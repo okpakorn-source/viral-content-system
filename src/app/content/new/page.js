@@ -42,6 +42,41 @@ export default function NewContentPage() {
   const [tiktokNeedUpload, setTiktokNeedUpload] = useState(false);
   const [videoFile, setVideoFile] = useState(null);
   const [youtubeNeedUpload, setYoutubeNeedUpload] = useState(false);
+  const [sentToReview, setSentToReview] = useState({}); // { versionIndex: true }
+  const [sendingReview, setSendingReview] = useState(null);
+
+  // === ส่งเข้าคลังรอตรวจ ===
+  const handleSendToReview = async (version, index) => {
+    setSendingReview(index);
+    try {
+      const angles = breakdownData?.possible_angles?.map(a => a.angle_name) || [];
+      const presetObj = analysisPresets.find(p => p.id === selectedPreset);
+      const res = await fetch('/api/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: version.title || newsData?.newsTitle || 'ไม่มีหัวข้อ',
+          content: [version.hook ? `🪝 ${version.hook}` : '', version.title || '', version.content || '', version.closing ? `💬 ${version.closing}` : ''].filter(Boolean).join('\n\n'),
+          sourceType,
+          preset: selectedPreset,
+          presetLabel: presetObj?.name || selectedPreset,
+          contentLength,
+          wordCount: version.content?.split(/\s+/).length || 0,
+          angles,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSentToReview(prev => ({ ...prev, [index]: true }));
+      } else {
+        setError(data.error || 'ส่งไม่สำเร็จ');
+      }
+    } catch (err) {
+      setError('ส่งไม่สำเร็จ: ' + err.message);
+    } finally {
+      setSendingReview(null);
+    }
+  };
 
   // Load presets
   useEffect(() => {
@@ -1065,6 +1100,20 @@ export default function NewContentPage() {
                 <div style={{ fontSize: 14, lineHeight: 2, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{v.content}</div>
                 {v.closing && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--success)', marginTop: 10, fontStyle: 'italic' }}>💬 {v.closing}</div>}
                 <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8 }}>📊 {v.content?.split(/\s+/).length || 0} คำ</div>
+                <button
+                  onClick={() => handleSendToReview(v, i)}
+                  disabled={sentToReview[i] || sendingReview === i}
+                  style={{
+                    marginTop: 10, width: '100%', padding: '10px 16px',
+                    background: sentToReview[i] ? 'var(--success)' : 'linear-gradient(135deg, #0ea5e9, #6366f1)',
+                    border: 'none', borderRadius: 'var(--radius-md)',
+                    color: '#fff', fontWeight: 700, fontSize: 12,
+                    cursor: sentToReview[i] ? 'default' : sendingReview === i ? 'wait' : 'pointer',
+                    opacity: sentToReview[i] ? 0.7 : 1,
+                    transition: 'all 0.3s',
+                  }}>
+                  {sentToReview[i] ? '✅ ส่งเข้าคลังแล้ว' : sendingReview === i ? '⏳ กำลังส่ง...' : '📤 ส่งเข้าคลังรอตรวจ'}
+                </button>
               </div>
             ))}
 
@@ -1113,9 +1162,17 @@ export default function NewContentPage() {
               </div>
             </div>
 
-            <button onClick={handleReset} className="btn btn-primary btn-lg" style={{ width: '100%' }}>
-              🔄 สร้างคอนเทนต์ใหม่
-            </button>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button onClick={handleReset} className="btn btn-primary btn-lg" style={{ flex: 1 }}>
+                🔄 สร้างคอนเทนต์ใหม่
+              </button>
+              {Object.keys(sentToReview).length > 0 && (
+                <a href="/review" className="btn btn-lg"
+                  style={{ flex: 1, background: 'linear-gradient(135deg, #0ea5e9, #6366f1)', border: 'none', color: '#fff', fontWeight: 700, textDecoration: 'none', textAlign: 'center', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  📋 ไปดูคลังรอตรวจ ({Object.keys(sentToReview).length} รายการ)
+                </a>
+              )}
+            </div>
           </div>
         )}
       </div>

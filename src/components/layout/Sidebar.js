@@ -16,7 +16,7 @@ const navSections = [
   {
     title: 'ผลิตคอนเทนต์',
     items: [
-      { href: '/review', icon: '👁️', label: 'รอรีวิว', badgeKey: 'review' },
+      { href: '/review', icon: '📋', label: 'คลังรอตรวจ', badgeKey: 'review' },
       { href: '/publish', icon: '📤', label: 'เผยแพร่' },
     ]
   },
@@ -38,11 +38,25 @@ const navSections = [
 export default function Sidebar() {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
 
   // Close sidebar on route change (mobile)
   useEffect(() => {
     setIsOpen(false);
   }, [pathname]);
+
+  // Load pending review count
+  useEffect(() => {
+    const loadCount = () => {
+      fetch('/api/review?status=pending')
+        .then(r => r.json())
+        .then(d => { if (d.stats) setPendingCount(d.stats.pending || 0); })
+        .catch(() => {});
+    };
+    loadCount();
+    const interval = setInterval(loadCount, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Close on resize to desktop
   useEffect(() => {
@@ -113,8 +127,8 @@ export default function Sidebar() {
                 >
                   <span className="nav-item-icon">{item.icon}</span>
                   <span>{item.label}</span>
-                  {item.badgeKey && (
-                    <span className="nav-item-badge">3</span>
+                  {item.badgeKey === 'review' && pendingCount > 0 && (
+                    <span className="nav-item-badge">{pendingCount}</span>
                   )}
                 </Link>
               ))}
