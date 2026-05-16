@@ -9,6 +9,9 @@ const DEFAULT_ANALYSIS_PRESETS = [
     id: 'viral_fb',
     name: '🔥 ไวรัล Facebook',
     desc: 'เล่าข่าวแบบโพสต์ไวรัลที่คนอยากแชร์',
+    usedIn: ['Step 4: สร้างเนื้อหา (mode=analyze)'],
+    affectsAPI: '/api/summarize (mode=analyze, preset=viral_fb)',
+    category: 'preset',
     prompt: [
       'คุณคือ AI Viral News Writer + Emotional Storyteller + Facebook Content Strategist',
       '',
@@ -187,6 +190,9 @@ const DEFAULT_ANALYSIS_PRESETS = [
     id: 'drama_storytelling',
     name: '🎭 ดราม่า เล่าเรื่อง',
     desc: 'เน้นดราม่า ขัดแย้ง ทำให้คนหยุดอ่าน',
+    usedIn: ['Step 4: สร้างเนื้อหา (mode=analyze)'],
+    affectsAPI: '/api/summarize (mode=analyze, preset=drama_storytelling)',
+    category: 'preset',
     prompt: `คุณคือนักเล่าเรื่องดราม่าโซเชียล
 
 อ่านเนื้อข่าวด้านล่างแล้วเขียนใหม่ทั้งหมดเป็นเรื่องเล่าดราม่ายาวๆ
@@ -229,6 +235,9 @@ const DEFAULT_ANALYSIS_PRESETS = [
     id: 'informative',
     name: '📰 สรุปข่าวเข้าใจง่าย',
     desc: 'สรุปประเด็นชัดเจน อ่านแล้วเข้าใจทันที',
+    usedIn: ['Step 4: สร้างเนื้อหา (mode=analyze)'],
+    affectsAPI: '/api/summarize (mode=analyze, preset=informative)',
+    category: 'preset',
     prompt: `คุณคือนักสรุปข่าวให้เข้าใจง่าย
 
 อ่านเนื้อข่าวด้านล่างแล้วเขียนสรุปใหม่ให้เข้าใจง่ายแบบยาวๆ มีรายละเอียดครบ
@@ -269,6 +278,9 @@ const DEFAULT_ANALYSIS_PRESETS = [
     id: 'opinion_debate',
     name: '💬 ชวนถกเถียง',
     desc: 'วิเคราะห์เชิงลึก ให้ข้อมูลครบทุกมุม',
+    usedIn: ['Step 4: สร้างเนื้อหา (mode=analyze)'],
+    affectsAPI: '/api/summarize (mode=analyze, preset=opinion_debate)',
+    category: 'preset',
     prompt: `คุณคือนักสร้างคอนเทนต์ที่ชวนถกเถียง
 
 อ่านเนื้อข่าวด้านล่างแล้วเขียนใหม่ในมุมที่ชวนถกเถียงแบบยาวๆ
@@ -307,23 +319,27 @@ const DEFAULT_ANALYSIS_PRESETS = [
   },
 ];
 
-// ===== Standard Prompts =====
+// ===== Standard Prompts (with metadata) =====
 const DEFAULT_PROMPTS = {
   extraction: {
+    label: '📥 สกัดเนื้อข่าว (URL/OCR/ข้อความ)',
+    description: 'ใช้สกัดเนื้อข่าวจริงจาก raw text ที่ scrape มาจากเว็บ, OCR, หรือข้อความที่วาง',
+    usedIn: ['Step 2: สกัดข่าว (mode=extract)'],
+    affectsAPI: '/api/summarize (mode=extract, sourceType=url/image/raw/facebook)',
+    category: 'pipeline',
+    editable: true,
     prompt: `คุณคือ AI News Content Extractor — ผู้เชี่ยวชาญสกัดเนื้อข่าวจากทุกรูปแบบ
 
 ข้อมูลที่ส่งมาอาจเป็น:
 - เนื้อหา scrape จากเว็บ (มี noise เมนู โฆษณา footer)
 - ข้อความที่อ่านจากภาพ/screenshot (OCR) — อาจมี marker เช่น "=== แหล่งที่มา ===" "=== เนื้อหาหลัก ==="
-- ถอดเสียงจากคลิป TikTok/YouTube — อาจมี marker เช่น "=== ถอดเสียง ===" "=== Transcript ==="
 - ข้อความที่พิมพ์เอง
 
 กฎ:
 1. ตัด metadata markers ทั้งหมด (===, timestamp, ยอดไลก์, ชื่อ segment ฯลฯ) ออก
 2. สกัดเฉพาะ "เนื้อข่าวจริง" — เหตุการณ์ บุคคล สถานที่ เวลา รายละเอียด
 3. เก็บเนื้อข่าวครบทุกย่อหน้า ห้ามตัดทอน ห้ามย่อ
-4. ถ้าเป็นถอดเสียง ให้จัดประโยคใหม่ให้อ่านง่าย (ถอดเสียงมักไม่มีเครื่องหมายวรรคตอน)
-5. ถ้าเป็น OCR ให้แก้คำผิดเล็กน้อยที่เกิดจากการอ่านภาพ
+4. ถ้าเป็น OCR ให้แก้คำผิดเล็กน้อยที่เกิดจากการอ่านภาพ
 
 {custom_instruction}
 
@@ -340,7 +356,51 @@ const DEFAULT_PROMPTS = {
   "news_category": "หมวดหมู่ข่าว"
 }`,
   },
+  transcript_extraction: {
+    label: '🎙️ สกัดเนื้อหาจากถอดเสียง (TikTok/YouTube)',
+    description: 'จัดรูปแบบข้อความถอดเสียง รักษาคำพูดเดิมทุกคำ ห้ามสรุปเอง',
+    usedIn: ['Step 2: สกัดข่าว (mode=extract, sourceType=tiktok/youtube)'],
+    affectsAPI: '/api/summarize (mode=extract, sourceType=tiktok|youtube)',
+    category: 'pipeline',
+    editable: true,
+    prompt: `คุณคือผู้เชี่ยวชาญจัดรูปแบบข้อความถอดเสียง (transcript)
+
+กฎเหล็ก:
+1. ห้ามเขียนใหม่ ห้ามสรุปเอง ห้ามเปลี่ยนคำพูดคน — ต้องรักษาคำพูดเดิมทุกคำ
+2. ห้ามตัดเนื้อหาออก — เก็บทุกประโยคที่คนพูด
+3. ห้ามเพิ่มข้อมูลที่ไม่มีในถอดเสียง
+4. จัดย่อหน้าให้อ่านง่าย เพิ่มเครื่องหมายวรรคตอนที่หายไป
+5. ตัดเฉพาะ metadata markers (===, timestamp, ความยาว:) ออก
+6. ถ้ามีคนพูดหลายคน ให้แยกบทพูดให้ชัดเจน
+7. คำพูดที่เป็น quote ให้ใส่ "" ครอบ
+
+สิ่งที่ต้องทำ:
+- จัดข้อความถอดเสียงให้เป็นย่อหน้าอ่านง่าย
+- เพิ่มเครื่องหมายวรรคตอน (มหัพภาค จุลภาค) ที่ขาดหายไป
+- สรุปหัวข้อจากเนื้อหาที่พูด
+
+{custom_instruction}
+
+=== ข้อความถอดเสียง ===
+{content}
+========================
+
+ตอบเป็น JSON:
+{
+  "news_title": "หัวข้อที่สรุปได้จากเนื้อหาที่พูด",
+  "news_body": "เนื้อหาที่จัดรูปแบบแล้ว — รักษาคำพูดเดิมทุกคำ จัดย่อหน้าให้อ่านง่าย",
+  "news_source": "คลิป {source_platform}",
+  "news_date": "",
+  "news_category": "หมวดหมู่"
+}`,
+  },
   breakdown: {
+    label: '🔍 แตกประเด็น + วิเคราะห์มุมข่าว',
+    description: 'วิเคราะห์ข่าวเชิงลึก หามุมเล่าที่ดีที่สุด ให้คะแนนไวรัล',
+    usedIn: ['Step 3: แตกประเด็น (mode=breakdown)'],
+    affectsAPI: '/api/summarize (mode=breakdown)',
+    category: 'pipeline',
+    editable: true,
     prompt: `คุณคือ AI Viral News Angle Strategist + Emotional Storytelling Director
 
 หน้าที่: อ่านเนื้อข่าวจริงแล้ววิเคราะห์ให้ลึกที่สุด หาทุกมุมที่สามารถแตกประเด็น เปลี่ยนมุมเล่า ดึงอารมณ์ สร้าง discussion สร้าง emotional connection สร้างมุมไวรัลได้
@@ -367,29 +427,13 @@ STEP 1 — วิเคราะห์แก่นข่าว:
 7. จุดที่แชร์ง่ายที่สุดคืออะไร
 
 STEP 2 — แตกประเด็นให้ครบทุกมุม (12 หมวด):
-1. ดราม่าชีวิต (คนสู้ชีวิต/เหนื่อย/เสียสละ)
-2. มุมคนโดนเข้าใจผิด (ถูกตัดสิน/มองผิด/โดนด่า)
-3. มุมความรัก (ความรักดีๆ/safe place/relationship goals)
-4. มุมครอบครัว (กตัญญู/ทำเพื่อพ่อแม่/เติบโตลำบาก)
-5. มุม social pressure (สังคม toxic/ชาวเน็ต judge/ไม่มีพื้นที่ส่วนตัว)
-6. มุมแรงบันดาลใจ (ไม่ยอมแพ้/สู้จนมีวันนี้/ชีวิตพลิก)
-7. มุม emotional conflict (คนดีแต่โดนด่า/คนที่ deserve better)
-8. มุมอบอุ่น (finally happy/คนดีเจอสิ่งดีๆ/emotional payoff)
-9. มุมถกเถียง (ถ้าเป็นคุณจะ.../เหมาะสมไหม/คิดว่าเขาผิดไหม)
-10. มุมฟิน (คลั่งรัก/ดูแลดี/โมเมนต์อบอุ่น)
-11. มุมชื่นชม (ขยัน/ใจสู้/เก่งเกินวัย)
-12. มุมเซอร์ไพรส์ (เปลี่ยนภาพจำ/เรื่องที่คนไม่คิด/มุมที่คนมองข้าม)
+1. ดราม่าชีวิต 2. มุมคนโดนเข้าใจผิด 3. มุมความรัก 4. มุมครอบครัว
+5. มุม social pressure 6. มุมแรงบันดาลใจ 7. มุม emotional conflict 8. มุมอบอุ่น
+9. มุมถกเถียง 10. มุมฟิน 11. มุมชื่นชม 12. มุมเซอร์ไพรส์
 
-STEP 3 — วิเคราะห์ "พลังไวรัล" ของแต่ละมุม:
-- คนจะอินเพราะอะไร / คอมเมนต์เพราะอะไร / แชร์เพราะอะไร
-- emotional trigger คืออะไร / กลุ่มคนที่น่าจะอินคือใคร
-
-STEP 4 — เลือก "มุมที่ดีที่สุด":
-- emotional impact สูงสุด / แชร์ง่ายที่สุด / Facebook friendly ที่สุด / คนอ่านจนจบมากที่สุด
-
-STEP 5 — วิเคราะห์ "ลูกเล่นภาษา":
-- เปิดแรงแบบไหน (ความเหนื่อย/ไม่แฟร์/แทงใจ/ตัวเลข/คำถาม/comparison)
-- สำนวน/mood/rhythm ที่เหมาะ
+STEP 3 — วิเคราะห์ "พลังไวรัล" ของแต่ละมุม
+STEP 4 — เลือก "มุมที่ดีที่สุด"
+STEP 5 — วิเคราะห์ "ลูกเล่นภาษา"
 
 ตอบเป็น JSON:
 {
@@ -398,52 +442,55 @@ STEP 5 — วิเคราะห์ "ลูกเล่นภาษา":
   "conflict_point": "จุด conflict หลัก",
   "viral_trigger": "จุดที่ทำให้คนอยากแชร์มากที่สุด",
   "news_summary": "สรุปรวมข่าว 3-5 ประโยค",
-  "key_points": [{"point": "ประเด็น", "detail": "รายละเอียด 2-4 ประโยค", "category": "หมวด", "importance": "สูง/กลาง/ต่ำ", "emotional_value": "สูง/กลาง/ต่ำ", "viral_potential": "สูง/กลาง/ต่ำ"}],
-  "quotes": ["คำพูดสำคัญจากข่าว"],
-  "conflicts": ["จุดขัดแย้งในข่าว"],
-  "pain_points": ["ปัญหา/ความเจ็บปวด"],
-  "best_sections": ["ท่อนที่มีพลังมากที่สุด"],
+  "key_points": [{"point": "", "detail": "", "category": "", "importance": "", "emotional_value": "", "viral_potential": ""}],
+  "quotes": [], "conflicts": [], "pain_points": [], "best_sections": [],
   "key_facts": {"people": [], "places": [], "numbers": [], "dates": []},
-  "emotional_hooks": ["จุดที่คนจะอินมากที่สุด"],
-  "possible_angles": [{"angle_name": "ชื่อมุม", "description": "อธิบาย", "why_people_connect": "ทำไมคนอิน", "share_trigger": "แชร์เพราะ", "comment_trigger": "คอมเมนต์เพราะ", "target_emotion": "อารมณ์เป้าหมาย", "facebook_viral_score": 8}],
-  "best_main_angle": {"angle_name": "ชื่อ", "why_best": "ทำไมดีสุด", "emotional_strength": "พลังอารมณ์", "facebook_safety": "ปลอดภัย", "share_potential": "โอกาสแชร์"},
-  "language_strategy": {"opening_style": "เปิดแบบไหน", "storytelling_style": "เล่าแบบไหน", "emotional_pacing": "จังหวะอารมณ์", "ending_style": "ปิดแบบไหน"},
-  "suggested_angles": [{"angle": "ชื่อมุม", "description": "อธิบาย", "tone": "โทน"}]
+  "emotional_hooks": [],
+  "possible_angles": [{"angle_name": "", "description": "", "why_people_connect": "", "share_trigger": "", "comment_trigger": "", "target_emotion": "", "facebook_viral_score": 8}],
+  "best_main_angle": {"angle_name": "", "why_best": "", "emotional_strength": "", "facebook_safety": "", "share_potential": ""},
+  "language_strategy": {"opening_style": "", "storytelling_style": "", "emotional_pacing": "", "ending_style": ""},
+  "suggested_angles": [{"angle": "", "description": "", "tone": ""}]
 }`,
   },
-  angle: {
-    prompt: `คุณคือนักกลยุทธ์คอนเทนต์ไวรัล
+  research: {
+    label: '🔎 AI หาข้อมูลเพิ่มเติม',
+    description: 'หาสถิติ กรณีคล้าย ความเห็นผู้เชี่ยวชาญ กฎหมาย ข้อมูลพื้นหลัง แนวโน้ม',
+    usedIn: ['Step 3.5: หาข้อมูลเพิ่ม (mode=research)'],
+    affectsAPI: '/api/summarize (mode=research)',
+    category: 'utility',
+    editable: true,
+    prompt: `คุณคือ AI Research Agent ที่เชี่ยวชาญในการหาข้อมูลเพิ่มเติมเพื่อเสริมเนื้อหาข่าว
 
-จากเนื้อหาด้านล่าง สร้างมุมมองไวรัล:
+=== หัวข้อข่าว ===
+{title}
+
+=== สรุปเนื้อข่าว ===
 {content}
-{analysis}
+
+=== ผลวิเคราะห์ ===
+{analysis_context}
+
+=== คำสั่ง ===
+จากข่าวนี้ ช่วยหาข้อมูลเพิ่มเติมที่เกี่ยวข้องและน่าสนใจ
+
+สร้างข้อมูลเพิ่มเติม 6-8 รายการ ในหมวดต่อไปนี้:
+1. 📊 สถิติ — ตัวเลข/สถิติที่เกี่ยวข้อง
+2. 📰 กรณีคล้าย — เหตุการณ์คล้ายกันที่เคยเกิดขึ้น
+3. 🎓 ความเห็นผู้เชี่ยวชาญ — มุมมองผู้เชี่ยวชาญด้านนี้
+4. ⚖️ กฎหมาย — กฎหมาย/ข้อบังคับที่เกี่ยวข้อง
+5. 📋 ข้อมูลพื้นหลัง — บริบท/ประวัติที่ช่วยให้เข้าใจมากขึ้น
+6. 🔮 แนวโน้ม — ผลกระทบหรือสิ่งที่น่าจะเกิดขึ้นต่อ
+
+กฎ:
+- เนื้อหาแต่ละรายการต้องยาว 2-4 ประโยค
+- ต้องเกี่ยวข้องกับข่าวโดยตรง
+- ห้ามแต่งข้อมูลเท็จ
 
 ตอบเป็น JSON:
 {
-  "headlines": ["หัวข้อ 1", "หัวข้อ 2", "หัวข้อ 3"],
-  "hooks": ["ประโยคเปิด 1", "ประโยคเปิด 2"],
-  "comment_baits": ["ตอนจบ 1", "ตอนจบ 2"],
-  "discussion_angles": ["มุม 1"],
-  "emotional_directions": [{"direction": "", "description": "", "expected_reaction": ""}]
-}`,
-  },
-  article: {
-    prompt: `คุณคือนักเขียนคอนเทนต์ไวรัล เขียนเหมือนคนเล่าเรื่อง
-
-เขียนบทความยาวจากข้อมูลด้านล่าง:
-หัวข้อ: {headline}
-Hook: {hook}
-เนื้อหา: {content}
-โทน: {tone}
-
-ตอบเป็น JSON:
-{
-  "headline": "หัวข้อ",
-  "body": "เนื้อหา 4-6 ย่อหน้า",
-  "hook": "ประโยคเปิด",
-  "closing": "ประโยคปิด",
-  "caption": "แคปชั่น",
-  "hashtags": ["แฮชแท็ก1"]
+  "items": [
+    {"type": "สถิติ", "title": "หัวข้อสั้นๆ", "content": "รายละเอียด 2-4 ประโยค", "relevance": "เกี่ยวข้องอย่างไร"}
+  ]
 }`,
   },
 };
