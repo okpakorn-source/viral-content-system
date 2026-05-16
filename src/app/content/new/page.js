@@ -52,11 +52,19 @@ export default function NewContentPage() {
         body: JSON.stringify({ url, type: sourceType }),
       });
       const data = await res.json();
-      if (!data.success) throw new Error(data.data?.error || data.error || 'ดึงเนื้อหาไม่สำเร็จ');
-      setExtracted(data.data);
-      if (data.data.text) setRawText(data.data.text);
+      const result = data.data || data;
+      
+      if (result.success && result.text) {
+        setExtracted(result);
+        setRawText(result.text);
+      } else {
+        // ดึงไม่ได้ → เปิดช่อง paste ให้อัตโนมัติ
+        setExtracted({ success: false, error: result.error || 'ดึงเนื้อหาไม่ได้', suggestion: 'paste' });
+        setError((result.error || 'ดึงเนื้อหาไม่ได้') + ' — วาง/พิมพ์ข้อความด้านล่างแทนได้เลย');
+      }
     } catch (err) {
-      setError(err.message);
+      setExtracted({ success: false, error: err.message, suggestion: 'paste' });
+      setError(err.message + ' — วาง/พิมพ์ข้อความด้านล่างแทนได้เลย');
     } finally {
       setExtracting(false);
     }
@@ -281,13 +289,19 @@ export default function NewContentPage() {
                     </div>
                   )}
 
-                  {/* Text area (always show for raw, or after extraction) */}
+                  {/* Text area — show for raw, after extraction success/failure, or facebook */}
                   {(sourceType === 'raw' || extracted || sourceType === 'facebook') && (
                     <div className="form-group">
-                      <label className="form-label">📝 {extracted ? 'เนื้อหาที่ดึงมา (แก้ไขได้)' : sourceType === 'facebook' ? 'วาง/พิมพ์ข้อความจากโพสต์ Facebook' : 'เนื้อหา'}</label>
+                      <label className="form-label">📝 {
+                        extracted?.success ? 'เนื้อหาที่ดึงมา (แก้ไขได้)' :
+                        extracted?.suggestion === 'paste' ? '📋 วาง/พิมพ์ข้อความจากเว็บแทน' :
+                        sourceType === 'facebook' ? 'วาง/พิมพ์ข้อความจากโพสต์ Facebook' :
+                        'เนื้อหา'
+                      }</label>
                       <textarea className="form-textarea" value={rawText} onChange={(e) => setRawText(e.target.value)}
-                        placeholder={sourceType === 'facebook' ? 'Copy ข้อความจากโพสต์ Facebook มาวางที่นี่...' : 'วางข้อความข่าว, โพสต์, หรือเรื่องราวที่ต้องการสร้างคอนเทนต์...'}
-                        required={sourceType === 'raw' || sourceType === 'facebook'} style={{ minHeight: 180 }} />
+                        placeholder="Copy เนื้อหาจากเว็บ/โพสต์/คลิป มาวางที่นี่..."
+                        required={sourceType === 'raw' || sourceType === 'facebook' || extracted?.suggestion === 'paste'}
+                        style={{ minHeight: 180, borderColor: extracted?.suggestion === 'paste' ? 'var(--warning)' : undefined }} />
                     </div>
                   )}
 
