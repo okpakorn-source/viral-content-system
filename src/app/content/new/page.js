@@ -24,7 +24,7 @@ export default function NewContentPage() {
   const [selectedPreset, setSelectedPreset] = useState('viral_fb');
 
   // Flow state
-  const [step, setStep] = useState('input'); // input → extracted → breakdown → analyzed
+  const [step, setStep] = useState('input'); // input → extracted → analyzed
   const [extracted, setExtracted] = useState(null);
   const [newsData, setNewsData] = useState(null);
   const [breakdownData, setBreakdownData] = useState(null);
@@ -283,16 +283,15 @@ export default function NewContentPage() {
 
   return (
     <>
-      <Header title="✨ สร้างคอนเทนต์ใหม่" subtitle="สกัดข่าว → แตกประเด็น → เลือก Prompt → วิเคราะห์" />
+      <Header title="✨ สร้างคอนเทนต์ใหม่" subtitle="1. ป้อนข้อมูล → 2. สกัด+แตกประเด็น+หาข้อมูล → 3. เลือก Prompt สร้างเนื้อหา" />
       <div className="page-content">
         {loading && (
           <div className="loading-overlay">
             <div className="spinner" />
             <div className="loading-text">
               {step === 'input' ? '📥 กำลังสกัดเนื้อข่าว...' :
-               step === 'extracted' ? '🔍 กำลังแตกประเด็น...' :
-               step === 'breakdown' ? '🤖 กำลังวิเคราะห์ด้วย AI...' :
-               '⏳ กำลังประมวลผล...'}
+               step === 'extracted' ? (researching ? '🔎 AI กำลังหาข้อมูลเพิ่มเติม...' : '🔍 กำลังแตกประเด็น...') :
+               '🤖 กำลังสร้างเนื้อหาด้วย AI...'}
             </div>
           </div>
         )}
@@ -306,16 +305,16 @@ export default function NewContentPage() {
 
         {/* Pipeline */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 24, flexWrap: 'wrap' }}>
-          {['ป้อนข้อมูล', 'สกัดข่าว', 'แตกประเด็น', 'วิเคราะห์'].map((label, i) => {
-            const steps = ['input', 'extracted', 'breakdown', 'analyzed'];
+          {['1. ป้อนข้อมูล', '2. สกัด + แตกประเด็น + หาข้อมูล', '3. ผลลัพธ์เนื้อหา'].map((label, i) => {
+            const steps = ['input', 'extracted', 'analyzed'];
             const currentIdx = steps.indexOf(step);
             const status = i < currentIdx ? 'done' : i === currentIdx ? 'active' : '';
             return (
               <span key={i} style={{ display: 'contents' }}>
                 <div className={`pipeline-step ${status}`} onClick={() => i <= currentIdx && setStep(steps[i])} style={{ cursor: i <= currentIdx ? 'pointer' : 'default' }}>
-                  {i + 1}. {label}
+                  {label}
                 </div>
-                {i < 3 && <span className="pipeline-arrow">→</span>}
+                {i < 2 && <span className="pipeline-arrow">→</span>}
               </span>
             );
           })}
@@ -710,10 +709,10 @@ export default function NewContentPage() {
               <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6, textAlign: 'center' }}>ยึด Prompt + Safety Rules ครบทุกข้อ • ใช้ข้อมูลจากข่าวจริงเท่านั้น</div>
             </div>
 
-            {/* เลือก Preset วิเคราะห์ → ไป Step สุดท้าย */}
+            {/* เลือก Prompt สร้างเนื้อหา → ไปหน้าผลลัพธ์ */}
             <div style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', border: '2px solid var(--accent)' }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--accent-light)', marginBottom: 4 }}>🎯 พอใจแล้ว? เลือก Prompt วิเคราะห์ประเด็นสุดท้าย</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14 }}>ระบบจะส่งเนื้อข่าว + ผลแตกประเด็นไปให้ AI วิเคราะห์ตาม Prompt ที่เลือก</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--accent-light)', marginBottom: 4 }}>🎯 เลือก Prompt สร้างเนื้อหาสำเร็จรูป</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14 }}>AI จะนำข้อมูลทั้งหมด (เนื้อข่าว + ผลแตกประเด็น + ข้อมูลเสริม) มาสร้างเนื้อหาตาม Prompt ที่เลือก</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
                 {analysisPresets.map(p => (
                   <button key={p.id} type="button" disabled={loading} onClick={() => handleAnalyze(p.id)}
