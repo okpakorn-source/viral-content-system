@@ -305,8 +305,32 @@ export default function NewContentPage() {
                     </div>
                   )}
 
-                  <button type="submit" className="btn btn-viral btn-lg" style={{ width: '100%' }} disabled={loading || (!rawText && !url)}>
-                    🚀 เริ่มวิเคราะห์ด้วย AI
+                  {/* AI Extraction Prompt — สั่ง AI แยกเนื้อข่าว */}
+                  {(rawText || extracted) && (
+                    <div className="form-group" style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                      <label className="form-label" style={{ marginBottom: 8 }}>🤖 คำสั่งให้ AI สกัดเนื้อข่าว (Extraction Prompt)</label>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                        <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
+                          onClick={() => setCustomPrompt('แยกเฉพาะเนื้อข่าวจริง ตัดลิงก์โซเชียล เมนูเว็บ โฆษณา และข้อความที่ไม่เกี่ยวข้องออกทั้งหมด')}>
+                          🗞️ แยกข่าวจริง
+                        </button>
+                        <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
+                          onClick={() => setCustomPrompt('สกัดเนื้อหาข่าวหลัก ตัดส่วนคอมเมนต์ ลิงก์ภายนอก และข้อมูลช่องทางติดตามออก เน้นเนื้อหาที่เป็นข้อเท็จจริง')}>
+                          📰 เน้นข้อเท็จจริง
+                        </button>
+                        <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
+                          onClick={() => setCustomPrompt('เอาเฉพาะเนื้อหาที่เป็นบทสัมภาษณ์หรือคำพูดของบุคคลในข่าว ตัดส่วนอื่นออก')}>
+                          🎤 เฉพาะคำพูด/สัมภาษณ์
+                        </button>
+                      </div>
+                      <textarea className="form-textarea" value={customPrompt} onChange={(e) => setCustomPrompt(e.target.value)}
+                        placeholder="สั่ง AI ว่าต้องการให้แยกเนื้อหาแบบไหน เช่น: แยกเฉพาะเนื้อข่าวจริง ตัดลิงก์โซเชียลมีเดียออก..."
+                        style={{ minHeight: 60, fontSize: 13 }} />
+                    </div>
+                  )}
+
+                  <button type="submit" className="btn btn-viral btn-lg" style={{ width: '100%', marginTop: 12 }} disabled={loading || (!rawText && !url)}>
+                    🚀 ส่งให้ AI สกัดข่าว + วิเคราะห์
                   </button>
                 </form>
               </div>
@@ -387,12 +411,12 @@ export default function NewContentPage() {
                   )}
                 </div>
 
-                {/* Custom Prompt */}
-                <div className="form-group">
-                  <label className="form-label">✏️ คำสั่งเพิ่มเติมสำหรับ AI (Custom Prompt — ไม่บังคับ)</label>
+                {/* Prompt สำหรับวิเคราะห์ต่อ */}
+                <div className="form-group" style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                  <label className="form-label">✏️ คำสั่งเพิ่มเติมสำหรับ AI วิเคราะห์ (ไม่บังคับ)</label>
                   <textarea className="form-textarea" value={customPrompt} onChange={(e) => setCustomPrompt(e.target.value)}
                     placeholder="เช่น: เน้นมุมดราม่า, เขียนแบบเล่าเรื่อง, เพิ่มมุมมองวิจารณ์, เน้นอารมณ์สะเทือนใจ..."
-                    style={{ minHeight: 80 }} />
+                    style={{ minHeight: 60 }} />
                 </div>
 
                 <button onClick={handleAnalyze} className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={loading}>
