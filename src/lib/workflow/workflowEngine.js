@@ -2,9 +2,7 @@
  * Workflow Engine — Persistent Context ทุก Step
  * ทุก step จะ save/load context จาก DB
  */
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/db';
 
 // สร้าง workflow ใหม่
 export async function createWorkflow(sourceType = 'url') {
