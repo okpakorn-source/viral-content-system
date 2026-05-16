@@ -36,7 +36,7 @@ function extractString(result, ...keys) {
 
 export async function POST(request) {
   try {
-    const { text, sourceType, customPrompt, analysisPresetId, mode, newsTitle } = await request.json();
+    const { text, sourceType, customPrompt, analysisPresetId, mode, newsTitle, breakdownData } = await request.json();
 
     if (!text || text.length < 10) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
@@ -134,7 +134,31 @@ export async function POST(request) {
       // ถ้า prompt ไม่มี placeholder → บังคับ append ข่าวท้าย prompt
       if (!hasContentPlaceholder) {
         prompt += `\n\n=== เนื้อข่าวที่ต้องใช้ (ห้ามมั่ว ห้ามแต่งเอง ใช้ข้อมูลจากนี้เท่านั้น) ===\nหัวข้อ: ${newsTitle || ''}\n\n${text.slice(0, 6000)}\n=== จบเนื้อข่าว ===`;
-        console.log(`[Analyze] ⚠️ No {content} placeholder found — appended news at end`);
+      }
+
+      // === บังคับ inject ผลแตกประเด็น (จาก step 3) เข้า prompt ===
+      if (breakdownData) {
+        let bCtx = '\n\n=== ผลการแตกประเด็นจาก AI (ขั้นตอนที่ 3 — ใช้ทุกประเด็นนี้ในการเขียน) ===';
+        if (breakdownData.news_summary) bCtx += `\nสรุปรวม: ${breakdownData.news_summary}`;
+        if (breakdownData.key_points?.length > 0) {
+          bCtx += '\n\nประเด็นสำคัญทั้งหมด (ต้องครอบคลุมทุกประเด็น):';
+          breakdownData.key_points.forEach((kp, i) => {
+            bCtx += `\n${i+1}. ${kp.point || kp}: ${kp.detail || ''} [ความสำคัญ: ${kp.importance || '-'}, อารมณ์: ${kp.emotional_value || '-'}]`;
+          });
+        }
+        if (breakdownData.best_sections?.length > 0) {
+          bCtx += `\n\nท่อนที่ดีที่สุด: ${breakdownData.best_sections.join(' | ')}`;
+        }
+        if (breakdownData.emotional_hooks?.length > 0) {
+          bCtx += `\nจุดที่คนจะอิน: ${breakdownData.emotional_hooks.join(' | ')}`;
+        }
+        if (breakdownData.suggested_angles?.length > 0) {
+          bCtx += `\nมุมที่แนะนำ: ${breakdownData.suggested_angles.join(' | ')}`;
+        }
+        bCtx += '\n=== จบผลแตกประเด็น ===';
+        bCtx += '\n\n⚠️ คำสั่งสำคัญ: ต้องเขียนเนื้อหาครอบคลุมทุกประเด็นด้านบน ห้ามข้ามประเด็นใดประเด็นหนึ่ง ห้ามหยิบประเด็นซ้ำ และห้ามแต่งเรื่องที่ไม่มีในข่าว';
+        prompt += bCtx;
+        console.log(`[Analyze] ✅ Injected ${breakdownData.key_points?.length || 0} breakdown points`);
       }
 
       console.log(`[Analyze] Final prompt length: ${prompt.length}ch`);

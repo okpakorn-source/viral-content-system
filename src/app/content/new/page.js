@@ -119,7 +119,7 @@ export default function NewContentPage() {
     }
   };
 
-  // === STEP 3: วิเคราะห์ประเด็นด้วย Preset ===
+  // === STEP 4: วิเคราะห์ประเด็นด้วย Preset (ส่ง newsBody + breakdownData) ===
   const handleAnalyze = async (presetId) => {
     const usePreset = presetId || selectedPreset;
     if (!newsData?.newsBody) return;
@@ -131,12 +131,13 @@ export default function NewContentPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          text: newsData.newsBody, // ส่งเนื้อข่าวสะอาดเท่านั้น!
+          text: newsData.newsBody,
           newsTitle: newsData.newsTitle,
           sourceType,
           customPrompt,
           analysisPresetId: usePreset,
           mode: 'analyze',
+          breakdownData: breakdownData || null,
         }),
       });
       const data = await res.json();
