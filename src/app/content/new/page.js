@@ -31,6 +31,9 @@ export default function NewContentPage() {
   const [breakdownPromptText, setBreakdownPromptText] = useState('');
   const [analysisResult, setAnalysisResult] = useState(null);
   const [workflowId, setWorkflowId] = useState(null);
+  const [researchData, setResearchData] = useState(null);
+  const [selectedResearch, setSelectedResearch] = useState([]);
+  const [researching, setResearching] = useState(false);
 
   // Load presets
   useEffect(() => {
@@ -187,6 +190,79 @@ export default function NewContentPage() {
       if (!data.success) throw new Error(data.error);
       setAnalysisResult(data.data);
       setStep('analyzed');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // === AI หาข้อมูลเพิ่มเติม ===
+  const handleResearch = async () => {
+    if (!newsData?.newsTitle) return;
+    setResearching(true);
+    setError('');
+    setResearchData(null);
+    setSelectedResearch([]);
+    try {
+      const res = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: newsData.newsBody,
+          newsTitle: newsData.newsTitle,
+          mode: 'research',
+          breakdownData: breakdownData || null,
+          workflowId,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      setResearchData(data.data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setResearching(false);
+    }
+  };
+
+  // Toggle เลือก/ไม่เลือก research item
+  const toggleResearchItem = (idx) => {
+    setSelectedResearch(prev =>
+      prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]
+    );
+  };
+
+  // เพิ่มข้อมูลที่เลือกเข้า newsBody แล้วแตกประเด็นใหม่
+  const handleAddResearch = async () => {
+    if (selectedResearch.length === 0 || !researchData?.items) return;
+    const selectedItems = researchData.items.filter((_, i) => selectedResearch.includes(i));
+    const additionalText = '\n\n=== ข้อมูลเพิ่มเติมจาก AI Research ===\n' +
+      selectedItems.map(item => `[${item.type}] ${item.title}\n${item.content}`).join('\n\n');
+
+    // เพิ่มเข้า newsBody
+    const enrichedBody = newsData.newsBody + additionalText;
+    setNewsData(prev => ({ ...prev, newsBody: enrichedBody }));
+    setResearchData(null);
+    setSelectedResearch([]);
+
+    // แตกประเด็นใหม่อัตโนมัติ
+    setLoading(true);
+    try {
+      const res = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: enrichedBody,
+          newsTitle: newsData.newsTitle,
+          customPrompt: breakdownPromptText,
+          mode: 'breakdown',
+          workflowId,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      setBreakdownData(data.data);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -532,6 +608,85 @@ export default function NewContentPage() {
               <button onClick={handleBreakdown} className="btn btn-outline" disabled={loading} style={{ width: '100%' }}>
                 {loading ? '⏳ กำลังแตกใหม่...' : '🔄 แตกประเด็นใหม่ตามคำสั่ง'}
               </button>
+            </div>
+
+            {/* 🔎 AI หาข้อมูลเพิ่มเติม — Research Agent */}
+            <div style={{ background: 'linear-gradient(135deg, rgba(14,165,233,0.12), rgba(6,182,212,0.12))', padding: 20, borderRadius: 'var(--radius-md)', border: '2px solid rgba(14,165,233,0.4)', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 22 }}>🔎</span>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: '#38bdf8' }}>AI หาข้อมูลเพิ่มเติม</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>AI จะหาข้อมูลพื้นหลัง สถิติ กรณีคล้าย ความเห็นผู้เชี่ยวชาญ เพื่อเพิ่มความลึกให้เนื้อหา</div>
+                  </div>
+                </div>
+                <button onClick={handleResearch} className="btn" disabled={researching || loading}
+                  style={{ background: 'linear-gradient(135deg, #0ea5e9, #06b6d4)', border: 'none', color: '#fff', fontWeight: 700, fontSize: 12, padding: '10px 20px', borderRadius: 'var(--radius-md)', cursor: (researching || loading) ? 'wait' : 'pointer', whiteSpace: 'nowrap', boxShadow: '0 2px 10px rgba(14,165,233,0.3)' }}>
+                  {researching ? '🔎 กำลังหา...' : '🔎 หาข้อมูลเพิ่ม'}
+                </button>
+              </div>
+
+              {/* แสดงผลข้อมูลที่หาได้ */}
+              {researchData?.items?.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', marginBottom: 8 }}>
+                    📚 พบข้อมูลเพิ่มเติม {researchData.items.length} รายการ — เลือกที่ต้องการแล้วกด &quot;เพิ่มข้อมูล&quot;
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {researchData.items.map((item, idx) => (
+                      <div key={idx} onClick={() => toggleResearchItem(idx)}
+                        style={{
+                          padding: '12px 14px', borderRadius: 'var(--radius-sm)',
+                          background: selectedResearch.includes(idx) ? 'rgba(14,165,233,0.15)' : 'var(--bg-secondary)',
+                          border: selectedResearch.includes(idx) ? '2px solid #38bdf8' : '1px solid var(--border)',
+                          cursor: 'pointer', transition: 'all 0.2s',
+                        }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                          <div style={{
+                            width: 20, height: 20, borderRadius: 4, border: '2px solid',
+                            borderColor: selectedResearch.includes(idx) ? '#38bdf8' : 'var(--border)',
+                            background: selectedResearch.includes(idx) ? '#38bdf8' : 'transparent',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            flexShrink: 0, marginTop: 2, fontSize: 12, color: '#fff',
+                          }}>
+                            {selectedResearch.includes(idx) && '✓'}
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                              <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 8,
+                                background: item.type === 'สถิติ' ? 'var(--warning-bg)' :
+                                  item.type === 'กรณีคล้าย' ? 'var(--danger-bg)' :
+                                  item.type === 'ความเห็นผู้เชี่ยวชาญ' ? 'var(--success-bg)' :
+                                  item.type === 'กฎหมาย' ? 'var(--info-bg)' : 'var(--bg-tertiary)',
+                                color: item.type === 'สถิติ' ? 'var(--warning)' :
+                                  item.type === 'กรณีคล้าย' ? 'var(--danger)' :
+                                  item.type === 'ความเห็นผู้เชี่ยวชาญ' ? 'var(--success)' :
+                                  item.type === 'กฎหมาย' ? 'var(--info)' : 'var(--text-muted)',
+                              }}>
+                                {item.type === 'สถิติ' ? '📊' : item.type === 'กรณีคล้าย' ? '📰' :
+                                 item.type === 'ความเห็นผู้เชี่ยวชาญ' ? '🎓' : item.type === 'กฎหมาย' ? '⚖️' : '📋'} {item.type}
+                              </span>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{item.title}</span>
+                            </div>
+                            <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.8 }}>{item.content}</div>
+                            {item.relevance && (
+                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>💡 เกี่ยวข้อง: {item.relevance}</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* ปุ่มเพิ่มข้อมูล */}
+                  {selectedResearch.length > 0 && (
+                    <button onClick={handleAddResearch} className="btn btn-lg" disabled={loading}
+                      style={{ width: '100%', marginTop: 12, background: 'linear-gradient(135deg, #0ea5e9, #06b6d4)', border: 'none', color: '#fff', fontWeight: 800, fontSize: 13, padding: '12px 0', borderRadius: 'var(--radius-md)', cursor: loading ? 'wait' : 'pointer', boxShadow: '0 3px 12px rgba(14,165,233,0.3)' }}>
+                      {loading ? '⏳ กำลังแตกประเด็นใหม่...' : `✅ เพิ่ม ${selectedResearch.length} ข้อมูล + แตกประเด็นใหม่อัตโนมัติ`}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* 🧬 AI ผสมมุมข่าว — เลือกหัวข้อดีมาผสมเป็นเนื้อหาใหม่ */}

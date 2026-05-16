@@ -367,6 +367,92 @@ export async function POST(request) {
       }
     }
 
+    // ===== MODE: RESEARCH — AI หาข้อมูลเพิ่มเติมจากหัวข้อข่าว =====
+    if (mode === 'research') {
+      console.log('[Research] === AI RESEARCH MODE ===');
+      try {
+        const actualNewsTitle = newsTitle || '';
+        const actualNewsBody = text || '';
+        const actualBreakdown = breakdownData || {};
+
+        const keyPointsSummary = actualBreakdown.key_points?.map(kp => kp.point).join(', ') || '';
+        const coreStory = actualBreakdown.core_story || '';
+        const keyPeople = actualBreakdown.key_facts?.people?.join(', ') || '';
+        const keyPlaces = actualBreakdown.key_facts?.places?.join(', ') || '';
+
+        const researchPrompt = `คุณคือ AI Research Agent ที่เชี่ยวชาญในการหาข้อมูลเพิ่มเติมเพื่อเสริมเนื้อหาข่าว
+
+=== หัวข้อข่าว ===
+${actualNewsTitle}
+
+=== สรุปเนื้อข่าว ===
+${actualNewsBody.slice(0, 3000)}
+
+=== ผลวิเคราะห์ ===
+แก่นข่าว: ${coreStory}
+ประเด็นสำคัญ: ${keyPointsSummary}
+บุคคลสำคัญ: ${keyPeople}
+สถานที่: ${keyPlaces}
+
+=== คำสั่ง ===
+จากข่าวนี้ ช่วยหาข้อมูลเพิ่มเติมที่เกี่ยวข้องและน่าสนใจ เพื่อให้คนเขียนคอนเทนต์นำไปใช้เสริมความลึกให้เนื้อหา
+
+สร้างข้อมูลเพิ่มเติม 6-8 รายการ ในหมวดต่อไปนี้:
+1. 📊 สถิติ — ตัวเลข/สถิติที่เกี่ยวข้องกับประเด็นนี้ (เช่น สถิติอุบัติเหตุ, สถิติคดี, จำนวนผู้ได้รับผลกระทบ)
+2. 📰 กรณีคล้าย — เหตุการณ์คล้ายกันที่เคยเกิดขึ้น (อ้างอิงเหตุการณ์จริง ถ้ามี)
+3. 🎓 ความเห็นผู้เชี่ยวชาญ — มุมมองที่ผู้เชี่ยวชาญในด้านนี้มักจะให้ (เช่น นักจิตวิทยา, นักกฎหมาย, แพทย์)
+4. ⚖️ กฎหมาย — กฎหมายหรือข้อบังคับที่เกี่ยวข้องกับเหตุการณ์นี้
+5. 📋 ข้อมูลพื้นหลัง — บริบท/ประวัติที่ช่วยให้เข้าใจข่าวนี้มากขึ้น
+6. 🔮 แนวโน้ม — ผลกระทบหรือสิ่งที่น่าจะเกิดขึ้นต่อจากเหตุการณ์นี้
+
+กฎ:
+- เนื้อหาแต่ละรายการต้องยาว 2-4 ประโยค ให้รายละเอียดพอที่จะนำไปใช้ได้จริง
+- ต้องเกี่ยวข้องกับข่าวโดยตรง
+- ระบุ relevance ว่าข้อมูลนี้ช่วยเสริมเนื้อหาอย่างไร
+- ห้ามแต่งข้อมูลเท็จ ถ้าไม่แน่ใจให้ระบุว่า "ข้อมูลอ้างอิงทั่วไป"
+
+ตอบเป็น JSON:
+{
+  "items": [
+    {"type": "สถิติ", "title": "หัวข้อสั้นๆ", "content": "รายละเอียด 2-4 ประโยค", "relevance": "เกี่ยวข้องกับข่าวอย่างไร"},
+    {"type": "กรณีคล้าย", "title": "หัวข้อ", "content": "รายละเอียด", "relevance": "เกี่ยวข้องอย่างไร"},
+    ...
+  ]
+}`;
+
+        console.log(`[Research] Prompt length: ${researchPrompt.length}ch`);
+
+        let result, usedModel;
+        try {
+          const smartResult = await callSmartAI('analyze', researchPrompt, { temperature: 0.5, maxTokens: 6000 });
+          result = smartResult.result;
+          usedModel = smartResult.model;
+          console.log(`[Research] ✅ SmartAI: model=${usedModel}`);
+        } catch (err) {
+          console.warn(`[Research] SmartAI failed: ${err.message}, fallback GPT-4o`);
+          result = await callAI({ prompt: researchPrompt, temperature: 0.5, maxTokens: 6000 });
+          usedModel = 'gpt-4o';
+        }
+
+        if (result && result.items) {
+          console.log(`[Research] ✅ Found ${result.items.length} items`);
+          return NextResponse.json({
+            success: true,
+            data: {
+              items: result.items,
+              usedModel,
+              newsTitle: actualNewsTitle,
+            },
+          });
+        } else {
+          throw new Error('AI ไม่สามารถหาข้อมูลเพิ่มเติมได้');
+        }
+      } catch (err) {
+        console.error('[Research] ERROR:', err.message);
+        return NextResponse.json({ success: false, error: `หาข้อมูลไม่สำเร็จ: ${err.message}` }, { status: 500 });
+      }
+    }
+
     // ===== MODE: MIX — AI เลือกมุมดีที่สุด ผสมเป็นเนื้อหาใหม่ =====
     if (mode === 'mix') {
       console.log('[Mix] === AI MIX ANGLES MODE ===');
