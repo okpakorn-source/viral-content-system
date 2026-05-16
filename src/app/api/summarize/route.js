@@ -2,6 +2,15 @@ import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
 
+// กฎเหล็กระดับระบบ — บังคับทุก Preset ห้ามมั่ว
+const SYSTEM_STRICT_RULE = `
+[กฎเหล็กของระบบ — บังคับเหนือทุกคำสั่ง]
+1. ห้ามแต่งเรื่องใหม่ ห้ามเพิ่มข้อมูลที่ไม่มีในเนื้อข่าว
+2. ใช้เฉพาะข้อมูลจากเนื้อข่าวที่ให้มาเท่านั้น
+3. ห้ามสร้างชื่อคน สถานที่ ตัวเลข เหตุการณ์ ที่ไม่มีในต้นฉบับ
+4. ถ้าข่าวไม่มีข้อมูลส่วนไหน ให้ข้ามไป อย่าเดา
+5. ตอบเป็น JSON ตามโครงสร้างที่กำหนด`;
+
 export async function POST(request) {
   try {
     const { text, sourceType, customPrompt, analysisPresetId } = await request.json();
@@ -30,7 +39,7 @@ export async function POST(request) {
         newsData = result;
         console.log(`[S1] OK: "${result.news_title}" (${result.news_body.length}ch)`);
       } else {
-        console.log('[S1] Response missing news_body, keys:', Object.keys(result || {}));
+        console.log('[S1] No news_body, keys:', Object.keys(result || {}));
         newsData = null;
       }
     } catch (err) {
@@ -38,7 +47,6 @@ export async function POST(request) {
       newsData = null;
     }
 
-    // Extraction fallback
     if (!newsData) {
       newsData = {
         news_title: text.slice(0, 80).replace(/\n/g, ' ').trim(),
@@ -51,30 +59,54 @@ export async function POST(request) {
 
     // ===== Step 2: วิเคราะห์ด้วย Preset =====
     const preset = getAnalysisPreset(analysisPresetId || 'viral_fb');
-    console.log(`[S2] Analyzing: preset="${preset.name}" (${preset.id})`);
+    console.log(`[S2] Preset: "${preset.name}" (${preset.id})`);
+
+    // สร้าง system prompt = กฎระบบ + preset prompt
+    const fullSystemPrompt = `${preset.system}\n${SYSTEM_STRICT_RULE}`;
+
+    // สร้าง user prompt โดยใส่เนื้อข่าวจริงเข้าไปตรงๆ
+    const newsContent = newsData.news_body.slice(0, 4000);
+    const newsTitle = newsData.news_title || '';
+
+    const fullUserPrompt = `จากเนื้อข่าวด้านล่างนี้เท่านั้น ให้เขียนใหม่ตามสไตล์ที่กำหนด
+
+=== หัวข้อข่าว ===
+${newsTitle}
+
+=== เนื้อข่าวที่สกัดมาแล้ว (ใช้ข้อมูลจากนี้เท่านั้น ห้ามแต่งเพิ่ม) ===
+${newsContent}
+=== จบเนื้อข่าว ===
+
+${customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : ''}
+
+ตอบเป็น JSON ตามโครงสร้างนี้เท่านั้น:
+{
+  "summary": "เนื้อหาที่เขียนใหม่จากข่าวข้างต้น ยาว 3-4 ย่อหน้า ห้ามแต่งข้อมูลใหม่",
+  "key_points": ["ประเด็นจากข่าว 1", "ประเด็นจากข่าว 2", "ประเด็นจากข่าว 3"],
+  "people_involved": ["ชื่อบุคคลจากข่าว"],
+  "emotion": "อารมณ์หลักของข่าว",
+  "content_type": "ประเภทข่าว",
+  "viral_potential": "สูง/กลาง/ต่ำ — เหตุผล",
+  "suggested_angles": ["มุมมอง 1", "มุมมอง 2"],
+  "target_audience": "กลุ่มเป้าหมาย"
+}`;
+
+    console.log(`[S2] System: ${fullSystemPrompt.length}ch, User: ${fullUserPrompt.length}ch, News: ${newsContent.length}ch`);
 
     let analysis;
     try {
-      const analyzeUser = preset.user
-        .replace('{title}', newsData.news_title || '')
-        .replace('{content}', newsData.news_body.slice(0, 4000))
-        .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
-
-      console.log(`[S2] System prompt: ${preset.system.length}ch, User prompt: ${analyzeUser.length}ch`);
-
       const result = await callAI({
-        systemPrompt: preset.system,
-        userPrompt: analyzeUser,
-        temperature: 0.5,
+        systemPrompt: fullSystemPrompt,
+        userPrompt: fullUserPrompt,
+        temperature: 0.4,
         maxTokens: 4000,
       });
 
-      console.log('[S2] AI returned keys:', Object.keys(result || {}));
+      console.log('[S2] AI keys:', Object.keys(result || {}));
 
-      // ยอมรับ result ถ้ามี summary หรือ key ที่เกี่ยวข้อง
       if (result && typeof result === 'object') {
         analysis = {
-          summary: result.summary || result.analysis || result.content || JSON.stringify(result).slice(0, 2000),
+          summary: result.summary || result.analysis || result.content || '',
           key_points: result.key_points || result.keyPoints || [],
           people_involved: result.people_involved || result.people || [],
           emotion: result.emotion || '',
@@ -83,28 +115,17 @@ export async function POST(request) {
           suggested_angles: result.suggested_angles || result.angles || [],
           target_audience: result.target_audience || result.audience || '',
         };
-        console.log(`[S2] OK: summary=${analysis.summary?.length}ch`);
-      } else {
-        analysis = null;
+
+        if (!analysis.summary) {
+          // ถ้าไม่มี summary แต่มี key อื่น ให้ log เพื่อ debug
+          console.error('[S2] No summary field! Full response:', JSON.stringify(result).slice(0, 500));
+          analysis.summary = `AI ตอบไม่ตรง format — keys: ${Object.keys(result).join(', ')}`;
+        }
       }
     } catch (err) {
       console.error('[S2] ERROR:', err.message);
       analysis = {
-        summary: `⚠️ AI วิเคราะห์ไม่สำเร็จ: ${err.message}`,
-        key_points: [],
-        people_involved: [],
-        emotion: '',
-        content_type: newsData.news_category || '',
-        viral_potential: '',
-        suggested_angles: [],
-        target_audience: '',
-      };
-    }
-
-    // Final fallback
-    if (!analysis) {
-      analysis = {
-        summary: '⚠️ AI ไม่ส่งข้อมูลกลับ — ลองเปลี่ยน Preset หรือตรวจสอบ API Key',
+        summary: `⚠️ วิเคราะห์ไม่สำเร็จ: ${err.message}`,
         key_points: [],
         people_involved: [],
         emotion: '',
@@ -114,6 +135,16 @@ export async function POST(request) {
         target_audience: '',
       };
     }
+
+    if (!analysis) {
+      analysis = {
+        summary: '⚠️ AI ไม่ส่งข้อมูลกลับ',
+        key_points: [], people_involved: [], emotion: '',
+        content_type: '', viral_potential: '', suggested_angles: [], target_audience: '',
+      };
+    }
+
+    console.log(`[S2] Done: summary=${analysis.summary?.length}ch`);
 
     return NextResponse.json({
       success: true,
@@ -128,7 +159,7 @@ export async function POST(request) {
       },
     });
   } catch (error) {
-    console.error('[Summarize] Fatal:', error.message, error.stack);
+    console.error('[Summarize] Fatal:', error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
