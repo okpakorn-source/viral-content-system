@@ -128,6 +128,44 @@ export default function NewContentPage() {
     }
   };
 
+  // === TikTok Transcription Handler ===
+  const [tiktokNeedUpload, setTiktokNeedUpload] = useState(false);
+  const [videoFile, setVideoFile] = useState(null);
+
+  const handleTikTokTranscribe = async (mode = 'url') => {
+    setExtracting(true);
+    setError('');
+    try {
+      let res;
+      if (mode === 'upload' && videoFile) {
+        const formData = new FormData();
+        formData.append('video', videoFile);
+        res = await fetch('/api/tiktok', { method: 'POST', body: formData });
+      } else {
+        res = await fetch('/api/tiktok', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        });
+      }
+      const data = await res.json();
+      if (data.success && data.text) {
+        setRawText(data.text);
+        setExtracted({ success: true, title: data.title || 'คลิป TikTok' });
+        setTiktokNeedUpload(false);
+      } else if (data.needUpload) {
+        setTiktokNeedUpload(true);
+        setError('ดาวน์โหลดอัตโนมัติไม่สำเร็จ — อัปโหลดไฟล์วิดีโอแทนได้เลย');
+      } else {
+        setError(data.error || 'ถอดเสียงไม่สำเร็จ');
+      }
+    } catch (err) {
+      setError('ถอดเสียงไม่สำเร็จ: ' + err.message);
+    } finally {
+      setExtracting(false);
+    }
+  };
+
   // === STEP 2: สกัดเนื้อข่าว (AI extraction) ===
   const handleExtractNews = async () => {
     if (!rawText) return;
@@ -331,6 +369,7 @@ export default function NewContentPage() {
     setWorkflowId(null); setResearchData(null); setSelectedResearch([]); setAddedResearchItems([]);
     setCustomPrompt(''); setBreakdownPromptText('');
     setImageFile(null); setImagePreview(null);
+    setTiktokNeedUpload(false); setVideoFile(null);
   };
 
   const needsUrl = ['url', 'facebook', 'tiktok', 'youtube'].includes(sourceType);
@@ -405,15 +444,53 @@ export default function NewContentPage() {
             {/* URL Input */}
             {needsUrl && (
               <div className="form-group">
-                <label className="form-label">🔗 URL</label>
+                <label className="form-label">🔗 {sourceType === 'tiktok' ? 'URL คลิป TikTok' : 'URL'}</label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input type="url" className="form-input" placeholder={placeholders[sourceType]}
                     value={url} onChange={(e) => setUrl(e.target.value)} style={{ flex: 1 }} />
-                  <button type="button" onClick={handleExtract} disabled={!url || extracting}
-                    className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
-                    {extracting ? '⏳ กำลังดึง...' : '📥 ดึงเนื้อหา'}
-                  </button>
+                  {sourceType === 'tiktok' ? (
+                    <button type="button" onClick={() => handleTikTokTranscribe('url')} disabled={!url || extracting}
+                      className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
+                      {extracting ? '⏳ กำลังถอดเสียง...' : '🎤 ถอดเสียงจากคลิป'}
+                    </button>
+                  ) : (
+                    <button type="button" onClick={handleExtract} disabled={!url || extracting}
+                      className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
+                      {extracting ? '⏳ กำลังดึง...' : '📥 ดึงเนื้อหา'}
+                    </button>
+                  )}
                 </div>
+                {sourceType === 'tiktok' && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                    AI จะดาวน์โหลดคลิปอัตโนมัติ → ถอดเสียงด้วย Whisper → ได้ข้อความ
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 🎵 TikTok Fallback: Upload Video */}
+            {sourceType === 'tiktok' && (tiktokNeedUpload || !url) && (
+              <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: 16, marginBottom: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>📤 หรืออัปโหลดไฟล์วิดีโอโดยตรง</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+                  {tiktokNeedUpload ? '⚠️ ดาวน์โหลดอัตโนมัติไม่สำเร็จ — ' : ''}ดาวน์โหลดคลิปจาก TikTok แล้วอัปโหลดที่นี่
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input type="file" accept="video/*"
+                    onChange={(e) => setVideoFile(e.target.files?.[0])}
+                    style={{ flex: 1, fontSize: 13, color: 'var(--text-secondary)' }} />
+                  {videoFile && (
+                    <button type="button" onClick={() => handleTikTokTranscribe('upload')} disabled={extracting}
+                      className="btn btn-viral" style={{ whiteSpace: 'nowrap' }}>
+                      {extracting ? '⏳ กำลังถอดเสียง...' : '🎤 ถอดเสียง'}
+                    </button>
+                  )}
+                </div>
+                {videoFile && (
+                  <div style={{ fontSize: 11, color: 'var(--accent-light)', marginTop: 6 }}>
+                    📁 {videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(1)} MB)
+                  </div>
+                )}
               </div>
             )}
 
