@@ -389,7 +389,7 @@ export default function NewContentPage() {
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>📥 เลือกแหล่งข้อมูล</h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 24 }}>
               {SOURCE_TYPES.map((s) => (
-                <button key={s.value} onClick={() => { setSourceType(s.value); setExtracted(null); setRawText(''); }}
+                <button key={s.value} onClick={() => { setSourceType(s.value); setExtracted(null); setRawText(''); setImageFile(null); setImagePreview(null); }}
                   style={{
                     padding: '14px 16px', textAlign: 'left', fontFamily: 'inherit',
                     background: sourceType === s.value ? 'var(--accent-glow)' : 'var(--bg-primary)',
