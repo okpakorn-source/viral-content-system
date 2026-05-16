@@ -234,7 +234,7 @@ export default function NewContentPage() {
     );
   };
 
-  // เพิ่มข้อมูลที่เลือกเข้า newsBody แล้วแตกประเด็นใหม่
+  // เพิ่มข้อมูลที่เลือกเข้า newsBody (ไม่ auto-breakdown — ให้ผู้ใช้กดเอง)
   const handleAddResearch = async () => {
     if (selectedResearch.length === 0 || !researchData?.items) return;
     const selectedItems = researchData.items.filter((_, i) => selectedResearch.includes(i));
@@ -246,43 +246,17 @@ export default function NewContentPage() {
 
     // เพิ่มเข้า newsBody ทันที
     const enrichedBody = (newsData.newsBody || '') + additionalText;
-    const newNewsData = { ...newsData, newsBody: enrichedBody };
-    setNewsData(newNewsData);
+    setNewsData(prev => ({ ...prev, newsBody: enrichedBody }));
 
-    // แสดง feedback ว่าเพิ่มแล้ว
+    // แสดง feedback
     setCopied('research_added');
     setTimeout(() => setCopied(''), 3000);
 
     console.log(`[Research] ✅ Added ${selectedItems.length} items (${additionalText.length}ch) to newsBody. Total: ${enrichedBody.length}ch`);
 
-    // เคลียร์ selection แต่ยังเก็บ researchData ไว้แสดงผล
+    // เคลียร์ selection + ซ่อน panel
     setSelectedResearch([]);
-
-    // แตกประเด็นใหม่ด้วยข้อมูลที่เพิ่มเข้ามา
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch('/api/summarize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: enrichedBody,
-          newsTitle: newNewsData.newsTitle,
-          customPrompt: breakdownPromptText || '',
-          mode: 'breakdown',
-          workflowId,
-        }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      setBreakdownData(data.data);
-      // สำเร็จแล้วค่อยซ่อน research panel
-      setResearchData(null);
-    } catch (err) {
-      setError('แตกประเด็นใหม่ไม่สำเร็จ: ' + err.message + ' (แต่ข้อมูลเพิ่มเข้า newsBody แล้ว กดแตกประเด็นใหม่ได้)');
-    } finally {
-      setLoading(false);
-    }
+    setResearchData(null);
   };
 
   // Copy
@@ -703,9 +677,9 @@ export default function NewContentPage() {
 
                   {/* ปุ่มเพิ่มข้อมูล */}
                   {selectedResearch.length > 0 && (
-                    <button onClick={handleAddResearch} className="btn btn-lg" disabled={loading}
-                      style={{ width: '100%', marginTop: 12, background: 'linear-gradient(135deg, #0ea5e9, #06b6d4)', border: 'none', color: '#fff', fontWeight: 800, fontSize: 13, padding: '12px 0', borderRadius: 'var(--radius-md)', cursor: loading ? 'wait' : 'pointer', boxShadow: '0 3px 12px rgba(14,165,233,0.3)' }}>
-                      {loading ? '⏳ กำลังแตกประเด็นใหม่...' : `✅ เพิ่ม ${selectedResearch.length} ข้อมูล + แตกประเด็นใหม่อัตโนมัติ`}
+                    <button onClick={handleAddResearch} className="btn btn-lg"
+                      style={{ width: '100%', marginTop: 12, background: 'linear-gradient(135deg, #0ea5e9, #06b6d4)', border: 'none', color: '#fff', fontWeight: 800, fontSize: 13, padding: '12px 0', borderRadius: 'var(--radius-md)', cursor: 'pointer', boxShadow: '0 3px 12px rgba(14,165,233,0.3)' }}>
+                      {`📥 เพิ่ม ${selectedResearch.length} ข้อมูลเข้าเนื้อข่าว`}
                     </button>
                   )}
                 </div>
