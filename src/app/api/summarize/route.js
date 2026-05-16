@@ -5,9 +5,9 @@ import { getPrompt } from '@/lib/ai/promptStore';
 /**
  * POST /api/summarize
  * 
- * Pipeline 2 ขั้นตอน:
- * 1. ดึง prompt "extraction" จากหน้าจัดการ → สกัดเนื้อข่าวจริง
- * 2. ดึง prompt "analysis" จากหน้าจัดการ → วิเคราะห์ประเด็นอย่างละเอียด
+ * ดึง prompt จากหน้าจัดการ Prompts มาใช้จริง:
+ * 1. prompt "extraction" → AI สกัดเนื้อข่าวจริง (ตัด noise)
+ * 2. prompt "analysis" → AI วิเคราะห์ประเด็นอย่างละเอียด
  */
 export async function POST(request) {
   try {
@@ -21,35 +21,39 @@ export async function POST(request) {
     const extractionPrompt = getPrompt('extraction');
     const analysisPrompt = getPrompt('analysis');
 
-    if (!extractionPrompt || !analysisPrompt) {
-      return NextResponse.json({ success: false, error: 'ไม่พบ Prompt templates' }, { status: 500 });
-    }
-
-    // ===== AI ตัวที่ 1: สกัดเนื้อข่าวจริง (ใช้ extraction prompt) =====
-    const extractUserPrompt = extractionPrompt.user
+    // ===== AI ตัวที่ 1: สกัดเนื้อข่าวจริง =====
+    const extractUser = extractionPrompt.user
       .replace('{content}', text.slice(0, 8000))
       .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติมจากผู้ใช้: "${customPrompt}"` : '');
 
-    console.log('[Summarize] Step 1: Extracting news with extraction prompt...');
+    console.log('[Summarize] Step 1: Extracting with prompt...');
     
-    const extractResult = await callAI({
-      systemPrompt: extractionPrompt.system,
-      userPrompt: extractUserPrompt,
-      temperature: 0.2,
-    });
-
     let newsData;
     try {
-      const jsonMatch = extractResult.match(/\{[\s\S]*\}/);
-      newsData = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-    } catch (parseErr) {
-      console.error('[Summarize] JSON parse error (extraction):', parseErr.message);
+      // callAI returns parsed JSON already (uses response_format: json_object)
+      const extractResult = await callAI({
+        systemPrompt: extractionPrompt.system,
+        userPrompt: extractUser,
+        temperature: 0.2,
+      });
+      
+      // callAI returns object directly (already parsed)
+      if (extractResult && typeof extractResult === 'object' && extractResult.news_body) {
+        newsData = extractResult;
+      } else if (typeof extractResult === 'string') {
+        const jsonMatch = extractResult.match(/\{[\s\S]*\}/);
+        newsData = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+      } else {
+        newsData = extractResult;
+      }
+    } catch (err) {
+      console.error('[Summarize] Extraction AI error:', err.message);
       newsData = null;
     }
 
-    // Fallback ถ้า AI parse ไม่ได้
+    // Fallback
     if (!newsData || !newsData.news_body || newsData.news_body.length < 20) {
-      console.log('[Summarize] Extraction fallback: using raw text');
+      console.log('[Summarize] Using raw text fallback');
       newsData = {
         news_title: text.slice(0, 80).replace(/\n/g, ' ').trim(),
         news_body: text.slice(0, 5000),
@@ -59,36 +63,41 @@ export async function POST(request) {
       };
     }
 
-    console.log(`[Summarize] Extracted: title="${newsData.news_title}", body=${newsData.news_body.length} chars`);
+    console.log(`[Summarize] Extracted: "${newsData.news_title}" (${newsData.news_body.length} chars)`);
 
-    // ===== AI ตัวที่ 2: วิเคราะห์ประเด็น (ใช้ analysis prompt) =====
-    const analyzeUserPrompt = analysisPrompt.user
+    // ===== AI ตัวที่ 2: วิเคราะห์ประเด็น =====
+    const analyzeUser = analysisPrompt.user
       .replace('{title}', newsData.news_title || '')
       .replace('{content}', newsData.news_body.slice(0, 5000))
       .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
 
-    console.log('[Summarize] Step 2: Analyzing with analysis prompt...');
+    console.log('[Summarize] Step 2: Analyzing with prompt...');
     
-    const analyzeResult = await callAI({
-      systemPrompt: analysisPrompt.system,
-      userPrompt: analyzeUserPrompt,
-      temperature: 0.5,
-    });
-
     let analysis;
     try {
-      const jsonMatch = analyzeResult.match(/\{[\s\S]*\}/);
-      analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-    } catch (parseErr) {
-      console.error('[Summarize] JSON parse error (analysis):', parseErr.message);
+      const analyzeResult = await callAI({
+        systemPrompt: analysisPrompt.system,
+        userPrompt: analyzeUser,
+        temperature: 0.5,
+      });
+      
+      if (analyzeResult && typeof analyzeResult === 'object' && analyzeResult.summary) {
+        analysis = analyzeResult;
+      } else if (typeof analyzeResult === 'string') {
+        const jsonMatch = analyzeResult.match(/\{[\s\S]*\}/);
+        analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+      } else {
+        analysis = analyzeResult;
+      }
+    } catch (err) {
+      console.error('[Summarize] Analysis AI error:', err.message);
       analysis = null;
     }
 
     // Fallback
     if (!analysis || !analysis.summary) {
-      console.log('[Summarize] Analysis fallback');
       analysis = {
-        summary: 'ไม่สามารถวิเคราะห์อัตโนมัติได้ — กรุณาตรวจสอบ API Key',
+        summary: 'ไม่สามารถวิเคราะห์อัตโนมัติได้ — ตรวจสอบ OPENAI_API_KEY',
         key_points: [],
         people_involved: [],
         emotion: '',
@@ -99,18 +108,16 @@ export async function POST(request) {
       };
     }
 
-    console.log(`[Summarize] Analysis done: summary=${analysis.summary?.length} chars, key_points=${analysis.key_points?.length}`);
+    console.log(`[Summarize] Done: summary=${analysis.summary?.length}ch, angles=${analysis.suggested_angles?.length}`);
 
     return NextResponse.json({
       success: true,
       data: {
-        // ผลจาก AI ตัวที่ 1 — เนื้อข่าวครบถ้วน
         newsTitle: newsData.news_title,
         newsBody: newsData.news_body,
         newsSource: newsData.news_source,
         newsDate: newsData.news_date,
         newsCategory: newsData.news_category,
-        // ผลจาก AI ตัวที่ 2 — วิเคราะห์ประเด็น
         ...analysis,
       },
     });
@@ -118,7 +125,7 @@ export async function POST(request) {
     console.error('Summarize API Error:', error);
     return NextResponse.json({ 
       success: false, 
-      error: `${error.message}${error.status === 401 ? ' — ตรวจสอบ OPENAI_API_KEY' : ''}` 
+      error: error.message 
     }, { status: 500 });
   }
 }
