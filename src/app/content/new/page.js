@@ -123,7 +123,7 @@ export default function NewContentPage() {
       if (data.debug) {
         console.log('[Breakdown Debug]', data.debug);
       }
-      setStep('breakdown');
+      // ไม่ต้อง setStep — อยู่หน้าเดิม (extracted) แสดง breakdown ต่อเลย
     } catch (err) {
       setError(err.message);
     } finally {
@@ -383,12 +383,12 @@ export default function NewContentPage() {
               style={{ width: '100%' }} disabled={loading}>
               {loading ? '⏳ กำลังแตกประเด็น...' : '🔍 AI แตกประเด็น + สรุปใจความสำคัญ'}
             </button>
-          </div>
-        )}
-        {/* ===== STEP 3: Breakdown — แตกประเด็น + interactive feedback ===== */}
-        {step === 'breakdown' && breakdownData && (
-          <div className="card slide-up">
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>🔍 AI แตกประเด็น + สรุปใจความ</h3>
+
+            {/* ===== Breakdown results แสดงต่อเลย (หน้าเดียวกัน) ===== */}
+            {breakdownData && (
+              <div style={{ marginTop: 20 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>🔍 AI แตกประเด็น + สรุปใจความ</h3>
+
 
             {/* สรุปรวม */}
             <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--accent)', borderLeft: '4px solid var(--accent)' }}>
@@ -570,9 +570,11 @@ export default function NewContentPage() {
                     <div style={{ fontSize: 10, marginTop: 4, opacity: 0.8 }}>{p.desc}</div>
                   </button>
                 ))}
-              </div>
+             </div>
               <a href="/prompts?tab=analysis" target="_blank" style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10, display: 'inline-block' }}>⚙️ จัดการ Presets</a>
             </div>
+              </div>
+            )}
           </div>
         )}
 
