@@ -372,10 +372,13 @@ export default function NewContentPage() {
                   </div>
                 )}
 
-                {/* AI Analysis Summary */}
-                <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>🤖 AI สรุปข่าว</div>
-                  <div style={{ fontSize: 14, lineHeight: 1.8, color: 'var(--text-secondary)' }}>{summary.summary}</div>
+                {/* AI Analysis Summary — ใช้ prompt "วิเคราะห์ประเด็น" จากหน้าจัดการ */}
+                <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--warning)', borderLeft: '4px solid var(--warning)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--warning)', textTransform: 'uppercase' }}>🤖 AI วิเคราะห์ประเด็น (จาก Prompt ที่ตั้งไว้)</div>
+                    <a href="/prompts" target="_blank" style={{ fontSize: 10, color: 'var(--accent-light)', textDecoration: 'none' }}>⚙️ แก้ไข Prompt</a>
+                  </div>
+                  <div style={{ fontSize: 14, lineHeight: 2, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{summary.summary}</div>
                 </div>
 
                 {/* Key Points */}
