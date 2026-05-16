@@ -81,6 +81,37 @@ export async function POST(request) {
       });
     }
 
+    // ===== MODE: breakdown — แตกประเด็น + สรุปใจความ =====
+    if (mode === 'breakdown') {
+      const breakdownPrompt = getPrompt('breakdown');
+      console.log(`[Breakdown] newsTitle: "${(newsTitle || '').slice(0, 80)}", textLen: ${text?.length}`);
+
+      const prompt = breakdownPrompt.prompt
+        .replace('{title}', newsTitle || text.slice(0, 100))
+        .replace('{content}', text.slice(0, 6000))
+        .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
+
+      try {
+        const result = await callAI({ prompt, model: 'gpt-4o', temperature: 0.4, maxTokens: 6000 });
+        console.log(`[Breakdown] OK, keys: ${Object.keys(result || {}).join(', ')}`);
+
+        return NextResponse.json({
+          success: true,
+          data: {
+            news_summary: result.news_summary || '',
+            key_points: result.key_points || [],
+            best_sections: result.best_sections || [],
+            key_facts: result.key_facts || { people: [], places: [], numbers: [], dates: [] },
+            emotional_hooks: result.emotional_hooks || [],
+            suggested_angles: result.suggested_angles || [],
+          },
+        });
+      } catch (err) {
+        console.error('[Breakdown] ERROR:', err.message);
+        return NextResponse.json({ success: false, error: `แตกประเด็นไม่สำเร็จ: ${err.message}` }, { status: 500 });
+      }
+    }
+
     // ===== MODE: analyze — วิเคราะห์ด้วย Preset (ใช้เนื้อข่าวสะอาดที่ส่งมา) =====
     if (mode === 'analyze') {
       const preset = getAnalysisPreset(analysisPresetId || 'viral_fb');

@@ -24,10 +24,12 @@ export default function NewContentPage() {
   const [selectedPreset, setSelectedPreset] = useState('viral_fb');
 
   // Flow state
-  const [step, setStep] = useState('input'); // input → extracted → analyzed
-  const [extracted, setExtracted] = useState(null); // raw extraction result from /api/extract
-  const [newsData, setNewsData] = useState(null); // AI-extracted clean news { newsTitle, newsBody, ... }
-  const [analysisResult, setAnalysisResult] = useState(null); // Analysis result from preset
+  const [step, setStep] = useState('input'); // input → extracted → breakdown → analyzed
+  const [extracted, setExtracted] = useState(null);
+  const [newsData, setNewsData] = useState(null);
+  const [breakdownData, setBreakdownData] = useState(null);
+  const [breakdownPromptText, setBreakdownPromptText] = useState('');
+  const [analysisResult, setAnalysisResult] = useState(null);
 
   // Load presets
   useEffect(() => {
@@ -90,6 +92,33 @@ export default function NewContentPage() {
     }
   };
 
+  // === STEP 2.5: แตกประเด็น + สรุปใจความ ===
+  const handleBreakdown = async () => {
+    if (!newsData?.newsBody) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: newsData.newsBody,
+          newsTitle: newsData.newsTitle,
+          customPrompt: breakdownPromptText,
+          mode: 'breakdown',
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      setBreakdownData(data.data);
+      setStep('breakdown');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // === STEP 3: วิเคราะห์ประเด็นด้วย Preset ===
   const handleAnalyze = async (presetId) => {
     const usePreset = presetId || selectedPreset;
@@ -131,7 +160,7 @@ export default function NewContentPage() {
   // Reset
   const handleReset = () => {
     setStep('input'); setExtracted(null); setRawText(''); setUrl('');
-    setError(''); setNewsData(null); setAnalysisResult(null);
+    setError(''); setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
   };
 
   const needsUrl = ['url', 'facebook', 'tiktok', 'youtube'].includes(sourceType);
@@ -144,14 +173,15 @@ export default function NewContentPage() {
 
   return (
     <>
-      <Header title="✨ สร้างคอนเทนต์ใหม่" subtitle="ป้อนแหล่งข้อมูล → AI สกัดข่าว → เลือก Prompt → วิเคราะห์ประเด็น" />
+      <Header title="✨ สร้างคอนเทนต์ใหม่" subtitle="สกัดข่าว → แตกประเด็น → เลือก Prompt → วิเคราะห์" />
       <div className="page-content">
         {loading && (
           <div className="loading-overlay">
             <div className="spinner" />
             <div className="loading-text">
               {step === 'input' ? '📥 กำลังสกัดเนื้อข่าว...' :
-               step === 'extracted' ? '🤖 กำลังวิเคราะห์ประเด็นด้วย AI...' :
+               step === 'extracted' ? '🔍 กำลังแตกประเด็น...' :
+               step === 'breakdown' ? '🤖 กำลังวิเคราะห์ด้วย AI...' :
                '⏳ กำลังประมวลผล...'}
             </div>
           </div>
@@ -166,8 +196,8 @@ export default function NewContentPage() {
 
         {/* Pipeline */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 24, flexWrap: 'wrap' }}>
-          {['ป้อนข้อมูล', 'สกัดเนื้อข่าว', 'วิเคราะห์ประเด็น'].map((label, i) => {
-            const steps = ['input', 'extracted', 'analyzed'];
+          {['ป้อนข้อมูล', 'สกัดข่าว', 'แตกประเด็น', 'วิเคราะห์'].map((label, i) => {
+            const steps = ['input', 'extracted', 'breakdown', 'analyzed'];
             const currentIdx = steps.indexOf(step);
             const status = i < currentIdx ? 'done' : i === currentIdx ? 'active' : '';
             return (
@@ -175,7 +205,7 @@ export default function NewContentPage() {
                 <div className={`pipeline-step ${status}`} onClick={() => i <= currentIdx && setStep(steps[i])} style={{ cursor: i <= currentIdx ? 'pointer' : 'default' }}>
                   {i + 1}. {label}
                 </div>
-                {i < 2 && <span className="pipeline-arrow">→</span>}
+                {i < 3 && <span className="pipeline-arrow">→</span>}
               </span>
             );
           })}
@@ -290,51 +320,110 @@ export default function NewContentPage() {
               </div>
             </div>
 
-            {/* ===== เลือก Preset + ปุ่มวิเคราะห์ ===== */}
-            <div style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', border: '2px solid var(--accent)', marginBottom: 16 }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--accent-light)', marginBottom: 4 }}>
-                🎯 เลือก Prompt วิเคราะห์ประเด็น แล้วกดปุ่ม
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14 }}>
-                ระบบจะส่งเนื้อข่าวด้านบนไปให้ AI วิเคราะห์ตาม Prompt ที่คุณเลือก
-              </div>
+            {/* คำสั่งแตกประเด็น */}
+            <div className="form-group" style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+              <label className="form-label">🤖 คำสั่งเพิ่มเติมสำหรับแตกประเด็น (ไม่บังคับ)</label>
+              <textarea className="form-textarea" value={breakdownPromptText} onChange={(e) => setBreakdownPromptText(e.target.value)}
+                placeholder="เช่น: เน้นประเด็นดราม่า, หาจุดที่คนจะอิน, แยกข้อเท็จจริงกับความเห็น..."
+                style={{ minHeight: 50, fontSize: 13 }} />
+            </div>
 
+            <button type="button" onClick={handleBreakdown} className="btn btn-viral btn-lg"
+              style={{ width: '100%' }} disabled={loading}>
+              {loading ? '⏳ กำลังแตกประเด็น...' : '🔍 AI แตกประเด็น + สรุปใจความสำคัญ'}
+            </button>
+          </div>
+        )}
+        {/* ===== STEP 3: Breakdown — แตกประเด็น + interactive feedback ===== */}
+        {step === 'breakdown' && breakdownData && (
+          <div className="card slide-up">
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>🔍 AI แตกประเด็น + สรุปใจความ</h3>
+
+            {/* สรุปรวม */}
+            <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--accent)', borderLeft: '4px solid var(--accent)' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-light)', marginBottom: 6 }}>📋 สรุปรวมข่าว</div>
+              <div style={{ fontSize: 14, lineHeight: 2, color: 'var(--text-secondary)' }}>{breakdownData.news_summary}</div>
+            </div>
+
+            {/* Key Points */}
+            {breakdownData.key_points?.length > 0 && (
+              <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 10 }}>📌 ประเด็นสำคัญ ({breakdownData.key_points.length} ประเด็น)</div>
+                {breakdownData.key_points.map((kp, i) => (
+                  <div key={i} style={{ padding: '10px 12px', marginBottom: 8, background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{i+1}. {kp.point}</span>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 8, background: kp.importance === 'สูง' ? 'var(--danger-bg)' : 'var(--bg-tertiary)', color: kp.importance === 'สูง' ? 'var(--danger)' : 'var(--text-muted)' }}>⚡ {kp.importance}</span>
+                        <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 8, background: kp.emotional_value === 'สูง' ? 'var(--warning-bg)' : 'var(--bg-tertiary)', color: kp.emotional_value === 'สูง' ? 'var(--warning)' : 'var(--text-muted)' }}>💖 {kp.emotional_value}</span>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.8 }}>{kp.detail}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Best Sections + Emotional Hooks */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+              {breakdownData.best_sections?.length > 0 && (
+                <div style={{ background: 'var(--bg-primary)', padding: 14, borderRadius: 'var(--radius-md)', border: '1px solid var(--success)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--success)', marginBottom: 8 }}>⭐ ท่อนที่ดีที่สุด</div>
+                  {breakdownData.best_sections.map((s, i) => (
+                    <div key={i} style={{ fontSize: 12, color: 'var(--text-secondary)', padding: '4px 0', lineHeight: 1.7 }}>• {s}</div>
+                  ))}
+                </div>
+              )}
+              {breakdownData.emotional_hooks?.length > 0 && (
+                <div style={{ background: 'var(--bg-primary)', padding: 14, borderRadius: 'var(--radius-md)', border: '1px solid var(--warning)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--warning)', marginBottom: 8 }}>🎣 จุดที่คนจะอิน</div>
+                  {breakdownData.emotional_hooks.map((h, i) => (
+                    <div key={i} style={{ fontSize: 12, color: 'var(--text-secondary)', padding: '4px 0', lineHeight: 1.7 }}>• {h}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Key Facts */}
+            {breakdownData.key_facts && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+                {breakdownData.key_facts.people?.map((p, i) => <span key={`p${i}`} style={{ fontSize: 10, padding: '3px 8px', background: 'var(--info-bg)', color: 'var(--info)', borderRadius: 10 }}>👤 {p}</span>)}
+                {breakdownData.key_facts.places?.map((p, i) => <span key={`l${i}`} style={{ fontSize: 10, padding: '3px 8px', background: 'var(--success-bg)', color: 'var(--success)', borderRadius: 10 }}>📍 {p}</span>)}
+                {breakdownData.key_facts.numbers?.map((n, i) => <span key={`n${i}`} style={{ fontSize: 10, padding: '3px 8px', background: 'var(--warning-bg)', color: 'var(--warning)', borderRadius: 10 }}>🔢 {n}</span>)}
+                {breakdownData.key_facts.dates?.map((d, i) => <span key={`d${i}`} style={{ fontSize: 10, padding: '3px 8px', background: 'var(--viral-bg)', color: 'var(--viral)', borderRadius: 10 }}>📅 {d}</span>)}
+              </div>
+            )}
+
+            {/* Interactive Feedback — สั่ง AI แตกใหม่ */}
+            <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', border: '2px solid var(--info)', marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--info)', marginBottom: 8 }}>💬 สั่ง AI ปรับผลลัพธ์ (พิมพ์แล้วกดแตกใหม่)</div>
+              <textarea className="form-textarea" value={breakdownPromptText} onChange={(e) => setBreakdownPromptText(e.target.value)}
+                placeholder="เช่น: ประเด็นที่ 2 ไม่ดี ตัดออก, เน้นมุมดราม่ามากขึ้น, แตกประเด็นเรื่องตัวเลขให้ละเอียดกว่านี้..."
+                style={{ minHeight: 60, fontSize: 13, marginBottom: 8 }} />
+              <button onClick={handleBreakdown} className="btn btn-outline" disabled={loading} style={{ width: '100%' }}>
+                {loading ? '⏳ กำลังแตกใหม่...' : '🔄 แตกประเด็นใหม่ตามคำสั่ง'}
+              </button>
+            </div>
+
+            {/* เลือก Preset วิเคราะห์ → ไป Step สุดท้าย */}
+            <div style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', border: '2px solid var(--accent)' }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--accent-light)', marginBottom: 4 }}>🎯 พอใจแล้ว? เลือก Prompt วิเคราะห์ประเด็นสุดท้าย</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14 }}>ระบบจะส่งเนื้อข่าว + ผลแตกประเด็นไปให้ AI วิเคราะห์ตาม Prompt ที่เลือก</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
                 {analysisPresets.map(p => (
-                  <button key={p.id} type="button"
-                    disabled={loading}
-                    onClick={() => handleAnalyze(p.id)}
-                    style={{
-                      padding: '14px 16px', textAlign: 'left', fontFamily: 'inherit',
-                      background: selectedPreset === p.id ? 'var(--accent)' : 'var(--bg-secondary)',
-                      color: selectedPreset === p.id ? '#fff' : 'var(--text-primary)',
-                      border: selectedPreset === p.id ? '2px solid var(--accent-light)' : '1px solid var(--border)',
-                      borderRadius: 'var(--radius-md)', cursor: loading ? 'wait' : 'pointer',
-                      transition: 'all 0.2s',
-                    }}>
-                    <div style={{ fontSize: 14, fontWeight: 700 }}>
-                      {loading && selectedPreset === p.id ? '⏳ กำลังวิเคราะห์...' : `▶ ${p.name}`}
-                    </div>
+                  <button key={p.id} type="button" disabled={loading} onClick={() => handleAnalyze(p.id)}
+                    style={{ padding: '14px 16px', textAlign: 'left', fontFamily: 'inherit', background: selectedPreset === p.id ? 'var(--accent)' : 'var(--bg-secondary)', color: selectedPreset === p.id ? '#fff' : 'var(--text-primary)', border: selectedPreset === p.id ? '2px solid var(--accent-light)' : '1px solid var(--border)', borderRadius: 'var(--radius-md)', cursor: loading ? 'wait' : 'pointer' }}>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{loading && selectedPreset === p.id ? '⏳...' : `▶ ${p.name}`}</div>
                     <div style={{ fontSize: 10, marginTop: 4, opacity: 0.8 }}>{p.desc}</div>
                   </button>
                 ))}
               </div>
-              <a href="/prompts?tab=analysis" target="_blank" style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10, display: 'inline-block' }}>
-                ⚙️ จัดการ Presets ในหน้า Prompts
-              </a>
-            </div>
-
-            {/* คำสั่งเพิ่มเติม */}
-            <div className="form-group" style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
-              <label className="form-label">✏️ คำสั่งเพิ่มเติม (ไม่บังคับ)</label>
-              <textarea className="form-textarea" value={customPrompt} onChange={(e) => setCustomPrompt(e.target.value)}
-                placeholder="เช่น: เน้นมุมดราม่า, เขียนแบบเล่าเรื่อง..."
-                style={{ minHeight: 50, fontSize: 13 }} />
+              <a href="/prompts?tab=analysis" target="_blank" style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10, display: 'inline-block' }}>⚙️ จัดการ Presets</a>
             </div>
           </div>
         )}
 
-        {/* ===== STEP 3: Analyzed — ผลลัพธ์วิเคราะห์ ===== */}
+        {/* ===== STEP 4: Analyzed — ผลลัพธ์วิเคราะห์ ===== */}
         {step === 'analyzed' && analysisResult && (
           <div className="card slide-up">
             {/* หัวข้อข่าว */}
