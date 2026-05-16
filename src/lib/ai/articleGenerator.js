@@ -5,25 +5,18 @@ import { getPrompt } from './promptStore.js';
  * สร้างบทความไวรัล
  */
 export async function generateArticle({ headline, hook, content, tone = 'emotional', instructions = '' }) {
-  const prompt = getPrompt('article');
+  const promptData = getPrompt('article');
 
-  const systemPrompt = prompt?.system || 'คุณคือนักเขียนคอนเทนต์ไวรัล ตอบ JSON เท่านั้น';
+  const prompt = (promptData?.prompt || `คุณคือนักเขียนคอนเทนต์ไวรัล
 
-  const userPrompt = (prompt?.user || `เขียนบทความ:
+เขียนบทความ:
 หัวข้อ: {headline}
 Hook: {hook}
 เนื้อหา: {content}
 โทน: {tone}
 
 ตอบ JSON:
-{
-  "headline": "",
-  "body": "",
-  "hook": "",
-  "closing": "",
-  "caption": "",
-  "hashtags": []
-}`)
+{ "headline": "", "body": "", "hook": "", "closing": "", "caption": "", "hashtags": [] }`)
     .replace('{headline}', headline || '')
     .replace('{hook}', hook || '')
     .replace('{content}', content?.slice(0, 4000) || '')
@@ -31,20 +24,13 @@ Hook: {hook}
     .replace('{instructions}', instructions);
 
   try {
-    return await callAI({
-      systemPrompt,
-      userPrompt,
-      temperature: 0.7,
-    });
+    return await callAI({ prompt, temperature: 0.7 });
   } catch (err) {
     console.error('[generateArticle] Error:', err.message);
     return {
       headline: headline || '(สร้างไม่สำเร็จ)',
       body: 'เกิดข้อผิดพลาด: ' + err.message,
-      hook: hook || '',
-      closing: '',
-      caption: '',
-      hashtags: [],
+      hook: '', closing: '', caption: '', hashtags: [],
     };
   }
 }
@@ -53,17 +39,15 @@ Hook: {hook}
  * เขียนบทความใหม่ด้วยโทนที่ต่างออกไป
  */
 export async function rewriteArticle({ originalBody, newTone, feedback = '' }) {
-  const prompt = getPrompt('article');
-  const systemPrompt = prompt?.system || 'คุณคือนักเขียนคอนเทนต์ไวรัล ตอบ JSON เท่านั้น';
+  const prompt = `คุณคือนักเขียนคอนเทนต์ไวรัล
 
-  const userPrompt = `เขียนบทความนี้ใหม่ด้วยโทน "${newTone}"
+เขียนบทความนี้ใหม่ด้วยโทน "${newTone}"
 
 ===== บทความเดิม =====
 ${originalBody}
 
 ===== Feedback =====
 ${feedback}
-===================
 
 ตอบเป็น JSON:
 {
@@ -76,12 +60,12 @@ ${feedback}
 }`;
 
   try {
-    return await callAI({ systemPrompt, userPrompt, temperature: 0.8 });
+    return await callAI({ prompt, temperature: 0.8 });
   } catch (err) {
     console.error('[rewriteArticle] Error:', err.message);
     return {
       headline: '(เขียนใหม่ไม่สำเร็จ)',
-      body: 'เกิดข้อผิดพลาด: ' + err.message,
+      body: 'Error: ' + err.message,
       hook: '', closing: '', caption: '', hashtags: [],
     };
   }

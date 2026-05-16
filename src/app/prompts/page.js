@@ -4,7 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 const PROMPT_LABELS = {
-  extraction: { name: '📥 สกัดเนื้อข่าว', desc: 'AI ตัวที่ 1: แยกเนื้อข่าวจริงจาก raw text' },
+  extraction: { name: '📥 สกัดเนื้อข่าว', desc: 'AI สกัดเนื้อข่าวจริงจาก raw text' },
   angle: { name: '🎯 มุมมองไวรัล', desc: 'สร้าง Headlines, Hooks, Comment Baits' },
   article: { name: '✍️ เขียนบทความ', desc: 'เขียนบทความไวรัลจากข้อมูลที่วิเคราะห์แล้ว' },
 };
@@ -14,8 +14,7 @@ function PromptsPageInner() {
   const initialTab = searchParams.get('tab') || 'extraction';
   const [selected, setSelected] = useState(initialTab);
   const [prompts, setPrompts] = useState({});
-  const [system, setSystem] = useState('');
-  const [user, setUser] = useState('');
+  const [promptText, setPromptText] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -30,8 +29,7 @@ function PromptsPageInner() {
       if (d.success) {
         setPrompts(d.data);
         if (initialTab !== 'analysis') {
-          setSystem(d.data[initialTab]?.system || '');
-          setUser(d.data[initialTab]?.user || '');
+          setPromptText(d.data[initialTab]?.prompt || '');
         }
       }
       if (d.analysisPresets) setPresets(d.analysisPresets);
@@ -48,8 +46,7 @@ function PromptsPageInner() {
     if (key === 'analysis') {
       if (presets.length > 0 && !editPreset) setEditPreset(presets[0]);
     } else {
-      setSystem(prompts[key]?.system || '');
-      setUser(prompts[key]?.user || '');
+      setPromptText(prompts[key]?.prompt || '');
     }
     setMsg('');
   };
@@ -62,12 +59,12 @@ function PromptsPageInner() {
       const res = await fetch('/api/prompts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: selected, system, user }),
+        body: JSON.stringify({ key: selected, prompt: promptText }),
       });
       const data = await res.json();
       if (data.success) {
         setMsg('✅ บันทึกแล้ว');
-        setPrompts(prev => ({ ...prev, [selected]: { system, user } }));
+        setPrompts(prev => ({ ...prev, [selected]: { prompt: promptText } }));
       } else {
         setMsg('❌ ' + data.error);
       }
@@ -106,19 +103,28 @@ function PromptsPageInner() {
       id: newId,
       name: '🆕 Preset ใหม่',
       desc: 'คำอธิบาย',
-      system: 'คุณคือนักวิเคราะห์คอนเทนต์ ตอบเป็น JSON เท่านั้น',
-      user: `อ่านข่าวนี้แล้ววิเคราะห์:
+      prompt: `คุณคือนักวิเคราะห์คอนเทนต์
 
+อ่านเนื้อข่าวด้านล่างแล้วเขียนใหม่ตามสไตล์ที่ต้องการ
+
+สไตล์การเขียน:
+- (ใส่สไตล์ที่ต้องการ)
+- ยาว 3-4 ย่อหน้า
+
+กฎเหล็ก:
+- ห้ามแต่งเรื่องใหม่ ใช้เฉพาะข้อมูลจากเนื้อข่าว
+
+=== เนื้อข่าวที่สกัดมา ===
 หัวข้อ: {title}
-เนื้อข่าว:
-"""
+
 {content}
-"""
+=== จบเนื้อข่าว ===
+
 {custom_instruction}
 
-ตอบเป็น JSON:
+ตอบเป็น JSON เท่านั้น:
 {
-  "summary": "เนื้อหายาว 3-4 ย่อหน้า",
+  "summary": "เนื้อหาที่เขียนใหม่ ยาว 3-4 ย่อหน้า",
   "key_points": ["ประเด็น 1", "ประเด็น 2"],
   "people_involved": ["ชื่อ"],
   "emotion": "อารมณ์",
@@ -163,8 +169,7 @@ function PromptsPageInner() {
       const data = await res.json();
       if (data.success) {
         setPrompts(data.data);
-        setSystem(data.data[selected]?.system || '');
-        setUser(data.data[selected]?.user || '');
+        setPromptText(data.data[selected]?.prompt || '');
         setMsg('↩️ รีเซ็ตแล้ว');
       }
     } catch (e) {
@@ -226,7 +231,7 @@ function PromptsPageInner() {
                   ))}
                 </div>
 
-                {/* Preset Editor */}
+                {/* Preset Editor — ช่องเดียว */}
                 {editPreset && (
                   <div style={{ background: 'var(--bg-secondary)', padding: 20, borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
@@ -243,20 +248,16 @@ function PromptsPageInner() {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label">System Prompt (คำสั่งให้ AI)</label>
-                      <textarea className="form-textarea" value={editPreset.system}
-                        onChange={e => setEditPreset({ ...editPreset, system: e.target.value })}
-                        style={{ minHeight: 200, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.6 }} />
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">User Prompt (ข้อมูลที่ส่งให้ AI)</label>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>
-                        ตัวแปร: <code style={{ color: 'var(--accent-light)' }}>{'{title}'}</code> <code style={{ color: 'var(--accent-light)' }}>{'{content}'}</code> <code style={{ color: 'var(--accent-light)' }}>{'{custom_instruction}'}</code>
+                      <label className="form-label">📝 Prompt คำสั่ง AI (ช่องเดียวครบจบ)</label>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.8 }}>
+                        ใส่คำสั่งทั้งหมดในช่องนี้ รวมทั้งสไตล์การเขียน กฎ และ JSON format &nbsp;
+                        ตัวแปร: <code style={{ color: 'var(--accent-light)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4 }}>{'{title}'}</code>&nbsp;
+                        <code style={{ color: 'var(--accent-light)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4 }}>{'{content}'}</code>&nbsp;
+                        <code style={{ color: 'var(--accent-light)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4 }}>{'{custom_instruction}'}</code>
                       </div>
-                      <textarea className="form-textarea" value={editPreset.user}
-                        onChange={e => setEditPreset({ ...editPreset, user: e.target.value })}
-                        style={{ minHeight: 250, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.6 }} />
+                      <textarea className="form-textarea" value={editPreset.prompt || ''}
+                        onChange={e => setEditPreset({ ...editPreset, prompt: e.target.value })}
+                        style={{ minHeight: 450, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.6 }} />
                     </div>
 
                     <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -272,21 +273,19 @@ function PromptsPageInner() {
                 )}
               </div>
             ) : (
-              /* ===== Standard Prompt Editor ===== */
+              /* ===== Standard Prompt Editor — ช่องเดียว ===== */
               <>
                 <div className="form-group">
-                  <label className="form-label">System Prompt (คำสั่งให้ AI)</label>
-                  <textarea className="form-textarea" value={system} onChange={(e) => setSystem(e.target.value)}
-                    style={{ minHeight: 250, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.6 }} />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">User Prompt (ข้อมูลที่ส่งให้ AI)</label>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>
-                    ใช้ตัวแปร: <code style={{ color: 'var(--accent-light)' }}>{'{content}'}</code> <code style={{ color: 'var(--accent-light)' }}>{'{title}'}</code> <code style={{ color: 'var(--accent-light)' }}>{'{custom_instruction}'}</code> <code style={{ color: 'var(--accent-light)' }}>{'{tone}'}</code>
+                  <label className="form-label">📝 Prompt คำสั่ง AI (ช่องเดียวครบจบ)</label>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.8 }}>
+                    ใส่คำสั่งทั้งหมดในช่องเดียว รวมทั้งบทบาท คำสั่ง ตัวแปร และ JSON format &nbsp;
+                    ตัวแปร: <code style={{ color: 'var(--accent-light)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4 }}>{'{content}'}</code>&nbsp;
+                    <code style={{ color: 'var(--accent-light)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4 }}>{'{title}'}</code>&nbsp;
+                    <code style={{ color: 'var(--accent-light)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4 }}>{'{custom_instruction}'}</code>&nbsp;
+                    <code style={{ color: 'var(--accent-light)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4 }}>{'{tone}'}</code>
                   </div>
-                  <textarea className="form-textarea" value={user} onChange={(e) => setUser(e.target.value)}
-                    style={{ minHeight: 350, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.6 }} />
+                  <textarea className="form-textarea" value={promptText} onChange={(e) => setPromptText(e.target.value)}
+                    style={{ minHeight: 500, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.6 }} />
                 </div>
 
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>

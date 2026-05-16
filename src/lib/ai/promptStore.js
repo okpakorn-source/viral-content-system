@@ -1,6 +1,7 @@
 /**
- * Prompt Store — Multi-Preset Analysis System
- * Flow: เนื้อข่าวที่สกัดได้ → ส่งให้ AI + preset prompt → ผลสรุปวิเคราะห์
+ * Prompt Store — Single Prompt System
+ * ทุก preset ใช้ prompt เดียว (ไม่แยก system/user)
+ * ตัวแปร: {title} {content} {custom_instruction}
  */
 
 // ===== Analysis Presets =====
@@ -9,8 +10,9 @@ const DEFAULT_ANALYSIS_PRESETS = [
     id: 'viral_fb',
     name: '🔥 ไวรัล Facebook',
     desc: 'เล่าข่าวแบบโพสต์ไวรัลที่คนอยากแชร์',
-    system: `คุณคือนักเล่าข่าวสไตล์ไวรัล Facebook ที่คนอยากแชร์
-คุณจะได้รับ "เนื้อข่าวที่สกัดมาแล้ว" ให้คุณเขียนใหม่ทั้งหมดในสไตล์โพสต์ไวรัล
+    prompt: `คุณคือนักเล่าข่าวสไตล์ไวรัล Facebook ที่คนอยากแชร์
+
+อ่านเนื้อข่าวด้านล่างแล้วเขียนใหม่ทั้งหมดในสไตล์โพสต์ไวรัล
 
 สไตล์การเขียน:
 - เขียนเหมือนคนเล่าเรื่องให้เพื่อนฟัง ไม่ใช่รายงานข่าว
@@ -25,8 +27,6 @@ const DEFAULT_ANALYSIS_PRESETS = [
 กฎเหล็ก:
 - ห้ามแต่งเรื่องใหม่ ห้ามเพิ่มข้อมูลที่ไม่มีในเนื้อข่าว
 - ใช้เฉพาะข้อมูลจากเนื้อข่าวที่ให้มาเท่านั้น
-- ตอบเป็น JSON เท่านั้น`,
-    user: `อ่านเนื้อข่าวด้านล่างแล้วเขียนใหม่ทั้งหมดในสไตล์ไวรัล Facebook
 
 === เนื้อข่าวที่สกัดมา ===
 หัวข้อ: {title}
@@ -36,9 +36,7 @@ const DEFAULT_ANALYSIS_PRESETS = [
 
 {custom_instruction}
 
-เขียนใหม่ทั้งหมดในสไตล์ไวรัล ห้ามใช้ภาษาข่าว ห้ามใช้คำทางการ
-
-ตอบเป็น JSON:
+ตอบเป็น JSON เท่านั้น:
 {
   "summary": "เนื้อหาที่เขียนใหม่ทั้งหมดในสไตล์ไวรัล ยาว 3-5 ย่อหน้า คั่นด้วยบรรทัดว่าง",
   "key_points": ["ประเด็นสำคัญ 1", "ประเด็นสำคัญ 2", "ประเด็นสำคัญ 3"],
@@ -54,8 +52,9 @@ const DEFAULT_ANALYSIS_PRESETS = [
     id: 'drama_storytelling',
     name: '🎭 ดราม่า เล่าเรื่อง',
     desc: 'เน้นดราม่า ขัดแย้ง ทำให้คนหยุดอ่าน',
-    system: `คุณคือนักเล่าเรื่องดราม่าโซเชียล
-คุณจะได้รับ "เนื้อข่าวที่สกัดมาแล้ว" ให้คุณเขียนใหม่ทั้งหมดในสไตล์ดราม่า
+    prompt: `คุณคือนักเล่าเรื่องดราม่าโซเชียล
+
+อ่านเนื้อข่าวด้านล่างแล้วเขียนใหม่ทั้งหมดในสไตล์ดราม่าเล่าเรื่อง
 
 สไตล์การเขียน:
 - เปิดด้วยประโยคช็อค ทำให้คนต้องหยุดอ่าน
@@ -67,8 +66,6 @@ const DEFAULT_ANALYSIS_PRESETS = [
 
 กฎเหล็ก:
 - ห้ามแต่งเรื่องใหม่ ใช้เฉพาะข้อมูลจากเนื้อข่าว
-- ตอบเป็น JSON เท่านั้น`,
-    user: `อ่านเนื้อข่าวด้านล่างแล้วเขียนใหม่ทั้งหมดในสไตล์ดราม่าเล่าเรื่อง
 
 === เนื้อข่าวที่สกัดมา ===
 หัวข้อ: {title}
@@ -78,9 +75,7 @@ const DEFAULT_ANALYSIS_PRESETS = [
 
 {custom_instruction}
 
-เขียนใหม่ให้เป็นเรื่องเล่าดราม่า เปิดด้วยประโยคช็อค
-
-ตอบเป็น JSON:
+ตอบเป็น JSON เท่านั้น:
 {
   "summary": "เนื้อหาดราม่าที่เขียนใหม่ ยาว 3-5 ย่อหน้า",
   "key_points": ["ประเด็น 1", "ประเด็น 2", "ประเด็น 3"],
@@ -96,8 +91,9 @@ const DEFAULT_ANALYSIS_PRESETS = [
     id: 'informative',
     name: '📰 สรุปข่าวเข้าใจง่าย',
     desc: 'สรุปประเด็นชัดเจน อ่านแล้วเข้าใจทันที',
-    system: `คุณคือนักสรุปข่าวให้เข้าใจง่าย
-คุณจะได้รับ "เนื้อข่าวที่สกัดมาแล้ว" ให้คุณสรุปใหม่ให้เข้าใจง่าย
+    prompt: `คุณคือนักสรุปข่าวให้เข้าใจง่าย
+
+อ่านเนื้อข่าวด้านล่างแล้วสรุปใหม่ให้เข้าใจง่าย
 
 สไตล์การเขียน:
 - สรุปว่าเกิดอะไร ใครเกี่ยวข้อง ผลกระทบอะไร
@@ -108,8 +104,6 @@ const DEFAULT_ANALYSIS_PRESETS = [
 
 กฎเหล็ก:
 - ห้ามแต่งเรื่องใหม่ ใช้เฉพาะข้อมูลจากเนื้อข่าว
-- ตอบเป็น JSON เท่านั้น`,
-    user: `อ่านเนื้อข่าวด้านล่างแล้วสรุปใหม่ให้เข้าใจง่าย
 
 === เนื้อข่าวที่สกัดมา ===
 หัวข้อ: {title}
@@ -119,9 +113,7 @@ const DEFAULT_ANALYSIS_PRESETS = [
 
 {custom_instruction}
 
-สรุปให้กระชับ เข้าใจง่าย ใส่ข้อมูลสำคัญครบ
-
-ตอบเป็น JSON:
+ตอบเป็น JSON เท่านั้น:
 {
   "summary": "เนื้อหาสรุปที่เขียนใหม่ ยาว 3-4 ย่อหน้า",
   "key_points": ["ประเด็น 1", "ประเด็น 2", "ประเด็น 3"],
@@ -137,8 +129,9 @@ const DEFAULT_ANALYSIS_PRESETS = [
     id: 'opinion_debate',
     name: '💬 ชวนถกเถียง',
     desc: 'ตั้งคำถาม กระตุ้นให้คนแสดงความเห็น',
-    system: `คุณคือนักสร้างคอนเทนต์ที่ชวนถกเถียง
-คุณจะได้รับ "เนื้อข่าวที่สกัดมาแล้ว" ให้คุณเขียนใหม่ในมุมที่ชวนถกเถียง
+    prompt: `คุณคือนักสร้างคอนเทนต์ที่ชวนถกเถียง
+
+อ่านเนื้อข่าวด้านล่างแล้วเขียนใหม่ในมุมที่ชวนถกเถียง
 
 สไตล์การเขียน:
 - เปิดด้วยมุมมองที่ขัดแย้งหรือน่าคิดจากข่าว
@@ -149,8 +142,6 @@ const DEFAULT_ANALYSIS_PRESETS = [
 
 กฎเหล็ก:
 - ห้ามแต่งเรื่องใหม่ ใช้เฉพาะข้อมูลจากเนื้อข่าว
-- ตอบเป็น JSON เท่านั้น`,
-    user: `อ่านเนื้อข่าวด้านล่างแล้วเขียนใหม่ในมุมที่ชวนถกเถียง
 
 === เนื้อข่าวที่สกัดมา ===
 หัวข้อ: {title}
@@ -160,9 +151,7 @@ const DEFAULT_ANALYSIS_PRESETS = [
 
 {custom_instruction}
 
-เขียนให้ชวนถกเถียง นำเสนอ 2 ฝ่าย ปิดด้วยคำถาม
-
-ตอบเป็น JSON:
+ตอบเป็น JSON เท่านั้น:
 {
   "summary": "เนื้อหาชวนถกเถียงที่เขียนใหม่ ยาว 3-4 ย่อหน้า",
   "key_points": ["ประเด็น 1", "ประเด็น 2"],
@@ -176,14 +165,12 @@ const DEFAULT_ANALYSIS_PRESETS = [
   },
 ];
 
-// ===== Standard Prompts =====
+// ===== Standard Prompts (ช่องเดียว) =====
 const DEFAULT_PROMPTS = {
   extraction: {
-    system: `คุณคือ AI News Content Extractor
-สกัดเนื้อข่าวจริงจาก raw text ตัด noise ทั้งหมด
-ตอบ JSON เท่านั้น`,
-    user: `สกัดเนื้อข่าวจริงจาก raw text นี้ ห้ามย่อ ห้ามสรุป เอามาทั้งหมด
-ตัดลิงก์ URL เมนู โฆษณา ออกให้หมด
+    prompt: `คุณคือ AI News Content Extractor
+สกัดเนื้อข่าวจริงจาก raw text ตัด noise ทั้งหมด (เมนู โฆษณา ลิงก์โซเชียล footer)
+เก็บเนื้อข่าวครบทุกย่อหน้า ห้ามตัดทอน ห้ามย่อ
 
 {custom_instruction}
 
@@ -191,7 +178,7 @@ const DEFAULT_PROMPTS = {
 {content}
 ================
 
-ตอบ JSON:
+ตอบเป็น JSON เท่านั้น:
 {
   "news_title": "หัวข้อข่าว",
   "news_body": "เนื้อข่าวทั้งหมดครบถ้วน",
@@ -202,12 +189,15 @@ const DEFAULT_PROMPTS = {
   },
 
   angle: {
-    system: `คุณคือนักกลยุทธ์คอนเทนต์ไวรัล ตอบ JSON เท่านั้น`,
-    user: `จากเนื้อหา สร้างมุมมองไวรัล:
+    prompt: `คุณคือนักกลยุทธ์คอนเทนต์ไวรัล
+
+จากเนื้อหาด้านล่าง สร้างมุมมองไวรัล:
+
 {content}
+
 {analysis}
 
-ตอบ JSON:
+ตอบเป็น JSON เท่านั้น:
 {
   "headlines": ["หัวข้อ 1", "หัวข้อ 2", "หัวข้อ 3"],
   "hooks": ["ประโยคเปิด 1", "ประโยคเปิด 2"],
@@ -218,14 +208,15 @@ const DEFAULT_PROMPTS = {
   },
 
   article: {
-    system: `คุณคือนักเขียนคอนเทนต์ไวรัล ตอบ JSON เท่านั้น`,
-    user: `เขียนบทความ:
+    prompt: `คุณคือนักเขียนคอนเทนต์ไวรัล เขียนเหมือนคนเล่าเรื่อง
+
+เขียนบทความจากข้อมูลด้านล่าง:
 หัวข้อ: {headline}
 Hook: {hook}
 เนื้อหา: {content}
 โทน: {tone}
 
-ตอบ JSON:
+ตอบเป็น JSON เท่านั้น:
 {
   "headline": "หัวข้อ",
   "body": "เนื้อหา 3-5 ย่อหน้า",
@@ -237,31 +228,26 @@ Hook: {hook}
   },
 };
 
-// ===== Global Store =====
+// ===== Store =====
 let _savedPrompts = null;
 let _savedAnalysisPresets = null;
 
 export function getPrompts() {
-  if (!_savedPrompts) {
-    _savedPrompts = JSON.parse(JSON.stringify(DEFAULT_PROMPTS));
-  }
+  if (!_savedPrompts) _savedPrompts = JSON.parse(JSON.stringify(DEFAULT_PROMPTS));
   return _savedPrompts;
 }
 
 export function getPrompt(key) {
-  const prompts = getPrompts();
-  return prompts[key] || DEFAULT_PROMPTS[key] || null;
+  return getPrompts()[key] || DEFAULT_PROMPTS[key] || null;
 }
 
-export function savePrompt(key, system, user) {
-  const prompts = getPrompts();
-  prompts[key] = { system, user };
+export function savePrompt(key, prompt) {
+  getPrompts()[key] = { prompt };
 }
 
 export function resetPrompt(key) {
-  const prompts = getPrompts();
   if (key && DEFAULT_PROMPTS[key]) {
-    prompts[key] = JSON.parse(JSON.stringify(DEFAULT_PROMPTS[key]));
+    getPrompts()[key] = JSON.parse(JSON.stringify(DEFAULT_PROMPTS[key]));
   }
 }
 
@@ -271,9 +257,7 @@ export function resetAllPrompts() {
 }
 
 export function getAnalysisPresets() {
-  if (!_savedAnalysisPresets) {
-    _savedAnalysisPresets = JSON.parse(JSON.stringify(DEFAULT_ANALYSIS_PRESETS));
-  }
+  if (!_savedAnalysisPresets) _savedAnalysisPresets = JSON.parse(JSON.stringify(DEFAULT_ANALYSIS_PRESETS));
   return _savedAnalysisPresets;
 }
 
@@ -285,19 +269,14 @@ export function getAnalysisPreset(id) {
 export function saveAnalysisPreset(preset) {
   const presets = getAnalysisPresets();
   const idx = presets.findIndex(p => p.id === preset.id);
-  if (idx >= 0) {
-    presets[idx] = { ...presets[idx], ...preset };
-  } else {
-    presets.push(preset);
-  }
+  if (idx >= 0) presets[idx] = { ...presets[idx], ...preset };
+  else presets.push(preset);
 }
 
 export function deleteAnalysisPreset(id) {
   const presets = getAnalysisPresets();
   const idx = presets.findIndex(p => p.id === id);
-  if (idx >= 0 && presets.length > 1) {
-    presets.splice(idx, 1);
-  }
+  if (idx >= 0 && presets.length > 1) presets.splice(idx, 1);
 }
 
 export function resetAnalysisPresets() {

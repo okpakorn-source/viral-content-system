@@ -10,69 +10,48 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
     }
 
-    const extractionPrompt = getPrompt('extraction');
-
     // ===== Step 1: สกัดเนื้อข่าว =====
+    const extractionPrompt = getPrompt('extraction');
     let newsData;
     try {
-      const extractUser = extractionPrompt.user
+      const prompt = extractionPrompt.prompt
         .replace('{content}', text.slice(0, 8000))
         .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
 
-      console.log('[S1] Extracting news...');
-      const result = await callAI({
-        systemPrompt: extractionPrompt.system,
-        userPrompt: extractUser,
-        temperature: 0.2,
-      });
+      console.log('[S1] Extracting...');
+      const result = await callAI({ prompt, temperature: 0.2 });
 
       if (result?.news_body && result.news_body.length >= 20) {
         newsData = result;
         console.log(`[S1] OK: "${result.news_title}" (${result.news_body.length}ch)`);
-      } else {
-        newsData = null;
       }
     } catch (err) {
       console.error('[S1] ERROR:', err.message);
-      newsData = null;
     }
 
     if (!newsData) {
       newsData = {
         news_title: text.slice(0, 80).replace(/\n/g, ' ').trim(),
         news_body: text.slice(0, 5000),
-        news_source: '',
-        news_date: '',
-        news_category: 'ทั่วไป',
+        news_source: '', news_date: '', news_category: 'ทั่วไป',
       };
     }
 
-    // ===== Step 2: วิเคราะห์ด้วย Preset ที่เลือก =====
-    // ดึง preset → ใช้ทั้ง system + user prompt จาก preset จริงๆ
+    // ===== Step 2: วิเคราะห์ด้วย Preset =====
     const preset = getAnalysisPreset(analysisPresetId || 'viral_fb');
-    console.log(`[S2] Preset: "${preset.name}" (${preset.id})`);
+    console.log(`[S2] Preset: "${preset.name}"`);
 
     let analysis;
     try {
-      // ใช้ user prompt จาก preset — ใส่เนื้อข่าวเข้าไปใน template
-      const newsContent = newsData.news_body.slice(0, 4000);
-      const newsTitle = newsData.news_title || '';
-
-      const userPrompt = preset.user
-        .replace('{title}', newsTitle)
-        .replace('{content}', newsContent)
+      // ใส่เนื้อข่าวเข้าไปใน prompt ของ preset
+      const prompt = preset.prompt
+        .replace('{title}', newsData.news_title || '')
+        .replace('{content}', newsData.news_body.slice(0, 4000))
         .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
 
-      console.log(`[S2] System: ${preset.system.length}ch, User: ${userPrompt.length}ch`);
+      console.log(`[S2] Prompt: ${prompt.length}ch`);
 
-      const result = await callAI({
-        systemPrompt: preset.system,
-        userPrompt: userPrompt,
-        temperature: 0.5,
-        maxTokens: 4000,
-      });
-
-      console.log('[S2] AI keys:', Object.keys(result || {}));
+      const result = await callAI({ prompt, temperature: 0.5, maxTokens: 4000 });
 
       if (result && typeof result === 'object') {
         analysis = {
@@ -80,14 +59,12 @@ export async function POST(request) {
           key_points: result.key_points || result.keyPoints || [],
           people_involved: result.people_involved || result.people || [],
           emotion: result.emotion || '',
-          content_type: result.content_type || result.type || '',
-          viral_potential: result.viral_potential || result.viralPotential || '',
-          suggested_angles: result.suggested_angles || result.angles || [],
-          target_audience: result.target_audience || result.audience || '',
+          content_type: result.content_type || '',
+          viral_potential: result.viral_potential || '',
+          suggested_angles: result.suggested_angles || [],
+          target_audience: result.target_audience || '',
         };
-
         if (!analysis.summary) {
-          console.error('[S2] No summary! keys:', Object.keys(result));
           analysis.summary = `AI ตอบไม่ตรง format — keys: ${Object.keys(result).join(', ')}`;
         }
       }
@@ -107,8 +84,6 @@ export async function POST(request) {
         content_type: '', viral_potential: '', suggested_angles: [], target_audience: '',
       };
     }
-
-    console.log(`[S2] Done: summary=${analysis.summary?.length}ch`);
 
     return NextResponse.json({
       success: true,

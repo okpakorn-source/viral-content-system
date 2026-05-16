@@ -20,11 +20,11 @@ export async function POST(request) {
     }
 
     // Save standard prompt
-    const { key, system, user } = body;
+    const { key, prompt } = body;
     if (!key) {
       return NextResponse.json({ success: false, error: 'Invalid prompt key' }, { status: 400 });
     }
-    savePrompt(key, system, user);
+    savePrompt(key, prompt);
     return NextResponse.json({ success: true, data: getPrompts()[key] });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
