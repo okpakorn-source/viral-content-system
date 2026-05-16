@@ -196,15 +196,15 @@ export default function ReviewPage() {
 
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: 6 }}>
                         <button onClick={() => handleUpdateStatus(item.id, 'approved')} disabled={updating === item.id}
-                          style={{ padding: '9px 8px', border: 'none', borderRadius: 'var(--radius-sm)', background: item.status === 'approved' ? 'var(--success)' : 'var(--success-bg)', color: item.status === 'approved' ? '#fff' : 'var(--success)', fontWeight: 700, fontSize: 11, cursor: 'pointer', border: `1px solid ${item.status === 'approved' ? 'var(--success)' : 'rgba(0,186,124,0.3)'}` }}>
+                          style={{ padding: '9px 8px', borderRadius: 'var(--radius-sm)', background: item.status === 'approved' ? 'var(--success)' : 'var(--success-bg)', color: item.status === 'approved' ? '#fff' : 'var(--success)', fontWeight: 700, fontSize: 11, cursor: 'pointer', border: `1px solid ${item.status === 'approved' ? 'var(--success)' : 'rgba(0,186,124,0.3)'}` }}>
                           ✅ ผ่าน
                         </button>
                         <button onClick={() => handleUpdateStatus(item.id, 'revision')} disabled={updating === item.id}
-                          style={{ padding: '9px 8px', border: 'none', borderRadius: 'var(--radius-sm)', background: item.status === 'revision' ? '#7c3aed' : 'rgba(124,58,237,0.1)', color: item.status === 'revision' ? '#fff' : '#a78bfa', fontWeight: 700, fontSize: 11, cursor: 'pointer', border: `1px solid ${item.status === 'revision' ? '#7c3aed' : 'rgba(124,58,237,0.3)'}` }}>
+                          style={{ padding: '9px 8px', borderRadius: 'var(--radius-sm)', background: item.status === 'revision' ? '#7c3aed' : 'rgba(124,58,237,0.1)', color: item.status === 'revision' ? '#fff' : '#a78bfa', fontWeight: 700, fontSize: 11, cursor: 'pointer', border: `1px solid ${item.status === 'revision' ? '#7c3aed' : 'rgba(124,58,237,0.3)'}` }}>
                           🔄 รอแก้
                         </button>
                         <button onClick={() => handleUpdateStatus(item.id, 'rejected')} disabled={updating === item.id}
-                          style={{ padding: '9px 8px', border: 'none', borderRadius: 'var(--radius-sm)', background: item.status === 'rejected' ? 'var(--danger)' : 'var(--danger-bg)', color: item.status === 'rejected' ? '#fff' : 'var(--danger)', fontWeight: 700, fontSize: 11, cursor: 'pointer', border: `1px solid ${item.status === 'rejected' ? 'var(--danger)' : 'rgba(244,33,46,0.3)'}` }}>
+                          style={{ padding: '9px 8px', borderRadius: 'var(--radius-sm)', background: item.status === 'rejected' ? 'var(--danger)' : 'var(--danger-bg)', color: item.status === 'rejected' ? '#fff' : 'var(--danger)', fontWeight: 700, fontSize: 11, cursor: 'pointer', border: `1px solid ${item.status === 'rejected' ? 'var(--danger)' : 'rgba(244,33,46,0.3)'}` }}>
                           ❌ ไม่ผ่าน
                         </button>
                         <button onClick={() => handleDelete(item.id)}

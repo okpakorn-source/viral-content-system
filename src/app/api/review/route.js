@@ -30,19 +30,19 @@ export async function GET(request) {
     // Sort by newest first
     reviews.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
+    // Stats (from unfiltered data)
+    const stats = {
+      total: reviews.length,
+      pending: reviews.filter(r => r.status === 'pending').length,
+      approved: reviews.filter(r => r.status === 'approved').length,
+      rejected: reviews.filter(r => r.status === 'rejected').length,
+      revision: reviews.filter(r => r.status === 'revision').length,
+    };
+
+    // Filter after stats
     if (status && status !== 'all') {
       reviews = reviews.filter(r => r.status === status);
     }
-
-    // Stats
-    const all = await loadReviews();
-    const stats = {
-      total: all.length,
-      pending: all.filter(r => r.status === 'pending').length,
-      approved: all.filter(r => r.status === 'approved').length,
-      rejected: all.filter(r => r.status === 'rejected').length,
-      revision: all.filter(r => r.status === 'revision').length,
-    };
 
     return NextResponse.json({ success: true, reviews, stats });
   } catch (error) {

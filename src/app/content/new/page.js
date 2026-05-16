@@ -456,6 +456,7 @@ export default function NewContentPage() {
     setCustomPrompt(''); setBreakdownPromptText('');
     setImageFile(null); setImagePreview(null);
     setTiktokNeedUpload(false); setVideoFile(null); setYoutubeNeedUpload(false);
+    setSentToReview({}); setSendingReview(null);
   };
 
   const needsUrl = ['url', 'facebook', 'tiktok', 'youtube'].includes(sourceType);
