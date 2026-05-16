@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
@@ -37,36 +37,91 @@ const navSections = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [isOpen, setIsOpen] = useState(false);
+
+  // Close sidebar on route change (mobile)
+  useEffect(() => {
+    setIsOpen(false);
+  }, [pathname]);
+
+  // Close on resize to desktop
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth > 1024) setIsOpen(false);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-logo">
-        <div className="sidebar-logo-icon">🔥</div>
-        <div>
-          <h1>ViralFlow<span>AI Content System</span></h1>
-        </div>
-      </div>
+    <>
+      {/* Hamburger button — mobile only */}
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        aria-label="เมนู"
+        style={{
+          position: 'fixed',
+          top: 10,
+          left: 10,
+          zIndex: 200,
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '8px 10px',
+          fontSize: 20,
+          cursor: 'pointer',
+          display: 'none',
+          color: 'var(--text-primary)',
+          boxShadow: 'var(--shadow-md)',
+        }}
+        className="mobile-menu-btn"
+      >
+        {isOpen ? '✕' : '☰'}
+      </button>
 
-      <nav className="sidebar-nav">
-        {navSections.map((section, idx) => (
-          <div key={idx} className="nav-section">
-            <div className="nav-section-title">{section.title}</div>
-            {section.items.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`nav-item ${pathname === item.href || (item.href !== '/dashboard' && pathname?.startsWith(item.href)) ? 'active' : ''}`}
-              >
-                <span className="nav-item-icon">{item.icon}</span>
-                <span>{item.label}</span>
-                {item.badgeKey && (
-                  <span className="nav-item-badge">3</span>
-                )}
-              </Link>
-            ))}
+      {/* Overlay — mobile */}
+      {isOpen && (
+        <div
+          onClick={() => setIsOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            zIndex: 99,
+          }}
+        />
+      )}
+
+      <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
+        <div className="sidebar-logo">
+          <div className="sidebar-logo-icon">🔥</div>
+          <div>
+            <h1>ViralFlow<span>AI Content System</span></h1>
           </div>
-        ))}
-      </nav>
-    </aside>
+        </div>
+
+        <nav className="sidebar-nav">
+          {navSections.map((section, idx) => (
+            <div key={idx} className="nav-section">
+              <div className="nav-section-title">{section.title}</div>
+              {section.items.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`nav-item ${pathname === item.href || (item.href !== '/dashboard' && pathname?.startsWith(item.href)) ? 'active' : ''}`}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <span className="nav-item-icon">{item.icon}</span>
+                  <span>{item.label}</span>
+                  {item.badgeKey && (
+                    <span className="nav-item-badge">3</span>
+                  )}
+                </Link>
+              ))}
+            </div>
+          ))}
+        </nav>
+      </aside>
+    </>
   );
 }

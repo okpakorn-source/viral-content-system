@@ -496,9 +496,9 @@ export default function NewContentPage() {
             {needsUrl && (
               <div className="form-group">
                 <label className="form-label">🔗 {sourceType === 'tiktok' ? 'URL คลิป TikTok' : sourceType === 'youtube' ? 'URL คลิป YouTube' : 'URL'}</label>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <input type="url" className="form-input" placeholder={placeholders[sourceType]}
-                    value={url} onChange={(e) => setUrl(e.target.value)} style={{ flex: 1 }} />
+                    value={url} onChange={(e) => setUrl(e.target.value)} style={{ flex: '1 1 200px', minWidth: 0 }} />
                   {sourceType === 'tiktok' ? (
                     <button type="button" onClick={() => handleTikTokTranscribe('url')} disabled={!url || extracting}
                       className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
