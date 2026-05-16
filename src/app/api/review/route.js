@@ -1,4 +1,6 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
+import { getSession, updateMemberStats } from '@/lib/auth';
+import { cookies } from 'next/headers';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
@@ -73,11 +75,23 @@ export async function POST(request) {
       wordCount: wordCount || content.split(/\s+/).length,
       angles: angles || [],
       status: 'pending',
+      submittedBy: null, // will be set below
       note: '',
       reviewedAt: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+
+    // Add member info
+    try {
+      const cookieStore = await cookies();
+      const token = cookieStore.get('auth_token')?.value;
+      const session = await getSession(token);
+      if (session) {
+        newItem.submittedBy = { id: session.memberId, name: session.displayName, avatar: session.avatar };
+        await updateMemberStats(session.memberId, 'totalCreated');
+      }
+    } catch {}
 
     reviews.push(newItem);
     await saveReviews(reviews);
@@ -135,6 +149,14 @@ export async function DELETE(request) {
     let reviews = await loadReviews();
     reviews = reviews.filter(r => r.id !== id);
     await saveReviews(reviews);
+    // Update member stats
+    const submitter = reviews[idx]?.submittedBy?.id;
+    if (submitter) {
+      const statsMap = { approved: 'totalApproved', rejected: 'totalRejected', revision: 'totalRevision' };
+      if (statsMap[status]) {
+        await updateMemberStats(submitter, statsMap[status]).catch(() => {});
+      }
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

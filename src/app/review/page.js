@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import Header from '@/components/layout/Header';
@@ -136,6 +136,7 @@ export default function ReviewPage() {
                       <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.3 }}>
                         {item.title?.slice(0, 80) || 'ไม่มีหัวข้อ'}
                       </div>
+                      {item.submittedBy && <span style={{ fontSize: 10, color: 'var(--accent-light)', marginLeft: 4 }}>{item.submittedBy.avatar} {item.submittedBy.name}</span>}
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 3 }}>
                         <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{sourceLabels[item.sourceType] || item.sourceType}</span>
                         <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>•</span>
