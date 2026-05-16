@@ -1,4 +1,4 @@
-﻿import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
@@ -58,9 +58,18 @@ export async function POST(request) {
     if (mode === 'extract') {
       const extractionPrompt = getPrompt('extraction');
       try {
+        const sourceHint = {
+          image: 'ข้อมูลนี้มาจากการอ่านภาพ (OCR) — อาจมี marker metadata ให้ตัดออก จัดข้อความให้อ่านง่าย',
+          tiktok: 'ข้อมูลนี้มาจากการถอดเสียงคลิป TikTok — จัดประโยคให้อ่านง่าย ตัด marker เวลาออก',
+          youtube: 'ข้อมูลนี้มาจาก subtitle/ถอดเสียง YouTube — จัดประโยคให้อ่านง่าย ตัด timestamp ออก',
+        }[sourceType] || '';
+
         const prompt = extractionPrompt.prompt
           .replace('{content}', text.slice(0, 8000))
-          .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
+          .replace('{custom_instruction}', [
+            sourceHint ? `[แหล่งข้อมูล: ${sourceHint}]` : '',
+            customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '',
+          ].filter(Boolean).join('\n'));
 
         console.log('[Extract] Extracting via SmartAI...');
         const { result, model: usedModel } = await callSmartAI('extract', { prompt, temperature: 0.2 });

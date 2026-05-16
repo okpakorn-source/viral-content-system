@@ -39,6 +39,9 @@ export default function NewContentPage() {
   const [addedResearchItems, setAddedResearchItems] = useState([]); // เก็บ research ที่เพิ่มแล้ว
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
+  const [tiktokNeedUpload, setTiktokNeedUpload] = useState(false);
+  const [videoFile, setVideoFile] = useState(null);
+  const [youtubeNeedUpload, setYoutubeNeedUpload] = useState(false);
 
   // Load presets
   useEffect(() => {
@@ -56,6 +59,13 @@ export default function NewContentPage() {
     if (url && (url.includes('tiktok.com') || url.includes('vm.tiktok.com'))) {
       setSourceType('tiktok');
       handleTikTokTranscribe('url');
+      return;
+    }
+
+    // Auto-detect YouTube URL → สลับไปดึง transcript
+    if (url && (url.includes('youtube.com') || url.includes('youtu.be') || url.includes('youtube.com/shorts'))) {
+      setSourceType('youtube');
+      handleYouTubeTranscribe('url');
       return;
     }
 
@@ -136,8 +146,6 @@ export default function NewContentPage() {
   };
 
   // === TikTok Transcription Handler ===
-  const [tiktokNeedUpload, setTiktokNeedUpload] = useState(false);
-  const [videoFile, setVideoFile] = useState(null);
 
   const handleTikTokTranscribe = async (mode = 'url') => {
     setExtracting(true);
@@ -168,6 +176,42 @@ export default function NewContentPage() {
       }
     } catch (err) {
       setError('ถอดเสียงไม่สำเร็จ: ' + err.message);
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  // === YouTube Transcript Handler ===
+
+  const handleYouTubeTranscribe = async (mode = 'url') => {
+    setExtracting(true);
+    setError('');
+    try {
+      let res;
+      if (mode === 'upload' && videoFile) {
+        const formData = new FormData();
+        formData.append('video', videoFile);
+        res = await fetch('/api/youtube', { method: 'POST', body: formData });
+      } else {
+        res = await fetch('/api/youtube', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        });
+      }
+      const data = await res.json();
+      if (data.success && data.text) {
+        setRawText(data.text);
+        setExtracted({ success: true, title: data.title || 'คลิป YouTube' });
+        setYoutubeNeedUpload(false);
+      } else if (data.needUpload) {
+        setYoutubeNeedUpload(true);
+        setError(data.error || 'ไม่มี subtitle — อัปโหลดไฟล์วิดีโอแทนได้');
+      } else {
+        setError(data.error || 'ดึง transcript ไม่สำเร็จ');
+      }
+    } catch (err) {
+      setError('ดึง transcript ไม่สำเร็จ: ' + err.message);
     } finally {
       setExtracting(false);
     }
@@ -376,7 +420,7 @@ export default function NewContentPage() {
     setWorkflowId(null); setResearchData(null); setSelectedResearch([]); setAddedResearchItems([]);
     setCustomPrompt(''); setBreakdownPromptText('');
     setImageFile(null); setImagePreview(null);
-    setTiktokNeedUpload(false); setVideoFile(null);
+    setTiktokNeedUpload(false); setVideoFile(null); setYoutubeNeedUpload(false);
   };
 
   const needsUrl = ['url', 'facebook', 'tiktok', 'youtube'].includes(sourceType);
@@ -435,7 +479,7 @@ export default function NewContentPage() {
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>📥 เลือกแหล่งข้อมูล</h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 24 }}>
               {SOURCE_TYPES.map((s) => (
-                <button key={s.value} onClick={() => { setSourceType(s.value); setExtracted(null); setRawText(''); setImageFile(null); setImagePreview(null); }}
+                <button key={s.value} onClick={() => { setSourceType(s.value); setExtracted(null); setRawText(''); setError(''); setImageFile(null); setImagePreview(null); setTiktokNeedUpload(false); setVideoFile(null); setYoutubeNeedUpload(false); }}
                   style={{
                     padding: '14px 16px', textAlign: 'left', fontFamily: 'inherit',
                     background: sourceType === s.value ? 'var(--accent-glow)' : 'var(--bg-primary)',
@@ -451,7 +495,7 @@ export default function NewContentPage() {
             {/* URL Input */}
             {needsUrl && (
               <div className="form-group">
-                <label className="form-label">🔗 {sourceType === 'tiktok' ? 'URL คลิป TikTok' : 'URL'}</label>
+                <label className="form-label">🔗 {sourceType === 'tiktok' ? 'URL คลิป TikTok' : sourceType === 'youtube' ? 'URL คลิป YouTube' : 'URL'}</label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input type="url" className="form-input" placeholder={placeholders[sourceType]}
                     value={url} onChange={(e) => setUrl(e.target.value)} style={{ flex: 1 }} />
@@ -459,6 +503,11 @@ export default function NewContentPage() {
                     <button type="button" onClick={() => handleTikTokTranscribe('url')} disabled={!url || extracting}
                       className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
                       {extracting ? '⏳ กำลังถอดเสียง...' : '🎤 ถอดเสียงจากคลิป'}
+                    </button>
+                  ) : sourceType === 'youtube' ? (
+                    <button type="button" onClick={() => handleYouTubeTranscribe('url')} disabled={!url || extracting}
+                      className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
+                      {extracting ? '⏳ กำลังดึง...' : '📺 ดึง Transcript'}
                     </button>
                   ) : (
                     <button type="button" onClick={handleExtract} disabled={!url || extracting}
@@ -470,6 +519,11 @@ export default function NewContentPage() {
                 {sourceType === 'tiktok' && (
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
                     AI จะดาวน์โหลดคลิปอัตโนมัติ → ถอดเสียงด้วย Whisper → ได้ข้อความ
+                  </div>
+                )}
+                {sourceType === 'youtube' && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                    ดึง subtitle อัตโนมัติ (ฟรี) — ถ้าไม่มี subtitle จะให้อัปโหลดไฟล์ถอดเสียงแทน
                   </div>
                 )}
               </div>
@@ -488,6 +542,32 @@ export default function NewContentPage() {
                     style={{ flex: 1, fontSize: 13, color: 'var(--text-secondary)' }} />
                   {videoFile && (
                     <button type="button" onClick={() => handleTikTokTranscribe('upload')} disabled={extracting}
+                      className="btn btn-viral" style={{ whiteSpace: 'nowrap' }}>
+                      {extracting ? '⏳ กำลังถอดเสียง...' : '🎤 ถอดเสียง'}
+                    </button>
+                  )}
+                </div>
+                {videoFile && (
+                  <div style={{ fontSize: 11, color: 'var(--accent-light)', marginTop: 6 }}>
+                    📁 {videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(1)} MB)
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 📺 YouTube Fallback: Upload Video */}
+            {sourceType === 'youtube' && youtubeNeedUpload && (
+              <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-md)', padding: 16, marginBottom: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--warning)', marginBottom: 6 }}>⚠️ คลิปนี้ไม่มี subtitle — อัปโหลดไฟล์วิดีโอเพื่อถอดเสียงด้วย AI</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+                  ดาวน์โหลดคลิปจาก YouTube แล้วอัปโหลดที่นี่ (Whisper จะถอดเสียงภาษาไทย)
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input type="file" accept="video/*,audio/*"
+                    onChange={(e) => setVideoFile(e.target.files?.[0])}
+                    style={{ flex: 1, fontSize: 13, color: 'var(--text-secondary)' }} />
+                  {videoFile && (
+                    <button type="button" onClick={() => handleYouTubeTranscribe('upload')} disabled={extracting}
                       className="btn btn-viral" style={{ whiteSpace: 'nowrap' }}>
                       {extracting ? '⏳ กำลังถอดเสียง...' : '🎤 ถอดเสียง'}
                     </button>
