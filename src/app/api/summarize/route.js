@@ -1,9 +1,24 @@
 import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
 
+// ดึง saved prompts (ถ้ามี)
+async function getSavedPrompts() {
+  try {
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : 'http://localhost:3000';
+    const res = await fetch(`${baseUrl}/api/prompts`, { cache: 'no-store' });
+    const data = await res.json();
+    return data.success ? data.data : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * POST /api/summarize — AI สกัดเนื้อข่าวจริง + สรุปประเด็น
- * ขั้นตอน: raw text → AI วิเคราะห์ → เนื้อข่าวจริง + สรุป
+ * POST /api/summarize — AI Pipeline:
+ * 1. AI ตัวที่ 1: สกัดเนื้อข่าวจริง (ใช้ extraction prompt)
+ * 2. AI ตัวที่ 2: วิเคราะห์ประเด็น + สรุป (ใช้ analysis prompt)
  */
 export async function POST(request) {
   try {
@@ -13,9 +28,13 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
     }
 
-    // ===== AI ตัวที่ 1: สกัดเนื้อข่าวจริงจาก raw text =====
-    const extractPrompt = `จากข้อความที่ได้มาจากเว็บไซต์ด้านล่าง ให้สกัดเฉพาะ "เนื้อข่าว/เนื้อหาหลัก" ออกมา 
-ตัดส่วนที่ไม่เกี่ยวข้องออก เช่น เมนูเว็บ, โฆษณา, ลิงก์ข่าวอื่น, ข้อความ copyright
+    // ===== AI ตัวที่ 1: สกัดเนื้อข่าวจริง =====
+    const extractionSystem = 'คุณคือ AI สกัดเนื้อข่าว — ดึงเฉพาะเนื้อหาข่าวจริงออกมา ตัดส่วนที่ไม่เกี่ยวข้องออก เช่น เมนูเว็บ, โฆษณา, ลิงก์โซเชียล ตอบเป็น JSON เท่านั้น';
+
+    const extractionUser = `จากข้อความที่ได้มาจากเว็บไซต์ด้านล่าง ให้สกัดเฉพาะ "เนื้อข่าว/เนื้อหาหลัก" ออกมา
+ตัดส่วนที่ไม่เกี่ยวข้องออก เช่น เมนูเว็บ, โฆษณา, ลิงก์ข่าวอื่น, ข้อความ copyright, ลิงก์โซเชียลมีเดีย
+
+${customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : ''}
 
 ข้อความ:
 """
@@ -32,8 +51,8 @@ ${text.slice(0, 6000)}
 }`;
 
     const extractResult = await callAI({
-      systemPrompt: 'คุณคือ AI สกัดเนื้อข่าว — ดึงเฉพาะเนื้อหาข่าวจริงออกมา ตัดส่วนที่ไม่เกี่ยวข้องออก ตอบเป็น JSON เท่านั้น',
-      userPrompt: extractPrompt,
+      systemPrompt: extractionSystem,
+      userPrompt: extractionUser,
       temperature: 0.3,
     });
 
@@ -45,19 +64,16 @@ ${text.slice(0, 6000)}
       newsData = { news_title: text.slice(0, 60), news_body: text.slice(0, 3000), news_category: 'ทั่วไป' };
     }
 
-    // ===== AI ตัวที่ 2: วิเคราะห์ประเด็น + สรุป =====
-    const userInstruction = customPrompt 
-      ? `\n\nคำสั่งเพิ่มเติมจากผู้ใช้: "${customPrompt}"` 
-      : '';
+    // ===== AI ตัวที่ 2: วิเคราะห์ประเด็น =====
+    const analysisSystem = 'คุณคือ AI วิเคราะห์ข่าว — วิเคราะห์ประเด็น สรุปใจความ แนะนำมุมมอง ตอบเป็น JSON เท่านั้น';
 
-    const analyzePrompt = `วิเคราะห์ข่าวต่อไปนี้:
+    const analysisUser = `วิเคราะห์ข่าวต่อไปนี้:
 
 หัวข้อ: ${newsData.news_title}
 เนื้อข่าว:
 """
 ${newsData.news_body?.slice(0, 4000)}
 """
-${userInstruction}
 
 ตอบเป็น JSON:
 {
@@ -67,13 +83,13 @@ ${userInstruction}
   "emotion": "อารมณ์หลักของข่าว",
   "content_type": "ประเภทเนื้อหา",
   "viral_potential": "สูง/กลาง/ต่ำ — พร้อมเหตุผลสั้นๆ",
-  "suggested_angles": ["มุมมองที่น่าสนใจสำหรับสร้างคอนเทนต์ 1", "มุมมอง 2", "มุมมอง 3"],
+  "suggested_angles": ["มุมมองที่น่าสนใจ 1", "มุมมอง 2", "มุมมอง 3"],
   "target_audience": "กลุ่มเป้าหมายที่เหมาะ"
 }`;
 
     const analyzeResult = await callAI({
-      systemPrompt: 'คุณคือ AI วิเคราะห์ข่าว — วิเคราะห์ประเด็น สรุปใจความ แนะนำมุมมอง ตอบเป็น JSON เท่านั้น',
-      userPrompt: analyzePrompt,
+      systemPrompt: analysisSystem,
+      userPrompt: analysisUser,
       temperature: 0.5,
     });
 
@@ -92,13 +108,11 @@ ${userInstruction}
     return NextResponse.json({
       success: true,
       data: {
-        // ผลจาก AI ตัวที่ 1
         newsTitle: newsData.news_title,
         newsBody: newsData.news_body,
         newsSource: newsData.news_source,
         newsDate: newsData.news_date,
         newsCategory: newsData.news_category,
-        // ผลจาก AI ตัวที่ 2
         ...analysis,
       },
     });
