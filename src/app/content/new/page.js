@@ -134,7 +134,7 @@ export default function NewContentPage() {
     }
   };
 
-  // === STEP 4: วิเคราะห์ประเด็นด้วย Preset (ส่ง newsBody + breakdownData) ===
+  // === STEP 4: วิเคราะห์ด้วย Preset — รวมข้อมูลทุกอย่างในหน้าส่ง AI (Mega Context) ===
   const handleAnalyze = async (presetId) => {
     const usePreset = presetId || selectedPreset;
     if (!newsData?.newsBody) return;
@@ -153,6 +153,7 @@ export default function NewContentPage() {
           analysisPresetId: usePreset,
           mode: 'analyze',
           breakdownData: breakdownData || null,
+          researchData: researchData || null,
           workflowId,
         }),
       });

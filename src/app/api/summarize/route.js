@@ -40,7 +40,7 @@ function extractString(result, ...keys) {
 
 export async function POST(request) {
   try {
-    const { text, sourceType, customPrompt, analysisPresetId, mode, newsTitle, breakdownData, workflowId } = await request.json();
+    const { text, sourceType, customPrompt, analysisPresetId, mode, newsTitle, breakdownData, researchData, workflowId } = await request.json();
 
     if (!text || text.length < 10) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
@@ -240,7 +240,20 @@ export async function POST(request) {
         console.log('[Analyze] ✅ Structured context appended');
       }
 
-      console.log(`[Analyze] Final prompt length: ${prompt.length}ch`);
+      // === Inject Research Data (ข้อมูลเพิ่มเติมจาก Research Agent) ===
+      if (researchData?.items?.length > 0) {
+        const researchCtx = '\n\n=== ข้อมูลเพิ่มเติมจาก AI Research Agent ===\n' +
+          'ข้อมูลด้านล่างนี้เป็นข้อมูลเสริมที่ AI วิจัยมาเพิ่มเติม ใช้ประกอบการเขียนให้เนื้อหาลึกและน่าสนใจขึ้น:\n\n' +
+          researchData.items.map((item, i) =>
+            `${i+1}. [${item.type}] ${item.title}\n${item.content}${item.relevance ? '\n→ เกี่ยวข้อง: ' + item.relevance : ''}`
+          ).join('\n\n') +
+          '\n=== จบข้อมูลเพิ่มเติม ===\n' +
+          '⚠️ ใช้ข้อมูลเหล่านี้เสริมเนื้อหาให้ลึกขึ้น แต่ต้องอ้างอิงข่าวต้นฉบับเป็นหลัก\n';
+        prompt += researchCtx;
+        console.log(`[Analyze] ✅ Research data injected: ${researchData.items.length} items`);
+      }
+
+      console.log(`[Analyze] Final prompt length: ${prompt.length}ch (Mega Context)`);
 
       // === สร้าง Multi-Version Writing Prompt + Facebook Safety ===
       let multiPrompt = prompt + '\n\n=== คำสั่งสำคัญสำหรับการเขียน ===\n' +
