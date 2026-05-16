@@ -15,7 +15,8 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'กรุณาใส่ URL' }, { status: 400 });
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+    const origin = new URL(request.url).origin;
+    const baseUrl = origin;
     const selectedPreset = preset || 'viral_fb';
     const selectedLength = contentLength || 'medium';
 
@@ -70,7 +71,7 @@ export async function POST(request) {
       });
       const scrapeData = await scrapeRes.json();
       if (!scrapeData.success) throw new Error(`Scrape: ${scrapeData.error}`);
-      rawText = scrapeData.text || '';
+      rawText = scrapeData.data?.text || scrapeData.text || '';
       addLog('Step1', `Scraped: ${rawText.length}ch`);
     }
 

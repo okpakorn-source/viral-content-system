@@ -502,6 +502,7 @@ export default function NewContentPage() {
     setImageFile(null); setImagePreview(null);
     setTiktokNeedUpload(false); setVideoFile(null); setYoutubeNeedUpload(false);
     setSentToReview({}); setSendingReview(null);
+    setAutoMode(false); setAutoProgress(''); setAutoLog([]);
   };
 
   const needsUrl = ['url', 'facebook', 'tiktok', 'youtube'].includes(sourceType);
