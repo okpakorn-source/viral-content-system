@@ -88,7 +88,7 @@ export async function POST(request) {
 
       console.log(`[S2] Prompt: ${prompt.length}ch`);
 
-      const result = await callAI({ prompt, temperature: 0.5, maxTokens: 4000 });
+      const result = await callAI({ prompt, temperature: 0.6, maxTokens: 8000 });
       console.log('[S2] AI keys:', Object.keys(result || {}));
 
       if (result && typeof result === 'object') {
