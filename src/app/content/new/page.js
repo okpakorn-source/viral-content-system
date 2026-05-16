@@ -238,25 +238,37 @@ export default function NewContentPage() {
   const handleAddResearch = async () => {
     if (selectedResearch.length === 0 || !researchData?.items) return;
     const selectedItems = researchData.items.filter((_, i) => selectedResearch.includes(i));
-    const additionalText = '\n\n=== ข้อมูลเพิ่มเติมจาก AI Research ===\n' +
-      selectedItems.map(item => `[${item.type}] ${item.title}\n${item.content}`).join('\n\n');
 
-    // เพิ่มเข้า newsBody
-    const enrichedBody = newsData.newsBody + additionalText;
-    setNewsData(prev => ({ ...prev, newsBody: enrichedBody }));
-    setResearchData(null);
+    // สร้างข้อความเพิ่มเติม
+    const additionalText = '\n\n=== ข้อมูลเพิ่มเติมจาก AI Research ===\n' +
+      selectedItems.map(item => `[${item.type}] ${item.title}\n${item.content}`).join('\n\n') +
+      '\n=== จบข้อมูลเพิ่มเติม ===';
+
+    // เพิ่มเข้า newsBody ทันที
+    const enrichedBody = (newsData.newsBody || '') + additionalText;
+    const newNewsData = { ...newsData, newsBody: enrichedBody };
+    setNewsData(newNewsData);
+
+    // แสดง feedback ว่าเพิ่มแล้ว
+    setCopied('research_added');
+    setTimeout(() => setCopied(''), 3000);
+
+    console.log(`[Research] ✅ Added ${selectedItems.length} items (${additionalText.length}ch) to newsBody. Total: ${enrichedBody.length}ch`);
+
+    // เคลียร์ selection แต่ยังเก็บ researchData ไว้แสดงผล
     setSelectedResearch([]);
 
-    // แตกประเด็นใหม่อัตโนมัติ
+    // แตกประเด็นใหม่ด้วยข้อมูลที่เพิ่มเข้ามา
     setLoading(true);
+    setError('');
     try {
       const res = await fetch('/api/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: enrichedBody,
-          newsTitle: newsData.newsTitle,
-          customPrompt: breakdownPromptText,
+          newsTitle: newNewsData.newsTitle,
+          customPrompt: breakdownPromptText || '',
           mode: 'breakdown',
           workflowId,
         }),
@@ -264,8 +276,10 @@ export default function NewContentPage() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
       setBreakdownData(data.data);
+      // สำเร็จแล้วค่อยซ่อน research panel
+      setResearchData(null);
     } catch (err) {
-      setError(err.message);
+      setError('แตกประเด็นใหม่ไม่สำเร็จ: ' + err.message + ' (แต่ข้อมูลเพิ่มเข้า newsBody แล้ว กดแตกประเด็นใหม่ได้)');
     } finally {
       setLoading(false);
     }
@@ -429,9 +443,17 @@ export default function NewContentPage() {
             </div>
 
             {/* เนื้อข่าวสะอาด */}
-            <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 20, border: '1px solid var(--border)' }}>
+            <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 20, border: newsData.newsBody?.includes('=== ข้อมูลเพิ่มเติมจาก AI Research ===') ? '2px solid #0ea5e9' : '1px solid var(--border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>📝 เนื้อข่าวที่สกัดได้ ({newsData.newsBody?.length || 0} ตัวอักษร)</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>📝 เนื้อข่าวที่สกัดได้ ({newsData.newsBody?.length || 0} ตัวอักษร)</span>
+                  {newsData.newsBody?.includes('=== ข้อมูลเพิ่มเติมจาก AI Research ===') && (
+                    <span style={{ fontSize: 9, padding: '2px 8px', background: 'rgba(14,165,233,0.2)', color: '#38bdf8', borderRadius: 10, fontWeight: 700 }}>🔎 มีข้อมูลเสริม</span>
+                  )}
+                  {copied === 'research_added' && (
+                    <span style={{ fontSize: 10, padding: '3px 10px', background: 'var(--success-bg)', color: 'var(--success)', borderRadius: 10, fontWeight: 700, animation: 'fadeIn 0.3s' }}>✅ เพิ่มข้อมูลเข้าเนื้อข่าวแล้ว!</span>
+                  )}
+                </div>
                 <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
                   onClick={() => copyText(newsData.newsBody, 'news')}>
                   {copied === 'news' ? '✅ คัดลอกแล้ว' : '📋 คัดลอก'}
