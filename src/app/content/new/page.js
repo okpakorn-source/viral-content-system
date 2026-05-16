@@ -184,6 +184,7 @@ export default function NewContentPage() {
           customPrompt,
           mode: 'mix',
           breakdownData,
+          researchData: researchData || null,
           workflowId,
         }),
       });
@@ -270,7 +271,8 @@ export default function NewContentPage() {
   const handleReset = () => {
     setStep('input'); setExtracted(null); setRawText(''); setUrl('');
     setError(''); setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
-    setWorkflowId(null);
+    setWorkflowId(null); setResearchData(null); setSelectedResearch([]);
+    setCustomPrompt(''); setBreakdownPromptText('');
   };
 
   const needsUrl = ['url', 'facebook', 'tiktok', 'youtube'].includes(sourceType);

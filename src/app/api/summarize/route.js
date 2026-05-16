@@ -517,7 +517,18 @@ ${actualNewsBody.slice(0, 3000)}
         const langStrategy = actualBreakdown.language_strategy ?
           `กลยุทธ์ภาษา: เปิด=${actualBreakdown.language_strategy.opening_style || '-'}, เล่า=${actualBreakdown.language_strategy.storytelling_style || '-'}, จังหวะ=${actualBreakdown.language_strategy.emotional_pacing || '-'}, ปิด=${actualBreakdown.language_strategy.ending_style || '-'}` : '';
 
-        const mixPrompt = fullCtx + '\n\n' +
+        // === Inject Research Data ถ้ามี ===
+        let researchCtx = '';
+        if (researchData?.items?.length > 0) {
+          researchCtx = '\n\n=== ข้อมูลเพิ่มเติมจาก AI Research ===\n' +
+            researchData.items.map((item, i) =>
+              `${i+1}. [${item.type}] ${item.title}: ${item.content}`
+            ).join('\n') +
+            '\n=== จบข้อมูลเพิ่มเติม ===\n';
+          console.log(`[Mix] ✅ Research data: ${researchData.items.length} items`);
+        }
+
+        const mixPrompt = fullCtx + researchCtx + '\n\n' +
           '=== คำสั่ง: AI ผสมมุมข่าว (MIX MODE) ===\n' +
           'คุณคือผู้เชี่ยวชาญสร้างคอนเทนต์ไวรัล คุณได้รับผลวิเคราะห์ข่าวข้างต้นทั้งหมด\n\n' +
           '📊 มุมข่าวทั้งหมดที่วิเคราะห์ได้:\n' + anglesInfo + '\n\n' +
