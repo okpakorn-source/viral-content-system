@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "validate": "node scripts/validate-workflow.mjs",
+    "prebuild": "node scripts/validate-workflow.mjs",
     "build": "prisma generate && next build",
     "start": "next start",
     "postinstall": "prisma generate",
