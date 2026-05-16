@@ -6,8 +6,8 @@ import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
  * ดึง summary จาก AI response ไม่ว่า key จะชื่ออะไร
  */
 function extractSummary(result) {
-  // ลอง key ที่เป็นไปได้ทั้งหมด
-  const directKeys = ['summary', 'main_post', 'content', 'analysis', 'post', 'body', 'text', 'article'];
+  // ลอง key ที่เป็นไปได้ — main_post ก่อนเพราะ preset หลักใช้ key นี้
+  const directKeys = ['main_post', 'summary', 'content', 'analysis', 'post', 'body', 'text', 'article'];
   for (const k of directKeys) {
     if (result[k] && typeof result[k] === 'string' && result[k].length > 20) {
       return result[k];
@@ -99,10 +99,15 @@ export async function POST(request) {
           key_points: extractArray(result, 'key_points', 'keyPoints', 'possible_angles', 'viral_headlines'),
           people_involved: extractArray(result, 'people_involved', 'people'),
           emotion: extractString(result, 'emotion', 'tone', 'emotional_direction'),
-          content_type: extractString(result, 'content_type', 'type'),
-          viral_potential: extractString(result, 'viral_potential', 'viralPotential', 'risk_level'),
-          suggested_angles: extractArray(result, 'suggested_angles', 'angles', 'possible_angles'),
+          content_type: extractString(result, 'content_type', 'type', 'selected_main_angle'),
+          viral_potential: extractString(result, 'viral_potential', 'viralPotential', 'facebook_safety_level'),
+          suggested_angles: extractArray(result, 'suggested_angles', 'angles', 'possible_angles', 'viral_headlines'),
           target_audience: extractString(result, 'target_audience', 'audience'),
+          // Extra fields from user's pro prompt
+          engagement_ending: result.engagement_ending || '',
+          selected_main_angle: result.selected_main_angle || '',
+          facebook_safe_check: result.facebook_safe_check || null,
+          emotion_analysis: result.emotion_analysis || null,
         };
       }
     } catch (err) {
