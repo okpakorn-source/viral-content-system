@@ -2,62 +2,106 @@ import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
 
 /**
- * POST /api/summarize — สรุปใจความสำคัญจากเนื้อหาต้นทาง
+ * POST /api/summarize — AI สกัดเนื้อข่าวจริง + สรุปประเด็น
+ * ขั้นตอน: raw text → AI วิเคราะห์ → เนื้อข่าวจริง + สรุป
  */
 export async function POST(request) {
   try {
-    const { text, sourceType } = await request.json();
+    const { text, sourceType, customPrompt } = await request.json();
 
     if (!text || text.length < 10) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
     }
 
-    const sourceLabel = {
-      url: 'บทความ/ข่าว',
-      raw: 'ข้อความ',
-      facebook: 'โพสต์ Facebook',
-      tiktok: 'คลิป TikTok',
-      youtube: 'วิดีโอ YouTube',
-    }[sourceType] || 'เนื้อหา';
+    // ===== AI ตัวที่ 1: สกัดเนื้อข่าวจริงจาก raw text =====
+    const extractPrompt = `จากข้อความที่ได้มาจากเว็บไซต์ด้านล่าง ให้สกัดเฉพาะ "เนื้อข่าว/เนื้อหาหลัก" ออกมา 
+ตัดส่วนที่ไม่เกี่ยวข้องออก เช่น เมนูเว็บ, โฆษณา, ลิงก์ข่าวอื่น, ข้อความ copyright
 
-    const prompt = `สรุปใจความสำคัญจาก${sourceLabel}ต่อไปนี้ ให้ได้ประเด็นหลักที่ชัดเจน กระชับ เข้าใจง่าย
-
-เนื้อหาต้นทาง:
+ข้อความ:
 """
-${text.slice(0, 4000)}
+${text.slice(0, 6000)}
 """
 
 ตอบเป็น JSON:
 {
-  "title": "หัวข้อหลักของเนื้อหา (1 บรรทัด)",
-  "summary": "สรุปใจความ 3-5 บรรทัด เขียนเป็นภาษาที่เข้าใจง่าย",
-  "key_points": ["ประเด็นสำคัญ 1", "ประเด็นสำคัญ 2", "ประเด็นสำคัญ 3"],
-  "people_involved": ["ชื่อบุคคลที่เกี่ยวข้อง (ถ้ามี)"],
-  "emotion": "อารมณ์หลักของเนื้อหา (เช่น สะเทือนใจ, ตื่นเต้น, โกรธ, ตลก)",
-  "content_type": "ประเภทเนื้อหา (เช่น ข่าว, ดราม่า, ให้ความรู้, บันเทิง)",
-  "word_count": ${text.split(/\s+/).length}
+  "news_title": "หัวข้อข่าวหลัก",
+  "news_body": "เนื้อข่าวทั้งหมดที่สกัดได้ (เขียนต่อเนื่อง ครบถ้วน ไม่ตัดทอน)",
+  "news_source": "แหล่งที่มา/สำนักข่าว (ถ้ามี)",
+  "news_date": "วันที่ข่าว (ถ้ามี)",
+  "news_category": "หมวดหมู่ข่าว (เช่น บันเทิง, อาชญากรรม, การเมือง, เศรษฐกิจ)"
 }`;
 
-    const result = await callAI({
-      systemPrompt: 'คุณคือ AI สรุปเนื้อหา — สรุปใจความสำคัญให้กระชับ ชัดเจน เข้าใจง่าย ตอบเป็น JSON เท่านั้น',
-      userPrompt: prompt,
+    const extractResult = await callAI({
+      systemPrompt: 'คุณคือ AI สกัดเนื้อข่าว — ดึงเฉพาะเนื้อหาข่าวจริงออกมา ตัดส่วนที่ไม่เกี่ยวข้องออก ตอบเป็น JSON เท่านั้น',
+      userPrompt: extractPrompt,
+      temperature: 0.3,
     });
 
-    let summary;
+    let newsData;
     try {
-      const jsonMatch = result.match(/\{[\s\S]*\}/);
-      summary = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+      const jsonMatch = extractResult.match(/\{[\s\S]*\}/);
+      newsData = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
     } catch {
-      summary = {
-        title: text.slice(0, 60),
-        summary: text.slice(0, 300),
-        key_points: ['ไม่สามารถสรุปอัตโนมัติได้'],
-        emotion: 'ไม่ระบุ',
-        content_type: 'ทั่วไป',
+      newsData = { news_title: text.slice(0, 60), news_body: text.slice(0, 3000), news_category: 'ทั่วไป' };
+    }
+
+    // ===== AI ตัวที่ 2: วิเคราะห์ประเด็น + สรุป =====
+    const userInstruction = customPrompt 
+      ? `\n\nคำสั่งเพิ่มเติมจากผู้ใช้: "${customPrompt}"` 
+      : '';
+
+    const analyzePrompt = `วิเคราะห์ข่าวต่อไปนี้:
+
+หัวข้อ: ${newsData.news_title}
+เนื้อข่าว:
+"""
+${newsData.news_body?.slice(0, 4000)}
+"""
+${userInstruction}
+
+ตอบเป็น JSON:
+{
+  "summary": "สรุปข่าวใน 3-5 ประโยค",
+  "key_points": ["ประเด็นสำคัญ 1", "ประเด็นสำคัญ 2", "ประเด็นสำคัญ 3"],
+  "people_involved": ["ชื่อบุคคลที่เกี่ยวข้อง"],
+  "emotion": "อารมณ์หลักของข่าว",
+  "content_type": "ประเภทเนื้อหา",
+  "viral_potential": "สูง/กลาง/ต่ำ — พร้อมเหตุผลสั้นๆ",
+  "suggested_angles": ["มุมมองที่น่าสนใจสำหรับสร้างคอนเทนต์ 1", "มุมมอง 2", "มุมมอง 3"],
+  "target_audience": "กลุ่มเป้าหมายที่เหมาะ"
+}`;
+
+    const analyzeResult = await callAI({
+      systemPrompt: 'คุณคือ AI วิเคราะห์ข่าว — วิเคราะห์ประเด็น สรุปใจความ แนะนำมุมมอง ตอบเป็น JSON เท่านั้น',
+      userPrompt: analyzePrompt,
+      temperature: 0.5,
+    });
+
+    let analysis;
+    try {
+      const jsonMatch = analyzeResult.match(/\{[\s\S]*\}/);
+      analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+    } catch {
+      analysis = {
+        summary: newsData.news_body?.slice(0, 300),
+        key_points: ['ไม่สามารถวิเคราะห์อัตโนมัติได้'],
+        emotion: 'ไม่ระบุ', content_type: newsData.news_category || 'ทั่วไป',
       };
     }
 
-    return NextResponse.json({ success: true, data: summary });
+    return NextResponse.json({
+      success: true,
+      data: {
+        // ผลจาก AI ตัวที่ 1
+        newsTitle: newsData.news_title,
+        newsBody: newsData.news_body,
+        newsSource: newsData.news_source,
+        newsDate: newsData.news_date,
+        newsCategory: newsData.news_category,
+        // ผลจาก AI ตัวที่ 2
+        ...analysis,
+      },
+    });
   } catch (error) {
     console.error('Summarize API Error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

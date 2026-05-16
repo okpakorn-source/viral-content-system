@@ -78,7 +78,7 @@ export default function NewContentPage() {
       const res = await fetch('/api/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: rawText, sourceType }),
+        body: JSON.stringify({ text: rawText, sourceType, customPrompt }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
@@ -312,27 +312,50 @@ export default function NewContentPage() {
               </div>
             )}
 
-            {/* ===== STEP 2: สรุปเนื้อหาจากต้นทาง ===== */}
+            {/* ===== STEP 2: ผลจาก AI สกัดข่าว + วิเคราะห์ ===== */}
             {step === 'summarized' && summary && (
               <div className="card slide-up">
-                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>📋 สรุปเนื้อหาจากต้นทาง</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>📋 AI สกัดเนื้อข่าว + วิเคราะห์ประเด็น</h3>
 
-                {/* Title */}
-                <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>หัวข้อหลัก</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.5 }}>{summary.title}</div>
+                {/* News Title */}
+                <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--accent)', borderLeft: '4px solid var(--accent)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-light)', marginBottom: 6, textTransform: 'uppercase' }}>🗞️ หัวข้อข่าว</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1.5 }}>{summary.newsTitle || summary.title}</div>
+                  {(summary.newsSource || summary.newsDate) && (
+                    <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                      {summary.newsSource && <span>📰 {summary.newsSource}</span>}
+                      {summary.newsDate && <span>📅 {summary.newsDate}</span>}
+                      {summary.newsCategory && <span>📂 {summary.newsCategory}</span>}
+                    </div>
+                  )}
                 </div>
 
-                {/* Summary */}
+                {/* News Body — เนื้อข่าวจริงที่ AI สกัดมา */}
+                {summary.newsBody && (
+                  <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>📝 เนื้อข่าวที่สกัดได้</div>
+                      <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
+                        onClick={() => { navigator.clipboard.writeText(summary.newsBody); setCopied('news'); setTimeout(() => setCopied(''), 2000); }}>
+                        {copied === 'news' ? '✅' : '📋 คัดลอก'}
+                      </button>
+                    </div>
+                    <div style={{ fontSize: 14, lineHeight: 2, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', maxHeight: 300, overflow: 'auto' }}>
+                      {summary.newsBody}
+                    </div>
+                  </div>
+                )}
+
+                {/* AI Analysis Summary */}
                 <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>สรุปใจความ</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>🤖 AI สรุปข่าว</div>
                   <div style={{ fontSize: 14, lineHeight: 1.8, color: 'var(--text-secondary)' }}>{summary.summary}</div>
                 </div>
 
                 {/* Key Points */}
                 {summary.key_points?.length > 0 && (
                   <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border)' }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>ประเด็นสำคัญ</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>📌 ประเด็นสำคัญ</div>
                     {summary.key_points.map((point, i) => (
                       <div key={i} style={{ fontSize: 13, color: 'var(--text-secondary)', padding: '6px 0', display: 'flex', gap: 8 }}>
                         <span style={{ color: 'var(--accent-light)', fontWeight: 700 }}>•</span> {point}
@@ -341,16 +364,26 @@ export default function NewContentPage() {
                   </div>
                 )}
 
-                {/* Meta info */}
-                <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-                  {summary.emotion && (
-                    <span style={{ fontSize: 11, padding: '4px 10px', background: 'var(--viral-bg)', color: 'var(--viral)', borderRadius: 12 }}>🎭 {summary.emotion}</span>
-                  )}
-                  {summary.content_type && (
-                    <span style={{ fontSize: 11, padding: '4px 10px', background: 'var(--info-bg)', color: 'var(--info)', borderRadius: 12 }}>📂 {summary.content_type}</span>
-                  )}
+                {/* Suggested Angles */}
+                {summary.suggested_angles?.length > 0 && (
+                  <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--success)', borderLeft: '4px solid var(--success)' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--success)', marginBottom: 8, textTransform: 'uppercase' }}>💡 มุมมองที่ AI แนะนำ</div>
+                    {summary.suggested_angles.map((angle, i) => (
+                      <div key={i} style={{ fontSize: 13, color: 'var(--text-secondary)', padding: '6px 0', display: 'flex', gap: 8 }}>
+                        <span style={{ color: 'var(--success)', fontWeight: 700 }}>{i + 1}.</span> {angle}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Meta Tags */}
+                <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+                  {summary.emotion && <span style={{ fontSize: 11, padding: '4px 10px', background: 'var(--viral-bg)', color: 'var(--viral)', borderRadius: 12 }}>🎭 {summary.emotion}</span>}
+                  {summary.content_type && <span style={{ fontSize: 11, padding: '4px 10px', background: 'var(--info-bg)', color: 'var(--info)', borderRadius: 12 }}>📂 {summary.content_type}</span>}
+                  {summary.viral_potential && <span style={{ fontSize: 11, padding: '4px 10px', background: 'var(--warning-bg)', color: 'var(--warning)', borderRadius: 12 }}>🔥 ไวรัล: {summary.viral_potential}</span>}
+                  {summary.target_audience && <span style={{ fontSize: 11, padding: '4px 10px', background: 'var(--success-bg)', color: 'var(--success)', borderRadius: 12 }}>🎯 {summary.target_audience}</span>}
                   {summary.people_involved?.length > 0 && summary.people_involved[0] !== '' && (
-                    <span style={{ fontSize: 11, padding: '4px 10px', background: 'var(--success-bg)', color: 'var(--success)', borderRadius: 12 }}>👤 {summary.people_involved.join(', ')}</span>
+                    <span style={{ fontSize: 11, padding: '4px 10px', background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', borderRadius: 12 }}>👤 {summary.people_involved.join(', ')}</span>
                   )}
                 </div>
 
@@ -358,12 +391,12 @@ export default function NewContentPage() {
                 <div className="form-group">
                   <label className="form-label">✏️ คำสั่งเพิ่มเติมสำหรับ AI (Custom Prompt — ไม่บังคับ)</label>
                   <textarea className="form-textarea" value={customPrompt} onChange={(e) => setCustomPrompt(e.target.value)}
-                    placeholder="เช่น: เน้นมุมมองด้านเศรษฐกิจ, ใช้ภาษาที่เด็กอ่านเข้าใจ, เพิ่มข้อมูลสถิติ, เขียนแบบเล่าเรื่อง..."
+                    placeholder="เช่น: เน้นมุมดราม่า, เขียนแบบเล่าเรื่อง, เพิ่มมุมมองวิจารณ์, เน้นอารมณ์สะเทือนใจ..."
                     style={{ minHeight: 80 }} />
                 </div>
 
                 <button onClick={handleAnalyze} className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={loading}>
-                  🔍 วิเคราะห์ศักยภาพไวรัล
+                  🔍 วิเคราะห์ศักยภาพไวรัล → สร้าง Headlines
                 </button>
               </div>
             )}
