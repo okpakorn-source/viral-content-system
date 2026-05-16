@@ -28,7 +28,7 @@ export default function NewContentPage() {
   const [extracted, setExtracted] = useState(null);
   const [newsData, setNewsData] = useState(null);
   const [breakdownData, setBreakdownData] = useState(null);
-  const [breakdownPromptText, setBreakdownPromptText] = useState('');
+  const [breakdownPromptText, setBreakdownPromptText] = useState('คุณคือ AI Viral News Angle Strategist + Emotional Storytelling Director\n\nหน้าที่: อ่านเนื้อข่าวจริงแล้ววิเคราะห์ให้ลึกที่สุด หาทุกมุมที่สามารถแตกประเด็น เปลี่ยนมุมเล่า ดึงอารมณ์ สร้าง discussion สร้าง emotional connection สร้างมุมไวรัลได้');
   const [analysisResult, setAnalysisResult] = useState(null);
   const [workflowId, setWorkflowId] = useState(null);
 
@@ -357,6 +357,34 @@ export default function NewContentPage() {
               <div style={{ fontSize: 14, lineHeight: 2, color: 'var(--text-secondary)' }}>{breakdownData.news_summary}</div>
             </div>
 
+            {/* Core Analysis Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+              {breakdownData.core_story && (
+                <div style={{ background: 'var(--bg-primary)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--info)' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--info)', marginBottom: 4 }}>🎯 แก่นข่าว</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>{breakdownData.core_story}</div>
+                </div>
+              )}
+              {breakdownData.main_emotional_core && (
+                <div style={{ background: 'var(--bg-primary)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--warning)' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--warning)', marginBottom: 4 }}>💖 แก่น Emotional</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>{breakdownData.main_emotional_core}</div>
+                </div>
+              )}
+              {breakdownData.conflict_point && (
+                <div style={{ background: 'var(--bg-primary)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--danger)' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--danger)', marginBottom: 4 }}>⚔️ จุด Conflict</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>{breakdownData.conflict_point}</div>
+                </div>
+              )}
+              {breakdownData.viral_trigger && (
+                <div style={{ background: 'var(--bg-primary)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--viral)' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--viral)', marginBottom: 4 }}>🔥 Viral Trigger</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>{breakdownData.viral_trigger}</div>
+                </div>
+              )}
+            </div>
+
             {/* Key Points */}
             {breakdownData.key_points?.length > 0 && (
               <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border)' }}>
@@ -366,13 +394,62 @@ export default function NewContentPage() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                       <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{i+1}. {kp.point}</span>
                       <div style={{ display: 'flex', gap: 4 }}>
+                        {kp.category && <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 8, background: 'var(--info-bg)', color: 'var(--info)' }}>🏷️ {kp.category}</span>}
                         <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 8, background: kp.importance === 'สูง' ? 'var(--danger-bg)' : 'var(--bg-tertiary)', color: kp.importance === 'สูง' ? 'var(--danger)' : 'var(--text-muted)' }}>⚡ {kp.importance}</span>
                         <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 8, background: kp.emotional_value === 'สูง' ? 'var(--warning-bg)' : 'var(--bg-tertiary)', color: kp.emotional_value === 'สูง' ? 'var(--warning)' : 'var(--text-muted)' }}>💖 {kp.emotional_value}</span>
+                        {kp.viral_potential && <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 8, background: kp.viral_potential === 'สูง' ? 'var(--viral-bg)' : 'var(--bg-tertiary)', color: kp.viral_potential === 'สูง' ? 'var(--viral)' : 'var(--text-muted)' }}>🔥 {kp.viral_potential}</span>}
                       </div>
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.8 }}>{kp.detail}</div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Possible Angles with Viral Scores */}
+            {breakdownData.possible_angles?.length > 0 && (
+              <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--viral)' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--viral)', marginBottom: 10 }}>🎯 มุมเล่าทั้งหมด ({breakdownData.possible_angles.length} มุม)</div>
+                {breakdownData.possible_angles.map((a, i) => (
+                  <div key={i} style={{ padding: '12px', marginBottom: 8, background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', borderLeft: `4px solid hsl(${(a.facebook_viral_score || 5) * 12}, 70%, 50%)` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 800 }}>{a.angle_name}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: (a.facebook_viral_score || 0) >= 7 ? 'var(--success-bg)' : 'var(--bg-tertiary)', color: (a.facebook_viral_score || 0) >= 7 ? 'var(--success)' : 'var(--text-muted)' }}>🔥 {a.facebook_viral_score}/10</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{a.description}</div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+                      {a.target_emotion && <span style={{ fontSize: 9, padding: '2px 6px', background: 'var(--warning-bg)', color: 'var(--warning)', borderRadius: 8 }}>🎭 {a.target_emotion}</span>}
+                      {a.share_trigger && <span style={{ fontSize: 9, padding: '2px 6px', background: 'var(--info-bg)', color: 'var(--info)', borderRadius: 8 }}>📤 {a.share_trigger}</span>}
+                      {a.comment_trigger && <span style={{ fontSize: 9, padding: '2px 6px', background: 'var(--success-bg)', color: 'var(--success)', borderRadius: 8 }}>💬 {a.comment_trigger}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Best Main Angle */}
+            {breakdownData.best_main_angle && (
+              <div style={{ background: 'linear-gradient(135deg, var(--bg-primary), var(--accent-bg))', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '2px solid var(--accent)' }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent-light)', marginBottom: 8 }}>🏆 มุมที่ดีที่สุด: {breakdownData.best_main_angle.angle_name}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.8, marginBottom: 8 }}>{breakdownData.best_main_angle.why_best}</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {breakdownData.best_main_angle.emotional_strength && <span style={{ fontSize: 9, padding: '3px 8px', background: 'var(--warning-bg)', color: 'var(--warning)', borderRadius: 10 }}>💪 {breakdownData.best_main_angle.emotional_strength}</span>}
+                  {breakdownData.best_main_angle.facebook_safety && <span style={{ fontSize: 9, padding: '3px 8px', background: 'var(--success-bg)', color: 'var(--success)', borderRadius: 10 }}>🛡️ {breakdownData.best_main_angle.facebook_safety}</span>}
+                  {breakdownData.best_main_angle.share_potential && <span style={{ fontSize: 9, padding: '3px 8px', background: 'var(--info-bg)', color: 'var(--info)', borderRadius: 10 }}>📤 {breakdownData.best_main_angle.share_potential}</span>}
+                </div>
+              </div>
+            )}
+
+            {/* Language Strategy */}
+            {breakdownData.language_strategy && (
+              <div style={{ background: 'var(--bg-primary)', padding: 14, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--info)' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--info)', marginBottom: 8 }}>✍️ กลยุทธ์ภาษา</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {breakdownData.language_strategy.opening_style && <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}><strong>เปิด:</strong> {breakdownData.language_strategy.opening_style}</div>}
+                  {breakdownData.language_strategy.storytelling_style && <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}><strong>เล่า:</strong> {breakdownData.language_strategy.storytelling_style}</div>}
+                  {breakdownData.language_strategy.emotional_pacing && <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}><strong>จังหวะ:</strong> {breakdownData.language_strategy.emotional_pacing}</div>}
+                  {breakdownData.language_strategy.ending_style && <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}><strong>ปิด:</strong> {breakdownData.language_strategy.ending_style}</div>}
+                </div>
               </div>
             )}
 

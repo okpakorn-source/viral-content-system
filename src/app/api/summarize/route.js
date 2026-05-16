@@ -97,20 +97,27 @@ export async function POST(request) {
 
       const prompt = breakdownPrompt.prompt
         .replace('{title}', newsTitle || text.slice(0, 100))
-        .replace('{content}', text.slice(0, 6000))
+        .replace('{content}', text.slice(0, 8000))
         .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
 
       try {
-        const result = await callAI({ prompt, model: 'gpt-4o', temperature: 0.4, maxTokens: 6000 });
+        const result = await callAI({ prompt, model: 'gpt-4o', temperature: 0.4, maxTokens: 8000 });
         console.log(`[Breakdown] OK, keys: ${Object.keys(result || {}).join(', ')}`);
 
         const bdData = {
           news_summary: result.news_summary || '',
+          core_story: result.core_story || '',
+          main_emotional_core: result.main_emotional_core || '',
+          conflict_point: result.conflict_point || '',
+          viral_trigger: result.viral_trigger || '',
           key_points: result.key_points || [],
           best_sections: result.best_sections || [],
           key_facts: result.key_facts || { people: [], places: [], numbers: [], dates: [] },
           emotional_hooks: result.emotional_hooks || [],
           suggested_angles: result.suggested_angles || [],
+          possible_angles: result.possible_angles || [],
+          best_main_angle: result.best_main_angle || null,
+          language_strategy: result.language_strategy || null,
           quotes: result.quotes || [],
           conflicts: result.conflicts || [],
           pain_points: result.pain_points || [],

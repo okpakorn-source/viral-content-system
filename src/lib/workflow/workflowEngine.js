@@ -64,23 +64,28 @@ export async function saveAnalysis(id, analysisResult, presetUsed) {
 export function buildFullContext(workflow) {
   let ctx = '';
 
-  // ข่าวต้นฉบับ (Step 2)
+  // ข่าวต้นฉบับเต็ม (Step 2) — ส่งทั้งหมด ไม่ตัด
   if (workflow.newsBody) {
-    ctx += `=== เนื้อข่าวต้นฉบับ (จากขั้นตอนที่ 2 — ห้ามแต่งเพิ่ม ใช้ข้อมูลนี้เท่านั้น) ===\n`;
+    ctx += `=== เนื้อข่าวต้นฉบับ (จากขั้นตอนที่ 2 — ใช้ข้อมูลทั้งหมดนี้เท่านั้น ห้ามแต่งเพิ่ม) ===\n`;
     ctx += `หัวข้อ: ${workflow.newsTitle || ''}\n\n`;
     ctx += `${workflow.newsBody}\n`;
-    ctx += `=== จบเนื้อข่าว ===\n\n`;
+    ctx += `=== จบเนื้อข่าว (${workflow.newsBody.length} ตัวอักษร) ===\n\n`;
   }
 
-  // ผลแตกประเด็น (Step 3)
+  // ผลแตกประเด็นทั้งหมด (Step 3)
   const bd = workflow.breakdownData;
   if (bd) {
     ctx += `=== ผลแตกประเด็นจาก AI (ขั้นตอนที่ 3 — ต้องใช้ทุกประเด็นในการเขียน) ===\n`;
+    if (bd.core_story) ctx += `แก่นข่าว: ${bd.core_story}\n`;
+    if (bd.main_emotional_core) ctx += `แก่น Emotional: ${bd.main_emotional_core}\n`;
+    if (bd.conflict_point) ctx += `จุด Conflict: ${bd.conflict_point}\n`;
+    if (bd.viral_trigger) ctx += `Viral Trigger: ${bd.viral_trigger}\n`;
     if (bd.news_summary) ctx += `สรุปรวม: ${bd.news_summary}\n`;
+
     if (bd.key_points?.length > 0) {
       ctx += `\nประเด็นสำคัญ (${bd.key_points.length} ข้อ):\n`;
       bd.key_points.forEach((kp, i) => {
-        ctx += `${i + 1}. ${kp.point || kp}: ${kp.detail || ''} [${kp.category || ''}, สำคัญ: ${kp.importance || '-'}, อารมณ์: ${kp.emotional_value || '-'}]\n`;
+        ctx += `${i + 1}. ${kp.point || kp}: ${kp.detail || ''} [${kp.category || ''}, สำคัญ: ${kp.importance || '-'}, อารมณ์: ${kp.emotional_value || '-'}, ไวรัล: ${kp.viral_potential || '-'}]\n`;
       });
     }
     if (bd.quotes?.length > 0) ctx += `\nคำพูดสำคัญ: ${bd.quotes.join(' | ')}\n`;
@@ -88,11 +93,28 @@ export function buildFullContext(workflow) {
     if (bd.pain_points?.length > 0) ctx += `Pain Points: ${bd.pain_points.join(' | ')}\n`;
     if (bd.best_sections?.length > 0) ctx += `ท่อนดีที่สุด: ${bd.best_sections.join(' | ')}\n`;
     if (bd.emotional_hooks?.length > 0) ctx += `จุดที่คนอิน: ${bd.emotional_hooks.join(' | ')}\n`;
+
+    // Possible Angles — ส่งทุกมุมพร้อม viral score
+    if (bd.possible_angles?.length > 0) {
+      ctx += `\nมุมเล่าทั้งหมด (${bd.possible_angles.length} มุม):\n`;
+      bd.possible_angles.forEach((a, i) => {
+        ctx += `${i + 1}. ${a.angle_name}: ${a.description} [อารมณ์: ${a.target_emotion || '-'}, viral: ${a.facebook_viral_score || '-'}/10]\n`;
+      });
+    }
     if (bd.suggested_angles?.length > 0) {
       ctx += `มุมแนะนำ: ${bd.suggested_angles.map(a => typeof a === 'string' ? a : `${a.angle} (${a.tone})`).join(' | ')}\n`;
     }
+
+    // Best Angle + Language Strategy
+    if (bd.best_main_angle) {
+      ctx += `\n🏆 มุมที่ดีที่สุด: ${bd.best_main_angle.angle_name} — ${bd.best_main_angle.why_best}\n`;
+    }
+    if (bd.language_strategy) {
+      ctx += `✍️ กลยุทธ์ภาษา: เปิด=${bd.language_strategy.opening_style || '-'}, เล่า=${bd.language_strategy.storytelling_style || '-'}, จังหวะ=${bd.language_strategy.emotional_pacing || '-'}, ปิด=${bd.language_strategy.ending_style || '-'}\n`;
+    }
+
     ctx += `=== จบผลแตกประเด็น ===\n\n`;
-    ctx += `⚠️ คำสั่งเหล็ก: ต้องครอบคลุมทุกประเด็นด้านบน ห้ามข้าม ห้ามซ้ำ ห้ามแต่งเรื่องใหม่\n`;
+    ctx += `⚠️ คำสั่งเหล็ก: ต้องครอบคลุมทุกประเด็นด้านบน ห้ามข้าม ห้ามซ้ำ ห้ามแต่งเรื่องใหม่ ต้องเขียนยาวอย่างน้อย 280 คำต่อเวอร์ชัน\n`;
   }
 
   return ctx;
