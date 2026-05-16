@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
+import { MasterAgent } from '@/lib/agents/masterAgent';
 
 /**
  * ดึง summary จาก AI response ไม่ว่า key จะชื่ออะไร
@@ -56,13 +57,21 @@ export async function POST(request) {
 
         if (result?.news_body && result.news_body.length >= 20) {
           console.log(`[Extract] OK: "${result.news_title}" (${result.news_body.length}ch)`);
-          // Save to workflow DB
+          // Save to workflow DB + Master Agent
           if (workflowId) {
             await saveExtraction(workflowId, {
               newsTitle: result.news_title, newsBody: result.news_body,
               newsSource: result.news_source, newsDate: result.news_date,
               newsCategory: result.news_category, rawInput: text.slice(0, 5000),
             }).catch(e => console.error('[Extract] DB save err:', e.message));
+            // Update Master Agent memory
+            const agent = new MasterAgent(workflowId);
+            agent.onExtractionComplete({
+              newsTitle: result.news_title, newsBody: result.news_body,
+              newsSource: result.news_source, newsDate: result.news_date,
+              newsCategory: result.news_category,
+            });
+            await agent.saveMemoryToDB().catch(() => {});
           }
           return NextResponse.json({
             success: true,
@@ -146,9 +155,14 @@ export async function POST(request) {
           pain_points: result.pain_points || [],
         };
 
-        // Save to workflow DB
+        // Save to workflow DB + Master Agent
         if (workflowId) {
           await saveBreakdown(workflowId, bdData).catch(e => console.error('[Breakdown] DB save err:', e.message));
+          // Update Master Agent memory
+          const agent = new MasterAgent(workflowId);
+          await agent.loadFromDB().catch(() => {});
+          agent.onBreakdownComplete(bdData);
+          await agent.saveMemoryToDB().catch(() => {});
         }
 
         return NextResponse.json({
@@ -196,21 +210,31 @@ export async function POST(request) {
       prompt = prompt.replace('{content}', actualNewsBody); // ส่งเต็ม ไม่ตัด
       prompt = prompt.replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
 
-      // === บังคับ inject Full Context จาก Workflow Engine ===
-      const fullCtx = buildFullContext({
-        newsBody: actualNewsBody,
-        newsTitle: actualNewsTitle,
-        breakdownData: actualBreakdown,
-      });
+      // === บังคับ inject Full Context ผ่าน Master Agent ===
+      let fullCtx = '';
+      if (workflowId) {
+        const agent = new MasterAgent(workflowId);
+        const loaded = await agent.loadFromDB().catch(() => false);
+        if (loaded) {
+          fullCtx = agent.compileContext();
+          console.log(`[Analyze] ✅ Context compiled via MasterAgent (${fullCtx.length}ch)`);
+          console.log(`[Analyze] Memory: entities=${agent.memory.entities.people?.length || 0} people, angles=${agent.memory.angles.possibleAngles?.length || 0}, emotion="${(agent.memory.emotional.emotionalCore || '').slice(0, 50)}"`);
+        }
+      }
+      if (!fullCtx) {
+        // Fallback to old buildFullContext
+        fullCtx = buildFullContext({ newsBody: actualNewsBody, newsTitle: actualNewsTitle, breakdownData: actualBreakdown });
+        console.log('[Analyze] ⚠️ Fallback to buildFullContext');
+      }
 
-      // ถ้า prompt ยังไม่มีเนื้อข่าว → append context ทั้งหมด
+      // Inject context ถ้ายังไม่มี
       if (!prompt.includes(actualNewsBody.slice(0, 50))) {
         prompt += '\n\n' + fullCtx;
         console.log('[Analyze] ✅ Full context injected');
-      } else if (actualBreakdown?.key_points?.length > 0 && !prompt.includes('ผลการแตกประเด็น')) {
+      } else if (actualBreakdown?.key_points?.length > 0 && !prompt.includes('Emotional Analysis')) {
         const parts = fullCtx.split('=== จบเนื้อข่าว ===');
         if (parts[1]) prompt += '\n\n' + parts[1];
-        console.log('[Analyze] ✅ Breakdown context appended');
+        console.log('[Analyze] ✅ Structured context appended');
       }
 
       console.log(`[Analyze] Final prompt length: ${prompt.length}ch`);
@@ -285,10 +309,16 @@ export async function POST(request) {
           const validation = validateOutput(result, { newsTitle: actualNewsTitle, newsBody: actualNewsBody });
           console.log(`[Analyze] Validation: ${validation.valid ? '✅ PASS' : '⚠️ ISSUES: ' + validation.issues.join(', ')}`);
 
-          // Save to workflow DB
+          // Save to workflow DB + Master Agent
           if (workflowId) {
             await saveAnalysis(workflowId, { versions, news_reference: result.news_reference }, preset.id)
               .catch(e => console.error('[Analyze] DB save err:', e.message));
+            // Update Master Agent memory
+            const agent = new MasterAgent(workflowId);
+            await agent.loadFromDB().catch(() => {});
+            agent.onAnalysisComplete({ versions, news_reference: result.news_reference });
+            agent.onValidationComplete({ safetyPassed: validation.valid, issues: validation.issues, factCheckPassed: true, riskyWordsFound: [], riskyWordsReplaced: [] });
+            await agent.saveMemoryToDB().catch(() => {});
           }
 
           return NextResponse.json({
