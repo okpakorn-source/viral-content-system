@@ -3,10 +3,10 @@ import Header from '@/components/layout/Header';
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-const PROMPT_LABELS = {
-  extraction: { name: '📥 สกัดเนื้อข่าว', desc: 'AI สกัดเนื้อข่าวจริงจาก raw text' },
-  angle: { name: '🎯 มุมมองไวรัล', desc: 'สร้าง Headlines, Hooks, Comment Baits' },
-  article: { name: '✍️ เขียนบทความ', desc: 'เขียนบทความไวรัลจากข้อมูลที่วิเคราะห์แล้ว' },
+const CATEGORY_LABELS = {
+  pipeline: { label: '🔄 Pipeline', color: '#22c55e' },
+  preset: { label: '🎨 Preset', color: '#f59e0b' },
+  utility: { label: '🔧 Utility', color: '#3b82f6' },
 };
 
 function PromptsPageInner() {
@@ -18,294 +18,256 @@ function PromptsPageInner() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
-
-  // Analysis Presets
   const [presets, setPresets] = useState([]);
   const [editPreset, setEditPreset] = useState(null);
 
-  // Load
   useEffect(() => {
     fetch('/api/prompts').then(r => r.json()).then(d => {
       if (d.success) {
         setPrompts(d.data);
-        if (initialTab !== 'analysis') {
-          setPromptText(d.data[initialTab]?.prompt || '');
-        }
-      }
-      if (d.analysisPresets) setPresets(d.analysisPresets);
-      if (initialTab === 'analysis' && d.analysisPresets?.length > 0) {
-        setEditPreset(d.analysisPresets[0]);
+        if (d.data[initialTab]) setPromptText(d.data[initialTab].prompt || '');
+        if (d.analysisPresets) setPresets(d.analysisPresets);
       }
       setLoading(false);
-    }).catch(() => setLoading(false));
+    });
   }, []);
 
-  // Switch tab
   const handleSelect = (key) => {
     setSelected(key);
-    if (key === 'analysis') {
-      if (presets.length > 0 && !editPreset) setEditPreset(presets[0]);
-    } else {
-      setPromptText(prompts[key]?.prompt || '');
-    }
+    setPromptText(prompts[key]?.prompt || '');
     setMsg('');
   };
 
-  // Save standard prompt
   const handleSave = async () => {
     setSaving(true);
-    setMsg('');
     try {
       const res = await fetch('/api/prompts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: selected, prompt: promptText }),
       });
-      const data = await res.json();
-      if (data.success) {
+      const d = await res.json();
+      if (d.success) {
         setMsg('✅ บันทึกแล้ว');
-        setPrompts(prev => ({ ...prev, [selected]: { prompt: promptText } }));
-      } else {
-        setMsg('❌ ' + data.error);
-      }
-    } catch (e) {
-      setMsg('❌ ' + e.message);
-    }
+        setPrompts(prev => ({ ...prev, [selected]: { ...prev[selected], prompt: promptText } }));
+      } else setMsg('❌ ' + d.error);
+    } catch { setMsg('❌ เกิดข้อผิดพลาด'); }
     setSaving(false);
+    setTimeout(() => setMsg(''), 3000);
   };
 
-  // Save analysis preset
+  const handleReset = async () => {
+    if (!confirm('คืนค่า prompt นี้เป็นค่าเริ่มต้น?')) return;
+    const res = await fetch('/api/prompts', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: selected }),
+    });
+    const d = await res.json();
+    if (d.success && d.data) {
+      setPrompts(prev => ({ ...prev, [selected]: d.data }));
+      setPromptText(d.data.prompt || '');
+      setMsg('✅ คืนค่าแล้ว');
+      setTimeout(() => setMsg(''), 3000);
+    }
+  };
+
   const handleSavePreset = async () => {
     if (!editPreset) return;
-    setSaving(true);
-    setMsg('');
-    try {
-      const res = await fetch('/api/prompts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'analysisPreset', preset: editPreset }),
-      });
-      const data = await res.json();
-      if (data.success && data.analysisPresets) {
-        setPresets(data.analysisPresets);
-        setMsg('✅ บันทึก Preset แล้ว');
-      }
-    } catch (e) {
-      setMsg('❌ ' + e.message);
-    }
-    setSaving(false);
+    const res = await fetch('/api/prompts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'analysisPreset', preset: editPreset }),
+    });
+    const d = await res.json();
+    if (d.success) { setPresets(d.analysisPresets); setEditPreset(null); setMsg('✅ บันทึกแล้ว'); }
+    setTimeout(() => setMsg(''), 3000);
   };
 
-  // Add new preset
-  const handleAddPreset = () => {
-    const newId = 'custom_' + Date.now();
-    const newPreset = {
-      id: newId,
-      name: '🆕 Preset ใหม่',
-      desc: 'คำอธิบาย',
-      prompt: `คุณคือนักวิเคราะห์คอนเทนต์
+  const promptKeys = Object.keys(prompts);
+  const currentMeta = prompts[selected] || {};
 
-อ่านเนื้อข่าวด้านล่างแล้วเขียนใหม่ตามสไตล์ที่ต้องการ
-
-สไตล์การเขียน:
-- (ใส่สไตล์ที่ต้องการ)
-- ยาว 3-4 ย่อหน้า
-
-กฎเหล็ก:
-- ห้ามแต่งเรื่องใหม่ ใช้เฉพาะข้อมูลจากเนื้อข่าว
-
-=== เนื้อข่าวที่สกัดมา ===
-หัวข้อ: {title}
-
-{content}
-=== จบเนื้อข่าว ===
-
-{custom_instruction}
-
-ตอบเป็น JSON เท่านั้น:
-{
-  "summary": "เนื้อหาที่เขียนใหม่ ยาว 3-4 ย่อหน้า",
-  "key_points": ["ประเด็น 1", "ประเด็น 2"],
-  "people_involved": ["ชื่อ"],
-  "emotion": "อารมณ์",
-  "content_type": "ประเภท",
-  "viral_potential": "สูง/กลาง/ต่ำ",
-  "suggested_angles": ["มุมมอง 1"],
-  "target_audience": "กลุ่มเป้าหมาย"
-}`,
-    };
-    setEditPreset(newPreset);
-  };
-
-  // Delete preset
-  const handleDeletePreset = async (id) => {
-    if (presets.length <= 1) { setMsg('⚠️ ต้องมีอย่างน้อย 1 Preset'); return; }
-    try {
-      const res = await fetch('/api/prompts', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'analysisPreset', id }),
-      });
-      const data = await res.json();
-      if (data.success && data.analysisPresets) {
-        setPresets(data.analysisPresets);
-        setEditPreset(data.analysisPresets[0] || null);
-        setMsg('🗑️ ลบแล้ว');
-      }
-    } catch (e) {
-      setMsg('❌ ' + e.message);
-    }
-  };
-
-  // Reset
-  const handleReset = async () => {
-    try {
-      await fetch('/api/prompts', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: selected }),
-      });
-      const res = await fetch('/api/prompts');
-      const data = await res.json();
-      if (data.success) {
-        setPrompts(data.data);
-        setPromptText(data.data[selected]?.prompt || '');
-        setMsg('↩️ รีเซ็ตแล้ว');
-      }
-    } catch (e) {
-      setMsg('❌ ' + e.message);
-    }
-  };
-
-  const allTabs = { ...PROMPT_LABELS, analysis: { name: '🔍 วิเคราะห์ประเด็น', desc: `AI Presets (${presets.length} ชุด)` } };
+  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>กำลังโหลด...</div>;
 
   return (
-    <>
-      <Header />
-      <div className="container" style={{ paddingTop: 20, paddingBottom: 40 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 20 }}>⚙️ จัดการ AI Prompts</h2>
+    <div>
+      <Header title="จัดการ AI Prompts" subtitle="แก้ไข prompt ทุกตัวในระบบ — พร้อมกำกับว่าส่งผลกับอะไร" />
+      <div style={{ padding: '0 24px 24px', maxWidth: 1200, margin: '0 auto' }}>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 20 }}>
-          {/* Sidebar */}
+        {msg && (
+          <div style={{ background: msg.includes('✅') ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)', padding: '10px 16px', borderRadius: 8, marginBottom: 16, fontSize: 13, color: msg.includes('✅') ? '#22c55e' : '#ef4444' }}>
+            {msg}
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 20 }}>
+          {/* Sidebar - Prompt List */}
           <div>
-            {Object.entries(allTabs).map(([key, val]) => (
-              <button key={key} onClick={() => handleSelect(key)}
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>
+              📋 Standard Prompts ({promptKeys.length})
+            </div>
+            {promptKeys.map(key => {
+              const meta = prompts[key];
+              const cat = CATEGORY_LABELS[meta.category] || CATEGORY_LABELS.pipeline;
+              return (
+                <button key={key} onClick={() => handleSelect(key)}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px',
+                    background: selected === key ? 'var(--accent-glow)' : 'var(--bg-secondary)',
+                    border: selected === key ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    borderRadius: 8, marginBottom: 6, cursor: 'pointer', fontFamily: 'inherit',
+                    color: 'var(--text-primary)',
+                  }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 2 }}>
+                    {meta.label || key}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                    {meta.description || ''}
+                  </div>
+                  <span style={{
+                    display: 'inline-block', padding: '1px 6px', borderRadius: 10, fontSize: 9,
+                    background: `${cat.color}20`, color: cat.color, fontWeight: 600,
+                  }}>
+                    {cat.label}
+                  </span>
+                </button>
+              );
+            })}
+
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginTop: 20, marginBottom: 8, textTransform: 'uppercase' }}>
+              🎨 Analysis Presets ({presets.length})
+            </div>
+            {presets.map(p => (
+              <button key={p.id} onClick={() => setEditPreset({ ...p })}
                 style={{
-                  display: 'block', width: '100%', padding: '12px 14px', marginBottom: 6,
-                  borderRadius: 'var(--radius-md)', border: 'none', cursor: 'pointer', textAlign: 'left',
-                  background: selected === key ? 'var(--accent)' : 'var(--bg-secondary)',
-                  color: selected === key ? '#fff' : 'var(--text-primary)',
+                  display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px',
+                  background: editPreset?.id === p.id ? 'rgba(249,24,128,0.1)' : 'var(--bg-secondary)',
+                  border: editPreset?.id === p.id ? '1px solid #f91880' : '1px solid var(--border)',
+                  borderRadius: 8, marginBottom: 6, cursor: 'pointer', fontFamily: 'inherit',
+                  color: 'var(--text-primary)',
                 }}>
-                <div style={{ fontSize: 13, fontWeight: 700 }}>{val.name}</div>
-                <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>{val.desc}</div>
+                <div style={{ fontSize: 12, fontWeight: 700 }}>{p.name}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{p.desc}</div>
               </button>
             ))}
           </div>
 
-          {/* Content */}
+          {/* Main Editor */}
           <div>
-            {msg && <div style={{ padding: 10, borderRadius: 8, marginBottom: 12, background: 'var(--bg-tertiary)', fontSize: 13 }}>{msg}</div>}
-
-            {loading ? (
-              <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>⏳ กำลังโหลด...</div>
-            ) : selected === 'analysis' ? (
-              /* ===== Analysis Presets Editor ===== */
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <h3 style={{ fontSize: 16, fontWeight: 700 }}>🔍 Analysis Presets ({presets.length} ชุด)</h3>
-                  <button className="btn btn-primary btn-sm" onClick={handleAddPreset}>➕ เพิ่ม Preset ใหม่</button>
-                </div>
-
-                {/* Preset List */}
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
-                  {presets.map(p => (
-                    <button key={p.id} onClick={() => setEditPreset(p)}
-                      style={{
-                        padding: '8px 14px', borderRadius: 8, border: 'none', cursor: 'pointer',
-                        background: editPreset?.id === p.id ? 'var(--accent)' : 'var(--bg-tertiary)',
-                        color: editPreset?.id === p.id ? '#fff' : 'var(--text-primary)',
-                        fontSize: 12, fontWeight: 600,
-                      }}>
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Preset Editor — ช่องเดียว */}
-                {editPreset && (
-                  <div style={{ background: 'var(--bg-secondary)', padding: 20, borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-                      <div className="form-group">
-                        <label className="form-label">ชื่อ Preset</label>
-                        <input className="form-input" value={editPreset.name}
-                          onChange={e => setEditPreset({ ...editPreset, name: e.target.value })} />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">คำอธิบาย</label>
-                        <input className="form-input" value={editPreset.desc}
-                          onChange={e => setEditPreset({ ...editPreset, desc: e.target.value })} />
-                      </div>
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">📝 Prompt คำสั่ง AI (ช่องเดียวครบจบ)</label>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.8 }}>
-                        ใส่คำสั่งทั้งหมดในช่องนี้ รวมทั้งสไตล์การเขียน กฎ และ JSON format &nbsp;
-                        ตัวแปร: <code style={{ color: 'var(--accent-light)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4 }}>{'{title}'}</code>&nbsp;
-                        <code style={{ color: 'var(--accent-light)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4 }}>{'{content}'}</code>&nbsp;
-                        <code style={{ color: 'var(--accent-light)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4 }}>{'{custom_instruction}'}</code>
-                      </div>
-                      <textarea className="form-textarea" value={editPreset.prompt || ''}
-                        onChange={e => setEditPreset({ ...editPreset, prompt: e.target.value })}
-                        style={{ minHeight: 450, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.6 }} />
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                      <button className="btn btn-primary" onClick={handleSavePreset} disabled={saving}>
-                        {saving ? '⏳ กำลังบันทึก...' : '💾 บันทึก Preset'}
-                      </button>
-                      <button className="btn btn-outline" onClick={() => handleDeletePreset(editPreset.id)} disabled={saving || presets.length <= 1}
-                        style={{ color: 'var(--error)' }}>
-                        🗑️ ลบ Preset
-                      </button>
-                    </div>
+            {!editPreset ? (
+              <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>{currentMeta.label || selected}</h3>
+                    {currentMeta.description && (
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{currentMeta.description}</div>
+                    )}
                   </div>
-                )}
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={handleReset} style={{ padding: '6px 12px', fontSize: 11, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'inherit' }}>
+                      🔄 คืนค่า
+                    </button>
+                    <button onClick={handleSave} disabled={saving} style={{ padding: '6px 16px', fontSize: 11, background: 'var(--accent)', border: 'none', borderRadius: 6, color: '#fff', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                      {saving ? '⏳...' : '💾 บันทึก'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Metadata badges */}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+                  {currentMeta.usedIn?.map((u, i) => (
+                    <span key={i} style={{ padding: '2px 8px', borderRadius: 10, fontSize: 9, background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontWeight: 600 }}>
+                      📍 {u}
+                    </span>
+                  ))}
+                  {currentMeta.affectsAPI && (
+                    <span style={{ padding: '2px 8px', borderRadius: 10, fontSize: 9, background: 'rgba(59,130,246,0.15)', color: '#3b82f6', fontWeight: 600 }}>
+                      🔗 {currentMeta.affectsAPI}
+                    </span>
+                  )}
+                </div>
+
+                {/* Editor */}
+                <textarea
+                  value={promptText}
+                  onChange={e => setPromptText(e.target.value)}
+                  style={{
+                    width: '100%', minHeight: 500, padding: 14, borderRadius: 8,
+                    background: 'var(--bg-primary)', border: '1px solid var(--border)',
+                    color: 'var(--text-primary)', fontFamily: 'monospace', fontSize: 12,
+                    lineHeight: 1.6, resize: 'vertical',
+                  }}
+                />
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>
+                  📐 {promptText.length} ตัวอักษร | ตัวแปร: {'{title}'} {'{content}'} {'{custom_instruction}'} {'{source_platform}'} {'{analysis_context}'}
+                </div>
               </div>
             ) : (
-              /* ===== Standard Prompt Editor — ช่องเดียว ===== */
-              <>
-                <div className="form-group">
-                  <label className="form-label">📝 Prompt คำสั่ง AI (ช่องเดียวครบจบ)</label>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.8 }}>
-                    ใส่คำสั่งทั้งหมดในช่องเดียว รวมทั้งบทบาท คำสั่ง ตัวแปร และ JSON format &nbsp;
-                    ตัวแปร: <code style={{ color: 'var(--accent-light)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4 }}>{'{content}'}</code>&nbsp;
-                    <code style={{ color: 'var(--accent-light)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4 }}>{'{title}'}</code>&nbsp;
-                    <code style={{ color: 'var(--accent-light)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4 }}>{'{custom_instruction}'}</code>&nbsp;
-                    <code style={{ color: 'var(--accent-light)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4 }}>{'{tone}'}</code>
+              /* Preset Editor */
+              <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>✏️ แก้ไข Preset: {editPreset.name}</h3>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => setEditPreset(null)} style={{ padding: '6px 12px', fontSize: 11, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'inherit' }}>
+                      ❌ ยกเลิก
+                    </button>
+                    <button onClick={handleSavePreset} style={{ padding: '6px 16px', fontSize: 11, background: '#f91880', border: 'none', borderRadius: 6, color: '#fff', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                      💾 บันทึก Preset
+                    </button>
                   </div>
-                  <textarea className="form-textarea" value={promptText} onChange={(e) => setPromptText(e.target.value)}
-                    style={{ minHeight: 500, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.6 }} />
                 </div>
 
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-                    {saving ? '⏳ กำลังบันทึก...' : '💾 บันทึก'}
-                  </button>
-                  <button className="btn btn-outline" onClick={handleReset} disabled={saving}>↩️ รีเซ็ตเป็นค่าเริ่มต้น</button>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+                  {editPreset.usedIn?.map((u, i) => (
+                    <span key={i} style={{ padding: '2px 8px', borderRadius: 10, fontSize: 9, background: 'rgba(249,24,128,0.15)', color: '#f91880', fontWeight: 600 }}>
+                      📍 {u}
+                    </span>
+                  ))}
+                  {editPreset.affectsAPI && (
+                    <span style={{ padding: '2px 8px', borderRadius: 10, fontSize: 9, background: 'rgba(59,130,246,0.15)', color: '#3b82f6', fontWeight: 600 }}>
+                      🔗 {editPreset.affectsAPI}
+                    </span>
+                  )}
                 </div>
-              </>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)' }}>ชื่อ</label>
+                    <input value={editPreset.name} onChange={e => setEditPreset({ ...editPreset, name: e.target.value })}
+                      className="form-input" style={{ width: '100%', marginTop: 4 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)' }}>คำอธิบาย</label>
+                    <input value={editPreset.desc} onChange={e => setEditPreset({ ...editPreset, desc: e.target.value })}
+                      className="form-input" style={{ width: '100%', marginTop: 4 }} />
+                  </div>
+                </div>
+
+                <textarea
+                  value={editPreset.prompt || ''}
+                  onChange={e => setEditPreset({ ...editPreset, prompt: e.target.value })}
+                  style={{
+                    width: '100%', minHeight: 500, padding: 14, borderRadius: 8,
+                    background: 'var(--bg-primary)', border: '1px solid var(--border)',
+                    color: 'var(--text-primary)', fontFamily: 'monospace', fontSize: 12,
+                    lineHeight: 1.6, resize: 'vertical',
+                  }}
+                />
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>
+                  📐 {(editPreset.prompt || '').length} ตัวอักษร
+                </div>
+              </div>
             )}
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
 export default function PromptsPage() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>กำลังโหลด...</div>}>
       <PromptsPageInner />
     </Suspense>
   );

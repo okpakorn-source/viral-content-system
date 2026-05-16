@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
@@ -60,37 +60,12 @@ export async function POST(request) {
       // === PATH A: TikTok/YouTube — ถอดเสียง → จัดรูปแบบ (รักษาคำพูดเดิม) ===
       if (sourceType === 'tiktok' || sourceType === 'youtube') {
         try {
-          const transcriptPrompt = `คุณคือผู้เชี่ยวชาญจัดรูปแบบข้อความถอดเสียง (transcript)
-
-กฎเหล็ก:
-1. ห้ามเขียนใหม่ ห้ามสรุปเอง ห้ามเปลี่ยนคำพูดคน — ต้องรักษาคำพูดเดิมทุกคำ
-2. ห้ามตัดเนื้อหาออก — เก็บทุกประโยคที่คนพูด
-3. ห้ามเพิ่มข้อมูลที่ไม่มีในถอดเสียง
-4. จัดย่อหน้าให้อ่านง่าย เพิ่มเครื่องหมายวรรคตอนที่หายไป
-5. ตัดเฉพาะ metadata markers (===, timestamp, ความยาว:) ออก
-6. ถ้ามีคนพูดหลายคน ให้แยกบทพูดให้ชัดเจน
-7. คำพูดที่เป็น quote ให้ใส่ "" ครอบ
-
-สิ่งที่ต้องทำ:
-- จัดข้อความถอดเสียงให้เป็นย่อหน้าอ่านง่าย
-- เพิ่มเครื่องหมายวรรคตอน (มหัพภาค จุลภาค) ที่ขาดหายไป
-- สรุปหัวข้อจากเนื้อหาที่พูด
-- ระบุแหล่งที่มาว่าเป็นคลิป ${sourceType === 'tiktok' ? 'TikTok' : 'YouTube'}
-
-${customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : ''}
-
-=== ข้อความถอดเสียง ===
-${text.slice(0, 8000)}
-========================
-
-ตอบเป็น JSON:
-{
-  "news_title": "หัวข้อที่สรุปได้จากเนื้อหาที่พูด",
-  "news_body": "เนื้อหาที่จัดรูปแบบแล้ว — รักษาคำพูดเดิมทุกคำ จัดย่อหน้าให้อ่านง่าย",
-  "news_source": "คลิป ${sourceType === 'tiktok' ? 'TikTok' : 'YouTube'}",
-  "news_date": "",
-  "news_category": "หมวดหมู่"
-}`;
+          const tPromptObj = getPrompt('transcript_extraction');
+          const platform = sourceType === 'tiktok' ? 'TikTok' : 'YouTube';
+          const transcriptPrompt = tPromptObj.prompt
+            .replace('{content}', text.slice(0, 8000))
+            .replace('{source_platform}', platform)
+            .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
 
           console.log(`[Extract-Transcript] ${sourceType} mode — preserving original speech...`);
           const { result, model: usedModel } = await callSmartAI('extract', { prompt: transcriptPrompt, temperature: 0.15 });
