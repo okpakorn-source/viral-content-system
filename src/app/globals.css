@@ -294,9 +294,11 @@ body {
 .btn-primary:hover { box-shadow: 0 6px 20px var(--accent-glow); }
 
 .btn-viral {
-  background: var(--gradient-viral);
+  background: linear-gradient(135deg, #1d9bf0, #0d8bd9);
   color: white;
+  box-shadow: 0 3px 12px rgba(29, 155, 240, 0.25);
 }
+.btn-viral:hover { box-shadow: 0 5px 16px rgba(29, 155, 240, 0.35); }
 
 .btn-outline {
   background: transparent;
