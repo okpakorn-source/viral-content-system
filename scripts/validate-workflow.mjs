@@ -91,20 +91,26 @@ criticalFiles.forEach(f => check(f, fileExists(f), 'ไฟล์หายไป!
 // ============================================
 console.log('\n🔑 [2/7] API Keys...');
 const envPath = resolve(ROOT, '.env');
-if (fileExists('.env')) {
-  const envContent = readFileSync(envPath, 'utf-8');
-  const getEnvValue = (key) => {
+// Vercel ไม่มี .env file → เช็คจาก process.env แทน
+const getEnvValue = (key) => {
+  // ลอง .env file ก่อน
+  if (fileExists('.env')) {
+    const envContent = readFileSync(envPath, 'utf-8');
     const match = envContent.match(new RegExp(`^${key}=(.+)$`, 'm'));
-    return match ? match[1].trim() : '';
-  };
-  
-  check('OPENAI_API_KEY', getEnvValue('OPENAI_API_KEY').length > 10, 'ต้องมี — ระบบหลักใช้ GPT-4o');
-  check('FIRECRAWL_API_KEY', getEnvValue('FIRECRAWL_API_KEY').length > 5, 'แนะนำ — ดึงข่าวจาก URL');
-  check('ANTHROPIC_API_KEY', getEnvValue('ANTHROPIC_API_KEY').length > 10, 'แนะนำ — Claude เขียนไทยดี');
-  check('GEMINI_API_KEY', getEnvValue('GEMINI_API_KEY').length > 10, 'แนะนำ — Gemini ถูก+เร็ว');
-} else {
-  check('.env file exists', false, 'ไม่พบไฟล์ .env');
-}
+    if (match && match[1].trim().length > 5) return match[1].trim();
+  }
+  // Fallback: process.env (Vercel)
+  return process.env[key] || '';
+};
+
+check('OPENAI_API_KEY', getEnvValue('OPENAI_API_KEY').length > 10, 'ต้องมี — ระบบหลักใช้ GPT-4o');
+// Claude/Gemini/Firecrawl เป็น optional — warn แต่ไม่ fail
+const firecrawl = getEnvValue('FIRECRAWL_API_KEY').length > 5;
+const claude = getEnvValue('ANTHROPIC_API_KEY').length > 10;
+const gemini = getEnvValue('GEMINI_API_KEY').length > 10;
+if (firecrawl) { check('FIRECRAWL_API_KEY', true); } else { console.log('  ⚠️  FIRECRAWL_API_KEY — ไม่มี (ดึง URL จะใช้ fallback)'); totalChecks++; passedChecks++; }
+if (claude) { check('ANTHROPIC_API_KEY', true); } else { console.log('  ⚠️  ANTHROPIC_API_KEY — ไม่มี (จะใช้ GPT-4o แทน Claude)'); totalChecks++; passedChecks++; }
+if (gemini) { check('GEMINI_API_KEY', true); } else { console.log('  ⚠️  GEMINI_API_KEY — ไม่มี (จะใช้ GPT-4o แทน Gemini)'); totalChecks++; passedChecks++; }
 
 // ============================================
 // 3. IMPORT/EXPORT CHAIN CHECK
