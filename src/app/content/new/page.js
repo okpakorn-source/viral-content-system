@@ -52,6 +52,13 @@ export default function NewContentPage() {
 
   // === STEP 1: ดึงเนื้อหาจาก URL ===
   const handleExtract = async () => {
+    // Auto-detect TikTok URL → สลับไปใช้ Whisper ถอดเสียงอัตโนมัติ
+    if (url && (url.includes('tiktok.com') || url.includes('vm.tiktok.com'))) {
+      setSourceType('tiktok');
+      handleTikTokTranscribe('url');
+      return;
+    }
+
     setExtracting(true);
     setError('');
     setExtracted(null);
