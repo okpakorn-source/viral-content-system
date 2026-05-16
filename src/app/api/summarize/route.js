@@ -90,19 +90,42 @@ export async function POST(request) {
       });
     }
 
-    // ===== MODE: breakdown — แตกประเด็น + สรุปใจความ =====
+    // ===== MODE: breakdown — แตกประเด็น + สรุปใจความ (Full Context Pipeline) =====
     if (mode === 'breakdown') {
+      // 1. โหลด prompt จาก promptStore (source of truth)
       const breakdownPrompt = getPrompt('breakdown');
-      console.log(`[Breakdown] newsTitle: "${(newsTitle || '').slice(0, 80)}", textLen: ${text?.length}`);
+
+      // 2. Resolve actual news body — ลำดับ: DB workflow > request text > fail
+      let actualNewsBody = text;
+      let actualNewsTitle = newsTitle;
+      let contextSource = 'request';
+
+      if (workflowId) {
+        const wf = await getWorkflow(workflowId).catch(() => null);
+        if (wf?.newsBody && wf.newsBody.length > actualNewsBody.length) {
+          actualNewsBody = wf.newsBody;
+          actualNewsTitle = wf.newsTitle || newsTitle;
+          contextSource = 'DB (workflow)';
+          console.log(`[Breakdown] ✅ Loaded full news from DB: ${actualNewsBody.length}ch`);
+        }
+      }
+
+      // 3. ส่ง rawText เต็ม (ไม่ตัด) — ใส่เข้า prompt template
+      console.log(`[Breakdown] Context: source=${contextSource}, title="${(actualNewsTitle || '').slice(0, 60)}", bodyLen=${actualNewsBody?.length}ch`);
 
       const prompt = breakdownPrompt.prompt
-        .replace('{title}', newsTitle || text.slice(0, 100))
-        .replace('{content}', text.slice(0, 8000))
-        .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
+        .replace('{title}', actualNewsTitle || actualNewsBody.slice(0, 100))
+        .replace('{content}', actualNewsBody) // ส่งเต็ม ไม่ตัด
+        .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติมจากผู้ใช้: "${customPrompt}"` : '');
+
+      // 4. LOG prompt จริง 100%
+      console.log(`[Breakdown] 📋 PROMPT USED (first 300ch): ${prompt.slice(0, 300)}`);
+      console.log(`[Breakdown] 📋 PROMPT LENGTH: ${prompt.length}ch`);
+      console.log(`[Breakdown] 📋 NEWS IN PROMPT: ${actualNewsBody.length}ch of actual news content`);
 
       try {
         const result = await callAI({ prompt, model: 'gpt-4o', temperature: 0.4, maxTokens: 8000 });
-        console.log(`[Breakdown] OK, keys: ${Object.keys(result || {}).join(', ')}`);
+        console.log(`[Breakdown] ✅ OK, keys: ${Object.keys(result || {}).join(', ')}`);
 
         const bdData = {
           news_summary: result.news_summary || '',
@@ -128,7 +151,16 @@ export async function POST(request) {
           await saveBreakdown(workflowId, bdData).catch(e => console.error('[Breakdown] DB save err:', e.message));
         }
 
-        return NextResponse.json({ success: true, data: bdData });
+        return NextResponse.json({
+          success: true,
+          data: bdData,
+          debug: {
+            contextSource,
+            newsBodyLength: actualNewsBody.length,
+            promptLength: prompt.length,
+            newsTitle: actualNewsTitle || '',
+          }
+        });
       } catch (err) {
         console.error('[Breakdown] ERROR:', err.message);
         return NextResponse.json({ success: false, error: `แตกประเด็นไม่สำเร็จ: ${err.message}` }, { status: 500 });
@@ -158,11 +190,10 @@ export async function POST(request) {
 
       console.log(`[Analyze] newsTitle: "${(actualNewsTitle || '').slice(0,80)}", textLen: ${actualNewsBody?.length}`);
 
-      // สร้าง prompt จาก preset — replace placeholders
+      // สร้าง prompt จาก preset — replace placeholders ด้วยค่าจริงเต็ม
       let prompt = preset.prompt;
-      // Replace placeholders ด้วยค่าจริง (จาก DB หรือ request)
       prompt = prompt.replace('{title}', actualNewsTitle || actualNewsBody.slice(0, 100));
-      prompt = prompt.replace('{content}', actualNewsBody.slice(0, 8000));
+      prompt = prompt.replace('{content}', actualNewsBody); // ส่งเต็ม ไม่ตัด
       prompt = prompt.replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
 
       // === บังคับ inject Full Context จาก Workflow Engine ===

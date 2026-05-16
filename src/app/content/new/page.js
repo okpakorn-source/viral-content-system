@@ -100,7 +100,7 @@ export default function NewContentPage() {
     }
   };
 
-  // === STEP 2.5: แตกประเด็น + สรุปใจความ ===
+  // === STEP 2.5: แตกประเด็น + สรุปใจความ (Full Context Pipeline) ===
   const handleBreakdown = async () => {
     if (!newsData?.newsBody) return;
     setLoading(true);
@@ -110,7 +110,7 @@ export default function NewContentPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          text: newsData.newsBody,
+          text: newsData.newsBody,     // ข่าวที่สกัดแล้ว (full)
           newsTitle: newsData.newsTitle,
           customPrompt: breakdownPromptText,
           mode: 'breakdown',
@@ -120,6 +120,9 @@ export default function NewContentPage() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
       setBreakdownData(data.data);
+      if (data.debug) {
+        console.log('[Breakdown Debug]', data.debug);
+      }
       setStep('breakdown');
     } catch (err) {
       setError(err.message);
