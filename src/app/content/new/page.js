@@ -28,7 +28,7 @@ export default function NewContentPage() {
   const [extracted, setExtracted] = useState(null);
   const [newsData, setNewsData] = useState(null);
   const [breakdownData, setBreakdownData] = useState(null);
-  const [breakdownPromptText, setBreakdownPromptText] = useState('คุณคือ AI Viral News Angle Strategist + Emotional Storytelling Director\n\nหน้าที่: อ่านเนื้อข่าวจริงแล้ววิเคราะห์ให้ลึกที่สุด หาทุกมุมที่สามารถแตกประเด็น เปลี่ยนมุมเล่า ดึงอารมณ์ สร้าง discussion สร้าง emotional connection สร้างมุมไวรัลได้');
+  const [breakdownPromptText, setBreakdownPromptText] = useState('');
   const [analysisResult, setAnalysisResult] = useState(null);
   const [workflowId, setWorkflowId] = useState(null);
 
@@ -337,10 +337,16 @@ export default function NewContentPage() {
 
             {/* คำสั่งแตกประเด็น */}
             <div className="form-group" style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
-              <label className="form-label">🤖 คำสั่งเพิ่มเติมสำหรับแตกประเด็น (ไม่บังคับ)</label>
+              <label className="form-label">✏️ คำสั่งเพิ่มเติม (ไม่บังคับ — Prompt หลักถูกตั้งค่าในระบบแล้ว)</label>
               <textarea className="form-textarea" value={breakdownPromptText} onChange={(e) => setBreakdownPromptText(e.target.value)}
-                placeholder="เช่น: เน้นประเด็นดราม่า, หาจุดที่คนจะอิน, แยกข้อเท็จจริงกับความเห็น..."
+                placeholder="เช่น: เน้นมุมดราม่ามากขึ้น, แตกประเด็นเรื่องตัวเลขให้ละเอียด, หาจุดที่คนจะอิน..."
                 style={{ minHeight: 50, fontSize: 13 }} />
+              <details style={{ marginTop: 8 }}>
+                <summary style={{ fontSize: 10, color: 'var(--text-muted)', cursor: 'pointer' }}>🔍 ดู Prompt หลักที่ระบบใช้จริง (Viral News Angle Strategist 7-Step)</summary>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--bg-secondary)', padding: 10, borderRadius: 6, marginTop: 4, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                  {`คุณคือ AI Viral News Angle Strategist + Emotional Storytelling Director\n\nSTEP 1: วิเคราะห์แก่นข่าว (core story, emotional core, conflict, characters)\nSTEP 2: แตกประเด็น 12 หมวด (ดราม่า, ความรัก, ครอบครัว, social pressure, แรงบันดาลใจ, ถกเถียง, ฟิน, ชื่นชม, เซอร์ไพรส์...)\nSTEP 3: วิเคราะห์พลัง viral ของแต่ละมุม (อิน/คอมเมนต์/แชร์/trigger)\nSTEP 4: เลือกมุมที่ดีที่สุด (emotional impact / share / FB friendly)\nSTEP 5: วิเคราะห์ลูกเล่นภาษา (opening/storytelling/pacing/ending)\nSTEP 6: Safety rules (ห้ามบิดข่าว ห้ามแต่งเรื่อง)\nSTEP 7: Output JSON (core_story, possible_angles, best_angle, language_strategy)\n\n⚠️ Prompt นี้ถูกใช้จริง 100% ทุกครั้งที่กดแตกประเด็น`}
+                </div>
+              </details>
             </div>
 
             <button type="button" onClick={handleBreakdown} className="btn btn-viral btn-lg"
@@ -492,6 +498,7 @@ export default function NewContentPage() {
               <textarea className="form-textarea" value={breakdownPromptText} onChange={(e) => setBreakdownPromptText(e.target.value)}
                 placeholder="เช่น: ประเด็นที่ 2 ไม่ดี ตัดออก, เน้นมุมดราม่ามากขึ้น, แตกประเด็นเรื่องตัวเลขให้ละเอียดกว่านี้..."
                 style={{ minHeight: 60, fontSize: 13, marginBottom: 8 }} />
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 8 }}>💡 Prompt หลัก (7-Step Viral Angle Strategist) ถูกใช้จริงทุกครั้ง — ช่องนี้เป็น "คำสั่งเพิ่มเติม" เท่านั้น</div>
               <button onClick={handleBreakdown} className="btn btn-outline" disabled={loading} style={{ width: '100%' }}>
                 {loading ? '⏳ กำลังแตกใหม่...' : '🔄 แตกประเด็นใหม่ตามคำสั่ง'}
               </button>
