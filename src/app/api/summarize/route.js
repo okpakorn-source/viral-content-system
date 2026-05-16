@@ -2,6 +2,44 @@ import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
 
+/**
+ * ดึง summary จาก AI response ไม่ว่า key จะชื่ออะไร
+ */
+function extractSummary(result) {
+  // ลอง key ที่เป็นไปได้ทั้งหมด
+  const directKeys = ['summary', 'main_post', 'content', 'analysis', 'post', 'body', 'text', 'article'];
+  for (const k of directKeys) {
+    if (result[k] && typeof result[k] === 'string' && result[k].length > 20) {
+      return result[k];
+    }
+  }
+
+  // ถ้ามี key ที่เป็น string ยาวๆ ให้ใช้อันที่ยาวสุด
+  let longest = '';
+  for (const [key, val] of Object.entries(result)) {
+    if (typeof val === 'string' && val.length > longest.length) {
+      longest = val;
+    }
+  }
+  if (longest.length > 30) return longest;
+
+  return '';
+}
+
+function extractArray(result, ...keys) {
+  for (const k of keys) {
+    if (Array.isArray(result[k]) && result[k].length > 0) return result[k];
+  }
+  return [];
+}
+
+function extractString(result, ...keys) {
+  for (const k of keys) {
+    if (result[k] && typeof result[k] === 'string') return result[k];
+  }
+  return '';
+}
+
 export async function POST(request) {
   try {
     const { text, sourceType, customPrompt, analysisPresetId } = await request.json();
@@ -43,7 +81,6 @@ export async function POST(request) {
 
     let analysis;
     try {
-      // ใส่เนื้อข่าวเข้าไปใน prompt ของ preset
       const prompt = preset.prompt
         .replace('{title}', newsData.news_title || '')
         .replace('{content}', newsData.news_body.slice(0, 4000))
@@ -52,21 +89,21 @@ export async function POST(request) {
       console.log(`[S2] Prompt: ${prompt.length}ch`);
 
       const result = await callAI({ prompt, temperature: 0.5, maxTokens: 4000 });
+      console.log('[S2] AI keys:', Object.keys(result || {}));
 
       if (result && typeof result === 'object') {
+        const summary = extractSummary(result);
+
         analysis = {
-          summary: result.summary || result.analysis || result.content || '',
-          key_points: result.key_points || result.keyPoints || [],
-          people_involved: result.people_involved || result.people || [],
-          emotion: result.emotion || '',
-          content_type: result.content_type || '',
-          viral_potential: result.viral_potential || '',
-          suggested_angles: result.suggested_angles || [],
-          target_audience: result.target_audience || '',
+          summary: summary || `(AI ตอบแต่ไม่มี summary — keys: ${Object.keys(result).join(', ')})`,
+          key_points: extractArray(result, 'key_points', 'keyPoints', 'possible_angles', 'viral_headlines'),
+          people_involved: extractArray(result, 'people_involved', 'people'),
+          emotion: extractString(result, 'emotion', 'tone', 'emotional_direction'),
+          content_type: extractString(result, 'content_type', 'type'),
+          viral_potential: extractString(result, 'viral_potential', 'viralPotential', 'risk_level'),
+          suggested_angles: extractArray(result, 'suggested_angles', 'angles', 'possible_angles'),
+          target_audience: extractString(result, 'target_audience', 'audience'),
         };
-        if (!analysis.summary) {
-          analysis.summary = `AI ตอบไม่ตรง format — keys: ${Object.keys(result).join(', ')}`;
-        }
       }
     } catch (err) {
       console.error('[S2] ERROR:', err.message);

@@ -29,7 +29,7 @@ export async function callAI({ prompt, systemPrompt, userPrompt, model = 'gpt-4o
   // สร้าง messages — ถ้ามี prompt เดียว ใส่ใน user message
   const messages = prompt
     ? [
-        { role: 'system', content: 'ตอบเป็น JSON เท่านั้น' },
+        { role: 'system', content: 'ตอบเป็น JSON เท่านั้น ใช้ key names ตามที่ระบุใน prompt ของ user ห้ามเปลี่ยนชื่อ key เอง ถ้า prompt บอกให้ใช้ key "summary" ต้องใช้ "summary" เท่านั้น' },
         { role: 'user', content: prompt },
       ]
     : [
