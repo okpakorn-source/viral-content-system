@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
+import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
 
 /**
  * ดึง summary จาก AI response ไม่ว่า key จะชื่ออะไร
@@ -36,7 +37,7 @@ function extractString(result, ...keys) {
 
 export async function POST(request) {
   try {
-    const { text, sourceType, customPrompt, analysisPresetId, mode, newsTitle, breakdownData } = await request.json();
+    const { text, sourceType, customPrompt, analysisPresetId, mode, newsTitle, breakdownData, workflowId } = await request.json();
 
     if (!text || text.length < 10) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
@@ -55,6 +56,14 @@ export async function POST(request) {
 
         if (result?.news_body && result.news_body.length >= 20) {
           console.log(`[Extract] OK: "${result.news_title}" (${result.news_body.length}ch)`);
+          // Save to workflow DB
+          if (workflowId) {
+            await saveExtraction(workflowId, {
+              newsTitle: result.news_title, newsBody: result.news_body,
+              newsSource: result.news_source, newsDate: result.news_date,
+              newsCategory: result.news_category, rawInput: text.slice(0, 5000),
+            }).catch(e => console.error('[Extract] DB save err:', e.message));
+          }
           return NextResponse.json({
             success: true,
             data: {
@@ -95,74 +104,81 @@ export async function POST(request) {
         const result = await callAI({ prompt, model: 'gpt-4o', temperature: 0.4, maxTokens: 6000 });
         console.log(`[Breakdown] OK, keys: ${Object.keys(result || {}).join(', ')}`);
 
-        return NextResponse.json({
-          success: true,
-          data: {
-            news_summary: result.news_summary || '',
-            key_points: result.key_points || [],
-            best_sections: result.best_sections || [],
-            key_facts: result.key_facts || { people: [], places: [], numbers: [], dates: [] },
-            emotional_hooks: result.emotional_hooks || [],
-            suggested_angles: result.suggested_angles || [],
-          },
-        });
+        const bdData = {
+          news_summary: result.news_summary || '',
+          key_points: result.key_points || [],
+          best_sections: result.best_sections || [],
+          key_facts: result.key_facts || { people: [], places: [], numbers: [], dates: [] },
+          emotional_hooks: result.emotional_hooks || [],
+          suggested_angles: result.suggested_angles || [],
+          quotes: result.quotes || [],
+          conflicts: result.conflicts || [],
+          pain_points: result.pain_points || [],
+        };
+
+        // Save to workflow DB
+        if (workflowId) {
+          await saveBreakdown(workflowId, bdData).catch(e => console.error('[Breakdown] DB save err:', e.message));
+        }
+
+        return NextResponse.json({ success: true, data: bdData });
       } catch (err) {
         console.error('[Breakdown] ERROR:', err.message);
         return NextResponse.json({ success: false, error: `แตกประเด็นไม่สำเร็จ: ${err.message}` }, { status: 500 });
       }
     }
 
-    // ===== MODE: analyze — วิเคราะห์ด้วย Preset (ใช้เนื้อข่าวสะอาดที่ส่งมา) =====
+    // ===== MODE: analyze — วิเคราะห์ด้วย Preset (ใช้ Persistent Context) =====
     if (mode === 'analyze') {
       const preset = getAnalysisPreset(analysisPresetId || 'viral_fb');
-      console.log(`[Analyze] Requested preset: "${analysisPresetId}", Got: "${preset.id}" "${preset.name}"`);
-      console.log(`[Analyze] newsTitle: "${(newsTitle || '').slice(0,80)}", textLen: ${text?.length}`);
+      console.log(`[Analyze] Preset: "${preset.id}" "${preset.name}"`);
+
+      // โหลด context จาก DB ถ้ามี workflowId
+      let wfContext = null;
+      let actualNewsBody = text;
+      let actualNewsTitle = newsTitle;
+      let actualBreakdown = breakdownData;
+
+      if (workflowId) {
+        wfContext = await getWorkflow(workflowId).catch(() => null);
+        if (wfContext) {
+          actualNewsBody = wfContext.newsBody || text;
+          actualNewsTitle = wfContext.newsTitle || newsTitle;
+          actualBreakdown = wfContext.breakdownData || breakdownData;
+          console.log(`[Analyze] ✅ Loaded from DB: title="${(actualNewsTitle||'').slice(0,60)}", body=${actualNewsBody?.length}ch, breakdown=${actualBreakdown?.key_points?.length || 0} points`);
+        }
+      }
+
+      console.log(`[Analyze] newsTitle: "${(actualNewsTitle || '').slice(0,80)}", textLen: ${actualNewsBody?.length}`);
 
       // สร้าง prompt จาก preset — replace placeholders
       let prompt = preset.prompt;
-      const hasContentPlaceholder = prompt.includes('{content}');
-      const hasTitlePlaceholder = prompt.includes('{title}');
-
-      if (hasTitlePlaceholder) {
-        prompt = prompt.replace('{title}', newsTitle || text.slice(0, 100));
-      }
-      if (hasContentPlaceholder) {
-        prompt = prompt.replace('{content}', text.slice(0, 6000));
-      }
+      // Replace placeholders ด้วยค่าจริง (จาก DB หรือ request)
+      prompt = prompt.replace('{title}', actualNewsTitle || actualNewsBody.slice(0, 100));
+      prompt = prompt.replace('{content}', actualNewsBody.slice(0, 8000));
       prompt = prompt.replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
 
-      // ถ้า prompt ไม่มี placeholder → บังคับ append ข่าวท้าย prompt
-      if (!hasContentPlaceholder) {
-        prompt += `\n\n=== เนื้อข่าวที่ต้องใช้ (ห้ามมั่ว ห้ามแต่งเอง ใช้ข้อมูลจากนี้เท่านั้น) ===\nหัวข้อ: ${newsTitle || ''}\n\n${text.slice(0, 6000)}\n=== จบเนื้อข่าว ===`;
-      }
+      // === บังคับ inject Full Context จาก Workflow Engine ===
+      const fullCtx = buildFullContext({
+        newsBody: actualNewsBody,
+        newsTitle: actualNewsTitle,
+        breakdownData: actualBreakdown,
+      });
 
-      // === บังคับ inject ผลแตกประเด็น (จาก step 3) เข้า prompt ===
-      if (breakdownData) {
-        let bCtx = '\n\n=== ผลการแตกประเด็นจาก AI (ขั้นตอนที่ 3 — ใช้ทุกประเด็นนี้ในการเขียน) ===';
-        if (breakdownData.news_summary) bCtx += `\nสรุปรวม: ${breakdownData.news_summary}`;
-        if (breakdownData.key_points?.length > 0) {
-          bCtx += '\n\nประเด็นสำคัญทั้งหมด (ต้องครอบคลุมทุกประเด็น):';
-          breakdownData.key_points.forEach((kp, i) => {
-            bCtx += `\n${i+1}. ${kp.point || kp}: ${kp.detail || ''} [ความสำคัญ: ${kp.importance || '-'}, อารมณ์: ${kp.emotional_value || '-'}]`;
-          });
+      // ถ้า prompt ยังไม่มีเนื้อข่าว → append context ทั้งหมด
+      if (!prompt.includes(actualNewsBody.slice(0, 50))) {
+        prompt += '\n\n' + fullCtx;
+        console.log('[Analyze] ✅ Full context injected via buildFullContext()');
+      } else {
+        // มีข่าวแล้ว แต่ยังไม่มี breakdown → append breakdown เท่านั้น
+        if (actualBreakdown?.key_points?.length > 0 && !prompt.includes('ผลการแตกประเด็น')) {
+          prompt += '\n\n' + fullCtx.split('=== จบเนื้อข่าว ===')[1] || '';
+          console.log('[Analyze] ✅ Breakdown context appended');
         }
-        if (breakdownData.best_sections?.length > 0) {
-          bCtx += `\n\nท่อนที่ดีที่สุด: ${breakdownData.best_sections.join(' | ')}`;
-        }
-        if (breakdownData.emotional_hooks?.length > 0) {
-          bCtx += `\nจุดที่คนจะอิน: ${breakdownData.emotional_hooks.join(' | ')}`;
-        }
-        if (breakdownData.suggested_angles?.length > 0) {
-          bCtx += `\nมุมที่แนะนำ: ${breakdownData.suggested_angles.join(' | ')}`;
-        }
-        bCtx += '\n=== จบผลแตกประเด็น ===';
-        bCtx += '\n\n⚠️ คำสั่งสำคัญ: ต้องเขียนเนื้อหาครอบคลุมทุกประเด็นด้านบน ห้ามข้ามประเด็นใดประเด็นหนึ่ง ห้ามหยิบประเด็นซ้ำ และห้ามแต่งเรื่องที่ไม่มีในข่าว';
-        prompt += bCtx;
-        console.log(`[Analyze] ✅ Injected ${breakdownData.key_points?.length || 0} breakdown points`);
       }
 
       console.log(`[Analyze] Final prompt length: ${prompt.length}ch`);
-      console.log(`[Analyze] Has breakdown: ${!!breakdownData}, Points: ${breakdownData?.key_points?.length || 0}`);
+      console.log(`[Analyze] Context: news=${actualNewsBody?.length}ch, breakdown=${actualBreakdown?.key_points?.length || 0} points`);
 
       // === สร้าง Multi-Version Writing Prompt ===
       let multiPrompt = prompt;
@@ -194,22 +210,33 @@ export async function POST(request) {
         console.log('[Analyze] AI keys:', Object.keys(result || {}));
         console.log('[Analyze] versions count:', result?.versions?.length || 0);
 
-        // Debug info ส่งกลับ frontend
+        // Debug info — ใช้ค่าจริง
         const debugInfo = {
           promptLength: multiPrompt.length,
-          newsBodyLength: text?.length || 0,
-          newsTitle: newsTitle || '',
-          breakdownPointsCount: breakdownData?.key_points?.length || 0,
+          newsBodyLength: actualNewsBody?.length || 0,
+          newsTitle: actualNewsTitle || '',
+          breakdownPointsCount: actualBreakdown?.key_points?.length || 0,
           presetUsed: preset.name,
-          hasBreakdown: !!breakdownData,
+          hasBreakdown: !!actualBreakdown,
+          workflowId: workflowId || 'none',
+          contextSource: wfContext ? 'DB (persistent)' : 'request (stateless)',
           promptPreview: multiPrompt.slice(0, 500) + '...',
         };
 
         if (result && typeof result === 'object') {
-          // ถ้า AI ตอบแบบเดิม (ไม่มี versions) → wrap เป็น versions
           let versions = result.versions || [];
           if (versions.length === 0 && result.main_post) {
-            versions = [{ style: preset.name, title: newsTitle, content: extractSummary(result), hook: '', closing: result.engagement_ending || '', tone: result.emotion || '', target: '' }];
+            versions = [{ style: preset.name, title: actualNewsTitle, content: extractSummary(result), hook: '', closing: result.engagement_ending || '', tone: result.emotion || '', target: '' }];
+          }
+
+          // Validate output
+          const validation = validateOutput(result, { newsTitle: actualNewsTitle, newsBody: actualNewsBody });
+          console.log(`[Analyze] Validation: ${validation.valid ? '✅ PASS' : '⚠️ ISSUES: ' + validation.issues.join(', ')}`);
+
+          // Save to workflow DB
+          if (workflowId) {
+            await saveAnalysis(workflowId, { versions, news_reference: result.news_reference }, preset.id)
+              .catch(e => console.error('[Analyze] DB save err:', e.message));
           }
 
           return NextResponse.json({
@@ -222,9 +249,9 @@ export async function POST(request) {
               key_points: extractArray(result, 'key_points', 'keyPoints', 'viral_headlines'),
               emotion: extractString(result, 'emotion', 'tone'),
               viral_potential: extractString(result, 'viral_potential', 'facebook_safety_level'),
-              suggested_angles: extractArray(result, 'suggested_angles', 'angles', 'viral_headlines'),
               engagement_ending: result.engagement_ending || '',
               facebook_safe_check: result.facebook_safe_check || null,
+              validation,
               debug: debugInfo,
             },
           });

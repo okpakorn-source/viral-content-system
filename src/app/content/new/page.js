@@ -30,6 +30,7 @@ export default function NewContentPage() {
   const [breakdownData, setBreakdownData] = useState(null);
   const [breakdownPromptText, setBreakdownPromptText] = useState('');
   const [analysisResult, setAnalysisResult] = useState(null);
+  const [workflowId, setWorkflowId] = useState(null);
 
   // Load presets
   useEffect(() => {
@@ -76,10 +77,17 @@ export default function NewContentPage() {
     setLoading(true);
     setError('');
     try {
+      // สร้าง workflow ก่อน
+      let wfId = workflowId;
+      if (!wfId) {
+        const wfRes = await fetch('/api/workflow', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceType }) });
+        const wfData = await wfRes.json();
+        if (wfData.success) { wfId = wfData.workflowId; setWorkflowId(wfId); }
+      }
       const res = await fetch('/api/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: rawText, sourceType, customPrompt, mode: 'extract' }),
+        body: JSON.stringify({ text: rawText, sourceType, customPrompt, mode: 'extract', workflowId: wfId }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
@@ -106,6 +114,7 @@ export default function NewContentPage() {
           newsTitle: newsData.newsTitle,
           customPrompt: breakdownPromptText,
           mode: 'breakdown',
+          workflowId,
         }),
       });
       const data = await res.json();
@@ -138,6 +147,7 @@ export default function NewContentPage() {
           analysisPresetId: usePreset,
           mode: 'analyze',
           breakdownData: breakdownData || null,
+          workflowId,
         }),
       });
       const data = await res.json();
@@ -162,6 +172,7 @@ export default function NewContentPage() {
   const handleReset = () => {
     setStep('input'); setExtracted(null); setRawText(''); setUrl('');
     setError(''); setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
+    setWorkflowId(null);
   };
 
   const needsUrl = ['url', 'facebook', 'tiktok', 'youtube'].includes(sourceType);
@@ -478,6 +489,13 @@ export default function NewContentPage() {
                   <div>📌 ประเด็นที่แตก: {analysisResult.debug.breakdownPointsCount} ประเด็น</div>
                   <div>🎯 Preset: {analysisResult.debug.presetUsed}</div>
                   <div>🔗 มี Breakdown: {analysisResult.debug.hasBreakdown ? '✅ ใช่' : '❌ ไม่'}</div>
+                  <div>🆔 Workflow: {analysisResult.debug.workflowId}</div>
+                  <div>💾 Context: {analysisResult.debug.contextSource}</div>
+                  {analysisResult.validation && (
+                    <div style={{ marginTop: 6, color: analysisResult.validation.valid ? 'var(--success)' : 'var(--warning)' }}>
+                      ✅ Validation: {analysisResult.validation.valid ? 'PASS' : `⚠️ ${analysisResult.validation.issues.join(', ')}`}
+                    </div>
+                  )}
                   <div style={{ marginTop: 8, wordBreak: 'break-all', maxHeight: 150, overflow: 'auto', background: 'var(--bg-secondary)', padding: 8, borderRadius: 4 }}>
                     <strong>Prompt Preview:</strong><br/>{analysisResult.debug.promptPreview}
                   </div>

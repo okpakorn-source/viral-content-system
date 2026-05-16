@@ -232,3 +232,43 @@ model AiFeedbackLog {
 
   @@map("ai_feedback_logs")
 }
+
+// =============================================
+// Workflow Run — Persistent Context ทุก Step
+// =============================================
+model WorkflowRun {
+  id             String   @id @default(uuid())
+  currentStep    String   @default("input") @map("current_step") // input, extracted, breakdown, analyzed
+  newsTitle      String?  @map("news_title")
+  newsBody       String?  @map("news_body")
+  newsSource     String?  @map("news_source")
+  newsDate       String?  @map("news_date")
+  newsCategory   String?  @map("news_category")
+  rawInput       String?  @map("raw_input")
+  sourceType     String?  @map("source_type")
+  breakdownData  String?  @map("breakdown_data") // JSON
+  analysisResult String?  @map("analysis_result") // JSON
+  presetUsed     String?  @map("preset_used")
+  metadata       String?  // JSON — extra data
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("workflow_runs")
+}
+
+// =============================================
+// Prompt Template — DB-backed (ไม่ reset เมื่อ deploy)
+// =============================================
+model PromptTemplate {
+  id        String   @id @default(uuid())
+  key       String   @unique // extraction, breakdown, viral_fb, drama, etc.
+  name      String
+  category  String   @default("standard") // standard, analysis
+  prompt    String
+  desc      String?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("prompt_templates")
+}
