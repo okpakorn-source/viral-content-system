@@ -424,83 +424,74 @@ export default function NewContentPage() {
           </div>
         )}
 
-        {/* ===== STEP 4: Analyzed — ผลลัพธ์วิเคราะห์ ===== */}
+        {/* ===== STEP 4: Analyzed — ผลลัพธ์หลายเวอร์ชัน ===== */}
         {step === 'analyzed' && analysisResult && (
           <div className="card slide-up">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>📝 ผลลัพธ์ — {analysisResult.usedPreset?.name || 'AI'}</h3>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{analysisResult.versions?.length || 0} เวอร์ชัน</span>
+            </div>
+
             {/* หัวข้อข่าว */}
-            <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--accent)', borderLeft: '4px solid var(--accent)' }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-light)', marginBottom: 6 }}>🗞️ หัวข้อข่าว</div>
-              <div style={{ fontSize: 16, fontWeight: 800, lineHeight: 1.5 }}>{newsData?.newsTitle}</div>
+            <div style={{ background: 'var(--bg-primary)', padding: 12, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--accent)', borderLeft: '4px solid var(--accent)' }}>
+              <div style={{ fontSize: 15, fontWeight: 800 }}>{newsData?.newsTitle}</div>
+              {analysisResult.news_reference && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>📰 {analysisResult.news_reference}</div>}
             </div>
 
-            {/* ผลวิเคราะห์ */}
-            <div style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--warning)', borderLeft: '4px solid var(--warning)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--warning)' }}>
-                  🤖 AI วิเคราะห์ประเด็น — {analysisResult.usedPreset?.name || 'Default'}
-                </div>
-                <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }}
-                  onClick={() => copyText(analysisResult.summary, 'summary')}>
-                  {copied === 'summary' ? '✅ คัดลอกแล้ว' : '📋 คัดลอก'}
-                </button>
-              </div>
-              <div style={{ fontSize: 15, lineHeight: 2, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>
-                {analysisResult.summary}
-              </div>
-            </div>
-
-            {/* Engagement Ending */}
-            {analysisResult.engagement_ending && (
-              <div style={{ background: 'var(--bg-primary)', padding: 14, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--success)', borderLeft: '4px solid var(--success)' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--success)', marginBottom: 6 }}>💬 ประโยคปิดกระตุ้นคอมเมนต์</div>
-                <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{analysisResult.engagement_ending}</div>
-              </div>
-            )}
-
-            {/* Key Points / Viral Headlines */}
-            {analysisResult.key_points?.length > 0 && (
-              <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8 }}>📌 ประเด็นสำคัญ / Viral Headlines</div>
-                {analysisResult.key_points.map((point, i) => (
-                  <div key={i} style={{ fontSize: 13, color: 'var(--text-secondary)', padding: '6px 0', display: 'flex', gap: 8 }}>
-                    <span style={{ color: 'var(--accent-light)', fontWeight: 700 }}>•</span> {point}
+            {/* แสดงแต่ละ Version */}
+            {analysisResult.versions?.map((v, i) => (
+              <div key={i} style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border)', borderLeft: `4px solid hsl(${i * 60}, 70%, 50%)` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 14, fontWeight: 800 }}>#{i+1} {v.style}</span>
+                    {v.tone && <span style={{ fontSize: 9, padding: '2px 8px', background: 'var(--info-bg)', color: 'var(--info)', borderRadius: 10 }}>🎭 {v.tone}</span>}
+                    {v.target && <span style={{ fontSize: 9, padding: '2px 8px', background: 'var(--success-bg)', color: 'var(--success)', borderRadius: 10 }}>👤 {v.target}</span>}
                   </div>
-                ))}
-              </div>
-            )}
-
-            {/* Meta Tags */}
-            <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
-              {analysisResult.selected_main_angle && <span style={{ fontSize: 11, padding: '4px 10px', background: 'var(--viral-bg)', color: 'var(--viral)', borderRadius: 12 }}>🎯 {analysisResult.selected_main_angle}</span>}
-              {analysisResult.emotion && <span style={{ fontSize: 11, padding: '4px 10px', background: 'var(--info-bg)', color: 'var(--info)', borderRadius: 12 }}>🎭 {analysisResult.emotion}</span>}
-              {analysisResult.viral_potential && <span style={{ fontSize: 11, padding: '4px 10px', background: 'var(--warning-bg)', color: 'var(--warning)', borderRadius: 12 }}>🔥 FB Safety: {analysisResult.viral_potential}</span>}
-              {analysisResult.target_audience && <span style={{ fontSize: 11, padding: '4px 10px', background: 'var(--success-bg)', color: 'var(--success)', borderRadius: 12 }}>👤 {analysisResult.target_audience}</span>}
-            </div>
-
-            {/* FB Safety Check */}
-            {analysisResult.facebook_safe_check?.replaced_words?.length > 0 && (
-              <div style={{ background: 'var(--bg-primary)', padding: 14, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--info)' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--info)', marginBottom: 6 }}>🛡️ Facebook Safety — คำที่เปลี่ยนแล้ว</div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                  {analysisResult.facebook_safe_check.replaced_words.join(', ')}
+                  <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }}
+                    onClick={() => copyText(v.content, `v${i}`)}>
+                    {copied === `v${i}` ? '✅ คัดลอกแล้ว' : '📋 คัดลอก'}
+                  </button>
                 </div>
+                {v.title && <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent-light)', marginBottom: 8 }}>{v.title}</div>}
+                {v.hook && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--warning)', marginBottom: 8, fontStyle: 'italic' }}>🪝 {v.hook}</div>}
+                <div style={{ fontSize: 14, lineHeight: 2, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{v.content}</div>
+                {v.closing && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--success)', marginTop: 10, fontStyle: 'italic' }}>💬 {v.closing}</div>}
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8 }}>📊 {v.content?.split(/\s+/).length || 0} คำ</div>
+              </div>
+            ))}
+
+            {/* ถ้าไม่มี versions แสดง summary แบบเดิม */}
+            {(!analysisResult.versions || analysisResult.versions.length === 0) && analysisResult.summary && (
+              <div style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--warning)', borderLeft: '4px solid var(--warning)' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--warning)', marginBottom: 12 }}>🤖 ผลลัพธ์</div>
+                <div style={{ fontSize: 15, lineHeight: 2, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{analysisResult.summary}</div>
               </div>
             )}
 
-            {/* ปุ่มวิเคราะห์ใหม่ด้วย Preset อื่น */}
+            {/* Debug Panel */}
+            {analysisResult.debug && (
+              <details style={{ marginBottom: 16 }}>
+                <summary style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', cursor: 'pointer', padding: '8px 0' }}>🔍 Debug — ตรวจสอบข้อมูลที่ส่งให้ AI</summary>
+                <div style={{ background: 'var(--bg-primary)', padding: 12, borderRadius: 'var(--radius-sm)', marginTop: 4, fontSize: 11, color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                  <div>📏 Prompt ความยาว: {analysisResult.debug.promptLength?.toLocaleString()} ตัวอักษร</div>
+                  <div>📰 เนื้อข่าว: {analysisResult.debug.newsBodyLength?.toLocaleString()} ตัวอักษร</div>
+                  <div>📌 ประเด็นที่แตก: {analysisResult.debug.breakdownPointsCount} ประเด็น</div>
+                  <div>🎯 Preset: {analysisResult.debug.presetUsed}</div>
+                  <div>🔗 มี Breakdown: {analysisResult.debug.hasBreakdown ? '✅ ใช่' : '❌ ไม่'}</div>
+                  <div style={{ marginTop: 8, wordBreak: 'break-all', maxHeight: 150, overflow: 'auto', background: 'var(--bg-secondary)', padding: 8, borderRadius: 4 }}>
+                    <strong>Prompt Preview:</strong><br/>{analysisResult.debug.promptPreview}
+                  </div>
+                </div>
+              </details>
+            )}
+
+            {/* ปุ่มวิเคราะห์ใหม่ */}
             <div style={{ paddingTop: 16, borderTop: '1px solid var(--border)', marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 10 }}>🔄 วิเคราะห์ใหม่ด้วย Prompt อื่น:</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 10 }}>🔄 สร้างใหม่ด้วย Prompt อื่น:</div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {analysisPresets.map(p => (
-                  <button key={p.id} className="btn btn-outline btn-sm"
-                    disabled={loading}
-                    onClick={() => handleAnalyze(p.id)}
-                    style={{
-                      fontSize: 12,
-                      background: analysisResult.usedPreset?.id === p.id ? 'var(--accent)' : undefined,
-                      color: analysisResult.usedPreset?.id === p.id ? '#fff' : undefined,
-                      border: analysisResult.usedPreset?.id === p.id ? '1px solid var(--accent)' : undefined,
-                    }}>
+                  <button key={p.id} className="btn btn-outline btn-sm" disabled={loading} onClick={() => handleAnalyze(p.id)}
+                    style={{ fontSize: 12, background: analysisResult.usedPreset?.id === p.id ? 'var(--accent)' : undefined, color: analysisResult.usedPreset?.id === p.id ? '#fff' : undefined }}>
                     {loading && selectedPreset === p.id ? '⏳...' : p.name}
                   </button>
                 ))}

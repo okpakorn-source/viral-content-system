@@ -162,45 +162,79 @@ export async function POST(request) {
       }
 
       console.log(`[Analyze] Final prompt length: ${prompt.length}ch`);
-      console.log(`[Analyze] Prompt starts with: "${prompt.slice(0, 150)}"`);
-      console.log(`[Analyze] Prompt contains news text? ${prompt.includes(text.slice(0, 50)) ? 'YES ✅' : 'NO ❌'}`);
+      console.log(`[Analyze] Has breakdown: ${!!breakdownData}, Points: ${breakdownData?.key_points?.length || 0}`);
+
+      // === สร้าง Multi-Version Writing Prompt ===
+      let multiPrompt = prompt;
+      multiPrompt += `\n\n=== คำสั่งสำคัญสำหรับการเขียน ===
+คุณต้องสร้างเนื้อหาหลายเวอร์ชันจากข่าวนี้ โดยแต่ละเวอร์ชันใช้มุมเขียนต่างกัน
+แต่ละเวอร์ชัน:
+- ต้องยาวอย่างน้อย 280 คำ (ห้ามสั้นกว่านี้เด็ดขาด)
+- ต้องอ้างอิงข้อมูลจริงจากข่าว ห้ามแต่งเรื่องที่ไม่มีในข่าว
+- ต้องครอบคลุมประเด็นสำคัญจากข่าว
+- ต้องมีโครงสร้าง: เปิดเรื่อง(hook) → เล่าเรื่อง → รายละเอียด → ปิดกระตุ้นอารมณ์
+
+สร้างอย่างน้อย 5 เวอร์ชัน ในแนวต่างๆ:
+1. แนวดราม่า/เดือด - เน้นความขัดแย้ง ความรุนแรงทางอารมณ์
+2. แนวซึ้ง/สะเทือนใจ - เน้นอารมณ์ ความเห็นอกเห็นใจ
+3. แนวไวรัล/แชร์ง่าย - เปิดแรง กระตุ้นอารมณ์ให้แชร์
+4. แนวชวนถกเถียง/คอมเมนต์ - ตั้งคำถาม ให้คนมาแสดงความเห็น
+5. แนวเล่าเรื่อง/บรรยาย - เล่าเป็นเรื่องราวยาว มีรายละเอียด
+
+ตอบเป็น JSON:
+{
+  "versions": [
+    {"style": "ชื่อแนว", "title": "พาดหัว", "content": "เนื้อหายาว 280+ คำ", "hook": "ประโยคเปิด", "closing": "ประโยคปิดกระตุ้น", "tone": "โทนเสียง", "target": "กลุ่มเป้าหมาย"}
+  ],
+  "news_reference": "สรุปข่าวต้นฉบับที่ใช้อ้างอิง 2-3 ประโยค"
+}`;
 
       try {
-        const result = await callAI({ prompt, model: 'gpt-4o', temperature: 0.6, maxTokens: 8000 });
+        const result = await callAI({ prompt: multiPrompt, model: 'gpt-4o', temperature: 0.7, maxTokens: 16000 });
         console.log('[Analyze] AI keys:', Object.keys(result || {}));
+        console.log('[Analyze] versions count:', result?.versions?.length || 0);
+
+        // Debug info ส่งกลับ frontend
+        const debugInfo = {
+          promptLength: multiPrompt.length,
+          newsBodyLength: text?.length || 0,
+          newsTitle: newsTitle || '',
+          breakdownPointsCount: breakdownData?.key_points?.length || 0,
+          presetUsed: preset.name,
+          hasBreakdown: !!breakdownData,
+          promptPreview: multiPrompt.slice(0, 500) + '...',
+        };
 
         if (result && typeof result === 'object') {
-          const summary = extractSummary(result);
+          // ถ้า AI ตอบแบบเดิม (ไม่มี versions) → wrap เป็น versions
+          let versions = result.versions || [];
+          if (versions.length === 0 && result.main_post) {
+            versions = [{ style: preset.name, title: newsTitle, content: extractSummary(result), hook: '', closing: result.engagement_ending || '', tone: result.emotion || '', target: '' }];
+          }
+
           return NextResponse.json({
             success: true,
             data: {
               usedPreset: { id: preset.id, name: preset.name },
-              summary: summary || `(AI ตอบแต่ไม่มี main_post — keys: ${Object.keys(result).join(', ')})`,
-              key_points: extractArray(result, 'key_points', 'keyPoints', 'possible_angles', 'viral_headlines'),
-              people_involved: extractArray(result, 'people_involved', 'people'),
-              emotion: extractString(result, 'emotion', 'tone', 'emotional_direction'),
-              content_type: extractString(result, 'content_type', 'type', 'selected_main_angle'),
-              viral_potential: extractString(result, 'viral_potential', 'viralPotential', 'facebook_safety_level'),
-              suggested_angles: extractArray(result, 'suggested_angles', 'angles', 'possible_angles', 'viral_headlines'),
-              target_audience: extractString(result, 'target_audience', 'audience'),
+              versions,
+              news_reference: result.news_reference || '',
+              summary: extractSummary(result) || versions[0]?.content || '',
+              key_points: extractArray(result, 'key_points', 'keyPoints', 'viral_headlines'),
+              emotion: extractString(result, 'emotion', 'tone'),
+              viral_potential: extractString(result, 'viral_potential', 'facebook_safety_level'),
+              suggested_angles: extractArray(result, 'suggested_angles', 'angles', 'viral_headlines'),
               engagement_ending: result.engagement_ending || '',
-              selected_main_angle: result.selected_main_angle || '',
               facebook_safe_check: result.facebook_safe_check || null,
-              emotion_analysis: result.emotion_analysis || null,
+              debug: debugInfo,
             },
           });
         }
       } catch (err) {
         console.error('[Analyze] ERROR:', err.message);
         return NextResponse.json({
-          success: true,
-          data: {
-            usedPreset: { id: preset.id, name: preset.name },
-            summary: `⚠️ วิเคราะห์ไม่สำเร็จ: ${err.message}`,
-            key_points: [], people_involved: [], emotion: '', content_type: '',
-            viral_potential: '', suggested_angles: [], target_audience: '',
-          },
-        });
+          success: false,
+          error: `วิเคราะห์ไม่สำเร็จ: ${err.message}`,
+        }, { status: 500 });
       }
     }
 
