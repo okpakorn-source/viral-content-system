@@ -344,14 +344,14 @@ export default function NewContentPage() {
                     </div>
                   )}
 
-                  {/* === เลือก Preset วิเคราะห์ === */}
-                  {(rawText || url) && analysisPresets.length > 0 && (
+                  {/* === ปุ่มเริ่มวิเคราะห์ — แสดงเสมอ === */}
+                  {analysisPresets.length > 0 ? (
                     <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--accent)', marginTop: 12 }}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent-light)', marginBottom: 10 }}>🎯 เลือกแนวทางวิเคราะห์ แล้วกดปุ่มเพื่อเริ่ม:</div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
                         {analysisPresets.map(p => (
                           <button key={p.id} type="button" className="btn btn-lg"
-                            disabled={loading}
+                            disabled={loading || (!rawText && !url)}
                             onClick={() => handleSummarize(p.id)}
                             style={{
                               background: selectedPreset === p.id ? 'var(--accent)' : 'var(--bg-secondary)',
@@ -360,20 +360,18 @@ export default function NewContentPage() {
                               padding: '12px 14px',
                               textAlign: 'left',
                               cursor: loading ? 'wait' : 'pointer',
+                              opacity: (!rawText && !url) ? 0.5 : 1,
                             }}>
-                            <div style={{ fontSize: 13, fontWeight: 700 }}>{p.name}</div>
+                            <div style={{ fontSize: 13, fontWeight: 700 }}>{loading && selectedPreset === p.id ? '⏳ กำลังวิเคราะห์...' : p.name}</div>
                             <div style={{ fontSize: 10, color: selectedPreset === p.id ? 'rgba(255,255,255,0.8)' : 'var(--text-muted)', marginTop: 4 }}>{p.desc}</div>
                           </button>
                         ))}
                       </div>
                       <a href="/prompts?tab=analysis" target="_blank" style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8, display: 'inline-block' }}>⚙️ จัดการ Presets ในหน้า Prompts</a>
                     </div>
-                  )}
-
-                  {/* ปุ่ม fallback กรณีไม่มี presets */}
-                  {analysisPresets.length === 0 && (
+                  ) : (
                     <button type="submit" className="btn btn-viral btn-lg" style={{ width: '100%', marginTop: 12 }} disabled={loading || (!rawText && !url)}>
-                      🚀 ส่งให้ AI สกัดข่าว + วิเคราะห์
+                      {loading ? '⏳ กำลังวิเคราะห์...' : '🚀 ส่งให้ AI สกัดข่าว + วิเคราะห์'}
                     </button>
                   )}
                 </form>
