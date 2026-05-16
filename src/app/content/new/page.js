@@ -375,8 +375,8 @@ export default function NewContentPage() {
                 {/* AI Analysis Summary — ใช้ prompt "วิเคราะห์ประเด็น" จากหน้าจัดการ */}
                 <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--warning)', borderLeft: '4px solid var(--warning)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--warning)', textTransform: 'uppercase' }}>🤖 AI วิเคราะห์ประเด็น (จาก Prompt ที่ตั้งไว้)</div>
-                    <a href="/prompts" target="_blank" style={{ fontSize: 10, color: 'var(--accent-light)', textDecoration: 'none' }}>⚙️ แก้ไข Prompt</a>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--warning)', textTransform: 'uppercase' }}>🤖 AI วิเคราะห์ประเด็น (ใช้ Prompt: "วิเคราะห์ประเด็น")</div>
+                    <a href="/prompts?tab=analysis" target="_blank" style={{ fontSize: 10, color: 'var(--accent-light)', textDecoration: 'none' }}>⚙️ แก้ไข Prompt "วิเคราะห์ประเด็น"</a>
                   </div>
                   <div style={{ fontSize: 14, lineHeight: 2, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{summary.summary}</div>
                 </div>

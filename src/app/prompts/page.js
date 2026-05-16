@@ -1,6 +1,7 @@
 'use client';
 import Header from '@/components/layout/Header';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 const PROMPT_LABELS = {
   extraction: { name: '📥 สกัดเนื้อข่าว', desc: 'AI ตัวที่ 1: แยกเนื้อข่าวจริงจาก raw text' },
@@ -9,8 +10,10 @@ const PROMPT_LABELS = {
   article: { name: '✍️ เขียนบทความ', desc: 'เขียนบทความไวรัลจากข้อมูลที่วิเคราะห์แล้ว' },
 };
 
-export default function PromptsPage() {
-  const [selected, setSelected] = useState('extraction');
+function PromptsPageInner() {
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get('tab') || 'extraction';
+  const [selected, setSelected] = useState(initialTab);
   const [prompts, setPrompts] = useState({});
   const [system, setSystem] = useState('');
   const [user, setUser] = useState('');
@@ -23,8 +26,9 @@ export default function PromptsPage() {
     fetch('/api/prompts').then(r => r.json()).then(d => {
       if (d.success) {
         setPrompts(d.data);
-        setSystem(d.data[selected]?.system || '');
-        setUser(d.data[selected]?.user || '');
+        const tab = initialTab;
+        setSystem(d.data[tab]?.system || '');
+        setUser(d.data[tab]?.user || '');
       }
       setLoading(false);
     }).catch(() => setLoading(false));
@@ -146,5 +150,13 @@ export default function PromptsPage() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function PromptsPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <PromptsPageInner />
+    </Suspense>
   );
 }
