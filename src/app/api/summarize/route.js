@@ -40,11 +40,19 @@ function extractString(result, ...keys) {
 
 export async function POST(request) {
   try {
-    const { text, sourceType, customPrompt, analysisPresetId, mode, newsTitle, breakdownData, researchData, workflowId } = await request.json();
+    const { text, sourceType, customPrompt, analysisPresetId, mode, newsTitle, breakdownData, researchData, contentLength, workflowId } = await request.json();
 
     if (!text || text.length < 10) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
     }
+
+    // === Content Length Config ===
+    const lengthConfig = {
+      short:  { min: 250, max: 300, paragraphs: '3', paraDesc: '3 ย่อหน้า', sentences: '3-5' },
+      medium: { min: 400, max: 500, paragraphs: '4-5', paraDesc: '4-5 ย่อหน้า', sentences: '4-6' },
+      long:   { min: 500, max: 1000, paragraphs: '6-8', paraDesc: '6-8 ย่อหน้า', sentences: '4-8' },
+    };
+    const lenCfg = lengthConfig[contentLength] || lengthConfig.short;
 
     // ===== MODE: extract — สกัดเนื้อข่าวอย่างเดียว =====
     if (mode === 'extract') {
@@ -258,10 +266,10 @@ export async function POST(request) {
       // === สร้าง Multi-Version Writing Prompt + Facebook Safety ===
       let multiPrompt = prompt + '\n\n=== คำสั่งสำคัญสำหรับการเขียน ===\n' +
         'คุณต้องสร้างเนื้อหาหลายเวอร์ชันจากข่าวนี้ โดยแต่ละเวอร์ชันใช้มุมเขียนต่างกัน\n' +
-        'แต่ละเวอร์ชัน:\n' +
-        '- ต้องยาวอย่างน้อย 250 คำ หรือ 3 ย่อหน้าเต็มสำหรับ Facebook (ห้ามสั้นกว่านี้เด็ดขาด)\n' +
-        '- โครงสร้าง 3 ย่อหน้า: [ย่อหน้า 1] เปิดแรง hook ดึงอารมณ์ [ย่อหน้า 2] เล่ารายละเอียด storytelling [ย่อหน้า 3] ปิดด้วยประโยคบรรยายทิ้งอารมณ์ทรงพลัง\n' +
-        '- แต่ละย่อหน้าต้องมีอย่างน้อย 3-5 ประโยค คั่นด้วย \\n\\n\n' +
+        `แต่ละเวอร์ชัน:\n` +
+        `- ต้องยาวอย่างน้อย ${lenCfg.min} คำ ถึง ${lenCfg.max} คำ แบ่ง ${lenCfg.paraDesc} สำหรับ Facebook (ห้ามสั้นกว่า ${lenCfg.min} คำเด็ดขาด)\n` +
+        `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้า 1] เปิดแรง hook ดึงอารมณ์ [ย่อหน้าตรงกลาง] เล่ารายละเอียด storytelling [ย่อหน้าสุดท้าย] ปิดด้วยประโยคบรรยายทิ้งอารมณ์ทรงพลัง\n` +
+        `- แต่ละย่อหน้าต้องมีอย่างน้อย ${lenCfg.sentences} ประโยค คั่นด้วย \\n\\n\n` +
         '- ต้องอ้างอิงข้อมูลจริงจากข่าว ห้ามแต่งเรื่องที่ไม่มีในข่าว\n' +
         '- ต้องครอบคลุมประเด็นสำคัญจากข่าว\n' +
         '- ต้องมีโครงสร้าง: เปิดเรื่อง(hook) → เล่าเรื่อง → รายละเอียด → ปิดด้วยประโยคบรรยายทรงพลังทิ้งท้าย\n' +
@@ -546,9 +554,9 @@ ${actualNewsBody.slice(0, 3000)}
           '   - เวอร์ชัน 1: ผสมมุมที่ viral score สูงสุด 2-3 มุม (เน้นไวรัล)\n' +
           '   - เวอร์ชัน 2: ผสมมุม Emotional + เรื่องเล่า (เน้นอิน สะเทือนใจ)\n' +
           '   - เวอร์ชัน 3: ผสมมุมข้อมูล + วิเคราะห์ (เน้นเนื้อหาครบถ้วน)\n\n' +
-          'แต่ละเวอร์ชัน:\n' +
-          '- ต้องยาวอย่างน้อย 250 คำ / 3 ย่อหน้าเต็ม\n' +
-          '- โครงสร้าง: [ย่อหน้า 1] เปิดแรง hook → [ย่อหน้า 2] เล่ารายละเอียด → [ย่อหน้า 3] ปิดด้วยประโยคบรรยายทรงพลัง\n' +
+          `แต่ละเวอร์ชัน:\n` +
+          `- ต้องยาวอย่างน้อย ${lenCfg.min} คำ ถึง ${lenCfg.max} คำ / ${lenCfg.paraDesc}\n` +
+          `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้าแรก] เปิดแรง hook → [ย่อหน้ากลาง] เล่ารายละเอียด → [ย่อหน้าสุดท้าย] ปิดด้วยประโยคบรรยายทรงพลัง\n` +
           '- ⚠️ ห้ามตั้งคำถามปิดท้าย ห้ามจบด้วยคำถามใดๆ\n' +
           '- ใช้ข้อมูลจากข่าวจริงเท่านั้น ห้ามแต่งเรื่องเพิ่ม\n' +
           '- ระบุว่าผสมจากมุมไหนบ้าง (ใน mixed_from)\n\n' +

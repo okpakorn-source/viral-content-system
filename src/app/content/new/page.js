@@ -34,6 +34,7 @@ export default function NewContentPage() {
   const [researchData, setResearchData] = useState(null);
   const [selectedResearch, setSelectedResearch] = useState([]);
   const [researching, setResearching] = useState(false);
+  const [contentLength, setContentLength] = useState('short'); // short | medium | long
 
   // Load presets
   useEffect(() => {
@@ -154,6 +155,7 @@ export default function NewContentPage() {
           mode: 'analyze',
           breakdownData: breakdownData || null,
           researchData: researchData || null,
+          contentLength,
           workflowId,
         }),
       });
@@ -185,6 +187,7 @@ export default function NewContentPage() {
           mode: 'mix',
           breakdownData,
           researchData: researchData || null,
+          contentLength,
           workflowId,
         }),
       });
@@ -711,10 +714,35 @@ export default function NewContentPage() {
               <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6, textAlign: 'center' }}>ยึด Prompt + Safety Rules ครบทุกข้อ • ใช้ข้อมูลจากข่าวจริงเท่านั้น</div>
             </div>
 
+            {/* 📏 เลือกความยาวเนื้อหา */}
+            <div style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 4 }}>📏 เลือกความยาวเนื้อหา</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>ข่าวที่มีข้อมูลเสริมเยอะ ใช้ความยาวมากจะได้เนื้อหาครบถ้วนกว่า</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                {[
+                  { id: 'short', label: '📝 สั้นกระชับ', range: '250-300 คำ', desc: 'โพสต์ไวรัลมาตรฐาน', para: '3 ย่อหน้า', color: '#22c55e' },
+                  { id: 'medium', label: '📄 ปานกลาง', range: '400-500 คำ', desc: 'มีข้อมูลเสริมเพิ่ม', para: '4-5 ย่อหน้า', color: '#f59e0b' },
+                  { id: 'long', label: '📰 ยาวครบถ้วน', range: '500-1000 คำ', desc: 'ข่าวเจาะลึก เต็มรายละเอียด', para: '6-8 ย่อหน้า', color: '#ef4444' },
+                ].map(opt => (
+                  <div key={opt.id} onClick={() => setContentLength(opt.id)}
+                    style={{
+                      padding: '14px 12px', borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                      background: contentLength === opt.id ? `${opt.color}15` : 'var(--bg-secondary)',
+                      border: contentLength === opt.id ? `2px solid ${opt.color}` : '1px solid var(--border)',
+                      transition: 'all 0.2s',
+                    }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: contentLength === opt.id ? opt.color : 'var(--text-primary)', marginBottom: 2 }}>{opt.label}</div>
+                    <div style={{ fontSize: 15, fontWeight: 900, color: opt.color, marginBottom: 4 }}>{opt.range}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{opt.para} • {opt.desc}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {/* เลือก Prompt สร้างเนื้อหา → ไปหน้าผลลัพธ์ */}
             <div style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', border: '2px solid var(--accent)' }}>
               <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--accent-light)', marginBottom: 4 }}>🎯 เลือก Prompt สร้างเนื้อหาสำเร็จรูป</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14 }}>AI จะนำข้อมูลทั้งหมด (เนื้อข่าว + ผลแตกประเด็น + ข้อมูลเสริม) มาสร้างเนื้อหาตาม Prompt ที่เลือก</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14 }}>AI จะนำข้อมูลทั้งหมด + ความยาว "{contentLength === 'short' ? '250-300 คำ' : contentLength === 'medium' ? '400-500 คำ' : '500-1000 คำ'}" มาสร้างเนื้อหา</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
                 {analysisPresets.map(p => (
                   <button key={p.id} type="button" disabled={loading} onClick={() => handleAnalyze(p.id)}
