@@ -1,31 +1,61 @@
 import { callAI } from './openai.js';
-import { ARTICLE_GENERATION_PROMPT } from './prompts.js';
+import { getPrompt } from './promptStore.js';
 
 /**
  * สร้างบทความไวรัล
  */
 export async function generateArticle({ headline, hook, content, tone = 'emotional', instructions = '' }) {
-  const userPrompt = ARTICLE_GENERATION_PROMPT.user
-    .replace('{headline}', headline)
+  const prompt = getPrompt('article');
+
+  const systemPrompt = prompt?.system || 'คุณคือนักเขียนคอนเทนต์ไวรัล ตอบ JSON เท่านั้น';
+
+  const userPrompt = (prompt?.user || `เขียนบทความ:
+หัวข้อ: {headline}
+Hook: {hook}
+เนื้อหา: {content}
+โทน: {tone}
+
+ตอบ JSON:
+{
+  "headline": "",
+  "body": "",
+  "hook": "",
+  "closing": "",
+  "caption": "",
+  "hashtags": []
+}`)
+    .replace('{headline}', headline || '')
     .replace('{hook}', hook || '')
-    .replace('{content}', content)
+    .replace('{content}', content?.slice(0, 4000) || '')
     .replace('{tone}', tone)
     .replace('{instructions}', instructions);
-  
-  const result = await callAI({
-    systemPrompt: ARTICLE_GENERATION_PROMPT.system,
-    userPrompt,
-    temperature: 0.8,
-  });
 
-  return result;
+  try {
+    return await callAI({
+      systemPrompt,
+      userPrompt,
+      temperature: 0.7,
+    });
+  } catch (err) {
+    console.error('[generateArticle] Error:', err.message);
+    return {
+      headline: headline || '(สร้างไม่สำเร็จ)',
+      body: 'เกิดข้อผิดพลาด: ' + err.message,
+      hook: hook || '',
+      closing: '',
+      caption: '',
+      hashtags: [],
+    };
+  }
 }
 
 /**
  * เขียนบทความใหม่ด้วยโทนที่ต่างออกไป
  */
 export async function rewriteArticle({ originalBody, newTone, feedback = '' }) {
-  const systemPrompt = ARTICLE_GENERATION_PROMPT.system;
+  const prompt = getPrompt('article');
+  const systemPrompt = prompt?.system || 'คุณคือนักเขียนคอนเทนต์ไวรัล ตอบ JSON เท่านั้น';
+
   const userPrompt = `เขียนบทความนี้ใหม่ด้วยโทน "${newTone}"
 
 ===== บทความเดิม =====
@@ -45,5 +75,14 @@ ${feedback}
   "hashtags": ["แฮชแท็ก"]
 }`;
 
-  return await callAI({ systemPrompt, userPrompt, temperature: 0.9 });
+  try {
+    return await callAI({ systemPrompt, userPrompt, temperature: 0.8 });
+  } catch (err) {
+    console.error('[rewriteArticle] Error:', err.message);
+    return {
+      headline: '(เขียนใหม่ไม่สำเร็จ)',
+      body: 'เกิดข้อผิดพลาด: ' + err.message,
+      hook: '', closing: '', caption: '', hashtags: [],
+    };
+  }
 }
