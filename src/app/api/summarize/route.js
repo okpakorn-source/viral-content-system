@@ -3,6 +3,8 @@ import { callAI } from '@/lib/ai/openai';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
 import { MasterAgent } from '@/lib/agents/masterAgent';
+import { callSmartAI, getAvailableModels } from '@/lib/ai/aiRouter';
+import { moderateVersions } from '@/lib/ai/moderationAgent';
 
 /**
  * ดึง summary จาก AI response ไม่ว่า key จะชื่ออะไร
@@ -52,8 +54,9 @@ export async function POST(request) {
           .replace('{content}', text.slice(0, 8000))
           .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
 
-        console.log('[Extract] Extracting...');
-        const result = await callAI({ prompt, temperature: 0.2 });
+        console.log('[Extract] Extracting via SmartAI...');
+        const { result, model: usedModel } = await callSmartAI('extract', { prompt, temperature: 0.2 });
+        console.log(`[Extract] Used model: ${usedModel}`);
 
         if (result?.news_body && result.news_body.length >= 20) {
           console.log(`[Extract] OK: "${result.news_title}" (${result.news_body.length}ch)`);
@@ -282,7 +285,9 @@ export async function POST(request) {
 
 
       try {
-        const result = await callAI({ prompt: multiPrompt, model: 'gpt-4o', temperature: 0.7, maxTokens: 16000 });
+        // ใช้ Smart Router: Claude สำหรับเขียน, fallback GPT-4o
+        const { result, model: usedModel } = await callSmartAI('write', { prompt: multiPrompt, temperature: 0.7, maxTokens: 16000 });
+        console.log(`[Analyze] Used model: ${usedModel}`);
         console.log('[Analyze] AI keys:', Object.keys(result || {}));
         console.log('[Analyze] versions count:', result?.versions?.length || 0);
 
@@ -321,10 +326,20 @@ export async function POST(request) {
             await agent.saveMemoryToDB().catch(() => {});
           }
 
+          // === OpenAI Moderation API (ฟรี!) ===
+          let moderation = { overallSafe: true, results: [] };
+          try {
+            moderation = await moderateVersions(versions);
+            console.log(`[Analyze] Moderation: ${moderation.overallSafe ? '✅ ALL SAFE' : '⚠️ FLAGGED'}`);
+          } catch (modErr) {
+            console.warn('[Analyze] Moderation check skipped:', modErr.message);
+          }
+
           return NextResponse.json({
             success: true,
             data: {
               usedPreset: { id: preset.id, name: preset.name },
+              usedModel: usedModel || 'gpt-4o',
               versions,
               news_reference: result.news_reference || '',
               summary: extractSummary(result) || versions[0]?.content || '',
@@ -334,6 +349,8 @@ export async function POST(request) {
               engagement_ending: result.engagement_ending || '',
               facebook_safe_check: result.facebook_safe_check || null,
               validation,
+              moderation,
+              availableModels: getAvailableModels(),
               debug: debugInfo,
             },
           });
