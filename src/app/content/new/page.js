@@ -44,6 +44,51 @@ export default function NewContentPage() {
   const [youtubeNeedUpload, setYoutubeNeedUpload] = useState(false);
   const [sentToReview, setSentToReview] = useState({}); // { versionIndex: true }
   const [sendingReview, setSendingReview] = useState(null);
+  const [autoMode, setAutoMode] = useState(false);
+  const [autoProgress, setAutoProgress] = useState('');
+  const [autoLog, setAutoLog] = useState([]);
+
+  // === ⚡ Auto Mode — วาง URL → ได้ผลลัพธ์ ===
+  const handleAutoMode = async () => {
+    if (!url || url.length < 5) { setError('กรุณาใส่ URL'); return; }
+    setAutoMode(true);
+    setAutoProgress('🔍 กำลังตรวจจับแหล่งข้อมูล...');
+    setAutoLog([]);
+    setError('');
+    setStep('input');
+    setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
+
+    try {
+      setAutoProgress('⚡ AI กำลังประมวลผลทุกขั้นตอนอัตโนมัติ...');
+
+      const res = await fetch('/api/auto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url,
+          preset: selectedPreset,
+          contentLength,
+        }),
+      });
+      const data = await res.json();
+
+      if (!data.success) throw new Error(data.error);
+
+      // Set all states from auto result
+      setNewsData(data.data.newsData);
+      setBreakdownData(data.data.breakdownData);
+      setAnalysisResult(data.data.analysisResult);
+      setSourceType(data.data.sourceType);
+      setAutoLog(data.data.log || []);
+      setStep('analyzed');
+      setAutoProgress('');
+    } catch (err) {
+      setError('Auto Mode: ' + err.message);
+      setAutoProgress('');
+    } finally {
+      setAutoMode(false);
+    }
+  };
 
   // === ส่งเข้าคลังรอตรวจ ===
   const handleSendToReview = async (version, index) => {
@@ -512,6 +557,107 @@ export default function NewContentPage() {
         {/* ===== STEP 1: Input ===== */}
         {step === 'input' && (
           <div className="card slide-up">
+            {/* ⚡ AUTO MODE */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(249,24,128,0.1), rgba(124,58,237,0.1))',
+              border: '2px solid rgba(249,24,128,0.4)',
+              borderRadius: 'var(--radius-lg)', padding: 20, marginBottom: 24,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 28 }}>⚡</span>
+                <div style={{ flex: 1, minWidth: 150 }}>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: '#f472b6' }}>Auto Mode</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>วาง URL แล้วรอรับผลลัพธ์ — AI คิดวิเคราะห์แทนทุกขั้นตอน</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                <input
+                  type="url" className="form-input"
+                  placeholder="วาง URL ข่าว, TikTok, YouTube — ระบบตรวจจับอัตโนมัติ"
+                  value={url} onChange={(e) => setUrl(e.target.value)}
+                  disabled={autoMode}
+                  style={{ flex: '1 1 200px', minWidth: 0 }}
+                />
+                <button onClick={handleAutoMode} disabled={!url || autoMode}
+                  style={{
+                    padding: '10px 20px', border: 'none', borderRadius: 'var(--radius-md)',
+                    background: autoMode ? 'var(--bg-elevated)' : 'linear-gradient(135deg, #f91880, #7c3aed)',
+                    color: '#fff', fontWeight: 800, fontSize: 13, cursor: autoMode ? 'wait' : 'pointer',
+                    whiteSpace: 'nowrap', boxShadow: autoMode ? 'none' : '0 4px 15px rgba(249,24,128,0.3)',
+                    transition: 'all 0.3s',
+                  }}>
+                  {autoMode ? '⏳ กำลังประมวลผล...' : '⚡ Auto สร้างเลย'}
+                </button>
+              </div>
+
+              {/* Preset + Length selectors */}
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                {analysisPresets.slice(0, 4).map(p => (
+                  <button key={p.id} onClick={() => setSelectedPreset(p.id)} disabled={autoMode}
+                    style={{
+                      padding: '4px 10px', fontSize: 10, fontWeight: 600,
+                      background: selectedPreset === p.id ? 'var(--accent)' : 'var(--bg-primary)',
+                      color: selectedPreset === p.id ? '#fff' : 'var(--text-muted)',
+                      border: `1px solid ${selectedPreset === p.id ? 'var(--accent)' : 'var(--border)'}`,
+                      borderRadius: 20, cursor: 'pointer', fontFamily: 'inherit',
+                    }}>
+                    {p.name}
+                  </button>
+                ))}
+                <span style={{ fontSize: 9, color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>|</span>
+                {[
+                  { id: 'short', label: '📝 สั้น' },
+                  { id: 'medium', label: '📄 กลาง' },
+                  { id: 'long', label: '📰 ยาว' },
+                ].map(l => (
+                  <button key={l.id} onClick={() => setContentLength(l.id)} disabled={autoMode}
+                    style={{
+                      padding: '4px 10px', fontSize: 10, fontWeight: 600,
+                      background: contentLength === l.id ? 'var(--success)' : 'var(--bg-primary)',
+                      color: contentLength === l.id ? '#fff' : 'var(--text-muted)',
+                      border: `1px solid ${contentLength === l.id ? 'var(--success)' : 'var(--border)'}`,
+                      borderRadius: 20, cursor: 'pointer', fontFamily: 'inherit',
+                    }}>
+                    {l.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Auto Progress */}
+              {autoMode && (
+                <div style={{
+                  background: 'var(--bg-primary)', padding: 14, borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border)', marginTop: 10,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <div style={{ width: 20, height: 20, border: '3px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-light)' }}>{autoProgress}</span>
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                    ⚡ ดึงเนื้อหา → สกัดข่าว → แตกประเด็น → สร้างผลลัพธ์ (ใช้เวลา ~20-40 วินาที)
+                  </div>
+                </div>
+              )}
+
+              {/* Auto Log (after done) */}
+              {autoLog.length > 0 && !autoMode && (
+                <details style={{ marginTop: 8 }}>
+                  <summary style={{ fontSize: 10, color: 'var(--text-muted)', cursor: 'pointer' }}>📊 Log ({autoLog.length} steps)</summary>
+                  <div style={{ background: 'var(--bg-primary)', padding: 8, borderRadius: 'var(--radius-sm)', marginTop: 4, fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace', maxHeight: 150, overflowY: 'auto' }}>
+                    {autoLog.map((l, i) => <div key={i}>{l}</div>)}
+                  </div>
+                </details>
+              )}
+            </div>
+
+            {/* Divider */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+              <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>หรือใช้แบบ Manual</span>
+              <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+            </div>
+
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>📥 เลือกแหล่งข้อมูล</h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 24 }}>
               {SOURCE_TYPES.map((s) => (
