@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
+import { getPrompt } from '@/lib/ai/promptStore';
 
 /**
  * POST /api/summarize
- * AI สกัดเนื้อข่าวจริงออกมาแบบครบถ้วน (ไม่ย่อ ไม่ตัด)
- * ตัดเฉพาะส่วนที่ไม่ใช่ข่าว: เมนู, โฆษณา, ลิงก์โซเชียล
+ * 
+ * Pipeline 2 ขั้นตอน:
+ * 1. ดึง prompt "extraction" จากหน้าจัดการ → สกัดเนื้อข่าวจริง
+ * 2. ดึง prompt "analysis" จากหน้าจัดการ → วิเคราะห์ประเด็นอย่างละเอียด
  */
 export async function POST(request) {
   try {
@@ -14,48 +17,24 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
     }
 
-    // ===== AI ตัวที่ 1: สกัดเนื้อข่าวจริง (ครบถ้วน ไม่ย่อ) =====
-    const systemPrompt = `คุณคือ AI News Content Extractor
-หน้าที่ของคุณคือ: รับ raw text ที่ดึงมาจากเว็บไซต์ แล้วแยกเฉพาะ "เนื้อข่าว/เนื้อหาหลัก" ออกมา
+    // ===== ดึง Prompts จากหน้าจัดการ =====
+    const extractionPrompt = getPrompt('extraction');
+    const analysisPrompt = getPrompt('analysis');
 
-สิ่งที่ต้องตัดออก:
-- เมนูเว็บไซต์, navigation bar, breadcrumb
-- ลิงก์โซเชียลมีเดีย (Facebook, TikTok, YouTube, X/Twitter URLs)
-- โฆษณา, banner, popup
-- ข้อความ copyright, footer
-- ข้อความชวนติดตาม/subscribe
-- ลิงก์ข่าวอื่นที่ไม่เกี่ยวข้อง
-- ข้อความซ้ำ
+    if (!extractionPrompt || !analysisPrompt) {
+      return NextResponse.json({ success: false, error: 'ไม่พบ Prompt templates' }, { status: 500 });
+    }
 
-สิ่งที่ต้องเก็บไว้:
-- เนื้อข่าวทั้งหมด ครบทุกย่อหน้า ห้ามตัดทอน ห้ามย่อ
-- คำพูด/คำให้สัมภาษณ์ของบุคคลในข่าว
-- ข้อมูลตัวเลข สถิติ วันเวลา สถานที่
-- ชื่อบุคคล องค์กร หน่วยงานที่เกี่ยวข้อง
+    // ===== AI ตัวที่ 1: สกัดเนื้อข่าวจริง (ใช้ extraction prompt) =====
+    const extractUserPrompt = extractionPrompt.user
+      .replace('{content}', text.slice(0, 8000))
+      .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติมจากผู้ใช้: "${customPrompt}"` : '');
 
-ตอบเป็น JSON เท่านั้น`;
-
-    const userPrompt = `สกัดเนื้อข่าวจริงจาก raw text ด้านล่าง
-ห้ามย่อ ห้ามสรุป — เอาเนื้อข่าวมาทั้งหมดตามต้นฉบับ
-
-${customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : ''}
-
-=== RAW TEXT ===
-${text.slice(0, 8000)}
-================
-
-ตอบเป็น JSON:
-{
-  "news_title": "หัวข้อข่าวหลัก (ถ้ามี)",
-  "news_body": "เนื้อข่าวทั้งหมดที่สกัดได้ — ครบถ้วน ไม่ตัดทอน ไม่ย่อ คัดมาเฉพาะส่วนที่เป็นเนื้อหาข่าวจริงๆ",
-  "news_source": "แหล่งที่มา/สำนักข่าว/ชื่อเว็บ (ถ้ามี)",
-  "news_date": "วันที่ข่าว (ถ้ามี)",
-  "news_category": "หมวดหมู่ เช่น การเมือง, บันเทิง, อาชญากรรม, เศรษฐกิจ, สังคม"
-}`;
-
+    console.log('[Summarize] Step 1: Extracting news with extraction prompt...');
+    
     const extractResult = await callAI({
-      systemPrompt,
-      userPrompt,
+      systemPrompt: extractionPrompt.system,
+      userPrompt: extractUserPrompt,
       temperature: 0.2,
     });
 
@@ -63,14 +42,16 @@ ${text.slice(0, 8000)}
     try {
       const jsonMatch = extractResult.match(/\{[\s\S]*\}/);
       newsData = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-    } catch {
+    } catch (parseErr) {
+      console.error('[Summarize] JSON parse error (extraction):', parseErr.message);
       newsData = null;
     }
 
+    // Fallback ถ้า AI parse ไม่ได้
     if (!newsData || !newsData.news_body || newsData.news_body.length < 20) {
-      // Fallback: ใช้ raw text เดิมถ้า AI parse ไม่ได้
+      console.log('[Summarize] Extraction fallback: using raw text');
       newsData = {
-        news_title: text.slice(0, 80),
+        news_title: text.slice(0, 80).replace(/\n/g, ' ').trim(),
         news_body: text.slice(0, 5000),
         news_source: '',
         news_date: '',
@@ -78,31 +59,19 @@ ${text.slice(0, 8000)}
       };
     }
 
-    // ===== AI ตัวที่ 2: วิเคราะห์ประเด็น (ใช้เนื้อข่าวที่สกัดแล้ว) =====
-    const analysisPrompt = `วิเคราะห์ข่าวต่อไปนี้:
+    console.log(`[Summarize] Extracted: title="${newsData.news_title}", body=${newsData.news_body.length} chars`);
 
-หัวข้อ: ${newsData.news_title}
+    // ===== AI ตัวที่ 2: วิเคราะห์ประเด็น (ใช้ analysis prompt) =====
+    const analyzeUserPrompt = analysisPrompt.user
+      .replace('{title}', newsData.news_title || '')
+      .replace('{content}', newsData.news_body.slice(0, 5000))
+      .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
 
-เนื้อข่าว:
-"""
-${newsData.news_body.slice(0, 5000)}
-"""
-
-ตอบเป็น JSON:
-{
-  "summary": "สรุปใจความสำคัญของข่าวนี้ใน 2-4 ประโยค",
-  "key_points": ["ประเด็นสำคัญ 1", "ประเด็นสำคัญ 2", "ประเด็นสำคัญ 3"],
-  "people_involved": ["ชื่อบุคคลที่เกี่ยวข้อง"],
-  "emotion": "อารมณ์หลักของข่าว (เช่น ตื่นเต้น, โกรธ, เศร้า, สะเทือนใจ)",
-  "content_type": "ประเภทเนื้อหา",
-  "viral_potential": "สูง/กลาง/ต่ำ — พร้อมเหตุผลสั้นๆ",
-  "suggested_angles": ["มุมมองที่น่าสนใจสำหรับสร้างคอนเทนต์ 1", "มุมมอง 2", "มุมมอง 3"],
-  "target_audience": "กลุ่มเป้าหมายที่เหมาะ"
-}`;
-
+    console.log('[Summarize] Step 2: Analyzing with analysis prompt...');
+    
     const analyzeResult = await callAI({
-      systemPrompt: 'คุณคือ AI วิเคราะห์ข่าว — วิเคราะห์ประเด็นสำคัญ สรุปใจความ แนะนำมุมมอง ตอบเป็น JSON เท่านั้น',
-      userPrompt: analysisPrompt,
+      systemPrompt: analysisPrompt.system,
+      userPrompt: analyzeUserPrompt,
       temperature: 0.5,
     });
 
@@ -110,18 +79,27 @@ ${newsData.news_body.slice(0, 5000)}
     try {
       const jsonMatch = analyzeResult.match(/\{[\s\S]*\}/);
       analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-    } catch {
+    } catch (parseErr) {
+      console.error('[Summarize] JSON parse error (analysis):', parseErr.message);
       analysis = null;
     }
 
-    if (!analysis) {
+    // Fallback
+    if (!analysis || !analysis.summary) {
+      console.log('[Summarize] Analysis fallback');
       analysis = {
-        summary: 'ไม่สามารถวิเคราะห์อัตโนมัติได้',
+        summary: 'ไม่สามารถวิเคราะห์อัตโนมัติได้ — กรุณาตรวจสอบ API Key',
         key_points: [],
-        emotion: '', content_type: newsData.news_category || '',
-        suggested_angles: [], viral_potential: '', target_audience: '',
+        people_involved: [],
+        emotion: '',
+        content_type: newsData.news_category || 'ทั่วไป',
+        viral_potential: '',
+        suggested_angles: [],
+        target_audience: '',
       };
     }
+
+    console.log(`[Summarize] Analysis done: summary=${analysis.summary?.length} chars, key_points=${analysis.key_points?.length}`);
 
     return NextResponse.json({
       success: true,
@@ -132,12 +110,15 @@ ${newsData.news_body.slice(0, 5000)}
         newsSource: newsData.news_source,
         newsDate: newsData.news_date,
         newsCategory: newsData.news_category,
-        // ผลจาก AI ตัวที่ 2 — วิเคราะห์
+        // ผลจาก AI ตัวที่ 2 — วิเคราะห์ประเด็น
         ...analysis,
       },
     });
   } catch (error) {
     console.error('Summarize API Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ 
+      success: false, 
+      error: `${error.message}${error.status === 401 ? ' — ตรวจสอบ OPENAI_API_KEY' : ''}` 
+    }, { status: 500 });
   }
 }
