@@ -114,7 +114,7 @@ export function buildFullContext(workflow) {
     }
 
     ctx += `=== จบผลแตกประเด็น ===\n\n`;
-    ctx += `⚠️ คำสั่งเหล็ก: ต้องครอบคลุมทุกประเด็นด้านบน ห้ามข้าม ห้ามซ้ำ ห้ามแต่งเรื่องใหม่ ต้องเขียนยาวอย่างน้อย 280 คำต่อเวอร์ชัน\n`;
+    ctx += `⚠️ คำสั่งเหล็ก: ต้องครอบคลุมทุกประเด็นด้านบน ห้ามข้าม ห้ามซ้ำ ห้ามแต่งเรื่องใหม่ ต้องเขียนยาวอย่างน้อย 250 คำ หรือ 3 ย่อหน้าเต็มสำหรับ Facebook (แต่ละย่อหน้า 3-5 ประโยค คั่นด้วย \n\n)\n`;
   }
 
   return ctx;
@@ -128,7 +128,7 @@ export function validateOutput(output, workflow) {
   const content = typeof output === 'string' ? output : JSON.stringify(output);
 
   // เช็คความยาว
-  if (content.length < 200) issues.push('เนื้อหาสั้นเกินไป');
+  if (content.length < 500) issues.push('เนื้อหาสั้นเกินไป (ต้องยาวกว่า 500 ตัวอักษร / ~250 คำ)');
 
   // เช็คว่ามีชื่อ/คำจากข่าวจริง
   if (workflow.newsTitle) {
