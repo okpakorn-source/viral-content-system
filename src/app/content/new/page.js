@@ -5,6 +5,7 @@ import Header from '@/components/layout/Header';
 
 const SOURCE_TYPES = [
   { value: 'url', label: '🔗 URL ข่าว/เว็บไซต์', desc: 'วางลิงก์ข่าว, บทความ, โพสต์' },
+  { value: 'image', label: '📷 แคปภาพ/รูปโพสต์', desc: 'วางภาพ (Ctrl+V) หรือลากไฟล์มา' },
   { value: 'raw', label: '📝 ข้อความ', desc: 'วางข้อความหรือพิมพ์เอง' },
   { value: 'facebook', label: '📘 Facebook', desc: 'วาง URL โพสต์ Facebook' },
   { value: 'tiktok', label: '🎵 TikTok', desc: 'วาง URL วิดีโอ TikTok' },
@@ -36,6 +37,8 @@ export default function NewContentPage() {
   const [researching, setResearching] = useState(false);
   const [contentLength, setContentLength] = useState('short'); // short | medium | long
   const [addedResearchItems, setAddedResearchItems] = useState([]); // เก็บ research ที่เพิ่มแล้ว
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
 
   // Load presets
   useEffect(() => {
@@ -71,6 +74,55 @@ export default function NewContentPage() {
     } catch (err) {
       setExtracted({ success: false, error: err.message, suggestion: 'paste' });
       setError(err.message + ' — วาง/พิมพ์ข้อความด้านล่างแทนได้เลย');
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  // === Image OCR Handlers ===
+  const processImageFile = (file) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = (e) => setImagePreview(e.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const handleImagePaste = (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        processImageFile(item.getAsFile());
+        return;
+      }
+    }
+  };
+
+  const handleImageDrop = (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer?.files?.[0];
+    if (file) processImageFile(file);
+  };
+
+  const handleImageOCR = async () => {
+    if (!imageFile) return;
+    setExtracting(true);
+    setError('');
+    try {
+      const formData = new FormData();
+      formData.append('image', imageFile);
+      const res = await fetch('/api/ocr', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.success && data.text) {
+        setRawText(data.text);
+        setExtracted({ success: true, title: data.title || 'ข่าวจากภาพ' });
+      } else {
+        setError(data.error || 'อ่านภาพไม่สำเร็จ');
+      }
+    } catch (err) {
+      setError('อ่านภาพไม่สำเร็จ: ' + err.message);
     } finally {
       setExtracting(false);
     }
@@ -278,6 +330,7 @@ export default function NewContentPage() {
     setError(''); setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
     setWorkflowId(null); setResearchData(null); setSelectedResearch([]); setAddedResearchItems([]);
     setCustomPrompt(''); setBreakdownPromptText('');
+    setImageFile(null); setImagePreview(null);
   };
 
   const needsUrl = ['url', 'facebook', 'tiktok', 'youtube'].includes(sourceType);
@@ -364,16 +417,70 @@ export default function NewContentPage() {
               </div>
             )}
 
+            {/* 📷 Image Upload Zone */}
+            {sourceType === 'image' && (
+              <div className="form-group">
+                <label className="form-label">📷 วางภาพแคปหน้าจอ หรือลากไฟล์มาวาง</label>
+                <div
+                  onPaste={handleImagePaste}
+                  onDrop={handleImageDrop}
+                  onDragOver={(e) => e.preventDefault()}
+                  onClick={() => document.getElementById('imageUpload')?.click()}
+                  tabIndex={0}
+                  style={{
+                    border: `2px dashed ${imagePreview ? 'var(--success)' : 'var(--border-light)'}`,
+                    borderRadius: 'var(--radius-md)',
+                    padding: imagePreview ? 12 : 40,
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    background: imagePreview ? 'var(--bg-primary)' : 'var(--bg-secondary)',
+                    transition: 'all 0.2s',
+                    outline: 'none',
+                  }}
+                >
+                  {imagePreview ? (
+                    <div>
+                      <img src={imagePreview} alt="Preview" style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 8, marginBottom: 10 }} />
+                      <div style={{ fontSize: 12, color: 'var(--success)', fontWeight: 600 }}>✅ ได้รับภาพแล้ว — กดปุ่มด้านล่างเพื่ออ่านข้อความ</div>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setImageFile(null); setImagePreview(null); }}
+                        style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+                        🗑️ ลบภาพ วางใหม่
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ fontSize: 40, marginBottom: 8 }}>📋</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>Ctrl+V วางภาพที่แคปมา</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>หรือลากไฟล์ภาพมาวาง • หรือคลิกเลือกไฟล์</div>
+                      <div style={{ fontSize: 11, color: 'var(--accent-light)', marginTop: 10, padding: '6px 12px', background: 'var(--accent-glow)', borderRadius: 20, display: 'inline-block' }}>
+                        รองรับ: FB, Twitter, Line, TikTok, ข่าว ฯลฯ
+                      </div>
+                    </div>
+                  )}
+                  <input id="imageUpload" type="file" accept="image/*" hidden
+                    onChange={(e) => processImageFile(e.target.files?.[0])} />
+                </div>
+
+                {/* ปุ่ม OCR */}
+                {imageFile && (
+                  <button type="button" onClick={handleImageOCR} disabled={extracting}
+                    className="btn btn-viral btn-lg" style={{ width: '100%', marginTop: 12 }}>
+                    {extracting ? '⏳ AI กำลังอ่านข้อความจากภาพ...' : '🔍 อ่านข้อความจากภาพ (AI Vision)'}
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Extracted Preview */}
             {extracted?.success && (
               <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--success)', borderRadius: 'var(--radius-md)', padding: 16, marginBottom: 16 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--success)' }}>✅ ดึงเนื้อหาสำเร็จ</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--success)' }}>✅ {sourceType === 'image' ? 'อ่านข้อความจากภาพสำเร็จ' : 'ดึงเนื้อหาสำเร็จ'}</span>
                 {extracted.title && <div style={{ fontSize: 14, fontWeight: 600, marginTop: 6 }}>{extracted.title}</div>}
               </div>
             )}
 
-            {/* Text area */}
-            {(sourceType === 'raw' || extracted || sourceType === 'facebook') && (
+            {/* Text area — แสดงกับทุก source ที่มีข้อความ */}
+            {(sourceType === 'raw' || extracted || sourceType === 'facebook' || (sourceType === 'image' && rawText)) && (
               <div className="form-group">
                 <label className="form-label">📝 {
                   extracted?.success ? 'เนื้อหาที่ดึงมา (แก้ไขได้)' :
@@ -396,7 +503,7 @@ export default function NewContentPage() {
               </div>
             )}
 
-            {/* ปุ่มสกัดข่าว */}
+            {/* ปุ่มสกัดข่าว — ทุก source เข้าที่เดียวกัน */}
             <button type="button" onClick={handleExtractNews} className="btn btn-viral btn-lg"
               style={{ width: '100%', marginTop: 12 }} disabled={loading || !rawText}>
               {loading ? '⏳ กำลังสกัดเนื้อข่าว...' : '📥 สกัดเนื้อข่าว (AI แยกข่าวจริงจากขยะ)'}
