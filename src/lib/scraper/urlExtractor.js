@@ -1,98 +1,107 @@
 import * as cheerio from 'cheerio';
 
 /**
- * ดึงเนื้อหาจาก URL
+ * ดึงเนื้อหาจาก URL เว็บไซต์ข่าว/บทความ
  */
 export async function extractFromUrl(url) {
   try {
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'th,en;q=0.9',
+        'Accept-Language': 'th-TH,th;q=0.9,en;q=0.8',
       },
       signal: AbortSignal.timeout(15000),
     });
 
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
+    
     const html = await response.text();
     const $ = cheerio.load(html);
 
-    // ลบ elements ที่ไม่ต้องการ
-    $('script, style, nav, footer, header, aside, .ads, .advertisement, .social-share, .comments').remove();
+    // Remove unwanted elements
+    $('script, style, nav, footer, header, aside, .ads, .advertisement, .social-share, .comments, .related-posts, iframe, noscript').remove();
 
-    // ดึง title
+    // Extract title
     const title = $('meta[property="og:title"]').attr('content')
       || $('title').text()
       || $('h1').first().text()
       || '';
 
-    // ดึง description
+    // Extract description
     const description = $('meta[property="og:description"]').attr('content')
       || $('meta[name="description"]').attr('content')
       || '';
 
-    // ดึง image
+    // Extract main image
     const image = $('meta[property="og:image"]').attr('content') || '';
 
-    // ดึงเนื้อหาหลัก
-    let content = '';
-    const articleSelectors = ['article', '.article-content', '.post-content', '.entry-content', '.content-body', 'main'];
-    
+    // Extract article body — try common selectors
+    const articleSelectors = [
+      'article .entry-content',
+      'article .post-content',
+      'article .article-content',
+      'article .content-detail',
+      '.article-body',
+      '.post-body',
+      '.entry-content',
+      '.content-area',
+      '[itemprop="articleBody"]',
+      '.detail-content',
+      '#article-content',
+      'article',
+      '.post',
+      'main',
+    ];
+
+    let bodyText = '';
     for (const selector of articleSelectors) {
       const el = $(selector);
       if (el.length && el.text().trim().length > 100) {
-        content = el.text().trim();
-        break;
+        // Get paragraphs
+        const paragraphs = [];
+        el.find('p').each((_, p) => {
+          const text = $(p).text().trim();
+          if (text.length > 20) paragraphs.push(text);
+        });
+        if (paragraphs.length > 0) {
+          bodyText = paragraphs.join('\n\n');
+          break;
+        }
       }
     }
 
-    // ถ้าไม่เจอ ใช้ body paragraphs
-    if (!content) {
-      const paragraphs = [];
-      $('p').each((_, el) => {
-        const text = $(el).text().trim();
-        if (text.length > 30) paragraphs.push(text);
+    // Fallback: get all p tags
+    if (!bodyText) {
+      const allP = [];
+      $('p').each((_, p) => {
+        const text = $(p).text().trim();
+        if (text.length > 30) allP.push(text);
       });
-      content = paragraphs.join('\n\n');
+      bodyText = allP.slice(0, 30).join('\n\n');
+    }
+
+    // Final fallback: get body text
+    if (!bodyText || bodyText.length < 50) {
+      bodyText = $('body').text().replace(/\s+/g, ' ').trim().slice(0, 3000);
     }
 
     return {
+      success: true,
+      type: 'url',
       title: title.trim(),
-      content: cleanText(content),
       description: description.trim(),
+      text: bodyText.trim(),
       image,
       url,
-      source: new URL(url).hostname,
+      extractedAt: new Date().toISOString(),
     };
   } catch (error) {
-    throw new Error(`ไม่สามารถดึงเนื้อหาจาก URL: ${error.message}`);
+    return {
+      success: false,
+      type: 'url',
+      error: `ไม่สามารถดึงเนื้อหาจาก URL ได้: ${error.message}`,
+      url,
+    };
   }
-}
-
-/**
- * ทำความสะอาดข้อความ
- */
-export function cleanText(text) {
-  return text
-    .replace(/\s+/g, ' ')             // รวม whitespace
-    .replace(/\n\s*\n/g, '\n\n')     // รวมบรรทัดว่าง
-    .replace(/\t/g, ' ')              // แทน tab
-    .replace(/[^\S\n]+/g, ' ')       // รวม spaces
-    .trim();
-}
-
-/**
- * ดึงจาก raw text input
- */
-export function extractFromRawText(text) {
-  return {
-    title: text.substring(0, 80).split('\n')[0] || 'เนื้อหาจากข้อความ',
-    content: cleanText(text),
-    description: text.substring(0, 160),
-    image: '',
-    url: '',
-    source: 'raw_text',
-  };
 }

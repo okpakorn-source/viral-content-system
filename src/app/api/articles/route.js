@@ -6,7 +6,7 @@ import { generateArticle, rewriteArticle } from '@/lib/ai/articleGenerator';
 // POST — สร้างบทความ
 export async function POST(request) {
   try {
-    const { contentId, angleId, headlineIndex, hookIndex, tone = 'emotional' } = await request.json();
+    const { contentId, angleId, headlineIndex, hookIndex, tone = 'emotional', customPrompt = '' } = await request.json();
 
     if (!contentId) {
       return NextResponse.json({ success: false, error: 'ต้องระบุ contentId' }, { status: 400 });
@@ -31,12 +31,13 @@ export async function POST(request) {
       }
     }
 
-    // สร้างบทความ
+    // สร้างบทความ (รองรับ custom prompt จากผู้ใช้)
     const articleData = await generateArticle({
       headline,
       hook,
       content: content.cleanedText || content.originalText,
       tone,
+      instructions: customPrompt || '',
     });
 
     // นับ variant
