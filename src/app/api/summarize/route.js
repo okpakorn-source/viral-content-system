@@ -1,59 +1,52 @@
 import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
-import { getPrompt } from '@/lib/ai/promptStore';
+import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
 
 /**
  * POST /api/summarize
  * 
- * ดึง prompt จากหน้าจัดการ Prompts มาใช้จริง:
- * 1. prompt "extraction" → AI สกัดเนื้อข่าวจริง (ตัด noise)
- * 2. prompt "analysis" → AI วิเคราะห์ประเด็นอย่างละเอียด
+ * รองรับ 2 โหมด:
+ * 1. ส่ง text มา → สกัดข่าว (extraction)
+ * 2. ส่ง text + analysisPresetId → สกัด + วิเคราะห์ด้วย preset ที่เลือก
  */
 export async function POST(request) {
   try {
-    const { text, sourceType, customPrompt } = await request.json();
+    const { text, sourceType, customPrompt, analysisPresetId } = await request.json();
 
     if (!text || text.length < 10) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
     }
 
-    // ===== ดึง Prompts จากหน้าจัดการ =====
+    // ===== ดึง Prompts =====
     const extractionPrompt = getPrompt('extraction');
-    const analysisPrompt = getPrompt('analysis');
 
     // ===== AI ตัวที่ 1: สกัดเนื้อข่าวจริง =====
     const extractUser = extractionPrompt.user
       .replace('{content}', text.slice(0, 8000))
-      .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติมจากผู้ใช้: "${customPrompt}"` : '');
+      .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
 
-    console.log('[Summarize] Step 1: Extracting with prompt...');
+    console.log('[Summarize] Step 1: Extracting...');
     
     let newsData;
     try {
-      // callAI returns parsed JSON already (uses response_format: json_object)
       const extractResult = await callAI({
         systemPrompt: extractionPrompt.system,
         userPrompt: extractUser,
         temperature: 0.2,
       });
       
-      // callAI returns object directly (already parsed)
       if (extractResult && typeof extractResult === 'object' && extractResult.news_body) {
         newsData = extractResult;
-      } else if (typeof extractResult === 'string') {
-        const jsonMatch = extractResult.match(/\{[\s\S]*\}/);
-        newsData = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
       } else {
-        newsData = extractResult;
+        newsData = null;
       }
     } catch (err) {
-      console.error('[Summarize] Extraction AI error:', err.message);
+      console.error('[Summarize] Extraction error:', err.message);
       newsData = null;
     }
 
     // Fallback
     if (!newsData || !newsData.news_body || newsData.news_body.length < 20) {
-      console.log('[Summarize] Using raw text fallback');
       newsData = {
         news_title: text.slice(0, 80).replace(/\n/g, ' ').trim(),
         news_body: text.slice(0, 5000),
@@ -65,32 +58,30 @@ export async function POST(request) {
 
     console.log(`[Summarize] Extracted: "${newsData.news_title}" (${newsData.news_body.length} chars)`);
 
-    // ===== AI ตัวที่ 2: วิเคราะห์ประเด็น =====
-    const analyzeUser = analysisPrompt.user
+    // ===== AI ตัวที่ 2: วิเคราะห์ด้วย Preset ที่เลือก =====
+    const preset = getAnalysisPreset(analysisPresetId || 'viral_fb');
+    console.log(`[Summarize] Step 2: Analyzing with preset "${preset.name}" (${preset.id})...`);
+
+    const analyzeUser = preset.user
       .replace('{title}', newsData.news_title || '')
       .replace('{content}', newsData.news_body.slice(0, 5000))
       .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
 
-    console.log('[Summarize] Step 2: Analyzing with prompt...');
-    
     let analysis;
     try {
       const analyzeResult = await callAI({
-        systemPrompt: analysisPrompt.system,
+        systemPrompt: preset.system,
         userPrompt: analyzeUser,
         temperature: 0.5,
       });
       
       if (analyzeResult && typeof analyzeResult === 'object' && analyzeResult.summary) {
         analysis = analyzeResult;
-      } else if (typeof analyzeResult === 'string') {
-        const jsonMatch = analyzeResult.match(/\{[\s\S]*\}/);
-        analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
       } else {
-        analysis = analyzeResult;
+        analysis = null;
       }
     } catch (err) {
-      console.error('[Summarize] Analysis AI error:', err.message, err.stack);
+      console.error('[Summarize] Analysis error:', err.message);
       analysis = { _error: err.message };
     }
 
@@ -109,7 +100,7 @@ export async function POST(request) {
       };
     }
 
-    console.log(`[Summarize] Done: summary=${analysis.summary?.length}ch, angles=${analysis.suggested_angles?.length}`);
+    console.log(`[Summarize] Done: preset=${preset.id}, summary=${analysis.summary?.length}ch`);
 
     return NextResponse.json({
       success: true,
@@ -119,14 +110,12 @@ export async function POST(request) {
         newsSource: newsData.news_source,
         newsDate: newsData.news_date,
         newsCategory: newsData.news_category,
+        usedPreset: { id: preset.id, name: preset.name },
         ...analysis,
       },
     });
   } catch (error) {
     console.error('Summarize API Error:', error);
-    return NextResponse.json({ 
-      success: false, 
-      error: error.message 
-    }, { status: 500 });
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

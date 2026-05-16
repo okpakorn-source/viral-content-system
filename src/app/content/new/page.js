@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Header from '@/components/layout/Header';
 
 const SOURCE_TYPES = [
@@ -39,6 +39,18 @@ export default function NewContentPage() {
   const [copied, setCopied] = useState('');
   const [summary, setSummary] = useState(null);
   const [customPrompt, setCustomPrompt] = useState('');
+  const [analysisPresets, setAnalysisPresets] = useState([]);
+  const [selectedPreset, setSelectedPreset] = useState('viral_fb');
+
+  // โหลด Analysis Presets
+  useEffect(() => {
+    fetch('/api/prompts').then(r => r.json()).then(d => {
+      if (d.analysisPresets) {
+        setAnalysisPresets(d.analysisPresets);
+        if (d.analysisPresets.length > 0) setSelectedPreset(d.analysisPresets[0].id);
+      }
+    }).catch(() => {});
+  }, []);
 
   // === ดึงเนื้อหา (Preview) ===
   const handleExtract = async () => {
@@ -58,7 +70,6 @@ export default function NewContentPage() {
         setExtracted(result);
         setRawText(result.text);
       } else {
-        // ดึงไม่ได้ → เปิดช่อง paste ให้อัตโนมัติ
         setExtracted({ success: false, error: result.error || 'ดึงเนื้อหาไม่ได้', suggestion: 'paste' });
         setError((result.error || 'ดึงเนื้อหาไม่ได้') + ' — วาง/พิมพ์ข้อความด้านล่างแทนได้เลย');
       }
@@ -70,15 +81,17 @@ export default function NewContentPage() {
     }
   };
 
-  // === สรุปเนื้อหาจากต้นทาง ===
-  const handleSummarize = async () => {
+  // === สกัด + วิเคราะห์ด้วย Preset ที่เลือก ===
+  const handleSummarize = async (presetId) => {
+    const usePreset = presetId || selectedPreset;
     setLoading(true);
     setError('');
+    setSelectedPreset(usePreset);
     try {
       const res = await fetch('/api/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: rawText, sourceType, customPrompt }),
+        body: JSON.stringify({ text: rawText, sourceType, customPrompt, analysisPresetId: usePreset }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
@@ -331,9 +344,38 @@ export default function NewContentPage() {
                     </div>
                   )}
 
-                  <button type="submit" className="btn btn-viral btn-lg" style={{ width: '100%', marginTop: 12 }} disabled={loading || (!rawText && !url)}>
-                    🚀 ส่งให้ AI สกัดข่าว + วิเคราะห์
-                  </button>
+                  {/* === เลือก Preset วิเคราะห์ === */}
+                  {(rawText || url) && analysisPresets.length > 0 && (
+                    <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--accent)', marginTop: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent-light)', marginBottom: 10 }}>🎯 เลือกแนวทางวิเคราะห์ แล้วกดปุ่มเพื่อเริ่ม:</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
+                        {analysisPresets.map(p => (
+                          <button key={p.id} type="button" className="btn btn-lg"
+                            disabled={loading}
+                            onClick={() => handleSummarize(p.id)}
+                            style={{
+                              background: selectedPreset === p.id ? 'var(--accent)' : 'var(--bg-secondary)',
+                              color: selectedPreset === p.id ? '#fff' : 'var(--text-primary)',
+                              border: selectedPreset === p.id ? '2px solid var(--accent-light)' : '1px solid var(--border)',
+                              padding: '12px 14px',
+                              textAlign: 'left',
+                              cursor: loading ? 'wait' : 'pointer',
+                            }}>
+                            <div style={{ fontSize: 13, fontWeight: 700 }}>{p.name}</div>
+                            <div style={{ fontSize: 10, color: selectedPreset === p.id ? 'rgba(255,255,255,0.8)' : 'var(--text-muted)', marginTop: 4 }}>{p.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+                      <a href="/prompts?tab=analysis" target="_blank" style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8, display: 'inline-block' }}>⚙️ จัดการ Presets ในหน้า Prompts</a>
+                    </div>
+                  )}
+
+                  {/* ปุ่ม fallback กรณีไม่มี presets */}
+                  {analysisPresets.length === 0 && (
+                    <button type="submit" className="btn btn-viral btn-lg" style={{ width: '100%', marginTop: 12 }} disabled={loading || (!rawText && !url)}>
+                      🚀 ส่งให้ AI สกัดข่าว + วิเคราะห์
+                    </button>
+                  )}
                 </form>
               </div>
             )}
@@ -372,13 +414,34 @@ export default function NewContentPage() {
                   </div>
                 )}
 
-                {/* AI Analysis Summary — ใช้ prompt "วิเคราะห์ประเด็น" จากหน้าจัดการ */}
+                {/* AI Analysis — แสดง preset ที่ใช้ + ปุ่มเปลี่ยน */}
                 <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--warning)', borderLeft: '4px solid var(--warning)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--warning)', textTransform: 'uppercase' }}>🤖 AI วิเคราะห์ประเด็น (ใช้ Prompt: "วิเคราะห์ประเด็น")</div>
-                    <a href="/prompts?tab=analysis" target="_blank" style={{ fontSize: 10, color: 'var(--accent-light)', textDecoration: 'none' }}>⚙️ แก้ไข Prompt "วิเคราะห์ประเด็น"</a>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--warning)', textTransform: 'uppercase' }}>
+                      🤖 AI วิเคราะห์ประเด็น — {summary.usedPreset?.name || 'Default'}
+                    </div>
+                    <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }}
+                      onClick={() => { navigator.clipboard.writeText(summary.summary); setCopied('summary'); setTimeout(() => setCopied(''), 2000); }}>
+                      {copied === 'summary' ? '✅ คัดลอกแล้ว' : '📋 คัดลอก'}
+                    </button>
                   </div>
                   <div style={{ fontSize: 14, lineHeight: 2, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{summary.summary}</div>
+                  
+                  {/* ปุ่มวิเคราะห์ใหม่ด้วย Preset อื่น */}
+                  {analysisPresets.length > 1 && (
+                    <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>🔄 วิเคราะห์ใหม่ด้วยแนวอื่น:</div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {analysisPresets.filter(p => p.id !== summary.usedPreset?.id).map(p => (
+                          <button key={p.id} className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
+                            disabled={loading}
+                            onClick={() => handleSummarize(p.id)}>
+                            {loading && selectedPreset === p.id ? '⏳...' : p.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Key Points */}
