@@ -56,12 +56,99 @@ export async function POST(request) {
 
     // ===== MODE: extract — สกัดเนื้อข่าวอย่างเดียว =====
     if (mode === 'extract') {
+
+      // === PATH A: TikTok/YouTube — ถอดเสียง → จัดรูปแบบ (รักษาคำพูดเดิม) ===
+      if (sourceType === 'tiktok' || sourceType === 'youtube') {
+        try {
+          const transcriptPrompt = `คุณคือผู้เชี่ยวชาญจัดรูปแบบข้อความถอดเสียง (transcript)
+
+กฎเหล็ก:
+1. ห้ามเขียนใหม่ ห้ามสรุปเอง ห้ามเปลี่ยนคำพูดคน — ต้องรักษาคำพูดเดิมทุกคำ
+2. ห้ามตัดเนื้อหาออก — เก็บทุกประโยคที่คนพูด
+3. ห้ามเพิ่มข้อมูลที่ไม่มีในถอดเสียง
+4. จัดย่อหน้าให้อ่านง่าย เพิ่มเครื่องหมายวรรคตอนที่หายไป
+5. ตัดเฉพาะ metadata markers (===, timestamp, ความยาว:) ออก
+6. ถ้ามีคนพูดหลายคน ให้แยกบทพูดให้ชัดเจน
+7. คำพูดที่เป็น quote ให้ใส่ "" ครอบ
+
+สิ่งที่ต้องทำ:
+- จัดข้อความถอดเสียงให้เป็นย่อหน้าอ่านง่าย
+- เพิ่มเครื่องหมายวรรคตอน (มหัพภาค จุลภาค) ที่ขาดหายไป
+- สรุปหัวข้อจากเนื้อหาที่พูด
+- ระบุแหล่งที่มาว่าเป็นคลิป ${sourceType === 'tiktok' ? 'TikTok' : 'YouTube'}
+
+${customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : ''}
+
+=== ข้อความถอดเสียง ===
+${text.slice(0, 8000)}
+========================
+
+ตอบเป็น JSON:
+{
+  "news_title": "หัวข้อที่สรุปได้จากเนื้อหาที่พูด",
+  "news_body": "เนื้อหาที่จัดรูปแบบแล้ว — รักษาคำพูดเดิมทุกคำ จัดย่อหน้าให้อ่านง่าย",
+  "news_source": "คลิป ${sourceType === 'tiktok' ? 'TikTok' : 'YouTube'}",
+  "news_date": "",
+  "news_category": "หมวดหมู่"
+}`;
+
+          console.log(`[Extract-Transcript] ${sourceType} mode — preserving original speech...`);
+          const { result, model: usedModel } = await callSmartAI('extract', { prompt: transcriptPrompt, temperature: 0.15 });
+          console.log(`[Extract-Transcript] Used model: ${usedModel}`);
+
+          if (result?.news_body && result.news_body.length >= 20) {
+            console.log(`[Extract-Transcript] ✅ OK: "${result.news_title}" (${result.news_body.length}ch)`);
+            if (workflowId) {
+              await saveExtraction(workflowId, {
+                newsTitle: result.news_title, newsBody: result.news_body,
+                newsSource: result.news_source, newsDate: result.news_date,
+                newsCategory: result.news_category, rawInput: text.slice(0, 5000),
+              }).catch(e => console.error('[Extract-Transcript] DB save err:', e.message));
+              const agent = new MasterAgent(workflowId);
+              agent.onExtractionComplete({
+                newsTitle: result.news_title, newsBody: result.news_body,
+                newsSource: result.news_source, newsDate: result.news_date,
+                newsCategory: result.news_category,
+              });
+              await agent.saveMemoryToDB().catch(() => {});
+            }
+            return NextResponse.json({
+              success: true,
+              data: {
+                newsTitle: result.news_title,
+                newsBody: result.news_body,
+                newsSource: result.news_source,
+                newsDate: result.news_date,
+                newsCategory: result.news_category,
+              },
+            });
+          }
+        } catch (err) {
+          console.error('[Extract-Transcript] ERROR:', err.message);
+        }
+
+        // Fallback — ส่ง raw transcript กลับ (ยังดีกว่าเสียหาย)
+        const cleanText = text
+          .replace(/===.*?===/g, '')
+          .replace(/ความยาว:.*นาที/g, '')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+        return NextResponse.json({
+          success: true,
+          data: {
+            newsTitle: cleanText.slice(0, 80).replace(/\n/g, ' ').trim(),
+            newsBody: cleanText.slice(0, 5000),
+            newsSource: `คลิป ${sourceType === 'tiktok' ? 'TikTok' : 'YouTube'}`,
+            newsDate: '', newsCategory: 'ทั่วไป',
+          },
+        });
+      }
+
+      // === PATH B: URL/Image/Raw — สกัดข่าวจาก web content (เหมือนเดิม) ===
       const extractionPrompt = getPrompt('extraction');
       try {
         const sourceHint = {
           image: 'ข้อมูลนี้มาจากการอ่านภาพ (OCR) — อาจมี marker metadata ให้ตัดออก จัดข้อความให้อ่านง่าย',
-          tiktok: 'ข้อมูลนี้มาจากการถอดเสียงคลิป TikTok — จัดประโยคให้อ่านง่าย ตัด marker เวลาออก',
-          youtube: 'ข้อมูลนี้มาจาก subtitle/ถอดเสียง YouTube — จัดประโยคให้อ่านง่าย ตัด timestamp ออก',
         }[sourceType] || '';
 
         const prompt = extractionPrompt.prompt
@@ -71,20 +158,18 @@ export async function POST(request) {
             customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '',
           ].filter(Boolean).join('\n'));
 
-        console.log('[Extract] Extracting via SmartAI...');
+        console.log('[Extract-URL] Extracting via SmartAI...');
         const { result, model: usedModel } = await callSmartAI('extract', { prompt, temperature: 0.2 });
-        console.log(`[Extract] Used model: ${usedModel}`);
+        console.log(`[Extract-URL] Used model: ${usedModel}`);
 
         if (result?.news_body && result.news_body.length >= 20) {
-          console.log(`[Extract] OK: "${result.news_title}" (${result.news_body.length}ch)`);
-          // Save to workflow DB + Master Agent
+          console.log(`[Extract-URL] OK: "${result.news_title}" (${result.news_body.length}ch)`);
           if (workflowId) {
             await saveExtraction(workflowId, {
               newsTitle: result.news_title, newsBody: result.news_body,
               newsSource: result.news_source, newsDate: result.news_date,
               newsCategory: result.news_category, rawInput: text.slice(0, 5000),
-            }).catch(e => console.error('[Extract] DB save err:', e.message));
-            // Update Master Agent memory
+            }).catch(e => console.error('[Extract-URL] DB save err:', e.message));
             const agent = new MasterAgent(workflowId);
             agent.onExtractionComplete({
               newsTitle: result.news_title, newsBody: result.news_body,
@@ -105,7 +190,7 @@ export async function POST(request) {
           });
         }
       } catch (err) {
-        console.error('[Extract] ERROR:', err.message);
+        console.error('[Extract-URL] ERROR:', err.message);
       }
 
       // Fallback
