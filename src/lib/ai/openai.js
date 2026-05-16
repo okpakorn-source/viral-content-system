@@ -14,7 +14,7 @@ export function getOpenAIClient() {
   return openaiClient;
 }
 
-export async function callAI({ systemPrompt, userPrompt, model = 'gpt-4o', temperature = 0.7 }) {
+export async function callAI({ systemPrompt, userPrompt, model = 'gpt-4o-mini', temperature = 0.7, maxTokens = 4000 }) {
   const client = getOpenAIClient();
   
   if (!client) {
@@ -29,13 +29,15 @@ export async function callAI({ systemPrompt, userPrompt, model = 'gpt-4o', tempe
         { role: 'user', content: userPrompt },
       ],
       temperature,
+      max_tokens: maxTokens,
       response_format: { type: 'json_object' },
     });
     const content = response.choices[0]?.message?.content;
+    console.log(`[callAI] OK: model=${model}, tokens=${response.usage?.total_tokens || '?'}`);
     return JSON.parse(content);
   } catch (error) {
-    console.error('AI Error:', error.message);
-    throw new Error(`AI ไม่สามารถประมวลผลได้: ${error.message}`);
+    console.error(`[callAI] FAIL: model=${model}, error=${error.message}, status=${error.status || '?'}`);
+    throw new Error(`AI error: ${error.message}`);
   }
 }
 

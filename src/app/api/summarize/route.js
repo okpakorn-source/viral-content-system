@@ -90,14 +90,15 @@ export async function POST(request) {
         analysis = analyzeResult;
       }
     } catch (err) {
-      console.error('[Summarize] Analysis AI error:', err.message);
-      analysis = null;
+      console.error('[Summarize] Analysis AI error:', err.message, err.stack);
+      analysis = { _error: err.message };
     }
 
     // Fallback
     if (!analysis || !analysis.summary) {
+      const errorMsg = analysis?._error || 'ไม่ทราบสาเหตุ';
       analysis = {
-        summary: 'ไม่สามารถวิเคราะห์อัตโนมัติได้ — ตรวจสอบ OPENAI_API_KEY',
+        summary: `วิเคราะห์ไม่สำเร็จ: ${errorMsg}`,
         key_points: [],
         people_involved: [],
         emotion: '',
