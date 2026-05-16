@@ -84,18 +84,34 @@ export async function POST(request) {
     // ===== MODE: analyze — วิเคราะห์ด้วย Preset (ใช้เนื้อข่าวสะอาดที่ส่งมา) =====
     if (mode === 'analyze') {
       const preset = getAnalysisPreset(analysisPresetId || 'viral_fb');
-      console.log(`[Analyze] Preset: "${preset.name}", newsTitle: "${(newsTitle || '').slice(0,50)}", textLen: ${text?.length}`);
+      console.log(`[Analyze] Requested preset: "${analysisPresetId}", Got: "${preset.id}" "${preset.name}"`);
+      console.log(`[Analyze] newsTitle: "${(newsTitle || '').slice(0,80)}", textLen: ${text?.length}`);
 
-      // text = เนื้อข่าวสะอาดที่ frontend ส่งมา (newsBody)
-      const prompt = preset.prompt
-        .replace('{title}', newsTitle || text.slice(0, 100))
-        .replace('{content}', text.slice(0, 6000))
-        .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
+      // สร้าง prompt จาก preset — replace placeholders
+      let prompt = preset.prompt;
+      const hasContentPlaceholder = prompt.includes('{content}');
+      const hasTitlePlaceholder = prompt.includes('{title}');
 
-      console.log(`[Analyze] Prompt: ${prompt.length}ch`);
+      if (hasTitlePlaceholder) {
+        prompt = prompt.replace('{title}', newsTitle || text.slice(0, 100));
+      }
+      if (hasContentPlaceholder) {
+        prompt = prompt.replace('{content}', text.slice(0, 6000));
+      }
+      prompt = prompt.replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
+
+      // ถ้า prompt ไม่มี placeholder → บังคับ append ข่าวท้าย prompt
+      if (!hasContentPlaceholder) {
+        prompt += `\n\n=== เนื้อข่าวที่ต้องใช้ (ห้ามมั่ว ห้ามแต่งเอง ใช้ข้อมูลจากนี้เท่านั้น) ===\nหัวข้อ: ${newsTitle || ''}\n\n${text.slice(0, 6000)}\n=== จบเนื้อข่าว ===`;
+        console.log(`[Analyze] ⚠️ No {content} placeholder found — appended news at end`);
+      }
+
+      console.log(`[Analyze] Final prompt length: ${prompt.length}ch`);
+      console.log(`[Analyze] Prompt starts with: "${prompt.slice(0, 150)}"`);
+      console.log(`[Analyze] Prompt contains news text? ${prompt.includes(text.slice(0, 50)) ? 'YES ✅' : 'NO ❌'}`);
 
       try {
-        const result = await callAI({ prompt, temperature: 0.6, maxTokens: 8000 });
+        const result = await callAI({ prompt, model: 'gpt-4o', temperature: 0.6, maxTokens: 8000 });
         console.log('[Analyze] AI keys:', Object.keys(result || {}));
 
         if (result && typeof result === 'object') {
