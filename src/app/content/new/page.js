@@ -35,6 +35,7 @@ export default function NewContentPage() {
   const [selectedResearch, setSelectedResearch] = useState([]);
   const [researching, setResearching] = useState(false);
   const [contentLength, setContentLength] = useState('short'); // short | medium | long
+  const [addedResearchItems, setAddedResearchItems] = useState([]); // เก็บ research ที่เพิ่มแล้ว
 
   // Load presets
   useEffect(() => {
@@ -154,7 +155,7 @@ export default function NewContentPage() {
           analysisPresetId: usePreset,
           mode: 'analyze',
           breakdownData: breakdownData || null,
-          researchData: researchData || null,
+          researchData: researchData || (addedResearchItems.length > 0 ? { items: addedResearchItems } : null),
           contentLength,
           workflowId,
         }),
@@ -186,7 +187,7 @@ export default function NewContentPage() {
           customPrompt,
           mode: 'mix',
           breakdownData,
-          researchData: researchData || null,
+          researchData: researchData || (addedResearchItems.length > 0 ? { items: addedResearchItems } : null),
           contentLength,
           workflowId,
         }),
@@ -258,7 +259,8 @@ export default function NewContentPage() {
 
     console.log(`[Research] ✅ Added ${selectedItems.length} items (${additionalText.length}ch) to newsBody. Total: ${enrichedBody.length}ch`);
 
-    // เคลียร์ selection + ซ่อน panel
+    // เคลียร์ selection + ซ่อน panel + เก็บ items ที่เพิ่มแล้ว
+    setAddedResearchItems(prev => [...prev, ...selectedItems]);
     setSelectedResearch([]);
     setResearchData(null);
   };
@@ -274,7 +276,7 @@ export default function NewContentPage() {
   const handleReset = () => {
     setStep('input'); setExtracted(null); setRawText(''); setUrl('');
     setError(''); setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
-    setWorkflowId(null); setResearchData(null); setSelectedResearch([]);
+    setWorkflowId(null); setResearchData(null); setSelectedResearch([]); setAddedResearchItems([]);
     setCustomPrompt(''); setBreakdownPromptText('');
   };
 

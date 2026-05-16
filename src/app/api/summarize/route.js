@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
@@ -250,15 +250,18 @@ export async function POST(request) {
 
       // === Inject Research Data (ข้อมูลเพิ่มเติมจาก Research Agent) ===
       if (researchData?.items?.length > 0) {
-        const researchCtx = '\n\n=== ข้อมูลเพิ่มเติมจาก AI Research Agent ===\n' +
-          'ข้อมูลด้านล่างนี้เป็นข้อมูลเสริมที่ AI วิจัยมาเพิ่มเติม ใช้ประกอบการเขียนให้เนื้อหาลึกและน่าสนใจขึ้น:\n\n' +
+        const researchTopics = researchData.items.map(item => item.title).join(', ');
+        const researchCtx = '\n\n=== ข้อมูลเพิ่มเติมจาก AI Research Agent (ต้องใช้ทุกหัวข้อ!) ===\n' +
+          '⚠️ คำสั่งสำคัญ: ข้อมูลด้านล่างนี้ผู้ใช้เลือกมาเพิ่มแล้ว — ต้องนำทุกหัวข้อไปสอดแทรกในเนื้อหาที่เขียน\n' +
+          '⚠️ ห้ามละเลย ต้องดัดแปลงคำให้เข้ากับ tone ของ preset แล้วใส่ให้ครบทุกหัวข้อ\n' +
+          `📋 หัวข้อที่ต้องครอบคลุม: ${researchTopics}\n\n` +
           researchData.items.map((item, i) =>
             `${i+1}. [${item.type}] ${item.title}\n${item.content}${item.relevance ? '\n→ เกี่ยวข้อง: ' + item.relevance : ''}`
           ).join('\n\n') +
           '\n=== จบข้อมูลเพิ่มเติม ===\n' +
-          '⚠️ ใช้ข้อมูลเหล่านี้เสริมเนื้อหาให้ลึกขึ้น แต่ต้องอ้างอิงข่าวต้นฉบับเป็นหลัก\n';
+          '✅ ข้อมูลข้างต้นต้องถูกนำไปใช้ในเนื้อหาทุกเวอร์ชัน ดัดแปลงคำได้ แต่ต้องครบทุกหัวข้อ\n';
         prompt += researchCtx;
-        console.log(`[Analyze] ✅ Research data injected: ${researchData.items.length} items`);
+        console.log(`[Analyze] ✅ Research data injected: ${researchData.items.length} items (MUST USE)`);
       }
 
       console.log(`[Analyze] Final prompt length: ${prompt.length}ch (Mega Context)`);
@@ -299,10 +302,11 @@ export async function POST(request) {
         'ห้าม clickbait: "คุณจะไม่เชื่อ", "แชร์ด่วน", "ดูก่อนโดนลบ"\n' +
         'ห้าม engagement bait: "พิมพ์ 1", "เมนต์ 99", "ใครเห็นด้วยกดไลก์"\n' +
         '=== จบกฎ FACEBOOK SAFETY ===\n\n' +
+        '⚠️⚠️⚠️ คำสั่งเด็ดขาด: เนื้อหาแต่ละเวอร์ชันต้องมีความยาวตามที่กำหนด (นับคำจริง) ถ้าเขียนสั้นกว่ากำหนด ถือว่าล้มเหลว ให้เขียนยาวไว้ก่อน ⚠️⚠️⚠️\n\n' +
         'ตอบเป็น JSON:\n' +
         '{\n' +
         '  "versions": [\n' +
-        '    {"style": "ชื่อแนว", "title": "พาดหัว", "content": "เนื้อหายาว 250+ คำ แบ่ง 3 ย่อหน้า คั่นด้วย \\n\\n", "hook": "ประโยคเปิด", "closing": "ประโยคปิดกระตุ้น", "tone": "โทนเสียง", "target": "กลุ่มเป้าหมาย"}\n' +
+        '    {"style": "ชื่อแนว", "title": "พาดหัว", "content": "เนื้อหายาว ${lenCfg.min}-${lenCfg.max} คำ แบ่ง ${lenCfg.paraDesc} คั่นด้วย \\n\\n", "hook": "ประโยคเปิด", "closing": "ประโยคปิดกระตุ้น", "tone": "โทนเสียง", "target": "กลุ่มเป้าหมาย"}\n' +
         '  ],\n' +
         '  "news_reference": "สรุปข่าวต้นฉบับที่ใช้อ้างอิง 2-3 ประโยค"\n' +
         '}';
