@@ -164,6 +164,36 @@ export default function NewContentPage() {
     }
   };
 
+  // === STEP 4B: AI ผสมมุมข่าว — เลือกหัวข้อดีที่สุดมาผสมเป็นเนื้อหาใหม่ ===
+  const handleMixAngles = async () => {
+    if (!newsData?.newsBody || !breakdownData) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: newsData.newsBody,
+          newsTitle: newsData.newsTitle,
+          sourceType,
+          customPrompt,
+          mode: 'mix',
+          breakdownData,
+          workflowId,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      setAnalysisResult(data.data);
+      setStep('analyzed');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Copy
   const copyText = (text, label) => {
     navigator.clipboard.writeText(text);
@@ -502,6 +532,30 @@ export default function NewContentPage() {
               <button onClick={handleBreakdown} className="btn btn-outline" disabled={loading} style={{ width: '100%' }}>
                 {loading ? '⏳ กำลังแตกใหม่...' : '🔄 แตกประเด็นใหม่ตามคำสั่ง'}
               </button>
+            </div>
+
+            {/* 🧬 AI ผสมมุมข่าว — เลือกหัวข้อดีมาผสมเป็นเนื้อหาใหม่ */}
+            <div style={{ background: 'linear-gradient(135deg, rgba(168,85,247,0.15), rgba(236,72,153,0.15))', padding: 20, borderRadius: 'var(--radius-md)', border: '2px solid rgba(168,85,247,0.5)', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 22 }}>🧬</span>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: '#c084fc' }}>AI ผสมมุมข่าว — สร้างเนื้อหาไวรัลใหม่</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>AI จะเลือกมุมที่ดีที่สุดจากผลวิเคราะห์ด้านบน ผสมเข้าด้วยกัน สร้างเนื้อหาใหม่ที่น่าอ่านและไวรัลได้</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                {breakdownData.possible_angles?.slice(0, 5).map((a, i) => (
+                  <span key={i} style={{ fontSize: 9, padding: '3px 8px', background: 'rgba(168,85,247,0.2)', color: '#c084fc', borderRadius: 10, border: '1px solid rgba(168,85,247,0.3)' }}>
+                    {a.angle_name} {a.facebook_viral_score >= 7 ? '🔥' : ''}
+                  </span>
+                ))}
+                <span style={{ fontSize: 9, padding: '3px 8px', color: 'var(--text-muted)' }}>→ AI เลือก + ผสม</span>
+              </div>
+              <button onClick={handleMixAngles} className="btn btn-lg" disabled={loading}
+                style={{ width: '100%', background: 'linear-gradient(135deg, #7c3aed, #db2777)', border: 'none', color: '#fff', fontWeight: 800, fontSize: 14, padding: '14px 0', borderRadius: 'var(--radius-md)', cursor: loading ? 'wait' : 'pointer', transition: 'all 0.3s', boxShadow: '0 4px 15px rgba(124,58,237,0.3)' }}>
+                {loading ? '🧬 AI กำลังผสมมุมข่าว...' : '🧬 AI เลือก + ผสมมุมข่าว สร้างเนื้อหาไวรัลใหม่'}
+              </button>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6, textAlign: 'center' }}>ยึด Prompt + Safety Rules ครบทุกข้อ • ใช้ข้อมูลจากข่าวจริงเท่านั้น</div>
             </div>
 
             {/* เลือก Preset วิเคราะห์ → ไป Step สุดท้าย */}

@@ -367,6 +367,161 @@ export async function POST(request) {
       }
     }
 
+    // ===== MODE: MIX — AI เลือกมุมดีที่สุด ผสมเป็นเนื้อหาใหม่ =====
+    if (mode === 'mix') {
+      console.log('[Mix] === AI MIX ANGLES MODE ===');
+      try {
+        const actualNewsBody = text || '';
+        const actualNewsTitle = newsTitle || '';
+        const actualBreakdown = breakdownData || {};
+
+        // === สร้าง context เต็มจาก MasterAgent + breakdown data ===
+        let fullCtx = '';
+        if (workflowId) {
+          const agent = new MasterAgent(workflowId);
+          const loaded = await agent.loadFromDB().catch(() => false);
+          if (loaded) {
+            fullCtx = agent.compileContext();
+            console.log(`[Mix] ✅ Context compiled via MasterAgent (${fullCtx.length}ch)`);
+          }
+        }
+        if (!fullCtx) {
+          fullCtx = buildFullContext({ newsBody: actualNewsBody, newsTitle: actualNewsTitle, breakdownData: actualBreakdown });
+          console.log('[Mix] ⚠️ Fallback to buildFullContext');
+        }
+
+        // === สร้าง Mix Prompt — ส่ง breakdown ทั้งหมดให้ AI ===
+        const anglesInfo = actualBreakdown.possible_angles?.map((a, i) =>
+          `${i+1}. ${a.angle_name} [viral: ${a.facebook_viral_score}/10] — ${a.description} (อารมณ์: ${a.target_emotion || '-'}, แชร์เพราะ: ${a.share_trigger || '-'})`
+        ).join('\n') || 'ไม่มีข้อมูลมุมข่าว';
+
+        const keyPointsInfo = actualBreakdown.key_points?.map((kp, i) =>
+          `${i+1}. ${kp.point} [สำคัญ: ${kp.importance}, อารมณ์: ${kp.emotional_value}] — ${kp.detail}`
+        ).join('\n') || '';
+
+        const emotionalInfo = [
+          actualBreakdown.core_story && `แก่นข่าว: ${actualBreakdown.core_story}`,
+          actualBreakdown.main_emotional_core && `Emotional Core: ${actualBreakdown.main_emotional_core}`,
+          actualBreakdown.conflict_point && `จุด Conflict: ${actualBreakdown.conflict_point}`,
+          actualBreakdown.viral_trigger && `Viral Trigger: ${actualBreakdown.viral_trigger}`,
+        ].filter(Boolean).join('\n');
+
+        const bestAngleInfo = actualBreakdown.best_main_angle ?
+          `มุมที่ดีที่สุด: ${actualBreakdown.best_main_angle.angle_name} — ${actualBreakdown.best_main_angle.why_best}` : '';
+
+        const hookInfo = actualBreakdown.emotional_hooks?.length ?
+          `จุดที่คนจะอิน: ${actualBreakdown.emotional_hooks.join(' | ')}` : '';
+
+        const bestSections = actualBreakdown.best_sections?.length ?
+          `ท่อนที่ดีที่สุด: ${actualBreakdown.best_sections.join(' | ')}` : '';
+
+        const langStrategy = actualBreakdown.language_strategy ?
+          `กลยุทธ์ภาษา: เปิด=${actualBreakdown.language_strategy.opening_style || '-'}, เล่า=${actualBreakdown.language_strategy.storytelling_style || '-'}, จังหวะ=${actualBreakdown.language_strategy.emotional_pacing || '-'}, ปิด=${actualBreakdown.language_strategy.ending_style || '-'}` : '';
+
+        const mixPrompt = fullCtx + '\n\n' +
+          '=== คำสั่ง: AI ผสมมุมข่าว (MIX MODE) ===\n' +
+          'คุณคือผู้เชี่ยวชาญสร้างคอนเทนต์ไวรัล คุณได้รับผลวิเคราะห์ข่าวข้างต้นทั้งหมด\n\n' +
+          '📊 มุมข่าวทั้งหมดที่วิเคราะห์ได้:\n' + anglesInfo + '\n\n' +
+          (keyPointsInfo ? '📌 ประเด็นสำคัญ:\n' + keyPointsInfo + '\n\n' : '') +
+          (emotionalInfo ? '💖 การวิเคราะห์อารมณ์:\n' + emotionalInfo + '\n\n' : '') +
+          (bestAngleInfo ? '🏆 ' + bestAngleInfo + '\n' : '') +
+          (hookInfo ? '🎣 ' + hookInfo + '\n' : '') +
+          (bestSections ? '⭐ ' + bestSections + '\n' : '') +
+          (langStrategy ? '✍️ ' + langStrategy + '\n' : '') +
+          '\n=== สิ่งที่ต้องทำ ===\n' +
+          '1. เลือกมุมข่าว 2-3 มุมที่ดีที่สุด (viral score สูง + อารมณ์แรง)\n' +
+          '2. ผสมมุมเหล่านั้นเข้าด้วยกัน สร้างเนื้อหาใหม่ที่อ่านเพลิน ไม่รู้สึกตัดแปะ\n' +
+          '3. ใช้ข้อมูลจากประเด็นสำคัญ + Emotional Core + Key Facts เป็นเนื้อหา\n' +
+          '4. สร้าง 3 เวอร์ชัน แต่ละเวอร์ชันผสมมุมต่างกัน:\n' +
+          '   - เวอร์ชัน 1: ผสมมุมที่ viral score สูงสุด 2-3 มุม (เน้นไวรัล)\n' +
+          '   - เวอร์ชัน 2: ผสมมุม Emotional + เรื่องเล่า (เน้นอิน สะเทือนใจ)\n' +
+          '   - เวอร์ชัน 3: ผสมมุมข้อมูล + วิเคราะห์ (เน้นเนื้อหาครบถ้วน)\n\n' +
+          'แต่ละเวอร์ชัน:\n' +
+          '- ต้องยาวอย่างน้อย 250 คำ / 3 ย่อหน้าเต็ม\n' +
+          '- โครงสร้าง: [ย่อหน้า 1] เปิดแรง hook → [ย่อหน้า 2] เล่ารายละเอียด → [ย่อหน้า 3] ปิดด้วยประโยคบรรยายทรงพลัง\n' +
+          '- ⚠️ ห้ามตั้งคำถามปิดท้าย ห้ามจบด้วยคำถามใดๆ\n' +
+          '- ใช้ข้อมูลจากข่าวจริงเท่านั้น ห้ามแต่งเรื่องเพิ่ม\n' +
+          '- ระบุว่าผสมจากมุมไหนบ้าง (ใน mixed_from)\n\n' +
+          '=== กฎเหล็ก FACEBOOK SAFETY ===\n' +
+          'ห้ามใช้คำเสี่ยง: ฆ่า→ทำให้เสียชีวิต, ศพ→ร่างผู้เสียชีวิต, สยอง→สะเทือนใจ, เลือด→ร่องรอยเหตุการณ์\n' +
+          '=== จบ SAFETY ===\n\n' +
+          'ตอบเป็น JSON:\n' +
+          '{\n' +
+          '  "versions": [\n' +
+          '    {"style": "ผสม: [ชื่อมุมที่ใช้]", "title": "พาดหัว", "content": "เนื้อหายาว 250+ คำ 3 ย่อหน้า", "hook": "ประโยคเปิด", "closing": "ประโยคปิดบรรยาย", "tone": "โทน", "target": "กลุ่มเป้าหมาย", "mixed_from": ["มุม1", "มุม2"]}\n' +
+          '  ],\n' +
+          '  "news_reference": "สรุปข่าวต้นฉบับ 2-3 ประโยค"\n' +
+          '}';
+
+        console.log(`[Mix] Prompt length: ${mixPrompt.length}ch`);
+
+        // ใช้ Writer Agent (Claude) เป็นหลัก
+        let result, usedModel;
+        try {
+          const smartResult = await callSmartAI('write', mixPrompt, { temperature: 0.7, maxTokens: 8000 });
+          result = smartResult.result;
+          usedModel = smartResult.model;
+          console.log(`[Mix] ✅ SmartAI write: model=${usedModel}`);
+        } catch (err) {
+          console.warn(`[Mix] SmartAI failed (${err.message}), falling back to GPT-4o`);
+          result = await callAI({ prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 });
+          usedModel = 'gpt-4o';
+        }
+
+        if (result && typeof result === 'object') {
+          let versions = result.versions || [];
+          if (versions.length === 0 && result.content) {
+            versions = [{ style: '🧬 AI ผสมมุมข่าว', title: actualNewsTitle, content: result.content, hook: '', closing: '', tone: '', target: '', mixed_from: [] }];
+          }
+
+          // Validate
+          const validation = validateOutput(result, { newsTitle: actualNewsTitle, newsBody: actualNewsBody });
+          console.log(`[Mix] Validation: ${validation.valid ? '✅ PASS' : '⚠️ ' + validation.issues.join(', ')}`);
+
+          // Save to DB + Master Agent
+          if (workflowId) {
+            await saveAnalysis(workflowId, { versions, news_reference: result.news_reference }, 'mix_angles').catch(e => console.error('[Mix] DB err:', e.message));
+            const agent = new MasterAgent(workflowId);
+            await agent.loadFromDB().catch(() => {});
+            agent.onAnalysisComplete({ versions, news_reference: result.news_reference });
+            agent.onValidationComplete({ safetyPassed: validation.valid, issues: validation.issues, factCheckPassed: true, riskyWordsFound: [], riskyWordsReplaced: [] });
+            await agent.saveMemoryToDB().catch(() => {});
+          }
+
+          // Moderation
+          let moderation = { overallSafe: true, results: [] };
+          try {
+            moderation = await moderateVersions(versions);
+            console.log(`[Mix] Moderation: ${moderation.overallSafe ? '✅ SAFE' : '⚠️ FLAGGED'}`);
+          } catch (modErr) {
+            console.warn('[Mix] Moderation skipped:', modErr.message);
+          }
+
+          return NextResponse.json({
+            success: true,
+            data: {
+              usedPreset: { id: 'mix_angles', name: '🧬 AI ผสมมุมข่าว' },
+              usedModel: usedModel || 'gpt-4o',
+              versions,
+              news_reference: result.news_reference || '',
+              summary: versions[0]?.content || '',
+              key_points: [],
+              emotion: '',
+              viral_potential: '',
+              engagement_ending: '',
+              validation,
+              moderation,
+              availableModels: getAvailableModels(),
+              debug: { mode: 'mix', mixedAngles: actualBreakdown.possible_angles?.length || 0 },
+            },
+          });
+        }
+      } catch (err) {
+        console.error('[Mix] ERROR:', err.message);
+        return NextResponse.json({ success: false, error: `ผสมมุมข่าวไม่สำเร็จ: ${err.message}` }, { status: 500 });
+      }
+    }
+
     // ===== DEFAULT: legacy flow (extract + analyze in one) =====
     const extractionPrompt = getPrompt('extraction');
     let newsData;
