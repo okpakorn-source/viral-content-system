@@ -36,7 +36,7 @@ function extractString(result, ...keys) {
 
 export async function POST(request) {
   try {
-    const { text, sourceType, customPrompt, analysisPresetId, mode } = await request.json();
+    const { text, sourceType, customPrompt, analysisPresetId, mode, newsTitle } = await request.json();
 
     if (!text || text.length < 10) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
@@ -83,11 +83,10 @@ export async function POST(request) {
 
     // ===== MODE: analyze — วิเคราะห์ด้วย Preset (ใช้เนื้อข่าวสะอาดที่ส่งมา) =====
     if (mode === 'analyze') {
-      const { newsTitle, newsBody } = await request.json().catch(() => ({}));
       const preset = getAnalysisPreset(analysisPresetId || 'viral_fb');
-      console.log(`[Analyze] Preset: "${preset.name}"`);
+      console.log(`[Analyze] Preset: "${preset.name}", newsTitle: "${(newsTitle || '').slice(0,50)}", textLen: ${text?.length}`);
 
-      // text = เนื้อข่าวสะอาดที่ frontend ส่งมา
+      // text = เนื้อข่าวสะอาดที่ frontend ส่งมา (newsBody)
       const prompt = preset.prompt
         .replace('{title}', newsTitle || text.slice(0, 100))
         .replace('{content}', text.slice(0, 6000))
