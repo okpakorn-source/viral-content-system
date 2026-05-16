@@ -91,15 +91,17 @@ export default function NewContentPage() {
     }
   };
 
-  // === วิเคราะห์ไวรัล ===
+  // === วิเคราะห์ไวรัล (ใช้เนื้อข่าวที่ AI สกัดมาแล้ว) ===
   const handleAnalyze = async () => {
     setLoading(true);
     setError('');
     try {
+      // ใช้เนื้อข่าวจาก AI สกัด (summary.newsBody) แทน rawText
+      const cleanNews = summary?.newsBody || rawText;
       const payload = {
         type: sourceType === 'raw' ? 'raw' : sourceType,
         url: sourceType !== 'raw' ? url : undefined,
-        rawContent: rawText,
+        rawContent: cleanNews,
         autoAnalyze: true,
       };
       const res = await fetch('/api/content', {
@@ -433,21 +435,66 @@ export default function NewContentPage() {
                   <span className={`score-badge ${viralScores.viral_probability >= 70 ? 'viral' : viralScores.viral_probability >= 40 ? 'medium' : 'low'}`}
                     style={{ fontSize: 16, padding: '6px 16px' }}>🔥 {viralScores.viral_probability}%</span>
                 </div>
-                {result?.data?.analysis?.summary && (
-                  <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 20, fontSize: 14, lineHeight: 1.8 }}>
-                    {result.data.analysis.summary}
+
+                {/* เนื้อข่าวที่สกัดมา (จาก Step 2) */}
+                {(summary?.newsBody || result?.data?.originalText) && (
+                  <div style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', marginBottom: 20, border: '1px solid var(--accent)', borderLeft: '4px solid var(--accent)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-light)' }}>🗞️ เนื้อข่าวที่ AI สกัดมา</div>
+                      <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
+                        onClick={() => { navigator.clipboard.writeText(summary?.newsBody || result?.data?.originalText); setCopied('analyzed-news'); setTimeout(() => setCopied(''), 2000); }}>
+                        {copied === 'analyzed-news' ? '✅ คัดลอกแล้ว' : '📋 คัดลอก'}
+                      </button>
+                    </div>
+                    {summary?.newsTitle && (
+                      <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12, lineHeight: 1.5 }}>{summary.newsTitle}</div>
+                    )}
+                    <div style={{ fontSize: 14, lineHeight: 2, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', maxHeight: 400, overflow: 'auto' }}>
+                      {summary?.newsBody || result?.data?.originalText}
+                    </div>
                   </div>
                 )}
+
+                {/* สรุปวิเคราะห์ */}
+                {result?.data?.analysis?.summary && (
+                  <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>🤖 AI สรุปวิเคราะห์</div>
+                    <div style={{ fontSize: 14, lineHeight: 2, color: 'var(--text-secondary)' }}>
+                      {result.data.analysis.summary}
+                    </div>
+                  </div>
+                )}
+
+                {/* การวิเคราะห์อารมณ์ */}
                 {emotionalAnalysis && (
-                  <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 20 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>🎭 การวิเคราะห์อารมณ์</div>
+                  <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 10, textTransform: 'uppercase' }}>🎭 การวิเคราะห์อารมณ์</div>
                     <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 2 }}>
                       <div>อารมณ์หลัก: <strong style={{ color: 'var(--accent-light)' }}>{emotionalAnalysis.primary_emotion}</strong></div>
+                      {emotionalAnalysis.secondary_emotions?.length > 0 && (
+                        <div>อารมณ์รอง: <strong>{emotionalAnalysis.secondary_emotions.join(', ')}</strong></div>
+                      )}
+                      {emotionalAnalysis.audience_reaction && (
+                        <div>ปฏิกิริยาผู้อ่าน: <strong>{emotionalAnalysis.audience_reaction}</strong></div>
+                      )}
                       <div>กลุ่มเป้าหมาย: <strong>{result.data?.analysis?.target_audience || '-'}</strong></div>
                       <div>มุมที่แนะนำ: <strong>{result.data?.analysis?.recommended_angle || '-'}</strong></div>
                     </div>
                   </div>
                 )}
+
+                {/* มุมมองที่ AI แนะนำ จาก Step 2 */}
+                {summary?.suggested_angles?.length > 0 && (
+                  <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--success)', borderLeft: '4px solid var(--success)' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--success)', marginBottom: 8, textTransform: 'uppercase' }}>💡 มุมมองที่ AI แนะนำ</div>
+                    {summary.suggested_angles.map((angle, i) => (
+                      <div key={i} style={{ fontSize: 13, color: 'var(--text-secondary)', padding: '5px 0', display: 'flex', gap: 8 }}>
+                        <span style={{ color: 'var(--success)', fontWeight: 700 }}>{i + 1}.</span> {angle}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <button onClick={handleGenerateAngles} className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={loading}>
                   🎯 สร้างมุมมองไวรัล (Headlines & Hooks)
                 </button>
