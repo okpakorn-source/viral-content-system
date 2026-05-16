@@ -6,23 +6,17 @@ import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
  * ดึง summary จาก AI response ไม่ว่า key จะชื่ออะไร
  */
 function extractSummary(result) {
-  // ลอง key ที่เป็นไปได้ — main_post ก่อนเพราะ preset หลักใช้ key นี้
   const directKeys = ['main_post', 'summary', 'content', 'analysis', 'post', 'body', 'text', 'article'];
   for (const k of directKeys) {
     if (result[k] && typeof result[k] === 'string' && result[k].length > 20) {
       return result[k];
     }
   }
-
-  // ถ้ามี key ที่เป็น string ยาวๆ ให้ใช้อันที่ยาวสุด
   let longest = '';
   for (const [key, val] of Object.entries(result)) {
-    if (typeof val === 'string' && val.length > longest.length) {
-      longest = val;
-    }
+    if (typeof val === 'string' && val.length > longest.length) longest = val;
   }
   if (longest.length > 30) return longest;
-
   return '';
 }
 
@@ -42,102 +36,145 @@ function extractString(result, ...keys) {
 
 export async function POST(request) {
   try {
-    const { text, sourceType, customPrompt, analysisPresetId } = await request.json();
+    const { text, sourceType, customPrompt, analysisPresetId, mode } = await request.json();
 
     if (!text || text.length < 10) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
     }
 
-    // ===== Step 1: สกัดเนื้อข่าว =====
+    // ===== MODE: extract — สกัดเนื้อข่าวอย่างเดียว =====
+    if (mode === 'extract') {
+      const extractionPrompt = getPrompt('extraction');
+      try {
+        const prompt = extractionPrompt.prompt
+          .replace('{content}', text.slice(0, 8000))
+          .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
+
+        console.log('[Extract] Extracting...');
+        const result = await callAI({ prompt, temperature: 0.2 });
+
+        if (result?.news_body && result.news_body.length >= 20) {
+          console.log(`[Extract] OK: "${result.news_title}" (${result.news_body.length}ch)`);
+          return NextResponse.json({
+            success: true,
+            data: {
+              newsTitle: result.news_title,
+              newsBody: result.news_body,
+              newsSource: result.news_source,
+              newsDate: result.news_date,
+              newsCategory: result.news_category,
+            },
+          });
+        }
+      } catch (err) {
+        console.error('[Extract] ERROR:', err.message);
+      }
+
+      // Fallback
+      return NextResponse.json({
+        success: true,
+        data: {
+          newsTitle: text.slice(0, 80).replace(/\n/g, ' ').trim(),
+          newsBody: text.slice(0, 5000),
+          newsSource: '', newsDate: '', newsCategory: 'ทั่วไป',
+        },
+      });
+    }
+
+    // ===== MODE: analyze — วิเคราะห์ด้วย Preset (ใช้เนื้อข่าวสะอาดที่ส่งมา) =====
+    if (mode === 'analyze') {
+      const { newsTitle, newsBody } = await request.json().catch(() => ({}));
+      const preset = getAnalysisPreset(analysisPresetId || 'viral_fb');
+      console.log(`[Analyze] Preset: "${preset.name}"`);
+
+      // text = เนื้อข่าวสะอาดที่ frontend ส่งมา
+      const prompt = preset.prompt
+        .replace('{title}', newsTitle || text.slice(0, 100))
+        .replace('{content}', text.slice(0, 6000))
+        .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
+
+      console.log(`[Analyze] Prompt: ${prompt.length}ch`);
+
+      try {
+        const result = await callAI({ prompt, temperature: 0.6, maxTokens: 8000 });
+        console.log('[Analyze] AI keys:', Object.keys(result || {}));
+
+        if (result && typeof result === 'object') {
+          const summary = extractSummary(result);
+          return NextResponse.json({
+            success: true,
+            data: {
+              usedPreset: { id: preset.id, name: preset.name },
+              summary: summary || `(AI ตอบแต่ไม่มี main_post — keys: ${Object.keys(result).join(', ')})`,
+              key_points: extractArray(result, 'key_points', 'keyPoints', 'possible_angles', 'viral_headlines'),
+              people_involved: extractArray(result, 'people_involved', 'people'),
+              emotion: extractString(result, 'emotion', 'tone', 'emotional_direction'),
+              content_type: extractString(result, 'content_type', 'type', 'selected_main_angle'),
+              viral_potential: extractString(result, 'viral_potential', 'viralPotential', 'facebook_safety_level'),
+              suggested_angles: extractArray(result, 'suggested_angles', 'angles', 'possible_angles', 'viral_headlines'),
+              target_audience: extractString(result, 'target_audience', 'audience'),
+              engagement_ending: result.engagement_ending || '',
+              selected_main_angle: result.selected_main_angle || '',
+              facebook_safe_check: result.facebook_safe_check || null,
+              emotion_analysis: result.emotion_analysis || null,
+            },
+          });
+        }
+      } catch (err) {
+        console.error('[Analyze] ERROR:', err.message);
+        return NextResponse.json({
+          success: true,
+          data: {
+            usedPreset: { id: preset.id, name: preset.name },
+            summary: `⚠️ วิเคราะห์ไม่สำเร็จ: ${err.message}`,
+            key_points: [], people_involved: [], emotion: '', content_type: '',
+            viral_potential: '', suggested_angles: [], target_audience: '',
+          },
+        });
+      }
+    }
+
+    // ===== DEFAULT: legacy flow (extract + analyze in one) =====
     const extractionPrompt = getPrompt('extraction');
     let newsData;
     try {
       const prompt = extractionPrompt.prompt
         .replace('{content}', text.slice(0, 8000))
         .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
-
-      console.log('[S1] Extracting...');
       const result = await callAI({ prompt, temperature: 0.2 });
-
-      if (result?.news_body && result.news_body.length >= 20) {
-        newsData = result;
-        console.log(`[S1] OK: "${result.news_title}" (${result.news_body.length}ch)`);
-      }
-    } catch (err) {
-      console.error('[S1] ERROR:', err.message);
-    }
+      if (result?.news_body && result.news_body.length >= 20) newsData = result;
+    } catch (err) { console.error('[S1] ERROR:', err.message); }
 
     if (!newsData) {
-      newsData = {
-        news_title: text.slice(0, 80).replace(/\n/g, ' ').trim(),
-        news_body: text.slice(0, 5000),
-        news_source: '', news_date: '', news_category: 'ทั่วไป',
-      };
+      newsData = { news_title: text.slice(0, 80).replace(/\n/g, ' ').trim(), news_body: text.slice(0, 5000), news_source: '', news_date: '', news_category: 'ทั่วไป' };
     }
 
-    // ===== Step 2: วิเคราะห์ด้วย Preset =====
     const preset = getAnalysisPreset(analysisPresetId || 'viral_fb');
-    console.log(`[S2] Preset: "${preset.name}"`);
-
     let analysis;
     try {
       const prompt = preset.prompt
         .replace('{title}', newsData.news_title || '')
-        .replace('{content}', newsData.news_body.slice(0, 4000))
+        .replace('{content}', newsData.news_body.slice(0, 6000))
         .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
-
-      console.log(`[S2] Prompt: ${prompt.length}ch`);
-
       const result = await callAI({ prompt, temperature: 0.6, maxTokens: 8000 });
-      console.log('[S2] AI keys:', Object.keys(result || {}));
-
       if (result && typeof result === 'object') {
         const summary = extractSummary(result);
-
         analysis = {
-          summary: summary || `(AI ตอบแต่ไม่มี summary — keys: ${Object.keys(result).join(', ')})`,
-          key_points: extractArray(result, 'key_points', 'keyPoints', 'possible_angles', 'viral_headlines'),
-          people_involved: extractArray(result, 'people_involved', 'people'),
-          emotion: extractString(result, 'emotion', 'tone', 'emotional_direction'),
-          content_type: extractString(result, 'content_type', 'type', 'selected_main_angle'),
-          viral_potential: extractString(result, 'viral_potential', 'viralPotential', 'facebook_safety_level'),
-          suggested_angles: extractArray(result, 'suggested_angles', 'angles', 'possible_angles', 'viral_headlines'),
-          target_audience: extractString(result, 'target_audience', 'audience'),
-          // Extra fields from user's pro prompt
-          engagement_ending: result.engagement_ending || '',
-          selected_main_angle: result.selected_main_angle || '',
-          facebook_safe_check: result.facebook_safe_check || null,
-          emotion_analysis: result.emotion_analysis || null,
+          summary: summary || '', key_points: extractArray(result, 'key_points', 'viral_headlines'),
+          people_involved: extractArray(result, 'people_involved'), emotion: extractString(result, 'emotion', 'tone', 'emotional_direction'),
+          content_type: extractString(result, 'content_type', 'selected_main_angle'), viral_potential: extractString(result, 'viral_potential', 'facebook_safety_level'),
+          suggested_angles: extractArray(result, 'suggested_angles', 'viral_headlines'), target_audience: extractString(result, 'target_audience'),
+          engagement_ending: result.engagement_ending || '', selected_main_angle: result.selected_main_angle || '',
+          facebook_safe_check: result.facebook_safe_check || null, emotion_analysis: result.emotion_analysis || null,
         };
       }
     } catch (err) {
-      console.error('[S2] ERROR:', err.message);
-      analysis = {
-        summary: `⚠️ วิเคราะห์ไม่สำเร็จ: ${err.message}`,
-        key_points: [], people_involved: [], emotion: '',
-        content_type: '', viral_potential: '', suggested_angles: [], target_audience: '',
-      };
-    }
-
-    if (!analysis) {
-      analysis = {
-        summary: '⚠️ AI ไม่ส่งข้อมูลกลับ',
-        key_points: [], people_involved: [], emotion: '',
-        content_type: '', viral_potential: '', suggested_angles: [], target_audience: '',
-      };
+      analysis = { summary: `⚠️ ${err.message}`, key_points: [], people_involved: [], emotion: '', content_type: '', viral_potential: '', suggested_angles: [], target_audience: '' };
     }
 
     return NextResponse.json({
       success: true,
-      data: {
-        newsTitle: newsData.news_title,
-        newsBody: newsData.news_body,
-        newsSource: newsData.news_source,
-        newsDate: newsData.news_date,
-        newsCategory: newsData.news_category,
-        usedPreset: { id: preset.id, name: preset.name },
-        ...analysis,
-      },
+      data: { newsTitle: newsData.news_title, newsBody: newsData.news_body, newsSource: newsData.news_source, newsDate: newsData.news_date, newsCategory: newsData.news_category, usedPreset: { id: preset.id, name: preset.name }, ...analysis },
     });
   } catch (error) {
     console.error('[Summarize] Fatal:', error.message);
