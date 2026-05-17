@@ -46,7 +46,7 @@ export default function Sidebar() {
     { label: 'จัดการ AI Prompts', icon: '🤖', href: '/prompts' },
     { type: 'divider', label: 'ระบบ' },
     { label: 'สถิติ', icon: '📈', href: '/analytics' },
-    ...(user?.role === 'admin' ? [{ label: 'จัดการสมาชิก', icon: '👥', href: '/members' }] : []),
+    { label: 'จัดการสมาชิก', icon: '👥', href: '/members' },
     { label: 'ตั้งค่า', icon: '⚙️', href: '/settings' },
   ];
 
