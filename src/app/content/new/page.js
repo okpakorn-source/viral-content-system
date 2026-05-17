@@ -1223,6 +1223,21 @@ export default function NewContentPage() {
               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{analysisResult.versions?.length || 0} เวอร์ชัน</span>
             </div>
 
+            {/* 🏛️ Prompt Source Indicator */}
+            {analysisResult.usedPreset?.source === 'library' && (
+              <div style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(59,130,246,0.1))', padding: '8px 14px', borderRadius: 'var(--radius-md)', marginBottom: 12, border: '1px solid rgba(139,92,246,0.3)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                <span>🏛️</span>
+                <span style={{ color: 'var(--text-secondary)' }}>เขียนด้วย <strong style={{ color: '#a78bfa' }}>{analysisResult.usedPreset.name?.replace('🏛️ ', '')}</strong></span>
+                {analysisResult.usedPreset.viralScore && <span style={{ background: 'rgba(139,92,246,0.2)', padding: '2px 8px', borderRadius: 20, color: '#a78bfa', fontWeight: 700 }}>Viral {analysisResult.usedPreset.viralScore}/100</span>}
+                <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 10 }}>จากหอสมุดไวรัล</span>
+              </div>
+            )}
+            {analysisResult.usedPreset?.source === 'preset' && (
+              <div style={{ background: 'rgba(100,100,100,0.1)', padding: '6px 14px', borderRadius: 'var(--radius-md)', marginBottom: 12, fontSize: 11, color: 'var(--text-muted)' }}>
+                📦 ใช้ Preset เดิม — <span style={{ color: 'var(--warning)' }}>เพิ่มเนื้อหาไวรัลในหอสมุดเพื่อให้ AI เรียนรู้สไตล์เขียนที่ดีขึ้น</span>
+              </div>
+            )}
+
             {/* หัวข้อข่าว */}
             <div style={{ background: 'var(--bg-primary)', padding: 12, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--accent)', borderLeft: '4px solid var(--accent)' }}>
               <div style={{ fontSize: 15, fontWeight: 800 }}>{newsData?.newsTitle}</div>

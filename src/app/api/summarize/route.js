@@ -264,7 +264,7 @@ export async function POST(request) {
     // ===== MODE: analyze — วิเคราะห์ด้วย Preset (ใช้ Persistent Context) =====
     if (mode === 'analyze') {
       const preset = getAnalysisPreset(analysisPresetId || 'viral_fb');
-      console.log(`[Analyze] Preset: "${preset.id}" "${preset.name}"`);
+      console.log(`[Analyze] Preset fallback: "${preset.id}" "${preset.name}"`);
 
       // โหลด context จาก DB ถ้ามี workflowId
       let wfContext = null;
@@ -284,11 +284,70 @@ export async function POST(request) {
 
       console.log(`[Analyze] newsTitle: "${(actualNewsTitle || '').slice(0,80)}", textLen: ${actualNewsBody?.length}`);
 
-      // สร้าง prompt จาก preset — replace placeholders ด้วยค่าจริงเต็ม
-      let prompt = preset.prompt;
-      prompt = prompt.replace('{title}', actualNewsTitle || actualNewsBody.slice(0, 100));
-      prompt = prompt.replace('{content}', actualNewsBody); // ส่งเต็ม ไม่ตัด
-      prompt = prompt.replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
+      // === 🏛️ Smart Prompt Library Lookup — ดึง Prompt จากหอสมุดไวรัลก่อน ===
+      let smartPrompt = null;
+      let promptSource = 'preset'; // 'library' หรือ 'preset'
+      try {
+        const detectedCategory = actualBreakdown?.content_type || actualBreakdown?.category || '';
+        if (detectedCategory) {
+          const { readFile: rf } = await import('fs/promises');
+          const { join: jn } = await import('path');
+          const IS_V = !!process.env.VERCEL;
+          const libPath = jn(IS_V ? '/tmp' : process.cwd() + '/data', 'prompt-library.json');
+          let promptLib = [];
+          try { promptLib = JSON.parse(await rf(libPath, 'utf-8')); } catch {
+            try { promptLib = JSON.parse(await rf(jn(process.cwd(), 'data', 'prompt-library.json'), 'utf-8')); } catch {}
+          }
+
+          if (promptLib.length > 0) {
+            // หา Prompt ที่ category ตรง → เรียงตาม viralScore
+            const matched = promptLib
+              .filter(p => p.promptText && p.category && detectedCategory.toLowerCase().includes(p.category.replace('ข่าว', '').toLowerCase()))
+              .sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
+            
+            if (matched.length > 0) {
+              smartPrompt = matched[0];
+              promptSource = 'library';
+              console.log(`[Analyze] 🏛️ Smart Match FOUND: "${smartPrompt.promptName || smartPrompt.category}" (Viral: ${smartPrompt.viralScore})`);
+            } else {
+              // Fallback: ใช้ Prompt ที่ viralScore สูงสุด
+              const best = promptLib.filter(p => p.promptText).sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
+              if (best.length > 0 && best[0].viralScore >= 70) {
+                smartPrompt = best[0];
+                promptSource = 'library';
+                console.log(`[Analyze] 🏛️ Smart Match BEST: "${smartPrompt.promptName || smartPrompt.category}" (Viral: ${smartPrompt.viralScore})`);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.log('[Analyze] Smart Match skipped:', err.message);
+      }
+
+      // สร้าง prompt — ใช้ Smart Prompt ถ้ามี, fallback ใช้ preset เก่า
+      let prompt;
+      if (smartPrompt && smartPrompt.promptText) {
+        // === ใช้ Prompt จากหอสมุดไวรัล ===
+        prompt = '=== 🏛️ คำสั่งเขียนจากหอสมุดไวรัล (AI-Generated Prompt) ===\n' +
+          `ประเภท: ${smartPrompt.category || '-'} | อารมณ์: ${smartPrompt.emotionalType || '-'} | Viral Score: ${smartPrompt.viralScore || '-'}\n` +
+          `สไตล์ Hook: ${smartPrompt.hookStyle || '-'} | โทน: ${smartPrompt.tone || '-'}\n` +
+          `โครงสร้าง: ${smartPrompt.structure || '-'}\n\n` +
+          smartPrompt.promptText + '\n' +
+          '=== จบคำสั่งหอสมุด ===\n\n' +
+          '=== เนื้อข่าวที่ต้องเขียน ===\n' +
+          `หัวข้อ: ${actualNewsTitle || actualNewsBody.slice(0, 100)}\n\n` +
+          actualNewsBody + '\n' +
+          '=== จบเนื้อข่าว ===\n';
+        if (customPrompt) prompt += `\nคำสั่งเพิ่มเติม: "${customPrompt}"\n`;
+        console.log(`[Analyze] ✅ Using LIBRARY prompt (${smartPrompt.promptName || smartPrompt.category})`);
+      } else {
+        // === Fallback: ใช้ preset เก่า ===
+        prompt = preset.prompt;
+        prompt = prompt.replace('{title}', actualNewsTitle || actualNewsBody.slice(0, 100));
+        prompt = prompt.replace('{content}', actualNewsBody);
+        prompt = prompt.replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
+        console.log(`[Analyze] ⚠️ Using PRESET fallback: ${preset.name}`);
+      }
 
       // === บังคับ inject Full Context ผ่าน Master Agent ===
       let fullCtx = '';
@@ -302,19 +361,25 @@ export async function POST(request) {
         }
       }
       if (!fullCtx) {
-        // Fallback to old buildFullContext
         fullCtx = buildFullContext({ newsBody: actualNewsBody, newsTitle: actualNewsTitle, breakdownData: actualBreakdown });
         console.log('[Analyze] ⚠️ Fallback to buildFullContext');
       }
 
-      // Inject context ถ้ายังไม่มี
-      if (!prompt.includes(actualNewsBody.slice(0, 50))) {
-        prompt += '\n\n' + fullCtx;
-        console.log('[Analyze] ✅ Full context injected');
-      } else if (actualBreakdown?.key_points?.length > 0 && !prompt.includes('Emotional Analysis')) {
-        const parts = fullCtx.split('=== จบเนื้อข่าว ===');
-        if (parts[1]) prompt += '\n\n' + parts[1];
-        console.log('[Analyze] ✅ Structured context appended');
+      // Inject context
+      if (promptSource === 'library') {
+        // Library prompt: append context หลังเนื้อข่าว
+        const ctxParts = fullCtx.split('=== จบเนื้อข่าว ===');
+        if (ctxParts[1]) prompt += '\n' + ctxParts[1]; // breakdown, emotional analysis
+      } else {
+        // Preset prompt: inject เหมือนเดิม
+        if (!prompt.includes(actualNewsBody.slice(0, 50))) {
+          prompt += '\n\n' + fullCtx;
+          console.log('[Analyze] ✅ Full context injected');
+        } else if (actualBreakdown?.key_points?.length > 0 && !prompt.includes('Emotional Analysis')) {
+          const parts = fullCtx.split('=== จบเนื้อข่าว ===');
+          if (parts[1]) prompt += '\n\n' + parts[1];
+          console.log('[Analyze] ✅ Structured context appended');
+        }
       }
 
       // === Inject Research Data (ข้อมูลเพิ่มเติมจาก Research Agent) ===
@@ -333,7 +398,8 @@ export async function POST(request) {
         console.log(`[Analyze] ✅ Research data injected: ${researchData.items.length} items (MUST USE)`);
       }
 
-      console.log(`[Analyze] Final prompt length: ${prompt.length}ch (Mega Context)`);
+      console.log(`[Analyze] Final prompt length: ${prompt.length}ch | Source: ${promptSource === 'library' ? '🏛️ Library' : '📦 Preset'}`);
+
 
       // === สร้าง Multi-Version Writing Prompt + Facebook Safety ===
       let multiPrompt = prompt + '\n\n=== คำสั่งสำคัญสำหรับการเขียน ===\n' +
@@ -395,6 +461,9 @@ export async function POST(request) {
           newsTitle: actualNewsTitle || '',
           breakdownPointsCount: actualBreakdown?.key_points?.length || 0,
           presetUsed: preset.name,
+          promptSource, // 'library' or 'preset'
+          smartPromptName: smartPrompt ? (smartPrompt.promptName || smartPrompt.category) : null,
+          smartPromptScore: smartPrompt?.viralScore || null,
           hasBreakdown: !!actualBreakdown,
           workflowId: workflowId || 'none',
           contextSource: wfContext ? 'DB (persistent)' : 'request (stateless)',
@@ -435,7 +504,9 @@ export async function POST(request) {
           return NextResponse.json({
             success: true,
             data: {
-              usedPreset: { id: preset.id, name: preset.name },
+              usedPreset: promptSource === 'library'
+                ? { id: 'library', name: `🏛️ ${smartPrompt.promptName || smartPrompt.category}`, source: 'library', viralScore: smartPrompt.viralScore }
+                : { id: preset.id, name: `📦 ${preset.name}`, source: 'preset' },
               usedModel: usedModel || 'gpt-4o',
               versions,
               news_reference: result.news_reference || '',
