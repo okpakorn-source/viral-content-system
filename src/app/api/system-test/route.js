@@ -227,20 +227,12 @@ export async function GET(request) {
   // === TEST 12: Database/Prisma ===
   try {
     const t = Date.now();
-    const dbUrl = process.env.DATABASE_URL;
-    if (!dbUrl) {
-      addResult('Database (Prisma)', 'warn', 'DATABASE_URL not set', Date.now() - t);
-    } else {
-      // Prisma v7+ reads DATABASE_URL from env automatically
-      const { PrismaClient } = await import('@prisma/client');
-      const prisma = new PrismaClient();
-      await prisma.$connect();
-      const count = await prisma.workflow.count();
-      await prisma.$disconnect();
-      addResult('Database (Prisma)', 'pass', `Connected — ${count} workflows (${dbUrl.startsWith('file:') ? 'SQLite' : 'Remote'})`, Date.now() - t);
-    }
+    // Use the app's own prisma instance from db.js
+    const { prisma } = await import('@/lib/db');
+    const count = await prisma.content.count();
+    addResult('Database (Prisma)', 'pass', `Connected — ${count} content items`, Date.now() - t);
   } catch (e) {
-    addResult('Database (Prisma)', 'warn', `DB error: ${e.message.slice(0, 80)}`, 0);
+    addResult('Database (Prisma)', 'warn', `DB: ${e.message.slice(0, 80)}`, 0);
   }
 
   const totalTime = Date.now() - startTime;
