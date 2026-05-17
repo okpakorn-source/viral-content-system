@@ -14,7 +14,7 @@
       "totalRejected": 0,
       "totalRevision": 0
     },
-    "lastLogin": "2026-05-17T14:35:30.353Z"
+    "lastLogin": "2026-05-17T14:57:32.331Z"
   },
   {
     "id": "member_1779027257546",
@@ -59,6 +59,23 @@
     "role": "editor",
     "avatar": "👤",
     "createdAt": "2026-05-17T14:36:59.650Z",
+    "stats": {
+      "totalCreated": 0,
+      "totalApproved": 0,
+      "totalRejected": 0,
+      "totalRevision": 0
+    },
+    "lastLogin": null
+  },
+  {
+    "id": "member_1779029917284",
+    "username": "testjwt",
+    "password": "96f0eafe0ea74c53599554764ba264a1234cd3d23cbcfc165997984580d3003b",
+    "displayName": "JWT Test",
+    "nickname": "",
+    "role": "editor",
+    "avatar": "👤",
+    "createdAt": "2026-05-17T14:58:37.284Z",
     "stats": {
       "totalCreated": 0,
       "totalApproved": 0,

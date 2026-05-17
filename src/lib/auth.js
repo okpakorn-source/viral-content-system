@@ -1,24 +1,52 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, createHash, createHmac } from 'crypto';
 
 // Vercel uses /tmp for writable storage; local uses ./data
 const IS_VERCEL = !!process.env.VERCEL;
 const DATA_DIR = IS_VERCEL ? '/tmp' : join(process.cwd(), 'data');
 const MEMBERS_FILE = join(DATA_DIR, 'members.json');
-const SESSIONS_FILE = join(DATA_DIR, 'sessions.json');
 
 // Bundled default members from repo (for Vercel cold starts)
 const BUNDLED_MEMBERS_FILE = join(process.cwd(), 'data', 'members.json');
+
+// JWT-like stateless token secret
+const TOKEN_SECRET = process.env.AUTH_SECRET || 'viralflow_jwt_secret_2024_prod';
 
 // === Helpers ===
 function hashPassword(password) {
   return createHash('sha256').update(password + 'viralflow_salt_2024').digest('hex');
 }
 
-function generateToken() {
-  return randomBytes(32).toString('hex');
+// === Stateless Token (JWT-like) ===
+// Encodes user info into the token itself — no server-side session storage needed
+function createStatelessToken(member) {
+  const payload = {
+    id: member.id,
+    username: member.username,
+    displayName: member.displayName,
+    role: member.role,
+    avatar: member.avatar,
+    exp: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
+  };
+  const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = createHmac('sha256', TOKEN_SECRET).update(payloadStr).digest('base64url');
+  return `${payloadStr}.${sig}`;
+}
+
+function verifyStatelessToken(token) {
+  if (!token || !token.includes('.')) return null;
+  try {
+    const [payloadStr, sig] = token.split('.');
+    const expectedSig = createHmac('sha256', TOKEN_SECRET).update(payloadStr).digest('base64url');
+    if (sig !== expectedSig) return null; // tampered
+    const payload = JSON.parse(Buffer.from(payloadStr, 'base64url').toString());
+    if (payload.exp < Date.now()) return null; // expired
+    return payload;
+  } catch {
+    return null;
+  }
 }
 
 async function ensureDir() {
@@ -55,7 +83,6 @@ async function readMembers() {
       const raw = await readFile(BUNDLED_MEMBERS_FILE, 'utf8');
       const members = JSON.parse(raw);
       if (Array.isArray(members) && members.length > 0) {
-        // Copy to writable location
         await writeFile(MEMBERS_FILE, JSON.stringify(members, null, 2), 'utf8');
         return members;
       }
@@ -82,28 +109,10 @@ async function saveMembers(members) {
   await ensureDir();
   const data = JSON.stringify(members, null, 2);
   await writeFile(MEMBERS_FILE, data, 'utf8');
-  // Also save to bundled location (works locally)
   try {
     await mkdir(join(process.cwd(), 'data'), { recursive: true });
     await writeFile(BUNDLED_MEMBERS_FILE, data, 'utf8');
   } catch {}
-}
-
-// === Sessions ===
-async function readSessions() {
-  await ensureDir();
-  try {
-    const raw = await readFile(SESSIONS_FILE, 'utf8');
-    return JSON.parse(raw);
-  } catch {
-    await writeFile(SESSIONS_FILE, '{}', 'utf8');
-    return {};
-  }
-}
-
-async function saveSessions(sessions) {
-  await ensureDir();
-  await writeFile(SESSIONS_FILE, JSON.stringify(sessions, null, 2), 'utf8');
 }
 
 // === Auth Functions ===
@@ -114,22 +123,14 @@ export async function login(username, password) {
     if (!member) return { success: false, error: 'ไม่พบชื่อผู้ใช้' };
     if (member.password !== hashPassword(password)) return { success: false, error: 'รหัสผ่านไม่ถูกต้อง' };
 
-    const token = generateToken();
-    const sessions = await readSessions();
-    sessions[token] = {
-      memberId: member.id,
-      username: member.username,
-      displayName: member.displayName,
-      role: member.role,
-      avatar: member.avatar,
-      loginAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    };
-    await saveSessions(sessions);
+    // Create stateless JWT token — no file storage needed!
+    const token = createStatelessToken(member);
 
-    // Update lastLogin — read fresh then save
+    // Update lastLogin
     member.lastLogin = new Date().toISOString();
     await saveMembers(members);
+
+    console.log(`[Auth] ✅ Login: ${username} (${member.role})`);
 
     return {
       success: true,
@@ -140,23 +141,23 @@ export async function login(username, password) {
 }
 
 export async function logout(token) {
-  const sessions = await readSessions();
-  delete sessions[token];
-  await saveSessions(sessions);
+  // Stateless — nothing to clear on server side
+  // Token will just be removed from cookie by the route handler
   return { success: true };
 }
 
 export async function getSession(token) {
+  // Stateless verification — no file I/O!
   if (!token) return null;
-  const sessions = await readSessions();
-  const session = sessions[token];
-  if (!session) return null;
-  if (new Date(session.expiresAt) < new Date()) {
-    delete sessions[token];
-    await saveSessions(sessions);
-    return null;
-  }
-  return session;
+  const payload = verifyStatelessToken(token);
+  if (!payload) return null;
+  return {
+    memberId: payload.id,
+    username: payload.username,
+    displayName: payload.displayName,
+    role: payload.role,
+    avatar: payload.avatar,
+  };
 }
 
 export async function register(data) {
