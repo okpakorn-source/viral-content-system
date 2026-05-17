@@ -21,6 +21,8 @@ export default function ReviewPage() {
   const [expandedId, setExpandedId] = useState(null);
   const [noteText, setNoteText] = useState({});
   const [updating, setUpdating] = useState(null);
+  const [engagementInput, setEngagementInput] = useState({});
+  const [engagementSaved, setEngagementSaved] = useState({});
 
   const loadReviews = useCallback(async () => {
     try {
@@ -95,6 +97,52 @@ export default function ReviewPage() {
   };
 
   const sourceLabels = { url: '🔗 URL', image: '🖼️ ภาพ', raw: '📝 ข้อความ', tiktok: '🎵 TikTok', youtube: '📺 YouTube', facebook: '📘 Facebook' };
+
+  // === Engagement Feedback ===
+  const handleEngagement = async (itemId) => {
+    const input = engagementInput[itemId];
+    if (!input) return;
+    const item = reviews.find(r => r.id === itemId);
+    // Send feedback to prompt-library API
+    try {
+      // Try to find which prompt was used
+      const promptId = item?.promptId || item?.usedPresetId;
+      if (promptId) {
+        await fetch('/api/prompt-library', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: promptId,
+            action: 'feedback',
+            feedback: {
+              likes: parseInt(input.likes) || 0,
+              shares: parseInt(input.shares) || 0,
+              comments: parseInt(input.comments) || 0,
+              contentId: itemId,
+            },
+          }),
+        });
+      }
+      // Save engagement to review item too
+      await fetch('/api/review', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: itemId,
+          engagement: {
+            likes: parseInt(input.likes) || 0,
+            shares: parseInt(input.shares) || 0,
+            comments: parseInt(input.comments) || 0,
+            recordedAt: new Date().toISOString(),
+          },
+        }),
+      });
+      setEngagementSaved(prev => ({ ...prev, [itemId]: true }));
+      setTimeout(() => setEngagementSaved(prev => ({ ...prev, [itemId]: false })), 3000);
+    } catch (err) {
+      console.error('Engagement save error:', err);
+    }
+  };
 
   return (
     <>
@@ -269,6 +317,52 @@ export default function ReviewPage() {
                           style={{ minHeight: 50, fontSize: 12 }}
                         />
                       </div>
+
+                      {/* 📊 Engagement Input (สำหรับรายการที่อนุมัติ/เผยแพร่แล้ว) */}
+                      {(item.status === 'approved') && (
+                        <div style={{ marginBottom: 12, padding: 12, background: 'linear-gradient(135deg, rgba(34,197,94,0.06), rgba(59,130,246,0.04))', borderRadius: 'var(--radius-md)', border: '1px solid rgba(34,197,94,0.15)' }}>
+                          <div style={{ fontSize: 10, fontWeight: 800, color: '#22c55e', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            📊 บันทึก Engagement (หลังโพสต์ลงเพจ)
+                            {engagementSaved[item.id] && <span style={{ color: '#22c55e', fontSize: 10, marginLeft: 8 }}>✅ บันทึกแล้ว!</span>}
+                          </div>
+                          {item.engagement && (
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>
+                              📈 ล่าสุด: ❤️ {item.engagement.likes || 0} 🔄 {item.engagement.shares || 0} 💬 {item.engagement.comments || 0}
+                              {item.engagement.recordedAt && ` (${new Date(item.engagement.recordedAt).toLocaleDateString('th-TH')})`}
+                            </div>
+                          )}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: 6, alignItems: 'end' }}>
+                            <div>
+                              <label style={{ fontSize: 9, color: 'var(--text-muted)', display: 'block', marginBottom: 2 }}>❤️ ไลค์</label>
+                              <input type="number" className="form-input" placeholder="0" min="0"
+                                value={engagementInput[item.id]?.likes || ''}
+                                onChange={e => setEngagementInput(prev => ({ ...prev, [item.id]: { ...prev[item.id], likes: e.target.value } }))}
+                                style={{ fontSize: 12, padding: '6px 8px', textAlign: 'center' }} />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: 9, color: 'var(--text-muted)', display: 'block', marginBottom: 2 }}>🔄 แชร์</label>
+                              <input type="number" className="form-input" placeholder="0" min="0"
+                                value={engagementInput[item.id]?.shares || ''}
+                                onChange={e => setEngagementInput(prev => ({ ...prev, [item.id]: { ...prev[item.id], shares: e.target.value } }))}
+                                style={{ fontSize: 12, padding: '6px 8px', textAlign: 'center' }} />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: 9, color: 'var(--text-muted)', display: 'block', marginBottom: 2 }}>💬 คอมเมนต์</label>
+                              <input type="number" className="form-input" placeholder="0" min="0"
+                                value={engagementInput[item.id]?.comments || ''}
+                                onChange={e => setEngagementInput(prev => ({ ...prev, [item.id]: { ...prev[item.id], comments: e.target.value } }))}
+                                style={{ fontSize: 12, padding: '6px 8px', textAlign: 'center' }} />
+                            </div>
+                            <button onClick={() => handleEngagement(item.id)}
+                              style={{ padding: '6px 12px', borderRadius: 6, border: 'none', background: '#22c55e', color: '#fff', fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+                              📊 บันทึก
+                            </button>
+                          </div>
+                          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>
+                            💡 กรอกตัวเลข engagement จริงจากเพจ → ระบบจะปรับ Viral Score ของ Prompt ที่ใช้อัตโนมัติ
+                          </div>
+                        </div>
+                      )}
 
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: 6 }}>
                         <button onClick={() => handleUpdateStatus(item.id, 'approved')} disabled={updating === item.id}
