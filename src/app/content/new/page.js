@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Header from '@/components/layout/Header';
+import { useWorkflow } from '@/components/WorkflowContext';
 
 const SOURCE_TYPES = [
   { value: 'url', label: '🔗 URL ข่าว/เว็บไซต์', desc: 'วางลิงก์ข่าว, บทความ, โพสต์' },
@@ -48,6 +49,9 @@ export default function NewContentPage() {
   const [autoProgress, setAutoProgress] = useState('');
   const [autoLog, setAutoLog] = useState([]);
 
+  // Workflow tracker
+  const { startWorkflow, startStep: wfStart, completeStep: wfComplete, failStep: wfFail, finishWorkflow } = useWorkflow();
+
   // === ⚡ Auto Mode — วาง URL → ได้ผลลัพธ์ ===
   const handleAutoMode = async () => {
     if (!url || url.length < 5) { setError('กรุณาใส่ URL'); return; }
@@ -58,8 +62,21 @@ export default function NewContentPage() {
     setStep('input');
     setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
 
+    // Start workflow tracker
+    const domain = url ? (() => { try { return new URL(url).hostname; } catch { return url.slice(0, 30); } })() : 'unknown';
+    startWorkflow('Auto Pipeline', [
+      { id: 'auto_detect', label: 'ตรวจจับแหล่งข้อมูล' },
+      { id: 'auto_scrape', label: 'ดึงเนื้อหา' },
+      { id: 'auto_extract', label: 'สกัดเนื้อข่าว (AI)' },
+      { id: 'auto_breakdown', label: 'แตกประเด็น (AI)' },
+      { id: 'auto_generate', label: 'สร้างผลลัพธ์ (AI)' },
+    ], { type: 'URL', label: domain });
+    wfStart('auto_detect', { detail: 'ตรวจสอบประเภท URL...' });
+
     try {
       setAutoProgress('⚡ AI กำลังประมวลผลทุกขั้นตอนอัตโนมัติ...');
+      wfComplete('auto_detect', `Source: ${domain}`);
+      wfStart('auto_scrape', { api: '/api/auto', detail: 'กำลังส่งข้อมูลไป Auto Pipeline...' });
 
       const res = await fetch('/api/auto', {
         method: 'POST',
@@ -74,7 +91,13 @@ export default function NewContentPage() {
 
       if (!data.success) throw new Error(data.error);
 
-      // Set all states from auto result
+      // Complete all steps from auto result
+      wfComplete('auto_scrape', `ดึงเนื้อหาแล้ว`);
+      wfStart('auto_extract'); wfComplete('auto_extract', `"${data.data.newsData?.newsTitle?.slice(0, 40) || '...'}"`);
+      wfStart('auto_breakdown'); wfComplete('auto_breakdown', `${data.data.breakdownData?.possible_angles?.length || 0} มุม`);
+      wfStart('auto_generate'); wfComplete('auto_generate', `${data.data.analysisResult?.versions?.length || 0} เวอร์ชัน`);
+      finishWorkflow(`Auto เสร็จ ${data.data.totalTimeSeconds || ''}s — ${data.data.analysisResult?.versions?.length || 0} เวอร์ชัน`);
+
       setNewsData(data.data.newsData);
       setBreakdownData(data.data.breakdownData);
       setAnalysisResult(data.data.analysisResult);
@@ -83,6 +106,7 @@ export default function NewContentPage() {
       setStep('analyzed');
       setAutoProgress('');
     } catch (err) {
+      wfFail('auto_scrape', err.message);
       setError('Auto Mode: ' + err.message);
       setAutoProgress('');
     } finally {
@@ -152,6 +176,8 @@ export default function NewContentPage() {
     setExtracting(true);
     setError('');
     setExtracted(null);
+    startWorkflow('ดึงเนื้อหา', [{ id: 'scrape', label: 'ดึงเนื้อหาจาก URL' }], { type: sourceType, label: url?.slice(0, 40) });
+    wfStart('scrape', { api: '/api/extract', detail: `Scraping ${url?.slice(0, 40)}...` });
     try {
       const res = await fetch('/api/extract', {
         method: 'POST',
@@ -164,13 +190,17 @@ export default function NewContentPage() {
       if (result.success && result.text) {
         setExtracted(result);
         setRawText(result.text);
+        wfComplete('scrape', `ได้ ${result.text.length} ตัวอักษร`);
+        finishWorkflow(`ดึงเนื้อหาสำเร็จ`);
       } else {
         setExtracted({ success: false, error: result.error || 'ดึงเนื้อหาไม่ได้', suggestion: 'paste' });
         setError((result.error || 'ดึงเนื้อหาไม่ได้') + ' — วาง/พิมพ์ข้อความด้านล่างแทนได้เลย');
+        wfFail('scrape', result.error || 'ดึงเนื้อหาไม่ได้');
       }
     } catch (err) {
       setExtracted({ success: false, error: err.message, suggestion: 'paste' });
       setError(err.message + ' — วาง/พิมพ์ข้อความด้านล่างแทนได้เลย');
+      wfFail('scrape', err.message);
     } finally {
       setExtracting(false);
     }
@@ -302,8 +332,9 @@ export default function NewContentPage() {
     if (!rawText) return;
     setLoading(true);
     setError('');
+    startWorkflow('สกัดเนื้อข่าว', [{ id: 'ai_extract', label: 'สกัดเนื้อข่าว (AI)' }]);
+    wfStart('ai_extract', { api: '/api/summarize (extract)', detail: 'AI กำลังอ่านและสกัดข่าว...' });
     try {
-      // สร้าง workflow ก่อน
       let wfId = workflowId;
       if (!wfId) {
         const wfRes = await fetch('/api/workflow', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceType }) });
@@ -319,8 +350,11 @@ export default function NewContentPage() {
       if (!data.success) throw new Error(data.error);
       setNewsData(data.data);
       setStep('extracted');
+      wfComplete('ai_extract', `"${data.data?.newsTitle?.slice(0, 40) || '...'}"`);
+      finishWorkflow('สกัดเนื้อข่าวสำเร็จ');
     } catch (err) {
       setError(err.message);
+      wfFail('ai_extract', err.message);
     } finally {
       setLoading(false);
     }
@@ -331,12 +365,14 @@ export default function NewContentPage() {
     if (!newsData?.newsBody) return;
     setLoading(true);
     setError('');
+    startWorkflow('แตกประเด็น', [{ id: 'ai_breakdown', label: 'แตกประเด็น + สรุป (AI)' }]);
+    wfStart('ai_breakdown', { api: '/api/summarize (breakdown)', detail: 'AI กำลังวิเคราะห์มุมข่าว...' });
     try {
       const res = await fetch('/api/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          text: newsData.newsBody,     // ข่าวที่สกัดแล้ว (full)
+          text: newsData.newsBody,
           newsTitle: newsData.newsTitle,
           customPrompt: breakdownPromptText,
           mode: 'breakdown',
@@ -349,9 +385,11 @@ export default function NewContentPage() {
       if (data.debug) {
         console.log('[Breakdown Debug]', data.debug);
       }
-      // ไม่ต้อง setStep — อยู่หน้าเดิม (extracted) แสดง breakdown ต่อเลย
+      wfComplete('ai_breakdown', `${data.data?.possible_angles?.length || 0} มุมข่าว, ${data.data?.key_points?.length || 0} ประเด็น`);
+      finishWorkflow('แตกประเด็นสำเร็จ');
     } catch (err) {
       setError(err.message);
+      wfFail('ai_breakdown', err.message);
     } finally {
       setLoading(false);
     }
@@ -364,6 +402,9 @@ export default function NewContentPage() {
     setLoading(true);
     setError('');
     setSelectedPreset(usePreset);
+    const presetLabel = analysisPresets.find(p => p.id === usePreset)?.name || usePreset;
+    startWorkflow('สร้างผลลัพธ์', [{ id: 'ai_analyze', label: `สร้างเนื้อหา (${presetLabel})` }]);
+    wfStart('ai_analyze', { api: '/api/summarize (analyze)', detail: `Preset: ${presetLabel} | Length: ${contentLength}` });
     try {
       const res = await fetch('/api/summarize', {
         method: 'POST',
@@ -385,8 +426,11 @@ export default function NewContentPage() {
       if (!data.success) throw new Error(data.error);
       setAnalysisResult(data.data);
       setStep('analyzed');
+      wfComplete('ai_analyze', `${data.data?.versions?.length || 0} เวอร์ชัน`);
+      finishWorkflow(`สร้างเสร็จ — ${data.data?.versions?.length || 0} เวอร์ชัน`);
     } catch (err) {
       setError(err.message);
+      wfFail('ai_analyze', err.message);
     } finally {
       setLoading(false);
     }
@@ -397,6 +441,8 @@ export default function NewContentPage() {
     if (!newsData?.newsBody || !breakdownData) return;
     setLoading(true);
     setError('');
+    startWorkflow('ผสมมุมข่าว', [{ id: 'ai_mix', label: 'AI ผสมมุมข่าว' }]);
+    wfStart('ai_mix', { api: '/api/summarize (mix)', detail: 'AI กำลังผสมมุมที่ดีที่สุด...' });
     try {
       const res = await fetch('/api/summarize', {
         method: 'POST',
@@ -417,8 +463,11 @@ export default function NewContentPage() {
       if (!data.success) throw new Error(data.error);
       setAnalysisResult(data.data);
       setStep('analyzed');
+      wfComplete('ai_mix', `${data.data?.versions?.length || 0} เวอร์ชัน`);
+      finishWorkflow(`ผสมเสร็จ — ${data.data?.versions?.length || 0} เวอร์ชัน`);
     } catch (err) {
       setError(err.message);
+      wfFail('ai_mix', err.message);
     } finally {
       setLoading(false);
     }

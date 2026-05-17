@@ -2,6 +2,8 @@
 import { usePathname } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
 import Sidebar from '@/components/layout/Sidebar';
+import WorkflowProvider from '@/components/WorkflowContext';
+import WorkflowTracker from '@/components/WorkflowTracker';
 
 export default function ClientLayout({ children }) {
   const pathname = usePathname();
@@ -11,15 +13,18 @@ export default function ClientLayout({ children }) {
     return children;
   }
 
-  // All other pages — auth guard + sidebar
+  // All other pages — auth guard + sidebar + workflow tracker
   return (
     <AuthGuard>
-      <div style={{ display: 'flex', minHeight: '100vh' }}>
-        <Sidebar />
-        <main className="main-content">
-          {children}
-        </main>
-      </div>
+      <WorkflowProvider>
+        <div style={{ display: 'flex', minHeight: '100vh' }}>
+          <Sidebar />
+          <main className="main-content">
+            {children}
+          </main>
+        </div>
+        <WorkflowTracker />
+      </WorkflowProvider>
     </AuthGuard>
   );
 }
