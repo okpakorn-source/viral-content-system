@@ -1,20 +1,22 @@
-﻿'use client';
+'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Header from '@/components/layout/Header';
+import Link from 'next/link';
 
 const STATUS_CONFIG = {
   all: { label: '📋 ทั้งหมด', color: 'var(--text-secondary)' },
-  pending: { label: '⏳ รอตรวจ', color: 'var(--warning)' },
-  approved: { label: '✅ ผ่าน', color: 'var(--success)' },
-  rejected: { label: '❌ ไม่ผ่าน', color: 'var(--danger)' },
-  revision: { label: '🔄 รอแก้ไข', color: '#a78bfa' },
+  pending: { label: '⏳ รอตรวจ', color: '#fbbf24' },
+  approved: { label: '✅ อนุมัติ', color: '#22c55e' },
+  rejected: { label: '❌ ไม่ผ่าน', color: '#ef4444' },
+  revision: { label: '🔄 แก้ไข', color: '#a78bfa' },
 };
 
 export default function ReviewPage() {
   const [reviews, setReviews] = useState([]);
   const [stats, setStats] = useState({});
   const [filter, setFilter] = useState('all');
+  const [memberFilter, setMemberFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState(null);
   const [noteText, setNoteText] = useState({});
@@ -37,6 +39,28 @@ export default function ReviewPage() {
 
   useEffect(() => { loadReviews(); }, [loadReviews]);
 
+  // Extract unique members from reviews
+  const members = useMemo(() => {
+    const map = new Map();
+    reviews.forEach(r => {
+      if (r.submittedBy?.id) {
+        map.set(r.submittedBy.id, {
+          id: r.submittedBy.id,
+          name: r.submittedBy.name || r.submittedBy.id,
+          avatar: r.submittedBy.avatar || '👤',
+          count: (map.get(r.submittedBy.id)?.count || 0) + 1,
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [reviews]);
+
+  // Filter reviews by member
+  const filteredReviews = useMemo(() => {
+    if (memberFilter === 'all') return reviews;
+    return reviews.filter(r => r.submittedBy?.id === memberFilter);
+  }, [reviews, memberFilter]);
+
   const handleUpdateStatus = async (id, status) => {
     setUpdating(id);
     try {
@@ -46,9 +70,7 @@ export default function ReviewPage() {
         body: JSON.stringify({ id, status, note: noteText[id] || '' }),
       });
       const data = await res.json();
-      if (data.success) {
-        await loadReviews();
-      }
+      if (data.success) await loadReviews();
     } catch (err) {
       console.error('Update error:', err);
     } finally {
@@ -72,15 +94,15 @@ export default function ReviewPage() {
     return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   };
 
-  const sourceLabels = { url: '🔗 URL', image: '📷 ภาพ', raw: '📝 ข้อความ', tiktok: '🎵 TikTok', youtube: '📺 YouTube', facebook: '📘 FB' };
-  const lengthLabels = { short: '📝 สั้น', medium: '📄 กลาง', long: '📰 ยาว' };
+  const sourceLabels = { url: '🔗 URL', image: '🖼️ ภาพ', raw: '📝 ข้อความ', tiktok: '🎵 TikTok', youtube: '📺 YouTube', facebook: '📘 Facebook' };
 
   return (
     <>
-      <Header title="📋 คลังรอตรวจ" subtitle="ตรวจสอบ อนุมัติ และจัดการเนื้อหาก่อนเผยแพร่" />
+      <Header title="📦 คลังรอตรวจ" subtitle="ตรวจสอบ อนุมัติ และจัดการเนื้อหาก่อนเผยแพร่" />
       <div className="page-content">
-        {/* Stats Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 8, marginBottom: 20 }}>
+
+        {/* Status Filter Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 8, marginBottom: 16 }}>
           {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
             <button key={key} onClick={() => setFilter(key)}
               style={{
@@ -98,18 +120,48 @@ export default function ReviewPage() {
           ))}
         </div>
 
+        {/* Member Filter Bar */}
+        {members.length > 0 && (
+          <div style={{
+            display: 'flex', gap: 8, marginBottom: 16, padding: '10px 14px',
+            background: 'var(--bg-card)', borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border)', alignItems: 'center', flexWrap: 'wrap',
+          }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>👥 กรองตามสมาชิก:</span>
+            <button onClick={() => setMemberFilter('all')}
+              style={{
+                padding: '4px 12px', borderRadius: 20, border: 'none',
+                background: memberFilter === 'all' ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
+                color: memberFilter === 'all' ? '#fff' : 'var(--text-muted)',
+                fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+              }}>ทุกคน ({reviews.length})</button>
+            {members.map(m => (
+              <button key={m.id} onClick={() => setMemberFilter(m.id)}
+                style={{
+                  padding: '4px 12px', borderRadius: 20, border: 'none',
+                  background: memberFilter === m.id ? 'linear-gradient(135deg, #f91880, #7c3aed)' : 'rgba(255,255,255,0.06)',
+                  color: memberFilter === m.id ? '#fff' : 'var(--text-muted)',
+                  fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                  transition: 'all 0.2s',
+                }}>
+                {m.avatar} {m.name} ({m.count})
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Review List */}
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>⏳ กำลังโหลด...</div>
-        ) : reviews.length === 0 ? (
+        ) : filteredReviews.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon">📋</div>
-            <div className="empty-state-title">ยังไม่มีรายการ{filter !== 'all' ? ` (${STATUS_CONFIG[filter].label})` : ''}</div>
-            <div className="empty-state-text">ส่งเนื้อหาจากหน้าสร้างคอนเทนต์มาที่นี่เพื่อตรวจสอบก่อนเผยแพร่</div>
+            <div className="empty-state-icon">📭</div>
+            <div className="empty-state-title">ไม่มีรายการ{filter !== 'all' ? ` (${STATUS_CONFIG[filter]?.label})` : ''}{memberFilter !== 'all' ? ` ของ ${members.find(m => m.id === memberFilter)?.name || ''}` : ''}</div>
+            <div className="empty-state-text">รายการจะแสดงเมื่อมีเนื้อหาถูกส่งเข้ามาตรวจสอบ</div>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {reviews.map(item => {
+            {filteredReviews.map(item => {
               const isExpanded = expandedId === item.id;
               const statusCfg = STATUS_CONFIG[item.status] || STATUS_CONFIG.pending;
 
@@ -124,6 +176,7 @@ export default function ReviewPage() {
                       borderBottom: isExpanded ? '1px solid var(--border)' : 'none',
                       flexWrap: 'wrap',
                     }}>
+                    {/* Status Badge */}
                     <span style={{
                       fontSize: 10, fontWeight: 700, padding: '3px 8px',
                       borderRadius: 20, color: statusCfg.color,
@@ -132,30 +185,52 @@ export default function ReviewPage() {
                       whiteSpace: 'nowrap', flexShrink: 0,
                     }}>{statusCfg.label}</span>
 
+                    {/* Title + Info */}
                     <div style={{ flex: 1, minWidth: 100 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.3 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.4 }}>
                         {item.title?.slice(0, 80) || 'ไม่มีหัวข้อ'}
                       </div>
-                      {item.submittedBy && <span style={{ fontSize: 10, color: 'var(--accent-light)', marginLeft: 4 }}>{item.submittedBy.avatar} {item.submittedBy.name}</span>}
-                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 3 }}>
-                        <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{sourceLabels[item.sourceType] || item.sourceType}</span>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
+                        {/* Member Badge */}
+                        {item.submittedBy && (
+                          <Link href={`/members/${item.submittedBy.id}`} style={{ textDecoration: 'none' }}
+                            onClick={(e) => e.stopPropagation()}>
+                            <span style={{
+                              fontSize: 10, padding: '2px 8px', borderRadius: 12,
+                              background: 'linear-gradient(135deg, rgba(249,24,128,0.15), rgba(124,58,237,0.15))',
+                              border: '1px solid rgba(249,24,128,0.25)',
+                              color: '#e879a8', fontWeight: 700, whiteSpace: 'nowrap',
+                              display: 'inline-flex', alignItems: 'center', gap: 3,
+                            }}>
+                              {item.submittedBy.avatar} {item.submittedBy.name}
+                            </span>
+                          </Link>
+                        )}
+                        {!item.submittedBy && (
+                          <span style={{
+                            fontSize: 10, padding: '2px 8px', borderRadius: 12,
+                            background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)',
+                          }}>👤 ไม่ระบุ</span>
+                        )}
+                        <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{sourceLabels[item.sourceType] || '📄'}</span>
                         <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>•</span>
-                        <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{item.wordCount} คำ</span>
+                        <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{item.wordCount || 0} คำ</span>
                         <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>•</span>
                         <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{formatDate(item.createdAt)}</span>
                       </div>
                     </div>
 
+                    {/* Preset Badge */}
                     {item.presetLabel && (
-                      <span style={{ fontSize: 9, padding: '2px 7px', background: 'var(--viral-bg)', color: 'var(--viral)', borderRadius: 10, whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 9, padding: '3px 8px', background: 'var(--viral-bg)', color: 'var(--viral-color)', borderRadius: 20, fontWeight: 700, whiteSpace: 'nowrap' }}>
                         {item.presetLabel}
                       </span>
                     )}
 
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'none', flexShrink: 0 }}>▼</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : '' }}>▼</span>
                   </div>
 
-                  {/* Expanded */}
+                  {/* Expanded Content */}
                   {isExpanded && (
                     <div style={{ padding: '14px' }}>
                       <div style={{
@@ -171,51 +246,51 @@ export default function ReviewPage() {
                       {item.angles?.length > 0 && (
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 12 }}>
                           {item.angles.map((a, i) => (
-                            <span key={i} style={{ fontSize: 9, padding: '2px 6px', background: 'var(--info-bg)', color: 'var(--info)', borderRadius: 10 }}>{a}</span>
+                            <span key={i} style={{ fontSize: 9, padding: '2px 6px', background: 'var(--bg-secondary)', borderRadius: 10, color: 'var(--text-muted)', border: '1px solid var(--border)' }}>📐 {a}</span>
                           ))}
                         </div>
                       )}
 
                       {item.note && (
-                        <div style={{ background: 'var(--warning-bg)', padding: 10, borderRadius: 'var(--radius-sm)', marginBottom: 12, border: '1px solid rgba(255,173,31,0.2)' }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--warning)', marginBottom: 3 }}>📝 หมายเหตุ:</div>
+                        <div style={{ background: 'rgba(251,191,36,0.08)', padding: 10, borderRadius: 'var(--radius-sm)', marginBottom: 12, border: '1px solid rgba(251,191,36,0.2)' }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24', marginBottom: 4 }}>💬 หมายเหตุจากผู้ตรวจ:</div>
                           <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{item.note}</div>
-                          {item.reviewedAt && <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 3 }}>ตรวจเมื่อ: {formatDate(item.reviewedAt)}</div>}
+                          {item.reviewedAt && <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4 }}>ตรวจเมื่อ {formatDate(item.reviewedAt)}</div>}
                         </div>
                       )}
 
                       <div style={{ marginBottom: 12 }}>
-                        <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>📝 หมายเหตุ:</label>
+                        <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>✏️ เพิ่มหมายเหตุ</label>
                         <textarea
                           className="form-textarea"
                           value={noteText[item.id] !== undefined ? noteText[item.id] : (item.note || '')}
                           onChange={(e) => setNoteText(prev => ({ ...prev, [item.id]: e.target.value }))}
-                          placeholder="พิมพ์หมายเหตุ..."
+                          placeholder="เขียนหมายเหตุ..."
                           style={{ minHeight: 50, fontSize: 12 }}
                         />
                       </div>
 
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: 6 }}>
                         <button onClick={() => handleUpdateStatus(item.id, 'approved')} disabled={updating === item.id}
-                          style={{ padding: '9px 8px', borderRadius: 'var(--radius-sm)', background: item.status === 'approved' ? 'var(--success)' : 'var(--success-bg)', color: item.status === 'approved' ? '#fff' : 'var(--success)', fontWeight: 700, fontSize: 11, cursor: 'pointer', border: `1px solid ${item.status === 'approved' ? 'var(--success)' : 'rgba(0,186,124,0.3)'}` }}>
-                          ✅ ผ่าน
+                          style={{ padding: '9px 8px', borderRadius: 'var(--radius-sm)', background: item.status === 'approved' ? '#22c55e' : 'rgba(34,197,94,0.12)', border: `1px solid ${item.status === 'approved' ? '#22c55e' : 'rgba(34,197,94,0.3)'}`, color: item.status === 'approved' ? '#fff' : '#22c55e', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                          ✅ อนุมัติ
                         </button>
                         <button onClick={() => handleUpdateStatus(item.id, 'revision')} disabled={updating === item.id}
-                          style={{ padding: '9px 8px', borderRadius: 'var(--radius-sm)', background: item.status === 'revision' ? '#7c3aed' : 'rgba(124,58,237,0.1)', color: item.status === 'revision' ? '#fff' : '#a78bfa', fontWeight: 700, fontSize: 11, cursor: 'pointer', border: `1px solid ${item.status === 'revision' ? '#7c3aed' : 'rgba(124,58,237,0.3)'}` }}>
-                          🔄 รอแก้
+                          style={{ padding: '9px 8px', borderRadius: 'var(--radius-sm)', background: item.status === 'revision' ? '#a78bfa' : 'rgba(167,139,250,0.12)', border: `1px solid ${item.status === 'revision' ? '#a78bfa' : 'rgba(167,139,250,0.3)'}`, color: item.status === 'revision' ? '#fff' : '#a78bfa', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                          🔄 แก้ไข
                         </button>
                         <button onClick={() => handleUpdateStatus(item.id, 'rejected')} disabled={updating === item.id}
-                          style={{ padding: '9px 8px', borderRadius: 'var(--radius-sm)', background: item.status === 'rejected' ? 'var(--danger)' : 'var(--danger-bg)', color: item.status === 'rejected' ? '#fff' : 'var(--danger)', fontWeight: 700, fontSize: 11, cursor: 'pointer', border: `1px solid ${item.status === 'rejected' ? 'var(--danger)' : 'rgba(244,33,46,0.3)'}` }}>
+                          style={{ padding: '9px 8px', borderRadius: 'var(--radius-sm)', background: item.status === 'rejected' ? '#ef4444' : 'rgba(239,68,68,0.12)', border: `1px solid ${item.status === 'rejected' ? '#ef4444' : 'rgba(239,68,68,0.3)'}`, color: item.status === 'rejected' ? '#fff' : '#ef4444', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                           ❌ ไม่ผ่าน
                         </button>
                         <button onClick={() => handleDelete(item.id)}
-                          style={{ padding: '9px 8px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'transparent', color: 'var(--text-muted)', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
+                          style={{ padding: '9px 8px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                           🗑️ ลบ
                         </button>
                       </div>
 
                       {updating === item.id && (
-                        <div style={{ textAlign: 'center', padding: 6, fontSize: 10, color: 'var(--accent)' }}>⏳ อัปเดต...</div>
+                        <div style={{ textAlign: 'center', padding: 6, fontSize: 10, color: 'var(--accent)' }}>กำลังอัปเดต...</div>
                       )}
                     </div>
                   )}
