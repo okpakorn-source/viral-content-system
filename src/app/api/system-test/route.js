@@ -231,18 +231,13 @@ export async function GET(request) {
     if (!dbUrl) {
       addResult('Database (Prisma)', 'warn', 'DATABASE_URL not set', Date.now() - t);
     } else {
-      // For SQLite relative paths, resolve against prisma dir
-      let resolvedUrl = dbUrl;
-      if (dbUrl.startsWith('file:./')) {
-        const { join: jn } = await import('path');
-        resolvedUrl = 'file:' + jn(process.cwd(), 'prisma', dbUrl.replace('file:./', ''));
-      }
+      // Prisma v7+ reads DATABASE_URL from env automatically
       const { PrismaClient } = await import('@prisma/client');
-      const prisma = new PrismaClient({ datasources: { db: { url: resolvedUrl } } });
+      const prisma = new PrismaClient();
       await prisma.$connect();
       const count = await prisma.workflow.count();
       await prisma.$disconnect();
-      addResult('Database (Prisma)', 'pass', `Connected — ${count} workflows (SQLite)`, Date.now() - t);
+      addResult('Database (Prisma)', 'pass', `Connected — ${count} workflows (${dbUrl.startsWith('file:') ? 'SQLite' : 'Remote'})`, Date.now() - t);
     }
   } catch (e) {
     addResult('Database (Prisma)', 'warn', `DB error: ${e.message.slice(0, 80)}`, 0);
