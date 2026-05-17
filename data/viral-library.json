@@ -1,1 +1,81 @@
-[]
+[
+  {
+    "id": "6cc009c0-7f62-40d2-b867-70dde099b49f",
+    "title": "Grandfather 70yo walks barefoot",
+    "content": "Deeply saddening. A 70-year-old grandfather walked 50 kilometers barefoot to visit his sick wife at the hospital because he didn't even have money for the bus. Locals saw him in this condition and were moved to tears, helping raise money for him. The total exceeded 100,000 baht. There are still many good people. Sending encouragement to the grandfather.",
+    "source": "manual",
+    "platform": "facebook",
+    "engagement": {},
+    "status": "prompted",
+    "analysis": {
+      "category": "ข่าวอบอุ่น",
+      "sub_category": "ข่าวคนจนสู้ชีวิต",
+      "emotional_patterns": [
+        "ความสงสาร",
+        "ความอบอุ่น",
+        "ความเห็นใจ"
+      ],
+      "primary_emotion": "ความสงสาร",
+      "viral_score": 85,
+      "hook_analysis": {
+        "type": "ประเภท Hook",
+        "opening_words": "Deeply saddening",
+        "uses_celebrity": false,
+        "uses_shock": false,
+        "hook_technique": "เริ่มด้วยการบรรยายเหตุการณ์ที่สะเทือนใจ"
+      },
+      "structure": {
+        "flow": "Hook > เนื้อหา > จุดพีค > CTA",
+        "has_twist": false,
+        "has_pain_point": true,
+        "emotional_arc": "เริ่มด้วยความเศร้าและเห็นใจ ต่อด้วยการช่วยเหลือจากคนในชุมชน",
+        "cta_style": "ส่งกำลังใจ"
+      },
+      "writing_dna": {
+        "sentence_style": "สั้นกระชับ",
+        "avg_paragraph_length": "สั้น",
+        "emotion_words": [
+          "saddening",
+          "moved to tears",
+          "encouragement"
+        ],
+        "share_triggers": [
+          "การบรรยายเหตุการณ์ที่สะเทือนใจ"
+        ],
+        "read_hooks": [
+          "การบรรยายเหตุการณ์ที่สะเทือนใจ"
+        ],
+        "paragraph_pattern": "เริ่มด้วยการบรรยายเหตุการณ์ ต่อด้วยการบรรยายความช่วยเหลือ"
+      },
+      "why_viral": "โพสต์นี้ไวรัลเพราะมันบรรยายเหตุการณ์ที่สะเทือนใจและกระตุ้นความเห็นใจจากผู้อ่าน อีกทั้งยังแสดงถึงความอบอุ่นของชุมชนที่เข้ามาช่วยเหลืออย่างทันท่วงที",
+      "key_takeaways": [
+        "การบรรยายเหตุการณ์ที่สะเทือนใจสามารถดึงดูดความสนใจได้",
+        "การแสดงความอบอุ่นและช่วยเหลือจากชุมชนทำให้เกิดความรู้สึกดี",
+        "การส่งกำลังใจเป็น CTA ที่มีประสิทธิภาพ"
+      ]
+    },
+    "generatedPrompt": {
+      "prompt_name": "ข่าวอบอุ่นใจ - สไตล์ช่วยเหลือจากชุมชน",
+      "category": "ข่าวอบอุ่น",
+      "emotional_type": "ความสงสาร",
+      "hook_style": "บรรยายเหตุการณ์ที่สะเทือนใจ",
+      "tone": "อบอุ่นและเห็นใจ",
+      "structure": "Hook > เนื้อหา > จุดพีค > CTA",
+      "cta_style": "ส่งกำลังใจ",
+      "writing_style": "สั้นกระชับ",
+      "viral_score": 85,
+      "prompt_text": "คุณคือผู้เขียนข่าวที่เชี่ยวชาญในการสร้างเรื่องราวที่อบอุ่นและสะเทือนใจ เริ่มต้นด้วยการบรรยายเหตุการณ์ที่ทำให้ผู้อ่านรู้สึกเศร้าและเห็นใจ เช่น การที่บุคคลหนึ่งต้องเผชิญกับความยากลำบากอย่างมาก จากนั้นเล่าถึงการที่ชุมชนเข้ามามีบทบาทในการช่วยเหลือ สร้างความอบอุ่นใจและความหวังให้กับผู้อ่าน ปิดท้ายด้วยการส่งกำลังใจและเชิญชวนให้ผู้อ่านมีส่วนร่วมในการสนับสนุนหรือส่งความปรารถนาดีให้กับบุคคลในข่าว เน้นการใช้คำที่กระตุ้นอารมณ์ เช่น 'สะเทือนใจ', 'น้ำตาคลอ', 'กำลังใจ' และระวังไม่ใช้คำที่ทำให้เกิดความเข้าใจผิดหรือสร้างความขัดแย้ง",
+      "do_not": [
+        "ใช้คำที่สร้างความขัดแย้ง",
+        "บรรยายเหตุการณ์ที่ไม่เกี่ยวข้อง"
+      ],
+      "example_hooks": [
+        "Deeply saddening. A young mother walks miles daily to provide for her children.",
+        "Heart-wrenching. An elderly man sells his belongings to afford medicine for his wife."
+      ]
+    },
+    "tags": [],
+    "createdAt": "2026-05-17T12:51:57.935Z",
+    "updatedAt": "2026-05-17T12:52:16.545Z"
+  }
+]

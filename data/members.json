@@ -8,7 +8,12 @@
     "role": "admin",
     "avatar": "👑",
     "createdAt": "2026-05-17T04:09:46.692Z",
-    "stats": { "totalCreated": 0, "totalApproved": 0, "totalRejected": 0, "totalRevision": 0 },
-    "lastLogin": null
+    "stats": {
+      "totalCreated": 0,
+      "totalApproved": 0,
+      "totalRejected": 0,
+      "totalRevision": 0
+    },
+    "lastLogin": "2026-05-17T12:38:53.435Z"
   }
 ]

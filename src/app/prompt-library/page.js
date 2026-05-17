@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import Header from '@/components/layout/Header';
@@ -135,7 +135,7 @@ export default function PromptLibraryPage() {
 
                     <div style={{ flex: 1, minWidth: 120 }}>
                       <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.4 }}>
-                        {p.prompt_name || p.hookStyle || 'Prompt'}
+                        {p.promptName || p.prompt_name || p.hookStyle || 'Prompt'}
                       </div>
                       <div style={{ display: 'flex', gap: 6, marginTop: 3, alignItems: 'center', flexWrap: 'wrap' }}>
                         {p.emotionalType && (
@@ -203,25 +203,25 @@ export default function PromptLibraryPage() {
                           color: 'var(--text-secondary)', whiteSpace: 'pre-wrap',
                           maxHeight: 300, overflowY: 'auto',
                         }}>
-                          {p.promptText || p.prompt_text || 'ไม่มีข้อมูล'}
+                          {p.promptText || p.prompt_text || p.promptName || 'ไม่มีข้อมูล'}
                         </div>
                       </div>
 
                       {/* Do Not list */}
-                      {p.do_not?.length > 0 && (
+                      {(p.doNot || p.do_not)?.length > 0 && (
                         <div style={{ marginBottom: 12, padding: 8, background: 'rgba(239,68,68,0.06)', borderRadius: 6 }}>
                           <div style={{ fontSize: 9, fontWeight: 700, color: '#ef4444', marginBottom: 4 }}>🚫 ห้ามทำ</div>
-                          {p.do_not.map((d, i) => (
+                          {(p.doNot || p.do_not).map((d, i) => (
                             <div key={i} style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>• {d}</div>
                           ))}
                         </div>
                       )}
 
                       {/* Example Hooks */}
-                      {p.example_hooks?.length > 0 && (
+                      {(p.exampleHooks || p.example_hooks)?.length > 0 && (
                         <div style={{ marginBottom: 12, padding: 8, background: 'rgba(34,197,94,0.06)', borderRadius: 6 }}>
                           <div style={{ fontSize: 9, fontWeight: 700, color: '#22c55e', marginBottom: 4 }}>🎣 ตัวอย่าง Hook</div>
-                          {p.example_hooks.map((h, i) => (
+                          {(p.exampleHooks || p.example_hooks).map((h, i) => (
                             <div key={i} style={{ fontSize: 11, color: 'var(--text-primary)', marginBottom: 2 }}>"{h}"</div>
                           ))}
                         </div>
@@ -229,7 +229,7 @@ export default function PromptLibraryPage() {
 
                       {/* Actions */}
                       <div style={{ display: 'flex', gap: 6 }}>
-                        <button onClick={() => handleCopy(p.promptText || p.prompt_text || '', p.id)}
+                        <button onClick={() => handleCopy(p.promptText || p.prompt_text || p.promptName || '', p.id)}
                           style={{
                             padding: '7px 14px', borderRadius: 8, border: 'none',
                             background: copiedId === p.id ? '#22c55e' : 'var(--accent)',
