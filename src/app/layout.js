@@ -1,4 +1,4 @@
-﻿import "./globals.css";
+import "./globals.css";
 import ClientLayout from "@/components/ClientLayout";
 
 export const metadata = {
@@ -9,7 +9,7 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="th">
-      <body>
+      <body suppressHydrationWarning>
         <ClientLayout>{children}</ClientLayout>
       </body>
     </html>
