@@ -14,7 +14,7 @@
       "totalRejected": 0,
       "totalRevision": 0
     },
-    "lastLogin": "2026-05-17T14:06:50.136Z"
+    "lastLogin": "2026-05-17T14:35:30.353Z"
   },
   {
     "id": "member_1779027257546",
@@ -25,6 +25,40 @@
     "role": "editor",
     "avatar": "👤",
     "createdAt": "2026-05-17T14:14:17.546Z",
+    "stats": {
+      "totalCreated": 0,
+      "totalApproved": 0,
+      "totalRejected": 0,
+      "totalRevision": 0
+    },
+    "lastLogin": null
+  },
+  {
+    "id": "member_1779028581602",
+    "username": "test_user1",
+    "password": "96f0eafe0ea74c53599554764ba264a1234cd3d23cbcfc165997984580d3003b",
+    "displayName": "Test User 1",
+    "nickname": "",
+    "role": "editor",
+    "avatar": "👤",
+    "createdAt": "2026-05-17T14:36:21.602Z",
+    "stats": {
+      "totalCreated": 0,
+      "totalApproved": 0,
+      "totalRejected": 0,
+      "totalRevision": 0
+    },
+    "lastLogin": null
+  },
+  {
+    "id": "member_1779028619650",
+    "username": "test_user2",
+    "password": "96f0eafe0ea74c53599554764ba264a1234cd3d23cbcfc165997984580d3003b",
+    "displayName": "Test User 2",
+    "nickname": "",
+    "role": "editor",
+    "avatar": "👤",
+    "createdAt": "2026-05-17T14:36:59.650Z",
     "stats": {
       "totalCreated": 0,
       "totalApproved": 0,
