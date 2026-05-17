@@ -15,5 +15,22 @@
       "totalRevision": 0
     },
     "lastLogin": "2026-05-17T14:06:50.136Z"
+  },
+  {
+    "id": "member_1779027257546",
+    "username": "editor1",
+    "password": "fc8691ec18528a1edfee0eed39ecfbb8bd7ce1d3b095eef579ef7fbcfda4815c",
+    "displayName": "Editor Test",
+    "nickname": "",
+    "role": "editor",
+    "avatar": "👤",
+    "createdAt": "2026-05-17T14:14:17.546Z",
+    "stats": {
+      "totalCreated": 0,
+      "totalApproved": 0,
+      "totalRejected": 0,
+      "totalRevision": 0
+    },
+    "lastLogin": null
   }
 ]

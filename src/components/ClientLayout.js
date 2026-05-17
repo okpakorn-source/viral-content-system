@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import { usePathname } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
 import Sidebar from '@/components/layout/Sidebar';
@@ -16,7 +16,7 @@ export default function ClientLayout({ children }) {
     <AuthGuard>
       <div style={{ display: 'flex', minHeight: '100vh' }}>
         <Sidebar />
-        <main style={{ flex: 1, marginLeft: 240, minHeight: '100vh', overflowY: 'auto' }}>
+        <main className="main-content">
           {children}
         </main>
       </div>
