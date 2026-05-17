@@ -102,6 +102,12 @@ export async function POST(request) {
       viralScore: body.viralScore || body.viral_score || 0,
       doNot: body.doNot || body.do_not || [],
       exampleHooks: body.exampleHooks || body.example_hooks || [],
+      // DNA v2 fields
+      dnaTemplate: body.dnaTemplate || body.dna_template || null,
+      emotionalArc: body.emotionalArc || body.emotional_arc || null,
+      visualImagination: body.visualImagination || body.visual_imagination_instruction || null,
+      commentTrigger: body.commentTrigger || body.comment_trigger_instruction || null,
+      shareTrigger: body.shareTrigger || body.share_trigger_instruction || null,
       sourceContentId: body.sourceContentId || null,
       exampleContent: body.exampleContent || '',
       usageCount: 0,

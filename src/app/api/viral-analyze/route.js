@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
 
-// ===== AI Viral Content Analyzer + Prompt Generator =====
-// แยกเป็น API ต่างหากเพื่อความเสถียร
+// ===== AI Viral Content DNA Analyzer + Prompt Generator =====
+// Deep DNA Analysis Framework v2.0 — 12 มิติ
 
 export async function POST(request) {
   try {
@@ -12,125 +12,249 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
     }
 
-    // ===== MODE: viral-analyze — วิเคราะห์ DNA ของคอนเทนต์ไวรัล =====
+    // ===== MODE: viral-analyze — วิเคราะห์ DNA 12 มิติ =====
     if (mode === 'viral-analyze') {
-      console.log('[Viral-Analyze] === ANALYZING VIRAL DNA ===');
+      console.log('[Viral-Analyze] === DEEP DNA ANALYSIS (12 Dimensions) ===');
 
-      const viralPrompt = `คุณคือผู้เชี่ยวชาญวิเคราะห์คอนเทนต์ไวรัลระดับโลก วิเคราะห์เนื้อหาที่ได้แสนไลค์ว่า "ทำไมมันถึงไวรัล"
+      const viralPrompt = `คุณคือ AI วิเคราะห์ "DNA ข่าวไวรัล Facebook" ระดับมืออาชีพ
+
+หน้าที่: ถอดโครงสร้างข่าว/โพสต์ไวรัลทั้งหมดออกมาเป็น "แม่แบบเชิงอารมณ์และเชิงภาษา" เพื่อใช้สร้างคอนเทนต์ใหม่ในระดับไวรัลใกล้เคียงต้นฉบับ
+
+สำคัญ:
+- ห้ามสรุปเนื้อหาแบบทั่วไป
+- ห้ามวิเคราะห์แบบนักเรียน
+- คิดเหมือน: นักวิเคราะห์พฤติกรรมคนแชร์ + นักจิตวิทยา social media + content strategist เพจไวรัลระดับประเทศ
 
 === เนื้อหาไวรัลที่ต้องวิเคราะห์ ===
-${text.slice(0, 6000)}
+${text.slice(0, 8000)}
 ======================================
 
-วิเคราะห์ 4 มิติอย่างละเอียด:
+วิเคราะห์ 12 มิติ ต่อไปนี้อย่างละเอียด:
 
-A. ประเภทคอนเทนต์ (เลือก 1 จาก: ข่าวอาลัย, ข่าวสูญเสีย, ข่าวดราม่า, ข่าวแฉ, ข่าวแซะ, ข่าวบริจาค, ข่าวการเมือง, ข่าวคนจนสู้ชีวิต, ข่าวหักมุม, ข่าวเศรษฐี, ข่าวอบอุ่น, ข่าวช็อก, ข่าวคอมเมนต์เดือด, ข่าวอุบัติเหตุ, ข่าวบันเทิง, ข่าวกีฬา, ข่าวดวง, ข่าวเทคโนโลยี)
+1. ประเภท DNA ข่าว — เลือกจาก: ดราม่าครอบครัว, สู้ชีวิต, nostalgia, moral conflict, ข่าวชาวบ้าน, ความรักสัตว์, คนดังตกต่ำ, พลิกชีวิต, ช่วยเหลือกัน, ข่าวเศร้า, ข่าวเอาคืน, ข่าวเตือนใจ, ข่าวเสียดายชีวิต, ข่าวอุบัติเหตุ, ข่าวอาชญากรรม, ข่าวดวง, ข่าวกีฬา, ข่าวบันเทิง, ข่าวการเมือง, ข่าวเศรษฐกิจ
 
-B. Emotional Pattern — อารมณ์หลักที่กระตุ้นคนอ่าน
+2. Emotional Core — อารมณ์หลักที่ทำให้คนหยุดอ่าน (เลือกจาก: สงสาร, โมโห, เสียดาย, คิดถึงอดีต, อบอุ่นใจ, ช็อก, ลุ้น, สะใจ, อินความเป็นมนุษย์, ภูมิใจ, กลัว, เห็นใจ)
+   ต้องจัดลำดับ: อารมณ์เปิด → อารมณ์กลาง → อารมณ์ปิด
 
-C. Viral Structure — โครงสร้างที่ทำให้ไวรัล:
-- เปิด Hook ยังไง, มีชื่อคนดัง, หักมุม, Pain Point, จังหวะอารมณ์, CTA
+3. Stop-Scrolling Hook — วิเคราะห์ประโยคแรกที่หยุดคน + เหตุผลว่าทำไมหยุดได้
+   แยกประเภท: hook สงสาร / hook ช็อก / hook เสียดาย / hook curiosity / hook nostalgia
 
-D. Writing DNA — เทคนิคการเขียนที่ซ่อนอยู่:
-- โครงสร้างประโยค, ความยาว, คำเร่งอารมณ์, เทคนิคชวนแชร์
+4. Comment Trigger — อะไรทำให้คนอยากคอมเมนต์ (moral conflict, ความเห็นต่าง, ความสงสาร, nostalgia, ความโกรธแทน, quote จำง่าย)
+
+5. Share Trigger — ทำไมคนแชร์ (เตือนใจ, อินวัยเด็ก, สะเทือนใจ, อยากให้กำลังใจ, อยากด่าคนในข่าว, อยากให้คนรู้)
+
+6. ภาษาที่ใช้ — วิเคราะห์: ภาษาคนเล่า/ภาษาข่าว/ภาษาชาวบ้าน/ภาษาดราม่า/ภาษาคำคม/ภาษา nostalgic + ระบุ: คำที่เป็น AI tone, คำที่ดูธรรมชาติ, คำที่ช่วยให้ไวรัล
+
+7. โครงสร้างการเล่าเรื่อง — แตกเป็น step: เปิดด้วยอะไร → ดันอารมณ์ยังไง → จุดพีคอยู่ตรงไหน → จบแบบไหน
+
+8. Visual Imagination — "ภาพอะไรเกิดขึ้นในหัวคนอ่าน" (เช่น เด็กยืนขายของคนเดียว, แม่จากลูกเข้าคุก)
+
+9. จุดผิดพลาดของบทความ — ตรวจจับ: AI tone, ภาษาทางการ, opening อ่อน, ending generic, คำลอย, ประโยคยาว, emotion ไม่สุด, ไม่มีภาพจำ
+
+10. Viral Score — ให้คะแนน 0-100 แต่ละด้าน: Hook, Emotional, Facebook language, Share potential, Comment potential, Readability, Visual imagination
+
+11. DNA Template — สรุปเป็น: สูตรโครงสร้าง + สูตรอารมณ์ + สูตรภาษา + สูตรจังหวะ
+
+12. คำแนะนำสำหรับ Prompt — สิ่งที่ต้องมีใน Prompt เพื่อรักษา DNA นี้
 
 ตอบเป็น JSON:
 {
-  "category": "ประเภทข่าว (ต้องตรงกับรายการด้านบน)",
-  "sub_category": "หมวดย่อย",
-  "content_summary": "สรุปเนื้อหา 2-3 ประโยคสั้นๆ",
+  "dna_type": "ประเภท DNA ข่าว (เลือกจากรายการข้อ 1)",
+  "sub_type": "หมวดย่อย",
+  "content_summary": "สรุปเนื้อหา 2-3 ประโยค",
   "target_audience": "กลุ่มเป้าหมาย",
-  "emotional_patterns": ["อารมณ์1", "อารมณ์2"],
-  "primary_emotion": "อารมณ์หลัก 1 ตัว",
-  "viral_score": 85,
-  "hook_analysis": {
-    "type": "ประเภท Hook",
-    "opening_words": "คำเปิดที่ใช้ (คัดลอกจากเนื้อหาจริง)",
-    "uses_celebrity": false,
-    "uses_shock": false,
-    "hook_technique": "อธิบายเทคนิค"
+
+  "emotional_core": {
+    "primary_emotion": "อารมณ์หลัก",
+    "emotion_open": "อารมณ์เปิด",
+    "emotion_middle": "อารมณ์กลาง",
+    "emotion_close": "อารมณ์ปิด",
+    "emotional_patterns": ["อารมณ์ที่เกิดขึ้นทั้งหมด"],
+    "why_this_emotion": "อธิบายว่าทำไมอารมณ์นี้ถึงทำให้คนหยุดอ่าน"
   },
-  "structure": {
-    "flow": "Hook > เนื้อหา > จุดพีค > CTA",
-    "has_twist": false,
-    "has_pain_point": false,
-    "emotional_arc": "อธิบายจังหวะอารมณ์",
-    "cta_style": "วิธีชวน engage",
+
+  "stop_scrolling_hook": {
+    "hook_sentence": "ประโยคแรกที่หยุดฟีด (คัดลอกจริง)",
+    "hook_type": "สงสาร/ช็อก/เสียดาย/curiosity/nostalgia",
+    "why_it_stops": "เหตุผลว่าทำไมหยุดคนได้",
+    "hook_technique": "เทคนิคที่ใช้",
+    "alternative_hooks": ["ตัวอย่าง hook แบบเดียวกัน 2 ประโยค"]
+  },
+
+  "comment_triggers": {
+    "main_trigger": "สิ่งที่ทำให้คอมเมนต์มากที่สุด",
+    "triggers": ["trigger1", "trigger2"],
+    "predicted_comments": ["ตัวอย่างคอมเมนต์ที่คาดว่าจะเจอ 3 ข้อ"]
+  },
+
+  "share_triggers": {
+    "main_reason": "เหตุผลหลักที่คนแชร์",
+    "triggers": ["เหตุผล1", "เหตุผล2"],
+    "share_context": "คนแชร์แล้วเขียน caption ว่าอะไร"
+  },
+
+  "language_analysis": {
+    "language_style": "ภาษาคนเล่า/ข่าว/ชาวบ้าน/ดราม่า/คำคม/nostalgic",
+    "ai_tone_words": ["คำที่เป็น AI tone (ถ้ามี)"],
+    "natural_words": ["คำที่ดูธรรมชาติ 5 คำ"],
+    "viral_words": ["คำที่ช่วยให้ไวรัล 5 คำ"],
+    "sentence_style": "สั้นกระชับ/ยาวลึกซึ้ง/สลับ",
+    "avg_paragraph_length": "สั้น/กลาง/ยาว"
+  },
+
+  "story_structure": {
+    "opening": "เปิดด้วยอะไร",
+    "emotion_build": "ดันอารมณ์ยังไง",
+    "peak_moment": "จุดพีคอยู่ตรงไหน",
+    "ending": "จบแบบไหน",
+    "full_flow": "Hook > X > Y > Z > Ending",
     "paragraph_count": 5,
     "word_count_estimate": 300
   },
-  "writing_dna": {
-    "sentence_style": "สั้นกระชับ/ยาวลึกซึ้ง/สลับ",
-    "avg_paragraph_length": "สั้น/กลาง/ยาว",
-    "emotion_words": ["คำเร่งอารมณ์ 5 คำ"],
-    "share_triggers": ["เหตุผลที่คนแชร์"],
-    "read_hooks": ["เทคนิคดึงอ่านต่อ"],
-    "paragraph_pattern": "อธิบายรูปแบบ"
+
+  "visual_imagination": {
+    "key_image": "ภาพหลักที่เกิดในหัวคนอ่าน",
+    "supporting_images": ["ภาพรอง 2-3 ภาพ"],
+    "emotional_image": "ภาพที่ทำให้เกิดอารมณ์สุด"
   },
-  "why_viral": "สรุป 2-3 ประโยค ว่าทำไมโพสต์นี้ไวรัล",
-  "key_takeaways": ["บทเรียน1", "บทเรียน2", "บทเรียน3"]
+
+  "content_flaws": {
+    "has_ai_tone": false,
+    "has_formal_language": false,
+    "weak_opening": false,
+    "generic_ending": false,
+    "floating_words": false,
+    "long_sentences": false,
+    "emotion_not_peaked": false,
+    "no_memorable_image": false,
+    "flaws_detail": ["รายละเอียดจุดอ่อนแต่ละจุด"],
+    "improvement_suggestions": ["คำแนะนำปรับปรุง"]
+  },
+
+  "viral_scores": {
+    "hook": 85,
+    "emotional": 85,
+    "facebook_language": 85,
+    "share_potential": 85,
+    "comment_potential": 85,
+    "readability": 85,
+    "visual_imagination": 85,
+    "overall": 85,
+    "score_reasons": {
+      "hook": "เหตุผลให้คะแนน",
+      "emotional": "เหตุผลให้คะแนน",
+      "facebook_language": "เหตุผลให้คะแนน",
+      "share_potential": "เหตุผลให้คะแนน",
+      "comment_potential": "เหตุผลให้คะแนน",
+      "readability": "เหตุผลให้คะแนน",
+      "visual_imagination": "เหตุผลให้คะแนน"
+    }
+  },
+
+  "dna_template": {
+    "structure_formula": "สูตรโครงสร้าง",
+    "emotion_formula": "สูตรอารมณ์",
+    "language_formula": "สูตรภาษา",
+    "rhythm_formula": "สูตรจังหวะ"
+  },
+
+  "prompt_recommendations": {
+    "must_have": ["สิ่งที่ต้องมีใน Prompt"],
+    "must_avoid": ["สิ่งที่ต้องหลีกเลี่ยง"],
+    "key_instructions": "คำแนะนำหลักสำหรับสร้าง Prompt"
+  },
+
+  "why_viral": "สรุป 3-5 ประโยค ว่าทำไมโพสต์นี้ไวรัล วิเคราะห์เชิงลึก",
+  "key_takeaways": ["บทเรียน1", "บทเรียน2", "บทเรียน3", "บทเรียน4", "บทเรียน5"]
 }`;
 
-      const result = await callAI({ prompt: viralPrompt, temperature: 0.3, maxTokens: 4000 });
+      const result = await callAI({ prompt: viralPrompt, temperature: 0.3, maxTokens: 8000 });
 
       let analysis;
       try {
         const raw = typeof result === 'string' ? result : JSON.stringify(result);
         analysis = JSON.parse(raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
       } catch {
-        analysis = typeof result === 'object' ? result : { category: 'ไม่สามารถวิเคราะห์ได้', raw: String(result).slice(0, 500) };
+        analysis = typeof result === 'object' ? result : { dna_type: 'ไม่สามารถวิเคราะห์ได้', raw: String(result).slice(0, 500) };
       }
 
-      console.log(`[Viral-Analyze] Done: category=${analysis.category}, score=${analysis.viral_score}`);
+      // Backward compat: map dna_type → category for prompt matching
+      if (analysis.dna_type && !analysis.category) {
+        analysis.category = analysis.dna_type;
+      }
+      if (analysis.viral_scores?.overall && !analysis.viral_score) {
+        analysis.viral_score = analysis.viral_scores.overall;
+      }
+
+      console.log(`[Viral-Analyze] Done: dna_type=${analysis.dna_type}, score=${analysis.viral_scores?.overall || analysis.viral_score}`);
       return NextResponse.json({ success: true, analysis });
     }
 
-    // ===== MODE: generate-prompt — สร้าง Prompt จากผลวิเคราะห์ =====
+    // ===== MODE: generate-prompt — สร้าง Prompt จาก DNA Analysis =====
     if (mode === 'generate-prompt') {
-      console.log('[Generate-Prompt] === CREATING PROMPT FROM DNA ===');
+      console.log('[Generate-Prompt] === CREATING PROMPT FROM DNA v2 ===');
       const analysisData = typeof analysis_input === 'object' ? JSON.stringify(analysis_input, null, 2) : (analysis_input || '');
 
-      const genPrompt = `คุณคือผู้เชี่ยวชาญสร้าง Writing Prompt สำหรับเขียนคอนเทนต์ไวรัลบน Facebook
+      const genPrompt = `คุณคือ content strategist ระดับประเทศ สร้าง Writing Prompt สำหรับเขียนคอนเทนต์ไวรัลบน Facebook
 
-จากผลวิเคราะห์ DNA ของคอนเทนต์ไวรัลด้านล่าง ให้สร้าง "Prompt สำหรับเขียนข่าว" ที่พร้อมใช้งานทันที
+จาก DNA Analysis ด้านล่าง ให้สร้าง "Prompt เขียนข่าว" ที่ production-ready ทันที
 
-=== ผลวิเคราะห์ DNA ===
+=== ผลวิเคราะห์ DNA 12 มิติ ===
 ${analysisData}
-========================
+================================
 
-${text ? '=== ตัวอย่างเนื้อหาต้นฉบับ (ใช้เป็น reference สไตล์เท่านั้น) ===\n' + text.slice(0, 3000) + '\n================================' : ''}
+${text ? '=== ตัวอย่างเนื้อหาต้นฉบับ (reference สไตล์เท่านั้น ห้าม copy) ===\n' + text.slice(0, 3000) + '\n================================' : ''}
 
-สร้าง Prompt ที่ครอบคลุม:
-1. บทบาทของ AI — เป็นนักเขียนแบบไหน (เช่น "คุณคือนักเขียนข่าวที่เชี่ยวชาญ...")
-2. น้ำเสียง/โทน — อบอุ่น, เข้มข้น, สะเทือนใจ ฯลฯ
-3. โครงสร้าง — Hook > Body > Climax > Ending
-4. เทคนิค Hook — เริ่มต้นยังไง
-5. จังหวะอารมณ์ — ขึ้น-ลง-พีค
-6. ความยาว/รูปแบบ — กี่ย่อหน้า กี่คำ
-7. คำเร่งอารมณ์ที่แนะนำ
-8. เทคนิคปิด — ทิ้งท้ายยังไงให้คนแชร์
-9. สิ่งที่ห้ามทำ — ต้องชัดเจน
+สร้าง Prompt ที่ครอบคลุม DNA ทั้ง 12 มิติ:
 
-⚠️ สำคัญ: prompt_text ต้องเป็นคำสั่งที่ AI อ่านแล้วเขียนข่าวได้เลย ห้ามใส่ตัวอย่างเนื้อหาจริงลงใน prompt_text
-⚠️ prompt_text ต้องยาว 300-500 คำ ครอบคลุมทุกส่วน
+1. บทบาท AI — "คุณคือ..." (ระบุให้ชัด เช่น นักเขียนเพจข่าวไวรัล, นักเล่าเรื่องสะเทือนใจ)
+2. DNA Template — ใส่สูตรโครงสร้าง + สูตรอารมณ์ + สูตรภาษา + สูตรจังหวะ
+3. Emotional Arc — ระบุอารมณ์เปิด → กลาง → ปิด
+4. Hook Style — ระบุเทคนิค Hook + ตัวอย่าง Hook pattern (ไม่ใช่ประโยคจริง)
+5. Visual Imagination — สั่งให้ AI สร้างภาพในหัวคนอ่าน
+6. Language DNA — ระบุสไตล์ภาษา + คำเร่งอารมณ์ + คำที่ห้ามใช้
+7. Story Structure — เปิดยังไง → ดันอารมณ์ → จุดพีค → จบยังไง
+8. Comment/Share Trigger — สั่งให้มีจุดที่กระตุ้นคอมเมนต์/แชร์
+9. ความยาว — กี่ย่อหน้า กี่คำ
+10. สิ่งที่ห้ามทำ — ต้องชัดเจนทุกข้อ
+
+⚠️ กฎเหล็ก:
+- prompt_text ต้องเป็นคำสั่งที่ AI อ่านแล้วเขียนข่าวได้เลย
+- ห้ามใส่ตัวอย่างเนื้อหาจริงลงใน prompt_text
+- prompt_text ต้องยาว 400-700 คำ ครอบคลุม DNA ทุกมิติ
+- ห้าม copy ประโยคจากต้นฉบับ แต่ต้องรักษา emotional structure
 
 ตอบเป็น JSON:
 {
-  "prompt_name": "ชื่อ Prompt สั้นๆ (เช่น 'ข่าวดราม่า - สไตล์เล่าเรื่องเข้มข้น')",
-  "category": "ประเภทข่าว (ตรงกับผลวิเคราะห์)",
+  "prompt_name": "ชื่อ Prompt (เช่น 'ข่าวสู้ชีวิต - สไตล์เล่าเรื่องสะเทือนใจ')",
+  "category": "ประเภทข่าว",
   "emotional_type": "อารมณ์หลัก",
   "hook_style": "สไตล์ Hook",
   "tone": "น้ำเสียง",
-  "structure": "Hook > Body > Climax > Ending",
+  "structure": "โครงสร้างเต็ม",
   "cta_style": "แบบ CTA",
   "writing_style": "สไตล์การเขียน",
   "viral_score": 85,
-  "prompt_text": "คำสั่งเต็มสำหรับ AI (300-500 คำ ห้ามมีตัวอย่างเนื้อหาจริง)",
-  "do_not": ["สิ่งที่ห้ามทำ 1", "สิ่งที่ห้ามทำ 2", "สิ่งที่ห้ามทำ 3"],
-  "example_hooks": ["ตัวอย่าง Hook ภาษาไทย 1", "ตัวอย่าง Hook ภาษาไทย 2"]
+  "dna_template": {
+    "structure_formula": "สูตรโครงสร้าง",
+    "emotion_formula": "สูตรอารมณ์",
+    "language_formula": "สูตรภาษา",
+    "rhythm_formula": "สูตรจังหวะ"
+  },
+  "emotional_arc": {
+    "open": "อารมณ์เปิด",
+    "middle": "อารมณ์กลาง",
+    "close": "อารมณ์ปิด"
+  },
+  "visual_imagination_instruction": "คำสั่งให้ AI สร้างภาพในหัวคนอ่าน",
+  "comment_trigger_instruction": "คำสั่งสร้างจุดกระตุ้นคอมเมนต์",
+  "share_trigger_instruction": "คำสั่งสร้างจุดกระตุ้นแชร์",
+  "prompt_text": "คำสั่งเต็ม production-ready (400-700 คำ ครอบคลุม DNA ทั้ง 12 มิติ)",
+  "do_not": ["สิ่งที่ห้ามทำ 1", "สิ่งที่ห้ามทำ 2", "สิ่งที่ห้ามทำ 3", "สิ่งที่ห้ามทำ 4", "สิ่งที่ห้ามทำ 5"],
+  "example_hooks": ["ตัวอย่าง Hook pattern 1", "ตัวอย่าง Hook pattern 2", "ตัวอย่าง Hook pattern 3"]
 }`;
 
-      const result = await callAI({ prompt: genPrompt, temperature: 0.4, maxTokens: 4000 });
+      const result = await callAI({ prompt: genPrompt, temperature: 0.4, maxTokens: 8000 });
 
       let promptData;
       try {

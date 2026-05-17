@@ -45,6 +45,7 @@ export default function Sidebar() {
     { label: 'หอสมุด Prompt', icon: '🏛️', href: '/prompt-library' },
     { label: 'จัดการ AI Prompts', icon: '🤖', href: '/prompts' },
     { type: 'divider', label: 'ระบบ' },
+    { label: 'เช็คสุขภาพระบบ', icon: '🔍', href: '/system-health' },
     { label: 'สถิติ', icon: '📈', href: '/analytics' },
     { label: 'จัดการสมาชิก', icon: '👥', href: '/members' },
     { label: 'ตั้งค่า', icon: '⚙️', href: '/settings' },
