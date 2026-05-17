@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'fs/promises';
+﻿import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { randomBytes, createHash } from 'crypto';
@@ -47,7 +47,7 @@ async function readMembers() {
     const defaultMembers = [{
       id: 'admin',
       username: 'admin',
-      password: hashPassword('admin123'),
+      password: hashPassword('Huasaii123'),
       displayName: 'Admin',
       role: 'admin',
       avatar: '👑',

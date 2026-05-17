@@ -2,17 +2,17 @@
   {
     "id": "admin",
     "username": "admin",
-    "password": "8c41d4a641f24d979cbd308d714f4f3b2b9c3cdcd9e201b8aafe0d4695d6dc50",
+    "password": "92376460bd2aa08eaabb714e39bdfc44e0afc637d69c379f4c24aa1732e94396",
     "displayName": "Admin",
     "role": "admin",
     "avatar": "👑",
-    "createdAt": "2026-05-16T21:09:25.329Z",
+    "createdAt": "2026-05-17T04:09:46.692Z",
     "stats": {
       "totalCreated": 0,
       "totalApproved": 0,
       "totalRejected": 0,
       "totalRevision": 0
     },
-    "lastLogin": "2026-05-17T03:46:10.095Z"
+    "lastLogin": "2026-05-17T04:09:46.698Z"
   }
 ]

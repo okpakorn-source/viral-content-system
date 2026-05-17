@@ -1,10 +1,7 @@
-import Sidebar from '@/components/layout/Sidebar';
+﻿export const metadata = {
+  title: 'ViralFlow',
+};
 
-export default function ContentLayout({ children }) {
-  return (
-    <div className="app-layout">
-      <Sidebar />
-      <main className="main-content">{children}</main>
-    </div>
-  );
+export default function Layout({ children }) {
+  return children;
 }

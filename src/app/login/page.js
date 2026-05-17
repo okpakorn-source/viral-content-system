@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -93,7 +93,7 @@ export default function LoginPage() {
         </form>
 
         <div style={{ textAlign: 'center', marginTop: 20, fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>
-          Default: admin / admin123
+          
         </div>
       </div>
     </div>
