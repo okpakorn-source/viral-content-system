@@ -1,5 +1,6 @@
-'use client';
+﻿'use client';
 import Header from '@/components/layout/Header';
+import Link from 'next/link';
 import { useState, useEffect } from 'react';
 
 const AVATARS = ['👑', '👤', '🧑‍💻', '👩‍💼', '🧑‍🎨', '🦊', '🐯', '🐻', '🦁', '🐸', '🎯', '⚡'];
@@ -124,7 +125,7 @@ export default function MembersPage() {
                     {m.avatar}
                   </div>
                   <div style={{ flex: 1, minWidth: 120 }}>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)' }}>{m.displayName}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)' }}><Link href={`/members/${m.id}`} style={{ color: 'var(--text-primary)', textDecoration: 'none' }}>{m.displayName}</Link></div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>@{m.username}</div>
                   </div>
                   <select value={m.role} onChange={e => handleRoleChange(m.id, e.target.value)}

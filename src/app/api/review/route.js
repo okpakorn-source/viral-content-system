@@ -27,12 +27,18 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status'); // pending, approved, rejected, revision
+    const memberId = searchParams.get('member'); // filter by member
     let reviews = await loadReviews();
 
     // Sort by newest first
     reviews.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-    // Stats (from unfiltered data)
+    // Filter by member if specified
+    if (memberId) {
+      reviews = reviews.filter(r => r.submittedBy?.id === memberId);
+    }
+
+    // Stats (from filtered data)
     const stats = {
       total: reviews.length,
       pending: reviews.filter(r => r.status === 'pending').length,
