@@ -284,10 +284,11 @@ export async function POST(request) {
 
       console.log(`[Analyze] newsTitle: "${(actualNewsTitle || '').slice(0,80)}", textLen: ${actualNewsBody?.length}`);
 
-      // === 🏛️ Smart Prompt Library Lookup — ดึง Prompt จากหอสมุดไวรัลก่อน ===
+      // === 🧠 AI Smart Prompt Match — ให้ AI วิเคราะห์ข่าวแล้วเทียบ Prompt ===
       let smartPrompt = null;
-      let promptSource = 'preset'; // 'library' หรือ 'preset'
+      let promptSource = 'preset';
       let promptMatchReason = '';
+      let newsTypeDetected = '';
       try {
         const { readFile: rf } = await import('fs/promises');
         const { join: jn } = await import('path');
@@ -297,64 +298,64 @@ export async function POST(request) {
         try { promptLib = JSON.parse(await rf(libPath, 'utf-8')); } catch {
           try { promptLib = JSON.parse(await rf(jn(process.cwd(), 'data', 'prompt-library.json'), 'utf-8')); } catch {}
         }
-        console.log(`[Analyze] 🏛️ Prompt Library loaded: ${promptLib.length} prompts`);
+        console.log(`[Analyze] 🧠 Prompt Library loaded: ${promptLib.length} prompts`);
 
-        if (promptLib.length > 0) {
-          // ดึง category จากหลายแหล่ง
-          const detectedCategory = actualBreakdown?.content_type || actualBreakdown?.category || actualBreakdown?.news_category || '';
-          const titleLower = (actualNewsTitle || '').toLowerCase();
-          const keywords = titleLower.split(/\s+/).filter(w => w.length > 2);
-          console.log(`[Analyze] 🏛️ Category: "${detectedCategory}" | Title keywords: ${keywords.length}`);
+        const validPrompts = promptLib.filter(p => p.promptText);
+        if (validPrompts.length > 0) {
+          // สร้างรายการ Prompt ให้ AI เลือก
+          const promptCatalog = validPrompts.map((p, i) =>
+            `[${i}] "${p.promptName}" | ประเภท: ${p.category || '-'} | อารมณ์: ${p.emotionalType || '-'} | โทน: ${p.tone || '-'}`
+          ).join('\n');
 
-          // Strategy 1: Category exact match
-          if (detectedCategory) {
-            const matched = promptLib
-              .filter(p => p.promptText && p.category && (
-                detectedCategory.toLowerCase().includes(p.category.replace('ข่าว', '').toLowerCase()) ||
-                p.category.toLowerCase().includes(detectedCategory.replace('ข่าว', '').toLowerCase())
-              ))
-              .sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
-            if (matched.length > 0) {
-              smartPrompt = matched[0];
+          console.log(`[Analyze] 🧠 Sending to AI for match: ${validPrompts.length} prompts vs "${(actualNewsTitle || '').slice(0, 60)}"`);
+
+          try {
+            const matchResult = await callAI({
+              model: 'gpt-4o-mini',
+              temperature: 0,
+              maxTokens: 200,
+              prompt: `วิเคราะห์ข่าวนี้แล้วเลือก Prompt ที่เหมาะที่สุดจากรายการด้านล่าง
+
+=== ข่าว ===
+หัวข้อ: ${actualNewsTitle || 'ไม่มีหัวข้อ'}
+เนื้อหาย่อ: ${(actualNewsBody || '').slice(0, 500)}
+=== จบข่าว ===
+
+=== Prompt ที่มีในหอสมุด (${validPrompts.length} ตัว) ===
+${promptCatalog}
+=== จบรายการ ===
+
+คำสั่ง:
+1. วิเคราะห์ว่าข่าวนี้เป็นข่าวแนวอะไร (เช่น อุบัติเหตุ, อาชญากรรม, อบอุ่น, การเมือง, กีฬา, บันเทิง, สังคม, เศรษฐกิจ)
+2. เทียบกับ Prompt แต่ละตัว — ตัวไหนมีประเภท/อารมณ์/โทนที่เหมาะกับข่าวนี้มากที่สุด?
+3. ⚠️ สำคัญ: ถ้าไม่มี Prompt ตัวไหนเหมาะกับข่าวนี้เลย ให้ selectedIndex = -1 (ห้ามบังคับเลือกถ้าไม่ตรง)
+
+ตอบเป็น JSON เท่านั้น:
+{"newsType":"ประเภทข่าว","selectedIndex":0 ถ้าเจอตัวที่เหมาะ หรือ -1 ถ้าไม่มี,"reason":"เหตุผลสั้นๆ ภาษาไทย"}`
+            });
+
+            newsTypeDetected = matchResult.newsType || '';
+            console.log(`[Analyze] 🧠 AI detected: ข่าว${newsTypeDetected} | selected: ${matchResult.selectedIndex} | reason: ${matchResult.reason}`);
+
+            if (matchResult.selectedIndex >= 0 && matchResult.selectedIndex < validPrompts.length) {
+              smartPrompt = validPrompts[matchResult.selectedIndex];
               promptSource = 'library';
-              promptMatchReason = `category match: "${detectedCategory}" → "${smartPrompt.category}"`;
-            }
-          }
-
-          // Strategy 2: Title keyword match
-          if (!smartPrompt && keywords.length > 0) {
-            const keywordMatched = promptLib
-              .filter(p => p.promptText && (
-                keywords.some(kw => (p.category || '').toLowerCase().includes(kw)) ||
-                keywords.some(kw => (p.promptName || '').toLowerCase().includes(kw)) ||
-                keywords.some(kw => (p.emotionalType || '').toLowerCase().includes(kw))
-              ))
-              .sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
-            if (keywordMatched.length > 0) {
-              smartPrompt = keywordMatched[0];
-              promptSource = 'library';
-              promptMatchReason = `keyword match: title → "${smartPrompt.promptName || smartPrompt.category}"`;
-            }
-          }
-
-          // Strategy 3: Best available (viralScore >= 60)
-          if (!smartPrompt) {
-            const best = promptLib.filter(p => p.promptText).sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
-            if (best.length > 0 && best[0].viralScore >= 60) {
-              smartPrompt = best[0];
-              promptSource = 'library';
-              promptMatchReason = `best available: "${smartPrompt.promptName || smartPrompt.category}" (score: ${smartPrompt.viralScore})`;
-            } else if (best.length > 0) {
-              promptMatchReason = `no match: ${best.length} prompts but max score ${best[0].viralScore || 0} < 60`;
+              promptMatchReason = `🧠 AI match: ข่าว${newsTypeDetected} → "${smartPrompt.promptName}" (${matchResult.reason})`;
+              // อัพเดท usage count
+              smartPrompt.usageCount = (smartPrompt.usageCount || 0) + 1;
+              smartPrompt.lastUsedAt = new Date().toISOString();
             } else {
-              promptMatchReason = 'library empty (no prompts with text)';
+              promptMatchReason = `🧠 AI: ไม่มี Prompt ที่เหมาะกับข่าว${newsTypeDetected} — ${matchResult.reason || 'ไม่ตรงแนว'}`;
             }
+          } catch (aiErr) {
+            console.log(`[Analyze] 🧠 AI match failed: ${aiErr.message} — falling back`);
+            promptMatchReason = `AI match error: ${aiErr.message}`;
           }
 
-          console.log(`[Analyze] 🏛️ Result: ${promptSource === 'library' ? '✅ USING' : '❌ SKIP'} | ${promptMatchReason}`);
+          console.log(`[Analyze] 🧠 Result: ${promptSource === 'library' ? '✅ USING' : '❌ SKIP'} | ${promptMatchReason}`);
         } else {
-          promptMatchReason = 'library empty (0 prompts)';
-          console.log(`[Analyze] 🏛️ Library empty — using preset fallback`);
+          promptMatchReason = 'library empty (0 prompts with text)';
+          console.log(`[Analyze] 🧠 Library empty — using preset fallback`);
         }
       } catch (err) {
         promptMatchReason = `error: ${err.message}`;
@@ -500,6 +501,7 @@ export async function POST(request) {
           presetUsed: preset.name,
           promptSource, // 'library' or 'preset'
           promptMatchReason: promptMatchReason || 'unknown',
+          newsTypeDetected: newsTypeDetected || '',
           smartPromptName: smartPrompt ? (smartPrompt.promptName || smartPrompt.category) : null,
           smartPromptScore: smartPrompt?.viralScore || null,
           hasBreakdown: !!actualBreakdown,

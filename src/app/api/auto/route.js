@@ -38,32 +38,34 @@ export async function POST(request) {
     };
 
     // === STEP 0: Detect source type ===
+    const step0Start = Date.now();
     let detectedType = forceType || 'url';
     if (!forceType) {
       if (/tiktok\.com/i.test(url)) detectedType = 'tiktok';
       else if (/youtube\.com|youtu\.be/i.test(url)) detectedType = 'youtube';
       else if (/facebook\.com|fb\.watch/i.test(url)) detectedType = 'facebook';
     }
-    addLog('Detect', `Source: ${detectedType}`);
+    const domain = (() => { try { return new URL(url).hostname; } catch { return url.slice(0, 30); } })();
+    addLog('Detect', `📎 ${detectedType.toUpperCase()} → ${domain}`);
 
     // === STEP 1: ดึงเนื้อหา (Scrape / Transcribe) ===
+    const step1Start = Date.now();
     let rawText = '';
 
     if (detectedType === 'tiktok') {
-      addLog('Step1', 'Transcribing TikTok...');
+      addLog('Step1', '🎵 กำลัง transcribe TikTok...');
       const tikRes = await callInternal('/api/tiktok', { url });
       if (!tikRes.success) throw new Error(`TikTok: ${tikRes.error}`);
       rawText = tikRes.transcript || tikRes.text || '';
-      addLog('Step1', `TikTok transcript: ${rawText.length}ch`);
+      addLog('Step1', `✅ TikTok transcript: ${rawText.length} ตัวอักษร (${((Date.now() - step1Start) / 1000).toFixed(1)}s)`);
     } else if (detectedType === 'youtube') {
-      addLog('Step1', 'Getting YouTube transcript...');
+      addLog('Step1', '🎬 กำลังดึง YouTube transcript...');
       const ytRes = await callInternal('/api/youtube', { url });
       if (!ytRes.success) throw new Error(`YouTube: ${ytRes.error}`);
       rawText = ytRes.transcript || ytRes.text || '';
-      addLog('Step1', `YouTube transcript: ${rawText.length}ch`);
+      addLog('Step1', `✅ YouTube transcript: ${rawText.length} ตัวอักษร (${((Date.now() - step1Start) / 1000).toFixed(1)}s)`);
     } else {
-      // Web scraping
-      addLog('Step1', 'Scraping URL...');
+      addLog('Step1', `🌐 กำลังดึง HTML จาก ${domain}...`);
       const scrapeRes = await fetch(`${baseUrl}/api/extract`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -72,7 +74,7 @@ export async function POST(request) {
       const scrapeData = await scrapeRes.json();
       if (!scrapeData.success) throw new Error(`Scrape: ${scrapeData.error}`);
       rawText = scrapeData.data?.text || scrapeData.text || '';
-      addLog('Step1', `Scraped: ${rawText.length}ch`);
+      addLog('Step1', `✅ ดึงเนื้อหา ${rawText.length} ตัวอักษร (${((Date.now() - step1Start) / 1000).toFixed(1)}s)`);
     }
 
     if (!rawText || rawText.length < 20) {
@@ -80,7 +82,8 @@ export async function POST(request) {
     }
 
     // === STEP 2: สกัดข่าว (Extract) ===
-    addLog('Step2', 'Extracting news...');
+    const step2Start = Date.now();
+    addLog('Step2', '📰 AI กำลังสกัดเนื้อข่าว...');
     const extractRes = await callInternal('/api/summarize', {
       text: rawText,
       sourceType: detectedType,
@@ -90,10 +93,11 @@ export async function POST(request) {
       throw new Error('สกัดข่าวไม่สำเร็จ');
     }
     const newsData = extractRes.data;
-    addLog('Step2', `Extracted: "${newsData.newsTitle?.slice(0, 50)}" (${newsData.newsBody.length}ch)`);
+    addLog('Step2', `✅ "${newsData.newsTitle?.slice(0, 40)}..." (${newsData.newsBody.length} ตัวอักษร, ${((Date.now() - step2Start) / 1000).toFixed(1)}s)`);
 
     // === STEP 3: แตกประเด็น (Breakdown) ===
-    addLog('Step3', 'Breaking down angles...');
+    const step3Start = Date.now();
+    addLog('Step3', '🔍 AI กำลังวิเคราะห์มุมข่าว...');
     const breakRes = await callInternal('/api/summarize', {
       text: newsData.newsBody,
       newsTitle: newsData.newsTitle,
@@ -104,10 +108,12 @@ export async function POST(request) {
       throw new Error('แตกประเด็นไม่สำเร็จ');
     }
     const breakdownData = breakRes.data;
-    addLog('Step3', `Breakdown: ${breakdownData.key_points?.length || 0} points, ${breakdownData.possible_angles?.length || 0} angles`);
+    addLog('Step3', `✅ ${breakdownData.key_points?.length || 0} ประเด็น, ${breakdownData.possible_angles?.length || 0} มุมข่าว (${((Date.now() - step3Start) / 1000).toFixed(1)}s)`);
 
     // === STEP 4: สร้างเนื้อหา (Analyze/Generate) ===
-    addLog('Step4', `Generating content (preset: ${selectedPreset}, length: ${selectedLength})...`);
+    const step4Start = Date.now();
+    addLog('Step4', `✍️ AI กำลังสร้างเนื้อหา (${selectedPreset}, ${selectedLength})...`);
+    addLog('Step4', `🧠 กำลังให้ AI วิเคราะห์แนวข่าว → เทียบกับ Prompt Library...`);
     const analyzeRes = await callInternal('/api/summarize', {
       text: newsData.newsBody,
       newsTitle: newsData.newsTitle,
@@ -121,21 +127,25 @@ export async function POST(request) {
       throw new Error('สร้างเนื้อหาไม่สำเร็จ');
     }
     const analysisResult = analyzeRes.data;
-    addLog('Step4', `Generated: ${analysisResult.versions?.length || 0} versions`);
+    addLog('Step4', `✅ สร้าง ${analysisResult.versions?.length || 0} เวอร์ชัน (${((Date.now() - step4Start) / 1000).toFixed(1)}s)`);
 
     // === Prompt Library info ===
     const usedPreset = analysisResult.usedPreset || null;
+    const newsType = analysisResult.debug?.newsTypeDetected || '';
+    if (newsType) {
+      addLog('Prompt', `🧠 AI วิเคราะห์: ข่าว${newsType}`);
+    }
     if (usedPreset?.source === 'library') {
-      addLog('Prompt', `🏛️ Library: "${usedPreset.name}" (Viral: ${usedPreset.viralScore || '-'})`);
+      addLog('Prompt', `🏛️ ใช้ Library: "${usedPreset.name}" (Viral: ${usedPreset.viralScore || '-'})`);
     } else if (usedPreset) {
-      addLog('Prompt', `📦 Preset: "${usedPreset.name}"`);
+      addLog('Prompt', `📦 ใช้ Preset: "${usedPreset.name}"`);
     }
     if (analysisResult.debug?.promptMatchReason) {
-      addLog('Prompt', `🔍 Match: ${analysisResult.debug.promptMatchReason}`);
+      addLog('Prompt', `${analysisResult.debug.promptMatchReason}`);
     }
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-    addLog('Done', `Total: ${totalTime}s`);
+    addLog('Done', `✅ เสร็จสมบูรณ์ ${totalTime}s`);
 
     return NextResponse.json({
       success: true,
@@ -152,7 +162,15 @@ export async function POST(request) {
           name: usedPreset.name,
           viralScore: usedPreset.viralScore || null,
           matchReason: analysisResult.debug?.promptMatchReason || '',
+          newsType: newsType || '',
         } : null,
+        stepTimings: {
+          detect: ((step1Start - step0Start) / 1000).toFixed(1),
+          scrape: ((step2Start - step1Start) / 1000).toFixed(1),
+          extract: ((step3Start - step2Start) / 1000).toFixed(1),
+          breakdown: ((step4Start - step3Start) / 1000).toFixed(1),
+          generate: ((Date.now() - step4Start) / 1000).toFixed(1),
+        },
         log,
       },
     });

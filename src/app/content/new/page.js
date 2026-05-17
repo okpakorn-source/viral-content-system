@@ -92,26 +92,41 @@ export default function NewContentPage() {
 
       if (!data.success) throw new Error(data.error);
 
-      // Complete all steps from auto result
-      wfComplete('auto_scrape', `ดึงเนื้อหาแล้ว`);
-      wfStart('auto_extract'); wfComplete('auto_extract', `"${data.data.newsData?.newsTitle?.slice(0, 40) || '...'}"`);
-      wfStart('auto_breakdown'); wfComplete('auto_breakdown', `${data.data.breakdownData?.possible_angles?.length || 0} มุม`);
-
-      // Show Library Check result
+      const st = data.data.stepTimings || {};
       const pi = data.data.usedPromptInfo;
-      wfStart('auto_lib_check', { detail: 'กำลังค้น Prompt จากหอสมุดไวรัล...' });
-      if (pi?.source === 'library') {
-        wfComplete('auto_lib_check', `🏛️ ใช้: ${pi.name} (Viral: ${pi.viralScore || '-'}) | ${pi.matchReason || ''}`);
-      } else if (pi) {
-        wfComplete('auto_lib_check', `📦 ใช้ Preset: ${pi.name} | ${pi.matchReason || 'ไม่มี Library Prompt ที่ตรง'}`);
+      const newsTitle = data.data.newsData?.newsTitle || '';
+      const anglesCount = data.data.breakdownData?.possible_angles?.length || 0;
+      const versionsCount = data.data.analysisResult?.versions?.length || 0;
+
+      // Complete all steps with detailed sub-info
+      wfComplete('auto_scrape', `ดึงเนื้อหา ${data.data.newsData?.newsBody?.length || 0} ตัวอักษร (${st.scrape || '?'}s)`);
+
+      wfStart('auto_extract', { detail: '📰 AI กำลังสกัดเนื้อข่าว...' });
+      wfComplete('auto_extract', `"${newsTitle.slice(0, 35)}..." (${st.extract || '?'}s)`);
+
+      wfStart('auto_breakdown', { detail: '🔍 AI กำลังวิเคราะห์มุมข่าว...' });
+      wfComplete('auto_breakdown', `${anglesCount} มุมข่าว (${st.breakdown || '?'}s)`);
+
+      // Show Library Check result with AI analysis
+      wfStart('auto_lib_check', { detail: '🧠 AI กำลังวิเคราะห์แนวข่าว → เทียบ Prompt Library...' });
+      if (pi?.newsType) {
+        const typeLabel = `ข่าว${pi.newsType}`;
+        if (pi.source === 'library') {
+          wfComplete('auto_lib_check', `🧠 ${typeLabel} → 🏛️ "${pi.name}" (Viral: ${pi.viralScore || '-'})`);
+        } else {
+          wfComplete('auto_lib_check', `🧠 ${typeLabel} → 📦 ไม่มี Prompt ที่เหมาะ → ใช้ Preset`);
+        }
+      } else if (pi?.source === 'library') {
+        wfComplete('auto_lib_check', `🏛️ ใช้: ${pi.name} (Viral: ${pi.viralScore || '-'})`);
       } else {
         wfComplete('auto_lib_check', `📦 ใช้ Preset: ${selectedPreset}`);
       }
 
-      wfStart('auto_generate', { detail: pi?.source === 'library' ? `🏛️ ${pi.name}` : `📦 Preset: ${selectedPreset}` });
-      wfComplete('auto_generate', `${data.data.analysisResult?.versions?.length || 0} เวอร์ชัน`);
-      const promptLabel = pi?.source === 'library' ? `🏛️ ${pi.name?.slice(0, 20)}` : `📦 Preset`;
-      finishWorkflow(`Auto เสร็จ ${data.data.totalTimeSeconds || ''}s — ${data.data.analysisResult?.versions?.length || 0} เวอร์ชัน | ${promptLabel}`);
+      const promptLabel = pi?.source === 'library' ? `🏛️ ${pi.name?.slice(0, 20)}` : `📦 Preset: ${selectedPreset}`;
+      wfStart('auto_generate', { detail: `✍️ ${promptLabel} → กำลังสร้างเนื้อหา...` });
+      wfComplete('auto_generate', `${versionsCount} เวอร์ชัน (${st.generate || '?'}s)`);
+
+      finishWorkflow(`Auto เสร็จ ${data.data.totalTimeSeconds || ''}s — ${versionsCount} เวอร์ชัน | ${promptLabel}`);
 
       setNewsData(data.data.newsData);
       setBreakdownData(data.data.breakdownData);
@@ -1303,65 +1318,66 @@ export default function NewContentPage() {
         {/* ===== STEP 4: Analyzed — ผลลัพธ์หลายเวอร์ชัน ===== */}
         {step === 'analyzed' && analysisResult && (
           <div className="card slide-up">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>📝 ผลลัพธ์ — {analysisResult.usedPreset?.name || 'AI'}</h3>
+            {/* ===== ส่วนหัว: หัวข้อข่าว + Prompt ที่ใช้ กำกับชัดเจน ===== */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>📝 ผลลัพธ์</h3>
               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{analysisResult.versions?.length || 0} เวอร์ชัน</span>
             </div>
 
-            {/* 🏛️📦 Prompt Source Card — แสดงชัดเจนว่าเนื้อหานี้สร้างจาก Prompt อะไร จากไหน */}
-            {analysisResult.usedPreset?.source === 'library' && (
-              <div style={{
-                background: 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(59,130,246,0.15))',
-                padding: '16px 18px', borderRadius: 'var(--radius-md)', marginBottom: 16,
-                border: '2px solid rgba(139,92,246,0.4)',
-                boxShadow: '0 4px 20px rgba(139,92,246,0.15)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg, #7c3aed, #3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>🏛️</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 1 }}>Prompt จากหอสมุดไวรัล</div>
-                    <div style={{ fontSize: 15, fontWeight: 900, color: '#fff' }}>{analysisResult.usedPreset.name?.replace('🏛️ ', '')}</div>
+            {/* 📰 หัวข้อข่าว + Prompt ที่ใช้ */}
+            <div style={{ background: 'var(--bg-primary)', borderRadius: 'var(--radius-md)', marginBottom: 16, border: analysisResult.usedPreset?.source === 'library' ? '2px solid rgba(139,92,246,0.5)' : '1px solid var(--border)', overflow: 'hidden' }}>
+              {/* Prompt Badge — ติดด้านบนหัวข้อข่าว */}
+              {analysisResult.usedPreset?.source === 'library' ? (
+                <div style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.25), rgba(59,130,246,0.2))', padding: '10px 16px', borderBottom: '1px solid rgba(139,92,246,0.3)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <div style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(135deg, #7c3aed, #3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>🏛️</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 1 }}>PROMPT จากหอสมุดไวรัล</div>
+                      <div style={{ fontSize: 13, fontWeight: 900, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{analysisResult.usedPreset.name?.replace('🏛️ ', '')}</div>
+                    </div>
+                    {analysisResult.usedPreset.viralScore && (
+                      <div style={{ background: 'linear-gradient(135deg, #7c3aed, #6366f1)', padding: '4px 10px', borderRadius: 16, color: '#fff', fontWeight: 900, fontSize: 12, textAlign: 'center', lineHeight: 1, flexShrink: 0 }}>
+                        <div style={{ fontSize: 7, opacity: 0.7, marginBottom: 1 }}>VIRAL</div>
+                        {analysisResult.usedPreset.viralScore}
+                      </div>
+                    )}
                   </div>
-                  {analysisResult.usedPreset.viralScore && (
-                    <div style={{ background: 'linear-gradient(135deg, #7c3aed, #6366f1)', padding: '6px 14px', borderRadius: 20, color: '#fff', fontWeight: 900, fontSize: 13, textAlign: 'center', lineHeight: 1 }}>
-                      <div style={{ fontSize: 8, opacity: 0.7, marginBottom: 2 }}>VIRAL</div>
-                      {analysisResult.usedPreset.viralScore}
+                  {analysisResult.debug?.promptMatchReason && (
+                    <div style={{ fontSize: 9, color: 'rgba(167,139,250,0.9)', marginTop: 6, padding: '4px 8px', background: 'rgba(139,92,246,0.1)', borderRadius: 4 }}>
+                      {analysisResult.debug.promptMatchReason}
                     </div>
                   )}
                 </div>
-                {analysisResult.debug?.promptMatchReason && (
-                  <div style={{ fontSize: 10, color: 'rgba(167,139,250,0.8)', padding: '6px 10px', background: 'rgba(139,92,246,0.1)', borderRadius: 6, marginTop: 4 }}>
-                    🔍 วิธี match: {analysisResult.debug.promptMatchReason}
+              ) : (
+                <div style={{ background: 'rgba(100,116,139,0.1)', padding: '8px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 16 }}>📦</span>
+                  <div style={{ flex: 1 }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1 }}>PRESET: </span>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-primary)' }}>{analysisResult.usedPreset?.name?.replace('📦 ', '') || selectedPreset}</span>
+                  </div>
+                  {analysisResult.debug?.newsTypeDetected && (
+                    <span style={{ fontSize: 9, color: '#f59e0b', background: 'rgba(245,158,11,0.1)', padding: '2px 8px', borderRadius: 4 }}>
+                      ข่าว{analysisResult.debug.newsTypeDetected}
+                    </span>
+                  )}
+                </div>
+              )}
+              {/* หัวข้อข่าวจริง */}
+              <div style={{ padding: '12px 16px' }}>
+                <div style={{ fontSize: 15, fontWeight: 800 }}>{newsData?.newsTitle}</div>
+                {analysisResult.news_reference && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>📰 {analysisResult.news_reference}</div>}
+                {analysisResult.debug?.newsTypeDetected && analysisResult.usedPreset?.source === 'library' && (
+                  <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
+                    🧠 AI วิเคราะห์: ข่าว{analysisResult.debug.newsTypeDetected}
                   </div>
                 )}
               </div>
-            )}
-            {analysisResult.usedPreset?.source === 'preset' && (
-              <div style={{
-                background: 'linear-gradient(135deg, rgba(100,116,139,0.15), rgba(71,85,105,0.1))',
-                padding: '14px 18px', borderRadius: 'var(--radius-md)', marginBottom: 16,
-                border: '1px solid rgba(100,116,139,0.3)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(100,116,139,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>📦</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1 }}>ใช้ Preset มาตรฐาน</div>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)' }}>{analysisResult.usedPreset.name?.replace('📦 ', '')}</div>
-                  </div>
+              {/* ถ้าใช้ Preset → แสดงเหตุผลว่าทำไมไม่ใช้ Library */}
+              {analysisResult.usedPreset?.source === 'preset' && analysisResult.debug?.promptMatchReason && (
+                <div style={{ padding: '6px 16px 10px', fontSize: 9, color: '#94a3b8', borderTop: '1px solid rgba(100,116,139,0.15)' }}>
+                  💡 {analysisResult.debug.promptMatchReason}
                 </div>
-                <div style={{ fontSize: 10, color: 'var(--warning)', marginTop: 8, padding: '6px 10px', background: 'rgba(245,158,11,0.08)', borderRadius: 6 }}>
-                  💡 ไม่พบ Prompt ที่ตรงกันในหอสมุด — เพิ่มเนื้อหาไวรัลเป็นตัวอย่างเพื่อให้ AI เรียนรู้สไตล์ที่ดีขึ้น
-                  {analysisResult.debug?.promptMatchReason && (
-                    <span style={{ display: 'block', marginTop: 4, color: '#94a3b8' }}>🔍 เหตุผล: {analysisResult.debug.promptMatchReason}</span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* หัวข้อข่าว */}
-            <div style={{ background: 'var(--bg-primary)', padding: 12, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--accent)', borderLeft: '4px solid var(--accent)' }}>
-              <div style={{ fontSize: 15, fontWeight: 800 }}>{newsData?.newsTitle}</div>
-              {analysisResult.news_reference && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>📰 {analysisResult.news_reference}</div>}
+              )}
             </div>
 
             {/* แสดงแต่ละ Version */}
