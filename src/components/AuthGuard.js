@@ -1,5 +1,5 @@
 'use client';
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 
 const AuthContext = createContext(null);
@@ -10,34 +10,45 @@ export function useAuth() {
 
 export default function AuthGuard({ children }) {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [checked, setChecked] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
+  const checkRef = useRef(false);
 
   useEffect(() => {
-    fetch('/api/auth').then(r => r.json()).then(d => {
-      if (d.loggedIn) setUser(d.member);
-      else setUser(null);
-      setLoading(false);
-    }).catch(() => setLoading(false));
-  }, [pathname]);
+    // Only check once, not on every pathname change
+    if (checkRef.current) return;
+    checkRef.current = true;
+
+    fetch('/api/auth')
+      .then(r => r.json())
+      .then(d => {
+        if (d.loggedIn && d.member) {
+          setUser(d.member);
+        }
+        setChecked(true);
+      })
+      .catch(() => {
+        setChecked(true);
+      });
+  }, []);
 
   // Login page is always accessible
   if (pathname === '/login') return children;
 
-  // Loading state
-  if (loading) {
+  // Still checking - show loading
+  if (!checked) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-primary)' }}>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-primary, #0d0d1a)' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>⚡</div>
-          <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>กำลังตรวจสอบ...</div>
+          <div style={{ color: '#888', fontSize: 13 }}>กำลังตรวจสอบ...</div>
         </div>
       </div>
     );
   }
 
-  // Not logged in — show lock screen
+  // Not logged in - show lock screen
   if (!user) {
     return (
       <div style={{
@@ -70,7 +81,7 @@ export default function AuthGuard({ children }) {
     );
   }
 
-  // Logged in — render children with auth context
+  // Logged in
   return (
     <AuthContext.Provider value={user}>
       {children}

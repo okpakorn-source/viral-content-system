@@ -10,13 +10,13 @@ export async function POST(request) {
       const result = await login(username, password);
       if (!result.success) return NextResponse.json(result, { status: 401 });
 
+      // Set cookie on response
       const response = NextResponse.json(result);
-      const cookieStore = await cookies();
-      cookieStore.set('auth_token', result.token, {
+      response.cookies.set('auth_token', result.token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60, // 7 days
+        maxAge: 7 * 24 * 60 * 60,
         path: '/',
       });
       return response;
@@ -26,12 +26,12 @@ export async function POST(request) {
       const cookieStore = await cookies();
       const token = cookieStore.get('auth_token')?.value;
       if (token) await logout(token);
-      cookieStore.delete('auth_token');
-      return NextResponse.json({ success: true });
+      const response = NextResponse.json({ success: true });
+      response.cookies.set('auth_token', '', { maxAge: 0, path: '/' });
+      return response;
     }
 
     if (action === 'register') {
-      // Only admin can register new members
       const cookieStore = await cookies();
       const token = cookieStore.get('auth_token')?.value;
       const session = await getSession(token);
@@ -44,6 +44,7 @@ export async function POST(request) {
 
     return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });
   } catch (error) {
+    console.error('[Auth] Error:', error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
@@ -52,10 +53,14 @@ export async function GET() {
   try {
     const cookieStore = await cookies();
     const token = cookieStore.get('auth_token')?.value;
-    const session = await getSession(token);
 
+    if (!token) {
+      return NextResponse.json({ success: true, loggedIn: false });
+    }
+
+    const session = await getSession(token);
     if (!session) {
-      return NextResponse.json({ success: false, loggedIn: false });
+      return NextResponse.json({ success: true, loggedIn: false });
     }
 
     return NextResponse.json({
@@ -70,6 +75,8 @@ export async function GET() {
       },
     });
   } catch (error) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('[Auth GET] Error:', error.message);
+    // Don't block on auth errors - just return not logged in
+    return NextResponse.json({ success: true, loggedIn: false });
   }
 }

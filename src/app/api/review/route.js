@@ -5,14 +5,26 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 
-const DATA_DIR = join(process.cwd(), 'data');
+const IS_VERCEL = !!process.env.VERCEL;
+const DATA_DIR = IS_VERCEL ? '/tmp' : join(process.cwd(), 'data');
 const REVIEW_FILE = join(DATA_DIR, 'reviews.json');
+const BUNDLED_REVIEW_FILE = join(process.cwd(), 'data', 'reviews.json');
 
 async function loadReviews() {
   try {
     const data = await readFile(REVIEW_FILE, 'utf-8');
     return JSON.parse(data);
   } catch {
+    // Try bundled file (Vercel cold start)
+    try {
+      const { existsSync } = await import('fs');
+      if (existsSync(BUNDLED_REVIEW_FILE)) {
+        const data = await readFile(BUNDLED_REVIEW_FILE, 'utf-8');
+        const reviews = JSON.parse(data);
+        await saveReviews(reviews);
+        return reviews;
+      }
+    } catch {}
     return [];
   }
 }
@@ -20,6 +32,13 @@ async function loadReviews() {
 async function saveReviews(reviews) {
   await mkdir(DATA_DIR, { recursive: true });
   await writeFile(REVIEW_FILE, JSON.stringify(reviews, null, 2), 'utf-8');
+  // Also save to repo dir if local
+  if (!IS_VERCEL) {
+    try {
+      await mkdir(join(process.cwd(), 'data'), { recursive: true });
+      await writeFile(BUNDLED_REVIEW_FILE, JSON.stringify(reviews, null, 2), 'utf-8');
+    } catch {}
+  }
 }
 
 // GET — ดึงรายการทั้งหมด (filter by status)
