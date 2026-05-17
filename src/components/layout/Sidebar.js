@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
@@ -38,9 +38,12 @@ export default function Sidebar() {
     { type: 'divider', label: 'เครื่องมือ' },
     { label: 'คลังรอตรวจ', icon: '📋', href: '/review', badge: reviewCount },
     { label: 'เผยแพร่', icon: '📤', href: '/publish' },
+    { type: 'divider', label: 'AI Intelligence' },
+    { label: 'หอสมุดไวรัล', icon: '📚', href: '/viral-library' },
+    { label: 'หอสมุด Prompt', icon: '🏛️', href: '/prompt-library' },
+    { label: 'จัดการ AI Prompts', icon: '🤖', href: '/prompts' },
     { type: 'divider', label: 'ระบบ' },
     { label: 'สถิติ', icon: '📈', href: '/analytics' },
-    { label: 'จัดการ AI Prompts', icon: '🤖', href: '/prompts' },
     ...(user?.role === 'admin' ? [{ label: 'จัดการสมาชิก', icon: '👥', href: '/members' }] : []),
     { label: 'ตั้งค่า', icon: '⚙️', href: '/settings' },
   ];
