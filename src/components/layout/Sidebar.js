@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
@@ -86,6 +86,13 @@ export default function Sidebar() {
       </nav>
 
       {/* User Info */}
+      {!user && (
+        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+          <Link href="/login" style={{ display: 'block', width: '100%', padding: '10px 0', borderRadius: 8, background: 'linear-gradient(135deg, #f91880, #7c3aed)', color: '#fff', fontSize: 13, fontWeight: 800, textAlign: 'center', textDecoration: 'none', fontFamily: 'inherit' }}>
+            🔐 เข้าสู่ระบบ
+          </Link>
+        </div>
+      )}
       {user && (
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
