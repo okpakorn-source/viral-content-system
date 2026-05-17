@@ -1293,18 +1293,53 @@ export default function NewContentPage() {
               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{analysisResult.versions?.length || 0} เวอร์ชัน</span>
             </div>
 
-            {/* 🏛️ Prompt Source Indicator */}
+            {/* 🏛️📦 Prompt Source Card — แสดงชัดเจนว่าเนื้อหานี้สร้างจาก Prompt อะไร จากไหน */}
             {analysisResult.usedPreset?.source === 'library' && (
-              <div style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(59,130,246,0.1))', padding: '8px 14px', borderRadius: 'var(--radius-md)', marginBottom: 12, border: '1px solid rgba(139,92,246,0.3)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                <span>🏛️</span>
-                <span style={{ color: 'var(--text-secondary)' }}>เขียนด้วย <strong style={{ color: '#a78bfa' }}>{analysisResult.usedPreset.name?.replace('🏛️ ', '')}</strong></span>
-                {analysisResult.usedPreset.viralScore && <span style={{ background: 'rgba(139,92,246,0.2)', padding: '2px 8px', borderRadius: 20, color: '#a78bfa', fontWeight: 700 }}>Viral {analysisResult.usedPreset.viralScore}/100</span>}
-                <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 10 }}>จากหอสมุดไวรัล</span>
+              <div style={{
+                background: 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(59,130,246,0.15))',
+                padding: '16px 18px', borderRadius: 'var(--radius-md)', marginBottom: 16,
+                border: '2px solid rgba(139,92,246,0.4)',
+                boxShadow: '0 4px 20px rgba(139,92,246,0.15)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg, #7c3aed, #3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>🏛️</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 1 }}>Prompt จากหอสมุดไวรัล</div>
+                    <div style={{ fontSize: 15, fontWeight: 900, color: '#fff' }}>{analysisResult.usedPreset.name?.replace('🏛️ ', '')}</div>
+                  </div>
+                  {analysisResult.usedPreset.viralScore && (
+                    <div style={{ background: 'linear-gradient(135deg, #7c3aed, #6366f1)', padding: '6px 14px', borderRadius: 20, color: '#fff', fontWeight: 900, fontSize: 13, textAlign: 'center', lineHeight: 1 }}>
+                      <div style={{ fontSize: 8, opacity: 0.7, marginBottom: 2 }}>VIRAL</div>
+                      {analysisResult.usedPreset.viralScore}
+                    </div>
+                  )}
+                </div>
+                {analysisResult.debug?.promptMatchReason && (
+                  <div style={{ fontSize: 10, color: 'rgba(167,139,250,0.8)', padding: '6px 10px', background: 'rgba(139,92,246,0.1)', borderRadius: 6, marginTop: 4 }}>
+                    🔍 วิธี match: {analysisResult.debug.promptMatchReason}
+                  </div>
+                )}
               </div>
             )}
             {analysisResult.usedPreset?.source === 'preset' && (
-              <div style={{ background: 'rgba(100,100,100,0.1)', padding: '6px 14px', borderRadius: 'var(--radius-md)', marginBottom: 12, fontSize: 11, color: 'var(--text-muted)' }}>
-                📦 ใช้ Preset เดิม — <span style={{ color: 'var(--warning)' }}>เพิ่มเนื้อหาไวรัลในหอสมุดเพื่อให้ AI เรียนรู้สไตล์เขียนที่ดีขึ้น</span>
+              <div style={{
+                background: 'linear-gradient(135deg, rgba(100,116,139,0.15), rgba(71,85,105,0.1))',
+                padding: '14px 18px', borderRadius: 'var(--radius-md)', marginBottom: 16,
+                border: '1px solid rgba(100,116,139,0.3)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(100,116,139,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>📦</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1 }}>ใช้ Preset มาตรฐาน</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)' }}>{analysisResult.usedPreset.name?.replace('📦 ', '')}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--warning)', marginTop: 8, padding: '6px 10px', background: 'rgba(245,158,11,0.08)', borderRadius: 6 }}>
+                  💡 ไม่พบ Prompt ที่ตรงกันในหอสมุด — เพิ่มเนื้อหาไวรัลเป็นตัวอย่างเพื่อให้ AI เรียนรู้สไตล์ที่ดีขึ้น
+                  {analysisResult.debug?.promptMatchReason && (
+                    <span style={{ display: 'block', marginTop: 4, color: '#94a3b8' }}>🔍 เหตุผล: {analysisResult.debug.promptMatchReason}</span>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1367,6 +1402,14 @@ export default function NewContentPage() {
                   <div>📰 เนื้อข่าว: {analysisResult.debug.newsBodyLength?.toLocaleString()} ตัวอักษร</div>
                   <div>📌 ประเด็นที่แตก: {analysisResult.debug.breakdownPointsCount} ประเด็น</div>
                   <div>🎯 Preset: {analysisResult.debug.presetUsed}</div>
+                  <div style={{ padding: '8px 10px', margin: '6px 0', borderRadius: 6, background: analysisResult.debug.promptSource === 'library' ? 'rgba(139,92,246,0.1)' : 'rgba(100,116,139,0.08)', border: `1px solid ${analysisResult.debug.promptSource === 'library' ? 'rgba(139,92,246,0.3)' : 'rgba(100,116,139,0.2)'}` }}>
+                    <div style={{ fontWeight: 700, color: analysisResult.debug.promptSource === 'library' ? '#a78bfa' : '#94a3b8' }}>
+                      {analysisResult.debug.promptSource === 'library' ? '🏛️ Prompt Library → ใช้จริง' : '📦 Prompt Library → ไม่ได้ใช้'}
+                    </div>
+                    {analysisResult.debug.smartPromptName && <div>📛 ชื่อ Prompt: {analysisResult.debug.smartPromptName}</div>}
+                    {analysisResult.debug.smartPromptScore && <div>⭐ Viral Score: {analysisResult.debug.smartPromptScore}/100</div>}
+                    {analysisResult.debug.promptMatchReason && <div>🔍 เหตุผล: {analysisResult.debug.promptMatchReason}</div>}
+                  </div>
                   <div>🔗 มี Breakdown: {analysisResult.debug.hasBreakdown ? '✅ ใช่' : '❌ ไม่'}</div>
                   <div>🆔 Workflow: {analysisResult.debug.workflowId}</div>
                   <div>💾 Context: {analysisResult.debug.contextSource}</div>
