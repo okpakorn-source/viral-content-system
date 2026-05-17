@@ -123,6 +123,17 @@ export async function POST(request) {
     const analysisResult = analyzeRes.data;
     addLog('Step4', `Generated: ${analysisResult.versions?.length || 0} versions`);
 
+    // === Prompt Library info ===
+    const usedPreset = analysisResult.usedPreset || null;
+    if (usedPreset?.source === 'library') {
+      addLog('Prompt', `🏛️ Library: "${usedPreset.name}" (Viral: ${usedPreset.viralScore || '-'})`);
+    } else if (usedPreset) {
+      addLog('Prompt', `📦 Preset: "${usedPreset.name}"`);
+    }
+    if (analysisResult.debug?.promptMatchReason) {
+      addLog('Prompt', `🔍 Match: ${analysisResult.debug.promptMatchReason}`);
+    }
+
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
     addLog('Done', `Total: ${totalTime}s`);
 
@@ -136,6 +147,12 @@ export async function POST(request) {
         preset: selectedPreset,
         contentLength: selectedLength,
         totalTimeSeconds: parseFloat(totalTime),
+        usedPromptInfo: usedPreset ? {
+          source: usedPreset.source,
+          name: usedPreset.name,
+          viralScore: usedPreset.viralScore || null,
+          matchReason: analysisResult.debug?.promptMatchReason || '',
+        } : null,
         log,
       },
     });

@@ -69,6 +69,7 @@ export default function NewContentPage() {
       { id: 'auto_scrape', label: 'ดึงเนื้อหา' },
       { id: 'auto_extract', label: 'สกัดเนื้อข่าว (AI)' },
       { id: 'auto_breakdown', label: 'แตกประเด็น (AI)' },
+      { id: 'auto_lib_check', label: 'ตรวจ Prompt Library' },
       { id: 'auto_generate', label: 'สร้างผลลัพธ์ (AI)' },
     ], { type: 'URL', label: domain });
     wfStart('auto_detect', { detail: 'ตรวจสอบประเภท URL...' });
@@ -95,8 +96,22 @@ export default function NewContentPage() {
       wfComplete('auto_scrape', `ดึงเนื้อหาแล้ว`);
       wfStart('auto_extract'); wfComplete('auto_extract', `"${data.data.newsData?.newsTitle?.slice(0, 40) || '...'}"`);
       wfStart('auto_breakdown'); wfComplete('auto_breakdown', `${data.data.breakdownData?.possible_angles?.length || 0} มุม`);
-      wfStart('auto_generate'); wfComplete('auto_generate', `${data.data.analysisResult?.versions?.length || 0} เวอร์ชัน`);
-      finishWorkflow(`Auto เสร็จ ${data.data.totalTimeSeconds || ''}s — ${data.data.analysisResult?.versions?.length || 0} เวอร์ชัน`);
+
+      // Show Library Check result
+      const pi = data.data.usedPromptInfo;
+      wfStart('auto_lib_check', { detail: 'กำลังค้น Prompt จากหอสมุดไวรัล...' });
+      if (pi?.source === 'library') {
+        wfComplete('auto_lib_check', `🏛️ ใช้: ${pi.name} (Viral: ${pi.viralScore || '-'}) | ${pi.matchReason || ''}`);
+      } else if (pi) {
+        wfComplete('auto_lib_check', `📦 ใช้ Preset: ${pi.name} | ${pi.matchReason || 'ไม่มี Library Prompt ที่ตรง'}`);
+      } else {
+        wfComplete('auto_lib_check', `📦 ใช้ Preset: ${selectedPreset}`);
+      }
+
+      wfStart('auto_generate', { detail: pi?.source === 'library' ? `🏛️ ${pi.name}` : `📦 Preset: ${selectedPreset}` });
+      wfComplete('auto_generate', `${data.data.analysisResult?.versions?.length || 0} เวอร์ชัน`);
+      const promptLabel = pi?.source === 'library' ? `🏛️ ${pi.name?.slice(0, 20)}` : `📦 Preset`;
+      finishWorkflow(`Auto เสร็จ ${data.data.totalTimeSeconds || ''}s — ${data.data.analysisResult?.versions?.length || 0} เวอร์ชัน | ${promptLabel}`);
 
       setNewsData(data.data.newsData);
       setBreakdownData(data.data.breakdownData);
