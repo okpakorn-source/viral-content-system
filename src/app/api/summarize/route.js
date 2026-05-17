@@ -1,4 +1,4 @@
-﻿import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
@@ -609,7 +609,50 @@ ${actualNewsBody.slice(0, 3000)}
           console.log(`[Mix] ✅ Research data: ${researchData.items.length} items`);
         }
 
-        const mixPrompt = fullCtx + researchCtx + '\n\n' +
+        // === Phase 2: Smart Prompt Matching — ดึง Prompt จากหอสมุดที่ตรงกับประเภทข่าว ===
+        let smartPromptCtx = '';
+        try {
+          const detectedCategory = actualBreakdown.content_type || actualBreakdown.category || '';
+          if (detectedCategory) {
+            const { readFile } = await import('fs/promises');
+            const { join } = await import('path');
+            const IS_VERCEL = !!process.env.VERCEL;
+            const promptLibPath = join(IS_VERCEL ? '/tmp' : process.cwd() + '/data', 'prompt-library.json');
+            let promptLib = [];
+            try {
+              promptLib = JSON.parse(await readFile(promptLibPath, 'utf-8'));
+            } catch {
+              try {
+                promptLib = JSON.parse(await readFile(join(process.cwd(), 'data', 'prompt-library.json'), 'utf-8'));
+              } catch {}
+            }
+
+            if (promptLib.length > 0) {
+              // หาที่ category ตรง → sort by viralScore
+              const matched = promptLib
+                .filter(p => p.category && detectedCategory.includes(p.category))
+                .sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
+
+              const bestPrompt = matched[0] || promptLib.sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0))[0];
+
+              if (bestPrompt && bestPrompt.promptText) {
+                smartPromptCtx = '\n\n=== 🏛️ Prompt จากหอสมุดไวรัล (Smart Match) ===\n' +
+                  `ประเภท: ${bestPrompt.category || '-'} | อารมณ์: ${bestPrompt.emotionalType || '-'} | Viral Score: ${bestPrompt.viralScore || '-'}\n` +
+                  `สไตล์ Hook: ${bestPrompt.hookStyle || '-'} | โทน: ${bestPrompt.tone || '-'}\n` +
+                  `โครงสร้าง: ${bestPrompt.structure || '-'}\n\n` +
+                  '--- คำสั่งเขียนจาก DNA ไวรัล ---\n' +
+                  bestPrompt.promptText + '\n' +
+                  '--- จบคำสั่ง DNA ---\n' +
+                  '=== จบ Smart Match ===\n';
+                console.log(`[Mix] 🏛️ Smart Match: "${bestPrompt.promptName || bestPrompt.category}" (score: ${bestPrompt.viralScore})`);
+              }
+            }
+          }
+        } catch (err) {
+          console.log('[Mix] Smart Match skipped:', err.message);
+        }
+
+        const mixPrompt = fullCtx + researchCtx + smartPromptCtx + '\n\n' +
           '=== คำสั่ง: AI ผสมมุมข่าว (MIX MODE) ===\n' +
           'คุณคือผู้เชี่ยวชาญสร้างคอนเทนต์ไวรัล คุณได้รับผลวิเคราะห์ข่าวข้างต้นทั้งหมด\n\n' +
           '📊 มุมข่าวทั้งหมดที่วิเคราะห์ได้:\n' + anglesInfo + '\n\n' +
