@@ -287,41 +287,78 @@ export async function POST(request) {
       // === 🏛️ Smart Prompt Library Lookup — ดึง Prompt จากหอสมุดไวรัลก่อน ===
       let smartPrompt = null;
       let promptSource = 'preset'; // 'library' หรือ 'preset'
+      let promptMatchReason = '';
       try {
-        const detectedCategory = actualBreakdown?.content_type || actualBreakdown?.category || '';
-        if (detectedCategory) {
-          const { readFile: rf } = await import('fs/promises');
-          const { join: jn } = await import('path');
-          const IS_V = !!process.env.VERCEL;
-          const libPath = jn(IS_V ? '/tmp' : process.cwd() + '/data', 'prompt-library.json');
-          let promptLib = [];
-          try { promptLib = JSON.parse(await rf(libPath, 'utf-8')); } catch {
-            try { promptLib = JSON.parse(await rf(jn(process.cwd(), 'data', 'prompt-library.json'), 'utf-8')); } catch {}
-          }
+        const { readFile: rf } = await import('fs/promises');
+        const { join: jn } = await import('path');
+        const IS_V = !!process.env.VERCEL;
+        const libPath = jn(IS_V ? '/tmp' : process.cwd() + '/data', 'prompt-library.json');
+        let promptLib = [];
+        try { promptLib = JSON.parse(await rf(libPath, 'utf-8')); } catch {
+          try { promptLib = JSON.parse(await rf(jn(process.cwd(), 'data', 'prompt-library.json'), 'utf-8')); } catch {}
+        }
+        console.log(`[Analyze] 🏛️ Prompt Library loaded: ${promptLib.length} prompts`);
 
-          if (promptLib.length > 0) {
-            // หา Prompt ที่ category ตรง → เรียงตาม viralScore
+        if (promptLib.length > 0) {
+          // ดึง category จากหลายแหล่ง
+          const detectedCategory = actualBreakdown?.content_type || actualBreakdown?.category || actualBreakdown?.news_category || '';
+          const titleLower = (actualNewsTitle || '').toLowerCase();
+          const keywords = titleLower.split(/\s+/).filter(w => w.length > 2);
+          console.log(`[Analyze] 🏛️ Category: "${detectedCategory}" | Title keywords: ${keywords.length}`);
+
+          // Strategy 1: Category exact match
+          if (detectedCategory) {
             const matched = promptLib
-              .filter(p => p.promptText && p.category && detectedCategory.toLowerCase().includes(p.category.replace('ข่าว', '').toLowerCase()))
+              .filter(p => p.promptText && p.category && (
+                detectedCategory.toLowerCase().includes(p.category.replace('ข่าว', '').toLowerCase()) ||
+                p.category.toLowerCase().includes(detectedCategory.replace('ข่าว', '').toLowerCase())
+              ))
               .sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
-            
             if (matched.length > 0) {
               smartPrompt = matched[0];
               promptSource = 'library';
-              console.log(`[Analyze] 🏛️ Smart Match FOUND: "${smartPrompt.promptName || smartPrompt.category}" (Viral: ${smartPrompt.viralScore})`);
-            } else {
-              // Fallback: ใช้ Prompt ที่ viralScore สูงสุด
-              const best = promptLib.filter(p => p.promptText).sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
-              if (best.length > 0 && best[0].viralScore >= 70) {
-                smartPrompt = best[0];
-                promptSource = 'library';
-                console.log(`[Analyze] 🏛️ Smart Match BEST: "${smartPrompt.promptName || smartPrompt.category}" (Viral: ${smartPrompt.viralScore})`);
-              }
+              promptMatchReason = `category match: "${detectedCategory}" → "${smartPrompt.category}"`;
             }
           }
+
+          // Strategy 2: Title keyword match
+          if (!smartPrompt && keywords.length > 0) {
+            const keywordMatched = promptLib
+              .filter(p => p.promptText && (
+                keywords.some(kw => (p.category || '').toLowerCase().includes(kw)) ||
+                keywords.some(kw => (p.promptName || '').toLowerCase().includes(kw)) ||
+                keywords.some(kw => (p.emotionalType || '').toLowerCase().includes(kw))
+              ))
+              .sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
+            if (keywordMatched.length > 0) {
+              smartPrompt = keywordMatched[0];
+              promptSource = 'library';
+              promptMatchReason = `keyword match: title → "${smartPrompt.promptName || smartPrompt.category}"`;
+            }
+          }
+
+          // Strategy 3: Best available (viralScore >= 60)
+          if (!smartPrompt) {
+            const best = promptLib.filter(p => p.promptText).sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
+            if (best.length > 0 && best[0].viralScore >= 60) {
+              smartPrompt = best[0];
+              promptSource = 'library';
+              promptMatchReason = `best available: "${smartPrompt.promptName || smartPrompt.category}" (score: ${smartPrompt.viralScore})`;
+            } else if (best.length > 0) {
+              promptMatchReason = `no match: ${best.length} prompts but max score ${best[0].viralScore || 0} < 60`;
+            } else {
+              promptMatchReason = 'library empty (no prompts with text)';
+            }
+          }
+
+          console.log(`[Analyze] 🏛️ Result: ${promptSource === 'library' ? '✅ USING' : '❌ SKIP'} | ${promptMatchReason}`);
+        } else {
+          promptMatchReason = 'library empty (0 prompts)';
+          console.log(`[Analyze] 🏛️ Library empty — using preset fallback`);
         }
       } catch (err) {
-        console.log('[Analyze] Smart Match skipped:', err.message);
+        promptMatchReason = `error: ${err.message}`;
+        console.log('[Analyze] Smart Match error:', err.message);
       }
 
       // สร้าง prompt — ใช้ Smart Prompt ถ้ามี, fallback ใช้ preset เก่า
@@ -462,6 +499,7 @@ export async function POST(request) {
           breakdownPointsCount: actualBreakdown?.key_points?.length || 0,
           presetUsed: preset.name,
           promptSource, // 'library' or 'preset'
+          promptMatchReason: promptMatchReason || 'unknown',
           smartPromptName: smartPrompt ? (smartPrompt.promptName || smartPrompt.category) : null,
           smartPromptScore: smartPrompt?.viralScore || null,
           hasBreakdown: !!actualBreakdown,

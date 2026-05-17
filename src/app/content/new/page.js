@@ -403,8 +403,11 @@ export default function NewContentPage() {
     setError('');
     setSelectedPreset(usePreset);
     const presetLabel = analysisPresets.find(p => p.id === usePreset)?.name || usePreset;
-    startWorkflow('สร้างผลลัพธ์', [{ id: 'ai_analyze', label: `สร้างเนื้อหา (${presetLabel})` }]);
-    wfStart('ai_analyze', { api: '/api/summarize (analyze)', detail: `Preset: ${presetLabel} | Length: ${contentLength}` });
+    startWorkflow('สร้างผลลัพธ์', [
+      { id: 'lib_check', label: 'ตรวจ Prompt Library' },
+      { id: 'ai_analyze', label: `สร้างเนื้อหา (${presetLabel})` },
+    ]);
+    wfStart('lib_check', { detail: 'กำลังค้น Prompt จากหอสมุดไวรัล...' });
     try {
       const res = await fetch('/api/summarize', {
         method: 'POST',
@@ -424,13 +427,21 @@ export default function NewContentPage() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
+      // แสดง prompt source ใน tracker
+      const ps = data.data?.usedPreset;
+      if (ps?.source === 'library') {
+        wfComplete('lib_check', `🏛️ ใช้: ${ps.name} (Score: ${ps.viralScore || '-'})`);
+      } else {
+        wfComplete('lib_check', `📦 ไม่พบใน Library → ใช้ Preset: ${ps?.name || presetLabel}`);
+      }
+      wfStart('ai_analyze', { api: '/api/summarize (analyze)', detail: ps?.source === 'library' ? `🏛️ ${ps.name}` : `📦 ${ps?.name || presetLabel}` });
       setAnalysisResult(data.data);
       setStep('analyzed');
       wfComplete('ai_analyze', `${data.data?.versions?.length || 0} เวอร์ชัน`);
-      finishWorkflow(`สร้างเสร็จ — ${data.data?.versions?.length || 0} เวอร์ชัน`);
+      finishWorkflow(`สร้างเสร็จ — ${data.data?.versions?.length || 0} เวอร์ชัน | ${ps?.source === 'library' ? '🏛️ Library' : '📦 Preset'}`);
     } catch (err) {
       setError(err.message);
-      wfFail('ai_analyze', err.message);
+      wfFail(err.message?.includes('Prompt') ? 'lib_check' : 'ai_analyze', err.message);
     } finally {
       setLoading(false);
     }
@@ -441,8 +452,11 @@ export default function NewContentPage() {
     if (!newsData?.newsBody || !breakdownData) return;
     setLoading(true);
     setError('');
-    startWorkflow('ผสมมุมข่าว', [{ id: 'ai_mix', label: 'AI ผสมมุมข่าว' }]);
-    wfStart('ai_mix', { api: '/api/summarize (mix)', detail: 'AI กำลังผสมมุมที่ดีที่สุด...' });
+    startWorkflow('ผสมมุมข่าว', [
+      { id: 'lib_check', label: 'ตรวจ Prompt Library' },
+      { id: 'ai_mix', label: 'AI ผสมมุมข่าว' },
+    ]);
+    wfStart('lib_check', { detail: 'กำลังค้น Prompt จากหอสมุดไวรัล...' });
     try {
       const res = await fetch('/api/summarize', {
         method: 'POST',
@@ -461,10 +475,17 @@ export default function NewContentPage() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
+      const ps = data.data?.usedPreset;
+      if (ps?.source === 'library') {
+        wfComplete('lib_check', `🏛️ ใช้: ${ps.name} (Score: ${ps.viralScore || '-'})`);
+      } else {
+        wfComplete('lib_check', `📦 ไม่พบใน Library → ใช้ Preset`);
+      }
+      wfStart('ai_mix', { api: '/api/summarize (mix)', detail: 'AI กำลังผสมมุมที่ดีที่สุด...' });
       setAnalysisResult(data.data);
       setStep('analyzed');
       wfComplete('ai_mix', `${data.data?.versions?.length || 0} เวอร์ชัน`);
-      finishWorkflow(`ผสมเสร็จ — ${data.data?.versions?.length || 0} เวอร์ชัน`);
+      finishWorkflow(`ผสมเสร็จ — ${data.data?.versions?.length || 0} เวอร์ชัน | ${ps?.source === 'library' ? '🏛️ Library' : '📦 Preset'}`);
     } catch (err) {
       setError(err.message);
       wfFail('ai_mix', err.message);
