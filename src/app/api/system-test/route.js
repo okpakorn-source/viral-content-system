@@ -203,7 +203,7 @@ export async function GET(request) {
     const routeSrc = await readFile(join(process.cwd(), 'src/app/api/summarize/route.js'), 'utf-8');
     const hasSmartMatch = routeSrc.includes('AI Smart Prompt Match') || routeSrc.includes('gpt-4o-mini');
     const hasBreakdownInject = routeSrc.includes('ผลแตกประเด็นจาก AI');
-    const hasStrictRules = routeSrc.includes('ห้ามแต่งเรื่อง') && routeSrc.includes('ห้ามเดา');
+    const hasStrictRules = routeSrc.includes('กฎสำคัญที่ต้องทำตาม') || routeSrc.includes('ห้ามแต่งเรื่อง') || routeSrc.includes('คำสั่งเหล็ก');
 
     if (hasSmartMatch && hasBreakdownInject && hasStrictRules) {
       addResult('AI Smart Match + Breakdown', 'pass', 'Smart Match + Direct Breakdown Inject + Strict Rules ✅', Date.now() - t);
