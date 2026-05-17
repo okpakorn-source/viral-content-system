@@ -150,6 +150,7 @@ export async function register(data) {
     username: data.username,
     password: hashPassword(data.password),
     displayName: data.displayName || data.username,
+    nickname: data.nickname || '',
     role: data.role || 'editor',
     avatar: data.avatar || '👤',
     createdAt: new Date().toISOString(),
@@ -164,7 +165,7 @@ export async function register(data) {
 
 export async function getMembers() {
   const members = await readMembers();
-  return members.map(m => ({ ...m, password: undefined }));
+  return members.map(m => ({ ...m, password: undefined, nickname: m.nickname || '' }));
 }
 
 export async function updateMember(id, updates) {

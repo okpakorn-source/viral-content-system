@@ -14,7 +14,7 @@ export default function MembersPage() {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ username: '', password: '', displayName: '', role: 'editor', avatar: '👤' });
+  const [form, setForm] = useState({ username: '', password: '', displayName: '', nickname: '', role: 'editor', avatar: '👤' });
   const [msg, setMsg] = useState('');
 
   const load = () => {
@@ -33,7 +33,7 @@ export default function MembersPage() {
       body: JSON.stringify({ action: 'create', ...form }),
     });
     const d = await res.json();
-    if (d.success) { load(); setShowAdd(false); setForm({ username: '', password: '', displayName: '', role: 'editor', avatar: '👤' }); setMsg('✅ เพิ่มสมาชิกแล้ว'); }
+    if (d.success) { load(); setShowAdd(false); setForm({ username: '', password: '', displayName: '', nickname: '', role: 'editor', avatar: '👤' }); setMsg('✅ เพิ่มสมาชิกแล้ว'); }
     else setMsg('❌ ' + d.error);
     setTimeout(() => setMsg(''), 3000);
   };
@@ -95,6 +95,7 @@ export default function MembersPage() {
               <input className="form-input" placeholder="ชื่อผู้ใช้ (login)" value={form.username} onChange={e => setForm({...form, username: e.target.value})} />
               <input className="form-input" type="password" placeholder="รหัสผ่าน" value={form.password} onChange={e => setForm({...form, password: e.target.value})} />
               <input className="form-input" placeholder="ชื่อแสดง" value={form.displayName} onChange={e => setForm({...form, displayName: e.target.value})} />
+              <input className="form-input" placeholder="ชื่อเล่น / Nickname" value={form.nickname} onChange={e => setForm({...form, nickname: e.target.value})}
               <select className="form-input" value={form.role} onChange={e => setForm({...form, role: e.target.value})}>
                 {ROLES.map(r => <option key={r.id} value={r.id}>{r.label} — {r.desc}</option>)}
               </select>
@@ -126,7 +127,7 @@ export default function MembersPage() {
                   </div>
                   <div style={{ flex: 1, minWidth: 120 }}>
                     <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)' }}><Link href={`/members/${m.id}`} style={{ color: 'var(--text-primary)', textDecoration: 'none' }}>{m.displayName}</Link></div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>@{m.username}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>@{m.username}{m.nickname ?  () : ''}</div>
                   </div>
                   <select value={m.role} onChange={e => handleRoleChange(m.id, e.target.value)}
                     style={{ padding: '4px 8px', borderRadius: 6, border: `1px solid ${roleObj.color}40`, background: `${roleObj.color}10`, color: roleObj.color, fontSize: 11, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}>

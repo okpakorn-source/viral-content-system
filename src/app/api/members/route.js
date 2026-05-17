@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { getSession, getMembers, updateMember, deleteMember, register } from '@/lib/auth';
 import { cookies } from 'next/headers';
 
@@ -39,6 +39,7 @@ export async function POST(request) {
         displayName: body.displayName,
         role: body.role || 'editor',
         avatar: body.avatar || '👤',
+        nickname: body.nickname || '',
       });
       return NextResponse.json(result);
     }
@@ -48,6 +49,7 @@ export async function POST(request) {
       if (body.displayName) updates.displayName = body.displayName;
       if (body.role) updates.role = body.role;
       if (body.avatar) updates.avatar = body.avatar;
+      if (body.nickname !== undefined) updates.nickname = body.nickname;
       if (body.password) updates.password = body.password;
       const result = await updateMember(body.id, updates);
       return NextResponse.json(result);

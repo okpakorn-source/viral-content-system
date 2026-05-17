@@ -113,7 +113,7 @@ export async function POST(request) {
       const token = cookieStore.get('auth_token')?.value;
       const session = await getSession(token);
       if (session) {
-        newItem.submittedBy = { id: session.memberId, name: session.displayName, avatar: session.avatar };
+        newItem.submittedBy = { id: session.memberId, name: session.displayName, nickname: session.nickname || '', avatar: session.avatar };
         await updateMemberStats(session.memberId, 'totalCreated');
       }
     } catch {}
