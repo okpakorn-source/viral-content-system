@@ -1,4 +1,4 @@
-﻿import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { randomBytes, createHash } from 'crypto';
@@ -63,13 +63,11 @@ async function readMembers() {
 async function saveMembers(members) {
   await ensureDir();
   await writeFile(MEMBERS_FILE, JSON.stringify(members, null, 2), 'utf8');
-  // Also save to repo data dir if local
-  if (!IS_VERCEL) {
-    try {
-      await mkdir(join(process.cwd(), 'data'), { recursive: true });
-      await writeFile(BUNDLED_MEMBERS_FILE, JSON.stringify(members, null, 2), 'utf8');
-    } catch {}
-  }
+  // Also try to save to bundled location (works locally, may fail on Vercel read-only fs)
+  try {
+    await mkdir(join(process.cwd(), 'data'), { recursive: true });
+    await writeFile(BUNDLED_MEMBERS_FILE, JSON.stringify(members, null, 2), 'utf8');
+  } catch {}
 }
 
 // === Sessions ===

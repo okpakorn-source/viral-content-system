@@ -16,5 +16,14 @@
     "avatar": "👑",
     "loginAt": "2026-05-17T10:21:12.474Z",
     "expiresAt": "2026-05-24T10:21:12.474Z"
+  },
+  "6977296542909f5715656fb2ce944ce3d167446b55a52a951e1768dafe2856f0": {
+    "memberId": "admin",
+    "username": "admin",
+    "displayName": "Admin",
+    "role": "admin",
+    "avatar": "👑",
+    "loginAt": "2026-05-17T11:01:51.521Z",
+    "expiresAt": "2026-05-24T11:01:51.522Z"
   }
 }
