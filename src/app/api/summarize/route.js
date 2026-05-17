@@ -539,6 +539,12 @@ ${promptCatalog}
         console.log('[Analyze] AI keys:', Object.keys(result || {}));
         console.log('[Analyze] versions count:', result?.versions?.length || 0);
 
+        // === กฎเหล็ก: ตรวจจับ _error/_warning จาก AI ===
+        const aiError = result?._error || null;
+        const aiWarning = result?._warning || null;
+        if (aiError) console.warn(`[Analyze] ⚠️ AI reported ERROR: ${aiError}`);
+        if (aiWarning) console.warn(`[Analyze] ⚠️ AI reported WARNING: ${aiWarning}`);
+
         // Debug info — ใช้ค่าจริง
         const debugInfo = {
           promptLength: multiPrompt.length,
@@ -555,6 +561,8 @@ ${promptCatalog}
           workflowId: workflowId || 'none',
           contextSource: wfContext ? 'DB (persistent)' : 'request (stateless)',
           promptPreview: multiPrompt.slice(0, 500) + '...',
+          aiError, // กฎเหล็ก: แจ้งเมื่อ AI ติดขัด
+          aiWarning, // กฎเหล็ก: แจ้งเมื่อ AI เตือน
         };
 
         if (result && typeof result === 'object') {

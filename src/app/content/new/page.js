@@ -1392,6 +1392,30 @@ export default function NewContentPage() {
               )}
             </div>
 
+            {/* === กฎเหล็ก: แจ้งเตือน AI Error/Warning === */}
+            {analysisResult.debug?.aiError && (
+              <div style={{ background: 'rgba(239,68,68,0.15)', border: '2px solid rgba(239,68,68,0.5)', borderRadius: 'var(--radius-md)', padding: '12px 16px', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 20 }}>🚨</span>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#ef4444' }}>AI แจ้งปัญหา (กฎเหล็ก: ติดขัดต้องแจ้ง)</div>
+                    <div style={{ fontSize: 12, color: '#fca5a5', marginTop: 2 }}>{analysisResult.debug.aiError}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+            {analysisResult.debug?.aiWarning && (
+              <div style={{ background: 'rgba(245,158,11,0.12)', border: '2px solid rgba(245,158,11,0.4)', borderRadius: 'var(--radius-md)', padding: '12px 16px', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 20 }}>⚠️</span>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#f59e0b' }}>AI เตือน (กฎเหล็ก: ข้อมูลไม่ชัดเจน)</div>
+                    <div style={{ fontSize: 12, color: '#fcd34d', marginTop: 2 }}>{analysisResult.debug.aiWarning}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* แสดงแต่ละ Version */}
             {analysisResult.versions?.map((v, i) => (
               <div key={i} style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border)', borderLeft: `4px solid hsl(${i * 60}, 70%, 50%)` }}>
