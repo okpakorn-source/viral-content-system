@@ -1,5 +1,5 @@
 'use client';
-import { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 
 const AuthContext = createContext(null);
@@ -13,25 +13,26 @@ export default function AuthGuard({ children }) {
   const [checked, setChecked] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const checkRef = useRef(false);
 
   useEffect(() => {
-    // Only check once, not on every pathname change
-    if (checkRef.current) return;
-    checkRef.current = true;
-
+    // Check auth on every route change to detect stale sessions
+    let cancelled = false;
     fetch('/api/auth')
       .then(r => r.json())
       .then(d => {
+        if (cancelled) return;
         if (d.loggedIn && d.member) {
           setUser(d.member);
+        } else {
+          setUser(null);
         }
         setChecked(true);
       })
       .catch(() => {
-        setChecked(true);
+        if (!cancelled) setChecked(true);
       });
-  }, []);
+    return () => { cancelled = true; };
+  }, [pathname]);
 
   // Login page is always accessible
   if (pathname === '/login') return children;

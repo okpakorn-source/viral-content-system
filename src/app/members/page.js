@@ -18,8 +18,16 @@ export default function MembersPage() {
   const [msg, setMsg] = useState('');
 
   const load = () => {
-    fetch('/api/members').then(r => r.json()).then(d => {
-      if (d.success) setMembers(d.members);
+    fetch('/api/members').then(r => {
+      if (r.status === 403) {
+        setMsg('⚠️ Session หมดอายุ — กรุณา login ใหม่');
+        setLoading(false);
+        return null;
+      }
+      return r.json();
+    }).then(d => {
+      if (d && d.success) setMembers(d.members);
+      else if (d) setMsg('❌ ' + (d.error || 'โหลดไม่ได้'));
       setLoading(false);
     }).catch(() => setLoading(false));
   };
@@ -32,10 +40,14 @@ export default function MembersPage() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'create', ...form }),
     });
+    if (res.status === 403) {
+      setMsg('⚠️ Session หมดอายุ — กดลิงก์ด้านล่างเพื่อ login ใหม่');
+      return;
+    }
     const d = await res.json();
     if (d.success) { load(); setShowAdd(false); setForm({ username: '', password: '', displayName: '', nickname: '', role: 'editor', avatar: '👤' }); setMsg('✅ เพิ่มสมาชิกแล้ว'); }
     else setMsg('❌ ' + d.error);
-    setTimeout(() => setMsg(''), 3000);
+    setTimeout(() => setMsg(''), 5000);
   };
 
   const handleDelete = async (id, name) => {
@@ -63,7 +75,10 @@ export default function MembersPage() {
     <div>
       <Header title="จัดการสมาชิก" subtitle={`ทั้งหมด ${members.length} คน`} />
       <div style={{ padding: '0 24px 24px', maxWidth: 1000, margin: '0 auto' }}>
-        {msg && <div style={{ background: msg.includes('✅') ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)', padding: '10px 16px', borderRadius: 8, marginBottom: 16, fontSize: 13, color: msg.includes('✅') ? '#22c55e' : '#ef4444' }}>{msg}</div>}
+        {msg && <div style={{ background: msg.includes('✅') ? 'rgba(34,197,94,0.15)' : msg.includes('⚠️') ? 'rgba(251,191,36,0.15)' : 'rgba(239,68,68,0.15)', padding: '10px 16px', borderRadius: 8, marginBottom: 16, fontSize: 13, color: msg.includes('✅') ? '#22c55e' : msg.includes('⚠️') ? '#fbbf24' : '#ef4444' }}>
+          {msg}
+          {msg.includes('Session') && <a href="/login" style={{ color: '#f91880', marginLeft: 8, textDecoration: 'underline', fontWeight: 700 }}>🔐 Login ใหม่</a>}
+        </div>}
 
         {/* Stats */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 24 }}>
