@@ -457,18 +457,24 @@ export default function NewContentPage() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
-      // แสดง prompt source ใน tracker
+      // แสดง prompt source ใน tracker (เหมือน Auto mode)
       const ps = data.data?.usedPreset;
-      if (ps?.source === 'library') {
+      const nt = data.data?.debug?.newsTypeDetected || '';
+      if (nt && ps?.source === 'library') {
+        wfComplete('lib_check', `🧠 ข่าว${nt} → 🏛️ "${ps.name}" (Viral: ${ps.viralScore || '-'})`);
+      } else if (nt && ps?.source !== 'library') {
+        wfComplete('lib_check', `🧠 ข่าว${nt} → 📦 ไม่มี Prompt ที่เหมาะ → ใช้ Preset`);
+      } else if (ps?.source === 'library') {
         wfComplete('lib_check', `🏛️ ใช้: ${ps.name} (Score: ${ps.viralScore || '-'})`);
       } else {
         wfComplete('lib_check', `📦 ไม่พบใน Library → ใช้ Preset: ${ps?.name || presetLabel}`);
       }
-      wfStart('ai_analyze', { api: '/api/summarize (analyze)', detail: ps?.source === 'library' ? `🏛️ ${ps.name}` : `📦 ${ps?.name || presetLabel}` });
+      const promptLabel = ps?.source === 'library' ? `🏛️ ${ps.name?.slice(0, 20)}` : `📦 ${ps?.name || presetLabel}`;
+      wfStart('ai_analyze', { api: '/api/summarize (analyze)', detail: `✍️ ${promptLabel} → กำลังสร้างเนื้อหา...` });
       setAnalysisResult(data.data);
       setStep('analyzed');
       wfComplete('ai_analyze', `${data.data?.versions?.length || 0} เวอร์ชัน`);
-      finishWorkflow(`สร้างเสร็จ — ${data.data?.versions?.length || 0} เวอร์ชัน | ${ps?.source === 'library' ? '🏛️ Library' : '📦 Preset'}`);
+      finishWorkflow(`สร้างเสร็จ — ${data.data?.versions?.length || 0} เวอร์ชัน | ${promptLabel}`);
     } catch (err) {
       setError(err.message);
       wfFail(err.message?.includes('Prompt') ? 'lib_check' : 'ai_analyze', err.message);
@@ -506,16 +512,22 @@ export default function NewContentPage() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
       const ps = data.data?.usedPreset;
-      if (ps?.source === 'library') {
+      const nt = data.data?.debug?.newsTypeDetected || '';
+      if (nt && ps?.source === 'library') {
+        wfComplete('lib_check', `🧠 ข่าว${nt} → 🏛️ "${ps.name}" (Viral: ${ps.viralScore || '-'})`);
+      } else if (nt) {
+        wfComplete('lib_check', `🧠 ข่าว${nt} → 📦 ไม่มี Prompt ที่เหมาะ → ใช้ Preset`);
+      } else if (ps?.source === 'library') {
         wfComplete('lib_check', `🏛️ ใช้: ${ps.name} (Score: ${ps.viralScore || '-'})`);
       } else {
         wfComplete('lib_check', `📦 ไม่พบใน Library → ใช้ Preset`);
       }
-      wfStart('ai_mix', { api: '/api/summarize (mix)', detail: 'AI กำลังผสมมุมที่ดีที่สุด...' });
+      const promptLabel = ps?.source === 'library' ? `🏛️ ${ps.name?.slice(0, 20)}` : `📦 Preset`;
+      wfStart('ai_mix', { api: '/api/summarize (mix)', detail: `✍️ ${promptLabel} → AI กำลังผสมมุมที่ดีที่สุด...` });
       setAnalysisResult(data.data);
       setStep('analyzed');
       wfComplete('ai_mix', `${data.data?.versions?.length || 0} เวอร์ชัน`);
-      finishWorkflow(`ผสมเสร็จ — ${data.data?.versions?.length || 0} เวอร์ชัน | ${ps?.source === 'library' ? '🏛️ Library' : '📦 Preset'}`);
+      finishWorkflow(`ผสมเสร็จ — ${data.data?.versions?.length || 0} เวอร์ชัน | ${promptLabel}`);
     } catch (err) {
       setError(err.message);
       wfFail('ai_mix', err.message);
