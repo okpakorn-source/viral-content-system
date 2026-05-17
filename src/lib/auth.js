@@ -1,10 +1,16 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
+import { existsSync } from 'fs';
 import { randomBytes, createHash } from 'crypto';
 
-const DATA_DIR = join(process.cwd(), 'data');
+// Vercel uses /tmp for writable storage; local uses ./data
+const IS_VERCEL = !!process.env.VERCEL;
+const DATA_DIR = IS_VERCEL ? '/tmp' : join(process.cwd(), 'data');
 const MEMBERS_FILE = join(DATA_DIR, 'members.json');
 const SESSIONS_FILE = join(DATA_DIR, 'sessions.json');
+
+// Bundled default members from repo (for Vercel cold starts)
+const BUNDLED_MEMBERS_FILE = join(process.cwd(), 'data', 'members.json');
 
 // === Helpers ===
 function hashPassword(password) {
@@ -26,13 +32,24 @@ async function readMembers() {
     const raw = await readFile(MEMBERS_FILE, 'utf8');
     return JSON.parse(raw);
   } catch {
+    // Try loading bundled file (for Vercel cold start)
+    try {
+      if (existsSync(BUNDLED_MEMBERS_FILE)) {
+        const raw = await readFile(BUNDLED_MEMBERS_FILE, 'utf8');
+        const members = JSON.parse(raw);
+        // Copy to writable location
+        await writeFile(MEMBERS_FILE, JSON.stringify(members, null, 2), 'utf8');
+        return members;
+      }
+    } catch {}
+
     // Create default admin
     const defaultMembers = [{
       id: 'admin',
       username: 'admin',
       password: hashPassword('admin123'),
       displayName: 'Admin',
-      role: 'admin', // admin | editor | viewer
+      role: 'admin',
       avatar: '👑',
       createdAt: new Date().toISOString(),
       stats: { totalCreated: 0, totalApproved: 0, totalRejected: 0, totalRevision: 0 },
@@ -46,6 +63,13 @@ async function readMembers() {
 async function saveMembers(members) {
   await ensureDir();
   await writeFile(MEMBERS_FILE, JSON.stringify(members, null, 2), 'utf8');
+  // Also save to repo data dir if local
+  if (!IS_VERCEL) {
+    try {
+      await mkdir(join(process.cwd(), 'data'), { recursive: true });
+      await writeFile(BUNDLED_MEMBERS_FILE, JSON.stringify(members, null, 2), 'utf8');
+    } catch {}
+  }
 }
 
 // === Sessions ===
@@ -81,11 +105,10 @@ export async function login(username, password) {
     role: member.role,
     avatar: member.avatar,
     loginAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
   };
   await saveSessions(sessions);
 
-  // Update last login
   member.lastLogin = new Date().toISOString();
   await saveMembers(members);
 
@@ -176,7 +199,6 @@ export async function updateMemberStats(memberId, field) {
   }
 }
 
-// Permission check
 export const PERMISSIONS = {
   admin: ['create', 'submit', 'review', 'approve', 'reject', 'manage_members', 'manage_prompts', 'settings'],
   editor: ['create', 'submit'],
