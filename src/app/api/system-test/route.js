@@ -105,12 +105,20 @@ export async function GET(request) {
     const t = Date.now();
     const { readFile } = await import('fs/promises');
     const { join } = await import('path');
-    const IS_V = !!process.env.VERCEL;
-    const vPath = join(IS_V ? '/tmp' : process.cwd() + '/data', 'viral-library.json');
-    try {
-      const data = JSON.parse(await readFile(vPath, 'utf-8'));
-      addResult('Viral Library File', 'pass', `${data.length} items (raw: ${data.filter(d => d.status === 'raw').length}, analyzed: ${data.filter(d => d.status === 'analyzed').length}, prompted: ${data.filter(d => d.status === 'prompted').length})`, Date.now() - t);
-    } catch {
+    const vPaths = [
+      join(process.cwd(), 'data', 'viral-library.json'),
+      join('/tmp', 'viral-library.json'),
+    ];
+    let vLoaded = false;
+    for (const vp of vPaths) {
+      try {
+        const data = JSON.parse(await readFile(vp, 'utf-8'));
+        addResult('Viral Library File', 'pass', `${data.length} items (raw: ${data.filter(d => d.status === 'raw').length}, analyzed: ${data.filter(d => d.status === 'analyzed').length}, prompted: ${data.filter(d => d.status === 'prompted').length})`, Date.now() - t);
+        vLoaded = true;
+        break;
+      } catch {}
+    }
+    if (!vLoaded) {
       addResult('Viral Library File', 'warn', 'No viral library file — will start empty', Date.now() - t);
     }
   } catch (e) { addResult('Viral Library File', 'warn', e.message, 0); }
@@ -219,14 +227,19 @@ export async function GET(request) {
   // === TEST 12: Database/Prisma ===
   try {
     const t = Date.now();
-    const { PrismaClient } = await import('@prisma/client');
-    const prisma = new PrismaClient();
-    await prisma.$connect();
-    const count = await prisma.workflow.count();
-    await prisma.$disconnect();
-    addResult('Database (Prisma)', 'pass', `Connected — ${count} workflows`, Date.now() - t);
+    const dbUrl = process.env.DATABASE_URL;
+    if (!dbUrl) {
+      addResult('Database (Prisma)', 'warn', 'DATABASE_URL not set', Date.now() - t);
+    } else {
+      const { PrismaClient } = await import('@prisma/client');
+      const prisma = new PrismaClient({ datasources: { db: { url: dbUrl } } });
+      await prisma.$connect();
+      const count = await prisma.workflow.count();
+      await prisma.$disconnect();
+      addResult('Database (Prisma)', 'pass', `Connected — ${count} workflows`, Date.now() - t);
+    }
   } catch (e) {
-    addResult('Database (Prisma)', 'warn', `DB not available: ${e.message.slice(0, 80)}`, 0);
+    addResult('Database (Prisma)', 'warn', `DB error: ${e.message.slice(0, 80)}`, 0);
   }
 
   const totalTime = Date.now() - startTime;
