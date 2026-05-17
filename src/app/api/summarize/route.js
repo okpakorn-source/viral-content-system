@@ -501,6 +501,31 @@ export async function POST(request) {
             console.warn('[Analyze] Moderation check skipped:', modErr.message);
           }
 
+          // === 🏛️ Auto Usage Tracking — นับการใช้งาน Prompt จากหอสมุด ===
+          if (promptSource === 'library' && smartPrompt?.id) {
+            try {
+              const { readFile: rf2, writeFile: wf2, mkdir: mk2 } = await import('fs/promises');
+              const { join: jn2 } = await import('path');
+              const IS_V2 = !!process.env.VERCEL;
+              const libPath2 = jn2(IS_V2 ? '/tmp' : process.cwd() + '/data', 'prompt-library.json');
+              let lib2 = [];
+              try { lib2 = JSON.parse(await rf2(libPath2, 'utf-8')); } catch {
+                try { lib2 = JSON.parse(await rf2(jn2(process.cwd(), 'data', 'prompt-library.json'), 'utf-8')); } catch {}
+              }
+              const idx = lib2.findIndex(p => p.id === smartPrompt.id);
+              if (idx >= 0) {
+                lib2[idx].usageCount = (lib2[idx].usageCount || 0) + 1;
+                lib2[idx].lastUsedAt = new Date().toISOString();
+                await mk2(jn2(IS_V2 ? '/tmp' : process.cwd(), 'data'), { recursive: true }).catch(() => {});
+                await wf2(libPath2, JSON.stringify(lib2, null, 2), 'utf-8');
+                try { await wf2(jn2(process.cwd(), 'data', 'prompt-library.json'), JSON.stringify(lib2, null, 2), 'utf-8'); } catch {}
+                console.log(`[Analyze] 🏛️ Usage tracked: "${smartPrompt.promptName}" → ${lib2[idx].usageCount} uses`);
+              }
+            } catch (trackErr) {
+              console.log('[Analyze] Usage tracking skipped:', trackErr.message);
+            }
+          }
+
           return NextResponse.json({
             success: true,
             data: {

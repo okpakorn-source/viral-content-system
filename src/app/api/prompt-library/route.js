@@ -129,11 +129,33 @@ export async function PUT(request) {
     // Increment usage
     if (body.action === 'use') {
       prompts[idx].usageCount = (prompts[idx].usageCount || 0) + 1;
+      prompts[idx].lastUsedAt = new Date().toISOString();
     } else if (body.action === 'success') {
       prompts[idx].successCount = (prompts[idx].successCount || 0) + 1;
+    } else if (body.action === 'feedback') {
+      // === Engagement Feedback — บันทึกผลลัพธ์จริง ===
+      const fb = body.feedback || {};
+      if (!prompts[idx].engagementHistory) prompts[idx].engagementHistory = [];
+      prompts[idx].engagementHistory.push({
+        date: new Date().toISOString(),
+        likes: fb.likes || 0,
+        shares: fb.shares || 0,
+        comments: fb.comments || 0,
+        reach: fb.reach || 0,
+        contentId: fb.contentId || null,
+      });
+      // Auto-adjust viral score based on engagement
+      const totalEngagement = (fb.likes || 0) + (fb.shares || 0) * 3 + (fb.comments || 0) * 2;
+      if (totalEngagement > 10000) {
+        prompts[idx].viralScore = Math.min(100, (prompts[idx].viralScore || 70) + 5);
+      } else if (totalEngagement > 1000) {
+        prompts[idx].viralScore = Math.min(100, (prompts[idx].viralScore || 70) + 2);
+      }
+      prompts[idx].successCount = (prompts[idx].successCount || 0) + 1;
+      prompts[idx].totalEngagement = (prompts[idx].totalEngagement || 0) + totalEngagement;
     } else {
       // General update
-      const fields = ['category', 'emotionalType', 'hookStyle', 'tone', 'structure', 'ctaStyle', 'writingStyle', 'promptText', 'viralScore'];
+      const fields = ['promptName', 'category', 'emotionalType', 'hookStyle', 'tone', 'structure', 'ctaStyle', 'writingStyle', 'promptText', 'viralScore'];
       fields.forEach(f => { if (body[f] !== undefined) prompts[idx][f] = body[f]; });
     }
     prompts[idx].updatedAt = new Date().toISOString();

@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import Header from '@/components/layout/Header';
@@ -228,7 +228,7 @@ export default function PromptLibraryPage() {
                       )}
 
                       {/* Actions */}
-                      <div style={{ display: 'flex', gap: 6 }}>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                         <button onClick={() => handleCopy(p.promptText || p.prompt_text || p.promptName || '', p.id)}
                           style={{
                             padding: '7px 14px', borderRadius: 8, border: 'none',
@@ -241,6 +241,13 @@ export default function PromptLibraryPage() {
                           style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
                           🗑️ ลบ
                         </button>
+
+                        {/* Usage Stats Bar */}
+                        <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
+                          {p.totalEngagement > 0 && <span style={{ color: '#22c55e' }}>📊 {p.totalEngagement.toLocaleString()} engagement</span>}
+                          {p.lastUsedAt && <span>🕐 ใช้ล่าสุด: {new Date(p.lastUsedAt).toLocaleDateString('th-TH')}</span>}
+                          {p.usageCount > 0 && p.successCount > 0 && <span style={{ color: '#fbbf24' }}>⭐ {Math.round((p.successCount/p.usageCount)*100)}% success</span>}
+                        </div>
                       </div>
                     </div>
                   )}
