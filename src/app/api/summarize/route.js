@@ -366,18 +366,65 @@ ${promptCatalog}
       let prompt;
       if (smartPrompt && smartPrompt.promptText) {
         // === ใช้ Prompt จากหอสมุดไวรัล ===
-        prompt = '=== 🏛️ คำสั่งเขียนจากหอสมุดไวรัล (AI-Generated Prompt) ===\n' +
+        prompt = '=== 🏛️ คำสั่งเขียนจากหอสมุดไวรัล ===\n' +
           `ประเภท: ${smartPrompt.category || '-'} | อารมณ์: ${smartPrompt.emotionalType || '-'} | Viral Score: ${smartPrompt.viralScore || '-'}\n` +
           `สไตล์ Hook: ${smartPrompt.hookStyle || '-'} | โทน: ${smartPrompt.tone || '-'}\n` +
           `โครงสร้าง: ${smartPrompt.structure || '-'}\n\n` +
+          '--- คำสั่งสไตล์การเขียน ---\n' +
           smartPrompt.promptText + '\n' +
-          '=== จบคำสั่งหอสมุด ===\n\n' +
-          '=== เนื้อข่าวที่ต้องเขียน ===\n' +
+          '--- จบคำสั่งสไตล์ ---\n\n' +
+          '⚠️ กฎสำคัญที่ต้องทำตาม:\n' +
+          '1. ใช้สไตล์การเขียนจากคำสั่งด้านบน แต่ต้องเขียนจากข้อมูลในข่าวด้านล่างเท่านั้น\n' +
+          '2. ห้ามแต่งเรื่อง ห้ามเพิ่มข้อมูลที่ไม่มีในข่าว ห้ามสรุปผิด\n' +
+          '3. ชื่อคน สถานที่ ตัวเลข วันที่ ต้องตรงกับข่าวต้นฉบับ 100%\n' +
+          '4. ห้ามนำตัวอย่างหรือข้อมูลจากแหล่งอื่นมาใส่ ใช้เฉพาะข่าวที่ให้มา\n\n' +
+          '=== จบคำสั่งหอสมุด ===\n\n';
+
+        // === Inject เนื้อข่าวต้นฉบับเต็ม ===
+        prompt += '=== เนื้อข่าวต้นฉบับ (ข้อมูลจริงที่ต้องใช้อ้างอิง — ห้ามแต่งเพิ่ม) ===\n' +
           `หัวข้อ: ${actualNewsTitle || actualNewsBody.slice(0, 100)}\n\n` +
           actualNewsBody + '\n' +
-          '=== จบเนื้อข่าว ===\n';
+          '=== จบเนื้อข่าว ===\n\n';
+
+        // === Inject ผลแตกประเด็นตรงๆ (สำคัญ!) ===
+        if (actualBreakdown) {
+          prompt += '=== ผลแตกประเด็นจาก AI (ต้องใช้ทุกประเด็นในการเขียน) ===\n';
+          if (actualBreakdown.core_story) prompt += `แก่นข่าว: ${actualBreakdown.core_story}\n`;
+          if (actualBreakdown.main_emotional_core) prompt += `แก่น Emotional: ${actualBreakdown.main_emotional_core}\n`;
+          if (actualBreakdown.conflict_point) prompt += `จุด Conflict: ${actualBreakdown.conflict_point}\n`;
+          if (actualBreakdown.viral_trigger) prompt += `Viral Trigger: ${actualBreakdown.viral_trigger}\n`;
+
+          if (actualBreakdown.key_points?.length > 0) {
+            prompt += `\nประเด็นสำคัญ (${actualBreakdown.key_points.length} ข้อ):\n`;
+            actualBreakdown.key_points.forEach((kp, i) => {
+              prompt += `${i + 1}. ${kp.point || kp}: ${kp.detail || ''} [${kp.category || ''}, อารมณ์: ${kp.emotional_value || '-'}]\n`;
+            });
+          }
+          if (actualBreakdown.quotes?.length > 0) prompt += `\nคำพูดสำคัญ: ${actualBreakdown.quotes.join(' | ')}\n`;
+          if (actualBreakdown.conflicts?.length > 0) prompt += `จุดขัดแย้ง: ${actualBreakdown.conflicts.join(' | ')}\n`;
+          if (actualBreakdown.emotional_hooks?.length > 0) prompt += `จุดที่คนอิน: ${actualBreakdown.emotional_hooks.join(' | ')}\n`;
+
+          if (actualBreakdown.possible_angles?.length > 0) {
+            prompt += `\nมุมเล่าทั้งหมด (${actualBreakdown.possible_angles.length} มุม):\n`;
+            actualBreakdown.possible_angles.forEach((a, i) => {
+              prompt += `${i + 1}. ${a.angle_name}: ${a.description} [อารมณ์: ${a.target_emotion || '-'}, viral: ${a.facebook_viral_score || '-'}/10]\n`;
+            });
+          }
+          if (actualBreakdown.best_main_angle) {
+            prompt += `\n🏆 มุมที่ดีที่สุด: ${actualBreakdown.best_main_angle.angle_name} — ${actualBreakdown.best_main_angle.why_best}\n`;
+          }
+          if (actualBreakdown.language_strategy) {
+            prompt += `✍️ กลยุทธ์ภาษา: เปิด=${actualBreakdown.language_strategy.opening_style || '-'}, เล่า=${actualBreakdown.language_strategy.storytelling_style || '-'}\n`;
+          }
+          prompt += '=== จบผลแตกประเด็น ===\n\n';
+          prompt += '⚠️ คำสั่งเหล็ก: ต้องครอบคลุมทุกประเด็นด้านบน ห้ามข้าม ห้ามซ้ำ ห้ามแต่งเรื่องใหม่ ต้องเขียนยาวอย่างน้อย 250 คำ\n';
+          console.log(`[Analyze] ✅ Breakdown injected: ${actualBreakdown.key_points?.length || 0} points, ${actualBreakdown.possible_angles?.length || 0} angles`);
+        } else {
+          console.log('[Analyze] ⚠️ No breakdown data to inject');
+        }
+
         if (customPrompt) prompt += `\nคำสั่งเพิ่มเติม: "${customPrompt}"\n`;
-        console.log(`[Analyze] ✅ Using LIBRARY prompt (${smartPrompt.promptName || smartPrompt.category})`);
+        console.log(`[Analyze] ✅ Using LIBRARY prompt (${smartPrompt.promptName || smartPrompt.category}) | breakdown: ${!!actualBreakdown}`);
       } else {
         // === Fallback: ใช้ preset เก่า ===
         prompt = preset.prompt;
@@ -403,13 +450,8 @@ ${promptCatalog}
         console.log('[Analyze] ⚠️ Fallback to buildFullContext');
       }
 
-      // Inject context
-      if (promptSource === 'library') {
-        // Library prompt: append context หลังเนื้อข่าว
-        const ctxParts = fullCtx.split('=== จบเนื้อข่าว ===');
-        if (ctxParts[1]) prompt += '\n' + ctxParts[1]; // breakdown, emotional analysis
-      } else {
-        // Preset prompt: inject เหมือนเดิม
+      // Inject context — เฉพาะ Preset เท่านั้น (Library ได้ inject ตรงๆ แล้ว)
+      if (promptSource !== 'library') {
         if (!prompt.includes(actualNewsBody.slice(0, 50))) {
           prompt += '\n\n' + fullCtx;
           console.log('[Analyze] ✅ Full context injected');
