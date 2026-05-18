@@ -699,7 +699,7 @@ ${promptCatalog}
           .replace('{content}', actualNewsBody.slice(0, 3000))
           .replace('{analysis_context}', analysisCtx);
 
-        console.log(`[Research] Prompt from promptStore, length: ${researchPrompt.length}ch`); ${researchPrompt.length}ch`);
+        console.log('[Research] Prompt from promptStore, length: ' + researchPrompt.length + 'ch');
 
         let result, usedModel;
         try {
