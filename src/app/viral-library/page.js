@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import Header from '@/components/layout/Header';
@@ -71,7 +71,11 @@ export default function ViralLibraryPage() {
         setInputText('');
         setInputTitle('');
         setShowInput(false);
-        loadItems();
+        // รอ 500ms ให้ filesystem sync ก่อน reload
+        await new Promise(r => setTimeout(r, 500));
+        await loadItems();
+      } else {
+        setMsg('❌ ' + (data.error || 'บันทึกไม่สำเร็จ'));
       }
     } catch (err) {
       setMsg('❌ ' + err.message);
@@ -92,15 +96,21 @@ export default function ViralLibraryPage() {
       const data = await res.json();
       if (data.success && data.analysis) {
         // บันทึกผลวิเคราะห์เข้า library
-        await fetch('/api/viral-library', {
+        const saveRes = await fetch('/api/viral-library', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: item.id, analysis: data.analysis }),
         });
-        setMsg(`✅ วิเคราะห์เสร็จ: ${data.analysis.category || 'สำเร็จ'}`);
-        loadItems();
+        const saveData = await saveRes.json();
+        if (saveData.success) {
+          setMsg(`✅ วิเคราะห์เสร็จ: ${data.analysis.category || 'สำเร็จ'}`);
+        } else {
+          setMsg(`⚠️ วิเคราะห์เสร็จแต่บันทึกไม่ได้: ${saveData.error}`);
+        }
+        await new Promise(r => setTimeout(r, 300));
+        await loadItems();
       } else {
-        setMsg('❌ วิเคราะห์ไม่สำเร็จ');
+        setMsg('❌ วิเคราะห์ไม่สำเร็จ: ' + (data.error || ''));
       }
     } catch (err) {
       setMsg('❌ ' + err.message);
@@ -131,13 +141,14 @@ export default function ViralLibraryPage() {
       const data = await res.json();
       if (data.success && data.promptData) {
         // บันทึก prompt เข้า viral library item
-        await fetch('/api/viral-library', {
+        const r1 = await fetch('/api/viral-library', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: item.id, generatedPrompt: data.promptData }),
         });
+        await r1.json();
         // บันทึก prompt เข้า Prompt Library ด้วย
-        await fetch('/api/prompt-library', {
+        const r2 = await fetch('/api/prompt-library', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -146,10 +157,12 @@ export default function ViralLibraryPage() {
             exampleContent: item.content.slice(0, 500),
           }),
         });
+        await r2.json();
         setMsg(`✅ สร้าง Prompt สำเร็จ: ${data.promptData.prompt_name || 'สำเร็จ'}`);
-        loadItems();
+        await new Promise(r => setTimeout(r, 300));
+        await loadItems();
       } else {
-        setMsg('❌ สร้าง Prompt ไม่สำเร็จ');
+        setMsg('❌ สร้าง Prompt ไม่สำเร็จ: ' + (data.error || ''));
       }
     } catch (err) {
       setMsg('❌ ' + err.message);
@@ -194,13 +207,14 @@ export default function ViralLibraryPage() {
       if (!data2.success) { setMsg('❌ สร้าง Prompt ล้มเหลว'); setProcessing(null); return; }
 
       // Save prompt to library item
-      await fetch('/api/viral-library', {
+      const r3 = await fetch('/api/viral-library', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: item.id, generatedPrompt: data2.promptData }),
       });
+      await r3.json();
       // Save to Prompt Library
-      await fetch('/api/prompt-library', {
+      const r4 = await fetch('/api/prompt-library', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -209,9 +223,11 @@ export default function ViralLibraryPage() {
           exampleContent: item.content.slice(0, 500),
         }),
       });
+      await r4.json();
 
       setMsg(`✅ เสร็จ! "${data2.promptData.prompt_name}" → เก็บเข้าหอสมุด Prompt แล้ว`);
-      loadItems();
+      await new Promise(r => setTimeout(r, 500));
+      await loadItems();
     } catch (err) {
       setMsg('❌ ' + err.message);
     }
