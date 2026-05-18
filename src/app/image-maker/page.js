@@ -37,24 +37,40 @@ function resizeImage(file, maxPx = 800, quality = 0.72) {
 }
 
 export default function ImageMakerPage() {
-  const [images, setImages]         = useState([]);
-  const [newsTitle, setNewsTitle]   = useState('');
-  const [newsType, setNewsType]     = useState('accident');
-  const [withText, setWithText]     = useState(true);
-  const [loading, setLoading]       = useState(false);
-  const [step, setStep]             = useState('');
-  const [error, setError]           = useState('');
-  const [result, setResult]         = useState(null);
-  const [layoutInfo, setLayoutInfo] = useState(null);
-  const [downloaded, setDownloaded] = useState({});
-  const [prompts, setPrompts]       = useState(DEFAULT_PROMPTS);
+  const [images, setImages]             = useState([]);
+  const [newsTitle, setNewsTitle]       = useState('');
+  const [newsType, setNewsType]         = useState('accident');
+  const [withText, setWithText]         = useState(true);
+  const [loading, setLoading]           = useState(false);
+  const [step, setStep]                 = useState('');
+  const [error, setError]               = useState('');
+  const [result, setResult]             = useState(null);
+  const [layoutInfo, setLayoutInfo]     = useState(null);
+  const [downloaded, setDownloaded]     = useState({});
+  const [prompts, setPrompts]           = useState(DEFAULT_PROMPTS);
+  const [customTemplates, setCustomTemplates] = useState([]);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem('imgPrompts_v2');
       if (saved) setPrompts(JSON.parse(saved));
     } catch {}
+    try {
+      const ct = localStorage.getItem('customTemplates');
+      if (ct) setCustomTemplates(JSON.parse(ct));
+    } catch {}
   }, []);
+
+  const handleTemplateAdded = (tmpl) => {
+    setCustomTemplates(prev => [...prev, tmpl]);
+  };
+
+  const deleteCustomTemplate = (id) => {
+    const next = customTemplates.filter(t => t.id !== id);
+    setCustomTemplates(next);
+    localStorage.setItem('customTemplates', JSON.stringify(next));
+    if (newsType === id) setNewsType('accident');
+  };
 
   const handleFiles = useCallback(async (files) => {
     const remaining = 5 - images.length;
@@ -139,6 +155,23 @@ export default function ImageMakerPage() {
                   onClick={() => setNewsType(k)} label={v.label} icon={v.icon} />
               ))}
             </div>
+            {customTemplates.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>⭐ Custom Templates</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {customTemplates.map(ct => (
+                    <button key={ct.id} onClick={() => setNewsType(ct.id)} style={{
+                      position: 'relative', padding: 0, border: `2px solid ${newsType === ct.id ? ct.color : 'var(--border)'}`,
+                      borderRadius: 10, cursor: 'pointer', background: 'none', width: 90, overflow: 'hidden', textAlign: 'center',
+                    }}>
+                      <img src={ct.previewImage} alt={ct.name} style={{ width: '100%', aspectRatio: '1/1', objectFit: 'cover', display: 'block' }} />
+                      <div style={{ padding: '4px 4px 2px', background: newsType === ct.id ? ct.color : 'var(--bg-primary)', fontSize: 9, fontWeight: 700, color: newsType === ct.id ? '#fff' : 'var(--text-muted)', lineHeight: 1.3 }}>{ct.name}</div>
+                      <div onClick={e => { e.stopPropagation(); deleteCustomTemplate(ct.id); }} style={{ position: 'absolute', top: 3, right: 3, width: 16, height: 16, borderRadius: '50%', background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>✕</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Image Upload */}
@@ -228,8 +261,8 @@ export default function ImageMakerPage() {
           </div>
         )}
 
-        {/* Prompt Manager — 3 prompts + layout preview */}
-        <PromptManager prompts={prompts} onChange={setPrompts} newsType={newsType} />
+        {/* Prompt Manager — 4 prompts + Template Builder */}
+        <PromptManager prompts={prompts} onChange={setPrompts} newsType={newsType} onTemplateAdded={handleTemplateAdded} />
 
       </div>
     </>
