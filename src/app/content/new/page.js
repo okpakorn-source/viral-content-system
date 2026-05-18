@@ -114,15 +114,15 @@ export default function NewContentPage() {
         if (pi.source === 'library') {
           wfComplete('auto_lib_check', `🧠 ${typeLabel} → 🏛️ "${pi.name}" (Viral: ${pi.viralScore || '-'})`);
         } else {
-          wfComplete('auto_lib_check', `🧠 ${typeLabel} → 📦 ไม่มี Prompt ที่เหมาะ → ใช้ Preset`);
+          wfComplete('auto_lib_check', `🧠 ${typeLabel} → ❌ ไม่พบ Prompt ที่เหมาะในหอสมุด`);
         }
       } else if (pi?.source === 'library') {
         wfComplete('auto_lib_check', `🏛️ ใช้: ${pi.name} (Viral: ${pi.viralScore || '-'})`);
       } else {
-        wfComplete('auto_lib_check', `📦 ใช้ Preset: ${selectedPreset}`);
+        wfComplete('auto_lib_check', `❌ ไม่พบ Prompt ในหอสมุด`);
       }
 
-      const promptLabel = pi?.source === 'library' ? `🏛️ ${pi.name?.slice(0, 20)}` : `📦 Preset: ${selectedPreset}`;
+      const promptLabel = pi?.source === 'library' ? `🏛️ ${pi.name?.slice(0, 20)}` : `❌ ไม่พบ Prompt`;
       wfStart('auto_generate', { detail: `✍️ ${promptLabel} → กำลังสร้างเนื้อหา...` });
       wfComplete('auto_generate', `${versionsCount} เวอร์ชัน (${st.generate || '?'}s)`);
 
@@ -177,15 +177,6 @@ export default function NewContentPage() {
     }
   };
 
-  // Load presets
-  useEffect(() => {
-    fetch('/api/prompts').then(r => r.json()).then(d => {
-      if (d.analysisPresets) {
-        setAnalysisPresets(d.analysisPresets);
-        if (d.analysisPresets.length > 0) setSelectedPreset(d.analysisPresets[0].id);
-      }
-    }).catch(() => {});
-  }, []);
 
   // === STEP 1: ดึงเนื้อหาจาก URL ===
   const handleExtract = async () => {
@@ -463,11 +454,11 @@ export default function NewContentPage() {
       if (nt && ps?.source === 'library') {
         wfComplete('lib_check', `🧠 ข่าว${nt} → 🏛️ "${ps.name}" (Viral: ${ps.viralScore || '-'})`);
       } else if (nt && ps?.source !== 'library') {
-        wfComplete('lib_check', `🧠 ข่าว${nt} → 📦 ไม่มี Prompt ที่เหมาะ → ใช้ Preset`);
+        wfComplete('lib_check', `🧠 ข่าว${nt} → ❌ ไม่พบ Prompt ที่เหมาะในหอสมุด`);
       } else if (ps?.source === 'library') {
         wfComplete('lib_check', `🏛️ ใช้: ${ps.name} (Score: ${ps.viralScore || '-'})`);
       } else {
-        wfComplete('lib_check', `📦 ไม่พบใน Library → ใช้ Preset: ${ps?.name || presetLabel}`);
+        wfComplete('lib_check', `❌ ไม่พบ Prompt ที่ตรงในหอสมุด`);
       }
       const promptLabel = ps?.source === 'library' ? `🏛️ ${ps.name?.slice(0, 20)}` : `📦 ${ps?.name || presetLabel}`;
       wfStart('ai_analyze', { api: '/api/summarize (analyze)', detail: `✍️ ${promptLabel} → กำลังสร้างเนื้อหา...` });
@@ -516,11 +507,11 @@ export default function NewContentPage() {
       if (nt && ps?.source === 'library') {
         wfComplete('lib_check', `🧠 ข่าว${nt} → 🏛️ "${ps.name}" (Viral: ${ps.viralScore || '-'})`);
       } else if (nt) {
-        wfComplete('lib_check', `🧠 ข่าว${nt} → 📦 ไม่มี Prompt ที่เหมาะ → ใช้ Preset`);
+        wfComplete('lib_check', `🧠 ข่าว${nt} → ❌ ไม่พบ Prompt ที่เหมาะในหอสมุด`);
       } else if (ps?.source === 'library') {
         wfComplete('lib_check', `🏛️ ใช้: ${ps.name} (Score: ${ps.viralScore || '-'})`);
       } else {
-        wfComplete('lib_check', `📦 ไม่พบใน Library → ใช้ Preset`);
+        wfComplete('lib_check', `❌ ไม่พบ Prompt ที่ตรงในหอสมุด`);
       }
       const promptLabel = ps?.source === 'library' ? `🏛️ ${ps.name?.slice(0, 20)}` : `📦 Preset`;
       wfStart('ai_mix', { api: '/api/summarize (mix)', detail: `✍️ ${promptLabel} → AI กำลังผสมมุมที่ดีที่สุด...` });
@@ -705,20 +696,8 @@ export default function NewContentPage() {
               </div>
 
               {/* Preset + Length selectors */}
+                            {/* ความยาวเนื้อหา */}
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-                {analysisPresets.slice(0, 4).map(p => (
-                  <button key={p.id} onClick={() => setSelectedPreset(p.id)} disabled={autoMode}
-                    style={{
-                      padding: '4px 10px', fontSize: 10, fontWeight: 600,
-                      background: selectedPreset === p.id ? 'var(--accent)' : 'var(--bg-primary)',
-                      color: selectedPreset === p.id ? '#fff' : 'var(--text-muted)',
-                      border: `1px solid ${selectedPreset === p.id ? 'var(--accent)' : 'var(--border)'}`,
-                      borderRadius: 20, cursor: 'pointer', fontFamily: 'inherit',
-                    }}>
-                    {p.name}
-                  </button>
-                ))}
-                <span style={{ fontSize: 9, color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>|</span>
                 {[
                   { id: 'short', label: '📝 สั้น' },
                   { id: 'medium', label: '📄 กลาง' },
@@ -1307,20 +1286,14 @@ export default function NewContentPage() {
               </div>
             </div>
 
-            {/* เลือก Prompt สร้างเนื้อหา → ไปหน้าผลลัพธ์ */}
+            {/* สร้างเนื้อหา — AI เลือก Prompt จากหอสมุดอัตโนมัติ */}
             <div style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', border: '2px solid var(--accent)' }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--accent-light)', marginBottom: 4 }}>🎯 เลือก Prompt สร้างเนื้อหาสำเร็จรูป</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14 }}>AI จะนำข้อมูลทั้งหมด + ความยาว "{contentLength === 'short' ? '250-300 คำ' : contentLength === 'medium' ? '400-500 คำ' : '500-1000 คำ'}" มาสร้างเนื้อหา</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
-                {analysisPresets.map(p => (
-                  <button key={p.id} type="button" disabled={loading} onClick={() => handleAnalyze(p.id)}
-                    style={{ padding: '14px 16px', textAlign: 'left', fontFamily: 'inherit', background: selectedPreset === p.id ? 'var(--accent)' : 'var(--bg-secondary)', color: selectedPreset === p.id ? '#fff' : 'var(--text-primary)', border: selectedPreset === p.id ? '2px solid var(--accent-light)' : '1px solid var(--border)', borderRadius: 'var(--radius-md)', cursor: loading ? 'wait' : 'pointer' }}>
-                    <div style={{ fontSize: 14, fontWeight: 700 }}>{loading && selectedPreset === p.id ? '⏳...' : `▶ ${p.name}`}</div>
-                    <div style={{ fontSize: 10, marginTop: 4, opacity: 0.8 }}>{p.desc}</div>
-                  </button>
-                ))}
-             </div>
-              <a href="/prompts?tab=analysis" target="_blank" style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10, display: 'inline-block' }}>⚙️ จัดการ Presets</a>
+              <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--accent-light)', marginBottom: 4 }}>🧠 AI เลือก Prompt จากหอสมุดอัตโนมัติ</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14 }}>AI จะวิเคราะห์แนวข่าว → เทียบกับ Prompt ในหอสมุด → เลือกที่ตรงที่สุดมาใช้</div>
+              <button type="button" disabled={loading} onClick={() => handleAnalyze()}
+                style={{ width: '100%', padding: '14px 20px', border: 'none', borderRadius: 'var(--radius-md)', background: 'linear-gradient(135deg, #7c3aed, #3b82f6)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: loading ? 'wait' : 'pointer', boxShadow: '0 4px 15px rgba(124,58,237,0.3)' }}>
+                {loading ? '⏳ AI กำลังวิเคราะห์และเลือก Prompt...' : '⚡ สร้างเนื้อหา (AI เลือก Prompt จากหอสมุดให้)'}
+              </button>
             </div>
               </div>
             )}
@@ -1365,7 +1338,7 @@ export default function NewContentPage() {
                   <span style={{ fontSize: 16 }}>📦</span>
                   <div style={{ flex: 1 }}>
                     <span style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1 }}>PRESET: </span>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-primary)' }}>{analysisResult.usedPreset?.name?.replace('📦 ', '') || selectedPreset}</span>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-primary)' }}>{analysisResult.usedPreset?.name?.replace('📦 ', '') || 'Library'}</span>
                   </div>
                   {analysisResult.debug?.newsTypeDetected && (
                     <span style={{ fontSize: 9, color: '#f59e0b', background: 'rgba(245,158,11,0.1)', padding: '2px 8px', borderRadius: 4 }}>
@@ -1494,15 +1467,10 @@ export default function NewContentPage() {
 
             {/* ปุ่มวิเคราะห์ใหม่ */}
             <div style={{ paddingTop: 16, borderTop: '1px solid var(--border)', marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 10 }}>🔄 สร้างใหม่ด้วย Prompt อื่น:</div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {analysisPresets.map(p => (
-                  <button key={p.id} className="btn btn-outline btn-sm" disabled={loading} onClick={() => handleAnalyze(p.id)}
-                    style={{ fontSize: 12, background: analysisResult.usedPreset?.id === p.id ? 'var(--accent)' : undefined, color: analysisResult.usedPreset?.id === p.id ? '#fff' : undefined }}>
-                    {loading && selectedPreset === p.id ? '⏳...' : p.name}
-                  </button>
-                ))}
-              </div>
+              <button className="btn btn-outline" disabled={loading} onClick={() => handleAnalyze()}
+                style={{ fontSize: 12 }}>
+                {loading ? '⏳ สร้างใหม่...' : '🔄 สร้างใหม่ (AI เลือก Prompt อัตโนมัติ)'}
+              </button>
             </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>

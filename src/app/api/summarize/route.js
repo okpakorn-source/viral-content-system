@@ -373,14 +373,31 @@ ${promptCatalog}
           console.log(`[Analyze] 🧠 Result: ${promptSource === 'library' ? '✅ USING' : '❌ SKIP'} | ${promptMatchReason}`);
         } else {
           promptMatchReason = 'library empty (0 prompts with text)';
-          console.log(`[Analyze] 🧠 Library empty — using preset fallback`);
+          console.log('[Analyze] ⚠️ Library empty — returning error');
+          return NextResponse.json({
+            success: false,
+            error: 'กรุณาเพิ่ม Prompt ในหอสมุดก่อน — ไม่พบ Prompt ที่จะใช้ (หอสมุดว่าง)',
+            libraryEmpty: true,
+          }, { status: 422 });
         }
       } catch (err) {
         promptMatchReason = `error: ${err.message}`;
         console.log('[Analyze] Smart Match error:', err.message);
       }
 
-      // สร้าง prompt — ใช้ Smart Prompt ถ้ามี, fallback ใช้ preset เก่า
+      // ── ถ้า AI ไม่เจอ Prompt ที่ตรง → error (ไม่มี preset fallback) ──
+      if (!smartPrompt) {
+        console.log('[Analyze] ⚠️ No matching prompt: ' + promptMatchReason);
+        return NextResponse.json({
+          success: false,
+          error: 'กรุณาเพิ่ม Prompt ในหอสมุดก่อน — ไม่พบ Prompt ที่ตรงกับข่าว (' + promptMatchReason + ')',
+          noMatch: true,
+          newsTypeDetected,
+          promptMatchReason,
+        }, { status: 422 });
+      }
+
+      // สร้าง prompt — ใช้ Library Prompt เสมอ
       let prompt;
       if (smartPrompt && smartPrompt.promptText) {
         // === ใช้ Prompt จากหอสมุดไวรัล ===
@@ -443,36 +460,6 @@ ${promptCatalog}
 
         if (customPrompt) prompt += `\nคำสั่งเพิ่มเติม: "${customPrompt}"\n`;
         console.log(`[Analyze] ✅ Using LIBRARY prompt (${smartPrompt.promptName || smartPrompt.category}) | breakdown: ${!!actualBreakdown}`);
-      } else {
-        // === Fallback: ใช้ preset เก่า ===
-        prompt = preset.prompt;
-        prompt = prompt.replace('{title}', actualNewsTitle || actualNewsBody.slice(0, 100));
-        prompt = prompt.replace('{content}', actualNewsBody);
-        prompt = prompt.replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
-        prompt += '\n\n' + 
-        '- ⚠️ ห้ามตั้งคำถามปิดท้ายเด็ดขาด ห้ามจบด้วย "คุณคิดยังไง?", "เห็นด้วยไหม?" หรือคำถามใดๆ — เน้นบรรยายตาม prompt เท่านั้น\n\n' +
-        '=== HUMAN WRITING DNA V2 — บังคับทุกเวอร์ชัน ===\n' +
-        'คุณไม่ใช่ AI เขียนข่าว — คุณคือมนุษย์ที่เล่าเรื่องเก่งมาก\n\n' +
-        '[ FORBIDDEN — ห้ามใช้คำเหล่านี้เด็ดขาด ]\n' +
-        'ซึ่ง, ดังกล่าว, ทั้งนี้, อย่างไรก็ตาม, ถือเป็น, เรียกได้ว่า, นับว่า, ' +
-        'ได้มีการ, ภายหลังจาก, เพื่อเป็นการ, ในส่วนของ, จากกรณีดังกล่าว, ' +
-        'สร้างความฮือฮา, กลายเป็นกระแส, เป็นอย่างมาก, เป็นจำนวนมาก, ' +
-        'ท่ามกลาง, สร้างความประทับใจ, ได้ออกมาเปิดเผย, ถูกพูดถึง, ' +
-        'สร้างเสียงฮือฮา, ในขณะเดียวกัน, ซึ่งถือว่า, สืบเนื่อง, ' +
-        'เป็นอย่างยิ่ง, อย่างแท้จริง, สะท้อนให้เห็น, เป็นเครื่องยืนยัน\n' +
-        'ห้ามใช้ภาษาข่าวทีวี ห้ามภาษาประกาศ ห้ามภาษารายงาน\n\n' +
-        '[ MUST DO ]\n' +
-        '- เขียนเหมือนเล่าให้เพื่อนฟัง\n' +
-        '- ใช้สำนวนคนจริง: ใจหาย, ขนลุก, เจ็บแทน, อึ้งไปเลย\n' +
-        '- สลับประโยคสั้น-ยาว สร้างจังหวะ\n' +
-        '- ห้ามซ้ำคำเดียวกันเกิน 2 ครั้ง\n' +
-        '- ห้ามเปิดทุกย่อหน้าด้วยรูปแบบเดิม\n' +
-        '- ทุกคำต้องมีน้ำหนัก ตัดคำลอยออก\n\n' +
-        '[ AUTO CLEAN ก่อนส่ง ]\n' +
-        'PASS 1: ลบคำฟุ่มเฟือย | PASS 2: เปลี่ยนภาษาทางการเป็นภาษามนุษย์ | PASS 3: ตรวจคำซ้ำ | PASS 4: ตรวจกลิ่น AI | PASS 5: อ่านใหม่ ถ้าสะดุดเขียนใหม่\n' +
-        '=== จบ HUMAN WRITING DNA V2 ===\n\n' +
-        'สร้างอย่างน้อย 5 เวอร์ชัน ในแนวต่างๆ:\n';
-        console.log(`[Analyze] ⚠️ Using PRESET fallback: ${preset.name}`);
       }
 
       // === บังคับ inject Full Context ผ่าน Master Agent ===
@@ -594,7 +581,7 @@ ${promptCatalog}
           newsBodyLength: actualNewsBody?.length || 0,
           newsTitle: actualNewsTitle || '',
           breakdownPointsCount: actualBreakdown?.key_points?.length || 0,
-          presetUsed: preset.name,
+          presetUsed: smartPrompt?.category || 'library',
           promptSource, // 'library' or 'preset'
           promptMatchReason: promptMatchReason || 'unknown',
           newsTypeDetected: newsTypeDetected || '',
@@ -611,7 +598,7 @@ ${promptCatalog}
         if (result && typeof result === 'object') {
           let versions = result.versions || [];
           if (versions.length === 0 && result.main_post) {
-            versions = [{ style: preset.name, title: actualNewsTitle, content: extractSummary(result), hook: '', closing: result.engagement_ending || '', tone: result.emotion || '', target: '' }];
+            versions = [{ style: smartPrompt?.category || 'library', title: actualNewsTitle, content: extractSummary(result), hook: '', closing: result.engagement_ending || '', tone: result.emotion || '', target: '' }];
           }
 
           // Validate output
@@ -620,7 +607,7 @@ ${promptCatalog}
 
           // Save to workflow DB + Master Agent
           if (workflowId) {
-            await saveAnalysis(workflowId, { versions, news_reference: result.news_reference }, preset.id)
+            await saveAnalysis(workflowId, { versions, news_reference: result.news_reference }, smartPrompt?.id || 'library'.id)
               .catch(e => console.error('[Analyze] DB save err:', e.message));
             // Update Master Agent memory
             const agent = new MasterAgent(workflowId);
@@ -660,7 +647,7 @@ ${promptCatalog}
             data: {
               usedPreset: promptSource === 'library'
                 ? { id: 'library', name: `🏛️ ${smartPrompt.promptName || smartPrompt.category}`, source: 'library', viralScore: smartPrompt.viralScore }
-                : { id: preset.id, name: `📦 ${preset.name}`, source: 'preset' },
+                : { id: 'library', name: '📦 Library', source: 'library' },
               usedModel: usedModel || 'gpt-4o',
               versions,
               news_reference: result.news_reference || '',
