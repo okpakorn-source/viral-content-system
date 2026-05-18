@@ -778,8 +778,8 @@ export default function NewContentPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 28 }}>⚡</span>
                 <div style={{ flex: 1, minWidth: 150 }}>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: '#f472b6' }}>Auto Mode</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>วาง URL แล้วรอรับผลลัพธ์ — AI คิดวิเคราะห์แทนทุกขั้นตอน</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: '#f472b6' }}>Auto Mode — ทุก Source</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>วาง URL ข่าว / TikTok / YouTube — AI ดึง → วิเคราะห์ → Blueprint → Research → สร้างทุกอย่างอัตโนมัติ</div>
                 </div>
               </div>
 
@@ -835,7 +835,7 @@ export default function NewContentPage() {
                     <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-light)' }}>{autoProgress}</span>
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                    ⚡ ดึงเนื้อหา → สกัดข่าว → แตกประเด็น → สร้างผลลัพธ์ (ใช้เวลา ~20-40 วินาที)
+                    🧬 Classic + Enhanced | ⚡ Blueprint | 🔍 Research | รองรับ URL / TikTok / YouTube (ใช้เวลา ~25-45 วินาที)
                   </div>
                 </div>
               )}
@@ -882,15 +882,27 @@ export default function NewContentPage() {
                   <input type="url" className="form-input" placeholder={placeholders[sourceType]}
                     value={url} onChange={(e) => setUrl(e.target.value)} style={{ flex: '1 1 200px', minWidth: 0 }} />
                   {sourceType === 'tiktok' ? (
-                    <button type="button" onClick={() => handleTikTokTranscribe('url')} disabled={!url || extracting}
-                      className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
-                      {extracting ? '⏳ กำลังถอดเสียง...' : '🎤 ถอดเสียงจากคลิป'}
-                    </button>
+                    <>
+                      <button type="button" onClick={() => handleTikTokTranscribe('url')} disabled={!url || extracting}
+                        className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
+                        {extracting ? '⏳ กำลังถอดเสียง...' : '🎤 ถอดเสียง (Manual)'}
+                      </button>
+                      <button type="button" onClick={handleAutoMode} disabled={!url || autoMode}
+                        style={{ padding: '9px 16px', border: 'none', borderRadius: 'var(--radius-md)', background: 'linear-gradient(135deg, #f91880, #7c3aed)', color: '#fff', fontWeight: 800, fontSize: 12, cursor: autoMode ? 'wait' : 'pointer', whiteSpace: 'nowrap', boxShadow: '0 4px 12px rgba(249,24,128,0.3)', fontFamily: 'inherit' }}>
+                        {autoMode ? '⏳ กำลัง...' : '⚡ Auto สร้างเลย'}
+                      </button>
+                    </>
                   ) : sourceType === 'youtube' ? (
-                    <button type="button" onClick={() => handleYouTubeTranscribe('url')} disabled={!url || extracting}
-                      className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
-                      {extracting ? '⏳ กำลังดึง...' : '📺 ดึง Transcript'}
-                    </button>
+                    <>
+                      <button type="button" onClick={() => handleYouTubeTranscribe('url')} disabled={!url || extracting}
+                        className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
+                        {extracting ? '⏳ กำลังดึง...' : '📺 ดึง Transcript (Manual)'}
+                      </button>
+                      <button type="button" onClick={handleAutoMode} disabled={!url || autoMode}
+                        style={{ padding: '9px 16px', border: 'none', borderRadius: 'var(--radius-md)', background: 'linear-gradient(135deg, #f91880, #7c3aed)', color: '#fff', fontWeight: 800, fontSize: 12, cursor: autoMode ? 'wait' : 'pointer', whiteSpace: 'nowrap', boxShadow: '0 4px 12px rgba(249,24,128,0.3)', fontFamily: 'inherit' }}>
+                        {autoMode ? '⏳ กำลัง...' : '⚡ Auto สร้างเลย'}
+                      </button>
+                    </>
                   ) : (
                     <button type="button" onClick={handleExtract} disabled={!url || extracting}
                       className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
