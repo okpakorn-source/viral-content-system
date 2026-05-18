@@ -519,7 +519,7 @@ export default function NewContentPage() {
     }
   };
 
-  // === AI หาข้อมูลเพิ่มเติม ===
+  // === AI หาข้อมูลเพิ่มเติม (Serper Real Search) ===
   const handleResearch = async () => {
     if (!newsData?.newsTitle) return;
     setResearching(true);
@@ -527,13 +527,12 @@ export default function NewContentPage() {
     setResearchData(null);
     setSelectedResearch([]);
     try {
-      const res = await fetch('/api/summarize', {
+      const res = await fetch('/api/research-search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          text: newsData.newsBody,
+          newsBody: newsData.newsBody,
           newsTitle: newsData.newsTitle,
-          mode: 'research',
           breakdownData: breakdownData || null,
           workflowId,
         }),
@@ -560,9 +559,13 @@ export default function NewContentPage() {
     if (selectedResearch.length === 0 || !researchData?.items) return;
     const selectedItems = researchData.items.filter((_, i) => selectedResearch.includes(i));
 
-    // สร้างข้อความเพิ่มเติม
-    const additionalText = '\n\n=== ข้อมูลเพิ่มเติมจาก AI Research ===\n' +
-      selectedItems.map(item => `[${item.type}] ${item.title}\n${item.content}`).join('\n\n') +
+    // สร้างข้อความเพิ่มเติม — ใส่ source URL ด้วย
+    const additionalText = '\n\n=== ข้อมูลเพิ่มเติมจาก Google Search (ข้อมูลจริง) ===\n' +
+      selectedItems.map(item =>
+        `[${item.keyword || item.type}] ${item.title}\n${item.content}` +
+        (item.sourceUrl ? `\nแหล่งอ้างอิง: ${item.sourceName || item.sourceUrl} (${item.sourceUrl})` : '') +
+        (item.relevance ? `\nเกี่ยวข้อง: ${item.relevance}` : '')
+      ).join('\n\n') +
       '\n=== จบข้อมูลเพิ่มเติม ===';
 
     // เพิ่มเข้า newsBody ทันที
@@ -573,7 +576,7 @@ export default function NewContentPage() {
     setCopied('research_added');
     setTimeout(() => setCopied(''), 3000);
 
-    console.log(`[Research] ✅ Added ${selectedItems.length} items (${additionalText.length}ch) to newsBody. Total: ${enrichedBody.length}ch`);
+    console.log(`[Research] ✅ Added ${selectedItems.length} items with URLs (${additionalText.length}ch) to newsBody.`);
 
     // เคลียร์ selection + ซ่อน panel + เก็บ items ที่เพิ่มแล้ว
     setAddedResearchItems(prev => [...prev, ...selectedItems]);
@@ -1150,38 +1153,56 @@ export default function NewContentPage() {
               </button>
             </div>
 
-            {/* 🔎 AI หาข้อมูลเพิ่มเติม — Research Agent */}
+            {/* 🔎 AI หาข้อมูลเพิ่มเติม — Research Agent (Serper Real Search) */}
             <div style={{ background: 'linear-gradient(135deg, rgba(14,165,233,0.12), rgba(6,182,212,0.12))', padding: 20, borderRadius: 'var(--radius-md)', border: '2px solid rgba(14,165,233,0.4)', marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 22 }}>🔎</span>
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 800, color: '#38bdf8' }}>AI หาข้อมูลเพิ่มเติม</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>AI จะหาข้อมูลพื้นหลัง สถิติ กรณีคล้าย ความเห็นผู้เชี่ยวชาญ เพื่อเพิ่มความลึกให้เนื้อหา</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>ค้นหาจริงผ่าน Google — สกัด keyword จากเนื้อข่าว → ค้นพร้อมกัน 5-10 คำ → ข้อมูลจริงพร้อม URL แหล่งอ้างอิง</div>
                   </div>
                 </div>
                 <button onClick={handleResearch} className="btn" disabled={researching || loading}
                   style={{ background: 'linear-gradient(135deg, #0ea5e9, #06b6d4)', border: 'none', color: '#fff', fontWeight: 700, fontSize: 12, padding: '10px 20px', borderRadius: 'var(--radius-md)', cursor: (researching || loading) ? 'wait' : 'pointer', whiteSpace: 'nowrap', boxShadow: '0 2px 10px rgba(14,165,233,0.3)' }}>
-                  {researching ? '🔎 กำลังหา...' : '🔎 หาข้อมูลเพิ่ม'}
+                  {researching ? '🔎 กำลังค้นหา...' : '+ หาข้อมูลเพิ่ม'}
                 </button>
               </div>
 
+              {/* แสดง keywords ที่ค้นหา */}
+              {researchData?.keywords?.length > 0 && (
+                <div style={{ marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', alignSelf: 'center' }}>🔑 ค้นหา:</span>
+                  {researchData.keywords.map((kw, i) => (
+                    <span key={i} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: 'rgba(14,165,233,0.15)', color: '#38bdf8', border: '1px solid rgba(14,165,233,0.3)' }}>{kw}</span>
+                  ))}
+                  {researchData.duration && <span style={{ fontSize: 10, color: 'var(--text-muted)', alignSelf: 'center', marginLeft: 4 }}>({researchData.duration}s)</span>}
+                </div>
+              )}
+
               {/* แสดงผลข้อมูลที่หาได้ */}
               {researchData?.items?.length > 0 && (
-                <div style={{ marginTop: 12 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', marginBottom: 8 }}>
-                    📚 พบข้อมูลเพิ่มเติม {researchData.items.length} รายการ — เลือกที่ต้องการแล้วกด &quot;เพิ่มข้อมูล&quot;
+                <div style={{ marginTop: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8' }}>
+                      📚 พบ {researchData.items.length} รายการจากการค้นหาจริง
+                    </div>
+                    <button onClick={() => setSelectedResearch(researchData.items.map((_, i) => i))}
+                      style={{ fontSize: 10, padding: '3px 10px', borderRadius: 8, background: 'rgba(14,165,233,0.2)', border: '1px solid #38bdf8', color: '#38bdf8', cursor: 'pointer' }}>
+                      เลือกทั้งหมด
+                    </button>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {researchData.items.map((item, idx) => (
                       <div key={idx} onClick={() => toggleResearchItem(idx)}
                         style={{
                           padding: '12px 14px', borderRadius: 'var(--radius-sm)',
-                          background: selectedResearch.includes(idx) ? 'rgba(14,165,233,0.15)' : 'var(--bg-secondary)',
+                          background: selectedResearch.includes(idx) ? 'rgba(14,165,233,0.12)' : 'var(--bg-secondary)',
                           border: selectedResearch.includes(idx) ? '2px solid #38bdf8' : '1px solid var(--border)',
                           cursor: 'pointer', transition: 'all 0.2s',
                         }}>
                         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                          {/* Checkbox */}
                           <div style={{
                             width: 20, height: 20, borderRadius: 4, border: '2px solid',
                             borderColor: selectedResearch.includes(idx) ? '#38bdf8' : 'var(--border)',
@@ -1191,26 +1212,40 @@ export default function NewContentPage() {
                           }}>
                             {selectedResearch.includes(idx) && '✓'}
                           </div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                              <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 8,
-                                background: item.type === 'สถิติ' ? 'var(--warning-bg)' :
-                                  item.type === 'กรณีคล้าย' ? 'var(--danger-bg)' :
-                                  item.type === 'ความเห็นผู้เชี่ยวชาญ' ? 'var(--success-bg)' :
-                                  item.type === 'กฎหมาย' ? 'var(--info-bg)' : 'var(--bg-tertiary)',
-                                color: item.type === 'สถิติ' ? 'var(--warning)' :
-                                  item.type === 'กรณีคล้าย' ? 'var(--danger)' :
-                                  item.type === 'ความเห็นผู้เชี่ยวชาญ' ? 'var(--success)' :
-                                  item.type === 'กฎหมาย' ? 'var(--info)' : 'var(--text-muted)',
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            {/* Type badge + keyword + title */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+                              <span style={{
+                                fontSize: 9, padding: '2px 6px', borderRadius: 8, flexShrink: 0,
+                                background: item.type === 'person' ? 'rgba(139,92,246,0.2)' :
+                                  item.type === 'statistic' ? 'rgba(245,158,11,0.2)' :
+                                  item.type === 'law' ? 'rgba(59,130,246,0.2)' :
+                                  item.type === 'event' ? 'rgba(239,68,68,0.2)' :
+                                  item.type === 'medical' ? 'rgba(16,185,129,0.2)' : 'rgba(100,116,139,0.2)',
+                                color: item.type === 'person' ? '#a78bfa' :
+                                  item.type === 'statistic' ? '#fbbf24' :
+                                  item.type === 'law' ? '#60a5fa' :
+                                  item.type === 'event' ? '#f87171' :
+                                  item.type === 'medical' ? '#34d399' : '#94a3b8',
                               }}>
-                                {item.type === 'สถิติ' ? '📊' : item.type === 'กรณีคล้าย' ? '📰' :
-                                 item.type === 'ความเห็นผู้เชี่ยวชาญ' ? '🎓' : item.type === 'กฎหมาย' ? '⚖️' : '📋'} {item.type}
+                                {item.type === 'person' ? '👤' : item.type === 'statistic' ? '📊' :
+                                 item.type === 'law' ? '⚖️' : item.type === 'event' ? '📰' :
+                                 item.type === 'medical' ? '🏥' : '📋'} {item.keyword || item.type}
                               </span>
                               <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{item.title}</span>
                             </div>
-                            <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.8 }}>{item.content}</div>
+                            {/* Content */}
+                            <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: 6 }}>{item.content}</div>
+                            {/* Source URL */}
+                            {item.sourceUrl && (
+                              <a href={item.sourceUrl} target="_blank" rel="noopener noreferrer"
+                                onClick={e => e.stopPropagation()}
+                                style={{ fontSize: 10, color: '#38bdf8', display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none', background: 'rgba(14,165,233,0.1)', padding: '2px 8px', borderRadius: 6, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                🌐 {item.sourceName || item.sourceUrl}
+                              </a>
+                            )}
                             {item.relevance && (
-                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>💡 เกี่ยวข้อง: {item.relevance}</div>
+                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>💡 {item.relevance}</div>
                             )}
                           </div>
                         </div>
@@ -1218,11 +1253,18 @@ export default function NewContentPage() {
                     ))}
                   </div>
 
+                  {/* ไม่พบ */}
+                  {researchData?.notFound?.length > 0 && (
+                    <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(100,116,139,0.1)', borderRadius: 8, fontSize: 10, color: 'var(--text-muted)' }}>
+                      🔍 ไม่พบข้อมูล: {researchData.notFound.join(', ')}
+                    </div>
+                  )}
+
                   {/* ปุ่มเพิ่มข้อมูล */}
                   {selectedResearch.length > 0 && (
                     <button onClick={handleAddResearch} className="btn btn-lg"
                       style={{ width: '100%', marginTop: 12, background: 'linear-gradient(135deg, #0ea5e9, #06b6d4)', border: 'none', color: '#fff', fontWeight: 800, fontSize: 13, padding: '12px 0', borderRadius: 'var(--radius-md)', cursor: 'pointer', boxShadow: '0 3px 12px rgba(14,165,233,0.3)' }}>
-                      {`📥 เพิ่ม ${selectedResearch.length} ข้อมูลเข้าเนื้อข่าว`}
+                      {`📥 เพิ่ม ${selectedResearch.length} ข้อมูล (พร้อม URL) เข้าเนื้อข่าว`}
                     </button>
                   )}
                 </div>
