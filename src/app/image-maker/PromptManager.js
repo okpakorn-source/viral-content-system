@@ -92,7 +92,24 @@ function TemplateBuilder({ newsType, onSaved }) {
   return (
     <div style={{ padding: 14, background: 'var(--bg-primary)', borderRadius: 10, border: '1px solid rgba(168,85,247,0.35)', marginBottom: 16 }}>
       <div style={{ fontSize: 12, fontWeight: 800, color: '#a855f7', marginBottom: 4 }}>🆕 Prompt 4: Custom Template Builder</div>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 12 }}>เขียน prompt → Generate จนถูกใจ → เพิ่มเข้า Template Selector ได้ทันที</div>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 10 }}>สร้าง layout ตัวอย่างด้วย Ideogram → เลือก concept → เพิ่มเข้า Template Selector</div>
+
+      {/* Routing Guide */}
+      <div style={{ padding: '10px 12px', background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.25)', borderRadius: 8, marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#a855f7', marginBottom: 6 }}>📍 Prompt ไหนใส่ที่ไหน?</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 10 }}>
+          <div style={{ padding: '6px 8px', background: 'rgba(129,140,248,0.08)', borderRadius: 6, border: '1px solid rgba(129,140,248,0.2)' }}>
+            <div style={{ color: '#818cf8', fontWeight: 700, marginBottom: 2 }}>🧠 Prompt 1: Logic เลือกรูป</div>
+            <div style={{ color: 'var(--text-secondary)' }}>ใส่: step-by-step, emotional roles, วิธีเลือกรูป</div>
+            <div style={{ color: '#818cf8', marginTop: 2, fontSize: 9 }}>→ ส่งไป GPT-4o Vision (คิดได้)</div>
+          </div>
+          <div style={{ padding: '6px 8px', background: 'rgba(168,85,247,0.08)', borderRadius: 6, border: '1px solid rgba(168,85,247,0.2)' }}>
+            <div style={{ color: '#a855f7', fontWeight: 700, marginBottom: 2 }}>🆕 Prompt 4: Template Builder (ช่องนี้)</div>
+            <div style={{ color: 'var(--text-secondary)' }}>ใส่: อธิบาย ภาพที่อยากได้ เช่น ซ้าย=ใบหน้า, ขวา=เหตุการณ์</div>
+            <div style={{ color: '#a855f7', marginTop: 2, fontSize: 9 }}>→ ส่งไป Ideogram (วาดรูป ไม่ใช่คิด)</div>
+          </div>
+        </div>
+      </div>
 
       {/* Row: name, color, base zones */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 150px', gap: 8, marginBottom: 10 }}>
@@ -110,9 +127,13 @@ function TemplateBuilder({ newsType, onSaved }) {
       </div>
 
       {/* Layout Prompt */}
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#a855f7', marginBottom: 4 }}>
+        🎨 บอก Ideogram ว่าอยากได้ภาพหน้าตาแบบไหน (Visual Description)
+      </div>
       <textarea value={prompt} onChange={e => setPrompt(e.target.value)} rows={4}
-        placeholder="⚠️ Prompt นี้ส่งไป Ideogram (ไม่ใช่ GPT) — อธิบาย ลักษณะภาพ ที่ต้องการ เช่น: dark news thumbnail, large face left side, evidence photo top-right with green border, black-and-white circle portrait bottom-left, headline bar at bottom"
-        style={{ width: '100%', background: '#0a0a14', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, padding: 10, color: 'var(--text-primary)', fontSize: 11, fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box', lineHeight: 1.6, marginBottom: 10 }} />
+        placeholder="เช่น: dark cinematic Thai news thumbnail, large emotional face left side 55%, evidence photo upper-right with green border, black-and-white memorial portrait circle bottom-left, bold white headline text bar at very bottom"
+        style={{ width: '100%', background: '#0a0a14', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, padding: 10, color: 'var(--text-primary)', fontSize: 11, fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box', lineHeight: 1.6, marginBottom: 4 }} />
+      <div style={{ fontSize: 9, color: '#f59e0b', marginBottom: 10 }}>⚠️ ช่องนี้รับแค่ "อธิบายภาพ" — ถ้าต้องการใส่ logic/steps ให้ไปใส่ที่ Prompt 1 ด้านบน</div>
 
       {/* Action buttons */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
