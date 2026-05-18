@@ -93,7 +93,6 @@ export async function POST(request) {
               });
               await agent.saveMemoryToDB().catch(() => {});
             }
-          await logPipeline({ workflowId, step: 'extract', status: 'success', model: usedModel, duration: Date.now() - _pipelineStart, detail: 'Transcript extracted' }).catch(() => {});
             return NextResponse.json({
               success: true,
               data: {
@@ -107,7 +106,6 @@ export async function POST(request) {
           }
         } catch (err) {
           console.error('[Extract-Transcript] ERROR:', err.message);
-        await logPipeline({ workflowId, step: 'extract', status: 'failed', duration: Date.now() - _pipelineStart, error: err.message }).catch(() => {});
         }
 
         // Fallback — ส่ง raw transcript กลับ (ยังดีกว่าเสียหาย)
@@ -144,6 +142,7 @@ export async function POST(request) {
         console.log('[Extract-URL] Extracting via SmartAI...');
         const { result, model: usedModel } = await callSmartAI('extract', { prompt, temperature: 0.2 });
         console.log(`[Extract-URL] Used model: ${usedModel}`);
+          logPipeline({ workflowId, step: 'extract', status: 'success', model: usedModel, duration: Date.now() - _pipelineStart, detail: 'Extracted via ' + usedModel }).catch(() => {});
 
         if (result?.news_body && result.news_body.length >= 20) {
           console.log(`[Extract-URL] OK: "${result.news_title}" (${result.news_body.length}ch)`);
@@ -161,7 +160,6 @@ export async function POST(request) {
             });
             await agent.saveMemoryToDB().catch(() => {});
           }
-          await logPipeline({ workflowId, step: 'extract', status: 'success', model: usedModel, duration: Date.now() - _pipelineStart, promptLength: prompt.length, detail: 'URL: ' + (result.news_title || '').slice(0, 60) }).catch(() => {});
           return NextResponse.json({
             success: true,
             data: {
@@ -175,7 +173,6 @@ export async function POST(request) {
         }
       } catch (err) {
         console.error('[Extract-URL] ERROR:', err.message);
-        await logPipeline({ workflowId, step: 'extract', status: 'failed', duration: Date.now() - _pipelineStart, error: err.message }).catch(() => {});
       }
 
       // Fallback
@@ -255,7 +252,6 @@ export async function POST(request) {
           await agent.saveMemoryToDB().catch(() => {});
         }
 
-        await logPipeline({ workflowId, step: 'breakdown', status: 'success', model: usedModel, duration: Date.now() - _pipelineStart, promptLength: prompt.length, detail: 'core_story: ' + (result.core_story || '').slice(0, 60) }).catch(() => {});
         return NextResponse.json({
           success: true,
           data: bdData,
@@ -268,7 +264,7 @@ export async function POST(request) {
         });
       } catch (err) {
         console.error('[Breakdown] ERROR:', err.message);
-        await logPipeline({ workflowId, step: 'breakdown', status: 'failed', duration: Date.now() - _pipelineStart, error: err.message }).catch(() => {});
+        logPipeline({ workflowId, step: 'breakdown', status: 'failed', duration: Date.now() - _pipelineStart, error: err.message }).catch(() => {});
         return NextResponse.json({ success: false, error: `แตกประเด็นไม่สำเร็จ: ${err.message}` }, { status: 500 });
       }
     }
@@ -648,7 +644,6 @@ ${promptCatalog}
             }
           }
 
-          await logPipeline({ workflowId, step: 'analyze', status: 'success', model: usedModel, duration: Date.now() - _pipelineStart, detail: (versions?.length || 0) + ' versions generated' }).catch(() => {});
           return NextResponse.json({
             success: true,
             data: {
@@ -673,7 +668,7 @@ ${promptCatalog}
         }
       } catch (err) {
         console.error('[Analyze] ERROR:', err.message);
-        await logPipeline({ workflowId, step: 'analyze', status: 'failed', duration: Date.now() - _pipelineStart, error: err.message }).catch(() => {});
+        logPipeline({ workflowId, step: 'analyze', status: 'failed', duration: Date.now() - _pipelineStart, error: err.message }).catch(() => {});
         return NextResponse.json({
           success: false,
           error: `วิเคราะห์ไม่สำเร็จ: ${err.message}`,
@@ -715,6 +710,7 @@ ${promptCatalog}
           result = smartResult.result;
           usedModel = smartResult.model;
           console.log(`[Research] ✅ SmartAI: model=${usedModel}`);
+          logPipeline({ workflowId, step: 'research', status: 'success', model: usedModel, duration: Date.now() - _pipelineStart, detail: 'Research via ' + usedModel }).catch(() => {});
         } catch (err) {
           console.warn(`[Research] SmartAI failed: ${err.message}, fallback GPT-4o`);
           result = await callAI({ prompt: researchPrompt, temperature: 0.5, maxTokens: 6000 });
@@ -723,7 +719,6 @@ ${promptCatalog}
 
         if (result && result.items) {
           console.log(`[Research] ✅ Found ${result.items.length} items`);
-          await logPipeline({ workflowId, step: 'research', status: 'success', model: usedModel, duration: Date.now() - _pipelineStart, detail: (result.items?.length || 0) + ' items found' }).catch(() => {});
           return NextResponse.json({
             success: true,
             data: {
@@ -737,7 +732,6 @@ ${promptCatalog}
         }
       } catch (err) {
         console.error('[Research] ERROR:', err.message);
-        await logPipeline({ workflowId, step: 'research', status: 'failed', duration: Date.now() - _pipelineStart, error: err.message }).catch(() => {});
         return NextResponse.json({ success: false, error: `หาข้อมูลไม่สำเร็จ: ${err.message}` }, { status: 500 });
       }
     }
@@ -917,7 +911,6 @@ ${promptCatalog}
             console.warn('[Mix] Moderation skipped:', modErr.message);
           }
 
-          await logPipeline({ workflowId, step: 'mix', status: 'success', model: usedModel, duration: Date.now() - _pipelineStart, detail: (versions?.length || 0) + ' mix versions' }).catch(() => {});
           return NextResponse.json({
             success: true,
             data: {
@@ -939,7 +932,7 @@ ${promptCatalog}
         }
       } catch (err) {
         console.error('[Mix] ERROR:', err.message);
-        await logPipeline({ workflowId, step: 'mix', status: 'failed', duration: Date.now() - _pipelineStart, error: err.message }).catch(() => {});
+        logPipeline({ workflowId, step: 'mix', status: 'failed', duration: Date.now() - _pipelineStart, error: err.message }).catch(() => {});
         return NextResponse.json({ success: false, error: `ผสมมุมข่าวไม่สำเร็จ: ${err.message}` }, { status: 500 });
       }
     }
@@ -988,7 +981,7 @@ ${promptCatalog}
     });
   } catch (error) {
     console.error('[Summarize] Fatal:', error.message);
-    await logPipeline({ step: mode || 'unknown', status: 'failed', duration: Date.now() - (_pipelineStart || Date.now()), error: error.message }).catch(() => {});
+    logPipeline({ step: mode || 'unknown', status: 'failed', duration: Date.now() - (_pipelineStart || Date.now()), error: error.message }).catch(() => {});
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
