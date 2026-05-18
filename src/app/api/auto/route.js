@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { logPipeline } from '@/lib/pipelineLogger';
 
 /**
  * Auto Pipeline API
@@ -7,13 +8,17 @@ import { NextResponse } from 'next/server';
  */
 export async function POST(request) {
   const startTime = Date.now();
+  let _autoWorkflowId = null;
 
   try {
-    const { url, sourceType: forceType, preset, contentLength } = await request.json();
+    const { url, sourceType: forceType, preset, contentLength, workflowId } = await request.json();
+    _autoWorkflowId = workflowId || ('auto_' + Date.now());
 
     if (!url || url.length < 5) {
       return NextResponse.json({ success: false, error: 'กรุณาใส่ URL' }, { status: 400 });
     }
+
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'auto-pipeline', status: 'started', detail: 'URL: ' + url.slice(0, 80) }).catch(() => {});
 
     const origin = new URL(request.url).origin;
     const baseUrl = origin;
@@ -94,6 +99,7 @@ export async function POST(request) {
     }
     const newsData = extractRes.data;
     addLog('Step2', `✅ "${newsData.newsTitle?.slice(0, 40)}..." (${newsData.newsBody.length} ตัวอักษร, ${((Date.now() - step2Start) / 1000).toFixed(1)}s)`);
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'extract', status: 'success', duration: Date.now() - step2Start, detail: (newsData.newsTitle || '').slice(0, 60) }).catch(() => {});
 
     // === STEP 3: แตกประเด็น (Breakdown) ===
     const step3Start = Date.now();
@@ -109,6 +115,7 @@ export async function POST(request) {
     }
     const breakdownData = breakRes.data;
     addLog('Step3', `✅ ${breakdownData.key_points?.length || 0} ประเด็น, ${breakdownData.possible_angles?.length || 0} มุมข่าว (${((Date.now() - step3Start) / 1000).toFixed(1)}s)`);
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'breakdown', status: 'success', duration: Date.now() - step3Start, detail: (breakdownData.key_points?.length || 0) + ' key points, ' + (breakdownData.possible_angles?.length || 0) + ' angles' }).catch(() => {});
 
     // === STEP 4: สร้างเนื้อหา (Analyze/Generate) ===
     const step4Start = Date.now();
@@ -128,6 +135,7 @@ export async function POST(request) {
     }
     const analysisResult = analyzeRes.data;
     addLog('Step4', `✅ สร้าง ${analysisResult.versions?.length || 0} เวอร์ชัน (${((Date.now() - step4Start) / 1000).toFixed(1)}s)`);
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'analyze', status: 'success', duration: Date.now() - step4Start, detail: (analysisResult.versions?.length || 0) + ' versions, preset=' + selectedPreset }).catch(() => {});
 
     // === Prompt Library info ===
     const usedPreset = analysisResult.usedPreset || null;
@@ -146,6 +154,7 @@ export async function POST(request) {
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
     addLog('Done', `✅ เสร็จสมบูรณ์ ${totalTime}s`);
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'auto-pipeline', status: 'success', duration: Date.now() - startTime, detail: 'Total: ' + totalTime + 's, preset=' + selectedPreset }).catch(() => {});
 
     return NextResponse.json({
       success: true,
@@ -177,6 +186,7 @@ export async function POST(request) {
 
   } catch (error) {
     console.error('[AutoPipeline] ERROR:', error.message);
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'auto-pipeline', status: 'failed', duration: Date.now() - startTime, error: error.message }).catch(() => {});
     return NextResponse.json({
       success: false,
       error: error.message,
