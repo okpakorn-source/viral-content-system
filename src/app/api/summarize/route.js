@@ -252,6 +252,7 @@ export async function POST(request) {
           await agent.saveMemoryToDB().catch(() => {});
         }
 
+        logPipeline({ workflowId, step: 'breakdown', status: 'success', model: usedModel, duration: Date.now() - _pipelineStart, detail: (result.core_story || '').slice(0, 60) }).catch(() => {});
         return NextResponse.json({
           success: true,
           data: bdData,
@@ -644,6 +645,7 @@ ${promptCatalog}
             }
           }
 
+          logPipeline({ workflowId, step: 'analyze', status: 'success', model: usedModel, duration: Date.now() - _pipelineStart, detail: (versions?.length || 0) + ' versions' }).catch(() => {});
           return NextResponse.json({
             success: true,
             data: {
@@ -911,6 +913,7 @@ ${promptCatalog}
             console.warn('[Mix] Moderation skipped:', modErr.message);
           }
 
+          logPipeline({ workflowId, step: 'mix', status: 'success', model: usedModel, duration: Date.now() - _pipelineStart, detail: (versions?.length || 0) + ' mix versions' }).catch(() => {});
           return NextResponse.json({
             success: true,
             data: {

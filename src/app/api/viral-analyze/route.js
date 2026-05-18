@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
+import { logPipeline } from '@/lib/pipelineLogger';
 
 // ===== AI Viral Content DNA Analyzer + Prompt Generator =====
 // Deep DNA Analysis Framework v2.0 — 12 มิติ
@@ -11,6 +12,9 @@ export async function POST(request) {
     if (!text || text.length < 10) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
     }
+
+    const _vaStart = Date.now();
+    logPipeline({ step: mode || 'viral-analyze', status: 'started', detail: 'Input: ' + text.length + 'ch, mode=' + mode }).catch(() => {});
 
     // ===== MODE: viral-analyze — วิเคราะห์ DNA 12 มิติ =====
     if (mode === 'viral-analyze') {
@@ -202,6 +206,7 @@ ${text.slice(0, 8000)}
       }
 
       console.log(`[Viral-Analyze] Done: dna_type=${analysis.dna_type}, score=${analysis.viral_scores?.overall || analysis.viral_score}`);
+      logPipeline({ step: 'viral-analyze', status: 'success', model: 'gpt-4o', duration: Date.now() - _vaStart, detail: 'dna_type: ' + (analysis.dna_type || '') }).catch(() => {});
       return NextResponse.json({ success: true, analysis });
     }
 
@@ -296,6 +301,7 @@ ${text ? '=== ตัวอย่างเนื้อหาต้นฉบับ
       }
 
       console.log(`[Generate-Prompt] Done: name=${promptData.prompt_name}`);
+      logPipeline({ step: 'generate-prompt', status: 'success', model: 'gpt-4o', duration: Date.now() - _vaStart, detail: 'name: ' + (promptData.prompt_name || '') }).catch(() => {});
       return NextResponse.json({ success: true, promptData });
     }
 
@@ -303,6 +309,7 @@ ${text ? '=== ตัวอย่างเนื้อหาต้นฉบับ
 
   } catch (error) {
     console.error('[Viral-Analyze] Fatal:', error.message);
+    logPipeline({ step: mode || 'viral-analyze', status: 'failed', duration: Date.now() - (_vaStart || Date.now()), error: error.message }).catch(() => {});
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
