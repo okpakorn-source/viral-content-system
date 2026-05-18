@@ -1,10 +1,11 @@
-﻿import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
 import { MasterAgent } from '@/lib/agents/masterAgent';
 import { callSmartAI, getAvailableModels } from '@/lib/ai/aiRouter';
 import { moderateVersions } from '@/lib/ai/moderationAgent';
+import { createStore } from '@/lib/persistStore';
 
 /**
  * ดึง summary จาก AI response ไม่ว่า key จะชื่ออะไร
@@ -290,15 +291,10 @@ export async function POST(request) {
       let promptMatchReason = '';
       let newsTypeDetected = '';
       try {
-        const { readFile: rf } = await import('fs/promises');
-        const { join: jn } = await import('path');
-        const IS_V = !!process.env.VERCEL;
-        const libPath = jn(IS_V ? '/tmp' : process.cwd() + '/data', 'prompt-library.json');
+        const promptStore = createStore('prompt-library');
         let promptLib = [];
-        try { promptLib = JSON.parse(await rf(libPath, 'utf-8')); } catch {
-          try { promptLib = JSON.parse(await rf(jn(process.cwd(), 'data', 'prompt-library.json'), 'utf-8')); } catch {}
-        }
-        console.log(`[Analyze] 🧠 Prompt Library loaded: ${promptLib.length} prompts`);
+        try { promptLib = await promptStore.getAll(); } catch (e) { console.warn('[Analyze] Prompt library load:', e.message); }
+        console.log(`[Analyze] 🧠 Prompt Library loaded: ${promptLib.length} prompts (via Supabase)`);
 
         const validPrompts = promptLib.filter(p => p.promptText);
         if (validPrompts.length > 0) {
@@ -564,7 +560,7 @@ ${promptCatalog}
 
       try {
         // ใช้ Smart Router: Claude สำหรับเขียน, fallback GPT-4o
-        const { result, model: usedModel } = await callSmartAI('write', { prompt: multiPrompt, temperature: 0.7, maxTokens: 16000 });
+        const { result, model: usedModel } = await callSmartAI('write', { prompt: multiPrompt, temperature: 0.7, maxTokens: 10000 });
         console.log(`[Analyze] Used model: ${usedModel}`);
         console.log('[Analyze] AI keys:', Object.keys(result || {}));
         console.log('[Analyze] versions count:', result?.versions?.length || 0);
@@ -629,23 +625,13 @@ ${promptCatalog}
           // === 🏛️ Auto Usage Tracking — นับการใช้งาน Prompt จากหอสมุด ===
           if (promptSource === 'library' && smartPrompt?.id) {
             try {
-              const { readFile: rf2, writeFile: wf2, mkdir: mk2 } = await import('fs/promises');
-              const { join: jn2 } = await import('path');
-              const IS_V2 = !!process.env.VERCEL;
-              const libPath2 = jn2(IS_V2 ? '/tmp' : process.cwd() + '/data', 'prompt-library.json');
-              let lib2 = [];
-              try { lib2 = JSON.parse(await rf2(libPath2, 'utf-8')); } catch {
-                try { lib2 = JSON.parse(await rf2(jn2(process.cwd(), 'data', 'prompt-library.json'), 'utf-8')); } catch {}
-              }
-              const idx = lib2.findIndex(p => p.id === smartPrompt.id);
-              if (idx >= 0) {
-                lib2[idx].usageCount = (lib2[idx].usageCount || 0) + 1;
-                lib2[idx].lastUsedAt = new Date().toISOString();
-                await mk2(jn2(IS_V2 ? '/tmp' : process.cwd(), 'data'), { recursive: true }).catch(() => {});
-                await wf2(libPath2, JSON.stringify(lib2, null, 2), 'utf-8');
-                try { await wf2(jn2(process.cwd(), 'data', 'prompt-library.json'), JSON.stringify(lib2, null, 2), 'utf-8'); } catch {}
-                console.log(`[Analyze] 🏛️ Usage tracked: "${smartPrompt.promptName}" → ${lib2[idx].usageCount} uses`);
-              }
+              const trackStore = createStore('prompt-library');
+              const updated = await trackStore.update(smartPrompt.id, (existing) => {
+                existing.usageCount = (existing.usageCount || 0) + 1;
+                existing.lastUsedAt = new Date().toISOString();
+                return existing;
+              });
+              console.log(`[Analyze] 🏛️ Usage tracked via Supabase: "${smartPrompt.promptName}" → ${updated.usageCount} uses`);
             } catch (trackErr) {
               console.log('[Analyze] Usage tracking skipped:', trackErr.message);
             }
@@ -835,18 +821,9 @@ ${actualNewsBody.slice(0, 3000)}
         try {
           const detectedCategory = actualBreakdown.content_type || actualBreakdown.category || '';
           if (detectedCategory) {
-            const { readFile } = await import('fs/promises');
-            const { join } = await import('path');
-            const IS_VERCEL = !!process.env.VERCEL;
-            const promptLibPath = join(IS_VERCEL ? '/tmp' : process.cwd() + '/data', 'prompt-library.json');
+            const mixPromptStore = createStore('prompt-library');
             let promptLib = [];
-            try {
-              promptLib = JSON.parse(await readFile(promptLibPath, 'utf-8'));
-            } catch {
-              try {
-                promptLib = JSON.parse(await readFile(join(process.cwd(), 'data', 'prompt-library.json'), 'utf-8'));
-              } catch {}
-            }
+            try { promptLib = await mixPromptStore.getAll(); } catch (e) { console.warn('[Mix] Prompt library load:', e.message); }
 
             if (promptLib.length > 0) {
               // หาที่ category ตรง → sort by viralScore
