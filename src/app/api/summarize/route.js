@@ -261,7 +261,7 @@ export async function POST(request) {
           await agent.saveMemoryToDB().catch(() => {});
         }
 
-        logPipeline({ workflowId, step: 'breakdown', status: 'success', model: usedModel, duration: Date.now() - _pipelineStart, detail: (result.core_story || '').slice(0, 60) }).catch(() => {});
+        logPipeline({ workflowId, step: 'breakdown', status: 'success', model: 'gpt-4o', duration: Date.now() - _pipelineStart, detail: (result.core_story || '').slice(0, 60) }).catch(() => {});
         return NextResponse.json({
           success: true,
           data: bdData,
