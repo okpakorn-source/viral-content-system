@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import { detectTemplate, TEMPLATES } from '@/lib/imageTemplates';
+import { detectTemplate, TEMPLATES } from '@/lib/imageTemplates.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
- * Image Analyzer — GPT-4o Vision (Direct OpenAI call, ไม่ผ่าน callAI wrapper)
- * รับรูป 2-5 รูป + ข้อมูลข่าว → layout JSON
+ * Image Analyzer — GPT-4o Vision
+ * customPrompt (Prompt 1) = PRIMARY instruction — ใช้แทนระบบ default ทั้งหมด
+ * ผลลัพธ์ = JSON assignments สำหรับ Sharp compositor เท่านั้น
+ * ไม่เชื่อมกับ content system
  */
 export async function POST(request) {
   try {
@@ -19,43 +21,52 @@ export async function POST(request) {
 
     const suggestedTemplate = detectTemplate(newsType || '', newsTitle || '');
     const tmpl = TEMPLATES[suggestedTemplate];
-
     const availableZones = tmpl.layout.zones
       .filter(z => z.role !== 'background')
       .map(z => `"${z.id}" (role: ${z.role})`)
       .join(', ');
+    const maxIdx = images.length - 1;
 
-    // Build content array: text + images
-    const customNote = customPrompt
-      ? `\n\nคำแนะนำเพิ่มเติมจากผู้ใช้: ${customPrompt}`
-      : '';
-    const contentParts = [
-      {
-        type: 'text',
-        text: `คุณคือผู้เชี่ยวชาญออกแบบปกข่าวไทย${customNote}
+    // ── System instruction ─────────────────────────────────────
+    // ถ้ามี customPrompt → ใช้เป็น PRIMARY SYSTEM PROMPT (ไม่ใช่แค่ hint)
+    // ถ้าไม่มี → ใช้ default
+    const systemInstruction = customPrompt?.trim()
+      ? customPrompt.trim()
+      : `You are an expert Thai news thumbnail layout editor.
+Analyze each image and assign it to the best matching zone based on content and visual quality.
+Prioritize: clear face → MAIN, event/evidence → EVENT, context/environment → CONTEXT, formal portrait → MEMORIAL.`;
 
-วิเคราะห์รูป ${images.length} รูปต่อไปนี้สำหรับข่าว:
-หัวข้อ: "${newsTitle || 'ไม่ระบุ'}"
-ประเภทข่าว: ${newsType || 'ไม่ระบุ'}
+    // ── Full text prompt (ส่งต่อให้ GPT-4o) ───────────────────
+    const analysisPrompt = `${systemInstruction}
 
-Template แนะนำ: "${suggestedTemplate}" (${tmpl.name})
-Zones ใน template: ${availableZones}
+---
+NEWS DATA:
+Title: "${newsTitle || 'Not specified'}"
+Type: ${newsType || 'Not specified'}
+Images count: ${images.length} (indexed 0-${maxIdx})
 
-กฎ:
-- assignments.bg, assignments.main ต้องมีเสมอ (index 0-${images.length - 1})
-- ถ้ารูปน้อย ให้ใช้ index ซ้ำได้
-- ถ้าไม่มีรูป memorial ให้ละ key นั้น
+TEMPLATE: "${suggestedTemplate}" (${tmpl.name})
+Available zones to assign: ${availableZones}
 
-ตอบเป็น JSON เท่านั้น (ห้ามมีข้อความอื่น):
+---
+STRICT OUTPUT RULES:
+- You MUST return ONLY valid JSON, no other text
+- assignments.bg and assignments.main are REQUIRED (index 0-${maxIdx})
+- Use duplicate indexes if fewer images than zones
+- Only include "memorial" key if a clear formal/memorial portrait exists
+
+RETURN EXACTLY THIS JSON FORMAT:
 {
   "template": "${suggestedTemplate}",
-  "assignments": {"bg": 0, "main": 0, "context": 1, "event": 2, "secondary": 1, "memorial": 3},
+  "assignments": {"bg": 0, "main": 0, "context": 1, "event": 2, "secondary": 1},
   "hasMemorial": false,
   "confidence": 85,
-  "reasoning": "เหตุผลสั้นๆ ภาษาไทย"
-}`,
-      },
-      ...images.slice(0, 5).map(src => ({
+  "reasoning": "short Thai explanation of choices"
+}`;
+
+    const contentParts = [
+      { type: 'text', text: analysisPrompt },
+      ...images.slice(0, 5).map((src, i) => ({
         type: 'image_url',
         image_url: {
           url: src.startsWith('data:') ? src : `data:image/jpeg;base64,${src}`,
@@ -67,8 +78,8 @@ Zones ใน template: ${availableZones}
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: contentParts }],
-      temperature: 0.2,
-      max_tokens: 500,
+      temperature: 0.1,
+      max_tokens: 600,
       response_format: { type: 'json_object' },
     });
 
@@ -77,22 +88,19 @@ Zones ใน template: ${availableZones}
     try {
       result = JSON.parse(raw);
     } catch {
-      throw new Error('AI ตอบกลับ JSON ไม่ถูกต้อง: ' + raw.slice(0, 100));
+      throw new Error('AI ตอบ JSON ไม่ถูกต้อง: ' + raw.slice(0, 100));
     }
 
     // Validate & sanitize
     const finalTemplate = TEMPLATES[result.template] ? result.template : suggestedTemplate;
     const assignments = result.assignments || {};
-    // Ensure bg and main exist
     if (assignments.bg === undefined) assignments.bg = 0;
     if (assignments.main === undefined) assignments.main = 0;
-    // Clamp all indexes to valid range
-    const maxIdx = images.length - 1;
     for (const key of Object.keys(assignments)) {
       assignments[key] = Math.min(Math.max(0, parseInt(assignments[key]) || 0), maxIdx);
     }
 
-    console.log('[ImageAnalyze] ✅ Template:', finalTemplate, '| Confidence:', result.confidence);
+    console.log('[ImageAnalyze] ✅', finalTemplate, '| Confidence:', result.confidence, '| CustomPrompt:', customPrompt ? 'YES' : 'NO');
 
     return NextResponse.json({
       success: true,
@@ -103,6 +111,7 @@ Zones ใน template: ${availableZones}
         hasMemorial: Boolean(result.hasMemorial),
         confidence: result.confidence || 80,
         reasoning: result.reasoning || '',
+        usedCustomPrompt: Boolean(customPrompt?.trim()),
       },
     });
 

@@ -2,15 +2,25 @@
 import { useState } from 'react';
 
 export const DEFAULT_PROMPTS = {
-  imageSelect: `วิเคราะห์รูปแต่ละรูปตามหลักการนี้เท่านั้น:
+  // Prompt 1 → ส่งไป GPT-4o Vision เป็น PRIMARY instruction
+  imageSelect: `You are a senior Thai viral news cover editor who controls viewer attention using emotional image hierarchy.
 
-1. MAIN ZONE — ใบหน้าคมชัด / หันตรง / แสดงอารมณ์ชัด / แสง & contrast ดี
-2. MEMORIAL ZONE — รูป ID card / รูปเดี่ยวพื้นหลังเรียบ → กำหนดเป็น memorial (ขาวดำ)
-3. EVENT ZONE — เหตุการณ์โดยตรง: รถเสียหาย / ที่เกิดเหตุ / ควัน / ไฟ
-4. CONTEXT ZONE — บริบท: โรงพยาบาล / เจ้าหน้าที่ / ครอบครัว / สถานที่
-5. ถ้ารูปไม่พอ — ใช้รูปซ้ำได้ โดย main ต้องดีที่สุดเสมอ
+Analyze ALL uploaded images and classify each into emotional roles:
 
-ห้ามเดาสุ่ม ต้องมีเหตุผลจาก visual element จริงๆ ห้ามทำนอกเหนือคำสั่งนี้`,
+1. MAIN EMOTIONAL ANCHOR — strongest human face, highest emotional pull, close-up portrait → assign to "main" zone
+2. EVIDENCE/EVENT IMAGE — accident scene, vehicle damage, hospital exterior, police, crime scene, evidence → assign to "event" zone  
+3. CONTEXT/LIFE STORY — hospital interior, family moment, colleagues, work environment, daily life → assign to "context" zone
+4. EMOTIONAL MEMORY — graduation, childhood, "before tragedy" feeling, nostalgic image → assign to "secondary" zone
+5. MEMORIAL/SYMBOLIC — black-and-white portrait, formal/ID photo, plain background portrait → assign to "memorial" zone (set hasMemorial: true)
+
+Priority rules:
+- Image with the STRONGEST emotional face MUST be "main"
+- Never assign landmark/building as "main" unless no human face exists
+- If unsure, pick the image that would make a viewer STOP scrolling
+- Do NOT randomize — every assignment must have a reason from visual evidence
+
+ห้ามเดาสุ่ม ต้องมีเหตุผลจาก visual element จริงๆ ห้ามทำนอกเหนือ roles ที่กำหนด`,
+
 
   layoutDNA: `สร้าง layout concept สำหรับปกข่าวไทย 1:1 (1080x1080px)
 - ซ้ายบน 55%: ใบหน้าหลัก soft edge ละลายไปทางขวา
@@ -101,7 +111,7 @@ function TemplateBuilder({ newsType, onSaved }) {
 
       {/* Layout Prompt */}
       <textarea value={prompt} onChange={e => setPrompt(e.target.value)} rows={4}
-        placeholder="อธิบาย layout ที่ต้องการ เช่น: ใบหน้าหลักขนาดใหญ่ตรงกลาง พร้อมรูปเหตุการณ์ขวา มีวงกลมขาวดำล่างซ้าย แถบข้อความด้านล่าง..."
+        placeholder="⚠️ Prompt นี้ส่งไป Ideogram (ไม่ใช่ GPT) — อธิบาย ลักษณะภาพ ที่ต้องการ เช่น: dark news thumbnail, large face left side, evidence photo top-right with green border, black-and-white circle portrait bottom-left, headline bar at bottom"
         style={{ width: '100%', background: '#0a0a14', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, padding: 10, color: 'var(--text-primary)', fontSize: 11, fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box', lineHeight: 1.6, marginBottom: 10 }} />
 
       {/* Action buttons */}
