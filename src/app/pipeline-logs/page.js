@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 const STATUS_CONFIG = {
   started: { icon: '🔄', color: '#3b82f6', bg: '#1e3a5f', label: 'กำลังทำงาน' },
@@ -32,6 +32,8 @@ export default function PipelineLogsPage() {
   const [expandedLog, setExpandedLog] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
 
+  const fetchLogsRef = useRef(null);
+
   const fetchLogs = useCallback(async () => {
     try {
       const params = new URLSearchParams();
@@ -55,12 +57,20 @@ export default function PipelineLogsPage() {
     }
   }, [filter]);
 
+  // Keep ref always pointing to latest fetchLogs
+  useEffect(() => { fetchLogsRef.current = fetchLogs; }, [fetchLogs]);
+
+  // Initial fetch
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
+
+  // Auto-refresh: depends only on autoRefresh flag, calls via ref to avoid stale closure
   useEffect(() => {
     if (!autoRefresh) return;
-    const interval = setInterval(fetchLogs, 4000);
+    const interval = setInterval(() => {
+      if (fetchLogsRef.current) fetchLogsRef.current();
+    }, 4000);
     return () => clearInterval(interval);
-  }, [autoRefresh, fetchLogs]);
+  }, [autoRefresh]);
 
   const fmt = (iso) => {
     if (!iso) return '-';
