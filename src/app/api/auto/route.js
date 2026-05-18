@@ -171,7 +171,7 @@ export async function POST(request) {
         breakdownData,
         analysisResult,
         sourceType: detectedType,
-        preset: selectedPreset,
+        preset: 'library',
         contentLength: selectedLength,
         totalTimeSeconds: parseFloat(totalTime),
         usedPromptInfo: usedPreset ? {
