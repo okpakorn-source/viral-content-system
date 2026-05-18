@@ -22,8 +22,6 @@ export default function NewContentPage() {
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
   const [customPrompt, setCustomPrompt] = useState('');
-  const [analysisPresets, setAnalysisPresets] = useState([]);
-  const [selectedPreset, setSelectedPreset] = useState('viral_fb');
 
   // Flow state
   const [step, setStep] = useState('input'); // input → extracted → analyzed
@@ -84,7 +82,6 @@ export default function NewContentPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url,
-          preset: selectedPreset,
           contentLength,
         }),
       });
@@ -149,7 +146,6 @@ export default function NewContentPage() {
     setSendingReview(index);
     try {
       const angles = breakdownData?.possible_angles?.map(a => a.angle_name) || [];
-      const presetObj = analysisPresets.find(p => p.id === selectedPreset);
       const res = await fetch('/api/review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -157,8 +153,8 @@ export default function NewContentPage() {
           title: version.title || newsData?.newsTitle || 'ไม่มีหัวข้อ',
           content: [version.hook ? `🪝 ${version.hook}` : '', version.title || '', version.content || '', version.closing ? `💬 ${version.closing}` : ''].filter(Boolean).join('\n\n'),
           sourceType,
-          preset: selectedPreset,
-          presetLabel: presetObj?.name || selectedPreset,
+          preset: analysisResult?.usedPreset?.id || 'library',
+          presetLabel: analysisResult?.usedPreset?.name || '🏛️ Library',
           contentLength,
           wordCount: version.content?.split(/\s+/).length || 0,
           angles,
@@ -416,19 +412,16 @@ export default function NewContentPage() {
     }
   };
 
-  // === STEP 4: วิเคราะห์ด้วย Preset — รวมข้อมูลทุกอย่างในหน้าส่ง AI (Mega Context) ===
-  const handleAnalyze = async (presetId) => {
-    const usePreset = presetId || selectedPreset;
+  // === STEP 4: AI วิเคราะห์แนวข่าว → เลือก Prompt จากหอสมุด → สร้างเนื้อหา ===
+  const handleAnalyze = async () => {
     if (!newsData?.newsBody) return;
     setLoading(true);
     setError('');
-    setSelectedPreset(usePreset);
-    const presetLabel = analysisPresets.find(p => p.id === usePreset)?.name || usePreset;
     startWorkflow('สร้างผลลัพธ์', [
-      { id: 'lib_check', label: 'ตรวจ Prompt Library' },
-      { id: 'ai_analyze', label: `สร้างเนื้อหา (${presetLabel})` },
+      { id: 'lib_check', label: '🧠 วิเคราะห์แนวข่าว → ค้นหอสมุด' },
+      { id: 'ai_analyze', label: 'สร้างเนื้อหา (AI เลือก Prompt)' },
     ]);
-    wfStart('lib_check', { detail: 'กำลังค้น Prompt จากหอสมุดไวรัล...' });
+    wfStart('lib_check', { detail: '🧠 AI กำลังวิเคราะห์แนวข่าว → เทียบกับ Prompt Library...' });
     try {
       const res = await fetch('/api/summarize', {
         method: 'POST',
@@ -438,7 +431,6 @@ export default function NewContentPage() {
           newsTitle: newsData.newsTitle,
           sourceType,
           customPrompt,
-          analysisPresetId: usePreset,
           mode: 'analyze',
           breakdownData: breakdownData || null,
           researchData: researchData || (addedResearchItems.length > 0 ? { items: addedResearchItems } : null),
