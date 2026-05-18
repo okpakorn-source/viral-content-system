@@ -1,181 +1,250 @@
 /**
- * Persistent JSON Store — ทำงานบน Vercel Serverless
+ * Persistent Store — ใช้ Supabase (PostgreSQL) เป็นฐานข้อมูลหลัก
  * 
- * ปัญหาเดิม: Vercel ใช้ /tmp ซึ่งหายทุก deploy + race condition ทำข้อมูลทับกัน
+ * Table: store_items
+ *   - id (text, PK)
+ *   - store_name (text) — ชื่อ store เช่น 'viral-library', 'prompt-library'
+ *   - data (jsonb) — ข้อมูลทั้งหมดของ item
+ *   - created_at (timestamptz)
+ *   - updated_at (timestamptz)
  * 
- * วิธีแก้:
- * 1. ใช้ global in-memory cache (อยู่ตราบ function instance warm)
- * 2. เขียน /tmp เป็น backup (ใช้ lock ป้องกัน race condition)
- * 3. Bundled file (data/) เป็น fallback สุดท้าย
- * 4. ทุกการเขียนจะ sync ทั้ง memory + file
+ * ถ้าไม่มี Supabase → fallback ไป file storage (local dev)
  */
 
+import { getSupabase, isSupabaseReady } from '@/lib/supabase';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 
-// === Global In-Memory Cache ===
-// ใน Node.js module scope → persist ข้าม request ตราบ instance ยังอยู่
-const _cache = new Map();
+const TABLE = 'store_items';
+
+// === File fallback (local dev only) ===
+const _memCache = new Map();
 const _locks = new Map();
 
-/**
- * สร้าง JSON store ที่ persist ได้
- * @param {string} name - ชื่อ store (เช่น 'viral-library', 'prompt-library')
- * @returns {object} store API
- */
-export function createStore(name) {
-  const IS_VERCEL = !!process.env.VERCEL;
-  const DATA_DIR = IS_VERCEL ? '/tmp' : join(process.cwd(), 'data');
-  const LIVE_FILE = join(DATA_DIR, `${name}.json`);
-  const BUNDLED_FILE = join(process.cwd(), 'data', `${name}.json`);
+async function _fileFallbackLoad(name) {
+  if (_memCache.has(name)) return _memCache.get(name);
   
-  // === Internal: อ่านจาก cache → file → bundled → empty ===
-  async function _load() {
-    // 1. จาก memory cache (เร็วที่สุด)
-    if (_cache.has(name)) {
-      return _cache.get(name);
-    }
-    
-    // 2. จาก /tmp file
-    try {
-      const data = JSON.parse(await readFile(LIVE_FILE, 'utf-8'));
-      _cache.set(name, data);
-      console.log(`[Store:${name}] ✅ Loaded from file: ${data.length} items`);
-      return data;
-    } catch {}
-    
-    // 3. จาก bundled file (data/ folder ใน repo)
-    try {
-      if (existsSync(BUNDLED_FILE)) {
-        const data = JSON.parse(await readFile(BUNDLED_FILE, 'utf-8'));
-        _cache.set(name, data);
-        // Copy to /tmp for future reads
-        try {
-          await mkdir(DATA_DIR, { recursive: true });
-          await writeFile(LIVE_FILE, JSON.stringify(data, null, 2), 'utf-8');
-        } catch {}
-        console.log(`[Store:${name}] ✅ Loaded from bundled: ${data.length} items`);
-        return data;
-      }
-    } catch {}
-    
-    // 4. Empty
-    console.log(`[Store:${name}] ⚠️ No data found — starting empty`);
-    _cache.set(name, []);
+  const filePath = join(process.cwd(), 'data', `${name}.json`);
+  try {
+    const data = JSON.parse(await readFile(filePath, 'utf-8'));
+    _memCache.set(name, data);
+    return data;
+  } catch {
+    _memCache.set(name, []);
     return [];
   }
+}
+
+async function _fileFallbackSave(name, items) {
+  _memCache.set(name, items);
+  try {
+    const dir = join(process.cwd(), 'data');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${name}.json`), JSON.stringify(items, null, 2), 'utf-8');
+  } catch (e) {
+    console.error(`[Store:${name}] File write failed:`, e.message);
+  }
+}
+
+async function _withLock(name, fn) {
+  let retries = 0;
+  while (_locks.get(name)) {
+    if (retries >= 30) throw new Error(`Lock timeout: ${name}`);
+    await new Promise(r => setTimeout(r, 50));
+    retries++;
+  }
+  _locks.set(name, true);
+  try { return await fn(); }
+  finally { _locks.delete(name); }
+}
+
+// === Main Store Factory ===
+export function createStore(name) {
   
-  // === Internal: เขียนลง cache + file ===
-  async function _save(items) {
-    // 1. อัพเดท memory cache ทันที (สำคัญที่สุด!)
-    _cache.set(name, items);
-    
-    // 2. เขียนลง /tmp file (backup)
-    try {
-      await mkdir(DATA_DIR, { recursive: true });
-      await writeFile(LIVE_FILE, JSON.stringify(items, null, 2), 'utf-8');
-    } catch (e) {
-      console.error(`[Store:${name}] ⚠️ File write failed: ${e.message}`);
-    }
-    
-    // 3. เขียนลง bundled (local dev only — Vercel read-only)
-    if (!IS_VERCEL) {
-      try {
-        await mkdir(join(process.cwd(), 'data'), { recursive: true });
-        await writeFile(BUNDLED_FILE, JSON.stringify(items, null, 2), 'utf-8');
-      } catch {}
-    }
+  // ===== SUPABASE MODE =====
+  if (isSupabaseReady()) {
+    return {
+      async getAll() {
+        const sb = getSupabase();
+        const { data, error } = await sb
+          .from(TABLE)
+          .select('data')
+          .eq('store_name', name)
+          .order('created_at', { ascending: false });
+        
+        if (error) {
+          console.error(`[Store:${name}] GET error:`, error.message);
+          throw new Error(error.message);
+        }
+        const items = (data || []).map(row => row.data);
+        console.log(`[Store:${name}] ✅ Loaded ${items.length} items from Supabase`);
+        return items;
+      },
+      
+      async add(item) {
+        const sb = getSupabase();
+        const { error } = await sb.from(TABLE).insert({
+          id: item.id,
+          store_name: name,
+          data: item,
+          created_at: item.createdAt || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+        if (error) {
+          console.error(`[Store:${name}] ADD error:`, error.message);
+          throw new Error(`บันทึกไม่สำเร็จ: ${error.message}`);
+        }
+        console.log(`[Store:${name}] ✅ Added: ${item.id}`);
+        return item;
+      },
+      
+      async addMany(newItems) {
+        const sb = getSupabase();
+        const rows = newItems.map(item => ({
+          id: item.id,
+          store_name: name,
+          data: item,
+          created_at: item.createdAt || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }));
+        const { error } = await sb.from(TABLE).insert(rows);
+        if (error) {
+          console.error(`[Store:${name}] ADD MANY error:`, error.message);
+          throw new Error(`บันทึกไม่สำเร็จ: ${error.message}`);
+        }
+        console.log(`[Store:${name}] ✅ Added ${newItems.length} items`);
+        return newItems;
+      },
+      
+      async update(id, updateFn) {
+        const sb = getSupabase();
+        // อ่านก่อน
+        const { data: existing, error: readErr } = await sb
+          .from(TABLE)
+          .select('data')
+          .eq('id', id)
+          .eq('store_name', name)
+          .single();
+        
+        if (readErr || !existing) {
+          throw new Error(`ไม่พบ id: ${id}`);
+        }
+        
+        let updated;
+        if (typeof updateFn === 'function') {
+          updated = updateFn(existing.data);
+        } else {
+          updated = { ...existing.data, ...updateFn };
+        }
+        updated.updatedAt = new Date().toISOString();
+        
+        const { error: writeErr } = await sb
+          .from(TABLE)
+          .update({ data: updated, updated_at: new Date().toISOString() })
+          .eq('id', id)
+          .eq('store_name', name);
+        
+        if (writeErr) {
+          console.error(`[Store:${name}] UPDATE error:`, writeErr.message);
+          throw new Error(`อัพเดทไม่สำเร็จ: ${writeErr.message}`);
+        }
+        console.log(`[Store:${name}] ✅ Updated: ${id}`);
+        return updated;
+      },
+      
+      async remove(id) {
+        const sb = getSupabase();
+        const { error } = await sb
+          .from(TABLE)
+          .delete()
+          .eq('id', id)
+          .eq('store_name', name);
+        
+        if (error) {
+          console.error(`[Store:${name}] DELETE error:`, error.message);
+          throw new Error(`ลบไม่สำเร็จ: ${error.message}`);
+        }
+        console.log(`[Store:${name}] ✅ Deleted: ${id}`);
+        return { removed: true };
+      },
+      
+      async findById(id) {
+        const sb = getSupabase();
+        const { data, error } = await sb
+          .from(TABLE)
+          .select('data')
+          .eq('id', id)
+          .eq('store_name', name)
+          .single();
+        if (error) return null;
+        return data?.data || null;
+      },
+      
+      async count() {
+        const sb = getSupabase();
+        const { count, error } = await sb
+          .from(TABLE)
+          .select('*', { count: 'exact', head: true })
+          .eq('store_name', name);
+        if (error) return 0;
+        return count || 0;
+      },
+    };
   }
   
-  // === Lock mechanism ===
-  async function _withLock(fn) {
-    let retries = 0;
-    while (_locks.get(name)) {
-      if (retries >= 20) throw new Error(`Store lock timeout: ${name}`);
-      await new Promise(r => setTimeout(r, 50));
-      retries++;
-    }
-    _locks.set(name, true);
-    try {
-      return await fn();
-    } finally {
-      _locks.delete(name);
-    }
-  }
-  
-  // === Public API ===
+  // ===== FILE FALLBACK MODE (local dev) =====
+  console.log(`[Store:${name}] ⚠️ No Supabase — using file fallback`);
   return {
-    /** อ่านข้อมูลทั้งหมด */
     async getAll() {
-      return [...(await _load())];
+      return [...(await _fileFallbackLoad(name))];
     },
-    
-    /** เพิ่มข้อมูลใหม่ (ป้องกัน race condition) */
     async add(item) {
-      return _withLock(async () => {
-        const items = await _load();
+      return _withLock(name, async () => {
+        const items = await _fileFallbackLoad(name);
         items.push(item);
-        await _save(items);
-        console.log(`[Store:${name}] ✅ Added 1 item → total: ${items.length}`);
+        await _fileFallbackSave(name, items);
         return item;
       });
     },
-    
-    /** เพิ่มหลายรายการ */
     async addMany(newItems) {
-      return _withLock(async () => {
-        const items = await _load();
+      return _withLock(name, async () => {
+        const items = await _fileFallbackLoad(name);
         items.push(...newItems);
-        await _save(items);
-        console.log(`[Store:${name}] ✅ Added ${newItems.length} items → total: ${items.length}`);
+        await _fileFallbackSave(name, items);
         return newItems;
       });
     },
-    
-    /** อัพเดทข้อมูลตาม id */
     async update(id, updateFn) {
-      return _withLock(async () => {
-        const items = await _load();
+      return _withLock(name, async () => {
+        const items = await _fileFallbackLoad(name);
         const idx = items.findIndex(i => i.id === id);
         if (idx < 0) throw new Error(`ไม่พบ id: ${id}`);
-        
         if (typeof updateFn === 'function') {
           items[idx] = updateFn(items[idx]);
         } else {
-          // updateFn is actually update data object
           Object.assign(items[idx], updateFn);
         }
         items[idx].updatedAt = new Date().toISOString();
-        
-        await _save(items);
-        console.log(`[Store:${name}] ✅ Updated id: ${id}`);
+        await _fileFallbackSave(name, items);
         return items[idx];
       });
     },
-    
-    /** ลบข้อมูลตาม id */
     async remove(id) {
-      return _withLock(async () => {
-        const items = await _load();
-        const before = items.length;
+      return _withLock(name, async () => {
+        const items = await _fileFallbackLoad(name);
         const filtered = items.filter(i => i.id !== id);
-        if (filtered.length === before) throw new Error(`ไม่พบ id: ${id}`);
-        await _save(filtered);
-        console.log(`[Store:${name}] ✅ Deleted id: ${id} → remaining: ${filtered.length}`);
+        if (filtered.length === items.length) throw new Error(`ไม่พบ id: ${id}`);
+        await _fileFallbackSave(name, filtered);
         return { removed: true, remaining: filtered.length };
       });
     },
-    
-    /** หาข้อมูลตาม id */
     async findById(id) {
-      const items = await _load();
+      const items = await _fileFallbackLoad(name);
       return items.find(i => i.id === id) || null;
     },
-    
-    /** นับจำนวน */
     async count() {
-      const items = await _load();
+      const items = await _fileFallbackLoad(name);
       return items.length;
     },
   };
