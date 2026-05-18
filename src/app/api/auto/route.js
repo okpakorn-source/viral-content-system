@@ -129,87 +129,92 @@ export async function POST(request) {
     await logPipeline({ workflowId: _autoWorkflowId, step: 'breakdown', status: 'success', duration: Date.now() - step3Start, detail: (breakdownData.key_points?.length || 0) + ' key points' }).catch(() => {});
 
     // ===================================================================
-    // === PIPELINE A (Classic) + PIPELINE B (Enhanced) รันพร้อมกัน ===
+    // === PIPELINE A: Classic (รันก่อน — เหมือนเดิม 100%) ===
+    // ===================================================================
+    const stepParallelStart = Date.now();
+
+    addLog('Classic', '📝 สร้างเนื้อหา Classic (ไม่ใช้ Blueprint/Research)...');
+    const classicRes = await callInternal('/api/summarize', {
+      text: newsData.newsBody,
+      newsTitle: newsData.newsTitle,
+      breakdownData,
+      sourceType: detectedType,
+      mode: 'analyze',
+      contentLength: selectedLength,
+    });
+
+    let classicData = null;
+    if (classicRes.success) {
+      classicData = classicRes.data;
+      addLog('Classic', `✅ ${classicData.versions?.length || 0} เวอร์ชัน Classic (${((Date.now() - stepParallelStart) / 1000).toFixed(1)}s)`);
+    } else {
+      // Library ว่าง หรือ error อื่น — log แต่ไม่ throw ทันที
+      addLog('Classic', `❌ ${classicRes.error || 'สร้างไม่สำเร็จ'}`);
+      // ถ้า Library ว่างจริง → throw ทันทีเพราะ Enhanced จะล้มด้วย
+      if (classicRes.libraryEmpty) {
+        throw new Error(classicRes.error || 'กรุณาเพิ่ม Prompt ในหอสมุดก่อน');
+      }
+    }
+
+    // ===================================================================
+    // === PIPELINE B: Blueprint + Research (parallel) → Enhanced Generate ===
     // ===================================================================
 
-    const stepParallelStart = Date.now();
-    addLog('Parallel', '🚀 เริ่มรัน Classic + Enhanced พร้อมกัน...');
+    addLog('Enhanced', '🧬 Blueprint + 🔍 Research พร้อมกัน...');
+    const bpStart = Date.now();
 
-    const [classicResult, enhancedBundle] = await Promise.allSettled([
-
-      // ── PIPELINE A: Classic (เหมือนเดิม ไม่เปลี่ยน) ──────────────────
-      (async () => {
-        const t = Date.now();
-        addLog('Classic', '📝 สร้างเนื้อหา Classic...');
-        const res = await callInternal('/api/summarize', {
-          text: newsData.newsBody,
-          newsTitle: newsData.newsTitle,
-          breakdownData,
-          sourceType: detectedType,
-          mode: 'analyze',
-          contentLength: selectedLength,
-        });
-        if (!res.success) throw new Error(res.error || 'Classic generate ไม่สำเร็จ');
-        addLog('Classic', `✅ ${res.data.versions?.length || 0} เวอร์ชัน (${((Date.now() - t) / 1000).toFixed(1)}s)`);
-        return res.data;
-      })(),
-
-      // ── PIPELINE B: Enhanced (Blueprint + Research → Generate) ─────────
-      (async () => {
-        // B1: Blueprint + Research ทำพร้อมกัน (Parallel)
-        const bpStart = Date.now();
-        addLog('Enhanced', '🧬 วาง Blueprint + 🔍 Research พร้อมกัน...');
-
-        const [bpResult, resResult] = await Promise.allSettled([
-          callInternal('/api/summarize', {
-            text: newsData.newsBody,
-            newsTitle: newsData.newsTitle,
-            mode: 'blueprint',
-            breakdownData,
-          }),
-          callInternal('/api/research-search', {
-            newsTitle: newsData.newsTitle,
-            newsBody: newsData.newsBody,
-            breakdownData,
-          }),
-        ]);
-
-        const blueprint = (bpResult.status === 'fulfilled' && bpResult.value?.success)
-          ? bpResult.value.data?.blueprint : null;
-
-        const researchItems = (resResult.status === 'fulfilled' && resResult.value?.success)
-          ? (resResult.value.data?.items || resResult.value.data?.results || []) : [];
-
-        if (blueprint) {
-          addLog('Enhanced', `✅ Blueprint: ${blueprint.core_emotion} | Research: ${researchItems.length} แหล่ง (${((Date.now() - bpStart) / 1000).toFixed(1)}s)`);
-        } else {
-          addLog('Enhanced', `⚠️ Blueprint ไม่สำเร็จ | Research: ${researchItems.length} แหล่ง`);
-        }
-
-        // B2: Generate ด้วย Blueprint + Research
-        const genStart = Date.now();
-        addLog('Enhanced', '✍️ สร้างเนื้อหา Enhanced...');
-        const res = await callInternal('/api/summarize', {
-          text: newsData.newsBody,
-          newsTitle: newsData.newsTitle,
-          breakdownData,
-          sourceType: detectedType,
-          mode: 'analyze',
-          contentLength: selectedLength,
-          emotionalBlueprint: blueprint,
-          researchData: researchItems.length > 0 ? { items: researchItems } : null,
-        });
-        if (!res.success) throw new Error(res.error || 'Enhanced generate ไม่สำเร็จ');
-        addLog('Enhanced', `✅ ${res.data.versions?.length || 0} เวอร์ชัน Enhanced (${((Date.now() - genStart) / 1000).toFixed(1)}s)`);
-        return { analysisData: res.data, blueprint, researchItems };
-      })(),
+    const [bpResult, resResult] = await Promise.allSettled([
+      callInternal('/api/summarize', {
+        text: newsData.newsBody,
+        newsTitle: newsData.newsTitle,
+        mode: 'blueprint',
+        breakdownData,
+      }),
+      callInternal('/api/research-search', {
+        newsTitle: newsData.newsTitle,
+        newsBody: newsData.newsBody,
+        breakdownData,
+      }),
     ]);
+
+    const blueprint = (bpResult.status === 'fulfilled' && bpResult.value?.success)
+      ? bpResult.value.data?.blueprint : null;
+    const researchItems = (resResult.status === 'fulfilled' && resResult.value?.success)
+      ? (resResult.value.data?.items || []) : [];
+
+    addLog('Enhanced', `Blueprint: ${blueprint ? blueprint.core_emotion : '❌'} | Research: ${researchItems.length} แหล่ง (${((Date.now() - bpStart) / 1000).toFixed(1)}s)`);
+
+    // Enhanced Generate — ใช้ Blueprint + Research
+    addLog('Enhanced', '✍️ สร้างเนื้อหา Enhanced...');
+    const enhancedGenStart = Date.now();
+    const enhancedRes = await callInternal('/api/summarize', {
+      text: newsData.newsBody,
+      newsTitle: newsData.newsTitle,
+      breakdownData,
+      sourceType: detectedType,
+      mode: 'analyze',
+      contentLength: selectedLength,
+      emotionalBlueprint: blueprint,
+      researchData: researchItems.length > 0 ? { items: researchItems } : null,
+    });
+
+    let enhancedData = null;
+    if (enhancedRes.success) {
+      enhancedData = { analysisData: enhancedRes.data, blueprint, researchItems };
+      addLog('Enhanced', `✅ ${enhancedRes.data.versions?.length || 0} เวอร์ชัน Enhanced (${((Date.now() - enhancedGenStart) / 1000).toFixed(1)}s)`);
+    } else {
+      addLog('Enhanced', `❌ ${enhancedRes.error || 'Enhanced generate ไม่สำเร็จ'}`);
+    }
 
     addLog('Parallel', `✅ ทั้งสอง pipeline เสร็จ (${((Date.now() - stepParallelStart) / 1000).toFixed(1)}s)`);
 
+    // pseudo-allSettled result format for compatibility below
+    const classicResult = classicData ? { status: 'fulfilled', value: classicData } : { status: 'rejected' };
+    const enhancedBundle = enhancedData ? { status: 'fulfilled', value: enhancedData } : { status: 'rejected' };
+
+
     // === รวม versions ทั้งหมด ===
-    const classicData = classicResult.status === 'fulfilled' ? classicResult.value : null;
-    const enhancedData = enhancedBundle.status === 'fulfilled' ? enhancedBundle.value : null;
+    // (classicData และ enhancedData ถูกประกาศด้านบนแล้ว — ใช้โดยตรง)
 
     // Classic versions — tag ว่า Classic
     const classicVersions = (classicData?.versions || []).map((v, i) => ({
@@ -233,12 +238,9 @@ export async function POST(request) {
     // ใช้ analysisResult จาก Classic (หรือ Enhanced ถ้า Classic ล้มเหลว) สำหรับ meta
     const primaryResult = classicData || enhancedData?.analysisData || {};
 
-    const blueprint = enhancedData?.blueprint || null;
-    const researchItems = enhancedData?.researchItems || [];
-
     // log สรุป
-    if (classicResult.status === 'rejected') addLog('Classic', `❌ ${classicResult.reason?.message || 'failed'}`);
-    if (enhancedBundle.status === 'rejected') addLog('Enhanced', `❌ ${enhancedBundle.reason?.message || 'failed'}`);
+    if (!classicData) addLog('Classic', '❌ Classic ไม่สำเร็จ');
+    if (!enhancedData) addLog('Enhanced', '❌ Enhanced ไม่สำเร็จ');
     if (allVersions.length === 0) throw new Error('ทั้ง Classic และ Enhanced สร้างเนื้อหาไม่สำเร็จ');
 
     addLog('Summary', `📊 รวม ${allVersions.length} เวอร์ชัน (Classic: ${classicVersions.length}, Enhanced: ${enhancedVersions.length})`);

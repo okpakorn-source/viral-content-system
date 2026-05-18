@@ -44,7 +44,7 @@ function extractString(result, ...keys) {
 
 export async function POST(request) {
   try {
-    const { text, sourceType, customPrompt, analysisPresetId, mode, newsTitle, breakdownData, researchData, contentLength, workflowId } = await request.json();
+    const { text, sourceType, customPrompt, analysisPresetId, mode, newsTitle, breakdownData, researchData, contentLength, workflowId, emotionalBlueprint } = await request.json();
 
     if (!text || text.length < 10) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
@@ -517,7 +517,7 @@ ${promptCatalog}
 
 
       // === Inject Emotional Blueprint (when user provides one) ===
-      const emotionalBlueprint = (body || {}).emotionalBlueprint || null;
+      // emotionalBlueprint is destructured from request at top of function
       let blueprintCtx = '';
       if (emotionalBlueprint && emotionalBlueprint.core_emotion) {
         const bp = emotionalBlueprint;
