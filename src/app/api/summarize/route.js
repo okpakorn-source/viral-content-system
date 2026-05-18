@@ -327,7 +327,7 @@ export async function POST(request) {
               model: 'gpt-4o-mini',
               temperature: 0,
               maxTokens: 200,
-              prompt: `คุณเป็นผู้เชี่ยวชาญจับคู่ข่าวกับ Prompt เขียนข่าว ทำตามขั้นตอนเคร่งครัด:
+              prompt: `คุณเป็น AI Agent ผู้เชี่ยวชาญวิเคราะห์ข่าวและจับคู่ Prompt เขียนข่าวไวรัล
 
 === ข่าวที่ต้องวิเคราะห์ ===
 หัวข้อ: ${actualNewsTitle || 'ไม่มีหัวข้อ'}
@@ -338,18 +338,20 @@ export async function POST(request) {
 ${promptCatalog}
 === จบรายการ ===
 
-ขั้นตอน:
-1. วิเคราะห์ประเภทข่าว (เช่น อุบัติเหตุ, อาชญากรรม, อบอุ่น, ดวง, การเมือง, กีฬา, บันเทิง, สังคม, เศรษฐกิจ, ดราม่า, ไลฟ์สไตล์)
-2. ดู "ประเภท" ของ Prompt แต่ละตัว — ต้องตรงกันจริงๆ เท่านั้น
+ขั้นตอนวิเคราะห์ (ต้องทำตามลำดับ):
+1. วิเคราะห์ประเภทข่าวจากเนื้อหา (เช่น อุบัติเหตุ, อาชญากรรม, สลดใจ, ดราม่า, การเมือง, กีฬา, บันเทิง, สังคม, เศรษฐกิจ, ไลฟ์สไตล์, ผู้สูงวัย, เด็ก, สัตว์)
+2. เปรียบเทียบ "ประเภทข่าว" กับ "ประเภท Prompt" ทีละตัว
+3. ถ้ามี Prompt ที่ตรงแน่ → เลือก matchType: "exact"
+4. ถ้าไม่มีตัวที่ตรงแน่ → วิเคราะห์ว่า Prompt ตัวใดมีโทน/อารมณ์ใกล้เคียงที่สุด แล้วเลือก matchType: "closest" พร้อมเหตุผลชัดเจน
 
-กฎเข้มงวด:
-- ⚠️ เลือก Prompt ได้เฉพาะเมื่อ "ประเภทข่าว" ตรงกับ "ประเภท Prompt" จริงๆ
-- ⚠️ ถ้าข่าวเป็นดวง/อุบัติเหตุ/การเมือง/กีฬา แต่ Prompt เป็น "อบอุ่น" → ไม่ตรง → selectedIndex = -1
-- ⚠️ ห้ามเลือกแบบ "พอใช้ได้" หรือ "ใกล้เคียง" ต้องตรงจริงเท่านั้น
-- selectedIndex = -1 เป็นคำตอบที่ถูกต้องและควรใช้บ่อยเมื่อไม่มี Prompt ตรง
+กฎ:
+- ต้องวิเคราะห์จริงทุกครั้ง ห้ามสุ่มเลือก
+- selectedIndex ต้องเป็น 0 ถึง ${validPrompts.length - 1} เสมอ (ห้ามเป็น -1)
+- matchType: "exact" = ประเภทตรงกันจริง, "closest" = ยืมที่ใกล้เคียงที่สุด
+- reason ต้องอธิบายว่าทำไมถึงเลือกตัวนี้ (เช่น "ข่าวสลดใจ ใกล้เคียงกับ Prompt อบอุ่นเพราะทั้งคู่กระตุ้นอารมณ์")
 
-ตอบเป็น JSON:
-{"newsType":"ประเภทข่าว","selectedIndex":-1 ถ้าไม่มีตัวที่ตรงจริง หรือ index ถ้าตรง,"reason":"เหตุผลสั้นๆ"}`
+ตอบเป็น JSON เท่านั้น:
+{"newsType":"ประเภทข่าว","selectedIndex":เลขindex,"matchType":"exact หรือ closest","reason":"เหตุผลการเลือก"}`
             });
 
             newsTypeDetected = matchResult.newsType || '';
@@ -358,8 +360,13 @@ ${promptCatalog}
             if (matchResult.selectedIndex >= 0 && matchResult.selectedIndex < validPrompts.length) {
               smartPrompt = validPrompts[matchResult.selectedIndex];
               promptSource = 'library';
-              promptMatchReason = `🧠 AI match: ข่าว${newsTypeDetected} → "${smartPrompt.promptName}" (${matchResult.reason})`;
-              // อัพเดท usage count
+              const isExact = matchResult.matchType === 'exact';
+              promptMatchReason = isExact
+                ? `🧠 AI match: ข่าว${newsTypeDetected} → "${smartPrompt.promptName}" (${matchResult.reason})`
+                : `⚠️ ไม่มี Prompt ตรงแนวข่าว${newsTypeDetected} — ยืม Prompt ใกล้เคียง: "${smartPrompt.promptName}" เพราะ ${matchResult.reason}`;
+              // Mark borrowed prompt
+              smartPrompt._isBorrowed = !isExact;
+              smartPrompt._borrowReason = isExact ? null : matchResult.reason;
               smartPrompt.usageCount = (smartPrompt.usageCount || 0) + 1;
               smartPrompt.lastUsedAt = new Date().toISOString();
             } else {
@@ -584,6 +591,8 @@ ${promptCatalog}
           presetUsed: smartPrompt?.category || 'library',
           promptSource, // 'library' or 'preset'
           promptMatchReason: promptMatchReason || 'unknown',
+          isBorrowed: smartPrompt?._isBorrowed || false,
+          borrowReason: smartPrompt?._borrowReason || null,
           newsTypeDetected: newsTypeDetected || '',
           smartPromptName: smartPrompt ? (smartPrompt.promptName || smartPrompt.category) : null,
           smartPromptScore: smartPrompt?.viralScore || null,
@@ -646,7 +655,14 @@ ${promptCatalog}
             success: true,
             data: {
               usedPreset: promptSource === 'library'
-                ? { id: 'library', name: `🏛️ ${smartPrompt.promptName || smartPrompt.category}`, source: 'library', viralScore: smartPrompt.viralScore }
+                ? {
+                    id: 'library',
+                    name: smartPrompt._isBorrowed ? `⚠️ ${smartPrompt.promptName || smartPrompt.category}` : `🏛️ ${smartPrompt.promptName || smartPrompt.category}`,
+                    source: 'library',
+                    viralScore: smartPrompt.viralScore,
+                    isBorrowed: smartPrompt._isBorrowed || false,
+                    borrowReason: smartPrompt._borrowReason || null,
+                  }
                 : { id: 'library', name: '📦 Library', source: 'library' },
               usedModel: usedModel || 'gpt-4o',
               versions,

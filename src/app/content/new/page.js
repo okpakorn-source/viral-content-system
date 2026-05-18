@@ -1305,22 +1305,55 @@ export default function NewContentPage() {
             <div style={{ background: 'var(--bg-primary)', borderRadius: 'var(--radius-md)', marginBottom: 16, border: analysisResult.usedPreset?.source === 'library' ? '2px solid rgba(139,92,246,0.5)' : '1px solid var(--border)', overflow: 'hidden' }}>
               {/* Prompt Badge — ติดด้านบนหัวข้อข่าว */}
               {analysisResult.usedPreset?.source === 'library' ? (
-                <div style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.25), rgba(59,130,246,0.2))', padding: '10px 16px', borderBottom: '1px solid rgba(139,92,246,0.3)' }}>
+                <div style={{
+                  background: analysisResult.usedPreset?.isBorrowed
+                    ? 'linear-gradient(135deg, rgba(245,158,11,0.2), rgba(239,68,68,0.1))'
+                    : 'linear-gradient(135deg, rgba(139,92,246,0.25), rgba(59,130,246,0.2))',
+                  padding: '10px 16px',
+                  borderBottom: analysisResult.usedPreset?.isBorrowed
+                    ? '1px solid rgba(245,158,11,0.4)'
+                    : '1px solid rgba(139,92,246,0.3)',
+                }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <div style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(135deg, #7c3aed, #3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>🏛️</div>
+                    <div style={{
+                      width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+                      background: analysisResult.usedPreset?.isBorrowed
+                        ? 'linear-gradient(135deg, #f59e0b, #ef4444)'
+                        : 'linear-gradient(135deg, #7c3aed, #3b82f6)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
+                    }}>
+                      {analysisResult.usedPreset?.isBorrowed ? '⚠️' : '🏛️'}
+                    </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 1 }}>PROMPT จากหอสมุดไวรัล</div>
-                      <div style={{ fontSize: 13, fontWeight: 900, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{analysisResult.usedPreset.name?.replace('🏛️ ', '')}</div>
+                      <div style={{
+                        fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1,
+                        color: analysisResult.usedPreset?.isBorrowed ? '#fbbf24' : '#a78bfa',
+                      }}>
+                        {analysisResult.usedPreset?.isBorrowed ? 'ยืม PROMPT ใกล้เคียง (ไม่มีตรงแนว)' : 'PROMPT จากหอสมุดไวรัล'}
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 900, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {analysisResult.usedPreset.name?.replace('🏛️ ', '').replace('⚠️ ', '')}
+                      </div>
                     </div>
                     {analysisResult.usedPreset.viralScore && (
-                      <div style={{ background: 'linear-gradient(135deg, #7c3aed, #6366f1)', padding: '4px 10px', borderRadius: 16, color: '#fff', fontWeight: 900, fontSize: 12, textAlign: 'center', lineHeight: 1, flexShrink: 0 }}>
+                      <div style={{
+                        background: analysisResult.usedPreset?.isBorrowed
+                          ? 'linear-gradient(135deg, #f59e0b, #f97316)'
+                          : 'linear-gradient(135deg, #7c3aed, #6366f1)',
+                        padding: '4px 10px', borderRadius: 16, color: '#fff', fontWeight: 900, fontSize: 12, textAlign: 'center', lineHeight: 1, flexShrink: 0,
+                      }}>
                         <div style={{ fontSize: 7, opacity: 0.7, marginBottom: 1 }}>VIRAL</div>
                         {analysisResult.usedPreset.viralScore}
                       </div>
                     )}
                   </div>
+                  {/* เหตุผล AI */}
                   {analysisResult.debug?.promptMatchReason && (
-                    <div style={{ fontSize: 9, color: 'rgba(167,139,250,0.9)', marginTop: 6, padding: '4px 8px', background: 'rgba(139,92,246,0.1)', borderRadius: 4 }}>
+                    <div style={{
+                      fontSize: 9, marginTop: 6, padding: '4px 8px', borderRadius: 4,
+                      color: analysisResult.usedPreset?.isBorrowed ? 'rgba(251,191,36,0.95)' : 'rgba(167,139,250,0.9)',
+                      background: analysisResult.usedPreset?.isBorrowed ? 'rgba(245,158,11,0.1)' : 'rgba(139,92,246,0.1)',
+                    }}>
                       {analysisResult.debug.promptMatchReason}
                     </div>
                   )}
