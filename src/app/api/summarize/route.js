@@ -516,8 +516,28 @@ ${promptCatalog}
       console.log(`[Analyze] Final prompt length: ${prompt.length}ch | Source: ${promptSource === 'library' ? '🏛️ Library' : '📦 Preset'}`);
 
 
+      // === Inject Emotional Blueprint (when user provides one) ===
+      const emotionalBlueprint = (body || {}).emotionalBlueprint || null;
+      let blueprintCtx = '';
+      if (emotionalBlueprint && emotionalBlueprint.core_emotion) {
+        const bp = emotionalBlueprint;
+        const timelineLines = (bp.emotional_timeline || []).map((t, i) => (i + 1) + '. ' + t).join('\n');
+        const branchLines = (bp.emotional_branches || []).map(b => '- [' + b.branch_type + '] ' + b.content).join('\n');
+        const bridgeLines = (bp.bridges || []).map(b => '\u2022 "' + b + '"').join('\n');
+        const forbidLine = (bp.forbidden && bp.forbidden.length) ? 'ห้ามเฉพาะข่าวนี้: ' + bp.forbidden.join(' | ') + '\n' : '';
+        blueprintCtx =
+          '\n\n=== EMOTIONAL ARCHITECTURE BLUEPRINT ===\n' +
+          'แกนอารมณ์: ' + bp.core_emotion + ' (' + (bp.emotion_reason || '') + ')\n\n' +
+          'Emotional Timeline:\n' + timelineLines + '\n\n' +
+          'จุดดันอารมณ์:\n' + branchLines + '\n\n' +
+          'ประโยคเชื่อม:\n' + bridgeLines + '\n\n' +
+          forbidLine +
+          '=== จบ Blueprint ===\n\n';
+        console.log('[Analyze] 🧬 Blueprint injected: emotion=' + bp.core_emotion + ', ' + (bp.emotional_timeline || []).length + ' steps');
+      }
+
       // === สร้าง Multi-Version Writing Prompt + Facebook Safety ===
-      let multiPrompt = prompt + '\n\n=== คำสั่งสำคัญสำหรับการเขียน ===\n' +
+      let multiPrompt = blueprintCtx + prompt + '\n\n=== คำสั่งสำคัญสำหรับการเขียน ===\n' +
         'คุณต้องสร้างเนื้อหาหลายเวอร์ชันจากข่าวนี้ โดยแต่ละเวอร์ชันใช้มุมเขียนต่างกัน\n' +
         `แต่ละเวอร์ชัน:\n` +
         `- ต้องยาวอย่างน้อย ${lenCfg.min} คำ ถึง ${lenCfg.max} คำ แบ่ง ${lenCfg.paraDesc} สำหรับ Facebook (ห้ามสั้นกว่า ${lenCfg.min} คำเด็ดขาด)\n` +
@@ -712,7 +732,116 @@ ${promptCatalog}
       }
     }
 
+    // ===== MODE: BLUEPRINT — Emotional Architecture Planning =====
+    if (mode === 'blueprint') {
+      console.log('[Blueprint] === EMOTIONAL ARCHITECTURE MODE ===');
+      try {
+        const actualNewsTitle = newsTitle || '';
+        const actualNewsBody = text || '';
+        const actualBreakdown = breakdownData || {};
+
+        const coreStory = actualBreakdown.core_story || '';
+        const keyPoints = actualBreakdown.key_points?.map(kp => kp.point || kp).join('\n') || '';
+        const quotes = actualBreakdown.quotes?.join(' | ') || '';
+        const conflicts = actualBreakdown.conflicts?.join(', ') || '';
+        const bestAngle = actualBreakdown.best_main_angle?.angle_name || '';
+        const emotionalCore = actualBreakdown.main_emotional_core || '';
+
+        const blueprintPrompt = `คุณคือ Story Architect ผู้เชี่ยวชาญเขียนข่าวไวรัลที่อ่านลื่นและอินจริง
+งาน: วางแผนโครงสร้างอารมณ์ก่อนเขียน — ห้ามเขียนเนื้อหาจริง วางแผนอย่างเดียว
+
+=== ข่าวที่ต้องวางแผน ===
+หัวข้อ: ${actualNewsTitle}
+เนื้อหา: ${actualNewsBody.slice(0, 2500)}
+${coreStory ? `แก่นข่าว: ${coreStory}` : ''}
+${keyPoints ? `ประเด็นสำคัญ:\n${keyPoints}` : ''}
+${quotes ? `คำพูดสำคัญ: ${quotes}` : ''}
+${conflicts ? `จุดขัดแย้ง: ${conflicts}` : ''}
+${bestAngle ? `มุมที่ดีสุด: ${bestAngle}` : ''}
+${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
+=== จบข่าว ===
+
+วางแผน 6 ส่วน:
+
+1. CORE_EMOTION — แกนอารมณ์เดียวที่ทรงพลังที่สุดในข่าวนี้
+   เลือกได้ 1 เท่านั้น: โกรธ | สงสาร | ช็อก | อึดอัด | สะเทือนใจ | อบอุ่น | ยินดี | ขำขัน
+   พร้อม emotion_reason: เหตุผลที่เลือกแกนนี้ (1 ประโยค)
+
+2. EMOTIONAL_BRANCHES — จุดที่จะ "ดันอารมณ์" แกนหลักนั้น (4-6 จุด)
+   แต่ละจุดต้องเป็น: จุดเจ็บ | จุดช็อก | จุดขัดแย้ง | จุดสงสาร | จุดโกรธ | จุดที่คนอยากเถียง | จุดที่แชร์ต่อ
+   content = ข้อมูลจริงจากข่าว (ไม่แต่ง)
+
+3. CONTEXT_SELECTION — ข้อมูลที่ใส่ได้ พร้อมเหตุผลเดียว
+   เลือกเฉพาะข้อมูลที่ตรงเงื่อนไขนี้เท่านั้น:
+   - ขยายแผล: ทำให้เรื่องเจ็บกว่าเดิม
+   - เพิ่มน้ำหนัก: ยืนยันความจริง
+   - contrast: ภาพนอก vs ความจริง
+   - tension: ดันความตึงเครียด
+   - แรงจูงใจ: อธิบายว่าทำไมถึงทำ
+   ถ้าข้อมูลไหนไม่เข้า 5 ข้อนี้ → ไม่ใส่
+
+4. EMOTIONAL_TIMELINE — ลำดับปล่อยข้อมูลทีละชั้น (6-8 ขั้น)
+   เริ่มจาก HOOK → จบด้วยประโยคทุบท้าย
+   ห้ามเรียง timeline แบบ A→B→C ตามเหตุการณ์จริง
+   ต้องเรียงตาม "ระดับอารมณ์" แทน
+
+5. BRIDGES — ประโยคเชื่อมระหว่างประเด็น (3-5 ประโยค)
+   ต้องเป็นภาษาคนพูดจริง ไม่ใช่ภาษาทางการ
+   เช่น: "แต่สิ่งที่หนักกว่านั้นคือ..." / "ย้อนกลับไปก่อนหน้านี้..."
+
+6. FORBIDDEN — สิ่งที่ห้ามเขียนในข่าวนี้โดยเฉพาะ (2-4 ข้อ)
+   เจาะจงกับข่าวนี้เท่านั้น ไม่ใช่กฎทั่วไป
+
+กฎเหล็ก:
+- CORE_EMOTION เดียวเท่านั้น ห้ามหลายแกน
+- ห้ามใส่ข้อมูลที่ไม่ดันอารมณ์แกนหลัก
+- BRIDGES ต้องเป็นภาษาที่คนไทยพูดจริงบน Facebook
+- ทุกอย่างต้องมาจากข่าวจริง ห้ามแต่ง
+
+ตอบ JSON:
+{
+  "core_emotion": "อารมณ์หลัก",
+  "emotion_reason": "เหตุผลที่เลือก",
+  "emotional_branches": [
+    { "branch_type": "จุดเจ็บ|จุดช็อก|จุดขัดแย้ง|จุดสงสาร|จุดโกรธ|จุดแชร์", "content": "ข้อมูลจริงจากข่าว" }
+  ],
+  "context_selection": [
+    { "info": "ข้อมูลที่จะใส่", "purpose": "ขยายแผล|เพิ่มน้ำหนัก|contrast|tension|แรงจูงใจ" }
+  ],
+  "emotional_timeline": ["HOOK — ...", "จุดสะเทือนแรก — ...", "...", "ประโยคทุบท้าย — ..."],
+  "bridges": ["ประโยคเชื่อม 1", "ประโยคเชื่อม 2", "ประโยคเชื่อม 3"],
+  "forbidden": ["ห้ามเขียนว่า...", "ห้าม ending แบบ..."]
+}`;
+
+        const blueprintResult = await callAI({
+          model: 'gpt-4o-mini',
+          prompt: blueprintPrompt,
+          temperature: 0.3,
+          maxTokens: 1200,
+        });
+
+        if (!blueprintResult?.core_emotion) {
+          throw new Error('AI ไม่สามารถวางแผน Blueprint ได้');
+        }
+
+        console.log(`[Blueprint] ✅ Core emotion: ${blueprintResult.core_emotion} | Branches: ${blueprintResult.emotional_branches?.length}`);
+        await logPipeline({ workflowId, step: 'blueprint', status: 'success', detail: `emotion=${blueprintResult.core_emotion}` }).catch(() => {});
+
+        return NextResponse.json({
+          success: true,
+          data: {
+            blueprint: blueprintResult,
+            usedModel: 'gpt-4o-mini',
+          },
+        });
+      } catch (err) {
+        console.error('[Blueprint] ERROR:', err.message);
+        return NextResponse.json({ success: false, error: `วางแผนไม่สำเร็จ: ${err.message}` }, { status: 500 });
+      }
+    }
+
     // ===== MODE: RESEARCH — AI หาข้อมูลเพิ่มเติมจากหัวข้อข่าว =====
+
     if (mode === 'research') {
       console.log('[Research] === AI RESEARCH MODE ===');
       try {

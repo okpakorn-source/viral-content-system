@@ -38,6 +38,9 @@ export default function NewContentPage() {
   const [contentLength, setContentLength] = useState('short'); // short | medium | long
   const [addedResearchItems, setAddedResearchItems] = useState([]); // เก็บ research ที่เพิ่มแล้ว
   const [archiveSaved, setArchiveSaved] = useState(false); // ป้องกัน save ซ้ำ
+  const [blueprintData, setBlueprintData] = useState(null); // Emotional Blueprint จาก AI
+  const [editedBlueprint, setEditedBlueprint] = useState(null); // version ที่ user แก้ไขแล้ว
+  const [blueprinting, setBlueprintting] = useState(false); // loading state
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [tiktokNeedUpload, setTiktokNeedUpload] = useState(false);
@@ -466,6 +469,37 @@ export default function NewContentPage() {
     }
   };
 
+  // === Blueprint: วางแผน Emotional Architecture ===
+  const handleBlueprint = async () => {
+    if (!newsData?.newsBody) return;
+    setBlueprintting(true);
+    setError('');
+    setBlueprintData(null);
+    setEditedBlueprint(null);
+    try {
+      const res = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: newsData.newsBody,
+          newsTitle: newsData.newsTitle,
+          mode: 'blueprint',
+          breakdownData: breakdownData || null,
+          workflowId,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      setBlueprintData(data.data.blueprint);
+      setEditedBlueprint(JSON.parse(JSON.stringify(data.data.blueprint))); // deep copy for editing
+      console.log('[Blueprint] ✅ Got blueprint:', data.data.blueprint?.core_emotion);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBlueprintting(false);
+    }
+  };
+
   // === STEP 4: AI วิเคราะห์แนวข่าว → เลือก Prompt จากหอสมุด → สร้างเนื้อหา ===
   const handleAnalyze = async () => {
     if (!newsData?.newsBody) return;
@@ -490,6 +524,7 @@ export default function NewContentPage() {
           researchData: researchData || (addedResearchItems.length > 0 ? { items: addedResearchItems } : null),
           contentLength,
           workflowId,
+          emotionalBlueprint: editedBlueprint || blueprintData || null, // inject blueprint
         }),
       });
       const data = await res.json();
@@ -1205,6 +1240,106 @@ export default function NewContentPage() {
               <button onClick={handleBreakdown} className="btn btn-outline" disabled={loading} style={{ width: '100%' }}>
                 {loading ? '⏳ กำลังแตกใหม่...' : '🔄 แตกประเด็นใหม่ตามคำสั่ง'}
               </button>
+            </div>
+
+            {/* 🧬 Emotional Architecture Blueprint */}
+            <div style={{ background: 'linear-gradient(135deg, rgba(168,85,247,0.12), rgba(236,72,153,0.10))', padding: 20, borderRadius: 'var(--radius-md)', border: '2px solid rgba(168,85,247,0.4)', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 22 }}>🧬</span>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: '#c084fc' }}>Emotional Architecture Blueprint</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>AI วางแผนโครงสร้างอารมณ์ก่อนเขียน — ทำให้เนื้อหาอ่านลื่นและอินเหมือนมนุษย์เขียนจริง</div>
+                  </div>
+                </div>
+                <button onClick={handleBlueprint} disabled={blueprinting || loading}
+                  style={{ background: 'linear-gradient(135deg, #a855f7, #ec4899)', border: 'none', color: '#fff', fontWeight: 700, fontSize: 12, padding: '10px 18px', borderRadius: 'var(--radius-md)', cursor: (blueprinting || loading) ? 'wait' : 'pointer', whiteSpace: 'nowrap', boxShadow: '0 2px 10px rgba(168,85,247,0.3)' }}>
+                  {blueprinting ? '⏳ วางแผน...' : (blueprintData ? '🔄 วางใหม่' : '🧬 วางแผนโครงสร้าง')}
+                </button>
+              </div>
+
+              {/* Blueprint Result */}
+              {editedBlueprint && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+                  {/* Core Emotion */}
+                  <div style={{ background: 'var(--bg-primary)', borderRadius: 10, padding: '12px 14px', border: '1px solid rgba(168,85,247,0.2)' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#c084fc', marginBottom: 6 }}>🎯 CORE EMOTION — แกนอารมณ์หลัก</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 18, fontWeight: 900, color: '#f0abfc' }}>{editedBlueprint.core_emotion}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-secondary)', flex: 1 }}>{editedBlueprint.emotion_reason}</span>
+                    </div>
+                  </div>
+
+                  {/* Emotional Timeline */}
+                  <div style={{ background: 'var(--bg-primary)', borderRadius: 10, padding: '12px 14px', border: '1px solid rgba(168,85,247,0.2)' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#c084fc', marginBottom: 8 }}>📅 EMOTIONAL TIMELINE — ลำดับปล่อยข้อมูล</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {(editedBlueprint.emotional_timeline || []).map((step, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                          <span style={{ fontSize: 10, background: 'rgba(168,85,247,0.2)', color: '#c084fc', borderRadius: 4, padding: '2px 6px', flexShrink: 0, fontWeight: 700, minWidth: 20, textAlign: 'center' }}>{i + 1}</span>
+                          <input
+                            value={step}
+                            onChange={e => {
+                              const arr = [...(editedBlueprint.emotional_timeline || [])]; arr[i] = e.target.value;
+                              setEditedBlueprint(prev => ({ ...prev, emotional_timeline: arr }));
+                            }}
+                            style={{ flex: 1, fontSize: 12, background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)', padding: '2px 0', outline: 'none' }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Emotional Branches */}
+                  <div style={{ background: 'var(--bg-primary)', borderRadius: 10, padding: '12px 14px', border: '1px solid rgba(168,85,247,0.2)' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#c084fc', marginBottom: 8 }}>⚡ EMOTIONAL BRANCHES — จุดดันอารมณ์</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {(editedBlueprint.emotional_branches || []).map((b, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                          <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 6, background: 'rgba(236,72,153,0.15)', color: '#f9a8d4', flexShrink: 0, whiteSpace: 'nowrap' }}>{b.branch_type}</span>
+                          <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{b.content}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Bridges */}
+                  <div style={{ background: 'var(--bg-primary)', borderRadius: 10, padding: '12px 14px', border: '1px solid rgba(168,85,247,0.2)' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#c084fc', marginBottom: 8 }}>🌉 BRIDGES — ประโยคเชื่อม</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {(editedBlueprint.bridges || []).map((b, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <span style={{ fontSize: 14, color: '#c084fc', flexShrink: 0 }}>•</span>
+                          <input
+                            value={b}
+                            onChange={e => {
+                              const arr = [...(editedBlueprint.bridges || [])]; arr[i] = e.target.value;
+                              setEditedBlueprint(prev => ({ ...prev, bridges: arr }));
+                            }}
+                            style={{ flex: 1, fontSize: 12, background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)', padding: '3px 0', outline: 'none' }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Forbidden */}
+                  {editedBlueprint.forbidden?.length > 0 && (
+                    <div style={{ background: 'rgba(239,68,68,0.08)', borderRadius: 10, padding: '10px 14px', border: '1px solid rgba(239,68,68,0.2)' }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#f87171', marginBottom: 6 }}>❌ ห้ามเฉพาะข่าวนี้</div>
+                      {editedBlueprint.forbidden.map((f, i) => (
+                        <div key={i} style={{ fontSize: 11, color: '#fca5a5', marginBottom: 2 }}>• {f}</div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Apply Blueprint badge */}
+                  <div style={{ fontSize: 10, color: '#c084fc', textAlign: 'center', padding: '6px', background: 'rgba(168,85,247,0.08)', borderRadius: 8 }}>
+                    ✅ Blueprint นี้จะถูกส่งไปพร้อมกับการสร้างเนื้อหาอัตโนมัติ — แก้ไขได้โดยตรงโดยตรงก่อนกด "สร้างเนื้อหา"
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* 🔎 AI หาข้อมูลเพิ่มเติม — Research Agent (Serper Real Search) */}
