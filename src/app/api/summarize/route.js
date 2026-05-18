@@ -7,6 +7,8 @@ import { callSmartAI, getAvailableModels } from '@/lib/ai/aiRouter';
 import { moderateVersions } from '@/lib/ai/moderationAgent';
 import { createStore } from '@/lib/persistStore';
 import { logPipeline } from '@/lib/pipelineLogger';
+import { getSession } from '@/lib/auth';
+import { cookies } from 'next/headers';
 
 /**
  * ดึง summary จาก AI response ไม่ว่า key จะชื่ออะไร
@@ -48,9 +50,16 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
     }
 
-    // Pipeline logging start
+    // Pipeline logging start — ดึง session user สำหรับ tracking
     const _pipelineStart = Date.now();
-    await logPipeline({ workflowId, step: mode || 'unknown', status: 'started', detail: 'Input: ' + text.length + 'ch, sourceType=' + (sourceType || '-') });
+    let _user = { userId: null, userName: null };
+    try {
+      const cookieStore = await cookies();
+      const token = cookieStore.get('auth_token')?.value;
+      const session = await getSession(token);
+      if (session) _user = { userId: session.memberId, userName: session.displayName || session.username };
+    } catch {}
+    await logPipeline({ workflowId, step: mode || 'unknown', status: 'started', detail: 'Input: ' + text.length + 'ch, sourceType=' + (sourceType || '-'), ..._user });
 
     // === Content Length Config ===
     const lengthConfig = {

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { logPipeline } from '@/lib/pipelineLogger';
+import { getSession } from '@/lib/auth';
+import { cookies } from 'next/headers';
 
 /**
  * Auto Pipeline API
@@ -18,7 +20,15 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'กรุณาใส่ URL' }, { status: 400 });
     }
 
-    await logPipeline({ workflowId: _autoWorkflowId, step: 'auto-pipeline', status: 'started', detail: 'URL: ' + url.slice(0, 80) }).catch(() => {});
+    let _user = { userId: null, userName: null };
+    try {
+      const cookieStore = await cookies();
+      const token = cookieStore.get('auth_token')?.value;
+      const session = await getSession(token);
+      if (session) _user = { userId: session.memberId, userName: session.displayName || session.username };
+    } catch {}
+
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'auto-pipeline', status: 'started', detail: 'URL: ' + url.slice(0, 80), ..._user }).catch(() => {});
 
     const origin = new URL(request.url).origin;
     const baseUrl = origin;

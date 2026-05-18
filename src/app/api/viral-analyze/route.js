@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
 import { logPipeline } from '@/lib/pipelineLogger';
+import { getSession } from '@/lib/auth';
+import { cookies } from 'next/headers';
 
 // ===== AI Viral Content DNA Analyzer + Prompt Generator =====
 // Deep DNA Analysis Framework v2.0 — 12 มิติ
@@ -14,7 +16,14 @@ export async function POST(request) {
     }
 
     const _vaStart = Date.now();
-    logPipeline({ step: mode || 'viral-analyze', status: 'started', detail: 'Input: ' + text.length + 'ch, mode=' + mode }).catch(() => {});
+    let _user = { userId: null, userName: null };
+    try {
+      const cookieStore = await cookies();
+      const token = cookieStore.get('auth_token')?.value;
+      const session = await getSession(token);
+      if (session) _user = { userId: session.memberId, userName: session.displayName || session.username };
+    } catch {}
+    logPipeline({ step: mode || 'viral-analyze', status: 'started', detail: 'Input: ' + text.length + 'ch, mode=' + mode, ..._user }).catch(() => {});
 
     // ===== MODE: viral-analyze — วิเคราะห์ DNA 12 มิติ =====
     if (mode === 'viral-analyze') {

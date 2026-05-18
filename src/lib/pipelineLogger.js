@@ -41,6 +41,8 @@ export async function logPipeline(entry) {
     error_message: entry.error || null,
     detail: entry.detail || null,
     metadata: entry.metadata ? JSON.stringify(entry.metadata) : null,
+    user_id: entry.userId || null,
+    user_name: entry.userName || null,
     created_at: new Date().toISOString(),
   };
 

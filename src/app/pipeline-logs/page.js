@@ -216,11 +216,11 @@ export default function PipelineLogsPage() {
             <thead>
               <tr style={{ background: '#111827' }}>
                 <th style={th}>เวลา</th>
+                <th style={th}>ผู้ใช้</th>
                 <th style={th}>Step</th>
                 <th style={th}>สถานะ</th>
                 <th style={th}>Model</th>
                 <th style={{ ...th, textAlign: 'right' }}>ใช้เวลา</th>
-                <th style={th}>Workflow ID</th>
                 <th style={th}>รายละเอียด</th>
                 <th style={{ ...th, textAlign: 'center' }}>error</th>
               </tr>
@@ -241,6 +241,11 @@ export default function PipelineLogsPage() {
                       transition: 'background 0.15s',
                     }}>
                     <td style={td}><span style={{ color: '#475569', fontSize: '12px' }}>{fmt(log.created_at)}</span></td>
+                    <td style={td}>
+                      <span style={{ color: log.user_name ? '#a78bfa' : '#334155', fontSize: '12px', fontWeight: log.user_name ? 600 : 400 }}>
+                        {log.user_name ? '👤 ' + log.user_name : '-'}
+                      </span>
+                    </td>
                     <td style={td}>
                       <span style={{ background: '#1e293b', padding: '3px 8px', borderRadius: '4px', color: '#e2e8f0', fontSize: '12px', whiteSpace: 'nowrap' }}>
                         {stepCfg.icon} {stepCfg.label}
