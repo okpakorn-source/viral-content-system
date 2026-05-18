@@ -13,10 +13,11 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const {
-      images,           // string[] — base64 images
-      layout,           // { template, assignments, colorOverride } from /api/image-analyze
-      newsTitle,        // สำหรับ text version
-      generateText,     // boolean — สร้าง text version ด้วยไหม
+      images,
+      layout,
+      newsTitle,
+      generateText,
+      customTextPrompt,
     } = body;
 
     if (!images?.length || !layout) {
@@ -64,6 +65,7 @@ export async function POST(request) {
             headline: newsTitle,
             template: layout.template,
             colorScheme: tmpl.colorScheme,
+            customPrompt: customTextPrompt || null,
           }),
         });
         const textData = await textRes.json();

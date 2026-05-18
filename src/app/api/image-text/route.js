@@ -14,25 +14,15 @@ export async function POST(request) {
     }
 
     const body = await request.json();
-    const { imageBase64, headline, template, colorScheme } = body;
+    const { imageBase64, headline, template, colorScheme, customPrompt } = body;
 
     if (!imageBase64 || !headline) {
       return NextResponse.json({ success: false, error: 'ต้องการ imageBase64 และ headline' }, { status: 400 });
     }
 
-    // Choose text color based on template
-    const textColor = {
-      accident: '#ffffff',
-      crime:    '#ffffff',
-      politics: '#ffffff',
-      economy:  '#fef3c7',
-      entertainment: '#ffffff',
-    }[template] || '#ffffff';
+    const textColor = { accident:'#ffffff', crime:'#ffffff', politics:'#ffffff', economy:'#fef3c7', entertainment:'#ffffff' }[template] || '#ffffff';
 
-    const borderColor = colorScheme?.border || '#22c55e';
-
-    // Ideogram prompt for text overlay
-    const textPrompt = `Add bold Thai news headline text at the bottom of this news thumbnail image.
+    const defaultPrompt = `Add bold Thai news headline text at the bottom of this news thumbnail image.
 Text to add: "${headline}"
 Text style: Bold, white color with dark shadow/outline for readability, modern Thai news style
 Position: Bottom 20% of image, horizontally centered
@@ -40,6 +30,10 @@ Background: Semi-transparent dark bar behind text (#000000 at 65% opacity)
 Font: Modern sans-serif, large and impactful
 Do NOT change the main photo composition, only add the text overlay at the bottom
 Keep all existing image elements exactly as they are`;
+
+    const textPrompt = customPrompt
+      ? `${customPrompt}\nHeadline text to add: "${headline}"`
+      : defaultPrompt;
 
     // Convert base64 to blob for multipart form
     const imageBuffer = Buffer.from(imageBase64.replace(/^data:image\/\w+;base64,/, ''), 'base64');

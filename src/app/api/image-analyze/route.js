@@ -11,7 +11,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { images, newsTitle, newsType } = body;
+    const { images, newsTitle, newsType, customPrompt } = body;
 
     if (!images || images.length < 1) {
       return NextResponse.json({ success: false, error: 'กรุณาส่งรูปอย่างน้อย 1 รูป' }, { status: 400 });
@@ -26,10 +26,13 @@ export async function POST(request) {
       .join(', ');
 
     // Build content array: text + images
+    const customNote = customPrompt
+      ? `\n\nคำแนะนำเพิ่มเติมจากผู้ใช้: ${customPrompt}`
+      : '';
     const contentParts = [
       {
         type: 'text',
-        text: `คุณคือผู้เชี่ยวชาญออกแบบปกข่าวไทย
+        text: `คุณคือผู้เชี่ยวชาญออกแบบปกข่าวไทย${customNote}
 
 วิเคราะห์รูป ${images.length} รูปต่อไปนี้สำหรับข่าว:
 หัวข้อ: "${newsTitle || 'ไม่ระบุ'}"
