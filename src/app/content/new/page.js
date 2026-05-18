@@ -5,6 +5,31 @@ import { useSearchParams } from 'next/navigation';
 import Header from '@/components/layout/Header';
 import { useWorkflow } from '@/components/WorkflowContext';
 
+// Client-side image resize — ป้องกัน 413 Request Too Large
+function resizeImage(file, maxPx = 800, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width: w, height: h } = img;
+        if (w > maxPx || h > maxPx) {
+          if (w > h) { h = Math.round(h * maxPx / w); w = maxPx; }
+          else       { w = Math.round(w * maxPx / h); h = maxPx; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 const SOURCE_TYPES = [
   { value: 'url', label: '🔗 URL ข่าว/เว็บไซต์', desc: 'วางลิงก์ข่าว, บทความ, โพสต์' },
   { value: 'image', label: '📷 แคปภาพ/รูปโพสต์', desc: 'วางภาพ (Ctrl+V) หรือลากไฟล์มา' },
@@ -890,16 +915,15 @@ export default function NewContentPage() {
                       <span style={{ fontSize:22 }}>+</span>
                       <span>เพิ่มรูป</span>
                       <input type="file" accept="image/*" multiple style={{ display:'none' }} disabled={autoMode}
-                        onChange={e => {
+                        onChange={async e => {
                           const files = Array.from(e.target.files || []).slice(0, 5 - newsImagePreviews.length);
-                          files.forEach(file => {
-                            const reader = new FileReader();
-                            reader.onload = ev => {
+                          for (const file of files) {
+                            try {
+                              const b64 = await resizeImage(file, 800, 0.72);
                               setNewsImages(p => [...p, file]);
-                              setNewsImagePreviews(p => [...p, ev.target.result]);
-                            };
-                            reader.readAsDataURL(file);
-                          });
+                              setNewsImagePreviews(p => [...p, b64]);
+                            } catch(err) { console.warn('resize err:', err); }
+                          }
                           e.target.value = '';
                         }}
                       />

@@ -2,6 +2,32 @@
 import { useState, useCallback } from 'react';
 import Header from '@/components/layout/Header';
 
+// ── Resize image client-side before sending (ป้องกัน Vercel 4.5MB limit) ──
+function resizeImage(file, maxPx = 800, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width: w, height: h } = img;
+        if (w > maxPx || h > maxPx) {
+          if (w > h) { h = Math.round(h * maxPx / w); w = maxPx; }
+          else       { w = Math.round(w * maxPx / h); h = maxPx; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 const TEMPLATES_META = {
   accident:      { label: 'อุบัติเหตุ / ภัยพิบัติ', icon: '🚨', color: '#22c55e' },
   crime:         { label: 'อาชญากรรม',              icon: '🔴', color: '#ef4444' },
@@ -23,16 +49,19 @@ export default function ImageMakerPage() {
   const [downloaded, setDownloaded] = useState({});
 
   // ── Image Upload ──────────────────────────────────────────────
-  const handleFiles = useCallback((files) => {
+  const handleFiles = useCallback(async (files) => {
     const remaining = 5 - images.length;
-    const toAdd = Array.from(files).slice(0, remaining);
-    toAdd.forEach(file => {
-      if (!file.type.startsWith('image/')) return;
-      const reader = new FileReader();
-      reader.onload = e => setImages(prev => [...prev, e.target.result]);
-      reader.readAsDataURL(file);
-    });
+    const toAdd = Array.from(files).filter(f => f.type.startsWith('image/')).slice(0, remaining);
+    for (const file of toAdd) {
+      try {
+        const b64 = await resizeImage(file, 800, 0.72);
+        setImages(prev => [...prev, b64]);
+      } catch (e) {
+        console.warn('resize failed:', e);
+      }
+    }
   }, [images.length]);
+
 
   const removeImage = (idx) => setImages(prev => prev.filter((_, i) => i !== idx));
 
