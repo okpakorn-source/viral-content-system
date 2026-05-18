@@ -1,103 +1,110 @@
 import { NextResponse } from 'next/server';
-import { callAI } from '@/lib/ai/openai';
+import OpenAI from 'openai';
 import { detectTemplate, TEMPLATES } from '@/lib/imageTemplates';
 
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
 /**
- * Image Analyzer — GPT-4o Vision
- * รับรูป 2-5 รูป + ข้อมูลข่าว → ตัดสินใจ layout JSON
+ * Image Analyzer — GPT-4o Vision (Direct OpenAI call, ไม่ผ่าน callAI wrapper)
+ * รับรูป 2-5 รูป + ข้อมูลข่าว → layout JSON
  */
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { images, newsTitle, newsContent, newsType } = body;
+    const { images, newsTitle, newsType } = body;
 
     if (!images || images.length < 1) {
       return NextResponse.json({ success: false, error: 'กรุณาส่งรูปอย่างน้อย 1 รูป' }, { status: 400 });
     }
 
-    // Auto-detect template from news context
     const suggestedTemplate = detectTemplate(newsType || '', newsTitle || '');
     const tmpl = TEMPLATES[suggestedTemplate];
 
-    const availableRoles = tmpl.layout.zones
+    const availableZones = tmpl.layout.zones
       .filter(z => z.role !== 'background')
-      .map(z => `"${z.role}" (${z.id})`)
+      .map(z => `"${z.id}" (role: ${z.role})`)
       .join(', ');
 
-    // Build vision messages with images
-    const imageContents = images.slice(0, 5).map((src, i) => ({
-      type: 'image_url',
-      image_url: {
-        url: src.startsWith('data:') ? src : `data:image/jpeg;base64,${src}`,
-        detail: 'low',
-      },
-    }));
+    // Build content array: text + images
+    const contentParts = [
+      {
+        type: 'text',
+        text: `คุณคือผู้เชี่ยวชาญออกแบบปกข่าวไทย
 
-    const systemPrompt = `คุณคือผู้เชี่ยวชาญออกแบบปกข่าวไทย วิเคราะห์รูปที่ได้รับและกำหนด layout ที่เหมาะสมที่สุด`;
-
-    const userPrompt = `วิเคราะห์รูป ${images.length} รูปต่อไปนี้สำหรับข่าว:
+วิเคราะห์รูป ${images.length} รูปต่อไปนี้สำหรับข่าว:
 หัวข้อ: "${newsTitle || 'ไม่ระบุ'}"
 ประเภทข่าว: ${newsType || 'ไม่ระบุ'}
 
-Template ที่แนะนำ: "${suggestedTemplate}" (${tmpl.name})
-Zone ที่มีใน template: ${availableRoles}
+Template แนะนำ: "${suggestedTemplate}" (${tmpl.name})
+Zones ใน template: ${availableZones}
 
-งาน:
-1. ดูรูปแต่ละรูป แล้วกำหนดว่ารูปไหนควรเป็น role อะไร
-2. ถ้ารูปไหนเหมาะจะเป็น memorial (คนเสียชีวิต/สูญเสีย) ให้ระบุ
-3. ถ้ามีรูปน้อยกว่า zone ที่ต้องการ ให้ใช้รูปเดิมซ้ำในบาง zone ได้
-4. เลือก template ที่เหมาะสมที่สุด (อาจเปลี่ยนจากที่แนะนำได้)
+กฎ:
+- assignments.bg, assignments.main ต้องมีเสมอ (index 0-${images.length - 1})
+- ถ้ารูปน้อย ให้ใช้ index ซ้ำได้
+- ถ้าไม่มีรูป memorial ให้ละ key นั้น
 
-ตอบเป็น JSON เท่านั้น:
+ตอบเป็น JSON เท่านั้น (ห้ามมีข้อความอื่น):
 {
-  "template": "accident|crime|politics|economy|entertainment",
-  "assignments": {
-    "bg": 0,
-    "main": 0,
-    "context": 1,
-    "event": 2,
-    "secondary": 1,
-    "memorial": 3
-  },
-  "hasMemorial": true|false,
-  "colorOverride": null,
-  "confidence": 0-100,
-  "reasoning": "อธิบายสั้นๆ ว่าทำไมถึงเลือก layout นี้"
-}
+  "template": "${suggestedTemplate}",
+  "assignments": {"bg": 0, "main": 0, "context": 1, "event": 2, "secondary": 1, "memorial": 3},
+  "hasMemorial": false,
+  "confidence": 85,
+  "reasoning": "เหตุผลสั้นๆ ภาษาไทย"
+}`,
+      },
+      ...images.slice(0, 5).map(src => ({
+        type: 'image_url',
+        image_url: {
+          url: src.startsWith('data:') ? src : `data:image/jpeg;base64,${src}`,
+          detail: 'low',
+        },
+      })),
+    ];
 
-หมายเหตุ: assignments values คือ index ของรูป (0-based) ที่ส่งมา`;
-
-    const result = await callAI({
+    const response = await openai.chat.completions.create({
       model: 'gpt-4o',
-      systemPrompt,
-      prompt: userPrompt,
-      imageContents,
+      messages: [{ role: 'user', content: contentParts }],
       temperature: 0.2,
-      maxTokens: 600,
+      max_tokens: 500,
+      response_format: { type: 'json_object' },
     });
 
-    if (!result || typeof result !== 'object') {
-      throw new Error('AI ไม่สามารถวิเคราะห์รูปได้');
+    const raw = response.choices[0]?.message?.content || '{}';
+    let result;
+    try {
+      result = JSON.parse(raw);
+    } catch {
+      throw new Error('AI ตอบกลับ JSON ไม่ถูกต้อง: ' + raw.slice(0, 100));
     }
 
-    // Validate template
-    const template = TEMPLATES[result.template] ? result.template : suggestedTemplate;
+    // Validate & sanitize
+    const finalTemplate = TEMPLATES[result.template] ? result.template : suggestedTemplate;
+    const assignments = result.assignments || {};
+    // Ensure bg and main exist
+    if (assignments.bg === undefined) assignments.bg = 0;
+    if (assignments.main === undefined) assignments.main = 0;
+    // Clamp all indexes to valid range
+    const maxIdx = images.length - 1;
+    for (const key of Object.keys(assignments)) {
+      assignments[key] = Math.min(Math.max(0, parseInt(assignments[key]) || 0), maxIdx);
+    }
+
+    console.log('[ImageAnalyze] ✅ Template:', finalTemplate, '| Confidence:', result.confidence);
 
     return NextResponse.json({
       success: true,
       layout: {
-        template,
-        templateName: TEMPLATES[template].name,
-        assignments: result.assignments || { bg: 0, main: 0 },
-        hasMemorial: result.hasMemorial || false,
-        colorOverride: result.colorOverride || null,
+        template: finalTemplate,
+        templateName: TEMPLATES[finalTemplate].name,
+        assignments,
+        hasMemorial: Boolean(result.hasMemorial),
         confidence: result.confidence || 80,
         reasoning: result.reasoning || '',
       },
     });
 
   } catch (error) {
-    console.error('[ImageAnalyze]', error.message);
+    console.error('[ImageAnalyze] ERROR:', error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

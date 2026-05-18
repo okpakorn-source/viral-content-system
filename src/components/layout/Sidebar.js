@@ -45,6 +45,8 @@ export default function Sidebar() {
     { label: 'หอสมุดไวรัล', icon: '📚', href: '/viral-library' },
     { label: 'หอสมุด Prompt', icon: '🏛️', href: '/prompt-library' },
     { label: 'จัดการ AI Prompts', icon: '🤖', href: '/prompts' },
+    { label: 'Image Maker', icon: '🖼️', href: '/image-maker', highlight: true },
+
     { type: 'divider', label: 'ระบบ' },
     { label: 'เช็คสุขภาพระบบ', icon: '🔍', href: '/system-health' },
     { label: 'Pipeline Logs', icon: '📋', href: '/pipeline-logs' },
