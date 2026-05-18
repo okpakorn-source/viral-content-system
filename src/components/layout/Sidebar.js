@@ -38,6 +38,7 @@ export default function Sidebar() {
     { label: 'คอนเทนต์ทั้งหมด', icon: '📰', href: '/content' },
     { label: 'สร้างใหม่', icon: '✨', href: '/content/new', highlight: true },
     { type: 'divider', label: 'เครื่องมือ' },
+    { label: 'คลังข่าว', icon: '📦', href: '/news-archive' },
     { label: 'คลังรอตรวจ', icon: '📋', href: '/review', badge: reviewCount },
     { label: 'เผยแพร่', icon: '📤', href: '/publish' },
     { type: 'divider', label: 'AI Intelligence' },

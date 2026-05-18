@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Header from '@/components/layout/Header';
 import { useWorkflow } from '@/components/WorkflowContext';
 
@@ -36,9 +37,58 @@ export default function NewContentPage() {
   const [researching, setResearching] = useState(false);
   const [contentLength, setContentLength] = useState('short'); // short | medium | long
   const [addedResearchItems, setAddedResearchItems] = useState([]); // เก็บ research ที่เพิ่มแล้ว
+  const [archiveSaved, setArchiveSaved] = useState(false); // ป้องกัน save ซ้ำ
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [tiktokNeedUpload, setTiktokNeedUpload] = useState(false);
+
+  // === โหลดข้อมูลจากคลังข่าว (ถ้ามี ?archive_id) ===
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const archiveId = searchParams?.get('archive_id');
+    if (!archiveId) return;
+    fetch(`/api/news-archive/${archiveId}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.success && d.data) {
+          const item = d.data;
+          setNewsData({ newsTitle: item.title, newsBody: item.body, sourceUrl: item.source_url || '' });
+          setExtracted({ title: item.title, text: item.body, url: item.source_url || '' });
+          setStep('extracted');
+          setUrl(item.source_url || '');
+          setArchiveSaved(true);
+          console.log('[Archive] ✅ Loaded from archive:', archiveId);
+        }
+      })
+      .catch(() => {});
+  }, [searchParams]);
+
+  // === Auto-save เข้าคลังข่าว ===
+  const autoSaveToArchive = useCallback(async (newsDataArg, breakdownDataArg) => {
+    if (archiveSaved) return;
+    try {
+      const res = await fetch('/api/news-archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newsDataArg?.newsTitle || '',
+          newsBody: newsDataArg?.newsBody || '',
+          sourceUrl: newsDataArg?.sourceUrl || newsDataArg?.url || '',
+          sourceType: sourceType || 'web',
+          breakdownData: breakdownDataArg || null,
+          workflowId,
+          archivedBy: 'auto',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setArchiveSaved(true);
+        console.log('[Archive] ✅ Auto-saved:', data.data?.id, '|', data.data?.category);
+      }
+    } catch (e) {
+      console.warn('[Archive] Auto-save failed (non-critical):', e.message);
+    }
+  }, [archiveSaved, sourceType, workflowId]);
   const [videoFile, setVideoFile] = useState(null);
   const [youtubeNeedUpload, setYoutubeNeedUpload] = useState(false);
   const [sentToReview, setSentToReview] = useState({}); // { versionIndex: true }
@@ -132,6 +182,8 @@ export default function NewContentPage() {
       setAutoLog(data.data.log || []);
       setStep('analyzed');
       setAutoProgress('');
+      // 📦 Auto-save เข้าคลังข่าว
+      autoSaveToArchive(data.data.newsData, data.data.breakdownData).catch(() => {});
     } catch (err) {
       wfFail('auto_scrape', err.message);
       setError('Auto Mode: ' + err.message);
@@ -404,6 +456,8 @@ export default function NewContentPage() {
       }
       wfComplete('ai_breakdown', `${data.data?.possible_angles?.length || 0} มุมข่าว, ${data.data?.key_points?.length || 0} ประเด็น`);
       finishWorkflow('แตกประเด็นสำเร็จ');
+      // 📦 Auto-save เข้าคลังข่าว (fire-and-forget)
+      autoSaveToArchive(newsData, data.data).catch(() => {});
     } catch (err) {
       setError(err.message);
       wfFail('ai_breakdown', err.message);
