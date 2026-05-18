@@ -39,17 +39,23 @@ Style requirements:
 - No real photos, only design zones and layout structure
 - Show text area at bottom with headline placeholder`;
 
-    const form = new FormData();
-    form.append('prompt', fullPrompt);
-    form.append('aspect_ratio', 'ASPECT_1_1');
-    form.append('model', 'V_2');
-    form.append('style_type', 'DESIGN');
-    form.append('num_images', '2'); // สร้าง 2 ตัวอย่างให้เลือก
+    const requestBody = JSON.stringify({
+      image_request: {
+        prompt: fullPrompt,
+        aspect_ratio: 'ASPECT_1_1',
+        model: 'V_2',
+        style_type: 'DESIGN',
+        num_images: 2,
+      },
+    });
 
     const ideogramRes = await fetch('https://api.ideogram.ai/generate', {
       method: 'POST',
-      headers: { 'Api-Key': process.env.IDEOGRAM_API_KEY },
-      body: form,
+      headers: {
+        'Api-Key': process.env.IDEOGRAM_API_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: requestBody,
     });
 
     if (!ideogramRes.ok) {
