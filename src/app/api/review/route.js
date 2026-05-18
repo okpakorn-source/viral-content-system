@@ -1,190 +1,218 @@
-﻿import { NextResponse } from 'next/server';
-import { getSession, updateMemberStats } from '@/lib/auth';
+import { NextResponse } from 'next/server';
+import { getSession } from '@/lib/auth';
 import { cookies } from 'next/headers';
-import { readFile, writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
+import { getSupabase, isSupabaseReady } from '@/lib/supabase';
 import { randomUUID } from 'crypto';
 
-const IS_VERCEL = !!process.env.VERCEL;
-const DATA_DIR = IS_VERCEL ? '/tmp' : join(process.cwd(), 'data');
-const REVIEW_FILE = join(DATA_DIR, 'reviews.json');
-const BUNDLED_REVIEW_FILE = join(process.cwd(), 'data', 'reviews.json');
+/**
+ * Content Review Queue — ใช้ Supabase store_items แทน /tmp
+ * store_name: 'review-queue'
+ */
 
-async function loadReviews() {
+const STORE = 'review-queue';
+
+// ─── helpers ────────────────────────────────────────────────
+async function getUser() {
   try {
-    const data = await readFile(REVIEW_FILE, 'utf-8');
-    return JSON.parse(data);
-  } catch {
-    // Try bundled file (Vercel cold start)
-    try {
-      const { existsSync } = await import('fs');
-      if (existsSync(BUNDLED_REVIEW_FILE)) {
-        const data = await readFile(BUNDLED_REVIEW_FILE, 'utf-8');
-        const reviews = JSON.parse(data);
-        await saveReviews(reviews);
-        return reviews;
-      }
-    } catch {}
-    return [];
-  }
+    const cookieStore = await cookies();
+    const token = cookieStore.get('auth_token')?.value;
+    const session = await getSession(token);
+    if (session) return { id: session.memberId, name: session.displayName || session.username, avatar: session.avatar || '👤' };
+  } catch {}
+  return null;
 }
 
-async function saveReviews(reviews) {
-  await mkdir(DATA_DIR, { recursive: true });
-  await writeFile(REVIEW_FILE, JSON.stringify(reviews, null, 2), 'utf-8');
-  // Also save to repo dir if local
-  if (!IS_VERCEL) {
-    try {
-      await mkdir(join(process.cwd(), 'data'), { recursive: true });
-      await writeFile(BUNDLED_REVIEW_FILE, JSON.stringify(reviews, null, 2), 'utf-8');
-    } catch {}
-  }
+async function db() {
+  if (!isSupabaseReady()) throw new Error('Supabase ยังไม่พร้อม');
+  return getSupabase();
 }
 
-// GET — ดึงรายการทั้งหมด (filter by status)
+// ─── GET — โหลดรายการ ────────────────────────────────────────
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status'); // pending, approved, rejected, revision
-    const memberId = searchParams.get('member'); // filter by member
-    let reviews = await loadReviews();
+    const status   = searchParams.get('status')  || 'all';
+    const memberId = searchParams.get('member')   || '';
+    const search   = searchParams.get('search')   || '';
+    const page     = parseInt(searchParams.get('page')  || '1');
+    const limit    = parseInt(searchParams.get('limit') || '50');
 
-    // Sort by newest first
-    reviews.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const supabase = await db();
 
-    // Filter by member if specified
-    if (memberId) {
-      reviews = reviews.filter(r => r.submittedBy?.id === memberId);
-    }
+    let query = supabase
+      .from('store_items')
+      .select('*')
+      .eq('store_name', STORE)
+      .order('created_at', { ascending: false });
 
-    // Stats (from filtered data)
-    const stats = {
-      total: reviews.length,
-      pending: reviews.filter(r => r.status === 'pending').length,
-      approved: reviews.filter(r => r.status === 'approved').length,
-      rejected: reviews.filter(r => r.status === 'rejected').length,
-      revision: reviews.filter(r => r.status === 'revision').length,
-    };
-
-    // Filter after stats
+    // Status filter — stored in item_data->status
     if (status && status !== 'all') {
-      reviews = reviews.filter(r => r.status === status);
+      query = query.eq('item_data->>status', status);
     }
+    // Member filter
+    if (memberId) {
+      query = query.eq('item_data->submittedBy->>id', memberId);
+    }
+    // Full-text search on title
+    if (search) {
+      query = query.ilike('item_data->>title', `%${search}%`);
+    }
+
+    // Pagination
+    const offset = (page - 1) * limit;
+    query = query.range(offset, offset + limit - 1);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const reviews = (data || []).map(r => ({ id: r.item_id, ...r.item_data, _dbId: r.id }));
+
+    // Stats — counts per status
+    const { data: allData } = await supabase
+      .from('store_items')
+      .select('item_data')
+      .eq('store_name', STORE);
+
+    const allItems = (allData || []).map(r => r.item_data);
+    const stats = {
+      total: allItems.length,
+      pending:  allItems.filter(r => r.status === 'pending').length,
+      approved: allItems.filter(r => r.status === 'approved').length,
+      rejected: allItems.filter(r => r.status === 'rejected').length,
+      revision: allItems.filter(r => r.status === 'revision').length,
+    };
 
     return NextResponse.json({ success: true, reviews, stats });
   } catch (error) {
+    console.error('[Review GET]', error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-// POST — ส่งเข้าคลังรอตรวจ
+// ─── POST — ส่งเข้าคลัง ──────────────────────────────────────
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { title, content, sourceType, preset, presetLabel, contentLength, wordCount, angles } = body;
+    const { title, content, hook, closing, style, tone, target, sourceType, presetLabel, contentLength, wordCount, angles, newsTitle, newsSource, sourceVersion } = body;
 
-    if (!content || content.length < 20) {
+    if (!content || content.length < 10) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
     }
 
-    const reviews = await loadReviews();
+    const user = await getUser();
+    const itemId = randomUUID();
 
-    const newItem = {
-      id: randomUUID(),
-      title: title || 'ไม่มีหัวข้อ',
+    const item = {
+      id: itemId,
+      title: title || newsTitle || 'ไม่มีหัวข้อ',
       content,
+      hook: hook || '',
+      closing: closing || '',
+      style: style || '',
+      tone: tone || '',
+      target: target || '',
       sourceType: sourceType || 'url',
-      preset: preset || '',
       presetLabel: presetLabel || '',
-      contentLength: contentLength || 'short',
+      contentLength: contentLength || 'medium',
       wordCount: wordCount || content.split(/\s+/).length,
       angles: angles || [],
+      newsTitle: newsTitle || title || '',
+      newsSource: newsSource || '',
+      sourceVersion: sourceVersion || 'classic', // 'classic' | 'enhanced'
       status: 'pending',
-      submittedBy: null, // will be set below
+      submittedBy: user,
       note: '',
+      engagement: null,
       reviewedAt: null,
+      reviewedBy: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
-    // Add member info
-    try {
-      const cookieStore = await cookies();
-      const token = cookieStore.get('auth_token')?.value;
-      const session = await getSession(token);
-      if (session) {
-        newItem.submittedBy = { id: session.memberId, name: session.displayName, nickname: session.nickname || '', avatar: session.avatar };
-        await updateMemberStats(session.memberId, 'totalCreated');
-      }
-    } catch {}
+    const supabase = await db();
+    const { error } = await supabase.from('store_items').insert({
+      item_id: itemId,
+      store_name: STORE,
+      item_data: item,
+      created_at: item.createdAt,
+      updated_at: item.updatedAt,
+    });
 
-    reviews.push(newItem);
-    await saveReviews(reviews);
+    if (error) throw error;
 
-    console.log(`[Review] ✅ Added: "${newItem.title.slice(0, 50)}" (${newItem.id.slice(0, 8)})`);
-
-    return NextResponse.json({ success: true, item: newItem });
+    console.log(`[Review] ✅ Added: "${item.title.slice(0, 50)}" (${itemId.slice(0, 8)}) by ${user?.name || 'anon'}`);
+    return NextResponse.json({ success: true, item });
   } catch (error) {
+    console.error('[Review POST]', error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-// PUT — อัปเดตสถานะ (ผ่าน/ไม่ผ่าน/รอแก้ไข) + หมายเหตุ
-export async function PUT(request) {
+// ─── PATCH — อัปเดต status / note / engagement ───────────────
+export async function PATCH(request) {
   try {
-    const { id, status, note } = await request.json();
+    const body = await request.json();
+    const { id, status, note, engagement } = body;
 
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'ไม่พบ ID' }, { status: 400 });
-    }
+    if (!id) return NextResponse.json({ success: false, error: 'ไม่พบ ID' }, { status: 400 });
 
-    const reviews = await loadReviews();
-    const idx = reviews.findIndex(r => r.id === id);
+    const supabase = await db();
+    const { data, error: fetchErr } = await supabase
+      .from('store_items')
+      .select('*')
+      .eq('store_name', STORE)
+      .eq('item_id', id)
+      .single();
 
-    if (idx === -1) {
-      return NextResponse.json({ success: false, error: 'ไม่พบรายการ' }, { status: 404 });
-    }
+    if (fetchErr || !data) return NextResponse.json({ success: false, error: 'ไม่พบรายการ' }, { status: 404 });
 
-    if (status) reviews[idx].status = status;
-    if (note !== undefined) reviews[idx].note = note;
-    reviews[idx].reviewedAt = new Date().toISOString();
-    reviews[idx].updatedAt = new Date().toISOString();
+    const user = await getUser();
+    const updated = {
+      ...data.item_data,
+      updatedAt: new Date().toISOString(),
+    };
+    if (status !== undefined) { updated.status = status; updated.reviewedAt = new Date().toISOString(); updated.reviewedBy = user; }
+    if (note  !== undefined) updated.note = note;
+    if (engagement !== undefined) updated.engagement = { ...updated.engagement, ...engagement, recordedAt: new Date().toISOString() };
 
-    await saveReviews(reviews);
+    const { error: updateErr } = await supabase
+      .from('store_items')
+      .update({ item_data: updated, updated_at: updated.updatedAt })
+      .eq('store_name', STORE)
+      .eq('item_id', id);
 
-    const statusLabels = { approved: 'ผ่าน', rejected: 'ไม่ผ่าน', revision: 'รอแก้ไข', pending: 'รอตรวจ' };
-    console.log(`[Review] Updated ${id.slice(0, 8)}: ${statusLabels[status] || status}`);
+    if (updateErr) throw updateErr;
 
-    return NextResponse.json({ success: true, item: reviews[idx] });
+    return NextResponse.json({ success: true, item: updated });
   } catch (error) {
+    console.error('[Review PATCH]', error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-// DELETE — ลบรายการ
+// ─── PUT — backward compat → redirect to PATCH ───────────────
+export async function PUT(request) {
+  return PATCH(request);
+}
+
+// ─── DELETE ───────────────────────────────────────────────────
 export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
+    if (!id) return NextResponse.json({ success: false, error: 'ไม่พบ ID' }, { status: 400 });
 
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'ไม่พบ ID' }, { status: 400 });
-    }
+    const supabase = await db();
+    const { error } = await supabase
+      .from('store_items')
+      .delete()
+      .eq('store_name', STORE)
+      .eq('item_id', id);
 
-    let reviews = await loadReviews();
-    reviews = reviews.filter(r => r.id !== id);
-    await saveReviews(reviews);
-    // Update member stats
-    const submitter = reviews[idx]?.submittedBy?.id;
-    if (submitter) {
-      const statsMap = { approved: 'totalApproved', rejected: 'totalRejected', revision: 'totalRevision' };
-      if (statsMap[status]) {
-        await updateMemberStats(submitter, statsMap[status]).catch(() => {});
-      }
-    }
-
+    if (error) throw error;
     return NextResponse.json({ success: true });
   } catch (error) {
+    console.error('[Review DELETE]', error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

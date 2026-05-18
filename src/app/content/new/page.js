@@ -221,20 +221,27 @@ export default function NewContentPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: version.title || newsData?.newsTitle || 'ไม่มีหัวข้อ',
-          content: [version.hook ? `🪝 ${version.hook}` : '', version.title || '', version.content || '', version.closing ? `💬 ${version.closing}` : ''].filter(Boolean).join('\n\n'),
+          content: version.content || '',
+          hook: version.hook || '',
+          closing: version.closing || '',
+          style: version.style || '',
+          tone: version.tone || '',
+          target: version.target || '',
           sourceType,
-          preset: analysisResult?.usedPreset?.id || 'library',
-          presetLabel: analysisResult?.usedPreset?.name || '🏛️ Library',
+          presetLabel: analysisResult?.usedPreset?.name || analysisResult?.usedPreset?.id || '🏛️ Library',
           contentLength,
           wordCount: version.content?.split(/\s+/).length || 0,
           angles,
+          newsTitle: newsData?.newsTitle || '',
+          newsSource: url || '',
+          sourceVersion: version._source || 'classic', // 'classic' | 'enhanced'
         }),
       });
       const data = await res.json();
       if (data.success) {
         setSentToReview(prev => ({ ...prev, [index]: true }));
       } else {
-        setError(data.error || 'ส่งไม่สำเร็จ');
+        setError('ส่งไม่สำเร็จ: ' + (data.error || 'ไม่ทราบสาเหตุ'));
       }
     } catch (err) {
       setError('ส่งไม่สำเร็จ: ' + err.message);
@@ -242,6 +249,8 @@ export default function NewContentPage() {
       setSendingReview(null);
     }
   };
+
+
 
 
   // === STEP 1: ดึงเนื้อหาจาก URL ===
