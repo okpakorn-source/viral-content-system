@@ -183,17 +183,20 @@ export default function ViralLibraryPage() {
         body: JSON.stringify({ text: item.content, mode: 'viral-analyze' }),
       });
       const data1 = await res1.json();
-      if (!data1.success) { setMsg('❌ วิเคราะห์ล้มเหลว'); setProcessing(null); return; }
+      if (!data1.success) { setMsg('❌ วิเคราะห์ล้มเหลว: ' + (data1.error || 'ไม่ทราบสาเหตุ')); setProcessing(null); return; }
 
-      // Save analysis
-      await fetch('/api/viral-library', {
+      // Save analysis — ต้องรอ save เสร็จก่อนไป step 2
+      const saveRes = await fetch('/api/viral-library', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: item.id, analysis: data1.analysis }),
       });
+      const saveData = await saveRes.json();
+      if (!saveData.success) { setMsg('❌ บันทึกผลวิเคราะห์ล้มเหลว: ' + (saveData.error || '')); setProcessing(null); return; }
 
       // Step 2: Generate prompt
-      setMsg(`🔬 Step 2/2: สร้าง Prompt จาก "${data1.analysis.category}"...`);
+      const categoryName = data1.analysis.category || data1.analysis.dna_type || 'สำเร็จ';
+      setMsg(`🔬 Step 2/2: สร้าง Prompt จาก "${categoryName}"...`);
       const res2 = await fetch('/api/viral-analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -204,7 +207,7 @@ export default function ViralLibraryPage() {
         }),
       });
       const data2 = await res2.json();
-      if (!data2.success) { setMsg('❌ สร้าง Prompt ล้มเหลว'); setProcessing(null); return; }
+      if (!data2.success) { setMsg('❌ สร้าง Prompt ล้มเหลว: ' + (data2.error || 'ไม่ทราบสาเหตุ')); setProcessing(null); return; }
 
       // Save prompt to library item
       const r3 = await fetch('/api/viral-library', {
