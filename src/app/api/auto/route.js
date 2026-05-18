@@ -32,7 +32,6 @@ export async function POST(request) {
 
     const origin = new URL(request.url).origin;
     const baseUrl = origin;
-    const selectedPreset = preset || 'viral_fb';
     const selectedLength = contentLength || 'medium';
 
     // Helper — call internal API
@@ -129,23 +128,22 @@ export async function POST(request) {
 
     // === STEP 4: สร้างเนื้อหา (Analyze/Generate) ===
     const step4Start = Date.now();
-    addLog('Step4', `✍️ AI กำลังสร้างเนื้อหา (${selectedPreset}, ${selectedLength})...`);
-    addLog('Step4', `🧠 กำลังให้ AI วิเคราะห์แนวข่าว → เทียบกับ Prompt Library...`);
+    addLog('Step4', `📝 AI กำลังวิเคราะห์แนวข่าว → เทียบกับ Prompt Library → สร้างเนื้อหา...`);
     const analyzeRes = await callInternal('/api/summarize', {
       text: newsData.newsBody,
       newsTitle: newsData.newsTitle,
       breakdownData,
       sourceType: detectedType,
       mode: 'analyze',
-      analysisPresetId: selectedPreset,
       contentLength: selectedLength,
     });
     if (!analyzeRes.success) {
-      throw new Error('สร้างเนื้อหาไม่สำเร็จ');
+      // ส่ง error จริงออกมา (รวมถึง กรุณาเพิ่ม Prompt ในหอสมุดก่อน)
+      throw new Error(analyzeRes.error || 'สร้างเนื้อหาไม่สำเร็จ');
     }
     const analysisResult = analyzeRes.data;
     addLog('Step4', `✅ สร้าง ${analysisResult.versions?.length || 0} เวอร์ชัน (${((Date.now() - step4Start) / 1000).toFixed(1)}s)`);
-    await logPipeline({ workflowId: _autoWorkflowId, step: 'analyze', status: 'success', duration: Date.now() - step4Start, detail: (analysisResult.versions?.length || 0) + ' versions, preset=' + selectedPreset }).catch(() => {});
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'analyze', status: 'success', duration: Date.now() - step4Start, detail: (analysisResult.versions?.length || 0) + ' versions' }).catch(() => {});
 
     // === Prompt Library info ===
     const usedPreset = analysisResult.usedPreset || null;
@@ -164,7 +162,7 @@ export async function POST(request) {
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
     addLog('Done', `✅ เสร็จสมบูรณ์ ${totalTime}s`);
-    await logPipeline({ workflowId: _autoWorkflowId, step: 'auto-pipeline', status: 'success', duration: Date.now() - startTime, detail: 'Total: ' + totalTime + 's, preset=' + selectedPreset }).catch(() => {});
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'auto-pipeline', status: 'success', duration: Date.now() - startTime, detail: 'Total: ' + totalTime + 's' }).catch(() => {});
 
     return NextResponse.json({
       success: true,
