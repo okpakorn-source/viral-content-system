@@ -6,6 +6,7 @@ import { MasterAgent } from '@/lib/agents/masterAgent';
 import { callSmartAI, getAvailableModels } from '@/lib/ai/aiRouter';
 import { moderateVersions } from '@/lib/ai/moderationAgent';
 import { createStore } from '@/lib/persistStore';
+import { logPipeline } from '@/lib/pipelineLogger';
 
 /**
  * ดึง summary จาก AI response ไม่ว่า key จะชื่ออะไร
@@ -46,6 +47,10 @@ export async function POST(request) {
     if (!text || text.length < 10) {
       return NextResponse.json({ success: false, error: 'เนื้อหาสั้นเกินไป' }, { status: 400 });
     }
+
+    // Pipeline logging start
+    const _pipelineStart = Date.now();
+    await logPipeline({ workflowId, step: mode || 'unknown', status: 'started', detail: 'Input: ' + text.length + 'ch, sourceType=' + (sourceType || '-') });
 
     // === Content Length Config ===
     const lengthConfig = {
@@ -681,47 +686,20 @@ ${promptCatalog}
         const keyPeople = actualBreakdown.key_facts?.people?.join(', ') || '';
         const keyPlaces = actualBreakdown.key_facts?.places?.join(', ') || '';
 
-        const researchPrompt = `คุณคือ AI Research Agent ที่เชี่ยวชาญในการหาข้อมูลเพิ่มเติมเพื่อเสริมเนื้อหาข่าว
+        const researchPromptTemplate = getPrompt('research');
+        const analysisCtx = [
+          coreStory && ('แก่นข่าว: ' + coreStory),
+          keyPointsSummary && ('ประเด็นสำคัญ: ' + keyPointsSummary),
+          keyPeople && ('บุคคลสำคัญ: ' + keyPeople),
+          keyPlaces && ('สถานที่: ' + keyPlaces),
+        ].filter(Boolean).join('\n');
 
-=== หัวข้อข่าว ===
-${actualNewsTitle}
+        const researchPrompt = researchPromptTemplate.prompt
+          .replace('{title}', actualNewsTitle)
+          .replace('{content}', actualNewsBody.slice(0, 3000))
+          .replace('{analysis_context}', analysisCtx);
 
-=== สรุปเนื้อข่าว ===
-${actualNewsBody.slice(0, 3000)}
-
-=== ผลวิเคราะห์ ===
-แก่นข่าว: ${coreStory}
-ประเด็นสำคัญ: ${keyPointsSummary}
-บุคคลสำคัญ: ${keyPeople}
-สถานที่: ${keyPlaces}
-
-=== คำสั่ง ===
-จากข่าวนี้ ช่วยหาข้อมูลเพิ่มเติมที่เกี่ยวข้องและน่าสนใจ เพื่อให้คนเขียนคอนเทนต์นำไปใช้เสริมความลึกให้เนื้อหา
-
-สร้างข้อมูลเพิ่มเติม 6-8 รายการ ในหมวดต่อไปนี้:
-1. 📊 สถิติ — ตัวเลข/สถิติที่เกี่ยวข้องกับประเด็นนี้ (เช่น สถิติอุบัติเหตุ, สถิติคดี, จำนวนผู้ได้รับผลกระทบ)
-2. 📰 กรณีคล้าย — เหตุการณ์คล้ายกันที่เคยเกิดขึ้น (อ้างอิงเหตุการณ์จริง ถ้ามี)
-3. 🎓 ความเห็นผู้เชี่ยวชาญ — มุมมองที่ผู้เชี่ยวชาญในด้านนี้มักจะให้ (เช่น นักจิตวิทยา, นักกฎหมาย, แพทย์)
-4. ⚖️ กฎหมาย — กฎหมายหรือข้อบังคับที่เกี่ยวข้องกับเหตุการณ์นี้
-5. 📋 ข้อมูลพื้นหลัง — บริบท/ประวัติที่ช่วยให้เข้าใจข่าวนี้มากขึ้น
-6. 🔮 แนวโน้ม — ผลกระทบหรือสิ่งที่น่าจะเกิดขึ้นต่อจากเหตุการณ์นี้
-
-กฎ:
-- เนื้อหาแต่ละรายการต้องยาว 2-4 ประโยค ให้รายละเอียดพอที่จะนำไปใช้ได้จริง
-- ต้องเกี่ยวข้องกับข่าวโดยตรง
-- ระบุ relevance ว่าข้อมูลนี้ช่วยเสริมเนื้อหาอย่างไร
-- ห้ามแต่งข้อมูลเท็จ ถ้าไม่แน่ใจให้ระบุว่า "ข้อมูลอ้างอิงทั่วไป"
-
-ตอบเป็น JSON:
-{
-  "items": [
-    {"type": "สถิติ", "title": "หัวข้อสั้นๆ", "content": "รายละเอียด 2-4 ประโยค", "relevance": "เกี่ยวข้องกับข่าวอย่างไร"},
-    {"type": "กรณีคล้าย", "title": "หัวข้อ", "content": "รายละเอียด", "relevance": "เกี่ยวข้องอย่างไร"},
-    ...
-  ]
-}`;
-
-        console.log(`[Research] Prompt length: ${researchPrompt.length}ch`);
+        console.log(`[Research] Prompt from promptStore, length: ${researchPrompt.length}ch`); ${researchPrompt.length}ch`);
 
         let result, usedModel;
         try {
