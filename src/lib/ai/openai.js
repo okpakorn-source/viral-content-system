@@ -18,7 +18,7 @@ export function getOpenAIClient() {
  * เรียก AI — Single prompt system
  * callAI({ prompt: "..." }) — prompt เดียวครบ
  */
-export async function callAI({ prompt, systemPrompt, userPrompt, model = 'gpt-4o', temperature = 0.7, maxTokens = 4000 }) {
+export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, model = 'gpt-4o', temperature = 0.7, maxTokens = 4000 }) {
   const client = getOpenAIClient();
 
   if (!client) {
@@ -131,15 +131,29 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
 หลักการ: เปลี่ยนจาก "ความแรง" → "อารมณ์" เน้น emotional storytelling, human emotion, social conflict แทน shock/gore/rage bait
 === จบ FACEBOOK SAFETY RULES ===`;
 
-  const messages = prompt
+  // Build user message content — support vision (imageContents)
+  let userContent;
+  if (imageContents && imageContents.length > 0) {
+    // Vision mode: text + images
+    const textPart = prompt || userPrompt || '';
+    userContent = [
+      { type: 'text', text: textPart },
+      ...imageContents,
+    ];
+  } else {
+    userContent = prompt || userPrompt || '';
+  }
+
+  const messages = prompt || imageContents
     ? [
-        { role: 'system', content: systemMsg },
-        { role: 'user', content: prompt },
+        { role: 'system', content: systemPrompt || systemMsg },
+        { role: 'user', content: userContent },
       ]
     : [
         { role: 'system', content: systemPrompt || systemMsg },
-        { role: 'user', content: userPrompt },
+        { role: 'user', content: userContent },
       ];
+
 
   // Debug log — แสดง prompt ที่ส่งไปจริง
   console.log(`[callAI] model=${model}, temp=${temperature}, maxTokens=${maxTokens}`);

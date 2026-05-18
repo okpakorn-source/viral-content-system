@@ -100,6 +100,13 @@ export default function NewContentPage() {
   const [autoProgress, setAutoProgress] = useState('');
   const [autoLog, setAutoLog] = useState([]);
 
+  // Image Composer states
+  const [newsImages, setNewsImages] = useState([]);         // File[] ที่ user อัปโหลด
+  const [newsImagePreviews, setNewsImagePreviews] = useState([]); // base64 preview
+  const [composingImage, setComposingImage] = useState(false);
+  const [composedImages, setComposedImages] = useState(null); // { layout, text }
+  const [imageLayout, setImageLayout] = useState(null);     // layout JSON จาก AI
+
   // Workflow tracker
   const { startWorkflow, startStep: wfStart, completeStep: wfComplete, failStep: wfFail, finishWorkflow } = useWorkflow();
 
@@ -197,6 +204,45 @@ export default function NewContentPage() {
       }
       if (data.data.researchItems?.length > 0) {
         setResearchData({ items: data.data.researchItems, keywords: [] });
+      }
+
+      // === ⚡ Image Pipeline (ถ้ามีรูป) ===
+      if (newsImagePreviews.length > 0) {
+        setComposingImage(true);
+        setAutoProgress('🖼️ AI กำลังวิเคราะห์รูปและสร้างปกข่าว...');
+        try {
+          // Step 1: Analyze layout
+          const analyzeRes = await fetch('/api/image-analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              images: newsImagePreviews,
+              newsTitle: data.data.newsData?.newsTitle || '',
+              newsType: data.data.breakdownData?.category || '',
+            }),
+          });
+          const analyzeData = await analyzeRes.json();
+          if (analyzeData.success) {
+            setImageLayout(analyzeData.layout);
+            // Step 2: Compose
+            const composeRes = await fetch('/api/image-compose', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                images: newsImagePreviews,
+                layout: analyzeData.layout,
+                newsTitle: data.data.newsData?.newsTitle || '',
+                generateText: true,
+              }),
+            });
+            const composeData = await composeRes.json();
+            if (composeData.success) setComposedImages(composeData.versions);
+          }
+        } catch (imgErr) {
+          console.warn('[ImagePipeline] non-critical error:', imgErr.message);
+        } finally {
+          setComposingImage(false);
+        }
       }
       setStep('analyzed');
       setAutoProgress('');
@@ -824,18 +870,61 @@ export default function NewContentPage() {
                 ))}
               </div>
 
+              {/* 📸 Image Upload Zone */}
+              <div style={{ marginTop: 12, padding: 12, background: 'rgba(255,255,255,0.03)', border: '1px dashed rgba(255,255,255,0.15)', borderRadius: 'var(--radius-md)' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8 }}>
+                  📸 อัปโหลดรูปประกอบข่าว <span style={{ fontWeight: 400 }}>(ไม่บังคับ — ถ้ามีรูป AI จะสร้างปกข่าวให้อัตโนมัติ)</span>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {newsImagePreviews.map((src, i) => (
+                    <div key={i} style={{ position: 'relative', width: 68, height: 68, borderRadius: 8, overflow: 'hidden', border: '2px solid rgba(249,24,128,0.4)' }}>
+                      <img src={src} alt={`img${i}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <button onClick={() => {
+                        setNewsImages(p => p.filter((_,j) => j !== i));
+                        setNewsImagePreviews(p => p.filter((_,j) => j !== i));
+                      }} style={{ position:'absolute', top:2, right:2, width:18, height:18, borderRadius:'50%', background:'rgba(0,0,0,0.75)', border:'none', color:'#fff', fontSize:10, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', lineHeight:1 }}>✕</button>
+                    </div>
+                  ))}
+                  {newsImagePreviews.length < 5 && (
+                    <label style={{ width:68, height:68, borderRadius:8, border:'1px dashed rgba(255,255,255,0.2)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'var(--text-muted)', fontSize:10, gap:4 }}>
+                      <span style={{ fontSize:22 }}>+</span>
+                      <span>เพิ่มรูป</span>
+                      <input type="file" accept="image/*" multiple style={{ display:'none' }} disabled={autoMode}
+                        onChange={e => {
+                          const files = Array.from(e.target.files || []).slice(0, 5 - newsImagePreviews.length);
+                          files.forEach(file => {
+                            const reader = new FileReader();
+                            reader.onload = ev => {
+                              setNewsImages(p => [...p, file]);
+                              setNewsImagePreviews(p => [...p, ev.target.result]);
+                            };
+                            reader.readAsDataURL(file);
+                          });
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                  )}
+                  {newsImagePreviews.length > 0 && (
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4 }}>
+                      {newsImagePreviews.length}/5 รูป<br/>AI จะจัดวาง<br/>ให้อัตโนมัติ
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Auto Progress */}
-              {autoMode && (
+              {(autoMode || composingImage) && (
                 <div style={{
                   background: 'var(--bg-primary)', padding: 14, borderRadius: 'var(--radius-md)',
                   border: '1px solid var(--border)', marginTop: 10,
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                     <div style={{ width: 20, height: 20, border: '3px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-light)' }}>{autoProgress}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-light)' }}>{autoProgress || (composingImage ? '🖼️ กำลังสร้างปกข่าว...' : '')}</span>
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                    🧬 Classic + Enhanced | ⚡ Blueprint | 🔍 Research | รองรับ URL / TikTok / YouTube (ใช้เวลา ~25-45 วินาที)
+                    🧬 Classic + Enhanced | ⚡ Blueprint | 🔍 Research | 🖼️ Image Composer | รองรับ URL / TikTok / YouTube (~25-50 วินาที)
                   </div>
                 </div>
               )}
@@ -849,7 +938,45 @@ export default function NewContentPage() {
                   </div>
                 </details>
               )}
+
+              {/* 🖼️ Image Result */}
+              {composedImages && !composingImage && (
+                <div style={{ marginTop: 14, padding: 14, background: 'rgba(249,24,128,0.06)', border: '1px solid rgba(249,24,128,0.2)', borderRadius: 'var(--radius-md)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: '#f472b6', marginBottom: 10 }}>
+                    🖼️ ปกข่าวที่สร้างได้
+                    {imageLayout && <span style={{ fontWeight: 400, fontSize: 10, marginLeft: 8, color: 'var(--text-muted)' }}>Template: {imageLayout.templateName} ({imageLayout.confidence}% confident)</span>}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+                    {composedImages.layout && (
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6, fontWeight: 700 }}>🖼️ Layout (ไม่มีข้อความ)</div>
+                        <img src={composedImages.layout.imageBase64} alt="layout" style={{ width: '100%', borderRadius: 8, border: '1px solid var(--border)' }} />
+                        <a href={composedImages.layout.imageBase64} download="news-layout.jpg"
+                          style={{ display: 'block', marginTop: 6, padding: '6px 12px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11, color: 'var(--text-secondary)', textDecoration: 'none', fontWeight: 700, textAlign: 'center' }}>
+                          📥 Download
+                        </a>
+                      </div>
+                    )}
+                    {composedImages.text && (
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6, fontWeight: 700 }}>✏️ พร้อมข้อความ (Ideogram)</div>
+                        <img src={composedImages.text.imageBase64} alt="with-text" style={{ width: '100%', borderRadius: 8, border: '1px solid rgba(249,24,128,0.3)' }} />
+                        <a href={composedImages.text.imageBase64} download="news-with-text.jpg"
+                          style={{ display: 'block', marginTop: 6, padding: '6px 12px', background: 'linear-gradient(135deg, #f91880, #7c3aed)', border: 'none', borderRadius: 6, fontSize: 11, color: '#fff', textDecoration: 'none', fontWeight: 700, textAlign: 'center' }}>
+                          📥 Download
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                  {imageLayout?.reasoning && (
+                    <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                      🤖 AI: {imageLayout.reasoning}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
+
 
             {/* Divider */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
