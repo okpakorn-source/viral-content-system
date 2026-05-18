@@ -4,9 +4,11 @@ import { getSession } from '@/lib/auth';
 import { cookies } from 'next/headers';
 
 /**
- * Auto Pipeline API
- * รับ URL เดียว → ดึงเนื้อหา → สกัดข่าว → แตกประเด็น → สร้างผลลัพธ์
- * ทุก step ทำอัตโนมัติ ไม่ต้องกดอะไร
+ * Auto Pipeline API V2
+ * รัน 2 pipeline พร้อมกัน:
+ *   Classic: Scrape → Extract → Breakdown → Generate (เหมือนเดิม)
+ *   Enhanced: + Blueprint + Research → Generate (คุณภาพสูงขึ้น)
+ * รวม versions ทั้งหมดเพื่อให้เลือกใช้ได้หลากหลาย
  */
 export async function POST(request) {
   const startTime = Date.now();
@@ -124,52 +126,154 @@ export async function POST(request) {
     }
     const breakdownData = breakRes.data;
     addLog('Step3', `✅ ${breakdownData.key_points?.length || 0} ประเด็น, ${breakdownData.possible_angles?.length || 0} มุมข่าว (${((Date.now() - step3Start) / 1000).toFixed(1)}s)`);
-    await logPipeline({ workflowId: _autoWorkflowId, step: 'breakdown', status: 'success', duration: Date.now() - step3Start, detail: (breakdownData.key_points?.length || 0) + ' key points, ' + (breakdownData.possible_angles?.length || 0) + ' angles' }).catch(() => {});
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'breakdown', status: 'success', duration: Date.now() - step3Start, detail: (breakdownData.key_points?.length || 0) + ' key points' }).catch(() => {});
 
-    // === STEP 4: สร้างเนื้อหา (Analyze/Generate) ===
-    const step4Start = Date.now();
-    addLog('Step4', `📝 AI กำลังวิเคราะห์แนวข่าว → เทียบกับ Prompt Library → สร้างเนื้อหา...`);
-    const analyzeRes = await callInternal('/api/summarize', {
-      text: newsData.newsBody,
-      newsTitle: newsData.newsTitle,
-      breakdownData,
-      sourceType: detectedType,
-      mode: 'analyze',
-      contentLength: selectedLength,
-    });
-    if (!analyzeRes.success) {
-      // ส่ง error จริงออกมา (รวมถึง กรุณาเพิ่ม Prompt ในหอสมุดก่อน)
-      throw new Error(analyzeRes.error || 'สร้างเนื้อหาไม่สำเร็จ');
-    }
-    const analysisResult = analyzeRes.data;
-    addLog('Step4', `✅ สร้าง ${analysisResult.versions?.length || 0} เวอร์ชัน (${((Date.now() - step4Start) / 1000).toFixed(1)}s)`);
-    await logPipeline({ workflowId: _autoWorkflowId, step: 'analyze', status: 'success', duration: Date.now() - step4Start, detail: (analysisResult.versions?.length || 0) + ' versions' }).catch(() => {});
+    // ===================================================================
+    // === PIPELINE A (Classic) + PIPELINE B (Enhanced) รันพร้อมกัน ===
+    // ===================================================================
+
+    const stepParallelStart = Date.now();
+    addLog('Parallel', '🚀 เริ่มรัน Classic + Enhanced พร้อมกัน...');
+
+    const [classicResult, enhancedBundle] = await Promise.allSettled([
+
+      // ── PIPELINE A: Classic (เหมือนเดิม ไม่เปลี่ยน) ──────────────────
+      (async () => {
+        const t = Date.now();
+        addLog('Classic', '📝 สร้างเนื้อหา Classic...');
+        const res = await callInternal('/api/summarize', {
+          text: newsData.newsBody,
+          newsTitle: newsData.newsTitle,
+          breakdownData,
+          sourceType: detectedType,
+          mode: 'analyze',
+          contentLength: selectedLength,
+        });
+        if (!res.success) throw new Error(res.error || 'Classic generate ไม่สำเร็จ');
+        addLog('Classic', `✅ ${res.data.versions?.length || 0} เวอร์ชัน (${((Date.now() - t) / 1000).toFixed(1)}s)`);
+        return res.data;
+      })(),
+
+      // ── PIPELINE B: Enhanced (Blueprint + Research → Generate) ─────────
+      (async () => {
+        // B1: Blueprint + Research ทำพร้อมกัน (Parallel)
+        const bpStart = Date.now();
+        addLog('Enhanced', '🧬 วาง Blueprint + 🔍 Research พร้อมกัน...');
+
+        const [bpResult, resResult] = await Promise.allSettled([
+          callInternal('/api/summarize', {
+            text: newsData.newsBody,
+            newsTitle: newsData.newsTitle,
+            mode: 'blueprint',
+            breakdownData,
+          }),
+          callInternal('/api/research-search', {
+            newsTitle: newsData.newsTitle,
+            newsBody: newsData.newsBody,
+            breakdownData,
+          }),
+        ]);
+
+        const blueprint = (bpResult.status === 'fulfilled' && bpResult.value?.success)
+          ? bpResult.value.data?.blueprint : null;
+
+        const researchItems = (resResult.status === 'fulfilled' && resResult.value?.success)
+          ? (resResult.value.data?.items || resResult.value.data?.results || []) : [];
+
+        if (blueprint) {
+          addLog('Enhanced', `✅ Blueprint: ${blueprint.core_emotion} | Research: ${researchItems.length} แหล่ง (${((Date.now() - bpStart) / 1000).toFixed(1)}s)`);
+        } else {
+          addLog('Enhanced', `⚠️ Blueprint ไม่สำเร็จ | Research: ${researchItems.length} แหล่ง`);
+        }
+
+        // B2: Generate ด้วย Blueprint + Research
+        const genStart = Date.now();
+        addLog('Enhanced', '✍️ สร้างเนื้อหา Enhanced...');
+        const res = await callInternal('/api/summarize', {
+          text: newsData.newsBody,
+          newsTitle: newsData.newsTitle,
+          breakdownData,
+          sourceType: detectedType,
+          mode: 'analyze',
+          contentLength: selectedLength,
+          emotionalBlueprint: blueprint,
+          researchData: researchItems.length > 0 ? { items: researchItems } : null,
+        });
+        if (!res.success) throw new Error(res.error || 'Enhanced generate ไม่สำเร็จ');
+        addLog('Enhanced', `✅ ${res.data.versions?.length || 0} เวอร์ชัน Enhanced (${((Date.now() - genStart) / 1000).toFixed(1)}s)`);
+        return { analysisData: res.data, blueprint, researchItems };
+      })(),
+    ]);
+
+    addLog('Parallel', `✅ ทั้งสอง pipeline เสร็จ (${((Date.now() - stepParallelStart) / 1000).toFixed(1)}s)`);
+
+    // === รวม versions ทั้งหมด ===
+    const classicData = classicResult.status === 'fulfilled' ? classicResult.value : null;
+    const enhancedData = enhancedBundle.status === 'fulfilled' ? enhancedBundle.value : null;
+
+    // Classic versions — tag ว่า Classic
+    const classicVersions = (classicData?.versions || []).map((v, i) => ({
+      ...v,
+      _source: 'classic',
+      _sourceLabel: '⚡ Classic',
+      style: v.style || `classic_${i + 1}`,
+    }));
+
+    // Enhanced versions — tag ว่า Enhanced
+    const enhancedVersions = (enhancedData?.analysisData?.versions || []).map((v, i) => ({
+      ...v,
+      _source: 'enhanced',
+      _sourceLabel: '🧬 Enhanced',
+      style: v.style ? `enhanced_${v.style}` : `enhanced_${i + 1}`,
+    }));
+
+    // รวมกัน: Enhanced มาก่อน (คุณภาพสูงกว่า), ตามด้วย Classic
+    const allVersions = [...enhancedVersions, ...classicVersions];
+
+    // ใช้ analysisResult จาก Classic (หรือ Enhanced ถ้า Classic ล้มเหลว) สำหรับ meta
+    const primaryResult = classicData || enhancedData?.analysisData || {};
+
+    const blueprint = enhancedData?.blueprint || null;
+    const researchItems = enhancedData?.researchItems || [];
+
+    // log สรุป
+    if (classicResult.status === 'rejected') addLog('Classic', `❌ ${classicResult.reason?.message || 'failed'}`);
+    if (enhancedBundle.status === 'rejected') addLog('Enhanced', `❌ ${enhancedBundle.reason?.message || 'failed'}`);
+    if (allVersions.length === 0) throw new Error('ทั้ง Classic และ Enhanced สร้างเนื้อหาไม่สำเร็จ');
+
+    addLog('Summary', `📊 รวม ${allVersions.length} เวอร์ชัน (Classic: ${classicVersions.length}, Enhanced: ${enhancedVersions.length})`);
+    if (blueprint) addLog('Summary', `🧬 Blueprint: ${blueprint.core_emotion}`);
+    if (researchItems.length) addLog('Summary', `🔍 Research: ${researchItems.length} แหล่งข้อมูล`);
 
     // === Prompt Library info ===
-    const usedPreset = analysisResult.usedPreset || null;
-    const newsType = analysisResult.debug?.newsTypeDetected || '';
-    if (newsType) {
-      addLog('Prompt', `🧠 AI วิเคราะห์: ข่าว${newsType}`);
-    }
+    const usedPreset = primaryResult.usedPreset || null;
+    const newsType = primaryResult.debug?.newsTypeDetected || '';
+    if (newsType) addLog('Prompt', `🧠 AI วิเคราะห์: ข่าว${newsType}`);
     if (usedPreset?.source === 'library') {
       addLog('Prompt', `🏛️ ใช้ Library: "${usedPreset.name}" (Viral: ${usedPreset.viralScore || '-'})`);
-    } else if (usedPreset) {
-      addLog('Prompt', `📦 ใช้ Preset: "${usedPreset.name}"`);
     }
-    if (analysisResult.debug?.promptMatchReason) {
-      addLog('Prompt', `${analysisResult.debug.promptMatchReason}`);
+    if (primaryResult.debug?.promptMatchReason) {
+      addLog('Prompt', `${primaryResult.debug.promptMatchReason}`);
     }
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-    addLog('Done', `✅ เสร็จสมบูรณ์ ${totalTime}s`);
-    await logPipeline({ workflowId: _autoWorkflowId, step: 'auto-pipeline', status: 'success', duration: Date.now() - startTime, detail: 'Total: ' + totalTime + 's' }).catch(() => {});
+    addLog('Done', `✅ เสร็จสมบูรณ์ ${totalTime}s | ${allVersions.length} เวอร์ชัน`);
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'auto-pipeline', status: 'success', duration: Date.now() - startTime, detail: `Total: ${totalTime}s | ${allVersions.length} versions` }).catch(() => {});
 
     return NextResponse.json({
       success: true,
       data: {
         newsData,
         breakdownData,
-        analysisResult,
+        analysisResult: {
+          ...primaryResult,
+          versions: allVersions, // รวมทั้งหมด
+        },
+        // Extra data สำหรับ UI แสดง
+        blueprint,
+        researchItems,
+        classicVersionCount: classicVersions.length,
+        enhancedVersionCount: enhancedVersions.length,
         sourceType: detectedType,
         preset: 'library',
         contentLength: selectedLength,
@@ -178,15 +282,15 @@ export async function POST(request) {
           source: usedPreset.source,
           name: usedPreset.name,
           viralScore: usedPreset.viralScore || null,
-          matchReason: analysisResult.debug?.promptMatchReason || '',
+          matchReason: primaryResult.debug?.promptMatchReason || '',
           newsType: newsType || '',
         } : null,
         stepTimings: {
           detect: ((step1Start - step0Start) / 1000).toFixed(1),
           scrape: ((step2Start - step1Start) / 1000).toFixed(1),
           extract: ((step3Start - step2Start) / 1000).toFixed(1),
-          breakdown: ((step4Start - step3Start) / 1000).toFixed(1),
-          generate: ((Date.now() - step4Start) / 1000).toFixed(1),
+          breakdown: ((stepParallelStart - step3Start) / 1000).toFixed(1),
+          generate: ((Date.now() - stepParallelStart) / 1000).toFixed(1),
         },
         log,
       },

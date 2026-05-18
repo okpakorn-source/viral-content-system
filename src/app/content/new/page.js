@@ -115,13 +115,15 @@ export default function NewContentPage() {
 
     // Start workflow tracker
     const domain = url ? (() => { try { return new URL(url).hostname; } catch { return url.slice(0, 30); } })() : 'unknown';
-    startWorkflow('Auto Pipeline', [
+    startWorkflow('Auto Pipeline V2', [
       { id: 'auto_detect', label: 'ตรวจจับแหล่งข้อมูล' },
       { id: 'auto_scrape', label: 'ดึงเนื้อหา' },
       { id: 'auto_extract', label: 'สกัดเนื้อข่าว (AI)' },
       { id: 'auto_breakdown', label: 'แตกประเด็น (AI)' },
-      { id: 'auto_lib_check', label: 'ตรวจ Prompt Library' },
-      { id: 'auto_generate', label: 'สร้างผลลัพธ์ (AI)' },
+      { id: 'auto_blueprint', label: '🧬 วาง Emotional Blueprint' },
+      { id: 'auto_research', label: '🔍 ค้นหาข้อมูล (Google)' },
+      { id: 'auto_classic', label: '⚡ Classic Generate' },
+      { id: 'auto_enhanced', label: '🧬 Enhanced Generate' },
     ], { type: 'URL', label: domain });
     wfStart('auto_detect', { detail: 'ตรวจสอบประเภท URL...' });
 
@@ -147,8 +149,10 @@ export default function NewContentPage() {
       const newsTitle = data.data.newsData?.newsTitle || '';
       const anglesCount = data.data.breakdownData?.possible_angles?.length || 0;
       const versionsCount = data.data.analysisResult?.versions?.length || 0;
+      const classicCount = data.data.classicVersionCount || 0;
+      const enhancedCount = data.data.enhancedVersionCount || 0;
 
-      // Complete all steps with detailed sub-info
+      // Tracker updates
       wfComplete('auto_scrape', `ดึงเนื้อหา ${data.data.newsData?.newsBody?.length || 0} ตัวอักษร (${st.scrape || '?'}s)`);
 
       wfStart('auto_extract', { detail: '📰 AI กำลังสกัดเนื้อข่าว...' });
@@ -157,32 +161,43 @@ export default function NewContentPage() {
       wfStart('auto_breakdown', { detail: '🔍 AI กำลังวิเคราะห์มุมข่าว...' });
       wfComplete('auto_breakdown', `${anglesCount} มุมข่าว (${st.breakdown || '?'}s)`);
 
-      // Show Library Check result with AI analysis
-      wfStart('auto_lib_check', { detail: '🧠 AI กำลังวิเคราะห์แนวข่าว → เทียบ Prompt Library...' });
-      if (pi?.newsType) {
-        const typeLabel = `ข่าว${pi.newsType}`;
-        if (pi.source === 'library') {
-          wfComplete('auto_lib_check', `🧠 ${typeLabel} → 🏛️ "${pi.name}" (Viral: ${pi.viralScore || '-'})`);
-        } else {
-          wfComplete('auto_lib_check', `🧠 ${typeLabel} → ❌ ไม่พบ Prompt ที่เหมาะในหอสมุด`);
-        }
-      } else if (pi?.source === 'library') {
-        wfComplete('auto_lib_check', `🏛️ ใช้: ${pi.name} (Viral: ${pi.viralScore || '-'})`);
+      // Blueprint step
+      wfStart('auto_blueprint', { detail: '🧬 AI วางแผน Emotional Architecture...' });
+      if (data.data.blueprint?.core_emotion) {
+        wfComplete('auto_blueprint', `🧬 ${data.data.blueprint.core_emotion} | ${data.data.blueprint.emotional_timeline?.length || 0} steps`);
       } else {
-        wfComplete('auto_lib_check', `❌ ไม่พบ Prompt ในหอสมุด`);
+        wfComplete('auto_blueprint', '⚠️ Blueprint ไม่สำเร็จ (ข้ามไป)');
       }
 
-      const promptLabel = pi?.source === 'library' ? `🏛️ ${pi.name?.slice(0, 20)}` : `❌ ไม่พบ Prompt`;
-      wfStart('auto_generate', { detail: `✍️ ${promptLabel} → กำลังสร้างเนื้อหา...` });
-      wfComplete('auto_generate', `${versionsCount} เวอร์ชัน (${st.generate || '?'}s)`);
+      // Research step
+      wfStart('auto_research', { detail: '🔍 ค้นหาข้อมูลจาก Google...' });
+      const resCount = data.data.researchItems?.length || 0;
+      wfComplete('auto_research', resCount > 0 ? `✅ ${resCount} แหล่งข้อมูลจริง` : '⚠️ ไม่พบข้อมูลเพิ่มเติม');
 
-      finishWorkflow(`Auto เสร็จ ${data.data.totalTimeSeconds || ''}s — ${versionsCount} เวอร์ชัน | ${promptLabel}`);
+      // Classic pipeline
+      wfStart('auto_classic', { detail: '⚡ Classic pipeline กำลังสร้าง...' });
+      wfComplete('auto_classic', `✅ ${classicCount} เวอร์ชัน Classic`);
+
+      // Enhanced pipeline
+      wfStart('auto_enhanced', { detail: '🧬 Enhanced pipeline กำลังสร้าง...' });
+      wfComplete('auto_enhanced', `✅ ${enhancedCount} เวอร์ชัน Enhanced`);
+
+      const promptLabel = pi?.source === 'library' ? `🏛️ ${pi.name?.slice(0, 20)}` : `📦 Library`;
+      finishWorkflow(`Auto V2 ✅ ${data.data.totalTimeSeconds || ''}s — ${versionsCount} เวอร์ชัน (${classicCount} Classic + ${enhancedCount} Enhanced) | ${promptLabel}`);
 
       setNewsData(data.data.newsData);
       setBreakdownData(data.data.breakdownData);
       setAnalysisResult(data.data.analysisResult);
       setSourceType(data.data.sourceType);
       setAutoLog(data.data.log || []);
+      // inject blueprint + research จาก enhanced pipeline
+      if (data.data.blueprint) {
+        setBlueprintData(data.data.blueprint);
+        setEditedBlueprint(JSON.parse(JSON.stringify(data.data.blueprint)));
+      }
+      if (data.data.researchItems?.length > 0) {
+        setResearchData({ items: data.data.researchItems, keywords: [] });
+      }
       setStep('analyzed');
       setAutoProgress('');
       // 📦 Auto-save เข้าคลังข่าว
@@ -1650,7 +1665,17 @@ export default function NewContentPage() {
               <div key={i} style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border)', borderLeft: `4px solid hsl(${i * 60}, 70%, 50%)` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 14, fontWeight: 800 }}>#{i+1} {v.style}</span>
+                    <span style={{ fontSize: 14, fontWeight: 800 }}>#{i+1} {v.style?.replace(/^(classic|enhanced)_/, '')}</span>
+                    {v._sourceLabel && (
+                      <span style={{
+                        fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 10,
+                        background: v._source === 'enhanced' ? 'rgba(168,85,247,0.2)' : 'rgba(234,179,8,0.15)',
+                        color: v._source === 'enhanced' ? '#c084fc' : '#fbbf24',
+                        border: `1px solid ${v._source === 'enhanced' ? 'rgba(168,85,247,0.4)' : 'rgba(234,179,8,0.3)'}`,
+                      }}>
+                        {v._sourceLabel}
+                      </span>
+                    )}
                     {v.tone && <span style={{ fontSize: 9, padding: '2px 8px', background: 'var(--info-bg)', color: 'var(--info)', borderRadius: 10 }}>🎭 {v.tone}</span>}
                     {v.target && <span style={{ fontSize: 9, padding: '2px 8px', background: 'var(--success-bg)', color: 'var(--success)', borderRadius: 10 }}>👤 {v.target}</span>}
                   </div>
