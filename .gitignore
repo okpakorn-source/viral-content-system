@@ -33,3 +33,19 @@ prisma/dev.db-journal
 
 # vercel
 .vercel
+
+# backup files (created by patch scripts — never commit)
+backup/
+*.bak
+*.backup
+
+# Turbo build cache
+.turbo/
+
+# production logs (may contain sensitive info)
+*.log
+logs/
+
+# temp media uploads
+.tempmediaStorage/
+tmp/
