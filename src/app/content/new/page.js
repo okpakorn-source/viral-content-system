@@ -125,6 +125,8 @@ export default function NewContentPage() {
   const [autoMode, setAutoMode] = useState(false);
   const [autoProgress, setAutoProgress] = useState('');
   const [autoLog, setAutoLog] = useState([]);
+  const [universalDetection, setUniversalDetection] = useState(null); // ✅ Phase 6: detection result from /api/auto/process
+  const [liveDetection, setLiveDetection] = useState(null); // ✅ Phase 6: live detection from UniversalInputBox
 
   // Image Composer states
   const [newsImages, setNewsImages] = useState([]);         // File[] ที่ user อัปโหลด
@@ -301,7 +303,6 @@ export default function NewContentPage() {
   };
 
   // === 🌐 Universal Auto Submit — รองรับทุก input type ===
-  const [universalDetection, setUniversalDetection] = useState(null);
 
   const handleUniversalSubmit = async (inputText, inputImages) => {
     if (!inputText && inputImages.length === 0) return;
@@ -957,17 +958,40 @@ export default function NewContentPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 28 }}>⚡</span>
                 <div style={{ flex: 1, minWidth: 150 }}>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: '#f472b6' }}>Auto Mode — ทุก Source</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>วาง URL ข่าว / TikTok / YouTube — AI ดึง → วิเคราะห์ → Blueprint → Research → สร้างทุกอย่างอัตโนมัติ</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: '#f472b6' }}>⚡ Auto Mode — Universal Input</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    วาง URL / พิมพ์ข้อความ / วางรูป / Drag &amp; Drop — AI ตรวจจับ → เลือก Pipeline → สร้างอัตโนมัติ
+                    <span style={{ display: 'inline-flex', gap: 4, marginLeft: 6, opacity: 0.7 }}>
+                      🌐 📘 🎵 📺 📝 🖼️ 🔀
+                    </span>
+                  </div>
                 </div>
               </div>
 
               {/* Universal Input Box — replaces URL-only input */}
               <UniversalInputBox
                 onSubmit={handleUniversalSubmit}
+                onDetect={(det, route) => setLiveDetection(det ? { ...det, route } : null)}
                 loading={autoMode}
                 disabled={autoMode}
               />
+
+              {/* ✅ Phase 6: Live Detection Preview */}
+              {liveDetection && !autoMode && (
+                <div style={{
+                  marginTop: 8, padding: '8px 12px',
+                  background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)',
+                  borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8' }}>🔍 ตรวจจับ:</span>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)' }}>
+                    {liveDetection.platform} — {liveDetection.label}
+                  </span>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                    ({Math.round((liveDetection.confidence || 0) * 100)}%)
+                  </span>
+                </div>
+              )}
 
               {/* Preset + Length selectors */}
                             {/* ความยาวเนื้อหา */}
@@ -1048,8 +1072,57 @@ export default function NewContentPage() {
                 </div>
               )}
 
-              {/* Auto Log (after done) */}
-              {autoLog.length > 0 && !autoMode && (
+              {/* ✅ Phase 6: Detection Result Panel */}
+              {universalDetection && !autoMode && (
+                <div className="detection-panel detection-glow" style={{
+                  marginTop: 10, padding: 14,
+                  background: 'linear-gradient(135deg, rgba(99,102,241,0.06), rgba(139,92,246,0.06))',
+                  border: '1px solid rgba(99,102,241,0.25)',
+                  borderRadius: 'var(--radius-md)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 18 }}>{universalDetection.pipelineIcon || '⚡'}</span>
+                    <div style={{ flex: 1, minWidth: 120 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>
+                        {universalDetection.pipelineLabel || universalDetection.label}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                        {universalDetection.inputType} → {universalDetection.pipelineUsed}
+                        {universalDetection.provider && <span> | provider: <strong>{universalDetection.provider}</strong></span>}
+                      </div>
+                    </div>
+                    <div style={{
+                      padding: '3px 10px', borderRadius: 20,
+                      background: (universalDetection.confidence || 0) > 0.7 ? 'rgba(34,197,94,0.15)' : 'rgba(251,191,36,0.15)',
+                      border: `1px solid ${(universalDetection.confidence || 0) > 0.7 ? 'rgba(34,197,94,0.4)' : 'rgba(251,191,36,0.4)'}`,
+                      fontSize: 10, fontWeight: 700,
+                      color: (universalDetection.confidence || 0) > 0.7 ? '#22c55e' : '#fbbf24',
+                    }}>
+                      {Math.round((universalDetection.confidence || 0) * 100)}% confident
+                    </div>
+                  </div>
+                  {/* Fallbacks */}
+                  {universalDetection.fallbacksUsed?.length > 0 && (
+                    <div style={{ fontSize: 10, color: '#fde68a', padding: '4px 8px', background: 'rgba(251,191,36,0.07)', borderRadius: 6, marginBottom: 6 }}>
+                      🔄 Fallback ใช้: {universalDetection.fallbacksUsed.join(' → ')}
+                    </div>
+                  )}
+                  {/* Debug log */}
+                  {autoLog.length > 0 && (
+                    <details style={{ marginTop: 4 }}>
+                      <summary style={{ fontSize: 10, color: 'var(--text-muted)', cursor: 'pointer', fontWeight: 600 }}>
+                        📊 Pipeline Log ({autoLog.length} steps)
+                      </summary>
+                      <div style={{ background: 'var(--bg-primary)', padding: 8, borderRadius: 'var(--radius-sm)', marginTop: 4, fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace', maxHeight: 180, overflowY: 'auto', lineHeight: 1.7 }}>
+                        {autoLog.map((l, i) => <div key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', padding: '2px 0' }}>{l}</div>)}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              )}
+
+              {/* Auto Log fallback (when no universalDetection but has log) */}
+              {!universalDetection && autoLog.length > 0 && !autoMode && (
                 <details style={{ marginTop: 8 }}>
                   <summary style={{ fontSize: 10, color: 'var(--text-muted)', cursor: 'pointer' }}>📊 Log ({autoLog.length} steps)</summary>
                   <div style={{ background: 'var(--bg-primary)', padding: 8, borderRadius: 'var(--radius-sm)', marginTop: 4, fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace', maxHeight: 150, overflowY: 'auto' }}>
