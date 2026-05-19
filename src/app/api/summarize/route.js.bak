@@ -316,26 +316,8 @@ export async function POST(request) {
       try {
         const promptStore = createStore('prompt-library');
         let promptLib = [];
-        try { promptLib = await promptStore.getAll(); } catch (e) { console.warn('[Analyze] Supabase prompt load:', e.message); }
-
-        // ✅ FIX: Dual-source — Supabase ว่าง → โหลดจาก local file
-        if (promptLib.length === 0) {
-          try {
-            const { readFile: _rf } = await import('fs/promises');
-            const { join: _join } = await import('path');
-            const _localPath = _join(process.cwd(), 'data', 'prompt-library.json');
-            const _localData = JSON.parse(await _rf(_localPath, 'utf-8'));
-            if (Array.isArray(_localData) && _localData.length > 0) {
-              promptLib = _localData;
-              console.log('[Analyze] ✅ FALLBACK: Loaded ' + promptLib.length + ' prompts from LOCAL FILE (Supabase empty)');
-            }
-          } catch (fileErr) {
-            console.warn('[Analyze] Local file fallback failed:', fileErr.message);
-          }
-        } else {
-          console.log('[Analyze] ✅ Supabase: ' + promptLib.length + ' prompts loaded');
-        }
-        console.log('[Analyze] 📋 validPrompts: ' + promptLib.filter(p => p.promptText).length + '/' + promptLib.length);
+        try { promptLib = await promptStore.getAll(); } catch (e) { console.warn('[Analyze] Prompt library load:', e.message); }
+        console.log(`[Analyze] 🧠 Prompt Library loaded: ${promptLib.length} prompts (via Supabase)`);
 
         const validPrompts = promptLib.filter(p => p.promptText);
         if (validPrompts.length > 0) {
@@ -415,32 +397,29 @@ ${promptCatalog}
 
           console.log(`[Analyze] 🧠 Result: ${promptSource === 'library' ? '✅ USING' : '❌ SKIP'} | ${promptMatchReason}`);
         } else {
-          // ✅ FIX: Library ว่าง → ใช้ built-in fallback prompt (ห้าม return error)
-          promptMatchReason = 'PROMPT_LIBRARY_MISSING — ใช้ built-in fallback';
-          console.warn('[Analyze] ⚠️ PROMPT_LIBRARY_MISSING — activating built-in fallback prompt');
-          smartPrompt = {
-            id: 'fallback_builtin', promptName: 'Built-in Fallback',
-            category: 'ทั่วไป', emotionalType: 'สาระน่าสนใจ', viralScore: 70,
-            promptText: 'เขียนเนื้อหาข่าวสำหรับ Facebook ที่ดึงดูดความสนใจ ใช้ภาษาเป็นกันเอง เล่าเรื่องราวอย่างน่าสนใจ มีการเปิดด้วย hook ที่ดึงความสนใจ เล่ารายละเอียดสำคัญ และปิดด้วยประโยคที่ทิ้งความประทับใจ ห้ามใช้ภาษาราชการ ห้ามตั้งคำถามปิดท้าย',
-            _isFallback: true,
-          };
-          promptSource = 'fallback';
+          promptMatchReason = 'library empty (0 prompts with text)';
+          console.log('[Analyze] ⚠️ Library empty — returning error');
+          return NextResponse.json({
+            success: false,
+            error: 'กรุณาเพิ่ม Prompt ในหอสมุดก่อน — ไม่พบ Prompt ที่จะใช้ (หอสมุดว่าง)',
+            libraryEmpty: true,
+          }, { status: 422 });
         }
       } catch (err) {
-        promptMatchReason = 'AI_MATCH_ERROR: ' + err.message;
-        console.warn('[Analyze] Smart Match error:', err.message);
+        promptMatchReason = `error: ${err.message}`;
+        console.log('[Analyze] Smart Match error:', err.message);
       }
 
-      // ✅ FIX: ยังไม่มี prompt → ใช้ built-in fallback (ห้ามพัง)
+      // ── ถ้า AI ไม่เจอ Prompt ที่ตรง → error (ไม่มี preset fallback) ──
       if (!smartPrompt) {
-        console.warn('[Analyze] ⚠️ No prompt matched — using built-in fallback. Reason:', promptMatchReason);
-        smartPrompt = {
-          id: 'fallback_builtin', promptName: 'Built-in Fallback (Auto)',
-          category: 'ทั่วไป', viralScore: 70,
-          promptText: 'เขียนเนื้อหาข่าวสำหรับ Facebook ที่ดึงดูดความสนใจ ใช้ภาษาเป็นกันเอง เล่าเรื่องราวอย่างน่าสนใจ มีการเปิดด้วย hook ที่ดึงความสนใจ เล่ารายละเอียดสำคัญ และปิดด้วยประโยคที่ทิ้งความประทับใจ ห้ามใช้ภาษาราชการ ห้ามตั้งคำถามปิดท้าย',
-          _isFallback: true,
-        };
-        promptSource = 'fallback';
+        console.log('[Analyze] ⚠️ No matching prompt: ' + promptMatchReason);
+        return NextResponse.json({
+          success: false,
+          error: 'กรุณาเพิ่ม Prompt ในหอสมุดก่อน — ไม่พบ Prompt ที่ตรงกับข่าว (' + promptMatchReason + ')',
+          noMatch: true,
+          newsTypeDetected,
+          promptMatchReason,
+        }, { status: 422 });
       }
 
       // สร้าง prompt — ใช้ Library Prompt เสมอ
