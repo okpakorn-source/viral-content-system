@@ -82,19 +82,29 @@ export async function POST(request) {
     // === STEP 1: ดึงเนื้อหา (Scrape / Transcribe) ===
     const step1Start = Date.now();
     let rawText = '';
+    let contentFallback = false;
 
     if (detectedType === 'tiktok') {
       addLog('Step1', '🎵 กำลัง transcribe TikTok...');
       const tikRes = await callInternal('/api/tiktok', { url });
       if (!tikRes.success) {
-        // TikTok shortlink → ไม่สามารถดาวน์โหลดได้ → แนะนำให้ paste ข้อความแทน
-        const msg = tikRes.needUpload
-          ? `TikTok: ดาวน์โหลดวิดีโออัตโนมัติไม่สำเร็จ — กรุณาวางลิงก์ TikTok แบบเต็ม (tiktok.com/@user/video/...) หรือสลับไปโหมด "วาง URL" แล้วเปิดหน้าเว็บดึงข้อความเอง`
-          : `TikTok: ${tikRes.error}`;
-        throwStep('auto_scrape', msg);
+        if (tikRes.needUpload) {
+          // ✅ FALLBACK: ดาวน์โหลดไม่ได้ → ใช้ URL + hint เป็น input ให้ AI วิเคราะห์ต่อ
+          contentFallback = true;
+          rawText = `[TIKTOK_DOWNLOAD_FAILED] ไม่สามารถดาวน์โหลดวิดีโออัตโนมัติ
+ลิงก์ TikTok: ${url}
+โดเมน: ${domain}
+คำอธิบาย: คลิป TikTok จาก ${domain} — กรุณาวิเคราะห์เนื้อหาจากลิงก์นี้
+หากไม่มีเนื้อหาเพิ่มเติม ให้ผลลัพธ์เป็น: newsTitle="คลิป TikTok (${domain})", newsBody="ไม่สามารถดึงเนื้อหาอัตโนมัติได้ กรุณาวางลิงก์แบบเต็มหรือพิมพ์เนื้อหาเอง"`.trim();
+          addLog('Step1', `⚠️ TIKTOK_DOWNLOAD_FAILED — ใช้ URL fallback แทน (${url.slice(0, 50)})`);
+          rlog.warn('TIKTOK_DOWNLOAD_FAILED — ปิปไลน์ยังดำเนินต่อด้วย URL fallback');
+        } else {
+          throwStep('auto_scrape', `TikTok: ${tikRes.error}`);
+        }
+      } else {
+        rawText = tikRes.transcript || tikRes.text || '';
+        addLog('Step1', `✅ TikTok transcript: ${rawText.length} ตัวอักษร (${((Date.now() - step1Start) / 1000).toFixed(1)}s)`);
       }
-      rawText = tikRes.transcript || tikRes.text || '';
-      addLog('Step1', `✅ TikTok transcript: ${rawText.length} ตัวอักษร (${((Date.now() - step1Start) / 1000).toFixed(1)}s)`);
     } else if (detectedType === 'youtube') {
       addLog('Step1', '🎬 กำลังดึง YouTube transcript...');
       const ytRes = await callInternal('/api/youtube', { url });
@@ -117,6 +127,8 @@ export async function POST(request) {
     if (!rawText || rawText.length < 20) {
       throwStep('auto_scrape', 'ไม่สามารถดึงเนื้อหาได้ (ข้อความสั้นเกินไป)');
     }
+    if (contentFallback) addLog('Step1', '⚠️ ใช้ URL fallback — AI จะวิเคราะห์เนื้อหาจาก context ที่มี (ผลลัพธ์อาจจำกัด)');
+
 
     // === STEP 2: สกัดข่าว (Extract) ===
     const step2Start = Date.now();
