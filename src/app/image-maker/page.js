@@ -55,6 +55,8 @@ export default function ImageMakerPage() {
   const [step, setStep]             = useState('');
   const [error, setError]           = useState('');
   const [result, setResult]         = useState(null);
+  const [qualityReport, setQuality] = useState(null);
+  const [debugInfo, setDebugInfo]   = useState(null);
   const [downloaded, setDownloaded] = useState({});
   const [customTemplates, setCustomTemplates] = useState([]);
 
@@ -130,6 +132,8 @@ export default function ImageMakerPage() {
       const cData = await cRes.json();
       if (!cData.success) throw new Error(cData.error);
       setResult(cData.versions);
+      setQuality(cData.qualityReport || null);
+      setDebugInfo(cData.debug || null);
       if (cData.textError) setError('⚠️ ' + cData.textError);
     } catch (e) { setError('❌ ' + e.message); }
     finally { setLoading(false); setStep(''); }
@@ -387,8 +391,44 @@ export default function ImageMakerPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Quality Guard Panel */}
+                {qualityReport && (
+                  <div style={{ margin: '0 18px 16px', border: `1px solid ${qualityReport.errors.length ? 'rgba(239,68,68,0.3)' : qualityReport.warnings.length ? 'rgba(251,191,36,0.3)' : 'rgba(163,230,53,0.3)'}`, borderRadius: 10, overflow: 'hidden' }}>
+                    <div style={{ padding: '10px 14px', background: qualityReport.errors.length ? 'rgba(239,68,68,0.07)' : qualityReport.warnings.length ? 'rgba(251,191,36,0.07)' : 'rgba(163,230,53,0.07)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 16 }}>{qualityReport.errors.length ? '❌' : qualityReport.warnings.length ? '⚠️' : '✅'}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: qualityReport.errors.length ? '#fca5a5' : qualityReport.warnings.length ? '#fde68a' : '#a3e635' }}>
+                          Quality Guard — Grade {qualityReport.grade}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>{qualityReport.summary}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: qualityReport.score >= 80 ? '#a3e635' : qualityReport.score >= 50 ? '#fde68a' : '#fca5a5' }}>{qualityReport.score}</div>
+                        <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>/ 100</div>
+                      </div>
+                    </div>
+                    <div style={{ height: 3, background: 'var(--bg-primary)' }}>
+                      <div style={{ height: '100%', width: qualityReport.score + '%', background: qualityReport.score >= 80 ? '#a3e635' : qualityReport.score >= 50 ? '#f59e0b' : '#ef4444', transition: 'width .6s ease' }} />
+                    </div>
+                    {(qualityReport.errors.length > 0 || qualityReport.warnings.length > 0) && (
+                      <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {qualityReport.errors.map((e, i) => (
+                          <div key={i} style={{ fontSize: 11, color: '#fca5a5', padding: '4px 8px', background: 'rgba(239,68,68,0.08)', borderRadius: 5, borderLeft: '3px solid #ef4444' }}>{e}</div>
+                        ))}
+                        {qualityReport.warnings.map((w, i) => (
+                          <div key={i} style={{ fontSize: 11, color: '#fde68a', padding: '4px 8px', background: 'rgba(251,191,36,0.06)', borderRadius: 5, borderLeft: '3px solid #f59e0b' }}>{w}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Debug Panel */}
+                {debugInfo && <DebugPanel info={debugInfo} />}
+
                 <div style={{ padding: '0 18px 18px' }}>
-                  <button onClick={() => { setImages([]); setResult(null); setError(''); }} style={{ padding: '8px 20px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  <button onClick={() => { setImages([]); setResult(null); setError(''); setQuality(null); setDebugInfo(null); }} style={{ padding: '8px 20px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                     🔄 เริ่มใหม่
                   </button>
                 </div>
@@ -398,5 +438,36 @@ export default function ImageMakerPage() {
         )}
       </div>
     </>
+  );
+}
+
+function DebugPanel({ info }) {
+  const [open, setOpen] = useState(false);
+  if (!info) return null;
+  return (
+    <div style={{ margin: '0 18px 16px', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 10, overflow: 'hidden' }}>
+      <button onClick={() => setOpen(p => !p)} style={{ width: '100%', padding: '9px 14px', background: 'rgba(99,102,241,0.06)', border: 'none', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#818cf8' }}>🛠️ Debug Panel</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{open ? '▲ ซ่อน' : '▼ ดูรายละเอียด'}</span>
+      </button>
+      {open && (
+        <div style={{ padding: '12px 14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          {[
+            ['🏷️ Template', info.templateId],
+            ['⚡ Render Time', info.renderTimeMs + 'ms'],
+            ['🎨 Enhance Mode', info.enhanceMode],
+            ['📏 Zones Used', (info.zonesUsed?.length || 0) + ' zones'],
+            ['📸 Slot Mapping', Object.entries(info.slotMapping || {}).map(([k, v]) => k + '→img' + v).join(', ') || '—'],
+            ['⚠️ Warnings', info.warnings?.length || 0],
+            ['❌ Errors', info.errors?.length || 0],
+          ].map(([label, val]) => (
+            <div key={label} style={{ padding: '6px 8px', background: 'var(--bg-primary)', borderRadius: 6 }}>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 2 }}>{label}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', wordBreak: 'break-all' }}>{String(val)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

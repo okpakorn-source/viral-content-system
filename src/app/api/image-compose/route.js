@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { composeImage } from '@/lib/imageComposer';
 import { TEMPLATES } from '@/lib/imageTemplates';
 import { createLogger } from '@/lib/logger';
+import { runQualityChecks } from '@/lib/pixel-composer/qualityGuard';
 
 const rlog = createLogger('IMAGE-COMPOSE');
 
@@ -53,6 +54,28 @@ export async function POST(request) {
     const layoutB64 = `data:image/jpeg;base64,${layoutBuf.toString('base64')}`;
     const phase1Time = ((Date.now() - startTime) / 1000).toFixed(1);
     rlog.step('sharp-done', `✅ Phase 1 done in ${phase1Time}s | ${(layoutBuf.length / 1024).toFixed(0)}KB`);
+
+    // ═══════════════════════════════════════════════════════════════
+    // PHASE 1.5: Quality Guard (runs before FAL/text)
+    // ═══════════════════════════════════════════════════════════════
+    rlog.step('quality-guard', 'running quality checks...');
+    let qualityReport = null;
+    try {
+      qualityReport = await runQualityChecks({
+        slots: layoutZones || (tmpl.zones ? tmpl.zones : []),
+        canvas: tmpl.layout?.canvas || { width: 1080, height: 1080 },
+        assignments,
+        outputBuf: layoutBuf,
+      });
+      rlog.step(
+        'quality-done',
+        `grade: ${qualityReport.grade} (${qualityReport.score}/100) | ⚠️ ${qualityReport.warnings.length} | ❌ ${qualityReport.errors.length}`
+      );
+      if (qualityReport.warnings.length) rlog.warn('Quality warnings: ' + qualityReport.warnings.join(' | '));
+      if (qualityReport.errors.length)   rlog.warn('Quality errors: '   + qualityReport.errors.join(' | '));
+    } catch (qErr) {
+      rlog.warn('Quality guard failed (non-blocking): ' + qErr.message);
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // PHASE 2: FAL Enhancement — OPT-IN ONLY (enhanceMode:'fal')
@@ -123,7 +146,7 @@ export async function POST(request) {
     }
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-    rlog.done('Total: ' + totalTime + 's | Phase1: ✅ | Phase2: ' + (enhancedB64 ? '✅ FAL' : useFAL ? '❌ FAL failed' : '⏭️ skipped') + ' | Text: ' + (textB64 ? '✅' : '-'));
+    rlog.done('Total: ' + totalTime + 's | Phase1: ✅ | Phase2: ' + (enhancedB64 ? '✅ FAL' : useFAL ? '❌ FAL failed' : '⏭️ skipped') + ' | Text: ' + (textB64 ? '✅' : '-') + ' | Quality: ' + (qualityReport ? qualityReport.grade : 'skipped'));
 
     // Build debug info
     const debugInfo = {
@@ -134,9 +157,11 @@ export async function POST(request) {
       enhanceMode: useFAL ? 'fal' : 'sharp-only',
       renderTimeMs: Math.round(parseFloat(totalTime) * 1000),
       warnings: [
+        ...(qualityReport?.warnings || []),
         ...(enhanceError ? ['FAL: ' + enhanceError] : []),
         ...(textError ? ['Text: ' + textError] : []),
       ],
+      errors: qualityReport?.errors || [],
     };
 
     return NextResponse.json({
@@ -151,6 +176,7 @@ export async function POST(request) {
       template: layout.template,
       templateName: layout.templateName || tmpl.name,
       durationSeconds: parseFloat(totalTime),
+      qualityReport,
       debug: debugInfo,
     });
 
