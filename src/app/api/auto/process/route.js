@@ -288,17 +288,29 @@ export async function POST(request) {
       preset,
     });
 
+    // ── Map genRes → analysisResult (same shape as /api/auto) ────
+    const genData        = genRes.data || genRes;
+    const versions       = genData.versions
+                        || genData.analysisResult?.versions
+                        || (Array.isArray(genData) ? genData : []);
+    const analysisResult = {
+      versions,
+      usedPreset:   genData.usedPreset || { name: route.pipeline.label },
+      totalVersions:versions.length,
+      pipeline:     route.pipelineId,
+    };
+
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-    addLog('Done', `✅ Total: ${totalTime}s | pipeline: ${route.pipelineId} | fallbacks: ${fallbacksUsed.join(',') || 'none'}`);
+    addLog('Done', `✅ Total: ${totalTime}s | ${versions.length} versions | pipeline: ${route.pipelineId} | fallbacks: ${fallbacksUsed.join(',') || 'none'}`);
 
     await logPipeline({ workflowId: _wfId, step: 'unified-auto', status: 'success', duration: Date.now() - startTime, detail: newsData.newsTitle?.slice(0, 60) }).catch(() => {});
 
     return NextResponse.json({
       success:        true,
-      data:           genRes.data || genRes,
+      data:           { ...genData, versions, analysisResult },
       newsData,
       breakdownData,
-      // ── Universal metadata ───────────────────────────────
+      analysisResult,   // ✅ top-level for handleUniversalSubmit
       detection: {
         inputType:    detection.inputType,
         platform:     detection.platform,
@@ -315,6 +327,7 @@ export async function POST(request) {
         language:    normalizedData.language,
         category:    normalizedData.contentCategory,
         keywords:    normalizedData.keywords,
+        entities:    normalizedData.extractedEntities,  // ✅ Phase 2 spec
         imageCount:  normalizedData.images.length,
         confidence:  normalizedData.confidence,
       },

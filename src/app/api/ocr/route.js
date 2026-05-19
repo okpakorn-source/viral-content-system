@@ -3,27 +3,68 @@ import OpenAI from 'openai';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+/**
+ * POST /api/ocr
+ * รับ 2 formats:
+ *  1. FormData: form.get('image') — single file upload (ใช้จาก manual UI)
+ *  2. JSON: { images: string[], mode: string } — base64 array (ใช้จาก /api/auto/process)
+ */
 export async function POST(request) {
   try {
-    const formData = await request.formData();
-    const imageFile = formData.get('image');
+    const contentType = request.headers.get('content-type') || '';
+    let dataUrls = [];
+    let mode = 'full';
 
-    if (!imageFile) {
-      return NextResponse.json({ success: false, error: 'ไม่พบภาพ' }, { status: 400 });
+    // ── Format 1: FormData (single image upload from UI) ──────────
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await request.formData();
+      const imageFile = formData.get('image');
+
+      if (!imageFile) {
+        return NextResponse.json({ success: false, error: 'ไม่พบภาพ' }, { status: 400 });
+      }
+
+      const bytes    = await imageFile.arrayBuffer();
+      const buffer   = Buffer.from(bytes);
+      const base64   = buffer.toString('base64');
+      const mimeType = imageFile.type || 'image/png';
+      dataUrls = [`data:${mimeType};base64,${base64}`];
+      console.log(`[OCR] FormData: ${imageFile.name}, ${(buffer.length / 1024).toFixed(0)}KB`);
+
+    // ── Format 2: JSON { images: base64[], mode } (from process route) ─
+    } else {
+      const body = await request.json();
+      mode = body.mode || 'full';
+
+      const rawImages = body.images || (body.imageData ? [body.imageData] : []);
+      if (!rawImages || rawImages.length === 0) {
+        return NextResponse.json({ success: false, error: 'ไม่พบภาพ' }, { status: 400 });
+      }
+
+      // Normalize each image to data URL format
+      dataUrls = rawImages.slice(0, 4).map(img => {
+        if (!img || typeof img !== 'string') return null;
+        // Already a data URL
+        if (img.startsWith('data:')) return img;
+        // Raw base64 — assume JPEG
+        return `data:image/jpeg;base64,${img}`;
+      }).filter(Boolean);
+
+      if (dataUrls.length === 0) {
+        return NextResponse.json({ success: false, error: 'รูปภาพไม่ถูกต้อง' }, { status: 400 });
+      }
+      console.log(`[OCR] JSON: ${dataUrls.length} image(s), mode: ${mode}`);
     }
 
-    // Convert to base64
-    const bytes = await imageFile.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-    const base64 = buffer.toString('base64');
-    const mimeType = imageFile.type || 'image/png';
-    const dataUrl = `data:${mimeType};base64,${base64}`;
+    // ── Build vision message content ─────────────────────────────
+    const imageContent = dataUrls.map(url => ({
+      type: 'image_url',
+      image_url: { url, detail: 'high' },
+    }));
 
-    console.log(`[OCR] Processing image: ${imageFile.name}, ${(buffer.length / 1024).toFixed(0)}KB, ${mimeType}`);
-
-    // GPT-4o Vision OCR
+    // ── GPT-4o Vision OCR ─────────────────────────────────────────
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model:      'gpt-4o',
       max_tokens: 4000,
       messages: [
         {
@@ -47,16 +88,16 @@ export async function POST(request) {
 [ข้อความที่พิมพ์อยู่บนรูปภาพ เช่น ข้อความบนภาพ thumbnail]
 
 ===ข้อมูลเสริม===
-[ข้อมูลอื่นๆ เช่น ยอดไลก์ คอมเมนต์ แชร์ แฮชแท็ก]`
+[ข้อมูลอื่นๆ เช่น ยอดไลก์ คอมเมนต์ แชร์ แฮชแท็ก]`,
         },
         {
           role: 'user',
           content: [
-            { type: 'text', text: 'อ่านข้อความทั้งหมดจากภาพนี้ให้ครบถ้วน:' },
-            { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } }
-          ]
-        }
-      ]
+            { type: 'text', text: `อ่านข้อความทั้งหมดจาก ${dataUrls.length > 1 ? dataUrls.length + ' ภาพ' : 'ภาพ'}นี้ให้ครบถ้วน:` },
+            ...imageContent,
+          ],
+        },
+      ],
     });
 
     const ocrText = response.choices[0]?.message?.content || '';
@@ -69,21 +110,23 @@ export async function POST(request) {
     const lines = ocrText.split('\n').filter(l => l.trim() && !l.startsWith('==='));
     const title = lines.find(l => l.length > 15 && l.length < 200) || 'ข่าวจากภาพ';
 
-    console.log(`[OCR] ✅ Extracted ${ocrText.length}ch, title: "${title.substring(0, 50)}..."`);
+    console.log(`[OCR] ✅ ${dataUrls.length} image(s) → ${ocrText.length}ch, title: "${title.substring(0, 50)}..."`);
 
     return NextResponse.json({
       success: true,
-      text: ocrText,
-      title: title.substring(0, 100),
-      chars: ocrText.length,
-      source: 'gpt-4o-vision',
+      text:    ocrText,
+      result:  ocrText,   // alias for process/route.js compatibility
+      title:   title.substring(0, 100),
+      chars:   ocrText.length,
+      source:  'gpt-4o-vision',
+      imageCount: dataUrls.length,
     });
 
   } catch (error) {
     console.error('[OCR] Error:', error);
     return NextResponse.json({
       success: false,
-      error: 'อ่านภาพไม่สำเร็จ: ' + (error.message || 'Unknown error')
+      error: 'อ่านภาพไม่สำเร็จ: ' + (error.message || 'Unknown error'),
     }, { status: 500 });
   }
 }
