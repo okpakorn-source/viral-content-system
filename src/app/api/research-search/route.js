@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
 import { logPipeline } from '@/lib/pipelineLogger';
+import { createLogger } from '@/lib/logger';
+
+const rlog = createLogger('RESEARCH');
 
 /**
  * Research Search Agent
@@ -56,12 +59,15 @@ export async function POST(request) {
     const body = await request.json();
     const { newsBody, newsTitle, breakdownData, workflowId: wfId } = body;
     workflowId = wfId || ('research_' + Date.now());
+    rlog.start(`newsTitle: "${(newsTitle||'').slice(0,50)}" | body: ${newsBody?.length||0}ch`);
 
     if (!newsBody || newsBody.length < 20) {
       return NextResponse.json({ success: false, error: 'ไม่มีเนื้อข่าว' }, { status: 400 });
     }
 
     // === STEP 1: Keyword Extraction ===
+    rlog.step('keyword-extraction', 'AI สกัด keywords สำหรับค้นหา...');
+    rlog.model('gpt-4o-mini', 'สกัด 5-10 keywords + searchQuery แต่ละตัว');
     console.log('[Research] === STEP 1: Keyword Extraction ===');
     const keyPointsSummary = breakdownData?.key_points?.map(kp => kp.point || kp).join(', ') || '';
     const coreStory = breakdownData?.core_story || '';
@@ -112,10 +118,13 @@ ${quotes ? `คำพูดสำคัญ: ${quotes}` : ''}
     if (!keywords.length) {
       throw new Error('ไม่สามารถสกัด keyword ได้');
     }
+    rlog.step('keyword-result', `${keywords.length} keywords: ${keywords.map(k=>k.keyword).join(', ')}`);
     console.log(`[Research] ✅ Keywords extracted: ${keywords.length} → ${keywords.map(k => k.keyword).join(', ')}`);
     await logPipeline({ workflowId, step: 'research-keywords', status: 'success', detail: keywords.map(k => k.keyword).join(', ') }).catch(() => {});
 
     // === STEP 2: Parallel Search ทุก keyword พร้อมกัน ===
+    rlog.step('serper-search', `ค้นหา Google (Serper API) ทั้ง ${keywords.length} keywords พร้อมกัน`);
+    if (!SERPER_API_KEY) rlog.warn('SERPER_API_KEY not set! การค้นหาจะล้มเหลว');
     console.log('[Research] === STEP 2: Parallel Serper Search ===');
     const searchPromises = keywords.map(async (kw) => {
       try {
@@ -130,9 +139,12 @@ ${quotes ? `คำพูดสำคัญ: ${quotes}` : ''}
 
     const searchResults = await Promise.all(searchPromises);
     const successfulSearches = searchResults.filter(s => s.results.length > 0);
+    rlog.research(`Search done: ${successfulSearches.length}/${keywords.length} keywords got results`);
     console.log(`[Research] ✅ Search done: ${successfulSearches.length}/${keywords.length} keywords found results`);
 
     // === STEP 3: Fact Extraction ===
+    rlog.step('fact-extraction', 'AI สรุปข้อเท็จจริงจากผลค้นหา...');
+    rlog.model('gpt-4o-mini', 'สรุป fact จาก search results — ห้ามแต่งเพิ่ม');
     console.log('[Research] === STEP 3: Fact Extraction ===');
 
     // สร้าง catalog ของผลค้นหาทั้งหมด

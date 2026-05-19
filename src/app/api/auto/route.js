@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { logPipeline } from '@/lib/pipelineLogger';
 import { getSession } from '@/lib/auth';
 import { cookies } from 'next/headers';
+import { createLogger } from '@/lib/logger';
+
+const rlog = createLogger('AUTO');
 
 /**
  * Auto Pipeline API V2
@@ -36,6 +39,9 @@ export async function POST(request) {
     const baseUrl = origin;
     const selectedLength = contentLength || 'medium';
 
+    // ══ PIPELINE START LOG ══ (defined after selectedLength)
+    rlog.start(`URL: ${url.slice(0,80)} | type: ${forceType || 'auto-detect'} | length: ${selectedLength}`);
+
     // Helper — call internal API
     const callInternal = async (path, body) => {
       const res = await fetch(`${baseUrl}${path}`, {
@@ -49,8 +55,9 @@ export async function POST(request) {
     const log = [];
     const addLog = (step, msg) => {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      log.push(`[${elapsed}s] ${step}: ${msg}`);
-      console.log(`[AutoPipeline] [${elapsed}s] ${step}: ${msg}`);
+      const entry = `[${elapsed}s] ${step}: ${msg}`;
+      log.push(entry);
+      console.log(`[AUTO-PIPELINE] [${elapsed}s] [${step}] ${msg}`);
     };
 
     // === STEP 0: Detect source type ===
@@ -100,6 +107,9 @@ export async function POST(request) {
     // === STEP 2: สกัดข่าว (Extract) ===
     const step2Start = Date.now();
     addLog('Step2', '📰 AI กำลังสกัดเนื้อข่าว...');
+    rlog.api('summarize', 'mode=EXTRACT');
+    rlog.prompt('transcript_extraction / news_extraction', `input: ${rawText.length}ch | source: ${detectedType}`);
+    rlog.model('Gemini Flash (fast+cheap)', 'ใช้สำหรับ Extract เพื่อประหยัดค่าใช้จ่าย');
     const extractRes = await callInternal('/api/summarize', {
       text: rawText,
       sourceType: detectedType,
@@ -109,12 +119,17 @@ export async function POST(request) {
       throw new Error('สกัดข่าวไม่สำเร็จ');
     }
     const newsData = extractRes.data;
+    rlog.inject('newsTitle', `"${(newsData.newsTitle||'').slice(0,50)}"`);
+    rlog.inject('newsBody', `${newsData.newsBody.length}ch | category: ${newsData.newsCategory||'-'}`);
     addLog('Step2', `✅ "${newsData.newsTitle?.slice(0, 40)}..." (${newsData.newsBody.length} ตัวอักษร, ${((Date.now() - step2Start) / 1000).toFixed(1)}s)`);
     await logPipeline({ workflowId: _autoWorkflowId, step: 'extract', status: 'success', duration: Date.now() - step2Start, detail: (newsData.newsTitle || '').slice(0, 60) }).catch(() => {});
 
     // === STEP 3: แตกประเด็น (Breakdown) ===
     const step3Start = Date.now();
     addLog('Step3', '🔍 AI กำลังวิเคราะห์มุมข่าว...');
+    rlog.api('summarize', 'mode=BREAKDOWN');
+    rlog.prompt('breakdown_analysis', 'วิเคราะห์ประเด็น/มุมข่าว/อารมณ์หลัก');
+    rlog.model('Gemini Flash', 'ใช้สำหรับ Breakdown');
     const breakRes = await callInternal('/api/summarize', {
       text: newsData.newsBody,
       newsTitle: newsData.newsTitle,
@@ -125,6 +140,7 @@ export async function POST(request) {
       throw new Error('แตกประเด็นไม่สำเร็จ');
     }
     const breakdownData = breakRes.data;
+    rlog.inject('breakdownData', `${breakdownData.key_points?.length||0} key_points | ${breakdownData.possible_angles?.length||0} angles | core: "${(breakdownData.core_story||'').slice(0,40)}"`);
     addLog('Step3', `✅ ${breakdownData.key_points?.length || 0} ประเด็น, ${breakdownData.possible_angles?.length || 0} มุมข่าว (${((Date.now() - step3Start) / 1000).toFixed(1)}s)`);
     await logPipeline({ workflowId: _autoWorkflowId, step: 'breakdown', status: 'success', duration: Date.now() - step3Start, detail: (breakdownData.key_points?.length || 0) + ' key points' }).catch(() => {});
 
@@ -133,7 +149,12 @@ export async function POST(request) {
     // ===================================================================
     const stepParallelStart = Date.now();
 
+    rlog.divider('PIPELINE A: CLASSIC');
     addLog('Classic', '📝 สร้างเนื้อหา Classic (ไม่ใช้ Blueprint/Research)...');
+    rlog.api('summarize', 'mode=ANALYZE (Classic)');
+    rlog.prompt('Library Prompt (AI Match)', 'AI เลือก prompt จากหอสมุดอัตโนมัติ');
+    rlog.inject('Anti-Duplicate+Factual System', 'injected | Breakdown data | Full context');
+    rlog.model('Claude Sonnet (write) > GPT-4o (fallback)', 'Smart Router เลือก model');
     const classicRes = await callInternal('/api/summarize', {
       text: newsData.newsBody,
       newsTitle: newsData.newsTitle,
@@ -160,7 +181,12 @@ export async function POST(request) {
     // === PIPELINE B: Blueprint + Research (parallel) → Enhanced Generate ===
     // ===================================================================
 
+    rlog.divider('PIPELINE B: ENHANCED');
     addLog('Enhanced', '🧬 Blueprint + 🔍 Research พร้อมกัน...');
+    rlog.api('summarize', 'mode=BLUEPRINT (parallel)');
+    rlog.prompt('emotional_blueprint', 'สร้างโครงสร้างอารมณ์ + emotional timeline');
+    rlog.api('research-search', 'Serper Google Search');
+    rlog.inject('SERPER_KEY', process.env.SERPER_API_KEY ? '✅ key set' : '❌ KEY MISSING — research will fail');
     const bpStart = Date.now();
 
     const [bpResult, resResult] = await Promise.allSettled([
@@ -183,9 +209,18 @@ export async function POST(request) {
       ? (resResult.value.data?.items || []) : [];
 
     addLog('Enhanced', `Blueprint: ${blueprint ? blueprint.core_emotion : '❌'} | Research: ${researchItems.length} แหล่ง (${((Date.now() - bpStart) / 1000).toFixed(1)}s)`);
+    if (blueprint) rlog.blueprint(`emotion: "${blueprint.core_emotion}" | steps: ${blueprint.emotional_timeline?.length || 0} | bridges: ${blueprint.bridges?.length || 0}`);
+    if (researchItems.length) rlog.research(`${researchItems.length} items | topics: ${researchItems.map(i=>i.title).join(', ').slice(0,100)}`);
+    else rlog.warn('Research: 0 items — ตรวจสอบ SERPER_API_KEY หรือ network');
 
-    // Enhanced Generate — ใช้ Blueprint + Research
+    rlog.divider('ENHANCED GENERATE');
     addLog('Enhanced', '✍️ สร้างเนื้อหา Enhanced...');
+    rlog.api('summarize', 'mode=ANALYZE (Enhanced)');
+    rlog.prompt('Library Prompt (AI Match)', 'AI เลือก prompt จากหอสมุดอัตโนมัติ');
+    rlog.inject('Blueprint', blueprint ? `core_emotion: ${blueprint.core_emotion}` : 'none');
+    rlog.inject('Research', `${researchItems.length} items from Serper`);
+    rlog.inject('Anti-Duplicate+Factual System', 'injected');
+    rlog.model('Claude Sonnet (write) > GPT-4o (fallback)', 'Smart Router');
     const enhancedGenStart = Date.now();
     const enhancedRes = await callInternal('/api/summarize', {
       text: newsData.newsBody,
