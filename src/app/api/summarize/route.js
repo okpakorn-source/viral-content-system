@@ -513,6 +513,32 @@ ${promptCatalog}
         console.log(`[Analyze] ✅ Research data injected: ${researchData.items.length} items (MUST USE)`);
       }
 
+      // === Inject Quote Safety Rule (บังคับทุกครั้ง — ห้ามบิดเบือน quote) ===
+      const quoteSafetyRule = `
+
+=== กฎบังคับ: การใช้คำพูดและ Quote (ห้ามละเมิด) ===
+
+PRIORITY สูงสุด — ใช้บังคับทุกเวอร์ชัน:
+1. ห้ามบิดเบือนข้อเท็จจริงหรือเจตนาของเจ้าตัว
+2. ห้ามทำให้เจ้าตัวเสียหายจากการตีความเกิน
+3. รักษาความหมายเดิมของทุก quote
+4. ลดการ copy quote ยาวตรงๆ — ให้สรุปความแทน
+5. เขียนให้ลื่น ถ้าขัดแย้งกับ 1-3 ให้เลือกความถูกต้องก่อนเสมอ
+
+✅ ทำได้: ยก quote สั้นๆ เช่น "ถ้าโดนก็หล่น" / "ไม่มีคำว่าแพ้"
+✅ ทำได้: สรุปความใหม่โดยไม่เปลี่ยนเจตนา เช่น "เขายืนยันว่าคืนนี้ขึ้นเวทีแบบไม่คิดถอย"
+✅ ทำได้: ใช้รูปแบบ เจ้าตัวยอมรับว่า "..." / เขาทิ้งท้ายว่า "..."
+
+❌ ห้าม: แต่งคำพูดใหม่ให้แรงกว่าเดิม
+❌ ห้าม: เติมอารมณ์ที่เจ้าตัวไม่ได้พูด
+❌ ห้าม: สร้าง quote ปลอมที่เจ้าตัวไม่เคยพูด
+❌ ห้าม: ยก quote ยาวทั้งย่อหน้าตรงๆ — ตัดเฉพาะ keyword สำคัญหรือสรุปความแทน
+
+=== จบกฎ Quote Safety ===
+`;
+      prompt += quoteSafetyRule;
+      console.log('[Analyze] ✅ Quote Safety Rule injected');
+
       console.log(`[Analyze] Final prompt length: ${prompt.length}ch | Source: ${promptSource === 'library' ? '🏛️ Library' : '📦 Preset'}`);
 
 
