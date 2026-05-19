@@ -15,7 +15,9 @@ export async function POST(request) {
   const startTime = Date.now();
   try {
     const body = await request.json();
-    const { images, layout, newsTitle, generateText, customTextPrompt } = body;
+    const { images, layout, newsTitle, generateText, customTextPrompt, enhanceMode } = body;
+    // enhanceMode: 'none' (default) | 'fal' (opt-in only)
+    const useFAL = enhanceMode === 'fal' && Boolean(process.env.FAL_KEY);
 
     if (!images?.length || !layout) {
       return NextResponse.json({ success: false, error: 'ต้องการ images และ layout' }, { status: 400 });
@@ -53,38 +55,35 @@ export async function POST(request) {
     rlog.step('sharp-done', `✅ Phase 1 done in ${phase1Time}s | ${(layoutBuf.length / 1024).toFixed(0)}KB`);
 
     // ═══════════════════════════════════════════════════════════════
-    // PHASE 2: FAL Flux Kontext Enhancement
+    // PHASE 2: FAL Enhancement — OPT-IN ONLY (enhanceMode:'fal')
+    // Default = Sharp only (deterministic, layout-preserving)
     // ═══════════════════════════════════════════════════════════════
     let enhancedB64 = null;
     let enhanceError = null;
 
-    if (process.env.FAL_KEY) {
+    if (useFAL) {
       try {
-        rlog.step('fal-phase2', 'calling /api/image-enhance (FAL Flux Kontext)...');
+        rlog.step('fal-phase2', '⚡ FAL opt-in: calling /api/image-enhance...');
         const origin = new URL(request.url).origin;
         const enhRes = await fetch(`${origin}/api/image-enhance`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            layoutBase64: layoutB64,
-            newsTitle: newsTitle || '',
-          }),
+          body: JSON.stringify({ layoutBase64: layoutB64, newsTitle: newsTitle || '' }),
         });
         const enhData = await enhRes.json();
         if (enhData.success) {
           enhancedB64 = enhData.imageBase64;
-          rlog.step('fal-done', `✅ Phase 2 done in ${enhData.durationSeconds}s (FAL Flux Kontext)`);
+          rlog.step('fal-done', `✅ Phase 2 FAL done in ${enhData.durationSeconds}s`);
         } else {
           enhanceError = enhData.error;
-          rlog.warn(`Phase 2 FAL failed: ${enhData.error}`);
+          rlog.warn('Phase 2 FAL failed: ' + enhData.error);
         }
       } catch (e) {
         enhanceError = e.message;
-        rlog.warn(`Phase 2 FAL error: ${e.message}`);
+        rlog.warn('Phase 2 FAL error: ' + e.message);
       }
     } else {
-      rlog.warn('FAL_KEY not set — skipping Phase 2 enhancement');
-      enhanceError = 'FAL_KEY ไม่ได้ตั้งค่า';
+      rlog.step('sharp-only', '✅ Default mode: Sharp-only (deterministic). Pass enhanceMode:"fal" to enable FAL.');
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -124,13 +123,27 @@ export async function POST(request) {
     }
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-    rlog.done(`Total: ${totalTime}s | Phase1: ✅ | Phase2: ${enhancedB64 ? '✅' : '❌'} | Text: ${textB64 ? '✅' : '-'}`);
+    rlog.done('Total: ' + totalTime + 's | Phase1: ✅ | Phase2: ' + (enhancedB64 ? '✅ FAL' : useFAL ? '❌ FAL failed' : '⏭️ skipped') + ' | Text: ' + (textB64 ? '✅' : '-'));
+
+    // Build debug info
+    const debugInfo = {
+      templateId: layout.template,
+      templateName: layout.templateName || tmpl.name,
+      slotMapping: layout.assignments || {},
+      zonesUsed: (layoutZones || []).map(z => z.id),
+      enhanceMode: useFAL ? 'fal' : 'sharp-only',
+      renderTimeMs: Math.round(parseFloat(totalTime) * 1000),
+      warnings: [
+        ...(enhanceError ? ['FAL: ' + enhanceError] : []),
+        ...(textError ? ['Text: ' + textError] : []),
+      ],
+    };
 
     return NextResponse.json({
       success: true,
       versions: {
-        layout:   { imageBase64: layoutB64,   label: '🖼️ Phase 1 (Sharp.js)' },
-        enhanced: enhancedB64 ? { imageBase64: enhancedB64, label: '✨ Phase 2 (FAL Enhanced)' } : null,
+        layout:   { imageBase64: layoutB64,   label: '🖼️ Sharp.js (Pixel-Perfect)' },
+        enhanced: enhancedB64 ? { imageBase64: enhancedB64, label: '✨ FAL Enhanced (opt-in)' } : null,
         text:     textB64 ? { imageBase64: textB64, label: '✏️ พร้อมข้อความ (Ideogram)' } : null,
       },
       enhanceError,
@@ -138,6 +151,7 @@ export async function POST(request) {
       template: layout.template,
       templateName: layout.templateName || tmpl.name,
       durationSeconds: parseFloat(totalTime),
+      debug: debugInfo,
     });
 
   } catch (error) {

@@ -161,8 +161,9 @@ export async function composeImage({ templateId, zones: zonesOverride, assignmen
   const availableSrcs = Object.values(assignments).filter(Boolean);
   if (!availableSrcs.length) throw new Error('ไม่มีรูปให้ compose');
 
-  // ─── FIX 2: Blurred background เต็ม canvas ───────────────────
-  const bgRaw = await fetchImageBuffer(availableSrcs[0]);
+  // ═══ FIX: bg source — ใช้ assignments.bg จาก AI ก่อน, fallback ถึง availableSrcs[0] ═══
+  const bgSrc = assignments.bg || assignments.background || availableSrcs[0];
+  const bgRaw = await fetchImageBuffer(bgSrc);
   const bgBlurred = await sharp(bgRaw)
     .resize(CANVAS_SIZE, CANVAS_SIZE, { fit: 'cover', position: 'centre' })
     .blur(28)
@@ -171,7 +172,7 @@ export async function composeImage({ templateId, zones: zonesOverride, assignmen
     .toBuffer();
 
   let canvas = await sharp(bgBlurred).png().toBuffer();
-  console.log(`[Composer] 🖼️ Blurred bg applied (${availableSrcs.length} images available)`);
+  console.log('[Composer] 🖼️ Blurred bg: ' + (assignments.bg ? 'from assignments.bg' : assignments.background ? 'from assignments.background' : 'fallback to first image') + ' | ' + availableSrcs.length + ' images available');
 
   // ─── FIX 3: Zone cycling — ทุก zone มีรูป ──────────────────
   let cycleIdx = 0;
@@ -194,18 +195,15 @@ export async function composeImage({ templateId, zones: zonesOverride, assignmen
     try {
       const raw = await fetchImageBuffer(src);
       let buf;
-
       const effect = zone.effect || 'none';
+      const borderRadius = zone.borderRadius || 0;
+      const darkOverlay = zone.darkOverlay || 0; // 0.0 - 1.0
 
       if (effect === 'circle_bw' || effect === 'circle_color') {
         const sz = Math.min(w, h);
-        if (effect === 'circle_color') {
-          // ✅ FIX: white ring เป็นวงกลมจริง
-          buf = await circleWithRing(raw, sz, 8);
-        } else {
-          buf = await circleCrop(raw, sz);
-          buf = await sharp(buf).grayscale().png().toBuffer();
-        }
+        buf = effect === 'circle_color'
+          ? await circleWithRing(raw, sz, 8)
+          : await sharp(await circleCrop(raw, sz)).grayscale().png().toBuffer();
       } else if (effect === 'border_green') {
         buf = await addBorder(raw, w, h, '#22c55e', 7);
       } else if (effect === 'border_lime') {
@@ -218,6 +216,27 @@ export async function composeImage({ templateId, zones: zonesOverride, assignmen
         buf = await applySoftEdge(raw, effect, w, h);
       } else {
         buf = await applyBasicEffect(raw, effect, w, h);
+      }
+
+      // ✅ Phase 1.3 NEW: borderRadius via SVG mask
+      if (borderRadius > 0 && effect !== 'circle_bw' && effect !== 'circle_color') {
+        const iw = Math.round(w), ih = Math.round(h);
+        const r = Math.min(borderRadius, iw / 2, ih / 2);
+        const svgMask = Buffer.from(
+          `<svg><rect x="0" y="0" width="${iw}" height="${ih}" rx="${r}" ry="${r}"/></svg>`
+        );
+        const resized = await sharp(buf).resize(iw, ih, { fit: 'cover' }).ensureAlpha().toBuffer();
+        buf = await sharp(resized).composite([{ input: svgMask, blend: 'dest-in' }]).png().toBuffer();
+      }
+
+      // ✅ Phase 1.3 NEW: darkOverlay อัดแยกสำหรับแต่ละ slot
+      if (darkOverlay > 0) {
+        const iw = Math.round(w), ih = Math.round(h);
+        const alpha = Math.round(darkOverlay * 255);
+        const overlayBuf = await sharp({
+          create: { width: iw, height: ih, channels: 4, background: { r: 0, g: 0, b: 0, alpha } },
+        }).png().toBuffer();
+        buf = await sharp(buf).composite([{ input: overlayBuf, blend: 'over' }]).png().toBuffer();
       }
 
       canvas = await sharp(canvas)

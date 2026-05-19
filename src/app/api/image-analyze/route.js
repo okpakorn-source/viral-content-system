@@ -53,17 +53,36 @@ export async function POST(request) {
     const usingCustomPrompt = Boolean(customPrompt?.trim());
     const systemInstruction = usingCustomPrompt
       ? customPrompt.trim()
-      : `You are an expert Thai news thumbnail layout editor.
-Analyze each image and assign it to the best matching zone based on content and visual quality.
-Prioritize: clear face → MAIN, event/evidence → EVENT, context/environment → CONTEXT, formal portrait → MEMORIAL.`;
+      : `You are an expert Thai news thumbnail Subject Matcher.
+Your job: analyze each uploaded image and assign it to the most appropriate layout zone.
+
+=== MATCHING PRIORITIES ===
+- face_closeup   → assign image with CLEAREST close-up face (sharpest, largest face)
+- context_action → assign image showing a scene, location, action, or event
+- reaction_face  → assign image with emotional/reaction face for circle slot
+- background_blur → assign image that works well as a blurred background (scene/landscape)
+- supporting     → assign remaining images to remaining slots
+
+=== RULES ===
+- Look at each image carefully before deciding
+- If multiple images have faces, pick the SHARPEST and LARGEST face for face_closeup
+- If duplicate indexes are needed (fewer images than zones), spread them intelligently
+- Never leave a zone unassigned
+- Return confidence score based on how well images match their zones`;
 
     rlog.prompt(
       usingCustomPrompt ? 'CUSTOM image-select prompt' : 'DEFAULT layout analyzer prompt',
-      `length: ${systemInstruction.length}ch | images: ${images.length}`
+      'length: ' + systemInstruction.length + 'ch | images: ' + images.length
     );
-    rlog.model('gpt-4o (vision)', `detail: low | max_tokens: 600 | temp: 0.1 | images: ${Math.min(images.length,5)}`);
+    // ✅ FIX: detail:'high' — GPT-4o เห็นหน้าคนชัดขึ้น, ไม่ตัดไปให้เหลือแค่ 512px
+    rlog.model('gpt-4o (vision)', 'detail: HIGH | max_tokens: 800 | temp: 0.1 | images: ' + Math.min(images.length, 5));
 
-    // ── Full text prompt (ส่งต่อให้ GPT-4o) ───────────────────
+    // Build zone priority info for AI
+    const zonePriorityInfo = allZones
+      .filter(z => z.role !== 'background')
+      .map(z => `"${z.id}" (role:${z.role}, priority:${z.priority || z.role})`)
+      .join(', ');
+
     const analysisPrompt = `${systemInstruction}
 
 ---
@@ -73,22 +92,28 @@ Type: ${newsType || 'Not specified'}
 Images count: ${images.length} (indexed 0-${maxIdx})
 
 TEMPLATE: "${suggestedTemplate}" (${tmplName})
-Available zones to assign: ${availableZones}
+Zones to assign (with priorities): ${zonePriorityInfo}
 
 ---
-STRICT OUTPUT RULES:
-- You MUST return ONLY valid JSON, no other text
-- Assign EVERY zone to a real image index (0-${maxIdx})
-- Use duplicate indexes if fewer images than zones (spread images evenly)
-- Only include "memorial" key if a clear formal/memorial portrait exists
+MATCHING GUIDE:
+- Zone with priority "face_closeup" → image index with clearest/largest face
+- Zone with priority "context_action" → image index with scene/action/location
+- Zone with priority "reaction_face" → image index with emotional/circle-worthy face
+- Zone with priority "background_blur" → image index that works as background
+- Zone with priority "supporting" → remaining images
 
-RETURN EXACTLY THIS JSON FORMAT:
+STRICT OUTPUT:
+- Return ONLY valid JSON
+- Assign EVERY zone to a real image index (0-${maxIdx})
+- Use duplicate indexes if fewer images than zones
+
+RETURN EXACTLY:
 {
   "template": "${suggestedTemplate}",
-  "assignments": {${allZones.filter(z=>z.role!=='background').map((z,i)=>`"${z.id}": ${Math.min(i, maxIdx)}`).join(', ')}},
+  "assignments": {${allZones.filter(z => z.role !== 'background').map((z, i) => `"${z.id}": ${Math.min(i, maxIdx)}`).join(', ')}},
   "hasMemorial": false,
   "confidence": 85,
-  "reasoning": "short Thai explanation of choices"
+  "reasoning": "short Thai explanation of slot matching choices"
 }`;
 
     const contentParts = [
@@ -96,18 +121,18 @@ RETURN EXACTLY THIS JSON FORMAT:
       ...images.slice(0, 5).map((src, i) => ({
         type: 'image_url',
         image_url: {
-          url: src.startsWith('data:') ? src : `data:image/jpeg;base64,${src}`,
-          detail: 'low',
+          url: src.startsWith('data:') ? src : 'data:image/jpeg;base64,' + src,
+          detail: 'high', // ✅ FIX: high detail — เห็นหน้าคนและรายละเอียดของภาพ
         },
       })),
     ];
 
-    rlog.step('gpt4o-vision-call', `calling GPT-4o with ${Math.min(images.length,5)} images + prompt...`);
+    rlog.step('gpt4o-vision-call', 'calling GPT-4o (detail:HIGH) with ' + Math.min(images.length, 5) + ' images...');
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: contentParts }],
       temperature: 0.1,
-      max_tokens: 600,
+      max_tokens: 800, // ✅ FIX: เพิ่มจาก 600 → 800
       response_format: { type: 'json_object' },
     });
     rlog.step('gpt4o-vision-done', `tokens: ${response.usage?.total_tokens||'?'} | finish: ${response.choices[0]?.finish_reason}`);
