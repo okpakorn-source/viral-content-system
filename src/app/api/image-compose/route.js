@@ -1,68 +1,110 @@
 import { NextResponse } from 'next/server';
 import { composeImage } from '@/lib/imageComposer';
 import { TEMPLATES } from '@/lib/imageTemplates';
+import { createLogger } from '@/lib/logger';
+
+const rlog = createLogger('IMAGE-COMPOSE');
 
 /**
- * Main Image Compose Orchestrator
- * รับ: รูปจริง (base64) + layout JSON จาก AI
- * ส่งออก: 2 versions — layout only + with text (Ideogram)
+ * Image Compose Orchestrator — Phase 1 + Phase 2
+ * Phase 1: Sharp.js (pixel-perfect layout)
+ * Phase 2: FAL Flux Kontext (AI blend + enhance)
+ * Phase 3: Ideogram (text overlay) [optional]
  */
 export async function POST(request) {
   const startTime = Date.now();
-
   try {
     const body = await request.json();
-    const {
-      images,
-      layout,
-      newsTitle,
-      generateText,
-      customTextPrompt,
-    } = body;
+    const { images, layout, newsTitle, generateText, customTextPrompt } = body;
 
     if (!images?.length || !layout) {
       return NextResponse.json({ success: false, error: 'ต้องการ images และ layout' }, { status: 400 });
     }
 
-    // ✅ FIX: ใช้ zones จาก layout โดยตรง (custom template) หรือ lookup TEMPLATES (built-in)
+    // Resolve zones (custom หรือ built-in)
     const layoutZones = (layout.zones && Array.isArray(layout.zones) && layout.zones.length > 0)
       ? layout.zones : null;
-
-    // fallback colorScheme จาก built-in template
     const tmpl = TEMPLATES[layout.template] || TEMPLATES.accident;
     const colorScheme = layout.colorScheme || tmpl.colorScheme || {};
 
-    // Map zone id → actual image base64 (จาก index ที่ AI กำหนด)
+    rlog.start(`template: "${layout.template}" | zones: ${layoutZones ? layoutZones.length + ' custom' : 'built-in'} | images: ${images.length}`);
+
+    // Map zone id → image base64
     const assignments = {};
     for (const [zoneId, imgIndex] of Object.entries(layout.assignments || {})) {
       if (images[imgIndex]) assignments[zoneId] = images[imgIndex];
     }
     if (!assignments.bg && images[0]) assignments.bg = images[0];
+    if (!assignments.main && images[0]) assignments.main = images[0];
 
-    console.log(`[ImageCompose] 🖼️ Template: "${layout.template}" | zones: ${layoutZones ? layoutZones.length + ' (custom)' : 'built-in'} | images: ${images.length}`);
+    rlog.step('sharp-phase1', `compositing ${Object.keys(assignments).length} assignments → Sharp.js`);
 
-    // ── VERSION A: Layout Only (no text) ──────────────────────
+    // ═══════════════════════════════════════════════════════════════
+    // PHASE 1: Sharp.js compositor
+    // ═══════════════════════════════════════════════════════════════
     const layoutBuf = await composeImage({
       templateId: layout.template,
-      zones: layoutZones, // ✅ ส่ง custom zones ถ้ามี
+      zones: layoutZones,
       assignments,
       colorOverride: layout.colorOverride,
     });
     const layoutB64 = `data:image/jpeg;base64,${layoutBuf.toString('base64')}`;
-    console.log('[ImageCompose] ✅ Layout version done');
+    const phase1Time = ((Date.now() - startTime) / 1000).toFixed(1);
+    rlog.step('sharp-done', `✅ Phase 1 done in ${phase1Time}s | ${(layoutBuf.length / 1024).toFixed(0)}KB`);
 
-    // ── VERSION B: With Text (Ideogram) ────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+    // PHASE 2: FAL Flux Kontext Enhancement
+    // ═══════════════════════════════════════════════════════════════
+    let enhancedB64 = null;
+    let enhanceError = null;
+
+    if (process.env.FAL_KEY) {
+      try {
+        rlog.step('fal-phase2', 'calling /api/image-enhance (FAL Flux Kontext)...');
+        const origin = new URL(request.url).origin;
+        const enhRes = await fetch(`${origin}/api/image-enhance`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            layoutBase64: layoutB64,
+            newsTitle: newsTitle || '',
+          }),
+        });
+        const enhData = await enhRes.json();
+        if (enhData.success) {
+          enhancedB64 = enhData.imageBase64;
+          rlog.step('fal-done', `✅ Phase 2 done in ${enhData.durationSeconds}s (FAL Flux Kontext)`);
+        } else {
+          enhanceError = enhData.error;
+          rlog.warn(`Phase 2 FAL failed: ${enhData.error}`);
+        }
+      } catch (e) {
+        enhanceError = e.message;
+        rlog.warn(`Phase 2 FAL error: ${e.message}`);
+      }
+    } else {
+      rlog.warn('FAL_KEY not set — skipping Phase 2 enhancement');
+      enhanceError = 'FAL_KEY ไม่ได้ตั้งค่า';
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // PHASE 3: Ideogram Text Overlay (optional)
+    // ═══════════════════════════════════════════════════════════════
     let textB64 = null;
     let textError = null;
 
+    // ใส่ text บน enhanced version (ถ้ามี) หรือ layout
+    const baseForText = enhancedB64 || layoutB64;
+
     if (generateText && newsTitle && process.env.IDEOGRAM_API_KEY) {
       try {
+        rlog.step('ideogram-phase3', 'adding text overlay via Ideogram /remix');
         const origin = new URL(request.url).origin;
         const textRes = await fetch(`${origin}/api/image-text`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            imageBase64: layoutB64,
+            imageBase64: baseForText,
             headline: newsTitle,
             template: layout.template,
             colorScheme,
@@ -72,36 +114,34 @@ export async function POST(request) {
         const textData = await textRes.json();
         if (textData.success) {
           textB64 = textData.imageBase64;
-          console.log('[ImageCompose] ✅ Text version done (Ideogram)');
+          rlog.step('ideogram-done', `✅ Text overlay done`);
         } else {
           textError = textData.error;
-          console.warn('[ImageCompose] ⚠️ Text version failed:', textData.error);
         }
       } catch (e) {
         textError = e.message;
-        console.warn('[ImageCompose] ⚠️ Text version error:', e.message);
       }
-    } else if (generateText && !process.env.IDEOGRAM_API_KEY) {
-      textError = 'IDEOGRAM_API_KEY ยังไม่ได้ตั้งค่า — ได้แค่ Layout version';
     }
 
-    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`[ImageCompose] ✅ Done in ${duration}s`);
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    rlog.done(`Total: ${totalTime}s | Phase1: ✅ | Phase2: ${enhancedB64 ? '✅' : '❌'} | Text: ${textB64 ? '✅' : '-'}`);
 
     return NextResponse.json({
       success: true,
       versions: {
-        layout: { imageBase64: layoutB64, label: '🖼️ Layout (ไม่มีข้อความ)' },
-        text: textB64 ? { imageBase64: textB64, label: '✏️ พร้อมข้อความ (Ideogram)' } : null,
+        layout:   { imageBase64: layoutB64,   label: '🖼️ Phase 1 (Sharp.js)' },
+        enhanced: enhancedB64 ? { imageBase64: enhancedB64, label: '✨ Phase 2 (FAL Enhanced)' } : null,
+        text:     textB64 ? { imageBase64: textB64, label: '✏️ พร้อมข้อความ (Ideogram)' } : null,
       },
+      enhanceError,
       textError,
       template: layout.template,
       templateName: layout.templateName || tmpl.name,
-      durationSeconds: parseFloat(duration),
+      durationSeconds: parseFloat(totalTime),
     });
 
   } catch (error) {
-    console.error('[ImageCompose] ERROR:', error.message);
+    rlog.error(error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

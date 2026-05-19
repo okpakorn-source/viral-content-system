@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 import { useState, useCallback, useEffect } from 'react';
 import Header from '@/components/layout/Header';
 import TemplateAnalyzer from './TemplateAnalyzer';
@@ -304,26 +304,40 @@ export default function ImageMakerPage() {
 
             {error && <div style={{ padding: '12px 16px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 10, fontSize: 13, color: '#fca5a5', marginBottom: 16 }}>{error}</div>}
 
-            {/* Result */}
+                   {/* Result — 3 Phases */}
             {result && !loading && (
               <div style={s.card}>
                 <div style={s.sectionHead}>✅ ปกข่าวที่สร้างได้</div>
-                <div style={{ ...s.body, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 20 }}>
-                  {result.layout && (
-                    <div>
-                      <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 8 }}>🖼️ Layout Only</div>
-                      <img src={result.layout.imageBase64} alt="" style={{ width: '100%', borderRadius: 10, border: '1px solid var(--border)', display: 'block' }} />
-                      <button onClick={() => download(result.layout.imageBase64, `layout-${Date.now()}.jpg`, 'layout')} style={{ width: '100%', marginTop: 10, padding: 10, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
-                        {downloaded.layout ? '✅ ดาวน์โหลดแล้ว' : '📥 Download'}
-                      </button>
+                <div style={{ ...s.body, display: 'flex', flexDirection: 'column', gap: 20 }}>
+                  {result.enhanced && (
+                    <div style={{ border: '2px solid #a3e635', borderRadius: 12, overflow: 'hidden' }}>
+                      <div style={{ padding: '8px 14px', background: 'rgba(163,230,53,0.1)', display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: '#a3e635' }}>✨ Phase 2 — FAL Flux Kontext</span>
+                        <span style={{ fontSize: 9, background: '#a3e635', color: '#000', borderRadius: 4, padding: '1px 6px', fontWeight: 800 }}>BEST</span>
+                      </div>
+                      <img src={result.enhanced.imageBase64} alt="fal" style={{ width: '100%', display: 'block' }} />
+                      <div style={{ padding: 12 }}>
+                        <button onClick={() => download(result.enhanced.imageBase64, `enhanced-${Date.now()}.jpg`, 'enhanced')} style={{ width: '100%', padding: '11px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg,#a3e635,#16a34a)', color: '#000', fontWeight: 800, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+                          {downloaded.enhanced ? '✅ ดาวน์โหลดแล้ว' : '📥 Download FAL Enhanced'}
+                        </button>
+                      </div>
                     </div>
                   )}
                   {result.text && (
                     <div>
-                      <div style={{ fontSize: 11, fontWeight: 800, color: '#f472b6', marginBottom: 8 }}>✏️ พร้อมข้อความ (Ideogram)</div>
-                      <img src={result.text.imageBase64} alt="" style={{ width: '100%', borderRadius: 10, border: '1px solid rgba(249,24,128,0.3)', display: 'block' }} />
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#f472b6', marginBottom: 8 }}>✏️ Phase 3 — พร้อมข้อความ (Ideogram)</div>
+                      <img src={result.text.imageBase64} alt="text" style={{ width: '100%', borderRadius: 10, border: '1px solid rgba(249,24,128,0.3)', display: 'block' }} />
                       <button onClick={() => download(result.text.imageBase64, `text-${Date.now()}.jpg`, 'text')} style={{ width: '100%', marginTop: 10, padding: 10, borderRadius: 8, border: 'none', background: 'linear-gradient(135deg,#f91880,#7c3aed)', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
                         {downloaded.text ? '✅ ดาวน์โหลดแล้ว' : '📥 Download + ข้อความ'}
+                      </button>
+                    </div>
+                  )}
+                  {result.layout && (
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>🖼️ Phase 1 — Sharp.js Layout</div>
+                      <img src={result.layout.imageBase64} alt="layout" style={{ width: '100%', borderRadius: 10, border: '1px solid var(--border)', display: 'block', opacity: 0.85 }} />
+                      <button onClick={() => download(result.layout.imageBase64, `layout-${Date.now()}.jpg`, 'layout')} style={{ width: '100%', marginTop: 8, padding: 9, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-muted)', fontWeight: 700, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
+                        {downloaded.layout ? '✅ ดาวน์โหลดแล้ว' : '📥 Download Phase 1'}
                       </button>
                     </div>
                   )}
