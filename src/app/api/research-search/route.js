@@ -6,51 +6,126 @@ import { createLogger } from '@/lib/logger';
 const rlog = createLogger('RESEARCH');
 
 /**
- * Research Search Agent
- * 
+ * Research Search Agent V2
+ *
  * Flow:
- * 1. รับ newsBody + breakdownData
- * 2. Keyword Extraction Agent → สกัด 5-10 keywords พร้อม searchQuery
- * 3. Parallel Serper Search → ค้นหาจริงทุก keyword พร้อมกัน
- * 4. Fact Extraction Agent → สรุปจากผลค้นหาเท่านั้น ห้ามแต่งเพิ่ม
- * 5. Return items พร้อม URL จริง
+ * 1. รับ newsBody + newsTitle + breakdownData
+ * 2. Keyword Extraction — AI ก่อน, ถ้า fail → rule-based fallback
+ * 3. Parallel Serper Search — ทุก keyword พร้อมกัน
+ * 4. Fact Extraction Agent — สรุปจาก search results เท่านั้น
+ * 5. Return items
+ *
+ * Error Types:
+ *   KEYWORD_INPUT_EMPTY     — ไม่มี input เลย
+ *   KEYWORD_AI_FAILED       — AI สกัด keyword ไม่สำเร็จ
+ *   KEYWORD_PARSE_FAILED    — parse JSON จาก AI ผิด
+ *   KEYWORD_FALLBACK_USED   — ใช้ rule-based fallback แทน AI
+ *   KEYWORD_FINAL_EMPTY     — แม้ fallback แล้วยังว่าง
+ *   RESEARCH_SEARCH_FAILED  — Serper / factExtract ล้มเหลว
  */
 
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
 const SERPER_URL = 'https://google.serper.dev/search';
 
-// === Serper Search ทีละ keyword ===
+// ── Serper Search ──────────────────────────────────────────────
 async function serperSearch(query, num = 3) {
   if (!SERPER_API_KEY) throw new Error('SERPER_API_KEY not configured');
-
   const res = await fetch(SERPER_URL, {
     method: 'POST',
-    headers: {
-      'X-API-KEY': SERPER_API_KEY,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      q: query,
-      gl: 'th',
-      hl: 'th',
-      num,
-    }),
+    headers: { 'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ q: query, gl: 'th', hl: 'th', num }),
   });
-
-  if (!res.ok) throw new Error(`Serper error: ${res.status}`);
+  if (!res.ok) throw new Error('Serper HTTP ' + res.status);
   const data = await res.json();
-
-  // ดึงผลลัพธ์ organic search
-  const results = (data.organic || []).slice(0, num).map(r => ({
+  return (data.organic || []).slice(0, num).map(r => ({
     title: r.title || '',
     snippet: r.snippet || '',
     link: r.link || '',
     source: r.displayLink || r.link || '',
   }));
-
-  return results;
 }
 
+// ── Rule-based Keyword Extractor (fallback) ────────────────────
+function extractKeywordsRuleBased(title, body, breakdownData) {
+  const stopWords = new Set([
+    'ที่', 'ซึ่ง', 'และ', 'หรือ', 'จาก', 'แล้ว', 'เพราะ', 'โดย', 'ของ',
+    'กับ', 'ใน', 'บน', 'ให้', 'ได้', 'มี', 'ไม่', 'เป็น', 'จะ', 'ยัง',
+    'นี้', 'นั้น', 'อยู่', 'ไป', 'มา', 'ว่า', 'แต่', 'ถ้า', 'เมื่อ', 'ตาม',
+    'เพื่อ', 'อีก', 'แล้ว', 'ก็', 'ด้วย', 'แม้', 'จน', 'กว่า', 'ออก',
+    'the', 'a', 'an', 'and', 'or', 'in', 'on', 'at', 'to', 'for',
+  ]);
+
+  const candidates = [];
+
+  // 1. Key people
+  if (breakdownData?.key_facts?.people?.length) {
+    breakdownData.key_facts.people.forEach(p => candidates.push({ keyword: p, type: 'person', src: 'breakdown.people' }));
+  }
+  // 2. Key places
+  if (breakdownData?.key_facts?.places?.length) {
+    breakdownData.key_facts.places.forEach(p => candidates.push({ keyword: p, type: 'place', src: 'breakdown.places' }));
+  }
+  // 3. Core story
+  if (breakdownData?.core_story) {
+    const words = breakdownData.core_story.split(/[\s,。.]+/).filter(w => w.length >= 3 && !stopWords.has(w));
+    words.slice(0, 3).forEach(w => candidates.push({ keyword: w, type: 'event', src: 'breakdown.core_story' }));
+  }
+  // 4. Key points
+  if (breakdownData?.key_points?.length) {
+    breakdownData.key_points.slice(0, 2).forEach(kp => {
+      const text = kp.point || (typeof kp === 'string' ? kp : '');
+      const words = text.split(/[\s,。.]+/).filter(w => w.length >= 3 && !stopWords.has(w));
+      words.slice(0, 2).forEach(w => candidates.push({ keyword: w, type: 'context', src: 'breakdown.key_points' }));
+    });
+  }
+  // 5. Title words
+  if (title) {
+    const words = title.split(/[\s,。.]+/).filter(w => w.length >= 3 && !stopWords.has(w));
+    words.slice(0, 4).forEach(w => candidates.push({ keyword: w, type: 'context', src: 'title' }));
+  }
+  // 6. Body words (first 500 chars)
+  if (body) {
+    const words = body.slice(0, 500).split(/[\s,。.]+/).filter(w => w.length >= 4 && !stopWords.has(w));
+    words.slice(0, 3).forEach(w => candidates.push({ keyword: w, type: 'context', src: 'body' }));
+  }
+
+  // Deduplicate + limit to 5-8
+  const seen = new Set();
+  const unique = candidates.filter(c => {
+    if (!c.keyword || c.keyword.length < 2 || seen.has(c.keyword)) return false;
+    seen.add(c.keyword);
+    return true;
+  }).slice(0, 8);
+
+  return unique.map(c => ({
+    keyword: c.keyword,
+    type: c.type || 'context',
+    searchQuery: c.keyword + (title ? ' ' + title.slice(0, 30) : ''),
+    intent: 'ข้อมูลเพิ่มเติมเกี่ยวกับ ' + c.keyword,
+    _source: c.src,
+  }));
+}
+
+// ── Build keyword input from cascade ──────────────────────────
+function resolveKeywordInput(newsTitle, newsBody, breakdownData) {
+  // ลำดับ: core_story → key_points → title → body[:500]
+  if (breakdownData?.core_story && breakdownData.core_story.length > 10) {
+    return { text: breakdownData.core_story, source: 'breakdown.core_story' };
+  }
+  if (breakdownData?.key_points?.length) {
+    const kpText = breakdownData.key_points.map(kp => kp.point || kp).join(', ');
+    return { text: kpText, source: 'breakdown.key_points' };
+  }
+  if (newsTitle && newsTitle.length > 5) {
+    return { text: newsTitle, source: 'newsTitle' };
+  }
+  if (newsBody && newsBody.length > 20) {
+    return { text: newsBody.slice(0, 500), source: 'newsBody[:500]' };
+  }
+  return null;
+}
+
+// ══════════════════════════════════════════════════════════════
 export async function POST(request) {
   const startTime = Date.now();
   let workflowId = null;
@@ -59,102 +134,219 @@ export async function POST(request) {
     const body = await request.json();
     const { newsBody, newsTitle, breakdownData, workflowId: wfId } = body;
     workflowId = wfId || ('research_' + Date.now());
-    rlog.start(`newsTitle: "${(newsTitle||'').slice(0,50)}" | body: ${newsBody?.length||0}ch`);
 
-    if (!newsBody || newsBody.length < 20) {
-      return NextResponse.json({ success: false, error: 'ไม่มีเนื้อข่าว' }, { status: 400 });
+    rlog.start('newsTitle: "' + (newsTitle || '').slice(0, 50) + '" | body: ' + (newsBody?.length || 0) + 'ch');
+    console.log('[Research] ═══════════════════════════════════════');
+    console.log('[Research] INPUT AUDIT:');
+    console.log('  newsTitle: ' + (newsTitle ? '"' + newsTitle.slice(0, 60) + '" (' + newsTitle.length + 'ch)' : '❌ EMPTY'));
+    console.log('  newsBody: ' + (newsBody ? newsBody.length + 'ch' : '❌ EMPTY'));
+    console.log('  breakdownData.core_story: ' + (breakdownData?.core_story ? '"' + breakdownData.core_story.slice(0, 40) + '"' : '❌ empty'));
+    console.log('  breakdownData.key_points: ' + (breakdownData?.key_points?.length || 0) + ' items');
+    console.log('  breakdownData.key_facts.people: ' + (breakdownData?.key_facts?.people?.join(', ') || '-'));
+    console.log('  breakdownData.key_facts.places: ' + (breakdownData?.key_facts?.places?.join(', ') || '-'));
+    console.log('[Research] ═══════════════════════════════════════');
+
+    // ── Validate minimum input ──────────────────────────────────
+    if (!newsBody || newsBody.length < 10) {
+      console.error('[Research] KEYWORD_INPUT_EMPTY: newsBody missing');
+      return NextResponse.json({
+        success: false,
+        error: 'KEYWORD_INPUT_EMPTY: ไม่มีเนื้อข่าวสำหรับสร้าง keyword',
+        errorType: 'KEYWORD_INPUT_EMPTY',
+      }, { status: 400 });
     }
 
-    // === STEP 1: Keyword Extraction ===
-    rlog.step('keyword-extraction', 'AI สกัด keywords สำหรับค้นหา...');
-    rlog.model('gpt-4o-mini', 'สกัด 5-10 keywords + searchQuery แต่ละตัว');
-    console.log('[Research] === STEP 1: Keyword Extraction ===');
+    // ═══════════════════════════════════════════════════════════
+    // STEP 1: Keyword Extraction — AI ก่อน, rule-based fallback
+    // ═══════════════════════════════════════════════════════════
+    rlog.step('keyword-extraction', 'สกัด keywords...');
+    console.log('[Research] STEP 1: Keyword Extraction');
+
+    // สรุป context จาก breakdown
     const keyPointsSummary = breakdownData?.key_points?.map(kp => kp.point || kp).join(', ') || '';
     const coreStory = breakdownData?.core_story || '';
     const keyPeople = breakdownData?.key_facts?.people?.join(', ') || '';
     const keyPlaces = breakdownData?.key_facts?.places?.join(', ') || '';
     const quotes = breakdownData?.quotes?.join(' | ') || '';
 
-    const keywordPrompt = `คุณคือ AI ผู้เชี่ยวชาญวิเคราะห์ข่าวและสกัด keyword เพื่อค้นหาข้อมูลเพิ่มเติม
+    let keywords = [];
+    let keywordSource = 'unknown';
+    let keywordFallbackUsed = false;
+    let keywordError = null;
+
+    // ─── Phase A: AI Extraction ──────────────────────────────
+    try {
+      const keywordPrompt = `คุณคือ AI ผู้เชี่ยวชาญวิเคราะห์ข่าวและสกัด keyword เพื่อค้นหาข้อมูลเพิ่มเติม
 
 === ข่าวที่ต้องวิเคราะห์ ===
-หัวข้อ: ${newsTitle || ''}
+หัวข้อ: ${newsTitle || '(ไม่มีหัวข้อ)'}
 เนื้อหา: ${newsBody.slice(0, 2000)}
-${coreStory ? `แก่นข่าว: ${coreStory}` : ''}
-${keyPointsSummary ? `ประเด็นสำคัญ: ${keyPointsSummary}` : ''}
-${keyPeople ? `บุคคล: ${keyPeople}` : ''}
-${keyPlaces ? `สถานที่: ${keyPlaces}` : ''}
-${quotes ? `คำพูดสำคัญ: ${quotes}` : ''}
+${coreStory ? 'แก่นข่าว: ' + coreStory : ''}
+${keyPointsSummary ? 'ประเด็นสำคัญ: ' + keyPointsSummary : ''}
+${keyPeople ? 'บุคคล: ' + keyPeople : ''}
+${keyPlaces ? 'สถานที่: ' + keyPlaces : ''}
+${quotes ? 'คำพูดสำคัญ: ' + quotes : ''}
 === จบข่าว ===
 
-งาน: สกัด 5-10 keywords ที่สำคัญที่สุดในข่าวนี้ เพื่อนำไปค้นหาข้อมูลเพิ่มเติม
+งาน: สกัด 5-8 keywords ที่สำคัญที่สุดในข่าวนี้ เพื่อนำไปค้นหาข้อมูลเพิ่มเติม
 
 กฎ:
 - เลือก keyword ที่ถ้าหาข้อมูลเพิ่มจะทำให้เนื้อหาข่าวน่าสนใจขึ้น
-- ครอบคลุมทุกมิติ: คนสำคัญ, สถานที่, เหตุการณ์, ตัวเลข/สถิติ, กฎหมาย/นโยบาย, บริบท
-- แต่ละ keyword ต้องมี searchQuery ภาษาไทย ที่ค้นหาแล้วจะได้ข้อมูลที่เป็นประโยชน์
+- ครอบคลุม: คนสำคัญ, สถานที่, เหตุการณ์, ตัวเลข/สถิติ, บริบท
 - searchQuery ต้องเฉพาะเจาะจง ไม่ใช่แค่ copy keyword
+- ต้องมีอย่างน้อย 3 keywords
 
-ตอบเป็น JSON:
-{
-  "keywords": [
-    {
-      "keyword": "คำสำคัญ",
-      "type": "person|place|event|statistic|law|context",
-      "searchQuery": "ประโยคค้นหาภาษาไทยที่เฉพาะเจาะจง",
-      "intent": "ต้องการข้อมูลอะไรจากการค้นหานี้"
+ตอบเป็น JSON เท่านั้น ห้ามอธิบายเพิ่ม:
+{"keywords":[{"keyword":"คำสำคัญ","type":"person|place|event|statistic|context","searchQuery":"ประโยคค้นหาภาษาไทย","intent":"ต้องการข้อมูลอะไร"}]}`;
+
+      console.log('[Research] → Calling AI keyword extractor (gpt-4o-mini)...');
+      const aiStart = Date.now();
+      const keywordResult = await callAI({
+        model: 'gpt-4o-mini',
+        prompt: keywordPrompt,
+        temperature: 0.2,
+        maxTokens: 1500,
+      });
+      const aiDuration = Date.now() - aiStart;
+
+      // ตรวจ response
+      if (!keywordResult) {
+        keywordError = 'KEYWORD_AI_FAILED: AI returned null/undefined';
+        console.warn('[Research] ⚠️ ' + keywordError + ' (' + aiDuration + 'ms)');
+      } else if (!keywordResult.keywords) {
+        keywordError = 'KEYWORD_PARSE_FAILED: response missing .keywords field (keys: ' + Object.keys(keywordResult).join(', ') + ')';
+        console.warn('[Research] ⚠️ ' + keywordError);
+      } else if (!Array.isArray(keywordResult.keywords) || keywordResult.keywords.length === 0) {
+        keywordError = 'KEYWORD_AI_FAILED: .keywords is empty array';
+        console.warn('[Research] ⚠️ ' + keywordError);
+      } else {
+        keywords = keywordResult.keywords;
+        keywordSource = 'ai_extraction';
+        console.log('[Research] ✅ AI keywords (' + aiDuration + 'ms): ' + keywords.map(k => k.keyword).join(', '));
+      }
+    } catch (aiErr) {
+      keywordError = 'KEYWORD_AI_FAILED: ' + aiErr.message;
+      console.warn('[Research] ⚠️ AI keyword extraction failed:', aiErr.message);
     }
-  ]
-}`;
 
-    const keywordResult = await callAI({
-      model: 'gpt-4o-mini',
-      prompt: keywordPrompt,
-      temperature: 0.2,
-      maxTokens: 1500,
-    });
+    // ─── Phase B: Rule-based Fallback ────────────────────────
+    if (keywords.length === 0) {
+      console.log('[Research] → KEYWORD_FALLBACK_USED: switching to rule-based extractor');
+      keywordFallbackUsed = true;
 
-    const keywords = keywordResult?.keywords || [];
-    if (!keywords.length) {
-      throw new Error('ไม่สามารถสกัด keyword ได้');
+      const fallbackKws = extractKeywordsRuleBased(newsTitle, newsBody, breakdownData);
+
+      if (fallbackKws.length > 0) {
+        keywords = fallbackKws;
+        keywordSource = 'rule_based_fallback';
+        console.log('[Research] ✅ Fallback keywords (' + keywords.length + '): ' + keywords.map(k => k.keyword + ' [' + k._source + ']').join(', '));
+      } else {
+        // ─── Phase C: Emergency keyword from title/URL ──────
+        console.warn('[Research] ⚠️ Rule-based also returned 0 — using emergency keyword');
+        const kwInput = resolveKeywordInput(newsTitle, newsBody, breakdownData);
+
+        if (!kwInput) {
+          console.error('[Research] KEYWORD_FINAL_EMPTY: no input source found');
+          return NextResponse.json({
+            success: false,
+            error: 'KEYWORD_FINAL_EMPTY: ไม่มีข้อมูลต้นทางสำหรับสร้าง keyword (title/body/breakdown ว่างทั้งหมด)',
+            errorType: 'KEYWORD_FINAL_EMPTY',
+            debug: { keywordError, hadTitle: !!newsTitle, hadBody: !!newsBody, hadBreakdown: !!breakdownData },
+          }, { status: 422 });
+        }
+
+        // ใช้ชื่อข่าวหรือข้อความแรกเป็น 1 keyword
+        const emergencyKw = kwInput.text.slice(0, 80).replace(/\n/g, ' ').trim();
+        keywords = [{
+          keyword: emergencyKw,
+          type: 'context',
+          searchQuery: emergencyKw,
+          intent: 'ค้นหาข้อมูลจาก: ' + kwInput.source,
+          _source: 'emergency:' + kwInput.source,
+        }];
+        keywordSource = 'emergency_cascade';
+        keywordFallbackUsed = true;
+        console.log('[Research] ✅ Emergency keyword: "' + emergencyKw + '" (from ' + kwInput.source + ')');
+      }
     }
-    rlog.step('keyword-result', `${keywords.length} keywords: ${keywords.map(k=>k.keyword).join(', ')}`);
-    console.log(`[Research] ✅ Keywords extracted: ${keywords.length} → ${keywords.map(k => k.keyword).join(', ')}`);
-    await logPipeline({ workflowId, step: 'research-keywords', status: 'success', detail: keywords.map(k => k.keyword).join(', ') }).catch(() => {});
 
-    // === STEP 2: Parallel Search ทุก keyword พร้อมกัน ===
-    rlog.step('serper-search', `ค้นหา Google (Serper API) ทั้ง ${keywords.length} keywords พร้อมกัน`);
-    if (!SERPER_API_KEY) rlog.warn('SERPER_API_KEY not set! การค้นหาจะล้มเหลว');
-    console.log('[Research] === STEP 2: Parallel Serper Search ===');
+    // ─── Keyword audit log ────────────────────────────────────
+    rlog.step('keyword-result', keywords.length + ' keywords from [' + keywordSource + ']' + (keywordFallbackUsed ? ' ⚠️ FALLBACK' : ''));
+    console.log('[Research] ─── KEYWORD AUDIT ───');
+    console.log('  source: ' + keywordSource);
+    console.log('  fallbackUsed: ' + keywordFallbackUsed);
+    console.log('  count: ' + keywords.length);
+    keywords.forEach((k, i) => console.log('  [' + i + '] ' + k.keyword + ' | query: "' + k.searchQuery + '"'));
+    if (keywordError) console.log('  aiError: ' + keywordError);
+    console.log('[Research] ─────────────────────');
+
+    await logPipeline({
+      workflowId,
+      step: 'research-keywords',
+      status: keywordFallbackUsed ? 'fallback' : 'success',
+      detail: keywords.map(k => k.keyword).join(', ') + ' [src:' + keywordSource + ']',
+    }).catch(() => {});
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 2: Parallel Serper Search
+    // ═══════════════════════════════════════════════════════════
+    rlog.step('serper-search', 'ค้นหา Google Serper ' + keywords.length + ' keywords พร้อมกัน');
+    if (!SERPER_API_KEY) {
+      rlog.warn('SERPER_API_KEY not set — search will fail');
+      console.warn('[Research] ⚠️ SERPER_API_KEY missing — search disabled');
+    }
+    console.log('[Research] STEP 2: Parallel Serper Search (' + keywords.length + ' keywords)');
+
     const searchPromises = keywords.map(async (kw) => {
       try {
         const results = await serperSearch(kw.searchQuery, 3);
-        console.log(`[Research] 🔍 "${kw.keyword}" → ${results.length} results`);
+        console.log('[Research] 🔍 "' + kw.keyword + '" → ' + results.length + ' results');
         return { keyword: kw, results };
       } catch (err) {
-        console.warn(`[Research] ⚠️ Search failed for "${kw.keyword}": ${err.message}`);
+        console.warn('[Research] ⚠️ Search failed for "' + kw.keyword + '": ' + err.message);
         return { keyword: kw, results: [] };
       }
     });
 
     const searchResults = await Promise.all(searchPromises);
     const successfulSearches = searchResults.filter(s => s.results.length > 0);
-    rlog.research(`Search done: ${successfulSearches.length}/${keywords.length} keywords got results`);
-    console.log(`[Research] ✅ Search done: ${successfulSearches.length}/${keywords.length} keywords found results`);
+    rlog.research('Search done: ' + successfulSearches.length + '/' + keywords.length + ' keywords got results');
+    console.log('[Research] ✅ Search done: ' + successfulSearches.length + '/' + keywords.length + ' found results');
 
-    // === STEP 3: Fact Extraction ===
+    // ═══════════════════════════════════════════════════════════
+    // STEP 3: Fact Extraction
+    // ═══════════════════════════════════════════════════════════
     rlog.step('fact-extraction', 'AI สรุปข้อเท็จจริงจากผลค้นหา...');
-    rlog.model('gpt-4o-mini', 'สรุป fact จาก search results — ห้ามแต่งเพิ่ม');
-    console.log('[Research] === STEP 3: Fact Extraction ===');
+    console.log('[Research] STEP 3: Fact Extraction');
 
-    // สร้าง catalog ของผลค้นหาทั้งหมด
     const searchCatalog = searchResults.map((sr, i) =>
-      `[KEYWORD ${i + 1}] ${sr.keyword.keyword} (${sr.keyword.type})\n` +
-      `Intent: ${sr.keyword.intent}\n` +
+      '[KEYWORD ' + (i + 1) + '] ' + sr.keyword.keyword + ' (' + sr.keyword.type + ')\n' +
+      'Intent: ' + sr.keyword.intent + '\n' +
       (sr.results.length > 0
-        ? sr.results.map(r => `  SOURCE: ${r.source}\n  URL: ${r.link}\n  TITLE: ${r.title}\n  TEXT: ${r.snippet}`).join('\n---\n')
+        ? sr.results.map(r => '  SOURCE: ' + r.source + '\n  URL: ' + r.link + '\n  TITLE: ' + r.title + '\n  TEXT: ' + r.snippet).join('\n---\n')
         : '  ไม่พบผลการค้นหา')
     ).join('\n\n');
+
+    // ถ้าไม่มีผลค้นหาเลย → return ผลว่างแทน throw
+    if (successfulSearches.length === 0) {
+      console.warn('[Research] ⚠️ No search results at all — returning empty items');
+      const duration = Date.now() - startTime;
+      await logPipeline({ workflowId, step: 'research-search', status: 'success', duration, detail: '0 results (no SERPER or no match)' }).catch(() => {});
+      return NextResponse.json({
+        success: true,
+        data: {
+          items: [],
+          notFound: keywords.map(k => k.keyword),
+          keywords: keywords.map(k => k.keyword),
+          totalKeywords: keywords.length,
+          foundCount: 0,
+          duration: parseFloat((duration / 1000).toFixed(1)),
+          keywordSource,
+          fallbackUsed: keywordFallbackUsed,
+          warning: 'RESEARCH_SEARCH_FAILED: ไม่พบผลค้นหา (Serper key หรือ network อาจมีปัญหา)',
+        },
+      });
+    }
 
     const factPrompt = `คุณคือ AI ผู้เชี่ยวชาญสรุปข้อเท็จจริงจากผลการค้นหาเว็บ
 
@@ -162,34 +354,20 @@ ${quotes ? `คำพูดสำคัญ: ${quotes}` : ''}
 ${newsTitle || ''}
 === จบข่าวต้นฉบับ ===
 
-=== ผลการค้นหาจาก Google (ข้อมูลจริง) ===
+=== ผลการค้นหาจาก Google ===
 ${searchCatalog}
 === จบผลการค้นหา ===
 
 งาน: สรุปข้อเท็จจริงที่น่าสนใจจากผลค้นหาด้านบน
 
-กฎเข้มงวด:
+กฎ:
 - ห้ามเพิ่มข้อมูลที่ไม่มีในผลค้นหา
 - ถ้า keyword ไหนหาไม่เจอ → ระบุ notFound
-- ต้องระบุ sourceUrl ของทุก item
-- content ต้องมาจากผลค้นหาเท่านั้น ห้ามแต่งเพิ่ม
-- เลือกเฉพาะข้อมูลที่เกี่ยวข้องกับข่าวต้นฉบับจริงๆ
+- ต้องระบุ sourceUrl จริง
+- เลือกเฉพาะข้อมูลที่เกี่ยวข้องกับข่าวต้นฉบับ
 
 ตอบเป็น JSON:
-{
-  "items": [
-    {
-      "keyword": "keyword ที่ค้นหา",
-      "type": "person|place|event|statistic|law|context",
-      "title": "หัวข้อสั้นๆ ไม่เกิน 60 ตัวอักษร",
-      "content": "ข้อเท็จจริงที่พบ 2-3 ประโยค (มาจากผลค้นหาเท่านั้น)",
-      "sourceUrl": "URL จริงจากผลค้นหา",
-      "sourceName": "ชื่อเว็บไซต์",
-      "relevance": "เกี่ยวข้องกับข่าวอย่างไร"
-    }
-  ],
-  "notFound": ["keyword ที่ค้นไม่เจอหรือไม่มีข้อมูลเกี่ยวข้อง"]
-}`;
+{"items":[{"keyword":"keyword ที่ค้นหา","type":"person|place|event|statistic|context","title":"หัวข้อ ≤60 ตัวอักษร","content":"ข้อเท็จจริง 2-3 ประโยค","sourceUrl":"URL จริง","sourceName":"ชื่อเว็บ","relevance":"เกี่ยวข้องอย่างไร"}],"notFound":["keywords ที่หาไม่เจอ"]}`;
 
     const factResult = await callAI({
       model: 'gpt-4o',
@@ -198,38 +376,50 @@ ${searchCatalog}
       maxTokens: 4000,
     });
 
+    // ถ้า factExtract ล้มเหลว → return items ว่างแทน throw
+    const finalItems = factResult?.items || [];
     if (!factResult?.items?.length) {
-      throw new Error('ไม่พบข้อมูลที่เกี่ยวข้อง');
+      console.warn('[Research] ⚠️ Fact extraction returned no items — returning empty');
     }
 
     const duration = Date.now() - startTime;
-    console.log(`[Research] ✅ Done: ${factResult.items.length} items found in ${(duration/1000).toFixed(1)}s`);
+    console.log('[Research] ✅ Done: ' + finalItems.length + ' items | ' + (duration / 1000).toFixed(1) + 's | src=' + keywordSource);
     await logPipeline({
       workflowId,
       step: 'research-search',
       status: 'success',
       duration,
-      detail: `${keywords.length} keywords → ${factResult.items.length} items`,
+      detail: keywords.length + ' keywords → ' + finalItems.length + ' items | fallback=' + keywordFallbackUsed,
     }).catch(() => {});
 
     return NextResponse.json({
       success: true,
       data: {
-        items: factResult.items,
-        notFound: factResult.notFound || [],
+        items: finalItems,
+        notFound: factResult?.notFound || [],
         keywords: keywords.map(k => k.keyword),
         totalKeywords: keywords.length,
-        foundCount: factResult.items.length,
+        foundCount: finalItems.length,
         duration: parseFloat((duration / 1000).toFixed(1)),
+        keywordSource,
+        fallbackUsed: keywordFallbackUsed,
+        keywordError: keywordError || null,
       },
     });
 
   } catch (error) {
-    console.error('[Research] ERROR:', error.message);
-    await logPipeline({ workflowId, step: 'research-search', status: 'failed', error: error.message }).catch(() => {});
+    const errorType = error.errorType || 'RESEARCH_SEARCH_FAILED';
+    console.error('[Research] ' + errorType + ':', error.message);
+    await logPipeline({
+      workflowId,
+      step: 'research-search',
+      status: 'failed',
+      error: error.message,
+    }).catch(() => {});
     return NextResponse.json({
       success: false,
       error: error.message,
+      errorType,
     }, { status: 500 });
   }
 }
