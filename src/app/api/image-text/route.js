@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
+import { createLogger } from '@/lib/logger';
 
-// ✅ ใช้ /remix ไม่ใช่ /edit — /edit ต้องการ mask ซึ่งเราไม่ได้ส่ง
 const IDEOGRAM_REMIX_URL = 'https://api.ideogram.ai/remix';
 const IDEOGRAM_KEY = process.env.IDEOGRAM_API_KEY;
+const rlog = createLogger('IDEOGRAM');
 
 /**
  * Ideogram Text Overlay — ใช้ Remix API
@@ -32,9 +33,18 @@ Font size: Large and impactful
 IMPORTANT: Do NOT change any other part of the image. Only add text at the bottom.`;
 
     // ถ้ามี customPrompt จาก Prompt Manager — ใช้แทน default แต่ยังล็อค scope
-    const finalPrompt = customPrompt?.trim()
+    const usingCustom = Boolean(customPrompt?.trim());
+    const finalPrompt = usingCustom
       ? `${customPrompt.trim()}\nText to add: "${headline}"\nDo NOT change any other part of the image.`
       : defaultPrompt;
+
+    rlog.start(`headline: "${headline.slice(0,50)}" | template: ${template||'-'}`);
+    rlog.prompt(
+      usingCustom ? 'CUSTOM text-style prompt' : 'DEFAULT text overlay prompt',
+      `length: ${finalPrompt.length}ch | headline: "${headline.slice(0,40)}"`
+    );
+    rlog.model('Ideogram V_2 /remix', `style: REALISTIC | image_weight: 85% preserve | aspect: 1:1`);
+    rlog.inject('IDEOGRAM_KEY', IDEOGRAM_KEY ? '✅ set' : '❌ MISSING');
 
     // Convert base64 → Buffer → Blob
     const b64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
@@ -54,6 +64,7 @@ IMPORTANT: Do NOT change any other part of the image. Only add text at the botto
     formData.append('image_request', imageRequest);
     formData.append('image_file', imageBlob, 'layout.jpg');
 
+    rlog.step('ideogram-call', `calling /remix | image: ${(imageBuffer.length/1024).toFixed(0)}KB`);
     console.log('[ImageText] 📤 Calling Ideogram /remix — headline:', headline.slice(0, 50));
 
     const res = await fetch(IDEOGRAM_REMIX_URL, {
@@ -78,6 +89,7 @@ IMPORTANT: Do NOT change any other part of the image. Only add text at the botto
     const resultBuf = await resultRes.arrayBuffer();
     const resultB64 = `data:image/jpeg;base64,${Buffer.from(resultBuf).toString('base64')}`;
 
+    rlog.done(`✅ Text overlay done via Ideogram | headline: "${headline.slice(0,40)}" | url: ${outputUrl.slice(0,60)}...`);
     console.log('[ImageText] ✅ Text added via Ideogram /remix:', headline.slice(0, 40));
 
     return NextResponse.json({ success: true, imageBase64: resultB64, provider: 'ideogram-remix' });

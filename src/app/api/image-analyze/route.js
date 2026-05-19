@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import { detectTemplate, TEMPLATES } from '@/lib/imageTemplates.js';
+import { detectTemplate, TEMPLATES, getZones } from '@/lib/imageTemplates.js';
+import { createLogger } from '@/lib/logger';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const rlog = createLogger('IMAGE-ANALYZE');
 
 /**
  * Image Analyzer — GPT-4o Vision
@@ -11,6 +13,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
  * ไม่เชื่อมกับ content system
  */
 export async function POST(request) {
+  const startTime = Date.now();
   try {
     const body = await request.json();
     const { images, newsTitle, newsType, customPrompt } = body;
@@ -19,22 +22,36 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'กรุณาส่งรูปอย่างน้อย 1 รูป' }, { status: 400 });
     }
 
+    rlog.start(`images: ${images.length} | newsType: ${newsType||'-'} | title: "${(newsTitle||'').slice(0,40)}"`);
+
     const suggestedTemplate = detectTemplate(newsType || '', newsTitle || '');
     const tmpl = TEMPLATES[suggestedTemplate];
-    const availableZones = tmpl.layout.zones
+
+    // ✅ FIX: ใช้ getZones() รองรับทั้ง template เดิม (.layout.zones) และใหม่ (.zones)
+    const allZones = getZones(tmpl);
+    const availableZones = allZones
       .filter(z => z.role !== 'background')
       .map(z => `"${z.id}" (role: ${z.role})`)
       .join(', ');
     const maxIdx = images.length - 1;
 
+    rlog.step('template-detect', `template: "${suggestedTemplate}" (${tmpl.name}) | zones: ${allZones.length} | images: ${images.length}`);
+
     // ── System instruction ─────────────────────────────────────
     // ถ้ามี customPrompt → ใช้เป็น PRIMARY SYSTEM PROMPT (ไม่ใช่แค่ hint)
     // ถ้าไม่มี → ใช้ default
-    const systemInstruction = customPrompt?.trim()
+    const usingCustomPrompt = Boolean(customPrompt?.trim());
+    const systemInstruction = usingCustomPrompt
       ? customPrompt.trim()
       : `You are an expert Thai news thumbnail layout editor.
 Analyze each image and assign it to the best matching zone based on content and visual quality.
 Prioritize: clear face → MAIN, event/evidence → EVENT, context/environment → CONTEXT, formal portrait → MEMORIAL.`;
+
+    rlog.prompt(
+      usingCustomPrompt ? 'CUSTOM image-select prompt' : 'DEFAULT layout analyzer prompt',
+      `length: ${systemInstruction.length}ch | images: ${images.length}`
+    );
+    rlog.model('gpt-4o (vision)', `detail: low | max_tokens: 600 | temp: 0.1 | images: ${Math.min(images.length,5)}`);
 
     // ── Full text prompt (ส่งต่อให้ GPT-4o) ───────────────────
     const analysisPrompt = `${systemInstruction}
@@ -75,6 +92,7 @@ RETURN EXACTLY THIS JSON FORMAT:
       })),
     ];
 
+    rlog.step('gpt4o-vision-call', `calling GPT-4o with ${Math.min(images.length,5)} images + prompt...`);
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: contentParts }],
@@ -82,6 +100,7 @@ RETURN EXACTLY THIS JSON FORMAT:
       max_tokens: 600,
       response_format: { type: 'json_object' },
     });
+    rlog.step('gpt4o-vision-done', `tokens: ${response.usage?.total_tokens||'?'} | finish: ${response.choices[0]?.finish_reason}`);
 
     const raw = response.choices[0]?.message?.content || '{}';
     let result;
@@ -100,7 +119,9 @@ RETURN EXACTLY THIS JSON FORMAT:
       assignments[key] = Math.min(Math.max(0, parseInt(assignments[key]) || 0), maxIdx);
     }
 
-    console.log('[ImageAnalyze] ✅', finalTemplate, '| Confidence:', result.confidence, '| CustomPrompt:', customPrompt ? 'YES' : 'NO');
+    const elapsed = ((Date.now() - startTime)/1000).toFixed(1);
+    rlog.done(`template: "${finalTemplate}" | confidence: ${result.confidence||80}% | assignments: ${JSON.stringify(assignments)} | customPrompt: ${usingCustomPrompt?'YES':'NO'} | ${elapsed}s`);
+    console.log(`[ImageAnalyze] ✅ ${finalTemplate} | confidence: ${result.confidence}% | assignments: ${JSON.stringify(assignments)} | ${elapsed}s`);
 
     return NextResponse.json({
       success: true,
