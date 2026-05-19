@@ -356,22 +356,28 @@ export default function NewContentPage() {
       if (!data.success) throw new Error(data.error || 'Universal process failed');
 
       // Update workflow steps
-      wfComplete('u_detect', `${data.detection?.label} → ${data.detection?.pipelineUsed}`);
-      wfStart('u_extract', {}); wfComplete('u_extract', `${data.normalized?.title?.slice(0,40) || 'สกัดสำเร็จ'}`);
-      wfStart('u_normalize', {}); wfComplete('u_normalize', `lang:${data.normalized?.language} | cat:${data.normalized?.category}`);
-      wfStart('u_generate', {}); wfComplete('u_generate', '✅ สร้างเนื้อหาสำเร็จ');
-      finishWorkflow(`✅ ${data.debug?.durationSeconds}s | ${data.detection?.pipelineIcon} ${data.detection?.pipelineLabel}`);
+      wfComplete('u_detect', `${data.detection?.pipelineIcon} ${data.detection?.pipelineLabel} (${Math.round((data.detection?.confidence || 0) * 100)}%)`);
+      wfStart('u_extract', {}); wfComplete('u_extract', `${data.normalized?.title?.slice(0, 40) || 'สกัดสำเร็จ'}`);
+      wfStart('u_normalize', {}); wfComplete('u_normalize', `lang:${data.normalized?.language} | cat:${data.normalized?.category} | entities:${data.normalized?.entities?.length || 0}`);
+      wfStart('u_generate', {}); wfComplete('u_generate', `✅ ${data.analysisResult?.totalVersions || 0} versions`);
+      finishWorkflow(`✅ ${data.debug?.durationSeconds}s | ${data.detection?.pipelineIcon} ${data.detection?.pipelineLabel}${data.debug?.delegatedTo ? ' (Enhanced ⚡)' : ''}`);
 
       // Store detection info for debug panel
       setUniversalDetection(data.detection);
 
-      // Set results — same shape as /api/auto
+      // ✅ Phase 3: use data.analysisResult directly (top-level from process route)
       setNewsData(data.newsData);
       setBreakdownData(data.breakdownData);
-      const versions = data.data?.versions || (data.data?.analysisResult?.versions) || [];
-      setAnalysisResult({ versions, usedPreset: { name: data.detection?.pipelineLabel } });
+      setAnalysisResult(data.analysisResult || {
+        versions:  data.data?.versions || [],
+        usedPreset:{ name: data.detection?.pipelineLabel },
+      });
       setSourceType(data.detection?.platform || 'universal');
       setAutoLog(data.debug?.log || []);
+
+      // ✅ Phase 3: set url from response for result display
+      const sourceUrl = data.newsData?.sourceUrl || data.normalized?.title && data.detection?.primaryUrl;
+      if (sourceUrl) setUrl(sourceUrl);
 
       autoSaveToArchive(data.newsData, data.breakdownData).catch(() => {});
       setStep('analyzed');

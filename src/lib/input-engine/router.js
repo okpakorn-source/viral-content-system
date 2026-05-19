@@ -199,6 +199,29 @@ export function routePipeline(detection) {
     warnings.push(`🔑 Missing API keys: ${providers.missingKeys.join(', ')} — ใช้ fallback แทน`);
   }
 
+  // ─── useEnhancedPipeline: single clean URL, no images ───────────
+  // Signals to process/route.js to delegate to /api/auto (full Blueprint+Research pipeline)
+  const useEnhancedPipeline = (
+    pipelineId === 'article_pipeline' &&
+    !detection.hasImage &&
+    detection.urls.length === 1 &&
+    detection.textContent?.length < 50
+  );
+
+  // ─── broken URL warning ──────────────────────────────────────────
+  if (detection.primaryUrl) {
+    try { new URL(detection.primaryUrl); }
+    catch { warnings.push('⚠️ URL ไม่ถูกต้อง — อาจดึงข้อมูลไม่ได้'); }
+  }
+
+  // ─── route quality score (0-100) ────────────────────────────────
+  let routeQuality = 50;
+  if (providers.availableCount > 0) routeQuality += 30;
+  if (providers.availableCount > 1) routeQuality += 10; // has fallback
+  if (detection.confidence > 0.8)   routeQuality += 10;
+  if (useEnhancedPipeline)          routeQuality = Math.min(100, routeQuality + 10);
+  routeQuality = Math.min(100, routeQuality);
+
   return {
     pipelineId,
     pipeline: {
@@ -224,7 +247,9 @@ export function routePipeline(detection) {
     },
     costEstimate,
     warnings,
-    canExecute: providers.availableCount > 0 || pipeline.providerKey === null,
+    canExecute:          providers.availableCount > 0 || pipeline.providerKey === null,
+    useEnhancedPipeline, // ✅ Phase 3: delegate to /api/auto for full pipeline
+    routeQuality,        // ✅ Phase 3: 0-100 confidence in this route
     routedAt:   new Date().toISOString(),
   };
 }

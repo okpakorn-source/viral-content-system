@@ -74,6 +74,69 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: detection.error || 'ไม่มี input' }, { status: 400 });
     }
 
+    // ─── PHASE 3: Delegate single URL to enhanced /api/auto ───────
+    // router.useEnhancedPipeline = true when: 1 URL, no image, no extra text
+    // /api/auto has full Blueprint + Research + multi-version Enhanced pipeline
+    // process/route.js reuses it instead of duplicating logic
+    if (route.useEnhancedPipeline && detection.primaryUrl) {
+      addLog('Route', `⚡ Delegating to /api/auto (enhanced pipeline) → ${detection.primaryUrl.slice(0, 60)}`);
+      const delegateRes = await callInternal('/api/auto', {
+        url:           detection.primaryUrl,
+        contentLength,
+        preset,
+        workflowId:    _wfId,
+      });
+
+      if (delegateRes.success) {
+        // Map /api/auto response to /api/auto/process shape
+        const legacyData    = delegateRes.data || {};
+        const versions      = legacyData.analysisResult?.versions || [];
+        const analysisResult = {
+          versions,
+          usedPreset:   legacyData.usedPromptInfo || { name: 'Enhanced Auto' },
+          totalVersions:versions.length,
+          pipeline:     'article_pipeline_enhanced',
+        };
+        addLog('Route', `✅ Enhanced pipeline: ${versions.length} versions in ${legacyData.totalTimeSeconds}s`);
+        return NextResponse.json({
+          success:       true,
+          data:          { ...legacyData, versions, analysisResult },
+          newsData:      legacyData.newsData,
+          breakdownData: legacyData.breakdownData,
+          analysisResult,
+          detection: {
+            inputType:    detection.inputType,
+            platform:     detection.platform,
+            label:        detection.label,
+            confidence:   detection.confidence,
+            pipelineUsed: 'article_pipeline_enhanced',
+            pipelineLabel:'เว็บข่าว / บทความ (Enhanced)',
+            pipelineIcon: '⚡',
+            provider:     legacyData.providerUsed || 'firecrawl',
+            fallbacksUsed:[],
+          },
+          normalized: {
+            title:    legacyData.newsData?.newsTitle || '',
+            language: 'th',
+            category: legacyData.breakdownData?.category || 'general',
+            keywords: [],
+            entities: [],
+            imageCount: 0,
+            confidence: detection.confidence,
+          },
+          debug: {
+            log: [...log, ...(legacyData.log || [])],
+            durationSeconds: legacyData.totalTimeSeconds || 0,
+            fallbacksUsed:   [],
+            pipelineId:      'article_pipeline_enhanced',
+            delegatedTo:     '/api/auto',
+          },
+        });
+      }
+      // If delegation failed, fall through to local pipeline
+      addLog('Route', `⚠️ Enhanced pipeline delegation failed: ${delegateRes.error} — using local pipeline`);
+    }
+
     const fallbacksUsed = [];
     let   normalizedData = null;
 
