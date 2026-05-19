@@ -300,7 +300,91 @@ export default function NewContentPage() {
     }
   };
 
-  // === ส่งเข้าคลังรอตรวจ ===
+  // === 🌐 Universal Auto Submit — รองรับทุก input type ===
+  const [universalDetection, setUniversalDetection] = useState(null);
+
+  const handleUniversalSubmit = async (inputText, inputImages) => {
+    if (!inputText && inputImages.length === 0) return;
+
+    const hasUrl  = /https?:\/\//.test(inputText);
+    const hasImg  = inputImages.length > 0;
+    const textOnly = inputText.replace(/https?:\/\/\S+/g, '').trim();
+    const hasText  = textOnly.length > 20;
+
+    // ถ้าเป็น URL เดียว ไม่มีรูป → ใช้ /api/auto เดิม (full enhanced pipeline)
+    if (hasUrl && !hasImg) {
+      const urlMatch = inputText.match(/https?:\/\/\S+/);
+      if (urlMatch) {
+        setUrl(urlMatch[0]);
+        setSourceType('url');
+        // เรียก handleAutoMode ด้วย URL ที่ detect ได้
+        await handleAutoMode({ url: urlMatch[0], type: 'url' });
+        return;
+      }
+    }
+
+    // Universal route → /api/auto/process (image, text, hybrid, multi-url)
+    setAutoMode(true);
+    setAutoProgress('🔍 ตรวจจับและ route pipeline...');
+    setAutoLog([]);
+    setError('');
+    setStep('input');
+    setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
+
+    const inputLabel = hasImg ? `รูปภาพ ${inputImages.length} ใบ` : textOnly.slice(0, 30) || 'input';
+    startWorkflow('Universal Auto Pipeline', [
+      { id: 'u_detect',    label: '🔍 ตรวจจับ source' },
+      { id: 'u_extract',   label: '⚙️ ดึง/วิเคราะห์เนื้อหา' },
+      { id: 'u_normalize', label: '📐 Normalize data' },
+      { id: 'u_generate',  label: '✍️ สร้างเนื้อหา' },
+    ], { type: 'universal', label: inputLabel });
+
+    try {
+      wfStart('u_detect', { detail: 'กำลัง detect และ route...' });
+      setAutoProgress('⚡ Universal AI Pipeline กำลังประมวลผล...');
+
+      const res = await fetch('/api/auto/process', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input:         inputText,
+          images:        inputImages,
+          contentLength,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Universal process failed');
+
+      // Update workflow steps
+      wfComplete('u_detect', `${data.detection?.label} → ${data.detection?.pipelineUsed}`);
+      wfStart('u_extract', {}); wfComplete('u_extract', `${data.normalized?.title?.slice(0,40) || 'สกัดสำเร็จ'}`);
+      wfStart('u_normalize', {}); wfComplete('u_normalize', `lang:${data.normalized?.language} | cat:${data.normalized?.category}`);
+      wfStart('u_generate', {}); wfComplete('u_generate', '✅ สร้างเนื้อหาสำเร็จ');
+      finishWorkflow(`✅ ${data.debug?.durationSeconds}s | ${data.detection?.pipelineIcon} ${data.detection?.pipelineLabel}`);
+
+      // Store detection info for debug panel
+      setUniversalDetection(data.detection);
+
+      // Set results — same shape as /api/auto
+      setNewsData(data.newsData);
+      setBreakdownData(data.breakdownData);
+      const versions = data.data?.versions || (data.data?.analysisResult?.versions) || [];
+      setAnalysisResult({ versions, usedPreset: { name: data.detection?.pipelineLabel } });
+      setSourceType(data.detection?.platform || 'universal');
+      setAutoLog(data.debug?.log || []);
+
+      autoSaveToArchive(data.newsData, data.breakdownData).catch(() => {});
+      setStep('analyzed');
+      setAutoProgress('');
+    } catch (err) {
+      wfFail('u_extract', err.message);
+      setError('❌ ' + err.message);
+      setAutoProgress('');
+    } finally {
+      setAutoMode(false);
+    }
+  };
+
   const handleSendToReview = async (version, index) => {
     setSendingReview(index);
     try {
