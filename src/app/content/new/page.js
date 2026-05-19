@@ -1,9 +1,10 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Header from '@/components/layout/Header';
 import { useWorkflow } from '@/components/WorkflowContext';
+import UniversalInputBox from '@/components/UniversalInputBox';
 
 // Client-side image resize — ป้องกัน 413 Request Too Large
 function resizeImage(file, maxPx = 800, quality = 0.72) {
@@ -136,17 +137,21 @@ export default function NewContentPage() {
   const { startWorkflow, startStep: wfStart, completeStep: wfComplete, failStep: wfFail, finishWorkflow } = useWorkflow();
 
   // === ⚡ Auto Mode — วาง URL → ได้ผลลัพธ์ ===
-  const handleAutoMode = async () => {
-    if (!url || url.length < 5) { setError('กรุณาใส่ URL'); return; }
+  const handleAutoMode = async (inputData) => {
+    const { url: targetUrl, type } = inputData;
+    if (!targetUrl || targetUrl.length < 5) { setError('กรุณาใส่แหล่งข้อมูล'); return; }
+    
     setAutoMode(true);
     setAutoProgress('🔍 กำลังตรวจจับแหล่งข้อมูล...');
     setAutoLog([]);
     setError('');
     setStep('input');
     setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
+    setSourceType(type || 'url');
+    setUrl(targetUrl);
 
     // Start workflow tracker
-    const domain = url ? (() => { try { return new URL(url).hostname; } catch { return url.slice(0, 30); } })() : 'unknown';
+    const domain = targetUrl ? (() => { try { return new URL(targetUrl).hostname; } catch { return targetUrl.slice(0, 30); } })() : 'unknown';
     startWorkflow('Auto Pipeline V2', [
       { id: 'auto_detect', label: 'ตรวจจับแหล่งข้อมูล' },
       { id: 'auto_scrape', label: 'ดึงเนื้อหา' },
@@ -867,25 +872,12 @@ export default function NewContentPage() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-                <input
-                  type="url" className="form-input"
-                  placeholder="วาง URL ข่าว, TikTok, YouTube — ระบบตรวจจับอัตโนมัติ"
-                  value={url} onChange={(e) => setUrl(e.target.value)}
-                  disabled={autoMode}
-                  style={{ flex: '1 1 200px', minWidth: 0 }}
-                />
-                <button onClick={handleAutoMode} disabled={!url || autoMode}
-                  style={{
-                    padding: '10px 20px', border: 'none', borderRadius: 'var(--radius-md)',
-                    background: autoMode ? 'var(--bg-elevated)' : 'linear-gradient(135deg, #f91880, #7c3aed)',
-                    color: '#fff', fontWeight: 800, fontSize: 13, cursor: autoMode ? 'wait' : 'pointer',
-                    whiteSpace: 'nowrap', boxShadow: autoMode ? 'none' : '0 4px 15px rgba(249,24,128,0.3)',
-                    transition: 'all 0.3s',
-                  }}>
-                  {autoMode ? '⏳ กำลังประมวลผล...' : '⚡ Auto สร้างเลย'}
-                </button>
-              </div>
+              {/* Universal Input Box — replaces URL-only input */}
+              <UniversalInputBox
+                onSubmit={handleUniversalSubmit}
+                loading={autoMode}
+                disabled={autoMode}
+              />
 
               {/* Preset + Length selectors */}
                             {/* ความยาวเนื้อหา */}
