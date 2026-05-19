@@ -1,6 +1,10 @@
 # Viral Content System — AI Agent Rules
 
-## ระบบนี้คืออะไร
+## ⚠️ อ่านก่อนทำงานทุกครั้ง
+
+> **กฎเหล็กของโปรเจกต์นี้อยู่ที่: `SYSTEM_SAFETY_RULES.md`**
+> ห้ามแก้ไฟล์ใดๆ ก่อนอ่านและเข้าใจ SYSTEM_SAFETY_RULES.md ครบทุกข้อ
+
 Next.js 15+ (App Router) + React 19 — AI Pipeline สร้างข่าวไวรัลสำหรับ Facebook
 
 ## กฎบังคับก่อนแก้โค้ดทุกครั้ง
