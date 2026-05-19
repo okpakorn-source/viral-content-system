@@ -1,26 +1,23 @@
 'use client';
 import { useState, useCallback, useEffect } from 'react';
 import Header from '@/components/layout/Header';
-import TemplateDiagram from './TemplateDiagram';
-import PromptManager, { DEFAULT_PROMPTS } from './PromptManager';
+import TemplateAnalyzer from './TemplateAnalyzer';
 
-const TEMPLATES_META = {
-  // ── New templates (จากรูปตัวอย่าง) ──────────────
-  grid_circle:    { label: 'Grid + วงกลม',         icon: '⊞',  color: '#ffffff', isNew: true },
-  big_face_multi: { label: 'ใบหน้าใหญ่ + Multi',   icon: '👤', color: '#a3e635', isNew: true },
-  big_face_ev:    { label: 'ใบหน้า BG + หลักฐาน',  icon: '🔍', color: '#a3e635', isNew: true },
-  // ── Original templates ───────────────────────────
-  accident:      { label: 'อุบัติเหตุ / ภัยพิบัติ', icon: '🚨', color: '#22c55e' },
-  crime:         { label: 'อาชญากรรม',               icon: '🔴', color: '#ef4444' },
-  politics:      { label: 'การเมือง',                 icon: '🏛️', color: '#3b82f6' },
-  economy:       { label: 'เศรษฐกิจ / ธุรกิจ',      icon: '💰', color: '#f59e0b' },
-  entertainment: { label: 'บันเทิง / ไลฟ์สไตล์',    icon: '🎬', color: '#ec4899' },
+const BUILT_IN = {
+  grid_circle:    { label: 'Grid + วงกลม',        icon: '⊞', color: '#a3e635', photos: 5, desc: '2×2 grid + วงกลมกลาง' },
+  big_face_multi: { label: 'ใบหน้าใหญ่ + Multi',  icon: '👤', color: '#a3e635', photos: 5, desc: 'หน้าใหญ่ซ้าย + 4 โซนขวา' },
+  big_face_ev:    { label: 'หน้า + หลักฐาน',      icon: '🔍', color: '#a3e635', photos: 4, desc: 'หน้า bg + หลักฐาน bordered' },
+  accident:       { label: 'อุบัติเหตุ',            icon: '🚨', color: '#22c55e', photos: 5, desc: 'ข่าวอุบัติเหตุ / ภัยพิบัติ' },
+  crime:          { label: 'อาชญากรรม',             icon: '🔴', color: '#ef4444', photos: 4, desc: 'ข่าวอาชญากรรม' },
+  politics:       { label: 'การเมือง',               icon: '🏛️', color: '#3b82f6', photos: 4, desc: 'ข่าวการเมือง' },
+  economy:        { label: 'เศรษฐกิจ',               icon: '💰', color: '#f59e0b', photos: 4, desc: 'ข่าวเศรษฐกิจ / ธุรกิจ' },
+  entertainment:  { label: 'บันเทิง',                icon: '🎬', color: '#ec4899', photos: 3, desc: 'ข่าวบันเทิง / ไลฟ์สไตล์' },
 };
 
-function resizeImage(file, maxPx = 800, quality = 0.72) {
-  return new Promise((resolve, reject) => {
+function resizeImg(file, maxPx = 900, q = 0.78) {
+  return new Promise((res, rej) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = e => {
       const img = new Image();
       img.onload = () => {
         let { width: w, height: h } = img;
@@ -28,63 +25,53 @@ function resizeImage(file, maxPx = 800, quality = 0.72) {
           if (w > h) { h = Math.round(h * maxPx / w); w = maxPx; }
           else { w = Math.round(w * maxPx / h); h = maxPx; }
         }
-        const canvas = document.createElement('canvas');
-        canvas.width = w; canvas.height = h;
-        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', quality));
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        res(c.toDataURL('image/jpeg', q));
       };
-      img.onerror = reject;
+      img.onerror = rej;
       img.src = e.target.result;
     };
-    reader.onerror = reject;
+    reader.onerror = rej;
     reader.readAsDataURL(file);
   });
 }
 
+const s = {
+  card: { background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 14, marginBottom: 16 },
+  sectionHead: { fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', padding: '14px 18px', borderBottom: '1px solid var(--border)' },
+  body: { padding: 18 },
+};
+
 export default function ImageMakerPage() {
-  const [images, setImages]             = useState([]);
-  const [newsTitle, setNewsTitle]       = useState('');
-  const [newsType, setNewsType]         = useState('accident');
-  const [withText, setWithText]         = useState(true);
-  const [loading, setLoading]           = useState(false);
-  const [step, setStep]                 = useState('');
-  const [error, setError]               = useState('');
-  const [result, setResult]             = useState(null);
-  const [layoutInfo, setLayoutInfo]     = useState(null);
-  const [downloaded, setDownloaded]     = useState({});
-  const [prompts, setPrompts]           = useState(DEFAULT_PROMPTS);
+  const [tab, setTab]               = useState('compose'); // 'compose' | 'analyze'
+  const [images, setImages]         = useState([]);
+  const [newsTitle, setNewsTitle]   = useState('');
+  const [template, setTemplate]     = useState('grid_circle');
+  const [withText, setWithText]     = useState(false);
+  const [loading, setLoading]       = useState(false);
+  const [step, setStep]             = useState('');
+  const [error, setError]           = useState('');
+  const [result, setResult]         = useState(null);
+  const [downloaded, setDownloaded] = useState({});
   const [customTemplates, setCustomTemplates] = useState([]);
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('imgPrompts_v2');
-      if (saved) setPrompts(JSON.parse(saved));
-    } catch {}
     try {
       const ct = localStorage.getItem('customTemplates');
       if (ct) setCustomTemplates(JSON.parse(ct));
     } catch {}
   }, []);
 
-  const handleTemplateAdded = (tmpl) => {
-    setCustomTemplates(prev => [...prev, tmpl]);
-  };
-
-  const deleteCustomTemplate = (id) => {
-    const next = customTemplates.filter(t => t.id !== id);
-    setCustomTemplates(next);
-    localStorage.setItem('customTemplates', JSON.stringify(next));
-    if (newsType === id) setNewsType('accident');
+  const allTemplates = {
+    ...BUILT_IN,
+    ...Object.fromEntries(customTemplates.map(t => [t.id, { label: t.name, icon: '⭐', color: t.color || '#a3e635', photos: t.totalPhotosNeeded || '?', desc: 'Custom template', previewImage: t.previewImage }])),
   };
 
   const handleFiles = useCallback(async (files) => {
-    const remaining = 5 - images.length;
-    const toAdd = Array.from(files).filter(f => f.type.startsWith('image/')).slice(0, remaining);
-    for (const file of toAdd) {
-      try {
-        const b64 = await resizeImage(file);
-        setImages(prev => [...prev, b64]);
-      } catch (e) { console.warn(e); }
+    const toAdd = Array.from(files).filter(f => f.type.startsWith('image/')).slice(0, 5 - images.length);
+    for (const f of toAdd) {
+      try { const b64 = await resizeImg(f); setImages(p => [...p, b64]); } catch {}
     }
   }, [images.length]);
 
@@ -92,26 +79,25 @@ export default function ImageMakerPage() {
 
   const handleCompose = async () => {
     if (!images.length) { setError('กรุณาอัปโหลดรูปอย่างน้อย 1 รูป'); return; }
-    setError(''); setResult(null); setLayoutInfo(null); setLoading(true); setDownloaded({});
+    setError(''); setResult(null); setLoading(true); setDownloaded({});
     try {
-      setStep('🧠 AI วิเคราะห์รูปและกำหนด layout...');
-      const analyzeRes = await fetch('/api/image-analyze', {
+      setStep('🤖 AI วิเคราะห์รูปและ layout...');
+      const aRes = await fetch('/api/image-analyze', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images, newsTitle, newsType, customPrompt: prompts.imageSelect }),
+        body: JSON.stringify({ images, newsTitle, newsType: template }),
       });
-      const analyzeData = await analyzeRes.json();
-      if (!analyzeData.success) throw new Error('วิเคราะห์ layout ล้มเหลว: ' + analyzeData.error);
-      setLayoutInfo(analyzeData.layout);
+      const aData = await aRes.json();
+      if (!aData.success) throw new Error(aData.error);
 
-      setStep('🖼️ กำลัง composite รูปด้วย Sharp.js...');
-      const composeRes = await fetch('/api/image-compose', {
+      setStep('🖼️ Sharp.js กำลัง composite รูป...');
+      const cRes = await fetch('/api/image-compose', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images, layout: analyzeData.layout, newsTitle, generateText: withText, customTextPrompt: prompts.textStyle }),
+        body: JSON.stringify({ images, layout: aData.layout, newsTitle, generateText: withText }),
       });
-      const composeData = await composeRes.json();
-      if (!composeData.success) throw new Error('สร้างรูปล้มเหลว: ' + composeData.error);
-      setResult(composeData.versions);
-      if (composeData.textError) setError('⚠️ Text: ' + composeData.textError);
+      const cData = await cRes.json();
+      if (!cData.success) throw new Error(cData.error);
+      setResult(cData.versions);
+      if (cData.textError) setError('⚠️ ' + cData.textError);
     } catch (e) { setError('❌ ' + e.message); }
     finally { setLoading(false); setStep(''); }
   };
@@ -122,172 +108,207 @@ export default function ImageMakerPage() {
     setTimeout(() => setDownloaded(p => ({ ...p, [key]: false })), 2500);
   };
 
-  const reset = () => { setImages([]); setResult(null); setLayoutInfo(null); setError(''); };
-  const tmpl = TEMPLATES_META[newsType] || TEMPLATES_META.accident;
+  const tmplInfo = allTemplates[template] || BUILT_IN.grid_circle;
 
   return (
     <>
       <Header title="🖼️ Image Maker" subtitle="สร้างปกข่าว 1080×1080 ด้วย AI" />
-      <div className="page-content" style={{ maxWidth: 960, margin: '0 auto' }}>
+      <div style={{ maxWidth: 800, margin: '0 auto', padding: '0 16px 40px' }}>
 
-        {/* Config */}
-        <div className="card" style={{ marginBottom: 14 }}>
-          <div className="form-group" style={{ marginBottom: 14 }}>
-            <label className="form-label">📰 หัวข้อข่าว <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(สำหรับ text overlay)</span></label>
-            <input className="form-input" value={newsTitle} onChange={e => setNewsTitle(e.target.value)}
-              placeholder="เช่น นักศึกษาแพทย์เสียชีวิตจากอุบัติเหตุรถตู้..." style={{ fontSize: 14 }} />
-          </div>
-
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>✏️ Text overlay:</span>
-            {[{ v: true, l: '✅ มีข้อความ (Ideogram)' }, { v: false, l: '🖼️ Layout only' }].map(opt => (
-              <button key={String(opt.v)} onClick={() => setWithText(opt.v)} style={{
-                padding: '5px 14px', borderRadius: 20, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
-                background: withText === opt.v ? 'var(--accent)' : 'var(--bg-primary)',
-                color: withText === opt.v ? '#fff' : 'var(--text-muted)',
-                border: `1px solid ${withText === opt.v ? 'var(--accent)' : 'var(--border)'}`,
-              }}>{opt.l}</button>
-            ))}
-            {withText && !newsTitle && <span style={{ fontSize: 10, color: '#fbbf24' }}>⚠️ ใส่หัวข้อด้วย</span>}
-          </div>
-
-          {/* Visual Template Selector */}
-          <div style={{ marginBottom: 14 }}>
-            {/* NEW Templates */}
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#a3e635', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-              ✨ Templates ใหม่ <span style={{ fontSize: 9, background: '#a3e635', color: '#000', borderRadius: 4, padding: '1px 5px', fontWeight: 800 }}>NEW</span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 12 }}>
-              {Object.entries(TEMPLATES_META).filter(([, v]) => v.isNew).map(([k, v]) => (
-                <button key={k} onClick={() => setNewsType(k)} style={{
-                  padding: '10px 8px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
-                  border: `2px solid ${newsType === k ? v.color : 'rgba(163,230,53,0.2)'}`,
-                  background: newsType === k ? `${v.color}18` : 'var(--bg-primary)',
-                  textAlign: 'center', transition: 'all .15s',
-                }}>
-                  <div style={{ fontSize: 22, marginBottom: 4 }}>{v.icon}</div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: newsType === k ? v.color : 'var(--text-secondary)', lineHeight: 1.3 }}>{v.label}</div>
-                </button>
-              ))}
-            </div>
-
-            {/* Original Templates */}
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8 }}>🗂️ Templates ตามประเภทข่าว</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8 }}>
-              {Object.entries(TEMPLATES_META).filter(([, v]) => !v.isNew).map(([k, v]) => (
-                <TemplateDiagram key={k} templateId={k} selected={newsType === k}
-                  onClick={() => setNewsType(k)} label={v.label} icon={v.icon} />
-              ))}
-            </div>
-            {customTemplates.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>⭐ Custom Templates</div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {customTemplates.map(ct => (
-                    <button key={ct.id} onClick={() => setNewsType(ct.id)} style={{
-                      position: 'relative', padding: 0, border: `2px solid ${newsType === ct.id ? ct.color : 'var(--border)'}`,
-                      borderRadius: 10, cursor: 'pointer', background: 'none', width: 90, overflow: 'hidden', textAlign: 'center',
-                    }}>
-                      <img src={ct.previewImage} alt={ct.name} style={{ width: '100%', aspectRatio: '1/1', objectFit: 'cover', display: 'block' }} />
-                      <div style={{ padding: '4px 4px 2px', background: newsType === ct.id ? ct.color : 'var(--bg-primary)', fontSize: 9, fontWeight: 700, color: newsType === ct.id ? '#fff' : 'var(--text-muted)', lineHeight: 1.3 }}>{ct.name}</div>
-                      <div onClick={e => { e.stopPropagation(); deleteCustomTemplate(ct.id); }} style={{ position: 'absolute', top: 3, right: 3, width: 16, height: 16, borderRadius: '50%', background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>✕</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Image Upload */}
-          <div>
-            <label className="form-label">📸 รูปประกอบข่าว <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>1-5 รูป</span></label>
-            <div onDrop={handleDrop} onDragOver={e => e.preventDefault()} style={{
-              marginTop: 8, padding: 14, border: '2px dashed rgba(255,255,255,0.13)',
-              borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)', minHeight: 90,
+        {/* Tab Bar */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 20, padding: '6px', background: 'var(--bg-secondary)', borderRadius: 12, border: '1px solid var(--border)' }}>
+          {[
+            { id: 'compose', label: '🖼️ สร้างรูป', desc: 'compose ปกข่าว' },
+            { id: 'analyze', label: '🔍 วิเคราะห์ Template', desc: 'อัปโหลด template ใหม่' },
+          ].map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{
+              flex: 1, padding: '10px 8px', borderRadius: 8, border: 'none', fontFamily: 'inherit',
+              background: tab === t.id ? 'var(--accent)' : 'transparent',
+              color: tab === t.id ? '#fff' : 'var(--text-muted)',
+              fontWeight: 700, fontSize: 13, cursor: 'pointer', transition: 'all .15s',
             }}>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                {images.map((src, i) => (
-                  <div key={i} style={{ position: 'relative', width: 88, height: 88, borderRadius: 8, overflow: 'hidden', border: `2px solid ${tmpl.color}55`, flexShrink: 0 }}>
-                    <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.6)', fontSize: 9, textAlign: 'center', color: '#fff', padding: '2px 0' }}>รูป {i + 1}</div>
-                    <button onClick={() => setImages(p => p.filter((_, j) => j !== i))}
-                      style={{ position: 'absolute', top: 3, right: 3, width: 20, height: 20, borderRadius: '50%', background: 'rgba(0,0,0,0.8)', border: 'none', color: '#fff', fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
-                  </div>
-                ))}
-                {images.length < 5 && (
-                  <label style={{ width: 88, height: 88, borderRadius: 8, border: '1px dashed rgba(255,255,255,0.18)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-muted)', gap: 4, flexShrink: 0 }}>
-                    <span style={{ fontSize: 26 }}>+</span>
-                    <span style={{ fontSize: 10 }}>เพิ่มรูป</span>
-                    <input type="file" accept="image/*" multiple style={{ display: 'none' }}
-                      onChange={e => { handleFiles(e.target.files); e.target.value = ''; }} />
-                  </label>
-                )}
-                {images.length === 0 && <div style={{ color: 'var(--text-muted)', fontSize: 12, padding: '18px 8px' }}>ลากรูปมาวาง หรือคลิก + (JPG/PNG/WebP)</div>}
-              </div>
-            </div>
-          </div>
-
-          {/* Buttons */}
-          <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center' }}>
-            <button onClick={handleCompose} disabled={loading || !images.length} style={{
-              padding: '11px 28px', borderRadius: 'var(--radius-md)', border: 'none', fontFamily: 'inherit',
-              background: loading || !images.length ? 'var(--bg-elevated)' : `linear-gradient(135deg,${tmpl.color},#7c3aed)`,
-              color: '#fff', fontWeight: 800, fontSize: 14, cursor: loading || !images.length ? 'not-allowed' : 'pointer',
-              boxShadow: loading ? 'none' : `0 4px 18px ${tmpl.color}44`,
-            }}>{loading ? '⏳ กำลังสร้าง...' : `${tmpl.icon} Compose รูป`}</button>
-            {(result || error) && (
-              <button onClick={reset} style={{ padding: '9px 18px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>🔄 เริ่มใหม่</button>
-            )}
-          </div>
+              {t.label}
+              <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.7, marginTop: 1 }}>{t.desc}</div>
+            </button>
+          ))}
         </div>
 
-        {/* Progress */}
-        {loading && <div className="card" style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 20, height: 20, border: '3px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-light)' }}>{step}</span>
-        </div>}
-
-        {/* Error */}
-        {error && <div style={{ padding: 14, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 'var(--radius-md)', marginBottom: 14, fontSize: 13, color: '#fca5a5' }}>{error}</div>}
-
-        {/* Layout Info */}
-        {layoutInfo && <div style={{ padding: '10px 14px', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 'var(--radius-md)', marginBottom: 12, fontSize: 11 }}>
-          <span style={{ fontWeight: 800, color: '#818cf8' }}>🧠 AI Layout: </span>
-          <span style={{ color: 'var(--text-secondary)' }}>Template <strong>{layoutInfo.templateName}</strong> • {layoutInfo.confidence}% confident{layoutInfo.hasMemorial ? ' • 🕊️ memorial' : ''}</span>
-          {layoutInfo.reasoning && <div style={{ marginTop: 4, color: 'var(--text-muted)', fontStyle: 'italic' }}>"{layoutInfo.reasoning}"</div>}
-        </div>}
-
-        {/* Result */}
-        {result && !loading && (
-          <div className="card" style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 16 }}>✅ ปกข่าวที่สร้างได้</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 20 }}>
-              {result.layout && <div>
-                <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 8 }}>🖼️ Layout Only</div>
-                <img src={result.layout.imageBase64} alt="layout" style={{ width: '100%', borderRadius: 12, border: '1px solid var(--border)', display: 'block' }} />
-                <button onClick={() => download(result.layout.imageBase64, `layout-${Date.now()}.jpg`, 'layout')} style={{ width: '100%', marginTop: 10, padding: 10, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
-                  {downloaded.layout ? '✅ ดาวน์โหลดแล้ว' : '📥 Download Layout'}
-                </button>
-              </div>}
-              {result.text && <div>
-                <div style={{ fontSize: 11, fontWeight: 800, color: '#f472b6', marginBottom: 8 }}>✏️ พร้อมข้อความ</div>
-                <img src={result.text.imageBase64} alt="text" style={{ width: '100%', borderRadius: 12, border: '1px solid rgba(249,24,128,0.3)', display: 'block' }} />
-                <button onClick={() => download(result.text.imageBase64, `text-${Date.now()}.jpg`, 'text')} style={{ width: '100%', marginTop: 10, padding: 10, borderRadius: 8, border: 'none', background: 'linear-gradient(135deg,#f91880,#7c3aed)', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
-                  {downloaded.text ? '✅ ดาวน์โหลดแล้ว' : '📥 Download พร้อมข้อความ'}
-                </button>
-              </div>}
-              {!result.text && withText && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: 12, minHeight: 200 }}>
-                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12, padding: 20 }}>
-                  <div style={{ fontSize: 32 }}>⚠️</div>Text version ล้มเหลว<br /><span style={{ fontSize: 10 }}>ตรวจสอบ IDEOGRAM_API_KEY</span>
-                </div>
-              </div>}
-            </div>
+        {/* ══ TAB: ANALYZE ══ */}
+        {tab === 'analyze' && (
+          <div style={s.card}>
+            <TemplateAnalyzer onTemplateSaved={t => {
+              setCustomTemplates(p => [...p, t]);
+              setTab('compose');
+              setTemplate(t.id);
+            }} />
           </div>
         )}
 
-        {/* Prompt Manager — 4 prompts + Template Builder */}
-        <PromptManager prompts={prompts} onChange={setPrompts} newsType={newsType} onTemplateAdded={handleTemplateAdded} />
+        {/* ══ TAB: COMPOSE ══ */}
+        {tab === 'compose' && (
+          <>
+            {/* Step 1: เลือก Template */}
+            <div style={s.card}>
+              <div style={s.sectionHead}>① เลือก Template</div>
+              <div style={s.body}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
+                  {Object.entries(allTemplates).map(([k, v]) => (
+                    <button key={k} onClick={() => setTemplate(k)} style={{
+                      padding: 10, borderRadius: 10, border: `2px solid ${template === k ? v.color : 'var(--border)'}`,
+                      background: template === k ? `${v.color}15` : 'var(--bg-primary)',
+                      cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', transition: 'all .15s',
+                      position: 'relative', overflow: 'hidden',
+                    }}>
+                      {v.previewImage && (
+                        <img src={v.previewImage} alt="" style={{ width: '100%', aspectRatio: '1/1', objectFit: 'cover', borderRadius: 6, display: 'block', marginBottom: 6 }} />
+                      )}
+                      {!v.previewImage && (
+                        <div style={{ fontSize: 26, marginBottom: 4, textAlign: 'center' }}>{v.icon}</div>
+                      )}
+                      <div style={{ fontSize: 11, fontWeight: 700, color: template === k ? v.color : 'var(--text-primary)', lineHeight: 1.3 }}>{v.label}</div>
+                      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>{v.desc}</div>
+                      <div style={{ fontSize: 9, color: template === k ? v.color : 'var(--text-muted)', marginTop: 2, fontWeight: 700 }}>📸 {v.photos} รูป</div>
+                      {template === k && (
+                        <div style={{ position: 'absolute', top: 5, right: 5, width: 16, height: 16, borderRadius: '50%', background: v.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: '#000' }}>✓</div>
+                      )}
+                    </button>
+                  ))}
+                  {/* Add new template button */}
+                  <button onClick={() => setTab('analyze')} style={{
+                    padding: 10, borderRadius: 10, border: '2px dashed rgba(163,230,53,0.3)',
+                    background: 'rgba(163,230,53,0.03)', cursor: 'pointer', fontFamily: 'inherit',
+                    textAlign: 'center', minHeight: 100, display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center', gap: 6, transition: 'all .15s',
+                  }}>
+                    <div style={{ fontSize: 26 }}>+</div>
+                    <div style={{ fontSize: 10, color: '#a3e635', fontWeight: 700 }}>วิเคราะห์ Template ใหม่</div>
+                  </button>
+                </div>
+              </div>
+            </div>
 
+            {/* Step 2: อัปโหลดรูป */}
+            <div style={s.card}>
+              <div style={s.sectionHead}>
+                ② อัปโหลดรูปประกอบข่าว
+                <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 8 }}>
+                  ต้องการ {tmplInfo.photos} รูป • อัปโหลด {images.length}/{tmplInfo.photos}
+                </span>
+              </div>
+              <div style={s.body}>
+                <div
+                  onDrop={handleDrop}
+                  onDragOver={e => e.preventDefault()}
+                  style={{ border: '2px dashed rgba(255,255,255,0.1)', borderRadius: 10, padding: 16, minHeight: 100 }}
+                >
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                    {images.map((src, i) => (
+                      <div key={i} style={{ position: 'relative', width: 90, height: 90, borderRadius: 8, overflow: 'hidden', border: `2px solid ${tmplInfo.color}55`, flexShrink: 0 }}>
+                        <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.65)', fontSize: 9, textAlign: 'center', color: '#fff', padding: '2px 0' }}>รูป {i + 1}</div>
+                        <button onClick={() => setImages(p => p.filter((_, j) => j !== i))} style={{ position: 'absolute', top: 3, right: 3, width: 18, height: 18, borderRadius: '50%', background: 'rgba(0,0,0,0.8)', border: 'none', color: '#fff', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                      </div>
+                    ))}
+                    {images.length < 5 && (
+                      <label style={{ width: 90, height: 90, borderRadius: 8, border: '1px dashed rgba(255,255,255,0.2)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-muted)', gap: 4, flexShrink: 0 }}>
+                        <span style={{ fontSize: 28 }}>+</span>
+                        <span style={{ fontSize: 10 }}>เพิ่มรูป</span>
+                        <input type="file" accept="image/*" multiple style={{ display: 'none' }}
+                          onChange={e => { handleFiles(e.target.files); e.target.value = ''; }} />
+                      </label>
+                    )}
+                    {!images.length && (
+                      <div style={{ color: 'var(--text-muted)', fontSize: 12, padding: '16px 8px', lineHeight: 1.6 }}>
+                        ลากรูปมาวาง หรือคลิก +<br />
+                        <span style={{ fontSize: 10 }}>JPG · PNG · WebP</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Step 3: ตัวเลือก */}
+            <div style={s.card}>
+              <div style={s.sectionHead}>③ ตัวเลือก</div>
+              <div style={{ ...s.body, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>หัวข้อข่าว (สำหรับ text overlay)</label>
+                  <input value={newsTitle} onChange={e => setNewsTitle(e.target.value)}
+                    placeholder="เช่น รถตู้ชนกัน เสียชีวิต 3 ราย..."
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'inherit', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Text Overlay</label>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {[
+                      { v: false, l: '🖼️ Layout Only', desc: 'เร็ว ไม่เสียเครดิต' },
+                      { v: true, l: '✏️ ใส่ข้อความ', desc: 'ใช้ Ideogram' },
+                    ].map(opt => (
+                      <button key={String(opt.v)} onClick={() => setWithText(opt.v)} style={{
+                        padding: '8px 14px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
+                        border: `1px solid ${withText === opt.v ? tmplInfo.color : 'var(--border)'}`,
+                        background: withText === opt.v ? `${tmplInfo.color}18` : 'transparent',
+                        color: withText === opt.v ? tmplInfo.color : 'var(--text-muted)',
+                        fontSize: 12, fontWeight: 700, textAlign: 'left',
+                      }}>
+                        {opt.l}
+                        <div style={{ fontSize: 9, fontWeight: 400, marginTop: 2 }}>{opt.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Compose Button */}
+            <button onClick={handleCompose} disabled={loading || !images.length} style={{
+              width: '100%', padding: '14px', borderRadius: 12, border: 'none',
+              background: (loading || !images.length) ? 'var(--bg-elevated)' : `linear-gradient(135deg,${tmplInfo.color},#7c3aed)`,
+              color: (loading || !images.length) ? 'var(--text-muted)' : '#fff',
+              fontWeight: 800, fontSize: 15, cursor: (loading || !images.length) ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit', marginBottom: 16,
+              boxShadow: (loading || !images.length) ? 'none' : `0 6px 24px ${tmplInfo.color}33`,
+              transition: 'all .2s',
+            }}>
+              {loading ? `⏳ ${step}` : `${tmplInfo.icon} Compose รูป`}
+            </button>
+
+            {error && <div style={{ padding: '12px 16px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 10, fontSize: 13, color: '#fca5a5', marginBottom: 16 }}>{error}</div>}
+
+            {/* Result */}
+            {result && !loading && (
+              <div style={s.card}>
+                <div style={s.sectionHead}>✅ ปกข่าวที่สร้างได้</div>
+                <div style={{ ...s.body, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 20 }}>
+                  {result.layout && (
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 8 }}>🖼️ Layout Only</div>
+                      <img src={result.layout.imageBase64} alt="" style={{ width: '100%', borderRadius: 10, border: '1px solid var(--border)', display: 'block' }} />
+                      <button onClick={() => download(result.layout.imageBase64, `layout-${Date.now()}.jpg`, 'layout')} style={{ width: '100%', marginTop: 10, padding: 10, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+                        {downloaded.layout ? '✅ ดาวน์โหลดแล้ว' : '📥 Download'}
+                      </button>
+                    </div>
+                  )}
+                  {result.text && (
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#f472b6', marginBottom: 8 }}>✏️ พร้อมข้อความ (Ideogram)</div>
+                      <img src={result.text.imageBase64} alt="" style={{ width: '100%', borderRadius: 10, border: '1px solid rgba(249,24,128,0.3)', display: 'block' }} />
+                      <button onClick={() => download(result.text.imageBase64, `text-${Date.now()}.jpg`, 'text')} style={{ width: '100%', marginTop: 10, padding: 10, borderRadius: 8, border: 'none', background: 'linear-gradient(135deg,#f91880,#7c3aed)', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+                        {downloaded.text ? '✅ ดาวน์โหลดแล้ว' : '📥 Download + ข้อความ'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div style={{ padding: '0 18px 18px' }}>
+                  <button onClick={() => { setImages([]); setResult(null); setError(''); }} style={{ padding: '8px 20px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                    🔄 เริ่มใหม่
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </>
   );
