@@ -3,7 +3,8 @@
  * NO SVG — ใช้ raw pixel buffer ทั้งหมด เพื่อหลีกเลี่ยง librsvg compatibility issues
  */
 import sharp from 'sharp';
-import { TEMPLATES } from './imageTemplates.js';
+import { TEMPLATES, getZones } from './imageTemplates.js';
+
 
 const CANVAS_SIZE = 1080;
 
@@ -134,15 +135,17 @@ async function applyBasicEffect(imgBuf, effect, w, h) {
     case 'blur_dark':    s = s.blur(10).modulate({ brightness: 0.55 }); break;
     case 'blur_light':   s = s.blur(6).modulate({ brightness: 0.85 });  break;
     case 'overlay_dark': s = s.modulate({ brightness: 0.45 });           break;
+    case 'desaturate':   s = s.modulate({ saturation: 0.35 });           break;
     default: break;
   }
   return s.png().toBuffer();
 }
 
+
 // ─── Main Composer ─────────────────────────────────────────────
 export async function composeImage({ templateId, assignments, colorOverride }) {
   const tmpl = TEMPLATES[templateId] || TEMPLATES.accident;
-  const { zones } = tmpl.layout;
+  const zones = getZones(tmpl); // รองรับทั้ง structure เดิมและใหม่
 
   // Black canvas
   let canvas = await sharp({
@@ -152,8 +155,9 @@ export async function composeImage({ templateId, assignments, colorOverride }) {
     },
   }).png().toBuffer();
 
-  // Process zones sequentially — composite one by one to avoid memory issues
+  // Process zones sequentially
   for (const zone of zones) {
+
     const src = assignments[zone.id] ?? assignments[zone.role];
     if (!src) continue;
 
@@ -166,12 +170,20 @@ export async function composeImage({ templateId, assignments, colorOverride }) {
 
       if (zone.effect === 'circle_bw' || zone.effect === 'circle_color') {
         const size = Math.min(w, h);
-        buf = await circleCrop(raw, size);
+        let circleBuf = await circleCrop(raw, size);
         if (zone.effect === 'circle_bw') {
-          buf = await sharp(buf).grayscale().png().toBuffer();
+          circleBuf = await sharp(circleBuf).grayscale().png().toBuffer();
+        } else {
+          // circle_color: add thin white border ring
+          const ringSize = size + 12;
+          const bgBuf = await sharp({ create: { width: ringSize, height: ringSize, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } } }).png().toBuffer();
+          circleBuf = await sharp(bgBuf).composite([{ input: circleBuf, left: 6, top: 6 }]).png().toBuffer();
         }
+        buf = circleBuf;
       } else if (zone.effect === 'border_green') {
         buf = await addBorder(raw, w, h, '#22c55e', 7);
+      } else if (zone.effect === 'border_lime') {
+        buf = await addBorder(raw, w, h, '#a3e635', 8);
       } else if (zone.effect === 'border_red') {
         buf = await addBorder(raw, w, h, '#ef4444', 7);
       } else if (zone.effect === 'border_gold') {

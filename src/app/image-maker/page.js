@@ -5,11 +5,16 @@ import TemplateDiagram from './TemplateDiagram';
 import PromptManager, { DEFAULT_PROMPTS } from './PromptManager';
 
 const TEMPLATES_META = {
+  // ── New templates (จากรูปตัวอย่าง) ──────────────
+  grid_circle:    { label: 'Grid + วงกลม',         icon: '⊞',  color: '#ffffff', isNew: true },
+  big_face_multi: { label: 'ใบหน้าใหญ่ + Multi',   icon: '👤', color: '#a3e635', isNew: true },
+  big_face_ev:    { label: 'ใบหน้า BG + หลักฐาน',  icon: '🔍', color: '#a3e635', isNew: true },
+  // ── Original templates ───────────────────────────
   accident:      { label: 'อุบัติเหตุ / ภัยพิบัติ', icon: '🚨', color: '#22c55e' },
-  crime:         { label: 'อาชญากรรม',              icon: '🔴', color: '#ef4444' },
-  politics:      { label: 'การเมือง',                icon: '🏛️', color: '#3b82f6' },
-  economy:       { label: 'เศรษฐกิจ / ธุรกิจ',     icon: '💰', color: '#f59e0b' },
-  entertainment: { label: 'บันเทิง / ไลฟ์สไตล์',   icon: '🎬', color: '#ec4899' },
+  crime:         { label: 'อาชญากรรม',               icon: '🔴', color: '#ef4444' },
+  politics:      { label: 'การเมือง',                 icon: '🏛️', color: '#3b82f6' },
+  economy:       { label: 'เศรษฐกิจ / ธุรกิจ',      icon: '💰', color: '#f59e0b' },
+  entertainment: { label: 'บันเทิง / ไลฟ์สไตล์',    icon: '🎬', color: '#ec4899' },
 };
 
 function resizeImage(file, maxPx = 800, quality = 0.72) {
@@ -148,9 +153,28 @@ export default function ImageMakerPage() {
 
           {/* Visual Template Selector */}
           <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 10 }}>🎨 เลือก Template</div>
+            {/* NEW Templates */}
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#a3e635', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              ✨ Templates ใหม่ <span style={{ fontSize: 9, background: '#a3e635', color: '#000', borderRadius: 4, padding: '1px 5px', fontWeight: 800 }}>NEW</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 12 }}>
+              {Object.entries(TEMPLATES_META).filter(([, v]) => v.isNew).map(([k, v]) => (
+                <button key={k} onClick={() => setNewsType(k)} style={{
+                  padding: '10px 8px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
+                  border: `2px solid ${newsType === k ? v.color : 'rgba(163,230,53,0.2)'}`,
+                  background: newsType === k ? `${v.color}18` : 'var(--bg-primary)',
+                  textAlign: 'center', transition: 'all .15s',
+                }}>
+                  <div style={{ fontSize: 22, marginBottom: 4 }}>{v.icon}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: newsType === k ? v.color : 'var(--text-secondary)', lineHeight: 1.3 }}>{v.label}</div>
+                </button>
+              ))}
+            </div>
+
+            {/* Original Templates */}
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8 }}>🗂️ Templates ตามประเภทข่าว</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8 }}>
-              {Object.entries(TEMPLATES_META).map(([k, v]) => (
+              {Object.entries(TEMPLATES_META).filter(([, v]) => !v.isNew).map(([k, v]) => (
                 <TemplateDiagram key={k} templateId={k} selected={newsType === k}
                   onClick={() => setNewsType(k)} label={v.label} icon={v.icon} />
               ))}
