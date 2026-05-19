@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -184,38 +184,49 @@ export default function NewContentPage() {
       const classicCount = data.data.classicVersionCount || 0;
       const enhancedCount = data.data.enhancedVersionCount || 0;
 
-      // Tracker updates
-      wfComplete('auto_scrape', `ดึงเนื้อหา ${data.data.newsData?.newsBody?.length || 0} ตัวอักษร (${st.scrape || '?'}s)`);
-
-      wfStart('auto_extract', { detail: '📰 AI กำลังสกัดเนื้อข่าว...' });
-      wfComplete('auto_extract', `"${newsTitle.slice(0, 35)}..." (${st.extract || '?'}s)`);
-
-      wfStart('auto_breakdown', { detail: '🔍 AI กำลังวิเคราะห์มุมข่าว...' });
-      wfComplete('auto_breakdown', `${anglesCount} มุมข่าว (${st.breakdown || '?'}s)`);
-
-      // Blueprint step
-      wfStart('auto_blueprint', { detail: '🧬 AI วางแผน Emotional Architecture...' });
-      if (data.data.blueprint?.core_emotion) {
-        wfComplete('auto_blueprint', `🧬 ${data.data.blueprint.core_emotion} | ${data.data.blueprint.emotional_timeline?.length || 0} steps`);
-      } else {
-        wfComplete('auto_blueprint', '⚠️ Blueprint ไม่สำเร็จ (ข้ามไป)');
-      }
-
-      // Research step
-      wfStart('auto_research', { detail: '🔍 ค้นหาข้อมูลจาก Google...' });
+      // ─── ✅ Sequential replay with actual stepTimings from API ────
+      const delay = (ms) => new Promise(r => setTimeout(r, ms));
       const resCount = data.data.researchItems?.length || 0;
-      wfComplete('auto_research', resCount > 0 ? `✅ ${resCount} แหล่งข้อมูลจริง` : '⚠️ ไม่พบข้อมูลเพิ่มเติม');
-
-      // Classic pipeline
-      wfStart('auto_classic', { detail: '⚡ Classic pipeline กำลังสร้าง...' });
-      wfComplete('auto_classic', `✅ ${classicCount} เวอร์ชัน Classic`);
-
-      // Enhanced pipeline
-      wfStart('auto_enhanced', { detail: '🧬 Enhanced pipeline กำลังสร้าง...' });
-      wfComplete('auto_enhanced', `✅ ${enhancedCount} เวอร์ชัน Enhanced`);
-
       const promptLabel = pi?.source === 'library' ? `🏛️ ${pi.name?.slice(0, 20)}` : `📦 Library`;
-      finishWorkflow(`Auto V2 ✅ ${data.data.totalTimeSeconds || ''}s — ${versionsCount} เวอร์ชัน (${classicCount} Classic + ${enhancedCount} Enhanced) | ${promptLabel}`);
+
+      wfComplete('auto_scrape', `ดึง ${data.data.newsData?.newsBody?.length || 0} ตัวอักษร | ${st.scrape || '?'}s`);
+      await delay(200);
+
+      wfStart('auto_extract', { api: '/api/auto → GPT-4o-mini', detail: `EXTRACT prompt → "${newsTitle.slice(0,30)}..."` });
+      await delay(280);
+      wfComplete('auto_extract', `"${newsTitle.slice(0, 40)}" | ${st.extract || '?'}s`);
+      await delay(200);
+
+      wfStart('auto_breakdown', { api: '/api/auto → GPT-4o-mini', detail: 'BREAKDOWN prompt → วิเคราะห์มุมข่าว' });
+      await delay(280);
+      wfComplete('auto_breakdown', `${anglesCount} มุมข่าว | ${st.breakdown || '?'}s`);
+      await delay(200);
+
+      wfStart('auto_blueprint', { api: '/api/auto → GPT-4o', detail: 'BLUEPRINT prompt → Emotional Architecture' });
+      await delay(280);
+      wfComplete('auto_blueprint', data.data.blueprint?.core_emotion
+        ? `"${data.data.blueprint.core_emotion}" | ${st.blueprint || '?'}s`
+        : `⚠️ Blueprint ข้ามไป`);
+      await delay(200);
+
+      wfStart('auto_research', { api: 'KEYWORD prompt → Serper API', detail: 'ค้นหาข้อมูลจริงจาก Google...' });
+      await delay(280);
+      wfComplete('auto_research', resCount > 0
+        ? `✅ ${resCount} แหล่งข้อมูล | ${st.research || '?'}s`
+        : `⚠️ ไม่พบข้อมูลเพิ่มเติม`);
+      await delay(200);
+
+      wfStart('auto_classic', { api: `/api/summarize ×${classicCount} → Claude`, detail: `Classic prompts from Library` });
+      await delay(280);
+      wfComplete('auto_classic', `✅ ${classicCount} เวอร์ชัน | ${st.classic || '?'}s`);
+      await delay(200);
+
+      wfStart('auto_enhanced', { api: `/api/summarize ×${enhancedCount} → Claude`, detail: `Enhanced + Blueprint inject` });
+      await delay(280);
+      wfComplete('auto_enhanced', `✅ ${enhancedCount} เวอร์ชัน | ${st.enhanced || '?'}s`);
+      await delay(150);
+
+      finishWorkflow(`✅ ${data.data.totalTimeSeconds || '?'}s — ${versionsCount} เวอร์ชัน (${classicCount}+${enhancedCount}) | ${promptLabel}`);
 
       setNewsData(data.data.newsData);
       setBreakdownData(data.data.breakdownData);
