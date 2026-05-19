@@ -19,7 +19,7 @@
 const PATTERNS = {
   tiktok:   /tiktok\.com|vt\.tiktok\.com|vm\.tiktok\.com/i,
   youtube:  /youtube\.com\/watch|youtu\.be\/|youtube\.com\/shorts/i,
-  facebook: /facebook\.com\/(watch|video|reel|permalink|posts|photo|groups|story)|fb\.watch/i,
+  facebook: /facebook\.com\/(?:.*\/)?(watch|video|reel|permalink|posts|photo|groups|story)|fb\.watch/i,
   twitter:  /twitter\.com\/|x\.com\//i,
   instagram:/instagram\.com\/(p|reel|tv)\//i,
   article:  /^https?:\/\/.{5,}/i,
