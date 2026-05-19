@@ -285,8 +285,10 @@ export default function NewContentPage() {
       // 📦 Auto-save เข้าคลังข่าว
       autoSaveToArchive(data.data.newsData, data.data.breakdownData).catch(() => {});
     } catch (err) {
-      wfFail('auto_scrape', err.message);
-      setError('Auto Mode: ' + err.message);
+      // \u2705 FIX: \u0e43\u0e0a\u0e49 failedStep \u0e08\u0e32\u0e01 API \u0e41\u0e17\u0e19 hard-code auto_scrape
+      const failStep = err.failedStep || 'auto_scrape';
+      wfFail(failStep, err.message);
+      setError('Auto Pipeline: ' + err.message);
       setAutoProgress('');
     } finally {
       setAutoMode(false);

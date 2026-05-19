@@ -64,12 +64,20 @@ export async function POST(request) {
     const step0Start = Date.now();
     let detectedType = forceType || 'url';
     if (!forceType) {
-      if (/tiktok\.com/i.test(url)) detectedType = 'tiktok';
+      // ✅ รวม vt.tiktok.com (short link) และ vm.tiktok.com
+      if (/tiktok\.com|vt\.tiktok|vm\.tiktok/i.test(url)) detectedType = 'tiktok';
       else if (/youtube\.com|youtu\.be/i.test(url)) detectedType = 'youtube';
       else if (/facebook\.com|fb\.watch/i.test(url)) detectedType = 'facebook';
     }
     const domain = (() => { try { return new URL(url).hostname; } catch { return url.slice(0, 30); } })();
     addLog('Detect', `📎 ${detectedType.toUpperCase()} → ${domain}`);
+
+    // ─── Helper: throw ด้วย failedStep ที่ถูกต้อง ────────────────
+    const throwStep = (stepId, msg) => {
+      const err = new Error(msg);
+      err.failedStep = stepId; // บอกว่า step ไหน fail จริง
+      throw err;
+    };
 
     // === STEP 1: ดึงเนื้อหา (Scrape / Transcribe) ===
     const step1Start = Date.now();
@@ -78,13 +86,19 @@ export async function POST(request) {
     if (detectedType === 'tiktok') {
       addLog('Step1', '🎵 กำลัง transcribe TikTok...');
       const tikRes = await callInternal('/api/tiktok', { url });
-      if (!tikRes.success) throw new Error(`TikTok: ${tikRes.error}`);
+      if (!tikRes.success) {
+        // TikTok shortlink → ไม่สามารถดาวน์โหลดได้ → แนะนำให้ paste ข้อความแทน
+        const msg = tikRes.needUpload
+          ? `TikTok: ดาวน์โหลดวิดีโออัตโนมัติไม่สำเร็จ — กรุณาวางลิงก์ TikTok แบบเต็ม (tiktok.com/@user/video/...) หรือสลับไปโหมด "วาง URL" แล้วเปิดหน้าเว็บดึงข้อความเอง`
+          : `TikTok: ${tikRes.error}`;
+        throwStep('auto_scrape', msg);
+      }
       rawText = tikRes.transcript || tikRes.text || '';
       addLog('Step1', `✅ TikTok transcript: ${rawText.length} ตัวอักษร (${((Date.now() - step1Start) / 1000).toFixed(1)}s)`);
     } else if (detectedType === 'youtube') {
       addLog('Step1', '🎬 กำลังดึง YouTube transcript...');
       const ytRes = await callInternal('/api/youtube', { url });
-      if (!ytRes.success) throw new Error(`YouTube: ${ytRes.error}`);
+      if (!ytRes.success) throwStep('auto_scrape', `YouTube: ${ytRes.error}`);
       rawText = ytRes.transcript || ytRes.text || '';
       addLog('Step1', `✅ YouTube transcript: ${rawText.length} ตัวอักษร (${((Date.now() - step1Start) / 1000).toFixed(1)}s)`);
     } else {
@@ -95,13 +109,13 @@ export async function POST(request) {
         body: JSON.stringify({ url }),
       });
       const scrapeData = await scrapeRes.json();
-      if (!scrapeData.success) throw new Error(`Scrape: ${scrapeData.error}`);
+      if (!scrapeData.success) throwStep('auto_scrape', `Scrape: ${scrapeData.error}`);
       rawText = scrapeData.data?.text || scrapeData.text || '';
       addLog('Step1', `✅ ดึงเนื้อหา ${rawText.length} ตัวอักษร (${((Date.now() - step1Start) / 1000).toFixed(1)}s)`);
     }
 
     if (!rawText || rawText.length < 20) {
-      throw new Error('ไม่สามารถดึงเนื้อหาได้ (ข้อความสั้นเกินไป)');
+      throwStep('auto_scrape', 'ไม่สามารถดึงเนื้อหาได้ (ข้อความสั้นเกินไป)');
     }
 
     // === STEP 2: สกัดข่าว (Extract) ===
@@ -116,7 +130,7 @@ export async function POST(request) {
       mode: 'extract',
     });
     if (!extractRes.success || !extractRes.data?.newsBody) {
-      throw new Error('สกัดข่าวไม่สำเร็จ');
+      throwStep('auto_extract', `สกัดข่าวไม่สำเร็จ: ${extractRes.error || 'ไม่มีเนื้อหา'}`);
     }
     const newsData = extractRes.data;
     rlog.inject('newsTitle', `"${(newsData.newsTitle||'').slice(0,50)}"`);
@@ -137,7 +151,7 @@ export async function POST(request) {
       mode: 'breakdown',
     });
     if (!breakRes.success || !breakRes.data) {
-      throw new Error('แตกประเด็นไม่สำเร็จ');
+      throwStep('auto_breakdown', `แตกประเด็นไม่สำเร็จ: ${breakRes.error || ''}`);
     }
     const breakdownData = breakRes.data;
     rlog.inject('breakdownData', `${breakdownData.key_points?.length||0} key_points | ${breakdownData.possible_angles?.length||0} angles | core: "${(breakdownData.core_story||'').slice(0,40)}"`);
@@ -276,7 +290,7 @@ export async function POST(request) {
     // log สรุป
     if (!classicData) addLog('Classic', '❌ Classic ไม่สำเร็จ');
     if (!enhancedData) addLog('Enhanced', '❌ Enhanced ไม่สำเร็จ');
-    if (allVersions.length === 0) throw new Error('ทั้ง Classic และ Enhanced สร้างเนื้อหาไม่สำเร็จ');
+    if (allVersions.length === 0) throwStep('auto_classic', 'ทั้ง Classic และ Enhanced สร้างเนื้อหาไม่สำเร็จ — ตรวจสอบ Prompt Library หรือ API key');
 
     addLog('Summary', `📊 รวม ${allVersions.length} เวอร์ชัน (Classic: ${classicVersions.length}, Enhanced: ${enhancedVersions.length})`);
     if (blueprint) addLog('Summary', `🧬 Blueprint: ${blueprint.core_emotion}`);
