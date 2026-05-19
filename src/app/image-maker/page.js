@@ -1,7 +1,8 @@
-﻿'use client';
+'use client';
 import { useState, useCallback, useEffect } from 'react';
 import Header from '@/components/layout/Header';
 import TemplateAnalyzer from './TemplateAnalyzer';
+import TemplateLibrary from './TemplateLibrary';
 
 const BUILT_IN = {
   grid_circle:    { label: 'Grid + วงกลม',        icon: '⊞', color: '#a3e635', photos: 5, desc: '2×2 grid + วงกลมกลาง' },
@@ -44,11 +45,12 @@ const s = {
 };
 
 export default function ImageMakerPage() {
-  const [tab, setTab]               = useState('compose'); // 'compose' | 'analyze'
+  const [tab, setTab]               = useState('compose'); // 'compose' | 'analyze' | 'library'
   const [images, setImages]         = useState([]);
   const [newsTitle, setNewsTitle]   = useState('');
   const [template, setTemplate]     = useState('grid_circle');
   const [withText, setWithText]     = useState(false);
+  const [useFAL, setUseFAL]         = useState(false); // ✅ FAL opt-in toggle
   const [loading, setLoading]       = useState(false);
   const [step, setStep]             = useState('');
   const [error, setError]           = useState('');
@@ -120,7 +122,10 @@ export default function ImageMakerPage() {
       setStep('🖼️ Sharp.js กำลัง composite รูป...');
       const cRes = await fetch('/api/image-compose', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images, layout: aData.layout, newsTitle, generateText: withText }),
+        body: JSON.stringify({
+          images, layout: aData.layout, newsTitle, generateText: withText,
+          enhanceMode: useFAL ? 'fal' : 'none', // ✅ FAL opt-in
+        }),
       });
       const cData = await cRes.json();
       if (!cData.success) throw new Error(cData.error);
@@ -145,8 +150,9 @@ export default function ImageMakerPage() {
 
         {/* Tab Bar */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 20, padding: '6px', background: 'var(--bg-secondary)', borderRadius: 12, border: '1px solid var(--border)' }}>
-          {[
+        {[
             { id: 'compose', label: '🖼️ สร้างรูป', desc: 'compose ปกข่าว' },
+            { id: 'library', label: '📚 Library', desc: 'templates ทั้งหมด' },
             { id: 'analyze', label: '🔍 วิเคราะห์ Template', desc: 'อัปโหลด template ใหม่' },
           ].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
@@ -160,6 +166,26 @@ export default function ImageMakerPage() {
             </button>
           ))}
         </div>
+
+        {/* ══ TAB: LIBRARY ══ */}
+        {tab === 'library' && (
+          <div style={s.card}>
+            <TemplateLibrary
+              selectedId={template}
+              onSelect={(tmpl) => {
+                // Merge into customTemplates if not built-in
+                if (!BUILT_IN[tmpl.id]) {
+                  setCustomTemplates(p => {
+                    const exists = p.find(t => t.id === tmpl.id);
+                    return exists ? p : [tmpl, ...p];
+                  });
+                }
+                setTemplate(tmpl.id);
+                setTab('compose');
+              }}
+            />
+          </div>
+        )}
 
         {/* ══ TAB: ANALYZE ══ */}
         {tab === 'analyze' && (
@@ -285,6 +311,25 @@ export default function ImageMakerPage() {
                       </button>
                     ))}
                   </div>
+                </div>
+                {/* ✅ FAL AI Enhancement toggle */}
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>AI Enhancement</label>
+                  <button
+                    onClick={() => setUseFAL(p => !p)}
+                    style={{
+                      padding: '8px 14px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
+                      border: `1px solid ${useFAL ? '#6366f1' : 'var(--border)'}`,
+                      background: useFAL ? 'rgba(99,102,241,0.12)' : 'transparent',
+                      color: useFAL ? '#818cf8' : 'var(--text-muted)',
+                      fontSize: 12, fontWeight: 700, textAlign: 'left',
+                    }}
+                  >
+                    {useFAL ? '✨ FAL On' : '⏭️ FAL Off'}
+                    <div style={{ fontSize: 9, fontWeight: 400, marginTop: 2 }}>
+                      {useFAL ? 'FAL Flux Kontext (เสียเครดิต)' : 'Sharp only — เร็ว แม่นยำ (แนะนำ)'}
+                    </div>
+                  </button>
                 </div>
               </div>
             </div>

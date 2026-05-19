@@ -33,6 +33,8 @@ export default function TemplateAnalyzer({ onTemplateSaved }) {
   const [result, setResult]       = useState(null);
   const [error, setError]         = useState('');
   const [saved, setSaved]         = useState(false);
+  const [saving, setSaving]       = useState(false);
+  const [autoSave, setAutoSave]   = useState(true);
 
   const handleFile = useCallback(async (file) => {
     if (!file || !file.type.startsWith('image/')) return;
@@ -68,8 +70,9 @@ export default function TemplateAnalyzer({ onTemplateSaved }) {
     finally { setLoading(false); }
   };
 
-  const saveTemplate = () => {
-    if (!result) return;
+  const saveTemplate = async () => {
+    if (!result || saving) return;
+    setSaving(true); setError('');
     const tmpl = {
       ...result.template,
       id: result.templateId,
@@ -77,13 +80,31 @@ export default function TemplateAnalyzer({ onTemplateSaved }) {
       color: '#a3e635',
     };
     try {
-      const existing = JSON.parse(localStorage.getItem('customTemplates') || '[]');
-      const next = [...existing, tmpl];
-      localStorage.setItem('customTemplates', JSON.stringify(next));
+      // 1. Save to API (primary)
+      const res = await fetch('/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template: tmpl }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      // 2. Save to localStorage (backward compat)
+      try {
+        const existing = JSON.parse(localStorage.getItem('customTemplates') || '[]');
+        const filtered = existing.filter(t => t.id !== tmpl.id);
+        localStorage.setItem('customTemplates', JSON.stringify([tmpl, ...filtered]));
+      } catch {}
+
       onTemplateSaved?.(tmpl);
       setSaved(true);
-    } catch { setError('บันทึกไม่สำเร็จ'); }
+    } catch (e) {
+      setError('บันทึกไม่สำเร็จ: ' + e.message);
+    } finally {
+      setSaving(false);
+    }
   };
+
 
   return (
     <div style={{ padding: 20 }}>
@@ -232,16 +253,16 @@ export default function TemplateAnalyzer({ onTemplateSaved }) {
             {/* Save button */}
             <button
               onClick={saveTemplate}
-              disabled={saved}
+              disabled={saved || saving}
               style={{
                 width: '100%', padding: '11px', borderRadius: 8, border: 'none',
-                background: saved ? 'var(--bg-elevated)' : '#a3e635',
-                color: saved ? 'var(--text-muted)' : '#000',
-                fontWeight: 800, fontSize: 13, cursor: saved ? 'default' : 'pointer',
-                fontFamily: 'inherit',
+                background: saved ? 'rgba(163,230,53,0.15)' : saving ? 'var(--bg-elevated)' : '#a3e635',
+                color: saved ? '#a3e635' : saving ? 'var(--text-muted)' : '#000',
+                fontWeight: 800, fontSize: 13, cursor: (saved || saving) ? 'default' : 'pointer',
+                fontFamily: 'inherit', transition: 'all .2s',
               }}
             >
-              {saved ? '✅ บันทึกแล้ว — ใช้งานได้ใน Image Maker' : '💾 บันทึก Template นี้'}
+              {saved ? '✅ บันทึกแล้ว — ดูใน Template Library' : saving ? '⏳ กำลังบันทึก...' : '💾 บันทึก Template นี้'}
             </button>
           </div>
         </div>
