@@ -63,9 +63,24 @@ export default function ImageMakerPage() {
     } catch {}
   }, []);
 
+  // เพิ่ม helper: ดึง zones ของ custom template จาก localStorage
+  const getCustomZones = (templateId) => {
+    try {
+      const ct = JSON.parse(localStorage.getItem('customTemplates') || '[]');
+      return ct.find(t => t.id === templateId)?.zones || null;
+    } catch { return null; }
+  };
+
   const allTemplates = {
     ...BUILT_IN,
-    ...Object.fromEntries(customTemplates.map(t => [t.id, { label: t.name, icon: '⭐', color: t.color || '#a3e635', photos: t.totalPhotosNeeded || '?', desc: 'Custom template', previewImage: t.previewImage }])),
+    ...Object.fromEntries(customTemplates.map(t => [t.id, {
+      label: t.name || 'Custom Template', // ✅ ใช้ name ไม่ใช่ id
+      icon: '⭐',
+      color: t.color || '#a3e635',
+      photos: t.totalPhotosNeeded || t.zones?.length || '?',
+      desc: `${t.zones?.length || '?'} zones • custom`,
+      previewImage: t.previewImage,
+    }])),
   };
 
   const handleFiles = useCallback(async (files) => {
@@ -80,11 +95,24 @@ export default function ImageMakerPage() {
   const handleCompose = async () => {
     if (!images.length) { setError('กรุณาอัปโหลดรูปอย่างน้อย 1 รูป'); return; }
     setError(''); setResult(null); setLoading(true); setDownloaded({});
+
+    // ✅ FIX: ดึง zones ของ custom template
+    const isBuiltIn = Boolean(BUILT_IN[template]);
+    const customZones = isBuiltIn ? null : getCustomZones(template);
+    const customTmplInfo = isBuiltIn ? null : customTemplates.find(t => t.id === template);
+
     try {
       setStep('🤖 AI วิเคราะห์รูปและ layout...');
       const aRes = await fetch('/api/image-analyze', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images, newsTitle, newsType: template }),
+        body: JSON.stringify({
+          images,
+          newsTitle,
+          newsType: template,
+          // ✅ ส่ง custom zones ถ้ามี
+          customZones: customZones || undefined,
+          templateName: customTmplInfo?.name || undefined,
+        }),
       });
       const aData = await aRes.json();
       if (!aData.success) throw new Error(aData.error);

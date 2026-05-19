@@ -16,26 +16,36 @@ export async function POST(request) {
   const startTime = Date.now();
   try {
     const body = await request.json();
-    const { images, newsTitle, newsType, customPrompt } = body;
+    const { images, newsTitle, newsType, customPrompt, customZones, templateName } = body;
 
     if (!images || images.length < 1) {
       return NextResponse.json({ success: false, error: 'กรุณาส่งรูปอย่างน้อย 1 รูป' }, { status: 400 });
     }
 
-    rlog.start(`images: ${images.length} | newsType: ${newsType||'-'} | title: "${(newsTitle||'').slice(0,40)}"`);
+    rlog.start(`images: ${images.length} | newsType: ${newsType||'-'} | customZones: ${customZones?.length||0}`);
 
-    const suggestedTemplate = detectTemplate(newsType || '', newsTitle || '');
-    const tmpl = TEMPLATES[suggestedTemplate];
+    // ✅ FIX: ถ้ามี customZones จาก custom template → ใช้เลย ไม่ต้อง detectTemplate
+    const isCustomTemplate = customZones && Array.isArray(customZones) && customZones.length > 0;
+    let allZones, suggestedTemplate, tmplName;
 
-    // ✅ FIX: ใช้ getZones() รองรับทั้ง template เดิม (.layout.zones) และใหม่ (.zones)
-    const allZones = getZones(tmpl);
+    if (isCustomTemplate) {
+      allZones = customZones;
+      suggestedTemplate = newsType || 'custom';
+      tmplName = templateName || 'Custom Template';
+      rlog.step('custom-zones', `✅ Using custom zones: ${allZones.length} zones | template: "${suggestedTemplate}"`);
+    } else {
+      suggestedTemplate = detectTemplate(newsType || '', newsTitle || '');
+      const tmpl = TEMPLATES[suggestedTemplate];
+      allZones = getZones(tmpl);
+      tmplName = tmpl.name;
+      rlog.step('template-detect', `template: "${suggestedTemplate}" (${tmplName}) | zones: ${allZones.length}`);
+    }
+
     const availableZones = allZones
       .filter(z => z.role !== 'background')
       .map(z => `"${z.id}" (role: ${z.role})`)
       .join(', ');
     const maxIdx = images.length - 1;
-
-    rlog.step('template-detect', `template: "${suggestedTemplate}" (${tmpl.name}) | zones: ${allZones.length} | images: ${images.length}`);
 
     // ── System instruction ─────────────────────────────────────
     // ถ้ามี customPrompt → ใช้เป็น PRIMARY SYSTEM PROMPT (ไม่ใช่แค่ hint)
@@ -62,20 +72,20 @@ Title: "${newsTitle || 'Not specified'}"
 Type: ${newsType || 'Not specified'}
 Images count: ${images.length} (indexed 0-${maxIdx})
 
-TEMPLATE: "${suggestedTemplate}" (${tmpl.name})
+TEMPLATE: "${suggestedTemplate}" (${tmplName})
 Available zones to assign: ${availableZones}
 
 ---
 STRICT OUTPUT RULES:
 - You MUST return ONLY valid JSON, no other text
-- assignments.bg and assignments.main are REQUIRED (index 0-${maxIdx})
-- Use duplicate indexes if fewer images than zones
+- Assign EVERY zone to a real image index (0-${maxIdx})
+- Use duplicate indexes if fewer images than zones (spread images evenly)
 - Only include "memorial" key if a clear formal/memorial portrait exists
 
 RETURN EXACTLY THIS JSON FORMAT:
 {
   "template": "${suggestedTemplate}",
-  "assignments": {"bg": 0, "main": 0, "context": 1, "event": 2, "secondary": 1},
+  "assignments": {${allZones.filter(z=>z.role!=='background').map((z,i)=>`"${z.id}": ${Math.min(i, maxIdx)}`).join(', ')}},
   "hasMemorial": false,
   "confidence": 85,
   "reasoning": "short Thai explanation of choices"
@@ -110,11 +120,15 @@ RETURN EXACTLY THIS JSON FORMAT:
       throw new Error('AI ตอบ JSON ไม่ถูกต้อง: ' + raw.slice(0, 100));
     }
 
-    // Validate & sanitize
-    const finalTemplate = TEMPLATES[result.template] ? result.template : suggestedTemplate;
+    // Validate & sanitize assignments
+    const finalTemplate = isCustomTemplate ? suggestedTemplate : (TEMPLATES[result.template] ? result.template : suggestedTemplate);
     const assignments = result.assignments || {};
-    if (assignments.bg === undefined) assignments.bg = 0;
-    if (assignments.main === undefined) assignments.main = 0;
+    // Ensure every zone has an assignment
+    for (const zone of allZones.filter(z => z.role !== 'background')) {
+      if (assignments[zone.id] === undefined) {
+        assignments[zone.id] = 0; // default to first image
+      }
+    }
     for (const key of Object.keys(assignments)) {
       assignments[key] = Math.min(Math.max(0, parseInt(assignments[key]) || 0), maxIdx);
     }
@@ -126,13 +140,15 @@ RETURN EXACTLY THIS JSON FORMAT:
     return NextResponse.json({
       success: true,
       layout: {
-        template: finalTemplate,
-        templateName: TEMPLATES[finalTemplate].name,
+        template: suggestedTemplate,
+        templateName: tmplName,
+        zones: allZones, // ✅ ส่ง zones กลับไปเสมอ เพื่อให้ image-compose ใช้ custom zones ได้
         assignments,
         hasMemorial: Boolean(result.hasMemorial),
         confidence: result.confidence || 80,
         reasoning: result.reasoning || '',
         usedCustomPrompt: Boolean(customPrompt?.trim()),
+        isCustomTemplate,
       },
     });
 

@@ -143,9 +143,16 @@ async function applyBasicEffect(imgBuf, effect, w, h) {
 
 
 // ─── Main Composer ─────────────────────────────────────────────
-export async function composeImage({ templateId, assignments, colorOverride }) {
-  const tmpl = TEMPLATES[templateId] || TEMPLATES.accident;
-  const zones = getZones(tmpl); // รองรับทั้ง structure เดิมและใหม่
+export async function composeImage({ templateId, zones: zonesOverride, assignments, colorOverride }) {
+  let zones;
+  if (zonesOverride && Array.isArray(zonesOverride) && zonesOverride.length > 0) {
+    zones = zonesOverride;
+    console.log(`[Composer] ✅ Custom zones: ${zones.length} zones`);
+  } else {
+    const tmpl = TEMPLATES[templateId] || TEMPLATES.accident;
+    zones = getZones(tmpl);
+    console.log(`[Composer] 📦 Built-in template: "${templateId}" → ${zones.length} zones`);
+  }
 
   // Black canvas
   let canvas = await sharp({

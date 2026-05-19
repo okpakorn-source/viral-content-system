@@ -24,26 +24,27 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'ต้องการ images และ layout' }, { status: 400 });
     }
 
+    // ✅ FIX: ใช้ zones จาก layout โดยตรง (custom template) หรือ lookup TEMPLATES (built-in)
+    const layoutZones = (layout.zones && Array.isArray(layout.zones) && layout.zones.length > 0)
+      ? layout.zones : null;
+
+    // fallback colorScheme จาก built-in template
     const tmpl = TEMPLATES[layout.template] || TEMPLATES.accident;
+    const colorScheme = layout.colorScheme || tmpl.colorScheme || {};
 
     // Map zone id → actual image base64 (จาก index ที่ AI กำหนด)
     const assignments = {};
     for (const [zoneId, imgIndex] of Object.entries(layout.assignments || {})) {
-      if (images[imgIndex]) {
-        assignments[zoneId] = images[imgIndex];
-      }
+      if (images[imgIndex]) assignments[zoneId] = images[imgIndex];
     }
+    if (!assignments.bg && images[0]) assignments.bg = images[0];
 
-    // Also fill bg with first image if not assigned
-    if (!assignments.bg && images[0]) {
-      assignments.bg = images[0];
-    }
-
-    console.log('[ImageCompose] 🖼️ Template:', layout.template, '| Zones:', Object.keys(assignments).length);
+    console.log(`[ImageCompose] 🖼️ Template: "${layout.template}" | zones: ${layoutZones ? layoutZones.length + ' (custom)' : 'built-in'} | images: ${images.length}`);
 
     // ── VERSION A: Layout Only (no text) ──────────────────────
     const layoutBuf = await composeImage({
       templateId: layout.template,
+      zones: layoutZones, // ✅ ส่ง custom zones ถ้ามี
       assignments,
       colorOverride: layout.colorOverride,
     });
@@ -64,7 +65,7 @@ export async function POST(request) {
             imageBase64: layoutB64,
             headline: newsTitle,
             template: layout.template,
-            colorScheme: tmpl.colorScheme,
+            colorScheme,
             customPrompt: customTextPrompt || null,
           }),
         });
@@ -95,7 +96,7 @@ export async function POST(request) {
       },
       textError,
       template: layout.template,
-      templateName: tmpl.name,
+      templateName: layout.templateName || tmpl.name,
       durationSeconds: parseFloat(duration),
     });
 
