@@ -19,10 +19,18 @@ export async function POST(request) {
   const startTime = Date.now();
   try {
     const body = await request.json();
-    const { input = '', images = [] } = body;
+    const { input = '', images = [], imageCount } = body;
+
+    // ✅ FIX Bug#3: client sends imageCount (not full base64) for lightweight detect
+    // Build a synthetic marker array so detectInputType knows images exist
+    const effectiveImages = images.length > 0
+      ? images
+      : imageCount > 0
+        ? Array.from({ length: imageCount }, (_, i) => `__image_placeholder_${i}__`)
+        : [];
 
     // ─── Validate ───────────────────────────────────────────────
-    if (!input && (!images || images.length === 0)) {
+    if (!input && effectiveImages.length === 0) {
       return NextResponse.json({
         success:   false,
         error:     'กรุณาส่ง input หรือ images อย่างน้อย 1 อย่าง',
@@ -32,7 +40,7 @@ export async function POST(request) {
     }
 
     // ─── Detect ─────────────────────────────────────────────────
-    const detection = detectInputType(input, images);
+    const detection = detectInputType(input, effectiveImages);
 
     // ─── Route ──────────────────────────────────────────────────
     const route = routePipeline(detection);

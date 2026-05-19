@@ -102,8 +102,8 @@ export default function UniversalInputBox({ onDetect, onSubmit, loading = false,
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            input:  inputText,
-            images: images.map(img => img.slice(0, 50)), // don't send full base64 for detect
+            input:      inputText,
+            imageCount: images.length, // ✅ FIX Bug#3: send count only — detector uses this to classify image/hybrid
           }),
         });
         const data = await res.json();

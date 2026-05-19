@@ -173,7 +173,7 @@ export default function NewContentPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          url,
+          url: targetUrl,   // ✅ FIX Bug#2: use targetUrl from inputData, not stale url state
           contentLength,
         }),
       });
@@ -1127,7 +1127,7 @@ export default function NewContentPage() {
                         className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
                         {extracting ? '⏳ กำลังถอดเสียง...' : '🎤 ถอดเสียง (Manual)'}
                       </button>
-                      <button type="button" onClick={handleAutoMode} disabled={!url || autoMode}
+                      <button type="button" onClick={() => handleAutoMode({ url, type: 'tiktok' })} disabled={!url || autoMode}
                         style={{ padding: '9px 16px', border: 'none', borderRadius: 'var(--radius-md)', background: 'linear-gradient(135deg, #f91880, #7c3aed)', color: '#fff', fontWeight: 800, fontSize: 12, cursor: autoMode ? 'wait' : 'pointer', whiteSpace: 'nowrap', boxShadow: '0 4px 12px rgba(249,24,128,0.3)', fontFamily: 'inherit' }}>
                         {autoMode ? '⏳ กำลัง...' : '⚡ Auto สร้างเลย'}
                       </button>
@@ -1138,7 +1138,7 @@ export default function NewContentPage() {
                         className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
                         {extracting ? '⏳ กำลังดึง...' : '📺 ดึง Transcript (Manual)'}
                       </button>
-                      <button type="button" onClick={handleAutoMode} disabled={!url || autoMode}
+                      <button type="button" onClick={() => handleAutoMode({ url, type: 'youtube' })} disabled={!url || autoMode}
                         style={{ padding: '9px 16px', border: 'none', borderRadius: 'var(--radius-md)', background: 'linear-gradient(135deg, #f91880, #7c3aed)', color: '#fff', fontWeight: 800, fontSize: 12, cursor: autoMode ? 'wait' : 'pointer', whiteSpace: 'nowrap', boxShadow: '0 4px 12px rgba(249,24,128,0.3)', fontFamily: 'inherit' }}>
                         {autoMode ? '⏳ กำลัง...' : '⚡ Auto สร้างเลย'}
                       </button>
