@@ -64,12 +64,13 @@ export async function saveAnalysis(id, analysisResult, presetUsed) {
 export function buildFullContext(workflow) {
   let ctx = '';
 
-  // ข่าวต้นฉบับเต็ม (Step 2) — ส่งทั้งหมด ไม่ตัด
-  if (workflow.newsBody) {
-    ctx += `=== เนื้อข่าวต้นฉบับ (จากขั้นตอนที่ 2 — ใช้ข้อมูลทั้งหมดนี้เท่านั้น ห้ามแต่งเพิ่ม) ===\n`;
-    ctx += `หัวข้อ: ${workflow.newsTitle || ''}\n\n`;
-    ctx += `${workflow.newsBody}\n`;
-    ctx += `=== จบเนื้อข่าว (${workflow.newsBody.length} ตัวอักษร) ===\n\n`;
+  // === NARRATIVE RECONSTRUCTION: ส่ง headline + fact summary เท่านั้น ===
+  // ⚠️ ห้ามส่ง newsBody เต็มเข้า final compose — ใช้ NarrativePayload แทน
+  if (workflow.newsTitle) {
+    ctx += `=== ข่าวต้นฉบับ (headline only — source removed for narrative reconstruction) ===\n`;
+    ctx += `หัวข้อ: ${workflow.newsTitle}\n`;
+    ctx += `⚠️ ข่าวต้นฉบับถูกแปลงเป็น structured facts แล้ว — ห้ามขอ source เดิม\n`;
+    ctx += `=== จบ headline ===\n\n`;
   }
 
   // ผลแตกประเด็นทั้งหมด (Step 3)
