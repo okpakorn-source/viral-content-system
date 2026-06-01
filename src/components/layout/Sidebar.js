@@ -52,6 +52,7 @@ export default function Sidebar() {
     { type: 'divider', label: 'ระบบ' },
     { label: 'เช็คสุขภาพระบบ', icon: '🔍', href: '/system-health' },
     { label: 'Pipeline Logs', icon: '📋', href: '/pipeline-logs' },
+    { label: 'Generation Log', icon: '🧪', href: '/generation-logs' },
     { label: 'สถิติ', icon: '📈', href: '/analytics' },
     { label: 'จัดการสมาชิก', icon: '👥', href: '/members' },
     { label: 'Discord Bot', icon: '👾', href: '/discord-bot', highlight: true },

@@ -9,6 +9,7 @@ import { logPipeline } from '@/lib/pipelineLogger';
 import { createLogger } from '@/lib/logger';
 import { withTimeout } from '@/lib/utils/withTimeout';
 import { runCorrectionPipeline } from '@/lib/correction/correctionPipeline';
+import { logGeneration } from '@/lib/services/generationLogger';
 
 const rlog = createLogger('AUTO-SERVICE');
 
@@ -364,6 +365,31 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   } catch (corrErr) {
     console.error('[AutoFlow] Correction pipeline failed, using original:', corrErr.message);
     addLog('Correction', `⚠️ Correction skipped: ${corrErr.message}`);
+  }
+
+  // === GENERATION LOG: บันทึกทุก case เข้าระบบ ===
+  try {
+    await logGeneration({
+      newsTitle: newsData.newsTitle,
+      sourceType: detectedType,
+      sourceUrl: url || '',
+      sourceText: rawText.slice(0, 5000),
+      versions: finalVersions,
+      breakdownData,
+      pipelineInfo: {
+        blueprint: blueprint?.core_emotion || null,
+        researchCount: totalResearchItems.length,
+        factPoolEntity: factPool?.entityName || null,
+        classicCount: classicVersionCount,
+        enhancedCount: enhancedVersionCount,
+        totalTime: parseFloat(totalTime),
+        contentLength: selectedLength,
+      },
+      userId: _user.userId,
+    });
+    addLog('GenLog', `📋 บันทึก Generation Log สำเร็จ`);
+  } catch (logErr) {
+    console.warn('[AutoFlow] Generation log failed (non-critical):', logErr.message);
   }
 
   return {

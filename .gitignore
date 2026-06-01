@@ -57,3 +57,5 @@ tmp/
 .env*.local
 dev.db
 scratch/
+
+.vercel
