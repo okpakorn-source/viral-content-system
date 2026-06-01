@@ -183,8 +183,8 @@ const openaiContent = fileExists('src/lib/ai/openai.js')
 
 check('Safety: System prompt rules', openaiContent.includes('FACEBOOK SAFETY RULES'), 'ไม่มี safety rules ใน system prompt');
 check('Safety: Post-processing filter', openaiContent.includes('sanitizeOutput'), 'ไม่มี post-processing safety filter');
-check('Safety: SAFETY_REPLACEMENTS array', openaiContent.includes('SAFETY_REPLACEMENTS'), 'ไม่มี safety replacement dictionary');
-check('Safety: Recursive sanitize', openaiContent.includes('function sanitizeOutput'), 'ไม่มี sanitizeOutput function');
+check('Safety: sanitizeOutput from safetyFilter', openaiContent.includes("import { sanitizeOutput } from './safetyFilter'"), 'ไม่ได้ import sanitizeOutput จาก safetyFilter');
+check('Safety: sanitizeOutput function exists', fileContains('src/lib/ai/safetyFilter.js', 'function sanitizeOutput'), 'ไม่มี sanitizeOutput function ใน safetyFilter');
 check('Safety: User prompt rules', routeContent.includes('กฎเหล็ก FACEBOOK SAFETY'), 'ไม่มี safety rules ใน user prompt');
 
 // ============================================

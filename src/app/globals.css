@@ -70,6 +70,7 @@ body {
 
 .sidebar {
   width: var(--sidebar-width);
+  height: 100vh;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex;
@@ -111,7 +112,7 @@ body {
   -webkit-text-fill-color: var(--text-muted);
 }
 
-.sidebar-nav { flex: 1; padding: 16px 12px; overflow-y: auto; }
+.sidebar-nav { flex: 1; padding: 16px 12px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
 .nav-section { margin-bottom: 24px; }
 .nav-section-title {
@@ -677,7 +678,7 @@ body {
   white-space: nowrap;
 }
 
-.wf-step-error {
+.wf-step-error-text {
   font-size: 10px;
   color: #ef4444;
   padding-left: 28px;
@@ -764,33 +765,7 @@ body {
   }
 }
 
-/* ===== SIDEBAR COMPONENT ===== */
-.sidebar {
-  width: 240px;
-  height: 100vh;
-  position: fixed;
-  left: 0;
-  top: 0;
-  background: var(--bg-elevated);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  z-index: 1000;
-  transition: transform 0.3s ease;
-}
-
-.sidebar-logo {
-  padding: 20px 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.sidebar-nav {
-  padding: 12px 8px;
-  flex: 1;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
+/* ===== SIDEBAR COMPONENT (child elements) ===== */
 .sidebar-divider {
   font-size: 9px;
   font-weight: 700;
@@ -928,14 +903,6 @@ body {
   background: rgba(0,0,0,0.6);
   z-index: 999;
   backdrop-filter: blur(2px);
-}
-
-/* ===== MAIN CONTENT ===== */
-.main-content {
-  flex: 1;
-  margin-left: 240px;
-  min-height: 100vh;
-  overflow-y: auto;
 }
 
 /* ===== RESPONSIVE — Tablet ===== */
