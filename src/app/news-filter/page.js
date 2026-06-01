@@ -149,13 +149,14 @@ function NewsFilterContent() {
       });
       const scrapeData = await scrapeRes.json();
 
-      if (!scrapeData.success && !scrapeData.data?.content) {
+      if (!scrapeData.success && !scrapeData.data?.text) {
         throw new Error(scrapeData.error || 'ไม่สามารถดึงเนื้อหาจาก URL ได้');
       }
 
       // Step 2: Extract clean text from scraped content
+      // Extract API returns { data: { text, title, ... } }
       setScrapeStep('⚙️ กำลังแยกเนื้อหาข่าว...');
-      const rawContent = scrapeData.data?.content || scrapeData.content || '';
+      const rawContent = scrapeData.data?.text || scrapeData.text || scrapeData.data?.content || '';
       const rawTitle = scrapeData.data?.title || scrapeData.title || '';
 
       // Basic cleaning: remove navigation, ads, footer patterns
