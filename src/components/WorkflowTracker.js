@@ -4,15 +4,20 @@ import { useWorkflow } from './WorkflowContext';
 
 // ─── Step metadata: model, prompt, API จริงๆ ─────────────────────
 const STEP_META = {
-  // Auto Pipeline
+  // Auto Pipeline (Enhanced)
   auto_detect:    { model: null,          prompt: null,              api: null,               icon: '🔍', color: '#64748b' },
   auto_scrape:    { model: null,          prompt: null,              api: '/api/auto',        icon: '📡', color: '#3b82f6' },
   auto_extract:   { model: 'GPT-4o-mini', prompt: 'EXTRACT prompt', api: '/api/auto (step)', icon: '📰', color: '#8b5cf6' },
   auto_breakdown: { model: 'GPT-4o-mini', prompt: 'BREAKDOWN prompt',api: '/api/auto (step)',icon: '🔍', color: '#f59e0b' },
   auto_blueprint: { model: 'GPT-4o',      prompt: 'BLUEPRINT prompt',api: '/api/auto (step)',icon: '🧬', color: '#ec4899' },
   auto_research:  { model: 'GPT-4o-mini', prompt: 'KEYWORD prompt', api: 'Serper Google API',icon: '🌐', color: '#06b6d4' },
-  auto_classic:   { model: 'Claude',      prompt: '5× Classic prompts from Library', api: '/api/summarize ×5', icon: '⚡', color: '#22c55e' },
-  auto_enhanced:  { model: 'Claude',      prompt: '5× Enhanced prompts + Blueprint', api: '/api/summarize ×5', icon: '🚀', color: '#a3e635' },
+  auto_classic:   { model: 'Claude',      prompt: 'Multi-Angle prompts from Library', api: '/api/summarize ×N', icon: '⚡', color: '#22c55e' },
+  auto_enhanced:  { model: 'Claude',      prompt: 'Enhanced + Blueprint inject', api: '/api/summarize ×N', icon: '🚀', color: '#a3e635' },
+  // Universal Pipeline (Local — Image/Hybrid)
+  u_detect:       { model: null,          prompt: null,              api: '/api/auto/detect',  icon: '🔍', color: '#64748b' },
+  u_extract:      { model: 'GPT-4o-mini', prompt: null,              api: '/api/auto/process', icon: '⚙️', color: '#8b5cf6' },
+  u_normalize:    { model: null,          prompt: null,              api: null,                icon: '📐', color: '#06b6d4' },
+  u_generate:     { model: 'Claude',      prompt: 'Library prompt',  api: '/api/summarize',    icon: '✍️', color: '#22c55e' },
   // Manual steps
   scrape:         { model: null,          prompt: null,              api: '/api/extract',     icon: '📡', color: '#3b82f6' },
   ai_extract:     { model: 'GPT-4o-mini', prompt: 'EXTRACT prompt', api: '/api/summarize',   icon: '📰', color: '#8b5cf6' },
