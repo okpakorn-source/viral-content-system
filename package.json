@@ -1,0 +1,44 @@
+{
+  "name": "viral-content-system",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "validate": "node scripts/validate-workflow.mjs",
+    "prebuild": "node scripts/validate-workflow.mjs",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "postinstall": "prisma generate",
+    "lint": "eslint",
+    "test-scrape": "node scratch/test_khaosod_extraction.mjs",
+    "test-api-auto": "node scratch/test_api_auto.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.96.0",
+    "@distube/ytdl-core": "^4.16.12",
+    "@google/genai": "^2.4.0",
+    "@google/generative-ai": "^0.24.1",
+    "@prisma/adapter-better-sqlite3": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "@supabase/supabase-js": "^2.106.1",
+    "better-sqlite3": "^12.10.0",
+    "bullmq": "^5.76.8",
+    "cheerio": "^1.2.0",
+    "date-fns": "^4.1.0",
+    "html-to-image": "^1.11.13",
+    "ioredis": "^5.10.1",
+    "next": "16.2.6",
+    "openai": "^6.38.0",
+    "prisma": "^7.8.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-easy-crop": "^5.5.7",
+    "sharp": "^0.34.5",
+    "uuid": "^14.0.0",
+    "youtube-transcript": "^1.3.1"
+  },
+  "devDependencies": {
+    "eslint": "^9",
+    "eslint-config-next": "16.2.6"
+  }
+}

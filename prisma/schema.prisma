@@ -1,0 +1,291 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// =============================================
+// ผู้ใช้งานระบบ
+// =============================================
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         String   @default("viewer") // admin, editor, viewer
+  avatarUrl    String?  @map("avatar_url")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  reviews Review[]
+
+  @@map("users")
+}
+
+// =============================================
+// แหล่งข้อมูล (Source)
+// =============================================
+model Source {
+  id         String   @id @default(uuid())
+  type       String   // url, rss, facebook, tiktok, x, youtube, raw
+  url        String?
+  rawContent String?  @map("raw_content")
+  metadata   String?  // JSON string
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  content Content?
+
+  @@map("sources")
+}
+
+// =============================================
+// คอนเทนต์หลัก
+// =============================================
+model Content {
+  id               String   @id @default(uuid())
+  sourceId         String   @unique @map("source_id")
+  title            String?
+  originalText     String   @map("original_text")
+  cleanedText      String?  @map("cleaned_text")
+  viralScores      String?  @map("viral_scores") // JSON
+  emotionalAnalysis String? @map("emotional_analysis") // JSON
+  viralProbability Float?   @map("viral_probability")
+  status           String   @default("pending") // pending, analyzing, scored, generating, review, approved, published, rejected
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  source     Source      @relation(fields: [sourceId], references: [id])
+  angles     Angle[]
+  articles   Article[]
+  thumbnails Thumbnail[]
+  reviews    Review[]
+  publications Publication[]
+  feedbackLogs AiFeedbackLog[]
+
+  @@map("contents")
+}
+
+// =============================================
+// มุมมองไวรัล (Angles)
+// =============================================
+model Angle {
+  id                    String  @id @default(uuid())
+  contentId             String  @map("content_id")
+  headlines             String  // JSON array
+  hooks                 String  // JSON array
+  emotionalDirections   String  @map("emotional_directions") // JSON array
+  commentBaits          String  @map("comment_baits") // JSON array
+  discussionAngles      String  @map("discussion_angles") // JSON array
+  selectedHeadlineIndex Int?    @map("selected_headline_index")
+  selectedHookIndex     Int?    @map("selected_hook_index")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  content  Content   @relation(fields: [contentId], references: [id])
+  articles Article[]
+
+  @@map("angles")
+}
+
+// =============================================
+// บทความ
+// =============================================
+model Article {
+  id           String   @id @default(uuid())
+  contentId    String   @map("content_id")
+  angleId      String?  @map("angle_id")
+  headline     String
+  hook         String?
+  body         String
+  tone         String   @default("emotional") // emotional, dramatic, concise, controversial
+  qualityScore Float?   @map("quality_score")
+  variant      String   @default("A") // A, B, C
+  isSelected   Boolean  @default(false) @map("is_selected")
+  version      Int      @default(1)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  content    Content     @relation(fields: [contentId], references: [id])
+  angle      Angle?      @relation(fields: [angleId], references: [id])
+  thumbnails Thumbnail[]
+
+  @@map("articles")
+}
+
+// =============================================
+// ปกภาพ / Thumbnail
+// =============================================
+model Thumbnail {
+  id          String  @id @default(uuid())
+  contentId   String  @map("content_id")
+  articleId   String? @map("article_id")
+  imagePath   String  @map("image_path")
+  style       String  @default("emotional") // drama, emotional, breaking_news
+  layoutConfig String? @map("layout_config") // JSON
+  textOverlay String?  @map("text_overlay") // JSON
+  qualityScore Float?  @map("quality_score")
+  isSelected  Boolean @default(false) @map("is_selected")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  content Content  @relation(fields: [contentId], references: [id])
+  article Article? @relation(fields: [articleId], references: [id])
+
+  @@map("thumbnails")
+}
+
+// =============================================
+// รีวิว (Editorial Review)
+// =============================================
+model Review {
+  id            String   @id @default(uuid())
+  contentId     String   @map("content_id")
+  reviewerId    String   @map("reviewer_id")
+  action        String   // approve, reject, edit, regenerate
+  feedback      String?
+  edits         String?  // JSON
+  qualityRating Int?     @map("quality_rating") // 1-10
+  reviewedAt    DateTime @default(now()) @map("reviewed_at")
+
+  content  Content @relation(fields: [contentId], references: [id])
+  reviewer User    @relation(fields: [reviewerId], references: [id])
+
+  @@map("reviews")
+}
+
+// =============================================
+// การเผยแพร่
+// =============================================
+model Publication {
+  id          String    @id @default(uuid())
+  contentId   String    @map("content_id")
+  platform    String    @default("facebook")
+  postId      String?   @map("post_id")
+  caption     String?
+  hashtags    String?   // JSON array
+  scheduledAt DateTime? @map("scheduled_at")
+  publishedAt DateTime? @map("published_at")
+  status      String    @default("scheduled") // scheduled, published, failed
+
+  content   Content    @relation(fields: [contentId], references: [id])
+  analytics Analytics?
+
+  @@map("publications")
+}
+
+// =============================================
+// สถิติ (Analytics)
+// =============================================
+model Analytics {
+  id             String   @id @default(uuid())
+  publicationId  String   @unique @map("publication_id")
+  impressions    Int      @default(0)
+  reach          Int      @default(0)
+  clicks         Int      @default(0)
+  shares         Int      @default(0)
+  comments       Int      @default(0)
+  reactions      Int      @default(0)
+  ctr            Float    @default(0)
+  engagementRate Float    @default(0) @map("engagement_rate")
+  hourlyData     String?  @map("hourly_data") // JSON
+  lastUpdated    DateTime @default(now()) @map("last_updated")
+
+  publication Publication @relation(fields: [publicationId], references: [id])
+
+  @@map("analytics")
+}
+
+// =============================================
+// AI Prompt Templates
+// =============================================
+model AiPrompt {
+  id                 String  @id @default(uuid())
+  name               String
+  phase              String  // intelligence, angle, article, thumbnail, quality
+  systemPrompt       String  @map("system_prompt")
+  userPromptTemplate String  @map("user_prompt_template")
+  parameters         String? // JSON
+  isActive           Boolean @default(true) @map("is_active")
+  version            Int     @default(1)
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  @@map("ai_prompts")
+}
+
+// =============================================
+// AI Feedback Logs
+// =============================================
+model AiFeedbackLog {
+  id               String   @id @default(uuid())
+  contentId        String?  @map("content_id")
+  phase            String   // intelligence, angle, article, thumbnail, quality
+  input            String?  // JSON
+  output           String?  // JSON
+  editorFeedback   String?  @map("editor_feedback") // JSON
+  performanceScore Float?   @map("performance_score")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  content Content? @relation(fields: [contentId], references: [id])
+
+  @@map("ai_feedback_logs")
+}
+
+// =============================================
+// Workflow Run — Persistent Context ทุก Step
+// =============================================
+model WorkflowRun {
+  id             String   @id @default(uuid())
+  currentStep    String   @default("input") @map("current_step") // input, extracted, breakdown, analyzed
+  newsTitle      String?  @map("news_title")
+  newsBody       String?  @map("news_body")
+  newsSource     String?  @map("news_source")
+  newsDate       String?  @map("news_date")
+  newsCategory   String?  @map("news_category")
+  rawInput       String?  @map("raw_input")
+  sourceType     String?  @map("source_type")
+  breakdownData  String?  @map("breakdown_data") // JSON
+  analysisResult String?  @map("analysis_result") // JSON
+  presetUsed     String?  @map("preset_used")
+  metadata       String?  // JSON — extra data
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("workflow_runs")
+}
+
+// =============================================
+// Prompt Template — DB-backed (ไม่ reset เมื่อ deploy)
+// =============================================
+model PromptTemplate {
+  id        String   @id @default(uuid())
+  key       String   @unique // extraction, breakdown, viral_fb, drama, etc.
+  name      String
+  category  String   @default("standard") // standard, analysis
+  prompt    String
+  desc      String?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("prompt_templates")
+}
+
+// =============================================
+// API Usage Log (บันทึกต้นทุน AI/API)
+// =============================================
+model ApiUsageLog {
+  id           String   @id @default(uuid())
+  provider     String   // openai, anthropic, gemini, apify
+  model        String   // gpt-4o, claude-3-5-sonnet
+  inputTokens  Int      @default(0) @map("input_tokens")
+  outputTokens Int      @default(0) @map("output_tokens")
+  costUsd      Float    @default(0) @map("cost_usd")
+  feature      String   @default("autoFlow")
+  userId       String?  @map("user_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("api_usage_logs")
+}

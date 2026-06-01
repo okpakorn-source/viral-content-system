@@ -1,0 +1,328 @@
+/**
+ * Smart Achievement Research — 6 Agent ค้นหาข้อมูลหลายมุมพร้อมกัน
+ * 
+ * Flow:
+ *   1. Entity Detection → ข่าวนี้พูดถึงใคร/อะไร
+ *   2. 6 Parallel Agents → ค้นหาข้อมูลหลายมุม (Serper + Wikipedia)
+ *   3. Safety Filter → กรองข้อมูลเสี่ยง 3 ชั้น
+ *   4. Return factPool → ส่งให้ AI เขียนเนื้อหา
+ * 
+ * Graceful Fallback: ถ้าล้มเหลวทุกขั้นตอน → return null → flow เดิมทำงานปกติ
+ */
+
+import { callAI } from '@/lib/ai/openai';
+import { createLogger } from '@/lib/logger';
+
+const rlog = createLogger('SMART-RESEARCH');
+const SERPER_API_KEY = process.env.SERPER_API_KEY;
+
+// ═══════════════════════════════════════════════
+// === SAFETY: Keyword Blacklist (ชั้นที่ 1) ===
+// ═══════════════════════════════════════════════
+const BLACKLIST_PATTERNS = [
+  // กฎหมายร้ายแรง
+  'คลิปหลุด', 'คลิปหน้าคล้าย', 'ข่มขืน', 'ฆ่า', 'ฆาตกรรม',
+  'ยาเสพติด', 'ยาบ้า', 'ยาไอซ์', 'กัญชา',
+  // สถาบัน
+  'ม.112', 'หมิ่นสถาบัน', 'ลบหลู่', 'หมิ่นพระบรม',
+  // ส่วนตัวร้ายแรง
+  'ชู้', 'มือที่สาม', 'นอกใจ', 'เปลือย', 'โป๊',
+  'ท้องก่อนแต่ง', 'โรคติดต่อ', 'เอดส์', 'HIV',
+  // FB Policy
+  'ยั่วยุ', 'เหยียดเชื้อชาติ', 'ฆ่าตัวตาย', 'ทำร้ายตัวเอง',
+  // อาชญากรรม
+  'แก๊งคอลเซ็นเตอร์', 'ฟอกเงิน', 'พนันออนไลน์',
+];
+
+function containsBlacklist(text) {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return BLACKLIST_PATTERNS.some(word => lower.includes(word));
+}
+
+// ═══════════════════════════════════════════════
+// === Serper Search (lightweight) ===
+// ═══════════════════════════════════════════════
+async function quickSearch(query, num = 3) {
+  if (!SERPER_API_KEY) return [];
+  try {
+    const res = await fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: { 'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: query, gl: 'th', hl: 'th', num }),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.organic || []).slice(0, num).map(r => ({
+      title: r.title || '',
+      snippet: r.snippet || '',
+      link: r.link || '',
+      source: r.displayLink || '',
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ═══════════════════════════════════════════════
+// === Wikipedia Search (free, no key) ===
+// ═══════════════════════════════════════════════
+async function wikiSearch(name) {
+  try {
+    const encoded = encodeURIComponent(name);
+    const res = await fetch(`https://th.wikipedia.org/api/rest_v1/page/summary/${encoded}`, {
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.type === 'standard' && data.extract) {
+      return {
+        title: data.title || name,
+        snippet: data.extract.slice(0, 500),
+        link: data.content_urls?.desktop?.page || '',
+        source: 'Wikipedia',
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════
+// === STEP 1: Entity Detection ===
+// ═══════════════════════════════════════════════
+async function detectEntity(newsTitle, newsBody) {
+  const prompt = `วิเคราะห์ข่าวนี้แล้วระบุบุคคล/องค์กรหลักที่ถูกกล่าวถึง
+
+=== ข่าว ===
+หัวข้อ: ${newsTitle || ''}
+เนื้อหา: ${(newsBody || '').slice(0, 1500)}
+=== จบข่าว ===
+
+กฎ:
+- ระบุชื่อจริง + ชื่อที่รู้จัก + อาชีพ/บทบาท
+- ระบุ narrativePattern: underdog_success | fallen_hero | hidden_hero | comeback_story | controversy | achievement | political | general
+- ถ้าข่าวไม่มีบุคคลเด่นชัด → ตอบ {"entity": null}
+
+ตอบ JSON เท่านั้น:
+{"entity": {"name": "ชื่อหลัก", "realName": "ชื่อจริง", "aliases": ["ชื่ออื่น"], "type": "ศิลปิน|นักการเมือง|นักธุรกิจ|บุคคลทั่วไป|องค์กร", "context": "บริบทสั้นๆ"}, "narrativePattern": "pattern_name"}`;
+
+  try {
+    const result = await callAI({
+      model: 'gpt-4o-mini',
+      prompt,
+      temperature: 0.1,
+      maxTokens: 500,
+    });
+    if (!result?.entity?.name) return null;
+    return result;
+  } catch (err) {
+    rlog.step('entity-detect', `⚠️ Failed: ${err.message}`);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════
+// === STEP 2: 6 Parallel Research Agents ===
+// ═══════════════════════════════════════════════
+function buildSearchQueries(entity) {
+  const name = entity.name;
+  const realName = entity.realName || '';
+  const type = entity.type || '';
+  const aliases = entity.aliases || [];
+  const searchName = realName || name;
+  const altName = aliases[0] || name;
+
+  return {
+    achievements: `"${searchName}" ${type === 'นักการเมือง' ? 'ตำแหน่ง ผลงานเด่น นโยบาย' : type === 'ศิลปิน' ? 'เพลงฮิต ชื่อเพลง อัลบั้ม รางวัล' : 'ผลงานเด่น ความสำเร็จ'}`,
+    numbers: `"${altName}" ${type === 'ศิลปิน' ? 'ล้านวิว ยอดวิว ยอดสตรีม รายได้ ผู้ติดตาม' : type === 'นักการเมือง' ? 'คะแนนเสียง ผลสำรวจ ผลโพล เปอร์เซ็นต์' : 'ตัวเลข สถิติ จำนวน ล้านบาท'}`,
+    quotes: `"${searchName}" สัมภาษณ์ เคยพูด คำคม ให้สัมภาษณ์`,
+    history: `"${searchName}" ${type === 'นักการเมือง' ? 'ประวัติการศึกษา ตำแหน่งที่ผ่านมา' : 'จุดเริ่มต้น ก่อนมีชื่อเสียง เบื้องหลัง'}`,
+    funFacts: `"${searchName}" ประวัติ เรื่องน่ารู้ ก่อนดัง ชีวิตวัยเด็ก`,
+    publicWork: `"${searchName}" ${type === 'นักการเมือง' ? 'ผลงาน สภา กฎหมาย' : type === 'ศิลปิน' ? 'คอนเสิร์ต ทัวร์ โชว์ กิจกรรม' : 'โครงการ งานสำคัญ'}`,
+  };
+}
+
+async function runAgents(entity) {
+  const queries = buildSearchQueries(entity);
+  rlog.step('agents', `🔎 6 Agents searching for "${entity.name}"...`);
+
+  // Run all 6 agents + Wikipedia in parallel
+  const [achievements, numbers, quotes, history, funFacts, publicWork, wiki] = await Promise.all([
+    quickSearch(queries.achievements, 3).catch(() => []),
+    quickSearch(queries.numbers, 3).catch(() => []),
+    quickSearch(queries.quotes, 2).catch(() => []),
+    quickSearch(queries.history, 2).catch(() => []),
+    quickSearch(queries.funFacts, 3).catch(() => []),
+    quickSearch(queries.publicWork, 2).catch(() => []),
+    wikiSearch(entity.realName || entity.name).catch(() => null),
+  ]);
+
+  const agentResults = {
+    achievements: { label: '🏆 ผลงาน', results: achievements },
+    numbers: { label: '📊 ตัวเลข', results: numbers },
+    quotes: { label: '🗣️ คำพูด', results: quotes },
+    history: { label: '⚡ ประวัติ', results: history },
+    funFacts: { label: '💡 เบื้องหลัง', results: funFacts },
+    publicWork: { label: '🎤 งานสาธารณะ', results: publicWork },
+  };
+
+  // Count total results
+  let totalResults = Object.values(agentResults).reduce((sum, a) => sum + a.results.length, 0);
+  if (wiki) totalResults += 1;
+  rlog.step('agents', `✅ Total: ${totalResults} results + ${wiki ? 'Wikipedia' : 'no Wiki'}`);
+
+  return { agentResults, wiki };
+}
+
+// ═══════════════════════════════════════════════
+// === STEP 3: AI Fact Extraction + Safety ===
+// ═══════════════════════════════════════════════
+async function extractAndFilterFacts(entity, agentResults, wiki, newsTitle) {
+  // Build search catalog for AI
+  let catalog = '';
+  for (const [key, agent] of Object.entries(agentResults)) {
+    if (agent.results.length === 0) continue;
+    catalog += `\n[${agent.label}]\n`;
+    agent.results.forEach(r => {
+      catalog += `  TITLE: ${r.title}\n  TEXT: ${r.snippet}\n  SOURCE: ${r.source}\n  URL: ${r.link}\n---\n`;
+    });
+  }
+  if (wiki) {
+    catalog += `\n[📖 Wikipedia]\n  ${wiki.snippet}\n  URL: ${wiki.link}\n---\n`;
+  }
+
+  if (!catalog.trim()) return null;
+
+  const prompt = `คุณคือ AI สกัดข้อเท็จจริง "เฉพาะเจาะจง" จากผลค้นหา
+
+=== บุคคล ===
+ชื่อ: ${entity.name} (${entity.realName || ''})
+อาชีพ: ${entity.type || '-'}
+บริบทข่าว: ${newsTitle || '-'}
+
+=== ผลค้นหาจาก 6 Agents ===
+${catalog}
+=== จบผลค้นหา ===
+
+## งาน: สกัดข้อเท็จจริงที่ "เฉพาะเจาะจง" และ "พิสูจน์ได้"
+
+## กฎเหล็กเรื่องคุณภาพ (สำคัญที่สุด):
+✅ ต้องเป็นข้อมูลเฉพาะเจาะจง: ชื่อเพลง, ตัวเลขยอดวิว, จำนวนรางวัล, วันที่, สถานที่, ชื่อโครงการ
+✅ ตัวอย่างดี: "เพลง กอดจูบลูบคลำ มียอดวิว 430 ล้านวิว บน YouTube"
+✅ ตัวอย่างดี: "เคยใช้ตะเกียงน้ำมันอ่านหนังสือ ก่อนมาเป็นศิลปิน"
+✅ ตัวอย่างดี: "รายได้จากช่อง YouTube ประมาณ 4 ล้านบาท/เดือน"
+❌ ตัวอย่างแย่: "เป็นศิลปินที่มีผลงานเพลงที่ได้รับความนิยมอย่างมาก" → กว้างเกินไป ไม่มีข้อมูลเฉพาะ
+❌ ตัวอย่างแย่: "มีผลงานเพลงที่โดดเด่นในวงการเพลงไทย" → วลีทั่วไป ไม่มีประโยชน์
+❌ ตัวอย่างแย่: "ได้รับการยอมรับจากแฟนเพลงอย่างกว้างขวาง" → ไม่มีข้อมูลเจาะจง
+
+## กฎความปลอดภัย:
+❌ ห้ามใช้ข้อมูลความสัมพันธ์ส่วนตัว (แฟน, เลิกรา, คบหา, ชู้, มือที่สาม)
+❌ ห้ามใช้ข้อมูลคดีความ/ข้อกล่าวหาที่ยังไม่พิสูจน์
+❌ ห้ามใช้ข้อมูลที่อาจทำให้บุคคลเสียหาย
+❌ ห้ามใช้ข้อมูลเกี่ยวกับสถาบัน หรือเนื้อหาที่อาจผิดกฎหมาย
+❌ ห้ามแต่งข้อมูลขึ้นเอง ถ้าผลค้นหาไม่มีข้อมูลเฉพาะเจาะจง ให้ตอบ facts = []
+✅ ใช้ได้: ผลงานเฉพาะ, ตัวเลข/สถิติ, ประวัติการทำงาน, คำพูดจากสัมภาษณ์, เกร็ดน่ารู้
+
+ตอบ JSON:
+{"facts": [{"category": "achievement|numbers|quote|history|funfact|publicwork", "text": "ข้อเท็จจริงเฉพาะเจาะจง ต้องมีชื่อ/ตัวเลข/วันที่", "source": "ชื่อเว็บที่พบ", "safetyScore": 1-10}], "entitySummary": "สรุปสั้นๆ ว่าบุคคลนี้คือใคร 1 ประโยค"}`;
+
+  try {
+    const result = await callAI({
+      model: 'gpt-4o-mini',
+      prompt,
+      temperature: 0.1,
+      maxTokens: 2000,
+    });
+
+    if (!result?.facts?.length) return null;
+
+    // Safety Layer 1: Blacklist filter
+    const safeFacts = result.facts.filter(fact => {
+      if (containsBlacklist(fact.text)) {
+        rlog.step('safety', `🔴 Blacklist blocked: "${fact.text.slice(0, 40)}..."`);
+        return false;
+      }
+      // Safety Layer 2: AI safety score (keep ≥ 5)
+      if (fact.safetyScore && fact.safetyScore < 5) {
+        rlog.step('safety', `🟡 Low safety score (${fact.safetyScore}): "${fact.text.slice(0, 40)}..."`);
+        return false;
+      }
+      return true;
+    });
+
+    if (safeFacts.length === 0) return null;
+
+    rlog.step('facts', `✅ ${safeFacts.length} safe facts extracted (from ${result.facts.length} total)`);
+    return {
+      facts: safeFacts,
+      entitySummary: result.entitySummary || '',
+      entityName: entity.name,
+      entityType: entity.type || '',
+    };
+  } catch (err) {
+    rlog.step('facts', `⚠️ Fact extraction failed: ${err.message}`);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════
+// === MAIN: Smart Research Pipeline ===
+// ═══════════════════════════════════════════════
+export async function smartResearch(newsData, breakdownData) {
+  const startTime = Date.now();
+  const newsTitle = newsData?.newsTitle || '';
+  const newsBody = newsData?.newsBody || '';
+
+  try {
+    rlog.start(`Smart Research for: "${newsTitle.slice(0, 50)}"`);
+
+    // Step 1: Entity Detection
+    rlog.step('entity', '🧠 Detecting entity...');
+    const detection = await detectEntity(newsTitle, newsBody);
+    
+    if (!detection?.entity) {
+      rlog.step('entity', '⚠️ No entity found — skipping smart research');
+      return null;
+    }
+
+    const entity = detection.entity;
+    const pattern = detection.narrativePattern || 'general';
+    rlog.step('entity', `✅ Found: "${entity.name}" (${entity.type}) | Pattern: ${pattern}`);
+
+    // Step 2: 6 Parallel Agents
+    const { agentResults, wiki } = await runAgents(entity);
+    
+    // Check if we got enough data
+    const totalResults = Object.values(agentResults).reduce((sum, a) => sum + a.results.length, 0) + (wiki ? 1 : 0);
+    if (totalResults < 2) {
+      rlog.step('agents', `⚠️ Only ${totalResults} results — not enough, skipping`);
+      return null;
+    }
+
+    // Step 3: AI Fact Extraction + Safety Filter
+    const factPool = await extractAndFilterFacts(entity, agentResults, wiki, newsTitle);
+    
+    if (!factPool || factPool.facts.length === 0) {
+      rlog.step('result', '⚠️ No safe facts — using original flow');
+      return null;
+    }
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    rlog.step('result', `✅ Smart Research done: ${factPool.facts.length} facts in ${duration}s`);
+
+    return {
+      ...factPool,
+      narrativePattern: pattern,
+      duration: parseFloat(duration),
+      totalSearchResults: totalResults,
+    };
+
+  } catch (err) {
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    rlog.step('error', `❌ Smart Research failed (${duration}s): ${err.message}`);
+    // Graceful fallback — return null, flow เดิมทำงานปกติ
+    return null;
+  }
+}

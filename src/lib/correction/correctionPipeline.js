@@ -1,0 +1,194 @@
+/**
+ * Correction Pipeline Orchestrator
+ * 
+ * เชื่อม Layer 2-5 เข้าด้วยกัน:
+ * Generate → Audit → Correct → Fact Check → Polish → Final Output
+ * 
+ * Safety rules:
+ * - SKIP_CORRECTION env → bypass ทั้ง pipeline
+ * - ถ้า layer ใด error → ข้ามไป ใช้ output จาก layer ก่อนหน้า
+ * - ทุก version เก็บ _correctionDebug
+ */
+
+import { auditOutput } from './outputAuditService';
+import { safeCorrect } from './safeCorrectionService';
+import { checkFactPreservation } from './factPreservationCheck';
+import { editorialPolish } from './editorialPolishService';
+import { semanticSanityCheck } from './semanticSanityCheck';
+
+/**
+ * รัน correction pipeline ทั้งหมดกับ versions array
+ * @param {Array} versions - output versions จาก Core Compose
+ * @param {object} newsData - { newsTitle, newsBody }
+ * @param {object} breakdownData - breakdown data (optional)
+ * @returns {Array} corrected versions พร้อม _correctionDebug
+ */
+export async function runCorrectionPipeline(versions, newsData, breakdownData) {
+  // === Bypass check ===
+  if (process.env.SKIP_CORRECTION === 'true') {
+    console.log('[CorrectionPipeline] ⏭️ SKIPPED (SKIP_CORRECTION=true)');
+    return versions.map(v => ({ ...v, _correctionApplied: false, _correctionSkipped: true }));
+  }
+
+  if (!versions || versions.length === 0) {
+    return versions;
+  }
+
+  const startTime = Date.now();
+  console.log(`\n${'═'.repeat(50)}`);
+  console.log(`🔧 CORRECTION PIPELINE — Processing ${versions.length} versions`);
+  console.log(`${'═'.repeat(50)}`);
+
+  const corrected = [];
+
+  for (let i = 0; i < versions.length; i++) {
+    const version = versions[i];
+    const vLabel = version._sourceLabel || version.style || `V${i + 1}`;
+
+    try {
+      if (!version.content || version.content.length < 50) {
+        console.log(`[Pipeline] ${vLabel}: ⏭️ Skip (content too short)`);
+        corrected.push({ ...version, _correctionApplied: false });
+        continue;
+      }
+
+      console.log(`\n[Pipeline] ${vLabel}: Starting...`);
+
+      // === Layer 2: Audit ===
+      const audit = await auditOutput(version);
+      console.log(`  L2 Audit: score=${audit.auditScore} issues=${audit.issues.length}`);
+
+
+      // ถ้า clean → ยังต้องผ่าน Semantic Check ก่อน Polish
+      if (audit.issues.length === 0) {
+        // === Layer 4.6: Semantic Sanity Check (clean path) ===
+        let cleanContent = version.content;
+        let cleanSemanticDebug = { checked: false };
+        try {
+          const semResult = await semanticSanityCheck(version.content);
+          cleanContent = semResult.sanitizedContent;
+          cleanSemanticDebug = {
+            checked: true,
+            issuesFound: semResult.issuesFound?.length || 0,
+            fixed: semResult.fixed || false,
+            issues: (semResult.issuesFound || []).slice(0, 3),
+          };
+          console.log(`  L4.6 Semantic (clean): ${cleanSemanticDebug.issuesFound} issues ${cleanSemanticDebug.fixed ? '(fixed)' : '(clean)'}`);
+        } catch (semErr) {
+          console.warn(`  L4.6 Semantic (clean): SKIPPED (${semErr.message})`);
+          cleanSemanticDebug = { checked: false, error: semErr.message };
+        }
+
+        const { polishedContent, changes } = editorialPolish(cleanContent);
+        console.log(`  L5 Polish: ${changes.length} changes (clean path)`);
+        corrected.push({
+          ...version,
+          content: polishedContent,
+          _correctionApplied: changes.length > 0 || cleanSemanticDebug.fixed,
+          _correctionDebug: {
+            auditScore: audit.auditScore,
+            issuesFound: 0,
+            correctionsMade: 0,
+            factPreserved: true,
+            rolledBack: false,
+            semanticCheck: cleanSemanticDebug,
+            polishChanges: changes.length,
+            path: 'clean',
+          },
+        });
+        continue;
+      }
+
+
+      // === Layer 3: Safe Correction ===
+      const { correctedContent, rollbackContent, corrections } = await safeCorrect(version.content, audit.issues);
+      const actualCorrections = corrections.filter(c => c.type !== 'skipped_low');
+      console.log(`  L3 Correct: ${actualCorrections.length} applied`);
+
+      // === Layer 4: Fact Preservation ===
+      const factCheck = checkFactPreservation(version.content, correctedContent, newsData || {});
+      console.log(`  L4 FactCheck: preserved=${factCheck.preserved} drifts=${factCheck.drifts.length} action=${factCheck.action}`);
+
+      // เลือก content ตาม fact check
+      const safeContent = factCheck.action === 'rollback' ? rollbackContent : correctedContent;
+
+      // === Layer 4.5: Hallucination Scrubbing ===
+      let scrubbedContent = safeContent;
+      if (newsData && newsData.newsBody) {
+        const placeRegex = /(?:จ\.|อ\.|ต\.|ซ\.|ถ\.|จังหวัด|อำเภอ|ตำบล|ซอย|ถนน|โรงพยาบาล|สถานี|วัด|โรงเรียน|มหาวิทยาลัย|สนามบิน)\s*([ก-๙a-zA-Z]+)/g;
+        const places = new Set();
+        let match;
+        while ((match = placeRegex.exec(scrubbedContent)) !== null) {
+          places.add(match[0].trim());
+        }
+        
+        const sourceBody = newsData.newsBody.replace(/\s+/g, '');
+        for (const place of places) {
+          const cleanPlace = place.replace(/^(จ\.|อ\.|ต\.|ซ\.|ถ\.|จังหวัด|อำเภอ|ตำบล|ซอย|ถนน|โรงพยาบาล|สถานี|วัด|โรงเรียน|มหาวิทยาลัย|สนามบิน)\s*/, '');
+          if (cleanPlace.length >= 3 && !sourceBody.includes(cleanPlace)) {
+            console.log(`  L4.5 Hallucination Scrub: "${place}" -> "ที่เกิดเหตุ"`);
+            scrubbedContent = scrubbedContent.split(place).join('ที่เกิดเหตุ');
+          }
+        }
+      }
+
+      // === Layer 4.6: Semantic Sanity Check (AI) ===
+      let semanticContent = scrubbedContent;
+      let semanticDebug = { checked: false };
+      try {
+        const semanticResult = await semanticSanityCheck(scrubbedContent);
+        semanticContent = semanticResult.sanitizedContent;
+        semanticDebug = {
+          checked: true,
+          issuesFound: semanticResult.issuesFound?.length || 0,
+          fixed: semanticResult.fixed || false,
+          issues: (semanticResult.issuesFound || []).slice(0, 3),
+        };
+        console.log(`  L4.6 Semantic: ${semanticDebug.issuesFound} issues ${semanticDebug.fixed ? '(fixed)' : '(clean)'}`);
+      } catch (semErr) {
+        console.warn(`  L4.6 Semantic: SKIPPED (${semErr.message})`);
+        semanticDebug = { checked: false, error: semErr.message };
+      }
+
+      // === Layer 5: Editorial Polish ===
+      const { polishedContent, changes } = editorialPolish(semanticContent);
+      console.log(`  L5 Polish: ${changes.length} changes`);
+
+      corrected.push({
+        ...version,
+        content: polishedContent,
+        _correctionApplied: true,
+        _correctionDebug: {
+          auditScore: audit.auditScore,
+          issuesFound: audit.issues.length,
+          issueTypes: [...new Set(audit.issues.map(i => i.type))],
+          correctionsMade: actualCorrections.length,
+          corrections: actualCorrections.slice(0, 5),
+          factPreserved: factCheck.preserved,
+          factDrifts: factCheck.drifts.length,
+          rolledBack: factCheck.action === 'rollback',
+          semanticCheck: semanticDebug,
+          polishChanges: changes.length,
+          path: factCheck.action === 'rollback' ? 'rollback' : 'corrected',
+        },
+      });
+
+    } catch (err) {
+      // ===  FAIL-SAFE: ถ้า error → ใช้ original ===
+      console.error(`[Pipeline] ${vLabel}: ERROR — ${err.message}`);
+      corrected.push({
+        ...version,
+        _correctionApplied: false,
+        _correctionError: err.message,
+      });
+    }
+  }
+
+  const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+  const appliedCount = corrected.filter(v => v._correctionApplied).length;
+  console.log(`\n${'═'.repeat(50)}`);
+  console.log(`🔧 CORRECTION COMPLETE — ${appliedCount}/${versions.length} corrected in ${totalTime}s`);
+  console.log(`${'═'.repeat(50)}\n`);
+
+  return corrected;
+}

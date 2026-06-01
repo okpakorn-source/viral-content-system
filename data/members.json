@@ -1,0 +1,87 @@
+[
+  {
+    "id": "admin",
+    "username": "admin",
+    "password": "92376460bd2aa08eaabb714e39bdfc44e0afc637d69c379f4c24aa1732e94396",
+    "displayName": "Admin",
+    "nickname": "",
+    "role": "admin",
+    "avatar": "👑",
+    "createdAt": "2026-05-17T04:09:46.692Z",
+    "stats": {
+      "totalCreated": 0,
+      "totalApproved": 0,
+      "totalRejected": 0,
+      "totalRevision": 0
+    },
+    "lastLogin": "2026-05-17T16:57:09.790Z"
+  },
+  {
+    "id": "member_1779027257546",
+    "username": "editor1",
+    "password": "fc8691ec18528a1edfee0eed39ecfbb8bd7ce1d3b095eef579ef7fbcfda4815c",
+    "displayName": "Editor Test",
+    "nickname": "",
+    "role": "editor",
+    "avatar": "👤",
+    "createdAt": "2026-05-17T14:14:17.546Z",
+    "stats": {
+      "totalCreated": 0,
+      "totalApproved": 0,
+      "totalRejected": 0,
+      "totalRevision": 0
+    },
+    "lastLogin": null
+  },
+  {
+    "id": "member_1779028581602",
+    "username": "test_user1",
+    "password": "96f0eafe0ea74c53599554764ba264a1234cd3d23cbcfc165997984580d3003b",
+    "displayName": "Test User 1",
+    "nickname": "",
+    "role": "editor",
+    "avatar": "👤",
+    "createdAt": "2026-05-17T14:36:21.602Z",
+    "stats": {
+      "totalCreated": 0,
+      "totalApproved": 0,
+      "totalRejected": 0,
+      "totalRevision": 0
+    },
+    "lastLogin": null
+  },
+  {
+    "id": "member_1779028619650",
+    "username": "test_user2",
+    "password": "96f0eafe0ea74c53599554764ba264a1234cd3d23cbcfc165997984580d3003b",
+    "displayName": "Test User 2",
+    "nickname": "",
+    "role": "editor",
+    "avatar": "👤",
+    "createdAt": "2026-05-17T14:36:59.650Z",
+    "stats": {
+      "totalCreated": 0,
+      "totalApproved": 0,
+      "totalRejected": 0,
+      "totalRevision": 0
+    },
+    "lastLogin": null
+  },
+  {
+    "id": "member_1779029917284",
+    "username": "testjwt",
+    "password": "96f0eafe0ea74c53599554764ba264a1234cd3d23cbcfc165997984580d3003b",
+    "displayName": "JWT Test",
+    "nickname": "",
+    "role": "editor",
+    "avatar": "👤",
+    "createdAt": "2026-05-17T14:58:37.284Z",
+    "stats": {
+      "totalCreated": 0,
+      "totalApproved": 0,
+      "totalRejected": 0,
+      "totalRevision": 0
+    },
+    "lastLogin": null
+  }
+]
