@@ -324,13 +324,16 @@ function determineAction(classification, mode = 'balanced', options = {}) {
       return 'KEEP';
 
     case 'strict':
-      // strict: เก็บเฉพาะข้อเท็จจริงแน่นๆ
-      if (scores.factualScore > 60) return 'KEEP';
+      // strict: เก็บข้อเท็จจริง + quote + context ที่จำเป็น
+      if (type === 'FACT') return 'KEEP';
       if (type === 'QUOTE' && keepQuotes) return 'KEEP';
       if (type === 'CONTEXT' && keepContext) return 'KEEP';
-      if (scores.fillerScore > 30) return 'REMOVE';
-      if (scores.emotionalScore > 30) return 'REMOVE';
-      if (scores.unsupportedScore > 0) return 'REMOVE';
+      if (scores.factualScore > 40) return 'KEEP'; // มีข้อเท็จจริงบ้าง → เก็บ
+      if (type === 'FILLER') return 'REMOVE';
+      if (type === 'EMOTIONAL_WRITING') return 'REMOVE';
+      if (type === 'UNSUPPORTED') return 'REMOVE';
+      if (type === 'INTERPRETATION') return 'REMOVE';
+      // ประโยคที่ไม่ชัดเจน → TRIM
       return 'TRIM';
 
     case 'balanced':

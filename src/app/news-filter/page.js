@@ -231,7 +231,18 @@ function NewsFilterContent() {
       if (!data.success) {
         throw new Error(data.error || 'เกิดข้อผิดพลาดในการวิเคราะห์');
       }
-      setOutputData(data);
+      // API returns { success, data: { cleanText, sentenceAnalysis, ... } }
+      // UI reads outputData.cleanText, outputData.analysis
+      const result = data.data || data;
+      setOutputData({
+        cleanText: result.cleanText || '',
+        analysis: result.sentenceAnalysis || result.analysis || [],
+        removedPatterns: result.removedPatterns || [],
+        originalWordCount: result.originalWordCount || 0,
+        cleanWordCount: result.cleanWordCount || 0,
+        removedPercent: result.removedPercent || 0,
+        mode: result.mode,
+      });
     } catch (err) {
       setError(err.message || 'ไม่สามารถเชื่อมต่อ API ได้');
     } finally {
