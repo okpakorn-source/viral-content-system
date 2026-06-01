@@ -81,6 +81,11 @@ function NewsFilterContent() {
   });
   const [expandedRows, setExpandedRows] = useState({});
   const [copySuccess, setCopySuccess] = useState(false);
+  // URL scraping state
+  const [scrapeLoading, setScrapeLoading] = useState(false);
+  const [scrapeStep, setScrapeStep] = useState('');
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [autoFilter, setAutoFilter] = useState(true); // auto-filter after scrape
 
   // Word count helper
   const countWords = useCallback((text) => {
@@ -105,6 +110,7 @@ function NewsFilterContent() {
     setInputText(SAMPLE_TEXT);
     setOutputData(null);
     setError(null);
+    setSourceUrl('');
   };
 
   // Clear all
@@ -113,11 +119,92 @@ function NewsFilterContent() {
     setOutputData(null);
     setError(null);
     setExpandedRows({});
+    setSourceUrl('');
+    setScrapeStep('');
+  };
+
+  // URL Detection
+  const detectedUrl = inputText.trim().match(/^https?:\/\/\S+$/)?.[0] || '';
+  const hasUrlInInput = /https?:\/\/\S+/.test(inputText.trim());
+  const isUrlOnly = !!detectedUrl;
+
+  // === URL Scrape Handler ===
+  const handleScrapeUrl = async (urlToScrape) => {
+    const targetUrl = urlToScrape || detectedUrl;
+    if (!targetUrl) return;
+
+    setScrapeLoading(true);
+    setScrapeStep('🔍 กำลังเชื่อมต่อ...');
+    setError(null);
+    setOutputData(null);
+    setSourceUrl(targetUrl);
+
+    try {
+      // Step 1: Scrape raw content
+      setScrapeStep('📡 กำลังดึงเนื้อหาจากเว็บ...');
+      const scrapeRes = await fetch('/api/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: targetUrl }),
+      });
+      const scrapeData = await scrapeRes.json();
+
+      if (!scrapeData.success && !scrapeData.data?.content) {
+        throw new Error(scrapeData.error || 'ไม่สามารถดึงเนื้อหาจาก URL ได้');
+      }
+
+      // Step 2: Extract clean text from scraped content
+      setScrapeStep('⚙️ กำลังแยกเนื้อหาข่าว...');
+      const rawContent = scrapeData.data?.content || scrapeData.content || '';
+      const rawTitle = scrapeData.data?.title || scrapeData.title || '';
+
+      // Basic cleaning: remove navigation, ads, footer patterns
+      let cleanedContent = rawContent
+        .replace(/\[.*?\]/g, '') // remove markdown links
+        .replace(/https?:\/\/\S+/g, '') // remove URLs
+        .replace(/#{1,6}\s*/g, '') // remove markdown headers
+        .replace(/\*{1,3}/g, '') // remove markdown bold/italic
+        .replace(/\n{3,}/g, '\n\n') // normalize excessive newlines
+        .replace(/^\s*[-•]\s*/gm, '') // remove bullet points
+        .replace(/^\s*(Share|Tweet|Facebook|Instagram|Line|Copy link|อ่านเพิ่มเติม|ข่าวที่เกี่ยวข้อง|แท็ก|Tags|Related|Advertisement|โฆษณา|Sponsored).*$/gim, '') // remove social/nav
+        .replace(/^\s*(Copyright|©|สงวนลิขสิทธิ์|เงื่อนไข|นโยบาย|Privacy|Terms).*$/gim, '') // remove footer
+        .trim();
+
+      // Add title at top if available
+      const finalText = rawTitle 
+        ? `${rawTitle}\n\n${cleanedContent}`
+        : cleanedContent;
+
+      if (finalText.length < 30) {
+        throw new Error('เนื้อหาที่ดึงได้สั้นเกินไป ลองวาง URL อื่น');
+      }
+
+      setScrapeStep('✅ ดึงเนื้อหาสำเร็จ!');
+      setInputText(finalText);
+
+      // Step 3: Auto-filter if enabled
+      if (autoFilter) {
+        setScrapeStep('🔬 กำลังกรองเนื้อหาอัตโนมัติ...');
+        // Small delay to show the text first
+        await new Promise(r => setTimeout(r, 300));
+        setScrapeLoading(false);
+        // Trigger analysis
+        await handleAnalyzeWithText(finalText);
+      } else {
+        setScrapeLoading(false);
+      }
+
+    } catch (err) {
+      setError(`❌ ${err.message}`);
+      setScrapeLoading(false);
+      setScrapeStep('');
+    }
   };
 
   // Analyze — calls POST /api/news-filter
-  const handleAnalyze = async () => {
-    if (!inputText.trim()) return;
+  const doAnalyze = async (textToAnalyze) => {
+    const text = textToAnalyze || inputText;
+    if (!text.trim()) return;
     setLoading(true);
     setError(null);
     setOutputData(null);
@@ -128,7 +215,7 @@ function NewsFilterContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          text: inputText,
+          text,
           mode,
           options: {
             keepQuotes: options.keepQuotes,
@@ -151,6 +238,9 @@ function NewsFilterContent() {
       setLoading(false);
     }
   };
+
+  const handleAnalyze = () => doAnalyze(inputText);
+  const handleAnalyzeWithText = (text) => doAnalyze(text);
 
   // Copy clean text
   const handleCopy = async () => {
@@ -235,7 +325,7 @@ function NewsFilterContent() {
             margin: '6px 0 0', fontSize: 13,
             color: 'var(--text-muted)', lineHeight: 1.5,
           }}>
-            กรองเนื้อข่าวให้เหลือเฉพาะ &quot;เนื้อจริง&quot; จากต้นทาง ตัดคำเฟ้อ คำตีความ คำแต่งอารมณ์ออก
+            วาง URL ข่าว หรือ ข้อความต้นฉบับ → ระบบดึงเนื้อ + กรองให้เหลือเฉพาะ &quot;เนื้อจริง&quot; ตัดคำเฟ้อ คำตีความ คำแต่งอารมณ์ออก
           </p>
         </div>
       </div>
@@ -266,7 +356,7 @@ function NewsFilterContent() {
                 margin: 0, fontSize: 16, fontWeight: 800,
                 color: 'var(--text-primary)',
               }}>
-                📝 ข้อความต้นฉบับ
+                📝 ข้อความต้นฉบับ / URL
               </h2>
               <button
                 onClick={loadSample}
@@ -289,18 +379,105 @@ function NewsFilterContent() {
               </button>
             </div>
 
+            {/* URL Detection Bar */}
+            {(isUrlOnly || scrapeLoading) && (
+              <div style={{
+                padding: '14px 16px', borderRadius: 12,
+                background: scrapeLoading
+                  ? 'linear-gradient(135deg, rgba(59,130,246,0.08), rgba(139,92,246,0.08))'
+                  : 'linear-gradient(135deg, rgba(34,197,94,0.06), rgba(59,130,246,0.06))',
+                border: `1px solid ${scrapeLoading ? 'rgba(59,130,246,0.25)' : 'rgba(34,197,94,0.2)'}`,
+                transition: 'all 0.3s',
+              }}>
+                {scrapeLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{
+                      width: 20, height: 20, border: '3px solid rgba(59,130,246,0.2)',
+                      borderTopColor: '#3b82f6', borderRadius: '50%',
+                      animation: 'spin 0.7s linear infinite',
+                    }} />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#3b82f6' }}>
+                        {scrapeStep}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                        {sourceUrl.slice(0, 60)}{sourceUrl.length > 60 ? '...' : ''}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 20 }}>🌐</span>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                          ตรวจพบ URL — พร้อมดึงเนื้อหา
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                          {detectedUrl.slice(0, 60)}{detectedUrl.length > 60 ? '...' : ''}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <label style={{
+                        display: 'flex', alignItems: 'center', gap: 5,
+                        fontSize: 10, color: 'var(--text-muted)', cursor: 'pointer',
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={autoFilter}
+                          onChange={e => setAutoFilter(e.target.checked)}
+                          style={{ accentColor: '#22c55e', width: 14, height: 14 }}
+                        />
+                        กรองอัตโนมัติ
+                      </label>
+                      <button
+                        onClick={() => handleScrapeUrl()}
+                        style={{
+                          padding: '8px 18px', borderRadius: 10, border: 'none',
+                          background: 'linear-gradient(135deg, #3b82f6, #6366f1)',
+                          color: '#fff', fontSize: 12, fontWeight: 700,
+                          cursor: 'pointer', fontFamily: 'inherit',
+                          boxShadow: '0 3px 10px rgba(59,130,246,0.3)',
+                          transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-1px)'}
+                        onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
+                      >
+                        📡 ดึงเนื้อหา
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Source URL indicator (after scrape) */}
+            {sourceUrl && !scrapeLoading && !isUrlOnly && (
+              <div style={{
+                padding: '8px 12px', borderRadius: 8,
+                background: 'rgba(34,197,94,0.06)',
+                border: '1px solid rgba(34,197,94,0.15)',
+                fontSize: 11, color: 'var(--text-muted)',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <span>✅</span>
+                <span>ดึงจาก: <strong style={{ color: '#22c55e' }}>{sourceUrl.slice(0, 70)}{sourceUrl.length > 70 ? '...' : ''}</strong></span>
+              </div>
+            )}
+
             {/* Textarea */}
             <textarea
               value={inputText}
-              onChange={e => setInputText(e.target.value)}
-              placeholder="วางข้อความข่าวต้นฉบับที่นี่..."
+              onChange={e => { setInputText(e.target.value); setSourceUrl(''); }}
+              placeholder="วาง URL ข่าว หรือ ข้อความต้นฉบับที่นี่...&#10;&#10;ตัวอย่าง URL:&#10;https://www.thairath.co.th/news/...&#10;https://www.khaosod.co.th/...&#10;&#10;หรือวางข้อความข่าวยาวๆ ได้เลย"
               style={{
-                width: '100%', minHeight: 400, padding: 16,
+                width: '100%', minHeight: isUrlOnly ? 100 : 400, padding: 16,
                 borderRadius: 12, border: '1px solid var(--border)',
                 background: 'var(--bg-primary)', color: 'var(--text-primary)',
                 fontSize: 14, lineHeight: 1.8, fontFamily: 'inherit',
                 resize: 'vertical', outline: 'none',
-                transition: 'border-color 0.2s',
+                transition: 'all 0.3s',
               }}
               onFocus={e => e.target.style.borderColor = 'var(--accent)'}
               onBlur={e => e.target.style.borderColor = 'var(--border)'}
@@ -432,25 +609,45 @@ function NewsFilterContent() {
 
             {/* Action Buttons */}
             <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={handleAnalyze}
-                disabled={loading || !inputText.trim()}
-                style={{
-                  flex: 1, padding: '14px 0', borderRadius: 12, border: 'none',
-                  background: loading || !inputText.trim()
-                    ? 'rgba(34,197,94,0.2)'
-                    : 'linear-gradient(135deg, #22c55e, #16a34a)',
-                  color: '#fff', fontSize: 15, fontWeight: 800,
-                  cursor: loading || !inputText.trim() ? 'not-allowed' : 'pointer',
-                  fontFamily: 'inherit', transition: 'all 0.2s',
-                  boxShadow: loading || !inputText.trim()
-                    ? 'none'
-                    : '0 4px 15px rgba(34,197,94,0.3)',
-                  opacity: loading || !inputText.trim() ? 0.6 : 1,
-                }}
-              >
-                {loading ? '⏳ กำลังวิเคราะห์...' : '🔬 วิเคราะห์'}
-              </button>
+              {isUrlOnly ? (
+                <button
+                  onClick={() => handleScrapeUrl()}
+                  disabled={scrapeLoading}
+                  style={{
+                    flex: 1, padding: '14px 0', borderRadius: 12, border: 'none',
+                    background: scrapeLoading
+                      ? 'rgba(59,130,246,0.2)'
+                      : 'linear-gradient(135deg, #3b82f6, #6366f1)',
+                    color: '#fff', fontSize: 15, fontWeight: 800,
+                    cursor: scrapeLoading ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit', transition: 'all 0.2s',
+                    boxShadow: scrapeLoading ? 'none' : '0 4px 15px rgba(59,130,246,0.3)',
+                    opacity: scrapeLoading ? 0.6 : 1,
+                  }}
+                >
+                  {scrapeLoading ? '⏳ กำลังดึงเนื้อหา...' : '📡 ดึงเนื้อหา + กรอง'}
+                </button>
+              ) : (
+                <button
+                  onClick={handleAnalyze}
+                  disabled={loading || !inputText.trim()}
+                  style={{
+                    flex: 1, padding: '14px 0', borderRadius: 12, border: 'none',
+                    background: loading || !inputText.trim()
+                      ? 'rgba(34,197,94,0.2)'
+                      : 'linear-gradient(135deg, #22c55e, #16a34a)',
+                    color: '#fff', fontSize: 15, fontWeight: 800,
+                    cursor: loading || !inputText.trim() ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit', transition: 'all 0.2s',
+                    boxShadow: loading || !inputText.trim()
+                      ? 'none'
+                      : '0 4px 15px rgba(34,197,94,0.3)',
+                    opacity: loading || !inputText.trim() ? 0.6 : 1,
+                  }}
+                >
+                  {loading ? '⏳ กำลังวิเคราะห์...' : '🔬 วิเคราะห์'}
+                </button>
+              )}
               <button
                 onClick={handleClear}
                 style={{
