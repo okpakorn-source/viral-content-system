@@ -1,3 +1,6 @@
+// @deprecated This route is currently unused by the client UI.
+// It provides streaming NDJSON output from processAutoFlow.
+// TODO: Connect to UI or remove in next cleanup.
 export const maxDuration = 300; // Allow 5 minutes for heavy LLM operations
 import { processAutoFlow } from '@/lib/services/autoFlowService';
 import { detectInputType } from '@/lib/input-engine/detector';

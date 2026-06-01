@@ -440,6 +440,23 @@ export async function POST(request) {
     const breakdownData = breakRes.success ? breakRes.data : null;
     if (breakdownData) addLog('Breakdown', `✅ ${breakdownData.possible_angles?.length || 0} angles`);
 
+    // === Blueprint (optional — ไม่ block ถ้าล้มเหลว) ===
+    let blueprintData = null;
+    try {
+      const bpRes = await performSummarize({
+        text: normalizedData.newsBody || normalizedData.text || normalizedData.rawText,
+        newsTitle: normalizedData.newsTitle || normalizedData.title,
+        mode: 'blueprint',
+        breakdownData: breakdownData,
+        workflowId: _wfId,
+        user: body.user || null,
+      });
+      if (bpRes?.success) blueprintData = bpRes.data?.blueprint || null;
+      addLog('Blueprint', blueprintData ? blueprintData.core_emotion : 'skipped');
+    } catch (bpErr) {
+      addLog('Blueprint', 'skipped: ' + bpErr.message);
+    }
+
     // ─── STEP 4: Generate ─────────────────────────────────────
     addLog('Generate', '✍️ Generating viral content...');
     const genRes = await performSummarize({
@@ -448,6 +465,7 @@ export async function POST(request) {
       mode:       'analyze',
       newsTitle:  newsData.newsTitle,
       breakdownData: breakdownData,
+      emotionalBlueprint: blueprintData,
       contentLength,
       analysisPresetId: preset,
       workflowId: _wfId,

@@ -188,7 +188,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     addLog('SmartResearch', '🧠 เริ่มค้นหาข้อมูลเชิงลึก 6 มุม...');
     factPool = await withTimeout(
       smartResearch(newsData, breakdownData),
-      20000,
+      35000,
       'smart_research'
     ).catch(() => null);
     if (factPool && factPool.facts?.length > 0) {

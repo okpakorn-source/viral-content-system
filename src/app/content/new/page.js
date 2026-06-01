@@ -156,6 +156,7 @@ function NewContentPageInner() {
 
   // === ⚡ Auto Mode — วาง URL → ได้ผลลัพธ์ ===
   const handleAutoMode = async (inputData) => {
+    if (autoMode || loading) return;
     const { url: targetUrl, type } = inputData;
     if (!targetUrl || targetUrl.length < 5) { setError('กรุณาใส่แหล่งข้อมูล'); return; }
     
@@ -187,6 +188,8 @@ function NewContentPageInner() {
       wfComplete('auto_detect', `Source: ${domain}`);
       wfStart('auto_scrape', { api: '/api/auto', detail: 'กำลังส่งข้อมูลไป Auto Pipeline...' });
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 min
       const res = await fetch('/api/auto', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -194,6 +197,7 @@ function NewContentPageInner() {
           url: targetUrl,   // ✅ FIX Bug#2: use targetUrl from inputData, not stale url state
           contentLength,
         }),
+        signal: controller.signal,
       });
       let data;
       try {
@@ -335,9 +339,10 @@ function NewContentPageInner() {
       // \u2705 FIX: \u0e43\u0e0a\u0e49 failedStep \u0e08\u0e32\u0e01 API \u0e41\u0e17\u0e19 hard-code auto_scrape
       const failStep = err.failedStep || 'auto_scrape';
       wfFail(failStep, err.message);
-      setError('Auto Pipeline: ' + err.message);
+      setError('Auto Pipeline: ' + (err.name === 'AbortError' ? 'หมดเวลา (Timeout 5 นาที) กรุณาลองใหม่' : err.message));
       setAutoProgress('');
     } finally {
+      clearTimeout(timeoutId);
       setAutoMode(false);
     }
   };
@@ -345,6 +350,7 @@ function NewContentPageInner() {
   // === 🌐 Universal Auto Submit — รองรับทุก input type ===
 
   const handleUniversalSubmit = async (inputText, inputImages) => {
+    if (autoMode || loading) return;
     if (!inputText && inputImages.length === 0) return;
 
     const hasUrl  = /https?:\/\//.test(inputText);
@@ -384,6 +390,8 @@ function NewContentPageInner() {
       wfStart('u_detect', { detail: 'กำลัง detect และ route...' });
       setAutoProgress('⚡ Universal AI Pipeline กำลังประมวลผล...');
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 min
       const res = await fetch('/api/auto/process', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -392,6 +400,7 @@ function NewContentPageInner() {
           images:        inputImages,
           contentLength,
         }),
+        signal: controller.signal,
       });
       const data = await res.json();
       if (!data.success) {
@@ -447,10 +456,11 @@ function NewContentPageInner() {
       setStep('analyzed');
       setAutoProgress('');
     } catch (err) {
-      wfFail(err.failedStep || 'u_extract', err.message);
-      setError('❌ ' + err.message);
+      wfFail(err.failedStep || (err.name === 'AbortError' ? 'u_timeout' : 'u_unknown'), err.message);
+      setError('❌ ' + (err.name === 'AbortError' ? 'หมดเวลา (Timeout 5 นาที) กรุณาลองใหม่' : err.message));
       setAutoProgress('');
     } finally {
+      clearTimeout(timeoutId);
       setAutoMode(false);
     }
   };

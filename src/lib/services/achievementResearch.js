@@ -67,22 +67,44 @@ async function quickSearch(query, num = 3) {
 // ═══════════════════════════════════════════════
 // === Wikipedia Search (free, no key) ===
 // ═══════════════════════════════════════════════
-async function wikiSearch(name) {
+async function wikiSearch(name, entity = null) {
   try {
     const encoded = encodeURIComponent(name);
     const res = await fetch(`https://th.wikipedia.org/api/rest_v1/page/summary/${encoded}`, {
       headers: { 'Accept': 'application/json' },
     });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.type === 'standard' && data.extract) {
-      return {
-        title: data.title || name,
-        snippet: data.extract.slice(0, 500),
-        link: data.content_urls?.desktop?.page || '',
-        source: 'Wikipedia',
-      };
+    let wikiText = '';
+    if (res.ok) {
+      const data = await res.json();
+      if (data.type === 'standard' && data.extract) {
+        return {
+          title: data.title || name,
+          snippet: data.extract.slice(0, 500),
+          link: data.content_urls?.desktop?.page || '',
+          source: 'Wikipedia',
+        };
+      }
     }
+
+    // Fallback: English Wikipedia for international figures
+    if (!wikiText && entity && entity.type !== 'นักการเมือง') {
+      try {
+        const enUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(entity.realName || entity.name)}`;
+        const enRes = await fetch(enUrl, { signal: AbortSignal.timeout(5000) });
+        if (enRes.ok) {
+          const enData = await enRes.json();
+          if (enData.type === 'standard' && enData.extract) {
+            return {
+              title: enData.title || name,
+              snippet: enData.extract.slice(0, 500),
+              link: enData.content_urls?.desktop?.page || '',
+              source: 'Wikipedia (EN)',
+            };
+          }
+        }
+      } catch {}
+    }
+
     return null;
   } catch {
     return null;
@@ -156,7 +178,7 @@ async function runAgents(entity) {
     quickSearch(queries.history, 2).catch(() => []),
     quickSearch(queries.funFacts, 3).catch(() => []),
     quickSearch(queries.publicWork, 2).catch(() => []),
-    wikiSearch(entity.realName || entity.name).catch(() => null),
+    wikiSearch(entity.realName || entity.name, entity).catch(() => null),
   ]);
 
   const agentResults = {

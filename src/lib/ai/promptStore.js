@@ -501,6 +501,9 @@ STEP 5 — วิเคราะห์ "ลูกเล่นภาษา"
   "suggested_angles": [{"angle": "", "description": "", "tone": ""}]
 }`,
   },
+  // NOTE: This prompt is currently not used by the active research pipeline.
+  // The pipeline uses inline prompts in researchService.js instead.
+  // Kept for potential future use or manual mode=research calls.
   research: {
     label: '🔎 AI หาข้อมูลเพิ่มเติม',
     description: 'หาสถิติ กรณีคล้าย ความเห็นผู้เชี่ยวชาญ กฎหมาย ข้อมูลพื้นหลัง แนวโน้ม',
