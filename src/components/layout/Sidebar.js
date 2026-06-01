@@ -46,6 +46,7 @@ export default function Sidebar() {
     { label: 'หอสมุดไวรัล', icon: '📚', href: '/viral-library' },
     { label: 'หอสมุด Prompt', icon: '🏛️', href: '/prompt-library' },
     { label: 'จัดการ AI Prompts', icon: '🤖', href: '/prompts' },
+    { label: 'News Core Filter', icon: '🔬', href: '/news-filter', highlight: true },
     { label: 'Cover premium', icon: '✨', href: '/cover-maker', highlight: true },
     { label: 'คลังรูป', icon: '🖼️', href: '/cover-gallery' },
 
