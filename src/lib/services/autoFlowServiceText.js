@@ -4,6 +4,7 @@ import { transcribeYoutube } from '@/lib/services/youtubeService';
 import { performResearch } from '@/lib/services/researchService';
 import { performSummarize, getTopPrompts } from '@/lib/services/summarizeServiceText';
 import { smartResearch } from '@/lib/services/achievementResearch';
+import { logGeneration } from '@/lib/services/generationLogger';
 import { getSession } from '@/lib/auth';
 import { logPipeline } from '@/lib/pipelineLogger';
 import { createLogger } from '@/lib/logger';
@@ -363,6 +364,31 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   } catch (corrErr) {
     console.error('[AutoFlow] Correction pipeline failed, using original:', corrErr.message);
     addLog('Correction', `⚠️ Correction skipped: ${corrErr.message}`);
+  }
+
+  // === GENERATION LOG: บันทึกทุก case เข้าระบบ ===
+  try {
+    await logGeneration({
+      newsTitle: newsData.newsTitle,
+      sourceType: detectedType,
+      sourceUrl: url || '',
+      sourceText: rawText.slice(0, 5000),
+      versions: finalVersions,
+      breakdownData,
+      pipelineInfo: {
+        blueprint: blueprint?.core_emotion || null,
+        researchCount: totalResearchItems.length,
+        factPoolEntity: factPool?.entityName || null,
+        classicCount: classicVersionCount,
+        enhancedCount: enhancedVersionCount,
+        totalTime: parseFloat(totalTime),
+        contentLength: selectedLength,
+      },
+      userId: _user.userId,
+    });
+    addLog('GenLog', `📋 บันทึก Generation Log สำเร็จ`);
+  } catch (logErr) {
+    console.warn('[AutoFlowText] Generation log failed (non-critical):', logErr.message);
   }
 
   return {

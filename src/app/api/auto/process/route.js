@@ -23,6 +23,7 @@ import { scrapeArticle }   from '@/lib/providers/firecrawlProvider';
 import { scrapeTikTok, scrapeFacebook } from '@/lib/providers/apifyProvider';
 import { getYouTubeData }  from '@/lib/providers/youtubeProvider';
 import { logPipeline }     from '@/lib/pipelineLogger';
+import { logGeneration }   from '@/lib/services/generationLogger';
 import { createLogger }    from '@/lib/logger';
 
 // Direct Service Imports
@@ -486,6 +487,26 @@ export async function POST(request) {
     addLog('Done', `✅ Total: ${totalTime}s | ${versions.length} versions | pipeline: ${route.pipelineId} | fallbacks: ${fallbacksUsed.join(',') || 'none'}`);
 
     await logPipeline({ workflowId: _wfId, step: 'unified-auto', status: 'success', duration: Date.now() - startTime, detail: newsData.newsTitle?.slice(0, 60) }).catch(() => {});
+
+    // === GENERATION LOG: บันทึกเคสเข้าระบบ ===
+    try {
+      await logGeneration({
+        newsTitle: newsData.newsTitle,
+        sourceType: detection.inputType || normalizedData.sourceType || 'web',
+        sourceUrl: detection.primaryUrl || '',
+        sourceText: (normalizedData.rawText || '').slice(0, 5000),
+        versions,
+        breakdownData,
+        pipelineInfo: {
+          totalTime: parseFloat(totalTime),
+          contentLength,
+          pipelineId: route.pipelineId,
+        },
+      });
+      addLog('GenLog', `📋 Generation Log saved`);
+    } catch (glErr) {
+      addLog('GenLog', `⚠️ GenLog failed (non-critical): ${glErr.message}`);
+    }
 
     return NextResponse.json({
       success:        true,
