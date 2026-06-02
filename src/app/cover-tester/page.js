@@ -568,15 +568,10 @@ export default function CoverPage() {
       }
       return;
     }
-    // Then try ANY slot for crop-pan
+    // Then try ANY slot for crop-pan (no auto-zoom — user controls zoom via scroll wheel)
     const anySlot = hitTestAll(mx,my);
     if (anySlot) {
       const crop = slotCrops[anySlot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
-      // Auto-zoom to 1.5x on first drag if not yet zoomed — unlocks both-axis panning
-      const autoZoom = (!crop.zoom || crop.zoom <= 1) ? 1.5 : crop.zoom;
-      if (autoZoom !== crop.zoom) {
-        setSlotCrops(prev => ({ ...prev, [anySlot.id]: { ...crop, zoom: autoZoom } }));
-      }
       setDragState({ slotId: anySlot.id, mode:'crop', startX:mx, startY:my, origFocalX: crop.focalX ?? 0.5, origFocalY: crop.focalY ?? 0.3 });
     }
   };
@@ -597,18 +592,15 @@ export default function CoverPage() {
     }
 
     if (dragState.mode === 'crop') {
-      // Move focal point: drag sensitivity relative to canvas movement
-      const dx = (mx - dragState.startX) / W;  // normalized to canvas width
+      // Smooth focal point movement — no rounding, continuous
+      const dx = (mx - dragState.startX) / W;
       const dy = (my - dragState.startY) / H;
-      const newFX = Math.max(0, Math.min(1, (dragState.origFocalX ?? 0.5) - dx * 2.5));
-      const newFY = Math.max(0, Math.min(1, (dragState.origFocalY ?? 0.3) - dy * 2.5));
+      const sensitivity = 3;
+      const newFX = Math.max(0, Math.min(1, (dragState.origFocalX ?? 0.5) - dx * sensitivity));
+      const newFY = Math.max(0, Math.min(1, (dragState.origFocalY ?? 0.3) - dy * sensitivity));
       setSlotCrops(prev => {
-        const old = prev[dragState.slotId] || { zoom: 1.5, focalX: 0.5, focalY: 0.3 };
-        return { ...prev, [dragState.slotId]: {
-          ...old,
-          focalX: Math.round(newFX * 100) / 100,
-          focalY: Math.round(newFY * 100) / 100,
-        }};
+        const old = prev[dragState.slotId] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
+        return { ...prev, [dragState.slotId]: { ...old, focalX: newFX, focalY: newFY } };
       });
     } else if (dragState.mode === 'move') {
       setSlotOffsets(prev => ({
@@ -634,16 +626,17 @@ export default function CoverPage() {
 
   const handleUp = () => setDragState(null);
 
-  // ── Mouse wheel: zoom image in slot ──
+  // ── Mouse wheel: smooth zoom in slot ──
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     const {mx,my} = getCoords(e.clientX, e.clientY);
     const slot = hitTestAll(mx,my);
     if (!slot) return;
-    const delta = e.deltaY < 0 ? 0.2 : -0.2; // scroll up = zoom in
+    // Smooth zoom — small steps, no rounding
+    const delta = e.deltaY < 0 ? 0.08 : -0.08;
     setSlotCrops(prev => {
       const old = prev[slot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
-      const newZoom = Math.max(1, Math.min(4, Math.round((old.zoom + delta) * 100) / 100));
+      const newZoom = Math.max(1, Math.min(5, old.zoom + delta));
       return { ...prev, [slot.id]: { ...old, zoom: newZoom } };
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
