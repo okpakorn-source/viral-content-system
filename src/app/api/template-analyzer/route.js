@@ -119,48 +119,79 @@ CRITICAL: Return ONLY the JSON. No markdown. No explanation. No code blocks.`;
     // ═══════════════════════════════════════════════════════════════
     const isCoverFormat = format === 'cover';
 
-    const coverSystemPrompt = `You are a pixel-accurate Template Layout Analyzer for Thai news cover images (portrait format).
-Your ONLY job: analyze the uploaded image and output a JSON template defining exact slot positions.
+    const coverSystemPrompt = `You are a pixel-accurate Template Layout Analyzer for Thai news cover images.
+Your ONLY job: analyze the uploaded image and output a JSON template with EVERY photo zone.
+
+=== CRITICAL: COUNT ALL ZONES ===
+Before outputting, you MUST count EVERY distinct photo in the image.
+Most Thai news covers have 4-6 photo zones. If you find fewer than 4, look again more carefully.
+Common pattern: 1 main hero + 1-2 backgrounds + 1 highlight box + 1-2 circles = 4-6 total.
 
 === CANVAS ===
-Canvas = 1200 x 1350 px (portrait format, Facebook cover)
+Canvas = 1200 x 1350 px (portrait, Facebook cover)
+- Left edge = x:0, Right edge = x:1200
+- Top edge = y:0, Bottom edge = y:1350
+- Center = x:600, y:675
 
-=== HOW TO ANALYZE ===
-1. Look for ALL rectangular or circular photo zones in the image
-2. Estimate x, y, width, height for each zone on a 1200x1350 canvas
-3. Identify each zone's visual role
-4. Note effects: blurred background, colored borders, circle crops, fading edges
+=== STEP-BY-STEP ANALYSIS ===
+1. Find the LARGEST photo (hero/main face) — usually 50-65% of width, full height
+2. Find background areas that fill BEHIND the hero — these are bg_top and bg_bottom
+3. Find any BORDERED rectangle (yellow/gold/green/red border) — this is highlight
+4. Find any CIRCLE-cropped photos — could be 1-3 circles with different sizes and borders
+5. Find any small detail photos that don't fit above categories
+6. VERIFY: total zones should be 4-6
 
-=== SLOT TYPES (use these exact id patterns) ===
-- "bg_top"     = background image top area (usually right side, fades left)
-- "bg_bottom"  = background image bottom area (usually right side, fades left)  
-- "bg_right"   = background image right side (full height, fades left)
-- "main"       = primary hero/face image (usually left side, largest, fades right)
-- "sub_left"   = secondary image (left side)
-- "highlight"  = bordered highlight box (usually yellow/gold border, DRAGGABLE)
-- "circle"     = circle-cropped portrait image (DRAGGABLE)
-- "detail"     = detail/additional image
+=== SLOT TYPES ===
+- "bg_top"      = background photo upper-right area. Fades: fadeLeft + fadeBottom. zIndex: 0
+- "bg_bottom"   = background photo lower-right area. Fades: fadeLeft + fadeTop. zIndex: 0
+- "bg_right"    = single background covering right side full-height. Fades: fadeLeft. zIndex: 0
+- "main"        = largest hero photo (left side usually). Fades: fadeRight. zIndex: 2
+- "sub_left"    = secondary photo. Fades vary. zIndex: 1
+- "highlight"   = rectangle with colored border. draggable: true. zIndex: 3
+- "circle"      = circle-cropped photo. draggable: true. zIndex: 4
+- "circle_small"= smaller secondary circle. draggable: true. zIndex: 5
+- "detail"      = additional detail photo. zIndex: 1
 
-=== FADE EFFECTS (pixels from edge) ===
-- fadeRight: N  = image fades to transparent N pixels from right edge
-- fadeLeft: N   = image fades to transparent N pixels from left edge  
-- fadeTop: N    = image fades to transparent N pixels from top edge
-- fadeBottom: N = image fades to transparent N pixels from bottom edge
+=== TYPICAL LAYOUT EXAMPLE (5 zones) ===
+Hero left (60% width) + bg_top (upper right) + bg_bottom (lower right) + yellow highlight (center right) + circle (bottom left)
 
-=== zIndex RULES ===
-- bg_* slots: zIndex = 0
-- main/sub slots: zIndex = 1 or 2
-- highlight: zIndex = 3
-- circle: zIndex = 4 (topmost)
+=== FADE EFFECTS (in pixels) ===
+- fadeRight: 250-350 = photo fades to transparent on right edge (for left-side images)
+- fadeLeft: 200-300  = fades on left edge (for right-side backgrounds)
+- fadeTop: 140-200   = fades on top edge
+- fadeBottom: 140-200 = fades on bottom edge
+Background slots should overlap slightly with the main image area to prevent black gaps.
 
-=== OUTPUT FORMAT (strict JSON) ===
+=== BORDER COLORS ===
+Match the EXACT border color you see:
+- Gold/Yellow = "#FFD700"
+- Red = "#FF0000" or "#ef4444"
+- Green/Lime = "#c4ff00" or "#a3e635"
+- White = "#FFFFFF"
+- Blue = "#4FC3F7"
+
+=== OUTPUT FORMAT ===
 {
   "templateName": "descriptive name in Thai",
-  "desc": "short description of layout",
+  "desc": "short layout description in Thai",
   "slots": [
     {
+      "id": "bg_top",
+      "label": "🖼 ฉากหลัง (บน-ขวา)",
+      "x": 460, "y": 0, "w": 740, "h": 600,
+      "fadeLeft": 220, "fadeBottom": 140,
+      "zIndex": 0
+    },
+    {
+      "id": "bg_bottom",
+      "label": "🖼 ฉากหลัง (ล่าง-ขวา)",
+      "x": 460, "y": 700, "w": 740, "h": 650,
+      "fadeLeft": 220, "fadeTop": 140,
+      "zIndex": 0
+    },
+    {
       "id": "main",
-      "label": "★ ภาพหลัก (ซ้าย)",
+      "label": "★ ภาพหลัก",
       "x": 0, "y": 0, "w": 740, "h": 1350,
       "fadeRight": 300,
       "zIndex": 2
@@ -168,7 +199,7 @@ Canvas = 1200 x 1350 px (portrait format, Facebook cover)
     {
       "id": "highlight",
       "label": "⭐ ไฮไลท์ (กรอบเหลือง)",
-      "x": 540, "y": 400, "w": 580, "h": 420,
+      "x": 540, "y": 380, "w": 580, "h": 420,
       "border": "#FFD700", "borderWidth": 5,
       "zIndex": 3,
       "draggable": true
@@ -178,26 +209,30 @@ Canvas = 1200 x 1350 px (portrait format, Facebook cover)
       "label": "⭕ วงกลม",
       "x": 60, "y": 880,
       "shape": "circle", "diameter": 360,
-      "border": "#4FC3F7", "borderWidth": 5,
+      "border": "#FFFFFF", "borderWidth": 5,
       "zIndex": 4,
       "draggable": true
     }
   ]
 }
 
-IMPORTANT RULES:
-- highlight and circle slots MUST have "draggable": true
-- circle slots MUST have "shape": "circle" and "diameter" instead of w/h
-- bg_* slots should have fade effects toward the center
-- main slot usually has fadeRight
-- Border colors: gold=#FFD700, blue=#4FC3F7, white=#FFFFFF, lime=#a3e635
-- Return ONLY the JSON. No markdown. No explanation.`;
+=== RULES ===
+- You MUST include bg_top and/or bg_bottom for background areas (don't skip them!)
+- highlight and circle: MUST have "draggable": true
+- circle: MUST have "shape": "circle" and "diameter" (NOT w/h)
+- If you see 2 circles, use "circle" for larger and "circle_small" for smaller
+- Background slots should extend slightly beyond visible area for bleed
+- Minimum 4 slots, maximum 8 slots
+- Return ONLY the JSON. No markdown. No explanation. No code blocks.`;
 
     const userMessage = isCoverFormat 
-      ? `Analyze this news cover template image precisely.
-Canvas = 1200x1350 pixels (portrait).
+      ? `Analyze this news cover template image with extreme precision.
+Canvas = 1200x1350 pixels (portrait format).
 Template name: "${templateName || 'custom_cover'}"
-Return ONLY the JSON object with all slot positions using the cover format.`
+
+IMPORTANT: Count every distinct photo zone carefully. Most covers have 4-6 zones.
+You MUST include background zones (bg_top/bg_bottom) — don't skip them!
+Return ONLY the JSON with ALL slot positions.`
       : `Analyze this news thumbnail template image precisely.
 Canvas = 1080x1080 pixels.
 Template name: "${templateName || 'custom_template'}"
@@ -213,7 +248,7 @@ Return ONLY the JSON object with all slot positions.`;
       },
       body: JSON.stringify({
         model: 'gpt-4o',
-        max_tokens: 2500,
+        max_tokens: isCoverFormat ? 4000 : 2500,
         temperature: 0.05, // เกือบ 0 — ต้องการความแม่นยำสูงสุด
         response_format: { type: 'json_object' },
         messages: [
