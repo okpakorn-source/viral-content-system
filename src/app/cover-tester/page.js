@@ -127,12 +127,27 @@ function roundRectPath(ctx, x, y, w, h, r) {
   ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
   ctx.closePath();
 }
-function coverFit(img, tw, th, focusY = 0.3) {
+function coverFit(img, tw, th, focusY = 0.3, crop) {
   const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
   const imgAr = iw / ih, tgtAr = tw / th;
   let sx, sy, sw, sh;
   if (imgAr > tgtAr) { sh = ih; sw = ih * tgtAr; sx = (iw - sw) / 2; sy = 0; }
   else { sw = iw; sh = iw / tgtAr; sx = 0; sy = Math.max(0, Math.min((ih - sh) * focusY, ih - sh)); }
+  // Apply zoom + pan from crop overrides
+  if (crop && crop.zoom && crop.zoom !== 1) {
+    const z = crop.zoom;
+    const zw = sw / z, zh = sh / z;
+    sx += (sw - zw) / 2;
+    sy += (sh - zh) / 2;
+    sw = zw; sh = zh;
+  }
+  if (crop) {
+    if (crop.panX) { sx += crop.panX * (iw * 0.1); }
+    if (crop.panY) { sy += crop.panY * (ih * 0.1); }
+  }
+  // Clamp to image bounds
+  sx = Math.max(0, Math.min(sx, iw - sw));
+  sy = Math.max(0, Math.min(sy, ih - sh));
   return { sx, sy, sw, sh };
 }
 
@@ -149,7 +164,7 @@ function createFadeMask(w, h, f) {
   return c;
 }
 
-function drawRectSlot(ctx, img, slot, offset) {
+function drawRectSlot(ctx, img, slot, offset, crop) {
   const ox = offset?.dx||0, oy = offset?.dy||0;
   const { x:bx, y:by, w, h, fadeRight:fR=0, fadeLeft:fL=0, fadeTop:fT=0, fadeBottom:fB=0, border, borderWidth:bw=0 } = slot;
   const x = bx+ox, y = by+oy;
@@ -158,13 +173,13 @@ function drawRectSlot(ctx, img, slot, offset) {
   if (border) { ctx.save(); ctx.fillStyle=border; ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=12; ctx.shadowOffsetY=4; ctx.fillRect(x,y,w,h); ctx.restore(); }
   const o = document.createElement('canvas'); o.width=dw; o.height=dh;
   const c = o.getContext('2d');
-  const {sx,sy,sw,sh} = coverFit(img,dw,dh);
+  const {sx,sy,sw,sh} = coverFit(img,dw,dh,0.3,crop);
   c.drawImage(img,sx,sy,sw,sh,0,0,dw,dh);
   if (!border && (fR||fL||fT||fB)) { const mask = createFadeMask(dw,dh,{right:fR,left:fL,top:fT,bottom:fB}); c.globalCompositeOperation='destination-in'; c.drawImage(mask,0,0); c.globalCompositeOperation='source-over'; }
   ctx.drawImage(o,dx,dy);
 }
 
-function drawCircleSlot(ctx, img, slot, offset) {
+function drawCircleSlot(ctx, img, slot, offset, crop) {
   const ox = offset?.dx||0, oy = offset?.dy||0;
   const { x:bx, y:by, diameter:d, border='#fff', borderWidth:bw=4 } = slot;
   const x = bx+ox, y = by+oy, r = d/2, cx = x+r, cy = y+r;
@@ -172,7 +187,7 @@ function drawCircleSlot(ctx, img, slot, offset) {
   ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=16; ctx.shadowOffsetY=4;
   ctx.fillStyle=border; ctx.fill(); ctx.restore();
   ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.clip();
-  const {sx,sy,sw,sh} = coverFit(img,d,d);
+  const {sx,sy,sw,sh} = coverFit(img,d,d,0.3,crop);
   ctx.drawImage(img,sx,sy,sw,sh,x,y,d,d); ctx.restore();
 }
 
@@ -281,6 +296,7 @@ export default function CoverPage() {
   const [slotImages, setSlotImages] = useState({});
   const [slotOffsets, setSlotOffsets] = useState({});
   const [slotScales, setSlotScales] = useState({});
+  const [slotCrops, setSlotCrops] = useState({}); // { slotId: { zoom: 1.2, panX: 0, panY: -1 } }
   const [textValues, setTextValues] = useState({});
   const [dragState, setDragState] = useState(null);
   const [downloaded, setDownloaded] = useState(false);
@@ -594,8 +610,8 @@ export default function CoverPage() {
       const img = slotImages[slot.id]; if (!img) continue;
       const offset = slotOffsets[slot.id];
       const eff = getEffSlot(slot, slotScales[slot.id]);
-      if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, offset);
-      else drawRectSlot(ctx, img, eff, offset);
+      if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, offset, slotCrops[slot.id]);
+      else drawRectSlot(ctx, img, eff, offset, slotCrops[slot.id]);
     }
 
     // Text background (dark banner or gradient)
@@ -610,8 +626,8 @@ export default function CoverPage() {
       const img = slotImages[slot.id]; if (!img) continue;
       const offset = slotOffsets[slot.id];
       const eff = getEffSlot(slot, slotScales[slot.id]);
-      if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, offset);
-      else drawRectSlot(ctx, img, eff, offset);
+      if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, offset, slotCrops[slot.id]);
+      else drawRectSlot(ctx, img, eff, offset, slotCrops[slot.id]);
     }
 
     // Empty state
@@ -661,7 +677,7 @@ export default function CoverPage() {
       }
       ctx.restore();
     }
-  }, [slotImages, slotOffsets, slotScales, template, textValues, textBgColors, dragState, draggableSlots]);
+  }, [slotImages, slotOffsets, slotScales, slotCrops, template, textValues, textBgColors, dragState, draggableSlots]);
 
   useEffect(() => { render(); }, [render]);
 
@@ -678,8 +694,8 @@ export default function CoverPage() {
       if ((slot.zIndex||0) >= 3) continue;
       const img = slotImages[slot.id]; if (!img) continue;
       const eff = getEffSlot(slot, slotScales[slot.id]);
-      if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, slotOffsets[slot.id]);
-      else drawRectSlot(ctx, img, eff, slotOffsets[slot.id]);
+      if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, slotOffsets[slot.id], slotCrops[slot.id]);
+      else drawRectSlot(ctx, img, eff, slotOffsets[slot.id], slotCrops[slot.id]);
     }
     // TextBg
     if (template.textBg) drawTextBg(ctx, template.textBg);
@@ -690,8 +706,8 @@ export default function CoverPage() {
       if ((slot.zIndex||0) < 3) continue;
       const img = slotImages[slot.id]; if (!img) continue;
       const eff = getEffSlot(slot, slotScales[slot.id]);
-      if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, slotOffsets[slot.id]);
-      else drawRectSlot(ctx, img, eff, slotOffsets[slot.id]);
+      if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, slotOffsets[slot.id], slotCrops[slot.id]);
+      else drawRectSlot(ctx, img, eff, slotOffsets[slot.id], slotCrops[slot.id]);
     }
 
     canvas.toBlob((blob) => {
@@ -995,6 +1011,49 @@ export default function CoverPage() {
                         <img src={slotImages[slot.id].src} alt={slot.label} style={{ height:'100%', width:'auto', objectFit:'cover' }} />
                       </div>
                     )}
+                    {/* ── Zoom + Pan Controls ── */}
+                    {slotImages[slot.id] && (() => {
+                      const crop = slotCrops[slot.id] || { zoom: 1, panX: 0, panY: 0 };
+                      const updateCrop = (key, delta) => {
+                        setSlotCrops(prev => {
+                          const old = prev[slot.id] || { zoom: 1, panX: 0, panY: 0 };
+                          let val = (old[key] || (key === 'zoom' ? 1 : 0)) + delta;
+                          if (key === 'zoom') val = Math.max(1, Math.min(3, Math.round(val * 10) / 10));
+                          else val = Math.max(-5, Math.min(5, Math.round(val * 10) / 10));
+                          return { ...prev, [slot.id]: { ...old, [key]: val } };
+                        });
+                      };
+                      const isDefault = crop.zoom === 1 && crop.panX === 0 && crop.panY === 0;
+                      return (
+                        <div style={{ marginTop:6, padding:'6px 10px', background:'rgba(59,130,246,0.04)', borderRadius:8, border:'1px solid rgba(59,130,246,0.12)' }}>
+                          {/* Zoom row */}
+                          <div style={{ display:'flex', gap:6, alignItems:'center', marginBottom:4 }}>
+                            <span style={{ fontSize:10, color:'#60a5fa', fontWeight:600, width:32 }}>🔍</span>
+                            <button onClick={() => updateCrop('zoom', -0.2)} style={s.scaleBtn}>−</button>
+                            <div style={{ flex:1, textAlign:'center', fontSize:11, fontWeight:700, color: crop.zoom > 1 ? '#60a5fa' : 'var(--text-muted)' }}>
+                              {crop.zoom.toFixed(1)}x
+                            </div>
+                            <button onClick={() => updateCrop('zoom', 0.2)} style={s.scaleBtn}>+</button>
+                          </div>
+                          {/* Pan row */}
+                          <div style={{ display:'flex', gap:4, alignItems:'center', justifyContent:'center' }}>
+                            <span style={{ fontSize:10, color:'#60a5fa', fontWeight:600, width:32 }}>📍</span>
+                            <button onClick={() => updateCrop('panX', -0.5)} style={s.scaleBtn} title="เลื่อนซ้าย">◀</button>
+                            <button onClick={() => updateCrop('panY', -0.5)} style={s.scaleBtn} title="เลื่อนขึ้น">▲</button>
+                            <button onClick={() => updateCrop('panY', 0.5)} style={s.scaleBtn} title="เลื่อนลง">▼</button>
+                            <button onClick={() => updateCrop('panX', 0.5)} style={s.scaleBtn} title="เลื่อนขวา">▶</button>
+                            {!isDefault && (
+                              <button onClick={() => setSlotCrops(prev => ({...prev, [slot.id]: { zoom: 1, panX: 0, panY: 0 }}))} style={{ ...s.scaleBtn, fontSize:10, width:28 }} title="รีเซ็ต">↺</button>
+                            )}
+                            {!isDefault && (
+                              <span style={{ fontSize:9, color:'var(--text-muted)', marginLeft:4 }}>
+                                {crop.zoom > 1 ? `${crop.zoom.toFixed(1)}x ` : ''}{crop.panX ? `X${crop.panX > 0 ? '+' : ''}${crop.panX}` : ''}{crop.panY ? ` Y${crop.panY > 0 ? '+' : ''}${crop.panY}` : ''}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>
