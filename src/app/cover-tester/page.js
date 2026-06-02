@@ -96,6 +96,26 @@ const BUILTIN_TEMPLATES = [
       { id: 'circle',    label: '⭕ วงกลม',                 x: 800, y: 500, shape: 'circle', diameter: 320, border: '#FFFFFF', borderWidth: 4, zIndex: 4, draggable: true },
     ],
   },
+  // ═══════════════════════════════════════════════════════════
+  // แบบ 6: 5 รูป + 2 บรรทัดข้อความแถบแดง — สไตล์ข่าวสังคม/สะเทือนใจ
+  // ตัวอย่าง: ใบหน้าชาย (ซ้ายเต็ม) + หญิงเตียง (บน-ขวา)
+  //          + กลุ่มคนรับของ (ล่าง-ขวา) + กรอบเหลือง + วงขาว
+  //          + "ซื่อกินไม่หมด / คดกินไม่นาน"
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: 'builtin_6', name: 'ข่าวสังคม + ข้อความ', desc: '5 รูป + 2 บรรทัดข้อความแถบแดง',
+    textSlots: [
+      { id: 'line1', label: '📝 บรรทัด 1 (ขาว/แดง)', x: 300, y: 530, fontSize: 52, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 560, stroke: '#000', strokeWidth: 2, bg: 'rgba(200,0,0,0.88)', bgPadY: 12, bgFullWidth: false, bgEditable: true, placeholder: 'พาดหัวหลัก...' },
+      { id: 'line2', label: '📝 บรรทัด 2 (เหลือง/แดง)', x: 300, y: 630, fontSize: 46, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 560, stroke: '#000', strokeWidth: 2, bg: 'rgba(200,0,0,0.88)', bgPadY: 10, bgFullWidth: false, bgEditable: true, placeholder: 'รายละเอียด...' },
+    ],
+    slots: [
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 720, h: 1050, fadeRight: 300, fadeBottom: 350, zIndex: 2 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 460, y: 0,   w: 740, h: 620,  fadeLeft: 300, fadeBottom: 200,  zIndex: 0 },
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 350, y: 560, w: 850, h: 790,  fadeLeft: 350, fadeTop: 250,    zIndex: 1 },
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 420, y: 300, w: 640, h: 500,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
+      { id: 'circle',    label: '⭕ วงกลม (ล่าง-ซ้าย)',      x: 20,  y: 720, shape: 'circle', diameter: 420, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
+    ],
+  },
 ];
 
 // ═══════════════════════════════════════════════════════════
