@@ -365,9 +365,10 @@ export default function CoverPage() {
   const hasOffsets = Object.values(slotOffsets).some(o => o.dx || o.dy);
   const hasScaleChanges = Object.values(slotScales).some(s => s !== 1 && s !== undefined);
   const [enhancing, setEnhancing] = useState({});
+  const [enhanceResults, setEnhanceResults] = useState({}); // per-slot enhancement metadata
 
   // ── AI Enhance Image ──
-  const enhanceSlotImage = async (slotId) => {
+  const enhanceSlotImage = async (slotId, forceScale) => {
     const img = slotImages[slotId];
     if (!img) return;
     setEnhancing(prev => ({ ...prev, [slotId]: true }));
@@ -380,15 +381,17 @@ export default function CoverPage() {
       const dataUrl = c.toDataURL('image/jpeg', 0.95);
       const base64 = dataUrl.split(',')[1];
 
+      const maxDim = Math.max(img.naturalWidth, img.naturalHeight);
+      const scale = forceScale || (maxDim < 400 ? 4 : 2);
+
       const res = await fetch('/api/assets/enhance-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           base64,
           mode: 'auto',
-          upscale: Math.max(img.naturalWidth, img.naturalHeight) < 400 ? 4 : 2,
+          upscale: scale,
           faceRestore: true,
-          outputSize: 1200,
           quality: 95,
         }),
       });
@@ -397,7 +400,19 @@ export default function CoverPage() {
         const enhanced = new Image();
         enhanced.onload = () => setSlotImages(prev => ({ ...prev, [slotId]: enhanced }));
         enhanced.src = `data:image/jpeg;base64,${data.data.base64}`;
-        console.log(`[Cover] ✨ Enhanced ${slotId}: ${data.data.inputSize?.width}×${data.data.inputSize?.height} → ${data.data.width}×${data.data.height} (${data.data.enhancerUsed})`);
+        // Store enhancement metadata
+        setEnhanceResults(prev => ({ ...prev, [slotId]: {
+          enhancerUsed: data.data.enhancerUsed,
+          originalResolution: data.data.originalResolution,
+          enhancedResolution: data.data.enhancedResolution,
+          sharpnessBefore: data.data.sharpnessBefore,
+          sharpnessAfter: data.data.sharpnessAfter,
+          similarityScore: data.data.similarityScore,
+          qualityGain: data.data.qualityGain,
+          processingTime: data.data.processingTime,
+          rejected: data.data.rejected || false,
+        }}));
+        console.log(`[Cover] ✨ Enhanced ${slotId}: ${data.data.originalResolution} → ${data.data.enhancedResolution} (${data.data.enhancerUsed}) | similarity: ${data.data.similarityScore}%`);
       }
     } catch (e) {
       console.error(`[Cover] ❌ Enhance error:`, e);
@@ -802,22 +817,52 @@ export default function CoverPage() {
                       {slotImages[slot.id] && (
                         <>
                           <button
-                            onClick={() => enhanceSlotImage(slot.id)}
+                            onClick={() => enhanceSlotImage(slot.id, 2)}
                             disabled={enhancing[slot.id]}
-                            title="✨ AI เพิ่มความชัด (Replicate)"
+                            title="Enhance 2x — Real-ESRGAN"
                             style={{
-                              padding:'10px 12px', borderRadius:10,
+                              padding:'8px 10px', borderRadius:10,
                               border:'1px solid rgba(168,85,247,0.3)',
                               background: enhancing[slot.id] ? 'rgba(168,85,247,0.15)' : 'rgba(168,85,247,0.06)',
-                              color:'#a855f7', fontSize:12, fontWeight:700,
+                              color:'#a855f7', fontSize:10, fontWeight:700,
                               cursor: enhancing[slot.id] ? 'wait' : 'pointer',
                               fontFamily:'inherit', opacity: enhancing[slot.id] ? 0.7 : 1,
                               animation: enhancing[slot.id] ? 'pulse 1.5s infinite' : 'none',
                             }}
                           >
-                            {enhancing[slot.id] ? '⏳' : '✨'}
+                            {enhancing[slot.id] ? '⏳' : '2x'}
                           </button>
-                          <button onClick={() => removeImage(slot.id)} style={{ padding:'10px 12px', borderRadius:10, border:'1px solid rgba(239,68,68,0.3)', background:'rgba(239,68,68,0.06)', color:'#f87171', fontSize:12, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>✕</button>
+                          <button
+                            onClick={() => enhanceSlotImage(slot.id, 4)}
+                            disabled={enhancing[slot.id]}
+                            title="Enhance 4x — Real-ESRGAN"
+                            style={{
+                              padding:'8px 10px', borderRadius:10,
+                              border:'1px solid rgba(234,179,8,0.3)',
+                              background:'rgba(234,179,8,0.06)',
+                              color:'#eab308', fontSize:10, fontWeight:700,
+                              cursor: enhancing[slot.id] ? 'wait' : 'pointer',
+                              fontFamily:'inherit',
+                            }}
+                          >
+                            4x
+                          </button>
+                          <button
+                            onClick={() => enhanceSlotImage(slot.id)}
+                            disabled={enhancing[slot.id]}
+                            title="Auto Best — เลือก model อัตโนมัติ"
+                            style={{
+                              padding:'8px 10px', borderRadius:10,
+                              border:'1px solid rgba(34,197,94,0.3)',
+                              background:'rgba(34,197,94,0.06)',
+                              color:'#22c55e', fontSize:10, fontWeight:700,
+                              cursor: enhancing[slot.id] ? 'wait' : 'pointer',
+                              fontFamily:'inherit',
+                            }}
+                          >
+                            Auto
+                          </button>
+                          <button onClick={() => removeImage(slot.id)} style={{ padding:'8px 10px', borderRadius:10, border:'1px solid rgba(239,68,68,0.3)', background:'rgba(239,68,68,0.06)', color:'#f87171', fontSize:10, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>✕</button>
                         </>
                       )}
                     </div>
@@ -830,8 +875,26 @@ export default function CoverPage() {
                       const isVerySmall = maxDim > 0 && maxDim < 300;
                       if (enhancing[slot.id]) {
                         return (
-                          <div style={{ marginTop:4, padding:'4px 10px', borderRadius:6, background:'rgba(168,85,247,0.1)', border:'1px solid rgba(168,85,247,0.2)', fontSize:10, color:'#a855f7', fontWeight:600 }}>
-                            ⏳ กำลังเพิ่มความชัดด้วย AI... (Replicate Super Resolution)
+                          <div style={{ marginTop:4, padding:'6px 10px', borderRadius:8, background:'rgba(168,85,247,0.1)', border:'1px solid rgba(168,85,247,0.2)', fontSize:10, color:'#a855f7', fontWeight:600 }}>
+                            ⏳ กำลังเพิ่มความชัดด้วย Real-ESRGAN... (อาจใช้เวลา 10-30 วินาที)
+                          </div>
+                        );
+                      }
+                      // Show enhancement results
+                      const eResult = enhanceResults[slot.id];
+                      if (eResult && !isSmall && !isVerySmall) {
+                        return (
+                          <div style={{ marginTop:4, padding:'8px 10px', borderRadius:8, background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.15)', fontSize:10, lineHeight:1.7 }}>
+                            <div style={{ fontWeight:700, color:'#22c55e', marginBottom:2 }}>✅ Enhanced — {eResult.enhancerUsed}</div>
+                            <div style={{ color:'var(--text-muted)' }}>
+                              📐 {eResult.originalResolution} → <span style={{color:'#22c55e',fontWeight:700}}>{eResult.enhancedResolution}</span>
+                              {' | '}
+                              🔍 Sharpness: {eResult.sharpnessBefore} → {eResult.sharpnessAfter}
+                              {' | '}
+                              🎯 Similarity: <span style={{color: eResult.similarityScore >= 95 ? '#22c55e' : '#ef4444', fontWeight:700}}>{eResult.similarityScore}%</span>
+                              {' | '}
+                              ⏱ {eResult.processingTime}
+                            </div>
                           </div>
                         );
                       }
