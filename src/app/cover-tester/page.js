@@ -504,7 +504,7 @@ export default function CoverPage() {
     return { mx: (cx-r.left)*(W/r.width), my: (cy-r.top)*(H/r.height) };
   };
 
-  // ── Hit test: returns { slot, mode } or null ──
+  // ── Hit test: draggable slots only (for move/resize) ──
   const hitTest = (mx, my) => {
     const sorted = [...draggableSlots].filter(sl => slotImages[sl.id]).sort((a,b) => (b.zIndex||0)-(a.zIndex||0));
     for (const slot of sorted) {
@@ -531,22 +531,48 @@ export default function CoverPage() {
     return null;
   };
 
+  // ── Hit test ALL slots (for crop pan) ──
+  const hitTestAll = (mx, my) => {
+    if (!template) return null;
+    const sorted = [...template.slots].filter(sl => slotImages[sl.id]).sort((a,b) => (b.zIndex||0)-(a.zIndex||0));
+    for (const slot of sorted) {
+      const off = slotOffsets[slot.id] || {dx:0,dy:0};
+      const eff = getEffSlot(slot, slotScales[slot.id]);
+      const sx = eff.x + off.dx, sy = eff.y + off.dy;
+      if (slot.shape === 'circle') {
+        const r = eff.diameter/2;
+        if (Math.hypot(mx-(sx+r), my-(sy+r)) <= r + (slot.borderWidth||0)) return slot;
+      } else {
+        if (mx >= sx && mx <= sx+(eff.w||0) && my >= sy && my <= sy+(eff.h||0)) return slot;
+      }
+    }
+    return null;
+  };
+
   // ── Pointer handlers ──
   const handleDown = (cx, cy) => {
     const {mx,my} = getCoords(cx,cy);
+    // First try draggable slots (move/resize)
     const hit = hitTest(mx,my);
-    if (!hit) return;
-    const off = slotOffsets[hit.slot.id] || {dx:0,dy:0};
-    const sc = slotScales[hit.slot.id] || 1;
-    const eff = getEffSlot(hit.slot, sc);
-    if (hit.mode === 'resize') {
-      // Calculate distance from center of the element
-      const ecx = eff.x + off.dx + (eff.shape==='circle' ? eff.diameter/2 : eff.w/2);
-      const ecy = eff.y + off.dy + (eff.shape==='circle' ? eff.diameter/2 : eff.h/2);
-      const startDist = Math.hypot(mx-ecx, my-ecy);
-      setDragState({ slotId: hit.slot.id, mode:'resize', startX:mx, startY:my, origDx:off.dx, origDy:off.dy, origScale:sc, startDist });
-    } else {
-      setDragState({ slotId: hit.slot.id, mode:'move', startX:mx, startY:my, origDx:off.dx, origDy:off.dy, origScale:sc, startDist:0 });
+    if (hit) {
+      const off = slotOffsets[hit.slot.id] || {dx:0,dy:0};
+      const sc = slotScales[hit.slot.id] || 1;
+      const eff = getEffSlot(hit.slot, sc);
+      if (hit.mode === 'resize') {
+        const ecx = eff.x + off.dx + (eff.shape==='circle' ? eff.diameter/2 : eff.w/2);
+        const ecy = eff.y + off.dy + (eff.shape==='circle' ? eff.diameter/2 : eff.h/2);
+        const startDist = Math.hypot(mx-ecx, my-ecy);
+        setDragState({ slotId: hit.slot.id, mode:'resize', startX:mx, startY:my, origDx:off.dx, origDy:off.dy, origScale:sc, startDist });
+      } else {
+        setDragState({ slotId: hit.slot.id, mode:'move', startX:mx, startY:my, origDx:off.dx, origDy:off.dy, origScale:sc, startDist:0 });
+      }
+      return;
+    }
+    // Then try ANY slot for crop-pan
+    const anySlot = hitTestAll(mx,my);
+    if (anySlot) {
+      const crop = slotCrops[anySlot.id] || { zoom: 1, panX: 0, panY: 0 };
+      setDragState({ slotId: anySlot.id, mode:'crop', startX:mx, startY:my, origPanX: crop.panX, origPanY: crop.panY });
     }
   };
 
@@ -556,13 +582,28 @@ export default function CoverPage() {
     if (!dragState) {
       // Hover cursor
       const hit = hitTest(mx,my);
-      if (!hit) setHoverCursor('default');
-      else if (hit.mode === 'resize') setHoverCursor('nwse-resize');
-      else setHoverCursor('grab');
+      if (hit) {
+        setHoverCursor(hit.mode === 'resize' ? 'nwse-resize' : 'grab');
+      } else {
+        const anySlot = hitTestAll(mx,my);
+        setHoverCursor(anySlot ? 'move' : 'default');
+      }
       return;
     }
 
-    if (dragState.mode === 'move') {
+    if (dragState.mode === 'crop') {
+      // Pan image within slot (crop)
+      const dx = (mx - dragState.startX) / 60;  // sensitivity: ~60px mouse = 1.0 pan unit
+      const dy = (my - dragState.startY) / 60;
+      setSlotCrops(prev => {
+        const old = prev[dragState.slotId] || { zoom: 1, panX: 0, panY: 0 };
+        return { ...prev, [dragState.slotId]: {
+          ...old,
+          panX: Math.max(-5, Math.min(5, Math.round(((dragState.origPanX || 0) - dx) * 10) / 10)),
+          panY: Math.max(-5, Math.min(5, Math.round(((dragState.origPanY || 0) - dy) * 10) / 10)),
+        }};
+      });
+    } else if (dragState.mode === 'move') {
       setSlotOffsets(prev => ({
         ...prev,
         [dragState.slotId]: {
@@ -571,7 +612,7 @@ export default function CoverPage() {
         },
       }));
     } else {
-      // Resize: measure distance from element center
+      // Resize
       const slot = template.slots.find(sl => sl.id === dragState.slotId);
       const off = { dx: dragState.origDx, dy: dragState.origDy };
       const eff = getEffSlot(slot, dragState.origScale);
@@ -586,7 +627,21 @@ export default function CoverPage() {
 
   const handleUp = () => setDragState(null);
 
-  const resetAll = () => { setSlotOffsets({}); setSlotScales({}); };
+  // ── Mouse wheel: zoom image in slot ──
+  const handleWheel = (e) => {
+    e.preventDefault();
+    const {mx,my} = getCoords(e.clientX, e.clientY);
+    const slot = hitTestAll(mx,my);
+    if (!slot) return;
+    const delta = e.deltaY < 0 ? 0.15 : -0.15; // scroll up = zoom in
+    setSlotCrops(prev => {
+      const old = prev[slot.id] || { zoom: 1, panX: 0, panY: 0 };
+      const newZoom = Math.max(1, Math.min(3, Math.round((old.zoom + delta) * 100) / 100));
+      return { ...prev, [slot.id]: { ...old, zoom: newZoom } };
+    });
+  };
+
+  const resetAll = () => { setSlotOffsets({}); setSlotScales({}); setSlotCrops({}); };
 
   // ── Render ──
   const render = useCallback(() => {
@@ -1201,6 +1256,7 @@ export default function CoverPage() {
                   onMouseDown={e => handleDown(e.clientX, e.clientY)}
                   onMouseMove={e => handleMove(e.clientX, e.clientY)}
                   onMouseUp={handleUp} onMouseLeave={handleUp}
+                  onWheel={handleWheel}
                   onTouchStart={e => { const t=e.touches[0]; handleDown(t.clientX, t.clientY); }}
                   onTouchMove={e => { e.preventDefault(); const t=e.touches[0]; handleMove(t.clientX, t.clientY); }}
                   onTouchEnd={handleUp}
