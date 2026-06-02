@@ -10,68 +10,90 @@ const EDGE_RING = 35;   // circle edge hit zone (px)
 // ═══════════════════════════════════════════════════════════
 // TEMPLATE DEFINITIONS
 // ═══════════════════════════════════════════════════════════
-// แทมเพลต builtin — วิเคราะห์จากตัวอย่างจริง
+// แทมเพลต builtin — วิเคราะห์จากตัวอย่างจริง (Layout: 4-quadrant)
+// Canvas = 1200 x 1350 px
+// แต่ละรูปครอบคลุม ~55-60% ของ canvas แล้ว fade เข้าหากัน ไม่มีจุดดำ
 const BUILTIN_TEMPLATES = [
   // ═══════════════════════════════════════════════════════════
-  // แบบ 1: ฮีโร่ซ้าย + ฉากขวาบน/ล่าง + ไฮไลท์เหลือง (4 รูป)
-  // ตัวอย่าง: ภาพเด็กผู้หญิง + ฉากสนามบิน + กรอบเหลืองรูปรับปริญญา + ฉากแม่จูบลูก
+  // แบบ 1: 5 รูป — 4 ช่อง + ไฮไลท์เหลือง
+  // ตัวอย่าง: เด็กผู้หญิง (บน-ซ้าย) + สนามบิน (บน-ขวา)
+  //          + ใบหน้า2 (ล่าง-ซ้าย) + แม่จูบลูก (ล่าง-ขวา)
+  //          + กรอบเหลืองรับปริญญา (กลาง)
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'builtin_1', name: 'ข่าวหน้าปก 1', desc: '4 รูป — ฮีโร่ซ้าย + ฉากหลังขวาบน/ล่าง + ไฮไลท์เหลือง', textSlots: [],
+    id: 'builtin_1', name: 'ข่าวหน้าปก 1', desc: '5 รูป — 4 ช่อง + ไฮไลท์เหลือง', textSlots: [],
     slots: [
-      { id: 'bg_top',    label: '🖼 ฉากหลัง (บน-ขวา)',    x: 420, y: 0,   w: 780, h: 650,  fadeLeft: 260, fadeBottom: 180, zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ฉากหลัง (ล่าง-ขวา)',   x: 420, y: 680, w: 780, h: 670,  fadeLeft: 260, fadeTop: 180,   zIndex: 0 },
-      { id: 'main',      label: '★ ภาพหลัก (ซ้าย)',        x: 0,   y: 0,   w: 740, h: 1350, fadeRight: 320,                zIndex: 2 },
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',  x: 480, y: 360, w: 640, h: 440,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
+      { id: 'main',      label: '★ ภาพหลัก (บน-ซ้าย)',      x: 0,   y: 0,   w: 700, h: 740,  fadeRight: 280, fadeBottom: 200, zIndex: 2 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 480, y: 0,   w: 720, h: 700,  fadeLeft: 280, fadeBottom: 180,  zIndex: 0 },
+      { id: 'sub_left',  label: '🖼 ภาพรอง (ล่าง-ซ้าย)',     x: 0,   y: 580, w: 680, h: 770,  fadeRight: 260, fadeTop: 200,   zIndex: 1 },
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 440, y: 600, w: 760, h: 750,  fadeLeft: 280, fadeTop: 200,    zIndex: 0 },
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 460, y: 340, w: 620, h: 440,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
     ],
   },
   // ═══════════════════════════════════════════════════════════
-  // แบบ 2: ฮีโร่ซ้าย + ฉากขวาบน/ล่าง + ไฮไลท์เหลือง + วงกลม (5 รูป)
-  // ตัวอย่าง: ภาพพ่อ + ฉากครอบครัว + กรอบเหลืองร้องไห้ + ฉากแม่ + วงกลมมือ
+  // แบบ 2: 5 รูป — บน-ซ้าย/ขวา + ล่าง-ขวา + ไฮไลท์ + วงกลม
+  // ตัวอย่าง: พ่อ (บน-ซ้าย) + ครอบครัว (บน-ขวา)
+  //          + แม่ (ล่าง-ขวา) + กรอบเหลืองร้องไห้ + วงกลมมือ
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'builtin_2', name: 'ข่าวหน้าปก 2', desc: '5 รูป — ฮีโร่ซ้าย + ฉากขวา 2 ชั้น + ไฮไลท์เหลือง + วงกลม', textSlots: [],
+    id: 'builtin_2', name: 'ข่าวหน้าปก 2', desc: '5 รูป — 3 ช่อง + ไฮไลท์เหลือง + วงกลม', textSlots: [],
     slots: [
-      { id: 'bg_top',    label: '🖼 ฉากหลัง (บน-ขวา)',    x: 440, y: 0,   w: 760, h: 580,  fadeLeft: 250, fadeBottom: 160, zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ฉากหลัง (ล่าง-ขวา)',   x: 440, y: 720, w: 760, h: 630,  fadeLeft: 250, fadeTop: 160,   zIndex: 0 },
-      { id: 'main',      label: '★ ภาพหลัก (ซ้าย)',        x: 0,   y: 0,   w: 720, h: 1350, fadeRight: 300,                zIndex: 2 },
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',  x: 460, y: 340, w: 640, h: 460,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
-      { id: 'circle',    label: '⭕ วงกลม (ล่าง-ซ้าย)',    x: 30,  y: 780, shape: 'circle', diameter: 380, border: '#4FC3F7', borderWidth: 5, zIndex: 4, draggable: true },
+      { id: 'main',      label: '★ ภาพหลัก (บน-ซ้าย)',      x: 0,   y: 0,   w: 700, h: 740,  fadeRight: 280, fadeBottom: 200, zIndex: 2 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 480, y: 0,   w: 720, h: 680,  fadeLeft: 280, fadeBottom: 180,  zIndex: 0 },
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 440, y: 600, w: 760, h: 750,  fadeLeft: 280, fadeTop: 200,    zIndex: 0 },
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 460, y: 340, w: 640, h: 460,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
+      { id: 'circle',    label: '⭕ วงกลม (ล่าง-ซ้าย)',      x: 30,  y: 780, shape: 'circle', diameter: 380, border: '#4FC3F7', borderWidth: 5, zIndex: 4, draggable: true },
     ],
   },
   // ═══════════════════════════════════════════════════════════
-  // แบบ 3: ฮีโร่ซ้าย + ฉากขวา + ไฮไลท์เหลือง + วงกลมขาว + วงกลมแดง (6 รูป)
-  // ตัวอย่าง: ภาพนักดำน้ำ + ฉากถ้ำ + กรอบเหลืองในถ้ำ + วงกลมขาวใหญ่ + วงกลมแดงเล็ก
+  // แบบ 3: 6 รูป — บน-ซ้าย/ขวา + ล่าง-ขวา + ไฮไลท์ + วงกลมขาว + วงกลมแดง
+  // ตัวอย่าง: นักดำน้ำ (บน-ซ้าย) + ถ้ำกลุ่ม (บน-ขวา)
+  //          + ใบหน้านักดำน้ำ (ล่าง-ขวา) + กรอบเหลือง + วงขาว + วงแดง
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'builtin_3', name: 'ข่าวหน้าปก 3', desc: '6 รูป — ฮีโร่ซ้าย + ฉาก 2 ชั้น + ไฮไลท์เหลือง + วงกลมขาว + วงกลมแดง', textSlots: [],
+    id: 'builtin_3', name: 'ข่าวหน้าปก 3', desc: '6 รูป — 3 ช่อง + ไฮไลท์เหลือง + วงกลมขาว + วงกลมแดง', textSlots: [],
     slots: [
-      { id: 'bg_top',       label: '🖼 ฉากหลัง (บน-ขวา)',     x: 420, y: 0,   w: 780, h: 560,  fadeLeft: 260, fadeBottom: 160, zIndex: 0 },
-      { id: 'bg_bottom',    label: '🖼 ฉากหลัง (ล่าง-ขวา)',    x: 420, y: 740, w: 780, h: 610,  fadeLeft: 260, fadeTop: 160,   zIndex: 0 },
-      { id: 'main',         label: '★ ภาพหลัก (ซ้าย)',         x: 0,   y: 0,   w: 740, h: 1350, fadeRight: 320,                zIndex: 2 },
-      { id: 'highlight',    label: '⭐ ไฮไลท์ (กรอบเหลือง)',   x: 440, y: 360, w: 660, h: 480,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
-      { id: 'circle',       label: '⭕ วงกลมใหญ่ (ขาว)',       x: 20,  y: 720, shape: 'circle', diameter: 400, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
-      { id: 'circle_small', label: '⭕ วงกลมเล็ก (แดง)',       x: 940, y: 10,  shape: 'circle', diameter: 200, border: '#FF0000', borderWidth: 4, zIndex: 5, draggable: true },
+      { id: 'main',         label: '★ ภาพหลัก (บน-ซ้าย)',      x: 0,   y: 0,   w: 700, h: 740,  fadeRight: 280, fadeBottom: 200, zIndex: 2 },
+      { id: 'bg_top',       label: '🖼 ฉากบน-ขวา',             x: 480, y: 0,   w: 720, h: 680,  fadeLeft: 280, fadeBottom: 180,  zIndex: 0 },
+      { id: 'bg_bottom',    label: '🖼 ฉากล่าง-ขวา',            x: 440, y: 600, w: 760, h: 750,  fadeLeft: 280, fadeTop: 200,    zIndex: 0 },
+      { id: 'highlight',    label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 440, y: 360, w: 660, h: 480,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
+      { id: 'circle',       label: '⭕ วงกลมใหญ่ (ขาว)',        x: 20,  y: 720, shape: 'circle', diameter: 400, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
+      { id: 'circle_small', label: '⭕ วงกลมเล็ก (แดง)',        x: 940, y: 10,  shape: 'circle', diameter: 200, border: '#FF0000', borderWidth: 4, zIndex: 5, draggable: true },
     ],
   },
   // ═══════════════════════════════════════════════════════════
-  // แบบ 4: คอลลาจ 6 รูป + ข้อความ 3 บรรทัด (สไตล์ข่าวบันเทิง)
-  // ตัวอย่าง: ภาพเล็กหลายภาพกระจาย + ข้อความสีเหลือง/ขาวบนแถบดำ
+  // แบบ 4: 5 รูป — 4 ช่องเท่ากัน + วงกลมตรงกลาง (ไม่มี highlight)
+  // ตัวอย่าง: แม่ยิ้ม (บน-ซ้าย) + ชายร้องไห้ (บน-ขวา)
+  //          + โต๊ะบูชา (ล่าง-ซ้าย) + ชายเช็ดน้ำตา (ล่าง-ขวา)
+  //          + วงกลมขาว (คู่ แม่-ลูก) ตรงกลาง
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'builtin_4', name: 'ข่าวคอลลาจ', desc: '6 รูป + 3 บรรทัดข้อความ — สไตล์ข่าวบันเทิง',
+    id: 'builtin_4', name: 'ข่าว 4 ช่อง + วงกลม', desc: '5 รูป — 4 ช่องเท่าๆ กัน + วงกลมตรงกลาง', textSlots: [],
+    slots: [
+      { id: 'main',      label: '★ ภาพหลัก (บน-ซ้าย)',      x: 0,   y: 0,   w: 690, h: 730,  fadeRight: 260, fadeBottom: 200, zIndex: 2 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 500, y: 0,   w: 700, h: 710,  fadeLeft: 260, fadeBottom: 200,  zIndex: 1 },
+      { id: 'sub_left',  label: '🖼 ภาพรอง (ล่าง-ซ้าย)',     x: 0,   y: 570, w: 680, h: 780,  fadeRight: 250, fadeTop: 200,   zIndex: 1 },
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 460, y: 560, w: 740, h: 790,  fadeLeft: 260, fadeTop: 200,    zIndex: 0 },
+      { id: 'circle',    label: '⭕ วงกลม (กลาง)',           x: 370, y: 410, shape: 'circle', diameter: 380, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
+    ],
+  },
+  // ═══════════════════════════════════════════════════════════
+  // แบบ 5: คอลลาจ 6 รูป + ข้อความ 3 บรรทัด (สไตล์ข่าวบันเทิง)
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: 'builtin_5', name: 'ข่าวคอลลาจ', desc: '6 รูป + 3 บรรทัดข้อความ — สไตล์ข่าวบันเทิง',
     textSlots: [
       { id: 'line1', label: '📝 บรรทัด 1 (ขาว)', x: 600, y: 960,  fontSize: 52, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 1100, stroke: '#000', strokeWidth: 4, placeholder: 'พาดหัวหลัก...' },
       { id: 'line2', label: '📝 บรรทัด 2 (เหลือง)', x: 600, y: 1060, fontSize: 46, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 1100, stroke: '#000', strokeWidth: 3, bg: 'rgba(0,0,0,0.65)', bgPadY: 14, bgFullWidth: true, bgEditable: true, placeholder: 'รายละเอียด...' },
       { id: 'line3', label: '📝 บรรทัด 3 (เหลือง)', x: 600, y: 1160, fontSize: 42, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 1100, stroke: '#000', strokeWidth: 3, bg: 'rgba(0,0,0,0.65)', bgPadY: 12, bgFullWidth: true, bgEditable: true, placeholder: 'ข้อความเสริม...' },
     ],
     slots: [
-      { id: 'bg_top',    label: '🖼 ฉากหลัง (บน-ขวา)',    x: 400, y: 0,   w: 800, h: 500,  fadeLeft: 240, fadeBottom: 140, zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ฉากหลัง (กลาง-ขวา)',   x: 500, y: 420, w: 700, h: 500,  fadeLeft: 200, fadeTop: 140,   zIndex: 0 },
-      { id: 'main',      label: '★ ภาพหลัก (บน-ซ้าย)',     x: 0,   y: 0,   w: 660, h: 560,  fadeRight: 260, fadeBottom: 180, zIndex: 2 },
-      { id: 'sub_left',  label: '🖼 ภาพรอง (กลาง-ซ้าย)',   x: 0,   y: 440, w: 620, h: 480,  fadeRight: 200, fadeTop: 160,  zIndex: 1 },
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเขียว)',   x: 140, y: 250, w: 440, h: 360,  border: '#c4ff00', borderWidth: 4, zIndex: 3, draggable: true },
-      { id: 'circle',    label: '⭕ วงกลม',                x: 800, y: 500, shape: 'circle', diameter: 320, border: '#FFFFFF', borderWidth: 4, zIndex: 4, draggable: true },
+      { id: 'main',      label: '★ ภาพหลัก (บน-ซ้าย)',      x: 0,   y: 0,   w: 660, h: 560,  fadeRight: 260, fadeBottom: 180, zIndex: 2 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 400, y: 0,   w: 800, h: 500,  fadeLeft: 240, fadeBottom: 140,  zIndex: 0 },
+      { id: 'sub_left',  label: '🖼 ภาพรอง (กลาง-ซ้าย)',    x: 0,   y: 440, w: 620, h: 480,  fadeRight: 200, fadeTop: 160,   zIndex: 1 },
+      { id: 'bg_bottom', label: '🖼 ฉากกลาง-ขวา',            x: 500, y: 420, w: 700, h: 500,  fadeLeft: 200, fadeTop: 140,    zIndex: 0 },
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเขียว)',    x: 140, y: 250, w: 440, h: 360,  border: '#c4ff00', borderWidth: 4, zIndex: 3, draggable: true },
+      { id: 'circle',    label: '⭕ วงกลม',                 x: 800, y: 500, shape: 'circle', diameter: 320, border: '#FFFFFF', borderWidth: 4, zIndex: 4, draggable: true },
     ],
   },
 ];
