@@ -36,11 +36,11 @@ const BUILTIN_TEMPLATES = [
   //          + แม่ (ล่าง-ขวา) + กรอบเหลืองร้องไห้ + วงกลมมือ
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'builtin_2', name: 'ข่าวหน้าปก 2', desc: '5 รูป — 3 ช่อง + ไฮไลท์เหลือง + วงกลม', textSlots: [],
+    id: 'builtin_2', name: 'ข่าวหน้าปก 2', desc: '5 รูป — ภาพหลักเต็มซ้าย + ฉากขวา + ไฮไลท์เหลือง + วงกลม', textSlots: [],
     slots: [
-      { id: 'main',      label: '★ ภาพหลัก (บน-ซ้าย)',      x: 0,   y: 0,   w: 700, h: 740,  fadeRight: 280, fadeBottom: 200, zIndex: 2 },
-      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 480, y: 0,   w: 720, h: 680,  fadeLeft: 280, fadeBottom: 180,  zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 440, y: 600, w: 760, h: 750,  fadeLeft: 280, fadeTop: 200,    zIndex: 0 },
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 720, h: 1050, fadeRight: 300, fadeBottom: 350, zIndex: 2 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 460, y: 0,   w: 740, h: 700,  fadeLeft: 300, fadeBottom: 200,  zIndex: 0 },
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 300, y: 550, w: 900, h: 800,  fadeLeft: 350, fadeTop: 250,    zIndex: 0 },
       { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 460, y: 340, w: 640, h: 460,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
       { id: 'circle',    label: '⭕ วงกลม (ล่าง-ซ้าย)',      x: 30,  y: 780, shape: 'circle', diameter: 380, border: '#4FC3F7', borderWidth: 5, zIndex: 4, draggable: true },
     ],
@@ -51,11 +51,11 @@ const BUILTIN_TEMPLATES = [
   //          + ใบหน้านักดำน้ำ (ล่าง-ขวา) + กรอบเหลือง + วงขาว + วงแดง
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'builtin_3', name: 'ข่าวหน้าปก 3', desc: '6 รูป — 3 ช่อง + ไฮไลท์เหลือง + วงกลมขาว + วงกลมแดง', textSlots: [],
+    id: 'builtin_3', name: 'ข่าวหน้าปก 3', desc: '6 รูป — ภาพหลักเต็มซ้าย + ฉากขวา + ไฮไลท์ + วงกลม×2', textSlots: [],
     slots: [
-      { id: 'main',         label: '★ ภาพหลัก (บน-ซ้าย)',      x: 0,   y: 0,   w: 700, h: 740,  fadeRight: 280, fadeBottom: 200, zIndex: 2 },
-      { id: 'bg_top',       label: '🖼 ฉากบน-ขวา',             x: 480, y: 0,   w: 720, h: 680,  fadeLeft: 280, fadeBottom: 180,  zIndex: 0 },
-      { id: 'bg_bottom',    label: '🖼 ฉากล่าง-ขวา',            x: 440, y: 600, w: 760, h: 750,  fadeLeft: 280, fadeTop: 200,    zIndex: 0 },
+      { id: 'main',         label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 720, h: 1050, fadeRight: 300, fadeBottom: 350, zIndex: 2 },
+      { id: 'bg_top',       label: '🖼 ฉากบน-ขวา',             x: 460, y: 0,   w: 740, h: 700,  fadeLeft: 300, fadeBottom: 200,  zIndex: 0 },
+      { id: 'bg_bottom',    label: '🖼 ฉากล่าง-ขวา',            x: 300, y: 550, w: 900, h: 800,  fadeLeft: 350, fadeTop: 250,    zIndex: 0 },
       { id: 'highlight',    label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 440, y: 360, w: 660, h: 480,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
       { id: 'circle',       label: '⭕ วงกลมใหญ่ (ขาว)',        x: 20,  y: 720, shape: 'circle', diameter: 400, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
       { id: 'circle_small', label: '⭕ วงกลมเล็ก (แดง)',        x: 940, y: 10,  shape: 'circle', diameter: 200, border: '#FF0000', borderWidth: 4, zIndex: 5, draggable: true },
@@ -1051,6 +1051,34 @@ export default function CoverPage() {
                               </span>
                             )}
                           </div>
+                        </div>
+                      );
+                    })()}
+                    {/* ── Position Offset Controls ── */}
+                    {slotImages[slot.id] && (() => {
+                      const off = slotOffsets[slot.id] || { dx: 0, dy: 0 };
+                      const hasOff = off.dx || off.dy;
+                      const moveSlot = (axis, delta) => {
+                        setSlotOffsets(prev => {
+                          const old = prev[slot.id] || { dx: 0, dy: 0 };
+                          return { ...prev, [slot.id]: { ...old, [axis]: (old[axis] || 0) + delta } };
+                        });
+                      };
+                      return (
+                        <div style={{ marginTop:4, padding:'4px 10px', background:'rgba(251,191,36,0.04)', borderRadius:8, border:'1px solid rgba(251,191,36,0.12)', display:'flex', gap:4, alignItems:'center' }}>
+                          <span style={{ fontSize:10, color:'#fbbf24', fontWeight:600, width:32 }}>📐</span>
+                          <button onClick={() => moveSlot('dx', -30)} style={s.scaleBtn} title="เลื่อนซ้าย">◀</button>
+                          <button onClick={() => moveSlot('dy', -30)} style={s.scaleBtn} title="เลื่อนขึ้น">▲</button>
+                          <button onClick={() => moveSlot('dy', 30)} style={s.scaleBtn} title="เลื่อนลง">▼</button>
+                          <button onClick={() => moveSlot('dx', 30)} style={s.scaleBtn} title="เลื่อนขวา">▶</button>
+                          {hasOff && (
+                            <>
+                              <button onClick={() => setSlotOffsets(prev => ({...prev, [slot.id]: {dx:0,dy:0}}))} style={{...s.scaleBtn, fontSize:10, width:28}} title="รีเซ็ต">↺</button>
+                              <span style={{ fontSize:9, color:'var(--text-muted)', marginLeft:2 }}>
+                                X:{off.dx||0} Y:{off.dy||0}
+                              </span>
+                            </>
+                          )}
                         </div>
                       );
                     })()}
