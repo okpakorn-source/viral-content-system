@@ -162,8 +162,28 @@ function NewsFilterContent() {
 
       // === DEEP CLEANING: กำจัดขยะจากเว็บข่าวไทย ===
       
+      // Phase 0: Cut everything after "ข่าวที่เกี่ยวข้อง" section
+      // (ข่าวแนะนำ, cookie consent, footer ทั้งหมดอยู่หลังนี้)
+      let cleaned = rawContent;
+      const relatedCutPatterns = [
+        /ข่าวที่เกี่ยวข้อง/i,
+        /ข่าวที่เกียวข้อง/i,  // typo variant
+        /บทความที่เกี่ยวข้อง/i,
+        /เรื่องที่น่าสนใจ/i,
+        /ข่าวแนะนำ/i,
+        /อ่านข่าวเพิ่มเติม/i,
+        /คุณอาจสนใจ/i,
+      ];
+      for (const pattern of relatedCutPatterns) {
+        const match = cleaned.match(pattern);
+        if (match) {
+          cleaned = cleaned.slice(0, match.index);
+          break;
+        }
+      }
+
       // Phase 1: Strip markdown formatting
-      let cleaned = rawContent
+      cleaned = cleaned
         .replace(/!\[.*?\]\(.*?\)/g, '')      // remove images
         .replace(/\[([^\]]*)\]\(.*?\)/g, '$1') // keep link text only
         .replace(/#{1,6}\s*/g, '')             // remove markdown headers
@@ -173,7 +193,8 @@ function NewsFilterContent() {
         .replace(/\|.*\|/g, '')                // remove tables
         .replace(/^---+$/gm, '')               // remove horizontal rules
         .replace(/https?:\/\/\S+/g, '')        // remove URLs
-        .replace(/^>\s*/gm, '');               // remove blockquotes
+        .replace(/^>\s*/gm, '')                // remove blockquotes
+        .replace(/\S+@\S+\.\S+/g, '')         // remove email addresses
 
       // Phase 2: Split into lines and filter junk
       const lines = cleaned.split('\n').map(l => l.trim()).filter(Boolean);
@@ -187,8 +208,14 @@ function NewsFilterContent() {
         // Honkrasae / channel navigation
         /^โหน/,  // โหนทุกข่าว, โหนบันเทิง, โหนร้องทุกข์, โหนไบบู
         /^(ข่าวกำลังโหน|ข่าวโซเชียล|ข่าวฮิต|ข่าวเด่น|ข่าวด่วน|ข่าวล่าสุด)$/,
+        // Show promos — "มาร่วมตีแผ่กระแส", "รายการโหนกระแส"
+        /มาร่วมตีแผ่กระแส/,
+        /รายการโหนกระแส/,
+        /กับรายการ/,
         // Contact / channel / footer
         /^ติดต่อ(เรา|โฆษณา|ลงโฆษณา)/,
+        /^ติดตาม(เรา|ได้ที่)/,
+        /^เกี่ยวกับเรา/,
         /^ช่อง\s*\d+\s*(กด)?\s*\d*/,
         /^\(\s*\(*\s*\)*\s*\)$/, // ((((
         /^[\(\)]+$/,
@@ -198,18 +225,33 @@ function NewsFilterContent() {
         /^(Copy link|คัดลอกลิงก์|พิมพ์|Print|อ่านเพิ่มเติม|Read more)/i,
         // Tags / categories
         /^(แท็ก|Tags?|หมวดหมู่|Category|ป้ายกำกับ|Label)s?\s*:?\s*/i,
-        /^(ข่าวที่เกี่ยวข้อง|Related|บทความที่เกี่ยวข้อง|เรื่องที่น่าสนใจ)/i,
+        /^(ข่าวที่เกี่ยวข้อง|ข่าวที่เกียวข้อง|Related|บทความที่เกี่ยวข้อง)/i,
         /^(แนะนำ|Recommended|Popular|ยอดนิยม|อ่านมากสุด|ข่าวยอดฮิต)/i,
         // Ads
         /^(Advertisement|โฆษณา|Sponsored|Ad|Ads|ป้ายโฆษณา|PR\s*News)/i,
         /^(สนับสนุนโดย|Presented by|Powered by)/i,
+        // Cookie consent
+        /คุกกี้/,
+        /^ยอมรับทั้งหมด/,
+        /cookie/i,
         // Copyright / legal
         /^(Copyright|©|สงวนลิขสิทธิ์|ลิขสิทธิ์|All rights? reserved)/i,
         /^(เงื่อนไข|นโยบาย|Privacy|Terms|Disclaimer|ข้อกำหนด)/i,
+        /เกี่ยวกับเราข้อกำหนด/,
+        // Company address
+        /^เลขที่\s*\d+/,
+        /อาคาร.*ทาวเวอร์/,
+        /แขวง.*เขต/,
+        /กรุงเทพ(ฯ|มหานคร)?.*\d{5}/,
+        // Schedule
+        /^วัน(จันทร์|อังคาร|อาทิตย์|เสาร์).*เวลา/,
+        /^วันจันทร์\s*(ถึง|-).*วันศุกร์/,
         // App download prompts
         /^(ดาวน์โหลด|Download|โหลดแอป|App Store|Google Play|อ่านต่อบน)/i,
-        // Timestamps / dates alone
+        // Timestamps / dates alone (abbreviated)
         /^\d{1,2}\s*(ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.|พ\.ย\.|ธ\.ค\.)\s*\d{2,4}$/,
+        // Timestamps / dates alone (full month name)
+        /^\d{1,2}\s*(มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม)\s*\d{2,4}\d*$/,
         /^\d{1,2}\/\d{1,2}\/\d{2,4}$/,
         // Reporter/source credits alone
         /^(ขอบคุณ|ที่มา|แหล่งที่มา|Source|Credit|ภาพจาก|ภาพ:)(\s|:)/i,
@@ -234,6 +276,12 @@ function NewsFilterContent() {
         
         // Skip lines that look like menu items (short + no verb/content)
         if (line.length < 25 && !/[ก-๙]{4,}/.test(line)) return false;
+
+        // Skip tags: mixed Thai+English concatenated without spaces (e.g. "ทองใหม่Theshockเดอะช็อค")
+        if (/[ก-๙][A-Za-z]/.test(line) && /[A-Za-z][ก-๙]/.test(line) && line.length < 80 && !/\s/.test(line.slice(0, 40))) return false;
+
+        // Skip email-only lines
+        if (/^\S+@\S+\.\S+$/.test(line)) return false;
         
         return true;
       });
