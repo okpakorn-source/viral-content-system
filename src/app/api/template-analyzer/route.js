@@ -19,7 +19,7 @@ const rlog = createLogger('TEMPLATE-ANALYZER');
 export async function POST(request) {
   const startTime = Date.now();
   try {
-    const { imageBase64, templateName, autoSave = false } = await request.json();
+    const { imageBase64, templateName, autoSave = false, format = 'composer' } = await request.json();
 
     if (!imageBase64) {
       return NextResponse.json({ success: false, error: 'กรุณาส่งรูปตัวอย่าง (imageBase64)' }, { status: 400 });
@@ -114,7 +114,91 @@ Each slot must have a "priority" field:
 
 CRITICAL: Return ONLY the JSON. No markdown. No explanation. No code blocks.`;
 
-    const userMessage = `Analyze this news thumbnail template image precisely.
+    // ═══════════════════════════════════════════════════════════════
+    // COVER FORMAT — Portrait 1200x1350 system prompt
+    // ═══════════════════════════════════════════════════════════════
+    const isCoverFormat = format === 'cover';
+
+    const coverSystemPrompt = `You are a pixel-accurate Template Layout Analyzer for Thai news cover images (portrait format).
+Your ONLY job: analyze the uploaded image and output a JSON template defining exact slot positions.
+
+=== CANVAS ===
+Canvas = 1200 x 1350 px (portrait format, Facebook cover)
+
+=== HOW TO ANALYZE ===
+1. Look for ALL rectangular or circular photo zones in the image
+2. Estimate x, y, width, height for each zone on a 1200x1350 canvas
+3. Identify each zone's visual role
+4. Note effects: blurred background, colored borders, circle crops, fading edges
+
+=== SLOT TYPES (use these exact id patterns) ===
+- "bg_top"     = background image top area (usually right side, fades left)
+- "bg_bottom"  = background image bottom area (usually right side, fades left)  
+- "bg_right"   = background image right side (full height, fades left)
+- "main"       = primary hero/face image (usually left side, largest, fades right)
+- "sub_left"   = secondary image (left side)
+- "highlight"  = bordered highlight box (usually yellow/gold border, DRAGGABLE)
+- "circle"     = circle-cropped portrait image (DRAGGABLE)
+- "detail"     = detail/additional image
+
+=== FADE EFFECTS (pixels from edge) ===
+- fadeRight: N  = image fades to transparent N pixels from right edge
+- fadeLeft: N   = image fades to transparent N pixels from left edge  
+- fadeTop: N    = image fades to transparent N pixels from top edge
+- fadeBottom: N = image fades to transparent N pixels from bottom edge
+
+=== zIndex RULES ===
+- bg_* slots: zIndex = 0
+- main/sub slots: zIndex = 1 or 2
+- highlight: zIndex = 3
+- circle: zIndex = 4 (topmost)
+
+=== OUTPUT FORMAT (strict JSON) ===
+{
+  "templateName": "descriptive name in Thai",
+  "desc": "short description of layout",
+  "slots": [
+    {
+      "id": "main",
+      "label": "★ ภาพหลัก (ซ้าย)",
+      "x": 0, "y": 0, "w": 740, "h": 1350,
+      "fadeRight": 300,
+      "zIndex": 2
+    },
+    {
+      "id": "highlight",
+      "label": "⭐ ไฮไลท์ (กรอบเหลือง)",
+      "x": 540, "y": 400, "w": 580, "h": 420,
+      "border": "#FFD700", "borderWidth": 5,
+      "zIndex": 3,
+      "draggable": true
+    },
+    {
+      "id": "circle",
+      "label": "⭕ วงกลม",
+      "x": 60, "y": 880,
+      "shape": "circle", "diameter": 360,
+      "border": "#4FC3F7", "borderWidth": 5,
+      "zIndex": 4,
+      "draggable": true
+    }
+  ]
+}
+
+IMPORTANT RULES:
+- highlight and circle slots MUST have "draggable": true
+- circle slots MUST have "shape": "circle" and "diameter" instead of w/h
+- bg_* slots should have fade effects toward the center
+- main slot usually has fadeRight
+- Border colors: gold=#FFD700, blue=#4FC3F7, white=#FFFFFF, lime=#a3e635
+- Return ONLY the JSON. No markdown. No explanation.`;
+
+    const userMessage = isCoverFormat 
+      ? `Analyze this news cover template image precisely.
+Canvas = 1200x1350 pixels (portrait).
+Template name: "${templateName || 'custom_cover'}"
+Return ONLY the JSON object with all slot positions using the cover format.`
+      : `Analyze this news thumbnail template image precisely.
 Canvas = 1080x1080 pixels.
 Template name: "${templateName || 'custom_template'}"
 Return ONLY the JSON object with all slot positions.`;
@@ -133,7 +217,7 @@ Return ONLY the JSON object with all slot positions.`;
         temperature: 0.05, // เกือบ 0 — ต้องการความแม่นยำสูงสุด
         response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: systemPrompt },
+          { role: 'system', content: isCoverFormat ? coverSystemPrompt : systemPrompt },
           {
             role: 'user',
             content: [
@@ -194,7 +278,41 @@ Return ONLY the JSON object with all slot positions.`;
       description: s.description || '',
     }));
 
-    if (slots.length === 0) {
+    // ── Cover format: normalize slots differently ──────────────────
+    let coverSlots = null;
+    if (isCoverFormat) {
+      coverSlots = (templateData.slots || []).map((s, i) => {
+        const slot = {
+          id: s.id || ('slot_' + (i + 1)),
+          label: s.label || s.id || ('Slot ' + (i + 1)),
+          x: Math.round(s.x ?? s.position?.x ?? 0),
+          y: Math.round(s.y ?? s.position?.y ?? 0),
+          zIndex: s.zIndex ?? i,
+        };
+        // Circle slots
+        if (s.shape === 'circle' || s.id?.includes('circle')) {
+          slot.shape = 'circle';
+          slot.diameter = Math.round(s.diameter || s.w || s.position?.w || 300);
+        } else {
+          slot.w = Math.round(s.w ?? s.position?.w ?? 300);
+          slot.h = Math.round(s.h ?? s.position?.h ?? 300);
+        }
+        // Fade effects
+        if (s.fadeRight) slot.fadeRight = Math.round(s.fadeRight);
+        if (s.fadeLeft) slot.fadeLeft = Math.round(s.fadeLeft);
+        if (s.fadeTop) slot.fadeTop = Math.round(s.fadeTop);
+        if (s.fadeBottom) slot.fadeBottom = Math.round(s.fadeBottom);
+        // Border
+        if (s.border) { slot.border = s.border; slot.borderWidth = s.borderWidth || 5; }
+        // Draggable
+        if (s.draggable || s.id === 'highlight' || s.id === 'circle' || s.id?.includes('highlight') || s.id?.includes('circle')) {
+          slot.draggable = true;
+        }
+        return slot;
+      });
+    }
+
+    if (slots.length === 0 && !coverSlots?.length) {
       return NextResponse.json({
         success: false,
         error: 'วิเคราะห์ไม่พบ slots — ลองอัปโหลดรูปที่ชัดกว่านี้',
@@ -232,23 +350,38 @@ Return ONLY the JSON object with all slot positions.`;
     };
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    rlog.done('Template: "' + finalTemplate.templateName + '" | ' + slots.length + ' slots | tokens: ' + tokens + ' | ' + elapsed + 's');
+    rlog.done('Template: "' + finalTemplate.templateName + '" | ' + (isCoverFormat ? (coverSlots?.length || 0) : slots.length) + ' slots | tokens: ' + tokens + ' | ' + elapsed + 's');
+
+    // ── Build cover-format template for saving to library ───────────
+    let coverTemplate = null;
+    if (isCoverFormat && coverSlots) {
+      coverTemplate = {
+        id: templateId,
+        name: templateData.templateName || templateName || 'Custom Cover',
+        desc: templateData.desc || templateData.analysis || '',
+        textSlots: [],
+        slots: coverSlots,
+        source: 'ai_analyzed',
+        createdAt: new Date().toISOString(),
+      };
+    }
 
     // ── Auto-save to library ────────────────────────────────────────
-    if (autoSave) {
+    if (autoSave || isCoverFormat) {
       try {
-        await saveTemplate(finalTemplate);
-        console.log('[TemplateAnalyzer] ✅ Auto-saved to library:', templateId);
+        const toSave = isCoverFormat ? coverTemplate : finalTemplate;
+        await saveTemplate(toSave);
+        console.log('[TemplateAnalyzer] ✅ Saved to library:', templateId);
       } catch (e) {
-        console.warn('[TemplateAnalyzer] Auto-save failed:', e.message);
+        console.warn('[TemplateAnalyzer] Save failed:', e.message);
       }
     }
 
     return NextResponse.json({
       success: true,
       templateId,
-      template: finalTemplate,
-      saved: autoSave,
+      template: isCoverFormat ? coverTemplate : finalTemplate,
+      saved: autoSave || isCoverFormat,
       tokensUsed: tokens,
       durationSeconds: parseFloat(elapsed),
     });

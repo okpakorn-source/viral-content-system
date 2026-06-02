@@ -10,162 +10,8 @@ const EDGE_RING = 35;   // circle edge hit zone (px)
 // ═══════════════════════════════════════════════════════════
 // TEMPLATE DEFINITIONS
 // ═══════════════════════════════════════════════════════════
-const TEMPLATES = [
-  {
-    id: 'template_1', name: 'แบบ 1', desc: 'ฮีโร่ซ้าย + ไฮไลท์กรอบเหลือง', textSlots: [],
-    slots: [
-      { id: 'bg_top',    label: '🖼 ฉากหลัง (บน-ขวา)',    x: 460, y: 0,   w: 740, h: 600,  fadeLeft: 220, fadeBottom: 140, zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ฉากหลัง (ล่าง-ขวา)',   x: 460, y: 700, w: 740, h: 650,  fadeLeft: 220, fadeTop: 140,   zIndex: 0 },
-      { id: 'main',      label: '★ ภาพหลัก (ซ้าย)',        x: 0,   y: 0,   w: 740, h: 1350, fadeRight: 300, zIndex: 2 },
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',  x: 540, y: 400, w: 580, h: 420,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
-    ],
-  },
-  {
-    id: 'template_2', name: 'แบบ 2', desc: 'ฮีโร่ซ้าย + กรอบเหลือง + วงกลม', textSlots: [],
-    slots: [
-      { id: 'bg_top',    label: '🖼 ฉากหลัง (บน-ขวา)',    x: 460, y: 0,   w: 740, h: 600,  fadeLeft: 220, fadeBottom: 140, zIndex: 0 },
-      { id: 'detail',    label: '🖼 ภาพเสริม (ล่าง-ขวา)',  x: 460, y: 700, w: 740, h: 650,  fadeLeft: 220, fadeTop: 140,   zIndex: 1 },
-      { id: 'main',      label: '★ ภาพหลัก (ซ้าย)',        x: 0,   y: 0,   w: 740, h: 1350, fadeRight: 300, zIndex: 2 },
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',  x: 540, y: 380, w: 580, h: 420,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
-      { id: 'circle',    label: '⭕ วงกลม (ล่าง-ซ้าย)',    x: 60,  y: 880, shape: 'circle', diameter: 360, border: '#4FC3F7', borderWidth: 5, zIndex: 4, draggable: true },
-    ],
-  },
-  {
-    id: 'template_3', name: 'แบบ 3', desc: 'ฮีโร่ขวา + วงกลมตรงกลาง', textSlots: [],
-    slots: [
-      { id: 'bg_top',    label: '🖼 ฉากหลัง (บน-ซ้าย)',   x: 0,   y: 0,   w: 740, h: 600,  fadeRight: 220, fadeBottom: 140, zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ฉากหลัง (ล่าง-ซ้าย)',  x: 0,   y: 700, w: 740, h: 650,  fadeRight: 220, fadeTop: 140,   zIndex: 0 },
-      { id: 'main',      label: '★ ภาพหลัก (ขวา)',         x: 460, y: 0,   w: 740, h: 1350, fadeLeft: 300, zIndex: 2 },
-      { id: 'circle',    label: '⭕ วงกลม (กลาง)',         x: 410, y: 480, shape: 'circle', diameter: 340, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
-    ],
-  },
-  {
-    id: 'template_4', name: 'แบบ 4', desc: '5 ภาพ — 2 ภาพซ้ายซ้อน + ฉากขวา + กรอบเหลือง', textSlots: [],
-    slots: [
-      { id: 'bg_top',    label: '🖼 ฉากหลัง (บน-ขวา)',      x: 420, y: 0,   w: 780, h: 570,  fadeLeft: 240, fadeBottom: 130, zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ฉากหลัง (ล่าง-ขวา)',     x: 420, y: 720, w: 780, h: 630,  fadeLeft: 240, fadeTop: 130,   zIndex: 0 },
-      { id: 'sub_left',  label: '🖼 ภาพรอง (ล่าง-ซ้าย)',     x: 0,   y: 580, w: 660, h: 770,  fadeTop: 220, fadeRight: 200,  zIndex: 1 },
-      { id: 'main',      label: '★ ภาพหลัก (บน-ซ้าย)',       x: 0,   y: 0,   w: 720, h: 800,  fadeRight: 280, fadeBottom: 220, zIndex: 2 },
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 480, y: 360, w: 580, h: 410,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
-    ],
-  },
-  {
-    id: 'template_5', name: 'แบบ 5', desc: 'ฮีโร่ขวา + 2 ภาพซ้ายซ้อน + วงกลมขาว', textSlots: [],
-    slots: [
-      { id: 'bg_top',    label: '🖼 ภาพบน (บน-ซ้าย)',      x: 0,   y: 0,   w: 720, h: 610,  fadeRight: 250, fadeBottom: 170, zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ภาพล่าง (ล่าง-ซ้าย)',   x: 0,   y: 620, w: 720, h: 730,  fadeRight: 250, fadeTop: 200,   zIndex: 1 },
-      { id: 'main',      label: '★ ภาพหลัก (ขวา)',          x: 440, y: 0,   w: 760, h: 1350, fadeLeft: 320,                 zIndex: 2 },
-      { id: 'circle',    label: '⭕ วงกลม (กลาง)',          x: 370, y: 460, shape: 'circle', diameter: 330, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
-    ],
-  },
-  {
-    id: 'template_6', name: 'แบบ 6', desc: '2 ภาพซ้อน + วงกลม + แถบข้อความ',
-    textBg: { x: 50, y: 850, w: 1100, h: 330, bg: 'rgba(0,0,0,0.72)', radius: 16 },
-    textSlots: [
-      { id: 'line1', label: '📝 บรรทัด 1 (สีเหลือง)', x: 600, y: 950, fontSize: 50, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 980, stroke: '#000', strokeWidth: 3, placeholder: 'พาดหัวหลัก...' },
-      { id: 'line2', label: '📝 บรรทัด 2 (สีขาว)', x: 600, y: 1040, fontSize: 44, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 980, stroke: '#000', strokeWidth: 2, placeholder: 'รายละเอียดเพิ่มเติม...' },
-    ],
-    slots: [
-      { id: 'bg_right', label: '🖼 ภาพรอง (ขวา)',        x: 380, y: 0,   w: 820, h: 1000, fadeLeft: 300, fadeBottom: 180, zIndex: 0 },
-      { id: 'main',     label: '★ ภาพหลัก (ซ้าย)',        x: 0,   y: 0,   w: 740, h: 1350, fadeRight: 300,                zIndex: 2 },
-      { id: 'circle',   label: '⭕ วงกลม (ล่าง-ซ้าย)',    x: 30,  y: 920, shape: 'circle', diameter: 280, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
-    ],
-  },
-  {
-    id: 'template_7', name: 'แบบ 7', desc: '5 ภาพ — 2 บน 2 ล่าง + วงกลม + ข้อความลอย',
-    textSlots: [
-      { id: 'line1', label: '📝 บรรทัด 1 (สีขาว)', x: 800, y: 690, fontSize: 46, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 660, stroke: '#000', strokeWidth: 5, placeholder: 'ข้อความบรรทัด 1...' },
-      { id: 'line2', label: '📝 บรรทัด 2 (สีขาว)', x: 800, y: 770, fontSize: 42, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 660, stroke: '#000', strokeWidth: 5, placeholder: 'ข้อความบรรทัด 2... 🥺🙏' },
-    ],
-    slots: [
-      { id: 'bg_top',    label: '🖼 ฉากหลัง (บน-ขวา)',    x: 420, y: 0,   w: 780, h: 580,  fadeLeft: 240, fadeBottom: 140, zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ภาพเสริม (ล่าง-ขวา)',  x: 460, y: 650, w: 740, h: 700,  fadeLeft: 220, fadeTop: 180,   zIndex: 0 },
-      { id: 'sub_left',  label: '🖼 ภาพรอง (ล่าง-ซ้าย)',   x: 0,   y: 580, w: 660, h: 770,  fadeRight: 200, fadeTop: 200,  zIndex: 1 },
-      { id: 'main',      label: '★ ภาพหลัก (บน-ซ้าย)',     x: 0,   y: 0,   w: 700, h: 780,  fadeRight: 260, fadeBottom: 200, zIndex: 2 },
-      { id: 'circle',    label: '⭕ วงกลม (กลาง-ล่าง)',    x: 280, y: 800, shape: 'circle', diameter: 300, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
-    ],
-  },
-  {
-    id: 'template_8', name: 'แบบ 8', desc: '5 ภาพ — ฮีโร่ซ้าย + กรอบเหลือง + วงกลม + ข้อความป้าย',
-    textSlots: [
-      { id: 'line1', label: '📝 บรรทัด 1', x: 80, y: 620, fontSize: 52, color: '#000000', fontWeight: 'bold', align: 'left', maxWidth: 600, bg: '#FFFFFF', bgPadX: 18, bgPadY: 10, bgEditable: true, placeholder: 'ข้อความบรรทัด 1...' },
-      { id: 'line2', label: '📝 บรรทัด 2', x: 80, y: 710, fontSize: 48, color: '#000000', fontWeight: 'bold', align: 'left', maxWidth: 600, bg: '#FFFFFF', bgPadX: 18, bgPadY: 10, bgEditable: true, placeholder: 'ข้อความบรรทัด 2...' },
-    ],
-    slots: [
-      { id: 'bg_top',    label: '🖼 ฉากหลัง (บน-ขวา)',    x: 430, y: 0,   w: 770, h: 520,  fadeLeft: 240, fadeBottom: 140, zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ฉากหลัง (ล่าง-ขวา)',   x: 430, y: 740, w: 770, h: 610,  fadeLeft: 220, fadeTop: 160,   zIndex: 0 },
-      { id: 'main',      label: '★ ภาพหลัก (ซ้าย)',        x: 0,   y: 0,   w: 700, h: 840,  fadeRight: 260, fadeBottom: 200, zIndex: 2 },
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',  x: 470, y: 370, w: 630, h: 470,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
-      { id: 'circle',    label: '⭕ วงกลม (ล่าง-ซ้าย)',    x: 40,  y: 820, shape: 'circle', diameter: 350, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
-    ],
-  },
-  {
-    id: 'template_9', name: 'แบบ 9', desc: '5 ภาพ — 2 บน 2 ล่าง + วงกลม + 3 บรรทัดแถบสี',
-    textSlots: [
-      { id: 'line1', label: '📝 บรรทัด 1', x: 600, y: 1060, fontSize: 52, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 1080, stroke: '#000', strokeWidth: 3, bg: '#1a1a2e', bgPadY: 16, bgFullWidth: true, bgEditable: true, placeholder: 'พาดหัวหลัก...' },
-      { id: 'line2', label: '📝 บรรทัด 2', x: 600, y: 1160, fontSize: 46, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 1080, stroke: '#000', strokeWidth: 2, bg: '#111827', bgPadY: 14, bgFullWidth: true, bgEditable: true, placeholder: 'รายละเอียด...' },
-      { id: 'line3', label: '📝 บรรทัด 3', x: 600, y: 1255, fontSize: 42, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 1080, stroke: '#000', strokeWidth: 2, bg: '#0d1117', bgPadY: 12, bgFullWidth: true, bgEditable: true, placeholder: 'ข้อความเพิ่ม...' },
-    ],
-    slots: [
-      { id: 'bg_top',    label: '🖼 ฉากหลัง (บน-ขวา)',    x: 400, y: 0,   w: 800, h: 700,  fadeLeft: 260, fadeBottom: 160, zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ภาพเสริม (ล่าง-ขวา)',  x: 480, y: 560, w: 720, h: 560,  fadeLeft: 220, fadeTop: 180,   zIndex: 0 },
-      { id: 'sub_left',  label: '🖼 ภาพรอง (ล่าง-ซ้าย)',   x: 0,   y: 520, w: 620, h: 620,  fadeRight: 200, fadeTop: 180,  zIndex: 1 },
-      { id: 'main',      label: '★ ภาพหลัก (บน-ซ้าย)',     x: 0,   y: 0,   w: 680, h: 780,  fadeRight: 260, fadeBottom: 200, zIndex: 2 },
-      { id: 'circle',    label: '⭕ วงกลม (กลาง)',          x: 360, y: 460, shape: 'circle', diameter: 320, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
-    ],
-  },
-  {
-    id: 'template_10', name: 'แบบ 10', desc: '5 ภาพ — ฮีโร่ซ้าย + กรอบเขียว + 2 ล่าง', textSlots: [],
-    slots: [
-      { id: 'bg_top',    label: '🖼 ฉากหลัง (บน-ขวา)',    x: 420, y: 0,   w: 780, h: 550,  fadeLeft: 240, fadeBottom: 140, zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ฉากหลัง (ล่าง-ขวา)',   x: 480, y: 700, w: 720, h: 650,  fadeLeft: 220, fadeTop: 180,   zIndex: 0 },
-      { id: 'sub_left',  label: '🖼 ภาพรอง (ล่าง-ซ้าย)',   x: 0,   y: 680, w: 620, h: 670,  fadeRight: 200, fadeTop: 180,  zIndex: 1 },
-      { id: 'main',      label: '★ ภาพหลัก (ซ้าย)',        x: 0,   y: 0,   w: 700, h: 860,  fadeRight: 260, fadeBottom: 200, zIndex: 2 },
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเขียว)',   x: 460, y: 340, w: 620, h: 440,  border: '#c4ff00', borderWidth: 5, zIndex: 3, draggable: true },
-    ],
-  },
-  {
-    id: 'template_11', name: 'แบบ 11', desc: '3 ภาพ — ฮีโร่ซ้าย + ฉากขวาเต็ม + กรอบดำ', textSlots: [],
-    slots: [
-      { id: 'bg_right', label: '🖼 ฉากหลัง (ขวาเต็ม)',    x: 400, y: 0,   w: 800, h: 1350, fadeLeft: 300,                zIndex: 0 },
-      { id: 'main',     label: '★ ภาพหลัก (ซ้าย)',        x: 0,   y: 0,   w: 720, h: 1350, fadeRight: 300,               zIndex: 2 },
-      { id: 'highlight',label: '⭐ ไฮไลท์ (กรอบดำ)',      x: 140, y: 680, w: 600, h: 400,  border: '#222222', borderWidth: 6, zIndex: 3, draggable: true },
-    ],
-  },
-  {
-    id: 'template_12', name: 'แบบ 12', desc: '5 ภาพ — ฮีโร่ซ้าย + กรอบเขียว + วงกลม + 2 ขวา', textSlots: [],
-    slots: [
-      { id: 'bg_top',    label: '🖼 ฉากหลัง (บน-ขวา)',    x: 400, y: 0,   w: 800, h: 740,  fadeLeft: 260, fadeBottom: 180, zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ฉากหลัง (ล่าง-ขวา)',   x: 400, y: 560, w: 800, h: 790,  fadeLeft: 220, fadeTop: 200,   zIndex: 0 },
-      { id: 'main',      label: '★ ภาพหลัก (ซ้าย)',        x: 0,   y: 0,   w: 700, h: 1350, fadeRight: 280,                zIndex: 2 },
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเขียว)',   x: 440, y: 400, w: 640, h: 450,  border: '#c4ff00', borderWidth: 5, zIndex: 3, draggable: true },
-      { id: 'circle',    label: '⭕ วงกลม (ล่าง-ซ้าย)',    x: 40,  y: 740, shape: 'circle', diameter: 380, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
-    ],
-  },
-  {
-    id: 'template_13', name: 'แบบ 13', desc: '4 ภาพ + วงกลม + ข้อความป้ายขาว',
-    textSlots: [
-      { id: 'line1', label: '📝 บรรทัด 1', x: 600, y: 720, fontSize: 48, color: '#000000', fontWeight: 'bold', align: 'center', maxWidth: 800, bg: '#FFFFFF', bgPadX: 20, bgPadY: 10, bgEditable: true, placeholder: 'ข้อความบรรทัด 1...' },
-      { id: 'line2', label: '📝 บรรทัด 2', x: 600, y: 810, fontSize: 42, color: '#000000', fontWeight: 'bold', align: 'center', maxWidth: 800, bg: '#FFFFFF', bgPadX: 20, bgPadY: 10, bgEditable: true, placeholder: 'ข้อความบรรทัด 2...' },
-    ],
-    slots: [
-      { id: 'bg_top',    label: '🖼 ฉากหลัง (บน-ขวา)',    x: 380, y: 0,   w: 820, h: 740,  fadeLeft: 260, fadeBottom: 180, zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ฉากหลัง (ล่าง-ขวา)',   x: 380, y: 560, w: 820, h: 790,  fadeLeft: 220, fadeTop: 200,   zIndex: 0 },
-      { id: 'main',      label: '★ ภาพหลัก (ซ้าย)',        x: 0,   y: 0,   w: 680, h: 1350, fadeRight: 280,                zIndex: 2 },
-      { id: 'circle',    label: '⭕ วงกลม (ล่าง-ซ้าย)',    x: 40,  y: 800, shape: 'circle', diameter: 350, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
-    ],
-  },
-  {
-    id: 'template_14', name: 'แบบ 14', desc: '5 ภาพ — ฮีโร่ซ้าย + กรอบเหลือง + วงกลมใหญ่', textSlots: [],
-    slots: [
-      { id: 'bg_top',    label: '🖼 ฉากหลัง (บน-ขวา)',    x: 400, y: 0,   w: 800, h: 740,  fadeLeft: 260, fadeBottom: 180, zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ฉากหลัง (ล่าง-ขวา)',   x: 400, y: 560, w: 800, h: 790,  fadeLeft: 220, fadeTop: 200,   zIndex: 0 },
-      { id: 'main',      label: '★ ภาพหลัก (ซ้าย)',        x: 0,   y: 0,   w: 700, h: 1350, fadeRight: 280,                zIndex: 2 },
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',  x: 450, y: 360, w: 640, h: 480,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
-      { id: 'circle',    label: '⭕ วงกลม (ล่าง-ซ้าย)',    x: 30,  y: 700, shape: 'circle', diameter: 400, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
-    ],
-  },
-];
+// แทมเพลตไม่ hardcode แล้ว — โหลดจาก API (Supabase)
+const BUILTIN_TEMPLATES = [];
 
 // ═══════════════════════════════════════════════════════════
 // Styles
@@ -358,9 +204,103 @@ export default function CoverPage() {
   const canvasRef = useRef(null);
   const fileRefs = useRef({});
 
-  const template = TEMPLATES.find(t => t.id === templateId);
-  const allSlotsFilled = template.slots.every(sl => slotImages[sl.id]);
-  const draggableSlots = template.slots.filter(sl => sl.draggable);
+  // Dynamic template management
+  const [templates, setTemplates] = useState([...BUILTIN_TEMPLATES]);
+  const [loadingTemplates, setLoadingTemplates] = useState(true);
+  const [uploadingTemplate, setUploadingTemplate] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
+
+  // Load templates from API on mount
+  useEffect(() => {
+    const loadTemplates = async () => {
+      try {
+        const res = await fetch('/api/templates');
+        const data = await res.json();
+        if (data.success && data.templates?.length > 0) {
+          // Filter only cover-format templates (have slots array with x/y/w/h)
+          const coverTemplates = data.templates.filter(t => t.slots && t.slots.length > 0);
+          setTemplates([...BUILTIN_TEMPLATES, ...coverTemplates]);
+          if (coverTemplates.length > 0 && !BUILTIN_TEMPLATES.find(t => t.id === templateId)) {
+            setTemplateId(coverTemplates[0].id);
+          }
+        }
+      } catch (e) {
+        console.warn('[CoverTester] Failed to load templates:', e.message);
+      } finally {
+        setLoadingTemplates(false);
+      }
+    };
+    loadTemplates();
+  }, []);
+
+  // Upload new template via AI analyzer
+  const handleUploadTemplate = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingTemplate(true);
+    setUploadProgress('🔍 AI กำลังวิเคราะห์รูปแบบ...');
+    try {
+      // Convert to base64
+      const reader = new FileReader();
+      const base64 = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      setUploadProgress('🧠 AI กำลังสร้างแทมเพลต... (ประมาณ 5-10 วินาที)');
+
+      const res = await fetch('/api/template-analyzer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: base64,
+          templateName: file.name.replace(/\.[^.]+$/, ''),
+          format: 'cover',
+          autoSave: true,
+        }),
+      });
+      const data = await res.json();
+
+      if (data.success && data.template) {
+        setTemplates(prev => [...prev, data.template]);
+        setTemplateId(data.template.id);
+        setUploadProgress('');
+        // Clear slot images for new template
+        setSlotImages({});
+        setSlotOffsets({});
+        setSlotScales({});
+      } else {
+        setUploadProgress('❌ ' + (data.error || 'วิเคราะห์ไม่สำเร็จ'));
+        setTimeout(() => setUploadProgress(''), 3000);
+      }
+    } catch (err) {
+      setUploadProgress('❌ ' + err.message);
+      setTimeout(() => setUploadProgress(''), 3000);
+    } finally {
+      setUploadingTemplate(false);
+      e.target.value = ''; // reset file input
+    }
+  };
+
+  // Delete template
+  const handleDeleteTemplate = async (id) => {
+    if (!confirm('ลบแทมเพลตนี้?')) return;
+    try {
+      await fetch(`/api/templates/${id}`, { method: 'DELETE' });
+      setTemplates(prev => prev.filter(t => t.id !== id));
+      if (templateId === id) {
+        const remaining = templates.filter(t => t.id !== id);
+        if (remaining.length > 0) setTemplateId(remaining[0].id);
+      }
+    } catch (e) {
+      console.warn('Delete failed:', e.message);
+    }
+  };
+
+  const template = templates.find(t => t.id === templateId);
+  const allSlotsFilled = template ? template.slots.every(sl => slotImages[sl.id]) : false;
+  const draggableSlots = template ? template.slots.filter(sl => sl.draggable) : [];
   const hasDraggables = draggableSlots.some(sl => slotImages[sl.id]);
   const hasOffsets = Object.values(slotOffsets).some(o => o.dx || o.dy);
   const hasScaleChanges = Object.values(slotScales).some(s => s !== 1 && s !== undefined);
@@ -550,6 +490,11 @@ export default function CoverPage() {
     const canvas = canvasRef.current; if (!canvas) return;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#111119'; ctx.fillRect(0,0,W,H);
+    if (!template) {
+      ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.font = 'bold 36px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('เลือกแทมเพลตเพื่อเริ่มต้น', W/2, H/2);
+      return;
+    }
 
     // Blurred background — fills gaps so no black areas when elements are moved/resized
     drawBlurredBg(ctx, slotImages, template);
@@ -635,7 +580,7 @@ export default function CoverPage() {
 
   // ── Download ──
   const handleDownload = () => {
-    const canvas = canvasRef.current; if (!canvas) return;
+    const canvas = canvasRef.current; if (!canvas || !template) return;
     // Render clean (no handles)
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#111119'; ctx.fillRect(0,0,W,H);
@@ -676,9 +621,9 @@ export default function CoverPage() {
   const switchTemplate = (id) => { setTemplateId(id); setSlotOffsets({}); setSlotScales({}); };
 
   // Sort slots for UI
-  const uiSlots = [...template.slots].sort((a,b) => {
+  const uiSlots = template ? [...template.slots].sort((a,b) => {
     const o = {main:0, sub_left:1, highlight:2, circle:3}; return (o[a.id]??5) - (o[b.id]??5);
-  });
+  }) : [];
 
   return (
     <>
@@ -779,21 +724,53 @@ export default function CoverPage() {
           <div>
             {/* ── Template Selector ── */}
             <div style={s.card}>
-              <div style={s.head}>① เลือกแทมเพลต</div>
-              <div style={{ ...s.body, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                {TEMPLATES.map(t => (
-                  <div key={t.id} style={{ textAlign: 'center' }}>
-                    <TemplateThumbnail template={t} isActive={templateId===t.id} onClick={() => switchTemplate(t.id)} />
-                    <div style={{ fontSize: 10, color: templateId===t.id ? '#a3e635':'var(--text-muted)', marginTop: 4, fontWeight: 700 }}>{t.name}</div>
-                  </div>
-                ))}
+              <div style={s.head}>
+                ① เลือกแทมเพลต
+                <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 'auto' }}>{templates.length} แบบ</span>
               </div>
-              <div style={{ padding: '0 18px 14px', fontSize: 11, color: 'var(--text-muted)' }}>📐 {template.desc}</div>
+              <div style={{ ...s.body, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {loadingTemplates ? (
+                  <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12, width: '100%' }}>⏳ กำลังโหลดแทมเพลต...</div>
+                ) : templates.length === 0 ? (
+                  <div style={{ padding: 20, textAlign: 'center', width: '100%' }}>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>🖼️</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>ยังไม่มีแทมเพลต — อัพโหลดรูปตัวอย่างเพื่อเริ่มต้น</div>
+                  </div>
+                ) : (
+                  templates.map(t => (
+                    <div key={t.id} style={{ textAlign: 'center', position: 'relative' }}>
+                      <TemplateThumbnail template={t} isActive={templateId===t.id} onClick={() => switchTemplate(t.id)} />
+                      <div style={{ fontSize: 10, color: templateId===t.id ? '#a3e635':'var(--text-muted)', marginTop: 4, fontWeight: 700 }}>{t.name}</div>
+                      {t.source === 'ai_analyzed' && (
+                        <button onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(t.id); }}
+                          style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', border: 'none', background: 'rgba(239,68,68,0.8)', color: '#fff', fontSize: 10, cursor: 'pointer', lineHeight: '18px', padding: 0 }}>×</button>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+              {/* Upload new template button */}
+              <div style={{ padding: '8px 18px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <label style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  padding: '10px 16px', borderRadius: 10,
+                  border: '2px dashed rgba(163,230,53,0.3)',
+                  background: 'rgba(163,230,53,0.05)',
+                  color: '#a3e635', fontSize: 12, fontWeight: 700,
+                  cursor: uploadingTemplate ? 'wait' : 'pointer',
+                  transition: 'all .15s',
+                  opacity: uploadingTemplate ? 0.6 : 1,
+                }}>
+                  {uploadingTemplate ? uploadProgress : '➕ อัพโหลดแทมเพลตใหม่ (AI วิเคราะห์อัตโนมัติ)'}
+                  <input type="file" accept="image/*" onChange={handleUploadTemplate} disabled={uploadingTemplate} style={{ display: 'none' }} />
+                </label>
+                {template && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>📐 {template.desc}</div>}
+              </div>
             </div>
 
             {/* ── Image Upload ── */}
             <div style={s.card}>
-              <div style={s.head}>② อัปโหลดรูป <span style={{ fontSize:10, fontWeight:400, color:'var(--text-muted)', marginLeft:'auto' }}>{Object.keys(slotImages).filter(k => template.slots.some(sl => sl.id===k)).length}/{template.slots.length}</span></div>
+              <div style={s.head}>② อัปโหลดรูป <span style={{ fontSize:10, fontWeight:400, color:'var(--text-muted)', marginLeft:'auto' }}>{template ? `${Object.keys(slotImages).filter(k => template.slots.some(sl => sl.id===k)).length}/${template.slots.length}` : '0/0'}</span></div>
               <div style={s.body}>
                 {uiSlots.map(slot => (
                   <div key={slot.id} style={{ marginBottom: 16 }}>
@@ -937,7 +914,7 @@ export default function CoverPage() {
             </div>
 
             {/* ── Text Inputs ── */}
-            {template.textSlots?.length > 0 && (
+            {template?.textSlots?.length > 0 && (
               <div style={s.card}>
                 <div style={s.head}>③ ใส่ข้อความ</div>
                 <div style={s.body}>
@@ -994,7 +971,7 @@ export default function CoverPage() {
 
             <div style={{ marginTop:12, padding:'12px 14px', background:'rgba(163,230,53,0.04)', borderRadius:10, fontSize:11, color:'var(--text-muted)', lineHeight:1.8 }}>
               💡 <strong style={{ color:'var(--text-secondary)' }}>วิธีใช้:</strong><br/>
-              1. เลือกแทมเพลต (แบบ 1-{TEMPLATES.length})<br/>
+              1. เลือกแทมเพลต (แบบ 1-{templates.length})<br/>
               2. อัปโหลดรูปแต่ละช่อง<br/>
               3. ลากตรงกลาง = ขยับ / ลากมุม = ปรับขนาด<br/>
               4. ใช้ปุ่ม +/− ปรับขนาดละเอียด<br/>
@@ -1006,7 +983,7 @@ export default function CoverPage() {
           <div style={s.card}>
             <div style={s.head}>
               ตัวอย่างปก
-              <span style={{ fontSize:10, fontWeight:400, color:'var(--text-muted)', marginLeft:'auto' }}>{W}×{H}px • {template.name}</span>
+              <span style={{ fontSize:10, fontWeight:400, color:'var(--text-muted)', marginLeft:'auto' }}>{W}×{H}px • {template?.name || '—'}</span>
             </div>
             <div style={{ ...s.body, display:'flex', flexDirection:'column', gap:12 }}>
               <div style={{
