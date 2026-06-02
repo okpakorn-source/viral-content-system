@@ -91,10 +91,13 @@ function drawCircleSlot(ctx, img, slot, offset) {
   ctx.drawImage(img,sx,sy,sw,sh,x,y,d,d); ctx.restore();
 }
 
-function drawTextSlot(ctx, ts, val, overrideBg) {
+function drawTextSlot(ctx, ts, val, overrideBg, overrides) {
   if (!val) return;
   ctx.save();
-  const fSize = ts.fontSize || 42;
+  const fSize = overrides?.fontSize || ts.fontSize || 42;
+  const textColor = overrides?.color || ts.color || '#FFD700';
+  const posX = ts.x + (overrides?.dx || 0);
+  const posY = ts.y + (overrides?.dy || 0);
   ctx.font = `${ts.fontWeight||'bold'} ${fSize}px "Noto Sans Thai","Sarabun",sans-serif`;
   ctx.textAlign = ts.align||'center'; ctx.textBaseline = 'middle';
 
@@ -103,24 +106,22 @@ function drawTextSlot(ctx, ts, val, overrideBg) {
   if (bgColor) {
     const py = ts.bgPadY || 10;
     if (ts.bgFullWidth) {
-      // Full-width strip across entire canvas
       ctx.fillStyle = bgColor;
-      ctx.fillRect(0, ts.y - fSize / 2 - py, W, fSize + py * 2);
+      ctx.fillRect(0, posY - fSize / 2 - py, W, fSize + py * 2);
     } else {
-      // Auto-width based on text content
       const metrics = ctx.measureText(val);
       const tw = Math.min(metrics.width, ts.maxWidth || 1100);
       const px = ts.bgPadX || 16;
-      let bx = ts.x - px;
-      if (ts.align === 'center') bx = ts.x - tw / 2 - px;
-      else if (ts.align === 'right') bx = ts.x - tw - px;
+      let bx = posX - px;
+      if (ts.align === 'center') bx = posX - tw / 2 - px;
+      else if (ts.align === 'right') bx = posX - tw - px;
       ctx.fillStyle = bgColor;
-      ctx.fillRect(bx, ts.y - fSize / 2 - py, tw + px * 2, fSize + py * 2);
+      ctx.fillRect(bx, posY - fSize / 2 - py, tw + px * 2, fSize + py * 2);
     }
   }
 
-  if (ts.stroke) { ctx.strokeStyle = ts.stroke; ctx.lineWidth = ts.strokeWidth || 3; ctx.lineJoin = 'round'; ctx.strokeText(val, ts.x, ts.y, ts.maxWidth || 1100); }
-  ctx.fillStyle = ts.color || '#FFD700'; ctx.fillText(val, ts.x, ts.y, ts.maxWidth || 1100);
+  if (ts.stroke) { ctx.strokeStyle = ts.stroke; ctx.lineWidth = ts.strokeWidth || 3; ctx.lineJoin = 'round'; ctx.strokeText(val, posX, posY, ts.maxWidth || 1100); }
+  ctx.fillStyle = textColor; ctx.fillText(val, posX, posY, ts.maxWidth || 1100);
   ctx.restore();
 }
 
@@ -200,6 +201,7 @@ export default function CoverPage() {
   const [downloaded, setDownloaded] = useState(false);
   const [hoverCursor, setHoverCursor] = useState('default');
   const [textBgColors, setTextBgColors] = useState({}); // override bg color per text slot
+  const [textOverrides, setTextOverrides] = useState({}); // { lineId: { fontSize, color, dx, dy } }
   const [showGuide, setShowGuide] = useState(false);
   const canvasRef = useRef(null);
   const fileRefs = useRef({});
@@ -515,7 +517,7 @@ export default function CoverPage() {
     if (template.textBg) drawTextBg(ctx, template.textBg);
 
     // Text slots
-    for (const ts of (template.textSlots||[])) drawTextSlot(ctx, ts, textValues[ts.id], textBgColors[ts.id]);
+    for (const ts of (template.textSlots||[])) drawTextSlot(ctx, ts, textValues[ts.id], textBgColors[ts.id], textOverrides[ts.id]);
 
     // Pass 2: top elements — circles, highlights (zIndex >= 3)
     for (const slot of sorted) {
@@ -597,7 +599,7 @@ export default function CoverPage() {
     // TextBg
     if (template.textBg) drawTextBg(ctx, template.textBg);
     // Text
-    for (const ts of (template.textSlots||[])) drawTextSlot(ctx, ts, textValues[ts.id], textBgColors[ts.id]);
+    for (const ts of (template.textSlots||[])) drawTextSlot(ctx, ts, textValues[ts.id], textBgColors[ts.id], textOverrides[ts.id]);
     // Pass 2: zIndex >= 3
     for (const slot of sorted) {
       if ((slot.zIndex||0) < 3) continue;
@@ -918,22 +920,51 @@ export default function CoverPage() {
               <div style={s.card}>
                 <div style={s.head}>③ ใส่ข้อความ</div>
                 <div style={s.body}>
-                  {template.textSlots.map(ts => (
+                  {template.textSlots.map(ts => {
+                    const ov = textOverrides[ts.id] || {};
+                    const curSize = ov.fontSize || ts.fontSize || 42;
+                    const curColor = ov.color || ts.color || '#FFD700';
+                    return (
                     <div key={ts.id} style={{ marginBottom:14 }}>
                       <label style={s.label}>{ts.label}</label>
                       <input type="text" value={textValues[ts.id]||''} onChange={e => setTextValues(p => ({...p,[ts.id]:e.target.value}))}
                         placeholder={ts.placeholder||'พิมพ์ข้อความ...'} style={{
                           width:'100%', padding:'10px 14px', borderRadius:10, border:'1px solid var(--border)',
-                          background:'var(--bg-primary)', color:ts.color||'var(--text-primary)',
+                          background:'var(--bg-primary)', color:curColor,
                           fontSize:13, fontFamily:'inherit', boxSizing:'border-box', outline:'none',
                         }} />
+                      {/* Font Size + Text Color controls */}
+                      <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:6, padding:'6px 10px', background:'rgba(163,230,53,0.04)', borderRadius:8, border:'1px solid rgba(163,230,53,0.12)', flexWrap:'wrap' }}>
+                        <span style={{ fontSize:10, color:'#a3e635', fontWeight:600, whiteSpace:'nowrap' }}>🔤 ขนาด</span>
+                        <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], fontSize: Math.max(20, curSize - 4)}}))} style={s.scaleBtn}>−</button>
+                        <span style={{ fontSize:11, fontWeight:700, color:'var(--text-primary)', minWidth:30, textAlign:'center' }}>{curSize}</span>
+                        <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], fontSize: Math.min(80, curSize + 4)}}))} style={s.scaleBtn}>+</button>
+                        <span style={{ width:1, height:16, background:'var(--border)', margin:'0 4px' }} />
+                        <span style={{ fontSize:10, color:'#a3e635', fontWeight:600, whiteSpace:'nowrap' }}>🎨 สี</span>
+                        <input type="color" value={curColor}
+                          onChange={e => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], color: e.target.value}}))}
+                          style={{ width:24, height:24, border:'1px solid var(--border)', borderRadius:6, cursor:'pointer', padding:0, background:'none' }} />
+                      </div>
+                      {/* Position controls */}
+                      <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:4, padding:'6px 10px', background:'rgba(96,165,250,0.04)', borderRadius:8, border:'1px solid rgba(96,165,250,0.12)' }}>
+                        <span style={{ fontSize:10, color:'#60a5fa', fontWeight:600, whiteSpace:'nowrap' }}>📍 ตำแหน่ง</span>
+                        <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], dy: (ov.dy||0) - 30}}))} style={s.scaleBtn}>▲</button>
+                        <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], dy: (ov.dy||0) + 30}}))} style={s.scaleBtn}>▼</button>
+                        <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], dx: (ov.dx||0) - 30}}))} style={s.scaleBtn}>◀</button>
+                        <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], dx: (ov.dx||0) + 30}}))} style={s.scaleBtn}>▶</button>
+                        {(ov.dx || ov.dy) && <span style={{ fontSize:9, color:'var(--text-muted)' }}>x{ov.dx>0?'+':''}{ov.dx||0} y{ov.dy>0?'+':''}{ov.dy||0}</span>}
+                        {(ov.fontSize || ov.color || ov.dx || ov.dy) && (
+                          <button onClick={() => setTextOverrides(p => { const n={...p}; delete n[ts.id]; return n; })}
+                            style={{ fontSize:10, padding:'2px 8px', borderRadius:4, border:'1px solid var(--border)', background:'none', color:'var(--text-muted)', cursor:'pointer', fontFamily:'inherit', marginLeft:'auto' }}>↺ รีเซ็ต</button>
+                        )}
+                      </div>
                       {/* Color picker for editable bg */}
                       {(ts.bg || ts.bgEditable) && (
-                        <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:6, padding:'6px 10px', background:'rgba(255,215,0,0.04)', borderRadius:8, border:'1px solid rgba(255,215,0,0.12)' }}>
+                        <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:4, padding:'6px 10px', background:'rgba(255,215,0,0.04)', borderRadius:8, border:'1px solid rgba(255,215,0,0.12)' }}>
                           <span style={{ fontSize:10, color:'#fbbf24', fontWeight:600, whiteSpace:'nowrap' }}>🎨 สีแถบ</span>
                           <input type="color" value={textBgColors[ts.id] || ts.bg || '#1a1a2e'}
                             onChange={e => setTextBgColors(p => ({...p,[ts.id]:e.target.value}))}
-                            style={{ width:28, height:28, border:'1px solid var(--border)', borderRadius:6, cursor:'pointer', padding:0, background:'none' }} />
+                            style={{ width:24, height:24, border:'1px solid var(--border)', borderRadius:6, cursor:'pointer', padding:0, background:'none' }} />
                           <span style={{ fontSize:10, color:'var(--text-muted)', flex:1 }}>{textBgColors[ts.id] || ts.bg || 'default'}</span>
                           {textBgColors[ts.id] && (
                             <button onClick={() => setTextBgColors(p => { const n={...p}; delete n[ts.id]; return n; })}
@@ -942,7 +973,8 @@ export default function CoverPage() {
                         </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}

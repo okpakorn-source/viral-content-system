@@ -213,8 +213,48 @@ Match the EXACT border color you see:
       "zIndex": 4,
       "draggable": true
     }
+  ],
+  "textSlots": [
+    {
+      "id": "line1",
+      "label": "📝 บรรทัด 1",
+      "x": 600, "y": 1060,
+      "fontSize": 52,
+      "color": "#FFD700",
+      "fontWeight": "bold",
+      "align": "center",
+      "maxWidth": 1080,
+      "stroke": "#000000",
+      "strokeWidth": 3,
+      "bg": "#1a1a2e",
+      "bgPadX": 18, "bgPadY": 14,
+      "bgFullWidth": true,
+      "placeholder": "พาดหัวหลัก..."
+    }
   ]
 }
+
+=== TEXT OVERLAY DETECTION ===
+7. After detecting photo zones, look for ANY text overlays in the image
+8. Text can appear as: headlines, captions, labels, banners, name tags
+9. For each text area, determine: position (x,y), font size, color, alignment
+10. Common text styles: white text with black stroke, yellow on dark strip, black on white label
+
+=== TEXT SLOT PROPERTIES ===
+- id: "line1", "line2", "line3" (sequential)
+- label: "📝 บรรทัด 1", "📝 บรรทัด 2", etc
+- x, y: center position of the text on 1200x1350 canvas
+- fontSize: estimated font size in pixels (30-60 typical)
+- color: text color (match the template)
+- fontWeight: "bold" or "normal"
+- align: "center", "left", or "right"
+- maxWidth: max text width before wrapping (usually 800-1100)
+- stroke: stroke/outline color (usually "#000000" for readability)
+- strokeWidth: 2-5 pixels
+- bg: background strip color behind text (if visible). Use hex color or "rgba(0,0,0,0.7)"
+- bgPadX, bgPadY: padding around text background (12-20px typical)
+- bgFullWidth: true if the background strip extends full canvas width
+- placeholder: default placeholder text in Thai
 
 === RULES ===
 - You MUST include bg_top and/or bg_bottom for background areas (don't skip them!)
@@ -222,7 +262,9 @@ Match the EXACT border color you see:
 - circle: MUST have "shape": "circle" and "diameter" (NOT w/h)
 - If you see 2 circles, use "circle" for larger and "circle_small" for smaller
 - Background slots should extend slightly beyond visible area for bleed
-- Minimum 4 slots, maximum 8 slots
+- If the image has NO text, set "textSlots": []
+- If the image HAS text, include ALL text lines as textSlots
+- Minimum 4 image slots, maximum 8 slots
 - Return ONLY the JSON. No markdown. No explanation. No code blocks.`;
 
     const userMessage = isCoverFormat 
@@ -390,11 +432,29 @@ Return ONLY the JSON object with all slot positions.`;
     // ── Build cover-format template for saving to library ───────────
     let coverTemplate = null;
     if (isCoverFormat && coverSlots) {
+      // Normalize text slots from AI output
+      const coverTextSlots = (templateData.textSlots || []).map((ts, i) => ({
+        id: ts.id || ('line' + (i + 1)),
+        label: ts.label || ('📝 บรรทัด ' + (i + 1)),
+        x: Math.round(ts.x ?? 600),
+        y: Math.round(ts.y ?? (1060 + i * 100)),
+        fontSize: ts.fontSize || 48,
+        color: ts.color || '#FFFFFF',
+        fontWeight: ts.fontWeight || 'bold',
+        align: ts.align || 'center',
+        maxWidth: ts.maxWidth || 1080,
+        stroke: ts.stroke || '#000000',
+        strokeWidth: ts.strokeWidth || 3,
+        ...(ts.bg && { bg: ts.bg, bgPadX: ts.bgPadX || 18, bgPadY: ts.bgPadY || 14, bgEditable: true }),
+        ...(ts.bgFullWidth && { bgFullWidth: true }),
+        placeholder: ts.placeholder || 'พิมพ์ข้อความ...',
+      }));
+
       coverTemplate = {
         id: templateId,
         name: templateData.templateName || templateName || 'Custom Cover',
         desc: templateData.desc || templateData.analysis || '',
-        textSlots: [],
+        textSlots: coverTextSlots,
         slots: coverSlots,
         source: 'ai_analyzed',
         createdAt: new Date().toISOString(),
