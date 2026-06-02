@@ -354,6 +354,7 @@ export default function CoverPage() {
   const [downloaded, setDownloaded] = useState(false);
   const [hoverCursor, setHoverCursor] = useState('default');
   const [textBgColors, setTextBgColors] = useState({}); // override bg color per text slot
+  const [showGuide, setShowGuide] = useState(false);
   const canvasRef = useRef(null);
   const fileRefs = useRef({});
 
@@ -667,6 +668,95 @@ export default function CoverPage() {
   return (
     <>
       <Header title="🖼️ ปกข่าว" subtitle="สร้างปกข่าว 1200×1350 — เลือกแทมเพลต อัปโหลดรูป ลากจัดตำแหน่ง ปรับขนาด" />
+
+      {/* ===== HELP BUTTON + GUIDE ===== */}
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <button
+            onClick={() => setShowGuide(!showGuide)}
+            style={{
+              padding: '7px 14px', borderRadius: 10, fontSize: 12, fontWeight: 700,
+              border: `1px solid ${showGuide ? 'rgba(234,179,8,0.4)' : 'var(--border)'}`,
+              background: showGuide ? 'rgba(234,179,8,0.1)' : 'rgba(255,255,255,0.04)',
+              color: showGuide ? '#eab308' : 'var(--text-muted)',
+              cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.3s',
+            }}
+          >
+            {showGuide ? '✕ ปิดคู่มือ' : '❓ วิธีใช้งาน'}
+          </button>
+        </div>
+
+        {showGuide && (
+          <div style={{
+            marginBottom: 20, padding: 24, borderRadius: 16,
+            background: 'linear-gradient(135deg, rgba(234,179,8,0.05), rgba(249,115,22,0.05))',
+            border: '1px solid rgba(234,179,8,0.15)',
+            animation: 'fadeUp 0.3s ease-out both',
+          }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 18 }}>
+              📖 คู่มือการใช้งาน — แทมเพลตปก 14 แบบ
+            </div>
+
+            {/* Steps */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+              <div style={{ padding: 16, borderRadius: 12, background: 'rgba(234,179,8,0.06)', border: '1px solid rgba(234,179,8,0.12)' }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: '#eab308', marginBottom: 12 }}>🎯 ขั้นตอนการใช้</div>
+                {[
+                  { s: '1', t: 'เลือกแทมเพลตจาก 14 แบบ (แถบซ้าย)', i: '🖼️' },
+                  { s: '2', t: 'อัปโหลดรูปตามช่อง (★ ภาพหลัก, 🖼 ฉากหลัง, ⭐ ไฮไลท์, ⭕ วงกลม)', i: '📤' },
+                  { s: '3', t: 'ลากจัดตำแหน่งภาพ ⭐ และ ⭕ ได้อิสระ', i: '✋' },
+                  { s: '4', t: 'ปรับขนาดภาพด้วย slider (50%–200%)', i: '🔍' },
+                  { s: '5', t: 'พิมพ์ข้อความ (ถ้าแทมเพลตรองรับ)', i: '✏️' },
+                  { s: '6', t: 'กด 📥 Download — ได้ภาพ 1200×1350px', i: '💾' },
+                ].map(x => (
+                  <div key={x.s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid rgba(234,179,8,0.08)' }}>
+                    <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'rgba(234,179,8,0.15)', color: '#eab308', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, flexShrink: 0 }}>{x.s}</div>
+                    <span style={{ fontSize: 11, color: 'var(--text-primary)', lineHeight: 1.5 }}>{x.i} {x.t}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ padding: 16, borderRadius: 12, background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.12)' }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: '#8b5cf6', marginBottom: 12 }}>📐 ประเภทแทมเพลต</div>
+                {[
+                  { cat: 'ฮีโร่ + กรอบ', ids: '1, 2, 4, 8, 10, 12, 14', color: '#FFD700' },
+                  { cat: 'ฮีโร่ + วงกลม', ids: '3, 5', color: '#4FC3F7' },
+                  { cat: 'ซ้อนภาพ + ข้อความ', ids: '6, 7, 9, 13', color: '#FFFFFF' },
+                  { cat: 'ฮีโร่ + กรอบดำ', ids: '11', color: '#666' },
+                ].map(c => (
+                  <div key={c.cat} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid rgba(139,92,246,0.08)' }}>
+                    <div style={{ width: 14, height: 14, borderRadius: 4, background: c.color, border: '1px solid rgba(255,255,255,0.2)', flexShrink: 0 }} />
+                    <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>{c.cat}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>แบบ {c.ids}</span>
+                  </div>
+                ))}
+                <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(139,92,246,0.08)', fontSize: 11, color: '#a78bfa' }}>
+                  💡 แทมเพลตที่มี 📝 ข้อความ: แบบ 6, 7, 8, 9, 13
+                </div>
+              </div>
+            </div>
+
+            {/* Slot types legend */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {[
+                { icon: '★', label: 'ภาพหลัก', desc: 'รูปคนหลัก/เหตุการณ์หลัก', color: '#22c55e' },
+                { icon: '🖼', label: 'ฉากหลัง', desc: 'ภาพประกอบเบลอด้านหลัง', color: '#3b82f6' },
+                { icon: '⭐', label: 'ไฮไลท์', desc: 'กรอบสี ลากได้', color: '#FFD700' },
+                { icon: '⭕', label: 'วงกลม', desc: 'รูปวงกลม ลากได้', color: '#4FC3F7' },
+                { icon: '📝', label: 'ข้อความ', desc: 'พิมพ์ข้อความบนภาพ', color: '#f97316' },
+                { icon: '🤖', label: 'AI Enhance', desc: 'ปรับภาพด้วย AI', color: '#8b5cf6' },
+              ].map(s => (
+                <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 8, background: `${s.color}10`, border: `1px solid ${s.color}25`, fontSize: 11 }}>
+                  <span>{s.icon}</span>
+                  <span style={{ fontWeight: 700, color: s.color }}>{s.label}</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>— {s.desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 16px 60px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 16, alignItems: 'start' }}>
 
