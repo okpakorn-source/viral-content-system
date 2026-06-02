@@ -504,7 +504,8 @@ export default function CoverPage() {
     return { mx: (cx-r.left)*(W/r.width), my: (cy-r.top)*(H/r.height) };
   };
 
-  // ── Hit test: draggable slots only (for move/resize) ──
+  // ── Hit test: draggable slots — 3 zones: corner=resize, border=move, center=crop ──
+  const MOVE_BORDER = 40; // px border zone for move
   const hitTest = (mx, my) => {
     const sorted = [...draggableSlots].filter(sl => slotImages[sl.id]).sort((a,b) => (b.zIndex||0)-(a.zIndex||0));
     for (const slot of sorted) {
@@ -516,7 +517,9 @@ export default function CoverPage() {
         const r = eff.diameter/2, ecx = sx+r, ecy = sy+r;
         const dist = Math.hypot(mx-ecx, my-ecy);
         if (dist <= r + (slot.borderWidth||0)) {
-          return { slot, mode: dist >= r - EDGE_RING ? 'resize' : 'move' };
+          if (dist >= r - EDGE_RING) return { slot, mode: 'resize' };
+          if (dist >= r * 0.55) return { slot, mode: 'move' };
+          return { slot, mode: 'crop' };
         }
       } else {
         const ew = eff.w, eh = eff.h;
@@ -524,7 +527,12 @@ export default function CoverPage() {
           const nearL = mx - sx < HANDLE_SIZE, nearR = sx+ew - mx < HANDLE_SIZE;
           const nearT = my - sy < HANDLE_SIZE, nearB = sy+eh - my < HANDLE_SIZE;
           const nearCorner = (nearL || nearR) && (nearT || nearB);
-          return { slot, mode: nearCorner ? 'resize' : 'move' };
+          if (nearCorner) return { slot, mode: 'resize' };
+          // Border zone = move, center = crop
+          const inBorderL = mx - sx < MOVE_BORDER, inBorderR = sx+ew - mx < MOVE_BORDER;
+          const inBorderT = my - sy < MOVE_BORDER, inBorderB = sy+eh - my < MOVE_BORDER;
+          if (inBorderL || inBorderR || inBorderT || inBorderB) return { slot, mode: 'move' };
+          return { slot, mode: 'crop' };
         }
       }
     }
@@ -552,23 +560,29 @@ export default function CoverPage() {
   // ── Pointer handlers ──
   const handleDown = (cx, cy) => {
     const {mx,my} = getCoords(cx,cy);
-    // First try draggable slots (move/resize)
+    // First try draggable slots (move/resize/crop)
     const hit = hitTest(mx,my);
     if (hit) {
-      const off = slotOffsets[hit.slot.id] || {dx:0,dy:0};
-      const sc = slotScales[hit.slot.id] || 1;
-      const eff = getEffSlot(hit.slot, sc);
-      if (hit.mode === 'resize') {
-        const ecx = eff.x + off.dx + (eff.shape==='circle' ? eff.diameter/2 : eff.w/2);
-        const ecy = eff.y + off.dy + (eff.shape==='circle' ? eff.diameter/2 : eff.h/2);
-        const startDist = Math.hypot(mx-ecx, my-ecy);
-        setDragState({ slotId: hit.slot.id, mode:'resize', startX:mx, startY:my, origDx:off.dx, origDy:off.dy, origScale:sc, startDist });
+      if (hit.mode === 'crop') {
+        // Center of draggable slot → crop pan (same as non-draggable)
+        const crop = slotCrops[hit.slot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
+        setDragState({ slotId: hit.slot.id, mode:'crop', startX:mx, startY:my, origFocalX: crop.focalX ?? 0.5, origFocalY: crop.focalY ?? 0.3 });
       } else {
-        setDragState({ slotId: hit.slot.id, mode:'move', startX:mx, startY:my, origDx:off.dx, origDy:off.dy, origScale:sc, startDist:0 });
+        const off = slotOffsets[hit.slot.id] || {dx:0,dy:0};
+        const sc = slotScales[hit.slot.id] || 1;
+        const eff = getEffSlot(hit.slot, sc);
+        if (hit.mode === 'resize') {
+          const ecx = eff.x + off.dx + (eff.shape==='circle' ? eff.diameter/2 : eff.w/2);
+          const ecy = eff.y + off.dy + (eff.shape==='circle' ? eff.diameter/2 : eff.h/2);
+          const startDist = Math.hypot(mx-ecx, my-ecy);
+          setDragState({ slotId: hit.slot.id, mode:'resize', startX:mx, startY:my, origDx:off.dx, origDy:off.dy, origScale:sc, startDist });
+        } else {
+          setDragState({ slotId: hit.slot.id, mode:'move', startX:mx, startY:my, origDx:off.dx, origDy:off.dy, origScale:sc, startDist:0 });
+        }
       }
       return;
     }
-    // Then try ANY slot for crop-pan (no auto-zoom — user controls zoom via scroll wheel)
+    // Then try ANY slot for crop-pan
     const anySlot = hitTestAll(mx,my);
     if (anySlot) {
       const crop = slotCrops[anySlot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
@@ -583,7 +597,7 @@ export default function CoverPage() {
       // Hover cursor
       const hit = hitTest(mx,my);
       if (hit) {
-        setHoverCursor(hit.mode === 'resize' ? 'nwse-resize' : 'grab');
+        setHoverCursor(hit.mode === 'resize' ? 'nwse-resize' : hit.mode === 'crop' ? 'move' : 'grab');
       } else {
         const anySlot = hitTestAll(mx,my);
         setHoverCursor(anySlot ? 'move' : 'default');
