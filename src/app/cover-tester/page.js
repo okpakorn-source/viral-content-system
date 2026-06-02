@@ -131,23 +131,21 @@ function coverFit(img, tw, th, focusY = 0.3, crop) {
   const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
   const imgAr = iw / ih, tgtAr = tw / th;
   let sw, sh;
-  // Base cover-fit dimensions
   if (imgAr > tgtAr) { sh = ih; sw = ih * tgtAr; }
   else { sw = iw; sh = iw / tgtAr; }
-  // Apply zoom
+  // Apply zoom (zoom > 1 = crop window smaller = image looks bigger)
   const zoom = (crop?.zoom && crop.zoom > 1) ? crop.zoom : 1;
   sw = sw / zoom;
   sh = sh / zoom;
-  // Focal point positioning (0=left/top, 0.5=center, 1=right/bottom)
-  const focalX = crop?.focalX ?? 0.5;
-  const focalY = crop?.focalY ?? focusY;
-  const maxPanX = Math.max(0, iw - sw);
-  const maxPanY = Math.max(0, ih - sh);
-  let sx = maxPanX * focalX;
-  let sy = maxPanY * focalY;
-  // Clamp
-  sx = Math.max(0, Math.min(sx, maxPanX));
-  sy = Math.max(0, Math.min(sy, maxPanY));
+  // Center position
+  let sx = (iw - sw) / 2;
+  let sy = imgAr > tgtAr ? (ih - sh) / 2 : Math.max(0, Math.min((ih - sh) * focusY, ih - sh));
+  // Apply pixel offsets from user drag
+  if (crop?.panX) sx -= crop.panX;
+  if (crop?.panY) sy -= crop.panY;
+  // Clamp to image bounds
+  sx = Math.max(0, Math.min(sx, Math.max(0, iw - sw)));
+  sy = Math.max(0, Math.min(sy, Math.max(0, ih - sh)));
   return { sx, sy, sw, sh };
 }
 
@@ -505,7 +503,7 @@ export default function CoverPage() {
   };
 
   // ── Hit test: draggable slots — 3 zones: corner=resize, border=move, center=crop ──
-  const MOVE_BORDER = 40; // px border zone for move
+  const MOVE_BORDER = 25; // px border zone for move (smaller = more crop area)
   const hitTest = (mx, my) => {
     const sorted = [...draggableSlots].filter(sl => slotImages[sl.id]).sort((a,b) => (b.zIndex||0)-(a.zIndex||0));
     for (const slot of sorted) {
@@ -564,9 +562,9 @@ export default function CoverPage() {
     const hit = hitTest(mx,my);
     if (hit) {
       if (hit.mode === 'crop') {
-        // Center of draggable slot → crop pan (same as non-draggable)
-        const crop = slotCrops[hit.slot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
-        setDragState({ slotId: hit.slot.id, mode:'crop', startX:mx, startY:my, origFocalX: crop.focalX ?? 0.5, origFocalY: crop.focalY ?? 0.3 });
+        // Center of draggable slot → crop pan
+        const crop = slotCrops[hit.slot.id] || { zoom: 1, panX: 0, panY: 0 };
+        setDragState({ slotId: hit.slot.id, mode:'crop', startX:mx, startY:my, origPanX: crop.panX || 0, origPanY: crop.panY || 0 });
       } else {
         const off = slotOffsets[hit.slot.id] || {dx:0,dy:0};
         const sc = slotScales[hit.slot.id] || 1;
@@ -585,8 +583,8 @@ export default function CoverPage() {
     // Then try ANY slot for crop-pan
     const anySlot = hitTestAll(mx,my);
     if (anySlot) {
-      const crop = slotCrops[anySlot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
-      setDragState({ slotId: anySlot.id, mode:'crop', startX:mx, startY:my, origFocalX: crop.focalX ?? 0.5, origFocalY: crop.focalY ?? 0.3 });
+      const crop = slotCrops[anySlot.id] || { zoom: 1, panX: 0, panY: 0 };
+      setDragState({ slotId: anySlot.id, mode:'crop', startX:mx, startY:my, origPanX: crop.panX || 0, origPanY: crop.panY || 0 });
     }
   };
 
@@ -606,15 +604,16 @@ export default function CoverPage() {
     }
 
     if (dragState.mode === 'crop') {
-      // Smooth focal point movement — no rounding, continuous
-      const dx = (mx - dragState.startX) / W;
-      const dy = (my - dragState.startY) / H;
-      const sensitivity = 3;
-      const newFX = Math.max(0, Math.min(1, (dragState.origFocalX ?? 0.5) - dx * sensitivity));
-      const newFY = Math.max(0, Math.min(1, (dragState.origFocalY ?? 0.3) - dy * sensitivity));
+      // Direct pixel offset — drag = move image naturally
+      const dx = mx - dragState.startX;
+      const dy = my - dragState.startY;
       setSlotCrops(prev => {
-        const old = prev[dragState.slotId] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
-        return { ...prev, [dragState.slotId]: { ...old, focalX: newFX, focalY: newFY } };
+        const old = prev[dragState.slotId] || { zoom: 1, panX: 0, panY: 0 };
+        return { ...prev, [dragState.slotId]: {
+          ...old,
+          panX: (dragState.origPanX || 0) + dx,
+          panY: (dragState.origPanY || 0) + dy,
+        }};
       });
     } else if (dragState.mode === 'move') {
       setSlotOffsets(prev => ({
@@ -646,10 +645,10 @@ export default function CoverPage() {
     const {mx,my} = getCoords(e.clientX, e.clientY);
     const slot = hitTestAll(mx,my);
     if (!slot) return;
-    // Smooth zoom — small steps, no rounding
-    const delta = e.deltaY < 0 ? 0.08 : -0.08;
+    // Smooth zoom — faster steps
+    const delta = e.deltaY < 0 ? 0.15 : -0.15;
     setSlotCrops(prev => {
-      const old = prev[slot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
+      const old = prev[slot.id] || { zoom: 1, panX: 0, panY: 0 };
       const newZoom = Math.max(1, Math.min(5, old.zoom + delta));
       return { ...prev, [slot.id]: { ...old, zoom: newZoom } };
     });
@@ -1091,25 +1090,25 @@ export default function CoverPage() {
                     )}
                     {/* ── Zoom + Crop Controls ── */}
                     {slotImages[slot.id] && (() => {
-                      const crop = slotCrops[slot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
-                      const isDefault = (!crop.zoom || crop.zoom <= 1) && (crop.focalX ?? 0.5) === 0.5 && (crop.focalY ?? 0.3) === 0.3;
+                      const crop = slotCrops[slot.id] || { zoom: 1, panX: 0, panY: 0 };
+                      const isDefault = (!crop.zoom || crop.zoom <= 1) && !crop.panX && !crop.panY;
                       return (
                         <div style={{ marginTop:6, padding:'6px 10px', background:'rgba(59,130,246,0.04)', borderRadius:8, border:'1px solid rgba(59,130,246,0.12)' }}>
                           <div style={{ display:'flex', gap:6, alignItems:'center' }}>
                             <span style={{ fontSize:10, color:'#60a5fa', fontWeight:600 }}>🔍</span>
                             <button onClick={() => setSlotCrops(prev => {
-                              const old = prev[slot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
+                              const old = prev[slot.id] || { zoom: 1, panX: 0, panY: 0 };
                               return { ...prev, [slot.id]: { ...old, zoom: Math.max(1, Math.round((old.zoom - 0.2) * 10) / 10) } };
                             })} style={s.scaleBtn}>−</button>
                             <div style={{ flex:1, textAlign:'center', fontSize:11, fontWeight:700, color: (crop.zoom||1) > 1 ? '#60a5fa' : 'var(--text-muted)' }}>
                               {(crop.zoom||1).toFixed(1)}x
                             </div>
                             <button onClick={() => setSlotCrops(prev => {
-                              const old = prev[slot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
-                              return { ...prev, [slot.id]: { ...old, zoom: Math.min(4, Math.round((old.zoom + 0.2) * 10) / 10) } };
+                              const old = prev[slot.id] || { zoom: 1, panX: 0, panY: 0 };
+                              return { ...prev, [slot.id]: { ...old, zoom: Math.min(5, Math.round((old.zoom + 0.2) * 10) / 10) } };
                             })} style={s.scaleBtn}>+</button>
                             {!isDefault && (
-                              <button onClick={() => setSlotCrops(prev => ({...prev, [slot.id]: { zoom: 1, focalX: 0.5, focalY: 0.3 }}))} style={{ ...s.scaleBtn, fontSize:10, width:28 }} title="รีเซ็ต">↺</button>
+                              <button onClick={() => setSlotCrops(prev => ({...prev, [slot.id]: { zoom: 1, panX: 0, panY: 0 }}))} style={{ ...s.scaleBtn, fontSize:10, width:28 }} title="รีเซ็ต">↺</button>
                             )}
                           </div>
                           <div style={{ fontSize:9, color:'var(--text-muted)', marginTop:4, textAlign:'center' }}>
