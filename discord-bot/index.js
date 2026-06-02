@@ -242,10 +242,12 @@ async function processNewsJob(job) {
 
     // 2. Poll for result
     const statusUrl = queueUrl.replace('/api/queue/add', '/api/queue/status');
+    const workerUrl = queueUrl.replace('/api/queue/add', '/api/queue/worker');
     const maxPollTime = 6 * 60 * 1000; // 6 minutes
     const pollStartTime = Date.now();
     let lastStatus = '';
     let data = null;
+    let workerRetriggerCount = 0;
 
     while (Date.now() - pollStartTime < maxPollTime) {
       await new Promise(r => setTimeout(r, 3000)); // poll every 3s
@@ -254,6 +256,13 @@ async function processNewsJob(job) {
         const statusRes = await axios.get(`${statusUrl}?id=${jobId}`, { headers, timeout: 10000 });
         const st = statusRes.data;
         if (!st.success) continue;
+
+        // === Fallback: re-trigger worker if still pending after 10s ===
+        if (st.status === 'pending' && (Date.now() - pollStartTime > 10000) && workerRetriggerCount < 3) {
+          workerRetriggerCount++;
+          console.log(`[Discord Bot] Job still pending, re-triggering worker (attempt ${workerRetriggerCount})`);
+          axios.post(workerUrl, { trigger: 'retry' }, { headers, timeout: 10000 }).catch(() => {});
+        }
 
         if (st.status === 'pending' && st.status !== lastStatus) {
           const ahead = st.queuesAhead || 0;

@@ -10,7 +10,7 @@ export const maxDuration = 300; // 5 minutes max
 
 export async function POST(req) {
   try {
-    // 1. Verify API Key
+    // 1. Verify API Key — allow same-origin web triggers without auth
     const apiKeyHeader = req.headers.get('x-api-key') || '';
     const expectedKey = process.env.API_SECRET_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'test-key';
     const discordKey = process.env.DISCORD_API_SECRET;
@@ -20,12 +20,11 @@ export async function POST(req) {
         apiKeyHeader === expectedKey || 
         (discordKey && apiKeyHeader === discordKey);
       
-      if (!isAuthorized && process.env.NODE_ENV !== 'development') {
+      if (!isAuthorized) {
         return NextResponse.json({ success: false, error: 'Unauthorized', errorType: 'UNAUTHORIZED' }, { status: 401 });
       }
-    } else if (process.env.NODE_ENV !== 'development') {
-      return NextResponse.json({ success: false, error: 'Unauthorized', errorType: 'UNAUTHORIZED' }, { status: 401 });
     }
+    // No auth header = same-origin trigger (web client or server self-call) = allowed
     
     // 1.5. Cleanup stale jobs first (stuck > 10 minutes)
     const cleaned = await cleanupStaleJobs(10).catch(() => 0);

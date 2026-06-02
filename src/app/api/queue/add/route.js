@@ -47,29 +47,40 @@ export async function POST(req) {
     
     logger.info(`[Queue] Job added: ${queueData.jobId} (Position: ${queueData.position})`);
     
-    // 4. Trigger the worker asynchronously in the background
-    // Fire and forget using fetch to the worker route. We don't await the response.
+    // 4. Trigger the worker — Use waitUntil pattern to prevent Vercel kill
+    // We don't await the full response (worker takes 5 min), just initiate it
     const baseUrl = req.nextUrl.origin;
-    fetch(`${baseUrl}/api/queue/worker`, {
+    const workerPromise = fetch(`${baseUrl}/api/queue/worker`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': expectedKey
       },
       body: JSON.stringify({ trigger: 'new_job' })
+    }).then(() => {
+      logger.info(`[Queue] Worker triggered successfully`);
     }).catch(err => {
-      logger.error(`[Queue] Failed to trigger worker: ${err.message}`);
+      logger.error(`[Queue] Worker trigger failed: ${err.message}`);
     });
     
-    // 5. Return immediate response with queue position
-    return NextResponse.json({
+    // 5. Return response immediately — include workerTriggerUrl for client fallback
+    const response = NextResponse.json({
       success: true,
       jobId: queueData.jobId,
       position: queueData.position,
       queuesAhead: queueData.queuesAhead,
       status: queueData.status,
-      message: `Job queued at position ${queueData.position}`
+      message: `Job queued at position ${queueData.position}`,
+      _workerUrl: `${baseUrl}/api/queue/worker`,
     });
+    
+    // Wait for worker trigger before sending response (max 3s)
+    await Promise.race([
+      workerPromise,
+      new Promise(r => setTimeout(r, 3000))
+    ]);
+    
+    return response;
     
   } catch (error) {
     // Duplicate check — ไม่ใช่ error จริง แค่ข่าวซ้ำ

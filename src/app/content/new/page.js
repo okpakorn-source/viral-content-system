@@ -174,6 +174,7 @@ function NewContentPageInner() {
     }
 
     const { jobId, position, queuesAhead } = addData;
+    const workerUrl = addData._workerUrl; // fallback trigger URL
     setQueueJobId(jobId);
     setQueuePosition(position);
     setQueueStatus('pending');
@@ -188,6 +189,7 @@ function NewContentPageInner() {
     // 2. Poll for result
     const maxPollTime = 6 * 60 * 1000; // 6 minutes max
     const startTime = Date.now();
+    let workerRetriggerCount = 0;
 
     while (Date.now() - startTime < maxPollTime) {
       await new Promise(r => setTimeout(r, 3000)); // poll every 3s
@@ -200,6 +202,13 @@ function NewContentPageInner() {
 
         setQueueStatus(statusData.status);
         setQueuePosition(statusData.position || 0);
+
+        // === Fallback: re-trigger worker if still pending after 10s ===
+        if (statusData.status === 'pending' && (Date.now() - startTime > 10000) && workerRetriggerCount < 3) {
+          workerRetriggerCount++;
+          console.log(`[Queue] Job still pending, re-triggering worker (attempt ${workerRetriggerCount})`);
+          fetch('/api/queue/worker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trigger: 'retry' }) }).catch(() => {});
+        }
 
         if (statusData.status === 'pending') {
           const ahead = statusData.queuesAhead || 0;
