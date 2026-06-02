@@ -86,6 +86,7 @@ function NewsFilterContent() {
   const [scrapeStep, setScrapeStep] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
   const [autoFilter, setAutoFilter] = useState(true); // auto-filter after scrape
+  const [showGuide, setShowGuide] = useState(false); // usage guide toggle
 
   // Word count helper
   const countWords = useCallback((text) => {
@@ -153,23 +154,108 @@ function NewsFilterContent() {
         throw new Error(scrapeData.error || 'ไม่สามารถดึงเนื้อหาจาก URL ได้');
       }
 
-      // Step 2: Extract clean text from scraped content
+      // Step 2: Extract & deep-clean news content
       // Extract API returns { data: { text, title, ... } }
       setScrapeStep('⚙️ กำลังแยกเนื้อหาข่าว...');
       const rawContent = scrapeData.data?.text || scrapeData.text || scrapeData.data?.content || '';
       const rawTitle = scrapeData.data?.title || scrapeData.title || '';
 
-      // Basic cleaning: remove navigation, ads, footer patterns
-      let cleanedContent = rawContent
-        .replace(/\[.*?\]/g, '') // remove markdown links
-        .replace(/https?:\/\/\S+/g, '') // remove URLs
-        .replace(/#{1,6}\s*/g, '') // remove markdown headers
-        .replace(/\*{1,3}/g, '') // remove markdown bold/italic
-        .replace(/\n{3,}/g, '\n\n') // normalize excessive newlines
-        .replace(/^\s*[-•]\s*/gm, '') // remove bullet points
-        .replace(/^\s*(Share|Tweet|Facebook|Instagram|Line|Copy link|อ่านเพิ่มเติม|ข่าวที่เกี่ยวข้อง|แท็ก|Tags|Related|Advertisement|โฆษณา|Sponsored).*$/gim, '') // remove social/nav
-        .replace(/^\s*(Copyright|©|สงวนลิขสิทธิ์|เงื่อนไข|นโยบาย|Privacy|Terms).*$/gim, '') // remove footer
-        .trim();
+      // === DEEP CLEANING: กำจัดขยะจากเว็บข่าวไทย ===
+      
+      // Phase 1: Strip markdown formatting
+      let cleaned = rawContent
+        .replace(/!\[.*?\]\(.*?\)/g, '')      // remove images
+        .replace(/\[([^\]]*)\]\(.*?\)/g, '$1') // keep link text only
+        .replace(/#{1,6}\s*/g, '')             // remove markdown headers
+        .replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1') // remove bold/italic but keep text
+        .replace(/`([^`]+)`/g, '$1')           // remove inline code
+        .replace(/```[\s\S]*?```/g, '')        // remove code blocks
+        .replace(/\|.*\|/g, '')                // remove tables
+        .replace(/^---+$/gm, '')               // remove horizontal rules
+        .replace(/https?:\/\/\S+/g, '')        // remove URLs
+        .replace(/^>\s*/gm, '');               // remove blockquotes
+
+      // Phase 2: Split into lines and filter junk
+      const lines = cleaned.split('\n').map(l => l.trim()).filter(Boolean);
+      
+      // Thai news site navigation/junk patterns
+      const JUNK_PATTERNS = [
+        // Navigation menus
+        /^(หน้าแรก|หน้าหลัก|Home|Menu|เมนู)$/i,
+        /^(ข่าว|บันเทิง|กีฬา|เศรษฐกิจ|การเมือง|ต่างประเทศ|เทคโนโลยี|ไลฟ์สไตล์|อาชญากรรม|ภูมิภาค)$/,
+        /^(ดูดวง|ละคร|ซีรีส์|คลิป|วิดีโอ|กระทู้|ฟอรัม|เกม|ผลบอล|ตารางบอล)$/,
+        // Honkrasae / channel navigation
+        /^โหน/,  // โหนทุกข่าว, โหนบันเทิง, โหนร้องทุกข์, โหนไบบู
+        /^(ข่าวกำลังโหน|ข่าวโซเชียล|ข่าวฮิต|ข่าวเด่น|ข่าวด่วน|ข่าวล่าสุด)$/,
+        // Contact / channel / footer
+        /^ติดต่อ(เรา|โฆษณา|ลงโฆษณา)/,
+        /^ช่อง\s*\d+\s*(กด)?\s*\d*/,
+        /^\(\s*\(*\s*\)*\s*\)$/, // ((((
+        /^[\(\)]+$/,
+        // Social & sharing
+        /^(Share|Tweet|Pin|Line|ส่งต่อ|แชร์|กดแชร์|กดไลค์|Like|Follow|Subscribe)/i,
+        /^(Facebook|Instagram|Twitter|TikTok|YouTube|LINE|Blockdit|Pantip)$/i,
+        /^(Copy link|คัดลอกลิงก์|พิมพ์|Print|อ่านเพิ่มเติม|Read more)/i,
+        // Tags / categories
+        /^(แท็ก|Tags?|หมวดหมู่|Category|ป้ายกำกับ|Label)s?\s*:?\s*/i,
+        /^(ข่าวที่เกี่ยวข้อง|Related|บทความที่เกี่ยวข้อง|เรื่องที่น่าสนใจ)/i,
+        /^(แนะนำ|Recommended|Popular|ยอดนิยม|อ่านมากสุด|ข่าวยอดฮิต)/i,
+        // Ads
+        /^(Advertisement|โฆษณา|Sponsored|Ad|Ads|ป้ายโฆษณา|PR\s*News)/i,
+        /^(สนับสนุนโดย|Presented by|Powered by)/i,
+        // Copyright / legal
+        /^(Copyright|©|สงวนลิขสิทธิ์|ลิขสิทธิ์|All rights? reserved)/i,
+        /^(เงื่อนไข|นโยบาย|Privacy|Terms|Disclaimer|ข้อกำหนด)/i,
+        // App download prompts
+        /^(ดาวน์โหลด|Download|โหลดแอป|App Store|Google Play|อ่านต่อบน)/i,
+        // Timestamps / dates alone
+        /^\d{1,2}\s*(ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.|พ\.ย\.|ธ\.ค\.)\s*\d{2,4}$/,
+        /^\d{1,2}\/\d{1,2}\/\d{2,4}$/,
+        // Reporter/source credits alone
+        /^(ขอบคุณ|ที่มา|แหล่งที่มา|Source|Credit|ภาพจาก|ภาพ:)(\s|:)/i,
+        // Misc junk
+        /^(Loading|กำลังโหลด|\.{3,}|…{2,})$/i,
+        /^(\d+\s*(views?|ครั้ง|shares?|likes?|comments?|ความคิดเห็น))$/i,
+      ];
+
+      // Filter lines
+      const cleanLines = lines.filter(line => {
+        // Skip empty or very short lines (< 12 chars = likely nav items)
+        if (line.length < 12) return false;
+        
+        // Skip lines matching junk patterns
+        if (JUNK_PATTERNS.some(p => p.test(line))) return false;
+        
+        // Skip lines that are just numbers
+        if (/^\d+$/.test(line)) return false;
+        
+        // Skip lines that are just punctuation/symbols
+        if (/^[\s\-_=.,:;!?()[\]{}|\/\\@#$%^&*~`'"<>]+$/.test(line)) return false;
+        
+        // Skip lines that look like menu items (short + no verb/content)
+        if (line.length < 25 && !/[ก-๙]{4,}/.test(line)) return false;
+        
+        return true;
+      });
+
+      // Phase 3: Remove duplicate lines (keep first occurrence)
+      const seen = new Set();
+      const uniqueLines = cleanLines.filter(line => {
+        const normalized = line.replace(/\s+/g, ' ').trim();
+        if (seen.has(normalized)) return false;
+        seen.add(normalized);
+        return true;
+      });
+
+      // Phase 4: Remove title from body if duplicated
+      const bodyLines = rawTitle
+        ? uniqueLines.filter(line => {
+            const similarity = line.length > 20 && rawTitle.includes(line.slice(0, 30));
+            return !similarity;
+          })
+        : uniqueLines;
+
+      const cleanedContent = bodyLines.join('\n\n');
 
       // Add title at top if available
       const finalText = rawTitle 
@@ -326,13 +412,45 @@ function NewsFilterContent() {
         background: 'linear-gradient(135deg, rgba(34,197,94,0.04), rgba(59,130,246,0.04))',
       }}>
         <div style={{ maxWidth: 1400, margin: '0 auto' }}>
-          <h1 style={{
-            margin: 0, fontSize: 26, fontWeight: 900,
-            color: 'var(--text-primary)',
-            display: 'flex', alignItems: 'center', gap: 10,
-          }}>
-            🔬 News Core Filter
-          </h1>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h1 style={{
+              margin: 0, fontSize: 26, fontWeight: 900,
+              color: 'var(--text-primary)',
+              display: 'flex', alignItems: 'center', gap: 10,
+            }}>
+              🔬 News Core Filter
+            </h1>
+            <button
+              onClick={() => setShowGuide(!showGuide)}
+              style={{
+                padding: '8px 16px', borderRadius: 10,
+                border: `1px solid ${showGuide ? 'rgba(99,102,241,0.4)' : 'var(--border)'}`,
+                background: showGuide
+                  ? 'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(139,92,246,0.12))'
+                  : 'rgba(255,255,255,0.04)',
+                color: showGuide ? '#818cf8' : 'var(--text-muted)',
+                fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                fontFamily: 'inherit', transition: 'all 0.3s',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}
+              onMouseEnter={e => {
+                if (!showGuide) {
+                  e.currentTarget.style.background = 'rgba(99,102,241,0.08)';
+                  e.currentTarget.style.borderColor = 'rgba(99,102,241,0.3)';
+                  e.currentTarget.style.color = '#818cf8';
+                }
+              }}
+              onMouseLeave={e => {
+                if (!showGuide) {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                  e.currentTarget.style.borderColor = 'var(--border)';
+                  e.currentTarget.style.color = 'var(--text-muted)';
+                }
+              }}
+            >
+              {showGuide ? '✕ ปิดคู่มือ' : '❓ วิธีใช้งาน'}
+            </button>
+          </div>
           <p style={{
             margin: '6px 0 0', fontSize: 13,
             color: 'var(--text-muted)', lineHeight: 1.5,
@@ -341,6 +459,184 @@ function NewsFilterContent() {
           </p>
         </div>
       </div>
+
+      {/* ===== USAGE GUIDE PANEL ===== */}
+      {showGuide && (
+        <div style={{
+          maxWidth: 1400, margin: '0 auto', padding: '0 32px',
+          animation: 'fadeUp 0.3s ease-out both',
+        }}>
+          <div style={{
+            marginTop: 20, padding: 28, borderRadius: 16,
+            background: 'linear-gradient(135deg, rgba(99,102,241,0.05), rgba(139,92,246,0.05))',
+            border: '1px solid rgba(99,102,241,0.15)',
+          }}>
+            {/* Guide Title */}
+            <div style={{
+              fontSize: 18, fontWeight: 800, color: 'var(--text-primary)',
+              marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              📖 คู่มือการใช้งาน News Core Filter
+            </div>
+
+            {/* Two usage modes */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
+              {/* Mode 1: URL */}
+              <div style={{
+                padding: 20, borderRadius: 14,
+                background: 'rgba(59,130,246,0.06)',
+                border: '1px solid rgba(59,130,246,0.15)',
+              }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: '#3b82f6', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  🌐 แบบที่ 1: วาง URL ข่าว
+                </div>
+                {[
+                  { step: '1', text: 'วาง URL ข่าวลงในช่องข้อความ', icon: '📋' },
+                  { step: '2', text: 'ระบบตรวจพบ URL อัตโนมัติ → แสดงแถบสีน้ำเงิน', icon: '🌐' },
+                  { step: '3', text: 'กดปุ่ม "📡 ดึงเนื้อหา + กรอง"', icon: '🔘' },
+                  { step: '4', text: 'ระบบดึงเนื้อข่าว → ลบขยะ (ads, nav, footer)', icon: '🧹' },
+                  { step: '5', text: 'กรองอัตโนมัติ → แสดงผลลัพธ์ฝั่งขวา', icon: '✨' },
+                ].map(s => (
+                  <div key={s.step} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 0', borderBottom: '1px solid rgba(59,130,246,0.08)',
+                  }}>
+                    <div style={{
+                      width: 26, height: 26, borderRadius: '50%',
+                      background: 'rgba(59,130,246,0.15)', color: '#3b82f6',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 12, fontWeight: 800, flexShrink: 0,
+                    }}>{s.step}</div>
+                    <span style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                      {s.icon} {s.text}
+                    </span>
+                  </div>
+                ))}
+                <div style={{
+                  marginTop: 12, padding: '8px 12px', borderRadius: 8,
+                  background: 'rgba(59,130,246,0.08)', fontSize: 11, color: '#60a5fa',
+                }}>
+                  💡 รองรับ: Thairath, Khaosod, Matichon, Sanook, ThaiPBS และเว็บข่าวทั่วไป
+                </div>
+              </div>
+
+              {/* Mode 2: Text */}
+              <div style={{
+                padding: 20, borderRadius: 14,
+                background: 'rgba(34,197,94,0.06)',
+                border: '1px solid rgba(34,197,94,0.15)',
+              }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: '#22c55e', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  📝 แบบที่ 2: วางข้อความข่าว
+                </div>
+                {[
+                  { step: '1', text: 'Copy เนื้อข่าวจากเว็บไซต์มาวาง', icon: '📋' },
+                  { step: '2', text: 'เลือกโหมดกรอง: Soft / Balanced / Strict', icon: '🎛️' },
+                  { step: '3', text: 'ตั้งค่า checkbox ตามต้องการ', icon: '☑️' },
+                  { step: '4', text: 'กดปุ่ม "🔬 วิเคราะห์"', icon: '🔘' },
+                  { step: '5', text: 'ดูผลกรอง + Copy หรือ Export ได้เลย', icon: '✨' },
+                ].map(s => (
+                  <div key={s.step} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 0', borderBottom: '1px solid rgba(34,197,94,0.08)',
+                  }}>
+                    <div style={{
+                      width: 26, height: 26, borderRadius: '50%',
+                      background: 'rgba(34,197,94,0.15)', color: '#22c55e',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 12, fontWeight: 800, flexShrink: 0,
+                    }}>{s.step}</div>
+                    <span style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                      {s.icon} {s.text}
+                    </span>
+                  </div>
+                ))}
+                <div style={{
+                  marginTop: 12, padding: '8px 12px', borderRadius: 8,
+                  background: 'rgba(34,197,94,0.08)', fontSize: 11, color: '#4ade80',
+                }}>
+                  💡 กดปุ่ม "📰 ตัวอย่าง" เพื่อลองใช้งานกับข่าวตัวอย่าง
+                </div>
+              </div>
+            </div>
+
+            {/* Filter modes explanation */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{
+                fontSize: 14, fontWeight: 800, color: 'var(--text-primary)',
+                marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                🎛️ อธิบายโหมดกรอง
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                {[
+                  { mode: 'Soft 🟢', color: '#22c55e', desc: 'ตัดเฉพาะคำเฟ้อที่ชัดเจนมาก เช่น "สร้างความฮือฮา" "กลายเป็นกระแส" — เหมาะกับข่าวที่ต้องการเก็บรายละเอียดมาก' },
+                  { mode: 'Balanced 🟡', color: '#eab308', desc: 'สมดุลระหว่างเนื้อจริงกับอารมณ์ — ตัดคำเฟ้อ + อารมณ์เกินส่วนใหญ่ เก็บข้อเท็จจริงครบ (แนะนำ)' },
+                  { mode: 'Strict 🔴', color: '#ef4444', desc: 'เข้มงวดมาก — เหลือเฉพาะข้อเท็จจริง คำพูด และบริบทที่จำเป็น ตัดการตีความทั้งหมด' },
+                ].map(m => (
+                  <div key={m.mode} style={{
+                    padding: 14, borderRadius: 12,
+                    background: `${m.color}08`, border: `1px solid ${m.color}20`,
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: m.color, marginBottom: 6 }}>{m.mode}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.6 }}>{m.desc}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Badge legend */}
+            <div>
+              <div style={{
+                fontSize: 14, fontWeight: 800, color: 'var(--text-primary)',
+                marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                🏷️ ความหมายของ Badge สี
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                {[
+                  { label: 'FACT', name: 'ข้อเท็จจริง', color: '#22c55e', desc: 'ตัวเลข ชื่อ สถานที่ วันที่' },
+                  { label: 'QUOTE', name: 'คำพูด', color: '#3b82f6', desc: 'คำพูด/สัมภาษณ์จากบุคคล' },
+                  { label: 'CONTEXT', name: 'บริบท', color: '#64748b', desc: 'ข้อมูลพื้นหลังที่จำเป็น' },
+                  { label: 'FILLER', name: 'คำเฟ้อ', color: '#eab308', desc: 'ไม่มีข้อมูลใหม่ ตัดได้' },
+                  { label: 'INTERPRETATION', name: 'ตีความ', color: '#f97316', desc: 'ผู้เขียนตีความเอง' },
+                  { label: 'EMOTIONAL', name: 'แต่งอารมณ์', color: '#ec4899', desc: 'ดราม่า เร้าอารมณ์เกิน' },
+                  { label: 'UNSUPPORTED', name: 'ไม่มีที่มา', color: '#ef4444', desc: 'กล่าวอ้างไม่มีหลักฐาน' },
+                ].map(b => (
+                  <div key={b.label} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '6px 12px', borderRadius: 8,
+                    background: `${b.color}10`, border: `1px solid ${b.color}25`,
+                  }}>
+                    <span style={{
+                      padding: '2px 8px', borderRadius: 6,
+                      background: `${b.color}20`, color: b.color,
+                      fontSize: 10, fontWeight: 800,
+                    }}>{b.label}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-primary)', fontWeight: 600 }}>{b.name}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>— {b.desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Workflow tip */}
+            <div style={{
+              marginTop: 20, padding: '14px 18px', borderRadius: 12,
+              background: 'rgba(255,255,255,0.03)',
+              border: '1px solid var(--border)',
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
+                🔄 เชื่อมกับ Workflow ข่าว
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+                ผลลัพธ์จาก News Core Filter สามารถ <strong style={{ color: '#22c55e' }}>Copy</strong> → วางใน "สร้างใหม่" เพื่อให้ AI เขียนข่าวจาก
+                เนื้อจริงเท่านั้น หรือ <strong style={{ color: '#8b5cf6' }}>Export TXT</strong> เก็บเป็นไฟล์อ้างอิง
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ===== MAIN CONTENT ===== */}
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 32px 60px' }}>
