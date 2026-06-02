@@ -1184,7 +1184,7 @@ export default function CoverPage() {
           </div>
 
           {/* ═══ RIGHT: Canvas ═══ */}
-          <div style={s.card}>
+          <div style={{ ...s.card, position: 'sticky', top: 70, alignSelf: 'start' }}>
             <div style={s.head}>
               ตัวอย่างปก
               <span style={{ fontSize:10, fontWeight:400, color:'var(--text-muted)', marginLeft:'auto' }}>{W}×{H}px • {template?.name || '—'}</span>
@@ -1205,6 +1205,23 @@ export default function CoverPage() {
                   onTouchMove={e => { e.preventDefault(); const t=e.touches[0]; handleMove(t.clientX, t.clientY); }}
                   onTouchEnd={handleUp}
                 />
+              </div>
+              {/* Quick download + status */}
+              <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                <button onClick={handleDownload} disabled={!Object.keys(slotImages).length}
+                  style={{
+                    flex:1, padding:'10px 0', borderRadius:10, border:'none',
+                    background: allSlotsFilled ? 'linear-gradient(135deg,#a3e635,#22c55e)' : 'rgba(163,230,53,0.15)',
+                    color: allSlotsFilled ? '#000' : '#a3e635',
+                    fontSize:13, fontWeight:800, cursor:'pointer', fontFamily:'inherit',
+                    opacity: Object.keys(slotImages).length ? 1 : 0.4,
+                    transition:'all .2s',
+                  }}>
+                  📥 {downloaded ? 'ดาวน์โหลดอีกครั้ง' : 'Download JPEG'}
+                </button>
+                <span style={{ fontSize:10, color:'var(--text-muted)', whiteSpace:'nowrap' }}>
+                  {template ? `${Object.keys(slotImages).filter(k => template.slots.some(sl => sl.id===k)).length}/${template.slots.length} รูป` : ''}
+                </span>
               </div>
             </div>
           </div>
