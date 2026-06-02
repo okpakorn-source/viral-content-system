@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getJobStatus } from '@/lib/services/queueService';
+import { getJobStatus, getQueueOverview } from '@/lib/services/queueService';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('QUEUE_STATUS');
@@ -13,7 +13,9 @@ export async function GET(req) {
     const jobId = searchParams.get('id');
     
     if (!jobId) {
-      return NextResponse.json({ success: false, error: 'Missing job ID' }, { status: 400 });
+      // No job ID = return queue overview
+      const overview = await getQueueOverview();
+      return NextResponse.json({ success: true, ...overview });
     }
     
     const jobStatus = await getJobStatus(jobId);

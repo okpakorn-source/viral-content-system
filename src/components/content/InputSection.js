@@ -3,7 +3,7 @@ import React from 'react';
 import UniversalInputBox from '@/components/UniversalInputBox';
 
 export default function InputSection({ states, setters, handlers, utils }) {
-  const { autoMode, liveDetection, contentLength, newsImagePreviews, autoProgress, composingImage, universalDetection, autoLog, composedImages, imageLayout, sourceType, url, tiktokNeedUpload, youtubeNeedUpload, videoFile, imagePreview, imageFile, extracting, extracted, rawText, customPrompt, loading } = states;
+  const { autoMode, liveDetection, contentLength, newsImagePreviews, autoProgress, composingImage, universalDetection, autoLog, composedImages, imageLayout, sourceType, url, tiktokNeedUpload, youtubeNeedUpload, videoFile, imagePreview, imageFile, extracting, extracted, rawText, customPrompt, loading, queuePolling, queuePosition, queueStatus } = states;
   const { setLiveDetection, setContentLength, setNewsImages, setNewsImagePreviews, setSourceType, setExtracted, setRawText, setError, setImageFile, setImagePreview, setTiktokNeedUpload, setVideoFile, setYoutubeNeedUpload, setUrl, setCustomPrompt } = setters;
   const { handleUniversalSubmit, handleTikTokTranscribe, handleAutoMode, handleYouTubeTranscribe, handleExtract, handleImagePaste, handleImageDrop, handleImageOCR, handleExtractNews, processImageFile } = handlers;
   const { resizeImage, SOURCE_TYPES, placeholders } = utils;
@@ -120,6 +120,32 @@ export default function InputSection({ states, setters, handlers, utils }) {
                       </div>
                     </div>
       
+                    {/* 📋 Queue Status Bar */}
+                    {queuePolling && queuePosition > 0 && (
+                      <div style={{
+                        padding: '12px 16px',
+                        borderRadius: 12,
+                        background: 'linear-gradient(135deg, rgba(59,130,246,0.12), rgba(168,85,247,0.08))',
+                        border: '1px solid rgba(59,130,246,0.2)',
+                        marginTop: 10,
+                        marginBottom: 4,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                      }}>
+                        <div style={{ fontSize: 24 }}>📋</div>
+                        <div>
+                          <div style={{ fontWeight: 700, color: '#60a5fa', fontSize: 13 }}>
+                            คิวลำดับที่ {queuePosition}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                            ระบบกำลังประมวลผลงานอื่นอยู่ รอสักครู่...
+                            {queueStatus === 'processing' ? ' ⚡ กำลังประมวลผลของคุณแล้ว!' : ` ประมาณ ${Math.max((queuePosition - 1) * 3, 1)} นาที`}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Auto Progress */}
                     {(autoMode || composingImage) && (
                       <div style={{

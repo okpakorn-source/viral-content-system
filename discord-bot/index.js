@@ -203,102 +203,83 @@ async function processNewsJob(job) {
     // เตรียมข้อมูลยิง API
     const payload = {
       input: content,
-      images: [], // สามารถอัปเกรดให้ดึงรูปจาก message.attachments ได้ในอนาคต
-      contentLength: 'short'
+      images: [],
+      contentLength: 'short',
+      userId: `discord-${message.author.id}`,
     };
 
     const headers = { 'Content-Type': 'application/json' };
     if (API_KEY) headers['x-api-key'] = API_KEY;
 
-    let streamUrl = API_URL;
-    if (streamUrl.endsWith('/api/auto/process')) {
-      streamUrl = streamUrl.replace('/api/auto/process', '/api/auto/stream');
+    // === Submit via Server Queue ===
+    let queueUrl = API_URL;
+    if (queueUrl.endsWith('/api/auto/process')) {
+      queueUrl = queueUrl.replace('/api/auto/process', '/api/queue/add');
+    } else if (queueUrl.endsWith('/api/auto/stream')) {
+      queueUrl = queueUrl.replace('/api/auto/stream', '/api/queue/add');
+    } else {
+      queueUrl = queueUrl.replace(/\/api\/.*$/, '/api/queue/add');
     }
 
-    const response = await axios.post(streamUrl, payload, {
-      headers,
-      responseType: 'stream',
-      timeout: 330000 // 5.5 นาที
-    });
+    // 1. Add to server queue
+    const addRes = await axios.post(queueUrl, payload, { headers, timeout: 15000 });
+    const addData = addRes.data;
 
-    let finalData = null;
-    let errorData = null;
-    let tickCount = 0;
-    let buffer = '';
-    let stepLogs = []; // เก็บประวัติ log ทั้งหมด
+    if (!addData.success) {
+      // Duplicate or error
+      throw new Error(addData.error || 'Failed to add to queue');
+    }
 
-    // ประมวลผลข้อมูลที่ไหลกลับมาจาก Vercel (Streaming Ticks)
-    response.data.on('data', (chunk) => {
-      buffer += chunk.toString();
-      const lines = buffer.split('\n');
-      buffer = lines.pop(); // เก็บส่วนที่ยังไม่ครบถ้วนไว้ใน buffer
+    const jobId = addData.jobId;
+    const initialPosition = addData.position;
+    const queuesAhead = addData.queuesAhead || 0;
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const parsed = JSON.parse(trimmed);
-          if (parsed.type === 'done' || parsed.type === 'result') {
-            finalData = parsed.data;
-          } else if (parsed.type === 'error') {
-            errorData = parsed.error;
-          } else if (parsed.type === 'log') {
-            // แสดงสถานะการทำงานจริงแบบเรียลไทม์ (สะสม log)
-            tickCount++;
-            const dots = '.'.repeat((tickCount % 3) + 1);
-            const stepName = parsed.data.step;
-            const stepMsg = parsed.data.msg;
-            
-            // เก็บเฉพาะ 5-6 ขั้นตอนล่าสุด เพื่อไม่ให้ข้อความยาวเกินไป
-            stepLogs.push(`✅ \`[${stepName}]\` ${stepMsg}`);
-            if (stepLogs.length > 7) stepLogs.shift();
-            
-            const logDisplay = stepLogs.join('\n');
-            const queueInfo = queue.length > 0 ? `\n\n📋 รอคิว: ${queue.length} งาน` : '';
-            processingMsg.edit(`กำลังทำงาน... ⚡${dots}\n\n**ขั้นตอนการประมวลผล:**\n${logDisplay}${queueInfo}`).catch(() => {});
-          }
-        } catch (e) {
-          // log parse failure สำหรับ debug (อย่า silent swallow)
-          if (trimmed.length > 20) {
-            console.warn('[Stream Parse] Failed to parse line:', trimmed.slice(0, 300), '| Error:', e.message);
-          }
-        }
-      }
-    });
+    if (queuesAhead > 0) {
+      await processingMsg.edit(`📋 คิวลำดับที่ **${initialPosition}** — มี ${queuesAhead} คิวก่อนหน้า\nประมาณ ${queuesAhead * 3} นาที ⏳`).catch(() => {});
+    } else {
+      await processingMsg.edit(`⚡ เริ่มประมวลผลแล้ว! กำลังอ่านข้อมูลและปั้นบทความไวรัล...`).catch(() => {});
+    }
 
-    // รอจนกว่าสายจะตัด
-    await new Promise((resolve, reject) => {
-      response.data.on('end', resolve);
-      response.data.on('error', reject);
-    });
+    // 2. Poll for result
+    const statusUrl = queueUrl.replace('/api/queue/add', '/api/queue/status');
+    const maxPollTime = 6 * 60 * 1000; // 6 minutes
+    const pollStartTime = Date.now();
+    let lastStatus = '';
+    let data = null;
 
-    // ═══ CRITICAL FIX: Flush remaining buffer after stream ends ═══
-    // ถ้า result JSON ถูกแบ่ง chunk หรือเป็นบรรทัดสุดท้ายที่ไม่จบด้วย \n
-    // จะติดค้างใน buffer → ต้อง parse ตรงนี้
-    if (buffer.trim()) {
-      console.log('[Stream] Flushing remaining buffer:', buffer.length, 'chars');
+    while (Date.now() - pollStartTime < maxPollTime) {
+      await new Promise(r => setTimeout(r, 3000)); // poll every 3s
+
       try {
-        const parsed = JSON.parse(buffer.trim());
-        if (parsed.type === 'done' || parsed.type === 'result') {
-          finalData = parsed.data;
-          console.log('[Stream] ✅ Got finalData from buffer flush!');
-        } else if (parsed.type === 'error') {
-          errorData = parsed.error;
+        const statusRes = await axios.get(`${statusUrl}?id=${jobId}`, { headers, timeout: 10000 });
+        const st = statusRes.data;
+        if (!st.success) continue;
+
+        if (st.status === 'pending' && st.status !== lastStatus) {
+          const ahead = st.queuesAhead || 0;
+          await processingMsg.edit(`📋 รอคิว (ลำดับที่ ${st.position}) มี ${ahead} คิวก่อนหน้า ⏳\nประมาณ ${ahead * 3} นาที`).catch(() => {});
+          lastStatus = st.status;
+        } else if (st.status === 'processing' && st.status !== lastStatus) {
+          await processingMsg.edit(`⚡ กำลังประมวลผลข่าวของคุณ... (อาจใช้เวลา 2-4 นาที)\n\n**ขั้นตอนการประมวลผล:**\n✅ \`[Queue]\` ถึงคิวของคุณแล้ว!\n⏳ \`[Pipeline]\` กำลังดึงข้อมูล + สร้างเนื้อหา...`).catch(() => {});
+          lastStatus = st.status;
+        } else if (st.status === 'completed') {
+          data = st.result;
+          break;
+        } else if (st.status === 'failed') {
+          throw new Error(st.error || 'Queue job failed');
         }
-      } catch (e) {
-        console.warn('[Stream] Buffer flush parse failed:', buffer.slice(0, 300), '| Error:', e.message);
+      } catch (pollErr) {
+        if (pollErr.message?.includes('Queue job failed') || pollErr.message?.includes('failed')) throw pollErr;
+        console.warn('[Discord Bot] Poll error:', pollErr.message);
       }
     }
 
-    console.log(`[Stream] Stream ended. finalData: ${finalData ? 'RECEIVED' : 'NULL'} | buffer: ${buffer.length} chars | steps: ${tickCount}`);
-
-    if (errorData) {
-      throw new Error(errorData);
+    if (!data) {
+      throw new Error('หมดเวลารอคิว (6 นาที) กรุณาลองใหม่');
     }
 
-    const data = finalData;
-    if (!data || !data.success) {
-      throw new Error(data?.error || 'API Processing Failed (No Data)');
+    if (!data.success) {
+      throw new Error(data.error || 'API Processing Failed');
     }
 
     // ดึงเวอร์ชันทั้งหมด (รองรับสูงสุด 10 เวอร์ชันเพื่อส่งมอบทั้ง Classic และ Enhanced)

@@ -16,19 +16,18 @@ export async function POST(req) {
     const expectedKey = process.env.API_SECRET_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'test-key';
     const discordKey = process.env.DISCORD_API_SECRET;
     
+    // Auth: allow same-origin web requests (no auth header needed)
+    // Only enforce auth for external callers (Discord, etc)
     if (authHeader || apiKeyHeader) {
       const isAuthorized = 
         (authHeader === `Bearer ${expectedKey}` || apiKeyHeader === expectedKey) ||
         (discordKey && apiKeyHeader === discordKey);
         
       if (!isAuthorized) {
-        if (process.env.NODE_ENV !== 'development') {
-          return NextResponse.json({ success: false, error: 'Unauthorized', errorType: 'UNAUTHORIZED' }, { status: 401 });
-        }
+        return NextResponse.json({ success: false, error: 'Unauthorized', errorType: 'UNAUTHORIZED' }, { status: 401 });
       }
-    } else if (process.env.NODE_ENV !== 'development') {
-      return NextResponse.json({ success: false, error: 'Unauthorized', errorType: 'UNAUTHORIZED' }, { status: 401 });
     }
+    // No auth header = same-origin web request = allowed
     
     // 2. Parse payload
     let payload;

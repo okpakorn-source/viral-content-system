@@ -144,6 +144,12 @@ function NewContentPageInner() {
   const [universalDetection, setUniversalDetection] = useState(null); // ✅ Phase 6: detection result from /api/auto/process
   const [liveDetection, setLiveDetection] = useState(null); // ✅ Phase 6: live detection from UniversalInputBox
 
+  // Queue system states
+  const [queueJobId, setQueueJobId] = useState(null);
+  const [queuePosition, setQueuePosition] = useState(0);
+  const [queueStatus, setQueueStatus] = useState(null); // 'pending' | 'processing' | 'completed' | 'failed'
+  const [queuePolling, setQueuePolling] = useState(false);
+
   // Image Composer states
   const [newsImages, setNewsImages] = useState([]);         // File[] ที่ user อัปโหลด
   const [newsImagePreviews, setNewsImagePreviews] = useState([]); // base64 preview
@@ -153,6 +159,69 @@ function NewContentPageInner() {
 
   // Workflow tracker
   const { startWorkflow, startStep: wfStart, completeStep: wfComplete, failStep: wfFail, finishWorkflow } = useWorkflow();
+
+  // === 📋 Queue System — ส่งผ่านคิวเพื่อป้องกันระบบล่ม ===
+  const submitViaQueue = async (payload) => {
+    // 1. Add to queue
+    const addRes = await fetch('/api/queue/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const addData = await addRes.json();
+    if (!addData.success) {
+      throw new Error(addData.error || 'ส่งคิวไม่สำเร็จ');
+    }
+
+    const { jobId, position, queuesAhead } = addData;
+    setQueueJobId(jobId);
+    setQueuePosition(position);
+    setQueueStatus('pending');
+    setQueuePolling(true);
+
+    if (queuesAhead > 0) {
+      setAutoProgress(`📋 อยู่ในคิวลำดับที่ ${position} (รอ ${queuesAhead} คิวก่อนหน้า) ประมาณ ${queuesAhead * 3} นาที`);
+    } else {
+      setAutoProgress('⚡ กำลังประมวลผล...');
+    }
+
+    // 2. Poll for result
+    const maxPollTime = 6 * 60 * 1000; // 6 minutes max
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxPollTime) {
+      await new Promise(r => setTimeout(r, 3000)); // poll every 3s
+
+      try {
+        const statusRes = await fetch(`/api/queue/status?id=${jobId}`);
+        const statusData = await statusRes.json();
+
+        if (!statusData.success) continue;
+
+        setQueueStatus(statusData.status);
+        setQueuePosition(statusData.position || 0);
+
+        if (statusData.status === 'pending') {
+          const ahead = statusData.queuesAhead || 0;
+          setAutoProgress(`📋 รอคิว (ลำดับที่ ${statusData.position}) มี ${ahead} คิวก่อนหน้า ประมาณ ${ahead * 3} นาที`);
+        } else if (statusData.status === 'processing') {
+          setAutoProgress('⚡ กำลังประมวลผล... (อาจใช้เวลา 2-4 นาที)');
+        } else if (statusData.status === 'completed') {
+          setQueuePolling(false);
+          return statusData.result; // Return the result data
+        } else if (statusData.status === 'failed') {
+          setQueuePolling(false);
+          throw new Error(statusData.error || 'คิวประมวลผลไม่สำเร็จ');
+        }
+      } catch (pollErr) {
+        if (pollErr.message?.includes('คิวประมวลผลไม่สำเร็จ')) throw pollErr;
+        console.warn('[Queue] Poll error:', pollErr.message);
+      }
+    }
+
+    setQueuePolling(false);
+    throw new Error('หมดเวลารอคิว (6 นาที) กรุณาลองใหม่');
+  };
 
   // === ⚡ Auto Mode — วาง URL → ได้ผลลัพธ์ ===
   const handleAutoMode = async (inputData) => {
@@ -188,24 +257,14 @@ function NewContentPageInner() {
       wfComplete('auto_detect', `Source: ${domain}`);
       wfStart('auto_scrape', { api: '/api/auto', detail: 'กำลังส่งข้อมูลไป Auto Pipeline...' });
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 min
-      const res = await fetch('/api/auto', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: targetUrl,   // ✅ FIX Bug#2: use targetUrl from inputData, not stale url state
-          contentLength,
-        }),
-        signal: controller.signal,
+      // === Queue-based submission ===
+      const queueResult = await submitViaQueue({
+        input: targetUrl,
+        url: targetUrl,
+        contentLength,
+        userId: 'web-user',
       });
-      let data;
-      try {
-        const text = await res.text();
-        data = JSON.parse(text);
-      } catch (err) {
-        throw new Error(`ระบบทำงานไม่สำเร็จ (${res.status}): ได้รับการตอบรับที่ผิดพลาดจากเซิร์ฟเวอร์`);
-      }
+      const data = { success: true, data: queueResult?.data || queueResult };
 
       if (!data.success) {
         const errMsg = getErrorMessage(data.error);
@@ -336,14 +395,13 @@ function NewContentPageInner() {
       // 📦 Auto-save เข้าคลังข่าว
       autoSaveToArchive(data.data.newsData, data.data.breakdownData).catch(() => {});
     } catch (err) {
-      // \u2705 FIX: \u0e43\u0e0a\u0e49 failedStep \u0e08\u0e32\u0e01 API \u0e41\u0e17\u0e19 hard-code auto_scrape
       const failStep = err.failedStep || 'auto_scrape';
       wfFail(failStep, err.message);
-      setError('Auto Pipeline: ' + (err.name === 'AbortError' ? 'หมดเวลา (Timeout 5 นาที) กรุณาลองใหม่' : err.message));
+      setError('Auto Pipeline: ' + err.message);
       setAutoProgress('');
     } finally {
-      clearTimeout(timeoutId);
       setAutoMode(false);
+      setQueuePolling(false);
     }
   };
 
@@ -391,19 +449,14 @@ function NewContentPageInner() {
       wfStart('u_detect', { detail: 'กำลัง detect และ route...' });
       setAutoProgress('⚡ Universal AI Pipeline กำลังประมวลผล...');
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 min
-      const res = await fetch('/api/auto/process', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          input:         inputText,
-          images:        inputImages,
-          contentLength,
-        }),
-        signal: controller.signal,
+      // === Queue-based submission ===
+      const queueResult = await submitViaQueue({
+        input: inputText,
+        images: inputImages,
+        contentLength,
+        userId: 'web-user',
       });
-      const data = await res.json();
+      const data = { success: true, ...(queueResult || {}) };
       if (!data.success) {
         const errMsg = getErrorMessage(data.error || 'Universal process failed');
         const errorWithStep = new Error(errMsg);
@@ -535,8 +588,8 @@ function NewContentPageInner() {
       setError('❌ ' + (err.name === 'AbortError' ? 'หมดเวลา (Timeout 5 นาที) กรุณาลองใหม่' : err.message));
       setAutoProgress('');
     } finally {
-      clearTimeout(timeoutId);
       setAutoMode(false);
+      setQueuePolling(false);
     }
   };
 
@@ -1048,6 +1101,7 @@ function NewContentPageInner() {
     setTiktokNeedUpload(false); setVideoFile(null); setYoutubeNeedUpload(false);
     setSentToReview({}); setSendingReview(null);
     setAutoMode(false); setAutoProgress(''); setAutoLog([]);
+    setQueueJobId(null); setQueuePosition(0); setQueueStatus(null); setQueuePolling(false);
     setSimulatedComments([]);
     setFactPoolData(null);
   };
@@ -1106,7 +1160,7 @@ function NewContentPageInner() {
         {step === 'input' && (
           <div className="card slide-up">
       <InputSection
-        states={{ autoMode, liveDetection, contentLength, newsImagePreviews, autoProgress, composingImage, universalDetection, autoLog, composedImages, imageLayout, sourceType, url, tiktokNeedUpload, youtubeNeedUpload, videoFile, imagePreview, imageFile, extracting, extracted, rawText, customPrompt, loading }}
+        states={{ autoMode, liveDetection, contentLength, newsImagePreviews, autoProgress, composingImage, universalDetection, autoLog, composedImages, imageLayout, sourceType, url, tiktokNeedUpload, youtubeNeedUpload, videoFile, imagePreview, imageFile, extracting, extracted, rawText, customPrompt, loading, queuePolling, queuePosition, queueStatus }}
         setters={{ setLiveDetection, setContentLength, setNewsImages, setNewsImagePreviews, setSourceType, setExtracted, setRawText, setError, setImageFile, setImagePreview, setTiktokNeedUpload, setVideoFile, setYoutubeNeedUpload, setUrl, setCustomPrompt }}
         handlers={{ handleUniversalSubmit, handleTikTokTranscribe, handleAutoMode, handleYouTubeTranscribe, handleExtract, handleImagePaste, handleImageDrop, handleImageOCR, handleExtractNews, processImageFile }}
         utils={{ resizeImage, SOURCE_TYPES, placeholders }}

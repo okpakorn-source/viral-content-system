@@ -246,3 +246,24 @@ export async function cleanupStaleJobs(maxAgeMinutes = 10) {
   
   return cleaned;
 }
+
+/**
+ * Get queue overview — how many jobs pending/processing.
+ * Used by web UI to check if system is busy.
+ */
+export async function getQueueOverview() {
+  const store = await getQueueStore();
+  const allJobs = await store.getAll();
+  
+  const pending = allJobs.filter(j => j.status === 'pending').length;
+  const processing = allJobs.filter(j => j.status === 'processing').length;
+  const total = pending + processing;
+  
+  return {
+    pending,
+    processing,
+    total,
+    busy: processing > 0,
+    estimatedWaitMinutes: total * 3, // ~3 min per job
+  };
+}
