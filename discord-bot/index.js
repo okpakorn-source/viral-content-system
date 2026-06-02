@@ -258,7 +258,10 @@ async function processNewsJob(job) {
             processingMsg.edit(`กำลังทำงาน... ⚡${dots}\n\n**ขั้นตอนการประมวลผล:**\n${logDisplay}${queueInfo}`).catch(() => {});
           }
         } catch (e) {
-          // ข้ามบรรทัดที่ parse ไม่ได้
+          // log parse failure สำหรับ debug (อย่า silent swallow)
+          if (trimmed.length > 20) {
+            console.warn('[Stream Parse] Failed to parse line:', trimmed.slice(0, 300), '| Error:', e.message);
+          }
         }
       }
     });
@@ -268,6 +271,26 @@ async function processNewsJob(job) {
       response.data.on('end', resolve);
       response.data.on('error', reject);
     });
+
+    // ═══ CRITICAL FIX: Flush remaining buffer after stream ends ═══
+    // ถ้า result JSON ถูกแบ่ง chunk หรือเป็นบรรทัดสุดท้ายที่ไม่จบด้วย \n
+    // จะติดค้างใน buffer → ต้อง parse ตรงนี้
+    if (buffer.trim()) {
+      console.log('[Stream] Flushing remaining buffer:', buffer.length, 'chars');
+      try {
+        const parsed = JSON.parse(buffer.trim());
+        if (parsed.type === 'done' || parsed.type === 'result') {
+          finalData = parsed.data;
+          console.log('[Stream] ✅ Got finalData from buffer flush!');
+        } else if (parsed.type === 'error') {
+          errorData = parsed.error;
+        }
+      } catch (e) {
+        console.warn('[Stream] Buffer flush parse failed:', buffer.slice(0, 300), '| Error:', e.message);
+      }
+    }
+
+    console.log(`[Stream] Stream ended. finalData: ${finalData ? 'RECEIVED' : 'NULL'} | buffer: ${buffer.length} chars | steps: ${tickCount}`);
 
     if (errorData) {
       throw new Error(errorData);
