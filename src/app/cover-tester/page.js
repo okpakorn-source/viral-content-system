@@ -130,24 +130,24 @@ function roundRectPath(ctx, x, y, w, h, r) {
 function coverFit(img, tw, th, focusY = 0.3, crop) {
   const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
   const imgAr = iw / ih, tgtAr = tw / th;
-  let sx, sy, sw, sh;
-  if (imgAr > tgtAr) { sh = ih; sw = ih * tgtAr; sx = (iw - sw) / 2; sy = 0; }
-  else { sw = iw; sh = iw / tgtAr; sx = 0; sy = Math.max(0, Math.min((ih - sh) * focusY, ih - sh)); }
-  // Apply zoom + pan from crop overrides
-  if (crop && crop.zoom && crop.zoom !== 1) {
-    const z = crop.zoom;
-    const zw = sw / z, zh = sh / z;
-    sx += (sw - zw) / 2;
-    sy += (sh - zh) / 2;
-    sw = zw; sh = zh;
-  }
-  if (crop) {
-    if (crop.panX) { sx += crop.panX * (iw * 0.1); }
-    if (crop.panY) { sy += crop.panY * (ih * 0.1); }
-  }
-  // Clamp to image bounds
-  sx = Math.max(0, Math.min(sx, iw - sw));
-  sy = Math.max(0, Math.min(sy, ih - sh));
+  let sw, sh;
+  // Base cover-fit dimensions
+  if (imgAr > tgtAr) { sh = ih; sw = ih * tgtAr; }
+  else { sw = iw; sh = iw / tgtAr; }
+  // Apply zoom
+  const zoom = (crop?.zoom && crop.zoom > 1) ? crop.zoom : 1;
+  sw = sw / zoom;
+  sh = sh / zoom;
+  // Focal point positioning (0=left/top, 0.5=center, 1=right/bottom)
+  const focalX = crop?.focalX ?? 0.5;
+  const focalY = crop?.focalY ?? focusY;
+  const maxPanX = Math.max(0, iw - sw);
+  const maxPanY = Math.max(0, ih - sh);
+  let sx = maxPanX * focalX;
+  let sy = maxPanY * focalY;
+  // Clamp
+  sx = Math.max(0, Math.min(sx, maxPanX));
+  sy = Math.max(0, Math.min(sy, maxPanY));
   return { sx, sy, sw, sh };
 }
 
@@ -571,8 +571,13 @@ export default function CoverPage() {
     // Then try ANY slot for crop-pan
     const anySlot = hitTestAll(mx,my);
     if (anySlot) {
-      const crop = slotCrops[anySlot.id] || { zoom: 1, panX: 0, panY: 0 };
-      setDragState({ slotId: anySlot.id, mode:'crop', startX:mx, startY:my, origPanX: crop.panX, origPanY: crop.panY });
+      const crop = slotCrops[anySlot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
+      // Auto-zoom to 1.5x on first drag if not yet zoomed — unlocks both-axis panning
+      const autoZoom = (!crop.zoom || crop.zoom <= 1) ? 1.5 : crop.zoom;
+      if (autoZoom !== crop.zoom) {
+        setSlotCrops(prev => ({ ...prev, [anySlot.id]: { ...crop, zoom: autoZoom } }));
+      }
+      setDragState({ slotId: anySlot.id, mode:'crop', startX:mx, startY:my, origFocalX: crop.focalX ?? 0.5, origFocalY: crop.focalY ?? 0.3 });
     }
   };
 
@@ -592,15 +597,17 @@ export default function CoverPage() {
     }
 
     if (dragState.mode === 'crop') {
-      // Pan image within slot (crop)
-      const dx = (mx - dragState.startX) / 60;  // sensitivity: ~60px mouse = 1.0 pan unit
-      const dy = (my - dragState.startY) / 60;
+      // Move focal point: drag sensitivity relative to canvas movement
+      const dx = (mx - dragState.startX) / W;  // normalized to canvas width
+      const dy = (my - dragState.startY) / H;
+      const newFX = Math.max(0, Math.min(1, (dragState.origFocalX ?? 0.5) - dx * 2.5));
+      const newFY = Math.max(0, Math.min(1, (dragState.origFocalY ?? 0.3) - dy * 2.5));
       setSlotCrops(prev => {
-        const old = prev[dragState.slotId] || { zoom: 1, panX: 0, panY: 0 };
+        const old = prev[dragState.slotId] || { zoom: 1.5, focalX: 0.5, focalY: 0.3 };
         return { ...prev, [dragState.slotId]: {
           ...old,
-          panX: Math.max(-5, Math.min(5, Math.round(((dragState.origPanX || 0) - dx) * 10) / 10)),
-          panY: Math.max(-5, Math.min(5, Math.round(((dragState.origPanY || 0) - dy) * 10) / 10)),
+          focalX: Math.round(newFX * 100) / 100,
+          focalY: Math.round(newFY * 100) / 100,
         }};
       });
     } else if (dragState.mode === 'move') {
@@ -628,18 +635,27 @@ export default function CoverPage() {
   const handleUp = () => setDragState(null);
 
   // ── Mouse wheel: zoom image in slot ──
-  const handleWheel = (e) => {
+  const handleWheel = useCallback((e) => {
     e.preventDefault();
     const {mx,my} = getCoords(e.clientX, e.clientY);
     const slot = hitTestAll(mx,my);
     if (!slot) return;
-    const delta = e.deltaY < 0 ? 0.15 : -0.15; // scroll up = zoom in
+    const delta = e.deltaY < 0 ? 0.2 : -0.2; // scroll up = zoom in
     setSlotCrops(prev => {
-      const old = prev[slot.id] || { zoom: 1, panX: 0, panY: 0 };
-      const newZoom = Math.max(1, Math.min(3, Math.round((old.zoom + delta) * 100) / 100));
+      const old = prev[slot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
+      const newZoom = Math.max(1, Math.min(4, Math.round((old.zoom + delta) * 100) / 100));
       return { ...prev, [slot.id]: { ...old, zoom: newZoom } };
     });
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [template, slotImages, slotOffsets, slotScales]);
+
+  // Native wheel listener with passive:false (React onWheel is passive)
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', handleWheel);
+  }, [handleWheel]);
 
   const resetAll = () => { setSlotOffsets({}); setSlotScales({}); setSlotCrops({}); };
 
@@ -1066,45 +1082,31 @@ export default function CoverPage() {
                         <img src={slotImages[slot.id].src} alt={slot.label} style={{ height:'100%', width:'auto', objectFit:'cover' }} />
                       </div>
                     )}
-                    {/* ── Zoom + Pan Controls ── */}
+                    {/* ── Zoom + Crop Controls ── */}
                     {slotImages[slot.id] && (() => {
-                      const crop = slotCrops[slot.id] || { zoom: 1, panX: 0, panY: 0 };
-                      const updateCrop = (key, delta) => {
-                        setSlotCrops(prev => {
-                          const old = prev[slot.id] || { zoom: 1, panX: 0, panY: 0 };
-                          let val = (old[key] || (key === 'zoom' ? 1 : 0)) + delta;
-                          if (key === 'zoom') val = Math.max(1, Math.min(3, Math.round(val * 10) / 10));
-                          else val = Math.max(-5, Math.min(5, Math.round(val * 10) / 10));
-                          return { ...prev, [slot.id]: { ...old, [key]: val } };
-                        });
-                      };
-                      const isDefault = crop.zoom === 1 && crop.panX === 0 && crop.panY === 0;
+                      const crop = slotCrops[slot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
+                      const isDefault = (!crop.zoom || crop.zoom <= 1) && (crop.focalX ?? 0.5) === 0.5 && (crop.focalY ?? 0.3) === 0.3;
                       return (
                         <div style={{ marginTop:6, padding:'6px 10px', background:'rgba(59,130,246,0.04)', borderRadius:8, border:'1px solid rgba(59,130,246,0.12)' }}>
-                          {/* Zoom row */}
-                          <div style={{ display:'flex', gap:6, alignItems:'center', marginBottom:4 }}>
-                            <span style={{ fontSize:10, color:'#60a5fa', fontWeight:600, width:32 }}>🔍</span>
-                            <button onClick={() => updateCrop('zoom', -0.2)} style={s.scaleBtn}>−</button>
-                            <div style={{ flex:1, textAlign:'center', fontSize:11, fontWeight:700, color: crop.zoom > 1 ? '#60a5fa' : 'var(--text-muted)' }}>
-                              {crop.zoom.toFixed(1)}x
+                          <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                            <span style={{ fontSize:10, color:'#60a5fa', fontWeight:600 }}>🔍</span>
+                            <button onClick={() => setSlotCrops(prev => {
+                              const old = prev[slot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
+                              return { ...prev, [slot.id]: { ...old, zoom: Math.max(1, Math.round((old.zoom - 0.2) * 10) / 10) } };
+                            })} style={s.scaleBtn}>−</button>
+                            <div style={{ flex:1, textAlign:'center', fontSize:11, fontWeight:700, color: (crop.zoom||1) > 1 ? '#60a5fa' : 'var(--text-muted)' }}>
+                              {(crop.zoom||1).toFixed(1)}x
                             </div>
-                            <button onClick={() => updateCrop('zoom', 0.2)} style={s.scaleBtn}>+</button>
+                            <button onClick={() => setSlotCrops(prev => {
+                              const old = prev[slot.id] || { zoom: 1, focalX: 0.5, focalY: 0.3 };
+                              return { ...prev, [slot.id]: { ...old, zoom: Math.min(4, Math.round((old.zoom + 0.2) * 10) / 10) } };
+                            })} style={s.scaleBtn}>+</button>
+                            {!isDefault && (
+                              <button onClick={() => setSlotCrops(prev => ({...prev, [slot.id]: { zoom: 1, focalX: 0.5, focalY: 0.3 }}))} style={{ ...s.scaleBtn, fontSize:10, width:28 }} title="รีเซ็ต">↺</button>
+                            )}
                           </div>
-                          {/* Pan row */}
-                          <div style={{ display:'flex', gap:4, alignItems:'center', justifyContent:'center' }}>
-                            <span style={{ fontSize:10, color:'#60a5fa', fontWeight:600, width:32 }}>📍</span>
-                            <button onClick={() => updateCrop('panX', -0.5)} style={s.scaleBtn} title="เลื่อนซ้าย">◀</button>
-                            <button onClick={() => updateCrop('panY', -0.5)} style={s.scaleBtn} title="เลื่อนขึ้น">▲</button>
-                            <button onClick={() => updateCrop('panY', 0.5)} style={s.scaleBtn} title="เลื่อนลง">▼</button>
-                            <button onClick={() => updateCrop('panX', 0.5)} style={s.scaleBtn} title="เลื่อนขวา">▶</button>
-                            {!isDefault && (
-                              <button onClick={() => setSlotCrops(prev => ({...prev, [slot.id]: { zoom: 1, panX: 0, panY: 0 }}))} style={{ ...s.scaleBtn, fontSize:10, width:28 }} title="รีเซ็ต">↺</button>
-                            )}
-                            {!isDefault && (
-                              <span style={{ fontSize:9, color:'var(--text-muted)', marginLeft:4 }}>
-                                {crop.zoom > 1 ? `${crop.zoom.toFixed(1)}x ` : ''}{crop.panX ? `X${crop.panX > 0 ? '+' : ''}${crop.panX}` : ''}{crop.panY ? ` Y${crop.panY > 0 ? '+' : ''}${crop.panY}` : ''}
-                              </span>
-                            )}
+                          <div style={{ fontSize:9, color:'var(--text-muted)', marginTop:4, textAlign:'center' }}>
+                            🖱️ ลากบนปก = เลื่อนภาพ • Scroll = ซูม
                           </div>
                         </div>
                       );
@@ -1256,7 +1258,6 @@ export default function CoverPage() {
                   onMouseDown={e => handleDown(e.clientX, e.clientY)}
                   onMouseMove={e => handleMove(e.clientX, e.clientY)}
                   onMouseUp={handleUp} onMouseLeave={handleUp}
-                  onWheel={handleWheel}
                   onTouchStart={e => { const t=e.touches[0]; handleDown(t.clientX, t.clientY); }}
                   onTouchMove={e => { e.preventDefault(); const t=e.touches[0]; handleMove(t.clientX, t.clientY); }}
                   onTouchEnd={handleUp}
