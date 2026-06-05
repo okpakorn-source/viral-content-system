@@ -1,304 +1,231 @@
 import { NextResponse } from 'next/server';
+import { expandKeywords } from '@/lib/services/radar/keywordExpansion';
+import { collectFromAllSources } from '@/lib/services/radar/sourceCollector';
+import { detectDuplicates } from '@/lib/services/radar/duplicateDetector';
+import { clusterArticles } from '@/lib/services/radar/newsClusterer';
+import { calculateHeatScore, calculateRewriteScore } from '@/lib/services/radar/heatScorer';
+import { calculateCredibilityScore } from '@/lib/services/radar/sourceCredibility';
+import { analyzeAngles } from '@/lib/services/radar/angleAnalyzer';
 import { callAI } from '@/lib/ai/openai';
-import { getSupabase } from '@/lib/supabase';
 
-export const maxDuration = 60;
+// เพิ่ม timeout สำหรับ multi-source pipeline
+export const maxDuration = 120;
 
-// === Serper fetch helper ===
-async function serperFetch(endpoint, query, num = 5) {
-  const SERPER_API_KEY = process.env.SERPER_API_KEY;
-  if (!SERPER_API_KEY) throw new Error('SERPER_API_KEY not configured');
+// === Main GET handler — รองรับ 2 modes ===
+export async function GET(request) {
+  const { searchParams } = new URL(request.url);
+  const mode = searchParams.get('mode');
 
-  const res = await fetch(`https://google.serper.dev/${endpoint}`, {
-    method: 'POST',
-    headers: { 'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ q: query, gl: 'th', hl: 'th', num }),
-  });
-  if (!res.ok) throw new Error(`Serper ${endpoint} error: ${res.status}`);
-  return res.json();
+  try {
+    // === MODE 1: Hot Keywords ===
+    if (mode === 'keywords') {
+      return await handleKeywords();
+    }
+
+    // === MODE 2: Full Search Pipeline ===
+    if (mode === 'search') {
+      const query = searchParams.get('q');
+      const sources = searchParams.get('sources')?.split(',') || ['serper', 'gdelt', 'rss', 'youtube', 'social'];
+      const timeRange = searchParams.get('time') || '7d';
+      if (!query) {
+        return NextResponse.json(
+          { success: false, error: 'ไม่มีคำค้น', errorType: 'MISSING_QUERY' },
+          { status: 400 }
+        );
+      }
+      return await handleSearch(query, sources, timeRange);
+    }
+
+    return NextResponse.json(
+      { success: false, error: 'Invalid mode', errorType: 'INVALID_MODE' },
+      { status: 400 }
+    );
+  } catch (err) {
+    console.error('[Radar-API] Error:', err.message);
+    return NextResponse.json(
+      { success: false, error: err.message, errorType: 'RADAR_ERROR' },
+      { status: 500 }
+    );
+  }
 }
 
 // =============================================
-// MODE 1: GET /api/radar?mode=keywords
-// → ดึงคีย์เวิร์ดร้อนจาก Autocomplete + News headlines
-// → แสดงเป็นปุ่มให้เลือกก่อน
+// handleKeywords — ดึงคีย์เวิร์ดฮอตจาก Serper Autocomplete + News + AI
 // =============================================
-async function getHotKeywords() {
-  const seedQueries = [
-    'ข่าวด่วนวันนี้',
-    'ดราม่า',
-    'ข่าวดารา',
-    'ข่าวการเมืองวันนี้',
-    'ข่าวอาชญากรรม',
-    'ข่าวไวรัล',
+async function handleKeywords() {
+  const seeds = [
+    'ข่าวด่วนวันนี้', 'ดราม่า', 'ข่าวดารา', 'ข่าวการเมืองวันนี้',
+    'ข่าวอาชญากรรม', 'ข่าวไวรัล', 'ข่าวสังคม', 'ข่าวบันเทิง',
   ];
 
-  // Parallel: autocomplete + news headlines from multiple seeds
-  const tasks = seedQueries.flatMap(q => [
-    serperFetch('autocomplete', q, 8).catch(() => ({ suggestions: [] })),
-    serperFetch('news', q, 5).catch(() => ({ news: [] })),
-  ]);
+  try {
+    const SERPER_KEY = process.env.SERPER_API_KEY;
 
-  const results = await Promise.allSettled(tasks);
+    // Serper autocomplete สำหรับทุก seed
+    const autoPromises = seeds.map(seed =>
+      fetch('https://google.serper.dev/autocomplete', {
+        method: 'POST',
+        headers: { 'X-API-KEY': SERPER_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: seed, gl: 'th', hl: 'th' }),
+      }).then(r => r.json()).catch(() => ({ suggestions: [] }))
+    );
 
-  const rawKeywords = new Set();
-  const newsHeadlines = [];
+    // Serper news สำหรับ trending (ใช้ 4 seed แรก)
+    const newsPromises = seeds.slice(0, 4).map(seed =>
+      fetch('https://google.serper.dev/news', {
+        method: 'POST',
+        headers: { 'X-API-KEY': SERPER_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: seed, gl: 'th', hl: 'th', num: 5 }),
+      }).then(r => r.json()).catch(() => ({ news: [] }))
+    );
 
-  results.forEach(r => {
-    if (r.status !== 'fulfilled' || !r.value) return;
-    const data = r.value;
+    const [autoResults, newsResults] = await Promise.all([
+      Promise.all(autoPromises),
+      Promise.all(newsPromises),
+    ]);
 
-    // Autocomplete suggestions
-    (data.suggestions || []).forEach(s => {
-      const val = (typeof s === 'string' ? s : s.value || '').trim();
-      if (val && val.length > 3 && val.length < 60) rawKeywords.add(val);
-    });
+    // รวม suggestions + headlines
+    const allSuggestions = autoResults.flatMap(r =>
+      (r.suggestions || []).map(s => s.value || s)
+    );
+    const allHeadlines = newsResults.flatMap(r =>
+      (r.news || []).map(n => n.title)
+    );
 
-    // News titles → extract as keywords
-    (data.news || []).forEach(item => {
-      if (item.title) {
-        newsHeadlines.push({
-          title: item.title,
-          source: item.source || '',
-          date: item.date || '',
-          link: item.link || '',
-        });
+    // AI สรุปเป็น hot keywords
+    const aiPrompt = `คุณคือ AI วิเคราะห์เทรนด์ข่าว
+
+=== Autocomplete Suggestions ===
+${allSuggestions.slice(0, 40).join('\n')}
+
+=== Headlines ===
+${allHeadlines.slice(0, 20).join('\n')}
+
+จากข้อมูลด้านบน สรุปเป็น 12-15 คีย์เวิร์ดฮอตที่ควรค้นหาต่อ
+
+ตอบเป็น JSON:
+{ "keywords": [{ "keyword": "คำค้นหา", "category": "drama|celeb|politics|crime|social|tech|sport|economy|health|other", "searchQuery": "คำค้นหาแบบยาวขึ้น", "heatLevel": 1|2|3 }] }
+
+heatLevel: 3=ร้อนมาก, 2=กำลังมา, 1=น่าสนใจ
+เลือกคีย์เวิร์ดที่กำลังเป็นที่สนใจ มีความเกี่ยวข้อง และทำข่าวไวรัลได้จริง`;
+
+    try {
+      const aiResult = await callAI({
+        prompt: aiPrompt,
+        model: 'gpt-4o-mini',
+        temperature: 0.4,
+        maxTokens: 2000,
+      });
+      if (aiResult?.keywords?.length > 0) {
+        return NextResponse.json({ success: true, keywords: aiResult.keywords });
       }
+    } catch (aiErr) {
+      console.warn('[Radar-API] AI keywords failed:', aiErr.message);
+    }
+
+    // Fallback: ใช้ raw autocomplete โดยตรง
+    const fallbackKeywords = allSuggestions.slice(0, 12).map((s, i) => ({
+      keyword: s,
+      category: 'other',
+      searchQuery: s,
+      heatLevel: i < 3 ? 3 : i < 7 ? 2 : 1,
+    }));
+
+    return NextResponse.json({ success: true, keywords: fallbackKeywords });
+  } catch (err) {
+    console.error('[Radar-API] Keywords error:', err.message);
+    return NextResponse.json(
+      { success: false, error: err.message, errorType: 'KEYWORDS_ERROR' },
+      { status: 500 }
+    );
+  }
+}
+
+// =============================================
+// handleSearch — Full multi-source search pipeline
+// =============================================
+async function handleSearch(query, sources, timeRange) {
+  const startTime = Date.now();
+  console.log(`[Radar-API] 📡 Full search: "${query}" sources=[${sources}] time=${timeRange}`);
+
+  // Step 1: ขยายคีย์เวิร์ดด้วย AI
+  const expandedQueries = await expandKeywords(query);
+  const enabledQueries = expandedQueries.filter(q => q.enabled);
+  console.log(`[Radar-API] 🧠 Expanded: ${enabledQueries.length} queries`);
+
+  // Step 2: รวบรวมข่าวจากทุกแหล่ง
+  const { articles: rawArticles, meta } = await collectFromAllSources(enabledQueries, {
+    sources,
+    timeRange,
+  });
+  console.log(`[Radar-API] 📰 Collected: ${rawArticles.length} articles (${JSON.stringify(meta.perSource)})`);
+
+  if (rawArticles.length === 0) {
+    return NextResponse.json({
+      success: true,
+      clusters: [],
+      expandedQueries: enabledQueries,
+      meta: { ...meta, duration: Date.now() - startTime },
     });
+  }
+
+  // Step 3: ตรวจจับข่าวซ้ำ
+  const { pairs: duplicatePairs } = detectDuplicates(rawArticles);
+  console.log(`[Radar-API] 🔍 Duplicates: ${duplicatePairs.length} pairs found`);
+
+  // Step 4: จัดกลุ่มข่าว
+  let clusters = clusterArticles(rawArticles, duplicatePairs);
+  console.log(`[Radar-API] 📋 Clusters: ${clusters.length} groups`);
+
+  // Step 5: คำนวณคะแนนแต่ละ cluster + flatten ให้ UI อ่านง่าย
+  clusters = clusters.map(cluster => {
+    const heat = calculateHeatScore(cluster);
+    const cred = calculateCredibilityScore(cluster);
+    const rewrite = calculateRewriteScore(cluster);
+    return {
+      ...cluster,
+      // === UI-friendly aliases ===
+      title: cluster.mainTitle || '',
+      snippet: cluster.summary || '',
+      link: cluster.bestSourceUrl || '',
+      heatScore: typeof heat === 'number' ? heat : (heat?.total || heat?.score || 0),
+      credibilityScore: typeof cred === 'number' ? cred : (cred?.total || cred?.score || 0),
+      rewriteScore: typeof rewrite === 'number' ? rewrite : (rewrite?.total || rewrite?.score || 0),
+      // === Original nested scores ===
+      scores: { heat, credibility: cred, rewritePotential: rewrite },
+    };
   });
 
-  // AI: จากข่าว + autocomplete → สรุปเป็นคีย์เวิร์ดร้อน 12 คำ
-  const headlinesSummary = newsHeadlines.slice(0, 25).map((h, i) =>
-    `${i + 1}. "${h.title}" (${h.source})`
-  ).join('\n');
+  // Step 6: เรียงตาม heat score (descending)
+  clusters.sort((a, b) => (b.heatScore || 0) - (a.heatScore || 0));
 
-  const autocompleteSummary = [...rawKeywords].slice(0, 30).join(', ');
+  // Step 7: วิเคราะห์มุมข่าวสำหรับ top clusters (สูงสุด 10)
+  const topClusters = clusters.slice(0, 10);
+  const anglePromises = topClusters.map(c =>
+    analyzeAngles(c).catch(err => {
+      console.warn(`[Radar-API] Angle analysis failed for cluster ${c.clusterId}:`, err.message);
+      return { angles: [], riskLabels: [] };
+    })
+  );
+  const angleResults = await Promise.all(anglePromises);
+  topClusters.forEach((c, i) => {
+    c.suggestedAngles = angleResults[i]?.angles || [];
+    c.riskLabels = angleResults[i]?.riskLabels || [];
+  });
 
-  const prompt = `จากข้อมูลด้านล่าง สรุปเป็น "คีย์เวิร์ดร้อน" 12 คำ ที่คนไทยกำลังสนใจตอนนี้
+  const duration = Date.now() - startTime;
+  console.log(`[Radar-API] ✅ Done in ${(duration / 1000).toFixed(1)}s: ${clusters.length} clusters, top heat=${topClusters[0]?.heatScore || 0}`);
 
-กฎ:
-- แต่ละคีย์ต้องเป็นประเด็นที่แตกต่างกัน (ห้ามซ้ำบริบท)
-- เขียนสั้นกระชับ 3-8 คำ ภาษาคน (ไม่ใช่ภาษาข่าว)
-- ใส่ emoji 1 ตัวนำหน้าแต่ละคีย์
-- เรียงจากร้อนสุด → น้อยสุด
-- ระบุหมวดของแต่ละคีย์ (drama/celeb/politics/crime/social/tech/sport/economy/health)
-
-=== พาดหัวข่าว 25 เรื่อง ===
-${headlinesSummary}
-
-=== คำค้นหา Autocomplete ===
-${autocompleteSummary}
-
-=== ส่งคืน JSON ===
-{
-  "keywords": [
-    {
-      "keyword": "🔥 กราดยิง อตก ตลาดสด",
-      "category": "crime",
-      "searchQuery": "กราดยิง อตก ตลาด ข่าวล่าสุด",
-      "heatLevel": 3
-    }
-  ]
-}
-
-heatLevel: 3 = ร้อนมาก, 2 = กำลังมา, 1 = น่าสนใจ`;
-
-  try {
-    const aiResult = await callAI({
-      prompt,
-      model: 'gpt-4o-mini',
-      temperature: 0.4,
-      maxTokens: 1500,
-      systemPrompt: 'คุณคือ Trend Analyst ตอบเป็น JSON เท่านั้น',
-    });
-    return aiResult.keywords || [];
-  } catch (err) {
-    console.error('[Radar Keywords AI] Error:', err.message);
-    // Fallback: use raw autocomplete
-    return [...rawKeywords].slice(0, 12).map((kw, i) => ({
-      keyword: kw,
-      category: 'other',
-      searchQuery: kw,
-      heatLevel: i < 4 ? 3 : i < 8 ? 2 : 1,
-    }));
-  }
-}
-
-// =============================================
-// MODE 2: GET /api/radar?mode=search&q=คีย์เวิร์ด
-// → ไปหาข่าวเฉพาะคีย์นั้น + AI วิเคราะห์
-// =============================================
-async function searchKeyword(query) {
-  // Parallel: News + Search
-  const [newsRes, searchRes] = await Promise.allSettled([
-    serperFetch('news', query, 10),
-    serperFetch('search', query, 8),
-  ]);
-
-  const articles = [];
-  const seenLinks = new Set();
-
-  // News
-  if (newsRes.status === 'fulfilled') {
-    (newsRes.value.news || []).forEach(item => {
-      if (item.link && !seenLinks.has(item.link)) {
-        seenLinks.add(item.link);
-        articles.push({
-          title: item.title || '', link: item.link,
-          snippet: item.snippet || '', source: item.source || '',
-          date: item.date || '', imageUrl: item.imageUrl || null, _from: 'news',
-        });
-      }
-    });
-  }
-
-  // Search organic + topStories
-  if (searchRes.status === 'fulfilled') {
-    const data = searchRes.value;
-    [...(data.topStories || []), ...(data.organic || [])].forEach(item => {
-      if (item.link && !seenLinks.has(item.link)) {
-        seenLinks.add(item.link);
-        articles.push({
-          title: item.title || '', link: item.link,
-          snippet: item.snippet || '', source: item.source || item.displayLink || '',
-          date: item.date || '', imageUrl: item.imageUrl || null, _from: 'search',
-        });
-      }
-    });
-  }
-
-  if (articles.length === 0) return { articles: [], aiSummary: null };
-
-  // AI: วิเคราะห์ข่าวที่ได้ + dedup + แนะนำมุม
-  const articlesSummary = articles.slice(0, 20).map((a, i) =>
-    `[${i + 1}] "${a.title}" — ${a.source} ${a.date ? '(' + a.date + ')' : ''}\nSnippet: ${(a.snippet || '').slice(0, 80)}`
-  ).join('\n\n');
-
-  try {
-    const aiResult = await callAI({
-      prompt: `คุณเป็น Trend Analyst วิเคราะห์ข่าวคีย์เวิร์ด "${query}"
-
-จากข่าว ${articles.length} เรื่องด้านล่าง:
-
-1. **จัดกลุ่มข่าวซ้ำ** (ต่างสำนักแต่เรื่องเดียวกัน → รวมเป็น 1)
-2. **เลือก Top 5 เรื่องที่แตกต่างกัน** (ห้ามซ้ำบริบท)
-3. **ให้คะแนน Heat Score 0-100** แต่ละเรื่อง
-4. **แนะนำมุมข่าว 2-3 มุม** สำหรับทำคอนเทนต์
-
-=== ข่าว ${articles.length} เรื่อง ===
-${articlesSummary}
-
-=== ส่งคืน JSON ===
-{
-  "summary": "สรุปภาพรวมสถานการณ์ 1-2 ประโยค",
-  "top5": [
-    {
-      "rank": 1,
-      "title": "หัวข้อกระชับ ภาษาคน",
-      "link": "URL ข่าวต้นฉบับ",
-      "sources": ["ไทยรัฐ", "ข่าวสด"],
-      "sourceCount": 2,
-      "heatScore": 90,
-      "snippet": "สรุปสั้นๆ 1-2 ประโยค",
-      "suggestedAngles": ["มุม 1", "มุม 2"],
-      "whyHot": "ทำไมข่าวนี้น่าสนใจ"
-    }
-  ],
-  "duplicatesRemoved": 5
-}`,
-      model: 'gpt-4o-mini',
-      temperature: 0.3,
-      maxTokens: 2000,
-      systemPrompt: 'คุณคือ Trend Analyst ตอบเป็น JSON เท่านั้น',
-    });
-
-    // Enrich with image + link from raw
-    const top5 = (aiResult.top5 || []).map(item => {
-      const matchedRaw = articles.find(a => a.link === item.link) ||
-        articles.find(a => a.title?.includes(item.title?.slice(0, 15)));
-      return {
-        ...item,
-        link: item.link || matchedRaw?.link || '',
-        imageUrl: matchedRaw?.imageUrl || null,
-        heatLevel: item.heatScore >= 80 ? '🔥🔥🔥' : item.heatScore >= 60 ? '🔥🔥' : item.heatScore >= 40 ? '🔥' : '❄️',
-      };
-    });
-
-    return {
-      articles: top5,
-      aiSummary: aiResult.summary || null,
-      duplicatesRemoved: aiResult.duplicatesRemoved || 0,
-      totalRaw: articles.length,
-    };
-  } catch (err) {
-    console.error('[Radar Search AI] Error:', err.message);
-    // Fallback: raw articles
-    return {
-      articles: articles.slice(0, 5).map((a, i) => ({
-        rank: i + 1, title: a.title, link: a.link, sources: [a.source],
-        sourceCount: 1, heatScore: 50, snippet: a.snippet?.slice(0, 100),
-        suggestedAngles: [], whyHot: '', heatLevel: '🔥', imageUrl: a.imageUrl,
-      })),
-      aiSummary: null,
-      totalRaw: articles.length,
-    };
-  }
-}
-
-// === Save to history for freshness ===
-async function saveToHistory(keyword, titles) {
-  try {
-    const supabase = getSupabase();
-    if (!supabase) return;
-    await supabase.from('radar_history').insert({
-      category: keyword.slice(0, 50),
-      titles,
-      created_at: new Date().toISOString(),
-    });
-  } catch {}
-}
-
-// === Main GET handler ===
-export async function GET(request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const mode = searchParams.get('mode') || 'keywords';
-    const query = searchParams.get('q') || '';
-
-    // MODE 1: Get hot keywords
-    if (mode === 'keywords') {
-      console.log('[Radar] Scanning hot keywords...');
-      const keywords = await getHotKeywords();
-      return NextResponse.json({
-        success: true,
-        mode: 'keywords',
-        keywords,
-        scannedAt: new Date().toISOString(),
-      });
-    }
-
-    // MODE 2: Search specific keyword
-    if (mode === 'search' && query) {
-      console.log(`[Radar] Deep search: "${query}"`);
-      const result = await searchKeyword(query);
-
-      // Save for freshness
-      const titles = result.articles.map(a => a.title);
-      saveToHistory(query, titles).catch(() => {});
-
-      return NextResponse.json({
-        success: true,
-        mode: 'search',
-        query,
-        ...result,
-        scannedAt: new Date().toISOString(),
-      });
-    }
-
-    return NextResponse.json({ success: false, error: 'Invalid mode. Use mode=keywords or mode=search&q=...' }, { status: 400 });
-
-  } catch (error) {
-    console.error('[Radar API Error]', error.message);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  }
+  return NextResponse.json({
+    success: true,
+    clusters: topClusters,
+    totalClusters: clusters.length,
+    expandedQueries: enabledQueries,
+    meta: {
+      ...meta,
+      duplicatesFound: duplicatePairs.length,
+      clustersTotal: clusters.length,
+      duration,
+    },
+  });
 }

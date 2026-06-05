@@ -1113,6 +1113,12 @@ function NewContentPageInner() {
     setQueueJobId(null); setQueuePosition(0); setQueueStatus(null); setQueuePolling(false);
     setSimulatedComments([]);
     setFactPoolData(null);
+    // W12 fix: clear state ที่เคยขาด
+    setArchiveSaved(false);
+    setBlueprintData(null); setEditedBlueprint(null); setBlueprinting(false);
+    setComposedImages(null); setComposingImage(false);
+    setNewsImages([]); setNewsImagePreviews([]);
+    setUniversalDetection(null); setLiveDetection(null);
   };
 
   const needsUrl = ['url', 'facebook', 'tiktok', 'youtube'].includes(sourceType);

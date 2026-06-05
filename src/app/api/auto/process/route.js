@@ -445,8 +445,8 @@ export async function POST(request) {
     let blueprintData = null;
     try {
       const bpRes = await performSummarize({
-        text: normalizedData.newsBody || normalizedData.text || normalizedData.rawText,
-        newsTitle: normalizedData.newsTitle || normalizedData.title,
+        text: newsData.newsBody || normalizedData.rawText,
+        newsTitle: newsData.newsTitle || normalizedData.title,
         mode: 'blueprint',
         breakdownData: breakdownData,
         workflowId: _wfId,

@@ -302,6 +302,12 @@ async function processNewsJob(job) {
     const jobTime = ((Date.now() - jobStartTime) / 1000).toFixed(1);
     await processingMsg.edit({ content: `✅ สร้างเนื้อหาสำเร็จแล้ว! (${versionsToShow.length} เวอร์ชัน | ใช้เวลา ${jobTime}s)` });
 
+    // ดึง Research items สำหรับแสดงแหล่งอ้างอิง
+    const researchItems = data.data?.researchItems || data.researchItems || [];
+    const researchText = researchItems.length > 0
+      ? researchItems.slice(0, 3).map(r => `• ${r.title || r.keyword} — [${r.sourceName || 'แหล่งข่าว'}](${r.sourceUrl || '#'})`).join('\n')
+      : null;
+
     // ส่งทีละ 1 เวอร์ชันเพื่อป้องกันข้อจำกัด 6000 ตัวอักษรต่อ 1 ข้อความของ Discord API
     const chunkSize = 1;
     for (let i = 0; i < versionsToShow.length; i += chunkSize) {
@@ -313,11 +319,20 @@ async function processNewsJob(job) {
         const isEnhanced = v._source === 'enhanced';
         const promptId = v.promptId || (data.data?.usedPromptInfo?.name ? 'Dynamic' : 'Unknown');
         
-        return new EmbedBuilder()
+        const embed = new EmbedBuilder()
           .setColor(isEnhanced ? '#10b981' : '#f91880') // สีเขียวสำหรับ Enhanced, สีชมพูสำหรับ Classic
           .setTitle(`[${versionLabel}] ${data.newsData?.newsTitle || 'AI Content Result'}`.slice(0, 250))
           .setDescription(`${(v.content || 'ไม่พบเนื้อหา').slice(0, 3800)}\n\n---\n*🔥 โพสต์แล้วปัง? พิมพ์ \`!ปัง ${promptId}\` เพื่อสอนให้ระบบเก่งขึ้น!*`)
           .setFooter({ text: `สร้างโดย Pipeline: ${data.detection?.pipelineLabel || 'Universal'} | PromptID: ${promptId}` });
+
+        // เพิ่มแหล่งอ้างอิง Research ในเวอร์ชันแรก
+        if (actualIndex === 0 && researchText) {
+          embed.addFields({ name: '📚 แหล่งอ้างอิง Research', value: researchText.slice(0, 1024) });
+        } else if (actualIndex === 0 && researchItems.length === 0) {
+          embed.addFields({ name: '📚 แหล่งอ้างอิง', value: '⚠️ ไม่มีข้อมูลจากการ Research (Serper)' });
+        }
+
+        return embed;
       });
 
       await message.reply({ embeds: embeds });
