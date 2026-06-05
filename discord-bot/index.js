@@ -327,8 +327,14 @@ async function processNewsJob(job) {
     const jobTime = ((Date.now() - jobStartTime) / 1000).toFixed(1);
     await processingMsg.edit({ content: `✅ สร้างเนื้อหาสำเร็จแล้ว! (${versionsToShow.length} เวอร์ชัน | ใช้เวลา ${jobTime}s)` });
 
-    // ดึง Research items สำหรับแสดงแหล่งอ้างอิง
-    const researchItems = data.data?.researchItems || data.researchItems || [];
+    // ดึง Research items — ลอง path ทั้งหมดที่เป็นไปได้
+    const researchItems = data.data?.researchItems 
+      || data.researchItems 
+      || data.data?.analysisResult?.researchItems 
+      || data.analysisResult?.researchItems 
+      || [];
+    console.log(`[Discord Bot] Research items found: ${researchItems.length} (paths: data.data?.researchItems=${!!data.data?.researchItems}, data.researchItems=${!!data.researchItems}, analysisResult.researchItems=${!!data.data?.analysisResult?.researchItems})`);
+    
     const researchText = researchItems.length > 0
       ? researchItems.slice(0, 3).map(r => `• ${r.title || r.keyword} — [${r.sourceName || 'แหล่งข่าว'}](${r.sourceUrl || '#'})`).join('\n')
       : null;
@@ -350,18 +356,22 @@ async function processNewsJob(job) {
           .setDescription(`${(v.content || 'ไม่พบเนื้อหา').slice(0, 3800)}\n\n---\n*🔥 โพสต์แล้วปัง? พิมพ์ \`!ปัง ${promptId}\` เพื่อสอนให้ระบบเก่งขึ้น!*`)
           .setFooter({ text: `สร้างโดย Pipeline: ${data.detection?.pipelineLabel || 'Universal'} | PromptID: ${promptId}` });
 
-        // เพิ่มแหล่งอ้างอิง Research ในเวอร์ชันแรก
-        if (actualIndex === 0 && researchText) {
-          embed.addFields({ name: '📚 แหล่งอ้างอิง Research', value: researchText.slice(0, 1024) });
-        } else if (actualIndex === 0 && researchItems.length === 0) {
-          embed.addFields({ name: '📚 แหล่งอ้างอิง', value: '⚠️ ไม่มีข้อมูลจากการ Research (Serper)' });
-        }
-
         return embed;
       });
 
       await message.reply({ embeds: embeds });
     }
+
+    // === แสดงสรุป Research ในข้อความแยกหลังเวอร์ชันทั้งหมด ===
+    const researchSummaryEmbed = new EmbedBuilder()
+      .setColor('#3b82f6')
+      .setTitle('📚 แหล่งอ้างอิง Research')
+      .setDescription(researchText 
+        ? `${researchText}\n\n_ใช้ข้อมูลจาก ${researchItems.length} แหล่ง เพื่อเสริมข้อเท็จจริงในเนื้อหา_`
+        : '⚠️ ไม่มีข้อมูลจากการ Research (Serper) — เนื้อหาใช้ข้อมูลจากข่าวต้นฉบับอย่างเดียว')
+      .setFooter({ text: `Research Grade: ${researchItems.length >= 3 ? '✅ Strong' : researchItems.length >= 1 ? '⚠️ Partial' : '❌ Missing'}` });
+    
+    await message.reply({ embeds: [researchSummaryEmbed] });
 
     // Display Simulated Comments if available
     const simulatedComments = data.simulatedComments || data.data?.simulatedComments || [];
