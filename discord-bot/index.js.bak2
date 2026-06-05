@@ -268,33 +268,8 @@ async function processNewsJob(job) {
           const ahead = st.queuesAhead || 0;
           await processingMsg.edit(`📋 รอคิว (ลำดับที่ ${st.position}) มี ${ahead} คิวก่อนหน้า ⏳\nประมาณ ${ahead * 3} นาที`).catch(() => {});
           lastStatus = st.status;
-        } else if (st.status === 'processing') {
-          // แสดง pipeline steps ตามเวลาที่ผ่านไป
-          const elapsed = Math.round((Date.now() - pollStartTime) / 1000);
-          const steps = [
-            { at: 0,  icon: '✅', label: 'ถึงคิวของคุณแล้ว' },
-            { at: 5,  icon: '✅', label: 'ตรวจจับแหล่งข้อมูล' },
-            { at: 10, icon: '✅', label: 'ดึงเนื้อหา' },
-            { at: 20, icon: '✅', label: 'สกัดเนื้อข่าว (AI)' },
-            { at: 35, icon: '✅', label: 'แตกประเด็น (AI)' },
-            { at: 50, icon: '✅', label: 'วาง Emotional Blueprint' },
-            { at: 65, icon: '✅', label: 'ค้นหาข้อมูล (Google)' },
-            { at: 90, icon: '✅', label: 'Multi-Angle Generate' },
-            { at: 120, icon: '✅', label: 'Enhanced Generate' },
-          ];
-
-          const stepLines = steps.map(s => {
-            if (elapsed >= s.at + 10) return `${s.icon} ${s.label}`;
-            if (elapsed >= s.at) return `⏳ ${s.label}...`;
-            return `⬜ ${s.label}`;
-          }).join('\n');
-
-          const progressMsg = `⚡ กำลังประมวลผลข่าวของคุณ... (${elapsed}s)\n\n**ขั้นตอน:**\n${stepLines}`;
-
-          // อัพเดททุก 5 วินาที เพื่อไม่ spam Discord API
-          if (elapsed % 5 === 0 || st.status !== lastStatus) {
-            await processingMsg.edit(progressMsg).catch(() => {});
-          }
+        } else if (st.status === 'processing' && st.status !== lastStatus) {
+          await processingMsg.edit(`⚡ กำลังประมวลผลข่าวของคุณ... (อาจใช้เวลา 2-4 นาที)\n\n**ขั้นตอนการประมวลผล:**\n✅ \`[Queue]\` ถึงคิวของคุณแล้ว!\n⏳ \`[Pipeline]\` กำลังดึงข้อมูล + สร้างเนื้อหา...`).catch(() => {});
           lastStatus = st.status;
         } else if (st.status === 'completed') {
           data = st.result;

@@ -446,43 +446,17 @@ function NewContentPageInner() {
     setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
 
     const inputLabel = hasImg ? `รูปภาพ ${inputImages.length} ใบ` : textOnly.slice(0, 30) || 'input';
-    const pipelineType = hasImg ? 'Image + Text' : 'Text Pipeline';
-    // แสดง 8 steps ตรงกับ Enhanced Pipeline ตั้งแต่แรก (text ทำ 8 steps จริง)
-    startWorkflow(`Enhanced Pipeline — ${pipelineType}`, [
-      { id: 'auto_detect',    label: '🔍 ตรวจจับแหล่งข้อมูล' },
-      { id: 'auto_scrape',    label: '📡 ดึงเนื้อหา' },
-      { id: 'auto_extract',   label: '📰 สกัดเนื้อข่าว (AI)' },
-      { id: 'auto_breakdown', label: '🔎 แตกประเด็น (AI)' },
-      { id: 'auto_blueprint', label: '🧬 วาง Emotional Blueprint' },
-      { id: 'auto_research',  label: '🔍 ค้นหาข้อมูล (Google)' },
-      { id: 'auto_classic',   label: '⚡ Multi-Angle Generate' },
-      { id: 'auto_enhanced',  label: '🧬 Enhanced Generate' },
-    ], { type: pipelineType, label: inputLabel });
+    // เริ่มด้วย 4 steps พื้นฐาน — จะ upgrade เป็น 8 steps ถ้า enhanced pipeline
+    startWorkflow('Universal Auto Pipeline', [
+      { id: 'u_detect',    label: '🔍 ตรวจจับ source' },
+      { id: 'u_extract',   label: '⚙️ ดึง/วิเคราะห์เนื้อหา' },
+      { id: 'u_normalize', label: '📐 Normalize data' },
+      { id: 'u_generate',  label: '✍️ สร้างเนื้อหา' },
+    ], { type: 'universal', label: inputLabel });
 
     try {
-      wfStart('auto_detect', { detail: 'กำลัง detect ประเภทข้อมูล...' });
-      setAutoProgress('⚡ Enhanced AI Pipeline กำลังประมวลผล...');
-
-      // === ตั้ง timer animate steps ระหว่าง polling ===
-      const stepTimeline = [
-        { at: 3,  fn: () => { wfComplete('auto_detect', `✅ ${pipelineType}`); wfStart('auto_scrape', { detail: 'ดึงเนื้อหา...' }); } },
-        { at: 8,  fn: () => { wfComplete('auto_scrape', 'ดึงเนื้อหาสำเร็จ'); wfStart('auto_extract', { api: 'Gemini Flash', detail: 'สกัดเนื้อข่าว...' }); } },
-        { at: 18, fn: () => { wfComplete('auto_extract', 'สกัดเนื้อข่าวสำเร็จ'); wfStart('auto_breakdown', { api: 'GPT-4o', detail: 'วิเคราะห์มุมข่าว...' }); } },
-        { at: 30, fn: () => { wfComplete('auto_breakdown', 'วิเคราะห์มุมข่าวสำเร็จ'); wfStart('auto_blueprint', { api: 'GPT-4o', detail: 'วาง Emotional Architecture...' }); } },
-        { at: 45, fn: () => { wfComplete('auto_blueprint', 'วาง Blueprint สำเร็จ'); wfStart('auto_research', { api: 'Serper API', detail: 'ค้นหาข้อมูลจริงจาก Google...' }); } },
-        { at: 60, fn: () => { wfComplete('auto_research', 'ค้นหาข้อมูลสำเร็จ'); wfStart('auto_classic', { api: 'Claude', detail: 'Multi-Angle prompts...' }); } },
-        { at: 90, fn: () => { wfComplete('auto_classic', 'สร้างเวอร์ชัน Classic สำเร็จ'); wfStart('auto_enhanced', { api: 'Claude', detail: 'Enhanced + Blueprint...' }); } },
-      ];
-      const animateStart = Date.now();
-      let animateIdx = 0;
-      const animateTimer = setInterval(() => {
-        const elapsed = (Date.now() - animateStart) / 1000;
-        while (animateIdx < stepTimeline.length && elapsed >= stepTimeline[animateIdx].at) {
-          stepTimeline[animateIdx].fn();
-          animateIdx++;
-        }
-        if (animateIdx >= stepTimeline.length) clearInterval(animateTimer);
-      }, 1000);
+      wfStart('u_detect', { detail: 'กำลัง detect และ route...' });
+      setAutoProgress('⚡ Universal AI Pipeline กำลังประมวลผล...');
 
       // === Queue-based submission ===
       const queueResult = await submitViaQueue({
@@ -491,50 +465,94 @@ function NewContentPageInner() {
         contentLength,
         userId: 'web-user',
       });
-
-      clearInterval(animateTimer); // หยุด animation
       const data = { success: true, ...(queueResult || {}) };
       if (!data.success) {
         const errMsg = getErrorMessage(data.error || 'Universal process failed');
         const errorWithStep = new Error(errMsg);
-        errorWithStep.failedStep = data.failedStep || 'auto_extract';
+        errorWithStep.failedStep = data.failedStep || 'u_extract';
         throw errorWithStep;
       }
 
-      // ─── Finalize steps กับข้อมูลจริงจาก API ───
-      const st = data.data?.stepTimings || {};
-      const pi = data.data?.usedPromptInfo;
-      const newsTitle = data.data?.newsData?.newsTitle || data.newsData?.newsTitle || '';
-      const anglesCount = data.data?.breakdownData?.possible_angles?.length || data.breakdownData?.possible_angles?.length || 0;
-      const versionsCount = data.data?.analysisResult?.versions?.length || data.analysisResult?.versions?.length || 0;
-      const classicCount = data.data?.classicVersionCount || 0;
-      const enhancedCount = data.data?.enhancedVersionCount || 0;
-      const resCount = data.data?.researchItems?.length || 0;
-      const promptLabel = pi?.source === 'library' ? `🏛️ ${pi.name?.slice(0, 20)}` : `📦 Library`;
-      const pipelineIcon = data.detection?.pipelineIcon || '📝';
-      const pipelineLbl = data.detection?.pipelineLabel || pipelineType;
-
+      // ─── Detect ว่าเป็น Enhanced Pipeline หรือ Local Pipeline ───
+      const isEnhanced = !!(data.debug?.delegatedTo || data.data?.stepTimings);
       const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
-      // Finalize ทุก step ด้วยข้อมูลจริง (ไม่ว่า animated ไปถึงไหนแล้ว)
-      wfComplete('auto_detect', `${pipelineIcon} ${pipelineLbl} (${Math.round((data.detection?.confidence || 0.9) * 100)}%)`);
-      wfComplete('auto_scrape', `ดึง ${data.data?.newsData?.newsBody?.length || data.newsData?.newsBody?.length || 0} ตัวอักษร | ${st.scrape || '✓'}s`);
-      await delay(100);
-      wfComplete('auto_extract', `"${newsTitle.slice(0, 40)}" | ${st.extract || '✓'}s`);
-      wfComplete('auto_breakdown', `${anglesCount} มุมข่าว | ${st.breakdown || '✓'}s`);
-      await delay(100);
-      const bpData = data.data?.blueprint || null;
-      wfComplete('auto_blueprint', bpData?.core_emotion
-        ? `"${bpData.core_emotion}" | ${st.blueprint || '✓'}s`
-        : `⚠️ Blueprint ข้ามไป`);
-      wfComplete('auto_research', resCount > 0
-        ? `✅ ${resCount} แหล่งข้อมูล | ${st.research || '✓'}s`
-        : `⚠️ ไม่พบข้อมูลเพิ่มเติม`);
-      await delay(100);
-      wfComplete('auto_classic', `✅ ${classicCount} เวอร์ชัน | ${st.classic || '✓'}s`);
-      wfComplete('auto_enhanced', `✅ ${enhancedCount} เวอร์ชัน | ${st.enhanced || '✓'}s`);
+      if (isEnhanced && data.data?.stepTimings) {
+        // === Enhanced Pipeline: replay 8 steps เหมือน handleAutoMode ===
+        const st = data.data.stepTimings || {};
+        const pi = data.data.usedPromptInfo;
+        const newsTitle = data.data?.newsData?.newsTitle || data.newsData?.newsTitle || '';
+        const anglesCount = data.data?.breakdownData?.possible_angles?.length || data.breakdownData?.possible_angles?.length || 0;
+        const versionsCount = data.data?.analysisResult?.versions?.length || data.analysisResult?.versions?.length || 0;
+        const classicCount = data.data?.classicVersionCount || 0;
+        const enhancedCount = data.data?.enhancedVersionCount || 0;
+        const resCount = data.data?.researchItems?.length || 0;
+        const promptLabel = pi?.source === 'library' ? `🏛️ ${pi.name?.slice(0, 20)}` : `📦 Library`;
+        const pipelineIcon = data.detection?.pipelineIcon || '📝';
+        const pipelineLabel = data.detection?.pipelineLabel || 'Text Pipeline';
 
-      finishWorkflow(`✅ ${data.data?.totalTimeSeconds || data.debug?.durationSeconds || '?'}s — ${versionsCount} เวอร์ชัน (${classicCount}+${enhancedCount}) | ${promptLabel}`);
+        // Upgrade workflow steps → 8 steps เหมือน URL pipeline
+        startWorkflow(`Enhanced Pipeline — ${pipelineLabel}`, [
+          { id: 'auto_detect', label: `${pipelineIcon} ตรวจจับแหล่งข้อมูล` },
+          { id: 'auto_scrape', label: '📡 ดึงเนื้อหา' },
+          { id: 'auto_extract', label: '📰 สกัดเนื้อข่าว (AI)' },
+          { id: 'auto_breakdown', label: '🔍 แตกประเด็น (AI)' },
+          { id: 'auto_blueprint', label: '🧬 วาง Emotional Blueprint' },
+          { id: 'auto_research', label: '🌐 ค้นหาข้อมูล (Google)' },
+          { id: 'auto_classic', label: '⚡ Multi-Angle Generate' },
+          { id: 'auto_enhanced', label: '🧬 Enhanced Generate' },
+        ], { type: pipelineLabel, label: inputLabel });
+
+        wfStart('auto_detect', { detail: `ตรวจจับ: ${pipelineLabel}` });
+        await delay(150);
+        wfComplete('auto_detect', `${pipelineIcon} ${pipelineLabel} (${Math.round((data.detection?.confidence || 0.9) * 100)}%)`);
+
+        wfStart('auto_scrape', { detail: 'ดึงเนื้อหา...' });
+        await delay(200);
+        wfComplete('auto_scrape', `ดึง ${data.data?.newsData?.newsBody?.length || data.newsData?.newsBody?.length || 0} ตัวอักษร | ${st.scrape || '?'}s`);
+
+        wfStart('auto_extract', { api: 'GPT-4o-mini', detail: `EXTRACT prompt → "${newsTitle.slice(0,30)}..."` });
+        await delay(250);
+        wfComplete('auto_extract', `"${newsTitle.slice(0, 40)}" | ${st.extract || '?'}s`);
+
+        wfStart('auto_breakdown', { api: 'GPT-4o-mini', detail: 'BREAKDOWN prompt → วิเคราะห์มุมข่าว' });
+        await delay(250);
+        wfComplete('auto_breakdown', `${anglesCount} มุมข่าว | ${st.breakdown || '?'}s`);
+
+        wfStart('auto_blueprint', { api: 'GPT-4o', detail: 'BLUEPRINT prompt → Emotional Architecture' });
+        await delay(250);
+        const bpData = data.data?.blueprint || null;
+        wfComplete('auto_blueprint', bpData?.core_emotion
+          ? `"${bpData.core_emotion}" | ${st.blueprint || '?'}s`
+          : `⚠️ Blueprint ข้ามไป`);
+
+        wfStart('auto_research', { api: 'Serper API', detail: 'ค้นหาข้อมูลจริงจาก Google...' });
+        await delay(250);
+        wfComplete('auto_research', resCount > 0
+          ? `✅ ${resCount} แหล่งข้อมูล | ${st.research || '?'}s`
+          : `⚠️ ไม่พบข้อมูลเพิ่มเติม`);
+
+        wfStart('auto_classic', { api: `Claude ×${classicCount}`, detail: 'Multi-Angle prompts from Library' });
+        await delay(250);
+        wfComplete('auto_classic', `✅ ${classicCount} เวอร์ชัน | ${st.classic || '?'}s`);
+
+        wfStart('auto_enhanced', { api: `Claude ×${enhancedCount}`, detail: 'Enhanced + Blueprint inject' });
+        await delay(250);
+        wfComplete('auto_enhanced', `✅ ${enhancedCount} เวอร์ชัน | ${st.enhanced || '?'}s`);
+
+        finishWorkflow(`✅ ${data.data?.totalTimeSeconds || data.debug?.durationSeconds || '?'}s — ${versionsCount} เวอร์ชัน (${classicCount}+${enhancedCount}) | ${promptLabel}`);
+      } else {
+        // === Local Pipeline: แสดง steps ตามจริง ===
+        const pipelineIcon = data.detection?.pipelineIcon || '⚙️';
+        const pipelineLabel = data.detection?.pipelineLabel || 'Pipeline';
+        const versionCount = data.analysisResult?.totalVersions || data.analysisResult?.versions?.length || 0;
+
+        wfComplete('u_detect', `${pipelineIcon} ${pipelineLabel} (${Math.round((data.detection?.confidence || 0) * 100)}%)`);
+        wfStart('u_extract', {}); wfComplete('u_extract', `${data.normalized?.title?.slice(0, 40) || 'สกัดสำเร็จ'}`);
+        wfStart('u_normalize', {}); wfComplete('u_normalize', `lang:${data.normalized?.language} | cat:${data.normalized?.category} | entities:${data.normalized?.entities?.length || 0}`);
+        wfStart('u_generate', {}); wfComplete('u_generate', `✅ ${versionCount} versions`);
+        finishWorkflow(`✅ ${data.debug?.durationSeconds}s | ${pipelineIcon} ${pipelineLabel}`);
+      }
 
       // Store detection info for debug panel
       setUniversalDetection(data.detection);
