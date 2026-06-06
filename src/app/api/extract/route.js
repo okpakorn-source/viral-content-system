@@ -24,7 +24,7 @@ export async function POST(request) {
   } catch (error) {
     console.error('Extract API Error:', error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: error.message, errorType: 'EXTRACT_ERROR' },
       { status: 500 }
     );
   }

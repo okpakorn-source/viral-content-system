@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+﻿import sharp from 'sharp';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -638,7 +638,7 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
   if (heroFaceData?.hasFaces && heroFaceData.faces.length > 0) {
     const heroSlot = layoutSlots[heroSlotIdx] || layoutSlots[0];
     // คำนวณตำแหน่งหน้าใน canvas coordinates (ประมาณ)
-    const heroMeta = imageBuffers[heroImgIdx] ? await sharp(imageBuffers[heroImgIdx]).metadata().catch(() => ({})) : {};
+    const heroMeta = imageBuffers[heroImgIdx] ? (imageBuffers[heroImgIdx] ? await sharp(imageBuffers[heroImgIdx]).metadata().catch(() => ({})) : {}) : {};
     const scaleX = (heroSlot.w || W) / (heroMeta.width || heroSlot.w || W);
     const scaleY = (heroSlot.h || H) / (heroMeta.height || heroSlot.h || H);
     

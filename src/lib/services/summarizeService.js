@@ -162,6 +162,7 @@ function checkThaiQuality(content) {
   
   // à¸•à¸£à¸§à¸ˆà¸ˆà¸±à¸šà¸¥à¸³à¸”à¸±à¸šà¸žà¸¢à¸±à¸�à¸Šà¸™à¸°à¸‹à¹‰à¸³à¸œà¸´à¸”à¸›à¸�à¸•à¸´ (garbled text)
   const garbledPattern = /[\u0E01-\u0E2E]{6,}/g;
+  const garbledMatches = content.match(garbledPattern) || [];
   if (garbledMatches.length > 0) {
     score -= garbledMatches.length * 5;
     issues.push(`garbled: ${garbledMatches.length} sequences`);
