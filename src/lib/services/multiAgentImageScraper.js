@@ -25,32 +25,81 @@ async function fetchWithTimeout(resource, options = {}) {
 }
 
 // ==========================================
+// Helper: Compute blur score (Laplacian variance)
+// Higher value = sharper image
+// ==========================================
+async function computeBlurScore(buffer) {
+  try {
+    const { data, info } = await sharp(buffer)
+      .resize(100, 100, { fit: 'cover' })
+      .greyscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    let sum = 0;
+    for (let i = 1; i < data.length - 1; i++) {
+      sum += Math.abs(data[i - 1] + data[i + 1] - 2 * data[i]);
+    }
+    return sum / data.length; // Higher = sharper
+  } catch {
+    return 0;
+  }
+}
+
+// ==========================================
 // Helper: Download image for AI Vision
+// Returns { inlineData, meta: { width, height, blurScore } } or null
 // ==========================================
 async function downloadForVision(url) {
   try {
-    const res = await fetchWithTimeout(url, { timeout: 8000 });
-    if (!res.ok) {
-      console.log(`[Download] Failed ${res.status} for ${url.substring(0, 80)}`);
+    let rawBuffer;
+
+    // รองรับ data: URI (จาก YouTube frame extractor)
+    if (url.startsWith('data:image/')) {
+      const base64Match = url.match(/base64,(.+)/);
+      if (base64Match) {
+        rawBuffer = Buffer.from(base64Match[1], 'base64');
+      } else {
+        return null;
+      }
+    } else {
+      const res = await fetchWithTimeout(url, { timeout: 8000 });
+      if (!res.ok) {
+        console.log(`[Download] Failed ${res.status} for ${url.substring(0, 80)}`);
+        return null;
+      }
+      const arrayBuffer = await res.arrayBuffer();
+      rawBuffer = Buffer.from(arrayBuffer);
+    }
+
+    if (rawBuffer.length < 2000) {
+      console.log(`[Download] Too small (${rawBuffer.length} bytes), skipping: ${url.substring(0, 80)}`);
       return null;
     }
-    const arrayBuffer = await res.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
 
-    if (buffer.length < 2000) {
-      console.log(`[Download] Too small (${buffer.length} bytes), skipping: ${url.substring(0, 80)}`);
-      return null;
-    }
+    // ดึง metadata ของภาพต้นฉบับ (resolution)
+    const originalMeta = await sharp(rawBuffer).metadata();
+    const origWidth = originalMeta.width || 0;
+    const origHeight = originalMeta.height || 0;
 
-    const resized = await sharp(buffer)
+    // Resize สำหรับ Vision API
+    const resized = await sharp(rawBuffer)
       .resize(512, 512, { fit: 'inside' })
       .jpeg({ quality: 80 })
       .toBuffer();
+
+    // คำนวณ blur score จาก resized buffer
+    const blurScore = await computeBlurScore(resized);
 
     return {
       inlineData: {
         data: resized.toString('base64'),
         mimeType: 'image/jpeg'
+      },
+      meta: {
+        width: origWidth,
+        height: origHeight,
+        blurScore: blurScore
       }
     };
   } catch (e) {
@@ -74,7 +123,7 @@ const BLOCKED_DOMAINS = [
   'twitter.com', 'x.com', 'twimg.com'
 ];
 
-const BLOCKED_URL_KEYWORDS = ['logo', 'icon', 'banner', 'watermark', 'avatar', 'sprite', 'pixel', 'tracking', 'crawler', 'widget'];
+const BLOCKED_URL_KEYWORDS = ['logo', 'icon', 'banner', 'watermark', 'avatar', 'sprite', 'pixel', 'tracking', 'crawler', 'widget', 'cover', 'poster', 'preview', 'thumb'];
 
 function isCleanImageUrl(url) {
   if (!url || !url.startsWith('http')) return false;
@@ -91,7 +140,7 @@ function isCleanImageUrl(url) {
 
 // ==========================================
 // Agent 1: Google Clean Image Search (Serper API)
-// 3 separate searches, block major Thai news sites
+// 6 targeted searches from AI-generated queries
 // ==========================================
 async function agentGoogleCleanImages(identity) {
   const apiKey = process.env.SERPER_API_KEY;
@@ -103,78 +152,81 @@ async function agentGoogleCleanImages(identity) {
   const blockSitesParam = BLOCKED_DOMAINS.map(d => `-site:${d}`).join(' ');
   const allImages = [];
 
-  // Search 1: Main keyword from identity.searchGoogle → 10 results
-  const q1 = identity?.searchGoogle || '';
-  if (q1) {
-    console.log(`[Agent1: Google] Search 1: "${q1}" (10 results)`);
+  // ดึง search queries จาก AI — รวม person-only + story-specific
+  const sq = identity?.searchQueries || {};
+  const queries = [
+    // === Person-only queries (ค้นชื่อตรงๆ ไม่ผูกข่าว — หาหน้าชัดจากแหล่งไหนก็ได้) ===
+    { q: sq.person_portrait || identity?.mainCharacter || '', label: 'person portrait', num: 10 },
+    { q: sq.person_interview || (identity?.mainCharacter ? `${identity.mainCharacter} สัมภาษณ์` : ''), label: 'person interview', num: 8 },
+    { q: sq.person_drama || (identity?.mainCharacter ? `${identity.mainCharacter} ละคร` : ''), label: 'person drama', num: 8 },
+    { q: sq.person_emotion || '', label: 'person emotion', num: 8 },
+    { q: sq.secondary_person || identity?.secondaryCharacter || '', label: 'secondary person', num: 6 },
+    // === Story-specific queries (ผูกกับเนื้อข่าวโดยตรง) ===
+    { q: sq.person_closeup || identity?.mainCharacter || '', label: 'person closeup', num: 8 },
+    { q: sq.person_context || identity?.searchGoogle || '', label: 'person context', num: 8 },
+    { q: sq.event_scene || '', label: 'event scene', num: 8 },
+    { q: sq.emotion_moment || '', label: 'emotion moment', num: 6 },
+    { q: sq.location_photo || identity?.location || '', label: 'location', num: 6 },
+    { q: sq.related_people || '', label: 'related people', num: 5 },
+  ].filter(q => q.q && q.q.trim());
+
+  // ถ้าไม่มี searchQueries เลย → fallback queries เดิม
+  if (queries.length === 0) {
+    if (identity?.searchGoogle) queries.push({ q: identity.searchGoogle, label: 'main search', num: 10 });
+    if (identity?.mainCharacter) queries.push({ q: identity.mainCharacter, label: 'character', num: 5 });
+  }
+
+  for (const queryObj of queries) {
+    console.log(`[Agent1: Google] Search (${queryObj.label}): "${queryObj.q}" (${queryObj.num} results)`);
     try {
       const res = await fetchWithTimeout('https://google.serper.dev/images', {
         method: 'POST',
         headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: `${q1} ${blockSitesParam}`, gl: 'th', hl: 'th', num: 10 })
+        body: JSON.stringify({
+          q: `${queryObj.q} ${blockSitesParam}`,
+          gl: 'th', hl: 'th', num: queryObj.num,
+          imgSize: 'large', imgType: 'photo'
+        })
       });
       if (res.ok) {
         const data = await res.json();
         if (data.images) {
           const urls = data.images.map(img => img.imageUrl).filter(isCleanImageUrl);
-          console.log(`[Agent1: Google] Search 1 got ${urls.length} clean images`);
+          console.log(`[Agent1: Google] (${queryObj.label}) got ${urls.length} clean images`);
           allImages.push(...urls);
         }
       }
-    } catch (e) { console.log('[Agent1: Google] Search 1 error:', e.message); }
+    } catch (e) { console.log(`[Agent1: Google] (${queryObj.label}) error: ${e.message}`); }
   }
 
-  // Search 2: Main character name → 5 results
-  const q2 = identity?.mainCharacter || '';
-  if (q2) {
-    console.log(`[Agent1: Google] Search 2: "${q2}" (5 results)`);
+  // === Pexels Supplement (ฟรี!) ===
+  const pexelsKey = process.env.PEXELS_API_KEY;
+  if (pexelsKey && identity?.searchPexels) {
     try {
-      const res = await fetchWithTimeout('https://google.serper.dev/images', {
-        method: 'POST',
-        headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: `${q2} ${blockSitesParam}`, gl: 'th', hl: 'th', num: 5 })
+      console.log(`[Agent1: Pexels] Search: "${identity.searchPexels}" (5 results)`);
+      const res = await fetchWithTimeout(`https://api.pexels.com/v1/search?query=${encodeURIComponent(identity.searchPexels)}&per_page=5&orientation=portrait`, {
+        headers: { 'Authorization': pexelsKey }
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.images) {
-          const urls = data.images.map(img => img.imageUrl).filter(isCleanImageUrl);
-          console.log(`[Agent1: Google] Search 2 got ${urls.length} clean images`);
+        if (data.photos) {
+          const urls = data.photos.map(p => p.src?.large2x || p.src?.large).filter(Boolean);
+          console.log(`[Agent1: Pexels] Got ${urls.length} stock images`);
           allImages.push(...urls);
         }
       }
-    } catch (e) { console.log('[Agent1: Google] Search 2 error:', e.message); }
+    } catch (e) { console.log('[Agent1: Pexels] error:', e.message); }
   }
 
-  // Search 3: Main character + first key scene → 5 results
-  const scene = identity?.keyScenes?.[0] || '';
-  const q3 = `${q2} ${scene}`.trim();
-  if (q3) {
-    console.log(`[Agent1: Google] Search 3: "${q3}" (5 results)`);
-    try {
-      const res = await fetchWithTimeout('https://google.serper.dev/images', {
-        method: 'POST',
-        headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: `${q3} ${blockSitesParam}`, gl: 'th', hl: 'th', num: 5 })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.images) {
-          const urls = data.images.map(img => img.imageUrl).filter(isCleanImageUrl);
-          console.log(`[Agent1: Google] Search 3 got ${urls.length} clean images`);
-          allImages.push(...urls);
-        }
-      }
-    } catch (e) { console.log('[Agent1: Google] Search 3 error:', e.message); }
-  }
-
-  const unique = [...new Set(allImages)].slice(0, 15);
+  const unique = [...new Set(allImages)].slice(0, 25);
   console.log(`[Agent1: Google] ✅ Total: ${unique.length} unique clean images`);
   return unique;
 }
 
 // ==========================================
 // Agent 2: YouTube Frame Capture (YouTube Data API v3)
-// Search → 3 videos → all thumbnail variants + storyboard frames
+// Search → 5 videos → extract REAL frames from storyboard sprites
+// ไม่ดึง thumbnail (maxresdefault etc.) เด็ดขาด!
 // ==========================================
 async function agentYouTubeFrames(identity) {
   const apiKey = process.env.YOUTUBE_API_KEY;
@@ -183,206 +235,269 @@ async function agentYouTubeFrames(identity) {
     return [];
   }
 
-  const query = identity?.searchYouTube || identity?.searchGoogle || '';
-  if (!query) {
+  // ★ ค้นหลาย query: ไม่แค่ข่าวเดียว แต่ค้นชื่อ+สัมภาษณ์+ผลงานด้วย
+  const mainChar = identity?.mainCharacter || '';
+  const youtubeQueries = [
+    identity?.searchYouTube || identity?.searchGoogle || '',
+    mainChar ? `${mainChar} สัมภาษณ์` : '',
+    mainChar ? `${mainChar} ละคร ซีรีส์ ฉาก` : '',
+    mainChar ? `${mainChar}` : '',
+  ].filter(q => q.trim());
+  
+  if (youtubeQueries.length === 0) {
     console.log('[Agent2: YouTube] ❌ No search query available');
     return [];
   }
 
-  console.log(`[Agent2: YouTube] Searching: "${query}" → 3 videos`);
+  console.log(`[Agent2: YouTube] 🎬 Searching ${youtubeQueries.length} queries → extract real frames`);
 
-  const allImages = [];
+  // ★ ลดเกณฑ์: 500x350 — landscape images (686x386) ต้องผ่าน!
+  const MIN_WIDTH = 500;
+  const MIN_HEIGHT = 350;
 
   try {
-    const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&key=${apiKey}&maxResults=3&relevanceLanguage=th&regionCode=TH`;
-    const response = await fetchWithTimeout(searchUrl, { timeout: 8000 });
+    const { searchAndExtractFrames } = await import('@/lib/services/youtubeFrameExtractor');
+    
+    // ★ ค้นหลาย query แบบ parallel
+    let allFrames = [];
+    for (const query of youtubeQueries.slice(0, 3)) { // max 3 queries
+      try {
+        console.log(`[Agent2: YouTube] 🔍 Query: "${query}"`);
+        const frames = await searchAndExtractFrames(query, 3);
+        allFrames.push(...frames);
+      } catch {}
+    }
+    
+    const frames = allFrames;
 
-    if (!response.ok) {
-      const errBody = await response.text().catch(() => '');
-      console.log(`[Agent2: YouTube] Search API error: ${response.status} — ${errBody.substring(0, 200)}`);
+    // กรองเฉพาะเฟรมที่ resolution ดีพอ
+    const qualityFrames = [];
+    for (const frame of frames) {
+      if (!frame.buffer) continue;
+      try {
+        const meta = await sharp(frame.buffer).metadata();
+        if ((meta.width || 0) >= MIN_WIDTH && (meta.height || 0) >= MIN_HEIGHT) {
+          qualityFrames.push(frame);
+        } else {
+          console.log(`[Agent2: YouTube] ❌ Rejected frame ${meta.width}x${meta.height} (min ${MIN_WIDTH}x${MIN_HEIGHT})`);
+        }
+      } catch {
+        qualityFrames.push(frame); // ถ้าเช็ค meta ไม่ได้ ให้ผ่านไป
+      }
+    }
+
+    console.log(`[Agent2: YouTube] Quality filter: ${qualityFrames.length}/${frames.length} frames passed`);
+
+    // ถ้าไม่มีเฟรมคุณภาพ → ใช้ maxresdefault (1280x720) แทน
+    if (qualityFrames.length === 0) {
+      console.log('[Agent2: YouTube] ⚠️ No quality frames, using maxresdefault thumbnails');
+      const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&key=${apiKey}&maxResults=5&relevanceLanguage=th&regionCode=TH`;
+      const response = await fetchWithTimeout(searchUrl, { timeout: 8000 });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const thumbUrls = [];
+        for (const item of (data.items || [])) {
+          const videoId = item.id?.videoId;
+          if (!videoId) continue;
+          // maxresdefault = 1280x720 (สูงสุด), fallback hqdefault = 480x360
+          thumbUrls.push(`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`);
+          thumbUrls.push(`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`);
+        }
+        console.log(`[Agent2: YouTube] ✅ Fallback: ${thumbUrls.length} thumbnail URLs from ${data.items?.length || 0} videos`);
+        return thumbUrls;
+      }
       return [];
     }
 
-    const data = await response.json();
-    const videos = data.items || [];
-    console.log(`[Agent2: YouTube] Found ${videos.length} videos`);
-
-    for (const item of videos) {
-      const videoId = item.id?.videoId;
-      if (!videoId) continue;
-
-      console.log(`[Agent2: YouTube] Collecting frames for video: ${videoId}`);
-
-      // Official thumbnails (highest quality first)
-      allImages.push(`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`);
-      allImages.push(`https://img.youtube.com/vi/${videoId}/sddefault.jpg`);
-      allImages.push(`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`);
-      allImages.push(`https://img.youtube.com/vi/${videoId}/mqdefault.jpg`);
-
-      // Auto-generated storyboard frames (captured at different moments)
-      allImages.push(`https://img.youtube.com/vi/${videoId}/1.jpg`);
-      allImages.push(`https://img.youtube.com/vi/${videoId}/2.jpg`);
-      allImages.push(`https://img.youtube.com/vi/${videoId}/3.jpg`);
+    // แปลง frame buffers เป็น data URLs
+    const frameUrls = [];
+    for (const frame of qualityFrames) {
+      if (frame.buffer) {
+        const base64 = frame.buffer.toString('base64');
+        frameUrls.push(`data:image/jpeg;base64,${base64}`);
+      } else if (frame.url) {
+        frameUrls.push(frame.url);
+      }
     }
 
-    console.log(`[Agent2: YouTube] ✅ Total: ${allImages.length} thumbnail/frame URLs from ${videos.length} clips`);
+    console.log(`[Agent2: YouTube] ✅ Total: ${frameUrls.length} quality frames`);
+    return frameUrls;
   } catch (e) {
     console.log('[Agent2: YouTube] Error:', e.message);
+    return [];
   }
-
-  return allImages;
 }
 
 // ==========================================
-// Agent 3: TikTok via Apify (with Serper fallback)
+// Agent 3: Multi-Context Image Search (Serper)
+// 5 targeted queries จากหลายมุมมอง
 // ==========================================
-async function agentTikTokImages(identity) {
-  const apifyKey = process.env.APIFY_API_KEY;
+async function agentContextImages(identity) {
   const serperKey = process.env.SERPER_API_KEY;
-  const query = identity?.searchTikTok || identity?.searchGoogle || '';
-
-  if (!query) {
-    console.log('[Agent3: TikTok] ❌ No search query available');
+  if (!serperKey) {
+    console.log('[Agent3: Context] ❌ No SERPER_API_KEY, skipping');
     return [];
   }
 
-  // --- Primary: Apify TikTok Scraper ---
-  if (apifyKey) {
-    console.log(`[Agent3: TikTok] Using Apify API with query: "${query}"`);
+  const mainChar = identity?.mainCharacter || '';
+  const sq = identity?.searchQueries || {};
+  const scenes = identity?.keyScenes || [];
+
+  // สร้าง queries จาก AI-generated searchQueries (5 มุม)
+  const queries = [];
+
+  // Query 1: บุคคลจริง (ไม่ใช่ข่าว ไม่ใช่ปก)
+  if (sq.person_closeup || mainChar) {
+    queries.push({
+      q: `"${sq.person_closeup || mainChar}" ภาพจริง -ปก -ข่าว -cover -thumbnail -screenshot`,
+      label: 'person real photo',
+    });
+  }
+
+  // Query 2: ★ ผลงาน/ละคร/ซีรีส์ (หาภาพจากผลงานอื่น ไม่ใช่ข่าวนี้)
+  if (sq.person_drama || mainChar) {
+    queries.push({
+      q: `${sq.person_drama || `${mainChar} ละคร ซีรีส์`} -ปก -cover -thumbnail`,
+      label: 'person drama/work',
+    });
+  }
+
+  // Query 3: ★ อารมณ์ตามโทนข่าว (เศร้า ยิ้ม ร้องไห้)
+  if (sq.person_emotion || mainChar) {
+    queries.push({
+      q: `${sq.person_emotion || `${mainChar}`} -ปก -cover -thumbnail`,
+      label: 'person emotion',
+    });
+  }
+
+  // Query 4: เหตุการณ์/บริบท
+  if (sq.event_scene || identity?.searchTikTok) {
+    queries.push({
+      q: `${sq.event_scene || identity.searchTikTok} ภาพเหตุการณ์ -ปกข่าว -designed -collage`,
+      label: 'event context',
+    });
+  }
+
+  // Query 5: อารมณ์/ซีน
+  if (sq.emotion_moment || (scenes.length > 0 && mainChar)) {
+    queries.push({
+      q: `${sq.emotion_moment || `${mainChar} ${scenes[0]}`} -thumbnail -cover -ปก`,
+      label: 'emotion moment',
+    });
+  }
+
+  // Query 6: สถานที่
+  if (sq.location_photo || identity?.location) {
+    queries.push({
+      q: `${sq.location_photo || identity.location} ภาพ -ปก -logo -banner`,
+      label: 'location',
+    });
+  }
+
+  // Query 7: คนอื่นที่เกี่ยวข้อง
+  if (sq.related_people) {
+    queries.push({
+      q: `${sq.related_people} ภาพ -ปก -cover`,
+      label: 'related people',
+    });
+  }
+
+  // fallback ถ้าไม่มี query
+  if (queries.length === 0 && identity?.searchGoogle) {
+    queries.push({
+      q: `${identity.searchGoogle} ภาพจริง -ปก -cover`,
+      label: 'fallback',
+    });
+  }
+
+  if (queries.length === 0) {
+    console.log('[Agent3: Context] ❌ No search queries available');
+    return [];
+  }
+
+  const blockSitesParam = BLOCKED_DOMAINS.map(d => `-site:${d}`).join(' ');
+  const allImages = [];
+
+  for (const queryObj of queries) {
+    console.log(`[Agent3: Context] Search (${queryObj.label}): "${queryObj.q}" (8 results)`);
     try {
-      // Start the actor run
-      const startRes = await fetchWithTimeout(
-        `https://api.apify.com/v2/acts/clockworks~free-tiktok-scraper/runs?token=${apifyKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            searchQueries: [query],
-            resultsPerPage: 3
-          }),
-          timeout: 15000
-        }
-      );
-
-      if (!startRes.ok) {
-        console.log(`[Agent3: TikTok] Apify start failed: ${startRes.status}`);
-        // Fall through to Serper fallback
-      } else {
-        const runData = await startRes.json();
-        const runId = runData?.data?.id;
-        console.log(`[Agent3: TikTok] Apify run started: ${runId}`);
-
-        if (runId) {
-          // Poll for completion (max 60s, check every 5s)
-          let status = 'RUNNING';
-          let attempts = 0;
-          while (status === 'RUNNING' && attempts < 12) {
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            attempts++;
-
-            try {
-              const statusRes = await fetchWithTimeout(
-                `https://api.apify.com/v2/actor-runs/${runId}?token=${apifyKey}`,
-                { timeout: 8000 }
-              );
-              if (statusRes.ok) {
-                const statusData = await statusRes.json();
-                status = statusData?.data?.status || 'FAILED';
-                console.log(`[Agent3: TikTok] Apify poll #${attempts}: ${status}`);
-              }
-            } catch (e) {
-              console.log(`[Agent3: TikTok] Poll error: ${e.message}`);
-            }
-          }
-
-          if (status === 'SUCCEEDED') {
-            // Get results from dataset
-            const datasetId = runData?.data?.defaultDatasetId;
-            if (datasetId) {
-              const dataRes = await fetchWithTimeout(
-                `https://api.apify.com/v2/datasets/${datasetId}/items?token=${apifyKey}&format=json`,
-                { timeout: 10000 }
-              );
-              if (dataRes.ok) {
-                const items = await dataRes.json();
-                const covers = [];
-                for (const item of items) {
-                  // Extract cover images from various possible fields
-                  if (item.videoMeta?.covers) {
-                    covers.push(...(Array.isArray(item.videoMeta.covers) ? item.videoMeta.covers : [item.videoMeta.covers]));
-                  }
-                  if (item.covers?.default) covers.push(item.covers.default);
-                  if (item.covers?.dynamic) covers.push(item.covers.dynamic);
-                  if (item.coverUrl) covers.push(item.coverUrl);
-                  if (item.dynamicCover) covers.push(item.dynamicCover);
-                }
-                const validCovers = covers.filter(u => u && u.startsWith('http'));
-                console.log(`[Agent3: TikTok] ✅ Apify got ${validCovers.length} cover images`);
-                return validCovers;
-              }
-            }
-          } else {
-            console.log(`[Agent3: TikTok] Apify run did not succeed (status: ${status}), falling back to Serper`);
-          }
+      const res = await fetchWithTimeout('https://google.serper.dev/images', {
+        method: 'POST',
+        headers: { 'X-API-KEY': serperKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          q: `${queryObj.q} ${blockSitesParam}`,
+          gl: 'th', hl: 'th', num: 8,
+          imgSize: 'large',
+          imgType: 'photo',
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.images) {
+          const urls = data.images.map(img => img.imageUrl).filter(isCleanImageUrl);
+          console.log(`[Agent3: Context] (${queryObj.label}) got ${urls.length} clean images`);
+          allImages.push(...urls);
         }
       }
     } catch (e) {
-      console.log(`[Agent3: TikTok] Apify error: ${e.message}, falling back to Serper`);
+      console.log(`[Agent3: Context] (${queryObj.label}) error: ${e.message}`);
     }
   }
 
-  // --- Fallback: Serper Image search with site:tiktok.com ---
-  if (!serperKey) {
-    console.log('[Agent3: TikTok] ❌ No SERPER_API_KEY for fallback, skipping');
-    return [];
-  }
-
-  console.log(`[Agent3: TikTok] Fallback → Serper image search: "site:tiktok.com ${query}"`);
-  try {
-    const res = await fetchWithTimeout('https://google.serper.dev/images', {
-      method: 'POST',
-      headers: { 'X-API-KEY': serperKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q: `site:tiktok.com ${query}`, gl: 'th', hl: 'th', num: 5 })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.images) {
-        const urls = data.images.map(img => img.imageUrl).filter(u => u && u.startsWith('http'));
-        console.log(`[Agent3: TikTok] ✅ Serper fallback got ${urls.length} images`);
-        return urls;
-      }
-    }
-  } catch (e) {
-    console.log(`[Agent3: TikTok] Serper fallback error: ${e.message}`);
-  }
-
-  return [];
+  const unique = [...new Set(allImages)].slice(0, 25);
+  console.log(`[Agent3: Context] ✅ Total: ${unique.length} unique context images from ${queries.length} searches`);
+  return unique;
 }
 
 // ==========================================
 // AI Judge: Strict image selection with Gemini Vision
-// Rejects watermarks, duplicates, cut faces
-// Enforces scene diversity, assigns HERO/SUPPORT roles
+// Pre-filters by resolution & blur, then assigns cover roles:
+// HERO_FACE, CONTEXT_SCENE, EVIDENCE, EMOTION, RELATIONSHIP
 // ==========================================
 async function judgeImages(candidates, newsTitle, identity) {
   if (!candidates || candidates.length === 0) return [];
 
   console.log(`[Judge] 🔍 Downloading ${candidates.length} candidates for AI Vision analysis...`);
 
+  // ดาวน์โหลดทั้งหมดพร้อม metadata
+  const downloadResults = await Promise.allSettled(candidates.map(url => downloadForVision(url)));
+
+  // === PRE-FILTER: Resolution & Blur ===
   const imageParts = [];
   const validCandidates = [];
+  let rejectedResolution = 0;
+  let rejectedBlur = 0;
 
-  const results = await Promise.allSettled(candidates.map(url => downloadForVision(url)));
+  for (let i = 0; i < downloadResults.length; i++) {
+    if (downloadResults[i].status !== 'fulfilled' || !downloadResults[i].value) continue;
 
-  for (let i = 0; i < results.length; i++) {
-    if (results[i].status === 'fulfilled' && results[i].value) {
-      imageParts.push(results[i].value);
-      validCandidates.push(candidates[i]);
+    const downloaded = downloadResults[i].value;
+    const meta = downloaded.meta || {};
+
+    // ★ เช็ค resolution ขั้นต่ำ 500x350 (ลดเกณฑ์ — landscape ต้องผ่าน)
+    if (meta.width && meta.height && (meta.width < 500 || meta.height < 350)) {
+      console.log(`[Judge] 🚫 Rejected (low res ${meta.width}x${meta.height}, need 500x350+): ${candidates[i].substring(0, 70)}`);
+      rejectedResolution++;
+      continue;
     }
+
+    // ★ เช็ค blur score ขั้นต่ำ 8 (ผ่อนลงนิดจาก 12 — ไม่ reject มากเกินไป)
+    if (meta.blurScore !== undefined && meta.blurScore < 8) {
+      console.log(`[Judge] 🚫 Rejected (too blurry, score=${meta.blurScore.toFixed(1)}, need 8+): ${candidates[i].substring(0, 70)}`);
+      rejectedBlur++;
+      continue;
+    }
+
+    // ส่งเฉพาะ inlineData ให้ Vision API (ไม่ส่ง meta)
+    imageParts.push({ inlineData: downloaded.inlineData });
+    validCandidates.push(candidates[i]);
   }
 
+  console.log(`[Judge] 📊 Pre-filter: ${validCandidates.length} passed, ${rejectedResolution} low-res, ${rejectedBlur} blurry`);
+
   if (validCandidates.length === 0) {
-    console.log('[Judge] ❌ No images could be downloaded');
+    console.log('[Judge] ❌ No images passed pre-filter');
     return [];
   }
 
@@ -397,8 +512,8 @@ async function judgeImages(candidates, newsTitle, identity) {
     const emotion = identity?.emotion || 'neutral';
     const coverEmotion = identity?.coverEmotion || 'drama';
 
-    const prompt = `คุณคือ Photo Editor มืออาชีพ สำหรับสำนักข่าวไวรัล กำลังเลือกภาพทำปกข่าว
-You are a STRICT photo editor selecting images for a viral news cover.
+    const prompt = `คุณคือ Photo Editor ระดับ Senior สำหรับสำนักข่าวไวรัลระดับมืออาชีพ กำลังเลือกภาพทำปกข่าว 5 แบบ
+You are a RUTHLESSLY STRICT senior photo editor selecting images for a professional viral news cover set.
 
 📰 ข่าว / News: "${storyContext}"
 🎭 ตัวละครหลัก / Main Character: "${mainChar}"
@@ -406,38 +521,78 @@ You are a STRICT photo editor selecting images for a viral news cover.
 
 มีภาพ ${imageParts.length} ภาพ (index 0 ถึง ${imageParts.length - 1}) ให้ตัดสิน
 
-=== กฎเข้มงวด / STRICT RULES ===
+=== ROLE ASSIGNMENTS (ต้องกำหนด role ให้ทุกภาพที่ผ่าน) ===
 
-❌ REJECT ทันที (score = 0):
-1. ภาพมี text overlay, ข้อความซ้อน, ตัวหนังสือบนภาพ, lower-third graphics, TV show graphics
-2. ภาพมี watermark, logo สำนักข่าว, แบนเนอร์, กราฟิกช่อง
-3. ภาพซ้ำกัน (same person + same angle + same scene) → เก็บแค่ภาพที่คมที่สุด 1 ภาพ
-4. ภาพที่หน้าถูกตัด (face cut off), เบลอ, มืดเกินไป
-5. ภาพ collage / รูปรวม / screenshot จอทีวี / screenshot ข่าว
-6. ภาพไม่เกี่ยวกับข่าวนี้เลย
+🏷️ HERO_FACE (1 ภาพเท่านั้น!):
+- ต้องเป็นภาพ close-up หน้า ${mainChar} ที่คมชัดที่สุด
+- ใบหน้าต้องกินพื้นที่ >30% ของเฟรม
+- ชัดมาก ไม่เบลอ
+- ⚠️ ภาพ HERO_FACE ไม่จำเป็นต้องมาจากข่าวนี้! ภาพจากคลิปอื่น ละคร สัมภาษณ์อื่น งานอีเวนท์ ก็ใช้ได้
+- ขอแค่เป็นรูปจริงของ ${mainChar} (ไม่ใช่ stock photo คนแปลกหน้า)
+- Score 7-10
+- ⚠️ ถ้ามีภาพหน้า ${mainChar} ชัด อย่า REJECT มัน! ถ้าไม่มี text overlay หนักๆ ให้ score ≥ 6
+- 📐 ภาพ HERO_FACE ต้องเห็นใบหน้าชัดเจน ครึ่งตัวบน (คอ-ไหล่-หัว) ห้ามเป็นภาพเต็มตัว ห้ามเห็นขา ห้ามเห็นพื้นหลังเยอะเกินครึ่งภาพ
+- 📊 เพิ่มคะแนน: คนอยู่กึ่งกลางเฟรม (+2), หน้าชัดไม่เบลอ (+2), ครึ่งตัวบน (+1). ลดคะแนน: พื้นหลังเยอะเกินครึ่ง (-2), เห็นทั้งตัวจนหน้าเล็ก (-2), มุมกำแพง/มุมโล่ง (-1)
 
-✅ ACCEPT (score 5-10):
-1. ภาพคมชัด หน้าเต็ม ไม่มีข้อความซ้อน
-2. ภาพสะอาด ไม่มี watermark หรือ logo
-3. ภาพแสดงอารมณ์ที่ตรงกับข่าว (${emotion})
-4. มีความหลากหลายของซีน (different angles, different moments) → ห้ามเลือกแต่ภาพมุมเดียว
+🏷️ CONTEXT_SCENE (1-2 ภาพ):
+- Wide shot แสดงสถานที่/เหตุการณ์/บริบท
+- เช่น อาคาร, ที่เกิดเหตุ, โรงพยาบาล, ศาล, สถานีตำรวจ
+- ภาพต้องเกี่ยวข้องกับข่าวจริง ไม่ใช่ภาพ generic
 
-🏷️ ROLES:
-- "HERO" (ต้องมีแค่ 1 ภาพเท่านั้น!): ภาพที่ดีที่สุด แสดง ${mainChar} ชัดเจน หน้าเต็ม อารมณ์ตรง
-- "SUPPORT": ภาพเสริม บริบท มุมอื่น คนอื่นที่เกี่ยวข้อง สถานที่
+🏷️ EVIDENCE (1 ภาพ):
+- ป้าย, เอกสาร, ข้อความ, ป้ายชื่อ, หลักฐาน
+- สิ่งที่ "บอกเล่า" เรื่องราว — ป้ายร้าน, ป้ายสถานที่, เอกสารศาล
+
+🏷️ EMOTION (1-2 ภาพ):
+- Close-up อารมณ์ — ร้องไห้, ตกใจ, โกรธ, ยิ้ม, เศร้า
+- ต้องเห็นอารมณ์ชัดเจน ไม่ใช่ neutral pose
+
+🏷️ RELATIONSHIP (0-1 ภาพ):
+- ภาพ ${mainChar} กับคนอื่น (คู่รัก, ครอบครัว, เพื่อน)
+- ต้องเห็นความสัมพันธ์ชัดเจน
+
+=== ❌ REJECT ทันที (score = 0, role = "REJECT") ===
+1. ภาพเบลอ, pixelated, resolution ต่ำ
+2. Stock photo — ภาพ generic ไม่ใช่คนจริงในข่าว
+3. มี text overlay หนักๆ / news graphics / TV show graphics / lower-third
+4. มี watermark, logo สำนักข่าว, แบนเนอร์, กราฟิกช่อง
+5. เป็น designed cover / thumbnail / collage / ปกคลิป
+6. หน้าถูกตัด / มองไม่ออกว่าเป็นใคร
+7. ภาพซ้ำกัน (same person + same angle) → เก็บแค่คมสุด 1 ภาพ
+8. Screenshot จอทีวี / screenshot ข่าว / news article screenshot
+9. ภาพ collage ปก — หลายภาพจัดเรียงเป็น layout
+10. มีกรอบ border สวยงาม / ถูกจัดวางตามดีไซน์
+11. ภาพไม่เกี่ยวกับข่าวนี้เลย
+
+=== SCORING GUIDE ===
+- 9-10: สมบูรณ์แบบ คมชัดสุด ภาพใหญ่ high-res ไม่มี text ไม่มี watermark เหมาะกับ role อย่างยิ่ง
+- 7-8: ดีมาก ใช้ได้ชัวร์ ภาพคม ไม่มี text
+- 6: พอใช้ได้ ไม่สมบูรณ์แต่ไม่มีข้อเสียร้ายแรง
+- 4-5: มีปัญหาบ้าง (เบลอเล็กน้อย, มุมไม่ดีนัก)
+- 1-3: ปัญหาชัดเจน — ไม่ควรใช้
+- 0: REJECT ตาม rules ด้านบน
+
+⚠️ กฎเข้มงวด (ปกต้องสะอาดเหมือนปก Viral มืออาชีพ):
+- ภาพที่มี text overlay (ไม่ว่าเล็กหรือใหญ่: ชื่อรายการ, lower-third, ข้อความซ้อน, ชื่อคน, subtitle) → score ≤ 3 เท่านั้น ห้ามให้สูงกว่านี้
+- Screenshot จอทีวี, screenshot ข่าว, ภาพจากหน้าจอรายการ (มีกรอบรายการ, logo ช่อง, แบนเนอร์) → score = 0 REJECT
+- ภาพ collage / designed cover / thumbnail → score = 0 REJECT
+- ภาพเบลอ, pixelated, แตก, ภาพยืด → score ≤ 2
+- ภาพที่มี watermark ใดๆ → score ≤ 2
+- เน้นภาพ "สะอาด": ไม่มี text, ไม่มี graphics, หน้าคนชัด, background สะอาด → score ≥ 7
+- REJECT เป็น 0 ทุกภาพที่ไม่ clean พอจะทำปกมืออาชีพได้
 
 === OUTPUT FORMAT ===
-Return JSON array เท่านั้น ห้ามมี markdown blocks
-เลือกไม่เกิน 15 ภาพที่ score >= 5
-HERO ต้องมีแค่ 1 ตัวเท่านั้น
+Return JSON array เท่านั้น ห้ามมี markdown blocks ห้ามมี \`\`\`
+ตัดสินทุกภาพ (แม้แต่ REJECT ก็ต้องใส่ score=0)
+HERO_FACE ต้องมีแค่ 1 ตัวเท่านั้น
 
-[{"index": 0, "score": 10, "role": "HERO", "reason": "..."}, {"index": 3, "score": 8, "role": "SUPPORT", "reason": "..."}]`;
+[{"index": 0, "score": 10, "role": "HERO_FACE", "reason": "..."}, {"index": 3, "score": 8, "role": "CONTEXT_SCENE", "reason": "..."}, {"index": 5, "score": 0, "role": "REJECT", "reason": "..."}]`;
 
     const result = await model.generateContent([prompt, ...imageParts]);
     const responseText = result.response.text();
 
-    // Parse JSON array from response
-    const match = responseText.match(/\[[\s\S]*?\]/);
+    // Parse JSON array from response (greedy match เพื่อจับ array ที่มี nested objects)
+    const match = responseText.match(/\[\s*\{[\s\S]*\}\s*\]/);
     if (match) {
       const parsed = JSON.parse(match[0]);
 
@@ -446,45 +601,96 @@ HERO ต้องมีแค่ 1 ตัวเท่านั้น
         return fallbackSelection(validCandidates);
       }
 
-      console.log(`[Judge] AI scores:`, parsed.map(s => `#${s.index}=${s.score}(${s.role})`).join(', '));
+      // แยก accepted vs rejected สำหรับ log — ★ ลดเกณฑ์จาก 5 → 4 เพื่อให้ได้ภาพเพียงพอ
+      const accepted = parsed.filter(s => s.score >= 4);
+      const nearMiss = parsed.filter(s => s.score === 3);
+      const rejected = parsed.filter(s => s.score < 3);
 
-      // Ensure only 1 HERO
+      console.log(`[Judge] AI scores: ${parsed.map(s => `#${s.index}=${s.score}(${s.role})`).join(', ')}`);
+      console.log(`[Judge] 📊 Accepted(≥5): ${accepted.length}, Near-miss(4): ${nearMiss.length}, Rejected(<4): ${rejected.length}`);
+
+      // === สร้าง selected list จากภาพที่ score >= 6 ===
+      // HERO_FACE ต้องมีแค่ 1
       let heroAssigned = false;
-      const validScores = parsed
-        .filter(s => s.score >= 3 && s.index >= 0 && s.index < validCandidates.length)
+      const HERO_ROLE = 'HERO_FACE';
+
+      const validScores = accepted
+        .filter(s => s.index >= 0 && s.index < validCandidates.length)
         .sort((a, b) => {
-          if (a.role === 'HERO' && b.role !== 'HERO') return -1;
-          if (b.role === 'HERO' && a.role !== 'HERO') return 1;
+          // HERO_FACE มาก่อน
+          if (a.role === HERO_ROLE && b.role !== HERO_ROLE) return -1;
+          if (b.role === HERO_ROLE && a.role !== HERO_ROLE) return 1;
           return b.score - a.score;
         });
 
       const selectedImages = [];
       for (const s of validScores) {
-        let role = s.role || 'SUPPORT';
-        if (role === 'HERO') {
-          if (heroAssigned) role = 'SUPPORT'; // Demote extra HEROs
+        let role = s.role || 'CONTEXT_SCENE';
+        if (role === HERO_ROLE) {
+          if (heroAssigned) role = 'EMOTION'; // Demote extra HERO_FACE
           else heroAssigned = true;
         }
         selectedImages.push({
           url: validCandidates[s.index],
-          role: role
+          role: role,
+          score: s.score
         });
       }
 
       if (selectedImages.length > 0) {
-        // If judge was too strict (< 5 images), supplement with remaining candidates
-        if (selectedImages.length < 5) {
+        // === Supplement: ถ้าน้อยกว่า 5 ภาพ ดึง near-miss (score 4-5) มาเสริม ===
+        if (selectedImages.length < 5 && nearMiss.length > 0) {
           const selectedUrls = new Set(selectedImages.map(i => i.url));
-          for (const candidate of validCandidates) {
-            if (selectedImages.length >= 10) break;
-            if (!selectedUrls.has(candidate)) {
-              selectedImages.push({ url: candidate, role: 'SUPPORT' });
-              selectedUrls.add(candidate);
+          const sortedNearMiss = nearMiss
+            .filter(s => s.index >= 0 && s.index < validCandidates.length)
+            .sort((a, b) => b.score - a.score);
+
+          for (const s of sortedNearMiss) {
+            if (selectedImages.length >= 8) break;
+            const url = validCandidates[s.index];
+            if (!selectedUrls.has(url)) {
+              selectedImages.push({
+                url: url,
+                role: s.role === 'REJECT' ? 'SUPPORT' : (s.role || 'SUPPORT'),
+                score: s.score
+              });
+              selectedUrls.add(url);
             }
           }
-          console.log(`[Judge] 📦 Supplemented to ${selectedImages.length} images (judge was strict)`);
+          console.log(`[Judge] 📦 Supplemented with near-miss → total ${selectedImages.length}`);
         }
-        console.log(`[Judge] ✅ Selected ${selectedImages.length} images (${selectedImages.filter(i => i.role === 'HERO').length} HERO, ${selectedImages.filter(i => i.role === 'SUPPORT').length} SUPPORT)`);
+
+        // ถ้ายังไม่พอ → ดึง score 1-3 มาเสริม (ดีกว่าไม่มีเลย)
+        if (selectedImages.length < 4) {
+          const selectedUrls = new Set(selectedImages.map(i => i.url));
+          const lowScored = rejected
+            .filter(s => s.score > 0 && s.index >= 0 && s.index < validCandidates.length)
+            .sort((a, b) => b.score - a.score);
+
+          for (const s of lowScored) {
+            if (selectedImages.length >= 6) break;
+            const url = validCandidates[s.index];
+            if (!selectedUrls.has(url)) {
+              selectedImages.push({
+                url: url,
+                role: 'SUPPORT',
+                score: s.score
+              });
+              selectedUrls.add(url);
+            }
+          }
+          if (lowScored.length > 0) {
+            console.log(`[Judge] 📦 Added low-scored supplements → total ${selectedImages.length}`);
+          }
+        }
+
+        // สรุป roles
+        const roleCounts = {};
+        for (const img of selectedImages) {
+          roleCounts[img.role] = (roleCounts[img.role] || 0) + 1;
+        }
+        const roleStr = Object.entries(roleCounts).map(([r, c]) => `${c} ${r}`).join(', ');
+        console.log(`[Judge] ✅ Selected ${selectedImages.length} images: ${roleStr}`);
         return selectedImages;
       }
     }
@@ -521,25 +727,25 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
   console.log('============================================');
 
   // Run all 3 agents in parallel
-  const [googleResult, youtubeResult, tiktokResult] = await Promise.allSettled([
+  const [googleResult, youtubeResult, contextResult] = await Promise.allSettled([
     agentGoogleCleanImages(identity),
     agentYouTubeFrames(identity),
-    agentTikTokImages(identity)
+    agentContextImages(identity)
   ]);
 
   // Collect results from each agent
   const googleImages = googleResult.status === 'fulfilled' ? googleResult.value : [];
   const youtubeImages = youtubeResult.status === 'fulfilled' ? youtubeResult.value : [];
-  const tiktokImages = tiktokResult.status === 'fulfilled' ? tiktokResult.value : [];
+  const contextImages = contextResult.status === 'fulfilled' ? contextResult.value : [];
 
   console.log('============================================');
   console.log(`[MultiAgent] Agent results:`);
-  console.log(`  Agent 1 (Google):  ${googleImages.length} images ${googleResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + googleResult.reason : ''}`);
-  console.log(`  Agent 2 (YouTube): ${youtubeImages.length} images ${youtubeResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + youtubeResult.reason : ''}`);
-  console.log(`  Agent 3 (TikTok):  ${tiktokImages.length} images ${tiktokResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + tiktokResult.reason : ''}`);
+  console.log(`  Agent 1 (Google):   ${googleImages.length} images ${googleResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + googleResult.reason : ''}`);
+  console.log(`  Agent 2 (YouTube):  ${youtubeImages.length} frames ${youtubeResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + youtubeResult.reason : ''}`);
+  console.log(`  Agent 3 (Context):  ${contextImages.length} images ${contextResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + contextResult.reason : ''}`);
 
   // Combine and deduplicate
-  let candidates = [...googleImages, ...youtubeImages, ...tiktokImages];
+  let candidates = [...googleImages, ...youtubeImages, ...contextImages];
   candidates = [...new Set(candidates)];
 
   console.log(`[MultiAgent] Combined unique candidates: ${candidates.length}`);

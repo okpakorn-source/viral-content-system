@@ -15,105 +15,128 @@ const EDGE_RING = 35;   // circle edge hit zone (px)
 // แต่ละรูปครอบคลุม ~55-60% ของ canvas แล้ว fade เข้าหากัน ไม่มีจุดดำ
 const BUILTIN_TEMPLATES = [
   // ═══════════════════════════════════════════════════════════
-  // แบบ 1: 5 รูป — 4 ช่อง + ไฮไลท์เหลือง
-  // ตัวอย่าง: เด็กผู้หญิง (บน-ซ้าย) + สนามบิน (บน-ขวา)
-  //          + ใบหน้า2 (ล่าง-ซ้าย) + แม่จูบลูก (ล่าง-ขวา)
-  //          + กรอบเหลืองรับปริญญา (กลาง)
+  // Template 1: Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight กลาง + Sub ซ้ายล่าง
+  // อ้างอิง: ปกข่าวดารายิ้ม + สถานที่ปฏิบัติธรรม + ป้ายเรือนธรรม + กลุ่มนั่งสมาธิ
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'builtin_1', name: 'ข่าวหน้าปก 1', desc: '5 รูป — 4 ช่อง + ไฮไลท์เหลือง', textSlots: [],
+    id: 'template_1', name: 'ข่าวดราม่า 5 ช่อง', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight + ภาพรอง', textSlots: [],
     slots: [
-      { id: 'main',      label: '★ ภาพหลัก (บน-ซ้าย)',      x: 0,   y: 0,   w: 700, h: 740,  fadeRight: 280, fadeBottom: 200, zIndex: 2 },
-      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 480, y: 0,   w: 720, h: 700,  fadeLeft: 280, fadeBottom: 180,  zIndex: 0 },
-      { id: 'sub_left',  label: '🖼 ภาพรอง (ล่าง-ซ้าย)',     x: 0,   y: 580, w: 680, h: 770,  fadeRight: 260, fadeTop: 200,   zIndex: 1 },
-      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 440, y: 600, w: 760, h: 750,  fadeLeft: 280, fadeTop: 200,    zIndex: 0 },
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 460, y: 340, w: 620, h: 440,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
+      // Hero: ซ้ายเต็มสูง — ใบหน้า closeup ยาวจากบนลงล่าง, fade ขวาเพื่อ blend กับ scene
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 750, h: 1350, fadeRight: 320,                  zIndex: 2 },
+      // Scene: ขวาบน — สถานที่/เหตุการณ์, fade ซ้าย + ล่าง
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 380, y: 0,   w: 820, h: 720,  fadeLeft: 380, fadeBottom: 250,  zIndex: 0 },
+      // Context: ขวาล่าง — ภาพบริบท/ความสัมพันธ์, fade ซ้าย + บน
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 350, y: 580, w: 850, h: 770,  fadeLeft: 320, fadeTop: 280,    zIndex: 1 },
+      // Highlight: กลาง-ขวา กรอบเหลืองเขียว — ป้าย/หลักฐาน
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเขียว)',     x: 370, y: 280, w: 560, h: 400,  border: '#CCFF00', borderWidth: 5, zIndex: 3, draggable: true },
+      // Sub: ซ้ายล่าง กรอบขาว — ภาพกลุ่ม/บริบทเสริม
+      { id: 'sub_left',  label: '🖼 ภาพรอง (ซ้ายล่าง)',      x: 15,  y: 610, w: 520, h: 430,  border: '#FFFFFF', borderWidth: 4, zIndex: 4, draggable: true },
     ],
   },
   // ═══════════════════════════════════════════════════════════
-  // แบบ 2: 5 รูป — บน-ซ้าย/ขวา + ล่าง-ขวา + ไฮไลท์ + วงกลม
-  // ตัวอย่าง: พ่อ (บน-ซ้าย) + ครอบครัว (บน-ขวา)
-  //          + แม่ (ล่าง-ขวา) + กรอบเหลืองร้องไห้ + วงกลมมือ
+  // Template 2: Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight กลาง (ไม่มี Circle)
+  // อ้างอิง: หญิงชุดขาว closeup + วัด/อุโบสถ + เดินถือดอกไม้ + ป้ายกุฏิ
+  // Layout สะอาด 4 slots — เหมาะกับข่าวที่มีภาพน้อย (3 ภาพ + 1 หลักฐาน)
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'builtin_2', name: 'ข่าวหน้าปก 2', desc: '5 รูป — ภาพหลักเต็มซ้าย + ฉากขวา + ไฮไลท์เหลือง + วงกลม', textSlots: [],
+    id: 'template_2', name: 'ข่าวสะอาด 4 ช่อง', desc: '4 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight กลาง', textSlots: [],
     slots: [
-      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 720, h: 1050, fadeRight: 300, fadeBottom: 350, zIndex: 2 },
-      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 460, y: 0,   w: 740, h: 700,  fadeLeft: 300, fadeBottom: 200,  zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 300, y: 550, w: 900, h: 800,  fadeLeft: 350, fadeTop: 250,    zIndex: 0 },
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 460, y: 340, w: 640, h: 460,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
-      { id: 'circle',    label: '⭕ วงกลม (ล่าง-ซ้าย)',      x: 30,  y: 780, shape: 'circle', diameter: 380, border: '#4FC3F7', borderWidth: 5, zIndex: 4, draggable: true },
+      // Hero: ซ้ายเต็มสูง — ใบหน้า closeup, fade ขวา blend กับวัด/สถานที่
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 720, h: 1350, fadeRight: 300,                  zIndex: 2 },
+      // Scene: ขวาบน — สถานที่ (วัด/อาคาร), fade ซ้าย + ล่าง
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 400, y: 0,   w: 800, h: 740,  fadeLeft: 360, fadeBottom: 260,  zIndex: 0 },
+      // Context: ขวาล่าง — full body / กิจกรรม, fade ซ้าย + บน
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 380, y: 520, w: 820, h: 830,  fadeLeft: 340, fadeTop: 280,    zIndex: 1 },
+      // Highlight: กลาง-ล่างซ้าย กรอบเข้ม — ป้ายชื่อ/หลักฐาน
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเข้ม)',      x: 120, y: 580, w: 560, h: 360,  border: '#333333', borderWidth: 5, zIndex: 3, draggable: true },
     ],
   },
   // ═══════════════════════════════════════════════════════════
-  // แบบ 3: 6 รูป — บน-ซ้าย/ขวา + ล่าง-ขวา + ไฮไลท์ + วงกลมขาว + วงกลมแดง
-  // ตัวอย่าง: นักดำน้ำ (บน-ซ้าย) + ถ้ำกลุ่ม (บน-ขวา)
-  //          + ใบหน้านักดำน้ำ (ล่าง-ขวา) + กรอบเหลือง + วงขาว + วงแดง
+  // Template 3: Hero ซ้ายเต็ม + Scene ขวาบน + Emotion ขวาล่าง + Highlight กลาง + Circle ซ้ายล่าง
+  // อ้างอิง: ชาย profile + หญิงที่ซากไฟไหม้ + หญิงเช็ดน้ำตา + 2 คนนั่งพื้น + ภาพคู่วงกลม
+  // Layout ครบ 5 ช่อง มี Circle — เหมาะกับข่าวดราม่าที่มีตัวละคร 2+ คน
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'builtin_3', name: 'ข่าวหน้าปก 3', desc: '6 รูป — ภาพหลักเต็มซ้าย + ฉากขวา + ไฮไลท์ + วงกลม×2', textSlots: [],
+    id: 'template_3', name: 'ข่าวดราม่า + วงกลม', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Emotion ขวาล่าง + Highlight + Circle', textSlots: [],
     slots: [
-      { id: 'main',         label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 720, h: 1050, fadeRight: 300, fadeBottom: 350, zIndex: 2 },
-      { id: 'bg_top',       label: '🖼 ฉากบน-ขวา',             x: 460, y: 0,   w: 740, h: 700,  fadeLeft: 300, fadeBottom: 200,  zIndex: 0 },
-      { id: 'bg_bottom',    label: '🖼 ฉากล่าง-ขวา',            x: 300, y: 550, w: 900, h: 800,  fadeLeft: 350, fadeTop: 250,    zIndex: 0 },
-      { id: 'highlight',    label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 440, y: 360, w: 660, h: 480,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
-      { id: 'circle',       label: '⭕ วงกลมใหญ่ (ขาว)',        x: 20,  y: 720, shape: 'circle', diameter: 400, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
-      { id: 'circle_small', label: '⭕ วงกลมเล็ก (แดง)',        x: 940, y: 10,  shape: 'circle', diameter: 200, border: '#FF0000', borderWidth: 4, zIndex: 5, draggable: true },
+      // Hero: ซ้ายเต็มสูง — ใบหน้า profile/closeup, fade ขวา
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 740, h: 1350, fadeRight: 310,                  zIndex: 2 },
+      // Scene: ขวาบน — สถานที่/เหตุการณ์, fade ซ้าย + ล่าง
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 400, y: 0,   w: 800, h: 720,  fadeLeft: 360, fadeBottom: 240,  zIndex: 0 },
+      // Emotion: ขวาล่าง — อารมณ์ close-up, fade ซ้าย + บน
+      { id: 'bg_bottom', label: '🖼 อารมณ์ล่าง-ขวา',         x: 380, y: 580, w: 820, h: 770,  fadeLeft: 320, fadeTop: 260,    zIndex: 1 },
+      // Highlight: กลาง-ขวา กรอบเหลืองเขียว — ภาพหลักฐาน/บริบท
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเขียว)',     x: 340, y: 280, w: 630, h: 440,  border: '#CCFF00', borderWidth: 5, zIndex: 3, draggable: true },
+      // Circle: ซ้ายล่าง กรอบขาว — ภาพคู่/ความสัมพันธ์
+      { id: 'circle',    label: '⭕ วงกลม (ซ้ายล่าง)',       x: 25,  y: 680, shape: 'circle', diameter: 440, border: '#FFFFFF', borderWidth: 6, zIndex: 4, draggable: true },
     ],
   },
   // ═══════════════════════════════════════════════════════════
-  // แบบ 4: 5 รูป — 4 ช่องเท่ากัน + วงกลมตรงกลาง (ไม่มี highlight)
-  // ตัวอย่าง: แม่ยิ้ม (บน-ซ้าย) + ชายร้องไห้ (บน-ขวา)
-  //          + โต๊ะบูชา (ล่าง-ซ้าย) + ชายเช็ดน้ำตา (ล่าง-ขวา)
-  //          + วงกลมขาว (คู่ แม่-ลูก) ตรงกลาง
+  // Template 4: Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Circle ซ้ายล่าง + Circle เล็กแดง + ข้อความ 2 บรรทัด
+  // อ้างอิง: ตำรวจ + คนนอนทางเท้า + closeup คนนอน + วงกลมข้าวของ + วงแดงคนนั่ง + ข้อความ
+  // Layout 6 ช่อง: 3 พื้นหลัง + 2 วงกลม + 2 ข้อความ — เหมาะข่าวสังคม/สะเทือนใจ
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'builtin_4', name: 'ข่าว 4 ช่อง + วงกลม', desc: '5 รูป — 4 ช่องเท่าๆ กัน + วงกลมตรงกลาง', textSlots: [],
-    slots: [
-      { id: 'main',      label: '★ ภาพหลัก (บน-ซ้าย)',      x: 0,   y: 0,   w: 690, h: 730,  fadeRight: 260, fadeBottom: 200, zIndex: 2 },
-      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 500, y: 0,   w: 700, h: 710,  fadeLeft: 260, fadeBottom: 200,  zIndex: 1 },
-      { id: 'sub_left',  label: '🖼 ภาพรอง (ล่าง-ซ้าย)',     x: 0,   y: 570, w: 680, h: 780,  fadeRight: 250, fadeTop: 200,   zIndex: 1 },
-      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 460, y: 560, w: 740, h: 790,  fadeLeft: 260, fadeTop: 200,    zIndex: 0 },
-      { id: 'circle',    label: '⭕ วงกลม (กลาง)',           x: 370, y: 410, shape: 'circle', diameter: 380, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
-    ],
-  },
-  // ═══════════════════════════════════════════════════════════
-  // แบบ 5: คอลลาจ 6 รูป + ข้อความ 3 บรรทัด (สไตล์ข่าวบันเทิง)
-  // ═══════════════════════════════════════════════════════════
-  {
-    id: 'builtin_5', name: 'ข่าวคอลลาจ', desc: '6 รูป + 3 บรรทัดข้อความ — สไตล์ข่าวบันเทิง',
+    id: 'template_4', name: 'ข่าวสังคม + 2 วงกลม', desc: '5 รูป + 2 ข้อความ — Hero + Scene + Context + Circle ใหญ่ + Circle เล็กแดง',
     textSlots: [
-      { id: 'line1', label: '📝 บรรทัด 1 (ขาว)', x: 600, y: 960,  fontSize: 52, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 1100, stroke: '#000', strokeWidth: 4, placeholder: 'พาดหัวหลัก...' },
-      { id: 'line2', label: '📝 บรรทัด 2 (เหลือง)', x: 600, y: 1060, fontSize: 46, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 1100, stroke: '#000', strokeWidth: 3, bg: 'rgba(0,0,0,0.65)', bgPadY: 14, bgFullWidth: true, bgEditable: true, placeholder: 'รายละเอียด...' },
-      { id: 'line3', label: '📝 บรรทัด 3 (เหลือง)', x: 600, y: 1160, fontSize: 42, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 1100, stroke: '#000', strokeWidth: 3, bg: 'rgba(0,0,0,0.65)', bgPadY: 12, bgFullWidth: true, bgEditable: true, placeholder: 'ข้อความเสริม...' },
+      { id: 'line1', label: '📝 บรรทัด 1 (ขาว)', x: 730, y: 680, fontSize: 48, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 500, stroke: '#000', strokeWidth: 4, placeholder: 'พาดหัวหลัก...' },
+      { id: 'line2', label: '📝 บรรทัด 2 (เหลือง)', x: 730, y: 760, fontSize: 40, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 520, stroke: '#000', strokeWidth: 3, bg: 'rgba(0,0,0,0.65)', bgPadY: 12, bgFullWidth: false, bgEditable: true, placeholder: 'รายละเอียด...' },
     ],
     slots: [
-      { id: 'main',      label: '★ ภาพหลัก (บน-ซ้าย)',      x: 0,   y: 0,   w: 660, h: 560,  fadeRight: 260, fadeBottom: 180, zIndex: 2 },
-      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 400, y: 0,   w: 800, h: 500,  fadeLeft: 240, fadeBottom: 140,  zIndex: 0 },
-      { id: 'sub_left',  label: '🖼 ภาพรอง (กลาง-ซ้าย)',    x: 0,   y: 440, w: 620, h: 480,  fadeRight: 200, fadeTop: 160,   zIndex: 1 },
-      { id: 'bg_bottom', label: '🖼 ฉากกลาง-ขวา',            x: 500, y: 420, w: 700, h: 500,  fadeLeft: 200, fadeTop: 140,    zIndex: 0 },
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเขียว)',    x: 140, y: 250, w: 440, h: 360,  border: '#c4ff00', borderWidth: 4, zIndex: 3, draggable: true },
-      { id: 'circle',    label: '⭕ วงกลม',                 x: 800, y: 500, shape: 'circle', diameter: 320, border: '#FFFFFF', borderWidth: 4, zIndex: 4, draggable: true },
+      // Hero: ซ้ายเต็มสูง — ใบหน้า closeup, fade ขวา
+      { id: 'main',         label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 720, h: 1350, fadeRight: 300,                  zIndex: 2 },
+      // Scene: ขวาบน — wide shot, fade ซ้าย + ล่าง
+      { id: 'bg_top',       label: '🖼 ฉากบน-ขวา',             x: 380, y: 0,   w: 820, h: 700,  fadeLeft: 350, fadeBottom: 240,  zIndex: 0 },
+      // Context: ขวาล่าง — close-up, fade ซ้าย + บน
+      { id: 'bg_bottom',    label: '🖼 ฉากล่าง-ขวา',            x: 350, y: 550, w: 850, h: 800,  fadeLeft: 320, fadeTop: 260,    zIndex: 1 },
+      // Circle: ซ้ายล่าง — ภาพหลักฐาน/detail
+      { id: 'circle',       label: '⭕ วงกลมใหญ่ (ซ้ายล่าง)',   x: 25,  y: 680, shape: 'circle', diameter: 400, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
+      // Circle Small: ขวาบน กรอบแดง — zoom detail
+      { id: 'circle_small', label: '⭕ วงกลมเล็ก (แดง ขวาบน)',  x: 890, y: 15,  shape: 'circle', diameter: 200, border: '#FF0000', borderWidth: 4, zIndex: 5, draggable: true },
     ],
   },
   // ═══════════════════════════════════════════════════════════
-  // แบบ 6: 5 รูป + 2 บรรทัดข้อความแถบแดง — สไตล์ข่าวสังคม/สะเทือนใจ
-  // ตัวอย่าง: ใบหน้าชาย (ซ้ายเต็ม) + หญิงเตียง (บน-ขวา)
-  //          + กลุ่มคนรับของ (ล่าง-ขวา) + กรอบเหลือง + วงขาว
-  //          + "ซื่อกินไม่หมด / คดกินไม่นาน"
+  // Template 5: Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight กลาง-ขวา + Circle ซ้ายล่างใหญ่
+  // อ้างอิง: นักสำรวจถ้ำ + ภายในถ้ำ wide + คนในถ้ำ + กลุ่มคน + 2 คน closeup
+  // Layout 5 ช่อง ไม่มีข้อความ — เหมาะข่าวผจญภัย/เหตุการณ์มืด/กลางคืน
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'builtin_6', name: 'ข่าวสังคม + ข้อความ', desc: '5 รูป + 2 บรรทัดข้อความแถบแดง',
+    id: 'template_5', name: 'ข่าวเหตุการณ์ 5 ช่อง', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight เหลือง + Circle ขาว', textSlots: [],
+    slots: [
+      // Hero: ซ้ายเต็มสูง — ใบหน้า closeup, fade ขวา
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 730, h: 1350, fadeRight: 300,                  zIndex: 2 },
+      // Scene: ขวาบน — wide shot สถานที่, fade ซ้าย + ล่าง
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 400, y: 0,   w: 800, h: 700,  fadeLeft: 360, fadeBottom: 240,  zIndex: 0 },
+      // Context: ขวาล่าง — บุคคล/บริบท, fade ซ้าย + บน
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 350, y: 560, w: 850, h: 790,  fadeLeft: 320, fadeTop: 260,    zIndex: 1 },
+      // Highlight: กลาง-ขวา กรอบเหลือง — ภาพกลุ่ม/หลักฐาน
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 420, y: 310, w: 580, h: 410,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
+      // Circle: ซ้ายล่าง กรอบขาว ใหญ่ — ภาพ closeup
+      { id: 'circle',    label: '⭕ วงกลม (ซ้ายล่าง)',       x: 15,  y: 630, shape: 'circle', diameter: 460, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
+    ],
+  },
+  // ═══════════════════════════════════════════════════════════
+  // Template 6: Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Circle เล็กแดงกลาง + Circle ใหญ่ขาว + ข้อความ 2 บรรทัด
+  // อ้างอิง: ทหารหนุ่ม + ปฏิบัติการ + ทหารอาวุโสร้องไห้ + zoom + ภาพบุคคล + "รอบนี้ผิดหวังครับ"
+  // Layout 5 ช่อง + ข้อความกลาง — เหมาะข่าวสะเทือนใจ/ทหาร/ตำรวจ
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: 'template_6', name: 'ข่าวสะเทือนใจ + ข้อความ', desc: '5 รูป + 2 ข้อความ — Hero + Scene + Context + Circle แดงกลาง + Circle ขาวล่าง',
     textSlots: [
-      { id: 'line1', label: '📝 บรรทัด 1 (ขาว/แดง)', x: 300, y: 530, fontSize: 52, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 560, stroke: '#000', strokeWidth: 2, bg: 'rgba(200,0,0,0.88)', bgPadY: 12, bgFullWidth: false, bgEditable: true, placeholder: 'พาดหัวหลัก...' },
-      { id: 'line2', label: '📝 บรรทัด 2 (เหลือง/แดง)', x: 300, y: 630, fontSize: 46, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 560, stroke: '#000', strokeWidth: 2, bg: 'rgba(200,0,0,0.88)', bgPadY: 10, bgFullWidth: false, bgEditable: true, placeholder: 'รายละเอียด...' },
+      { id: 'line1', label: '📝 บรรทัด 1 (ขาว)', x: 620, y: 580, fontSize: 46, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 480, stroke: '#000', strokeWidth: 4, placeholder: 'พาดหัวหลัก...' },
+      { id: 'line2', label: '📝 บรรทัด 2 (ขาว)', x: 620, y: 660, fontSize: 40, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 500, stroke: '#000', strokeWidth: 3, placeholder: 'รายละเอียด...' },
     ],
     slots: [
-      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 720, h: 1050, fadeRight: 300, fadeBottom: 350, zIndex: 2 },
-      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 460, y: 0,   w: 740, h: 620,  fadeLeft: 300, fadeBottom: 200,  zIndex: 0 },
-      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 350, y: 560, w: 850, h: 790,  fadeLeft: 350, fadeTop: 250,    zIndex: 1 },
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 420, y: 300, w: 640, h: 500,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
-      { id: 'circle',    label: '⭕ วงกลม (ล่าง-ซ้าย)',      x: 20,  y: 720, shape: 'circle', diameter: 420, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
+      // Hero: ซ้ายเต็มสูง — ใบหน้า closeup, fade ขวา
+      { id: 'main',         label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 700, h: 1350, fadeRight: 280,                  zIndex: 2 },
+      // Scene: ขวาบน — สถานการณ์/ปฏิบัติการ, fade ซ้าย + ล่าง
+      { id: 'bg_top',       label: '🖼 ฉากบน-ขวา',             x: 380, y: 0,   w: 820, h: 650,  fadeLeft: 350, fadeBottom: 220,  zIndex: 0 },
+      // Context: ขวาล่าง — อารมณ์/ผู้เกี่ยวข้อง, fade ซ้าย + บน
+      { id: 'bg_bottom',    label: '🖼 ฉากล่าง-ขวา',            x: 340, y: 520, w: 860, h: 830,  fadeLeft: 320, fadeTop: 260,    zIndex: 1 },
+      // Circle เล็ก: กลาง-บน กรอบแดง — zoom detail
+      { id: 'circle_small', label: '⭕ วงกลมเล็ก (แดง กลาง)',   x: 440, y: 180, shape: 'circle', diameter: 160, border: '#FF0000', borderWidth: 3, zIndex: 5, draggable: true },
+      // Circle ใหญ่: ซ้ายล่าง กรอบขาว — portrait
+      { id: 'circle',       label: '⭕ วงกลมใหญ่ (ซ้ายล่าง)',   x: 50,  y: 680, shape: 'circle', diameter: 360, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
     ],
   },
 ];
@@ -557,6 +580,28 @@ export default function CoverPage() {
     return null;
   };
 
+  // ── Hit test TEXT slots (for drag) ──
+  const hitTestText = (mx, my) => {
+    if (!template?.textSlots?.length) return null;
+    for (const ts of template.textSlots) {
+      const ov = textOverrides[ts.id] || {};
+      const tx = (ts.x || 0) + (ov.dx || 0);
+      const ty = (ts.y || 0) + (ov.dy || 0);
+      const fs = ov.fontSize || ts.fontSize || 40;
+      const val = textValues[ts.id];
+      if (!val) continue;
+      // Approximate text bounding box
+      const textW = Math.min(ts.maxWidth || 600, val.length * fs * 0.55);
+      const textH = fs * 1.4;
+      const left = (ts.align === 'center') ? tx - textW/2 : tx;
+      const top = ty - fs * 0.3;
+      if (mx >= left && mx <= left + textW && my >= top && my <= top + textH) {
+        return ts;
+      }
+    }
+    return null;
+  };
+
   // ── Hit test ALL slots (for crop pan) ──
   const hitTestAll = (mx, my) => {
     if (!template) return null;
@@ -578,7 +623,14 @@ export default function CoverPage() {
   // ── Pointer handlers ──
   const handleDown = (cx, cy) => {
     const {mx,my} = getCoords(cx,cy);
-    // First try draggable slots (move/resize/crop)
+    // First try text drag
+    const textHit = hitTestText(mx, my);
+    if (textHit) {
+      const ov = textOverrides[textHit.id] || {};
+      setDragState({ slotId: textHit.id, mode: 'textmove', startX: mx, startY: my, origDx: ov.dx || 0, origDy: ov.dy || 0 });
+      return;
+    }
+    // Then try draggable slots (move/resize/crop)
     const hit = hitTest(mx,my);
     if (hit) {
       if (hit.mode === 'crop') {
@@ -612,7 +664,12 @@ export default function CoverPage() {
     const {mx,my} = getCoords(cx,cy);
 
     if (!dragState) {
-      // Hover cursor
+      // Hover cursor — check text first
+      const textHover = hitTestText(mx, my);
+      if (textHover) {
+        setHoverCursor('grab');
+        return;
+      }
       const hit = hitTest(mx,my);
       if (hit) {
         setHoverCursor(hit.mode === 'resize' ? 'nwse-resize' : hit.mode === 'crop' ? 'move' : 'grab');
@@ -623,6 +680,18 @@ export default function CoverPage() {
       return;
     }
 
+    if (dragState.mode === 'textmove') {
+      // Text drag — update dx, dy in textOverrides
+      setTextOverrides(prev => ({
+        ...prev,
+        [dragState.slotId]: {
+          ...(prev[dragState.slotId] || {}),
+          dx: dragState.origDx + (mx - dragState.startX),
+          dy: dragState.origDy + (my - dragState.startY),
+        },
+      }));
+      return;
+    }
     if (dragState.mode === 'crop') {
       // Direct pixel offset — drag = move image naturally
       const dx = mx - dragState.startX;

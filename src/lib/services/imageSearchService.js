@@ -78,9 +78,9 @@ export async function downloadAndValidateImage(url) {
     
     const metadata = await sharp(buffer).metadata();
     
-    // ขนาดขั้นต่ำ 300x300 (เพิ่มจาก 250)
-    if (metadata.width < 300 || metadata.height < 300) {
-      console.log(`[Download] Skipped: too small (${metadata.width}x${metadata.height})`);
+    // ★ ขนาดขั้นต่ำ 450x300 (ผ่อนลง — ภาพ portrait 457x636 ต้องผ่าน)
+    if (metadata.width < 450 || metadata.height < 300) {
+      console.log(`[Download] Skipped: too small (${metadata.width}x${metadata.height}, need 450x300+)`);
       return null;
     }
     
