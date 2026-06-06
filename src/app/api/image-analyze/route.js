@@ -3,7 +3,11 @@ import OpenAI from 'openai';
 import { detectTemplate, TEMPLATES, getZones } from '@/lib/imageTemplates.js';
 import { createLogger } from '@/lib/logger';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _openai;
+function getOpenAI() {
+  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return _openai;
+}
 const rlog = createLogger('IMAGE-ANALYZE');
 
 /**
@@ -14,6 +18,7 @@ const rlog = createLogger('IMAGE-ANALYZE');
  */
 export async function POST(request) {
   const startTime = Date.now();
+  const openai = getOpenAI();
   try {
     const body = await request.json();
     const { images, newsTitle, newsType, customPrompt, customZones, templateName } = body;

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Auto Cover API Route — /api/auto-cover
  * 
  * POST: Generate cover image automatically from content
@@ -411,7 +411,7 @@ export async function POST(request) {
         const { autoSelectTemplate } = await import('@/lib/coverTemplateRegistry');
         chosenTemplate = autoSelectTemplate(numImages, hasMultipleFaces, identity);
       } catch {
-        chosenTemplate = 'builtin_4'; // fallback default
+        chosenTemplate = 'template_4'; // fallback default
       }
       console.log(`[AutoCover] Auto-selected template: ${chosenTemplate}`);
     }
