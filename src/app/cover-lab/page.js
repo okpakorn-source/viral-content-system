@@ -1,5 +1,7 @@
 'use client';
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useCoverCanvas } from '@/lib/cover/useCoverCanvas';
+import { W, H } from '@/lib/cover/constants';
 
 export default function CoverLabPage() {
   // === Input State ===
@@ -37,6 +39,25 @@ export default function CoverLabPage() {
   const [slotCrops, setSlotCrops] = useState({});
   const [cropEditorState, setCropEditorState] = useState(null); // { slotId, imageUrl, zoom, panX, panY }
   const [templateSlots, setTemplateSlots] = useState([]);
+
+  // === Manual Edit Mode State ===
+  const [editMode, setEditMode] = useState(false);
+  const [editingCover, setEditingCover] = useState(null);
+  const [editTemplate, setEditTemplate] = useState(null);
+  const [editImages, setEditImages] = useState({});
+
+  // === useCoverCanvas hook for Manual Edit Mode ===
+  const {
+    canvasRef: editCanvasRef,
+    slotCrops: editSlotCrops, setSlotCrops: setEditSlotCrops,
+    slotOffsets: editSlotOffsets, slotScales: editSlotScales,
+    textValues: editTextValues, setTextValues: setEditTextValues,
+    textOverrides: editTextOverrides, setTextOverrides: setEditTextOverrides,
+    hoverCursor: editHoverCursor,
+    handleDown: editHandleDown, handleMove: editHandleMove, handleUp: editHandleUp,
+    render: editRender, exportAsBlob: editExportAsBlob, resetAll: editResetAll,
+    draggableSlots: editDraggableSlots,
+  } = useCoverCanvas(editTemplate, editImages);
 
   // โหลด templates
   useEffect(() => {
@@ -239,6 +260,93 @@ export default function CoverLabPage() {
     finally { setLoading(false); }
   }
 
+  // === Convert API template format to flat cover-tester format ===
+  function convertTemplateToCoverFormat(templateDef) {
+    if (!templateDef) return null;
+    const slots = [...(templateDef.slots || [])].map(s => ({
+      ...s,
+      draggable: s.draggable !== false && (s.border || s.shape === 'circle'),
+    }));
+    // Add circle as a flat slot if it exists as separate field
+    if (templateDef.circle && !slots.find(s => s.id === 'circle')) {
+      slots.push({
+        id: 'circle',
+        x: templateDef.circle.x || 25,
+        y: templateDef.circle.y || 680,
+        shape: 'circle',
+        diameter: templateDef.circle.diameter || 440,
+        border: templateDef.circle.border || '#FFFFFF',
+        borderWidth: templateDef.circle.borderWidth || 5,
+        zIndex: 4,
+        draggable: true,
+      });
+    }
+    // Add circleSmall if exists
+    if (templateDef.circleSmall && !slots.find(s => s.id === 'circle_small')) {
+      slots.push({
+        id: 'circle_small',
+        x: templateDef.circleSmall.x || 890,
+        y: templateDef.circleSmall.y || 15,
+        shape: 'circle',
+        diameter: templateDef.circleSmall.diameter || 200,
+        border: templateDef.circleSmall.border || '#FF0000',
+        borderWidth: templateDef.circleSmall.borderWidth || 4,
+        zIndex: 5,
+        draggable: true,
+      });
+    }
+    return {
+      id: templateDef.id,
+      name: templateDef.name || 'Auto Cover',
+      textSlots: templateDef.textSlots || [],
+      textBg: templateDef.textBg || null,
+      slots,
+    };
+  }
+
+  // === Handle Edit Cover (enter Manual Edit Mode) ===
+  async function handleEditCover(coverIndex) {
+    const cover = coverResult?.covers?.[coverIndex];
+    if (!cover) return;
+    setSelectedCoverIndex(coverIndex);
+    const slotData = cover.slotData;
+    if (!slotData || !slotData.templateDef) {
+      // No slotData available — just select the cover (fallback to download)
+      setError('ปกนี้ไม่มีข้อมูล slot สำหรับแก้ไข — ดาวน์โหลดได้เลย');
+      return;
+    }
+    // Convert template
+    const tmpl = convertTemplateToCoverFormat(slotData.templateDef);
+    if (!tmpl) return;
+
+    // Convert base64 slot images to HTMLImageElement
+    const loadImage = (src) => new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+
+    const images = {};
+    if (slotData.slotImages) {
+      for (const [slotId, base64] of Object.entries(slotData.slotImages)) {
+        const img = await loadImage(base64);
+        if (img) images[slotId] = img;
+      }
+    }
+
+    // Set text values from slotData if available
+    if (slotData.textValues) {
+      setEditTextValues(slotData.textValues);
+    }
+
+    setEditingCover(slotData);
+    setEditTemplate(tmpl);
+    setEditImages(images);
+    setEditMode(true);
+    setError('');
+  }
+
   return (
     <div style={{ minHeight: '100vh', background: '#0a0f1a', color: '#e2e8f0', fontFamily: 'Inter, sans-serif' }}>
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 16px' }}>
@@ -394,13 +502,13 @@ export default function CoverLabPage() {
                                 borderColor: cover.score >= 7 ? '#22c55e' : '#f97316',
                               }}>⭐ {cover.score}/10</span>
                             </div>
-                            <button onClick={(e) => { e.stopPropagation(); setSelectedCoverIndex(idx); }} style={{
+                            <button onClick={(e) => { e.stopPropagation(); handleEditCover(idx); }} style={{
                               padding: '5px 14px', fontSize: 12, fontWeight: 700, borderRadius: 6, border: 'none', cursor: 'pointer',
                               background: selectedCoverIndex === idx ? '#22c55e' : '#374151',
                               color: selectedCoverIndex === idx ? '#000' : '#94a3b8',
                               transition: 'all 0.2s',
                             }}>
-                              {selectedCoverIndex === idx ? '✅ เลือกปกนี้' : 'เลือก'}
+                              {selectedCoverIndex === idx ? '✅ แก้ไขปกนี้' : '🎨 เลือก & แก้ไข'}
                             </button>
                           </div>
                         </div>
@@ -453,6 +561,108 @@ export default function CoverLabPage() {
                     🤖 AI: {coverResult.judgeComment}
                   </p>
                 )}
+              </div>
+            )}
+
+            {/* ★ MANUAL EDIT MODE — Live Canvas Editor */}
+            {editMode && editTemplate && (
+              <div style={{ background: '#111827', borderRadius: 16, border: '1px solid #1e293b', padding: 24, marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <h3 style={{ color: '#e2e8f0', margin: 0, fontSize: 18, fontWeight: 700 }}>🎨 ปรับแต่งปก</h3>
+                  <button onClick={() => setEditMode(false)} style={{
+                    padding: '6px 14px', borderRadius: 8, border: '1px solid #475569',
+                    background: '#1e293b', color: '#94a3b8', fontSize: 13, cursor: 'pointer', fontWeight: 600,
+                  }}>✕ ปิด</button>
+                </div>
+                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                  {/* Canvas */}
+                  <div style={{ flex: '1 1 600px', minWidth: 400 }}>
+                    <canvas
+                      ref={editCanvasRef}
+                      width={W}
+                      height={H}
+                      style={{ width: '100%', height: 'auto', borderRadius: 12, cursor: editHoverCursor, border: '1px solid #374151' }}
+                      onMouseDown={e => editHandleDown(e.clientX, e.clientY)}
+                      onMouseMove={e => editHandleMove(e.clientX, e.clientY)}
+                      onMouseUp={editHandleUp}
+                      onMouseLeave={editHandleUp}
+                      onTouchStart={e => { e.preventDefault(); const t = e.touches[0]; editHandleDown(t.clientX, t.clientY); }}
+                      onTouchMove={e => { e.preventDefault(); const t = e.touches[0]; editHandleMove(t.clientX, t.clientY); }}
+                      onTouchEnd={editHandleUp}
+                    />
+                  </div>
+                  {/* Controls sidebar */}
+                  <div style={{ flex: '0 0 280px', minWidth: 260 }}>
+                    {/* Usage guide */}
+                    <div style={{ background: '#0f172a', borderRadius: 10, border: '1px solid #1e293b', marginBottom: 16 }}>
+                      <div style={{ padding: '12px 16px', fontSize: 13, color: '#94a3b8' }}>
+                        <p style={{ margin: '0 0 8px', fontWeight: 700, color: '#e2e8f0' }}>💡 วิธีใช้</p>
+                        <p style={{ margin: '2px 0' }}>• <b>ลากภาพ</b> = เลื่อนภาพในช่อง</p>
+                        <p style={{ margin: '2px 0' }}>• <b>ลากขอบ</b> = ย้ายตำแหน่งช่อง</p>
+                        <p style={{ margin: '2px 0' }}>• <b>ลากมุม</b> = ปรับขนาดช่อง</p>
+                        <p style={{ margin: '2px 0' }}>• <b>Scroll</b> = ซูมภาพ</p>
+                        <p style={{ margin: '2px 0' }}>• <b>ลากข้อความ</b> = ย้ายตำแหน่ง</p>
+                      </div>
+                    </div>
+
+                    {/* Slot zoom controls */}
+                    {editTemplate.slots.filter(s => editImages[s.id]).map(slot => (
+                      <div key={slot.id} style={{ background: '#0f172a', borderRadius: 8, border: '1px solid #1e293b', marginBottom: 8, padding: '8px 12px' }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 4 }}>
+                          {slot.shape === 'circle' ? '⭕' : '🖼️'} {slot.id}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <button style={editZoomBtnStyle} onClick={() => {
+                            setEditSlotCrops(prev => {
+                              const old = prev[slot.id] || { zoom: 1, panX: 0, panY: 0 };
+                              return { ...prev, [slot.id]: { ...old, zoom: Math.max(1, old.zoom - 0.2) } };
+                            });
+                          }}>−</button>
+                          <span style={{ fontSize: 12, color: '#e2e8f0', minWidth: 40, textAlign: 'center' }}>
+                            {((editSlotCrops[slot.id]?.zoom || 1) * 100).toFixed(0)}%
+                          </span>
+                          <button style={editZoomBtnStyle} onClick={() => {
+                            setEditSlotCrops(prev => {
+                              const old = prev[slot.id] || { zoom: 1, panX: 0, panY: 0 };
+                              return { ...prev, [slot.id]: { ...old, zoom: Math.min(5, old.zoom + 0.2) } };
+                            });
+                          }}>+</button>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Text editing for templates with text */}
+                    {editTemplate.textSlots?.map(ts => (
+                      <div key={ts.id} style={{ background: '#0f172a', borderRadius: 8, border: '1px solid #1e293b', marginBottom: 8, padding: '8px 12px' }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 4 }}>📝 {ts.label || ts.id}</div>
+                        <input
+                          type="text"
+                          value={editTextValues[ts.id] || ''}
+                          onChange={e => setEditTextValues(prev => ({ ...prev, [ts.id]: e.target.value }))}
+                          placeholder={ts.placeholder || 'พิมพ์ข้อความ...'}
+                          style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #374151', background: '#1e293b', color: '#e2e8f0', fontSize: 13, boxSizing: 'border-box' }}
+                        />
+                      </div>
+                    ))}
+
+                    {/* Action buttons */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
+                      <button onClick={() => editExportAsBlob(`cover_edited_${Date.now()}.jpg`)} style={{
+                        padding: '12px 20px', borderRadius: 10, border: 'none',
+                        background: 'linear-gradient(135deg, #a3e635, #22c55e)', color: '#000',
+                        fontWeight: 700, fontSize: 14, cursor: 'pointer',
+                      }}>
+                        📥 ดาวน์โหลดปกที่แก้แล้ว
+                      </button>
+                      <button onClick={editResetAll} style={{
+                        padding: '8px 16px', borderRadius: 8, border: '1px solid #475569',
+                        background: '#1e293b', color: '#94a3b8', fontSize: 13, cursor: 'pointer',
+                      }}>
+                        🔄 รีเซ็ตทั้งหมด
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -843,4 +1053,10 @@ const tagStyle = {
   display: 'inline-block', padding: '3px 10px', borderRadius: 20,
   fontSize: 12, fontWeight: 600, color: '#e2e8f0', border: '1px solid',
   marginBottom: 4,
+};
+const editZoomBtnStyle = {
+  width: 28, height: 28, borderRadius: 6, border: '1px solid #475569',
+  background: '#1e293b', color: '#e2e8f0', fontSize: 16, fontWeight: 700,
+  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  lineHeight: 1, padding: 0,
 };

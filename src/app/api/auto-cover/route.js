@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Auto Cover API Route — /api/auto-cover
  * 
  * POST: Generate cover image automatically from content
@@ -491,6 +491,11 @@ export async function POST(request) {
     const base64 = `data:image/jpeg;base64,${coverBuffer.toString('base64')}`;
     const orderedBuffers = allBuffers;
 
+    // ★ Build slotData for cover 1 — individual slot images for manual editor
+    const cover1SlotData = buildSlotData(
+      chosenTemplate, templateSpec, slotAssignment, imageBuffers
+    );
+
     // ★ บันทึกภาพลงคลัง (ไม่ block response) ★
     try {
       const { saveToCache } = await import('@/lib/services/imageCacheService');
@@ -550,10 +555,29 @@ export async function POST(request) {
           // Keep default
         }
 
+        // ★ Build slotData for cover 2
+        let altTemplateSpec = null;
+        try {
+          const { getTemplateById: getTmpl2, normalizeTemplate: normTmpl2 } = await import('@/lib/coverTemplateRegistry');
+          altTemplateSpec = getTmpl2(altTemplateId);
+          if (!altTemplateSpec) {
+            try {
+              const { getTemplate: getUT2 } = await import('@/lib/template-library/store');
+              const ut2 = await getUT2(altTemplateId);
+              if (ut2) altTemplateSpec = normTmpl2(ut2);
+            } catch {}
+          }
+        } catch {}
+
+        const cover2SlotData = buildSlotData(
+          altTemplateId, altTemplateSpec, altSlotAssignment, imageBuffers
+        );
+
         cover2Data = {
           base64: altBase64,
           templateUsed: altTemplateId,
           score: altScore,
+          slotData: cover2SlotData,
         };
         console.log(`[AutoCover] 🎨 2nd cover score: ${altScore}/10 (template: ${altTemplateId})`);
       }
@@ -574,7 +598,7 @@ export async function POST(request) {
 
     // ★ Build covers array (cover1 always first, cover2 if available)
     const covers = [
-      { base64, templateUsed: chosenTemplate, score },
+      { base64, templateUsed: chosenTemplate, score, slotData: cover1SlotData },
     ];
     if (cover2Data) {
       covers.push(cover2Data);
@@ -632,6 +656,67 @@ export async function POST(request) {
       { success: false, error: error.message, errorType: 'PIPELINE_ERROR' },
       { status: 500 }
     );
+  }
+}
+
+// =============================================
+// buildSlotData — สร้างข้อมูล slot images สำหรับ manual editor
+// =============================================
+function buildSlotData(templateId, templateSpec, slotAssignment, imageBuffers) {
+  try {
+    const slotImages = {};
+    const photoOrder = slotAssignment?.photoOrder || [];
+
+    // Map each slot to its original image buffer
+    if (templateSpec && templateSpec.slots) {
+      templateSpec.slots.forEach((slot, slotIdx) => {
+        const imgIndex = photoOrder[slotIdx];
+        if (imgIndex !== undefined && imageBuffers[imgIndex]?.buffer) {
+          slotImages[slot.id] = 'data:image/jpeg;base64,' + imageBuffers[imgIndex].buffer.toString('base64');
+        }
+      });
+    } else {
+      // No template spec — use photoOrder indices as slot keys
+      photoOrder.forEach((imgIndex, slotIdx) => {
+        if (imageBuffers[imgIndex]?.buffer) {
+          slotImages[`slot_${slotIdx}`] = 'data:image/jpeg;base64,' + imageBuffers[imgIndex].buffer.toString('base64');
+        }
+      });
+    }
+
+    // Circle image (separate from slots array)
+    const circleIndex = slotAssignment?.circleIndex;
+    if (circleIndex !== undefined && imageBuffers[circleIndex]?.buffer && templateSpec?.circle) {
+      slotImages[templateSpec.circle.id || 'circle'] = 'data:image/jpeg;base64,' + imageBuffers[circleIndex].buffer.toString('base64');
+    }
+
+    // CircleSmall image
+    const circleSmallIndex = slotAssignment?.circleSmallIndex;
+    if (circleSmallIndex !== undefined && imageBuffers[circleSmallIndex]?.buffer) {
+      slotImages['circle_small'] = 'data:image/jpeg;base64,' + imageBuffers[circleSmallIndex].buffer.toString('base64');
+    }
+
+    return {
+      templateId,
+      slotImages,
+      textSlots: templateSpec?.textSlots || [],
+      templateDef: templateSpec ? {
+        id: templateSpec.id || templateId,
+        name: templateSpec.name || templateId,
+        canvasW: templateSpec.canvasW || 1200,
+        canvasH: templateSpec.canvasH || 1350,
+        slots: templateSpec.slots || [],
+        circle: templateSpec.circle || null,
+        circleSmall: templateSpec.circleSmall || null,
+        imageSlots: templateSpec.imageSlots || templateSpec.slots?.length || 0,
+      } : null,
+      photoOrder,
+      circleIndex: circleIndex ?? null,
+      circleSmallIndex: circleSmallIndex ?? null,
+    };
+  } catch (err) {
+    console.error('[buildSlotData] Error:', err.message);
+    return { templateId, slotImages: {}, textSlots: [], templateDef: null, photoOrder: [] };
   }
 }
 
