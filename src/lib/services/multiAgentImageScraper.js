@@ -126,7 +126,7 @@ const BLOCKED_DOMAINS = [
   'twitter.com', 'x.com', 'twimg.com'
 ];
 
-const BLOCKED_URL_KEYWORDS = ['logo', 'icon', 'banner', 'watermark', 'avatar', 'sprite', 'pixel', 'tracking', 'crawler', 'widget', 'cover', 'poster', 'preview', 'thumb'];
+const BLOCKED_URL_KEYWORDS = ['logo', 'icon', 'banner', 'watermark', 'avatar', 'sprite', 'pixel', 'tracking', 'crawler', 'widget', 'poster', 'preview'];
 
 function isCleanImageUrl(url) {
   if (!url || !url.startsWith('http')) return false;
@@ -164,14 +164,48 @@ async function agentGoogleCleanImages(identity) {
     { q: sq.person_drama || (identity?.mainCharacter ? `${identity.mainCharacter} ละคร` : ''), label: 'person drama', num: 8 },
     { q: sq.person_emotion || '', label: 'person emotion', num: 8 },
     { q: sq.secondary_person || identity?.secondaryCharacter || '', label: 'secondary person', num: 6 },
+    // === Family/Support queries (ค้นหาพ่อแม่ ครอบครัว คนสนับสนุน) ===
+    { q: sq.family_support || '', label: 'family support', num: 6 },
+    { q: sq.parent_child || '', label: 'parent child', num: 6 },
     // === Story-specific queries (ผูกกับเนื้อข่าวโดยตรง) ===
     { q: sq.person_closeup || identity?.mainCharacter || '', label: 'person closeup', num: 8 },
     { q: sq.person_context || identity?.searchGoogle || '', label: 'person context', num: 8 },
-    { q: sq.event_scene || '', label: 'event scene', num: 8 },
+    { q: sq.event_scene || '', label: 'event scene', num: 6 },
     { q: sq.emotion_moment || '', label: 'emotion moment', num: 6 },
-    { q: sq.location_photo || identity?.location || '', label: 'location', num: 6 },
+    { q: sq.location_photo || identity?.location || '', label: 'location', num: 5 },
     { q: sq.related_people || '', label: 'related people', num: 5 },
   ].filter(q => q.q && q.q.trim());
+
+  // === ค้นหาตัวละครเสริมแต่ละคน (จาก characters[] ที่ AI วิเคราะห์ได้) ===
+  const charMain = identity?.mainCharacter || '';
+  for (const charName of (identity?.characters || []).slice(0, 4)) {
+    if (!charName || charName === charMain || charName === identity?.secondaryCharacter) continue;
+    queries.push({ q: charName, label: `character: ${charName}`, num: 5 });
+  }
+
+  // === ค้นหาตาม characterRoles (พ่อแม่ โค้ช ฯลฯ) ===
+  for (const cr of (identity?.characterRoles || [])) {
+    if (!cr.name || cr.role === 'main') continue;
+    if (queries.some(q => q.q === cr.name)) continue;
+    queries.push({ q: `${cr.name} ${cr.relation || ''}`.trim(), label: `role: ${cr.role} (${cr.name})`, num: 5 });
+  }
+
+  // === ค้นหาตาม keyScenes (ฉากที่ AI วิเคราะห์ว่าต้องมี เช่น "สมัยสาวๆ", "ตอนได้รางวัล") ===
+  const mainCharForScenes = identity?.mainCharacter || '';
+  for (const scene of (identity?.keyScenes || []).slice(0, 4)) {
+    if (!scene) continue;
+    const sceneQuery = mainCharForScenes ? `${mainCharForScenes} ${scene}` : scene;
+    if (queries.some(q => q.q === sceneQuery)) continue;
+    queries.push({ q: sceneQuery, label: `scene: ${scene}`, num: 6 });
+  }
+
+  // === ค้นหาจาก keywords ที่ AI สกัดได้ ===
+  for (const kw of (identity?.keywords || []).slice(0, 3)) {
+    if (!kw || kw.length < 3) continue;
+    const kwQuery = mainCharForScenes ? `${mainCharForScenes} ${kw}` : kw;
+    if (queries.some(q => q.q === kwQuery)) continue;
+    queries.push({ q: kwQuery, label: `keyword: ${kw}`, num: 5 });
+  }
 
   // ถ้าไม่มี searchQueries เลย → fallback queries เดิม
   if (queries.length === 0) {
@@ -186,7 +220,7 @@ async function agentGoogleCleanImages(identity) {
         method: 'POST',
         headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          q: `${queryObj.q} ${blockSitesParam}`,
+          q: `${queryObj.q} ${blockSitesParam} -ปกข่าว -ลายน้ำ -screenshot -cover -watermark`,
           gl: 'th', hl: 'th', num: queryObj.num,
           imgSize: 'large', imgType: 'photo'
         })
@@ -238,13 +272,26 @@ async function agentYouTubeFrames(identity) {
     return [];
   }
 
-  // ★ ค้นหลาย query: ไม่แค่ข่าวเดียว แต่ค้นชื่อ+สัมภาษณ์+ผลงานด้วย
+  // ★ ค้นหลาย query: ไม่แค่ข่าวเดียว แต่ค้นชื่อ+สัมภาษณ์+ผลงาน+keyScenes ด้วย
   const mainChar = identity?.mainCharacter || '';
   const youtubeQueries = [
     identity?.searchYouTube || identity?.searchGoogle || '',
     mainChar ? `${mainChar} สัมภาษณ์` : '',
     mainChar ? `${mainChar} ละคร ซีรีส์ ฉาก` : '',
     mainChar ? `${mainChar}` : '',
+    // ★ เพิ่ม secondary character queries
+    identity?.secondaryCharacter ? `${identity.secondaryCharacter} สัมภาษณ์` : '',
+    // ★ เพิ่ม characterRoles queries
+    ...(identity?.characterRoles || []).slice(0, 2)
+      .filter(cr => cr.name && cr.name !== mainChar)
+      .map(cr => cr.name),
+    // ★ เพิ่ม keyScenes: หาคลิปตามฉากที่ AI วิเคราะห์ เช่น "สมัยสาวๆ", "ได้รางวัล"
+    ...(identity?.keyScenes || []).slice(0, 3).map(scene => 
+      mainChar ? `${mainChar} ${scene}` : scene
+    ),
+    // ★ เพิ่ม searchQueries เฉพาะที่เกี่ยวกับ drama/emotion
+    identity?.searchQueries?.person_drama || '',
+    identity?.searchQueries?.emotion_moment || '',
   ].filter(q => q.trim());
   
   if (youtubeQueries.length === 0) {
@@ -263,7 +310,7 @@ async function agentYouTubeFrames(identity) {
     
     // ★ ค้นหลาย query แบบ parallel
     let allFrames = [];
-    for (const query of youtubeQueries.slice(0, 3)) { // max 3 queries
+    for (const query of youtubeQueries.slice(0, 5)) { // max 5 queries (เพิ่มจาก 3 เพื่อความหลากหลาย)
       try {
         console.log(`[Agent2: YouTube] 🔍 Query: "${query}"`);
         const frames = await searchAndExtractFrames(query, 3);
@@ -454,6 +501,57 @@ async function agentContextImages(identity) {
 }
 
 // ==========================================
+// Agent 4: TikTok Frame Search
+// ค้น TikTok → extract thumbnails/frames → data URIs
+// ==========================================
+async function agentTikTokFrames(identity) {
+  console.log('[Agent4: TikTok] Starting TikTok frame search...');
+  
+  const mainChar = identity?.mainCharacter || '';
+  if (!mainChar) {
+    console.log('[Agent4: TikTok] No main character — skipping');
+    return [];
+  }
+
+  try {
+    const { searchAndExtractTikTokFrames } = await import('@/lib/services/tiktokFrameExtractor');
+    
+    // ค้น TikTok ด้วยชื่อตัวละครหลัก
+    const queries = [
+      mainChar,
+      identity?.secondaryCharacter ? `${mainChar} ${identity.secondaryCharacter}` : '',
+    ].filter(q => q.trim());
+
+    let allFrames = [];
+    for (const query of queries.slice(0, 2)) {
+      try {
+        console.log(`[Agent4: TikTok] 🔍 Query: "${query}"`);
+        const frames = await searchAndExtractTikTokFrames(query);
+        allFrames.push(...frames);
+      } catch (e) {
+        console.log(`[Agent4: TikTok] Query "${query}" error: ${e.message?.slice(0, 60)}`);
+      }
+    }
+
+    // Convert buffers to data URIs (เหมือน YouTube agent)
+    const dataUris = [];
+    for (const frame of allFrames) {
+      if (frame.buffer) {
+        const base64 = frame.buffer.toString('base64');
+        dataUris.push(`data:image/jpeg;base64,${base64}`);
+      }
+    }
+
+    console.log(`[Agent4: TikTok] ✅ Total: ${dataUris.length} TikTok frames`);
+    return dataUris;
+
+  } catch (err) {
+    console.log(`[Agent4: TikTok] Error: ${err.message?.slice(0, 80)}`);
+    return [];
+  }
+}
+
+// ==========================================
 // AI Judge: Strict image selection with Gemini Vision
 // Pre-filters by resolution & blur, then assigns cover roles:
 // HERO_FACE, CONTEXT_SCENE, EVIDENCE, EMOTION, RELATIONSHIP
@@ -554,6 +652,21 @@ You are a RUTHLESSLY STRICT senior photo editor selecting images for a professio
 - ภาพ ${mainChar} กับคนอื่น (คู่รัก, ครอบครัว, เพื่อน)
 - ต้องเห็นความสัมพันธ์ชัดเจน
 
+🏷️ FAMILY_SUPPORT (0-2 ภาพ):
+- ★ ภาพพ่อแม่ / ครอบครัว / โค้ช / คนที่คอยสนับสนุนตัวละครหลัก
+- ภาพที่แสดงความผูกพัน ความรัก การสนับสนุน
+- เช่น พ่อแม่เชียร์ลูก, ครอบครัวกอดกัน, พ่อจูงมือลูก
+- ★ ให้ความสำคัญสูง ถ้าเนื้อข่าวพูดถึงครอบครัว/พ่อแม่ → score 7-10
+
+=== ⚠️ DIVERSITY RULES (สำคัญมาก!) ===
+1. ห้ามเลือกภาพ "ซีนเดียวกัน" เกิน 2 ภาพ
+   - เช่น ภาพแข่งจักรยาน 5 ภาพ → เก็บแค่ 2 ภาพที่ดีที่สุด ที่เหลือ REJECT
+   - เช่น ภาพนั่งสัมภาษณ์ 3 ภาพ → เก็บ 1-2 ภาพ
+2. ต้องมีความหลากหลาย: ต้องมีทั้ง close-up (หน้าชัด) + wide shot (บริบท) + relationship/family
+3. ★ ให้ priority สูง: portrait close-up > group action shot
+4. ★ ถ้ามีภาพพ่อแม่/ครอบครัว ให้เลือกไว้ 1-2 ภาพ แทนที่จะเลือก action shot ซ้ำ
+5. ภาพที่มีคนเยอะมาก (>10 คน) จนไม่มีจุดโฟกัส → ลดคะแนน -2
+
 === ❌ REJECT ทันที (score = 0, role = "REJECT") ===
 1. ภาพเบลอ, pixelated, resolution ต่ำ
 2. Stock photo — ภาพ generic ไม่ใช่คนจริงในข่าว
@@ -566,6 +679,7 @@ You are a RUTHLESSLY STRICT senior photo editor selecting images for a professio
 9. ภาพ collage ปก — หลายภาพจัดเรียงเป็น layout
 10. มีกรอบ border สวยงาม / ถูกจัดวางตามดีไซน์
 11. ภาพไม่เกี่ยวกับข่าวนี้เลย
+12. ★ ภาพ "ซีนซ้ำ" ที่เกิน 2 ภาพแล้ว → REJECT ภาพ 3+ ที่คล้ายกัน
 
 === SCORING GUIDE ===
 - 9-10: สมบูรณ์แบบ คมชัดสุด ภาพใหญ่ high-res ไม่มี text ไม่มี watermark เหมาะกับ role อย่างยิ่ง
@@ -576,13 +690,35 @@ You are a RUTHLESSLY STRICT senior photo editor selecting images for a professio
 - 0: REJECT ตาม rules ด้านบน
 
 ⚠️ กฎเข้มงวด (ปกต้องสะอาดเหมือนปก Viral มืออาชีพ):
-- ภาพที่มี text overlay (ไม่ว่าเล็กหรือใหญ่: ชื่อรายการ, lower-third, ข้อความซ้อน, ชื่อคน, subtitle) → score ≤ 3 เท่านั้น ห้ามให้สูงกว่านี้
+
+★★★ ขั้นตอนบังคับ: OCR SCAN (ทำทุกภาพก่อนให้คะแนน!) ★★★
+ก่อนให้คะแนนแต่ละภาพ ให้ทำ "OCR scan ในใจ" ตามขั้นตอนนี้:
+1. มองมุมซ้ายบน → มี text/logo ไหม?
+2. มองมุมขวาบน → มี text/logo ไหม?
+3. มองมุมซ้ายล่าง → มี text/logo ไหม?
+4. มองมุมขวาล่าง → มี text/logo ไหม?
+5. มองกลางภาพ → มี text ซ้อนบนคน/ฉากไหม?
+6. มองขอบบน-ล่าง → มี lower-third / banner / ชื่อรายการไหม?
+→ ถ้าเจอ text ใดๆ (แม้เล็กมาก) ที่ไม่ใช่ป้ายธรรมชาติในฉาก → score = 0 REJECT ทันที
+
+★★★ Logo/Text ที่พบบ่อยและต้อง REJECT:
+- Logo ช่องทีวี: "AMARIN", "ช่อง 7", "ONE31", "MONO29", "CH3", "PPTV", "TNN", "ไทยรัฐ", "ข่าวสด", "Thai PBS", "Workpoint", "Spring News"
+- Logo สำนักข่าว: "AMARIN NEWS", "ข่าวเที่ยง", "ข่าวค่ำ", "mgr online", "Matichon", "Daily News"
+- Text ซ้อนภาพ: พาดหัวข่าว, subtitle, ชื่อรายการ, hashtag, เครดิตภาพ, ลายน้ำจางๆ
+- ข้อความที่เขียนซ้อนภาพ เช่น "เปิดใจ", "ช่วยใช้หนี้", "ดราม่า", "สุดซึ้ง"
+
+★★★ ภาพปกคลิป YouTube/TikTok ที่มีข้อความซ้อน → REJECT ทันที ไม่ว่าหน้าคนจะชัดแค่ไหน!
+★★★ ภาพที่มีกราฟิก/กรอบ/ดีไซน์ตกแต่ง (เส้นกรอบ, สีพื้นหลัง, gradient overlay, วงกลมตัดภาพ) → REJECT
+★ ต้องเป็นภาพ "ถ่ายจริง" (photograph) เท่านั้น ไม่ใช่ภาพที่ถูกออกแบบ/ตัดต่อ/ตกแต่ง
 - Screenshot จอทีวี, screenshot ข่าว, ภาพจากหน้าจอรายการ (มีกรอบรายการ, logo ช่อง, แบนเนอร์) → score = 0 REJECT
 - ภาพ collage / designed cover / thumbnail → score = 0 REJECT
 - ภาพเบลอ, pixelated, แตก, ภาพยืด → score ≤ 2
 - ภาพที่มี watermark ใดๆ → score ≤ 2
 - เน้นภาพ "สะอาด": ไม่มี text, ไม่มี graphics, หน้าคนชัด, background สะอาด → score ≥ 7
 - REJECT เป็น 0 ทุกภาพที่ไม่ clean พอจะทำปกมืออาชีพได้
+- ★ ภาพ close-up portrait หน้าชัด ไม่ใส่หมวก/แว่น → คะแนนสูง (8-10)
+- ★ ภาพ group shot คนเยอะ ไม่มีจุดโฟกัส → ลดคะแนน -2
+
 
 === OUTPUT FORMAT ===
 Return JSON array เท่านั้น ห้ามมี markdown blocks ห้ามมี \`\`\`
@@ -612,13 +748,14 @@ HERO_FACE ต้องมีแค่ 1 ตัวเท่านั้น
       console.log(`[Judge] AI scores: ${parsed.map(s => `#${s.index}=${s.score}(${s.role})`).join(', ')}`);
       console.log(`[Judge] 📊 Accepted(≥4): ${accepted.length}, Near-miss(3): ${nearMiss.length}, Rejected(<3): ${rejected.length}`);
 
-      // === สร้าง selected list จากภาพที่ score >= 6 ===
-      // HERO_FACE ต้องมีแค่ 1
+      // === สร้าง selected list จากภาพที่ score >= 4 AND role ไม่ใช่ REJECT ===
+      // ★ FIX: AI บางทีให้ score สูง (7-8) แต่ role=REJECT → ต้อง exclude ออก
       let heroAssigned = false;
       const HERO_ROLE = 'HERO_FACE';
 
       const validScores = accepted
         .filter(s => s.index >= 0 && s.index < validCandidates.length)
+        .filter(s => s.role !== 'REJECT') // ★ ห้ามรับ REJECT ไม่ว่า score เท่าไหร่
         .sort((a, b) => {
           // HERO_FACE มาก่อน
           if (a.role === HERO_ROLE && b.role !== HERO_ROLE) return -1;
@@ -641,11 +778,13 @@ HERO_FACE ต้องมีแค่ 1 ตัวเท่านั้น
       }
 
       if (selectedImages.length > 0) {
-        // === Supplement: ถ้าน้อยกว่า 5 ภาพ ดึง near-miss (score 4-5) มาเสริม ===
+        // === Supplement: ถ้าน้อยกว่า 5 ภาพ ดึง near-miss (score 3) มาเสริม ===
+        // ★ FIX: ไม่ดึง REJECT กลับมาอีก
         if (selectedImages.length < 5 && nearMiss.length > 0) {
           const selectedUrls = new Set(selectedImages.map(i => i.url));
           const sortedNearMiss = nearMiss
             .filter(s => s.index >= 0 && s.index < validCandidates.length)
+            .filter(s => s.role !== 'REJECT') // ★ ห้าม REJECT
             .sort((a, b) => b.score - a.score);
 
           for (const s of sortedNearMiss) {
@@ -654,7 +793,7 @@ HERO_FACE ต้องมีแค่ 1 ตัวเท่านั้น
             if (!selectedUrls.has(url)) {
               selectedImages.push({
                 url: url,
-                role: s.role === 'REJECT' ? 'SUPPORT' : (s.role || 'SUPPORT'),
+                role: s.role || 'SUPPORT',
                 score: s.score
               });
               selectedUrls.add(url);
@@ -663,11 +802,12 @@ HERO_FACE ต้องมีแค่ 1 ตัวเท่านั้น
           console.log(`[Judge] 📦 Supplemented with near-miss → total ${selectedImages.length}`);
         }
 
-        // ถ้ายังไม่พอ → ดึง score 1-3 มาเสริม (ดีกว่าไม่มีเลย)
+        // ถ้ายังไม่พอ → ดึง score 1-3 มาเสริม (ดีกว่าไม่มีเลย) ★ ยกเว้น REJECT
         if (selectedImages.length < 4) {
           const selectedUrls = new Set(selectedImages.map(i => i.url));
           const lowScored = rejected
             .filter(s => s.score > 0 && s.index >= 0 && s.index < validCandidates.length)
+            .filter(s => s.role !== 'REJECT') // ★ ห้าม REJECT
             .sort((a, b) => b.score - a.score);
 
           for (const s of lowScored) {
@@ -729,34 +869,37 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
   console.log(`  TikTok: ${identity?.searchTikTok || 'N/A'}`);
   console.log('============================================');
 
-  // Run all 3 agents in parallel
-  const [googleResult, youtubeResult, contextResult] = await Promise.allSettled([
+  // Run all 4 agents in parallel (TikTok is Agent 4 — non-critical)
+  const [googleResult, youtubeResult, contextResult, tiktokResult] = await Promise.allSettled([
     agentGoogleCleanImages(identity),
     agentYouTubeFrames(identity),
-    agentContextImages(identity)
+    agentContextImages(identity),
+    agentTikTokFrames(identity),
   ]);
 
   // Collect results from each agent
   const googleImages = googleResult.status === 'fulfilled' ? googleResult.value : [];
   const youtubeImages = youtubeResult.status === 'fulfilled' ? youtubeResult.value : [];
   const contextImages = contextResult.status === 'fulfilled' ? contextResult.value : [];
+  const tiktokImages = tiktokResult.status === 'fulfilled' ? tiktokResult.value : [];
 
   console.log('============================================');
   console.log(`[MultiAgent] Agent results:`);
   console.log(`  Agent 1 (Google):   ${googleImages.length} images ${googleResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + googleResult.reason : ''}`);
   console.log(`  Agent 2 (YouTube):  ${youtubeImages.length} frames ${youtubeResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + youtubeResult.reason : ''}`);
   console.log(`  Agent 3 (Context):  ${contextImages.length} images ${contextResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + contextResult.reason : ''}`);
+  console.log(`  Agent 4 (TikTok):   ${tiktokImages.length} frames ${tiktokResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + tiktokResult.reason : ''}`);
 
   // Combine and deduplicate
-  let candidates = [...googleImages, ...youtubeImages, ...contextImages];
+  let candidates = [...googleImages, ...youtubeImages, ...contextImages, ...tiktokImages];
   candidates = [...new Set(candidates)];
 
   console.log(`[MultiAgent] Combined unique candidates: ${candidates.length}`);
 
-  // Cap at 30 for the judge
-  if (candidates.length > 30) {
-    candidates = candidates.sort(() => 0.5 - Math.random()).slice(0, 30);
-    console.log(`[MultiAgent] Capped to 30 candidates for judging`);
+  // Cap at 35 for the judge (เพิ่มจาก 30 เพราะมี TikTok เพิ่ม)
+  if (candidates.length > 35) {
+    candidates = candidates.sort(() => 0.5 - Math.random()).slice(0, 35);
+    console.log(`[MultiAgent] Capped to 35 candidates for judging`);
   }
 
   console.log(`[MultiAgent] 🏛️ Sending ${candidates.length} candidates to AI Judge...`);

@@ -173,44 +173,62 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
       let cropX, cropY;
       
       if (cropStrategy === 'portrait-upper') {
-        // ★ Hero: ให้หน้าอยู่ที่ ~30% จากบน (ไม่ใช่ 35% จาก focusCY)
-        // วิธี: center หน้าก่อน แล้วเลื่อนขึ้นนิดหน่อย เพื่อเห็นตัวด้วย
+        // ★ Hero: ให้หน้าอยู่ที่ ~25-30% จากบน — เห็นหัว+ไหล่+หน้าอก
+        // Step 1: คำนวณให้ใบหน้าอยู่ที่ 28% จากบนของ crop region
+        const faceTargetY = cropH * 0.28; // หน้าอยู่ 28% จากบน
         cropX = Math.round(focusCX - cropW / 2);
-        cropY = Math.round(focusCY - cropH * 0.30); // หน้าอยู่ 30% จากบน
+        cropY = Math.round(focusCY - faceTargetY);
+        
+        // ★ Safety: ต้องเห็นหัว → เหลือ padding ด้านบนหน้าอย่างน้อย 15% ของหน้า
+        const headPadding = Math.max(focusH * 0.5, 20); // padding ด้านบนหัว
+        const faceTop = focusCY - focusH / 2;
+        if (faceTop - cropY < headPadding) {
+          cropY = Math.max(0, Math.round(faceTop - headPadding));
+        }
         
         // ★ Safety: ถ้า cropY ติดลบ = หน้าอยู่บนสุด → ให้เริ่มจาก 0
         if (cropY < 0) cropY = 0;
-        // ★ Safety: ถ้า cropY + cropH เกินภาพ = หน้าอยู่ล่างมาก → ให้ crop ถึงล่าง
+        // ★ Safety: ถ้า crop เกินล่าง → เลื่อนขึ้น
         if (cropY + cropH > srcH) cropY = Math.max(0, srcH - cropH);
         
-        // ★ ตรวจสอบ: ใบหน้าต้องอยู่ใน crop region เด็ดขาด
-        const faceTop = focusCY - focusH / 2;
+        // ★ Safety: ใบหน้าต้องอยู่ใน crop region เด็ดขาด
         const faceBottom = focusCY + focusH / 2;
         if (faceTop < cropY) {
-          cropY = Math.max(0, Math.round(faceTop - focusH * 0.3));
+          cropY = Math.max(0, Math.round(faceTop - headPadding));
         }
         if (faceBottom > cropY + cropH) {
-          cropY = Math.max(0, Math.round(faceBottom - cropH + focusH * 0.3));
+          cropY = Math.max(0, Math.round(faceBottom - cropH + focusH * 0.5));
+        }
+        
+        // ★ Safety: ใบหน้าต้องไม่ตกขอบซ้าย-ขวา
+        const faceLeft = focusCX - focusW / 2;
+        const faceRight = focusCX + focusW / 2;
+        const sidePadding = focusW * 0.3;
+        if (faceLeft - cropX < sidePadding) {
+          cropX = Math.max(0, Math.round(faceLeft - sidePadding));
+        }
+        if (faceRight > cropX + cropW - sidePadding) {
+          cropX = Math.min(srcW - cropW, Math.round(faceRight - cropW + sidePadding));
         }
       } else {
         // center-face / face-tight / scene-with-face: center ที่จุดกลางหน้า
         cropX = Math.round(focusCX - cropW / 2);
         cropY = Math.round(focusCY - cropH / 2);
         
-        // ★ Safety: ตรวจสอบทุกใบหน้าอยู่ใน crop
+        // ★ Safety: ตรวจสอบทุกใบหน้าอยู่ใน crop — เพิ่ม padding 30%
         for (const face of faces) {
           const fx = face.x;
           const fy = face.y;
           const fw = face.width;
           const fh = face.height;
           // ถ้าหน้าตกขอบซ้าย → เลื่อน crop ไปซ้าย
-          if (fx < cropX) cropX = Math.max(0, fx - Math.round(fw * 0.2));
+          if (fx < cropX) cropX = Math.max(0, fx - Math.round(fw * 0.3));
           // ถ้าหน้าตกขอบขวา → เลื่อน crop ไปขวา
-          if (fx + fw > cropX + cropW) cropX = Math.min(srcW - cropW, Math.round(fx + fw - cropW + fw * 0.2));
+          if (fx + fw > cropX + cropW) cropX = Math.min(srcW - cropW, Math.round(fx + fw - cropW + fw * 0.3));
           // ถ้าหน้าตกขอบบน
-          if (fy < cropY) cropY = Math.max(0, fy - Math.round(fh * 0.2));
+          if (fy < cropY) cropY = Math.max(0, fy - Math.round(fh * 0.3));
           // ถ้าหน้าตกขอบล่าง
-          if (fy + fh > cropY + cropH) cropY = Math.min(srcH - cropH, Math.round(fy + fh - cropH + fh * 0.2));
+          if (fy + fh > cropY + cropH) cropY = Math.min(srcH - cropH, Math.round(fy + fh - cropH + fh * 0.3));
         }
       }
 

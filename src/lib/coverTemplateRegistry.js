@@ -129,6 +129,71 @@ const BUILTIN_TEMPLATES = [
   },
 ];
 
+// ═══ NORMALIZE USER TEMPLATES ═══
+
+/** Guess slot role from slot id (for user templates that don't have role) */
+function guessRole(id) {
+  if (!id) return 'support';
+  const lower = id.toLowerCase();
+  if (lower === 'main' || lower.includes('hero')) return 'hero';
+  if (lower.includes('bg_top') || lower.includes('scene')) return 'scene';
+  if (lower.includes('bg_bottom') || lower.includes('emotion')) return 'scene';
+  if (lower.includes('highlight') || lower.includes('evidence')) return 'highlight';
+  if (lower.includes('circle')) return 'highlight';
+  if (lower.includes('sub') || lower.includes('support')) return 'support';
+  return 'support';
+}
+
+/**
+ * Normalize a user template (from template-library/store) to match
+ * the builtin template format expected by the auto-cover pipeline.
+ * 
+ * Fills: canvasW/canvasH, imageSlots, role per slot, standalone circle field.
+ * Safe to call on builtin templates too (no-op in practice).
+ */
+export function normalizeTemplate(tmpl) {
+  if (!tmpl || !tmpl.slots) return tmpl;
+
+  // Extract standalone circle from slots[] if not already present
+  let circle = tmpl.circle || null;
+  if (!circle) {
+    const circleSlot = tmpl.slots.find(
+      s => s.shape === 'circle' && (s.id === 'circle' || s.id?.startsWith('circle'))
+    );
+    if (circleSlot) {
+      circle = {
+        id: circleSlot.id,
+        x: circleSlot.x,
+        y: circleSlot.y,
+        diameter: circleSlot.diameter,
+        border: circleSlot.border || '#FFFFFF',
+        borderWidth: circleSlot.borderWidth || 5,
+        zIndex: circleSlot.zIndex || 4,
+      };
+    }
+  }
+
+  // Normalize slots: add role, keep all existing fields
+  const normalizedSlots = (tmpl.slots || []).map(s => ({
+    role: s.role || guessRole(s.id),
+    ...s,
+  }));
+
+  // Count non-circle image slots for imageSlots
+  const imageSlots = tmpl.imageSlots || normalizedSlots.length;
+
+  return {
+    canvasW: tmpl.canvasW || 1200,
+    canvasH: tmpl.canvasH || 1350,
+    imageSlots,
+    textSlots: tmpl.textSlots || [],
+    circle,
+    ...tmpl,
+    // Override with normalized values (after spread so they win)
+    slots: normalizedSlots,
+  };
+}
+
 // ═══ EXPORTS ═══
 
 export const ALL_TEMPLATES = BUILTIN_TEMPLATES;
@@ -178,6 +243,23 @@ export function scaleTemplateSlots(template, targetW, targetH) {
     circle: scaleCircle(template.circle),
     circleSmall: scaleCircle(template.circleSmall),
   };
+}
+
+/**
+ * Get an alternate template ID different from the current one,
+ * best-fit for the given image count.
+ * @param {string} currentId - Current template ID
+ * @param {number} imageCount - Number of available images
+ * @returns {string|null} - Alternate template ID or null if none
+ */
+export function getAlternateTemplate(currentId, imageCount) {
+  const all = ['template_1','template_2','template_3','template_4','template_5','template_6'];
+  const others = all.filter(id => id !== currentId);
+  if (others.length === 0) return null;
+  // Pick based on imageCount fit
+  if (imageCount >= 5) return others.find(id => ['template_1','template_4','template_5'].includes(id)) || others[0];
+  if (imageCount >= 3) return others.find(id => ['template_3','template_6'].includes(id)) || others[0];
+  return others[0];
 }
 
 export function autoSelectTemplate(imageCount, faceCount, storyIdentity) {

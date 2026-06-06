@@ -1,4 +1,4 @@
-import { extractContent } from '@/lib/scraper/index.js';
+﻿import { extractContent } from '@/lib/scraper/index.js';
 import { transcribeTiktok } from '@/lib/services/tiktokService';
 import { transcribeYoutube } from '@/lib/services/youtubeService';
 import { performResearch } from '@/lib/services/researchService';
@@ -174,7 +174,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     breakdownData,
     workflowId: _autoWorkflowId,
     user: _user,
-  }), 60000, 'blueprint').catch(() => null);
+  }), 60000, 'blueprint').catch(err => { console.warn('[AutoFlow] Blueprint failed:', err.message); return null; });
 
   const blueprint = bpResult?.success ? bpResult.data?.blueprint : null;
   addLog('Enhanced', `Blueprint: ${blueprint ? blueprint.core_emotion : '❌'}`);
@@ -190,7 +190,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
       smartResearch(newsData, breakdownData),
       35000,
       'smart_research'
-    ).catch(() => null);
+    ).catch(err => { console.warn('[AutoFlow] SmartResearch failed:', err.message); return null; });
     if (factPool && factPool.facts?.length > 0) {
       addLog('SmartResearch', `✅ พบ ${factPool.facts.length} ข้อเท็จจริงเกี่ยวกับ "${factPool.entityName || '?'}" (${factPool.duration || '?'}s)`);
       await logPipeline({ workflowId: _autoWorkflowId, step: 'smart-research', status: 'success', duration: (factPool.duration || 0) * 1000, detail: `${factPool.facts.length} facts for "${factPool.entityName}"` }).catch(() => {});
