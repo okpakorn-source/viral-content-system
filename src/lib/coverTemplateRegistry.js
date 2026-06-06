@@ -283,3 +283,144 @@ export function autoSelectTemplate(imageCount, faceCount, storyIdentity) {
   // T2: สะอาด 4 ช่อง (default)
   return 'template_2';
 }
+
+// ═══ AI-POWERED TEMPLATE SELECTION & TEXT GENERATION ═══
+
+/**
+ * AI-powered template selection — uses GPT to analyze news content
+ * and choose the best template based on content, emotion, image count.
+ * Falls back to rule-based autoSelectTemplate on failure.
+ * 
+ * @param {Object} context - { imageCount, faceCount, storyIdentity, newsTitle, newsContent, userTemplates }
+ * @returns {Promise<{templateId: string, reason: string, coverTexts: Object|null}>}
+ */
+export async function aiSelectTemplate(context) {
+  const { imageCount, faceCount, storyIdentity, newsTitle, newsContent, userTemplates = [] } = context;
+  
+  try {
+    // Build template catalog for AI
+    const builtinChoices = ALL_TEMPLATES.map(t => (
+      `- ${t.id}: "${t.name}" — ${t.imageSlots} ภาพ${t.circle ? ' + วงกลม' : ''}${t.textSlots?.length ? ` + ${t.textSlots.length} บรรทัดข้อความ` : ''} — ${t.desc}`
+    )).join('\n');
+    
+    const userChoices = userTemplates.map(t => (
+      `- ${t.id}: "${t.name}" — ${t.imageSlots || t.slots?.length || '?'} ภาพ — ${t.desc || 'User template'}`
+    )).join('\n');
+    
+    const allChoices = userChoices ? builtinChoices + '\n' + userChoices : builtinChoices;
+    
+    const prompt = `เลือก template ปกข่าวที่เหมาะสมที่สุดสำหรับข่าวนี้:
+
+## ข้อมูลข่าว
+หัวข้อ: ${newsTitle || 'ไม่ระบุ'}
+อารมณ์: ${storyIdentity?.emotion || 'ไม่ระบุ'}
+ตัวละคร: ${storyIdentity?.characters?.map(c => c.name || c).join(', ') || 'ไม่ระบุ'}
+จำนวนภาพที่หาได้: ${imageCount} ภาพ
+จำนวนภาพที่มีใบหน้า: ${faceCount} ภาพ
+
+## Template ที่เลือกได้
+${allChoices}
+
+## กฎการเลือก
+1. template ที่ต้องใช้ 5 ภาพ — ห้ามเลือกถ้ามีภาพ < 4
+2. template ที่ต้องใช้ 4 ภาพ (template_2) — เหมาะกับภาพน้อย
+3. ข่าวมีตัวละคร 2+ คน — ควรใช้ template ที่มีวงกลม (ใส่หน้าตัวละครเสริม)
+4. ข่าวเศร้า/สะเทือนใจ — ควรใช้ template ที่มีข้อความ (template_4/6)
+5. ข่าวเหตุการณ์/ผจญภัย — template_5 (เหตุการณ์ 5 ช่อง)
+6. ข่าวดราม่าทั่วไป — template_1 หรือ template_3
+
+ตอบเป็น JSON เท่านั้น:
+{"templateId": "template_X", "reason": "เหตุผลสั้นๆ"}${context.needCoverText ? `
+
+## ข้อความบนปก
+ถ้า template ที่เลือกมีข้อความ (มี textSlots) ให้สร้างข้อความที่ทรงพลังด้านจิตใจที่สุด ด้านบวกที่สุด กระชับ สั้นๆ ดึงจุดเด่นที่สุดของข่าว
+เพิ่มใน JSON: "coverTexts": {"line1": "บรรทัด 1", "line2": "บรรทัด 2"}` : ''}`;
+
+    // Use callSmartAI for routing
+    const { callSmartAI } = await import('@/lib/ai/aiRouter');
+    const { result } = await callSmartAI('general', {
+      prompt,
+      temperature: 0.3,
+      maxTokens: 500,
+    });
+    
+    // Parse JSON from response
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      // Validate templateId exists
+      const validId = parsed.templateId;
+      const found = ALL_TEMPLATES.find(t => t.id === validId) || userTemplates.find(t => t.id === validId);
+      if (found) {
+        return {
+          templateId: validId,
+          reason: parsed.reason || 'AI selected',
+          coverTexts: parsed.coverTexts || null,
+        };
+      }
+    }
+    // If parsing fails, fallback
+    throw new Error('AI response parsing failed');
+  } catch (err) {
+    console.warn('[CoverRegistry] AI template selection failed, using rule-based:', err.message);
+    return {
+      templateId: autoSelectTemplate(imageCount, faceCount, storyIdentity),
+      reason: 'Rule-based fallback',
+      coverTexts: null,
+    };
+  }
+}
+
+/**
+ * Generate cover text for templates with textSlots.
+ * Produces short, powerful, emotionally impactful headlines.
+ * 
+ * @param {Object} context - { newsTitle, newsContent, storyIdentity, templateId }
+ * @returns {Promise<Object>} - { line1: string, line2: string }
+ */
+export async function aiGenerateCoverText(context) {
+  const { newsTitle, newsContent, storyIdentity, templateId } = context;
+  
+  const template = getTemplateById(templateId);
+  if (!template || !template.textSlots?.length) return null;
+  
+  try {
+    const { callSmartAI } = await import('@/lib/ai/aiRouter');
+    
+    const prompt = `สร้างข้อความสำหรับปกข่าว ${template.textSlots.length} บรรทัด:
+
+## ข่าว
+หัวข้อ: ${newsTitle || ''}
+เนื้อหา: ${(newsContent || '').slice(0, 500)}
+อารมณ์: ${storyIdentity?.emotion || 'ไม่ระบุ'}
+
+## กฎ
+- บรรทัด 1: พาดหัวหลัก สั้นกระชับ ทรงพลัง ดึงดูดคนอ่าน (ไม่เกิน 10 ตัวอักษร)
+- บรรทัด 2: รายละเอียดเสริม สั้นกว่าบรรทัด 1 เล็กน้อย (ไม่เกิน 15 ตัวอักษร)
+- ดึงจุดเด่นที่สุดของข่าว ด้านบวกที่สุด ทรงพลังด้านจิตใจที่สุด
+- ห้ามใส่อีโมจิ ห้ามใช้ภาษาที่หยาบคาย
+
+ตอบ JSON เท่านั้น:
+{"line1": "พาดหัวหลัก", "line2": "รายละเอียด"}`;
+
+    const { result } = await callSmartAI('general', {
+      prompt,
+      temperature: 0.5,
+      maxTokens: 300,
+    });
+    
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return parsed;
+    }
+    return null;
+  } catch (err) {
+    console.warn('[CoverRegistry] AI text generation failed:', err.message);
+    // Fallback: use news title
+    return {
+      line1: (newsTitle || '').slice(0, 20),
+      line2: storyIdentity?.emotion || '',
+    };
+  }
+}

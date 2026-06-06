@@ -401,17 +401,45 @@ export async function POST(request) {
 
     console.log('[AutoCover] Face detection complete');
 
-    // Step 5: Choose template — ★ ถ้าภาพน้อย ต้องเลือก template ที่ slot น้อยลง
+    // Step 5: Choose template — ★ AI-powered selection with fallback
     let chosenTemplate = templateId;
+    let coverTexts = null;
+    let aiReason = '';
     if (templateId === 'auto') {
       const hasMultipleFaces = [...faceDataMap.values()].filter(f => f.hasFaces).length;
       const numImages = imageBuffers.length;
 
       try {
-        const { autoSelectTemplate } = await import('@/lib/coverTemplateRegistry');
-        chosenTemplate = autoSelectTemplate(numImages, hasMultipleFaces, identity);
-      } catch {
-        chosenTemplate = 'template_4'; // fallback default
+        // Load user templates for AI pool
+        let userTemplates = [];
+        try {
+          const { loadTemplateStore } = await import('@/lib/template-library/store');
+          const store = loadTemplateStore();
+          userTemplates = store?.templates || [];
+        } catch { /* no user templates */ }
+
+        const { aiSelectTemplate } = await import('@/lib/coverTemplateRegistry');
+        const aiResult = await aiSelectTemplate({
+          imageCount: numImages,
+          faceCount: hasMultipleFaces,
+          storyIdentity: identity,
+          newsTitle: newsTitle || '',
+          newsContent: (content || '').slice(0, 800),
+          userTemplates,
+          needCoverText: true,
+        });
+        chosenTemplate = aiResult.templateId;
+        coverTexts = aiResult.coverTexts;
+        aiReason = aiResult.reason;
+        console.log(`[AutoCover] AI selected: ${chosenTemplate} — ${aiReason}`);
+      } catch (err) {
+        console.warn('[AutoCover] AI template selection failed:', err.message);
+        try {
+          const { autoSelectTemplate } = await import('@/lib/coverTemplateRegistry');
+          chosenTemplate = autoSelectTemplate(numImages, hasMultipleFaces, identity);
+        } catch {
+          chosenTemplate = 'template_4'; // fallback default
+        }
       }
       console.log(`[AutoCover] Auto-selected template: ${chosenTemplate}`);
     }
@@ -495,6 +523,10 @@ export async function POST(request) {
     const cover1SlotData = buildSlotData(
       chosenTemplate, templateSpec, slotAssignment, imageBuffers
     );
+    // ★ Attach AI-generated cover texts if available
+    if (coverTexts) {
+      cover1SlotData.coverTexts = coverTexts;
+    }
 
     // ★ บันทึกภาพลงคลัง (ไม่ block response) ★
     try {
@@ -598,7 +630,7 @@ export async function POST(request) {
 
     // ★ Build covers array (cover1 always first, cover2 if available)
     const covers = [
-      { base64, templateUsed: chosenTemplate, score, slotData: cover1SlotData },
+      { base64, templateUsed: chosenTemplate, score, slotData: cover1SlotData, aiReason: aiReason || undefined },
     ];
     if (cover2Data) {
       covers.push(cover2Data);
