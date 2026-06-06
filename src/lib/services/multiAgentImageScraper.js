@@ -14,14 +14,17 @@ async function fetchWithTimeout(resource, options = {}) {
   const { timeout = 10000 } = options;
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
-  const response = await fetch(resource, {
-    ...options,
-    headers: { ...DEFAULT_HEADERS, ...(options.headers || {}) },
-    signal: controller.signal,
-    redirect: 'follow'
-  });
-  clearTimeout(id);
-  return response;
+  try {
+    const response = await fetch(resource, {
+      ...options,
+      headers: { ...DEFAULT_HEADERS, ...(options.headers || {}) },
+      signal: controller.signal,
+      redirect: 'follow'
+    });
+    return response;
+  } finally {
+    clearTimeout(id);
+  }
 }
 
 // ==========================================
@@ -291,7 +294,7 @@ async function agentYouTubeFrames(identity) {
     // ถ้าไม่มีเฟรมคุณภาพ → ใช้ maxresdefault (1280x720) แทน
     if (qualityFrames.length === 0) {
       console.log('[Agent2: YouTube] ⚠️ No quality frames, using maxresdefault thumbnails');
-      const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&key=${apiKey}&maxResults=5&relevanceLanguage=th&regionCode=TH`;
+      const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(youtubeQueries[0] || '')}&type=video&key=${apiKey}&maxResults=5&relevanceLanguage=th&regionCode=TH`;
       const response = await fetchWithTimeout(searchUrl, { timeout: 8000 });
       
       if (response.ok) {
@@ -607,7 +610,7 @@ HERO_FACE ต้องมีแค่ 1 ตัวเท่านั้น
       const rejected = parsed.filter(s => s.score < 3);
 
       console.log(`[Judge] AI scores: ${parsed.map(s => `#${s.index}=${s.score}(${s.role})`).join(', ')}`);
-      console.log(`[Judge] 📊 Accepted(≥5): ${accepted.length}, Near-miss(4): ${nearMiss.length}, Rejected(<4): ${rejected.length}`);
+      console.log(`[Judge] 📊 Accepted(≥4): ${accepted.length}, Near-miss(3): ${nearMiss.length}, Rejected(<3): ${rejected.length}`);
 
       // === สร้าง selected list จากภาพที่ score >= 6 ===
       // HERO_FACE ต้องมีแค่ 1

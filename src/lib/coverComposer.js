@@ -683,7 +683,7 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
         const d = Math.round(slot.diameter);
         const slotFaceData = faceDataMap?.get?.(String(imgIdx)) || null;
         const circleImg = await createCircleImageColored(
-          imageBuffers[imgIdx], d, slot.border || '#FFFFFF', slot.borderWidth || 4, slotFaceData
+          imageBuffers[imgIdx], d, slot.borderWidth || 4, slot.border || '#FFFFFF', slotFaceData
         );
         composites.push({ input: circleImg, left: safeX, top: safeY });
       } catch (e) {
