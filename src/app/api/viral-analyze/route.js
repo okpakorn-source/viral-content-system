@@ -1,6 +1,7 @@
 export const maxDuration = 300; // Allow 5 minutes for heavy LLM operations
 import { NextResponse } from 'next/server';
 import { callAI } from '@/lib/ai/openai';
+import { MODEL_PRIMARY } from '@/lib/ai/modelConfig';
 import { logPipeline } from '@/lib/pipelineLogger';
 import { getSession } from '@/lib/auth';
 import { cookies } from 'next/headers';
@@ -217,7 +218,7 @@ ${text.slice(0, 8000)}
       }
 
       console.log(`[Viral-Analyze] Done: dna_type=${analysis.dna_type}, score=${analysis.viral_scores?.overall || analysis.viral_score}`);
-      logPipeline({ step: 'viral-analyze', status: 'success', model: 'gpt-4o', duration: Date.now() - _vaStart, detail: 'dna_type: ' + (analysis.dna_type || '') }).catch(() => {});
+      logPipeline({ step: 'viral-analyze', status: 'success', model: MODEL_PRIMARY, duration: Date.now() - _vaStart, detail: 'dna_type: ' + (analysis.dna_type || '') }).catch(() => {});
       return NextResponse.json({ success: true, analysis });
     }
 
@@ -317,7 +318,7 @@ ${text ? '=== ตัวอย่างเนื้อหาต้นฉบับ
       }
 
       console.log(`[Generate-Prompt] Done: name=${promptData.prompt_name}`);
-      logPipeline({ step: 'generate-prompt', status: 'success', model: 'gpt-4o', duration: Date.now() - _vaStart, detail: 'name: ' + (promptData.prompt_name || '') }).catch(() => {});
+      logPipeline({ step: 'generate-prompt', status: 'success', model: MODEL_PRIMARY, duration: Date.now() - _vaStart, detail: 'name: ' + (promptData.prompt_name || '') }).catch(() => {});
       return NextResponse.json({ success: true, promptData });
     }
 

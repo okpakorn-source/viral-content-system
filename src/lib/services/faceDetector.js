@@ -17,33 +17,36 @@ const LOG = '[FaceDetector]';
  * @returns {{ faces: Array<{x,y,width,height,confidence}>, hasFaces: boolean }}
  */
 export async function detectFaces(imageBuffer) {
-  try {
-    const { GoogleGenerativeAI } = await import('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const MAX_RETRIES = 3;
+  
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-    // Resize ภาพให้เล็กลงก่อนส่ง (ลด cost)
-    const metadata = await sharp(imageBuffer).metadata();
-    const maxDim = 800;
-    let resized = imageBuffer;
-    if (metadata.width > maxDim || metadata.height > maxDim) {
-      resized = await sharp(imageBuffer)
-        .resize(maxDim, maxDim, { fit: 'inside' })
-        .jpeg({ quality: 70 })
-        .toBuffer();
-    }
+      // Resize ภาพให้เล็กลงก่อนส่ง (ลด cost)
+      const metadata = await sharp(imageBuffer).metadata();
+      const maxDim = 800;
+      let resized = imageBuffer;
+      if (metadata.width > maxDim || metadata.height > maxDim) {
+        resized = await sharp(imageBuffer)
+          .resize(maxDim, maxDim, { fit: 'inside' })
+          .jpeg({ quality: 70 })
+          .toBuffer();
+      }
 
-    const base64 = resized.toString('base64');
+      const base64 = resized.toString('base64');
 
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          mimeType: 'image/jpeg',
-          data: base64,
+      const result = await model.generateContent([
+        {
+          inlineData: {
+            mimeType: 'image/jpeg',
+            data: base64,
+          },
         },
-      },
-      {
-        text: `Analyze this image for face detection. Return JSON only, no markdown.
+        {
+          text: `Analyze this image for face detection. Return JSON only, no markdown.
 
 If there are people/faces visible, return their approximate bounding box as percentage of image dimensions (0-100).
 
@@ -60,50 +63,58 @@ Format:
 
 If no faces: has_faces=false, faces=[], and provide main_subject_region for the most interesting area.
 best_crop_focus options: "center", "center-top", "center-bottom", "left", "right", "top-left", "top-right"`,
-      },
-    ]);
+        },
+      ]);
 
-    const text = result.response.text();
-    // Clean JSON from markdown code blocks
-    const jsonStr = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    const parsed = JSON.parse(jsonStr);
+      const text = result.response.text();
+      // Clean JSON from markdown code blocks
+      const jsonStr = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const parsed = JSON.parse(jsonStr);
 
-    // Convert percentage to pixel coordinates
-    const faces = (parsed.faces || []).map(f => ({
-      x: Math.round((f.x_pct / 100) * metadata.width),
-      y: Math.round((f.y_pct / 100) * metadata.height),
-      width: Math.round((f.w_pct / 100) * metadata.width),
-      height: Math.round((f.h_pct / 100) * metadata.height),
-      description: f.description || '',
-    }));
+      // Convert percentage to pixel coordinates
+      const faces = (parsed.faces || []).map(f => ({
+        x: Math.round((f.x_pct / 100) * metadata.width),
+        y: Math.round((f.y_pct / 100) * metadata.height),
+        width: Math.round((f.w_pct / 100) * metadata.width),
+        height: Math.round((f.h_pct / 100) * metadata.height),
+        description: f.description || '',
+      }));
 
-    const subject = parsed.main_subject_region || { x_pct: 25, y_pct: 10, w_pct: 50, h_pct: 80 };
+      const subject = parsed.main_subject_region || { x_pct: 25, y_pct: 10, w_pct: 50, h_pct: 80 };
 
-    return {
-      faces,
-      hasFaces: parsed.has_faces || false,
-      faceCount: parsed.face_count || 0,
-      mainSubject: {
-        x: Math.round((subject.x_pct / 100) * metadata.width),
-        y: Math.round((subject.y_pct / 100) * metadata.height),
-        width: Math.round((subject.w_pct / 100) * metadata.width),
-        height: Math.round((subject.h_pct / 100) * metadata.height),
-      },
-      bestCropFocus: parsed.best_crop_focus || 'center',
-      imageWidth: metadata.width,
-      imageHeight: metadata.height,
-    };
-  } catch (err) {
-    console.error(`${LOG} detectFaces error:`, err.message);
-    return {
-      faces: [],
-      hasFaces: false,
-      faceCount: 0,
-      mainSubject: null,
-      bestCropFocus: 'center',
-      imageWidth: 0,
-      imageHeight: 0,
-    };
+      return {
+        faces,
+        hasFaces: parsed.has_faces || false,
+        faceCount: parsed.face_count || 0,
+        mainSubject: {
+          x: Math.round((subject.x_pct / 100) * metadata.width),
+          y: Math.round((subject.y_pct / 100) * metadata.height),
+          width: Math.round((subject.w_pct / 100) * metadata.width),
+          height: Math.round((subject.h_pct / 100) * metadata.height),
+        },
+        bestCropFocus: parsed.best_crop_focus || 'center',
+        imageWidth: metadata.width,
+        imageHeight: metadata.height,
+      };
+    } catch (err) {
+      const is503 = err.message?.includes('503') || err.message?.includes('high demand');
+      if (is503 && attempt < MAX_RETRIES) {
+        const delay = (attempt + 1) * 2000; // 2s, 4s, 6s
+        console.warn(`${LOG} 503 retry ${attempt + 1}/${MAX_RETRIES} (wait ${delay}ms)...`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      console.error(`${LOG} detectFaces error:`, err.message);
+      return {
+        faces: [],
+        hasFaces: false,
+        faceCount: 0,
+        mainSubject: null,
+        bestCropFocus: 'center',
+        imageWidth: 0,
+        imageHeight: 0,
+      };
+    }
   }
 }
 

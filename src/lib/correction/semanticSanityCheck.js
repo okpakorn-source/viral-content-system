@@ -13,6 +13,7 @@
  */
 
 import { callAI } from '@/lib/ai/openai';
+import { MODEL_FAST } from '@/lib/ai/modelConfig';
 
 const SANITY_CHECK_PROMPT = `คุณเป็นบรรณาธิการภาษาไทยระดับสูง ตรวจสอบเนื้อหาด้านล่างว่ามี "ประโยคที่ไร้ความหมาย" หรือ "คำผิดร้ายแรง" หรือไม่
 
@@ -59,7 +60,7 @@ export async function semanticSanityCheck(content) {
     const prompt = SANITY_CHECK_PROMPT.replace('{CONTENT}', content);
 
     const result = await callAI({
-      model: 'gpt-4o-mini',
+      model: MODEL_FAST,
       temperature: 0.1,
       maxTokens: 500,
       prompt,

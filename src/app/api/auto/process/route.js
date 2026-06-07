@@ -33,6 +33,7 @@ import { performOcr }      from '@/lib/services/ocrService';
 import { performSummarize } from '@/lib/services/summarizeService';
 import { createStore }     from '@/lib/persistStore';
 import { callAI }          from '@/lib/ai/openai';
+import { MODEL_FAST }      from '@/lib/ai/modelConfig';
 
 const rlog = createLogger('AUTO-PROCESS');
 
@@ -51,7 +52,7 @@ async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, wo
     let tags = [];
     try {
       const aiResult = await callAI({
-        model: 'gpt-4o-mini',
+        model: MODEL_FAST,
         temperature: 0.1,
         maxTokens: 400,
         prompt: `วิเคราะห์ข่าวนี้แล้วตอบเป็น JSON\nหัวข้อ: ${newsData.newsTitle || ''}\nเนื้อหา: ${(newsData.newsBody || '').slice(0, 1500)}\nตอบ JSON:\n{\n  "category": "หมวดหมู่ข่าว (เลือก 1: การเมือง|สังคม|อาชญากรรม|อุบัติเหตุ|บันเทิง|กีฬา|เศรษฐกิจ|สุขภาพ|ต่างประเทศ|เทคโนโลยี|สิ่งแวดล้อม|ศาสนา|ทั่วไป)",\n  "summary": "สรุปข่าว 1-2 ประโยค",\n  "tags": ["tag1", "tag2", "tag3"]\n}`,

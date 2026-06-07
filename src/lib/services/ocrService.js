@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { MODEL_VISION } from '@/lib/ai/modelConfig';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -41,7 +42,7 @@ export async function performOcr({ images = [], mode = 'full', dataUrls = [] }) 
 
   // GPT-4o Vision OCR
   const response = await openai.chat.completions.create({
-    model:      'gpt-4o',
+    model:      MODEL_VISION,
     max_tokens: 4000,
     messages: [
       {

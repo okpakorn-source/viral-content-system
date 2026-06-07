@@ -7,6 +7,7 @@ import { calculateHeatScore, calculateRewriteScore } from '@/lib/services/radar/
 import { calculateCredibilityScore } from '@/lib/services/radar/sourceCredibility';
 import { analyzeAngles } from '@/lib/services/radar/angleAnalyzer';
 import { callAI } from '@/lib/ai/openai';
+import { MODEL_FAST } from '@/lib/ai/modelConfig';
 
 // เพิ่ม timeout สำหรับ multi-source pipeline
 export const maxDuration = 120;
@@ -112,7 +113,7 @@ heatLevel: 3=ร้อนมาก, 2=กำลังมา, 1=น่าสน�
     try {
       const aiResult = await callAI({
         prompt: aiPrompt,
-        model: 'gpt-4o-mini',
+        model: MODEL_FAST,
         temperature: 0.4,
         maxTokens: 2000,
       });

@@ -1,4 +1,4 @@
-﻿import sharp from 'sharp';
+import sharp from 'sharp';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -148,10 +148,12 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
         if (cropW / cropH > targetRatio) cropW = Math.round(cropH * targetRatio);
         else cropH = Math.round(cropW / targetRatio);
       } else if (faces.length > 1) {
-        // Multi-face: crop ต้องใหญ่พอครอบทุกหน้า + padding 30%
-        const pad = 1.3;
-        const neededW = focusW * pad;
-        const neededH = focusH * pad * 2;
+        // Multi-face: crop ต้องใหญ่พอครอบทุกหน้า + padding
+        // ★ ใช้ bounding box + 40% padding (ไม่ใช่ *2 ที่ทำให้สูงเกิน)
+        const padX = 1.4;
+        const padY = 1.6; // แนวตั้งต้อง padding มากกว่า (หัว-คาง)
+        const neededW = focusW * padX;
+        const neededH = focusH * padY;
         if (neededW / neededH > targetRatio) {
           cropW = Math.round(Math.min(neededW, srcW));
           cropH = Math.round(cropW / targetRatio);
@@ -159,11 +161,20 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
           cropH = Math.round(Math.min(neededH, srcH));
           cropW = Math.round(cropH * targetRatio);
         }
-        cropW = Math.min(Math.max(cropW, Math.round(srcW * 0.5)), srcW);
-        cropH = Math.min(Math.max(cropH, Math.round(srcH * 0.5)), srcH);
+        cropW = Math.min(Math.max(cropW, Math.round(srcW * 0.4)), srcW);
+        cropH = Math.min(Math.max(cropH, Math.round(srcH * 0.4)), srcH);
       } else if (srcW / srcH > targetRatio) {
         cropH = srcH;
         cropW = Math.round(cropH * targetRatio);
+        // ★ portrait-upper: ป้องกันภาพหลุดเฟรม — ใช้อย่างน้อย 80% ของ srcW
+        if (cropStrategy === 'portrait-upper' && faces.length === 1) {
+          const minCropW = Math.round(srcW * 0.80);
+          if (cropW < minCropW) {
+            cropW = Math.min(minCropW, srcW);
+            cropH = Math.round(cropW / targetRatio);
+            cropH = Math.min(cropH, srcH);
+          }
+        }
       } else {
         cropW = srcW;
         cropH = Math.round(cropW / targetRatio);
@@ -173,62 +184,66 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
       let cropX, cropY;
       
       if (cropStrategy === 'portrait-upper') {
-        // ★ Hero: ให้หน้าอยู่ที่ ~25-30% จากบน — เห็นหัว+ไหล่+หน้าอก
-        // Step 1: คำนวณให้ใบหน้าอยู่ที่ 28% จากบนของ crop region
-        const faceTargetY = cropH * 0.28; // หน้าอยู่ 28% จากบน
         cropX = Math.round(focusCX - cropW / 2);
-        cropY = Math.round(focusCY - faceTargetY);
+        cropY = Math.round(focusCY - cropH * 0.30);
         
-        // ★ Safety: ต้องเห็นหัว → เหลือ padding ด้านบนหน้าอย่างน้อย 15% ของหน้า
-        const headPadding = Math.max(focusH * 0.5, 20); // padding ด้านบนหัว
-        const faceTop = focusCY - focusH / 2;
-        if (faceTop - cropY < headPadding) {
-          cropY = Math.max(0, Math.round(faceTop - headPadding));
-        }
-        
-        // ★ Safety: ถ้า cropY ติดลบ = หน้าอยู่บนสุด → ให้เริ่มจาก 0
         if (cropY < 0) cropY = 0;
-        // ★ Safety: ถ้า crop เกินล่าง → เลื่อนขึ้น
         if (cropY + cropH > srcH) cropY = Math.max(0, srcH - cropH);
         
-        // ★ Safety: ใบหน้าต้องอยู่ใน crop region เด็ดขาด
+        const faceTop = focusCY - focusH / 2;
         const faceBottom = focusCY + focusH / 2;
         if (faceTop < cropY) {
-          cropY = Math.max(0, Math.round(faceTop - headPadding));
+          cropY = Math.max(0, Math.round(faceTop - focusH * 0.3));
         }
         if (faceBottom > cropY + cropH) {
-          cropY = Math.max(0, Math.round(faceBottom - cropH + focusH * 0.5));
-        }
-        
-        // ★ Safety: ใบหน้าต้องไม่ตกขอบซ้าย-ขวา
-        const faceLeft = focusCX - focusW / 2;
-        const faceRight = focusCX + focusW / 2;
-        const sidePadding = focusW * 0.3;
-        if (faceLeft - cropX < sidePadding) {
-          cropX = Math.max(0, Math.round(faceLeft - sidePadding));
-        }
-        if (faceRight > cropX + cropW - sidePadding) {
-          cropX = Math.min(srcW - cropW, Math.round(faceRight - cropW + sidePadding));
+          cropY = Math.max(0, Math.round(faceBottom - cropH + focusH * 0.3));
         }
       } else {
         // center-face / face-tight / scene-with-face: center ที่จุดกลางหน้า
         cropX = Math.round(focusCX - cropW / 2);
         cropY = Math.round(focusCY - cropH / 2);
         
-        // ★ Safety: ตรวจสอบทุกใบหน้าอยู่ใน crop — เพิ่ม padding 30%
+        // ★ Safety: ตรวจสอบทุกใบหน้าอยู่ใน crop (padding 30% รอบหน้า)
         for (const face of faces) {
           const fx = face.x;
           const fy = face.y;
           const fw = face.width;
           const fh = face.height;
+          const facePad = 0.3; // ★ 30% padding รอบใบหน้า
           // ถ้าหน้าตกขอบซ้าย → เลื่อน crop ไปซ้าย
-          if (fx < cropX) cropX = Math.max(0, fx - Math.round(fw * 0.3));
+          if (fx - fw * facePad < cropX) cropX = Math.max(0, Math.round(fx - fw * facePad));
           // ถ้าหน้าตกขอบขวา → เลื่อน crop ไปขวา
-          if (fx + fw > cropX + cropW) cropX = Math.min(srcW - cropW, Math.round(fx + fw - cropW + fw * 0.3));
-          // ถ้าหน้าตกขอบบน
-          if (fy < cropY) cropY = Math.max(0, fy - Math.round(fh * 0.3));
-          // ถ้าหน้าตกขอบล่าง
-          if (fy + fh > cropY + cropH) cropY = Math.min(srcH - cropH, Math.round(fy + fh - cropH + fh * 0.3));
+          if (fx + fw + fw * facePad > cropX + cropW) cropX = Math.min(srcW - cropW, Math.round(fx + fw + fw * facePad - cropW));
+          // ถ้าหน้าตกขอบบน → เลื่อน crop ขึ้น
+          if (fy - fh * facePad < cropY) cropY = Math.max(0, Math.round(fy - fh * facePad));
+          // ถ้าหน้าตกขอบล่าง → เลื่อน crop ลง
+          if (fy + fh + fh * facePad > cropY + cropH) cropY = Math.min(srcH - cropH, Math.round(fy + fh + fh * facePad - cropH));
+        }
+        
+        // ★ Final safety: ถ้ายังมีหน้าหลุดอยู่ → ขยาย crop ให้ครอบ
+        for (const face of faces) {
+          if (face.x < cropX || face.x + face.width > cropX + cropW ||
+              face.y < cropY || face.y + face.height > cropY + cropH) {
+            // ขยาย crop ให้ครอบทุกหน้า
+            const allMinX = Math.min(cropX, ...faces.map(f => f.x));
+            const allMinY = Math.min(cropY, ...faces.map(f => f.y));
+            const allMaxX = Math.max(cropX + cropW, ...faces.map(f => f.x + f.width));
+            const allMaxY = Math.max(cropY + cropH, ...faces.map(f => f.y + f.height));
+            cropX = Math.max(0, allMinX - 20);
+            cropY = Math.max(0, allMinY - 20);
+            cropW = Math.min(allMaxX - allMinX + 40, srcW - cropX);
+            cropH = Math.min(allMaxY - allMinY + 40, srcH - cropY);
+            // รักษา aspect ratio
+            if (cropW / cropH > targetRatio) {
+              cropH = Math.round(cropW / targetRatio);
+            } else {
+              cropW = Math.round(cropH * targetRatio);
+            }
+            cropW = Math.min(cropW, srcW - cropX);
+            cropH = Math.min(cropH, srcH - cropY);
+            console.log(`[Composer] ⚠️ Face overflow → expanded crop to (${cropX},${cropY},${cropW}x${cropH})`);
+            break;
+          }
         }
       }
 
@@ -627,52 +642,252 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
     });
   }
 
-  // ═══ Step 2: Sort slots by zIndex (low → high) เหมือน cover-tester ═══
+  // ═══ Step 2: Sort slots by zIndex (low → high) ═══
   const sortedSlots = [...layoutSlots].sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0));
 
-  // ═══ Step 2.5: ★ Anti-overlap: เลื่อน highlight ถ้าทับหน้าคนใน Hero ═══
-  const heroSlotIdx = layoutSlots.findIndex(s => s.id === 'main' || s.role === 'hero');
-  const heroImgIdx = heroSlotIdx >= 0 ? photoOrder[heroSlotIdx] : 0;
-  const heroFaceData = faceDataMap?.get?.(String(heroImgIdx));
-  
-  if (heroFaceData?.hasFaces && heroFaceData.faces.length > 0) {
-    const heroSlot = layoutSlots[heroSlotIdx] || layoutSlots[0];
-    // คำนวณตำแหน่งหน้าใน canvas coordinates (ประมาณ)
-    const heroMeta = imageBuffers[heroImgIdx] ? (imageBuffers[heroImgIdx] ? await sharp(imageBuffers[heroImgIdx]).metadata().catch(() => ({})) : {}) : {};
-    const scaleX = (heroSlot.w || W) / (heroMeta.width || heroSlot.w || W);
-    const scaleY = (heroSlot.h || H) / (heroMeta.height || heroSlot.h || H);
+  // ═══ Step 2.5: ★★★ Smart Placement Engine — หาตำแหน่งวาง highlight/circle ที่ไม่ทับหน้าคน ═══
+  // รวบรวมหน้าจากทุก slot → ค้นหาตำแหน่งที่ดีที่สุด
+
+  // 1. รวบรวม face bounding boxes จากทุก slot → canvas coordinates
+  const allCanvasFaces = [];
+  for (let si = 0; si < layoutSlots.length; si++) {
+    const imgIdx = photoOrder[si];
+    if (imgIdx === undefined || imgIdx >= imageBuffers.length) continue;
+    const fd = faceDataMap?.get?.(String(imgIdx));
+    if (!fd?.hasFaces || !fd.faces?.length) continue;
     
-    for (const face of heroFaceData.faces) {
-      const faceCanvasX = (heroSlot.x || 0) + face.x * scaleX;
-      const faceCanvasY = (heroSlot.y || 0) + face.y * scaleY;
-      const faceCanvasW = face.width * scaleX;
-      const faceCanvasH = face.height * scaleY;
+    const slot = layoutSlots[si];
+    const srcW = fd.imageWidth || slot.w || W;
+    const srcH = fd.imageHeight || slot.h || H;
+    
+    for (const face of fd.faces) {
+      allCanvasFaces.push({
+        x: (slot.x || 0) + (face.x / srcW) * (slot.w || W),
+        y: (slot.y || 0) + (face.y / srcH) * (slot.h || H),
+        w: (face.width / srcW) * (slot.w || W),
+        h: (face.height / srcH) * (slot.h || H),
+        slot: slot.id,
+      });
+    }
+  }
+
+  // ★★★ Hero Zone Protection — แม้ face detection ล้มเหลว ก็ต้องปกป้อง hero!
+  // ถ้า face detection ล้มเหลว → ประมาณ "virtual face" จากตำแหน่ง hero slot
+  const heroSlot = layoutSlots.find(s => s.id === 'main' || s.role === 'hero');
+  if (heroSlot) {
+    const heroImgIdx = photoOrder[layoutSlots.indexOf(heroSlot)];
+    const heroFD = faceDataMap?.get?.(String(heroImgIdx));
+    const heroHasFace = heroFD?.hasFaces && heroFD.faces?.length > 0;
+    
+    if (!heroHasFace) {
+      // ★ Face detection ล้มเหลวสำหรับ hero → สร้าง virtual face zone
+      // ภาพ hero มักมีหน้าคนอยู่ center-top ของ slot (portrait-upper crop)
+      const vfX = (heroSlot.x || 0) + (heroSlot.w || 700) * 0.15;
+      const vfY = (heroSlot.y || 0) + (heroSlot.h || 1350) * 0.05;
+      const vfW = (heroSlot.w || 700) * 0.55;
+      const vfH = (heroSlot.h || 1350) * 0.45;
+      allCanvasFaces.push({ x: vfX, y: vfY, w: vfW, h: vfH, slot: 'hero_virtual' });
+      console.log(`[SmartPlace] ★ Added virtual hero face zone: (${Math.round(vfX)},${Math.round(vfY)}) ${Math.round(vfW)}x${Math.round(vfH)}`);
+    }
+    
+    // ★ ตรวจ bg_top/bg_bottom ด้วย — ถ้า face detection ล้มเหลว → ประมาณ face zone
+    for (const bgSlot of layoutSlots.filter(s => s.id === 'bg_top' || s.id === 'bg_bottom')) {
+      const bgImgIdx = photoOrder[layoutSlots.indexOf(bgSlot)];
+      const bgFD = faceDataMap?.get?.(String(bgImgIdx));
+      if (bgFD?.hasFaces || !bgImgIdx) continue;
       
-      // เช็คทุก slot ที่มี border (highlight/sub) ว่าทับหน้าไหม
-      for (const slot of sortedSlots) {
-        if (!slot.border || !slot.borderWidth) continue;
-        
-        // เช็ค overlap
-        const overlapsX = slot.x < faceCanvasX + faceCanvasW && slot.x + slot.w > faceCanvasX;
-        const overlapsY = slot.y < faceCanvasY + faceCanvasH && slot.y + slot.h > faceCanvasY;
-        
-        if (overlapsX && overlapsY) {
-          console.log(`[Composer] ⚠️ Highlight "${slot.id}" ทับหน้าคน! กำลังเลื่อน...`);
-          // ลองเลื่อนขวา
-          const newX = Math.round(faceCanvasX + faceCanvasW + 20);
-          if (newX + slot.w <= W) {
-            slot.x = newX;
-            console.log(`[Composer] ✅ เลื่อน highlight ไปขวา x=${newX}`);
-          } else {
-            // ลองเลื่อนลง
-            const newY = Math.round(faceCanvasY + faceCanvasH + 20);
-            if (newY + slot.h <= H) {
-              slot.y = newY;
-              console.log(`[Composer] ✅ เลื่อน highlight ลงล่าง y=${newY}`);
-            }
-          }
+      // ภาพ bg มักมีหน้าคนอยู่ตรงกลาง
+      const vfX = (bgSlot.x || 0) + (bgSlot.w || 800) * 0.25;
+      const vfY = (bgSlot.y || 0) + (bgSlot.h || 700) * 0.1;
+      const vfW = (bgSlot.w || 800) * 0.5;
+      const vfH = (bgSlot.h || 700) * 0.6;
+      allCanvasFaces.push({ x: vfX, y: vfY, w: vfW, h: vfH, slot: bgSlot.id + '_virtual' });
+      console.log(`[SmartPlace] ★ Added virtual ${bgSlot.id} face zone: (${Math.round(vfX)},${Math.round(vfY)}) ${Math.round(vfW)}x${Math.round(vfH)}`);
+    }
+  }
+  
+  console.log(`[SmartPlace] Found ${allCanvasFaces.length} face zones (real + virtual) from ${layoutSlots.length} slots`);
+
+  // 2. ฟังก์ชันตรวจ overlap
+  const PAD = EDITORIAL_GEOMETRY.safeFacePadding;
+  const rectsOverlap = (ax, ay, aw, ah, bx, by, bw, bh) => {
+    return ax < bx + bw + PAD && ax + aw + PAD > bx &&
+           ay < by + bh + PAD && ay + ah + PAD > by;
+  };
+
+  // 3. ★★★ ฟังก์ชันหาตำแหน่งที่ "ปลอดภัย" — ไม่ทับหน้าคน, ไม่ทับ hero zone
+  // แนวคิดใหม่: แทนที่จะ "ลองเลื่อน" → สแกนหาจุดที่ปลอดภัยจริงๆ
+  
+  // ★ เพิ่ม hero slot เป็น obstacle zone — highlight ห้ามทับ hero!
+  const heroSlotForPlacement = layoutSlots.find(s => s.id === 'main' || s.role === 'hero' || s.role === 'hero1');
+  const heroProtectionZone = heroSlotForPlacement ? {
+    // ปกป้องเฉพาะส่วนบน 55% ของ hero (ที่มีหน้าคน) — ส่วนล่างไม่เป็นไร
+    x: heroSlotForPlacement.x || 0,
+    y: heroSlotForPlacement.y || 0,
+    w: (heroSlotForPlacement.w || 700) * 0.85, // ปกป้อง 85% กว้าง
+    h: (heroSlotForPlacement.h || 1350) * 0.55, // ปกป้อง 55% สูง (ส่วนบนที่มีหน้า)
+  } : null;
+
+  const findBestPosition = (defaultX, defaultY, elW, elH, avoid = []) => {
+    const obstacles = [...allCanvasFaces, ...avoid];
+    if (heroProtectionZone) obstacles.push(heroProtectionZone);
+
+    const hasOverlapAt = (testX, testY, testW, testH) => {
+      for (const ob of obstacles) {
+        if (rectsOverlap(testX, testY, testW, testH, ob.x, ob.y, ob.w, ob.h)) {
+          return true;
         }
       }
+      return false;
+    };
+
+    // ★ ถ้า default ไม่ทับ → ใช้เลย!
+    if (!hasOverlapAt(defaultX, defaultY, elW, elH)) {
+      return { x: defaultX, y: defaultY, w: elW, h: elH, moved: false };
+    }
+
+    console.log(`[SmartPlace] Default (${defaultX},${defaultY}) ${elW}x${elH} ทับ obstacle → scanning...`);
+
+    // ★ Strategy: สร้าง candidates จากจุดที่มักปลอดภัย (เรียงตาม priority)
+    const candidates = [];
+    
+    // Priority 1: ขอบขวาของ canvas (ห่างจาก hero)
+    const rightZone = Math.max(W * 0.5, W - elW - 30);
+    for (let y = 50; y + elH <= H - 50; y += 50) {
+      for (let x = Math.round(rightZone); x + elW <= W - 10; x += 50) {
+        candidates.push({ x, y, priority: 1 });
+      }
+    }
+    
+    // Priority 2: กลางล่างของ canvas
+    for (let y = Math.round(H * 0.55); y + elH <= H - 30; y += 50) {
+      for (let x = 30; x + elW <= W - 30; x += 50) {
+        candidates.push({ x, y, priority: 2 });
+      }
+    }
+    
+    // Priority 3: สแกนทั้ง canvas (ทุก 60px)
+    for (let y = 20; y + elH <= H - 20; y += 60) {
+      for (let x = 20; x + elW <= W - 20; x += 60) {
+        candidates.push({ x, y, priority: 3 });
+      }
+    }
+
+    // Priority 4: ขนาดเล็กลง (75%)
+    const smallW = Math.round(elW * 0.75);
+    const smallH = Math.round(elH * 0.75);
+    for (let y = 50; y + smallH <= H - 50; y += 80) {
+      for (let x = 20; x + smallW <= W - 20; x += 80) {
+        candidates.push({ x, y, w: smallW, h: smallH, priority: 4 });
+      }
+    }
+
+    // Priority 5: ขนาดเล็กลงอีก (60%)
+    const tinyW = Math.round(elW * 0.60);
+    const tinyH = Math.round(elH * 0.60);
+    for (let y = 30; y + tinyH <= H - 30; y += 60) {
+      for (let x = 20; x + tinyW <= W - 20; x += 60) {
+        candidates.push({ x, y, w: tinyW, h: tinyH, priority: 5 });
+      }
+    }
+
+    // Priority 6: ขนาดเล็กสุด (50%) — ยังดีกว่าไม่มี
+    const miniW = Math.round(elW * 0.50);
+    const miniH = Math.round(elH * 0.50);
+    for (let y = 30; y + miniH <= H - 30; y += 60) {
+      for (let x = 20; x + miniW <= W - 20; x += 60) {
+        candidates.push({ x, y, w: miniW, h: miniH, priority: 6 });
+      }
+    }
+
+    // ★ หา candidate แรกที่ไม่ทับ (priority ต่ำ = ดีกว่า)
+    candidates.sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      const distA = Math.sqrt((a.x - defaultX) ** 2 + (a.y - defaultY) ** 2);
+      const distB = Math.sqrt((b.x - defaultX) ** 2 + (b.y - defaultY) ** 2);
+      return distA - distB;
+    });
+
+    for (const c of candidates) {
+      const cw = c.w || elW;
+      const ch = c.h || elH;
+      if (!hasOverlapAt(c.x, c.y, cw, ch)) {
+        console.log(`[SmartPlace] ✅ Safe position: (${c.x},${c.y}) ${cw}x${ch} (priority ${c.priority})`);
+        return { x: c.x, y: c.y, w: cw, h: ch, moved: true };
+      }
+    }
+
+    // ★ Fallback: มุมซ้ายล่าง (ห่างจาก circle ที่มักอยู่ขวาล่าง)
+    const fallbackX = 20;
+    const fallbackY = H - elH - 20;
+    console.log(`[SmartPlace] ⚠️ All positions blocked — fallback to (${fallbackX},${fallbackY})`);
+    return { x: fallbackX, y: fallbackY, w: Math.min(elW, W * 0.4), h: Math.min(elH, H * 0.3), moved: true };
+  };
+
+  // 4. ★ จัดตำแหน่ง circle ก่อน (อยู่ล่าง, ทับ hero น้อยกว่า)
+  let circleCanvasRect = null;
+  if (layoutCircle) {
+    const cd = layoutCircle.diameter || 380;
+    const cbw = (layoutCircle.borderWidth || 5) * 2;
+    const fullD = cd + cbw;
+    const defCX = layoutCircle.x ?? 25;
+    const defCY = layoutCircle.y ?? 680;
+    
+    const circlePlacement = findBestPosition(defCX, defCY, fullD, fullD);
+    layoutCircle.x = circlePlacement.x;
+    layoutCircle.y = circlePlacement.y;
+    if (circlePlacement.w < fullD) {
+      layoutCircle.diameter = circlePlacement.w - cbw;
+    }
+    circleCanvasRect = { x: circlePlacement.x, y: circlePlacement.y, w: circlePlacement.w, h: circlePlacement.w };
+    if (circlePlacement.moved) {
+      console.log(`[SmartPlace] 🔵 Circle moved: (${defCX},${defCY}) → (${circlePlacement.x},${circlePlacement.y})`);
+    }
+  }
+
+  // 5. ★ จัดตำแหน่ง highlight/bordered slots (หลบ faces + circle)
+  // ★ circle avoid rect ต้อง inflate ขึ้นเพื่อให้ highlight ห่างจาก circle มากพอ!
+  const OVERLAY_SPACING = 40; // ระยะห่างขั้นต่ำระหว่าง overlay elements
+  for (const slot of sortedSlots) {
+    if (!slot.border || !slot.borderWidth) continue;
+    if (slot.shape === 'circle') continue;
+    
+    const avoid = [];
+    if (circleCanvasRect) {
+      // ★ Inflate circle rect ให้ใหญ่ขึ้น เพื่อห้ามวาง highlight ใกล้เกินไป
+      avoid.push({
+        x: circleCanvasRect.x - OVERLAY_SPACING,
+        y: circleCanvasRect.y - OVERLAY_SPACING,
+        w: circleCanvasRect.w + OVERLAY_SPACING * 2,
+        h: circleCanvasRect.h + OVERLAY_SPACING * 2,
+      });
+    }
+    const placement = findBestPosition(slot.x, slot.y, slot.w, slot.h, avoid);
+    
+    if (placement.moved) {
+      console.log(`[SmartPlace] 🟨 Highlight "${slot.id}" moved: (${slot.x},${slot.y}) ${slot.w}x${slot.h} → (${placement.x},${placement.y}) ${placement.w}x${placement.h}`);
+      slot.x = placement.x;
+      slot.y = placement.y;
+      slot.w = placement.w;
+      slot.h = placement.h;
+    }
+  }
+
+  // 6. ★ จัดตำแหน่ง circle_small (ถ้ามี)
+  for (const slot of sortedSlots) {
+    if (slot.shape !== 'circle') continue;
+    const avoid = circleCanvasRect ? [circleCanvasRect] : [];
+    // เพิ่ม highlight ที่จัดแล้วเข้า avoid
+    for (const s2 of sortedSlots) {
+      if (s2.border && s2.borderWidth && s2.shape !== 'circle') {
+        avoid.push({ x: s2.x, y: s2.y, w: s2.w, h: s2.h });
+      }
+    }
+    const placement = findBestPosition(slot.x, slot.y, slot.w || slot.diameter || 200, slot.h || slot.diameter || 200, avoid);
+    if (placement.moved) {
+      console.log(`[SmartPlace] 🔴 CircleSmall "${slot.id}" moved: (${slot.x},${slot.y}) → (${placement.x},${placement.y})`);
+      slot.x = placement.x;
+      slot.y = placement.y;
     }
   }
 
@@ -747,8 +962,8 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
         const slotRole = slot.role || slot.id || '';
         const slotFaceData = faceDataMap?.get?.(String(imgIdx)) || null;
         let cropStrat;
-        if (slotRole === 'hero' || slotRole === 'main' || slot.id === 'main') {
-          cropStrat = 'portrait-upper'; // Hero: ครึ่งตัวบน หน้าชัด
+        if (slotRole === 'hero' || slotRole === 'hero2' || slotRole === 'main' || slot.id === 'main') {
+          cropStrat = 'portrait-upper'; // Hero/Hero2: ครึ่งตัวบน หน้าชัด
         } else if (slotRole === 'emotion') {
           cropStrat = 'portrait-upper'; // Emotion: ครึ่งตัวบน
         } else if (slotRole === 'highlight') {
@@ -760,11 +975,49 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
         }
         let resized = await smartCropPhoto(imageBuffers[imgIdx], safeW, safeH, slotFaceData, cropStrat);
 
+        // ★ Sharpen ทุกภาพ — เพิ่มความคมชัด!
+        try {
+          resized = await sharp(resized)
+            .sharpen({ sigma: 0.8, m1: 1.0, m2: 0.5 })
+            .png()
+            .toBuffer();
+        } catch (e) { /* sharpen fail → ใช้ภาพเดิม */ }
+
         // Apply fade ทั้ง 4 ทิศพร้อมกัน (เหมือน cover-tester createFadeMask)
-        const fR = slot.fadeRight || 0;
-        const fL = slot.fadeLeft || 0;
-        const fT = slot.fadeTop || 0;
-        const fB = slot.fadeBottom || 0;
+        let fR = slot.fadeRight || 0;
+        let fL = slot.fadeLeft || 0;
+        let fT = slot.fadeTop || 0;
+        let fB = slot.fadeBottom || 0;
+        
+        // ★★★ Face-aware fade: ถ้าเป็น hero/hero2 slot → ห้าม fade กินหน้าคน!
+        if ((slotRole === 'hero' || slotRole === 'hero2' || slot.id === 'main') && slotFaceData?.hasFaces && fR > 0) {
+          const face = slotFaceData.faces[0];
+          // คำนวณ face right edge ใน slot coordinates (หลัง crop)
+          const faceRightRatio = (face.x + face.width) / (slotFaceData.imageWidth || safeW);
+          const faceRightPx = faceRightRatio * safeW;
+          const safeFadeStart = faceRightPx + EDITORIAL_GEOMETRY.safeFacePadding;
+          const maxSafeFade = safeW - safeFadeStart;
+          
+          if (fR > maxSafeFade && maxSafeFade > 50) {
+            console.log(`[Composer] ★ Hero fade adjusted: ${fR}px → ${Math.round(maxSafeFade)}px (face at ${Math.round(faceRightPx)}px)`);
+            fR = Math.round(maxSafeFade);
+          }
+        }
+        
+        // ★ BG slots: ถ้ามีหน้าคนใน BG → ลด fadeLeft/fadeTop ไม่ให้กินหน้า
+        if ((slot.id === 'bg_top' || slot.id === 'bg_bottom') && slotFaceData?.hasFaces) {
+          const face = slotFaceData.faces[0];
+          if (fL > 0) {
+            const faceLeftRatio = face.x / (slotFaceData.imageWidth || safeW);
+            const faceLeftPx = faceLeftRatio * safeW;
+            if (fL > faceLeftPx - EDITORIAL_GEOMETRY.safeFacePadding && faceLeftPx > 50) {
+              const newFadeL = Math.max(50, Math.round(faceLeftPx - EDITORIAL_GEOMETRY.safeFacePadding));
+              console.log(`[Composer] ★ BG ${slot.id} fadeLeft adjusted: ${fL}px → ${newFadeL}px (face at ${Math.round(faceLeftPx)}px)`);
+              fL = newFadeL;
+            }
+          }
+        }
+        
         console.log(`[Composer] Slot ${slotIdx} (${slot.id}): fade R=${fR} L=${fL} T=${fT} B=${fB}, size=${safeW}x${safeH}`);
         if (fR || fL || fT || fB) {
           try {
@@ -833,7 +1086,8 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
     },
   })
     .composite(composites)
-    .jpeg({ quality: 92 })
+    .sharpen({ sigma: 0.5, m1: 0.8, m2: 0.3 }) // ★ Final sharpen — ภาพรวมคมขึ้น
+    .jpeg({ quality: 95 }) // ★ คุณภาพสูงขึ้น
     .toBuffer();
 
   return result;

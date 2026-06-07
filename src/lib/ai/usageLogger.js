@@ -1,7 +1,10 @@
 import { prisma } from '@/lib/db';
+import { MODEL_COSTS } from './modelConfig.js';
 
 // Pricing per 1,000,000 tokens (USD)
 const PRICING = {
+  ...MODEL_COSTS,
+  // Legacy + other providers
   'gpt-4o': { input: 5.0, output: 15.0 },
   'gpt-4o-mini': { input: 0.15, output: 0.60 },
   'claude-sonnet-4-6': { input: 3.0, output: 15.0 },

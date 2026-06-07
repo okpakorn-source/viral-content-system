@@ -1,4 +1,5 @@
 import { callAI } from '@/lib/ai/openai';
+import { MODEL_NEWS_ANALYSIS, MODEL_FAST_CHEAP } from '@/lib/ai/modelConfig';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStoreText';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
 import { MasterAgent } from '@/lib/agents/masterAgent';
@@ -242,7 +243,7 @@ export async function performSummarize({
     console.log(`[Breakdown-Service] 📋 NEWS IN PROMPT: ${actualNewsBody.length}ch of actual news content`);
 
     try {
-      const result = await callAI({ prompt, model: 'gpt-4o', temperature: 0.4, maxTokens: 8000 });
+      const result = await callAI({ prompt, model: MODEL_NEWS_ANALYSIS, temperature: 0.4, maxTokens: 8000 });
       console.log(`[Breakdown-Service] ✅ OK, keys: ${Object.keys(result || {}).join(', ')}`);
 
       const bdData = {
@@ -279,7 +280,7 @@ export async function performSummarize({
         await agent.saveMemoryToDB().catch(() => {});
       }
 
-      logPipeline({ workflowId, step: 'breakdown', status: 'success', model: 'gpt-4o', duration: Date.now() - _pipelineStart, detail: (result.core_story || '').slice(0, 60) }).catch(() => {});
+      logPipeline({ workflowId, step: 'breakdown', status: 'success', model: MODEL_NEWS_ANALYSIS, duration: Date.now() - _pipelineStart, detail: (result.core_story || '').slice(0, 60) }).catch(() => {});
       return {
         success: true,
         data: bdData,
@@ -412,7 +413,7 @@ export async function performSummarize({
 }`;
 
               const aiResult = await callAI({
-                model: 'gpt-4o-mini',
+                model: MODEL_FAST_CHEAP,
                 temperature: 0.1,
                 maxTokens: 1000,
                 prompt: analyzerPrompt
@@ -674,7 +675,7 @@ ${candidateList}
                 // Fallback to callAI if Gemini not available
                 aiSelection = await callAI({
                   prompt: aiFallbackPrompt,
-                  model: 'gpt-4o-mini',
+                  model: MODEL_FAST_CHEAP,
                   temperature: 0.1,
                   maxTokens: 300,
                 });
@@ -1206,7 +1207,7 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
 }`;
 
       const blueprintResult = await callAI({
-        model: 'gpt-4o-mini',
+        model: MODEL_FAST_CHEAP,
         prompt: blueprintPrompt,
         temperature: 0.3,
         maxTokens: 1200,
@@ -1543,7 +1544,7 @@ ${keyPoints}
 }`;
 
       const res = await callAI({
-        model: 'gpt-4o-mini',
+        model: MODEL_FAST_CHEAP,
         temperature: 0.8, // Slightly higher for creativity
         maxTokens: 500,
         prompt: prompt,
@@ -1650,7 +1651,7 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
 }`;
 
     newsAnalysis = await callAI({
-      model: 'gpt-4o-mini',
+      model: MODEL_FAST_CHEAP,
       temperature: 0.1,
       maxTokens: 800,
       prompt: analyzerPrompt

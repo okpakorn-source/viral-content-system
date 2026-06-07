@@ -3,77 +3,159 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useCoverCanvas } from '@/lib/cover/useCoverCanvas';
 import { W, H } from '@/lib/cover/constants';
 
+// ═══════════════════════════════════════════════════════════
+// BUILTIN TEMPLATE DEFINITIONS (copied from cover-tester)
+// Canvas = 1200 x 1350 px
+// ═══════════════════════════════════════════════════════════
+const BUILTIN_TEMPLATES = [
+  {
+    id: 'template_1', name: 'ข่าวดราม่า 5 ช่อง', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight + ภาพรอง', textSlots: [],
+    slots: [
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 750, h: 1350, fadeRight: 320,                  zIndex: 2 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 380, y: 0,   w: 820, h: 720,  fadeLeft: 380, fadeBottom: 250,  zIndex: 0 },
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 350, y: 580, w: 850, h: 770,  fadeLeft: 320, fadeTop: 280,    zIndex: 1 },
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเขียว)',     x: 370, y: 280, w: 560, h: 400,  border: '#CCFF00', borderWidth: 5, zIndex: 3, draggable: true },
+      { id: 'sub_left',  label: '🖼 ภาพรอง (ซ้ายล่าง)',      x: 15,  y: 610, w: 520, h: 430,  border: '#FFFFFF', borderWidth: 4, zIndex: 4, draggable: true },
+    ],
+  },
+  {
+    id: 'template_2', name: 'ข่าวสะอาด 4 ช่อง', desc: '4 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight กลาง', textSlots: [],
+    slots: [
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 720, h: 1350, fadeRight: 300,                  zIndex: 2 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 400, y: 0,   w: 800, h: 740,  fadeLeft: 360, fadeBottom: 260,  zIndex: 0 },
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 380, y: 520, w: 820, h: 830,  fadeLeft: 340, fadeTop: 280,    zIndex: 1 },
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเข้ม)',      x: 120, y: 580, w: 560, h: 360,  border: '#333333', borderWidth: 5, zIndex: 3, draggable: true },
+    ],
+  },
+  {
+    id: 'template_3', name: 'ข่าวดราม่า + วงกลม', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Emotion ขวาล่าง + Highlight + Circle', textSlots: [],
+    slots: [
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 740, h: 1350, fadeRight: 310,                  zIndex: 2 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 400, y: 0,   w: 800, h: 720,  fadeLeft: 360, fadeBottom: 240,  zIndex: 0 },
+      { id: 'bg_bottom', label: '🖼 อารมณ์ล่าง-ขวา',         x: 380, y: 580, w: 820, h: 770,  fadeLeft: 320, fadeTop: 260,    zIndex: 1 },
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเขียว)',     x: 340, y: 280, w: 630, h: 440,  border: '#CCFF00', borderWidth: 5, zIndex: 3, draggable: true },
+      { id: 'circle',    label: '⭕ วงกลม (ซ้ายล่าง)',       x: 25,  y: 680, shape: 'circle', diameter: 440, border: '#FFFFFF', borderWidth: 6, zIndex: 4, draggable: true },
+    ],
+  },
+  {
+    id: 'template_4', name: 'ข่าวสังคม + 2 วงกลม', desc: '5 รูป + 2 ข้อความ — Hero + Scene + Context + Circle ใหญ่ + Circle เล็กแดง',
+    textSlots: [
+      { id: 'line1', label: '📝 บรรทัด 1 (ขาว)', x: 730, y: 680, fontSize: 48, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 500, stroke: '#000', strokeWidth: 4, placeholder: 'พาดหัวหลัก...' },
+      { id: 'line2', label: '📝 บรรทัด 2 (เหลือง)', x: 730, y: 760, fontSize: 40, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 520, stroke: '#000', strokeWidth: 3, bg: 'rgba(0,0,0,0.65)', bgPadY: 12, bgFullWidth: false, bgEditable: true, placeholder: 'รายละเอียด...' },
+    ],
+    slots: [
+      { id: 'main',         label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 720, h: 1350, fadeRight: 300,                  zIndex: 2 },
+      { id: 'bg_top',       label: '🖼 ฉากบน-ขวา',             x: 380, y: 0,   w: 820, h: 700,  fadeLeft: 350, fadeBottom: 240,  zIndex: 0 },
+      { id: 'bg_bottom',    label: '🖼 ฉากล่าง-ขวา',            x: 350, y: 550, w: 850, h: 800,  fadeLeft: 320, fadeTop: 260,    zIndex: 1 },
+      { id: 'circle',       label: '⭕ วงกลมใหญ่ (ซ้ายล่าง)',   x: 25,  y: 680, shape: 'circle', diameter: 400, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
+      { id: 'circle_small', label: '⭕ วงกลมเล็ก (แดง ขวาบน)',  x: 890, y: 15,  shape: 'circle', diameter: 200, border: '#FF0000', borderWidth: 4, zIndex: 5, draggable: true },
+    ],
+  },
+  {
+    id: 'template_5', name: 'ข่าวเหตุการณ์ 5 ช่อง', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight เหลือง + Circle ขาว', textSlots: [],
+    slots: [
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 730, h: 1350, fadeRight: 300,                  zIndex: 2 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 400, y: 0,   w: 800, h: 700,  fadeLeft: 360, fadeBottom: 240,  zIndex: 0 },
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 350, y: 560, w: 850, h: 790,  fadeLeft: 320, fadeTop: 260,    zIndex: 1 },
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 420, y: 310, w: 580, h: 410,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
+      { id: 'circle',    label: '⭕ วงกลม (ซ้ายล่าง)',       x: 15,  y: 630, shape: 'circle', diameter: 460, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
+    ],
+  },
+  {
+    id: 'template_6', name: 'ข่าวสะเทือนใจ + ข้อความ', desc: '5 รูป + 2 ข้อความ — Hero + Scene + Context + Circle แดงกลาง + Circle ขาวล่าง',
+    textSlots: [
+      { id: 'line1', label: '📝 บรรทัด 1 (ขาว)', x: 620, y: 580, fontSize: 46, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 480, stroke: '#000', strokeWidth: 4, placeholder: 'พาดหัวหลัก...' },
+      { id: 'line2', label: '📝 บรรทัด 2 (ขาว)', x: 620, y: 660, fontSize: 40, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 500, stroke: '#000', strokeWidth: 3, placeholder: 'รายละเอียด...' },
+    ],
+    slots: [
+      { id: 'main',         label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 700, h: 1350, fadeRight: 280,                  zIndex: 2 },
+      { id: 'bg_top',       label: '🖼 ฉากบน-ขวา',             x: 380, y: 0,   w: 820, h: 650,  fadeLeft: 350, fadeBottom: 220,  zIndex: 0 },
+      { id: 'bg_bottom',    label: '🖼 ฉากล่าง-ขวา',            x: 340, y: 520, w: 860, h: 830,  fadeLeft: 320, fadeTop: 260,    zIndex: 1 },
+      { id: 'circle_small', label: '⭕ วงกลมเล็ก (แดง กลาง)',   x: 440, y: 180, shape: 'circle', diameter: 160, border: '#FF0000', borderWidth: 3, zIndex: 5, draggable: true },
+      { id: 'circle',       label: '⭕ วงกลมใหญ่ (ซ้ายล่าง)',   x: 50,  y: 680, shape: 'circle', diameter: 360, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
+    ],
+  },
+];
+
+// Role → slot mapping for gallery images
+const ROLE_TO_SLOT = {
+  HERO_FACE: 'main', HERO: 'main',
+  CONTEXT_SCENE: 'bg_top',
+  EMOTION: 'bg_bottom',
+  RELATIONSHIP: 'circle', FAMILY_SUPPORT: 'circle',
+  EVIDENCE: 'highlight',
+  SUPPORT: null, // fill remaining
+};
+
+function TemplateThumbnail({ template, isActive, onClick }) {
+  const sc = 72 / W, th = H * sc;
+  return (
+    <button onClick={onClick} style={{ padding: 0, border: isActive ? '2px solid #a3e635' : '2px solid #374151', borderRadius: 8, background: '#1a1a2e', cursor: 'pointer', width: 76, height: th + 4, overflow: 'hidden', transition: 'all .15s', boxShadow: isActive ? '0 0 12px rgba(163,230,53,0.3)' : 'none', flexShrink: 0 }}>
+      <svg width={72} height={th} viewBox={`0 0 ${W} ${H}`}>
+        <rect width={W} height={H} fill="#111" />
+        {template.slots.map(sl => sl.shape === 'circle'
+          ? <circle key={sl.id} cx={sl.x + sl.diameter / 2} cy={sl.y + sl.diameter / 2} r={sl.diameter / 2} fill="none" stroke={sl.border || '#4FC3F7'} strokeWidth={14} opacity={0.7} />
+          : <rect key={sl.id} x={sl.x} y={sl.y} width={sl.w} height={sl.h} fill={sl.border || (sl.id === 'main' ? '#a3e635' : '#556')} opacity={sl.id === 'main' ? 0.4 : 0.25} stroke={sl.border || 'none'} strokeWidth={sl.border ? 12 : 0} />
+        )}
+      </svg>
+    </button>
+  );
+}
+
 export default function CoverLabPage() {
-  // === Input State ===
+  // Auto Cover state
   const [newsTitle, setNewsTitle] = useState('');
   const [content, setContent] = useState('');
-  const [manualCharacters, setManualCharacters] = useState('');
-  const [manualKeywords, setManualKeywords] = useState('');
   const [templateId, setTemplateId] = useState('auto');
-  const [templates, setTemplates] = useState([]);
-
-  // === Pipeline State ===
+  const [coverResult, setCoverResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [coverResult, setCoverResult] = useState(null);
-  const [selectedCoverIndex, setSelectedCoverIndex] = useState(0);
-  const [sessionId, setSessionId] = useState(null);
-  const [identity, setIdentity] = useState(null);
+  // Edit mode state
+  const [editMode, setEditMode] = useState(false);
+  const [editTemplateId, setEditTemplateId] = useState('template_1');
+  const [editImages, setEditImages] = useState({}); // { slotId: HTMLImageElement }
+  const [loadingEdit, setLoadingEdit] = useState(false);
+  const [templates, setTemplates] = useState([]);
 
-  // === Image Bank State ===
-  const [imageBank, setImageBank] = useState([]);
-  const [bankFilter, setBankFilter] = useState('all');
-  const [bankLoading, setBankLoading] = useState(false);
+  // ★ Batch Mode state
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchText, setBatchText] = useState('');
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchCoverProgress, setBatchCoverProgress] = useState({ current: 0, total: 0 });
+  const [batchResults, setBatchResults] = useState([]);
+  const [expandedBatch, setExpandedBatch] = useState(null); // index of expanded result
 
-  // === Cover Library State ===
+  // Cover Library state
   const [uploadCategory, setUploadCategory] = useState('ทั่วไป');
   const [uploading, setUploading] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, results: [] });
   const [library, setLibrary] = useState([]);
   const [loadingLib, setLoadingLib] = useState(false);
-  const [showLibrary, setShowLibrary] = useState(false);
   const fileRef = useRef(null);
 
-  // === Manual Slot Assignment + Crop State ===
-  const [slotAssignment, setSlotAssignment] = useState({});
-  const [slotCrops, setSlotCrops] = useState({});
-  const [cropEditorState, setCropEditorState] = useState(null); // { slotId, imageUrl, zoom, panX, panY }
-  const [templateSlots, setTemplateSlots] = useState([]);
-
-  // === Manual Edit Mode State ===
-  const [editMode, setEditMode] = useState(false);
-  const [editingCover, setEditingCover] = useState(null);
-  const [editTemplate, setEditTemplate] = useState(null);
-  const [editImages, setEditImages] = useState({});
-
-  // === useCoverCanvas hook for Manual Edit Mode ===
-  const {
-    canvasRef: editCanvasRef,
-    slotCrops: editSlotCrops, setSlotCrops: setEditSlotCrops,
-    slotOffsets: editSlotOffsets, slotScales: editSlotScales,
-    textValues: editTextValues, setTextValues: setEditTextValues,
-    textOverrides: editTextOverrides, setTextOverrides: setEditTextOverrides,
-    hoverCursor: editHoverCursor,
-    handleDown: editHandleDown, handleMove: editHandleMove, handleUp: editHandleUp,
-    render: editRender, exportAsBlob: editExportAsBlob, resetAll: editResetAll,
-    draggableSlots: editDraggableSlots,
-  } = useCoverCanvas(editTemplate, editImages);
-
-  // โหลด templates
+  // โหลด template จริง 6 แบบจากหน้าปกข่าว
   useEffect(() => {
     fetch('/api/auto-cover/templates')
       .then(r => r.json())
-      .then(data => { if (data.success) setTemplates(data.templates); })
-      .catch(() => setTemplates([{ id: 'auto', name: '🤖 Auto', desc: 'AI เลือกให้' }]));
+      .then(data => {
+        if (data.success) setTemplates(data.templates);
+      })
+      .catch(() => {
+        // Fallback ถ้า API ยังไม่พร้อม
+        setTemplates([
+          { id: 'auto', name: '🤖 Auto', desc: 'AI เลือกให้' },
+        ]);
+      });
   }, []);
 
-  // === Generate Cover ===
+  // Generate auto cover
   async function handleGenerate(isRegenerate = false) {
     if (!newsTitle && !content) return setError('ใส่หัวข้อหรือเนื้อหาข่าว');
     setLoading(true);
     setError('');
-    if (!isRegenerate) { setCoverResult(null); setImageBank([]); setIdentity(null); }
+    if (!isRegenerate) setCoverResult(null);
     try {
+      // ถ้า regenerate ให้สุ่ม template ใหม่
       let useTemplate = templateId;
       if (isRegenerate && templateId === 'auto') {
         const builtins = templates.filter(t => t.id !== 'auto');
@@ -89,24 +171,11 @@ export default function CoverLabPage() {
       const res = await fetch('/api/auto-cover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          newsTitle, content, templateId: useTemplate, regenerate: isRegenerate,
-          manualCharacters: manualCharacters ? manualCharacters.split(',').map(s => s.trim()).filter(Boolean) : [],
-          manualKeywords: manualKeywords ? manualKeywords.split(',').map(s => s.trim()).filter(Boolean) : [],
-        }),
+        body: JSON.stringify({ newsTitle, content, templateId: useTemplate, regenerate: isRegenerate }),
       });
       const data = await res.json();
       if (data.success) {
         setCoverResult(data);
-        // ★ Reset selected cover index when new covers arrive
-        setSelectedCoverIndex(0);
-        if (data.sessionId) {
-          setSessionId(data.sessionId);
-          loadImageBank(data.sessionId);
-        }
-        if (data.identity) setIdentity(data.identity);
-        // Load template slots for manual assignment
-        if (data.templateUsed) loadTemplateSlots(data.templateUsed);
       } else {
         setError(data.error || 'เกิดข้อผิดพลาด');
       }
@@ -117,85 +186,172 @@ export default function CoverLabPage() {
     }
   }
 
-  // === Load Image Bank ===
-  async function loadImageBank(sid) {
-    if (!sid) return;
-    setBankLoading(true);
-    try {
-      const res = await fetch(`/api/auto-cover/image-bank?sessionId=${sid}`);
-      const data = await res.json();
-      if (data.success) setImageBank(data.images || []);
-    } catch {}
-    setBankLoading(false);
+  // ★ Parse batch text into news items
+  function parseBatchText(text) {
+    if (!text.trim()) return [];
+    return text.split('---').map(block => {
+      const lines = block.trim().split('\n').filter(l => l.trim());
+      let title = '', body = '';
+      for (const line of lines) {
+        const titleMatch = line.match(/^หัวข้อ[:：]\s*(.+)/i);
+        if (titleMatch) {
+          title = titleMatch[1].trim();
+        } else if (!title && !body) {
+          title = line.trim(); // first line = title if no prefix
+        } else {
+          const contentMatch = line.match(/^เนื้อหา[:：]\s*(.+)/i);
+          body += (contentMatch ? contentMatch[1] : line).trim() + '\n';
+        }
+      }
+      return { title: title || body.substring(0, 80), content: body.trim() };
+    }).filter(item => item.title || item.content);
   }
 
-  // === Toggle Image Selection ===
-  async function toggleImageSelect(img) {
-    const newSelected = !img.is_selected;
-    // Optimistic UI update
-    setImageBank(prev => prev.map(i => i.id === img.id ? { ...i, is_selected: newSelected } : i));
+  // ★ Batch generate covers
+  async function handleBatchGenerate() {
+    const items = parseBatchText(batchText);
+    if (items.length === 0) return;
+    
+    setBatchLoading(true);
+    setBatchResults([]);
+    setBatchCoverProgress({ current: 0, total: items.length });
+    const batchId = `BATCH-${Date.now()}`;
+    const results = [];
+
+    for (let i = 0; i < items.length; i++) {
+      setBatchCoverProgress({ current: i + 1, total: items.length });
+      try {
+        const res = await fetch('/api/auto-cover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            newsTitle: items[i].title,
+            content: items[i].content,
+            templateId: 'auto',
+            batchId,
+          }),
+        });
+        const data = await res.json();
+        results.push({
+          newsTitle: items[i].title,
+          success: data.success,
+          coverResult: data.success ? data : null,
+          error: data.error || null,
+        });
+      } catch (e) {
+        results.push({
+          newsTitle: items[i].title,
+          success: false,
+          coverResult: null,
+          error: e.message,
+        });
+      }
+      setBatchResults([...results]);
+    }
+
+    setBatchLoading(false);
+  }
+
+  // Enter edit mode — load gallery images into canvas slots
+  async function enterEditMode(result) {
+    if (!result?.gallery?.length) return;
+    setLoadingEdit(true);
     try {
-      await fetch('/api/auto-cover/image-bank', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageId: img.id, isSelected: newSelected }),
-      });
-    } catch {
-      // Revert on error
-      setImageBank(prev => prev.map(i => i.id === img.id ? { ...i, is_selected: !newSelected } : i));
+      // Determine which builtin template was used
+      const usedId = result.templateUsed || 'template_1';
+      const tpl = BUILTIN_TEMPLATES.find(t => t.id === usedId) || BUILTIN_TEMPLATES[0];
+      setEditTemplateId(tpl.id);
+
+      // Load images and map by role
+      const slotIds = tpl.slots.map(s => s.id);
+      const usedSlots = new Set();
+      const imgMap = {};
+      const loadPromises = [];
+
+      for (const gImg of result.gallery) {
+        if (!gImg.url) continue;
+        const role = gImg.role || 'SUPPORT';
+        let targetSlot = ROLE_TO_SLOT[role];
+
+        // If slot already taken or doesn't exist in template, find alternative
+        if (!targetSlot || usedSlots.has(targetSlot) || !slotIds.includes(targetSlot)) {
+          // Try secondary mappings
+          if (role === 'RELATIONSHIP' || role === 'FAMILY_SUPPORT') {
+            targetSlot = slotIds.includes('sub_left') && !usedSlots.has('sub_left') ? 'sub_left' : null;
+          }
+          if (role === 'EVIDENCE') {
+            targetSlot = slotIds.includes('circle_small') && !usedSlots.has('circle_small') ? 'circle_small' : null;
+          }
+          // Fill remaining empty slot
+          if (!targetSlot) {
+            targetSlot = slotIds.find(sid => !usedSlots.has(sid)) || null;
+          }
+        }
+        if (!targetSlot || usedSlots.has(targetSlot)) continue;
+        usedSlots.add(targetSlot);
+
+        const p = new Promise((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => { imgMap[targetSlot] = img; resolve(); };
+          img.onerror = () => resolve(); // skip failed
+          img.src = gImg.url;
+        });
+        loadPromises.push(p);
+      }
+      await Promise.all(loadPromises);
+
+      setEditImages(imgMap);
+      setEditMode(true);
+    } catch (e) {
+      console.error('[CoverLab] Edit mode error:', e);
+    } finally {
+      setLoadingEdit(false);
     }
   }
 
-  // === Regenerate from selected images ===
-  async function handleRegenerateFromSelection() {
-    const selected = imageBank.filter(i => i.is_selected);
-    if (selected.length < 2) return setError('เลือกอย่างน้อย 2 ภาพ');
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch('/api/auto-cover', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          newsTitle, content, templateId,
-          regenerate: true,
-          selectedImageUrls: selected.map(i => i.image_url),
-        }),
-      });
-      const data = await res.json();
-      if (data.success) setCoverResult(data);
-      else setError(data.error || 'เกิดข้อผิดพลาด');
-    } catch (e) { setError(e.message); }
-    finally { setLoading(false); }
-  }
-
-  // === Cover Library ===
+  // Batch upload cover examples
   async function handleBatchUpload() {
     const files = fileRef.current?.files;
     if (!files || files.length === 0) return;
+    
     setUploading(true);
+    const total = files.length;
     const results = [];
-    setBatchProgress({ current: 0, total: files.length, results: [] });
-    for (let i = 0; i < files.length; i++) {
+    setBatchProgress({ current: 0, total, results: [] });
+
+    for (let i = 0; i < total; i++) {
+      const file = files[i];
       setBatchProgress(prev => ({ ...prev, current: i + 1 }));
+      
       try {
         const formData = new FormData();
-        formData.append('image', files[i]);
-        formData.append('title', files[i].name.replace(/\.[^.]+$/, ''));
+        formData.append('image', file);
+        formData.append('title', file.name.replace(/\.[^.]+$/, ''));
         formData.append('category', uploadCategory);
+        
         const res = await fetch('/api/cover-library', { method: 'POST', body: formData });
         const data = await res.json();
-        results.push({ name: files[i].name, success: data.success, layout: data.cover?.analysis?.layout_type || '', score: data.cover?.analysis?.quality_score || 0, error: data.error });
+        results.push({ 
+          name: file.name, 
+          success: data.success, 
+          layout: data.cover?.analysis?.layout_type || '',
+          score: data.cover?.analysis?.quality_score || 0,
+          error: data.error 
+        });
       } catch (e) {
-        results.push({ name: files[i].name, success: false, error: e.message });
+        results.push({ name: file.name, success: false, error: e.message });
       }
-      setBatchProgress({ current: i + 1, total: files.length, results: [...results] });
+      
+      setBatchProgress({ current: i + 1, total, results: [...results] });
     }
+
     setUploading(false);
     loadLibrary();
     if (fileRef.current) fileRef.current.value = '';
   }
 
+  // Load library
   async function loadLibrary() {
     setLoadingLib(true);
     try {
@@ -206,857 +362,715 @@ export default function CoverLabPage() {
     setLoadingLib(false);
   }
 
-  // === Filter Image Bank ===
-  const filteredBank = imageBank.filter(img => {
-    if (bankFilter === 'all') return true;
-    if (bankFilter === 'selected') return img.is_selected;
-    if (bankFilter === 'hero') return img.ai_role === 'HERO_FACE' || img.ai_role === 'HERO';
-    if (bankFilter === 'context') return img.ai_role === 'CONTEXT_SCENE';
-    if (bankFilter === 'emotion') return img.ai_role === 'EMOTION' || img.ai_role === 'FAMILY_SUPPORT';
-    if (bankFilter === 'reject') return img.ai_role === 'REJECT' || img.ai_score < 4;
-    return true;
-  });
-
-  const selectedCount = imageBank.filter(i => i.is_selected).length;
-
-  // === Load Template Slots ===
-  function loadTemplateSlots(tmplId) {
-    fetch('/api/auto-cover/templates')
-      .then(r => r.json())
-      .then(d => {
-        const tmpl = d.templates?.find(t => t.id === tmplId);
-        if (tmpl?.slots) setTemplateSlots(tmpl.slots);
-      })
-      .catch(() => {});
-  }
-
-  // === Open Crop Editor ===
-  function openCropEditor(slotId) {
-    const imgUrl = slotAssignment[slotId];
-    if (!imgUrl) return;
-    const existing = slotCrops[slotId] || { zoom: 1.0, panX: 0, panY: 0 };
-    setCropEditorState({ slotId, imageUrl: imgUrl, ...existing });
-  }
-
-  // === Handle Manual Generate ===
-  async function handleManualGenerate() {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch('/api/auto-cover', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          newsTitle, content, templateId,
-          regenerate: true,
-          manualSlots: slotAssignment,
-          slotCrops,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) setCoverResult(data);
-      else setError(data.error || 'เกิดข้อผิดพลาด');
-    } catch (e) { setError(e.message); }
-    finally { setLoading(false); }
-  }
-
-  // === Convert API template format to flat cover-tester format ===
-  function convertTemplateToCoverFormat(templateDef) {
-    if (!templateDef) return null;
-    const slots = [...(templateDef.slots || [])].map(s => ({
-      ...s,
-      draggable: s.draggable !== false && (s.border || s.shape === 'circle'),
-    }));
-    // Add circle as a flat slot if it exists as separate field
-    if (templateDef.circle && !slots.find(s => s.id === 'circle')) {
-      slots.push({
-        id: 'circle',
-        x: templateDef.circle.x || 25,
-        y: templateDef.circle.y || 680,
-        shape: 'circle',
-        diameter: templateDef.circle.diameter || 440,
-        border: templateDef.circle.border || '#FFFFFF',
-        borderWidth: templateDef.circle.borderWidth || 5,
-        zIndex: 4,
-        draggable: true,
-      });
-    }
-    // Add circleSmall if exists
-    if (templateDef.circleSmall && !slots.find(s => s.id === 'circle_small')) {
-      slots.push({
-        id: 'circle_small',
-        x: templateDef.circleSmall.x || 890,
-        y: templateDef.circleSmall.y || 15,
-        shape: 'circle',
-        diameter: templateDef.circleSmall.diameter || 200,
-        border: templateDef.circleSmall.border || '#FF0000',
-        borderWidth: templateDef.circleSmall.borderWidth || 4,
-        zIndex: 5,
-        draggable: true,
-      });
-    }
-    return {
-      id: templateDef.id,
-      name: templateDef.name || 'Auto Cover',
-      textSlots: templateDef.textSlots || [],
-      textBg: templateDef.textBg || null,
-      slots,
-    };
-  }
-
-  // === Handle Edit Cover (enter Manual Edit Mode) ===
-  async function handleEditCover(coverIndex) {
-    const cover = coverResult?.covers?.[coverIndex];
-    if (!cover) return;
-    setSelectedCoverIndex(coverIndex);
-    const slotData = cover.slotData;
-    if (!slotData || !slotData.templateDef) {
-      // No slotData available — just select the cover (fallback to download)
-      setError('ปกนี้ไม่มีข้อมูล slot สำหรับแก้ไข — ดาวน์โหลดได้เลย');
-      return;
-    }
-    // Convert template
-    const tmpl = convertTemplateToCoverFormat(slotData.templateDef);
-    if (!tmpl) return;
-
-    // Convert base64 slot images to HTMLImageElement
-    const loadImage = (src) => new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => resolve(null);
-      img.src = src;
-    });
-
-    const images = {};
-    if (slotData.slotImages) {
-      for (const [slotId, base64] of Object.entries(slotData.slotImages)) {
-        const img = await loadImage(base64);
-        if (img) images[slotId] = img;
-      }
-    }
-
-    // Set text values from slotData if available
-    if (slotData.textValues) {
-      setEditTextValues(slotData.textValues);
-    }
-
-    setEditingCover(slotData);
-    setEditTemplate(tmpl);
-    setEditImages(images);
-    setEditMode(true);
-    setError('');
-  }
-
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0f1a', color: '#e2e8f0', fontFamily: 'Inter, sans-serif' }}>
-      <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 16px' }}>
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-          <div>
-            <h1 style={{ fontSize: 28, fontWeight: 800, color: '#fbbf24', margin: 0 }}>
-              🖼️ Cover Lab — สร้างปกอัตโนมัติ
-            </h1>
-            <p style={{ color: '#94a3b8', margin: '4px 0 0', fontSize: 14 }}>AI วิเคราะห์ + ค้นหาภาพ + สร้างปกให้อัตโนมัติ</p>
+    <div style={{ minHeight: '100vh', background: '#0a0f1a', color: '#e2e8f0', fontFamily: 'sans-serif' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <h1 style={{ fontSize: 28, fontWeight: 800, color: '#fbbf24', margin: 0 }}>
+            🖼️ Cover Lab
+          </h1>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <a href="/cover-archive" style={{ padding: '8px 16px', background: '#1e293b', color: '#94a3b8', border: '1px solid #374151', borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+              📁 คลังปก
+            </a>
+            <button
+              onClick={() => { setBatchMode(!batchMode); setBatchResults([]); setExpandedBatch(null); }}
+              style={{
+                padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                border: batchMode ? '2px solid #f59e0b' : '2px solid #374151',
+                background: batchMode ? 'rgba(245,158,11,0.15)' : '#1e293b',
+                color: batchMode ? '#fbbf24' : '#94a3b8',
+              }}
+            >
+              {batchMode ? '📋 Batch Mode ✓' : '📋 Batch Mode'}
+            </button>
           </div>
-          <button onClick={() => setShowLibrary(!showLibrary)} style={{
-            padding: '8px 16px', background: showLibrary ? '#f59e0b' : '#1e293b',
-            color: showLibrary ? '#000' : '#94a3b8', border: '1px solid #374151',
-            borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-          }}>
-            📚 {showLibrary ? 'ซ่อนคลังปก' : 'คลังปกไวรัล'}
-          </button>
         </div>
+        <p style={{ color: '#94a3b8', marginBottom: 24 }}>
+          {batchMode ? '📊 ใส่หลายข่าว สร้างปกทีเดียว เปรียบเทียบผลลัพธ์' : 'ทดสอบ Auto Cover + คลังปกไวรัล'}
+        </p>
 
-        <div style={{ display: 'grid', gridTemplateColumns: showLibrary ? '1fr 380px' : '1fr', gap: 24 }}>
-          {/* ========== MAIN COLUMN ========== */}
-          <div>
-            {/* INPUT SECTION */}
-            <div style={{ background: '#111827', borderRadius: 12, padding: 24, border: '1px solid #1e293b', marginBottom: 16 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 700, color: '#60a5fa', marginBottom: 16 }}>📝 ใส่เนื้อหาข่าว</h2>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <div>
-                  <label style={labelStyle}>หัวข้อข่าว</label>
-                  <input value={newsTitle} onChange={e => setNewsTitle(e.target.value)}
-                    placeholder="เช่น: ตัก บงกช สร้างบ้าน 800 ไร่ให้ครอบครัว" style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Template ({templates.length} แบบ)</label>
-                  <select value={templateId} onChange={e => setTemplateId(e.target.value)} style={inputStyle}>
-                    <option value="auto">🤖 Auto — AI เลือกให้</option>
-                    <optgroup label="── ปกข่าว ──">
-                      {templates.filter(t => t.id !== 'auto').map(t => (
-                        <option key={t.id} value={t.id}>{t.name} — {t.desc}</option>
-                      ))}
-                    </optgroup>
-                  </select>
+        {/* ★ BATCH MODE UI */}
+        {batchMode && (
+          <div style={{ background: '#111827', borderRadius: 12, padding: 24, border: '2px solid #f59e0b33', marginBottom: 24 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16, color: '#fbbf24' }}>
+              📋 Batch Cover Generation
+            </h2>
+            
+            <label style={labelStyle}>ใส่หลายข่าว คั่นด้วย --- (ขีด 3 ตัว)</label>
+            <textarea
+              value={batchText}
+              onChange={e => setBatchText(e.target.value)}
+              placeholder={`หัวข้อ: ก้อย รัชวิน มอบเงิน 5 แสน...\nเนื้อหา: ครั้งหนึ่ง "ก้อย รัชวิน" มอบเงิน...\n---\nหัวข้อ: ตัก บงกช โพสต์ความในใจ...\nเนื้อหา: หลังจากที่ตัก บงกช...\n---\nหัวข้อ: ลิซ่า BLACKPINK กลับไทย...\nเนื้อหา: ลิซ่า ลลิษา มโนบาล...`}
+              rows={10}
+              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'monospace', fontSize: 13, lineHeight: 1.6 }}
+            />
+            
+            {/* Preview parsed items */}
+            {batchText.trim() && (
+              <div style={{ marginTop: 8, padding: 8, background: '#0f172a', borderRadius: 8 }}>
+                <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                  📰 {parseBatchText(batchText).length} ข่าว:
+                </span>
+                {parseBatchText(batchText).map((item, i) => (
+                  <span key={i} style={{ display: 'inline-block', margin: '4px 4px 0', padding: '2px 8px', background: '#1e293b', borderRadius: 4, fontSize: 11, color: '#e2e8f0' }}>
+                    {i + 1}. {item.title.substring(0, 40)}{item.title.length > 40 ? '...' : ''}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <button
+              onClick={handleBatchGenerate}
+              disabled={batchLoading || !batchText.trim()}
+              style={{
+                width: '100%', padding: '14px 24px', marginTop: 16,
+                background: batchLoading ? '#374151' : 'linear-gradient(135deg, #f59e0b, #ef4444)',
+                color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, fontWeight: 700,
+                cursor: batchLoading ? 'wait' : 'pointer',
+              }}
+            >
+              {batchLoading
+                ? `⏳ กำลังสร้าง ${batchCoverProgress.current}/${batchCoverProgress.total}...`
+                : `🚀 สร้างปกทั้งหมด (${parseBatchText(batchText).length} ข่าว)`}
+            </button>
+
+            {/* Progress Bar */}
+            {batchLoading && batchCoverProgress.total > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ background: '#1e293b', borderRadius: 8, height: 28, overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${(batchCoverProgress.current / batchCoverProgress.total) * 100}%`,
+                    height: '100%',
+                    background: 'linear-gradient(90deg, #f59e0b, #22c55e)',
+                    borderRadius: 8,
+                    transition: 'width 0.5s ease',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 13, fontWeight: 700, color: '#000',
+                  }}>
+                    {batchCoverProgress.current}/{batchCoverProgress.total}
+                  </div>
                 </div>
               </div>
-              <label style={labelStyle}>เนื้อหาข่าว (ช่วยให้ AI วิเคราะห์ได้ดีขึ้น)</label>
-              <textarea value={content} onChange={e => setContent(e.target.value)}
-                placeholder="วางเนื้อหาข่าวที่ต้องการทำปก..." rows={3}
-                style={{ ...inputStyle, resize: 'vertical' }} />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
-                <div>
-                  <label style={{ ...labelStyle, color: '#f59e0b' }}>👤 ตัวละครสำคัญ (คั่นด้วย ,)</label>
-                  <input value={manualCharacters} onChange={e => setManualCharacters(e.target.value)}
-                    placeholder="เช่น: เชียร์ ทีชัมพร, พิมประภา" style={inputStyle} />
+            )}
+
+            {/* ★ Batch Results Summary */}
+            {batchResults.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+                  {(() => {
+                    const scores = batchResults.filter(r => r.success).map(r => r.coverResult?.score || 0);
+                    const avg = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : '-';
+                    const high = scores.filter(s => s >= 8).length;
+                    const mid = scores.filter(s => s >= 5 && s < 8).length;
+                    const low = scores.filter(s => s < 5).length;
+                    return (
+                      <>
+                        <div style={{ padding: '10px 16px', background: '#0f172a', borderRadius: 8, border: '1px solid #1e293b', textAlign: 'center' }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: '#fbbf24' }}>{avg}</div>
+                          <div style={{ fontSize: 11, color: '#94a3b8' }}>Avg Score</div>
+                        </div>
+                        <div style={{ padding: '10px 16px', background: '#0f172a', borderRadius: 8, border: '1px solid #1e293b', textAlign: 'center' }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: '#22c55e' }}>{batchResults.filter(r => r.success).length}/{batchResults.length}</div>
+                          <div style={{ fontSize: 11, color: '#94a3b8' }}>สำเร็จ</div>
+                        </div>
+                        <div style={{ padding: '10px 16px', background: '#0f172a', borderRadius: 8, border: '1px solid #1e293b', display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <span style={{ fontSize: 13 }}>🟢 {high}</span>
+                          <span style={{ fontSize: 13 }}>🟡 {mid}</span>
+                          <span style={{ fontSize: 13 }}>🔴 {low}</span>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
-                <div>
-                  <label style={{ ...labelStyle, color: '#34d399' }}>🏷️ คีย์เวิร์ดสำคัญ (คั่นด้วย ,)</label>
-                  <input value={manualKeywords} onChange={e => setManualKeywords(e.target.value)}
-                    placeholder="เช่น: ร้องไห้, ช่วยใช้หนี้, ครอบครัว" style={inputStyle} />
+
+                {/* Results Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+                  {batchResults.map((result, i) => (
+                    <div
+                      key={i}
+                      onClick={() => setExpandedBatch(expandedBatch === i ? null : i)}
+                      style={{
+                        background: result.success ? '#0f172a' : '#7f1d1d22',
+                        borderRadius: 10, padding: 12,
+                        border: expandedBatch === i ? '2px solid #f59e0b' : '1px solid #1e293b',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 6, fontWeight: 600 }}>
+                        📰 {result.newsTitle?.substring(0, 50)}{result.newsTitle?.length > 50 ? '...' : ''}
+                      </div>
+                      {result.success && result.coverResult?.base64 && (
+                        <img
+                          src={result.coverResult.base64}
+                          alt=""
+                          style={{ width: '100%', borderRadius: 6, marginBottom: 8 }}
+                        />
+                      )}
+                      {!result.success && (
+                        <div style={{ padding: 16, textAlign: 'center', color: '#fca5a5', fontSize: 13 }}>
+                          ❌ {result.error || 'เกิดข้อผิดพลาด'}
+                        </div>
+                      )}
+                      {result.success && (
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ ...badgeStyle, background: (result.coverResult?.score || 0) >= 8 ? '#14532d' : (result.coverResult?.score || 0) >= 5 ? '#713f12' : '#7f1d1d', color: '#fff', fontSize: 11 }}>
+                            ⭐ {result.coverResult?.score}/10
+                          </span>
+                          <span style={{ ...badgeStyle, fontSize: 11 }}>
+                            🎨 {result.coverResult?.templateUsed}
+                          </span>
+                          <span style={{ ...badgeStyle, fontSize: 11 }}>
+                            ⏱️ {result.coverResult?.elapsed}
+                          </span>
+                          {result.coverResult?.caseId && (
+                            <span style={{ ...badgeStyle, fontSize: 11, background: '#1e3a5f', color: '#60a5fa' }}>
+                              📁 {result.coverResult.caseId}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
+
+                {/* Expanded view */}
+                {expandedBatch !== null && batchResults[expandedBatch]?.success && (
+                  <div style={{ marginTop: 16, padding: 16, background: '#0f172a', borderRadius: 12, border: '2px solid #f59e0b' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <h3 style={{ fontSize: 16, fontWeight: 700, color: '#fbbf24', margin: 0 }}>
+                        📰 {batchResults[expandedBatch].newsTitle?.substring(0, 60)}
+                      </h3>
+                      <button onClick={() => setExpandedBatch(null)} style={{ padding: '4px 12px', background: '#374151', color: '#94a3b8', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>✕</button>
+                    </div>
+                    <img
+                      src={batchResults[expandedBatch].coverResult.base64}
+                      alt=""
+                      style={{ width: '100%', maxWidth: 600, borderRadius: 8, border: '2px solid #374151' }}
+                    />
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                      <a
+                        href={batchResults[expandedBatch].coverResult.base64}
+                        download={`cover-batch-${expandedBatch + 1}.jpg`}
+                        style={{ padding: '10px 20px', background: '#065f46', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, textDecoration: 'none' }}
+                      >
+                        💾 ดาวน์โหลด
+                      </a>
+                    </div>
+                  </div>
+                )}
               </div>
-              <button onClick={() => handleGenerate(false)} disabled={loading} style={{
-                width: '100%', padding: '14px', marginTop: 12,
+            )}
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: batchMode ? '1fr' : '1fr 1fr', gap: 24 }}>
+          {/* Left: Auto Cover (hidden in batch mode) */}
+          {!batchMode && (
+          <div style={{ background: '#111827', borderRadius: 12, padding: 24, border: '1px solid #1e293b' }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16, color: '#60a5fa' }}>
+              🚀 สร้างปกอัตโนมัติ
+            </h2>
+
+            <label style={labelStyle}>หัวข้อข่าว</label>
+            <input
+              value={newsTitle}
+              onChange={e => setNewsTitle(e.target.value)}
+              placeholder="เช่น: ตัก บงกช สร้างบ้าน 800 ไร่ให้ครอบครัว"
+              style={inputStyle}
+            />
+
+            <label style={labelStyle}>เนื้อหาข่าว (optional)</label>
+            <textarea
+              value={content}
+              onChange={e => setContent(e.target.value)}
+              placeholder="วางเนื้อหาข่าวที่ต้องการทำปก..."
+              rows={4}
+              style={{ ...inputStyle, resize: 'vertical' }}
+            />
+
+            <label style={labelStyle}>Template ปก ({templates.length} แบบ)</label>
+            <select
+              value={templateId}
+              onChange={e => setTemplateId(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="auto">🤖 Auto — AI เลือก template ที่เหมาะสม</option>
+              <optgroup label="── ปกข่าว (6 แบบ) ──">
+                {templates.filter(t => t.id !== 'auto').map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} — {t.desc}{t.imageSlots ? ` (${t.imageSlots} รูป)` : ''}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+
+            <button
+              onClick={() => handleGenerate(false)}
+              disabled={loading}
+              style={{
+                width: '100%', padding: '14px 24px', marginTop: 16,
                 background: loading ? '#374151' : 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
                 color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, fontWeight: 700,
                 cursor: loading ? 'wait' : 'pointer',
-              }}>
-                {loading ? '⏳ กำลังสร้างปก... (30-120 วินาที)' : '🚀 สร้างปกอัตโนมัติ'}
-              </button>
-              {error && <div style={{ marginTop: 8, padding: 10, background: '#7f1d1d', borderRadius: 8, color: '#fca5a5', fontSize: 13 }}>❌ {error}</div>}
-            </div>
+              }}
+            >
+              {loading ? '⏳ กำลังสร้างปก... (30-60 วินาที)' : '🖼️ สร้างปกอัตโนมัติ'}
+            </button>
 
-            {/* KEYWORDS SECTION */}
-            {identity && (
-              <div style={{ background: '#111827', borderRadius: 12, padding: 20, border: '1px solid #1e293b', marginBottom: 16 }}>
-                <h2 style={{ fontSize: 16, fontWeight: 700, color: '#a78bfa', marginBottom: 12 }}>🔍 Keywords ที่วิเคราะห์ได้</h2>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-                  {/* Characters */}
-                  {identity.characters?.map((c, i) => (
-                    <span key={i} style={{ ...tagStyle, background: '#1e3a5f', borderColor: '#3b82f6' }}>👤 {c}</span>
-                  ))}
-                  {/* Emotions */}
-                  {identity.emotion && <span style={{ ...tagStyle, background: '#3b1f3f', borderColor: '#a855f7' }}>💗 {identity.emotion}</span>}
-                  {identity.coverEmotion && <span style={{ ...tagStyle, background: '#3b1f3f', borderColor: '#a855f7' }}>🎭 {identity.coverEmotion}</span>}
-                  {/* Location */}
-                  {identity.location && <span style={{ ...tagStyle, background: '#1a3a2a', borderColor: '#22c55e' }}>📍 {identity.location}</span>}
-                </div>
-                {/* Keywords */}
-                {identity.keywords?.length > 0 && (
-                  <div style={{ marginBottom: 8 }}>
-                    <span style={{ fontSize: 12, color: '#64748b', marginRight: 8 }}>🏷️ Keywords:</span>
-                    {identity.keywords.map((k, i) => (
-                      <span key={i} style={{ ...tagStyle, background: '#1e293b', borderColor: '#475569', fontSize: 11 }}>{k}</span>
-                    ))}
-                  </div>
-                )}
-                {/* Character Roles */}
-                {identity.characterRoles?.length > 0 && (
-                  <div style={{ marginBottom: 8 }}>
-                    <span style={{ fontSize: 12, color: '#64748b', marginRight: 8 }}>👥 ตัวละคร:</span>
-                    {identity.characterRoles.map((cr, i) => (
-                      <span key={i} style={{ ...tagStyle, background: '#1f2937', borderColor: '#6b7280', fontSize: 11 }}>
-                        {cr.name} ({cr.role}: {cr.relation})
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {/* Story */}
-                {identity.story && <p style={{ fontSize: 13, color: '#94a3b8', margin: '8px 0 0' }}>📰 {identity.story}</p>}
-                {/* Key Scenes */}
-                {identity.keyScenes?.length > 0 && (
-                  <div style={{ marginTop: 8 }}>
-                    <span style={{ fontSize: 12, color: '#64748b' }}>🎬 ซีนที่ต้องการ: </span>
-                    <span style={{ fontSize: 12, color: '#94a3b8' }}>{identity.keyScenes.join(' • ')}</span>
-                  </div>
-                )}
+            {error && (
+              <div style={{ marginTop: 12, padding: 12, background: '#7f1d1d', borderRadius: 8, color: '#fca5a5' }}>
+                ❌ {error}
               </div>
             )}
 
-            {/* COVER RESULT */}
             {coverResult && (
-              <div style={{ background: '#111827', borderRadius: 12, padding: 20, border: '1px solid #1e293b', marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <h2 style={{ fontSize: 16, fontWeight: 700, color: '#22c55e', margin: 0 }}>
-                    🖼️ ปกที่สร้างได้ {coverResult.covers && coverResult.covers.length > 1 ? `(${coverResult.covers.length} แบบ)` : ''}
-                  </h2>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <span style={badgeStyle}>🖼️ {coverResult.imageCount} ภาพ</span>
-                    <span style={badgeStyle}>⏱️ {coverResult.elapsed}</span>
-                  </div>
+              <div style={{ marginTop: 16 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                  <span style={badgeStyle}>📐 {coverResult.templateUsed}</span>
+                  <span style={badgeStyle}>🖼️ {coverResult.imageCount} ภาพ</span>
+                  <span style={badgeStyle}>⭐ {coverResult.score}/10</span>
+                  <span style={badgeStyle}>⏱️ {coverResult.elapsed}</span>
                 </div>
-
-                {/* ★ Dual cover comparison */}
-                {coverResult.covers && coverResult.covers.length > 1 ? (
-                  <div>
-                    <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
-                      {coverResult.covers.map((cover, idx) => (
-                        <div key={idx} style={{
-                          flex: '1 1 280px', maxWidth: 420, position: 'relative',
-                          border: selectedCoverIndex === idx ? '3px solid #22c55e' : '2px solid #374151',
-                          borderRadius: 12, overflow: 'hidden', cursor: 'pointer',
-                          background: '#0f172a', transition: 'all 0.25s ease',
-                          boxShadow: selectedCoverIndex === idx ? '0 0 20px rgba(34,197,94,0.25)' : 'none',
-                        }} onClick={() => setSelectedCoverIndex(idx)}>
-                          <img src={cover.base64} alt={`Cover ${idx + 1}`}
-                            style={{ width: '100%', display: 'block', borderRadius: '10px 10px 0 0' }} />
-                          {/* Info bar */}
-                          <div style={{ padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <span style={{ ...badgeStyle, fontSize: 10 }}>📐 {cover.templateUsed}</span>
-                              <span style={{
-                                ...badgeStyle, fontSize: 10,
-                                background: cover.score >= 7 ? '#14532d' : '#7c2d12',
-                                borderColor: cover.score >= 7 ? '#22c55e' : '#f97316',
-                              }}>⭐ {cover.score}/10</span>
-                            </div>
-                            <button onClick={(e) => { e.stopPropagation(); handleEditCover(idx); }} style={{
-                              padding: '5px 14px', fontSize: 12, fontWeight: 700, borderRadius: 6, border: 'none', cursor: 'pointer',
-                              background: selectedCoverIndex === idx ? '#22c55e' : '#374151',
-                              color: selectedCoverIndex === idx ? '#000' : '#94a3b8',
-                              transition: 'all 0.2s',
-                            }}>
-                              {selectedCoverIndex === idx ? '✅ แก้ไขปกนี้' : '🎨 เลือก & แก้ไข'}
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  /* ★ Single cover (backward compat) */
-                  <div>
-                    <div style={{ display: 'flex', gap: 6, marginBottom: 8, justifyContent: 'center' }}>
-                      <span style={badgeStyle}>📐 {coverResult.templateUsed}</span>
-                      <span style={{
-                        ...badgeStyle,
-                        background: coverResult.score >= 7 ? '#14532d' : '#7c2d12',
-                        borderColor: coverResult.score >= 7 ? '#22c55e' : '#f97316',
-                      }}>⭐ {coverResult.score}/10</span>
-                    </div>
-                    <img src={coverResult.base64} alt="Generated cover"
-                      style={{ width: '100%', maxWidth: 600, borderRadius: 8, border: '2px solid #374151', display: 'block', margin: '0 auto' }} />
-                  </div>
+                {coverResult.identity && (
+                  <p style={{ color: '#94a3b8', fontSize: 13, marginBottom: 8 }}>
+                    👤 {coverResult.identity.mainCharacter} | 💗 {coverResult.identity.emotion}
+                  </p>
                 )}
+                <img
+                  src={coverResult.base64}
+                  alt="Auto generated cover"
+                  style={{ width: '100%', borderRadius: 8, border: '2px solid #374151' }}
+                />
 
-                {/* Action Buttons */}
-                <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'center' }}>
-                  <button onClick={() => handleGenerate(true)} disabled={loading} style={{
-                    padding: '10px 20px', background: 'linear-gradient(135deg, #f59e0b, #ef4444)',
-                    color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700,
-                    cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.6 : 1,
-                  }}>
-                    🔄 สร้างใหม่ (หาภาพใหม่)
+                {/* 🔄 ปุ่มสร้างปกใหม่ */}
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <button
+                    onClick={() => handleGenerate(true)}
+                    disabled={loading}
+                    style={{
+                      flex: 1, padding: '12px', background: 'linear-gradient(135deg, #f59e0b, #ef4444)',
+                      color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700,
+                      cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.6 : 1,
+                    }}
+                  >
+                    {loading ? '⏳ กำลังสร้างใหม่...' : '🔄 สร้างปกใหม่ (สลับ template)'}
                   </button>
-                  <button onClick={handleRegenerateFromSelection} disabled={loading || selectedCount < 2} style={{
-                    padding: '10px 20px', background: selectedCount >= 2 ? 'linear-gradient(135deg, #8b5cf6, #3b82f6)' : '#374151',
-                    color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700,
-                    cursor: selectedCount >= 2 ? 'pointer' : 'not-allowed',
-                  }}>
-                    ✨ สร้างจากภาพที่เลือก ({selectedCount})
-                  </button>
-                  <a href={coverResult.covers && coverResult.covers.length > 1 ? coverResult.covers[selectedCoverIndex]?.base64 : coverResult.base64}
-                    download={`cover-${Date.now()}.jpg`} style={{
-                    padding: '10px 20px', background: '#065f46', color: '#fff', border: 'none',
-                    borderRadius: 8, fontSize: 13, fontWeight: 700, textDecoration: 'none',
-                  }}>
-                    💾 ดาวน์โหลด{coverResult.covers && coverResult.covers.length > 1 ? ` (ปก ${selectedCoverIndex + 1})` : ''}
+                  <a
+                    href={coverResult.base64}
+                    download={`cover-${Date.now()}.jpg`}
+                    style={{
+                      padding: '12px 20px', background: '#065f46',
+                      color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700,
+                      textDecoration: 'none', display: 'flex', alignItems: 'center',
+                    }}
+                  >
+                    💾 ดาวน์โหลด
                   </a>
                 </div>
 
-                {coverResult.judgeComment && (
-                  <p style={{ fontSize: 12, color: '#94a3b8', textAlign: 'center', marginTop: 8 }}>
-                    🤖 AI: {coverResult.judgeComment}
-                  </p>
+                {/* ✏️ Edit Mode Button */}
+                {!editMode && (
+                  <button
+                    onClick={() => enterEditMode(coverResult)}
+                    disabled={loadingEdit}
+                    style={{
+                      width: '100%', padding: '12px', marginTop: 8,
+                      background: loadingEdit ? '#374151' : 'linear-gradient(135deg, #8b5cf6, #6366f1)',
+                      color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700,
+                      cursor: loadingEdit ? 'wait' : 'pointer', opacity: loadingEdit ? 0.6 : 1,
+                    }}
+                  >
+                    {loadingEdit ? '⏳ โหลดภาพ...' : '✏️ แก้ไขปกนี้ (Edit Mode)'}
+                  </button>
+                )}
+
+                {/* ✏️ Interactive Edit Mode */}
+                {editMode && <CoverEditPanel
+                  editImages={editImages}
+                  editTemplateId={editTemplateId}
+                  setEditTemplateId={setEditTemplateId}
+                  onClose={() => setEditMode(false)}
+                />}
+
+                {/* Case ID + ข้อมูลคลัง */}
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                  {coverResult.caseId && (
+                    <span style={{ ...badgeStyle, background: '#1e3a5f', color: '#60a5fa', fontSize: 11 }}>
+                      📁 {coverResult.caseId}
+                    </span>
+                  )}
+                  {coverResult.cachedImages > 0 && (
+                    <span style={{ ...badgeStyle, fontSize: 11 }}>
+                      📦 {coverResult.cachedImages} ภาพในคลัง
+                    </span>
+                  )}
+                </div>
+
+                {/* 🖼️ Gallery: ภาพที่ AI ค้นพบ */}
+                {coverResult.gallery?.length > 0 && (
+                  <div style={{ marginTop: 16, padding: 12, background: '#0f172a', borderRadius: 8, border: '1px solid #1e293b' }}>
+                    <h4 style={{ fontSize: 14, fontWeight: 700, color: '#a78bfa', marginBottom: 10 }}>
+                      🖼️ ภาพที่ AI ค้นพบ ({coverResult.gallery.length} ภาพ)
+                    </h4>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {coverResult.gallery.map((img, i) => {
+                        const roleBg = {
+                          HERO_FACE: '#dc2626', HERO: '#ea580c', CONTEXT_SCENE: '#2563eb',
+                          EVIDENCE: '#ca8a04', EMOTION: '#db2777', RELATIONSHIP: '#7c3aed', SUPPORT: '#475569'
+                        }[img.role] || '#475569';
+                        return (
+                          <div key={i} style={{
+                            position: 'relative', width: 80, height: 80,
+                            borderRadius: 6, overflow: 'hidden', border: `2px solid ${roleBg}`,
+                            background: '#1e293b',
+                          }}>
+                            {img.url && <img src={img.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+                            <div style={{
+                              position: 'absolute', bottom: 0, left: 0, right: 0,
+                              background: 'rgba(0,0,0,0.8)', padding: '2px 4px',
+                              fontSize: 9, color: '#fff', textAlign: 'center',
+                            }}>
+                              <span style={{
+                                display: 'inline-block', background: roleBg, borderRadius: 3,
+                                padding: '1px 4px', fontSize: 8, fontWeight: 700,
+                              }}>{img.role?.replace('_', ' ')}</span>
+                              {img.hasFace && <span style={{ marginLeft: 3 }}>👤{img.faceCount}</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 )}
               </div>
             )}
+          </div>)}
 
-            {/* ★ MANUAL EDIT MODE — Live Canvas Editor */}
-            {editMode && editTemplate && (
-              <div style={{ background: '#111827', borderRadius: 16, border: '1px solid #1e293b', padding: 24, marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <h3 style={{ color: '#e2e8f0', margin: 0, fontSize: 18, fontWeight: 700 }}>🎨 ปรับแต่งปก</h3>
-                  <button onClick={() => setEditMode(false)} style={{
-                    padding: '6px 14px', borderRadius: 8, border: '1px solid #475569',
-                    background: '#1e293b', color: '#94a3b8', fontSize: 13, cursor: 'pointer', fontWeight: 600,
-                  }}>✕ ปิด</button>
-                </div>
-                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-                  {/* Canvas */}
-                  <div style={{ flex: '1 1 600px', minWidth: 400 }}>
-                    <canvas
-                      ref={editCanvasRef}
-                      width={W}
-                      height={H}
-                      style={{ width: '100%', height: 'auto', borderRadius: 12, cursor: editHoverCursor, border: '1px solid #374151' }}
-                      onMouseDown={e => editHandleDown(e.clientX, e.clientY)}
-                      onMouseMove={e => editHandleMove(e.clientX, e.clientY)}
-                      onMouseUp={editHandleUp}
-                      onMouseLeave={editHandleUp}
-                      onTouchStart={e => { e.preventDefault(); const t = e.touches[0]; editHandleDown(t.clientX, t.clientY); }}
-                      onTouchMove={e => { e.preventDefault(); const t = e.touches[0]; editHandleMove(t.clientX, t.clientY); }}
-                      onTouchEnd={editHandleUp}
-                    />
-                  </div>
-                  {/* Controls sidebar */}
-                  <div style={{ flex: '0 0 280px', minWidth: 260 }}>
-                    {/* Usage guide */}
-                    <div style={{ background: '#0f172a', borderRadius: 10, border: '1px solid #1e293b', marginBottom: 16 }}>
-                      <div style={{ padding: '12px 16px', fontSize: 13, color: '#94a3b8' }}>
-                        <p style={{ margin: '0 0 8px', fontWeight: 700, color: '#e2e8f0' }}>💡 วิธีใช้</p>
-                        <p style={{ margin: '2px 0' }}>• <b>ลากภาพ</b> = เลื่อนภาพในช่อง</p>
-                        <p style={{ margin: '2px 0' }}>• <b>ลากขอบ</b> = ย้ายตำแหน่งช่อง</p>
-                        <p style={{ margin: '2px 0' }}>• <b>ลากมุม</b> = ปรับขนาดช่อง</p>
-                        <p style={{ margin: '2px 0' }}>• <b>Scroll</b> = ซูมภาพ</p>
-                        <p style={{ margin: '2px 0' }}>• <b>ลากข้อความ</b> = ย้ายตำแหน่ง</p>
-                      </div>
-                    </div>
+          {/* Right: Cover Library */}
+          <div style={{ background: '#111827', borderRadius: 12, padding: 24, border: '1px solid #1e293b' }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16, color: '#f59e0b' }}>
+              📚 คลังปกไวรัล (AI เรียนรู้)
+            </h2>
 
-                    {/* Slot zoom controls */}
-                    {editTemplate.slots.filter(s => editImages[s.id]).map(slot => (
-                      <div key={slot.id} style={{ background: '#0f172a', borderRadius: 8, border: '1px solid #1e293b', marginBottom: 8, padding: '8px 12px' }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 4 }}>
-                          {slot.shape === 'circle' ? '⭕' : '🖼️'} {slot.id}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <button style={editZoomBtnStyle} onClick={() => {
-                            setEditSlotCrops(prev => {
-                              const old = prev[slot.id] || { zoom: 1, panX: 0, panY: 0 };
-                              return { ...prev, [slot.id]: { ...old, zoom: Math.max(1, old.zoom - 0.2) } };
-                            });
-                          }}>−</button>
-                          <span style={{ fontSize: 12, color: '#e2e8f0', minWidth: 40, textAlign: 'center' }}>
-                            {((editSlotCrops[slot.id]?.zoom || 1) * 100).toFixed(0)}%
-                          </span>
-                          <button style={editZoomBtnStyle} onClick={() => {
-                            setEditSlotCrops(prev => {
-                              const old = prev[slot.id] || { zoom: 1, panX: 0, panY: 0 };
-                              return { ...prev, [slot.id]: { ...old, zoom: Math.min(5, old.zoom + 0.2) } };
-                            });
-                          }}>+</button>
-                        </div>
-                      </div>
-                    ))}
+            <label style={labelStyle}>เลือกภาพปก (เลือกได้หลายภาพพร้อมกัน)</label>
+            <div
+              onClick={() => fileRef.current?.click()}
+              style={{
+                border: '2px dashed #374151', borderRadius: 12, padding: '24px 16px',
+                textAlign: 'center', cursor: 'pointer', background: '#0f172a',
+                transition: 'border-color 0.2s',
+              }}
+              onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = '#f59e0b'; }}
+              onDragLeave={e => { e.currentTarget.style.borderColor = '#374151'; }}
+              onDrop={e => {
+                e.preventDefault();
+                e.currentTarget.style.borderColor = '#374151';
+                if (fileRef.current) {
+                  fileRef.current.files = e.dataTransfer.files;
+                  setBatchProgress(p => ({ ...p, total: e.dataTransfer.files.length }));
+                }
+              }}
+            >
+              <input
+                type="file"
+                ref={fileRef}
+                accept="image/*"
+                multiple
+                onChange={e => setBatchProgress(p => ({ ...p, total: e.target.files?.length || 0 }))}
+                style={{ display: 'none' }}
+              />
+              <p style={{ fontSize: 32, margin: 0 }}>📂</p>
+              <p style={{ color: '#94a3b8', fontSize: 14, margin: '8px 0 0' }}>
+                คลิกเลือก หรือลากไฟล์มาวาง
+              </p>
+              <p style={{ color: '#64748b', fontSize: 12 }}>
+                รองรับ JPG, PNG — เลือกได้ 1-50 ภาพพร้อมกัน
+              </p>
+              {fileRef.current?.files?.length > 0 && !uploading && (
+                <p style={{ color: '#fbbf24', fontSize: 14, fontWeight: 700, marginTop: 8 }}>
+                  📎 เลือกแล้ว {fileRef.current.files.length} ภาพ
+                </p>
+              )}
+            </div>
 
-                    {/* Text editing for templates with text */}
-                    {editTemplate.textSlots?.map(ts => (
-                      <div key={ts.id} style={{ background: '#0f172a', borderRadius: 8, border: '1px solid #1e293b', marginBottom: 8, padding: '8px 12px' }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 4 }}>📝 {ts.label || ts.id}</div>
-                        <input
-                          type="text"
-                          value={editTextValues[ts.id] || ''}
-                          onChange={e => setEditTextValues(prev => ({ ...prev, [ts.id]: e.target.value }))}
-                          placeholder={ts.placeholder || 'พิมพ์ข้อความ...'}
-                          style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #374151', background: '#1e293b', color: '#e2e8f0', fontSize: 13, boxSizing: 'border-box' }}
-                        />
-                      </div>
-                    ))}
+            <label style={labelStyle}>หมวดหมู่ (ใช้กับทุกภาพ)</label>
+            <select value={uploadCategory} onChange={e => setUploadCategory(e.target.value)} style={inputStyle}>
+              {['ทั่วไป','ข่าวบันเทิง','ดราม่า','ข่าวเศร้า','การเมือง','สู้ชีวิต','อาชญากรรม','กีฬา'].map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
 
-                    {/* Action buttons */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
-                      <button onClick={() => editExportAsBlob(`cover_edited_${Date.now()}.jpg`)} style={{
-                        padding: '12px 20px', borderRadius: 10, border: 'none',
-                        background: 'linear-gradient(135deg, #a3e635, #22c55e)', color: '#000',
-                        fontWeight: 700, fontSize: 14, cursor: 'pointer',
-                      }}>
-                        📥 ดาวน์โหลดปกที่แก้แล้ว
-                      </button>
-                      <button onClick={editResetAll} style={{
-                        padding: '8px 16px', borderRadius: 8, border: '1px solid #475569',
-                        background: '#1e293b', color: '#94a3b8', fontSize: 13, cursor: 'pointer',
-                      }}>
-                        🔄 รีเซ็ตทั้งหมด
-                      </button>
-                    </div>
+            <button
+              onClick={handleBatchUpload}
+              disabled={uploading}
+              style={{
+                width: '100%', padding: '14px 24px', marginTop: 16,
+                background: uploading ? '#374151' : 'linear-gradient(135deg, #f59e0b, #ef4444)',
+                color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, fontWeight: 700,
+                cursor: uploading ? 'wait' : 'pointer',
+              }}
+            >
+              {uploading 
+                ? `⏳ AI วิเคราะห์ ${batchProgress.current}/${batchProgress.total}...` 
+                : '📤 อัปโหลดทั้งหมด + AI วิเคราะห์'}
+            </button>
+
+            {/* Progress Bar */}
+            {uploading && batchProgress.total > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ background: '#1e293b', borderRadius: 8, height: 24, overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${(batchProgress.current / batchProgress.total) * 100}%`,
+                    height: '100%',
+                    background: 'linear-gradient(90deg, #f59e0b, #22c55e)',
+                    borderRadius: 8,
+                    transition: 'width 0.3s',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 12, fontWeight: 700, color: '#000',
+                  }}>
+                    {batchProgress.current}/{batchProgress.total}
                   </div>
                 </div>
               </div>
             )}
 
-            {/* MANUAL SLOT ASSIGNMENT */}
-            {coverResult && imageBank.length > 0 && templateSlots.length > 0 && (
-              <div style={{ background: '#111827', borderRadius: 12, padding: 20, border: '1px solid #1e293b', marginBottom: 16 }}>
-                <h2 style={{ fontSize: 16, fontWeight: 700, color: '#c084fc', marginBottom: 12 }}>🎛️ Manual Slot Assignment</h2>
-                <p style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>เลือกภาพที่ต้องการใส่ในแต่ละ slot หรือปล่อย Auto ให้ AI เลือก</p>
-                {templateSlots.map(slot => (
-                  <div key={slot.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, padding: '8px 12px', background: '#0f172a', borderRadius: 8, border: '1px solid #1e293b' }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', minWidth: 120 }}>
-                      {slot.id} <span style={{ fontSize: 11, color: '#64748b' }}>({slot.role})</span>
-                    </span>
-                    <select
-                      value={slotAssignment[slot.id] || ''}
-                      onChange={e => setSlotAssignment(prev => ({ ...prev, [slot.id]: e.target.value }))}
-                      style={{ ...inputStyle, flex: 1, fontSize: 12, padding: '6px 8px' }}
-                    >
-                      <option value="">🤖 Auto</option>
-                      {imageBank.filter(i => i.is_selected || i.ai_score >= 4).map(img => (
-                        <option key={img.id} value={img.image_url}>
-                          {img.ai_role} (⭐{img.ai_score}) — {img.image_url?.substring(0, 40)}…
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => openCropEditor(slot.id)}
-                      disabled={!slotAssignment[slot.id]}
-                      style={{
-                        padding: '6px 12px', background: slotAssignment[slot.id] ? '#7c3aed' : '#374151',
-                        color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600,
-                        cursor: slotAssignment[slot.id] ? 'pointer' : 'not-allowed', whiteSpace: 'nowrap',
-                      }}
-                    >
-                      ✂️ Crop
-                    </button>
-                    {slotCrops[slot.id] && (
-                      <span style={{ fontSize: 10, color: '#22c55e', whiteSpace: 'nowrap' }}>✅ {slotCrops[slot.id].zoom.toFixed(1)}x</span>
-                    )}
+            {/* Batch Results */}
+            {batchProgress.results.length > 0 && (
+              <div style={{ marginTop: 12, maxHeight: 200, overflowY: 'auto' }}>
+                {batchProgress.results.map((r, i) => (
+                  <div key={i} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '6px 10px', borderRadius: 6, marginBottom: 4, fontSize: 12,
+                    background: r.success ? '#14532d' : '#7f1d1d',
+                    color: r.success ? '#86efac' : '#fca5a5',
+                  }}>
+                    <span>{r.success ? '✅' : '❌'} {r.name?.substring(0, 30)}</span>
+                    {r.success && <span style={{ color: '#94a3b8' }}>{r.layout} | ⭐{r.score}</span>}
                   </div>
                 ))}
-                <button onClick={handleManualGenerate} disabled={loading} style={{
-                  width: '100%', padding: '12px', marginTop: 8,
-                  background: loading ? '#374151' : 'linear-gradient(135deg, #7c3aed, #ec4899)',
-                  color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700,
-                  cursor: loading ? 'wait' : 'pointer',
-                }}>
-                  {loading ? '⏳ กำลังสร้าง...' : '🖼️ สร้างปก Manual'}
-                </button>
-              </div>
-            )}
-
-            {/* IMAGE BANK */}
-            {(imageBank.length > 0 || bankLoading) && (
-              <div style={{ background: '#111827', borderRadius: 12, padding: 20, border: '1px solid #1e293b' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <h2 style={{ fontSize: 16, fontWeight: 700, color: '#f59e0b', margin: 0 }}>
-                    📸 คลังภาพ (Image Bank) — {imageBank.length} ภาพ
-                  </h2>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <span style={{ fontSize: 12, color: '#22c55e' }}>✅ {selectedCount} เลือก</span>
-                    <span style={{ fontSize: 12, color: '#64748b', margin: '0 4px' }}>|</span>
-                    <span style={{ fontSize: 12, color: '#ef4444' }}>❌ {imageBank.length - selectedCount} ไม่เลือก</span>
-                  </div>
-                </div>
-
-                {/* Filter Tabs */}
-                <div style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap' }}>
-                  {[
-                    { key: 'all', label: `ทั้งหมด (${imageBank.length})` },
-                    { key: 'selected', label: `✅ เลือกแล้ว (${selectedCount})` },
-                    { key: 'hero', label: '👤 Hero' },
-                    { key: 'context', label: '🏞️ Context' },
-                    { key: 'emotion', label: '💗 Emotion/Family' },
-                    { key: 'reject', label: '❌ Reject' },
-                  ].map(tab => (
-                    <button key={tab.key} onClick={() => setBankFilter(tab.key)} style={{
-                      padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
-                      background: bankFilter === tab.key ? '#3b82f6' : '#1e293b',
-                      color: bankFilter === tab.key ? '#fff' : '#94a3b8',
-                      border: '1px solid', borderColor: bankFilter === tab.key ? '#3b82f6' : '#374151',
-                      cursor: 'pointer',
-                    }}>
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Image Grid */}
-                {bankLoading ? (
-                  <p style={{ color: '#64748b', textAlign: 'center', padding: 20 }}>⏳ กำลังโหลดคลังภาพ...</p>
-                ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8 }}>
-                    {filteredBank.map(img => {
-                      const roleBg = ROLE_COLORS[img.ai_role] || '#475569';
-                      return (
-                        <div key={img.id} onClick={() => toggleImageSelect(img)} style={{
-                          position: 'relative', borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
-                          border: `3px solid ${img.is_selected ? '#22c55e' : '#374151'}`,
-                          background: '#1e293b', transition: 'all 0.2s',
-                          opacity: img.ai_role === 'REJECT' && !img.is_selected ? 0.5 : 1,
-                          transform: img.is_selected ? 'scale(1.02)' : 'scale(1)',
-                        }}>
-                          {img.image_url ? (
-                            <img src={img.image_url} alt="" style={{ width: '100%', height: 100, objectFit: 'cover', display: 'block' }}
-                              onError={e => { e.target.style.display = 'none'; }} />
-                          ) : img.thumbnail_base64 ? (
-                            <img src={img.thumbnail_base64} alt="" style={{ width: '100%', height: 100, objectFit: 'cover', display: 'block' }} />
-                          ) : (
-                            <div style={{ width: '100%', height: 100, background: '#374151', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>🖼️</div>
-                          )}
-                          {/* Selected badge */}
-                          {img.is_selected && (
-                            <div style={{ position: 'absolute', top: 4, left: 4, width: 22, height: 22, borderRadius: '50%', background: '#22c55e', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#fff', fontWeight: 700 }}>✓</div>
-                          )}
-                          {/* Role + Score badge */}
-                          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.85)', padding: '3px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ display: 'inline-block', background: roleBg, borderRadius: 3, padding: '1px 5px', fontSize: 9, fontWeight: 700, color: '#fff' }}>
-                              {img.ai_role?.replace('_', ' ')}
-                            </span>
-                            <span style={{ fontSize: 10, color: '#fbbf24', fontWeight: 700 }}>⭐{img.ai_score}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Tip */}
-                <p style={{ fontSize: 11, color: '#64748b', marginTop: 8, textAlign: 'center' }}>
-                  💡 คลิกภาพเพื่อเลือก/ยกเลิก → กด &quot;สร้างจากภาพที่เลือก&quot; เพื่อสร้างปกใหม่
+                <p style={{ color: '#94a3b8', fontSize: 12, marginTop: 8 }}>
+                  ✅ สำเร็จ: {batchProgress.results.filter(r => r.success).length} | 
+                  ❌ ล้มเหลว: {batchProgress.results.filter(r => !r.success).length} | 
+                  📚 รวมในคลัง: {library.length + batchProgress.results.filter(r => r.success).length}
                 </p>
               </div>
             )}
-          </div>
 
-          {/* ========== RIGHT SIDEBAR: Cover Library ========== */}
-          {showLibrary && (
-            <div style={{ background: '#111827', borderRadius: 12, padding: 20, border: '1px solid #1e293b', maxHeight: 'calc(100vh - 80px)', overflowY: 'auto' }}>
-              <h2 style={{ fontSize: 18, fontWeight: 700, color: '#f59e0b', marginBottom: 16 }}>📚 คลังปกไวรัล</h2>
-
-              <label style={labelStyle}>อัปโหลดปกตัวอย่าง</label>
-              <div onClick={() => fileRef.current?.click()} style={{
-                border: '2px dashed #374151', borderRadius: 8, padding: '16px', textAlign: 'center',
-                cursor: 'pointer', background: '#0f172a', fontSize: 13,
-              }}>
-                <input type="file" ref={fileRef} accept="image/*" multiple
-                  onChange={e => setBatchProgress(p => ({ ...p, total: e.target.files?.length || 0 }))}
-                  style={{ display: 'none' }} />
-                <p style={{ margin: 0, color: '#94a3b8' }}>📂 คลิกเลือกภาพ (1-50)</p>
-                {fileRef.current?.files?.length > 0 && !uploading && (
-                  <p style={{ color: '#fbbf24', fontWeight: 700, margin: '4px 0 0' }}>📎 {fileRef.current.files.length} ภาพ</p>
-                )}
+            <div style={{ marginTop: 24, borderTop: '1px solid #1e293b', paddingTop: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 600, color: '#e2e8f0' }}>ปกในคลัง ({library.length})</h3>
+                <button
+                  onClick={loadLibrary}
+                  disabled={loadingLib}
+                  style={{
+                    padding: '6px 16px', background: '#1e293b', color: '#94a3b8',
+                    border: '1px solid #374151', borderRadius: 6, cursor: 'pointer', fontSize: 13,
+                  }}
+                >
+                  {loadingLib ? '...' : '🔄 โหลด'}
+                </button>
               </div>
 
-              <select value={uploadCategory} onChange={e => setUploadCategory(e.target.value)} style={{ ...inputStyle, marginTop: 8 }}>
-                {['ทั่วไป','ข่าวบันเทิง','ดราม่า','ข่าวเศร้า','การเมือง','สู้ชีวิต','อาชญากรรม','กีฬา'].map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-
-              <button onClick={handleBatchUpload} disabled={uploading} style={{
-                width: '100%', padding: '10px', marginTop: 8,
-                background: uploading ? '#374151' : 'linear-gradient(135deg, #f59e0b, #ef4444)',
-                color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-              }}>
-                {uploading ? `⏳ ${batchProgress.current}/${batchProgress.total}...` : '📤 อัปโหลด + AI วิเคราะห์'}
-              </button>
-
-              {uploading && batchProgress.total > 0 && (
-                <div style={{ marginTop: 8, background: '#1e293b', borderRadius: 8, height: 20, overflow: 'hidden' }}>
-                  <div style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%`, height: '100%', background: 'linear-gradient(90deg, #f59e0b, #22c55e)', borderRadius: 8, transition: 'width 0.3s' }} />
-                </div>
+              {library.length === 0 && (
+                <p style={{ color: '#64748b', fontSize: 14 }}>ยังไม่มีปกในคลัง — อัปโหลดปกตัวอย่างด้านบน</p>
               )}
 
-              {batchProgress.results.length > 0 && (
-                <div style={{ marginTop: 8, maxHeight: 150, overflowY: 'auto', fontSize: 11 }}>
-                  {batchProgress.results.map((r, i) => (
-                    <div key={i} style={{ padding: '3px 6px', borderRadius: 4, marginBottom: 2, background: r.success ? '#14532d' : '#7f1d1d', color: r.success ? '#86efac' : '#fca5a5' }}>
-                      {r.success ? '✅' : '❌'} {r.name?.substring(0, 25)} {r.success && `| ${r.layout} ⭐${r.score}`}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div style={{ marginTop: 16, borderTop: '1px solid #1e293b', paddingTop: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>ปกในคลัง ({library.length})</h3>
-                  <button onClick={loadLibrary} disabled={loadingLib} style={{
-                    padding: '4px 12px', background: '#1e293b', color: '#94a3b8',
-                    border: '1px solid #374151', borderRadius: 6, cursor: 'pointer', fontSize: 12,
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                {library.map(cover => (
+                  <div key={cover.id} style={{
+                    background: '#1e293b', borderRadius: 8, padding: 8, border: '1px solid #374151',
                   }}>
-                    {loadingLib ? '...' : '🔄'}
-                  </button>
-                </div>
-                {library.length === 0 && <p style={{ color: '#64748b', fontSize: 12 }}>ยังไม่มีปก — อัปโหลดด้านบน</p>}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  {library.map(cover => (
-                    <div key={cover.id} style={{ background: '#1e293b', borderRadius: 6, padding: 6, border: '1px solid #374151' }}>
-                      {cover.thumbnail && <img src={cover.thumbnail} alt="" style={{ width: '100%', borderRadius: 4, marginBottom: 4 }} />}
-                      <p style={{ fontSize: 10, fontWeight: 600, margin: 0 }}>{cover.title?.substring(0, 30)}</p>
-                      <div style={{ display: 'flex', gap: 3, marginTop: 2 }}>
-                        <span style={{ fontSize: 9, background: '#374151', borderRadius: 3, padding: '1px 4px', color: '#94a3b8' }}>{cover.category}</span>
-                        <span style={{ fontSize: 9, color: '#fbbf24' }}>⭐{cover.quality_score}</span>
-                      </div>
+                    {cover.thumbnail && (
+                      <img src={cover.thumbnail} alt={cover.title} style={{
+                        width: '100%', borderRadius: 6, marginBottom: 6,
+                      }} />
+                    )}
+                    <p style={{ fontSize: 12, fontWeight: 600, color: '#e2e8f0', marginBottom: 2 }}>
+                      {cover.title?.substring(0, 40)}
+                    </p>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <span style={{ ...badgeStyle, fontSize: 10, padding: '2px 6px' }}>{cover.category}</span>
+                      <span style={{ ...badgeStyle, fontSize: 10, padding: '2px 6px' }}>⭐{cover.quality_score}</span>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
               </div>
             </div>
-          )}
+          </div>
         </div>
       </div>
-
-      {/* CropEditor Modal */}
-      {cropEditorState && (
-        <CropEditor
-          state={cropEditorState}
-          onApply={(slotId, cropData) => {
-            setSlotCrops(prev => ({ ...prev, [slotId]: cropData }));
-            setCropEditorState(null);
-          }}
-          onCancel={() => setCropEditorState(null)}
-        />
-      )}
     </div>
   );
 }
 
-// === CropEditor Component ===
-function CropEditor({ state, onApply, onCancel }) {
-  const canvasRef = useRef(null);
-  const imgRef = useRef(null);
-  const [zoom, setZoom] = useState(state.zoom || 1.0);
-  const [panX, setPanX] = useState(state.panX || 0);
-  const [panY, setPanY] = useState(state.panY || 0);
-  const [dragging, setDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [imgLoaded, setImgLoaded] = useState(false);
+// ═══════════════════════════════════════════════════════════
+// CoverEditPanel — Interactive canvas editor sub-component
+// ═══════════════════════════════════════════════════════════
+function CoverEditPanel({ editImages, editTemplateId, setEditTemplateId, onClose }) {
+  const template = BUILTIN_TEMPLATES.find(t => t.id === editTemplateId) || BUILTIN_TEMPLATES[0];
 
-  // Load image
+  const {
+    canvasRef, slotImages, setSlotImages,
+    slotOffsets, setSlotOffsets, slotScales, setSlotScales,
+    textValues, setTextValues, hoverCursor,
+    handleDown, handleMove, handleUp,
+    exportAsBlob, resetAll,
+  } = useCoverCanvas(template, editImages);
+
+  // Sync editImages when they change (e.g. template switch keeps same images)
   useEffect(() => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => { imgRef.current = img; setImgLoaded(true); };
-    img.onerror = () => setImgLoaded(false);
-    img.src = state.imageUrl;
-  }, [state.imageUrl]);
+    if (editImages && Object.keys(editImages).length > 0) {
+      setSlotImages(editImages);
+    }
+  }, [editImages, setSlotImages]);
 
-  // Render preview
-  useEffect(() => {
-    if (!imgLoaded || !canvasRef.current || !imgRef.current) return;
-    const ctx = canvasRef.current.getContext('2d');
-    const img = imgRef.current;
-    const cW = 400, cH = 400;
-    ctx.clearRect(0, 0, cW, cH);
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(0, 0, cW, cH);
+  const adjustScale = (slotId, delta) => {
+    setSlotScales(prev => {
+      const cur = prev[slotId] || 1;
+      return { ...prev, [slotId]: Math.max(0.3, Math.min(2.5, +(cur + delta).toFixed(2))) };
+    });
+  };
 
-    const srcW = img.width / zoom;
-    const srcH = img.height / zoom;
-    const sx = Math.max(0, Math.min((img.width - srcW) / 2 - panX, img.width - srcW));
-    const sy = Math.max(0, Math.min((img.height - srcH) / 2 - panY, img.height - srcH));
-    ctx.drawImage(img, sx, sy, srcW, srcH, 0, 0, cW, cH);
+  const adjustOffset = (slotId, axis, delta) => {
+    setSlotOffsets(prev => {
+      const old = prev[slotId] || { dx: 0, dy: 0 };
+      return { ...prev, [slotId]: { dx: old.dx + (axis === 'x' ? delta : 0), dy: old.dy + (axis === 'y' ? delta : 0) } };
+    });
+  };
 
-    // Draw crosshair guides
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([8, 4]);
-    ctx.beginPath();
-    ctx.moveTo(cW / 3, 0); ctx.lineTo(cW / 3, cH);
-    ctx.moveTo((cW * 2) / 3, 0); ctx.lineTo((cW * 2) / 3, cH);
-    ctx.moveTo(0, cH / 3); ctx.lineTo(cW, cH / 3);
-    ctx.moveTo(0, (cH * 2) / 3); ctx.lineTo(cW, (cH * 2) / 3);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }, [imgLoaded, zoom, panX, panY]);
+  const handleDownload = () => {
+    exportAsBlob(`cover-edited-${Date.now()}.jpg`);
+  };
 
-  function handleMouseDown(e) {
-    setDragging(true);
-    setDragStart({ x: e.clientX - panX, y: e.clientY - panY });
-  }
-  function handleMouseMove(e) {
-    if (!dragging) return;
-    setPanX(e.clientX - dragStart.x);
-    setPanY(e.clientY - dragStart.y);
-  }
-  function handleMouseUp() { setDragging(false); }
-  function handleWheel(e) {
-    e.preventDefault();
-    setZoom(prev => Math.min(5, Math.max(1, prev + (e.deltaY < 0 ? 0.15 : -0.15))));
-  }
-  function handleReset() { setZoom(1.0); setPanX(0); setPanY(0); }
+  const filledSlots = template.slots.filter(sl => slotImages[sl.id]);
 
   return (
-    <div
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-      onClick={e => { if (e.target === e.currentTarget) onCancel(); }}
-    >
-      <div style={{ background: '#1e293b', borderRadius: 16, padding: 24, maxWidth: 500, width: '90%', boxShadow: '0 25px 50px rgba(0,0,0,0.5)' }}>
-        <h3 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700, color: '#e2e8f0' }}>
-          ✂️ Crop & Zoom — <span style={{ color: '#c084fc' }}>{state.slotId}</span>
+    <div style={{ marginTop: 16, padding: 16, background: '#0f172a', borderRadius: 12, border: '2px solid #6366f1' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: '#a78bfa', margin: 0 }}>
+          ✏️ แก้ไขปก — {template.name}
         </h3>
+        <button
+          onClick={onClose}
+          style={{ padding: '6px 14px', background: '#374151', color: '#94a3b8', border: '1px solid #4b5563', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+        >
+          ✕ กลับดูปกเดิม
+        </button>
+      </div>
 
+      {/* Template Selector */}
+      <div style={{ marginBottom: 12 }}>
+        <p style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>เลือก Template:</p>
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+          {BUILTIN_TEMPLATES.map(t => (
+            <TemplateThumbnail
+              key={t.id}
+              template={t}
+              isActive={t.id === editTemplateId}
+              onClick={() => setEditTemplateId(t.id)}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Interactive Canvas */}
+      <div style={{ position: 'relative', marginBottom: 12, borderRadius: 8, overflow: 'hidden', border: '1px solid #374151' }}>
         <canvas
           ref={canvasRef}
-          width={400}
-          height={400}
-          style={{
-            border: '2px solid #374151', borderRadius: 8, cursor: dragging ? 'grabbing' : 'grab',
-            display: 'block', margin: '0 auto', maxWidth: '100%',
-            background: '#0f172a',
-          }}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          onWheel={handleWheel}
+          width={W}
+          height={H}
+          style={{ width: '100%', cursor: hoverCursor, display: 'block' }}
+          onMouseDown={e => handleDown(e.clientX, e.clientY)}
+          onMouseMove={e => handleMove(e.clientX, e.clientY)}
+          onMouseUp={handleUp}
+          onMouseLeave={handleUp}
+          onTouchStart={e => { e.preventDefault(); const t = e.touches[0]; handleDown(t.clientX, t.clientY); }}
+          onTouchMove={e => { e.preventDefault(); const t = e.touches[0]; handleMove(t.clientX, t.clientY); }}
+          onTouchEnd={handleUp}
         />
-
-        {!imgLoaded && (
-          <p style={{ textAlign: 'center', color: '#64748b', marginTop: 8, fontSize: 13 }}>⏳ กำลังโหลดภาพ...</p>
-        )}
-
-        {/* Zoom Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 16 }}>
-          <button onClick={() => setZoom(prev => Math.max(1, prev - 0.25))} style={cropBtnStyle}>➖</button>
-          <span style={{ fontSize: 14, fontWeight: 700, color: '#fbbf24', minWidth: 50, textAlign: 'center' }}>
-            {zoom.toFixed(1)}x
-          </span>
-          <button onClick={() => setZoom(prev => Math.min(5, prev + 0.25))} style={cropBtnStyle}>➕</button>
-          <button onClick={handleReset} style={{ ...cropBtnStyle, background: '#374151', marginLeft: 8 }}>🔄 Reset</button>
+        <div style={{ position: 'absolute', bottom: 8, left: 8, background: 'rgba(0,0,0,0.7)', padding: '4px 10px', borderRadius: 6, fontSize: 10, color: '#94a3b8' }}>
+          🖱️ ลาก=เลื่อนรูป | Scroll=ซูม | ขอบ=ย้าย | มุม=ปรับขนาด
         </div>
+      </div>
 
-        {/* Zoom Slider */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '0 20px' }}>
-          <span style={{ fontSize: 10, color: '#64748b' }}>1x</span>
-          <input
-            type="range" min="1" max="5" step="0.1" value={zoom}
-            onChange={e => setZoom(parseFloat(e.target.value))}
-            style={{ flex: 1, accentColor: '#7c3aed' }}
-          />
-          <span style={{ fontSize: 10, color: '#64748b' }}>5x</span>
+      {/* Per-slot controls */}
+      {filledSlots.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <p style={{ fontSize: 11, color: '#64748b', marginBottom: 6, fontWeight: 600 }}>🎛️ ปรับแต่งรายช่อง:</p>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {filledSlots.map(slot => {
+              const sc = slotScales[slot.id] || 1;
+              return (
+                <div key={slot.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: '#1e293b', borderRadius: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11, color: '#94a3b8', minWidth: 90, fontWeight: 600 }}>{slot.label?.substring(0, 14) || slot.id}</span>
+                  {/* Scale */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <button onClick={() => adjustScale(slot.id, -0.1)} style={editBtnStyle}>−</button>
+                    <span style={{ fontSize: 11, color: '#e2e8f0', minWidth: 30, textAlign: 'center' }}>{sc.toFixed(1)}x</span>
+                    <button onClick={() => adjustScale(slot.id, 0.1)} style={editBtnStyle}>+</button>
+                  </div>
+                  {/* Position */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 4 }}>
+                    <button onClick={() => adjustOffset(slot.id, 'x', -30)} style={editBtnStyle}>◀</button>
+                    <button onClick={() => adjustOffset(slot.id, 'y', -30)} style={editBtnStyle}>▲</button>
+                    <button onClick={() => adjustOffset(slot.id, 'y', 30)} style={editBtnStyle}>▼</button>
+                    <button onClick={() => adjustOffset(slot.id, 'x', 30)} style={editBtnStyle}>▶</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
+      )}
 
-        {/* Action Buttons */}
-        <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
-          <button onClick={onCancel} style={{
-            padding: '10px 24px', background: '#374151', color: '#94a3b8',
-            border: '1px solid #475569', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-          }}>
-            ✖️ Cancel
-          </button>
-          <button onClick={() => onApply(state.slotId, { zoom, panX, panY })} style={{
-            padding: '10px 24px', background: 'linear-gradient(135deg, #7c3aed, #3b82f6)',
-            color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-          }}>
-            ✅ Apply
-          </button>
+      {/* Text editing */}
+      {template.textSlots?.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <p style={{ fontSize: 11, color: '#64748b', marginBottom: 6, fontWeight: 600 }}>📝 แก้ไขข้อความ:</p>
+          {template.textSlots.map(ts => (
+            <div key={ts.id} style={{ marginBottom: 6 }}>
+              <label style={{ fontSize: 10, color: '#94a3b8', display: 'block', marginBottom: 2 }}>{ts.label}</label>
+              <input
+                value={textValues[ts.id] || ''}
+                onChange={e => setTextValues(prev => ({ ...prev, [ts.id]: e.target.value }))}
+                placeholder={ts.placeholder || 'พิมพ์ข้อความ...'}
+                style={{ width: '100%', padding: '6px 10px', background: '#1e293b', color: '#e2e8f0', border: '1px solid #374151', borderRadius: 6, fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
+              />
+            </div>
+          ))}
         </div>
+      )}
+
+      {/* Action buttons */}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={resetAll} style={{ flex: 1, padding: '10px', background: '#374151', color: '#94a3b8', border: '1px solid #4b5563', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+          🔄 รีเซ็ตทั้งหมด
+        </button>
+        <button onClick={handleDownload} style={{ flex: 1, padding: '10px', background: 'linear-gradient(135deg, #065f46, #047857)', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+          💾 ดาวน์โหลด JPEG
+        </button>
       </div>
     </div>
   );
 }
 
-// === CONSTANTS ===
-const cropBtnStyle = {
-  padding: '6px 14px', background: '#1e293b', color: '#e2e8f0',
-  border: '1px solid #475569', borderRadius: 6, fontSize: 14, fontWeight: 700, cursor: 'pointer',
+const editBtnStyle = {
+  width: 24, height: 24, borderRadius: 4,
+  border: '1px solid #374151', background: '#0f172a', color: '#e2e8f0',
+  fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center',
+  justifyContent: 'center', padding: 0, fontFamily: 'inherit',
 };
 
-const ROLE_COLORS = {
-  HERO_FACE: '#dc2626', HERO: '#ea580c', CONTEXT_SCENE: '#2563eb',
-  EVIDENCE: '#ca8a04', EMOTION: '#db2777', RELATIONSHIP: '#7c3aed',
-  FAMILY_SUPPORT: '#059669', SUPPORT: '#475569', REJECT: '#374151',
-};
-
-const labelStyle = { display: 'block', fontSize: 13, fontWeight: 600, color: '#94a3b8', marginTop: 10, marginBottom: 4 };
+const labelStyle = { display: 'block', fontSize: 13, fontWeight: 600, color: '#94a3b8', marginTop: 12, marginBottom: 4 };
 const inputStyle = {
   width: '100%', padding: '10px 12px', background: '#1e293b', color: '#e2e8f0',
-  border: '1px solid #374151', borderRadius: 8, fontSize: 14, outline: 'none', boxSizing: 'border-box',
+  border: '1px solid #374151', borderRadius: 8, fontSize: 14, outline: 'none',
+  boxSizing: 'border-box',
 };
 const badgeStyle = {
-  display: 'inline-block', padding: '3px 8px', background: '#1e293b',
-  borderRadius: 6, fontSize: 11, color: '#94a3b8', border: '1px solid #374151',
-};
-const tagStyle = {
-  display: 'inline-block', padding: '3px 10px', borderRadius: 20,
-  fontSize: 12, fontWeight: 600, color: '#e2e8f0', border: '1px solid',
-  marginBottom: 4,
-};
-const editZoomBtnStyle = {
-  width: 28, height: 28, borderRadius: 6, border: '1px solid #475569',
-  background: '#1e293b', color: '#e2e8f0', fontSize: 16, fontWeight: 700,
-  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-  lineHeight: 1, padding: 0,
+  display: 'inline-block', padding: '4px 10px', background: '#1e293b',
+  borderRadius: 6, fontSize: 12, color: '#94a3b8', border: '1px solid #374151',
 };

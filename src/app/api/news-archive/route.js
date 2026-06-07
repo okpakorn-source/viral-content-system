@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createStore } from '@/lib/persistStore';
 import { callAI } from '@/lib/ai/openai';
+import { MODEL_FAST } from '@/lib/ai/modelConfig';
 import { getSupabase, isSupabaseReady } from '@/lib/supabase';
 
 const STORE = 'news-archive';
@@ -96,7 +97,7 @@ export async function POST(request) {
     let tags = [];
     try {
       const aiResult = await callAI({
-        model: 'gpt-4o-mini',
+        model: MODEL_FAST,
         temperature: 0.1,
         maxTokens: 400,
         prompt: `วิเคราะห์ข่าวนี้แล้วตอบเป็น JSON

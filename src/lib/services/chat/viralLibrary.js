@@ -6,6 +6,7 @@
  */
 import { getSupabase } from '@/lib/supabase';
 import { callAI } from '@/lib/ai/openai';
+import { MODEL_PRIMARY } from '@/lib/ai/modelConfig';
 
 // =============================================
 // Categories — หมวดหมู่ข่าว
@@ -295,7 +296,7 @@ ${content}
 
     const result = await callAI({
       prompt,
-      model: 'gpt-4o',
+      model: MODEL_PRIMARY,
       temperature: 0.3,
       maxTokens: 2000,
     });

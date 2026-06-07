@@ -8,6 +8,7 @@
  */
 
 import { callAI } from '@/lib/ai/openai';
+import { MODEL_FAST } from '@/lib/ai/modelConfig';
 
 /**
  * แก้ content ตาม issues ที่ audit พบ
@@ -106,7 +107,7 @@ export async function safeCorrect(content, issues) {
         const riskyWords = aiRewriteIssues.map(i => `"${i.text}" → ควรเปลี่ยนเป็นคำที่ปลอดภัย (suggestion: "${i.suggestion}")`).join('\n');
         
         const result = await callAI({
-          model: 'gpt-4o-mini',
+          model: MODEL_FAST,
           temperature: 0.1,
           maxTokens: 2000,
           prompt: `อ่านเนื้อหาด้านล่างแล้ว rewrite เฉพาะคำเสี่ยงที่ระบุ ให้ปลอดภัยสำหรับ Facebook
@@ -199,7 +200,7 @@ function extractSentence(content, phrase) {
 async function fixSentenceWithAI(sentence, issue) {
   try {
     const result = await callAI({
-      model: 'gpt-4o-mini',
+      model: MODEL_FAST,
       temperature: 0.1,
       maxTokens: 200,
       prompt: `แก้ประโยคนี้ให้เป็นภาษาคนพูดจริงบน Facebook โดยรักษาความหมายเดิม

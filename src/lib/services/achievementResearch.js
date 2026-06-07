@@ -12,6 +12,7 @@
 
 import { callAI } from '@/lib/ai/openai';
 import { createLogger } from '@/lib/logger';
+import { MODEL_FAST } from '@/lib/ai/modelConfig';
 
 const rlog = createLogger('SMART-RESEARCH');
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
@@ -132,7 +133,7 @@ async function detectEntity(newsTitle, newsBody) {
 
   try {
     const result = await callAI({
-      model: 'gpt-4o-mini',
+      model: MODEL_FAST,
       prompt,
       temperature: 0.1,
       maxTokens: 500,
@@ -252,7 +253,7 @@ ${catalog}
 
   try {
     const result = await callAI({
-      model: 'gpt-4o-mini',
+      model: MODEL_FAST,
       prompt,
       temperature: 0.1,
       maxTokens: 2000,

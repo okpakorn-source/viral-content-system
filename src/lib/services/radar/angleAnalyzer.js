@@ -5,6 +5,7 @@
  */
 
 import { callAI } from '@/lib/ai/openai';
+import { MODEL_FAST } from '@/lib/ai/modelConfig';
 
 // === คำสำคัญสำหรับ rule-based fallback ===
 const ANGLE_KEYWORDS = {
@@ -85,7 +86,7 @@ async function analyzeWithAI(cluster) {
 
     const result = await callAI({
       prompt,
-      model: 'gpt-4o-mini',
+      model: MODEL_FAST,
       temperature: 0.4,
       maxTokens: 2000,
     });

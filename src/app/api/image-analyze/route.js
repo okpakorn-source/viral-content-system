@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { MODEL_VISION } from '@/lib/ai/modelConfig';
 import OpenAI from 'openai';
 import { detectTemplate, TEMPLATES, getZones } from '@/lib/imageTemplates.js';
 import { createLogger } from '@/lib/logger';
@@ -80,7 +81,7 @@ Your job: analyze each uploaded image and assign it to the most appropriate layo
       'length: ' + systemInstruction.length + 'ch | images: ' + images.length
     );
     // ✅ FIX: detail:'high' — GPT-4o เห็นหน้าคนชัดขึ้น, ไม่ตัดไปให้เหลือแค่ 512px
-    rlog.model('gpt-4o (vision)', 'detail: HIGH | max_tokens: 800 | temp: 0.1 | images: ' + Math.min(images.length, 5));
+    rlog.model(`${MODEL_VISION} (vision)`, 'detail: HIGH | max_tokens: 800 | temp: 0.1 | images: ' + Math.min(images.length, 5));
 
     // Build zone priority info for AI
     const zonePriorityInfo = allZones
@@ -132,9 +133,9 @@ RETURN EXACTLY:
       })),
     ];
 
-    rlog.step('gpt4o-vision-call', 'calling GPT-4o (detail:HIGH) with ' + Math.min(images.length, 5) + ' images...');
+    rlog.step('gpt4o-vision-call', `calling ${MODEL_VISION} (detail:HIGH) with ` + Math.min(images.length, 5) + ' images...');
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: MODEL_VISION,
       messages: [{ role: 'user', content: contentParts }],
       temperature: 0.1,
       max_tokens: 800, // ✅ FIX: เพิ่มจาก 600 → 800

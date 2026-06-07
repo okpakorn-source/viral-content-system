@@ -5,6 +5,7 @@
  * Saves result as AI message in chat_messages
  */
 import { NextResponse } from 'next/server';
+import { MODEL_PRIMARY } from '@/lib/ai/modelConfig';
 import { getSupabase } from '@/lib/supabase';
 import { reviewNews, reviewCaption, reviewImage } from '@/lib/services/chat/aiReviewer';
 import { callAI } from '@/lib/ai/openai';
@@ -259,7 +260,7 @@ ${rulesText || '(ยังไม่มีกฎเพิ่มเติม)'}
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   
   const response = await client.chat.completions.create({
-    model: 'gpt-4o',
+    model: MODEL_PRIMARY,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userMsg },

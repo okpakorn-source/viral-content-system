@@ -24,8 +24,8 @@ const YT_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   'Accept-Language': 'en-US,en;q=0.9',
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-  // Cookie เพื่อข้ามหน้า consent ของ EU
-  'Cookie': 'SOCS=CAISHAgCEhJnd3NfMjAyNDA4MjgtMF9SQzIaAmVuIAEaBgiA_cmzBg; CONSENT=PENDING+987',
+  // Cookie เพื่อข้ามหน้า consent ของ EU — ★ อัปเดต 2025-06
+  'Cookie': 'SOCS=CAISNQgDEitib3FfaWRlbnRpdHlmcm9udGVuZHVpc2VydmVyXzIwMjUwNjAxLjA3X3AwGgJlbiADGgYIgPPTvAY; CONSENT=YES+cb.20210622-15-p0.en+FX+634',
 };
 
 /**
@@ -61,23 +61,10 @@ export async function extractYouTubeFrames(videoIds) {
 
 /**
  * ดึงเฟรมจากวิดีโอ YouTube เดียว
- * Strategy 1: HD frames via ytdl-core + ffmpeg (best quality)
- * Strategy 2: Storyboard sprite sheets (medium quality)
- * Strategy 3: Auto-generated frame URLs (fallback)
+ * ลอง storyboard ก่อน → ถ้าไม่ได้ fallback ไป auto-generated frames
  */
 async function extractFramesFromSingleVideo(videoId) {
-  // === Strategy 1: HD via ytdl-core + ffmpeg (720p frames) ===
-  try {
-    const hdFrames = await extractViaYtdlCore(videoId);
-    if (hdFrames.length > 0) {
-      console.log(`${LOG_PREFIX} ✅ HD extraction success: ${hdFrames.length} frames from ${videoId}`);
-      return hdFrames.slice(0, MAX_FRAMES_PER_VIDEO);
-    }
-  } catch (err) {
-    console.log(`${LOG_PREFIX} HD extraction failed for ${videoId}: ${err.message?.slice(0, 80)}`);
-  }
-
-  // === Strategy 2: Storyboard sprite sheets ===
+  // === Strategy 1: Storyboard sprite sheets ===
   try {
     const storyboardFrames = await extractViaStoryboard(videoId);
     if (storyboardFrames.length > 0) {
@@ -87,188 +74,13 @@ async function extractFramesFromSingleVideo(videoId) {
     console.log(`${LOG_PREFIX} Storyboard failed for ${videoId}: ${err.message?.slice(0, 80)}`);
   }
 
-  // === Strategy 3: Auto-generated frame URLs (fallback) ===
+  // === Strategy 2: Auto-generated frame URLs (fallback) ===
   console.log(`${LOG_PREFIX} Falling back to auto-generated frames for ${videoId}`);
   return await extractViaAutoFrames(videoId);
 }
 
 // ==========================================
-// Strategy 1: HD Frame Extraction via ytdl-core + ffmpeg
-// ==========================================
-
-/**
- * ดาวน์โหลด video stream ผ่าน @distube/ytdl-core แล้วใช้ ffmpeg
- * ตัด key frames (scene change detection) ความละเอียดจริง
- * ได้ frames 360p-720p แทน storyboard 160x90
- */
-async function extractViaYtdlCore(videoId) {
-  // Dynamic import — ถ้า package ไม่มีจะ throw error → fallback ไปใช้ storyboard
-  let ytdl;
-  try {
-    ytdl = (await import('@distube/ytdl-core')).default;
-  } catch {
-    console.log(`${LOG_PREFIX} @distube/ytdl-core not installed — skipping HD extraction`);
-    return [];
-  }
-
-  // Check ffmpeg
-  const { execSync, execFile } = await import('child_process');
-  try {
-    execSync('ffmpeg -version', { stdio: 'ignore', timeout: 3000 });
-  } catch {
-    console.log(`${LOG_PREFIX} ffmpeg not available — skipping HD extraction`);
-    return [];
-  }
-
-  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  const fs = await import('fs');
-  const path = await import('path');
-  const os = await import('os');
-
-  // สร้าง temp directory
-  const tmpDir = path.join(os.tmpdir(), `ytframes_${videoId}_${Date.now()}`);
-  fs.mkdirSync(tmpDir, { recursive: true });
-  const videoPath = path.join(tmpDir, 'video.mp4');
-
-  try {
-    console.log(`${LOG_PREFIX} 🎬 HD: Downloading ${videoId} (360p max, 45s limit)...`);
-
-    // Step 1: Download video — เลือก format เล็กที่สุดที่ >= 360p
-    const info = await ytdl.getInfo(videoUrl, { requestOptions: { headers: YT_HEADERS } });
-    const formats = ytdl.chooseFormat(info.formats, {
-      quality: 'lowest',
-      filter: f => f.hasVideo && !f.hasAudio && f.height >= 360 && f.height <= 720,
-    });
-
-    // ถ้าไม่เจอ video-only → ใช้ format รวม audio+video
-    let chosenFormat = formats;
-    if (!chosenFormat) {
-      const combined = info.formats
-        .filter(f => f.hasVideo && f.height >= 360 && f.height <= 720)
-        .sort((a, b) => a.height - b.height);
-      chosenFormat = combined[0];
-    }
-    if (!chosenFormat) {
-      console.log(`${LOG_PREFIX} HD: No suitable format found for ${videoId}`);
-      return [];
-    }
-
-    console.log(`${LOG_PREFIX} HD: Using format ${chosenFormat.qualityLabel || chosenFormat.height + 'p'} (${chosenFormat.container})`);
-
-    // Download เฉพาะ 45 วินาทีแรก (ประหยัด bandwidth)
-    await new Promise((resolve, reject) => {
-      const stream = ytdl.downloadFromInfo(info, { format: chosenFormat });
-      const writeStream = fs.createWriteStream(videoPath);
-      
-      let bytesWritten = 0;
-      const MAX_BYTES = 15 * 1024 * 1024; // 15MB limit
-      const timeout = setTimeout(() => {
-        stream.destroy();
-        writeStream.end();
-        resolve(); // ไม่ reject — ใช้ video ที่โหลดได้
-      }, 20000); // 20s timeout
-
-      stream.on('data', (chunk) => {
-        bytesWritten += chunk.length;
-        if (bytesWritten > MAX_BYTES) {
-          stream.destroy();
-          writeStream.end();
-          clearTimeout(timeout);
-          resolve();
-        }
-      });
-
-      stream.pipe(writeStream);
-      writeStream.on('finish', () => { clearTimeout(timeout); resolve(); });
-      writeStream.on('error', (err) => { clearTimeout(timeout); reject(err); });
-      stream.on('error', (err) => { clearTimeout(timeout); reject(err); });
-    });
-
-    // Check file exists
-    if (!fs.existsSync(videoPath) || fs.statSync(videoPath).size < 10000) {
-      console.log(`${LOG_PREFIX} HD: Download too small or failed`);
-      return [];
-    }
-
-    console.log(`${LOG_PREFIX} HD: Downloaded ${(fs.statSync(videoPath).size / 1024 / 1024).toFixed(1)}MB`);
-
-    // Step 2: Extract frames with ffmpeg scene change detection
-    const framesDir = path.join(tmpDir, 'frames');
-    fs.mkdirSync(framesDir, { recursive: true });
-
-    // -t 45 = first 45 seconds only
-    // -vf "select='gt(scene,0.25)'" = scene change detection (25% threshold)
-    // -fps_mode vfr = variable frame rate output
-    // -q:v 2 = high quality JPEG
-    await new Promise((resolve, reject) => {
-      const args = [
-        '-i', videoPath,
-        '-t', '45',
-        '-vf', "select='gt(scene\\,0.25)',scale='min(960\\,iw):-2'",
-        '-fps_mode', 'vfr',
-        '-q:v', '2',
-        '-frames:v', '15',
-        path.join(framesDir, 'frame_%04d.jpg'),
-      ];
-
-      execFile('ffmpeg', args, { timeout: 30000 }, (err) => {
-        if (err && !fs.readdirSync(framesDir).length) reject(err);
-        else resolve();
-      });
-    });
-
-    // Step 3: Read extracted frames
-    const frameFiles = fs.readdirSync(framesDir)
-      .filter(f => f.endsWith('.jpg'))
-      .sort();
-
-    console.log(`${LOG_PREFIX} HD: ffmpeg extracted ${frameFiles.length} scene-change frames`);
-
-    const frames = [];
-    for (const filename of frameFiles) {
-      try {
-        const framePath = path.join(framesDir, filename);
-        let buffer = fs.readFileSync(framePath);
-        
-        // Validate
-        const meta = await sharp(buffer).metadata();
-        if (!meta.width || meta.width < 200) continue;
-
-        // Sharpen slightly
-        buffer = await sharp(buffer)
-          .sharpen({ sigma: 0.8 })
-          .jpeg({ quality: 90 })
-          .toBuffer();
-
-        const idx = parseInt(filename.replace('frame_', '').replace('.jpg', '')) || 0;
-        frames.push({
-          buffer,
-          source: 'youtube-hd',
-          videoId,
-          timestamp: `scene-${idx}`,
-        });
-      } catch (e) {
-        // skip bad frames
-      }
-    }
-
-    console.log(`${LOG_PREFIX} HD: ✅ ${frames.length} valid HD frames from ${videoId}`);
-    return frames;
-
-  } catch (err) {
-    console.log(`${LOG_PREFIX} HD extraction error: ${err.message?.slice(0, 100)}`);
-    return [];
-  } finally {
-    // Cleanup temp files
-    try {
-      const fs2 = await import('fs');
-      fs2.rmSync(tmpDir, { recursive: true, force: true });
-    } catch { /* ignore cleanup errors */ }
-  }
-}
-
-// ==========================================
-// Strategy 2: Storyboard Sprite Sheets
+// Strategy 1: Storyboard Sprite Sheets
 // ==========================================
 
 /**

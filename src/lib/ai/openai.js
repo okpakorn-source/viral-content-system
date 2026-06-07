@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { logApiUsage } from './usageLogger';
 import { sanitizeOutput } from './safetyFilter';
+import { MODEL_PRIMARY } from './modelConfig.js';
 
 let openaiClient = null;
 
@@ -20,7 +21,7 @@ export function getOpenAIClient() {
  * เรียก AI — Single prompt system
  * callAI({ prompt: "..." }) — prompt เดียวครบ
  */
-export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, model = 'gpt-4o', temperature = 0.7, maxTokens = 4000 }) {
+export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, model = MODEL_PRIMARY, temperature = 0.7, maxTokens = 4000 }) {
   const client = getOpenAIClient();
 
   if (!client) {

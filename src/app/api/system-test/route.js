@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { MODEL_FAST } from '@/lib/ai/modelConfig';
 
 /**
  * === 🔍 System Health Check & Auto Test ===
@@ -55,7 +56,7 @@ export async function GET(request) {
     const { callAI } = await import('@/lib/ai/openai');
     const result = await callAI({
       prompt: 'ตอบ JSON: {"status":"ok","test":true}',
-      model: 'gpt-4o-mini',
+      model: MODEL_FAST,
       temperature: 0,
       maxTokens: 50,
     });

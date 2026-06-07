@@ -13,6 +13,7 @@
 import { callAI } from './openai.js';
 import { callClaude, isClaudeAvailable } from './claudeClient.js';
 import { callGemini, isGeminiAvailable } from './geminiClient.js';
+import { MODEL_PRIMARY } from './modelConfig.js';
 
 /**
  * เลือก model + เรียก AI อัตโนมัติ
@@ -105,7 +106,7 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
       return callGemini({ prompt, temperature, maxTokens });
     case 'gpt4o':
     default:
-      return callAI({ prompt, temperature, maxTokens, model: 'gpt-4o' });
+      return callAI({ prompt, temperature, maxTokens, model: MODEL_PRIMARY });
   }
 }
 

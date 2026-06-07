@@ -1,5 +1,6 @@
 import { callAI } from '@/lib/ai/openai';
 import { createLogger } from '@/lib/logger';
+import { MODEL_VISION } from '@/lib/ai/modelConfig';
 
 const hlog = createLogger('IMAGE-HUNTER');
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
@@ -26,7 +27,7 @@ ${mode === 'youtube' ? '- ข้อกำหนด: ห้ามใส่ชื�
     const aiResponse = await callAI({
       systemPrompt: systemPrompt,
       userPrompt: userPrompt,
-      model: 'gpt-4o',
+      model: MODEL_VISION,
       temperature: 0.7,
     });
     

@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import sharp from 'sharp';
+import { MODEL_VISION } from '@/lib/ai/modelConfig';
 
 // ==========================================
 // Helper: Fetch with timeout
@@ -126,7 +127,7 @@ const BLOCKED_DOMAINS = [
   'twitter.com', 'x.com', 'twimg.com'
 ];
 
-const BLOCKED_URL_KEYWORDS = ['logo', 'icon', 'banner', 'watermark', 'avatar', 'sprite', 'pixel', 'tracking', 'crawler', 'widget', 'poster', 'preview'];
+const BLOCKED_URL_KEYWORDS = ['logo', 'icon', 'banner', 'watermark', 'avatar', 'sprite', 'pixel', 'tracking', 'crawler', 'widget'];
 
 function isCleanImageUrl(url) {
   if (!url || !url.startsWith('http')) return false;
@@ -158,54 +159,23 @@ async function agentGoogleCleanImages(identity) {
   // ดึง search queries จาก AI — รวม person-only + story-specific
   const sq = identity?.searchQueries || {};
   const queries = [
-    // === Person-only queries (ค้นชื่อตรงๆ ไม่ผูกข่าว — หาหน้าชัดจากแหล่งไหนก็ได้) ===
+    // === ภาพบุคคลหลัก (หน้าชัด portrait) ===
     { q: sq.person_portrait || identity?.mainCharacter || '', label: 'person portrait', num: 10 },
-    { q: sq.person_interview || (identity?.mainCharacter ? `${identity.mainCharacter} สัมภาษณ์` : ''), label: 'person interview', num: 8 },
-    { q: sq.person_drama || (identity?.mainCharacter ? `${identity.mainCharacter} ละคร` : ''), label: 'person drama', num: 8 },
-    { q: sq.person_emotion || '', label: 'person emotion', num: 8 },
+    { q: sq.person_closeup || (identity?.mainCharacter ? `${identity.mainCharacter} ภาพถ่ายหน้าชัด` : ''), label: 'person closeup', num: 8 },
     { q: sq.secondary_person || identity?.secondaryCharacter || '', label: 'secondary person', num: 6 },
-    // === Family/Support queries (ค้นหาพ่อแม่ ครอบครัว คนสนับสนุน) ===
-    { q: sq.family_support || '', label: 'family support', num: 6 },
-    { q: sq.parent_child || '', label: 'parent child', num: 6 },
-    // === Story-specific queries (ผูกกับเนื้อข่าวโดยตรง) ===
-    { q: sq.person_closeup || identity?.mainCharacter || '', label: 'person closeup', num: 8 },
+    // === ★★★ Story-specific queries (ผูกกับเนื้อข่าวโดยตรง — สำคัญที่สุด!) ===
     { q: sq.person_context || identity?.searchGoogle || '', label: 'person context', num: 8 },
-    { q: sq.event_scene || '', label: 'event scene', num: 6 },
+    { q: sq.event_scene || '', label: 'event scene', num: 8 },
     { q: sq.emotion_moment || '', label: 'emotion moment', num: 6 },
-    { q: sq.location_photo || identity?.location || '', label: 'location', num: 5 },
+    { q: sq.location_photo || identity?.location || '', label: 'location', num: 6 },
     { q: sq.related_people || '', label: 'related people', num: 5 },
+    { q: sq.person_emotion || '', label: 'person emotion', num: 8 },
+    // === ★★★ Story-driven queries ใหม่ (เล่าเรื่องผ่านภาพ) ===
+    { q: sq.person_past || '', label: 'person past/timeline', num: 6 },
+    { q: sq.key_relationship || '', label: 'key relationship', num: 8 },
+    { q: sq.key_activity || '', label: 'key activity', num: 8 },
+    { q: sq.story_contrast || '', label: 'story contrast', num: 6 },
   ].filter(q => q.q && q.q.trim());
-
-  // === ค้นหาตัวละครเสริมแต่ละคน (จาก characters[] ที่ AI วิเคราะห์ได้) ===
-  const charMain = identity?.mainCharacter || '';
-  for (const charName of (identity?.characters || []).slice(0, 4)) {
-    if (!charName || charName === charMain || charName === identity?.secondaryCharacter) continue;
-    queries.push({ q: charName, label: `character: ${charName}`, num: 5 });
-  }
-
-  // === ค้นหาตาม characterRoles (พ่อแม่ โค้ช ฯลฯ) ===
-  for (const cr of (identity?.characterRoles || [])) {
-    if (!cr.name || cr.role === 'main') continue;
-    if (queries.some(q => q.q === cr.name)) continue;
-    queries.push({ q: `${cr.name} ${cr.relation || ''}`.trim(), label: `role: ${cr.role} (${cr.name})`, num: 5 });
-  }
-
-  // === ค้นหาตาม keyScenes (ฉากที่ AI วิเคราะห์ว่าต้องมี เช่น "สมัยสาวๆ", "ตอนได้รางวัล") ===
-  const mainCharForScenes = identity?.mainCharacter || '';
-  for (const scene of (identity?.keyScenes || []).slice(0, 4)) {
-    if (!scene) continue;
-    const sceneQuery = mainCharForScenes ? `${mainCharForScenes} ${scene}` : scene;
-    if (queries.some(q => q.q === sceneQuery)) continue;
-    queries.push({ q: sceneQuery, label: `scene: ${scene}`, num: 6 });
-  }
-
-  // === ค้นหาจาก keywords ที่ AI สกัดได้ ===
-  for (const kw of (identity?.keywords || []).slice(0, 3)) {
-    if (!kw || kw.length < 3) continue;
-    const kwQuery = mainCharForScenes ? `${mainCharForScenes} ${kw}` : kw;
-    if (queries.some(q => q.q === kwQuery)) continue;
-    queries.push({ q: kwQuery, label: `keyword: ${kw}`, num: 5 });
-  }
 
   // ถ้าไม่มี searchQueries เลย → fallback queries เดิม
   if (queries.length === 0) {
@@ -220,7 +190,7 @@ async function agentGoogleCleanImages(identity) {
         method: 'POST',
         headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          q: `${queryObj.q} ${blockSitesParam} -ปกข่าว -ลายน้ำ -screenshot -cover -watermark`,
+          q: `${queryObj.q} ${blockSitesParam}`,
           gl: 'th', hl: 'th', num: queryObj.num,
           imgSize: 'large', imgType: 'photo'
         })
@@ -236,24 +206,11 @@ async function agentGoogleCleanImages(identity) {
     } catch (e) { console.log(`[Agent1: Google] (${queryObj.label}) error: ${e.message}`); }
   }
 
-  // === Pexels Supplement (ฟรี!) ===
-  const pexelsKey = process.env.PEXELS_API_KEY;
-  if (pexelsKey && identity?.searchPexels) {
-    try {
-      console.log(`[Agent1: Pexels] Search: "${identity.searchPexels}" (5 results)`);
-      const res = await fetchWithTimeout(`https://api.pexels.com/v1/search?query=${encodeURIComponent(identity.searchPexels)}&per_page=5&orientation=portrait`, {
-        headers: { 'Authorization': pexelsKey }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.photos) {
-          const urls = data.photos.map(p => p.src?.large2x || p.src?.large).filter(Boolean);
-          console.log(`[Agent1: Pexels] Got ${urls.length} stock images`);
-          allImages.push(...urls);
-        }
-      }
-    } catch (e) { console.log('[Agent1: Pexels] error:', e.message); }
-  }
+  // === Pexels DISABLED ===
+  // ★ ปิด Pexels! ภาพ stock ไม่เกี่ยวกับข่าวเฉพาะเจาะจง
+  // เช่น search "thai girl child" ได้ wine review, cartoon โรงเรียน
+  // ทำให้ปกมั่ว — ใช้แค่ Google + YouTube เท่านั้น
+  // const pexelsKey = process.env.PEXELS_API_KEY;
 
   const unique = [...new Set(allImages)].slice(0, 25);
   console.log(`[Agent1: Google] ✅ Total: ${unique.length} unique clean images`);
@@ -261,76 +218,165 @@ async function agentGoogleCleanImages(identity) {
 }
 
 // ==========================================
-// Agent 2: YouTube Frame Capture (YouTube Data API v3)
-// Search → 5 videos → extract REAL frames from storyboard sprites
-// ไม่ดึง thumbnail (maxresdefault etc.) เด็ดขาด!
+// Agent 2: YouTube Frame Capture (3-Tier Search)
+// Tier 1: YouTube API search (max 1 query — save quota)
+// Tier 2: Serper site:youtube.com/watch (fallback — no quota!)
+// Tier 3: extractYouTubeFrames (storyboard — no API needed!)
 // ==========================================
 async function agentYouTubeFrames(identity) {
-  const apiKey = process.env.YOUTUBE_API_KEY;
-  if (!apiKey) {
-    console.log('[Agent2: YouTube] ❌ No YOUTUBE_API_KEY, skipping');
-    return [];
-  }
-
-  // ★ ค้นหลาย query: ไม่แค่ข่าวเดียว แต่ค้นชื่อ+สัมภาษณ์+ผลงาน+keyScenes ด้วย
   const mainChar = identity?.mainCharacter || '';
-  const youtubeQueries = [
-    identity?.searchYouTube || identity?.searchGoogle || '',
-    mainChar ? `${mainChar} สัมภาษณ์` : '',
-    mainChar ? `${mainChar} ละคร ซีรีส์ ฉาก` : '',
-    mainChar ? `${mainChar}` : '',
-    // ★ เพิ่ม secondary character queries
-    identity?.secondaryCharacter ? `${identity.secondaryCharacter} สัมภาษณ์` : '',
-    // ★ เพิ่ม characterRoles queries
-    ...(identity?.characterRoles || []).slice(0, 2)
-      .filter(cr => cr.name && cr.name !== mainChar)
-      .map(cr => cr.name),
-    // ★ เพิ่ม keyScenes: หาคลิปตามฉากที่ AI วิเคราะห์ เช่น "สมัยสาวๆ", "ได้รางวัล"
-    ...(identity?.keyScenes || []).slice(0, 3).map(scene => 
-      mainChar ? `${mainChar} ${scene}` : scene
-    ),
-    // ★ เพิ่ม searchQueries เฉพาะที่เกี่ยวกับ drama/emotion
-    identity?.searchQueries?.person_drama || '',
-    identity?.searchQueries?.emotion_moment || '',
-  ].filter(q => q.trim());
+  const searchQuery = identity?.searchYouTube || identity?.searchGoogle || '';
   
-  if (youtubeQueries.length === 0) {
+  if (!searchQuery && !mainChar) {
     console.log('[Agent2: YouTube] ❌ No search query available');
     return [];
   }
 
-  console.log(`[Agent2: YouTube] 🎬 Searching ${youtubeQueries.length} queries → extract real frames`);
+  // ★ สร้าง query จากเนื้อข่าว — ห้ามค้นชื่อคนกว้างๆ!
+  const sq = identity?.searchQueries || {};
+  const sd = identity?.specific_details || {};
+  const youtubeQueries = [
+    searchQuery,
+    // ★ ค้นจากบริบทข่าว ไม่ใช่ "สัมภาษณ์" หรือ "ละคร"
+    sq.person_context || (mainChar && identity?.story ? `${mainChar} ${identity.story.substring(0, 30)}` : ''),
+    sq.event_scene || (sd.place_names?.[0] ? `${mainChar} ${sd.place_names[0]}` : ''),
+  ].filter(q => q.trim());
 
-  // ★ ลดเกณฑ์: 500x350 — landscape images (686x386) ต้องผ่าน!
+  console.log(`[Agent2: YouTube] 🎬 3-Tier search with ${youtubeQueries.length} queries`);
+
   const MIN_WIDTH = 500;
   const MIN_HEIGHT = 350;
 
   try {
-    const { searchAndExtractFrames } = await import('@/lib/services/youtubeFrameExtractor');
+    // === Tier 1: YouTube API (max 1 query เพื่อประหยัด quota) ===
+    let videoIds = [];
+    const apiKey = process.env.YOUTUBE_API_KEY;
     
-    // ★ ค้นหลาย query แบบ parallel
-    let allFrames = [];
-    for (const query of youtubeQueries.slice(0, 5)) { // max 5 queries (เพิ่มจาก 3 เพื่อความหลากหลาย)
+    if (apiKey) {
       try {
-        console.log(`[Agent2: YouTube] 🔍 Query: "${query}"`);
-        const frames = await searchAndExtractFrames(query, 3);
-        allFrames.push(...frames);
-      } catch {}
+        const firstQuery = youtubeQueries[0];
+        console.log(`[Agent2: YouTube] 📡 Tier 1: YouTube API → "${firstQuery.substring(0, 50)}"`);
+        
+        const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(firstQuery)}&type=video&key=${apiKey}&maxResults=5&relevanceLanguage=th&regionCode=TH`;
+        const response = await fetchWithTimeout(searchUrl, { timeout: 8000 });
+        
+        if (response.ok) {
+          const data = await response.json();
+          videoIds = (data.items || [])
+            .map(item => item.id?.videoId)
+            .filter(Boolean);
+          console.log(`[Agent2: YouTube] ✅ Tier 1: Found ${videoIds.length} videos`);
+        } else if (response.status === 429 || response.status === 403) {
+          console.log(`[Agent2: YouTube] ⚠️ Tier 1: HTTP ${response.status} (quota exceeded) → switching to Tier 2`);
+        } else {
+          console.log(`[Agent2: YouTube] ⚠️ Tier 1: HTTP ${response.status} → switching to Tier 2`);
+        }
+      } catch (e) {
+        console.log(`[Agent2: YouTube] ⚠️ Tier 1 error: ${e.message?.substring(0, 60)} → Tier 2`);
+      }
+    } else {
+      console.log('[Agent2: YouTube] ⚠️ No YOUTUBE_API_KEY → skipping to Tier 2');
     }
-    
-    const frames = allFrames;
 
-    // กรองเฉพาะเฟรมที่ resolution ดีพอ
+    // === Tier 2: Serper site:youtube.com/watch (ไม่กิน YouTube quota!) ===
+    if (videoIds.length === 0) {
+      const serperKey = process.env.SERPER_API_KEY;
+      if (serperKey) {
+        console.log('[Agent2: YouTube] 🔄 Tier 2: Serper site:youtube.com fallback');
+        
+        // ค้นหลาย query ผ่าน Serper (max 2 queries)
+        for (const query of youtubeQueries.slice(0, 2)) {
+          try {
+            const serperQuery = `site:youtube.com/watch "${query}"`;
+            console.log(`[Agent2: YouTube] 🔍 Serper: "${serperQuery.substring(0, 60)}"`);
+            
+            const serperRes = await fetchWithTimeout('https://google.serper.dev/search', {
+              method: 'POST',
+              headers: {
+                'X-API-KEY': serperKey,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                q: serperQuery,
+                num: 5,
+                gl: 'th',
+                hl: 'th'
+              }),
+              timeout: 8000
+            });
+
+            if (serperRes.ok) {
+              const serperData = await serperRes.json();
+              const results = serperData.organic || [];
+              
+              // Parse video_id จาก YouTube URLs
+              for (const result of results) {
+                const url = result.link || '';
+                const vidMatch = url.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+                if (vidMatch && !videoIds.includes(vidMatch[1])) {
+                  videoIds.push(vidMatch[1]);
+                }
+              }
+              console.log(`[Agent2: YouTube] ✅ Serper found ${results.length} results → ${videoIds.length} unique video IDs`);
+            }
+          } catch (e) {
+            console.log(`[Agent2: YouTube] Serper error: ${e.message?.substring(0, 60)}`);
+          }
+        }
+        
+        if (videoIds.length > 0) {
+          console.log(`[Agent2: YouTube] ✅ Tier 2: Got ${videoIds.length} video IDs via Serper (NO YouTube quota used!)`);
+        }
+      } else {
+        console.log('[Agent2: YouTube] ⚠️ No SERPER_API_KEY → cannot fallback');
+      }
+    }
+
+    // === ถ้ายังไม่มี video_id → return เปล่า ===
+    if (videoIds.length === 0) {
+      console.log('[Agent2: YouTube] ❌ No video IDs found from any tier');
+      return [];
+    }
+
+    // === Tier 3: Extract frames จาก storyboard (ไม่ใช้ API เลย!) ===
+    console.log(`[Agent2: YouTube] 🎞️ Tier 3: Extracting frames from ${videoIds.length} videos (storyboard — no API)...`);
+    
+    const { extractYouTubeFrames } = await import('@/lib/services/youtubeFrameExtractor');
+    const frames = await extractYouTubeFrames(videoIds.slice(0, 5));
+
+    // กรอง + upscale เฟรม (storyboard frames มักเล็ก 160x90 หรือ 320x180)
     const qualityFrames = [];
     for (const frame of frames) {
       if (!frame.buffer) continue;
       try {
         const meta = await sharp(frame.buffer).metadata();
-        if ((meta.width || 0) >= MIN_WIDTH && (meta.height || 0) >= MIN_HEIGHT) {
-          qualityFrames.push(frame);
-        } else {
-          console.log(`[Agent2: YouTube] ❌ Rejected frame ${meta.width}x${meta.height} (min ${MIN_WIDTH}x${MIN_HEIGHT})`);
+        const w = meta.width || 0;
+        const h = meta.height || 0;
+        
+        // ★ Reject เฉพาะ tiny frames (< 160px) — เล็กเกินจะ upscale
+        if (w < 160 || h < 90) {
+          console.log(`[Agent2: YouTube] ❌ Rejected tiny frame ${w}x${h}`);
+          continue;
         }
+        
+        // ★ Upscale frames 160-500px → ~960px (lanczos3 + sharpen)
+        if (w < MIN_WIDTH) {
+          const scale = Math.min(3, Math.ceil(960 / w));
+          const targetW = w * scale;
+          const targetH = h * scale;
+          frame.buffer = await sharp(frame.buffer)
+            .resize(targetW, targetH, { 
+              fit: 'inside', 
+              kernel: 'lanczos3',
+              withoutEnlargement: false 
+            })
+            .sharpen({ sigma: 1.2 })
+            .jpeg({ quality: 92 })
+            .toBuffer();
+          console.log(`[Agent2: YouTube] ⬆️ Upscaled frame ${w}x${h} → ${targetW}x${targetH}`);
+        }
+        
+        qualityFrames.push(frame);
       } catch {
         qualityFrames.push(frame); // ถ้าเช็ค meta ไม่ได้ ให้ผ่านไป
       }
@@ -339,25 +385,15 @@ async function agentYouTubeFrames(identity) {
     console.log(`[Agent2: YouTube] Quality filter: ${qualityFrames.length}/${frames.length} frames passed`);
 
     // ถ้าไม่มีเฟรมคุณภาพ → ใช้ maxresdefault (1280x720) แทน
-    if (qualityFrames.length === 0) {
+    if (qualityFrames.length === 0 && videoIds.length > 0) {
       console.log('[Agent2: YouTube] ⚠️ No quality frames, using maxresdefault thumbnails');
-      const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(youtubeQueries[0] || '')}&type=video&key=${apiKey}&maxResults=5&relevanceLanguage=th&regionCode=TH`;
-      const response = await fetchWithTimeout(searchUrl, { timeout: 8000 });
-      
-      if (response.ok) {
-        const data = await response.json();
-        const thumbUrls = [];
-        for (const item of (data.items || [])) {
-          const videoId = item.id?.videoId;
-          if (!videoId) continue;
-          // maxresdefault = 1280x720 (สูงสุด), fallback hqdefault = 480x360
-          thumbUrls.push(`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`);
-          thumbUrls.push(`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`);
-        }
-        console.log(`[Agent2: YouTube] ✅ Fallback: ${thumbUrls.length} thumbnail URLs from ${data.items?.length || 0} videos`);
-        return thumbUrls;
+      const thumbUrls = [];
+      for (const videoId of videoIds.slice(0, 5)) {
+        thumbUrls.push(`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`);
+        thumbUrls.push(`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`);
       }
-      return [];
+      console.log(`[Agent2: YouTube] ✅ Fallback: ${thumbUrls.length} thumbnail URLs`);
+      return thumbUrls;
     }
 
     // แปลง frame buffers เป็น data URLs
@@ -396,27 +432,28 @@ async function agentContextImages(identity) {
 
   // สร้าง queries จาก AI-generated searchQueries (5 มุม)
   const queries = [];
+  const blockTerms = '-ลายน้ำ -watermark -ปกข่าว -ปกคลิป';
 
   // Query 1: บุคคลจริง (ไม่ใช่ข่าว ไม่ใช่ปก)
   if (sq.person_closeup || mainChar) {
     queries.push({
-      q: `"${sq.person_closeup || mainChar}" ภาพจริง -ปก -ข่าว -cover -thumbnail -screenshot`,
+      q: `"${sq.person_closeup || mainChar}" ภาพจริง -ปก -ข่าว -cover -thumbnail -screenshot ${blockTerms}`,
       label: 'person real photo',
     });
   }
 
-  // Query 2: ★ ผลงาน/ละคร/ซีรีส์ (หาภาพจากผลงานอื่น ไม่ใช่ข่าวนี้)
-  if (sq.person_drama || mainChar) {
+  // Query 2: ★ บริบทข่าว (ค้นบุคคล+เหตุการณ์เฉพาะของข่าวนี้)
+  if (sq.person_context || (mainChar && identity?.story)) {
     queries.push({
-      q: `${sq.person_drama || `${mainChar} ละคร ซีรีส์`} -ปก -cover -thumbnail`,
-      label: 'person drama/work',
+      q: `${sq.person_context || `${mainChar} ${identity?.story?.substring(0, 30) || ''}`} -ปก -cover -thumbnail ${blockTerms}`,
+      label: 'person in news context',
     });
   }
 
   // Query 3: ★ อารมณ์ตามโทนข่าว (เศร้า ยิ้ม ร้องไห้)
   if (sq.person_emotion || mainChar) {
     queries.push({
-      q: `${sq.person_emotion || `${mainChar}`} -ปก -cover -thumbnail`,
+      q: `${sq.person_emotion || `${mainChar}`} -ปก -cover -thumbnail ${blockTerms}`,
       label: 'person emotion',
     });
   }
@@ -424,7 +461,7 @@ async function agentContextImages(identity) {
   // Query 4: เหตุการณ์/บริบท
   if (sq.event_scene || identity?.searchTikTok) {
     queries.push({
-      q: `${sq.event_scene || identity.searchTikTok} ภาพเหตุการณ์ -ปกข่าว -designed -collage`,
+      q: `${sq.event_scene || identity.searchTikTok} ภาพเหตุการณ์ -designed -collage ${blockTerms}`,
       label: 'event context',
     });
   }
@@ -432,7 +469,7 @@ async function agentContextImages(identity) {
   // Query 5: อารมณ์/ซีน
   if (sq.emotion_moment || (scenes.length > 0 && mainChar)) {
     queries.push({
-      q: `${sq.emotion_moment || `${mainChar} ${scenes[0]}`} -thumbnail -cover -ปก`,
+      q: `${sq.emotion_moment || `${mainChar} ${scenes[0]}`} -thumbnail -cover -ปก ${blockTerms}`,
       label: 'emotion moment',
     });
   }
@@ -440,7 +477,7 @@ async function agentContextImages(identity) {
   // Query 6: สถานที่
   if (sq.location_photo || identity?.location) {
     queries.push({
-      q: `${sq.location_photo || identity.location} ภาพ -ปก -logo -banner`,
+      q: `${sq.location_photo || identity.location} ภาพ -ปก -logo -banner ${blockTerms}`,
       label: 'location',
     });
   }
@@ -448,15 +485,45 @@ async function agentContextImages(identity) {
   // Query 7: คนอื่นที่เกี่ยวข้อง
   if (sq.related_people) {
     queries.push({
-      q: `${sq.related_people} ภาพ -ปก -cover`,
+      q: `${sq.related_people} ภาพ -ปก -cover ${blockTerms}`,
       label: 'related people',
     });
+  }
+
+  // ★ Fix 8: queries จาก specific_details (ชื่อสถานที่/หลักฐานเฉพาะ)
+  if (identity?.specific_details?.place_names) {
+    for (const place of identity.specific_details.place_names.slice(0, 3)) {
+      if (place && place.length > 3) {
+        queries.push({ q: `${place} ภาพ -ปก -cover ${blockTerms}`, label: 'specific place' });
+      }
+    }
+  }
+  if (identity?.specific_details?.evidence_items) {
+    for (const item of identity.specific_details.evidence_items.slice(0, 2)) {
+      if (item && item.length > 3) {
+        queries.push({ q: `${item} ${mainChar || ''} ${blockTerms}`, label: 'evidence' });
+      }
+    }
+  }
+  
+  // ★★★ Story-driven queries ใหม่ (เล่าเรื่องผ่านภาพ)
+  if (sq.person_past) {
+    queries.push({ q: `${sq.person_past} -ปก -cover ${blockTerms}`, label: 'person past' });
+  }
+  if (sq.key_relationship) {
+    queries.push({ q: `${sq.key_relationship} -ปก -cover ${blockTerms}`, label: 'key relationship' });
+  }
+  if (sq.key_activity) {
+    queries.push({ q: `${sq.key_activity} -ปก -cover ${blockTerms}`, label: 'key activity' });
+  }
+  if (sq.story_contrast) {
+    queries.push({ q: `${sq.story_contrast} -ปก -cover ${blockTerms}`, label: 'story contrast' });
   }
 
   // fallback ถ้าไม่มี query
   if (queries.length === 0 && identity?.searchGoogle) {
     queries.push({
-      q: `${identity.searchGoogle} ภาพจริง -ปก -cover`,
+      q: `${identity.searchGoogle} ภาพจริง -ปก -cover ${blockTerms}`,
       label: 'fallback',
     });
   }
@@ -501,57 +568,6 @@ async function agentContextImages(identity) {
 }
 
 // ==========================================
-// Agent 4: TikTok Frame Search
-// ค้น TikTok → extract thumbnails/frames → data URIs
-// ==========================================
-async function agentTikTokFrames(identity) {
-  console.log('[Agent4: TikTok] Starting TikTok frame search...');
-  
-  const mainChar = identity?.mainCharacter || '';
-  if (!mainChar) {
-    console.log('[Agent4: TikTok] No main character — skipping');
-    return [];
-  }
-
-  try {
-    const { searchAndExtractTikTokFrames } = await import('@/lib/services/tiktokFrameExtractor');
-    
-    // ค้น TikTok ด้วยชื่อตัวละครหลัก
-    const queries = [
-      mainChar,
-      identity?.secondaryCharacter ? `${mainChar} ${identity.secondaryCharacter}` : '',
-    ].filter(q => q.trim());
-
-    let allFrames = [];
-    for (const query of queries.slice(0, 2)) {
-      try {
-        console.log(`[Agent4: TikTok] 🔍 Query: "${query}"`);
-        const frames = await searchAndExtractTikTokFrames(query);
-        allFrames.push(...frames);
-      } catch (e) {
-        console.log(`[Agent4: TikTok] Query "${query}" error: ${e.message?.slice(0, 60)}`);
-      }
-    }
-
-    // Convert buffers to data URIs (เหมือน YouTube agent)
-    const dataUris = [];
-    for (const frame of allFrames) {
-      if (frame.buffer) {
-        const base64 = frame.buffer.toString('base64');
-        dataUris.push(`data:image/jpeg;base64,${base64}`);
-      }
-    }
-
-    console.log(`[Agent4: TikTok] ✅ Total: ${dataUris.length} TikTok frames`);
-    return dataUris;
-
-  } catch (err) {
-    console.log(`[Agent4: TikTok] Error: ${err.message?.slice(0, 80)}`);
-    return [];
-  }
-}
-
-// ==========================================
 // AI Judge: Strict image selection with Gemini Vision
 // Pre-filters by resolution & blur, then assigns cover roles:
 // HERO_FACE, CONTEXT_SCENE, EVIDENCE, EMOTION, RELATIONSHIP
@@ -576,9 +592,9 @@ async function judgeImages(candidates, newsTitle, identity) {
     const downloaded = downloadResults[i].value;
     const meta = downloaded.meta || {};
 
-    // ★ เช็ค resolution ขั้นต่ำ 500x350 (ลดเกณฑ์ — landscape ต้องผ่าน)
-    if (meta.width && meta.height && (meta.width < 500 || meta.height < 350)) {
-      console.log(`[Judge] 🚫 Rejected (low res ${meta.width}x${meta.height}, need 500x350+): ${candidates[i].substring(0, 70)}`);
+    // ★ เช็ค resolution ขั้นต่ำ 350x250 (ลดเกณฑ์ — ภาพจาก blog/news ไทยมักเล็ก)
+    if (meta.width && meta.height && (meta.width < 350 || meta.height < 250)) {
+      console.log(`[Judge] 🚫 Rejected (low res ${meta.width}x${meta.height}, need 350x250+): ${candidates[i].substring(0, 70)}`);
       rejectedResolution++;
       continue;
     }
@@ -604,128 +620,170 @@ async function judgeImages(candidates, newsTitle, identity) {
 
   console.log(`[Judge] 📤 Sending ${imageParts.length} valid images to Gemini Vision...`);
 
-  try {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  // ★ ย้ายมาไว้นอก try เพื่อให้ catch block เข้าถึง prompt ได้ (แก้ "prompt is not defined")
+  const mainChar = identity?.mainCharacter || 'ตัวละครหลักในข่าว';
+  const storyContext = identity?.story || newsTitle;
+  const emotion = identity?.emotion || 'neutral';
+  const coverEmotion = identity?.coverEmotion || 'drama';
 
-    const mainChar = identity?.mainCharacter || 'ตัวละครหลักในข่าว';
-    const storyContext = identity?.story || newsTitle;
-    const emotion = identity?.emotion || 'neutral';
-    const coverEmotion = identity?.coverEmotion || 'drama';
+  // ★ เพิ่ม newsContent ให้ Judge อ่านเนื้อข่าวด้วย (ไม่ใช่แค่ชื่อข่าว)
+  const newsContent = identity?.story || storyContext;
+  const keyEvents = identity?.specific_details?.key_events?.join(', ') || '';
+  const keyScenes = identity?.keyScenes?.join(', ') || '';
 
-    const prompt = `คุณคือ Photo Editor ระดับ Senior สำหรับสำนักข่าวไวรัลระดับมืออาชีพ กำลังเลือกภาพทำปกข่าว 5 แบบ
-You are a RUTHLESSLY STRICT senior photo editor selecting images for a professional viral news cover set.
+  const prompt = `คุณคือ Photo Editor ระดับ Senior สำหรับสำนักข่าวไวรัลระดับมืออาชีพ กำลังเลือกภาพทำปกข่าว
+You are a senior photo editor selecting images for a viral news cover.
 
-📰 ข่าว / News: "${storyContext}"
-🎭 ตัวละครหลัก / Main Character: "${mainChar}"
-💢 อารมณ์ข่าว / Emotion: ${emotion} → Cover mood: ${coverEmotion}
+📰 ข่าว: "${storyContext}"
+📝 เนื้อข่าว: "${newsContent}"
+🎭 ตัวละครหลัก: "${mainChar}"
+👤 ตัวละครรอง: "${identity?.secondaryCharacter || 'ไม่มี'}"
+💢 อารมณ์ข่าว: ${emotion} → Cover mood: ${coverEmotion}
+📋 ประเด็นสำคัญ: ${keyEvents || keyScenes || 'ไม่ระบุ'}
+📍 สถานที่: ${identity?.location || 'ไม่ระบุ'}
+🔑 กิจกรรมหลัก: ${identity?.searchQueries?.key_activity || identity?.searchQueries?.event_scene || 'ไม่ระบุ'}
+🎬 ซีนที่ต้องการ: ${keyScenes || keyEvents || 'ไม่ระบุ'}
+
+★★★ เป้าหมาย: เลือกภาพที่ "เล่าเรื่อง" ข่าวนี้ ไม่ใช่เลือกภาพ "สวย" ของคน!
+- ภาพที่แสดง กิจกรรม/สถานที่/เหตุการณ์ ในข่าว → score สูง (7-10)
+- ภาพ ${mainChar} ที่สวยแต่ไม่เกี่ยวข่าว → score ต่ำ (≤ 3!)
 
 มีภาพ ${imageParts.length} ภาพ (index 0 ถึง ${imageParts.length - 1}) ให้ตัดสิน
 
-=== ROLE ASSIGNMENTS (ต้องกำหนด role ให้ทุกภาพที่ผ่าน) ===
+=== ★★★ กฎสำคัญที่สุด: ตรวจสอบตัวตนคน! ===
+- ภาพในแต่ละรูปต้องเป็น ${mainChar} จริงๆ! ห้ามเอาภาพคนอื่นมา!
+- ถ้าภาพเป็นคนละคน คนละเชื้อชาติ คนละวงการ → REJECT ทันที!
+  ตัวอย่าง: ข่าว "เจนนี่ ได้หมดถ้าสดชื่น" แต่ภาพเป็น Jennie BLACKPINK → REJECT!
+- ดูบริบทภาพ: ถ้ามีข้อมูลใน metadata/label ที่ชี้ว่าเป็นคนอื่น → REJECT!
 
-🏷️ HERO_FACE (1 ภาพเท่านั้น!):
-- ต้องเป็นภาพ close-up หน้า ${mainChar} ที่คมชัดที่สุด
-- ใบหน้าต้องกินพื้นที่ >30% ของเฟรม
-- ชัดมาก ไม่เบลอ
-- ⚠️ ภาพ HERO_FACE ไม่จำเป็นต้องมาจากข่าวนี้! ภาพจากคลิปอื่น ละคร สัมภาษณ์อื่น งานอีเวนท์ ก็ใช้ได้
-- ขอแค่เป็นรูปจริงของ ${mainChar} (ไม่ใช่ stock photo คนแปลกหน้า)
+=== ★★★ กฎสำคัญเท่ากัน: ตรวจสอบความเกี่ยวข้องกับข่าว! ===
+- ภาพต้องเกี่ยวกับเนื้อหาข่าว! ไม่ใช่แค่ภาพคนถูกคน!
+- ★★★ ภาพ ${mainChar} ที่สวยแต่ไม่เกี่ยวข่าว (แฟชั่น/ท่องเที่ยว/ชายหาด/ไลฟ์สไตล์/งานอีเวนท์อื่น) → score = 4 (ต่ำแต่ยังใช้ได้)
+- ตัวอย่าง: ข่าว "ก้อย รัชวิน บริจาคโรงเรียน" แต่ภาพเป็นก้อยถ่ายแบบริมทะเล → score = 4 (คนถูก แต่บริบทผิด!)
+- ตัวอย่าง: ข่าว "ก้อย รัชวิน บริจาคโรงเรียน" ภาพก้อยถ่ายกับเด็กนักเรียน → score 9! (คนถูก + บริบทถูก!)
+- ★ เน้นเลือกภาพที่ "เล่าเรื่อง" ข่าว ไม่ใช่ภาพ "สวย" ของคน!
+
+=== ROLE ASSIGNMENTS ===
+
+★ สัดส่วนที่ดีสำหรับปกข่าวไวรัล:
+  ภาพคน (HERO+PERSON_SUPPORT): 2-3 ภาพ
+  ภาพเล่าเรื่อง (KEY_ACTIVITY+CONTEXT+RELATIONSHIP+EVIDENCE): 2-3 ภาพ
+  ★ ต้องมีภาพ "เล่าเรื่อง" อย่างน้อย 2 ภาพ! ห้ามมีแค่ภาพหน้าคน!
+
+🏷️ HERO_FACE (1 ภาพ — สำคัญที่สุด!):
+- ภาพ close-up หน้า ${mainChar} ที่คมชัดที่สุด
+- ใบหน้ากินพื้นที่ >30% ของเฟรม
+- ⚠️ ไม่จำเป็นต้องมาจากข่าวนี้! ภาพจาก Social media, สัมภาษณ์, อีเวนท์ ใช้ได้!
+- ⚠️ ต้องเป็น ${mainChar} จริงๆ! ไม่ใช่คนอื่นที่ชื่อคล้ายกัน!
 - Score 7-10
-- ⚠️ ถ้ามีภาพหน้า ${mainChar} ชัด อย่า REJECT มัน! ถ้าไม่มี text overlay หนักๆ ให้ score ≥ 6
-- 📐 ภาพ HERO_FACE ต้องเห็นใบหน้าชัดเจน ครึ่งตัวบน (คอ-ไหล่-หัว) ห้ามเป็นภาพเต็มตัว ห้ามเห็นขา ห้ามเห็นพื้นหลังเยอะเกินครึ่งภาพ
-- 📊 เพิ่มคะแนน: คนอยู่กึ่งกลางเฟรม (+2), หน้าชัดไม่เบลอ (+2), ครึ่งตัวบน (+1). ลดคะแนน: พื้นหลังเยอะเกินครึ่ง (-2), เห็นทั้งตัวจนหน้าเล็ก (-2), มุมกำแพง/มุมโล่ง (-1)
 
-🏷️ CONTEXT_SCENE (1-2 ภาพ):
-- Wide shot แสดงสถานที่/เหตุการณ์/บริบท
-- เช่น อาคาร, ที่เกิดเหตุ, โรงพยาบาล, ศาล, สถานีตำรวจ
-- ภาพต้องเกี่ยวข้องกับข่าวจริง ไม่ใช่ภาพ generic
+🏷️ PERSON_SUPPORT (0-1 ภาพเท่านั้น!):
+- ภาพ ${mainChar} ในบริบทที่เกี่ยวกับข่าว เท่านั้น!
+- ★★★ ภาพ ${mainChar} ที่สวยแต่ไม่เกี่ยวข่าว → Score = 4 เท่านั้น!
+  ❌ ภาพถ่ายแบบ/แฟชั่น/ท่องเที่ยว/ชายหาด/งานอีเวนท์อื่น → score = 4
+  ❌ ภาพคู่กับคนรัก/ครอบครัว ที่ไม่เกี่ยวกับข่าว → score = 4
+  ✅ ภาพ ${mainChar} ในบริบทข่าว (เช่น ถ่ายกับเด็กนักเรียน) → score 6-7
+- ★ จำกัดแค่ 0-1 ภาพ! ห้ามเกิน 1 ภาพ!
+- Score 4-7 (ขึ้นกับบริบท)
 
-🏷️ EVIDENCE (1 ภาพ):
-- ป้าย, เอกสาร, ข้อความ, ป้ายชื่อ, หลักฐาน
-- สิ่งที่ "บอกเล่า" เรื่องราว — ป้ายร้าน, ป้ายสถานที่, เอกสารศาล
+🏷️ KEY_ACTIVITY (1-2 ภาพ — ★ สำคัญมาก!):
+- ★★★ ภาพกิจกรรม/การกระทำหลักในข่าว
+- เช่น: ภาพไลฟ์สด, ภาพทำสวน, ภาพช่วยหมา, ภาพทำอาหาร, ภาพบริจาค
+- ภาพที่เห็นแล้วรู้ว่า "ข่าวนี้เกี่ยวกับอะไร" โดยไม่ต้องอ่าน!
+- ★ ถ้ามีภาพ ${mainChar} กำลังทำกิจกรรมที่เกี่ยวกับข่าว → Score 8-9!
+- Score 6-9
 
-🏷️ EMOTION (1-2 ภาพ):
+🏷️ TIMELINE_PAST (0-1 ภาพ — ถ้าข่าวมีไทม์ไลน์):
+- ภาพอดีต/สมัยหนุ่มสาว ที่เห็นความเปลี่ยนแปลง
+- เช่น: ภาพแต่งงาน, ภาพสมัยเด็ก, ภาพยุคทำละคร
+- Score 6-8
+
+🏷️ EMOTION (0-1 ภาพ):
 - Close-up อารมณ์ — ร้องไห้, ตกใจ, โกรธ, ยิ้ม, เศร้า
-- ต้องเห็นอารมณ์ชัดเจน ไม่ใช่ neutral pose
+- ต้องเห็น ${mainChar} แสดงอารมณ์ชัดเจน
 
 🏷️ RELATIONSHIP (0-1 ภาพ):
-- ภาพ ${mainChar} กับคนอื่น (คู่รัก, ครอบครัว, เพื่อน)
-- ต้องเห็นความสัมพันธ์ชัดเจน
+- ภาพ ${mainChar} กับคนอื่น — ต้องเกี่ยวกับข่าว!
+- ★ ภาพคู่กับตัวละครรองในข่าว + บริบทตรง → score 6-8
+- ★ ภาพคู่/ครอบครัว ที่ไม่เกี่ยวข่าว (งานแต่ง/ท่องเที่ยว/อีเวนท์อื่น) → score = 4
 
-🏷️ FAMILY_SUPPORT (0-2 ภาพ):
-- ★ ภาพพ่อแม่ / ครอบครัว / โค้ช / คนที่คอยสนับสนุนตัวละครหลัก
-- ภาพที่แสดงความผูกพัน ความรัก การสนับสนุน
-- เช่น พ่อแม่เชียร์ลูก, ครอบครัวกอดกัน, พ่อจูงมือลูก
-- ★ ให้ความสำคัญสูง ถ้าเนื้อข่าวพูดถึงครอบครัว/พ่อแม่ → score 7-10
+🏷️ CONTEXT_SCENE (0-2 ภาพ):
+- Wide shot สถานที่/เหตุการณ์/บริบท — ภาพกว้างไม่ใช่ portrait!
+- ★ กลุ่มคน (เด็กนักเรียน, ผู้เข้าร่วม) ในฉากที่เกี่ยวข่าว → CONTEXT_SCENE score 6-8
+- ★ ภาพป้ายสถานที่ = EVIDENCE ไม่ใช่ CONTEXT_SCENE
+- ★★★ ห้ามเอาภาพ portrait/closeup ของคนแปลกหน้ามาเป็น CONTEXT_SCENE!
 
-=== ⚠️ DIVERSITY RULES (สำคัญมาก!) ===
-1. ห้ามเลือกภาพ "ซีนเดียวกัน" เกิน 2 ภาพ
-   - เช่น ภาพแข่งจักรยาน 5 ภาพ → เก็บแค่ 2 ภาพที่ดีที่สุด ที่เหลือ REJECT
-   - เช่น ภาพนั่งสัมภาษณ์ 3 ภาพ → เก็บ 1-2 ภาพ
-2. ต้องมีความหลากหลาย: ต้องมีทั้ง close-up (หน้าชัด) + wide shot (บริบท) + relationship/family
-3. ★ ให้ priority สูง: portrait close-up > group action shot
-4. ★ ถ้ามีภาพพ่อแม่/ครอบครัว ให้เลือกไว้ 1-2 ภาพ แทนที่จะเลือก action shot ซ้ำ
-5. ภาพที่มีคนเยอะมาก (>10 คน) จนไม่มีจุดโฟกัส → ลดคะแนน -2
+🏷️ EVIDENCE (0-1 ภาพ):
+- ป้ายจริง, เอกสาร, หลักฐาน, แอป, screenshot ที่เกี่ยวกับข่าว
+- ★★ text บนป้ายจริง ≠ text overlay → ห้าม reject ป้ายจริง!
 
 === ❌ REJECT ทันที (score = 0, role = "REJECT") ===
-1. ภาพเบลอ, pixelated, resolution ต่ำ
-2. Stock photo — ภาพ generic ไม่ใช่คนจริงในข่าว
-3. มี text overlay หนักๆ / news graphics / TV show graphics / lower-third
-4. มี watermark, logo สำนักข่าว, แบนเนอร์, กราฟิกช่อง
+1. ★★★ ภาพคนผิดคน! ไม่ใช่ ${mainChar} → REJECT ทันที!
+   - ★★★ ภาพ portrait/closeup ของคนแปลกหน้า (ไม่ใช่ ${mainChar}) → REJECT!
+   - ★★★ ภาพบัตรนักศึกษา/yearbook/ID photo ของคนอื่น → REJECT!
+   - ★ ยกเว้น: ภาพกลุ่มคน (group shot) ที่ไม่มี ${mainChar} → ใช้เป็น CONTEXT_SCENE ได้ (score 5-7)
+   - ★ ยกเว้น: ภาพ wide shot สถานที่ที่มีคนเดินผ่าน → ใช้เป็น CONTEXT_SCENE ได้
+2. ภาพเบลอ, pixelated, resolution ต่ำมาก
+3. Stock photo — ภาพ generic ไม่มีตัวละครจริง
+3b. ★★★ ภาพการ์ตูน / illustration / clip art / vector / AI-generated → REJECT ทันที!
+    - ภาพวาด, ภาพกราฟิก, ภาพ 3D render
+    - ภาพจาก stock ที่ไม่ใช่ภาพถ่ายจริง
+    - infographic / diagram / chart
+3c. ★★★ ภาพทางการแพทย์ / โฆษณา / สินค้า → REJECT ทันที!
+    - ภาพอวัยวะ / แผนภาพกายวิภาค / medical diagram
+    - โฆษณาครีม / สกินแคร์ / คลินิกความงาม / โฆษณาสินค้า
+    - before-after ผิว / สิว / ศัลยกรรม
+    - ภาพที่มีชื่อสินค้า/แบรนด์เด่น
+4. ★★★ มี "text แต่งเติม" (designed text) ซ้อนทับภาพ → REJECT:
+   - headline ข่าว / หัวข้อข่าวซ้อนทับด้วย font สี
+   - subtitle / lower-third / caption bar
+   - text banner สี / แถบข้อความ / กราฟิกข่าว
+   - ชื่อรายการ / โลโก้ข่าว / โลโก้ช่อง ขนาดใหญ่
+   - ปกข่าว / ปกคลิป / YouTube thumbnail ที่มี text ออกแบบ
+   - ลายน้ำ (watermark) ขนาดใหญ่กลางภาพ
+   - ข้อความโฆษณา / promotion / แบนเนอร์
 5. เป็น designed cover / thumbnail / collage / ปกคลิป
-6. หน้าถูกตัด / มองไม่ออกว่าเป็นใคร
-7. ภาพซ้ำกัน (same person + same angle) → เก็บแค่คมสุด 1 ภาพ
-8. Screenshot จอทีวี / screenshot ข่าว / news article screenshot
-9. ภาพ collage ปก — หลายภาพจัดเรียงเป็น layout
-10. มีกรอบ border สวยงาม / ถูกจัดวางตามดีไซน์
-11. ภาพไม่เกี่ยวกับข่าวนี้เลย
-12. ★ ภาพ "ซีนซ้ำ" ที่เกิน 2 ภาพแล้ว → REJECT ภาพ 3+ ที่คล้ายกัน
+6. Screenshot จอทีวี / screenshot ข่าว (มีกรอบรายการ, logo ช่อง)
+7. ภาพ collage ปก — หลายภาพจัดเรียงเป็น layout
+
+⚠️ ★★★ ข้อยกเว้นสำคัญมาก — "text ธรรมชาติ" ห้าม REJECT!
+"text ธรรมชาติ" = ตัวหนังสือที่อยู่ในโลกจริง ถ่ายติดมาตามธรรมชาติ เช่น:
+- ป้ายโรงเรียน / ป้ายโรงพยาบาล / ป้ายสถานที่
+- ป้ายบอกชื่อผู้บริจาค / แผ่นป้ายเกียรติคุณ
+- ป้ายงานอีเวนต์จริง / แบนเนอร์งานจริง
+- ป้ายถนน / ป้ายร้านค้า / ป้ายประกาศจริง
+- เอกสารจริง / ใบประกาศ / ใบเสร็จ
+→ ภาพเหล่านี้เป็น EVIDENCE ที่มีค่ามาก! ให้ score ≥ 7 + role = EVIDENCE
+
+วิธีแยก: 
+- text แต่งเติม = font สวย สีสด มี drop shadow/outline อยู่ "ลอย" บนภาพ → REJECT
+- text ธรรมชาติ = อยู่บนป้าย/กระดาน/ผนัง ในฉากจริง มีมิติ 3D → KEEP (EVIDENCE)
+
+⚠️ ข้อยกเว้นอื่น — ห้าม REJECT ภาพเหล่านี้:
+- ภาพ ${mainChar} ที่ชัดแต่มี text เบาๆ ที่มุม → score ≥ 4 (PERSON_SUPPORT)
+- ภาพ ${mainChar} ที่มี watermark เล็กๆ ที่มุม → score ≥ 4
+- ภาพ ${mainChar} จากโซเชียล (TikTok, Instagram, YouTube) ที่เห็นหน้าชัด → score ≥ 5
 
 === SCORING GUIDE ===
-- 9-10: สมบูรณ์แบบ คมชัดสุด ภาพใหญ่ high-res ไม่มี text ไม่มี watermark เหมาะกับ role อย่างยิ่ง
-- 7-8: ดีมาก ใช้ได้ชัวร์ ภาพคม ไม่มี text
-- 6: พอใช้ได้ ไม่สมบูรณ์แต่ไม่มีข้อเสียร้ายแรง
-- 4-5: มีปัญหาบ้าง (เบลอเล็กน้อย, มุมไม่ดีนัก)
-- 1-3: ปัญหาชัดเจน — ไม่ควรใช้
-- 0: REJECT ตาม rules ด้านบน
-
-⚠️ กฎเข้มงวด (ปกต้องสะอาดเหมือนปก Viral มืออาชีพ):
-
-★★★ ขั้นตอนบังคับ: OCR SCAN (ทำทุกภาพก่อนให้คะแนน!) ★★★
-ก่อนให้คะแนนแต่ละภาพ ให้ทำ "OCR scan ในใจ" ตามขั้นตอนนี้:
-1. มองมุมซ้ายบน → มี text/logo ไหม?
-2. มองมุมขวาบน → มี text/logo ไหม?
-3. มองมุมซ้ายล่าง → มี text/logo ไหม?
-4. มองมุมขวาล่าง → มี text/logo ไหม?
-5. มองกลางภาพ → มี text ซ้อนบนคน/ฉากไหม?
-6. มองขอบบน-ล่าง → มี lower-third / banner / ชื่อรายการไหม?
-→ ถ้าเจอ text ใดๆ (แม้เล็กมาก) ที่ไม่ใช่ป้ายธรรมชาติในฉาก → score = 0 REJECT ทันที
-
-★★★ Logo/Text ที่พบบ่อยและต้อง REJECT:
-- Logo ช่องทีวี: "AMARIN", "ช่อง 7", "ONE31", "MONO29", "CH3", "PPTV", "TNN", "ไทยรัฐ", "ข่าวสด", "Thai PBS", "Workpoint", "Spring News"
-- Logo สำนักข่าว: "AMARIN NEWS", "ข่าวเที่ยง", "ข่าวค่ำ", "mgr online", "Matichon", "Daily News"
-- Text ซ้อนภาพ: พาดหัวข่าว, subtitle, ชื่อรายการ, hashtag, เครดิตภาพ, ลายน้ำจางๆ
-- ข้อความที่เขียนซ้อนภาพ เช่น "เปิดใจ", "ช่วยใช้หนี้", "ดราม่า", "สุดซึ้ง"
-
-★★★ ภาพปกคลิป YouTube/TikTok ที่มีข้อความซ้อน → REJECT ทันที ไม่ว่าหน้าคนจะชัดแค่ไหน!
-★★★ ภาพที่มีกราฟิก/กรอบ/ดีไซน์ตกแต่ง (เส้นกรอบ, สีพื้นหลัง, gradient overlay, วงกลมตัดภาพ) → REJECT
-★ ต้องเป็นภาพ "ถ่ายจริง" (photograph) เท่านั้น ไม่ใช่ภาพที่ถูกออกแบบ/ตัดต่อ/ตกแต่ง
-- Screenshot จอทีวี, screenshot ข่าว, ภาพจากหน้าจอรายการ (มีกรอบรายการ, logo ช่อง, แบนเนอร์) → score = 0 REJECT
-- ภาพ collage / designed cover / thumbnail → score = 0 REJECT
-- ภาพเบลอ, pixelated, แตก, ภาพยืด → score ≤ 2
-- ภาพที่มี watermark ใดๆ → score ≤ 2
-- เน้นภาพ "สะอาด": ไม่มี text, ไม่มี graphics, หน้าคนชัด, background สะอาด → score ≥ 7
-- REJECT เป็น 0 ทุกภาพที่ไม่ clean พอจะทำปกมืออาชีพได้
-- ★ ภาพ close-up portrait หน้าชัด ไม่ใส่หมวก/แว่น → คะแนนสูง (8-10)
-- ★ ภาพ group shot คนเยอะ ไม่มีจุดโฟกัส → ลดคะแนน -2
-
+- 9-10: สมบูรณ์แบบ คมชัดสุด ไม่มี text ไม่มี watermark
+- 7-8: ดีมาก ใช้ได้ชัวร์
+- 5-6: พอใช้ได้ อาจมี text เบาๆ แต่เห็นคนชัด
+- 4: มีปัญหาบ้าง แต่ยังใช้ได้ถ้าจำเป็น
+- 1-3: ปัญหาชัดเจน
+- 0: REJECT
 
 === OUTPUT FORMAT ===
 Return JSON array เท่านั้น ห้ามมี markdown blocks ห้ามมี \`\`\`
 ตัดสินทุกภาพ (แม้แต่ REJECT ก็ต้องใส่ score=0)
-HERO_FACE ต้องมีแค่ 1 ตัวเท่านั้น
+★ ต้องมีภาพ ${mainChar} อย่างน้อย 2 ภาพ (1 HERO_FACE + 1 KEY_ACTIVITY/CONTEXT_SCENE/RELATIONSHIP)
+★ ต้องมีภาพเล่าเรื่อง (KEY_ACTIVITY/CONTEXT/RELATIONSHIP/EVIDENCE) อย่างน้อย 2 ภาพ
+★ PERSON_SUPPORT ห้ามเกิน 1 ภาพ! เน้นเอาภาพเล่าเรื่องแทน!
 
-[{"index": 0, "score": 10, "role": "HERO_FACE", "reason": "..."}, {"index": 3, "score": 8, "role": "CONTEXT_SCENE", "reason": "..."}, {"index": 5, "score": 0, "role": "REJECT", "reason": "..."}]`;
+[{"index": 0, "score": 10, "role": "HERO_FACE", "reason": "..."}, {"index": 1, "score": 9, "role": "KEY_ACTIVITY", "reason": "ภาพไลฟ์สดตรงกับข่าว"}, {"index": 5, "score": 0, "role": "REJECT", "reason": "คนผิดคน ไม่ใช่ตัวละครในข่าว"}]`;
+
+  try {
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const result = await model.generateContent([prompt, ...imageParts]);
     const responseText = result.response.text();
@@ -748,14 +806,13 @@ HERO_FACE ต้องมีแค่ 1 ตัวเท่านั้น
       console.log(`[Judge] AI scores: ${parsed.map(s => `#${s.index}=${s.score}(${s.role})`).join(', ')}`);
       console.log(`[Judge] 📊 Accepted(≥4): ${accepted.length}, Near-miss(3): ${nearMiss.length}, Rejected(<3): ${rejected.length}`);
 
-      // === สร้าง selected list จากภาพที่ score >= 4 AND role ไม่ใช่ REJECT ===
-      // ★ FIX: AI บางทีให้ score สูง (7-8) แต่ role=REJECT → ต้อง exclude ออก
+      // === สร้าง selected list จากภาพที่ score >= 6 ===
+      // HERO_FACE ต้องมีแค่ 1
       let heroAssigned = false;
       const HERO_ROLE = 'HERO_FACE';
 
       const validScores = accepted
         .filter(s => s.index >= 0 && s.index < validCandidates.length)
-        .filter(s => s.role !== 'REJECT') // ★ ห้ามรับ REJECT ไม่ว่า score เท่าไหร่
         .sort((a, b) => {
           // HERO_FACE มาก่อน
           if (a.role === HERO_ROLE && b.role !== HERO_ROLE) return -1;
@@ -778,13 +835,11 @@ HERO_FACE ต้องมีแค่ 1 ตัวเท่านั้น
       }
 
       if (selectedImages.length > 0) {
-        // === Supplement: ถ้าน้อยกว่า 5 ภาพ ดึง near-miss (score 3) มาเสริม ===
-        // ★ FIX: ไม่ดึง REJECT กลับมาอีก
+        // === Supplement: ถ้าน้อยกว่า 5 ภาพ ดึง near-miss (score 4-5) มาเสริม ===
         if (selectedImages.length < 5 && nearMiss.length > 0) {
           const selectedUrls = new Set(selectedImages.map(i => i.url));
           const sortedNearMiss = nearMiss
             .filter(s => s.index >= 0 && s.index < validCandidates.length)
-            .filter(s => s.role !== 'REJECT') // ★ ห้าม REJECT
             .sort((a, b) => b.score - a.score);
 
           for (const s of sortedNearMiss) {
@@ -793,7 +848,7 @@ HERO_FACE ต้องมีแค่ 1 ตัวเท่านั้น
             if (!selectedUrls.has(url)) {
               selectedImages.push({
                 url: url,
-                role: s.role || 'SUPPORT',
+                role: s.role === 'REJECT' ? 'SUPPORT' : (s.role || 'SUPPORT'),
                 score: s.score
               });
               selectedUrls.add(url);
@@ -802,12 +857,11 @@ HERO_FACE ต้องมีแค่ 1 ตัวเท่านั้น
           console.log(`[Judge] 📦 Supplemented with near-miss → total ${selectedImages.length}`);
         }
 
-        // ถ้ายังไม่พอ → ดึง score 1-3 มาเสริม (ดีกว่าไม่มีเลย) ★ ยกเว้น REJECT
+        // ถ้ายังไม่พอ → ดึง score 1-3 มาเสริม (ดีกว่าไม่มีเลย)
         if (selectedImages.length < 4) {
           const selectedUrls = new Set(selectedImages.map(i => i.url));
           const lowScored = rejected
             .filter(s => s.score > 0 && s.index >= 0 && s.index < validCandidates.length)
-            .filter(s => s.role !== 'REJECT') // ★ ห้าม REJECT
             .sort((a, b) => b.score - a.score);
 
           for (const s of lowScored) {
@@ -838,12 +892,217 @@ HERO_FACE ต้องมีแค่ 1 ตัวเท่านั้น
       }
     }
 
-    console.log('[Judge] ⚠️ Could not parse AI response, using fallback');
-    return fallbackSelection(validCandidates);
+    console.log('[Judge] ⚠️ Could not parse AI response, trying GPT-4o fallback...');
+    return await judgeWithFallback(validCandidates, imageParts, prompt, newsTitle, identity);
   } catch (e) {
-    console.log('[Judge] ❌ AI Vision Error:', e.message);
-    return fallbackSelection(validCandidates);
+    console.log('[Judge] ❌ Gemini Vision Error:', e.message?.substring(0, 80));
+    console.log('[Judge] 🔄 Trying GPT-4o Vision fallback...');
+    return await judgeWithFallback(validCandidates, imageParts, prompt, newsTitle, identity);
   }
+}
+
+// ★★★ GPT-4o Vision Fallback Judge ★★★
+async function judgeWithFallback(validCandidates, imageParts, prompt, newsTitle, identity) {
+  // === Attempt 1: GPT-4o Vision ===
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey) {
+    try {
+      console.log('[Judge Fallback] 📤 Sending to GPT-4o Vision...');
+      
+      // สร้าง content array สำหรับ GPT-4o (text + images)
+      const gptContent = [{ type: 'text', text: prompt }];
+      
+      // เพิ่มภาพ (จำกัด 28 ภาพ — ต้องครอบคลุม context/evidence ที่อยู่ท้ายด้วย!)
+      const maxImages = Math.min(imageParts.length, 28);
+      for (let i = 0; i < maxImages; i++) {
+        const part = imageParts[i];
+        if (part?.inlineData) {
+          gptContent.push({
+            type: 'image_url',
+            image_url: {
+              url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
+              detail: 'low' // ประหยัด token
+            }
+          });
+        }
+      }
+
+      const gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: MODEL_VISION,
+          messages: [{ role: 'user', content: gptContent }],
+          max_tokens: 4000,
+          temperature: 0.2
+        })
+      });
+
+      if (gptRes.ok) {
+        const gptData = await gptRes.json();
+        const gptText = gptData.choices?.[0]?.message?.content || '';
+        const gptMatch = gptText.match(/\[\s*\{[\s\S]*\}\s*\]/);
+        
+        if (gptMatch) {
+          const parsed = JSON.parse(gptMatch[0]);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            console.log(`[Judge Fallback] ✅ GPT-4o scored ${parsed.length} images`);
+            return processJudgeResults(parsed, validCandidates);
+          }
+        }
+        console.log('[Judge Fallback] ⚠️ GPT-4o returned unparseable response');
+      } else {
+        const errData = await gptRes.json().catch(() => ({}));
+        console.log(`[Judge Fallback] ❌ GPT-4o HTTP ${gptRes.status}: ${errData.error?.message?.substring(0, 80) || ''}`);
+      }
+    } catch (gptErr) {
+      console.log(`[Judge Fallback] ❌ GPT-4o Error: ${gptErr.message?.substring(0, 80)}`);
+    }
+  }
+
+  // === Attempt 2: Claude Sonnet Vision ===
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (anthropicKey) {
+    try {
+      console.log('[Judge Fallback] 📤 Sending to Claude Sonnet Vision...');
+      
+      const claudeContent = [{ type: 'text', text: prompt }];
+      const maxImages = Math.min(imageParts.length, 28);
+      for (let i = 0; i < maxImages; i++) {
+        const part = imageParts[i];
+        if (part?.inlineData) {
+          claudeContent.push({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: part.inlineData.mimeType,
+              data: part.inlineData.data
+            }
+          });
+        }
+      }
+
+      const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': anthropicKey,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 4000,
+          messages: [{ role: 'user', content: claudeContent }]
+        })
+      });
+
+      if (claudeRes.ok) {
+        const claudeData = await claudeRes.json();
+        const claudeText = claudeData.content?.[0]?.text || '';
+        const claudeMatch = claudeText.match(/\[\s*\{[\s\S]*\}\s*\]/);
+        
+        if (claudeMatch) {
+          const parsed = JSON.parse(claudeMatch[0]);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            console.log(`[Judge Fallback] ✅ Claude scored ${parsed.length} images`);
+            return processJudgeResults(parsed, validCandidates);
+          }
+        }
+        console.log('[Judge Fallback] ⚠️ Claude returned unparseable response');
+      } else {
+        const errData = await claudeRes.json().catch(() => ({}));
+        console.log(`[Judge Fallback] ❌ Claude HTTP ${claudeRes.status}: ${errData.error?.message?.substring(0, 80) || ''}`);
+      }
+    } catch (claudeErr) {
+      console.log(`[Judge Fallback] ❌ Claude Error: ${claudeErr.message?.substring(0, 80)}`);
+    }
+  }
+
+  // === Last Resort: Random (ไม่ควรถึงจุดนี้) ===
+  console.log('[Judge Fallback] ⚠️ All AI providers failed! Using random fallback (last resort)');
+  return fallbackSelection(validCandidates);
+}
+
+// ★ แยก processJudgeResults ออกมาเพื่อใช้ร่วมกัน (Gemini, GPT-4o, Claude)
+function processJudgeResults(parsed, validCandidates) {
+  const accepted = parsed.filter(s => s.score >= 4);
+  const nearMiss = parsed.filter(s => s.score === 3);
+  const rejected = parsed.filter(s => s.score < 3);
+
+  console.log(`[Judge] AI scores: ${parsed.map(s => `#${s.index}=${s.score}(${s.role})`).join(', ')}`);
+  console.log(`[Judge] 📊 Accepted(≥4): ${accepted.length}, Near-miss(3): ${nearMiss.length}, Rejected(<3): ${rejected.length}`);
+
+  let heroAssigned = false;
+  const HERO_ROLE = 'HERO_FACE';
+
+  const validScores = accepted
+    .filter(s => s.index >= 0 && s.index < validCandidates.length)
+    .sort((a, b) => {
+      if (a.role === HERO_ROLE && b.role !== HERO_ROLE) return -1;
+      if (b.role === HERO_ROLE && a.role !== HERO_ROLE) return 1;
+      return b.score - a.score;
+    });
+
+  const selectedImages = [];
+  for (const s of validScores) {
+    let role = s.role || 'CONTEXT_SCENE';
+    if (role === HERO_ROLE) {
+      if (heroAssigned) role = 'EMOTION';
+      else heroAssigned = true;
+    }
+    selectedImages.push({ url: validCandidates[s.index], role, score: s.score });
+  }
+
+  if (selectedImages.length > 0) {
+    // Supplement: near-miss
+    if (selectedImages.length < 5 && nearMiss.length > 0) {
+      const selectedUrls = new Set(selectedImages.map(i => i.url));
+      const sortedNearMiss = nearMiss
+        .filter(s => s.index >= 0 && s.index < validCandidates.length)
+        .sort((a, b) => b.score - a.score);
+      for (const s of sortedNearMiss) {
+        if (selectedImages.length >= 8) break;
+        const url = validCandidates[s.index];
+        if (!selectedUrls.has(url)) {
+          selectedImages.push({ url, role: s.role === 'REJECT' ? 'SUPPORT' : (s.role || 'SUPPORT'), score: s.score });
+          selectedUrls.add(url);
+        }
+      }
+      console.log(`[Judge] 📦 Supplemented with near-miss → total ${selectedImages.length}`);
+    }
+
+    // Low-scored supplement
+    if (selectedImages.length < 4) {
+      const selectedUrls = new Set(selectedImages.map(i => i.url));
+      const lowScored = rejected
+        .filter(s => s.score > 0 && s.index >= 0 && s.index < validCandidates.length)
+        .sort((a, b) => b.score - a.score);
+      for (const s of lowScored) {
+        if (selectedImages.length >= 6) break;
+        const url = validCandidates[s.index];
+        if (!selectedUrls.has(url)) {
+          selectedImages.push({ url, role: 'SUPPORT', score: s.score });
+          selectedUrls.add(url);
+        }
+      }
+      if (lowScored.length > 0) {
+        console.log(`[Judge] 📦 Added low-scored supplements → total ${selectedImages.length}`);
+      }
+    }
+
+    const roleCounts = {};
+    for (const img of selectedImages) {
+      roleCounts[img.role] = (roleCounts[img.role] || 0) + 1;
+    }
+    const roleStr = Object.entries(roleCounts).map(([r, c]) => `${c} ${r}`).join(', ');
+    console.log(`[Judge] ✅ Selected ${selectedImages.length} images: ${roleStr}`);
+    return selectedImages;
+  }
+
+  return fallbackSelection(validCandidates);
 }
 
 function fallbackSelection(candidates) {
@@ -869,38 +1128,84 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
   console.log(`  TikTok: ${identity?.searchTikTok || 'N/A'}`);
   console.log('============================================');
 
-  // Run all 4 agents in parallel (TikTok is Agent 4 — non-critical)
-  const [googleResult, youtubeResult, contextResult, tiktokResult] = await Promise.allSettled([
+  // Run all 3 agents in parallel
+  const [googleResult, youtubeResult, contextResult] = await Promise.allSettled([
     agentGoogleCleanImages(identity),
     agentYouTubeFrames(identity),
-    agentContextImages(identity),
-    agentTikTokFrames(identity),
+    agentContextImages(identity)
   ]);
 
   // Collect results from each agent
   const googleImages = googleResult.status === 'fulfilled' ? googleResult.value : [];
   const youtubeImages = youtubeResult.status === 'fulfilled' ? youtubeResult.value : [];
   const contextImages = contextResult.status === 'fulfilled' ? contextResult.value : [];
-  const tiktokImages = tiktokResult.status === 'fulfilled' ? tiktokResult.value : [];
 
   console.log('============================================');
   console.log(`[MultiAgent] Agent results:`);
   console.log(`  Agent 1 (Google):   ${googleImages.length} images ${googleResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + googleResult.reason : ''}`);
   console.log(`  Agent 2 (YouTube):  ${youtubeImages.length} frames ${youtubeResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + youtubeResult.reason : ''}`);
   console.log(`  Agent 3 (Context):  ${contextImages.length} images ${contextResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + contextResult.reason : ''}`);
-  console.log(`  Agent 4 (TikTok):   ${tiktokImages.length} frames ${tiktokResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + tiktokResult.reason : ''}`);
 
-  // Combine and deduplicate
-  let candidates = [...googleImages, ...youtubeImages, ...contextImages, ...tiktokImages];
-  candidates = [...new Set(candidates)];
-
-  console.log(`[MultiAgent] Combined unique candidates: ${candidates.length}`);
-
-  // Cap at 35 for the judge (เพิ่มจาก 30 เพราะมี TikTok เพิ่ม)
-  if (candidates.length > 35) {
-    candidates = candidates.sort(() => 0.5 - Math.random()).slice(0, 35);
-    console.log(`[MultiAgent] Capped to 35 candidates for judging`);
+  // ★★★ จัดลำดับความสำคัญ — ตัวละครหลักต้องมาก่อน!
+  // Priority: ตัวละครหลัก (18 ภาพ) → บริบท/สถานที่ (8 ภาพ) → YouTube (4 ภาพ)
+  // เหตุผล: ปกต้องมีทั้งภาพคน + ภาพบริบทข่าว (หมา, สถานที่, หลักฐาน)
+  // ★ ใช้ TRUE INTERLEAVE: สลับ 2 คน + 1 บริบท ซ้ำๆ
+  // ไม่ให้ภาพคนท่วม 14 ตำแหน่งแรก → context ตกรอบ Judge!
+  
+  const prioritized = [];
+  const seen = new Set();
+  
+  // สร้าง queue แยก: Google (ภาพคน) vs Context (ภาพบริบท)
+  const googleQueue = googleImages.filter(img => !seen.has(img));
+  const contextQueue = contextImages.filter(img => !googleQueue.includes(img)); // ไม่ซ้ำกับ Google
+  const ytQueue = youtubeImages.filter(img => !googleQueue.includes(img) && !contextQueue.includes(img));
+  
+  let gIdx = 0, cIdx = 0, yIdx = 0;
+  
+  // ★ Interleave: 2 คน → 1 บริบท → 2 คน → 1 บริบท → ...
+  while (prioritized.length < 30) {
+    // ใส่ภาพคน 2 ภาพ (ค้นจากชื่อ → ได้ภาพคนถูกคน)
+    let personAdded = 0;
+    while (personAdded < 2 && gIdx < googleQueue.length) {
+      const img = googleQueue[gIdx++];
+      if (!seen.has(img)) {
+        seen.add(img);
+        prioritized.push(img);
+        personAdded++;
+      }
+    }
+    
+    // ใส่ภาพบริบท 1 ภาพ (ค้นจากสถานที่ → อาจได้เหตุการณ์อื่น)
+    while (cIdx < contextQueue.length) {
+      const img = contextQueue[cIdx++];
+      if (!seen.has(img)) {
+        seen.add(img);
+        prioritized.push(img);
+        break; // แค่ 1 ภาพ
+      }
+    }
+    
+    // ถ้าทั้ง Google และ Context หมดแล้ว → ใส่ YouTube
+    if (gIdx >= googleQueue.length && cIdx >= contextQueue.length) {
+      while (yIdx < ytQueue.length && prioritized.length < 30) {
+        const img = ytQueue[yIdx++];
+        if (!seen.has(img)) {
+          seen.add(img);
+          prioritized.push(img);
+        }
+      }
+      break;
+    }
   }
+  
+  let candidates = prioritized;
+  if (candidates.length > 30) {
+    candidates = candidates.slice(0, 30);
+  }
+  const personCount = Math.min(gIdx, googleQueue.length);
+  const contextCount = Math.min(cIdx, contextQueue.length);
+  const ytCount = prioritized.length - personCount - contextCount;
+  console.log(`[MultiAgent] ★ Interleaved: ${candidates.length} candidates (Person ~${personCount} ↔ Context ~${contextCount} + YT ~${Math.max(0, ytCount)})`);
 
   console.log(`[MultiAgent] 🏛️ Sending ${candidates.length} candidates to AI Judge...`);
   console.log('============================================');

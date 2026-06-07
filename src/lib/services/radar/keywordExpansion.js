@@ -6,6 +6,7 @@
  */
 
 import { callAI } from '@/lib/ai/openai';
+import { MODEL_FAST } from '@/lib/ai/modelConfig';
 
 // === Cache แบบ Map + TTL 10 นาที ===
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -61,7 +62,7 @@ async function expandWithAI(keyword) {
 
     const result = await callAI({
       prompt,
-      model: 'gpt-4o-mini',
+      model: MODEL_FAST,
       temperature: 0.3,
       maxTokens: 1500,
     });

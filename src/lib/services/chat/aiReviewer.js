@@ -10,6 +10,7 @@
  * - reviewImage() — ตรวจภาพปกว่าเหมาะสมไหม
  */
 import { callAI } from '@/lib/ai/openai';
+import { MODEL_VISION } from '@/lib/ai/modelConfig';
 import { checkAllRules } from './contentRules';
 import { searchSimilar } from './viralLibrary';
 
@@ -18,7 +19,7 @@ import { searchSimilar } from './viralLibrary';
 // =============================================
 
 const CLAUDE_SONNET = 'claude-sonnet-4-20250514';
-const GPT4O_VISION = 'gpt-4o';
+const GPT4O_VISION = MODEL_VISION;
 
 // Category detection keywords
 const CATEGORY_KEYWORDS = {

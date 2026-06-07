@@ -23,6 +23,7 @@
  */
 
 import { callAI } from '@/lib/ai/openai';
+import { MODEL_FAST } from '@/lib/ai/modelConfig';
 
 // =============================================
 // PATTERN DEFINITIONS — คำ/วลีสำหรับจำแนกประโยค
@@ -523,7 +524,7 @@ ${numberedSentences}
     // TODO: เปลี่ยนเป็น callClaude ถ้าต้องการใช้ Claude
     const aiResult = await callAI({
       prompt: aiPrompt,
-      model: 'gpt-4o-mini',
+      model: MODEL_FAST,
       temperature: 0.2,
       maxTokens: 4000,
     });

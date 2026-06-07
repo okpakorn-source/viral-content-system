@@ -1,4 +1,4 @@
-﻿export const maxDuration = 300; // Allow 5 minutes for heavy LLM operations
+export const maxDuration = 300; // Allow 5 minutes for heavy LLM operations
 import { NextResponse } from 'next/server';
 import { processAutoFlow } from '@/lib/services/autoFlowService';
 
@@ -22,7 +22,6 @@ export async function POST(request) {
     return NextResponse.json({
       success: false,
       error: error.message,
-      errorType: 'AUTO_PIPELINE_ERROR',
       failedStep: error.failedStep || 'auto_scrape',
       totalTimeSeconds: parseFloat(elapsed),
     }, { status: 500 });

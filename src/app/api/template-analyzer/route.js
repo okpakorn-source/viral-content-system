@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { MODEL_VISION } from '@/lib/ai/modelConfig';
 import { saveTemplate } from '@/lib/template-library/store';
 import { createLogger } from '@/lib/logger';
 
@@ -289,7 +290,7 @@ Return ONLY the JSON object with all slot positions.`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
+        model: MODEL_VISION,
         max_tokens: isCoverFormat ? 4000 : 2500,
         temperature: 0.05, // เกือบ 0 — ต้องการความแม่นยำสูงสุด
         response_format: { type: 'json_object' },
