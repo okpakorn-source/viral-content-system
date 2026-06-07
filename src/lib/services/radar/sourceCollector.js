@@ -10,6 +10,7 @@ import { searchGDELT } from './gdeltSource.js';
 import { searchRSS } from './rssSource.js';
 import { searchYouTube } from './youtubeSource.js';
 import { searchSocial } from './socialSource.js';
+import { searchTavily } from './tavilySource.js';
 
 // === แหล่งข่าวทั้งหมดที่รองรับ ===
 const SOURCE_MAP = {
@@ -18,10 +19,11 @@ const SOURCE_MAP = {
   rss: searchRSS,
   youtube: searchYouTube,
   social: searchSocial,
+  tavily: searchTavily,
 };
 
 // === ค่า default สำหรับ sources ที่เปิดใช้ ===
-const DEFAULT_SOURCES = ['serper', 'gdelt', 'rss', 'youtube', 'social'];
+const DEFAULT_SOURCES = ['serper', 'gdelt', 'rss', 'youtube', 'social', 'tavily'];
 const MIN_TITLE_LENGTH = 10;
 
 /**

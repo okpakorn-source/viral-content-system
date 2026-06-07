@@ -13,6 +13,7 @@
 import { callAI } from '@/lib/ai/openai';
 import { createLogger } from '@/lib/logger';
 import { MODEL_FAST } from '@/lib/ai/modelConfig';
+import { tavilySearch, isTavilyAvailable } from '@/lib/services/tavilyService';
 
 const rlog = createLogger('SMART-RESEARCH');
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
@@ -42,27 +43,62 @@ function containsBlacklist(text) {
 }
 
 // ═══════════════════════════════════════════════
-// === Serper Search (lightweight) ===
+// === Serper Search (lightweight) + Tavily Supplement ===
 // ═══════════════════════════════════════════════
 async function quickSearch(query, num = 3) {
-  if (!SERPER_API_KEY) return [];
-  try {
-    const res = await fetch('https://google.serper.dev/search', {
-      method: 'POST',
-      headers: { 'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q: query, gl: 'th', hl: 'th', num }),
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.organic || []).slice(0, num).map(r => ({
-      title: r.title || '',
-      snippet: r.snippet || '',
-      link: r.link || '',
-      source: r.displayLink || '',
-    }));
-  } catch {
-    return [];
+  let results = [];
+
+  // Try Serper first (if API key available)
+  if (SERPER_API_KEY) {
+    try {
+      const res = await fetch('https://google.serper.dev/search', {
+        method: 'POST',
+        headers: { 'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: query, gl: 'th', hl: 'th', num }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        results = (data.organic || []).slice(0, num).map(r => ({
+          title: r.title || '',
+          snippet: r.snippet || '',
+          link: r.link || '',
+          source: r.displayLink || '',
+        }));
+      }
+    } catch {
+      // Serper failed, will try Tavily below
+    }
   }
+
+  // Tavily supplement: use as primary if no Serper, or supplement if Serper returned few results
+  const shouldUseTavily = isTavilyAvailable() && (!SERPER_API_KEY || results.length < 2);
+  if (shouldUseTavily) {
+    try {
+      const { results: tavilyResults } = await tavilySearch(query, {
+        topic: 'news',
+        maxResults: num,
+        searchDepth: 'basic',
+        includeAnswer: false,
+      });
+      const existingLinks = new Set(results.map(r => r.link));
+      const newResults = tavilyResults
+        .filter(r => !existingLinks.has(r.url))
+        .map(r => ({
+          title: r.title || '',
+          snippet: r.content || '',
+          link: r.url || '',
+          source: 'tavily',
+        }));
+      results = [...results, ...newResults].slice(0, num + 2);
+      if (newResults.length > 0) {
+        console.log(`[SmartResearch] 🔍 Tavily added ${newResults.length} results for "${query.slice(0, 40)}"`);
+      }
+    } catch {
+      // Tavily failed silently
+    }
+  }
+
+  return results;
 }
 
 // ═══════════════════════════════════════════════

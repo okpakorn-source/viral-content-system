@@ -18,7 +18,7 @@ export async function analyzeStoryIdentity(newsTitle, breakdownData) {
     const prompt = `คุณคือ News Analyst มืออาชีพ วิเคราะห์ข่าวนี้อย่างละเอียดแล้วสกัดข้อมูลสำหรับทีมค้นหาภาพ
 
 ชื่อข่าว: "${newsTitle}"
-เนื้อข่าว: "${breakdownData?.core_story || ''}"
+เนื้อข่าว (ครบถ้วน): "${(breakdownData?.core_story || '').slice(0, 3000)}"
 คนที่เกี่ยวข้อง: ${JSON.stringify(breakdownData?.key_facts?.people || [])}
 
 สร้าง search queries ที่หลากหลายมุมมอง เพื่อค้นหาภาพที่ตรงกับข่าวมากที่สุด
@@ -142,7 +142,7 @@ export async function analyzeStoryIdentity(newsTitle, breakdownData) {
     const openaiKey = process.env.OPENAI_API_KEY;
     if (openaiKey) {
       try {
-        console.log('[StoryIdentity] 🔄 Trying GPT-4o fallback...');
+        console.log(`[StoryIdentity] 🔄 Trying ${MODEL_PRIMARY} fallback...`);
         const gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -162,10 +162,10 @@ export async function analyzeStoryIdentity(newsTitle, breakdownData) {
           const gptData = await gptRes.json();
           const gptText = gptData.choices?.[0]?.message?.content || '';
           const parsed = JSON.parse(gptText);
-          console.log(`[StoryIdentity] ✅ GPT-4o fallback success: ${parsed.mainCharacter}`);
+          console.log(`[StoryIdentity] ✅ ${MODEL_PRIMARY} fallback success: ${parsed.mainCharacter}`);
           return parsed;
         } else {
-          console.log(`[StoryIdentity] ❌ GPT-4o HTTP ${gptRes.status}`);
+          console.log(`[StoryIdentity] ❌ ${MODEL_PRIMARY} HTTP ${gptRes.status}`);
         }
       } catch (gptErr) {
         console.log(`[StoryIdentity] ❌ GPT-4o error: ${gptErr.message?.substring(0, 80)}`);

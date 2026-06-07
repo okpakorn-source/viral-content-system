@@ -90,6 +90,56 @@ export async function searchYouTube(queries, options = {}) {
       .flatMap(r => r.value || []);
 
     console.log(`[YouTubeSource] ✅ ค้นหา ${queries.length} queries → ได้ ${articles.length} วิดีโอ`);
+
+    // === Optional Twelve Labs video AI enrichment ===
+    try {
+      if (articles.length > 0) {
+        const { searchScenes, isTwelveLabsAvailable } = await import('@/lib/services/twelvelabsService');
+
+        if (isTwelveLabsAvailable()) {
+          const topVideos = articles.slice(0, 3);
+          console.log(`[YouTubeSource] 🎬 Twelve Labs: enriching top ${topVideos.length} videos...`);
+
+          const enrichResults = await Promise.allSettled(
+            topVideos.map(async (video) => {
+              try {
+                const scenes = await searchScenes(video.title, { videoUrl: video.url });
+                return { url: video.url, scenes };
+              } catch (e) {
+                console.warn(`[YouTubeSource] ⚠️ Twelve Labs enrichment failed for "${video.title}":`, e.message);
+                return null;
+              }
+            })
+          );
+
+          // Merge enriched data back into articles
+          const enrichMap = new Map();
+          for (const r of enrichResults) {
+            if (r.status === 'fulfilled' && r.value && r.value.scenes) {
+              enrichMap.set(r.value.url, r.value.scenes);
+            }
+          }
+
+          for (const article of articles) {
+            const sceneData = enrichMap.get(article.url);
+            if (sceneData) {
+              article.twelveLabs = {
+                scenes: sceneData.scenes || [],
+                keyMoments: sceneData.keyMoments || [],
+                thumbnails: sceneData.thumbnails || [],
+                enrichedAt: new Date().toISOString(),
+              };
+            }
+          }
+
+          console.log(`[YouTubeSource] 🎬 Twelve Labs: enriched ${enrichMap.size}/${topVideos.length} videos`);
+        }
+      }
+    } catch (twelveLabsErr) {
+      // Twelve Labs is optional — never break the pipeline
+      console.warn('[YouTubeSource] ⚠️ Twelve Labs enrichment skipped:', twelveLabsErr.message);
+    }
+
     return articles;
 
   } catch (err) {

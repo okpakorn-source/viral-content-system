@@ -20,7 +20,7 @@ export async function GET(request) {
 
   // ─── AI Models ───────────────────────────────────────────────
   checks.openai = {
-    label: 'OpenAI (GPT-4o)',
+    label: 'OpenAI (GPT-5.5 / 5.4-mini)',
     configured: Boolean(process.env.OPENAI_API_KEY),
     keyPrefix: maskKey(process.env.OPENAI_API_KEY),
     usedFor: 'Vision OCR + Generate content',
@@ -36,7 +36,7 @@ export async function GET(request) {
   };
 
   checks.gemini = {
-    label: 'Gemini Flash',
+    label: 'Gemini 2.5 Pro',
     configured: Boolean(process.env.GEMINI_API_KEY),
     keyPrefix: maskKey(process.env.GEMINI_API_KEY),
     usedFor: 'Fast news extraction',
@@ -80,7 +80,21 @@ export async function GET(request) {
     label: 'Serper (Google Search)',
     configured: Boolean(process.env.SERPER_API_KEY),
     keyPrefix: maskKey(process.env.SERPER_API_KEY),
-    usedFor: 'Research / fact expansion',
+    usedFor: 'Research / fact expansion / image search',
+  };
+
+  checks.tavily = {
+    label: 'Tavily (AI Search)',
+    configured: Boolean(process.env.TAVILY_API_KEY),
+    keyPrefix: maskKey(process.env.TAVILY_API_KEY),
+    usedFor: 'AI-powered research + image search (เสริม Serper)',
+  };
+
+  checks.twelvelabs = {
+    label: 'Twelve Labs (Video AI)',
+    configured: Boolean(process.env.TWELVELABS_API_KEY),
+    keyPrefix: maskKey(process.env.TWELVELABS_API_KEY),
+    usedFor: 'Video scene search + key frame extraction (เสริม YouTube)',
   };
 
   // ─── Image AI ────────────────────────────────────────────────
@@ -121,7 +135,7 @@ export async function GET(request) {
   };
 
   // ─── Provider summary ────────────────────────────────────────
-  const providerList = ['openai','anthropic','gemini','firecrawl','jina','apify','youtube','serper','fal','ideogram'];
+  const providerList = ['openai','anthropic','gemini','firecrawl','jina','apify','youtube','serper','tavily','twelvelabs','fal','ideogram'];
   const configuredCount = providerList.filter(k => checks[k]?.configured).length;
   const totalProviders  = providerList.length;
 

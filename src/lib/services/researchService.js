@@ -2,6 +2,7 @@ import { callAI } from '@/lib/ai/openai';
 import { logPipeline } from '@/lib/pipelineLogger';
 import { createLogger } from '@/lib/logger';
 import { MODEL_PRIMARY, MODEL_FAST } from '@/lib/ai/modelConfig';
+import { tavilySearch, isTavilyAvailable } from '@/lib/services/tavilyService';
 
 const rlog = createLogger('RESEARCH-SERVICE');
 
@@ -303,14 +304,16 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
       detail: keywords.map(k => k.keyword).join(', ') + ' [src:' + keywordSource + ']',
     }).catch(() => {});
 
-    // STEP 2: Parallel Serper Search
+    // STEP 2: Parallel Serper Search + Tavily Supplement
     rlog.step('serper-search', 'ค้นหา Google Serper ' + keywords.length + ' keywords พร้อมกัน');
-    if (!SERPER_API_KEY) {
-      console.warn('[Research-Service] ⚠️ SERPER_API_KEY missing — search disabled');
+    const useSerper = !!SERPER_API_KEY;
+    if (!useSerper) {
+      console.warn('[Research-Service] ⚠️ SERPER_API_KEY missing — will try Tavily as primary');
     }
 
     const searchPromises = keywords.map(async (kw) => {
       try {
+        if (!useSerper) return { keyword: kw, results: [] };
         const results = await serperSearch(kw.searchQuery, 3);
         console.log('[Research-Service] 🔍 "' + kw.keyword + '" → ' + results.length + ' results');
         return { keyword: kw, results };
@@ -320,14 +323,61 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
       }
     });
 
-    const searchResults = await Promise.all(searchPromises);
-    const successfulSearches = searchResults.filter(s => s.results.length > 0);
-    rlog.research('Search done: ' + successfulSearches.length + '/' + keywords.length + ' keywords got results');
+    let searchResults = await Promise.all(searchPromises);
+    let successfulSearches = searchResults.filter(s => s.results.length > 0);
+    rlog.research('Serper done: ' + successfulSearches.length + '/' + keywords.length + ' keywords got results');
+
+    // === Tavily Supplement ===
+    // Use Tavily as primary if no Serper, or supplement if Serper returned < 3 results
+    const shouldUseTavily = isTavilyAvailable() && (!useSerper || successfulSearches.length < 3);
+    if (shouldUseTavily) {
+      const tavilyLabel = !useSerper ? 'primary (no Serper)' : 'supplement (Serper < 3)';
+      console.log('[Research-Service] 🔍 Tavily ' + tavilyLabel + ' — searching ' + keywords.length + ' keywords');
+
+      const tavilyPromises = keywords.map(async (kw) => {
+        try {
+          const { results } = await tavilySearch(kw.searchQuery, {
+            topic: 'news',
+            maxResults: 3,
+            searchDepth: 'basic',
+            includeAnswer: false,
+          });
+          const mapped = results.map(r => ({
+            title: r.title || '',
+            snippet: r.content || '',
+            link: r.url || '',
+            source: 'tavily',
+          }));
+          return { keyword: kw, results: mapped };
+        } catch (err) {
+          console.warn('[Research-Service] ⚠️ Tavily failed for "' + kw.keyword + '": ' + err.message);
+          return { keyword: kw, results: [] };
+        }
+      });
+
+      const tavilyResults = await Promise.all(tavilyPromises);
+
+      // Merge Tavily results into searchResults (deduplicate by link)
+      for (const tr of tavilyResults) {
+        const existing = searchResults.find(s => s.keyword.keyword === tr.keyword.keyword);
+        if (existing) {
+          const existingLinks = new Set(existing.results.map(r => r.link));
+          const newResults = tr.results.filter(r => !existingLinks.has(r.link));
+          existing.results = [...existing.results, ...newResults];
+        } else {
+          searchResults.push(tr);
+        }
+      }
+
+      successfulSearches = searchResults.filter(s => s.results.length > 0);
+      const tavilyCount = tavilyResults.reduce((sum, t) => sum + t.results.length, 0);
+      console.log('[Research-Service] ✅ Tavily added ' + tavilyCount + ' results → total successful: ' + successfulSearches.length);
+    }
 
     if (successfulSearches.length === 0) {
       console.warn('[Research-Service] ⚠️ No search results at all — returning empty items');
       const duration = Date.now() - startTime;
-      await logPipeline({ workflowId, step: 'research-search', status: 'success', duration, detail: '0 results (no SERPER or no match)' }).catch(() => {});
+      await logPipeline({ workflowId, step: 'research-search', status: 'success', duration, detail: '0 results (no SERPER/Tavily or no match)' }).catch(() => {});
       return {
         items: [],
         notFound: keywords.map(k => k.keyword),
@@ -337,7 +387,7 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
         duration: parseFloat((duration / 1000).toFixed(1)),
         keywordSource,
         fallbackUsed: keywordFallbackUsed,
-        warning: 'RESEARCH_SEARCH_FAILED: ไม่พบผลค้นหา (Serper key หรือ network อาจมีปัญหา)',
+        warning: 'RESEARCH_SEARCH_FAILED: ไม่พบผลค้นหา (Serper/Tavily key หรือ network อาจมีปัญหา)',
       };
     }
 

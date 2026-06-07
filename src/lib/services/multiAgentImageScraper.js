@@ -626,8 +626,8 @@ async function judgeImages(candidates, newsTitle, identity) {
   const emotion = identity?.emotion || 'neutral';
   const coverEmotion = identity?.coverEmotion || 'drama';
 
-  // ★ เพิ่ม newsContent ให้ Judge อ่านเนื้อข่าวด้วย (ไม่ใช่แค่ชื่อข่าว)
-  const newsContent = identity?.story || storyContext;
+  // ★ ใช้เนื้อข่าวเต็ม (ถูก inject จาก auto-cover route) แทนแค่ 1 ประโยค
+  const newsContent = identity?._newsContent || identity?.story || storyContext;
   const keyEvents = identity?.specific_details?.key_events?.join(', ') || '';
   const keyScenes = identity?.keyScenes?.join(', ') || '';
 
@@ -635,7 +635,7 @@ async function judgeImages(candidates, newsTitle, identity) {
 You are a senior photo editor selecting images for a viral news cover.
 
 📰 ข่าว: "${storyContext}"
-📝 เนื้อข่าว: "${newsContent}"
+📝 เนื้อข่าว (เต็ม): "${(newsContent || '').slice(0, 800)}"
 🎭 ตัวละครหลัก: "${mainChar}"
 👤 ตัวละครรอง: "${identity?.secondaryCharacter || 'ไม่มี'}"
 💢 อารมณ์ข่าว: ${emotion} → Cover mood: ${coverEmotion}
@@ -1128,23 +1128,38 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
   console.log(`  TikTok: ${identity?.searchTikTok || 'N/A'}`);
   console.log('============================================');
 
-  // Run all 3 agents in parallel
-  const [googleResult, youtubeResult, contextResult] = await Promise.allSettled([
+  // Run all agents in parallel — ★ เพิ่ม Agent 4: Tavily AI Search
+  let tavilyPromise = Promise.resolve([]);
+  try {
+    const { tavilyImageSearch, isTavilyAvailable } = await import('@/lib/services/tavilyService');
+    if (isTavilyAvailable()) {
+      const sq = identity?.searchQueries || {};
+      const tavilyQuery = sq.person_context || sq.key_activity || identity?.searchGoogle || newsTitle || '';
+      if (tavilyQuery) {
+        tavilyPromise = tavilyImageSearch(tavilyQuery).catch(() => []);
+      }
+    }
+  } catch { /* Tavily not available */ }
+
+  const [googleResult, youtubeResult, contextResult, tavilyResult] = await Promise.allSettled([
     agentGoogleCleanImages(identity),
     agentYouTubeFrames(identity),
-    agentContextImages(identity)
+    agentContextImages(identity),
+    tavilyPromise
   ]);
 
   // Collect results from each agent
   const googleImages = googleResult.status === 'fulfilled' ? googleResult.value : [];
   const youtubeImages = youtubeResult.status === 'fulfilled' ? youtubeResult.value : [];
   const contextImages = contextResult.status === 'fulfilled' ? contextResult.value : [];
+  const tavilyImages = tavilyResult.status === 'fulfilled' ? (tavilyResult.value || []).filter(u => typeof u === 'string' && u.startsWith('http')) : [];
 
   console.log('============================================');
   console.log(`[MultiAgent] Agent results:`);
   console.log(`  Agent 1 (Google):   ${googleImages.length} images ${googleResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + googleResult.reason : ''}`);
   console.log(`  Agent 2 (YouTube):  ${youtubeImages.length} frames ${youtubeResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + youtubeResult.reason : ''}`);
   console.log(`  Agent 3 (Context):  ${contextImages.length} images ${contextResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + contextResult.reason : ''}`);
+  console.log(`  Agent 4 (Tavily):   ${tavilyImages.length} images ${tavilyResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + tavilyResult.reason : ''}`);
 
   // ★★★ จัดลำดับความสำคัญ — ตัวละครหลักต้องมาก่อน!
   // Priority: ตัวละครหลัก (18 ภาพ) → บริบท/สถานที่ (8 ภาพ) → YouTube (4 ภาพ)
@@ -1155,9 +1170,12 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
   const prioritized = [];
   const seen = new Set();
   
-  // สร้าง queue แยก: Google (ภาพคน) vs Context (ภาพบริบท)
+  // สร้าง queue แยก: Google (ภาพคน) vs Context (ภาพบริบท) + Tavily (AI search)
   const googleQueue = googleImages.filter(img => !seen.has(img));
-  const contextQueue = contextImages.filter(img => !googleQueue.includes(img)); // ไม่ซ้ำกับ Google
+  const contextQueue = [
+    ...contextImages.filter(img => !googleQueue.includes(img)),
+    ...tavilyImages.filter(img => !googleQueue.includes(img) && !contextImages.includes(img)),
+  ]; // ★ รวม Tavily เข้า context queue
   const ytQueue = youtubeImages.filter(img => !googleQueue.includes(img) && !contextQueue.includes(img));
   
   let gIdx = 0, cIdx = 0, yIdx = 0;

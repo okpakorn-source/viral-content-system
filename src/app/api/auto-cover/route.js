@@ -123,7 +123,7 @@ export async function POST(request) {
     }
     
     const breakdownData = {
-      core_story: contentText.substring(0, 1000) || titleText, // ★ เพิ่มจาก 500 → 1000 chars
+      core_story: contentText.substring(0, 3000) || titleText, // ★ เพิ่มเป็น 3000 chars เพื่อให้ AI สร้าง search queries ที่แม่นขึ้น
       key_facts: {
         people: extractedPeople.slice(0, 5), // ★ ส่งชื่อคนจริง
       },
@@ -210,6 +210,12 @@ export async function POST(request) {
     console.log(`[AutoCover] Keywords: ${JSON.stringify(identity.keywords || [])}`);
     console.log(`[AutoCover] KeyScenes: ${JSON.stringify(identity.keyScenes || [])}`);
     console.log(`[AutoCover] People sent to AI: ${JSON.stringify(breakdownData.key_facts.people)}`);
+
+    // ★ Inject full newsContent into identity for Vision Judge
+    if (identity) {
+      identity._newsContent = (content || '').slice(0, 2000);
+      identity._newsTitle = newsTitle || '';
+    }
 
     // Step 2: Multi-agent image search
     const { runMultiAgentImageSearch } = await import('@/lib/services/multiAgentImageScraper');
@@ -627,8 +633,8 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
 ดูภาพ ${thumbnails.length} ภาพด้านบน (ภาพ #0 ถึง #${thumbnails.length - 1} ตามลำดับ)
 
 ## เนื้อข่าว:
-หัวข้อ: ${newsTitle || 'ไม่ระบุ'}
-เนื้อหา: ${(newsContent || '').substring(0, 800)}
+📰 หัวข้อข่าว: "${newsTitle || 'ไม่ระบุ'}"
+📝 เนื้อข่าวย่อ: "${(newsContent || '').slice(0, 500)}"
 
 ## ตัวละครหลัก: ${identity?.mainCharacter || 'ไม่ระบุ'}
 ## สถานที่: ${identity?.location || 'ไม่ระบุ'}
@@ -725,17 +731,28 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
       item.recommendedRole
     );
     
+    // ★ Fix 4: Filter by relevance threshold — ภาพไม่เกี่ยวข่าว ห้ามเข้า layout!
+    const MIN_RELEVANCE = 5;
+    const relevantItems = validItems.filter(item => (item.relevance || 0) >= MIN_RELEVANCE);
+    
+    // Fallback: ถ้าเหลือน้อยกว่า 3 ภาพ → ลดเกณฑ์เป็น >= 4
+    const finalCurated = relevantItems.length >= 3 
+      ? relevantItems 
+      : validItems.filter(item => (item.relevance || 0) >= 4);
+    
+    console.log(`[Curator] 🎯 Relevance filter: ${validItems.length} total → ${relevantItems.length} (≥${MIN_RELEVANCE}) → ${finalCurated.length} final`);
+    
     // Log ผล Curator
-    const contextImages = validItems.filter(i => 
+    const contextImages = finalCurated.filter(i => 
       i.recommendedRole === 'CONTEXT_SCENE' || i.recommendedRole === 'EVIDENCE'
     );
     
-    for (const item of validItems) {
+    for (const item of finalCurated) {
       console.log(`[Curator] Image #${item.index}: ${item.recommendedRole} (relevance: ${item.relevance}/10) — ${item.reason || ''}`);
     }
-    console.log(`[Curator] 📊 Results: ${validItems.length} images curated, ${contextImages.length} context/evidence images`);
+    console.log(`[Curator] 📊 Results: ${finalCurated.length} images curated, ${contextImages.length} context/evidence images`);
     
-    return validItems;
+    return finalCurated;
     
   } catch (err) {
     console.warn('[Curator] Error:', err.message);
