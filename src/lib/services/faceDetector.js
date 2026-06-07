@@ -23,7 +23,7 @@ export async function detectFaces(imageBuffer) {
     try {
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
 
       // Resize ภาพให้เล็กลงก่อนส่ง (ลด cost)
       const metadata = await sharp(imageBuffer).metadata();
