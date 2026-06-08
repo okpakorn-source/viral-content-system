@@ -127,10 +127,16 @@ const BLOCKED_DOMAINS = [
   'twitter.com', 'x.com', 'twimg.com',
   // ★ Stock photo sites — ห้ามเด็ดขาด (ภาพไม่ใช่คนในข่าว!)
   'shutterstock.com', 'istockphoto.com', 'freepik.com', 'pexels.com',
-  'pixabay.com', '123rf.com', 'dreamstime.com', 'gettyimages.com',
+  'pixabay.com', '123rf.com', 'dreamstime.com',
+  // ★★★ Getty Images — block ทุก CDN variant!
+  'gettyimages.com', 'gettyimages.net', 'gettyimages.co.uk',
+  'media.gettyimages.com', 'gi.gettyimages.com',
+  'media2.gettyimages.com', 'media3.gettyimages.com',
   'unsplash.com', 'canva.com', 'depositphotos.com', 'rawpixel.com',
   'stock.adobe.com', 'alamy.com', 'bigstockphoto.com',
+  'alamyimages.com', 'age.fotostock.com',
 ];
+
 
 const BLOCKED_URL_KEYWORDS = ['logo', 'icon', 'banner', 'watermark', 'avatar', 'sprite', 'pixel', 'tracking', 'crawler', 'widget'];
 
@@ -138,6 +144,8 @@ function isCleanImageUrl(url) {
   if (!url || !url.startsWith('http')) return false;
   const lower = url.toLowerCase();
   if (BLOCKED_DOMAINS.some(domain => lower.includes(domain))) return false;
+  // ★ Block Getty by URL keyword (ครอบคลุมทุก CDN path)
+  if (lower.includes('gettyimages') || lower.includes('getty-images') || lower.includes('/gettyimages/')) return false;
   if (BLOCKED_URL_KEYWORDS.some(kw => lower.includes(kw))) return false;
   // Prefer direct image file URLs
   const hasImageExt = /\.(jpg|jpeg|png|webp|gif)/i.test(url);
@@ -146,6 +154,7 @@ function isCleanImageUrl(url) {
   if (isApiUrl && !hasImageExt) return false;
   return true;
 }
+
 
 // ==========================================
 // Agent 1: Google Clean Image Search (Serper API)
