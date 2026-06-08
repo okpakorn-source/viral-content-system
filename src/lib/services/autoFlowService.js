@@ -245,7 +245,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   // ===================================================================
   rlog.divider('MULTI-ANGLE PARALLEL PIPELINE');
   
-  const anglesToUse = breakdownData.possible_angles?.slice(0, 4) || [];
+  const anglesToUse = breakdownData.possible_angles?.slice(0, 3) || []; // ★ max 3 angles (was 4) — ลดเวลา generate
   if (anglesToUse.length === 0) {
     anglesToUse.push({ angle_name: 'นำเสนอข่าวสารทั่วไป', description: 'เล่าเหตุการณ์ตามจริง' });
   }
@@ -341,7 +341,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
         _researchItems: researchItems,
         _topPrompt: topPrompt
       };
-    })(), 240000, `generate_A${index + 1}`); // ★ 240s per angle — research + Claude generate needs more time with gpt-5.5
+    })(), 150000, `generate_A${index + 1}`); // ★ 150s per angle (was 240s) — ลดจาก rate limit + Claude latency
   });
 
   const genResults = await Promise.allSettled(generationTasks);

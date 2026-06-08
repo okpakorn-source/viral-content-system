@@ -187,7 +187,7 @@ function NewContentPageInner() {
     }
 
     // 2. Poll for result
-    const maxPollTime = 8 * 60 * 1000; // 8 minutes max
+    const maxPollTime = 12 * 60 * 1000; // 12 minutes max (pipeline ~5-8min)
     const startTime = Date.now();
     let workerRetriggerCount = 0;
     let notFoundCount = 0; // ★ Track consecutive 'job not found' responses
