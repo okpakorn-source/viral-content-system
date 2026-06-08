@@ -115,7 +115,9 @@ export async function analyzeStoryIdentity(newsTitle, breakdownData) {
     "person_past": "★★ คำค้นภาพอดีต เช่น 'นิรุตติ์ ศิริจรรยา สมัยหนุ่ม' (ถ้าข่าวมีไทม์ไลน์)",
     "key_relationship": "★★★ ชื่อ + relationship เช่น ถ้า relationship='แม่' → 'หมอโบว์ แม่' หรือ 'หมอโบว์ ครอบครัว' — ห้ามใส่ชื่อสัตว์/อาชีพ",
     "key_activity": "★★★ ชื่อ + celebratedAction ล้วนๆ เช่น 'หมอโบว์ ดูแลแม่' หรือ 'ก้อย รัชวิน บริจาค' — ต้องมี! ห้ามใช้ occupation!",
-    "story_contrast": "★★ คำค้นที่สร้างความต่าง เช่น 'น้ำฝน สมัยสาว' หรือ 'โรงเรียน ก่อนบูรณะ'"
+    "story_contrast": "★★ คำค้นที่สร้างความต่าง เช่น 'น้ำฝน สมัยสาว' หรือ 'โรงเรียน ก่อนบูรณะ'",
+    "storySubject_direct": "★★★★ คำค้นตรงๆ สำหรับ storySubject (ไม่ใช่ตัวเอก!) เช่น: ถ้า storySubject='สายฟ้า-พายุ' → 'ชมพู่ ลูก สายฟ้า พายุ', ถ้า storySubject='แม่' → 'หมอโบว์ แม่ ครอบครัว' — ต้องค้นสิ่งที่ข่าวเล่าถึงโดยตรง!"
+
   },
 
   "searchGoogle": "คำค้น Google Image หลัก (ภาษาไทย)",
