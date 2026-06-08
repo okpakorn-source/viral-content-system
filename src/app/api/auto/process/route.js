@@ -14,7 +14,7 @@
  *
  * Returns: same as /api/auto (backward compatible)
  */
-export const maxDuration = 300; // Allow 5 minutes for heavy LLM operations
+export const maxDuration = 800; // Allow ~13 min for heavy LLM pipeline (pipeline can take 300-480s+)
 import { NextResponse } from 'next/server';
 import { detectInputType } from '@/lib/input-engine/detector';
 import { routePipeline }   from '@/lib/input-engine/router';

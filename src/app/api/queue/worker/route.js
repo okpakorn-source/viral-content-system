@@ -26,8 +26,8 @@ export async function POST(req) {
     }
     // No auth header = same-origin trigger (web client or server self-call) = allowed
     
-    // 1.5. Cleanup stale jobs first (stuck > 10 minutes)
-    const cleaned = await cleanupStaleJobs(10).catch(() => 0);
+    // 1.5. Cleanup stale jobs first (stuck > 6 minutes)
+    const cleaned = await cleanupStaleJobs(6).catch(() => 0);
     if (cleaned > 0) {
       logger.info(`[Queue Worker] 🧹 Cleaned ${cleaned} stale jobs`);
     }
@@ -64,6 +64,12 @@ export async function POST(req) {
         });
         clearTimeout(timeout);
         
+        // Guard: ถ้า HTTP error ให้ throw เข้า catch block เพื่อ mark failed
+        if (!res.ok) {
+          const errText = await res.text().catch(() => `HTTP ${res.status}`);
+          throw new Error(`process API failed: ${res.status} — ${errText.substring(0, 200)}`);
+        }
+
         const data = await res.json();
         
         if (res.ok && data.success) {

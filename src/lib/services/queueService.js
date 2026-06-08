@@ -57,14 +57,14 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
     // 0. Single getAll() call — then do cleanup in-memory to avoid multiple round-trips
     const allJobs = await store.getAll();
     
-    // 0a. Auto-cleanup: reset stale "processing" jobs stuck > 8 minutes
-    const cutoff = new Date(Date.now() - 8 * 60 * 1000);
+    // 0a. Auto-cleanup: reset stale "processing" jobs stuck > 6 minutes
+    const cutoff = new Date(Date.now() - 6 * 60 * 1000);
     for (const j of allJobs) {
       if (j.status === 'processing' && new Date(j.startedAt || j.createdAt) < cutoff) {
         await store.update(j.id, (existing) => ({
           ...existing,
           status: 'failed',
-          error: `Stale job — stuck for >8 minutes, auto-reset by enqueue cleanup`,
+          error: `Stale job — stuck for >6 minutes, auto-reset by enqueue cleanup`,
           completedAt: new Date().toISOString(),
         }));
         j.status = 'failed'; // Update in-memory too
