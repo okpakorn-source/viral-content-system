@@ -57,7 +57,7 @@ async function evaluateFinalCover(base64Image, newsTitle) {
   try {
     const { GoogleGenerativeAI } = await import('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     const prompt = `You are an elite news Art Director evaluating a composed 1200x1350 news cover for: "${newsTitle}".
 
@@ -226,277 +226,16 @@ export async function POST(request) {
       identity._newsTitle = newsTitle || '';
     }
 
-    // ════════════════════════════════════════════════════════
-    // ★ PROGRAMMATIC QUERY OVERRIDE (ROOT FIX)
-    // ไม่ได้พึ่ง AI ทำตาม schema — override ตาม celebratedAction จริงๆ
-    // ★★★ ถ้า celebratedAction มี → ALWAYS override ทันที
-    //     (ลบ occupationImportance threshold — มันเข้มเกินไป)
-    //     occupation threshold ใช้แค่กับ image scoring ไม่ใช่ query gen
-    // ════════════════════════════════════════════════════════
-    {
-      const cs = identity?.coreStory || {};
-      const celebratedAction = cs.celebratedAction;
-      const occupationImportance = cs.occupationImportance ?? 1.0;
-      const relationship = cs.relationship;
-      const hero = identity?.mainCharacter || '';
-
-      if (celebratedAction && hero && identity?.searchQueries) {
-        // ★ Always override — celebratedAction drives queries regardless of occupationImportance
-        const sq = identity.searchQueries;
-        const prevKeyActivity = sq.key_activity;
-        const prevPersonContext = sq.person_context;
-        sq.key_activity     = `${hero} ${celebratedAction}`.trim();
-        sq.key_relationship = relationship ? `${hero} ${relationship}`.trim() : `${hero} ครอบครัว`;
-        sq.person_context   = relationship ? `${hero} ${relationship}`.trim() : `${hero} ${celebratedAction}`.trim();
-        sq.event_scene      = `${hero} ${celebratedAction}`.trim();
-        identity.searchGoogle  = `${hero} ${celebratedAction}`.trim().substring(0, 80);
-        identity.searchYouTube = relationship ? `${hero} ${relationship} ${celebratedAction}`.trim().substring(0, 60) : `${hero} ${celebratedAction}`.trim().substring(0, 60);
-        console.log(`[AutoCover] ★ QUERY OVERRIDE (occupationImportance=${occupationImportance})`);
-        console.log(`  key_activity:     "${prevKeyActivity}" -> "${sq.key_activity}"`);
-        console.log(`  person_context:   "${prevPersonContext}" -> "${sq.person_context}"`);
-        console.log(`  key_relationship: "${sq.key_relationship}"`);
-        console.log(`  searchGoogle:     "${identity.searchGoogle}"`);
-      } else {
-        console.log(`[AutoCover] No override: celebratedAction="${celebratedAction || 'N/A'}", occImportance=${occupationImportance}`);
-      }
-    }
-
-    // ════════════════════════════════════════════════════════
-    // ★ BUILD coreImageQueries — ชุดคีย์เดียวใช้ทุก Agent
-    // ทุก Agent (Google/YouTube/Tavily/Context) ใช้ชุดเดียวกัน
-    // ไม่แยก "YouTube ใช้คีย์หนึ่ง Tavily ใช้คีย์อื่น"
-    // ════════════════════════════════════════════════════════
-    if (identity) {
-      const _hero = identity.mainCharacter || '';
-      const _action = identity.coreStory?.celebratedAction || '';
-      const _rel = identity.coreStory?.relationship || '';
-      const _subject = identity.coreStory?.storySubject || '';  // ★ ใคร/อะไรที่ข่าวเล่าถึงจริงๆ
-      const _sq = identity.searchQueries || {};
-
-      console.log(`[AutoCover] ★ STORY FOCUS: hero="${_hero}" | storySubject="${_subject}" | relationship="${_rel}" | celebratedAction="${_action}"`);
-
-      if (_hero && (_action || _rel || _subject)) {
-        // Core queries — ทุก Agent MUST search เหล่านี้ก่อน
-        const core = [
-          // ★★★ storySubject ก่อนเสมอ — ข่าวเล่าเรื่องใคร?
-          (_subject && _subject !== _hero) ? `${_hero} ${_subject}` : null,
-          (_subject && _subject !== _hero) ? _subject : null,  // ค้น storySubject ตรงๆ
-          _rel  ? `${_hero} ${_rel}` : null,
-          _action ? `${_hero} ${_action}` : null,
-          (_rel && _action) ? `${_hero} ${_rel} ${_action}` : null,
-          _sq.key_relationship && _sq.key_relationship !== `${_hero} ${_rel}` ? _sq.key_relationship : null,
-          _sq.key_activity && _sq.key_activity !== `${_hero} ${_action}` ? _sq.key_activity : null,
-        ].filter(Boolean).map(q => q.trim()).filter((q, i, a) => q.length > 3 && a.indexOf(q) === i);
-
-        // Optional queries — occupation/context — ค้นหลัง core เสร็จ
-        const optional = [
-          _sq.person_portrait,
-          _sq.person_closeup,
-          _sq.person_emotion,
-        ].filter(Boolean);
-
-        identity.coreImageQueries = core;
-        identity.optionalContextQueries = optional;
-        identity._storySubject = _subject || _rel || _action; // ★ ใช้ใน Vision Judge
-        console.log(`[AutoCover] ★ coreImageQueries: ${JSON.stringify(core)}`);
-        console.log(`[AutoCover]   storySubject:     "${_subject || '(same as hero)'}"`);
-        console.log(`[AutoCover]   optionalContext:  ${JSON.stringify(optional)}`);
-      } else {
-        identity.coreImageQueries = [];
-        identity.optionalContextQueries = [];
-        console.log(`[AutoCover] ⚠️ coreImageQueries EMPTY — hero="${_hero}" subject="${_subject}" action="${_action}" rel="${_rel}"`);
-      }
-    }
-
-
-    // ═══════════════════════════════════════════════════════
-    // Step 1.5: Entity Resolver — ค้นหา Social Profile ของตัวละครหลัก
-    // ═══════════════════════════════════════════════════════
-    let entityData = { found: false, warning: null };
-    let resolvedRelationships = { hero: { name: identity?.mainCharacter || '', searchName: identity?.mainCharacter || '' }, relationships: [], evidenceCategories: ['hero', 'interview'] };
-    let coverPlan = null;
-    let evidencePool = {};
-    let evidencePoolTotal = 0;
-
-    try {
-      if (identity?.mainCharacter) {
-        console.log(`[AutoCover] 🔍 Step 1.5: Entity Resolver → "${identity.mainCharacter}"`);
-        const { resolveEntity } = await import('@/lib/services/entityResolverService');
-        entityData = await resolveEntity(identity.mainCharacter, newsTitle || '', identity);
-        if (entityData.warning) console.log(`[AutoCover] ⚠️ Entity: ${entityData.warning}`);
-      } else {
-        entityData.warning = 'storyIdentity ไม่สามารถระบุตัวละครหลักได้จากข่าวนี้';
-        console.log('[AutoCover] ⚠️ No mainCharacter — skipping Entity Resolver');
-      }
-    } catch (entityErr) {
-      console.error('[AutoCover] Entity Resolver failed (non-critical):', entityErr.message);
-      entityData = { found: false, warning: `Entity Resolver error: ${entityErr.message}` };
-    }
-
-    // ═══════════════════════════════════════════════════════
-    // Step 1.6: Relationship Resolver — วิเคราะห์ตัวละครและความสัมพันธ์ในข่าว
-    // ═══════════════════════════════════════════════════════
-    try {
-      if (identity?.mainCharacter) {
-        console.log('[AutoCover] 👥 Step 1.6: Relationship Resolver...');
-        const { resolveRelationships } = await import('@/lib/services/relationshipResolverService');
-        resolvedRelationships = await resolveRelationships(identity, content || '');
-        console.log(`[AutoCover] 👥 Relationships: ${resolvedRelationships.relationships?.length || 0} found, categories: ${(resolvedRelationships.evidenceCategories || []).join(', ')}`);
-      }
-    } catch (relErr) {
-      console.error('[AutoCover] Relationship Resolver failed (non-critical):', relErr.message);
-    }
-
-    // Step 2: Multi-agent image search (parallel กับ Step 1.7–1.8)
+    // Step 2: Multi-agent image search
     const { runMultiAgentImageSearch } = await import('@/lib/services/multiAgentImageScraper');
 
-    // ★ Run Step 1.7 (CoverPlanner) + Step 1.8 (EvidenceLibrary) + Step 2 (MultiAgent) แบบ parallel
-    const [multiAgentResult, evidenceResult] = await Promise.allSettled([
-      // Step 2: Multi-agent image search (keyword-based เหมือนเดิม)
-      runMultiAgentImageSearch(
-        sourceUrl || '',
-        sourceUrl ? 'url' : 'text',
-        identity.characters || [],
-        newsTitle || content?.substring(0, 100),
-        identity
-      ),
-      // Step 1.7 + 1.8: CoverPlanner + EvidenceLibrary (entity-first)
-      (async () => {
-        try {
-          // Step 1.7: Cover Planner — วางแผน slot-to-category mapping
-          // (ต้องรู้ chosenTemplate ก่อน — แต่ตอนนี้ยังไม่รู้ เลยใช้ templateId จาก body หรือ 'auto')
-          // ★ ถ้า templateId='auto' → ใช้ fallback plan ก่อน (จะ refine หลัง autoSelectTemplate)
-          const planTemplateId = templateId !== 'auto' ? templateId : 'template_5';
-          console.log(`[AutoCover] 📋 Step 1.7: Cover Planner → template: ${planTemplateId}`);
-          const { planCoverLayout } = await import('@/lib/services/coverPlannerService');
-          coverPlan = await planCoverLayout(resolvedRelationships, planTemplateId, identity);
-          console.log(`[AutoCover] 📋 Cover Plan: ${coverPlan.slots?.length || 0} slots mapped (source: ${coverPlan.source})`);
-
-          // Step 1.8: Evidence Library — ค้นภาพแยกตาม category
-          console.log('[AutoCover] 📚 Step 1.8: Evidence Library...');
-          const { buildEvidenceLibrary } = await import('@/lib/services/evidenceLibrary');
-          const evLib = await buildEvidenceLibrary(resolvedRelationships, identity);
-          evidencePoolTotal = evLib.totalCount || 0;
-          evidencePool = evLib._raw || {};
-          console.log(`[AutoCover] 📚 Evidence Library: ${evidencePoolTotal} images across ${Object.keys(evidencePool).length} categories`);
-
-          // ★ v3 Step 1.9: Event Resolver — fallback เมื่อ entity ไม่พบ Social Profile
-          if (!entityData?.found && evidencePoolTotal === 0) {
-            console.log('[AutoCover] 🌐 Step 1.9: Event Resolver fallback (no entity profile found)...');
-            try {
-              const { resolveEvent } = await import('@/lib/services/eventResolverService');
-              const eventResult = await resolveEvent(identity);
-              if (eventResult.eventImages && eventResult.eventImages.length > 0) {
-                // inject event images เข้า evidencePool ใน category 'event'
-                evidencePool['event'] = eventResult.eventImages;
-                evidencePoolTotal += eventResult.eventImages.length;
-                console.log(`[AutoCover] 🌐 Event Resolver: ${eventResult.eventImages.length} images added`);
-              } else if (eventResult.warning) {
-                console.log(`[AutoCover] ⚠️ Event Resolver: ${eventResult.warning}`);
-              }
-            } catch (evtErr) {
-              console.warn('[AutoCover] Event Resolver failed (non-critical):', evtErr.message);
-            }
-          }
-
-          return evLib;
-        } catch (evErr) {
-          console.error('[AutoCover] Evidence pipeline failed (non-critical):', evErr.message);
-          return null;
-        }
-      })()
-    ]);
-
-    // แยก results
-    const multiAgentImages = multiAgentResult.status === 'fulfilled' ? (multiAgentResult.value || []) : [];
-    if (multiAgentResult.status === 'rejected') {
-      console.error('[AutoCover] MultiAgent search failed:', multiAgentResult.reason?.message);
-    }
-
-    // ═══════════════════════════════════════════════════════
-    // Step 2.5: Merge Entity-First images (priority) + MultiAgent images (fallback)
-    // ═══════════════════════════════════════════════════════
-    const entityFirstImages = [];
-    if (evidencePoolTotal > 0) {
-      const catToRole = {
-        hero: 'HERO_FACE',
-        mother: 'RELATIONSHIP', father: 'RELATIONSHIP', sibling: 'RELATIONSHIP',
-        child: 'RELATIONSHIP', spouse: 'RELATIONSHIP', partner: 'RELATIONSHIP',
-        caregiving: 'KEY_ACTIVITY', activity: 'KEY_ACTIVITY', work: 'KEY_ACTIVITY',
-        interview: 'PERSON_SUPPORT',
-        location: 'CONTEXT_SCENE', evidence: 'EVIDENCE',
-        relationship: 'RELATIONSHIP', family: 'RELATIONSHIP',
-        event: 'CONTEXT_SCENE', // ★ v3: event images จาก eventResolverService
-      };
-
-      const RELATIONSHIP_CATS = new Set(['mother', 'father', 'spouse', 'partner', 'child', 'sibling', 'friend']);
-      const heroNameForConfidence = resolvedRelationships?.hero?.name || identity?.mainCharacter || '';
-      const { filterRelationshipImages } = await import('@/lib/services/evidenceConfidenceService').catch(() => ({ filterRelationshipImages: null }));
-
-      for (const [cat, imgs] of Object.entries(evidencePool)) {
-        const role = catToRole[cat] || 'PERSON_SUPPORT';
-        let catImgs = (imgs || []).filter(img => img.imageUrl);
-
-        // ★ v3: กรอง relationship images ด้วย Evidence Confidence (เฉพาะ high-importance)
-        if (RELATIONSHIP_CATS.has(cat) && filterRelationshipImages && catImgs.length > 0) {
-          try {
-            // ★ v4 Step 1.9: Caption Analyzer — pre-sort ด้วย text (เบากว่า Vision มาก)
-            let sortedImgs = catImgs;
-            try {
-              const { sortAndFilterByCaptions } = await import('@/lib/services/captionAnalyzerService').catch(() => ({ sortAndFilterByCaptions: null }));
-              if (sortAndFilterByCaptions) {
-                sortedImgs = await sortAndFilterByCaptions(catImgs, cat, heroNameForConfidence);
-                console.log(`[AutoCover] 📝 Caption sort (${cat}): ${sortedImgs.length}/${catImgs.length} after caption filter`);
-              }
-            } catch (capErr) {
-              console.warn(`[AutoCover] Caption Analyzer error (${cat}):`, capErr.message);
-            }
-
-            // ★ v3 Step 1.10: ตรวจ top 3 (caption-sorted) ด้วย Vision
-            const toCheck = sortedImgs.slice(0, 3);
-            const passed = await filterRelationshipImages(toCheck, heroNameForConfidence);
-            const passedUrls = new Set(passed.map(p => p.imageUrl || p.url));
-            const passedCount = toCheck.filter(img => passedUrls.has(img.imageUrl)).length;
-            console.log(`[AutoCover] 🔬 Confidence filter (${cat}): ${passedCount}/${toCheck.length} passed`);
-            // ถ้าไม่ผ่าน → ใช้ hero category แทน slot นั้น (fallback)
-            if (passedCount === 0 && toCheck.length > 0) {
-              console.log(`[AutoCover] ⚠️ Confidence: all ${cat} images failed → using hero fallback for this slot`);
-              catImgs = []; // skip — hero fallback จะถูกเลือกโดย assignImagesToSlots
-            } else {
-              catImgs = sortedImgs.filter(img => passedUrls.has(img.imageUrl) || !toCheck.find(t => t.imageUrl === img.imageUrl));
-            }
-          } catch (cfErr) {
-            console.warn(`[AutoCover] Confidence filter error (${cat}):`, cfErr.message);
-          }
-        }
-
-        for (const img of catImgs) {
-          // combine quality score: authorityScore (0.3) + captionScore (0.4) + base (0.3)
-          const authorityScore = img.authorityScore || 0.35;
-          const captionScore = img.captionScore || 0.5;
-          const qualityScore = (authorityScore * 0.3) + (captionScore * 0.4) + (0.3 * (cat === 'hero' ? 1.0 : 0.7));
-          entityFirstImages.push({
-            url: img.imageUrl,
-            role,
-            score: cat === 'hero' ? 9 : 7,
-            qualityScore,
-            authorityScore,
-            captionScore: img.captionScore,
-            captionMatch: img.captionMatch,
-            source: 'entity_first',
-            evidenceCat: cat,
-          });
-        }
-      }
-      console.log(`[AutoCover] 🔀 Step 2.5: Merged ${entityFirstImages.length} entity-first + ${multiAgentImages.length} multiAgent images`);
-    }
-
-    // ★ Sort entity-first images by qualityScore DESC before merge
-    entityFirstImages.sort((a, b) => (b.qualityScore || 0) - (a.qualityScore || 0));
-
-    // รวม: entity-first มาก่อน (priority, sorted by quality) → multiAgent ตามหลัง
-    const bestImages = [...entityFirstImages, ...multiAgentImages];
-    console.log(`[AutoCover] 🏆 Best images: ${entityFirstImages.length} entity-first (sorted) + ${multiAgentImages.length} multiAgent`);
+    const bestImages = await runMultiAgentImageSearch(
+      sourceUrl || '',
+      sourceUrl ? 'url' : 'text',
+      identity.characters || [],
+      newsTitle || content?.substring(0, 100),
+      identity
+    );
 
     if (!bestImages || bestImages.length === 0) {
       return NextResponse.json(
@@ -649,26 +388,13 @@ export async function POST(request) {
       const hasMultipleFaces = [...faceDataMap.values()].filter(f => f.hasFaces).length;
       const numImages = imageBuffers.length;
 
-      // ★ v4: Cover DNA override — ถ้า DNA recommend template → ใช้ก่อน autoSelectTemplate
-      let dnaTemplate = null;
-      try {
-        const { matchCoverDNA } = await import('@/lib/services/coverDNAService');
-        const dna = matchCoverDNA(identity);
-        if (dna?.templateId) {
-          dnaTemplate = dna.templateId;
-          console.log(`[AutoCover] 🧬 Cover DNA override: ${dnaTemplate} (storyType: ${identity?.coverEmotion || 'unknown'})`);
-        }
-      } catch { /* DNA fail → ใช้ autoSelect */ }
-
       try {
         const { autoSelectTemplate } = await import('@/lib/coverTemplateRegistry');
-        const autoTemplate = autoSelectTemplate(numImages, hasMultipleFaces, identity);
-        // DNA มี priority — แต่ถ้า DNA template ไม่รองรับ image count → fallback autoSelect
-        chosenTemplate = dnaTemplate || autoTemplate;
+        chosenTemplate = autoSelectTemplate(numImages, hasMultipleFaces, identity);
       } catch {
-        chosenTemplate = dnaTemplate || 'template_5'; // fallback
+        chosenTemplate = 'template_5'; // fallback — safe general-purpose template
       }
-      console.log(`[AutoCover] Template selected: ${chosenTemplate} (source: ${dnaTemplate ? 'DNA' : 'autoSelect'})`);
+      console.log(`[AutoCover] Auto-selected template: ${chosenTemplate}`);
     }
 
     // Step 6: ★ ดึงคลังปกไวรัลมาเป็น reference ★
@@ -748,34 +474,6 @@ export async function POST(request) {
       // ถ้า Curator ล้มเหลว → ใช้ role เดิมจาก Judge (ไม่พัง!)
     }
 
-    // ★★★ Character Focus Rule: ถ้า heroImage ไม่มีหน้าคน (hasFaces=false)
-    // และมีภาพอื่นที่มีหน้าคน + curatorScore สูงกว่า → swap heroImage
-    // ป้องกันปัญหา: hero slot กลายเป็นภาพวิวทะเล/สถานที่ ไม่มีตัวละครหลัก
-    {
-      const heroCandidate = imageBuffers.find(img => img.role === 'HERO_FACE' || img.role === 'HERO');
-      if (heroCandidate) {
-        const heroIdx = imageBuffers.indexOf(heroCandidate);
-        const heroFaceData = faceDataMap?.get?.(String(heroIdx));
-        if (!heroFaceData?.hasFaces) {
-          // Hero ไม่มีหน้าคน → หาภาพอื่นที่มีหน้าคน + curatorScore สูงสุด
-          const faceImages = imageBuffers
-            .map((img, i) => ({ img, i, fd: faceDataMap?.get?.(String(i)) }))
-            .filter(({ i, img, fd }) => i !== heroIdx && fd?.hasFaces && (img.curatorScore || 0) >= 5);
-          
-          if (faceImages.length > 0) {
-            faceImages.sort((a, b) => (b.img.curatorScore || 0) - (a.img.curatorScore || 0));
-            const best = faceImages[0];
-            const oldRole = best.img.role;
-            best.img.role = 'HERO_FACE';
-            heroCandidate.role = oldRole || 'CONTEXT_SCENE';
-            console.log(`[AutoCover] 🔄 Character Focus Rule: swapped hero #${heroIdx} (no face) ↔ image #${best.i} (${oldRole}, score: ${best.img.curatorScore}) — now hero has face`);
-          } else {
-            console.log(`[AutoCover] ⚠️ Character Focus Rule: hero has no face, but no better face-image found (min score 5)`);
-          }
-        }
-      }
-    }
-
     // Timeout check before Step 7
     if (Date.now() - startTime > TIMEOUT_MS) {
       return NextResponse.json({ success: false, error: 'Pipeline timeout', errorType: 'TIMEOUT' }, { status: 504 });
@@ -843,71 +541,6 @@ export async function POST(request) {
       }
     } catch {
       // Keep default score 7
-    }
-
-    // FIX C: Cover Praising Test -- Story Match Validator (upgraded)
-    let storyMatchScore = null;
-    let storyMatchReason = null;
-    let viewerImpression = null;
-    let dominantElement = null;
-    let coverPraises = null;
-    let isCorrectPraise = null;
-    try {
-      if (identity?.coreStory?.emotionalHook && coverBuffer) {
-        const { GoogleGenerativeAI: _SmGAI } = await import('@google/generative-ai');
-        const smGenAI = new _SmGAI(process.env.GEMINI_API_KEY);
-        const smModel = smGenAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-
-        const celebratedTarget = identity.coreStory?.celebratedAction
-          || identity.coreStory?.emotionalHook
-          || 'the main story';
-
-        const storyMatchPrompt = `You are a cover critic. Look at this news cover image.
-
-Question 1: What is this cover PRAISING or CELEBRATING? (one sentence)
-Question 2: What story does the viewer think this is about? (one sentence)
-
-Target: This cover should praise: "${celebratedTarget}"
-
-Return JSON without markdown:
-{
-  "coverPraises": "what the cover is praising/celebrating",
-  "viewerThinks": "what story viewer thinks this is",
-  "storyMatch": 0-10,
-  "isCorrectPraise": true/false,
-  "dominantVisual": "what takes most space",
-  "reason": "why match or mismatch"
-}`;
-        const smResult = await smModel.generateContent([
-          storyMatchPrompt,
-          { inlineData: { data: coverBuffer.toString('base64'), mimeType: 'image/jpeg' } }
-        ]);
-        const smText = smResult.response.text().trim();
-        const smMatch = smText.match(/```(?:json)?\s*({[\s\S]*?})\s*```/) || smText.match(/({[\s\S]*?"storyMatch"[\s\S]*?})/);
-        if (smMatch) {
-          const smData = JSON.parse(smMatch[1] || smMatch[0]);
-          storyMatchScore = smData.storyMatch;
-          storyMatchReason = smData.reason;
-          viewerImpression = smData.viewerThinks;
-          dominantElement = smData.dominantVisual;
-          coverPraises = smData.coverPraises;
-          isCorrectPraise = smData.isCorrectPraise;
-          if (storyMatchScore < 3) {
-            console.warn(`[AutoCover] HARD REJECT: storyMatch=${storyMatchScore}/10`);
-            console.warn(`[AutoCover]   Cover praises: "${coverPraises}"`);
-            console.warn(`[AutoCover]   Should praise: "${celebratedTarget}"`);
-            console.warn(`[AutoCover]   Viewer thinks: "${viewerImpression}"`);
-          } else if (storyMatchScore < 5) {
-            console.warn(`[AutoCover] Story Match LOW: ${storyMatchScore}/10`);
-            console.warn(`[AutoCover] Cover praises: "${coverPraises}" | Should: "${celebratedTarget}"`);
-            console.warn(`[AutoCover] Viewer: "${viewerImpression}" | Dominant: "${dominantElement}"`);
-          } else {
-            console.log(`[AutoCover] Story Match: ${storyMatchScore}/10 -- ${storyMatchReason}`);
-          }
-        }
-      }
-    } catch (smErr) {
-      console.warn('[AutoCover] Story Match Validator error:', smErr.message);
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -991,26 +624,11 @@ Return JSON without markdown:
       newsHash,
       cachedImages: imageBuffers.length,
       caseId: caseResult?.caseId || null,
-      entityFound: entityData?.found || false,
-      entityWarning: entityData?.warning || null,
-      evidenceCategories: resolvedRelationships?.evidenceCategories || [],
-      evidenceImageCount: evidencePoolTotal || 0,
       identity: {
         mainCharacter: identity.mainCharacter,
         emotion: identity.emotion,
         coverEmotion: identity.coverEmotion,
       },
-      // FIX C: Cover Praising Test results
-      storyMatchScore: storyMatchScore ?? null,
-      storyMatchReason: storyMatchReason ?? null,
-      viewerImpression: viewerImpression ?? null,
-      dominantElement: dominantElement ?? null,
-      coverPraises: coverPraises ?? null,
-      isCorrectPraise: isCorrectPraise ?? null,
-      // storyMismatch: true = HARD REJECT (score < 3) -- UI should show warning
-      storyMismatch: storyMatchScore !== null && storyMatchScore < 3,
-      // coverPraising: viewer impression when score is LOW (< 5)
-      ...(storyMatchScore !== null && storyMatchScore < 5 ? { coverPraising: viewerImpression } : {}),
       // Gallery: ภาพทั้งหมดที่ค้นมา + role/score (thumbnail สร้างทีหลัง)
       gallery: imageBuffers.map((img, i) => {
         const fd = faceDataMap?.get?.(String(i));
@@ -1110,23 +728,6 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
 - ภาพอื่นทั้งหมด: ★ ต้องเกี่ยวกับ "เนื้อหาข่าว" โดยตรง! ★
   - ภาพสวยแต่ไม่เกี่ยวข่าว (วิวทะเล, fashion, ท่องเที่ยว, ไลฟ์สไตล์) → score ≤ 3 เท่านั้น!
   - ภาพที่เกี่ยวกับข่าวโดยตรง (กิจกรรมในข่าว, สถานที่ในข่าว, คนในข่าว) → score ≥ 7
-
-★★★ SCORING GUIDE — CHARACTER FOCUS:
-Give HIGH score (8-10) to images that:
-- Clearly show the main character's face (recognizable, close-up or medium-shot)
-- Capture the KEY moment/emotion of this specific news event
-- Are from the ACTUAL event (not generic stock, not old unrelated photos)
-
-Give MEDIUM score (5-7) to images that:
-- Show the main character but in unrelated context (old interview, fashion, lifestyle)
-- Show the event location/activity WITHOUT the main character
-- Show secondary characters related to the news
-
-Give LOW score (1-4) to images that:
-- Show only backgrounds/locations without any recognizable people
-- Are generic stock photos unrelated to this specific person or event
-- Are duplicate scenes of another already-scored image
-- Show people who are NOT subjects of this news story
   
 ตัวอย่าง: ข่าว "ก้อยรัชวิน บริจาค 5 แสนให้โรงเรียน"
 - ภาพก้อยถ่ายริมทะเล → score 2 (สวยแต่ไม่เกี่ยวข่าว)
@@ -1181,24 +782,7 @@ Give LOW score (1-4) to images that:
 - ต้องมี entry ครบทุกภาพ (index 0 ถึง ${thumbnails.length - 1}) ห้ามข้ามภาพไหน!
 - ภาพ stock photo / studio / กราฟิก → relevance <= 2
 - ภาพที่ไม่ใช่คนในข่าว → relevance <= 2
-- ★★★ ภาพที่เป็นคนในข่าวแต่ไม่เกี่ยวกับเนื้อหาข่าว (ไลฟ์สไตล์/แฟชั่น/ท่องเที่ยว) → relevance <= 3
-
-## ★★★ STORY WEIGHT SCORING (สำคัญที่สุด):
-
-ข่าวนี้มีน้ำหนักดังนี้:
-${JSON.stringify(identity?.coreStory?.storyWeight || {})}
-
-สิ่งที่ห้ามให้คะแนนสูง (negativeFocus):
-${(identity?.coreStory?.negativeFocus || []).join(', ') || 'ไม่มี'}
-
-กฎ STORY MATCH:
-- ภาพที่สะท้อน core story (relationship/sacrifice/caregiving) → score สูง (8-10)
-- ภาพที่สะท้อน context/occupation เท่านั้น → score ≤ 4 เสมอ
-- ภาพที่อยู่ใน negativeFocus เป็น dominant subject → score ≤ 2
-
-ถามตัวเองก่อนให้คะแนน:
-"ถ้าคนเห็นภาพนี้บน cover จะเข้าใจว่าข่าวนี้คือเรื่องอะไร?"
-ถ้าคำตอบไม่ตรงกับ core story → score ต้องต่ำ`;
+- ★★★ ภาพที่เป็นคนในข่าวแต่ไม่เกี่ยวกับเนื้อหาข่าว (ไลฟ์สไตล์/แฟชั่น/ท่องเที่ยว) → relevance <= 3`;
 
     console.log(`[Curator] 🧠 Analyzing ${thumbnails.length} images against news content...`);
     
@@ -1262,16 +846,13 @@ ${(identity?.coreStory?.negativeFocus || []).join(', ') || 'ไม่มี'}
 }
 
 // =============================================
-// AI Slot Assignment — Role-based NARRATIVE ORDER:
-// ★ hero slot      → MUST be clearest face of main character (HERO_FACE)
-// ★ highlight slot → key moment/climax of the news event (KEY_ACTIVITY / EVIDENCE)
-// ★ scene/bg_top   → location or context of the event (CONTEXT_SCENE)
-// ★ emotion/bg_bot → supporting mood or secondary character (EMOTION / RELATIONSHIP)
-// ★ circle         → single-face portrait of main character (not background!)
-// NEVER put a background/location-only image in hero slot.
-// NEVER put a duplicate of hero into any other slot.
+// AI Slot Assignment — Role-based: เรียนรู้จากปกตัวอย่าง 5 ภาพ
+// Slot 0 (Main): HERO_FACE — ใบหน้า closeup ชัด
+// Slot 1 (Top-right): CONTEXT_SCENE — สถานที่/เหตุการณ์
+// Highlight: EVIDENCE — ป้าย/เอกสาร/หลักฐาน
+// Bottom: EMOTION — อารมณ์/reaction
+// Circle: RELATIONSHIP — ความสัมพันธ์/ภาพคู่
 // =============================================
-// (Maintained by Character Focus Rule above — hero is guaranteed to have a face)
 async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identity, coverReferences) {
   try {
     let slotCount = 4;
@@ -1648,46 +1229,6 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
       
       if (photoOrder.length < slotCount) {
         console.log(`[assignSlots] ⚠️ Still only ${photoOrder.length}/${slotCount} images after fill`);
-      }
-    }
-
-    // ★ FIX 5: Negative Evidence Rules — ห้าม negativeFocus อยู่ใน hero/circle slots
-    // ถ้า coreStory ไม่มี → fallback: ใช้ logic เดิม
-    const negFocusTerms = identity?.coreStory?.negativeFocus || [];
-    const coreStoryAnchor = identity?.coreStory?.sacrifice || identity?.coreStory?.relationship || null;
-    if (negFocusTerms.length > 0) {
-      console.log(`[assignSlots] ★ NEGATIVE EVIDENCE RULES active — blocked: ${negFocusTerms.join(', ')}`);
-      if (coreStoryAnchor) {
-        console.log(`[assignSlots] ★ CORE STORY ANCHOR: "${coreStoryAnchor}" — remaining slots must reflect this`);
-      }
-      // ตรวจว่าภาพโดน flag หรือเปล่า (url/role) มีคำใน negativeFocus
-      const isNegativeImage = (imgIdx) => {
-        const img = imageBuffers[imgIdx];
-        if (!img) return false;
-        const textToCheck = `${img.url || ''} ${img.role || ''}`.toLowerCase();
-        return negFocusTerms.some(neg => textToCheck.includes(neg.toLowerCase()));
-      };
-      // ★ Hero slot guard: ถ้า hero ตาม negativeFocus → swap กับ alt ที่มีหน้าคน
-      if (heroIndex !== undefined && isNegativeImage(heroIndex)) {
-        const altHero = photoOrder.find(i => i !== heroIndex && !isNegativeImage(i) && (faceDataMap?.get?.(String(i))?.hasFaces));
-        if (altHero !== undefined) {
-          console.warn(`[assignSlots] ⚠️ FIX5: Hero #${heroIndex} in negativeFocus → swapping to #${altHero}`);
-          const heroPos = photoOrder.indexOf(heroIndex);
-          const altPos = photoOrder.indexOf(altHero);
-          if (heroPos >= 0 && altPos >= 0) {
-            photoOrder[heroPos] = altHero;
-            photoOrder[altPos] = heroIndex;
-          }
-          heroIndex = altHero;
-        }
-      }
-      // ★ Circle slot guard: ถ้า circle ตาม negativeFocus → swap กับ alt
-      if (circleIndex !== undefined && isNegativeImage(circleIndex)) {
-        const altCircle = photoOrder.find(i => i !== heroIndex && i !== circleIndex && !isNegativeImage(i));
-        if (altCircle !== undefined) {
-          console.warn(`[assignSlots] ⚠️ FIX5: Circle #${circleIndex} in negativeFocus → swapping to #${altCircle}`);
-          circleIndex = altCircle;
-        }
       }
     }
 

@@ -57,7 +57,7 @@ async function evaluateFinalCover(base64Image, newsTitle) {
   try {
     const { GoogleGenerativeAI } = await import('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     const prompt = `You are an elite news Art Director evaluating a composed 1200x1350 news cover for: "${newsTitle}".
 
@@ -226,89 +226,6 @@ export async function POST(request) {
       identity._newsTitle = newsTitle || '';
     }
 
-    // ════════════════════════════════════════════════════════
-    // ★ PROGRAMMATIC QUERY OVERRIDE (ROOT FIX)
-    // ไม่ได้พึ่ง AI ทำตาม schema — override ตาม celebratedAction จริงๆ
-    // ★★★ ถ้า celebratedAction มี → ALWAYS override ทันที
-    //     (ลบ occupationImportance threshold — มันเข้มเกินไป)
-    //     occupation threshold ใช้แค่กับ image scoring ไม่ใช่ query gen
-    // ════════════════════════════════════════════════════════
-    {
-      const cs = identity?.coreStory || {};
-      const celebratedAction = cs.celebratedAction;
-      const occupationImportance = cs.occupationImportance ?? 1.0;
-      const relationship = cs.relationship;
-      const hero = identity?.mainCharacter || '';
-
-      if (celebratedAction && hero && identity?.searchQueries) {
-        // ★ Always override — celebratedAction drives queries regardless of occupationImportance
-        const sq = identity.searchQueries;
-        const prevKeyActivity = sq.key_activity;
-        const prevPersonContext = sq.person_context;
-        sq.key_activity     = `${hero} ${celebratedAction}`.trim();
-        sq.key_relationship = relationship ? `${hero} ${relationship}`.trim() : `${hero} ครอบครัว`;
-        sq.person_context   = relationship ? `${hero} ${relationship}`.trim() : `${hero} ${celebratedAction}`.trim();
-        sq.event_scene      = `${hero} ${celebratedAction}`.trim();
-        identity.searchGoogle  = `${hero} ${celebratedAction}`.trim().substring(0, 80);
-        identity.searchYouTube = relationship ? `${hero} ${relationship} ${celebratedAction}`.trim().substring(0, 60) : `${hero} ${celebratedAction}`.trim().substring(0, 60);
-        console.log(`[AutoCover] ★ QUERY OVERRIDE (occupationImportance=${occupationImportance})`);
-        console.log(`  key_activity:     "${prevKeyActivity}" -> "${sq.key_activity}"`);
-        console.log(`  person_context:   "${prevPersonContext}" -> "${sq.person_context}"`);
-        console.log(`  key_relationship: "${sq.key_relationship}"`);
-        console.log(`  searchGoogle:     "${identity.searchGoogle}"`);
-      } else {
-        console.log(`[AutoCover] No override: celebratedAction="${celebratedAction || 'N/A'}", occImportance=${occupationImportance}`);
-      }
-    }
-
-    // ════════════════════════════════════════════════════════
-    // ★ BUILD coreImageQueries — ชุดคีย์เดียวใช้ทุก Agent
-    // ทุก Agent (Google/YouTube/Tavily/Context) ใช้ชุดเดียวกัน
-    // ไม่แยก "YouTube ใช้คีย์หนึ่ง Tavily ใช้คีย์อื่น"
-    // ════════════════════════════════════════════════════════
-    if (identity) {
-      const _hero = identity.mainCharacter || '';
-      const _action = identity.coreStory?.celebratedAction || '';
-      const _rel = identity.coreStory?.relationship || '';
-      const _subject = identity.coreStory?.storySubject || '';  // ★ ใคร/อะไรที่ข่าวเล่าถึงจริงๆ
-      const _sq = identity.searchQueries || {};
-
-      console.log(`[AutoCover] ★ STORY FOCUS: hero="${_hero}" | storySubject="${_subject}" | relationship="${_rel}" | celebratedAction="${_action}"`);
-
-      if (_hero && (_action || _rel || _subject)) {
-        // Core queries — ทุก Agent MUST search เหล่านี้ก่อน
-        const core = [
-          // ★★★ storySubject ก่อนเสมอ — ข่าวเล่าเรื่องใคร?
-          (_subject && _subject !== _hero) ? `${_hero} ${_subject}` : null,
-          (_subject && _subject !== _hero) ? _subject : null,  // ค้น storySubject ตรงๆ
-          _rel  ? `${_hero} ${_rel}` : null,
-          _action ? `${_hero} ${_action}` : null,
-          (_rel && _action) ? `${_hero} ${_rel} ${_action}` : null,
-          _sq.key_relationship && _sq.key_relationship !== `${_hero} ${_rel}` ? _sq.key_relationship : null,
-          _sq.key_activity && _sq.key_activity !== `${_hero} ${_action}` ? _sq.key_activity : null,
-        ].filter(Boolean).map(q => q.trim()).filter((q, i, a) => q.length > 3 && a.indexOf(q) === i);
-
-        // Optional queries — occupation/context — ค้นหลัง core เสร็จ
-        const optional = [
-          _sq.person_portrait,
-          _sq.person_closeup,
-          _sq.person_emotion,
-        ].filter(Boolean);
-
-        identity.coreImageQueries = core;
-        identity.optionalContextQueries = optional;
-        identity._storySubject = _subject || _rel || _action; // ★ ใช้ใน Vision Judge
-        console.log(`[AutoCover] ★ coreImageQueries: ${JSON.stringify(core)}`);
-        console.log(`[AutoCover]   storySubject:     "${_subject || '(same as hero)'}"`);
-        console.log(`[AutoCover]   optionalContext:  ${JSON.stringify(optional)}`);
-      } else {
-        identity.coreImageQueries = [];
-        identity.optionalContextQueries = [];
-        console.log(`[AutoCover] ⚠️ coreImageQueries EMPTY — hero="${_hero}" subject="${_subject}" action="${_action}" rel="${_rel}"`);
-      }
-    }
-
-
     // ═══════════════════════════════════════════════════════
     // Step 1.5: Entity Resolver — ค้นหา Social Profile ของตัวละครหลัก
     // ═══════════════════════════════════════════════════════
@@ -322,7 +239,7 @@ export async function POST(request) {
       if (identity?.mainCharacter) {
         console.log(`[AutoCover] 🔍 Step 1.5: Entity Resolver → "${identity.mainCharacter}"`);
         const { resolveEntity } = await import('@/lib/services/entityResolverService');
-        entityData = await resolveEntity(identity.mainCharacter, newsTitle || '', identity);
+        entityData = await resolveEntity(identity.mainCharacter, newsTitle || '');
         if (entityData.warning) console.log(`[AutoCover] ⚠️ Entity: ${entityData.warning}`);
       } else {
         entityData.warning = 'storyIdentity ไม่สามารถระบุตัวละครหลักได้จากข่าวนี้';
@@ -845,71 +762,6 @@ export async function POST(request) {
       // Keep default score 7
     }
 
-    // FIX C: Cover Praising Test -- Story Match Validator (upgraded)
-    let storyMatchScore = null;
-    let storyMatchReason = null;
-    let viewerImpression = null;
-    let dominantElement = null;
-    let coverPraises = null;
-    let isCorrectPraise = null;
-    try {
-      if (identity?.coreStory?.emotionalHook && coverBuffer) {
-        const { GoogleGenerativeAI: _SmGAI } = await import('@google/generative-ai');
-        const smGenAI = new _SmGAI(process.env.GEMINI_API_KEY);
-        const smModel = smGenAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-
-        const celebratedTarget = identity.coreStory?.celebratedAction
-          || identity.coreStory?.emotionalHook
-          || 'the main story';
-
-        const storyMatchPrompt = `You are a cover critic. Look at this news cover image.
-
-Question 1: What is this cover PRAISING or CELEBRATING? (one sentence)
-Question 2: What story does the viewer think this is about? (one sentence)
-
-Target: This cover should praise: "${celebratedTarget}"
-
-Return JSON without markdown:
-{
-  "coverPraises": "what the cover is praising/celebrating",
-  "viewerThinks": "what story viewer thinks this is",
-  "storyMatch": 0-10,
-  "isCorrectPraise": true/false,
-  "dominantVisual": "what takes most space",
-  "reason": "why match or mismatch"
-}`;
-        const smResult = await smModel.generateContent([
-          storyMatchPrompt,
-          { inlineData: { data: coverBuffer.toString('base64'), mimeType: 'image/jpeg' } }
-        ]);
-        const smText = smResult.response.text().trim();
-        const smMatch = smText.match(/```(?:json)?\s*({[\s\S]*?})\s*```/) || smText.match(/({[\s\S]*?"storyMatch"[\s\S]*?})/);
-        if (smMatch) {
-          const smData = JSON.parse(smMatch[1] || smMatch[0]);
-          storyMatchScore = smData.storyMatch;
-          storyMatchReason = smData.reason;
-          viewerImpression = smData.viewerThinks;
-          dominantElement = smData.dominantVisual;
-          coverPraises = smData.coverPraises;
-          isCorrectPraise = smData.isCorrectPraise;
-          if (storyMatchScore < 3) {
-            console.warn(`[AutoCover] HARD REJECT: storyMatch=${storyMatchScore}/10`);
-            console.warn(`[AutoCover]   Cover praises: "${coverPraises}"`);
-            console.warn(`[AutoCover]   Should praise: "${celebratedTarget}"`);
-            console.warn(`[AutoCover]   Viewer thinks: "${viewerImpression}"`);
-          } else if (storyMatchScore < 5) {
-            console.warn(`[AutoCover] Story Match LOW: ${storyMatchScore}/10`);
-            console.warn(`[AutoCover] Cover praises: "${coverPraises}" | Should: "${celebratedTarget}"`);
-            console.warn(`[AutoCover] Viewer: "${viewerImpression}" | Dominant: "${dominantElement}"`);
-          } else {
-            console.log(`[AutoCover] Story Match: ${storyMatchScore}/10 -- ${storyMatchReason}`);
-          }
-        }
-      }
-    } catch (smErr) {
-      console.warn('[AutoCover] Story Match Validator error:', smErr.message);
-    }
-
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`[AutoCover] ✅ Complete! Score: ${score}/10, Time: ${elapsed}s, Template: ${chosenTemplate}`);
 
@@ -1000,17 +852,6 @@ Return JSON without markdown:
         emotion: identity.emotion,
         coverEmotion: identity.coverEmotion,
       },
-      // FIX C: Cover Praising Test results
-      storyMatchScore: storyMatchScore ?? null,
-      storyMatchReason: storyMatchReason ?? null,
-      viewerImpression: viewerImpression ?? null,
-      dominantElement: dominantElement ?? null,
-      coverPraises: coverPraises ?? null,
-      isCorrectPraise: isCorrectPraise ?? null,
-      // storyMismatch: true = HARD REJECT (score < 3) -- UI should show warning
-      storyMismatch: storyMatchScore !== null && storyMatchScore < 3,
-      // coverPraising: viewer impression when score is LOW (< 5)
-      ...(storyMatchScore !== null && storyMatchScore < 5 ? { coverPraising: viewerImpression } : {}),
       // Gallery: ภาพทั้งหมดที่ค้นมา + role/score (thumbnail สร้างทีหลัง)
       gallery: imageBuffers.map((img, i) => {
         const fd = faceDataMap?.get?.(String(i));
@@ -1181,24 +1022,7 @@ Give LOW score (1-4) to images that:
 - ต้องมี entry ครบทุกภาพ (index 0 ถึง ${thumbnails.length - 1}) ห้ามข้ามภาพไหน!
 - ภาพ stock photo / studio / กราฟิก → relevance <= 2
 - ภาพที่ไม่ใช่คนในข่าว → relevance <= 2
-- ★★★ ภาพที่เป็นคนในข่าวแต่ไม่เกี่ยวกับเนื้อหาข่าว (ไลฟ์สไตล์/แฟชั่น/ท่องเที่ยว) → relevance <= 3
-
-## ★★★ STORY WEIGHT SCORING (สำคัญที่สุด):
-
-ข่าวนี้มีน้ำหนักดังนี้:
-${JSON.stringify(identity?.coreStory?.storyWeight || {})}
-
-สิ่งที่ห้ามให้คะแนนสูง (negativeFocus):
-${(identity?.coreStory?.negativeFocus || []).join(', ') || 'ไม่มี'}
-
-กฎ STORY MATCH:
-- ภาพที่สะท้อน core story (relationship/sacrifice/caregiving) → score สูง (8-10)
-- ภาพที่สะท้อน context/occupation เท่านั้น → score ≤ 4 เสมอ
-- ภาพที่อยู่ใน negativeFocus เป็น dominant subject → score ≤ 2
-
-ถามตัวเองก่อนให้คะแนน:
-"ถ้าคนเห็นภาพนี้บน cover จะเข้าใจว่าข่าวนี้คือเรื่องอะไร?"
-ถ้าคำตอบไม่ตรงกับ core story → score ต้องต่ำ`;
+- ★★★ ภาพที่เป็นคนในข่าวแต่ไม่เกี่ยวกับเนื้อหาข่าว (ไลฟ์สไตล์/แฟชั่น/ท่องเที่ยว) → relevance <= 3`;
 
     console.log(`[Curator] 🧠 Analyzing ${thumbnails.length} images against news content...`);
     
@@ -1648,46 +1472,6 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
       
       if (photoOrder.length < slotCount) {
         console.log(`[assignSlots] ⚠️ Still only ${photoOrder.length}/${slotCount} images after fill`);
-      }
-    }
-
-    // ★ FIX 5: Negative Evidence Rules — ห้าม negativeFocus อยู่ใน hero/circle slots
-    // ถ้า coreStory ไม่มี → fallback: ใช้ logic เดิม
-    const negFocusTerms = identity?.coreStory?.negativeFocus || [];
-    const coreStoryAnchor = identity?.coreStory?.sacrifice || identity?.coreStory?.relationship || null;
-    if (negFocusTerms.length > 0) {
-      console.log(`[assignSlots] ★ NEGATIVE EVIDENCE RULES active — blocked: ${negFocusTerms.join(', ')}`);
-      if (coreStoryAnchor) {
-        console.log(`[assignSlots] ★ CORE STORY ANCHOR: "${coreStoryAnchor}" — remaining slots must reflect this`);
-      }
-      // ตรวจว่าภาพโดน flag หรือเปล่า (url/role) มีคำใน negativeFocus
-      const isNegativeImage = (imgIdx) => {
-        const img = imageBuffers[imgIdx];
-        if (!img) return false;
-        const textToCheck = `${img.url || ''} ${img.role || ''}`.toLowerCase();
-        return negFocusTerms.some(neg => textToCheck.includes(neg.toLowerCase()));
-      };
-      // ★ Hero slot guard: ถ้า hero ตาม negativeFocus → swap กับ alt ที่มีหน้าคน
-      if (heroIndex !== undefined && isNegativeImage(heroIndex)) {
-        const altHero = photoOrder.find(i => i !== heroIndex && !isNegativeImage(i) && (faceDataMap?.get?.(String(i))?.hasFaces));
-        if (altHero !== undefined) {
-          console.warn(`[assignSlots] ⚠️ FIX5: Hero #${heroIndex} in negativeFocus → swapping to #${altHero}`);
-          const heroPos = photoOrder.indexOf(heroIndex);
-          const altPos = photoOrder.indexOf(altHero);
-          if (heroPos >= 0 && altPos >= 0) {
-            photoOrder[heroPos] = altHero;
-            photoOrder[altPos] = heroIndex;
-          }
-          heroIndex = altHero;
-        }
-      }
-      // ★ Circle slot guard: ถ้า circle ตาม negativeFocus → swap กับ alt
-      if (circleIndex !== undefined && isNegativeImage(circleIndex)) {
-        const altCircle = photoOrder.find(i => i !== heroIndex && i !== circleIndex && !isNegativeImage(i));
-        if (altCircle !== undefined) {
-          console.warn(`[assignSlots] ⚠️ FIX5: Circle #${circleIndex} in negativeFocus → swapping to #${altCircle}`);
-          circleIndex = altCircle;
-        }
       }
     }
 
