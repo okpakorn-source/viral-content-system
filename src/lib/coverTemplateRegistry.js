@@ -74,6 +74,10 @@ const BUILTIN_TEMPLATES = [
     id: 'template_4',
     name: 'ข่าวสังคม + 2 วงกลม',
     desc: '5 รูป + 2 ข้อความ — Hero + Scene + Context + Circle ใหญ่ + Circle เล็กแดง',
+    // ⛔ DISABLED: circle_small (diameter=200px) ยังเล็กเกินไป — ดูไม่รู้เรื่อง ดูสกปรก
+    // ต้อง diameter ≥ 320px จึงจะเปิดใช้ได้
+    disabled: true,
+    disabledReason: 'circle_small diameter=200px < MIN_CIRCLE_SIZE(320px) — small red circle looks dirty and unreadable',
     canvasW: 1200, canvasH: 1350,
     imageSlots: 5,
     textSlots: [
@@ -187,7 +191,7 @@ const BUILTIN_TEMPLATES = [
 // ── Circle size gate ─────────────────────────────────────────────────────────
 // Templates ที่มี circle หรือ frame slot ขนาดเล็ก (< MIN_CIRCLE_SIZE) จะถูก filter ออก
 // เพื่อไม่ให้ thumbnail จิ๋วที่ดูไม่รู้เรื่องปรากฏบนปก
-const MIN_CIRCLE_SIZE = 200; // px บน canvas 1200×1350
+const MIN_CIRCLE_SIZE = 320; // px บน canvas 1200×1350 — ต้องใหญ่พอมองเห็นหน้าคนชัด
 
 /**
  * คืน true ถ้า template มี circle/frame zone ที่เล็กเกินกว่า MIN_CIRCLE_SIZE
