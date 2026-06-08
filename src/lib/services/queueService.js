@@ -73,17 +73,24 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
     }
     
     // 0b. Auto-purge: remove old completed/failed jobs to prevent Supabase bloat
-    //     Keep only the newest 10 finished jobs for history
+    //     Keep jobs finished < 5 minutes (so polling can still retrieve results)
+    //     Then keep only the newest 10 beyond that
+    const purgeMinAge = 5 * 60 * 1000; // 5 minutes — must keep recent results for polling!
     const finishedJobs = allJobs
       .filter(j => j.status === 'completed' || j.status === 'failed')
       .sort((a, b) => new Date(b.completedAt || b.createdAt) - new Date(a.completedAt || a.createdAt));
     
     if (finishedJobs.length > 10) {
-      const toRemove = finishedJobs.slice(10);
+      const toRemove = finishedJobs.slice(10).filter(j => {
+        const finishedAt = new Date(j.completedAt || j.createdAt);
+        return (Date.now() - finishedAt.getTime()) > purgeMinAge; // ★ Only purge if > 5 min old
+      });
       for (const old of toRemove) {
         await store.remove(old.id).catch(() => {});
       }
-      console.log(`[QueueService] 🗑️ Purged ${toRemove.length} old finished jobs (kept 10)`);
+      if (toRemove.length > 0) {
+        console.log(`[QueueService] 🗑️ Purged ${toRemove.length} old finished jobs (kept recent + 10)`);
+      }
     }
     
     // 1. Use the already-fetched allJobs (with in-memory status updates) for position calc

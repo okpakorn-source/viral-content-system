@@ -187,9 +187,11 @@ function NewContentPageInner() {
     }
 
     // 2. Poll for result
-    const maxPollTime = 8 * 60 * 1000; // 8 minutes max (pipeline optimized: BP+Research parallel)
+    const maxPollTime = 8 * 60 * 1000; // 8 minutes max
     const startTime = Date.now();
     let workerRetriggerCount = 0;
+    let notFoundCount = 0; // ★ Track consecutive 'job not found' responses
+    let lastSeenStatus = 'pending'; // ★ Track last known status
 
     while (Date.now() - startTime < maxPollTime) {
       await new Promise(r => setTimeout(r, 3000)); // poll every 3s
@@ -198,7 +200,21 @@ function NewContentPageInner() {
         const statusRes = await fetch(`/api/queue/status?id=${jobId}`);
         const statusData = await statusRes.json();
 
-        if (!statusData.success) continue;
+        if (!statusData.success) {
+          notFoundCount++;
+          console.warn(`[Queue] Job ${jobId.slice(0,8)} not found (${notFoundCount}/5) — last status: ${lastSeenStatus}`);
+          // ★★ ถ้า job หายไปหลังจากเคยเห็น processing → backend เสร็จแล้วแต่ถูก purge!
+          if (notFoundCount >= 5 || (notFoundCount >= 3 && lastSeenStatus === 'processing')) {
+            console.warn('[Queue] Job was purged after completion — treating as success');
+            setQueuePolling(false);
+            // Return empty result — handleAutoMode will check and show error
+            return { data: null, _jobPurged: true };
+          }
+          continue;
+        }
+        
+        notFoundCount = 0; // reset on successful poll
+        lastSeenStatus = statusData.status;
 
         setQueueStatus(statusData.status);
         setQueuePosition(statusData.position || 0);
@@ -294,6 +310,12 @@ function NewContentPageInner() {
         userId: 'web-user',
       });
       clearInterval(animateTimer); // หยุด animation
+      
+      // ★ ถ้า job ถูก purge ก่อน polling จะเอาผลลัพธ์ → แจ้ง error
+      if (queueResult?._jobPurged) {
+        throw new Error('ประมวลผลเสร็จแล้วแต่ผลลัพธ์หายไป — กรุณาลองใหม่อีกครั้ง');
+      }
+      
       const data = { success: true, data: queueResult?.data || queueResult };
 
       if (!data.success) {
