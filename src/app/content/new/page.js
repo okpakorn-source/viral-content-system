@@ -922,7 +922,7 @@ function NewContentPageInner() {
       wfComplete('ai_breakdown', `${data.data?.possible_angles?.length || 0} มุมข่าว, ${data.data?.key_points?.length || 0} ประเด็น`);
       finishWorkflow('แตกประเด็นสำเร็จ');
       // 📦 Auto-save เข้าคลังข่าว (fire-and-forget)
-      autoSaveToArchive(newsData, data.data).catch(() => {});
+      autoSaveToArchive(newsData, data.data, null).catch(() => {});
     } catch (err) {
       setError(err.message);
       wfFail('ai_breakdown', err.message);

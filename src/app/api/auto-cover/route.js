@@ -59,31 +59,37 @@ async function evaluateFinalCover(base64Image, newsTitle) {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-    const prompt = `You are an elite news Art Director evaluating a composed 1080x1080 news cover for: "${newsTitle}".
+    const prompt = `You are an elite news Art Director evaluating a composed 1200x1350 news cover for: "${newsTitle}".
 
 Evaluate:
-1. Is the main subject clearly visible in the center circle?
-2. Are the background images diverse (not the same photo cropped differently)?
-3. Is the text readable (not broken characters)?
-4. Is it professional quality (not cheap-looking)?
+1. Is the main subject clearly visible?
+2. Are background images diverse (not the same photo repeated)?
+3. Is the composition balanced and professional?
+4. Is the overall quality high (not cheap-looking)?
 
-Score 1-10. Return ONLY: {"score": 8, "reason": "brief"}. No markdown blocks.`;
+Score 1-10. Return ONLY valid JSON without any markdown: {"score": 8, "reason": "brief"}. Do NOT wrap in code blocks.`;
 
     const result = await model.generateContent([
       prompt,
       { inlineData: { data: base64Image, mimeType: 'image/jpeg' } }
     ]);
-    const responseText = result.response.text();
-    const match = responseText.match(/\{[\s\S]*?\}/);
+    const responseText = result.response.text().trim();
+    // Support both raw JSON and markdown-wrapped JSON
+    const match = responseText.match(/```(?:json)?\s*({[\s\S]*?})\s*```/) ||
+                  responseText.match(/({[\s\S]*?"score"[\s\S]*?})/);
     if (match) {
-      const data = JSON.parse(match[0]);
-      console.log(`[AutoCover Judge] Score: ${data.score}/10 — ${data.reason}`);
-      return data.score || 7;
+      const data = JSON.parse(match[1] || match[0]);
+      const score = parseInt(data.score, 10);
+      if (score >= 1 && score <= 10) {
+        console.log(`[AutoCover Judge] ✅ Score: ${score}/10 — ${data.reason}`);
+        return score;
+      }
     }
-    return 7;
+    console.log('[AutoCover Judge] ⚠️ Could not parse score from response:', responseText.slice(0, 100));
+    return null;
   } catch (e) {
     console.log('[AutoCover Judge] Evaluation error:', e.message);
-    return 7;
+    return null;
   }
 }
 
@@ -516,11 +522,25 @@ export async function POST(request) {
     } catch {}
 
     // Step 8: AI Final Judge
-    let score = 7; // Default
+    let score = 7; // Default fallback
     try {
-      score = await evaluateFinalCover(coverBuffer.toString('base64'), newsTitle || '');
+      const judgeScore = await evaluateFinalCover(coverBuffer.toString('base64'), newsTitle || '');
+      if (judgeScore !== null) {
+        score = judgeScore;
+        console.log(`[AutoCover] 🏆 AI Judge score: ${score}/10`);
+      } else {
+        // Dynamic fallback: average of curator relevance scores
+        const scoredImages = assignedImages || selectedImages || [];
+        if (scoredImages.length > 0) {
+          const avg = scoredImages.reduce((sum, img) => sum + (img.curatorScore || img.relevanceScore || img.score || 5), 0) / scoredImages.length;
+          score = Math.round(Math.min(9, Math.max(4, avg)));
+          console.log(`[AutoCover] ⚠️ Judge parse failed, curator avg fallback: ${score}/10`);
+        } else {
+          console.log('[AutoCover] ⚠️ Judge failed, using default score: 7/10');
+        }
+      }
     } catch {
-      // Keep default score
+      // Keep default score 7
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
