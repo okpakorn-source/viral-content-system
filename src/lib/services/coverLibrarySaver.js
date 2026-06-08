@@ -61,11 +61,13 @@ async function makeThumbnail(imageBase64) {
  * @param {string}   params.templateId    — template ที่ใช้ เช่น 'builtin_3'
  * @param {string}   params.newsTitle     — หัวข้อข่าว
  * @param {string}  [params.newsUrl]      — URL ต้นทาง (optional)
+ * @param {string}  [params.newsBody]     — เนื้อหาข่าวที่ใช้เจนปก (optional)
  * @param {string}  [params.caseId]       — case ID เช่น 'CASE-042'
  * @param {number}  [params.score]        — คะแนนจาก Gemini (1-10)
  * @param {string[]}[params.subjects]     — ชื่อตัวละครหลัก เช่น ['ชมพู่', 'อารยา']
  * @param {string}  [params.emotion]      — อารมณ์หลัก เช่น 'shocked'
  * @param {number}  [params.imageCount]   — จำนวนภาพที่ใช้สร้างปก
+ * @param {number}  [params.version]      — เวอร์ชัน (คำนวณอัตโนมัติถ้าไม่ระบุ)
  * @returns {Promise<{success: boolean, id?: string|number, error?: string}>}
  */
 export async function saveGeneratedCoverToLibrary(params) {
@@ -75,6 +77,7 @@ export async function saveGeneratedCoverToLibrary(params) {
     templateId = 'auto',
     newsTitle = '',
     newsUrl = '',
+    newsBody = '',
     caseId = null,
     score = 7,
     subjects = [],
@@ -112,6 +115,9 @@ export async function saveGeneratedCoverToLibrary(params) {
       has_circle: templateId.includes('circle') || ['builtin_3', 'builtin_4', 'builtin_5', 'builtin_6'].includes(templateId),
       has_text: true,
       color_scheme: { mood: emotion || 'drama' },
+      // ข้อมูลเพิ่มเติมเก็บใน JSONB (ไม่ต้องการ column ใหม่)
+      case_id: caseId || null,
+      subjects: subjects || [],
     };
 
     // Insert เข้า cover_examples
@@ -131,18 +137,20 @@ export async function saveGeneratedCoverToLibrary(params) {
           what_makes_it_viral: '',
           tags: subjects.length > 0 ? subjects : [],
           slot_assignment_guide: '',
+          // ข้อมูลเพิ่มเติมเก็บใน JSONB (ไม่ต้องการ ALTER TABLE)
+          source_type: 'auto_generated',
+          case_id: caseId || null,
+          news_url: newsUrl || null,
+          news_body: newsBody || null,
+          subjects: subjects || [],
+          emotion: emotion || null,
+          image_count: imageCount || 0,
+          version: version || 1,
+          created_at: new Date().toISOString(),
         },
         composition,
         tags: subjects.length > 0 ? subjects : [],
         quality_score: score,
-        // ฟิลด์เพิ่มเติมสำหรับ auto-generated covers
-        source_type: 'auto_generated',
-        case_id: caseId,
-        news_url: newsUrl,
-        subjects,
-        emotion,
-        image_count: imageCount,
-        version,
         created_at: new Date().toISOString(),
       })
       .select('id')
@@ -157,7 +165,7 @@ export async function saveGeneratedCoverToLibrary(params) {
           .insert({
             title: newsTitle || 'ปกอัตโนมัติ',
             category: 'auto_generated',
-            notes: `${newsUrl || ''} | caseId: ${caseId || '-'} | score: ${score} | subjects: ${subjects.join(', ')}`,
+            notes: newsUrl || '',
             thumbnail,
             image_width: 1080,
             image_height: 1080,
@@ -166,6 +174,15 @@ export async function saveGeneratedCoverToLibrary(params) {
               layout_type: templateId,
               quality_score: score,
               tags: subjects,
+              source_type: 'auto_generated',
+              case_id: caseId || null,
+              news_url: newsUrl || null,
+              news_body: newsBody || null,
+              subjects: subjects || [],
+              emotion: emotion || null,
+              image_count: imageCount || 0,
+              version: version || 1,
+              created_at: new Date().toISOString(),
             },
             composition,
             tags: subjects.length > 0 ? subjects : [],

@@ -90,7 +90,7 @@ export async function saveCase(coverBuffer, metadata) {
     caseId,
     caseNumber,
     newsTitle: metadata.newsTitle || '',
-    content: (metadata.content || '').substring(0, 500), // จำกัด 500 ตัวอักษร
+    content: (metadata.content || '').substring(0, 5000), // จำกัด 5000 ตัวอักษร
     score: metadata.score || 0,
     templateUsed: metadata.templateUsed || '',
     elapsed: metadata.elapsed || '',
@@ -143,7 +143,10 @@ export async function saveCase(coverBuffer, metadata) {
           template_used: caseData.templateUsed,
           elapsed: caseData.elapsed,
           image_count: caseData.imageCount,
-          identity: caseData.identity,
+          identity: {
+            ...caseData.identity,
+            news_url: metadata.newsUrl || '',  // เก็บ news_url ใน JSONB identity
+          },
           batch_id: caseData.batchId,
           cover_image_url: caseData.supabaseImageUrl || caseData.coverImagePath,
           created_at: now,

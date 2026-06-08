@@ -536,6 +536,7 @@ export async function POST(request) {
         templateUsed: chosenTemplate,
         elapsed: `${elapsed}s`,
         imageCount: orderedBuffers.length,
+        newsUrl: sourceUrl || '',
         identity: {
           mainCharacter: identity?.mainCharacter || '',
           emotion: identity?.emotion || '',
@@ -563,6 +564,7 @@ export async function POST(request) {
         templateId: chosenTemplate,
         newsTitle: newsTitle || content?.substring(0, 100) || '',
         newsUrl: sourceUrl || '',
+        newsBody: content || '',
         caseId: finalCaseId,
         score,
         subjects,
