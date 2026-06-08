@@ -34,6 +34,7 @@ import { performSummarize } from '@/lib/services/summarizeService';
 import { createStore }     from '@/lib/persistStore';
 import { callAI }          from '@/lib/ai/openai';
 import { MODEL_FAST }      from '@/lib/ai/modelConfig';
+import { withTimeout }     from '@/lib/utils/withTimeout';
 
 const rlog = createLogger('AUTO-PROCESS');
 
@@ -251,7 +252,7 @@ export async function POST(request) {
       case 'social_pipeline': {
         const url = detection.primaryUrl || input;
         addLog('Scrape', `🌐 Scraping: ${url.slice(0, 60)}`);
-        const raw = await scrapeArticle(url, { baseUrl: origin });
+        const raw = await withTimeout(scrapeArticle(url, { baseUrl: origin }), 45000, 'scrape');
         if (raw.fallbackUsed) fallbacksUsed.push(raw.fallbackProvider || 'jina');
         normalizedData = normalizeToSchema(raw, 'article', { originalUrl: url, inputImages: images });
         addLog('Scrape', `${raw.success ? '✅' : '⚠️'} ${raw.provider}: ${normalizedData.rawText.length}ch`);
@@ -262,7 +263,7 @@ export async function POST(request) {
       case 'tiktok_pipeline': {
         const url = detection.primaryUrl || input;
         addLog('TikTok', `🎵 Extracting TikTok: ${url.slice(0, 60)}`);
-        const raw = await scrapeTikTok(url, { baseUrl: origin });
+        const raw = await withTimeout(scrapeTikTok(url, { baseUrl: origin }), 45000, 'tiktok_scrape');
         if (raw.fallbackUsed) fallbacksUsed.push(raw.fallbackProvider || 'builtin_tiktok');
         normalizedData = normalizeToSchema(raw, 'tiktok', { originalUrl: url, inputImages: images });
         addLog('TikTok', `${raw.success ? '✅' : '⚠️'} ${raw.provider}: ${normalizedData.rawText.length}ch`);
@@ -273,7 +274,7 @@ export async function POST(request) {
       case 'youtube_pipeline': {
         const url = detection.primaryUrl || input;
         addLog('YouTube', `📺 Extracting YouTube: ${url.slice(0, 60)}`);
-        const raw = await getYouTubeData(url, { baseUrl: origin });
+        const raw = await withTimeout(getYouTubeData(url, { baseUrl: origin }), 45000, 'youtube_scrape');
         if (raw.fallbackUsed) fallbacksUsed.push(raw.fallbackProvider || 'builtin_youtube');
         normalizedData = normalizeToSchema(raw, 'youtube', { originalUrl: url, inputImages: images });
         addLog('YouTube', `${raw.success ? '✅' : '⚠️'} ${raw.provider}: ${normalizedData.rawText.length}ch`);
@@ -284,7 +285,7 @@ export async function POST(request) {
       case 'facebook_pipeline': {
         const url = detection.primaryUrl || input;
         addLog('Facebook', `📘 Extracting Facebook: ${url.slice(0, 60)}`);
-        const raw = await scrapeFacebook(url, { baseUrl: origin });
+        const raw = await withTimeout(scrapeFacebook(url, { baseUrl: origin }), 45000, 'facebook_scrape');
         if (raw.fallbackUsed) fallbacksUsed.push(raw.fallbackProvider || 'jina');
         normalizedData = normalizeToSchema(raw, 'facebook', { originalUrl: url, inputImages: images });
         addLog('Facebook', `${raw.success ? '✅' : '⚠️'} ${raw.provider}: ${normalizedData.rawText.length}ch`);
@@ -411,13 +412,13 @@ export async function POST(request) {
 
     // ─── STEP 2: Extract (via performSummarize) ─────────────────
     addLog('Extract', `📰 AI extracting news from ${normalizedData.rawText.length}ch`);
-    const extractRes = await performSummarize({
+    const extractRes = await withTimeout(performSummarize({
       text:       normalizedData.rawText,
       sourceType: normalizedData.sourceType,
       mode:       'extract',
       workflowId: _wfId,
       user:       body.user || null,
-    });
+    }), 60000, 'extract');
     if (!extractRes.success || !extractRes.data?.newsBody) {
       return NextResponse.json({
         success:    false,
@@ -431,28 +432,28 @@ export async function POST(request) {
 
     // ─── STEP 3: Breakdown ────────────────────────────────────
     addLog('Breakdown', '🔍 AI analyzing angles...');
-    const breakRes = await performSummarize({
+    const breakRes = await withTimeout(performSummarize({
       text:       newsData.newsBody,
       sourceType: normalizedData.sourceType,
       mode:       'breakdown',
       newsTitle:  newsData.newsTitle,
       workflowId: _wfId,
       user:       body.user || null,
-    });
+    }), 60000, 'breakdown');
     const breakdownData = breakRes.success ? breakRes.data : null;
     if (breakdownData) addLog('Breakdown', `✅ ${breakdownData.possible_angles?.length || 0} angles`);
 
     // === Blueprint (optional — ไม่ block ถ้าล้มเหลว) ===
     let blueprintData = null;
     try {
-      const bpRes = await performSummarize({
+      const bpRes = await withTimeout(performSummarize({
         text: newsData.newsBody || normalizedData.rawText,
         newsTitle: newsData.newsTitle || normalizedData.title,
         mode: 'blueprint',
         breakdownData: breakdownData,
         workflowId: _wfId,
         user: body.user || null,
-      });
+      }), 60000, 'blueprint');
       if (bpRes?.success) blueprintData = bpRes.data?.blueprint || null;
       addLog('Blueprint', blueprintData ? blueprintData.core_emotion : 'skipped');
     } catch (bpErr) {
@@ -461,7 +462,7 @@ export async function POST(request) {
 
     // ─── STEP 4: Generate ─────────────────────────────────────
     addLog('Generate', '✍️ Generating viral content...');
-    const genRes = await performSummarize({
+    const genRes = await withTimeout(performSummarize({
       text:       newsData.newsBody,
       sourceType: normalizedData.sourceType,
       mode:       'analyze',
@@ -472,7 +473,7 @@ export async function POST(request) {
       analysisPresetId: preset,
       workflowId: _wfId,
       user:       body.user || null,
-    });
+    }), 90000, 'generate');
 
     const genData        = genRes.data || genRes;
     const versions       = genData.versions || [];
