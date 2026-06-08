@@ -15,7 +15,7 @@ import { NextResponse } from 'next/server';
 import { MODEL_VISION } from '@/lib/ai/modelConfig';
 import sharp from 'sharp';
 
-export const maxDuration = 120; // 2 minutes max for cover pipeline
+export const maxDuration = 300; // 5 minutes — cover pipeline needs 70-120s normally
 
 // ═══ dHash: Perceptual Image Hashing ═══
 // Inlined because imageSearchService.js does not export these utilities
@@ -89,7 +89,7 @@ Score 1-10. Return ONLY: {"score": 8, "reason": "brief"}. No markdown blocks.`;
 
 export async function POST(request) {
   const startTime = Date.now();
-  const TIMEOUT_MS = 110_000; // 110s safety margin
+  const TIMEOUT_MS = 280_000; // 280s safety — pipeline needs 70-120s, allow buffer for slow AI/network
 
   try {
     const body = await request.json();
@@ -105,11 +105,6 @@ export async function POST(request) {
     console.log('[AutoCover] Starting pipeline...');
     console.log(`[AutoCover] Title: ${(newsTitle || '').substring(0, 80)}`);
     console.log(`[AutoCover] Template: ${templateId}, Regenerate: ${regenerate}`);
-
-    // Timeout check before Step 1
-    if (Date.now() - startTime > TIMEOUT_MS) {
-      return NextResponse.json({ success: false, error: 'Pipeline timeout', errorType: 'TIMEOUT' }, { status: 504 });
-    }
 
     // Step 1: Analyze story identity (extract keywords, characters, emotions)
     const { analyzeStoryIdentity } = await import('@/lib/services/storyIdentityService');
@@ -225,11 +220,6 @@ export async function POST(request) {
       identity._newsTitle = newsTitle || '';
     }
 
-    // Timeout check before Step 2
-    if (Date.now() - startTime > TIMEOUT_MS) {
-      return NextResponse.json({ success: false, error: 'Pipeline timeout', errorType: 'TIMEOUT' }, { status: 504 });
-    }
-
     // Step 2: Multi-agent image search
     const { runMultiAgentImageSearch } = await import('@/lib/services/multiAgentImageScraper');
 
@@ -249,11 +239,6 @@ export async function POST(request) {
     }
 
     console.log(`[AutoCover] Found ${bestImages.length} images`);
-
-    // Timeout check before Step 3
-    if (Date.now() - startTime > TIMEOUT_MS) {
-      return NextResponse.json({ success: false, error: 'Pipeline timeout', errorType: 'TIMEOUT' }, { status: 504 });
-    }
 
     // Step 3: Download + validate + dedup
     const { downloadAndValidateImage } = await import('@/lib/services/imageSearchService');
@@ -383,11 +368,6 @@ export async function POST(request) {
     }
 
     console.log(`[AutoCover] Downloaded ${imageBuffers.length} valid images`);
-
-    // Timeout check before Step 4
-    if (Date.now() - startTime > TIMEOUT_MS) {
-      return NextResponse.json({ success: false, error: 'Pipeline timeout', errorType: 'TIMEOUT' }, { status: 504 });
-    }
 
     // Step 4: Face detection on all images
     const { batchDetectFaces } = await import('@/lib/services/faceDetector');
