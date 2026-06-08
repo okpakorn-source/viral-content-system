@@ -306,7 +306,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
         _researchItems: researchItems,
         _topPrompt: topPrompt
       };
-    })(), 150000, `generate_A${index + 1}`); // ★ 150s per angle (was 240s — ลดจาก 4 นาที → 2.5 นาที)
+    })(), 240000, `generate_A${index + 1}`); // ★ 240s per angle — research + Claude generate needs more time with gpt-5.5
   });
 
   const genResults = await Promise.allSettled(generationTasks);
