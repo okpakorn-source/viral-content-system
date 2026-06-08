@@ -423,7 +423,7 @@ ${searchCatalog}
 {"items":[{"keyword":"keyword ที่ค้นหา","type":"person|place|event|statistic|context","title":"หัวข้อ ≤60 ตัวอักษร","content":"ข้อเท็จจริง 2-3 ประโยค","sourceUrl":"URL จริง","sourceName":"ชื่อเว็บ","relevance":"เกี่ยวข้องอย่างไร"}],"notFound":["keywords ที่หาไม่เจอ"]}`;
 
     const factResult = await callAI({
-      model: MODEL_PRIMARY,
+      model: MODEL_FAST, // ★ MODEL_FAST (was MODEL_PRIMARY) — perf: fact JSON extraction doesn't need primary model
       prompt: factPrompt,
       temperature: 0.1,
       maxTokens: 4000,

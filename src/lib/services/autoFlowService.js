@@ -184,7 +184,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     mode: 'breakdown',
     workflowId: _autoWorkflowId,
     user: _user,
-  }), 210000, 'breakdown'); // ★ 210s (was 90s) — GPT-5.5 measured 169s in production, need margin
+  }), 120000, 'breakdown'); // ★ 120s (was 210s) — perf: cut timeout to trigger fallback faster
 
   if (!breakRes.success || !breakRes.data) {
     throwStep('auto_breakdown', `แตกประเด็นไม่สำเร็จ: ${breakRes.error || ''}`);
@@ -255,7 +255,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   const totalVersions = 4;
   const versionsPerAngle = 2;
 
-  addLog('Generate', `🚀 ${anglesToUse.length} มุมมอง × ${versionsPerAngle} เวอร์ชัน = รวม ${totalVersions} เวอร์ชัน (sequential เพื่อป้องกัน rate limit)...`);
+  addLog('Generate', `🚀 ${anglesToUse.length} มุมมอง × ${versionsPerAngle} เวอร์ชัน = รวม ${totalVersions} เวอร์ชัน (parallel — ทุก angle ทำงานพร้อมกัน)...`);
 
   // === PRE-SELECT: เลือก prompt ล่วงหน้าทุก angle (sequential — ป้องกันซ้ำ) ===
   // ★ BUG FIX: Cache AI analysis + prompt lib จาก angle แรก → ใช้ซ้ำทุก angle
@@ -290,13 +290,12 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     addLog('PromptSelect', `📋 Angle "${angleObj.angle_name}" → ${topPrompt ? topPrompt.promptName?.slice(0, 40) : '❌ ไม่พบ'} (excluded: ${usedPromptIds.length - 1})${_cachedNewsAnalysis ? ' ♻️' : ''}`);
   }
 
-  // === SEQUENTIAL GENERATE: สร้างเนื้อหาทีละ angle (ป้องกัน Claude rate limit) ===
-  const genResults = [];
-  for (let index = 0; index < anglesToUse.length; index++) {
-    const angleObj = anglesToUse[index];
-    addLog('Generate', `▶️ Angle ${index + 1}/${anglesToUse.length}: "${angleObj.angle_name}"...`);
-    try {
-      const result = await withTimeout((async () => {
+  // === PARALLEL GENERATE: สร้างเนื้อหาทุก angle พร้อมกัน (★ PARALLEL — save ~150-300s) ===
+  addLog('Generate', `🚀 เริ่ม PARALLEL generate ${anglesToUse.length} angles พร้อมกัน...`);
+  const genResultsRaw = await Promise.allSettled(
+    anglesToUse.map(async (angleObj, index) => {
+      addLog('Generate', `▶️ Angle ${index + 1}/${anglesToUse.length}: "${angleObj.angle_name}" (parallel)...`);
+      return withTimeout((async () => {
         const focusAngle = `${angleObj.angle_name}: ${angleObj.description}`;
 
         // 1. Research for this angle
@@ -343,16 +342,20 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
           _researchItems: researchItems,
           _topPrompt: topPrompt,
         };
-      })(), 240000, `generate_A${index + 1}`); // ★ 240s per angle — sequential with Claude+fallback takes ~200s
+      })(), 240000, `generate_A${index + 1}`); // ★ 240s per angle timeout
+    })
+  );
 
-      genResults.push({ status: 'fulfilled', value: result });
-      addLog('Generate', `✅ Angle ${index + 1} เสร็จ: ${result?.data?.versions?.length || 0} เวอร์ชัน`);
-    } catch (angleErr) {
-      addLog('Generate', `❌ Angle ${index + 1} fail: ${angleErr.message || angleErr}`);
-      genResults.push({ status: 'rejected', reason: angleErr });
-      // ★ ถ้า angle แรกเสร็จแล้ว → ยังคืน partial result ได้ (ไม่ abort)
+  // Map Promise.allSettled results → format เดิม { status, value/reason }
+  const genResults = genResultsRaw.map((raw, index) => {
+    if (raw.status === 'fulfilled') {
+      addLog('Generate', `✅ Angle ${index + 1} เสร็จ: ${raw.value?.data?.versions?.length || 0} เวอร์ชัน`);
+      return { status: 'fulfilled', value: raw.value };
+    } else {
+      addLog('Generate', `❌ Angle ${index + 1} fail: ${raw.reason?.message || raw.reason}`);
+      return { status: 'rejected', reason: raw.reason };
     }
-  }
+  });
 
   let allVersions = [];
   let primaryResult = null;
