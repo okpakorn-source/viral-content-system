@@ -158,6 +158,24 @@ export async function planCoverLayout(resolvedRelationships, templateId, identit
   const catList = evidenceCategories.join(', ');
   const relDesc = relationships.map(r => `${r.name} (${r.role}, ${r.importance})`).join(', ') || 'ไม่มี';
 
+  // ★ Occupation Guard: ตรวจ storyType → สร้าง guard text สำหรับ family_care
+  const storyType = dnaResult?.storyType || 'default';
+  const isFamilyCare = storyType === 'family_care' || storyType === 'relationship';
+  const occupationMaxPct = isFamilyCare ? (storyType === 'relationship' ? 15 : 20) : 100;
+  const occupationGuardText = isFamilyCare ? `
+
+★★★ OCCUPATION DOMINANCE GUARD (บังคับใช้ — ห้ามฝ่าฝืน):
+ข่าวนี้คือข่าว ครอบครัว/เสียสละ/กตัญญู — ไม่ใช่ข่าวอาชีพหรือสัตว์
+
+กฎเหล็ก:
+1. hero slot → ต้องเป็นหน้าชัดของตัวละครหลัก — ห้ามเป็นภาพสัตว์/ที่ทำงาน EVER
+2. circle → ต้องเป็นแม่/พ่อ/ครอบครัว — สำคัญยิ่งกว่าภาพอาชีพ!
+3. ภาพสัตว์/เครื่องแบบ/ที่ทำงาน = evidence รอง ไม่เกิน ${occupationMaxPct}% ของ cover
+4. slot ที่เหลือ → ลำดับ: caregiving → mother/father/family → interview → hero (สีหน้า)
+5. ภาพสัตว์/อาชีพ → ใช้ได้เฉพาะ "support" slot เล็กๆ เท่านั้น
+
+SEVERE FAIL: ถ้าสัตว์หรืออาชีพไปอยู่ใน hero/circle/highlight → cover จะทำให้คนเข้าใจผิดว่าเป็นข่าวอาชีพ ไม่ใช่ข่าวครอบครัว!` : '';
+
   try {
     const { GoogleGenerativeAI } = await import('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -170,13 +188,14 @@ export async function planCoverLayout(resolvedRelationships, templateId, identit
 ตัวละครอื่น: ${relDesc}
 ซีนสำคัญ: ${(identity?.keyScenes || []).join(', ') || 'ไม่ระบุ'}
 บริบท: ${identity?.story?.slice(0, 200) || 'ไม่ระบุ'}
+ประเภทข่าว: ${storyType}
 
 Template: ${templateId}
 Slots: ${slotDesc}${hasCircle ? ', circle (portrait ของบุคคล)' : ''}
 
 Evidence categories ที่มีภาพอยู่: ${catList}
 
-กฎ:
+กฎพื้นฐาน:
 - slot hero → ต้องใช้ "hero" เสมอ
 - slot scene → ใช้ location/activity/caregiving/work (ไม่ใช่ hero)
 - slot emotion → ใช้ caregiving/activity/interview (ไม่ใช่ hero ถ้าทำได้)
@@ -184,6 +203,7 @@ Evidence categories ที่มีภาพอยู่: ${catList}
 - slot highlight → ใช้ activity/caregiving/evidence/interview
 - slot support → ใช้ relationship/family/interview
 - circle → ใช้ hero หรือ relationship สำคัญ (ต้องเป็นภาพหน้า 1 คน)
+${occupationGuardText}
 
 ใช้แค่ categories ที่มีใน: ${catList}
 
@@ -191,7 +211,7 @@ Evidence categories ที่มีภาพอยู่: ${catList}
 {
   "slots": [
     {"slotId": "main", "templateRole": "hero", "evidenceCategory": "hero", "description": "หน้าชัด${heroName}"},
-    {"slotId": "bg_top", "templateRole": "scene", "evidenceCategory": "activity", "description": "ภาพกิจกรรมหลัก"}
+    {"slotId": "bg_top", "templateRole": "scene", "evidenceCategory": "caregiving", "description": "ภาพดูแลแม่/ครอบครัว"}
   ]
 }`;
 

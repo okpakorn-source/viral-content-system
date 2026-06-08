@@ -6,12 +6,12 @@
 
 // ─── DNA Map: storyType → template + layout options ───────────────────────────
 const DNA_MAP = {
-  family_care:   { templateId: 'template_7', circleNeeded: true,  desc: 'ข่าวครอบครัว/การดูแล' },
+  family_care:   { templateId: 'template_7', circleNeeded: true,  desc: 'ข่าวครอบครัว/การดูแล/กตัญญู', occupationMaxPct: 0.20 },
   drama:         { templateId: 'template_1', circleNeeded: false, desc: 'ข่าวดราม่า' },
   donation:      { templateId: 'template_8', circleNeeded: false, desc: 'ข่าวบริจาค/ช่วยเหลือ' },
   rescue:        { templateId: 'template_5', circleNeeded: false, desc: 'ข่าวช่วยเหลือ/กู้ภัย' },
   celebrity:     { templateId: 'template_2', circleNeeded: true,  desc: 'ข่าวดารา/คนดัง' },
-  relationship:  { templateId: 'template_7', circleNeeded: true,  desc: 'ข่าวความสัมพันธ์/คู่รัก' },
+  relationship:  { templateId: 'template_7', circleNeeded: true,  desc: 'ข่าวความสัมพันธ์/คู่รัก', occupationMaxPct: 0.15 },
   achievement:   { templateId: 'template_8', circleNeeded: false, desc: 'ข่าวความสำเร็จ' },
   conflict:      { templateId: 'template_3', circleNeeded: false, desc: 'ข่าวขัดแย้ง/คดี' },
   accident:      { templateId: 'template_5', circleNeeded: false, desc: 'ข่าวอุบัติเหตุ' },
@@ -19,10 +19,27 @@ const DNA_MAP = {
   default:       { templateId: null,         circleNeeded: false, desc: 'ทั่วไป (ใช้ autoSelectTemplate)' },
 };
 
+// ─── Occupation keywords ที่ต้องระวัง (อาชีพ/บริบทรอง — ห้ามครอง cover)
+// Rule: ถ้าข่าว family_care แต่ query เจอ occupation → evidence cat นี้ต้องเป็น secondary เท่านั้น
+export const OCCUPATION_CONTEXT_KEYWORDS = [
+  'ช้าง', 'สัตวแพทย์', 'หมอสัตว์', 'elephant', 'vet',
+  'ราชการ', 'ครู', 'โรงเรียน', 'ทหาร', 'ตำรวจ', 'พยาบาล',
+  'โรงพยาบาล', 'คลินิก', 'แพทย์', 'หมอ',
+  'ทนาย', 'นักกฎหมาย', 'บริษัท', 'office', 'uniform',
+];
+
 // ─── Emotion + keywords → storyType mapping ───────────────────────────────────
 const STORY_TYPE_RULES = [
-  // family / care
-  { type: 'family_care',  keywords: ['แม่', 'พ่อ', 'ลูก', 'ครอบครัว', 'ดูแล', 'อัลไซเมอร์', 'พ่อแม่', 'พยาบาล'] },
+  // family / care — เพิ่ม keywords เสียสละ/กตัญญู/ออกราชการ
+  {
+    type: 'family_care',
+    keywords: [
+      'แม่', 'พ่อ', 'ลูก', 'ครอบครัว', 'ดูแล', 'อัลไซเมอร์', 'พ่อแม่',
+      'เสียสละ', 'กตัญญู', 'ออกราชการ', 'ค่าน้ำนม', 'ลืม', 'ความทรงจำ',
+      'ป่วย', 'สมองเสื่อม', 'ดมนา', 'จ่ายเงิน', 'รักษา', 'เฝ้าไข้',
+      'พ่อป่วย', 'แม่ป่วย', 'ลูกป่วย', 'พี่น้อง', 'น้อง', 'พี่',
+    ]
+  },
   // relationship / couple
   { type: 'relationship', keywords: ['คู่รัก', 'แฟน', 'แต่งงาน', 'หย่า', 'เลิก', 'สามี', 'ภรรยา', 'ผัว', 'เมีย'] },
   // drama
@@ -38,7 +55,7 @@ const STORY_TYPE_RULES = [
   { type: 'achievement',  keywords: ['ชนะ', 'รางวัล', 'เปิดตัว', 'สำเร็จ', 'ภูมิใจ', 'ประสบความสำเร็จ'] },
   // politics
   { type: 'politics',     keywords: ['การเมือง', 'นักการเมือง', 'รัฐบาล', 'รัฐมนตรี', 'ส.ส.', 'ส.ว.'] },
-  // celebrity (ใช้ coverEmotion=warm + identity.searchQueries.person_portrait)
+  // celebrity
   { type: 'celebrity',    keywords: ['ดารา', 'นักร้อง', 'นักแสดง', 'วงการบันเทิง', 'ศิลปิน', 'อินฟลูเอนเซอร์'] },
 ];
 
