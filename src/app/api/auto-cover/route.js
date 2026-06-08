@@ -90,7 +90,7 @@ export async function POST(request) {
 
   try {
     const body = await request.json();
-    const { content, newsTitle, templateId = 'auto', sourceUrl = '', regenerate = false } = body;
+    const { content, newsTitle, templateId = 'auto', sourceUrl = '', regenerate = false, caseId: bodyCaseId } = body;
 
     if (!content && !newsTitle) {
       return NextResponse.json(
@@ -546,6 +546,34 @@ export async function POST(request) {
       console.log(`[AutoCover] 📁 Saved as ${caseResult.caseId}`);
     } catch (e) {
       console.log(`[AutoCover] ⚠️ Case archive save failed: ${e.message}`);
+    }
+
+    // ★ Step 10: Auto-save ปกเข้า "คลังปก" (cover_examples) — fire-and-forget ★
+    // ไม่ block response หลัก, ถ้า save ล้มเหลวจะ log warning เท่านั้น
+    try {
+      const { saveGeneratedCoverToLibrary } = await import('@/lib/services/coverLibrarySaver');
+      const finalCaseId = caseResult?.caseId || bodyCaseId || null;
+      const subjects = identity?.characters?.slice(0, 5) || [
+        identity?.mainCharacter,
+        identity?.secondaryCharacter,
+      ].filter(Boolean);
+
+      saveGeneratedCoverToLibrary({
+        coverBuffer,
+        templateId: chosenTemplate,
+        newsTitle: newsTitle || content?.substring(0, 100) || '',
+        newsUrl: sourceUrl || '',
+        caseId: finalCaseId,
+        score,
+        subjects,
+        emotion: identity?.coverEmotion || identity?.emotion || '',
+        imageCount: orderedBuffers.length,
+      }).catch((err) =>
+        console.warn('[AutoCover] ⚠️ Cover library auto-save error:', err?.message)
+      );
+    } catch (libErr) {
+      // ห้าม throw — ไม่กระทบ response หลัก
+      console.warn('[AutoCover] ⚠️ Cover library import error:', libErr?.message);
     }
 
     return NextResponse.json({
