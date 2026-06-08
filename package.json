@@ -11,7 +11,10 @@
     "postinstall": "prisma generate",
     "lint": "eslint",
     "test-scrape": "node scratch/test_khaosod_extraction.mjs",
-    "test-api-auto": "node scratch/test_api_auto.mjs"
+    "test-api-auto": "node scratch/test_api_auto.mjs",
+    "watchdog": "node scripts/watchdog/check-system.mjs",
+    "watchdog:build": "node scripts/watchdog/check-system.mjs --build",
+    "audit": "node scripts/weekly-audit.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
