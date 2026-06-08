@@ -223,8 +223,12 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   addLog('Parallel', `🚀 แยกทำงานขนาน ${anglesToUse.length} มุมมอง (เป้าหมายรวม 7 เวอร์ชัน)...`);
 
   // === PRE-SELECT: เลือก prompt ล่วงหน้าทุก angle (sequential — ป้องกันซ้ำ) ===
+  // ★ BUG FIX: Cache AI analysis + prompt lib จาก angle แรก → ใช้ซ้ำทุก angle
   const usedPromptIds = [];
   const anglePrompts = [];
+  let _cachedNewsAnalysis = null;
+  let _cachedPromptLib = null;
+  
   for (const angleObj of anglesToUse) {
     const focusAngle = `${angleObj.angle_name}: ${angleObj.description}`;
     const promptsRes = await getTopPrompts({
@@ -233,11 +237,22 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
       focusAngle,
       workflowId: _autoWorkflowId,
       excludePromptIds: [...usedPromptIds],
+      _cachedNewsAnalysis,   // ★ ส่ง cached analysis (null ครั้งแรก → AI วิเคราะห์ → cache)
+      _cachedPromptLib,      // ★ ส่ง cached lib (null ครั้งแรก → load → cache)
     }).catch(() => null);
+    
+    // Cache จากผลลัพธ์ครั้งแรก → ใช้ซ้ำครั้งถัดไป
+    if (!_cachedNewsAnalysis && promptsRes?.newsAnalysis) {
+      _cachedNewsAnalysis = promptsRes.newsAnalysis;
+    }
+    if (!_cachedPromptLib && promptsRes?._promptLib?.length > 0) {
+      _cachedPromptLib = promptsRes._promptLib;
+    }
+    
     const topPrompt = promptsRes?.prompts?.[0] || null;
     if (topPrompt?.id) usedPromptIds.push(topPrompt.id);
     anglePrompts.push(topPrompt);
-    addLog('PromptSelect', `📋 Angle "${angleObj.angle_name}" → ${topPrompt ? topPrompt.promptName?.slice(0, 40) : '❌ ไม่พบ'} (excluded: ${usedPromptIds.length - 1})`);
+    addLog('PromptSelect', `📋 Angle "${angleObj.angle_name}" → ${topPrompt ? topPrompt.promptName?.slice(0, 40) : '❌ ไม่พบ'} (excluded: ${usedPromptIds.length - 1})${_cachedNewsAnalysis ? ' ♻️' : ''}`);
   }
 
   // === PARALLEL GENERATE: สร้างเนื้อหาขนานด้วย prompt ที่เลือกไว้แล้ว ===
