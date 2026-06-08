@@ -111,6 +111,26 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   if (!rawText || rawText.length < 20) {
     throwStep('auto_scrape', 'ไม่สามารถดึงเนื้อหาได้ (ข้อความสั้นเกินไป)');
   }
+
+  // ★★★ Content Quality Gate — ตรวจจับ garbage/template content
+  if (detectedType !== 'text') {
+    const _lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const _longLines = _lines.filter(l => l.length > 60); // ประโยคยาวที่เป็นเนื้อข่าวจริง
+    const _navKeywords = ['ติดต่อเรา', 'คุกกี้', 'cookie', 'ข้อกำหนด', 'สงวนลิขสิทธิ์', 'All Rights Reserved', 'ยอมรับทั้งหมด', 'ติดต่อโฆษณา'];
+    const _navHits = _navKeywords.filter(kw => rawText.includes(kw)).length;
+    const _linkDensity = (rawText.match(/https?:\/\//g) || []).length;
+    
+    // ถ้ามีประโยคยาว < 3 + คำ nav ≥ 3 + ลิงก์เยอะ → เป็น template/garbage
+    if (_longLines.length < 3 && _navHits >= 3) {
+      addLog('Step1', `❌ Content Quality FAIL: เนื้อหาเป็น template เว็บ (${_longLines.length} ประโยคยาว, ${_navHits} nav keywords, ${_linkDensity} links)`);
+      throwStep('auto_scrape', `เว็บไซต์นี้ไม่มีเนื้อข่าว (พบเฉพาะ template/navbar) — กรุณา copy เนื้อข่าวมาวางแทน`);
+    }
+    if (_longLines.length < 2 && rawText.length < 300) {
+      addLog('Step1', `❌ Content Quality FAIL: เนื้อหาสั้นเกินไป (${_longLines.length} ประโยค, ${rawText.length} chars)`);
+      throwStep('auto_scrape', `เว็บไซต์นี้มีเนื้อหาน้อยเกินไป — กรุณา copy เนื้อข่าวมาวางแทน`);
+    }
+  }
+
   if (contentFallback) addLog('Step1', '⚠️ ใช้ URL fallback — AI จะวิเคราะห์เนื้อหาจาก context ที่มี (ผลลัพธ์อาจจำกัด)');
 
   // === STEP 2: สกัดข่าว (Extract) ===
@@ -132,6 +152,21 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   }
   const newsData = extractRes.data;
   if (url) newsData.sourceUrl = url;
+
+  // ★★★ Circuit Breaker — หยุดถ้า AI สกัดข่าวไม่ได้จริง
+  const _noContentPhrases = ['ไม่พบเนื้อหาข่าว', 'ไม่พบเนื้อหา', 'ไม่มีเนื้อหาข่าว', 'ไม่มีแก่นข่าว', 'ไม่สามารถระบุ', 'ไม่พบข้อมูลข่าว'];
+  const _titleLower = (newsData.newsTitle || '').toLowerCase();
+  const _hasNoContent = _noContentPhrases.some(p => _titleLower.includes(p.toLowerCase()));
+  if (_hasNoContent) {
+    addLog('Step2', `❌ Circuit Breaker: AI สกัดข่าวไม่ได้ — "${newsData.newsTitle}"`);
+    throwStep('auto_extract', `ไม่สามารถสกัดเนื้อข่าวได้จาก URL นี้ (${newsData.newsTitle}) — กรุณา copy เนื้อข่าวมาวางแทน`);
+  }
+  // ★ เช็คว่า newsBody มีเนื้อหาจริง ไม่ใช่ AI แต่งขึ้น
+  if (newsData.newsBody.length < 80) {
+    addLog('Step2', `❌ Circuit Breaker: newsBody สั้นเกินไป (${newsData.newsBody.length} chars)`);
+    throwStep('auto_extract', `เนื้อข่าวที่สกัดได้สั้นเกินไป (${newsData.newsBody.length} ตัวอักษร) — กรุณา copy เนื้อข่าวมาวางแทน`);
+  }
+
   rlog.inject('newsTitle', `"${(newsData.newsTitle||'').slice(0,50)}"`);
   rlog.inject('newsBody', `${newsData.newsBody.length}ch | category: ${newsData.newsCategory||'-'}`);
   addLog('Step2', `✅ "${newsData.newsTitle?.slice(0, 40)}..." (${newsData.newsBody.length} ตัวอักษร, ${((Date.now() - step2Start) / 1000).toFixed(1)}s)`);

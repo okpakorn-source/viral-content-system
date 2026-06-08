@@ -131,6 +131,20 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     throwStep('auto_extract', `สกัดข่าวไม่สำเร็จ: ${extractRes.error || 'ไม่มีเนื้อหา'}`);
   }
   const newsData = extractRes.data;
+
+  // ★★★ Circuit Breaker — หยุดถ้า AI สกัดข่าวไม่ได้จริง
+  const _noContentPhrases = ['ไม่พบเนื้อหาข่าว', 'ไม่พบเนื้อหา', 'ไม่มีเนื้อหาข่าว', 'ไม่มีแก่นข่าว', 'ไม่สามารถระบุ', 'ไม่พบข้อมูลข่าว'];
+  const _titleLower = (newsData.newsTitle || '').toLowerCase();
+  const _hasNoContent = _noContentPhrases.some(p => _titleLower.includes(p.toLowerCase()));
+  if (_hasNoContent) {
+    addLog('Step2', `❌ Circuit Breaker: AI สกัดข่าวไม่ได้ — "${newsData.newsTitle}"`);
+    throwStep('auto_extract', `ไม่สามารถสกัดเนื้อข่าวได้ (${newsData.newsTitle}) — กรุณา copy เนื้อข่าวมาวางแทน`);
+  }
+  if (newsData.newsBody.length < 80) {
+    addLog('Step2', `❌ Circuit Breaker: newsBody สั้นเกินไป (${newsData.newsBody.length} chars)`);
+    throwStep('auto_extract', `เนื้อข่าวสั้นเกินไป (${newsData.newsBody.length} ตัวอักษร) — กรุณา copy เนื้อข่าวมาวางแทน`);
+  }
+
   rlog.inject('newsTitle', `"${(newsData.newsTitle||'').slice(0,50)}"`);
   rlog.inject('newsBody', `${newsData.newsBody.length}ch | category: ${newsData.newsCategory||'-'}`);
   addLog('Step2', `✅ "${newsData.newsTitle?.slice(0, 40)}..." (${newsData.newsBody.length} ตัวอักษร, ${((Date.now() - step2Start) / 1000).toFixed(1)}s)`);
