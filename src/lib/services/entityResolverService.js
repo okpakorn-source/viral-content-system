@@ -3,7 +3,7 @@
  * Layer 1: รับชื่อตัวละครหลัก → ค้นหา Social Profile URLs ด้วย Serper Web Search
  */
 
-export async function resolveEntity(mainCharacter, newsTitle = '') {
+export async function resolveEntity(mainCharacter, newsTitle = '', identity = null) {
   if (!mainCharacter || mainCharacter.length < 2) {
     return {
       found: false,
@@ -86,11 +86,40 @@ export async function resolveEntity(mainCharacter, newsTitle = '') {
       ? null
       : `ไม่พบ Social Profile หรือหน้าข่าวของ "${mainCharacter}" — จะใช้ Google Images Fallback แทน`;
 
-    const entityImageQueries = [
-      mainCharacter,
-      `${mainCharacter} ${newsTitle.slice(0, 30)}`.trim(),
-      ...sources.facebook.slice(0, 1).map(() => `${mainCharacter} facebook`),
-    ].filter(q => q.trim().length > 2);
+    // ★ FIX B: ใช้ celebratedAction + relationship เป็น primary queries
+    // ถ้าข่าวไม่ได้เกี่ยวอาชีพ (occupationImportance < 0.3) → ห้ามใช้ occupation เป็น primary
+    let entityImageQueries;
+    {
+      const coreStory = identity?.coreStory;
+      const celebratedAction = coreStory?.celebratedAction;
+      const relationship = coreStory?.relationship;
+      const occupationImportance = coreStory?.occupationImportance ?? 1.0;
+
+      if (celebratedAction && occupationImportance < 0.3) {
+        // ★ ข่าวนี้ไม่ได้เกี่ยวอาชีพหลัก → ใช้ action + relationship เป็น primary queries
+        console.log(`[EntityResolver] 🎯 FIX B: celebratedAction mode (occupationImportance=${occupationImportance})`);
+        console.log(`[EntityResolver]   celebratedAction: "${celebratedAction}"`);
+        console.log(`[EntityResolver]   relationship: "${relationship || 'N/A'}"`);
+        const primaryQueries = [];
+        if (relationship) primaryQueries.push(`${mainCharacter} ${relationship}`.trim());    // เช่น "หมอโบว์ แม่"
+        primaryQueries.push(`${mainCharacter} ${celebratedAction}`.trim());                    // เช่น "หมอโบว์ ดูแลแม่"
+        primaryQueries.push(`${mainCharacter} ครอบครัว`.trim());                               // เช่น "หมอโบว์ ครอบครัว"
+        primaryQueries.push(`${mainCharacter} สีหน้า`.trim());                                 // portrait เฉยๆ
+        // ★ occupation queries มีได้แค่ 1 query และอยู่ท้ายสุด
+        if (occupationImportance > 0.05) {
+          primaryQueries.push(mainCharacter);
+        }
+        // ★ ห้ามใส่ negativeFocus ในquery เด็ดขาด → ไม่ search เลย
+        entityImageQueries = primaryQueries.filter(q => q.trim().length > 2);
+      } else {
+        // ข่าวอาชีพปกติ → ใช้ queries เดิม
+        entityImageQueries = [
+          mainCharacter,
+          `${mainCharacter} ${newsTitle.slice(0, 30)}`.trim(),
+          ...sources.facebook.slice(0, 1).map(() => `${mainCharacter} facebook`),
+        ].filter(q => q.trim().length > 2);
+      }
+    }
 
     console.log(
       `[EntityResolver] "${mainCharacter}" → FB:${sources.facebook.length} YT:${sources.youtube.length} News:${sources.newsPages.length}`

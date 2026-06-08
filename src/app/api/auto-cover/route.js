@@ -239,7 +239,7 @@ export async function POST(request) {
       if (identity?.mainCharacter) {
         console.log(`[AutoCover] 🔍 Step 1.5: Entity Resolver → "${identity.mainCharacter}"`);
         const { resolveEntity } = await import('@/lib/services/entityResolverService');
-        entityData = await resolveEntity(identity.mainCharacter, newsTitle || '');
+        entityData = await resolveEntity(identity.mainCharacter, newsTitle || '', identity);
         if (entityData.warning) console.log(`[AutoCover] ⚠️ Entity: ${entityData.warning}`);
       } else {
         entityData.warning = 'storyIdentity ไม่สามารถระบุตัวละครหลักได้จากข่าวนี้';
@@ -762,29 +762,38 @@ export async function POST(request) {
       // Keep default score 7
     }
 
-    // ★ FIX 4: Story Match Validator — ถามว่าปกนี้เล่าเรื่องถูกไหม (ไม่ regenerate อัตโนมัติ — บันทึก storyMatchScore ใน response)
+    // FIX C: Cover Praising Test -- Story Match Validator (upgraded)
     let storyMatchScore = null;
     let storyMatchReason = null;
     let viewerImpression = null;
     let dominantElement = null;
+    let coverPraises = null;
+    let isCorrectPraise = null;
     try {
       if (identity?.coreStory?.emotionalHook && coverBuffer) {
         const { GoogleGenerativeAI: _SmGAI } = await import('@google/generative-ai');
         const smGenAI = new _SmGAI(process.env.GEMINI_API_KEY);
         const smModel = smGenAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+        const celebratedTarget = identity.coreStory?.celebratedAction
+          || identity.coreStory?.emotionalHook
+          || 'the main story';
+
         const storyMatchPrompt = `You are a cover critic. Look at this news cover image.
 
-Describe in ONE sentence what story the viewer will think this cover is about.
-(Answer based on what you see, ignore any article text)
+Question 1: What is this cover PRAISING or CELEBRATING? (one sentence)
+Question 2: What story does the viewer think this is about? (one sentence)
 
-Then compare to the TARGET STORY: "${identity.coreStory.emotionalHook}"
+Target: This cover should praise: "${celebratedTarget}"
 
 Return JSON without markdown:
 {
-  "viewerImpression": "what viewer thinks this story is about",
+  "coverPraises": "what the cover is praising/celebrating",
+  "viewerThinks": "what story viewer thinks this is",
   "storyMatch": 0-10,
-  "reason": "why match or mismatch",
-  "dominantElement": "what takes up the most visual space"
+  "isCorrectPraise": true/false,
+  "dominantVisual": "what takes most space",
+  "reason": "why match or mismatch"
 }`;
         const smResult = await smModel.generateContent([
           storyMatchPrompt,
@@ -796,13 +805,21 @@ Return JSON without markdown:
           const smData = JSON.parse(smMatch[1] || smMatch[0]);
           storyMatchScore = smData.storyMatch;
           storyMatchReason = smData.reason;
-          viewerImpression = smData.viewerImpression;
-          dominantElement = smData.dominantElement;
-          if (storyMatchScore < 5) {
-            console.warn(`[AutoCover] ⚠️ Story Match LOW: ${storyMatchScore}/10 — ${storyMatchReason}`);
-            console.warn(`[AutoCover] ⚠️ Viewer impression: "${viewerImpression}" | Dominant: "${dominantElement}"`);
+          viewerImpression = smData.viewerThinks;
+          dominantElement = smData.dominantVisual;
+          coverPraises = smData.coverPraises;
+          isCorrectPraise = smData.isCorrectPraise;
+          if (storyMatchScore < 3) {
+            console.warn(`[AutoCover] HARD REJECT: storyMatch=${storyMatchScore}/10`);
+            console.warn(`[AutoCover]   Cover praises: "${coverPraises}"`);
+            console.warn(`[AutoCover]   Should praise: "${celebratedTarget}"`);
+            console.warn(`[AutoCover]   Viewer thinks: "${viewerImpression}"`);
+          } else if (storyMatchScore < 5) {
+            console.warn(`[AutoCover] Story Match LOW: ${storyMatchScore}/10`);
+            console.warn(`[AutoCover] Cover praises: "${coverPraises}" | Should: "${celebratedTarget}"`);
+            console.warn(`[AutoCover] Viewer: "${viewerImpression}" | Dominant: "${dominantElement}"`);
           } else {
-            console.log(`[AutoCover] ✅ Story Match: ${storyMatchScore}/10 — ${storyMatchReason}`);
+            console.log(`[AutoCover] Story Match: ${storyMatchScore}/10 -- ${storyMatchReason}`);
           }
         }
       }
@@ -900,11 +917,17 @@ Return JSON without markdown:
         emotion: identity.emotion,
         coverEmotion: identity.coverEmotion,
       },
-      // ★ FIX 4: Story Match Validator results
+      // FIX C: Cover Praising Test results
       storyMatchScore: storyMatchScore ?? null,
       storyMatchReason: storyMatchReason ?? null,
       viewerImpression: viewerImpression ?? null,
       dominantElement: dominantElement ?? null,
+      coverPraises: coverPraises ?? null,
+      isCorrectPraise: isCorrectPraise ?? null,
+      // storyMismatch: true = HARD REJECT (score < 3) -- UI should show warning
+      storyMismatch: storyMatchScore !== null && storyMatchScore < 3,
+      // coverPraising: viewer impression when score is LOW (< 5)
+      ...(storyMatchScore !== null && storyMatchScore < 5 ? { coverPraising: viewerImpression } : {}),
       // Gallery: ภาพทั้งหมดที่ค้นมา + role/score (thumbnail สร้างทีหลัง)
       gallery: imageBuffers.map((img, i) => {
         const fd = faceDataMap?.get?.(String(i));
