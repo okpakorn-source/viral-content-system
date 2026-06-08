@@ -2,26 +2,12 @@
  * Cover Case Archive — บันทึกปกทุกครั้งที่สร้าง เป็น CASE-001, CASE-002, ...
  * Primary: Supabase | Fallback: Local JSON + files
  */
-import { createClient } from '@supabase/supabase-js';
+import { getSupabase } from '@/lib/supabase';
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
 
 const LOCAL_JSON_PATH = path.join(process.cwd(), 'data', 'cover-cases.json');
 const LOCAL_IMAGES_DIR = path.join(process.cwd(), 'public', 'cover-cases');
-
-// ============ Supabase ============
-let supabase = null;
-function getSupabase() {
-  if (!supabase) {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (url && key) {
-      supabase = createClient(url, key);
-    }
-  }
-  return supabase;
-}
 
 // ============ Local Helpers ============
 function ensureDirs() {
@@ -83,7 +69,7 @@ export async function getNextCaseId() {
  * @param {Object} metadata — ข้อมูลปก
  */
 export async function saveCase(coverBuffer, metadata) {
-  const { caseId, caseNumber } = await getNextCaseId();
+  let { caseId, caseNumber } = await getNextCaseId();
   const now = new Date().toISOString();
 
   const caseData = {
@@ -131,26 +117,45 @@ export async function saveCase(coverBuffer, metadata) {
         caseData.supabaseImageUrl = urlData?.publicUrl || '';
       }
 
-      // Insert case record
-      const { error: insertErr } = await sb
+      // Insert case record — with retry on duplicate key (C-18 race condition fix)
+      const insertPayload = {
+        case_id: caseId,
+        case_number: caseNumber,
+        news_title: caseData.newsTitle,
+        content: caseData.content,
+        score: caseData.score,
+        template_used: caseData.templateUsed,
+        elapsed: caseData.elapsed,
+        image_count: caseData.imageCount,
+        identity: {
+          ...caseData.identity,
+          news_url: metadata.newsUrl || '',  // เก็บ news_url ใน JSONB identity
+        },
+        batch_id: caseData.batchId,
+        cover_image_url: caseData.supabaseImageUrl || caseData.coverImagePath,
+        created_at: now,
+      };
+
+      let { error: insertErr } = await sb
         .from('cover_cases')
-        .insert({
-          case_id: caseId,
-          case_number: caseNumber,
-          news_title: caseData.newsTitle,
-          content: caseData.content,
-          score: caseData.score,
-          template_used: caseData.templateUsed,
-          elapsed: caseData.elapsed,
-          image_count: caseData.imageCount,
-          identity: {
-            ...caseData.identity,
-            news_url: metadata.newsUrl || '',  // เก็บ news_url ใน JSONB identity
-          },
-          batch_id: caseData.batchId,
-          cover_image_url: caseData.supabaseImageUrl || caseData.coverImagePath,
-          created_at: now,
-        });
+        .insert(insertPayload);
+
+      // ★ C-18: Retry once on duplicate key (race condition between concurrent requests)
+      if (insertErr?.code === '23505') {
+        console.log(`[CaseArchive] ⚠️ Duplicate case_id ${caseId}, retrying with new ID...`);
+        const retry = await getNextCaseId();
+        caseId = retry.caseId;
+        caseNumber = retry.caseNumber;
+        caseData.caseId = caseId;
+        caseData.caseNumber = caseNumber;
+        insertPayload.case_id = caseId;
+        insertPayload.case_number = caseNumber;
+
+        const retryResult = await sb
+          .from('cover_cases')
+          .insert(insertPayload);
+        insertErr = retryResult.error;
+      }
 
       if (!insertErr) {
         savedToSupabase = true;
