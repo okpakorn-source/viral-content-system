@@ -148,7 +148,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     mode: 'breakdown',
     workflowId: _autoWorkflowId,
     user: _user,
-  }), 60000, 'breakdown');
+  }), 90000, 'breakdown'); // ★ 90s — GPT-5.5 is slower than GPT-4o
 
   if (!breakRes.success || !breakRes.data) {
     throwStep('auto_breakdown', `แตกประเด็นไม่สำเร็จ: ${breakRes.error || ''}`);
@@ -173,7 +173,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     breakdownData,
     workflowId: _autoWorkflowId,
     user: _user,
-  }), 60000, 'blueprint').catch(() => null);
+  }), 75000, 'blueprint').catch(() => null); // ★ 75s — GPT-5.5 needs more time
 
   const blueprint = bpResult?.success ? bpResult.data?.blueprint : null;
   addLog('Enhanced', `Blueprint: ${blueprint ? blueprint.core_emotion : '❌'}`);
