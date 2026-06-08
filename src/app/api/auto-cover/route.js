@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Auto Cover API Route — /api/auto-cover
  * 
  * POST: Generate cover image automatically from content
@@ -249,7 +249,8 @@ export async function POST(request) {
         sq.key_relationship = relationship ? `${hero} ${relationship}`.trim() : `${hero} ครอบครัว`;
         sq.person_context   = relationship ? `${hero} ${relationship}`.trim() : `${hero} ${celebratedAction}`.trim();
         sq.event_scene      = `${hero} ${celebratedAction}`.trim();
-        identity.searchGoogle = `${hero} ${celebratedAction}`.trim().substring(0, 80);
+        identity.searchGoogle  = `${hero} ${celebratedAction}`.trim().substring(0, 80);
+        identity.searchYouTube = relationship ? `${hero} ${relationship} ${celebratedAction}`.trim().substring(0, 60) : `${hero} ${celebratedAction}`.trim().substring(0, 60);
         console.log(`[AutoCover] ★ QUERY OVERRIDE (occupationImportance=${occupationImportance})`);
         console.log(`  key_activity:     "${prevKeyActivity}" -> "${sq.key_activity}"`);
         console.log(`  person_context:   "${prevPersonContext}" -> "${sq.person_context}"`);
