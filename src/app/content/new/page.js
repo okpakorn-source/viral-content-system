@@ -187,7 +187,7 @@ function NewContentPageInner() {
     }
 
     // 2. Poll for result
-    const maxPollTime = 12 * 60 * 1000; // 12 minutes max (pipeline ~5-8min)
+    const maxPollTime = 15 * 60 * 1000; // 15 minutes max (pipeline can take >12min)
     const startTime = Date.now();
     let workerRetriggerCount = 0;
     let notFoundCount = 0; // ★ Track consecutive 'job not found' responses
@@ -255,7 +255,7 @@ function NewContentPageInner() {
     }
 
     setQueuePolling(false);
-    throw new Error('หมดเวลารอคิว (12 นาที) กรุณาลองใหม่');
+    throw new Error('หมดเวลารอคิว (15 นาที) กรุณาลองใหม่');
   };
 
   // === ⚡ Auto Mode — วาง URL → ได้ผลลัพธ์ ===
@@ -631,7 +631,7 @@ function NewContentPageInner() {
       setAutoProgress('');
     } catch (err) {
       wfFail(err.failedStep || (err.name === 'AbortError' ? 'u_timeout' : 'u_unknown'), err.message);
-      setError('❌ ' + (err.name === 'AbortError' ? 'หมดเวลา (Timeout 12 นาที) กรุณาลองใหม่' : err.message));
+      setError('❌ ' + (err.name === 'AbortError' ? 'หมดเวลา (Timeout 15 นาที) กรุณาลองใหม่' : err.message));
       setAutoProgress('');
     } finally {
       setAutoMode(false);

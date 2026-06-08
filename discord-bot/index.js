@@ -349,7 +349,7 @@ async function processNewsJob(job) {
     }
 
     if (!data) {
-      throw new Error('หมดเวลารอคิว (10 นาที) กรุณาลองใหม่');
+      throw new Error('หมดเวลารอคิว (15 นาที) กรุณาลองใหม่');
     }
 
     if (!data.success) {
