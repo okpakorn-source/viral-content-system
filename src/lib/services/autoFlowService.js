@@ -341,7 +341,9 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     } else if (res.status === 'fulfilled' && res.value?.error === 'NO_MATCHING_PROMPT') {
       addLog('PromptSkip', `⏭️ ข้าม ${res.value._sourceLabel || 'Angle'} — ไม่มี prompt ที่ match ใน library`);
     } else {
-      addLog('Error', `❌ Generation Failed for an Angle: ${res.reason?.message || res.reason || res.value?.error || 'Unknown Error'}`);
+      const errDetail = res.reason?.message || res.reason || res.value?.error || 'Unknown Error';
+      addLog('Error', `❌ Generation Failed for an Angle: ${errDetail}`);
+      console.error(`[AutoFlow] ❌ ANGLE FAIL DETAIL:`, JSON.stringify({ status: res.status, reason: res.reason?.message, valueError: res.value?.error, valueSuccess: res.value?.success }));
     }
   });
 
@@ -352,7 +354,12 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     if (skippedAngles === genResults.length) {
       throwStep('auto_classic', `ถูกข้ามทั้งหมด (${skippedAngles} มุมมอง) เพราะไม่มี Prompt ในคลังที่ตรงกับข่าวนี้เลย โปรดเข้าไปเพิ่ม Prompt ให้ครอบคลุมหมวดหมู่ข่าวนี้`);
     } else {
-      throwStep('auto_classic', `สร้างเนื้อหาไม่สำเร็จในทุกมุมมอง (ล้มเหลว ${failedAngles} มุมมอง) — ตรวจสอบ API key หรือโควตาอาจจะเต็ม`);
+      // Collect actual error details for debugging
+      const errorDetails = genResults
+        .filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value?.success && r.value?.error !== 'NO_MATCHING_PROMPT'))
+        .map(r => r.reason?.message || r.value?.error || 'unknown')
+        .join('; ');
+      throwStep('auto_classic', `สร้างเนื้อหาไม่สำเร็จในทุกมุมมอง (ล้มเหลว ${failedAngles} มุมมอง): ${errorDetails || 'ไม่ทราบสาเหตุ'}`);
     }
   }
 
