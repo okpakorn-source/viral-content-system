@@ -247,15 +247,25 @@ async function agentGoogleCleanImages(identity) {
 async function agentYouTubeFrames(identity) {
   const mainChar = identity?.mainCharacter || '';
 
-  // ★★★ ใช้ coreImageQueries ชุดเดียวกับทุก Agent — ไม่ถือคีย์คนละชุดอีกแล้ว!
+  // Priority: storySubject-focused YouTube queries (DIFFERENT from Google Image queries!)
+  // YouTube มี vlog/interview ที่มีเด็ก/ครอบครัว ซึ่ง Google Images ไม่มี!
+  const storySubject = identity?._storySubject || identity?.coreStory?.storySubject || identity?.coreStory?.relationship || '';
   const coreQueries = identity?.coreImageQueries || [];
   const sq = identity?.searchQueries || {};
-  const sd = identity?.specific_details || {};
 
-  // Priority: coreImageQueries → searchYouTube → searchGoogle → fallback
   let youtubeQueries = [];
-  if (coreQueries.length > 0) {
-    // ★ ใช้ coreImageQueries ทุกตัว (max 3) — เหมือน Google + Tavily
+
+  // ★★★ Build YouTube-specific queries (เน้น family/children/vlog)
+  if (storySubject && storySubject !== mainChar) {
+    // ข่าวที่มี storySubject ชัดเจน (เช่น ลูก, แม่, พ่อ) → ค้น YouTube ตรงๆ
+    youtubeQueries = [
+      `${mainChar} ${storySubject}`,          // เช่น "ชมพู่ สายฟ้า พายุ"
+      `${mainChar} ลูก ครอบครัว`,              // family vlog
+      sq.storySubject_direct || `${mainChar} ${storySubject} วิดีโอ`, // from AI query
+      sq.key_relationship || `${mainChar} ครอบครัว`,
+    ].filter(q => q && q.trim() && q !== mainChar);
+    console.log(`[Agent2: YouTube] ★ STORY SUBJECT mode: ${JSON.stringify(youtubeQueries)}`);
+  } else if (coreQueries.length > 0) {
     youtubeQueries = coreQueries.slice(0, 3);
     console.log(`[Agent2: YouTube] ★ Using coreImageQueries: ${JSON.stringify(youtubeQueries)}`);
   } else {
@@ -264,7 +274,7 @@ async function agentYouTubeFrames(identity) {
     youtubeQueries = [
       searchQuery,
       sq.person_context || (mainChar && identity?.story ? `${mainChar} ${identity.story.substring(0, 30)}` : ''),
-      sq.event_scene || (sd.place_names?.[0] ? `${mainChar} ${sd.place_names[0]}` : ''),
+      sq.event_scene || '',
     ].filter(q => q && q.trim());
     console.log(`[Agent2: YouTube] ⚠️ No coreImageQueries, using legacy: ${JSON.stringify(youtubeQueries)}`);
   }
