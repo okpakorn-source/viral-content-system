@@ -559,6 +559,8 @@ export async function POST(request) {
         identity?.secondaryCharacter,
       ].filter(Boolean);
 
+      console.log(`[AutoCover] 📚 Step 10: Saving to cover library... caseId=${finalCaseId}, subjects=${JSON.stringify(subjects)}`);
+      
       saveGeneratedCoverToLibrary({
         coverBuffer,
         templateId: chosenTemplate,
@@ -570,6 +572,12 @@ export async function POST(request) {
         subjects,
         emotion: identity?.coverEmotion || identity?.emotion || '',
         imageCount: orderedBuffers.length,
+      }).then((result) => {
+        if (result?.success) {
+          console.log(`[AutoCover] ✅ Cover library auto-save SUCCESS: id=${result.id}, version=${result.version || 1}`);
+        } else {
+          console.warn(`[AutoCover] ⚠️ Cover library auto-save returned error: ${result?.error || 'unknown'}`);
+        }
       }).catch((err) =>
         console.warn('[AutoCover] ⚠️ Cover library auto-save error:', err?.message)
       );

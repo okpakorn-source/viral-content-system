@@ -47,6 +47,7 @@ export default function Sidebar() {
     { label: 'แทมเพลตปก (14 แบบ)', icon: '🎨', href: '/cover-tester' },
     { label: 'สร้างปก (Manual)', icon: '🎭', href: '/cover-maker' },
     { label: 'คลังรูป', icon: '📸', href: '/cover-gallery' },
+    { label: 'คลังปก (Archive)', icon: '📁', href: '/cover-archive' },
     { type: 'divider', label: 'AI Intelligence' },
     { label: 'หอสมุดไวรัล', icon: '📚', href: '/viral-library' },
     { label: 'หอสมุด Prompt', icon: '🏛️', href: '/prompt-library' },

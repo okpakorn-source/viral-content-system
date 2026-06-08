@@ -71,6 +71,19 @@ async function makeThumbnail(imageBase64) {
  * @returns {Promise<{success: boolean, id?: string|number, error?: string}>}
  */
 export async function saveGeneratedCoverToLibrary(params) {
+  console.log('[CoverLibrarySaver] 🔄 saveGeneratedCoverToLibrary called with:', {
+    hasImageBase64: !!params.imageBase64,
+    hasCoverBuffer: !!params.coverBuffer,
+    coverBufferLength: params.coverBuffer?.length || 0,
+    templateId: params.templateId,
+    newsTitle: (params.newsTitle || '').substring(0, 60),
+    caseId: params.caseId,
+    score: params.score,
+    subjects: params.subjects,
+    emotion: params.emotion,
+    imageCount: params.imageCount,
+  });
+
   const {
     imageBase64,
     coverBuffer,
@@ -122,6 +135,14 @@ export async function saveGeneratedCoverToLibrary(params) {
 
     // Insert เข้า cover_examples
     // เขียนทั้ง real columns (หลัง migration) และ JSONB backup (compat)
+    console.log('[CoverLibrarySaver] 📝 Inserting into cover_examples...', {
+      title: (newsTitle || 'ปกอัตโนมัติ').substring(0, 40),
+      category: 'auto_generated',
+      thumbnailSize: thumbnail?.length || 0,
+      quality_score: score,
+      caseId,
+      version,
+    });
     const { data, error } = await supabase
       .from('cover_examples')
       .insert({
