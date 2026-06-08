@@ -408,8 +408,12 @@ export async function POST(request) {
       console.log(`[AutoCover] 🔀 Step 2.5: Merged ${entityFirstImages.length} entity-first + ${multiAgentImages.length} multiAgent images`);
     }
 
-    // รวม: entity-first มาก่อน (priority) → multiAgent ตามหลัง
+    // ★ Sort entity-first images by qualityScore DESC before merge
+    entityFirstImages.sort((a, b) => (b.qualityScore || 0) - (a.qualityScore || 0));
+
+    // รวม: entity-first มาก่อน (priority, sorted by quality) → multiAgent ตามหลัง
     const bestImages = [...entityFirstImages, ...multiAgentImages];
+    console.log(`[AutoCover] 🏆 Best images: ${entityFirstImages.length} entity-first (sorted) + ${multiAgentImages.length} multiAgent`);
 
     if (!bestImages || bestImages.length === 0) {
       return NextResponse.json(
@@ -562,13 +566,26 @@ export async function POST(request) {
       const hasMultipleFaces = [...faceDataMap.values()].filter(f => f.hasFaces).length;
       const numImages = imageBuffers.length;
 
+      // ★ v4: Cover DNA override — ถ้า DNA recommend template → ใช้ก่อน autoSelectTemplate
+      let dnaTemplate = null;
+      try {
+        const { matchCoverDNA } = await import('@/lib/services/coverDNAService');
+        const dna = matchCoverDNA(identity);
+        if (dna?.templateId) {
+          dnaTemplate = dna.templateId;
+          console.log(`[AutoCover] 🧬 Cover DNA override: ${dnaTemplate} (storyType: ${identity?.coverEmotion || 'unknown'})`);
+        }
+      } catch { /* DNA fail → ใช้ autoSelect */ }
+
       try {
         const { autoSelectTemplate } = await import('@/lib/coverTemplateRegistry');
-        chosenTemplate = autoSelectTemplate(numImages, hasMultipleFaces, identity);
+        const autoTemplate = autoSelectTemplate(numImages, hasMultipleFaces, identity);
+        // DNA มี priority — แต่ถ้า DNA template ไม่รองรับ image count → fallback autoSelect
+        chosenTemplate = dnaTemplate || autoTemplate;
       } catch {
-        chosenTemplate = 'template_5'; // fallback — safe general-purpose template
+        chosenTemplate = dnaTemplate || 'template_5'; // fallback
       }
-      console.log(`[AutoCover] Auto-selected template: ${chosenTemplate}`);
+      console.log(`[AutoCover] Template selected: ${chosenTemplate} (source: ${dnaTemplate ? 'DNA' : 'autoSelect'})`);
     }
 
     // Step 6: ★ ดึงคลังปกไวรัลมาเป็น reference ★
