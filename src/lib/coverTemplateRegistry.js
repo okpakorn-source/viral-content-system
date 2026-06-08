@@ -23,9 +23,9 @@ const BUILTIN_TEMPLATES = [
     imageSlots: 5,
     textSlots: [],
     slots: [
-      { id: 'main',      role: 'hero',      x: 0,   y: 0,   w: 750, h: 1350, fadeRight: 150, zIndex: 2 },
-      { id: 'bg_top',    role: 'scene',     x: 380, y: 0,   w: 820, h: 720,  fadeLeft: 190, fadeBottom: 140, zIndex: 0 },
-      { id: 'bg_bottom', role: 'scene',     x: 350, y: 580, w: 850, h: 770,  fadeLeft: 160, fadeTop: 160, zIndex: 1 },
+      { id: 'main',      role: 'hero',      x: 0,   y: 0,   w: 750, h: 1350, fadeRight: 280, fadeBottom: 250, zIndex: 2 },
+      { id: 'bg_top',    role: 'scene',     x: 380, y: 0,   w: 820, h: 720,  fadeLeft: 320, fadeBottom: 140, zIndex: 0 },
+      { id: 'bg_bottom', role: 'scene',     x: 350, y: 580, w: 850, h: 770,  fadeLeft: 320, fadeTop: 220, zIndex: 1 },
       { id: 'highlight', role: 'highlight', x: 370, y: 280, w: 560, h: 400,  border: '#CCFF00', borderWidth: 5, zIndex: 3 },
       { id: 'sub_left',  role: 'support',   x: 15,  y: 610, w: 520, h: 430,  border: '#FFFFFF', borderWidth: 4, zIndex: 4 },
     ],
@@ -42,10 +42,10 @@ const BUILTIN_TEMPLATES = [
     imageSlots: 4,
     textSlots: [],
     slots: [
-      { id: 'main',      role: 'hero',      x: 0,   y: 0,   w: 720, h: 1350, fadeRight: 170, zIndex: 2 },
-      { id: 'bg_top',    role: 'scene',     x: 400, y: 0,   w: 800, h: 740,  fadeLeft: 180, fadeBottom: 150, zIndex: 0 },
-      { id: 'bg_bottom', role: 'scene',     x: 380, y: 520, w: 820, h: 830,  fadeLeft: 170, fadeTop: 160, zIndex: 1 },
-      { id: 'highlight', role: 'highlight', x: 120, y: 580, w: 560, h: 360,  border: '#333333', borderWidth: 5, zIndex: 3 },
+      { id: 'main',      role: 'hero',      x: 0,   y: 0,   w: 720, h: 1350, fadeRight: 280, fadeBottom: 250, zIndex: 2 },
+      { id: 'bg_top',    role: 'scene',     x: 400, y: 0,   w: 800, h: 740,  fadeLeft: 320, fadeBottom: 150, zIndex: 0 },
+      { id: 'bg_bottom', role: 'scene',     x: 380, y: 520, w: 820, h: 830,  fadeLeft: 320, fadeTop: 220, zIndex: 1 },
+      { id: 'highlight', role: 'highlight', x: 120, y: 580, w: 560, h: 360,  border: '#CCFF00', borderWidth: 5, zIndex: 3 },
     ],
     circle: null,
   },
@@ -60,9 +60,9 @@ const BUILTIN_TEMPLATES = [
     imageSlots: 5,
     textSlots: [],
     slots: [
-      { id: 'main',      role: 'hero',      x: 0,   y: 0,   w: 740, h: 1350, fadeRight: 150, zIndex: 2 },
-      { id: 'bg_top',    role: 'scene',     x: 400, y: 0,   w: 800, h: 720,  fadeLeft: 180, fadeBottom: 140, zIndex: 0 },
-      { id: 'bg_bottom', role: 'emotion',   x: 380, y: 580, w: 820, h: 770,  fadeLeft: 160, fadeTop: 150, zIndex: 1 },
+      { id: 'main',      role: 'hero',      x: 0,   y: 0,   w: 740, h: 1350, fadeRight: 280, fadeBottom: 250, zIndex: 2 },
+      { id: 'bg_top',    role: 'scene',     x: 400, y: 0,   w: 800, h: 720,  fadeLeft: 320, fadeBottom: 140, zIndex: 0 },
+      { id: 'bg_bottom', role: 'emotion',   x: 380, y: 580, w: 820, h: 770,  fadeLeft: 320, fadeTop: 220, zIndex: 1 },
       { id: 'highlight', role: 'highlight', x: 340, y: 280, w: 630, h: 440,  border: '#CCFF00', borderWidth: 5, zIndex: 3 },
     ],
     circle: { id: 'circle', x: 25, y: 680, diameter: 440, border: '#FFFFFF', borderWidth: 6, zIndex: 4 },
@@ -103,9 +103,9 @@ const BUILTIN_TEMPLATES = [
     imageSlots: 5,
     textSlots: [],
     slots: [
-      { id: 'main',      role: 'hero',      x: 0,   y: 0,   w: 730, h: 1350, fadeRight: 170, zIndex: 2 },
-      { id: 'bg_top',    role: 'scene',     x: 400, y: 0,   w: 800, h: 700,  fadeLeft: 180, fadeBottom: 140, zIndex: 0 },
-      { id: 'bg_bottom', role: 'scene',     x: 350, y: 560, w: 850, h: 790,  fadeLeft: 160, fadeTop: 150, zIndex: 1 },
+      { id: 'main',      role: 'hero',      x: 0,   y: 0,   w: 730, h: 1350, fadeRight: 280, fadeBottom: 250, zIndex: 2 },
+      { id: 'bg_top',    role: 'scene',     x: 400, y: 0,   w: 800, h: 700,  fadeLeft: 320, fadeBottom: 140, zIndex: 0 },
+      { id: 'bg_bottom', role: 'scene',     x: 350, y: 560, w: 850, h: 790,  fadeLeft: 320, fadeTop: 220, zIndex: 1 },
       { id: 'highlight', role: 'highlight', x: 420, y: 310, w: 580, h: 410,  border: '#FFD700', borderWidth: 5, zIndex: 3 },
     ],
     circle: { id: 'circle', x: 15, y: 630, diameter: 460, border: '#FFFFFF', borderWidth: 5, zIndex: 4 },
@@ -385,8 +385,8 @@ export function autoSelectTemplate(imageCount, faceCount, storyIdentity) {
   
   // ★ Weighted random: เลือกจาก top 2-3 candidates (ไม่ใช่ตัวเดียวทุกครั้ง!)
   const topScore = sorted[0][1];
-  // เอา candidates ที่คะแนนห่างจาก top ไม่เกิน 15 คะแนน
-  const candidates = sorted.filter(([_, score]) => topScore - score <= 15);
+  // เอา candidates ที่คะแนนห่างจาก top ไม่เกิน 25 คะแนน (ขยาย pool ให้มี variety มากขึ้น)
+  const candidates = sorted.filter(([_, score]) => topScore - score <= 25);
   
   // สุ่มแบบถ่วงน้ำหนัก — score สูง = โอกาสมาก
   const totalWeight = candidates.reduce((sum, [_, score]) => sum + score, 0);
