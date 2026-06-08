@@ -12,6 +12,8 @@ import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT
 import { MODEL_PRIMARY, MODEL_FAST } from '@/lib/ai/modelConfig';
 import { withTimeout } from '@/lib/utils/withTimeout';
 
+const MODEL_GEMINI_PRO = 'gemini-2.5-pro';
+
 // ═══════════════════════════════════════════════════════════
 // 🔍 POST-PROCESSING QUALITY FILTERS
 // ═══════════════════════════════════════════════════════════
@@ -962,7 +964,7 @@ ${candidateList}
               if (isGeminiAvailable()) {
                 aiSelection = await callGemini({
                   prompt: aiFallbackPrompt,
-                  model: 'gemini-2.5-pro',
+                  model: MODEL_GEMINI_PRO,
                   temperature: 0.1,
                   maxTokens: 300,
                 });
