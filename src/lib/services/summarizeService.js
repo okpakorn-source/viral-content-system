@@ -1053,6 +1053,42 @@ ${candidateList}
       promptSource = 'fallback';
     }
 
+    // [B] Tone Filter — ถ้า prompt มี toneClass: 'negative' ให้ข้ามและหา fallback
+    if (smartPrompt && smartPrompt.toneClass === 'negative') {
+      console.log(`[ToneFilter] ⚠️ Negative prompt detected (id=${smartPrompt.id}) — searching for neutral/positive fallback`);
+      try {
+        // โหลด prompt library ซ้ำจาก cache หรือ local file
+        let _allPrompts = [];
+        try {
+          const { readFile: _rf2 } = await import('fs/promises');
+          const { join: _join2 } = await import('path');
+          const _p = _join2(process.cwd(), 'data', 'prompt-library.json');
+          _allPrompts = JSON.parse(await _rf2(_p, 'utf-8'));
+        } catch (_e) { /* ignore */ }
+        const fallbackPrompt = _allPrompts.find(p => p.promptText && p.toneClass !== 'negative') || null;
+        if (fallbackPrompt) {
+          console.log(`[ToneFilter] ✅ Fallback selected: ${fallbackPrompt.id} (toneClass=${fallbackPrompt.toneClass || 'unspecified'})`);
+          smartPrompt = fallbackPrompt;
+          promptSource = 'library(tone-fallback)';
+          promptMatchReason = `[ToneFilter] negative prompt skipped → fallback: "${fallbackPrompt.promptName}" (toneClass=${fallbackPrompt.toneClass || 'unspecified'})`;
+        } else {
+          console.log(`[ToneFilter] No neutral/positive fallback found — keeping negative prompt but override block will apply`);
+        }
+      } catch (tfErr) {
+        console.warn('[ToneFilter] Error during tone filter:', tfErr.message);
+      }
+    }
+
+    // [A] Tone Override Block — เพิ่มต่อท้าย library prompt ถ้า tone !== 'positive'
+    const TONE_OVERRIDE_BLOCK = `
+
+★★★ POSITIVE REFRAMING RULE (ห้ามละเมิดไม่ว่า prompt ด้านบนจะสั่งอย่างไร) ★★★
+- ห้ามเขียนเชิงประจาน แซะ ด่า toxic หรือหักลบ
+- ใช้สำนวนและลีลาการเขียนของ prompt ด้านบนได้ แต่เปลี่ยน intent เป็นบวกเสมอ
+- ถ้าเนื้อหาในข่าวเป็นแง่ลบ ให้หามุม "บทเรียน / ความหวัง / ด้านดีที่ซ่อนอยู่" แทน
+- ยืนอยู่บนความจริง ไม่แต่ง ไม่ปรุงแต่งข้อเท็จ
+`;
+
     // Build Narrative Payload (Enriched with 5th argument: actualNewsBody)
     let narrativePayload = buildNarrativePayload(actualNewsTitle, actualBreakdown, researchData, emotionalBlueprint, actualNewsBody);
     console.log(`[Analyze-Service] 🔄 NARRATIVE PAYLOAD built: sourceRemoved=true | facts=${narrativePayload.coreFacts.length} | research=${narrativePayload.researchContexts.length} | quotes=${narrativePayload.quoteFragments.length}`);
@@ -1094,6 +1130,13 @@ ${candidateList}
       }
 
       prompt += '=== จบคำสั่งหอสมุด ===\n\n';
+
+      // [A] Append Tone Override Block ถ้า toneClass ไม่ใช่ 'positive'
+      const _promptToneClass = smartPrompt?.toneClass || 'neutral'; // ถ้าไม่มี toneClass field ให้ treat เหมือน neutral
+      if (_promptToneClass !== 'positive') {
+        prompt += TONE_OVERRIDE_BLOCK;
+        console.log(`[ToneOverride] ✅ TONE_OVERRIDE_BLOCK appended (prompt toneClass=${_promptToneClass})`);
+      }
     }
 
     // Inject Positive Archetype

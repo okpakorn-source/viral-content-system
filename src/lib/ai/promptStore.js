@@ -12,6 +12,7 @@ const DEFAULT_ANALYSIS_PRESETS = [
     usedIn: ['Step 4: สร้างเนื้อหา (mode=analyze)'],
     affectsAPI: '/api/summarize (mode=analyze, preset=viral_fb)',
     category: 'preset',
+    tone: 'neutral',
     prompt: [
       'คุณคือ AI Viral News Writer + Emotional Storyteller + Facebook Content Strategist',
       '',
@@ -227,6 +228,7 @@ const DEFAULT_ANALYSIS_PRESETS = [
     usedIn: ['Step 4: สร้างเนื้อหา (mode=analyze)'],
     affectsAPI: '/api/summarize (mode=analyze, preset=drama_storytelling)',
     category: 'preset',
+    tone: 'neutral',
     prompt: `คุณคือนักเล่าเรื่องดราม่าโซเชียล
 
 อ่านเนื้อข่าวด้านล่างแล้วเขียนใหม่ทั้งหมดเป็นเรื่องเล่าดราม่ายาวๆ
@@ -272,6 +274,7 @@ const DEFAULT_ANALYSIS_PRESETS = [
     usedIn: ['Step 4: สร้างเนื้อหา (mode=analyze)'],
     affectsAPI: '/api/summarize (mode=analyze, preset=informative)',
     category: 'preset',
+    tone: 'positive',
     prompt: `คุณคือนักสรุปข่าวให้เข้าใจง่าย
 
 อ่านเนื้อข่าวด้านล่างแล้วเขียนสรุปใหม่ให้เข้าใจง่ายแบบยาวๆ มีรายละเอียดครบ
@@ -315,6 +318,7 @@ const DEFAULT_ANALYSIS_PRESETS = [
     usedIn: ['Step 4: สร้างเนื้อหา (mode=analyze)'],
     affectsAPI: '/api/summarize (mode=analyze, preset=opinion_debate)',
     category: 'preset',
+    tone: 'neutral',
     prompt: `คุณคือนักสร้างคอนเทนต์ที่ชวนถกเถียง
 
 อ่านเนื้อข่าวด้านล่างแล้วเขียนใหม่ในมุมที่ชวนถกเถียงแบบยาวๆ
@@ -361,6 +365,7 @@ const DEFAULT_PROMPTS = {
     usedIn: ['Step 2: สกัดข่าว (mode=extract)'],
     affectsAPI: '/api/summarize (mode=extract, sourceType=url/image/raw/facebook)',
     category: 'pipeline',
+    tone: 'positive',
     editable: true,
     prompt: `คุณคือ AI News Content Extractor — ผู้เชี่ยวชาญสกัดเนื้อข่าวจากทุกรูปแบบ
 
@@ -396,6 +401,7 @@ const DEFAULT_PROMPTS = {
     usedIn: ['Step 2: สกัดข่าว (mode=extract, sourceType=tiktok/youtube)'],
     affectsAPI: '/api/summarize (mode=extract, sourceType=tiktok|youtube)',
     category: 'pipeline',
+    tone: 'positive',
     editable: true,
     prompt: `คุณคือผู้เชี่ยวชาญจัดรูปแบบข้อความถอดเสียง (transcript)
 
@@ -434,6 +440,7 @@ const DEFAULT_PROMPTS = {
     usedIn: ['Step 3: แตกประเด็น (mode=breakdown)'],
     affectsAPI: '/api/summarize (mode=breakdown)',
     category: 'pipeline',
+    tone: 'positive',
     editable: true,
     prompt: `คุณคือ AI Viral News Angle Strategist + Emotional Storytelling Director
 
@@ -510,6 +517,7 @@ STEP 5 — วิเคราะห์ "ลูกเล่นภาษา"
     usedIn: ['Step 3.5: หาข้อมูลเพิ่ม (mode=research)'],
     affectsAPI: '/api/summarize (mode=research)',
     category: 'utility',
+    tone: 'positive',
     editable: true,
     prompt: `คุณคือ AI Research Agent ที่เชี่ยวชาญในการหาข้อมูลเพิ่มเติมเพื่อเสริมเนื้อหาข่าว
 
