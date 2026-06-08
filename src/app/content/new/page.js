@@ -269,6 +269,7 @@ function NewContentPageInner() {
     setAutoLog([]);
     setError('');
     setStep('input');
+    setArchiveSaved(false); // ★ Reset เพื่อให้ save ได้ทุกครั้ง
     setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
     setSourceType(type || 'url');
     setUrl(targetUrl);
@@ -456,7 +457,7 @@ function NewContentPageInner() {
       setStep('analyzed');
       setAutoProgress('');
       // 📦 Auto-save เข้าคลังข่าว
-      autoSaveToArchive(data.data.newsData, data.data.breakdownData).catch(() => {});
+      autoSaveToArchive(data.data.newsData, data.data.breakdownData).catch((e) => console.warn('[Archive] Auto-save failed:', e.message));
     } catch (err) {
       const failStep = err.failedStep || 'auto_scrape';
       wfFail(failStep, err.message);
@@ -497,6 +498,7 @@ function NewContentPageInner() {
     setAutoLog([]);
     setError('');
     setStep('input');
+    setArchiveSaved(false); // ★ Reset เพื่อให้ save ได้ทุกครั้ง
     setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
 
     const inputLabel = hasImg ? `รูปภาพ ${inputImages.length} ใบ` : textOnly.slice(0, 30) || 'input';
@@ -608,7 +610,7 @@ function NewContentPageInner() {
       const sourceUrl = data.newsData?.sourceUrl || data.normalized?.title && data.detection?.primaryUrl;
       if (sourceUrl) setUrl(sourceUrl);
 
-      autoSaveToArchive(data.newsData, data.breakdownData).catch(() => {});
+      autoSaveToArchive(data.newsData || data.data?.newsData, data.breakdownData || data.data?.breakdownData).catch((e) => console.warn('[Archive] Auto-save failed:', e.message));
       if (data.simulatedComments?.length > 0) {
         setSimulatedComments(data.simulatedComments);
       }
