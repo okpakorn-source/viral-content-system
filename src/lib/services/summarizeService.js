@@ -1,4 +1,4 @@
-﻿import { callAI } from '@/lib/ai/openai';
+import { callAI } from '@/lib/ai/openai';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
 import { MasterAgent } from '@/lib/agents/masterAgent';
@@ -1174,7 +1174,8 @@ ${candidateList}
       prompt += `ข้อมูลต่อไปนี้มาจากการค้นหาข้อเท็จจริงเพิ่มเติม (SmartResearch) — นำไปเสริมในเนื้อหาเฉพาะส่วนที่เข้ากับบริบทและมุมมองของเวอร์ชันนี้\n`;
       prompt += `ห้ามนำข้อมูลทั้งหมดมายัดใส่ — เลือกเฉพาะข้อที่เพิ่มคุณค่าให้เรื่องเล่า และห้ามแทรก URL ลงในเนื้อหา\n\n`;
       _fpFacts.forEach((fact, i) => {
-        prompt += `${i + 1}. ${fact}\n`;
+        const factText = typeof fact === 'string' ? fact : (fact.text || fact.content || JSON.stringify(fact));
+        prompt += `${i + 1}. ${factText}\n`;
       });
       prompt += `=== จบ SMART RESEARCH FACTS ===\n\n`;
       console.log(`[FactPool] ✅ injected ${_fpFacts.length} facts from SmartResearch (entityName: "${factPool?.entityName || '?'}")`);

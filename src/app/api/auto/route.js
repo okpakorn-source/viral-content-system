@@ -1,4 +1,4 @@
-export const maxDuration = 300; // Allow 5 minutes for heavy LLM operations
+export const maxDuration = 800; // ~13 min — must match /api/auto/process (pipeline uses 5-12 min)
 import { NextResponse } from 'next/server';
 import { processAutoFlow } from '@/lib/services/autoFlowService';
 
