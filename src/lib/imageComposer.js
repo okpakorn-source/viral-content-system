@@ -79,16 +79,30 @@ async function circleWithRing(imgBuf, size, ringPx = 8) {
 }
 
 // ─── Soft edge fade ───────────────────────────────────────────────
+// FIX: fade zone ลดลงจาก 22% → 14% เพื่อลด overlap กับตัวคน
+// FIX: ใช้ direction-aware crop position — subject อยู่ห่างจาก fade edge เสมอ
+//   soft_left  (zone ฝั่งขวา): crop จาก east → subject ชิดขวา ห่างจาก left fade
+//   soft_right (zone ฝั่งซ้าย): crop จาก west → subject ชิดซ้าย ห่างจาก right fade
+//   soft_top:                    crop จาก south → subject อยู่ล่าง ห่างจาก top fade
 async function applySoftEdge(imgBuf, direction, w, h) {
   const iw = Math.round(w), ih = Math.round(h);
+
+  // เลือก crop anchor ให้ subject อยู่ห่างจากขอบ fade
+  let cropPosition;
+  if (direction === 'soft_left')  cropPosition = 'right';   // subject ชิดขวา ห่างจาก left fade
+  else if (direction === 'soft_right') cropPosition = 'left';    // subject ชิดซ้าย ห่างจาก right fade
+  else if (direction === 'soft_top')   cropPosition = 'south';   // subject อยู่ล่าง ห่างจาก top fade
+  else                                  cropPosition = 'centre';  // soft_all: center
+
   const { data } = await sharp(imgBuf)
-    .resize(iw, ih, { fit: 'cover', position: 'centre' })
+    .resize(iw, ih, { fit: 'cover', position: cropPosition })
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
 
   const out = Buffer.from(data);
-  const fadeZone = 0.22; // 22% ของขอบ
+  // FIX: ลด fadeZone จาก 0.22 → 0.14 (14%) เพื่อเป็นแค่ separator บาง ไม่ทับ subject
+  const fadeZone = 0.14;
 
   for (let y = 0; y < ih; y++) {
     for (let x = 0; x < iw; x++) {

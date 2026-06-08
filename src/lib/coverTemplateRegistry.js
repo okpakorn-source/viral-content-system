@@ -113,6 +113,10 @@ const BUILTIN_TEMPLATES = [
     id: 'template_6',
     name: 'ข่าวสะเทือนใจ + ข้อความ',
     desc: '5 รูป + 2 ข้อความ — Hero + Scene + Context + Circle แดงกลาง + Circle ขาวล่าง',
+    // ⛔ DISABLED: circle_small (diameter=160px) เล็กเกินไป — ดูไม่รู้เรื่องว่าใครเป็นใคร
+    // ต้อง diameter ≥ 200px จึงจะเปิดใช้ได้
+    disabled: true,
+    disabledReason: 'circle_small diameter=160px < MIN_CIRCLE_SIZE(200px) — thumbnail too small to identify person',
     canvasW: 1200, canvasH: 1350,
     imageSlots: 5,
     textSlots: [
@@ -180,6 +184,29 @@ const BUILTIN_TEMPLATES = [
 
 // ═══ EXPORTS ═══
 
+// ── Circle size gate ─────────────────────────────────────────────────────────
+// Templates ที่มี circle หรือ frame slot ขนาดเล็ก (< MIN_CIRCLE_SIZE) จะถูก filter ออก
+// เพื่อไม่ให้ thumbnail จิ๋วที่ดูไม่รู้เรื่องปรากฏบนปก
+const MIN_CIRCLE_SIZE = 200; // px บน canvas 1200×1350
+
+/**
+ * คืน true ถ้า template มี circle/frame zone ที่เล็กเกินกว่า MIN_CIRCLE_SIZE
+ * (ตรวจทั้ง slots[].shape==='circle' และ template.circle / template.circleSmall)
+ */
+function hasSmallCircle(template) {
+  // ตรวจ slots ที่มี shape = 'circle'
+  const smallSlot = (template.slots || []).some(
+    (s) => s.shape === 'circle' && (s.diameter || 0) < MIN_CIRCLE_SIZE
+  );
+  if (smallSlot) return true;
+
+  // ตรวจ top-level circle / circleSmall
+  if (template.circle && (template.circle.diameter || 0) < MIN_CIRCLE_SIZE) return true;
+  if (template.circleSmall && (template.circleSmall.diameter || 0) < MIN_CIRCLE_SIZE) return true;
+
+  return false;
+}
+
 export const ALL_TEMPLATES = BUILTIN_TEMPLATES;
 
 export function getTemplateById(id) {
@@ -230,7 +257,15 @@ export function scaleTemplateSlots(template, targetW, targetH) {
 }
 
 export function autoSelectTemplate(imageCount, faceCount, storyIdentity) {
-  if (ALL_TEMPLATES.length === 0) return null;
+  // ── ก่อน scoring: ตัด templates ที่ disabled หรือมี small circle ออก ──
+  const ELIGIBLE_IDS = new Set(
+    ALL_TEMPLATES
+      .filter((t) => !t.disabled && !hasSmallCircle(t))
+      .map((t) => t.id)
+  );
+  console.log(`[TemplateSelect] Eligible templates (no small circles): ${[...ELIGIBLE_IDS].join(', ')}`);
+
+  if (ELIGIBLE_IDS.size === 0) return null;
   
   const emotion = storyIdentity?.emotion || '';
   const coverEmotion = storyIdentity?.coverEmotion || '';
@@ -250,47 +285,48 @@ export function autoSelectTemplate(imageCount, faceCount, storyIdentity) {
   const isRelationshipNews = /คู่รัก|สามี|ภรรยา|แฟน|ครอบครัว|แต่งงาน|หย่า|เลิก|พ่อ|แม่|ลูก|คู่กรณี|พี่น้อง|ผัว|เมีย|คู่ชีวิต|ชีวิตคู่/i.test(storyText);
   
   // ═══ Scoring System — แต่ละ template ได้คะแนนตามความเหมาะสม ═══
+  // (เฉพาะ template ที่อยู่ใน ELIGIBLE_IDS เท่านั้น)
   const scores = {};
   
   // --- Template 7: 2 ตัวละคร (คู่รัก/ครอบครัว) ---
   // ★ ต้องเป็นข่าวที่เน้นความสัมพันธ์จริงๆ + มี 2 คน
-  if (imageCount >= 4 && faceCount >= 2 && has2Characters && isRelationshipNews) {
+  if (ELIGIBLE_IDS.has('template_7') && imageCount >= 4 && faceCount >= 2 && has2Characters && isRelationshipNews) {
     scores['template_7'] = 90;
   }
   
-  // --- Template 6: สะเทือนใจ + ข้อความ ---
-  if (imageCount >= 5 && faceCount >= 1 && isSad) {
-    scores['template_6'] = hasText ? 85 : 70;
-  }
+  // --- Template 6: สะเทือนใจ + ข้อความ --- ⛔ DISABLED (circle_small=160px)
+  // if (imageCount >= 5 && faceCount >= 1 && isSad) {
+  //   scores['template_6'] = hasText ? 85 : 70;
+  // }
   
   // --- Template 1: ดราม่า 5 ช่อง (ไม่มี circle) ---
-  if (imageCount >= 5 && faceCount >= 1 && isDrama) {
+  if (ELIGIBLE_IDS.has('template_1') && imageCount >= 5 && faceCount >= 1 && isDrama) {
     scores['template_1'] = 80;
   }
   
   // --- Template 3: ดราม่า + วงกลม ---
-  if (imageCount >= 5 && faceCount >= 2 && (isSad || isDrama)) {
+  if (ELIGIBLE_IDS.has('template_3') && imageCount >= 5 && faceCount >= 2 && (isSad || isDrama)) {
     scores['template_3'] = 75;
   }
   
   // --- Template 5: เหตุการณ์ 5 ช่อง + circle ---
-  if (imageCount >= 4 && faceCount >= 1) {
+  if (ELIGIBLE_IDS.has('template_5') && imageCount >= 4 && faceCount >= 1) {
     scores['template_5'] = isDrama ? 72 : (isWarm ? 68 : 65);
   }
   
   // --- Template 8: สะอาด Zone ชัด ---
-  if (imageCount >= 4 && faceCount >= 1) {
+  if (ELIGIBLE_IDS.has('template_8') && imageCount >= 4 && faceCount >= 1) {
     scores['template_8'] = isWarm ? 78 : (isNeutral ? 72 : 60);
   }
   
   // --- Template 4: สังคม + 2 วงกลม + text ---
-  if (imageCount >= 5 && faceCount >= 2 && isWarm) {
+  if (ELIGIBLE_IDS.has('template_4') && imageCount >= 5 && faceCount >= 2 && isWarm) {
     scores['template_4'] = hasText ? 80 : 65;
   }
   
   // --- Template 2: สะอาด 4 ช่อง (ไม่มี circle) ---
   // ★ ใหม่! เหมาะกับข่าว neutral / ภาพน้อย / เนื้อหาเรียบ
-  if (imageCount >= 3) {
+  if (ELIGIBLE_IDS.has('template_2') && imageCount >= 3) {
     scores['template_2'] = imageCount <= 5 ? 70 : (isNeutral ? 55 : 45);
   }
   
@@ -299,7 +335,8 @@ export function autoSelectTemplate(imageCount, faceCount, storyIdentity) {
     .sort((a, b) => b[1] - a[1]);
   
   if (sorted.length === 0) {
-    return 'template_5'; // ultimate fallback
+    // fallback ต้องเป็น template ที่ eligible เท่านั้น
+    return ELIGIBLE_IDS.has('template_5') ? 'template_5' : [...ELIGIBLE_IDS][0] || null;
   }
   
   // ★ Weighted random: เลือกจาก top 2-3 candidates (ไม่ใช่ตัวเดียวทุกครั้ง!)
