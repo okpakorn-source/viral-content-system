@@ -39,17 +39,13 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
   console.log(`🔧 CORRECTION PIPELINE — Processing ${versions.length} versions`);
   console.log(`${'═'.repeat(50)}`);
 
-  const corrected = [];
-
-  for (let i = 0; i < versions.length; i++) {
-    const version = versions[i];
+  const correctionTasks = versions.map(async (version, i) => {
     const vLabel = version._sourceLabel || version.style || `V${i + 1}`;
 
     try {
       if (!version.content || version.content.length < 50) {
         console.log(`[Pipeline] ${vLabel}: ⏭️ Skip (content too short)`);
-        corrected.push({ ...version, _correctionApplied: false });
-        continue;
+        return { ...version, _correctionApplied: false };
       }
 
       console.log(`\n[Pipeline] ${vLabel}: Starting...`);
@@ -81,7 +77,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
 
         const { polishedContent, changes } = editorialPolish(cleanContent);
         console.log(`  L5 Polish: ${changes.length} changes (clean path)`);
-        corrected.push({
+        return {
           ...version,
           content: polishedContent,
           _correctionApplied: changes.length > 0 || cleanSemanticDebug.fixed,
@@ -95,8 +91,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
             polishChanges: changes.length,
             path: 'clean',
           },
-        });
-        continue;
+        };
       }
 
 
@@ -154,7 +149,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
       const { polishedContent, changes } = editorialPolish(semanticContent);
       console.log(`  L5 Polish: ${changes.length} changes`);
 
-      corrected.push({
+      return {
         ...version,
         content: polishedContent,
         _correctionApplied: true,
@@ -171,18 +166,26 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
           polishChanges: changes.length,
           path: factCheck.action === 'rollback' ? 'rollback' : 'corrected',
         },
-      });
+      };
 
     } catch (err) {
       // ===  FAIL-SAFE: ถ้า error → ใช้ original ===
       console.error(`[Pipeline] ${vLabel}: ERROR — ${err.message}`);
-      corrected.push({
+      return {
         ...version,
         _correctionApplied: false,
         _correctionError: err.message,
-      });
+      };
     }
-  }
+  });
+
+  // ★ PARALLEL: ทำทุก version พร้อมกัน แทนที่จะทีละตัว
+  const results = await Promise.allSettled(correctionTasks);
+  const corrected = results.map((r, i) => {
+    if (r.status === 'fulfilled') return r.value;
+    // Fallback: ถ้า Promise rejected → ใช้ original
+    return { ...versions[i], _correctionApplied: false, _correctionError: r.reason?.message || 'Unknown' };
+  });
 
   const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
   const appliedCount = corrected.filter(v => v._correctionApplied).length;
