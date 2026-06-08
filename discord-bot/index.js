@@ -249,13 +249,23 @@ async function processNewsJob(job) {
     let data = null;
     let workerRetriggerCount = 0;
 
+    let notFoundCount = 0; // ★ Track consecutive 'job not found'
+
     while (Date.now() - pollStartTime < maxPollTime) {
       await new Promise(r => setTimeout(r, 3000)); // poll every 3s
 
       try {
         const statusRes = await axios.get(`${statusUrl}?id=${jobId}`, { headers, timeout: 10000 });
         const st = statusRes.data;
-        if (!st.success) continue;
+        if (!st.success) {
+          notFoundCount++;
+          console.warn(`[Discord Bot] Job ${jobId.slice(0,8)} not found (${notFoundCount}/5) — last: ${lastStatus}`);
+          if (notFoundCount >= 5 || (notFoundCount >= 3 && lastStatus === 'processing')) {
+            throw new Error('ประมวลผลเสร็จแล้วแต่ผลลัพธ์หายไป — กรุณาส่งลิงก์ใหม่อีกครั้ง');
+          }
+          continue;
+        }
+        notFoundCount = 0; // reset on success
 
         // === Fallback: re-trigger worker if still pending after 10s ===
         if (st.status === 'pending' && (Date.now() - pollStartTime > 10000) && workerRetriggerCount < 3) {
@@ -303,7 +313,7 @@ async function processNewsJob(job) {
           throw new Error(st.error || 'Queue job failed');
         }
       } catch (pollErr) {
-        if (pollErr.message?.includes('Queue job failed') || pollErr.message?.includes('failed')) throw pollErr;
+        if (pollErr.message?.includes('Queue job failed') || pollErr.message?.includes('failed') || pollErr.message?.includes('หายไป')) throw pollErr;
         console.warn('[Discord Bot] Poll error:', pollErr.message);
       }
     }
