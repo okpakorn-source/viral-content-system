@@ -671,6 +671,29 @@ ${sourceUrlMap}
 - ภาพที่แสดง กิจกรรม/สถานที่/เหตุการณ์ ในข่าว → score สูง (7-10)
 - ภาพ ${mainChar} ที่สวยแต่ไม่เกี่ยวข่าว → score ต่ำ (≤ 3!)
 
+★★★ GOLD STANDARD — 2-SECOND TEST ★★★
+ก่อนให้ score ทุกภาพ ถามตัวเองว่า:
+"ถ้าคนดูเห็นภาพนี้ 2 วินาที พวกเขาจะเข้าใจว่าข่าวนี้พูดถึง '${identity?.coreStory?.celebratedAction || 'เรื่องหลักในข่าว'}' ไหม?"
+- ถ้าใช่ → score สูง (7-10)
+- ถ้าไม่ใช่ → score ต่ำ (1-4)
+
+🎯 สิ่งที่ข่าวนี้ต้องการยกย่อง (celebratedAction):
+"${identity?.coreStory?.celebratedAction || identity?.coreStory?.emotionalHook || 'ไม่ระบุ'}"
+
+🔗 ความสัมพันธ์หลัก: "${identity?.coreStory?.relationship || 'ไม่ระบุ'}"
+
+⛔⛔⛔ STORY FORBIDDEN — SCORE = 0 ทันที ⛔⛔⛔
+สิ่งต่อไปนี้ห้ามใช้เป็น dominant visual ในข่าวนี้:
+${(identity?.coreStory?.negativeFocus || []).map(f => `- ${f}`).join('\n') || '- (ไม่มี negativeFocus)'}
+- ถ้าภาพมี element เหล่านี้เป็นใจกลาง (>30% ของภาพ) → score = 0, role = REJECT
+- ยกเว้น: ปรากฏในภาพแต่ไม่ใช่ main subject → ลด score 3 คะแนน (ยังใช้ได้ถ้าจำเป็น)
+
+✅ ภาพที่ได้ score สูงสำหรับข่าวนี้ (8-10):
+- ภาพ ${mainChar} กับ ${identity?.coreStory?.relationship || 'ตัวละครรอง'} (แม่-ลูก, การดูแล, อ้อมกอด)
+- ภาพ ${mainChar} กำลัง${identity?.coreStory?.celebratedAction || 'ทำกิจกรรมหลักในข่าว'}
+- ภาพใบหน้า ${identity?.coreStory?.relationship || 'ตัวละครรอง'} (emotional proof)
+- ภาพ ${mainChar} ในบริบทการดูแล/ช่วยเหลือ (ป้อนข้าว, ดูแลข้างเตียง, กอด)
+
 มีภาพ ${imageParts.length} ภาพ (index 0 ถึง ${imageParts.length - 1}) ให้ตัดสิน
 
 === ★★★ กฎสำคัญที่สุด: ตรวจสอบตัวตนคน! ===
