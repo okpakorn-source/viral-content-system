@@ -218,13 +218,53 @@ export function getTemplateById(id) {
 }
 
 export function getTemplateChoices() {
-  return ALL_TEMPLATES.map(t => ({
-    id: t.id,
-    name: t.name,
-    desc: t.desc,
-    imageSlots: t.imageSlots,
-    hasText: t.textSlots?.length > 0,
-  }));
+  return ALL_TEMPLATES
+    .filter(t => !t.disabled) // ★ BUG C-12: hide disabled templates from dropdown
+    .map(t => ({
+      id: t.id,
+      name: t.name,
+      desc: t.desc,
+      imageSlots: t.imageSlots,
+      hasText: t.textSlots?.length > 0,
+    }));
+}
+
+/**
+ * Normalize a user/external template object to match the internal format.
+ * Used by /api/auto-cover/templates to merge user templates with built-in ones.
+ * @param {Object} t — raw template object (may be partial)
+ * @returns {Object} normalized template
+ */
+export function normalizeTemplate(t) {
+  return {
+    id: t.id || `user_${Date.now()}`,
+    name: t.name || t.title || 'Custom Template',
+    desc: t.desc || t.description || '',
+    canvasW: t.canvasW || 1200,
+    canvasH: t.canvasH || 1350,
+    imageSlots: t.imageSlots || (t.slots?.length || 4),
+    textSlots: t.textSlots || [],
+    slots: (t.slots || []).map(s => ({
+      id: s.id || 'main',
+      role: s.role || 'hero',
+      x: s.x || 0,
+      y: s.y || 0,
+      w: s.w || s.width || 600,
+      h: s.h || s.height || 675,
+      fadeRight: s.fadeRight || undefined,
+      fadeLeft: s.fadeLeft || undefined,
+      fadeTop: s.fadeTop || undefined,
+      fadeBottom: s.fadeBottom || undefined,
+      border: s.border || undefined,
+      borderWidth: s.borderWidth || undefined,
+      zIndex: s.zIndex || 0,
+      shape: s.shape || undefined,
+      diameter: s.diameter || undefined,
+    })),
+    circle: t.circle || null,
+    circleSmall: t.circleSmall || null,
+    disabled: !!t.disabled,
+  };
 }
 
 export function scaleTemplateSlots(template, targetW, targetH) {

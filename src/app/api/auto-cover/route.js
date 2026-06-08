@@ -383,7 +383,7 @@ export async function POST(request) {
         const { autoSelectTemplate } = await import('@/lib/coverTemplateRegistry');
         chosenTemplate = autoSelectTemplate(numImages, hasMultipleFaces, identity);
       } catch {
-        chosenTemplate = 'builtin_4'; // fallback default
+        chosenTemplate = 'template_5'; // fallback — safe general-purpose template
       }
       console.log(`[AutoCover] Auto-selected template: ${chosenTemplate}`);
     }
