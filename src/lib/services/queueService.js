@@ -57,14 +57,14 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
     // 0. Single getAll() call — then do cleanup in-memory to avoid multiple round-trips
     const allJobs = await store.getAll();
     
-    // 0a. Auto-cleanup: reset stale "processing" jobs stuck > 6 minutes
-    const cutoff = new Date(Date.now() - 6 * 60 * 1000);
+    // 0a. Auto-cleanup: reset stale "processing" jobs stuck > 15 minutes (pipeline uses 5-12 min)
+    const cutoff = new Date(Date.now() - 15 * 60 * 1000);
     for (const j of allJobs) {
       if (j.status === 'processing' && new Date(j.startedAt || j.createdAt) < cutoff) {
         await store.update(j.id, (existing) => ({
           ...existing,
           status: 'failed',
-          error: `Stale job — stuck for >6 minutes, auto-reset by enqueue cleanup`,
+          error: `Stale job — stuck for >15 minutes, auto-reset by enqueue cleanup`,
           completedAt: new Date().toISOString(),
         }));
         j.status = 'failed'; // Update in-memory too
@@ -75,7 +75,7 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
     // 0b. Auto-purge: remove old completed/failed jobs to prevent Supabase bloat
     //     Keep jobs finished < 5 minutes (so polling can still retrieve results)
     //     Then keep only the newest 10 beyond that
-    const purgeMinAge = 5 * 60 * 1000; // 5 minutes — must keep recent results for polling!
+    const purgeMinAge = 30 * 60 * 1000; // 30 minutes — must keep results long enough for bot to poll
     const finishedJobs = allJobs
       .filter(j => j.status === 'completed' || j.status === 'failed')
       .sort((a, b) => new Date(b.completedAt || b.createdAt) - new Date(a.completedAt || a.createdAt));

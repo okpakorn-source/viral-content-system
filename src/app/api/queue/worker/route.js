@@ -27,7 +27,7 @@ export async function POST(req) {
     // No auth header = same-origin trigger (web client or server self-call) = allowed
     
     // 1.5. Cleanup stale jobs first (stuck > 6 minutes)
-    const cleaned = await cleanupStaleJobs(6).catch(() => 0);
+    const cleaned = await cleanupStaleJobs(15).catch(() => 0);
     if (cleaned > 0) {
       logger.info(`[Queue Worker] 🧹 Cleaned ${cleaned} stale jobs`);
     }

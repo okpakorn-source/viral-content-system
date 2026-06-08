@@ -21,7 +21,7 @@ export async function GET(req) {
     const now = Date.now();
     if (now - _lastCleanupAt > 60_000) {
       _lastCleanupAt = now;
-      cleanupStaleJobs(8).catch(() => {}); // fire-and-forget, 8 min threshold
+      cleanupStaleJobs(15).catch(() => {}); // fire-and-forget, 15 min threshold (pipeline uses 5-12 min)
     }
     
     if (!jobId) {

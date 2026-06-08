@@ -318,7 +318,7 @@ async function processNewsJob(job) {
 
           // หา step ปัจจุบัน
           const currentStep = PIPELINE_STEPS.slice().reverse().find(s => elapsed >= s.at);
-          const progressBar = buildProgressBar(elapsed, 280); // 280s = worker timeout
+          const progressBar = buildProgressBar(elapsed, 600); // 600s = real pipeline max (~10 min)
 
           const progressMsg = [
             `⚡ **Auto Pipeline V2** กำลังประมวลผล... (\`${elapsed}s\`)`,
