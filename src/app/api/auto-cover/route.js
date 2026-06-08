@@ -357,8 +357,20 @@ export async function POST(request) {
         // ★ v3: กรอง relationship images ด้วย Evidence Confidence (เฉพาะ high-importance)
         if (RELATIONSHIP_CATS.has(cat) && filterRelationshipImages && catImgs.length > 0) {
           try {
-            // ตรวจแค่ 3 ภาพแรกต่อ category เพื่อประหยัด API
-            const toCheck = catImgs.slice(0, 3);
+            // ★ v4 Step 1.9: Caption Analyzer — pre-sort ด้วย text (เบากว่า Vision มาก)
+            let sortedImgs = catImgs;
+            try {
+              const { sortAndFilterByCaptions } = await import('@/lib/services/captionAnalyzerService').catch(() => ({ sortAndFilterByCaptions: null }));
+              if (sortAndFilterByCaptions) {
+                sortedImgs = await sortAndFilterByCaptions(catImgs, cat, heroNameForConfidence);
+                console.log(`[AutoCover] 📝 Caption sort (${cat}): ${sortedImgs.length}/${catImgs.length} after caption filter`);
+              }
+            } catch (capErr) {
+              console.warn(`[AutoCover] Caption Analyzer error (${cat}):`, capErr.message);
+            }
+
+            // ★ v3 Step 1.10: ตรวจ top 3 (caption-sorted) ด้วย Vision
+            const toCheck = sortedImgs.slice(0, 3);
             const passed = await filterRelationshipImages(toCheck, heroNameForConfidence);
             const passedUrls = new Set(passed.map(p => p.imageUrl || p.url));
             const passedCount = toCheck.filter(img => passedUrls.has(img.imageUrl)).length;
@@ -368,7 +380,7 @@ export async function POST(request) {
               console.log(`[AutoCover] ⚠️ Confidence: all ${cat} images failed → using hero fallback for this slot`);
               catImgs = []; // skip — hero fallback จะถูกเลือกโดย assignImagesToSlots
             } else {
-              catImgs = catImgs.filter(img => passedUrls.has(img.imageUrl) || !toCheck.find(t => t.imageUrl === img.imageUrl));
+              catImgs = sortedImgs.filter(img => passedUrls.has(img.imageUrl) || !toCheck.find(t => t.imageUrl === img.imageUrl));
             }
           } catch (cfErr) {
             console.warn(`[AutoCover] Confidence filter error (${cat}):`, cfErr.message);
@@ -376,10 +388,18 @@ export async function POST(request) {
         }
 
         for (const img of catImgs) {
+          // combine quality score: authorityScore (0.3) + captionScore (0.4) + base (0.3)
+          const authorityScore = img.authorityScore || 0.35;
+          const captionScore = img.captionScore || 0.5;
+          const qualityScore = (authorityScore * 0.3) + (captionScore * 0.4) + (0.3 * (cat === 'hero' ? 1.0 : 0.7));
           entityFirstImages.push({
             url: img.imageUrl,
             role,
             score: cat === 'hero' ? 9 : 7,
+            qualityScore,
+            authorityScore,
+            captionScore: img.captionScore,
+            captionMatch: img.captionMatch,
             source: 'entity_first',
             evidenceCat: cat,
           });

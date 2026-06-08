@@ -2,7 +2,10 @@
  * Evidence Library Builder
  * Layer 3: รับ relationships + evidenceCategories → ค้นภาพแยกตาม category
  * Output: { hero: [urls], mother: [urls], caregiving: [urls], ... }
+ * v4: เพิ่ม Source Authority scoring + stock photo filter
  */
+
+import { scoreAndFilterImages } from '@/lib/services/sourceAuthorityService';
 
 const MAX_PER_CATEGORY = 10;
 const MAX_TOTAL = 40;
@@ -146,7 +149,7 @@ export async function buildEvidenceLibrary(resolvedRelationships, identity) {
     )
   );
 
-  // รวมผลลัพธ์แยก category
+  // รวมผลลัพธ์แยก category + apply Authority scoring
   const seen = new Set();
   results.forEach((r, idx) => {
     if (r.status !== 'fulfilled') {
@@ -156,7 +159,10 @@ export async function buildEvidenceLibrary(resolvedRelationships, identity) {
     const cat = tasks[idx].category;
     if (!library[cat]) library[cat] = [];
 
-    for (const img of r.value) {
+    // ★ v4: apply Source Authority scoring + filter stock photos
+    const scoredImgs = scoreAndFilterImages(r.value);
+
+    for (const img of scoredImgs) {
       if (!img.imageUrl || seen.has(img.imageUrl)) continue;
       if (library[cat].length >= MAX_PER_CATEGORY) continue;
       if (totalCount >= MAX_TOTAL) break;
