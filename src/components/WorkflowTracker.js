@@ -2,30 +2,86 @@
 import { useState, useEffect, useRef } from 'react';
 import { useWorkflow } from './WorkflowContext';
 
-// ─── Step metadata: model, prompt, API จริงๆ ─────────────────────
 const STEP_META = {
-  // Auto Pipeline (Enhanced)
-  auto_detect:    { model: null,          prompt: null,              api: null,               icon: '🔍', color: '#64748b' },
-  auto_scrape:    { model: null,          prompt: null,              api: '/api/auto',        icon: '📡', color: '#3b82f6' },
-  auto_extract:   { model: 'GPT-4o-mini', prompt: 'EXTRACT prompt', api: '/api/auto (step)', icon: '📰', color: '#8b5cf6' },
-  auto_breakdown: { model: 'GPT-4o-mini', prompt: 'BREAKDOWN prompt',api: '/api/auto (step)',icon: '🔍', color: '#f59e0b' },
-  auto_blueprint: { model: 'GPT-4o',      prompt: 'BLUEPRINT prompt',api: '/api/auto (step)',icon: '🧬', color: '#ec4899' },
-  auto_research:  { model: 'GPT-4o-mini', prompt: 'KEYWORD prompt', api: 'Serper Google API',icon: '🌐', color: '#06b6d4' },
-  auto_classic:   { model: 'Claude',      prompt: 'Multi-Angle prompts from Library', api: '/api/summarize ×N', icon: '⚡', color: '#22c55e' },
-  auto_enhanced:  { model: 'Claude',      prompt: 'Enhanced + Blueprint inject', api: '/api/summarize ×N', icon: '🚀', color: '#a3e635' },
-  // Universal Pipeline (Local — Image/Hybrid)
-  u_detect:       { model: null,          prompt: null,              api: '/api/auto/detect',  icon: '🔍', color: '#64748b' },
-  u_extract:      { model: 'GPT-4o-mini', prompt: null,              api: '/api/auto/process', icon: '⚙️', color: '#8b5cf6' },
-  u_normalize:    { model: null,          prompt: null,              api: null,                icon: '📐', color: '#06b6d4' },
-  u_generate:     { model: 'Claude',      prompt: 'Library prompt',  api: '/api/summarize',    icon: '✍️', color: '#22c55e' },
-  // Manual steps
-  scrape:         { model: null,          prompt: null,              api: '/api/extract',     icon: '📡', color: '#3b82f6' },
-  ai_extract:     { model: 'GPT-4o-mini', prompt: 'EXTRACT prompt', api: '/api/summarize',   icon: '📰', color: '#8b5cf6' },
-  ai_breakdown:   { model: 'GPT-4o-mini', prompt: 'BREAKDOWN prompt',api: '/api/summarize',  icon: '🔍', color: '#f59e0b' },
-  lib_check:      { model: 'GPT-4o-mini', prompt: 'AI Smart Match → Prompt Library', api: '/api/summarize', icon: '🏛️', color: '#a3e635' },
-  ai_analyze:     { model: 'Claude',      prompt: 'Library prompt (auto-selected)', api: '/api/summarize', icon: '✍️', color: '#22c55e' },
-  ai_mix:         { model: 'Claude',      prompt: 'Library prompt (mix angles)',    api: '/api/summarize', icon: '🎯', color: '#f59e0b' },
+  // ── Auto Pipeline V2 (Enhanced) ─────────────────────────────────
+  auto_detect:    {
+    model: null,
+    prompt: null,
+    api: null,
+    icon: '🔍',
+    color: '#64748b',
+    desc: 'ตรวจสอบประเภท URL และพลัตฟอร์ม',
+  },
+  auto_scrape: {
+    model: null,
+    prompt: null,
+    api: 'Firecrawl → Jina → Direct fetch',
+    icon: '📡',
+    color: '#3b82f6',
+    desc: 'ดึง HTML จากเว็บไซต์ → สกัด article content',
+  },
+  auto_extract: {
+    model: 'Gemini 2.0 Flash',
+    prompt: 'news_extraction prompt',
+    api: '/api/summarize?mode=extract',
+    icon: '📰',
+    color: '#8b5cf6',
+    desc: 'AI อ่านเนื้อเว็บ → สกัด newsTitle + newsBody + category',
+  },
+  auto_breakdown: {
+    model: 'GPT-5.5',
+    prompt: 'breakdown_analysis prompt',
+    api: '/api/summarize?mode=breakdown',
+    icon: '🔍',
+    color: '#f59e0b',
+    desc: 'AI วิเคราะห์ core story + key points + possible angles',
+  },
+  auto_blueprint: {
+    model: 'GPT-5.5',
+    prompt: 'blueprint_design prompt',
+    api: '/api/summarize?mode=blueprint',
+    icon: '🧦',
+    color: '#ec4899',
+    desc: 'AI วาง emotional structure: arc → hook → twist → CTA',
+  },
+  auto_research: {
+    model: null,
+    prompt: 'keyword_extraction → Serper API',
+    api: 'Serper Google Search API',
+    icon: '🌐',
+    color: '#06b6d4',
+    desc: 'ค้นหาข้อเท็จจาก Google (Smart Research × angles)',
+  },
+  auto_classic: {
+    model: 'Claude Sonnet 4',
+    prompt: 'Multi-Angle prompts × Library',
+    api: '/api/summarize?mode=analyze (parallel)',
+    icon: '⚡',
+    color: '#22c55e',
+    desc: 'Claude เขียน Classic versions × 3 angles พร้อมกัน',
+  },
+  auto_enhanced: {
+    model: 'Claude Sonnet 4',
+    prompt: 'Enhanced prompt + Blueprint inject',
+    api: '/api/summarize?mode=analyze (enhanced)',
+    icon: '🚀',
+    color: '#a3e635',
+    desc: 'Claude เขียน Enhanced versions พร้อม research facts + emotional blueprint',
+  },
+  // ── Universal Pipeline ──────────────────────────────────────────
+  u_detect:    { model: null,              prompt: null,                api: '/api/auto/detect',  icon: '🔍', color: '#64748b', desc: 'ตรวจจับประเภท input' },
+  u_extract:   { model: 'GPT-5.5',         prompt: null,                api: '/api/auto/process', icon: '⚙️', color: '#8b5cf6', desc: 'สกัดเนื้อหา' },
+  u_normalize: { model: null,              prompt: null,                api: null,                icon: '📐', color: '#06b6d4', desc: 'จัดรูปข้อมูล' },
+  u_generate:  { model: 'Claude Sonnet 4', prompt: 'Library prompt',    api: '/api/summarize',    icon: '✍️', color: '#22c55e', desc: 'สร้างเนื้อหา' },
+  // ── Manual steps ────────────────────────────────────────────────
+  scrape:      { model: null,              prompt: null,                api: '/api/extract',      icon: '📡', color: '#3b82f6', desc: 'ดึงเนื้อหา' },
+  ai_extract:  { model: 'Gemini 2.0 Flash',prompt: 'EXTRACT prompt',    api: '/api/summarize',    icon: '📰', color: '#8b5cf6', desc: 'สกัดข่าว' },
+  ai_breakdown:{ model: 'GPT-5.5',         prompt: 'BREAKDOWN prompt',  api: '/api/summarize',    icon: '🔍', color: '#f59e0b', desc: 'วิเคราะห์มุมข่าว' },
+  lib_check:   { model: 'GPT-5.5',         prompt: 'AI Smart Match',    api: '/api/summarize',    icon: '🏛️', color: '#a3e635', desc: 'จับคู่ Prompt Library' },
+  ai_analyze:  { model: 'Claude Sonnet 4', prompt: 'Library prompt',    api: '/api/summarize',    icon: '✍️', color: '#22c55e', desc: 'สร้างเนื้อหา' },
+  ai_mix:      { model: 'Claude Sonnet 4', prompt: 'Library (mix)',      api: '/api/summarize',    icon: '🎯', color: '#f59e0b', desc: 'สร้างหลายมุม' },
 };
+
 
 const STATUS_CONFIG = {
   pending:  { icon: '⏳', color: '#475569', bg: 'rgba(71,85,105,0.06)' },
@@ -228,6 +284,13 @@ export default function WorkflowTracker() {
               {isRunning && (
                 <div style={{ padding: '0 10px 8px 10px', display: 'flex', flexDirection: 'column', gap: 3 }}>
 
+                  {/* Step description */}
+                  {(meta.desc || step.detail) && (
+                    <div style={{ fontSize: 10.5, color: '#e2e8f0', marginBottom: 2, lineHeight: 1.5, fontWeight: 500 }}>
+                      {meta.desc || step.detail}
+                    </div>
+                  )}
+
                   {/* API being called */}
                   {(step.api || meta.api) && (
                     <div style={metaRowStyle('#60a5fa')}>
@@ -239,30 +302,30 @@ export default function WorkflowTracker() {
                   )}
 
                   {/* Model */}
-                  {meta.model && (
+                  {(step.model || meta.model) && (
                     <div style={metaRowStyle('#c084fc')}>
                       <span style={{ opacity: 0.6 }}>🤖</span>
-                      <span>Model: <strong>{meta.model}</strong></span>
+                      <span>Model: <strong style={{ color: '#e879f9' }}>{step.model || meta.model}</strong></span>
                     </div>
                   )}
 
                   {/* Prompt */}
-                  {meta.prompt && (
+                  {(step.prompt || meta.prompt) && (
                     <div style={metaRowStyle('#fbbf24')}>
                       <span style={{ opacity: 0.6 }}>📝</span>
-                      <span>Prompt: {meta.prompt}</span>
+                      <span>Prompt: {step.prompt || meta.prompt}</span>
                     </div>
                   )}
 
-                  {/* Custom detail from wfStart() */}
-                  {step.detail && (
-                    <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2, paddingLeft: 2, lineHeight: 1.5 }}>
-                      {step.detail}
+                  {/* Custom extra detail from wfStart() — shown separately if different from desc */}
+                  {step.detail && step.detail !== meta.desc && (
+                    <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1, paddingLeft: 2, lineHeight: 1.5 }}>
+                      ↳ {step.detail}
                     </div>
                   )}
 
                   {/* Pulse dots */}
-                  <div style={{ display: 'flex', gap: 3, marginTop: 3 }}>
+                  <div style={{ display: 'flex', gap: 3, marginTop: 4 }}>
                     {[0, 1, 2].map(j => (
                       <span key={j} style={{
                         width: 4, height: 4, borderRadius: '50%',

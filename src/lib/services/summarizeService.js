@@ -10,6 +10,7 @@ import { getSession } from '@/lib/auth';
 import { buildNarrativePayload, formatNarrativePayload, checkNarrativeSimilarity } from '@/lib/input-engine/narrativePayload';
 import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT_CLUSTERS } from '@/lib/ai/semanticClusters';
 import { MODEL_PRIMARY, MODEL_FAST } from '@/lib/ai/modelConfig';
+import { withTimeout } from '@/lib/utils/withTimeout';
 
 // ═══════════════════════════════════════════════════════════
 // 🔍 POST-PROCESSING QUALITY FILTERS
@@ -522,8 +523,21 @@ export async function performSummarize({
     console.log(`[Breakdown-Service] 📋 PROMPT LENGTH: ${prompt.length}ch`);
     console.log(`[Breakdown-Service] 📋 NEWS IN PROMPT: ${actualNewsBody.length}ch of actual news content`);
 
+    // ★ gpt-5.5 มี inner timeout 60s → fail fast → fallback gpt-4o ทันที
+    // (outer withTimeout ใน autoFlowService คือ 210s — ต้องให้ fallback เสร็จก่อน)
+    let result;
     try {
-      const result = await callAI({ prompt, model: MODEL_PRIMARY, temperature: 0.4, maxTokens: 8000 });
+      result = await withTimeout(
+        callAI({ prompt, model: MODEL_PRIMARY, temperature: 0.4, maxTokens: 8000 }),
+        60000, // ★ 60s max สำหรับ gpt-5.5 — ถ้าช้ากว่านี้ = overloaded → fallback
+        'breakdown_gpt55_inner'
+      );
+    } catch (primaryErr) {
+      console.warn(`[Breakdown-Service] ⚠️ ${MODEL_PRIMARY} failed/timeout: "${primaryErr.message}" — retrying with gpt-4o fallback...`);
+      result = await callAI({ prompt, model: 'gpt-4o', temperature: 0.4, maxTokens: 8000 });
+    }
+
+    try {
       console.log(`[Breakdown-Service] ✅ OK, keys: ${Object.keys(result || {}).join(', ')}`);
 
       const bdData = {
@@ -576,6 +590,7 @@ export async function performSummarize({
       logPipeline({ workflowId, step: 'breakdown', status: 'failed', duration: Date.now() - _pipelineStart, error: err.message }).catch(() => {});
       throw err;
     }
+
   }
 
   // ===== MODE: analyze — วิเคราะห์ด้วย Preset (Smart Match + Narrative Reconstruction) =====

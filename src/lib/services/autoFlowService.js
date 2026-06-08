@@ -184,7 +184,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     mode: 'breakdown',
     workflowId: _autoWorkflowId,
     user: _user,
-  }), 90000, 'breakdown'); // ★ 90s — GPT-5.5 is slower than GPT-4o
+  }), 210000, 'breakdown'); // ★ 210s (was 90s) — GPT-5.5 measured 169s in production, need margin
 
   if (!breakRes.success || !breakRes.data) {
     throwStep('auto_breakdown', `แตกประเด็นไม่สำเร็จ: ${breakRes.error || ''}`);
@@ -212,7 +212,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
       breakdownData,
       workflowId: _autoWorkflowId,
       user: _user,
-    }), 75000, 'blueprint').catch(() => null), // ★ 75s — GPT-5.5 needs more time
+    }), 120000, 'blueprint').catch(() => null), // ★ 120s (was 75s) — GPT-5.5 needs more time
     
     // Task 2: Smart Research
     withTimeout(
@@ -245,17 +245,17 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   // ===================================================================
   rlog.divider('MULTI-ANGLE PARALLEL PIPELINE');
   
-  const anglesToUse = breakdownData.possible_angles?.slice(0, 3) || []; // ★ max 3 angles (was 4) — ลดเวลา generate
+  // ★ max 2 angles — sequential เพื่อป้องกัน Claude rate limit ที่ทำให้ timeout
+  const anglesToUse = breakdownData.possible_angles?.slice(0, 2) || [];
   if (anglesToUse.length === 0) {
     anglesToUse.push({ angle_name: 'นำเสนอข่าวสารทั่วไป', description: 'เล่าเหตุการณ์ตามจริง' });
   }
 
-  // Calculate target counts. Total = 7.
-  const totalVersions = 7;
-  const baseCount = Math.floor(totalVersions / anglesToUse.length);
-  let remainder = totalVersions % anglesToUse.length;
-  
-  addLog('Parallel', `🚀 แยกทำงานขนาน ${anglesToUse.length} มุมมอง (เป้าหมายรวม 7 เวอร์ชัน)...`);
+  // ★ 4 total versions: 2 per angle (เดิม 7 versions / 3 angles → ช้าเกิน)
+  const totalVersions = 4;
+  const versionsPerAngle = 2;
+
+  addLog('Generate', `🚀 ${anglesToUse.length} มุมมอง × ${versionsPerAngle} เวอร์ชัน = รวม ${totalVersions} เวอร์ชัน (sequential เพื่อป้องกัน rate limit)...`);
 
   // === PRE-SELECT: เลือก prompt ล่วงหน้าทุก angle (sequential — ป้องกันซ้ำ) ===
   // ★ BUG FIX: Cache AI analysis + prompt lib จาก angle แรก → ใช้ซ้ำทุก angle
@@ -290,62 +290,70 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     addLog('PromptSelect', `📋 Angle "${angleObj.angle_name}" → ${topPrompt ? topPrompt.promptName?.slice(0, 40) : '❌ ไม่พบ'} (excluded: ${usedPromptIds.length - 1})${_cachedNewsAnalysis ? ' ♻️' : ''}`);
   }
 
-  // === PARALLEL GENERATE: สร้างเนื้อหาขนานด้วย prompt ที่เลือกไว้แล้ว ===
-  const generationTasks = anglesToUse.map((angleObj, index) => {
-    return withTimeout((async () => {
-      const count = baseCount + (index < remainder ? 1 : 0);
-      const focusAngle = `${angleObj.angle_name}: ${angleObj.description}`;
-      
-      // 1. Research for this angle
-      const resResult = await performResearch({
-        newsTitle: newsData.newsTitle,
-        newsBody: newsData.newsBody,
-        breakdownData,
-        focusAngle,
-        workflowId: _autoWorkflowId,
-      }).catch((resErr) => {
-        addLog('Research', `⚠️ Research failed for "${angleObj.angle_name}": ${resErr.message || resErr}`);
-        return null;
-      });
-      const researchItems = resResult?.items || [];
-      
-      // 2. ใช้ prompt ที่เลือกไว้แล้ว (ไม่ซ้ำกัน)
-      const topPrompt = anglePrompts[index];
-      
-      if (!topPrompt) {
-        addLog('PromptSkip', `⚠️ ข้าม Angle "${angleObj.angle_name}" — ไม่มี prompt ที่ match (เพิ่ม prompt ใน library เพื่อครอบคลุม)`);
-        return { success: false, error: 'NO_MATCHING_PROMPT', _sourceLabel: angleObj.angle_name, _pIndex: index + 1, _researchItems: researchItems, _topPrompt: null };
-      }
-      
-      // 3. Generate content
-      const genResult = await performSummarize({
-        text: newsData.newsBody,
-        newsTitle: newsData.newsTitle,
-        breakdownData,
-        sourceType: detectedType,
-        mode: 'analyze',
-        contentLength: selectedLength,
-        presetPrompt: topPrompt,
-        targetCount: count,
-        emotionalBlueprint: blueprint,
-        researchData: researchItems.length > 0 ? { items: researchItems } : null,
-        factPool: factPool,
-        workflowId: _autoWorkflowId,
-        user: _user,
-      });
-      
-      return {
-        ...genResult,
-        _sourceLabel: angleObj.angle_name,
-        _pIndex: index + 1,
-        _researchItems: researchItems,
-        _topPrompt: topPrompt
-      };
-    })(), 150000, `generate_A${index + 1}`); // ★ 150s per angle (was 240s) — ลดจาก rate limit + Claude latency
-  });
+  // === SEQUENTIAL GENERATE: สร้างเนื้อหาทีละ angle (ป้องกัน Claude rate limit) ===
+  const genResults = [];
+  for (let index = 0; index < anglesToUse.length; index++) {
+    const angleObj = anglesToUse[index];
+    addLog('Generate', `▶️ Angle ${index + 1}/${anglesToUse.length}: "${angleObj.angle_name}"...`);
+    try {
+      const result = await withTimeout((async () => {
+        const focusAngle = `${angleObj.angle_name}: ${angleObj.description}`;
 
-  const genResults = await Promise.allSettled(generationTasks);
-  
+        // 1. Research for this angle
+        const resResult = await performResearch({
+          newsTitle: newsData.newsTitle,
+          newsBody: newsData.newsBody,
+          breakdownData,
+          focusAngle,
+          workflowId: _autoWorkflowId,
+        }).catch((resErr) => {
+          addLog('Research', `⚠️ Research failed for "${angleObj.angle_name}": ${resErr.message || resErr}`);
+          return null;
+        });
+        const researchItems = resResult?.items || [];
+
+        // 2. ใช้ prompt ที่เลือกไว้แล้ว
+        const topPrompt = anglePrompts[index];
+        if (!topPrompt) {
+          addLog('PromptSkip', `⚠️ ข้าม Angle "${angleObj.angle_name}" — ไม่มี prompt match`);
+          return { success: false, error: 'NO_MATCHING_PROMPT', _sourceLabel: angleObj.angle_name, _pIndex: index + 1, _researchItems: researchItems, _topPrompt: null };
+        }
+
+        // 3. Generate content
+        const genResult = await performSummarize({
+          text: newsData.newsBody,
+          newsTitle: newsData.newsTitle,
+          breakdownData,
+          sourceType: detectedType,
+          mode: 'analyze',
+          contentLength: selectedLength,
+          presetPrompt: topPrompt,
+          targetCount: versionsPerAngle,
+          emotionalBlueprint: blueprint,
+          researchData: researchItems.length > 0 ? { items: researchItems } : null,
+          factPool: factPool,
+          workflowId: _autoWorkflowId,
+          user: _user,
+        });
+
+        return {
+          ...genResult,
+          _sourceLabel: angleObj.angle_name,
+          _pIndex: index + 1,
+          _researchItems: researchItems,
+          _topPrompt: topPrompt,
+        };
+      })(), 240000, `generate_A${index + 1}`); // ★ 240s per angle — sequential with Claude+fallback takes ~200s
+
+      genResults.push({ status: 'fulfilled', value: result });
+      addLog('Generate', `✅ Angle ${index + 1} เสร็จ: ${result?.data?.versions?.length || 0} เวอร์ชัน`);
+    } catch (angleErr) {
+      addLog('Generate', `❌ Angle ${index + 1} fail: ${angleErr.message || angleErr}`);
+      genResults.push({ status: 'rejected', reason: angleErr });
+      // ★ ถ้า angle แรกเสร็จแล้ว → ยังคืน partial result ได้ (ไม่ abort)
+    }
+  }
+
   let allVersions = [];
   let primaryResult = null;
   let classicVersionCount = 0;

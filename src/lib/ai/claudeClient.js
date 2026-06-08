@@ -123,12 +123,16 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
 
   // Parse JSON จาก response
   try {
-    // Claude อาจครอบ JSON ด้วย markdown code block
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, content];
-    const jsonStr = jsonMatch[1].trim();
+    // ★ BUG FIX: Strip ```json ``` wrapper before parsing (Claude wraps JSON in code blocks)
+    let jsonStr = content;
+    jsonStr = jsonStr.trim();
+    if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
+    if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
+    if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
+    jsonStr = jsonStr.trim();
     return sanitizeOutput(JSON.parse(jsonStr));
   } catch (e) {
-    // ลอง parse ตรงๆ
+    // ลอง parse ตรงๆ โดยหา { } ครอบ
     try {
       const startIdx = content.indexOf('{');
       const endIdx = content.lastIndexOf('}');

@@ -162,7 +162,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     mode: 'breakdown',
     workflowId: _autoWorkflowId,
     user: _user,
-  }), 90000, 'breakdown'); // ★ 90s — GPT-5.5 is slower than GPT-4o
+  }), 210000, 'breakdown'); // ★ 210s (was 90s) — GPT-5.5 measured 169s in production, need margin
 
   if (!breakRes.success || !breakRes.data) {
     throwStep('auto_breakdown', `แตกประเด็นไม่สำเร็จ: ${breakRes.error || ''}`);

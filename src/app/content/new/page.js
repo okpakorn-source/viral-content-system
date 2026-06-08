@@ -283,13 +283,14 @@ function NewContentPageInner() {
       wfStart('auto_scrape', { api: '/api/auto', detail: 'กำลังส่งข้อมูลไป Auto Pipeline...' });
 
       // === ตั้ง timer animate steps ระหว่าง polling (ให้ UI ไม่ค้าง) ===
+      // Real timings: Scrape 8s | Extract 12s | Breakdown 30-60s | Blueprint+Research 15s | Generate A1 60-120s | Generate A2 60-120s
       const stepTimeline = [
-        { at: 8,  fn: () => { wfComplete('auto_scrape', 'ดึงเนื้อหาสำเร็จ'); wfStart('auto_extract', { api: 'Gemini Flash', detail: 'สกัดเนื้อข่าว...' }); } },
-        { at: 20, fn: () => { wfComplete('auto_extract', 'สกัดเนื้อข่าวสำเร็จ'); wfStart('auto_breakdown', { api: 'GPT-4o', detail: 'วิเคราะห์มุมข่าว...' }); } },
-        { at: 35, fn: () => { wfComplete('auto_breakdown', 'วิเคราะห์มุมข่าวสำเร็จ'); wfStart('auto_blueprint', { api: 'GPT-4o', detail: 'วาง Emotional Architecture...' }); } },
-        { at: 50, fn: () => { wfComplete('auto_blueprint', 'วาง Blueprint สำเร็จ'); wfStart('auto_research', { api: 'Serper API', detail: 'ค้นหาข้อมูลจริงจาก Google...' }); } },
-        { at: 65, fn: () => { wfComplete('auto_research', 'ค้นหาข้อมูลสำเร็จ'); wfStart('auto_classic', { api: 'Claude', detail: 'Multi-Angle prompts...' }); } },
-        { at: 100, fn: () => { wfComplete('auto_classic', 'สร้าง Classic สำเร็จ'); wfStart('auto_enhanced', { api: 'Claude', detail: 'Enhanced + Blueprint...' }); } },
+        { at: 8,   fn: () => { wfComplete('auto_scrape', 'ดึงเนื้อหาสำเร็จ'); wfStart('auto_extract', { model: 'Gemini 2.0 Flash', api: '/api/summarize?mode=extract', detail: 'อ่านเนื้อเว็บ → สกัด newsTitle + newsBody...' }); } },
+        { at: 22,  fn: () => { wfComplete('auto_extract', 'สกัดเนื้อข่าวสำเร็จ'); wfStart('auto_breakdown', { model: 'GPT-5.5', api: '/api/summarize?mode=breakdown', detail: 'วิเคราะห์ core story + key points + possible angles...' }); } },
+        { at: 60,  fn: () => { wfComplete('auto_breakdown', 'วิเคราะห์มุมข่าวสำเร็จ'); wfStart('auto_blueprint', { model: 'GPT-5.5', api: '/api/summarize?mode=blueprint', detail: 'วาง emotional arc: hook → twist → CTA...' }); } },
+        { at: 78,  fn: () => { wfComplete('auto_blueprint', 'วาง Blueprint สำเร็จ'); wfStart('auto_research', { api: 'Serper Google Search API', detail: 'ค้นหาข้อเท็จจาก Google × angles...' }); } },
+        { at: 95,  fn: () => { wfComplete('auto_research', 'ค้นหาข้อมูลสำเร็จ'); wfStart('auto_classic', { model: 'Claude Sonnet 4', api: '/api/summarize?mode=analyze', detail: 'Angle 1: Research → Generate 2 เวอร์ชัน...' }); } },
+        { at: 200, fn: () => { wfComplete('auto_classic', 'Angle 1 สำเร็จ'); wfStart('auto_enhanced', { model: 'Claude Sonnet 4', api: '/api/summarize?mode=analyze', detail: 'Angle 2: Research → Generate 2 เวอร์ชัน...' }); } },
       ];
       const animateStart = Date.now();
       let animateIdx = 0;
@@ -507,14 +508,15 @@ function NewContentPageInner() {
       setAutoProgress('⚡ Enhanced AI Pipeline กำลังประมวลผล...');
 
       // === ตั้ง timer animate steps ระหว่าง polling ===
+      // Timing based on real pipeline measurements
       const stepTimeline = [
-        { at: 3,  fn: () => { wfComplete('auto_detect', `✅ ${pipelineType}`); wfStart('auto_scrape', { detail: 'ดึงเนื้อหา...' }); } },
-        { at: 8,  fn: () => { wfComplete('auto_scrape', 'ดึงเนื้อหาสำเร็จ'); wfStart('auto_extract', { api: 'Gemini Flash', detail: 'สกัดเนื้อข่าว...' }); } },
-        { at: 18, fn: () => { wfComplete('auto_extract', 'สกัดเนื้อข่าวสำเร็จ'); wfStart('auto_breakdown', { api: 'GPT-4o', detail: 'วิเคราะห์มุมข่าว...' }); } },
-        { at: 30, fn: () => { wfComplete('auto_breakdown', 'วิเคราะห์มุมข่าวสำเร็จ'); wfStart('auto_blueprint', { api: 'GPT-4o', detail: 'วาง Emotional Architecture...' }); } },
-        { at: 45, fn: () => { wfComplete('auto_blueprint', 'วาง Blueprint สำเร็จ'); wfStart('auto_research', { api: 'Serper API', detail: 'ค้นหาข้อมูลจริงจาก Google...' }); } },
-        { at: 60, fn: () => { wfComplete('auto_research', 'ค้นหาข้อมูลสำเร็จ'); wfStart('auto_classic', { api: 'Claude', detail: 'Multi-Angle prompts...' }); } },
-        { at: 90, fn: () => { wfComplete('auto_classic', 'สร้างเวอร์ชัน Classic สำเร็จ'); wfStart('auto_enhanced', { api: 'Claude', detail: 'Enhanced + Blueprint...' }); } },
+        { at: 3,   fn: () => { wfComplete('auto_detect', `✅ ${pipelineType}`); wfStart('auto_scrape', { detail: 'ดึงเนื้อหา...' }); } },
+        { at: 8,   fn: () => { wfComplete('auto_scrape', 'ดึงเนื้อหาสำเร็จ'); wfStart('auto_extract', { model: 'Gemini 2.0 Flash', api: '/api/summarize?mode=extract', detail: 'อ่านเนื้อเว็บ → สกัด newsTitle + newsBody...' }); } },
+        { at: 22,  fn: () => { wfComplete('auto_extract', 'สกัดเนื้อข่าวสำเร็จ'); wfStart('auto_breakdown', { model: 'GPT-5.5', api: '/api/summarize?mode=breakdown', detail: 'วิเคราะห์ core story + key points + possible angles...' }); } },
+        { at: 60,  fn: () => { wfComplete('auto_breakdown', 'วิเคราะห์มุมข่าวสำเร็จ'); wfStart('auto_blueprint', { model: 'GPT-5.5', api: '/api/summarize?mode=blueprint', detail: 'วาง emotional arc: hook → twist → CTA...' }); } },
+        { at: 78,  fn: () => { wfComplete('auto_blueprint', 'วาง Blueprint สำเร็จ'); wfStart('auto_research', { api: 'Serper Google Search API', detail: 'ค้นหาข้อเท็จจาก Google × angles...' }); } },
+        { at: 95,  fn: () => { wfComplete('auto_research', 'ค้นหาข้อมูลสำเร็จ'); wfStart('auto_classic', { model: 'Claude Sonnet 4', api: '/api/summarize?mode=analyze', detail: 'Multi-Angle generate × 3 angles ทำพร้อมกัน...' }); } },
+        { at: 170, fn: () => { wfComplete('auto_classic', 'สร้าง Classic สำเร็จ'); wfStart('auto_enhanced', { model: 'Claude Sonnet 4', api: '/api/summarize?mode=analyze (enhanced)', detail: 'Enhanced + Blueprint inject + research facts...' }); } },
       ];
       const animateStart = Date.now();
       let animateIdx = 0;
