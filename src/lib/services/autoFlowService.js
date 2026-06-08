@@ -167,6 +167,14 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     throwStep('auto_extract', `เนื้อข่าวที่สกัดได้สั้นเกินไป (${newsData.newsBody.length} ตัวอักษร) — กรุณา copy เนื้อข่าวมาวางแทน`);
   }
 
+  // Bug #3: Guard — หยุด pipeline ถ้าสกัดข่าวไม่ได้เลย (newsTitle ว่างหรือ newsBody สั้นมาก)
+  const _guardTitle = newsData.newsTitle || '';
+  const _guardBody = newsData.newsBody || '';
+  if (!_guardTitle || _guardTitle.includes('ไม่พบเนื้อหาข่าว') || _guardBody.length < 100) {
+    addLog('Step2', `❌ Extract Guard: newsTitle="${_guardTitle}", newsBody length=${_guardBody.length}`);
+    throwStep('auto_extract', `ไม่สามารถสกัดเนื้อหาข่าวได้ — newsTitle: "${_guardTitle}", newsBody length: ${_guardBody.length}`);
+  }
+
   rlog.inject('newsTitle', `"${(newsData.newsTitle||'').slice(0,50)}"`);
   rlog.inject('newsBody', `${newsData.newsBody.length}ch | category: ${newsData.newsCategory||'-'}`);
   addLog('Step2', `✅ "${newsData.newsTitle?.slice(0, 40)}..." (${newsData.newsBody.length} ตัวอักษร, ${((Date.now() - step2Start) / 1000).toFixed(1)}s)`);
@@ -447,13 +455,19 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
       versions: finalVersions,
       breakdownData,
       pipelineInfo: {
-        blueprint: blueprint?.core_emotion || null,
-        researchCount: totalResearchItems.length,
-        factPoolEntity: factPool?.entityName || null,
-        classicCount: classicVersionCount,
-        enhancedCount: enhancedVersionCount,
-        totalTime: parseFloat(totalTime),
         contentLength: selectedLength,
+        totalTime: parseFloat(totalTime),
+        promptName: usedPreset?.name || anglePrompts[0]?.promptName || '',
+        promptSource: usedPreset?.source || (anglePrompts[0] ? 'library' : ''),
+        promptScore: usedPreset?.viralScore || anglePrompts[0]?.viralScore || 0,
+        newsType: newsType || '',
+        stepTimings: {
+          detect: ((step1Start - step0Start) / 1000).toFixed(1),
+          scrape: ((step2Start - step1Start) / 1000).toFixed(1),
+          extract: ((step3Start - step2Start) / 1000).toFixed(1),
+          breakdown: ((stepParallelStart - step3Start) / 1000).toFixed(1),
+          generate: ((Date.now() - stepParallelStart) / 1000).toFixed(1),
+        },
       },
       userId: _user.userId,
     });

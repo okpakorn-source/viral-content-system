@@ -1164,6 +1164,25 @@ ${candidateList}
     // Append Narrative Payload exactly ONCE
     prompt += formatNarrativePayload(narrativePayload);
 
+    // ── FactPool Injection (SmartResearch) ──────────────────────────────
+    // factPool มาจาก achievementResearch (Serper Google Search)
+    // โครงสร้าง: { facts: string[], entityName: string, duration: number }
+    const _fpFacts = factPool?.facts || factPool?.items || [];
+    if (_fpFacts.length > 0) {
+      const _entityLabel = factPool?.entityName ? ` เกี่ยวกับ "${factPool.entityName}"` : '';
+      prompt += `\n=== SMART RESEARCH FACTS${_entityLabel} (${_fpFacts.length} ข้อ) ===\n`;
+      prompt += `ข้อมูลต่อไปนี้มาจากการค้นหาข้อเท็จจริงเพิ่มเติม (SmartResearch) — นำไปเสริมในเนื้อหาเฉพาะส่วนที่เข้ากับบริบทและมุมมองของเวอร์ชันนี้\n`;
+      prompt += `ห้ามนำข้อมูลทั้งหมดมายัดใส่ — เลือกเฉพาะข้อที่เพิ่มคุณค่าให้เรื่องเล่า และห้ามแทรก URL ลงในเนื้อหา\n\n`;
+      _fpFacts.forEach((fact, i) => {
+        prompt += `${i + 1}. ${fact}\n`;
+      });
+      prompt += `=== จบ SMART RESEARCH FACTS ===\n\n`;
+      console.log(`[FactPool] ✅ injected ${_fpFacts.length} facts from SmartResearch (entityName: "${factPool?.entityName || '?'}")`);
+    } else {
+      console.log(`[FactPool] ⚠️ factPool empty or missing — skipped injection`);
+    }
+    // ── จบ FactPool Injection ────────────────────────────────────────────
+
     if (customPrompt) {
       prompt += `\n=== คำสั่งเพิ่มเติมจากผู้ใช้ ===\n"${customPrompt}"\n\n`;
     }
