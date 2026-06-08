@@ -24,8 +24,8 @@ const BUILTIN_TEMPLATES = [
     textSlots: [],
     slots: [
       { id: 'main',      role: 'hero',      x: 0,   y: 0,   w: 750, h: 1350, fadeRight: 150, zIndex: 2 },
-      { id: 'bg_top',    role: 'scene',     x: 380, y: 0,   w: 820, h: 720,  fadeLeft: 220, fadeBottom: 140, zIndex: 0 },
-      { id: 'bg_bottom', role: 'scene',     x: 350, y: 580, w: 850, h: 770,  fadeLeft: 190, fadeTop: 160, zIndex: 1 },
+      { id: 'bg_top',    role: 'scene',     x: 380, y: 0,   w: 820, h: 720,  fadeLeft: 190, fadeBottom: 140, zIndex: 0 },
+      { id: 'bg_bottom', role: 'scene',     x: 350, y: 580, w: 850, h: 770,  fadeLeft: 160, fadeTop: 160, zIndex: 1 },
       { id: 'highlight', role: 'highlight', x: 370, y: 280, w: 560, h: 400,  border: '#CCFF00', borderWidth: 5, zIndex: 3 },
       { id: 'sub_left',  role: 'support',   x: 15,  y: 610, w: 520, h: 430,  border: '#FFFFFF', borderWidth: 4, zIndex: 4 },
     ],
@@ -43,8 +43,8 @@ const BUILTIN_TEMPLATES = [
     textSlots: [],
     slots: [
       { id: 'main',      role: 'hero',      x: 0,   y: 0,   w: 720, h: 1350, fadeRight: 170, zIndex: 2 },
-      { id: 'bg_top',    role: 'scene',     x: 400, y: 0,   w: 800, h: 740,  fadeLeft: 210, fadeBottom: 150, zIndex: 0 },
-      { id: 'bg_bottom', role: 'scene',     x: 380, y: 520, w: 820, h: 830,  fadeLeft: 200, fadeTop: 160, zIndex: 1 },
+      { id: 'bg_top',    role: 'scene',     x: 400, y: 0,   w: 800, h: 740,  fadeLeft: 180, fadeBottom: 150, zIndex: 0 },
+      { id: 'bg_bottom', role: 'scene',     x: 380, y: 520, w: 820, h: 830,  fadeLeft: 170, fadeTop: 160, zIndex: 1 },
       { id: 'highlight', role: 'highlight', x: 120, y: 580, w: 560, h: 360,  border: '#333333', borderWidth: 5, zIndex: 3 },
     ],
     circle: null,
@@ -61,8 +61,8 @@ const BUILTIN_TEMPLATES = [
     textSlots: [],
     slots: [
       { id: 'main',      role: 'hero',      x: 0,   y: 0,   w: 740, h: 1350, fadeRight: 150, zIndex: 2 },
-      { id: 'bg_top',    role: 'scene',     x: 400, y: 0,   w: 800, h: 720,  fadeLeft: 210, fadeBottom: 140, zIndex: 0 },
-      { id: 'bg_bottom', role: 'emotion',   x: 380, y: 580, w: 820, h: 770,  fadeLeft: 190, fadeTop: 150, zIndex: 1 },
+      { id: 'bg_top',    role: 'scene',     x: 400, y: 0,   w: 800, h: 720,  fadeLeft: 180, fadeBottom: 140, zIndex: 0 },
+      { id: 'bg_bottom', role: 'emotion',   x: 380, y: 580, w: 820, h: 770,  fadeLeft: 160, fadeTop: 150, zIndex: 1 },
       { id: 'highlight', role: 'highlight', x: 340, y: 280, w: 630, h: 440,  border: '#CCFF00', borderWidth: 5, zIndex: 3 },
     ],
     circle: { id: 'circle', x: 25, y: 680, diameter: 440, border: '#FFFFFF', borderWidth: 6, zIndex: 4 },
@@ -82,8 +82,8 @@ const BUILTIN_TEMPLATES = [
     ],
     slots: [
       { id: 'main',         role: 'hero',      x: 0,   y: 0,   w: 720, h: 1350, fadeRight: 170, zIndex: 2 },
-      { id: 'bg_top',       role: 'scene',     x: 380, y: 0,   w: 820, h: 700,  fadeLeft: 200, fadeBottom: 140, zIndex: 0 },
-      { id: 'bg_bottom',    role: 'scene',     x: 350, y: 550, w: 850, h: 800,  fadeLeft: 190, fadeTop: 150, zIndex: 1 },
+      { id: 'bg_top',       role: 'scene',     x: 380, y: 0,   w: 820, h: 700,  fadeLeft: 170, fadeBottom: 140, zIndex: 0 },
+      { id: 'bg_bottom',    role: 'scene',     x: 350, y: 550, w: 850, h: 800,  fadeLeft: 160, fadeTop: 150, zIndex: 1 },
       { id: 'circle_small', role: 'highlight', x: 890, y: 15,  shape: 'circle', diameter: 200, border: '#FF0000', borderWidth: 4, zIndex: 5 },
     ],
     circle: { id: 'circle', x: 25, y: 680, diameter: 400, border: '#FFFFFF', borderWidth: 5, zIndex: 4 },
@@ -100,8 +100,8 @@ const BUILTIN_TEMPLATES = [
     textSlots: [],
     slots: [
       { id: 'main',      role: 'hero',      x: 0,   y: 0,   w: 730, h: 1350, fadeRight: 170, zIndex: 2 },
-      { id: 'bg_top',    role: 'scene',     x: 400, y: 0,   w: 800, h: 700,  fadeLeft: 210, fadeBottom: 140, zIndex: 0 },
-      { id: 'bg_bottom', role: 'scene',     x: 350, y: 560, w: 850, h: 790,  fadeLeft: 190, fadeTop: 150, zIndex: 1 },
+      { id: 'bg_top',    role: 'scene',     x: 400, y: 0,   w: 800, h: 700,  fadeLeft: 180, fadeBottom: 140, zIndex: 0 },
+      { id: 'bg_bottom', role: 'scene',     x: 350, y: 560, w: 850, h: 790,  fadeLeft: 160, fadeTop: 150, zIndex: 1 },
       { id: 'highlight', role: 'highlight', x: 420, y: 310, w: 580, h: 410,  border: '#FFD700', borderWidth: 5, zIndex: 3 },
     ],
     circle: { id: 'circle', x: 15, y: 630, diameter: 460, border: '#FFFFFF', borderWidth: 5, zIndex: 4 },
@@ -125,8 +125,8 @@ const BUILTIN_TEMPLATES = [
     ],
     slots: [
       { id: 'main',         role: 'hero',      x: 0,   y: 0,   w: 700, h: 1350, fadeRight: 160, zIndex: 2 },
-      { id: 'bg_top',       role: 'scene',     x: 380, y: 0,   w: 820, h: 650,  fadeLeft: 200, fadeBottom: 130, zIndex: 0 },
-      { id: 'bg_bottom',    role: 'emotion',   x: 340, y: 520, w: 860, h: 830,  fadeLeft: 190, fadeTop: 150, zIndex: 1 },
+      { id: 'bg_top',       role: 'scene',     x: 380, y: 0,   w: 820, h: 650,  fadeLeft: 170, fadeBottom: 130, zIndex: 0 },
+      { id: 'bg_bottom',    role: 'emotion',   x: 340, y: 520, w: 860, h: 830,  fadeLeft: 160, fadeTop: 150, zIndex: 1 },
       { id: 'circle_small', role: 'highlight', x: 440, y: 180, shape: 'circle', diameter: 160, border: '#FF0000', borderWidth: 3, zIndex: 5 },
     ],
     circle: { id: 'circle', x: 50, y: 680, diameter: 360, border: '#FFFFFF', borderWidth: 5, zIndex: 4 },
@@ -148,9 +148,9 @@ const BUILTIN_TEMPLATES = [
       // Hero1: ซ้าย — face ใหญ่ ครองทั้งฝั่งซ้าย (ไม่มี gap ซ้ายล่าง!)
       { id: 'main',       role: 'hero',      x: 0,   y: 0,   w: 680, h: 1350, fadeRight: 150, fadeBottom: 0, zIndex: 3 },
       // BG: ขวาบน — context/สถานที่
-      { id: 'bg_top',     role: 'scene',     x: 400, y: 0,   w: 800, h: 680,  fadeLeft: 200, fadeBottom: 130, zIndex: 0 },
+      { id: 'bg_top',     role: 'scene',     x: 400, y: 0,   w: 800, h: 680,  fadeLeft: 170, fadeBottom: 130, zIndex: 0 },
       // Hero2: ล่างขวา — face คนที่ 2
-      { id: 'bg_bottom',  role: 'hero2',     x: 480, y: 650, w: 720, h: 700,  fadeLeft: 150, fadeTop: 120, zIndex: 2 },
+      { id: 'bg_bottom',  role: 'hero2',     x: 480, y: 650, w: 720, h: 700,  fadeLeft: 120, fadeTop: 120, zIndex: 2 },
       // Highlight: กลางขวา — กรอบภาพบริบท
       { id: 'highlight',  role: 'highlight', x: 480, y: 320, w: 520, h: 360,  border: '#CCFF00', borderWidth: 5, zIndex: 4 },
     ],
@@ -172,9 +172,9 @@ const BUILTIN_TEMPLATES = [
       // Hero: ซ้าย 50% — fade น้อยลง ไม่กินหน้า!
       { id: 'main',      role: 'hero',      x: 0,   y: 0,   w: 660, h: 1350, fadeRight: 120, zIndex: 2 },
       // BG top: ขวาบน — ไม่ fade มากเข้ามา
-      { id: 'bg_top',    role: 'scene',     x: 480, y: 0,   w: 720, h: 650,  fadeLeft: 150, fadeBottom: 110, zIndex: 0 },
+      { id: 'bg_top',    role: 'scene',     x: 480, y: 0,   w: 720, h: 650,  fadeLeft: 120, fadeBottom: 110, zIndex: 0 },
       // BG bottom: ขวาล่าง — แยกชัดจาก bg_top
-      { id: 'bg_bottom', role: 'scene',     x: 460, y: 620, w: 740, h: 730,  fadeLeft: 160, fadeTop: 120, zIndex: 1 },
+      { id: 'bg_bottom', role: 'scene',     x: 460, y: 620, w: 740, h: 730,  fadeLeft: 130, fadeTop: 120, zIndex: 1 },
       // Highlight: ขวากลาง — กรอบชัดเจน ไม่ทับ hero
       { id: 'highlight', role: 'highlight', x: 520, y: 280, w: 500, h: 350,  border: '#CCFF00', borderWidth: 5, zIndex: 3 },
     ],

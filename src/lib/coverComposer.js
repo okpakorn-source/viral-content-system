@@ -20,7 +20,7 @@ const EDITORIAL_GEOMETRY = {
   circleOffsetY: -20,
   margin: 32,
   gap: 12,
-  safeFacePadding: 24,
+  safeFacePadding: 60,  // FIX: เพิ่มจาก 24 → 60px เพื่อให้ fade ห่างจากหน้าคนมากขึ้น
   minImageSpacing: 10,
 };
 
@@ -94,7 +94,7 @@ async function loadThaiFontBase64() {
  *   'attention'      — ภาพรวม saliency (สำหรับ scene)
  *   null             — auto detect จาก orientation
  */
-async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy = null) {
+async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy = null, opts = {}) {
   // ★ Guard: dimensions ต้อง valid
   w = Math.round(Math.max(1, w || 1));
   h = Math.round(Math.max(1, h || 1));
@@ -202,6 +202,23 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
         // center-face / face-tight / scene-with-face: center ที่จุดกลางหน้า
         cropX = Math.round(focusCX - cropW / 2);
         cropY = Math.round(focusCY - cropH / 2);
+        
+        // FIX: ถ้า slot มี fadeLeft → push cropX ออกจาก fade zone ให้ subject อยู่ในพื้นที่ใช้ได้จริง
+        if (opts.fadeLeftPx > 0) {
+          // usable area เริ่มจาก fadeLeft px จาก slot left edge
+          // target: face center อยู่ใน usable area (right of fadeLeft)
+          // ถ้า face จะโดน fade → เลื่อน crop ไปทางซ้าย เพื่อ face อยู่ right-of-fade
+          const fadePx = Math.round(opts.fadeLeftPx);
+          // face ใน source image: focusCX, ใน slot coords หลัง crop: face อยู่ที่ focusCX - cropX
+          // ต้องการให้ focusCX - cropX >= fadePx + 60 (พื้นที่ปลอดภัย 60px จาก fade edge)
+          const minFaceInSlot = fadePx + 60;
+          const currentFaceInSlot = focusCX - cropX;
+          if (currentFaceInSlot < minFaceInSlot) {
+            const delta = minFaceInSlot - currentFaceInSlot;
+            cropX = Math.max(0, cropX - delta); // เลื่อน crop ไปซ้าย → face ชิดขวามากขึ้น
+            console.log(`[SmartCrop] FadeLeft(${fadePx}px) push: cropX ${Math.round(cropX + delta)} → ${Math.round(cropX)}`);
+          }
+        }
         
         // ★ Safety: ตรวจสอบทุกใบหน้าอยู่ใน crop (padding 30% รอบหน้า)
         for (const face of faces) {
@@ -973,7 +990,7 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
         } else {
           cropStrat = 'attention';      // Scene ไม่มีคน: ใช้ saliency
         }
-        let resized = await smartCropPhoto(imageBuffers[imgIdx], safeW, safeH, slotFaceData, cropStrat);
+        let resized = await smartCropPhoto(imageBuffers[imgIdx], safeW, safeH, slotFaceData, cropStrat, { fadeLeftPx: slot.fadeLeft || 0 });
 
         // ★ Sharpen ทุกภาพ — เพิ่มความคมชัด!
         try {
@@ -1005,14 +1022,15 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
         }
         
         // ★ BG slots: ถ้ามีหน้าคนใน BG → ลด fadeLeft/fadeTop ไม่ให้กินหน้า
+        // FIX: ใช้ safeFacePadding=60px (เพิ่มจาก 24px) + ลด threshold จาก 50 → 30px
         if ((slot.id === 'bg_top' || slot.id === 'bg_bottom') && slotFaceData?.hasFaces) {
           const face = slotFaceData.faces[0];
           if (fL > 0) {
             const faceLeftRatio = face.x / (slotFaceData.imageWidth || safeW);
             const faceLeftPx = faceLeftRatio * safeW;
-            if (fL > faceLeftPx - EDITORIAL_GEOMETRY.safeFacePadding && faceLeftPx > 50) {
-              const newFadeL = Math.max(50, Math.round(faceLeftPx - EDITORIAL_GEOMETRY.safeFacePadding));
-              console.log(`[Composer] ★ BG ${slot.id} fadeLeft adjusted: ${fL}px → ${newFadeL}px (face at ${Math.round(faceLeftPx)}px)`);
+            if (fL > faceLeftPx - EDITORIAL_GEOMETRY.safeFacePadding && faceLeftPx > 30) {
+              const newFadeL = Math.max(40, Math.round(faceLeftPx - EDITORIAL_GEOMETRY.safeFacePadding));
+              console.log(`[Composer] ★ BG ${slot.id} fadeLeft adjusted: ${fL}px → ${newFadeL}px (face at ${Math.round(faceLeftPx)}px, safePad=${EDITORIAL_GEOMETRY.safeFacePadding}px)`);
               fL = newFadeL;
             }
           }
