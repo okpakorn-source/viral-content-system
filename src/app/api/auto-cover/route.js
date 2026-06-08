@@ -15,6 +15,8 @@ import { NextResponse } from 'next/server';
 import { MODEL_VISION } from '@/lib/ai/modelConfig';
 import sharp from 'sharp';
 
+export const maxDuration = 120; // 2 minutes max for cover pipeline
+
 // ═══ dHash: Perceptual Image Hashing ═══
 // Inlined because imageSearchService.js does not export these utilities
 async function computeImageHash(buffer) {
@@ -55,7 +57,7 @@ async function evaluateFinalCover(base64Image, newsTitle) {
   try {
     const { GoogleGenerativeAI } = await import('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     const prompt = `You are an elite news Art Director evaluating a composed 1080x1080 news cover for: "${newsTitle}".
 
@@ -87,6 +89,7 @@ Score 1-10. Return ONLY: {"score": 8, "reason": "brief"}. No markdown blocks.`;
 
 export async function POST(request) {
   const startTime = Date.now();
+  const TIMEOUT_MS = 110_000; // 110s safety margin
 
   try {
     const body = await request.json();
@@ -102,6 +105,11 @@ export async function POST(request) {
     console.log('[AutoCover] Starting pipeline...');
     console.log(`[AutoCover] Title: ${(newsTitle || '').substring(0, 80)}`);
     console.log(`[AutoCover] Template: ${templateId}, Regenerate: ${regenerate}`);
+
+    // Timeout check before Step 1
+    if (Date.now() - startTime > TIMEOUT_MS) {
+      return NextResponse.json({ success: false, error: 'Pipeline timeout', errorType: 'TIMEOUT' }, { status: 504 });
+    }
 
     // Step 1: Analyze story identity (extract keywords, characters, emotions)
     const { analyzeStoryIdentity } = await import('@/lib/services/storyIdentityService');
@@ -217,6 +225,11 @@ export async function POST(request) {
       identity._newsTitle = newsTitle || '';
     }
 
+    // Timeout check before Step 2
+    if (Date.now() - startTime > TIMEOUT_MS) {
+      return NextResponse.json({ success: false, error: 'Pipeline timeout', errorType: 'TIMEOUT' }, { status: 504 });
+    }
+
     // Step 2: Multi-agent image search
     const { runMultiAgentImageSearch } = await import('@/lib/services/multiAgentImageScraper');
 
@@ -231,11 +244,16 @@ export async function POST(request) {
     if (!bestImages || bestImages.length === 0) {
       return NextResponse.json(
         { success: false, error: 'ไม่พบภาพที่เหมาะสม', errorType: 'NO_IMAGES_FOUND', status: 'NEED_MANUAL_COVER' },
-        { status: 200 }
+        { status: 422 }
       );
     }
 
     console.log(`[AutoCover] Found ${bestImages.length} images`);
+
+    // Timeout check before Step 3
+    if (Date.now() - startTime > TIMEOUT_MS) {
+      return NextResponse.json({ success: false, error: 'Pipeline timeout', errorType: 'TIMEOUT' }, { status: 504 });
+    }
 
     // Step 3: Download + validate + dedup
     const { downloadAndValidateImage } = await import('@/lib/services/imageSearchService');
@@ -361,10 +379,15 @@ export async function POST(request) {
         errorType: 'INSUFFICIENT_IMAGES',
         status: 'NEED_MANUAL_COVER',
         imageCount: imageBuffers.length,
-      }, { status: 200 });
+      }, { status: 422 });
     }
 
     console.log(`[AutoCover] Downloaded ${imageBuffers.length} valid images`);
+
+    // Timeout check before Step 4
+    if (Date.now() - startTime > TIMEOUT_MS) {
+      return NextResponse.json({ success: false, error: 'Pipeline timeout', errorType: 'TIMEOUT' }, { status: 504 });
+    }
 
     // Step 4: Face detection on all images
     const { batchDetectFaces } = await import('@/lib/services/faceDetector');
@@ -465,6 +488,11 @@ export async function POST(request) {
       // ถ้า Curator ล้มเหลว → ใช้ role เดิมจาก Judge (ไม่พัง!)
     }
 
+    // Timeout check before Step 7
+    if (Date.now() - startTime > TIMEOUT_MS) {
+      return NextResponse.json({ success: false, error: 'Pipeline timeout', errorType: 'TIMEOUT' }, { status: 504 });
+    }
+
     // Step 7: AI Slot Assignment (with cover library reference)
     const slotAssignment = await assignImagesToSlots(
       imageBuffers, faceDataMap, chosenTemplate, identity, coverReferences
@@ -487,7 +515,7 @@ export async function POST(request) {
 
     const coverBuffer = await composeCover(plan, allBuffers, faceDataMap);
     const base64 = `data:image/jpeg;base64,${coverBuffer.toString('base64')}`;
-    const orderedBuffers = allBuffers;
+
 
     // ★ บันทึกภาพลงคลัง (ไม่ block response) ★
     try {
@@ -535,7 +563,7 @@ export async function POST(request) {
         score,
         templateUsed: chosenTemplate,
         elapsed: `${elapsed}s`,
-        imageCount: orderedBuffers.length,
+        imageCount: imageBuffers.length,
         newsUrl: sourceUrl || '',
         identity: {
           mainCharacter: identity?.mainCharacter || '',
@@ -571,7 +599,7 @@ export async function POST(request) {
         score,
         subjects,
         emotion: identity?.coverEmotion || identity?.emotion || '',
-        imageCount: orderedBuffers.length,
+        imageCount: imageBuffers.length,
       }).then((result) => {
         if (result?.success) {
           console.log(`[AutoCover] ✅ Cover library auto-save SUCCESS: id=${result.id}, version=${result.version || 1}`);
@@ -590,7 +618,7 @@ export async function POST(request) {
       success: true,
       base64,
       templateUsed: chosenTemplate,
-      imageCount: orderedBuffers.length,
+      imageCount: imageBuffers.length,
       score,
       elapsed: `${elapsed}s`,
       newsHash,
