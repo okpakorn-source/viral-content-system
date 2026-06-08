@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Auto Cover API Route — /api/auto-cover
  * 
  * POST: Generate cover image automatically from content
@@ -260,6 +260,46 @@ export async function POST(request) {
         console.log(`[AutoCover] No override: celebratedAction="${celebratedAction || 'N/A'}", occImportance=${occupationImportance}`);
       }
     }
+
+    // ════════════════════════════════════════════════════════
+    // ★ BUILD coreImageQueries — ชุดคีย์เดียวใช้ทุก Agent
+    // ทุก Agent (Google/YouTube/Tavily/Context) ใช้ชุดเดียวกัน
+    // ไม่แยก "YouTube ใช้คีย์หนึ่ง Tavily ใช้คีย์อื่น"
+    // ════════════════════════════════════════════════════════
+    if (identity) {
+      const _hero = identity.mainCharacter || '';
+      const _action = identity.coreStory?.celebratedAction || '';
+      const _rel = identity.coreStory?.relationship || '';
+      const _sq = identity.searchQueries || {};
+
+      if (_hero && (_action || _rel)) {
+        // Core queries — ทุก Agent MUST search เหล่านี้ก่อน
+        const core = [
+          _rel  ? `${_hero} ${_rel}` : null,
+          _action ? `${_hero} ${_action}` : null,
+          (_rel && _action) ? `${_hero} ${_rel} ${_action}` : null,
+          _sq.key_relationship && _sq.key_relationship !== `${_hero} ${_rel}` ? _sq.key_relationship : null,
+          _sq.key_activity && _sq.key_activity !== `${_hero} ${_action}` ? _sq.key_activity : null,
+        ].filter(Boolean).map(q => q.trim()).filter((q, i, a) => q.length > 3 && a.indexOf(q) === i);
+
+        // Optional queries — occupation/context — ค้นหลัง core เสร็จ
+        const optional = [
+          _sq.person_portrait,
+          _sq.person_closeup,
+          _sq.person_emotion,
+        ].filter(Boolean);
+
+        identity.coreImageQueries = core;
+        identity.optionalContextQueries = optional;
+        console.log(`[AutoCover] ★ coreImageQueries: ${JSON.stringify(core)}`);
+        console.log(`[AutoCover]   optionalContext:  ${JSON.stringify(optional)}`);
+      } else {
+        identity.coreImageQueries = [];
+        identity.optionalContextQueries = [];
+        console.log(`[AutoCover] ⚠️ coreImageQueries EMPTY — hero="${_hero}" action="${_action}" rel="${_rel}"`);
+      }
+    }
+
 
     // ═══════════════════════════════════════════════════════
     // Step 1.5: Entity Resolver — ค้นหา Social Profile ของตัวละครหลัก

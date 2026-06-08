@@ -230,22 +230,33 @@ async function agentGoogleCleanImages(identity) {
 // ==========================================
 async function agentYouTubeFrames(identity) {
   const mainChar = identity?.mainCharacter || '';
-  const searchQuery = identity?.searchYouTube || identity?.searchGoogle || '';
-  
-  if (!searchQuery && !mainChar) {
-    console.log('[Agent2: YouTube] ❌ No search query available');
-    return [];
-  }
 
-  // ★ สร้าง query จากเนื้อข่าว — ห้ามค้นชื่อคนกว้างๆ!
+  // ★★★ ใช้ coreImageQueries ชุดเดียวกับทุก Agent — ไม่ถือคีย์คนละชุดอีกแล้ว!
+  const coreQueries = identity?.coreImageQueries || [];
   const sq = identity?.searchQueries || {};
   const sd = identity?.specific_details || {};
-  const youtubeQueries = [
-    searchQuery,
-    // ★ ค้นจากบริบทข่าว ไม่ใช่ "สัมภาษณ์" หรือ "ละคร"
-    sq.person_context || (mainChar && identity?.story ? `${mainChar} ${identity.story.substring(0, 30)}` : ''),
-    sq.event_scene || (sd.place_names?.[0] ? `${mainChar} ${sd.place_names[0]}` : ''),
-  ].filter(q => q.trim());
+
+  // Priority: coreImageQueries → searchYouTube → searchGoogle → fallback
+  let youtubeQueries = [];
+  if (coreQueries.length > 0) {
+    // ★ ใช้ coreImageQueries ทุกตัว (max 3) — เหมือน Google + Tavily
+    youtubeQueries = coreQueries.slice(0, 3);
+    console.log(`[Agent2: YouTube] ★ Using coreImageQueries: ${JSON.stringify(youtubeQueries)}`);
+  } else {
+    // Fallback เดิม
+    const searchQuery = identity?.searchYouTube || identity?.searchGoogle || '';
+    youtubeQueries = [
+      searchQuery,
+      sq.person_context || (mainChar && identity?.story ? `${mainChar} ${identity.story.substring(0, 30)}` : ''),
+      sq.event_scene || (sd.place_names?.[0] ? `${mainChar} ${sd.place_names[0]}` : ''),
+    ].filter(q => q && q.trim());
+    console.log(`[Agent2: YouTube] ⚠️ No coreImageQueries, using legacy: ${JSON.stringify(youtubeQueries)}`);
+  }
+
+  if (youtubeQueries.length === 0) {
+    console.log('[Agent2: YouTube] ❌ No search queries available');
+    return [];
+  }
 
   console.log(`[Agent2: YouTube] 🎬 3-Tier search with ${youtubeQueries.length} queries`);
 
@@ -435,9 +446,18 @@ async function agentContextImages(identity) {
   const sq = identity?.searchQueries || {};
   const scenes = identity?.keyScenes || [];
 
-  // สร้าง queries จาก AI-generated searchQueries (5 มุม)
+  // ★★★ ใช้ coreImageQueries ชุดเดียวก่อน — เหมือนทุก Agent
+  const coreQueries = identity?.coreImageQueries || [];
   const queries = [];
   const blockTerms = '-ลายน้ำ -watermark -ปกข่าว -ปกคลิป';
+
+  // Prepend coreImageQueries เป็นกลุ่มแรก (highest priority)
+  for (const cq of coreQueries) {
+    queries.push({
+      q: `${cq} ภาพจริง -ปก -cover -thumbnail ${blockTerms}`,
+      label: `core: ${cq.substring(0, 30)}`,
+    });
+  }
 
   // Query 1: บุคคลจริง (ไม่ใช่ข่าว ไม่ใช่ปก)
   if (sq.person_closeup || mainChar) {
@@ -1210,7 +1230,7 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
     const { tavilyImageSearch, isTavilyAvailable } = await import('@/lib/services/tavilyService');
     if (isTavilyAvailable()) {
       const sq = identity?.searchQueries || {};
-      const tavilyQuery = sq.person_context || sq.key_activity || identity?.searchGoogle || newsTitle || '';
+      const tavilyQuery = identity?.coreImageQueries?.[0] || sq.person_context || sq.key_activity || identity?.searchGoogle || newsTitle || '';
       if (tavilyQuery) {
         tavilyPromise = tavilyImageSearch(tavilyQuery).catch(() => []);
       }
