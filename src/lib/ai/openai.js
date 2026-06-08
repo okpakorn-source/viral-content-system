@@ -157,14 +157,15 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
   console.log(`[callAI] model=${model}, temp=${temperature}, maxTokens=${maxTokens}`);
   console.log(`[callAI] prompt preview (first 500ch): ${(prompt || userPrompt || '').slice(0, 500)}`);
 
-  // ★ gpt-5.5 / gpt-5.4-mini ต้องใช้ max_completion_tokens (ไม่ใช่ max_tokens)
-  const useNewParam = model.startsWith('gpt-5') || model.startsWith('o1') || model.startsWith('o3');
+  // ★ gpt-5.5 / gpt-5.4-mini: ใช้ max_completion_tokens + ไม่รับ temperature (ใช้ default=1 เท่านั้น)
+  const isNewModel = model.startsWith('gpt-5') || model.startsWith('o1') || model.startsWith('o3');
   
   const response = await client.chat.completions.create({
     model,
     messages,
-    temperature,
-    ...(useNewParam 
+    // ★ gpt-5.x ไม่รับ temperature ≠ 1 → ไม่ส่ง (ใช้ default)
+    ...(isNewModel ? {} : { temperature }),
+    ...(isNewModel 
       ? { max_completion_tokens: maxTokens }
       : { max_tokens: maxTokens }),
     response_format: { type: 'json_object' },
