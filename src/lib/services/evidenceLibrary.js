@@ -172,6 +172,57 @@ export async function buildEvidenceLibrary(resolvedRelationships, identity) {
     }
   });
 
+  // ★ FIX 2: Story Weight Quota + negativeFocus Demoting
+  // ใช้ coreStory จาก identity เพื่อ cap จำนวนภาพต่อ category + demote ภาพ negativeFocus
+  const storyWeight = identity?.coreStory?.storyWeight || {};
+  const negativeFocus = identity?.coreStory?.negativeFocus || [];
+  const hasStoryWeight = Object.keys(storyWeight).filter(k => k !== '_comment').length > 0;
+
+  for (const cat of Object.keys(library)) {
+    let catImgs = library[cat];
+    if (!catImgs || catImgs.length === 0) continue;
+
+    // ★ negativeFocus demoting: ภาพที่ title/snippet/url มีคำใน negativeFocus → ย้ายไปท้าย
+    if (negativeFocus.length > 0) {
+      const kept = [];
+      const demoted = [];
+      for (const img of catImgs) {
+        const textToCheck = `${img.title || ''} ${img.snippet || ''} ${img.imageUrl || ''}`.toLowerCase();
+        const isNegative = negativeFocus.some(neg => textToCheck.includes(neg.toLowerCase()));
+        if (isNegative) {
+          img.negativeFocusPenalty = -0.4;
+          img.authorityScore = Math.max(0, (img.authorityScore || 0.35) - 0.4);
+          demoted.push(img);
+        } else {
+          kept.push(img);
+        }
+      }
+      if (demoted.length > 0) {
+        console.log(`[EvidenceLibrary] ⚠️ negativeFocus demote (${cat}): ${demoted.length} images moved to back`);
+        library[cat] = [...kept, ...demoted];
+      }
+    }
+
+    // ★ storyWeight quota: cap จำนวนภาพต่อ category ตาม weight
+    if (hasStoryWeight) {
+      // หา weight ที่ตรงกับ category (match แบบ substring ไม่ sensitive)
+      const matchedKey = Object.keys(storyWeight).find(k =>
+        k !== '_comment' && (cat.includes(k) || k.includes(cat))
+      );
+      if (matchedKey) {
+        const weightPct = Number(storyWeight[matchedKey]) || 0;
+        const maxImages = Math.max(1, Math.round((weightPct / 100) * MAX_TOTAL));
+        if (library[cat].length > maxImages) {
+          console.log(`[EvidenceLibrary] 📊 storyWeight cap (${cat}): ${library[cat].length} → ${maxImages} (weight: ${weightPct}%)`);
+          library[cat] = library[cat].slice(0, maxImages);
+        }
+      }
+    }
+  }
+
+  // Recount after quota/demote
+  totalCount = Object.values(library).reduce((sum, imgs) => sum + (imgs?.length || 0), 0);
+
   // Log summary
   const catSummary = Object.entries(library)
     .map(([cat, imgs]) => `${cat}:${imgs.length}`)

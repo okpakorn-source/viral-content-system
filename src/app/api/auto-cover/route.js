@@ -1075,7 +1075,24 @@ Give LOW score (1-4) to images that:
 - ต้องมี entry ครบทุกภาพ (index 0 ถึง ${thumbnails.length - 1}) ห้ามข้ามภาพไหน!
 - ภาพ stock photo / studio / กราฟิก → relevance <= 2
 - ภาพที่ไม่ใช่คนในข่าว → relevance <= 2
-- ★★★ ภาพที่เป็นคนในข่าวแต่ไม่เกี่ยวกับเนื้อหาข่าว (ไลฟ์สไตล์/แฟชั่น/ท่องเที่ยว) → relevance <= 3`;
+- ★★★ ภาพที่เป็นคนในข่าวแต่ไม่เกี่ยวกับเนื้อหาข่าว (ไลฟ์สไตล์/แฟชั่น/ท่องเที่ยว) → relevance <= 3
+
+## ★★★ STORY WEIGHT SCORING (สำคัญที่สุด):
+
+ข่าวนี้มีน้ำหนักดังนี้:
+${JSON.stringify(identity?.coreStory?.storyWeight || {})}
+
+สิ่งที่ห้ามให้คะแนนสูง (negativeFocus):
+${(identity?.coreStory?.negativeFocus || []).join(', ') || 'ไม่มี'}
+
+กฎ STORY MATCH:
+- ภาพที่สะท้อน core story (relationship/sacrifice/caregiving) → score สูง (8-10)
+- ภาพที่สะท้อน context/occupation เท่านั้น → score ≤ 4 เสมอ
+- ภาพที่อยู่ใน negativeFocus เป็น dominant subject → score ≤ 2
+
+ถามตัวเองก่อนให้คะแนน:
+"ถ้าคนเห็นภาพนี้บน cover จะเข้าใจว่าข่าวนี้คือเรื่องอะไร?"
+ถ้าคำตอบไม่ตรงกับ core story → score ต้องต่ำ`;
 
     console.log(`[Curator] 🧠 Analyzing ${thumbnails.length} images against news content...`);
     

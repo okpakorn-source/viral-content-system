@@ -125,8 +125,33 @@ export async function analyzeStoryIdentity(newsTitle, breakdownData) {
     "hook": "1-3 คำ เช่น 'ช็อก!', 'ด่วน!', 'เศร้า'",
     "main": "4-8 คำ สรุปประเด็นหลัก",
     "punch": "2-4 คำ กระแทกอารมณ์"
+  },
+
+  "coreStory": {
+    "relationship": "ชื่อ/บทบาทตัวละครรองที่สำคัญที่สุด (เช่น แม่, ลูก, สามี)",
+    "sacrifice": "สิ่งที่ตัวเอกเสียสละ/ทำเพื่อ (เช่น ลาออกราชการ สูญเงิน 10 ล้าน) — null ถ้าไม่มี",
+    "emotionalHook": "ประโยคสั้นๆ 1 ประโยคที่ทำให้คนกดอ่าน (สะท้อนแก่นข่าวจริง)",
+    "storyWeight": {
+      "_comment": "น้ำหนักของแต่ละ element ในข่าว รวมกัน = 100 — กฎ: occupation/work/location ต้องไม่เกิน 20 เสมอ"
+    },
+    "negativeFocus": [
+      "สิ่งที่ห้ามใช้เป็น dominant cover element แม้ปรากฏในข่าว (เช่น 'elephant as main subject', 'veterinary work as dominant')"
+    ],
+    "contextOnly": ["คำ/บริบทที่เป็นแค่ background ไม่ใช่แก่นข่าว"]
   }
-}`;
+}
+
+★★★ coreStory RULES:
+- relationship: ใส่ชื่อ/บทบาทของตัวละครรองที่ข่าวพูดถึงมากที่สุด
+- sacrifice: สิ่งที่ตัวเอกเสียสละจริงๆ ในข่าวนี้ (ถ้าไม่มีให้ใส่ null)
+- emotionalHook: ประโยคสั้น 1 ประโยคที่จับใจความแก่นข่าว
+- storyWeight: ให้น้ำหนัก % แก่แต่ละ element โดย:
+  * อาชีพ/งาน/สถานที่ทำงาน = ห้ามเกิน 20% เสมอ
+  * ความสัมพันธ์หลัก (แม่/ลูก/สามี) ต้องมีน้ำหนักสูงที่สุดถ้าข่าวพูดถึง
+  * ตัวอย่างข่าวหมอโบว์: { "mother_care": 45, "caregiving": 30, "sacrifice": 15, "vet_work": 10 }
+- negativeFocus: สิ่งที่ไม่ใช่แก่นข่าว แต่อาจ dominate cover ได้ถ้าไม่ระวัง
+  ตัวอย่าง: ข่าวหมอโบว์ → "elephant", "vet work", "animal treatment" ควรอยู่ใน negativeFocus
+- contextOnly: คำ/บริบทที่เป็นแค่ background (เช่น ชื่อโรงพยาบาลที่ทำงาน)`;
 
     // ★ Retry: ถ้า 503 → รอ 2 วิ แล้วลองใหม่
     let lastError;
