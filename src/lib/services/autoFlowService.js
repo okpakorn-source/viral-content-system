@@ -225,7 +225,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     // Task 2: Smart Research
     withTimeout(
       smartResearch(newsData, breakdownData),
-      30000,
+      60000,  // ★ 60s (was 30s) — เพิ่มเป็น 2× เพราะ SmartResearch มี 2 AI calls + 7 Serper HTTP calls
       'smart_research'
     ).catch(() => null),
   ]);

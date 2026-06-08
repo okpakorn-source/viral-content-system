@@ -53,9 +53,10 @@ async function _rawSerperSearch(query, num = 5) {
   const headers = { 'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json' };
   const body = JSON.stringify({ q: query, gl: 'th', hl: 'th', num });
 
+  const serperSignal = AbortSignal.timeout(8000); // ★ 8s guard — ป้องกัน Serper ค้างใน generate-per-angle step
   const [resOrg, resNews] = await Promise.all([
-    fetch('https://google.serper.dev/search', { method: 'POST', headers, body }),
-    fetch('https://google.serper.dev/news', { method: 'POST', headers, body })
+    fetch('https://google.serper.dev/search', { method: 'POST', headers, body, signal: serperSignal }),
+    fetch('https://google.serper.dev/news', { method: 'POST', headers, body, signal: serperSignal })
   ]);
 
   if (!resOrg.ok && !resNews.ok) throw new Error('Serper HTTP Error');

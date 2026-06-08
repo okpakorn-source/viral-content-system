@@ -55,6 +55,7 @@ async function quickSearch(query, num = 3) {
         method: 'POST',
         headers: { 'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json' },
         body: JSON.stringify({ q: query, gl: 'th', hl: 'th', num }),
+        signal: AbortSignal.timeout(5000),  // ★ 5s per Serper call — ป้องกัน Serper ช้ากิน SmartResearch budget
       });
       if (res.ok) {
         const data = await res.json();
