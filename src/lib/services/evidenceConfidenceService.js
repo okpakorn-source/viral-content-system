@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Evidence Confidence Service
  * ใช้ Gemini Vision ตรวจว่าภาพใน relationship slots มีบุคคลที่ถูกต้องจริงไหม
  * เรียกเฉพาะ relationship/circle slots เท่านั้น (ไม่ใช้กับทุกภาพ — ประหยัด API cost)

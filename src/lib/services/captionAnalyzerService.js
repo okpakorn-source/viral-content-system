@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Caption Analyzer Service
  * วิเคราะห์ title + snippet ของภาพจาก Serper → ตรวจว่าภาพตรงกับ expectedRole ไหม
  * ใช้ Gemini Flash (text-only, ไม่ใช่ Vision → เบากว่า + เร็วกว่ามาก)

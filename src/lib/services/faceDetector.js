@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Face Detector + Smart Crop Service
  * 
  * ตรวจจับหน้าคนในภาพ → return coordinates สำหรับ smart crop

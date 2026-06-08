@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Cover Planner Service
  * วางแผน Layout + กำหนดว่าต้องการภาพอะไรใน slot ไหน
  * Input: resolvedRelationships, templateId, identity

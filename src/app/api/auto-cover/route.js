@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Auto Cover API Route — /api/auto-cover
  * 
  * POST: Generate cover image automatically from content

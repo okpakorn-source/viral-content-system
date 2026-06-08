@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { getSession, getMembers, updateMember, deleteMember, register } from '@/lib/auth';
 import { cookies } from 'next/headers';
 
@@ -17,7 +17,7 @@ async function requireAdmin() {
 export async function GET() {
   try {
     const session = await requireAdmin();
-    if (!session) return NextResponse.json({ success: false, error: '???????????' }, { status: 403 });
+    if (!session) return NextResponse.json({ success: false, error: 'ไม่มีสิทธิ์' }, { status: 403 });
     const members = await getMembers();
     return NextResponse.json({ success: true, members });
   } catch (error) {
@@ -28,7 +28,7 @@ export async function GET() {
 export async function POST(request) {
   try {
     const session = await requireAdmin();
-    if (!session) return NextResponse.json({ success: false, error: '???????????' }, { status: 403 });
+    if (!session) return NextResponse.json({ success: false, error: 'ไม่มีสิทธิ์' }, { status: 403 });
 
     const body = await request.json();
 
@@ -38,7 +38,7 @@ export async function POST(request) {
         password: body.password,
         displayName: body.displayName,
         role: body.role || 'editor',
-        avatar: body.avatar || '??',
+        avatar: body.avatar || '👤',
         nickname: body.nickname || '',
       });
       return NextResponse.json(result);

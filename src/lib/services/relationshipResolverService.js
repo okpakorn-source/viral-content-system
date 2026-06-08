@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Relationship Resolver Service
  * วิเคราะห์ว่าในข่าวนี้มีตัวละครสำคัญคนไหนบ้าง + role ของแต่ละคน
  * Input: identity (จาก storyIdentity), newsBody

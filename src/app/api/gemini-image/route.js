@@ -45,7 +45,7 @@ async function planLayout(prompt, numPhotos) {
   const genAI = new GoogleGenerativeAI(apiKey);
 
   const fullSystemPrompt = SYSTEM_PROMPT + `\n\nจำนวนรูปที่อัปโหลด: ${numPhotos} รูป`;
-  const modelsToTry = ['gemini-2.5-pro', 'gemini-2.5-flash'];
+  const modelsToTry = ['gemini-2.5-pro', 'gemini-2.0-flash'];
   const maxRetries = 2;
 
   let lastError = '';
