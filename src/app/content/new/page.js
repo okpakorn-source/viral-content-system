@@ -197,7 +197,12 @@ function NewContentPageInner() {
       await new Promise(r => setTimeout(r, 3000)); // poll every 3s
 
       try {
-        const statusRes = await fetch(`/api/queue/status?id=${jobId}`);
+        // ★ cache:'no-store' + AbortSignal.timeout — แยก signal ออกจาก React lifecycle
+        // ป้องกัน React concurrent re-render abort ทำให้ poll ตาย
+        const statusRes = await fetch(`/api/queue/status?id=${jobId}`, {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(8000), // 8s per poll — independent from React
+        });
         const statusData = await statusRes.json();
 
         if (!statusData.success) {
@@ -223,7 +228,7 @@ function NewContentPageInner() {
         if (statusData.status === 'pending' && (Date.now() - startTime > 10000) && workerRetriggerCount < 3) {
           workerRetriggerCount++;
           console.log(`[Queue] Job still pending, re-triggering worker (attempt ${workerRetriggerCount})`);
-          fetch('/api/queue/worker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trigger: 'retry' }) }).catch(() => {});
+          fetch('/api/queue/worker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trigger: 'retry' }), cache: 'no-store' }).catch(() => {});
         }
 
         if (statusData.status === 'pending') {
@@ -239,6 +244,11 @@ function NewContentPageInner() {
           throw new Error(statusData.error || 'คิวประมวลผลไม่สำเร็จ');
         }
       } catch (pollErr) {
+        // ★ AbortError/TimeoutError = React lifecycle หรือ 8s timeout → retry ทันที
+        if (pollErr.name === 'AbortError' || pollErr.name === 'TimeoutError') {
+          console.warn(`[Queue] Poll ${pollErr.name} — retrying...`);
+          continue; // ไม่นับเป็น error จริง — retry loop
+        }
         if (pollErr.message?.includes('คิวประมวลผลไม่สำเร็จ')) throw pollErr;
         console.warn('[Queue] Poll error:', pollErr.message);
       }
