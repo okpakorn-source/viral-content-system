@@ -296,6 +296,26 @@ export async function POST(request) {
           evidencePoolTotal = evLib.totalCount || 0;
           evidencePool = evLib._raw || {};
           console.log(`[AutoCover] 📚 Evidence Library: ${evidencePoolTotal} images across ${Object.keys(evidencePool).length} categories`);
+
+          // ★ v3 Step 1.9: Event Resolver — fallback เมื่อ entity ไม่พบ Social Profile
+          if (!entityData?.found && evidencePoolTotal === 0) {
+            console.log('[AutoCover] 🌐 Step 1.9: Event Resolver fallback (no entity profile found)...');
+            try {
+              const { resolveEvent } = await import('@/lib/services/eventResolverService');
+              const eventResult = await resolveEvent(identity);
+              if (eventResult.eventImages && eventResult.eventImages.length > 0) {
+                // inject event images เข้า evidencePool ใน category 'event'
+                evidencePool['event'] = eventResult.eventImages;
+                evidencePoolTotal += eventResult.eventImages.length;
+                console.log(`[AutoCover] 🌐 Event Resolver: ${eventResult.eventImages.length} images added`);
+              } else if (eventResult.warning) {
+                console.log(`[AutoCover] ⚠️ Event Resolver: ${eventResult.warning}`);
+              }
+            } catch (evtErr) {
+              console.warn('[AutoCover] Event Resolver failed (non-critical):', evtErr.message);
+            }
+          }
+
           return evLib;
         } catch (evErr) {
           console.error('[AutoCover] Evidence pipeline failed (non-critical):', evErr.message);
@@ -315,9 +335,6 @@ export async function POST(request) {
     // ═══════════════════════════════════════════════════════
     const entityFirstImages = [];
     if (evidencePoolTotal > 0) {
-      // แปลง evidencePool → format เดียวกับ bestImages (จาก multiAgent Judge)
-      // evidencePool[category] = [{imageUrl, query, category, entityName, ...}]
-      // bestImages format: [{url, role, score}]
       const catToRole = {
         hero: 'HERO_FACE',
         mother: 'RELATIONSHIP', father: 'RELATIONSHIP', sibling: 'RELATIONSHIP',
@@ -326,20 +343,46 @@ export async function POST(request) {
         interview: 'PERSON_SUPPORT',
         location: 'CONTEXT_SCENE', evidence: 'EVIDENCE',
         relationship: 'RELATIONSHIP', family: 'RELATIONSHIP',
+        event: 'CONTEXT_SCENE', // ★ v3: event images จาก eventResolverService
       };
+
+      const RELATIONSHIP_CATS = new Set(['mother', 'father', 'spouse', 'partner', 'child', 'sibling', 'friend']);
+      const heroNameForConfidence = resolvedRelationships?.hero?.name || identity?.mainCharacter || '';
+      const { filterRelationshipImages } = await import('@/lib/services/evidenceConfidenceService').catch(() => ({ filterRelationshipImages: null }));
 
       for (const [cat, imgs] of Object.entries(evidencePool)) {
         const role = catToRole[cat] || 'PERSON_SUPPORT';
-        for (const img of (imgs || [])) {
-          if (img.imageUrl) {
-            entityFirstImages.push({
-              url: img.imageUrl,
-              role,
-              score: cat === 'hero' ? 9 : 7, // entity-first images ได้ score สูงกว่า
-              source: 'entity_first',
-              evidenceCat: cat,
-            });
+        let catImgs = (imgs || []).filter(img => img.imageUrl);
+
+        // ★ v3: กรอง relationship images ด้วย Evidence Confidence (เฉพาะ high-importance)
+        if (RELATIONSHIP_CATS.has(cat) && filterRelationshipImages && catImgs.length > 0) {
+          try {
+            // ตรวจแค่ 3 ภาพแรกต่อ category เพื่อประหยัด API
+            const toCheck = catImgs.slice(0, 3);
+            const passed = await filterRelationshipImages(toCheck, heroNameForConfidence);
+            const passedUrls = new Set(passed.map(p => p.imageUrl || p.url));
+            const passedCount = toCheck.filter(img => passedUrls.has(img.imageUrl)).length;
+            console.log(`[AutoCover] 🔬 Confidence filter (${cat}): ${passedCount}/${toCheck.length} passed`);
+            // ถ้าไม่ผ่าน → ใช้ hero category แทน slot นั้น (fallback)
+            if (passedCount === 0 && toCheck.length > 0) {
+              console.log(`[AutoCover] ⚠️ Confidence: all ${cat} images failed → using hero fallback for this slot`);
+              catImgs = []; // skip — hero fallback จะถูกเลือกโดย assignImagesToSlots
+            } else {
+              catImgs = catImgs.filter(img => passedUrls.has(img.imageUrl) || !toCheck.find(t => t.imageUrl === img.imageUrl));
+            }
+          } catch (cfErr) {
+            console.warn(`[AutoCover] Confidence filter error (${cat}):`, cfErr.message);
           }
+        }
+
+        for (const img of catImgs) {
+          entityFirstImages.push({
+            url: img.imageUrl,
+            role,
+            score: cat === 'hero' ? 9 : 7,
+            source: 'entity_first',
+            evidenceCat: cat,
+          });
         }
       }
       console.log(`[AutoCover] 🔀 Step 2.5: Merged ${entityFirstImages.length} entity-first + ${multiAgentImages.length} multiAgent images`);

@@ -2,7 +2,9 @@
  * Cover Planner Service
  * วางแผน Layout + กำหนดว่าต้องการภาพอะไรใน slot ไหน
  * Input: resolvedRelationships, templateId, identity
- * Output: { layout, slots: [{slotId, role, evidenceCategory, description}] }
+ * Output: { layout, slots: [{slotId, role, evidenceCategory, description}], dna }
+ *
+ * v3: เรียก coverDNAService ก่อนเพื่อ recommend template ตาม story type
  */
 
 const PLANNER_TIMEOUT_MS = 8000;
@@ -113,6 +115,22 @@ function buildFallbackPlan(templateId, templateSpec, resolvedRelationships, iden
  * @returns {{ layout, slots, source }}
  */
 export async function planCoverLayout(resolvedRelationships, templateId, identity) {
+  // ★ v3: Cover DNA — ดู story type ก่อน → อาจ override templateId
+  let dnaResult = null;
+  try {
+    const { matchCoverDNA } = await import('@/lib/services/coverDNAService');
+    dnaResult = matchCoverDNA(identity);
+    // ถ้า DNA recommend template ที่ชัดเจน (ไม่ใช่ null) → ใช้ แทน templateId ที่ส่งมา
+    if (dnaResult.recommendedTemplate && templateId === 'auto') {
+      console.log(`[CoverPlanner] 🧬 DNA override: ${templateId} → ${dnaResult.recommendedTemplate} (${dnaResult.storyType})`);
+      templateId = dnaResult.recommendedTemplate;
+    } else if (dnaResult.recommendedTemplate) {
+      console.log(`[CoverPlanner] 🧬 DNA suggestion: ${dnaResult.recommendedTemplate} (${dnaResult.storyType}) — using provided: ${templateId}`);
+    }
+  } catch (dnaErr) {
+    console.warn('[CoverPlanner] CoverDNA error (non-critical):', dnaErr.message);
+  }
+
   // อ่าน template spec
   let templateSpec = null;
   try {
@@ -217,9 +235,12 @@ Evidence categories ที่มีภาพอยู่: ${catList}
       layout: templateId,
       slots: parsedSlots,
       source: 'gemini',
+      dna: dnaResult,
     };
   } catch (e) {
     console.warn(`[CoverPlanner] Gemini failed (${e.message?.slice(0, 60)}) → fallback`);
-    return buildFallbackPlan(templateId, templateSpec, resolvedRelationships, identity);
+    const fp = buildFallbackPlan(templateId, templateSpec, resolvedRelationships, identity);
+    fp.dna = dnaResult;
+    return fp;
   }
 }
