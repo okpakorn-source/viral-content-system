@@ -173,65 +173,67 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   await logPipeline({ workflowId: _autoWorkflowId, step: 'breakdown', status: 'success', duration: Date.now() - step3Start, detail: (breakdownData.key_points?.length || 0) + ' key points' }).catch(() => {});
 
   // ===================================================================
-  // === PRE-GENERATE: GLOBAL BLUEPRINT ===
+  // === PRE-GENERATE: BLUEPRINT + SMART RESEARCH (★ PARALLEL!)
   // ===================================================================
   const stepParallelStart = Date.now();
 
-  rlog.divider('PRE-GENERATE: GLOBAL BLUEPRINT');
-  addLog('Parallel', '🚀 เริ่มต้นวิเคราะห์โครงสร้างอารมณ์ (Blueprint)...');
+  rlog.divider('PRE-GENERATE: BLUEPRINT + SMART RESEARCH (PARALLEL)');
+  addLog('Parallel', '🚀 Blueprint + SmartResearch ทำงานพร้อมกัน...');
   
-  const bpResult = await withTimeout(performSummarize({
-    text: newsData.newsBody,
-    newsTitle: newsData.newsTitle,
-    mode: 'blueprint',
-    breakdownData,
-    workflowId: _autoWorkflowId,
-    user: _user,
-  }), 75000, 'blueprint').catch(() => null); // ★ 75s — GPT-5.5 needs more time
+  // ★ ทำ 2 งานพร้อมกัน แทนที่จะรอทีละตัว (ประหยัด 30-60 วินาที!)
+  const [bpSettled, srSettled] = await Promise.allSettled([
+    // Task 1: Blueprint
+    withTimeout(performSummarize({
+      text: newsData.newsBody,
+      newsTitle: newsData.newsTitle,
+      mode: 'blueprint',
+      breakdownData,
+      workflowId: _autoWorkflowId,
+      user: _user,
+    }), 120000, 'blueprint').catch(() => null), // ★ 120s — GPT-5.5 needs more time
+    
+    // Task 2: Smart Research
+    withTimeout(
+      smartResearch(newsData, breakdownData),
+      30000,
+      'smart_research'
+    ).catch(() => null),
+  ]);
 
+  // Extract Blueprint result
+  const bpResult = bpSettled.status === 'fulfilled' ? bpSettled.value : null;
   const blueprint = bpResult?.success ? bpResult.data?.blueprint : null;
   addLog('Enhanced', `Blueprint: ${blueprint ? blueprint.core_emotion : '❌'}`);
 
-  // ===================================================================
-  // === SMART RESEARCH: 6-Agent Fact Pool ===
-  // ===================================================================
+  // Extract SmartResearch result
   let factPool = null;
-  try {
-    rlog.divider('SMART RESEARCH: 6-AGENT FACT POOL');
-    addLog('SmartResearch', '🧠 เริ่มค้นหาข้อมูลเชิงลึก 6 มุม...');
-    factPool = await withTimeout(
-      smartResearch(newsData, breakdownData),
-      20000,
-      'smart_research'
-    ).catch(() => null);
-    if (factPool && factPool.facts?.length > 0) {
-      addLog('SmartResearch', `✅ พบ ${factPool.facts.length} ข้อเท็จจริงเกี่ยวกับ "${factPool.entityName || '?'}" (${factPool.duration || '?'}s)`);
-      await logPipeline({ workflowId: _autoWorkflowId, step: 'smart-research', status: 'success', duration: (factPool.duration || 0) * 1000, detail: `${factPool.facts.length} facts for "${factPool.entityName}"` }).catch(() => {});
-    } else {
-      addLog('SmartResearch', '⚠️ ไม่พบข้อมูลเพียงพอ — ใช้ flow เดิม');
-      factPool = null;
-    }
-  } catch (smartErr) {
-    addLog('SmartResearch', `⚠️ Smart Research ข้ามไป: ${smartErr.message}`);
-    factPool = null;
+  const srResult = srSettled.status === 'fulfilled' ? srSettled.value : null;
+  if (srResult && srResult.facts?.length > 0) {
+    factPool = srResult;
+    addLog('SmartResearch', `✅ พบ ${factPool.facts.length} ข้อเท็จจริงเกี่ยวกับ "${factPool.entityName || '?'}" (${factPool.duration || '?'}s)`);
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'smart-research', status: 'success', duration: (factPool.duration || 0) * 1000, detail: `${factPool.facts.length} facts for "${factPool.entityName}"` }).catch(() => {});
+  } else {
+    addLog('SmartResearch', '⚠️ ไม่พบข้อมูลเพียงพอ — ใช้ flow เดิม');
   }
+  
+  addLog('Parallel', `⏱️ Blueprint+Research เสร็จใน ${((Date.now() - stepParallelStart) / 1000).toFixed(1)}s (แทนที่จะ ~90s sequential)`);
 
   // ===================================================================
   // === MULTI-ANGLE PARALLEL PIPELINE ===
   // ===================================================================
   rlog.divider('MULTI-ANGLE PARALLEL PIPELINE');
   
-  const anglesToUse = breakdownData.possible_angles?.slice(0, 4) || [];
+  // ★ max 2 angles — ป้องกัน rate limit
+  const anglesToUse = breakdownData.possible_angles?.slice(0, 2) || [];
   if (anglesToUse.length === 0) {
     anglesToUse.push({ angle_name: 'นำเสนอข่าวสารทั่วไป', description: 'เล่าเหตุการณ์ตามจริง' });
   }
 
-  // Calculate target counts. Total = 7.
-  const totalVersions = 7;
-  const baseCount = Math.floor(totalVersions / anglesToUse.length);
-  let remainder = totalVersions % anglesToUse.length;
+  // ★ 4 total versions: 2 per angle (เดิม 7 versions / 4 angles → ช้าเกิน)
+  const totalVersions = 4;
+  const versionsPerAngle = 2;
   
-  addLog('Parallel', `🚀 แยกทำงานขนาน ${anglesToUse.length} มุมมอง (เป้าหมายรวม 7 เวอร์ชัน)...`);
+  addLog('Generate', `🚀 ${anglesToUse.length} มุมมอง × ${versionsPerAngle} เวอร์ชัน = รวม ${totalVersions} เวอร์ชัน (parallel — ทุก angle ทำงานพร้อมกัน)...`);
 
   // === PRE-SELECT: เลือก prompt ล่วงหน้าทุก angle (sequential — ป้องกันซ้ำ) ===
   // ★ BUG FIX: Cache AI analysis + prompt lib จาก angle แรก → ใช้ซ้ำทุก angle
@@ -269,7 +271,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // === PARALLEL GENERATE: สร้างเนื้อหาขนานด้วย prompt ที่เลือกไว้แล้ว ===
   const generationTasks = anglesToUse.map((angleObj, index) => {
     return withTimeout((async () => {
-      const count = baseCount + (index < remainder ? 1 : 0);
+      const count = versionsPerAngle;
       const focusAngle = `${angleObj.angle_name}: ${angleObj.description}`;
       
       // 1. Research for this angle
