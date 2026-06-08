@@ -718,11 +718,16 @@ ${sourceUrlMap}
 → ภาพตัวเอก (${mainChar}) แต่ไม่มี story subject → score ≤ 4
 → ห้ามให้ score สูงกับภาพ glamour/fashion/celebrity portrait ที่ไม่เกี่ยวข่าว!
 
-⛔⛔⛔ STORY FORBIDDEN — SCORE = 0 ทันที ⛔⛔⛔
-สิ่งต่อไปนี้ห้ามใช้เป็น dominant visual ในข่าวนี้:
+⛔⛔⛔ FORBIDDEN — ZERO TOLERANCE — SCORE = 0 ทันที ⛔⛔⛔
+รายการต่อไปนี้ถ้าปรากฏในภาพ ไม่ว่าจะเป็นแค่ฉากหลัง หรือเล็กน้อยเพียงใด → score = 0, role = REJECT ทันที:
 ${(identity?.coreStory?.negativeFocus || []).map(f => `- ${f}`).join('\n') || '- (ไม่มี negativeFocus)'}
-- ถ้าภาพมี element เหล่านี้เป็นใจกลาง (>30% ของภาพ) → score = 0, role = REJECT
-- ยกเว้น: ปรากฏในภาพแต่ไม่ใช่ main subject → ลด score 3 คะแนน (ยังใช้ได้ถ้าจำเป็น)
+★ ไม่มีข้อยกเว้น! แม้ปรากฏเพียง 5% ของภาพ → REJECT!
+★ ห้ามให้ score > 0 กับภาพที่มี forbidden element แม้แต่รูปเดียว!
+
+⛔ GLAMOUR REJECT — ห้ามเด็ดขาด:
+- ภาพ ${mainChar} แต่งตัวสวย/red carpet/fashion/งานอีเวนต์ ที่ไม่เกี่ยวกับข่าวนี้เลย → score = 1 (ใช้เป็น fallback สุดท้ายเท่านั้น)
+- ภาพ portrait สวยๆ ของ ${mainChar} คนเดียว ไม่มี story subject → score ≤ 3
+- ถ้า storySubject = "${identity?._storySubject || identity?.coreStory?.relationship || 'อื่นๆ'}" แต่ภาพไม่มี storySubject เลย → score ≤ 3
 
 ✅ ภาพที่ได้ score สูงสำหรับข่าวนี้ (8-10):
 - ภาพ ${mainChar} กับ ${identity?.coreStory?.relationship || 'ตัวละครรอง'} (แม่-ลูก, การดูแล, อ้อมกอด)
@@ -816,13 +821,14 @@ ${(identity?.coreStory?.negativeFocus || []).map(f => `- ${f}`).join('\n') || '-
     - โฆษณาครีม / สกินแคร์ / คลินิกความงาม / โฆษณาสินค้า
     - before-after ผิว / สิว / ศัลยกรรม
     - ภาพที่มีชื่อสินค้า/แบรนด์เด่น
-4. ★★★ มี "text แต่งเติม" (designed text) ซ้อนทับภาพ → REJECT:
-   - headline ข่าว / หัวข้อข่าวซ้อนทับด้วย font สี
-   - subtitle / lower-third / caption bar
-   - text banner สี / แถบข้อความ / กราฟิกข่าว
-   - ชื่อรายการ / โลโก้ข่าว / โลโก้ช่อง ขนาดใหญ่
-   - ปกข่าว / ปกคลิป / YouTube thumbnail ที่มี text ออกแบบ
-   - ลายน้ำ (watermark) ขนาดใหญ่กลางภาพ
+4. ★★★★★ มี "text แต่งเติม" หรือ "กราฟิกข่าว" → REJECT ทันที score=0:
+   - ภาพที่มีแถบสีใดๆ วางทับภาพ (สีเขียว/แดง/ส้ม/น้ำเงิน) + ข้อความภาษาไทย → REJECT!
+   - headline ข่าว / หัวข้อข่าวซ้อนทับด้วย font สี → REJECT!
+   - ปกข่าว / ปกคลิป / YouTube thumbnail มี text → REJECT!
+   - lower-third / caption bar / แถบชื่อรายการ → REJECT!
+   - ลายน้ำ (watermark) ขนาดใหญ่ / ตรงกลาง → REJECT!
+   - ภาพที่ดูเหมือน "collage ปกข่าว" ที่มีกราฟิกซ้อน → REJECT!
+   ★★★ กฎนี้เด็ดขาด ไม่มีข้อยกเว้น แม้ภาพจะมี ${mainChar} อยู่ก็ตาม!
    - ข้อความโฆษณา / promotion / แบนเนอร์
 5. เป็น designed cover / thumbnail / collage / ปกคลิป
 6. Screenshot จอทีวี / screenshot ข่าว (มีกรอบรายการ, logo ช่อง)
