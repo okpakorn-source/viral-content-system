@@ -109,7 +109,7 @@ function NewContentPageInner() {
   }, [searchParams]);
 
   // === Auto-save เข้าคลังข่าว ===
-  const autoSaveToArchive = useCallback(async (newsDataArg, breakdownDataArg) => {
+  const autoSaveToArchive = useCallback(async (newsDataArg, breakdownDataArg, coverBase64Arg) => {
     if (archiveSaved) return;
     try {
       const res = await fetch('/api/news-archive', {
@@ -123,6 +123,7 @@ function NewContentPageInner() {
           breakdownData: breakdownDataArg || null,
           workflowId,
           archivedBy: 'auto',
+          coverImage: coverBase64Arg || null,
         }),
       });
       const data = await res.json();
@@ -457,7 +458,8 @@ function NewContentPageInner() {
       setStep('analyzed');
       setAutoProgress('');
       // 📦 Auto-save เข้าคลังข่าว
-      autoSaveToArchive(data.data.newsData, data.data.breakdownData).catch((e) => console.warn('[Archive] Auto-save failed:', e.message));
+      const coverBase64 = data.data?.autoCoverResult?.success ? data.data.autoCoverResult.base64 : null;
+      autoSaveToArchive(data.data.newsData, data.data.breakdownData, coverBase64).catch((e) => console.warn('[Archive] Auto-save failed:', e.message));
     } catch (err) {
       const failStep = err.failedStep || 'auto_scrape';
       wfFail(failStep, err.message);
@@ -610,7 +612,8 @@ function NewContentPageInner() {
       const sourceUrl = data.newsData?.sourceUrl || data.normalized?.title && data.detection?.primaryUrl;
       if (sourceUrl) setUrl(sourceUrl);
 
-      autoSaveToArchive(data.newsData || data.data?.newsData, data.breakdownData || data.data?.breakdownData).catch((e) => console.warn('[Archive] Auto-save failed:', e.message));
+      const coverBase64 = data.autoCoverResult?.success ? data.autoCoverResult.base64 : null;
+      autoSaveToArchive(data.newsData || data.data?.newsData, data.breakdownData || data.data?.breakdownData, coverBase64).catch((e) => console.warn('[Archive] Auto-save failed:', e.message));
       if (data.simulatedComments?.length > 0) {
         setSimulatedComments(data.simulatedComments);
       }

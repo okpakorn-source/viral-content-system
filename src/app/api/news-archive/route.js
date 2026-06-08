@@ -85,7 +85,7 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { title, newsBody, sourceUrl, sourceType, breakdownData, workflowId, archivedBy } = body;
+    const { title, newsBody, sourceUrl, sourceType, breakdownData, workflowId, archivedBy, coverImage } = body;
 
     if (!title && !newsBody) {
       return NextResponse.json({ success: false, error: 'ต้องมี title หรือ newsBody' }, { status: 400 });
@@ -155,6 +155,7 @@ export async function POST(request) {
       archived_by: archivedBy || 'system',
       archived_at: now,
       workflow_id: workflowId || null,
+      cover_image: coverImage || null,
       createdAt: now,
       updatedAt: now,
     };
