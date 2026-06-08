@@ -226,6 +226,38 @@ export async function POST(request) {
       identity._newsTitle = newsTitle || '';
     }
 
+    // ════════════════════════════════════════════════════════
+    // ★ PROGRAMMATIC QUERY OVERRIDE (ROOT FIX)
+    // ไม่ได้พึ่ง AI ทำตาม schema — override ตาม celebratedAction จริงๆ
+    // ถ้า occupationImportance < 0.3 → ข่าวนี้ไม่ได้เกี่ยวอาชีพ
+    // force key_activity = hero + celebratedAction
+    // ════════════════════════════════════════════════════════
+    {
+      const cs = identity?.coreStory || {};
+      const celebratedAction = cs.celebratedAction;
+      const occupationImportance = cs.occupationImportance ?? 1.0;
+      const relationship = cs.relationship;
+      const hero = identity?.mainCharacter || '';
+
+      if (celebratedAction && occupationImportance < 0.3 && hero && identity?.searchQueries) {
+        const sq = identity.searchQueries;
+        const prevKeyActivity = sq.key_activity;
+        const prevPersonContext = sq.person_context;
+        sq.key_activity     = `${hero} ${celebratedAction}`.trim();
+        sq.key_relationship = relationship ? `${hero} ${relationship}`.trim() : `${hero} ครอบครัว`;
+        sq.person_context   = relationship ? `${hero} ${relationship}`.trim() : `${hero} ${celebratedAction}`.trim();
+        sq.event_scene      = `${hero} ${celebratedAction}`.trim();
+        identity.searchGoogle = `${hero} ${celebratedAction}`.trim().substring(0, 80);
+        console.log(`[AutoCover] ★ QUERY OVERRIDE (occupationImportance=${occupationImportance})`);
+        console.log(`  key_activity:     "${prevKeyActivity}" -> "${sq.key_activity}"`);
+        console.log(`  person_context:   "${prevPersonContext}" -> "${sq.person_context}"`);
+        console.log(`  key_relationship: "${sq.key_relationship}"`);
+        console.log(`  searchGoogle:     "${identity.searchGoogle}"`);
+      } else {
+        console.log(`[AutoCover] No override: celebratedAction="${celebratedAction || 'N/A'}", occImportance=${occupationImportance}`);
+      }
+    }
+
     // ═══════════════════════════════════════════════════════
     // Step 1.5: Entity Resolver — ค้นหา Social Profile ของตัวละครหลัก
     // ═══════════════════════════════════════════════════════
