@@ -51,7 +51,7 @@ export async function POST(req) {
         
         // AbortController: timeout before Vercel's maxDuration (300s) kills the function
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 280_000); // 280s safety margin
+        const timeout = setTimeout(() => controller.abort(), 295_000); // 295s safety margin (Vercel limit = 300s)
         
         const res = await fetch(`${baseUrl}/api/auto/process`, {
           method: 'POST',

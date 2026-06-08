@@ -243,7 +243,7 @@ async function processNewsJob(job) {
     // 2. Poll for result
     const statusUrl = queueUrl.replace('/api/queue/add', '/api/queue/status');
     const workerUrl = queueUrl.replace('/api/queue/add', '/api/queue/worker');
-    const maxPollTime = 6 * 60 * 1000; // 6 minutes
+    const maxPollTime = 10 * 60 * 1000; // 10 minutes (pipeline ~5.5min + queue wait)
     const pollStartTime = Date.now();
     let lastStatus = '';
     let data = null;
@@ -319,7 +319,7 @@ async function processNewsJob(job) {
     }
 
     if (!data) {
-      throw new Error('หมดเวลารอคิว (6 นาที) กรุณาลองใหม่');
+      throw new Error('หมดเวลารอคิว (10 นาที) กรุณาลองใหม่');
     }
 
     if (!data.success) {
