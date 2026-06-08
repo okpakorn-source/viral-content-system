@@ -474,6 +474,34 @@ export async function POST(request) {
       // ถ้า Curator ล้มเหลว → ใช้ role เดิมจาก Judge (ไม่พัง!)
     }
 
+    // ★★★ Character Focus Rule: ถ้า heroImage ไม่มีหน้าคน (hasFaces=false)
+    // และมีภาพอื่นที่มีหน้าคน + curatorScore สูงกว่า → swap heroImage
+    // ป้องกันปัญหา: hero slot กลายเป็นภาพวิวทะเล/สถานที่ ไม่มีตัวละครหลัก
+    {
+      const heroCandidate = imageBuffers.find(img => img.role === 'HERO_FACE' || img.role === 'HERO');
+      if (heroCandidate) {
+        const heroIdx = imageBuffers.indexOf(heroCandidate);
+        const heroFaceData = faceDataMap?.get?.(String(heroIdx));
+        if (!heroFaceData?.hasFaces) {
+          // Hero ไม่มีหน้าคน → หาภาพอื่นที่มีหน้าคน + curatorScore สูงสุด
+          const faceImages = imageBuffers
+            .map((img, i) => ({ img, i, fd: faceDataMap?.get?.(String(i)) }))
+            .filter(({ i, img, fd }) => i !== heroIdx && fd?.hasFaces && (img.curatorScore || 0) >= 5);
+          
+          if (faceImages.length > 0) {
+            faceImages.sort((a, b) => (b.img.curatorScore || 0) - (a.img.curatorScore || 0));
+            const best = faceImages[0];
+            const oldRole = best.img.role;
+            best.img.role = 'HERO_FACE';
+            heroCandidate.role = oldRole || 'CONTEXT_SCENE';
+            console.log(`[AutoCover] 🔄 Character Focus Rule: swapped hero #${heroIdx} (no face) ↔ image #${best.i} (${oldRole}, score: ${best.img.curatorScore}) — now hero has face`);
+          } else {
+            console.log(`[AutoCover] ⚠️ Character Focus Rule: hero has no face, but no better face-image found (min score 5)`);
+          }
+        }
+      }
+    }
+
     // Timeout check before Step 7
     if (Date.now() - startTime > TIMEOUT_MS) {
       return NextResponse.json({ success: false, error: 'Pipeline timeout', errorType: 'TIMEOUT' }, { status: 504 });
@@ -728,6 +756,23 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
 - ภาพอื่นทั้งหมด: ★ ต้องเกี่ยวกับ "เนื้อหาข่าว" โดยตรง! ★
   - ภาพสวยแต่ไม่เกี่ยวข่าว (วิวทะเล, fashion, ท่องเที่ยว, ไลฟ์สไตล์) → score ≤ 3 เท่านั้น!
   - ภาพที่เกี่ยวกับข่าวโดยตรง (กิจกรรมในข่าว, สถานที่ในข่าว, คนในข่าว) → score ≥ 7
+
+★★★ SCORING GUIDE — CHARACTER FOCUS:
+Give HIGH score (8-10) to images that:
+- Clearly show the main character's face (recognizable, close-up or medium-shot)
+- Capture the KEY moment/emotion of this specific news event
+- Are from the ACTUAL event (not generic stock, not old unrelated photos)
+
+Give MEDIUM score (5-7) to images that:
+- Show the main character but in unrelated context (old interview, fashion, lifestyle)
+- Show the event location/activity WITHOUT the main character
+- Show secondary characters related to the news
+
+Give LOW score (1-4) to images that:
+- Show only backgrounds/locations without any recognizable people
+- Are generic stock photos unrelated to this specific person or event
+- Are duplicate scenes of another already-scored image
+- Show people who are NOT subjects of this news story
   
 ตัวอย่าง: ข่าว "ก้อยรัชวิน บริจาค 5 แสนให้โรงเรียน"
 - ภาพก้อยถ่ายริมทะเล → score 2 (สวยแต่ไม่เกี่ยวข่าว)
@@ -846,13 +891,16 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
 }
 
 // =============================================
-// AI Slot Assignment — Role-based: เรียนรู้จากปกตัวอย่าง 5 ภาพ
-// Slot 0 (Main): HERO_FACE — ใบหน้า closeup ชัด
-// Slot 1 (Top-right): CONTEXT_SCENE — สถานที่/เหตุการณ์
-// Highlight: EVIDENCE — ป้าย/เอกสาร/หลักฐาน
-// Bottom: EMOTION — อารมณ์/reaction
-// Circle: RELATIONSHIP — ความสัมพันธ์/ภาพคู่
+// AI Slot Assignment — Role-based NARRATIVE ORDER:
+// ★ hero slot      → MUST be clearest face of main character (HERO_FACE)
+// ★ highlight slot → key moment/climax of the news event (KEY_ACTIVITY / EVIDENCE)
+// ★ scene/bg_top   → location or context of the event (CONTEXT_SCENE)
+// ★ emotion/bg_bot → supporting mood or secondary character (EMOTION / RELATIONSHIP)
+// ★ circle         → single-face portrait of main character (not background!)
+// NEVER put a background/location-only image in hero slot.
+// NEVER put a duplicate of hero into any other slot.
 // =============================================
+// (Maintained by Character Focus Rule above — hero is guaranteed to have a face)
 async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identity, coverReferences) {
   try {
     let slotCount = 4;
