@@ -6,7 +6,7 @@ const logger = createLogger('QUEUE_WORKER');
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300; // 5 minutes max
+export const maxDuration = 800; // 13 minutes max (pipeline ~8min + buffer)
 
 export async function POST(req) {
   try {
@@ -49,9 +49,10 @@ export async function POST(req) {
       try {
         logger.info(`[Queue Worker] ▶️ Starting job ${job.id.slice(0, 8)}`);
         
-        // AbortController: timeout before Vercel's maxDuration (300s) kills the function
+        // AbortController: pipeline ใช้เวลา ~480s — timeout ต้องมากกว่านั้น
+        // maxDuration=800 → ใช้ 720s (12 min) เป็น safety margin
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 295_000); // 295s safety margin (Vercel limit = 300s)
+        const timeout = setTimeout(() => controller.abort(), 720_000); // 720s = 12 min
         
         const res = await fetch(`${baseUrl}/api/auto/process`, {
           method: 'POST',
