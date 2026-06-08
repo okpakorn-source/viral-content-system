@@ -266,6 +266,26 @@ function NewContentPageInner() {
       wfComplete('auto_detect', `Source: ${domain}`);
       wfStart('auto_scrape', { api: '/api/auto', detail: 'กำลังส่งข้อมูลไป Auto Pipeline...' });
 
+      // === ตั้ง timer animate steps ระหว่าง polling (ให้ UI ไม่ค้าง) ===
+      const stepTimeline = [
+        { at: 8,  fn: () => { wfComplete('auto_scrape', 'ดึงเนื้อหาสำเร็จ'); wfStart('auto_extract', { api: 'Gemini Flash', detail: 'สกัดเนื้อข่าว...' }); } },
+        { at: 20, fn: () => { wfComplete('auto_extract', 'สกัดเนื้อข่าวสำเร็จ'); wfStart('auto_breakdown', { api: 'GPT-4o', detail: 'วิเคราะห์มุมข่าว...' }); } },
+        { at: 35, fn: () => { wfComplete('auto_breakdown', 'วิเคราะห์มุมข่าวสำเร็จ'); wfStart('auto_blueprint', { api: 'GPT-4o', detail: 'วาง Emotional Architecture...' }); } },
+        { at: 50, fn: () => { wfComplete('auto_blueprint', 'วาง Blueprint สำเร็จ'); wfStart('auto_research', { api: 'Serper API', detail: 'ค้นหาข้อมูลจริงจาก Google...' }); } },
+        { at: 65, fn: () => { wfComplete('auto_research', 'ค้นหาข้อมูลสำเร็จ'); wfStart('auto_classic', { api: 'Claude', detail: 'Multi-Angle prompts...' }); } },
+        { at: 100, fn: () => { wfComplete('auto_classic', 'สร้าง Classic สำเร็จ'); wfStart('auto_enhanced', { api: 'Claude', detail: 'Enhanced + Blueprint...' }); } },
+      ];
+      const animateStart = Date.now();
+      let animateIdx = 0;
+      const animateTimer = setInterval(() => {
+        const elapsed = (Date.now() - animateStart) / 1000;
+        while (animateIdx < stepTimeline.length && elapsed >= stepTimeline[animateIdx].at) {
+          stepTimeline[animateIdx].fn();
+          animateIdx++;
+        }
+        if (animateIdx >= stepTimeline.length) clearInterval(animateTimer);
+      }, 1000);
+
       // === Queue-based submission ===
       const queueResult = await submitViaQueue({
         input: targetUrl,
@@ -273,6 +293,7 @@ function NewContentPageInner() {
         contentLength,
         userId: 'web-user',
       });
+      clearInterval(animateTimer); // หยุด animation
       const data = { success: true, data: queueResult?.data || queueResult };
 
       if (!data.success) {
