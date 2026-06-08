@@ -23,7 +23,7 @@ let activeCount = 0;
 const queue = []; // { message, content, processingMsg, addedAt }
 
 // ─── Progress bar helper ─────────────────────────────────────────
-function buildProgressBar(elapsedSec, totalSec = 280, barLen = 14) {
+function buildProgressBar(elapsedSec, totalSec = 320, barLen = 14) {
   const pct = Math.min(elapsedSec / totalSec, 1);
   const filled = Math.round(pct * barLen);
   const bar = '█'.repeat(filled) + '░'.repeat(barLen - filled);
@@ -294,13 +294,13 @@ async function processNewsJob(job) {
           // Pipeline steps with real model/API info and accurate timing
           const PIPELINE_STEPS = [
             { at: 0,   done: 2,   icon: '🔍', label: 'ตรวจจับแหล่งข้อมูล',       detail: 'ตรวจสอบประเภท URL และพลัตฟอร์ม',              model: null },
-            { at: 2,   done: 10,  icon: '📡', label: 'ดึงเนื้อหาจากเว็บ',        detail: 'Firecrawl → Jina → Direct fetch',              model: null },
-            { at: 10,  done: 25,  icon: '📰', label: 'สกัดเนื้อข่าว (AI)',       detail: 'สกัด newsTitle + newsBody + category',          model: 'Gemini 2.0 Flash' },
-            { at: 25,  done: 65,  icon: '🔍', label: 'วิเคราะห์มุมข่าว (AI)',    detail: 'core story + key points + possible angles',      model: 'GPT-5.5' },
-            { at: 65,  done: 82,  icon: '🧬', label: 'วาง Emotional Blueprint',  detail: 'emotional arc: hook → twist → CTA',              model: 'GPT-5.5' },
-            { at: 82,  done: 100, icon: '🌐', label: 'ค้นหาข้อมูล Google',       detail: 'Smart Research × 3 angles (Serper API)',          model: null },
-            { at: 100, done: 175, icon: '⚡', label: 'Classic Generate',         detail: 'Multi-Angle × 3 prompts ทำพร้อมกัน',            model: 'Claude Sonnet 4' },
-            { at: 175, done: 999, icon: '🚀', label: 'Enhanced Generate',        detail: 'Enhanced + Blueprint inject + research facts',    model: 'Claude Sonnet 4' },
+            { at: 2,   done: 12,  icon: '📡', label: 'ดึงเนื้อหาจากเว็บ',        detail: 'Firecrawl → Jina → Direct fetch',              model: null },
+            { at: 12,  done: 26,  icon: '📰', label: 'สกัดเนื้อข่าว (AI)',       detail: 'สกัด newsTitle + newsBody + category',          model: 'Gemini 2.0 Flash' },
+            { at: 26,  done: 68,  icon: '🔍', label: 'วิเคราะห์มุมข่าว (AI)',    detail: 'core story + key points + possible angles',      model: 'GPT-5.5' },
+            { at: 68,  done: 85,  icon: '🧬', label: 'วาง Emotional Blueprint',  detail: 'emotional arc: hook → twist → CTA',              model: 'GPT-5.5' },
+            { at: 85,  done: 100, icon: '🌐', label: 'ค้นหาข้อมูล Google',       detail: 'Smart Research × 3 angles (Serper API)',          model: null },
+            { at: 100, done: 180, icon: '⚡', label: 'Classic + Enhanced (Parallel)', detail: '2 Angles รันพร้อมกัน — Claude Sonnet 4 × 2', model: 'Claude Sonnet 4' },
+            { at: 180, done: 999, icon: '🚀', label: 'สรุปผลและบันทึก',          detail: 'รวมผลลัพธ์ + บันทึกลงคลัง',                    model: null },
           ];
 
           const stepLines = PIPELINE_STEPS.map(s => {
