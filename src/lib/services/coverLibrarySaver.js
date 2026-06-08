@@ -121,6 +121,7 @@ export async function saveGeneratedCoverToLibrary(params) {
     };
 
     // Insert เข้า cover_examples
+    // เขียนทั้ง real columns (หลัง migration) และ JSONB backup (compat)
     const { data, error } = await supabase
       .from('cover_examples')
       .insert({
@@ -130,6 +131,15 @@ export async function saveGeneratedCoverToLibrary(params) {
         thumbnail,
         image_width: 1080,
         image_height: 1080,
+        // ── Real columns (ต้องรัน sql/migrations/add-cover-examples-columns.sql ก่อน) ──
+        source_type: 'auto_generated',
+        case_id: caseId || null,
+        news_url: newsUrl || null,
+        subjects: subjects.length > 0 ? subjects : null,
+        emotion: emotion || null,
+        image_count: imageCount || 0,
+        version: version || 1,
+        // ── JSONB backup (compat กับ code เก่าที่อ่านจาก analysis) ──
         analysis: {
           suggested_title: newsTitle,
           layout_type: templateId,
@@ -137,7 +147,6 @@ export async function saveGeneratedCoverToLibrary(params) {
           what_makes_it_viral: '',
           tags: subjects.length > 0 ? subjects : [],
           slot_assignment_guide: '',
-          // ข้อมูลเพิ่มเติมเก็บใน JSONB (ไม่ต้องการ ALTER TABLE)
           source_type: 'auto_generated',
           case_id: caseId || null,
           news_url: newsUrl || null,
@@ -159,7 +168,7 @@ export async function saveGeneratedCoverToLibrary(params) {
     if (error) {
       // ถ้าเป็น column-not-found error → ลอง insert แบบ minimal fields (backward compat)
       if (error.code === '42703' || error.message?.includes('column')) {
-        console.warn('[CoverLibrarySaver] ⚠️ Extra columns not in table — falling back to minimal insert');
+        console.warn('[CoverLibrarySaver] ⚠️ Extra columns not in table — falling back to minimal insert (JSONB only)');
         const { data: d2, error: e2 } = await supabase
           .from('cover_examples')
           .insert({
@@ -169,6 +178,7 @@ export async function saveGeneratedCoverToLibrary(params) {
             thumbnail,
             image_width: 1080,
             image_height: 1080,
+            // JSONB fallback เท่านั้น — ไม่ใส่ real columns เพราะ column ยังไม่มี
             analysis: {
               suggested_title: newsTitle,
               layout_type: templateId,

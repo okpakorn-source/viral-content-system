@@ -199,6 +199,12 @@ export async function listCases(limit = 50, offset = 0) {
           batchId: row.batch_id,
           coverImageUrl: row.cover_image_url,
           createdAt: row.created_at,
+          // fields added by migration (may be null if not yet populated)
+          analysis: row.analysis ?? null,
+          subjects: row.subjects ?? null,
+          emotion: row.emotion ?? null,
+          newsBody: row.news_body ?? null,
+          newsUrl: row.news_url ?? null,
         }));
       }
     } catch {}
@@ -238,6 +244,12 @@ export async function getCase(caseId) {
           batchId: data.batch_id,
           coverImageUrl: data.cover_image_url,
           createdAt: data.created_at,
+          // fields added by migration (may be null if not yet populated)
+          analysis: data.analysis ?? null,
+          subjects: data.subjects ?? null,
+          emotion: data.emotion ?? null,
+          newsBody: data.news_body ?? null,
+          newsUrl: data.news_url ?? null,
         };
       }
     } catch {}

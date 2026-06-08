@@ -130,6 +130,28 @@ function CaseModal({ caseData, onClose }) {
             {caseData.newsTitle || 'ไม่มีหัวข้อ'}
           </h3>
 
+          {/* subjects & emotion tags */}
+          {((caseData.subjects?.length > 0) || (caseData.analysis?.subjects?.length > 0) || caseData.analysis?.emotion || caseData.emotion) && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+              {(caseData.subjects || caseData.analysis?.subjects || []).map((s, i) => (
+                <span key={i} style={{ fontSize: 11, padding: '3px 9px', background: 'rgba(139,92,246,0.15)', color: '#a78bfa', borderRadius: 6, fontWeight: 600 }}>{s}</span>
+              ))}
+              {(caseData.emotion || caseData.analysis?.emotion) && (
+                <span style={{ fontSize: 11, padding: '3px 9px', background: 'rgba(251,191,36,0.12)', color: '#fbbf24', borderRadius: 6 }}>💫 {caseData.emotion || caseData.analysis?.emotion}</span>
+              )}
+            </div>
+          )}
+
+          {/* newsBody preview */}
+          {(caseData.newsBody || caseData.analysis?.newsBody) && (
+            <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, borderLeft: '3px solid rgba(139,92,246,0.4)' }}>
+              <p style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6 }}>📰 เนื้อหาข่าว</p>
+              <p style={{ color: '#94a3b8', fontSize: 13, lineHeight: 1.7, margin: 0 }}>
+                {truncate(caseData.newsBody || caseData.analysis?.newsBody, 400)}
+              </p>
+            </div>
+          )}
+
           {caseData.content && (
             <p style={{ color: '#94a3b8', fontSize: 14, lineHeight: 1.6, marginBottom: 16 }}>
               {caseData.content}
@@ -244,6 +266,18 @@ function CaseCard({ caseData, onClick, index }) {
           <span style={styles.metaText}>⏱️ {caseData.elapsed}</span>
         )}
       </div>
+
+      {/* Subjects & Emotion tags */}
+      {(caseData.subjects?.length > 0 || caseData.analysis?.subjects?.length > 0 || caseData.analysis?.emotion || caseData.emotion) && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+          {(caseData.subjects || caseData.analysis?.subjects || []).slice(0, 2).map((s, i) => (
+            <span key={i} style={{ fontSize: 10, padding: '2px 7px', background: 'rgba(139,92,246,0.15)', color: '#a78bfa', borderRadius: 5, fontWeight: 600 }}>{s}</span>
+          ))}
+          {(caseData.emotion || caseData.analysis?.emotion) && (
+            <span style={{ fontSize: 10, padding: '2px 7px', background: 'rgba(251,191,36,0.12)', color: '#fbbf24', borderRadius: 5 }}>💫 {caseData.emotion || caseData.analysis?.emotion}</span>
+          )}
+        </div>
+      )}
 
       {/* Date */}
       <p style={styles.cardDate}>{formatDate(caseData.createdAt)}</p>
