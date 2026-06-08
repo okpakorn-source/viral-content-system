@@ -978,6 +978,8 @@ async function judgeWithFallback(validCandidates, imageParts, prompt, newsTitle,
         }
       }
 
+      // ★ GPT-5.5 compatibility
+      const _isNew = MODEL_VISION.startsWith('gpt-5') || MODEL_VISION.startsWith('o1') || MODEL_VISION.startsWith('o3');
       const gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -987,8 +989,8 @@ async function judgeWithFallback(validCandidates, imageParts, prompt, newsTitle,
         body: JSON.stringify({
           model: MODEL_VISION,
           messages: [{ role: 'user', content: gptContent }],
-          max_tokens: 4000,
-          temperature: 0.2
+          ...(_isNew ? { max_completion_tokens: 4000 } : { max_tokens: 4000 }),
+          ...(_isNew ? {} : { temperature: 0.2 })
         })
       });
 

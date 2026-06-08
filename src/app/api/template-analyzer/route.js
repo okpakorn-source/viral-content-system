@@ -283,6 +283,8 @@ Return ONLY the JSON object with all slot positions.`;
 
     rlog.step('gpt4o-vision', 'calling GPT-4o Vision (detail:high, max_tokens:2500)...');
 
+    // ★ GPT-5.5 compatibility
+    const _isNew = MODEL_VISION.startsWith('gpt-5') || MODEL_VISION.startsWith('o1') || MODEL_VISION.startsWith('o3');
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -291,8 +293,8 @@ Return ONLY the JSON object with all slot positions.`;
       },
       body: JSON.stringify({
         model: MODEL_VISION,
-        max_tokens: isCoverFormat ? 4000 : 2500,
-        temperature: 0.05, // เกือบ 0 — ต้องการความแม่นยำสูงสุด
+        ...(_isNew ? { max_completion_tokens: isCoverFormat ? 4000 : 2500 } : { max_tokens: isCoverFormat ? 4000 : 2500 }),
+        ...(_isNew ? {} : { temperature: 0.05 }),
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: isCoverFormat ? coverSystemPrompt : systemPrompt },

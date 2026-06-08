@@ -255,21 +255,10 @@ ${rulesText || '(ยังไม่มีกฎเพิ่มเติม)'}
     }
   }
 
-  // Fallback: GPT-4o
-  const OpenAI = (await import('openai')).default;
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  
-  const response = await client.chat.completions.create({
-    model: MODEL_PRIMARY,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userMsg },
-    ],
-    temperature: 0.3,
-    max_tokens: 2000,
-  });
+  // Fallback: GPT — ★ ใช้ callAI() ที่รองรับ GPT-5.5 แล้ว
+  const result = await callAI({ prompt: userMsg, systemPrompt, temperature: 0.3, maxTokens: 2000 });
 
-  return response.choices?.[0]?.message?.content || 'ขออภัย ไม่สามารถตอบได้ในขณะนี้';
+  return result?.reply || result?.text || (typeof result === 'string' ? result : 'ขออภัย ไม่สามารถตอบได้ในขณะนี้');
 }
 
 // =============================================

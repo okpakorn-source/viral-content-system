@@ -143,6 +143,8 @@ export async function analyzeStoryIdentity(newsTitle, breakdownData) {
     if (openaiKey) {
       try {
         console.log(`[StoryIdentity] 🔄 Trying ${MODEL_PRIMARY} fallback...`);
+        // ★ GPT-5.5 compatibility
+        const _isNew = MODEL_PRIMARY.startsWith('gpt-5') || MODEL_PRIMARY.startsWith('o1') || MODEL_PRIMARY.startsWith('o3');
         const gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -152,8 +154,8 @@ export async function analyzeStoryIdentity(newsTitle, breakdownData) {
           body: JSON.stringify({
             model: MODEL_PRIMARY,
             messages: [{ role: 'user', content: prompt }],
-            max_tokens: 4000,
-            temperature: 0.2,
+            ...(_isNew ? { max_completion_tokens: 4000 } : { max_tokens: 4000 }),
+            ...(_isNew ? {} : { temperature: 0.2 }),
             response_format: { type: 'json_object' }
           })
         });

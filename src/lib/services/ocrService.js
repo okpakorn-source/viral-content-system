@@ -40,10 +40,11 @@ export async function performOcr({ images = [], mode = 'full', dataUrls = [] }) 
     image_url: { url, detail: 'high' },
   }));
 
-  // GPT-4o Vision OCR
+  // ★ GPT-5.5 compatibility
+  const _isNew = MODEL_VISION.startsWith('gpt-5') || MODEL_VISION.startsWith('o1') || MODEL_VISION.startsWith('o3');
   const response = await openai.chat.completions.create({
     model:      MODEL_VISION,
-    max_tokens: 4000,
+    ...(_isNew ? { max_completion_tokens: 4000 } : { max_tokens: 4000 }),
     messages: [
       {
         role: 'system',

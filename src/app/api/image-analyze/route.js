@@ -134,11 +134,13 @@ RETURN EXACTLY:
     ];
 
     rlog.step('gpt4o-vision-call', `calling ${MODEL_VISION} (detail:HIGH) with ` + Math.min(images.length, 5) + ' images...');
+    // ★ GPT-5.5 compatibility
+    const _isNew = MODEL_VISION.startsWith('gpt-5') || MODEL_VISION.startsWith('o1') || MODEL_VISION.startsWith('o3');
     const response = await openai.chat.completions.create({
       model: MODEL_VISION,
       messages: [{ role: 'user', content: contentParts }],
-      temperature: 0.1,
-      max_tokens: 800, // ✅ FIX: เพิ่มจาก 600 → 800
+      ...(_isNew ? {} : { temperature: 0.1 }),
+      ...(_isNew ? { max_completion_tokens: 800 } : { max_tokens: 800 }),
       response_format: { type: 'json_object' },
     });
     rlog.step('gpt4o-vision-done', `tokens: ${response.usage?.total_tokens||'?'} | finish: ${response.choices[0]?.finish_reason}`);
