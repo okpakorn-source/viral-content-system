@@ -160,48 +160,50 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   await logPipeline({ workflowId: _autoWorkflowId, step: 'breakdown', status: 'success', duration: Date.now() - step3Start, detail: (breakdownData.key_points?.length || 0) + ' key points' }).catch(() => {});
 
   // ===================================================================
-  // === PRE-GENERATE: GLOBAL BLUEPRINT ===
+  // === PRE-GENERATE: BLUEPRINT + SMART RESEARCH (★ PARALLEL!)
   // ===================================================================
   const stepParallelStart = Date.now();
 
-  rlog.divider('PRE-GENERATE: GLOBAL BLUEPRINT');
-  addLog('Parallel', '🚀 เริ่มต้นวิเคราะห์โครงสร้างอารมณ์ (Blueprint)...');
+  rlog.divider('PRE-GENERATE: BLUEPRINT + SMART RESEARCH (PARALLEL)');
+  addLog('Parallel', '🚀 Blueprint + SmartResearch ทำงานพร้อมกัน...');
   
-  const bpResult = await withTimeout(performSummarize({
-    text: newsData.newsBody,
-    newsTitle: newsData.newsTitle,
-    mode: 'blueprint',
-    breakdownData,
-    workflowId: _autoWorkflowId,
-    user: _user,
-  }), 60000, 'blueprint').catch(() => null);
+  // ★ ทำ 2 งานพร้อมกัน แทนที่จะรอทีละตัว (ประหยัด 30-60 วินาที!)
+  const [bpSettled, srSettled] = await Promise.allSettled([
+    // Task 1: Blueprint
+    withTimeout(performSummarize({
+      text: newsData.newsBody,
+      newsTitle: newsData.newsTitle,
+      mode: 'blueprint',
+      breakdownData,
+      workflowId: _autoWorkflowId,
+      user: _user,
+    }), 45000, 'blueprint').catch(() => null),
+    
+    // Task 2: Smart Research
+    withTimeout(
+      smartResearch(newsData, breakdownData),
+      30000,
+      'smart_research'
+    ).catch(() => null),
+  ]);
 
+  // Extract Blueprint result
+  const bpResult = bpSettled.status === 'fulfilled' ? bpSettled.value : null;
   const blueprint = bpResult?.success ? bpResult.data?.blueprint : null;
   addLog('Enhanced', `Blueprint: ${blueprint ? blueprint.core_emotion : '❌'}`);
 
-  // ===================================================================
-  // === SMART RESEARCH: 6-Agent Fact Pool ===
-  // ===================================================================
+  // Extract SmartResearch result
   let factPool = null;
-  try {
-    rlog.divider('SMART RESEARCH: 6-AGENT FACT POOL');
-    addLog('SmartResearch', '🧠 เริ่มค้นหาข้อมูลเชิงลึก 6 มุม...');
-    factPool = await withTimeout(
-      smartResearch(newsData, breakdownData),
-      35000,
-      'smart_research'
-    ).catch(() => null);
-    if (factPool && factPool.facts?.length > 0) {
-      addLog('SmartResearch', `✅ พบ ${factPool.facts.length} ข้อเท็จจริงเกี่ยวกับ "${factPool.entityName || '?'}" (${factPool.duration || '?'}s)`);
-      await logPipeline({ workflowId: _autoWorkflowId, step: 'smart-research', status: 'success', duration: (factPool.duration || 0) * 1000, detail: `${factPool.facts.length} facts for "${factPool.entityName}"` }).catch(() => {});
-    } else {
-      addLog('SmartResearch', '⚠️ ไม่พบข้อมูลเพียงพอ — ใช้ flow เดิม');
-      factPool = null;
-    }
-  } catch (smartErr) {
-    addLog('SmartResearch', `⚠️ Smart Research ข้ามไป: ${smartErr.message}`);
-    factPool = null;
+  const srResult = srSettled.status === 'fulfilled' ? srSettled.value : null;
+  if (srResult && srResult.facts?.length > 0) {
+    factPool = srResult;
+    addLog('SmartResearch', `✅ พบ ${factPool.facts.length} ข้อเท็จจริงเกี่ยวกับ "${factPool.entityName || '?'}" (${factPool.duration || '?'}s)`);
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'smart-research', status: 'success', duration: (factPool.duration || 0) * 1000, detail: `${factPool.facts.length} facts for "${factPool.entityName}"` }).catch(() => {});
+  } else {
+    addLog('SmartResearch', '⚠️ ไม่พบข้อมูลเพียงพอ — ใช้ flow เดิม');
   }
+  
+  addLog('Parallel', `⏱️ Blueprint+Research เสร็จใน ${((Date.now() - stepParallelStart) / 1000).toFixed(1)}s (แทนที่จะ ~90s sequential)`);
 
   // ===================================================================
   // === MULTI-ANGLE PARALLEL PIPELINE ===
@@ -289,7 +291,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
         _researchItems: researchItems,
         _topPrompt: topPrompt
       };
-    })(), 240000, `generate_A${index + 1}`);
+    })(), 150000, `generate_A${index + 1}`); // ★ 150s per angle (was 240s — ลดจาก 4 นาที → 2.5 นาที)
   });
 
   const genResults = await Promise.allSettled(generationTasks);

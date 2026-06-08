@@ -187,7 +187,7 @@ function NewContentPageInner() {
     }
 
     // 2. Poll for result
-    const maxPollTime = 6 * 60 * 1000; // 6 minutes max
+    const maxPollTime = 8 * 60 * 1000; // 8 minutes max (pipeline optimized: BP+Research parallel)
     const startTime = Date.now();
     let workerRetriggerCount = 0;
 
@@ -229,7 +229,7 @@ function NewContentPageInner() {
     }
 
     setQueuePolling(false);
-    throw new Error('หมดเวลารอคิว (6 นาที) กรุณาลองใหม่');
+    throw new Error('หมดเวลารอคิว (8 นาที) กรุณาลองใหม่');
   };
 
   // === ⚡ Auto Mode — วาง URL → ได้ผลลัพธ์ ===
