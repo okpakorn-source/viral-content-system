@@ -847,35 +847,49 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
         heroIndex = withFace.length > 0 ? withFace[withFace.length - 1].index : 0;
       }
 
-      // Circle: ★ ต้องเลือกภาพที่มีความหมายกับข่าว! ไม่ใช่ภาพอะไรก็ได้
-      // Priority: EVIDENCE (ป้ายโรงเรียน/เอกสาร) > EMOTION > CONTEXT > HERO ตัว 2 > หน้าคนอื่น
+      // Circle: ★★★ Smart Slot Assignment (จากสูตรปกตัวอย่าง 5 ภาพ)
+      // ปกที่ชนะ: Circle = RELATIONSHIP (ภาพคู่/เซลฟี่ ≥2 คน) > EVIDENCE > EMOTION > HERO ตัว 2
       if (hasCircle) {
-        const allCandidates = [
-          ...byRole.EVIDENCE,
-          ...byRole.EMOTION,
-          ...byRole.RELATIONSHIP,
-          ...heroCandidates.slice(1),
-          ...byRole.CONTEXT_SCENE,
-          ...byRole.SUPPORT,
-        ].filter(x => x.index !== heroIndex);
+        // ★ Step 1: RELATIONSHIP ที่มี ≥ 2 faces (ตรงสูตรมากที่สุด!)
+        const relationWithFaces = byRole.RELATIONSHIP
+          .filter(x => x.index !== heroIndex && x.faceData.faceCount >= 2 && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
+        
+        // ★ Step 2: RELATIONSHIP ทั้งหมด (แม้ไม่รู้จำนวน face)
+        const relationAll = byRole.RELATIONSHIP
+          .filter(x => x.index !== heroIndex && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
+        
+        // ★ Step 3: EVIDENCE/EMOTION ที่เกี่ยวข่าว
+        const evidenceEmotion = [...byRole.EVIDENCE, ...byRole.EMOTION]
+          .filter(x => x.index !== heroIndex && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
+        
+        // ★ Step 4: HERO ตัว 2 / PERSON_SUPPORT (ภาพอีกมุม)
+        const personFallback = [...heroCandidates.slice(1), ...byRole.PERSON_SUPPORT]
+          .filter(x => x.index !== heroIndex && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
+        
+        // ★ Step 5: รวมทั้งหมด fallback score >= 2
+        const allFallback = [
+          ...byRole.RELATIONSHIP, ...byRole.EVIDENCE, ...byRole.EMOTION,
+          ...heroCandidates.slice(1), ...byRole.CONTEXT_SCENE, ...byRole.SUPPORT,
+        ].filter(x => x.index !== heroIndex && (imageBuffers[x.index]?.curatorScore || 0) >= 2);
 
-        // ★ Adaptive: ลอง score >= 4 ก่อน → ถ้าไม่มีลดเป็น >= 2 เฉพาะ person-type
-        let circlePool = allCandidates.filter(x => (imageBuffers[x.index]?.curatorScore || 0) >= 4);
-        if (circlePool.length === 0) {
-          // ★ fallback เฉพาะภาพที่เป็นคนถูกคน (ก้อย fashion/คู่ ดีกว่าภาพนักศึกษาแปลกหน้า!)
-          const personRoles = ['PERSON_SUPPORT', 'HERO_FACE', 'RELATIONSHIP', 'EMOTION'];
-          circlePool = allCandidates.filter(x => (imageBuffers[x.index]?.curatorScore || 0) >= 2 && personRoles.includes(x.role));
-        }
+        // เลือกตาม priority
+        const circlePool = relationWithFaces.length > 0 ? relationWithFaces
+          : relationAll.length > 0 ? relationAll
+          : evidenceEmotion.length > 0 ? evidenceEmotion
+          : personFallback.length > 0 ? personFallback
+          : allFallback;
 
         if (circlePool.length > 0) {
           circleIndex = circlePool[0].index;
-          console.log(`[assignSlots] ★ Circle: chose image #${circleIndex} (role: ${circlePool[0].role}, score: ${imageBuffers[circleIndex]?.curatorScore || 0}) — meaningful!`);
+          const chosenRole = circlePool[0].role;
+          const faces = circlePool[0].faceData?.faceCount || 0;
+          console.log(`[assignSlots] ★ Circle: image #${circleIndex} (${chosenRole}, faces: ${faces}, score: ${imageBuffers[circleIndex]?.curatorScore || 0}) — ${relationWithFaces.length > 0 ? '✅ RELATIONSHIP match!' : 'fallback'}`);
         } else {
-          // ★ ถ้าไม่มีภาพ score >= 4 → ใช้ hero ซ้ำ (crop ต่างมุม) ดีกว่าภาพไม่เกี่ยว
+          // ★ ถ้าไม่มีเลย → ใช้ hero ซ้ำ ดีกว่าภาพไม่เกี่ยว
           const otherHero = heroCandidates.filter(x => x.index !== heroIndex);
           if (otherHero.length > 0) {
             circleIndex = otherHero[0].index;
-            console.log(`[assignSlots] ★ Circle: fallback to hero #${circleIndex} (ไม่มีภาพ score >= ${minScore})`);
+            console.log(`[assignSlots] ★ Circle: fallback to hero #${circleIndex}`);
           } else {
             circleIndex = heroIndex === 0 ? 1 : 0;
             console.log(`[assignSlots] ⚠️ Circle: no relevant images — using image #${circleIndex}`);
