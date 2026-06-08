@@ -188,6 +188,8 @@ async function agentGoogleCleanImages(identity) {
     if (identity?.mainCharacter) queries.push({ q: identity.mainCharacter, label: 'character', num: 5 });
   }
 
+  const allMeta = []; // ★ เก็บ metadata สำหรับ Distribution Report
+
   for (const queryObj of queries) {
     console.log(`[Agent1: Google] Search (${queryObj.label}): "${queryObj.q}" (${queryObj.num} results)`);
     try {
@@ -203,23 +205,21 @@ async function agentGoogleCleanImages(identity) {
       if (res.ok) {
         const data = await res.json();
         if (data.images) {
-          const urls = data.images.map(img => img.imageUrl).filter(isCleanImageUrl);
-          console.log(`[Agent1: Google] (${queryObj.label}) got ${urls.length} clean images`);
-          allImages.push(...urls);
+          const imgs = data.images.filter(img => isCleanImageUrl(img.imageUrl));
+          console.log(`[Agent1: Google] (${queryObj.label}) got ${imgs.length} clean images`);
+          for (const img of imgs) {
+            allImages.push(img.imageUrl);
+            allMeta.push({ url: img.imageUrl, title: img.title || '', source: img.source || '', link: img.link || '', queryLabel: queryObj.label, queryText: queryObj.q });
+          }
         }
       }
     } catch (e) { console.log(`[Agent1: Google] (${queryObj.label}) error: ${e.message}`); }
   }
 
-  // === Pexels DISABLED ===
-  // ★ ปิด Pexels! ภาพ stock ไม่เกี่ยวกับข่าวเฉพาะเจาะจง
-  // เช่น search "thai girl child" ได้ wine review, cartoon โรงเรียน
-  // ทำให้ปกมั่ว — ใช้แค่ Google + YouTube เท่านั้น
-  // const pexelsKey = process.env.PEXELS_API_KEY;
-
   const unique = [...new Set(allImages)].slice(0, 25);
   console.log(`[Agent1: Google] ✅ Total: ${unique.length} unique clean images`);
-  return unique;
+  // ★ Return พร้อม metadata สำหรับ Distribution Report
+  return Object.assign(unique, { _meta: allMeta });
 }
 
 // ==========================================
@@ -1256,6 +1256,70 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
   console.log(`  Agent 2 (YouTube):  ${youtubeImages.length} frames ${youtubeResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + youtubeResult.reason : ''}`);
   console.log(`  Agent 3 (Context):  ${contextImages.length} images ${contextResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + contextResult.reason : ''}`);
   console.log(`  Agent 4 (Tavily):   ${tavilyImages.length} images ${tavilyResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + tavilyResult.reason : ''}`);
+
+  // ══════════════════════════════════════════════════════════════
+  // ★ CANDIDATE DISTRIBUTION REPORT
+  // จัดหมวดหมู่ภาพทั้งหมดจาก query label + metadata
+  // ไม่ใช้ Vision API — ใช้ keyword matching บน title/queryText
+  // ══════════════════════════════════════════════════════════════
+  {
+    const negFocus = (identity?.coreStory?.negativeFocus || []).map(f => f.toLowerCase());
+    const coreQueries = (identity?.coreImageQueries || []).map(q => q.toLowerCase());
+    const allMeta = [
+      ...((googleResult.value?._meta) || []),
+      ...contextImages.map((url, i) => ({ url, queryLabel: `context-${i}`, queryText: '' })),
+      ...youtubeImages.map((url, i) => ({ url, queryLabel: 'youtube-core', queryText: coreQueries[0] || '' })),
+      ...tavilyImages.map((url, i) => ({ url, queryLabel: 'tavily-core', queryText: coreQueries[0] || '' })),
+    ];
+
+    function categorizeImage(meta) {
+      const text = `${meta.title} ${meta.source} ${meta.link} ${meta.queryLabel} ${meta.queryText}`.toLowerCase();
+      // ★ Forbidden categories (from negativeFocus)
+      if (negFocus.some(nf => text.includes(nf))) {
+        if (/ช้าง|elephant|งาช้าง|pachyderm/.test(text)) return 'elephant';
+        return 'occupation';
+      }
+      if (/ช้าง|elephant|งาช้าง/.test(text)) return 'elephant';
+      if (/สัตวแพทย์|veterinar|animal clinic|zoo/.test(text)) return 'occupation';
+      // ★ Story categories
+      if (/แม่|มารดา|mother|mom|อัลไซ|alzheimer/.test(text)) return 'mother';
+      if (/ดูแล|caregiving|ป้อน|bedside|ช่วยเหลือ|feeding/.test(text)) return 'caregiving';
+      if (/ครอบครัว|family|พ่อแม่|พ่อ|พ่อ|น้อง/.test(text)) return 'family';
+      // ★ Core query = story relevant by default
+      if (meta.queryLabel?.startsWith('core:') || meta.queryLabel === 'youtube-core' || meta.queryLabel === 'tavily-core') return 'family';
+      return 'unrelated';
+    }
+
+    const dist = { mother: 0, caregiving: 0, family: 0, occupation: 0, elephant: 0, unrelated: 0 };
+    for (const meta of allMeta) {
+      const cat = categorizeImage(meta);
+      dist[cat] = (dist[cat] || 0) + 1;
+    }
+    const total = allMeta.length || 1;
+    const pct = (n) => `${n} (${((n/total)*100).toFixed(1)}%)`;
+
+    console.log('============================================');
+    console.log('[MultiAgent] ★ CANDIDATE DISTRIBUTION REPORT');
+    console.log(`  ✅ mother:      ${pct(dist.mother)}`);
+    console.log(`  ✅ caregiving:  ${pct(dist.caregiving)}`);
+    console.log(`  ✅ family:      ${pct(dist.family)}`);
+    console.log(`  ⛔ occupation:  ${pct(dist.occupation)}`);
+    console.log(`  ⛔ elephant:    ${pct(dist.elephant)}`);
+    console.log(`  ❓ unrelated:  ${pct(dist.unrelated)}`);
+    console.log(`  Total:          ${total} images`);
+    console.log('============================================');
+
+    const forbiddenPct = (dist.occupation + dist.elephant) / total;
+    if (forbiddenPct > 0.2 && total > 10) {
+      console.log(`[MultiAgent] ❌ SEARCH STAGE FAIL: occupation+elephant = ${(forbiddenPct*100).toFixed(1)}% > 20% threshold`);
+      console.log(`[MultiAgent]    Root cause: search queries still returning forbidden content`);
+      console.log(`[MultiAgent]    Continuing pipeline but cover quality will be poor — check QUERY OVERRIDE logs above`);
+      // ★ ไม่ fail hard ตอนนี้ — log เพื่อ debug ก่อน
+      // TODO: return { error: 'SEARCH_STAGE_FAIL', dist } เมื่อ fix สมบูรณ์
+    } else if (forbiddenPct <= 0.2) {
+      console.log(`[MultiAgent] ✅ SEARCH STAGE PASS: forbidden content = ${(forbiddenPct*100).toFixed(1)}% ≤ 20%`);
+    }
+  }
 
   // ★★★ จัดลำดับความสำคัญ — ตัวละครหลักต้องมาก่อน!
   // Priority: ตัวละครหลัก (18 ภาพ) → บริบท/สถานที่ (8 ภาพ) → YouTube (4 ภาพ)
