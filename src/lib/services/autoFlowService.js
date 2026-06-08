@@ -422,7 +422,9 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   if (totalResearchItems.length) addLog('Summary', `🔍 Research: ${totalResearchItems.length} แหล่งข้อมูล`);
 
   const usedPreset = primaryResult.usedPreset || null;
-  const newsType = primaryResult.debug?.newsTypeDetected || '';
+  // ★ FIX: breakdownData.primaryCategory มักมีค่าเสมอหลัง STEP 3
+  // primaryResult.debug.newsTypeDetected ว่างเมื่อ presetPrompt ถูกเลือกไว้ล่วงหน้า (Stage 1 DNA analysis ถูกข้าม)
+  const newsType = breakdownData?.primaryCategory || primaryResult.debug?.newsTypeDetected || '';
   if (newsType) addLog('Prompt', `🧠 AI วิเคราะห์: ข่าว${newsType}`);
   if (usedPreset?.source === 'library') {
     addLog('Prompt', `🏛️ ใช้ Library: "${usedPreset.name}" (Viral: ${usedPreset.viralScore || '-'})`);
