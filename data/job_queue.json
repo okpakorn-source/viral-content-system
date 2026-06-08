@@ -1,9 +1,27 @@
 [
   {
-    "id": "ad71fc40-29c8-4351-8b0c-f52b2350fbfe",
-    "error": null,
+    "id": "8ae8e5a4-1e9e-4dac-9a5e-0eee45a50025",
+    "error": "Unexpected token 'A', \"An error o\"... is not valid JSON",
     "result": null,
-    "status": "processing",
+    "status": "failed",
+    "userId": "web-user",
+    "payload": {
+      "url": "https://entertainment.trueid.net/detail/Qw9mnEkvMe3w",
+      "input": "https://entertainment.trueid.net/detail/Qw9mnEkvMe3w",
+      "userId": "web-user",
+      "contentLength": "short"
+    },
+    "position": 1,
+    "createdAt": "2026-06-08T11:42:07.873Z",
+    "startedAt": "2026-06-08T11:42:10.084Z",
+    "updatedAt": "2026-06-08T11:47:11.015Z",
+    "completedAt": "2026-06-08T11:47:10.775Z"
+  },
+  {
+    "id": "ad71fc40-29c8-4351-8b0c-f52b2350fbfe",
+    "error": "This operation was aborted",
+    "result": null,
+    "status": "failed",
     "userId": "web-user",
     "payload": {
       "url": "https://entertainment.trueid.net/detail/Qw9mnEkvMe3w",
@@ -14,8 +32,8 @@
     "position": 1,
     "createdAt": "2026-06-08T10:36:47.710Z",
     "startedAt": "2026-06-08T10:36:49.157Z",
-    "updatedAt": "2026-06-08T10:36:49.157Z",
-    "completedAt": null
+    "updatedAt": "2026-06-08T10:41:44.606Z",
+    "completedAt": "2026-06-08T10:41:44.373Z"
   },
   {
     "id": "864ce33b-91b1-47d2-b693-b379a413c6b5",
@@ -178,23 +196,5 @@
     "startedAt": "2026-06-08T08:49:06.502Z",
     "updatedAt": "2026-06-08T08:51:37.446Z",
     "completedAt": "2026-06-08T08:51:37.206Z"
-  },
-  {
-    "id": "b2788e59-1d4a-4c9b-99a5-07666f4ff764",
-    "error": "TIMEOUT: breakdown ใช้เวลาเกิน 90s",
-    "result": null,
-    "status": "failed",
-    "userId": "discord-777547203606478877",
-    "payload": {
-      "input": "https://www.matichon.co.th/entertainment/news_5751330",
-      "images": [],
-      "userId": "discord-777547203606478877",
-      "contentLength": "short"
-    },
-    "position": 1,
-    "createdAt": "2026-06-08T07:19:06.300Z",
-    "startedAt": "2026-06-08T07:19:10.645Z",
-    "updatedAt": "2026-06-08T07:21:14.967Z",
-    "completedAt": "2026-06-08T07:21:14.741Z"
   }
 ]
