@@ -980,6 +980,10 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
           cropStrat = 'portrait-upper'; // Hero/Hero2: ครึ่งตัวบน หน้าชัด
         } else if (slotRole === 'emotion') {
           cropStrat = 'portrait-upper'; // Emotion: ครึ่งตัวบน
+        } else if (slot.id === 'bg_bottom' && slotFaceData?.hasFaces) {
+          // ★ FIX: bg_bottom มีหน้าคน (role=scene/ใดก็ตาม) → ใช้ portrait-upper เสมอ
+          // เพราะ bg_bottom มี fadeTop สูง (120-160px) → center-face จะทำให้หน้าคนถูก fade กินหาย!
+          cropStrat = 'portrait-upper';
         } else if (slotRole === 'highlight') {
           cropStrat = 'center-face';    // Highlight: center ที่หน้า
         } else if (slotFaceData?.hasFaces) {

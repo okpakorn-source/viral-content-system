@@ -657,12 +657,24 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
     }));
     
     // ★ Prompt: AI ดูเนื้อข่าว + ภาพ แล้วจัดลำดับ — เน้น "เล่าเรื่องผ่านภาพ"
+    // ★ Inject subjects (characters) into prompt for subject-matching
+    const subjectsForPrompt = [
+      identity?.mainCharacter,
+      identity?.secondaryCharacter,
+      ...(identity?.characters || []),
+    ].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).slice(0, 5);
+    const subjectsStr = subjectsForPrompt.length > 0
+      ? subjectsForPrompt.join(', ')
+      : 'ไม่ระบุ';
     const prompt = `คุณเป็น "Content Curator" สำหรับปกข่าวไวรัล
 ดูภาพ ${thumbnails.length} ภาพด้านบน (ภาพ #0 ถึง #${thumbnails.length - 1} ตามลำดับ)
 
 ## เนื้อข่าว:
 📰 หัวข้อข่าว: "${newsTitle || 'ไม่ระบุ'}"
 📝 เนื้อข่าวย่อ: "${(newsContent || '').slice(0, 500)}"
+
+## ★★★ Subjects หลัก (คนที่อยู่ในข่าว): ${subjectsStr}
+คนอื่นที่ไม่เกี่ยวกับ subjects เหล่านี้ = คนแปลก → relevance <= 2!
 
 ## ตัวละครหลัก: ${identity?.mainCharacter || 'ไม่ระบุ'}
 ## สถานที่: ${identity?.location || 'ไม่ระบุ'}
@@ -720,6 +732,13 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
   {"index": 2, "relevance": 2, "recommendedRole": "PERSON_SUPPORT", "reason": "ภาพวิวทะเล สวยแต่ไม่เกี่ยวข่าว"},
   ...จนครบทุกภาพ #0 - #${thumbnails.length - 1}...
 ]}
+
+## ★★★ CIRCLE SLOT RULES (ถ้าข่าวมีวงกลม):
+- วงกลมต้องแสดง 1 คน ที่เป็น subject หลักเท่านั้น: ${subjectsStr}
+- ภาพที่จะอยู่ใน circle ต้องมี relevance >= 6
+- ห้ามเลือกภาพวัยรุ่น/เด็ก/คนแปลกหน้าที่ไม่ใช่ subject
+- ห้ามเลือกภาพกลุ่มคน (>1 คน) สำหรับ circle
+- ถ้าไม่มีภาพที่ตรง subjects และ relevance >= 6 → ให้ใช้ภาพ HERO_FACE เดิม (ซ้ำได้)
 
 ★★★ กฎสำคัญ: 
 - ต้องมี entry ครบทุกภาพ (index 0 ถึง ${thumbnails.length - 1}) ห้ามข้ามภาพไหน!
@@ -894,16 +913,21 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
         const singleFaceEmotion = [...byRole.EMOTION, ...byRole.EVIDENCE]
           .filter(x => x.index !== heroIndex && x.faceData.faceCount === 1 && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
         
-        // ★ Step 5: ภาพอะไรก็ได้ที่มี faceCount === 1 (score >= 2)
+        // ★ Step 5: ภาพอะไรก็ได้ที่มี faceCount === 1 — ต้อง score >= 5 เพื่อป้องกันภาพคนไม่เกี่ยว!
+        // score 2-4 = คนในภาพแต่ไม่ใช่ subject หลัก (เช่น วัยรุ่นสุ่มที่ AI เลือกมา) → ห้ามใช้ circle!
         const anySingleFace = imageBuffers
-          .map((img, i) => ({ index: i, faceData: faceDataMap.get(String(i)) || {}, score: img.curatorScore || 0 }))
-          .filter(x => x.index !== heroIndex && (x.faceData.faceCount === 1) && x.score >= 2);
+          .map((img, i) => ({ index: i, faceData: faceDataMap.get(String(i)) || {}, score: img.curatorScore || 0, role: img.role }))
+          .filter(x => x.index !== heroIndex && (x.faceData.faceCount === 1) && x.score >= 5
+            // ★ ยอมให้ SUPPORT ได้เฉพาะ score >= 7 (มั่นใจว่าเป็น subject)
+            && (x.role !== 'SUPPORT' || x.score >= 7));
         
-        // ★ Step 6 (LAST RESORT): ภาพใดก็ได้ที่ไม่ใช่ hero (ยอมให้มีวงกลมดีกว่าน circle)
+        // ★ Step 6 (LAST RESORT): ภาพใดก็ได้ที่ไม่ใช่ hero — แต่ต้อง score >= 4 (ไม่ใช่คนแปลกหน้า!)
         const anyFallback = [
           ...byRole.RELATIONSHIP, ...byRole.EVIDENCE, ...byRole.EMOTION,
-          ...heroCandidates.slice(1), ...byRole.CONTEXT_SCENE, ...byRole.SUPPORT,
-        ].filter(x => x.index !== heroIndex && (imageBuffers[x.index]?.curatorScore || 0) >= 2);
+          ...heroCandidates.slice(1), ...byRole.CONTEXT_SCENE,
+          // ★ SUPPORT เฉพาะ score >= 6 — ป้องกันภาพคนไม่เกี่ยวข่าว
+          ...byRole.SUPPORT.filter(x => (imageBuffers[x.index]?.curatorScore || 0) >= 6),
+        ].filter(x => x.index !== heroIndex && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
 
         // เลือกตาม priority — single-face ก่อนเสมอ
         const circlePool = singleFaceHero.length > 0 ? singleFaceHero
@@ -917,13 +941,22 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
           circleIndex = circlePool[0].index;
           const chosenRole = imageBuffers[circleIndex]?.role || circlePool[0].role || '?';
           const faces = faceDataMap.get(String(circleIndex))?.faceCount || 0;
+          const curScore = imageBuffers[circleIndex]?.curatorScore || 0;
           const pickedStep = singleFaceHero.length > 0 ? 'HERO single-face'
             : singleFacePerson.length > 0 ? 'PERSON single-face'
             : singleFaceRelation.length > 0 ? 'RELATION single-face'
             : singleFaceEmotion.length > 0 ? 'EMOTION single-face'
-            : anySingleFace.length > 0 ? 'any single-face'
-            : 'fallback';
-          console.log(`[assignSlots] ★ Circle: image #${circleIndex} (${chosenRole}, faces: ${faces}, score: ${imageBuffers[circleIndex]?.curatorScore || 0}) [${pickedStep}]`);
+            : anySingleFace.length > 0 ? 'any single-face (score>=5)'
+            : 'fallback (score>=4)';
+          console.log(`[assignSlots] ★ Circle: image #${circleIndex} (${chosenRole}, faces: ${faces}, score: ${curScore}) [${pickedStep}]`);
+          // ★ Guard: ถ้า circle ได้ภาพจาก fallback แต่ score ต่ำมาก → ใช้ hero ดีกว่า
+          if (curScore < 4 && pickedStep.includes('fallback')) {
+            const otherHeroFallback = heroCandidates.filter(x => x.index !== heroIndex);
+            if (otherHeroFallback.length > 0) {
+              circleIndex = otherHeroFallback[0].index;
+              console.log(`[assignSlots] ★ Circle fallback score too low (${curScore}) → using secondary hero #${circleIndex}`);
+            }
+          }
         } else {
           // ★ ถ้าไม่มีเลย → ใช้ hero ซ้ำ ดีกว่าภาพไม่เกี่ยว
           const otherHero = heroCandidates.filter(x => x.index !== heroIndex);
