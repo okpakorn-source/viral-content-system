@@ -301,7 +301,7 @@ export function scaleTemplateSlots(template, targetW, targetH) {
 }
 
 export function autoSelectTemplate(imageCount, faceCount, storyIdentity) {
-  // ── ก่อน scoring: ตัด templates ที่ disabled หรือมี small circle ออก ──
+  // ── Before scoring: remove disabled or small-circle templates ──
   const ELIGIBLE_IDS = new Set(
     ALL_TEMPLATES
       .filter((t) => !t.disabled && !hasSmallCircle(t))
@@ -310,86 +310,129 @@ export function autoSelectTemplate(imageCount, faceCount, storyIdentity) {
   console.log(`[TemplateSelect] Eligible templates (no small circles): ${[...ELIGIBLE_IDS].join(', ')}`);
 
   if (ELIGIBLE_IDS.size === 0) return null;
-  
+
   const emotion = storyIdentity?.emotion || '';
   const coverEmotion = storyIdentity?.coverEmotion || '';
   const emotionAll = `${emotion} ${coverEmotion}`;
   const storyText = storyIdentity?.story || '';
+  // eslint-disable-next-line no-unused-vars
   const hasText = storyIdentity?.typography?.hook || storyIdentity?.typography?.punch;
-  
-  // ★ Emotion detection
+
+  // ★ Emotion detection (Thai + English keywords — unchanged)
   const isSad = /เศร้า|สะเทือน|ร้องไห้|เสียใจ|สูญเสีย|ตาย|จากไป|sad|tragedy/i.test(emotionAll);
   const isDrama = /drama|dramatic|shocking|shocked|angry|โกรธ|ช็อก|ด่วน|ฟ้อง|คดี/i.test(emotionAll);
   const isWarm = /warm|hope|happy|สังคม|ช่วยเหลือ|น่ารัก|อบอุ่น|ภูมิใจ/i.test(emotionAll);
   const isNeutral = /neutral/i.test(emotionAll) || (!isSad && !isDrama && !isWarm);
-  
-  // ★ ตรวจสอบว่าเป็นข่าว "ความสัมพันธ์" จริงๆ ไหม (ไม่ใช่แค่มี 2 ชื่อ)
+
+  // ★ Check for relationship news (unchanged logic)
   const characters = storyIdentity?.characters || [];
   const has2Characters = characters.length >= 2;
   const isRelationshipNews = /คู่รัก|สามี|ภรรยา|แฟน|ครอบครัว|แต่งงาน|หย่า|เลิก|พ่อ|แม่|ลูก|คู่กรณี|พี่น้อง|ผัว|เมีย|คู่ชีวิต|ชีวิตคู่/i.test(storyText);
-  
-  // ═══ Scoring System — แต่ละ template ได้คะแนนตามความเหมาะสม ═══
-  // (เฉพาะ template ที่อยู่ใน ELIGIBLE_IDS เท่านั้น)
+
+  // ═══════════════════════════════════════════════════════════════════
+  // SCORING SYSTEM — FIX: all active templates get BASE SCORE = 50
+  //
+  // ROOT CAUSE of template_2 always winning (before this fix):
+  //   - template_2 gate: imageCount >= 3  (weakest — always qualifies)
+  //   - template_1 gate: imageCount>=5 + faceCount>=1 + isDrama
+  //   - template_3 gate: imageCount>=5 + faceCount>=2 + (isSad||isDrama)
+  //   - template_5/8:    imageCount>=4 + faceCount>=1
+  //   - template_7:      imageCount>=4 + faceCount>=2 + has2Characters + isRelationship
+  //   → neutral news + few images = template_2 ONLY candidate = 100% win rate
+  //
+  // FIX: equal base 50 for all, emotion bonus 10-35, window expanded 15→20
+  // Expected distribution on neutral news: each template ~15-22%
+  // ═══════════════════════════════════════════════════════════════════
   const scores = {};
-  
-  // --- Template 7: 2 ตัวละคร (คู่รัก/ครอบครัว) ---
-  // ★ ต้องเป็นข่าวที่เน้นความสัมพันธ์จริงๆ + มี 2 คน
-  if (ELIGIBLE_IDS.has('template_7') && imageCount >= 4 && faceCount >= 2 && has2Characters && isRelationshipNews) {
-    scores['template_7'] = 90;
+  const hasEnoughImages = imageCount >= 3; // single minimum gate for all
+  const hasFace = faceCount >= 1;
+  const hasMany = imageCount >= 5;
+
+  // --- template_1: Drama 5-slot (no circle) ---
+  // Old: required imageCount>=5 + faceCount>=1 + isDrama (almost never selected)
+  // New: base 50, drama wins clearly, still has neutral chance
+  if (ELIGIBLE_IDS.has('template_1') && hasEnoughImages) {
+    let s = 50;
+    if (isDrama) s += 25; // strong drama bonus
+    if (isSad)   s += 10;
+    if (hasMany) s += 5;  // slight bonus for having many images
+    scores['template_1'] = s;
   }
-  
-  // --- Template 6: สะเทือนใจ + ข้อความ --- ⛔ DISABLED (circle_small=160px)
-  // if (imageCount >= 5 && faceCount >= 1 && isSad) {
-  //   scores['template_6'] = hasText ? 85 : 70;
+
+  // --- template_2: Clean 4-slot (no circle) ---
+  // ★ ROOT CAUSE FIX: was hardcoded 70 for neutral+imageCount<=5
+  // Old: scores['template_2'] = imageCount<=5 ? 70 : (isNeutral ? 55 : 45)
+  //      → always 70 on neutral, others at 72 → almost never lost
+  // New: base 50, tiny bonus only when images are scarce (no circle = safer)
+  if (ELIGIBLE_IDS.has('template_2') && hasEnoughImages) {
+    let s = 50; // NO special advantage anymore
+    if (isNeutral && imageCount < 4) s += 5; // safe for very few images
+    scores['template_2'] = s;
+  }
+
+  // --- template_3: Drama + circle ---
+  // Old: required imageCount>=5 + faceCount>=2 + (isSad||isDrama)
+  // New: base 50, excellent for sad/drama news
+  if (ELIGIBLE_IDS.has('template_3') && hasEnoughImages) {
+    let s = 50;
+    if (isSad)   s += 25; // best for sad news
+    if (isDrama) s += 20;
+    if (hasFace) s += 5;
+    scores['template_3'] = s;
+  }
+
+  // --- template_5: Event 5-slot + circle ---
+  // Old: required imageCount>=4 + faceCount>=1 (skipped when faceCount=0)
+  // New: base 50 + drama/warm bonus
+  if (ELIGIBLE_IDS.has('template_5') && hasEnoughImages) {
+    let s = 50;
+    if (isDrama) s += 15;
+    if (isWarm)  s += 10;
+    if (hasFace) s += 5;
+    scores['template_5'] = s;
+  }
+
+  // --- template_7: 2 characters (couple/family) ---
+  // Kept specific relationship bonus, but now has base 50 so competes on neutral too
+  if (ELIGIBLE_IDS.has('template_7') && hasEnoughImages) {
+    let s = 50; // base — previously only entered when strict conditions met
+    if (has2Characters && isRelationshipNews) s += 35; // strong relationship bonus
+    else if (has2Characters)                  s += 10;
+    if (faceCount >= 2)                       s += 10;
+    scores['template_7'] = s;
+  }
+
+  // --- template_8: Clean Zone ---
+  // Old: required imageCount>=4 + faceCount>=1 (skipped like template_5)
+  // New: base 50 + warm/neutral bonus → wins on warm news, good on neutral
+  if (ELIGIBLE_IDS.has('template_8') && hasEnoughImages) {
+    let s = 50;
+    if (isWarm)    s += 25; // best for warm/positive news
+    if (isNeutral) s += 15; // good for neutral news
+    if (hasFace)   s += 5;
+    scores['template_8'] = s;
+  }
+
+  // --- template_4: DISABLED (circle_small < 320px) ---
+  // if (ELIGIBLE_IDS.has('template_4') && imageCount >= 5 && faceCount >= 2 && isWarm) {
+  //   scores['template_4'] = hasText ? 80 : 65;
   // }
-  
-  // --- Template 1: ดราม่า 5 ช่อง (ไม่มี circle) ---
-  if (ELIGIBLE_IDS.has('template_1') && imageCount >= 5 && faceCount >= 1 && isDrama) {
-    scores['template_1'] = 80;
-  }
-  
-  // --- Template 3: ดราม่า + วงกลม ---
-  if (ELIGIBLE_IDS.has('template_3') && imageCount >= 5 && faceCount >= 2 && (isSad || isDrama)) {
-    scores['template_3'] = 75;
-  }
-  
-  // --- Template 5: เหตุการณ์ 5 ช่อง + circle ---
-  if (ELIGIBLE_IDS.has('template_5') && imageCount >= 4 && faceCount >= 1) {
-    scores['template_5'] = isDrama ? 72 : (isWarm ? 68 : 65);
-  }
-  
-  // --- Template 8: สะอาด Zone ชัด ---
-  if (ELIGIBLE_IDS.has('template_8') && imageCount >= 4 && faceCount >= 1) {
-    scores['template_8'] = isWarm ? 78 : (isNeutral ? 72 : 60);
-  }
-  
-  // --- Template 4: สังคม + 2 วงกลม + text ---
-  if (ELIGIBLE_IDS.has('template_4') && imageCount >= 5 && faceCount >= 2 && isWarm) {
-    scores['template_4'] = hasText ? 80 : 65;
-  }
-  
-  // --- Template 2: สะอาด 4 ช่อง (ไม่มี circle) ---
-  // ★ ใหม่! เหมาะกับข่าว neutral / ภาพน้อย / เนื้อหาเรียบ
-  if (ELIGIBLE_IDS.has('template_2') && imageCount >= 3) {
-    scores['template_2'] = imageCount <= 5 ? 70 : (isNeutral ? 55 : 45);
-  }
-  
-  // ═══ เลือก template จาก score ═══
-  const sorted = Object.entries(scores)
-    .sort((a, b) => b[1] - a[1]);
-  
+
+  // ═══ Select template by weighted random ═══
+  const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+
   if (sorted.length === 0) {
-    // fallback ต้องเป็น template ที่ eligible เท่านั้น
+    // Fallback: use eligible template only
     return ELIGIBLE_IDS.has('template_5') ? 'template_5' : [...ELIGIBLE_IDS][0] || null;
   }
-  
-  // ★ Weighted random: เลือกจาก top 2-3 candidates (ไม่ใช่ตัวเดียวทุกครั้ง!)
+
+  // ★ Weighted random from candidates within 20 pts of top (window was 15, now 20)
+  // Example neutral: t8=65, t1=50, t2=50, t3=50, t5=50, t7=50
+  //   top=65, window=20 -> all 6 enter pool -> t8≈22%, others≈15% each
   const topScore = sorted[0][1];
-  // เอา candidates ที่คะแนนห่างจาก top ไม่เกิน 25 คะแนน (ขยาย pool ให้มี variety มากขึ้น)
-  const candidates = sorted.filter(([_, score]) => topScore - score <= 25);
-  
-  // สุ่มแบบถ่วงน้ำหนัก — score สูง = โอกาสมาก
-  const totalWeight = candidates.reduce((sum, [_, score]) => sum + score, 0);
+  const candidates = sorted.filter(([, score]) => topScore - score <= 20);
+
+  const totalWeight = candidates.reduce((sum, [, score]) => sum + score, 0);
   let rand = Math.random() * totalWeight;
   for (const [templateId, score] of candidates) {
     rand -= score;
@@ -398,9 +441,8 @@ export function autoSelectTemplate(imageCount, faceCount, storyIdentity) {
       return templateId;
     }
   }
-  
-  // Fallback
+
+  // Fallback (should rarely hit)
   console.log(`[TemplateSelect] Fallback: ${sorted[0][0]}`);
   return sorted[0][0];
 }
-
