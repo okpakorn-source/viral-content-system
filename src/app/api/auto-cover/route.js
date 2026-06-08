@@ -226,16 +226,127 @@ export async function POST(request) {
       identity._newsTitle = newsTitle || '';
     }
 
-    // Step 2: Multi-agent image search
+    // ═══════════════════════════════════════════════════════
+    // Step 1.5: Entity Resolver — ค้นหา Social Profile ของตัวละครหลัก
+    // ═══════════════════════════════════════════════════════
+    let entityData = { found: false, warning: null };
+    let resolvedRelationships = { hero: { name: identity?.mainCharacter || '', searchName: identity?.mainCharacter || '' }, relationships: [], evidenceCategories: ['hero', 'interview'] };
+    let coverPlan = null;
+    let evidencePool = {};
+    let evidencePoolTotal = 0;
+
+    try {
+      if (identity?.mainCharacter) {
+        console.log(`[AutoCover] 🔍 Step 1.5: Entity Resolver → "${identity.mainCharacter}"`);
+        const { resolveEntity } = await import('@/lib/services/entityResolverService');
+        entityData = await resolveEntity(identity.mainCharacter, newsTitle || '');
+        if (entityData.warning) console.log(`[AutoCover] ⚠️ Entity: ${entityData.warning}`);
+      } else {
+        entityData.warning = 'storyIdentity ไม่สามารถระบุตัวละครหลักได้จากข่าวนี้';
+        console.log('[AutoCover] ⚠️ No mainCharacter — skipping Entity Resolver');
+      }
+    } catch (entityErr) {
+      console.error('[AutoCover] Entity Resolver failed (non-critical):', entityErr.message);
+      entityData = { found: false, warning: `Entity Resolver error: ${entityErr.message}` };
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // Step 1.6: Relationship Resolver — วิเคราะห์ตัวละครและความสัมพันธ์ในข่าว
+    // ═══════════════════════════════════════════════════════
+    try {
+      if (identity?.mainCharacter) {
+        console.log('[AutoCover] 👥 Step 1.6: Relationship Resolver...');
+        const { resolveRelationships } = await import('@/lib/services/relationshipResolverService');
+        resolvedRelationships = await resolveRelationships(identity, content || '');
+        console.log(`[AutoCover] 👥 Relationships: ${resolvedRelationships.relationships?.length || 0} found, categories: ${(resolvedRelationships.evidenceCategories || []).join(', ')}`);
+      }
+    } catch (relErr) {
+      console.error('[AutoCover] Relationship Resolver failed (non-critical):', relErr.message);
+    }
+
+    // Step 2: Multi-agent image search (parallel กับ Step 1.7–1.8)
     const { runMultiAgentImageSearch } = await import('@/lib/services/multiAgentImageScraper');
 
-    const bestImages = await runMultiAgentImageSearch(
-      sourceUrl || '',
-      sourceUrl ? 'url' : 'text',
-      identity.characters || [],
-      newsTitle || content?.substring(0, 100),
-      identity
-    );
+    // ★ Run Step 1.7 (CoverPlanner) + Step 1.8 (EvidenceLibrary) + Step 2 (MultiAgent) แบบ parallel
+    const [multiAgentResult, evidenceResult] = await Promise.allSettled([
+      // Step 2: Multi-agent image search (keyword-based เหมือนเดิม)
+      runMultiAgentImageSearch(
+        sourceUrl || '',
+        sourceUrl ? 'url' : 'text',
+        identity.characters || [],
+        newsTitle || content?.substring(0, 100),
+        identity
+      ),
+      // Step 1.7 + 1.8: CoverPlanner + EvidenceLibrary (entity-first)
+      (async () => {
+        try {
+          // Step 1.7: Cover Planner — วางแผน slot-to-category mapping
+          // (ต้องรู้ chosenTemplate ก่อน — แต่ตอนนี้ยังไม่รู้ เลยใช้ templateId จาก body หรือ 'auto')
+          // ★ ถ้า templateId='auto' → ใช้ fallback plan ก่อน (จะ refine หลัง autoSelectTemplate)
+          const planTemplateId = templateId !== 'auto' ? templateId : 'template_5';
+          console.log(`[AutoCover] 📋 Step 1.7: Cover Planner → template: ${planTemplateId}`);
+          const { planCoverLayout } = await import('@/lib/services/coverPlannerService');
+          coverPlan = await planCoverLayout(resolvedRelationships, planTemplateId, identity);
+          console.log(`[AutoCover] 📋 Cover Plan: ${coverPlan.slots?.length || 0} slots mapped (source: ${coverPlan.source})`);
+
+          // Step 1.8: Evidence Library — ค้นภาพแยกตาม category
+          console.log('[AutoCover] 📚 Step 1.8: Evidence Library...');
+          const { buildEvidenceLibrary } = await import('@/lib/services/evidenceLibrary');
+          const evLib = await buildEvidenceLibrary(resolvedRelationships, identity);
+          evidencePoolTotal = evLib.totalCount || 0;
+          evidencePool = evLib._raw || {};
+          console.log(`[AutoCover] 📚 Evidence Library: ${evidencePoolTotal} images across ${Object.keys(evidencePool).length} categories`);
+          return evLib;
+        } catch (evErr) {
+          console.error('[AutoCover] Evidence pipeline failed (non-critical):', evErr.message);
+          return null;
+        }
+      })()
+    ]);
+
+    // แยก results
+    const multiAgentImages = multiAgentResult.status === 'fulfilled' ? (multiAgentResult.value || []) : [];
+    if (multiAgentResult.status === 'rejected') {
+      console.error('[AutoCover] MultiAgent search failed:', multiAgentResult.reason?.message);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // Step 2.5: Merge Entity-First images (priority) + MultiAgent images (fallback)
+    // ═══════════════════════════════════════════════════════
+    const entityFirstImages = [];
+    if (evidencePoolTotal > 0) {
+      // แปลง evidencePool → format เดียวกับ bestImages (จาก multiAgent Judge)
+      // evidencePool[category] = [{imageUrl, query, category, entityName, ...}]
+      // bestImages format: [{url, role, score}]
+      const catToRole = {
+        hero: 'HERO_FACE',
+        mother: 'RELATIONSHIP', father: 'RELATIONSHIP', sibling: 'RELATIONSHIP',
+        child: 'RELATIONSHIP', spouse: 'RELATIONSHIP', partner: 'RELATIONSHIP',
+        caregiving: 'KEY_ACTIVITY', activity: 'KEY_ACTIVITY', work: 'KEY_ACTIVITY',
+        interview: 'PERSON_SUPPORT',
+        location: 'CONTEXT_SCENE', evidence: 'EVIDENCE',
+        relationship: 'RELATIONSHIP', family: 'RELATIONSHIP',
+      };
+
+      for (const [cat, imgs] of Object.entries(evidencePool)) {
+        const role = catToRole[cat] || 'PERSON_SUPPORT';
+        for (const img of (imgs || [])) {
+          if (img.imageUrl) {
+            entityFirstImages.push({
+              url: img.imageUrl,
+              role,
+              score: cat === 'hero' ? 9 : 7, // entity-first images ได้ score สูงกว่า
+              source: 'entity_first',
+              evidenceCat: cat,
+            });
+          }
+        }
+      }
+      console.log(`[AutoCover] 🔀 Step 2.5: Merged ${entityFirstImages.length} entity-first + ${multiAgentImages.length} multiAgent images`);
+    }
+
+    // รวม: entity-first มาก่อน (priority) → multiAgent ตามหลัง
+    const bestImages = [...entityFirstImages, ...multiAgentImages];
 
     if (!bestImages || bestImages.length === 0) {
       return NextResponse.json(
@@ -652,6 +763,10 @@ export async function POST(request) {
       newsHash,
       cachedImages: imageBuffers.length,
       caseId: caseResult?.caseId || null,
+      entityFound: entityData?.found || false,
+      entityWarning: entityData?.warning || null,
+      evidenceCategories: resolvedRelationships?.evidenceCategories || [],
+      evidenceImageCount: evidencePoolTotal || 0,
       identity: {
         mainCharacter: identity.mainCharacter,
         emotion: identity.emotion,
