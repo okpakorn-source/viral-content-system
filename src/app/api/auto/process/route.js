@@ -43,7 +43,7 @@ const rlog = createLogger('AUTO-PROCESS');
  * Called after successful processing so Discord/queue content also gets archived.
  * Fire-and-forget — does not block the response.
  */
-async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, workflowId, archivedBy }) {
+async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, workflowId, archivedBy, coverImage }) {
   try {
     if (!newsData?.newsTitle && !newsData?.newsBody) return;
     
@@ -89,6 +89,7 @@ async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, wo
       word_count: wordCount,
       used_count: 0,
       last_used_at: null,
+      cover_image: coverImage || null,
       archived_by: archivedBy || 'auto-server',
       archived_at: now,
       workflow_id: workflowId || null,
@@ -197,6 +198,7 @@ export async function POST(request) {
             sourceType: detection.inputType,
             workflowId: _wfId,
             archivedBy: 'discord-bot',
+            coverImage: delegateRes.autoCoverResult?.success ? delegateRes.autoCoverResult.base64 : null,
           }).catch(() => {});
         }
 
