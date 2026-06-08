@@ -702,6 +702,13 @@ ${sourceUrlMap}
 
 🔗 ความสัมพันธ์หลัก: "${identity?.coreStory?.relationship || 'ไม่ระบุ'}"
 
+★★★ STORY SUBJECT (สำคัญที่สุดบนปก!) ★★★
+"${identity?._storySubject || identity?.coreStory?.storySubject || identity?.coreStory?.relationship || 'ไม่ระบุ'}"
+→ ข่าวนี้กำลังเล่าเรื่องของ "${identity?._storySubject || identity?.coreStory?.relationship || mainChar}"
+→ ภาพที่แสดง STORY SUBJECT นี้ให้ score สูงสุด (8-10)
+→ ภาพตัวเอก (${mainChar}) แต่ไม่มี story subject → score ≤ 4
+→ ห้ามให้ score สูงกับภาพ glamour/fashion/celebrity portrait ที่ไม่เกี่ยวข่าว!
+
 ⛔⛔⛔ STORY FORBIDDEN — SCORE = 0 ทันที ⛔⛔⛔
 สิ่งต่อไปนี้ห้ามใช้เป็น dominant visual ในข่าวนี้:
 ${(identity?.coreStory?.negativeFocus || []).map(f => `- ${f}`).join('\n') || '- (ไม่มี negativeFocus)'}

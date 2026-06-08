@@ -270,11 +270,17 @@ export async function POST(request) {
       const _hero = identity.mainCharacter || '';
       const _action = identity.coreStory?.celebratedAction || '';
       const _rel = identity.coreStory?.relationship || '';
+      const _subject = identity.coreStory?.storySubject || '';  // ★ ใคร/อะไรที่ข่าวเล่าถึงจริงๆ
       const _sq = identity.searchQueries || {};
 
-      if (_hero && (_action || _rel)) {
+      console.log(`[AutoCover] ★ STORY FOCUS: hero="${_hero}" | storySubject="${_subject}" | relationship="${_rel}" | celebratedAction="${_action}"`);
+
+      if (_hero && (_action || _rel || _subject)) {
         // Core queries — ทุก Agent MUST search เหล่านี้ก่อน
         const core = [
+          // ★★★ storySubject ก่อนเสมอ — ข่าวเล่าเรื่องใคร?
+          (_subject && _subject !== _hero) ? `${_hero} ${_subject}` : null,
+          (_subject && _subject !== _hero) ? _subject : null,  // ค้น storySubject ตรงๆ
           _rel  ? `${_hero} ${_rel}` : null,
           _action ? `${_hero} ${_action}` : null,
           (_rel && _action) ? `${_hero} ${_rel} ${_action}` : null,
@@ -291,12 +297,14 @@ export async function POST(request) {
 
         identity.coreImageQueries = core;
         identity.optionalContextQueries = optional;
+        identity._storySubject = _subject || _rel || _action; // ★ ใช้ใน Vision Judge
         console.log(`[AutoCover] ★ coreImageQueries: ${JSON.stringify(core)}`);
+        console.log(`[AutoCover]   storySubject:     "${_subject || '(same as hero)'}"`);
         console.log(`[AutoCover]   optionalContext:  ${JSON.stringify(optional)}`);
       } else {
         identity.coreImageQueries = [];
         identity.optionalContextQueries = [];
-        console.log(`[AutoCover] ⚠️ coreImageQueries EMPTY — hero="${_hero}" action="${_action}" rel="${_rel}"`);
+        console.log(`[AutoCover] ⚠️ coreImageQueries EMPTY — hero="${_hero}" subject="${_subject}" action="${_action}" rel="${_rel}"`);
       }
     }
 

@@ -131,6 +131,7 @@ export async function analyzeStoryIdentity(newsTitle, breakdownData) {
 
   "coreStory": {
     "relationship": "ชื่อ/บทบาทตัวละครรองที่สำคัญที่สุด (เช่น แม่, ลูก, สามี)",
+    "storySubject": "★★★ ใคร/อะไรที่ข่าวกำลังเล่าถึงจริงๆ — อาจไม่ใช่ตัวเอก! ตัวอย่าง: ข่าวชมพู่เล่าเรื่องลูก → storySubject='สายฟ้า-พายุ', ข่าวหมอโบว์เล่าเรื่องแม่ → storySubject='แม่' ถ้าเป็นตัวเอกเองให้ใส่ชื่อตัวเอก",
     "sacrifice": "สิ่งที่ตัวเอกเสียสละ/ทำเพื่อ (เช่น ลาออกราชการ สูญเงิน 10 ล้าน) — null ถ้าไม่มี",
     "emotionalHook": "ประโยคสั้นๆ 1 ประโยคที่ทำให้คนกดอ่าน (สะท้อนแก่นข่าวจริง)",
     "celebratedAction": "สิ่งที่ข่าวยกย่อง/ชื่นชม ในรูปกิจกรรม เช่น ดูแลแม่อัลไซเมอร์ 9 ปี, ช่วยเหลือชุมชน (ไม่ใช่อาชีพ)",
@@ -149,6 +150,17 @@ export async function analyzeStoryIdentity(newsTitle, breakdownData) {
 - relationship: ใส่ชื่อ/บทบาทของตัวละครรองที่ข่าวพูดถึงมากที่สุด
 - sacrifice: สิ่งที่ตัวเอกเสียสละจริงๆ ในข่าวนี้ (ถ้าไม่มีให้ใส่ null)
 - emotionalHook: ประโยคสั้น 1 ประโยคที่จับใจความแก่นข่าว
+
+★★★ storySubject RULES (สำคัญมาก!):
+  ข่าวส่วนใหญ่ตัวเอก (mainCharacter) ไม่ใช่สิ่งที่ปกควรเน้น!
+  ถามตัวเองว่า "ข่าวกำลังเล่าเรื่องของใคร/อะไร?"
+  ตัวอย่าง:
+    ข่าวชมพู่เล่าเรื่องลูก → storySubject = "สายฟ้า-พายุ"
+    ข่าวหมอโบว์ดูแลแม่ → storySubject = "แม่"
+    ข่าวนักร้องบริจาค → storySubject = "ผู้รับบริจาค/เด็กๆ ที่ได้รับ"
+    ข่าวดาราให้สัมภาษณ์เรื่องตัวเอง → storySubject = ชื่อดารา (เป็นตัวเอง)
+  coverVisualWeight: storySubject ต้องได้ visual weight มากที่สุดบนปก!
+
 ★ celebratedAction: สิ่งที่ข่าวต้องการให้คนชื่นชม (ไม่ใช่อาชีพ แต่เป็นการกระทำ)
   ตัวอย่าง ข่าวหมอโบว์: "ดูแลแม่อัลไซเมอร์ 9 ปี" ไม่ใช่ "รักษาช้าง"
   ตัวอย่าง ข่าวก้อย: "บริจาคสร้างหลังคาโรงเรียน" ไม่ใช่ "นักแสดง"
@@ -163,6 +175,7 @@ export async function analyzeStoryIdentity(newsTitle, breakdownData) {
 - negativeFocus: สิ่งที่ไม่ใช่แก่นข่าว แต่อาจ dominate cover ได้ถ้าไม่ระวัง
   ตัวอย่าง: ข่าวหมอโบว์ → "elephant", "vet work", "animal treatment" ควรอยู่ใน negativeFocus
 - contextOnly: คำ/บริบทที่เป็นแค่ background (เช่น ชื่อโรงพยาบาลที่ทำงาน)`;
+
 
     // ★ Retry: ถ้า 503 → รอ 2 วิ แล้วลองใหม่
     let lastError;
