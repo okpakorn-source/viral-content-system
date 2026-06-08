@@ -1096,7 +1096,10 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
 ## ★★★ Subjects หลัก (คนที่อยู่ในข่าว): ${subjectsStr}
 คนอื่นที่ไม่เกี่ยวกับ subjects เหล่านี้ = คนแปลก → relevance <= 2!
 
-## ตัวละครหลัก: ${identity?.mainCharacter || 'ไม่ระบุ'}
+## ตัวละครหลัก (Hero): ${identity?.mainCharacter || 'ไม่ระบุ'}
+## ★★★ STORY SUBJECT (สิ่งที่ข่าวเล่าถึงจริงๆ — สำคัญที่สุด!): ${identity?._storySubject || identity?.coreStory?.storySubject || identity?.coreStory?.relationship || 'ไม่ระบุ'}
+   → ภาพที่แสดง STORY SUBJECT นี้ต้องได้ score 8-10!
+   → ภาพ Hero คนเดียวที่ไม่มี Story Subject → score ≤ 5 เท่านั้น!
 ## สถานที่: ${identity?.location || 'ไม่ระบุ'}
 ## ประเด็นหลัก: ${identity?.keyScenes?.join(', ') || identity?.story?.substring(0, 100) || 'ไม่ระบุ'}
 
@@ -1111,23 +1114,26 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
   - ภาพสวยแต่ไม่เกี่ยวข่าว (วิวทะเล, fashion, ท่องเที่ยว, ไลฟ์สไตล์) → score ≤ 3 เท่านั้น!
   - ภาพที่เกี่ยวกับข่าวโดยตรง (กิจกรรมในข่าว, สถานที่ในข่าว, คนในข่าว) → score ≥ 7
 
-★★★ SCORING GUIDE — CHARACTER FOCUS:
+★★★ SCORING GUIDE — STORY SUBJECT FOCUS (สำคัญที่สุด):
 Give HIGH score (8-10) to images that:
-- Clearly show the main character's face (recognizable, close-up or medium-shot)
+- Clearly show the STORY SUBJECT: "${identity?._storySubject || identity?.coreStory?.storySubject || identity?.coreStory?.relationship || 'ไม่ระบุ'}"
+- Show Hero + Story Subject together (family, relationship photos)
 - Capture the KEY moment/emotion of this specific news event
-- Are from the ACTUAL event (not generic stock, not old unrelated photos)
 
 Give MEDIUM score (5-7) to images that:
-- Show the main character but in unrelated context (old interview, fashion, lifestyle)
-- Show the event location/activity WITHOUT the main character
+- Show the main character (Hero) in context that relates to the news
 - Show secondary characters related to the news
 
 Give LOW score (1-4) to images that:
-- Show only backgrounds/locations without any recognizable people
-- Are generic stock photos unrelated to this specific person or event
-- Are duplicate scenes of another already-scored image
-- Show people who are NOT subjects of this news story
-  
+- Show ONLY the Hero in unrelated context (fashion, event, red carpet) with NO story subject → score ≤ 4!
+- Are generic glamour/fashion shots of the hero alone → score 3
+- Show only backgrounds/locations without people
+- Show people who are NOT subjects of this news story → score ≤ 2
+
+★★★ CRITICAL RULE:
+- ภาพ hero คนเดียว (portrait/glamour/fashion ที่ไม่เกี่ยวข่าว) → score ≤ 4! ห้ามให้ 8-10!
+- ภาพ hero + story subject (ลูก/แม่/ครอบครัว) → score 9-10!
+
 ตัวอย่าง: ข่าว "ก้อยรัชวิน บริจาค 5 แสนให้โรงเรียน"
 - ภาพก้อยถ่ายริมทะเล → score 2 (สวยแต่ไม่เกี่ยวข่าว)
 - ภาพก้อยแต่งตัวแฟชั่น → score 2 (สวยแต่ไม่เกี่ยวข่าว)
@@ -1232,15 +1238,21 @@ ${(identity?.coreStory?.negativeFocus || []).join(', ') || 'ไม่มี'}
       item.recommendedRole
     );
     
-    // ★ Fix 4: Filter by relevance threshold — ภาพไม่เกี่ยวข่าว ห้ามเข้า layout!
+    // ★ Fix: Filter by relevance threshold — ภาพไม่เกี่ยวข่าว ห้ามเข้า layout!
     const MIN_RELEVANCE = 5;
     const relevantItems = validItems.filter(item => (item.relevance || 0) >= MIN_RELEVANCE);
     
-    // Fallback: ถ้าเหลือน้อยกว่า 3 ภาพ → ลดเกณฑ์เป็น >= 4
-    const finalCurated = relevantItems.length >= 3 
-      ? relevantItems 
-      : validItems.filter(item => (item.relevance || 0) >= 4);
-    
+    // Fallback: ถ้าเหลือน้อยกว่า 3 ภาพ → ลดเกณฑ์ลงทีละขั้น เพื่อให้มีภาพพอ
+    let finalCurated = relevantItems;
+    if (finalCurated.length < 3) {
+      finalCurated = validItems.filter(item => (item.relevance || 0) >= 3);
+      console.log(`[Curator] ⚠️ Fallback to ≥3 threshold → ${finalCurated.length} images`);
+    }
+    if (finalCurated.length < 2) {
+      finalCurated = validItems.filter(item => (item.relevance || 0) >= 1);
+      console.log(`[Curator] ⚠️ Fallback to ≥1 threshold → ${finalCurated.length} images (minimal)`);
+    }
+
     console.log(`[Curator] 🎯 Relevance filter: ${validItems.length} total → ${relevantItems.length} (≥${MIN_RELEVANCE}) → ${finalCurated.length} final`);
     
     // Log ผล Curator
