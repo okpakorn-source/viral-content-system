@@ -229,8 +229,9 @@ export async function POST(request) {
     // ════════════════════════════════════════════════════════
     // ★ PROGRAMMATIC QUERY OVERRIDE (ROOT FIX)
     // ไม่ได้พึ่ง AI ทำตาม schema — override ตาม celebratedAction จริงๆ
-    // ถ้า occupationImportance < 0.3 → ข่าวนี้ไม่ได้เกี่ยวอาชีพ
-    // force key_activity = hero + celebratedAction
+    // ★★★ ถ้า celebratedAction มี → ALWAYS override ทันที
+    //     (ลบ occupationImportance threshold — มันเข้มเกินไป)
+    //     occupation threshold ใช้แค่กับ image scoring ไม่ใช่ query gen
     // ════════════════════════════════════════════════════════
     {
       const cs = identity?.coreStory || {};
@@ -239,7 +240,8 @@ export async function POST(request) {
       const relationship = cs.relationship;
       const hero = identity?.mainCharacter || '';
 
-      if (celebratedAction && occupationImportance < 0.3 && hero && identity?.searchQueries) {
+      if (celebratedAction && hero && identity?.searchQueries) {
+        // ★ Always override — celebratedAction drives queries regardless of occupationImportance
         const sq = identity.searchQueries;
         const prevKeyActivity = sq.key_activity;
         const prevPersonContext = sq.person_context;
