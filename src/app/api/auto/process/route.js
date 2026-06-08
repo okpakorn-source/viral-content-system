@@ -252,7 +252,7 @@ export async function POST(request) {
       case 'social_pipeline': {
         const url = detection.primaryUrl || input;
         addLog('Scrape', `🌐 Scraping: ${url.slice(0, 60)}`);
-        const raw = await withTimeout(scrapeArticle(url, { baseUrl: origin }), 45000, 'scrape');
+        const raw = await withTimeout(scrapeArticle(url, { baseUrl: origin }), 30000, 'scrape');
         if (raw.fallbackUsed) fallbacksUsed.push(raw.fallbackProvider || 'jina');
         normalizedData = normalizeToSchema(raw, 'article', { originalUrl: url, inputImages: images });
         addLog('Scrape', `${raw.success ? '✅' : '⚠️'} ${raw.provider}: ${normalizedData.rawText.length}ch`);
@@ -263,7 +263,7 @@ export async function POST(request) {
       case 'tiktok_pipeline': {
         const url = detection.primaryUrl || input;
         addLog('TikTok', `🎵 Extracting TikTok: ${url.slice(0, 60)}`);
-        const raw = await withTimeout(scrapeTikTok(url, { baseUrl: origin }), 45000, 'tiktok_scrape');
+        const raw = await withTimeout(scrapeTikTok(url, { baseUrl: origin }), 30000, 'tiktok_scrape');
         if (raw.fallbackUsed) fallbacksUsed.push(raw.fallbackProvider || 'builtin_tiktok');
         normalizedData = normalizeToSchema(raw, 'tiktok', { originalUrl: url, inputImages: images });
         addLog('TikTok', `${raw.success ? '✅' : '⚠️'} ${raw.provider}: ${normalizedData.rawText.length}ch`);
@@ -274,7 +274,7 @@ export async function POST(request) {
       case 'youtube_pipeline': {
         const url = detection.primaryUrl || input;
         addLog('YouTube', `📺 Extracting YouTube: ${url.slice(0, 60)}`);
-        const raw = await withTimeout(getYouTubeData(url, { baseUrl: origin }), 45000, 'youtube_scrape');
+        const raw = await withTimeout(getYouTubeData(url, { baseUrl: origin }), 30000, 'youtube_scrape');
         if (raw.fallbackUsed) fallbacksUsed.push(raw.fallbackProvider || 'builtin_youtube');
         normalizedData = normalizeToSchema(raw, 'youtube', { originalUrl: url, inputImages: images });
         addLog('YouTube', `${raw.success ? '✅' : '⚠️'} ${raw.provider}: ${normalizedData.rawText.length}ch`);
@@ -285,7 +285,7 @@ export async function POST(request) {
       case 'facebook_pipeline': {
         const url = detection.primaryUrl || input;
         addLog('Facebook', `📘 Extracting Facebook: ${url.slice(0, 60)}`);
-        const raw = await withTimeout(scrapeFacebook(url, { baseUrl: origin }), 45000, 'facebook_scrape');
+        const raw = await withTimeout(scrapeFacebook(url, { baseUrl: origin }), 30000, 'facebook_scrape');
         if (raw.fallbackUsed) fallbacksUsed.push(raw.fallbackProvider || 'jina');
         normalizedData = normalizeToSchema(raw, 'facebook', { originalUrl: url, inputImages: images });
         addLog('Facebook', `${raw.success ? '✅' : '⚠️'} ${raw.provider}: ${normalizedData.rawText.length}ch`);
@@ -418,7 +418,7 @@ export async function POST(request) {
       mode:       'extract',
       workflowId: _wfId,
       user:       body.user || null,
-    }), 60000, 'extract');
+    }), 45000, 'extract');
     if (!extractRes.success || !extractRes.data?.newsBody) {
       return NextResponse.json({
         success:    false,
@@ -439,7 +439,7 @@ export async function POST(request) {
       newsTitle:  newsData.newsTitle,
       workflowId: _wfId,
       user:       body.user || null,
-    }), 60000, 'breakdown');
+    }), 45000, 'breakdown');
     const breakdownData = breakRes.success ? breakRes.data : null;
     if (breakdownData) addLog('Breakdown', `✅ ${breakdownData.possible_angles?.length || 0} angles`);
 
@@ -453,7 +453,7 @@ export async function POST(request) {
         breakdownData: breakdownData,
         workflowId: _wfId,
         user: body.user || null,
-      }), 60000, 'blueprint');
+      }), 45000, 'blueprint');
       if (bpRes?.success) blueprintData = bpRes.data?.blueprint || null;
       addLog('Blueprint', blueprintData ? blueprintData.core_emotion : 'skipped');
     } catch (bpErr) {
