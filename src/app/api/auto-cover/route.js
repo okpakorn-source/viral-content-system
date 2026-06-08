@@ -762,6 +762,54 @@ export async function POST(request) {
       // Keep default score 7
     }
 
+    // ★ FIX 4: Story Match Validator — ถามว่าปกนี้เล่าเรื่องถูกไหม (ไม่ regenerate อัตโนมัติ — บันทึก storyMatchScore ใน response)
+    let storyMatchScore = null;
+    let storyMatchReason = null;
+    let viewerImpression = null;
+    let dominantElement = null;
+    try {
+      if (identity?.coreStory?.emotionalHook && coverBuffer) {
+        const { GoogleGenerativeAI: _SmGAI } = await import('@google/generative-ai');
+        const smGenAI = new _SmGAI(process.env.GEMINI_API_KEY);
+        const smModel = smGenAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+        const storyMatchPrompt = `You are a cover critic. Look at this news cover image.
+
+Describe in ONE sentence what story the viewer will think this cover is about.
+(Answer based on what you see, ignore any article text)
+
+Then compare to the TARGET STORY: "${identity.coreStory.emotionalHook}"
+
+Return JSON without markdown:
+{
+  "viewerImpression": "what viewer thinks this story is about",
+  "storyMatch": 0-10,
+  "reason": "why match or mismatch",
+  "dominantElement": "what takes up the most visual space"
+}`;
+        const smResult = await smModel.generateContent([
+          storyMatchPrompt,
+          { inlineData: { data: coverBuffer.toString('base64'), mimeType: 'image/jpeg' } }
+        ]);
+        const smText = smResult.response.text().trim();
+        const smMatch = smText.match(/```(?:json)?\s*({[\s\S]*?})\s*```/) || smText.match(/({[\s\S]*?"storyMatch"[\s\S]*?})/);
+        if (smMatch) {
+          const smData = JSON.parse(smMatch[1] || smMatch[0]);
+          storyMatchScore = smData.storyMatch;
+          storyMatchReason = smData.reason;
+          viewerImpression = smData.viewerImpression;
+          dominantElement = smData.dominantElement;
+          if (storyMatchScore < 5) {
+            console.warn(`[AutoCover] ⚠️ Story Match LOW: ${storyMatchScore}/10 — ${storyMatchReason}`);
+            console.warn(`[AutoCover] ⚠️ Viewer impression: "${viewerImpression}" | Dominant: "${dominantElement}"`);
+          } else {
+            console.log(`[AutoCover] ✅ Story Match: ${storyMatchScore}/10 — ${storyMatchReason}`);
+          }
+        }
+      }
+    } catch (smErr) {
+      console.warn('[AutoCover] Story Match Validator error:', smErr.message);
+    }
+
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`[AutoCover] ✅ Complete! Score: ${score}/10, Time: ${elapsed}s, Template: ${chosenTemplate}`);
 
@@ -852,6 +900,11 @@ export async function POST(request) {
         emotion: identity.emotion,
         coverEmotion: identity.coverEmotion,
       },
+      // ★ FIX 4: Story Match Validator results
+      storyMatchScore: storyMatchScore ?? null,
+      storyMatchReason: storyMatchReason ?? null,
+      viewerImpression: viewerImpression ?? null,
+      dominantElement: dominantElement ?? null,
       // Gallery: ภาพทั้งหมดที่ค้นมา + role/score (thumbnail สร้างทีหลัง)
       gallery: imageBuffers.map((img, i) => {
         const fd = faceDataMap?.get?.(String(i));
@@ -1472,6 +1525,46 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
       
       if (photoOrder.length < slotCount) {
         console.log(`[assignSlots] ⚠️ Still only ${photoOrder.length}/${slotCount} images after fill`);
+      }
+    }
+
+    // ★ FIX 5: Negative Evidence Rules — ห้าม negativeFocus อยู่ใน hero/circle slots
+    // ถ้า coreStory ไม่มี → fallback: ใช้ logic เดิม
+    const negFocusTerms = identity?.coreStory?.negativeFocus || [];
+    const coreStoryAnchor = identity?.coreStory?.sacrifice || identity?.coreStory?.relationship || null;
+    if (negFocusTerms.length > 0) {
+      console.log(`[assignSlots] ★ NEGATIVE EVIDENCE RULES active — blocked: ${negFocusTerms.join(', ')}`);
+      if (coreStoryAnchor) {
+        console.log(`[assignSlots] ★ CORE STORY ANCHOR: "${coreStoryAnchor}" — remaining slots must reflect this`);
+      }
+      // ตรวจว่าภาพโดน flag หรือเปล่า (url/role) มีคำใน negativeFocus
+      const isNegativeImage = (imgIdx) => {
+        const img = imageBuffers[imgIdx];
+        if (!img) return false;
+        const textToCheck = `${img.url || ''} ${img.role || ''}`.toLowerCase();
+        return negFocusTerms.some(neg => textToCheck.includes(neg.toLowerCase()));
+      };
+      // ★ Hero slot guard: ถ้า hero ตาม negativeFocus → swap กับ alt ที่มีหน้าคน
+      if (heroIndex !== undefined && isNegativeImage(heroIndex)) {
+        const altHero = photoOrder.find(i => i !== heroIndex && !isNegativeImage(i) && (faceDataMap?.get?.(String(i))?.hasFaces));
+        if (altHero !== undefined) {
+          console.warn(`[assignSlots] ⚠️ FIX5: Hero #${heroIndex} in negativeFocus → swapping to #${altHero}`);
+          const heroPos = photoOrder.indexOf(heroIndex);
+          const altPos = photoOrder.indexOf(altHero);
+          if (heroPos >= 0 && altPos >= 0) {
+            photoOrder[heroPos] = altHero;
+            photoOrder[altPos] = heroIndex;
+          }
+          heroIndex = altHero;
+        }
+      }
+      // ★ Circle slot guard: ถ้า circle ตาม negativeFocus → swap กับ alt
+      if (circleIndex !== undefined && isNegativeImage(circleIndex)) {
+        const altCircle = photoOrder.find(i => i !== heroIndex && i !== circleIndex && !isNegativeImage(i));
+        if (altCircle !== undefined) {
+          console.warn(`[assignSlots] ⚠️ FIX5: Circle #${circleIndex} in negativeFocus → swapping to #${altCircle}`);
+          circleIndex = altCircle;
+        }
       }
     }
 
