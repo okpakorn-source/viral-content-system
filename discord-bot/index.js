@@ -252,7 +252,7 @@ async function processNewsJob(job) {
     // 2. Poll for result
     const statusUrl = queueUrl.replace('/api/queue/add', '/api/queue/status');
     const workerUrl = queueUrl.replace('/api/queue/add', '/api/queue/worker');
-    const maxPollTime = 10 * 60 * 1000; // 10 minutes (pipeline ~5.5min + queue wait)
+    const maxPollTime = 15 * 60 * 1000; // 15 minutes (pipeline ~8min + queue wait)
     const pollStartTime = Date.now();
     let lastStatus = '';
     let data = null;
@@ -356,16 +356,21 @@ async function processNewsJob(job) {
       throw new Error(data.error || 'API Processing Failed');
     }
 
-    // ดึงเวอร์ชันทั้งหมด (รองรับสูงสุด 10 เวอร์ชันเพื่อส่งมอบทั้ง Classic และ Enhanced)
+    // ดึงเวอร์ชันทั้งหมด (รองรับสูงสุด 10 เวอร์ชัน)
     const allVersions = data.analysisResult?.versions || data.data?.analysisResult?.versions || [];
     const versionsToShow = allVersions.slice(0, 10);
-    
+
+    // ดึง newsTitle และ caseId จาก path ที่ถูกต้อง
+    const newsTitle = data.data?.newsData?.newsTitle || data.newsData?.newsTitle || data.data?.analysisResult?.newsTitle || 'ไม่ทราบหัวข้อ';
+    const caseId = data.data?.caseId || data.caseId || null;
+    const logLink = caseId ? `\n🔗 ดูผลลัพธ์เต็ม: ${(process.env.API_URL || 'http://localhost:3001').replace('/api/auto/process','')}/generation-logs/${caseId}` : '';
+
     if (versionsToShow.length === 0) {
       throw new Error('ไม่พบเนื้อหาที่สร้างเสร็จ');
     }
 
     const jobTime = ((Date.now() - jobStartTime) / 1000).toFixed(1);
-    await processingMsg.edit({ content: `✅ สร้างเนื้อหาสำเร็จแล้ว! (${versionsToShow.length} เวอร์ชัน | ใช้เวลา ${jobTime}s)` });
+    await processingMsg.edit({ content: `✅ **สร้างข่าวสำเร็จ!** ${versionsToShow.length} เวอร์ชัน | ใช้เวลา ${jobTime}s\n📰 **${newsTitle.slice(0, 80)}**${logLink}` });
 
     // ดึง Research items — ลอง path ทั้งหมดที่เป็นไปได้
     const researchItems = data.data?.researchItems 
@@ -390,11 +395,12 @@ async function processNewsJob(job) {
         const isEnhanced = v._source === 'enhanced';
         const promptId = v.promptId || (data.data?.usedPromptInfo?.name ? 'Dynamic' : 'Unknown');
         
+        const embedTitle = `[${versionLabel}] ${newsTitle}`.slice(0, 250);
         const embed = new EmbedBuilder()
-          .setColor(isEnhanced ? '#10b981' : '#f91880') // สีเขียวสำหรับ Enhanced, สีชมพูสำหรับ Classic
-          .setTitle(`[${versionLabel}] ${data.newsData?.newsTitle || 'AI Content Result'}`.slice(0, 250))
+          .setColor(isEnhanced ? '#10b981' : '#f91880')
+          .setTitle(embedTitle)
           .setDescription(`${(v.content || 'ไม่พบเนื้อหา').slice(0, 3800)}\n\n---\n*🔥 โพสต์แล้วปัง? พิมพ์ \`!ปัง ${promptId}\` เพื่อสอนให้ระบบเก่งขึ้น!*`)
-          .setFooter({ text: `สร้างโดย Pipeline: ${data.detection?.pipelineLabel || 'Universal'} | PromptID: ${promptId}` });
+          .setFooter({ text: `Pipeline: ${data.data?.detection?.pipelineLabel || data.detection?.pipelineLabel || 'Universal'} | PromptID: ${promptId} | เวลา: ${jobTime}s` });
 
         return embed;
       });

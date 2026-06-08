@@ -245,7 +245,7 @@ function NewContentPageInner() {
     }
 
     setQueuePolling(false);
-    throw new Error('หมดเวลารอคิว (8 นาที) กรุณาลองใหม่');
+    throw new Error('หมดเวลารอคิว (12 นาที) กรุณาลองใหม่');
   };
 
   // === ⚡ Auto Mode — วาง URL → ได้ผลลัพธ์ ===
@@ -290,7 +290,7 @@ function NewContentPageInner() {
         { at: 60,  fn: () => { wfComplete('auto_breakdown', 'วิเคราะห์มุมข่าวสำเร็จ'); wfStart('auto_blueprint', { model: 'GPT-5.5', api: '/api/summarize?mode=blueprint', detail: 'วาง emotional arc: hook → twist → CTA...' }); } },
         { at: 78,  fn: () => { wfComplete('auto_blueprint', 'วาง Blueprint สำเร็จ'); wfStart('auto_research', { api: 'Serper Google Search API', detail: 'ค้นหาข้อเท็จจาก Google × angles...' }); } },
         { at: 95,  fn: () => { wfComplete('auto_research', 'ค้นหาข้อมูลสำเร็จ'); wfStart('auto_classic', { model: 'Claude Sonnet 4', api: '/api/summarize?mode=analyze', detail: 'Angle 1: Research → Generate 2 เวอร์ชัน...' }); } },
-        { at: 200, fn: () => { wfComplete('auto_classic', 'Angle 1 สำเร็จ'); wfStart('auto_enhanced', { model: 'Claude Sonnet 4', api: '/api/summarize?mode=analyze', detail: 'Angle 2: Research → Generate 2 เวอร์ชัน...' }); } },
+        { at: 200, fn: () => { wfComplete('auto_classic', '✅ Angle 1 สำเร็จ'); wfStart('auto_enhanced', { model: 'Claude Sonnet 4', api: '/api/summarize?mode=analyze', detail: 'กำลังเขียน Angle 2 + Blueprint inject + research facts — อาจใช้เวลา 2-4 นาที...' }); } },
       ];
       const animateStart = Date.now();
       let animateIdx = 0;
@@ -516,7 +516,7 @@ function NewContentPageInner() {
         { at: 60,  fn: () => { wfComplete('auto_breakdown', 'วิเคราะห์มุมข่าวสำเร็จ'); wfStart('auto_blueprint', { model: 'GPT-5.5', api: '/api/summarize?mode=blueprint', detail: 'วาง emotional arc: hook → twist → CTA...' }); } },
         { at: 78,  fn: () => { wfComplete('auto_blueprint', 'วาง Blueprint สำเร็จ'); wfStart('auto_research', { api: 'Serper Google Search API', detail: 'ค้นหาข้อเท็จจาก Google × angles...' }); } },
         { at: 95,  fn: () => { wfComplete('auto_research', 'ค้นหาข้อมูลสำเร็จ'); wfStart('auto_classic', { model: 'Claude Sonnet 4', api: '/api/summarize?mode=analyze', detail: 'Multi-Angle generate × 3 angles ทำพร้อมกัน...' }); } },
-        { at: 170, fn: () => { wfComplete('auto_classic', 'สร้าง Classic สำเร็จ'); wfStart('auto_enhanced', { model: 'Claude Sonnet 4', api: '/api/summarize?mode=analyze (enhanced)', detail: 'Enhanced + Blueprint inject + research facts...' }); } },
+        { at: 170, fn: () => { wfComplete('auto_classic', '✅ สร้าง Classic สำเร็จ'); wfStart('auto_enhanced', { model: 'Claude Sonnet 4', api: '/api/summarize?mode=analyze (enhanced)', detail: 'กำลังเขียน Enhanced + Blueprint inject + research facts — อาจใช้เวลา 2-4 นาที...' }); } },
       ];
       const animateStart = Date.now();
       let animateIdx = 0;
@@ -621,7 +621,7 @@ function NewContentPageInner() {
       setAutoProgress('');
     } catch (err) {
       wfFail(err.failedStep || (err.name === 'AbortError' ? 'u_timeout' : 'u_unknown'), err.message);
-      setError('❌ ' + (err.name === 'AbortError' ? 'หมดเวลา (Timeout 5 นาที) กรุณาลองใหม่' : err.message));
+      setError('❌ ' + (err.name === 'AbortError' ? 'หมดเวลา (Timeout 12 นาที) กรุณาลองใหม่' : err.message));
       setAutoProgress('');
     } finally {
       setAutoMode(false);
