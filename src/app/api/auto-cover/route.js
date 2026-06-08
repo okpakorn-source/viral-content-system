@@ -847,43 +847,55 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
         heroIndex = withFace.length > 0 ? withFace[withFace.length - 1].index : 0;
       }
 
-      // Circle: ★★★ Smart Slot Assignment (จากสูตรปกตัวอย่าง 5 ภาพ)
-      // ปกที่ชนะ: Circle = RELATIONSHIP (ภาพคู่/เซลฟี่ ≥2 คน) > EVIDENCE > EMOTION > HERO ตัว 2
+      // Circle: ★★★ Smart Slot Assignment
+      // ★ FIX: Circle ต้องเป็นภาพหน้า 1 คนชัด — ห้ามใช้ภาพโซเชลฟี่/กลุ่มที่มีคนมากกว่า 1
       if (hasCircle) {
-        // ★ Step 1: RELATIONSHIP ที่มี ≥ 2 faces (ตรงสูตรมากที่สุด!)
-        const relationWithFaces = byRole.RELATIONSHIP
-          .filter(x => x.index !== heroIndex && x.faceData.faceCount >= 2 && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
+        // ★ Step 1 (BEST): HERO_FACE ที่มี faceCount === 1 (ไม่ใช่ hero หลัก) — ภาพหน้าชัดสุดสำหรับวงกลม!
+        const singleFaceHero = [...byRole.HERO_FACE, ...byRole.HERO]
+          .filter(x => x.index !== heroIndex && x.faceData.faceCount === 1);
         
-        // ★ Step 2: RELATIONSHIP ทั้งหมด (แม้ไม่รู้จำนวน face)
-        const relationAll = byRole.RELATIONSHIP
-          .filter(x => x.index !== heroIndex && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
+        // ★ Step 2: PERSON_SUPPORT ที่มี faceCount === 1 และ curatorScore >= 4
+        const singleFacePerson = byRole.PERSON_SUPPORT
+          .filter(x => x.index !== heroIndex && x.faceData.faceCount === 1 && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
         
-        // ★ Step 3: EVIDENCE/EMOTION ที่เกี่ยวข่าว
-        const evidenceEmotion = [...byRole.EVIDENCE, ...byRole.EMOTION]
-          .filter(x => x.index !== heroIndex && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
+        // ★ Step 3: RELATIONSHIP ที่มี faceCount === 1 (ภาพ portrait เดี่ยว)
+        const singleFaceRelation = byRole.RELATIONSHIP
+          .filter(x => x.index !== heroIndex && x.faceData.faceCount === 1 && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
         
-        // ★ Step 4: HERO ตัว 2 / PERSON_SUPPORT (ภาพอีกมุม)
-        const personFallback = [...heroCandidates.slice(1), ...byRole.PERSON_SUPPORT]
-          .filter(x => x.index !== heroIndex && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
+        // ★ Step 4: EMOTION/EVIDENCE ที่มี face เดียว
+        const singleFaceEmotion = [...byRole.EMOTION, ...byRole.EVIDENCE]
+          .filter(x => x.index !== heroIndex && x.faceData.faceCount === 1 && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
         
-        // ★ Step 5: รวมทั้งหมด fallback score >= 2
-        const allFallback = [
+        // ★ Step 5: ภาพอะไรก็ได้ที่มี faceCount === 1 (score >= 2)
+        const anySingleFace = imageBuffers
+          .map((img, i) => ({ index: i, faceData: faceDataMap.get(String(i)) || {}, score: img.curatorScore || 0 }))
+          .filter(x => x.index !== heroIndex && (x.faceData.faceCount === 1) && x.score >= 2);
+        
+        // ★ Step 6 (LAST RESORT): ภาพใดก็ได้ที่ไม่ใช่ hero (ยอมให้มีวงกลมดีกว่าน circle)
+        const anyFallback = [
           ...byRole.RELATIONSHIP, ...byRole.EVIDENCE, ...byRole.EMOTION,
           ...heroCandidates.slice(1), ...byRole.CONTEXT_SCENE, ...byRole.SUPPORT,
         ].filter(x => x.index !== heroIndex && (imageBuffers[x.index]?.curatorScore || 0) >= 2);
 
-        // เลือกตาม priority
-        const circlePool = relationWithFaces.length > 0 ? relationWithFaces
-          : relationAll.length > 0 ? relationAll
-          : evidenceEmotion.length > 0 ? evidenceEmotion
-          : personFallback.length > 0 ? personFallback
-          : allFallback;
+        // เลือกตาม priority — single-face ก่อนเสมอ
+        const circlePool = singleFaceHero.length > 0 ? singleFaceHero
+          : singleFacePerson.length > 0 ? singleFacePerson
+          : singleFaceRelation.length > 0 ? singleFaceRelation
+          : singleFaceEmotion.length > 0 ? singleFaceEmotion
+          : anySingleFace.length > 0 ? anySingleFace
+          : anyFallback;
 
         if (circlePool.length > 0) {
           circleIndex = circlePool[0].index;
-          const chosenRole = circlePool[0].role;
-          const faces = circlePool[0].faceData?.faceCount || 0;
-          console.log(`[assignSlots] ★ Circle: image #${circleIndex} (${chosenRole}, faces: ${faces}, score: ${imageBuffers[circleIndex]?.curatorScore || 0}) — ${relationWithFaces.length > 0 ? '✅ RELATIONSHIP match!' : 'fallback'}`);
+          const chosenRole = imageBuffers[circleIndex]?.role || circlePool[0].role || '?';
+          const faces = faceDataMap.get(String(circleIndex))?.faceCount || 0;
+          const pickedStep = singleFaceHero.length > 0 ? 'HERO single-face'
+            : singleFacePerson.length > 0 ? 'PERSON single-face'
+            : singleFaceRelation.length > 0 ? 'RELATION single-face'
+            : singleFaceEmotion.length > 0 ? 'EMOTION single-face'
+            : anySingleFace.length > 0 ? 'any single-face'
+            : 'fallback';
+          console.log(`[assignSlots] ★ Circle: image #${circleIndex} (${chosenRole}, faces: ${faces}, score: ${imageBuffers[circleIndex]?.curatorScore || 0}) [${pickedStep}]`);
         } else {
           // ★ ถ้าไม่มีเลย → ใช้ hero ซ้ำ ดีกว่าภาพไม่เกี่ยว
           const otherHero = heroCandidates.filter(x => x.index !== heroIndex);

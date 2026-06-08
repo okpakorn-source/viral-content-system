@@ -24,6 +24,9 @@ const EDITORIAL_GEOMETRY = {
   minImageSpacing: 10,
 };
 
+// ★ FIX: วงกลมต้องใหญ่พอดูรู้เรื่อง — ถ้า SmartPlace จะหดต่ำกว่านี้ให้ยอมทับ obstacle แทน
+const MIN_RENDERED_CIRCLE = 320; // px — ต่ำกว่านี้หน้าคนดูไม่ออก
+
 // ═══ THAI FONT LOADER (base64 embed) ═══
 const THAI_FONT_PATH = (() => {
   try {
@@ -837,12 +840,22 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
     const circlePlacement = findBestPosition(defCX, defCY, fullD, fullD);
     layoutCircle.x = circlePlacement.x;
     layoutCircle.y = circlePlacement.y;
-    if (circlePlacement.w < fullD) {
-      layoutCircle.diameter = circlePlacement.w - cbw;
+    
+    // ★ FIX: ถ้า SmartPlace หด circle ต่ำกว่า MIN_RENDERED_CIRCLE → reset กลับ default
+    // ยอมทับ obstacle ดีกว่าทำให้หน้าคนเล็กจนดูไม่ออก!
+    const renderedDiameter = circlePlacement.w < fullD ? circlePlacement.w - cbw : cd;
+    if (renderedDiameter < MIN_RENDERED_CIRCLE) {
+      console.log(`[SmartPlace] ⚠️ Circle would shrink to ${renderedDiameter}px < MIN_RENDERED_CIRCLE(${MIN_RENDERED_CIRCLE}px) — keeping original size at default position`);
+      layoutCircle.x = defCX;
+      layoutCircle.y = defCY;
+      // คง diameter เดิม ไม่หด
+    } else if (circlePlacement.w < fullD) {
+      layoutCircle.diameter = renderedDiameter;
     }
-    circleCanvasRect = { x: circlePlacement.x, y: circlePlacement.y, w: circlePlacement.w, h: circlePlacement.w };
+    
+    circleCanvasRect = { x: layoutCircle.x, y: layoutCircle.y, w: (layoutCircle.diameter || cd) + cbw, h: (layoutCircle.diameter || cd) + cbw };
     if (circlePlacement.moved) {
-      console.log(`[SmartPlace] 🔵 Circle moved: (${defCX},${defCY}) → (${circlePlacement.x},${circlePlacement.y})`);
+      console.log(`[SmartPlace] 🔵 Circle moved: (${defCX},${defCY}) → (${layoutCircle.x},${layoutCircle.y}), diameter=${layoutCircle.diameter || cd}px`);
     }
   }
 
@@ -1099,15 +1112,13 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
  * เหมือน cover-tester drawCircleSlot()
  */
 async function createCircleImageColored(imageBuffer, diameter, borderWidth = 5, borderColor = '#FFFFFF', faceData = null) {
-  // Smart crop เป็นวงกลม
+  // ★ FIX: Circle slot ควรเป็นภาพหน้าเดียวชัดๆ เสมอ — ใช้ face-tight ไม่ว่าจะกี่หน้า
+  // (ระบบ assignSlots จะเลือกภาพ 1 คนมาก่อนแล้ว แต่ถ้าพลาดมาก็ zoom ที่หน้าแรก)
   let resized;
   if (faceData && faceData.hasFaces) {
-    // ★ ถ้าหลายหน้า → ใช้ center-face (ครอบทุกหน้า) ไม่ใช่ face-tight (zoom หน้าเดียว)
-    const strategy = (faceData.faceCount || faceData.faces?.length || 1) > 1 
-      ? 'center-face'   // หลายคน → ครอบทุกหน้าให้เห็นครบ
-      : 'face-tight';   // 1 คน → zoom เข้าหน้า
-    console.log(`[Composer] Circle crop: ${faceData.faceCount || faceData.faces?.length || 0} faces → ${strategy}`);
-    resized = await smartCropPhoto(imageBuffer, diameter, diameter, faceData, strategy);
+    // ★ ใช้ face-tight เสมอ — zoom เข้าหน้าแรก/หน้าหลัก ไม่ zoom ออกให้เห็นหลายคน
+    console.log(`[Composer] Circle crop: ${faceData.faceCount || faceData.faces?.length || 0} faces → face-tight (zoom to primary face)`);
+    resized = await smartCropPhoto(imageBuffer, diameter, diameter, faceData, 'face-tight');
   } else {
     // ★ fallback: ใช้ centre ไม่ใช้ top
     resized = await sharp(imageBuffer)
