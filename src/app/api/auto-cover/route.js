@@ -1010,18 +1010,25 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
               return (b.score + personBonus(b.role)) - (a.score + personBonus(a.role));
             });
           
-          // ★ ถ้าไม่มี score >= MIN_SLOT_SCORE → fallback เฉพาะภาพที่เป็น "คนถูกคน" (PERSON_SUPPORT/HERO/RELATIONSHIP)
-          // ภาพ CONTEXT/TIMELINE/EVIDENCE score ต่ำ = อาจเป็นคนอื่น/เหตุการณ์อื่น → ห้ามใช้!
+          // ★ ถ้าไม่มี score >= MIN_SLOT_SCORE → ลดเกณฑ์เป็น >= 2 สำหรับ ANY role
+          // ภาพ score ต่ำแต่มีอยู่ = ดีกว่าเว้นว่าง (ปกที่ slot ว่างดูเสีย!)
           if (relevantFallback.length === 0) {
-            const personRoles = ['PERSON_SUPPORT', 'HERO_FACE', 'RELATIONSHIP', 'EMOTION'];
             relevantFallback = remaining
-              .filter(x => !assignedIndices.has(x.index) && x.score >= 2 && personRoles.includes(x.role))
+              .filter(x => !assignedIndices.has(x.index) && x.score >= 2)
+              .sort((a, b) => b.score - a.score);
+          }
+          
+          // ★★ Ultimate fallback: ใช้ภาพ score >= 1 (ดีกว่า slot ว่าง!)
+          if (relevantFallback.length === 0) {
+            relevantFallback = remaining
+              .filter(x => !assignedIndices.has(x.index) && x.score >= 1)
               .sort((a, b) => b.score - a.score);
           }
           
           if (relevantFallback.length > 0) {
             picked = relevantFallback[0];
             assignedIndices.add(picked.index);
+            console.log(`[assignSlots] ⚠️ Slot ${si} (${slotRole}): fallback image #${picked.index} (${picked.role}, score: ${picked.score})`);
           } else {
             console.log(`[assignSlots] ⚠️ Slot ${si} (${slotRole}): ไม่มีภาพเลย — เว้นว่าง`);
           }
@@ -1091,10 +1098,27 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
       photoOrder = [heroIndex, ...remaining.slice(0, slotCount - 1)];
     }
 
-    // ★ ห้าม pad ด้วยภาพซ้ำ — ถ้าภาพไม่พอให้เว้น slot
-    // ถ้า photoOrder มีไม่ครบ ให้ใช้เท่าที่มี ไม่ loop ซ้ำ
+    // ★★★ ถ้า photoOrder ไม่ครบ → fill จากภาพที่ยังไม่ได้ใช้ (ดีกว่าเว้นว่าง!)
     if (photoOrder.length < slotCount) {
-      console.log(`[assignSlots] ⚠️ Only ${photoOrder.length}/${slotCount} unique images — slots จะเว้นว่างแทนการซ้ำ`);
+      const usedInPhoto = new Set(photoOrder);
+      if (circleIndex !== undefined) usedInPhoto.add(circleIndex);
+      if (circleSmallIndex !== undefined) usedInPhoto.add(circleSmallIndex);
+      
+      // เอาภาพที่เหลือทั้งหมด sort by score
+      const fillCandidates = imageBuffers
+        .map((img, i) => ({ index: i, score: img.curatorScore || 0 }))
+        .filter(x => !usedInPhoto.has(x.index))
+        .sort((a, b) => b.score - a.score);
+      
+      for (const c of fillCandidates) {
+        if (photoOrder.length >= slotCount) break;
+        photoOrder.push(c.index);
+        console.log(`[assignSlots] 🔄 Fill slot ${photoOrder.length}: image #${c.index} (score: ${c.score})`);
+      }
+      
+      if (photoOrder.length < slotCount) {
+        console.log(`[assignSlots] ⚠️ Still only ${photoOrder.length}/${slotCount} images after fill`);
+      }
     }
 
     console.log(`[assignSlots] Hero: ${heroIndex}, Circle: ${circleIndex}, CircleSmall: ${circleSmallIndex}`);
