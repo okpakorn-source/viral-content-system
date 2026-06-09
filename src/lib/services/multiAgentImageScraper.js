@@ -171,6 +171,11 @@ const SOURCE_RELIABILITY = {
 
 function getSourceScore(url) {
   try {
+    // ★ Handle bare domain names (e.g. "thairath.co.th" from Serper's source field)
+    const bare = url?.replace(/^www\./, '');
+    if (bare && !bare.includes('/') && SOURCE_RELIABILITY[bare] !== undefined) {
+      return SOURCE_RELIABILITY[bare];
+    }
     const hostname = new URL(url).hostname.replace(/^www\./, '');
     // Check exact match first
     if (SOURCE_RELIABILITY[hostname] !== undefined) return SOURCE_RELIABILITY[hostname];
@@ -1855,7 +1860,9 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
   // ★ Attach _meta to candidates so judgeImages can look up source page URLs for reliability scoring
   candidates._meta = allMeta;
   if (candidates.length > 100) {
+    const savedMeta = candidates._meta;
     candidates = candidates.slice(0, 100);
+    candidates._meta = savedMeta; // Preserve _meta after slice
   }
   const personCount = Math.min(gIdx, googleQueue.length);
   const contextCount = Math.min(cIdx, contextQueue.length);
