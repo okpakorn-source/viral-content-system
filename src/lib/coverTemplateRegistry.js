@@ -435,13 +435,31 @@ export function autoSelectTemplate(imageCount, faceCount, storyIdentity) {
   }
 
   // --- template_9: 3 Background Split + Central Circle ---
-  // Base 50, works well for any type of news with a single character in focus but multiple scene context images.
+  // ★ FIX 13: Best for nature/family/garden stories with enough clean unique images
+  // Rules: 4 clean unique → template_9 OK; 2-3 clean → prefer simpler template
   if (ELIGIBLE_IDS.has('template_9') && hasEnoughImages) {
     let s = 50;
     if (isNeutral) s += 15;
-    if (isWarm)    s += 10;
+    if (isWarm)    s += 25; // warm/nature stories prefer simpler layout
     if (isDrama)   s += 15;
     if (hasFace)   s += 5;
+    // ★ FIX 13: Detect nature/family from storyType or story content
+    const storyTypeDirect = (storyIdentity?.storyType || '').toLowerCase();
+    const storyText2 = `${storyTypeDirect} ${storyIdentity?.story || ''} ${storyIdentity?.coverEmotion || ''} ${(storyIdentity?.keywords || []).join(' ')}`;
+    const isNatureFamily = /family_nature|nature_learning|สวน|ที่ดิน|ธรรมชาติ|ต้นไม้|ปลูก|เลี้ยง|ฟาร์ม|garden|land|nature|farm|หลาน|ครอบครัว/i.test(storyText2);
+    if (isNatureFamily) {
+      // ★ FIX 13: Only boost if enough clean images (4+)
+      if (imageCount >= 4) {
+        s += 40; // Strongly prefer template_9 for nature/family with enough images
+        console.log('[TemplateSelect] ★ FIX 13: nature/family + ≥4 images → template_9 boosted +40');
+      } else {
+        // ★ FIX 13: With only 2-3 images, don't force 4-image layout
+        s -= 10; // Penalize template_9 — prefer template_2 (4-slot no circle) or simpler
+        console.log(`[TemplateSelect] ★ FIX 13: nature/family but only ${imageCount} images → template_9 penalized -10`);
+      }
+    }
+    // ★ FIX 13: Also prefer when image diversity is low but enough to fill 4 slots
+    if (imageCount <= 5 && imageCount >= 4) s += 10;
     scores['template_9'] = s;
   }
 
@@ -477,4 +495,9 @@ export function autoSelectTemplate(imageCount, faceCount, storyIdentity) {
   // Fallback (should rarely hit)
   console.log(`[TemplateSelect] Fallback: ${sorted[0][0]}`);
   return sorted[0][0];
+}
+
+// ★ FIX 19: Export getAllTemplateIds — was missing, causing sufficiency fallback to fail
+export function getAllTemplateIds() {
+  return ALL_TEMPLATES.filter(t => !t.disabled).map(t => t.id);
 }

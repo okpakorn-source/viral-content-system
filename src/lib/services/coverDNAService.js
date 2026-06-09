@@ -6,17 +6,18 @@
 
 // ─── DNA Map: storyType → template + layout options ───────────────────────────
 const DNA_MAP = {
-  family_care:   { templateId: 'template_7', circleNeeded: true,  desc: 'ข่าวครอบครัว/การดูแล/กตัญญู', occupationMaxPct: 0.20 },
-  drama:         { templateId: 'template_1', circleNeeded: false, desc: 'ข่าวดราม่า' },
-  donation:      { templateId: 'template_8', circleNeeded: false, desc: 'ข่าวบริจาค/ช่วยเหลือ' },
-  rescue:        { templateId: 'template_5', circleNeeded: false, desc: 'ข่าวช่วยเหลือ/กู้ภัย' },
-  celebrity:     { templateId: 'template_2', circleNeeded: true,  desc: 'ข่าวดารา/คนดัง' },
-  relationship:  { templateId: 'template_7', circleNeeded: true,  desc: 'ข่าวความสัมพันธ์/คู่รัก', occupationMaxPct: 0.15 },
-  achievement:   { templateId: 'template_8', circleNeeded: false, desc: 'ข่าวความสำเร็จ' },
-  conflict:      { templateId: 'template_3', circleNeeded: false, desc: 'ข่าวขัดแย้ง/คดี' },
-  accident:      { templateId: 'template_5', circleNeeded: false, desc: 'ข่าวอุบัติเหตุ' },
-  politics:      { templateId: 'template_1', circleNeeded: false, desc: 'ข่าวการเมือง' },
-  default:       { templateId: null,         circleNeeded: false, desc: 'ทั่วไป (ใช้ autoSelectTemplate)' },
+  family_care:            { templateId: 'template_9', circleNeeded: true,  desc: 'simple family care story layout (3-slot)' },
+  family_nature_learning: { templateId: 'template_9', circleNeeded: true,  desc: 'simple nature/family story layout (3-slot)' },
+  drama:                  { templateId: 'template_1', circleNeeded: false, desc: 'ข่าวดราม่า' },
+  donation:               { templateId: 'template_8', circleNeeded: false, desc: 'ข่าวบริจาค/ช่วยเหลือ' },
+  rescue:                 { templateId: 'template_5', circleNeeded: false, desc: 'ข่าวช่วยเหลือ/กู้ภัย' },
+  celebrity:              { templateId: 'template_2', circleNeeded: true,  desc: 'ข่าวดารา/คนดัง' },
+  relationship:           { templateId: 'template_7', circleNeeded: true,  desc: 'ข่าวความสัมพันธ์/คู่รัก', occupationMaxPct: 0.15 },
+  achievement:            { templateId: 'template_8', circleNeeded: false, desc: 'ข่าวความสำเร็จ' },
+  conflict:               { templateId: 'template_3', circleNeeded: false, desc: 'ข่าวขัดแย้ง/คดี' },
+  accident:               { templateId: 'template_5', circleNeeded: false, desc: 'ข่าวอุบัติเหตุ' },
+  politics:               { templateId: 'template_1', circleNeeded: false, desc: 'ข่าวการเมือง' },
+  default:                { templateId: null,         circleNeeded: false, desc: 'ทั่วไป (ใช้ autoSelectTemplate)' },
 };
 
 // ─── Occupation keywords ที่ต้องระวัง (อาชีพ/บริบทรอง — ห้ามครอง cover)
@@ -38,6 +39,16 @@ const STORY_TYPE_RULES = [
       'เสียสละ', 'กตัญญู', 'ออกราชการ', 'ค่าน้ำนม', 'ลืม', 'ความทรงจำ',
       'ป่วย', 'สมองเสื่อม', 'ดมนา', 'จ่ายเงิน', 'รักษา', 'เฝ้าไข้',
       'พ่อป่วย', 'แม่ป่วย', 'ลูกป่วย', 'พี่น้อง', 'น้อง', 'พี่',
+    ]
+  },
+  // ★ FIX 13: family + nature/learning — สวน ที่ดิน ธรรมชาติ ปลูก เลี้ยง หลาน
+  {
+    type: 'family_nature_learning',
+    keywords: [
+      'สวน', 'ที่ดิน', 'ไร่', 'ธรรมชาติ', 'ต้นไม้', 'ปลูก', 'เลี้ยง',
+      'ฟาร์ม', 'ขุดบ่อ', 'เลี้ยงปลา', 'สวนผัก', 'สวนผลไม้', 'มะนาว',
+      'กล้วย', 'ไก่', 'เป็ด', 'วิ่งเล่น', 'เรียนรู้ธรรมชาติ', 'สัมผัสดิน',
+      'หลาน', 'ยาย', 'ปู่', 'ตา', 'garden', 'farm', 'land',
     ]
   },
   // relationship / couple
