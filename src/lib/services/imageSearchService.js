@@ -180,6 +180,8 @@ async function planLayout(identity, imageRoles) {
 async function evaluateFinalCover(base64Image, newsTitle) {
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    // Fix: Gemini disabled
+    throw new Error('Gemini disabled');
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
 
     const prompt = `You are an elite news Art Director evaluating a composed 1080x1080 news cover for: "${newsTitle}".

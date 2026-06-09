@@ -383,14 +383,14 @@ async function downloadAndSplitStoryboard(fullSpec, videoId) {
 
 /**
  * YouTube สร้าง frame ที่ตำแหน่ง 25%, 50%, 75% ของวิดีโอโดยอัตโนมัติ
- * URLs: /vi/{id}/1.jpg, /vi/{id}/2.jpg, /vi/{id}/3.jpg
+ * URLs: /vi/{id}/hq1.jpg, /vi/{id}/hq2.jpg, /vi/{id}/hq3.jpg
  * ❌ ไม่ใช้ maxresdefault.jpg, hqdefault.jpg — เป็นภาพปก ไม่ใช่เฟรม
  */
 async function extractViaAutoFrames(videoId) {
   const frameUrls = [
-    { url: `https://img.youtube.com/vi/${videoId}/1.jpg`, label: '25%' },
-    { url: `https://img.youtube.com/vi/${videoId}/2.jpg`, label: '50%' },
-    { url: `https://img.youtube.com/vi/${videoId}/3.jpg`, label: '75%' },
+    { url: `https://img.youtube.com/vi/${videoId}/hq1.jpg`, label: '25%' },
+    { url: `https://img.youtube.com/vi/${videoId}/hq2.jpg`, label: '50%' },
+    { url: `https://img.youtube.com/vi/${videoId}/hq3.jpg`, label: '75%' },
   ];
 
   const frames = [];

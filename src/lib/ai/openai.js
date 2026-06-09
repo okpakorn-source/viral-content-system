@@ -158,53 +158,68 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
   console.log(`[callAI] prompt preview (first 500ch): ${(prompt || userPrompt || '').slice(0, 500)}`);
 
   // ★ gpt-5.5 / gpt-5.4-mini: ใช้ max_completion_tokens + ไม่รับ temperature (ใช้ default=1 เท่านั้น)
-  const isNewModel = model.startsWith('gpt-5') || model.startsWith('o1') || model.startsWith('o3');
-  
-  const response = await client.chat.completions.create({
-    model,
-    messages,
-    // ★ gpt-5.x ไม่รับ temperature ≠ 1 → ไม่ส่ง (ใช้ default)
-    ...(isNewModel ? {} : { temperature }),
-    ...(isNewModel 
-      ? { max_completion_tokens: maxTokens }
-      : { max_tokens: maxTokens }),
-    response_format: { type: 'json_object' },
-  });
-
-  const content = response.choices[0]?.message?.content;
-  
-  const inputTokens = response.usage?.prompt_tokens || 0;
-  const outputTokens = response.usage?.completion_tokens || 0;
-  console.log(`[callAI] OK: tokens=${response.usage?.total_tokens || '?'}, output=${content?.length || 0}ch`);
-  
-  // Asynchronously log usage to DB
-  logApiUsage({
-    provider: 'openai',
-    model,
-    inputTokens,
-    outputTokens,
-    feature: 'callAI'
-  });
-
-  if (!content) throw new Error('AI ไม่ส่งข้อมูลกลับ');
-
-  try {
-    const parsed = JSON.parse(content);
-
-    // === กฎเหล็ก: ตรวจจับ _error/_warning จาก AI ===
-    if (parsed._error) {
-      console.warn(`[callAI] ⚠️ AI reported error: ${parsed._error}`);
-    }
-    if (parsed._warning) {
-      console.warn(`[callAI] ⚠️ AI reported warning: ${parsed._warning}`);
-    }
-
-    // === POST-PROCESSING SAFETY FILTER ===
-    // แม้ AI จะไม่ทำตาม prompt → filter คำเสี่ยงออกจาก output ก่อน return
-    return sanitizeOutput(parsed);
-  } catch (e) {
-    console.error('[callAI] JSON parse failed:', content.slice(0, 300));
-    throw new Error('AI ส่งข้อมูลที่ parse ไม่ได้');
+  const modelsToTry = [model];
+  if (model === 'gpt-5.5') {
+    modelsToTry.push('gpt-4o');
+  } else if (model === 'gpt-5.4-mini') {
+    modelsToTry.push('gpt-4o-mini');
+  } else if (model !== 'gpt-4o') {
+    modelsToTry.push('gpt-4o');
   }
+
+  let lastError = null;
+  for (const currentModel of modelsToTry) {
+    try {
+      console.log(`[callAI] Trying model=${currentModel}`);
+      const isNewModel = currentModel.startsWith('gpt-5') || currentModel.startsWith('o1') || currentModel.startsWith('o3');
+      
+      const response = await client.chat.completions.create({
+        model: currentModel,
+        messages,
+        // ★ gpt-5.x ไม่รับ temperature ≠ 1 → ไม่ส่ง (ใช้ default)
+        ...(isNewModel ? {} : { temperature }),
+        ...(isNewModel 
+          ? { max_completion_tokens: maxTokens }
+          : { max_tokens: maxTokens }),
+        response_format: { type: 'json_object' },
+      });
+
+      const content = response.choices[0]?.message?.content;
+      if (!content) {
+        throw new Error('AI returned empty content');
+      }
+
+      const inputTokens = response.usage?.prompt_tokens || 0;
+      const outputTokens = response.usage?.completion_tokens || 0;
+      console.log(`[callAI] OK: model=${currentModel}, tokens=${response.usage?.total_tokens || '?'}, output=${content.length}ch`);
+      
+      // Asynchronously log usage to DB
+      logApiUsage({
+        provider: 'openai',
+        model: currentModel,
+        inputTokens,
+        outputTokens,
+        feature: 'callAI'
+      });
+
+      const parsed = JSON.parse(content);
+
+      // === กฎเหล็ก: ตรวจจับ _error/_warning จาก AI ===
+      if (parsed._error) {
+        console.warn(`[callAI] ⚠️ AI reported error: ${parsed._error}`);
+      }
+      if (parsed._warning) {
+        console.warn(`[callAI] ⚠️ AI reported warning: ${parsed._warning}`);
+      }
+
+      // === POST-PROCESSING SAFETY FILTER ===
+      return sanitizeOutput(parsed);
+    } catch (err) {
+      console.warn(`[callAI] ⚠️ Model '${currentModel}' failed: ${err.message}`);
+      lastError = err;
+    }
+  }
+
+  throw new Error(`OpenAI call failed for all models: ${lastError?.message}`);
 }
 

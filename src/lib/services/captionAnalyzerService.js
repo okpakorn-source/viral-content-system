@@ -1,4 +1,6 @@
-﻿/**
+// GPT-4o-mini replaces Gemini for caption analysis (text-only)
+
+/**
  * Caption Analyzer Service
  * วิเคราะห์ title + snippet ของภาพจาก Serper → ตรวจว่าภาพตรงกับ expectedRole ไหม
  * ใช้ Gemini Flash (text-only, ไม่ใช่ Vision → เบากว่า + เร็วกว่ามาก)
@@ -19,7 +21,7 @@ export async function analyzeCaptionContext(image, expectedRole, heroName) {
   const caption = [image.title, image.snippet].filter(Boolean).join(' ').trim();
 
   if (!caption || caption.length < 5) return SAFE_DEFAULT;
-  if (!process.env.GEMINI_API_KEY) return SAFE_DEFAULT;
+  if (!process.env.OPENAI_API_KEY) return SAFE_DEFAULT;
 
   const roleLabel = {
     hero: `ตัวละครหลัก "${heroName}"`,
@@ -27,7 +29,7 @@ export async function analyzeCaptionContext(image, expectedRole, heroName) {
     father: `พ่อของ "${heroName}"`,
     spouse: `คู่สมรสของ "${heroName}"`,
     partner: `แฟนของ "${heroName}"`,
-    child: `ลูกของ "${heroName}"`,
+    child: `ลูก of "${heroName}"`,
     sibling: `พี่/น้องของ "${heroName}"`,
     caregiving: `กิจกรรมดูแลในข่าว "${heroName}"`,
     activity: `กิจกรรมหลักในข่าว "${heroName}"`,
@@ -35,11 +37,8 @@ export async function analyzeCaptionContext(image, expectedRole, heroName) {
     event: `เหตุการณ์ในข่าว "${heroName}"`,
   }[expectedRole] || `${expectedRole} ของ "${heroName}"`;
 
+  // ★ GPT-4o-mini — replace Gemini (text-only, no vision needed)
   try {
-    const { GoogleGenerativeAI } = await import('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-
     const prompt = `Caption ของภาพข่าว: "${caption}"
 
 ภาพนี้น่าจะเป็น ${roleLabel} ไหม?
@@ -53,14 +52,34 @@ export async function analyzeCaptionContext(image, expectedRole, heroName) {
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), CAPTION_TIMEOUT_MS);
-    let result;
+
+    let gptRes;
     try {
-      result = await model.generateContent(prompt);
+      gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.1,
+          max_tokens: 150,
+        }),
+        signal: controller.signal,
+      });
     } finally {
       clearTimeout(timer);
     }
 
-    const text = result.response.text().trim();
+    if (!gptRes.ok) {
+      const errBody = await gptRes.text().catch(() => '');
+      throw new Error(`OpenAI API ${gptRes.status}: ${errBody.slice(0, 100)}`);
+    }
+
+    const gptData = await gptRes.json();
+    const text = (gptData.choices?.[0]?.message?.content || '').trim();
     const jsonMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || text.match(/(\{[\s\S]*?\})/);
     if (!jsonMatch) return SAFE_DEFAULT;
 
@@ -71,7 +90,7 @@ export async function analyzeCaptionContext(image, expectedRole, heroName) {
     return { match, score, reason: parsed.reason || '' };
   } catch (e) {
     if (e.name !== 'AbortError') {
-      console.warn(`[CaptionAnalyzer] Error (${e.message?.slice(0, 50)}) → unclear`);
+      console.warn(`[CaptionAnalyzer] GPT-4o-mini error (${e.message?.slice(0, 50)}) → unclear`);
     }
     return SAFE_DEFAULT;
   }
@@ -87,8 +106,14 @@ export async function analyzeCaptionContext(image, expectedRole, heroName) {
 export async function sortAndFilterByCaptions(images, expectedRole, heroName) {
   if (!images || images.length === 0) return [];
 
-  const results = await Promise.allSettled(
-    images.map(async img => {
+  const results = [];
+  const batchSize = 3;
+  for (let i = 0; i < images.length; i += batchSize) {
+    if (i > 0) {
+      await new Promise(r => setTimeout(r, 400)); // sleep 400ms between batches
+    }
+    const batch = images.slice(i, i + batchSize);
+    const promises = batch.map(async img => {
       const caption = await analyzeCaptionContext(img, expectedRole, heroName);
       return {
         ...img,
@@ -96,11 +121,16 @@ export async function sortAndFilterByCaptions(images, expectedRole, heroName) {
         captionMatch: caption.match,
         captionReason: caption.reason,
       };
-    })
-  );
+    });
+    const batchResults = await Promise.allSettled(promises);
+    for (const r of batchResults) {
+      if (r.status === 'fulfilled') {
+        results.push(r.value);
+      }
+    }
+  }
 
   return results
-    .filter(r => r.status === 'fulfilled' && r.value.captionMatch !== 'no')
-    .map(r => r.value)
+    .filter(r => r.captionMatch !== 'no')
     .sort((a, b) => (b.captionScore || 0) - (a.captionScore || 0));
 }

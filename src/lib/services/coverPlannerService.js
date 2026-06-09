@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Cover Planner Service
  * วางแผน Layout + กำหนดว่าต้องการภาพอะไรใน slot ไหน
  * Input: resolvedRelationships, templateId, identity
@@ -164,69 +164,86 @@ export async function planCoverLayout(resolvedRelationships, templateId, identit
   const occupationMaxPct = isFamilyCare ? (storyType === 'relationship' ? 15 : 20) : 100;
   const occupationGuardText = isFamilyCare ? `
 
-★★★ OCCUPATION DOMINANCE GUARD (บังคับใช้ — ห้ามฝ่าฝืน):
-ข่าวนี้คือข่าว ครอบครัว/เสียสละ/กตัญญู — ไม่ใช่ข่าวอาชีพหรือสัตว์
+★★★ OCCUPATION DOMINANCE GUARD (STRICTLY ENFORCED — NO EXCEPTIONS):
+This is a FAMILY/SACRIFICE/GRATITUDE story — NOT an occupation or animal story.
 
-กฎเหล็ก:
-1. hero slot → ต้องเป็นหน้าชัดของตัวละครหลัก — ห้ามเป็นภาพสัตว์/ที่ทำงาน EVER
-2. circle → ต้องเป็นแม่/พ่อ/ครอบครัว — สำคัญยิ่งกว่าภาพอาชีพ!
-3. ภาพสัตว์/เครื่องแบบ/ที่ทำงาน = evidence รอง ไม่เกิน ${occupationMaxPct}% ของ cover
-4. slot ที่เหลือ → ลำดับ: caregiving → mother/father/family → interview → hero (สีหน้า)
-5. ภาพสัตว์/อาชีพ → ใช้ได้เฉพาะ "support" slot เล็กๆ เท่านั้น
+Strict Rules:
+1. hero slot → MUST be a clear face of the main character — NEVER animals/workplace images
+2. circle → MUST be mother/father/family — MORE important than occupation images!
+3. Animal/uniform/workplace images = secondary evidence, max ${occupationMaxPct}% of cover
+4. Remaining slots → priority order: caregiving → mother/father/family → interview → hero (expression)
+5. Animal/occupation images → ONLY allowed in small "support" slots
 
-SEVERE FAIL: ถ้าสัตว์หรืออาชีพไปอยู่ใน hero/circle/highlight → cover จะทำให้คนเข้าใจผิดว่าเป็นข่าวอาชีพ ไม่ใช่ข่าวครอบครัว!` : '';
+SEVERE FAIL: If animals or occupation images end up in hero/circle/highlight → the cover will mislead viewers into thinking this is an occupation story, not a family story!` : '';
 
+  // ★ GPT-4o-mini — replace Gemini with OpenAI
   try {
-    const { GoogleGenerativeAI } = await import('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const prompt = `You are a Photo Editor planning a viral news cover layout.
 
-    const prompt = `คุณเป็น Photo Editor วางแผนปกข่าวไวรัล
-
-ข่าว:
-ตัวละครหลัก: "${heroName}"
-ตัวละครอื่น: ${relDesc}
-ซีนสำคัญ: ${(identity?.keyScenes || []).join(', ') || 'ไม่ระบุ'}
-บริบท: ${identity?.story?.slice(0, 200) || 'ไม่ระบุ'}
-ประเภทข่าว: ${storyType}
+News Context:
+Main character: "${heroName}"
+Other characters: ${relDesc}
+Key scenes: ${(identity?.keyScenes || []).join(', ') || 'unspecified'}
+Context: ${identity?.story?.slice(0, 200) || 'unspecified'}
+Story type: ${storyType}
 
 Template: ${templateId}
-Slots: ${slotDesc}${hasCircle ? ', circle (portrait ของบุคคล)' : ''}
+Slots: ${slotDesc}${hasCircle ? ', circle (single person portrait)' : ''}
 
-Evidence categories ที่มีภาพอยู่: ${catList}
+Available evidence categories: ${catList}
 
-กฎพื้นฐาน:
-- slot hero → ต้องใช้ "hero" เสมอ
-- slot scene → ใช้ location/activity/caregiving/work (ไม่ใช่ hero)
-- slot emotion → ใช้ caregiving/activity/interview (ไม่ใช่ hero ถ้าทำได้)
-- slot hero2 → ใช้ category ที่เป็น relationship สำคัญ (mother/spouse/child)
-- slot highlight → ใช้ activity/caregiving/evidence/interview
-- slot support → ใช้ relationship/family/interview
-- circle → ใช้ hero หรือ relationship สำคัญ (ต้องเป็นภาพหน้า 1 คน)
+Slot Assignment Rules:
+- hero slot → ALWAYS use "hero" category
+- scene slot → use location/activity/caregiving/work (NOT hero)
+- emotion slot → use caregiving/activity/interview (avoid hero if possible)
+- hero2 slot → use the most important relationship category (mother/spouse/child)
+- highlight slot → use activity/caregiving/evidence/interview
+- support slot → use relationship/family/interview
+- circle → use hero or important relationship (MUST be single face portrait)
 ${occupationGuardText}
 
-ใช้แค่ categories ที่มีใน: ${catList}
+ONLY use categories from: ${catList}
 
-ตอบ JSON เท่านั้น:
+Respond with JSON ONLY:
 {
   "slots": [
-    {"slotId": "main", "templateRole": "hero", "evidenceCategory": "hero", "description": "หน้าชัด${heroName}"},
-    {"slotId": "bg_top", "templateRole": "scene", "evidenceCategory": "caregiving", "description": "ภาพดูแลแม่/ครอบครัว"}
+    {"slotId": "main", "templateRole": "hero", "evidenceCategory": "hero", "description": "clear face of ${heroName}"},
+    {"slotId": "bg_top", "templateRole": "scene", "evidenceCategory": "caregiving", "description": "caregiving/family scene"}
   ]
 }`;
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), PLANNER_TIMEOUT_MS);
-    let result;
+
+    let gptRes;
     try {
-      result = await model.generateContent(prompt);
+      gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.3,
+          max_tokens: 800,
+        }),
+        signal: controller.signal,
+      });
     } finally {
       clearTimeout(timer);
     }
 
-    const text = result.response.text().trim();
+    if (!gptRes.ok) {
+      const errBody = await gptRes.text().catch(() => '');
+      throw new Error(`OpenAI API ${gptRes.status}: ${errBody.slice(0, 100)}`);
+    }
+
+    const gptData = await gptRes.json();
+    const text = (gptData.choices?.[0]?.message?.content || '').trim();
     const jsonMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || text.match(/(\{[\s\S]*\})/);
-    if (!jsonMatch) throw new Error('ไม่พบ JSON ใน CoverPlanner response');
+    if (!jsonMatch) throw new Error('ไม่พบ JSON ใน CoverPlanner GPT response');
 
     const parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
     const parsedSlots = (parsed.slots || []).filter(s =>
@@ -249,16 +266,17 @@ ${occupationGuardText}
       });
     }
 
-    console.log(`[CoverPlanner] ✅ ${parsedSlots.length} slots planned: ${parsedSlots.map(s => `${s.slotId}→${s.evidenceCategory}`).join(', ')}`);
+    console.log(`[CoverPlanner] ✅ ${parsedSlots.length} slots planned: ${parsedSlots.map(s => `${s.slotId}→${s.evidenceCategory}`).join(', ')} (model: gpt-4o-mini)`);
 
     return {
       layout: templateId,
       slots: parsedSlots,
-      source: 'gemini',
+      source: 'gpt',
       dna: dnaResult,
+      modelUsed: 'gpt-4o-mini',
     };
   } catch (e) {
-    console.warn(`[CoverPlanner] Gemini failed (${e.message?.slice(0, 60)}) → fallback`);
+    console.warn(`[CoverPlanner] GPT-4o-mini failed (${e.message?.slice(0, 80)}) → fallback`);
     const fp = buildFallbackPlan(templateId, templateSpec, resolvedRelationships, identity);
     fp.dna = dnaResult;
     return fp;

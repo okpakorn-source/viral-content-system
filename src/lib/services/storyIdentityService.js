@@ -15,173 +15,176 @@ export async function analyzeStoryIdentity(newsTitle, breakdownData) {
       }
     });
 
-    const prompt = `คุณคือ News Analyst มืออาชีพ วิเคราะห์ข่าวนี้อย่างละเอียดแล้วสกัดข้อมูลสำหรับทีมค้นหาภาพ
+    const prompt = `You are a professional News Story Analyst. Analyze this news article in detail and extract data for the image search team.
+CRITICAL: ALL output field values (names, descriptions, search queries, story, emotionalHook, keywords, etc.) MUST be in Thai language. Only the JSON keys and enum values (emotion, coverEmotion) are in English.
 
-ชื่อข่าว: "${newsTitle}"
-เนื้อข่าว (ครบถ้วน): "${(breakdownData?.core_story || '').slice(0, 3000)}"
-คนที่เกี่ยวข้อง: ${JSON.stringify(breakdownData?.key_facts?.people || [])}
+News title: "${newsTitle}"
+Full article content: "${(breakdownData?.core_story || '').slice(0, 3000)}"
+People involved: ${JSON.stringify(breakdownData?.key_facts?.people || [])}
 
-สร้าง search queries ที่หลากหลายมุมมอง เพื่อค้นหาภาพที่ตรงกับข่าวมากที่สุด
-ต้องจับใจความข่าว จับซีนอารมณ์ จับสถานที่ จับคีย์เวิร์ดสำคัญ
+Generate diverse search queries from multiple angles to find images that best match the news story.
+You must capture the essence of the story, emotional scenes, locations, and important keywords.
 
-★★★ กฎสำคัญที่สุด — ต้องระบุตัวตนคนชัดเจน (Disambiguation):
-- ชื่อเล่น/ฉายาสั้นๆ (เช่น "เจนนี่", "ลิซ่า", "มิว") → ต้องใส่บริบทเพิ่มเสมอ!
-  ตัวอย่างดี: "เจนนี่ ได้หมดถ้าสดชื่น" หรือ "เจนนี่ รัชนก สุวรรณเกตุ"
-  ตัวอย่างแย่: "เจนนี่" ← จะได้ Jennie BLACKPINK! ห้ามทำแบบนี้!
-- ถ้าชื่อไม่มีนามสกุลปรากฏในข่าว → ใส่ฉายา/รายการ/อาชีพ ต่อท้ายเพื่อแยกแยะ
-  เช่น: "ตั๊ก บงกช" ไม่ใช่ "ตั๊ก", "ยิว ฉัตรบริรักษ์" ไม่ใช่ "ยิว"
-- mainCharacter ต้องเป็นชื่อที่ค้น Google แล้วได้คนถูกคน!
-- ★ person_portrait ห้ามใช้ชื่อเล่นเดี่ยวเด็ดขาด! ต้องมีฉายา/นามสกุล/บริบทเสมอ!
+★★★ MOST IMPORTANT RULE — Person Disambiguation (clear identity required):
+- Short nicknames (e.g. "เจนนี่", "ลิซ่า", "มิว") → MUST always include additional context!
+  Good example: "เจนนี่ ได้หมดถ้าสดชื่น" or "เจนนี่ รัชนก สุวรรณเกตุ"
+  Bad example: "เจนนี่" ← This will return Jennie BLACKPINK! NEVER do this!
+- If no surname appears in the article → append a title/show name/occupation to disambiguate
+  e.g.: "ตั๊ก บงกช" not "ตั๊ก", "ยิว ฉัตรบริรักษ์" not "ยิว"
+- mainCharacter MUST be a name that returns the correct person on Google!
+- ★ person_portrait MUST NEVER use a standalone nickname! Always include title/surname/context!
 
-★★★ กฎสำคัญ — ลูกดารา/ลูกคนดัง:
-- ถ้าข่าวเกี่ยวกับลูกของดารา → ค้น "ชื่อลูก + ลูกของ + ชื่อพ่อ/แม่"
-  ตัวอย่าง: ข่าว "น้องทาเรีย" ลูกของน้ำฝน → mainCharacter: "น้องทาเรีย ลูกน้ำฝน กุลณัฐ"
-  ★ ห้ามค้นแค่ "ทาเรีย" → จะได้คนผิด! ต้องใส่ "ลูกน้ำฝน" เสมอ!
-  ตัวอย่าง: "น้องเป่าเปา ลูกเป้ย ปานวาด" ไม่ใช่ "น้องเป่าเปา"
-  ตัวอย่าง: "น้องมะลิ ลูกพ่อโน้ต อุดม" ไม่ใช่ "น้องมะลิ"
-- ★ mainCharacter + searchQueries ต้องมีชื่อพ่อ/แม่กำกับเสมอ!
+★★★ IMPORTANT RULE — Children of celebrities:
+- If the news is about a celebrity's child → search "child's name + child of + parent's name"
+  Example: News about "น้องทาเรีย" daughter of น้ำฝน → mainCharacter: "น้องทาเรีย ลูกน้ำฝน กุลณัฐ"
+  ★ NEVER search just "ทาเรีย" → will return the wrong person! Always include "ลูกน้ำฝน"!
+  Example: "น้องเป่าเปา ลูกเป้ย ปานวาด" not "น้องเป่าเปา"
+  Example: "น้องมะลิ ลูกพ่อโน้ต อุดม" not "น้องมะลิ"
+- ★ mainCharacter + searchQueries MUST always include parent's name!
 
-★★★ กฎสำคัญ — Search queries ต้อง "เล่าเรื่อง" ไม่ใช่แค่หาหน้าคน!
-ปกข่าวไวรัลที่ดีต้องมีภาพ 5 แบบ:
-1. หน้าชัดตัวละครหลัก (HERO) — portrait สวย
-2. ซีนกิจกรรมจากข่าว (KEY_ACTIVITY) — ★ สำคัญมาก! เช่น "บริจาค", "ทำสวน", "ในถ้ำ"
-3. สถานที่จริงในข่าว (CONTEXT_SCENE) — เช่น โรงเรียน, บ้าน, วัด
-4. ความสัมพันธ์ (RELATIONSHIP) — กับคู่รัก, ลูก, พ่อแม่
-5. หน้าตัวละครรอง (HERO2)
+★★★ IMPORTANT RULE — Search queries must "tell the story", not just find faces!
+A good viral news cover needs 5 types of images:
+1. Clear face of main character (HERO) — beautiful portrait
+2. Activity scene from the news (KEY_ACTIVITY) — ★ Very important! e.g. "บริจาค", "ทำสวน", "ในถ้ำ"
+3. Real location from the news (CONTEXT_SCENE) — e.g. school, home, temple
+4. Relationship (RELATIONSHIP) — with partner, child, parents
+5. Secondary character face (HERO2)
 
-★ ห้ามค้นแต่ภาพ "หน้าสวย" ของคน! ต้องค้นภาพ "กิจกรรม/สถานที่" ด้วย!
-ตัวอย่างดี (ข่าวก้อยรัชวิน บริจาคโรงเรียน):
+★ Do NOT only search for "pretty face" photos! MUST also search for "activity/location" images!
+Good examples (news: ก้อยรัชวิน donates to school):
 - "ก้อย รัชวิน บริจาค โรงเรียน" ✅
 - "โรงเรียนบ้านขุนสมุทรไทย" ✅
 - "ก้อย รัชวิน ตูน บอดี้สแลม" ✅
-ตัวอย่างแย่:
-- "ก้อย รัชวิน ชายหาด" ❌ (ไม่เกี่ยวข่าว!)
-- "ก้อย รัชวิน แฟชั่น" ❌ (ไม่เกี่ยวข่าว!)
+Bad examples:
+- "ก้อย รัชวิน ชายหาด" ❌ (unrelated to the news!)
+- "ก้อย รัชวิน แฟชั่น" ❌ (unrelated to the news!)
 
-⚠️ กลยุทธ์สำคัญ — ต้องหาภาพให้ได้อย่างน้อย 5-8 ภาพ:
-- ภาพหน้าชัดของบุคคลหลัก — ค้นจากแหล่งใดก็ได้ (สัมภาษณ์, IG, งานอีเวนท์)
-- ★ ภาพกิจกรรม/เหตุการณ์ในข่าว — ต้องค้นคำค้นเฉพาะของข่าวนี้!
-- ★ ภาพสถานที่จริง — ใส่ชื่อเต็มสถานที่เสมอ
-- ★ ถ้าข่าวเศร้า → ค้น "ชื่อคน + ร้องไห้" แต่ต้องเป็นซีนที่เกี่ยวข้อง
-- ★ ถ้าข่าวมี 2 คน → ค้น "คนA + คนB + บริบทข่าว"
-- ค้นชื่อเต็ม+ฉายา ตรงๆ เพื่อหา portrait คมชัด
+⚠️ KEY STRATEGY — Must find at least 5-8 images:
+- Clear face of main person — search from any source (interviews, IG, events)
+- ★ Activity/event images from the news — MUST use news-specific search terms!
+- ★ Real location images — always use full location names
+- ★ If sad news → search "person's name + ร้องไห้" but must be a relevant scene
+- ★ If news has 2 people → search "personA + personB + news context"
+- Search full name + title directly for sharp portraits
 
-★★★ กฎเหล็ก — search queries ต้องเฉพาะเจาะจง ห้ามกว้าง:
-- ถ้าข่าวมีชื่อสถานที่ → ต้องใส่ชื่อเต็มใน query
-- ถ้าข่าวมีเหตุการณ์เฉพาะ → ต้องใส่รายละเอียดใน query
-- event_scene และ location_photo ต้องมีชื่อสถานที่เฉพาะเสมอ
-- person_context ต้องมีบริบทเฉพาะของข่าวนี้
+★★★ STRICT RULE — Search queries must be specific, NEVER generic:
+- If news has a location name → MUST include full name in query
+- If news has a specific event → MUST include details in query
+- event_scene and location_photo MUST always include specific location names
+- person_context MUST include news-specific context
 
-★★★ กฎเหล็กสูงสุด — ทุก query ที่เกี่ยวกับคนต้องมีชื่อจริงของตัวละครหลัก:
-- ห้ามค้น "ดาราร้องไห้" → ต้องค้น "[ชื่อจริง] ร้องไห้"
-- ห้ามค้น "นักการเมือง แถลงข่าว" → ต้องค้น "[ชื่อจริง] แถลงข่าว"
-- ห้ามค้น "แม่ลูก" → ต้องค้น "[ชื่อแม่จริง] กับ [ชื่อลูกจริง]"
-- person_portrait, person_closeup, person_emotion, person_context ต้องมีชื่อจริงทุก field!
-- ข้อยกเว้นเพียงอย่างเดียว: location_photo และ event_scene (ถ้าเป็นสถานที่ล้วน) ไม่ต้องมีชื่อคน
+★★★ HIGHEST PRIORITY RULE — Every people-related query MUST contain the main character's real name:
+- NEVER search "ดาราร้องไห้" → MUST search "[real name] ร้องไห้"
+- NEVER search "นักการเมือง แถลงข่าว" → MUST search "[real name] แถลงข่าว"
+- NEVER search "แม่ลูก" → MUST search "[real mother's name] กับ [real child's name]"
+- person_portrait, person_closeup, person_emotion, person_context MUST have real names in every field!
+- Only exception: location_photo and event_scene (if purely location-based) don't need person names
 
-ตอบเป็น JSON object ตามโครงสร้างนี้เท่านั้น:
+Respond with ONLY a JSON object following this exact structure (ALL values in Thai!):
 {
-  "characters": ["ชื่อเต็มคนที่เกี่ยวข้องทั้งหมด รวมฉายา/นามสกุล"],
-  "mainCharacter": "ชื่อเต็ม+ฉายา/นามสกุล ที่ค้น Google ได้ถูกคน (★ ถ้าเป็นลูกดารา ต้องมีชื่อพ่อ/แม่กำกับ! เช่น 'น้องทาเรีย ลูกน้ำฝน กุลณัฐ')",
-  "secondaryCharacter": "ชื่อเต็ม+ฉายา/นามสกุล ของตัวละครรอง (ถ้ามี เช่น พ่อ/แม่/คู่รัก)",
-  "story": "สรุปเนื้อข่าว 1 ประโยค",
+  "characters": ["Full names of all people involved, including titles/surnames — in Thai"],
+  "mainCharacter": "Full name + title/surname that returns the correct person on Google — in Thai (★ If celebrity's child, MUST include parent's name! e.g. 'น้องทาเรีย ลูกน้ำฝน กุลณัฐ')",
+  "secondaryCharacter": "Full name + title/surname of secondary character (if any, e.g. father/mother/partner) — in Thai",
+  "story": "One-sentence summary of the news — in Thai",
   "emotion": "happy | sad | angry | shocked | neutral | dramatic",
   "coverEmotion": "drama | tragedy | shocking | hope | warm | neutral",
-  "location": "ชื่อสถานที่เกิดเหตุ เต็มๆ (ถ้ามี)",
-  "timeframe": "วันเวลาเกิดเหตุ (ถ้ามี)",
-  "keywords": ["คำสำคัญ", "สำหรับ tag ภาพในคลัง", "ควรมี 5-10 คำ"],
-  "keyScenes": ["★ ซีนกิจกรรมที่ต้องหาภาพ เช่น 'มอบเงิน บริจาคโรงเรียน', 'ทำสวน ปลูกผัก', 'ในถ้ำ ช่วยเด็ก'"],
+  "location": "Full name of the location where the event occurred (if any) — in Thai",
+  "timeframe": "Date/time of the event (if any) — in Thai",
+  "keywords": ["Important keywords for image tagging, should have 5-10 words — in Thai"],
+  "keyScenes": ["★ Activity scenes to find images for, e.g. 'มอบเงิน บริจาคโรงเรียน', 'ทำสวน ปลูกผัก', 'ในถ้ำ ช่วยเด็ก' — in Thai"],
   
   "specific_details": {
-    "place_names": ["ชื่อสถานที่ทั้งหมดที่ปรากฏในข่าว ต้องเป็นชื่อเต็ม"],
-    "organization_names": ["ชื่อหน่วยงาน/องค์กรที่เกี่ยวข้อง"],
-    "key_events": ["★ เหตุการณ์สำคัญ เช่น 'บริจาคเงินสร้างหลังคาโรงเรียน'"],
-    "evidence_items": ["หลักฐาน เช่น 'ป้ายโรงเรียน', 'เอกสารบริจาค'"]
+    "place_names": ["All location names appearing in the news, must be full names — in Thai"],
+    "organization_names": ["Names of relevant agencies/organizations — in Thai"],
+    "key_events": ["★ Key events, e.g. 'บริจาคเงินสร้างหลังคาโรงเรียน' — in Thai"],
+    "evidence_items": ["Evidence items, e.g. 'ป้ายโรงเรียน', 'เอกสารบริจาค' — in Thai"]
   },
 
   "searchQueries": {
-    "person_closeup": "ชื่อบุคคลหลัก + คำที่ได้ภาพหน้าชัด เฉยๆ ไม่ต้องใส่อาชีพ (ภาษาไทย)",
-    "person_portrait": "★ ชื่อเต็ม+ฉายา ตรงๆ (ถ้าลูกดารา: 'น้องทาเรีย ลูกน้ำฝน')",
-    "person_emotion": "ชื่อบุคคลหลัก + อารมณ์ตามข่าว (ภาษาไทย)",
-    "secondary_person": "ชื่อตัวละครรอง (ถ้ามี) เพื่อหาหน้าชัด — ถ้า relationship='แม่' ให้ใส่ 'ชื่อhero แม่'",
+    "person_closeup": "Main person's name + terms for clear face photo, no occupation needed — in Thai",
+    "person_portrait": "★ Full name + title directly (if celebrity's child: 'น้องทาเรีย ลูกน้ำฝน') — in Thai",
+    "person_emotion": "Main person's name + emotion matching the news — in Thai",
+    "secondary_person": "Secondary character's name (if any) for clear face — if relationship='แม่', use 'hero name แม่' — in Thai",
 
-    "★★★ CELEBRATED_ACTION_FIRST RULE ★★★": "key_activity, person_context, key_relationship ต้องใช้ celebratedAction เป็น PRIMARY — ห้ามใช้ occupation!",
-    "person_context": "★★★ ชื่อ + celebratedAction เช่น ถ้า celebratedAction='ดูแลแม่' → 'หมอโบว์ ดูแลแม่' ไม่ใช่ 'หมอโบว์ สัตวแพทย์'",
-    "event_scene": "★★★ คำค้นกิจกรรมหลัก+สถานที่ ใช้ celebratedAction เช่น 'ดูแลผู้ป่วยอัลไซเมอร์' หรือ 'มอบเงิน บริจาค สร้างหลังคา'",
-    "emotion_moment": "คำค้นภาพอารมณ์ ตามโทนข่าว (ภาษาไทย)",
-    "location_photo": "★ คำค้นสถานที่เต็ม เช่น 'โรงเรียนบ้านขุนสมุทรไทย'",
-    "related_people": "คำค้นคนอื่นที่เกี่ยวข้อง (ภาษาไทย)",
+    "★★★ CELEBRATED_ACTION_FIRST RULE ★★★": "key_activity, person_context, key_relationship MUST use celebratedAction as PRIMARY — NEVER use occupation!",
+    "person_context": "★★★ Name + celebratedAction. e.g. if celebratedAction='ดูแลแม่' → 'หมอโบว์ ดูแลแม่' NOT 'หมอโบว์ สัตวแพทย์' — in Thai",
+    "event_scene": "★★★ Main activity keywords + location, using celebratedAction. e.g. 'ดูแลผู้ป่วยอัลไซเมอร์' or 'มอบเงิน บริจาค สร้างหลังคา' — in Thai",
+    "emotion_moment": "Emotional image search terms matching the news tone — in Thai",
+    "location_photo": "★ Full location name, e.g. 'โรงเรียนบ้านขุนสมุทรไทย' — in Thai",
+    "related_people": "Search terms for other related people — in Thai",
     
-    "person_past": "★★ คำค้นภาพอดีต เช่น 'นิรุตติ์ ศิริจรรยา สมัยหนุ่ม' (ถ้าข่าวมีไทม์ไลน์)",
-    "key_relationship": "★★★ ชื่อ + relationship เช่น ถ้า relationship='แม่' → 'หมอโบว์ แม่' หรือ 'หมอโบว์ ครอบครัว' — ห้ามใส่ชื่อสัตว์/อาชีพ",
-    "key_activity": "★★★ ชื่อ + celebratedAction ล้วนๆ เช่น 'หมอโบว์ ดูแลแม่' หรือ 'ก้อย รัชวิน บริจาค' — ต้องมี! ห้ามใช้ occupation!",
-    "story_contrast": "★★ คำค้นที่สร้างความต่าง เช่น 'น้ำฝน สมัยสาว' หรือ 'โรงเรียน ก่อนบูรณะ'",
-    "storySubject_direct": "★★★★ คำค้นตรงๆ สำหรับ storySubject (ไม่ใช่ตัวเอก!) เช่น: ถ้า storySubject='สายฟ้า-พายุ' → 'ชมพู่ ลูก สายฟ้า พายุ', ถ้า storySubject='แม่' → 'หมอโบว์ แม่ ครอบครัว' — ต้องค้นสิ่งที่ข่าวเล่าถึงโดยตรง!"
+    "person_past": "★★ Past image search terms, e.g. 'นิรุตติ์ ศิริจรรยา สมัยหนุ่ม' (if news has timeline) — in Thai",
+    "key_relationship": "★★★ Name + relationship. e.g. if relationship='แม่' → 'หมอโบว์ แม่' or 'หมอโบว์ ครอบครัว' — NEVER include animal names/occupation — in Thai",
+    "key_activity": "★★★ Name + celebratedAction only. e.g. 'หมอโบว์ ดูแลแม่' or 'ก้อย รัชวิน บริจาค' — REQUIRED! NEVER use occupation! — in Thai",
+    "story_contrast": "★★ Contrast search terms, e.g. 'น้ำฝน สมัยสาว' or 'โรงเรียน ก่อนบูรณะ' — in Thai",
+    "storySubject_direct": "★★★★ Direct search for storySubject (NOT the protagonist!). e.g. if storySubject='สายฟ้า-พายุ' → 'ชมพู่ ลูก สายฟ้า พายุ', if storySubject='แม่' → 'หมอโบว์ แม่ ครอบครัว' — must search what the news is actually about! — in Thai"
 
   },
 
-  "searchGoogle": "คำค้น Google Image หลัก (ภาษาไทย)",
-  "searchYouTube": "คำค้น YouTube",
-  "searchTikTok": "คำค้น TikTok (ภาษาไทย)",
-  "searchPexels": "คำค้นภาพ stock (ภาษาอังกฤษ)",
+  "searchGoogle": "Primary Google Image search query — in Thai",
+  "searchYouTube": "YouTube search query — in Thai",
+  "searchTikTok": "TikTok search query — in Thai",
+  "searchPexels": "Stock photo search query — in English",
 
   "typography": {
-    "hook": "1-3 คำ เช่น 'ช็อก!', 'ด่วน!', 'เศร้า'",
-    "main": "4-8 คำ สรุปประเด็นหลัก",
-    "punch": "2-4 คำ กระแทกอารมณ์"
+    "hook": "1-3 words, e.g. 'ช็อก!', 'ด่วน!', 'เศร้า' — in Thai",
+    "main": "4-8 words summarizing the main point — in Thai",
+    "punch": "2-4 words for emotional impact — in Thai"
   },
 
   "coreStory": {
-    "relationship": "ชื่อ/บทบาทตัวละครรองที่สำคัญที่สุด (เช่น แม่, ลูก, สามี)",
-    "storySubject": "★★★ ใคร/อะไรที่ข่าวกำลังเล่าถึงจริงๆ — อาจไม่ใช่ตัวเอก! ตัวอย่าง: ข่าวชมพู่เล่าเรื่องลูก → storySubject='สายฟ้า-พายุ', ข่าวหมอโบว์เล่าเรื่องแม่ → storySubject='แม่' ถ้าเป็นตัวเอกเองให้ใส่ชื่อตัวเอก",
-    "sacrifice": "สิ่งที่ตัวเอกเสียสละ/ทำเพื่อ (เช่น ลาออกราชการ สูญเงิน 10 ล้าน) — null ถ้าไม่มี",
-    "emotionalHook": "ประโยคสั้นๆ 1 ประโยคที่ทำให้คนกดอ่าน (สะท้อนแก่นข่าวจริง)",
-    "celebratedAction": "สิ่งที่ข่าวยกย่อง/ชื่นชม ในรูปกิจกรรม เช่น ดูแลแม่อัลไซเมอร์ 9 ปี, ช่วยเหลือชุมชน (ไม่ใช่อาชีพ)",
+    "relationship": "Name/role of the most important secondary character (e.g. mother, child, husband) — in Thai",
+    "storySubject": "★★★ Who/what is the news ACTUALLY about — may NOT be the protagonist! Example: news about ชมพู่ talking about her kids → storySubject='สายฟ้า-พายุ', news about หมอโบว์ caring for her mother → storySubject='แม่'. If it's about the protagonist themselves, use their name — in Thai",
+    "sacrifice": "What the protagonist sacrificed/did for others (e.g. resigned from government, lost 10 million baht) — null if none — in Thai",
+    "emotionalHook": "One short sentence that makes people click to read (reflecting the true core of the news) — in Thai",
+    "celebratedAction": "The action the news celebrates/praises, as an activity. e.g. caring for Alzheimer's mother for 9 years, helping the community (NOT an occupation) — in Thai",
     "occupationImportance": 0.1,
     "storyWeight": {
-      "_comment": "น้ำหนักของแต่ละ element ในข่าว รวมกัน = 100 — กฎ: occupation/work/location ต้องไม่เกิน 20 เสมอ"
+      "_comment": "Weight of each element in the news, total = 100 — Rule: occupation/work/location must NEVER exceed 20"
     },
     "negativeFocus": [
-      "สิ่งที่ห้ามใช้เป็น dominant cover element แม้ปรากฏในข่าว (เช่น 'elephant as main subject', 'veterinary work as dominant')"
+      "Things that must NOT be used as dominant cover elements even if they appear in the news (e.g. 'elephant as main subject', 'veterinary work as dominant')"
     ],
-    "contextOnly": ["คำ/บริบทที่เป็นแค่ background ไม่ใช่แก่นข่าว"]
+    "contextOnly": ["Words/context that are just background, not the core of the news — in Thai"]
   }
 }
 
 ★★★ coreStory RULES:
-- relationship: ใส่ชื่อ/บทบาทของตัวละครรองที่ข่าวพูดถึงมากที่สุด
-- sacrifice: สิ่งที่ตัวเอกเสียสละจริงๆ ในข่าวนี้ (ถ้าไม่มีให้ใส่ null)
-- emotionalHook: ประโยคสั้น 1 ประโยคที่จับใจความแก่นข่าว
+- relationship: Use the name/role of the secondary character most discussed in the news — value in Thai
+- sacrifice: What the protagonist actually sacrificed in this news (if none, set null) — value in Thai
+- emotionalHook: One short sentence capturing the core of the news — value in Thai
 
-★★★ storySubject RULES (สำคัญมาก!):
-  ข่าวส่วนใหญ่ตัวเอก (mainCharacter) ไม่ใช่สิ่งที่ปกควรเน้น!
-  ถามตัวเองว่า "ข่าวกำลังเล่าเรื่องของใคร/อะไร?"
-  ตัวอย่าง:
-    ข่าวชมพู่เล่าเรื่องลูก → storySubject = "สายฟ้า-พายุ"
-    ข่าวหมอโบว์ดูแลแม่ → storySubject = "แม่"
-    ข่าวนักร้องบริจาค → storySubject = "ผู้รับบริจาค/เด็กๆ ที่ได้รับ"
-    ข่าวดาราให้สัมภาษณ์เรื่องตัวเอง → storySubject = ชื่อดารา (เป็นตัวเอง)
-  coverVisualWeight: storySubject ต้องได้ visual weight มากที่สุดบนปก!
+★★★ storySubject RULES (VERY IMPORTANT!):
+  In most news, the protagonist (mainCharacter) is NOT what the cover should emphasize!
+  Ask yourself: "Who/what is the news ACTUALLY telling the story about?"
+  Examples:
+    News about ชมพู่ telling about her kids → storySubject = "สายฟ้า-พายุ"
+    News about หมอโบว์ caring for her mother → storySubject = "แม่"
+    News about a singer donating → storySubject = "ผู้รับบริจาค/เด็กๆ ที่ได้รับ"
+    News about a celebrity being interviewed about themselves → storySubject = celebrity's name
+  coverVisualWeight: storySubject MUST get the highest visual weight on the cover!
 
-★ celebratedAction: สิ่งที่ข่าวต้องการให้คนชื่นชม (ไม่ใช่อาชีพ แต่เป็นการกระทำ)
-  ตัวอย่าง ข่าวหมอโบว์: "ดูแลแม่อัลไซเมอร์ 9 ปี" ไม่ใช่ "รักษาช้าง"
-  ตัวอย่าง ข่าวก้อย: "บริจาคสร้างหลังคาโรงเรียน" ไม่ใช่ "นักแสดง"
-★ occupationImportance: น้ำหนัก 0-1 ของอาชีพในข่าว
-  - ถ้าข่าวไม่ได้เกี่ยวกับอาชีพ → ใส่ 0.05-0.1
-  - ถ้าข่าวเกี่ยวกับอาชีพโดยตรง → ใส่ 0.5-1.0
-  - ตัวอย่าง ข่าวหมอโบว์ดูแลแม่: 0.05 (ข่าวไม่ได้เกี่ยวงานสัตวแพทย์)
-- storyWeight: ให้น้ำหนัก % แก่แต่ละ element โดย:
-  * อาชีพ/งาน/สถานที่ทำงาน = ห้ามเกิน 20% เสมอ
-  * ความสัมพันธ์หลัก (แม่/ลูก/สามี) ต้องมีน้ำหนักสูงที่สุดถ้าข่าวพูดถึง
-  * ตัวอย่างข่าวหมอโบว์: { "mother_care": 45, "caregiving": 30, "sacrifice": 15, "vet_work": 10 }
-- negativeFocus: สิ่งที่ไม่ใช่แก่นข่าว แต่อาจ dominate cover ได้ถ้าไม่ระวัง
-  ตัวอย่าง: ข่าวหมอโบว์ → "elephant", "vet work", "animal treatment" ควรอยู่ใน negativeFocus
-- contextOnly: คำ/บริบทที่เป็นแค่ background (เช่น ชื่อโรงพยาบาลที่ทำงาน)`;
+★ celebratedAction: What the news wants people to admire (NOT an occupation, but an ACTION)
+  Example หมอโบว์ news: "ดูแลแม่อัลไซเมอร์ 9 ปี" NOT "รักษาช้าง"
+  Example ก้อย news: "บริจาคสร้างหลังคาโรงเรียน" NOT "นักแสดง"
+★ occupationImportance: Weight 0-1 of occupation relevance in the news
+  - If news is NOT about occupation → set 0.05-0.1
+  - If news is directly about occupation → set 0.5-1.0
+  - Example หมอโบว์ caring for mother: 0.05 (news is NOT about veterinary work)
+- storyWeight: Assign % weight to each element where:
+  * Occupation/work/workplace = MUST NEVER exceed 20%
+  * Primary relationship (mother/child/husband) must have highest weight if discussed in news
+  * Example หมอโบว์ news: { "mother_care": 45, "caregiving": 30, "sacrifice": 15, "vet_work": 10 }
+- negativeFocus: Things that are NOT the core story but could dominate the cover if not careful
+  Example: หมอโบว์ news → "elephant", "vet work", "animal treatment" should be in negativeFocus
+- contextOnly: Words/context that are just background (e.g. name of the hospital where they work) — in Thai`;
 
 
-    // ★ Retry: ถ้า 503 → รอ 2 วิ แล้วลองใหม่
+    // ★★★ Fix 14: ปิด Gemini ชั่วคราว — ใช้ GPT ตรงเลย (Gemini 503 ทั้งวัน)
+    // เปิดใหม่โดย uncomment Gemini loop ด้านล่าง
+    /*
     let lastError;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 1; attempt++) {
       try {
         const result = await model.generateContent(prompt);
         const text = result.response.text();
@@ -189,12 +192,11 @@ export async function analyzeStoryIdentity(newsTitle, breakdownData) {
       } catch (err) {
         lastError = err;
         console.log(`[StoryIdentity] Attempt ${attempt + 1} failed: ${err.message?.substring(0, 80)}`);
-        if (attempt === 0 && err.message?.includes('503')) {
-          console.log('[StoryIdentity] 503 → Retrying in 2s...');
-          await new Promise(r => setTimeout(r, 2000));
-        }
       }
     }
+    */
+    let lastError = new Error('Gemini disabled — using GPT directly');
+    console.log('[StoryIdentity] ⚡ Gemini disabled — going straight to GPT');
 
     // ★★★ Fallback: GPT-4o เมื่อ Gemini ล้มเหลว (สำคัญมาก! ถ้า identity null → ค้นภาพมั่วทั้งหมด)
     const openaiKey = process.env.OPENAI_API_KEY;

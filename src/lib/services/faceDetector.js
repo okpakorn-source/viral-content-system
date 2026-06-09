@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Face Detector + Smart Crop Service
  * 
  * ตรวจจับหน้าคนในภาพ → return coordinates สำหรับ smart crop
@@ -8,6 +8,7 @@
  * ห้ามแก้ไฟล์ core AI (openai.js, aiRouter.js)
  */
 import sharp from 'sharp';
+// GPT-4o-mini via callAI is the sole face detection provider (Gemini removed)
 
 const LOG = '[FaceDetector]';
 
@@ -17,39 +18,36 @@ const LOG = '[FaceDetector]';
  * @returns {{ faces: Array<{x,y,width,height,confidence}>, hasFaces: boolean }}
  */
 export async function detectFaces(imageBuffer) {
-  const MAX_RETRIES = 3;
+  const MAX_RETRIES = 1;
   
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  let metadata = { width: 0, height: 0 };
+  try {
+    metadata = await sharp(imageBuffer).metadata();
+  } catch (e) {
+    console.error(`${LOG} Failed to read image metadata:`, e.message);
+  }
+
+  // Resize ภาพให้เล็กลงก่อนส่ง (ลด cost)
+  const maxDim = 800;
+  let resized = imageBuffer;
+  if (metadata.width > maxDim || metadata.height > maxDim) {
     try {
-      const { GoogleGenerativeAI } = await import('@google/generative-ai');
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      resized = await sharp(imageBuffer)
+        .resize(maxDim, maxDim, { fit: 'inside' })
+        .jpeg({ quality: 70 })
+        .toBuffer();
+    } catch (e) {
+      console.error(`${LOG} Failed to resize image:`, e.message);
+    }
+  }
 
-      // Resize ภาพให้เล็กลงก่อนส่ง (ลด cost)
-      const metadata = await sharp(imageBuffer).metadata();
-      const maxDim = 800;
-      let resized = imageBuffer;
-      if (metadata.width > maxDim || metadata.height > maxDim) {
-        resized = await sharp(imageBuffer)
-          .resize(maxDim, maxDim, { fit: 'inside' })
-          .jpeg({ quality: 70 })
-          .toBuffer();
-      }
+  const base64 = resized.toString('base64');
 
-      const base64 = resized.toString('base64');
-
-      const result = await model.generateContent([
-        {
-          inlineData: {
-            mimeType: 'image/jpeg',
-            data: base64,
-          },
-        },
-        {
-          text: `Analyze this image for face detection. Return JSON only, no markdown.
-
+  // Try gpt-4o-mini first (vision model) as it is extremely fast and reliable
+  try {
+    const { callAI } = await import('@/lib/ai/openai');
+    const gptPrompt = `Analyze this image for face detection. Return JSON only.
 If there are people/faces visible, return their approximate bounding box as percentage of image dimensions (0-100).
-
 Format:
 {
   "faces": [
@@ -60,62 +58,62 @@ Format:
   "face_count": 1,
   "best_crop_focus": "center-top"
 }
+If no faces: has_faces=false, faces=[], and provide main_subject_region for the most interesting area.`;
 
-If no faces: has_faces=false, faces=[], and provide main_subject_region for the most interesting area.
-best_crop_focus options: "center", "center-top", "center-bottom", "left", "right", "top-left", "top-right"`,
-        },
-      ]);
+    const parsed = await callAI({
+      prompt: gptPrompt,
+      imageContents: [
+        {
+          type: 'image_url',
+          image_url: { url: `data:image/jpeg;base64,${base64}`, detail: 'low' }
+        }
+      ],
+      model: 'gpt-4o-mini',
+      temperature: 0.1,
+      maxTokens: 500,
+    });
 
-      const text = result.response.text();
-      // Clean JSON from markdown code blocks
-      const jsonStr = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      const parsed = JSON.parse(jsonStr);
+    const faces = (parsed.faces || []).map(f => ({
+      x: Math.round((f.x_pct / 100) * metadata.width),
+      y: Math.round((f.y_pct / 100) * metadata.height),
+      width: Math.round((f.w_pct / 100) * metadata.width),
+      height: Math.round((f.h_pct / 100) * metadata.height),
+      description: f.description || '',
+    }));
 
-      // Convert percentage to pixel coordinates
-      const faces = (parsed.faces || []).map(f => ({
-        x: Math.round((f.x_pct / 100) * metadata.width),
-        y: Math.round((f.y_pct / 100) * metadata.height),
-        width: Math.round((f.w_pct / 100) * metadata.width),
-        height: Math.round((f.h_pct / 100) * metadata.height),
-        description: f.description || '',
-      }));
+    const subject = parsed.main_subject_region || { x_pct: 25, y_pct: 10, w_pct: 50, h_pct: 80 };
 
-      const subject = parsed.main_subject_region || { x_pct: 25, y_pct: 10, w_pct: 50, h_pct: 80 };
+    console.log(`${LOG} ✅ gpt-4o-mini success: found ${faces.length} faces`);
 
-      return {
-        faces,
-        hasFaces: parsed.has_faces || false,
-        faceCount: parsed.face_count || 0,
-        mainSubject: {
-          x: Math.round((subject.x_pct / 100) * metadata.width),
-          y: Math.round((subject.y_pct / 100) * metadata.height),
-          width: Math.round((subject.w_pct / 100) * metadata.width),
-          height: Math.round((subject.h_pct / 100) * metadata.height),
-        },
-        bestCropFocus: parsed.best_crop_focus || 'center',
-        imageWidth: metadata.width,
-        imageHeight: metadata.height,
-      };
-    } catch (err) {
-      const is503 = err.message?.includes('503') || err.message?.includes('high demand');
-      if (is503 && attempt < MAX_RETRIES) {
-        const delay = (attempt + 1) * 2000; // 2s, 4s, 6s
-        console.warn(`${LOG} 503 retry ${attempt + 1}/${MAX_RETRIES} (wait ${delay}ms)...`);
-        await new Promise(r => setTimeout(r, delay));
-        continue;
-      }
-      console.error(`${LOG} detectFaces error:`, err.message);
-      return {
-        faces: [],
-        hasFaces: false,
-        faceCount: 0,
-        mainSubject: null,
-        bestCropFocus: 'center',
-        imageWidth: 0,
-        imageHeight: 0,
-      };
-    }
+    return {
+      faces,
+      hasFaces: parsed.has_faces || false,
+      faceCount: parsed.face_count || 0,
+      mainSubject: {
+        x: Math.round((subject.x_pct / 100) * metadata.width),
+        y: Math.round((subject.y_pct / 100) * metadata.height),
+        width: Math.round((subject.w_pct / 100) * metadata.width),
+        height: Math.round((subject.h_pct / 100) * metadata.height),
+      },
+      bestCropFocus: parsed.best_crop_focus || 'center',
+      imageWidth: metadata.width,
+      imageHeight: metadata.height,
+    };
+  } catch (gptErr) {
+    console.warn(`${LOG} ⚠️ gpt-4o-mini failed, trying Gemini fallback:`, gptErr.message);
   }
+
+  // Gemini fallback removed — GPT-4o-mini is primary (above)
+  console.warn(`${LOG} GPT-4o-mini was the only attempt — returning empty result`);
+  return {
+    faces: [],
+    hasFaces: false,
+    faceCount: 0,
+    mainSubject: null,
+    bestCropFocus: 'center',
+    imageWidth: metadata.width || 0,
+    imageHeight: metadata.height || 0,
+  };
 }
 
 /**
@@ -210,9 +208,12 @@ export async function smartCrop(imageBuffer, targetWidth, targetHeight, faceData
 export async function batchDetectFaces(images) {
   const results = new Map();
   
-  // Process ทีละ 3 ภาพ (ไม่ให้ Gemini overload)
-  const batchSize = 3;
+  // Process ทีละ 2 ภาพ (ไม่ให้ Gemini overload)
+  const batchSize = 2;
   for (let i = 0; i < images.length; i += batchSize) {
+    if (i > 0) {
+      await new Promise(r => setTimeout(r, 600)); // sleep 600ms between batches
+    }
     const batch = images.slice(i, i + batchSize);
     const promises = batch.map(async (img) => {
       const data = await detectFaces(img.buffer);

@@ -11,24 +11,77 @@ const MAX_PER_CATEGORY = 10;
 const MAX_TOTAL = 40;
 const QUERY_TIMEOUT_MS = 8000;
 
+function sanitizeHeroName(name) {
+  if (!name) return '';
+  let clean = name;
+  const badWords = [
+    'สัตวแพทย์หญิง',
+    'สัตวแพทย์',
+    'ดูแลแม่ป่วยอัลไซเมอร์',
+    'ดูแลแม่ป่วย',
+    'ดูแลแม่อัลไซเมอร์',
+    'ดูแลผู้ป่วย',
+    'ป่วยอัลไซเมอร์',
+    'อัลไซเมอร์',
+    'ดูแลแม่',
+    'ดูแลพ่อ',
+    'ผู้ดูแล',
+    'รักษาช้าง',
+    'รักษาสัตว์',
+    'รักษา',
+    'บริจาค',
+    'แพทย์หญิง',
+    'นายแพทย์'
+  ];
+  for (const word of badWords) {
+    const escaped = word.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const regex = new RegExp(escaped, 'gi');
+    clean = clean.replace(regex, '');
+  }
+  return clean.replace(/\s+/g, ' ').trim();
+}
+
 /**
  * สร้าง Serper Image search queries ต่อ category
  */
 function buildCategoryQueries(category, hero, relationships, identity) {
-  const heroName = hero?.searchName || hero?.name || '';
+  const heroName = sanitizeHeroName(hero?.searchName || hero?.name || '');
   const keyScenes = identity?.keyScenes || [];
   const location = identity?.location || '';
+  // ★★★ ดึง storySubject + celebratedAction เพื่อค้นภาพตรงข่าว
+  const storySubject = identity?.coreStory?.storySubject || '';
+  const celebratedAction = identity?.coreStory?.celebratedAction || '';
+  const storyCtx = identity?.coreStory?.relationship || celebratedAction || '';
 
   // หา relationship ที่ตรงกับ category
   const relMatch = relationships.find(r => r.role === category);
   const relName = relMatch?.searchName || relMatch?.name || '';
 
   switch (category) {
-    case 'hero':
-      return [
-        heroName,
-        `${heroName} ภาพล่าสุด`,
-      ].filter(Boolean);
+    case 'hero': {
+      // ★★★ Fix 7: ค้นภาพตรงข่าว — ใช้ storySubject + celebratedAction
+      const occImp = identity?.coreStory?.occupationImportance ?? 1.0;
+      const glamourNeg = '-แฟชั่น -fashion -"red carpet" -พรมแดง -เซ็กซี่ -bikini -ชุดราตรี -Cannes -runway';
+      const queries = [];
+
+      // Priority 1: ค้นด้วย storySubject (เช่น "สวนแม่ชมพู่", "ที่ดินยายหนิง")
+      if (storySubject) {
+        queries.push(`${heroName} ${storySubject} ${occImp < 0.3 ? glamourNeg : ''}`.trim());
+      }
+      // Priority 2: ค้นด้วย celebratedAction
+      if (celebratedAction && celebratedAction !== storySubject) {
+        queries.push(`${heroName} ${celebratedAction}`.trim());
+      }
+      // Priority 3: ค้นด้วย storyCtx (relationship/action)
+      if (occImp < 0.3 && storyCtx && !queries.some(q => q.includes(storyCtx))) {
+        queries.push(`${heroName} ${storyCtx} ${glamourNeg}`);
+      }
+      // Fallback: ชื่อ + ภาพล่าสุด
+      if (queries.length === 0) {
+        queries.push(heroName, `${heroName} ภาพล่าสุด`);
+      }
+      return queries.filter(Boolean);
+    }
 
     case 'mother':
     case 'father':
@@ -46,15 +99,19 @@ function buildCategoryQueries(category, hero, relationships, identity) {
     case 'caregiving':
       return [
         keyScenes[0] ? `${heroName} ${keyScenes[0]}` : `${heroName} ดูแล`,
-        `${heroName} ช่วยเหลือ`,
+        storySubject ? `${heroName} ${storySubject}` : `${heroName} ช่วยเหลือ`,
       ].filter(Boolean);
 
-    case 'activity':
-      return [
-        keyScenes[0] ? `${heroName} ${keyScenes[0]}` : null,
-        keyScenes[1] ? `${heroName} ${keyScenes[1]}` : null,
-        `${heroName} กิจกรรม`,
-      ].filter(Boolean);
+    case 'activity': {
+      // ★★★ Fix 7: เพิ่ม storySubject + celebratedAction เข้าไปใน activity queries
+      const actQueries = [];
+      if (storySubject) actQueries.push(`${heroName} ${storySubject}`);
+      if (celebratedAction && celebratedAction !== storySubject) actQueries.push(`${heroName} ${celebratedAction}`);
+      if (keyScenes[0] && !actQueries.some(q => q.includes(keyScenes[0]))) actQueries.push(`${heroName} ${keyScenes[0]}`);
+      if (keyScenes[1]) actQueries.push(`${heroName} ${keyScenes[1]}`);
+      if (actQueries.length === 0) actQueries.push(`${heroName} กิจกรรม`);
+      return actQueries.filter(Boolean);
+    }
 
     case 'interview':
       return [
@@ -79,12 +136,22 @@ function buildCategoryQueries(category, hero, relationships, identity) {
         : [`${heroName} หลักฐาน`];
 
     case 'relationship':
-      return relName
-        ? [`${heroName} ${relName}`, `${heroName} คนสำคัญ`]
+      // ★★★ Fix 7: relationship ก็ใช้ storySubject
+      if (relName) {
+        return [
+          storySubject ? `${heroName} ${relName} ${storySubject}` : `${heroName} ${relName}`,
+          `${heroName} ${relName}`,
+        ].filter(Boolean);
+      }
+      return storySubject
+        ? [`${heroName} ${storySubject}`, `${heroName} ครอบครัว`]
         : [`${heroName} ครอบครัว`];
 
     case 'family':
-      return [`${heroName} ครอบครัว`, `${heroName} family`];
+      return [
+        storySubject ? `${heroName} ${storySubject} ครอบครัว` : `${heroName} ครอบครัว`,
+        `${heroName} ครอบครัว`,
+      ].filter(Boolean);
 
     default:
       return [`${heroName} ${category}`];

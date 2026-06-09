@@ -27,6 +27,17 @@ const EDITORIAL_GEOMETRY = {
 // ★ FIX: วงกลมต้องใหญ่พอดูรู้เรื่อง — ถ้า SmartPlace จะหดต่ำกว่านี้ให้ยอมทับ obstacle แทน
 const MIN_RENDERED_CIRCLE = 320; // px — ต่ำกว่านี้หน้าคนดูไม่ออก
 
+// OVERLAP DETECTION UTILITY
+function detectOverlap(a, b, minGap = 20) {
+  const ax2 = a.x + a.w, ay2 = a.y + a.h;
+  const bx2 = b.x + b.w, by2 = b.y + b.h;
+  const overlapX = Math.max(0, Math.min(ax2, bx2) - Math.max(a.x, b.x));
+  const overlapY = Math.max(0, Math.min(ay2, by2) - Math.max(a.y, b.y));
+  const overlapArea = overlapX * overlapY;
+  const minArea = Math.min(a.w * a.h, b.w * b.h);
+  return { overlapArea, overlapPct: minArea > 0 ? overlapArea / minArea : 0, hasOverlap: overlapArea > 0 };
+}
+
 // ═══ THAI FONT LOADER (base64 embed) ═══
 const THAI_FONT_PATH = (() => {
   try {
@@ -113,7 +124,7 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
     if (faceData && faceData.hasFaces && faceData.faces && faceData.faces.length > 0) {
       const faces = faceData.faces;
       
-      // ★ Multi-face: คำนวณ bounding box ของทุกใบหน้า
+      // ★ Multi-face: คำนวณ focus point
       let focusCX, focusCY, focusW, focusH;
       
       if (faces.length === 1) {
@@ -123,19 +134,30 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
         focusCY = face.y + face.height / 2;
         focusW = face.width;
         focusH = face.height;
+      } else if (cropStrategy === 'portrait-upper' || cropStrategy === 'face-tight') {
+        // ★★★ FIX: Hero/Circle ที่มีหลายหน้า → เลือกหน้าใหญ่สุด zoom เข้าคนเดียว
+        // ไม่พยายามครอบทุกหน้า (ทำให้ภาพเล็ก ลายตา ตกเฟรม)
+        const largest = faces.reduce((best, f) => {
+          const area = f.width * f.height;
+          return area > (best.width * best.height) ? f : best;
+        }, faces[0]);
+        focusCX = largest.x + largest.width / 2;
+        focusCY = largest.y + largest.height / 2;
+        focusW = largest.width;
+        focusH = largest.height;
+        console.log(`[Composer] ★ Multi-face (${faces.length}) → picked LARGEST face for ${cropStrategy} (${largest.width}x${largest.height} at ${Math.round(focusCX)},${Math.round(focusCY)})`);
       } else {
-        // หลายคน → bounding box ครอบทุกหน้า
-        let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
-        for (const face of faces) {
-          minX = Math.min(minX, face.x);
-          minY = Math.min(minY, face.y);
-          maxX = Math.max(maxX, face.x + face.width);
-          maxY = Math.max(maxY, face.y + face.height);
-        }
-        focusCX = (minX + maxX) / 2;
-        focusCY = (minY + maxY) / 2;
-        focusW = maxX - minX;
-        focusH = maxY - minY;
+        // ★★★ ALWAYS pick LARGEST face — ทุก slot, ทุกสถานการณ์
+        // ไม่ bounding box ครอบทุกหน้าอีกแล้ว → AI ต้องตัดสินใจเลือก 1 คน แล้ว crop zoom เข้า
+        const largest = faces.reduce((best, f) => {
+          const area = f.width * f.height;
+          return area > (best.width * best.height) ? f : best;
+        }, faces[0]);
+        focusCX = largest.x + largest.width / 2;
+        focusCY = largest.y + largest.height / 2;
+        focusW = largest.width;
+        focusH = largest.height;
+        console.log(`[Composer] ★ Multi-face (${faces.length}) → picked LARGEST face (${largest.width}x${largest.height} at ${Math.round(focusCX)},${Math.round(focusCY)}) for ${cropStrategy || 'auto'}`);
       }
 
       // คำนวณ crop region
@@ -150,22 +172,54 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
         cropH = Math.round(Math.min(zoomSize, srcH));
         if (cropW / cropH > targetRatio) cropW = Math.round(cropH * targetRatio);
         else cropH = Math.round(cropW / targetRatio);
-      } else if (faces.length > 1) {
-        // Multi-face: crop ต้องใหญ่พอครอบทุกหน้า + padding
-        // ★ ใช้ bounding box + 40% padding (ไม่ใช่ *2 ที่ทำให้สูงเกิน)
-        const padX = 1.4;
-        const padY = 1.6; // แนวตั้งต้อง padding มากกว่า (หัว-คาง)
-        const neededW = focusW * padX;
-        const neededH = focusH * padY;
-        if (neededW / neededH > targetRatio) {
-          cropW = Math.round(Math.min(neededW, srcW));
-          cropH = Math.round(cropW / targetRatio);
-        } else {
-          cropH = Math.round(Math.min(neededH, srcH));
+      } else if (cropStrategy === 'portrait-upper') {
+        // ★ Smart Zoom for Portrait Upper (ฮีโร่หลัก/คนสำคัญ):
+        // ★ FIX: pick ใหญ่สุดแล้ว — zoom ระดับพอดี (ไม่แตก)
+        const faceSize = Math.max(focusW, focusH);
+        // ★ zoom 6x faceSize — เห็นหน้า+ไหล่+บริบท ไม่ zoom จนแตก
+        const desiredH = Math.max(faceSize * 6, srcH * 0.6);
+        const desiredW = desiredH * targetRatio;
+
+        cropH = Math.round(Math.min(desiredH, srcH));
+        cropW = Math.round(Math.min(desiredW, srcW));
+        if (cropW / cropH > targetRatio) {
           cropW = Math.round(cropH * targetRatio);
+        } else {
+          cropH = Math.round(cropW / targetRatio);
         }
-        cropW = Math.min(Math.max(cropW, Math.round(srcW * 0.4)), srcW);
-        cropH = Math.min(Math.max(cropH, Math.round(srcH * 0.4)), srcH);
+
+        // ★ ป้องกัน zoom จนภาพแตก — ต้องกว้างอย่างน้อย 55% ของรูปต้นฉบับ
+        const minW = Math.round(srcW * 0.55);
+        if (cropW < minW) {
+          cropW = Math.min(minW, srcW);
+          cropH = Math.round(cropW / targetRatio);
+          if (cropH > srcH) {
+            cropH = srcH;
+            cropW = Math.round(cropH * targetRatio);
+          }
+        }
+      } else if (faces.length > 1) {
+        // ★★★ Multi-face bg/scene: zoom น้อยกว่า hero — เห็นบริบทมากขึ้น
+        const faceSize = Math.max(focusW, focusH);
+        // ★ zoom 7x faceSize — เน้นหน้า 1 คน แต่ยังเห็นบริบทรอบข้าง
+        const desiredH = Math.max(faceSize * 7, srcH * 0.7);
+        const desiredW = desiredH * targetRatio;
+
+        cropH = Math.round(Math.min(desiredH, srcH));
+        cropW = Math.round(Math.min(desiredW, srcW));
+        if (cropW / cropH > targetRatio) {
+          cropW = Math.round(cropH * targetRatio);
+        } else {
+          cropH = Math.round(cropW / targetRatio);
+        }
+
+        // ★ ป้องกัน zoom จนแตก — ต้องกว้างอย่างน้อย 55%
+        const minW = Math.round(srcW * 0.55);
+        if (cropW < minW) {
+          cropW = Math.min(minW, srcW);
+          cropH = Math.round(cropW / targetRatio);
+          if (cropH > srcH) { cropH = srcH; cropW = Math.round(cropH * targetRatio); }
+        }
       } else if (srcW / srcH > targetRatio) {
         cropH = srcH;
         cropW = Math.round(cropH * targetRatio);
@@ -175,12 +229,29 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
           if (cropW < minCropW) {
             cropW = Math.min(minCropW, srcW);
             cropH = Math.round(cropW / targetRatio);
-            cropH = Math.min(cropH, srcH);
+            if (cropH > srcH) {
+              cropH = srcH;
+              cropW = Math.round(cropH * targetRatio);
+            }
           }
         }
       } else {
         cropW = srcW;
         cropH = Math.round(cropW / targetRatio);
+        if (cropH > srcH) {
+          cropH = srcH;
+          cropW = Math.round(cropH * targetRatio);
+        }
+      }
+
+      // Ensure dimensions do not exceed the image boundaries and strictly follow targetRatio
+      if (cropW > srcW) {
+        cropW = srcW;
+        cropH = Math.round(cropW / targetRatio);
+      }
+      if (cropH > srcH) {
+        cropH = srcH;
+        cropW = Math.round(cropH * targetRatio);
       }
 
       // ★ ตำแหน่ง crop — ทุก strategy ต้องให้ใบหน้าอยู่ใน crop region เสมอ
@@ -200,6 +271,26 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
         }
         if (faceBottom > cropY + cropH) {
           cropY = Math.max(0, Math.round(faceBottom - cropH + focusH * 0.3));
+        }
+
+        // A1: Face safety margin - ensure 15% margin on all sides
+        const faceMarginPct = 0.15;
+        const faceTopEdge = focusCY - focusH / 2;
+        const faceBottomEdge = focusCY + focusH / 2;
+        const marginY = cropH * faceMarginPct;
+        const marginX = cropW * faceMarginPct;
+        if (faceTopEdge < cropY + cropH * 0.05) {
+          cropY = Math.max(0, Math.round(faceTopEdge - marginY));
+        }
+        if (faceBottomEdge > cropY + cropH - cropH * 0.05) {
+          cropY = Math.min(srcH - cropH, Math.round(faceBottomEdge - cropH + marginY));
+        }
+        // A2: Horizontal centering if face is off-center
+        const faceCenterInCrop = focusCX - cropX;
+        const faceCenterPct = faceCenterInCrop / cropW;
+        if (faceCenterPct < 0.30 || faceCenterPct > 0.70) {
+          cropX = Math.round(focusCX - cropW / 2);
+          cropX = Math.max(0, Math.min(cropX, srcW - cropW));
         }
       } else {
         // center-face / face-tight / scene-with-face: center ที่จุดกลางหน้า
@@ -251,25 +342,46 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
         }
       }
 
-      // Clamp ไม่เกินขอบภาพ
-      cropX = Math.max(0, Math.min(cropX, srcW - cropW));
-      cropY = Math.max(0, Math.min(cropY, srcH - cropH));
-      cropW = Math.min(cropW, srcW);
-      cropH = Math.min(cropH, srcH);
+      // Clamp ไม่เกินขอบภาพ และป้องกันทศนิยม (float parameters ใน Sharp.extract)
+      cropX = Math.round(Math.max(0, Math.min(cropX, srcW - cropW)));
+      cropY = Math.round(Math.max(0, Math.min(cropY, srcH - cropH)));
+      cropW = Math.round(Math.min(cropW, srcW));
+      cropH = Math.round(Math.min(cropH, srcH));
 
       if (cropW > 0 && cropH > 0) {
+        let resizePosition = 'centre';
+        if (cropStrategy === 'portrait-upper') {
+          resizePosition = 'north'; // align to top to protect head/hair from being cut off during resize
+        }
         console.log(`[Composer] 🎯 Face crop: strategy=${cropStrategy||'center'}, faces=${faces.length}, focus=(${Math.round(focusCX)},${Math.round(focusCY)}), crop=(${cropX},${cropY},${cropW}x${cropH}), src=${srcW}x${srcH}`);
         return sharp(imageBuffer)
           .extract({ left: cropX, top: cropY, width: cropW, height: cropH })
-          .resize(w, h, { fit: 'cover', position: 'centre' })
+          .resize(w, h, { fit: 'cover', position: resizePosition })
           .png()
           .toBuffer();
       }
     }
 
-    // Fallback: ★ ใช้ centre เสมอ (ไม่ใช้ top — เพราะหน้าอาจอยู่ตรงกลาง/ล่าง)
+    // Fallback:
+    let position = 'centre';
+    
+    // Check fade options to shift the focal point away from faded edges (to keep the main subject prominent)
+    if (opts.fadeLeftPx && opts.fadeLeftPx > 50) {
+      position = 'east'; // align right to protect the right side of the image
+    } else if (opts.fadeRightPx && opts.fadeRightPx > 50) {
+      position = 'west'; // align left
+    } else if (opts.fadeTopPx && opts.fadeTopPx > 50) {
+      position = 'south'; // align bottom
+    } else if (opts.fadeBottomPx && opts.fadeBottomPx > 50) {
+      position = 'north'; // align top
+    } else if (cropStrategy === 'attention') {
+      position = sharp.strategy.attention;
+    } else if (cropStrategy === 'entropy') {
+      position = sharp.strategy.entropy;
+    }
+
     return sharp(imageBuffer)
-      .resize(w, h, { fit: 'cover', position: 'centre' })
+      .resize(w, h, { fit: 'cover', position })
       .png()
       .toBuffer();
   } catch (e) {
@@ -834,20 +946,123 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
     const cd = layoutCircle.diameter || 380;
     const cbw = (layoutCircle.borderWidth || 5) * 2;
     const fullD = cd + cbw;
-    const defCX = layoutCircle.x ?? 25;
-    const defCY = layoutCircle.y ?? 680;
+    let defCX = layoutCircle.x ?? 25;
+    let defCY = layoutCircle.y ?? 680;
+
+    // ★ Smart Hero Face Avoidance: หลบใบหน้าของ Hero หลักเป็นพิเศษ!
+    // ค้นหาตำแหน่งใบหน้าจริงของ Hero (ถ้ามี)
+    const heroSlotIdx = layoutSlots.findIndex(s => s.id === 'main' || s.role === 'hero');
+    if (heroSlotIdx !== -1) {
+      const heroImgIdx = photoOrder[heroSlotIdx];
+      const heroFD = faceDataMap?.get?.(String(heroImgIdx));
+      if (heroFD?.hasFaces && heroFD.faces?.length > 0) {
+        // หาใบหน้าที่ใหญ่ที่สุดของ Hero (มักเป็นใบหน้าหลัก)
+        const heroFace = [...heroFD.faces].sort((a, b) => b.width * b.height - a.x * a.y)[0];
+        
+        const heroSlotSpec = layoutSlots[heroSlotIdx];
+        const srcW = heroFD.imageWidth || heroSlotSpec.w || W;
+        const srcH = heroFD.imageHeight || heroSlotSpec.h || H;
+        
+        // แปลงพิกัดใบหน้า Hero ไปเป็น Canvas coordinates
+        const faceCanvasX = (heroSlotSpec.x || 0) + (heroFace.x / srcW) * (heroSlotSpec.w || W);
+        const faceCanvasY = (heroSlotSpec.y || 0) + (heroFace.y / srcH) * (heroSlotSpec.h || H);
+        const faceCanvasW = (heroFace.width / srcW) * (heroSlotSpec.w || W);
+        const faceCanvasH = (heroFace.height / srcH) * (heroSlotSpec.h || H);
+        
+        const faceCX = faceCanvasX + faceCanvasW / 2;
+        const faceCY = faceCanvasY + faceCanvasH / 2;
+        
+        // ตรวจสอบว่าตำแหน่งตั้งต้นของวงกลมทับหรืออยู่ใกล้ใบหน้า Hero เกินไปหรือไม่
+        const circleCX = defCX + fullD / 2;
+        const circleCY = defCY + fullD / 2;
+        
+        const dist = Math.sqrt((circleCX - faceCX) ** 2 + (circleCY - faceCY) ** 2);
+        const minDist = (faceCanvasW + fullD) / 2 + 100; // เพิ่มระยะห่างกันชน (100px)
+        
+        if (dist < minDist) {
+          console.log(`[SmartPlace] 🔵 Circle is too close to Hero face (dist: ${Math.round(dist)} < minDist: ${Math.round(minDist)}) → shifting default position downwards`);
+          // ผลักวงกลมลงมาด้านล่าง (หน้าอก/ตัว) ของ Hero
+          // ถ้าเป็นสล็อตซ้าย ให้วงกลมอยู่เฉียงขวาล่างของใบหน้า
+          if (faceCX < W / 2) {
+            defCY = Math.min(H - fullD - 40, faceCanvasY + faceCanvasH + 50); // วางไว้ใต้ใบหน้า 50px
+            defCX = Math.max(20, Math.min(W - fullD - 20, faceCanvasX + faceCanvasW * 0.8)); // ปัดไปทางขวานิดหน่อย
+          } else {
+            // ฮีโร่อยู่ขวา (ถ้ามี) → ปรับกลับกัน
+            defCY = Math.min(H - fullD - 40, faceCanvasY + faceCanvasH + 50);
+            defCX = Math.max(20, faceCanvasX - fullD - 50);
+          }
+          console.log(`[SmartPlace] 🔵 Adjusted default circle coordinates to: (${defCX}, ${defCY})`);
+        }
+      }
+    }
     
-    const circlePlacement = findBestPosition(defCX, defCY, fullD, fullD);
-    layoutCircle.x = circlePlacement.x;
-    layoutCircle.y = circlePlacement.y;
+    // C2: Smart Circle Placement - try 8 candidate positions and score them
+    // Collect bounds of ALL already-rendered overlay slots (highlight, bordered)
+    const overlaySlotBounds = [];
+    for (const s of sortedSlots) {
+      if ((s.border && s.borderWidth) || s.role === 'highlight') {
+        overlaySlotBounds.push({ x: s.x || 0, y: s.y || 0, w: s.w || 200, h: s.h || 200 });
+      }
+    }
+
+    // 8 candidate positions for circle
+    const circleCandidates = [
+      { x: defCX, y: defCY, label: 'default' },
+      { x: 20, y: H - fullD - 20, label: 'bottom-left' },
+      { x: W - fullD - 20, y: H - fullD - 20, label: 'bottom-right' },
+      { x: W - fullD - 20, y: 20, label: 'top-right' },
+      { x: 20, y: 20, label: 'top-left' },
+      { x: 20, y: Math.round(H / 2 - fullD / 2), label: 'mid-left' },
+      { x: W - fullD - 20, y: Math.round(H / 2 - fullD / 2), label: 'mid-right' },
+      { x: Math.round(W / 2 - fullD / 2), y: H - fullD - 20, label: 'bottom-center' },
+    ];
+
+    let bestCircleScore = -Infinity;
+    let bestCirclePos = { x: defCX, y: defCY };
+    let bestCircleLabel = 'default';
+    for (const cand of circleCandidates) {
+      let score = 0;
+      const circBBox = { x: cand.x, y: cand.y, w: fullD, h: fullD };
+      // Check face overlap
+      for (const face of allCanvasFaces) {
+        const ov = detectOverlap(circBBox, face);
+        if (ov.hasOverlap) score -= 1000;
+      }
+      // Check overlay slot overlap
+      for (const ob of overlaySlotBounds) {
+        const ov = detectOverlap(circBBox, ob);
+        if (ov.hasOverlap) score -= 500;
+      }
+      // Check hero protection zone
+      if (heroProtectionZone) {
+        const ov = detectOverlap(circBBox, heroProtectionZone);
+        if (ov.hasOverlap) score -= 800;
+      }
+      // Prefer edges (distance from center)
+      const dx = Math.abs(cand.x + fullD/2 - W/2);
+      const dy = Math.abs(cand.y + fullD/2 - H/2);
+      score += (dx + dy) * 0.1;
+      // Prefer default position slightly
+      if (cand.label === 'default') score += 50;
+      if (score > bestCircleScore) {
+        bestCircleScore = score;
+        bestCirclePos = { x: cand.x, y: cand.y };
+        bestCircleLabel = cand.label;
+      }
+    }
+    console.log(`[SmartPlace] C2: Best circle position: ${bestCircleLabel} (${bestCirclePos.x},${bestCirclePos.y}) score=${bestCircleScore.toFixed(0)}`);
+    const circlePlacement = { x: bestCirclePos.x, y: bestCirclePos.y, w: fullD, h: fullD, moved: bestCircleLabel !== 'default' };
+    // ★ Math.round() ทุกค่าเพราะ sharp composite ต้องการ integer — float ทำให้ crash!
+    layoutCircle.x = Math.round(circlePlacement.x);
+    layoutCircle.y = Math.round(circlePlacement.y);
     
     // ★ FIX: ถ้า SmartPlace หด circle ต่ำกว่า MIN_RENDERED_CIRCLE → reset กลับ default
     // ยอมทับ obstacle ดีกว่าทำให้หน้าคนเล็กจนดูไม่ออก!
     const renderedDiameter = circlePlacement.w < fullD ? circlePlacement.w - cbw : cd;
     if (renderedDiameter < MIN_RENDERED_CIRCLE) {
       console.log(`[SmartPlace] ⚠️ Circle would shrink to ${renderedDiameter}px < MIN_RENDERED_CIRCLE(${MIN_RENDERED_CIRCLE}px) — keeping original size at default position`);
-      layoutCircle.x = defCX;
-      layoutCircle.y = defCY;
+      layoutCircle.x = Math.round(defCX);
+      layoutCircle.y = Math.round(defCY);
       // คง diameter เดิม ไม่หด
     } else if (circlePlacement.w < fullD) {
       layoutCircle.diameter = renderedDiameter;
@@ -877,6 +1092,52 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
       });
     }
     const placement = findBestPosition(slot.x, slot.y, slot.w, slot.h, avoid);
+
+    // C3: Check if highlight overlaps with circle and try to adjust
+    if (circleCanvasRect) {
+      const hlRect = { x: placement.x, y: placement.y, w: placement.w || slot.w, h: placement.h || slot.h };
+      const circRect = { x: circleCanvasRect.x, y: circleCanvasRect.y, w: circleCanvasRect.w, h: circleCanvasRect.h };
+      const hlOverlap = detectOverlap(hlRect, circRect);
+      if (hlOverlap.overlapPct > 0.10) {
+        // Try shifting highlight up by circle diameter
+        const shiftedUpY = placement.y - circleCanvasRect.h - 20;
+        if (shiftedUpY >= 0) {
+          const upRect = { x: placement.x, y: shiftedUpY, w: hlRect.w, h: hlRect.h };
+          const recheck = detectOverlap(upRect, circRect);
+          if (!recheck.hasOverlap) {
+            placement.y = shiftedUpY;
+            placement.moved = true;
+            console.log(`[SmartPlace] C3: Highlight shifted UP to avoid circle (y: ${hlRect.y} -> ${shiftedUpY})`);
+          }
+        }
+        // Try shifting right if up did not help
+        if (placement.y === hlRect.y) {
+          const rightX = circleCanvasRect.x + circleCanvasRect.w + 20;
+          if (rightX + hlRect.w <= W) {
+            const rightRect = { x: rightX, y: placement.y, w: hlRect.w, h: hlRect.h };
+            const recheck2 = detectOverlap(rightRect, circRect);
+            if (!recheck2.hasOverlap) {
+              placement.x = rightX;
+              placement.moved = true;
+              console.log(`[SmartPlace] C3: Highlight shifted RIGHT to avoid circle (x: ${hlRect.x} -> ${rightX})`);
+            }
+          }
+        }
+        // Try shifting left
+        if (placement.y === hlRect.y && placement.x === hlRect.x) {
+          const leftX = circleCanvasRect.x - hlRect.w - 20;
+          if (leftX >= 0) {
+            const leftRect = { x: leftX, y: placement.y, w: hlRect.w, h: hlRect.h };
+            const recheck3 = detectOverlap(leftRect, circRect);
+            if (!recheck3.hasOverlap) {
+              placement.x = leftX;
+              placement.moved = true;
+              console.log(`[SmartPlace] C3: Highlight shifted LEFT to avoid circle (x: ${hlRect.x} -> ${leftX})`);
+            }
+          }
+        }
+      }
+    }
     
     if (placement.moved) {
       console.log(`[SmartPlace] 🟨 Highlight "${slot.id}" moved: (${slot.x},${slot.y}) ${slot.w}x${slot.h} → (${placement.x},${placement.y}) ${placement.w}x${placement.h}`);
@@ -984,6 +1245,9 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
           // ★ FIX: bg_bottom มีหน้าคน (role=scene/ใดก็ตาม) → ใช้ portrait-upper เสมอ
           // เพราะ bg_bottom มี fadeTop สูง (120-160px) → center-face จะทำให้หน้าคนถูก fade กินหาย!
           cropStrat = 'portrait-upper';
+        // B1: Scene crop for bg_top/bg_bottom with scene/evidence role
+        } else if ((slot.id === 'bg_top' || slot.id === 'bg_bottom') && !slotFaceData?.hasFaces && (slotRole === 'scene' || slotRole.includes('CONTEXT') || slotRole.includes('EVIDENCE'))) {
+          cropStrat = 'attention'; // B1: prevents over-cropping buildings and signs
         } else if (slotRole === 'highlight') {
           cropStrat = 'center-face';    // Highlight: center ที่หน้า
         } else if (slotFaceData?.hasFaces) {
@@ -991,7 +1255,12 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
         } else {
           cropStrat = 'attention';      // Scene ไม่มีคน: ใช้ saliency
         }
-        let resized = await smartCropPhoto(imageBuffers[imgIdx], safeW, safeH, slotFaceData, cropStrat, { fadeLeftPx: slot.fadeLeft || 0 });
+        let resized = await smartCropPhoto(imageBuffers[imgIdx], safeW, safeH, slotFaceData, cropStrat, {
+          fadeLeftPx: slot.fadeLeft || 0,
+          fadeRightPx: slot.fadeRight || 0,
+          fadeTopPx: slot.fadeTop || 0,
+          fadeBottomPx: slot.fadeBottom || 0
+        });
 
         // ★ Sharpen ทุกภาพ — เพิ่มความคมชัด!
         try {
@@ -1072,8 +1341,9 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
     // คำนวณตำแหน่ง + clamp ให้ไม่เกินขอบ canvas
     const rawLeft = circleSlot.x !== undefined ? circleSlot.x : Math.round((circleSlot.cx || W / 2) - totalSize / 2);
     const rawTop = circleSlot.y !== undefined ? circleSlot.y : Math.round((circleSlot.cy || H / 2) - totalSize / 2);
-    const left = Math.max(0, Math.min(rawLeft, W - totalSize));
-    const top = Math.max(0, Math.min(rawTop, H - totalSize));
+    // ★ Math.round() ทุกค่าเพราะ sharp ต้องการ integer เท่านั้น — float ทำให้ pipeline crash!
+    const left = Math.round(Math.max(0, Math.min(rawLeft, W - totalSize)));
+    const top = Math.round(Math.max(0, Math.min(rawTop, H - totalSize)));
 
     composites.push({ input: circleBuf, left, top });
   }

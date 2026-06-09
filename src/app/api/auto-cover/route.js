@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Auto Cover API Route — /api/auto-cover
  * 
  * POST: Generate cover image automatically from content
@@ -14,8 +14,85 @@
 import { NextResponse } from 'next/server';
 import { MODEL_VISION } from '@/lib/ai/modelConfig';
 import sharp from 'sharp';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-export const maxDuration = 300; // 5 minutes — cover pipeline needs 70-120s normally
+// ============================================================================
+// ★ GEMINI GLOBAL FETCH INTERCEPTOR — AUTO FALLBACK FOR 503/429/TIMEOUTS ★
+// ★★★ Fix 11: จำกัด retry สูงสุด 3 ครั้ง แล้วปล่อยให้ caller fallback เอง (GPT-4o)
+// ============================================================================
+try {
+  if (!globalThis.__isFetchIntercepted) {
+    globalThis.__isFetchIntercepted = true;
+    globalThis.__geminiRetryCount = 0; // ★ Fix 11: นับจำนวน retry
+    const MAX_GEMINI_RETRIES = 3;      // ★ Fix 11: จำกัด 3 ครั้งต่อ pipeline
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async function(input, init) {
+      let url = '';
+      if (typeof input === 'string') {
+        url = input;
+      } else if (input && typeof input === 'object' && input.url) {
+        url = input.url;
+      }
+
+      const isGemini25Flash = url.includes('generativelanguage.googleapis.com') && url.includes('gemini-2.5-flash');
+      const isGemini25Pro = url.includes('generativelanguage.googleapis.com') && url.includes('gemini-2.5-pro');
+
+      if (isGemini25Flash || isGemini25Pro) {
+        const fallbackModel = 'gemini-2.5-pro';
+        try {
+          const response = await originalFetch.call(this, input, init);
+          if (!response.ok && (response.status === 503 || response.status === 429)) {
+            // ★ Fix 11: เช็ค retry limit
+            if (globalThis.__geminiRetryCount >= MAX_GEMINI_RETRIES) {
+              console.warn(`[Gemini Fetch Interceptor] ⛔ Max retries (${MAX_GEMINI_RETRIES}) reached — letting error pass to caller for GPT-4o fallback`);
+              return response; // ปล่อยให้ caller จัดการเอง (มี GPT-4o fallback)
+            }
+            globalThis.__geminiRetryCount++;
+            if (isGemini25Pro) {
+              console.warn(`[Gemini Fetch Interceptor] HTTP ${response.status} for gemini-2.5-pro. Sleeping 1500ms before retry... (${globalThis.__geminiRetryCount}/${MAX_GEMINI_RETRIES})`);
+              await new Promise(r => setTimeout(r, 1500));
+            }
+            const newUrl = url.replace(/gemini-2.5-(flash|pro)/, fallbackModel);
+            console.warn(`[Gemini Fetch Interceptor] HTTP ${response.status} for ${url}. Retrying with ${fallbackModel}... (${globalThis.__geminiRetryCount}/${MAX_GEMINI_RETRIES})`);
+            if (typeof input !== 'string' && typeof Request !== 'undefined' && input instanceof Request) {
+              const newRequest = new Request(newUrl, input);
+              return await originalFetch.call(this, newRequest, init);
+            }
+            return await originalFetch.call(this, newUrl, init);
+          }
+          // ★ Fix 11: รีเซ็ต counter เมื่อสำเร็จ
+          if (response.ok) globalThis.__geminiRetryCount = 0;
+          return response;
+        } catch (err) {
+          // ★ Fix 11: เช็ค retry limit
+          if (globalThis.__geminiRetryCount >= MAX_GEMINI_RETRIES) {
+            console.warn(`[Gemini Fetch Interceptor] ⛔ Max retries (${MAX_GEMINI_RETRIES}) reached on error — letting error pass to caller`);
+            throw err;
+          }
+          globalThis.__geminiRetryCount++;
+          if (isGemini25Pro) {
+            console.warn(`[Gemini Fetch Interceptor] Fetch error for gemini-2.5-pro. Sleeping 1500ms before retry... (${globalThis.__geminiRetryCount}/${MAX_GEMINI_RETRIES})`);
+            await new Promise(r => setTimeout(r, 1500));
+          }
+          const newUrl = url.replace(/gemini-2.5-(flash|pro)/, fallbackModel);
+          console.warn(`[Gemini Fetch Interceptor] Fetch error: ${err.message} for ${url}. Retrying with ${fallbackModel}... (${globalThis.__geminiRetryCount}/${MAX_GEMINI_RETRIES})`);
+          if (typeof input !== 'string' && typeof Request !== 'undefined' && input instanceof Request) {
+            const newRequest = new Request(newUrl, input);
+            return await originalFetch.call(this, newRequest, init);
+          }
+          return await originalFetch.call(this, newUrl, init);
+        }
+      }
+
+      return await originalFetch.apply(this, arguments);
+    };
+    console.log('[Gemini Fetch Interceptor] Installed global fetch interceptor successfully. (max retries: 3)');
+  }
+} catch (e) {
+  console.error('[Gemini Fetch Interceptor] Failed to install:', e);
+}
+
+export const maxDuration = 600; // ★ Fix 12: 10 minutes — Gemini 503 fallback chain needs more time
 
 // ═══ dHash: Perceptual Image Hashing ═══
 // Inlined because imageSearchService.js does not export these utilities
@@ -52,54 +129,69 @@ function hammingDistance(hash1, hash2) {
   return dist;
 }
 
-// ═══ Final Cover Judge (Gemini Vision) ═══
+// ═══ Final Cover Judge (GPT-4o-mini Vision — Fix 17: ปิด Gemini) ═══
 async function evaluateFinalCover(base64Image, newsTitle) {
+  // ★★★ Fix 17: ใช้ GPT-4o-mini ตรง ไม่ผ่าน Gemini (503 ทั้งวัน)
   try {
-    const { GoogleGenerativeAI } = await import('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (!openaiKey) return 7; // default score ถ้าไม่มี key
 
     const prompt = `You are an elite news Art Director evaluating a composed 1200x1350 news cover for: "${newsTitle}".
+Evaluate: 1) Main subject visible? 2) Background images diverse? 3) Composition balanced? 4) Quality high?
+Score 1-10. Return ONLY valid JSON: {"score": 8, "reason": "brief"}`;
 
-Evaluate:
-1. Is the main subject clearly visible?
-2. Are background images diverse (not the same photo repeated)?
-3. Is the composition balanced and professional?
-4. Is the overall quality high (not cheap-looking)?
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}`, detail: 'low' } }
+        ]}],
+        max_tokens: 200,
+        temperature: 0.2
+      }),
+      signal: AbortSignal.timeout(15000) // 15s timeout
+    });
 
-Score 1-10. Return ONLY valid JSON without any markdown: {"score": 8, "reason": "brief"}. Do NOT wrap in code blocks.`;
-
-    const result = await model.generateContent([
-      prompt,
-      { inlineData: { data: base64Image, mimeType: 'image/jpeg' } }
-    ]);
-    const responseText = result.response.text().trim();
-    // Support both raw JSON and markdown-wrapped JSON
-    const match = responseText.match(/```(?:json)?\s*({[\s\S]*?})\s*```/) ||
-                  responseText.match(/({[\s\S]*?"score"[\s\S]*?})/);
-    if (match) {
-      const data = JSON.parse(match[1] || match[0]);
-      const score = parseInt(data.score, 10);
-      if (score >= 1 && score <= 10) {
-        console.log(`[AutoCover Judge] ✅ Score: ${score}/10 — ${data.reason}`);
-        return score;
+    if (res.ok) {
+      const data = await res.json();
+      const text = data.choices?.[0]?.message?.content || '';
+      const match = text.match(/\{[\s\S]*?"score"[\s\S]*?\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        const score = parseInt(parsed.score, 10);
+        if (score >= 1 && score <= 10) {
+          console.log(`[AutoCover Judge] ✅ Score: ${score}/10 using gpt-4o-mini — ${parsed.reason}`);
+          return score;
+        }
       }
     }
-    console.log('[AutoCover Judge] ⚠️ Could not parse score from response:', responseText.slice(0, 100));
-    return null;
+    console.log('[AutoCover Judge] ⚠️ GPT-4o-mini judge failed, using default score 7');
+    return 7;
   } catch (e) {
-    console.log('[AutoCover Judge] Evaluation error:', e.message);
-    return null;
+    console.warn('[AutoCover Judge] Error:', e.message?.substring(0, 60));
+    return 7; // default score
   }
 }
+// ★ Old Gemini evaluateFinalCover (disabled by Fix 17)
+// Original code preserved below — uncomment to re-enable Gemini
+/*
+  for (const modelName of models) { ... }
+  return null;
+}
+*/
 
 export async function POST(request) {
   const startTime = Date.now();
-  const TIMEOUT_MS = 280_000; // 280s safety — pipeline needs 70-120s, allow buffer for slow AI/network
+  const TIMEOUT_MS = 540_000; // ★ Fix 12: 9 minutes — Gemini 503 fallback to GPT-4o needs ~5-8 min
 
   try {
     const body = await request.json();
-    const { content, newsTitle, templateId = 'auto', sourceUrl = '', regenerate = false, caseId: bodyCaseId } = body;
+    const { content, newsTitle, templateId = 'auto', sourceUrl = '', regenerate = false, caseId: bodyCaseId, clearCache = false } = body;
+
+    const sessionId = bodyCaseId || `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
     if (!content && !newsTitle) {
       return NextResponse.json(
@@ -227,6 +319,23 @@ export async function POST(request) {
     }
 
     // ════════════════════════════════════════════════════════
+    // ★★★ Step 1.4: Smart Query Generator — AI วิเคราะห์ข่าวสร้าง keyword ฉลาดๆ
+    // ไม่ค้นแค่ชื่อคน แต่ใช้บริบทข่าว เช่น "สวนแม่ชมพู่", "ที่ดิน 1 ไร่ ยายหนิง"
+    // ════════════════════════════════════════════════════════
+    try {
+      console.log('[AutoCover] 🧠 Step 1.4: Smart Query Generator...');
+      const { generateSmartQueries } = await import('@/lib/services/smartQueryGenerator');
+      const smartResult = await generateSmartQueries(newsTitle, content, identity);
+      if (smartResult?.injected) {
+        console.log(`[AutoCover] 🧠 Smart queries injected: ${smartResult.smartQueries?.length || 0} queries`);
+      } else {
+        console.log(`[AutoCover] 🧠 Smart queries: fallback mode (${smartResult?.smartQueries?.length || 0} queries)`);
+      }
+    } catch (smartErr) {
+      console.warn('[AutoCover] 🧠 Smart Query Generator failed (non-critical):', smartErr.message?.slice(0, 80));
+    }
+
+    // ════════════════════════════════════════════════════════
     // ★ PROGRAMMATIC QUERY OVERRIDE (ROOT FIX)
     // ไม่ได้พึ่ง AI ทำตาม schema — override ตาม celebratedAction จริงๆ
     // ★★★ ถ้า celebratedAction มี → ALWAYS override ทันที
@@ -251,6 +360,18 @@ export async function POST(request) {
         sq.event_scene      = `${hero} ${celebratedAction}`.trim();
         identity.searchGoogle  = `${hero} ${celebratedAction}`.trim().substring(0, 80);
         identity.searchYouTube = relationship ? `${hero} ${relationship} ${celebratedAction}`.trim().substring(0, 60) : `${hero} ${celebratedAction}`.trim().substring(0, 60);
+        // ★★★ Fix 1: Override person_portrait + person_closeup เมื่อข่าวไม่เกี่ยวอาชีพ
+        // ป้องกัน Google คืนภาพแฟชั่น/พรมแดง เมื่อค้นชื่อคนดังดิบๆ
+        if (occupationImportance < 0.3) {
+          const storyContext = relationship || celebratedAction || '';
+          const prevPortrait = sq.person_portrait;
+          const prevCloseup = sq.person_closeup;
+          sq.person_portrait = `${hero} ${storyContext}`.trim();
+          sq.person_closeup = `${hero} สัมภาษณ์`.trim();
+          console.log(`  person_portrait:  "${prevPortrait}" -> "${sq.person_portrait}" (★ story context override)`);
+          console.log(`  person_closeup:   "${prevCloseup}" -> "${sq.person_closeup}" (★ interview mode)`);
+        }
+
         console.log(`[AutoCover] ★ QUERY OVERRIDE (occupationImportance=${occupationImportance})`);
         console.log(`  key_activity:     "${prevKeyActivity}" -> "${sq.key_activity}"`);
         console.log(`  person_context:   "${prevPersonContext}" -> "${sq.person_context}"`);
@@ -336,6 +457,9 @@ export async function POST(request) {
     // ═══════════════════════════════════════════════════════
     // Step 1.6: Relationship Resolver — วิเคราะห์ตัวละครและความสัมพันธ์ในข่าว
     // ═══════════════════════════════════════════════════════
+    // ★★★ Fix 15: ปิด Relationship Resolver ชั่วคราว — Gemini 503 ทั้งวัน ใช้ข้อมูลจาก StoryIdentity แทน
+    // เปิดใหม่โดย uncomment block ด้านล่าง
+    /*
     try {
       if (identity?.mainCharacter) {
         console.log('[AutoCover] 👥 Step 1.6: Relationship Resolver...');
@@ -346,12 +470,122 @@ export async function POST(request) {
     } catch (relErr) {
       console.error('[AutoCover] Relationship Resolver failed (non-critical):', relErr.message);
     }
+    */
+    console.log('[AutoCover] ⚡ Step 1.6: Relationship Resolver SKIPPED (Fix 15 — Gemini disabled)');
+    // ★ ใช้ข้อมูลจาก StoryIdentity แทน
+    if (identity?.coreStory?.relationship && identity?.mainCharacter) {
+      resolvedRelationships = {
+        hero: { name: identity.mainCharacter, searchName: identity.mainCharacter },
+        relationships: [{ name: identity.coreStory.relationship, role: 'relationship' }],
+        evidenceCategories: ['hero', 'relationship', 'interview'],
+      };
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // ★★★ IMAGE CACHE CHECK — ก่อนค้น Google ให้เช็ค cache ก่อน!
+    // ป้องกันปัญหา: Google ให้ภาพชุดต่างทุกครั้ง → ผลไม่คงที่
+    // ถ้ามี cache ที่ดี → ใช้เลย ไม่ต้องค้นใหม่!
+
+    // ★ Clear cache ถ้า user ร้องขอ (ล้างภาพเก่าที่แย่ออก)
+    if (clearCache && newsTitle) {
+      try {
+        const { clearCacheByTitle } = await import('@/lib/services/imageCacheService');
+        const newsHash = generateNewsHash(newsTitle || content?.substring(0, 100));
+        await clearCacheByTitle(newsHash);
+        console.log(`[AutoCover] 🗑️ Cache CLEARED for hash: ${newsHash?.slice(0,8)} — will search Google fresh!`);
+      } catch (e) {
+        console.log(`[AutoCover] ⚠️ Cache clear failed: ${e.message}`);
+      }
+    }
+    // ═══════════════════════════════════════════════════════
+    let useCachedImages = false;
+    let cachedImageBuffers = [];
+    
+    if (!regenerate) {
+      try {
+        const { generateNewsHash, getFromCache, downloadFromStorage } = await import('@/lib/services/imageCacheService');
+        const newsHash = generateNewsHash(newsTitle || content?.substring(0, 100));
+        console.log(`[AutoCover] 📦 Checking image cache (hash: ${newsHash?.substring(0, 12)}...)...`);
+        
+        const cached = await getFromCache(newsHash);
+        if (cached && cached.length >= 4) {
+          // ★ กรอง REJECT ออก + เรียงตาม score สูง → ต่ำ
+          const goodCached = cached
+            .filter(img => img.role !== 'REJECT' && (img.ai_score || 0) >= 4)
+            .sort((a, b) => (b.ai_score || 0) - (a.ai_score || 0));
+          const usableCached = goodCached.length >= 4 ? goodCached : cached.sort((a, b) => (b.ai_score || 0) - (a.ai_score || 0));
+          console.log(`[AutoCover] 📦 Cache HIT! ${cached.length} total, ${goodCached.length} non-REJECT — downloading from storage...`);
+          
+          const cacheDownloads = await Promise.allSettled(
+            usableCached.slice(0, 12).map(async (img) => {
+              try {
+                if (img.storage_path) {
+                  const buf = await downloadFromStorage(img.storage_path);
+                  if (buf && buf.length > 5000) {
+                    return {
+                      buffer: buf,
+                      url: img.image_url || '',
+                      role: img.role || 'SUPPORT',
+                      score: img.ai_score || 7,
+                      source: 'cache',
+                      width: img.width || 0,
+                      height: img.height || 0,
+                    };
+                  }
+                }
+                return null;
+              } catch { return null; }
+            })
+          );
+          
+          cachedImageBuffers = cacheDownloads
+            .filter(r => r.status === 'fulfilled' && r.value)
+            .map(r => r.value);
+          
+          if (cachedImageBuffers.length >= 8) {
+            // ★ 8+ ภาพดี → ใช้ cache เท่านั้น ข้าม Google
+            useCachedImages = true;
+            console.log(`[AutoCover] 📦 ✅ Using ${cachedImageBuffers.length} cached images — SKIPPING Google search!`);
+          } else if (cachedImageBuffers.length >= 4) {
+            // ★★★ HYBRID MODE: 4-7 ภาพ → ใช้ cache + ค้น Google เพิ่ม!
+            useCachedImages = false; // ยังค้น Google เพิ่ม
+            console.log(`[AutoCover] 📦 🔄 HYBRID MODE: ${cachedImageBuffers.length} cached images + will search Google for more!`);
+          } else {
+            console.log(`[AutoCover] 📦 ⚠️ Only ${cachedImageBuffers.length} cached images — falling back to full Google search`);
+            cachedImageBuffers = [];
+          }
+        } else {
+          console.log(`[AutoCover] 📦 Cache MISS (${cached?.length || 0} images) — will search Google`);
+        }
+      } catch (cacheErr) {
+        console.warn('[AutoCover] 📦 Cache check failed (non-critical):', cacheErr.message);
+      }
+    } else {
+      console.log('[AutoCover] 📦 Regenerate mode — skipping cache, fresh search');
+    }
 
     // Step 2: Multi-agent image search (parallel กับ Step 1.7–1.8)
     const { runMultiAgentImageSearch } = await import('@/lib/services/multiAgentImageScraper');
 
     // ★ Run Step 1.7 (CoverPlanner) + Step 1.8 (EvidenceLibrary) + Step 2 (MultiAgent) แบบ parallel
-    const [multiAgentResult, evidenceResult] = await Promise.allSettled([
+    // ★★★ SKIP if cache hit!
+    if (useCachedImages) {
+      console.log(`[AutoCover] 📦 CACHE MODE — skipping Google search + Evidence Library`);
+      // Still run CoverPlanner for slot mapping
+      try {
+        const planTemplateId = templateId !== 'auto' ? templateId : 'template_5';
+        console.log(`[AutoCover] 📋 Step 1.7: Cover Planner → template: ${planTemplateId}`);
+        const { planCoverLayout } = await import('@/lib/services/coverPlannerService');
+        coverPlan = await planCoverLayout(resolvedRelationships, planTemplateId, identity);
+        console.log(`[AutoCover] 📋 Cover Plan: ${coverPlan.slots?.length || 0} slots mapped (source: ${coverPlan.source})`);
+      } catch (planErr) {
+        console.warn('[AutoCover] CoverPlanner failed:', planErr.message);
+      }
+    }
+    
+    const [multiAgentResult, evidenceResult] = useCachedImages 
+      ? [{ status: 'fulfilled', value: [] }, { status: 'fulfilled', value: null }]
+      : await Promise.allSettled([
       // Step 2: Multi-agent image search (keyword-based เหมือนเดิม)
       runMultiAgentImageSearch(
         sourceUrl || '',
@@ -474,17 +708,23 @@ export async function POST(request) {
           // combine quality score: authorityScore (0.3) + captionScore (0.4) + base (0.3)
           const authorityScore = img.authorityScore || 0.35;
           const captionScore = img.captionScore || 0.5;
-          const qualityScore = (authorityScore * 0.3) + (captionScore * 0.4) + (0.3 * (cat === 'hero' ? 1.0 : 0.7));
+          // ★★★ Fix 8v2: ลด hero score เล็กน้อย แต่ยังต้องมีหน้าคนชัดสำหรับ main slot
+          const occImpForHero = identity?.coreStory?.occupationImportance ?? 1.0;
+          const heroBonus = (cat === 'hero' && occImpForHero < 0.3) ? 0.7 : (cat === 'hero' ? 1.0 : 0.7);
+          const heroScore = (cat === 'hero' && occImpForHero < 0.3) ? 7 : (cat === 'hero' ? 9 : 7);
+          const qualityScore = (authorityScore * 0.3) + (captionScore * 0.4) + (0.3 * heroBonus);
           entityFirstImages.push({
             url: img.imageUrl,
             role,
-            score: cat === 'hero' ? 9 : 7,
+            score: heroScore,
             qualityScore,
             authorityScore,
             captionScore: img.captionScore,
             captionMatch: img.captionMatch,
             source: 'entity_first',
             evidenceCat: cat,
+            title: img.title || img.caption || '',
+            snippet: img.query || img.snippet || img.queryLabel || '',
           });
         }
       }
@@ -495,36 +735,74 @@ export async function POST(request) {
     entityFirstImages.sort((a, b) => (b.qualityScore || 0) - (a.qualityScore || 0));
 
     // รวม: entity-first มาก่อน (priority, sorted by quality) → multiAgent ตามหลัง
-    const bestImages = [...entityFirstImages, ...multiAgentImages];
-    console.log(`[AutoCover] 🏆 Best images: ${entityFirstImages.length} entity-first (sorted) + ${multiAgentImages.length} multiAgent`);
+    // ★★★ ถ้า cache hit → ใช้ cached images แทน!
+    const bestImages = useCachedImages ? [] : [...entityFirstImages, ...multiAgentImages];
+    if (!useCachedImages) {
+      console.log(`[AutoCover] 🏆 Best images: ${entityFirstImages.length} entity-first (sorted) + ${multiAgentImages.length} multiAgent`);
+    }
 
-    if (!bestImages || bestImages.length === 0) {
+    if (!useCachedImages && (!bestImages || bestImages.length === 0)) {
       return NextResponse.json(
         { success: false, error: 'ไม่พบภาพที่เหมาะสม', errorType: 'NO_IMAGES_FOUND', status: 'NEED_MANUAL_COVER' },
         { status: 422 }
       );
     }
 
-    console.log(`[AutoCover] Found ${bestImages.length} images`);
+    console.log(`[AutoCover] Found ${useCachedImages ? cachedImageBuffers.length + ' (from cache)' : bestImages.length} images`);
+
 
     // Step 3: Download + validate + dedup
     const { downloadAndValidateImage } = await import('@/lib/services/imageSearchService');
 
     const imageBuffers = [];
     const imageHashes = [];
-    // ★★★ เรียงลำดับ: HERO_FACE → KEY_ACTIVITY → CONTEXT_SCENE → EVIDENCE → RELATIONSHIP → TIMELINE_PAST → EMOTION → PERSON_SUPPORT
-    // ภาพเล่าเรื่อง (KEY_ACTIVITY, CONTEXT_SCENE) ต้องถูก download ก่อนภาพสวย (PERSON_SUPPORT)!
-    const rolePriority = { 
-      'HERO_FACE': 0, 'HERO': 1, 
-      'KEY_ACTIVITY': 2,    // ★ สำคัญมาก! ภาพกิจกรรมหลักในข่าว
-      'CONTEXT_SCENE': 3,   // ★ ภาพสถานที่/บริบทข่าว
-      'EVIDENCE': 4, 
-      'RELATIONSHIP': 5,    // ภาพความสัมพันธ์
-      'TIMELINE_PAST': 6,
-      'EMOTION': 7, 
-      'PERSON_SUPPORT': 8,  // ★ ต่ำสุด! ภาพหน้าคนทั่วไป download ทีหลัง
-      'SUPPORT': 9 
-    };
+
+    // ★★★ CACHE INJECTION — ถ้า cache hit ให้ใช้ภาพจาก cache โดยตรง!
+    if (useCachedImages && cachedImageBuffers.length >= 4) {
+      for (const img of cachedImageBuffers) {
+        try {
+          const imgMeta = await sharp(img.buffer).metadata().catch(() => ({}));
+          imageBuffers.push({
+            ...img,
+            width: imgMeta.width || img.width || 0,
+            height: imgMeta.height || img.height || 0,
+          });
+          console.log(`[Cache] ✅ #${imageBuffers.length} ${img.role} ${imgMeta.width}x${imgMeta.height} (cached)`);
+        } catch { /* skip corrupt cache entry */ }
+      }
+      console.log(`[AutoCover] 📦 Loaded ${imageBuffers.length} images from cache — skipping Google download!`);
+    }
+
+    if (!useCachedImages) {
+    // ★★★ Fix 7v2: Balanced story-first mode
+    // HERO_FACE ยัง priority 2 (ต้องมีหน้าคนสำหรับ slot หลัก!)
+    // แต่ KEY_ACTIVITY + CONTEXT_SCENE download ก่อน เพื่อเติม slot อื่น
+    const occImpForSort = identity?.coreStory?.occupationImportance ?? 1.0;
+    const rolePriority = occImpForSort < 0.3
+      ? {
+        // ★ Story-first mode: สลับ context ขึ้นก่อน แต่ยัง download HERO_FACE ด้วย
+        'KEY_ACTIVITY': 0,    // ★ ภาพกิจกรรมหลักในข่าว (สำหรับ bg slots)
+        'CONTEXT_SCENE': 1,   // ★ ภาพสถานที่/บริบทข่าว (สำหรับ bg slots)
+        'HERO_FACE': 2, 'HERO': 2,  // ★★★ ยังต้องมีหน้าคนชัด สำหรับ main slot!
+        'RELATIONSHIP': 3,    // ภาพความสัมพันธ์ (สำหรับ circle)
+        'EVIDENCE': 4,
+        'TIMELINE_PAST': 5,
+        'EMOTION': 6,
+        'PERSON_SUPPORT': 7,
+        'SUPPORT': 8,
+      }
+      : { 
+        'HERO_FACE': 0, 'HERO': 1, 
+        'KEY_ACTIVITY': 2,
+        'CONTEXT_SCENE': 3,
+        'EVIDENCE': 4, 
+        'RELATIONSHIP': 5,
+        'TIMELINE_PAST': 6,
+        'EMOTION': 7, 
+        'PERSON_SUPPORT': 8,
+        'SUPPORT': 9 
+      };
+    console.log(`[AutoCover] ★ Download priority: ${occImpForSort < 0.3 ? 'STORY-FIRST-v2 (context+hero balanced)' : 'HERO-FIRST (default)'}`)
     const orderedImages = [...bestImages].sort((a, b) => {
       const pA = rolePriority[a.role] ?? 8;
       const pB = rolePriority[b.role] ?? 8;
@@ -533,37 +811,105 @@ export async function POST(request) {
       return (b.score || 0) - (a.score || 0);
     });
 
-    for (const img of orderedImages) {
-      if (imageBuffers.length >= 8) break; // เพิ่ม max เป็น 8 (เผื่อ template ใหญ่)
+    // Download up to 24 candidates in parallel
+    const candidatesToDownload = orderedImages.slice(0, 24);
+    console.log(`[AutoCover] 📥 Downloading ${candidatesToDownload.length} candidate images in parallel...`);
+
+    const downloadPromises = candidatesToDownload.map(async (img) => {
       try {
         const buf = await downloadAndValidateImage(img.url);
-        if (!buf) {
-          console.log(`[Download] Skipped: ${img.url?.substring(0, 60)}`);
-          continue;
-        }
+        if (!buf) return null;
+        return {
+          ...img, // Copy all original metadata fields (like title, snippet, evidenceCat, etc.)
+          buffer: buf,
+        };
+      } catch (err) {
+        return null;
+      }
+    });
 
+    const downloadResults = await Promise.allSettled(downloadPromises);
+    const downloadedImages = downloadResults
+      .filter(r => r.status === 'fulfilled' && r.value)
+      .map(r => r.value);
+
+    console.log(`[AutoCover] 📥 Downloaded ${downloadedImages.length}/${candidatesToDownload.length} successfully. Filtering for diversity & dedup...`);
+
+    // First pass: try selecting with role diversity limit
+    const downloadedRoleCounts = {};
+    const maxPerRole = {
+      'HERO_FACE': 3,
+      'HERO': 2,
+      'KEY_ACTIVITY': 3,
+      'CONTEXT_SCENE': 3,
+      'RELATIONSHIP': 3,
+      'EVIDENCE': 2,
+      'TIMELINE_PAST': 2,
+      'EMOTION': 2,
+      'PERSON_SUPPORT': 2,
+      'SUPPORT': 2
+    };
+    const skippedImages = [];
+
+    for (const img of downloadedImages) {
+      if (imageBuffers.length >= 12) break; // เพิ่ม max เป็น 12 เพื่อให้ได้ภาพหลากหลายขึ้น
+      
+      const role = img.role || 'SUPPORT';
+      const currentCount = downloadedRoleCounts[role] || 0;
+      const maxAllowed = maxPerRole[role] ?? 2;
+      
+      if (currentCount >= maxAllowed) {
+        skippedImages.push(img);
+        continue;
+      }
+
+      try {
         // Dedup check via dHash
-        const hash = await computeImageHash(buf);
+        const hash = await computeImageHash(img.buffer);
         const isDuplicate = imageHashes.some(h => hammingDistance(hash, h) < 12);
         if (isDuplicate) {
-          console.log(`[Download] Skipped duplicate (hamming < 12)`);
+          console.log(`[Download] Skipped duplicate (hamming < 12): ${img.url?.substring(0, 60)}`);
           continue;
         }
 
         // ★ เก็บ metadata ความละเอียดด้วย
-        const imgMeta = await sharp(buf).metadata().catch(() => ({}));
+        const imgMeta = await sharp(img.buffer).metadata().catch(() => ({}));
         imageHashes.push(hash);
         imageBuffers.push({
-          buffer: buf,
-          role: img.role || 'SUPPORT',
-          url: img.url,
-          score: img.score,
+          ...img, // Copy all fields
+          buffer: img.buffer,
           width: imgMeta.width || 0,
           height: imgMeta.height || 0,
         });
+        downloadedRoleCounts[role] = (downloadedRoleCounts[role] || 0) + 1;
         console.log(`[Download] ✅ #${imageBuffers.length} ${img.role} ${imgMeta.width}x${imgMeta.height} — ${img.url?.substring(0, 60)}`);
       } catch {
-        // Skip failed downloads silently
+        // Skip silently
+      }
+    }
+
+    // Second pass: fill remaining capacity up to 12 if diversity limits left some space
+    if (imageBuffers.length < 12 && skippedImages.length > 0) {
+      console.log(`[Download] 🔄 Filling remaining slots from skipped list: ${imageBuffers.length}/12...`);
+      for (const img of skippedImages) {
+        if (imageBuffers.length >= 12) break;
+        try {
+          const hash = await computeImageHash(img.buffer);
+          const isDuplicate = imageHashes.some(h => hammingDistance(hash, h) < 12);
+          if (isDuplicate) continue;
+
+          const imgMeta = await sharp(img.buffer).metadata().catch(() => ({}));
+          imageHashes.push(hash);
+          imageBuffers.push({
+            ...img, // Copy all fields
+            buffer: img.buffer,
+            width: imgMeta.width || 0,
+            height: imgMeta.height || 0,
+          });
+          console.log(`[Download Fill] ✅ #${imageBuffers.length} ${img.role} ${imgMeta.width}x${imgMeta.height} — ${img.url?.substring(0, 60)}`);
+        } catch {
+          // Skip
+        }
       }
     }
 
@@ -591,7 +937,7 @@ export async function POST(request) {
         const serperKey = process.env.SERPER_API_KEY;
         if (serperKey) {
           for (const eq of emergencyQueries) {
-            if (imageBuffers.length >= 6) break;
+            if (imageBuffers.length >= 10) break; // เพิ่มจาก 6 เป็น 10
             try {
               console.log(`[Emergency] 🔍 Searching: "${eq}"`);
               const res = await fetch('https://google.serper.dev/images', {
@@ -602,7 +948,7 @@ export async function POST(request) {
               if (res.ok) {
                 const data = await res.json();
                 for (const img of (data.images || [])) {
-                  if (imageBuffers.length >= 8) break;
+                  if (imageBuffers.length >= 12) break; // เพิ่มจาก 8 เป็น 12
                   try {
                     const { downloadAndValidateImage } = await import('@/lib/services/imageSearchService');
                     const buf = await downloadAndValidateImage(img.imageUrl);
@@ -624,6 +970,33 @@ export async function POST(request) {
       }
     }
 
+    } // end if (!useCachedImages)
+
+    // ★★★ HYBRID MODE: inject cached images เข้า pool ร่วมกับ Google results
+    if (!useCachedImages && cachedImageBuffers.length > 0) {
+      console.log(`[AutoCover] 🔄 HYBRID: Injecting ${cachedImageBuffers.length} cached images into pool (${imageBuffers.length} from Google)`);
+      for (const img of cachedImageBuffers) {
+        try {
+          const imgMeta = await sharp(img.buffer).metadata().catch(() => ({}));
+          // Check dedup — ไม่เพิ่มภาพที่ซ้ำกับ Google
+          const isDuplicate = imageBuffers.some(existing => 
+            Math.abs((existing.width || 0) - (imgMeta.width || 0)) < 10 && 
+            Math.abs((existing.height || 0) - (imgMeta.height || 0)) < 10 &&
+            Math.abs((existing.buffer?.length || 0) - (img.buffer?.length || 0)) < 1000
+          );
+          if (!isDuplicate) {
+            imageBuffers.push({
+              ...img,
+              width: imgMeta.width || img.width || 0,
+              height: imgMeta.height || img.height || 0,
+              source: 'cache+hybrid',
+            });
+          }
+        } catch { /* skip */ }
+      }
+      console.log(`[AutoCover] 🔄 HYBRID: Total pool = ${imageBuffers.length} images (Google + Cache)`);
+    }
+
     if (imageBuffers.length < 2) {
       return NextResponse.json({
         success: false,
@@ -636,12 +1009,87 @@ export async function POST(request) {
 
     console.log(`[AutoCover] Downloaded ${imageBuffers.length} valid images`);
 
-    // Step 4: Face detection on all images
+    // Step 4: Face detection on best candidate images (limit to 8 to prevent timeout & API overload)
+    const MAX_CANDIDATE_IMAGES = 8;
+    let candidateImages = [...imageBuffers];
+    if (candidateImages.length > MAX_CANDIDATE_IMAGES) {
+      candidateImages = candidateImages
+        .map((img, idx) => ({ img, idx }))
+        .sort((a, b) => {
+          const scoreA = a.img.score || 0;
+          const scoreB = b.img.score || 0;
+          if (scoreA !== scoreB) return scoreB - scoreA;
+          return (b.img.width * b.img.height) - (a.img.width * a.img.height);
+        })
+        .slice(0, MAX_CANDIDATE_IMAGES)
+        .map(x => x.img);
+      
+      console.log(`[AutoCover] ✂️ Sliced candidate images from ${imageBuffers.length} to ${candidateImages.length} to prevent timeout`);
+      imageBuffers.length = 0;
+      imageBuffers.push(...candidateImages);
+    }
+
     const { batchDetectFaces } = await import('@/lib/services/faceDetector');
     const faceInput = imageBuffers.map((img, i) => ({ id: String(i), buffer: img.buffer }));
     const faceDataMap = await batchDetectFaces(faceInput);
 
     console.log('[AutoCover] Face detection complete');
+
+    // ═══ Step 3.5: Story Coverage Controller ═══
+    // ★ FIX: Coverage dynamic ตาม storyType — ไม่ hardcode ทุกข่าว!
+    {
+      // กำหนด coverage ตาม storyType จาก identity
+      const storyType = (identity?.coreStory?.storyType || identity?.emotion || 'general').toLowerCase();
+      
+      let coverageRequired, coverageOptional;
+      
+      // ใช้ coverageRequired จาก identity ถ้ามี (จาก Story Event Extraction)
+      if (identity?.coverageRequired?.length > 0) {
+        coverageRequired = identity.coverageRequired;
+        coverageOptional = identity.coverageOptional || [];
+      } else {
+        // Fallback: กำหนดตาม storyType
+        if (storyType.includes('family') || storyType.includes('warm') || storyType.includes('love') || storyType.includes('ครอบครัว')) {
+          coverageRequired = ['HERO_FACE', 'RELATIONSHIP', 'EMOTION'];
+          coverageOptional = ['KEY_ACTIVITY', 'CONTEXT_SCENE'];
+        } else if (storyType.includes('crime') || storyType.includes('อาชญากรรม')) {
+          coverageRequired = ['HERO_FACE', 'CONTEXT_SCENE'];
+          coverageOptional = ['EVIDENCE', 'KEY_ACTIVITY'];
+        } else if (storyType.includes('sport') || storyType.includes('กีฬา')) {
+          coverageRequired = ['HERO_FACE', 'KEY_ACTIVITY'];
+          coverageOptional = ['CONTEXT_SCENE', 'EMOTION'];
+        } else if (storyType.includes('charity') || storyType.includes('บริจาค') || storyType.includes('donate')) {
+          coverageRequired = ['HERO_FACE', 'KEY_ACTIVITY', 'EMOTION'];
+          coverageOptional = ['RELATIONSHIP', 'CONTEXT_SCENE'];
+        } else {
+          // Default: minimal
+          coverageRequired = ['HERO_FACE', 'KEY_ACTIVITY', 'CONTEXT_SCENE'];
+          coverageOptional = ['RELATIONSHIP', 'EMOTION'];
+        }
+      }
+      
+      const ALL_ROLES = [...new Set([...coverageRequired, ...coverageOptional])];
+      const coverageReport = {};
+      for (const role of ALL_ROLES) {
+        const count = imageBuffers.filter(img => img.role === role || img.role === role.replace('_', ' ')).length;
+        coverageReport[role] = count;
+      }
+      
+      const missingRequired = coverageRequired.filter(r => (coverageReport[r] || 0) === 0);
+      const coveredRequired = coverageRequired.filter(r => (coverageReport[r] || 0) > 0);
+      
+      console.log(`[Coverage] 📊 Story type: "${storyType}" → Required: [${coverageRequired.join(', ')}]`);
+      console.log(`[Coverage] 📊 Coverage: ${coveredRequired.length}/${coverageRequired.length} required roles covered`);
+      for (const [role, count] of Object.entries(coverageReport)) {
+        const isRequired = coverageRequired.includes(role);
+        const status = count > 0 ? '✅' : (isRequired ? '❌' : '⚪');
+        console.log(`[Coverage]   ${status} ${role}: ${count} images ${isRequired ? '(required)' : '(optional)'}`);
+      }
+      
+      if (missingRequired.length > 0) {
+        console.log(`[Coverage] ⚠️ Missing REQUIRED: ${missingRequired.join(', ')}`);
+      }
+    }
 
     // Step 5: Choose template — ★ ถ้าภาพน้อย ต้องเลือก template ที่ slot น้อยลง
     let chosenTemplate = templateId;
@@ -709,16 +1157,98 @@ export async function POST(request) {
       templateSpec = getTemplateById(chosenTemplate);
     } catch {}
 
+    // ════════════════════════════════════════════════════════════
+    // ★★★ SMART KEYWORD MATCH BOOST — ก่อน Curator!
+    // ต้องทำก่อน Curator เพื่อให้ Curator เห็น score ที่ boost แล้ว
+    // ════════════════════════════════════════════════════════════
+    {
+      const smartKeywords = identity?._smartQueryKeywords || [];
+      const queryTypes = identity?._smartQueryTypes || {};
+      const hero = (identity?.mainCharacter || '').toLowerCase();
+      const heroWords = hero.split(/\s+/).filter(w => w.length > 2);
+
+      const storyQueries = [
+        ...(queryTypes?.event_visual || []),
+        ...(queryTypes?.person_relationship || []),
+        ...(queryTypes?.context_fallback || []),
+        ...(queryTypes?.exact_person || []),
+        // backward compat (old type names)
+        ...(queryTypes?.hero_action || []),
+        ...(queryTypes?.relationship || []),
+        ...(queryTypes?.scene_with_people || []),
+        ...(queryTypes?.hero_portrait || []),
+        ...(queryTypes?.story_specific || []),
+        ...(queryTypes?.scene_object || []),
+        ...(queryTypes?.nickname || []),
+      ];
+
+      const allWords = [];
+      for (const q of storyQueries) {
+        const words = (q || '').split(/\s+/).filter(w => w.length > 2);
+        allWords.push(...words);
+      }
+      for (const kw of smartKeywords) {
+        const words = (kw || '').split(/\s+/).filter(w => w.length > 2);
+        allWords.push(...words);
+      }
+
+      const storyOnlyKeywords = [...new Set(allWords.map(k => k.toLowerCase()))]
+        .filter(k => k.length > 2)
+        .filter(k => !heroWords.includes(k))
+        .filter(k => !['ภาพ', 'รูป', 'ข่าว', 'ไทย', 'วิดีโอ', 'คลิป'].includes(k));
+
+      if (storyOnlyKeywords.length > 0) {
+        console.log(`[SmartBoost] 🔑 Story keywords (excl. hero name): [${storyOnlyKeywords.slice(0, 10).join(', ')}]`);
+        let boostedCount = 0;
+        for (let i = 0; i < imageBuffers.length; i++) {
+          const img = imageBuffers[i];
+          const searchText = `${img.title || ''} ${img.snippet || ''} ${img.url || ''}`.toLowerCase();
+
+          let matchCount = 0;
+          const matchedWords = [];
+          for (const kw of storyOnlyKeywords) {
+            if (searchText.includes(kw)) {
+              matchCount++;
+              matchedWords.push(kw);
+            }
+          }
+
+          if (matchCount > 0) {
+            const boost = Math.min(matchCount * 2, 4);
+            const oldScore = img.score || 5;
+            img.score = Math.min(10, oldScore + boost);
+            img._keywordMatch = matchCount;
+            img._keywordBoost = boost;
+            img._smartBoosted = true;
+            boostedCount++;
+            console.log(`[SmartBoost] 🎯 #${i} matched ${matchCount} story kw: [${matchedWords.join(', ')}] → score ${oldScore}→${img.score} (${img.role})`);
+          }
+        }
+        console.log(`[SmartBoost] ✅ ${boostedCount}/${imageBuffers.length} images boosted (${storyOnlyKeywords.length} story keywords, hero name excluded)`);
+      } else {
+        console.log(`[SmartBoost] ⚠️ No story-specific keywords found — skipping boost`);
+      }
+    }
+
     // ═══ Step 6.5: ★ AI Content Curator — วิเคราะห์เนื้อหา + ภาพ ก่อนเลือกลง slot ═══
-    // "สมอง" ตัวที่ 2: ดูเนื้อข่าวทั้งหมด + ภาพทั้ง 8 → ตัดสินว่าภาพไหนตรงกับข่าวจริง
+    // "สมอง" ตัวที่ 2: ดูเนื้อข่าวทั้งหมด + ภาพทั้ง 12 → ตัดสินว่าภาพไหนตรงกับข่าวจริง
     try {
-      const curatedOrder = await curateImagesForCover(
+      const curatorResult = await curateImagesForCover(
         imageBuffers, 
         newsTitle || content?.substring(0, 200), 
         content || newsTitle,
         identity,
-        templateSpec
+        templateSpec,
+        faceDataMap
       );
+      
+      // ★ Handle new format: { curated, artDirection } or legacy array
+      const curatedOrder = curatorResult?.curated || (Array.isArray(curatorResult) ? curatorResult : null);
+      var artDirection = curatorResult?.artDirection || null;
+      
+      if (artDirection) {
+        console.log(`[AutoCover] ★ AI Art Director decisions received — will override rule-based slot assignment`);
+      }
       
       if (curatedOrder && curatedOrder.length > 0) {
         // ★ ปรับ role ตามผล AI Curator
@@ -781,9 +1311,245 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'Pipeline timeout', errorType: 'TIMEOUT' }, { status: 504 });
     }
 
+    // ════════════════════════════════════════════════════════
+    // ★★★ SMART KEYWORD MATCH BOOST — ก่อน assignSlots
+    // ★ FIX: ไม่ boost ด้วยชื่อคน (ทุกภาพ match → ไร้ประโยชน์)
+    //   ใช้แค่ story-specific keywords: สวน, ที่ดิน, ปลูก, ธรรมชาติ
+    // ════════════════════════════════════════════════════════
+    {
+      const smartKeywords = identity?._smartQueryKeywords || [];
+      const queryTypes = identity?._smartQueryTypes || {};
+      const hero = (identity?.mainCharacter || '').toLowerCase();
+      const heroWords = hero.split(/\s+/).filter(w => w.length > 2);
+
+      // ★ เฉพาะ Visual Intent queries (ไม่เอา hero name)
+      const storyQueries = [
+        ...(queryTypes?.event_visual || []),
+        ...(queryTypes?.person_relationship || []),
+        ...(queryTypes?.context_fallback || []),
+        ...(queryTypes?.exact_person || []),
+        // backward compat (old type names)
+        ...(queryTypes?.hero_action || []),
+        ...(queryTypes?.relationship || []),
+        ...(queryTypes?.scene_with_people || []),
+        ...(queryTypes?.hero_portrait || []),
+        ...(queryTypes?.story_specific || []),
+        ...(queryTypes?.scene_object || []),
+        ...(queryTypes?.nickname || []),
+      ];
+
+      // แยกคำจาก story queries + keywords
+      const allWords = [];
+      for (const q of storyQueries) {
+        const words = (q || '').split(/\s+/).filter(w => w.length > 2);
+        allWords.push(...words);
+      }
+      for (const kw of smartKeywords) {
+        const words = (kw || '').split(/\s+/).filter(w => w.length > 2);
+        allWords.push(...words);
+      }
+
+      // ★ ตัดชื่อคน (hero) ออก — ไม่งั้นทุกภาพ match เท่ากันหมด!
+      const storyOnlyKeywords = [...new Set(allWords.map(k => k.toLowerCase()))]
+        .filter(k => k.length > 2)
+        .filter(k => !heroWords.includes(k))
+        .filter(k => !['ภาพ', 'รูป', 'ข่าว', 'ไทย', 'วิดีโอ', 'คลิป'].includes(k));
+
+      if (storyOnlyKeywords.length > 0) {
+        console.log(`[SmartBoost] 🔑 Story keywords (excl. hero name): [${storyOnlyKeywords.slice(0, 10).join(', ')}]`);
+        let boostedCount = 0;
+        for (let i = 0; i < imageBuffers.length; i++) {
+          const img = imageBuffers[i];
+          const searchText = `${img.title || ''} ${img.snippet || ''} ${img.url || ''}`.toLowerCase();
+
+          let matchCount = 0;
+          const matchedWords = [];
+          for (const kw of storyOnlyKeywords) {
+            if (searchText.includes(kw)) {
+              matchCount++;
+              matchedWords.push(kw);
+            }
+          }
+
+          if (matchCount > 0) {
+            // ★ Boost: +2 per match (max +4) — story match = ได้เปรียบมาก
+            const boost = Math.min(matchCount * 2, 4);
+            const oldScore = img.score || 5;
+            img.score = Math.min(10, oldScore + boost);
+            img._keywordMatch = matchCount;
+            img._keywordBoost = boost;
+            boostedCount++;
+            console.log(`[SmartBoost] 🎯 #${i} matched ${matchCount} story kw: [${matchedWords.join(', ')}] → score ${oldScore}→${img.score} (${img.role})`);
+          }
+        }
+        console.log(`[SmartBoost] ✅ ${boostedCount}/${imageBuffers.length} images boosted (${storyOnlyKeywords.length} story keywords, hero name excluded)`);
+      } else {
+        console.log(`[SmartBoost] ⚠️ No story-specific keywords found — skipping boost`);
+      }
+    }
+
+    // ═══ Image Sufficiency Check — Rescue Re-search ═══
+    // ★ FIX: LOW_PRIORITY = fallback ใช้ได้ (ไม่ใช่ REJECT!)
+    // ★ FIX: Max 2 rescue attempts + fallback to simpler template
+    {
+      const MAX_RESCUE_ATTEMPTS = 2;
+      const MIN_IMAGES_FULL = 4;
+      const MIN_IMAGES_SIMPLE = 2;
+
+      // แบ่ง 3 ระดับ:
+      const preferred = imageBuffers.filter(img => 
+        img.role !== 'LOW_PRIORITY' && img.role !== 'TECHNICAL_BAD' && (img.curatorScore || img.score || 0) >= 3
+      );
+      const fallbackPool = imageBuffers.filter(img => img.role === 'LOW_PRIORITY');
+      
+      console.log(`[Sufficiency] 📊 Preferred: ${preferred.length}, Fallback(LOW_PRIORITY): ${fallbackPool.length}, Total: ${imageBuffers.length}`);
+      
+      if (preferred.length >= MIN_IMAGES_FULL) {
+        console.log(`[Sufficiency] ✅ ${preferred.length} preferred images — sufficient`);
+      } else {
+        // ขั้น 1: ใช้ LOW_PRIORITY เติมก่อน (ไม่ต้อง search ใหม่!)
+        if (preferred.length < MIN_IMAGES_FULL && fallbackPool.length > 0) {
+          const needed = MIN_IMAGES_FULL - preferred.length;
+          const recovered = fallbackPool.slice(0, needed);
+          for (const img of recovered) {
+            img.role = 'CONTEXT_SCENE'; // upgrade จาก LOW_PRIORITY
+            img._recoveredFromFallback = true;
+            console.log(`[Sufficiency] ★ Recovered LOW_PRIORITY → CONTEXT_SCENE (score:${img.curatorScore || img.score || '?'})`);
+          }
+          const newPreferred = imageBuffers.filter(img => 
+            img.role !== 'LOW_PRIORITY' && img.role !== 'TECHNICAL_BAD'
+          ).length;
+          console.log(`[Sufficiency] 🔄 After LOW_PRIORITY recovery: ${newPreferred} usable`);
+        }
+        
+        // ขั้น 2: Rescue search (max 2 รอบ)
+        const currentUsable = imageBuffers.filter(img => 
+          img.role !== 'LOW_PRIORITY' && img.role !== 'TECHNICAL_BAD'
+        ).length;
+        
+        if (currentUsable < MIN_IMAGES_FULL) {
+          console.log(`[Rescue] ⚠️ Still only ${currentUsable} usable — triggering rescue search`);
+          
+          const hero = identity?.mainCharacter || '';
+          const storySubject = identity?.coreStory?.storySubject || identity?.coreStory?.celebratedAction || '';
+          let rescueAttempts = 0;
+          
+          while (rescueAttempts < MAX_RESCUE_ATTEMPTS) {
+            rescueAttempts++;
+            const usableNow = imageBuffers.filter(img => 
+              img.role !== 'LOW_PRIORITY' && img.role !== 'TECHNICAL_BAD'
+            ).length;
+            if (usableNow >= MIN_IMAGES_FULL || imageBuffers.length >= 10) break;
+            
+            const rescueQueries = rescueAttempts === 1 
+              ? [`${hero} ${storySubject}`.trim(), `${hero} สัมภาษณ์`]
+              : [`${hero} กิจกรรม`, `${hero} ข่าว`];
+            
+            try {
+              const { searchGoogleImages } = await import('@/lib/services/imageSearchService');
+              let rescueCount = 0;
+              
+              for (const query of rescueQueries.filter(q => q.length > 3)) {
+                if (imageBuffers.length >= 10) break;
+                try {
+                  const results = await searchGoogleImages(query, 4);
+                  for (const result of (results || [])) {
+                    if (!result?.url || imageBuffers.some(img => img.url === result.url)) continue;
+                    try {
+                      const { downloadAndValidateImage } = await import('@/lib/services/imageSearchService');
+                      const downloaded = await downloadAndValidateImage(result.url);
+                      if (downloaded?.buffer) {
+                        imageBuffers.push({
+                          buffer: downloaded.buffer,
+                          url: result.url,
+                          title: result.title || '',
+                          width: downloaded.width,
+                          height: downloaded.height,
+                          role: 'CONTEXT_SCENE',
+                          score: 5,
+                          _rescueSearch: true,
+                          _rescueAttempt: rescueAttempts,
+                        });
+                        rescueCount++;
+                        console.log(`[Rescue] ★ Attempt ${rescueAttempts}: Added "${result.title?.slice(0, 40)}"`);
+                      }
+                    } catch {}
+                  }
+                } catch {}
+              }
+              console.log(`[Rescue] Attempt ${rescueAttempts}: Added ${rescueCount} images (total: ${imageBuffers.length})`);
+            } catch (err) {
+              console.log(`[Rescue] ⚠️ Attempt ${rescueAttempts} failed: ${err.message?.slice(0, 50)}`);
+            }
+          }
+        }
+        
+        // ขั้น 3: ถ้ายังไม่พอ → switch to simpler template
+        const finalUsable = imageBuffers.filter(img => 
+          img.role !== 'TECHNICAL_BAD'
+        ).length;
+        
+        if (finalUsable < MIN_IMAGES_FULL && finalUsable >= MIN_IMAGES_SIMPLE) {
+          console.log(`[Sufficiency] ⚠️ Only ${finalUsable} images — switching to simpler template`);
+          try {
+            const { getTemplateById, getAllTemplateIds } = await import('@/lib/coverTemplateRegistry');
+            const allIds = getAllTemplateIds();
+            // หา template ที่ต้องการ slot น้อยที่สุด
+            const simpleTemplate = allIds
+              .map(id => ({ id, spec: getTemplateById(id) }))
+              .filter(t => t.spec && t.spec.slots.length <= finalUsable)
+              .sort((a, b) => b.spec.slots.length - a.spec.slots.length)[0];
+            
+            if (simpleTemplate) {
+              console.log(`[Sufficiency] ★ Switched template: ${chosenTemplate} → ${simpleTemplate.id} (${simpleTemplate.spec.slots.length} slots)`);
+              chosenTemplate = simpleTemplate.id;
+              templateSpec = simpleTemplate.spec;
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // ═══ Layout Fitness Score — ภาพต้องเหมาะกับ slot ที่จะใส่ ═══
+    {
+      for (let i = 0; i < imageBuffers.length; i++) {
+        const img = imageBuffers[i];
+        const faceData = faceDataMap?.get?.(String(i)) || { hasFaces: false, faceCount: 0, faces: [] };
+        const faces = faceData.faces || [];
+        const imgW = img.width || 800;
+        const imgH = img.height || 600;
+        const isPortrait = imgH > imgW;
+        const hasSingleFace = faces.length === 1;
+        const hasMultiFace = faces.length >= 2;
+        const biggestFaceRatio = faces.length > 0 ? Math.max(...faces.map(f => (f.width || 0) / imgW)) : 0;
+        
+        img._layoutFitness = {
+          // Hero slot: ต้องเห็นหน้า > 15% ของภาพ + หน้าเดียว
+          hero: hasSingleFace && biggestFaceRatio > 0.15 ? 10 : 
+                hasSingleFace ? 6 : hasMultiFace ? 4 : 2,
+          // Circle slot: ต้องมีใบหน้าเดี่ยวชัด
+          circle: hasSingleFace && biggestFaceRatio > 0.2 ? 10 : 
+                  hasSingleFace ? 7 : hasMultiFace ? 4 : 1,
+          // Background slot: ไม่มีหน้าคนใหญ่ = ดี
+          background: faces.length === 0 ? 10 : 
+                      biggestFaceRatio < 0.15 ? 8 : 4,
+          // Highlight slot: มีคนกำลังทำอะไร
+          highlight: hasMultiFace ? 10 : hasSingleFace ? 7 : 3,
+          // Portrait bonus
+          isPortrait,
+          biggestFaceRatio: Math.round(biggestFaceRatio * 100),
+        };
+      }
+      
+      console.log(`[LayoutFitness] 📍 Scored ${imageBuffers.length} images for layout compatibility`);
+      const heroReady = imageBuffers.filter(img => img._layoutFitness?.hero >= 8).length;
+      const circleReady = imageBuffers.filter(img => img._layoutFitness?.circle >= 8).length;
+      console.log(`[LayoutFitness]   Hero-ready: ${heroReady}, Circle-ready: ${circleReady}`);
+    }
+
     // Step 7: AI Slot Assignment (with cover library reference)
     const slotAssignment = await assignImagesToSlots(
-      imageBuffers, faceDataMap, chosenTemplate, identity, coverReferences
+      imageBuffers, faceDataMap, chosenTemplate, identity, coverReferences, artDirection
     );
 
     console.log(`[AutoCover] Slot assignment: ${JSON.stringify(slotAssignment.photoOrder)}`);
@@ -809,12 +1575,14 @@ export async function POST(request) {
     try {
       const { saveToCache } = await import('@/lib/services/imageCacheService');
       saveToCache(
-        imageBuffers.map((img, i) => ({
+        imageBuffers
+          .filter(img => img.role !== 'REJECT' && img.role !== 'LOW_PRIORITY') // ★ ไม่เก็บภาพขยะเข้า cache!
+          .map((img, i) => ({
           buffer: img.buffer,
           url: img.url || '',
           role: img.role || 'SUPPORT',
           source: img.url?.startsWith('data:') ? 'youtube' : 'google',
-          score: 7,
+          score: img.curatorScore || img.score || 7,  // ★ ใช้คะแนนจริง
         })),
         newsTitle || content?.substring(0, 100),
         identity
@@ -825,8 +1593,22 @@ export async function POST(request) {
 
     // Step 8: AI Final Judge
     let score = 7; // Default fallback
+    
+    // Resize cover buffer to 800px max dimension for Vision Judge and Story Match Validator to reduce payload size and speed up API calls.
+    let resizedCoverBase64 = null;
     try {
-      const judgeScore = await evaluateFinalCover(coverBuffer.toString('base64'), newsTitle || '');
+      const resizedBuf = await sharp(coverBuffer)
+        .resize(800, 900, { fit: 'inside' })
+        .jpeg({ quality: 75 })
+        .toBuffer();
+      resizedCoverBase64 = resizedBuf.toString('base64');
+    } catch (resizeErr) {
+      console.warn('[AutoCover] Failed to resize cover for judge:', resizeErr.message);
+      resizedCoverBase64 = coverBuffer.toString('base64');
+    }
+
+    try {
+      const judgeScore = await evaluateFinalCover(resizedCoverBase64, newsTitle || '');
       if (judgeScore !== null) {
         score = judgeScore;
         console.log(`[AutoCover] 🏆 AI Judge score: ${score}/10`);
@@ -854,9 +1636,7 @@ export async function POST(request) {
     let isCorrectPraise = null;
     try {
       if (identity?.coreStory?.emotionalHook && coverBuffer) {
-        const { GoogleGenerativeAI: _SmGAI } = await import('@google/generative-ai');
-        const smGenAI = new _SmGAI(process.env.GEMINI_API_KEY);
-        const smModel = smGenAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const { callAI } = await import('@/lib/ai/openai');
 
         const celebratedTarget = identity.coreStory?.celebratedAction
           || identity.coreStory?.emotionalHook
@@ -869,7 +1649,7 @@ Question 2: What story does the viewer think this is about? (one sentence)
 
 Target: This cover should praise: "${celebratedTarget}"
 
-Return JSON without markdown:
+Return JSON:
 {
   "coverPraises": "what the cover is praising/celebrating",
   "viewerThinks": "what story viewer thinks this is",
@@ -878,14 +1658,20 @@ Return JSON without markdown:
   "dominantVisual": "what takes most space",
   "reason": "why match or mismatch"
 }`;
-        const smResult = await smModel.generateContent([
-          storyMatchPrompt,
-          { inlineData: { data: coverBuffer.toString('base64'), mimeType: 'image/jpeg' } }
-        ]);
-        const smText = smResult.response.text().trim();
-        const smMatch = smText.match(/```(?:json)?\s*({[\s\S]*?})\s*```/) || smText.match(/({[\s\S]*?"storyMatch"[\s\S]*?})/);
-        if (smMatch) {
-          const smData = JSON.parse(smMatch[1] || smMatch[0]);
+
+        // ★ Use GPT-4o-mini via callAI (replaces Gemini which is 503)
+        const smData = await callAI({
+          prompt: storyMatchPrompt,
+          imageContents: [
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${resizedCoverBase64}`, detail: 'low' } }
+          ],
+          model: 'gpt-4o-mini',
+          temperature: 0.3,
+          maxTokens: 500,
+        });
+        console.log(`[AutoCover] Story Match Validator evaluated using model: gpt-4o-mini`);
+
+        if (smData && typeof smData.storyMatch !== 'undefined') {
           storyMatchScore = smData.storyMatch;
           storyMatchReason = smData.reason;
           viewerImpression = smData.viewerThinks;
@@ -981,6 +1767,90 @@ Return JSON without markdown:
       console.warn('[AutoCover] ⚠️ Cover library import error:', libErr?.message);
     }
 
+    // Save all candidate images to the database cover_images gallery
+    let gallerySaveList = [];
+    try {
+      const selectedUrls = new Set(
+        [
+          ...(plan.photoOrder || []),
+          plan.circlePhotoIndex,
+          plan.circleSmallPhotoIndex
+        ]
+        .filter(idx => idx !== undefined && idx !== null)
+        .map(idx => imageBuffers[idx]?.url)
+        .filter(Boolean)
+      );
+
+      const seenUrls = new Set();
+
+      // 1. Downloaded images (in imageBuffers) — บันทึกเฉพาะรูปที่ผ่านการกรองโดย AI (คะแนน >= 4 และไม่ REJECT)
+      imageBuffers.forEach((img, i) => {
+        const scoreVal = img.curatorScore || img.score || 0;
+        const roleVal = img.role || 'SUPPORT';
+        
+        // ★ คัดกรองอย่างเข้มงวด: ไม่บันทึกภาพที่เป็น LOW_PRIORITY หรือคะแนนต่ำลงแกลเลอรี
+        if (roleVal === 'REJECT' || roleVal === 'reject' || roleVal === 'LOW_PRIORITY' || scoreVal < 4) {
+          return; 
+        }
+
+        if (img.url && !seenUrls.has(img.url)) {
+          seenUrls.add(img.url);
+          const fd = faceDataMap?.get?.(String(i)) || { hasFaces: false, faceCount: 0 };
+          
+          let sourceAgent = 'google';
+          const urlStr = img.url || '';
+          const lowerUrl = urlStr.toLowerCase();
+          if (lowerUrl.includes('youtube') || lowerUrl.includes('hunter') || urlStr.startsWith('data:') || img.source?.includes('youtube') || img.sourceAgent === 'youtube') {
+            sourceAgent = 'youtube';
+          } else if (lowerUrl.includes('tiktok') || img.source?.includes('tiktok') || img.sourceAgent === 'tiktok') {
+            sourceAgent = 'tiktok';
+          }
+
+          gallerySaveList.push({
+            url: img.url,
+            sourceAgent: sourceAgent,
+            role: roleVal,
+            score: scoreVal,
+            reason: img.reason || (img.curatorScore ? `Curator relevance: ${img.curatorScore}/10` : 'Selected candidate'),
+            width: img.width || 0,
+            height: img.height || 0,
+            thumbnailBase64: null,
+            isSelected: selectedUrls.has(img.url),
+            hasFace: fd.hasFaces || false,
+            faceCount: fd.faceCount || 0,
+          });
+        }
+      });
+
+      const { saveToGallery } = await import('@/lib/services/imageGallery');
+      let finalSessionId = caseResult?.caseId || bodyCaseId || sessionId;
+      if (!bodyCaseId && finalSessionId === 'CASE-001') {
+        // If it falls back to CASE-001 and was not explicitly requested, use sessionId to prevent mixing.
+        finalSessionId = sessionId;
+      }
+      const galleryTitle = newsTitle || content?.substring(0, 100) || 'Untitled';
+      
+      await saveToGallery(finalSessionId, galleryTitle, gallerySaveList);
+      console.log(`[AutoCover] 💾 Saved ${gallerySaveList.length} images to cover_images table for session ${finalSessionId}`);
+    } catch (galErr) {
+      console.warn('[AutoCover] ⚠️ Failed to save to image gallery:', galErr.message);
+    }
+
+    if (gallerySaveList.length === 0) {
+      gallerySaveList = imageBuffers.map((img, i) => {
+        const fd = faceDataMap?.get?.(String(i)) || { hasFaces: false, faceCount: 0 };
+        return {
+          url: img.url,
+          role: img.role || 'SUPPORT',
+          score: img.score || 0,
+          hasFace: fd.hasFaces || false,
+          faceCount: fd.faceCount || 0,
+          width: img.width || 0,
+          height: img.height || 0,
+        };
+      });
+    }
+
     return NextResponse.json({
       success: true,
       base64,
@@ -1011,20 +1881,17 @@ Return JSON without markdown:
       storyMismatch: storyMatchScore !== null && storyMatchScore < 3,
       // coverPraising: viewer impression when score is LOW (< 5)
       ...(storyMatchScore !== null && storyMatchScore < 5 ? { coverPraising: viewerImpression } : {}),
-      // Gallery: ภาพทั้งหมดที่ค้นมา + role/score (thumbnail สร้างทีหลัง)
-      gallery: imageBuffers.map((img, i) => {
-        const fd = faceDataMap?.get?.(String(i));
-        return {
-          index: i,
-          url: img.url || null,
-          role: img.role || 'SUPPORT',
-          score: img.score || 0,
-          hasFace: fd?.hasFaces || false,
-          faceCount: fd?.faceCount || 0,
-          width: img.width || 0,
-          height: img.height || 0,
-        };
-      }),
+      // Gallery: all fetched images + role/score (thumbnails generated later)
+      gallery: gallerySaveList.map((img, i) => ({
+        index: i,
+        url: img.url || null,
+        role: img.role || 'SUPPORT',
+        score: img.score || 0,
+        hasFace: img.hasFace || false,
+        faceCount: img.faceCount || 0,
+        width: img.width || 0,
+        height: img.height || 0,
+      })),
     });
   } catch (error) {
     console.error('[AutoCover] Pipeline error:', error.message);
@@ -1036,22 +1903,22 @@ Return JSON without markdown:
 }
 
 // =============================================
-// ★ AI Content Curator — "สมอง" ดูเนื้อหา + ภาพ ก่อนเลือกลง slot
-// ดูภาพทั้งหมดที่ดาวน์โหลดมา + เนื้อข่าว → ตัดสินว่าภาพไหนตรงกับข่าวจริง
+// ★ AI Content Curator — The "brain" that reviews content + images before assigning to slots
+// Reviews all downloaded images + news content → determines which images are truly relevant to the news
 // =============================================
-async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identity, templateSpec) {
+async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identity, templateSpec, faceDataMap = null) {
   try {
     if (!imageBuffers || imageBuffers.length < 2) return null;
     
     const { callAI } = await import('@/lib/ai/openai');
     
-    // สร้าง thumbnail ขนาดเล็กสำหรับ Vision API
+    // Create sharper thumbnails for Vision API (to help AI clearly distinguish faces and AI-generated images)
     const thumbnails = [];
-    for (let i = 0; i < Math.min(imageBuffers.length, 8); i++) {
+    for (let i = 0; i < Math.min(imageBuffers.length, 8); i++) { // Limit to 8 most important images
       try {
         const thumb = await sharp(imageBuffers[i].buffer)
-          .resize(300, 300, { fit: 'cover' })
-          .jpeg({ quality: 60 })
+          .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 85 })
           .toBuffer();
         thumbnails.push({
           index: i,
@@ -1066,17 +1933,50 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
     
     if (thumbnails.length < 2) return null;
     
-    // สร้าง slot description จาก template
+    // Find the index of the image used as the Hero Face Reference for the main character
+    let heroRefIndex = 0;
+    let foundHeroRef = false;
+    
+    if (faceDataMap) {
+      // 1. First try to find a single-face image (faceCount = 1) to ensure it's the main character
+      for (const thumb of thumbnails) {
+        const faceData = faceDataMap.get(String(thumb.index));
+        if (faceData && faceData.hasFaces && faceData.faceCount === 1) {
+          heroRefIndex = thumb.index;
+          foundHeroRef = true;
+          break;
+        }
+      }
+      // 2. If no single-face image found, use any image with faces (faceCount > 0)
+      if (!foundHeroRef) {
+        for (const thumb of thumbnails) {
+          const faceData = faceDataMap.get(String(thumb.index));
+          if (faceData && faceData.hasFaces && faceData.faceCount > 0) {
+            heroRefIndex = thumb.index;
+            foundHeroRef = true;
+            break;
+          }
+        }
+      }
+    }
+    
+    if (foundHeroRef) {
+      console.log(`[Curator] 🎯 Resolved Hero face reference index: #${heroRefIndex} (${identity?.mainCharacter || 'main character'})`);
+    } else {
+      console.log(`[Curator] ⚠️ No clear Hero face reference detected. Defaulting reference to image #0.`);
+    }
+    
+    // Build slot description from template
     const slotDesc = templateSpec?.slots?.map(s => `${s.id} (${s.role})`).join(', ') || 'main (hero), bg_top (scene), bg_bottom (scene/emotion), highlight';
     const hasCircle = !!templateSpec?.circle;
     
-    // ★ สร้าง imageContents array สำหรับ Vision API
+    // ★ Build imageContents array for Vision API (use detail: auto for higher clarity in face recognition)
     const imageContents = thumbnails.map((t, idx) => ({
       type: 'image_url',
-      image_url: { url: `data:image/jpeg;base64,${t.base64}`, detail: 'low' }
+      image_url: { url: `data:image/jpeg;base64,${t.base64}`, detail: 'auto' }
     }));
     
-    // ★ Prompt: AI ดูเนื้อข่าว + ภาพ แล้วจัดลำดับ — เน้น "เล่าเรื่องผ่านภาพ"
+    // ★ Prompt: AI reviews news content + images then ranks them — emphasis on "visual storytelling"
     // ★ Inject subjects (characters) into prompt for subject-matching
     const subjectsForPrompt = [
       identity?.mainCharacter,
@@ -1086,35 +1986,47 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
     const subjectsStr = subjectsForPrompt.length > 0
       ? subjectsForPrompt.join(', ')
       : 'ไม่ระบุ';
-    const prompt = `คุณเป็น "Content Curator" สำหรับปกข่าวไวรัล
-ดูภาพ ${thumbnails.length} ภาพด้านบน (ภาพ #0 ถึง #${thumbnails.length - 1} ตามลำดับ)
+      
+    const faceReferenceInstruction = foundHeroRef
+      ? `- **Image #${heroRefIndex}** is the real photograph of the main character in this news story: "${identity?.mainCharacter || 'ไม่ระบุ'}" (this is the Hero Face Reference image)
+- Strictly compare the face of every person in all other images (#0 to #${thumbnails.length - 1}, except #${heroRefIndex}) against the person in image #${heroRefIndex}!
+- If a person in any image has clearly different facial features, bone structure, gender, or skin tone from the person in image #${heroRefIndex} (e.g., image #${heroRefIndex} shows a dark-skinned male but another image shows a fair-skinned male or a random female), or they appear to be a different person -> set relevance = 0 and recommend role "REJECT" immediately!
+- The system requires ONLY images of people who are actual characters in the news story. NEVER include images of unrelated people or other celebrities who are not the character in image #${heroRefIndex} on the cover!`
+      : `- No single clear face photo was detected to serve as a Hero Reference for this story.
+- Please select images based on relevance to the main character "${identity?.mainCharacter || 'ไม่ระบุ'}" and the core news topic carefully. NEVER include unrelated people or random celebrities.`;
 
-## เนื้อข่าว:
-📰 หัวข้อข่าว: "${newsTitle || 'ไม่ระบุ'}"
-📝 เนื้อข่าวย่อ: "${(newsContent || '').slice(0, 500)}"
+    const prompt = `You are a "Content Curator and Art Director" for viral news covers.
+Review the ${thumbnails.length} images above (image #0 to #${thumbnails.length - 1} in order).
 
-## ★★★ Subjects หลัก (คนที่อยู่ในข่าว): ${subjectsStr}
-คนอื่นที่ไม่เกี่ยวกับ subjects เหล่านี้ = คนแปลก → relevance <= 2!
+## News Content:
+📰 Headline: "${newsTitle || 'ไม่ระบุ'}"
+📝 Summary: "${(newsContent || '').slice(0, 500)}"
 
-## ตัวละครหลัก (Hero): ${identity?.mainCharacter || 'ไม่ระบุ'}
-## ★★★ STORY SUBJECT (สิ่งที่ข่าวเล่าถึงจริงๆ — สำคัญที่สุด!): ${identity?._storySubject || identity?.coreStory?.storySubject || identity?.coreStory?.relationship || 'ไม่ระบุ'}
-   → ภาพที่แสดง STORY SUBJECT นี้ต้องได้ score 8-10!
-   → ภาพ Hero คนเดียวที่ไม่มี Story Subject → score ≤ 5 เท่านั้น!
-## สถานที่: ${identity?.location || 'ไม่ระบุ'}
-## ประเด็นหลัก: ${identity?.keyScenes?.join(', ') || identity?.story?.substring(0, 100) || 'ไม่ระบุ'}
+## ★★★ Face Reference Matching Rule:
+${faceReferenceInstruction}
 
-## Layout slots: ${slotDesc}${hasCircle ? ' + วงกลม (circle)' : ''}
+## ★★★ Main Subjects (people in the news): ${subjectsStr}
+Anyone NOT related to these subjects = stranger → relevance <= 2!
 
-## ★★★ หลักการสำคัญที่สุด: ภาพต้องเกี่ยวกับข่าว!
-ปกข่าวไวรัลที่ดี ต้อง "เล่าเรื่อง" ผ่านภาพ — ไม่ใช่แค่เอาภาพสวยๆ ของคนมากอง!
+## Main Character (Hero): ${identity?.mainCharacter || 'ไม่ระบุ'}
+## ★★★ STORY SUBJECT (what the news is actually about — MOST IMPORTANT!): ${identity?._storySubject || identity?.coreStory?.storySubject || identity?.coreStory?.relationship || 'ไม่ระบุ'}
+   → Images showing this STORY SUBJECT must score 8-10!
+   → Hero-only images WITHOUT the Story Subject → score ≤ 5 only!
+## Location: ${identity?.location || 'ไม่ระบุ'}
+## Key Issues/Scenes: ${identity?.keyScenes?.join(', ') || identity?.story?.substring(0, 100) || 'ไม่ระบุ'}
 
-★★★ กฎเหล็กเรื่อง RELEVANCE:
-- Hero (1 ภาพ): อนุญาตให้ใช้ภาพ portrait สวยๆ ได้ แม้ไม่ตรงบริบทข่าว → score 8-10
-- ภาพอื่นทั้งหมด: ★ ต้องเกี่ยวกับ "เนื้อหาข่าว" โดยตรง! ★
-  - ภาพสวยแต่ไม่เกี่ยวข่าว (วิวทะเล, fashion, ท่องเที่ยว, ไลฟ์สไตล์) → score ≤ 3 เท่านั้น!
-  - ภาพที่เกี่ยวกับข่าวโดยตรง (กิจกรรมในข่าว, สถานที่ในข่าว, คนในข่าว) → score ≥ 7
+## Layout slots: ${slotDesc}${hasCircle ? ' + circle slot' : ''}
 
-★★★ SCORING GUIDE — STORY SUBJECT FOCUS (สำคัญที่สุด):
+## ★★★ MOST IMPORTANT PRINCIPLE: Images MUST be relevant to the news!
+A great viral news cover must "tell the story" through images — not just pile up pretty photos of the person!
+
+★★★ IRON RULES FOR RELEVANCE:
+- Hero (1 image): A beautiful portrait is allowed even if not directly in news context → score 8-10
+- ALL other images: ★ MUST directly relate to the "news content"! ★
+  - Beautiful but news-irrelevant images (beach scenery, fashion, travel, lifestyle) → score ≤ 3 only!
+  - Images directly related to the news (activities in the news, locations in the news, people in the news) → score ≥ 7
+
+★★★ SCORING GUIDE — STORY SUBJECT FOCUS (HIGHEST PRIORITY):
 Give HIGH score (8-10) to images that:
 - Clearly show the STORY SUBJECT: "${identity?._storySubject || identity?.coreStory?.storySubject || identity?.coreStory?.relationship || 'ไม่ระบุ'}"
 - Show Hero + Story Subject together (family, relationship photos)
@@ -1127,102 +2039,152 @@ Give MEDIUM score (5-7) to images that:
 Give LOW score (1-4) to images that:
 - Show ONLY the Hero in unrelated context (fashion, event, red carpet) with NO story subject → score ≤ 4!
 - Are generic glamour/fashion shots of the hero alone → score 3
-- Show only backgrounds/locations without people
+- Show only backgrounds/locations without people (EXCEPTION: if the location/background/object IS the STORY_SUBJECT itself, e.g., the house of the main character, the school being donated, then give it a high score 8-10!)
 - Show people who are NOT subjects of this news story → score ≤ 2
 
 ★★★ CRITICAL RULE:
-- ภาพ hero คนเดียว (portrait/glamour/fashion ที่ไม่เกี่ยวข่าว) → score ≤ 4! ห้ามให้ 8-10!
-- ภาพ hero + story subject (ลูก/แม่/ครอบครัว) → score 9-10!
+- Hero alone (portrait/glamour/fashion unrelated to the news) → score ≤ 4! NEVER give 8-10!
+- Hero + story subject (child/mother/family together) → score 9-10!
 
-ตัวอย่าง: ข่าว "ก้อยรัชวิน บริจาค 5 แสนให้โรงเรียน"
-- ภาพก้อยถ่ายริมทะเล → score 2 (สวยแต่ไม่เกี่ยวข่าว)
-- ภาพก้อยแต่งตัวแฟชั่น → score 2 (สวยแต่ไม่เกี่ยวข่าว)
-- ภาพก้อยกับเด็กนักเรียน → score 9 (เกี่ยวกับข่าวบริจาค)
-- ภาพโรงเรียนบ้านขุนสมุทร → score 9 (สถานที่ในข่าว)
-- ภาพก้อยมอบเงิน → score 10 (KEY_ACTIVITY ตรงข่าว)
+Example: News "ก้อยรัชวิน บริจาค 5 แสนให้โรงเรียน" (celebrity donates 500K to school)
+- Photo of ก้อย at the beach → score 2 (beautiful but news-irrelevant)
+- Photo of ก้อย in fashion outfit → score 2 (beautiful but news-irrelevant)
+- Photo of ก้อย with students → score 9 (directly related to donation news)
+- Photo of โรงเรียนบ้านขุนสมุทร → score 9 (location in the news)
+- Photo of ก้อย handing over money → score 10 (KEY_ACTIVITY matches the news)
 
-ตัวอย่าง: ข่าว "น้องทาเรีย ลูกน้ำฝน สวยเหมือนแม่"
-- ภาพน้ำฝนถ่ายคนเดียวที่ชายหาด → score 3 (ไม่เกี่ยว)
-- ภาพน้ำฝนกับน้องทาเรีย → score 9 (RELATIONSHIP ตรงข่าว)
-- ภาพน้องทาเรียหน้าชัด → score 10 (ตัวละครหลัก)
-- ภาพน้ำฝนสมัยสาว → score 7 (เปรียบเทียบความสวย ตรงข่าว)
+Example: News "น้องทาเรีย ลูกน้ำฝน สวยเหมือนแม่" (daughter looks like celebrity mother)
+- Photo of น้ำฝน alone at the beach → score 3 (irrelevant)
+- Photo of น้ำฝน with น้องทาเรีย → score 9 (RELATIONSHIP matches the news)
+- Photo of น้องทาเรีย clear face → score 10 (main character of the story)
+- Photo of น้ำฝน in her younger days → score 7 (beauty comparison, relevant to the news)
 
-## Role ที่ใช้ได้:
-- HERO_FACE: ภาพหน้าชัด closeup ตัวละครหลัก (ปัจจุบัน) — อนุญาตให้สวยๆ ไม่ตรงข่าวได้
-- TIMELINE_PAST: ภาพตัวละครในอดีต/สมัยหนุ่มสาว
-- RELATIONSHIP: ภาพตัวละครกับคนสำคัญในข่าว (ภรรยา, แฟน, ลูก)
-- KEY_ACTIVITY: ภาพกิจกรรมหลักในข่าว (บริจาค, ทำสวน, ช่วยเด็ก)
-- CONTEXT_SCENE: สถานที่/เหตุการณ์ในข่าว (โรงเรียน, ไร่, มูลนิธิ)
-- EVIDENCE: หลักฐาน ป้าย เอกสาร
-- EMOTION: ภาพอารมณ์ที่เกี่ยวกับข่าว (ร้องไห้, ยิ้ม)
-- PERSON_SUPPORT: ภาพตัวละครในบริบทที่เกี่ยวกับข่าว (★ ไม่ใช่แค่สวย!)
+## Available Roles:
+- HERO_FACE: Clear solo close-up face of the main character (e.g., หมอโบว์ alone, smiling/facing camera) — allowed to be visually appealing even if slightly off-topic
+- OCCUPATION_WORK: Main character in professional role/work uniform/working (e.g., หมอโบว์ wearing blue scrubs, green hair cap, working in clinic/examination room)
+- CO_CHARACTER_EMOTION: Clear solo face of an important co-character (e.g., mother with Alzheimer's) to convey drama/exhaustion/emotion in the story
+- RELATIONSHIP: Image showing intimate, warm relationship between people in the news (e.g., หมอโบว์ hugging her mother, cheek to cheek, smiling with eyes closed happily)
+- KEY_ACTIVITY: Main activity that IS the news story (e.g., หมอโบว์ feeding her mother, supporting her, providing care)
+- CONTEXT_SCENE: Location/event setting in the news (school, farm, house, hospital)
+- TIMELINE_PAST: Character in the past/younger days
+- EVIDENCE: Evidence, signs, documents
+- EMOTION: Other standalone emotional images related to the news
+- PERSON_SUPPORT: Other characters in news-related context (★ NOT just pretty photos!)
 
-## กฎเหล็ก:
-1. ★★★ ภาพที่สวยแต่ไม่เกี่ยวข่าว → relevance ≤ 3! (ห้ามให้ 7 เด็ดขาด!)
-2. ★ ต้องเลือก Role ที่หลากหลาย — ห้ามมีแค่ HERO+PERSON_SUPPORT!
-3. ★ ถ้าข่าวมีกิจกรรม/สถานที่ → ต้องมี KEY_ACTIVITY หรือ CONTEXT_SCENE
-4. ★ ถ้าข่าวมีความสัมพันธ์ → ต้องมี RELATIONSHIP
-5. ★★ ภาพ PERSON_SUPPORT ที่ไม่มีบริบทข่าว (ภาพถ่ายทั่วไป/แฟชั่น/ไลฟ์สไตล์) → relevance ≤ 3
-6. ★★ แยก "text แต่งเติม" vs "text ธรรมชาติ":
-   - text แต่งเติม (ปกข่าว/ปกคลิป/ลายน้ำ) → relevance ≤ 2 ❌
-   - text ธรรมชาติ (ป้ายโรงเรียน/ป้ายสถานที่) → EVIDENCE, relevance ≥ 7 ✅
-7. ★ ภาพที่ไม่ใช่ตัวละครในข่าว (คนแปลก ดาราอื่น) → relevance ≤ 2
+## ZERO TOLERANCE RULES:
+1. ★★★ Beautiful but news-irrelevant images → relevance ≤ 3! (NEVER give 7!)
+2. ★ Choose DIVERSE roles — do NOT assign only HERO + PERSON_SUPPORT!
+3. ★ If the news involves an activity/location → there MUST be a KEY_ACTIVITY or CONTEXT_SCENE
+4. ★ If the news involves a relationship → there MUST be a RELATIONSHIP role
+5. ★★ PERSON_SUPPORT images with no news context (generic photos/fashion/lifestyle) → relevance ≤ 3
+6. ⚠️⚠️⚠️ ⛔ ZERO TOLERANCE — NO overlaid text/graphics allowed ⛔ (HIGHEST PRIORITY!):
+   - NEVER select images with large overlaid text or floating text on the image (e.g., red/yellow news headlines, subtitle speech bubbles, news ticker bars at the bottom, price tags/numbers like "10 ล้าน", news channel logos, YouTube thumbnail text) → set relevance = 0 and recommend role "REJECT" immediately! NEVER place in any slot!
+   - Only allow "clean" images with no overlaid text/graphics whatsoever
+   - Natural signs at real locations (e.g., real house number signs, real school name signs, license plates) are allowed as EVIDENCE or CONTEXT_SCENE and can score high (>= 7)
+7. ⚠️⚠️⚠️ ⛔ ZERO TOLERANCE — NO elephant/animal treatment images for family news ⛔:
+   - If the news is about family love / filial piety / caring for a mother with Alzheimer's (NOT about elephant tourism) → NEVER score elephant images, elephant care equipment, jungle elephant scenes, or veterinary animal treatment!
+   - Any image containing elephants or animal treatment (even slightly visible) → set relevance = 0 and recommend role "REJECT" immediately!
+8. ⚠️⚠️⚠️ ⛔ ZERO TOLERANCE — NO AI-generated / 3D / drawn / synthetic images ⛔:
+   - Inspect carefully: NEVER select images with unnaturally smooth skin (highly smoothed/airbrushed plastic skin), perfect lighting/shadows as if generated by Midjourney/Stable Diffusion, distorted fingers/proportions, or drawings/cartoons/3D models/anime → set relevance = 0 and recommend role "REJECT" immediately! We require REAL camera photographs only!
+9. ⚠️⚠️⚠️ ⛔ ZERO TOLERANCE — NO strangers or wrong-person images ⛔:
+   - Check main character (Hero) name: "${identity?.mainCharacter || 'ไม่ระบุ'}"
+   - If this is a single-person news story (no named secondary character) such as a story about "กัน นภัทร" or "แม่ทัพกุ้ง" → NEVER select face images of strangers or random other people (e.g., other celebrities, random models, random women) who are not the protagonist and not actual characters in the news!
+   - If an image prominently features a stranger → set relevance <= 2 and recommend role "REJECT" immediately!
+10. ★ Images of people NOT in the news (strangers, other celebrities) → relevance ≤ 2
 
-ตอบ JSON (★★ ต้อง score ทุกภาพ ห้ามข้าม!):
+Respond in JSON (★★ MUST score EVERY image, do NOT skip any!):
 {"curated": [
-  {"index": 0, "relevance": 10, "recommendedRole": "HERO_FACE", "reason": "หน้าชัด ตัวละครหลัก"},
-  {"index": 1, "relevance": 9, "recommendedRole": "KEY_ACTIVITY", "reason": "ภาพบริจาค ตรงกับข่าว"},
-  {"index": 2, "relevance": 2, "recommendedRole": "PERSON_SUPPORT", "reason": "ภาพวิวทะเล สวยแต่ไม่เกี่ยวข่าว"},
-  ...จนครบทุกภาพ #0 - #${thumbnails.length - 1}...
-]}
+  {"index": 0, "relevance": 10, "recommendedRole": "HERO_FACE", "reason": "Clear face, main character"},
+  {"index": 1, "relevance": 9, "recommendedRole": "KEY_ACTIVITY", "reason": "Donation photo, matches the news"},
+  {"index": 2, "relevance": 2, "recommendedRole": "PERSON_SUPPORT", "reason": "Beach scenery, beautiful but news-irrelevant"},
+  ...score ALL images #0 - #${thumbnails.length - 1}...
+],
+"artDirection": {
+  "heroIndex": <index of Hero image — professional clear-face portrait/interview/news shot, NOT selfie, NO watermark>,
+  "circleIndex": <index of circle image — relationship photo of 2 people (couple/family) or a single warm image>,
+  "highlightIndex": <index of highlight image — key activity (caregiving, feeding, donating, family together)>,
+  "secondaryPersonIndex": <index of 2nd person or null>,
+  "bgIndices": [<indices for background — location/story context>],
+  "rejectIndices": [<indices to NEVER use — AI images/watermark/strangers>],
+  "heroReason": "Brief reason for choosing this Hero image",
+  "circleReason": "Brief reason for choosing this Circle image"
+}}
 
-## ★★★ CIRCLE SLOT RULES (ถ้าข่าวมีวงกลม):
-- วงกลมต้องแสดง 1 คน ที่เป็น subject หลักเท่านั้น: ${subjectsStr}
-- ภาพที่จะอยู่ใน circle ต้องมี relevance >= 6
-- ห้ามเลือกภาพวัยรุ่น/เด็ก/คนแปลกหน้าที่ไม่ใช่ subject
-- ห้ามเลือกภาพกลุ่มคน (>1 คน) สำหรับ circle
-- ถ้าไม่มีภาพที่ตรง subjects และ relevance >= 6 → ให้ใช้ภาพ HERO_FACE เดิม (ซ้ำได้)
+## ★★★ ART DIRECTOR DECISIONS ★★★
+In addition to relevance scoring, make the following Art Director decisions.
+Review ALL images and decide like a professional cover layout designer:
+1. Hero image (main): Must be a professional clear-face shot (portrait/interview/news) — NOT a selfie, NO watermark
+2. Circle image: Relationship photo of 2 people (couple/family) or a single warm image
+3. Highlight image (rectangle): Key activity image (caregiving, feeding, donating, family together)
+4. Background image: Location/story context
+5. Secondary person image (bottom-right): Another relevant person (mother, father, recipient)
 
-★★★ กฎสำคัญ: 
-- ต้องมี entry ครบทุกภาพ (index 0 ถึง ${thumbnails.length - 1}) ห้ามข้ามภาพไหน!
-- ภาพ stock photo / studio / กราฟิก → relevance <= 2
-- ภาพที่ไม่ใช่คนในข่าว → relevance <= 2
-- ★★★ ภาพที่เป็นคนในข่าวแต่ไม่เกี่ยวกับเนื้อหาข่าว (ไลฟ์สไตล์/แฟชั่น/ท่องเที่ยว) → relevance <= 3
+## ★★★ CIRCLE SLOT RULES (if layout has circle):
+- Circle must show exactly 1 person who is a main subject: ${subjectsStr}
+- Image for circle must have relevance >= 6
+- NEVER select teenager/child/stranger images that are NOT a subject
+- NEVER select group photos (>1 person) for circle
+- If no image matches subjects with relevance >= 6 → reuse the HERO_FACE image (duplication is allowed)
 
-## ★★★ STORY WEIGHT SCORING (สำคัญที่สุด):
+★★★ CRITICAL RULES:
+- MUST include an entry for EVERY image (index 0 to ${thumbnails.length - 1}), do NOT skip any!
+- Stock photos / studio shots / graphics → relevance <= 2
+- Images of people NOT in the news → relevance <= 2
+- ★★★ Images of news characters but in unrelated context (lifestyle/fashion/travel) → relevance <= 3
 
-ข่าวนี้มีน้ำหนักดังนี้:
+## ★★★ STORY WEIGHT SCORING (MOST IMPORTANT):
+
+This news story has the following weight distribution:
 ${JSON.stringify(identity?.coreStory?.storyWeight || {})}
 
-สิ่งที่ห้ามให้คะแนนสูง (negativeFocus):
+Items that must NEVER score high (negativeFocus):
 ${(identity?.coreStory?.negativeFocus || []).join(', ') || 'ไม่มี'}
 
-กฎ STORY MATCH:
-- ภาพที่สะท้อน core story (relationship/sacrifice/caregiving) → score สูง (8-10)
-- ภาพที่สะท้อน context/occupation เท่านั้น → score ≤ 4 เสมอ
-- ภาพที่อยู่ใน negativeFocus เป็น dominant subject → score ≤ 2
+## 🧠 SMART KEYWORDS (AI-analyzed from news content):
+Story Theme: "${identity?._smartQueryTheme || identity?.coreStory?.celebratedAction || 'ไม่ระบุ'}"
+Keywords: ${(identity?._smartQueryKeywords || []).join(', ') || 'N/A'}
+Search Queries used to find these images:
+${(identity?.coreImageQueries || []).slice(0, 8).map((q, i) => `  ${i+1}. "${q}"`).join('\n') || '  (none)'}
 
-ถามตัวเองก่อนให้คะแนน:
-"ถ้าคนเห็นภาพนี้บน cover จะเข้าใจว่าข่าวนี้คือเรื่องอะไร?"
-ถ้าคำตอบไม่ตรงกับ core story → score ต้องต่ำ`;
+★ Images matching these keywords → HIGH score (8-10)!
+★ Images not matching any keyword → LOW score (≤ 3)!
+
+STORY MATCH RULES:
+- Images reflecting the core story (relationship/sacrifice/caregiving) → HIGH score (8-10)
+- Images reflecting only context/occupation → score ≤ 4 always
+- Images where a negativeFocus item is the dominant subject → score ≤ 2
+
+Ask yourself before scoring each image:
+"If a viewer sees this image on the cover, will they understand what this news story is about?"
+If the answer does NOT match the core story → score must be LOW`;
 
     console.log(`[Curator] 🧠 Analyzing ${thumbnails.length} images against news content...`);
     
     const response = await callAI({
       prompt,
       imageContents,
-      model: MODEL_VISION,
+      model: 'gpt-5.5',
       temperature: 0.1,
-      maxTokens: 1000,
-      systemPrompt: 'คุณเป็น Content Curator สำหรับปกข่าว วิเคราะห์ภาพแต่ละภาพว่าตรงกับเนื้อข่าวไหม ตอบ JSON เท่านั้น',
+      maxTokens: 2000,
+      systemPrompt: 'You are an AI Art Director and Content Curator for viral news covers. Analyze all images and make decisions like a professional cover layout designer. Respond with JSON only.',
     });
 
-    // Parse response (callAI ใน openai.js จะ parse JSON ให้แล้ว)
+    // Parse response (callAI in openai.js already parses JSON)
     let parsed = null;
+    let artDirection = null;
     
     if (response && typeof response === 'object') {
-      // callAI parse JSON ให้แล้ว
+      // callAI already parsed JSON
       parsed = response.curated || response;
+      artDirection = response?.artDirection || null;
+      if (artDirection) {
+        console.log(`[ArtDirector] ★ Hero: #${artDirection.heroIndex}, Circle: #${artDirection.circleIndex}, Highlight: #${artDirection.highlightIndex}`);
+        console.log(`[ArtDirector]   Hero reason: ${artDirection.heroReason}`);
+        console.log(`[ArtDirector]   Circle reason: ${artDirection.circleReason}`);
+        if (artDirection.rejectIndices?.length > 0) {
+          console.log(`[ArtDirector]   Reject indices: ${artDirection.rejectIndices.join(', ')}`);
+        }
+      }
     }
     
     if (!parsed || !Array.isArray(parsed)) {
@@ -1238,34 +2200,59 @@ ${(identity?.coreStory?.negativeFocus || []).join(', ') || 'ไม่มี'}
       item.recommendedRole
     );
     
-    // ★ Fix: Filter by relevance threshold — ภาพไม่เกี่ยวข่าว ห้ามเข้า layout!
-    const MIN_RELEVANCE = 5;
-    const relevantItems = validItems.filter(item => (item.relevance || 0) >= MIN_RELEVANCE);
+    // ★★★ FIX 1.1: CURATOR RANK-ONLY MODE ★★★
+    // Curator ไม่มีสิทธิ์ฆ่าภาพอีกต่อไป — ได้แค่จัดลำดับ!
+    // เฉพาะ Zero Tolerance (text overlay, AI-generated, คนผิดชัดเจน relevance=0) 
+    // ถึงจะถูกลดเป็น LOW_PRIORITY
     
-    // Fallback: ถ้าเหลือน้อยกว่า 3 ภาพ → ลดเกณฑ์ลงทีละขั้น เพื่อให้มีภาพพอ
-    let finalCurated = relevantItems;
-    if (finalCurated.length < 3) {
-      finalCurated = validItems.filter(item => (item.relevance || 0) >= 3);
-      console.log(`[Curator] ⚠️ Fallback to ≥3 threshold → ${finalCurated.length} images`);
+    // ★ Judge Score Protection — ยังคงใช้
+    for (const item of validItems) {
+      const img = imageBuffers[item.index];
+      const judgeScore = img?.score || 0;
+      if (judgeScore >= 7 && (item.relevance || 0) < 3) {
+        console.log(`[Curator] ★ Judge-protected #${item.index}: relevance ${item.relevance} → 3 (Judge gave ${judgeScore}/10)`);
+        item.relevance = 3;
+      }
     }
-    if (finalCurated.length < 2) {
-      finalCurated = validItems.filter(item => (item.relevance || 0) >= 1);
-      console.log(`[Curator] ⚠️ Fallback to ≥1 threshold → ${finalCurated.length} images (minimal)`);
-    }
-
-    console.log(`[Curator] 🎯 Relevance filter: ${validItems.length} total → ${relevantItems.length} (≥${MIN_RELEVANCE}) → ${finalCurated.length} final`);
     
-    // Log ผล Curator
+    // ★★★ RANK-ONLY: เรียงตาม relevance สูง→ต่ำ — ไม่ตัดออก!
+    const ranked = [...validItems].sort((a, b) => (b.relevance || 0) - (a.relevance || 0));
+    
+    // เฉพาะ Zero Tolerance (relevance = 0 + REJECT จาก AI) → LOW_PRIORITY
+    // ภาพอื่นทั้งหมดยังอยู่ในระบบ
+    for (const item of ranked) {
+      if (item.recommendedRole === 'REJECT') {
+        if ((item.relevance || 0) === 0) {
+          // Zero Tolerance: text overlay, AI-generated, คนผิด → LOW_PRIORITY
+          item.recommendedRole = 'LOW_PRIORITY';
+          console.log(`[Curator] ⛔ Zero Tolerance #${item.index} (rel:0) → LOW_PRIORITY`);
+        } else {
+          // Curator บอก REJECT แต่ relevance > 0 → เปลี่ยนเป็น CONTEXT_SCENE (ยังใช้ได้!)
+          item.recommendedRole = 'CONTEXT_SCENE';
+          console.log(`[Curator] ★ Rank-mode: #${item.index} REJECT(rel:${item.relevance}) → CONTEXT_SCENE (kept in pool)`);
+        }
+      }
+    }
+    
+    const finalCurated = ranked; // ★ ทุกภาพอยู่ในระบบ!
+    
+    console.log(`[Curator] 🎯 RANK-ONLY mode: ${validItems.length} images → ALL kept, sorted by relevance`);
+    console.log(`[Curator]   Top: ${ranked.slice(0, 3).map(i => `#${i.index}(${i.relevance})`).join(', ')}`);
+    console.log(`[Curator]   Bottom: ${ranked.slice(-2).map(i => `#${i.index}(${i.relevance})`).join(', ')}`);
+    
+    // Log all ranked results
     const contextImages = finalCurated.filter(i => 
       i.recommendedRole === 'CONTEXT_SCENE' || i.recommendedRole === 'EVIDENCE'
     );
     
     for (const item of finalCurated) {
-      console.log(`[Curator] Image #${item.index}: ${item.recommendedRole} (relevance: ${item.relevance}/10) — ${item.reason || ''}`);
+      const marker = (item.relevance || 0) >= 5 ? '✅' : (item.relevance || 0) >= 3 ? '🟡' : '⚪';
+      console.log(`[Curator] ${marker} #${item.index}: ${item.recommendedRole} (rel:${item.relevance}/10) — ${item.reason || ''}`);
     }
-    console.log(`[Curator] 📊 Results: ${finalCurated.length} images curated, ${contextImages.length} context/evidence images`);
+    console.log(`[Curator] 📊 Results: ${finalCurated.length} images ranked (ALL kept), ${contextImages.length} context/evidence`);
     
-    return finalCurated;
+    // ★ ส่งทุกภาพออกไป — ไม่มีการ map เป็น REJECT อีกต่อไป!
+    return { curated: finalCurated, artDirection: artDirection || null };
     
   } catch (err) {
     console.warn('[Curator] Error:', err.message);
@@ -1282,9 +2269,73 @@ ${(identity?.coreStory?.negativeFocus || []).join(', ') || 'ไม่มี'}
 // ★ circle         → single-face portrait of main character (not background!)
 // NEVER put a background/location-only image in hero slot.
 // NEVER put a duplicate of hero into any other slot.
-// =============================================
+async function createModifiedBuffer(originalBuffer, mode) {
+  try {
+    let sh = sharp(originalBuffer);
+    if (mode === 'flip') {
+      sh = sh.flop();
+    } else if (mode === 'zoom') {
+      const meta = await sh.metadata();
+      if (meta.width && meta.height) {
+        const w = Math.round(meta.width * 0.7);
+        const h = Math.round(meta.height * 0.7);
+        const left = Math.round((meta.width - w) / 2);
+        const top = Math.round((meta.height - h) / 2);
+        sh = sh.extract({ left, top, width: w, height: h });
+      }
+    } else if (mode === 'zoom-left') {
+      const meta = await sh.metadata();
+      if (meta.width && meta.height) {
+        const w = Math.round(meta.width * 0.65);
+        const h = Math.round(meta.height * 0.65);
+        const left = Math.round(meta.width * 0.05);
+        const top = Math.round((meta.height - h) / 2);
+        sh = sh.extract({ left, top, width: w, height: h });
+      }
+    } else if (mode === 'zoom-right') {
+      const meta = await sh.metadata();
+      if (meta.width && meta.height) {
+        const w = Math.round(meta.width * 0.65);
+        const h = Math.round(meta.height * 0.65);
+        const left = Math.round(meta.width * 0.3);
+        const top = Math.round((meta.height - h) / 2);
+        sh = sh.extract({ left, top, width: w, height: h });
+      }
+    }
+    return await sh.toBuffer();
+  } catch (err) {
+    console.error('[createModifiedBuffer] Error:', err.message);
+    return originalBuffer;
+  }
+}
+
+async function cropFaceTightly(buffer, face) {
+  try {
+    let sh = sharp(buffer);
+    const meta = await sh.metadata();
+    if (meta.width && meta.height && face) {
+      const padW = Math.round(face.width * 0.3);
+      const padH = Math.round(face.height * 0.3);
+      
+      const left = Math.round(Math.max(0, face.x - padW));
+      const top = Math.round(Math.max(0, face.y - padH));
+      const width = Math.round(Math.min(meta.width - left, face.width + 2 * padW));
+      const height = Math.round(Math.min(meta.height - top, face.height + 2 * padH));
+      
+      const size = Math.round(Math.min(width, height));
+      if (size > 50) {
+        sh = sh.extract({ left, top, width: size, height: size });
+      }
+    }
+    return await sh.toBuffer();
+  } catch (err) {
+    console.error('[cropFaceTightly] Error:', err.message);
+    return await createModifiedBuffer(buffer, 'zoom');
+  }
+}
+
 // (Maintained by Character Focus Rule above — hero is guaranteed to have a face)
-async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identity, coverReferences) {
+async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identity, coverReferences, artDirection = null) {
   try {
     let slotCount = 4;
     let hasCircle = false;
@@ -1299,28 +2350,93 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
       }
     } catch {}
 
+    // ★ Define negative focus terms at the top for reuse
+    const negFocusTerms = identity?.coreStory?.negativeFocus || [];
+    const coreStoryAnchor = identity?.coreStory?.sacrifice || identity?.coreStory?.relationship || null;
+    const isNegativeImage = (imgIdx) => {
+      const img = imageBuffers[imgIdx];
+      if (!img) return false;
+      if (img.role === 'LOW_PRIORITY' || img.role === 'low_priority') return true;
+      
+      const cat = (img.evidenceCat || '').toLowerCase();
+      const textToCheck = `${img.url || ''} ${img.role || ''} ${img.evidenceCat || ''} ${img.title || ''} ${img.snippet || ''}`.toLowerCase();
+      
+      // ★ Hardcoded fallback safeguard: ถ้าเรื่องหลักคือการดูแลแม่อัลไซเมอร์ แต่ภาพมีช้างหรือรักษาสัตว์
+      const titleToCheck = (identity?._newsTitle || identity?.story || '').toLowerCase();
+      const contentToCheck = (identity?._newsContent || '').toLowerCase();
+      const isAlzheimerStory = titleToCheck.match(/อัลไซเมอร์|ดูแลแม่|แม่ป่วย|ป่วยหนัก|ค่าน้ำนม/) || 
+                               contentToCheck.match(/อัลไซเมอร์|ดูแลแม่|แม่ป่วย|ป่วยหนัก|ค่าน้ำนม/);
+      if (isAlzheimerStory) {
+        const hasElephantOrVet = textToCheck.match(/ช้าง|elephant|สัตวแพทย์|รักษาสัตว์|หมอช้าง|vet|veterinary|animal/);
+        if (hasElephantOrVet) {
+          console.log(`[isNegativeImage] 🐘 Safeguard triggered: elephant/vet image #${imgIdx} marked negative for Alzheimer story`);
+          // Set curator score to 0 to prevent accidental usage in other fallback logic
+          img.curatorScore = 0;
+          img.role = 'LOW_PRIORITY';
+          return true;
+        }
+      }
+
+      const matchesNegative = negFocusTerms.some(neg => {
+        const cleanNeg = neg.toLowerCase();
+        if (textToCheck.includes(cleanNeg)) return true;
+        
+        // ตรวจคีย์เวิร์ดช้าง (Elephant)
+        if (cleanNeg.includes('elephant') || cleanNeg.includes('ช้าง')) {
+          if (textToCheck.includes('ช้าง') || textToCheck.includes('elephant') || cat.includes('elephant')) return true;
+        }
+        // ตรวจคีย์เวิร์ดสัตวแพทย์/รักษาสัตว์ (Veterinary/vet)
+        if (cleanNeg.includes('vet') || cleanNeg.includes('veterinary') || cleanNeg.includes('animal') || cleanNeg.includes('สัตวแพทย์') || cleanNeg.includes('รักษาสัตว์')) {
+          if (textToCheck.includes('สัตวแพทย์') || textToCheck.includes('รักษาสัตว์') || textToCheck.includes('หมอรักษาสัตว์') || textToCheck.includes('สัตว์') || textToCheck.includes('vet') || cat.includes('work')) return true;
+        }
+        return false;
+      });
+
+      if (matchesNegative) {
+        img.curatorScore = 0;
+        img.role = 'LOW_PRIORITY';
+      }
+
+      if (cat === 'work' && matchesNegative) {
+        return true;
+      }
+
+      return matchesNegative;
+    };
+
     // จัดกลุ่มภาพตาม role
     const byRole = {
       HERO_FACE: [],
       HERO: [],
+      OCCUPATION_WORK: [], // ภาพอาชีพ/ชุดทำงาน
+      CO_CHARACTER_EMOTION: [], // ภาพหน้าตัวละครร่วมเด่น (แม่)
       PERSON_SUPPORT: [],
       CONTEXT_SCENE: [],
+      KEY_ACTIVITY: [], // แยก KEY_ACTIVITY ออกมาจาก CONTEXT_SCENE
       EVIDENCE: [],
       EMOTION: [],
       RELATIONSHIP: [],
       SUPPORT: [],
+      NEGATIVE: [], // Separate pool for negative images
     };
 
     imageBuffers.forEach((img, i) => {
       const role = img.role || 'SUPPORT';
       const faceData = faceDataMap.get(String(i)) || { hasFaces: false, faceCount: 0 };
       
-      if (role === 'HERO_FACE' || role === 'HERO') {
+      if (isNegativeImage(i)) {
+        byRole.NEGATIVE.push({ index: i, faceData, role });
+      } else if (role === 'HERO_FACE' || role === 'HERO') {
         byRole.HERO_FACE.push({ index: i, faceData, role });
+      } else if (role === 'OCCUPATION_WORK') {
+        byRole.OCCUPATION_WORK.push({ index: i, faceData, role });
+      } else if (role === 'CO_CHARACTER_EMOTION') {
+        byRole.CO_CHARACTER_EMOTION.push({ index: i, faceData, role });
       } else if (role === 'PERSON_SUPPORT') {
         byRole.PERSON_SUPPORT.push({ index: i, faceData, role });
-      } else if (role === 'CONTEXT_SCENE' || role === 'KEY_ACTIVITY') {
-        // ★ KEY_ACTIVITY → ใส่ใน CONTEXT_SCENE (เพราะเป็นภาพบริบท/กิจกรรมในข่าว)
+      } else if (role === 'KEY_ACTIVITY') {
+        byRole.KEY_ACTIVITY.push({ index: i, faceData, role });
+      } else if (role === 'CONTEXT_SCENE') {
         byRole.CONTEXT_SCENE.push({ index: i, faceData, role });
       } else if (role === 'EVIDENCE') {
         byRole.EVIDENCE.push({ index: i, faceData, role });
@@ -1340,69 +2456,262 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
     let heroIndex, circleIndex, circleSmallIndex;
     let photoOrder = [];
 
-    if (hasRoles) {
-      // === Role-based assignment ===
+    // ★★★ AI Art Director Override: ถ้ามี artDirection จาก GPT-5.5 → ใช้ AI ตัดสินใจแทน rule-based logic
+    if (artDirection && artDirection.heroIndex !== undefined && artDirection.heroIndex !== null) {
+      console.log(`[assignSlots] ★★★ Using AI Art Director decisions (GPT-5.5) instead of rule-based logic`);
       
-      // Hero: ภาพ HERO_FACE ที่มีหน้าชัดที่สุด (faceCount === 1 ดีสุด)
+      // Validate indices are within bounds
+      const maxIdx = imageBuffers.length - 1;
+      const validIdx = (idx) => typeof idx === 'number' && idx >= 0 && idx <= maxIdx && !isNegativeImage(idx);
+      
+      // Hero
+      if (validIdx(artDirection.heroIndex)) {
+        heroIndex = artDirection.heroIndex;
+        console.log(`[assignSlots] ★ Art Director Hero: #${heroIndex} — ${artDirection.heroReason || 'AI selected'}`);
+      }
+      
+      // Circle
+      if (hasCircle && validIdx(artDirection.circleIndex)) {
+        circleIndex = artDirection.circleIndex;
+        console.log(`[assignSlots] ★ Art Director Circle: #${circleIndex} — ${artDirection.circleReason || 'AI selected'}`);
+      }
+      
+      // Build photoOrder from artDirection
+      const usedByAD = new Set([heroIndex]);
+      if (circleIndex !== undefined) usedByAD.add(circleIndex);
+      
+      // Slot 0 = hero
+      photoOrder = [heroIndex];
+      
+      // Highlight slot
+      if (validIdx(artDirection.highlightIndex) && !usedByAD.has(artDirection.highlightIndex)) {
+        photoOrder.push(artDirection.highlightIndex);
+        usedByAD.add(artDirection.highlightIndex);
+        console.log(`[assignSlots] ★ Art Director Highlight: #${artDirection.highlightIndex}`);
+      }
+      
+      // Secondary person
+      if (validIdx(artDirection.secondaryPersonIndex) && !usedByAD.has(artDirection.secondaryPersonIndex)) {
+        photoOrder.push(artDirection.secondaryPersonIndex);
+        usedByAD.add(artDirection.secondaryPersonIndex);
+        console.log(`[assignSlots] ★ Art Director Secondary Person: #${artDirection.secondaryPersonIndex}`);
+      }
+      
+      // Background indices
+      if (Array.isArray(artDirection.bgIndices)) {
+        for (const bgIdx of artDirection.bgIndices) {
+          if (validIdx(bgIdx) && !usedByAD.has(bgIdx)) {
+            photoOrder.push(bgIdx);
+            usedByAD.add(bgIdx);
+          }
+        }
+      }
+      
+      // Fill remaining slots from high-scoring images
+      const remainingForAD = imageBuffers
+        .map((img, i) => ({ index: i, score: img.curatorScore || 0 }))
+        .filter(x => !usedByAD.has(x.index) && !isNegativeImage(x.index) && x.score >= 4)
+        .sort((a, b) => b.score - a.score);
+      
+      while (photoOrder.length < slotCount && remainingForAD.length > 0) {
+        const next = remainingForAD.shift();
+        photoOrder.push(next.index);
+        usedByAD.add(next.index);
+      }
+      
+      // Apply reject indices
+      if (Array.isArray(artDirection.rejectIndices)) {
+        for (const rejIdx of artDirection.rejectIndices) {
+          if (typeof rejIdx === 'number' && rejIdx >= 0 && rejIdx <= maxIdx) {
+            imageBuffers[rejIdx].role = 'REJECT';
+            imageBuffers[rejIdx].curatorScore = 0;
+          }
+        }
+      }
+      
+      console.log(`[assignSlots] ★ Art Director final: Hero=#${heroIndex}, Circle=#${circleIndex}, PhotoOrder=${JSON.stringify(photoOrder)}`);
+      
+      return {
+        photoOrder,
+        circleIndex: circleIndex !== undefined ? circleIndex : 0,
+        circleSmallIndex: undefined,
+        heroIndex,
+      };
+    }
+    
+    // ★ Fallback: ไม่มี artDirection → ใช้ rule-based logic ปกติ
+    if (hasRoles) {
+      // ★★★ Hero: Viral Cover Pattern — ALWAYS the best quality single-face professional photo
+      // Priority: single face > high resolution > HERO_FACE with curatorScore>=6 > penalize selfie
       const heroCandidates = [...byRole.HERO_FACE, ...byRole.HERO];
-      if (heroCandidates.length > 0) {
-        heroCandidates.sort((a, b) => {
-          const aFace = a.faceData.faceCount === 1 ? 100 : (a.faceData.hasFaces ? 50 : 0);
-          const bFace = b.faceData.faceCount === 1 ? 100 : (b.faceData.hasFaces ? 50 : 0);
-          return bFace - aFace;
+      // ★ Also consider high-scoring non-hero candidates with single clear face (ภาพดีที่ AI ไม่ได้ tag HERO)
+      const heroExpandedPool = [
+        ...heroCandidates,
+        ...byRole.CO_CHARACTER_EMOTION.filter(x => x.faceData.faceCount === 1 && (imageBuffers[x.index]?.curatorScore || 0) >= 7),
+        ...byRole.PERSON_SUPPORT.filter(x => x.faceData.faceCount === 1 && (imageBuffers[x.index]?.curatorScore || 0) >= 7),
+      ];
+
+      if (heroExpandedPool.length > 0) {
+        // ★ Weighted scoring system for hero selection (viral cover patterns)
+        const heroScored = heroExpandedPool.map(candidate => {
+          const img = imageBuffers[candidate.index];
+          const curatorScore = img?.curatorScore || 0;
+          const faceCount = candidate.faceData.faceCount || 0;
+          const imgWidth = img?.width || img?.naturalWidth || 0;
+          let totalScore = 0;
+
+          // Rule 1: Prefer single face (faceCount === 1)
+          if (faceCount === 1) totalScore += 40;
+          else if (faceCount > 1) totalScore += 10; // multiple faces = less ideal for hero
+          else totalScore += 0; // no face at all
+
+          // Rule 2: Prefer higher resolution (width > 600px)
+          if (imgWidth > 800) totalScore += 25;
+          else if (imgWidth > 600) totalScore += 20;
+          else if (imgWidth > 400) totalScore += 10;
+
+          // Rule 3: Penalize selfie-like images (PERSON_SUPPORT role)
+          if (candidate.role === 'PERSON_SUPPORT') totalScore -= 30;
+
+          // Rule 4: Strong preference for HERO_FACE with curatorScore >= 6
+          if (candidate.role === 'HERO_FACE' && curatorScore >= 6) totalScore += 60;
+          else if (candidate.role === 'HERO_FACE') totalScore += 30;
+          else if (candidate.role === 'HERO') totalScore += 20;
+
+          // Curator relevance score (0-10 → 0-30 points)
+          totalScore += curatorScore * 3;
+
+          // Scraper quality score as tie-breaker
+          totalScore += (img?.score || 0) * 0.5;
+
+          return { ...candidate, totalScore };
         });
-        heroIndex = heroCandidates[0].index;
+
+        heroScored.sort((a, b) => b.totalScore - a.totalScore);
+        heroIndex = heroScored[0].index;
+        console.log(`[assignSlots] ★ Hero scored: ${heroScored.slice(0, 3).map(h => `#${h.index}(${h.totalScore.toFixed(1)})`).join(', ')}`);
       } else {
-        // ไม่มี HERO → หาภาพที่มีหน้า 1 คนชัดสุด
+        // ไม่มี HERO → หาภาพที่มีความเกี่ยวข้องสูงสุด (score) และหน้าชัด (และไม่ใช่ negative image)
         const withFace = imageBuffers.map((img, i) => ({
           index: i,
-          faceData: faceDataMap.get(String(i)) || { hasFaces: false },
-        })).filter(x => x.faceData.hasFaces).sort((a, b) => {
-          return (a.faceData.faceCount === 1 ? 100 : 0) - (b.faceData.faceCount === 1 ? 100 : 0);
+          score: img.curatorScore || 0,
+          faceData: faceDataMap.get(String(i)) || { hasFaces: false, faceCount: 0 },
+          role: img.role || 'SUPPORT',
+        })).filter(x => x.faceData.hasFaces && !isNegativeImage(x.index)).sort((a, b) => {
+          // ★ Weighted sort: single face + high curator score + not selfie
+          const aW = (a.faceData.faceCount === 1 ? 40 : 0) + a.score * 3 + (a.role === 'PERSON_SUPPORT' ? -30 : 0);
+          const bW = (b.faceData.faceCount === 1 ? 40 : 0) + b.score * 3 + (b.role === 'PERSON_SUPPORT' ? -30 : 0);
+          return bW - aW;
         });
-        heroIndex = withFace.length > 0 ? withFace[withFace.length - 1].index : 0;
+        
+        if (withFace.length > 0) {
+          heroIndex = withFace[0].index;
+        } else {
+          // ★ Fallback: หาภาพที่เกี่ยวข้องสูงสุด (score) ที่ไม่ใช่ negative image แม้ไม่มีหน้าคนก็ยอม!
+          const withoutFace = imageBuffers.map((img, i) => ({
+            index: i,
+            score: img.curatorScore || 0,
+          })).filter(x => !isNegativeImage(x.index)).sort((a, b) => b.score - a.score);
+          
+          heroIndex = withoutFace.length > 0 ? withoutFace[0].index : 0;
+        }
       }
 
       // Circle: ★★★ Smart Slot Assignment
       // ★ FIX: Circle ต้องเป็นภาพหน้า 1 คนชัด — ห้ามใช้ภาพโซเชลฟี่/กลุ่มที่มีคนมากกว่า 1
       if (hasCircle) {
-        // ★ Step 1 (BEST): HERO_FACE ที่มี faceCount === 1 (ไม่ใช่ hero หลัก) — ภาพหน้าชัดสุดสำหรับวงกลม!
+        // ★★★ Circle: Viral Cover Pattern — ALWAYS a relationship photo (couple, parent-child, 2 people together)
+        // NEVER select an image with watermark for circle
+        const hasWatermark = (idx) => {
+          const img = imageBuffers[idx];
+          if (!img) return false;
+          const text = `${img.url || ''} ${img.title || ''} ${img.snippet || ''}`.toLowerCase();
+          return text.includes('watermark') || text.includes('ลายน้ำ') || img.hasWatermark === true;
+        };
+
+        // ★ FIRST priority: images with exactly 2 faces (relationship/couple photo) — THE viral circle pattern
+        const twoFaceRelationship = [
+          ...byRole.RELATIONSHIP,
+          ...byRole.CO_CHARACTER_EMOTION,
+          ...byRole.EMOTION,
+          ...byRole.KEY_ACTIVITY,
+          ...byRole.HERO_FACE,
+          ...byRole.HERO,
+          ...byRole.PERSON_SUPPORT,
+        ]
+          .filter(x => x.index !== heroIndex
+            && x.faceData.faceCount === 2
+            && !isNegativeImage(x.index)
+            && !hasWatermark(x.index)
+            && (imageBuffers[x.index]?.curatorScore || 0) >= 3)
+          .sort((a, b) => {
+            // Prefer RELATIONSHIP role first, then by curatorScore
+            const roleBonus = (r) => r === 'RELATIONSHIP' ? 20 : (r === 'CO_CHARACTER_EMOTION' ? 10 : 0);
+            const aW = roleBonus(a.role) + (imageBuffers[a.index]?.curatorScore || 0) * 3;
+            const bW = roleBonus(b.role) + (imageBuffers[b.index]?.curatorScore || 0) * 3;
+            return bW - aW;
+          });
+
+        // ★ SECOND priority: RELATIONSHIP role images with score >= 4 (any face count)
+        const relationshipScored = byRole.RELATIONSHIP
+          .filter(x => x.index !== heroIndex
+            && !isNegativeImage(x.index)
+            && !hasWatermark(x.index)
+            && (imageBuffers[x.index]?.curatorScore || 0) >= 4)
+          .sort((a, b) => {
+            // Prefer 2 faces, then by score
+            const aFaceBonus = a.faceData.faceCount === 2 ? 50 : (a.faceData.faceCount >= 1 ? 10 : 0);
+            const bFaceBonus = b.faceData.faceCount === 2 ? 50 : (b.faceData.faceCount >= 1 ? 10 : 0);
+            return (bFaceBonus + (imageBuffers[b.index]?.curatorScore || 0) * 3) - (aFaceBonus + (imageBuffers[a.index]?.curatorScore || 0) * 3);
+          });
+
+        // ★ THIRD priority: CO_CHARACTER_EMOTION with face (parent-child, supporting character)
+        const coCharCircle = byRole.CO_CHARACTER_EMOTION
+          .filter(x => x.index !== heroIndex
+            && x.faceData.hasFaces
+            && !isNegativeImage(x.index)
+            && !hasWatermark(x.index)
+            && (imageBuffers[x.index]?.curatorScore || 0) >= 4)
+          .sort((a, b) => {
+            const aFaceBonus = a.faceData.faceCount === 2 ? 30 : 0;
+            const bFaceBonus = b.faceData.faceCount === 2 ? 30 : 0;
+            return (bFaceBonus + (imageBuffers[b.index]?.curatorScore || 0)) - (aFaceBonus + (imageBuffers[a.index]?.curatorScore || 0));
+          });
+
+        // ★ Step 4: HERO_FACE ที่มี faceCount === 1 (ไม่ใช่ hero หลัก) — single-face portrait fallback
         const singleFaceHero = [...byRole.HERO_FACE, ...byRole.HERO]
-          .filter(x => x.index !== heroIndex && x.faceData.faceCount === 1);
-        
-        // ★ Step 2: PERSON_SUPPORT ที่มี faceCount === 1 และ curatorScore >= 4
-        const singleFacePerson = byRole.PERSON_SUPPORT
-          .filter(x => x.index !== heroIndex && x.faceData.faceCount === 1 && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
-        
-        // ★ Step 3: RELATIONSHIP ที่มี faceCount === 1 (ภาพ portrait เดี่ยว)
-        const singleFaceRelation = byRole.RELATIONSHIP
-          .filter(x => x.index !== heroIndex && x.faceData.faceCount === 1 && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
-        
-        // ★ Step 4: EMOTION/EVIDENCE ที่มี face เดียว
-        const singleFaceEmotion = [...byRole.EMOTION, ...byRole.EVIDENCE]
-          .filter(x => x.index !== heroIndex && x.faceData.faceCount === 1 && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
-        
-        // ★ Step 5: ภาพอะไรก็ได้ที่มี faceCount === 1 — ต้อง score >= 5 เพื่อป้องกันภาพคนไม่เกี่ยว!
-        // score 2-4 = คนในภาพแต่ไม่ใช่ subject หลัก (เช่น วัยรุ่นสุ่มที่ AI เลือกมา) → ห้ามใช้ circle!
+          .filter(x => x.index !== heroIndex && x.faceData.faceCount === 1 && !hasWatermark(x.index));
+
+        // ★ Step 5: ภาพอะไรก็ได้ที่มี faceCount === 1 — ต้อง score >= 5 (last resort portrait)
         const anySingleFace = imageBuffers
           .map((img, i) => ({ index: i, faceData: faceDataMap.get(String(i)) || {}, score: img.curatorScore || 0, role: img.role }))
           .filter(x => x.index !== heroIndex && (x.faceData.faceCount === 1) && x.score >= 5
-            // ★ ยอมให้ SUPPORT ได้เฉพาะ score >= 7 (มั่นใจว่าเป็น subject)
+            && !isNegativeImage(x.index)
+            && !hasWatermark(x.index)
             && (x.role !== 'SUPPORT' || x.score >= 7));
-        
-        // ★ Step 6 (LAST RESORT): ภาพใดก็ได้ที่ไม่ใช่ hero — แต่ต้อง score >= 4 (ไม่ใช่คนแปลกหน้า!)
-        const anyFallback = [
-          ...byRole.RELATIONSHIP, ...byRole.EVIDENCE, ...byRole.EMOTION,
-          ...heroCandidates.slice(1), ...byRole.CONTEXT_SCENE,
-          // ★ SUPPORT เฉพาะ score >= 6 — ป้องกันภาพคนไม่เกี่ยวข่าว
-          ...byRole.SUPPORT.filter(x => (imageBuffers[x.index]?.curatorScore || 0) >= 6),
-        ].filter(x => x.index !== heroIndex && (imageBuffers[x.index]?.curatorScore || 0) >= 4);
 
-        // เลือกตาม priority — single-face ก่อนเสมอ
-        const circlePool = singleFaceHero.length > 0 ? singleFaceHero
-          : singleFacePerson.length > 0 ? singleFacePerson
-          : singleFaceRelation.length > 0 ? singleFaceRelation
-          : singleFaceEmotion.length > 0 ? singleFaceEmotion
+        // ★ Step 6 (LAST RESORT): any remaining usable image
+        const anyFallback = [
+          ...byRole.RELATIONSHIP,
+          ...byRole.CO_CHARACTER_EMOTION,
+          ...byRole.EVIDENCE,
+          ...byRole.EMOTION,
+          ...heroCandidates.slice(1),
+          ...byRole.SUPPORT.filter(x => (imageBuffers[x.index]?.curatorScore || 0) >= 6),
+        ].filter(x => x.index !== heroIndex && !hasWatermark(x.index) && (imageBuffers[x.index]?.curatorScore || 0) >= 4)
+         .sort((a, b) => {
+           // Prefer relationship (2 faces) even in fallback
+           const aRelBonus = a.faceData.faceCount === 2 ? 100 : (a.faceData.faceCount === 1 ? 50 : 0);
+           const bRelBonus = b.faceData.faceCount === 2 ? 100 : (b.faceData.faceCount === 1 ? 50 : 0);
+           if (aRelBonus !== bRelBonus) return bRelBonus - aRelBonus;
+           return (imageBuffers[b.index]?.curatorScore || 0) - (imageBuffers[a.index]?.curatorScore || 0);
+         });
+
+        // ★★★ Circle selection — relationship-first priority chain
+        const circlePool = twoFaceRelationship.length > 0 ? twoFaceRelationship
+          : relationshipScored.length > 0 ? relationshipScored
+          : coCharCircle.length > 0 ? coCharCircle
+          : singleFaceHero.length > 0 ? singleFaceHero
           : anySingleFace.length > 0 ? anySingleFace
           : anyFallback;
 
@@ -1411,10 +2720,10 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
           const chosenRole = imageBuffers[circleIndex]?.role || circlePool[0].role || '?';
           const faces = faceDataMap.get(String(circleIndex))?.faceCount || 0;
           const curScore = imageBuffers[circleIndex]?.curatorScore || 0;
-          const pickedStep = singleFaceHero.length > 0 ? 'HERO single-face'
-            : singleFacePerson.length > 0 ? 'PERSON single-face'
-            : singleFaceRelation.length > 0 ? 'RELATION single-face'
-            : singleFaceEmotion.length > 0 ? 'EMOTION single-face'
+          const pickedStep = twoFaceRelationship.length > 0 ? '2-FACE relationship (BEST)'
+            : relationshipScored.length > 0 ? 'RELATIONSHIP scored'
+            : coCharCircle.length > 0 ? 'CO_CHARACTER_EMOTION'
+            : singleFaceHero.length > 0 ? 'HERO single-face'
             : anySingleFace.length > 0 ? 'any single-face (score>=5)'
             : 'fallback (score>=4)';
           console.log(`[assignSlots] ★ Circle: image #${circleIndex} (${chosenRole}, faces: ${faces}, score: ${curScore}) [${pickedStep}]`);
@@ -1429,12 +2738,36 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
         } else {
           // ★ ถ้าไม่มีเลย → ใช้ hero ซ้ำ ดีกว่าภาพไม่เกี่ยว
           const otherHero = heroCandidates.filter(x => x.index !== heroIndex);
-          if (otherHero.length > 0) {
-            circleIndex = otherHero[0].index;
-            console.log(`[assignSlots] ★ Circle: fallback to hero #${circleIndex}`);
+          const baseIndexForCircle = otherHero.length > 0 ? otherHero[0].index : heroIndex;
+          
+          console.log(`[assignSlots] ★ Circle: fallback — creating tightly cropped face from image #${baseIndexForCircle}`);
+          const origImg = imageBuffers[baseIndexForCircle];
+          if (origImg) {
+            let modBuffer;
+            const faceData = faceDataMap?.get?.(String(baseIndexForCircle));
+            if (faceData && faceData.hasFaces && faceData.faces?.length > 0) {
+              modBuffer = await cropFaceTightly(origImg.buffer, faceData.faces[0]);
+            } else {
+              modBuffer = await createModifiedBuffer(origImg.buffer, 'zoom');
+            }
+            
+            const newIndex = imageBuffers.length;
+            imageBuffers.push({
+              ...origImg,
+              buffer: modBuffer,
+              isVirtual: true,
+              originalIndex: baseIndexForCircle,
+              modificationMode: 'circle-crop'
+            });
+            
+            if (faceDataMap) {
+              faceDataMap.set(String(newIndex), { hasFaces: true, faceCount: 1 });
+            }
+            
+            circleIndex = newIndex;
+            console.log(`[assignSlots] ★ Circle: created virtual image #${circleIndex} for slot`);
           } else {
-            circleIndex = heroIndex === 0 ? 1 : 0;
-            console.log(`[assignSlots] ⚠️ Circle: no relevant images — using image #${circleIndex}`);
+            circleIndex = heroIndex;
           }
         }
       }
@@ -1461,23 +2794,36 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
         }
       } catch {}
 
-      // เตรียม pool ภาพแยกตาม category
+      // เตรียม pool ภาพแยกตาม category (กรองภาพ negative ออกจาก pools ทั้งหมด)
       const MIN_SLOT_SCORE = 4; // ★ ห้ามใช้ภาพ score < 4 (ไม่เกี่ยวกับข่าว!)
       const remaining = imageBuffers
         .map((img, i) => ({ index: i, role: img.role, score: img.curatorScore || 0 }))
-        .filter(x => !usedIndices.has(x.index));
+        .filter(x => !usedIndices.has(x.index) && !isNegativeImage(x.index));
 
-      const isSceneRole = (r) => ['CONTEXT_SCENE', 'KEY_ACTIVITY'].includes(r);
-      const isPersonRole = (r) => ['PERSON_SUPPORT', 'HERO_FACE', 'HERO'].includes(r);
-      const isEmotionRole = (r) => ['EMOTION', 'TIMELINE_PAST'].includes(r);
+      const isSceneRole = (r) => ['CONTEXT_SCENE', 'OCCUPATION_WORK'].includes(r);
+      const isPersonRole = (r) => ['PERSON_SUPPORT', 'HERO_FACE', 'HERO', 'CO_CHARACTER_EMOTION'].includes(r);
+      const isEmotionRole = (r) => ['EMOTION', 'TIMELINE_PAST', 'CO_CHARACTER_EMOTION'].includes(r);
       const isEvidenceRole = (r) => ['EVIDENCE'].includes(r);
 
       // ★ กรอง score >= MIN_SLOT_SCORE — ไม่เอาภาพ stock/ไม่เกี่ยว
-      const scenePool = remaining.filter(x => isSceneRole(x.role) && x.score >= MIN_SLOT_SCORE).sort((a, b) => b.score - a.score);
-      const personPool = remaining.filter(x => isPersonRole(x.role) && x.score >= MIN_SLOT_SCORE).sort((a, b) => b.score - a.score);
-      const emotionPool = remaining.filter(x => isEmotionRole(x.role) && x.score >= MIN_SLOT_SCORE).sort((a, b) => b.score - a.score);
-      const evidencePool = remaining.filter(x => isEvidenceRole(x.role) && x.score >= MIN_SLOT_SCORE).sort((a, b) => b.score - a.score);
-      const otherPool = remaining.filter(x => ['RELATIONSHIP', 'SUPPORT'].includes(x.role) && x.score >= MIN_SLOT_SCORE).sort((a, b) => b.score - a.score);
+      // ★ Tie-breaker: เรียงตามความสำคัญของ AI Curator (score) แล้วตามด้วยคุณภาพของ scraper (original score) เพื่อป้องกันภาพคนหน้าตาเบลอ/เก่า
+      const sortPoolWithQuality = (pool) => {
+        return pool.sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          const qualA = imageBuffers[a.index]?.score || 0;
+          const qualB = imageBuffers[b.index]?.score || 0;
+          return qualB - qualA;
+        });
+      };
+
+      const scenePool = sortPoolWithQuality(remaining.filter(x => isSceneRole(x.role) && x.score >= MIN_SLOT_SCORE));
+      const occupationPool = sortPoolWithQuality(remaining.filter(x => x.role === 'OCCUPATION_WORK' && x.score >= MIN_SLOT_SCORE));
+      const coCharacterPool = sortPoolWithQuality(remaining.filter(x => x.role === 'CO_CHARACTER_EMOTION' && x.score >= MIN_SLOT_SCORE));
+      const activityPool = sortPoolWithQuality(remaining.filter(x => x.role === 'KEY_ACTIVITY' && x.score >= MIN_SLOT_SCORE));
+      const personPool = sortPoolWithQuality(remaining.filter(x => isPersonRole(x.role) && x.score >= MIN_SLOT_SCORE));
+      const emotionPool = sortPoolWithQuality(remaining.filter(x => isEmotionRole(x.role) && x.score >= MIN_SLOT_SCORE));
+      const evidencePool = sortPoolWithQuality(remaining.filter(x => isEvidenceRole(x.role) && x.score >= MIN_SLOT_SCORE));
+      const otherPool = sortPoolWithQuality(remaining.filter(x => ['RELATIONSHIP', 'SUPPORT', 'KEY_ACTIVITY'].includes(x.role) && x.score >= MIN_SLOT_SCORE));
       
       // ★★★ Role-aware slot assignment: จับคู่ภาพกับ slot ตาม template role
       // Slot 0 = main (hero) → จัดแล้ว = heroIndex
@@ -1486,8 +2832,6 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
       const assignedIndices = new Set();
       
       // ใช้ counters เพื่อหยิบจาก pool ไม่ซ้ำ
-      let sceneIdx = 0, personIdx = 0, emotionIdx = 0, evidenceIdx = 0, otherIdx = 0;
-      
       const pickFromPool = (pool, counter) => {
         while (counter.val < pool.length) {
           const item = pool[counter.val];
@@ -1501,14 +2845,14 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
       };
 
       // ★ Map: template slot role → image role preference
-      // scene → ภาพ scene/activity (ไม่ใช่คน! เพราะ scene slot มี fadeLeft กินหน้า)
-      // emotion → ภาพอารมณ์/timeline
-      // hero2 → ภาพคน (PERSON_SUPPORT)
-      // highlight → ภาพ activity/evidence/person (หลากหลาย — อยู่ในกรอบ ไม่มี fade)
+      // scene → ภาพอาชีพ/สครับ (OCCUPATION_WORK) > ภาพสถานที่ (CONTEXT_SCENE)
+      // emotion → ภาพเดี่ยวตัวละครร่วมเด่น (CO_CHARACTER_EMOTION) > ภาพอารมณ์ (EMOTION)
+      // highlight → ภาพกิจกรรมกตัญญู (KEY_ACTIVITY) > หลักฐาน (EVIDENCE)
       // support → ภาพอะไรก็ได้
 
       const counters = {
-        scene: { val: 0 }, person: { val: 0 }, emotion: { val: 0 },
+        scene: { val: 0 }, occupation: { val: 0 }, coCharacter: { val: 0 },
+        activity: { val: 0 }, person: { val: 0 }, emotion: { val: 0 },
         evidence: { val: 0 }, other: { val: 0 }
       };
 
@@ -1517,27 +2861,70 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
         let picked = null;
 
         if (slotRole === 'scene') {
-          // ★ Scene slot มี fadeLeft → ใส่ภาพ scene/activity (ไม่มีหน้าคนสำคัญ!)
-          picked = pickFromPool(scenePool, counters.scene);
+          // bg_top slot: อาชีพ (OCCUPATION_WORK) > ฉากสถานที่ (CONTEXT_SCENE)
+          picked = pickFromPool(occupationPool, counters.occupation);
+          if (!picked) picked = pickFromPool(scenePool, counters.scene);
           if (!picked) picked = pickFromPool(evidencePool, counters.evidence);
           if (!picked) picked = pickFromPool(otherPool, counters.other);
         } else if (slotRole === 'emotion') {
-          picked = pickFromPool(emotionPool, counters.emotion);
+          // bg_bottom slot: หน้าตัวละครร่วมเด่น (CO_CHARACTER_EMOTION) > อารมณ์ (EMOTION)
+          picked = pickFromPool(coCharacterPool, counters.coCharacter);
+          if (!picked) picked = pickFromPool(emotionPool, counters.emotion);
           if (!picked) picked = pickFromPool(personPool, counters.person);
         } else if (slotRole === 'hero2') {
           picked = pickFromPool(personPool, counters.person);
           if (!picked) picked = pickFromPool(emotionPool, counters.emotion);
         } else if (slotRole === 'highlight') {
-          // Highlight อยู่ในกรอบ ไม่มี fade → ใส่ภาพอะไรก็ได้ ★ priority: activity > evidence > person
-          picked = pickFromPool(scenePool, counters.scene);
+          // ★★★ Highlight: Viral Cover Pattern — ALWAYS a key activity/scene (caregiving, family gathering, evidence)
+          // FIRST priority: KEY_ACTIVITY images with 2+ faces (showing interaction — THE viral highlight pattern)
+          const activityWithInteraction = activityPool.filter(x => {
+            const fd = faceDataMap.get(String(x.index)) || { faceCount: 0 };
+            return fd.faceCount >= 2 && !assignedIndices.has(x.index);
+          });
+          if (activityWithInteraction.length > 0) {
+            picked = activityWithInteraction[0];
+            assignedIndices.add(picked.index);
+            console.log(`[assignSlots] ★ Highlight: KEY_ACTIVITY with ${faceDataMap.get(String(picked.index))?.faceCount} faces (interaction scene)`);
+          }
+          // Then try any KEY_ACTIVITY (even single person doing activity)
+          if (!picked) {
+            // Avoid pure portrait (1 face, no activity) — prefer images with some action context
+            const activityNonPortrait = activityPool.filter(x => {
+              const fd = faceDataMap.get(String(x.index)) || { faceCount: 0 };
+              return !assignedIndices.has(x.index) && !(fd.faceCount === 1 && (imageBuffers[x.index]?.curatorScore || 0) < 5);
+            });
+            if (activityNonPortrait.length > 0) {
+              picked = activityNonPortrait[0];
+              assignedIndices.add(picked.index);
+            } else {
+              picked = pickFromPool(activityPool, counters.activity);
+            }
+          }
+          // SECOND priority: EVIDENCE images (proof, documents, screenshots)
           if (!picked) picked = pickFromPool(evidencePool, counters.evidence);
+          // THIRD: scene/person fallback (avoid solo portraits)
+          if (!picked) {
+            // Try scene images that aren't just a single-face portrait
+            const sceneNonPortrait = scenePool.filter(x => {
+              const fd = faceDataMap.get(String(x.index)) || { faceCount: 0 };
+              return !assignedIndices.has(x.index) && fd.faceCount !== 1;
+            });
+            if (sceneNonPortrait.length > 0) {
+              picked = sceneNonPortrait[0];
+              assignedIndices.add(picked.index);
+            } else {
+              picked = pickFromPool(scenePool, counters.scene);
+            }
+          }
           if (!picked) picked = pickFromPool(personPool, counters.person);
         } else if (slotRole === 'support') {
           picked = pickFromPool(personPool, counters.person);
           if (!picked) picked = pickFromPool(otherPool, counters.other);
         } else {
           // Unknown role → any remaining
-          picked = pickFromPool(scenePool, counters.scene)
+          picked = pickFromPool(activityPool, counters.activity)
+            || pickFromPool(occupationPool, counters.occupation)
+            || pickFromPool(scenePool, counters.scene)
             || pickFromPool(personPool, counters.person)
             || pickFromPool(emotionPool, counters.emotion);
         }
@@ -1646,10 +3033,10 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
       if (circleIndex !== undefined) usedInPhoto.add(circleIndex);
       if (circleSmallIndex !== undefined) usedInPhoto.add(circleSmallIndex);
       
-      // เอาภาพที่เหลือทั้งหมด sort by score
+      // เอาภาพที่เหลือทั้งหมด sort by score (กรองภาพ negative ออก)
       const fillCandidates = imageBuffers
         .map((img, i) => ({ index: i, score: img.curatorScore || 0 }))
-        .filter(x => !usedInPhoto.has(x.index))
+        .filter(x => !usedInPhoto.has(x.index) && !isNegativeImage(x.index))
         .sort((a, b) => b.score - a.score);
       
       for (const c of fillCandidates) {
@@ -1658,27 +3045,69 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
         console.log(`[assignSlots] 🔄 Fill slot ${photoOrder.length}: image #${c.index} (score: ${c.score})`);
       }
       
+      // Ultimate fallback: ถ้าช่องยังไม่ครบ ค่อยยินยอมเอาภาพ non-negative มาซ้ำก่อน! (ดีกว่าเอาภาพ negative มาใส่สล็อตให้หลุดธีม)
+      if (photoOrder.length < slotCount) {
+        const nonNegCandidates = imageBuffers
+          .map((img, i) => ({ index: i, score: img.curatorScore || 0 }))
+          .filter(x => !isNegativeImage(x.index))
+          .sort((a, b) => b.score - a.score);
+        
+        if (nonNegCandidates.length > 0) {
+          let idx = 0;
+          const modes = ['zoom', 'flip', 'zoom-left', 'zoom-right'];
+          
+          while (photoOrder.length < slotCount) {
+            const c = nonNegCandidates[idx % nonNegCandidates.length];
+            const mode = modes[Math.floor(idx / nonNegCandidates.length) % modes.length];
+            
+            console.log(`[assignSlots] 🔄 Creating modified virtual duplicate of image #${c.index} (mode: ${mode}) for slot ${photoOrder.length + 1}`);
+            
+            const origImg = imageBuffers[c.index];
+            if (origImg) {
+              const modBuffer = await createModifiedBuffer(origImg.buffer, mode);
+              const newIndex = imageBuffers.length;
+              imageBuffers.push({
+                ...origImg,
+                buffer: modBuffer,
+                isVirtual: true,
+                originalIndex: c.index,
+                modificationMode: mode
+              });
+              
+              if (faceDataMap) {
+                const faceData = faceDataMap.get(String(c.index));
+                if (faceData) {
+                  faceDataMap.set(String(newIndex), { ...faceData });
+                }
+              }
+              
+              photoOrder.push(newIndex);
+              console.log(`[assignSlots] 🔄 Added virtual duplicate image #${newIndex} to photoOrder`);
+            } else {
+              photoOrder.push(c.index);
+            }
+            idx++;
+          }
+        }
+      }
+
+      // ★ ถ้า non-negative candidates ก็หมดแล้ว → ยอมรับว่าภาพไม่พอ ไม่ดึงภาพ LOW_PRIORITY กลับมา (ดีกว่าใส่ขยะบนปก!)
+      if (photoOrder.length < slotCount) {
+        console.log(`[assignSlots] ⚠️ Only ${photoOrder.length}/${slotCount} clean images — refusing to use LOW_PRIORITY images on cover`);
+      }
+
       if (photoOrder.length < slotCount) {
         console.log(`[assignSlots] ⚠️ Still only ${photoOrder.length}/${slotCount} images after fill`);
       }
     }
 
     // ★ FIX 5: Negative Evidence Rules — ห้าม negativeFocus อยู่ใน hero/circle slots
-    // ถ้า coreStory ไม่มี → fallback: ใช้ logic เดิม
-    const negFocusTerms = identity?.coreStory?.negativeFocus || [];
-    const coreStoryAnchor = identity?.coreStory?.sacrifice || identity?.coreStory?.relationship || null;
+    // (ตอนนี้ผ่านการกรองข้างบนแล้ว แต่รักษาไว้เป็น extra guard สำรอง)
     if (negFocusTerms.length > 0) {
       console.log(`[assignSlots] ★ NEGATIVE EVIDENCE RULES active — blocked: ${negFocusTerms.join(', ')}`);
       if (coreStoryAnchor) {
         console.log(`[assignSlots] ★ CORE STORY ANCHOR: "${coreStoryAnchor}" — remaining slots must reflect this`);
       }
-      // ตรวจว่าภาพโดน flag หรือเปล่า (url/role) มีคำใน negativeFocus
-      const isNegativeImage = (imgIdx) => {
-        const img = imageBuffers[imgIdx];
-        if (!img) return false;
-        const textToCheck = `${img.url || ''} ${img.role || ''}`.toLowerCase();
-        return negFocusTerms.some(neg => textToCheck.includes(neg.toLowerCase()));
-      };
       // ★ Hero slot guard: ถ้า hero ตาม negativeFocus → swap กับ alt ที่มีหน้าคน
       if (heroIndex !== undefined && isNegativeImage(heroIndex)) {
         const altHero = photoOrder.find(i => i !== heroIndex && !isNegativeImage(i) && (faceDataMap?.get?.(String(i))?.hasFaces));

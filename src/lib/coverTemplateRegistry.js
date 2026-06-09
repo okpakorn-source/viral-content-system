@@ -184,6 +184,27 @@ const BUILTIN_TEMPLATES = [
     ],
     circle: { id: 'circle', x: 30, y: 720, diameter: 400, border: '#FFFFFF', borderWidth: 5, zIndex: 4 },
   },
+  // ═══════════════════════════════════════════════════════════
+  // Template 9: 3 Background Split (Hero 50% + 2 Split Scene on Right) + 1 Central Circle
+  // Layout from sample: Left Hero half, Right split top/bottom, Central Circle overlap
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: 'template_9',
+    name: '3 ฉากแยกชัด + วงกลมกลาง',
+    desc: '4 รูป — Hero ซ้าย 50% + ฉากขวาบน 50% + ฉากขวาล่าง 50% + วงกลมกลางซ้อนทับ',
+    canvasW: 1200, canvasH: 1350,
+    imageSlots: 4,
+    textSlots: [],
+    slots: [
+      // Hero: ซ้าย 50% สูงเต็ม 1350 — fade ขวาเพื่อ blend
+      { id: 'main',      role: 'hero',      x: 0,   y: 0,   w: 650, h: 1350, fadeRight: 100, zIndex: 1 },
+      // ฉากขวาบน (Scene): สูง 675, กว้าง 600
+      { id: 'bg_top',    role: 'scene',     x: 600, y: 0,   w: 600, h: 680,  fadeLeft: 80, fadeBottom: 80, zIndex: 0 },
+      // ฉากขวาล่าง (Context): สูง 675, กว้าง 600
+      { id: 'bg_bottom', role: 'scene',     x: 600, y: 670, w: 600, h: 680,  fadeLeft: 80, fadeTop: 80, zIndex: 0 },
+    ],
+    circle: { id: 'circle', x: 380, y: 390, diameter: 460, border: '#FFFFFF', borderWidth: 10, zIndex: 3 },
+  },
 ];
 
 // ═══ EXPORTS ═══
@@ -411,6 +432,17 @@ export function autoSelectTemplate(imageCount, faceCount, storyIdentity) {
     if (isNeutral) s += 15; // good for neutral news
     if (hasFace)   s += 5;
     scores['template_8'] = s;
+  }
+
+  // --- template_9: 3 Background Split + Central Circle ---
+  // Base 50, works well for any type of news with a single character in focus but multiple scene context images.
+  if (ELIGIBLE_IDS.has('template_9') && hasEnoughImages) {
+    let s = 50;
+    if (isNeutral) s += 15;
+    if (isWarm)    s += 10;
+    if (isDrama)   s += 15;
+    if (hasFace)   s += 5;
+    scores['template_9'] = s;
   }
 
   // --- template_4: DISABLED (circle_small < 320px) ---

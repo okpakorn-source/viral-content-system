@@ -343,6 +343,51 @@ export async function getCacheStats() {
 }
 
 // ═══════════════════════════════════════════════
+// clearCacheByTitle — ล้าง cache ทั้งหมดของข่าวนี้
+// ═══════════════════════════════════════════════
+export async function clearCacheByTitle(newsHash) {
+  try {
+    if (!isSupabaseReady() || !newsHash) {
+      return { success: false, deleted: 0 };
+    }
+
+    const sb = getSupabase();
+
+    // 1. ดึง storage paths ก่อนลบ
+    const { data: rows } = await sb
+      .from(TABLE)
+      .select('storage_path')
+      .eq('news_hash', newsHash);
+
+    // 2. ลบไฟล์จาก Storage
+    if (rows && rows.length > 0) {
+      const paths = rows.map(r => r.storage_path).filter(Boolean);
+      if (paths.length > 0) {
+        await sb.storage.from(BUCKET).remove(paths);
+        console.log(`[ImageCache] 🗑️ Deleted ${paths.length} files from storage`);
+      }
+    }
+
+    // 3. ลบ records จาก table
+    const { error, count } = await sb
+      .from(TABLE)
+      .delete()
+      .eq('news_hash', newsHash);
+
+    if (error) {
+      console.log(`[ImageCache] ❌ clearCacheByTitle error: ${error.message}`);
+      return { success: false, deleted: 0, error: error.message };
+    }
+
+    console.log(`[ImageCache] 🗑️ Cleared cache for hash ${newsHash.slice(0, 12)}: ${rows?.length || 0} images deleted`);
+    return { success: true, deleted: rows?.length || 0 };
+  } catch (err) {
+    console.log(`[ImageCache] ❌ clearCacheByTitle error: ${err.message}`);
+    return { success: false, deleted: 0, error: err.message };
+  }
+}
+
+// ═══════════════════════════════════════════════
 // buildKeywords — สร้าง keyword array จาก title + identity
 // ═══════════════════════════════════════════════
 function buildKeywords(newsTitle, identity = {}) {

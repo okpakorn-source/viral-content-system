@@ -39,28 +39,49 @@ function formatCaseId(num) {
  * หา case ID ถัดไป
  */
 export async function getNextCaseId() {
-  // ลอง Supabase ก่อน
+  let maxNum = 0;
+
+  // 1. Try Supabase
   const sb = getSupabase();
   if (sb) {
     try {
-      const { data } = await sb
+      const { data, error } = await sb
         .from('cover_cases')
         .select('case_id')
         .order('case_number', { ascending: false })
         .limit(1);
+      
+      if (error) {
+        console.log(`[CaseArchive] ⚠️ Supabase cover_cases query error: ${error.message}`);
+        throw error;
+      }
+
       if (data && data.length > 0) {
         const lastNum = parseInt(data[0].case_id.replace('CASE-', ''), 10);
-        return { caseId: formatCaseId(lastNum + 1), caseNumber: lastNum + 1 };
+        if (!isNaN(lastNum) && lastNum > maxNum) {
+          maxNum = lastNum;
+        }
       }
-      return { caseId: 'CASE-001', caseNumber: 1 };
-    } catch {}
+    } catch (err) {
+      console.log(`[CaseArchive] ⚠️ Supabase getNextCaseId failed, falling back: ${err.message || err}`);
+    }
   }
 
-  // Fallback: local JSON
-  const cases = loadLocalCases();
-  if (cases.length === 0) return { caseId: 'CASE-001', caseNumber: 1 };
-  const lastNum = Math.max(...cases.map(c => c.caseNumber || 0));
-  return { caseId: formatCaseId(lastNum + 1), caseNumber: lastNum + 1 };
+  // 2. Try Local JSON
+  try {
+    const cases = loadLocalCases();
+    if (cases && cases.length > 0) {
+      const localLastNum = Math.max(...cases.map(c => c.caseNumber || 0));
+      if (!isNaN(localLastNum) && localLastNum > maxNum) {
+        maxNum = localLastNum;
+      }
+    }
+  } catch (err) {
+    console.log(`[CaseArchive] ⚠️ Local JSON load/parse failed: ${err.message}`);
+  }
+
+  const nextNum = maxNum + 1;
+  return { caseId: formatCaseId(nextNum), caseNumber: nextNum };
 }
 
 /**

@@ -55,7 +55,7 @@ export async function callGemini({ prompt, model = 'gemini-2.5-pro', temperature
 === จบ SAFETY RULES ===`,
   });
 
-  const result = await genModel.generateContent(prompt);
+  const result = await genModel.generateContent(prompt, { requestOptions: { timeout: 15000 } });
   const content = result.response?.text();
   const usageMetadata = result.response?.usageMetadata;
   const inputTokens = usageMetadata?.promptTokenCount || 0;
@@ -126,7 +126,7 @@ export async function callGeminiVision({ prompt, images, model = 'gemini-2.5-pro
     }))
   ];
 
-  const result = await genModel.generateContent(promptParts);
+  const result = await genModel.generateContent(promptParts, { requestOptions: { timeout: 25000 } });
   const content = result.response?.text();
   const usageMetadata = result.response?.usageMetadata;
   const inputTokens = usageMetadata?.promptTokenCount || 0;

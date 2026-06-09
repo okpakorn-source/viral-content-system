@@ -63,7 +63,7 @@ export async function captureVideoFrames(videoUrl, numFrames = 15, searchContext
     const chromium = await getChromium();
     browser = await chromium.launch({
       executablePath: chromePath,
-      headless: false,
+      headless: true,
       args: [
         '--headless=new',
         '--no-sandbox', '--disable-setuid-sandbox',
@@ -175,7 +175,7 @@ export async function captureVideoFrames(videoUrl, numFrames = 15, searchContext
     // Use Playwright to split sprite sheets via Canvas (reuses chromium from above)
     const chromium2 = await getChromium();
     const splitBrowser = await chromium2.launch({
-      executablePath: chromePath, headless: false,
+      executablePath: chromePath, headless: true,
       args: ['--headless=new', '--no-sandbox', '--window-position=-10000,-10000', '--window-size=1,1']
     });
     const splitPage = await splitBrowser.newPage();

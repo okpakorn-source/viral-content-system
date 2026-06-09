@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useCoverCanvas } from '@/lib/cover/useCoverCanvas';
 import { W, H } from '@/lib/cover/constants';
+import CoverEditor from './CoverEditor';
 
 // ═══════════════════════════════════════════════════════════
 // BUILTIN TEMPLATE DEFINITIONS (copied from cover-tester)
@@ -149,7 +150,7 @@ export default function CoverLabPage() {
   }, []);
 
   // Generate auto cover
-  async function handleGenerate(isRegenerate = false) {
+  async function handleGenerate(isRegenerate = false, isFresh = false) {
     if (!newsTitle && !content) return setError('ใส่หัวข้อหรือเนื้อหาข่าว');
     setLoading(true);
     setError('');
@@ -171,7 +172,7 @@ export default function CoverLabPage() {
       const res = await fetch('/api/auto-cover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newsTitle, content, templateId: useTemplate, regenerate: isRegenerate }),
+        body: JSON.stringify({ newsTitle, content, templateId: useTemplate, regenerate: isRegenerate, clearCache: !!isRegenerate && isFresh }),
       });
       const data = await res.json();
       if (data.success) {
@@ -638,16 +639,26 @@ export default function CoverLabPage() {
                     👤 {coverResult.identity.mainCharacter} | 💗 {coverResult.identity.emotion}
                   </p>
                 )}
-                <img
-                  src={coverResult.base64}
-                  alt="Auto generated cover"
-                  style={{ width: '100%', borderRadius: 8, border: '2px solid #374151' }}
-                />
+                {/* ★ ปกหลัก: ถ้า editMode → แสดง Editor แทน, ถ้าไม่ → แสดงภาพปกปกติ */}
+                {editMode ? (
+                  <CoverEditor
+                    editImages={editImages}
+                    editTemplateId={editTemplateId}
+                    setEditTemplateId={setEditTemplateId}
+                    onClose={() => setEditMode(false)}
+                    coverBase64={coverResult?.base64}
+                  />
+                ) : (
+                  <img
+                    src={coverResult.base64}
+                    alt="Auto generated cover"
+                    style={{ width: '100%', borderRadius: 8, border: '2px solid #374151' }}
+                  />
+                )}
 
-                {/* 🔄 ปุ่มสร้างปกใหม่ */}
-                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
                   <button
-                    onClick={() => handleGenerate(true)}
+                    onClick={() => handleGenerate(true, false)}
                     disabled={loading}
                     style={{
                       flex: 1, padding: '12px', background: 'linear-gradient(135deg, #f59e0b, #ef4444)',
@@ -656,6 +667,18 @@ export default function CoverLabPage() {
                     }}
                   >
                     {loading ? '⏳ กำลังสร้างใหม่...' : '🔄 สร้างปกใหม่ (สลับ template)'}
+                  </button>
+                  <button
+                    onClick={() => handleGenerate(true, true)}
+                    disabled={loading}
+                    style={{
+                      padding: '12px 16px', background: loading ? '#374151' : '#7f1d1d',
+                      color: '#fff', border: '1px solid #ef4444', borderRadius: 8, fontSize: 13, fontWeight: 700,
+                      cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.6 : 1,
+                    }}
+                    title="ล้าง cache ภาพเก่า แล้วค้น Google ใหม่ทั้งหมด"
+                  >
+                    🗑️ ค้นภาพใหม่
                   </button>
                   <a
                     href={coverResult.base64}
@@ -670,29 +693,21 @@ export default function CoverLabPage() {
                   </a>
                 </div>
 
-                {/* ✏️ Edit Mode Button */}
-                {!editMode && (
-                  <button
-                    onClick={() => enterEditMode(coverResult)}
-                    disabled={loadingEdit}
-                    style={{
-                      width: '100%', padding: '12px', marginTop: 8,
-                      background: loadingEdit ? '#374151' : 'linear-gradient(135deg, #8b5cf6, #6366f1)',
-                      color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700,
-                      cursor: loadingEdit ? 'wait' : 'pointer', opacity: loadingEdit ? 0.6 : 1,
-                    }}
-                  >
-                    {loadingEdit ? '⏳ โหลดภาพ...' : '✏️ แก้ไขปกนี้ (Edit Mode)'}
-                  </button>
-                )}
-
-                {/* ✏️ Interactive Edit Mode */}
-                {editMode && <CoverEditPanel
-                  editImages={editImages}
-                  editTemplateId={editTemplateId}
-                  setEditTemplateId={setEditTemplateId}
-                  onClose={() => setEditMode(false)}
-                />}
+                {/* ✏️ Edit Mode Toggle Button */}
+                <button
+                  onClick={() => editMode ? setEditMode(false) : enterEditMode(coverResult)}
+                  disabled={loadingEdit}
+                  style={{
+                    width: '100%', padding: '12px', marginTop: 8,
+                    background: loadingEdit ? '#374151' : editMode
+                      ? 'linear-gradient(135deg, #ef4444, #dc2626)'
+                      : 'linear-gradient(135deg, #8b5cf6, #6366f1)',
+                    color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700,
+                    cursor: loadingEdit ? 'wait' : 'pointer', opacity: loadingEdit ? 0.6 : 1,
+                  }}
+                >
+                  {loadingEdit ? '⏳ โหลดภาพ...' : editMode ? '❌ ปิด Edit Mode' : '✏️ แก้ไขปกนี้ (Edit Mode)'}
+                </button>
 
                 {/* Case ID + ข้อมูลคลัง */}
                 <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
@@ -905,164 +920,6 @@ export default function CoverLabPage() {
   );
 }
 
-// ═══════════════════════════════════════════════════════════
-// CoverEditPanel — Interactive canvas editor sub-component
-// ═══════════════════════════════════════════════════════════
-function CoverEditPanel({ editImages, editTemplateId, setEditTemplateId, onClose }) {
-  const template = BUILTIN_TEMPLATES.find(t => t.id === editTemplateId) || BUILTIN_TEMPLATES[0];
-
-  const {
-    canvasRef, slotImages, setSlotImages,
-    slotOffsets, setSlotOffsets, slotScales, setSlotScales,
-    textValues, setTextValues, hoverCursor,
-    handleDown, handleMove, handleUp,
-    exportAsBlob, resetAll,
-  } = useCoverCanvas(template, editImages);
-
-  // Sync editImages when they change (e.g. template switch keeps same images)
-  useEffect(() => {
-    if (editImages && Object.keys(editImages).length > 0) {
-      setSlotImages(editImages);
-    }
-  }, [editImages, setSlotImages]);
-
-  const adjustScale = (slotId, delta) => {
-    setSlotScales(prev => {
-      const cur = prev[slotId] || 1;
-      return { ...prev, [slotId]: Math.max(0.3, Math.min(2.5, +(cur + delta).toFixed(2))) };
-    });
-  };
-
-  const adjustOffset = (slotId, axis, delta) => {
-    setSlotOffsets(prev => {
-      const old = prev[slotId] || { dx: 0, dy: 0 };
-      return { ...prev, [slotId]: { dx: old.dx + (axis === 'x' ? delta : 0), dy: old.dy + (axis === 'y' ? delta : 0) } };
-    });
-  };
-
-  const handleDownload = () => {
-    exportAsBlob(`cover-edited-${Date.now()}.jpg`);
-  };
-
-  const filledSlots = template.slots.filter(sl => slotImages[sl.id]);
-
-  return (
-    <div style={{ marginTop: 16, padding: 16, background: '#0f172a', borderRadius: 12, border: '2px solid #6366f1' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <h3 style={{ fontSize: 16, fontWeight: 700, color: '#a78bfa', margin: 0 }}>
-          ✏️ แก้ไขปก — {template.name}
-        </h3>
-        <button
-          onClick={onClose}
-          style={{ padding: '6px 14px', background: '#374151', color: '#94a3b8', border: '1px solid #4b5563', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
-        >
-          ✕ กลับดูปกเดิม
-        </button>
-      </div>
-
-      {/* Template Selector */}
-      <div style={{ marginBottom: 12 }}>
-        <p style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>เลือก Template:</p>
-        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
-          {BUILTIN_TEMPLATES.map(t => (
-            <TemplateThumbnail
-              key={t.id}
-              template={t}
-              isActive={t.id === editTemplateId}
-              onClick={() => setEditTemplateId(t.id)}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* Interactive Canvas */}
-      <div style={{ position: 'relative', marginBottom: 12, borderRadius: 8, overflow: 'hidden', border: '1px solid #374151' }}>
-        <canvas
-          ref={canvasRef}
-          width={W}
-          height={H}
-          style={{ width: '100%', cursor: hoverCursor, display: 'block' }}
-          onMouseDown={e => handleDown(e.clientX, e.clientY)}
-          onMouseMove={e => handleMove(e.clientX, e.clientY)}
-          onMouseUp={handleUp}
-          onMouseLeave={handleUp}
-          onTouchStart={e => { e.preventDefault(); const t = e.touches[0]; handleDown(t.clientX, t.clientY); }}
-          onTouchMove={e => { e.preventDefault(); const t = e.touches[0]; handleMove(t.clientX, t.clientY); }}
-          onTouchEnd={handleUp}
-        />
-        <div style={{ position: 'absolute', bottom: 8, left: 8, background: 'rgba(0,0,0,0.7)', padding: '4px 10px', borderRadius: 6, fontSize: 10, color: '#94a3b8' }}>
-          🖱️ ลาก=เลื่อนรูป | Scroll=ซูม | ขอบ=ย้าย | มุม=ปรับขนาด
-        </div>
-      </div>
-
-      {/* Per-slot controls */}
-      {filledSlots.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <p style={{ fontSize: 11, color: '#64748b', marginBottom: 6, fontWeight: 600 }}>🎛️ ปรับแต่งรายช่อง:</p>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {filledSlots.map(slot => {
-              const sc = slotScales[slot.id] || 1;
-              return (
-                <div key={slot.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: '#1e293b', borderRadius: 8, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 11, color: '#94a3b8', minWidth: 90, fontWeight: 600 }}>{slot.label?.substring(0, 14) || slot.id}</span>
-                  {/* Scale */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <button onClick={() => adjustScale(slot.id, -0.1)} style={editBtnStyle}>−</button>
-                    <span style={{ fontSize: 11, color: '#e2e8f0', minWidth: 30, textAlign: 'center' }}>{sc.toFixed(1)}x</span>
-                    <button onClick={() => adjustScale(slot.id, 0.1)} style={editBtnStyle}>+</button>
-                  </div>
-                  {/* Position */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 4 }}>
-                    <button onClick={() => adjustOffset(slot.id, 'x', -30)} style={editBtnStyle}>◀</button>
-                    <button onClick={() => adjustOffset(slot.id, 'y', -30)} style={editBtnStyle}>▲</button>
-                    <button onClick={() => adjustOffset(slot.id, 'y', 30)} style={editBtnStyle}>▼</button>
-                    <button onClick={() => adjustOffset(slot.id, 'x', 30)} style={editBtnStyle}>▶</button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Text editing */}
-      {template.textSlots?.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <p style={{ fontSize: 11, color: '#64748b', marginBottom: 6, fontWeight: 600 }}>📝 แก้ไขข้อความ:</p>
-          {template.textSlots.map(ts => (
-            <div key={ts.id} style={{ marginBottom: 6 }}>
-              <label style={{ fontSize: 10, color: '#94a3b8', display: 'block', marginBottom: 2 }}>{ts.label}</label>
-              <input
-                value={textValues[ts.id] || ''}
-                onChange={e => setTextValues(prev => ({ ...prev, [ts.id]: e.target.value }))}
-                placeholder={ts.placeholder || 'พิมพ์ข้อความ...'}
-                style={{ width: '100%', padding: '6px 10px', background: '#1e293b', color: '#e2e8f0', border: '1px solid #374151', borderRadius: 6, fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
-              />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Action buttons */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={resetAll} style={{ flex: 1, padding: '10px', background: '#374151', color: '#94a3b8', border: '1px solid #4b5563', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-          🔄 รีเซ็ตทั้งหมด
-        </button>
-        <button onClick={handleDownload} style={{ flex: 1, padding: '10px', background: 'linear-gradient(135deg, #065f46, #047857)', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-          💾 ดาวน์โหลด JPEG
-        </button>
-      </div>
-    </div>
-  );
-}
-
-const editBtnStyle = {
-  width: 24, height: 24, borderRadius: 4,
-  border: '1px solid #374151', background: '#0f172a', color: '#e2e8f0',
-  fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center',
-  justifyContent: 'center', padding: 0, fontFamily: 'inherit',
-};
 
 const labelStyle = { display: 'block', fontSize: 13, fontWeight: 600, color: '#94a3b8', marginTop: 12, marginBottom: 4 };
 const inputStyle = {

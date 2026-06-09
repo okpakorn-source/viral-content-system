@@ -38,7 +38,7 @@ export const MODEL_SPELL_CHECK     = 'gpt-5.4-mini';  // ตรวจคำผ�
 // ═══════════════════════════════════════════
 export const MODEL_PRIMARY = MODEL_MAIN_REASONING;    // = gpt-5.5
 export const MODEL_FAST    = MODEL_FAST_CHEAP;         // = gpt-5.4-mini
-export const MODEL_VISION  = MODEL_MAIN_REASONING;     // = gpt-5.5 (vision capable)
+export const MODEL_VISION  = 'gpt-4o';                 // = gpt-4o (vision capable)
 
 // ★ COST LOOKUP (per 1M tokens, USD)
 export const MODEL_COSTS = {
