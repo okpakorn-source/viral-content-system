@@ -146,8 +146,35 @@ Respond with ONLY a JSON object following this exact structure (ALL values in Th
       "Things that must NOT be used as dominant cover elements even if they appear in the news (e.g. 'elephant as main subject', 'veterinary work as dominant')"
     ],
     "contextOnly": ["Words/context that are just background, not the core of the news — in Thai"]
-  }
+  },
+
+  "storyType": "string - ประเภทข่าว เช่น family_warm, crime, sport, charity, entertainment, political, nature_learning",
+  "mainVisualShouldBe": "string - อธิบายว่าภาพหลักของปกควรเป็นอะไร ตอบเป็นคำอธิบายภาพ ไม่ใช่แค่ชื่อคน เช่น 'ยายหนิงหรือหลานอยู่ในสวน/ที่ดิน/ธรรมชาติ' ไม่ใช่ 'ชมพู่สวย' หรือ 'ชมพู่ อารยา'",
+  "coverageRequired": ["array of roles that the cover MUST have - ordered by importance. Roles: STORY_ANCHOR (ภาพที่เล่าแก่นข่าว), KEY_ACTIVITY (กิจกรรมหลัก), CONTEXT_SCENE (สถานที่/บรรยากาศ), RELATIONSHIP (ความสัมพันธ์), HERO_FACE (portrait ตัวละครหลัก), EVIDENCE (หลักฐาน), EMOTION (อารมณ์)"],
+  "coverageOptional": ["array of roles that are nice to have but not essential"],
+  "visualPriority": {"group_name": "percent — allocate visual weight to each image group, total = 100"},
+  "storyAnchorQueries": ["search queries to find STORY_ANCHOR images — must describe the visual scene, not just person names. Include activity/location context"]
 }
+
+★★★ Visual Priority Rules:
+- mainVisualShouldBe: Think "if we make a cover for this news, what should the BIGGEST image show?" Answer as visual description, NOT person name.
+  - News about "grandma bought land to make garden for grandchildren" → mainVisualShouldBe: "ยายหนิงหรือหลานอยู่ในสวน/ที่ดิน/ธรรมชาติ"
+  - News about "celebrity donates money" → mainVisualShouldBe: "ดาราถือของบริจาค/อยู่กับผู้รับบริจาค"
+  - News about "actor wins award" → mainVisualShouldBe: "นักแสดงถือรางวัล/บนเวที"
+  - News about scandal/personal → mainVisualShouldBe: "ตัวละครหลัก"
+
+- STORY_ANCHOR = the image that tells the CORE of the story. NOT the celebrity portrait. HERO_FACE = portrait of a person.
+  - If news is about an EVENT/PLACE/ACTIVITY → STORY_ANCHOR is MORE important than HERO_FACE
+  - If news is about a PERSON DIRECTLY (scandal, personal life) → HERO_FACE can be the anchor
+
+- coverageRequired order matters: first role = most important for main slot
+
+- storyAnchorQueries: search queries to find the STORY_ANCHOR image
+  - Must describe the visual scene, not just person names
+  - Include supporting character names + activity/location
+  - Example for garden story: ["ยายหนิง สวน ชมพู่", "สวนยายหนิง ชมพู่", "ที่ดิน 1 ไร่ ยายหนิง"]
+  - Example for donation story: ["ก้อย รัชวิน มอบเงิน บริจาค", "โรงเรียน รับบริจาค", "ก้อย รัชวิน บริจาค โรงเรียน"]
+  - Example for scandal: ["ชื่อดารา แถลงข่าว", "ชื่อดารา ให้สัมภาษณ์"]
 
 ★★★ coreStory RULES:
 - relationship: Use the name/role of the secondary character most discussed in the news — value in Thai
@@ -224,7 +251,14 @@ Respond with ONLY a JSON object following this exact structure (ALL values in Th
           const gptData = await gptRes.json();
           const gptText = gptData.choices?.[0]?.message?.content || '';
           const parsed = JSON.parse(gptText);
-          console.log(`[StoryIdentity] ✅ ${MODEL_PRIMARY} fallback success: ${parsed.mainCharacter}`);
+          // ★ Extract new visual priority fields with safe defaults
+          parsed.storyType = parsed.storyType || 'general';
+          parsed.mainVisualShouldBe = parsed.mainVisualShouldBe || '';
+          parsed.coverageRequired = parsed.coverageRequired || [];
+          parsed.coverageOptional = parsed.coverageOptional || [];
+          parsed.visualPriority = parsed.visualPriority || {};
+          parsed.storyAnchorQueries = parsed.storyAnchorQueries || [];
+          console.log(`[StoryIdentity] ✅ ${MODEL_PRIMARY} fallback success: ${parsed.mainCharacter} | storyType=${parsed.storyType} | coverageRequired=${parsed.coverageRequired.length} roles`);
           return parsed;
         } else {
           console.log(`[StoryIdentity] ❌ ${MODEL_PRIMARY} HTTP ${gptRes.status}`);
