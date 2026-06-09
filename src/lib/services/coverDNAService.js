@@ -2,7 +2,11 @@
  * Cover DNA Service
  * Map story type + emotion → recommended template + layout options
  * Hardcoded DNA map (ไม่ต้อง AI/DB — เร็วทันที)
+ *
+ * ★ Phase 2: Now delegates to coverStoryPolicyRegistry for detailed policies.
+ * matchCoverDNA() still returns the same shape + an extra `policy` field.
  */
+import { getPolicyForStoryType } from './coverStoryPolicyRegistry.js';
 
 // ─── DNA Map: storyType → template + layout options ───────────────────────────
 const DNA_MAP = {
@@ -119,7 +123,10 @@ export function matchCoverDNA(identity) {
 
     const dna = DNA_MAP[storyType] || DNA_MAP['default'];
 
-    console.log(`[CoverDNA] Story type: "${storyType}" → template: ${dna.templateId || 'auto'} (circle: ${dna.circleNeeded}) — ${dna.desc} [source: ${source}]`);
+    // ★ Phase 2: Attach detailed policy from registry (backward-compatible)
+    const policy = getPolicyForStoryType(storyType);
+
+    console.log(`[CoverDNA] Story type: "${storyType}" → template: ${dna.templateId || 'auto'} (circle: ${dna.circleNeeded}) — ${dna.desc} [source: ${source}] [policy: ${policy._policyKey}]`);
 
     return {
       recommendedTemplate: dna.templateId,
@@ -127,6 +134,8 @@ export function matchCoverDNA(identity) {
       storyType,
       source,
       desc: dna.desc,
+      // ★ Phase 2: New field — detailed cover policy from registry
+      policy,
     };
   } catch (e) {
     console.warn('[CoverDNA] Error:', e.message);

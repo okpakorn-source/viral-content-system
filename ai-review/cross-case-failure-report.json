@@ -1,0 +1,292 @@
+{
+  "reportId": "cross-case-failure-v1",
+  "generatedAt": "2026-06-10T03:42:00+07:00",
+  "branch": "ai/post-selection-quality",
+  "totalCasesInspected": 12,
+  "failureTaxonomy": [
+    "WRONG_STORY_TYPE",
+    "THUMBNAIL_OR_NEWS_COVER_USED_AS_SOURCE",
+    "TEXT_OVERLAY_SOURCE_IMAGE",
+    "COLLAGE_SOURCE_IMAGE",
+    "WRONG_MAIN_VISUAL",
+    "BAD_TEMPLATE_FOR_STORY_TYPE",
+    "CIRCLE_NOT_STORY_RELATED",
+    "SUPPORT_IMAGE_OVERPOWERS_MAIN",
+    "FINAL_QA_SHOULD_HAVE_BLOCKED_SAVE"
+  ],
+  "cases": [
+    {
+      "caseId": "CASE-001",
+      "score": 7,
+      "template": "template_9",
+      "inferredStoryType": "family_nature_learning",
+      "title": "ชมพู่พาลูกเยี่ยมยายหนิง สวน 1 ไร่",
+      "failures": [
+        {
+          "type": "CIRCLE_NOT_STORY_RELATED",
+          "severity": "medium",
+          "detail": "Circle slot uses airport family photo (Suvarnabhumi) instead of garden/nature scene. Story is about visiting grandmother's garden but circle shows airport departure."
+        },
+        {
+          "type": "THUMBNAIL_OR_NEWS_COVER_USED_AS_SOURCE",
+          "severity": "low",
+          "detail": "Instagram screenshot with UI elements (username 'chomismaterialgirl', play button overlay) used as source in main hero slot."
+        },
+        {
+          "type": "WRONG_MAIN_VISUAL",
+          "severity": "medium",
+          "detail": "Main hero is children near Christmas tree (indoor event, unrelated to garden/nature story). Should show garden/nature activity scene."
+        }
+      ],
+      "overallVerdict": "PARTIAL_FAIL"
+    },
+    {
+      "caseId": "CASE-002",
+      "score": 8,
+      "template": "template_9",
+      "inferredStoryType": "family_nature_learning",
+      "title": "ชมพู่ อารยา พาลูกเยี่ยมยายหนิง ปลูกผัก",
+      "failures": [
+        {
+          "type": "SUPPORT_IMAGE_OVERPOWERS_MAIN",
+          "severity": "medium",
+          "detail": "Chompoo press interview (with ET Thailand/true4U/ช่อง 24 mic logos) dominates bottom-right support slot. Interview is unrelated to nature/garden story."
+        },
+        {
+          "type": "CIRCLE_NOT_STORY_RELATED",
+          "severity": "medium",
+          "detail": "Circle shows airport family photo (Q18 Qatar First Class gate visible). Should show Yai Ning or garden scene."
+        }
+      ],
+      "overallVerdict": "PARTIAL_FAIL"
+    },
+    {
+      "caseId": "CASE-003",
+      "score": 5,
+      "template": "template_9",
+      "inferredStoryType": "relationship_drama",
+      "title": "เบียร์ ยอมรับตรง ๆ ว่า สิ่งที่ทำให้เขารู้สึกดีกับ โอ๋ ภัคจีรา",
+      "failures": [
+        {
+          "type": "TEXT_OVERLAY_SOURCE_IMAGE",
+          "severity": "critical",
+          "detail": "ALL slots use images with massive Thai text overlays. Main hero slot: Dara2you news page screenshot with full article text. Support slots: Facebook social media posts with comments and reactions. Circle: news interview screenshot with 'อาจารย์เบียร์ คนตื่นธรรม' text overlay."
+        },
+        {
+          "type": "COLLAGE_SOURCE_IMAGE",
+          "severity": "critical",
+          "detail": "Bottom-left support image is a pre-made news collage with wedding photo + quote text embedded in a designed graphic frame."
+        },
+        {
+          "type": "THUMBNAIL_OR_NEWS_COVER_USED_AS_SOURCE",
+          "severity": "critical",
+          "detail": "Upper-right image is a YouTube/news program thumbnail showing เบียร์ with large Thai quote text '\"จะบอกกูโง่ก็ได้...\"'. This is another outlet's finished thumbnail, not a clean source photo."
+        },
+        {
+          "type": "FINAL_QA_SHOULD_HAVE_BLOCKED_SAVE",
+          "severity": "critical",
+          "detail": "Score 5 should never be saved as SUCCESS. Zero clean source photos were used. Every slot contains text-heavy news screenshots. This cover should have been blocked or flagged NEED_MANUAL_REVIEW."
+        }
+      ],
+      "overallVerdict": "HARD_FAIL"
+    },
+    {
+      "caseId": "CASE-004",
+      "score": 6,
+      "template": "template_8",
+      "inferredStoryType": "charity_donation",
+      "title": "ชื่นชม เจ๊แห้ง แม่ค้าหัวใจทองคำ",
+      "failures": [
+        {
+          "type": "THUMBNAIL_OR_NEWS_COVER_USED_AS_SOURCE",
+          "severity": "high",
+          "detail": "Main hero is MGR Online (ผู้จัดการออนไลน์) news screenshot with MGR logo watermark in top-left corner. Circle slot uses news interview screenshot with 'ข่าว 23' (channel 23) lower-third banner."
+        },
+        {
+          "type": "TEXT_OVERLAY_SOURCE_IMAGE",
+          "severity": "high",
+          "detail": "Support image (lottery ticket in trash) has large Thai text overlay: '2ใบที่พบ ในถังขยะ แต่รรางวัล ที่ 1 ที่อยู่ใบกลางหายไป' with decorative stars. This is a pre-made news graphic, not a clean photo."
+        },
+        {
+          "type": "WRONG_MAIN_VISUAL",
+          "severity": "medium",
+          "detail": "Main visual shows a sad elderly woman face (from news broadcast). The story is about a market vendor's kindness/honesty — main should show the vendor or the heroic action."
+        }
+      ],
+      "overallVerdict": "FAIL"
+    },
+    {
+      "caseId": "CASE-005",
+      "score": 7,
+      "template": "template_9",
+      "inferredStoryType": "family_nature_learning",
+      "title": "ชมพู่ อารยา พาลูกๆ เรียนรู้ธรรมชาติกับยายหนิง",
+      "failures": [],
+      "overallVerdict": "PASS",
+      "notes": "Clean source photos. Children playing in nature/water. Garden scene. Circle shows mother+child in stream. Good story-type match."
+    },
+    {
+      "caseId": "CASE-006",
+      "score": null,
+      "template": "template_9",
+      "inferredStoryType": "family_care",
+      "title": "(tye.chutima — ส่งลูกไปเรียนต่างประเทศ)",
+      "failures": [
+        {
+          "type": "THUMBNAIL_OR_NEWS_COVER_USED_AS_SOURCE",
+          "severity": "medium",
+          "detail": "Source includes Instagram story screenshot with UI elements (username 'tye.chutima', timestamp '15 ชม.', reply bar, and video play button visible)."
+        },
+        {
+          "type": "TEXT_OVERLAY_SOURCE_IMAGE",
+          "severity": "low",
+          "detail": "One source has 'Thank you' text with hearts and 'picture board' / 'le girl' captions visible — Instagram story text overlay."
+        }
+      ],
+      "overallVerdict": "PARTIAL_FAIL"
+    },
+    {
+      "caseId": "CASE-007",
+      "score": null,
+      "template": "template_9",
+      "inferredStoryType": "family_warm",
+      "title": "(Celebrity family — mother-daughter photos)",
+      "failures": [],
+      "overallVerdict": "PASS",
+      "notes": "Clean source photos from Instagram/personal. Good portrait + activity mix. No text overlays."
+    },
+    {
+      "caseId": "CASE-008",
+      "score": null,
+      "template": "template_9",
+      "inferredStoryType": "achievement",
+      "title": "(Award ceremony — mother and daughter at royal foundation)",
+      "failures": [],
+      "overallVerdict": "PASS",
+      "notes": "Clean event photos. Award ceremony context. Good story-activity match."
+    },
+    {
+      "caseId": "CASE-009",
+      "score": null,
+      "template": "template_9",
+      "inferredStoryType": "family_warm",
+      "title": "(Celebrity family — mother with children, colorful family)",
+      "failures": [
+        {
+          "type": "TEXT_OVERLAY_SOURCE_IMAGE",
+          "severity": "low",
+          "detail": "Circle image has 'สประกอบ' Thai text visible at bottom — likely cropped from a news interview lower-third."
+        }
+      ],
+      "overallVerdict": "PARTIAL_FAIL"
+    },
+    {
+      "caseId": "CASE-010",
+      "score": null,
+      "template": "template_9",
+      "inferredStoryType": "family_care",
+      "title": "(หมอโบว์ รักษาช้าง — แม่ป่วยอัลไซเมอร์)",
+      "failures": [
+        {
+          "type": "TEXT_OVERLAY_SOURCE_IMAGE",
+          "severity": "high",
+          "detail": "Bottom support slot uses One31 TV interview screenshot with large Thai text: 'หมอโบว์ รักษาช้าง' + 'แม่ป่วยอัลไซเมอร์'. Has channel logo and program name banner."
+        },
+        {
+          "type": "COLLAGE_SOURCE_IMAGE",
+          "severity": "high",
+          "detail": "Circle slot contains a 4-panel collage image (2x2 grid showing elephant + หมอโบว์ in different poses). This is a pre-made news graphic, not a single clean photo."
+        },
+        {
+          "type": "WRONG_MAIN_VISUAL",
+          "severity": "high",
+          "detail": "Main visual is dominated by elephant close-up face. Story is about หมอโบว์ caring for her Alzheimer's mother — elephant is occupation context only, not the core story. Main should show mother-care or หมอโบว์ with her mother."
+        },
+        {
+          "type": "SUPPORT_IMAGE_OVERPOWERS_MAIN",
+          "severity": "medium",
+          "detail": "Elephant takes up >50% of hero slot visual weight. The person (หมอโบว์) is secondary. This makes it look like an 'elephant news' rather than a 'family sacrifice' story."
+        }
+      ],
+      "overallVerdict": "FAIL"
+    },
+    {
+      "caseId": "CASE-020",
+      "score": null,
+      "template": "template_9",
+      "inferredStoryType": "family_care",
+      "title": "(หมอโบว์ — elephant + Alzheimer mother variant)",
+      "failures": [
+        {
+          "type": "TEXT_OVERLAY_SOURCE_IMAGE",
+          "severity": "critical",
+          "detail": "Multiple slots use Thai text overlay sources: 'อัลไซเมอร์' text in red, 'เดินไม่ได้' text, 'และแม่อัลไซเมอร์' lower-third banner. All from news broadcasts."
+        },
+        {
+          "type": "COLLAGE_SOURCE_IMAGE",
+          "severity": "high",
+          "detail": "Circle slot is a 4-panel collage (same as CASE-010) — pre-made news graphic."
+        },
+        {
+          "type": "WRONG_MAIN_VISUAL",
+          "severity": "critical",
+          "detail": "Elephant completely dominates main visual (~70% of hero area). Story about mother care is invisible. Cover looks like wildlife/zoo news."
+        },
+        {
+          "type": "FINAL_QA_SHOULD_HAVE_BLOCKED_SAVE",
+          "severity": "high",
+          "detail": "Text overlays everywhere, collage in circle, wrong dominant subject. Should have been flagged NEED_MANUAL_REVIEW."
+        }
+      ],
+      "overallVerdict": "HARD_FAIL"
+    },
+    {
+      "caseId": "CASE-030",
+      "score": null,
+      "template": "template_9",
+      "inferredStoryType": "family_care",
+      "title": "(หมอโบว์ — คุณหมอเคียงข้างน้องช้าง variant)",
+      "failures": [
+        {
+          "type": "TEXT_OVERLAY_SOURCE_IMAGE",
+          "severity": "critical",
+          "detail": "Main hero slot: large Thai headline text 'คุณหมอเคียง ของ น้องช้าง' covers >40% of the image. This is a news outlet's cover page/article header, not a clean photo. Also shows 'Made (วันนี้ดีที่สุด)' branding and 'หมอโบว์ - สัตว์แพทย์หญิงรัชดาภ...' subtitle."
+        },
+        {
+          "type": "THUMBNAIL_OR_NEWS_COVER_USED_AS_SOURCE",
+          "severity": "critical",
+          "detail": "Support slot uses มติชน (Matichon) news article layout. Circle slot uses MCOT HD interview screenshot with program branding."
+        },
+        {
+          "type": "FINAL_QA_SHOULD_HAVE_BLOCKED_SAVE",
+          "severity": "critical",
+          "detail": "Main image is literally another outlet's cover/header image. The system should NEVER reuse another page's finished cover as its own source."
+        }
+      ],
+      "overallVerdict": "HARD_FAIL"
+    }
+  ],
+  "summary": {
+    "totalPassed": 3,
+    "totalPartialFail": 3,
+    "totalFail": 3,
+    "totalHardFail": 3,
+    "failureTypeFrequency": {
+      "TEXT_OVERLAY_SOURCE_IMAGE": 8,
+      "THUMBNAIL_OR_NEWS_COVER_USED_AS_SOURCE": 5,
+      "WRONG_MAIN_VISUAL": 3,
+      "COLLAGE_SOURCE_IMAGE": 3,
+      "CIRCLE_NOT_STORY_RELATED": 2,
+      "SUPPORT_IMAGE_OVERPOWERS_MAIN": 2,
+      "FINAL_QA_SHOULD_HAVE_BLOCKED_SAVE": 3,
+      "WRONG_STORY_TYPE": 0,
+      "BAD_TEMPLATE_FOR_STORY_TYPE": 0
+    },
+    "topFailurePatterns": [
+      "TEXT_OVERLAY — news screenshots with Thai headlines used as source images (8/12 cases)",
+      "NEWS_THUMBNAIL — finished covers/thumbnails from other outlets reused as source (5/12)",
+      "WRONG_MAIN — dominant visual doesn't match story core (3/12, especially หมอโบว์ elephant cases)",
+      "COLLAGE — 4-panel collage graphics from news used in circle/support slots (3/12)"
+    ]
+  }
+}
