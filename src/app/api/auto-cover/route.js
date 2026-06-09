@@ -1029,8 +1029,26 @@ export async function POST(request) {
       imageBuffers.push(...candidateImages);
     }
 
+    // ★ FIX: Assign stable candidateId to every image (not array index!)
+    // ป้องกัน faceData ผิดภาพเมื่อ sort/filter/push เปลี่ยนลำดับ
+    for (let i = 0; i < imageBuffers.length; i++) {
+      const img = imageBuffers[i];
+      if (!img.candidateId) {
+        // สร้าง ID ถาวรจาก URL (simple hash)
+        const urlStr = img.url || `img_${i}_${Date.now()}`;
+        let hash = 0;
+        for (let c = 0; c < urlStr.length; c++) {
+          hash = ((hash << 5) - hash) + urlStr.charCodeAt(c);
+          hash |= 0; // Convert to 32bit int
+        }
+        img.candidateId = `cid_${Math.abs(hash).toString(36)}`;
+      }
+    }
+    console.log(`[AutoCover] ★ Assigned candidateId to ${imageBuffers.length} images`);
+
     const { batchDetectFaces } = await import('@/lib/services/faceDetector');
-    const faceInput = imageBuffers.map((img, i) => ({ id: String(i), buffer: img.buffer }));
+    // ★ ใช้ candidateId แทน array index เป็น key
+    const faceInput = imageBuffers.map((img) => ({ id: img.candidateId, buffer: img.buffer }));
     const faceDataMap = await batchDetectFaces(faceInput);
 
     console.log('[AutoCover] Face detection complete');
@@ -1511,10 +1529,12 @@ export async function POST(request) {
     }
 
     // ═══ Layout Fitness Score — ภาพต้องเหมาะกับ slot ที่จะใส่ ═══
+    // ★ FIX: ใช้ candidateId ดึง faceData (ไม่ใช่ array index!)
     {
       for (let i = 0; i < imageBuffers.length; i++) {
         const img = imageBuffers[i];
-        const faceData = faceDataMap?.get?.(String(i)) || { hasFaces: false, faceCount: 0, faces: [] };
+        // ★ ใช้ candidateId เป็น key — stable ไม่เปลี่ยนตามลำดับ
+        const faceData = faceDataMap?.get?.(img.candidateId) || faceDataMap?.get?.(String(i)) || { hasFaces: false, faceCount: 0, faces: [] };
         const faces = faceData.faces || [];
         const imgW = img.width || 800;
         const imgH = img.height || 600;
@@ -2337,6 +2357,15 @@ async function cropFaceTightly(buffer, face) {
 // (Maintained by Character Focus Rule above — hero is guaranteed to have a face)
 async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identity, coverReferences, artDirection = null) {
   try {
+    // ★ Helper: ดึง faceData โดยลอง candidateId ก่อน, fallback เป็น index
+    const getFaceData = (imgOrIndex, fallbackIndex) => {
+      const idx = typeof imgOrIndex === 'number' ? imgOrIndex : fallbackIndex;
+      const img = typeof imgOrIndex === 'number' ? imageBuffers[imgOrIndex] : imgOrIndex;
+      return faceDataMap?.get?.(img?.candidateId) 
+          || faceDataMap?.get?.(String(idx)) 
+          || { hasFaces: false, faceCount: 0, faces: [] };
+    };
+
     let slotCount = 4;
     let hasCircle = false;
     let hasCircleSmall = false;
