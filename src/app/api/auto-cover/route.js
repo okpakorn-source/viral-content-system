@@ -2416,7 +2416,7 @@ Return JSON:
 
     if (gallerySaveList.length === 0) {
       gallerySaveList = imageBuffers.map((img, i) => {
-        const fd = getFaceData(img, i);
+        const fd = faceDataMap?.get?.(img.candidateId) || faceDataMap?.get?.(String(i)) || { hasFaces: false, faceCount: 0 };
         return {
           url: img.url,
           role: img.role || 'SUPPORT',
@@ -2434,9 +2434,12 @@ Return JSON:
       const reviewDir = path.join(process.cwd(), 'ai-review');
       await mkdir(reviewDir, { recursive: true });
       
+      // ★ Use identity-derived title to avoid request-body encoding issues
+      const safeNewsTitle = identity?.typography?.main || identity?.story || identity?._newsTitle || newsTitle || '';
+      
       const reviewData = {
         timestamp: new Date().toISOString(),
-        newsTitle,
+        newsTitle: safeNewsTitle,
         storyType: identity.storyType || 'general',
         mainVisualShouldBe: identity.mainVisualShouldBe || '',
         coverageRequired: identity.coverageRequired || [],
@@ -2460,7 +2463,7 @@ Return JSON:
         finalSlotAudit: {
           issues: slotAuditIssues || [],
           fixes: slotAuditFixes || [],
-          passed: (slotAuditIssues || []).length === 0,
+          passed: (slotAuditIssues || []).length === 0 || (slotAuditFixes || []).length >= (slotAuditIssues || []).length,
         },
         duplicateSlotDetected: (slotAuditIssues || []).some(i => i.type.startsWith('DUPLICATE_')),
         finalUsedCandidateIds: [...new Set(
@@ -2505,7 +2508,7 @@ Return JSON:
       const mdContent = `# AI Cover Review — ${new Date().toISOString()}
 
 ## Story Identity
-- **Title**: ${newsTitle}
+- **Title**: ${safeNewsTitle}
 - **Story Type**: ${identity.storyType || 'general'}
 - **Main Visual Should Be**: ${identity.mainVisualShouldBe || 'N/A'}
 - **Coverage Required**: ${(identity.coverageRequired || []).join(', ') || 'N/A'}
@@ -2612,7 +2615,7 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
         finalSlotAudit: {
           issues: slotAuditIssues || [],
           fixes: slotAuditFixes || [],
-          passed: (slotAuditIssues || []).length === 0,
+          passed: (slotAuditIssues || []).length === 0 || (slotAuditFixes || []).length >= (slotAuditIssues || []).length,
         },
         duplicateSlotDetected: (slotAuditIssues || []).some(i => i.type?.startsWith('DUPLICATE_')),
         templateReason: templateReason || 'auto',
@@ -2721,7 +2724,7 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
     if (faceDataMap) {
       // 1. First try to find a single-face image (faceCount = 1) to ensure it's the main character
       for (const thumb of thumbnails) {
-        const faceData = getFaceData(imageBuffers[thumb.index], thumb.index);
+        const faceData = faceDataMap?.get?.(imageBuffers[thumb.index]?.candidateId) || faceDataMap?.get?.(String(thumb.index)) || { hasFaces: false, faceCount: 0 };
         if (faceData && faceData.hasFaces && faceData.faceCount === 1) {
           heroRefIndex = thumb.index;
           foundHeroRef = true;
@@ -2731,7 +2734,7 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
       // 2. If no single-face image found, use any image with faces (faceCount > 0)
       if (!foundHeroRef) {
         for (const thumb of thumbnails) {
-          const faceData = getFaceData(imageBuffers[thumb.index], thumb.index);
+          const faceData = faceDataMap?.get?.(imageBuffers[thumb.index]?.candidateId) || faceDataMap?.get?.(String(thumb.index)) || { hasFaces: false, faceCount: 0 };
           if (faceData && faceData.hasFaces && faceData.faceCount > 0) {
             heroRefIndex = thumb.index;
             foundHeroRef = true;

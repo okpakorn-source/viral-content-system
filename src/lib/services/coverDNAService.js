@@ -8,6 +8,8 @@
 const DNA_MAP = {
   family_care:            { templateId: 'template_9', circleNeeded: true,  desc: 'simple family care story layout (3-slot)' },
   family_nature_learning: { templateId: 'template_9', circleNeeded: true,  desc: 'simple nature/family story layout (3-slot)' },
+  family_warm:            { templateId: 'template_9', circleNeeded: true,  desc: 'warm family story (3-slot simple)' },
+  nature_learning:        { templateId: 'template_9', circleNeeded: true,  desc: 'nature/learning story (3-slot simple)' },
   drama:                  { templateId: 'template_1', circleNeeded: false, desc: 'ข่าวดราม่า' },
   donation:               { templateId: 'template_8', circleNeeded: false, desc: 'ข่าวบริจาค/ช่วยเหลือ' },
   rescue:                 { templateId: 'template_5', circleNeeded: false, desc: 'ข่าวช่วยเหลือ/กู้ภัย' },
@@ -97,16 +99,33 @@ function detectStoryType(identity) {
  */
 export function matchCoverDNA(identity) {
   try {
-    const storyType = detectStoryType(identity);
+    // ★ Priority 1: Use GPT's storyType if it exists in DNA_MAP
+    const gptStoryType = identity?.storyType || '';
+    let storyType = 'default';
+    let source = 'fallback';
+
+    if (gptStoryType && DNA_MAP[gptStoryType]) {
+      storyType = gptStoryType;
+      source = 'gpt';
+      console.log(`[CoverDNA] ★ Using GPT storyType: "${gptStoryType}"`);
+    } else {
+      // ★ Priority 2: Keyword-based detection
+      storyType = detectStoryType(identity);
+      source = storyType === 'default' ? 'fallback' : 'dna';
+      if (gptStoryType && gptStoryType !== storyType) {
+        console.log(`[CoverDNA] ⚠️ GPT storyType "${gptStoryType}" not in DNA_MAP, keyword detection → "${storyType}"`);
+      }
+    }
+
     const dna = DNA_MAP[storyType] || DNA_MAP['default'];
 
-    console.log(`[CoverDNA] Story type: "${storyType}" → template: ${dna.templateId || 'auto'} (circle: ${dna.circleNeeded}) — ${dna.desc}`);
+    console.log(`[CoverDNA] Story type: "${storyType}" → template: ${dna.templateId || 'auto'} (circle: ${dna.circleNeeded}) — ${dna.desc} [source: ${source}]`);
 
     return {
       recommendedTemplate: dna.templateId,
       circleNeeded: dna.circleNeeded,
       storyType,
-      source: storyType === 'default' ? 'fallback' : 'dna',
+      source,
       desc: dna.desc,
     };
   } catch (e) {
