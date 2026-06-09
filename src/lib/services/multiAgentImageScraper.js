@@ -814,6 +814,109 @@ async function agentContextImages(identity) {
   return unique;
 }
 
+// ★ Fix 25: Story Anchor Keyword Extraction & Pre-Judge Batch Preparation
+function getStoryAnchorKeywords(identity) {
+  if (!identity) return [];
+  const personWords = new Set();
+  [identity.mainCharacter, identity.secondaryCharacter, ...(identity.characters || [])]
+    .filter(Boolean)
+    .forEach(name => {
+      name.split(/[\s]+/).filter(w => w.length >= 2).forEach(w => personWords.add(w));
+    });
+  const GENERIC_WEAK = new Set([
+    'ลูก','แม่','พ่อ','หลาน','ครอบครัว','น้อง','เอ',
+    'กับ','พา','ที่','ใน','มา','ไป','ให้','ได้','กัน','อยู่','มี','เป็น','ว่า',
+    'ภาพ','รูป','พร้อม','เผย','เปิด','อีก','มุม','การ','เลี้ยง','1','2',
+    'คน','เรื่อง','วัน','เมื่อ','ก่อน','หลัง','แล้ว','ยัง','ก็','จะ','หรือ'
+  ]);
+  const strongTerms = new Set();
+  const sources = [
+    ...(identity.storyAnchorQueries || []),
+    ...(identity.keyScenes || []),
+    ...(identity.specific_details?.place_names || []),
+    ...(identity.specific_details?.key_events || []),
+    identity.location,
+    identity.coreStory?.celebratedAction,
+  ].filter(Boolean);
+  for (const src of sources) {
+    const words = src.split(/[\s,+/]+/).filter(w => w.length >= 2);
+    for (const w of words) {
+      if (!personWords.has(w) && !GENERIC_WEAK.has(w)) strongTerms.add(w);
+    }
+  }
+  return [...strongTerms];
+}
+
+function checkStoryAnchorMatch(text, anchorKeywords) {
+  if (!text || !anchorKeywords || anchorKeywords.length === 0) return false;
+  const lower = text.toLowerCase();
+  return anchorKeywords.some(kw => lower.includes(kw.toLowerCase()));
+}
+
+function prepareJudgeBatch(candidates, identity) {
+  if (!candidates || candidates.length === 0) return candidates;
+  const anchorKeywords = getStoryAnchorKeywords(identity);
+  console.log(`[StoryAnchor] 🔑 Anchor keywords (${anchorKeywords.length}): [${anchorKeywords.slice(0, 15).join(', ')}]`);
+  const metaLookup = new Map();
+  if (candidates._meta) {
+    for (const m of candidates._meta) { if (m.url) metaLookup.set(m.url, m); }
+  }
+  const tagged = candidates.map((url, idx) => {
+    const meta = metaLookup.get(url) || {};
+    const titleText = `${meta.title || ''} ${meta.source || ''}`;
+    const isAnchor = checkStoryAnchorMatch(titleText, anchorKeywords);
+    return { url, idx, meta, isAnchor, title: meta.title || '' };
+  });
+  // Dedup: max 1 per URL, YouTube video ID, source page
+  const seenUrls = new Set();
+  const seenVideoIds = new Set();
+  const seenSourcePages = new Set();
+  const deduped = tagged.filter(item => {
+    if (seenUrls.has(item.url)) return false;
+    seenUrls.add(item.url);
+    const ytMatch = item.url.match(/(?:youtube\.com\/.*[?&]v=|youtu\.be\/|ytimg\.com\/vi\/)([a-zA-Z0-9_-]{11})/);
+    if (ytMatch) {
+      if (seenVideoIds.has(ytMatch[1])) return false;
+      seenVideoIds.add(ytMatch[1]);
+    }
+    if (item.meta.link) {
+      const normalizedLink = item.meta.link.replace(/[?#].*$/, '');
+      if (seenSourcePages.has(normalizedLink)) return false;
+      seenSourcePages.add(normalizedLink);
+    }
+    return true;
+  });
+  const dedupedCount = tagged.length - deduped.length;
+  if (dedupedCount > 0) console.log(`[StoryAnchor] 🗑️ Deduped ${dedupedCount} candidates (${tagged.length} → ${deduped.length})`);
+  const anchorBucket = deduped.filter(i => i.isAnchor);
+  const otherBucket = deduped.filter(i => !i.isAnchor);
+  console.log(`[StoryAnchor] 📦 Buckets: ${anchorBucket.length} storyAnchor, ${otherBucket.length} other`);
+  if (anchorBucket.length > 0) {
+    console.log(`[StoryAnchor] ★ Anchor candidates:`);
+    anchorBucket.forEach(b => console.log(`  [#${b.idx}] "${b.title.substring(0, 60)}"`));
+  }
+  const MAX_JUDGE = 24;
+  const anchorsToSend = anchorBucket.slice(0, 8);
+  const othersToSend = otherBucket.slice(0, MAX_JUDGE - anchorsToSend.length);
+  const batch = [...anchorsToSend, ...othersToSend];
+  const resultUrls = batch.map(b => b.url);
+  const anchorMap = new Map();
+  for (const b of batch) { if (b.isAnchor) anchorMap.set(b.url, true); }
+  return Object.assign([...resultUrls], {
+    _meta: candidates._meta,
+    _storyAnchorMap: anchorMap,
+    _anchorKeywords: anchorKeywords,
+    _bucketCounts: {
+      totalBeforeDedup: tagged.length,
+      totalAfterDedup: deduped.length,
+      storyAnchor: anchorBucket.length,
+      other: otherBucket.length,
+      sentToJudge: batch.length,
+    },
+    _storyAnchorCandidates: anchorBucket.map(b => ({ originalIndex: b.idx, title: b.title, url: b.url })),
+  });
+}
+
 // ==========================================
 // AI Judge: Strict image selection with Gemini Vision
 // Pre-filters by resolution & blur, then assigns cover roles:
@@ -822,8 +925,8 @@ async function agentContextImages(identity) {
 async function judgeImages(candidates, newsTitle, identity) {
   if (!candidates || candidates.length === 0) return [];
 
-  // Limit vision download & judging to top 24 to prevent token/API limit exhaustion
-  const candidatesToDownload = candidates.slice(0, 24);
+  // ★ Fix 25: Story anchor tagging + dedup + bucket quotas before Judge
+  const candidatesToDownload = prepareJudgeBatch(candidates, identity);
   console.log(`[Judge] 🔍 Downloading ${candidatesToDownload.length}/${candidates.length} candidates for AI Vision analysis...`);
 
   // ดาวน์โหลดเฉพาะตัวที่เลือกพร้อม metadata
@@ -861,6 +964,14 @@ async function judgeImages(candidates, newsTitle, identity) {
   }
 
   console.log(`[Judge] 📊 Pre-filter: ${validCandidates.length} passed, ${rejectedResolution} low-res, ${rejectedBlur} blurry`);
+
+  // ★ Fix 25: Transfer story anchor flags to validCandidates
+  if (candidatesToDownload._storyAnchorMap) {
+    validCandidates._storyAnchorMap = candidatesToDownload._storyAnchorMap;
+    validCandidates._anchorKeywords = candidatesToDownload._anchorKeywords;
+    validCandidates._bucketCounts = candidatesToDownload._bucketCounts;
+    validCandidates._storyAnchorCandidates = candidatesToDownload._storyAnchorCandidates;
+  }
 
   // ═══ Source Reliability Score — ให้คะแนนก่อน AI Judge ═══
   // ★ FIX: Use source page URL (from _meta.link/source) instead of image CDN URL!
@@ -1572,8 +1683,13 @@ function processJudgeResults(parsed, validCandidates) {
           item.sourceReliability = sourceScore;
           const oldScore = item.score;
           if (sourceScore >= 5) {
-            // Trusted source: +1 or +2 bonus (max +2)
-            item.score = Math.min(10, item.score + Math.floor(sourceScore / 5));
+            // ★ Fix 26: Don't revive REJECT (score 0) non-anchor images via source bonus
+            const isAnchor = validCandidates._storyAnchorMap?.has(imgUrl);
+            if (item.score === 0 && item.role === 'REJECT' && !isAnchor) {
+              // Keep at 0 — source bonus shouldn't save unrelated rejected images
+            } else {
+              item.score = Math.min(10, item.score + Math.floor(sourceScore / 5));
+            }
           } else if (sourceScore <= 1) {
             // Stock/low-trust: -2 penalty (min 0 for REJECT, min 1 otherwise)
             item.score = item.role === 'REJECT' ? 0 : Math.max(1, item.score - 2);
@@ -1583,6 +1699,25 @@ function processJudgeResults(parsed, validCandidates) {
             try { domain = new URL(imgUrl).hostname.replace(/^www\./, ''); } catch {}
             console.log(`[SourceScore] POST-JUDGE #${item.index}: ${domain} (src=${sourceScore}) score ${oldScore} → ${item.score}`);
           }
+        }
+      }
+    }
+  }
+
+  // ★ Fix 26: Story Anchor Rescue — don't let Judge kill story-relevant images
+  if (validCandidates._storyAnchorMap && validCandidates._storyAnchorMap.size > 0) {
+    for (const item of parsed) {
+      if (item.index >= 0 && item.index < validCandidates.length) {
+        const imgUrl = validCandidates[item.index];
+        const isAnchor = validCandidates._storyAnchorMap.has(imgUrl);
+        if (isAnchor && item.score < 5) {
+          const oldScore = item.score;
+          const oldRole = item.role;
+          item.score = Math.max(item.score, 6);
+          if (item.role === 'REJECT') item.role = 'CONTEXT_SCENE';
+          item._rescued = true;
+          item._rescueReason = `Story anchor rescue: title matches story keywords (was ${oldScore}/${oldRole})`;
+          console.log(`[Judge] ★ Story Anchor Rescue: #${item.index} score ${oldScore} → ${item.score}, role ${oldRole} → ${item.role}`);
         }
       }
     }
@@ -1614,7 +1749,13 @@ function processJudgeResults(parsed, validCandidates) {
       if (heroAssigned) role = 'EMOTION';
       else heroAssigned = true;
     }
-    selectedImages.push({ url: validCandidates[s.index], role, score: s.score, sourceReliability: s.sourceReliability });
+    selectedImages.push({
+      url: validCandidates[s.index],
+      role, score: s.score, sourceReliability: s.sourceReliability,
+      _storyAnchor: validCandidates._storyAnchorMap?.has(validCandidates[s.index]) || false,
+      _rescued: s._rescued || false,
+      _rescueReason: s._rescueReason || null,
+    });
   }
 
   if (selectedImages.length > 0) {
@@ -1660,6 +1801,9 @@ function processJudgeResults(parsed, validCandidates) {
     }
     const roleStr = Object.entries(roleCounts).map(([r, c]) => `${c} ${r}`).join(', ');
     console.log(`[Judge] ✅ Selected ${selectedImages.length} images: ${roleStr}`);
+    // ★ Fix 25: Propagate story anchor diagnostics
+    selectedImages._storyAnchorCandidates = validCandidates._storyAnchorCandidates || [];
+    selectedImages._bucketCounts = validCandidates._bucketCounts || null;
     return selectedImages;
   }
 
@@ -1908,5 +2052,8 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
     };
   });
   result.allCandidates = allScrapedUrls;
+  // ★ Fix 25: Pass story anchor diagnostics to route.js
+  result._storyAnchorCandidates = selectedImages._storyAnchorCandidates || candidates._storyAnchorCandidates || [];
+  result._bucketCounts = selectedImages._bucketCounts || candidates._bucketCounts || null;
   return result;
 }

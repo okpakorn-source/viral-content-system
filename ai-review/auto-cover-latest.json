@@ -1,0 +1,225 @@
+{
+  "timestamp": "2026-06-09T19:57:48.204Z",
+  "newsTitle": "ชีวิตในสวนยายหนิง",
+  "storyType": "nature_learning",
+  "mainVisualShouldBe": "น้องสายฟ้าและน้องพายุอยู่ในสวนยายหนิง กำลังสัมผัสธรรมชาติ ปลูกผัก หรือดูปลา โดยมีบรรยากาศครอบครัวอบอุ่นกับชมพู่หรือยายหนิง",
+  "coverageRequired": [
+    "STORY_ANCHOR",
+    "KEY_ACTIVITY",
+    "RELATIONSHIP",
+    "CONTEXT_SCENE",
+    "HERO_FACE",
+    "EMOTION"
+  ],
+  "coverageOptional": [
+    "HERO2",
+    "EVIDENCE"
+  ],
+  "visualPriority": {
+    "หลานในสวนเรียนรู้ธรรมชาติ": 35,
+    "กิจกรรมปลูกผักเลี้ยงปลาเลี้ยงไก่": 25,
+    "ความสัมพันธ์ชมพู่ลูกยายหนิง": 20,
+    "บรรยากาศสวนยายหนิงที่ดิน 1 ไร่": 15,
+    "ภาพหน้าชัดชมพู่ อารยา": 5
+  },
+  "storyAnchorQueries": [
+    "ชมพู่ อารยา ลูก สวนยายหนิง ปลูกผัก",
+    "ชมพู่ อารยา สายฟ้า พายุ สวนยายหนิง",
+    "น้องสายฟ้า น้องพายุ ลูกชมพู่ อารยา เรียนรู้ธรรมชาติ",
+    "ชมพู่ อารยา พาลูก เลี้ยงปลา เลี้ยงไก่",
+    "สวนยายหนิง ชมพู่ อารยา ที่ดิน 1 ไร่",
+    "ชมพู่ อารยา ชีวิตในสวนยายหนิง",
+    "ชมพู่ อารยา ครอบครัว สวนธรรมชาติ",
+    "น้องสายฟ้า น้องพายุ ลูกชมพู่ อารยา ปลูกผัก"
+  ],
+  "slotAssignment": {
+    "heroIndex": 2,
+    "heroRole": "HERO_FACE",
+    "heroTitle": "ชมพู่ อารยา' หาเวลาสวีตสามี รับอยากมีลูกสาว รอ สายฟ้า-พายุ",
+    "circleIndex": 6,
+    "photoOrder": [
+      4,
+      0,
+      2
+    ]
+  },
+  "templateUsed": "template_9",
+  "templateReason": "DNA/autoSelect → template_9",
+  "templateChanged": false,
+  "score": 8,
+  "storyMatchScore": 8,
+  "finalSlotAudit": {
+    "issues": [
+      {
+        "type": "MAIN_IS_PORTRAIT_IN_NATURE",
+        "index": 2,
+        "role": "HERO_FACE"
+      }
+    ],
+    "fixes": [
+      {
+        "slot": "main",
+        "oldIndex": 2,
+        "newIndex": 4,
+        "reason": "MAIN_IS_PORTRAIT_IN_NATURE"
+      }
+    ],
+    "passed": true
+  },
+  "duplicateSlotDetected": false,
+  "finalUsedCandidateIds": [
+    "cid_8ldekl",
+    "cid_silvoy",
+    "cid_gc37qr",
+    "cid_o3nkp3"
+  ],
+  "rejectedSlotCandidates": [
+    {
+      "index": 2,
+      "reason": "MAIN_IS_PORTRAIT_IN_NATURE"
+    }
+  ],
+  "whySimpleTemplateWasChosen": null,
+  "normalizedYoutubeVideoIds": [],
+  "duplicateReplacement": [],
+  "storyTypePropagationCheck": {
+    "fromGPT": "nature_learning",
+    "afterCoverage": "nature_learning"
+  },
+  "allCandidates": [
+    {
+      "index": 0,
+      "role": "KEY_ACTIVITY",
+      "curatorScore": 9,
+      "score": 9,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ud/1616/8081998/chom.jpg?ip/crop/w670h402/q80/jpg",
+      "width": 670,
+      "height": 402,
+      "techBad": null,
+      "_storyAnchor": false,
+      "_rescued": false,
+      "_curatorScoreBeforeGuard": null
+    },
+    {
+      "index": 1,
+      "role": "LOW_PRIORITY",
+      "curatorScore": 6,
+      "score": 10,
+      "title": "เปิดสวนยายหนิง ชมพู่ อารยา ยกครอบครัวใช้ชีวิตบ้านๆ หลานๆ สาย",
+      "url": "https://i.ytimg.com/vi/7yz0H6ETodE/sddefault.jpg",
+      "width": 640,
+      "height": 480,
+      "techBad": null,
+      "_storyAnchor": false,
+      "_rescued": false,
+      "_curatorScoreBeforeGuard": 3
+    },
+    {
+      "index": 2,
+      "role": "HERO_FACE",
+      "curatorScore": 6,
+      "score": 6,
+      "title": "ชมพู่ อารยา' หาเวลาสวีตสามี รับอยากมีลูกสาว รอ สายฟ้า-พายุ",
+      "url": "https://www.khaosod.co.th/wpapp/uploads/2018/06/S__21397541.jpg",
+      "width": 1478,
+      "height": 1108,
+      "techBad": null,
+      "_storyAnchor": true,
+      "_rescued": true,
+      "_curatorScoreBeforeGuard": 5
+    },
+    {
+      "index": 3,
+      "role": "LOW_PRIORITY",
+      "curatorScore": 6,
+      "score": 10,
+      "title": "ส่องกิจกรรมวันหยุดครอบครัว ชมพู่ อารยาพาลูกๆ สายฟ้า พายุ น้อ",
+      "url": "https://i.ytimg.com/vi/AoN3trk1f20/hq720.jpg?sqp=-oaymwEhCK4FEIIDSFryq4qpAxMIARUAAAAAGAElAADIQj0AgKJ",
+      "width": 686,
+      "height": 386,
+      "techBad": null,
+      "_storyAnchor": false,
+      "_rescued": false,
+      "_curatorScoreBeforeGuard": 3
+    },
+    {
+      "index": 4,
+      "role": "KEY_ACTIVITY",
+      "curatorScore": 8,
+      "score": 10,
+      "title": "ลุยสวนยายหนิง สายฟ้า-พายุ ขุดดิน-เก็บผัก แม่ชม ปลื้ม บอกรับ",
+      "url": "https://www.khaosod.co.th/wpapp/uploads/2021/01/2-146.jpg",
+      "width": 1920,
+      "height": 1080,
+      "techBad": null,
+      "_storyAnchor": false,
+      "_rescued": false,
+      "_curatorScoreBeforeGuard": null
+    },
+    {
+      "index": 5,
+      "role": "CONTEXT_SCENE",
+      "curatorScore": 7,
+      "score": 10,
+      "title": "ทายาทหมื่นล้าน หอบฟางช่วยงานยายหนิง แห่ชม ชมพู่ เลี้ยงลูกดี",
+      "url": "https://www.khaosod.co.th/wpapp/uploads/2022/12/%E0%B8%94%E0%B8%B5%E0%B8%A1%E0%B8%B2%E0%B8%81Edit.jp",
+      "width": 1200,
+      "height": 675,
+      "techBad": null,
+      "_storyAnchor": false,
+      "_rescued": false,
+      "_curatorScoreBeforeGuard": null
+    },
+    {
+      "index": 6,
+      "role": "RELATIONSHIP",
+      "curatorScore": 9,
+      "score": 10,
+      "title": "ยายหนิง คุณแม่ชมพู่ อารยา บินเดี่ยวไปอเมริกา เปิดภาพไปเยี่ยม",
+      "url": "https://static.thairath.co.th/media/Dtbezn3nNUxytg04ay0Dcstu1o8SxepQCtzglXnlXeB5bY.jpg",
+      "width": 736,
+      "height": 1000,
+      "techBad": null,
+      "_storyAnchor": false,
+      "_rescued": false,
+      "_curatorScoreBeforeGuard": null
+    },
+    {
+      "index": 7,
+      "role": "LOW_PRIORITY",
+      "curatorScore": 6,
+      "score": 10,
+      "title": "วิถีลูกคุณหนู 3 พี่น้อง สายฟ้า-พายุ น้องเกล ลุยสวนคุณยายหนิง",
+      "url": "https://i.ytimg.com/vi/_ERBMOkd6Ho/sddefault.jpg",
+      "width": 640,
+      "height": 480,
+      "techBad": null,
+      "_storyAnchor": false,
+      "_rescued": false,
+      "_curatorScoreBeforeGuard": 3
+    }
+  ],
+  "normalizedStoryType": "nature_learning",
+  "rawStoryType": "nature_learning",
+  "storyAnchorCandidates": [
+    {
+      "title": "ชมพู่ อารยา' หาเวลาสวีตสามี รับอยากมีลูกสาว รอ สายฟ้า-พายุ",
+      "url": "https://www.khaosod.co.th/wpapp/uploads/2018/06/S__21397541.jpg",
+      "role": "HERO_FACE",
+      "judgeScore": 6,
+      "curatorScore": 6,
+      "curatorScoreBeforeGuard": 5,
+      "rescued": true
+    }
+  ],
+  "candidateBucketCounts": {
+    "totalBeforeDedup": 30,
+    "totalAfterDedup": 28,
+    "storyAnchor": 2,
+    "other": 26,
+    "sentToJudge": 24
+  },
+  "needManualReview": false,
+  "noStoryAnchorFallbackReason": null
+}

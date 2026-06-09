@@ -663,6 +663,13 @@ export async function POST(request) {
     if (multiAgentResult.status === 'rejected') {
       console.error('[AutoCover] MultiAgent search failed:', multiAgentResult.reason?.message);
     }
+    // ★ Fix 25: Transfer story anchor diagnostics to identity
+    if (multiAgentImages._storyAnchorCandidates) {
+      identity._storyAnchorCandidates = multiAgentImages._storyAnchorCandidates;
+    }
+    if (multiAgentImages._bucketCounts) {
+      identity._bucketCounts = multiAgentImages._bucketCounts;
+    }
 
     // ═══════════════════════════════════════════════════════
     // Step 2.5: Merge Entity-First images (priority) + MultiAgent images (fallback)
@@ -1427,6 +1434,50 @@ export async function POST(request) {
       // ถ้า Curator ล้มเหลว → ใช้ role เดิมจาก Judge (ไม่พัง!)
     }
 
+    // ★ Fix 27: Curator Story Anchor Relevance Guard
+    // Prevent story-relevant images from being killed by low curator relevance
+    {
+      const anchorKeywords = identity?.storyAnchorQueries || [];
+      const anchorKwWords = [];
+      const personWords = new Set();
+      [identity?.mainCharacter, identity?.secondaryCharacter, ...(identity?.characters || [])]
+        .filter(Boolean).forEach(n => n.split(/[\s]+/).filter(w => w.length >= 2).forEach(w => personWords.add(w)));
+      const GENERIC_WEAK = new Set(['ลูก','แม่','พ่อ','หลาน','ครอบครัว','น้อง','เอ','กับ','พา','ที่','ใน','มา','ไป','ให้','ได้','กัน','อยู่','มี','เป็น','ว่า','ภาพ','รูป','พร้อม','เผย','เปิด','การ','เลี้ยง','1','2']);
+      for (const q of anchorKeywords) {
+        const words = q.split(/[\s,+/]+/).filter(w => w.length >= 2);
+        for (const w of words) { if (!personWords.has(w) && !GENERIC_WEAK.has(w)) anchorKwWords.push(w); }
+      }
+      // Also from keyScenes, place_names, celebratedAction
+      [...(identity?.keyScenes || []), ...(identity?.specific_details?.place_names || []), identity?.coreStory?.celebratedAction].filter(Boolean).forEach(src => {
+        src.split(/[\s,+/]+/).filter(w => w.length >= 2).forEach(w => { if (!personWords.has(w) && !GENERIC_WEAK.has(w)) anchorKwWords.push(w); });
+      });
+      const uniqueAnchorKw = [...new Set(anchorKwWords)];
+
+      if (uniqueAnchorKw.length > 0) {
+        let guardedCount = 0;
+        for (const img of imageBuffers) {
+          const titleText = `${img.title || ''} ${img.snippet || ''}`.toLowerCase();
+          const isAnchorTitle = uniqueAnchorKw.some(kw => titleText.includes(kw.toLowerCase()));
+          if (isAnchorTitle || img._storyAnchor) {
+            const oldScore = img.curatorScore;
+            const oldRole = img.role;
+            if (img.curatorScore !== undefined && img.curatorScore < 6) {
+              img._curatorScoreBeforeGuard = img.curatorScore;
+              img.curatorScore = Math.max(6, img.curatorScore);
+              guardedCount++;
+            }
+            if (img.role === 'LOW_PRIORITY') {
+              img.role = img._storyAnchor ? 'STORY_ANCHOR' : 'CONTEXT_SCENE';
+            }
+            if (oldScore !== img.curatorScore || oldRole !== img.role) {
+              console.log(`[Curator] ★ Story Anchor Guard: "${(img.title || '').substring(0, 40)}" relevance ${oldScore}→${img.curatorScore}, role ${oldRole}→${img.role}`);
+            }
+          }
+        }
+        if (guardedCount > 0) console.log(`[Curator] ★ Guarded ${guardedCount} story anchor images from low relevance`);
+      }
+    }
+
     // ★★★ Character Focus Rule: ถ้า heroImage ไม่มีหน้าคน (hasFaces=false)
     // และมีภาพอื่นที่มีหน้าคน + curatorScore สูงกว่า → swap heroImage
     // ป้องกันปัญหา: hero slot กลายเป็นภาพวิวทะเล/สถานที่ ไม่มีตัวละครหลัก
@@ -1719,6 +1770,30 @@ export async function POST(request) {
       const heroReady = imageBuffers.filter(img => img._layoutFitness?.hero >= 8).length;
       const circleReady = imageBuffers.filter(img => img._layoutFitness?.circle >= 8).length;
       console.log(`[LayoutFitness]   Hero-ready: ${heroReady}, Circle-ready: ${circleReady}`);
+    }
+
+    // ★ Fix 28: STORY_ANCHOR hard rule variables (declared before check)
+    let needManualReview = false;
+    let noStoryAnchorFallbackReason = null;
+
+    // ★ Fix 28: STORY_ANCHOR hard rule — detect missing story anchor
+    {
+      const coverageRequired = identity?.coverageRequired || [];
+      const storyAnchorRequired = coverageRequired.includes('STORY_ANCHOR');
+      if (storyAnchorRequired) {
+        const hasStoryAnchor = imageBuffers.some(img =>
+          ['STORY_ANCHOR', 'CONTEXT_SCENE', 'KEY_ACTIVITY'].includes(img.role) &&
+          img.role !== 'LOW_PRIORITY' && img.role !== 'TECHNICAL_BAD'
+        );
+        if (!hasStoryAnchor) {
+          needManualReview = true;
+          noStoryAnchorFallbackReason = 'No STORY_ANCHOR/CONTEXT_SCENE/KEY_ACTIVITY survived Judge+Curator pipeline';
+          console.warn(`[Coverage] ⚠️ NEED_MANUAL_REVIEW: ${noStoryAnchorFallbackReason}`);
+          console.warn(`[Coverage] ⚠️ Available roles: ${[...new Set(imageBuffers.map(i => i.role))].join(', ')}`);
+        } else {
+          console.log(`[Coverage] ✅ STORY_ANCHOR check passed — story-relevant images survived pipeline`);
+        }
+      }
     }
 
     // Step 7: AI Slot Assignment (with cover library reference)
@@ -2490,7 +2565,25 @@ Return JSON:
           width: img.width || 0,
           height: img.height || 0,
           techBad: img._techBadReason || null,
+          _storyAnchor: img._storyAnchor || false,
+          _rescued: img._rescued || false,
+          _curatorScoreBeforeGuard: img._curatorScoreBeforeGuard ?? null,
         })),
+        // ★ Fix 28: Story anchor diagnostics
+        normalizedStoryType: identity.storyType || 'default',
+        rawStoryType: identity.rawStoryType || identity.storyType || null,
+        storyAnchorCandidates: imageBuffers.filter(img => img._storyAnchor).map(img => ({
+          title: (img.title || '').slice(0, 80),
+          url: (img.url || '').slice(0, 100),
+          role: img.role,
+          judgeScore: img.score || 0,
+          curatorScore: img.curatorScore || 0,
+          curatorScoreBeforeGuard: img._curatorScoreBeforeGuard ?? null,
+          rescued: img._rescued || false,
+        })),
+        candidateBucketCounts: identity._bucketCounts || null,
+        needManualReview: needManualReview || false,
+        noStoryAnchorFallbackReason: noStoryAnchorFallbackReason || null,
       };
       
       // Write JSON
@@ -2573,7 +2666,10 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
     }
 
     return NextResponse.json({
-      success: true,
+      success: !needManualReview,
+      status: needManualReview ? 'NEED_MANUAL_REVIEW' : 'SUCCESS',
+      needManualReview: needManualReview || false,
+      noStoryAnchorFallbackReason: noStoryAnchorFallbackReason || null,
       base64,
       templateUsed: chosenTemplate,
       imageCount: imageBuffers.length,
@@ -2596,6 +2692,9 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
         visualPriority: identity.visualPriority || {},
         storyAnchorQueries: identity.storyAnchorQueries || [],
       },
+      // ★ Fix 28: Add normalizedStoryType to response identity
+      normalizedStoryType: identity.storyType || 'default',
+      rawStoryType: identity.rawStoryType || identity.storyType || null,
       // ★ FIX 18: Enhanced aiReview with slot audit data
       aiReview: {
         storyType: identity.storyType || 'general',
@@ -2652,6 +2751,21 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
           title: (img.title || '').slice(0, 50),
           url: (img.url || '').slice(0, 80),
           techBad: img._techBadReason || null,
+          _storyAnchor: img._storyAnchor || false,
+          _rescued: img._rescued || false,
+        })),
+        // ★ Fix 28: Story anchor diagnostics in aiReview
+        normalizedStoryType: identity.storyType || 'default',
+        rawStoryType: identity.rawStoryType || identity.storyType || null,
+        needManualReview: needManualReview || false,
+        noStoryAnchorFallbackReason: noStoryAnchorFallbackReason || null,
+        storyAnchorCandidates: imageBuffers.filter(img => img._storyAnchor).map(img => ({
+          title: (img.title || '').slice(0, 80),
+          role: img.role,
+          judgeScore: img.score || 0,
+          curatorScore: img.curatorScore || 0,
+          curatorScoreBeforeGuard: img._curatorScoreBeforeGuard ?? null,
+          rescued: img._rescued || false,
         })),
       },
       // FIX C: Cover Praising Test results
