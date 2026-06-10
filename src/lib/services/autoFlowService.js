@@ -356,6 +356,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
           emotionalBlueprint: blueprint,
           researchData: researchItems.length > 0 ? { items: researchItems } : null,
           factPool: factPool,
+          focusAngle, // ★ มุมเล่าบังคับของ angle นี้ — กัน 3 มุมเขียนลู่เข้าหากัน
           workflowId: _autoWorkflowId,
           user: _user,
         });

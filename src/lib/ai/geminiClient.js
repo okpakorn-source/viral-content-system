@@ -1,11 +1,13 @@
 /**
  * ========================================
- * GEMINI CLIENT — Google Gemini 2.5 Flash
+ * GEMINI CLIENT — Google Gemini 3.5 Flash
  * ========================================
- * ใช้สำหรับ: Extraction (เร็ว + ถูก)
- * ราคา: $0.075/M input tokens (ถูกกว่า GPT-4o 50x!)
+ * ใช้สำหรับ: Extraction (เร็ว + ถูก + แม่น)
+ * ★ อัปเกรด 10 มิ.ย. 2026: gemini-2.5-pro → gemini-3.5-flash (GA stable)
+ *   - ใหม่กว่า 2 รุ่น, เร็วกว่า ~4 เท่า, ราคา $1.50/$9.00 ต่อ 1M tokens
+ *   - ของเดิมตั้ง default เป็น "Pro" ทั้งที่คอมเมนต์ตั้งใจใช้ Flash (แพง+ช้าโดยไม่จำเป็น)
  * Context window: 1M tokens
- * 
+ *
  * ตั้งค่า: GEMINI_API_KEY ใน .env
  * สมัครฟรี: https://aistudio.google.com
  */
@@ -31,7 +33,7 @@ function getGeminiClient() {
  * เรียก Gemini — ส่ง prompt + response เป็น JSON
  * เหมาะสำหรับ: extraction, summarization, fast tasks
  */
-export async function callGemini({ prompt, model = 'gemini-2.5-pro', temperature = 0.3, maxTokens = 4000 }) {
+export async function callGemini({ prompt, model = 'gemini-3.5-flash', temperature = 0.3, maxTokens = 4000 }) {
   const client = getGeminiClient();
   if (!client) throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า — ไปตั้งค่าที่ Settings');
 
@@ -101,7 +103,7 @@ export function isGeminiAvailable() {
  * เรียก Gemini Vision — ส่งภาพ (Base64) เข้าไปวิเคราะห์
  * images: [{ data: "base64...", mimeType: "image/jpeg" }, ...]
  */
-export async function callGeminiVision({ prompt, images, model = 'gemini-2.5-pro', temperature = 0.2, maxTokens = 4000 }) {
+export async function callGeminiVision({ prompt, images, model = 'gemini-3.5-flash', temperature = 0.2, maxTokens = 4000 }) {
   const client = getGeminiClient();
   if (!client) throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า');
 
