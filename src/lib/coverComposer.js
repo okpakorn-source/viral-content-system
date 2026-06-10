@@ -55,6 +55,45 @@ const THAI_FONT_CDN_URL =
 /** @type {string | null} */
 let _cachedFontBase64 = null;
 
+// ═══ FONTCONFIG SETUP (Linux/Vercel) ═══
+// librsvg (ตัว render SVG ของ sharp) ไม่รองรับ @font-face แบบ data-URI — มันหาฟอนต์ผ่าน fontconfig จากดิสก์เท่านั้น
+// บน Windows/macOS รอดเพราะมีฟอนต์ไทยในระบบ แต่ Vercel Linux ไม่มี → ข้อความไทยกลายเป็น □□□
+// ทางแก้: เขียนฟอนต์ลง /tmp + ชี้ FONTCONFIG ไปหา (และ map sans-serif → NotoSansThai ให้ SVG ทุกตัวในไฟล์นี้)
+let _fontconfigReady = false;
+async function ensureThaiFontconfig() {
+  if (_fontconfigReady || process.platform !== 'linux') { _fontconfigReady = true; return; }
+  try {
+    const fontDir = '/tmp/vf-fonts';
+    const fontFile = path.join(fontDir, 'NotoSansThai-Bold.ttf');
+    fs.mkdirSync(fontDir, { recursive: true });
+    if (!fs.existsSync(fontFile)) {
+      const b64 = await loadThaiFontBase64();
+      if (!b64) { _fontconfigReady = true; return; }
+      fs.writeFileSync(fontFile, Buffer.from(b64, 'base64'));
+    }
+    const confFile = path.join(fontDir, 'fonts.conf');
+    if (!fs.existsSync(confFile)) {
+      fs.writeFileSync(confFile, `<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>${fontDir}</dir>
+  <cachedir>${fontDir}/cache</cachedir>
+  <match target="pattern">
+    <test qual="any" name="family"><string>sans-serif</string></test>
+    <edit name="family" mode="assign" binding="same"><string>NotoSansThai</string></edit>
+  </match>
+</fontconfig>
+`);
+    }
+    process.env.FONTCONFIG_PATH = fontDir;
+    process.env.FONTCONFIG_FILE = confFile;
+    console.log('[Composer] ✅ Thai fontconfig ready:', fontFile);
+  } catch (e) {
+    console.log('[Composer] ⚠️ fontconfig setup failed (non-fatal):', e.message);
+  }
+  _fontconfigReady = true;
+}
+
 /**
  * Load Noto Sans Thai Bold as a base64 string.
  * Priority: local file → CDN (fetched once and cached in memory).
@@ -175,10 +214,12 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
         else cropH = Math.round(cropW / targetRatio);
       } else if (cropStrategy === 'portrait-upper') {
         // ★ Smart Zoom for Portrait Upper (ฮีโร่หลัก/คนสำคัญ):
-        // ★ FIX: pick ใหญ่สุดแล้ว — zoom ระดับพอดี (ไม่แตก)
+        // ★ HERO DNA (10 มิ.ย.): เดิม 6x faceSize = หน้าแค่ ~17% ของช่อง — ฮีโร่จมฉาก พื้นที่โล่งเต็มปก
+        //   ปกไวรัลจริงหน้าฮีโร่ ~25-30% ของช่อง → 3.5x และยอม zoom ลึกเมื่อต้นฉบับมีพิกเซลพอ
         const faceSize = Math.max(focusW, focusH);
-        // ★ zoom 6x faceSize — เห็นหน้า+ไหล่+บริบท ไม่ zoom จนแตก
-        const desiredH = Math.max(faceSize * 6, srcH * 0.6);
+        // กันภาพแตก: crop สูงอย่างน้อย ~60% ของขนาดช่องจริง (upscale ≤ ~1.67x) — ไม่ใช่สัดส่วนของต้นฉบับ
+        const minSharpH = Math.min(srcH, Math.round(h * 0.6));
+        const desiredH = Math.max(faceSize * 3.5, minSharpH);
         const desiredW = desiredH * targetRatio;
 
         cropH = Math.round(Math.min(desiredH, srcH));
@@ -189,8 +230,8 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
           cropH = Math.round(cropW / targetRatio);
         }
 
-        // ★ ป้องกัน zoom จนภาพแตก — ต้องกว้างอย่างน้อย 55% ของรูปต้นฉบับ
-        const minW = Math.round(srcW * 0.55);
+        // ★ กันแตกด้านกว้าง: อิงขนาดช่องจริง (เดิม 55% ของต้นฉบับ = ห้ามซูมแม้พิกเซลเหลือเฟือ)
+        const minW = Math.min(srcW, Math.round(w * 0.6));
         if (cropW < minW) {
           cropW = Math.min(minW, srcW);
           cropH = Math.round(cropW / targetRatio);
@@ -740,6 +781,9 @@ function getLayout(layoutName, W, H, numPhotos) {
 // 6. circleSmall support
 
 export async function composeCover(plan, imageBuffers, faceDataMap = null, imageRoles = []) {
+  // ★ ต้องตั้ง fontconfig ก่อน sharp แตะ SVG ใดๆ ใน process นี้ (fontconfig init ครั้งเดียวแล้วล็อก)
+  await ensureThaiFontconfig();
+
   const photoOrder = plan.photoOrder || imageBuffers.map((_, i) => i);
 
   // ★ FIX (10 มิ.ย.): faceDataMap ถูกสร้างด้วย key = candidateId (route Step 3) แต่โค้ดเดิมทั้งไฟล์ lookup ด้วย
