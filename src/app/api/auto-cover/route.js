@@ -2619,6 +2619,44 @@ Return JSON:
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`[AutoCover] ✅ Complete! Score: ${score}/10, Time: ${elapsed}s, Template: ${chosenTemplate}`);
 
+    // ═══════════════════════════════════════════════════════════
+    // ★ Phase 4: Final Save Gate
+    // Evaluate whether the cover should be saved as SUCCESS
+    // or flagged as NEED_MANUAL_REVIEW before gallery save.
+    // ═══════════════════════════════════════════════════════════
+    let finalSaveGateResult = { saveGatePassed: true, saveGateStatus: 'SUCCESS', saveGateBlockers: [], manualReviewReason: null, summary: {} };
+    try {
+      const { evaluateFinalSaveGate } = await import('@/lib/services/finalSaveGate');
+      finalSaveGateResult = evaluateFinalSaveGate({
+        finalSlotAudit: {
+          passed: (slotAuditIssues || []).length === 0 || (slotAuditFixes || []).length >= (slotAuditIssues || []).length,
+          issues: slotAuditIssues || [],
+          fixes: slotAuditFixes || [],
+        },
+        compositionQA,
+        qualityGateDiagnostics,
+        storyMatchScore,
+        duplicateSlotDetected: (slotAuditIssues || []).some(i => i.type?.startsWith('DUPLICATE_')),
+        imageBuffers,
+        slotAssignment,
+        identity,
+        chosenTemplate,
+        score,
+        dominantElement,
+        needManualReview,
+      });
+
+      // Override needManualReview from save gate
+      if (!finalSaveGateResult.saveGatePassed) {
+        needManualReview = true;
+        console.log(`[AutoCover] ★ Phase 4 Save Gate: NEED_MANUAL_REVIEW — ${finalSaveGateResult.saveGateBlockers.length} blocker(s)`);
+      } else {
+        console.log(`[AutoCover] ★ Phase 4 Save Gate: PASSED — cover will save as SUCCESS`);
+      }
+    } catch (sgErr) {
+      console.warn('[AutoCover] ⚠️ Final Save Gate error (non-critical):', sgErr.message);
+    }
+
     // สร้าง newsHash สำหรับ regenerate
     let newsHash = '';
     try {
@@ -2853,6 +2891,12 @@ Return JSON:
         qualityGate: qualityGateDiagnostics || null,
         needManualReview: needManualReview || false,
         noStoryAnchorFallbackReason: noStoryAnchorFallbackReason || null,
+        // ★ Phase 4: Final Save Gate diagnostics
+        finalSaveGate: finalSaveGateResult || null,
+        saveGatePassed: finalSaveGateResult?.saveGatePassed ?? true,
+        saveGateStatus: finalSaveGateResult?.saveGateStatus || 'SUCCESS',
+        saveGateBlockers: finalSaveGateResult?.saveGateBlockers || [],
+        manualReviewReason: finalSaveGateResult?.manualReviewReason || null,
       };
       
       // Write JSON
@@ -2939,6 +2983,14 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
       status: needManualReview ? 'NEED_MANUAL_REVIEW' : 'SUCCESS',
       needManualReview: needManualReview || false,
       noStoryAnchorFallbackReason: noStoryAnchorFallbackReason || null,
+      // ★ Phase 4: Final Save Gate fields
+      finalSaveGate: finalSaveGateResult || null,
+      saveGatePassed: finalSaveGateResult?.saveGatePassed ?? true,
+      saveGateStatus: finalSaveGateResult?.saveGateStatus || 'SUCCESS',
+      saveGateBlockers: finalSaveGateResult?.saveGateBlockers || [],
+      savedToGallery: !needManualReview,
+      galleryStatus: needManualReview ? 'NEED_MANUAL_REVIEW' : 'SAVED',
+      manualReviewReason: finalSaveGateResult?.manualReviewReason || null,
       base64,
       templateUsed: chosenTemplate,
       imageCount: imageBuffers.length,
@@ -3028,6 +3080,12 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
         rawStoryType: identity.rawStoryType || identity.storyType || null,
         needManualReview: needManualReview || false,
         noStoryAnchorFallbackReason: noStoryAnchorFallbackReason || null,
+        // ★ Phase 4: Final Save Gate in aiReview
+        finalSaveGate: finalSaveGateResult || null,
+        saveGatePassed: finalSaveGateResult?.saveGatePassed ?? true,
+        saveGateStatus: finalSaveGateResult?.saveGateStatus || 'SUCCESS',
+        saveGateBlockers: finalSaveGateResult?.saveGateBlockers || [],
+        manualReviewReason: finalSaveGateResult?.manualReviewReason || null,
         storyAnchorCandidates: imageBuffers.filter(img => img._storyAnchor).map(img => ({
           title: (img.title || '').slice(0, 80),
           role: img.role,
