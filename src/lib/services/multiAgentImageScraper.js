@@ -520,6 +520,11 @@ async function agentYouTubeFrames(identity) {
     const qualityFrames = [];
 
     // === Tier 2.8: Try Playwright Frame Capture first (highly reliable on local environment) ===
+    // ★ FIX (11 มิ.ย.): Vercel serverless ไม่มี Chrome binary — การ launch browser พังแรงระดับ process
+    //   (เกิน try/catch) → ข้ามไป Tier 3 storyboard (HTTP ล้วน) บน serverless
+    if (process.env.VERCEL) {
+      console.log('[Agent2: YouTube] ⏭️ Skip Playwright on serverless (no browser) → Tier 3 storyboard');
+    } else
     try {
       console.log(`[Agent2: YouTube] 🚀 Tier 2.8: Trying Playwright frame capture...`);
       const { captureVideoFrames } = await import('@/lib/services/playwrightFrameCapture');
@@ -1984,9 +1989,10 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
     ...contextImages.filter(img => !googleQueue.includes(img)),
     ...tavilyImages.filter(img => !googleQueue.includes(img) && !contextImages.includes(img)),
   ]; // ★ รวม Tavily เข้า context queue
-  // ★ Agent 0: ภาพจากข่าวต้นทาง = ตรงเนื้อที่สุด → ขึ้นหัวคิว (เข้ารอบ Judge ก่อนใคร)
-  const articleQueue = articleImages.filter(img => !googleQueue.includes(img));
-  googleQueue.unshift(...articleQueue);
+  // ★ Agent 0 (ปรับ 11 มิ.ย. ตาม feedback): ภาพจากข่าวต้นทางสมัยนี้มักเป็นปกกราฟิกทางการ/มีตัวหนังสือ ใช้จริงไม่ได้
+  //   → ไม่ให้ priority พิเศษ เข้าคิว context ปกติ แล้วให้ Judge + zero-tolerance กรองเหมือนภาพอื่น
+  const articleQueue = articleImages.filter(img => !googleQueue.includes(img) && !contextQueue.includes(img));
+  contextQueue.push(...articleQueue);
   // ★ Agent 2: เฟรม YouTube = ภาพคน (สัมภาษณ์/vlog) → เข้าฝั่ง person ต่อท้าย Google
   const youtubeQueue = youtubeImages.filter(img => !googleQueue.includes(img));
   googleQueue.push(...youtubeQueue);
