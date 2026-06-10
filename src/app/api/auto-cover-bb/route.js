@@ -91,14 +91,15 @@ export async function POST(request) {
     const pick = heroFirst.slice(0, 4);
     console.log(`[CoverBB] Step 3: Picked ${pick.length} images (hero: ${pick[0]?.role || '?'} score ${pick[0]?.score || '?'})`);
 
-    // ── Step 4: ข้อความปก ──
-    const typography = (identity.typography && (identity.typography.main || identity.typography.punch))
-      ? identity.typography
-      : {
+    // ── Step 4: ข้อความปก — ผู้ใช้เลือกแนว "คลีนไม่มีข้อความ" (11 มิ.ย.) → ไม่ส่ง text ไป Bannerbear
+    //   (เปิดกลับได้ด้วย env COVER_BB_TEXT=1)
+    const typography = process.env.COVER_BB_TEXT === '1'
+      ? {
           hook: identity.coverEmotion || 'ข่าวเด่น',
           main: (newsTitle || identity.mainCharacter || '').slice(0, 34),
           punch: (identity.emotionalHook || identity.coreStory?.celebratedAction || '').slice(0, 46),
-        };
+        }
+      : {};
 
     // ── Step 5: โยนให้ Bannerbear ประกอบ ──
     console.log('[CoverBB] Step 5: Rendering via Bannerbear...');
