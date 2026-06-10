@@ -406,8 +406,10 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
     }
 
     // Fallback:
-    let position = 'centre';
-    
+    // ★ FIX (10 มิ.ย.): default 'centre' ตัดหัวคนในภาพแนวตั้ง (หน้าอยู่ส่วนบนแต่ครอปเอากลางภาพ) —
+    //   เปลี่ยนเป็น attention (saliency เกาะใบหน้า/จุดเด่น) เพราะภาพข่าวแทบทั้งหมดมีคนเป็นประธาน
+    let position = sharp.strategy.attention;
+
     // Check fade options to shift the focal point away from faded edges (to keep the main subject prominent)
     if (opts.fadeLeftPx && opts.fadeLeftPx > 50) {
       position = 'east'; // align right to protect the right side of the image
@@ -740,6 +742,15 @@ function getLayout(layoutName, W, H, numPhotos) {
 export async function composeCover(plan, imageBuffers, faceDataMap = null, imageRoles = []) {
   const photoOrder = plan.photoOrder || imageBuffers.map((_, i) => i);
 
+  // ★ FIX (10 มิ.ย.): faceDataMap ถูกสร้างด้วย key = candidateId (route Step 3) แต่โค้ดเดิมทั้งไฟล์ lookup ด้วย
+  //   String(index) → พลาดเงียบทุกภาพจริง = face-aware crop ไม่เคยทำงาน (หน้าโดนตัด/ครอปเพี้ยนมาตลอด)
+  //   getFD() ลอง candidateId ก่อน แล้วค่อย fallback เป็น index-key (ภาพ virtual ที่ set ด้วย String(newIndex))
+  const getFD = (idx) => {
+    if (!faceDataMap?.get) return null;
+    const cid = imageBuffers?.[idx]?.candidateId;
+    return (cid != null ? faceDataMap.get(cid) : null) || faceDataMap.get(String(idx)) || null;
+  };
+
   // ★ ดึง template จาก registry (6 template จริงจากหน้าปกข่าว) ★
   let templateData = null;
   let W, H, layoutSlots, layoutCircle, layoutCircleSmall;
@@ -812,7 +823,7 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null, image
   for (let si = 0; si < layoutSlots.length; si++) {
     const imgIdx = photoOrder[si];
     if (imgIdx === undefined || imgIdx >= imageBuffers.length) continue;
-    const fd = faceDataMap?.get?.(String(imgIdx));
+    const fd = getFD(imgIdx);
     if (!fd?.hasFaces || !fd.faces?.length) continue;
     
     const slot = layoutSlots[si];
@@ -835,7 +846,7 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null, image
   const heroSlot = layoutSlots.find(s => s.id === 'main' || s.role === 'hero');
   if (heroSlot) {
     const heroImgIdx = photoOrder[layoutSlots.indexOf(heroSlot)];
-    const heroFD = faceDataMap?.get?.(String(heroImgIdx));
+    const heroFD = getFD(heroImgIdx);
     const heroHasFace = heroFD?.hasFaces && heroFD.faces?.length > 0;
     
     if (!heroHasFace) {
@@ -852,7 +863,7 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null, image
     // ★ ตรวจ bg_top/bg_bottom ด้วย — ถ้า face detection ล้มเหลว → ประมาณ face zone
     for (const bgSlot of layoutSlots.filter(s => s.id === 'bg_top' || s.id === 'bg_bottom')) {
       const bgImgIdx = photoOrder[layoutSlots.indexOf(bgSlot)];
-      const bgFD = faceDataMap?.get?.(String(bgImgIdx));
+      const bgFD = getFD(bgImgIdx);
       if (bgFD?.hasFaces || !bgImgIdx) continue;
       
       // ภาพ bg มักมีหน้าคนอยู่ตรงกลาง
@@ -997,7 +1008,7 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null, image
     const heroSlotIdx = layoutSlots.findIndex(s => s.id === 'main' || s.role === 'hero');
     if (heroSlotIdx !== -1) {
       const heroImgIdx = photoOrder[heroSlotIdx];
-      const heroFD = faceDataMap?.get?.(String(heroImgIdx));
+      const heroFD = getFD(heroImgIdx);
       if (heroFD?.hasFaces && heroFD.faces?.length > 0) {
         // หาใบหน้าที่ใหญ่ที่สุดของ Hero (มักเป็นใบหน้าหลัก)
         const heroFace = [...heroFD.faces].sort((a, b) => b.width * b.height - a.x * a.y)[0];
@@ -1232,7 +1243,7 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null, image
     if (slot.shape === 'circle' && slot.diameter) {
       try {
         const d = Math.round(slot.diameter);
-        const slotFaceData = faceDataMap?.get?.(String(imgIdx)) || null;
+        const slotFaceData = getFD(imgIdx) || null;
         const circleImg = await createCircleImageColored(
           imageBuffers[imgIdx], d, slot.borderWidth || 4, slot.border || '#FFFFFF', slotFaceData
         );
@@ -1265,7 +1276,7 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null, image
       const innerH = safeH - bw * 2;
       if (innerW > 0 && innerH > 0) {
         try {
-          const slotFaceData = faceDataMap?.get?.(String(imgIdx)) || null;
+          const slotFaceData = getFD(imgIdx) || null;
           const slotStrategy = (slot.role === 'hero' || slot.id === 'main') ? 'center-face' : 'center-face';
           const resized = await smartCropPhoto(imageBuffers[imgIdx], innerW, innerH, slotFaceData, slotStrategy);
           composites.push({ input: resized, left: safeX + bw, top: safeY + bw });
@@ -1278,7 +1289,7 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null, image
       try {
         // ★ เลือก crop strategy ตาม role ของ slot + image role
         const slotRole = slot.role || slot.id || '';
-        const slotFaceData = faceDataMap?.get?.(String(imgIdx)) || null;
+        const slotFaceData = getFD(imgIdx) || null;
         const imageRole = imageRoles[imgIdx] || ''; // ★ Fix 30: image's content role
         let cropStrat;
         
@@ -1389,7 +1400,7 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null, image
     const borderColor = circleSlot.border || '#FFFFFF';
 
     // createCircleImage ต้องใช้ border สีที่ถูกต้อง
-    const circleFaceData = faceDataMap?.get?.(String(circleImgIdx)) || null;
+    const circleFaceData = getFD(circleImgIdx) || null;
     const circleBuf = await createCircleImageColored(
       imageBuffers[circleImgIdx], d, bw, borderColor, circleFaceData
     );

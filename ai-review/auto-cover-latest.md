@@ -1,23 +1,23 @@
-# AI Cover Review — 2026-06-10T15:25:56.455Z
+# AI Cover Review — 2026-06-10T15:46:24.795Z
 
 ## Story Identity
-- **Title**: แพรรี่หนุนฟอร์ดจนเติบโต
-- **Story Type**: relationship
-- **Main Visual Should Be**: ภาพแพรรี่ ไพรวัลย์กับฟอร์ด ปกรณ์ในบรรยากาศคู่รักอบอุ่นหรือกำลังทำงานไลฟ์สดขายของออนไลน์ เพื่อสื่อถึงการสนับสนุนและการเติบโตเคียงข้างกัน
-- **Coverage Required**: STORY_ANCHOR, RELATIONSHIP, KEY_ACTIVITY, HERO_FACE, EMOTION
-- **Coverage Optional**: HERO2, CONTEXT_SCENE, EVIDENCE
+- **Title**: ชมพู่พาลูกเรียนรู้ธรรมชาติ
+- **Story Type**: nature_learning
+- **Main Visual Should Be**: น้องสายฟ้าและน้องพายุอยู่ในสวนผักกับยายหนิงและชมพู่ ขณะปลูกผักหรือเรียนรู้ธรรมชาติในบรรยากาศอบอุ่นของครอบครัว
+- **Coverage Required**: STORY_ANCHOR, KEY_ACTIVITY, RELATIONSHIP, CONTEXT_SCENE, HERO_FACE, EMOTION
+- **Coverage Optional**: EVIDENCE
 
 ## Slot Assignment
-- **Hero Index**: #2 → role: HERO_FACE
-- **Hero Title**: เปิดเส้นทางชีวิต ไพรวัลย์ วรรณบุตร จากนักเทศน์สู่วันที่เป็น แพรรี่ ไพร
-- **Circle Index**: #4
-- **Photo Order**: [2,3,5,0]
-- **Template**: template_7
-- **Template Reason**: DNA/autoSelect → template_7
+- **Hero Index**: #0 → role: RELATIONSHIP
+- **Hero Title**: N/A
+- **Circle Index**: #null
+- **Photo Order**: [0,1,5]
+- **Template**: template_9
+- **Template Reason**: DNA/autoSelect → template_9
 - **Template Changed**: no
 
 ## Scores
-- **Overall Score**: 4/10
+- **Overall Score**: 8/10
 - **Story Match Score**: 8
 
 ## ★ Slot Audit (Fix 12-17)
@@ -28,7 +28,7 @@
 - **Fixes Applied**: []
 - **Duplicate Replacements**: []
 - **Rejected Candidates**: []
-- **Final Used CIDs**: cid_8pu30e, cid_fsrj6q, cid_l17lhk, cid_fr1fco, cid_73ntmn
+- **Final Used CIDs**: cid_t9x0fh, cid_f6zs7b, cid_rgs7d6
 - **YouTube Video IDs**: []
 
 ## ★ Face Detection Diagnostics (Fix 9)
@@ -37,36 +37,40 @@
 - **All Faces Empty**: No
 
 ## ★ Story Type Propagation (Fix 0)
-- **From GPT**: relationship
-- **After Coverage**: relationship
-- **coverageRequired**: [STORY_ANCHOR, RELATIONSHIP, KEY_ACTIVITY, HERO_FACE, EMOTION]
+- **From GPT**: nature_learning
+- **After Coverage**: nature_learning
+- **coverageRequired**: [STORY_ANCHOR, KEY_ACTIVITY, RELATIONSHIP, CONTEXT_SCENE, HERO_FACE, EMOTION]
 
 ## All Candidates
 | # | Role | Score | Tech Bad | Title |
 |---|------|-------|----------|-------|
-| 0 | RELATIONSHIP | 8 | - | แพรรี่ ไพรวัลย์ เผยปมเลิกแฟนหนุ่ม ครั้งน |
-| 1 | LOW_PRIORITY | 4 | - |  |
-| 2 | HERO_FACE | 8 | - | เปิดเส้นทางชีวิต ไพรวัลย์ วรรณบุตร จากนั |
-| 3 | RELATIONSHIP | 10 | - | แพรรี่" จูงมือ "ฟอร์ด" แฟนหนุ่มวัย 21 ปี |
-| 4 | RELATIONSHIP | 7 | - | เปิดใจ น้องฟอร์ด หนุ่มรุ่นน้องที่เลือก แ |
-| 5 | RELATIONSHIP | 9 | - | แพรรี่ ไพรวัลย์ เผยปมเลิกแฟนหนุ่ม ครั้งน |
-| 6 | LOW_PRIORITY | 3 | - | รวมรูปภาพของ ส่องไลฟ์สไตล์แฟชั่น "ฟอร์ด" |
-| 7 | LOW_PRIORITY | 3 | - |  |
+| 0 | RELATIONSHIP | 9 | - |  |
+| 1 | KEY_ACTIVITY | 9 | - |  |
+| 2 | LOW_PRIORITY | 4 | - |  |
+| 3 | LOW_PRIORITY | 4 | - |  |
+| 4 | LOW_PRIORITY | 4 | - |  |
+| 5 | CONTEXT_SCENE | 8 | - |  |
+| 6 | LOW_PRIORITY | 4 | - |  |
+| 7 | LOW_PRIORITY | 4 | - |  |
 
 ## Visual Priority
 ```json
 {
-  "ความสัมพันธ์แพรรี่กับฟอร์ด": 40,
-  "การสนับสนุนและสอนขายของออนไลน์": 25,
-  "ภาพหน้าชัดแพรรี่ ไพรวัลย์": 15,
-  "ภาพหน้าชัดฟอร์ด ปกรณ์": 10,
-  "บรรยากาศไลฟ์สดและทำงานออนไลน์": 10
+  "STORY_ANCHOR": 35,
+  "KEY_ACTIVITY": 25,
+  "RELATIONSHIP": 20,
+  "CONTEXT_SCENE": 10,
+  "HERO_FACE": 7,
+  "EMOTION": 3
 }
 ```
 
 ## Story Anchor Queries
-- แพรรี่ ไพรวัลย์ ฟอร์ด ปกรณ์ คู่รัก อบอุ่น
-- แพรรี่ ไพรวัลย์ ฟอร์ด ปกรณ์ ไลฟ์สดขายของออนไลน์
-- แพรรี่ ไพรวัลย์ สอนขายของออนไลน์ ฟอร์ด ปกรณ์
-- แพรรี่ ไพรวัลย์ ฟอร์ด ปกรณ์ ให้สัมภาษณ์ความสัมพันธ์
-- แพรรี่ ไพรวัลย์ ฟอร์ด ปกรณ์ เติบโตไปด้วยกัน
+- ชมพู่ อารยา ลูก สายฟ้า พายุ ปลูกผักสวนครัว
+- ชมพู่ อารยา ยายหนิง สวนผัก ลูกๆ
+- น้องสายฟ้า น้องพายุ ปลูกผัก ชมพู่ อารยา
+- ชมพู่ อารยา พาลูกเรียนรู้ธรรมชาติในสวน
+- ยายหนิง ชมพู่ อารยา หลาน ปลูกผัก
+- สวนยายหนิง ชมพู่ สายฟ้า พายุ
+- ชมพู่ อารยา ครอบครัว ทำสวน ปลูกผัก
+- น้องสายฟ้า น้องพายุ สวนผัก ยายหนิง

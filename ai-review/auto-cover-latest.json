@@ -1,50 +1,52 @@
 {
-  "timestamp": "2026-06-10T15:25:56.454Z",
-  "newsTitle": "แพรรี่หนุนฟอร์ดจนเติบโต",
-  "storyType": "relationship",
-  "mainVisualShouldBe": "ภาพแพรรี่ ไพรวัลย์กับฟอร์ด ปกรณ์ในบรรยากาศคู่รักอบอุ่นหรือกำลังทำงานไลฟ์สดขายของออนไลน์ เพื่อสื่อถึงการสนับสนุนและการเติบโตเคียงข้างกัน",
+  "timestamp": "2026-06-10T15:46:24.793Z",
+  "newsTitle": "ชมพู่พาลูกเรียนรู้ธรรมชาติ",
+  "storyType": "nature_learning",
+  "mainVisualShouldBe": "น้องสายฟ้าและน้องพายุอยู่ในสวนผักกับยายหนิงและชมพู่ ขณะปลูกผักหรือเรียนรู้ธรรมชาติในบรรยากาศอบอุ่นของครอบครัว",
   "coverageRequired": [
     "STORY_ANCHOR",
-    "RELATIONSHIP",
     "KEY_ACTIVITY",
+    "RELATIONSHIP",
+    "CONTEXT_SCENE",
     "HERO_FACE",
     "EMOTION"
   ],
   "coverageOptional": [
-    "HERO2",
-    "CONTEXT_SCENE",
     "EVIDENCE"
   ],
   "visualPriority": {
-    "ความสัมพันธ์แพรรี่กับฟอร์ด": 40,
-    "การสนับสนุนและสอนขายของออนไลน์": 25,
-    "ภาพหน้าชัดแพรรี่ ไพรวัลย์": 15,
-    "ภาพหน้าชัดฟอร์ด ปกรณ์": 10,
-    "บรรยากาศไลฟ์สดและทำงานออนไลน์": 10
+    "STORY_ANCHOR": 35,
+    "KEY_ACTIVITY": 25,
+    "RELATIONSHIP": 20,
+    "CONTEXT_SCENE": 10,
+    "HERO_FACE": 7,
+    "EMOTION": 3
   },
   "storyAnchorQueries": [
-    "แพรรี่ ไพรวัลย์ ฟอร์ด ปกรณ์ คู่รัก อบอุ่น",
-    "แพรรี่ ไพรวัลย์ ฟอร์ด ปกรณ์ ไลฟ์สดขายของออนไลน์",
-    "แพรรี่ ไพรวัลย์ สอนขายของออนไลน์ ฟอร์ด ปกรณ์",
-    "แพรรี่ ไพรวัลย์ ฟอร์ด ปกรณ์ ให้สัมภาษณ์ความสัมพันธ์",
-    "แพรรี่ ไพรวัลย์ ฟอร์ด ปกรณ์ เติบโตไปด้วยกัน"
+    "ชมพู่ อารยา ลูก สายฟ้า พายุ ปลูกผักสวนครัว",
+    "ชมพู่ อารยา ยายหนิง สวนผัก ลูกๆ",
+    "น้องสายฟ้า น้องพายุ ปลูกผัก ชมพู่ อารยา",
+    "ชมพู่ อารยา พาลูกเรียนรู้ธรรมชาติในสวน",
+    "ยายหนิง ชมพู่ อารยา หลาน ปลูกผัก",
+    "สวนยายหนิง ชมพู่ สายฟ้า พายุ",
+    "ชมพู่ อารยา ครอบครัว ทำสวน ปลูกผัก",
+    "น้องสายฟ้า น้องพายุ สวนผัก ยายหนิง"
   ],
   "slotAssignment": {
-    "heroIndex": 2,
-    "heroRole": "HERO_FACE",
-    "heroTitle": "เปิดเส้นทางชีวิต ไพรวัลย์ วรรณบุตร จากนักเทศน์สู่วันที่เป็น แพรรี่ ไพร",
-    "circleIndex": 4,
+    "heroIndex": 0,
+    "heroRole": "RELATIONSHIP",
+    "heroTitle": "",
+    "circleIndex": null,
     "photoOrder": [
-      2,
-      3,
-      5,
-      0
+      0,
+      1,
+      5
     ]
   },
-  "templateUsed": "template_7",
-  "templateReason": "DNA/autoSelect → template_7",
+  "templateUsed": "template_9",
+  "templateReason": "DNA/autoSelect → template_9",
   "templateChanged": false,
-  "score": 4,
+  "score": 8,
   "storyMatchScore": 8,
   "finalSlotAudit": {
     "issues": [],
@@ -53,30 +55,28 @@
   },
   "duplicateSlotDetected": false,
   "finalUsedCandidateIds": [
-    "cid_8pu30e",
-    "cid_fsrj6q",
-    "cid_l17lhk",
-    "cid_fr1fco",
-    "cid_73ntmn"
+    "cid_t9x0fh",
+    "cid_f6zs7b",
+    "cid_rgs7d6"
   ],
   "rejectedSlotCandidates": [],
   "whySimpleTemplateWasChosen": null,
   "normalizedYoutubeVideoIds": [],
   "duplicateReplacement": [],
   "storyTypePropagationCheck": {
-    "fromGPT": "relationship",
-    "afterCoverage": "relationship"
+    "fromGPT": "nature_learning",
+    "afterCoverage": "nature_learning"
   },
   "allCandidates": [
     {
       "index": 0,
       "role": "RELATIONSHIP",
-      "curatorScore": 8,
-      "score": 8,
-      "title": "แพรรี่ ไพรวัลย์ เผยปมเลิกแฟนหนุ่ม ครั้งนี้จริง ฟอร์ด ยอมรับไ",
-      "url": "https://static.thairath.co.th/media/Dtbezn3nNUxytg04avc7gSs2umveRkXtzGCysQL6OexUVW.webp",
-      "width": 1280,
-      "height": 1930,
+      "curatorScore": 9,
+      "score": 10,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/resize/w728/q80/jpg",
+      "width": 728,
+      "height": 908,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -84,13 +84,13 @@
     },
     {
       "index": 1,
-      "role": "LOW_PRIORITY",
-      "curatorScore": 4,
-      "score": 9,
+      "role": "KEY_ACTIVITY",
+      "curatorScore": 9,
+      "score": 10,
       "title": "",
-      "url": "https://s359.kapook.com/pagebuilder/a631c2ae-f05f-4434-ad22-362e9034a378.jpg",
-      "width": 514,
-      "height": 644,
+      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+      "width": 1440,
+      "height": 1920,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -98,13 +98,13 @@
     },
     {
       "index": 2,
-      "role": "HERO_FACE",
-      "curatorScore": 8,
-      "score": 9,
-      "title": "เปิดเส้นทางชีวิต ไพรวัลย์ วรรณบุตร จากนักเทศน์สู่วันที่เป็น ",
-      "url": "https://resource.nationtv.tv/uploads/images/contents/w1024/2023/09/bqmULBm7aV6gr4x82rnV.webp?x-image",
-      "width": 1200,
-      "height": 800,
+      "role": "LOW_PRIORITY",
+      "curatorScore": 4,
+      "score": 10,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/resize/w728/q80/jpg",
+      "width": 728,
+      "height": 908,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -112,13 +112,13 @@
     },
     {
       "index": 3,
-      "role": "RELATIONSHIP",
-      "curatorScore": 10,
-      "score": 7,
-      "title": "แพรรี่\" จูงมือ \"ฟอร์ด\" แฟนหนุ่มวัย 21 ปี เคลียร์คำครหา รักจร",
-      "url": "https://s.isanook.com/ns/0/ui/1760/8800838/335896326_1279604325961413_6504887099828668285_n.jpg",
-      "width": 1506,
-      "height": 2048,
+      "role": "LOW_PRIORITY",
+      "curatorScore": 4,
+      "score": 10,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/resize/w728/q80/jpg",
+      "width": 728,
+      "height": 908,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -126,13 +126,13 @@
     },
     {
       "index": 4,
-      "role": "RELATIONSHIP",
-      "curatorScore": 7,
-      "score": 7,
-      "title": "เปิดใจ น้องฟอร์ด หนุ่มรุ่นน้องที่เลือก แพรรี่ เป็นแฟน ยืนยัน",
-      "url": "https://static.thairath.co.th/media/dFQROr7oWzulq5Fa5BwILd1RhCpgW38CFM4zibsdjIuTMEWSrqq78yRphjLbuHHI",
-      "width": 1280,
-      "height": 720,
+      "role": "LOW_PRIORITY",
+      "curatorScore": 4,
+      "score": 10,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/resize/w728/q80/jpg",
+      "width": 728,
+      "height": 908,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -140,13 +140,13 @@
     },
     {
       "index": 5,
-      "role": "RELATIONSHIP",
-      "curatorScore": 9,
-      "score": 7,
-      "title": "แพรรี่ ไพรวัลย์ เผยปมเลิกแฟนหนุ่ม ครั้งนี้จริง ฟอร์ด ยอมรับไ",
-      "url": "https://static.thairath.co.th/media/dFQROr7oWzulq5Fa6rBiePEo02XsxSZ7eqc5kdfxLbGFVhjvMfsV2VXaf41sH3Hj",
-      "width": 1280,
-      "height": 720,
+      "role": "CONTEXT_SCENE",
+      "curatorScore": 8,
+      "score": 9,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+      "width": 1440,
+      "height": 1920,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -155,12 +155,12 @@
     {
       "index": 6,
       "role": "LOW_PRIORITY",
-      "curatorScore": 3,
-      "score": 6,
-      "title": "รวมรูปภาพของ ส่องไลฟ์สไตล์แฟชั่น \"ฟอร์ด\" แฟน \"แพรรี่ ไพรวัลย",
-      "url": "https://s.isanook.com/me/0/ui/17/86449/346288640_116034224819849_2364043417907848446_n.jpg",
-      "width": 865,
-      "height": 1080,
+      "curatorScore": 4,
+      "score": 9,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+      "width": 1440,
+      "height": 1920,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -169,34 +169,28 @@
     {
       "index": 7,
       "role": "LOW_PRIORITY",
-      "curatorScore": 3,
-      "score": 6,
+      "curatorScore": 4,
+      "score": 9,
       "title": "",
-      "url": "https://s359.kapook.com/pagebuilder/84a4a751-05a0-4496-8313-f4bc4eea9302.jpg",
-      "width": 524,
-      "height": 636,
+      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+      "width": 1440,
+      "height": 1920,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
       "_curatorScoreBeforeGuard": null
     }
   ],
-  "normalizedStoryType": "relationship",
-  "rawStoryType": "ข่าวบันเทิงความสัมพันธ์",
+  "normalizedStoryType": "nature_learning",
+  "rawStoryType": "nature_learning",
   "storyAnchorCandidates": [],
-  "candidateBucketCounts": {
-    "totalBeforeDedup": 30,
-    "totalAfterDedup": 29,
-    "storyAnchor": 0,
-    "other": 29,
-    "sentToJudge": 24
-  },
+  "candidateBucketCounts": null,
   "qualityGate": {
     "sourceImageTypes": [
       {
         "candidateId": "unknown",
-        "url": "https://s359.kapook.com/pagebuilder/a631c2ae-f05f-4434-ad22-362e9034a378.jpg",
-        "role": "KEY_ACTIVITY",
+        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
+        "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
         "gateAction": "PASSED",
@@ -206,8 +200,8 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s359.kapook.com/pagebuilder/84a4a751-05a0-4496-8313-f4bc4eea9302.jpg",
-        "role": "CONTEXT_SCENE",
+        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
+        "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
         "gateAction": "PASSED",
@@ -217,8 +211,8 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/me/0/ui/17/86449/346288640_116034224819849_236404341790784",
-        "role": "CONTEXT_SCENE",
+        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
+        "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
         "gateAction": "PASSED",
@@ -228,18 +222,7 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/me/0/ud/17/86449/343873446_573876321510252_551.jpg?ip/resi",
-        "role": "CONTEXT_SCENE",
-        "sourceType": "CLEAN_PHOTO",
-        "confidence": 1,
-        "gateAction": "PASSED",
-        "gateReason": "",
-        "reasons": [],
-        "forbiddenSlots": null
-      },
-      {
-        "candidateId": "unknown",
-        "url": "https://resource.nationtv.tv/uploads/images/contents/w1024/2023/09/bqmULBm7aV6gr",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
         "role": "HERO_FACE",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
@@ -250,7 +233,7 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://static.thairath.co.th/media/Dtbezn3nNUxytg04avc7gSs2umveRkXtzGCysQL6OexU",
+        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
         "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
@@ -261,7 +244,7 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://static.thairath.co.th/media/dFQROr7oWzulq5Fa5BwILd1RhCpgW38CFM4zibsdjIuT",
+        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
         "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
@@ -272,7 +255,18 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://static.thairath.co.th/media/dFQROr7oWzulq5Fa6rBiePEo02XsxSZ7eqc5kdfxLbGF",
+        "url": "https://f.ptcdn.info/027/064/000/prnbyg52xnRket5coya0-o.jpg",
+        "role": "HERO_FACE",
+        "sourceType": "CLEAN_PHOTO",
+        "confidence": 1,
+        "gateAction": "PASSED",
+        "gateReason": "",
+        "reasons": [],
+        "forbiddenSlots": null
+      },
+      {
+        "candidateId": "unknown",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
         "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
@@ -283,7 +277,7 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ui/1760/8800838/335896326_1279604325961413_6504887099",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
         "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
@@ -294,81 +288,69 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://archive.siamrath.co.th/sites/default/files/styles/1140/public/img/2024/1",
-        "role": "EVIDENCE_CANDIDATE",
-        "sourceType": "TEXT_OVERLAY",
-        "confidence": 0.75,
-        "gateAction": "DOWNGRADED",
-        "gateReason": "TEXT_OVERLAY within quota (1/1) — support/evidence only",
-        "reasons": [
-          "Title contains Thai news outlet/program name (1 matches)"
-        ],
-        "forbiddenSlots": {
-          "main": true,
-          "circle": true
-        }
-      }
-    ],
-    "blockedSourceImages": [
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+        "role": "RELATIONSHIP",
+        "sourceType": "CLEAN_PHOTO",
+        "confidence": 1,
+        "gateAction": "PASSED",
+        "gateReason": "",
+        "reasons": [],
+        "forbiddenSlots": null
+      },
       {
-        "url": "https://siamrath.co.th/sites/default/files/styles/insert/public/img/2024/1008/29",
-        "originalRole": "QUALITY_BLOCKED",
-        "sourceType": "TEXT_OVERLAY",
-        "confidence": 0.75,
-        "reasons": [
-          "Title contains Thai news outlet/program name (1 matches)"
-        ],
-        "gateReason": "TEXT_OVERLAY over quota (1/1) in relationship_drama policy"
-      }
-    ],
-    "downgradedSourceImages": [
+        "candidateId": "unknown",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+        "role": "RELATIONSHIP",
+        "sourceType": "CLEAN_PHOTO",
+        "confidence": 1,
+        "gateAction": "PASSED",
+        "gateReason": "",
+        "reasons": [],
+        "forbiddenSlots": null
+      },
       {
-        "url": "https://archive.siamrath.co.th/sites/default/files/styles/1140/public/img/2024/1",
-        "originalRole": "HERO_FACE",
-        "newRole": "EVIDENCE_CANDIDATE",
-        "sourceType": "TEXT_OVERLAY",
-        "reasons": [
-          "Title contains Thai news outlet/program name (1 matches)"
-        ],
-        "forbiddenSlots": {
-          "main": true,
-          "circle": true
-        }
+        "candidateId": "unknown",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+        "role": "RELATIONSHIP",
+        "sourceType": "CLEAN_PHOTO",
+        "confidence": 1,
+        "gateAction": "PASSED",
+        "gateReason": "",
+        "reasons": [],
+        "forbiddenSlots": null
       }
     ],
-    "evidenceCandidates": [
-      {
-        "url": "https://archive.siamrath.co.th/sites/default/files/styles/1140/public/img/2024/1",
-        "originalRole": "HERO_FACE"
-      }
-    ],
+    "blockedSourceImages": [],
+    "downgradedSourceImages": [],
+    "evidenceCandidates": [],
     "qualityGateSummary": {
-      "total": 11,
-      "passed": 9,
-      "blocked": 1,
-      "downgraded": 1,
+      "total": 12,
+      "passed": 12,
+      "blocked": 0,
+      "downgraded": 0,
       "types": {
-        "CLEAN_PHOTO": 9,
-        "TEXT_OVERLAY": 2
+        "CLEAN_PHOTO": 12
       },
-      "cleanPhotoCount": 9,
+      "cleanPhotoCount": 12,
       "qualityGatePassed": true,
       "qualityGateFailReasons": [],
-      "policyKey": "relationship_drama",
+      "policyKey": "family_nature_learning",
       "forbiddenTypes": [
+        "NEWS_THUMBNAIL",
+        "TEXT_OVERLAY",
         "COLLAGE",
         "SCREENSHOT",
-        "PREVIOUS_COVER"
+        "SPLIT_SCREEN",
+        "PREVIOUS_COVER",
+        "YOUTUBE_THUMBNAIL"
       ],
       "quotasApplied": {
-        "TEXT_OVERLAY": 1,
+        "TEXT_OVERLAY": 0,
         "NEWS_THUMBNAIL": 0,
         "YOUTUBE_THUMBNAIL": 0,
         "SOCIAL_POST": 0
       },
-      "quotasUsed": {
-        "TEXT_OVERLAY": 1
-      }
+      "quotasUsed": {}
     },
     "qualityGatePassed": true
   },
@@ -376,22 +358,24 @@
   "noStoryAnchorFallbackReason": null,
   "finalSaveGate": {
     "saveGatePassed": true,
-    "saveGateStatus": "SUCCESS",
+    "saveGateStatus": "PARTIAL_PASS",
     "saveGateBlockers": [],
-    "saveGateWarnings": [],
-    "manualReviewReason": null,
+    "saveGateWarnings": [
+      "CIRCLE_NO_FACE on nature_learning (soft-circle type, score 8/10) — downgraded to WARNING"
+    ],
+    "manualReviewReason": "[WARNING] CIRCLE_NO_FACE on nature_learning (soft-circle type, score 8/10) — downgraded to WARNING",
     "summary": {
       "totalBlockers": 0,
-      "totalWarnings": 0,
+      "totalWarnings": 1,
       "criticalBlockers": 0,
       "highBlockers": 0,
       "mediumBlockers": 0,
       "inheritedReview": false,
-      "partialPass": false
+      "partialPass": true
     }
   },
   "saveGatePassed": true,
-  "saveGateStatus": "SUCCESS",
+  "saveGateStatus": "PARTIAL_PASS",
   "saveGateBlockers": [],
-  "manualReviewReason": null
+  "manualReviewReason": "[WARNING] CIRCLE_NO_FACE on nature_learning (soft-circle type, score 8/10) — downgraded to WARNING"
 }

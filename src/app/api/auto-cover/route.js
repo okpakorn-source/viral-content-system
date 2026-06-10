@@ -2234,6 +2234,27 @@ export async function POST(request) {
         }
       }
 
+      // ★ C2: ถ้า circle ซ้ำกับช่องภาพอื่นและถึงจุดนี้ยังแก้ไม่ได้ (ไม่มีภาพ unique เหลือ) → ตัด circle ทิ้ง
+      //   ปก 3 ช่องสะอาด ดีกว่าปกที่มีภาพเดียวกันโผล่ 2 ที่ (เคส pool เสื่อม เช่น scrape ได้ภาพจริงแค่ 3 ใบ)
+      if (finalCircleIndex != null && finalCircleIndex >= 0) {
+        const cImg = imageBuffers[finalCircleIndex];
+        if (cImg) {
+          const cKeys = [normalizeYTUrl(cImg.url || `img_${finalCircleIndex}`), cImg.candidateId || `cid_${finalCircleIndex}`];
+          const orderKeys = new Set();
+          for (const pi of finalPhotoOrder.filter(i => i != null && i >= 0)) {
+            const pImg = imageBuffers[pi];
+            if (!pImg) continue;
+            orderKeys.add(normalizeYTUrl(pImg.url || `img_${pi}`));
+            orderKeys.add(pImg.candidateId || `cid_${pi}`);
+          }
+          if (cKeys.some(k => orderKeys.has(k))) {
+            console.log(`[SlotAudit] ★ C2: circle #${finalCircleIndex} duplicates a photo slot, no unique replacement → DROP circle`);
+            slotAuditFixes.push({ slot: 'circle', oldIndex: finalCircleIndex, newIndex: null, reason: 'DUPLICATE_DROP_CIRCLE' });
+            finalCircleIndex = null;
+          }
+        }
+      }
+
       // ★ C2: re-verify รอบสุดท้าย — เช็คว่าช่องจริงๆ ยังมีเนื้อหาซ้ำเหลืออยู่ไหม (หลัง fix + template slice)
       slotDuplicatesRemaining = 0;
       {
@@ -3411,7 +3432,7 @@ Respond in JSON (★★ MUST score EVERY image, do NOT skip any!):
   ...score ALL images #0 - #${thumbnails.length - 1}...
 ],
 "artDirection": {
-  "heroIndex": <index of Hero image — professional clear-face portrait/interview/news shot, NOT selfie, NO watermark>,
+  "heroIndex": <index of Hero image — professional clear-face portrait/interview/news shot, NOT selfie, NO watermark. The MAIN slot fills ~40% of the cover: the person/subject must DOMINATE the frame (≥30% of image area, face clearly readable). NEVER pick an empty room, interior, scenery, building, or object-only shot — those are bgIndices material only>,
   "circleIndex": <index of circle image — relationship photo of 2 people (couple/family) or a single warm image>,
   "highlightIndex": <index of highlight image — key activity (caregiving, feeding, donating, family together)>,
   "secondaryPersonIndex": <index of 2nd person or null>,
@@ -3425,6 +3446,8 @@ Respond in JSON (★★ MUST score EVERY image, do NOT skip any!):
 In addition to relevance scoring, make the following Art Director decisions.
 Review ALL images and decide like a professional cover layout designer:
 1. Hero image (main): Must be a professional clear-face shot (portrait/interview/news) — NOT a selfie, NO watermark
+   ★★★ The main slot is the biggest zone (~40% of cover). A viewer must see a PERSON with readable peak emotion at a glance.
+   ⛔ NEVER assign empty scenes (room interiors, furniture, scenery, buildings, objects without people) as Hero — a near-empty frame as the main slot kills the cover. Empty scenes may ONLY appear as small background slots.
 2. Circle image: Relationship photo of 2 people (couple/family) or a single warm image
 3. Highlight image (rectangle): Key activity image (caregiving, feeding, donating, family together)
 4. Background image: Location/story context
@@ -3435,7 +3458,7 @@ Review ALL images and decide like a professional cover layout designer:
 - Image for circle must have relevance >= 6
 - NEVER select teenager/child/stranger images that are NOT a subject
 - NEVER select group photos (>1 person) for circle
-- If no image matches subjects with relevance >= 6 → reuse the HERO_FACE image (duplication is allowed)
+- If no image matches subjects with relevance >= 6 → set "circleIndex": null — ⛔ NEVER reuse an image already chosen for another slot (duplicate images across slots are forbidden and will be rejected by the save gate)
 
 ★★★ CRITICAL RULES:
 - MUST include an entry for EVERY image (index 0 to ${thumbnails.length - 1}), do NOT skip any!
@@ -3896,7 +3919,9 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
 
       return {
         photoOrder,
-        circleIndex: circleIndex !== undefined ? circleIndex : 0,
+        // ★ C2: default เดิม (=0) คือต้นเหตุภาพซ้ำ main+circle เมื่อ pool ไม่มีภาพ unique เหลือ —
+        //   null = "ไม่มี circle" (composer ข้ามการวาดอย่างปลอดภัย) ดีกว่าภาพซ้ำสองช่องบนปก
+        circleIndex: circleIndex !== undefined ? circleIndex : null,
         circleSmallIndex: undefined,
         heroIndex,
       };
