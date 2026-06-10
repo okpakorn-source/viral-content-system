@@ -2651,7 +2651,7 @@ Return JSON:
         needManualReview = true;
         console.log(`[AutoCover] ★ Phase 4 Save Gate: NEED_MANUAL_REVIEW — ${finalSaveGateResult.saveGateBlockers.length} blocker(s)`);
       } else {
-        console.log(`[AutoCover] ★ Phase 4 Save Gate: PASSED — cover will save as SUCCESS`);
+        console.log(`[AutoCover] ★ Phase 4 Save Gate: ${finalSaveGateResult.saveGateStatus} — cover will save to gallery${finalSaveGateResult.saveGateWarnings?.length ? ` (${finalSaveGateResult.saveGateWarnings.length} warning(s))` : ''}`);
       }
     } catch (sgErr) {
       console.warn('[AutoCover] ⚠️ Final Save Gate error (non-critical):', sgErr.message);
@@ -2988,6 +2988,7 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
       saveGatePassed: finalSaveGateResult?.saveGatePassed ?? true,
       saveGateStatus: finalSaveGateResult?.saveGateStatus || 'SUCCESS',
       saveGateBlockers: finalSaveGateResult?.saveGateBlockers || [],
+      saveGateWarnings: finalSaveGateResult?.saveGateWarnings || [],
       savedToGallery: !needManualReview,
       galleryStatus: needManualReview ? 'NEED_MANUAL_REVIEW' : 'SAVED',
       manualReviewReason: finalSaveGateResult?.manualReviewReason || null,
