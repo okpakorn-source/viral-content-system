@@ -265,6 +265,15 @@ export async function POST(request) {
       const locationStr = foundLocations[0] || '';
       const activityStr = foundActivities.join(' ');
       
+      // ★ FIX 0: Detect storyType from fallback text for proper propagation
+      const fbFullText = `${title} ${contentText.substring(0, 1000)}`;
+      const isNatureFb = /สวน|ที่ดิน|ไร่|ธรรมชาติ|ต้นไม้|ปลูก|เลี้ยง|ฟาร์ม|ขุดบ่อ|เลี้ยงปลา|หลาน|ยาย|garden|farm|land/i.test(fbFullText);
+      const isFamilyFb = /แม่|พ่อ|ลูก|ครอบครัว|ยาย|ปู่|หลาน|พี่น้อง/i.test(fbFullText);
+      let fbStoryType = 'general';
+      if (isNatureFb && isFamilyFb) fbStoryType = 'family_nature_learning';
+      else if (isFamilyFb) fbStoryType = 'family_care';
+      else if (isNatureFb) fbStoryType = 'nature_learning';
+
       identity = {
         characters: [mainChar],
         mainCharacter: mainChar,
@@ -278,12 +287,10 @@ export async function POST(request) {
         searchQueries: {
           person_portrait: mainChar,
           person_closeup: `${mainChar} ภาพถ่ายหน้าชัด`,
-          // ★ context ใช้ title + สถานที่ + กิจกรรม
           person_context: `${mainChar} ${locationStr} ${activityStr}`.trim().substring(0, 80),
           event_scene: `${mainChar} ${activityStr} ${locationStr}`.trim().substring(0, 60),
           emotion_moment: `${mainChar} ${foundActivities[0] || ''}`.trim(),
           location_photo: locationStr,
-          // ★ เพิ่ม key_activity ที่ตรงกับเนื้อข่าว!
           key_activity: `${mainChar} ${activityStr}`.trim(),
           key_relationship: `${mainChar} ${locationStr}`.trim(),
         },
@@ -291,7 +298,15 @@ export async function POST(request) {
         searchYouTube: `${mainChar} ${activityStr} ${locationStr}`.trim().substring(0, 60),
         searchPexels: foundActivities.length > 0 ? `${foundActivities[0]} charity event` : 'news event person',
         typography: { hook: 'ด่วน!', main: title.substring(0, 30), punch: '' },
+        // ★ FIX 0: Ensure these fields exist in fallback identity
+        storyType: fbStoryType,
+        mainVisualShouldBe: isNatureFb ? `${mainChar} สวน ที่ดิน ธรรมชาติ` : '',
+        coverageRequired: isNatureFb ? ['STORY_ANCHOR', 'KEY_ACTIVITY', 'CONTEXT_SCENE', 'RELATIONSHIP'] : ['STORY_ANCHOR', 'KEY_ACTIVITY', 'CONTEXT_SCENE'],
+        coverageOptional: ['HERO_FACE', 'EMOTION'],
+        visualPriority: {},
+        storyAnchorQueries: isNatureFb ? [`${mainChar} สวน ที่ดิน`, `${mainChar} ปลูก เลี้ยง ธรรมชาติ`] : [],
       };
+      console.log(`[AutoCover] ★ FIX 0: Fallback identity storyType=${fbStoryType}, coverageRequired=${identity.coverageRequired.join(',')}`);
     }
 
     // ★ Detailed logging of searchQueries for debugging
@@ -647,6 +662,13 @@ export async function POST(request) {
     const multiAgentImages = multiAgentResult.status === 'fulfilled' ? (multiAgentResult.value || []) : [];
     if (multiAgentResult.status === 'rejected') {
       console.error('[AutoCover] MultiAgent search failed:', multiAgentResult.reason?.message);
+    }
+    // ★ Fix 25: Transfer story anchor diagnostics to identity
+    if (multiAgentImages._storyAnchorCandidates) {
+      identity._storyAnchorCandidates = multiAgentImages._storyAnchorCandidates;
+    }
+    if (multiAgentImages._bucketCounts) {
+      identity._bucketCounts = multiAgentImages._bucketCounts;
     }
 
     // ═══════════════════════════════════════════════════════
@@ -1011,6 +1033,21 @@ export async function POST(request) {
 
     console.log(`[AutoCover] Downloaded ${imageBuffers.length} valid images`);
 
+    // ═══════════════════════════════════════════════════════════
+    // ★ Phase 3: Source Image Quality Gate
+    // Block bad source images (text overlays, news thumbnails, collages)
+    // BEFORE they reach slot assignment or AI Curator.
+    // ═══════════════════════════════════════════════════════════
+    var qualityGateDiagnostics = null;
+    try {
+      const { applyQualityGateToPool } = await import('@/lib/services/sourceImageQualityGate');
+      const storyTypeForGate = identity?.storyType || 'default';
+      qualityGateDiagnostics = await applyQualityGateToPool(imageBuffers, storyTypeForGate);
+      console.log(`[AutoCover] ★ Quality Gate: ${imageBuffers.length} images survived (${qualityGateDiagnostics?.qualityGateSummary?.blocked || 0} blocked)`);
+    } catch (gateErr) {
+      console.warn('[AutoCover] Quality Gate error (non-critical, using all images):', gateErr.message);
+    }
+
     // Step 4: Coverage-aware selection (limit to 8 to prevent timeout & API overload)
     // ★ FIX: Force-pick coverageRequired roles FIRST, then fill with best scored
     const MAX_CANDIDATE_IMAGES = 8;
@@ -1115,6 +1152,13 @@ export async function POST(request) {
       const missingRequired = coverageRequired.filter(r => (coverageReport[r] || 0) === 0);
       const coveredRequired = coverageRequired.filter(r => (coverageReport[r] || 0) > 0);
       
+      // ★ FIX 0: Write back storyType + coverageRequired to identity for downstream use
+      if (!identity.storyType || identity.storyType === 'general') {
+        identity.storyType = storyType;
+      }
+      identity.coverageRequired = coverageRequired;
+      identity.coverageOptional = coverageOptional;
+      
       console.log(`[Coverage] 📊 Story: "${storyType}" | Required: [${coverageRequired.join(', ')}]`);
       console.log(`[Coverage] 📊 Coverage: ${coveredRequired.length}/${coverageRequired.length} required roles`);
       for (const [role, count] of Object.entries(coverageReport)) {
@@ -1172,9 +1216,9 @@ export async function POST(request) {
       try {
         const { matchCoverDNA } = await import('@/lib/services/coverDNAService');
         const dna = matchCoverDNA(identity);
-        if (dna?.templateId) {
-          dnaTemplate = dna.templateId;
-          console.log(`[AutoCover] 🧬 Cover DNA override: ${dnaTemplate} (storyType: ${identity?.coverEmotion || 'unknown'})`);
+        if (dna?.recommendedTemplate) {
+          dnaTemplate = dna.recommendedTemplate;
+          console.log(`[AutoCover] 🧬 Cover DNA override: ${dnaTemplate} (storyType: ${dna.storyType}, desc: ${dna.desc})`);
         }
       } catch { /* DNA fail → ใช้ autoSelect */ }
 
@@ -1403,6 +1447,50 @@ export async function POST(request) {
     } catch (curatorErr) {
       console.warn('[Curator] AI Content Curation failed (non-critical):', curatorErr.message);
       // ถ้า Curator ล้มเหลว → ใช้ role เดิมจาก Judge (ไม่พัง!)
+    }
+
+    // ★ Fix 27: Curator Story Anchor Relevance Guard
+    // Prevent story-relevant images from being killed by low curator relevance
+    {
+      const anchorKeywords = identity?.storyAnchorQueries || [];
+      const anchorKwWords = [];
+      const personWords = new Set();
+      [identity?.mainCharacter, identity?.secondaryCharacter, ...(identity?.characters || [])]
+        .filter(Boolean).forEach(n => n.split(/[\s]+/).filter(w => w.length >= 2).forEach(w => personWords.add(w)));
+      const GENERIC_WEAK = new Set(['ลูก','แม่','พ่อ','หลาน','ครอบครัว','น้อง','เอ','กับ','พา','ที่','ใน','มา','ไป','ให้','ได้','กัน','อยู่','มี','เป็น','ว่า','ภาพ','รูป','พร้อม','เผย','เปิด','การ','เลี้ยง','1','2']);
+      for (const q of anchorKeywords) {
+        const words = q.split(/[\s,+/]+/).filter(w => w.length >= 2);
+        for (const w of words) { if (!personWords.has(w) && !GENERIC_WEAK.has(w)) anchorKwWords.push(w); }
+      }
+      // Also from keyScenes, place_names, celebratedAction
+      [...(identity?.keyScenes || []), ...(identity?.specific_details?.place_names || []), identity?.coreStory?.celebratedAction].filter(Boolean).forEach(src => {
+        src.split(/[\s,+/]+/).filter(w => w.length >= 2).forEach(w => { if (!personWords.has(w) && !GENERIC_WEAK.has(w)) anchorKwWords.push(w); });
+      });
+      const uniqueAnchorKw = [...new Set(anchorKwWords)];
+
+      if (uniqueAnchorKw.length > 0) {
+        let guardedCount = 0;
+        for (const img of imageBuffers) {
+          const titleText = `${img.title || ''} ${img.snippet || ''}`.toLowerCase();
+          const isAnchorTitle = uniqueAnchorKw.some(kw => titleText.includes(kw.toLowerCase()));
+          if (isAnchorTitle || img._storyAnchor) {
+            const oldScore = img.curatorScore;
+            const oldRole = img.role;
+            if (img.curatorScore !== undefined && img.curatorScore < 6) {
+              img._curatorScoreBeforeGuard = img.curatorScore;
+              img.curatorScore = Math.max(6, img.curatorScore);
+              guardedCount++;
+            }
+            if (img.role === 'LOW_PRIORITY') {
+              img.role = img._storyAnchor ? 'STORY_ANCHOR' : 'CONTEXT_SCENE';
+            }
+            if (oldScore !== img.curatorScore || oldRole !== img.role) {
+              console.log(`[Curator] ★ Story Anchor Guard: "${(img.title || '').substring(0, 40)}" relevance ${oldScore}→${img.curatorScore}, role ${oldRole}→${img.role}`);
+            }
+          }
+        }
+        if (guardedCount > 0) console.log(`[Curator] ★ Guarded ${guardedCount} story anchor images from low relevance`);
+      }
     }
 
     // ★★★ Character Focus Rule: ถ้า heroImage ไม่มีหน้าคน (hasFaces=false)
@@ -1699,6 +1787,30 @@ export async function POST(request) {
       console.log(`[LayoutFitness]   Hero-ready: ${heroReady}, Circle-ready: ${circleReady}`);
     }
 
+    // ★ Fix 28: STORY_ANCHOR hard rule variables (declared before check)
+    let needManualReview = false;
+    let noStoryAnchorFallbackReason = null;
+
+    // ★ Fix 28: STORY_ANCHOR hard rule — detect missing story anchor
+    {
+      const coverageRequired = identity?.coverageRequired || [];
+      const storyAnchorRequired = coverageRequired.includes('STORY_ANCHOR');
+      if (storyAnchorRequired) {
+        const hasStoryAnchor = imageBuffers.some(img =>
+          ['STORY_ANCHOR', 'CONTEXT_SCENE', 'KEY_ACTIVITY'].includes(img.role) &&
+          img.role !== 'LOW_PRIORITY' && img.role !== 'TECHNICAL_BAD'
+        );
+        if (!hasStoryAnchor) {
+          needManualReview = true;
+          noStoryAnchorFallbackReason = 'No STORY_ANCHOR/CONTEXT_SCENE/KEY_ACTIVITY survived Judge+Curator pipeline';
+          console.warn(`[Coverage] ⚠️ NEED_MANUAL_REVIEW: ${noStoryAnchorFallbackReason}`);
+          console.warn(`[Coverage] ⚠️ Available roles: ${[...new Set(imageBuffers.map(i => i.role))].join(', ')}`);
+        } else {
+          console.log(`[Coverage] ✅ STORY_ANCHOR check passed — story-relevant images survived pipeline`);
+        }
+      }
+    }
+
     // Step 7: AI Slot Assignment (with cover library reference)
     const slotAssignment = await assignImagesToSlots(
       imageBuffers, faceDataMap, chosenTemplate, identity, coverReferences, artDirection
@@ -1706,7 +1818,552 @@ export async function POST(request) {
 
     console.log(`[AutoCover] Slot assignment: ${JSON.stringify(slotAssignment.photoOrder)}`);
 
-    // Step 7: Compose cover
+    // =============================================
+    // ★ FIX 12+14+15+16+17: FINAL SLOT AUDIT — before compose
+    // Dedup, semantic guard, indoor penalty, tech filter, auto-fix
+    // =============================================
+    let finalPhotoOrder = [...slotAssignment.photoOrder];
+    let finalCircleIndex = slotAssignment.circleIndex;
+    let templateChanged = false;
+    let templateReason = `DNA/autoSelect → ${chosenTemplate}`;
+    const slotAuditIssues = [];
+    const slotAuditFixes = [];
+    const rejectedSlotCandidates = [];
+    let whySimpleTemplateWasChosen = null;
+    let normalizedYoutubeVideoIds = [];
+    let slotDuplicatesRemaining = 0; // ★ C2: จำนวนช่องที่ยังซ้ำจริงหลัง PASS 3 fix (re-verify ไม่ใช่นับ issues-fixes)
+
+    try {
+      // --- Helper: normalize YouTube URL to video ID ---
+      const normalizeYTUrl = (url) => {
+        if (!url) return url;
+        const m = url.match(/ytimg\.com\/vi\/([^/]+)\//);
+        return m ? `ytimg:${m[1]}` : url;
+      };
+
+      // --- Helper: get best unused image for a role ---
+      const getBestUnused = (usedSet, preferredRoles, excludeIndices = new Set()) => {
+        const candidates = imageBuffers
+          .map((img, i) => ({ img, i }))
+          .filter(({ img, i }) => !usedSet.has(i) && !excludeIndices.has(i))
+          .filter(({ img }) => img._techBadReason == null);
+        
+        // Prefer specific roles first
+        for (const role of preferredRoles) {
+          const match = candidates.find(c => c.img.role === role);
+          if (match) return match.i;
+        }
+        // Fallback: highest score
+        candidates.sort((a, b) => (b.img.curatorScore || b.img.score || 0) - (a.img.curatorScore || a.img.score || 0));
+        return candidates[0]?.i ?? null;
+      };
+
+      // ★ FIX 15: Strengthen tech filter — detect bad images for ALL slots
+      const isLikelyCollage = (img) => {
+        const title = (img.title || '').toLowerCase();
+        const url = (img.url || '').toLowerCase();
+        // Multiple photos in one / split-screen / collage indicators
+        if (/รวมภาพ|ภาพรวม|collage|compilation|split|ก่อน.*หลัง|vs\.|versus|มาดู.*ภาพ|top\s*\d+/i.test(title)) return 'TITLE_COLLAGE';
+        if (/collage|compilation|split|mosaic/i.test(url)) return 'URL_COLLAGE';
+        // YouTube text overlay / cover graphics
+        if (/thumbnail|cover.*graphic|news.*thumb|ข่าวด่วน|ข่าวเด่น|พาดหัว|แชร์ว่อน|ไลฟ์สด|live/i.test(title) && 
+            /ytimg|youtube/i.test(url)) return 'YT_TEXT_OVERLAY';
+        // Infographic / graphic-heavy
+        if (/infographic|อินโฟกราฟิก|สรุป.*ข่าว|timeline/i.test(title)) return 'INFOGRAPHIC';
+        // News thumbnail with text overlay
+        if (/news.*thumb|ข่าว.*ภาพ|สกู๊ป|รายงาน.*พิเศษ/i.test(title) && img.width && img.height && img.width / img.height > 1.6) return 'NEWS_THUMBNAIL';
+        return null;
+      };
+
+      // ★ FIX 15: Full technical bad check for any slot
+      const isLikelyTechBad = (img) => {
+        const collageCheck = isLikelyCollage(img);
+        if (collageCheck) return collageCheck;
+        const title = (img.title || '').toLowerCase();
+        // Large watermark/logo
+        if (/watermark|ลายน้ำ|©|copyright/i.test(title)) return 'WATERMARK';
+        // Very small / broken
+        if (img.width && img.height && (img.width < 200 || img.height < 200)) return 'TOO_SMALL';
+        // Low quality indicator
+        if (img.width && img.height && img.width * img.height < 50000) return 'LOW_RESOLUTION';
+        return null;
+      };
+
+      // ★ FIX 16: Indoor-unrelated penalty check
+      const isIndoorUnrelated = (img, storyType) => {
+        if (!storyType || !/(nature|garden|farm|สวน|ที่ดิน|ธรรมชาติ)/i.test(storyType)) return false;
+        const title = (img.title || '').toLowerCase();
+        return /ร้านอาหาร|restaurant|interview|สัมภาษณ์|กินข้าว|โต๊ะ|ในร้าน|indoor|ห้อง|ออฟฟิศ/i.test(title) &&
+               !/สวน|ที่ดิน|ต้นไม้|ปลูก|เลี้ยง|ธรรมชาติ|garden|farm|land/i.test(title);
+      };
+
+      // Detect nature story type
+      const storyTypeText = `${identity.storyType || ''} ${identity.mainVisualShouldBe || ''} ${(identity.keywords || []).join(' ')}`;
+      const isNatureStory = /nature|garden|farm|สวน|ที่ดิน|ธรรมชาติ|ปลูก|เลี้ยง|ไร่|family_nature/i.test(storyTypeText);
+
+      // Track all used indices (photoOrder + circle)
+      const allFinalIndices = [...finalPhotoOrder, finalCircleIndex].filter(i => i != null && i >= 0);
+      const usedUrls = new Map(); // normalizedUrl → first slot position
+      const usedCids = new Map(); // candidateId → first slot position
+
+      // ═══ PASS 1: Detect duplicates ═══
+      const usedSourcePages = new Map(); // sourcePageUrl → first slot position
+      const usedYTVideoIds = new Set(); // normalized YouTube video IDs already used
+      normalizedYoutubeVideoIds = []; // reset (declared in parent scope for review output access)
+
+      for (let pos = 0; pos < allFinalIndices.length; pos++) {
+        const idx = allFinalIndices[pos];
+        const img = imageBuffers[idx];
+        if (!img) continue;
+
+        const normUrl = normalizeYTUrl(img.url || `img_${idx}`);
+        const cid = img.candidateId || `cid_${idx}`;
+        const slotName = pos < finalPhotoOrder.length ? `slot_${pos}` : 'circle';
+
+        // ★ FIX 12: Duplicate URL check (includes YouTube video ID normalization)
+        if (usedUrls.has(normUrl)) {
+          slotAuditIssues.push({ type: 'DUPLICATE_URL', slot: slotName, index: idx, duplicateOf: usedUrls.get(normUrl) });
+        } else {
+          usedUrls.set(normUrl, slotName);
+        }
+
+        // ★ FIX 12: Duplicate candidateId check
+        if (usedCids.has(cid)) {
+          slotAuditIssues.push({ type: 'DUPLICATE_CID', slot: slotName, index: idx, duplicateOf: usedCids.get(cid) });
+        } else {
+          usedCids.set(cid, slotName);
+        }
+
+        // ★ FIX 12: sourcePageUrl dedup — same article page = likely same content
+        const srcPage = img.sourcePageUrl || img._sourceUrl || null;
+        if (srcPage) {
+          // Only flag if same source page AND same normalized YT video
+          if (normUrl.startsWith('ytimg:') && usedSourcePages.has(srcPage)) {
+            const existingSlot = usedSourcePages.get(srcPage);
+            const existingNormUrl = normalizeYTUrl(imageBuffers[allFinalIndices.find((_, p) => {
+              const s = p < finalPhotoOrder.length ? `slot_${p}` : 'circle';
+              return s === existingSlot;
+            })]?.url);
+            if (existingNormUrl && existingNormUrl.startsWith('ytimg:') && existingNormUrl === normUrl) {
+              slotAuditIssues.push({ type: 'DUPLICATE_SOURCE_PAGE', slot: slotName, index: idx, duplicateOf: existingSlot });
+            }
+          }
+          if (!usedSourcePages.has(srcPage)) usedSourcePages.set(srcPage, slotName);
+        }
+
+        // ★ FIX 12: Track YouTube video IDs for reporting
+        if (normUrl.startsWith('ytimg:')) {
+          const ytId = normUrl.replace('ytimg:', '');
+          if (usedYTVideoIds.has(ytId)) {
+            slotAuditIssues.push({ type: 'DUPLICATE_YT_VIDEO', slot: slotName, index: idx, videoId: ytId });
+          }
+          usedYTVideoIds.add(ytId);
+          normalizedYoutubeVideoIds.push({ index: idx, videoId: ytId, slot: slotName });
+        }
+
+        // ★ FIX 12: dHash perceptual dedup (if available)
+        if (img._dHash) {
+          for (let prevPos = 0; prevPos < pos; prevPos++) {
+            const prevIdx = allFinalIndices[prevPos];
+            const prevImg = imageBuffers[prevIdx];
+            if (prevImg?._dHash) {
+              // Hamming distance < 12 = perceptually similar
+              let hamming = 0;
+              const h1 = img._dHash, h2 = prevImg._dHash;
+              for (let b = 0; b < Math.min(h1.length, h2.length); b++) {
+                if (h1[b] !== h2[b]) hamming++;
+              }
+              if (hamming < 12) {
+                const prevSlot = prevPos < finalPhotoOrder.length ? `slot_${prevPos}` : 'circle';
+                slotAuditIssues.push({ type: 'DUPLICATE_DHASH', slot: slotName, index: idx, duplicateOf: prevSlot, hamming });
+              }
+            }
+          }
+        }
+      }
+
+      // ═══ PASS 2: Semantic & quality checks ═══
+      // Check main slot (photoOrder[0])
+      if (finalPhotoOrder.length > 0) {
+        const mainImg = imageBuffers[finalPhotoOrder[0]];
+        if (mainImg) {
+          // ★ FIX 14: Main slot semantic guard for nature stories
+          // Priority: STORY_ANCHOR > KEY_ACTIVITY > CONTEXT_SCENE > RELATIONSHIP
+          // HERO_FACE must not be main unless no story image exists
+          if (isNatureStory && mainImg.role === 'HERO_FACE') {
+            slotAuditIssues.push({ type: 'MAIN_IS_PORTRAIT_IN_NATURE', index: finalPhotoOrder[0], role: mainImg.role });
+          }
+          // ★ FIX 15: Tech bad check for main slot
+          const mainTechBad = isLikelyTechBad(mainImg);
+          if (mainTechBad) {
+            slotAuditIssues.push({ type: 'MAIN_IS_TECH_BAD', index: finalPhotoOrder[0], reason: mainTechBad });
+          }
+          // ★ FIX 16: Indoor check
+          if (isIndoorUnrelated(mainImg, storyTypeText)) {
+            slotAuditIssues.push({ type: 'MAIN_IS_INDOOR_UNRELATED', index: finalPhotoOrder[0] });
+          }
+        }
+      }
+
+      // Check highlight slot (photoOrder[1] for 3-slot, photoOrder[3] for 4+ slot templates)
+      const highlightPos = finalPhotoOrder.length >= 4 ? 3 : (finalPhotoOrder.length >= 2 ? 1 : -1);
+      if (highlightPos >= 0 && highlightPos < finalPhotoOrder.length) {
+        const hlImg = imageBuffers[finalPhotoOrder[highlightPos]];
+        if (hlImg) {
+          // ★ FIX 14: Highlight must be different from main
+          if (finalPhotoOrder[0] === finalPhotoOrder[highlightPos]) {
+            slotAuditIssues.push({ type: 'HIGHLIGHT_SAME_AS_MAIN', index: finalPhotoOrder[highlightPos] });
+          }
+          if (isNatureStory && hlImg.role === 'HERO_FACE') {
+            slotAuditIssues.push({ type: 'HIGHLIGHT_IS_PORTRAIT_IN_NATURE', index: finalPhotoOrder[highlightPos] });
+          }
+          // ★ FIX 14: Must not be generic portrait / indoor interview
+          const hlTitle = (hlImg.title || '').toLowerCase();
+          if (/สัมภาษณ์|interview|ให้สัมภาษณ์|แถลงข่าว|press/i.test(hlTitle) && isNatureStory) {
+            slotAuditIssues.push({ type: 'HIGHLIGHT_IS_INTERVIEW', index: finalPhotoOrder[highlightPos] });
+          }
+          // ★ FIX 15: Tech bad check
+          const hlTechBad = isLikelyTechBad(hlImg);
+          if (hlTechBad) {
+            slotAuditIssues.push({ type: 'HIGHLIGHT_IS_TECH_BAD', index: finalPhotoOrder[highlightPos], reason: hlTechBad });
+          }
+          if (isIndoorUnrelated(hlImg, storyTypeText)) {
+            slotAuditIssues.push({ type: 'HIGHLIGHT_IS_INDOOR_UNRELATED', index: finalPhotoOrder[highlightPos] });
+          }
+        }
+      }
+
+      // ★ FIX 15+16: Check ALL other slots for tech bad / indoor
+      for (let p = 0; p < finalPhotoOrder.length; p++) {
+        if (p === 0 || p === highlightPos) continue; // already checked
+        const slotImg = imageBuffers[finalPhotoOrder[p]];
+        if (slotImg) {
+          const techBad = isLikelyTechBad(slotImg);
+          if (techBad) {
+            slotAuditIssues.push({ type: `SLOT${p}_IS_TECH_BAD`, index: finalPhotoOrder[p], reason: techBad });
+          }
+        }
+      }
+
+      // ★ FIX 15: Circle slot — no collage, split-screen, multi-photo, thumbnail collage, text overlay
+      if (finalCircleIndex != null && finalCircleIndex >= 0) {
+        const circImg = imageBuffers[finalCircleIndex];
+        if (circImg) {
+          const collageReason = isLikelyCollage(circImg);
+          if (collageReason) {
+            slotAuditIssues.push({ type: 'CIRCLE_IS_COLLAGE', index: finalCircleIndex, reason: collageReason });
+          }
+          // ★ FIX 9: If all faces empty, don't rely on circle face logic
+          const allFacesEmpty = !imageBuffers.some(img => faceDataMap?.get?.(img.candidateId)?.hasFaces);
+          if (allFacesEmpty) {
+            // Check if circle candidate has HERO_FACE role from judge (acceptable even without face detection)
+            if (circImg.role !== 'HERO_FACE' && circImg.role !== 'RELATIONSHIP') {
+              slotAuditIssues.push({ type: 'CIRCLE_NO_FACE_DATA', index: finalCircleIndex, role: circImg.role });
+            }
+          }
+        }
+      }
+
+      // Count HERO_FACE in final cover
+      const heroFaceCount = allFinalIndices.filter(i => imageBuffers[i]?.role === 'HERO_FACE').length;
+      if (heroFaceCount > 2) {
+        slotAuditIssues.push({ type: 'TOO_MANY_HERO_FACE', count: heroFaceCount });
+      }
+
+      // ═══ PASS 3: Auto-fix issues ═══
+      const usedInFinal = new Set(allFinalIndices);
+
+      // ★ C2: ช่องที่ซ้ำ 1 ช่องสร้าง 2 issues (URL+CID) — ต้อง fix ครั้งเดียว ไม่งั้นเปลี่ยนภาพช่องเดิมซ้ำจนภาพสำรองหมด
+      const fixedDupSlots = new Set();
+      // ★ C2: replacement ต้องไม่เป็นเนื้อหาซ้ำกับภาพที่ใช้อยู่ (เช็ค URL/candidateId ไม่ใช่แค่ index)
+      const dupContentExclude = () => {
+        const usedKeys = new Set();
+        for (const ui of usedInFinal) {
+          const uimg = imageBuffers[ui];
+          if (!uimg) continue;
+          usedKeys.add(normalizeYTUrl(uimg.url || `img_${ui}`));
+          usedKeys.add(uimg.candidateId || `cid_${ui}`);
+        }
+        return new Set(imageBuffers
+          .map((img, i) => i)
+          .filter(i => usedKeys.has(normalizeYTUrl(imageBuffers[i]?.url || `img_${i}`)) ||
+                       usedKeys.has(imageBuffers[i]?.candidateId || `cid_${i}`)));
+      };
+
+      for (const issue of slotAuditIssues) {
+        if (issue.type.startsWith('DUPLICATE_')) {
+          if (fixedDupSlots.has(issue.slot)) continue;
+          // Find which position has the duplicate and replace it
+          const isCircle = issue.slot === 'circle';
+          if (isCircle) {
+            const replacement = getBestUnused(usedInFinal, ['HERO_FACE', 'RELATIONSHIP', 'CONTEXT_SCENE'], dupContentExclude());
+            if (replacement != null) {
+              rejectedSlotCandidates.push({ index: issue.index, reason: issue.type });
+              finalCircleIndex = replacement;
+              usedInFinal.add(replacement);
+              fixedDupSlots.add(issue.slot);
+              slotAuditFixes.push({ slot: 'circle', oldIndex: issue.index, newIndex: replacement, reason: issue.type });
+            }
+          } else {
+            const slotPos = parseInt(issue.slot.replace('slot_', ''));
+            if (!isNaN(slotPos) && slotPos > 0) { // Don't replace main (pos 0)
+              const replacement = getBestUnused(usedInFinal, ['KEY_ACTIVITY', 'CONTEXT_SCENE', 'STORY_ANCHOR'], dupContentExclude());
+              if (replacement != null) {
+                rejectedSlotCandidates.push({ index: issue.index, reason: issue.type });
+                finalPhotoOrder[slotPos] = replacement;
+                usedInFinal.add(replacement);
+                fixedDupSlots.add(issue.slot);
+                slotAuditFixes.push({ slot: issue.slot, oldIndex: issue.index, newIndex: replacement, reason: issue.type });
+              }
+            }
+          }
+        }
+
+        // ★ FIX 14+16: Main slot replacement (portrait in nature, indoor, tech bad)
+        if (issue.type === 'MAIN_IS_PORTRAIT_IN_NATURE' || issue.type === 'MAIN_IS_INDOOR_UNRELATED' || issue.type === 'MAIN_IS_TECH_BAD') {
+          const replacement = getBestUnused(usedInFinal, ['STORY_ANCHOR', 'KEY_ACTIVITY', 'CONTEXT_SCENE']);
+          if (replacement != null) {
+            const oldMain = finalPhotoOrder[0];
+            rejectedSlotCandidates.push({ index: oldMain, reason: issue.type });
+            finalPhotoOrder[0] = replacement;
+            usedInFinal.add(replacement);
+            // Try to put old main in a non-critical slot (if not tech bad)
+            if (finalPhotoOrder.length > 2 && issue.type !== 'MAIN_IS_TECH_BAD') {
+              finalPhotoOrder[finalPhotoOrder.length - 1] = oldMain;
+            }
+            slotAuditFixes.push({ slot: 'main', oldIndex: oldMain, newIndex: replacement, reason: issue.type });
+          }
+        }
+
+        // ★ FIX 14+16: Highlight slot replacement
+        if (issue.type === 'HIGHLIGHT_IS_PORTRAIT_IN_NATURE' || issue.type === 'HIGHLIGHT_IS_INDOOR_UNRELATED' || 
+            issue.type === 'HIGHLIGHT_IS_TECH_BAD' || issue.type === 'HIGHLIGHT_IS_INTERVIEW' || issue.type === 'HIGHLIGHT_SAME_AS_MAIN') {
+          if (highlightPos >= 0 && highlightPos < finalPhotoOrder.length) {
+            const replacement = getBestUnused(usedInFinal, ['KEY_ACTIVITY', 'CONTEXT_SCENE', 'STORY_ANCHOR', 'EVIDENCE']);
+            if (replacement != null) {
+              rejectedSlotCandidates.push({ index: finalPhotoOrder[highlightPos], reason: issue.type });
+              finalPhotoOrder[highlightPos] = replacement;
+              usedInFinal.add(replacement);
+              slotAuditFixes.push({ slot: 'highlight', oldIndex: issue.index, newIndex: replacement, reason: issue.type });
+            }
+          }
+        }
+
+        // ★ FIX 15+9: Circle slot replacement (collage or no face data)
+        if (issue.type === 'CIRCLE_IS_COLLAGE' || issue.type === 'CIRCLE_NO_FACE_DATA') {
+          const replacement = getBestUnused(usedInFinal, ['HERO_FACE', 'RELATIONSHIP']);
+          if (replacement != null) {
+            rejectedSlotCandidates.push({ index: finalCircleIndex, reason: issue.type });
+            finalCircleIndex = replacement;
+            usedInFinal.add(replacement);
+            slotAuditFixes.push({ slot: 'circle', oldIndex: issue.index, newIndex: replacement, reason: issue.type });
+          }
+        }
+
+        // ★ FIX 15: Other slot tech bad replacements
+        if (/^SLOT\d+_IS_TECH_BAD$/.test(issue.type)) {
+          const slotPos = parseInt(issue.type.match(/SLOT(\d+)/)[1]);
+          if (!isNaN(slotPos) && slotPos < finalPhotoOrder.length) {
+            const replacement = getBestUnused(usedInFinal, ['KEY_ACTIVITY', 'CONTEXT_SCENE', 'STORY_ANCHOR', 'RELATIONSHIP']);
+            if (replacement != null) {
+              rejectedSlotCandidates.push({ index: finalPhotoOrder[slotPos], reason: issue.type });
+              finalPhotoOrder[slotPos] = replacement;
+              usedInFinal.add(replacement);
+              slotAuditFixes.push({ slot: `slot_${slotPos}`, oldIndex: issue.index, newIndex: replacement, reason: issue.type });
+            }
+          }
+        }
+
+        if (issue.type === 'TOO_MANY_HERO_FACE') {
+          // Replace non-main HERO_FACE slots with story images
+          let replaced = 0;
+          for (let p = 1; p < finalPhotoOrder.length && replaced < heroFaceCount - 2; p++) {
+            const img = imageBuffers[finalPhotoOrder[p]];
+            if (img?.role === 'HERO_FACE') {
+              const replacement = getBestUnused(usedInFinal, ['KEY_ACTIVITY', 'CONTEXT_SCENE', 'STORY_ANCHOR', 'RELATIONSHIP']);
+              if (replacement != null) {
+                rejectedSlotCandidates.push({ index: finalPhotoOrder[p], reason: 'TOO_MANY_HERO_FACE' });
+                finalPhotoOrder[p] = replacement;
+                usedInFinal.add(replacement);
+                slotAuditFixes.push({ slot: `slot_${p}`, oldIndex: finalPhotoOrder[p], newIndex: replacement, reason: 'TOO_MANY_HERO_FACE' });
+                replaced++;
+              }
+            }
+          }
+        }
+      }
+
+      // ★ FIX 13+17: Template downgrade — progressive fallback based on clean unique image count
+      const uniqueGoodIndices = new Set([...finalPhotoOrder, finalCircleIndex].filter(i => i != null && i >= 0 && !imageBuffers[i]?._techBadReason));
+      const { getTemplateById, getAllTemplateIds } = await import('@/lib/coverTemplateRegistry');
+      const templateSpec = getTemplateById(chosenTemplate);
+      const neededSlots = (templateSpec?.slots?.length || 4) + (templateSpec?.circle ? 1 : 0);
+      whySimpleTemplateWasChosen = null; // reset (declared in parent scope for review output access)
+      
+      if (uniqueGoodIndices.size < neededSlots) {
+        const available = uniqueGoodIndices.size;
+        // ★ FIX 13: Progressive template downgrade
+        if (available >= 4 && chosenTemplate !== 'template_9') {
+          // 4 clean images → template_9 (3 rect + 1 circle = 4 slots)
+          chosenTemplate = 'template_9';
+          templateChanged = true;
+          whySimpleTemplateWasChosen = `Only ${available} clean unique images < ${neededSlots} needed → downgraded to template_9 (4-slot)`;
+          templateReason = `FIX 13+17: ${whySimpleTemplateWasChosen}`;
+          finalPhotoOrder = finalPhotoOrder.slice(0, 3);
+          console.log(`[SlotAudit] ★ Template downgrade to template_9: ${templateReason}`);
+          slotAuditFixes.push({ slot: 'template', oldTemplate: templateSpec?.id, newTemplate: 'template_9', reason: templateReason });
+        } else if (available >= 3 && chosenTemplate !== 'template_2' && chosenTemplate !== 'template_9') {
+          // 3 clean images → template_2 (4-slot no circle, but 3 rect + 1 highlight)
+          chosenTemplate = 'template_2';
+          templateChanged = true;
+          whySimpleTemplateWasChosen = `Only ${available} clean unique images < ${neededSlots} needed → downgraded to template_2 (no circle)`;
+          templateReason = `FIX 13+17: ${whySimpleTemplateWasChosen}`;
+          finalPhotoOrder = finalPhotoOrder.slice(0, 4);
+          finalCircleIndex = -1; // No circle for template_2
+          console.log(`[SlotAudit] ★ Template downgrade to template_2: ${templateReason}`);
+          slotAuditFixes.push({ slot: 'template', oldTemplate: templateSpec?.id, newTemplate: 'template_2', reason: templateReason });
+        } else if (chosenTemplate !== 'template_9') {
+          // Fallback: template_9 with trimmed slots
+          chosenTemplate = 'template_9';
+          templateChanged = true;
+          whySimpleTemplateWasChosen = `Only ${available} clean unique images, insufficient → fallback to template_9`;
+          templateReason = `FIX 17: ${whySimpleTemplateWasChosen}`;
+          finalPhotoOrder = finalPhotoOrder.slice(0, 3);
+          console.log(`[SlotAudit] ★ Template fallback: ${templateReason}`);
+          slotAuditFixes.push({ slot: 'template', oldTemplate: templateSpec?.id, newTemplate: 'template_9', reason: templateReason });
+        }
+      }
+
+      // ★ C2: re-verify รอบสุดท้าย — เช็คว่าช่องจริงๆ ยังมีเนื้อหาซ้ำเหลืออยู่ไหม (หลัง fix + template slice)
+      slotDuplicatesRemaining = 0;
+      {
+        const finalIdxCheck = [...finalPhotoOrder, finalCircleIndex].filter(i => i != null && i >= 0);
+        const seenKeys = new Set();
+        for (const fi of finalIdxCheck) {
+          const fimg = imageBuffers[fi];
+          if (!fimg) continue;
+          const keys = [normalizeYTUrl(fimg.url || `img_${fi}`), fimg.candidateId || `cid_${fi}`];
+          if (keys.some(k => seenKeys.has(k))) slotDuplicatesRemaining++;
+          keys.forEach(k => seenKeys.add(k));
+        }
+        if (slotDuplicatesRemaining > 0) {
+          console.log(`[SlotAudit] ⛔ C2 re-verify: ${slotDuplicatesRemaining} duplicate slot(s) still remain after fixes`);
+        }
+      }
+
+      console.log(`[SlotAudit] ★ Audit complete: ${slotAuditIssues.length} issues, ${slotAuditFixes.length} fixes, dupRemaining=${slotDuplicatesRemaining}`);
+    } catch (auditErr) {
+      console.warn('[SlotAudit] ⚠️ Audit error:', auditErr.message);
+    }
+
+    // ★ C2: passed ที่สะท้อนความจริง — DUPLICATE_* ตัดสินจาก re-verify (1 ช่องซ้ำ = 2 issues แต่ fix เดียว ห้ามนับลบกัน)
+    const slotAuditEffectivePassed = () => {
+      const issues = slotAuditIssues || [];
+      if (issues.length === 0) return true;
+      const nonDupIssues = issues.filter(i => !i.type?.startsWith('DUPLICATE_'));
+      const nonDupFixes = (slotAuditFixes || []).filter(f => !String(f.reason || '').startsWith('DUPLICATE_'));
+      return slotDuplicatesRemaining === 0 && nonDupFixes.length >= nonDupIssues.length;
+    };
+
+    // Apply audited values
+    slotAssignment.photoOrder = finalPhotoOrder;
+    slotAssignment.circleIndex = finalCircleIndex;
+
+    // ★★★ Fix 31: Visual Weight Balancing ★★★
+    // For nature_learning / family_nature_learning, ensure story-anchor images get >40% pixel area
+    const storyTypeForWeight = (identity?.storyType || '').toLowerCase();
+    const isNatureFamilyStory = ['nature_learning', 'family_nature_learning', 'family_warmth'].includes(storyTypeForWeight);
+    let visualWeightReport = null;
+    let slotSwapApplied = false;
+    let slotSwapReason = '';
+    
+    if (isNatureFamilyStory) {
+      try {
+        const { getTemplateById } = await import('@/lib/coverTemplateRegistry');
+        const tplData = getTemplateById(chosenTemplate);
+        if (tplData?.slots) {
+          const totalArea = tplData.canvasW * tplData.canvasH;
+          let storyAnchorArea = 0;
+          let celebrityArea = 0;
+          let genericArea = 0;
+          const interviewTerms = ['สัมภาษณ์', 'interview', 'press', 'แถลง', 'พรมแดง', 'red carpet', 'งานอีเวนต์'];
+          
+          // Map each slot to its pixel area + weight category
+          const photoOrder = slotAssignment.photoOrder;
+          const slotWeights = tplData.slots.map((slot, si) => {
+            const imgIdx = photoOrder[si];
+            const img = imageBuffers[imgIdx];
+            if (!img) return { slot: slot.id, area: 0, category: 'generic' };
+            const area = (slot.w || 0) * (slot.h || 0);
+            const role = img.role || '';
+            const title = (img.title || '').toLowerCase();
+            const isInterview = interviewTerms.some(t => title.includes(t));
+            
+            let category;
+            if (['KEY_ACTIVITY', 'STORY_ANCHOR', 'CONTEXT_SCENE'].includes(role) || img._storyAnchor) {
+              category = 'storyAnchor';
+              storyAnchorArea += area;
+            } else if (['HERO_FACE', 'HERO'].includes(role) || isInterview) {
+              category = 'celebrity';
+              celebrityArea += area;
+            } else {
+              category = 'generic';
+              genericArea += area;
+            }
+            return { slot: slot.id, area, category, imgIdx, role, isInterview };
+          });
+          
+          const storyPct = Math.round((storyAnchorArea / totalArea) * 100);
+          const celebPct = Math.round((celebrityArea / totalArea) * 100);
+          const genericPct = Math.round((genericArea / totalArea) * 100);
+          
+          visualWeightReport = {
+            storyAnchor: `${storyPct}%`,
+            celebrity: `${celebPct}%`,
+            generic: `${genericPct}%`,
+            target: '70/20/10',
+            perSlot: slotWeights.map(s => ({ slot: s.slot, category: s.category, role: s.role })),
+          };
+          
+          console.log(`[VisualWeight] Fix 31: storyAnchor=${storyPct}% celebrity=${celebPct}% generic=${genericPct}%`);
+          
+          // Check: if celebrity > 35% AND storyAnchor < 40%, attempt one swap
+          if (celebPct > 35 && storyPct < 40) {
+            // Find the largest celebrity slot and the smallest story-anchor slot
+            const celebSlots = slotWeights.filter(s => s.category === 'celebrity').sort((a, b) => b.area - a.area);
+            const storySlots = slotWeights.filter(s => s.category === 'storyAnchor').sort((a, b) => a.area - b.area);
+            
+            if (celebSlots.length > 0 && storySlots.length > 0) {
+              const bigCeleb = celebSlots[0];
+              const smallStory = storySlots[0];
+              
+              // Only swap if celebrity slot is bigger than story slot
+              if (bigCeleb.area > smallStory.area) {
+                const celebSlotIdx = tplData.slots.findIndex(s => s.id === bigCeleb.slot);
+                const storySlotIdx = tplData.slots.findIndex(s => s.id === smallStory.slot);
+                
+                if (celebSlotIdx >= 0 && storySlotIdx >= 0 && celebSlotIdx < photoOrder.length && storySlotIdx < photoOrder.length) {
+                  const tmp = photoOrder[celebSlotIdx];
+                  photoOrder[celebSlotIdx] = photoOrder[storySlotIdx];
+                  photoOrder[storySlotIdx] = tmp;
+                  slotSwapApplied = true;
+                  slotSwapReason = `Fix31: Swapped ${bigCeleb.slot}(#${bigCeleb.imgIdx},${bigCeleb.role}) ↔ ${smallStory.slot}(#${smallStory.imgIdx},${smallStory.role}) — celebrity was ${celebPct}% > 35%`;
+                  console.log(`[VisualWeight] ★ ${slotSwapReason}`);
+                  
+                  // Recalculate after swap
+                  visualWeightReport.swapped = true;
+                  visualWeightReport.swapDetail = slotSwapReason;
+                }
+              }
+            }
+          }
+        }
+      } catch (vwErr) {
+        console.warn('[VisualWeight] Error:', vwErr.message);
+      }
+    }
+
+    // Step 8: Compose cover
     const { composeCover } = await import('@/lib/coverComposer');
 
     const plan = {
@@ -1714,12 +2371,181 @@ export async function POST(request) {
       photoOrder: slotAssignment.photoOrder,
       circlePhotoIndex: slotAssignment.circleIndex,
       circleSmallPhotoIndex: slotAssignment.circleSmallIndex,
+      // ★ C1 (10 มิ.ย.): แถบข้อความบนปก — DNA ปกไวรัลจริงทุกใบ "มีข้อความเสมอ"
+      //   storyIdentity AI สร้าง typography (hook/main/punch) อยู่แล้ว แต่ไม่เคยถูกวาดลงปก (dead code)
+      typography: (identity?.typography && (identity.typography.main || identity.typography.punch))
+        ? identity.typography
+        : { hook: 'ข่าวเด่น', main: (newsTitle || '').slice(0, 34), punch: '' },
     };
 
-    // ส่ง buffers ทั้งหมดไป — composeCover จะ map ตาม photoOrder เอง
+    // ★ Fix 30: Pass image roles for role-aware crop strategy
     const allBuffers = imageBuffers.map(img => img.buffer);
+    const imageRoles = imageBuffers.map(img => img.role || '');
 
-    const coverBuffer = await composeCover(plan, allBuffers, faceDataMap);
+    // ★★★ Fix 32: Track per-slot crop mode ★★★
+    const perSlotCropMode = {};
+    const whyThisImageWasUsedInThisSlot = {};
+    
+    // Build slot reasoning
+    try {
+      const { getTemplateById } = await import('@/lib/coverTemplateRegistry');
+      const tplForSlots = getTemplateById(chosenTemplate);
+      if (tplForSlots?.slots) {
+        tplForSlots.slots.forEach((slot, si) => {
+          const imgIdx = slotAssignment.photoOrder[si];
+          const img = imageBuffers[imgIdx];
+          if (!img) return;
+          const slotRole = slot.role || slot.id || '';
+          const imgRole = img.role || '';
+          
+          // Predict crop mode (mirrors coverComposer logic)
+          let crop;
+          if ((slotRole === 'hero' || slot.id === 'main') && ['KEY_ACTIVITY', 'STORY_ANCHOR', 'CONTEXT_SCENE'].includes(imgRole)) {
+            crop = 'activity-context';
+          } else if (slotRole === 'hero' || slot.id === 'main') {
+            crop = 'portrait-upper';
+          } else if (slotRole === 'emotion') {
+            crop = 'portrait-upper';
+          } else if (slotRole === 'highlight') {
+            crop = 'center-face';
+          } else {
+            crop = 'attention/center-face';
+          }
+          perSlotCropMode[slot.id] = crop;
+          whyThisImageWasUsedInThisSlot[slot.id] = `#${imgIdx} ${imgRole} (curator=${img.curatorScore || '?'}, title="${(img.title || '').slice(0, 40)}")`;
+        });
+        
+        // Circle slot
+        const circleImg = imageBuffers[slotAssignment.circleIndex];
+        if (circleImg) {
+          perSlotCropMode['circle'] = 'face-tight';
+          whyThisImageWasUsedInThisSlot['circle'] = `#${slotAssignment.circleIndex} ${circleImg.role || '?'} [${slotAssignment.circleSlotReason || 'default'}]`;
+        }
+      }
+    } catch {}
+
+    const coverBuffer = await composeCover(plan, allBuffers, faceDataMap, imageRoles);
+
+    // ★★★ Fix 32: Post-Compose Visual QA ★★★
+    let compositionQA = { passed: true, issues: [], score: 10 };
+    let repairPassApplied = false;
+    let cropQuality = {};
+    let focalRegion = {};
+    let visibleFaceRatio = {};
+    
+    try {
+      const qaIssues = [];
+      
+      // ★ Phase 4.1: Helper for correct faceData lookup (candidateId-first, String(idx) fallback)
+      const getFaceDataForIndex = (idx) => {
+        const img = imageBuffers[idx];
+        return faceDataMap?.get?.(img?.candidateId) || faceDataMap?.get?.(String(idx)) || null;
+      };
+      
+      // QA 1: Check face visibility per slot
+      const { getTemplateById: getTpl2 } = await import('@/lib/coverTemplateRegistry');
+      const tplQA = getTpl2(chosenTemplate);
+      if (tplQA?.slots) {
+        tplQA.slots.forEach((slot, si) => {
+          const imgIdx = slotAssignment.photoOrder[si];
+          const fd = getFaceDataForIndex(imgIdx);
+          const img = imageBuffers[imgIdx];
+          if (!img) return;
+          
+          const slotArea = (slot.w || 1) * (slot.h || 1);
+          
+          if (fd?.hasFaces && fd.faces?.length > 0) {
+            const face = fd.faces[0];
+            const faceArea = (face.width || 0) * (face.height || 0);
+            const srcArea = (fd.imageWidth || 1) * (fd.imageHeight || 1);
+            const faceRatio = faceArea / srcArea;
+            
+            visibleFaceRatio[slot.id] = Math.round(faceRatio * 100) + '%';
+            focalRegion[slot.id] = { x: face.x, y: face.y, w: face.width, h: face.height };
+            cropQuality[slot.id] = faceRatio > 0.02 ? 'good' : 'small';
+            
+            // QA: Face too small (< 2% of source image)
+            if (faceRatio < 0.02) {
+              qaIssues.push({ type: 'FACE_TOO_SMALL', slot: slot.id, imgIdx, faceRatio: Math.round(faceRatio * 100) + '%' });
+            }
+          } else {
+            cropQuality[slot.id] = 'no-face';
+            visibleFaceRatio[slot.id] = 'N/A';
+          }
+          
+          // QA: Non-main slot larger than main slot (interview overpower)
+          if (slot.id !== 'main' && img.role === 'HERO_FACE') {
+            const mainSlot = tplQA.slots.find(s => s.id === 'main');
+            if (mainSlot) {
+              const mainArea = (mainSlot.w || 1) * (mainSlot.h || 1);
+              if (slotArea > mainArea * 0.8) {
+                qaIssues.push({ type: 'SUPPORT_OVERPOWERS_MAIN', slot: slot.id, imgIdx, role: img.role });
+              }
+            }
+          }
+        });
+        
+        // QA: Circle without face data
+        const circleFD = getFaceDataForIndex(slotAssignment.circleIndex);
+        if (!circleFD?.hasFaces) {
+          qaIssues.push({ type: 'CIRCLE_NO_FACE', imgIdx: slotAssignment.circleIndex });
+        }
+        cropQuality['circle'] = circleFD?.hasFaces ? 'good' : 'no-face';
+      }
+      
+      // QA: Check gradient hiding (face in fade region)
+      // This is approximate — checks if face center is in the outer 15% of a faded slot
+      if (tplQA?.slots) {
+        tplQA.slots.forEach((slot, si) => {
+          const imgIdx = slotAssignment.photoOrder[si];
+          const fd = getFaceDataForIndex(imgIdx);
+          if (!fd?.hasFaces || !fd.faces?.length) return;
+          
+          const face = fd.faces[0];
+          const faceCX = face.x + face.width / 2;
+          const srcW = fd.imageWidth || slot.w || 1;
+          const facePctFromRight = 1 - (faceCX / srcW);
+          
+          if (slot.fadeRight && slot.fadeRight > 60 && facePctFromRight < 0.15) {
+            qaIssues.push({ type: 'FACE_IN_FADE_REGION', slot: slot.id, imgIdx, edge: 'right' });
+          }
+          if (slot.fadeLeft && slot.fadeLeft > 60) {
+            const facePctFromLeft = faceCX / srcW;
+            if (facePctFromLeft < 0.15) {
+              qaIssues.push({ type: 'FACE_IN_FADE_REGION', slot: slot.id, imgIdx, edge: 'left' });
+            }
+          }
+        });
+      }
+      
+      // Score composition
+      const qaScore = Math.max(0, 10 - qaIssues.length * 2);
+      compositionQA = { passed: qaIssues.length === 0, issues: qaIssues, score: qaScore };
+      
+      if (!compositionQA.passed) {
+        console.log(`[CompositionQA] Fix 32: ${qaIssues.length} issues found:`, qaIssues.map(i => i.type).join(', '));
+        
+        // If critical issues and no swap already attempted → mark for manual review
+        const criticalIssues = qaIssues.filter(i => ['CIRCLE_NO_FACE', 'SUPPORT_OVERPOWERS_MAIN'].includes(i.type));
+        if (criticalIssues.length > 0 && !slotSwapApplied) {
+          // Attempt one repair: re-compose is not practical without re-assigning slots,
+          // so we just flag it
+          repairPassApplied = true;
+          console.log('[CompositionQA] ★ Critical issues detected but no automatic repair available → flagging');
+        }
+      } else {
+        console.log('[CompositionQA] Fix 32: ✅ All QA checks passed');
+      }
+    } catch (qaErr) {
+      console.warn('[CompositionQA] Error:', qaErr.message);
+    }
+    
+    // ★ Fix 32: Override needManualReview if composition QA failed critically
+    if (compositionQA.score <= 4 && repairPassApplied) {
+      needManualReview = true;
+      console.log('[CompositionQA] ★ Score ≤4 after repair → NEED_MANUAL_REVIEW');
+    }
+
     const base64 = `data:image/jpeg;base64,${coverBuffer.toString('base64')}`;
 
 
@@ -1851,14 +2677,52 @@ Return JSON:
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`[AutoCover] ✅ Complete! Score: ${score}/10, Time: ${elapsed}s, Template: ${chosenTemplate}`);
 
-    // สร้าง newsHash สำหรับ regenerate
-    let newsHash = '';
+    // ═══════════════════════════════════════════════════════════
+    // ★ Phase 4: Final Save Gate
+    // Evaluate whether the cover should be saved as SUCCESS
+    // or flagged as NEED_MANUAL_REVIEW before gallery save.
+    // ═══════════════════════════════════════════════════════════
+    let finalSaveGateResult = { saveGatePassed: true, saveGateStatus: 'SUCCESS', saveGateBlockers: [], manualReviewReason: null, summary: {} };
     try {
-      const { generateNewsHash } = await import('@/lib/services/imageCacheService');
-      newsHash = generateNewsHash(newsTitle || content?.substring(0, 100));
-    } catch {}
+      const { evaluateFinalSaveGate } = await import('@/lib/services/finalSaveGate');
+      finalSaveGateResult = evaluateFinalSaveGate({
+        finalSlotAudit: {
+          passed: slotAuditEffectivePassed(),
+          issues: slotAuditIssues || [],
+          fixes: slotAuditFixes || [],
+        },
+        compositionQA,
+        qualityGateDiagnostics,
+        storyMatchScore,
+        duplicateSlotDetected: slotDuplicatesRemaining > 0,
+        imageBuffers,
+        slotAssignment,
+        identity,
+        chosenTemplate,
+        score,
+        dominantElement,
+        needManualReview,
+      });
+
+      // Override needManualReview from save gate
+      if (!finalSaveGateResult.saveGatePassed) {
+        needManualReview = true;
+        console.log(`[AutoCover] ★ Phase 4 Save Gate: NEED_MANUAL_REVIEW — ${finalSaveGateResult.saveGateBlockers.length} blocker(s)`);
+      } else {
+        console.log(`[AutoCover] ★ Phase 4 Save Gate: ${finalSaveGateResult.saveGateStatus} — cover will save to gallery${finalSaveGateResult.saveGateWarnings?.length ? ` (${finalSaveGateResult.saveGateWarnings.length} warning(s))` : ''}`);
+      }
+    } catch (sgErr) {
+      console.warn('[AutoCover] ⚠️ Final Save Gate error (non-critical):', sgErr.message);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ★ Phase 4.1: Determine whether save paths should run
+    // ═══════════════════════════════════════════════════════════
+    const shouldSaveAsSuccess = finalSaveGateResult.saveGateStatus === 'SUCCESS' || finalSaveGateResult.saveGateStatus === 'PARTIAL_PASS';
+    console.log(`[AutoCover] ★ shouldSaveAsSuccess=${shouldSaveAsSuccess} (status=${finalSaveGateResult.saveGateStatus})`);
 
     // Step 9: Save to Case Archive
+    // Always save case (for debug/review), but mark status correctly
     let caseResult = null;
     try {
       const { saveCase } = await import('@/lib/services/coverCaseArchive');
@@ -1876,121 +2740,141 @@ Return JSON:
           coverEmotion: identity?.coverEmotion || '',
         },
         batchId: body.batchId || null,
+        // ★ Phase 4.1: Pass save gate status to case archive
+        saveGateStatus: finalSaveGateResult.saveGateStatus,
+        needManualReview: !shouldSaveAsSuccess,
       });
-      console.log(`[AutoCover] 📁 Saved as ${caseResult.caseId}`);
+      console.log(`[AutoCover] 📁 Saved as ${caseResult.caseId}${!shouldSaveAsSuccess ? ' (status: NEED_MANUAL_REVIEW)' : ''}`);
     } catch (e) {
       console.log(`[AutoCover] ⚠️ Case archive save failed: ${e.message}`);
     }
 
     // ★ Step 10: Auto-save ปกเข้า "คลังปก" (cover_examples) — fire-and-forget ★
-    // ไม่ block response หลัก, ถ้า save ล้มเหลวจะ log warning เท่านั้น
-    try {
-      const { saveGeneratedCoverToLibrary } = await import('@/lib/services/coverLibrarySaver');
-      const finalCaseId = caseResult?.caseId || bodyCaseId || null;
-      const subjects = identity?.characters?.slice(0, 5) || [
-        identity?.mainCharacter,
-        identity?.secondaryCharacter,
-      ].filter(Boolean);
+    // ★ Phase 4.1: SKIP entirely if save gate rejected the cover
+    if (shouldSaveAsSuccess) {
+      try {
+        const { saveGeneratedCoverToLibrary } = await import('@/lib/services/coverLibrarySaver');
+        const finalCaseId = caseResult?.caseId || bodyCaseId || null;
+        const subjects = identity?.characters?.slice(0, 5) || [
+          identity?.mainCharacter,
+          identity?.secondaryCharacter,
+        ].filter(Boolean);
 
-      console.log(`[AutoCover] 📚 Step 10: Saving to cover library... caseId=${finalCaseId}, subjects=${JSON.stringify(subjects)}`);
-      
-      saveGeneratedCoverToLibrary({
-        coverBuffer,
-        templateId: chosenTemplate,
-        newsTitle: newsTitle || content?.substring(0, 100) || '',
-        newsUrl: sourceUrl || '',
-        newsBody: content || '',
-        caseId: finalCaseId,
-        score,
-        subjects,
-        emotion: identity?.coverEmotion || identity?.emotion || '',
-        imageCount: imageBuffers.length,
-      }).then((result) => {
-        if (result?.success) {
-          console.log(`[AutoCover] ✅ Cover library auto-save SUCCESS: id=${result.id}, version=${result.version || 1}`);
-        } else {
-          console.warn(`[AutoCover] ⚠️ Cover library auto-save returned error: ${result?.error || 'unknown'}`);
-        }
-      }).catch((err) =>
-        console.warn('[AutoCover] ⚠️ Cover library auto-save error:', err?.message)
-      );
-    } catch (libErr) {
-      // ห้าม throw — ไม่กระทบ response หลัก
-      console.warn('[AutoCover] ⚠️ Cover library import error:', libErr?.message);
+        console.log(`[AutoCover] 📚 Step 10: Saving to cover library... caseId=${finalCaseId}, subjects=${JSON.stringify(subjects)}`);
+        
+        saveGeneratedCoverToLibrary({
+          coverBuffer,
+          templateId: chosenTemplate,
+          newsTitle: newsTitle || content?.substring(0, 100) || '',
+          newsUrl: sourceUrl || '',
+          newsBody: content || '',
+          caseId: finalCaseId,
+          score,
+          subjects,
+          emotion: identity?.coverEmotion || identity?.emotion || '',
+          imageCount: imageBuffers.length,
+        }).then((result) => {
+          if (result?.success) {
+            console.log(`[AutoCover] ✅ Cover library auto-save SUCCESS: id=${result.id}, version=${result.version || 1}`);
+          } else {
+            console.warn(`[AutoCover] ⚠️ Cover library auto-save returned error: ${result?.error || 'unknown'}`);
+          }
+        }).catch((err) =>
+          console.warn('[AutoCover] ⚠️ Cover library auto-save error:', err?.message)
+        );
+      } catch (libErr) {
+        // ห้าม throw — ไม่กระทบ response หลัก
+        console.warn('[AutoCover] ⚠️ Cover library import error:', libErr?.message);
+      }
+    } else {
+      console.log(`[AutoCover] ⛔ Step 10: SKIPPED cover library save — saveGateStatus=${finalSaveGateResult.saveGateStatus}`);
     }
 
     // Save all candidate images to the database cover_images gallery
+    // ★ Phase 4.1: Only save to gallery if save gate passed
     let gallerySaveList = [];
-    try {
-      const selectedUrls = new Set(
-        [
-          ...(plan.photoOrder || []),
-          plan.circlePhotoIndex,
-          plan.circleSmallPhotoIndex
-        ]
-        .filter(idx => idx !== undefined && idx !== null)
-        .map(idx => imageBuffers[idx]?.url)
-        .filter(Boolean)
-      );
+    let gallerySaved = false;
+    if (shouldSaveAsSuccess) {
+      try {
+        const selectedUrls = new Set(
+          [
+            ...(plan.photoOrder || []),
+            plan.circlePhotoIndex,
+            plan.circleSmallPhotoIndex
+          ]
+          .filter(idx => idx !== undefined && idx !== null)
+          .map(idx => imageBuffers[idx]?.url)
+          .filter(Boolean)
+        );
 
-      const seenUrls = new Set();
+        const seenUrls = new Set();
 
-      // 1. Downloaded images (in imageBuffers) — บันทึกเฉพาะรูปที่ผ่านการกรองโดย AI (คะแนน >= 4 และไม่ REJECT)
-      imageBuffers.forEach((img, i) => {
-        const scoreVal = img.curatorScore || img.score || 0;
-        const roleVal = img.role || 'SUPPORT';
-        
-        // ★ คัดกรองอย่างเข้มงวด: ไม่บันทึกภาพที่เป็น LOW_PRIORITY หรือคะแนนต่ำลงแกลเลอรี
-        if (roleVal === 'REJECT' || roleVal === 'reject' || roleVal === 'LOW_PRIORITY' || scoreVal < 4) {
-          return; 
-        }
-
-        if (img.url && !seenUrls.has(img.url)) {
-          seenUrls.add(img.url);
-          const fd = faceDataMap?.get?.(String(i)) || { hasFaces: false, faceCount: 0 };
+        // 1. Downloaded images (in imageBuffers) — บันทึกเฉพาะรูปที่ผ่านการกรองโดย AI (คะแนน >= 4 และไม่ REJECT)
+        imageBuffers.forEach((img, i) => {
+          const scoreVal = img.curatorScore || img.score || 0;
+          const roleVal = img.role || 'SUPPORT';
           
-          let sourceAgent = 'google';
-          const urlStr = img.url || '';
-          const lowerUrl = urlStr.toLowerCase();
-          if (lowerUrl.includes('youtube') || lowerUrl.includes('hunter') || urlStr.startsWith('data:') || img.source?.includes('youtube') || img.sourceAgent === 'youtube') {
-            sourceAgent = 'youtube';
-          } else if (lowerUrl.includes('tiktok') || img.source?.includes('tiktok') || img.sourceAgent === 'tiktok') {
-            sourceAgent = 'tiktok';
+          // ★ คัดกรองอย่างเข้มงวด: ไม่บันทึกภาพที่เป็น LOW_PRIORITY หรือคะแนนต่ำลงแกลเลอรี
+          if (roleVal === 'REJECT' || roleVal === 'reject' || roleVal === 'LOW_PRIORITY' || scoreVal < 4) {
+            return; 
           }
 
-          gallerySaveList.push({
-            url: img.url,
-            sourceAgent: sourceAgent,
-            role: roleVal,
-            score: scoreVal,
-            reason: img.reason || (img.curatorScore ? `Curator relevance: ${img.curatorScore}/10` : 'Selected candidate'),
-            width: img.width || 0,
-            height: img.height || 0,
-            thumbnailBase64: null,
-            isSelected: selectedUrls.has(img.url),
-            hasFace: fd.hasFaces || false,
-            faceCount: fd.faceCount || 0,
-          });
-        }
-      });
+          if (img.url && !seenUrls.has(img.url)) {
+            seenUrls.add(img.url);
+            const fd = faceDataMap?.get?.(img.candidateId) || faceDataMap?.get?.(String(i)) || { hasFaces: false, faceCount: 0 };
+            
+            let sourceAgent = 'google';
+            const urlStr = img.url || '';
+            const lowerUrl = urlStr.toLowerCase();
+            if (lowerUrl.includes('youtube') || lowerUrl.includes('hunter') || urlStr.startsWith('data:') || img.source?.includes('youtube') || img.sourceAgent === 'youtube') {
+              sourceAgent = 'youtube';
+            } else if (lowerUrl.includes('tiktok') || img.source?.includes('tiktok') || img.sourceAgent === 'tiktok') {
+              sourceAgent = 'tiktok';
+            }
 
-      const { saveToGallery } = await import('@/lib/services/imageGallery');
-      let finalSessionId = caseResult?.caseId || bodyCaseId || sessionId;
-      if (!bodyCaseId && finalSessionId === 'CASE-001') {
-        // If it falls back to CASE-001 and was not explicitly requested, use sessionId to prevent mixing.
-        finalSessionId = sessionId;
+            gallerySaveList.push({
+              url: img.url,
+              sourceAgent: sourceAgent,
+              role: roleVal,
+              score: scoreVal,
+              reason: img.reason || (img.curatorScore ? `Curator relevance: ${img.curatorScore}/10` : 'Selected candidate'),
+              width: img.width || 0,
+              height: img.height || 0,
+              thumbnailBase64: null,
+              isSelected: selectedUrls.has(img.url),
+              hasFace: fd.hasFaces || false,
+              faceCount: fd.faceCount || 0,
+            });
+          }
+        });
+
+        const { saveToGallery } = await import('@/lib/services/imageGallery');
+        let finalSessionId = caseResult?.caseId || bodyCaseId || sessionId;
+        if (!bodyCaseId && finalSessionId === 'CASE-001') {
+          finalSessionId = sessionId;
+        }
+        const galleryTitle = newsTitle || content?.substring(0, 100) || 'Untitled';
+        
+        await saveToGallery(finalSessionId, galleryTitle, gallerySaveList);
+        gallerySaved = true;
+        console.log(`[AutoCover] 💾 Saved ${gallerySaveList.length} images to cover_images table for session ${finalSessionId}`);
+      } catch (galErr) {
+        console.warn('[AutoCover] ⚠️ Failed to save to image gallery:', galErr.message);
       }
-      const galleryTitle = newsTitle || content?.substring(0, 100) || 'Untitled';
-      
-      await saveToGallery(finalSessionId, galleryTitle, gallerySaveList);
-      console.log(`[AutoCover] 💾 Saved ${gallerySaveList.length} images to cover_images table for session ${finalSessionId}`);
-    } catch (galErr) {
-      console.warn('[AutoCover] ⚠️ Failed to save to image gallery:', galErr.message);
+    } else {
+      console.log(`[AutoCover] ⛔ Gallery save SKIPPED — saveGateStatus=${finalSaveGateResult.saveGateStatus}`);
     }
+
+    // ★ Phase 4.1: newsHash still needed for regenerate even if not saved
+    let newsHash = '';
+    try {
+      const { generateNewsHash } = await import('@/lib/services/imageCacheService');
+      newsHash = generateNewsHash(newsTitle || content?.substring(0, 100));
+    } catch {}
 
     if (gallerySaveList.length === 0) {
       gallerySaveList = imageBuffers.map((img, i) => {
-        const fd = getFaceData(img, i);
+        const fd = faceDataMap?.get?.(img.candidateId) || faceDataMap?.get?.(String(i)) || { hasFaces: false, faceCount: 0 };
         return {
           url: img.url,
           role: img.role || 'SUPPORT',
@@ -2008,9 +2892,12 @@ Return JSON:
       const reviewDir = path.join(process.cwd(), 'ai-review');
       await mkdir(reviewDir, { recursive: true });
       
+      // ★ Use identity-derived title to avoid request-body encoding issues
+      const safeNewsTitle = identity?.typography?.main || identity?.story || identity?._newsTitle || newsTitle || '';
+      
       const reviewData = {
         timestamp: new Date().toISOString(),
-        newsTitle,
+        newsTitle: safeNewsTitle,
         storyType: identity.storyType || 'general',
         mainVisualShouldBe: identity.mainVisualShouldBe || '',
         coverageRequired: identity.coverageRequired || [],
@@ -2025,8 +2912,32 @@ Return JSON:
           photoOrder: slotAssignment?.photoOrder,
         },
         templateUsed: chosenTemplate,
+        // ★ FIX 18: Enhanced review fields
+        templateReason: templateReason || 'auto',
+        templateChanged: templateChanged || false,
         score,
         storyMatchScore: storyMatchScore ?? null,
+        // ★ FIX 18: Slot audit data
+        finalSlotAudit: {
+          issues: slotAuditIssues || [],
+          fixes: slotAuditFixes || [],
+          passed: slotAuditEffectivePassed(),
+        },
+        duplicateSlotDetected: slotDuplicatesRemaining > 0,
+        finalUsedCandidateIds: [...new Set(
+          [...(slotAssignment?.photoOrder || []), slotAssignment?.circleIndex]
+            .filter(i => i != null && i >= 0)
+            .map(i => imageBuffers[i]?.candidateId || `idx_${i}`)
+        )],
+        rejectedSlotCandidates: rejectedSlotCandidates || [],
+        // ★ FIX 18: Additional diagnostic fields
+        whySimpleTemplateWasChosen: whySimpleTemplateWasChosen || null,
+        normalizedYoutubeVideoIds: normalizedYoutubeVideoIds || [],
+        duplicateReplacement: (slotAuditFixes || []).filter(f => f.reason?.startsWith('DUPLICATE_')),
+        storyTypePropagationCheck: {
+          fromGPT: identity._gptStoryType || identity.storyType || null,
+          afterCoverage: identity.storyType || null,
+        },
         allCandidates: imageBuffers.map((img, i) => ({
           index: i,
           role: img.role || 'SUPPORT',
@@ -2037,7 +2948,33 @@ Return JSON:
           width: img.width || 0,
           height: img.height || 0,
           techBad: img._techBadReason || null,
+          _storyAnchor: img._storyAnchor || false,
+          _rescued: img._rescued || false,
+          _curatorScoreBeforeGuard: img._curatorScoreBeforeGuard ?? null,
         })),
+        // ★ Fix 28: Story anchor diagnostics
+        normalizedStoryType: identity.storyType || 'default',
+        rawStoryType: identity.rawStoryType || identity.storyType || null,
+        storyAnchorCandidates: imageBuffers.filter(img => img._storyAnchor).map(img => ({
+          title: (img.title || '').slice(0, 80),
+          url: (img.url || '').slice(0, 100),
+          role: img.role,
+          judgeScore: img.score || 0,
+          curatorScore: img.curatorScore || 0,
+          curatorScoreBeforeGuard: img._curatorScoreBeforeGuard ?? null,
+          rescued: img._rescued || false,
+        })),
+        candidateBucketCounts: identity._bucketCounts || null,
+        // ★ Phase 3: Quality Gate diagnostics
+        qualityGate: qualityGateDiagnostics || null,
+        needManualReview: needManualReview || false,
+        noStoryAnchorFallbackReason: noStoryAnchorFallbackReason || null,
+        // ★ Phase 4: Final Save Gate diagnostics
+        finalSaveGate: finalSaveGateResult || null,
+        saveGatePassed: finalSaveGateResult?.saveGatePassed ?? true,
+        saveGateStatus: finalSaveGateResult?.saveGateStatus || 'SUCCESS',
+        saveGateBlockers: finalSaveGateResult?.saveGateBlockers || [],
+        manualReviewReason: finalSaveGateResult?.manualReviewReason || null,
       };
       
       // Write JSON
@@ -2049,10 +2986,13 @@ Return JSON:
       
       // Write MD
       const heroImg = imageBuffers[slotAssignment?.heroIndex];
+      const auditSummary = (slotAuditIssues || []).length === 0 
+        ? '✅ No issues found' 
+        : `⚠️ ${slotAuditIssues.length} issues, ${(slotAuditFixes || []).length} auto-fixed`;
       const mdContent = `# AI Cover Review — ${new Date().toISOString()}
 
 ## Story Identity
-- **Title**: ${newsTitle}
+- **Title**: ${safeNewsTitle}
 - **Story Type**: ${identity.storyType || 'general'}
 - **Main Visual Should Be**: ${identity.mainVisualShouldBe || 'N/A'}
 - **Coverage Required**: ${(identity.coverageRequired || []).join(', ') || 'N/A'}
@@ -2064,10 +3004,33 @@ Return JSON:
 - **Circle Index**: #${slotAssignment?.circleIndex}
 - **Photo Order**: ${JSON.stringify(slotAssignment?.photoOrder)}
 - **Template**: ${chosenTemplate}
+- **Template Reason**: ${templateReason || 'auto'}
+- **Template Changed**: ${templateChanged ? 'YES' : 'no'}
 
 ## Scores
 - **Overall Score**: ${score}/10
 - **Story Match Score**: ${storyMatchScore ?? 'N/A'}
+
+## ★ Slot Audit (Fix 12-17)
+- **Status**: ${auditSummary}
+- **Duplicate Detected**: ${(slotAuditIssues || []).some(i => i.type.startsWith('DUPLICATE_')) ? 'YES ⚠️' : 'No ✅'}
+- **Why Simple Template**: ${whySimpleTemplateWasChosen || 'N/A (template was not downgraded)'}
+- **Issues**: ${JSON.stringify(slotAuditIssues || [])}
+- **Fixes Applied**: ${JSON.stringify(slotAuditFixes || [])}
+- **Duplicate Replacements**: ${JSON.stringify((slotAuditFixes || []).filter(f => f.reason?.startsWith('DUPLICATE_')))}
+- **Rejected Candidates**: ${JSON.stringify(rejectedSlotCandidates || [])}
+- **Final Used CIDs**: ${[...(slotAssignment?.photoOrder || []), slotAssignment?.circleIndex].filter(i => i != null && i >= 0).map(i => imageBuffers[i]?.candidateId || `idx_${i}`).join(', ')}
+- **YouTube Video IDs**: ${JSON.stringify(normalizedYoutubeVideoIds || [])}
+
+## ★ Face Detection Diagnostics (Fix 9)
+- **Has Face Count**: ${imageBuffers.filter(img => faceDataMap?.get?.(img.candidateId)?.hasFaces).length}
+- **Total Images**: ${imageBuffers.length}
+- **All Faces Empty**: ${!imageBuffers.some(img => faceDataMap?.get?.(img.candidateId)?.hasFaces) ? 'YES ⚠️' : 'No'}
+
+## ★ Story Type Propagation (Fix 0)
+- **From GPT**: ${identity._gptStoryType || identity.storyType || 'N/A'}
+- **After Coverage**: ${identity.storyType || 'N/A'}
+- **coverageRequired**: [${(identity.coverageRequired || []).join(', ')}]
 
 ## All Candidates
 | # | Role | Score | Tech Bad | Title |
@@ -2094,7 +3057,19 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
     }
 
     return NextResponse.json({
-      success: true,
+      success: shouldSaveAsSuccess,
+      status: finalSaveGateResult.saveGateStatus,
+      needManualReview: !shouldSaveAsSuccess,
+      noStoryAnchorFallbackReason: noStoryAnchorFallbackReason || null,
+      // ★ Phase 4: Final Save Gate fields
+      finalSaveGate: finalSaveGateResult || null,
+      saveGatePassed: finalSaveGateResult?.saveGatePassed ?? true,
+      saveGateStatus: finalSaveGateResult?.saveGateStatus || 'SUCCESS',
+      saveGateBlockers: finalSaveGateResult?.saveGateBlockers || [],
+      saveGateWarnings: finalSaveGateResult?.saveGateWarnings || [],
+      savedToGallery: shouldSaveAsSuccess && gallerySaved,
+      galleryStatus: shouldSaveAsSuccess ? (gallerySaved ? 'SAVED' : 'SAVE_FAILED') : 'SKIPPED_MANUAL_REVIEW',
+      manualReviewReason: finalSaveGateResult?.manualReviewReason || null,
       base64,
       templateUsed: chosenTemplate,
       imageCount: imageBuffers.length,
@@ -2117,7 +3092,10 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
         visualPriority: identity.visualPriority || {},
         storyAnchorQueries: identity.storyAnchorQueries || [],
       },
-      // ★ FIX 10: AI Review data for debugging visual hierarchy
+      // ★ Fix 28: Add normalizedStoryType to response identity
+      normalizedStoryType: identity.storyType || 'default',
+      rawStoryType: identity.rawStoryType || identity.storyType || null,
+      // ★ FIX 18: Enhanced aiReview with slot audit data
       aiReview: {
         storyType: identity.storyType || 'general',
         mainVisualShouldBe: identity.mainVisualShouldBe || '',
@@ -2132,6 +3110,40 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
           circleIndex: slotAssignment?.circleIndex,
           photoOrder: slotAssignment?.photoOrder,
         },
+        // ★ FIX 18: Slot audit fields
+        finalSlotAudit: {
+          issues: slotAuditIssues || [],
+          fixes: slotAuditFixes || [],
+          passed: slotAuditEffectivePassed(),
+        },
+        duplicateSlotDetected: slotDuplicatesRemaining > 0,
+        templateReason: templateReason || 'auto',
+        templateChanged: templateChanged || false,
+        finalUsedCandidateIds: [...new Set(
+          [...(slotAssignment?.photoOrder || []), slotAssignment?.circleIndex]
+            .filter(i => i != null && i >= 0)
+            .map(i => imageBuffers[i]?.candidateId || `idx_${i}`)
+        )],
+        rejectedSlotCandidates: rejectedSlotCandidates || [],
+        // ★ FIX 9: Face detection diagnostics
+        faceDetection: {
+          hasFaceCount: imageBuffers.filter(img => {
+            const fd = faceDataMap?.get?.(img.candidateId);
+            return fd?.hasFaces;
+          }).length,
+          totalImages: imageBuffers.length,
+          faceDetectionFailedCount: imageBuffers.filter(img => {
+            const fd = faceDataMap?.get?.(img.candidateId);
+            return !fd || !fd.hasFaces;
+          }).length,
+          allFacesEmpty: !imageBuffers.some(img => faceDataMap?.get?.(img.candidateId)?.hasFaces),
+        },
+        // ★ FIX 0: storyType propagation check
+        storyTypePropagationCheck: {
+          fromGPT: identity._gptStoryType || identity.storyType || null,
+          afterCoverage: identity.storyType || null,
+          usedForDNA: identity.storyType || null,
+        },
         allCandidates: imageBuffers.map((img, i) => ({
           index: i,
           role: img.role || 'SUPPORT',
@@ -2139,6 +3151,27 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
           title: (img.title || '').slice(0, 50),
           url: (img.url || '').slice(0, 80),
           techBad: img._techBadReason || null,
+          _storyAnchor: img._storyAnchor || false,
+          _rescued: img._rescued || false,
+        })),
+        // ★ Fix 28: Story anchor diagnostics in aiReview
+        normalizedStoryType: identity.storyType || 'default',
+        rawStoryType: identity.rawStoryType || identity.storyType || null,
+        needManualReview: needManualReview || false,
+        noStoryAnchorFallbackReason: noStoryAnchorFallbackReason || null,
+        // ★ Phase 4: Final Save Gate in aiReview
+        finalSaveGate: finalSaveGateResult || null,
+        saveGatePassed: finalSaveGateResult?.saveGatePassed ?? true,
+        saveGateStatus: finalSaveGateResult?.saveGateStatus || 'SUCCESS',
+        saveGateBlockers: finalSaveGateResult?.saveGateBlockers || [],
+        manualReviewReason: finalSaveGateResult?.manualReviewReason || null,
+        storyAnchorCandidates: imageBuffers.filter(img => img._storyAnchor).map(img => ({
+          title: (img.title || '').slice(0, 80),
+          role: img.role,
+          judgeScore: img.score || 0,
+          curatorScore: img.curatorScore || 0,
+          curatorScoreBeforeGuard: img._curatorScoreBeforeGuard ?? null,
+          rescued: img._rescued || false,
         })),
       },
       // FIX C: Cover Praising Test results
@@ -2211,7 +3244,7 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
     if (faceDataMap) {
       // 1. First try to find a single-face image (faceCount = 1) to ensure it's the main character
       for (const thumb of thumbnails) {
-        const faceData = getFaceData(imageBuffers[thumb.index], thumb.index);
+        const faceData = faceDataMap?.get?.(imageBuffers[thumb.index]?.candidateId) || faceDataMap?.get?.(String(thumb.index)) || { hasFaces: false, faceCount: 0 };
         if (faceData && faceData.hasFaces && faceData.faceCount === 1) {
           heroRefIndex = thumb.index;
           foundHeroRef = true;
@@ -2221,7 +3254,7 @@ async function curateImagesForCover(imageBuffers, newsTitle, newsContent, identi
       // 2. If no single-face image found, use any image with faces (faceCount > 0)
       if (!foundHeroRef) {
         for (const thumb of thumbnails) {
-          const faceData = getFaceData(imageBuffers[thumb.index], thumb.index);
+          const faceData = faceDataMap?.get?.(imageBuffers[thumb.index]?.candidateId) || faceDataMap?.get?.(String(thumb.index)) || { hasFaces: false, faceCount: 0 };
           if (faceData && faceData.hasFaces && faceData.faceCount > 0) {
             heroRefIndex = thumb.index;
             foundHeroRef = true;
@@ -2362,6 +3395,13 @@ Example: News "น้องทาเรีย ลูกน้ำฝน สวย
    - If this is a single-person news story (no named secondary character) such as a story about "กัน นภัทร" or "แม่ทัพกุ้ง" → NEVER select face images of strangers or random other people (e.g., other celebrities, random models, random women) who are not the protagonist and not actual characters in the news!
    - If an image prominently features a stranger → set relevance <= 2 and recommend role "REJECT" immediately!
 10. ★ Images of people NOT in the news (strangers, other celebrities) → relevance ≤ 2
+11. ★★★ HERO = PEAK EMOTION ⭐ (viral cover DNA):
+   - The HERO_FACE must capture a PEAK-EMOTION moment: tears, a big genuine smile, shock, embrace, triumph — sharp, well-lit, eyes clearly visible
+   - NEVER recommend HERO_FACE for: mid-speech frames (mouth half-open, eyes half-closed), blurry/low-light faces, faces turned away, passport-style stiff portraits → demote to PERSON_SUPPORT or score lower
+   - If two images show the same moment, prefer the one with the strongest readable emotion on the face
+12. ★★★ NO DUPLICATE PERSON across slots:
+   - The SAME person must NOT be recommended for more than ONE role/slot — pick their single best image and reject near-duplicates (same person, same outfit, same scene → keep only the best one, others relevance ≤ 4)
+   - ONLY exception: a deliberate then-vs-now contrast (TIMELINE_PAST + present-day) where the two images are clearly from different eras
 
 Respond in JSON (★★ MUST score EVERY image, do NOT skip any!):
 {"curated": [
@@ -2737,6 +3777,7 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
     const hasRoles = byRole.STORY_ANCHOR.length > 0 || byRole.HERO_FACE.length > 0 || byRole.CONTEXT_SCENE.length > 0;
 
     let heroIndex, circleIndex, circleSmallIndex;
+    let circleSlotReason = ''; // ★ Fix 29: tracking
     let photoOrder = [];
 
     // ★★★ AI Art Director Override: ถ้ามี artDirection จาก GPT-5.5 → ใช้ AI ตัดสินใจแทน rule-based logic
@@ -2746,60 +3787,80 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
       // Validate indices are within bounds
       const maxIdx = imageBuffers.length - 1;
       const validIdx = (idx) => typeof idx === 'number' && idx >= 0 && idx <= maxIdx && !isNegativeImage(idx);
-      
+
+      // ★ C2: dedup ระดับเนื้อหา — ดัชนีต่างกันแต่ URL/candidateId เดียวกัน (เช่น thumbnail คนละขนาดจากวิดีโอ YouTube เดียวกัน) = รูปซ้ำ ห้ามลงหลายช่อง
+      const usedByAD = new Set();
+      const usedContentKeysAD = new Set();
+      const contentKeysOf = (idx) => {
+        const img = imageBuffers[idx] || {};
+        const url = String(img.url || `img_${idx}`);
+        const m = url.match(/ytimg\.com\/vi\/([^/]+)\//);
+        return [m ? `ytimg:${m[1]}` : url, img.candidateId || `cid_${idx}`];
+      };
+      const markUsedAD = (idx) => {
+        if (idx == null) return;
+        usedByAD.add(idx);
+        for (const k of contentKeysOf(idx)) usedContentKeysAD.add(k);
+      };
+      const isDupContentAD = (idx) => contentKeysOf(idx).some(k => usedContentKeysAD.has(k));
+
       // Hero
       if (validIdx(artDirection.heroIndex)) {
         heroIndex = artDirection.heroIndex;
+        markUsedAD(heroIndex);
         console.log(`[assignSlots] ★ Art Director Hero: #${heroIndex} — ${artDirection.heroReason || 'AI selected'}`);
       }
-      
+
       // Circle
-      if (hasCircle && validIdx(artDirection.circleIndex)) {
+      if (hasCircle && validIdx(artDirection.circleIndex) && !isDupContentAD(artDirection.circleIndex)) {
         circleIndex = artDirection.circleIndex;
+        markUsedAD(circleIndex);
         console.log(`[assignSlots] ★ Art Director Circle: #${circleIndex} — ${artDirection.circleReason || 'AI selected'}`);
       }
-      
-      // Build photoOrder from artDirection
-      const usedByAD = new Set([heroIndex]);
-      if (circleIndex !== undefined) usedByAD.add(circleIndex);
+
+      // Build photoOrder from artDirection (usedByAD ติดตาม hero+circle แล้วข้างบน)
       
       // Slot 0 = hero
       photoOrder = [heroIndex];
       
       // Highlight slot
-      if (validIdx(artDirection.highlightIndex) && !usedByAD.has(artDirection.highlightIndex)) {
+      if (validIdx(artDirection.highlightIndex) && !usedByAD.has(artDirection.highlightIndex) && !isDupContentAD(artDirection.highlightIndex)) {
         photoOrder.push(artDirection.highlightIndex);
-        usedByAD.add(artDirection.highlightIndex);
+        markUsedAD(artDirection.highlightIndex);
         console.log(`[assignSlots] ★ Art Director Highlight: #${artDirection.highlightIndex}`);
       }
-      
+
       // Secondary person
-      if (validIdx(artDirection.secondaryPersonIndex) && !usedByAD.has(artDirection.secondaryPersonIndex)) {
+      if (validIdx(artDirection.secondaryPersonIndex) && !usedByAD.has(artDirection.secondaryPersonIndex) && !isDupContentAD(artDirection.secondaryPersonIndex)) {
         photoOrder.push(artDirection.secondaryPersonIndex);
-        usedByAD.add(artDirection.secondaryPersonIndex);
+        markUsedAD(artDirection.secondaryPersonIndex);
         console.log(`[assignSlots] ★ Art Director Secondary Person: #${artDirection.secondaryPersonIndex}`);
       }
-      
+
       // Background indices
       if (Array.isArray(artDirection.bgIndices)) {
         for (const bgIdx of artDirection.bgIndices) {
-          if (validIdx(bgIdx) && !usedByAD.has(bgIdx)) {
+          if (validIdx(bgIdx) && !usedByAD.has(bgIdx) && !isDupContentAD(bgIdx)) {
             photoOrder.push(bgIdx);
-            usedByAD.add(bgIdx);
+            markUsedAD(bgIdx);
           }
         }
       }
-      
+
       // Fill remaining slots from high-scoring images
       const remainingForAD = imageBuffers
         .map((img, i) => ({ index: i, score: img.curatorScore || 0 }))
         .filter(x => !usedByAD.has(x.index) && !isNegativeImage(x.index) && x.score >= 4)
         .sort((a, b) => b.score - a.score);
-      
+
       while (photoOrder.length < slotCount && remainingForAD.length > 0) {
         const next = remainingForAD.shift();
+        if (isDupContentAD(next.index)) {
+          console.log(`[assignSlots] ★ C2 skip #${next.index} — duplicate content (same URL/video as a used slot)`);
+          continue;
+        }
         photoOrder.push(next.index);
-        usedByAD.add(next.index);
+        markUsedAD(next.index);
       }
       
       // ★ FIX: rejectIndices → LOW_PRIORITY (ไม่ใช่ hard REJECT ยกเว้น TECHNICAL_BAD)
@@ -2856,8 +3917,8 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
       }
       
       // ★ ขั้น 3: ถ้ายังไม่ได้ → fallback ไปหา HERO_FACE/portrait (เดิม)
+      const heroCandidates = [...(byRole.HERO_FACE || []), ...(byRole.HERO || [])];
       if (heroIndex === undefined) {
-        const heroCandidates = [...byRole.HERO_FACE, ...byRole.HERO];
         const heroExpandedPool = [
           ...heroCandidates,
           ...byRole.CO_CHARACTER_EMOTION.filter(x => x.faceData.faceCount === 1 && (imageBuffers[x.index]?.curatorScore || 0) >= 7),
@@ -3018,25 +4079,89 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
            return (imageBuffers[b.index]?.curatorScore || 0) - (imageBuffers[a.index]?.curatorScore || 0);
          });
 
-        // ★★★ Circle selection — relationship-first priority chain
-        const circlePool = twoFaceRelationship.length > 0 ? twoFaceRelationship
+        // ★★★ Fix 29: Story-type-aware circle preference
+        // For nature/family stories, prefer story-anchor context over generic celebrity photos
+        const storyTypeNorm = (identity?.storyType || '').toLowerCase();
+        const isNatureFamily = ['nature_learning', 'family_nature_learning', 'family_warmth'].includes(storyTypeNorm);
+        
+        // Reject terms for circle in nature stories (airport, event, press)
+        const circleRejectTerms = ['สนามบิน', 'airport', 'งานอีเวนต์', 'พรมแดง', 'red carpet', 'press conference', 'งานเปิดตัว', 'แถลงข่าว'];
+        const isCircleReject = (idx) => {
+          if (!isNatureFamily) return false;
+          const img = imageBuffers[idx];
+          if (!img) return false;
+          const text = `${img.title || ''} ${img.snippet || ''} ${img.url || ''}`.toLowerCase();
+          return circleRejectTerms.some(t => text.includes(t));
+        };
+        
+        let storyCircleCandidate = null;
+        circleSlotReason = '';
+        
+        if (isNatureFamily) {
+          // Priority 0: Story-anchor images with face (garden/Yai Ning context)
+          const anchorKeywords = (identity?.storyAnchorQueries || [])
+            .join(' ').toLowerCase().split(/\s+/)
+            .filter(w => w.length >= 3);
+          
+          const storyCirclePool = imageBuffers
+            .map((img, i) => ({ index: i, img, faceData: getFaceData(img, i) }))
+            .filter(x => x.index !== heroIndex
+              && !isNegativeImage(x.index)
+              && !hasWatermark(x.index)
+              && !isCircleReject(x.index)
+              && x.faceData?.hasFaces
+              && (x.img.curatorScore || 0) >= 4)
+            .map(x => {
+              const title = (x.img.title || '').toLowerCase();
+              const anchorMatch = anchorKeywords.filter(kw => title.includes(kw)).length;
+              const roleBonus = x.img.role === 'RELATIONSHIP' ? 20
+                : x.img.role === 'CONTEXT_SCENE' ? 15
+                : x.img.role === 'KEY_ACTIVITY' ? 10
+                : x.img.role === 'CO_CHARACTER_EMOTION' ? 8 : 0;
+              const faceBonus = (x.faceData.faceCount === 2) ? 30 : (x.faceData.faceCount === 1 ? 10 : 0);
+              return { ...x, anchorMatch, score: anchorMatch * 15 + roleBonus + faceBonus + (x.img.curatorScore || 0) * 2 };
+            })
+            .filter(x => x.anchorMatch >= 1) // Must match at least 1 anchor keyword
+            .sort((a, b) => b.score - a.score);
+          
+          if (storyCirclePool.length > 0) {
+            storyCircleCandidate = storyCirclePool[0];
+            circleSlotReason = `Fix29: story-type=${storyTypeNorm} → anchor match (${storyCircleCandidate.anchorMatch} keywords, role=${storyCircleCandidate.img.role}, score=${storyCircleCandidate.score})`;
+            console.log(`[assignSlots] ★ Fix 29: Circle story preference found: #${storyCircleCandidate.index} "${(storyCircleCandidate.img.title || '').slice(0, 60)}" (${circleSlotReason})`);
+          } else {
+            console.log(`[assignSlots] ★ Fix 29: No story-anchor circle candidate for ${storyTypeNorm} → falling through to default chain`);
+          }
+        }
+        
+        // ★★★ Circle selection — story-preference first, then relationship-first priority chain
+        // Fix 29: If story-type circle preference found, use it; otherwise fall through
+        const circlePool = storyCircleCandidate ? [storyCircleCandidate]
+          : twoFaceRelationship.length > 0 ? twoFaceRelationship
           : relationshipScored.length > 0 ? relationshipScored
           : coCharCircle.length > 0 ? coCharCircle
           : singleFaceHero.length > 0 ? singleFaceHero
           : anySingleFace.length > 0 ? anySingleFace
           : anyFallback;
+        
+        // Fix 29: Also filter out airport/event images from circle pool for nature stories
+        const filteredCirclePool = isNatureFamily
+          ? circlePool.filter(x => !isCircleReject(x.index))
+          : circlePool;
+        const finalCirclePool = filteredCirclePool.length > 0 ? filteredCirclePool : circlePool;
 
-        if (circlePool.length > 0) {
-          circleIndex = circlePool[0].index;
-          const chosenRole = imageBuffers[circleIndex]?.role || circlePool[0].role || '?';
+        if (finalCirclePool.length > 0) {
+          circleIndex = finalCirclePool[0].index;
+          const chosenRole = imageBuffers[circleIndex]?.role || finalCirclePool[0].role || '?';
           const faces = getFaceData(imageBuffers[circleIndex], circleIndex)?.faceCount || 0;
           const curScore = imageBuffers[circleIndex]?.curatorScore || 0;
-          const pickedStep = twoFaceRelationship.length > 0 ? '2-FACE relationship (BEST)'
+          const pickedStep = storyCircleCandidate ? 'Fix29: STORY-ANCHOR circle'
+            : twoFaceRelationship.length > 0 ? '2-FACE relationship (BEST)'
             : relationshipScored.length > 0 ? 'RELATIONSHIP scored'
             : coCharCircle.length > 0 ? 'CO_CHARACTER_EMOTION'
             : singleFaceHero.length > 0 ? 'HERO single-face'
             : anySingleFace.length > 0 ? 'any single-face (score>=5)'
             : 'fallback (score>=4)';
+          if (!circleSlotReason) circleSlotReason = pickedStep;
           console.log(`[assignSlots] ★ Circle: image #${circleIndex} (${chosenRole}, faces: ${faces}, score: ${curScore}) [${pickedStep}]`);
           // ★ Guard: ถ้า circle ได้ภาพจาก fallback แต่ score ต่ำมาก → ใช้ hero ดีกว่า
           if (curScore < 4 && pickedStep.includes('fallback')) {
@@ -3478,6 +4603,7 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
       circleIndex: circleIndex !== undefined ? circleIndex : 0,
       circleSmallIndex,
       heroIndex,
+      circleSlotReason: circleSlotReason || 'default',
     };
   } catch (err) {
     console.error('[assignImagesToSlots] Error:', err.message);

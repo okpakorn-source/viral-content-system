@@ -1,6 +1,42 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { MODEL_PRIMARY } from '@/lib/ai/modelConfig';
 
+// ★ Fix 24: Normalize GPT's Thai storyType to DNA_MAP enum
+const VALID_STORY_ENUMS = [
+  'family_warm','family_care','family_nature_learning','nature_learning',
+  'drama','donation','rescue','celebrity','relationship','achievement',
+  'conflict','accident','politics','default'
+];
+
+function normalizeStoryType(raw) {
+  if (!raw || typeof raw !== 'string') return 'default';
+  const lower = raw.toLowerCase().trim();
+  
+  // Already a valid enum
+  if (VALID_STORY_ENUMS.includes(lower)) return lower;
+  
+  // Thai sentence → enum mapping (ordered: most specific first)
+  if (/ครอบครัว/.test(lower) && /ธรรมชาติ|สวน|ที่ดิน|ปลูก|เลี้ยงปลา|เลี้ยงไก่|หลาน|เกษตร/.test(lower)) return 'family_nature_learning';
+  if (/ธรรมชาติ|สวน|ที่ดิน|ปลูก|เลี้ยงปลา|เลี้ยงไก่|เกษตร/.test(lower) && /เรียนรู้|เด็ก|หลาน/.test(lower)) return 'family_nature_learning';
+  if (/ครอบครัว|แม่|พ่อ|ลูก|หลาน|อบอุ่น|ดูแล/.test(lower) && !/ธรรมชาติ|สวน/.test(lower)) return 'family_warm';
+  if (/บริจาค|ช่วยเหลือ|มอบทุน|การกุศล|สร้างโรงเรียน/.test(lower)) return 'donation';
+  if (/อาชญากรรม|ฆาตกรรม|ปล้น|ชิงทรัพย์|ฆ่า/.test(lower)) return 'conflict';
+  if (/อุบัติเหตุ|ชน|คว่ำ|ตกน้ำ/.test(lower)) return 'accident';
+  if (/กีฬา|แข่ง|เหรียญ|สำเร็จ|ชนะ/.test(lower)) return 'achievement';
+  if (/การเมือง|รัฐบาล|สภา|พรรค|เลือกตั้ง/.test(lower)) return 'politics';
+  if (/ดราม่า|ดรา|วิจารณ์|โต้เถียง/.test(lower)) return 'drama';
+  if (/คู่รัก|แต่งงาน|หย่า|เลิก|ความสัมพันธ์/.test(lower)) return 'relationship';
+  if (/ดารา|คนดัง|เซเลบ|บันเทิง/.test(lower)) return 'celebrity';
+  if (/กู้ภัย|ช่วยชีวิต|กู้/.test(lower)) return 'rescue';
+  
+  // Fallback: check for partial enum matches
+  for (const e of VALID_STORY_ENUMS) {
+    if (lower.includes(e)) return e;
+  }
+  
+  return 'default';
+}
+
 export async function analyzeStoryIdentity(newsTitle, breakdownData) {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -258,7 +294,10 @@ Respond with ONLY a JSON object following this exact structure (ALL values in Th
           parsed.coverageOptional = parsed.coverageOptional || [];
           parsed.visualPriority = parsed.visualPriority || {};
           parsed.storyAnchorQueries = parsed.storyAnchorQueries || [];
-          console.log(`[StoryIdentity] ✅ ${MODEL_PRIMARY} fallback success: ${parsed.mainCharacter} | storyType=${parsed.storyType} | coverageRequired=${parsed.coverageRequired.length} roles`);
+          // ★ Fix 24: Normalize storyType from Thai sentence → enum
+          parsed.rawStoryType = parsed.storyType;
+          parsed.storyType = normalizeStoryType(parsed.storyType);
+          console.log(`[StoryIdentity] ✅ ${MODEL_PRIMARY} fallback success: ${parsed.mainCharacter} | rawStoryType=${parsed.rawStoryType} | normalizedStoryType=${parsed.storyType} | coverageRequired=${parsed.coverageRequired.length} roles`);
           return parsed;
         } else {
           console.log(`[StoryIdentity] ❌ ${MODEL_PRIMARY} HTTP ${gptRes.status}`);

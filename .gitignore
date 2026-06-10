@@ -38,6 +38,7 @@ prisma/dev.db-journal
 backup/
 backups/
 *.bak
+*.bak*
 *.backup
 *.bak-narrative
 

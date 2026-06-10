@@ -1,0 +1,643 @@
+{
+  "reportId": "phase3-quality-gate-test",
+  "generatedAt": "2026-06-10T03:22:52.774Z",
+  "branch": "ai/post-selection-quality",
+  "commitSha": "phase3-v2",
+  "source": "auto-task",
+  "cases": [
+    {
+      "caseId": "CASE-003",
+      "timestamp": "2026-06-10T03:16:45.746Z",
+      "elapsed": "196.2s",
+      "httpStatus": 200,
+      "success": true,
+      "error": null,
+      "errorType": null,
+      "storyType": "family_warm",
+      "rawStoryType": "บันเทิงอบอุ่น",
+      "selectedPolicy": "family_warm",
+      "template": null,
+      "qualityGateSummary": {
+        "total": 15,
+        "passed": 8,
+        "blocked": 7,
+        "downgraded": 0,
+        "types": {
+          "NEWS_THUMBNAIL": 4,
+          "CLEAN_PHOTO": 8,
+          "TEXT_OVERLAY": 2,
+          "YOUTUBE_THUMBNAIL": 1
+        },
+        "cleanPhotoCount": 8,
+        "qualityGatePassed": true,
+        "qualityGateFailReasons": [],
+        "policyKey": "family_warm",
+        "forbiddenTypes": [
+          "NEWS_THUMBNAIL",
+          "TEXT_OVERLAY",
+          "COLLAGE",
+          "SCREENSHOT",
+          "PREVIOUS_COVER"
+        ],
+        "quotasApplied": {
+          "TEXT_OVERLAY": 0,
+          "NEWS_THUMBNAIL": 0,
+          "YOUTUBE_THUMBNAIL": 0,
+          "SOCIAL_POST": 0
+        },
+        "quotasUsed": {}
+      },
+      "qualityGatePassed": true,
+      "sourceImageTypes": [
+        {
+          "candidateId": "unknown",
+          "url": "https://static.thairath.co.th/media/Dtbezn3nNUxytg04ajZcbZhv9zc09ie5M4zbjdOVplU0",
+          "role": "HERO_FACE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://static.thairath.co.th/media/dFQROr7oWzulq5Fa5LFesb8qXmfde3A3Ko1A6bDkFt1r",
+          "role": "HERO_FACE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://img.pptvhd36.com/thumbor/2024/02/01/news-747394d.jpg",
+          "role": "RELATIONSHIP",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://static.amarintv.com/media/PJVlR0ljpOCgUNUpBo70Vo3nDLOu9DFD4QJidLU1iNBlvj",
+          "role": "HERO_FACE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://cms.dmpcdn.com/dara/2026/02/02/a29bdb10-fffc-11f0-9e50-65bbb6192fc1_webp",
+          "role": "HERO_FACE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://s.isanook.com/ns/0/ud/1824/9122786/15.jpg",
+          "role": "RELATIONSHIP",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://static.thairath.co.th/media/Dtbezn3nNUxytg04avfjZe2GMTDeWMGTmXWXxQdrvNLi",
+          "role": "HERO_FACE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://static.thairath.co.th/media/Dtbezn3nNUxytg04ayzOMtraZJAMD0lUKwoUhx6S0kpV",
+          "role": "RELATIONSHIP",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        }
+      ],
+      "blockedSourceImages": [
+        {
+          "url": "https://mpics.mgronline.com/pics/Images/568000002768401.JPEG",
+          "originalRole": "QUALITY_BLOCKED",
+          "sourceType": "NEWS_THUMBNAIL",
+          "confidence": 0.7,
+          "reasons": [
+            "News domain + 16:9 thumbnail aspect (1.78)"
+          ],
+          "gateReason": "NEWS_THUMBNAIL forbidden by family_warm policy"
+        },
+        {
+          "url": "https://s.isanook.com/ns/0/ud/1973/9869938/555881.jpg?ip/crop/w1200h700/q80/jpg",
+          "originalRole": "QUALITY_BLOCKED",
+          "sourceType": "TEXT_OVERLAY",
+          "confidence": 0.7,
+          "reasons": [
+            "Text banner detected: Bottom banner: uniform color (0.85)"
+          ],
+          "gateReason": "TEXT_OVERLAY forbidden by family_warm policy"
+        },
+        {
+          "url": "https://s359.kapook.com/pagebuilder/18b99998-f6fe-4251-9829-bea95051a319.jpg",
+          "originalRole": "QUALITY_BLOCKED",
+          "sourceType": "NEWS_THUMBNAIL",
+          "confidence": 0.75,
+          "reasons": [
+            "Colored graphic border detected: Top banner: uniform color (0.78) with saturation 0.52"
+          ],
+          "gateReason": "NEWS_THUMBNAIL forbidden by family_warm policy"
+        },
+        {
+          "url": "https://mpics.mgronline.com/pics/Images/567000001167401.JPEG",
+          "originalRole": "QUALITY_BLOCKED",
+          "sourceType": "NEWS_THUMBNAIL",
+          "confidence": 0.7,
+          "reasons": [
+            "News domain + 16:9 thumbnail aspect (1.65)"
+          ],
+          "gateReason": "NEWS_THUMBNAIL forbidden by family_warm policy"
+        },
+        {
+          "url": "https://i.ytimg.com/vi/wAC5NNgHiJw/hq720.jpg?sqp=-oaymwE7CK4FEIIDSFryq4qpAy0IARU",
+          "originalRole": "QUALITY_BLOCKED",
+          "sourceType": "YOUTUBE_THUMBNAIL",
+          "confidence": 0.95,
+          "reasons": [
+            "URL matches YouTube thumbnail pattern"
+          ],
+          "gateReason": "YOUTUBE_THUMBNAIL over quota (0/0) in family_warm policy"
+        },
+        {
+          "url": "https://img.pptvhd36.com/thumbor/2024/02/01/news-3ff4beb.jpg",
+          "originalRole": "QUALITY_BLOCKED",
+          "sourceType": "TEXT_OVERLAY",
+          "confidence": 0.75,
+          "reasons": [
+            "Title contains Thai news outlet/program name (1 matches)"
+          ],
+          "gateReason": "TEXT_OVERLAY forbidden by family_warm policy"
+        },
+        {
+          "url": "https://mpics.mgronline.com/pics/Images/566000010069101.JPEG",
+          "originalRole": "QUALITY_BLOCKED",
+          "sourceType": "NEWS_THUMBNAIL",
+          "confidence": 0.7,
+          "reasons": [
+            "News domain + 16:9 thumbnail aspect (1.79)"
+          ],
+          "gateReason": "NEWS_THUMBNAIL forbidden by family_warm policy"
+        }
+      ],
+      "downgradedSourceImages": [],
+      "evidenceCandidates": [],
+      "compositionQA": null,
+      "storyMatch": {
+        "score": 8,
+        "reason": "The cover effectively conveys a sense of love and acceptance, aligning well with the theme of celebrating individuality in a relationship."
+      },
+      "score": 6,
+      "slotAssignment": {
+        "heroIndex": 5,
+        "heroRole": "HERO_FACE",
+        "heroTitle": "",
+        "circleIndex": 0,
+        "photoOrder": [
+          5,
+          2,
+          6,
+          7
+        ]
+      },
+      "slotAuditIssues": null,
+      "status": "SUCCESS",
+      "hasCoverImage": false,
+      "coverImageSize": 0,
+      "expectedBehavior": "BLOCK_MOST — text overlays + news thumbnails + YT thumbnails blocked/downgraded, qualityGatePassed=false if clean images insufficient"
+    },
+    {
+      "caseId": "CASE-004",
+      "timestamp": "2026-06-10T03:20:10.508Z",
+      "elapsed": "204.8s",
+      "httpStatus": 200,
+      "success": true,
+      "error": null,
+      "errorType": null,
+      "storyType": "default",
+      "rawStoryType": "ข่าวน้ำใจและความเป็นธรรม",
+      "selectedPolicy": "default",
+      "template": null,
+      "qualityGateSummary": {
+        "total": 11,
+        "passed": 9,
+        "blocked": 2,
+        "downgraded": 0,
+        "types": {
+          "NEWS_THUMBNAIL": 1,
+          "CLEAN_PHOTO": 9,
+          "YOUTUBE_THUMBNAIL": 1
+        },
+        "cleanPhotoCount": 9,
+        "qualityGatePassed": true,
+        "qualityGateFailReasons": [],
+        "policyKey": "default",
+        "forbiddenTypes": [
+          "NEWS_THUMBNAIL",
+          "TEXT_OVERLAY",
+          "COLLAGE",
+          "SCREENSHOT",
+          "SPLIT_SCREEN",
+          "PREVIOUS_COVER"
+        ],
+        "quotasApplied": {
+          "TEXT_OVERLAY": 0,
+          "NEWS_THUMBNAIL": 0,
+          "YOUTUBE_THUMBNAIL": 0,
+          "SOCIAL_POST": 0
+        },
+        "quotasUsed": {}
+      },
+      "qualityGatePassed": true,
+      "sourceImageTypes": [
+        {
+          "candidateId": "unknown",
+          "url": "https://static.thairath.co.th/media/dFQROr7oWzulq5Fa7HCHKLHxaY12Y5iwoY5ic4MXHXRm",
+          "role": "KEY_ACTIVITY",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://thethaiger.com/th/wp-content/uploads/2026/06/lotto54548-4.png",
+          "role": "CONTEXT_SCENE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://www.khaosod.co.th/wpapp/uploads/2022/12/145465465.jpg",
+          "role": "CONTEXT_SCENE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://thaipbs-media-fuzzylop.thaipbs.or.th/imgpx1/unsafe/resizing_type:fit/siz",
+          "role": "CONTEXT_SCENE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://today-obs.line-scdn.net/0hW238k-UZCB0OQRRdo393SjYXBGw9JxIULHNEcyMSAyorbR",
+          "role": "CONTEXT_SCENE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://static.amarintv.com/media/PJVlR0ljpN9mLZ4kybsHylWiZ3giIXYvHzQKLU9808h8OT",
+          "role": "CONTEXT_SCENE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://s1.dmcdn.net/v/YY9JW1eGxxS5eQ_HQ/x720",
+          "role": "CONTEXT_SCENE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://s1.dmcdn.net/v/YY9JW1eGxxSuzaASu/x1080",
+          "role": "CONTEXT_SCENE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://us-fbcloud.net/wb/data/1688/1688203-display.big.jpg",
+          "role": "CONTEXT_SCENE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        }
+      ],
+      "blockedSourceImages": [
+        {
+          "url": "https://mpics2.mgronline.com/pics/Images/569000005512101.JPEG",
+          "originalRole": "QUALITY_BLOCKED",
+          "sourceType": "NEWS_THUMBNAIL",
+          "confidence": 0.7,
+          "reasons": [
+            "News domain + 16:9 thumbnail aspect (1.78)"
+          ],
+          "gateReason": "NEWS_THUMBNAIL forbidden by default policy"
+        },
+        {
+          "url": "https://i.ytimg.com/vi/jIP_AXmMRQc/maxresdefault.jpg",
+          "originalRole": "QUALITY_BLOCKED",
+          "sourceType": "YOUTUBE_THUMBNAIL",
+          "confidence": 0.95,
+          "reasons": [
+            "URL matches YouTube thumbnail pattern"
+          ],
+          "gateReason": "YOUTUBE_THUMBNAIL over quota (0/0) in default policy"
+        }
+      ],
+      "downgradedSourceImages": [],
+      "evidenceCandidates": [],
+      "compositionQA": null,
+      "storyMatch": {
+        "score": 5,
+        "reason": "The cover highlights the lottery ticket and the winner, aligning with the praise, but the overall context may suggest a mix of emotions."
+      },
+      "score": 7,
+      "slotAssignment": {
+        "heroIndex": 7,
+        "heroRole": "CONTEXT_SCENE",
+        "heroTitle": "หนุ่มคนขับรถวัดถูก รางวัลที่ 1 รับ 6 ล้านบาท เชื่อได้โชค",
+        "circleIndex": 0,
+        "photoOrder": [
+          7,
+          3,
+          4,
+          6
+        ]
+      },
+      "slotAuditIssues": null,
+      "status": "SUCCESS",
+      "hasCoverImage": false,
+      "coverImageSize": 0,
+      "expectedBehavior": "BLOCK_SOME — MGR thumbnail + text overlay blocked"
+    },
+    {
+      "caseId": "CASE-005-regression",
+      "timestamp": "2026-06-10T03:22:52.774Z",
+      "elapsed": "162.3s",
+      "httpStatus": 200,
+      "success": true,
+      "error": null,
+      "errorType": null,
+      "storyType": "nature_learning",
+      "rawStoryType": "nature_learning",
+      "selectedPolicy": "family_nature_learning",
+      "template": null,
+      "qualityGateSummary": {
+        "total": 12,
+        "passed": 10,
+        "blocked": 2,
+        "downgraded": 0,
+        "types": {
+          "CLEAN_PHOTO": 10,
+          "YOUTUBE_THUMBNAIL": 1,
+          "NEWS_THUMBNAIL": 1
+        },
+        "cleanPhotoCount": 10,
+        "qualityGatePassed": true,
+        "qualityGateFailReasons": [],
+        "policyKey": "family_nature_learning",
+        "forbiddenTypes": [
+          "NEWS_THUMBNAIL",
+          "TEXT_OVERLAY",
+          "COLLAGE",
+          "SCREENSHOT",
+          "SPLIT_SCREEN",
+          "PREVIOUS_COVER",
+          "YOUTUBE_THUMBNAIL"
+        ],
+        "quotasApplied": {
+          "TEXT_OVERLAY": 0,
+          "NEWS_THUMBNAIL": 0,
+          "YOUTUBE_THUMBNAIL": 0,
+          "SOCIAL_POST": 0
+        },
+        "quotasUsed": {}
+      },
+      "qualityGatePassed": true,
+      "sourceImageTypes": [
+        {
+          "candidateId": "unknown",
+          "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+          "role": "RELATIONSHIP",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://f.ptcdn.info/027/064/000/prnbyg52xnRket5coya0-o.jpg",
+          "role": "HERO_FACE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+          "role": "KEY_ACTIVITY",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://www.technologychaoban.com/wp-content/uploads/2023/08/1-4-1024x576.jpg",
+          "role": "CONTEXT_SCENE",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+          "role": "RELATIONSHIP",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
+          "role": "RELATIONSHIP",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://static.thairath.co.th/media/Dtbezn3nNUxytg04ay0Dcstu1o8SxepQCtzglXnlXeB5",
+          "role": "RELATIONSHIP",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+          "role": "RELATIONSHIP",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726151505.jpeg",
+          "role": "PERSON_SUPPORT",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        },
+        {
+          "candidateId": "unknown",
+          "url": "https://www.tnnthailand.com/static/images/be83329c-f3cf-4fc3-8221-ea1a8e162ced.j",
+          "role": "PERSON_SUPPORT",
+          "sourceType": "CLEAN_PHOTO",
+          "confidence": 1,
+          "gateAction": "PASSED",
+          "gateReason": "",
+          "reasons": [],
+          "forbiddenSlots": null
+        }
+      ],
+      "blockedSourceImages": [
+        {
+          "url": "https://i.ytimg.com/vi/73kiODzAG2A/hq720.jpg?sqp=-oaymwEhCK4FEIIDSFryq4qpAxMIARU",
+          "originalRole": "QUALITY_BLOCKED",
+          "sourceType": "YOUTUBE_THUMBNAIL",
+          "confidence": 0.95,
+          "reasons": [
+            "URL matches YouTube thumbnail pattern"
+          ],
+          "gateReason": "YOUTUBE_THUMBNAIL forbidden by family_nature_learning policy"
+        },
+        {
+          "url": "https://s.isanook.com/ns/0/ud/1835/9178526/chom.jpg?ip/crop/w670h402/q80/jpg",
+          "originalRole": "QUALITY_BLOCKED",
+          "sourceType": "NEWS_THUMBNAIL",
+          "confidence": 0.7,
+          "reasons": [
+            "News domain + 16:9 thumbnail aspect (1.67)"
+          ],
+          "gateReason": "NEWS_THUMBNAIL forbidden by family_nature_learning policy"
+        }
+      ],
+      "downgradedSourceImages": [],
+      "evidenceCandidates": [],
+      "compositionQA": null,
+      "storyMatch": {
+        "score": 8,
+        "reason": "the cover effectively highlights family bonding and nature, aligning well with the theme of learning and gardening."
+      },
+      "score": 7,
+      "slotAssignment": {
+        "heroIndex": 3,
+        "heroRole": "HERO_FACE",
+        "heroTitle": "",
+        "circleIndex": 5,
+        "photoOrder": [
+          2,
+          1,
+          0,
+          3
+        ]
+      },
+      "slotAuditIssues": null,
+      "status": "SUCCESS",
+      "hasCoverImage": false,
+      "coverImageSize": 0,
+      "expectedBehavior": "PASS — clean images should not be false-blocked"
+    }
+  ],
+  "summary": {
+    "totalCases": 3,
+    "passed": 3,
+    "failed": 0,
+    "gateBlocked": 11,
+    "gateDowngraded": 0
+  }
+}

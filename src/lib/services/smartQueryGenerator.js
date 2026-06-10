@@ -144,7 +144,7 @@ ${newsText.slice(0, 1500)}
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-6', // ★ 10 มิ.ย.: sonnet-4-20250514 ปลดระวาง 15 มิ.ย. 2026
           max_tokens: 1500,
           messages: [{ role: 'user', content: prompt }],
         }),

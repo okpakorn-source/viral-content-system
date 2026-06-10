@@ -11,7 +11,7 @@ import { reviewNews, reviewCaption, reviewImage } from '@/lib/services/chat/aiRe
 import { callAI } from '@/lib/ai/openai';
 import { checkAllRules } from '@/lib/services/chat/contentRules';
 
-const CLAUDE_SONNET = 'claude-sonnet-4-20250514';
+const CLAUDE_SONNET = 'claude-sonnet-4-6';
 
 // =============================================
 // General AI Chat — ตอบแชททั่วไป (อ้างอิงคลังไวรัลจริง ไม่ด้นสด)
@@ -242,7 +242,7 @@ ${rulesText || '(ยังไม่มีกฎเพิ่มเติม)'}
       const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       
       const response = await claude.messages.create({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 2000,
         temperature: 0.3,
         system: systemPrompt,
