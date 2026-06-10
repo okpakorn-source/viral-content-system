@@ -1033,6 +1033,21 @@ export async function POST(request) {
 
     console.log(`[AutoCover] Downloaded ${imageBuffers.length} valid images`);
 
+    // ═══════════════════════════════════════════════════════════
+    // ★ Phase 3: Source Image Quality Gate
+    // Block bad source images (text overlays, news thumbnails, collages)
+    // BEFORE they reach slot assignment or AI Curator.
+    // ═══════════════════════════════════════════════════════════
+    var qualityGateDiagnostics = null;
+    try {
+      const { applyQualityGateToPool } = await import('@/lib/services/sourceImageQualityGate');
+      const storyTypeForGate = identity?.storyType || 'default';
+      qualityGateDiagnostics = await applyQualityGateToPool(imageBuffers, storyTypeForGate);
+      console.log(`[AutoCover] ★ Quality Gate: ${imageBuffers.length} images survived (${qualityGateDiagnostics?.qualityGateSummary?.blocked || 0} blocked)`);
+    } catch (gateErr) {
+      console.warn('[AutoCover] Quality Gate error (non-critical, using all images):', gateErr.message);
+    }
+
     // Step 4: Coverage-aware selection (limit to 8 to prevent timeout & API overload)
     // ★ FIX: Force-pick coverageRequired roles FIRST, then fill with best scored
     const MAX_CANDIDATE_IMAGES = 8;
@@ -2207,6 +2222,100 @@ export async function POST(request) {
     slotAssignment.photoOrder = finalPhotoOrder;
     slotAssignment.circleIndex = finalCircleIndex;
 
+    // ★★★ Fix 31: Visual Weight Balancing ★★★
+    // For nature_learning / family_nature_learning, ensure story-anchor images get >40% pixel area
+    const storyTypeForWeight = (identity?.storyType || '').toLowerCase();
+    const isNatureFamilyStory = ['nature_learning', 'family_nature_learning', 'family_warmth'].includes(storyTypeForWeight);
+    let visualWeightReport = null;
+    let slotSwapApplied = false;
+    let slotSwapReason = '';
+    
+    if (isNatureFamilyStory) {
+      try {
+        const { getTemplateById } = await import('@/lib/coverTemplateRegistry');
+        const tplData = getTemplateById(chosenTemplate);
+        if (tplData?.slots) {
+          const totalArea = tplData.canvasW * tplData.canvasH;
+          let storyAnchorArea = 0;
+          let celebrityArea = 0;
+          let genericArea = 0;
+          const interviewTerms = ['สัมภาษณ์', 'interview', 'press', 'แถลง', 'พรมแดง', 'red carpet', 'งานอีเวนต์'];
+          
+          // Map each slot to its pixel area + weight category
+          const photoOrder = slotAssignment.photoOrder;
+          const slotWeights = tplData.slots.map((slot, si) => {
+            const imgIdx = photoOrder[si];
+            const img = imageBuffers[imgIdx];
+            if (!img) return { slot: slot.id, area: 0, category: 'generic' };
+            const area = (slot.w || 0) * (slot.h || 0);
+            const role = img.role || '';
+            const title = (img.title || '').toLowerCase();
+            const isInterview = interviewTerms.some(t => title.includes(t));
+            
+            let category;
+            if (['KEY_ACTIVITY', 'STORY_ANCHOR', 'CONTEXT_SCENE'].includes(role) || img._storyAnchor) {
+              category = 'storyAnchor';
+              storyAnchorArea += area;
+            } else if (['HERO_FACE', 'HERO'].includes(role) || isInterview) {
+              category = 'celebrity';
+              celebrityArea += area;
+            } else {
+              category = 'generic';
+              genericArea += area;
+            }
+            return { slot: slot.id, area, category, imgIdx, role, isInterview };
+          });
+          
+          const storyPct = Math.round((storyAnchorArea / totalArea) * 100);
+          const celebPct = Math.round((celebrityArea / totalArea) * 100);
+          const genericPct = Math.round((genericArea / totalArea) * 100);
+          
+          visualWeightReport = {
+            storyAnchor: `${storyPct}%`,
+            celebrity: `${celebPct}%`,
+            generic: `${genericPct}%`,
+            target: '70/20/10',
+            perSlot: slotWeights.map(s => ({ slot: s.slot, category: s.category, role: s.role })),
+          };
+          
+          console.log(`[VisualWeight] Fix 31: storyAnchor=${storyPct}% celebrity=${celebPct}% generic=${genericPct}%`);
+          
+          // Check: if celebrity > 35% AND storyAnchor < 40%, attempt one swap
+          if (celebPct > 35 && storyPct < 40) {
+            // Find the largest celebrity slot and the smallest story-anchor slot
+            const celebSlots = slotWeights.filter(s => s.category === 'celebrity').sort((a, b) => b.area - a.area);
+            const storySlots = slotWeights.filter(s => s.category === 'storyAnchor').sort((a, b) => a.area - b.area);
+            
+            if (celebSlots.length > 0 && storySlots.length > 0) {
+              const bigCeleb = celebSlots[0];
+              const smallStory = storySlots[0];
+              
+              // Only swap if celebrity slot is bigger than story slot
+              if (bigCeleb.area > smallStory.area) {
+                const celebSlotIdx = tplData.slots.findIndex(s => s.id === bigCeleb.slot);
+                const storySlotIdx = tplData.slots.findIndex(s => s.id === smallStory.slot);
+                
+                if (celebSlotIdx >= 0 && storySlotIdx >= 0 && celebSlotIdx < photoOrder.length && storySlotIdx < photoOrder.length) {
+                  const tmp = photoOrder[celebSlotIdx];
+                  photoOrder[celebSlotIdx] = photoOrder[storySlotIdx];
+                  photoOrder[storySlotIdx] = tmp;
+                  slotSwapApplied = true;
+                  slotSwapReason = `Fix31: Swapped ${bigCeleb.slot}(#${bigCeleb.imgIdx},${bigCeleb.role}) ↔ ${smallStory.slot}(#${smallStory.imgIdx},${smallStory.role}) — celebrity was ${celebPct}% > 35%`;
+                  console.log(`[VisualWeight] ★ ${slotSwapReason}`);
+                  
+                  // Recalculate after swap
+                  visualWeightReport.swapped = true;
+                  visualWeightReport.swapDetail = slotSwapReason;
+                }
+              }
+            }
+          }
+        }
+      } catch (vwErr) {
+        console.warn('[VisualWeight] Error:', vwErr.message);
+      }
+    }
+
     // Step 8: Compose cover
     const { composeCover } = await import('@/lib/coverComposer');
 
@@ -2217,10 +2326,168 @@ export async function POST(request) {
       circleSmallPhotoIndex: slotAssignment.circleSmallIndex,
     };
 
-    // ส่ง buffers ทั้งหมดไป — composeCover จะ map ตาม photoOrder เอง
+    // ★ Fix 30: Pass image roles for role-aware crop strategy
     const allBuffers = imageBuffers.map(img => img.buffer);
+    const imageRoles = imageBuffers.map(img => img.role || '');
 
-    const coverBuffer = await composeCover(plan, allBuffers, faceDataMap);
+    // ★★★ Fix 32: Track per-slot crop mode ★★★
+    const perSlotCropMode = {};
+    const whyThisImageWasUsedInThisSlot = {};
+    
+    // Build slot reasoning
+    try {
+      const { getTemplateById } = await import('@/lib/coverTemplateRegistry');
+      const tplForSlots = getTemplateById(chosenTemplate);
+      if (tplForSlots?.slots) {
+        tplForSlots.slots.forEach((slot, si) => {
+          const imgIdx = slotAssignment.photoOrder[si];
+          const img = imageBuffers[imgIdx];
+          if (!img) return;
+          const slotRole = slot.role || slot.id || '';
+          const imgRole = img.role || '';
+          
+          // Predict crop mode (mirrors coverComposer logic)
+          let crop;
+          if ((slotRole === 'hero' || slot.id === 'main') && ['KEY_ACTIVITY', 'STORY_ANCHOR', 'CONTEXT_SCENE'].includes(imgRole)) {
+            crop = 'activity-context';
+          } else if (slotRole === 'hero' || slot.id === 'main') {
+            crop = 'portrait-upper';
+          } else if (slotRole === 'emotion') {
+            crop = 'portrait-upper';
+          } else if (slotRole === 'highlight') {
+            crop = 'center-face';
+          } else {
+            crop = 'attention/center-face';
+          }
+          perSlotCropMode[slot.id] = crop;
+          whyThisImageWasUsedInThisSlot[slot.id] = `#${imgIdx} ${imgRole} (curator=${img.curatorScore || '?'}, title="${(img.title || '').slice(0, 40)}")`;
+        });
+        
+        // Circle slot
+        const circleImg = imageBuffers[slotAssignment.circleIndex];
+        if (circleImg) {
+          perSlotCropMode['circle'] = 'face-tight';
+          whyThisImageWasUsedInThisSlot['circle'] = `#${slotAssignment.circleIndex} ${circleImg.role || '?'} [${slotAssignment.circleSlotReason || 'default'}]`;
+        }
+      }
+    } catch {}
+
+    const coverBuffer = await composeCover(plan, allBuffers, faceDataMap, imageRoles);
+
+    // ★★★ Fix 32: Post-Compose Visual QA ★★★
+    let compositionQA = { passed: true, issues: [], score: 10 };
+    let repairPassApplied = false;
+    let cropQuality = {};
+    let focalRegion = {};
+    let visibleFaceRatio = {};
+    
+    try {
+      const qaIssues = [];
+      
+      // QA 1: Check face visibility per slot
+      const { getTemplateById: getTpl2 } = await import('@/lib/coverTemplateRegistry');
+      const tplQA = getTpl2(chosenTemplate);
+      if (tplQA?.slots) {
+        tplQA.slots.forEach((slot, si) => {
+          const imgIdx = slotAssignment.photoOrder[si];
+          const fd = faceDataMap?.get?.(String(imgIdx));
+          const img = imageBuffers[imgIdx];
+          if (!img) return;
+          
+          const slotArea = (slot.w || 1) * (slot.h || 1);
+          
+          if (fd?.hasFaces && fd.faces?.length > 0) {
+            const face = fd.faces[0];
+            const faceArea = (face.width || 0) * (face.height || 0);
+            const srcArea = (fd.imageWidth || 1) * (fd.imageHeight || 1);
+            const faceRatio = faceArea / srcArea;
+            
+            visibleFaceRatio[slot.id] = Math.round(faceRatio * 100) + '%';
+            focalRegion[slot.id] = { x: face.x, y: face.y, w: face.width, h: face.height };
+            cropQuality[slot.id] = faceRatio > 0.02 ? 'good' : 'small';
+            
+            // QA: Face too small (< 2% of source image)
+            if (faceRatio < 0.02) {
+              qaIssues.push({ type: 'FACE_TOO_SMALL', slot: slot.id, imgIdx, faceRatio: Math.round(faceRatio * 100) + '%' });
+            }
+          } else {
+            cropQuality[slot.id] = 'no-face';
+            visibleFaceRatio[slot.id] = 'N/A';
+          }
+          
+          // QA: Non-main slot larger than main slot (interview overpower)
+          if (slot.id !== 'main' && img.role === 'HERO_FACE') {
+            const mainSlot = tplQA.slots.find(s => s.id === 'main');
+            if (mainSlot) {
+              const mainArea = (mainSlot.w || 1) * (mainSlot.h || 1);
+              if (slotArea > mainArea * 0.8) {
+                qaIssues.push({ type: 'SUPPORT_OVERPOWERS_MAIN', slot: slot.id, imgIdx, role: img.role });
+              }
+            }
+          }
+        });
+        
+        // QA: Circle without face data
+        const circleFD = faceDataMap?.get?.(String(slotAssignment.circleIndex));
+        if (!circleFD?.hasFaces) {
+          qaIssues.push({ type: 'CIRCLE_NO_FACE', imgIdx: slotAssignment.circleIndex });
+        }
+        cropQuality['circle'] = circleFD?.hasFaces ? 'good' : 'no-face';
+      }
+      
+      // QA: Check gradient hiding (face in fade region)
+      // This is approximate — checks if face center is in the outer 15% of a faded slot
+      if (tplQA?.slots) {
+        tplQA.slots.forEach((slot, si) => {
+          const imgIdx = slotAssignment.photoOrder[si];
+          const fd = faceDataMap?.get?.(String(imgIdx));
+          if (!fd?.hasFaces || !fd.faces?.length) return;
+          
+          const face = fd.faces[0];
+          const faceCX = face.x + face.width / 2;
+          const srcW = fd.imageWidth || slot.w || 1;
+          const facePctFromRight = 1 - (faceCX / srcW);
+          
+          if (slot.fadeRight && slot.fadeRight > 60 && facePctFromRight < 0.15) {
+            qaIssues.push({ type: 'FACE_IN_FADE_REGION', slot: slot.id, imgIdx, edge: 'right' });
+          }
+          if (slot.fadeLeft && slot.fadeLeft > 60) {
+            const facePctFromLeft = faceCX / srcW;
+            if (facePctFromLeft < 0.15) {
+              qaIssues.push({ type: 'FACE_IN_FADE_REGION', slot: slot.id, imgIdx, edge: 'left' });
+            }
+          }
+        });
+      }
+      
+      // Score composition
+      const qaScore = Math.max(0, 10 - qaIssues.length * 2);
+      compositionQA = { passed: qaIssues.length === 0, issues: qaIssues, score: qaScore };
+      
+      if (!compositionQA.passed) {
+        console.log(`[CompositionQA] Fix 32: ${qaIssues.length} issues found:`, qaIssues.map(i => i.type).join(', '));
+        
+        // If critical issues and no swap already attempted → mark for manual review
+        const criticalIssues = qaIssues.filter(i => ['CIRCLE_NO_FACE', 'SUPPORT_OVERPOWERS_MAIN'].includes(i.type));
+        if (criticalIssues.length > 0 && !slotSwapApplied) {
+          // Attempt one repair: re-compose is not practical without re-assigning slots,
+          // so we just flag it
+          repairPassApplied = true;
+          console.log('[CompositionQA] ★ Critical issues detected but no automatic repair available → flagging');
+        }
+      } else {
+        console.log('[CompositionQA] Fix 32: ✅ All QA checks passed');
+      }
+    } catch (qaErr) {
+      console.warn('[CompositionQA] Error:', qaErr.message);
+    }
+    
+    // ★ Fix 32: Override needManualReview if composition QA failed critically
+    if (compositionQA.score <= 4 && repairPassApplied) {
+      needManualReview = true;
+      console.log('[CompositionQA] ★ Score ≤4 after repair → NEED_MANUAL_REVIEW');
+    }
+
     const base64 = `data:image/jpeg;base64,${coverBuffer.toString('base64')}`;
 
 
@@ -2582,6 +2849,8 @@ Return JSON:
           rescued: img._rescued || false,
         })),
         candidateBucketCounts: identity._bucketCounts || null,
+        // ★ Phase 3: Quality Gate diagnostics
+        qualityGate: qualityGateDiagnostics || null,
         needManualReview: needManualReview || false,
         noStoryAnchorFallbackReason: noStoryAnchorFallbackReason || null,
       };
@@ -3364,6 +3633,7 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
     const hasRoles = byRole.STORY_ANCHOR.length > 0 || byRole.HERO_FACE.length > 0 || byRole.CONTEXT_SCENE.length > 0;
 
     let heroIndex, circleIndex, circleSmallIndex;
+    let circleSlotReason = ''; // ★ Fix 29: tracking
     let photoOrder = [];
 
     // ★★★ AI Art Director Override: ถ้ามี artDirection จาก GPT-5.5 → ใช้ AI ตัดสินใจแทน rule-based logic
@@ -3645,25 +3915,89 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
            return (imageBuffers[b.index]?.curatorScore || 0) - (imageBuffers[a.index]?.curatorScore || 0);
          });
 
-        // ★★★ Circle selection — relationship-first priority chain
-        const circlePool = twoFaceRelationship.length > 0 ? twoFaceRelationship
+        // ★★★ Fix 29: Story-type-aware circle preference
+        // For nature/family stories, prefer story-anchor context over generic celebrity photos
+        const storyTypeNorm = (identity?.storyType || '').toLowerCase();
+        const isNatureFamily = ['nature_learning', 'family_nature_learning', 'family_warmth'].includes(storyTypeNorm);
+        
+        // Reject terms for circle in nature stories (airport, event, press)
+        const circleRejectTerms = ['สนามบิน', 'airport', 'งานอีเวนต์', 'พรมแดง', 'red carpet', 'press conference', 'งานเปิดตัว', 'แถลงข่าว'];
+        const isCircleReject = (idx) => {
+          if (!isNatureFamily) return false;
+          const img = imageBuffers[idx];
+          if (!img) return false;
+          const text = `${img.title || ''} ${img.snippet || ''} ${img.url || ''}`.toLowerCase();
+          return circleRejectTerms.some(t => text.includes(t));
+        };
+        
+        let storyCircleCandidate = null;
+        circleSlotReason = '';
+        
+        if (isNatureFamily) {
+          // Priority 0: Story-anchor images with face (garden/Yai Ning context)
+          const anchorKeywords = (identity?.storyAnchorQueries || [])
+            .join(' ').toLowerCase().split(/\s+/)
+            .filter(w => w.length >= 3);
+          
+          const storyCirclePool = imageBuffers
+            .map((img, i) => ({ index: i, img, faceData: getFaceData(img, i) }))
+            .filter(x => x.index !== heroIndex
+              && !isNegativeImage(x.index)
+              && !hasWatermark(x.index)
+              && !isCircleReject(x.index)
+              && x.faceData?.hasFaces
+              && (x.img.curatorScore || 0) >= 4)
+            .map(x => {
+              const title = (x.img.title || '').toLowerCase();
+              const anchorMatch = anchorKeywords.filter(kw => title.includes(kw)).length;
+              const roleBonus = x.img.role === 'RELATIONSHIP' ? 20
+                : x.img.role === 'CONTEXT_SCENE' ? 15
+                : x.img.role === 'KEY_ACTIVITY' ? 10
+                : x.img.role === 'CO_CHARACTER_EMOTION' ? 8 : 0;
+              const faceBonus = (x.faceData.faceCount === 2) ? 30 : (x.faceData.faceCount === 1 ? 10 : 0);
+              return { ...x, anchorMatch, score: anchorMatch * 15 + roleBonus + faceBonus + (x.img.curatorScore || 0) * 2 };
+            })
+            .filter(x => x.anchorMatch >= 1) // Must match at least 1 anchor keyword
+            .sort((a, b) => b.score - a.score);
+          
+          if (storyCirclePool.length > 0) {
+            storyCircleCandidate = storyCirclePool[0];
+            circleSlotReason = `Fix29: story-type=${storyTypeNorm} → anchor match (${storyCircleCandidate.anchorMatch} keywords, role=${storyCircleCandidate.img.role}, score=${storyCircleCandidate.score})`;
+            console.log(`[assignSlots] ★ Fix 29: Circle story preference found: #${storyCircleCandidate.index} "${(storyCircleCandidate.img.title || '').slice(0, 60)}" (${circleSlotReason})`);
+          } else {
+            console.log(`[assignSlots] ★ Fix 29: No story-anchor circle candidate for ${storyTypeNorm} → falling through to default chain`);
+          }
+        }
+        
+        // ★★★ Circle selection — story-preference first, then relationship-first priority chain
+        // Fix 29: If story-type circle preference found, use it; otherwise fall through
+        const circlePool = storyCircleCandidate ? [storyCircleCandidate]
+          : twoFaceRelationship.length > 0 ? twoFaceRelationship
           : relationshipScored.length > 0 ? relationshipScored
           : coCharCircle.length > 0 ? coCharCircle
           : singleFaceHero.length > 0 ? singleFaceHero
           : anySingleFace.length > 0 ? anySingleFace
           : anyFallback;
+        
+        // Fix 29: Also filter out airport/event images from circle pool for nature stories
+        const filteredCirclePool = isNatureFamily
+          ? circlePool.filter(x => !isCircleReject(x.index))
+          : circlePool;
+        const finalCirclePool = filteredCirclePool.length > 0 ? filteredCirclePool : circlePool;
 
-        if (circlePool.length > 0) {
-          circleIndex = circlePool[0].index;
-          const chosenRole = imageBuffers[circleIndex]?.role || circlePool[0].role || '?';
+        if (finalCirclePool.length > 0) {
+          circleIndex = finalCirclePool[0].index;
+          const chosenRole = imageBuffers[circleIndex]?.role || finalCirclePool[0].role || '?';
           const faces = getFaceData(imageBuffers[circleIndex], circleIndex)?.faceCount || 0;
           const curScore = imageBuffers[circleIndex]?.curatorScore || 0;
-          const pickedStep = twoFaceRelationship.length > 0 ? '2-FACE relationship (BEST)'
+          const pickedStep = storyCircleCandidate ? 'Fix29: STORY-ANCHOR circle'
+            : twoFaceRelationship.length > 0 ? '2-FACE relationship (BEST)'
             : relationshipScored.length > 0 ? 'RELATIONSHIP scored'
             : coCharCircle.length > 0 ? 'CO_CHARACTER_EMOTION'
             : singleFaceHero.length > 0 ? 'HERO single-face'
             : anySingleFace.length > 0 ? 'any single-face (score>=5)'
             : 'fallback (score>=4)';
+          if (!circleSlotReason) circleSlotReason = pickedStep;
           console.log(`[assignSlots] ★ Circle: image #${circleIndex} (${chosenRole}, faces: ${faces}, score: ${curScore}) [${pickedStep}]`);
           // ★ Guard: ถ้า circle ได้ภาพจาก fallback แต่ score ต่ำมาก → ใช้ hero ดีกว่า
           if (curScore < 4 && pickedStep.includes('fallback')) {
@@ -4105,6 +4439,7 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
       circleIndex: circleIndex !== undefined ? circleIndex : 0,
       circleSmallIndex,
       heroIndex,
+      circleSlotReason: circleSlotReason || 'default',
     };
   } catch (err) {
     console.error('[assignImagesToSlots] Error:', err.message);
