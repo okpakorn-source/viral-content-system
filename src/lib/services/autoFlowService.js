@@ -261,15 +261,18 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   // ===================================================================
   rlog.divider('MULTI-ANGLE PARALLEL PIPELINE');
   
-  // ★ max 2 angles — sequential เพื่อป้องกัน Claude rate limit ที่ทำให้ timeout
-  const anglesToUse = breakdownData.possible_angles?.slice(0, 2) || [];
+  // ★ ปรับ 10 มิ.ย. 2026: default 3 มุม × 1 เวอร์ชัน = 3 ชิ้นที่ "ต่างกันจริง" (คนละมุม คนละ prompt คนละ research)
+  //   เดิม 2 มุม × 2 → เวอร์ชันในมุมเดียวกันแทบซ้ำกัน (V2/V4 เคยได้พาดหัวเหมือนกันคำต่อคำ)
+  //   ปรับได้ผ่าน .env: GEN_ANGLES (1-4) / GEN_PER_ANGLE (1-3)
+  const GEN_ANGLES = Math.max(1, Math.min(4, parseInt(process.env.GEN_ANGLES || '3', 10) || 3));
+  const GEN_PER_ANGLE = Math.max(1, Math.min(3, parseInt(process.env.GEN_PER_ANGLE || '1', 10) || 1));
+  const anglesToUse = breakdownData.possible_angles?.slice(0, GEN_ANGLES) || [];
   if (anglesToUse.length === 0) {
     anglesToUse.push({ angle_name: 'นำเสนอข่าวสารทั่วไป', description: 'เล่าเหตุการณ์ตามจริง' });
   }
 
-  // ★ 4 total versions: 2 per angle (เดิม 7 versions / 3 angles → ช้าเกิน)
-  const totalVersions = 4;
-  const versionsPerAngle = 2;
+  const versionsPerAngle = GEN_PER_ANGLE;
+  const totalVersions = anglesToUse.length * versionsPerAngle;
 
   addLog('Generate', `🚀 ${anglesToUse.length} มุมมอง × ${versionsPerAngle} เวอร์ชัน = รวม ${totalVersions} เวอร์ชัน (parallel — ทุก angle ทำงานพร้อมกัน)...`);
 

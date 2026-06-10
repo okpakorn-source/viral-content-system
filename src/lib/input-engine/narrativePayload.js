@@ -119,6 +119,7 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     sourceUrl: item.sourceUrl || '',
     sourceName: item.sourceName || '',
     relevance: item.relevance || '',
+    identity: item._identity || 'generic', // 'verified' = ยืนยันแล้วว่าบุคคล/เหตุการณ์เดียวกับข่าว
   }));
 
   // Background Knowledge
@@ -327,10 +328,12 @@ export function formatNarrativePayload(payload) {
   if (payload.researchContexts.length > 0) {
     p += `\n=== ข้อมูลจาก Research (${payload.researchContexts.length} แหล่ง) ===\n`;
     payload.researchContexts.forEach((r, i) => {
-      p += `${i + 1}. [${r.type}] ${r.topic}\n   ${r.content}\n`;
+      const idTag = r.identity === 'verified' ? '✅ยืนยันบุคคล/เหตุการณ์เดียวกัน' : '🌐บริบททั่วไป';
+      p += `${i + 1}. [${r.type}|${idTag}] ${r.topic}\n   ${r.content}\n`;
       if (r.sourceUrl) p += `   แหล่งอ้างอิง: ${r.sourceUrl} (${r.sourceName})\n`;
       if (r.relevance) p += `   → ${r.relevance}\n`;
     });
+    p += '🚨 กฎ IDENTITY (ห้ามฝ่าฝืนเด็ดขาด): รายการ [🌐บริบททั่วไป] ใช้เป็นความรู้ประกอบเท่านั้น — ห้ามเขียนผูกกับตัวบุคคลในข่าว (ห้ามบอกว่าเขาเคยทำ/เคยพูด/มีประวัติตามข้อมูลนั้น) เฉพาะรายการ [✅ยืนยันบุคคล] เท่านั้นที่ผูกกับบุคคลได้\n';
     // ถอดกฎการแนบลิงก์ในประโยคออก เพื่อไม่ให้รบกวนเนื้อหา (พนักงานจะเช็คจาก UI แทน)
     p += '⚠️ คำแนะนำการใช้ข้อมูล: เลือกหยิบข้อมูล ตัวเลข สถิติ หรือข้อเท็จจริง จากบรรทัดด้านบน มาเขียนอธิบายเสริมในเนื้อหา **เฉพาะส่วนที่เข้ากับบริบทและมุมมองของเวอร์ชันนี้** เพื่อเพิ่มความลึกและน่าเชื่อถือ (ไม่จำเป็นต้องใช้ทั้งหมด และห้ามแทรก URL หรือคำว่าอ้างอิงลงในเนื้อหาโดยเด็ดขาด พนักงานจะเช็คจาก UI เอง)\n';
     p += '⚠️ กฎความยาว: เขียนเนื้อหาให้ยาว ลึกซึ้ง และมีรายละเอียดที่จับใจผู้อ่าน ห้ามเขียนสรุปรวบรัดสั้นๆ\n\n';

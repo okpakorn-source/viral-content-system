@@ -231,15 +231,16 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // ===================================================================
   rlog.divider('MULTI-ANGLE PARALLEL PIPELINE');
   
-  // ★ max 2 angles — ป้องกัน rate limit
-  const anglesToUse = breakdownData.possible_angles?.slice(0, 2) || [];
+  // ★ ปรับ 10 มิ.ย. 2026: default 3 มุม × 1 เวอร์ชัน — ดู autoFlowService.js (กฎเดียวกัน)
+  const GEN_ANGLES = Math.max(1, Math.min(4, parseInt(process.env.GEN_ANGLES || '3', 10) || 3));
+  const GEN_PER_ANGLE = Math.max(1, Math.min(3, parseInt(process.env.GEN_PER_ANGLE || '1', 10) || 1));
+  const anglesToUse = breakdownData.possible_angles?.slice(0, GEN_ANGLES) || [];
   if (anglesToUse.length === 0) {
     anglesToUse.push({ angle_name: 'นำเสนอข่าวสารทั่วไป', description: 'เล่าเหตุการณ์ตามจริง' });
   }
 
-  // ★ 4 total versions: 2 per angle (เดิม 7 versions / 4 angles → ช้าเกิน)
-  const totalVersions = 4;
-  const versionsPerAngle = 2;
+  const versionsPerAngle = GEN_PER_ANGLE;
+  const totalVersions = anglesToUse.length * versionsPerAngle;
   
   addLog('Generate', `🚀 ${anglesToUse.length} มุมมอง × ${versionsPerAngle} เวอร์ชัน = รวม ${totalVersions} เวอร์ชัน (parallel — ทุก angle ทำงานพร้อมกัน)...`);
 

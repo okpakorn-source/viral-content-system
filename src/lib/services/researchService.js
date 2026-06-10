@@ -3,6 +3,7 @@ import { logPipeline } from '@/lib/pipelineLogger';
 import { createLogger } from '@/lib/logger';
 import { MODEL_PRIMARY, MODEL_FAST } from '@/lib/ai/modelConfig';
 import { tavilySearch, isTavilyAvailable } from '@/lib/services/tavilyService';
+import { verifyResearchItems } from '@/lib/services/researchVerifier';
 
 const rlog = createLogger('RESEARCH-SERVICE');
 
@@ -430,9 +431,30 @@ ${searchCatalog}
       maxTokens: 4000,
     });
 
-    const finalItems = factResult?.items || [];
+    let finalItems = factResult?.items || [];
     if (!factResult?.items?.length) {
       console.warn('[Research-Service] ⚠️ Fact extraction returned no items — returning empty');
+    }
+
+    // ★ STEP 3.5: Identity Verification — กันข้อมูล "คนชื่อเดียวกันแต่คนละคน" (fail-closed)
+    let identityDropped = 0;
+    if (finalItems.length > 0) {
+      try {
+        const verified = await verifyResearchItems({
+          newsTitle,
+          newsBody,
+          breakdownData,
+          items: finalItems,
+        });
+        identityDropped = verified.droppedCount;
+        finalItems = verified.items;
+        verified.report.forEach(line => console.log('[Research-Verify] ' + line));
+      } catch (vErr) {
+        // fail-closed: verifier พังทั้งตัว → ไม่ปล่อย research เข้าเนื้อหาเลย
+        console.warn('[Research-Service] 🔴 Identity verifier crashed — dropping ALL research items (fail-closed):', vErr.message);
+        identityDropped = finalItems.length;
+        finalItems = [];
+      }
     }
 
     const duration = Date.now() - startTime;
@@ -455,6 +477,7 @@ ${searchCatalog}
       keywordSource,
       fallbackUsed: keywordFallbackUsed,
       keywordError: keywordError || null,
+      identityDropped, // จำนวน item ที่ถูกตัดเพราะยืนยันตัวบุคคลไม่ได้
     };
 
   } catch (error) {

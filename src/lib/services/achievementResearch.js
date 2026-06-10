@@ -14,6 +14,7 @@ import { callAI } from '@/lib/ai/openai';
 import { createLogger } from '@/lib/logger';
 import { MODEL_FAST } from '@/lib/ai/modelConfig';
 import { tavilySearch, isTavilyAvailable } from '@/lib/services/tavilyService';
+import { extractIdentityAnchors } from '@/lib/services/researchVerifier';
 
 const rlog = createLogger('SMART-RESEARCH');
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
@@ -186,27 +187,29 @@ async function detectEntity(newsTitle, newsBody) {
 // ═══════════════════════════════════════════════
 // === STEP 2: 6 Parallel Research Agents ===
 // ═══════════════════════════════════════════════
-function buildSearchQueries(entity) {
+function buildSearchQueries(entity, anchorStr = '') {
   const name = entity.name;
   const realName = entity.realName || '';
   const type = entity.type || '';
   const aliases = entity.aliases || [];
   const searchName = realName || name;
   const altName = aliases[0] || name;
+  // ★ แนบ anchor (จังหวัด/องค์กร) เข้าทุก query — กันเจอคนชื่อซ้ำตั้งแต่ตอนค้น
+  const a = anchorStr ? ` ${anchorStr}` : '';
 
   return {
-    achievements: `"${searchName}" ${type === 'นักการเมือง' ? 'ตำแหน่ง ผลงานเด่น นโยบาย' : type === 'ศิลปิน' ? 'เพลงฮิต ชื่อเพลง อัลบั้ม รางวัล' : 'ผลงานเด่น ความสำเร็จ'}`,
-    numbers: `"${altName}" ${type === 'ศิลปิน' ? 'ล้านวิว ยอดวิว ยอดสตรีม รายได้ ผู้ติดตาม' : type === 'นักการเมือง' ? 'คะแนนเสียง ผลสำรวจ ผลโพล เปอร์เซ็นต์' : 'ตัวเลข สถิติ จำนวน ล้านบาท'}`,
-    quotes: `"${searchName}" สัมภาษณ์ เคยพูด คำคม ให้สัมภาษณ์`,
-    history: `"${searchName}" ${type === 'นักการเมือง' ? 'ประวัติการศึกษา ตำแหน่งที่ผ่านมา' : 'จุดเริ่มต้น ก่อนมีชื่อเสียง เบื้องหลัง'}`,
-    funFacts: `"${searchName}" ประวัติ เรื่องน่ารู้ ก่อนดัง ชีวิตวัยเด็ก`,
-    publicWork: `"${searchName}" ${type === 'นักการเมือง' ? 'ผลงาน สภา กฎหมาย' : type === 'ศิลปิน' ? 'คอนเสิร์ต ทัวร์ โชว์ กิจกรรม' : 'โครงการ งานสำคัญ'}`,
+    achievements: `"${searchName}"${a} ${type === 'นักการเมือง' ? 'ตำแหน่ง ผลงานเด่น นโยบาย' : type === 'ศิลปิน' ? 'เพลงฮิต ชื่อเพลง อัลบั้ม รางวัล' : 'ผลงานเด่น ความสำเร็จ'}`,
+    numbers: `"${altName}"${a} ${type === 'ศิลปิน' ? 'ล้านวิว ยอดวิว ยอดสตรีม รายได้ ผู้ติดตาม' : type === 'นักการเมือง' ? 'คะแนนเสียง ผลสำรวจ ผลโพล เปอร์เซ็นต์' : 'ตัวเลข สถิติ จำนวน ล้านบาท'}`,
+    quotes: `"${searchName}"${a} สัมภาษณ์ เคยพูด คำคม ให้สัมภาษณ์`,
+    history: `"${searchName}"${a} ${type === 'นักการเมือง' ? 'ประวัติการศึกษา ตำแหน่งที่ผ่านมา' : 'จุดเริ่มต้น ก่อนมีชื่อเสียง เบื้องหลัง'}`,
+    funFacts: `"${searchName}"${a} ประวัติ เรื่องน่ารู้ ก่อนดัง ชีวิตวัยเด็ก`,
+    publicWork: `"${searchName}"${a} ${type === 'นักการเมือง' ? 'ผลงาน สภา กฎหมาย' : type === 'ศิลปิน' ? 'คอนเสิร์ต ทัวร์ โชว์ กิจกรรม' : 'โครงการ งานสำคัญ'}`,
   };
 }
 
-async function runAgents(entity) {
-  const queries = buildSearchQueries(entity);
-  rlog.step('agents', `🔎 6 Agents searching for "${entity.name}"...`);
+async function runAgents(entity, anchorStr = '') {
+  const queries = buildSearchQueries(entity, anchorStr);
+  rlog.step('agents', `🔎 6 Agents searching for "${entity.name}"${anchorStr ? ` + anchor "${anchorStr}"` : ''}...`);
 
   // Run all 6 agents + Wikipedia in parallel
   const [achievements, numbers, quotes, history, funFacts, publicWork, wiki] = await Promise.all([
@@ -239,7 +242,7 @@ async function runAgents(entity) {
 // ═══════════════════════════════════════════════
 // === STEP 3: AI Fact Extraction + Safety ===
 // ═══════════════════════════════════════════════
-async function extractAndFilterFacts(entity, agentResults, wiki, newsTitle) {
+async function extractAndFilterFacts(entity, agentResults, wiki, newsTitle, newsBody = '') {
   // Build search catalog for AI
   let catalog = '';
   for (const [key, agent] of Object.entries(agentResults)) {
@@ -261,6 +264,7 @@ async function extractAndFilterFacts(entity, agentResults, wiki, newsTitle) {
 ชื่อ: ${entity.name} (${entity.realName || ''})
 อาชีพ: ${entity.type || '-'}
 บริบทข่าว: ${newsTitle || '-'}
+เนื้อข่าวต้นฉบับ (ใช้เทียบยืนยันตัวบุคคล): ${(newsBody || '').slice(0, 600)}
 
 === ผลค้นหาจาก 6 Agents ===
 ${catalog}
@@ -285,8 +289,15 @@ ${catalog}
 ❌ ห้ามแต่งข้อมูลขึ้นเอง ถ้าผลค้นหาไม่มีข้อมูลเฉพาะเจาะจง ให้ตอบ facts = []
 ✅ ใช้ได้: ผลงานเฉพาะ, ตัวเลข/สถิติ, ประวัติการทำงาน, คำพูดจากสัมภาษณ์, เกร็ดน่ารู้
 
+## 🚨 กฎยืนยันตัวบุคคล (IDENTITY — สำคัญที่สุด ห้ามพลาดเด็ดขาด):
+ผลค้นหาอาจมี "คนชื่อเดียวกันแต่คนละคน" — ก่อนใช้ทุก fact ต้องเทียบกับบริบทข่าว
+(จังหวัด/อาชีพ/อายุ/องค์กร/เหตุการณ์) ว่าเป็นคนเดียวกันจริง
+- บริบทตรงชัดเจน → identityConfidence 8-10
+- ชื่อตรงแต่บริบทไม่มีอะไรยืนยัน → identityConfidence ≤ 5 (จะถูกตัดทิ้ง)
+- บริบทขัดแย้ง (คนละจังหวัด/อาชีพ/วงการ) → ห้ามใส่ใน facts เลย
+
 ตอบ JSON:
-{"facts": [{"category": "achievement|numbers|quote|history|funfact|publicwork", "text": "ข้อเท็จจริงเฉพาะเจาะจง ต้องมีชื่อ/ตัวเลข/วันที่", "source": "ชื่อเว็บที่พบ", "safetyScore": 1-10}], "entitySummary": "สรุปสั้นๆ ว่าบุคคลนี้คือใคร 1 ประโยค"}`;
+{"facts": [{"category": "achievement|numbers|quote|history|funfact|publicwork", "text": "ข้อเท็จจริงเฉพาะเจาะจง ต้องมีชื่อ/ตัวเลข/วันที่", "source": "ชื่อเว็บที่พบ", "safetyScore": 1-10, "identityConfidence": 1-10}], "entitySummary": "สรุปสั้นๆ ว่าบุคคลนี้คือใคร 1 ประโยค"}`;
 
   try {
     const result = await callAI({
@@ -307,6 +318,12 @@ ${catalog}
       // Safety Layer 2: AI safety score (keep ≥ 5)
       if (fact.safetyScore && fact.safetyScore < 5) {
         rlog.step('safety', `🟡 Low safety score (${fact.safetyScore}): "${fact.text.slice(0, 40)}..."`);
+        return false;
+      }
+      // ★ Safety Layer 3: Identity confidence — ยืนยันไม่ได้ว่าคนเดียวกับข่าว = ทิ้ง (fail-closed)
+      const idConf = Number(fact.identityConfidence);
+      if (isNaN(idConf) || idConf < 8) {
+        rlog.step('identity', `🔴 Identity unverified (conf=${fact.identityConfidence ?? 'n/a'}): "${fact.text.slice(0, 40)}..."`);
         return false;
       }
       return true;
@@ -351,18 +368,45 @@ export async function smartResearch(newsData, breakdownData) {
     const pattern = detection.narrativePattern || 'general';
     rlog.step('entity', `✅ Found: "${entity.name}" (${entity.type}) | Pattern: ${pattern}`);
 
-    // Step 2: 6 Parallel Agents
-    const { agentResults, wiki } = await runAgents(entity);
-    
+    // ★ Step 1.5: สกัด identity anchors จากข่าว (จังหวัด/องค์กร/อายุ) — ใช้กันคนชื่อซ้ำ
+    const { anchors } = extractIdentityAnchors({ newsTitle, newsBody });
+    const anchorStr = anchors.find(a => !/^อายุ/.test(a)) || ''; // ตัวแรกที่ไม่ใช่อายุ ใช้แนบ query
+    if (anchors.length > 0) {
+      rlog.step('identity', `🔒 Anchors: [${anchors.slice(0, 4).join(', ')}] | query anchor: "${anchorStr || '-'}"`);
+    } else {
+      rlog.step('identity', `⚠️ No identity anchors in news — relying on AI identityConfidence only`);
+    }
+
+    // Step 2: 6 Parallel Agents (+ anchor ใน query)
+    const { agentResults, wiki } = await runAgents(entity, anchorStr);
+
+    // ★ Step 2.5: Anchor pre-filter — ผลค้นหาที่เอ่ยชื่อ entity แต่ไม่มี anchor ของข่าวเลย = เสี่ยงคนละคน → ตัดทิ้ง
+    if (anchors.length > 0) {
+      const entityNames = [entity.name, entity.realName, ...(entity.aliases || [])].filter(Boolean);
+      const normalize = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
+      let preDropped = 0;
+      for (const agent of Object.values(agentResults)) {
+        agent.results = agent.results.filter(r => {
+          const t = normalize(`${r.title} ${r.snippet}`);
+          const nameHit = entityNames.some(n => n && n.length >= 3 && t.includes(normalize(n)));
+          if (!nameHit) return true; // ไม่เอ่ยชื่อ = บริบททั่วไป ให้ AI ชั้นถัดไปตัดสิน
+          const anchorHit = anchors.some(a => t.includes(normalize(a.replace(/อายุ(\d+)ปี/, '$1'))));
+          if (!anchorHit) { preDropped++; return false; } // ชื่อตรงแต่ไร้หลักฐาน → ทิ้ง
+          return true;
+        });
+      }
+      if (preDropped > 0) rlog.step('identity', `🔴 Pre-filter dropped ${preDropped} results (ชื่อตรงแต่ anchor ไม่ตรง)`);
+    }
+
     // Check if we got enough data
     const totalResults = Object.values(agentResults).reduce((sum, a) => sum + a.results.length, 0) + (wiki ? 1 : 0);
     if (totalResults < 2) {
-      rlog.step('agents', `⚠️ Only ${totalResults} results — not enough, skipping`);
+      rlog.step('agents', `⚠️ Only ${totalResults} results after identity filter — not enough, skipping (fail-closed)`);
       return null;
     }
 
-    // Step 3: AI Fact Extraction + Safety Filter
-    const factPool = await extractAndFilterFacts(entity, agentResults, wiki, newsTitle);
+    // Step 3: AI Fact Extraction + Safety Filter (+ identityConfidence ≥ 8)
+    const factPool = await extractAndFilterFacts(entity, agentResults, wiki, newsTitle, newsBody);
     
     if (!factPool || factPool.facts.length === 0) {
       rlog.step('result', '⚠️ No safe facts — using original flow');
