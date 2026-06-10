@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Header from '@/components/layout/Header';
 import { useWorkflow } from '@/components/WorkflowContext';
@@ -101,7 +101,7 @@ function NewContentPageInner() {
           setExtracted({ title: item.title, text: item.body, url: item.source_url || '' });
           setStep('extracted');
           setUrl(item.source_url || '');
-          setArchiveSaved(true);
+          setArchiveSaved(true); archiveSavedRef.current = true;
           console.log('[Archive] ✅ Loaded from archive:', archiveId);
         }
       })
@@ -109,8 +109,10 @@ function NewContentPageInner() {
   }, [searchParams]);
 
   // === Auto-save เข้าคลังข่าว ===
+  // ★ ใช้ ref กัน stale closure — เดิม callback จำค่า archiveSaved เก่า ทำให้ run ที่ 2 ใน session เดียวไม่ถูก save
+  const archiveSavedRef = useRef(false);
   const autoSaveToArchive = useCallback(async (newsDataArg, breakdownDataArg, coverBase64Arg) => {
-    if (archiveSaved) return;
+    if (archiveSavedRef.current) return;
     try {
       const res = await fetch('/api/news-archive', {
         method: 'POST',
@@ -128,13 +130,14 @@ function NewContentPageInner() {
       });
       const data = await res.json();
       if (data.success) {
+        archiveSavedRef.current = true;
         setArchiveSaved(true);
-        console.log('[Archive] ✅ Auto-saved:', data.data?.id, '|', data.data?.category);
+        console.log('[Archive] ✅ Auto-saved:', data.data?.id, '|', data.data?.category, data.deduped ? '(deduped)' : '');
       }
     } catch (e) {
       console.warn('[Archive] Auto-save failed (non-critical):', e.message);
     }
-  }, [archiveSaved, sourceType, workflowId]);
+  }, [sourceType, workflowId]);
   const [videoFile, setVideoFile] = useState(null);
   const [youtubeNeedUpload, setYoutubeNeedUpload] = useState(false);
   const [sentToReview, setSentToReview] = useState({}); // { versionIndex: true }
@@ -270,7 +273,7 @@ function NewContentPageInner() {
     setAutoLog([]);
     setError('');
     setStep('input');
-    setArchiveSaved(false); // ★ Reset เพื่อให้ save ได้ทุกครั้ง
+    setArchiveSaved(false); archiveSavedRef.current = false; // ★ Reset เพื่อให้ save ได้ทุกครั้ง
     setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
     setSourceType(type || 'url');
     setUrl(targetUrl);
@@ -354,17 +357,17 @@ function NewContentPageInner() {
       wfComplete('auto_scrape', `ดึง ${data.data.newsData?.newsBody?.length || 0} ตัวอักษร | ${st.scrape || '?'}s`);
       await delay(200);
 
-      wfStart('auto_extract', { api: '/api/auto → GPT-4o-mini', detail: `EXTRACT prompt → "${newsTitle.slice(0,30)}..."` });
+      wfStart('auto_extract', { api: '/api/auto → Gemini Flash', detail: `EXTRACT prompt → "${newsTitle.slice(0,30)}..."` });
       await delay(280);
       wfComplete('auto_extract', `"${newsTitle.slice(0, 40)}" | ${st.extract || '?'}s`);
       await delay(200);
 
-      wfStart('auto_breakdown', { api: '/api/auto → GPT-4o-mini', detail: 'BREAKDOWN prompt → วิเคราะห์มุมข่าว' });
+      wfStart('auto_breakdown', { api: '/api/auto → GPT-5.5', detail: 'BREAKDOWN prompt → วิเคราะห์มุมข่าว' });
       await delay(280);
       wfComplete('auto_breakdown', `${anglesCount} มุมข่าว | ${st.breakdown || '?'}s`);
       await delay(200);
 
-      wfStart('auto_blueprint', { api: '/api/auto → GPT-4o', detail: 'BLUEPRINT prompt → Emotional Architecture' });
+      wfStart('auto_blueprint', { api: '/api/auto → GPT-5.4-mini', detail: 'BLUEPRINT prompt → Emotional Architecture' });
       await delay(280);
       wfComplete('auto_blueprint', data.data.blueprint?.core_emotion
         ? `"${data.data.blueprint.core_emotion}" | ${st.blueprint || '?'}s`
@@ -380,12 +383,12 @@ function NewContentPageInner() {
 
       wfStart('auto_classic', { api: `/api/summarize ×${classicCount} → Claude`, detail: `Classic prompts from Library` });
       await delay(280);
-      wfComplete('auto_classic', `✅ ${classicCount} เวอร์ชัน | ${st.classic || '?'}s`);
+      wfComplete('auto_classic', `✅ ${classicCount} เวอร์ชัน | ${st.generate || '?'}s`);
       await delay(200);
 
       wfStart('auto_enhanced', { api: `/api/summarize ×${enhancedCount} → Claude`, detail: `Enhanced + Blueprint inject` });
       await delay(280);
-      wfComplete('auto_enhanced', `✅ ${enhancedCount} เวอร์ชัน | ${st.enhanced || '?'}s`);
+      wfComplete('auto_enhanced', `✅ ${enhancedCount} เวอร์ชัน | ${st.generate || '?'}s`);
       await delay(150);
 
       finishWorkflow(`✅ ${data.data.totalTimeSeconds || '?'}s — ${versionsCount} เวอร์ชัน (${classicCount}+${enhancedCount}) | ${promptLabel}`);
@@ -457,9 +460,13 @@ function NewContentPageInner() {
       }
       setStep('analyzed');
       setAutoProgress('');
-      // 📦 Auto-save เข้าคลังข่าว
-      const coverBase64 = data.data?.autoCoverResult?.success ? data.data.autoCoverResult.base64 : null;
-      autoSaveToArchive(data.data.newsData, data.data.breakdownData, coverBase64).catch((e) => console.warn('[Archive] Auto-save failed:', e.message));
+      // 📦 Auto-save เข้าคลังข่าว — ข้ามถ้า server (queue) บันทึกให้แล้ว
+      if (!queueResult?.archiveSaved) {
+        const coverBase64 = data.data?.autoCoverResult?.success ? data.data.autoCoverResult.base64 : null;
+        autoSaveToArchive(data.data.newsData, data.data.breakdownData, coverBase64).catch((e) => console.warn('[Archive] Auto-save failed:', e.message));
+      } else {
+        console.log('[Archive] ⏭️ Server-side archived — client skip');
+      }
     } catch (err) {
       const failStep = err.failedStep || 'auto_scrape';
       wfFail(failStep, err.message);
@@ -500,7 +507,7 @@ function NewContentPageInner() {
     setAutoLog([]);
     setError('');
     setStep('input');
-    setArchiveSaved(false); // ★ Reset เพื่อให้ save ได้ทุกครั้ง
+    setArchiveSaved(false); archiveSavedRef.current = false; // ★ Reset เพื่อให้ save ได้ทุกครั้ง
     setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
 
     const inputLabel = hasImg ? `รูปภาพ ${inputImages.length} ใบ` : textOnly.slice(0, 30) || 'input';
@@ -590,8 +597,8 @@ function NewContentPageInner() {
         ? `✅ ${resCount} แหล่งข้อมูล | ${st.research || '✓'}s`
         : `⚠️ ไม่พบข้อมูลเพิ่มเติม`);
       await delay(100);
-      wfComplete('auto_classic', `✅ ${classicCount} เวอร์ชัน | ${st.classic || '✓'}s`);
-      wfComplete('auto_enhanced', `✅ ${enhancedCount} เวอร์ชัน | ${st.enhanced || '✓'}s`);
+      wfComplete('auto_classic', `✅ ${classicCount} เวอร์ชัน | ${st.generate || '✓'}s`);
+      wfComplete('auto_enhanced', `✅ ${enhancedCount} เวอร์ชัน | ${st.generate || '✓'}s`);
 
       finishWorkflow(`✅ ${data.data?.totalTimeSeconds || data.debug?.durationSeconds || '?'}s — ${versionsCount} เวอร์ชัน (${classicCount}+${enhancedCount}) | ${promptLabel}`);
 
@@ -612,8 +619,13 @@ function NewContentPageInner() {
       const sourceUrl = data.newsData?.sourceUrl || data.normalized?.title && data.detection?.primaryUrl;
       if (sourceUrl) setUrl(sourceUrl);
 
-      const coverBase64 = data.autoCoverResult?.success ? data.autoCoverResult.base64 : null;
-      autoSaveToArchive(data.newsData || data.data?.newsData, data.breakdownData || data.data?.breakdownData, coverBase64).catch((e) => console.warn('[Archive] Auto-save failed:', e.message));
+      // ★ ข้าม save ถ้า server (queue) บันทึกให้แล้ว
+      if (!data.archiveSaved) {
+        const coverBase64 = data.autoCoverResult?.success ? data.autoCoverResult.base64 : null;
+        autoSaveToArchive(data.newsData || data.data?.newsData, data.breakdownData || data.data?.breakdownData, coverBase64).catch((e) => console.warn('[Archive] Auto-save failed:', e.message));
+      } else {
+        console.log('[Archive] ⏭️ Server-side archived — client skip');
+      }
       if (data.simulatedComments?.length > 0) {
         setSimulatedComments(data.simulatedComments);
       }

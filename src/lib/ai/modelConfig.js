@@ -39,6 +39,7 @@ export const MODEL_SPELL_CHECK     = 'gpt-5.4-mini';  // ตรวจคำผ�
 export const MODEL_PRIMARY = MODEL_MAIN_REASONING;    // = gpt-5.5
 export const MODEL_FAST    = MODEL_FAST_CHEAP;         // = gpt-5.4-mini
 export const MODEL_VISION  = 'gpt-4o';                 // = gpt-4o (vision capable)
+export const MODEL_HEAVY_FALLBACK = 'gpt-4o';          // fallback เมื่อ MODEL_PRIMARY ล้มเหลว/timeout
 
 // ★ COST LOOKUP (per 1M tokens, USD)
 export const MODEL_COSTS = {

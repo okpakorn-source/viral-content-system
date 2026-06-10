@@ -1,7 +1,43 @@
 import OpenAI from 'openai';
 import { MODEL_VISION } from '@/lib/ai/modelConfig';
+import { callGeminiVision, isGeminiAvailable } from '@/lib/ai/geminiClient';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+/**
+ * ★ Gemini Vision fallback — เดิม router ประกาศว่ามี fallback แต่โค้ดจริงใช้ OpenAI อย่างเดียว
+ * (OpenAI ล่ม = pipeline รูปภาพตายทั้งเส้น)
+ */
+async function performOcrWithGemini(dataUrls) {
+  const images = dataUrls.map(url => {
+    const m = url.match(/^data:(image\/[a-z+]+);base64,(.+)$/i);
+    return m
+      ? { mimeType: m[1], data: m[2] }
+      : { mimeType: 'image/jpeg', data: url.replace(/^data:[^,]*,/, '') };
+  });
+
+  const result = await callGeminiVision({
+    prompt: `อ่านข้อความทั้งหมดจากภาพ (OCR ภาษาไทย) ให้ครบถ้วน — หัวข้อข่าว เนื้อหา ชื่อเพจ/แหล่งที่มา วันที่ ข้อความบนภาพ ยอดไลก์/แชร์
+ตอบเป็น JSON: { "title": "หัวข้อที่สรุปจากภาพ", "ocr_text": "ข้อความทั้งหมดที่อ่านได้ จัดรูปแบบให้อ่านง่าย แยกส่วน ===แหล่งที่มา=== ===เนื้อหาหลัก=== ===ข้อความจากภาพ===" }`,
+    images,
+    temperature: 0.1,
+    maxTokens: 4000,
+  });
+
+  const ocrText = result?.ocr_text || result?.text || '';
+  if (!ocrText || ocrText.length < 20) {
+    throw new Error('Gemini Vision อ่านข้อความจากภาพไม่ได้');
+  }
+  return {
+    success: true,
+    text:    ocrText,
+    result:  ocrText,
+    title:   (result?.title || ocrText.slice(0, 80)).substring(0, 100),
+    chars:   ocrText.length,
+    source:  'gemini-vision-fallback',
+    imageCount: dataUrls.length,
+  };
+}
 
 /**
  * Perform GPT-4o Vision OCR on base64 images or data URLs
@@ -42,7 +78,9 @@ export async function performOcr({ images = [], mode = 'full', dataUrls = [] }) 
 
   // ★ GPT-5.5 compatibility
   const _isNew = MODEL_VISION.startsWith('gpt-5') || MODEL_VISION.startsWith('o1') || MODEL_VISION.startsWith('o3');
-  const response = await openai.chat.completions.create({
+  let response;
+  try {
+    response = await openai.chat.completions.create({
     model:      MODEL_VISION,
     ...(_isNew ? { max_completion_tokens: 4000 } : { max_tokens: 4000 }),
     messages: [
@@ -77,11 +115,25 @@ export async function performOcr({ images = [], mode = 'full', dataUrls = [] }) 
         ],
       },
     ],
-  });
+    });
+  } catch (openaiErr) {
+    // ★ OpenAI Vision ล่ม → fallback Gemini Vision (เดิมตายทั้ง pipeline รูปภาพ)
+    console.warn(`[OCR-Service] ⚠️ OpenAI Vision failed: ${openaiErr.message}`);
+    if (isGeminiAvailable()) {
+      console.log('[OCR-Service] 🔄 Falling back to Gemini Vision...');
+      return performOcrWithGemini(finalDataUrls);
+    }
+    throw openaiErr;
+  }
 
   const ocrText = response.choices[0]?.message?.content || '';
 
   if (!ocrText || ocrText.length < 20) {
+    // ★ OpenAI อ่านไม่ได้ → ลอง Gemini ก่อนยอมแพ้
+    if (isGeminiAvailable()) {
+      console.log('[OCR-Service] 🔄 OpenAI returned empty — falling back to Gemini Vision...');
+      return performOcrWithGemini(finalDataUrls);
+    }
     throw new Error('ไม่สามารถอ่านข้อความจากภาพได้');
   }
 

@@ -26,7 +26,7 @@ const PROVIDERS = {
     { id: 'extract',      envKey: null,                  label: 'Built-in Scraper', apiRoute: '/api/extract' }, // always available
   ],
   tiktok: [
-    { id: 'apify_tiktok', envKey: 'APIFY_API_KEY',    label: 'Apify TikTok',  apiRoute: '/api/auto/providers/apify-tiktok' },
+    { id: 'apify_tiktok', envKey: 'APIFY_API_TOKEN',  label: 'Apify TikTok',  apiRoute: '/api/auto/providers/apify-tiktok' },
     { id: 'tiktok_native',envKey: null,                  label: 'Built-in TikTok', apiRoute: '/api/tiktok' }, // always available
   ],
   youtube: [
@@ -34,7 +34,7 @@ const PROVIDERS = {
     { id: 'youtube_native',envKey: null,                 label: 'Built-in YouTube', apiRoute: '/api/youtube' }, // always available
   ],
   facebook: [
-    { id: 'apify_fb',     envKey: 'APIFY_API_KEY',    label: 'Apify Facebook', apiRoute: '/api/auto/providers/apify-facebook' },
+    { id: 'apify_fb',     envKey: 'APIFY_API_TOKEN',  label: 'Apify Facebook', apiRoute: '/api/auto/providers/apify-facebook' },
     { id: 'jina',         envKey: 'JINA_API_KEY',        label: 'Jina Reader',   apiRoute: '/api/auto/providers/jina' },
     { id: 'extract',      envKey: null,                  label: 'Built-in Scraper', apiRoute: '/api/extract' },
   ],

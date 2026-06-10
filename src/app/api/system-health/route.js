@@ -61,8 +61,8 @@ export async function GET(request) {
 
   checks.apify = {
     label: 'Apify',
-    configured: Boolean(process.env.APIFY_API_KEY),
-    keyPrefix: maskKey(process.env.APIFY_API_KEY),
+    configured: Boolean(process.env.APIFY_API_TOKEN),
+    keyPrefix: maskKey(process.env.APIFY_API_TOKEN),
     usedFor: 'TikTok + Facebook scraping',
     fallback: 'Built-in extractors',
   };

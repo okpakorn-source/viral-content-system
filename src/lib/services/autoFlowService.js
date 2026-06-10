@@ -10,6 +10,7 @@ import { createLogger } from '@/lib/logger';
 import { withTimeout } from '@/lib/utils/withTimeout';
 import { runCorrectionPipeline } from '@/lib/correction/correctionPipeline';
 import { logGeneration } from '@/lib/services/generationLogger';
+import { getBuiltinFallbackPrompt } from '@/lib/ai/builtinFallbackPrompt';
 
 const rlog = createLogger('AUTO-SERVICE');
 
@@ -131,6 +132,12 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     }
   }
 
+  // ★ ผนวกข้อความเพิ่มเติมที่ผู้ใช้พิมพ์มาพร้อม URL (url_with_context) — เดิมถูกทิ้งไม่ได้ใช้
+  if (url && text && text.length > 20 && !text.includes(url)) {
+    rawText += `\n\n[ข้อมูลเพิ่มเติมจากผู้ใช้]\n${text}`;
+    addLog('Step1', `➕ ผนวกข้อความจากผู้ใช้ ${text.length} ตัวอักษร`);
+  }
+
   if (contentFallback) addLog('Step1', '⚠️ ใช้ URL fallback — AI จะวิเคราะห์เนื้อหาจาก context ที่มี (ผลลัพธ์อาจจำกัด)');
 
   // === STEP 2: สกัดข่าว (Extract) ===
@@ -247,6 +254,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   }
   
   addLog('Parallel', `⏱️ Blueprint+Research เสร็จใน ${((Date.now() - stepParallelStart) / 1000).toFixed(1)}s (แทนที่จะ ~90s sequential)`);
+  const stepGenStart = Date.now(); // ★ จุดเริ่ม generate จริง — แยก timing blueprint/research ออกจาก generate
 
   // ===================================================================
   // === MULTI-ANGLE PARALLEL PIPELINE ===
@@ -292,10 +300,16 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
       _cachedPromptLib = promptsRes._promptLib;
     }
     
-    const topPrompt = promptsRes?.prompts?.[0] || null;
+    let topPrompt = promptsRes?.prompts?.[0] || null;
     if (topPrompt?.id) usedPromptIds.push(topPrompt.id);
+    // ★ ไม่มี prompt match → ใช้ Built-in Fallback V12 แทนการข้าม angle (เดิมเนื้อหาหายทั้ง angle)
+    if (!topPrompt) {
+      topPrompt = getBuiltinFallbackPrompt();
+      addLog('PromptSelect', `📦 Angle "${angleObj.angle_name}" → ไม่มี match ใน library — ใช้ Built-in Fallback V12 แทน`);
+    } else {
+      addLog('PromptSelect', `📋 Angle "${angleObj.angle_name}" → ${topPrompt.promptName?.slice(0, 40)} (excluded: ${usedPromptIds.length - 1})${_cachedNewsAnalysis ? ' ♻️' : ''}`);
+    }
     anglePrompts.push(topPrompt);
-    addLog('PromptSelect', `📋 Angle "${angleObj.angle_name}" → ${topPrompt ? topPrompt.promptName?.slice(0, 40) : '❌ ไม่พบ'} (excluded: ${usedPromptIds.length - 1})${_cachedNewsAnalysis ? ' ♻️' : ''}`);
   }
 
   // === PARALLEL GENERATE: สร้างเนื้อหาทุก angle พร้อมกัน (★ PARALLEL — save ~150-300s) ===
@@ -468,7 +482,9 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
           scrape: ((step2Start - step1Start) / 1000).toFixed(1),
           extract: ((step3Start - step2Start) / 1000).toFixed(1),
           breakdown: ((stepParallelStart - step3Start) / 1000).toFixed(1),
-          generate: ((Date.now() - stepParallelStart) / 1000).toFixed(1),
+          blueprint: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
+          research: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
+          generate: ((Date.now() - stepGenStart) / 1000).toFixed(1),
         },
       },
       userId: _user.userId,
@@ -510,7 +526,9 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
         scrape: ((step2Start - step1Start) / 1000).toFixed(1),
         extract: ((step3Start - step2Start) / 1000).toFixed(1),
         breakdown: ((stepParallelStart - step3Start) / 1000).toFixed(1),
-        generate: ((Date.now() - stepParallelStart) / 1000).toFixed(1),
+        blueprint: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
+        research: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
+        generate: ((Date.now() - stepGenStart) / 1000).toFixed(1),
       },
       log,
     },

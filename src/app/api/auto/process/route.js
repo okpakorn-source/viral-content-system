@@ -43,10 +43,27 @@ const rlog = createLogger('AUTO-PROCESS');
  * Called after successful processing so Discord/queue content also gets archived.
  * Fire-and-forget — does not block the response.
  */
-async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, workflowId, archivedBy, coverImage }) {
+async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, sourceUrl, workflowId, archivedBy, coverImage }) {
   try {
     if (!newsData?.newsTitle && !newsData?.newsBody) return;
-    
+
+    // ★ Dedup guard: title เดียวกันภายใน 10 นาที → ไม่บันทึกซ้ำ
+    try {
+      const dedupStore = createStore('news-archive');
+      const existing = await dedupStore.getAll();
+      const cutoff = Date.now() - 10 * 60 * 1000;
+      const dupe = existing.find(it =>
+        it.title && newsData.newsTitle && it.title === newsData.newsTitle &&
+        new Date(it.archived_at || it.createdAt || 0).getTime() > cutoff
+      );
+      if (dupe) {
+        console.log(`[Archive-Server] ⏭️ Duplicate within 10min — skip: "${newsData.newsTitle.slice(0, 50)}"`);
+        return;
+      }
+    } catch (dedupErr) {
+      console.warn('[Archive-Server] Dedup check failed (continuing):', dedupErr.message);
+    }
+
     // AI classify category
     let category = 'ทั่วไป';
     let summary = '';
@@ -77,9 +94,9 @@ async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, wo
       id,
       title: newsData.newsTitle || (newsData.newsBody || '').slice(0, 100) || 'ไม่มีหัวข้อ',
       body: newsData.newsBody || '',
-      source_url: '',
+      source_url: sourceUrl || '',
       source_type: sourceType || 'discord',
-      source_name: archivedBy || 'discord-bot',
+      source_name: archivedBy || 'auto-server',
       category,
       tags,
       summary,
@@ -190,20 +207,22 @@ export async function POST(request) {
         };
         addLog('Route', `✅ Enhanced pipeline: ${versions.length} versions in ${legacyData.totalTimeSeconds}s`);
 
-        // 🗄️ Auto-save to news archive (only for queue/Discord — web UI saves client-side)
+        // 🗄️ Auto-save to news archive — server-side ที่เดียว (web/Discord ผ่าน queue ทั้งคู่)
         if (isFromQueue) {
           saveToArchiveServerSide({
             newsData: legacyData.newsData,
             breakdownData: legacyData.breakdownData,
             sourceType: detection.inputType,
+            sourceUrl: detection.primaryUrl || '',
             workflowId: _wfId,
-            archivedBy: 'discord-bot',
+            archivedBy: body.userId || 'auto-server',
             coverImage: delegateRes.autoCoverResult?.success ? delegateRes.autoCoverResult.base64 : null,
           }).catch(() => {});
         }
 
         return NextResponse.json({
           success:       true,
+          archiveSaved:  isFromQueue, // ★ client เห็น flag นี้แล้วไม่ต้อง save ซ้ำ
           data:          { ...legacyData, versions, analysisResult },
           newsData:      legacyData.newsData,
           breakdownData: legacyData.breakdownData,
@@ -257,6 +276,11 @@ export async function POST(request) {
         const raw = await withTimeout(scrapeArticle(url, { baseUrl: origin }), 30000, 'scrape');
         if (raw.fallbackUsed) fallbacksUsed.push(raw.fallbackProvider || 'jina');
         normalizedData = normalizeToSchema(raw, 'article', { originalUrl: url, inputImages: images });
+        // ★ ผนวกข้อความที่ผู้ใช้พิมพ์มากับ URL (url_with_context) — เดิมถูกทิ้งไม่ได้ใช้
+        if (detection.textContent && detection.textContent.length > 20) {
+          normalizedData.rawText += `\n\n[ข้อมูลเพิ่มเติมจากผู้ใช้]\n${detection.textContent}`;
+          addLog('Scrape', `➕ ผนวกข้อความจากผู้ใช้ ${detection.textContent.length}ch`);
+        }
         addLog('Scrape', `${raw.success ? '✅' : '⚠️'} ${raw.provider}: ${normalizedData.rawText.length}ch`);
         break;
       }
@@ -473,12 +497,28 @@ export async function POST(request) {
       emotionalBlueprint: blueprintData,
       contentLength,
       analysisPresetId: preset,
+      targetCount: 4, // ★ เดิมไม่ส่ง → prompt ขอ "อย่างน้อย 5" ใน 90s = เสี่ยง timeout สูง
       workflowId: _wfId,
       user:       body.user || null,
-    }), 90000, 'generate');
+    }), 240000, 'generate'); // ★ 240s ให้เท่ากับ enhanced path (เดิม 90s ไม่พอจริง)
 
     const genData        = genRes.data || genRes;
     const versions       = genData.versions || [];
+
+    // Guard: generate ล้มเหลวหรือได้ 0 เวอร์ชัน → ต้องไม่ตอบ success
+    if (!genRes.success || versions.length === 0) {
+      addLog('Generate', `❌ Generate failed: ${genRes.error || 'no versions produced'}`);
+      return NextResponse.json({
+        success:   false,
+        error:     `สร้างเนื้อหาไม่สำเร็จ: ${genRes.error || 'AI ไม่ได้สร้างเวอร์ชันใดเลย'}`,
+        errorType: 'GENERATE_FAILED',
+        failedStep: 'u_generate',
+        newsData,
+        breakdownData,
+        log,
+      }, { status: 422 });
+    }
+
     const analysisResult = {
       ...(genData || {}),
       versions,
@@ -491,6 +531,19 @@ export async function POST(request) {
     addLog('Done', `✅ Total: ${totalTime}s | ${versions.length} versions | pipeline: ${route.pipelineId} | fallbacks: ${fallbacksUsed.join(',') || 'none'}`);
 
     await logPipeline({ workflowId: _wfId, step: 'unified-auto', status: 'success', duration: Date.now() - startTime, detail: newsData.newsTitle?.slice(0, 60) }).catch(() => {});
+
+    // 🗄️ Auto-save to news archive — server-side ที่เดียว (เดิม pipeline ท้องถิ่นไม่ archive เลย → ข่าวจาก Discord รูป/text หายจากคลัง)
+    if (isFromQueue) {
+      saveToArchiveServerSide({
+        newsData,
+        breakdownData,
+        sourceType: detection.inputType,
+        sourceUrl: detection.primaryUrl || '',
+        workflowId: _wfId,
+        archivedBy: body.userId || 'auto-server',
+        coverImage: null,
+      }).catch(() => {});
+    }
 
     // === GENERATION LOG: บันทึกเคสเข้าระบบ ===
     try {
@@ -514,6 +567,7 @@ export async function POST(request) {
 
     return NextResponse.json({
       success:        true,
+      archiveSaved:   isFromQueue, // ★ client เห็น flag นี้แล้วไม่ต้อง save ซ้ำ
       data:           { ...genData, versions, analysisResult },
       newsData,
       breakdownData,

@@ -91,6 +91,23 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'ต้องมี title หรือ newsBody' }, { status: 400 });
     }
 
+    // ★ Dedup guard: title เดียวกันภายใน 10 นาที → ไม่สร้างซ้ำ (กัน archive ซ้ำจาก server+client)
+    try {
+      const dedupStore = createStore(STORE);
+      const existing = await dedupStore.getAll();
+      const cutoff = Date.now() - 10 * 60 * 1000;
+      const dupe = existing.find(it =>
+        it.title && title && it.title === title &&
+        new Date(it.archived_at || it.createdAt || 0).getTime() > cutoff
+      );
+      if (dupe) {
+        console.log(`[Archive] ⏭️ Duplicate within 10min — skip save: "${String(title).slice(0, 50)}"`);
+        return NextResponse.json({ success: true, data: dupe, deduped: true });
+      }
+    } catch (dedupErr) {
+      console.warn('[Archive] Dedup check failed (continuing):', dedupErr.message);
+    }
+
     // === AI ตรวจจับ category อัตโนมัติ ===
     let category = 'ทั่วไป';
     let summary = '';

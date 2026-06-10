@@ -252,7 +252,7 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     painPoints,
     researchGrade,
     factSufficiency,
-    sourceRemovedFromCompose: true,
+    sourceRemovedFromCompose: false, // compose แนบ source excerpt 3000ch เพื่ออ้างอิงรายละเอียด (anti-duplicate ยังบังคับ)
   };
 }
 
@@ -262,8 +262,8 @@ export function formatNarrativePayload(payload) {
   let p = '';
 
   p += '=== NARRATIVE RECONSTRUCTION PAYLOAD ===\n';
-  p += '⚠️ คุณจะไม่เห็นบทความต้นฉบับ — ต้องสร้างเรื่องใหม่จาก facts ด้านล่างเท่านั้น\n';
-  p += '⚠️ ห้ามเรียงตาม structure เดิม ห้าม rewrite — ต้อง reconstruct narrative ใหม่\n\n';
+  p += '⚠️ payload นี้คือ "โครงหลัก" ของเรื่อง — facts, บุคคล, timeline, quotes ด้านล่างคือกระดูกสันหลังที่ต้องครอบคลุม\n';
+  p += '⚠️ ห้ามเรียงตาม structure ของต้นฉบับ ห้าม rewrite ทีละย่อหน้า — ต้อง reconstruct narrative ใหม่\n\n';
 
   p += `📰 หัวข้อ: ${payload.headline}\n`;
   if (payload.coreStory) p += `🎯 แก่นข่าว: ${payload.coreStory}\n`;
@@ -386,10 +386,10 @@ export function formatNarrativePayload(payload) {
 
   // Reconstruction Mandate
   p += '=== NARRATIVE RECONSTRUCTION MANDATE ===\n';
-  p += 'คุณไม่มีบทความต้นฉบับ — คุณมีแค่ facts, quotes, และ context\n';
+  p += 'ใช้ facts, quotes และ context จาก payload นี้เป็นแกนของเรื่อง — เนื้อข่าวต้นฉบับ (ถ้าแนบมาด้านล่าง) มีไว้ตรวจความถูกต้องของรายละเอียดเท่านั้น\n';
   p += 'งาน: สร้างเรื่องเล่าใหม่ทั้งหมดจาก facts\n';
   p += 'ห้าม: เรียง facts ตามลำดับที่ให้ (สลับตามความเหมาะสม)\n';
-  p += 'ห้าม: สรุปทีละย่อหน้า\n';
+  p += 'ห้าม: สรุปทีละย่อหน้า ห้ามลอกโครงเรื่องหรือสำนวนจากต้นฉบับ\n';
   p += 'ต้อง: เลือก angle → เปิดด้วย moment/conflict → เล่า → ปิดด้วยอารมณ์\n';
   p += '=== จบ MANDATE ===\n\n';
 

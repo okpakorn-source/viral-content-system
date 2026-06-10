@@ -40,6 +40,19 @@ export async function POST(req) {
     if (!payload.input && !payload.url && !payload.text) {
       return NextResponse.json({ success: false, error: 'Missing input/url/text in payload' }, { status: 400 });
     }
+
+    // ★ Garbage-input guard: input ที่ encoding พัง (เต็มไปด้วย "?") จะทำให้ AI แต่งข่าวมั่วทั้งเรื่อง
+    const _rawInput = String(payload.input || payload.text || '');
+    if (_rawInput.length > 30) {
+      const _qMarks = (_rawInput.match(/\?/g) || []).length;
+      if (_qMarks / _rawInput.length > 0.3) {
+        return NextResponse.json({
+          success: false,
+          error: 'ข้อความที่ส่งมามีตัวอักษรเสียหาย (encoding) จำนวนมาก — กรุณาวางข้อความใหม่อีกครั้ง',
+          errorType: 'GARBLED_INPUT',
+        }, { status: 400 });
+      }
+    }
     
     // 3. Add to Queue
     const sourceUserId = payload.userId || 'discord-bot';
