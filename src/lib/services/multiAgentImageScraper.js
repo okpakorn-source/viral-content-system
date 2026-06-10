@@ -1858,9 +1858,9 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
     }
   } catch { /* Tavily not available */ }
 
-  const [googleResult, youtubeResult, contextResult, tavilyResult] = await Promise.allSettled([
+  const [googleResult, reelsResult, contextResult, tavilyResult, youtubeResult] = await Promise.allSettled([
     agentGoogleCleanImages(identity),
-    // Agent 5: Facebook Reels (Bright Data)
+    // Agent 5: Facebook Reels (Serper thumbnail)
     (async () => {
       try {
         const { searchAndExtractReelFrames } = await import('@/lib/services/facebookReelsExtractor');
@@ -1868,14 +1868,18 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
       } catch (e) { console.log('[Agent5:Reels] Error:', e.message); return []; }
     })(),
     agentContextImages(identity),
-    tavilyPromise
+    tavilyPromise,
+    // ★ Agent 2 (10 มิ.ย.): YouTube Frames กลับเข้าระบบ — เคยเขียนครบแต่ไม่ถูกเรียก (สล็อตถูกแทนด้วย Reels)
+    //   เฟรมจากคลิปสัมภาษณ์/รายการ = แหล่งภาพ "อารมณ์พีค" ที่ Google Images ไม่มี
+    agentYouTubeFrames(identity)
   ]);
 
   // Collect results from each agent
   const googleImages = googleResult.status === 'fulfilled' ? googleResult.value : [];
-  const youtubeImages = youtubeResult.status === 'fulfilled' ? youtubeResult.value : [];
+  const reelsImages = reelsResult.status === 'fulfilled' ? (reelsResult.value || []) : [];
   const contextImages = contextResult.status === 'fulfilled' ? contextResult.value : [];
   const tavilyImages = tavilyResult.status === 'fulfilled' ? (tavilyResult.value || []).filter(u => typeof u === 'string' && u.startsWith('http')) : [];
+  const youtubeImages = youtubeResult.status === 'fulfilled' ? (youtubeResult.value || []) : [];
 
   console.log('============================================');
   console.log(`[MultiAgent] Agent results:`);
@@ -1883,12 +1887,14 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
   console.log(`  Agent 2 (YouTube):  ${youtubeImages.length} frames ${youtubeResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + youtubeResult.reason : ''}`);
   console.log(`  Agent 3 (Context):  ${contextImages.length} images ${contextResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + contextResult.reason : ''}`);
   console.log(`  Agent 4 (Tavily):   ${tavilyImages.length} images ${tavilyResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + tavilyResult.reason : ''}`);
+  console.log(`  Agent 5 (FB Reels): ${reelsImages.length} thumbs ${reelsResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + reelsResult.reason : ''}`);
 
   const coreQueriesForMeta = (identity?.coreImageQueries || []).map(q => q.toLowerCase());
   const allMeta = [
     ...((googleResult.value?._meta) || []),
     ...contextImages.map((url, i) => ({ url, queryLabel: `context-${i}`, queryText: '' })),
     ...youtubeImages.map((url, i) => ({ url, queryLabel: 'youtube-core', queryText: coreQueriesForMeta[0] || '' })),
+    ...reelsImages.map((url, i) => ({ url, queryLabel: 'reels-core', queryText: coreQueriesForMeta[0] || '' })),
     ...tavilyImages.map((url, i) => ({ url, queryLabel: 'tavily-core', queryText: coreQueriesForMeta[0] || '' })),
   ];
 
@@ -1966,7 +1972,10 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
     ...contextImages.filter(img => !googleQueue.includes(img)),
     ...tavilyImages.filter(img => !googleQueue.includes(img) && !contextImages.includes(img)),
   ]; // ★ รวม Tavily เข้า context queue
-  const reelsQueue = youtubeImages.filter(img => !googleQueue.includes(img) && !contextQueue.includes(img));
+  // ★ Agent 2: เฟรม YouTube = ภาพคน (สัมภาษณ์/vlog) → เข้าฝั่ง person ต่อท้าย Google
+  const youtubeQueue = youtubeImages.filter(img => !googleQueue.includes(img));
+  googleQueue.push(...youtubeQueue);
+  const reelsQueue = reelsImages.filter(img => !googleQueue.includes(img) && !contextQueue.includes(img));
   contextQueue.push(...reelsQueue);
   
   let gIdx = 0, cIdx = 0;
@@ -2010,8 +2019,7 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
   }
   const personCount = Math.min(gIdx, googleQueue.length);
   const contextCount = Math.min(cIdx, contextQueue.length);
-  const reelsCount = reelsQueue.length;
-  console.log(`[MultiAgent] ★ Interleaved: ${candidates.length} candidates (Person ~${personCount} ↔ Context ~${contextCount} + Reels ~${reelsCount})`);
+  console.log(`[MultiAgent] ★ Interleaved: ${candidates.length} candidates (Person ~${personCount} [+YT ${youtubeQueue.length}] ↔ Context ~${contextCount} + Reels ~${reelsQueue.length})`);
 
   console.log(`[MultiAgent] 🏛️ Sending ${candidates.length} candidates to AI Judge...`);
   console.log('============================================');
@@ -2026,7 +2034,8 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
     ...googleImages,
     ...contextImages,
     ...tavilyImages,
-    ...youtubeImages
+    ...youtubeImages,
+    ...reelsImages
   ])];
 
   // Map metadata back to selected images so that they can be filtered properly in route.js

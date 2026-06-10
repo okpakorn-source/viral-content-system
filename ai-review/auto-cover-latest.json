@@ -1,52 +1,51 @@
 {
-  "timestamp": "2026-06-10T15:46:24.793Z",
-  "newsTitle": "ชมพู่พาลูกเรียนรู้ธรรมชาติ",
-  "storyType": "nature_learning",
-  "mainVisualShouldBe": "น้องสายฟ้าและน้องพายุอยู่ในสวนผักกับยายหนิงและชมพู่ ขณะปลูกผักหรือเรียนรู้ธรรมชาติในบรรยากาศอบอุ่นของครอบครัว",
+  "timestamp": "2026-06-10T16:57:03.672Z",
+  "newsTitle": "สร้างบ้านใหญ่ให้ลูกๆ",
+  "storyType": "family_warm",
+  "mainVisualShouldBe": "ภาพบุญชัย เบญจรงคกุลกับตั๊ก บงกชอยู่ในพื้นที่บ้านหรือหน้าบ้านหลังใหญ่ที่กำลังสร้าง สื่อถึงความตั้งใจสร้างที่อยู่ให้ลูกๆ และครอบครัวอยู่พร้อมหน้า",
   "coverageRequired": [
     "STORY_ANCHOR",
     "KEY_ACTIVITY",
     "RELATIONSHIP",
     "CONTEXT_SCENE",
-    "HERO_FACE",
-    "EMOTION"
+    "HERO_FACE"
   ],
   "coverageOptional": [
+    "HERO2",
+    "EMOTION",
     "EVIDENCE"
   ],
   "visualPriority": {
     "STORY_ANCHOR": 35,
-    "KEY_ACTIVITY": 25,
-    "RELATIONSHIP": 20,
-    "CONTEXT_SCENE": 10,
-    "HERO_FACE": 7,
-    "EMOTION": 3
+    "RELATIONSHIP": 25,
+    "CONTEXT_SCENE": 20,
+    "HERO_FACE": 12,
+    "EVIDENCE": 8
   },
   "storyAnchorQueries": [
-    "ชมพู่ อารยา ลูก สายฟ้า พายุ ปลูกผักสวนครัว",
-    "ชมพู่ อารยา ยายหนิง สวนผัก ลูกๆ",
-    "น้องสายฟ้า น้องพายุ ปลูกผัก ชมพู่ อารยา",
-    "ชมพู่ อารยา พาลูกเรียนรู้ธรรมชาติในสวน",
-    "ยายหนิง ชมพู่ อารยา หลาน ปลูกผัก",
-    "สวนยายหนิง ชมพู่ สายฟ้า พายุ",
-    "ชมพู่ อารยา ครอบครัว ทำสวน ปลูกผัก",
-    "น้องสายฟ้า น้องพายุ สวนผัก ยายหนิง"
+    "บุญชัย เบญจรงคกุล ตั๊ก บงกช บ้านหลังใหญ่ ลูกๆ",
+    "บุญชัย เบญจรงคกุล สร้างบ้านให้ลูกๆ ครอบครัว",
+    "ตั๊ก บงกช บุญชัย เบญจรงคกุล ดูแลพื้นที่บ้าน",
+    "บุญชัย เบญจรงคกุล ตั๊ก บงกช ครอบครัว บ้าน",
+    "บ้านหลังใหญ่ บุญชัย เบญจรงคกุล ตั๊ก บงกช",
+    "บุญชัย เบญจรงคกุล ตั๊ก บงกช ชีวิตคู่ 14 ปี"
   ],
   "slotAssignment": {
-    "heroIndex": 0,
-    "heroRole": "RELATIONSHIP",
-    "heroTitle": "",
-    "circleIndex": null,
+    "heroIndex": 5,
+    "heroRole": "HERO_FACE",
+    "heroTitle": "ตั๊ก-เจ้าสัวบุญชัย เล่าอาณาจักรเบญจรงคกุล 800 ไร่ ยันสามีไม่มีเรื่อง",
+    "circleIndex": 1,
     "photoOrder": [
-      0,
-      1,
-      5
+      5,
+      7,
+      4,
+      0
     ]
   },
   "templateUsed": "template_9",
   "templateReason": "DNA/autoSelect → template_9",
   "templateChanged": false,
-  "score": 8,
+  "score": 6,
   "storyMatchScore": 8,
   "finalSlotAudit": {
     "issues": [],
@@ -55,28 +54,30 @@
   },
   "duplicateSlotDetected": false,
   "finalUsedCandidateIds": [
-    "cid_t9x0fh",
-    "cid_f6zs7b",
-    "cid_rgs7d6"
+    "cid_yyeml4",
+    "cid_r5mrg2",
+    "cid_b974mj",
+    "cid_fmlbnf",
+    "cid_1s3lia"
   ],
   "rejectedSlotCandidates": [],
   "whySimpleTemplateWasChosen": null,
   "normalizedYoutubeVideoIds": [],
   "duplicateReplacement": [],
   "storyTypePropagationCheck": {
-    "fromGPT": "nature_learning",
-    "afterCoverage": "nature_learning"
+    "fromGPT": "family_warm",
+    "afterCoverage": "family_warm"
   },
   "allCandidates": [
     {
       "index": 0,
       "role": "RELATIONSHIP",
-      "curatorScore": 9,
+      "curatorScore": 8,
       "score": 10,
       "title": "",
-      "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/resize/w728/q80/jpg",
-      "width": 728,
-      "height": 908,
+      "url": "https://static.thairath.co.th/media/Dtbezn3nNUxytg04aiHu9rVHLWTGVluqOiG6QwOK9xhTIH.jpg",
+      "width": 1051,
+      "height": 1559,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -84,13 +85,13 @@
     },
     {
       "index": 1,
-      "role": "KEY_ACTIVITY",
-      "curatorScore": 9,
-      "score": 10,
+      "role": "RELATIONSHIP",
+      "curatorScore": 7,
+      "score": 8,
       "title": "",
-      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
-      "width": 1440,
-      "height": 1920,
+      "url": "https://www.matichon.co.th/wp-content/uploads/2023/11/2E3CCB44-8749-4FAC-B5C6-FB4008F1CAD9-831x1024.",
+      "width": 831,
+      "height": 1024,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -99,12 +100,12 @@
     {
       "index": 2,
       "role": "LOW_PRIORITY",
-      "curatorScore": 4,
-      "score": 10,
+      "curatorScore": 3,
+      "score": 7,
       "title": "",
-      "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/resize/w728/q80/jpg",
-      "width": 728,
-      "height": 908,
+      "url": "https://s.isanook.com/ns/0/ud/1754/8771222/tak.jpg?ip/crop/w1200h700/q80/jpg",
+      "width": 1200,
+      "height": 700,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -112,13 +113,13 @@
     },
     {
       "index": 3,
-      "role": "LOW_PRIORITY",
-      "curatorScore": 4,
+      "role": "RELATIONSHIP",
+      "curatorScore": 6,
       "score": 10,
-      "title": "",
-      "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/resize/w728/q80/jpg",
-      "width": 728,
-      "height": 908,
+      "title": "ตั๊ก-เจ้าสัวบุญชัย เล่าอาณาจักรเบญจรงคกุล 800 ไร่  ยันสามีไม",
+      "url": "https://static.thairath.co.th/media/Dtbezn3nNUxytg04aiJ95vhfvolZMCOgV0cgUSyezZs2EV.jpg",
+      "width": 1280,
+      "height": 1707,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -126,13 +127,13 @@
     },
     {
       "index": 4,
-      "role": "LOW_PRIORITY",
-      "curatorScore": 4,
+      "role": "RELATIONSHIP",
+      "curatorScore": 8,
       "score": 10,
       "title": "",
-      "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/resize/w728/q80/jpg",
-      "width": 728,
-      "height": 908,
+      "url": "https://th-images.th-hellomagazine.com/wp-content/uploads/2023/09/12114106/S5_0131-1-scaled.jpg",
+      "width": 2550,
+      "height": 1913,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -140,13 +141,13 @@
     },
     {
       "index": 5,
-      "role": "CONTEXT_SCENE",
+      "role": "HERO_FACE",
       "curatorScore": 8,
-      "score": 9,
-      "title": "",
-      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
-      "width": 1440,
-      "height": 1920,
+      "score": 10,
+      "title": "ตั๊ก-เจ้าสัวบุญชัย เล่าอาณาจักรเบญจรงคกุล 800 ไร่ ยันสามีไม่",
+      "url": "https://static.thairath.co.th/media/dFQROr7oWzulq5Fa5BV8jTxnDmdMV7Qk8Of0Pw0NnWdBIHsUy3ceTAVrrC688gij",
+      "width": 1280,
+      "height": 720,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -155,42 +156,48 @@
     {
       "index": 6,
       "role": "LOW_PRIORITY",
-      "curatorScore": 4,
-      "score": 9,
-      "title": "",
-      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
-      "width": 1440,
-      "height": 1920,
+      "curatorScore": 6,
+      "score": 10,
+      "title": "เปิดโฉมหน้าลูก 6 คนของ เจ้าสัวบุญชัย ร่วมฉลองวันเกิดให้พ่อ ต",
+      "url": "https://static.thairath.co.th/media/dFQROr7oWzulq5Fa5BEgD4XLvgPOTbg11ybbXLb6PpTSkeOZfkwkiC5B2X7LUHw1",
+      "width": 1280,
+      "height": 720,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
-      "_curatorScoreBeforeGuard": null
+      "_curatorScoreBeforeGuard": 4
     },
     {
       "index": 7,
-      "role": "LOW_PRIORITY",
-      "curatorScore": 4,
-      "score": 9,
-      "title": "",
-      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
-      "width": 1440,
-      "height": 1920,
+      "role": "KEY_ACTIVITY",
+      "curatorScore": 9,
+      "score": 10,
+      "title": "ตั๊ก บงกช ลั่น ครอบครัวเรารักกันมานานเเล้ว ร่วมเฟรมลูก ๆ ทั้",
+      "url": "https://today-obs.line-scdn.net/0hRz_9RX4dDVViQB9KDOhyAloWASRRJhdcQHNHMRRIW2RPbE8EXSZeNkcVVnlHIx5RQi",
+      "width": 644,
+      "height": 644,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
       "_curatorScoreBeforeGuard": null
     }
   ],
-  "normalizedStoryType": "nature_learning",
-  "rawStoryType": "nature_learning",
+  "normalizedStoryType": "family_warm",
+  "rawStoryType": "ครอบครัวอบอุ่น",
   "storyAnchorCandidates": [],
-  "candidateBucketCounts": null,
+  "candidateBucketCounts": {
+    "totalBeforeDedup": 30,
+    "totalAfterDedup": 28,
+    "storyAnchor": 1,
+    "other": 27,
+    "sentToJudge": 24
+  },
   "qualityGate": {
     "sourceImageTypes": [
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
-        "role": "RELATIONSHIP",
+        "url": "https://static.thairath.co.th/media/Dtbezn3nNUxytg04aiHu9rVHLWTGVluqOiG6QwOK9xhT",
+        "role": "KEY_ACTIVITY",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
         "gateAction": "PASSED",
@@ -200,8 +207,8 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
-        "role": "RELATIONSHIP",
+        "url": "https://s.isanook.com/ns/0/ud/1754/8771222/tak.jpg?ip/crop/w1200h700/q80/jpg",
+        "role": "CONTEXT_SCENE",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
         "gateAction": "PASSED",
@@ -211,8 +218,8 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
-        "role": "RELATIONSHIP",
+        "url": "https://t1.blockdit.com/photos/2023/03/6403f6679284dd42204fde79_800x0xcover_SCA4",
+        "role": "CONTEXT_SCENE",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
         "gateAction": "PASSED",
@@ -222,7 +229,7 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+        "url": "https://static.thairath.co.th/media/Dtbezn3nNUxytg04aiJ95vhfvolZMCOgV0cgUSyezZs2",
         "role": "HERO_FACE",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
@@ -233,29 +240,7 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
-        "role": "RELATIONSHIP",
-        "sourceType": "CLEAN_PHOTO",
-        "confidence": 1,
-        "gateAction": "PASSED",
-        "gateReason": "",
-        "reasons": [],
-        "forbiddenSlots": null
-      },
-      {
-        "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
-        "role": "RELATIONSHIP",
-        "sourceType": "CLEAN_PHOTO",
-        "confidence": 1,
-        "gateAction": "PASSED",
-        "gateReason": "",
-        "reasons": [],
-        "forbiddenSlots": null
-      },
-      {
-        "candidateId": "unknown",
-        "url": "https://f.ptcdn.info/027/064/000/prnbyg52xnRket5coya0-o.jpg",
+        "url": "https://static.thairath.co.th/media/dFQROr7oWzulq5Fa5BV8jTxnDmdMV7Qk8Of0Pw0NnWdB",
         "role": "HERO_FACE",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
@@ -266,7 +251,7 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+        "url": "https://www.matichon.co.th/wp-content/uploads/2023/11/2E3CCB44-8749-4FAC-B5C6-FB",
         "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
@@ -277,7 +262,7 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+        "url": "https://th-images.th-hellomagazine.com/wp-content/uploads/2023/09/12114106/S5_01",
         "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
@@ -288,7 +273,7 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+        "url": "https://static.thairath.co.th/media/dFQROr7oWzulq5Fa5BEgD4XLvgPOTbg11ybbXLb6PpTS",
         "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
@@ -299,19 +284,8 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
-        "role": "RELATIONSHIP",
-        "sourceType": "CLEAN_PHOTO",
-        "confidence": 1,
-        "gateAction": "PASSED",
-        "gateReason": "",
-        "reasons": [],
-        "forbiddenSlots": null
-      },
-      {
-        "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
-        "role": "RELATIONSHIP",
+        "url": "https://today-obs.line-scdn.net/0hRz_9RX4dDVViQB9KDOhyAloWASRRJhdcQHNHMRRIW2RPbE",
+        "role": "HERO_FACE",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
         "gateAction": "PASSED",
@@ -320,29 +294,60 @@
         "forbiddenSlots": null
       }
     ],
-    "blockedSourceImages": [],
+    "blockedSourceImages": [
+      {
+        "url": "https://static.thairath.co.th/media/Dtbezn3nNUxytg04aiHu9rVHLWTGVluqq037BzRPGogf",
+        "originalRole": "QUALITY_BLOCKED",
+        "sourceType": "NEWS_THUMBNAIL",
+        "confidence": 0.75,
+        "reasons": [
+          "Colored graphic border detected: Top banner: uniform color (0.73) with saturation 0.30"
+        ],
+        "gateReason": "NEWS_THUMBNAIL forbidden by family_warm policy"
+      },
+      {
+        "url": "https://mpics.mgronline.com/pics/Images/557000002093703.JPEG",
+        "originalRole": "QUALITY_BLOCKED",
+        "sourceType": "TEXT_OVERLAY",
+        "confidence": 0.7,
+        "reasons": [
+          "Text banner detected: Bottom banner: uniform color (0.75)"
+        ],
+        "gateReason": "TEXT_OVERLAY forbidden by family_warm policy"
+      },
+      {
+        "url": "https://mpics.mgronline.com/pics/Images/566000002450301.JPEG",
+        "originalRole": "QUALITY_BLOCKED",
+        "sourceType": "NEWS_THUMBNAIL",
+        "confidence": 0.7,
+        "reasons": [
+          "News domain + 16:9 thumbnail aspect (1.78)"
+        ],
+        "gateReason": "NEWS_THUMBNAIL forbidden by family_warm policy"
+      }
+    ],
     "downgradedSourceImages": [],
     "evidenceCandidates": [],
     "qualityGateSummary": {
       "total": 12,
-      "passed": 12,
-      "blocked": 0,
+      "passed": 9,
+      "blocked": 3,
       "downgraded": 0,
       "types": {
-        "CLEAN_PHOTO": 12
+        "NEWS_THUMBNAIL": 2,
+        "CLEAN_PHOTO": 9,
+        "TEXT_OVERLAY": 1
       },
-      "cleanPhotoCount": 12,
+      "cleanPhotoCount": 9,
       "qualityGatePassed": true,
       "qualityGateFailReasons": [],
-      "policyKey": "family_nature_learning",
+      "policyKey": "family_warm",
       "forbiddenTypes": [
         "NEWS_THUMBNAIL",
         "TEXT_OVERLAY",
         "COLLAGE",
         "SCREENSHOT",
-        "SPLIT_SCREEN",
-        "PREVIOUS_COVER",
-        "YOUTUBE_THUMBNAIL"
+        "PREVIOUS_COVER"
       ],
       "quotasApplied": {
         "TEXT_OVERLAY": 0,
@@ -358,24 +363,22 @@
   "noStoryAnchorFallbackReason": null,
   "finalSaveGate": {
     "saveGatePassed": true,
-    "saveGateStatus": "PARTIAL_PASS",
+    "saveGateStatus": "SUCCESS",
     "saveGateBlockers": [],
-    "saveGateWarnings": [
-      "CIRCLE_NO_FACE on nature_learning (soft-circle type, score 8/10) — downgraded to WARNING"
-    ],
-    "manualReviewReason": "[WARNING] CIRCLE_NO_FACE on nature_learning (soft-circle type, score 8/10) — downgraded to WARNING",
+    "saveGateWarnings": [],
+    "manualReviewReason": null,
     "summary": {
       "totalBlockers": 0,
-      "totalWarnings": 1,
+      "totalWarnings": 0,
       "criticalBlockers": 0,
       "highBlockers": 0,
       "mediumBlockers": 0,
       "inheritedReview": false,
-      "partialPass": true
+      "partialPass": false
     }
   },
   "saveGatePassed": true,
-  "saveGateStatus": "PARTIAL_PASS",
+  "saveGateStatus": "SUCCESS",
   "saveGateBlockers": [],
-  "manualReviewReason": "[WARNING] CIRCLE_NO_FACE on nature_learning (soft-circle type, score 8/10) — downgraded to WARNING"
+  "manualReviewReason": null
 }

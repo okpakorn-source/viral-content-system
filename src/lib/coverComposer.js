@@ -343,15 +343,19 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
         cropX = Math.max(0, Math.min(cropX, srcW - cropW));
       } else if (cropStrategy === 'portrait-upper') {
         cropX = Math.round(focusCX - cropW / 2);
-        cropY = Math.round(focusCY - cropH * 0.30);
-        
+        // ★ FIX (10 มิ.ย.): เดิม 0.30 — พอซูมแน่นขึ้น (3.5x) หัว/ผมโดนตัดขอบบน (CASE-032)
+        //   0.38 = องค์ประกอบ portrait มาตรฐาน เหลือที่เหนือหน้า ~0.83 เท่าของความสูงหน้า
+        cropY = Math.round(focusCY - cropH * 0.38);
+
         if (cropY < 0) cropY = 0;
         if (cropY + cropH > srcH) cropY = Math.max(0, srcH - cropH);
-        
+
         const faceTop = focusCY - focusH / 2;
         const faceBottom = focusCY + focusH / 2;
-        if (faceTop < cropY) {
-          cropY = Math.max(0, Math.round(faceTop - focusH * 0.3));
+        // ★ กันหัวขาด: ต้องมีที่ว่างเหนือกรอบหน้า (ผม/ศีรษะ) อย่างน้อย 0.6 เท่าของความสูงหน้า
+        const hairRoom = focusH * 0.6;
+        if (faceTop - cropY < hairRoom) {
+          cropY = Math.max(0, Math.round(faceTop - hairRoom));
         }
         if (faceBottom > cropY + cropH) {
           cropY = Math.max(0, Math.round(faceBottom - cropH + focusH * 0.3));
