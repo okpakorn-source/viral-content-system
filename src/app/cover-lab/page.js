@@ -110,6 +110,8 @@ export default function CoverLabPage() {
   // Auto Cover state
   const [newsTitle, setNewsTitle] = useState('');
   const [content, setContent] = useState('');
+  // ★ Agent 0 (11 มิ.ย.): ลิงก์ข่าวต้นทาง — ระบบดึงภาพจากบทความโดยตรง (ภาพตรงเนื้อที่สุด)
+  const [sourceUrl, setSourceUrl] = useState('');
   const [templateId, setTemplateId] = useState('auto');
   const [coverResult, setCoverResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -331,6 +333,7 @@ export default function CoverLabPage() {
 
       const addData = await enqueueCoverJob({
         newsTitle, content, templateId: useTemplate,
+        sourceUrl: sourceUrl.trim() || undefined,
         regenerate: isRegenerate, clearCache: !!isRegenerate && isFresh,
       });
       // ★ Recovery: จำ jobId ไว้ — ถ้า UI หลุด/รีเฟรช ระบบกู้ผลลัพธ์คืนได้
@@ -777,6 +780,14 @@ export default function CoverLabPage() {
               placeholder="วางเนื้อหาข่าวที่ต้องการทำปก..."
               rows={4}
               style={{ ...inputStyle, resize: 'vertical' }}
+            />
+
+            <label style={labelStyle}>ลิงก์ข่าวต้นทาง (optional — ช่วยให้ภาพตรงเนื้อหามาก)</label>
+            <input
+              value={sourceUrl}
+              onChange={e => setSourceUrl(e.target.value)}
+              placeholder="https://... วางลิงก์ข่าว ระบบจะดึงภาพจริงจากบทความมาใช้ก่อน"
+              style={inputStyle}
             />
 
             <label style={labelStyle}>Template ปก ({templates.length} แบบ)</label>

@@ -1858,7 +1858,7 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
     }
   } catch { /* Tavily not available */ }
 
-  const [googleResult, reelsResult, contextResult, tavilyResult, youtubeResult] = await Promise.allSettled([
+  const [googleResult, reelsResult, contextResult, tavilyResult, youtubeResult, articleResult] = await Promise.allSettled([
     agentGoogleCleanImages(identity),
     // Agent 5: Facebook Reels (Serper thumbnail)
     (async () => {
@@ -1871,7 +1871,16 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
     tavilyPromise,
     // ★ Agent 2 (10 มิ.ย.): YouTube Frames กลับเข้าระบบ — เคยเขียนครบแต่ไม่ถูกเรียก (สล็อตถูกแทนด้วย Reels)
     //   เฟรมจากคลิปสัมภาษณ์/รายการ = แหล่งภาพ "อารมณ์พีค" ที่ Google Images ไม่มี
-    agentYouTubeFrames(identity)
+    agentYouTubeFrames(identity),
+    // ★ Agent 0 (11 มิ.ย.): ภาพจากบทความข่าวต้นทาง — ภาพ "ตรงเนื้อ" ที่สุด (บ้านจริง/สวนจริง/เหตุการณ์จริง)
+    //   แก้ปัญหา "คนถูกแต่ผิดเรื่อง" จากการค้นด้วยชื่อคนซึ่งได้แต่ portrait
+    (async () => {
+      try {
+        if (!url || !/^https?:\/\//i.test(url)) return [];
+        const { extractSourceArticleImages } = await import('@/lib/services/sourceArticleImages');
+        return await extractSourceArticleImages(url);
+      } catch (e) { console.log('[Agent0:Article] Error:', e.message); return []; }
+    })()
   ]);
 
   // Collect results from each agent
@@ -1880,9 +1889,11 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
   const contextImages = contextResult.status === 'fulfilled' ? contextResult.value : [];
   const tavilyImages = tavilyResult.status === 'fulfilled' ? (tavilyResult.value || []).filter(u => typeof u === 'string' && u.startsWith('http')) : [];
   const youtubeImages = youtubeResult.status === 'fulfilled' ? (youtubeResult.value || []) : [];
+  const articleImages = articleResult.status === 'fulfilled' ? (articleResult.value || []) : [];
 
   console.log('============================================');
   console.log(`[MultiAgent] Agent results:`);
+  console.log(`  Agent 0 (Article):  ${articleImages.length} images ${articleResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + articleResult.reason : ''}`);
   console.log(`  Agent 1 (Google):   ${googleImages.length} images ${googleResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + googleResult.reason : ''}`);
   console.log(`  Agent 2 (YouTube):  ${youtubeImages.length} frames ${youtubeResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + youtubeResult.reason : ''}`);
   console.log(`  Agent 3 (Context):  ${contextImages.length} images ${contextResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + contextResult.reason : ''}`);
@@ -1895,6 +1906,7 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
     ...contextImages.map((url, i) => ({ url, queryLabel: `context-${i}`, queryText: '' })),
     ...youtubeImages.map((url, i) => ({ url, queryLabel: 'youtube-core', queryText: coreQueriesForMeta[0] || '' })),
     ...reelsImages.map((url, i) => ({ url, queryLabel: 'reels-core', queryText: coreQueriesForMeta[0] || '' })),
+    ...articleImages.map((url, i) => ({ url, queryLabel: 'article-source', queryText: 'ภาพจากบทความข่าวต้นทาง' })),
     ...tavilyImages.map((url, i) => ({ url, queryLabel: 'tavily-core', queryText: coreQueriesForMeta[0] || '' })),
   ];
 
@@ -1972,6 +1984,9 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
     ...contextImages.filter(img => !googleQueue.includes(img)),
     ...tavilyImages.filter(img => !googleQueue.includes(img) && !contextImages.includes(img)),
   ]; // ★ รวม Tavily เข้า context queue
+  // ★ Agent 0: ภาพจากข่าวต้นทาง = ตรงเนื้อที่สุด → ขึ้นหัวคิว (เข้ารอบ Judge ก่อนใคร)
+  const articleQueue = articleImages.filter(img => !googleQueue.includes(img));
+  googleQueue.unshift(...articleQueue);
   // ★ Agent 2: เฟรม YouTube = ภาพคน (สัมภาษณ์/vlog) → เข้าฝั่ง person ต่อท้าย Google
   const youtubeQueue = youtubeImages.filter(img => !googleQueue.includes(img));
   googleQueue.push(...youtubeQueue);
@@ -2031,6 +2046,7 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
   console.log('============================================');
 
   const allScrapedUrls = [...new Set([
+    ...articleImages,
     ...googleImages,
     ...contextImages,
     ...tavilyImages,
