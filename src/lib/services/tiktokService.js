@@ -4,7 +4,12 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { createReadStream } from 'fs';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// ★ lazy-init: ห้าม new OpenAI() ระดับ module — SDK throw ตอน build ถ้า env ไม่มี key (เช่น Vercel Preview)
+let _openai = null;
+const getOpenai = () => {
+  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return _openai;
+};
 
 // ดาวน์โหลดวิดีโอ TikTok ผ่าน free API
 async function downloadTikTok(url) {
@@ -79,7 +84,7 @@ export async function transcribeTiktok({ url, videoBuffer, mimeType }) {
 
     console.log(`[TikTok-Service] Starting Whisper transcription...`);
 
-    const transcription = await openai.audio.transcriptions.create({
+    const transcription = await getOpenai().audio.transcriptions.create({
       file: audioSource,
       model: 'whisper-1',
       language: 'th',

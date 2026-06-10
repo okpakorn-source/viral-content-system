@@ -2,7 +2,12 @@ import OpenAI from 'openai';
 import { MODEL_VISION } from '@/lib/ai/modelConfig';
 import { callGeminiVision, isGeminiAvailable } from '@/lib/ai/geminiClient';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// ★ lazy-init: ห้าม new OpenAI() ระดับ module — SDK throw ตอน build (Collecting page data) ถ้า env ไม่มี key (เช่น Vercel Preview)
+let _openai = null;
+const getOpenai = () => {
+  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return _openai;
+};
 
 /**
  * ★ Gemini Vision fallback — เดิม router ประกาศว่ามี fallback แต่โค้ดจริงใช้ OpenAI อย่างเดียว
@@ -80,7 +85,7 @@ export async function performOcr({ images = [], mode = 'full', dataUrls = [] }) 
   const _isNew = MODEL_VISION.startsWith('gpt-5') || MODEL_VISION.startsWith('o1') || MODEL_VISION.startsWith('o3');
   let response;
   try {
-    response = await openai.chat.completions.create({
+    response = await getOpenai().chat.completions.create({
     model:      MODEL_VISION,
     ...(_isNew ? { max_completion_tokens: 4000 } : { max_tokens: 4000 }),
     messages: [

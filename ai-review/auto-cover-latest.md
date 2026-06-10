@@ -1,34 +1,34 @@
-# AI Cover Review — 2026-06-10T14:55:50.412Z
+# AI Cover Review — 2026-06-10T15:16:35.563Z
 
 ## Story Identity
 - **Title**: ชมพู่พาลูกปลูกผักกับยาย
 - **Story Type**: family_nature_learning
-- **Main Visual Should Be**: น้องสายฟ้าและน้องพายุอยู่ในสวนผักกับคุณยายหนิงหรือชมพู่ อารยา กำลังปลูกผักหรือสัมผัสดินในบรรยากาศธรรมชาติอบอุ่น
+- **Main Visual Should Be**: น้องสายฟ้าและน้องพายุอยู่ในสวนผักกับชมพู่และยายหนิง กำลังปลูกผักหรือทำกิจกรรมธรรมชาติร่วมกันอย่างอบอุ่น
 - **Coverage Required**: STORY_ANCHOR, KEY_ACTIVITY, RELATIONSHIP, CONTEXT_SCENE, HERO_FACE, EMOTION
-- **Coverage Optional**: EVIDENCE, HERO2
+- **Coverage Optional**: HERO2, EVIDENCE
 
 ## Slot Assignment
-- **Hero Index**: #1 → role: RELATIONSHIP
+- **Hero Index**: #0 → role: RELATIONSHIP
 - **Hero Title**: N/A
-- **Circle Index**: #2
-- **Photo Order**: [1,0,4]
+- **Circle Index**: #0
+- **Photo Order**: [0,1,5]
 - **Template**: template_9
 - **Template Reason**: DNA/autoSelect → template_9
 - **Template Changed**: no
 
 ## Scores
 - **Overall Score**: 8/10
-- **Story Match Score**: 8
+- **Story Match Score**: 7
 
 ## ★ Slot Audit (Fix 12-17)
-- **Status**: ⚠️ 2 issues, 1 auto-fixed
+- **Status**: ⚠️ 2 issues, 0 auto-fixed
 - **Duplicate Detected**: YES ⚠️
 - **Why Simple Template**: N/A (template was not downgraded)
-- **Issues**: [{"type":"DUPLICATE_URL","slot":"circle","index":0,"duplicateOf":"slot_1"},{"type":"DUPLICATE_CID","slot":"circle","index":0,"duplicateOf":"slot_1"}]
-- **Fixes Applied**: [{"slot":"circle","oldIndex":0,"newIndex":2,"reason":"DUPLICATE_URL"}]
-- **Duplicate Replacements**: [{"slot":"circle","oldIndex":0,"newIndex":2,"reason":"DUPLICATE_URL"}]
-- **Rejected Candidates**: [{"index":0,"reason":"DUPLICATE_URL"}]
-- **Final Used CIDs**: cid_t9x0fh, cid_f6zs7b, cid_rgs7d6, cid_n0em0q
+- **Issues**: [{"type":"DUPLICATE_URL","slot":"circle","index":0,"duplicateOf":"slot_0"},{"type":"DUPLICATE_CID","slot":"circle","index":0,"duplicateOf":"slot_0"}]
+- **Fixes Applied**: []
+- **Duplicate Replacements**: []
+- **Rejected Candidates**: []
+- **Final Used CIDs**: cid_t9x0fh, cid_f6zs7b, cid_rgs7d6, cid_t9x0fh
 - **YouTube Video IDs**: []
 
 ## ★ Face Detection Diagnostics (Fix 9)
@@ -44,31 +44,32 @@
 ## All Candidates
 | # | Role | Score | Tech Bad | Title |
 |---|------|-------|----------|-------|
-| 0 | KEY_ACTIVITY | 9 | - |  |
-| 1 | RELATIONSHIP | 10 | - |  |
-| 2 | LOW_PRIORITY | 3 | - |  |
-| 3 | RELATIONSHIP | 10 | - |  |
-| 4 | KEY_ACTIVITY | 9 | - |  |
-| 5 | KEY_ACTIVITY | 9 | - |  |
-| 6 | KEY_ACTIVITY | 9 | - |  |
-| 7 | KEY_ACTIVITY | 9 | - |  |
+| 0 | RELATIONSHIP | 9 | - |  |
+| 1 | KEY_ACTIVITY | 8 | - |  |
+| 2 | LOW_PRIORITY | 4 | - |  |
+| 3 | LOW_PRIORITY | 4 | - |  |
+| 4 | LOW_PRIORITY | 4 | - |  |
+| 5 | RELATIONSHIP | 8 | - |  |
+| 6 | LOW_PRIORITY | 4 | - |  |
+| 7 | LOW_PRIORITY | 4 | - |  |
 
 ## Visual Priority
 ```json
 {
-  "STORY_ANCHOR": "35%",
-  "KEY_ACTIVITY": "25%",
-  "RELATIONSHIP": "20%",
-  "CONTEXT_SCENE": "10%",
-  "HERO_FACE": "7%",
-  "EMOTION": "3%"
+  "story_subject_children": "35%",
+  "key_activity_gardening": "25%",
+  "family_relationship": "20%",
+  "garden_context_scene": "10%",
+  "hero_face_chompoo": "10%"
 }
 ```
 
 ## Story Anchor Queries
-- ชมพู่ อารยา สายฟ้า พายุ ยายหนิง ปลูกผักสวนครัว
-- ชมพู่ อารยา พาลูกปลูกผัก เรียนรู้ธรรมชาติ
-- น้องสายฟ้า น้องพายุ ลูกชมพู่ ปลูกผักกับยายหนิง
-- ชมพู่ อารยา ลูกๆ ทำกิจกรรมในสวนกับคุณยาย
-- ครอบครัวชมพู่ อารยา สวนผักสวนครัว ยายหนิง
-- น้องสายฟ้า น้องพายุ เรียนรู้ธรรมชาติในสวน ชมพู่ อารยา
+- ชมพู่ อารยา ลูก สายฟ้า พายุ ปลูกผักสวนครัว
+- ชมพู่ อารยา สายฟ้า พายุ สวนผัก
+- ยายหนิง แม่ชมพู่ หลาน สวนผัก
+- ชมพู่ อารยา พาลูก เรียนรู้ธรรมชาติ
+- น้องสายฟ้า ลูกชมพู่ อารยา น้องพายุ ลูกชมพู่ อารยา ปลูกผัก
+- ชมพู่ อารยา ครอบครัว ทำกิจกรรมในสวน
+- ชมพู่ อารยา ยายหนิง ปลูกผักสวนครัว
+- ชมพู่ อารยา ลูกๆ รดน้ำผักในสวน

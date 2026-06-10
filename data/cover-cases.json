@@ -448,5 +448,59 @@
     "batchId": null,
     "createdAt": "2026-06-10T14:55:50.069Z",
     "coverImagePath": "/cover-cases/CASE-025.jpg"
+  },
+  {
+    "caseId": "CASE-026",
+    "caseNumber": 26,
+    "newsTitle": "ชมพู่ อารยา พาลูกๆ เรียนรู้ธรรมชาติกับยายหนิง ปลูกผักสวนครัว",
+    "content": "ชมพู่ อารยา เอ ฮาร์เก็ต พาลูกๆ สายฟ้า-พายุ ไปเยี่ยมคุณยายหนิง ปลูกผักสวนครัว เรียนรู้ธรรมชาติ ทำกิจกรรมในสวน ภาพน่ารักอบอุ่น ครอบครัวสุขสันต์",
+    "score": 7,
+    "templateUsed": "template_9",
+    "elapsed": "216.4s",
+    "imageCount": 8,
+    "identity": {
+      "mainCharacter": "ชมพู่ อารยา เอ ฮาร์เก็ต",
+      "emotion": "happy",
+      "coverEmotion": "warm"
+    },
+    "batchId": null,
+    "createdAt": "2026-06-10T15:03:52.701Z",
+    "coverImagePath": "/cover-cases/CASE-026.jpg"
+  },
+  {
+    "caseId": "CASE-027",
+    "caseNumber": 27,
+    "newsTitle": "ชมพู่ อารยา พาลูกๆ เรียนรู้ธรรมชาติกับยายหนิง ปลูกผักสวนครัว",
+    "content": "ชมพู่ อารยา เอ ฮาร์เก็ต พาลูกๆ สายฟ้า-พายุ ไปเยี่ยมคุณยายหนิง ปลูกผักสวนครัว เรียนรู้ธรรมชาติ ทำกิจกรรมในสวน ภาพน่ารักอบอุ่น ครอบครัวสุขสันต์",
+    "score": 7,
+    "templateUsed": "template_9",
+    "elapsed": "193.0s",
+    "imageCount": 8,
+    "identity": {
+      "mainCharacter": "ชมพู่ อารยา เอ ฮาร์เก็ต",
+      "emotion": "happy",
+      "coverEmotion": "warm"
+    },
+    "batchId": null,
+    "createdAt": "2026-06-10T15:08:48.053Z",
+    "coverImagePath": "/cover-cases/CASE-027.jpg"
+  },
+  {
+    "caseId": "CASE-028",
+    "caseNumber": 28,
+    "newsTitle": "ชมพู่ อารยา พาลูกๆ เรียนรู้ธรรมชาติกับยายหนิง ปลูกผักสวนครัว",
+    "content": "ชมพู่ อารยา เอ ฮาร์เก็ต พาลูกๆ สายฟ้า-พายุ ไปเยี่ยมคุณยายหนิง ปลูกผักสวนครัว เรียนรู้ธรรมชาติ ทำกิจกรรมในสวน ภาพน่ารักอบอุ่น ครอบครัวสุขสันต์",
+    "score": 8,
+    "templateUsed": "template_9",
+    "elapsed": "182.1s",
+    "imageCount": 8,
+    "identity": {
+      "mainCharacter": "ชมพู่ อารยา เอ ฮาร์เก็ต",
+      "emotion": "happy",
+      "coverEmotion": "warm"
+    },
+    "batchId": null,
+    "createdAt": "2026-06-10T15:16:35.222Z",
+    "coverImagePath": "/cover-cases/CASE-028.jpg"
   }
 ]

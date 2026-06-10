@@ -2121,7 +2121,7 @@ export async function POST(request) {
 
         // ★ FIX 14+16: Main slot replacement (portrait in nature, indoor, tech bad)
         if (issue.type === 'MAIN_IS_PORTRAIT_IN_NATURE' || issue.type === 'MAIN_IS_INDOOR_UNRELATED' || issue.type === 'MAIN_IS_TECH_BAD') {
-          const replacement = getBestUnused(usedInFinal, ['STORY_ANCHOR', 'KEY_ACTIVITY', 'CONTEXT_SCENE']);
+          const replacement = getBestUnused(usedInFinal, ['STORY_ANCHOR', 'KEY_ACTIVITY', 'CONTEXT_SCENE'], dupContentExclude());
           if (replacement != null) {
             const oldMain = finalPhotoOrder[0];
             rejectedSlotCandidates.push({ index: oldMain, reason: issue.type });
@@ -2139,7 +2139,7 @@ export async function POST(request) {
         if (issue.type === 'HIGHLIGHT_IS_PORTRAIT_IN_NATURE' || issue.type === 'HIGHLIGHT_IS_INDOOR_UNRELATED' || 
             issue.type === 'HIGHLIGHT_IS_TECH_BAD' || issue.type === 'HIGHLIGHT_IS_INTERVIEW' || issue.type === 'HIGHLIGHT_SAME_AS_MAIN') {
           if (highlightPos >= 0 && highlightPos < finalPhotoOrder.length) {
-            const replacement = getBestUnused(usedInFinal, ['KEY_ACTIVITY', 'CONTEXT_SCENE', 'STORY_ANCHOR', 'EVIDENCE']);
+            const replacement = getBestUnused(usedInFinal, ['KEY_ACTIVITY', 'CONTEXT_SCENE', 'STORY_ANCHOR', 'EVIDENCE'], dupContentExclude());
             if (replacement != null) {
               rejectedSlotCandidates.push({ index: finalPhotoOrder[highlightPos], reason: issue.type });
               finalPhotoOrder[highlightPos] = replacement;
@@ -2151,7 +2151,7 @@ export async function POST(request) {
 
         // ★ FIX 15+9: Circle slot replacement (collage or no face data)
         if (issue.type === 'CIRCLE_IS_COLLAGE' || issue.type === 'CIRCLE_NO_FACE_DATA') {
-          const replacement = getBestUnused(usedInFinal, ['HERO_FACE', 'RELATIONSHIP']);
+          const replacement = getBestUnused(usedInFinal, ['HERO_FACE', 'RELATIONSHIP'], dupContentExclude());
           if (replacement != null) {
             rejectedSlotCandidates.push({ index: finalCircleIndex, reason: issue.type });
             finalCircleIndex = replacement;
@@ -2164,7 +2164,7 @@ export async function POST(request) {
         if (/^SLOT\d+_IS_TECH_BAD$/.test(issue.type)) {
           const slotPos = parseInt(issue.type.match(/SLOT(\d+)/)[1]);
           if (!isNaN(slotPos) && slotPos < finalPhotoOrder.length) {
-            const replacement = getBestUnused(usedInFinal, ['KEY_ACTIVITY', 'CONTEXT_SCENE', 'STORY_ANCHOR', 'RELATIONSHIP']);
+            const replacement = getBestUnused(usedInFinal, ['KEY_ACTIVITY', 'CONTEXT_SCENE', 'STORY_ANCHOR', 'RELATIONSHIP'], dupContentExclude());
             if (replacement != null) {
               rejectedSlotCandidates.push({ index: finalPhotoOrder[slotPos], reason: issue.type });
               finalPhotoOrder[slotPos] = replacement;
@@ -2180,7 +2180,7 @@ export async function POST(request) {
           for (let p = 1; p < finalPhotoOrder.length && replaced < heroFaceCount - 2; p++) {
             const img = imageBuffers[finalPhotoOrder[p]];
             if (img?.role === 'HERO_FACE') {
-              const replacement = getBestUnused(usedInFinal, ['KEY_ACTIVITY', 'CONTEXT_SCENE', 'STORY_ANCHOR', 'RELATIONSHIP']);
+              const replacement = getBestUnused(usedInFinal, ['KEY_ACTIVITY', 'CONTEXT_SCENE', 'STORY_ANCHOR', 'RELATIONSHIP'], dupContentExclude());
               if (replacement != null) {
                 rejectedSlotCandidates.push({ index: finalPhotoOrder[p], reason: 'TOO_MANY_HERO_FACE' });
                 finalPhotoOrder[p] = replacement;
@@ -3476,7 +3476,8 @@ If the answer does NOT match the core story → score must be LOW`;
       imageContents,
       model: 'gpt-5.5',
       temperature: 0.1,
-      maxTokens: 2000,
+      // ★ 10 มิ.ย.: gpt-5.5 เป็น reasoning model — 2000 ถูก reasoning กินหมดจน content ว่าง → fallback gpt-4o ทุกครั้ง (คะแนนมั่ว/ปล่อยลายน้ำ)
+      maxTokens: 6000,
       systemPrompt: 'You are an AI Art Director and Content Curator for viral news covers. Analyze all images and make decisions like a professional cover layout designer. Respond with JSON only.',
     });
 
@@ -3877,8 +3878,22 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
         }
       }
       
+      // ★ C2: default circle เดิม (=0) ยัดภาพที่อยู่ใน photoOrder แล้วกลับมาเป็น circle → ภาพซ้ำ 2 ช่อง
+      //   ต้องเลือกภาพที่ "ยังไม่ถูกใช้และเนื้อหาไม่ซ้ำ" แทน — ถ้าไม่มีจริงๆ ค่อยยอม fallback 0
+      if (circleIndex === undefined) {
+        const circleFallback = imageBuffers
+          .map((img, i) => ({ i, score: img.curatorScore || 0 }))
+          .filter(x => !usedByAD.has(x.i) && !isDupContentAD(x.i) && !isNegativeImage(x.i))
+          .sort((a, b) => b.score - a.score)[0];
+        if (circleFallback) {
+          circleIndex = circleFallback.i;
+          markUsedAD(circleIndex);
+          console.log(`[assignSlots] ★ C2 circle fallback: #${circleIndex} (best unused, content-unique)`);
+        }
+      }
+
       console.log(`[assignSlots] ★ Art Director final: Hero=#${heroIndex}, Circle=#${circleIndex}, PhotoOrder=${JSON.stringify(photoOrder)}`);
-      
+
       return {
         photoOrder,
         circleIndex: circleIndex !== undefined ? circleIndex : 0,

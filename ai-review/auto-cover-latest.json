@@ -1,8 +1,8 @@
 {
-  "timestamp": "2026-06-10T14:55:50.410Z",
+  "timestamp": "2026-06-10T15:16:35.561Z",
   "newsTitle": "ชมพู่พาลูกปลูกผักกับยาย",
   "storyType": "family_nature_learning",
-  "mainVisualShouldBe": "น้องสายฟ้าและน้องพายุอยู่ในสวนผักกับคุณยายหนิงหรือชมพู่ อารยา กำลังปลูกผักหรือสัมผัสดินในบรรยากาศธรรมชาติอบอุ่น",
+  "mainVisualShouldBe": "น้องสายฟ้าและน้องพายุอยู่ในสวนผักกับชมพู่และยายหนิง กำลังปลูกผักหรือทำกิจกรรมธรรมชาติร่วมกันอย่างอบอุ่น",
   "coverageRequired": [
     "STORY_ANCHOR",
     "KEY_ACTIVITY",
@@ -12,89 +12,70 @@
     "EMOTION"
   ],
   "coverageOptional": [
-    "EVIDENCE",
-    "HERO2"
+    "HERO2",
+    "EVIDENCE"
   ],
   "visualPriority": {
-    "STORY_ANCHOR": "35%",
-    "KEY_ACTIVITY": "25%",
-    "RELATIONSHIP": "20%",
-    "CONTEXT_SCENE": "10%",
-    "HERO_FACE": "7%",
-    "EMOTION": "3%"
+    "story_subject_children": "35%",
+    "key_activity_gardening": "25%",
+    "family_relationship": "20%",
+    "garden_context_scene": "10%",
+    "hero_face_chompoo": "10%"
   },
   "storyAnchorQueries": [
-    "ชมพู่ อารยา สายฟ้า พายุ ยายหนิง ปลูกผักสวนครัว",
-    "ชมพู่ อารยา พาลูกปลูกผัก เรียนรู้ธรรมชาติ",
-    "น้องสายฟ้า น้องพายุ ลูกชมพู่ ปลูกผักกับยายหนิง",
-    "ชมพู่ อารยา ลูกๆ ทำกิจกรรมในสวนกับคุณยาย",
-    "ครอบครัวชมพู่ อารยา สวนผักสวนครัว ยายหนิง",
-    "น้องสายฟ้า น้องพายุ เรียนรู้ธรรมชาติในสวน ชมพู่ อารยา"
+    "ชมพู่ อารยา ลูก สายฟ้า พายุ ปลูกผักสวนครัว",
+    "ชมพู่ อารยา สายฟ้า พายุ สวนผัก",
+    "ยายหนิง แม่ชมพู่ หลาน สวนผัก",
+    "ชมพู่ อารยา พาลูก เรียนรู้ธรรมชาติ",
+    "น้องสายฟ้า ลูกชมพู่ อารยา น้องพายุ ลูกชมพู่ อารยา ปลูกผัก",
+    "ชมพู่ อารยา ครอบครัว ทำกิจกรรมในสวน",
+    "ชมพู่ อารยา ยายหนิง ปลูกผักสวนครัว",
+    "ชมพู่ อารยา ลูกๆ รดน้ำผักในสวน"
   ],
   "slotAssignment": {
-    "heroIndex": 1,
+    "heroIndex": 0,
     "heroRole": "RELATIONSHIP",
     "heroTitle": "",
-    "circleIndex": 2,
+    "circleIndex": 0,
     "photoOrder": [
-      1,
       0,
-      4
+      1,
+      5
     ]
   },
   "templateUsed": "template_9",
   "templateReason": "DNA/autoSelect → template_9",
   "templateChanged": false,
   "score": 8,
-  "storyMatchScore": 8,
+  "storyMatchScore": 7,
   "finalSlotAudit": {
     "issues": [
       {
         "type": "DUPLICATE_URL",
         "slot": "circle",
         "index": 0,
-        "duplicateOf": "slot_1"
+        "duplicateOf": "slot_0"
       },
       {
         "type": "DUPLICATE_CID",
         "slot": "circle",
         "index": 0,
-        "duplicateOf": "slot_1"
+        "duplicateOf": "slot_0"
       }
     ],
-    "fixes": [
-      {
-        "slot": "circle",
-        "oldIndex": 0,
-        "newIndex": 2,
-        "reason": "DUPLICATE_URL"
-      }
-    ],
+    "fixes": [],
     "passed": false
   },
   "duplicateSlotDetected": true,
   "finalUsedCandidateIds": [
     "cid_t9x0fh",
     "cid_f6zs7b",
-    "cid_rgs7d6",
-    "cid_n0em0q"
+    "cid_rgs7d6"
   ],
-  "rejectedSlotCandidates": [
-    {
-      "index": 0,
-      "reason": "DUPLICATE_URL"
-    }
-  ],
+  "rejectedSlotCandidates": [],
   "whySimpleTemplateWasChosen": null,
   "normalizedYoutubeVideoIds": [],
-  "duplicateReplacement": [
-    {
-      "slot": "circle",
-      "oldIndex": 0,
-      "newIndex": 2,
-      "reason": "DUPLICATE_URL"
-    }
-  ],
+  "duplicateReplacement": [],
   "storyTypePropagationCheck": {
     "fromGPT": "family_nature_learning",
     "afterCoverage": "family_nature_learning"
@@ -102,22 +83,8 @@
   "allCandidates": [
     {
       "index": 0,
-      "role": "KEY_ACTIVITY",
-      "curatorScore": 9,
-      "score": 9,
-      "title": "",
-      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
-      "width": 1440,
-      "height": 1920,
-      "techBad": null,
-      "_storyAnchor": false,
-      "_rescued": false,
-      "_curatorScoreBeforeGuard": null
-    },
-    {
-      "index": 1,
       "role": "RELATIONSHIP",
-      "curatorScore": 10,
+      "curatorScore": 9,
       "score": 10,
       "title": "",
       "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/resize/w728/q80/jpg",
@@ -129,14 +96,28 @@
       "_curatorScoreBeforeGuard": null
     },
     {
+      "index": 1,
+      "role": "KEY_ACTIVITY",
+      "curatorScore": 8,
+      "score": 10,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+      "width": 1440,
+      "height": 1920,
+      "techBad": null,
+      "_storyAnchor": false,
+      "_rescued": false,
+      "_curatorScoreBeforeGuard": null
+    },
+    {
       "index": 2,
       "role": "LOW_PRIORITY",
-      "curatorScore": 3,
-      "score": 9,
+      "curatorScore": 4,
+      "score": 10,
       "title": "",
-      "url": "https://f.ptcdn.info/027/064/000/prnbyg52xnRket5coya0-o.jpg",
-      "width": 999,
-      "height": 1500,
+      "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/resize/w728/q80/jpg",
+      "width": 728,
+      "height": 908,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -144,8 +125,8 @@
     },
     {
       "index": 3,
-      "role": "RELATIONSHIP",
-      "curatorScore": 10,
+      "role": "LOW_PRIORITY",
+      "curatorScore": 4,
       "score": 10,
       "title": "",
       "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/resize/w728/q80/jpg",
@@ -158,13 +139,13 @@
     },
     {
       "index": 4,
-      "role": "KEY_ACTIVITY",
-      "curatorScore": 9,
-      "score": 9,
+      "role": "LOW_PRIORITY",
+      "curatorScore": 4,
+      "score": 10,
       "title": "",
-      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
-      "width": 1440,
-      "height": 1920,
+      "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/resize/w728/q80/jpg",
+      "width": 728,
+      "height": 908,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -172,8 +153,8 @@
     },
     {
       "index": 5,
-      "role": "KEY_ACTIVITY",
-      "curatorScore": 9,
+      "role": "RELATIONSHIP",
+      "curatorScore": 8,
       "score": 9,
       "title": "",
       "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
@@ -186,11 +167,11 @@
     },
     {
       "index": 6,
-      "role": "KEY_ACTIVITY",
-      "curatorScore": 9,
+      "role": "LOW_PRIORITY",
+      "curatorScore": 4,
       "score": 9,
       "title": "",
-      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
       "width": 1440,
       "height": 1920,
       "techBad": null,
@@ -200,8 +181,8 @@
     },
     {
       "index": 7,
-      "role": "KEY_ACTIVITY",
-      "curatorScore": 9,
+      "role": "LOW_PRIORITY",
+      "curatorScore": 4,
       "score": 9,
       "title": "",
       "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
@@ -214,7 +195,7 @@
     }
   ],
   "normalizedStoryType": "family_nature_learning",
-  "rawStoryType": "ครอบครัวอบอุ่น_เรียนรู้ธรรมชาติ",
+  "rawStoryType": "ข่าวครอบครัวอบอุ่นและเรียนรู้ธรรมชาติ",
   "storyAnchorCandidates": [],
   "candidateBucketCounts": null,
   "qualityGate": {
@@ -243,7 +224,7 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
         "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
@@ -254,7 +235,29 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+        "role": "HERO_FACE",
+        "sourceType": "CLEAN_PHOTO",
+        "confidence": 1,
+        "gateAction": "PASSED",
+        "gateReason": "",
+        "reasons": [],
+        "forbiddenSlots": null
+      },
+      {
+        "candidateId": "unknown",
+        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
+        "role": "RELATIONSHIP",
+        "sourceType": "CLEAN_PHOTO",
+        "confidence": 1,
+        "gateAction": "PASSED",
+        "gateReason": "",
+        "reasons": [],
+        "forbiddenSlots": null
+      },
+      {
+        "candidateId": "unknown",
+        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
         "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
@@ -287,39 +290,6 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
-        "role": "RELATIONSHIP",
-        "sourceType": "CLEAN_PHOTO",
-        "confidence": 1,
-        "gateAction": "PASSED",
-        "gateReason": "",
-        "reasons": [],
-        "forbiddenSlots": null
-      },
-      {
-        "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
-        "role": "RELATIONSHIP",
-        "sourceType": "CLEAN_PHOTO",
-        "confidence": 1,
-        "gateAction": "PASSED",
-        "gateReason": "",
-        "reasons": [],
-        "forbiddenSlots": null
-      },
-      {
-        "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
-        "role": "KEY_ACTIVITY",
-        "sourceType": "CLEAN_PHOTO",
-        "confidence": 1,
-        "gateAction": "PASSED",
-        "gateReason": "",
-        "reasons": [],
-        "forbiddenSlots": null
-      },
-      {
-        "candidateId": "unknown",
         "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
         "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
@@ -342,7 +312,18 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+        "role": "RELATIONSHIP",
+        "sourceType": "CLEAN_PHOTO",
+        "confidence": 1,
+        "gateAction": "PASSED",
+        "gateReason": "",
+        "reasons": [],
+        "forbiddenSlots": null
+      },
+      {
+        "candidateId": "unknown",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
         "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
@@ -394,7 +375,7 @@
     "saveGateBlockers": [
       {
         "id": "SLOT_AUDIT_FAILED",
-        "reason": "Slot audit has 1 unfixed issues: DUPLICATE_URL, DUPLICATE_CID",
+        "reason": "Slot audit has 2 unfixed issues: DUPLICATE_URL, DUPLICATE_CID",
         "severity": "HIGH"
       },
       {
@@ -404,7 +385,7 @@
       }
     ],
     "saveGateWarnings": [],
-    "manualReviewReason": "[HIGH] Slot audit has 1 unfixed issues: DUPLICATE_URL, DUPLICATE_CID | [MEDIUM] Duplicate image used in multiple slots",
+    "manualReviewReason": "[HIGH] Slot audit has 2 unfixed issues: DUPLICATE_URL, DUPLICATE_CID | [MEDIUM] Duplicate image used in multiple slots",
     "summary": {
       "totalBlockers": 2,
       "totalWarnings": 0,
@@ -420,7 +401,7 @@
   "saveGateBlockers": [
     {
       "id": "SLOT_AUDIT_FAILED",
-      "reason": "Slot audit has 1 unfixed issues: DUPLICATE_URL, DUPLICATE_CID",
+      "reason": "Slot audit has 2 unfixed issues: DUPLICATE_URL, DUPLICATE_CID",
       "severity": "HIGH"
     },
     {
@@ -429,5 +410,5 @@
       "severity": "MEDIUM"
     }
   ],
-  "manualReviewReason": "[HIGH] Slot audit has 1 unfixed issues: DUPLICATE_URL, DUPLICATE_CID | [MEDIUM] Duplicate image used in multiple slots"
+  "manualReviewReason": "[HIGH] Slot audit has 2 unfixed issues: DUPLICATE_URL, DUPLICATE_CID | [MEDIUM] Duplicate image used in multiple slots"
 }
