@@ -14,8 +14,9 @@ import { sanitizeOutput } from './safetyFilter';
 let claudeClient = null;
 
 // ★ A/B switch: เปลี่ยน model เขียนได้จาก .env โดยไม่ต้องแก้โค้ด
-//   เช่น CLAUDE_WRITE_MODEL=claude-opus-4-8 (default = claude-sonnet-4-6)
-const DEFAULT_WRITE_MODEL = process.env.CLAUDE_WRITE_MODEL || 'claude-sonnet-4-6';
+//   ★ 10 มิ.ย. 2026: default → claude-opus-4-8 — สำนวน prose เหนือกว่า Sonnet ชัดเจนจากผล A/B
+//   (สลับกลับได้: CLAUDE_WRITE_MODEL=claude-sonnet-4-6)
+const DEFAULT_WRITE_MODEL = process.env.CLAUDE_WRITE_MODEL || 'claude-opus-4-8';
 
 // Opus 4.7+ / Fable ไม่รับ sampling params (temperature/top_p/top_k → 400)
 function modelRejectsSampling(model) {
@@ -115,7 +116,8 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
     ],
   });
 
-  const content = response.content?.[0]?.text;
+  // หา text block (กันกรณีมี thinking block นำหน้าใน model ใหม่ๆ)
+  const content = response.content?.find?.(b => b.type === 'text')?.text || response.content?.[0]?.text;
   
   const inputTokens = response.usage?.input_tokens || 0;
   const outputTokens = response.usage?.output_tokens || 0;
