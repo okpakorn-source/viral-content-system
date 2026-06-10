@@ -404,26 +404,46 @@ function sampleRegionColor(data, imgWidth, channels, rowStart, rowEnd, colStart 
  * Apply the quality gate to a set of downloaded images.
  * Returns classified images with pass/block/downgrade status.
  *
+ * Enforces:
+ * 1. Forbidden types → BLOCKED
+ * 2. Per-type max quotas (excess → BLOCKED even if type is not forbidden)
+ * 3. Slot restrictions (non-clean types get _forbiddenSlots metadata)
+ * 4. qualityGatePassed = false if no clean images available for main slot
+ *
  * @param {Array} images - Array of image objects from imageBuffers
  * @param {string} storyType - From identity.storyType
  * @param {Object} [policyOverride] - Optional policy override (default: auto from storyType)
  * @returns {Promise<{
  *   passed: Array, blocked: Array, downgraded: Array,
- *   summary: { total, passed, blocked, downgraded, types: Object }
+ *   summary: { total, passed, blocked, downgraded, types: Object, qualityGatePassed: boolean }
  * }>}
  */
 export async function applyQualityGate(images, storyType, policyOverride = null) {
   const policy = policyOverride || getPolicyForStoryType(storyType);
   const forbiddenTypes = policy.forbiddenSourceTypes || [];
-  const maxTextOverlay = policy.maxTextOverlaySourceImages ?? 0;
+
+  // Per-type max quotas
+  const maxQuotas = {
+    [SOURCE_TYPES.TEXT_OVERLAY]:       policy.maxTextOverlaySourceImages ?? 0,
+    [SOURCE_TYPES.NEWS_THUMBNAIL]:     policy.maxNewsThumbnailImages ?? 0,
+    [SOURCE_TYPES.YOUTUBE_THUMBNAIL]:  policy.maxYoutubeThumbnailImages ?? 0,
+    [SOURCE_TYPES.SOCIAL_POST]:        policy.maxSocialPostImages ?? 0,
+  };
+
+  // Slot restriction definitions from policy
+  const forbiddenSlotTypes = policy.forbiddenSlotTypes || {
+    main: ['NEWS_THUMBNAIL', 'YOUTUBE_THUMBNAIL', 'TEXT_OVERLAY', 'SOCIAL_POST', 'SCREENSHOT', 'COLLAGE', 'SPLIT_SCREEN', 'PREVIOUS_COVER', 'INTERVIEW_FRAME'],
+    circle: ['NEWS_THUMBNAIL', 'YOUTUBE_THUMBNAIL', 'TEXT_OVERLAY', 'SOCIAL_POST', 'SCREENSHOT', 'COLLAGE', 'SPLIT_SCREEN', 'PREVIOUS_COVER'],
+  };
 
   const passed = [];
   const blocked = [];
   const downgraded = [];
   const typeCounts = {};
-  let textOverlayCount = 0;
+  const quotaUsed = {};  // Track how many of each type have been allowed through
 
   console.log(`[QualityGate] ★ Applying quality gate: storyType="${storyType}", policy="${policy._policyKey}", forbidden=[${forbiddenTypes.join(',')}]`);
+  console.log(`[QualityGate] ★ Quotas: TEXT_OVERLAY=${maxQuotas[SOURCE_TYPES.TEXT_OVERLAY]}, NEWS_THUMBNAIL=${maxQuotas[SOURCE_TYPES.NEWS_THUMBNAIL]}, YOUTUBE_THUMBNAIL=${maxQuotas[SOURCE_TYPES.YOUTUBE_THUMBNAIL]}, SOCIAL_POST=${maxQuotas[SOURCE_TYPES.SOCIAL_POST]}`);
 
   for (let i = 0; i < images.length; i++) {
     const img = images[i];
@@ -453,55 +473,136 @@ export async function applyQualityGate(images, storyType, policyOverride = null)
 
     typeCounts[classification.type] = (typeCounts[classification.type] || 0) + 1;
 
-    // Check against policy
-    if (classification.type !== SOURCE_TYPES.CLEAN_PHOTO) {
-      const isForbidden = forbiddenTypes.includes(classification.type);
-
-      if (isForbidden) {
-        // Exception: allow limited TEXT_OVERLAY if policy permits
-        if (classification.type === SOURCE_TYPES.TEXT_OVERLAY && textOverlayCount < maxTextOverlay) {
-          textOverlayCount++;
-          // Downgrade: allowed as small support/evidence only
-          img._gateAction = 'DOWNGRADED';
-          img._gateReason = `TEXT_OVERLAY allowed (${textOverlayCount}/${maxTextOverlay})`;
-          img._originalRole = img.role;
-          if (img.role !== 'EVIDENCE' && img.role !== 'EVIDENCE_CANDIDATE') {
-            img.role = 'EVIDENCE_CANDIDATE';
-          }
-          img._sourceType = SOURCE_TYPES.EVIDENCE_CANDIDATE;
-          downgraded.push(img);
-          console.log(`[QualityGate] ⬇️ #${i} DOWNGRADED: ${classification.type} → EVIDENCE_CANDIDATE (${classification.reasons[0]?.substring(0, 60)})`);
-          continue;
-        }
-
-        // Blocked: forbidden source type
-        img._gateAction = 'BLOCKED';
-        img._gateReason = `${classification.type} forbidden by ${policy._policyKey} policy`;
-        img.role = 'QUALITY_BLOCKED';
-        img.curatorScore = 0;
-        blocked.push(img);
-        console.log(`[QualityGate] ⛔ #${i} BLOCKED: ${classification.type} (conf=${classification.confidence.toFixed(2)}) — ${classification.reasons[0]?.substring(0, 60)}`);
-        continue;
-      }
-
-      // Not forbidden but not clean — allow with lower priority
-      if (classification.type === SOURCE_TYPES.INTERVIEW_FRAME || 
-          classification.type === SOURCE_TYPES.PREVIOUS_COVER) {
-        img._gateAction = 'DOWNGRADED';
-        img._gateReason = `${classification.type} — allowed but lower priority`;
-        img._originalRole = img.role;
-        // Don't change role, but reduce score
-        img.score = Math.max(1, (img.score || 5) - 2);
-        downgraded.push(img);
-        console.log(`[QualityGate] ⬇️ #${i} DOWNGRADED: ${classification.type} score-2 — ${classification.reasons[0]?.substring(0, 60)}`);
-        continue;
-      }
+    // ═══════════════════════════════════════════════
+    // Decision: CLEAN_PHOTO → always pass
+    // ═══════════════════════════════════════════════
+    if (classification.type === SOURCE_TYPES.CLEAN_PHOTO) {
+      img._gateAction = 'PASSED';
+      passed.push(img);
+      continue;
     }
 
-    // Passed: clean photo or allowed type
+    // ═══════════════════════════════════════════════
+    // Non-clean image — check forbidden + quota
+    // ═══════════════════════════════════════════════
+    const isForbidden = forbiddenTypes.includes(classification.type);
+    const typeQuota = maxQuotas[classification.type];
+    const typeUsed = quotaUsed[classification.type] || 0;
+    const hasQuota = typeQuota !== undefined && typeQuota !== null;
+    const quotaExceeded = hasQuota && typeUsed >= typeQuota;
+
+    // ─── Case A: Forbidden type ───
+    if (isForbidden) {
+      // Check if quota allows limited pass-through as evidence
+      if (hasQuota && typeQuota > 0 && typeUsed < typeQuota) {
+        // Quota allows: downgrade to evidence candidate
+        quotaUsed[classification.type] = typeUsed + 1;
+        img._gateAction = 'DOWNGRADED';
+        img._gateReason = `${classification.type} allowed as evidence (${typeUsed + 1}/${typeQuota})`;
+        img._originalRole = img.role;
+        if (img.role !== 'EVIDENCE' && img.role !== 'EVIDENCE_CANDIDATE') {
+          img.role = 'EVIDENCE_CANDIDATE';
+        }
+        // Mark slot restrictions
+        img._forbiddenSlots = {
+          main: (forbiddenSlotTypes.main || []).includes(classification.type),
+          circle: (forbiddenSlotTypes.circle || []).includes(classification.type),
+        };
+        img.score = Math.max(1, (img.score || 5) - 3);
+        downgraded.push(img);
+        console.log(`[QualityGate] ⬇️ #${i} DOWNGRADED: ${classification.type} → EVIDENCE_CANDIDATE (${typeUsed + 1}/${typeQuota}) — ${classification.reasons[0]?.substring(0, 60)}`);
+        continue;
+      }
+
+      // Blocked: forbidden and no quota remaining
+      img._gateAction = 'BLOCKED';
+      img._gateReason = `${classification.type} forbidden by ${policy._policyKey} policy`;
+      img.role = 'QUALITY_BLOCKED';
+      img.curatorScore = 0;
+      blocked.push(img);
+      console.log(`[QualityGate] ⛔ #${i} BLOCKED: ${classification.type} (conf=${classification.confidence.toFixed(2)}) — ${classification.reasons[0]?.substring(0, 60)}`);
+      continue;
+    }
+
+    // ─── Case B: Not forbidden, but has quota limit ───
+    if (hasQuota && quotaExceeded) {
+      // Over quota → block excess
+      img._gateAction = 'BLOCKED';
+      img._gateReason = `${classification.type} over quota (${typeUsed}/${typeQuota}) in ${policy._policyKey} policy`;
+      img.role = 'QUALITY_BLOCKED';
+      img.curatorScore = 0;
+      blocked.push(img);
+      console.log(`[QualityGate] ⛔ #${i} BLOCKED: ${classification.type} over quota (${typeUsed}/${typeQuota}) — ${classification.reasons[0]?.substring(0, 60)}`);
+      continue;
+    }
+
+    // ─── Case C: Not forbidden, within quota → downgrade ───
+    if (hasQuota && typeQuota > 0 && typeUsed < typeQuota) {
+      quotaUsed[classification.type] = typeUsed + 1;
+      img._gateAction = 'DOWNGRADED';
+      img._gateReason = `${classification.type} within quota (${typeUsed + 1}/${typeQuota}) — support/evidence only`;
+      img._originalRole = img.role;
+      if (img.role !== 'EVIDENCE' && img.role !== 'EVIDENCE_CANDIDATE') {
+        img.role = 'EVIDENCE_CANDIDATE';
+      }
+      img._forbiddenSlots = {
+        main: (forbiddenSlotTypes.main || []).includes(classification.type),
+        circle: (forbiddenSlotTypes.circle || []).includes(classification.type),
+      };
+      img.score = Math.max(1, (img.score || 5) - 3);
+      downgraded.push(img);
+      console.log(`[QualityGate] ⬇️ #${i} DOWNGRADED: ${classification.type} → evidence (${typeUsed + 1}/${typeQuota}) — ${classification.reasons[0]?.substring(0, 60)}`);
+      continue;
+    }
+
+    // ─── Case D: Not forbidden, no quota defined, non-clean type ───
+    // Allow but downgrade with slot restrictions (INTERVIEW_FRAME, PREVIOUS_COVER, etc.)
+    if (classification.type === SOURCE_TYPES.INTERVIEW_FRAME || 
+        classification.type === SOURCE_TYPES.PREVIOUS_COVER) {
+      img._gateAction = 'DOWNGRADED';
+      img._gateReason = `${classification.type} — allowed but lower priority`;
+      img._originalRole = img.role;
+      img._forbiddenSlots = {
+        main: (forbiddenSlotTypes.main || []).includes(classification.type),
+        circle: (forbiddenSlotTypes.circle || []).includes(classification.type),
+      };
+      img.score = Math.max(1, (img.score || 5) - 2);
+      downgraded.push(img);
+      console.log(`[QualityGate] ⬇️ #${i} DOWNGRADED: ${classification.type} score-2 — ${classification.reasons[0]?.substring(0, 60)}`);
+      continue;
+    }
+
+    // ─── Fallback: treat as passed but with slot restrictions ───
     img._gateAction = 'PASSED';
+    img._forbiddenSlots = {
+      main: (forbiddenSlotTypes.main || []).includes(classification.type),
+      circle: (forbiddenSlotTypes.circle || []).includes(classification.type),
+    };
     passed.push(img);
   }
+
+  // ═══════════════════════════════════════════════
+  // Compute qualityGatePassed — strict logic
+  // ═══════════════════════════════════════════════
+  const cleanPhotoPassed = passed.filter(img => img._sourceType === SOURCE_TYPES.CLEAN_PHOTO).length;
+  const totalSurviving = passed.length + downgraded.length;
+  const nonCleanSurviving = totalSurviving - cleanPhotoPassed;
+
+  // qualityGatePassed is FALSE if:
+  // 1. No images survived at all
+  // 2. No clean photos available for main slot (all surviving are thumbnails/overlays)
+  // 3. Non-clean images dominate (>60% of surviving pool)
+  // 4. Fewer than 2 images survived total
+  const noCleanForMain = cleanPhotoPassed === 0;
+  const nonCleanDominates = totalSurviving > 0 && (nonCleanSurviving / totalSurviving) > 0.6;
+  const tooFewImages = totalSurviving < 2;
+  const qualityGatePassed = totalSurviving > 0 && !noCleanForMain && !tooFewImages;
+
+  const failReasons = [];
+  if (totalSurviving === 0) failReasons.push('NO_IMAGES_SURVIVED');
+  if (noCleanForMain) failReasons.push('NO_CLEAN_PHOTO_FOR_MAIN');
+  if (nonCleanDominates) failReasons.push('NON_CLEAN_DOMINATES_POOL');
+  if (tooFewImages) failReasons.push('TOO_FEW_IMAGES');
 
   const summary = {
     total: images.length,
@@ -509,13 +610,18 @@ export async function applyQualityGate(images, storyType, policyOverride = null)
     blocked: blocked.length,
     downgraded: downgraded.length,
     types: typeCounts,
-    qualityGatePassed: blocked.length < images.length, // at least some images passed
+    cleanPhotoCount: cleanPhotoPassed,
+    qualityGatePassed,
+    qualityGateFailReasons: failReasons,
     policyKey: policy._policyKey,
     forbiddenTypes,
+    quotasApplied: { ...maxQuotas },
+    quotasUsed: { ...quotaUsed },
   };
 
-  console.log(`[QualityGate] 📊 Results: ${passed.length} passed, ${blocked.length} blocked, ${downgraded.length} downgraded out of ${images.length} total`);
+  console.log(`[QualityGate] 📊 Results: ${passed.length} passed (${cleanPhotoPassed} clean), ${blocked.length} blocked, ${downgraded.length} downgraded out of ${images.length} total`);
   console.log(`[QualityGate] 📊 Type breakdown: ${JSON.stringify(typeCounts)}`);
+  console.log(`[QualityGate] 📊 qualityGatePassed=${qualityGatePassed}${failReasons.length > 0 ? ` — reasons: [${failReasons.join(', ')}]` : ''}`);
 
   return { passed, blocked, downgraded, summary };
 }
@@ -541,9 +647,12 @@ export async function applyQualityGateToPool(imageBuffers, storyType, policyOver
 
   console.log(`[QualityGate] ★ Pool filtered: ${result.summary.total} → ${imageBuffers.length} images (${result.summary.blocked} blocked)`);
 
-  // Check if we still have enough images
+  // Check if we still have enough clean images
   if (imageBuffers.length < 2) {
     console.warn(`[QualityGate] ⚠️ Only ${imageBuffers.length} images survived! May need fallback.`);
+  }
+  if (result.summary.cleanPhotoCount === 0 && imageBuffers.length > 0) {
+    console.warn(`[QualityGate] ⚠️ No CLEAN_PHOTO in pool! All ${imageBuffers.length} surviving images are non-clean.`);
   }
 
   // Build diagnostics for ai-review
@@ -557,6 +666,7 @@ export async function applyQualityGateToPool(imageBuffers, storyType, policyOver
       gateAction: img._gateAction || 'PASSED',
       gateReason: img._gateReason || '',
       reasons: img._sourceReasons || [],
+      forbiddenSlots: img._forbiddenSlots || null,
     })),
     blockedSourceImages: result.blocked.map(img => ({
       url: (img.url || '').substring(0, 80),
@@ -572,6 +682,7 @@ export async function applyQualityGateToPool(imageBuffers, storyType, policyOver
       newRole: img.role,
       sourceType: img._sourceType || 'UNKNOWN',
       reasons: img._sourceReasons || [],
+      forbiddenSlots: img._forbiddenSlots || null,
     })),
     evidenceCandidates: survivingImages
       .filter(img => img._sourceType === SOURCE_TYPES.EVIDENCE_CANDIDATE || img.role === 'EVIDENCE_CANDIDATE')
@@ -585,3 +696,4 @@ export async function applyQualityGateToPool(imageBuffers, storyType, policyOver
 
   return diagnostics;
 }
+

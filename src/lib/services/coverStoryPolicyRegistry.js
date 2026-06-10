@@ -57,6 +57,14 @@ const DEFAULT_POLICY = {
   forbiddenMainVisual: [],
   maxHeroFaceCount: 2,
   maxTextOverlaySourceImages: 0,
+  maxNewsThumbnailImages: 0,
+  maxYoutubeThumbnailImages: 0,
+  maxSocialPostImages: 0,
+  // Types that can NEVER be used in main or circle slots even if they pass the gate
+  forbiddenSlotTypes: {
+    main: ['NEWS_THUMBNAIL', 'YOUTUBE_THUMBNAIL', 'TEXT_OVERLAY', 'SOCIAL_POST', 'SCREENSHOT', 'COLLAGE', 'SPLIT_SCREEN', 'PREVIOUS_COVER', 'INTERVIEW_FRAME'],
+    circle: ['NEWS_THUMBNAIL', 'YOUTUBE_THUMBNAIL', 'TEXT_OVERLAY', 'SOCIAL_POST', 'SCREENSHOT', 'COLLAGE', 'SPLIT_SCREEN', 'PREVIOUS_COVER'],
+  },
   technicalBadRules: ['TEXT_AREA_>30%', 'LOGO_AREA_>15%', 'MULTI_PANEL'],
   manualReviewTriggers: ['ALL_TEXT_OVERLAY', 'NO_CLEAN_PHOTO', 'SCORE_BELOW_5'],
   visualWeightRules: { storyAnchorMin: 0, heroFaceMax: 60 },
@@ -276,14 +284,21 @@ export const STORY_POLICIES = {
     circleSlotPriority: ['HERO2', 'RELATIONSHIP', 'PERSON_SUPPORT'],
     circleSlotRejection: ['same_person_as_main'],
     allowedTemplates: ['template_2', 'template_9', 'template_7'],
-    forbiddenSourceTypes: ['COLLAGE', 'SCREENSHOT', 'PREVIOUS_COVER'],
+    forbiddenSourceTypes: ['TEXT_OVERLAY', 'COLLAGE', 'SCREENSHOT', 'PREVIOUS_COVER', 'SOCIAL_POST'],
     forbiddenMainVisual: [],
     maxHeroFaceCount: 2,
-    maxTextOverlaySourceImages: 1,
+    maxTextOverlaySourceImages: 0,
+    maxNewsThumbnailImages: 1,       // allow max 1 news thumbnail as evidence only
+    maxYoutubeThumbnailImages: 1,    // allow max 1 YT thumbnail as evidence only
+    maxSocialPostImages: 0,
+    forbiddenSlotTypes: {
+      main: ['NEWS_THUMBNAIL', 'YOUTUBE_THUMBNAIL', 'TEXT_OVERLAY', 'SOCIAL_POST', 'SCREENSHOT', 'COLLAGE', 'PREVIOUS_COVER', 'INTERVIEW_FRAME'],
+      circle: ['NEWS_THUMBNAIL', 'YOUTUBE_THUMBNAIL', 'TEXT_OVERLAY', 'SOCIAL_POST', 'SCREENSHOT', 'COLLAGE', 'PREVIOUS_COVER'],
+    },
     technicalBadRules: ['TEXT_AREA_>40%', 'LOGO_AREA_>20%', 'MULTI_PANEL'],
-    manualReviewTriggers: ['ALL_TEXT_OVERLAY', 'NO_CLEAN_PORTRAIT'],
+    manualReviewTriggers: ['ALL_TEXT_OVERLAY', 'NO_CLEAN_PORTRAIT', 'THUMBNAIL_DOMINATES'],
     visualWeightRules: { storyAnchorMin: 0, heroFaceMax: 60 },
-    description: 'ข่าวดาราให้สัมภาษณ์ — เน้น portrait สวย + กิจกรรม/ความสัมพันธ์',
+    description: 'ข่าวดาราให้สัมภาษณ์ — เน้น portrait สวย + กิจกรรม/ความสัมพันธ์ ห้ามใช้ภาพซ้อนข้อความ/thumbnail เป็นหลัก',
   },
 
   // ────────────────────────────────────────────────────────────────────────────
