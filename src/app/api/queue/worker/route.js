@@ -47,9 +47,10 @@ export async function POST(req) {
     // 3. Process jobs ONE AT A TIME (sequential, not concurrent)
     for (const job of jobs) {
       try {
-        // ★ Cover job (jobType: 'cover') → /api/auto-cover, ข่าวปกติ → /api/auto/process
+        // ★ Cover job (jobType: 'cover') → /api/auto-cover (หรือ v3 ถ้า composer='v3'), ข่าวปกติ → /api/auto/process
         const isCoverJob = job.payload?.jobType === 'cover';
-        const processUrl = isCoverJob ? `${baseUrl}/api/auto-cover` : `${baseUrl}/api/auto/process`;
+        const coverPath = job.payload?.composer === 'v3' ? '/api/auto-cover-v3' : '/api/auto-cover';
+        const processUrl = isCoverJob ? `${baseUrl}${coverPath}` : `${baseUrl}/api/auto/process`;
         logger.info(`[Queue Worker] ▶️ Starting ${isCoverJob ? 'cover ' : ''}job ${job.id.slice(0, 8)}`);
 
         // AbortController: pipeline ใช้เวลา >12min — timeout ต้องมากกว่านั้น

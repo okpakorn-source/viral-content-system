@@ -112,6 +112,8 @@ export default function CoverLabPage() {
   const [content, setContent] = useState('');
   // ★ Agent 0 (11 มิ.ย.): ลิงก์ข่าวต้นทาง — ระบบดึงภาพจากบทความโดยตรง (ภาพตรงเนื้อที่สุด)
   const [sourceUrl, setSourceUrl] = useState('');
+  // ★ v3 (11 มิ.ย.): เลือกเครื่องยนต์ประกอบปก — v3 = AI Vision Director (ตาเลือกครอป + พิกเซลแท้ + QC ตัวเอง)
+  const [composer, setComposer] = useState('v3');
   const [templateId, setTemplateId] = useState('auto');
   const [coverResult, setCoverResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -334,6 +336,7 @@ export default function CoverLabPage() {
       const addData = await enqueueCoverJob({
         newsTitle, content, templateId: useTemplate,
         sourceUrl: sourceUrl.trim() || undefined,
+        composer, // 'v3' = Vision Director | 'v1' = ระบบเดิม
         regenerate: isRegenerate, clearCache: !!isRegenerate && isFresh,
       });
       // ★ Recovery: จำ jobId ไว้ — ถ้า UI หลุด/รีเฟรช ระบบกู้ผลลัพธ์คืนได้
@@ -789,6 +792,12 @@ export default function CoverLabPage() {
               placeholder="https://... วางลิงก์ข่าว ระบบจะดึงภาพจริงจากบทความมาใช้ก่อน"
               style={inputStyle}
             />
+
+            <label style={labelStyle}>เครื่องยนต์จัดปก</label>
+            <select value={composer} onChange={e => setComposer(e.target.value)} style={inputStyle}>
+              <option value="v3">🎬 v3 — AI Vision Director (ใหม่: AI เห็นภาพจริงแล้วสั่งครอปเอง + ตรวจงานตัวเอง)</option>
+              <option value="v1">⚙️ v1 — ระบบเดิม (สูตรอัตโนมัติเต็มรูปแบบ)</option>
+            </select>
 
             <label style={labelStyle}>Template ปก ({templates.length} แบบ)</label>
             <select
