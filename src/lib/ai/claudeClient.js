@@ -13,6 +13,15 @@ import { sanitizeOutput } from './safetyFilter';
 
 let claudeClient = null;
 
+// ★ A/B switch: เปลี่ยน model เขียนได้จาก .env โดยไม่ต้องแก้โค้ด
+//   เช่น CLAUDE_WRITE_MODEL=claude-opus-4-8 (default = claude-sonnet-4-6)
+const DEFAULT_WRITE_MODEL = process.env.CLAUDE_WRITE_MODEL || 'claude-sonnet-4-6';
+
+// Opus 4.7+ / Fable ไม่รับ sampling params (temperature/top_p/top_k → 400)
+function modelRejectsSampling(model) {
+  return /^claude-(opus-4-[78]|fable)/.test(model);
+}
+
 function getClaudeClient() {
   if (!claudeClient) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -29,7 +38,7 @@ function getClaudeClient() {
  * เรียก Claude — ส่ง prompt เดียว + system prompt
  * Return: parsed JSON object
  */
-export async function callClaude({ prompt, systemPrompt, model = 'claude-sonnet-4-6', temperature = 0.7, maxTokens = 8000 }) {
+export async function callClaude({ prompt, systemPrompt, model = DEFAULT_WRITE_MODEL, temperature = 0.7, maxTokens = 8000 }) {
   const client = getClaudeClient();
   if (!client) throw new Error('ANTHROPIC_API_KEY ไม่ได้ตั้งค่า — ไปตั้งค่าที่ Settings');
 
@@ -91,13 +100,15 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
 เปลี่ยน "ความแรง" → "อารมณ์" เน้น emotional storytelling
 === จบ SAFETY RULES ===`;
 
-  console.log(`[Claude] model=${model}, temp=${temperature}, maxTokens=${maxTokens}`);
+  const stripSampling = modelRejectsSampling(model);
+  console.log(`[Claude] model=${model}, temp=${stripSampling ? 'n/a (opus4.7+)' : temperature}, maxTokens=${maxTokens}`);
   console.log(`[Claude] prompt preview: ${prompt.slice(0, 300)}...`);
 
   const response = await client.messages.create({
     model,
     max_tokens: maxTokens,
-    temperature,
+    // ★ Opus 4.7/4.8/Fable: ห้ามส่ง temperature (API จะ 400) — คุมความหลากหลายผ่าน prompt แทน
+    ...(stripSampling ? {} : { temperature }),
     system: systemMsg,
     messages: [
       { role: 'user', content: prompt + '\n\nตอบเป็น JSON เท่านั้น ห้ามมี text อื่นนอก JSON' }
