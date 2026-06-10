@@ -102,19 +102,37 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
 === จบ SAFETY RULES ===`;
 
   const stripSampling = modelRejectsSampling(model);
-  console.log(`[Claude] model=${model}, temp=${stripSampling ? 'n/a (opus4.7+)' : temperature}, maxTokens=${maxTokens}`);
+  // ★ SPEED FIX (10 มิ.ย.): Opus 4.x default effort = "high" (คิดลึกสุดทุกครั้ง) → ช้าจน timeout
+  //   งานเขียนที่ prompt ละเอียดอยู่แล้วใช้ "medium" = เร็วขึ้นมาก คุณภาพแทบไม่ต่าง
+  //   ปรับได้ผ่าน .env: CLAUDE_WRITE_EFFORT=low|medium|high
+  const writeEffort = process.env.CLAUDE_WRITE_EFFORT || 'medium';
+  console.log(`[Claude] model=${model}, temp=${stripSampling ? 'n/a (opus4.7+)' : temperature}, effort=${stripSampling ? writeEffort : 'n/a'}, maxTokens=${maxTokens}`);
   console.log(`[Claude] prompt preview: ${prompt.slice(0, 300)}...`);
 
-  const response = await client.messages.create({
+  const requestBody = {
     model,
     max_tokens: maxTokens,
     // ★ Opus 4.7/4.8/Fable: ห้ามส่ง temperature (API จะ 400) — คุมความหลากหลายผ่าน prompt แทน
-    ...(stripSampling ? {} : { temperature }),
+    ...(stripSampling ? { output_config: { effort: writeEffort } } : { temperature }),
     system: systemMsg,
     messages: [
       { role: 'user', content: prompt + '\n\nตอบเป็น JSON เท่านั้น ห้ามมี text อื่นนอก JSON' }
     ],
-  });
+  };
+
+  let response;
+  try {
+    response = await client.messages.create(requestBody);
+  } catch (effortErr) {
+    // Defensive: SDK/รุ่น model ไม่รองรับ output_config → ลองใหม่แบบไม่ส่ง (ไม่ให้ pipeline ตายเพราะ param เดียว)
+    if (requestBody.output_config && /output_config|effort/i.test(effortErr.message || '')) {
+      console.warn('[Claude] ⚠️ output_config not supported — retrying without effort param');
+      delete requestBody.output_config;
+      response = await client.messages.create(requestBody);
+    } else {
+      throw effortErr;
+    }
+  }
 
   // หา text block (กันกรณีมี thinking block นำหน้าใน model ใหม่ๆ)
   const content = response.content?.find?.(b => b.type === 'text')?.text || response.content?.[0]?.text;

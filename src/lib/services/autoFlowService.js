@@ -379,7 +379,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
           _researchItems: researchItems,
           _topPrompt: topPrompt,
         };
-      })(), 240000, `generate_A${index + 1}`); // ★ 240s per angle timeout
+      })(), 300000, `generate_A${index + 1}`); // ★ 300s per angle (เดิม 240s — Opus ช้ากว่า Sonnet ขยายกัน timeout)
     })
   );
 

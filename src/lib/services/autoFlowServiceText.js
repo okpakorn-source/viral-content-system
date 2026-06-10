@@ -344,7 +344,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         _researchItems: researchItems,
         _topPrompt: topPrompt
       };
-    })(), 240000, `generate_A${index + 1}`);
+    })(), 300000, `generate_A${index + 1}`); // ★ 300s per angle (เดิม 240s — Opus ช้ากว่า Sonnet ขยายกัน timeout)
   });
 
   const genResults = await Promise.allSettled(generationTasks);
