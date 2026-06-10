@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
+import ThemeToggle from '@/components/ThemeToggle';
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -114,6 +115,11 @@ export default function Sidebar() {
             );
           })}
         </nav>
+
+        {/* Theme Toggle */}
+        <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)' }}>
+          <ThemeToggle />
+        </div>
 
         {/* User Info */}
         {!user && (

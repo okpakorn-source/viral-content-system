@@ -45,6 +45,38 @@
   --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* === ☀️ Daylight — โทนสว่าง อ่านง่าย (default theme) ===
+   สลับด้วย data-theme บน <html> — ทุกหน้าใช้ var() อยู่แล้วจึงเปลี่ยนทั้งระบบจากจุดเดียว */
+html[data-theme='light'] {
+  --bg-primary: #f5f7fa;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f0f4f8;
+  --bg-elevated: #e9eef4;
+  --border: #dce3ea;
+  --border-light: #c8d2dd;
+  --text-primary: #17212b;
+  --text-secondary: #4e5e6c;
+  --text-muted: #7a8794;
+  --accent: #0f7fd6;
+  --accent-light: #1d9bf0;
+  --accent-glow: rgba(15, 127, 214, 0.14);
+  --success: #058f60;
+  --success-bg: rgba(5, 143, 96, 0.08);
+  --warning: #b3680a;
+  --warning-bg: rgba(179, 104, 10, 0.08);
+  --danger: #d61f2c;
+  --danger-bg: rgba(214, 31, 44, 0.06);
+  --info: #0f7fd6;
+  --info-bg: rgba(15, 127, 214, 0.08);
+  --viral: #d6157a;
+  --viral-bg: rgba(214, 21, 122, 0.06);
+  --gradient-card: linear-gradient(160deg, #ffffff 0%, #f5f7fa 100%);
+  --shadow-sm: 0 1px 3px rgba(23, 33, 43, 0.06);
+  --shadow-md: 0 2px 8px rgba(23, 33, 43, 0.08);
+  --shadow-lg: 0 4px 16px rgba(23, 33, 43, 0.10);
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 html, body { height: 100%; }
