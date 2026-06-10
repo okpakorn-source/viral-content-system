@@ -219,19 +219,26 @@ export function evaluateFinalSaveGate({
     const mainMatchesPriority = mainPriority.includes(heroRole);
 
     if (storyMatchScore < 5) {
-      // Always block if very low
-      if (isSoftMatchType && qualityGatePassed && storyMatchScore >= 3) {
-        // Soft types with okay quality: still block but mark as potentially inconsistent
-        blockers.push({
-          id: BLOCKER_IDS.STORY_MATCH_LOW,
-          reason: `Story match score low: ${storyMatchScore}/10 (may be inconsistent for ${storyType})`,
-          severity: 'HIGH',
-          _possiblyInconsistent: isSoftMatchType,
-        });
+      // Check if this could be a storyMatch false positive on soft types
+      const storyAnchorRoles = ['STORY_ANCHOR', 'KEY_ACTIVITY', 'CONTEXT_SCENE', 'RELATIONSHIP'];
+      const mainRoleIsClean = mainPriority.includes(heroRole) || storyAnchorRoles.includes(heroRole);
+
+      // Check for critical blockers that prove the cover is genuinely bad
+      const hasCriticalBlocker = blockers.some(b =>
+        [BLOCKER_IDS.BAD_IMAGE_DOMINATES, BLOCKER_IDS.REUSED_NEWS_COVER,
+         BLOCKER_IDS.EMBEDDED_HEADLINE_TEXT, BLOCKER_IDS.SOURCE_TYPE_VIOLATION,
+         BLOCKER_IDS.MAIN_SLOT_POLICY_VIOLATION].includes(b.id)
+      );
+
+      if (isSoftMatchType && qualityGatePassed && mainRoleIsClean && !hasCriticalBlocker && storyMatchScore >= 1) {
+        // ★ Phase 4.1: StoryMatch appears inconsistent with clean story-anchor visuals
+        // Downgrade to WARNING for soft types with clean images
+        warnings.push(`StoryMatch ${storyMatchScore}/10 appears inconsistent with clean story-anchor visuals on ${storyType} (hero role: ${heroRole}) — downgraded to WARNING`);
+        console.log(`[FinalSaveGate] ↓ STORY_MATCH_LOW downgraded to WARNING: score=${storyMatchScore}/10, soft type "${storyType}", hero="${heroRole}", qualityGatePassed, no critical blockers`);
       } else {
         blockers.push({
           id: BLOCKER_IDS.STORY_MATCH_LOW,
-          reason: `Story match score too low: ${storyMatchScore}/10 (threshold: 5)`,
+          reason: `Story match score too low: ${storyMatchScore}/10 (threshold: 5)${hasCriticalBlocker ? ' + critical blocker present' : ''}`,
           severity: storyMatchScore < 3 ? 'CRITICAL' : 'HIGH',
         });
       }

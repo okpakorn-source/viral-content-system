@@ -2384,13 +2384,19 @@ export async function POST(request) {
     try {
       const qaIssues = [];
       
+      // ★ Phase 4.1: Helper for correct faceData lookup (candidateId-first, String(idx) fallback)
+      const getFaceDataForIndex = (idx) => {
+        const img = imageBuffers[idx];
+        return faceDataMap?.get?.(img?.candidateId) || faceDataMap?.get?.(String(idx)) || null;
+      };
+      
       // QA 1: Check face visibility per slot
       const { getTemplateById: getTpl2 } = await import('@/lib/coverTemplateRegistry');
       const tplQA = getTpl2(chosenTemplate);
       if (tplQA?.slots) {
         tplQA.slots.forEach((slot, si) => {
           const imgIdx = slotAssignment.photoOrder[si];
-          const fd = faceDataMap?.get?.(String(imgIdx));
+          const fd = getFaceDataForIndex(imgIdx);
           const img = imageBuffers[imgIdx];
           if (!img) return;
           
@@ -2428,7 +2434,7 @@ export async function POST(request) {
         });
         
         // QA: Circle without face data
-        const circleFD = faceDataMap?.get?.(String(slotAssignment.circleIndex));
+        const circleFD = getFaceDataForIndex(slotAssignment.circleIndex);
         if (!circleFD?.hasFaces) {
           qaIssues.push({ type: 'CIRCLE_NO_FACE', imgIdx: slotAssignment.circleIndex });
         }
@@ -2440,7 +2446,7 @@ export async function POST(request) {
       if (tplQA?.slots) {
         tplQA.slots.forEach((slot, si) => {
           const imgIdx = slotAssignment.photoOrder[si];
-          const fd = faceDataMap?.get?.(String(imgIdx));
+          const fd = getFaceDataForIndex(imgIdx);
           if (!fd?.hasFaces || !fd.faces?.length) return;
           
           const face = fd.faces[0];
@@ -2657,14 +2663,14 @@ Return JSON:
       console.warn('[AutoCover] ⚠️ Final Save Gate error (non-critical):', sgErr.message);
     }
 
-    // สร้าง newsHash สำหรับ regenerate
-    let newsHash = '';
-    try {
-      const { generateNewsHash } = await import('@/lib/services/imageCacheService');
-      newsHash = generateNewsHash(newsTitle || content?.substring(0, 100));
-    } catch {}
+    // ═══════════════════════════════════════════════════════════
+    // ★ Phase 4.1: Determine whether save paths should run
+    // ═══════════════════════════════════════════════════════════
+    const shouldSaveAsSuccess = finalSaveGateResult.saveGateStatus === 'SUCCESS' || finalSaveGateResult.saveGateStatus === 'PARTIAL_PASS';
+    console.log(`[AutoCover] ★ shouldSaveAsSuccess=${shouldSaveAsSuccess} (status=${finalSaveGateResult.saveGateStatus})`);
 
     // Step 9: Save to Case Archive
+    // Always save case (for debug/review), but mark status correctly
     let caseResult = null;
     try {
       const { saveCase } = await import('@/lib/services/coverCaseArchive');
@@ -2682,117 +2688,137 @@ Return JSON:
           coverEmotion: identity?.coverEmotion || '',
         },
         batchId: body.batchId || null,
+        // ★ Phase 4.1: Pass save gate status to case archive
+        saveGateStatus: finalSaveGateResult.saveGateStatus,
+        needManualReview: !shouldSaveAsSuccess,
       });
-      console.log(`[AutoCover] 📁 Saved as ${caseResult.caseId}`);
+      console.log(`[AutoCover] 📁 Saved as ${caseResult.caseId}${!shouldSaveAsSuccess ? ' (status: NEED_MANUAL_REVIEW)' : ''}`);
     } catch (e) {
       console.log(`[AutoCover] ⚠️ Case archive save failed: ${e.message}`);
     }
 
     // ★ Step 10: Auto-save ปกเข้า "คลังปก" (cover_examples) — fire-and-forget ★
-    // ไม่ block response หลัก, ถ้า save ล้มเหลวจะ log warning เท่านั้น
-    try {
-      const { saveGeneratedCoverToLibrary } = await import('@/lib/services/coverLibrarySaver');
-      const finalCaseId = caseResult?.caseId || bodyCaseId || null;
-      const subjects = identity?.characters?.slice(0, 5) || [
-        identity?.mainCharacter,
-        identity?.secondaryCharacter,
-      ].filter(Boolean);
+    // ★ Phase 4.1: SKIP entirely if save gate rejected the cover
+    if (shouldSaveAsSuccess) {
+      try {
+        const { saveGeneratedCoverToLibrary } = await import('@/lib/services/coverLibrarySaver');
+        const finalCaseId = caseResult?.caseId || bodyCaseId || null;
+        const subjects = identity?.characters?.slice(0, 5) || [
+          identity?.mainCharacter,
+          identity?.secondaryCharacter,
+        ].filter(Boolean);
 
-      console.log(`[AutoCover] 📚 Step 10: Saving to cover library... caseId=${finalCaseId}, subjects=${JSON.stringify(subjects)}`);
-      
-      saveGeneratedCoverToLibrary({
-        coverBuffer,
-        templateId: chosenTemplate,
-        newsTitle: newsTitle || content?.substring(0, 100) || '',
-        newsUrl: sourceUrl || '',
-        newsBody: content || '',
-        caseId: finalCaseId,
-        score,
-        subjects,
-        emotion: identity?.coverEmotion || identity?.emotion || '',
-        imageCount: imageBuffers.length,
-      }).then((result) => {
-        if (result?.success) {
-          console.log(`[AutoCover] ✅ Cover library auto-save SUCCESS: id=${result.id}, version=${result.version || 1}`);
-        } else {
-          console.warn(`[AutoCover] ⚠️ Cover library auto-save returned error: ${result?.error || 'unknown'}`);
-        }
-      }).catch((err) =>
-        console.warn('[AutoCover] ⚠️ Cover library auto-save error:', err?.message)
-      );
-    } catch (libErr) {
-      // ห้าม throw — ไม่กระทบ response หลัก
-      console.warn('[AutoCover] ⚠️ Cover library import error:', libErr?.message);
+        console.log(`[AutoCover] 📚 Step 10: Saving to cover library... caseId=${finalCaseId}, subjects=${JSON.stringify(subjects)}`);
+        
+        saveGeneratedCoverToLibrary({
+          coverBuffer,
+          templateId: chosenTemplate,
+          newsTitle: newsTitle || content?.substring(0, 100) || '',
+          newsUrl: sourceUrl || '',
+          newsBody: content || '',
+          caseId: finalCaseId,
+          score,
+          subjects,
+          emotion: identity?.coverEmotion || identity?.emotion || '',
+          imageCount: imageBuffers.length,
+        }).then((result) => {
+          if (result?.success) {
+            console.log(`[AutoCover] ✅ Cover library auto-save SUCCESS: id=${result.id}, version=${result.version || 1}`);
+          } else {
+            console.warn(`[AutoCover] ⚠️ Cover library auto-save returned error: ${result?.error || 'unknown'}`);
+          }
+        }).catch((err) =>
+          console.warn('[AutoCover] ⚠️ Cover library auto-save error:', err?.message)
+        );
+      } catch (libErr) {
+        // ห้าม throw — ไม่กระทบ response หลัก
+        console.warn('[AutoCover] ⚠️ Cover library import error:', libErr?.message);
+      }
+    } else {
+      console.log(`[AutoCover] ⛔ Step 10: SKIPPED cover library save — saveGateStatus=${finalSaveGateResult.saveGateStatus}`);
     }
 
     // Save all candidate images to the database cover_images gallery
+    // ★ Phase 4.1: Only save to gallery if save gate passed
     let gallerySaveList = [];
-    try {
-      const selectedUrls = new Set(
-        [
-          ...(plan.photoOrder || []),
-          plan.circlePhotoIndex,
-          plan.circleSmallPhotoIndex
-        ]
-        .filter(idx => idx !== undefined && idx !== null)
-        .map(idx => imageBuffers[idx]?.url)
-        .filter(Boolean)
-      );
+    let gallerySaved = false;
+    if (shouldSaveAsSuccess) {
+      try {
+        const selectedUrls = new Set(
+          [
+            ...(plan.photoOrder || []),
+            plan.circlePhotoIndex,
+            plan.circleSmallPhotoIndex
+          ]
+          .filter(idx => idx !== undefined && idx !== null)
+          .map(idx => imageBuffers[idx]?.url)
+          .filter(Boolean)
+        );
 
-      const seenUrls = new Set();
+        const seenUrls = new Set();
 
-      // 1. Downloaded images (in imageBuffers) — บันทึกเฉพาะรูปที่ผ่านการกรองโดย AI (คะแนน >= 4 และไม่ REJECT)
-      imageBuffers.forEach((img, i) => {
-        const scoreVal = img.curatorScore || img.score || 0;
-        const roleVal = img.role || 'SUPPORT';
-        
-        // ★ คัดกรองอย่างเข้มงวด: ไม่บันทึกภาพที่เป็น LOW_PRIORITY หรือคะแนนต่ำลงแกลเลอรี
-        if (roleVal === 'REJECT' || roleVal === 'reject' || roleVal === 'LOW_PRIORITY' || scoreVal < 4) {
-          return; 
-        }
-
-        if (img.url && !seenUrls.has(img.url)) {
-          seenUrls.add(img.url);
-          const fd = faceDataMap?.get?.(String(i)) || { hasFaces: false, faceCount: 0 };
+        // 1. Downloaded images (in imageBuffers) — บันทึกเฉพาะรูปที่ผ่านการกรองโดย AI (คะแนน >= 4 และไม่ REJECT)
+        imageBuffers.forEach((img, i) => {
+          const scoreVal = img.curatorScore || img.score || 0;
+          const roleVal = img.role || 'SUPPORT';
           
-          let sourceAgent = 'google';
-          const urlStr = img.url || '';
-          const lowerUrl = urlStr.toLowerCase();
-          if (lowerUrl.includes('youtube') || lowerUrl.includes('hunter') || urlStr.startsWith('data:') || img.source?.includes('youtube') || img.sourceAgent === 'youtube') {
-            sourceAgent = 'youtube';
-          } else if (lowerUrl.includes('tiktok') || img.source?.includes('tiktok') || img.sourceAgent === 'tiktok') {
-            sourceAgent = 'tiktok';
+          // ★ คัดกรองอย่างเข้มงวด: ไม่บันทึกภาพที่เป็น LOW_PRIORITY หรือคะแนนต่ำลงแกลเลอรี
+          if (roleVal === 'REJECT' || roleVal === 'reject' || roleVal === 'LOW_PRIORITY' || scoreVal < 4) {
+            return; 
           }
 
-          gallerySaveList.push({
-            url: img.url,
-            sourceAgent: sourceAgent,
-            role: roleVal,
-            score: scoreVal,
-            reason: img.reason || (img.curatorScore ? `Curator relevance: ${img.curatorScore}/10` : 'Selected candidate'),
-            width: img.width || 0,
-            height: img.height || 0,
-            thumbnailBase64: null,
-            isSelected: selectedUrls.has(img.url),
-            hasFace: fd.hasFaces || false,
-            faceCount: fd.faceCount || 0,
-          });
-        }
-      });
+          if (img.url && !seenUrls.has(img.url)) {
+            seenUrls.add(img.url);
+            const fd = faceDataMap?.get?.(img.candidateId) || faceDataMap?.get?.(String(i)) || { hasFaces: false, faceCount: 0 };
+            
+            let sourceAgent = 'google';
+            const urlStr = img.url || '';
+            const lowerUrl = urlStr.toLowerCase();
+            if (lowerUrl.includes('youtube') || lowerUrl.includes('hunter') || urlStr.startsWith('data:') || img.source?.includes('youtube') || img.sourceAgent === 'youtube') {
+              sourceAgent = 'youtube';
+            } else if (lowerUrl.includes('tiktok') || img.source?.includes('tiktok') || img.sourceAgent === 'tiktok') {
+              sourceAgent = 'tiktok';
+            }
 
-      const { saveToGallery } = await import('@/lib/services/imageGallery');
-      let finalSessionId = caseResult?.caseId || bodyCaseId || sessionId;
-      if (!bodyCaseId && finalSessionId === 'CASE-001') {
-        // If it falls back to CASE-001 and was not explicitly requested, use sessionId to prevent mixing.
-        finalSessionId = sessionId;
+            gallerySaveList.push({
+              url: img.url,
+              sourceAgent: sourceAgent,
+              role: roleVal,
+              score: scoreVal,
+              reason: img.reason || (img.curatorScore ? `Curator relevance: ${img.curatorScore}/10` : 'Selected candidate'),
+              width: img.width || 0,
+              height: img.height || 0,
+              thumbnailBase64: null,
+              isSelected: selectedUrls.has(img.url),
+              hasFace: fd.hasFaces || false,
+              faceCount: fd.faceCount || 0,
+            });
+          }
+        });
+
+        const { saveToGallery } = await import('@/lib/services/imageGallery');
+        let finalSessionId = caseResult?.caseId || bodyCaseId || sessionId;
+        if (!bodyCaseId && finalSessionId === 'CASE-001') {
+          finalSessionId = sessionId;
+        }
+        const galleryTitle = newsTitle || content?.substring(0, 100) || 'Untitled';
+        
+        await saveToGallery(finalSessionId, galleryTitle, gallerySaveList);
+        gallerySaved = true;
+        console.log(`[AutoCover] 💾 Saved ${gallerySaveList.length} images to cover_images table for session ${finalSessionId}`);
+      } catch (galErr) {
+        console.warn('[AutoCover] ⚠️ Failed to save to image gallery:', galErr.message);
       }
-      const galleryTitle = newsTitle || content?.substring(0, 100) || 'Untitled';
-      
-      await saveToGallery(finalSessionId, galleryTitle, gallerySaveList);
-      console.log(`[AutoCover] 💾 Saved ${gallerySaveList.length} images to cover_images table for session ${finalSessionId}`);
-    } catch (galErr) {
-      console.warn('[AutoCover] ⚠️ Failed to save to image gallery:', galErr.message);
+    } else {
+      console.log(`[AutoCover] ⛔ Gallery save SKIPPED — saveGateStatus=${finalSaveGateResult.saveGateStatus}`);
     }
+
+    // ★ Phase 4.1: newsHash still needed for regenerate even if not saved
+    let newsHash = '';
+    try {
+      const { generateNewsHash } = await import('@/lib/services/imageCacheService');
+      newsHash = generateNewsHash(newsTitle || content?.substring(0, 100));
+    } catch {}
 
     if (gallerySaveList.length === 0) {
       gallerySaveList = imageBuffers.map((img, i) => {
@@ -2989,8 +3015,8 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
       saveGateStatus: finalSaveGateResult?.saveGateStatus || 'SUCCESS',
       saveGateBlockers: finalSaveGateResult?.saveGateBlockers || [],
       saveGateWarnings: finalSaveGateResult?.saveGateWarnings || [],
-      savedToGallery: !needManualReview,
-      galleryStatus: needManualReview ? 'NEED_MANUAL_REVIEW' : 'SAVED',
+      savedToGallery: shouldSaveAsSuccess && gallerySaved,
+      galleryStatus: shouldSaveAsSuccess ? (gallerySaved ? 'SAVED' : 'SAVE_FAILED') : 'SKIPPED_MANUAL_REVIEW',
       manualReviewReason: finalSaveGateResult?.manualReviewReason || null,
       base64,
       templateUsed: chosenTemplate,
