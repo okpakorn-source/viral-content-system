@@ -2324,6 +2324,11 @@ export async function POST(request) {
       photoOrder: slotAssignment.photoOrder,
       circlePhotoIndex: slotAssignment.circleIndex,
       circleSmallPhotoIndex: slotAssignment.circleSmallIndex,
+      // ★ C1 (10 มิ.ย.): แถบข้อความบนปก — DNA ปกไวรัลจริงทุกใบ "มีข้อความเสมอ"
+      //   storyIdentity AI สร้าง typography (hook/main/punch) อยู่แล้ว แต่ไม่เคยถูกวาดลงปก (dead code)
+      typography: (identity?.typography && (identity.typography.main || identity.typography.punch))
+        ? identity.typography
+        : { hook: 'ข่าวเด่น', main: (newsTitle || '').slice(0, 34), punch: '' },
     };
 
     // ★ Fix 30: Pass image roles for role-aware crop strategy
@@ -3343,6 +3348,13 @@ Example: News "น้องทาเรีย ลูกน้ำฝน สวย
    - If this is a single-person news story (no named secondary character) such as a story about "กัน นภัทร" or "แม่ทัพกุ้ง" → NEVER select face images of strangers or random other people (e.g., other celebrities, random models, random women) who are not the protagonist and not actual characters in the news!
    - If an image prominently features a stranger → set relevance <= 2 and recommend role "REJECT" immediately!
 10. ★ Images of people NOT in the news (strangers, other celebrities) → relevance ≤ 2
+11. ★★★ HERO = PEAK EMOTION ⭐ (viral cover DNA):
+   - The HERO_FACE must capture a PEAK-EMOTION moment: tears, a big genuine smile, shock, embrace, triumph — sharp, well-lit, eyes clearly visible
+   - NEVER recommend HERO_FACE for: mid-speech frames (mouth half-open, eyes half-closed), blurry/low-light faces, faces turned away, passport-style stiff portraits → demote to PERSON_SUPPORT or score lower
+   - If two images show the same moment, prefer the one with the strongest readable emotion on the face
+12. ★★★ NO DUPLICATE PERSON across slots:
+   - The SAME person must NOT be recommended for more than ONE role/slot — pick their single best image and reject near-duplicates (same person, same outfit, same scene → keep only the best one, others relevance ≤ 4)
+   - ONLY exception: a deliberate then-vs-now contrast (TIMELINE_PAST + present-day) where the two images are clearly from different eras
 
 Respond in JSON (★★ MUST score EVERY image, do NOT skip any!):
 {"curated": [

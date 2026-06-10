@@ -1354,6 +1354,14 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null, image
           }
         }
         
+        // ★ C4 (10 มิ.ย.): HARD EDGES เป็นค่าเริ่มต้น — fade ระหว่างโซนทำหน้าซ้อนเป็นเงา ("เละ" เคส CASE-057)
+        //   ปกไวรัลจริงทั้ง 10 ใบที่วิเคราะห์ ขอบโซนคมทุกใบ — เปิด fade กลับได้ด้วย COVER_SOFT_FADES=1
+        const SOFT_FADES = process.env.COVER_SOFT_FADES === '1';
+        if (!SOFT_FADES && (fR || fL || fT || fB)) {
+          console.log(`[Composer] ⬛ C4 hard-edges: skip fade on ${slot.id} (R=${fR} L=${fL} T=${fT} B=${fB} → 0)`);
+          fR = 0; fL = 0; fT = 0; fB = 0;
+        }
+
         console.log(`[Composer] Slot ${slotIdx} (${slot.id}): fade R=${fR} L=${fL} T=${fT} B=${fB}, size=${safeW}x${safeH}`);
         if (fR || fL || fT || fB) {
           try {
@@ -1411,6 +1419,24 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null, image
       ? plan.circleSmallPhotoIndex
       : photoOrder[layoutSlots.length + 1]; // ภาพถัดจาก circle หลัก
     await renderCircleSlot(layoutCircleSmall, smallCircleIdx !== undefined ? smallCircleIdx : 1);
+  }
+
+  // ═══ ★ Step 4.9 (C1): แถบข้อความ Headline/Quote — DNA ปกไวรัลจริง "มีข้อความเสมอ" ═══
+  // createTextOverlaySvg มีอยู่แล้วแต่ไม่เคยถูกเรียก (dead code) — ตอนนี้วาดจริง
+  if (plan.typography && (plan.typography.main || plan.typography.punch)) {
+    try {
+      const fontBase64 = await loadThaiFontBase64();
+      const typo = {
+        hook: String(plan.typography.hook || 'ข่าวเด่น').slice(0, 18),
+        main: String(plan.typography.main || '').slice(0, 36),
+        punch: String(plan.typography.punch || '').slice(0, 46),
+      };
+      const textSvg = createTextOverlaySvg(W, typo, plan.accentColor || '#e11d48', fontBase64);
+      composites.push({ input: textSvg, left: 0, top: H - 240 });
+      console.log(`[Composer] ✅ C1 Text bar: hook="${typo.hook}" | main="${typo.main}" | punch="${typo.punch}"`);
+    } catch (tErr) {
+      console.log('[Composer] ⚠️ C1 text bar failed (non-fatal):', tErr.message);
+    }
   }
 
   // ═══ Step 5: Compose final image ═══
