@@ -47,14 +47,17 @@ export async function POST(req) {
     // 3. Process jobs ONE AT A TIME (sequential, not concurrent)
     for (const job of jobs) {
       try {
-        logger.info(`[Queue Worker] ▶️ Starting job ${job.id.slice(0, 8)}`);
-        
+        // ★ Cover job (jobType: 'cover') → /api/auto-cover, ข่าวปกติ → /api/auto/process
+        const isCoverJob = job.payload?.jobType === 'cover';
+        const processUrl = isCoverJob ? `${baseUrl}/api/auto-cover` : `${baseUrl}/api/auto/process`;
+        logger.info(`[Queue Worker] ▶️ Starting ${isCoverJob ? 'cover ' : ''}job ${job.id.slice(0, 8)}`);
+
         // AbortController: pipeline ใช้เวลา >12min — timeout ต้องมากกว่านั้น
         // maxDuration=800 → ใช้ 900s (15 min) เป็น safety margin
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 900_000); // 900s = 15 min
-        
-        const res = await fetch(`${baseUrl}/api/auto/process`, {
+
+        const res = await fetch(processUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -72,16 +75,18 @@ export async function POST(req) {
 
         const data = await res.json();
         
-        if (res.ok && data.success) {
-          await updateJobStatus(job.id, 'completed', { 
-            result: data, 
-            completedAt: new Date().toISOString() 
+        // ★ Cover ที่ render สำเร็จแต่ติด save-gate (success:false + base64) ก็นับเป็น completed
+        //   — เก็บ result เต็มให้ client ตัดสินใจแสดง warning เอง (เทียบเท่า sync path ที่ได้ JSON เต็ม)
+        if (res.ok && (data.success || (isCoverJob && data.base64))) {
+          await updateJobStatus(job.id, 'completed', {
+            result: data,
+            completedAt: new Date().toISOString()
           });
           logger.info(`[Queue Worker] ✅ Job ${job.id.slice(0, 8)} completed successfully.`);
         } else {
-          await updateJobStatus(job.id, 'failed', { 
-            error: data.error || 'Unknown API Error', 
-            completedAt: new Date().toISOString() 
+          await updateJobStatus(job.id, 'failed', {
+            error: data.error || data.manualReviewReason || 'Unknown API Error',
+            completedAt: new Date().toISOString()
           });
           logger.error(`[Queue Worker] ❌ Job ${job.id.slice(0, 8)} failed: ${data.error}`);
         }

@@ -78,6 +78,9 @@ const BUILTIN_TEMPLATES = [
   },
 ];
 
+// ★ Recovery: localStorage key เก็บ cover job ล่าสุด (รูปแบบเดียวกับ vf_last_job ของหน้าข่าว)
+const COVER_JOB_KEY = 'vf_last_cover_job';
+
 // Role → slot mapping for gallery images
 const ROLE_TO_SLOT = {
   HERO_FACE: 'main', HERO: 'main',
@@ -111,6 +114,10 @@ export default function CoverLabPage() {
   const [coverResult, setCoverResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // ★ Queue mode: ข้อความสถานะคิว/ความคืบหน้า ระหว่างรอ job
+  const [jobProgress, setJobProgress] = useState('');
+  // ★ Recovery: ปกที่สร้างเสร็จค้างจากรอบก่อน (รีเฟรช/เน็ตหลุด) — { jobId, result, newsTitle }
+  const [recoveryCover, setRecoveryCover] = useState(null);
   // Edit mode state
   const [editMode, setEditMode] = useState(false);
   const [editTemplateId, setEditTemplateId] = useState('template_1');
@@ -149,6 +156,31 @@ export default function CoverLabPage() {
       });
   }, []);
 
+  // ★ Recovery: เปิดหน้ามา — เช็คว่ามี cover job ค้าง/เสร็จแล้วรอกู้ไหม (เหมือน vf_last_job หน้าข่าว)
+  useEffect(() => {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(COVER_JOB_KEY) || 'null'); } catch {}
+    if (!saved?.jobId) return;
+    if (Date.now() - (saved.at || 0) > 60 * 60 * 1000) { // เกิน 1 ชม. — หมดอายุ
+      try { localStorage.removeItem(COVER_JOB_KEY); } catch {}
+      return;
+    }
+    fetch(`/api/queue/status?id=${saved.jobId}`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(st => {
+        if (st.success && st.status === 'completed' && st.result) {
+          setRecoveryCover({ jobId: saved.jobId, result: st.result, newsTitle: saved.newsTitle || '' });
+        } else if (st.success && (st.status === 'pending' || st.status === 'processing')) {
+          // งานยังวิ่งอยู่ฝั่งเซิร์ฟเวอร์ — กลับมา poll ต่ออัตโนมัติ
+          if (saved.newsTitle) setNewsTitle(t => t || saved.newsTitle);
+          resumeCoverJob(saved.jobId);
+        } else if (!st.success || st.status === 'failed') {
+          try { localStorage.removeItem(COVER_JOB_KEY); } catch {}
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // ★ FIX (10 มิ.ย.): error จาก Vercel platform (เช่น FUNCTION_INVOCATION_TIMEOUT) เป็น object {code,id,message}
   //   เอาไป render ตรงๆ = React error #31 จอขาว — ต้อง normalize เป็น string เสมอ
   function errText(v) {
@@ -160,11 +192,128 @@ export default function CoverLabPage() {
     return v.message || v.code || JSON.stringify(v);
   }
 
-  // Generate auto cover
+  // ═══ ★ Queue Mode (10 มิ.ย.): สร้างปกผ่าน job queue แทน HTTP เดียวยาว 3-7 นาที ═══
+  // Vercel ตัด request ยาวด้วย FUNCTION_INVOCATION_TIMEOUT — enqueue แล้ว poll ผลแทน
+  // (รูปแบบเดียวกับ submitViaQueue ของ /content/new)
+
+  async function enqueueCoverJob(payload) {
+    const addRes = await fetch('/api/queue/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobType: 'cover', ...payload }),
+    });
+    const addData = await addRes.json();
+    if (!addData.success) throw new Error(errText(addData.error));
+    return addData; // { jobId, position, queuesAhead }
+  }
+
+  // Poll จนงานเสร็จ — คืน result object เต็มของ /api/auto-cover
+  async function pollCoverJob(jobId, { trackLocal = true } = {}) {
+    const maxPollTime = 15 * 60 * 1000; // 15 นาที (pipeline ปก 3-7+ นาที)
+    const startTime = Date.now();
+    let workerRetriggerCount = 0;
+    let notFoundCount = 0;
+    let lastSeenStatus = 'pending';
+    let consecutiveNetErrors = 0;
+
+    const clearSaved = () => { if (trackLocal) { try { localStorage.removeItem(COVER_JOB_KEY); } catch {} } };
+    // error ถาวร (job จบแล้วจริงๆ) — ติด flag กันโดน catch ของ network retry กลืน
+    const permanentError = (msg) => { const e = new Error(msg); e.permanent = true; return e; };
+
+    while (Date.now() - startTime < maxPollTime) {
+      await new Promise(r => setTimeout(r, 3000)); // poll every 3s
+
+      try {
+        const statusRes = await fetch(`/api/queue/status?id=${jobId}`, {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(8000), // 8s per poll — แยกจาก React lifecycle
+        });
+        const statusData = await statusRes.json();
+
+        if (!statusData.success) {
+          notFoundCount++;
+          // job หายหลังเคยเห็น processing → ถูก purge หลังเสร็จ (เก็บผลแค่ 30 นาที)
+          if (notFoundCount >= 5 || (notFoundCount >= 3 && lastSeenStatus === 'processing')) {
+            clearSaved();
+            throw permanentError('งานหายจากคิว (ผลลัพธ์อาจถูกล้างหลังเสร็จเกิน 30 นาที) — กรุณาสร้างใหม่');
+          }
+          continue;
+        }
+
+        notFoundCount = 0;
+        consecutiveNetErrors = 0;
+        lastSeenStatus = statusData.status;
+
+        // Fallback: ปลุก worker ถ้างานยังค้าง pending เกิน 10s
+        if (statusData.status === 'pending' && (Date.now() - startTime > 10000) && workerRetriggerCount < 3) {
+          workerRetriggerCount++;
+          fetch('/api/queue/worker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trigger: 'retry' }), cache: 'no-store' }).catch(() => {});
+        }
+
+        const elapsedMin = ((Date.now() - startTime) / 60000).toFixed(1);
+        if (statusData.status === 'pending') {
+          const ahead = statusData.queuesAhead || 0;
+          setJobProgress(ahead > 0 ? `📋 รอคิว (ลำดับที่ ${statusData.position}) มี ${ahead} คิวก่อนหน้า` : '📋 รอคิวเริ่มงาน...');
+        } else if (statusData.status === 'processing') {
+          setJobProgress(`⚡ กำลังสร้างปก... ${elapsedMin} นาที (ปกติ 3-7 นาที)`);
+        } else if (statusData.status === 'completed') {
+          clearSaved();
+          return statusData.result;
+        } else if (statusData.status === 'failed') {
+          clearSaved();
+          throw permanentError(errText(statusData.error) || 'สร้างปกไม่สำเร็จ');
+        }
+      } catch (pollErr) {
+        // AbortError/TimeoutError = 8s timeout หรือ React lifecycle → retry ทันที
+        if (pollErr.name === 'AbortError' || pollErr.name === 'TimeoutError') continue;
+        if (pollErr.permanent) throw pollErr;
+        // network error (server restart/เน็ตหลุด) — ห้ามกลืนเงียบ โชว์สถานะให้ผู้ใช้เห็น
+        consecutiveNetErrors++;
+        console.warn(`[CoverLab] Poll error (${consecutiveNetErrors} ติดกัน):`, pollErr.message);
+        if (consecutiveNetErrors >= 3) {
+          setJobProgress(`⚠️ การเชื่อมต่อสะดุด (พยายามใหม่ครั้งที่ ${consecutiveNetErrors}) — งานยังทำอยู่ฝั่งเซิร์ฟเวอร์ ไม่หาย รีเฟรชหน้าได้เลย ระบบจะกู้ผลลัพธ์ให้`);
+        }
+      }
+    }
+
+    throw new Error('หมดเวลารอผลปก (15 นาที) — งานอาจยังทำอยู่ฝั่งเซิร์ฟเวอร์ รีเฟรชหน้าภายหลังเพื่อกู้ผลลัพธ์');
+  }
+
+  // ★ รับ result จาก queue → แสดงปก (รวมเคส save-gate ไม่ผ่านที่ยังมี base64 ให้ดู)
+  function applyCoverResult(result) {
+    if (result?.base64) {
+      setCoverResult(result);
+      if (result.success === false) {
+        setError(`⚠️ ปกนี้ไม่ผ่าน Final Save Gate (ต้องตรวจสอบเอง) — ${errText(result.manualReviewReason || result.saveGateStatus || '')}`);
+      }
+      return true;
+    }
+    setError(errText(result?.error || 'ไม่ได้รับผลลัพธ์ปกจากเซิร์ฟเวอร์'));
+    return false;
+  }
+
+  // ★ Recovery: poll ต่อจาก job ที่ยังวิ่งอยู่ หลังรีเฟรชหน้า/เน็ตหลุด
+  async function resumeCoverJob(jobId) {
+    setLoading(true);
+    setError('');
+    setJobProgress('🔄 พบงานสร้างปกค้างอยู่ — กำลังติดตามผลต่อ...');
+    try {
+      const result = await pollCoverJob(jobId);
+      applyCoverResult(result);
+    } catch (e) {
+      setError(errText(e.message || e));
+    } finally {
+      setLoading(false);
+      setJobProgress('');
+    }
+  }
+
+  // Generate auto cover — ★ Queue mode: enqueue → poll (กัน Vercel FUNCTION_INVOCATION_TIMEOUT)
   async function handleGenerate(isRegenerate = false, isFresh = false) {
     if (!newsTitle && !content) return setError('ใส่หัวข้อหรือเนื้อหาข่าว');
     setLoading(true);
     setError('');
+    setRecoveryCover(null);
     if (!isRegenerate) setCoverResult(null);
     try {
       // ถ้า regenerate ให้สุ่ม template ใหม่
@@ -180,21 +329,23 @@ export default function CoverLabPage() {
         }
       }
 
-      const res = await fetch('/api/auto-cover', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newsTitle, content, templateId: useTemplate, regenerate: isRegenerate, clearCache: !!isRegenerate && isFresh }),
+      const addData = await enqueueCoverJob({
+        newsTitle, content, templateId: useTemplate,
+        regenerate: isRegenerate, clearCache: !!isRegenerate && isFresh,
       });
-      const data = await res.json();
-      if (data.success) {
-        setCoverResult(data);
-      } else {
-        setError(errText(data.error));
-      }
+      // ★ Recovery: จำ jobId ไว้ — ถ้า UI หลุด/รีเฟรช ระบบกู้ผลลัพธ์คืนได้
+      try { localStorage.setItem(COVER_JOB_KEY, JSON.stringify({ jobId: addData.jobId, at: Date.now(), newsTitle })); } catch {}
+      setJobProgress(addData.queuesAhead > 0
+        ? `📋 อยู่ในคิวลำดับที่ ${addData.position} (รอ ${addData.queuesAhead} คิวก่อนหน้า)`
+        : '⚡ เริ่มประมวลผล...');
+
+      const result = await pollCoverJob(addData.jobId);
+      applyCoverResult(result);
     } catch (e) {
       setError(errText(e.message || e));
     } finally {
       setLoading(false);
+      setJobProgress('');
     }
   }
 
@@ -233,22 +384,19 @@ export default function CoverLabPage() {
     for (let i = 0; i < items.length; i++) {
       setBatchCoverProgress({ current: i + 1, total: items.length });
       try {
-        const res = await fetch('/api/auto-cover', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            newsTitle: items[i].title,
-            content: items[i].content,
-            templateId: 'auto',
-            batchId,
-          }),
+        // ★ Queue mode: enqueue → poll ทีละข่าว (กัน Vercel timeout เหมือนโหมดเดี่ยว)
+        const addData = await enqueueCoverJob({
+          newsTitle: items[i].title,
+          content: items[i].content,
+          templateId: 'auto',
+          batchId,
         });
-        const data = await res.json();
+        const data = await pollCoverJob(addData.jobId, { trackLocal: false });
         results.push({
           newsTitle: items[i].title,
-          success: data.success,
-          coverResult: data.success ? data : null,
-          error: data.success ? null : errText(data.error),
+          success: !!data?.success,
+          coverResult: data?.success ? data : null,
+          error: data?.success ? null : errText(data?.error || data?.manualReviewReason || 'ไม่ผ่าน Save Gate'),
         });
       } catch (e) {
         results.push({
@@ -401,6 +549,35 @@ export default function CoverLabPage() {
         <p style={{ color: '#94a3b8', marginBottom: 24 }}>
           {batchMode ? '📊 ใส่หลายข่าว สร้างปกทีเดียว เปรียบเทียบผลลัพธ์' : 'ทดสอบ Auto Cover + คลังปกไวรัล'}
         </p>
+
+        {/* ★ Recovery banner: ปกที่สร้างเสร็จค้างจากรอบก่อน (รีเฟรช/เน็ตหลุด/Vercel ตัด) */}
+        {recoveryCover && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 16px', marginBottom: 16, background: 'rgba(20,83,45,0.25)', border: '1px solid #22c55e', borderRadius: 10 }}>
+            <span style={{ fontSize: 14, color: '#86efac', flex: 1, minWidth: 200 }}>
+              🔄 พบปกที่สร้างเสร็จจากครั้งก่อน{recoveryCover.newsTitle ? ` — "${recoveryCover.newsTitle.slice(0, 50)}"` : ''}
+            </span>
+            <button
+              onClick={() => {
+                if (recoveryCover.newsTitle && !newsTitle) setNewsTitle(recoveryCover.newsTitle);
+                applyCoverResult(recoveryCover.result);
+                setRecoveryCover(null);
+                try { localStorage.removeItem(COVER_JOB_KEY); } catch {}
+              }}
+              style={{ padding: '8px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+            >
+              ✅ กู้คืนปก
+            </button>
+            <button
+              onClick={() => {
+                setRecoveryCover(null);
+                try { localStorage.removeItem(COVER_JOB_KEY); } catch {}
+              }}
+              style={{ padding: '8px 12px', background: '#1e293b', color: '#94a3b8', border: '1px solid #374151', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
+            >
+              ✕ ปิด
+            </button>
+          </div>
+        )}
 
         {/* ★ BATCH MODE UI */}
         {batchMode && (
@@ -628,8 +805,15 @@ export default function CoverLabPage() {
                 cursor: loading ? 'wait' : 'pointer',
               }}
             >
-              {loading ? '⏳ กำลังสร้างปก... (30-60 วินาที)' : '🖼️ สร้างปกอัตโนมัติ'}
+              {loading ? '⏳ กำลังสร้างปก... (ปกติ 3-7 นาที)' : '🖼️ สร้างปกอัตโนมัติ'}
             </button>
+
+            {/* ★ Queue progress: สถานะคิว/ความคืบหน้าระหว่างรอ job */}
+            {loading && jobProgress && (
+              <div style={{ marginTop: 10, padding: 10, background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, color: '#93c5fd', fontSize: 13 }}>
+                {jobProgress}
+              </div>
+            )}
 
             {error && (
               <div style={{ marginTop: 12, padding: 12, background: '#7f1d1d', borderRadius: 8, color: '#fca5a5' }}>

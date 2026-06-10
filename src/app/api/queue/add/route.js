@@ -37,7 +37,22 @@ export async function POST(req) {
       return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 });
     }
     
-    if (!payload.input && !payload.url && !payload.text) {
+    // ★ Cover job (jobType: 'cover') — งานสร้างปกใช้ newsTitle/content แทน input/url/text
+    //   worker จะส่งต่อไป /api/auto-cover (ข่าวปกติยังไป /api/auto/process เหมือนเดิม)
+    const isCoverJob = payload.jobType === 'cover';
+    if (isCoverJob) {
+      if (!payload.newsTitle && !payload.content) {
+        return NextResponse.json({
+          success: false,
+          error: 'Cover job ต้องระบุ newsTitle หรือ content',
+          errorType: 'VALIDATION_ERROR',
+        }, { status: 400 });
+      }
+      // สร้าง dedupe key รูปแบบเดียวกับ input ของข่าว — ให้ queueService กันงานปกซ้ำได้
+      if (!payload.input) {
+        payload.input = `[cover] ${(payload.newsTitle || payload.content).substring(0, 120)} | ${payload.templateId || 'auto'}`;
+      }
+    } else if (!payload.input && !payload.url && !payload.text) {
       return NextResponse.json({ success: false, error: 'Missing input/url/text in payload' }, { status: 400 });
     }
 
