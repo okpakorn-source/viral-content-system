@@ -3005,9 +3005,9 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
     }
 
     return NextResponse.json({
-      success: !needManualReview,
-      status: needManualReview ? 'NEED_MANUAL_REVIEW' : 'SUCCESS',
-      needManualReview: needManualReview || false,
+      success: shouldSaveAsSuccess,
+      status: finalSaveGateResult.saveGateStatus,
+      needManualReview: !shouldSaveAsSuccess,
       noStoryAnchorFallbackReason: noStoryAnchorFallbackReason || null,
       // ★ Phase 4: Final Save Gate fields
       finalSaveGate: finalSaveGateResult || null,
