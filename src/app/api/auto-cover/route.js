@@ -94,7 +94,7 @@ try {
   console.error('[Gemini Fetch Interceptor] Failed to install:', e);
 }
 
-export const maxDuration = 600; // ★ Fix 12: 10 minutes — Gemini 503 fallback chain needs more time
+export const maxDuration = 800; // ★ 10 มิ.ย.: เคสจริงใช้ 3-7.1 นาที (CASE-029=426s) — ยกให้เท่า route หนักตัวอื่น (/api/auto/process=800)
 
 // ═══ dHash: Perceptual Image Hashing ═══
 // Inlined because imageSearchService.js does not export these utilities

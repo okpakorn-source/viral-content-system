@@ -149,6 +149,17 @@ export default function CoverLabPage() {
       });
   }, []);
 
+  // ★ FIX (10 มิ.ย.): error จาก Vercel platform (เช่น FUNCTION_INVOCATION_TIMEOUT) เป็น object {code,id,message}
+  //   เอาไป render ตรงๆ = React error #31 จอขาว — ต้อง normalize เป็น string เสมอ
+  function errText(v) {
+    if (!v) return 'เกิดข้อผิดพลาด';
+    if (typeof v === 'string') return v;
+    if (v.code === 'FUNCTION_INVOCATION_TIMEOUT') {
+      return 'เซิร์ฟเวอร์ประมวลผลเกินเวลาที่ Vercel กำหนด (ปกใช้เวลาหลายนาที) — ลองกดสร้างใหม่ หรือสร้างจากเครื่อง localhost';
+    }
+    return v.message || v.code || JSON.stringify(v);
+  }
+
   // Generate auto cover
   async function handleGenerate(isRegenerate = false, isFresh = false) {
     if (!newsTitle && !content) return setError('ใส่หัวข้อหรือเนื้อหาข่าว');
@@ -178,10 +189,10 @@ export default function CoverLabPage() {
       if (data.success) {
         setCoverResult(data);
       } else {
-        setError(data.error || 'เกิดข้อผิดพลาด');
+        setError(errText(data.error));
       }
     } catch (e) {
-      setError(e.message);
+      setError(errText(e.message || e));
     } finally {
       setLoading(false);
     }
@@ -237,7 +248,7 @@ export default function CoverLabPage() {
           newsTitle: items[i].title,
           success: data.success,
           coverResult: data.success ? data : null,
-          error: data.error || null,
+          error: data.success ? null : errText(data.error),
         });
       } catch (e) {
         results.push({
@@ -333,12 +344,12 @@ export default function CoverLabPage() {
         
         const res = await fetch('/api/cover-library', { method: 'POST', body: formData });
         const data = await res.json();
-        results.push({ 
-          name: file.name, 
-          success: data.success, 
+        results.push({
+          name: file.name,
+          success: data.success,
           layout: data.cover?.analysis?.layout_type || '',
           score: data.cover?.analysis?.quality_score || 0,
-          error: data.error 
+          error: data.success ? null : errText(data.error)
         });
       } catch (e) {
         results.push({ name: file.name, success: false, error: e.message });
