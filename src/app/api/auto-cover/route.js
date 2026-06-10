@@ -1464,6 +1464,29 @@ export async function POST(request) {
       // ถ้า Curator ล้มเหลว → ใช้ role เดิมจาก Judge (ไม่พัง!)
     }
 
+    // ★ QUALITY FLOOR (11 มิ.ย.): pool เสื่อม (เคสพลอย — 5 ภาพ ดีจริง 2) ระบบเคย "ฝืนประกอบ" จนได้
+    //   ปกผนังเปล่า + กราฟิกติดตัวหนังสือ — ต้องมีภาพ relevance ≥ 5 อย่างน้อย 3 ใบ ไม่งั้นหยุดอย่างซื่อสัตย์
+    //   (เช็คจากคะแนนดิบของ Curator ก่อน Anchor Guard จะ boost — กันการฟอกคะแนนภาพขยะในพูลเล็ก)
+    {
+      const usableCount = imageBuffers.filter(img => {
+        const rel = img.curatorScore ?? img.score ?? 0;
+        return rel >= 5 && !img._techBadReason;
+      }).length;
+      if (usableCount < 3) {
+        const msg = `ภาพคุณภาพพอใช้มีแค่ ${usableCount} ใบ (ต้องการอย่างน้อย 3) — ข่าวนี้ภาพหายาก แนะนำเพิ่มหัวข้อข่าวให้เจาะจงขึ้น หรือทำปกแมนนวล`;
+        console.log(`[AutoCover] ⛔ QUALITY FLOOR: only ${usableCount} of ${imageBuffers.length} images with relevance >= 5 — refusing to compose a bad cover`);
+        await markQueueJob('failed', { error: msg });
+        return NextResponse.json({
+          success: false,
+          error: msg,
+          errorType: 'INSUFFICIENT_QUALITY_IMAGES',
+          status: 'NEED_MANUAL_COVER',
+          imageCount: imageBuffers.length,
+          usableCount,
+        }, { status: 422 });
+      }
+    }
+
     // ★ Fix 27: Curator Story Anchor Relevance Guard
     // Prevent story-relevant images from being killed by low curator relevance
     {
