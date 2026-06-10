@@ -2645,13 +2645,20 @@ export async function POST(request) {
 
 Question 1: What is this cover PRAISING or CELEBRATING? (one sentence)
 Question 2: What story does the viewer think this is about? (one sentence)
+Question 3: ★ SETTING CHECK — Where do the photos appear to be taken (farm/home/event/red carpet/restaurant/studio)? Does that SETTING match where this story takes place?
 
 Target: This cover should praise: "${celebratedTarget}"
+Expected visual setting: "${identity?.mainVisualShouldBe || 'ตามเนื้อเรื่อง'}"
+
+★ SCORING RULE: correct PEOPLE in the wrong SETTING is a MISMATCH.
+If the story is about farming/building a home/family life but the photos show formal events, gowns/suits, award stages, or luxury dinners → storyMatch ≤ 4 (even if every person is correct). A viewer must be able to guess the story from the images alone.
 
 Return JSON:
 {
   "coverPraises": "what the cover is praising/celebrating",
   "viewerThinks": "what story viewer thinks this is",
+  "settingSeen": "where the photos appear to be taken",
+  "settingMatches": true/false,
   "storyMatch": 0-10,
   "isCorrectPraise": true/false,
   "dominantVisual": "what takes most space",
@@ -3423,6 +3430,12 @@ Example: News "น้องทาเรีย ลูกน้ำฝน สวย
 12. ★★★ NO DUPLICATE PERSON across slots:
    - The SAME person must NOT be recommended for more than ONE role/slot — pick their single best image and reject near-duplicates (same person, same outfit, same scene → keep only the best one, others relevance ≤ 4)
    - ONLY exception: a deliberate then-vs-now contrast (TIMELINE_PAST + present-day) where the two images are clearly from different eras
+13. ★★★ SETTING MUST MATCH THE STORY (คนถูกแต่ฉากผิด = ปกผิด):
+   - Read "mainVisualShouldBe" + storyType. The image's SETTING/ACTIVITY must match WHERE and WHAT the story is about — not just WHO.
+   - Story about farming/land/building a home/family life/nature → photos of the right person at red carpets, award events, formal gowns/suits, luxury restaurant dinners, studio shoots = WRONG SETTING → relevance ≤ 3
+   - Story about an event/ceremony → casual home photos = WRONG SETTING → relevance ≤ 3
+   - A cover where the text says "สร้างบ้าน/ทำเกษตร" over images of formal events confuses the viewer instantly — the viewer must be able to GUESS the story from the images alone
+   - When fewer good on-setting images exist, prefer a smaller set of on-setting images over filling slots with off-setting glamour shots
 
 Respond in JSON (★★ MUST score EVERY image, do NOT skip any!):
 {"curated": [
@@ -3436,7 +3449,7 @@ Respond in JSON (★★ MUST score EVERY image, do NOT skip any!):
   "circleIndex": <index of circle image — relationship photo of 2 people (couple/family) or a single warm image>,
   "highlightIndex": <index of highlight image — key activity (caregiving, feeding, donating, family together)>,
   "secondaryPersonIndex": <index of 2nd person or null>,
-  "bgIndices": [<indices for background — location/story context>],
+  "bgIndices": [<indices for background — location/story context. ★ MUST prioritize images whose SETTING matches the story (farm/house/activity per mainVisualShouldBe) — NEVER fill every slot with formal/event photos of the person when the story is about an activity or place>],
   "rejectIndices": [<indices to NEVER use — AI images/watermark/strangers>],
   "heroReason": "Brief reason for choosing this Hero image",
   "circleReason": "Brief reason for choosing this Circle image"
