@@ -106,6 +106,7 @@ async function loadThaiFontBase64() {
  *   'face-tight'     — zoom เข้าหน้าเต็มพื้นที่ (สำหรับ circle)
  *   'center-face'    — center ที่หน้า (สำหรับ highlight)
  *   'attention'      — ภาพรวม saliency (สำหรับ scene)
+ *   'activity-context' — wider zoom preserving action+environment (for KEY_ACTIVITY/STORY_ANCHOR in main slot)
  *   null             — auto detect จาก orientation
  */
 async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy = null, opts = {}) {
@@ -198,6 +199,32 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
             cropW = Math.round(cropH * targetRatio);
           }
         }
+      } else if (cropStrategy === 'activity-context') {
+        // ★ Fix 30: Activity-context — wider zoom, preserve hands/action/environment
+        // Face at 40% from top (not 30%), min 65% of srcW to keep context
+        const faceSize = Math.max(focusW, focusH);
+        // ★ zoom 8x faceSize — wider than portrait-upper to show action/environment
+        const desiredH = Math.max(faceSize * 8, srcH * 0.75);
+        const desiredW = desiredH * targetRatio;
+
+        cropH = Math.round(Math.min(desiredH, srcH));
+        cropW = Math.round(Math.min(desiredW, srcW));
+        if (cropW / cropH > targetRatio) {
+          cropW = Math.round(cropH * targetRatio);
+        } else {
+          cropH = Math.round(cropW / targetRatio);
+        }
+
+        // ★ Min 65% of srcW — wider than portrait-upper's 55%
+        const minW = Math.round(srcW * 0.65);
+        if (cropW < minW) {
+          cropW = Math.min(minW, srcW);
+          cropH = Math.round(cropW / targetRatio);
+          if (cropH > srcH) {
+            cropH = srcH;
+            cropW = Math.round(cropH * targetRatio);
+          }
+        }
       } else if (faces.length > 1) {
         // ★★★ Multi-face bg/scene: zoom น้อยกว่า hero — เห็นบริบทมากขึ้น
         const faceSize = Math.max(focusW, focusH);
@@ -257,7 +284,23 @@ async function smartCropPhoto(imageBuffer, w, h, faceData = null, cropStrategy =
       // ★ ตำแหน่ง crop — ทุก strategy ต้องให้ใบหน้าอยู่ใน crop region เสมอ
       let cropX, cropY;
       
-      if (cropStrategy === 'portrait-upper') {
+      if (cropStrategy === 'activity-context') {
+        // ★ Fix 30: Face at 40% from top — more environment below than portrait-upper
+        cropX = Math.round(focusCX - cropW / 2);
+        cropY = Math.round(focusCY - cropH * 0.40);
+        
+        if (cropY < 0) cropY = 0;
+        if (cropY + cropH > srcH) cropY = Math.max(0, srcH - cropH);
+        
+        // Ensure face is visible
+        const faceTop = focusCY - focusH / 2;
+        const faceBottom = focusCY + focusH / 2;
+        if (faceTop < cropY) cropY = Math.max(0, Math.round(faceTop - focusH * 0.3));
+        if (faceBottom > cropY + cropH) cropY = Math.max(0, Math.round(faceBottom - cropH + focusH * 0.3));
+        
+        // Horizontal centering
+        cropX = Math.max(0, Math.min(cropX, srcW - cropW));
+      } else if (cropStrategy === 'portrait-upper') {
         cropX = Math.round(focusCX - cropW / 2);
         cropY = Math.round(focusCY - cropH * 0.30);
         
@@ -694,7 +737,7 @@ function getLayout(layoutName, W, H, numPhotos) {
 // 5. Circle with colored border + shadow
 // 6. circleSmall support
 
-export async function composeCover(plan, imageBuffers, faceDataMap = null) {
+export async function composeCover(plan, imageBuffers, faceDataMap = null, imageRoles = []) {
   const photoOrder = plan.photoOrder || imageBuffers.map((_, i) => i);
 
   // ★ ดึง template จาก registry (6 template จริงจากหน้าปกข่าว) ★
@@ -1233,19 +1276,25 @@ export async function composeCover(plan, imageBuffers, faceDataMap = null) {
     } else {
       // 3b. Normal slot → smart crop + multi-directional fade
       try {
-        // ★ เลือก crop strategy ตาม role ของ slot
+        // ★ เลือก crop strategy ตาม role ของ slot + image role
         const slotRole = slot.role || slot.id || '';
         const slotFaceData = faceDataMap?.get?.(String(imgIdx)) || null;
+        const imageRole = imageRoles[imgIdx] || ''; // ★ Fix 30: image's content role
         let cropStrat;
-        if (slotRole === 'hero' || slotRole === 'hero2' || slotRole === 'main' || slot.id === 'main') {
+        
+        // ★ Fix 30: Role-aware crop strategy
+        if ((slotRole === 'hero' || slotRole === 'hero2' || slotRole === 'main' || slot.id === 'main') &&
+            (imageRole === 'KEY_ACTIVITY' || imageRole === 'STORY_ANCHOR' || imageRole === 'CONTEXT_SCENE')) {
+          // Activity/anchor in main slot: preserve action + environment
+          cropStrat = 'activity-context';
+          console.log(`[Composer] ★ Fix 30: Main slot uses activity-context crop (imageRole=${imageRole})`);
+        } else if (slotRole === 'hero' || slotRole === 'hero2' || slotRole === 'main' || slot.id === 'main') {
           cropStrat = 'portrait-upper'; // Hero/Hero2: ครึ่งตัวบน หน้าชัด
         } else if (slotRole === 'emotion') {
           cropStrat = 'portrait-upper'; // Emotion: ครึ่งตัวบน
         } else if (slot.id === 'bg_bottom' && slotFaceData?.hasFaces) {
-          // ★ FIX: bg_bottom มีหน้าคน (role=scene/ใดก็ตาม) → ใช้ portrait-upper เสมอ
-          // เพราะ bg_bottom มี fadeTop สูง (120-160px) → center-face จะทำให้หน้าคนถูก fade กินหาย!
+          // ★ FIX: bg_bottom มีหน้าคน → ใช้ portrait-upper เสมอ
           cropStrat = 'portrait-upper';
-        // B1: Scene crop for bg_top/bg_bottom with scene/evidence role
         } else if ((slot.id === 'bg_top' || slot.id === 'bg_bottom') && !slotFaceData?.hasFaces && (slotRole === 'scene' || slotRole.includes('CONTEXT') || slotRole.includes('EVIDENCE'))) {
           cropStrat = 'attention'; // B1: prevents over-cropping buildings and signs
         } else if (slotRole === 'highlight') {
