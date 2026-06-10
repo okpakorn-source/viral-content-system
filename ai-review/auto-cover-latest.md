@@ -1,34 +1,34 @@
-# AI Cover Review — 2026-06-10T15:16:35.563Z
+# AI Cover Review — 2026-06-10T15:25:56.455Z
 
 ## Story Identity
-- **Title**: ชมพู่พาลูกปลูกผักกับยาย
-- **Story Type**: family_nature_learning
-- **Main Visual Should Be**: น้องสายฟ้าและน้องพายุอยู่ในสวนผักกับชมพู่และยายหนิง กำลังปลูกผักหรือทำกิจกรรมธรรมชาติร่วมกันอย่างอบอุ่น
-- **Coverage Required**: STORY_ANCHOR, KEY_ACTIVITY, RELATIONSHIP, CONTEXT_SCENE, HERO_FACE, EMOTION
-- **Coverage Optional**: HERO2, EVIDENCE
+- **Title**: แพรรี่หนุนฟอร์ดจนเติบโต
+- **Story Type**: relationship
+- **Main Visual Should Be**: ภาพแพรรี่ ไพรวัลย์กับฟอร์ด ปกรณ์ในบรรยากาศคู่รักอบอุ่นหรือกำลังทำงานไลฟ์สดขายของออนไลน์ เพื่อสื่อถึงการสนับสนุนและการเติบโตเคียงข้างกัน
+- **Coverage Required**: STORY_ANCHOR, RELATIONSHIP, KEY_ACTIVITY, HERO_FACE, EMOTION
+- **Coverage Optional**: HERO2, CONTEXT_SCENE, EVIDENCE
 
 ## Slot Assignment
-- **Hero Index**: #0 → role: RELATIONSHIP
-- **Hero Title**: N/A
-- **Circle Index**: #0
-- **Photo Order**: [0,1,5]
-- **Template**: template_9
-- **Template Reason**: DNA/autoSelect → template_9
+- **Hero Index**: #2 → role: HERO_FACE
+- **Hero Title**: เปิดเส้นทางชีวิต ไพรวัลย์ วรรณบุตร จากนักเทศน์สู่วันที่เป็น แพรรี่ ไพร
+- **Circle Index**: #4
+- **Photo Order**: [2,3,5,0]
+- **Template**: template_7
+- **Template Reason**: DNA/autoSelect → template_7
 - **Template Changed**: no
 
 ## Scores
-- **Overall Score**: 8/10
-- **Story Match Score**: 7
+- **Overall Score**: 4/10
+- **Story Match Score**: 8
 
 ## ★ Slot Audit (Fix 12-17)
-- **Status**: ⚠️ 2 issues, 0 auto-fixed
-- **Duplicate Detected**: YES ⚠️
+- **Status**: ✅ No issues found
+- **Duplicate Detected**: No ✅
 - **Why Simple Template**: N/A (template was not downgraded)
-- **Issues**: [{"type":"DUPLICATE_URL","slot":"circle","index":0,"duplicateOf":"slot_0"},{"type":"DUPLICATE_CID","slot":"circle","index":0,"duplicateOf":"slot_0"}]
+- **Issues**: []
 - **Fixes Applied**: []
 - **Duplicate Replacements**: []
 - **Rejected Candidates**: []
-- **Final Used CIDs**: cid_t9x0fh, cid_f6zs7b, cid_rgs7d6, cid_t9x0fh
+- **Final Used CIDs**: cid_8pu30e, cid_fsrj6q, cid_l17lhk, cid_fr1fco, cid_73ntmn
 - **YouTube Video IDs**: []
 
 ## ★ Face Detection Diagnostics (Fix 9)
@@ -37,39 +37,36 @@
 - **All Faces Empty**: No
 
 ## ★ Story Type Propagation (Fix 0)
-- **From GPT**: family_nature_learning
-- **After Coverage**: family_nature_learning
-- **coverageRequired**: [STORY_ANCHOR, KEY_ACTIVITY, RELATIONSHIP, CONTEXT_SCENE, HERO_FACE, EMOTION]
+- **From GPT**: relationship
+- **After Coverage**: relationship
+- **coverageRequired**: [STORY_ANCHOR, RELATIONSHIP, KEY_ACTIVITY, HERO_FACE, EMOTION]
 
 ## All Candidates
 | # | Role | Score | Tech Bad | Title |
 |---|------|-------|----------|-------|
-| 0 | RELATIONSHIP | 9 | - |  |
-| 1 | KEY_ACTIVITY | 8 | - |  |
-| 2 | LOW_PRIORITY | 4 | - |  |
-| 3 | LOW_PRIORITY | 4 | - |  |
-| 4 | LOW_PRIORITY | 4 | - |  |
-| 5 | RELATIONSHIP | 8 | - |  |
-| 6 | LOW_PRIORITY | 4 | - |  |
-| 7 | LOW_PRIORITY | 4 | - |  |
+| 0 | RELATIONSHIP | 8 | - | แพรรี่ ไพรวัลย์ เผยปมเลิกแฟนหนุ่ม ครั้งน |
+| 1 | LOW_PRIORITY | 4 | - |  |
+| 2 | HERO_FACE | 8 | - | เปิดเส้นทางชีวิต ไพรวัลย์ วรรณบุตร จากนั |
+| 3 | RELATIONSHIP | 10 | - | แพรรี่" จูงมือ "ฟอร์ด" แฟนหนุ่มวัย 21 ปี |
+| 4 | RELATIONSHIP | 7 | - | เปิดใจ น้องฟอร์ด หนุ่มรุ่นน้องที่เลือก แ |
+| 5 | RELATIONSHIP | 9 | - | แพรรี่ ไพรวัลย์ เผยปมเลิกแฟนหนุ่ม ครั้งน |
+| 6 | LOW_PRIORITY | 3 | - | รวมรูปภาพของ ส่องไลฟ์สไตล์แฟชั่น "ฟอร์ด" |
+| 7 | LOW_PRIORITY | 3 | - |  |
 
 ## Visual Priority
 ```json
 {
-  "story_subject_children": "35%",
-  "key_activity_gardening": "25%",
-  "family_relationship": "20%",
-  "garden_context_scene": "10%",
-  "hero_face_chompoo": "10%"
+  "ความสัมพันธ์แพรรี่กับฟอร์ด": 40,
+  "การสนับสนุนและสอนขายของออนไลน์": 25,
+  "ภาพหน้าชัดแพรรี่ ไพรวัลย์": 15,
+  "ภาพหน้าชัดฟอร์ด ปกรณ์": 10,
+  "บรรยากาศไลฟ์สดและทำงานออนไลน์": 10
 }
 ```
 
 ## Story Anchor Queries
-- ชมพู่ อารยา ลูก สายฟ้า พายุ ปลูกผักสวนครัว
-- ชมพู่ อารยา สายฟ้า พายุ สวนผัก
-- ยายหนิง แม่ชมพู่ หลาน สวนผัก
-- ชมพู่ อารยา พาลูก เรียนรู้ธรรมชาติ
-- น้องสายฟ้า ลูกชมพู่ อารยา น้องพายุ ลูกชมพู่ อารยา ปลูกผัก
-- ชมพู่ อารยา ครอบครัว ทำกิจกรรมในสวน
-- ชมพู่ อารยา ยายหนิง ปลูกผักสวนครัว
-- ชมพู่ อารยา ลูกๆ รดน้ำผักในสวน
+- แพรรี่ ไพรวัลย์ ฟอร์ด ปกรณ์ คู่รัก อบอุ่น
+- แพรรี่ ไพรวัลย์ ฟอร์ด ปกรณ์ ไลฟ์สดขายของออนไลน์
+- แพรรี่ ไพรวัลย์ สอนขายของออนไลน์ ฟอร์ด ปกรณ์
+- แพรรี่ ไพรวัลย์ ฟอร์ด ปกรณ์ ให้สัมภาษณ์ความสัมพันธ์
+- แพรรี่ ไพรวัลย์ ฟอร์ด ปกรณ์ เติบโตไปด้วยกัน
