@@ -1,7 +1,7 @@
 /**
  * AI Reviewer Service — สมองหลักของ AI Content Review Chat
  * 
- * ใช้ Claude Sonnet 4 สำหรับ review text
+ * ใช้ Claude Sonnet 4.6 สำหรับ review text
  * ใช้ GPT-4o Vision สำหรับ review image
  * 
  * Functions:
@@ -18,7 +18,7 @@ import { searchSimilar } from './viralLibrary';
 // Constants
 // =============================================
 
-const CLAUDE_SONNET = 'claude-sonnet-4-20250514';
+const CLAUDE_SONNET = 'claude-sonnet-4-6';
 const GPT4O_VISION = MODEL_VISION;
 
 // Category detection keywords
