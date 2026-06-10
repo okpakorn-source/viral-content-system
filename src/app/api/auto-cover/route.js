@@ -1831,6 +1831,7 @@ export async function POST(request) {
     const rejectedSlotCandidates = [];
     let whySimpleTemplateWasChosen = null;
     let normalizedYoutubeVideoIds = [];
+    let slotDuplicatesRemaining = 0; // ★ C2: จำนวนช่องที่ยังซ้ำจริงหลัง PASS 3 fix (re-verify ไม่ใช่นับ issues-fixes)
 
     try {
       // --- Helper: normalize YouTube URL to video ID ---
@@ -2072,26 +2073,46 @@ export async function POST(request) {
       // ═══ PASS 3: Auto-fix issues ═══
       const usedInFinal = new Set(allFinalIndices);
 
+      // ★ C2: ช่องที่ซ้ำ 1 ช่องสร้าง 2 issues (URL+CID) — ต้อง fix ครั้งเดียว ไม่งั้นเปลี่ยนภาพช่องเดิมซ้ำจนภาพสำรองหมด
+      const fixedDupSlots = new Set();
+      // ★ C2: replacement ต้องไม่เป็นเนื้อหาซ้ำกับภาพที่ใช้อยู่ (เช็ค URL/candidateId ไม่ใช่แค่ index)
+      const dupContentExclude = () => {
+        const usedKeys = new Set();
+        for (const ui of usedInFinal) {
+          const uimg = imageBuffers[ui];
+          if (!uimg) continue;
+          usedKeys.add(normalizeYTUrl(uimg.url || `img_${ui}`));
+          usedKeys.add(uimg.candidateId || `cid_${ui}`);
+        }
+        return new Set(imageBuffers
+          .map((img, i) => i)
+          .filter(i => usedKeys.has(normalizeYTUrl(imageBuffers[i]?.url || `img_${i}`)) ||
+                       usedKeys.has(imageBuffers[i]?.candidateId || `cid_${i}`)));
+      };
+
       for (const issue of slotAuditIssues) {
         if (issue.type.startsWith('DUPLICATE_')) {
+          if (fixedDupSlots.has(issue.slot)) continue;
           // Find which position has the duplicate and replace it
           const isCircle = issue.slot === 'circle';
           if (isCircle) {
-            const replacement = getBestUnused(usedInFinal, ['HERO_FACE', 'RELATIONSHIP', 'CONTEXT_SCENE']);
+            const replacement = getBestUnused(usedInFinal, ['HERO_FACE', 'RELATIONSHIP', 'CONTEXT_SCENE'], dupContentExclude());
             if (replacement != null) {
               rejectedSlotCandidates.push({ index: issue.index, reason: issue.type });
               finalCircleIndex = replacement;
               usedInFinal.add(replacement);
+              fixedDupSlots.add(issue.slot);
               slotAuditFixes.push({ slot: 'circle', oldIndex: issue.index, newIndex: replacement, reason: issue.type });
             }
           } else {
             const slotPos = parseInt(issue.slot.replace('slot_', ''));
             if (!isNaN(slotPos) && slotPos > 0) { // Don't replace main (pos 0)
-              const replacement = getBestUnused(usedInFinal, ['KEY_ACTIVITY', 'CONTEXT_SCENE', 'STORY_ANCHOR']);
+              const replacement = getBestUnused(usedInFinal, ['KEY_ACTIVITY', 'CONTEXT_SCENE', 'STORY_ANCHOR'], dupContentExclude());
               if (replacement != null) {
                 rejectedSlotCandidates.push({ index: issue.index, reason: issue.type });
                 finalPhotoOrder[slotPos] = replacement;
                 usedInFinal.add(replacement);
+                fixedDupSlots.add(issue.slot);
                 slotAuditFixes.push({ slot: issue.slot, oldIndex: issue.index, newIndex: replacement, reason: issue.type });
               }
             }
@@ -2213,10 +2234,36 @@ export async function POST(request) {
         }
       }
 
-      console.log(`[SlotAudit] ★ Audit complete: ${slotAuditIssues.length} issues, ${slotAuditFixes.length} fixes`);
+      // ★ C2: re-verify รอบสุดท้าย — เช็คว่าช่องจริงๆ ยังมีเนื้อหาซ้ำเหลืออยู่ไหม (หลัง fix + template slice)
+      slotDuplicatesRemaining = 0;
+      {
+        const finalIdxCheck = [...finalPhotoOrder, finalCircleIndex].filter(i => i != null && i >= 0);
+        const seenKeys = new Set();
+        for (const fi of finalIdxCheck) {
+          const fimg = imageBuffers[fi];
+          if (!fimg) continue;
+          const keys = [normalizeYTUrl(fimg.url || `img_${fi}`), fimg.candidateId || `cid_${fi}`];
+          if (keys.some(k => seenKeys.has(k))) slotDuplicatesRemaining++;
+          keys.forEach(k => seenKeys.add(k));
+        }
+        if (slotDuplicatesRemaining > 0) {
+          console.log(`[SlotAudit] ⛔ C2 re-verify: ${slotDuplicatesRemaining} duplicate slot(s) still remain after fixes`);
+        }
+      }
+
+      console.log(`[SlotAudit] ★ Audit complete: ${slotAuditIssues.length} issues, ${slotAuditFixes.length} fixes, dupRemaining=${slotDuplicatesRemaining}`);
     } catch (auditErr) {
       console.warn('[SlotAudit] ⚠️ Audit error:', auditErr.message);
     }
+
+    // ★ C2: passed ที่สะท้อนความจริง — DUPLICATE_* ตัดสินจาก re-verify (1 ช่องซ้ำ = 2 issues แต่ fix เดียว ห้ามนับลบกัน)
+    const slotAuditEffectivePassed = () => {
+      const issues = slotAuditIssues || [];
+      if (issues.length === 0) return true;
+      const nonDupIssues = issues.filter(i => !i.type?.startsWith('DUPLICATE_'));
+      const nonDupFixes = (slotAuditFixes || []).filter(f => !String(f.reason || '').startsWith('DUPLICATE_'));
+      return slotDuplicatesRemaining === 0 && nonDupFixes.length >= nonDupIssues.length;
+    };
 
     // Apply audited values
     slotAssignment.photoOrder = finalPhotoOrder;
@@ -2640,14 +2687,14 @@ Return JSON:
       const { evaluateFinalSaveGate } = await import('@/lib/services/finalSaveGate');
       finalSaveGateResult = evaluateFinalSaveGate({
         finalSlotAudit: {
-          passed: (slotAuditIssues || []).length === 0 || (slotAuditFixes || []).length >= (slotAuditIssues || []).length,
+          passed: slotAuditEffectivePassed(),
           issues: slotAuditIssues || [],
           fixes: slotAuditFixes || [],
         },
         compositionQA,
         qualityGateDiagnostics,
         storyMatchScore,
-        duplicateSlotDetected: (slotAuditIssues || []).some(i => i.type?.startsWith('DUPLICATE_')),
+        duplicateSlotDetected: slotDuplicatesRemaining > 0,
         imageBuffers,
         slotAssignment,
         identity,
@@ -2874,9 +2921,9 @@ Return JSON:
         finalSlotAudit: {
           issues: slotAuditIssues || [],
           fixes: slotAuditFixes || [],
-          passed: (slotAuditIssues || []).length === 0 || (slotAuditFixes || []).length >= (slotAuditIssues || []).length,
+          passed: slotAuditEffectivePassed(),
         },
-        duplicateSlotDetected: (slotAuditIssues || []).some(i => i.type.startsWith('DUPLICATE_')),
+        duplicateSlotDetected: slotDuplicatesRemaining > 0,
         finalUsedCandidateIds: [...new Set(
           [...(slotAssignment?.photoOrder || []), slotAssignment?.circleIndex]
             .filter(i => i != null && i >= 0)
@@ -3067,9 +3114,9 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
         finalSlotAudit: {
           issues: slotAuditIssues || [],
           fixes: slotAuditFixes || [],
-          passed: (slotAuditIssues || []).length === 0 || (slotAuditFixes || []).length >= (slotAuditIssues || []).length,
+          passed: slotAuditEffectivePassed(),
         },
-        duplicateSlotDetected: (slotAuditIssues || []).some(i => i.type?.startsWith('DUPLICATE_')),
+        duplicateSlotDetected: slotDuplicatesRemaining > 0,
         templateReason: templateReason || 'auto',
         templateChanged: templateChanged || false,
         finalUsedCandidateIds: [...new Set(
@@ -3740,60 +3787,80 @@ async function assignImagesToSlots(imageBuffers, faceDataMap, templateId, identi
       // Validate indices are within bounds
       const maxIdx = imageBuffers.length - 1;
       const validIdx = (idx) => typeof idx === 'number' && idx >= 0 && idx <= maxIdx && !isNegativeImage(idx);
-      
+
+      // ★ C2: dedup ระดับเนื้อหา — ดัชนีต่างกันแต่ URL/candidateId เดียวกัน (เช่น thumbnail คนละขนาดจากวิดีโอ YouTube เดียวกัน) = รูปซ้ำ ห้ามลงหลายช่อง
+      const usedByAD = new Set();
+      const usedContentKeysAD = new Set();
+      const contentKeysOf = (idx) => {
+        const img = imageBuffers[idx] || {};
+        const url = String(img.url || `img_${idx}`);
+        const m = url.match(/ytimg\.com\/vi\/([^/]+)\//);
+        return [m ? `ytimg:${m[1]}` : url, img.candidateId || `cid_${idx}`];
+      };
+      const markUsedAD = (idx) => {
+        if (idx == null) return;
+        usedByAD.add(idx);
+        for (const k of contentKeysOf(idx)) usedContentKeysAD.add(k);
+      };
+      const isDupContentAD = (idx) => contentKeysOf(idx).some(k => usedContentKeysAD.has(k));
+
       // Hero
       if (validIdx(artDirection.heroIndex)) {
         heroIndex = artDirection.heroIndex;
+        markUsedAD(heroIndex);
         console.log(`[assignSlots] ★ Art Director Hero: #${heroIndex} — ${artDirection.heroReason || 'AI selected'}`);
       }
-      
+
       // Circle
-      if (hasCircle && validIdx(artDirection.circleIndex)) {
+      if (hasCircle && validIdx(artDirection.circleIndex) && !isDupContentAD(artDirection.circleIndex)) {
         circleIndex = artDirection.circleIndex;
+        markUsedAD(circleIndex);
         console.log(`[assignSlots] ★ Art Director Circle: #${circleIndex} — ${artDirection.circleReason || 'AI selected'}`);
       }
-      
-      // Build photoOrder from artDirection
-      const usedByAD = new Set([heroIndex]);
-      if (circleIndex !== undefined) usedByAD.add(circleIndex);
+
+      // Build photoOrder from artDirection (usedByAD ติดตาม hero+circle แล้วข้างบน)
       
       // Slot 0 = hero
       photoOrder = [heroIndex];
       
       // Highlight slot
-      if (validIdx(artDirection.highlightIndex) && !usedByAD.has(artDirection.highlightIndex)) {
+      if (validIdx(artDirection.highlightIndex) && !usedByAD.has(artDirection.highlightIndex) && !isDupContentAD(artDirection.highlightIndex)) {
         photoOrder.push(artDirection.highlightIndex);
-        usedByAD.add(artDirection.highlightIndex);
+        markUsedAD(artDirection.highlightIndex);
         console.log(`[assignSlots] ★ Art Director Highlight: #${artDirection.highlightIndex}`);
       }
-      
+
       // Secondary person
-      if (validIdx(artDirection.secondaryPersonIndex) && !usedByAD.has(artDirection.secondaryPersonIndex)) {
+      if (validIdx(artDirection.secondaryPersonIndex) && !usedByAD.has(artDirection.secondaryPersonIndex) && !isDupContentAD(artDirection.secondaryPersonIndex)) {
         photoOrder.push(artDirection.secondaryPersonIndex);
-        usedByAD.add(artDirection.secondaryPersonIndex);
+        markUsedAD(artDirection.secondaryPersonIndex);
         console.log(`[assignSlots] ★ Art Director Secondary Person: #${artDirection.secondaryPersonIndex}`);
       }
-      
+
       // Background indices
       if (Array.isArray(artDirection.bgIndices)) {
         for (const bgIdx of artDirection.bgIndices) {
-          if (validIdx(bgIdx) && !usedByAD.has(bgIdx)) {
+          if (validIdx(bgIdx) && !usedByAD.has(bgIdx) && !isDupContentAD(bgIdx)) {
             photoOrder.push(bgIdx);
-            usedByAD.add(bgIdx);
+            markUsedAD(bgIdx);
           }
         }
       }
-      
+
       // Fill remaining slots from high-scoring images
       const remainingForAD = imageBuffers
         .map((img, i) => ({ index: i, score: img.curatorScore || 0 }))
         .filter(x => !usedByAD.has(x.index) && !isNegativeImage(x.index) && x.score >= 4)
         .sort((a, b) => b.score - a.score);
-      
+
       while (photoOrder.length < slotCount && remainingForAD.length > 0) {
         const next = remainingForAD.shift();
+        if (isDupContentAD(next.index)) {
+          console.log(`[assignSlots] ★ C2 skip #${next.index} — duplicate content (same URL/video as a used slot)`);
+          continue;
+        }
         photoOrder.push(next.index);
-        usedByAD.add(next.index);
+        markUsedAD(next.index);
       }
       
       // ★ FIX: rejectIndices → LOW_PRIORITY (ไม่ใช่ hard REJECT ยกเว้น TECHNICAL_BAD)

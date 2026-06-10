@@ -1,34 +1,34 @@
-# AI Cover Review — 2026-06-10T08:36:31.197Z
+# AI Cover Review — 2026-06-10T14:55:50.412Z
 
 ## Story Identity
-- **Title**: ครูอาสาเดินเท้า 10 กม.ทุกวัน ส
-- **Story Type**: general
-- **Main Visual Should Be**: N/A
-- **Coverage Required**: STORY_ANCHOR, KEY_ACTIVITY, CONTEXT_SCENE
-- **Coverage Optional**: HERO_FACE, EMOTION
+- **Title**: ชมพู่พาลูกปลูกผักกับยาย
+- **Story Type**: family_nature_learning
+- **Main Visual Should Be**: น้องสายฟ้าและน้องพายุอยู่ในสวนผักกับคุณยายหนิงหรือชมพู่ อารยา กำลังปลูกผักหรือสัมผัสดินในบรรยากาศธรรมชาติอบอุ่น
+- **Coverage Required**: STORY_ANCHOR, KEY_ACTIVITY, RELATIONSHIP, CONTEXT_SCENE, HERO_FACE, EMOTION
+- **Coverage Optional**: EVIDENCE, HERO2
 
 ## Slot Assignment
-- **Hero Index**: #2 → role: HERO_FACE
-- **Hero Title**: รีวิวค่ายอาสาบนดอย แม่ฮ่องสอน 2 วัน 1 คืน: พัฒนาโรงเรียนบ้านแม่เกาะวิทยา +  ขึ้น
-- **Circle Index**: #1
-- **Photo Order**: [2,5,0,7]
-- **Template**: template_8
-- **Template Reason**: DNA/autoSelect → template_8
+- **Hero Index**: #1 → role: RELATIONSHIP
+- **Hero Title**: N/A
+- **Circle Index**: #2
+- **Photo Order**: [1,0,4]
+- **Template**: template_9
+- **Template Reason**: DNA/autoSelect → template_9
 - **Template Changed**: no
 
 ## Scores
 - **Overall Score**: 8/10
-- **Story Match Score**: N/A
+- **Story Match Score**: 8
 
 ## ★ Slot Audit (Fix 12-17)
-- **Status**: ✅ No issues found
-- **Duplicate Detected**: No ✅
+- **Status**: ⚠️ 2 issues, 1 auto-fixed
+- **Duplicate Detected**: YES ⚠️
 - **Why Simple Template**: N/A (template was not downgraded)
-- **Issues**: []
-- **Fixes Applied**: []
-- **Duplicate Replacements**: []
-- **Rejected Candidates**: []
-- **Final Used CIDs**: cid_1t6otf, cid_uimeys, cid_rsfz87, cid_tdwrr3, cid_7ygzze
+- **Issues**: [{"type":"DUPLICATE_URL","slot":"circle","index":0,"duplicateOf":"slot_1"},{"type":"DUPLICATE_CID","slot":"circle","index":0,"duplicateOf":"slot_1"}]
+- **Fixes Applied**: [{"slot":"circle","oldIndex":0,"newIndex":2,"reason":"DUPLICATE_URL"}]
+- **Duplicate Replacements**: [{"slot":"circle","oldIndex":0,"newIndex":2,"reason":"DUPLICATE_URL"}]
+- **Rejected Candidates**: [{"index":0,"reason":"DUPLICATE_URL"}]
+- **Final Used CIDs**: cid_t9x0fh, cid_f6zs7b, cid_rgs7d6, cid_n0em0q
 - **YouTube Video IDs**: []
 
 ## ★ Face Detection Diagnostics (Fix 9)
@@ -37,26 +37,38 @@
 - **All Faces Empty**: No
 
 ## ★ Story Type Propagation (Fix 0)
-- **From GPT**: general
-- **After Coverage**: general
-- **coverageRequired**: [STORY_ANCHOR, KEY_ACTIVITY, CONTEXT_SCENE]
+- **From GPT**: family_nature_learning
+- **After Coverage**: family_nature_learning
+- **coverageRequired**: [STORY_ANCHOR, KEY_ACTIVITY, RELATIONSHIP, CONTEXT_SCENE, HERO_FACE, EMOTION]
 
 ## All Candidates
 | # | Role | Score | Tech Bad | Title |
 |---|------|-------|----------|-------|
-| 0 | CONTEXT_SCENE | 7 | - | ครูอาสาบนดอยสะเมิง เชียงใหม่: ประสบการณ์ |
-| 1 | KEY_ACTIVITY | 9 | - | เปิดใจครู ศศช.มอตะหลั่ว 10 ปี ที่มุ่งมั่ |
-| 2 | HERO_FACE | 10 | - | รีวิวค่ายอาสาบนดอย แม่ฮ่องสอน 2 วัน 1 คื |
-| 3 | LOW_PRIORITY | 3 | - | ข่าว Like สาระ - ธารน้ำใจหลั่งไหลช่วย'น้ |
-| 4 | LOW_PRIORITY | 3 | - | ครูอาสาบนดอยสูง' สัมผัสความหมายชีวิต เติ |
-| 5 | PERSON_SUPPORT | 5 | - | รีวิวค่ายครูอาสาบนดอยสูง 3 วัน 2 คืน: จิ |
-| 6 | LOW_PRIORITY | 3 | - | รีวิวประสบการณ์เป็นครูอาสาบนดอย เชียงใหม |
-| 7 | CONTEXT_SCENE | 8 | - | ครูอาสาบนดอยสูง' สัมผัสความหมายชีวิต เติ |
+| 0 | KEY_ACTIVITY | 9 | - |  |
+| 1 | RELATIONSHIP | 10 | - |  |
+| 2 | LOW_PRIORITY | 3 | - |  |
+| 3 | RELATIONSHIP | 10 | - |  |
+| 4 | KEY_ACTIVITY | 9 | - |  |
+| 5 | KEY_ACTIVITY | 9 | - |  |
+| 6 | KEY_ACTIVITY | 9 | - |  |
+| 7 | KEY_ACTIVITY | 9 | - |  |
 
 ## Visual Priority
 ```json
-{}
+{
+  "STORY_ANCHOR": "35%",
+  "KEY_ACTIVITY": "25%",
+  "RELATIONSHIP": "20%",
+  "CONTEXT_SCENE": "10%",
+  "HERO_FACE": "7%",
+  "EMOTION": "3%"
+}
 ```
 
 ## Story Anchor Queries
-N/A
+- ชมพู่ อารยา สายฟ้า พายุ ยายหนิง ปลูกผักสวนครัว
+- ชมพู่ อารยา พาลูกปลูกผัก เรียนรู้ธรรมชาติ
+- น้องสายฟ้า น้องพายุ ลูกชมพู่ ปลูกผักกับยายหนิง
+- ชมพู่ อารยา ลูกๆ ทำกิจกรรมในสวนกับคุณยาย
+- ครอบครัวชมพู่ อารยา สวนผักสวนครัว ยายหนิง
+- น้องสายฟ้า น้องพายุ เรียนรู้ธรรมชาติในสวน ชมพู่ อารยา

@@ -430,5 +430,23 @@
     "batchId": null,
     "createdAt": "2026-06-10T08:36:29.721Z",
     "coverImagePath": "/cover-cases/CASE-024.jpg"
+  },
+  {
+    "caseId": "CASE-025",
+    "caseNumber": 25,
+    "newsTitle": "ชมพู่ อารยา พาลูกๆ เรียนรู้ธรรมชาติกับยายหนิง ปลูกผักสวนครัว",
+    "content": "ชมพู่ อารยา เอ ฮาร์เก็ต พาลูกๆ สายฟ้า-พายุ ไปเยี่ยมคุณยายหนิง ปลูกผักสวนครัว เรียนรู้ธรรมชาติ ทำกิจกรรมในสวน ภาพน่ารักอบอุ่น ครอบครัวสุขสันต์",
+    "score": 8,
+    "templateUsed": "template_9",
+    "elapsed": "213.2s",
+    "imageCount": 8,
+    "identity": {
+      "mainCharacter": "ชมพู่ อารยา เอ ฮาร์เก็ต",
+      "emotion": "happy",
+      "coverEmotion": "warm"
+    },
+    "batchId": null,
+    "createdAt": "2026-06-10T14:55:50.069Z",
+    "coverImagePath": "/cover-cases/CASE-025.jpg"
   }
 ]

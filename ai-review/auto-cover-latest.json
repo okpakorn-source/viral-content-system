@@ -1,67 +1,114 @@
 {
-  "timestamp": "2026-06-10T08:36:31.195Z",
-  "newsTitle": "ครูอาสาเดินเท้า 10 กม.ทุกวัน ส",
-  "storyType": "general",
-  "mainVisualShouldBe": "",
+  "timestamp": "2026-06-10T14:55:50.410Z",
+  "newsTitle": "ชมพู่พาลูกปลูกผักกับยาย",
+  "storyType": "family_nature_learning",
+  "mainVisualShouldBe": "น้องสายฟ้าและน้องพายุอยู่ในสวนผักกับคุณยายหนิงหรือชมพู่ อารยา กำลังปลูกผักหรือสัมผัสดินในบรรยากาศธรรมชาติอบอุ่น",
   "coverageRequired": [
     "STORY_ANCHOR",
     "KEY_ACTIVITY",
-    "CONTEXT_SCENE"
-  ],
-  "coverageOptional": [
+    "RELATIONSHIP",
+    "CONTEXT_SCENE",
     "HERO_FACE",
     "EMOTION"
   ],
-  "visualPriority": {},
-  "storyAnchorQueries": [],
+  "coverageOptional": [
+    "EVIDENCE",
+    "HERO2"
+  ],
+  "visualPriority": {
+    "STORY_ANCHOR": "35%",
+    "KEY_ACTIVITY": "25%",
+    "RELATIONSHIP": "20%",
+    "CONTEXT_SCENE": "10%",
+    "HERO_FACE": "7%",
+    "EMOTION": "3%"
+  },
+  "storyAnchorQueries": [
+    "ชมพู่ อารยา สายฟ้า พายุ ยายหนิง ปลูกผักสวนครัว",
+    "ชมพู่ อารยา พาลูกปลูกผัก เรียนรู้ธรรมชาติ",
+    "น้องสายฟ้า น้องพายุ ลูกชมพู่ ปลูกผักกับยายหนิง",
+    "ชมพู่ อารยา ลูกๆ ทำกิจกรรมในสวนกับคุณยาย",
+    "ครอบครัวชมพู่ อารยา สวนผักสวนครัว ยายหนิง",
+    "น้องสายฟ้า น้องพายุ เรียนรู้ธรรมชาติในสวน ชมพู่ อารยา"
+  ],
   "slotAssignment": {
-    "heroIndex": 2,
-    "heroRole": "HERO_FACE",
-    "heroTitle": "รีวิวค่ายอาสาบนดอย แม่ฮ่องสอน 2 วัน 1 คืน: พัฒนาโรงเรียนบ้านแม่เกาะวิทยา +  ขึ้น",
-    "circleIndex": 1,
+    "heroIndex": 1,
+    "heroRole": "RELATIONSHIP",
+    "heroTitle": "",
+    "circleIndex": 2,
     "photoOrder": [
-      2,
-      5,
+      1,
       0,
-      7
+      4
     ]
   },
-  "templateUsed": "template_8",
-  "templateReason": "DNA/autoSelect → template_8",
+  "templateUsed": "template_9",
+  "templateReason": "DNA/autoSelect → template_9",
   "templateChanged": false,
   "score": 8,
-  "storyMatchScore": null,
+  "storyMatchScore": 8,
   "finalSlotAudit": {
-    "issues": [],
-    "fixes": [],
-    "passed": true
+    "issues": [
+      {
+        "type": "DUPLICATE_URL",
+        "slot": "circle",
+        "index": 0,
+        "duplicateOf": "slot_1"
+      },
+      {
+        "type": "DUPLICATE_CID",
+        "slot": "circle",
+        "index": 0,
+        "duplicateOf": "slot_1"
+      }
+    ],
+    "fixes": [
+      {
+        "slot": "circle",
+        "oldIndex": 0,
+        "newIndex": 2,
+        "reason": "DUPLICATE_URL"
+      }
+    ],
+    "passed": false
   },
-  "duplicateSlotDetected": false,
+  "duplicateSlotDetected": true,
   "finalUsedCandidateIds": [
-    "cid_1t6otf",
-    "cid_uimeys",
-    "cid_rsfz87",
-    "cid_tdwrr3",
-    "cid_7ygzze"
+    "cid_t9x0fh",
+    "cid_f6zs7b",
+    "cid_rgs7d6",
+    "cid_n0em0q"
   ],
-  "rejectedSlotCandidates": [],
+  "rejectedSlotCandidates": [
+    {
+      "index": 0,
+      "reason": "DUPLICATE_URL"
+    }
+  ],
   "whySimpleTemplateWasChosen": null,
   "normalizedYoutubeVideoIds": [],
-  "duplicateReplacement": [],
+  "duplicateReplacement": [
+    {
+      "slot": "circle",
+      "oldIndex": 0,
+      "newIndex": 2,
+      "reason": "DUPLICATE_URL"
+    }
+  ],
   "storyTypePropagationCheck": {
-    "fromGPT": "general",
-    "afterCoverage": "general"
+    "fromGPT": "family_nature_learning",
+    "afterCoverage": "family_nature_learning"
   },
   "allCandidates": [
     {
       "index": 0,
-      "role": "CONTEXT_SCENE",
-      "curatorScore": 7,
-      "score": 7,
-      "title": "ครูอาสาบนดอยสะเมิง เชียงใหม่: ประสบการณ์จริง ที่พัก-อาหาร-กา",
-      "url": "https://www.lemon8-app.com/seo/image?item_id=7243157582104363521&index=1&sign=8f8501b9f25bc73115af02",
-      "width": 1074,
-      "height": 1432,
+      "role": "KEY_ACTIVITY",
+      "curatorScore": 9,
+      "score": 9,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+      "width": 1440,
+      "height": 1920,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -69,13 +116,13 @@
     },
     {
       "index": 1,
-      "role": "KEY_ACTIVITY",
-      "curatorScore": 9,
-      "score": 9,
-      "title": "เปิดใจครู ศศช.มอตะหลั่ว 10 ปี ที่มุ่งมั่นส่ง",
-      "url": "https://static.thairath.co.th/media/B6FtNKtgSqRqbnNsbKFwWL2tGrUkZP0sMZI8fMPVXT13zoAOSW5vL11IHPGGFb7i",
-      "width": 1280,
-      "height": 720,
+      "role": "RELATIONSHIP",
+      "curatorScore": 10,
+      "score": 10,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/resize/w728/q80/jpg",
+      "width": 728,
+      "height": 908,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -83,13 +130,13 @@
     },
     {
       "index": 2,
-      "role": "HERO_FACE",
-      "curatorScore": 10,
+      "role": "LOW_PRIORITY",
+      "curatorScore": 3,
       "score": 9,
-      "title": "รีวิวค่ายอาสาบนดอย แม่ฮ่องสอน 2 วัน 1 คืน: พัฒนาโรงเรียนบ้าน",
-      "url": "https://www.lemon8-app.com/seo/image?item_id=7306135231491359234&index=0&sign=8aca21e9509d3db6c0d744",
-      "width": 764,
-      "height": 1018,
+      "title": "",
+      "url": "https://f.ptcdn.info/027/064/000/prnbyg52xnRket5coya0-o.jpg",
+      "width": 999,
+      "height": 1500,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -97,13 +144,13 @@
     },
     {
       "index": 3,
-      "role": "LOW_PRIORITY",
-      "curatorScore": 3,
-      "score": 9,
-      "title": "ข่าว Like สาระ - ธารน้ำใจหลั่งไหลช่วย'น้องเบียร์'เด็ก 9 ขวบเ",
-      "url": "https://static.naewna.com/uploads/news/source/725461.jpg",
-      "width": 1080,
-      "height": 720,
+      "role": "RELATIONSHIP",
+      "curatorScore": 10,
+      "score": 10,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/resize/w728/q80/jpg",
+      "width": 728,
+      "height": 908,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -111,13 +158,13 @@
     },
     {
       "index": 4,
-      "role": "LOW_PRIORITY",
-      "curatorScore": 3,
-      "score": 7,
-      "title": "ครูอาสาบนดอยสูง' สัมผัสความหมายชีวิต เติมฝันในแก้วแคบ",
-      "url": "https://static.thairath.co.th/media/FcvsRgKyX10OHanMl6lg1PXU7YTtiqTN0eku0Ql2QyQNlTeivwuHWYnS3A.jpg",
-      "width": 1280,
-      "height": 1796,
+      "role": "KEY_ACTIVITY",
+      "curatorScore": 9,
+      "score": 9,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+      "width": 1440,
+      "height": 1920,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -125,13 +172,13 @@
     },
     {
       "index": 5,
-      "role": "PERSON_SUPPORT",
-      "curatorScore": 5,
-      "score": 7,
-      "title": "รีวิวค่ายครูอาสาบนดอยสูง 3 วัน 2 คืน: จิตอาสาแบบไม่มีไฟฟ้า ไ",
-      "url": "https://www.lemon8-app.com/seo/image?item_id=7399167467291001360&index=2&sign=b7c5f5958a749529d96c9d",
-      "width": 1074,
-      "height": 1432,
+      "role": "KEY_ACTIVITY",
+      "curatorScore": 9,
+      "score": 9,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+      "width": 1440,
+      "height": 1920,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -139,13 +186,13 @@
     },
     {
       "index": 6,
-      "role": "LOW_PRIORITY",
-      "curatorScore": 3,
-      "score": 7,
-      "title": "รีวิวประสบการณ์เป็นครูอาสาบนดอย เชียงใหม่ ครั้งแรก  ที่เต็มไ",
-      "url": "https://www.lemon8-app.com/seo/image?item_id=7356150867118047745&index=0&sign=a23c9f6a633c4e508a66ac",
-      "width": 1080,
-      "height": 1214,
+      "role": "KEY_ACTIVITY",
+      "curatorScore": 9,
+      "score": 9,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+      "width": 1440,
+      "height": 1920,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
@@ -153,34 +200,72 @@
     },
     {
       "index": 7,
-      "role": "CONTEXT_SCENE",
-      "curatorScore": 8,
-      "score": 7,
-      "title": "ครูอาสาบนดอยสูง' สัมผัสความหมายชีวิต เติมฝันในแก้วแคบ",
-      "url": "https://static.thairath.co.th/media/dFQROr7oWzulq5Fa5LFetoVTdKyvoLmnls5NSiUfrnDa4hZYwGQfsvxRBhH1bBQC",
-      "width": 1280,
-      "height": 720,
+      "role": "KEY_ACTIVITY",
+      "curatorScore": 9,
+      "score": 9,
+      "title": "",
+      "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+      "width": 1440,
+      "height": 1920,
       "techBad": null,
       "_storyAnchor": false,
       "_rescued": false,
       "_curatorScoreBeforeGuard": null
     }
   ],
-  "normalizedStoryType": "general",
-  "rawStoryType": "general",
+  "normalizedStoryType": "family_nature_learning",
+  "rawStoryType": "ครอบครัวอบอุ่น_เรียนรู้ธรรมชาติ",
   "storyAnchorCandidates": [],
-  "candidateBucketCounts": {
-    "totalBeforeDedup": 17,
-    "totalAfterDedup": 15,
-    "storyAnchor": 0,
-    "other": 15,
-    "sentToJudge": 15
-  },
+  "candidateBucketCounts": null,
   "qualityGate": {
     "sourceImageTypes": [
       {
         "candidateId": "unknown",
-        "url": "https://static.thairath.co.th/media/B6FtNKtgSqRqbnNsbKFwWL2tGrUkZP0sMZI8fMPVXT13",
+        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
+        "role": "RELATIONSHIP",
+        "sourceType": "CLEAN_PHOTO",
+        "confidence": 1,
+        "gateAction": "PASSED",
+        "gateReason": "",
+        "reasons": [],
+        "forbiddenSlots": null
+      },
+      {
+        "candidateId": "unknown",
+        "url": "https://s.isanook.com/ns/0/ud/1723/8617970/line_album_392022_220903_1.jpg?ip/res",
+        "role": "RELATIONSHIP",
+        "sourceType": "CLEAN_PHOTO",
+        "confidence": 1,
+        "gateAction": "PASSED",
+        "gateReason": "",
+        "reasons": [],
+        "forbiddenSlots": null
+      },
+      {
+        "candidateId": "unknown",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+        "role": "RELATIONSHIP",
+        "sourceType": "CLEAN_PHOTO",
+        "confidence": 1,
+        "gateAction": "PASSED",
+        "gateReason": "",
+        "reasons": [],
+        "forbiddenSlots": null
+      },
+      {
+        "candidateId": "unknown",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+        "role": "RELATIONSHIP",
+        "sourceType": "CLEAN_PHOTO",
+        "confidence": 1,
+        "gateAction": "PASSED",
+        "gateReason": "",
+        "reasons": [],
+        "forbiddenSlots": null
+      },
+      {
+        "candidateId": "unknown",
+        "url": "https://f.ptcdn.info/027/064/000/prnbyg52xnRket5coya0-o.jpg",
         "role": "HERO_FACE",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
@@ -191,8 +276,8 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://static.naewna.com/uploads/news/source/725461.jpg",
-        "role": "HERO_FACE",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+        "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
         "gateAction": "PASSED",
@@ -202,8 +287,8 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://www.lemon8-app.com/seo/image?item_id=7243157582104363521&index=1&sign=8f",
-        "role": "CONTEXT_SCENE",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+        "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
         "gateAction": "PASSED",
@@ -213,8 +298,8 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://static.thairath.co.th/media/dFQROr7oWzulq5Fa5LFetoVTdKyvoLmnls5NSiUfrnDa",
-        "role": "PERSON_SUPPORT",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+        "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
         "gateAction": "PASSED",
@@ -224,8 +309,8 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://static.thairath.co.th/media/FcvsRgKyX10OHanMl6lg1PXU7YTtiqTN0eku0Ql2QyQN",
-        "role": "PERSON_SUPPORT",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+        "role": "KEY_ACTIVITY",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
         "gateAction": "PASSED",
@@ -235,8 +320,8 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://www.lemon8-app.com/seo/image?item_id=7306135231491359234&index=0&sign=8a",
-        "role": "HERO_FACE",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+        "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
         "gateAction": "PASSED",
@@ -246,8 +331,8 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://static.thairath.co.th/media/Dtbezn3nNUxytg04ajZcbjFhLKzn8oe5iArykBxtPb9o",
-        "role": "PERSON_SUPPORT",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726118459.jpeg",
+        "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
         "gateAction": "PASSED",
@@ -257,19 +342,8 @@
       },
       {
         "candidateId": "unknown",
-        "url": "https://www.lemon8-app.com/seo/image?item_id=7399167467291001360&index=2&sign=b7",
-        "role": "PERSON_SUPPORT",
-        "sourceType": "CLEAN_PHOTO",
-        "confidence": 1,
-        "gateAction": "PASSED",
-        "gateReason": "",
-        "reasons": [],
-        "forbiddenSlots": null
-      },
-      {
-        "candidateId": "unknown",
-        "url": "https://www.lemon8-app.com/seo/image?item_id=7356150867118047745&index=0&sign=a2",
-        "role": "PERSON_SUPPORT",
+        "url": "https://s.isanook.com/ns/0/ui/1978/9892866/1780726147018.jpeg",
+        "role": "RELATIONSHIP",
         "sourceType": "CLEAN_PHOTO",
         "confidence": 1,
         "gateAction": "PASSED",
@@ -278,51 +352,29 @@
         "forbiddenSlots": null
       }
     ],
-    "blockedSourceImages": [
-      {
-        "url": "https://www.dailynews.co.th/wp-content/uploads/2022/09/%E0%B8%9B%E0%B8%81-14-102",
-        "originalRole": "QUALITY_BLOCKED",
-        "sourceType": "TEXT_OVERLAY",
-        "confidence": 0.75,
-        "reasons": [
-          "News domain + 16:9 thumbnail aspect (1.77)",
-          "Title contains Thai news outlet/program name (1 matches)"
-        ],
-        "gateReason": "TEXT_OVERLAY forbidden by default policy"
-      },
-      {
-        "url": "https://f.ptcdn.info/421/074/000/qxj1tzabzlh3LoWV8t6-o.jpg",
-        "originalRole": "QUALITY_BLOCKED",
-        "sourceType": "TEXT_OVERLAY",
-        "confidence": 0.65,
-        "reasons": [
-          "Embedded text indicators detected (1 matches)"
-        ],
-        "gateReason": "TEXT_OVERLAY forbidden by default policy"
-      }
-    ],
+    "blockedSourceImages": [],
     "downgradedSourceImages": [],
     "evidenceCandidates": [],
     "qualityGateSummary": {
-      "total": 11,
-      "passed": 9,
-      "blocked": 2,
+      "total": 12,
+      "passed": 12,
+      "blocked": 0,
       "downgraded": 0,
       "types": {
-        "TEXT_OVERLAY": 2,
-        "CLEAN_PHOTO": 9
+        "CLEAN_PHOTO": 12
       },
-      "cleanPhotoCount": 9,
+      "cleanPhotoCount": 12,
       "qualityGatePassed": true,
       "qualityGateFailReasons": [],
-      "policyKey": "default",
+      "policyKey": "family_nature_learning",
       "forbiddenTypes": [
         "NEWS_THUMBNAIL",
         "TEXT_OVERLAY",
         "COLLAGE",
         "SCREENSHOT",
         "SPLIT_SCREEN",
-        "PREVIOUS_COVER"
+        "PREVIOUS_COVER",
+        "YOUTUBE_THUMBNAIL"
       ],
       "quotasApplied": {
         "TEXT_OVERLAY": 0,
@@ -334,26 +386,48 @@
     },
     "qualityGatePassed": true
   },
-  "needManualReview": false,
+  "needManualReview": true,
   "noStoryAnchorFallbackReason": null,
   "finalSaveGate": {
-    "saveGatePassed": true,
-    "saveGateStatus": "SUCCESS",
-    "saveGateBlockers": [],
+    "saveGatePassed": false,
+    "saveGateStatus": "NEED_MANUAL_REVIEW",
+    "saveGateBlockers": [
+      {
+        "id": "SLOT_AUDIT_FAILED",
+        "reason": "Slot audit has 1 unfixed issues: DUPLICATE_URL, DUPLICATE_CID",
+        "severity": "HIGH"
+      },
+      {
+        "id": "DUPLICATE_SLOT_DETECTED",
+        "reason": "Duplicate image used in multiple slots",
+        "severity": "MEDIUM"
+      }
+    ],
     "saveGateWarnings": [],
-    "manualReviewReason": null,
+    "manualReviewReason": "[HIGH] Slot audit has 1 unfixed issues: DUPLICATE_URL, DUPLICATE_CID | [MEDIUM] Duplicate image used in multiple slots",
     "summary": {
-      "totalBlockers": 0,
+      "totalBlockers": 2,
       "totalWarnings": 0,
       "criticalBlockers": 0,
-      "highBlockers": 0,
-      "mediumBlockers": 0,
+      "highBlockers": 1,
+      "mediumBlockers": 1,
       "inheritedReview": false,
       "partialPass": false
     }
   },
-  "saveGatePassed": true,
-  "saveGateStatus": "SUCCESS",
-  "saveGateBlockers": [],
-  "manualReviewReason": null
+  "saveGatePassed": false,
+  "saveGateStatus": "NEED_MANUAL_REVIEW",
+  "saveGateBlockers": [
+    {
+      "id": "SLOT_AUDIT_FAILED",
+      "reason": "Slot audit has 1 unfixed issues: DUPLICATE_URL, DUPLICATE_CID",
+      "severity": "HIGH"
+    },
+    {
+      "id": "DUPLICATE_SLOT_DETECTED",
+      "reason": "Duplicate image used in multiple slots",
+      "severity": "MEDIUM"
+    }
+  ],
+  "manualReviewReason": "[HIGH] Slot audit has 1 unfixed issues: DUPLICATE_URL, DUPLICATE_CID | [MEDIUM] Duplicate image used in multiple slots"
 }
