@@ -189,11 +189,26 @@ export async function POST(request) {
   const startTime = Date.now();
   const TIMEOUT_MS = 540_000; // ★ Fix 12: 9 minutes — Gemini 503 fallback to GPT-4o needs ~5-8 min
 
+  // ★ FIX (11 มิ.ย.): cover job ผ่านคิวที่เกิน 5 นาทีโดน undici headersTimeout ฆ่า fetch ฝั่ง worker ("fetch failed")
+  //   ทั้งที่ pipeline วิ่งจนจบ — route อัปเดตสถานะ job เองที่ปลายทาง (self-report) ไม่พึ่ง HTTP response
+  let markQueueJob = async () => {};
+
   try {
     const body = await request.json();
-    const { content, newsTitle, templateId = 'auto', sourceUrl = '', regenerate = false, caseId: bodyCaseId, clearCache = false } = body;
+    const { content, newsTitle, templateId = 'auto', sourceUrl = '', regenerate = false, caseId: bodyCaseId, clearCache = false, _queueJobId = null } = body;
 
     const sessionId = bodyCaseId || `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+    markQueueJob = async (status, extra = {}) => {
+      if (!_queueJobId) return;
+      try {
+        const { updateJobStatus } = await import('@/lib/services/queueService');
+        await updateJobStatus(_queueJobId, status, { ...extra, completedAt: new Date().toISOString() });
+        console.log(`[AutoCover] ★ Queue job ${String(_queueJobId).slice(0, 8)} marked ${status} (self-report)`);
+      } catch (e) {
+        console.log('[AutoCover] ⚠️ markQueueJob failed (non-fatal):', e.message);
+      }
+    };
 
     if (!content && !newsTitle) {
       return NextResponse.json(
@@ -3084,7 +3099,7 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
       console.warn('[AutoCover] ⚠️ Failed to write AI review files:', reviewErr.message);
     }
 
-    return NextResponse.json({
+    const responsePayload = {
       success: shouldSaveAsSuccess,
       status: finalSaveGateResult.saveGateStatus,
       needManualReview: !shouldSaveAsSuccess,
@@ -3224,9 +3239,20 @@ ${(identity.storyAnchorQueries || []).map(q => `- ${q}`).join('\n') || 'N/A'}
         width: img.width || 0,
         height: img.height || 0,
       })),
-    });
+    };
+
+    // ★ Self-report: อัปเดต job เองก่อนตอบ — fetch ฝั่ง worker อาจตายไปแล้ว (เกณฑ์ completed เดียวกับ worker)
+    await markQueueJob(
+      (responsePayload.success || responsePayload.base64) ? 'completed' : 'failed',
+      (responsePayload.success || responsePayload.base64)
+        ? { result: responsePayload }
+        : { error: responsePayload.error || responsePayload.manualReviewReason || 'Unknown API Error' }
+    );
+
+    return NextResponse.json(responsePayload);
   } catch (error) {
     console.error('[AutoCover] Pipeline error:', error.message);
+    await markQueueJob('failed', { error: error.message });
     return NextResponse.json(
       { success: false, error: error.message, errorType: 'PIPELINE_ERROR' },
       { status: 500 }

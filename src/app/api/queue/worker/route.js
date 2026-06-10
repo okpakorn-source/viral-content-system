@@ -91,11 +91,19 @@ export async function POST(req) {
           logger.error(`[Queue Worker] ❌ Job ${job.id.slice(0, 8)} failed: ${data.error}`);
         }
       } catch (err) {
-        await updateJobStatus(job.id, 'failed', { 
-          error: err.message, 
-          completedAt: new Date().toISOString() 
-        });
-        logger.error(`[Queue Worker] ❌ Job ${job.id.slice(0, 8)} threw error: ${err.message}`);
+        // ★ FIX (11 มิ.ย.): cover job >5 นาทีโดน undici headersTimeout ("fetch failed") ทั้งที่ pipeline ยังวิ่งจนจบ
+        //   → อย่า mark failed; route จะ self-report สถานะเอง (มี cleanupStaleJobs เป็น safety net ถ้าค้างจริง)
+        const isTimeoutish = /fetch failed|UND_ERR|HeadersTimeout|aborted|timeout/i.test(err.message || '');
+        const isCoverJob2 = job.payload?.jobType === 'cover';
+        if (isCoverJob2 && isTimeoutish) {
+          logger.info(`[Queue Worker] ⏳ Cover job ${job.id.slice(0, 8)} fetch died (${err.message?.slice(0, 50)}) — pipeline ยังวิ่งต่อ รอ self-report จาก route`);
+        } else {
+          await updateJobStatus(job.id, 'failed', {
+            error: err.message,
+            completedAt: new Date().toISOString()
+          });
+          logger.error(`[Queue Worker] ❌ Job ${job.id.slice(0, 8)} threw error: ${err.message}`);
+        }
       }
     }
     
