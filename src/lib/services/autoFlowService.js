@@ -315,6 +315,15 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     anglePrompts.push(topPrompt);
   }
 
+  // ★ HOTFIX (10 มิ.ย.): สไตล์เปิดเรื่องหมุนเวียนต่อ angle — โหมด 1 เวอร์ชัน/call ไม่มีแรงบังคับ
+  //   diversity ภายใน call ทำให้ทุกเวอร์ชันเปิดเหมือนกัน (เคยออกมาเปิด "วันที่ 8..." ทั้งหมด)
+  const OPENING_STYLES = [
+    'เปิดด้วยภาพ/ฉากของเหตุการณ์ (visual moment) — พาคนอ่านไปยืนอยู่ตรงนั้นตั้งแต่ประโยคแรก ห้ามขึ้นต้นด้วยวันที่',
+    'เปิดด้วยตัวเลขหรือ contrast ที่สะดุดใจ — ขัดความคาดหมายตั้งแต่ประโยคแรก ห้ามขึ้นต้นด้วยวันที่',
+    'เปิดด้วยคำพูดของคนในเหตุการณ์ หรือความรู้สึก/คำถามที่ค้างในใจคนอ่าน ห้ามขึ้นต้นด้วยวันที่',
+    'เปิดด้วยผลลัพธ์/ปลายทางของเรื่องก่อน แล้วค่อยย้อนเล่าที่มา ห้ามขึ้นต้นด้วยวันที่',
+  ];
+
   // === PARALLEL GENERATE: สร้างเนื้อหาทุก angle พร้อมกัน (★ PARALLEL — save ~150-300s) ===
   addLog('Generate', `🚀 เริ่ม PARALLEL generate ${anglesToUse.length} angles พร้อมกัน...`);
   const genResultsRaw = await Promise.allSettled(
@@ -322,6 +331,8 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
       addLog('Generate', `▶️ Angle ${index + 1}/${anglesToUse.length}: "${angleObj.angle_name}" (parallel)...`);
       return withTimeout((async () => {
         const focusAngle = `${angleObj.angle_name}: ${angleObj.description}`;
+        // มุมเล่า + สไตล์เปิดเรื่องเฉพาะของเวอร์ชันนี้ (ส่งให้ตัวเขียนเท่านั้น — research ใช้ focusAngle เพียวๆ)
+        const writeAngle = `${focusAngle}\nสไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${OPENING_STYLES[index % OPENING_STYLES.length]}`;
 
         // 1. Research for this angle
         const resResult = await performResearch({
@@ -356,7 +367,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
           emotionalBlueprint: blueprint,
           researchData: researchItems.length > 0 ? { items: researchItems } : null,
           factPool: factPool,
-          focusAngle, // ★ มุมเล่าบังคับของ angle นี้ — กัน 3 มุมเขียนลู่เข้าหากัน
+          focusAngle: writeAngle, // ★ มุมเล่า + สไตล์เปิดเรื่องบังคับของ angle นี้
           workflowId: _autoWorkflowId,
           user: _user,
         });

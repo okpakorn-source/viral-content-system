@@ -283,11 +283,20 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     anglePrompts.push(topPrompt);
   }
 
+  // ★ HOTFIX (10 มิ.ย.): สไตล์เปิดเรื่องหมุนเวียนต่อ angle — กันทุกเวอร์ชันเปิดเหมือนกัน (ดู autoFlowService.js)
+  const OPENING_STYLES = [
+    'เปิดด้วยภาพ/ฉากของเหตุการณ์ (visual moment) — พาคนอ่านไปยืนอยู่ตรงนั้นตั้งแต่ประโยคแรก ห้ามขึ้นต้นด้วยวันที่',
+    'เปิดด้วยตัวเลขหรือ contrast ที่สะดุดใจ — ขัดความคาดหมายตั้งแต่ประโยคแรก ห้ามขึ้นต้นด้วยวันที่',
+    'เปิดด้วยคำพูดของคนในเหตุการณ์ หรือความรู้สึก/คำถามที่ค้างในใจคนอ่าน ห้ามขึ้นต้นด้วยวันที่',
+    'เปิดด้วยผลลัพธ์/ปลายทางของเรื่องก่อน แล้วค่อยย้อนเล่าที่มา ห้ามขึ้นต้นด้วยวันที่',
+  ];
+
   // === PARALLEL GENERATE: สร้างเนื้อหาขนานด้วย prompt ที่เลือกไว้แล้ว ===
   const generationTasks = anglesToUse.map((angleObj, index) => {
     return withTimeout((async () => {
       const count = versionsPerAngle;
       const focusAngle = `${angleObj.angle_name}: ${angleObj.description}`;
+      const writeAngle = `${focusAngle}\nสไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${OPENING_STYLES[index % OPENING_STYLES.length]}`;
       
       // 1. Research for this angle
       const resResult = await performResearch({
@@ -323,7 +332,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         emotionalBlueprint: blueprint,
         researchData: researchItems.length > 0 ? { items: researchItems } : null,
         factPool: factPool,
-        focusAngle, // ★ มุมเล่าบังคับของ angle นี้ — กัน 3 มุมเขียนลู่เข้าหากัน
+        focusAngle: writeAngle, // ★ มุมเล่า + สไตล์เปิดเรื่องบังคับของ angle นี้
         workflowId: _autoWorkflowId,
         user: _user,
       });
