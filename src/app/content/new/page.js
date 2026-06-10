@@ -138,6 +138,48 @@ function NewContentPageInner() {
       console.warn('[Archive] Auto-save failed (non-critical):', e.message);
     }
   }, [sourceType, workflowId]);
+  // ★ Recovery: นำผลลัพธ์จาก queue job ที่เสร็จแล้วมาแสดง (ใช้ตอน UI หลุดจากการ poll)
+  const applyQueueResult = useCallback((result) => {
+    if (!result) return;
+    const d = result.data || result;
+    const nd = result.newsData || d.newsData || null;
+    const bd = result.breakdownData || d.breakdownData || null;
+    const ar = result.analysisResult || d.analysisResult || null;
+    if (!ar?.versions?.length) return;
+    setNewsData(nd);
+    setBreakdownData(bd);
+    setAnalysisResult(ar);
+    if (d.blueprint) { setBlueprintData(d.blueprint); setEditedBlueprint(JSON.parse(JSON.stringify(d.blueprint))); }
+    if (d.researchItems?.length > 0) setResearchData({ items: d.researchItems, keywords: [] });
+    if (d.factPool) setFactPoolData(d.factPool);
+    setAutoLog(d.log || []);
+    setStep('analyzed');
+    setError('');
+    setAutoProgress('');
+  }, []);
+
+  // ★ Recovery: ตอนเปิดหน้า — เช็คว่ามี job ค้างที่เสร็จแล้วรอให้กู้ไหม
+  useEffect(() => {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem('vf_last_job') || 'null'); } catch {}
+    if (!saved?.jobId) return;
+    if (Date.now() - (saved.at || 0) > 60 * 60 * 1000) { // เกิน 1 ชม. — หมดอายุ
+      try { localStorage.removeItem('vf_last_job'); } catch {}
+      return;
+    }
+    fetch(`/api/queue/status?id=${saved.jobId}`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(st => {
+        if (st.success && st.status === 'completed' && st.result) {
+          setRecoveryJob({ jobId: saved.jobId, result: st.result });
+        } else if (!st.success || st.status === 'failed') {
+          try { localStorage.removeItem('vf_last_job'); } catch {}
+        }
+        // ถ้ายัง pending/processing — เก็บไว้ให้กู้รอบหน้า
+      })
+      .catch(() => {});
+  }, []);
+
   const [videoFile, setVideoFile] = useState(null);
   const [youtubeNeedUpload, setYoutubeNeedUpload] = useState(false);
   const [sentToReview, setSentToReview] = useState({}); // { versionIndex: true }
@@ -147,6 +189,9 @@ function NewContentPageInner() {
   const [autoLog, setAutoLog] = useState([]);
   const [universalDetection, setUniversalDetection] = useState(null); // ✅ Phase 6: detection result from /api/auto/process
   const [liveDetection, setLiveDetection] = useState(null); // ✅ Phase 6: live detection from UniversalInputBox
+
+  // ★ Recovery: งานล่าสุดที่เสร็จแล้วแต่ UI ไม่ได้รับผล (เน็ตหลุด/รีเฟรช/server restart)
+  const [recoveryJob, setRecoveryJob] = useState(null); // { jobId, result }
 
   // Queue system states
   const [queueJobId, setQueueJobId] = useState(null);
@@ -184,6 +229,9 @@ function NewContentPageInner() {
     setQueueStatus('pending');
     setQueuePolling(true);
 
+    // ★ Recovery: จำ jobId ไว้ — ถ้า UI หลุด/รีเฟรช/เน็ตสะดุด ระบบกู้ผลลัพธ์คืนได้
+    try { localStorage.setItem('vf_last_job', JSON.stringify({ jobId, at: Date.now() })); } catch {}
+
     if (queuesAhead > 0) {
       setAutoProgress(`📋 อยู่ในคิวลำดับที่ ${position} (รอ ${queuesAhead} คิวก่อนหน้า) ประมาณ ${queuesAhead * 3} นาที`);
     } else {
@@ -196,6 +244,7 @@ function NewContentPageInner() {
     let workerRetriggerCount = 0;
     let notFoundCount = 0; // ★ Track consecutive 'job not found' responses
     let lastSeenStatus = 'pending'; // ★ Track last known status
+    let consecutiveNetErrors = 0; // ★ network error ติดกัน — ต้องโชว์ให้ผู้ใช้เห็น ห้ามเงียบ
 
     while (Date.now() - startTime < maxPollTime) {
       await new Promise(r => setTimeout(r, 3000)); // poll every 3s
@@ -223,6 +272,7 @@ function NewContentPageInner() {
         }
         
         notFoundCount = 0; // reset on successful poll
+        consecutiveNetErrors = 0; // ★ เชื่อมต่อกลับมาแล้ว
         lastSeenStatus = statusData.status;
 
         setQueueStatus(statusData.status);
@@ -242,9 +292,11 @@ function NewContentPageInner() {
           setAutoProgress('⚡ กำลังประมวลผล... (อาจใช้เวลา 2-4 นาที)');
         } else if (statusData.status === 'completed') {
           setQueuePolling(false);
+          try { localStorage.removeItem('vf_last_job'); } catch {}
           return statusData.result; // Return the result data
         } else if (statusData.status === 'failed') {
           setQueuePolling(false);
+          try { localStorage.removeItem('vf_last_job'); } catch {}
           throw new Error(statusData.error || 'คิวประมวลผลไม่สำเร็จ');
         }
       } catch (pollErr) {
@@ -254,7 +306,13 @@ function NewContentPageInner() {
           continue; // ไม่นับเป็น error จริง — retry loop
         }
         if (pollErr.message?.includes('คิวประมวลผลไม่สำเร็จ')) throw pollErr;
-        console.warn('[Queue] Poll error:', pollErr.message);
+        // ★ FIX: network error (server restart/เน็ตหลุด) เดิมกลืนเงียบ → UI ค้างตลอดกาล
+        //   ตอนนี้โชว์สถานะ + ระบบ recovery จะกู้ผลลัพธ์ให้เมื่อกลับมาเชื่อมต่อได้
+        consecutiveNetErrors++;
+        console.warn(`[Queue] Poll error (${consecutiveNetErrors} ติดกัน):`, pollErr.message);
+        if (consecutiveNetErrors >= 3) {
+          setAutoProgress(`⚠️ การเชื่อมต่อสะดุด (พยายามใหม่ครั้งที่ ${consecutiveNetErrors}) — งานยังประมวลผลอยู่ฝั่งเซิร์ฟเวอร์ ไม่หาย ถ้าหน้าค้างนาน รีเฟรชหน้าได้เลย ระบบจะกู้ผลลัพธ์ให้`);
+        }
       }
     }
 
@@ -1202,6 +1260,28 @@ function NewContentPageInner() {
           <div style={{ background: 'var(--danger-bg)', border: '1px solid var(--danger)', borderRadius: 'var(--radius-md)', padding: '14px 20px', marginBottom: 20, color: 'var(--danger)', fontSize: 13 }}>
             ❌ {error}
             <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontWeight: 700 }}>✕</button>
+          </div>
+        )}
+
+        {/* ★ Recovery Banner — งานล่าสุดเสร็จแล้วแต่ UI ไม่ได้รับผล (เน็ตหลุด/รีเฟรช/server restart) */}
+        {recoveryJob && step === 'input' && !autoMode && (
+          <div style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid #10b981', borderRadius: 'var(--radius-md)', padding: '14px 20px', marginBottom: 20, fontSize: 13, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 20 }}>🧭</span>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontWeight: 700, color: '#10b981' }}>พบงานล่าสุดที่ประมวลผลเสร็จแล้ว</div>
+              <div style={{ color: 'var(--text-muted)', marginTop: 2 }}>
+                "{(recoveryJob.result?.newsData?.newsTitle || recoveryJob.result?.data?.newsData?.newsTitle || 'ข่าวที่สร้างเสร็จ').slice(0, 60)}" — {(recoveryJob.result?.analysisResult?.versions || recoveryJob.result?.data?.analysisResult?.versions || []).length} เวอร์ชัน
+              </div>
+            </div>
+            <button
+              onClick={() => { applyQueueResult(recoveryJob.result); setRecoveryJob(null); try { localStorage.removeItem('vf_last_job'); } catch {} }}
+              className="btn btn-sm"
+              style={{ background: '#10b981', color: '#fff', border: 'none', fontWeight: 700 }}
+            >📥 ดูผลลัพธ์</button>
+            <button
+              onClick={() => { setRecoveryJob(null); try { localStorage.removeItem('vf_last_job'); } catch {} }}
+              className="btn btn-ghost btn-sm"
+            >ปิด</button>
           </div>
         )}
 

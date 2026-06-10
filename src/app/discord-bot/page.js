@@ -1,11 +1,20 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import AuthGuard from '@/components/AuthGuard';
 import ClientLayout from '@/components/ClientLayout';
 
 export default function DiscordBotPage() {
   const [copied, setCopied] = useState(false);
+  // ★ สถานะจริง — เดิมเป็นข้อความ static "✅ ทำงานปกติ" ตลอดกาลไม่ได้เช็คอะไร
+  const [apiStatus, setApiStatus] = useState({ checking: true, ok: false, queue: null });
+
+  useEffect(() => {
+    fetch('/api/queue/status', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(q => setApiStatus({ checking: false, ok: q?.success !== false, queue: q }))
+      .catch(() => setApiStatus({ checking: false, ok: false, queue: null }));
+  }, []);
 
   const handleCopy = () => {
     navigator.clipboard.writeText('npm start');
@@ -29,13 +38,17 @@ export default function DiscordBotPage() {
             <h2 style={{ fontSize: 20, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ color: '#5865F2' }}>1.</span> สถานะระบบ API ของเว็บไซต์
             </h2>
-            <div style={{ background: 'var(--bg-secondary)', padding: 16, borderRadius: 'var(--radius-md)', borderLeft: '4px solid var(--success)' }}>
+            <div style={{ background: 'var(--bg-secondary)', padding: 16, borderRadius: 'var(--radius-md)', borderLeft: `4px solid ${apiStatus.checking ? 'var(--border)' : apiStatus.ok ? 'var(--success)' : 'var(--danger)'}` }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontSize: 24 }}>✅</span>
+                <span style={{ fontSize: 24 }}>{apiStatus.checking ? '⏳' : apiStatus.ok ? '✅' : '❌'}</span>
                 <div>
-                  <div style={{ fontWeight: 700, color: 'var(--success)' }}>API รับรอง Discord ทำงานปกติ</div>
+                  <div style={{ fontWeight: 700, color: apiStatus.checking ? 'var(--text-muted)' : apiStatus.ok ? 'var(--success)' : 'var(--danger)' }}>
+                    {apiStatus.checking ? 'กำลังตรวจสอบ API...' : apiStatus.ok ? 'API คิวงานทำงานปกติ (ตรวจสอบจริงเมื่อสักครู่)' : 'API ไม่ตอบสนอง — บอทจะใช้งานไม่ได้'}
+                  </div>
                   <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
-                    ระบบเว็บไซต์พร้อมรับคำสั่งจากบอทแล้ว (ตรวจสอบ <code>DISCORD_API_SECRET</code> ใน Environment Variables ของ Vercel)
+                    {apiStatus.ok && apiStatus.queue
+                      ? <>คิวตอนนี้: กำลังทำ {apiStatus.queue.processing ?? 0} | รอ {apiStatus.queue.pending ?? 0} — อย่าลืมตั้ง <code>DISCORD_API_SECRET</code> ใน Environment Variables ของ Vercel</>
+                      : <>ตรวจสอบ <code>DISCORD_API_SECRET</code> ใน Environment Variables ของ Vercel</>}
                   </div>
                 </div>
               </div>

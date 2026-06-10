@@ -41,11 +41,12 @@ export default function Sidebar() {
     { label: 'Viral Radar', icon: '📡', href: '/radar', highlight: true },
     { label: 'คลังข่าว', icon: '📦', href: '/news-archive' },
     { label: 'คลังรอตรวจ', icon: '📋', href: '/review', badge: reviewCount },
-    { label: 'เผยแพร่', icon: '📤', href: '/publish' },
+    // 'เผยแพร่' (/publish) ซ่อนชั่วคราว — หน้ายังเป็น stub ไม่เชื่อมระบบจริง
     { type: 'divider', label: 'ภาพปก & สื่อ' },
     { label: '🔥 สร้างปกอัตโนมัติ', icon: '🖼️', href: '/cover-lab', highlight: true },
     { label: 'แทมเพลตปก (14 แบบ)', icon: '🎨', href: '/cover-tester' },
     { label: 'สร้างปก (Manual)', icon: '🎭', href: '/cover-maker' },
+    { label: 'สร้างภาพ AI', icon: '🖌️', href: '/image-maker' },
     { label: 'คลังรูป', icon: '📸', href: '/cover-gallery' },
     { label: 'คลังปก (Archive)', icon: '📁', href: '/cover-archive' },
     { type: 'divider', label: 'AI Intelligence' },
