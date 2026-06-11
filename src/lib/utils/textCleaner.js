@@ -49,9 +49,12 @@ export function cleanScrapedText(text) {
   if (tailAt > 400) t = t.slice(0, tailAt);
 
   // ② กรองทีละบรรทัด
+  const LANG_BAR = /(繁體中文|简体中文|日本語|한국어|Tiếng Việt|Bahasa Melayu|Русский|Français|Deutsch|Español)/g;
   const kept = t.split(/\n+/).filter(line => {
     const s = line.trim();
     if (!s) return false;
+    // แถบเลือกภาษาของเว็บข่าวต่างชาติ (ชื่อภาษา ≥3 ภาษาติดกัน — เคสตำรวจไต้หวัน)
+    if ((s.match(LANG_BAR) || []).length >= 3) return false;
     if (JUNK_LINE.test(s) && s.length < 160) return false; // บรรทัดยาวที่บังเอิญมีคำ ให้ผ่าน (อาจเป็นเนื้อจริง)
     if (s.length <= 30 && NAV_WORD.test(s)) return false;
     // บรรทัดที่เป็นชุดลิงก์เมนู (คำสั้นคั่นด้วยช่องว่างล้วน ไม่มีประโยค)
