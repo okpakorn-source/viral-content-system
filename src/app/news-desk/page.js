@@ -20,6 +20,10 @@ const TABS = [
 
 const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁', buzz: '📊' };
 
+// ★★ สวิตช์ปิดระบบหาภาพชั่วคราว (คำสั่งทีม 12 มิ.ย. 69): บัคภาพซ้ำข้ามข่าว + ออโต้รันถี่เกิน
+//    ให้คนหาภาพเองไปก่อน — เปิดกลับ: เปลี่ยนเป็น false (โค้ดหลังบ้านยังอยู่ครบ)
+const PHOTO_SCOUT_OFF = true;
+
 // ★ ช่องทางแหล่งภาพ (Image Scout) — เรียงตามที่ทีมใช้ทำปกบ่อยสุด
 const IMG_CHANNELS = {
   facebook:  { icon: '📘', label: 'Facebook' },
@@ -94,10 +98,10 @@ export default function NewsDeskPage() {
   useEffect(() => { setLoading(true); load(); }, [load]);
   useEffect(() => { const t = setInterval(load, 60_000); return () => clearInterval(t); }, [load]);
 
-  // ★ Auto Photo Board ที่ชั้นวาง ✅: เปิดแท็บแล้วใบไหนยังไม่มีรูป → หาให้เองเงียบๆ (สูงสุด 2 ใบ/รอบ กันค่าใช้จ่ายพุ่ง)
+  // ★ Auto Photo Board ที่ชั้นวาง ✅: ปิดชั่วคราว (PHOTO_SCOUT_OFF) — รอแก้บัคภาพซ้ำ/ออโต้ถี่เกิน
   const _autoScouted = useRef(new Set());
   useEffect(() => {
-    if (tab !== 'ready' || !items.length) return;
+    if (PHOTO_SCOUT_OFF || tab !== 'ready' || !items.length) return;
     const targets = items.filter(i => !i.imageSources && !_autoScouted.current.has(i.id)).slice(0, 2);
     for (const t of targets) {
       _autoScouted.current.add(t.id);
@@ -143,9 +147,9 @@ export default function NewsDeskPage() {
       });
       const d = await res.json();
       if (d.success) {
-        setMsg(`✅ เข้าคิวแล้ว (คิวที่ ${d.position}) — ระบบกำลังหาแหล่งภาพให้อัตโนมัติ พอเขียนเสร็จรูปจะพร้อมพอดี`);
-        // ★ Auto Photo Board: ส่งเขียนปุ๊บ หาภาพปั๊บ (ไม่ต้องรอ ไม่บล็อกหน้าจอ) — เนื้อเสร็จ รูปเสร็จ พร้อมกัน
-        if (!item.imageSources) {
+        setMsg(`✅ เข้าคิวแล้ว (คิวที่ ${d.position}) — ดูผลในหน้า Generation Log`);
+        // ★ Auto Photo Board: ปิดชั่วคราว (PHOTO_SCOUT_OFF) — รอแก้บัคภาพซ้ำ
+        if (!PHOTO_SCOUT_OFF && !item.imageSources) {
           fetch('/api/news-desk/image-scout', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ newsId: item.id }),
@@ -512,8 +516,8 @@ export default function NewsDeskPage() {
                         {it.captionSkeleton && <div style={{ fontSize: 12, color: 'var(--desk-blue)', marginTop: 4 }}>📝 โครงเล่า: {it.captionSkeleton}</div>}
                       </div>
                     )}
-                    {/* ★ แหล่งภาพของข่าวนี้ — แผงรูปพร้อมใช้ + ต้นโพสต์ + ลิงก์จัดกลุ่ม */}
-                    {(it.imageSources?.totalLinks > 0 || it.imageSources?.photoBoard?.images?.length > 0) && (
+                    {/* ★ แหล่งภาพของข่าวนี้ — ปิดชั่วคราว (PHOTO_SCOUT_OFF) */}
+                    {!PHOTO_SCOUT_OFF && (it.imageSources?.totalLinks > 0 || it.imageSources?.photoBoard?.images?.length > 0) && (
                       <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 10, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.25)' }}>
                         <div style={{ fontSize: 12.5, color: 'var(--desk-amber)', fontWeight: 700 }}>
                           📸 แหล่งภาพของข่าวนี้ — {it.imageSources.totalLinks} ลิงก์
@@ -596,9 +600,11 @@ export default function NewsDeskPage() {
                       style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: researching[it.id] ? 'wait' : 'pointer', background: 'rgba(6,182,212,0.15)', color: 'var(--desk-cyan)', fontSize: 13, fontWeight: 700 }}>
                       {researching[it.id] ? '⏳ กำลังเจาะ...' : '🔬 เจาะลึก'}</button>
                   )}
-                  <button onClick={() => scoutImg(it)} disabled={researching['img_' + it.id]}
-                    style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: researching['img_' + it.id] ? 'wait' : 'pointer', background: 'rgba(245,158,11,0.15)', color: 'var(--desk-amber)', fontSize: 13, fontWeight: 700 }}>
-                    {researching['img_' + it.id] ? '⏳ กำลังหาภาพ...' : it.imageSources ? '📸 หาภาพใหม่' : '📸 หาแหล่งภาพ'}</button>
+                  {!PHOTO_SCOUT_OFF && (
+                    <button onClick={() => scoutImg(it)} disabled={researching['img_' + it.id]}
+                      style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: researching['img_' + it.id] ? 'wait' : 'pointer', background: 'rgba(245,158,11,0.15)', color: 'var(--desk-amber)', fontSize: 13, fontWeight: 700 }}>
+                      {researching['img_' + it.id] ? '⏳ กำลังหาภาพ...' : it.imageSources ? '📸 หาภาพใหม่' : '📸 หาแหล่งภาพ'}</button>
+                  )}
                   {it.status === 'new' && (
                     <button onClick={() => act(it.id, 'claim')}
                       style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'rgba(245,158,11,0.2)', color: 'var(--desk-amber)', fontSize: 13, fontWeight: 700 }}>

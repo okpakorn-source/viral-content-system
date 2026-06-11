@@ -18,6 +18,9 @@ const STATUS_CFG = {
   used:       { icon: '📌', label: 'ใช้แล้ว',    color: 'var(--desk-purple)' },
 };
 
+// ★★ สวิตช์ปิดระบบหาภาพชั่วคราว (คำสั่งทีม 12 มิ.ย. 69) — เปิดกลับ: เปลี่ยนเป็น false
+const PHOTO_SCOUT_OFF = true;
+
 const LANE_CFG = {
   trend:     { icon: '🔥', label: 'กระแส' },
   good:      { icon: '💚', label: 'น้ำดี' },
@@ -380,14 +383,16 @@ export default function GenerationLogsPage() {
                         <button onClick={() => setEvalDashboard({ caseId: detail.caseId, newsTitle: detail.newsTitle, versions: detail.versions, sourceText: detail.sourceText })} style={btnStyle}>
                           🧪 ประเมินคุณภาพ
                         </button>
-                        <button onClick={() => scoutImg(c.caseId)} disabled={!!imgScouting[c.caseId]} style={{ ...btnStyle, color: 'var(--desk-amber)' }}>
-                          {imgScouting[c.caseId] ? '⏳ กำลังหาภาพ...' : '📸 หาแหล่งภาพ'}
-                        </button>
+                        {!PHOTO_SCOUT_OFF && (
+                          <button onClick={() => scoutImg(c.caseId)} disabled={!!imgScouting[c.caseId]} style={{ ...btnStyle, color: 'var(--desk-amber)' }}>
+                            {imgScouting[c.caseId] ? '⏳ กำลังหาภาพ...' : '📸 หาแหล่งภาพ'}
+                          </button>
+                        )}
                         <a href="/cover-lab" target="_blank" rel="noopener noreferrer" style={{ ...btnStyle, textDecoration: 'none' }} title="เปิด Cover Lab ทำภาพปก">🎨 ไปทำปก</a>
                       </div>
 
                       {/* แหล่งภาพของข่าวนี้ — ลิงก์จัดกลุ่มตามช่องทาง */}
-                      {(imgScout[c.caseId]?.totalLinks > 0 || imgScout[c.caseId]?.photoBoard?.images?.length > 0) && (
+                      {!PHOTO_SCOUT_OFF && (imgScout[c.caseId]?.totalLinks > 0 || imgScout[c.caseId]?.photoBoard?.images?.length > 0) && (
                         <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(245,158,11,0.3)', background: 'rgba(245,158,11,0.05)' }}>
                           <div style={{ fontSize: 13, color: 'var(--desk-amber)', fontWeight: 700, marginBottom: 4 }}>
                             📸 แหล่งภาพของข่าวนี้ — {imgScout[c.caseId].totalLinks} ลิงก์
