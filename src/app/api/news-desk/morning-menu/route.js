@@ -47,29 +47,28 @@ async function sendDiscord(menu, deskUrl) {
   if (!webhook) return { sent: false, reason: 'ไม่มี webhook — ตั้งใน env DISCORD_WEBHOOK_URL หรือ store desk-settings' };
 
   const date = new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Bangkok' });
-  const messages = [`# 🗞️ เมนูข่าวเช้า — ${date}\nคัดโดยสมองโต๊ะข่าว · กดเลือกได้ที่ ${deskUrl}`];
+  const LANE_COLORS = { buzz: 0x3b82f6, trend: 0xef4444, good: 0x22c55e, evergreen: 0x8b5cf6, followup: 0xf59e0b };
 
+  // ★ ใช้ embed: ลิงก์ฝังในชื่อข่าว ไม่มี URL ยาวเกะกะ อ่านง่ายกว่ากำแพงข้อความ (feedback ผู้ใช้)
+  const payloads = [{ content: `# 🗞️ เมนูข่าวเช้า — ${date}\nคัดโดยสมองโต๊ะข่าว · จอง/ส่งทำได้ที่ ${deskUrl}` }];
   for (const [lane, items] of Object.entries(menu)) {
     if (!items.length) continue;
-    let block = `\n## ${LANE_HEADERS[lane]}\n`;
+    let desc = '';
     items.forEach((it, i) => {
-      const line = `**${i + 1}. [${it.finalScore}] ${String(it.title).slice(0, 90)}**\n` +
-        `${it.judgeReason ? '🧠 ' + String(it.judgeReason).slice(0, 90) + '\n' : ''}<${it.url}>\n`;
-      // Discord จำกัด 2000 ตัวอักษร/ข้อความ — เกินแล้วขึ้นก้อนใหม่
-      if ((block + line).length > 1850) { messages.push(block); block = ''; }
-      block += line;
+      const line = `**${i + 1}.** \`${it.finalScore}\` [${String(it.title).slice(0, 80)}](${it.url})` +
+        `${it.judgeReason ? `\n→ ${String(it.judgeReason).slice(0, 80)}` : ''}\n`;
+      if (desc.length + line.length < 3900) desc += line;
     });
-    messages.push(block);
+    payloads.push({ embeds: [{ title: LANE_HEADERS[lane], description: desc, color: LANE_COLORS[lane] || 0x6b7280 }] });
   }
 
   let sentCount = 0;
-  for (const content of messages) {
-    if (!content.trim()) continue;
+  for (const payload of payloads) {
     try {
       const res = await fetch(webhook, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(payload),
       });
       if (res.ok || res.status === 204) sentCount++;
       else console.log('[MorningMenu] webhook ตอบ', res.status);

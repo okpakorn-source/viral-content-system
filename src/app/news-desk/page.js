@@ -229,13 +229,24 @@ export default function NewsDeskPage() {
             {mktSending ? '⏳...' : '📈 รายงานโพสต์แรง'}</button>
         </div>
 
-        {/* brief จาก บก.ใหญ่ AI */}
-        {chiefBrief?.brief && (
+        {/* brief จาก บก.ใหญ่ AI — รูปแบบหัวข้อสั้น */}
+        {(chiefBrief?.orders?.length > 0 || chiefBrief?.brief) && (
           <div style={{ marginBottom: 12, padding: '12px 16px', borderRadius: 12, background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.25)' }}>
             <div style={{ fontSize: 13.5, color: '#c4b5fd', fontWeight: 700 }}>🧠 บก.ใหญ่ AI ({new Date(chiefBrief.at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.)</div>
-            <div style={{ fontSize: 13.5, color: '#ddd6fe', marginTop: 4 }}>{chiefBrief.brief}</div>
+            {(chiefBrief.orders || []).map((o, i) => (
+              <div key={i} style={{ fontSize: 13.5, color: '#ddd6fe', marginTop: 4 }}>📌 {o}</div>
+            ))}
+            {(chiefBrief.warnings || []).map((w, i) => (
+              <div key={i} style={{ fontSize: 13, color: '#fca5a5', marginTop: 4 }}>⚠️ {w}</div>
+            ))}
+            {(chiefBrief.pushNow || []).length > 0 && (
+              <div style={{ fontSize: 13, color: '#86efac', marginTop: 4 }}>🚀 ดันทันที: {chiefBrief.pushNow.join(' · ')}</div>
+            )}
+            {!chiefBrief.orders?.length && chiefBrief.brief && (
+              <div style={{ fontSize: 13.5, color: '#ddd6fe', marginTop: 4 }}>{chiefBrief.brief}</div>
+            )}
             {chiefBrief.extraQueries?.length > 0 && (
-              <div style={{ fontSize: 12, color: '#a78bfa', marginTop: 4 }}>🔎 สั่งเก็บเพิ่ม: {chiefBrief.extraQueries.join(' · ')} (+{chiefBrief.harvested} ใบ)</div>
+              <div style={{ fontSize: 12, color: '#a78bfa', marginTop: 4 }}>🔎 สั่งเก็บเพิ่ม {chiefBrief.extraQueries.length} คำค้น (+{chiefBrief.harvested} ใบ)</div>
             )}
           </div>
         )}

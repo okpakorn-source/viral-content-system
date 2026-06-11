@@ -64,11 +64,15 @@ export async function POST(request) {
 
 หน้าที่:
 1. วินิจฉัย: วันนี้ขาดอะไร (ปริมาณ? หมวดไหนบาง? ตลาดกำลังเล่นอะไรที่เราไม่มีของ?)
-2. สั่งคำค้นพิเศษ 3-6 ชุดให้หน่วยลาดตระเวนไปเก็บ "เดี๋ยวนี้" — คำค้นต้องเฉพาะเจาะจง อิงจากช่องว่าง+สัญญาณตลาดจริง ห้ามกว้างแบบ "ข่าววันนี้"
-3. เขียน brief สั้น 2-4 ประโยคบอกทีมว่าช่วงนี้ควรหยิบอะไร/ระวังอะไร
+2. สั่งคำค้นพิเศษ 3-6 ชุดให้หน่วยลาดตระเวนไปเก็บ "เดี๋ยวนี้" — คำค้นต้องเฉพาะเจาะจง หา "เรื่องใหม่" ที่ยังไม่มีในคลัง ห้ามสั่งซ้ำเรื่องที่อยู่ในคลังแล้ว ห้ามกว้างแบบ "ข่าววันนี้"
+3. สั่งทีมเป็นข้อสั้นๆ — แต่ละข้อความยาวไม่เกิน 90 ตัวอักษร อ่านแวบเดียวรู้เรื่อง
 
 ตอบ JSON เท่านั้น:
-{"diagnosis":"สั้นๆ","extraQueries":[{"q":"คำค้น","lane":"trend|good|evergreen","timeRange":"qdr:d|qdr:w|qdr:y"}],"brief":"ข้อความถึงทีม"}`,
+{"diagnosis":"สั้นๆ 1 ประโยค",
+"orders":["คำสั่งหลัก 1-3 ข้อ เช่น 'เร่งหยิบข่าว 78+ น้ำดี 2-3 : ครอบครัว 1'"],
+"warnings":["ข้อควรระวัง 0-2 ข้อ เช่น 'ข่าวเจนนี่ เขียนโทนอบอุ่น ห้ามโจมตีครอบครัว'"],
+"pushNow":["ชื่อข่าวสั้นๆ ที่ควรดันตอนนี้ 0-4 เรื่อง"],
+"extraQueries":[{"q":"คำค้น","lane":"trend|good|evergreen","timeRange":"qdr:d|qdr:w|qdr:y"}]}`,
       model: 'gpt-5.5',
       temperature: 0.3,
       maxTokens: 8000,
@@ -84,12 +88,16 @@ export async function POST(request) {
       harvestStats = await runHarvest({ lanes: [], extraQueries, judgeTop: 16 });
     }
 
-    // ── แปะ brief หน้าโต๊ะ + ยิง Discord ──
+    // ── แปะ brief หน้าโต๊ะ + ยิง Discord (รูปแบบหัวข้อสั้น อ่านแวบเดียวรู้เรื่อง) ──
+    const orders = (parsed.orders || []).slice(0, 3).map(s => String(s).slice(0, 100));
+    const warnings = (parsed.warnings || []).slice(0, 2).map(s => String(s).slice(0, 100));
+    const pushNow = (parsed.pushNow || []).slice(0, 4).map(s => String(s).slice(0, 60));
     const brief = {
       id: 'chief_brief',
       at: new Date().toISOString(),
-      diagnosis: String(parsed.diagnosis || '').slice(0, 300),
-      brief: String(parsed.brief || '').slice(0, 500),
+      diagnosis: String(parsed.diagnosis || '').slice(0, 200),
+      orders, warnings, pushNow,
+      brief: orders.join(' · '), // เผื่อ UI เก่า
       extraQueries: extraQueries.map(e => e.q),
       harvested: harvestStats?.added || 0,
     };
@@ -99,10 +107,17 @@ export async function POST(request) {
     else await settings.add(brief);
 
     const webhook = await getWebhookUrl();
-    if (webhook && brief.brief) {
+    if (webhook && (orders.length || warnings.length)) {
+      const lines = [
+        `## 🧠 บก.ใหญ่ AI — ${hour} น.`,
+        ...(orders.length ? ['**📌 คำสั่งตอนนี้**', ...orders.map(o => `> ${o}`)] : []),
+        ...(warnings.length ? ['**⚠️ ระวัง**', ...warnings.map(w => `> ${w}`)] : []),
+        ...(pushNow.length ? ['**🚀 ดันทันที**', '> ' + pushNow.join(' · ')] : []),
+        ...(extraQueries.length ? [`🔎 สั่งลาดตระเวนเพิ่ม ${extraQueries.length} คำค้น → ได้ข่าวใหม่ ${brief.harvested} ใบ`] : []),
+      ];
       await fetch(webhook, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: `🧠 **บก.ใหญ่ AI (${hour} น.)**\n${brief.brief}${extraQueries.length ? `\n🔎 สั่งเก็บเพิ่ม: ${extraQueries.map(e => e.q).join(' · ')} → ได้ใหม่ ${brief.harvested} ใบ` : ''}` }),
+        body: JSON.stringify({ content: lines.join('\n').slice(0, 1950) }),
       }).catch(() => {});
     }
 
