@@ -43,6 +43,10 @@ export default function NewsDeskPage() {
   const [clipUrl, setClipUrl] = useState('');
   const [mining, setMining] = useState(false);
   const [jobStatus, setJobStatus] = useState({}); // jobId → { status, position, error }
+  const [chiefBrief, setChiefBrief] = useState(null);
+  const [mktUrl, setMktUrl] = useState('');
+  const [mktSending, setMktSending] = useState(false);
+  const [researching, setResearching] = useState({}); // id → true
 
   useEffect(() => {
     setMe(localStorage.getItem('desk_username') || '');
@@ -61,7 +65,7 @@ export default function NewsDeskPage() {
     try {
       const res = await fetch(`/api/news-desk?tab=${tab}&limit=80`, { cache: 'no-store' });
       const d = await res.json();
-      if (d.success) { setItems(d.items); setMixToday(d.mixToday || {}); setSentToday(d.sentToday || 0); setGovernor(d.governor || null);
+      if (d.success) { setItems(d.items); setMixToday(d.mixToday || {}); setSentToday(d.sentToday || 0); setGovernor(d.governor || null); setChiefBrief(d.chiefBrief || null);
         // ★ ติดตามสถานะงานเขียนของการ์ดที่ส่งทำใน 2 ชม.ล่าสุด
         const recent = (d.items || []).filter(i => i.status === 'sent' && i.jobId && Date.now() - new Date(i.sentAt || 0).getTime() < 2 * 3600e3).slice(0, 8);
         for (const it of recent) {
@@ -137,6 +141,47 @@ export default function NewsDeskPage() {
     setMining(false);
   };
 
+  const research = async (item) => {
+    setResearching(prev => ({ ...prev, [item.id]: true }));
+    setMsg(`🔬 กำลังเจาะลึก "${item.title.slice(0, 40)}..." (หาแหล่งเพิ่ม+สังเคราะห์ ~1 นาที)`);
+    try {
+      const res = await fetch('/api/news-desk', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'research', id: item.id, user: me || 'ไม่ระบุ' }),
+      });
+      const d = await res.json();
+      setMsg(d.success ? `✅ เจาะลึกเสร็จ — พร้อมเขียน ${d.research.readyScore}/10 (${d.research.keyFacts?.length || 0} ข้อเท็จจริง)` : `❌ ${d.error}`);
+      load();
+    } catch (e) { setMsg('❌ ' + e.message); }
+    setResearching(prev => ({ ...prev, [item.id]: false }));
+  };
+
+  const sendMarketPost = async () => {
+    if (!/^https?:\/\//.test(mktUrl)) { setMsg('❌ วางลิงก์โพสต์/คลิปที่เห็นว่าแรงก่อน'); return; }
+    setMktSending(true);
+    setMsg('📈 กำลังดึงเนื้อ+ถอด pattern โพสต์แรง...');
+    try {
+      const res = await fetch('/api/news-desk/market-post', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: mktUrl, user: me || 'ไม่ระบุ' }),
+      });
+      const d = await res.json();
+      setMsg(d.success ? `✅ เข้าคลังตลาดแล้ว: "${d.item.topic}" — ${d.item.whyViral}` : `❌ ${d.error}`);
+      if (d.success) setMktUrl('');
+    } catch (e) { setMsg('❌ ' + e.message); }
+    setMktSending(false);
+  };
+
+  const callChief = async () => {
+    setMsg('🧠 บก.ใหญ่ AI กำลังวิเคราะห์ภาพรวม+สั่งเก็บเพิ่ม (~2-4 นาที)...');
+    try {
+      const res = await fetch('/api/news-desk/chief', { method: 'POST' });
+      const d = await res.json();
+      setMsg(d.success ? `🧠 ${d.brief}` : `❌ ${d.error}`);
+      load();
+    } catch (e) { setMsg('❌ ' + e.message); }
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary, #0f1419)' }}>
       <Header title="🗞️ โต๊ะข่าวกลาง" subtitle="ข่าวคัดกรองด้วยสมอง 4 ชั้น — เรียงตามความน่าทำของเพจเรา" />
@@ -153,6 +198,9 @@ export default function NewsDeskPage() {
               }}>{t.label}</button>
           ))}
           <div style={{ flex: 1 }} />
+          <button onClick={callChief}
+            style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid rgba(139,92,246,0.4)', cursor: 'pointer', background: 'rgba(139,92,246,0.12)', color: '#c4b5fd', fontWeight: 700, fontSize: 13.5 }}>
+            🧠 เรียก บก.ใหญ่</button>
           <button onClick={harvest} disabled={harvesting}
             style={{
               padding: '8px 18px', borderRadius: 10, border: 'none', cursor: harvesting ? 'wait' : 'pointer',
@@ -169,6 +217,27 @@ export default function NewsDeskPage() {
             style={{ padding: '10px 18px', borderRadius: 10, border: 'none', cursor: mining ? 'wait' : 'pointer', background: mining ? '#4b5563' : 'linear-gradient(135deg,#06b6d4,#0e7490)', color: '#fff', fontWeight: 700, fontSize: 13.5, whiteSpace: 'nowrap' }}>
             {mining ? '⏳ กำลังขุด...' : '⛏️ ขุดนาทีทอง'}</button>
         </div>
+
+        {/* ช่องรายงานโพสต์แรงตลาด — ตา engagement ของระบบ */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <input value={mktUrl} onChange={e => setMktUrl(e.target.value)} disabled={mktSending}
+            placeholder="📈 เห็นโพสต์ไหนกำลังแรงในฟีด? วางลิงก์ตรงนี้ — ระบบเก็บเข้าคลังตลาด ให้ บก.ใหญ่เรียนรู้ว่าตลาดเล่นอะไร"
+            style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: '1px solid rgba(245,158,11,0.25)', background: 'rgba(245,158,11,0.05)', color: '#e2e8f0', fontSize: 13.5, outline: 'none' }} />
+          <button onClick={sendMarketPost} disabled={mktSending}
+            style={{ padding: '10px 18px', borderRadius: 10, border: 'none', cursor: mktSending ? 'wait' : 'pointer', background: mktSending ? '#4b5563' : 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#000', fontWeight: 700, fontSize: 13.5, whiteSpace: 'nowrap' }}>
+            {mktSending ? '⏳...' : '📈 รายงานโพสต์แรง'}</button>
+        </div>
+
+        {/* brief จาก บก.ใหญ่ AI */}
+        {chiefBrief?.brief && (
+          <div style={{ marginBottom: 12, padding: '12px 16px', borderRadius: 12, background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.25)' }}>
+            <div style={{ fontSize: 13.5, color: '#c4b5fd', fontWeight: 700 }}>🧠 บก.ใหญ่ AI ({new Date(chiefBrief.at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.)</div>
+            <div style={{ fontSize: 13.5, color: '#ddd6fe', marginTop: 4 }}>{chiefBrief.brief}</div>
+            {chiefBrief.extraQueries?.length > 0 && (
+              <div style={{ fontSize: 12, color: '#a78bfa', marginTop: 4 }}>🔎 สั่งเก็บเพิ่ม: {chiefBrief.extraQueries.join(' · ')} (+{chiefBrief.harvested} ใบ)</div>
+            )}
+          </div>
+        )}
 
         {/* แถบส่วนผสมวันนี้ + Mix Governor */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14, padding: '10px 14px', background: 'rgba(255,255,255,0.04)', borderRadius: 12, fontSize: 13, color: '#94a3b8' }}>
@@ -240,6 +309,17 @@ export default function NewsDeskPage() {
                         💡 {it.angles.join(' · ')}
                       </div>
                     )}
+                    {it.research?.enrichedSummary && (
+                      <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 10, background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)' }}>
+                        <div style={{ fontSize: 12, color: '#4ade80', fontWeight: 700 }}>🔬 เจาะลึกแล้ว — พร้อมเขียน {it.research.readyScore}/10 ({it.research.sources?.length || 1} แหล่ง)</div>
+                        {(it.research.keyFacts || []).slice(0, 3).map((f, fi) => (
+                          <div key={fi} style={{ fontSize: 12.5, color: '#bbf7d0', marginTop: 3 }}>• {f}</div>
+                        ))}
+                        {(it.research.quotes || []).slice(0, 1).map((q, qi) => (
+                          <div key={qi} style={{ fontSize: 12.5, color: '#86efac', marginTop: 3, fontStyle: 'italic' }}>&ldquo;{q}&rdquo;</div>
+                        ))}
+                      </div>
+                    )}
                     {(it.goldenMoments || []).length > 0 && (
                       <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 10, background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.2)' }}>
                         {it.goldenMoments.map((g, gi) => (
@@ -260,6 +340,11 @@ export default function NewsDeskPage() {
                     <button onClick={() => sendToWorkflow(it)}
                       style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', fontSize: 13, fontWeight: 700 }}>
                       🚀 ส่งเข้า workflow</button>
+                  )}
+                  {it.status !== 'sent' && it.lane !== 'interview' && !it.research && (
+                    <button onClick={() => research(it)} disabled={researching[it.id]}
+                      style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: researching[it.id] ? 'wait' : 'pointer', background: 'rgba(6,182,212,0.15)', color: '#22d3ee', fontSize: 13, fontWeight: 700 }}>
+                      {researching[it.id] ? '⏳ กำลังเจาะ...' : '🔬 เจาะลึก'}</button>
                   )}
                   {it.status === 'new' && (
                     <button onClick={() => act(it.id, 'claim')}

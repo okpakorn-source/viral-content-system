@@ -15,12 +15,21 @@ import {
   getCategoryPerformance,
 } from './deskBrain';
 
-const TREND_QUERIES = [
-  'ข่าวดราม่าวันนี้ กระแสโซเชียล',
-  'ข่าวดาราล่าสุดวันนี้',
-  'คลิปไวรัลวันนี้ ชาวเน็ตแห่แชร์',
-  'ข่าวสังคมวันนี้ ประเด็นร้อน',
+// ★ ขยายคลังคำค้นกระแส (quick-fix: รอบเดิม 4 query โดน dedupe จนเหลือผ่านคัด 2) — หมุน 8 ชุด/รอบ
+const TREND_QUERY_POOL = [
+  'ข่าวดราม่าวันนี้ กระแสโซเชียล', 'ข่าวดาราล่าสุดวันนี้', 'คลิปไวรัลวันนี้ ชาวเน็ตแห่แชร์',
+  'ข่าวสังคมวันนี้ ประเด็นร้อน', 'ชาวเน็ตถล่มคอมเมนต์ ล่าสุด', 'สุดซึ้งทั้งโซเชียล วันนี้',
+  'เรื่องเล่าเช้านี้ ไวรัล', 'โหนกระแสวันนี้ ประเด็น', 'ดราม่าร้านดัง ล่าสุด',
+  'คนดังตอบกลับ ดราม่า ล่าสุด', 'แห่ชื่นชม วันนี้', 'เปิดใจทั้งน้ำตา ล่าสุด',
+  'ครูนักเรียน ไวรัล ล่าสุด', 'คลิปกล้องวงจรปิด ไวรัล', 'ขอความเป็นธรรม ล่าสุด', 'รีวิวแตก ไวรัล วันนี้',
 ];
+
+function pickTrendQueries(count = 8) {
+  const slot = Math.floor(Date.now() / (3600e3 * 3)); // หมุนทุก 3 ชม. — รอบถัดไปได้คำใหม่ ไม่ชน dedupe เดิม
+  const out = [];
+  for (let i = 0; i < count; i++) out.push(TREND_QUERY_POOL[(slot * count + i) % TREND_QUERY_POOL.length]);
+  return out;
+}
 
 // คลังคำค้นน้ำดี — หมุนวันละ 4 ชุดตามวันของปี (ครอบ pattern ที่ผู้ใช้ยกตัวอย่าง)
 const GOOD_QUERY_POOL = [
@@ -47,6 +56,9 @@ const EVERGREEN_PATTERNS = [
   'ดาราเลี้ยงดูพ่อแม่ป่วย กตัญญู', 'คนดังช่วยค่ารักษา เด็กป่วย', 'ดาราใช้หนี้ให้พ่อแม่',
   'เศรษฐีใจบุญ สร้างโรงเรียน สร้างวัด', 'อดีตดารา ชีวิตเรียบง่าย ปัจจุบัน', 'ดาราเปิดร้านเล็กๆ สู้ชีวิต',
   'คนเก็บขยะส่งลูกเรียนจบ', 'แม่ค้าใจบุญ เลี้ยงข้าวคนจร', 'คุณตาคุณยายสู้ชีวิต ไวรัล',
+  'เด็กยอดกตัญญู ทำงานส่งตัวเองเรียน', 'วินมอเตอร์ไซค์น้ำใจงาม', 'แท็กซี่คืนของ ผู้โดยสารลืม',
+  'คนไทยในต่างแดน สร้างชื่อ', 'นักเรียนช่วยชีวิต CPR', 'เจ้าของร้านใจดี แจกอาหารฟรี',
+  'ชาวบ้านรวมเงินช่วย เพื่อนบ้าน', 'หนุ่มสาวออฟฟิศลาออก ทำตามฝัน สำเร็จ', 'คนเลี้ยงหมาแมวจร ใจบุญ',
 ];
 
 function pickEvergreenQueries(count = 3) {
@@ -63,11 +75,14 @@ async function buildFollowupQueries(count = 3) {
     const archive = createStore('news-archive');
     const all = await archive.getAll();
     const cutoff = Date.now() - 21 * 864e5;
+    // ★ quick-fix: key_people ใน archive ปนชื่อละคร/รายการ (เคยได้ "เรื่องย่อธาตรี" มาเป็นตามรอย)
+    const NOT_PERSON = /ละคร|รายการ|เรื่องย่อ|ตอนที่|ช่อง\s?\d|ศึก|ทีมชาติ|โรงเรียน|มูลนิธิ|บริษัท|วัด|ตำบล|อำเภอ|จังหวัด|ประเทศ|กระทรวง|ตำรวจภูธร/;
     const candidates = all
       .filter(a => {
         const t = new Date(a.archived_at || a.createdAt || 0).getTime();
-        const person = (a.key_people || [])[0];
-        return t > 0 && t < cutoff && person && String(person).length >= 3;
+        const person = (a.key_people || []).find(p => p && String(p).length >= 3 && String(p).length <= 35 && !NOT_PERSON.test(p));
+        if (person) a._followPerson = person;
+        return t > 0 && t < cutoff && !!person;
       })
       // เรื่องที่เคยถูกใช้/คะแนนไวรัลสูงมาก่อน = น่าตามรอยสุด
       .sort((a, b) => ((b.viral_score || 0) + (b.used_count || 0) * 10) - ((a.viral_score || 0) + (a.used_count || 0) * 10));
@@ -76,7 +91,7 @@ async function buildFollowupQueries(count = 3) {
     for (let i = 0; i < Math.min(count, candidates.length); i++) {
       const pick = candidates[(day * count + i) % candidates.length];
       out.push({
-        query: `"${String(pick.key_people[0]).slice(0, 30)}" ล่าสุด`,
+        query: `"${String(pick._followPerson || pick.key_people[0]).slice(0, 30)}" ล่าสุด`,
         followupOf: String(pick.title || '').slice(0, 90),
       });
     }
@@ -122,7 +137,7 @@ const idOf = (url) => crypto.createHash('md5').update(String(url)).digest('hex')
  * รันเก็บ+คัดกรองครบ 4 ชั้น แล้วลงคลัง
  * @returns {Promise<{harvested, gated, classified, judged, added}>}
  */
-export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'followup'], judgeTop = 24 } = {}) {
+export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'followup'], judgeTop = 24, extraQueries = [] } = {}) {
   const t0 = Date.now();
   const store = createStore('news-desk');
   const existing = await store.getAll();
@@ -132,20 +147,26 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
   // ── เก็บดิบ ──
   const raw = [];
   if (lanes.includes('trend')) {
-    for (const q of TREND_QUERIES) {
+    for (const q of pickTrendQueries(8)) {
       try { raw.push(...(await serperNews(q, { num: 10, timeRange: 'qdr:d' })).map(r => ({ ...r, lane: 'trend' }))); }
       catch (e) { console.log('[Harvester] trend query failed:', e.message?.slice(0, 50)); }
     }
   }
   if (lanes.includes('good')) {
-    for (const q of pickGoodQueries(4)) {
+    for (const q of pickGoodQueries(6)) {
       try { raw.push(...(await serperNews(q, { num: 8, timeRange: 'qdr:w' })).map(r => ({ ...r, lane: 'good' }))); }
       catch (e) { console.log('[Harvester] good query failed:', e.message?.slice(0, 50)); }
     }
   }
+  // ★ คำค้นพิเศษจาก Chief Editor Agent — เติมตามช่องว่างของวัน
+  for (const ex of extraQueries) {
+    try {
+      raw.push(...(await serperNews(ex.q, { num: 8, timeRange: ex.timeRange || 'qdr:d' })).map(r => ({ ...r, lane: ex.lane || 'trend' })));
+    } catch (e) { console.log('[Harvester] extra query failed:', e.message?.slice(0, 50)); }
+  }
   if (lanes.includes('evergreen')) {
     // ไม่จำกัดเวลา — ของเก่าน้ำดีคือเป้าหมาย (วันไหนกระแสแห้ง เลนนี้คือบ่อสำรอง)
-    for (const q of pickEvergreenQueries(3)) {
+    for (const q of pickEvergreenQueries(4)) {
       try { raw.push(...(await serperNews(q, { num: 8, timeRange: 'qdr:y' })).map(r => ({ ...r, lane: 'evergreen' }))); }
       catch (e) { console.log('[Harvester] evergreen query failed:', e.message?.slice(0, 50)); }
     }
@@ -213,6 +234,20 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
   }));
   if (finalItems.length > 0) await store.addMany(finalItems);
   stats.added = finalItems.length;
+
+  // ★ Research Agent อัตโนมัติ: เจาะลึกตัวท็อป (judge ≥8) สูงสุด 3 ใบ/รอบ — การ์ดขึ้น feed แบบ "พร้อมเขียน"
+  try {
+    const { deepResearch } = await import('./researchAgent');
+    const tops = finalItems.filter(i => (i.judgeScore ?? 0) >= 8 && i.lane !== 'interview').slice(0, 3);
+    for (const top of tops) {
+      const r = await deepResearch(top).catch(e => ({ ok: false, reason: e.message }));
+      if (r.ok) {
+        const boosted = Math.min(100, (top.finalScore || 0) + Math.max(0, r.readyScore - 5) * 2);
+        await store.update(top.id, (ex) => ({ ...ex, research: r, finalScore: boosted }));
+        stats.researched = (stats.researched || 0) + 1;
+      }
+    }
+  } catch (e) { console.log('[Harvester] auto-research skip:', e.message?.slice(0, 50)); }
 
   console.log(`[Harvester] ✅ ${JSON.stringify(stats)} in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
   return stats;

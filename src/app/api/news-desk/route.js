@@ -23,6 +23,14 @@ export async function GET(request) {
     if (['trend', 'good', 'evergreen', 'interview', 'followup'].includes(tab)) items = items.filter(i => i.lane === tab);
     items = items.filter(i => i.status !== 'dismissed');
 
+    // ★ quick-fix: คะแนนเสื่อมตามอายุ — กระแสเก่าจมเอง (trend -8/วัน, good -3/วัน, เลนไร้กาลเวลาไม่เสื่อม)
+    const DECAY = { trend: 8, good: 3, evergreen: 0, followup: 4, interview: 0 };
+    items = items.map(i => {
+      const ageDays = Math.max(0, (Date.now() - new Date(i.harvestedAt || 0).getTime()) / 864e5);
+      const decayed = Math.max(0, Math.round((i.finalScore || 0) - ageDays * (DECAY[i.lane] ?? 4)));
+      return { ...i, finalScore: decayed };
+    });
+
     // ส่วนผสมวันนี้ (นับเฉพาะที่ทีมส่งทำจริงวันนี้)
     const today = new Date().toISOString().slice(0, 10);
     const sentToday = (await store.getAll()).filter(i => i.status === 'sent' && String(i.sentAt || '').startsWith(today));
@@ -35,7 +43,14 @@ export async function GET(request) {
     // fullText (บทถอดเสียงคลิป) ยาว — ไม่ส่งให้หน้า feed
     const lightItems = governed.slice(0, limit).map(({ fullText, ...rest }) => rest);
 
-    return NextResponse.json({ success: true, items: lightItems, total: items.length, mixToday: mix, sentToday: sentToday.length, governor });
+    // ★ brief ล่าสุดจาก บก.ใหญ่ AI
+    let chiefBrief = null;
+    try {
+      const settings = createStore('desk-settings');
+      chiefBrief = (await settings.getAll()).find(s => s.id === 'chief_brief') || null;
+    } catch {}
+
+    return NextResponse.json({ success: true, items: lightItems, total: items.length, mixToday: mix, sentToday: sentToday.length, governor, chiefBrief });
   } catch (error) {
     console.error('[NewsDesk API]', error.message);
     return NextResponse.json({ success: false, error: error.message, errorType: 'DESK_FEED_ERROR' }, { status: 500 });
@@ -56,9 +71,25 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'ไม่พบข่าวนี้ในคลัง', errorType: 'NOT_FOUND' }, { status: 404 });
     }
 
-    // ★ ส่งเข้า workflow ฝั่งเซิร์ฟเวอร์ (เฟส 2) — คลิปสัมภาษณ์ส่งบทถอดเสียงเต็ม, ข่าวปกติส่งลิงก์
+    // ★ ปุ่ม 🔬 เจาะลึก — Research Agent หาแหล่งเพิ่ม+สังเคราะห์เนื้อพร้อมเขียน (ใช้เวลา ~30-60 วิ)
+    if (action === 'research') {
+      const { deepResearch } = await import('@/lib/services/newsDesk/researchAgent');
+      const r = await deepResearch(item);
+      if (!r.ok) {
+        return NextResponse.json({ success: false, error: r.reason, errorType: 'RESEARCH_THIN' }, { status: 422 });
+      }
+      const boosted = Math.min(100, (item.finalScore || 0) + Math.max(0, r.readyScore - 5) * 2);
+      await store.update(id, (ex) => ({ ...ex, research: r, finalScore: boosted }));
+      return NextResponse.json({ success: true, id, research: r, finalScore: boosted });
+    }
+
+    // ★ ส่งเข้า workflow ฝั่งเซิร์ฟเวอร์ — เรียงตามความแน่นของวัตถุดิบ:
+    //   คลิปสัมภาษณ์→บทถอดเสียงเต็ม | เจาะลึกแล้ว→เนื้อสังเคราะห์หลายแหล่ง | ปกติ→ลิงก์
     if (action === 'sendWorkflow') {
-      const input = item.lane === 'interview' && item.fullText ? item.fullText : item.url;
+      const { buildEnrichedInput } = await import('@/lib/services/newsDesk/researchAgent');
+      const input = (item.lane === 'interview' && item.fullText)
+        ? item.fullText
+        : (buildEnrichedInput(item) || item.url);
       const qRes = await fetch(`${request.nextUrl.origin}/api/queue/add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

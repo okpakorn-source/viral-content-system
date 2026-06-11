@@ -8,7 +8,7 @@ import { runHarvest, pruneOldItems } from '@/lib/services/newsDesk/harvester';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
+export const maxDuration = 600; // harvest + auto-research ตัวท็อป 3 ใบ
 
 // กันเก็บซ้อนกัน — เครื่องหนึ่งเก็บทีละรอบ
 let _harvestLock = Promise.resolve();
