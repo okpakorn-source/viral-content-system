@@ -64,9 +64,9 @@ export function detectFlags(versions, sourceText) {
     }
   });
 
-  // ③ เปิดเรื่องด้วยคำต้องห้าม
+  // ③ เปิดเรื่องด้วยคำต้องห้าม + คำสั่งระบบรั่วลงเนื้อ (จับได้จริง: V2 ขึ้นต้น "เปิดด้วยความกดดัน..." = order leak)
   versions.forEach((v, i) => {
-    if (/^(ลองนึก|ลองคิด|ลองจินตนาการ|วันที่ \d|เมื่อวันที่)/.test(String(v.content || '').trim())) {
+    if (/^(ลองนึก|ลองคิด|ลองจินตนาการ|วันที่ \d|เมื่อวันที่|เปิดด้วย|มุม(มอง)?\s*[:：]|แนวเปิด|สไตล์เปิด|เขียนย่อหน้า)/.test(String(v.content || '').trim())) {
       problems[i].push('banned_opening');
     }
   });
@@ -130,7 +130,8 @@ export async function fixFlaggedVersions(versions, newsData) {
       orders.push('- ประโยคเปิดซ้ำกับเวอร์ชันอื่นคำต่อคำ → เขียนประโยคเปิดใหม่คนละแนว (อ่านเป็นธรรมชาติ ห้ามขึ้นต้นด้วยวันที่)');
     }
     if (problems[i].includes('same_angle')) {
-      orders.push(`- เปิดเรื่องด้วยภาพ/มุมเดียวกับเวอร์ชันอื่น (แม้คำต่างกัน) → เขียนย่อหน้าเปิดใหม่ด้วยมุมนี้แทน: "${v._newAngle || 'มุมอื่นที่ต่างจริง'}" — เนื้อส่วนอื่นคงเดิม`);
+      orders.push(`- เปิดเรื่องด้วยภาพ/มุมเดียวกับเวอร์ชันอื่น (แม้คำต่างกัน) → เขียนย่อหน้าเปิดใหม่โดยใช้มุมนี้: "${v._newAngle || 'มุมอื่นที่ต่างจริง'}" — เนื้อส่วนอื่นคงเดิม
+  ⚠️ สำคัญ: นี่คือคำสั่งกำกับ ห้ามคัดลอกข้อความคำสั่งลงเนื้อโพสต์เด็ดขาด (ห้ามมีคำว่า "เปิดด้วย/มุม/แนวเปิด" ในประโยคแรก) — เขียนประโยคเปิดจริงที่คนอ่านเห็นเลย`);
     }
     if (problems[i].includes('dup_body')) {
       orders.push(`- มีท่อนเนื้อหากลางเรื่องซ้ำกับเวอร์ชันอื่นคำต่อคำ (เช่นท่อน "${String(v._dupBodySample || '').slice(0, 28)}...") → เล่าท่อนที่ซ้ำใหม่ด้วยคำของตัวเอง ข้อเท็จจริงเดิมครบ`);
@@ -160,7 +161,8 @@ ${content}
       });
       // callAI คืน object เสมอ (json_object mode) — ดึง field ออกมา (เผื่อ string ไว้กัน client เปลี่ยน)
       const fixed = String((typeof result === 'object' ? result?.fixedContent : result) || '').trim();
-      if (fixed && fixed.length > content.length * 0.6 && fixed.length < content.length * 1.5) {
+      const orderLeak = /^(เปิดด้วย|มุม(มอง)?\s*[:：]|แนวเปิด|สไตล์เปิด|เขียนย่อหน้า)/.test(fixed);
+      if (fixed && !orderLeak && fixed.length > content.length * 0.6 && fixed.length < content.length * 1.5) {
         console.log(`[FlagFixer] ✅ V${i + 1} แก้: ${problems[i].join('+')}`);
         return { ...v, content: fixed, _flagsFixed: problems[i] };
       }
