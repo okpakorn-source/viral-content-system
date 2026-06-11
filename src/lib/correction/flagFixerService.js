@@ -156,11 +156,13 @@ ${orders.join('\n')}
 ${content}
 === จบ ===
 
-ตอบเฉพาะเนื้อโพสต์ฉบับแก้แล้ว ไม่ต้องอธิบาย`,
+ตอบ JSON เท่านั้น (callAI ของระบบรับเฉพาะ JSON): {"fixedContent":"เนื้อโพสต์ฉบับแก้แล้วทั้งหมด"}`,
       });
-      if (typeof result === 'string' && result.length > content.length * 0.6 && result.length < content.length * 1.5) {
+      // callAI คืน object เสมอ (json_object mode) — ดึง field ออกมา (เผื่อ string ไว้กัน client เปลี่ยน)
+      const fixed = String((typeof result === 'object' ? result?.fixedContent : result) || '').trim();
+      if (fixed && fixed.length > content.length * 0.6 && fixed.length < content.length * 1.5) {
         console.log(`[FlagFixer] ✅ V${i + 1} แก้: ${problems[i].join('+')}`);
-        return { ...v, content: result.trim(), _flagsFixed: problems[i] };
+        return { ...v, content: fixed, _flagsFixed: problems[i] };
       }
       console.log(`[FlagFixer] ⚠️ V${i + 1} ผลแก้ผิดรูป — คงของเดิม`);
       return v;
