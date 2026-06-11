@@ -456,18 +456,23 @@ export async function POST(request) {
     const newsData = extractRes.data;
     addLog('Extract', `✅ "${newsData.newsTitle?.slice(0, 40)}" (${newsData.newsBody?.length}ch)`);
 
-    // ─── STEP 3: Breakdown ────────────────────────────────────
+    // ─── STEP 3: Breakdown (optional — ไม่ block ถ้าล้มเหลว) ──
     addLog('Breakdown', '🔍 AI analyzing angles...');
-    const breakRes = await withTimeout(performSummarize({
-      text:       newsData.newsBody,
-      sourceType: normalizedData.sourceType,
-      mode:       'breakdown',
-      newsTitle:  newsData.newsTitle,
-      workflowId: _wfId,
-      user:       body.user || null,
-    }), 45000, 'breakdown');
-    const breakdownData = breakRes.success ? breakRes.data : null;
-    if (breakdownData) addLog('Breakdown', `✅ ${breakdownData.possible_angles?.length || 0} angles`);
+    let breakdownData = null;
+    try {
+      const breakRes = await withTimeout(performSummarize({
+        text:       newsData.newsBody,
+        sourceType: normalizedData.sourceType,
+        mode:       'breakdown',
+        newsTitle:  newsData.newsTitle,
+        workflowId: _wfId,
+        user:       body.user || null,
+      }), 45000, 'breakdown');
+      breakdownData = breakRes.success ? breakRes.data : null;
+      if (breakdownData) addLog('Breakdown', `✅ ${breakdownData.possible_angles?.length || 0} angles`);
+    } catch (bdErr) {
+      addLog('Breakdown', 'skipped: ' + bdErr.message);
+    }
 
     // === Blueprint (optional — ไม่ block ถ้าล้มเหลว) ===
     let blueprintData = null;
