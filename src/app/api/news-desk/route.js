@@ -127,14 +127,15 @@ export async function POST(request) {
       return NextResponse.json({ success: true, id, research: r, finalScore: boosted });
     }
 
-    // ★ ส่งเข้า workflow ฝั่งเซิร์ฟเวอร์ — เรียงตามความแน่นของวัตถุดิบ:
-    //   คลิปสัมภาษณ์→บทถอดเสียงเต็ม | เจาะลึกแล้ว→เนื้อสังเคราะห์หลายแหล่ง | ปกติ→ลิงก์
+    // ★ ส่งเข้า workflow ฝั่งเซิร์ฟเวอร์ — กฎเหล็ก (คำสั่งทีม 12 มิ.ย.): ส่งได้แค่ 2 รูปแบบเหมือนที่คนทำแมนนวล
+    //   ① TEXT = บทถอดเสียงคลิปข่าวเดียว (interview) ② URL = ลิงก์ข่าวต้นทาง
+    //   ห้ามส่งเนื้อสังเคราะห์หลายแหล่ง (buildEnrichedInput) เข้าไลน์เขียน — เคยทำให้เนื้อหลายข่าวปนกัน
+    //   (ผลเจาะลึก research ยังอยู่บนการ์ดให้คนอ่านประกอบ แต่ไม่ feed เข้าไลน์)
     if (action === 'sendWorkflow') {
-      const { buildEnrichedInput } = await import('@/lib/services/newsDesk/researchAgent');
       let input = (item.lane === 'interview' && item.fullText)
         ? item.fullText
-        : (buildEnrichedInput(item) || item.url);
-      // ★ ข่าวต่างประเทศที่ส่งเป็นลิงก์ตรง — แนบข้อเท็จจริงประเทศไปกับงาน (pipeline ผนวกเป็นข้อมูลเพิ่มเติม)
+        : item.url;
+      // ★ ข่าวต่างประเทศ — แนบข้อเท็จจริงประเทศไปกับลิงก์ (pipeline ผนวกเป็นข้อมูลเพิ่มเติม ไม่ใช่เนื้อแทน)
       if (item.foreignCountry && input === item.url) {
         input = `${item.url}\n\nหมายเหตุบรรณาธิการ (ข้อเท็จจริง): ข่าวนี้เกิดที่ประเทศ${item.foreignCountry} ไม่ใช่ประเทศไทย — ต้องระบุประเทศชัดเจนตั้งแต่ย่อหน้าแรกของโพสต์`;
       }

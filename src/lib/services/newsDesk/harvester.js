@@ -361,9 +361,9 @@ async function autoPilotPick(freshItems, store, opts = {}) {
     for (const pick of picks.slice(0, perRound)) {
       if (budget <= 0) break;
       try {
-        const { buildEnrichedInput } = await import('./researchAgent');
-        let input = (pick.lane === 'interview' && pick.fullText) ? pick.fullText
-          : (buildEnrichedInput(pick) || pick.url);
+        // ★ กฎเหล็ก (12 มิ.ย.): ส่งได้แค่ TEXT (บทถอดเสียงข่าวเดียว) หรือ URL — เหมือนคนทำแมนนวลเป๊ะ
+        //   ห้ามส่งเนื้อสังเคราะห์หลายแหล่งเข้าไลน์ (เคยทำให้เนื้อหลายข่าวปนกัน)
+        let input = (pick.lane === 'interview' && pick.fullText) ? pick.fullText : pick.url;
         // ★ ข่าวต่างประเทศส่งเป็นลิงก์ตรง — แนบข้อเท็จจริงประเทศ (กันเขียนแบบไม่บอกประเทศ)
         if (pick.foreignCountry && input === pick.url) {
           input = `${pick.url}\n\nหมายเหตุบรรณาธิการ (ข้อเท็จจริง): ข่าวนี้เกิดที่ประเทศ${pick.foreignCountry} ไม่ใช่ประเทศไทย — ต้องระบุประเทศชัดเจนตั้งแต่ย่อหน้าแรกของโพสต์`;
