@@ -20,9 +20,19 @@ export async function POST(request) {
   _mineLock = new Promise((r) => (release = r));
   await prev;
   try {
-    const { url } = await request.json();
+    const { url, _queueJobId = null } = await request.json();
     if (!url || !/^https?:\/\//.test(url)) {
       return NextResponse.json({ success: false, error: 'ต้องวางลิงก์คลิป (YouTube / Facebook / IG / TikTok)', errorType: 'VALIDATION_ERROR' }, { status: 400 });
+    }
+
+    // ★ บน production (Linux) ไม่มี yt-dlp — ส่งเข้าคิวให้เครื่องทีมขุดแทน (บัคจริง: ผู้ใช้กดจากเว็บ prod แล้วพัง)
+    if (process.platform !== 'win32' && !_queueJobId) {
+      const { enqueueJob } = await import('@/lib/services/queueService');
+      const q = await enqueueJob({ jobType: 'mineclip', url, input: url }, 'desk-mineclip');
+      return NextResponse.json({
+        success: true, queued: true, jobId: q.jobId,
+        message: '⏳ ส่งให้เครื่องทีมขุดแล้ว — เสร็จจะโผล่ในแท็บ 🎙️ เอง (~3-6 นาที, เครื่องทีมต้องเปิดอยู่)',
+      });
     }
 
     const store = createStore('news-desk');

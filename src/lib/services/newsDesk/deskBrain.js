@@ -148,6 +148,81 @@ export function isDuplicateOfArchive(title, archiveTitles) {
   return false;
 }
 
+// ════════════════════════════════════════════════════
+// ★ ทีม บก.เฉพาะทาง (ผู้ใช้ 11 มิ.ย.) — แต่ละแนวมี บก. ที่เก่งแนวนั้นจริงๆ คนเดียว
+// ใช้ 2 ที่: (1) editorialJudge เลือก persona ตามเลน (2) action "ปรึกษา บก." เจาะรายข่าว
+// ════════════════════════════════════════════════════
+export const SPECIALIST_EDITORS = {
+  good: {
+    name: 'บก.ข่าวน้ำดี',
+    icon: '💚',
+    lanes: ['good', 'evergreen', 'followup'],
+    persona: 'คุณคือ บก.ข่าวน้ำดี ประสบการณ์ 15 ปี เชี่ยวชาญข่าวน้ำใจ/กตัญญู/สู้ชีวิต/คนดังทำดี รู้ลึกว่าข่าวแนวนี้ปังเพราะ "รายละเอียดเล็กที่จริง" (ตัวเลขเงิน ระยะเวลา คำพูดจากปาก) ไม่ใช่ความซึ้งลอยๆ และรู้ว่าเรื่องซ้ำซาก (บริจาคทั่วไป) ต้องมีมุมใหม่ถึงค่อยทำ',
+  },
+  drama: {
+    name: 'บก.ดราม่า',
+    icon: '🌶️',
+    lanes: ['trend', 'buzz'],
+    persona: 'คุณคือ บก.ดราม่า/กระแส ที่เก่งสุดเรื่อง "เล่นดราม่าแบบไม่ไหม้" — รู้ว่าเพจโดน Facebook กดรีชถ้า toxic จึงถนัดแปลงเรื่องร้อนให้เล่าได้แบบมีชั้นเชิง: เล่าผ่านข้อเท็จจริง+คำพูดจริง ไม่ตัดสินแทนคนอ่าน ไม่โจมตีใคร และเตือนได้แม่นว่าเรื่องไหน "อย่าแตะ" เพราะเสี่ยงกฎหมาย/ดราม่าย้อนเข้าเพจ',
+  },
+  interview: {
+    name: 'บก.บทสัมภาษณ์',
+    icon: '🎙️',
+    lanes: ['interview'],
+    persona: 'คุณคือ บก.สายสัมภาษณ์ เก่งการฟัง 35 นาทีแล้วชี้ "ประโยคเดียวที่คนจะแชร์" ถนัดแปลงบทสนทนายาวเป็นโพสต์สั้นที่เก็บหัวใจครบ และรู้ว่าคำพูดไหนยกมาตรงๆ ได้ คำพูดไหนต้องเล่าอ้อม',
+  },
+};
+
+export function specialistForLane(lane) {
+  for (const sp of Object.values(SPECIALIST_EDITORS)) {
+    if (sp.lanes.includes(lane)) return sp;
+  }
+  return SPECIALIST_EDITORS.drama;
+}
+
+/** ★ ปรึกษา บก.ประจำแนว รายข่าว — แตกประเด็นลึก: ทำได้กี่แนว แต่ละแนวเล่นยังไง เสี่ยงอะไร */
+export async function consultSpecialist(item) {
+  const sp = specialistForLane(item.lane);
+  const research = item.research?.enrichedSummary
+    ? `\nข้อมูลเจาะลึกที่มี:\n${item.research.enrichedSummary}\n${(item.research.keyFacts || []).map(f => '- ' + f).join('\n')}`
+    : '';
+  const res = await callAI({
+    prompt: `${sp.persona}
+
+ข่าว: ${item.title}
+สรุป: ${String(item.snippet || '').slice(0, 250)}${research}
+${item.judgeReason ? 'ความเห็นรอบคัด: ' + item.judgeReason : ''}
+
+วิเคราะห์แบบ บก.ตัวจริงสั่งลูกทีม ตอบ JSON เท่านั้น:
+{"verdict":"ทำ|ทำแบบมีเงื่อนไข|ไม่ทำ",
+"verdictWhy":"เหตุผล 1 ประโยค",
+"angles":[{"name":"ชื่อแนว สั้นๆ","how":"เล่ายังไง เปิดด้วยอะไร เน้นอะไร (≤120 ตัวอักษร)","risk":"จุดเสี่ยง/ข้อระวังของแนวนี้ ('' ถ้าไม่มี)"}],
+"bestAngle":"ชื่อแนวที่แนะนำสุด",
+"doNot":"สิ่งที่ห้ามทำกับข่าวนี้เด็ดขาด ('' ถ้าไม่มี)"}
+- ให้ 2-4 แนวที่ "ทำได้จริง" ตามแนวเพจ (น้ำดี/อบอุ่น/ดราม่ามีชั้นเชิง) ไม่ใช่แนวเพ้อ
+- แนวลบ/โจมตี = ไม่นับเป็นแนว`,
+    model: 'gpt-5.5',
+    temperature: 0.3,
+    maxTokens: 6000,
+  });
+  const parsed = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
+  if (!parsed?.angles?.length) throw new Error('บก.วิเคราะห์ไม่สำเร็จ ลองใหม่อีกครั้ง');
+  return {
+    by: sp.name,
+    icon: sp.icon,
+    verdict: String(parsed.verdict || 'ทำ').slice(0, 30),
+    verdictWhy: String(parsed.verdictWhy || '').slice(0, 150),
+    angles: parsed.angles.slice(0, 4).map(a => ({
+      name: String(a.name || '').slice(0, 50),
+      how: String(a.how || '').slice(0, 150),
+      risk: String(a.risk || '').slice(0, 100),
+    })),
+    bestAngle: String(parsed.bestAngle || '').slice(0, 50),
+    doNot: String(parsed.doNot || '').slice(0, 120),
+    at: new Date().toISOString(),
+  };
+}
+
 // ── ชั้น 3: บรรณาธิการ AI (gpt-5.5) + few-shot จากการตัดสินใจจริงของทีม ──
 async function getJudgeFewshot() {
   try {
@@ -171,13 +246,22 @@ export async function editorialJudge(items) {
   if (!items.length) return items;
   const fewshot = await getJudgeFewshot();
   const out = [];
-  for (let i = 0; i < items.length; i += 8) {
-    const chunk = items.slice(i, i + 8);
+  // ★ จัดกลุ่มตาม บก.เฉพาะทาง — แต่ละแนวถูกตัดสินโดย บก. ที่เก่งแนวนั้นจริงๆ
+  const groups = new Map();
+  for (const it of items) {
+    const sp = specialistForLane(it.lane);
+    if (!groups.has(sp.name)) groups.set(sp.name, { sp, items: [] });
+    groups.get(sp.name).items.push(it);
+  }
+  for (const { sp, items: groupItems } of groups.values()) {
+  for (let i = 0; i < groupItems.length; i += 8) {
+    const chunk = groupItems.slice(i, i + 8);
     const list = chunk.map((it, idx) =>
       `${idx}: [${it.category}|${it.tone}] ${String(it.title).slice(0, 110)} — ${String(it.snippet || '').slice(0, 180)}`).join('\n');
     try {
       const res = await callAI({
-        prompt: `คุณคือหัวหน้ากองบรรณาธิการเพจข่าวไวรัลไทย (แนวถนัดของเพจ: น้ำใจ กตัญญู สู้ชีวิต คนดังทำดี เรื่องอบอุ่นใจ — เนื้อหาลบ/toxic ทำได้จำกัดเพราะเพจโดนกดรีช)
+        prompt: `${sp.persona}
+(บริบทเพจ: แนวถนัดคือ น้ำใจ กตัญญู สู้ชีวิต คนดังทำดี เรื่องอบอุ่นใจ — เนื้อหาลบ/toxic ทำได้จำกัดเพราะเพจโดนกดรีช)
 ${fewshot}
 ให้คะแนน "น่าหยิบมาทำโพสต์" 0-10 ต่อข่าว + เหตุผลสั้น + แตกประเด็น 2 มุมที่เพจเราเล่นได้
 เกณฑ์: เรื่องคนตัวเล็ก/อารมณ์ร่วมสูง/มีตัวเลข-รายละเอียดเจาะใจ = สูง | ข่าวแถลง/การเมือง/ไกลตัวคนไทย = ต่ำ
@@ -206,6 +290,7 @@ ${list}
       console.log('[DeskBrain] judge chunk failed:', e.message?.slice(0, 60));
       out.push(...chunk);
     }
+  }
   }
   return out;
 }

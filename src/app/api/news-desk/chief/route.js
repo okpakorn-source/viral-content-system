@@ -31,6 +31,9 @@ export async function POST(request) {
   await prev;
   try {
     const t0 = Date.now();
+    // ★ สั่ง บก. ด้วยข้อความ (ผู้ใช้ 11 มิ.ย.): ไม่ต้องรอรอบ cron — พิมพ์สั่งให้ไปตรวจ/วิเคราะห์/หาอะไรก็ได้
+    const body = await request.json().catch(() => ({}));
+    const instruction = String(body.instruction || '').slice(0, 300);
     const desk = createStore('news-desk');
     const fbStore = createStore('news-desk-feedback');
     const mktStore = createStore('market-hot-posts');
@@ -62,6 +65,7 @@ export async function POST(request) {
 - การตัดสินใจล่าสุดของทีม (เลือก/ทิ้ง/ปัง/แป้ก):\n${recentFb.join('\n') || '(ยังไม่มี)'}
 - โพสต์แรงในตลาดที่ทีมรายงานเข้ามา:\n${recentMkt.join('\n') || '(ยังไม่มี)'}
 
+${instruction ? `★★★ คำสั่งพิเศษจากหัวหน้าทีม (มนุษย์) — ต้องตอบ/จัดการข้อนี้เป็นอันดับแรกใน orders:\n"${instruction}"\n` : ''}
 หน้าที่:
 1. วินิจฉัย: วันนี้ขาดอะไร (ปริมาณ? หมวดไหนบาง? ตลาดกำลังเล่นอะไรที่เราไม่มีของ?)
 2. สั่งคำค้นพิเศษ 3-6 ชุดให้หน่วยลาดตระเวนไปเก็บ "เดี๋ยวนี้" — คำค้นต้องเฉพาะเจาะจง หา "เรื่องใหม่" ที่ยังไม่มีในคลัง ห้ามสั่งซ้ำเรื่องที่อยู่ในคลังแล้ว ห้ามกว้างแบบ "ข่าววันนี้"

@@ -228,6 +228,7 @@ export async function getNextPendingJobs(limit = 1) {
     // ★ งานคลิป Meta (FB Reel/IG) ใช้ yt-dlp.exe — รันได้เฉพาะเครื่องทีม (Windows)
     //   บน Vercel (Linux) ให้ "ข้าม" งานพวกนี้ไว้เป็น pending รอเครื่องทีมคว้า (เครื่องทีม poll คิวร่วมกันอยู่แล้ว)
     const isMetaVideoJob = (j) => {
+      if (j.payload?.jobType === 'mineclip') return true; // ขุดนาทีทองใช้ yt-dlp — เครื่องทีมเท่านั้น
       const u = String(j.payload?.input || j.payload?.url || '');
       return /facebook\.com\/(reel|watch|share\/[rv]\/|video)|fb\.watch\/|instagram\.com\/(reel|reels|tv)\//i.test(u);
     };

@@ -71,6 +71,14 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'ไม่พบข่าวนี้ในคลัง', errorType: 'NOT_FOUND' }, { status: 404 });
     }
 
+    // ★ ปุ่ม 💼 ปรึกษา บก.ประจำแนว — แตกประเด็นลึก: ทำได้กี่แนว เล่นยังไง เสี่ยงอะไร
+    if (action === 'consult') {
+      const { consultSpecialist } = await import('@/lib/services/newsDesk/deskBrain');
+      const c = await consultSpecialist(item);
+      await store.update(id, (ex) => ({ ...ex, consult: c }));
+      return NextResponse.json({ success: true, id, consult: c });
+    }
+
     // ★ ปุ่ม 🔬 เจาะลึก — Research Agent หาแหล่งเพิ่ม+สังเคราะห์เนื้อพร้อมเขียน (ใช้เวลา ~30-60 วิ)
     if (action === 'research') {
       const { deepResearch } = await import('@/lib/services/newsDesk/researchAgent');
