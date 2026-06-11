@@ -151,12 +151,155 @@ ${listing}
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// ★ Photo Board (12 มิ.ย. 69) — "แผงรูปพร้อมใช้" คนไม่ต้องเสิร์ชเอง
+// ① ดูดรูปจริงจากตัวบทความข่าว (อัลบั้มดิบใต้ข่าวไทยมักไม่มีกราฟิกทับ — ของดีอยู่ตรงนี้)
+// ② ตามรอย "ขอบคุณภาพจาก/เครดิต: เพจ X" → ลิงก์ต้นโพสต์ที่มีอัลบั้มเต็ม
+// ③ ตา AI (faceDetector ตัวเดียวกับระบบปก) คัดเฉพาะรูปคนชัด ไม่มีตัวหนังสือเผา เรียงสวยสุดก่อน
+// ═══════════════════════════════════════════════════════════════
+
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+
+async function fetchHtml(url, timeoutMs = 10000) {
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': 'th,en' }, signal: controller.signal, redirect: 'follow' });
+    clearTimeout(t);
+    if (!res.ok || !/text\/html/i.test(res.headers.get('content-type') || '')) return null;
+    return (await res.text()).slice(0, 600_000);
+  } catch { return null; }
+}
+
+function extractArticleImages(html, baseUrl) {
+  const urls = new Set();
+  const og = html.match(/property=["']og:image["'][^>]*content=["']([^"']+)/i)
+    || html.match(/content=["']([^"']+)["'][^>]*property=["']og:image/i);
+  if (og?.[1]) urls.add(og[1]);
+  const re = /<img[^>]+(?:data-src|data-original|data-lazy-src|src)=["']([^"'>\s]+)["']/gi;
+  let m;
+  while ((m = re.exec(html)) !== null && urls.size < 40) urls.add(m[1]);
+  return [...urls]
+    .map(u => { try { return new URL(u, baseUrl).href; } catch { return null; } })
+    // รับทั้งมีนามสกุลรูปชัด และ path สไตล์ CDN ข่าวไทยที่ไม่มีนามสกุล (/uploads/, /media/, wp-content)
+    .filter(u => u && (/\.(jpe?g|png|webp)(\?|$)/i.test(u) || /\/(uploads?|media|images?|wp-content|files|photo)\//i.test(u)))
+    .filter(u => !/logo|icon|avatar|sprite|placeholder|banner|favicon|emoji|\/ads?[\/.]|\/static\/|qrcode|line-add|share|button|\.svg|\.gif/i.test(u));
+}
+
+// "ขอบคุณภาพจาก/ภาพจาก/เครดิต/ที่มา : เพจ X" — ธรรมเนียมข่าวไทย = ป้ายชี้ต้นโพสต์ฟรีๆ
+function extractPhotoCredits(html) {
+  const text = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, ' ');
+  const credits = new Set();
+  const re = /(?:ขอบคุณ(?:ภาพ|ข้อมูล)?(?:และข้อมูล)?(?:จาก)?|ภาพจาก|เครดิต(?:ภาพ)?|ที่มา)\s*[:：]\s*(?:เพจ\s*)?([ก-๙a-zA-Z0-9 ._\-']{3,50})/g;
+  let m;
+  while ((m = re.exec(text)) !== null && credits.size < 3) {
+    const name = m[1].trim().replace(/\s{2,}/g, ' ').replace(/[,.]$/, '');
+    if (name.length >= 3 && !/^(facebook|ข่าว|วันที่|https?)/i.test(name)) credits.add(name);
+  }
+  return [...credits];
+}
+
+async function buildPhotoBoard(kept, analysis) {
+  // ── รวบหน้าเว็บข่าวที่คุ้มจะเข้าไปดูดรูป (โซเชียลดูดไม่ได้ — ข้าม) ──
+  const SOCIAL = /facebook\.com|instagram\.com|tiktok\.com|youtube\.com|youtu\.be|twitter\.com|x\.com|lookaside\./i;
+  let pageLinks = [...new Set(
+    kept.filter(c => (c.channel === 'news' || c.channel === 'images') && c.url
+      && !SOCIAL.test(c.url)
+      && (c.score == null || c.score >= 6))
+      .map(c => c.url)
+  )].slice(0, 5);
+
+  // ★ ข่าวกระแสโซเชียล: ผลค้นเป็น FB/IG/TikTok ล้วน ไม่มีเว็บข่าวให้ดูดรูป → ค้นเว็บข่าวเพิ่มเอง 1 รอบ
+  if (pageLinks.length < 2 && analysis?.queries?.[0]?.q) {
+    try {
+      const extra = await serperSearch('search', `${analysis.queries[0].q} ข่าว`, 8);
+      for (const o of extra.organic || []) {
+        if (o.link && !SOCIAL.test(o.link) && pageLinks.length < 5 && !pageLinks.includes(o.link)) pageLinks.push(o.link);
+      }
+    } catch { /* ข้าม */ }
+  }
+
+  const candidates = new Map(); // key = URL ตัด query (กันรูปเดียวกันซ้ำคนละ size param) → { img, page }
+  const addCandidate = (img, page) => {
+    const key = String(img).split('?')[0];
+    if (!candidates.has(key) && candidates.size < 34) candidates.set(key, { img, page });
+  };
+  // รูปจาก Google Images มี URL รูปตรงอยู่แล้ว — เข้ารอบทันที
+  for (const c of kept.filter(x => x.imageUrl)) addCandidate(c.imageUrl, c.url || '');
+
+  const creditNames = new Set();
+  const htmls = await Promise.all(pageLinks.map(u => fetchHtml(u)));
+  htmls.forEach((html, i) => {
+    if (!html) return;
+    for (const img of extractArticleImages(html, pageLinks[i])) addCandidate(img, pageLinks[i]);
+    for (const name of extractPhotoCredits(html)) creditNames.add(name);
+  });
+
+  // ── ตามรอยต้นโพสต์จากชื่อเครดิต (สูงสุด 2 ชื่อ ชื่อละ 1 ค้น) ──
+  const originPosts = [];
+  for (const name of [...creditNames].slice(0, 2)) {
+    try {
+      const r = await serperSearch('search', `"${name}" site:facebook.com`, 3);
+      const hit = (r.organic || [])[0];
+      if (hit?.link) originPosts.push({ name, url: hit.link, title: String(hit.title || '').slice(0, 90) });
+    } catch { /* ข้าม */ }
+  }
+
+  // ── ดาวน์โหลด + ตา AI คัด (faceDetector ของระบบปก: faces + hasBigText) ──
+  const list = [...candidates.values()].slice(0, 14);
+  const downloads = await Promise.all(list.map(async (c, i) => {
+    try {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 12000);
+      const res = await fetch(c.img, { headers: { 'User-Agent': UA, Referer: c.page || c.img }, signal: controller.signal });
+      clearTimeout(t);
+      if (!res.ok) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length < 15_000 || buf.length > 5_000_000) return null; // เล็กจิ๋ว=ไอคอน / ใหญ่ยักษ์=เปลือง
+      return { id: String(i), buffer: buf, meta: c };
+    } catch { return null; }
+  }));
+  const valid = downloads.filter(Boolean);
+
+  let scored = [];
+  if (valid.length > 0) {
+    try {
+      const { batchDetectFaces } = await import('@/lib/services/faceDetector');
+      const results = await batchDetectFaces(valid.map(v => ({ id: v.id, buffer: v.buffer })));
+      scored = valid.map(v => {
+        const d = results.get(v.id) || {};
+        const hasFace = (d.faces || []).length > 0;
+        const clean = hasFace && !d.hasBigText;
+        // อันดับ: คนชัด+ไม่มีตัวหนังสือ > ฉาก/ของไม่มีตัวหนังสือ > คน+มีตัวหนังสือ (ครอปหลบได้) > ตัดทิ้ง
+        const rank = clean ? 3 : (!hasFace && !d.hasBigText) ? 2 : hasFace ? 1 : 0;
+        return { img: v.meta.img, page: v.meta.page, face: hasFace, clean, rank };
+      }).filter(s => s.rank > 0);
+      scored.sort((a, b) => b.rank - a.rank);
+    } catch (e) {
+      console.log('[ImageScout] vision คัดรูปล้ม — ใช้รูปดิบ:', e.message?.slice(0, 50));
+      scored = valid.map(v => ({ img: v.meta.img, page: v.meta.page, face: null, clean: null, rank: 1 }));
+    }
+  }
+
+  return {
+    images: scored.slice(0, 12),
+    originPosts,
+    checked: valid.length,
+  };
+}
+
 // ── เต็มวงจร ──────────────────────────────────────────────────
 export async function scoutImages({ title, content }) {
   const t0 = Date.now();
   const analysis = await analyzeImageQueries({ title, content });
   const candidates = await searchAllChannels(analysis);
   const kept = await filterByRelevance(analysis, candidates);
+
+  // ★ แผงรูปพร้อมใช้ — ดูดรูปจริง + ตามรอยต้นโพสต์ + ตา AI คัด (พังได้โดยไม่ล้มงานหลัก)
+  const photoBoard = await buildPhotoBoard(kept, analysis).catch(e => {
+    console.log('[ImageScout] photoBoard ล้ม (ไม่กระทบลิงก์):', e.message?.slice(0, 60));
+    return null;
+  });
 
   // จัดกลุ่มตามช่องทาง เรียงคะแนน สูงสุด 10 ลิงก์/ช่อง
   const channels = {};
@@ -173,12 +316,13 @@ export async function scoutImages({ title, content }) {
   console.log(`[ImageScout] ✅ "${String(title).slice(0, 40)}" → ${totalLinks} ลิงก์ (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
 
   return {
-    ok: totalLinks > 0,
+    ok: totalLinks > 0 || (photoBoard?.images?.length || 0) > 0,
     event: analysis.event,
     people: analysis.people || [],
     queries: analysis.queries.map(q => q.q),
     channels,
     totalLinks,
+    photoBoard, // ★ { images: [{img, page, face, clean}], originPosts: [{name, url}] }
     at: new Date().toISOString(),
   };
 }

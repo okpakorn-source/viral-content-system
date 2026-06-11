@@ -4,7 +4,7 @@
  * 🗞️ โต๊ะข่าวกลาง (News Desk) — เฟส 1
  * feed ข่าวคัดกรองแล้วเรียงคะแนน · จองกันชนกัน · ส่งเข้า workflow คลิกเดียว
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Header from '@/components/layout/Header';
 
 const TABS = [
@@ -94,6 +94,20 @@ export default function NewsDeskPage() {
   useEffect(() => { setLoading(true); load(); }, [load]);
   useEffect(() => { const t = setInterval(load, 60_000); return () => clearInterval(t); }, [load]);
 
+  // ★ Auto Photo Board ที่ชั้นวาง ✅: เปิดแท็บแล้วใบไหนยังไม่มีรูป → หาให้เองเงียบๆ (สูงสุด 2 ใบ/รอบ กันค่าใช้จ่ายพุ่ง)
+  const _autoScouted = useRef(new Set());
+  useEffect(() => {
+    if (tab !== 'ready' || !items.length) return;
+    const targets = items.filter(i => !i.imageSources && !_autoScouted.current.has(i.id)).slice(0, 2);
+    for (const t of targets) {
+      _autoScouted.current.add(t.id);
+      fetch('/api/news-desk/image-scout', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newsId: t.id }),
+      }).then(() => load()).catch(() => {});
+    }
+  }, [tab, items, load]);
+
   const harvest = async () => {
     setHarvesting(true); setMsg('🔄 กำลังเก็บ+คัดกรองข่าวรอบใหม่ (~2-4 นาที — AI ให้คะแนนทีละข่าว)...');
     try {
@@ -128,8 +142,16 @@ export default function NewsDeskPage() {
         body: JSON.stringify({ action: 'sendWorkflow', id: item.id, user }),
       });
       const d = await res.json();
-      if (d.success) setMsg(`✅ เข้าคิวแล้ว (คิวที่ ${d.position}) — ดูผลในหน้า Generation Log`);
-      else setMsg(`❌ ${d.error}`);
+      if (d.success) {
+        setMsg(`✅ เข้าคิวแล้ว (คิวที่ ${d.position}) — ระบบกำลังหาแหล่งภาพให้อัตโนมัติ พอเขียนเสร็จรูปจะพร้อมพอดี`);
+        // ★ Auto Photo Board: ส่งเขียนปุ๊บ หาภาพปั๊บ (ไม่ต้องรอ ไม่บล็อกหน้าจอ) — เนื้อเสร็จ รูปเสร็จ พร้อมกัน
+        if (!item.imageSources) {
+          fetch('/api/news-desk/image-scout', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newsId: item.id }),
+          }).then(() => load()).catch(() => {});
+        }
+      } else setMsg(`❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
   };
@@ -490,13 +512,35 @@ export default function NewsDeskPage() {
                         {it.captionSkeleton && <div style={{ fontSize: 12, color: 'var(--desk-blue)', marginTop: 4 }}>📝 โครงเล่า: {it.captionSkeleton}</div>}
                       </div>
                     )}
-                    {/* ★ แหล่งภาพของข่าวนี้ — ลิงก์จัดกลุ่มตามช่องทาง คนเลือกหยิบเอง */}
-                    {it.imageSources?.totalLinks > 0 && (
+                    {/* ★ แหล่งภาพของข่าวนี้ — แผงรูปพร้อมใช้ + ต้นโพสต์ + ลิงก์จัดกลุ่ม */}
+                    {(it.imageSources?.totalLinks > 0 || it.imageSources?.photoBoard?.images?.length > 0) && (
                       <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 10, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.25)' }}>
                         <div style={{ fontSize: 12.5, color: 'var(--desk-amber)', fontWeight: 700 }}>
                           📸 แหล่งภาพของข่าวนี้ — {it.imageSources.totalLinks} ลิงก์
+                          {it.imageSources.photoBoard?.images?.length > 0 && <span> · 🖼️ รูปพร้อมใช้ {it.imageSources.photoBoard.images.length}</span>}
                           <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {String(it.imageSources.event || '').slice(0, 70)}</span>
                         </div>
+                        {/* 🏠 ต้นโพสต์จากเครดิต "ขอบคุณภาพจาก" — อัลบั้มเต็มอยู่ที่นี่ */}
+                        {(it.imageSources.photoBoard?.originPosts || []).map((op, oi) => (
+                          <div key={oi} style={{ marginTop: 5, fontSize: 12.5 }}>
+                            <a href={op.url} target="_blank" rel="noreferrer" style={{ color: 'var(--desk-green)', fontWeight: 700, textDecoration: 'none' }}>
+                              🏠 ต้นโพสต์: {op.name} — {op.title || op.url}
+                            </a>
+                          </div>
+                        ))}
+                        {/* แผงรูป — ✅ ขอบเขียว = คนชัดไม่มีตัวหนังสือเผา (ตา AI คัดแล้ว) */}
+                        {it.imageSources.photoBoard?.images?.length > 0 && (
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                            {it.imageSources.photoBoard.images.map((p, pi) => (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <a key={pi} href={p.img} target="_blank" rel="noreferrer" title={p.clean ? 'คนชัด ไม่มีตัวหนังสือ — ใช้ได้เลย' : p.face ? 'มีคน แต่มีตัวหนังสือ (ครอปหลบได้)' : 'ภาพฉาก/ของ'}
+                                style={{ position: 'relative', width: 106, height: 80, borderRadius: 8, overflow: 'hidden', border: p.clean ? '2px solid var(--desk-green)' : '1px solid var(--border)', flexShrink: 0 }}>
+                                <img src={p.img} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                {p.clean && <span style={{ position: 'absolute', top: 2, right: 3, fontSize: 11 }}>✅</span>}
+                              </a>
+                            ))}
+                          </div>
+                        )}
                         {Object.entries(IMG_CHANNELS).filter(([k]) => it.imageSources.channels?.[k]?.length > 0).map(([k, cfg]) => (
                           <div key={k} style={{ marginTop: 6 }}>
                             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>{cfg.icon} {cfg.label} ({it.imageSources.channels[k].length})</div>

@@ -387,12 +387,32 @@ export default function GenerationLogsPage() {
                       </div>
 
                       {/* แหล่งภาพของข่าวนี้ — ลิงก์จัดกลุ่มตามช่องทาง */}
-                      {imgScout[c.caseId]?.totalLinks > 0 && (
+                      {(imgScout[c.caseId]?.totalLinks > 0 || imgScout[c.caseId]?.photoBoard?.images?.length > 0) && (
                         <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(245,158,11,0.3)', background: 'rgba(245,158,11,0.05)' }}>
                           <div style={{ fontSize: 13, color: 'var(--desk-amber)', fontWeight: 700, marginBottom: 4 }}>
                             📸 แหล่งภาพของข่าวนี้ — {imgScout[c.caseId].totalLinks} ลิงก์
+                            {imgScout[c.caseId].photoBoard?.images?.length > 0 && <span> · 🖼️ รูปพร้อมใช้ {imgScout[c.caseId].photoBoard.images.length}</span>}
                             <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {String(imgScout[c.caseId].event || '').slice(0, 70)}</span>
                           </div>
+                          {(imgScout[c.caseId].photoBoard?.originPosts || []).map((op, oi) => (
+                            <div key={oi} style={{ marginTop: 4, fontSize: 12.5 }}>
+                              <a href={op.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--desk-green)', fontWeight: 700, textDecoration: 'none' }}>
+                                🏠 ต้นโพสต์: {op.name} — {op.title || op.url}
+                              </a>
+                            </div>
+                          ))}
+                          {imgScout[c.caseId].photoBoard?.images?.length > 0 && (
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, marginBottom: 4 }}>
+                              {imgScout[c.caseId].photoBoard.images.map((p, pi) => (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <a key={pi} href={p.img} target="_blank" rel="noopener noreferrer" title={p.clean ? 'คนชัด ไม่มีตัวหนังสือ — ใช้ได้เลย' : p.face ? 'มีคน แต่มีตัวหนังสือ (ครอปหลบได้)' : 'ภาพฉาก/ของ'}
+                                  style={{ position: 'relative', width: 106, height: 80, borderRadius: 8, overflow: 'hidden', border: p.clean ? '2px solid var(--desk-green)' : '1px solid var(--border)', flexShrink: 0 }}>
+                                  <img src={p.img} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                  {p.clean && <span style={{ position: 'absolute', top: 2, right: 3, fontSize: 11 }}>✅</span>}
+                                </a>
+                              ))}
+                            </div>
+                          )}
                           {Object.entries({ facebook: '📘 Facebook', images: '🖼️ ภาพจาก Google', news: '📰 เว็บข่าว', youtube: '▶️ YouTube', tiktok: '🎵 TikTok', instagram: '📷 Instagram' })
                             .filter(([k]) => imgScout[c.caseId].channels?.[k]?.length > 0)
                             .map(([k, label]) => (
