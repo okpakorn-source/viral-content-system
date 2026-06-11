@@ -66,7 +66,7 @@ function templateText(templateSpec) {
  * @param {Array} [templateOptions] — ถ้าส่งหลาย template มา Director จะ "เลือกโครงที่เล่าเรื่องนี้ได้ดีสุด" เอง
  * @returns {Promise<{templateSpec, assignments: Array<{slotId, imageIndex, crop:{x,y,w,h}}>, reason: string}|null>}
  */
-export async function directCover({ imageBuffers, identity, templateSpec, templateOptions = null, newsTitle }) {
+export async function directCover({ imageBuffers, identity, templateSpec, templateOptions = null, newsTitle, faceBoxes = [] }) {
   const options = (templateOptions && templateOptions.length > 0) ? templateOptions : [templateSpec];
   const thumbs = await buildThumbnails(imageBuffers);
   const usable = options.filter(t => thumbs.length >= t.slots.length);
@@ -80,7 +80,13 @@ export async function directCover({ imageBuffers, identity, templateSpec, templa
     image_url: { url: `data:image/jpeg;base64,${t.base64}`, detail: 'auto' },
   }));
 
-  const dimsText = thumbs.map(t => `#${t.index}: ${t.width}x${t.height}px`).join(', ');
+  const dimsText = thumbs.map(t => {
+    const fb = faceBoxes[t.index];
+    const faceTxt = fb
+      ? ` | ใบหน้าหลัก: x ${fb.x1}-${fb.x2}, y ${fb.y1}-${fb.y2} (กว้าง ${(fb.x2 - fb.x1).toFixed(2)})${fb.count > 1 ? ` [มี ${fb.count} หน้า]` : ''}`
+      : '';
+    return `#${t.index}: ${t.width}x${t.height}px${faceTxt}`;
+  }).join('\n');
 
   const templatesBlock = usable.map(t =>
     `▼ "${t.id}"${t.storyFit ? ` — เหมาะกับ: ${t.storyFit}` : ''} (ใช้ ${t.slots.length} ภาพ, canvas ${t.canvasW}x${t.canvasH})\n${templateText(t)}`
@@ -115,6 +121,10 @@ ${templatesBlock}
 8. ช่อง "highlight" (ถ้ามี): วินาทีสำคัญของเหตุการณ์ (การส่งมอบ/การกระทำ/หลักฐาน)
 9. ★★ HEADROOM: ขอบบนของกรอบครอปต้องอยู่ "เหนือเส้นผม" เสมอ — ถ้าหัวคนชิดขอบบนของภาพต้นฉบับให้เริ่ม y=0 ได้ แต่ห้ามตั้ง y ที่ทำให้ผม/ศีรษะหลุดกรอบเด็ดขาด
 10. ★★ บุคคลเดียวกันห้ามปรากฏเกิน 2 ช่อง — ถ้าเรื่องมีบุคคลอื่น (ผู้ให้/ผู้รับ/คู่กรณี/ครอบครัว) ต้องให้พื้นที่พวกเขา ช่องที่เกินให้ใช้ฉากเหตุการณ์แทน
+11. ★★★ สูตรกรอบแน่น (ใช้พิกัดใบหน้าที่ให้มา "คำนวณ" — ห้ามกะด้วยตา):
+   - ช่อง main/hero: ความกว้างกรอบ = 2.2-2.8 เท่าของความกว้างใบหน้า, หน้าอยู่กึ่งกลางแนวนอนของกรอบ, ดวงตาอยู่ที่ ~35-40% จากขอบบนกรอบ → หน้าจะใหญ่เด่นเต็มช่องแบบปกไวรัลจริง (ห้ามครอปทั้งภาพแบบหลวมๆ เด็ดขาด!)
+   - ช่อง circle: กรอบจัตุรัส ความกว้าง = 1.8-2.2 เท่าของความกว้างใบหน้า, ใบหน้ากึ่งกลางเป๊ะทั้งแนวตั้ง-แนวนอน — เผื่อขอบว่างรอบหน้า ≥25% ของกรอบกันหน้าล้นขอบวง
+   - ตัวอย่างคำนวณ: หน้ากว้าง 0.20 (x 0.35-0.55) → กรอบ hero กว้าง ~0.5 → x เริ่ม ~0.20 (กึ่งกลางหน้า 0.45 - 0.25)
 
 ตอบ JSON เท่านั้น:
 {"templateId":"ชื่อโครงที่เลือก","assignments":[{"slotId":"main","imageIndex":0,"crop":{"x":0.1,"y":0.0,"w":0.6,"h":0.9},"why":"สั้นๆ"}],"reason":"เลือกโครงนี้เพราะ... + ภาพรวมการเล่าเรื่อง"}`;

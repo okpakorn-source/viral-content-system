@@ -84,6 +84,28 @@ export async function POST(request) {
     }));
     console.log(`[CoverV3] downloaded ${imageBuffers.length}/${candidates.length} buffers`);
 
+    // ── ตรวจจับตำแหน่งใบหน้า → ป้อนเป็น "ข้อมูลพิกัด" ให้ Director คำนวณกรอบแน่นแบบตัวเลข
+    //    (rev.7 — feedback: ฮีโร่ไม่เด่น/วงกลมล้น เพราะ Director กะกรอบด้วยตาแล้วหลวม)
+    let faceBoxes = [];
+    try {
+      const { batchDetectFaces } = await import('@/lib/services/faceDetector');
+      const fdMap = await batchDetectFaces(imageBuffers.map((img, i) => ({ id: `v3_${i}`, buffer: img.buffer })));
+      const sharpLib = (await import('sharp')).default;
+      faceBoxes = await Promise.all(imageBuffers.map(async (img, i) => {
+        const fd = fdMap?.get?.(`v3_${i}`);
+        if (!fd?.hasFaces || !fd.faces?.length) return null;
+        const meta = await sharpLib(img.buffer).metadata();
+        const W = meta.width || 1, H = meta.height || 1;
+        const largest = fd.faces.reduce((b, f) => (f.width * f.height > b.width * b.height ? f : b), fd.faces[0]);
+        return {
+          x1: +(largest.x / W).toFixed(2), y1: +(largest.y / H).toFixed(2),
+          x2: +((largest.x + largest.width) / W).toFixed(2), y2: +((largest.y + largest.height) / H).toFixed(2),
+          count: fd.faces.length,
+        };
+      }));
+      console.log(`[CoverV3] face boxes: ${faceBoxes.filter(Boolean).length}/${imageBuffers.length} images`);
+    } catch (e) { console.log('[CoverV3] face detect failed (non-fatal):', e.message?.slice(0, 50)); }
+
     // ── Quality floor (หลักเดียวกับ v1) ──
     const { V3_TEMPLATES, adaptRegistryTemplate } = await import('@/lib/services/coverExecutorService');
     if (imageBuffers.length < 3) {
@@ -104,7 +126,7 @@ export async function POST(request) {
 
     console.log(`[CoverV3] ③ Director (options: ${templateOptions.map(t => t.id).join(', ')} | pool=${imageBuffers.length})...`);
     const { directCover, reviewCover } = await import('@/lib/services/coverDirectorService');
-    const direction = await directCover({ imageBuffers, identity, templateOptions, templateSpec: templateOptions[0], newsTitle });
+    const direction = await directCover({ imageBuffers, identity, templateOptions, templateSpec: templateOptions[0], newsTitle, faceBoxes });
     if (!direction) {
       await markQueueJob('failed', { error: 'AI Director จัดวางไม่สำเร็จ' });
       return NextResponse.json({ success: false, error: 'AI Director จัดวางไม่สำเร็จ', errorType: 'DIRECTOR_FAILED' }, { status: 422 });
@@ -134,8 +156,10 @@ export async function POST(request) {
     try {
       const { callAI } = await import('@/lib/ai/openai');
       const smallForScore = await (await import('sharp')).default(coverBuffer).resize(600, null, { fit: 'inside' }).jpeg({ quality: 75 }).toBuffer();
+      // งานจากคิวมักไม่มี newsTitle → ใช้ identity แทน และบังคับให้คะแนนจากภาพเสมอ (กัน "ข้อมูลไม่พอ" = 0/10)
+      const judgeCtx = (newsTitle || identity?.mainCharacter || identity?.storyType || '').slice(0, 80);
       const judgeRes = await callAI({
-        prompt: `ให้คะแนนปกข่าวนี้ 0-10 (องค์ประกอบ, ความเด่นของบุคคล, การเล่าเรื่อง, ความสะอาด) ข่าว: "${(newsTitle || '').slice(0, 80)}"\nตอบ JSON: {"score": 0-10, "reason": "สั้นๆ"}`,
+        prompt: `ให้คะแนนปกข่าวนี้ 0-10 จากภาพที่แนบ (องค์ประกอบ, ความเด่นของบุคคล, การเล่าเรื่อง, ความสะอาด)${judgeCtx ? ` บริบท: "${judgeCtx}"` : ''}\nต้องประเมินจากภาพเสมอแม้ไม่มีบริบทข่าว ห้ามตอบว่าข้อมูลไม่เพียงพอ\nตอบ JSON: {"score": 0-10, "reason": "สั้นๆ"}`,
         imageContents: [{ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${smallForScore.toString('base64')}`, detail: 'low' } }],
         model: 'gpt-4o-mini',
         temperature: 0.2,

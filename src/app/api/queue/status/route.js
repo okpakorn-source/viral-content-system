@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 
 // ★ Track last cleanup time to avoid running cleanup every poll (every 3s)
 let _lastCleanupAt = 0;
+let _lastReviveAt = 0;
 
 export async function GET(req) {
   try {
@@ -22,6 +23,19 @@ export async function GET(req) {
     if (now - _lastCleanupAt > 60_000) {
       _lastCleanupAt = now;
       cleanupStaleJobs(15).catch(() => {}); // fire-and-forget, 15 min threshold (pipeline uses 5-12 min)
+    }
+
+    // ★ Self-heal (11 มิ.ย.): ลูกโซ่ worker ขาดได้ (trigger next batch ตาย / server restart)
+    // → งาน pending ค้างเงียบจนกว่าจะมีคนยิง worker เอง — UI poll ทุก 3s อยู่แล้ว
+    // ถ้าเห็น pending แต่ไม่มีงานวิ่ง ให้ปลุก worker เอง (throttle 20s กันยิงรัว)
+    if (now - _lastReviveAt > 20_000) {
+      _lastReviveAt = now;
+      getQueueOverview().then((ov) => {
+        if (ov.pending > 0 && ov.processing === 0) {
+          logger.info(`[Queue Status] 🚑 Self-heal: ${ov.pending} pending แต่ไม่มี worker วิ่ง — ปลุก worker`);
+          fetch(`${req.nextUrl.origin}/api/queue/worker`, { method: 'POST' }).catch(() => {});
+        }
+      }).catch(() => {});
     }
     
     if (!jobId) {
