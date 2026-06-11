@@ -371,8 +371,8 @@ async function autoPilotPick(freshItems, store, opts = {}) {
         const q = await enqueueJob(
           {
             input, contentLength: 'short', userId: `ai-${sp.name}`,
-            // ★ ป้ายโต๊ะข่าว — ไหลผ่าน worker → auto/process → Generation Log (แยก บก./แนวข่าวได้)
-            deskMeta: { newsId: pick.id, lane: pick.lane, category: pick.category || '', editor: sp.name, editorIcon: sp.icon },
+            // ★ ป้ายโต๊ะข่าว — ไหลผ่าน worker → auto/process → Generation Log (แยก บก./แนวข่าว + คะแนนความควรทำ)
+            deskMeta: { newsId: pick.id, lane: pick.lane, category: pick.category || '', editor: sp.name, editorIcon: sp.icon, judgeScore: pick.judgeScore ?? null, finalScore: pick.finalScore ?? null },
           },
           `ai-${sp.name}`
         );

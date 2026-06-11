@@ -143,8 +143,8 @@ export async function POST(request) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           input, contentLength: 'short', userId: `desk-${user}`,
-          // ★ ป้ายโต๊ะข่าว — Generation Log ใช้แยกว่าใครทำ แนวอะไร
-          deskMeta: { newsId: id, lane: item.lane, category: item.category || '', editor: user, editorIcon: '👤' },
+          // ★ ป้ายโต๊ะข่าว — Generation Log ใช้แยกว่าใครทำ แนวอะไร + คะแนนไว้ติดป้าย "ความควรทำ"
+          deskMeta: { newsId: id, lane: item.lane, category: item.category || '', editor: user, editorIcon: '👤', judgeScore: item.judgeScore ?? null, finalScore: item.finalScore ?? null },
         }),
       });
       const qData = await qRes.json();

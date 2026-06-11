@@ -51,6 +51,29 @@ function laneOf(c) {
   return 'other';
 }
 
+// ★ ป้าย "ความควรทำ" — อ่านแวบเดียวรู้ว่าหยิบอะไรก่อน ไม่ต้องไล่อ่านทุกเคส (คะแนนจาก บก.บนโต๊ะข่าว)
+const URGENCY_CFG = {
+  hot:      { icon: '🔥', label: 'รีบทำ! กระแสกำลังมา',        color: '#ef4444', bg: 'rgba(239,68,68,0.13)' },
+  viral:    { icon: '💎', label: 'ไวรัลแน่ ควรทำ',             color: '#a855f7', bg: 'rgba(168,85,247,0.13)' },
+  anytime:  { icon: '🕓', label: 'ดีไม่หมดอายุ ทำตอนไหนก็ได้', color: '#22c55e', bg: 'rgba(34,197,94,0.13)' },
+  good:     { icon: '👍', label: 'น่าทำ',                      color: '#3b82f6', bg: 'rgba(59,130,246,0.13)' },
+};
+
+function urgencyOf(c) {
+  const d = c.desk || {};
+  const js = Number(d.judgeScore);
+  const fs = Number(d.finalScore);
+  if (!Number.isFinite(js) && !Number.isFinite(fs)) return null;
+  const strong = (Number.isFinite(js) && js >= 8) || (Number.isFinite(fs) && fs >= 82);
+  const decent = (Number.isFinite(js) && js >= 6.5) || (Number.isFinite(fs) && fs >= 72);
+  const timeSensitive = d.lane === 'trend' || d.lane === 'buzz';
+  if (strong && timeSensitive) return 'hot';
+  if (strong) return 'viral';
+  if (decent && d.lane === 'evergreen') return 'anytime';
+  if (decent) return 'good';
+  return null;
+}
+
 function fmtDate(iso) {
   if (!iso) return '-';
   return new Date(iso).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -71,6 +94,7 @@ export default function GenerationLogsPage() {
   const [filterEditor, setFilterEditor] = useState('all');
   const [filterLane, setFilterLane]   = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterUrgency, setFilterUrgency] = useState('all');
   const [todayOnly, setTodayOnly]     = useState(false);
   const [expanded, setExpanded]       = useState(null);   // caseId ที่กางอยู่
   const [detail, setDetail]           = useState(null);   // เนื้อเต็มของเคสที่กาง
@@ -204,7 +228,13 @@ export default function GenerationLogsPage() {
   }, [detail]);
 
   // ── กรอง + นับ ──
-  const enriched = useMemo(() => cases.map(c => ({ ...c, _editor: editorOf(c), _lane: laneOf(c) })), [cases]);
+  const enriched = useMemo(() => cases.map(c => ({ ...c, _editor: editorOf(c), _lane: laneOf(c), _urgency: urgencyOf(c) })), [cases]);
+
+  const urgencyCounts = useMemo(() => {
+    const m = {};
+    for (const c of enriched) if (c._urgency) m[c._urgency] = (m[c._urgency] || 0) + 1;
+    return m;
+  }, [enriched]);
 
   const editorCounts = useMemo(() => {
     const m = {};
@@ -223,6 +253,7 @@ export default function GenerationLogsPage() {
     if (filterEditor !== 'all') list = list.filter(c => c._editor === filterEditor);
     if (filterLane !== 'all') list = list.filter(c => c._lane === filterLane);
     if (filterStatus !== 'all') list = list.filter(c => c.status === filterStatus);
+    if (filterUrgency !== 'all') list = list.filter(c => c._urgency === filterUrgency);
     if (todayOnly) list = list.filter(c => isToday(c.createdAt));
     if (search.trim()) {
       const s = search.trim().toLowerCase();
@@ -234,7 +265,7 @@ export default function GenerationLogsPage() {
       );
     }
     return list;
-  }, [enriched, filterEditor, filterLane, filterStatus, todayOnly, search]);
+  }, [enriched, filterEditor, filterLane, filterStatus, filterUrgency, todayOnly, search]);
 
   const chipStyle = (active) => ({
     padding: '6px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600, cursor: 'pointer',
@@ -295,6 +326,18 @@ export default function GenerationLogsPage() {
         ))}
       </div>
 
+      {/* ── แถวกรอง: ความควรทำ (อ่านแวบเดียวรู้ว่าหยิบอะไรก่อน) ── */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700, minWidth: 52 }}>ควรทำ:</span>
+        <button onClick={() => setFilterUrgency('all')} style={chipStyle(filterUrgency === 'all')}>ทั้งหมด</button>
+        {Object.entries(URGENCY_CFG).filter(([k]) => urgencyCounts[k]).map(([k, cfg]) => (
+          <button key={k} onClick={() => setFilterUrgency(filterUrgency === k ? 'all' : k)}
+            style={{ ...chipStyle(filterUrgency === k), ...(filterUrgency === k ? {} : { color: cfg.color, borderColor: cfg.color + '55' }) }}>
+            {cfg.icon} {cfg.label} ({urgencyCounts[k]})
+          </button>
+        ))}
+      </div>
+
       {/* ── แถวกรอง: แนวข่าว ── */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700, minWidth: 52 }}>แนวข่าว:</span>
@@ -345,6 +388,11 @@ export default function GenerationLogsPage() {
               <div onClick={() => toggleExpand(c.caseId)} style={{ padding: '12px 16px', cursor: 'pointer' }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
                   <span style={{ fontWeight: 800, color: 'var(--desk-purple)', fontSize: 14 }}>#{c.caseId}</span>
+                  {c._urgency && URGENCY_CFG[c._urgency] && (
+                    <span style={{ fontSize: 12, fontWeight: 800, padding: '2px 10px', borderRadius: 999, whiteSpace: 'nowrap', color: URGENCY_CFG[c._urgency].color, background: URGENCY_CFG[c._urgency].bg, border: `1px solid ${URGENCY_CFG[c._urgency].color}44` }}>
+                      {URGENCY_CFG[c._urgency].icon} {URGENCY_CFG[c._urgency].label}
+                    </span>
+                  )}
                   <span style={{ fontSize: 15, fontWeight: 700, flex: '1 1 300px', lineHeight: 1.45 }}>{c.newsTitle}</span>
                   <span style={{ fontSize: 12, color: st.color, fontWeight: 700, whiteSpace: 'nowrap' }}>{st.icon} {st.label}</span>
                 </div>
