@@ -934,5 +934,24 @@
     "batchId": null,
     "createdAt": "2026-06-11T07:32:48.513Z",
     "coverImagePath": "/cover-cases/CASE-054.jpg"
+  },
+  {
+    "caseId": "CASE-055",
+    "caseNumber": 55,
+    "newsTitle": "ทราย สก๊อต ตอบปมแท็กหานัดคุย มายด์ หลายรอบก่อนแต่งงานทำไม - รับห่วงสภาพจิตใจ",
+    "content": "ทราย สก๊อต ตอบปมแท็กหาพยายามนัดคุย มายด์ หลายรอบก่อนแต่งงานทำไม – รับห่วงสภาพจิตใจ มายด์ ตอนนี้\n\nรายการ ถกไม่เถียง ซึ่ง ทราย สก๊อต ไปเปิดใจเรื่องราวชีวิตและประเด็นการถูกกระทำความรุนแรงถูกละเมิดในครอบครัว ตอนหนึ่ง ทิน โชคกมลกิจ พิธีกรถามถึงตอนที่ ทราย เคยโพสต์ไอจีสตอรี่ ข้อความว่า ทราย พยายามนัดคุยหลายรอบ พร้อมแท็กไปหาพี่สะใภ้ รบกวนตอบรับด้วย ตอนนั้นทำไมถึงขึ้นไอจีสตอรี่แบบนั้นที่ผ่านมาไม่สามารถที่จะสื่อสารกับเขาได้เลยเหรอ ความตั้งใจในการสื่อสารกับเขาคืออะไร\n\nทราย กล่าวว่า “เราแค่พยายามจะบอกเขาว่",
+    "score": 7,
+    "templateUsed": "vt_faces_circle",
+    "elapsed": 356.371,
+    "imageCount": 5,
+    "identity": {
+      "mainCharacter": "ทราย สก๊อต",
+      "storyType": "family_warm",
+      "composer": "v3-director"
+    },
+    "batchId": null,
+    "createdAt": "2026-06-11T08:40:31.149Z",
+    "supabaseImageUrl": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/cover-images/cover-cases/CASE-055.jpg",
+    "coverImagePath": "/cover-cases/CASE-055.jpg"
   }
 ]

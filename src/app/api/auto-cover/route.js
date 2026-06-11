@@ -185,7 +185,22 @@ Score 1-10. Return ONLY valid JSON: {"score": 8, "reason": "brief"}`;
 }
 */
 
+// ★ ล็อกเร็นเดอร์ทีละใบต่อเครื่อง (11 มิ.ย.) — ล็อกเดียวกับ v3: ปกหลายใบพร้อมกัน = แย่งทรัพยากร/ระบบเพี้ยน
+let _renderLockV1 = Promise.resolve();
+
 export async function POST(request) {
+  const prevLock = _renderLockV1;
+  let releaseLock;
+  _renderLockV1 = new Promise((r) => (releaseLock = r));
+  await prevLock;
+  try {
+    return await _renderCoverV1(request);
+  } finally {
+    releaseLock();
+  }
+}
+
+async function _renderCoverV1(request) {
   const startTime = Date.now();
   const TIMEOUT_MS = 540_000; // ★ Fix 12: 9 minutes — Gemini 503 fallback to GPT-4o needs ~5-8 min
 
