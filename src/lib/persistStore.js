@@ -71,14 +71,29 @@ async function _fileFallbackLoad(name) {
 }
 
 
+// Serverless (Vercel/Lambda) filesystem is read-only — disk writes always fail there.
+// Local dev keeps the file fallback working exactly as before.
+const _isServerless = !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+const _warnedWriteSkip = new Set();
+
+function _warnWriteSkipOnce(name, message) {
+  if (_warnedWriteSkip.has(name)) return;
+  _warnedWriteSkip.add(name);
+  console.warn(`[Store:${name}] ${message}`);
+}
+
 async function _fileFallbackSave(name, items) {
   _memCache.set(name, items);
+  if (_isServerless) {
+    _warnWriteSkipOnce(name, 'Read-only serverless filesystem — skipping local JSON cache write (in-memory cache only)');
+    return;
+  }
   try {
     const dir = join(process.cwd(), 'data');
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, `${name}.json`), JSON.stringify(items, null, 2), 'utf-8');
   } catch (e) {
-    console.error(`[Store:${name}] File write failed:`, e.message);
+    _warnWriteSkipOnce(name, `File write failed (further failures suppressed): ${e.message}`);
   }
 }
 
