@@ -326,9 +326,9 @@ async function getAutopilotConfig() {
   } catch { return defaults; }
 }
 
-async function autoPilotPick(freshItems, store) {
+async function autoPilotPick(freshItems, store, opts = {}) {
   const cfg = await getAutopilotConfig();
-  if (!cfg.enabled) return 0;
+  if (!cfg.enabled && !opts.force) return 0;
 
   const { specialistForLane } = await import('./deskBrain');
   const { enqueueJob } = await import('@/lib/services/queueService');
@@ -349,14 +349,16 @@ async function autoPilotPick(freshItems, store) {
     if ((it.judgeScore ?? 0) < cfg.minScore || it.status !== 'new') continue;
     if ((it.toxicity || 0) >= 2 || (it.fbRisk || 0) >= 2) continue;
     const sp = specialistForLane(it.lane);
+    if (opts.onlyEditor && sp.name !== opts.onlyEditor) continue; // โหมดสั่ง บก.รายฝ่าย
     if (!byEditor.has(sp.name)) byEditor.set(sp.name, { sp, picks: [] });
     byEditor.get(sp.name).picks.push(it);
   }
 
   let sent = 0;
+  const perRound = opts.perRound || cfg.perEditorPerRound;
   for (const { sp, picks } of byEditor.values()) {
     picks.sort((a, b) => (b.judgeScore || 0) - (a.judgeScore || 0));
-    for (const pick of picks.slice(0, cfg.perEditorPerRound)) {
+    for (const pick of picks.slice(0, perRound)) {
       if (budget <= 0) break;
       try {
         const { buildEnrichedInput } = await import('./researchAgent');
@@ -385,6 +387,62 @@ async function autoPilotPick(freshItems, store) {
   }
   if (sent > 0) console.log(`[AutoPilot] ✅ บก.ส่งเจนเอง ${sent} ข่าว (วันนี้รวม ${autoSentToday + sent}/${cfg.dailyCap})`);
   return sent;
+}
+
+/** ★ แจ้ง Discord (webhook เดียวกับเมนูเช้า) — ให้คนที่ไม่อยู่หน้าคอมเห็นเหมือนกัน */
+export async function notifyDiscord(content) {
+  try {
+    let webhook = process.env.DISCORD_WEBHOOK_URL;
+    if (!webhook) {
+      const settings = createStore('desk-settings');
+      const all = await settings.getAll();
+      webhook = all.find(s => s.id === 'discord_webhook')?.url;
+    }
+    if (!webhook) return false;
+    await fetch(webhook, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: String(content).slice(0, 1950) }),
+    });
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * ★ สั่ง บก.รายฝ่ายทำทันที (ปุ่ม/Discord) — สแกนเลนตัวเอง ตัดสินตัวที่ยังไม่มีคะแนน แล้วเลือกส่งเจน
+ */
+export async function runEditorNow(editorKey) {
+  const { SPECIALIST_EDITORS, editorialJudge, finalScore, getCategoryPerformance } = await import('./deskBrain');
+  const sp = SPECIALIST_EDITORS[editorKey];
+  if (!sp) throw new Error('ไม่รู้จัก บก.: ' + editorKey);
+
+  const store = createStore('news-desk');
+  const all = await store.getAll();
+  const candidates = all.filter(i =>
+    i.status === 'new' && sp.lanes.includes(i.lane) &&
+    Date.now() - new Date(i.harvestedAt || 0).getTime() < 48 * 3600e3);
+
+  // ตัวที่ บก.ยังไม่เคยดู → ตัดสินก่อน (สูงสุด 16 ใบ/ครั้ง)
+  const unjudged = candidates.filter(c => c.judgeScore === undefined).slice(0, 16);
+  if (unjudged.length > 0) {
+    const judged = await editorialJudge(unjudged);
+    const perf = await getCategoryPerformance();
+    for (const j of judged) {
+      if (j.judgeScore === undefined) continue;
+      await store.update(j.id, (ex) => ({
+        ...ex, judgeScore: j.judgeScore, judgeReason: j.judgeReason, angles: j.angles,
+        finalScore: finalScore(j, perf),
+      }));
+    }
+  }
+
+  // เลือกส่งเจน (บังคับรันแม้ Auto-Pilot ปิด — เพราะคนกดสั่งเอง)
+  const fresh = await store.getAll();
+  const pool = fresh.filter(i => i.status === 'new' && sp.lanes.includes(i.lane));
+  const picked = await autoPilotPick(pool, store, { force: true, onlyEditor: sp.name, perRound: 3 });
+
+  const summary = `${sp.icon} **${sp.name}** สแกนเลนตัวเองแล้ว: ดูใหม่ ${unjudged.length} ใบ · เลือกส่งเจน ${picked} ข่าว${picked > 0 ? ' (ดูที่แท็บ ✅ พร้อมใช้เมื่อเขียนเสร็จ)' : ' — ยังไม่มีตัวที่ถึงเกณฑ์ 8+'}`;
+  await notifyDiscord(summary);
+  return { editor: sp.name, icon: sp.icon, scanned: candidates.length, judgedNew: unjudged.length, picked, summary };
 }
 
 /** ลบข่าวเก่าเกิน N วัน กันคลังบวม (เรียกตอน harvest) */

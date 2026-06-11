@@ -68,6 +68,7 @@ export default function NewsDeskPage() {
       const res = await fetch(`/api/news-desk?tab=${tab}&limit=80`, { cache: 'no-store' });
       const d = await res.json();
       if (d.success) { setItems(d.items); setMixToday(d.mixToday || {}); setSentToday(d.sentToday || 0); setGovernor(d.governor || null); setChiefBrief(d.chiefBrief || null);
+        setEditorStats(d.editorStats || {}); setQueueDepth(d.queueDepth || { pending: 0, processing: 0 }); setReadyCount(d.readyCount || 0);
         // ★ ติดตามสถานะงานเขียนของการ์ดที่ส่งทำใน 2 ชม.ล่าสุด
         const recent = (d.items || []).filter(i => i.status === 'sent' && i.jobId && Date.now() - new Date(i.sentAt || 0).getTime() < 2 * 3600e3).slice(0, 8);
         for (const it of recent) {
@@ -205,6 +206,25 @@ export default function NewsDeskPage() {
   const [chiefCmd, setChiefCmd] = useState('');
   const [expanded, setExpanded] = useState({}); // id → versions[] (แท็บพร้อมใช้)
   const [autopilot, setAutopilot] = useState(true);
+  const [editorStats, setEditorStats] = useState({});
+  const [queueDepth, setQueueDepth] = useState({ pending: 0, processing: 0 });
+  const [readyCount, setReadyCount] = useState(0);
+  const [editorRunning, setEditorRunning] = useState('');
+
+  const runEditor = async (key, label) => {
+    setEditorRunning(key);
+    setMsg(`${label} กำลังสแกนเลนตัวเอง + เลือกส่งเจน (~1-3 นาที)...`);
+    try {
+      const res = await fetch('/api/news-desk/editor-run', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ editor: key }),
+      });
+      const d = await res.json();
+      setMsg(d.success ? d.summary : `❌ ${d.error}`);
+      load();
+    } catch (e) { setMsg('❌ ' + e.message); }
+    setEditorRunning('');
+  };
 
   const toggleAutopilot = async () => {
     const next = !autopilot;
@@ -319,9 +339,26 @@ export default function NewsDeskPage() {
             🧠 สั่งเลย</button>
         </div>
 
+        {/* ★ แถวสั่ง บก.รายฝ่ายทำทันที + สถานะคิว */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12, padding: '10px 14px', background: 'var(--bg-card)', borderRadius: 12, border: '1px solid var(--border)' }}>
+          <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 700 }}>สั่ง บก.ทำทันที:</span>
+          {[['good', '💚 บก.น้ำดี'], ['drama', '🌶️ บก.ดราม่า'], ['interview', '🎙️ บก.สัมภาษณ์']].map(([key, label]) => (
+            <button key={key} onClick={() => runEditor(key, label)} disabled={!!editorRunning}
+              style={{ padding: '7px 14px', borderRadius: 9, border: '1px solid var(--border)', cursor: editorRunning ? 'wait' : 'pointer', background: editorRunning === key ? 'rgba(139,92,246,0.2)' : 'transparent', color: 'var(--text-primary)', fontSize: 13, fontWeight: 700 }}>
+              {editorRunning === key ? '⏳ กำลังสแกน...' : label + ' ลุย'}</button>
+          ))}
+          <div style={{ flex: 1 }} />
+          <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+            ✍️ กำลังเขียน <b style={{ color: 'var(--desk-blue)' }}>{queueDepth.processing}</b> · รอคิว <b style={{ color: 'var(--desk-amber)' }}>{queueDepth.pending}</b> · ✅ พร้อมใช้ <b style={{ color: 'var(--desk-green)' }}>{readyCount}</b>
+          </span>
+        </div>
+
         {/* แถบส่วนผสมวันนี้ + Mix Governor */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14, padding: '10px 14px', background: 'var(--bg-card)', borderRadius: 12, fontSize: 13, color: 'var(--text-secondary)' }}>
           <span>วันนี้ส่งทำแล้ว <b style={{ color: '#f59e0b' }}>{sentToday}</b> ข่าว</span>
+          {Object.entries(editorStats).map(([who, n]) => (
+            <span key={who} style={{ padding: '3px 10px', borderRadius: 999, background: 'rgba(139,92,246,0.12)', color: 'var(--desk-purple)', fontWeight: 700 }}>{who} ×{n}</span>
+          ))}
           {governor && governor.total > 0 && (
             <>
               <span style={{ padding: '3px 10px', borderRadius: 999, fontWeight: 700, background: governor.positiveOk ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)', color: governor.positiveOk ? '#22c55e' : 'var(--desk-red)' }}>

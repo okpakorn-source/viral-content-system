@@ -57,7 +57,23 @@ export async function GET(request) {
       chiefBrief = (await settings.getAll()).find(s => s.id === 'chief_brief') || null;
     } catch {}
 
-    return NextResponse.json({ success: true, items: lightItems, total: items.length, mixToday: mix, sentToday: sentToday.length, governor, chiefBrief });
+    // ★ สถิติ: บก.ไหนส่งไปเท่าไหร่วันนี้ + คิวตอนนี้ + ชั้นวางพร้อมใช้
+    const editorStats = {};
+    for (const s of sentToday) {
+      const who = s.pickedBy ? `${s.pickedByIcon || '🤖'} ${s.pickedBy}` : `👤 ทีม`;
+      editorStats[who] = (editorStats[who] || 0) + 1;
+    }
+    let queueDepth = { pending: 0, processing: 0 };
+    try {
+      const jq = await createStore('job_queue').getAll();
+      queueDepth = {
+        pending: jq.filter(j => j.status === 'pending').length,
+        processing: jq.filter(j => j.status === 'processing').length,
+      };
+    } catch {}
+    const readyCount = (await store.getAll()).filter(i => i.status === 'sent' && !i.used).length;
+
+    return NextResponse.json({ success: true, items: lightItems, total: items.length, mixToday: mix, sentToday: sentToday.length, governor, chiefBrief, editorStats, queueDepth, readyCount });
   } catch (error) {
     console.error('[NewsDesk API]', error.message);
     return NextResponse.json({ success: false, error: error.message, errorType: 'DESK_FEED_ERROR' }, { status: 500 });
