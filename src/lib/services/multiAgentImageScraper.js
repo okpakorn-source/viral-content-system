@@ -731,6 +731,25 @@ async function agentContextImages(identity) {
     });
   }
 
+  // ★ Query 7.5 (11 มิ.ย. — บทเรียน CASE-056 ปกกรรชัยล้วน 4 ช่อง ทั้งที่ข่าวมีหลายคน):
+  //   ค้นภาพ "บุคคลรอง" แยกเป็นคนๆ + ภาพคู่กับตัวหลัก — ไม่งั้นคลังภาพมีแต่ตัวหลัก
+  //   แล้วกฎห้ามหน้าซ้ำ/QC สลับรูป ไม่มีตัวเลือกให้ทำงานเลย
+  const secondaries = [...new Set(
+    [identity?.secondaryCharacter, ...(identity?.characters || [])]
+      .map(c => (typeof c === 'string' ? c : c?.name || ''))
+      .map(s => String(s).trim())
+      .filter(n => n && n.length >= 3 && n !== rawMainChar && !rawMainChar.includes(n) && !n.includes(rawMainChar))
+      // ★ ชื่อต้องค้นได้จริง — วลีบรรยาย ("ทราย ผู้เกี่ยวข้องกับตระกูล...") ค้นแล้วได้ขยะ judge คัดทิ้งหมด (CASE-057)
+      .filter(n => n.length <= 30 && !/ผู้เกี่ยวข้อง|ผู้ใหญ่|คนใน|เกี่ยวกับ|ครอบครัวของ|ฝ่าย|บุคคล/.test(n))
+  )].slice(0, 3);
+  for (const sec of secondaries) {
+    queries.push({ q: `"${sec}" ภาพจริง -ปก -cover -thumbnail ${blockTerms}`, label: `secondary: ${sec.slice(0, 20)}` });
+    if (mainChar) {
+      queries.push({ q: `${mainChar} ${sec} -ปก -cover ${blockTerms}`, label: `pair: ${sec.slice(0, 20)}` });
+    }
+  }
+  if (secondaries.length > 0) console.log(`[Agent3: Context] 👥 บุคคลรอง ${secondaries.length} คน: ${secondaries.join(', ')}`);
+
   // ★ Fix 8: queries จาก specific_details (ชื่อสถานที่/หลักฐานเฉพาะ)
   if (identity?.specific_details?.place_names) {
     for (const place of identity.specific_details.place_names.slice(0, 3)) {

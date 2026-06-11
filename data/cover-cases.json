@@ -953,5 +953,24 @@
     "createdAt": "2026-06-11T08:40:31.149Z",
     "supabaseImageUrl": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/cover-images/cover-cases/CASE-055.jpg",
     "coverImagePath": "/cover-cases/CASE-055.jpg"
+  },
+  {
+    "caseId": "CASE-057",
+    "caseNumber": 57,
+    "newsTitle": "ไม่ใช่ทนายความ ไม่ใช่ญาติผู้ใหญ่ แต่กลับเป็นพิธีกรคนหนึ่งที่ทำให้ 'ทราย' ได้นั่ง",
+    "content": "ไม่ใช่ทนายความ ไม่ใช่ญาติผู้ใหญ่ แต่กลับเป็นพิธีกรคนหนึ่งที่ทำให้ 'ทราย' ได้นั่งลงคุยกับคนในตระกูล 'ภิรมย์ภักดี' อย่างที่เฝ้ารอมานานกว่าหลายสิบปี เรื่องนี้ไม่ได้เริ่มจากเสียงดัง ไม่มีการชี้หน้าว่าใครผิดใครถูก กลางรายการเที่ยงวันทันเหตุการณ์ 'พี่หนุ่ม' กรรชัย เล่าว่าตัวเองเดินเข้าไปนั่งฟังผู้ใหญ่ในบ้าน รับข้อมูลจากหลายฝ่าย แล้ววางตัวเองไว้ตรงกลางพอดี ไม่เอนไปข้างใคร สิ่งที่เขาทำไม่ใช่การตัดสิน แต่คือการเปิดพื้นที่ให้ทุกคนได้ยินกันมากขึ้น และตรงนี้แหละที่ทำให้หลายคนรู้สึกตาม เพราะการเป็นคนกลางที่จ",
+    "score": 7,
+    "templateUsed": "vt_quad_circle",
+    "elapsed": 320.372,
+    "imageCount": 5,
+    "identity": {
+      "mainCharacter": "หนุ่ม กรรชัย กำเนิดพลอย",
+      "storyType": "family_warm",
+      "composer": "v3-director"
+    },
+    "batchId": null,
+    "createdAt": "2026-06-11T09:05:40.460Z",
+    "supabaseImageUrl": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/cover-images/cover-cases/CASE-057.jpg",
+    "coverImagePath": "/cover-cases/CASE-057.jpg"
   }
 ]

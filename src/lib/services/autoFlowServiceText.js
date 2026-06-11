@@ -1,6 +1,7 @@
 import { extractContent } from '@/lib/scraper/index.js';
 import { transcribeTiktok } from '@/lib/services/tiktokService';
 import { transcribeYoutube } from '@/lib/services/youtubeService';
+import { transcribeMetaReel, isMetaVideoUrl } from '@/lib/services/metaReelsService';
 import { performResearch } from '@/lib/services/researchService';
 import { performSummarize, getTopPrompts } from '@/lib/services/summarizeServiceText';
 import { smartResearch } from '@/lib/services/achievementResearch';
@@ -56,6 +57,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     if (/tiktok\.com|vt\.tiktok|vm\.tiktok/i.test(url)) detectedType = 'tiktok';
     else if (/youtube\.com|youtu\.be/i.test(url)) detectedType = 'youtube';
     else if (/facebook\.com|fb\.watch/i.test(url)) detectedType = 'facebook';
+    else if (/instagram\.com/i.test(url)) detectedType = 'instagram';
   }
   const domain = url ? (() => { try { return new URL(url).hostname; } catch { return url.slice(0, 30); } })() : 'plain-text';
   addLog('Detect', `📎 ${detectedType.toUpperCase()} → ${domain}`);
@@ -101,6 +103,24 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     if (!ytRes.success) throwStep('auto_scrape', `YouTube: ${ytRes.error}`);
     rawText = ytRes.transcript || ytRes.text || '';
     addLog('Step1', `✅ YouTube transcript: ${rawText.length} ตัวอักษร (${((Date.now() - step1Start) / 1000).toFixed(1)}s)`);
+  } else if ((detectedType === 'facebook' || detectedType === 'instagram') && isMetaVideoUrl(url)) {
+    // ★ Reels/วิดีโอ Meta (11 มิ.ย. — คลิปข่าวส่วนใหญ่อยู่บน Meta): แคปชันโพสต์ + Whisper ถอดเสียงพากย์
+    addLog('Step1', '🎞️ กำลังถอดเสียง Reels/วิดีโอจาก Meta...');
+    const mRes = await transcribeMetaReel({ url });
+    if (mRes.success) {
+      rawText = mRes.text || '';
+      addLog('Step1', `✅ Meta Reels: แคปชัน+เสียง ${rawText.length} ตัวอักษร (${((Date.now() - step1Start) / 1000).toFixed(1)}s)`);
+    } else {
+      // วิดีโอดึงไม่ได้ (ส่วนตัว/ต้องล็อกอิน/ไม่มีเสียง) → ลอง scrape หน้าโพสต์ก่อนยอมแพ้
+      addLog('Step1', `⚠️ Meta Reels: ${mRes.error} — ลอง scrape หน้าโพสต์แทน`);
+      const scrapeData = await withTimeout(extractContent({ url }), 90000, 'scrape').catch(e => ({ success: false, error: e.message }));
+      if (scrapeData.success && (scrapeData.text || '').length > 50) {
+        rawText = scrapeData.text;
+        addLog('Step1', `✅ scrape หน้าโพสต์แทนได้ ${rawText.length} ตัวอักษร`);
+      } else {
+        throwStep('auto_scrape', `Meta Reels: ${mRes.error}`);
+      }
+    }
   } else {
     addLog('Step1', `🌐 กำลังดึง HTML จาก ${domain}...`);
     const scrapeData = await withTimeout(extractContent({ url }), 90000, 'scrape'); // ★ 90s (was 60s) — เว็บข่าวไทยบางเจ้าช้า/กันบอท
