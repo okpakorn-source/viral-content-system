@@ -8,6 +8,10 @@
     {
       "path": "/api/queue/worker",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/news-desk/morning-menu",
+      "schedule": "30 22 * * *"
     }
   ]
 }

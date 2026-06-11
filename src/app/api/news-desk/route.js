@@ -20,7 +20,7 @@ export async function GET(request) {
     const store = createStore('news-desk');
     let items = await store.getAll();
 
-    if (['trend', 'good', 'evergreen', 'interview'].includes(tab)) items = items.filter(i => i.lane === tab);
+    if (['trend', 'good', 'evergreen', 'interview', 'followup'].includes(tab)) items = items.filter(i => i.lane === tab);
     items = items.filter(i => i.status !== 'dismissed');
 
     // ส่วนผสมวันนี้ (นับเฉพาะที่ทีมส่งทำจริงวันนี้)
@@ -88,19 +88,23 @@ export async function POST(request) {
       patch.status = 'dismissed'; patch.dismissedBy = user;
     } else if (action === 'sent') {
       patch.status = 'sent'; patch.claimedBy = item.claimedBy || user; patch.sentAt = new Date().toISOString();
+    } else if (action === 'viral' || action === 'flop') {
+      // ★ เฟส 3: รายงานผลโพสต์จริง — เข้าลูปเรียนรู้ (น้ำหนักหมวด + few-shot บรรณาธิการ AI)
+      patch.performance = action;
     } else {
       return NextResponse.json({ success: false, error: `action ไม่รู้จัก: ${action}`, errorType: 'VALIDATION_ERROR' }, { status: 400 });
     }
 
     await store.update(id, (ex) => ({ ...ex, ...patch }));
 
-    // ★ ทุกการตัดสินใจ = บทเรียนของบรรณาธิการ AI (few-shot ใน deskBrain)
-    if (['claim', 'dismiss', 'sent'].includes(action)) {
+    // ★ ทุกการตัดสินใจ = บทเรียนของบรรณาธิการ AI (few-shot + น้ำหนักหมวด ใน deskBrain)
+    if (['claim', 'dismiss', 'sent', 'viral', 'flop'].includes(action)) {
       try {
         const fb = createStore('news-desk-feedback');
+        const fbAction = { claim: 'claimed', sent: 'sent', dismiss: 'dismissed', viral: 'viral', flop: 'flop' }[action];
         await fb.add({
           id: `${id}_${action}_${Date.now()}`,
-          newsId: id, action: action === 'claim' ? 'claimed' : action === 'sent' ? 'sent' : 'dismissed',
+          newsId: id, action: fbAction,
           title: item.title, category: item.category, lane: item.lane, user,
           at: new Date().toISOString(),
         });

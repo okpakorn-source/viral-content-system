@@ -12,6 +12,7 @@ import { createStore } from '@/lib/persistStore';
 import {
   gateKeywords, classifyBatch, fitScore, freshScore,
   loadArchiveTitles, isDuplicateOfArchive, editorialJudge, finalScore,
+  getCategoryPerformance,
 } from './deskBrain';
 
 const TREND_QUERIES = [
@@ -55,6 +56,37 @@ function pickEvergreenQueries(count = 3) {
   return out;
 }
 
+// ── เลน 🔁 Follow-up (เฟส 3): ตามรอยข่าวที่เพจเคยทำ — "ตอนนี้เป็นยังไงแล้ว" ──
+// หยิบข่าวเก่าในคลังเพจ (อายุ ≥21 วัน, มีตัวบุคคล) วันละ 3 เรื่อง → ค้นความเคลื่อนไหวล่าสุดของคนนั้น
+async function buildFollowupQueries(count = 3) {
+  try {
+    const archive = createStore('news-archive');
+    const all = await archive.getAll();
+    const cutoff = Date.now() - 21 * 864e5;
+    const candidates = all
+      .filter(a => {
+        const t = new Date(a.archived_at || a.createdAt || 0).getTime();
+        const person = (a.key_people || [])[0];
+        return t > 0 && t < cutoff && person && String(person).length >= 3;
+      })
+      // เรื่องที่เคยถูกใช้/คะแนนไวรัลสูงมาก่อน = น่าตามรอยสุด
+      .sort((a, b) => ((b.viral_score || 0) + (b.used_count || 0) * 10) - ((a.viral_score || 0) + (a.used_count || 0) * 10));
+    const day = Math.floor(Date.now() / 86400000);
+    const out = [];
+    for (let i = 0; i < Math.min(count, candidates.length); i++) {
+      const pick = candidates[(day * count + i) % candidates.length];
+      out.push({
+        query: `"${String(pick.key_people[0]).slice(0, 30)}" ล่าสุด`,
+        followupOf: String(pick.title || '').slice(0, 90),
+      });
+    }
+    return out;
+  } catch (e) {
+    console.log('[Harvester] followup build failed:', e.message?.slice(0, 50));
+    return [];
+  }
+}
+
 async function serperNews(query, { num = 10, timeRange = 'qdr:d' } = {}) {
   const key = process.env.SERPER_API_KEY;
   if (!key) throw new Error('ไม่มี SERPER_API_KEY');
@@ -90,7 +122,7 @@ const idOf = (url) => crypto.createHash('md5').update(String(url)).digest('hex')
  * รันเก็บ+คัดกรองครบ 4 ชั้น แล้วลงคลัง
  * @returns {Promise<{harvested, gated, classified, judged, added}>}
  */
-export async function runHarvest({ lanes = ['trend', 'good', 'evergreen'], judgeTop = 24 } = {}) {
+export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'followup'], judgeTop = 24 } = {}) {
   const t0 = Date.now();
   const store = createStore('news-desk');
   const existing = await store.getAll();
@@ -116,6 +148,15 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen'], judge
     for (const q of pickEvergreenQueries(3)) {
       try { raw.push(...(await serperNews(q, { num: 8, timeRange: 'qdr:y' })).map(r => ({ ...r, lane: 'evergreen' }))); }
       catch (e) { console.log('[Harvester] evergreen query failed:', e.message?.slice(0, 50)); }
+    }
+  }
+  if (lanes.includes('followup')) {
+    // ตามรอยบุคคลจากข่าวที่เพจเคยทำ — ความเคลื่อนไหวสัปดาห์ล่าสุด
+    for (const f of await buildFollowupQueries(3)) {
+      try {
+        raw.push(...(await serperNews(f.query, { num: 5, timeRange: 'qdr:w' }))
+          .map(r => ({ ...r, lane: 'followup', followupOf: f.followupOf })));
+      } catch (e) { console.log('[Harvester] followup query failed:', e.message?.slice(0, 50)); }
     }
   }
   stats.harvested = raw.length;
@@ -144,15 +185,18 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen'], judge
   // ทิ้งตัวพิษเกิน/เกลาไม่ได้
   classified = classified.filter(c => c.toxicity < 3 && c.fbRisk < 3 && c.toneable !== false);
 
-  // ── ชั้น 2: กันซ้ำกับที่เพจเคยทำ ──
+  // ── ชั้น 2: กันซ้ำกับที่เพจเคยทำ (ยกเว้นเลน followup — ตั้งใจตามเรื่องคนเดิมอยู่แล้ว) ──
   const archiveTitles = await loadArchiveTitles();
   classified = classified.filter(c => {
+    if (c.lane === 'followup') return true;
     if (isDuplicateOfArchive(c.title, archiveTitles)) { stats.archiveDup++; return false; }
     return true;
   });
 
   // ── ชั้น 3: บรรณาธิการ AI เฉพาะตัวท็อป (เรียงคร่าวด้วย fit+fresh ก่อน) ──
-  classified.sort((a, b) => (fitScore(b.category) + freshScore(b.publishedAt)) - (fitScore(a.category) + freshScore(a.publishedAt)));
+  // ★ เฟส 3: น้ำหนักหมวดปรับตามผลโพสต์จริง (ปัง/แป้ก) ที่ทีมรายงานกลับ
+  const perfBoost = await getCategoryPerformance();
+  classified.sort((a, b) => (fitScore(b.category, perfBoost) + freshScore(b.publishedAt)) - (fitScore(a.category, perfBoost) + freshScore(a.publishedAt)));
   const toJudge = classified.slice(0, judgeTop);
   const rest = classified.slice(judgeTop);
   const judged = await editorialJudge(toJudge);
@@ -162,7 +206,7 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen'], judge
   const now = new Date().toISOString();
   const finalItems = [...judged, ...rest].map(it => ({
     ...it,
-    finalScore: finalScore(it),
+    finalScore: finalScore(it, perfBoost),
     status: 'new',
     claimedBy: null,
     harvestedAt: now,

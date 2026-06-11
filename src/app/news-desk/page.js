@@ -12,10 +12,11 @@ const TABS = [
   { id: 'trend', label: '🔥 กระแสวันนี้' },
   { id: 'good', label: '💎 ข่าวน้ำดี' },
   { id: 'evergreen', label: '🗄️ ข่าวเก่าน้ำดี' },
+  { id: 'followup', label: '🔁 ตามรอย' },
   { id: 'interview', label: '🎙️ คลิปสัมภาษณ์' },
 ];
 
-const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️' };
+const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁' };
 
 const CAT_COLORS = {
   'น้ำใจ/ช่วยเหลือ': '#22c55e', 'กตัญญู/ครอบครัวอบอุ่น': '#10b981', 'สู้ชีวิต': '#06b6d4',
@@ -209,6 +210,9 @@ export default function NewsDeskPage() {
                       <span style={{ color: '#64748b' }}>{it.source}</span>
                       {it.status === 'claimed' && <span style={{ color: '#f59e0b', fontWeight: 700 }}>📌 {it.claimedBy} จองแล้ว</span>}
                       {it.status === 'sent' && <span style={{ color: '#22c55e', fontWeight: 700 }}>✅ ส่งทำแล้ว</span>}
+                      {it.performance === 'viral' && <span style={{ color: '#fb923c', fontWeight: 700 }}>🔥 ปังจริง</span>}
+                      {it.performance === 'flop' && <span style={{ color: '#94a3b8', fontWeight: 700 }}>🧊 แป้ก</span>}
+                      {it.followupOf && <span style={{ color: '#c084fc' }}>🔁 ตามรอย: {String(it.followupOf).slice(0, 40)}</span>}
                     </div>
                     {it.judgeReason && (
                       <div style={{ marginTop: 6, fontSize: 13, color: '#94a3b8' }}>🧠 {it.judgeReason}</div>
@@ -253,6 +257,16 @@ export default function NewsDeskPage() {
                     <button onClick={() => act(it.id, 'dismiss')}
                       style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'rgba(239,68,68,0.12)', color: '#f87171', fontSize: 13 }}>
                       🗑 ไม่เอา</button>
+                  )}
+                  {it.status === 'sent' && !it.performance && (
+                    <>
+                      <button onClick={() => act(it.id, 'viral')} title="โพสต์แล้วปัง — สอนระบบให้หาแนวนี้เพิ่ม"
+                        style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'rgba(251,146,60,0.18)', color: '#fb923c', fontSize: 13, fontWeight: 700 }}>
+                        🔥 ปังจริง</button>
+                      <button onClick={() => act(it.id, 'flop')} title="โพสต์แล้วแป้ก — สอนระบบให้เลี่ยงแนวนี้"
+                        style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'rgba(148,163,184,0.12)', color: '#94a3b8', fontSize: 13 }}>
+                        🧊 แป้ก</button>
+                    </>
                   )}
                 </div>
               </div>

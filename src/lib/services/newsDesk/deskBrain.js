@@ -84,8 +84,34 @@ ${list}
 }
 
 // ── ชั้น 2: ViralFit + ความสด + กันซ้ำกับคลังที่เพจเคยทำ ──
-export function fitScore(category) {
-  return FIT_WEIGHTS[category] ?? 6;
+// ★ เฟส 3: น้ำหนักหมวด "เรียนรู้จากผลโพสต์จริง" — ทีมกด 🔥 ปังจริง / 🧊 แป้ก บนการ์ดที่ส่งทำแล้ว
+let _perfCache = { at: 0, boost: {} };
+export async function getCategoryPerformance() {
+  if (Date.now() - _perfCache.at < 10 * 60 * 1000) return _perfCache.boost;
+  const boost = {};
+  try {
+    const store = createStore('news-desk-feedback');
+    const all = await store.getAll();
+    const counts = {};
+    for (const f of all) {
+      if (f.action !== 'viral' && f.action !== 'flop') continue;
+      const c = f.category || 'อื่นๆ';
+      counts[c] = counts[c] || { viral: 0, flop: 0 };
+      counts[c][f.action]++;
+    }
+    for (const [cat, n] of Object.entries(counts)) {
+      // ปังจริงดันหมวดขึ้น แป้กกดลง — จำกัด -6..+8 กันเหวี่ยงแรงเกิน
+      boost[cat] = Math.max(-6, Math.min(8, (n.viral - n.flop) * 2));
+    }
+  } catch { /* อ่าน feedback ไม่ได้ = ไม่ปรับ */ }
+  _perfCache = { at: Date.now(), boost };
+  return boost;
+}
+
+export function fitScore(category, perfBoost = null) {
+  const base = FIT_WEIGHTS[category] ?? 6;
+  const learned = perfBoost?.[category] || 0;
+  return Math.max(0, base + learned);
 }
 
 export function freshScore(publishedAt) {
@@ -127,11 +153,15 @@ async function getJudgeFewshot() {
   try {
     const store = createStore('news-desk-feedback');
     const all = await store.getAll();
-    const recent = all.slice(-60);
+    const recent = all.slice(-100);
+    const viral = recent.filter(f => f.action === 'viral').slice(-5);
+    const flop = recent.filter(f => f.action === 'flop').slice(-5);
     const picked = recent.filter(f => f.action === 'sent' || f.action === 'claimed').slice(-6);
     const dropped = recent.filter(f => f.action === 'dismissed').slice(-6);
-    if (picked.length === 0 && dropped.length === 0) return '';
-    return '\n=== รสนิยมจริงของกองบรรณาธิการ (เรียนจากการกดเลือก/ทิ้งล่าสุด) ===\n' +
+    if (picked.length === 0 && dropped.length === 0 && viral.length === 0) return '';
+    return '\n=== รสนิยมจริงของกองบรรณาธิการ (เรียนจากผลจริงล่าสุด) ===\n' +
+      viral.map(f => `🔥 โพสต์แล้วปังจริง: ${String(f.title).slice(0, 80)} [${f.category || ''}]`).join('\n') + (viral.length ? '\n' : '') +
+      flop.map(f => `🧊 โพสต์แล้วแป้ก: ${String(f.title).slice(0, 80)} [${f.category || ''}]`).join('\n') + (flop.length ? '\n' : '') +
       picked.map(f => `✅ ทีมเลือกทำ: ${String(f.title).slice(0, 80)} [${f.category || ''}]`).join('\n') + '\n' +
       dropped.map(f => `❌ ทีมกดทิ้ง: ${String(f.title).slice(0, 80)} [${f.category || ''}]`).join('\n') + '\n';
   } catch { return ''; }
@@ -180,8 +210,8 @@ ${list}
   return out;
 }
 
-export function finalScore(item) {
-  const fit = fitScore(item.category);
+export function finalScore(item, perfBoost = null) {
+  const fit = fitScore(item.category, perfBoost);
   // evergreen = ของเก่าที่ตั้งใจหยิบ ไม่หักความสด | good = มีพื้นขั้นต่ำ | trend = วัดความสดจริง
   const fresh = item.lane === 'evergreen' ? 10
     : item.lane === 'good' ? Math.max(8, freshScore(item.publishedAt))
