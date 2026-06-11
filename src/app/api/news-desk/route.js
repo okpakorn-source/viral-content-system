@@ -137,7 +137,11 @@ export async function POST(request) {
       const qRes = await fetch(`${request.nextUrl.origin}/api/queue/add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input, contentLength: 'short', userId: `desk-${user}` }),
+        body: JSON.stringify({
+          input, contentLength: 'short', userId: `desk-${user}`,
+          // ★ ป้ายโต๊ะข่าว — Generation Log ใช้แยกว่าใครทำ แนวอะไร
+          deskMeta: { newsId: id, lane: item.lane, category: item.category || '', editor: user, editorIcon: '👤' },
+        }),
       });
       const qData = await qRes.json();
       if (!qData.success) {

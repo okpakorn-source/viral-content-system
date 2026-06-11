@@ -54,10 +54,10 @@ export async function PATCH(request, { params }) {
       }, { status: 400 });
     }
 
-    if (!['good', 'bad', 'unreviewed'].includes(status)) {
+    if (!['good', 'bad', 'unreviewed', 'used'].includes(status)) {
       return NextResponse.json({
         success: false,
-        error: 'status ต้องเป็น good, bad, หรือ unreviewed',
+        error: 'status ต้องเป็น good, bad, unreviewed หรือ used',
         errorType: 'INVALID_STATUS',
       }, { status: 400 });
     }

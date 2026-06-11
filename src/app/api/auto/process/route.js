@@ -559,10 +559,13 @@ export async function POST(request) {
         sourceText: (normalizedData.rawText || '').slice(0, 5000),
         versions,
         breakdownData,
+        // ★ ใครส่งงาน (ai-บก.X / desk-ทีม) + ป้ายโต๊ะข่าว (เลน/หมวด) — Generation Log แยก บก./แนวข่าวได้
+        userId: body.userId || 'anonymous',
         pipelineInfo: {
           totalTime: parseFloat(totalTime),
           contentLength,
           pipelineId: route.pipelineId,
+          desk: body.deskMeta || null,
         },
       });
       addLog('GenLog', `📋 Generation Log saved`);

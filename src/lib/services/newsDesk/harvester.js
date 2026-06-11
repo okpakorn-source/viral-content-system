@@ -365,7 +365,11 @@ async function autoPilotPick(freshItems, store, opts = {}) {
         const input = (pick.lane === 'interview' && pick.fullText) ? pick.fullText
           : (buildEnrichedInput(pick) || pick.url);
         const q = await enqueueJob(
-          { input, contentLength: 'short', userId: `ai-${sp.name}` },
+          {
+            input, contentLength: 'short', userId: `ai-${sp.name}`,
+            // ★ ป้ายโต๊ะข่าว — ไหลผ่าน worker → auto/process → Generation Log (แยก บก./แนวข่าวได้)
+            deskMeta: { newsId: pick.id, lane: pick.lane, category: pick.category || '', editor: sp.name, editorIcon: sp.icon },
+          },
           `ai-${sp.name}`
         );
         await store.update(pick.id, (ex) => ({

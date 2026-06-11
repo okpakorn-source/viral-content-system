@@ -136,6 +136,7 @@ export async function logGeneration({
         promptScore: pipelineInfo.promptScore || 0,
         newsType: pipelineInfo.newsType || '',
         stepTimings: pipelineInfo.stepTimings || {},
+        desk: pipelineInfo.desk || null, // ★ ป้ายโต๊ะข่าว {newsId, lane, category, editor, editorIcon}
       },
       userId: userId || 'anonymous',
       status: 'unreviewed', // unreviewed | good | bad
@@ -199,7 +200,7 @@ export async function getCases({ limit = 50, offset = 0, status = null, sourceTy
   if (isSupabaseReady()) {
     const sb = getSupabase();
     let q = sb.from(TABLE)
-      .select('case_id, news_title, source_type, source_url, version_count, status, review_note, created_at, pipeline_info', { count: 'exact' })
+      .select('case_id, news_title, source_type, source_url, version_count, status, review_note, created_at, pipeline_info, user_id', { count: 'exact' })
       .order('case_id', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -234,6 +235,8 @@ function mapSupabaseCase(row) {
     totalTime: row.pipeline_info?.totalTime || 0,
     promptName: row.pipeline_info?.promptName || '',
     newsType: row.pipeline_info?.newsType || '',
+    userId: row.user_id || 'anonymous',
+    desk: row.pipeline_info?.desk || null,
   };
 }
 
@@ -266,6 +269,8 @@ async function getCasesLocal({ limit, offset, status, sourceType, search }) {
       totalTime: l.pipelineInfo?.totalTime || 0,
       promptName: l.pipelineInfo?.promptName || '',
       newsType: l.pipelineInfo?.newsType || '',
+      userId: l.userId || 'anonymous',
+      desk: l.pipelineInfo?.desk || null,
     })),
     total,
   };
@@ -356,10 +361,11 @@ export async function getStats() {
   if (isSupabaseReady()) {
     try {
       const sb = getSupabase();
-      const [totalRes, todayRes, unreviewedRes] = await Promise.all([
+      const [totalRes, todayRes, unreviewedRes, usedRes] = await Promise.all([
         sb.from(TABLE).select('*', { count: 'exact', head: true }),
         sb.from(TABLE).select('*', { count: 'exact', head: true }).gte('created_at', todayISO),
         sb.from(TABLE).select('*', { count: 'exact', head: true }).eq('status', 'unreviewed'),
+        sb.from(TABLE).select('*', { count: 'exact', head: true }).eq('status', 'used'),
       ]);
       // ถ้ามี error ใน query ใดก็ตาม → fallback local
       if (totalRes.error || todayRes.error || unreviewedRes.error) {
@@ -369,6 +375,7 @@ export async function getStats() {
           total: totalRes.count || 0,
           today: todayRes.count || 0,
           unreviewed: unreviewedRes.count || 0,
+          used: usedRes.error ? 0 : (usedRes.count || 0),
         };
       }
     } catch (err) {
@@ -381,5 +388,6 @@ export async function getStats() {
     total: logs.length,
     today: logs.filter(l => l.createdAt >= todayISO).length,
     unreviewed: logs.filter(l => l.status === 'unreviewed').length,
+    used: logs.filter(l => l.status === 'used').length,
   };
 }
