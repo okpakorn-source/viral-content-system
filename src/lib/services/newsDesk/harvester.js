@@ -133,11 +133,60 @@ function parseSerperDate(d) {
 
 const idOf = (url) => crypto.createHash('md5').update(String(url)).digest('hex').slice(0, 12);
 
+// ── เลน 📊 BuzzSumo (แชร์จริง): RSS Trending Thailand — ทำงานเมื่อบัญชี BuzzSumo จ่ายแล้ว ──
+async function getBuzzsumoRssUrl() {
+  if (process.env.BUZZSUMO_RSS_URL) return process.env.BUZZSUMO_RSS_URL;
+  try {
+    const store = createStore('desk-settings');
+    const all = await store.getAll();
+    return all.find(s => s.id === 'buzzsumo_rss')?.url || null;
+  } catch { return null; }
+}
+
+function parseRssItems(xml) {
+  const items = [];
+  const blocks = String(xml).match(/<item[\s\S]*?<\/item>/g) || [];
+  const pick = (block, tag) => {
+    const m = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+    if (!m) return '';
+    return m[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '').trim();
+  };
+  for (const b of blocks.slice(0, 25)) {
+    items.push({
+      title: pick(b, 'title'),
+      url: pick(b, 'link'),
+      snippet: pick(b, 'description').slice(0, 200),
+      publishedAt: (() => { const d = new Date(pick(b, 'pubDate')); return isNaN(d) ? null : d.toISOString(); })(),
+      source: 'BuzzSumo Trending',
+    });
+  }
+  return items.filter(i => i.title && i.url);
+}
+
+async function harvestBuzzsumo() {
+  const url = await getBuzzsumoRssUrl();
+  if (!url) return [];
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': 'ViralFlow-NewsDesk/1.0' } });
+    const body = await res.text();
+    if (!res.ok || /paid BuzzSumo subscription/i.test(body)) {
+      console.log('[Harvester] 📊 BuzzSumo ยังไม่เปิดใช้ (รอจ่ายแพลน) — ข้ามเลนนี้');
+      return [];
+    }
+    const items = parseRssItems(body).map(r => ({ ...r, lane: 'buzz' }));
+    console.log(`[Harvester] 📊 BuzzSumo Trending: ${items.length} ใบ`);
+    return items;
+  } catch (e) {
+    console.log('[Harvester] buzzsumo failed:', e.message?.slice(0, 50));
+    return [];
+  }
+}
+
 /**
  * รันเก็บ+คัดกรองครบ 4 ชั้น แล้วลงคลัง
  * @returns {Promise<{harvested, gated, classified, judged, added}>}
  */
-export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'followup'], judgeTop = 24, extraQueries = [] } = {}) {
+export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'followup', 'buzz'], judgeTop = 24, extraQueries = [] } = {}) {
   const t0 = Date.now();
   const store = createStore('news-desk');
   const existing = await store.getAll();
@@ -170,6 +219,9 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       try { raw.push(...(await serperNews(q, { num: 8, timeRange: 'qdr:y' })).map(r => ({ ...r, lane: 'evergreen' }))); }
       catch (e) { console.log('[Harvester] evergreen query failed:', e.message?.slice(0, 50)); }
     }
+  }
+  if (lanes.includes('buzz')) {
+    raw.push(...await harvestBuzzsumo());
   }
   if (lanes.includes('followup')) {
     // ตามรอยบุคคลจากข่าวที่เพจเคยทำ — ความเคลื่อนไหวสัปดาห์ล่าสุด

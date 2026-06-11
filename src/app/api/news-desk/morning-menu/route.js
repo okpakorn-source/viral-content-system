@@ -13,12 +13,13 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 600;
 
 const LANE_HEADERS = {
+  buzz: '📊 แชร์จริงในไทยตอนนี้ (BuzzSumo)',
   trend: '🔥 กระแสวันนี้',
   good: '💎 ข่าวน้ำดี',
   evergreen: '🗄️ ข่าวเก่าน้ำดี (หยิบมาทำใหม่ได้)',
   followup: '🔁 ตามรอยข่าวที่เพจเคยทำ',
 };
-const LANE_QUOTA = { trend: 10, good: 10, evergreen: 5, followup: 5 };
+const LANE_QUOTA = { buzz: 5, trend: 8, good: 10, evergreen: 4, followup: 3 };
 
 function buildMenu(items) {
   const menu = {};

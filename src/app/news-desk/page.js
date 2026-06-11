@@ -12,11 +12,12 @@ const TABS = [
   { id: 'trend', label: '🔥 กระแสวันนี้' },
   { id: 'good', label: '💎 ข่าวน้ำดี' },
   { id: 'evergreen', label: '🗄️ ข่าวเก่าน้ำดี' },
+  { id: 'buzz', label: '📊 แชร์จริง' },
   { id: 'followup', label: '🔁 ตามรอย' },
   { id: 'interview', label: '🎙️ คลิปสัมภาษณ์' },
 ];
 
-const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁' };
+const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁', buzz: '📊' };
 
 const CAT_COLORS = {
   'น้ำใจ/ช่วยเหลือ': '#22c55e', 'กตัญญู/ครอบครัวอบอุ่น': '#10b981', 'สู้ชีวิต': '#06b6d4',

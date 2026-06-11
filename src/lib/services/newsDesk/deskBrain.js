@@ -212,9 +212,10 @@ ${list}
 
 export function finalScore(item, perfBoost = null) {
   const fit = fitScore(item.category, perfBoost);
-  // evergreen = ของเก่าที่ตั้งใจหยิบ ไม่หักความสด | good = มีพื้นขั้นต่ำ | trend = วัดความสดจริง
+  // evergreen = ของเก่าที่ตั้งใจหยิบ ไม่หักความสด | good = มีพื้นขั้นต่ำ | buzz = แชร์จริงจาก BuzzSumo +โบนัส | trend = วัดความสดจริง
   const fresh = item.lane === 'evergreen' ? 10
     : item.lane === 'good' ? Math.max(8, freshScore(item.publishedAt))
+    : item.lane === 'buzz' ? Math.min(20, freshScore(item.publishedAt) + 6)
     : freshScore(item.publishedAt);
   const judge = (item.judgeScore ?? 5) * 5; // 0-50
   const toxPenalty = (item.toxicity || 0) * 3 + (item.fbRisk || 0) * 3;

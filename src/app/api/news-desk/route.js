@@ -20,11 +20,11 @@ export async function GET(request) {
     const store = createStore('news-desk');
     let items = await store.getAll();
 
-    if (['trend', 'good', 'evergreen', 'interview', 'followup'].includes(tab)) items = items.filter(i => i.lane === tab);
+    if (['trend', 'good', 'evergreen', 'interview', 'followup', 'buzz'].includes(tab)) items = items.filter(i => i.lane === tab);
     items = items.filter(i => i.status !== 'dismissed');
 
     // ★ quick-fix: คะแนนเสื่อมตามอายุ — กระแสเก่าจมเอง (trend -8/วัน, good -3/วัน, เลนไร้กาลเวลาไม่เสื่อม)
-    const DECAY = { trend: 8, good: 3, evergreen: 0, followup: 4, interview: 0 };
+    const DECAY = { trend: 8, good: 3, evergreen: 0, followup: 4, interview: 0, buzz: 10 }; // buzz แชร์จริงแต่หมดอายุไว
     items = items.map(i => {
       const ageDays = Math.max(0, (Date.now() - new Date(i.harvestedAt || 0).getTime()) / 864e5);
       const decayed = Math.max(0, Math.round((i.finalScore || 0) - ageDays * (DECAY[i.lane] ?? 4)));
