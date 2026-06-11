@@ -75,11 +75,46 @@ export function detectFlags(versions, sourceText) {
 }
 
 /**
+ * ★ v3 (12 มิ.ย. — ลูปคุณภาพรอบ 1 จับได้): เวอร์ชันเปิด "ภาพ/มุมเดียวกัน" แม้ใช้คำต่างกัน
+ * (เช่น ทุกเวอร์ชันเปิดด้วยรถ 31 คันจอดเรียง) — โปรแกรมเทียบตัวอักษรจับไม่ได้ ใช้ AI เช็คเชิงความหมาย 1 ครั้ง
+ * เวอร์ชันแรกของกลุ่มถือเป็นเจ้าของมุม ที่เหลือถูกสั่งเขียนเปิดใหม่ด้วยมุมที่กำหนดให้
+ */
+async function detectSameAngleOpenings(versions) {
+  if (versions.length < 2) return [];
+  const opens = versions.map((v, i) => `${i + 1}: ${String(v.content || '').split('\n')[0].slice(0, 150)}`).join('\n');
+  try {
+    const raw = await callAI({
+      model: 'gpt-4o-mini', temperature: 0.1, maxTokens: 800,
+      prompt: `ประโยคเปิดของแต่ละเวอร์ชัน (ข่าวเดียวกัน เขียนคนละมุม):
+${opens}
+
+เวอร์ชันไหน "เปิดด้วยภาพ/มุม/จุดโฟกัสเดียวกัน" กับเวอร์ชันก่อนหน้า แม้ใช้คำต่างกัน? (เช่น ทุกอันเปิดด้วยภาพรถจอดเรียง = มุมเดียวกัน)
+เวอร์ชันแรกของกลุ่มเป็นเจ้าของมุม — ระบุเฉพาะตัวที่ต้องเขียนใหม่ พร้อมมุมเปิดใหม่ที่ต่างจริง (อิงจากเนื้อที่เห็น)
+ถ้าทุกเวอร์ชันเปิดต่างมุมกันดีแล้ว ตอบ {"rewrite":[]}
+ตอบ JSON เท่านั้น: {"rewrite":[{"v":2,"newAngle":"เช่น เปิดด้วยคำพูดของผู้รับมอบ / เปิดด้วยปัญหาที่พื้นที่เจอก่อนได้รถ"}]}`,
+    });
+    const parsed = typeof raw === 'object' ? raw : JSON.parse(String(raw).match(/\{[\s\S]*\}/)?.[0] || '{}');
+    return (parsed?.rewrite || []).filter(r => r.v >= 2 && r.v <= versions.length);
+  } catch { return []; }
+}
+
+/**
  * แก้เวอร์ชันที่มีธง — 1 AI call ต่อเวอร์ชันที่มีปัญหาเท่านั้น
  */
 export async function fixFlaggedVersions(versions, newsData) {
   const sourceText = newsData?.newsBody || '';
   const problems = detectFlags(versions, sourceText);
+
+  // ★ เช็คเปิดมุมซ้ำเชิงความหมาย (ข้ามถ้าโปรแกรมจับเปิดซ้ำตรงตัวไปแล้ว — เดี๋ยวซ้ำซ้อน)
+  const sameAngle = await detectSameAngleOpenings(versions);
+  for (const r of sameAngle) {
+    const idx = r.v - 1;
+    if (!problems[idx].includes('dup_opening') && !problems[idx].includes('same_angle')) {
+      problems[idx].push('same_angle');
+      versions[idx]._newAngle = String(r.newAngle || '').slice(0, 120);
+    }
+  }
+
   const flaggedCount = problems.filter(p => p.length > 0).length;
   if (flaggedCount === 0) return { versions, fixed: 0 };
 
@@ -93,6 +128,9 @@ export async function fixFlaggedVersions(versions, newsData) {
     }
     if (problems[i].includes('dup_opening')) {
       orders.push('- ประโยคเปิดซ้ำกับเวอร์ชันอื่นคำต่อคำ → เขียนประโยคเปิดใหม่คนละแนว (อ่านเป็นธรรมชาติ ห้ามขึ้นต้นด้วยวันที่)');
+    }
+    if (problems[i].includes('same_angle')) {
+      orders.push(`- เปิดเรื่องด้วยภาพ/มุมเดียวกับเวอร์ชันอื่น (แม้คำต่างกัน) → เขียนย่อหน้าเปิดใหม่ด้วยมุมนี้แทน: "${v._newAngle || 'มุมอื่นที่ต่างจริง'}" — เนื้อส่วนอื่นคงเดิม`);
     }
     if (problems[i].includes('dup_body')) {
       orders.push(`- มีท่อนเนื้อหากลางเรื่องซ้ำกับเวอร์ชันอื่นคำต่อคำ (เช่นท่อน "${String(v._dupBodySample || '').slice(0, 28)}...") → เล่าท่อนที่ซ้ำใหม่ด้วยคำของตัวเอง ข้อเท็จจริงเดิมครบ`);

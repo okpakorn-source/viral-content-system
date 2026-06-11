@@ -120,21 +120,30 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
       const safeContent = factCheck.action === 'rollback' ? rollbackContent : correctedContent;
 
       // === Layer 4.5: Hallucination Scrubbing ===
+      // ★ ปรับ 12 มิ.ย. (ลูปคุณภาพจับได้): เดิมแทนทุกอย่างด้วย "ที่เกิดเหตุ" ทื่อๆ → ได้คำพิกล
+      //   ("ผที่เกิดเหตุ", ข่าวโรงพยาบาลกลายเป็น "ที่เกิดเหตุ") — เปลี่ยนเป็นแทนแบบรักษาชนิดสถานที่
       let scrubbedContent = safeContent;
       if (newsData && newsData.newsBody) {
-        const placeRegex = /(?:จ\.|อ\.|ต\.|ซ\.|ถ\.|จังหวัด|อำเภอ|ตำบล|ซอย|ถนน|โรงพยาบาล|สถานี|วัด|โรงเรียน|มหาวิทยาลัย|สนามบิน)\s*([ก-๙a-zA-Z]+)/g;
-        const places = new Set();
+        const placeRegex = /(จ\.|อ\.|ต\.|ซ\.|ถ\.|จังหวัด|อำเภอ|ตำบล|ซอย|ถนน|โรงพยาบาล|สถานี|วัด|โรงเรียน|มหาวิทยาลัย|สนามบิน)\s*([ก-๙a-zA-Z]+)/g;
+        const TYPE_REPLACEMENT = {
+          'จ.': 'ในพื้นที่', 'จังหวัด': 'ในพื้นที่', 'อ.': 'ในพื้นที่', 'อำเภอ': 'ในพื้นที่',
+          'ต.': 'ในพื้นที่', 'ตำบล': 'ในพื้นที่', 'ซ.': 'ในซอย', 'ซอย': 'ในซอย', 'ถ.': 'บนถนน', 'ถนน': 'บนถนน',
+          'โรงพยาบาล': 'โรงพยาบาล', 'สถานี': 'สถานี', 'วัด': 'วัด', 'โรงเรียน': 'โรงเรียน',
+          'มหาวิทยาลัย': 'มหาวิทยาลัย', 'สนามบิน': 'สนามบิน',
+        };
+        const places = new Map(); // full match → { prefix }
         let match;
         while ((match = placeRegex.exec(scrubbedContent)) !== null) {
-          places.add(match[0].trim());
+          places.set(match[0].trim(), { prefix: match[1] });
         }
-        
         const sourceBody = newsData.newsBody.replace(/\s+/g, '');
-        for (const place of places) {
-          const cleanPlace = place.replace(/^(จ\.|อ\.|ต\.|ซ\.|ถ\.|จังหวัด|อำเภอ|ตำบล|ซอย|ถนน|โรงพยาบาล|สถานี|วัด|โรงเรียน|มหาวิทยาลัย|สนามบิน)\s*/, '');
-          if (cleanPlace.length >= 3 && !sourceBody.includes(cleanPlace)) {
-            console.log(`  L4.5 Hallucination Scrub: "${place}" -> "ที่เกิดเหตุ"`);
-            scrubbedContent = scrubbedContent.split(place).join('ที่เกิดเหตุ');
+        for (const [place, info] of places) {
+          const cleanPlace = place.replace(placeRegex, '$2');
+          // ชื่อ ≥4 ตัวอักษรเท่านั้น (สั้นกว่านี้เสี่ยงจับคำทั่วไป) + ไม่อยู่ในต้นฉบับจริง
+          if (cleanPlace.length >= 4 && !sourceBody.includes(cleanPlace)) {
+            const replacement = TYPE_REPLACEMENT[info.prefix] || 'ในพื้นที่';
+            console.log(`  L4.5 Hallucination Scrub: "${place}" -> "${replacement}" (รักษาชนิดสถานที่)`);
+            scrubbedContent = scrubbedContent.split(place).join(replacement);
           }
         }
       }
