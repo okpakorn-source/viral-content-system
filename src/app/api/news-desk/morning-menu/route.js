@@ -31,9 +31,19 @@ function buildMenu(items) {
   return menu;
 }
 
+// webhook อ่านได้ 2 ทาง: env → settings store (Supabase ที่ local/prod แชร์กัน — ไม่ต้องตั้ง env บน Vercel)
+async function getWebhookUrl() {
+  if (process.env.DISCORD_WEBHOOK_URL) return process.env.DISCORD_WEBHOOK_URL;
+  try {
+    const store = createStore('desk-settings');
+    const all = await store.getAll();
+    return all.find(s => s.id === 'discord_webhook')?.url || null;
+  } catch { return null; }
+}
+
 async function sendDiscord(menu, deskUrl) {
-  const webhook = process.env.DISCORD_WEBHOOK_URL;
-  if (!webhook) return { sent: false, reason: 'ไม่มี DISCORD_WEBHOOK_URL ใน env' };
+  const webhook = await getWebhookUrl();
+  if (!webhook) return { sent: false, reason: 'ไม่มี webhook — ตั้งใน env DISCORD_WEBHOOK_URL หรือ store desk-settings' };
 
   const date = new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Bangkok' });
   const messages = [`# 🗞️ เมนูข่าวเช้า — ${date}\nคัดโดยสมองโต๊ะข่าว · กดเลือกได้ที่ ${deskUrl}`];
