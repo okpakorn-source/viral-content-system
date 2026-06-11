@@ -30,7 +30,8 @@ const FORBIDDEN_WORDS = [
   { pattern: /ยิง(?!ประตู|จรวด|ดาว)/g, type: 'forbidden_word', severity: 'high', suggestion: 'ใช้อาวุธปืน' },
 
   // === คำเสี่ยงที่ขาดไป (เพิ่มใหม่) ===
-  { pattern: /เสียชีวิต/g, type: 'forbidden_word', severity: 'high', suggestion: 'จากไป' },
+  // ★ เสียชีวิต/ตาย: ห้ามแทนคำตรงๆ (จะได้ "จากไป" ซ้ำจำเจทุกข่าว) — เข้าโหมด AI เกลาตามบริบทใน safeCorrect
+  { pattern: /เสียชีวิต/g, type: 'forbidden_word', severity: 'high', suggestion: 'สำนวนเลี่ยงตามบริบท เช่น จากไปอย่างสงบ/ไม่อยู่แล้ว/ลาลับ/ปิดตำนาน' },
   { pattern: /บาดเจ็บสาหัส/g, type: 'forbidden_word', severity: 'high', suggestion: 'ได้รับบาดเจ็บหนัก' },
   { pattern: /สะเก็ดระเบิด/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุการณ์ไม่คาดฝัน' },
   { pattern: /ระเบิด(?!ความ|พลัง|แรง)/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุการณ์รุนแรง' },
@@ -51,6 +52,16 @@ const FORBIDDEN_WORDS = [
   { pattern: /ทำร้าย(?!ตัวเอง)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ใช้ความรุนแรง' },
   { pattern: /เลือดสาด/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุรุนแรง' },
   { pattern: /บาดแผล(?!ทางใจ)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'อาการบาดเจ็บ' },
+
+  // === ★ การพนัน / ยาเสพติด / แอลกอฮอล์ (Meta restricted — เพิ่ม 12 มิ.ย. 69) ===
+  //     หมายเหตุ: สลาก/ลอตเตอรี่ (หวยรัฐถูกกฎหมาย) จงใจไม่ใส่ — บางข่าวเป็นแก่นเรื่อง เล่าไม่ได้ถ้าตัด
+  { pattern: /การพนัน|เล่นพนัน|บ่อนพนัน|บ่อนการพนัน/g, type: 'forbidden_word', severity: 'high', suggestion: 'เกมเสี่ยงโชคผิดกฎหมาย' },
+  { pattern: /เว็บพนัน|พนันออนไลน์|บาคาร่า|สล็อตออนไลน์/g, type: 'forbidden_word', severity: 'high', suggestion: 'เว็บผิดกฎหมาย' },
+  { pattern: /แทงบอล|แทงม้า/g, type: 'forbidden_word', severity: 'high', suggestion: 'เกมเสี่ยงโชคผิดกฎหมาย' },
+  { pattern: /ยาบ้า|ยาไอซ์|เฮโรอีน|โคเคน/g, type: 'forbidden_word', severity: 'high', suggestion: 'สิ่งผิดกฎหมาย' },
+  { pattern: /ยาเสพติด|เสพยา|ค้ายา|พ่อค้ายา/g, type: 'forbidden_word', severity: 'high', suggestion: 'สิ่งผิดกฎหมาย' },
+  { pattern: /เมาแล้วขับ/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ขับขี่ในสภาพไม่พร้อม' },
+  { pattern: /ตั้งวงเหล้า|วงเหล้า|ดื่มสุรา/g, type: 'forbidden_word', severity: 'medium', suggestion: 'วงสังสรรค์' },
 
   // === Engagement bait / clickbait (HIGH) ===
   { pattern: /ด่วน(?!จัด)/g, type: 'forbidden_word', severity: 'medium', suggestion: '' },

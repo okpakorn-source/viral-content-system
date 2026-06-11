@@ -19,6 +19,9 @@ const BANNED_PATTERNS = [
   /สงคราม.{0,12}(ยูเครน|รัสเซีย|กาซา|อิสราเอล|ตะวันออกกลาง)|ระเบิดพลีชีพ|กราดยิง/,
   /ยุบสภา|รัฐประหาร|ม็อบ.{0,10}(ปะทะ|สลาย)|นายกฯ.{0,10}(ลาออก|อภิปราย)/,
   /หมิ่นศาสนา|ดูหมิ่นพระ|พระฉาว.{0,10}(สีกา|เสพ)/,
+  // ★ 12 มิ.ย. 69 (คำสั่งทีม): พนัน/ยาเสพติด ไม่เอาทุกรูปแบบ — บล็อกตั้งแต่ประตู (สลาก/หวยรัฐไม่นับ)
+  /การพนัน|เล่นพนัน|บ่อนพนัน|เว็บพนัน|พนันออนไลน์|บาคาร่า|แทงบอล|เปิดบ่อน/,
+  /ยาบ้า|ยาไอซ์|ยาเสพติด|เสพยา|ค้ายา/,
 ];
 
 export function gateKeywords(item) {
@@ -45,21 +48,25 @@ export async function classifyBatch(items) {
   const out = [];
   for (let i = 0; i < items.length; i += 10) {
     const chunk = items.slice(i, i + 10);
-    const list = chunk.map((it, idx) =>
-      `${idx}: ${String(it.title || '').slice(0, 120)} | ${String(it.snippet || '').slice(0, 150)}`).join('\n');
+    const list = chunk.map((it, idx) => {
+      let domain = '';
+      try { domain = new URL(it.url || '').hostname; } catch {}
+      return `${idx}: [${domain}] ${String(it.title || '').slice(0, 120)} | ${String(it.snippet || '').slice(0, 150)}`;
+    }).join('\n');
     try {
       const res = await callAI({
         prompt: `จัดหมวดข่าวเพจไวรัลไทย ตอบ JSON เท่านั้น
 หมวดให้เลือก: ${DESK_CATEGORIES.join(', ')}
-ข่าว:
+ข่าว (รูปแบบ: เลข: [โดเมนต้นทาง] หัวข้อ | คำโปรย):
 ${list}
 
-ตอบ: {"items":[{"i":0,"category":"...","tone":"บวก|กลาง|ลบ","toxicity":0-3,"fbRisk":0-3,"toneable":true/false}]}
+ตอบ: {"items":[{"i":0,"category":"...","tone":"บวก|กลาง|ลบ","toxicity":0-3,"fbRisk":0-3,"toneable":true/false,"country":""}]}
 - toxicity: 0=สะอาด 3=หดหู่/รุนแรง | fbRisk: ความเสี่ยงโดน Facebook ลดรีช/ลบ (เลือด ความรุนแรง เนื้อหาล่อแหลม)
-- toneable: ถ้าเอาไปเกลาโทนใหม่แล้วลงเพจได้แบบไม่ลบเกิน/ไม่ toxic`,
+- toneable: ถ้าเอาไปเกลาโทนใหม่แล้วลงเพจได้แบบไม่ลบเกิน/ไม่ toxic
+- country: ★ ถ้าเหตุการณ์เกิดนอกประเทศไทย ใส่ชื่อประเทศ (เช่น "เวียดนาม", "เกาหลีใต้") — ดูจากโดเมน (.vn, vietnam.vn = เวียดนาม) ชื่อสถานที่ ชื่อคน ถ้าเกิดในไทยใส่ "" เท่านั้น`,
         model: 'gpt-4o-mini',
         temperature: 0.1,
-        maxTokens: 1200,
+        maxTokens: 1500,
       });
       const parsed = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
       for (const r of parsed?.items || []) {
@@ -72,6 +79,8 @@ ${list}
           toxicity: Math.min(3, Math.max(0, Number(r.toxicity) || 0)),
           fbRisk: Math.min(3, Math.max(0, Number(r.fbRisk) || 0)),
           toneable: r.toneable !== false,
+          // ★ ข่าวต่างประเทศ — ติดประเทศไว้บนการ์ด ใช้ทั้งคัดกรอง (judge) และบังคับระบุประเทศตอนเขียน
+          foreignCountry: (r.country && String(r.country).trim() && !/ไทย|thailand/i.test(r.country)) ? String(r.country).trim().slice(0, 30) : null,
         });
       }
     } catch (e) {
@@ -257,7 +266,7 @@ export async function editorialJudge(items) {
   for (let i = 0; i < groupItems.length; i += 8) {
     const chunk = groupItems.slice(i, i + 8);
     const list = chunk.map((it, idx) =>
-      `${idx}: [${it.category}|${it.tone}] ${String(it.title).slice(0, 110)} — ${String(it.snippet || '').slice(0, 180)}`).join('\n');
+      `${idx}: [${it.category}|${it.tone}${it.foreignCountry ? '|🌏' + it.foreignCountry : ''}] ${String(it.title).slice(0, 110)} — ${String(it.snippet || '').slice(0, 180)}`).join('\n');
     try {
       const res = await callAI({
         prompt: `${sp.persona}
@@ -265,6 +274,8 @@ export async function editorialJudge(items) {
 ${fewshot}
 ให้คะแนน "น่าหยิบมาทำโพสต์" 0-10 ต่อข่าว + เหตุผลสั้น + แตกประเด็น 2 มุมที่เพจเราเล่นได้
 เกณฑ์: เรื่องคนตัวเล็ก/อารมณ์ร่วมสูง/มีตัวเลข-รายละเอียดเจาะใจ = สูง | ข่าวแถลง/การเมือง/ไกลตัวคนไทย = ต่ำ
+★ ข่าวต่างประเทศ (ติดป้าย 🌏): ผ่านได้เฉพาะเรื่องอิมแพคสูงที่เกี่ยวกับคนดัง/บุคคลมีชื่อเสียงที่คนไทยรู้จัก (เช่น CEO บริษัทดัง, ไอดอลเกาหลี, ดาราฮอลลีวูด) — ข่าวชาวบ้านทั่วไปในต่างประเทศที่ไม่มีอิมแพคกับคนดู (น้ำใจชาวบ้าน, อุบัติเหตุท้องถิ่น, สัตว์ทำร้ายคน) ให้ 0-2 ไปเลย
+★ ข่าวที่แก่นเรื่องคือเหล้า/การดื่ม (วงเหล้า เมาอาละวาด) ให้ 0-2 — ยกเว้นเป็นข่าวคนดัง/บุคคลสาธารณะ (เช่น ดาราเมาแล้วขับ) อนุญาตตามปกติ
 ข่าว:
 ${list}
 

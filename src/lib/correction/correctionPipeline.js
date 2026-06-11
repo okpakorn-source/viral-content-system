@@ -15,6 +15,7 @@ import { safeCorrect } from './safeCorrectionService';
 import { checkFactPreservation } from './factPreservationCheck';
 import { editorialPolish } from './editorialPolishService';
 import { semanticSanityCheck } from './semanticSanityCheck';
+import { fixFlaggedVersions } from './flagFixerService';
 
 /**
  * รัน correction pipeline ทั้งหมดกับ versions array
@@ -39,7 +40,18 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
   console.log(`🔧 CORRECTION PIPELINE — Processing ${versions.length} versions`);
   console.log(`${'═'.repeat(50)}`);
 
-  const correctionTasks = versions.map(async (version, i) => {
+  // === ★ Layer 1.5: Flag Fixer (12 มิ.ย. 69) — จุดเดียวที่เห็นทุกเวอร์ชันพร้อมกัน ===
+  //     จบซ้ำข้ามมุม / เลขหัวใจข่าวหายหมด / เปิดเรื่องต้องห้าม → AI แก้เฉพาะจุด (เคยตรวจเจอแต่ไม่มีใครแก้)
+  let workVersions = versions;
+  try {
+    const flagResult = await fixFlaggedVersions(versions, newsData);
+    workVersions = flagResult.versions;
+    if (flagResult.fixed > 0) console.log(`[Pipeline] L1.5 FlagFixer: แก้ ${flagResult.fixed} เวอร์ชัน`);
+  } catch (ffErr) {
+    console.warn(`[Pipeline] L1.5 FlagFixer skipped: ${ffErr.message}`);
+  }
+
+  const correctionTasks = workVersions.map(async (version, i) => {
     const vLabel = version._sourceLabel || version.style || `V${i + 1}`;
 
     try {
@@ -183,8 +195,8 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
   const results = await Promise.allSettled(correctionTasks);
   const corrected = results.map((r, i) => {
     if (r.status === 'fulfilled') return r.value;
-    // Fallback: ถ้า Promise rejected → ใช้ original
-    return { ...versions[i], _correctionApplied: false, _correctionError: r.reason?.message || 'Unknown' };
+    // Fallback: ถ้า Promise rejected → ใช้ original (ฉบับผ่าน FlagFixer แล้ว)
+    return { ...workVersions[i], _correctionApplied: false, _correctionError: r.reason?.message || 'Unknown' };
   });
 
   const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);

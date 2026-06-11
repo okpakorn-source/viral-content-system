@@ -131,9 +131,13 @@ export async function POST(request) {
     //   คลิปสัมภาษณ์→บทถอดเสียงเต็ม | เจาะลึกแล้ว→เนื้อสังเคราะห์หลายแหล่ง | ปกติ→ลิงก์
     if (action === 'sendWorkflow') {
       const { buildEnrichedInput } = await import('@/lib/services/newsDesk/researchAgent');
-      const input = (item.lane === 'interview' && item.fullText)
+      let input = (item.lane === 'interview' && item.fullText)
         ? item.fullText
         : (buildEnrichedInput(item) || item.url);
+      // ★ ข่าวต่างประเทศที่ส่งเป็นลิงก์ตรง — แนบข้อเท็จจริงประเทศไปกับงาน (pipeline ผนวกเป็นข้อมูลเพิ่มเติม)
+      if (item.foreignCountry && input === item.url) {
+        input = `${item.url}\n\nหมายเหตุบรรณาธิการ (ข้อเท็จจริง): ข่าวนี้เกิดที่ประเทศ${item.foreignCountry} ไม่ใช่ประเทศไทย — ต้องระบุประเทศชัดเจนตั้งแต่ย่อหน้าแรกของโพสต์`;
+      }
       const qRes = await fetch(`${request.nextUrl.origin}/api/queue/add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

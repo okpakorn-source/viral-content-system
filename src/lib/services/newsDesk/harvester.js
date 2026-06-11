@@ -362,8 +362,12 @@ async function autoPilotPick(freshItems, store, opts = {}) {
       if (budget <= 0) break;
       try {
         const { buildEnrichedInput } = await import('./researchAgent');
-        const input = (pick.lane === 'interview' && pick.fullText) ? pick.fullText
+        let input = (pick.lane === 'interview' && pick.fullText) ? pick.fullText
           : (buildEnrichedInput(pick) || pick.url);
+        // ★ ข่าวต่างประเทศส่งเป็นลิงก์ตรง — แนบข้อเท็จจริงประเทศ (กันเขียนแบบไม่บอกประเทศ)
+        if (pick.foreignCountry && input === pick.url) {
+          input = `${pick.url}\n\nหมายเหตุบรรณาธิการ (ข้อเท็จจริง): ข่าวนี้เกิดที่ประเทศ${pick.foreignCountry} ไม่ใช่ประเทศไทย — ต้องระบุประเทศชัดเจนตั้งแต่ย่อหน้าแรกของโพสต์`;
+        }
         const q = await enqueueJob(
           {
             input, contentLength: 'short', userId: `ai-${sp.name}`,
