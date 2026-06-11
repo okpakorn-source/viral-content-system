@@ -63,12 +63,15 @@ function templateText(templateSpec) {
 
 /**
  * ให้ AI Vision กำกับการจัดปก
- * @returns {Promise<{assignments: Array<{slotId, imageIndex, crop:{x,y,w,h}}>, reason: string}|null>}
+ * @param {Array} [templateOptions] — ถ้าส่งหลาย template มา Director จะ "เลือกโครงที่เล่าเรื่องนี้ได้ดีสุด" เอง
+ * @returns {Promise<{templateSpec, assignments: Array<{slotId, imageIndex, crop:{x,y,w,h}}>, reason: string}|null>}
  */
-export async function directCover({ imageBuffers, identity, templateSpec, newsTitle }) {
+export async function directCover({ imageBuffers, identity, templateSpec, templateOptions = null, newsTitle }) {
+  const options = (templateOptions && templateOptions.length > 0) ? templateOptions : [templateSpec];
   const thumbs = await buildThumbnails(imageBuffers);
-  if (thumbs.length < templateSpec.slots.length) {
-    console.log(`[CoverDirector] ⚠️ ภาพใช้ได้ ${thumbs.length} < ช่อง ${templateSpec.slots.length}`);
+  const usable = options.filter(t => thumbs.length >= t.slots.length);
+  if (usable.length === 0) {
+    console.log(`[CoverDirector] ⚠️ ภาพใช้ได้ ${thumbs.length} < ช่องของทุก template`);
     return null;
   }
 
@@ -78,6 +81,10 @@ export async function directCover({ imageBuffers, identity, templateSpec, newsTi
   }));
 
   const dimsText = thumbs.map(t => `#${t.index}: ${t.width}x${t.height}px`).join(', ');
+
+  const templatesBlock = usable.map(t =>
+    `▼ "${t.id}"${t.storyFit ? ` — เหมาะกับ: ${t.storyFit}` : ''} (ใช้ ${t.slots.length} ภาพ, canvas ${t.canvasW}x${t.canvasH})\n${templateText(t)}`
+  ).join('\n\n');
 
   const prompt = `คุณคือ Art Director มืออาชีพของเพจข่าวไวรัล กำลังจัดปกข่าวจากภาพจริง ${thumbs.length} ใบ (เรียงตามลำดับ #0 ถึง #${thumbs.length - 1})
 
@@ -89,11 +96,12 @@ export async function directCover({ imageBuffers, identity, templateSpec, newsTi
 === ขนาดจริงของแต่ละภาพ ===
 ${dimsText}
 
-=== TEMPLATE (canvas ${templateSpec.canvasW}x${templateSpec.canvasH}) ===
-${templateText(templateSpec)}
+=== โครงปกให้เลือก (${usable.length} แบบ — แกะจากปกไวรัลจริงที่ได้หลักหมื่นไลก์) ===
+${templatesBlock}
 
 === งานของคุณ ===
-เลือกภาพลงทุกช่อง + กำหนดกรอบครอปของแต่ละภาพเป็นสัดส่วน 0-1 ของภาพต้นฉบับ
+ขั้น 1: เลือก "โครงปก" ที่เล่าเรื่องนี้ได้ดีที่สุด (ดูจาก storyFit + ภาพที่มีจริง — เช่น เรื่องให้-รับที่มีภาพสองฝ่าย = quad_circle, เรื่องผู้ดูแล = hero_stack)
+ขั้น 2: เลือกภาพลงทุกช่องของโครงนั้น + กำหนดกรอบครอปเป็นสัดส่วน 0-1 ของภาพต้นฉบับ
 (x,y = มุมซ้ายบนของกรอบ, w,h = กว้าง/สูงของกรอบ — เทียบกับขนาดเต็มของภาพนั้น)
 
 กฎเหล็ก:
@@ -109,7 +117,7 @@ ${templateText(templateSpec)}
 10. ★★ บุคคลเดียวกันห้ามปรากฏเกิน 2 ช่อง — ถ้าเรื่องมีบุคคลอื่น (ผู้ให้/ผู้รับ/คู่กรณี/ครอบครัว) ต้องให้พื้นที่พวกเขา ช่องที่เกินให้ใช้ฉากเหตุการณ์แทน
 
 ตอบ JSON เท่านั้น:
-{"assignments":[{"slotId":"main","imageIndex":0,"crop":{"x":0.1,"y":0.0,"w":0.6,"h":0.9},"why":"สั้นๆ"}],"reason":"ภาพรวมการเล่าเรื่อง"}`;
+{"templateId":"ชื่อโครงที่เลือก","assignments":[{"slotId":"main","imageIndex":0,"crop":{"x":0.1,"y":0.0,"w":0.6,"h":0.9},"why":"สั้นๆ"}],"reason":"เลือกโครงนี้เพราะ... + ภาพรวมการเล่าเรื่อง"}`;
 
   try {
     const res = await callAI({
@@ -124,8 +132,12 @@ ${templateText(templateSpec)}
     const parsed = typeof res === 'object' && res !== null ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
     const assignments = parsed?.assignments || [];
 
+    // ★ โครงที่ Director เลือก (ต้องอยู่ในตัวเลือก — ไม่งั้นใช้ตัวแรก)
+    const chosenSpec = usable.find(t => t.id === parsed?.templateId) || usable[0];
+    console.log(`[CoverDirector] 🏗️ เลือกโครง: ${chosenSpec.id}${parsed?.templateId !== chosenSpec.id ? ' (fallback)' : ''}`);
+
     // Validate: ครบทุกช่อง ไม่ซ้ำภาพ ดัชนีถูก
-    const slotIds = new Set(templateSpec.slots.map(s => s.id));
+    const slotIds = new Set(chosenSpec.slots.map(s => s.id));
     const seenSlots = new Set();
     const seenImages = new Set();
     const valid = [];
@@ -147,13 +159,13 @@ ${templateText(templateSpec)}
       seenImages.add(idx);
     }
 
-    if (valid.length < templateSpec.slots.length) {
-      console.log(`[CoverDirector] ⚠️ assignments ใช้ได้ ${valid.length}/${templateSpec.slots.length} ช่อง`);
+    if (valid.length < chosenSpec.slots.length) {
+      console.log(`[CoverDirector] ⚠️ assignments ใช้ได้ ${valid.length}/${chosenSpec.slots.length} ช่อง`);
       return null;
     }
 
     valid.forEach(a => console.log(`[CoverDirector] 🎬 ${a.slotId} ← #${a.imageIndex} crop(${a.crop.x.toFixed(2)},${a.crop.y.toFixed(2)},${a.crop.w.toFixed(2)},${a.crop.h.toFixed(2)}) — ${a.why}`));
-    return { assignments: valid, reason: String(parsed.reason || '').slice(0, 200) };
+    return { templateSpec: chosenSpec, assignments: valid, reason: String(parsed.reason || '').slice(0, 200) };
   } catch (e) {
     console.log('[CoverDirector] ❌ direct failed:', e.message?.slice(0, 80));
     return null;

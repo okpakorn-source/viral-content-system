@@ -92,19 +92,24 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: msg, errorType: 'INSUFFICIENT_QUALITY_IMAGES' }, { status: 422 });
     }
 
-    // ── ② AI Vision Director — template "viral-safe" (rev.4 หลังบทเรียน CASE-038:
-    //    ช่องลอยกลางผืนของ template_5 บังหน้าฮีโร่ → ใช้ลูกผสม ตารางสะอาด + วงกลม/กรอบเหลืองแบบควบคุม) ──
-    let templateSpec;
-    if (imageBuffers.length >= 5) templateSpec = V3_TEMPLATES.v3_viral5;
-    else if (imageBuffers.length === 4) templateSpec = V3_TEMPLATES.v3_viral4;
-    else templateSpec = V3_TEMPLATES.v3_grid3;
-    console.log(`[CoverV3] ③ Director (${templateSpec.id}, pool=${imageBuffers.length})...`);
+    // ── ② AI Vision Director — เลือกโครงเองจาก 5 แม่บทที่แกะจากปกไวรัลจริง (rev.6) ──
+    const templateOptions = [
+      V3_TEMPLATES.vt_hero_stack,   // 6 ภาพ — ผู้ดูแล/ผู้ช่วยเหลือ
+      V3_TEMPLATES.vt_quad_circle,  // 5 ภาพ — สองฝ่าย ให้-รับ
+      V3_TEMPLATES.vt_faces_circle, // 5 ภาพ — ครอบครัว/เด็ก
+      V3_TEMPLATES.vt_hero_br,      // 4 ภาพ — อารมณ์น้ำตาเป็นจุดขาย
+      V3_TEMPLATES.vt_hero_wide,    // 4 ภาพ — คนเล่า/สัมภาษณ์ + คู่กรณี
+      V3_TEMPLATES.v3_grid3,        // 3 ภาพ — fallback ตารางสะอาด
+    ].filter(t => t.slots.length <= imageBuffers.length);
+
+    console.log(`[CoverV3] ③ Director (options: ${templateOptions.map(t => t.id).join(', ')} | pool=${imageBuffers.length})...`);
     const { directCover, reviewCover } = await import('@/lib/services/coverDirectorService');
-    const direction = await directCover({ imageBuffers, identity, templateSpec, newsTitle });
+    const direction = await directCover({ imageBuffers, identity, templateOptions, templateSpec: templateOptions[0], newsTitle });
     if (!direction) {
       await markQueueJob('failed', { error: 'AI Director จัดวางไม่สำเร็จ' });
       return NextResponse.json({ success: false, error: 'AI Director จัดวางไม่สำเร็จ', errorType: 'DIRECTOR_FAILED' }, { status: 422 });
     }
+    const templateSpec = direction.templateSpec; // โครงที่ Director เลือก
 
     // ── ③ Execute (พิกเซลแท้) ──
     const { executeCover, applyFixes } = await import('@/lib/services/coverExecutorService');
