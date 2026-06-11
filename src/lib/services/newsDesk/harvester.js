@@ -287,6 +287,14 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
   if (finalItems.length > 0) await store.addMany(finalItems);
   stats.added = finalItems.length;
 
+  // ════════════════════════════════════════════════════
+  // ★ AUTO-PILOT (ผู้ใช้ 11 มิ.ย.): บก.แต่ละคนเฝ้าโต๊ะ — ข่าวที่ บก.ประจำแนวให้ ≥8 = "ทำได้"
+  //   ส่งเข้าเวิร์กโฟลว์เจนเองทันที ต่อคิวกัน คนมาหยิบผลงานที่แท็บ ✅ พร้อมใช้
+  // ════════════════════════════════════════════════════
+  try {
+    stats.autoPicked = await autoPilotPick(finalItems, store);
+  } catch (e) { console.log('[AutoPilot] skip:', e.message?.slice(0, 50)); }
+
   // ★ Research Agent อัตโนมัติ: เจาะลึกตัวท็อป (judge ≥8) สูงสุด 3 ใบ/รอบ — การ์ดขึ้น feed แบบ "พร้อมเขียน"
   try {
     const { deepResearch } = await import('./researchAgent');
@@ -303,6 +311,80 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
 
   console.log(`[Harvester] ✅ ${JSON.stringify(stats)} in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
   return stats;
+}
+
+// ════════════════════════════════════════════════════
+// AUTO-PILOT — บก.เลือกเอง ส่งเจนเอง
+// ════════════════════════════════════════════════════
+async function getAutopilotConfig() {
+  const defaults = { enabled: true, minScore: 8, perEditorPerRound: 2, dailyCap: 20 };
+  try {
+    const settings = createStore('desk-settings');
+    const all = await settings.getAll();
+    const cfg = all.find(s => s.id === 'autopilot');
+    return cfg ? { ...defaults, ...cfg } : defaults;
+  } catch { return defaults; }
+}
+
+async function autoPilotPick(freshItems, store) {
+  const cfg = await getAutopilotConfig();
+  if (!cfg.enabled) return 0;
+
+  const { specialistForLane } = await import('./deskBrain');
+  const { enqueueJob } = await import('@/lib/services/queueService');
+
+  // เพดานรายวัน — นับที่ บก.ส่งเองวันนี้
+  const today = new Date().toISOString().slice(0, 10);
+  const allItems = await store.getAll();
+  const autoSentToday = allItems.filter(i => i.autoPicked && String(i.sentAt || '').startsWith(today)).length;
+  if (autoSentToday >= cfg.dailyCap) {
+    console.log(`[AutoPilot] ⏸️ ครบเพดานวันนี้แล้ว (${autoSentToday}/${cfg.dailyCap})`);
+    return 0;
+  }
+  let budget = cfg.dailyCap - autoSentToday;
+
+  // จัดกลุ่มผู้สมัครตาม บก. — เอาเฉพาะที่ บก.ให้คะแนน "ทำได้" (judge ≥ minScore) และสะอาด
+  const byEditor = new Map();
+  for (const it of freshItems) {
+    if ((it.judgeScore ?? 0) < cfg.minScore || it.status !== 'new') continue;
+    if ((it.toxicity || 0) >= 2 || (it.fbRisk || 0) >= 2) continue;
+    const sp = specialistForLane(it.lane);
+    if (!byEditor.has(sp.name)) byEditor.set(sp.name, { sp, picks: [] });
+    byEditor.get(sp.name).picks.push(it);
+  }
+
+  let sent = 0;
+  for (const { sp, picks } of byEditor.values()) {
+    picks.sort((a, b) => (b.judgeScore || 0) - (a.judgeScore || 0));
+    for (const pick of picks.slice(0, cfg.perEditorPerRound)) {
+      if (budget <= 0) break;
+      try {
+        const { buildEnrichedInput } = await import('./researchAgent');
+        const input = (pick.lane === 'interview' && pick.fullText) ? pick.fullText
+          : (buildEnrichedInput(pick) || pick.url);
+        const q = await enqueueJob(
+          { input, contentLength: 'short', userId: `ai-${sp.name}` },
+          `ai-${sp.name}`
+        );
+        await store.update(pick.id, (ex) => ({
+          ...ex, status: 'sent', autoPicked: true, pickedBy: sp.name, pickedByIcon: sp.icon,
+          pickReason: pick.judgeReason || '', claimedBy: `${sp.icon} ${sp.name}`,
+          sentAt: new Date().toISOString(), jobId: q.jobId,
+        }));
+        // บันทึกเป็นบทเรียน (เหมือนทีมกดส่งเอง)
+        try {
+          const fb = createStore('news-desk-feedback');
+          await fb.add({ id: `${pick.id}_autosent_${Date.now()}`, newsId: pick.id, action: 'sent', title: pick.title, category: pick.category, lane: pick.lane, user: sp.name, at: new Date().toISOString() });
+        } catch {}
+        sent++; budget--;
+        console.log(`[AutoPilot] ${sp.icon} ${sp.name} เลือก [${pick.judgeScore}] ${String(pick.title).slice(0, 50)} → คิว ${q.jobId.slice(0, 8)}`);
+      } catch (e) {
+        console.log('[AutoPilot] ส่งไม่สำเร็จ:', e.message?.slice(0, 60));
+      }
+    }
+  }
+  if (sent > 0) console.log(`[AutoPilot] ✅ บก.ส่งเจนเอง ${sent} ข่าว (วันนี้รวม ${autoSentToday + sent}/${cfg.dailyCap})`);
+  return sent;
 }
 
 /** ลบข่าวเก่าเกิน N วัน กันคลังบวม (เรียกตอน harvest) */

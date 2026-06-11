@@ -21,6 +21,13 @@ export async function GET(request) {
     let items = await store.getAll();
 
     if (['trend', 'good', 'evergreen', 'interview', 'followup', 'buzz'].includes(tab)) items = items.filter(i => i.lane === tab);
+    // ★ แท็บ ✅ พร้อมใช้: ผลงานที่ส่งเจนแล้ว (คนมาหยิบเนื้อไปทำโพสต์/ปก) — เรียงใหม่สุดก่อน
+    if (tab === 'ready') {
+      items = items.filter(i => i.status === 'sent' && !i.used);
+      items.sort((a, b) => new Date(b.sentAt || 0) - new Date(a.sentAt || 0));
+      const lightReady = items.slice(0, limit).map(({ fullText, ...rest }) => rest);
+      return NextResponse.json({ success: true, items: lightReady, total: items.length, tab: 'ready' });
+    }
     items = items.filter(i => i.status !== 'dismissed');
 
     // ★ quick-fix: คะแนนเสื่อมตามอายุ — กระแสเก่าจมเอง (trend -8/วัน, good -3/วัน, เลนไร้กาลเวลาไม่เสื่อม)
@@ -59,7 +66,20 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const { action, id, user = 'ไม่ระบุ' } = await request.json();
+    const { action, id, user = 'ไม่ระบุ', enabled } = await request.json();
+
+    // ★ สวิตช์ Auto-Pilot (ไม่ผูกกับข่าวใบไหน — จัดการก่อนหา item)
+    if (action === 'autopilot') {
+      const settings = createStore('desk-settings');
+      const allS = await settings.getAll();
+      if (allS.find(s => s.id === 'autopilot')) {
+        await settings.update('autopilot', (ex) => ({ ...ex, enabled: !!enabled }));
+      } else {
+        await settings.add({ id: 'autopilot', enabled: !!enabled, minScore: 8, perEditorPerRound: 2, dailyCap: 20 });
+      }
+      return NextResponse.json({ success: true, enabled: !!enabled });
+    }
+
     if (!action || !id) {
       return NextResponse.json({ success: false, error: 'ต้องระบุ action และ id', errorType: 'VALIDATION_ERROR' }, { status: 400 });
     }
@@ -128,6 +148,9 @@ export async function POST(request) {
       patch.status = 'dismissed'; patch.dismissedBy = user;
     } else if (action === 'sent') {
       patch.status = 'sent'; patch.claimedBy = item.claimedBy || user; patch.sentAt = new Date().toISOString();
+    } else if (action === 'used') {
+      // ★ คนหยิบเนื้อไปทำโพสต์แล้ว — เก็บออกจากชั้นวาง
+      patch.used = true; patch.usedBy = user; patch.usedAt = new Date().toISOString();
     } else if (action === 'viral' || action === 'flop') {
       // ★ เฟส 3: รายงานผลโพสต์จริง — เข้าลูปเรียนรู้ (น้ำหนักหมวด + few-shot บรรณาธิการ AI)
       patch.performance = action;

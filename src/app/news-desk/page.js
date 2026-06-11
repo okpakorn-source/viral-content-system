@@ -15,6 +15,7 @@ const TABS = [
   { id: 'buzz', label: '📊 แชร์จริง' },
   { id: 'followup', label: '🔁 ตามรอย' },
   { id: 'interview', label: '🎙️ คลิปสัมภาษณ์' },
+  { id: 'ready', label: '✅ พร้อมใช้' },
 ];
 
 const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁', buzz: '📊' };
@@ -202,6 +203,39 @@ export default function NewsDeskPage() {
   };
 
   const [chiefCmd, setChiefCmd] = useState('');
+  const [expanded, setExpanded] = useState({}); // id → versions[] (แท็บพร้อมใช้)
+  const [autopilot, setAutopilot] = useState(true);
+
+  const toggleAutopilot = async () => {
+    const next = !autopilot;
+    setAutopilot(next);
+    await fetch('/api/news-desk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'autopilot', enabled: next }),
+    }).catch(() => {});
+    setMsg(next ? '🤖 Auto-Pilot เปิด — บก.จะเลือกข่าวคะแนน 8+ ส่งเจนเองทุกรอบเก็บข่าว' : '⏸️ Auto-Pilot ปิด — บก.แนะนำอย่างเดียว ทีมกดส่งเอง');
+  };
+
+  const openVersions = async (item) => {
+    if (expanded[item.id]) { setExpanded(prev => ({ ...prev, [item.id]: null })); return; }
+    if (!item.jobId) { setMsg('❌ การ์ดนี้ไม่มีงานเขียนผูกอยู่'); return; }
+    setMsg('📖 กำลังเปิดเนื้อที่เจนไว้...');
+    try {
+      const res = await fetch(`/api/queue/status?id=${item.jobId}`, { cache: 'no-store' });
+      const d = await res.json();
+      const data = d.result?.data || d.result || {};
+      const versions = data?.analysis?.versions || data?.versions || [];
+      if (d.status !== 'completed') { setMsg(d.status === 'failed' ? `❌ งานเขียนล้มเหลว: ${d.error || ''}` : '⏳ ยังเขียนไม่เสร็จ รอแป๊บ'); return; }
+      if (!versions.length) { setMsg('❌ ไม่พบเวอร์ชันในงานนี้ — ดูใน Generation Log แทน'); return; }
+      setExpanded(prev => ({ ...prev, [item.id]: versions }));
+      setMsg('');
+    } catch (e) { setMsg('❌ ' + e.message); }
+  };
+
+  const copyText = async (text) => {
+    try { await navigator.clipboard.writeText(text); setMsg('📋 คัดลอกแล้ว — เอาไปทำโพสต์/ปกได้เลย'); }
+    catch { setMsg('❌ คัดลอกไม่สำเร็จ'); }
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary, #0f1419)' }}>
@@ -219,7 +253,10 @@ export default function NewsDeskPage() {
               }}>{t.label}</button>
           ))}
           <div style={{ flex: 1 }} />
-          <button onClick={callChief}
+          <button onClick={toggleAutopilot} title="เปิด: บก.เลือกข่าวคะแนน 8+ ส่งเจนเองทุกรอบ / ปิด: บก.แนะนำอย่างเดียว"
+            style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid ' + (autopilot ? 'rgba(34,197,94,0.45)' : 'var(--border)'), cursor: 'pointer', background: autopilot ? 'rgba(34,197,94,0.12)' : 'var(--bg-card)', color: autopilot ? '#22c55e' : 'var(--text-muted)', fontWeight: 700, fontSize: 13.5 }}>
+            {autopilot ? '🤖 Auto-Pilot: เปิด' : '⏸️ Auto-Pilot: ปิด'}</button>
+          <button onClick={() => callChief()}
             style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid rgba(139,92,246,0.4)', cursor: 'pointer', background: 'rgba(139,92,246,0.12)', color: 'var(--desk-purple)', fontWeight: 700, fontSize: 13.5 }}>
             🧠 เรียก บก.ใหญ่</button>
           <button onClick={harvest} disabled={harvesting}
@@ -330,6 +367,7 @@ export default function NewsDeskPage() {
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, fontSize: 12 }}>
                       <span style={{ padding: '2px 9px', borderRadius: 999, background: (CAT_COLORS[it.category] || '#666') + '22', color: CAT_COLORS[it.category] || '#999', fontWeight: 600 }}>{it.category}</span>
                       <span style={{ color: 'var(--text-muted)' }}>{it.source}</span>
+                      {it.pickedBy && <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(139,92,246,0.15)', color: 'var(--desk-purple)', fontWeight: 700 }}>{it.pickedByIcon || '🤖'} {it.pickedBy} เลือก</span>}
                       {it.status === 'claimed' && <span style={{ color: 'var(--desk-amber)', fontWeight: 700 }}>📌 {it.claimedBy} จองแล้ว</span>}
                       {it.status === 'sent' && (() => {
                         const js = it.jobId ? jobStatus[it.jobId] : null;
@@ -390,6 +428,24 @@ export default function NewsDeskPage() {
                     )}
                   </div>
                 </div>
+                {/* ★ เนื้อที่เจนเสร็จ — คนหยิบ copy ไปทำโพสต์/ปกได้เลย */}
+                {expanded[it.id] && (
+                  <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {expanded[it.id].map((v, vi) => (
+                      <div key={vi} style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                          <b style={{ fontSize: 13.5, color: 'var(--text-primary)' }}>เวอร์ชัน {vi + 1}{v.title ? ` — ${String(v.title).slice(0, 60)}` : ''}</b>
+                          <button onClick={() => copyText(v.content || v.text || '')}
+                            style={{ padding: '4px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', fontSize: 12.5, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            📋 คัดลอก</button>
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 13.5, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.65 }}>
+                          {String(v.content || v.text || '')}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {/* ปุ่ม */}
                 <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
                   <a href={it.url} target="_blank" rel="noreferrer"
@@ -423,6 +479,16 @@ export default function NewsDeskPage() {
                     <button onClick={() => act(it.id, 'dismiss')}
                       style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'rgba(239,68,68,0.12)', color: 'var(--desk-red)', fontSize: 13 }}>
                       🗑 ไม่เอา</button>
+                  )}
+                  {it.status === 'sent' && (
+                    <button onClick={() => openVersions(it)}
+                      style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'rgba(34,197,94,0.15)', color: 'var(--desk-green)', fontSize: 13, fontWeight: 700 }}>
+                      {expanded[it.id] ? '📕 ปิดเนื้อ' : '📖 เปิดเนื้อที่เจนแล้ว'}</button>
+                  )}
+                  {it.status === 'sent' && !it.used && (
+                    <button onClick={() => act(it.id, 'used')} title="หยิบเนื้อไปทำโพสต์แล้ว — เก็บการ์ดออกจากชั้นวาง"
+                      style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'var(--bg-card)', color: 'var(--text-secondary)', fontSize: 13, border: '1px solid var(--border)' }}>
+                      ✔️ หยิบไปใช้แล้ว</button>
                   )}
                   {it.status === 'sent' && !it.performance && (
                     <>
