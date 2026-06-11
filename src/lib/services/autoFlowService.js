@@ -15,7 +15,7 @@ import { getBuiltinFallbackPrompt } from '@/lib/ai/builtinFallbackPrompt';
 
 const rlog = createLogger('AUTO-SERVICE');
 
-export async function processAutoFlow({ url, text, sourceType: forceType, preset, contentLength, workflowId, user, onProgress }) {
+export async function processAutoFlow({ url, text, sourceType: forceType, preset, contentLength, workflowId, user, deskMeta, onProgress }) {
   const startTime = Date.now();
   const _autoWorkflowId = workflowId || ('auto_' + Date.now());
 
@@ -521,6 +521,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
           research: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
           generate: ((Date.now() - stepGenStart) / 1000).toFixed(1),
         },
+        desk: deskMeta || null, // ★ ป้ายโต๊ะข่าว {newsId, lane, category, editor, editorIcon}
       },
       userId: _user.userId,
     });

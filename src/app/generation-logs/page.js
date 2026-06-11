@@ -78,6 +78,8 @@ export default function GenerationLogsPage() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [renderCap, setRenderCap]     = useState(60);
   const [evalDashboard, setEvalDashboard] = useState(null);
+  const [imgScout, setImgScout]       = useState({});   // caseId → ผลแหล่งภาพ
+  const [imgScouting, setImgScouting] = useState({});   // caseId → กำลังหา
 
   const fetchRef = useRef(null);
   const detailCache = useRef({}); // caseId → เนื้อเต็ม (กันโหลดซ้ำตอนกดคัดลอกด่วน)
@@ -159,6 +161,25 @@ export default function GenerationLogsPage() {
       showToast(`⚠️ ${e.message}`);
     }
   }, [getDetail, copyText]);
+
+  // ── หาแหล่งภาพประกอบ — AI วิเคราะห์บริบทข่าว ค้นลิงก์ทุกช่องทาง ──
+  const scoutImg = useCallback(async (caseId) => {
+    setImgScouting(prev => ({ ...prev, [caseId]: true }));
+    showToast('📸 กำลังหาแหล่งภาพ (~1 นาที)...');
+    try {
+      const res = await fetch('/api/news-desk/image-scout', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caseId }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      setImgScout(prev => ({ ...prev, [caseId]: data.imageSources }));
+      showToast(`📸 เจอแหล่งภาพ ${data.imageSources.totalLinks} ลิงก์`);
+    } catch (e) {
+      showToast(`⚠️ ${e.message}`);
+    }
+    setImgScouting(prev => ({ ...prev, [caseId]: false }));
+  }, []);
 
   // ── อัปเดตสถานะ (✅ ผ่าน / ❌ ไม่ผ่าน / 📌 ใช้แล้ว) ──
   const setStatus = useCallback(async (caseId, status, note) => {
@@ -359,8 +380,37 @@ export default function GenerationLogsPage() {
                         <button onClick={() => setEvalDashboard({ caseId: detail.caseId, newsTitle: detail.newsTitle, versions: detail.versions, sourceText: detail.sourceText })} style={btnStyle}>
                           🧪 ประเมินคุณภาพ
                         </button>
+                        <button onClick={() => scoutImg(c.caseId)} disabled={!!imgScouting[c.caseId]} style={{ ...btnStyle, color: 'var(--desk-amber)' }}>
+                          {imgScouting[c.caseId] ? '⏳ กำลังหาภาพ...' : '📸 หาแหล่งภาพ'}
+                        </button>
                         <a href="/cover-lab" target="_blank" rel="noopener noreferrer" style={{ ...btnStyle, textDecoration: 'none' }} title="เปิด Cover Lab ทำภาพปก">🎨 ไปทำปก</a>
                       </div>
+
+                      {/* แหล่งภาพของข่าวนี้ — ลิงก์จัดกลุ่มตามช่องทาง */}
+                      {imgScout[c.caseId]?.totalLinks > 0 && (
+                        <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(245,158,11,0.3)', background: 'rgba(245,158,11,0.05)' }}>
+                          <div style={{ fontSize: 13, color: 'var(--desk-amber)', fontWeight: 700, marginBottom: 4 }}>
+                            📸 แหล่งภาพของข่าวนี้ — {imgScout[c.caseId].totalLinks} ลิงก์
+                            <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {String(imgScout[c.caseId].event || '').slice(0, 70)}</span>
+                          </div>
+                          {Object.entries({ facebook: '📘 Facebook', images: '🖼️ ภาพจาก Google', news: '📰 เว็บข่าว', youtube: '▶️ YouTube', tiktok: '🎵 TikTok', instagram: '📷 Instagram' })
+                            .filter(([k]) => imgScout[c.caseId].channels?.[k]?.length > 0)
+                            .map(([k, label]) => (
+                              <div key={k} style={{ marginTop: 5 }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>{label} ({imgScout[c.caseId].channels[k].length})</div>
+                                {imgScout[c.caseId].channels[k].slice(0, 6).map((l, li) => (
+                                  <div key={li} style={{ fontSize: 12, marginTop: 2, display: 'flex', gap: 6, alignItems: 'baseline', minWidth: 0 }}>
+                                    {l.score != null && <span style={{ color: l.score >= 8 ? 'var(--desk-green)' : 'var(--desk-amber)', fontWeight: 700, flexShrink: 0 }}>[{l.score}]</span>}
+                                    <a href={l.url} target="_blank" rel="noopener noreferrer"
+                                      style={{ color: 'var(--desk-blue)', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {l.title || l.url}
+                                    </a>
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                        </div>
+                      )}
 
                       {/* เนื้อแต่ละเวอร์ชัน — โชว์เต็ม ไม่ต้องกดต่อ */}
                       {(detail.versions || []).map((v, i) => (

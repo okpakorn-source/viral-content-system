@@ -173,6 +173,9 @@ export async function POST(request) {
     // ─── PHASE 3: Delegate single URL to enhanced /api/auto ───────
     if (route.useEnhancedPipeline && (detection.primaryUrl || detection.hasText)) {
       let delegateRes;
+      // ★ ส่งตัวตนคนสั่ง (ai-บก.X / desk-ทีม) + ป้ายโต๊ะข่าวเข้า pipeline — Generation Log ถึงรู้ว่าใครทำ
+      //   (เดิมไม่ส่ง → ทุกเคสจากคิวเป็น anonymous หมด)
+      const _delegateUser = body.userId ? { userId: body.userId, userName: body.userId } : undefined;
       if (detection.inputType === 'plain_text' || (!detection.primaryUrl && detection.hasText)) {
         addLog('Route', `⚡ Delegating to /api/auto (TEXT pipeline)`);
         delegateRes = await processAutoFlowText({
@@ -182,6 +185,8 @@ export async function POST(request) {
           contentLength,
           preset,
           workflowId:    _wfId,
+          user:          _delegateUser,
+          deskMeta:      body.deskMeta || null,
         });
       } else {
         addLog('Route', `⚡ Delegating to /api/auto (URL pipeline) → ${detection.primaryUrl ? detection.primaryUrl.slice(0, 60) : 'Plain Text'}`);
@@ -191,6 +196,8 @@ export async function POST(request) {
           contentLength,
           preset,
           workflowId:    _wfId,
+          user:          _delegateUser,
+          deskMeta:      body.deskMeta || null,
         });
       }
 

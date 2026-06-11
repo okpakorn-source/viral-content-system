@@ -20,6 +20,16 @@ const TABS = [
 
 const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁', buzz: '📊' };
 
+// ★ ช่องทางแหล่งภาพ (Image Scout) — เรียงตามที่ทีมใช้ทำปกบ่อยสุด
+const IMG_CHANNELS = {
+  facebook:  { icon: '📘', label: 'Facebook' },
+  images:    { icon: '🖼️', label: 'ภาพจาก Google' },
+  news:      { icon: '📰', label: 'เว็บข่าว' },
+  youtube:   { icon: '▶️', label: 'YouTube' },
+  tiktok:    { icon: '🎵', label: 'TikTok' },
+  instagram: { icon: '📷', label: 'Instagram' },
+};
+
 const CAT_COLORS = {
   'น้ำใจ/ช่วยเหลือ': '#22c55e', 'กตัญญู/ครอบครัวอบอุ่น': '#10b981', 'สู้ชีวิต': '#06b6d4',
   'คนดังทำดี/ติดดิน': '#a3e635', 'สัมภาษณ์/บทสนทนาดี': '#8b5cf6', 'บันเทิงกระแส': 'var(--desk-amber)',
@@ -157,6 +167,22 @@ export default function NewsDeskPage() {
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
     setResearching(prev => ({ ...prev, [item.id]: false }));
+  };
+
+  // ★ หาแหล่งภาพประกอบข่าว — AI วิเคราะห์บริบท+ค้นทุกช่องทาง ส่งเป็นลิงก์จัดกลุ่ม (ไม่แคปภาพ)
+  const scoutImg = async (item) => {
+    setResearching(prev => ({ ...prev, ['img_' + item.id]: true }));
+    setMsg(`📸 กำลังหาแหล่งภาพ "${item.title.slice(0, 40)}..." (วิเคราะห์บริบท+ค้น 6 ช่องทาง ~1 นาที)`);
+    try {
+      const res = await fetch('/api/news-desk/image-scout', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newsId: item.id, force: !!item.imageSources }),
+      });
+      const d = await res.json();
+      setMsg(d.success ? `✅ เจอแหล่งภาพ ${d.imageSources.totalLinks} ลิงก์ — ${d.imageSources.event?.slice(0, 60)}` : `❌ ${d.error}`);
+      load();
+    } catch (e) { setMsg('❌ ' + e.message); }
+    setResearching(prev => ({ ...prev, ['img_' + item.id]: false }));
   };
 
   const sendMarketPost = async () => {
@@ -463,6 +489,29 @@ export default function NewsDeskPage() {
                         {it.captionSkeleton && <div style={{ fontSize: 12, color: 'var(--desk-blue)', marginTop: 4 }}>📝 โครงเล่า: {it.captionSkeleton}</div>}
                       </div>
                     )}
+                    {/* ★ แหล่งภาพของข่าวนี้ — ลิงก์จัดกลุ่มตามช่องทาง คนเลือกหยิบเอง */}
+                    {it.imageSources?.totalLinks > 0 && (
+                      <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 10, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.25)' }}>
+                        <div style={{ fontSize: 12.5, color: 'var(--desk-amber)', fontWeight: 700 }}>
+                          📸 แหล่งภาพของข่าวนี้ — {it.imageSources.totalLinks} ลิงก์
+                          <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {String(it.imageSources.event || '').slice(0, 70)}</span>
+                        </div>
+                        {Object.entries(IMG_CHANNELS).filter(([k]) => it.imageSources.channels?.[k]?.length > 0).map(([k, cfg]) => (
+                          <div key={k} style={{ marginTop: 6 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>{cfg.icon} {cfg.label} ({it.imageSources.channels[k].length})</div>
+                            {it.imageSources.channels[k].slice(0, 6).map((l, li) => (
+                              <div key={li} style={{ fontSize: 12, marginTop: 2, display: 'flex', gap: 6, alignItems: 'baseline', minWidth: 0 }}>
+                                {l.score != null && <span style={{ color: l.score >= 8 ? 'var(--desk-green)' : 'var(--desk-amber)', fontWeight: 700, flexShrink: 0 }}>[{l.score}]</span>}
+                                <a href={l.url} target="_blank" rel="noreferrer"
+                                  style={{ color: 'var(--desk-blue)', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {l.title || l.url}
+                                </a>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
                 {/* ★ เนื้อที่เจนเสร็จ — คนหยิบ copy ไปทำโพสต์/ปกได้เลย */}
@@ -502,6 +551,9 @@ export default function NewsDeskPage() {
                       style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: researching[it.id] ? 'wait' : 'pointer', background: 'rgba(6,182,212,0.15)', color: 'var(--desk-cyan)', fontSize: 13, fontWeight: 700 }}>
                       {researching[it.id] ? '⏳ กำลังเจาะ...' : '🔬 เจาะลึก'}</button>
                   )}
+                  <button onClick={() => scoutImg(it)} disabled={researching['img_' + it.id]}
+                    style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: researching['img_' + it.id] ? 'wait' : 'pointer', background: 'rgba(245,158,11,0.15)', color: 'var(--desk-amber)', fontSize: 13, fontWeight: 700 }}>
+                    {researching['img_' + it.id] ? '⏳ กำลังหาภาพ...' : it.imageSources ? '📸 หาภาพใหม่' : '📸 หาแหล่งภาพ'}</button>
                   {it.status === 'new' && (
                     <button onClick={() => act(it.id, 'claim')}
                       style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'rgba(245,158,11,0.2)', color: 'var(--desk-amber)', fontSize: 13, fontWeight: 700 }}>
