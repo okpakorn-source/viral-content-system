@@ -224,11 +224,22 @@ export async function getNextPendingJobs(limit = 1) {
     }
     
     const availableSlots = Math.min(limit, maxConcurrency - processingCount);
-    
+
+    // ★ งานคลิป Meta (FB Reel/IG) ใช้ yt-dlp.exe — รันได้เฉพาะเครื่องทีม (Windows)
+    //   บน Vercel (Linux) ให้ "ข้าม" งานพวกนี้ไว้เป็น pending รอเครื่องทีมคว้า (เครื่องทีม poll คิวร่วมกันอยู่แล้ว)
+    const isMetaVideoJob = (j) => {
+      const u = String(j.payload?.input || j.payload?.url || '');
+      return /facebook\.com\/(reel|watch|share\/[rv]\/|video)|fb\.watch\/|instagram\.com\/(reel|reels|tv)\//i.test(u);
+    };
+    const canRunHere = (j) => process.platform === 'win32' || !isMetaVideoJob(j);
+
     const pendingJobs = allJobs
-      .filter(j => j.status === 'pending')
+      .filter(j => j.status === 'pending' && canRunHere(j))
       .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
       .slice(0, availableSlots);
+
+    const skippedMeta = allJobs.filter(j => j.status === 'pending' && !canRunHere(j)).length;
+    if (skippedMeta > 0) console.log(`[QueueService] ⏭️ ข้ามงานคลิป Meta ${skippedMeta} งาน (รอเครื่องทีม Windows)`);
     
     // Immediately mark as 'processing' inside the lock to prevent double-pick
     for (const job of pendingJobs) {

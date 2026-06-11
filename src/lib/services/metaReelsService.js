@@ -39,6 +39,8 @@ function ytdlpPaths() {
 }
 
 async function runYtdlp(args, timeout = 90_000) {
+  // yt-dlp.exe เป็นไบนารี Windows — บน Vercel (Linux) ไฟล์มีอยู่แต่รันไม่ได้ (เคสจริง 11 มิ.ย.)
+  if (process.platform !== 'win32') throw new Error('คลิป Meta ถอดได้เฉพาะเครื่องทีม (Windows) — งานจะรอเครื่องทีมออนไลน์');
   const { exe, cookies } = ytdlpPaths();
   if (!existsSync(exe)) throw new Error('ไม่พบ bin/yt-dlp.exe — Reels ดึงได้เฉพาะเครื่อง local');
   // มี cookies ลองก่อน (IG/บางโพสต์ FB ต้องล็อกอิน) — พังค่อยลองแบบไม่มี

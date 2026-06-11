@@ -1,27 +1,28 @@
 [
   {
-    "id": "95eab4f48f75",
-    "url": "https://www.thaipbs.or.th/live/special/279663",
-    "lane": "trend",
+    "id": "8d5b972a8960",
+    "url": "https://today.line.me/th/v3/article/DR6yvno",
+    "lane": "followup",
     "tone": "กลาง",
-    "title": "เกาะติดผลประชุมถกเกณฑ์ \"บัตรสวัสดิการแห่งรัฐ\" | ไลฟ์วันนี้ | 11 มิ.ย. 69",
+    "title": "ทราย สก๊อต เปิดใจไม่พร้อม ก็ต้องพร้อม ขึ้นศาลไกล่เกลี่ยคดีลูกเนรคุณ | The Bangkok Insight",
     "angles": [
-      "มุมคนรอความชัดเจนเรื่องสิทธิ์บัตรสวัสดิการ",
-      "มุมเสียงวิจารณ์เงื่อนไขใช้ชื่อพ่อแม่"
+      "มุมคนต้องฝืนเข้มแข็ง แม้ยังไม่พร้อมขึ้นศาล",
+      "มุมกำลังใจจากแฟนคลับในวันที่ชีวิตหนัก"
     ],
-    "fbRisk": 0,
-    "source": "Thai PBS",
+    "fbRisk": 1,
+    "source": "LINE TODAY",
     "status": "new",
-    "snippet": "เกาะติดวงประชุมคณะกรรมการประชารัฐสวัสดิการเพื่อเศรษฐกิจฐานรากและสังคม พิจารณาทบทวนเกณฑ์ของผู้มีสิทธิ์ได้บัตรสวัสดิการแห่งรัฐในรอบใหม่ หลังเกิดเสียงวิจารณ์เงื่อนไข หากใช้ชื่อพ่อ-แม่ลดหย่อนภาษี...",
-    "category": "อื่นๆ",
-    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT2IOPvugy-o5r7crKEPiN-JAZ1PvX5kQ8JS6bTay1Ty7U1WUJ0vlz7jrs&usqp=CAI&s",
+    "snippet": "ทราย สก๊อต เปิดใจไม่พร้อม ก็ต้องพร้อม ขึ้นศาลไกล่เกลี่ยคดีลูกเนรคุณ พร้อมกล่าวขอบคุณแฟนคลับที่เดินทางมาให้กำลังใจ อีกหนึ่งประเด็นที่สังคมจับตามอง วันนี้ (1...",
+    "category": "ดราม่าสังคม",
+    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRL6IsjwIoKaiV6ZRm_4HVNQRubaFOyEMOVMioxLGM_LUw4zLiXJbLd9-c&usqp=CAI&s",
     "toneable": true,
-    "toxicity": 0,
+    "toxicity": 1,
     "claimedBy": null,
-    "finalScore": 34,
-    "judgeScore": 4,
+    "finalScore": 42,
+    "followupOf": "ทรายสก๊อตเปิดใจเรื่องครอบครัวและคดีที่ดินหัวหินในรายการโหนกระแส",
+    "judgeScore": 5,
     "harvestedAt": "2026-06-11T11:29:06.131Z",
-    "judgeReason": "เกี่ยวกับคนฐานราก แต่เป็นข่าวประชุมและเงื่อนไขรัฐ อ่านยากสำหรับเพจไวรัล",
+    "judgeReason": "ประเด็นเดียวกับข่าวแรก อารมณ์มี แต่รายละเอียดน้อยกว่า",
     "publishedAt": null
   },
   {
@@ -129,32 +130,6 @@
     "publishedAt": null
   },
   {
-    "id": "a1856ffbf245",
-    "url": "https://samutsongkhram.prd.go.th/th/content/category/detail/id/9/iid/510391",
-    "lane": "followup",
-    "tone": "บวก",
-    "title": "อัมพวาเปิดบ้านรับคณะกรรมการฯ ตรวจประเมินคัดเลือกคนกองทุนพัฒนาบทบาทสตรีดีเด่น ระดับจังหวัด ประจำปี 2569",
-    "angles": [
-      "ผู้หญิงในชุมชนกับบทบาทเล็ก ๆ ที่ช่วยพัฒนาบ้านเกิด",
-      "อัมพวาเปิดบ้านรับการประเมิน สะท้อนพลังคนทำงานเงียบ ๆ"
-    ],
-    "fbRisk": 0,
-    "source": "สำนักงานประชาสัมพันธ์จังหวัดสมุทรสงคราม",
-    "status": "new",
-    "snippet": "วันนี้ (8 มิถุนายน พ.ศ. 2569) เวลา 09.00 น. ณ ห้องประชุมที่ว่าการอำเภออัมพวา นายรนัสถ์ชัย พุ่มเจริญ รองผู้ว่าราชการจังหวัดสมุทรสงคราม...",
-    "category": "น้ำใจ/ช่วยเหลือ",
-    "imageUrl": "data:image/jpeg;base64,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",
-    "toneable": true,
-    "toxicity": 0,
-    "claimedBy": null,
-    "finalScore": 53,
-    "followupOf": "พี่จ่าไข่เจียวช่วยแม่-ลูกป่วยติดเตียง เจอเกรียนคีย์บอร์ดด่าหยาบ",
-    "judgeScore": 3,
-    "harvestedAt": "2026-06-11T11:29:06.131Z",
-    "judgeReason": "ข่าวราชการเยอะ อารมณ์ร่วมยังไม่ชัด แต่มีมุมน้ำใจและงานชุมชนพอหยิบได้",
-    "publishedAt": null
-  },
-  {
     "id": "b92bf7c64126",
     "url": "https://www.thairath.co.th/news/politic/2937751",
     "lane": "followup",
@@ -178,6 +153,32 @@
     "judgeScore": 2,
     "harvestedAt": "2026-06-11T11:29:06.131Z",
     "judgeReason": "เป็นข่าวหาเสียงการเมือง คนอ่านเพจไวรัลอาจไม่อิน",
+    "publishedAt": null
+  },
+  {
+    "id": "a1856ffbf245",
+    "url": "https://samutsongkhram.prd.go.th/th/content/category/detail/id/9/iid/510391",
+    "lane": "followup",
+    "tone": "บวก",
+    "title": "อัมพวาเปิดบ้านรับคณะกรรมการฯ ตรวจประเมินคัดเลือกคนกองทุนพัฒนาบทบาทสตรีดีเด่น ระดับจังหวัด ประจำปี 2569",
+    "angles": [
+      "ผู้หญิงในชุมชนกับบทบาทเล็ก ๆ ที่ช่วยพัฒนาบ้านเกิด",
+      "อัมพวาเปิดบ้านรับการประเมิน สะท้อนพลังคนทำงานเงียบ ๆ"
+    ],
+    "fbRisk": 0,
+    "source": "สำนักงานประชาสัมพันธ์จังหวัดสมุทรสงคราม",
+    "status": "new",
+    "snippet": "วันนี้ (8 มิถุนายน พ.ศ. 2569) เวลา 09.00 น. ณ ห้องประชุมที่ว่าการอำเภออัมพวา นายรนัสถ์ชัย พุ่มเจริญ รองผู้ว่าราชการจังหวัดสมุทรสงคราม...",
+    "category": "น้ำใจ/ช่วยเหลือ",
+    "imageUrl": "data:image/jpeg;base64,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",
+    "toneable": true,
+    "toxicity": 0,
+    "claimedBy": null,
+    "finalScore": 53,
+    "followupOf": "พี่จ่าไข่เจียวช่วยแม่-ลูกป่วยติดเตียง เจอเกรียนคีย์บอร์ดด่าหยาบ",
+    "judgeScore": 3,
+    "harvestedAt": "2026-06-11T11:29:06.131Z",
+    "judgeReason": "ข่าวราชการเยอะ อารมณ์ร่วมยังไม่ชัด แต่มีมุมน้ำใจและงานชุมชนพอหยิบได้",
     "publishedAt": null
   },
   {
@@ -283,29 +284,28 @@
     "publishedAt": null
   },
   {
-    "id": "8d5b972a8960",
-    "url": "https://today.line.me/th/v3/article/DR6yvno",
-    "lane": "followup",
+    "id": "95eab4f48f75",
+    "url": "https://www.thaipbs.or.th/live/special/279663",
+    "lane": "trend",
     "tone": "กลาง",
-    "title": "ทราย สก๊อต เปิดใจไม่พร้อม ก็ต้องพร้อม ขึ้นศาลไกล่เกลี่ยคดีลูกเนรคุณ | The Bangkok Insight",
+    "title": "เกาะติดผลประชุมถกเกณฑ์ \"บัตรสวัสดิการแห่งรัฐ\" | ไลฟ์วันนี้ | 11 มิ.ย. 69",
     "angles": [
-      "มุมคนต้องฝืนเข้มแข็ง แม้ยังไม่พร้อมขึ้นศาล",
-      "มุมกำลังใจจากแฟนคลับในวันที่ชีวิตหนัก"
+      "มุมคนรอความชัดเจนเรื่องสิทธิ์บัตรสวัสดิการ",
+      "มุมเสียงวิจารณ์เงื่อนไขใช้ชื่อพ่อแม่"
     ],
-    "fbRisk": 1,
-    "source": "LINE TODAY",
+    "fbRisk": 0,
+    "source": "Thai PBS",
     "status": "new",
-    "snippet": "ทราย สก๊อต เปิดใจไม่พร้อม ก็ต้องพร้อม ขึ้นศาลไกล่เกลี่ยคดีลูกเนรคุณ พร้อมกล่าวขอบคุณแฟนคลับที่เดินทางมาให้กำลังใจ อีกหนึ่งประเด็นที่สังคมจับตามอง วันนี้ (1...",
-    "category": "ดราม่าสังคม",
-    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRL6IsjwIoKaiV6ZRm_4HVNQRubaFOyEMOVMioxLGM_LUw4zLiXJbLd9-c&usqp=CAI&s",
+    "snippet": "เกาะติดวงประชุมคณะกรรมการประชารัฐสวัสดิการเพื่อเศรษฐกิจฐานรากและสังคม พิจารณาทบทวนเกณฑ์ของผู้มีสิทธิ์ได้บัตรสวัสดิการแห่งรัฐในรอบใหม่ หลังเกิดเสียงวิจารณ์เงื่อนไข หากใช้ชื่อพ่อ-แม่ลดหย่อนภาษี...",
+    "category": "อื่นๆ",
+    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT2IOPvugy-o5r7crKEPiN-JAZ1PvX5kQ8JS6bTay1Ty7U1WUJ0vlz7jrs&usqp=CAI&s",
     "toneable": true,
-    "toxicity": 1,
+    "toxicity": 0,
     "claimedBy": null,
-    "finalScore": 42,
-    "followupOf": "ทรายสก๊อตเปิดใจเรื่องครอบครัวและคดีที่ดินหัวหินในรายการโหนกระแส",
-    "judgeScore": 5,
+    "finalScore": 34,
+    "judgeScore": 4,
     "harvestedAt": "2026-06-11T11:29:06.131Z",
-    "judgeReason": "ประเด็นเดียวกับข่าวแรก อารมณ์มี แต่รายละเอียดน้อยกว่า",
+    "judgeReason": "เกี่ยวกับคนฐานราก แต่เป็นข่าวประชุมและเงื่อนไขรัฐ อ่านยากสำหรับเพจไวรัล",
     "publishedAt": null
   },
   {
@@ -387,32 +387,6 @@
     "publishedAt": null
   },
   {
-    "id": "af9dba60d9c3",
-    "url": "https://mgronline.com/crime/detail/9690000055062",
-    "lane": "followup",
-    "tone": "กลาง",
-    "title": "\"ทราย สก๊อต\" ขึ้นศาลไกล่เกลี่ยคดีลูกเนรคุณ ขอบคุณแฟนคลับที่มาให้กำลังใจ",
-    "angles": [
-      "วันที่ต้องไปศาล แต่ยังมีแฟนคลับยืนส่งกำลังใจให้ไม่โดดเดี่ยว",
-      "ทราย สก๊อต กับคำขอบคุณในวันที่ชีวิตเจอเรื่องหนัก"
-    ],
-    "fbRisk": 0,
-    "source": "ผู้จัดการออนไลน์",
-    "status": "new",
-    "snippet": "ทราย สก๊อต ขึ้นศาลไกล่เกลี่ยคดีลูกเนรคุณ ขอบคุณแฟนคลับที่มาให้กำลังใจ พร้อมมอบหมายอ.ปานเทพ และทนายความร่วมเจรจาไกล่เกลี่ยข้อพิพาท.",
-    "category": "ดราม่าสังคม",
-    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQLtnnem5fEfqjhG612PyJC6x79e5xFf7JnJXKaSTLlfUcg4EP8MqRRVR0&usqp=CAI&s",
-    "toneable": true,
-    "toxicity": 0,
-    "claimedBy": null,
-    "finalScore": 53,
-    "followupOf": "ทรายสก๊อตเปิดใจเรื่องครอบครัวและคดีที่ดินหัวหินในรายการโหนกระแส",
-    "judgeScore": 6,
-    "harvestedAt": "2026-06-11T11:29:06.131Z",
-    "judgeReason": "มีคนดังและกำลังใจจากแฟนคลับ แต่แกนหลักเป็นคดีครอบครัว เสี่ยงลบเกินไป",
-    "publishedAt": null
-  },
-  {
     "id": "8e747ad1b05a",
     "url": "https://www.dailynews.co.th/news/5922101/",
     "lane": "followup",
@@ -436,6 +410,32 @@
     "judgeScore": 3,
     "harvestedAt": "2026-06-11T11:29:06.131Z",
     "judgeReason": "เป็นข่าวการเมืองท้องถิ่นและการบริหาร กทม. มีชื่อคนรู้จัก แต่โทนแถลงมากกว่าเรื่องอบอุ่นใจ",
+    "publishedAt": null
+  },
+  {
+    "id": "af9dba60d9c3",
+    "url": "https://mgronline.com/crime/detail/9690000055062",
+    "lane": "followup",
+    "tone": "กลาง",
+    "title": "\"ทราย สก๊อต\" ขึ้นศาลไกล่เกลี่ยคดีลูกเนรคุณ ขอบคุณแฟนคลับที่มาให้กำลังใจ",
+    "angles": [
+      "วันที่ต้องไปศาล แต่ยังมีแฟนคลับยืนส่งกำลังใจให้ไม่โดดเดี่ยว",
+      "ทราย สก๊อต กับคำขอบคุณในวันที่ชีวิตเจอเรื่องหนัก"
+    ],
+    "fbRisk": 0,
+    "source": "ผู้จัดการออนไลน์",
+    "status": "new",
+    "snippet": "ทราย สก๊อต ขึ้นศาลไกล่เกลี่ยคดีลูกเนรคุณ ขอบคุณแฟนคลับที่มาให้กำลังใจ พร้อมมอบหมายอ.ปานเทพ และทนายความร่วมเจรจาไกล่เกลี่ยข้อพิพาท.",
+    "category": "ดราม่าสังคม",
+    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQLtnnem5fEfqjhG612PyJC6x79e5xFf7JnJXKaSTLlfUcg4EP8MqRRVR0&usqp=CAI&s",
+    "toneable": true,
+    "toxicity": 0,
+    "claimedBy": null,
+    "finalScore": 53,
+    "followupOf": "ทรายสก๊อตเปิดใจเรื่องครอบครัวและคดีที่ดินหัวหินในรายการโหนกระแส",
+    "judgeScore": 6,
+    "harvestedAt": "2026-06-11T11:29:06.131Z",
+    "judgeReason": "มีคนดังและกำลังใจจากแฟนคลับ แต่แกนหลักเป็นคดีครอบครัว เสี่ยงลบเกินไป",
     "publishedAt": null
   },
   {
@@ -740,31 +740,6 @@
     "publishedAt": null
   },
   {
-    "id": "6d0568dd2253",
-    "url": "https://www.sanook.com/news/9817126/",
-    "lane": "evergreen",
-    "tone": "บวก",
-    "title": "\"เชน ธนา\" โดนตราหน้าว่าโกง แบกหนี้ 800 ล้าน ชีวิตขึ้นสุดลงสุด ดีที่ไม่ตาย!",
-    "angles": [
-      "จากชีวิตขึ้นสุดลงสุด แบกหนี้ 800 ล้าน แต่ยังไม่ยอมแพ้",
-      "เชน ธนา กับบทเรียนวันที่คนไม่เชื่อใจ แต่ยังต้องลุกขึ้นสู้ต่อ"
-    ],
-    "fbRisk": 0,
-    "source": "Sanook",
-    "status": "new",
-    "snippet": "Life Line สัปดาห์นี้เปิดเส้นทางนักสู้ “เชน ธนา” ที่เกือบทำให้ไม่รอด แบกหนี้ 800 ล้าน ชีวิตขึ้นสุด ลงสุด แต่ไม่ยอมแพ้! จากเด็กหัวการค้าสู่ศิลปินบอยแบนด์...",
-    "category": "สู้ชีวิต",
-    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRadFP58ZC5QTP_3tX3Iytl9g2PcrqMLHQwGrguUGQZXrmkxoLGWjUMeAM&usqp=CAI&s",
-    "toneable": true,
-    "toxicity": 0,
-    "claimedBy": null,
-    "finalScore": 73,
-    "judgeScore": 7,
-    "harvestedAt": "2026-06-11T11:18:02.027Z",
-    "judgeReason": "หนี้ 800 ล้านแรงมาก มีมุมสู้ชีวิตชัด แต่โทนลบหนัก ต้องเล่าแบบพลังใจมากกว่าดราม่า",
-    "publishedAt": null
-  },
-  {
     "id": "6649c5dafcd8",
     "url": "https://mgronline.com/entertainment/detail/9680000097449",
     "lane": "evergreen",
@@ -1016,31 +991,6 @@
     "publishedAt": null
   },
   {
-    "id": "73994dda83ef",
-    "url": "https://www.daradaily.com/news/162335/read/?utm_source=TrueID&amp;utm_medium=Application&amp;utm_campaign=daradaily_true_id&amp;utm_content=daradaily_true_id",
-    "lane": "trend",
-    "tone": "บวก",
-    "title": "“ก๊อท จักรพันธ์” โพสต์ถึง “ติณติณ นิวคันทรี่” ทุกอย่างคือบทเรียน",
-    "angles": [
-      "รุ่นพี่พูดถึงรุ่นน้องในมุมบทเรียนชีวิต ถ้ามีเนื้อหาเต็มค่อยขยายได้",
-      "ใช้เป็นโพสต์สั้นแนวให้กำลังใจคนทำงานวงการเพลง แต่ต้องมีคำพูดจริงเพิ่ม"
-    ],
-    "fbRisk": 0,
-    "source": "daradaily.com",
-    "status": "new",
-    "snippet": "website ข่าวบันเทิงอันดับหนึ่ง ดาราเดลี่ เบื้องลึกเบื้องหลังวงการมายา อัพเดททุกวัน สดก่อนใคร.",
-    "category": "คนดังทำดี/ติดดิน",
-    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ3XBe6S2r_gaLBxNci6eCNoGKKxQvsPh3b4_Jc8XGA94tz3XXINbe1AWY&usqp=CAI&s",
-    "toneable": true,
-    "toxicity": 0,
-    "claimedBy": null,
-    "finalScore": 50,
-    "judgeScore": 3,
-    "harvestedAt": "2026-06-11T11:18:02.027Z",
-    "judgeReason": "ข้อมูลน้อยมาก ไม่เห็นแกนเรื่องทำดีหรืออารมณ์ร่วมชัด เสี่ยงทำแล้วแบน",
-    "publishedAt": null
-  },
-  {
     "id": "7e1b62641b16",
     "url": "https://mgronline.com/drama/detail/9690000053714",
     "lane": "followup",
@@ -1064,6 +1014,31 @@
     "judgeScore": 3,
     "harvestedAt": "2026-06-11T11:18:02.027Z",
     "judgeReason": "ข่าวโปรโมตละครซ้ำประเด็นเดิม มีวันฉายและภารกิจสวมรอยเป็นจุดขาย",
+    "publishedAt": null
+  },
+  {
+    "id": "73994dda83ef",
+    "url": "https://www.daradaily.com/news/162335/read/?utm_source=TrueID&amp;utm_medium=Application&amp;utm_campaign=daradaily_true_id&amp;utm_content=daradaily_true_id",
+    "lane": "trend",
+    "tone": "บวก",
+    "title": "“ก๊อท จักรพันธ์” โพสต์ถึง “ติณติณ นิวคันทรี่” ทุกอย่างคือบทเรียน",
+    "angles": [
+      "รุ่นพี่พูดถึงรุ่นน้องในมุมบทเรียนชีวิต ถ้ามีเนื้อหาเต็มค่อยขยายได้",
+      "ใช้เป็นโพสต์สั้นแนวให้กำลังใจคนทำงานวงการเพลง แต่ต้องมีคำพูดจริงเพิ่ม"
+    ],
+    "fbRisk": 0,
+    "source": "daradaily.com",
+    "status": "new",
+    "snippet": "website ข่าวบันเทิงอันดับหนึ่ง ดาราเดลี่ เบื้องลึกเบื้องหลังวงการมายา อัพเดททุกวัน สดก่อนใคร.",
+    "category": "คนดังทำดี/ติดดิน",
+    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ3XBe6S2r_gaLBxNci6eCNoGKKxQvsPh3b4_Jc8XGA94tz3XXINbe1AWY&usqp=CAI&s",
+    "toneable": true,
+    "toxicity": 0,
+    "claimedBy": null,
+    "finalScore": 50,
+    "judgeScore": 3,
+    "harvestedAt": "2026-06-11T11:18:02.027Z",
+    "judgeReason": "ข้อมูลน้อยมาก ไม่เห็นแกนเรื่องทำดีหรืออารมณ์ร่วมชัด เสี่ยงทำแล้วแบน",
     "publishedAt": null
   },
   {
@@ -1168,6 +1143,31 @@
     "publishedAt": null
   },
   {
+    "id": "6d0568dd2253",
+    "url": "https://www.sanook.com/news/9817126/",
+    "lane": "evergreen",
+    "tone": "บวก",
+    "title": "\"เชน ธนา\" โดนตราหน้าว่าโกง แบกหนี้ 800 ล้าน ชีวิตขึ้นสุดลงสุด ดีที่ไม่ตาย!",
+    "angles": [
+      "จากชีวิตขึ้นสุดลงสุด แบกหนี้ 800 ล้าน แต่ยังไม่ยอมแพ้",
+      "เชน ธนา กับบทเรียนวันที่คนไม่เชื่อใจ แต่ยังต้องลุกขึ้นสู้ต่อ"
+    ],
+    "fbRisk": 0,
+    "source": "Sanook",
+    "status": "new",
+    "snippet": "Life Line สัปดาห์นี้เปิดเส้นทางนักสู้ “เชน ธนา” ที่เกือบทำให้ไม่รอด แบกหนี้ 800 ล้าน ชีวิตขึ้นสุด ลงสุด แต่ไม่ยอมแพ้! จากเด็กหัวการค้าสู่ศิลปินบอยแบนด์...",
+    "category": "สู้ชีวิต",
+    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRadFP58ZC5QTP_3tX3Iytl9g2PcrqMLHQwGrguUGQZXrmkxoLGWjUMeAM&usqp=CAI&s",
+    "toneable": true,
+    "toxicity": 0,
+    "claimedBy": null,
+    "finalScore": 73,
+    "judgeScore": 7,
+    "harvestedAt": "2026-06-11T11:18:02.027Z",
+    "judgeReason": "หนี้ 800 ล้านแรงมาก มีมุมสู้ชีวิตชัด แต่โทนลบหนัก ต้องเล่าแบบพลังใจมากกว่าดราม่า",
+    "publishedAt": null
+  },
+  {
     "id": "019c1e3cb179",
     "url": "https://entertainment.trueid.net/synopsis/X3L1Rddp6eqj",
     "lane": "followup",
@@ -1220,28 +1220,28 @@
     "publishedAt": null
   },
   {
-    "id": "d29e33b88cbb",
-    "url": "https://www.sanook.com/news/9169166/",
+    "id": "e49cc1588d77",
+    "url": "https://mgronline.com/entertainment/detail/9680000063906",
     "lane": "evergreen",
     "tone": "บวก",
-    "title": "หนุ่มคิดว่าบ้านจนมา 20 ปี จู่ๆ พ่อเฉลยเป็น \"ครอบครัวเศรษฐี\" พากลับคฤหาสน์ มีบริษัทดัง!!!",
+    "title": "\"เบสท์ คำสิงห์\" ออกรถหรูให้น้องชาย เป็นของขวัญวันเกิดรับวัย 18 ปี",
     "angles": [
-      "ลูกตั้งใจเรียนจบมาใช้หนี้ให้บ้าน ก่อนรู้ว่าพ่อแม่ซ่อนความจริงไว้ 20 ปี",
-      "บทเรียนจากพ่อที่ให้ลูกโตมากับความประหยัด ก่อนพากลับไปเห็นชีวิตอีกด้าน"
+      "เบสท์ซื้อรถให้น้องชายวัย 18 ของขวัญจากพี่สาวที่อยากเห็นน้องเริ่มต้นวัยผู้ใหญ่",
+      "เบื้องหลังของขวัญราคา 3.99 ล้านบาท คือภาพพี่น้องที่ยังดูแลกันในวันที่โตขึ้น"
     ],
     "fbRisk": 0,
-    "source": "Sanook",
+    "source": "ผู้จัดการออนไลน์",
     "status": "new",
-    "snippet": "หนุ่มคิดว่าบ้านจนมา 20 ปี เรียนจบตั้งใจใช้หนี้ให้ แต่พ่อเปิดทรัพย์สินโชว์ รวยเป็นเศรษฐี!!!",
+    "snippet": "เรียกว่าเป็นลูกกตัญญูอีกหนึ่งคนของวงการบันเทิง แถมยังเป็นพี่สาวที่แสนดีอีกต่างหาก สำหรับ เบสท์ รักษ์วนีย์ คำสิงห์ ที่ล่าสุดถอยรถเบนซ์ป้ายแดง สนนราคา 3.99 ล้านบาท ให้ โบ๊ท...",
     "category": "กตัญญู/ครอบครัวอบอุ่น",
-    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS18avrbcLNwS4OWw07B755cKugGy7B9ZvDFRG666s2ZG3jbOZlJCkdGJc&usqp=CAI&s",
+    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTrDQ2BjssGgZmIuK61xLavoIMR_TdxIq-WZ2PlJeKgqi7JkqnzjgincX_X&usqp=CAI&s",
     "toneable": true,
     "toxicity": 0,
     "claimedBy": null,
-    "finalScore": 70,
-    "judgeScore": 6,
+    "finalScore": 75,
+    "judgeScore": 7,
     "harvestedAt": "2026-06-11T10:39:25.298Z",
-    "judgeReason": "พล็อตไวรัลแรง อ่านง่าย แต่มีโอกาสดูไกลตัวและเหมือนเรื่องต่างประเทศมากกว่าเรื่องอบอุ่นแบบไทย",
+    "judgeReason": "มีคนดัง มีตัวเลข 3.99 ล้านบาท ภาพพี่สาวให้น้องชายชัด แต่เสี่ยงโดนมองว่าอวดรวย ต้องเล่าให้เป็นมุมครอบครัว",
     "publishedAt": null
   },
   {
@@ -1452,28 +1452,28 @@
     "publishedAt": null
   },
   {
-    "id": "e49cc1588d77",
-    "url": "https://mgronline.com/entertainment/detail/9680000063906",
+    "id": "d29e33b88cbb",
+    "url": "https://www.sanook.com/news/9169166/",
     "lane": "evergreen",
     "tone": "บวก",
-    "title": "\"เบสท์ คำสิงห์\" ออกรถหรูให้น้องชาย เป็นของขวัญวันเกิดรับวัย 18 ปี",
+    "title": "หนุ่มคิดว่าบ้านจนมา 20 ปี จู่ๆ พ่อเฉลยเป็น \"ครอบครัวเศรษฐี\" พากลับคฤหาสน์ มีบริษัทดัง!!!",
     "angles": [
-      "เบสท์ซื้อรถให้น้องชายวัย 18 ของขวัญจากพี่สาวที่อยากเห็นน้องเริ่มต้นวัยผู้ใหญ่",
-      "เบื้องหลังของขวัญราคา 3.99 ล้านบาท คือภาพพี่น้องที่ยังดูแลกันในวันที่โตขึ้น"
+      "ลูกตั้งใจเรียนจบมาใช้หนี้ให้บ้าน ก่อนรู้ว่าพ่อแม่ซ่อนความจริงไว้ 20 ปี",
+      "บทเรียนจากพ่อที่ให้ลูกโตมากับความประหยัด ก่อนพากลับไปเห็นชีวิตอีกด้าน"
     ],
     "fbRisk": 0,
-    "source": "ผู้จัดการออนไลน์",
+    "source": "Sanook",
     "status": "new",
-    "snippet": "เรียกว่าเป็นลูกกตัญญูอีกหนึ่งคนของวงการบันเทิง แถมยังเป็นพี่สาวที่แสนดีอีกต่างหาก สำหรับ เบสท์ รักษ์วนีย์ คำสิงห์ ที่ล่าสุดถอยรถเบนซ์ป้ายแดง สนนราคา 3.99 ล้านบาท ให้ โบ๊ท...",
+    "snippet": "หนุ่มคิดว่าบ้านจนมา 20 ปี เรียนจบตั้งใจใช้หนี้ให้ แต่พ่อเปิดทรัพย์สินโชว์ รวยเป็นเศรษฐี!!!",
     "category": "กตัญญู/ครอบครัวอบอุ่น",
-    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTrDQ2BjssGgZmIuK61xLavoIMR_TdxIq-WZ2PlJeKgqi7JkqnzjgincX_X&usqp=CAI&s",
+    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS18avrbcLNwS4OWw07B755cKugGy7B9ZvDFRG666s2ZG3jbOZlJCkdGJc&usqp=CAI&s",
     "toneable": true,
     "toxicity": 0,
     "claimedBy": null,
-    "finalScore": 75,
-    "judgeScore": 7,
+    "finalScore": 70,
+    "judgeScore": 6,
     "harvestedAt": "2026-06-11T10:39:25.298Z",
-    "judgeReason": "มีคนดัง มีตัวเลข 3.99 ล้านบาท ภาพพี่สาวให้น้องชายชัด แต่เสี่ยงโดนมองว่าอวดรวย ต้องเล่าให้เป็นมุมครอบครัว",
+    "judgeReason": "พล็อตไวรัลแรง อ่านง่าย แต่มีโอกาสดูไกลตัวและเหมือนเรื่องต่างประเทศมากกว่าเรื่องอบอุ่นแบบไทย",
     "publishedAt": null
   },
   {
@@ -2215,31 +2215,6 @@
     "publishedAt": null
   },
   {
-    "id": "d7997cb190e2",
-    "url": "https://today.line.me/th/v3/article/LXz2wX0?view=topic&referral=Newscentral",
-    "lane": "good",
-    "tone": "บวก",
-    "title": "เปิดใจ เจ้าของร้านทองดัง สระบุรี คืนกำไรสู่สังคม แจกทุนฟรีถึงป.ตรี เด็กเรียนดี แต่ขาดทุนทรัพย์",
-    "angles": [
-      "เจ้าของร้านทองคืนกำไรให้สังคม ส่งเด็กเรียนดีแต่ขาดทุนทรัพย์ไปถึงปริญญาตรี",
-      "ความสุขของคนให้ เมื่อเงินจากร้านทองกลายเป็นโอกาสสร้างอนาคตเด็ก"
-    ],
-    "fbRisk": 0,
-    "source": "LINE TODAY",
-    "status": "new",
-    "snippet": "เปิดใจ เจ้าของร้านทองดัง สระบุรี คืนกำไรสู่สังคม แจกทุนฟรีถึงป.ตรี เด็กเรียนดี แต่ขาดทุนทรัพย์ เผยสุขใจที่ได้ให้ ช่วยสานฝัน สร้างอนาคตเยาวชน วันที่ 6 มิ....",
-    "category": "น้ำใจ/ช่วยเหลือ",
-    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ5mLcrrvmpp5s71f1SH025Zo47pJ-YslIWHu7jRpv3f1m0CZlxFd4t9n0&usqp=CAI&s",
-    "toneable": true,
-    "toxicity": 0,
-    "claimedBy": null,
-    "finalScore": 83,
-    "judgeScore": 9,
-    "harvestedAt": "2026-06-11T10:28:03.582Z",
-    "judgeReason": "เข้าทางเพจมาก มีน้ำใจ การศึกษา เด็กขาดทุนทรัพย์ และมีปลายทางชัดถึงปริญญาตรี",
-    "publishedAt": null
-  },
-  {
     "id": "7fb832120e48",
     "url": "https://www.js100.com/en/site/news/view/161969",
     "lane": "good",
@@ -2306,6 +2281,33 @@
     "claimedBy": null,
     "finalScore": 42,
     "harvestedAt": "2026-06-11T10:28:03.582Z",
+    "publishedAt": null
+  },
+  {
+    "id": "d7997cb190e2",
+    "url": "https://today.line.me/th/v3/article/LXz2wX0?view=topic&referral=Newscentral",
+    "lane": "good",
+    "tone": "บวก",
+    "title": "เปิดใจ เจ้าของร้านทองดัง สระบุรี คืนกำไรสู่สังคม แจกทุนฟรีถึงป.ตรี เด็กเรียนดี แต่ขาดทุนทรัพย์",
+    "angles": [
+      "เจ้าของร้านทองคืนกำไรให้สังคม ส่งเด็กเรียนดีแต่ขาดทุนทรัพย์ไปถึงปริญญาตรี",
+      "ความสุขของคนให้ เมื่อเงินจากร้านทองกลายเป็นโอกาสสร้างอนาคตเด็ก"
+    ],
+    "fbRisk": 0,
+    "sentAt": "2026-06-11T11:32:25.322Z",
+    "source": "LINE TODAY",
+    "status": "sent",
+    "snippet": "เปิดใจ เจ้าของร้านทองดัง สระบุรี คืนกำไรสู่สังคม แจกทุนฟรีถึงป.ตรี เด็กเรียนดี แต่ขาดทุนทรัพย์ เผยสุขใจที่ได้ให้ ช่วยสานฝัน สร้างอนาคตเยาวชน วันที่ 6 มิ....",
+    "category": "น้ำใจ/ช่วยเหลือ",
+    "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ5mLcrrvmpp5s71f1SH025Zo47pJ-YslIWHu7jRpv3f1m0CZlxFd4t9n0&usqp=CAI&s",
+    "toneable": true,
+    "toxicity": 0,
+    "claimedBy": "moo",
+    "updatedAt": "2026-06-11T11:32:25.322Z",
+    "finalScore": 83,
+    "judgeScore": 9,
+    "harvestedAt": "2026-06-11T10:28:03.582Z",
+    "judgeReason": "เข้าทางเพจมาก มีน้ำใจ การศึกษา เด็กขาดทุนทรัพย์ และมีปลายทางชัดถึงปริญญาตรี",
     "publishedAt": null
   },
   {

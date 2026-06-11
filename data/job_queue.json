@@ -1,5 +1,22 @@
 [
   {
+    "id": "19c12aa0-667a-4a0b-9728-1bc10e2e7cb4",
+    "error": null,
+    "result": null,
+    "status": "processing",
+    "userId": "desk-moo",
+    "payload": {
+      "input": "https://today.line.me/th/v3/article/LXz2wX0?view=topic&referral=Newscentral",
+      "userId": "desk-moo",
+      "contentLength": "short"
+    },
+    "position": 1,
+    "createdAt": "2026-06-11T11:32:21.115Z",
+    "startedAt": "2026-06-11T11:32:23.470Z",
+    "updatedAt": "2026-06-11T11:32:23.470Z",
+    "completedAt": null
+  },
+  {
     "id": "d9081813-2910-4d34-8796-5639d21cc60b",
     "error": "process API failed: 500 — {\"success\":false,\"error\":\"Meta Reels: Meta Reels: Command failed: /var/task/bin/yt-dlp.exe -f b[ext=mp4]/b -o /tmp/meta_1781176916373.mp4 --no-warnings --no-playlist http\",\"failedStep\":\"auto_scrape\",\"",
     "result": null,
@@ -6998,23 +7015,5 @@
     "startedAt": "2026-06-11T09:04:55.696Z",
     "updatedAt": "2026-06-11T09:08:04.651Z",
     "completedAt": "2026-06-11T09:08:04.005Z"
-  },
-  {
-    "id": "35bc0f10-f119-44c8-9fd0-f60a9af9fff0",
-    "error": "process API failed: 401 — <!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>Authentication Required</title><script type=text/llms.txt>\n## Note to agents ac",
-    "result": null,
-    "status": "failed",
-    "userId": "discord-913004396466561026",
-    "payload": {
-      "input": "\"กิ๊ก อินเมกา\" สาวไทยที่ใช้ชีวิตอยู่ในสหรัฐอเมริกา และทำธุรกิจร้านพิซซ่ากับสามี โดยสิ่งที่ทำให้เธอเป็นที่รักของผู้ติดตามจำนวนมาก คือการนำอาหารไทยไปให้ชาวต่างชาติได้ลองชิมผ่านคลิปวิดีโอที่เต็มไปด้วยความอบอุ่นและเป็นกันเอง\n\nหลายครั้งเราได้เห็นรอยยิ้มของชาวต่างชาติหลังได้ลองชิมอาหารไทย ไม่ว่าจะเป็นเมนูบ้าน ๆ หรืออาหารรสจัดที่หลายคนคุ้นเคย บางคนถึงกับติดใจจนขอรับประทานซ้ำ ทำให้คนไทยที่ได้รับชมรู้สึกภูมิใจไปกับเสน่ห์ของอาหารบ้านเรา\n\nนอกจากร้านพิซซ่าแล้ว กิ๊กยังนำรสชาติแบบไทย ๆ มาสร้างสรรค์เป็นพิซซ่าออกขายตามงานต่าง ๆ ไม่ว่าจะเป็นพิซซ่าหน้าพะแนง หน้าลาบ หรือแม้แต่กะเพรา จนได้รับความสนใจจากลูกค้าไม่น้อย เรื่องราวของเธอจึงเป็นอีกหนึ่งตัวอย่างของคนไทยในต่างแดนที่ช่วยส่งต่อเสน่ห์ของอาหารไทยให้ผู้คนทั่วโลกได้รู้จักและหลงรักมากขึ้น",
-      "images": [],
-      "userId": "discord-913004396466561026",
-      "contentLength": "short"
-    },
-    "position": 1,
-    "createdAt": "2026-06-11T09:04:18.082Z",
-    "startedAt": "2026-06-11T09:04:23.101Z",
-    "updatedAt": "2026-06-11T09:04:23.559Z",
-    "completedAt": "2026-06-11T09:04:23.355Z"
   }
 ]
