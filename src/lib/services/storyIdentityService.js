@@ -118,7 +118,7 @@ Bad examples:
 
 Respond with ONLY a JSON object following this exact structure (ALL values in Thai!):
 {
-  "characters": ["Real SEARCHABLE public names of all people involved (ชื่อ-นามสกุล/ชื่อที่สื่อไทยใช้เรียกจริง) — in Thai. If story uses a nickname only, infer the full public name from context when confident (e.g. 'ทราย' ในข่าวตระกูลภิรมย์ภักดี → ชื่อเต็มที่สื่อใช้). NEVER write descriptive phrases like 'ผู้เกี่ยวข้องกับ...', 'ผู้ใหญ่ใน...' — names only; omit people you cannot name"],
+  "characters": ["Names of people EXACTLY as written in the story text, combined with surname/family/context words FROM THE STORY ITSELF (e.g. story says 'ทราย' + 'ตระกูลภิรมย์ภักดี' → 'ทราย ภิรมย์ภักดี') — in Thai. ★ NEVER substitute a guessed identity of a different public figure (ห้ามเดาว่าชื่อเล่นนี้คือดาราคนไหน — เคยทำให้หน้าคนผิดขึ้นปกข่าวมาแล้ว!). NEVER write descriptive phrases like 'ผู้เกี่ยวข้องกับ...', 'ผู้ใหญ่ใน...'. If a person cannot be named from the story text, omit them"],
   "mainCharacter": "Full name + title/surname that returns the correct person on Google — in Thai (★ If celebrity's child, MUST include parent's name! e.g. 'น้องทาเรีย ลูกน้ำฝน กุลณัฐ')",
   "secondaryCharacter": "Full name + title/surname of secondary character (if any, e.g. father/mother/partner) — in Thai",
   "story": "One-sentence summary of the news — in Thai",

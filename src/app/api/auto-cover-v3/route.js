@@ -119,7 +119,8 @@ async function _renderCoverV3(request) {
       faceBoxes = await Promise.all(imageBuffers.map(async (img, i) => {
         const fd = fdMap?.get?.(`v3_${i}`);
         const hasText = !!fd?.hasBigText; // ★ สกรีนช็อต/กราฟิกข่าว — ต้องส่งธงต่อแม้ไม่มีหน้า
-        if (!fd?.hasFaces || !fd.faces?.length) return hasText ? { hasText } : null;
+        const textRegion = fd?.textRegion || null; // ★ โซนข้อความ — ครอปคนหลบโซนนี้ = ใช้เฟรมรายการได้
+        if (!fd?.hasFaces || !fd.faces?.length) return hasText ? { hasText, textRegion } : null;
         const meta = await sharpLib(img.buffer).metadata();
         const W = meta.width || 1, H = meta.height || 1;
         const largest = fd.faces.reduce((b, f) => (f.width * f.height > b.width * b.height ? f : b), fd.faces[0]);
@@ -127,7 +128,7 @@ async function _renderCoverV3(request) {
           x1: +(largest.x / W).toFixed(2), y1: +(largest.y / H).toFixed(2),
           x2: +((largest.x + largest.width) / W).toFixed(2), y2: +((largest.y + largest.height) / H).toFixed(2),
           count: fd.faces.length,
-          ...(hasText ? { hasText } : {}),
+          ...(hasText ? { hasText, textRegion } : {}),
         };
       }));
       console.log(`[CoverV3] face boxes: ${faceBoxes.filter(b => b && b.x1 !== undefined).length}/${imageBuffers.length} images | มีตัวหนังสือฝัง: ${faceBoxes.filter(b => b?.hasText).length}`);

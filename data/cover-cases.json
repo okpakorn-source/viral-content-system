@@ -972,5 +972,62 @@
     "createdAt": "2026-06-11T09:05:40.460Z",
     "supabaseImageUrl": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/cover-images/cover-cases/CASE-057.jpg",
     "coverImagePath": "/cover-cases/CASE-057.jpg"
+  },
+  {
+    "caseId": "CASE-058",
+    "caseNumber": 58,
+    "newsTitle": "ไม่ใช่ทนายความ ไม่ใช่ญาติผู้ใหญ่ แต่กลับเป็นพิธีกรคนหนึ่งที่ทำให้ 'ทราย' ได้นั่ง",
+    "content": "ไม่ใช่ทนายความ ไม่ใช่ญาติผู้ใหญ่ แต่กลับเป็นพิธีกรคนหนึ่งที่ทำให้ 'ทราย' ได้นั่งลงคุยกับคนในตระกูล 'ภิรมย์ภักดี' อย่างที่เฝ้ารอมานานกว่าหลายสิบปี เรื่องนี้ไม่ได้เริ่มจากเสียงดัง ไม่มีการชี้หน้าว่าใครผิดใครถูก กลางรายการเที่ยงวันทันเหตุการณ์ 'พี่หนุ่ม' กรรชัย เล่าว่าตัวเองเดินเข้าไปนั่งฟังผู้ใหญ่ในบ้าน รับข้อมูลจากหลายฝ่าย แล้ววางตัวเองไว้ตรงกลางพอดี ไม่เอนไปข้างใคร สิ่งที่เขาทำไม่ใช่การตัดสิน แต่คือการเปิดพื้นที่ให้ทุกคนได้ยินกันมากขึ้น และตรงนี้แหละที่ทำให้หลายคนรู้สึกตาม เพราะการเป็นคนกลางที่จ",
+    "score": 7,
+    "templateUsed": "vt_quad_circle",
+    "elapsed": 537.888,
+    "imageCount": 5,
+    "identity": {
+      "mainCharacter": "หนุ่ม กรรชัย กำเนิดพลอย",
+      "storyType": "family_warm",
+      "composer": "v3-director"
+    },
+    "batchId": null,
+    "createdAt": "2026-06-11T09:20:42.162Z",
+    "supabaseImageUrl": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/cover-images/cover-cases/CASE-058.jpg",
+    "coverImagePath": "/cover-cases/CASE-058.jpg"
+  },
+  {
+    "caseId": "CASE-059",
+    "caseNumber": 59,
+    "newsTitle": "ไม่ใช่ทนายความ ไม่ใช่ญาติผู้ใหญ่ แต่กลับเป็นพิธีกรคนหนึ่งที่ทำให้ 'ทราย' ได้นั่ง",
+    "content": "ไม่ใช่ทนายความ ไม่ใช่ญาติผู้ใหญ่ แต่กลับเป็นพิธีกรคนหนึ่งที่ทำให้ 'ทราย' ได้นั่งลงคุยกับคนในตระกูล 'ภิรมย์ภักดี' อย่างที่เฝ้ารอมานานกว่าหลายสิบปี เรื่องนี้ไม่ได้เริ่มจากเสียงดัง ไม่มีการชี้หน้าว่าใครผิดใครถูก กลางรายการเที่ยงวันทันเหตุการณ์ 'พี่หนุ่ม' กรรชัย เล่าว่าตัวเองเดินเข้าไปนั่งฟังผู้ใหญ่ในบ้าน รับข้อมูลจากหลายฝ่าย แล้ววางตัวเองไว้ตรงกลางพอดี ไม่เอนไปข้างใคร สิ่งที่เขาทำไม่ใช่การตัดสิน แต่คือการเปิดพื้นที่ให้ทุกคนได้ยินกันมากขึ้น และตรงนี้แหละที่ทำให้หลายคนรู้สึกตาม เพราะการเป็นคนกลางที่จ",
+    "score": 7,
+    "templateUsed": "vt_hero_stack",
+    "elapsed": 612.616,
+    "imageCount": 6,
+    "identity": {
+      "mainCharacter": "หนุ่ม กรรชัย กำเนิดพลอย",
+      "storyType": "family_warm",
+      "composer": "v3-director"
+    },
+    "batchId": null,
+    "createdAt": "2026-06-11T09:31:58.135Z",
+    "supabaseImageUrl": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/cover-images/cover-cases/CASE-059.jpg",
+    "coverImagePath": "/cover-cases/CASE-059.jpg"
+  },
+  {
+    "caseId": "CASE-061",
+    "caseNumber": 61,
+    "newsTitle": "\"พี่บิ๋ม\" ขนจักรยานเต็มคันรถไปมอบเป็นของขวัญให้น้อง ๆ ทั้งโรงเรียน โดยหวังเพียงส",
+    "content": "\"พี่บิ๋ม\" ขนจักรยานเต็มคันรถไปมอบเป็นของขวัญให้น้อง ๆ ทั้งโรงเรียน โดยหวังเพียงสิ่งเดียวคือ “รอยยิ้ม” ที่แสนบริสุทธิ์\nหลายคนน่าจะคุ้นหน้า “พี่บิ๋ม ฑาทิพย์” อินฟลูฯ สายบุญที่ชอบช่วยเหลือสังคมมาอย่างยาวนาน และยังเคยช่วยสมทบทุนซื้อรถกู้ภัยให้พี่ปอนด์\nล่าสุดพี่บิ๋มก็ได้เหมาจักรยานหลายสิบคันไปมอบให้น้อง ๆ ที่โรงเรียนแห่งหนึ่ง โดยมีกติกาง่าย ๆ แค่ให้น้องนักเรียนยิ้มหวาน ๆ ให้พี่บิ๋ม ก็รับจักรยานไปได้เลย\nภาพที่ออกมาก็เลยน่ารักและอบอุ่นมาก เพราะน้อง ๆ พากันมาเข้าแถวมาส่งยิ้มให้พี่บิ๋มทีละคน ก่อนจะเดินไป",
+    "score": 7,
+    "templateUsed": "vt_quad_circle",
+    "elapsed": 419.937,
+    "imageCount": 5,
+    "identity": {
+      "mainCharacter": "พี่บิ๋ม ฑาทิพย์ อินฟลูฯ สายบุญ",
+      "storyType": "donation",
+      "composer": "v3-director"
+    },
+    "batchId": null,
+    "createdAt": "2026-06-11T09:52:19.512Z",
+    "supabaseImageUrl": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/cover-images/cover-cases/CASE-061.jpg",
+    "coverImagePath": "/cover-cases/CASE-061.jpg"
   }
 ]
