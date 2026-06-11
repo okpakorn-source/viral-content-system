@@ -6,6 +6,7 @@
  */
 import { NextResponse } from 'next/server';
 import { createStore } from '@/lib/persistStore';
+import { applyMixGovernor } from '@/lib/services/newsDesk/deskBrain';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,17 +20,22 @@ export async function GET(request) {
     const store = createStore('news-desk');
     let items = await store.getAll();
 
-    if (tab === 'trend' || tab === 'good') items = items.filter(i => i.lane === tab);
+    if (['trend', 'good', 'evergreen', 'interview'].includes(tab)) items = items.filter(i => i.lane === tab);
     items = items.filter(i => i.status !== 'dismissed');
-    items.sort((a, b) => (b.finalScore || 0) - (a.finalScore || 0));
 
-    // ส่วนผสมวันนี้ (นับเฉพาะที่ทีมส่งทำจริงวันนี้) — โชว์แถบ mix บนหน้า
+    // ส่วนผสมวันนี้ (นับเฉพาะที่ทีมส่งทำจริงวันนี้)
     const today = new Date().toISOString().slice(0, 10);
     const sentToday = (await store.getAll()).filter(i => i.status === 'sent' && String(i.sentAt || '').startsWith(today));
     const mix = {};
     for (const s of sentToday) mix[s.category || 'อื่นๆ'] = (mix[s.category || 'อื่นๆ'] || 0) + 1;
 
-    return NextResponse.json({ success: true, items: items.slice(0, limit), total: items.length, mixToday: mix, sentToday: sentToday.length });
+    // ★ Mix Governor (เฟส 2): เรียง feed ตามโควตาที่เหลือของวัน — เกินเพดานดราม่าแล้วการ์ดดราม่าจม น้ำดีลอย
+    const { items: governed, governor } = applyMixGovernor(items, mix);
+
+    // fullText (บทถอดเสียงคลิป) ยาว — ไม่ส่งให้หน้า feed
+    const lightItems = governed.slice(0, limit).map(({ fullText, ...rest }) => rest);
+
+    return NextResponse.json({ success: true, items: lightItems, total: items.length, mixToday: mix, sentToday: sentToday.length, governor });
   } catch (error) {
     console.error('[NewsDesk API]', error.message);
     return NextResponse.json({ success: false, error: error.message, errorType: 'DESK_FEED_ERROR' }, { status: 500 });
@@ -48,6 +54,26 @@ export async function POST(request) {
     const item = all.find(i => i.id === id);
     if (!item) {
       return NextResponse.json({ success: false, error: 'ไม่พบข่าวนี้ในคลัง', errorType: 'NOT_FOUND' }, { status: 404 });
+    }
+
+    // ★ ส่งเข้า workflow ฝั่งเซิร์ฟเวอร์ (เฟส 2) — คลิปสัมภาษณ์ส่งบทถอดเสียงเต็ม, ข่าวปกติส่งลิงก์
+    if (action === 'sendWorkflow') {
+      const input = item.lane === 'interview' && item.fullText ? item.fullText : item.url;
+      const qRes = await fetch(`${request.nextUrl.origin}/api/queue/add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input, contentLength: 'short', userId: `desk-${user}` }),
+      });
+      const qData = await qRes.json();
+      if (!qData.success) {
+        return NextResponse.json({ success: false, error: qData.error || 'เข้าคิวไม่สำเร็จ', errorType: 'QUEUE_ADD_FAILED' }, { status: 502 });
+      }
+      await store.update(id, (ex) => ({ ...ex, status: 'sent', claimedBy: ex.claimedBy || user, sentAt: new Date().toISOString() }));
+      try {
+        const fb = createStore('news-desk-feedback');
+        await fb.add({ id: `${id}_sent_${Date.now()}`, newsId: id, action: 'sent', title: item.title, category: item.category, lane: item.lane, user, at: new Date().toISOString() });
+      } catch {}
+      return NextResponse.json({ success: true, id, status: 'sent', jobId: qData.jobId, position: qData.position });
     }
 
     const patch = {};

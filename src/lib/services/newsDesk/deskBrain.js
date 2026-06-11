@@ -182,8 +182,62 @@ ${list}
 
 export function finalScore(item) {
   const fit = fitScore(item.category);
-  const fresh = item.lane === 'good' ? Math.max(8, freshScore(item.publishedAt)) : freshScore(item.publishedAt);
+  // evergreen = ของเก่าที่ตั้งใจหยิบ ไม่หักความสด | good = มีพื้นขั้นต่ำ | trend = วัดความสดจริง
+  const fresh = item.lane === 'evergreen' ? 10
+    : item.lane === 'good' ? Math.max(8, freshScore(item.publishedAt))
+    : freshScore(item.publishedAt);
   const judge = (item.judgeScore ?? 5) * 5; // 0-50
   const toxPenalty = (item.toxicity || 0) * 3 + (item.fbRisk || 0) * 3;
   return Math.max(0, Math.min(100, Math.round(fit + fresh + judge - toxPenalty)));
+}
+
+// ════════════════════════════════════════════════════
+// Mix Governor (เฟส 2) — คุมส่วนผสมรายวัน กันเพจ toxic สะสมจนโดน FB กดรีช
+// ════════════════════════════════════════════════════
+// กลุ่มหมวด: positive (น้ำดี) ต้อง ≥40% ของที่ส่งทำวันนี้ | drama ≤20% | warn ≤15%
+const CAT_GROUP = {
+  'น้ำใจ/ช่วยเหลือ': 'positive', 'กตัญญู/ครอบครัวอบอุ่น': 'positive', 'สู้ชีวิต': 'positive',
+  'คนดังทำดี/ติดดิน': 'positive', 'สัมภาษณ์/บทสนทนาดี': 'positive',
+  'บันเทิงกระแส': 'neutral', 'อื่นๆ': 'neutral',
+  'ดราม่าสังคม': 'drama', 'เตือนภัย/อุทาหรณ์': 'warn',
+};
+export const MIX_POLICY = { positive: { min: 0.4 }, drama: { max: 0.2 }, warn: { max: 0.15 } };
+
+/**
+ * คำนวณสถานะส่วนผสมวันนี้ + boost/sink รายการ feed ตามโควตาที่เหลือ
+ * @param {Array} items - feed ที่จะแสดง
+ * @param {Object} mixToday - { หมวด: จำนวนที่ส่งทำวันนี้ }
+ */
+export function applyMixGovernor(items, mixToday) {
+  const groupCount = { positive: 0, neutral: 0, drama: 0, warn: 0 };
+  let total = 0;
+  for (const [cat, n] of Object.entries(mixToday || {})) {
+    groupCount[CAT_GROUP[cat] || 'neutral'] += n;
+    total += n;
+  }
+  const ratio = (g) => (total > 0 ? groupCount[g] / total : 0);
+
+  const governor = {
+    total,
+    positivePct: Math.round(ratio('positive') * 100),
+    dramaPct: Math.round(ratio('drama') * 100),
+    warnPct: Math.round(ratio('warn') * 100),
+    positiveOk: total === 0 || ratio('positive') >= MIX_POLICY.positive.min,
+    dramaOk: ratio('drama') <= MIX_POLICY.drama.max,
+    warnOk: ratio('warn') <= MIX_POLICY.warn.max,
+  };
+
+  // boost/sink: เกินเพดานแล้ว → การ์ดกลุ่มนั้นจม / น้ำดียังไม่ถึงเป้า → การ์ดน้ำดีลอย
+  const adjusted = items.map(it => {
+    const g = CAT_GROUP[it.category] || 'neutral';
+    let bonus = 0;
+    if (total >= 3) { // เริ่มคุมเมื่อวันนี้ส่งทำแล้วอย่างน้อย 3 ข่าว
+      if (g === 'drama' && !governor.dramaOk) bonus -= 25;
+      if (g === 'warn' && !governor.warnOk) bonus -= 25;
+      if (g === 'positive' && !governor.positiveOk) bonus += 15;
+    }
+    return { ...it, _govBonus: bonus, _sortScore: (it.finalScore || 0) + bonus };
+  });
+  adjusted.sort((a, b) => b._sortScore - a._sortScore);
+  return { items: adjusted, governor };
 }

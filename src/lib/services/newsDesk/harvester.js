@@ -38,6 +38,23 @@ function pickGoodQueries(count = 4) {
   return out;
 }
 
+// ── เลน 🗄️ Evergreen (เฟส 2): ข่าวเก่าน้ำดีที่หยิบมาทำใหม่ได้ — บ่อที่ไม่มีวันแห้ง ──
+// pattern จากผู้ใช้: "ดาราเคยสร้างบ้านให้คนจน / ยกที่ดิน / ติดดิน / กินก๋วยเตี๋ยวข้างทาง"
+const EVERGREEN_PATTERNS = [
+  'ดาราสร้างบ้านให้พ่อแม่', 'ดาราสร้างบ้านให้คนจน', 'คนดังยกที่ดิน บริจาคที่ดิน',
+  'ดาราติดดิน กินข้าวแกงข้างทาง', 'ดาราขับวินมอเตอร์ไซค์ ขายของตลาด', 'นักร้องดังกลับบ้านเกิด ทำนา',
+  'ดาราเลี้ยงดูพ่อแม่ป่วย กตัญญู', 'คนดังช่วยค่ารักษา เด็กป่วย', 'ดาราใช้หนี้ให้พ่อแม่',
+  'เศรษฐีใจบุญ สร้างโรงเรียน สร้างวัด', 'อดีตดารา ชีวิตเรียบง่าย ปัจจุบัน', 'ดาราเปิดร้านเล็กๆ สู้ชีวิต',
+  'คนเก็บขยะส่งลูกเรียนจบ', 'แม่ค้าใจบุญ เลี้ยงข้าวคนจร', 'คุณตาคุณยายสู้ชีวิต ไวรัล',
+];
+
+function pickEvergreenQueries(count = 3) {
+  const day = Math.floor(Date.now() / 86400000);
+  const out = [];
+  for (let i = 0; i < count; i++) out.push(EVERGREEN_PATTERNS[(day * count + i + 7) % EVERGREEN_PATTERNS.length]);
+  return out;
+}
+
 async function serperNews(query, { num = 10, timeRange = 'qdr:d' } = {}) {
   const key = process.env.SERPER_API_KEY;
   if (!key) throw new Error('ไม่มี SERPER_API_KEY');
@@ -73,7 +90,7 @@ const idOf = (url) => crypto.createHash('md5').update(String(url)).digest('hex')
  * รันเก็บ+คัดกรองครบ 4 ชั้น แล้วลงคลัง
  * @returns {Promise<{harvested, gated, classified, judged, added}>}
  */
-export async function runHarvest({ lanes = ['trend', 'good'], judgeTop = 24 } = {}) {
+export async function runHarvest({ lanes = ['trend', 'good', 'evergreen'], judgeTop = 24 } = {}) {
   const t0 = Date.now();
   const store = createStore('news-desk');
   const existing = await store.getAll();
@@ -92,6 +109,13 @@ export async function runHarvest({ lanes = ['trend', 'good'], judgeTop = 24 } = 
     for (const q of pickGoodQueries(4)) {
       try { raw.push(...(await serperNews(q, { num: 8, timeRange: 'qdr:w' })).map(r => ({ ...r, lane: 'good' }))); }
       catch (e) { console.log('[Harvester] good query failed:', e.message?.slice(0, 50)); }
+    }
+  }
+  if (lanes.includes('evergreen')) {
+    // ไม่จำกัดเวลา — ของเก่าน้ำดีคือเป้าหมาย (วันไหนกระแสแห้ง เลนนี้คือบ่อสำรอง)
+    for (const q of pickEvergreenQueries(3)) {
+      try { raw.push(...(await serperNews(q, { num: 8, timeRange: 'qdr:y' })).map(r => ({ ...r, lane: 'evergreen' }))); }
+      catch (e) { console.log('[Harvester] evergreen query failed:', e.message?.slice(0, 50)); }
     }
   }
   stats.harvested = raw.length;

@@ -11,7 +11,11 @@ const TABS = [
   { id: 'all', label: '📋 ทั้งหมด' },
   { id: 'trend', label: '🔥 กระแสวันนี้' },
   { id: 'good', label: '💎 ข่าวน้ำดี' },
+  { id: 'evergreen', label: '🗄️ ข่าวเก่าน้ำดี' },
+  { id: 'interview', label: '🎙️ คลิปสัมภาษณ์' },
 ];
+
+const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️' };
 
 const CAT_COLORS = {
   'น้ำใจ/ช่วยเหลือ': '#22c55e', 'กตัญญู/ครอบครัวอบอุ่น': '#10b981', 'สู้ชีวิต': '#06b6d4',
@@ -34,6 +38,9 @@ export default function NewsDeskPage() {
   const [harvesting, setHarvesting] = useState(false);
   const [msg, setMsg] = useState('');
   const [me, setMe] = useState('');
+  const [governor, setGovernor] = useState(null);
+  const [clipUrl, setClipUrl] = useState('');
+  const [mining, setMining] = useState(false);
 
   useEffect(() => {
     setMe(localStorage.getItem('desk_username') || '');
@@ -52,7 +59,7 @@ export default function NewsDeskPage() {
     try {
       const res = await fetch(`/api/news-desk?tab=${tab}&limit=80`, { cache: 'no-store' });
       const d = await res.json();
-      if (d.success) { setItems(d.items); setMixToday(d.mixToday || {}); setSentToday(d.sentToday || 0); }
+      if (d.success) { setItems(d.items); setMixToday(d.mixToday || {}); setSentToday(d.sentToday || 0); setGovernor(d.governor || null); }
     } catch {} finally { setLoading(false); }
   }, [tab]);
 
@@ -85,18 +92,38 @@ export default function NewsDeskPage() {
   const sendToWorkflow = async (item) => {
     const user = ensureName();
     if (!user) return;
-    setMsg(`🚀 ส่ง "${item.title.slice(0, 40)}..." เข้าคิวเขียนแล้ว`);
+    setMsg(`🚀 กำลังส่ง "${item.title.slice(0, 40)}..." เข้าคิวเขียน...`);
     try {
-      const res = await fetch('/api/queue/add', {
+      // ฝั่งเซิร์ฟเวอร์จัดการเอง: คลิปสัมภาษณ์ → ส่งบทถอดเสียงเต็ม / ข่าวปกติ → ส่งลิงก์
+      const res = await fetch('/api/news-desk', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: item.url, contentLength: 'short', userId: `desk-${user}` }),
+        body: JSON.stringify({ action: 'sendWorkflow', id: item.id, user }),
+      });
+      const d = await res.json();
+      if (d.success) setMsg(`✅ เข้าคิวแล้ว (คิวที่ ${d.position}) — ดูผลในหน้า Generation Log`);
+      else setMsg(`❌ ${d.error}`);
+      load();
+    } catch (e) { setMsg('❌ ' + e.message); }
+  };
+
+  const mineClip = async () => {
+    if (!/^https?:\/\//.test(clipUrl)) { setMsg('❌ วางลิงก์คลิปก่อน (YouTube / Facebook / IG / TikTok)'); return; }
+    setMining(true);
+    setMsg('⛏️ กำลังถอดเสียง + ขุดนาทีทอง... (คลิปยาวใช้เวลาหลายนาที)');
+    try {
+      const res = await fetch('/api/news-desk/mine-clip', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: clipUrl }),
       });
       const d = await res.json();
       if (d.success) {
-        await act(item.id, 'sent');
-        setMsg(`✅ เข้าคิวแล้ว (คิวที่ ${d.position}) — ดูผลในหน้า Generation Log`);
+        setMsg(`✅ ขุดสำเร็จ: "${d.item.title}" — นาทีทอง ${d.golden?.length || 0} จุด (อยู่แท็บ 🎙️)`);
+        setClipUrl('');
+        setTab('interview');
       } else setMsg(`❌ ${d.error}`);
+      load();
     } catch (e) { setMsg('❌ ' + e.message); }
+    setMining(false);
   };
 
   return (
@@ -122,9 +149,29 @@ export default function NewsDeskPage() {
             }}>{harvesting ? '⏳ กำลังคัดกรอง...' : '🔄 หาข่าวรอบใหม่'}</button>
         </div>
 
-        {/* แถบส่วนผสมวันนี้ */}
+        {/* ช่องวางลิงก์คลิปสัมภาษณ์ (เหมืองนาทีทอง) */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <input value={clipUrl} onChange={e => setClipUrl(e.target.value)} disabled={mining}
+            placeholder="🎙️ วางลิงก์คลิปสัมภาษณ์/รายการ (YouTube / FB Reel / TikTok) — ระบบถอดเสียง+ขุดนาทีทองให้"
+            style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)', color: '#e2e8f0', fontSize: 13.5, outline: 'none' }} />
+          <button onClick={mineClip} disabled={mining}
+            style={{ padding: '10px 18px', borderRadius: 10, border: 'none', cursor: mining ? 'wait' : 'pointer', background: mining ? '#4b5563' : 'linear-gradient(135deg,#06b6d4,#0e7490)', color: '#fff', fontWeight: 700, fontSize: 13.5, whiteSpace: 'nowrap' }}>
+            {mining ? '⏳ กำลังขุด...' : '⛏️ ขุดนาทีทอง'}</button>
+        </div>
+
+        {/* แถบส่วนผสมวันนี้ + Mix Governor */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14, padding: '10px 14px', background: 'rgba(255,255,255,0.04)', borderRadius: 12, fontSize: 13, color: '#94a3b8' }}>
           <span>วันนี้ส่งทำแล้ว <b style={{ color: '#f59e0b' }}>{sentToday}</b> ข่าว</span>
+          {governor && governor.total > 0 && (
+            <>
+              <span style={{ padding: '3px 10px', borderRadius: 999, fontWeight: 700, background: governor.positiveOk ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)', color: governor.positiveOk ? '#22c55e' : '#f87171' }}>
+                💚 น้ำดี {governor.positivePct}% {governor.positiveOk ? '✓' : '(เป้า ≥40%)'}
+              </span>
+              <span style={{ padding: '3px 10px', borderRadius: 999, fontWeight: 700, background: governor.dramaOk ? 'rgba(255,255,255,0.06)' : 'rgba(239,68,68,0.2)', color: governor.dramaOk ? '#94a3b8' : '#f87171' }}>
+                🌶️ ดราม่า {governor.dramaPct}% {governor.dramaOk ? '✓' : '⚠️ เกินเพดาน 20% — การ์ดดราม่าถูกกดลงแล้ว'}
+              </span>
+            </>
+          )}
           {Object.entries(mixToday).map(([cat, n]) => (
             <span key={cat} style={{ padding: '3px 10px', borderRadius: 999, background: (CAT_COLORS[cat] || '#666') + '22', color: CAT_COLORS[cat] || '#999', fontWeight: 600 }}>
               {cat} ×{n}
@@ -155,7 +202,7 @@ export default function NewsDeskPage() {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 15, lineHeight: 1.45 }}>
-                      {it.lane === 'good' ? '💎 ' : '🔥 '}{it.title}
+                      {(LANE_ICONS[it.lane] || '📰') + ' '}{it.title}
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, fontSize: 12 }}>
                       <span style={{ padding: '2px 9px', borderRadius: 999, background: (CAT_COLORS[it.category] || '#666') + '22', color: CAT_COLORS[it.category] || '#999', fontWeight: 600 }}>{it.category}</span>
@@ -169,6 +216,16 @@ export default function NewsDeskPage() {
                     {(it.angles || []).length > 0 && (
                       <div style={{ marginTop: 4, fontSize: 12.5, color: '#7dd3fc' }}>
                         💡 {it.angles.join(' · ')}
+                      </div>
+                    )}
+                    {(it.goldenMoments || []).length > 0 && (
+                      <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 10, background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.2)' }}>
+                        {it.goldenMoments.map((g, gi) => (
+                          <div key={gi} style={{ fontSize: 12.5, color: '#a5f3fc', marginBottom: 4 }}>
+                            ⛏️ &ldquo;{g.quote}&rdquo; <span style={{ color: '#64748b' }}>— {g.why}</span>
+                          </div>
+                        ))}
+                        {it.captionSkeleton && <div style={{ fontSize: 12, color: '#7dd3fc', marginTop: 4 }}>📝 โครงเล่า: {it.captionSkeleton}</div>}
                       </div>
                     )}
                   </div>
