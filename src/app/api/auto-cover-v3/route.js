@@ -22,7 +22,7 @@ export async function POST(request) {
 
   try {
     const body = await request.json();
-    const { content, newsTitle = '', sourceUrl = '', _queueJobId = null } = body;
+    const { content, newsTitle = '', sourceUrl = '', _queueJobId = null, forceTemplateId = null } = body;
 
     if (!content && !newsTitle) {
       return NextResponse.json(
@@ -42,13 +42,22 @@ export async function POST(request) {
     // ── ① Identity + Scrape + Judge (สมองเดิม — พิสูจน์แล้ว) ──
     console.log('[CoverV3] ① Story identity...');
     const { analyzeStoryIdentity } = await import('@/lib/services/storyIdentityService');
-    const identity = await analyzeStoryIdentity(
+    let identity = await analyzeStoryIdentity(
       newsTitle || (content || '').slice(0, 100),
       { core_story: content || newsTitle }
     );
     if (!identity) {
-      await markQueueJob('failed', { error: 'วิเคราะห์เนื้อข่าวไม่สำเร็จ' });
-      return NextResponse.json({ success: false, error: 'วิเคราะห์เนื้อข่าวไม่สำเร็จ', errorType: 'IDENTITY_FAILED' }, { status: 422 });
+      // ★ ข่าวฉาก/ฝูงชนไม่มีบุคคลตัวหลัก (เช่น ประชาชนเรียงแถวถวายบังคม) — เดิม fail ทั้งงาน (IDENTITY_FAILED 422)
+      //   → fallback โหมด "เหตุการณ์นำ": ใช้ใจความข่าวแทนตัวบุคคล ให้ pipeline เดินต่อได้
+      const headline = (newsTitle || (content || '').slice(0, 80)).trim();
+      identity = {
+        mainCharacter: headline.slice(0, 60) || 'เหตุการณ์ในข่าว',
+        storyType: 'event_scene',
+        coreStory: { celebratedAction: (content || newsTitle || '').slice(0, 200) },
+        mainVisualShouldBe: headline,
+        _fallback: true,
+      };
+      console.log('[CoverV3] ⚠️ identity fallback: ข่าวไม่มีตัวหลัก → โหมดเหตุการณ์นำ');
     }
     console.log(`[CoverV3] identity: ${identity.mainCharacter} | ${identity.storyType}`);
 
@@ -129,7 +138,9 @@ export async function POST(request) {
       V3_TEMPLATES.vt_hero_wide,    // 4 ภาพ — คนเล่า/สัมภาษณ์ + คู่กรณี
       V3_TEMPLATES.v3_grid3,        // 3 ภาพ — fallback ตารางสะอาด
     ].filter(t => t.slots.length <= imageBuffers.length);
-    const templateOptions = viralFirst.length > 0 ? viralFirst : plainFallbacks;
+    // forceTemplateId: บังคับโครงเจาะจง (ใช้ทดสอบ/Cover Lab เลือกเอง) — ข้าม viral-first logic
+    const forced = forceTemplateId && V3_TEMPLATES[forceTemplateId] ? [V3_TEMPLATES[forceTemplateId]] : null;
+    const templateOptions = forced || (viralFirst.length > 0 ? viralFirst : plainFallbacks);
 
     console.log(`[CoverV3] ③ Director (options: ${templateOptions.map(t => t.id).join(', ')} | pool=${imageBuffers.length})...`);
     const { directCover, reviewCover } = await import('@/lib/services/coverDirectorService');

@@ -107,38 +107,14 @@ export async function saveCase(coverBuffer, metadata) {
     createdAt: now,
   };
 
-  // ★ Save image locally
-  ensureDirs();
-  const localImagePath = path.join(LOCAL_IMAGES_DIR, `${caseId}.jpg`);
-  try {
-    fs.writeFileSync(localImagePath, coverBuffer);
-    caseData.coverImagePath = `/cover-cases/${caseId}.jpg`;
-    console.log(`[CaseArchive] 💾 Saved image: ${localImagePath}`);
-  } catch (e) {
-    console.log(`[CaseArchive] ⚠️ Image save failed: ${e.message}`);
-    caseData.coverImagePath = '';
-  }
-
-  // ★ Save to Supabase (primary)
+  // ★★ ลำดับใหม่ (11 มิ.ย. — บทเรียน CASE-052/053 ภาพปนข้ามเครื่อง):
+  //   เดิม: อัพภาพ Storage ก่อนจองแถว (upsert:true) → สองเครื่องได้เลขเดียวกัน ภาพเขียนทับกัน
+  //         แล้วตอนแถวชน (23505) เปลี่ยนแค่เลขแถว ไม่อัพภาพใหม่ → แถวกับภาพจับคู่ผิดถาวร
+  //   ใหม่: จองแถวใน DB ให้สำเร็จก่อน (unique constraint ล็อกเลขให้เรา) → ค่อยเขียนภาพตามเลขจริง
   const sb = getSupabase();
   let savedToSupabase = false;
   if (sb) {
     try {
-      // Upload image to Supabase Storage
-      const storagePath = `cover-cases/${caseId}.jpg`;
-      const { error: uploadErr } = await sb.storage
-        .from('images')
-        .upload(storagePath, coverBuffer, {
-          contentType: 'image/jpeg',
-          upsert: true,
-        });
-      
-      if (!uploadErr) {
-        const { data: urlData } = sb.storage.from('images').getPublicUrl(storagePath);
-        caseData.supabaseImageUrl = urlData?.publicUrl || '';
-      }
-
-      // Insert case record — with retry on duplicate key (C-18 race condition fix)
       const insertPayload = {
         case_id: caseId,
         case_number: caseNumber,
@@ -153,16 +129,16 @@ export async function saveCase(coverBuffer, metadata) {
           news_url: metadata.newsUrl || '',  // เก็บ news_url ใน JSONB identity
         },
         batch_id: caseData.batchId,
-        cover_image_url: caseData.supabaseImageUrl || caseData.coverImagePath,
+        cover_image_url: '', // เติมหลังอัพภาพสำเร็จ (เลขถูกล็อกแล้ว)
         created_at: now,
       };
 
-      let { error: insertErr } = await sb
-        .from('cover_cases')
-        .insert(insertPayload);
-
-      // ★ C-18: Retry once on duplicate key (race condition between concurrent requests)
-      if (insertErr?.code === '23505') {
+      // จองแถว — retry เลขใหม่สูงสุด 3 ครั้งเมื่อชน (23505)
+      let insertErr = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const res = await sb.from('cover_cases').insert(insertPayload);
+        insertErr = res.error;
+        if (insertErr?.code !== '23505') break;
         console.log(`[CaseArchive] ⚠️ Duplicate case_id ${caseId}, retrying with new ID...`);
         const retry = await getNextCaseId();
         caseId = retry.caseId;
@@ -171,15 +147,27 @@ export async function saveCase(coverBuffer, metadata) {
         caseData.caseNumber = caseNumber;
         insertPayload.case_id = caseId;
         insertPayload.case_number = caseNumber;
-
-        const retryResult = await sb
-          .from('cover_cases')
-          .insert(insertPayload);
-        insertErr = retryResult.error;
       }
 
       if (!insertErr) {
         savedToSupabase = true;
+
+        // อัพภาพ "หลัง" ได้เลขแน่นอนแล้ว — เลขเป็นของเราเครื่องเดียว ไม่มีใครเขียนทับ
+        // ★ bucket จริงชื่อ 'cover-images' — เดิมเขียน 'images' (ไม่มีอยู่) ทำให้อัพภาพพังเงียบมาตลอด
+        //   ทุกแถวเลย fallback เป็น path ไฟล์เครื่อง → บน Vercel เสิร์ฟไฟล์เก่าจาก git ผิดข่าว (CASE-052/053)
+        const storagePath = `cover-cases/${caseId}.jpg`;
+        const { error: uploadErr } = await sb.storage
+          .from('cover-images')
+          .upload(storagePath, coverBuffer, { contentType: 'image/jpeg', upsert: true });
+        if (!uploadErr) {
+          const { data: urlData } = sb.storage.from('cover-images').getPublicUrl(storagePath);
+          caseData.supabaseImageUrl = urlData?.publicUrl || '';
+          await sb.from('cover_cases')
+            .update({ cover_image_url: caseData.supabaseImageUrl })
+            .eq('case_id', caseId);
+        } else {
+          console.log(`[CaseArchive] ⚠️ Storage upload failed: ${uploadErr.message}`);
+        }
         console.log(`[CaseArchive] ☁️ Saved to Supabase: ${caseId}`);
       } else {
         console.log(`[CaseArchive] ⚠️ Supabase insert failed: ${insertErr.message}`);
@@ -187,6 +175,18 @@ export async function saveCase(coverBuffer, metadata) {
     } catch (e) {
       console.log(`[CaseArchive] ⚠️ Supabase error: ${e.message}`);
     }
+  }
+
+  // ★ Save image locally — หลังเลข CASE สรุปแล้วเท่านั้น (เดิมเขียนก่อน retry → ไฟล์ชื่อเลขเก่า)
+  ensureDirs();
+  const localImagePath = path.join(LOCAL_IMAGES_DIR, `${caseId}.jpg`);
+  try {
+    fs.writeFileSync(localImagePath, coverBuffer);
+    caseData.coverImagePath = `/cover-cases/${caseId}.jpg`;
+    console.log(`[CaseArchive] 💾 Saved image: ${localImagePath}`);
+  } catch (e) {
+    console.log(`[CaseArchive] ⚠️ Image save failed: ${e.message}`);
+    caseData.coverImagePath = '';
   }
 
   // ★ Always save to local JSON (fallback / backup)
