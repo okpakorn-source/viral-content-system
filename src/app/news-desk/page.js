@@ -42,6 +42,7 @@ export default function NewsDeskPage() {
   const [governor, setGovernor] = useState(null);
   const [clipUrl, setClipUrl] = useState('');
   const [mining, setMining] = useState(false);
+  const [jobStatus, setJobStatus] = useState({}); // jobId → { status, position, error }
 
   useEffect(() => {
     setMe(localStorage.getItem('desk_username') || '');
@@ -60,7 +61,16 @@ export default function NewsDeskPage() {
     try {
       const res = await fetch(`/api/news-desk?tab=${tab}&limit=80`, { cache: 'no-store' });
       const d = await res.json();
-      if (d.success) { setItems(d.items); setMixToday(d.mixToday || {}); setSentToday(d.sentToday || 0); setGovernor(d.governor || null); }
+      if (d.success) { setItems(d.items); setMixToday(d.mixToday || {}); setSentToday(d.sentToday || 0); setGovernor(d.governor || null);
+        // ★ ติดตามสถานะงานเขียนของการ์ดที่ส่งทำใน 2 ชม.ล่าสุด
+        const recent = (d.items || []).filter(i => i.status === 'sent' && i.jobId && Date.now() - new Date(i.sentAt || 0).getTime() < 2 * 3600e3).slice(0, 8);
+        for (const it of recent) {
+          fetch(`/api/queue/status?id=${it.jobId}`, { cache: 'no-store' })
+            .then(r => r.json())
+            .then(q => setJobStatus(prev => ({ ...prev, [it.jobId]: { status: q.status, position: q.position, error: q.error } })))
+            .catch(() => {});
+        }
+      }
     } catch {} finally { setLoading(false); }
   }, [tab]);
 
@@ -209,7 +219,15 @@ export default function NewsDeskPage() {
                       <span style={{ padding: '2px 9px', borderRadius: 999, background: (CAT_COLORS[it.category] || '#666') + '22', color: CAT_COLORS[it.category] || '#999', fontWeight: 600 }}>{it.category}</span>
                       <span style={{ color: '#64748b' }}>{it.source}</span>
                       {it.status === 'claimed' && <span style={{ color: '#f59e0b', fontWeight: 700 }}>📌 {it.claimedBy} จองแล้ว</span>}
-                      {it.status === 'sent' && <span style={{ color: '#22c55e', fontWeight: 700 }}>✅ ส่งทำแล้ว</span>}
+                      {it.status === 'sent' && (() => {
+                        const js = it.jobId ? jobStatus[it.jobId] : null;
+                        if (!js) return <span style={{ color: '#22c55e', fontWeight: 700 }}>✅ ส่งทำแล้ว</span>;
+                        if (js.status === 'pending') return <span style={{ color: '#fbbf24', fontWeight: 700 }}>⏳ รอคิว{js.position ? `ที่ ${js.position}` : ''}</span>;
+                        if (js.status === 'processing') return <span style={{ color: '#60a5fa', fontWeight: 700 }}>✍️ AI กำลังเขียน...</span>;
+                        if (js.status === 'completed') return <a href="/generation-logs" style={{ color: '#22c55e', fontWeight: 700, textDecoration: 'underline' }}>✅ เขียนเสร็จ — เปิดดูใน Generation Log</a>;
+                        if (js.status === 'failed') return <span style={{ color: '#f87171', fontWeight: 700 }} title={js.error}>❌ เขียนล้มเหลว — ลองส่งใหม่</span>;
+                        return <span style={{ color: '#22c55e', fontWeight: 700 }}>✅ ส่งทำแล้ว</span>;
+                      })()}
                       {it.performance === 'viral' && <span style={{ color: '#fb923c', fontWeight: 700 }}>🔥 ปังจริง</span>}
                       {it.performance === 'flop' && <span style={{ color: '#94a3b8', fontWeight: 700 }}>🧊 แป้ก</span>}
                       {it.followupOf && <span style={{ color: '#c084fc' }}>🔁 ตามรอย: {String(it.followupOf).slice(0, 40)}</span>}

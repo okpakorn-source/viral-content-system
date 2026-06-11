@@ -68,7 +68,8 @@ export async function POST(request) {
       if (!qData.success) {
         return NextResponse.json({ success: false, error: qData.error || 'เข้าคิวไม่สำเร็จ', errorType: 'QUEUE_ADD_FAILED' }, { status: 502 });
       }
-      await store.update(id, (ex) => ({ ...ex, status: 'sent', claimedBy: ex.claimedBy || user, sentAt: new Date().toISOString() }));
+      // ★ เก็บ jobId ไว้กับการ์ด — UI ใช้ติดตามสถานะงานเขียนได้ (feedback ผู้ใช้ 11 มิ.ย.)
+      await store.update(id, (ex) => ({ ...ex, status: 'sent', claimedBy: ex.claimedBy || user, sentAt: new Date().toISOString(), jobId: qData.jobId }));
       try {
         const fb = createStore('news-desk-feedback');
         await fb.add({ id: `${id}_sent_${Date.now()}`, newsId: id, action: 'sent', title: item.title, category: item.category, lane: item.lane, user, at: new Date().toISOString() });

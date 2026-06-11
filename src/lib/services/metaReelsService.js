@@ -51,7 +51,14 @@ async function runYtdlp(args, timeout = 90_000) {
       console.log('[MetaReels] cookies.txt failed:', e.message?.slice(0, 80));
     }
   }
-  return execFileAsync(exe, args, { maxBuffer: 1024 * 1024 * 20, timeout });
+  try {
+    return await execFileAsync(exe, args, { maxBuffer: 1024 * 1024 * 20, timeout });
+  } catch (e) {
+    // โชว์สาเหตุจริงจาก yt-dlp — e.message อย่างเดียวมักเป็นแค่ "Command failed: ..."
+    const stderr = String(e.stderr || '').trim().split('\n').slice(-3).join(' | ');
+    console.log('[MetaReels] yt-dlp stderr:', stderr.slice(0, 300) || '(empty)');
+    throw new Error(`yt-dlp: ${stderr.slice(0, 160) || e.message?.slice(0, 160)}`);
+  }
 }
 
 export async function transcribeMetaReel({ url }) {
@@ -88,7 +95,8 @@ export async function transcribeMetaReel({ url }) {
     let mediaPath = existsSync(audioPath) ? audioPath : null;
     if (!mediaPath) {
       videoPath = join(tmpdir(), `meta_${Date.now()}.mp4`);
-      await runYtdlp(['-f', 'b[ext=mp4]/b', '-o', videoPath, '--no-warnings', '--no-playlist', url], 180_000);
+      // sd/hd ของ Facebook = ไฟล์เดี่ยวมีเสียงในตัว (ไม่ต้อง merge ด้วย ffmpeg ซึ่งเราไม่มี)
+      await runYtdlp(['-f', 'sd/hd/b[ext=mp4]/b', '-o', videoPath, '--no-warnings', '--no-playlist', url], 180_000);
       if (existsSync(videoPath)) mediaPath = videoPath;
     }
     if (!mediaPath) {
