@@ -115,8 +115,9 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       addLog('Step1', `⚠️ Meta Reels: ${mRes.error} — ลอง scrape หน้าโพสต์แทน`);
       const scrapeData = await withTimeout(extractContent({ url }), 90000, 'scrape').catch(e => ({ success: false, error: e.message }));
       if (scrapeData.success && (scrapeData.text || '').length > 50) {
-        rawText = scrapeData.text;
-        addLog('Step1', `✅ scrape หน้าโพสต์แทนได้ ${rawText.length} ตัวอักษร`);
+        const { cleanScrapedText } = await import('@/lib/utils/textCleaner');
+        rawText = cleanScrapedText(scrapeData.text);
+        addLog('Step1', `✅ scrape หน้าโพสต์แทนได้ ${rawText.length} ตัวอักษร (ตัดขยะแล้ว)`);
       } else {
         throwStep('auto_scrape', `Meta Reels: ${mRes.error}`);
       }
@@ -125,8 +126,12 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     addLog('Step1', `🌐 กำลังดึง HTML จาก ${domain}...`);
     const scrapeData = await withTimeout(extractContent({ url }), 90000, 'scrape'); // ★ 90s (was 60s) — เว็บข่าวไทยบางเจ้าช้า/กันบอท
     if (!scrapeData.success) throwStep('auto_scrape', `Scrape: ${scrapeData.error}`);
-    rawText = scrapeData.text || '';
-    addLog('Step1', `✅ ดึงเนื้อหา ${rawText.length} ตัวอักษร (${((Date.now() - step1Start) / 1000).toFixed(1)}s)`);
+    // ★ 12 มิ.ย.: กำจัดขยะเว็บก่อนเข้าไลน์ (คำเตือนเบราว์เซอร์/คุกกี้/เมนู/ลิสต์ข่าวแนะนำ) —
+    //   ข่าวที่ส่งเป็นลิงก์จากโต๊ะ/บอทเจอขยะพวกนี้บ่อย ต่างจากคนวางเนื้อเองที่สะอาด (#00206 ตัวเลขมั่วเพราะแบบนี้)
+    const { cleanScrapedText } = await import('@/lib/utils/textCleaner');
+    const _rawScrape = scrapeData.text || '';
+    rawText = cleanScrapedText(_rawScrape);
+    addLog('Step1', `✅ ดึงเนื้อหา ${_rawScrape.length} ตัวอักษร → ตัดขยะเหลือ ${rawText.length} (${((Date.now() - step1Start) / 1000).toFixed(1)}s)`);
   }
 
   if (!rawText || rawText.length < 20) {
