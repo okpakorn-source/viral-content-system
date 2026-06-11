@@ -85,16 +85,19 @@ export async function POST(request) {
     console.log(`[CoverV3] downloaded ${imageBuffers.length}/${candidates.length} buffers`);
 
     // ── Quality floor (หลักเดียวกับ v1) ──
-    const { V3_TEMPLATES } = await import('@/lib/services/coverExecutorService');
-    const minSlots = V3_TEMPLATES.v3_grid3.slots.length;
-    if (imageBuffers.length < minSlots) {
-      const msg = `ภาพใช้ได้ ${imageBuffers.length} ใบ (ต้องการอย่างน้อย ${minSlots}) — ข่าวนี้ภาพหายาก`;
+    const { V3_TEMPLATES, adaptRegistryTemplate } = await import('@/lib/services/coverExecutorService');
+    if (imageBuffers.length < 3) {
+      const msg = `ภาพใช้ได้ ${imageBuffers.length} ใบ (ต้องการอย่างน้อย 3) — ข่าวนี้ภาพหายาก`;
       await markQueueJob('failed', { error: msg });
       return NextResponse.json({ success: false, error: msg, errorType: 'INSUFFICIENT_QUALITY_IMAGES' }, { status: 422 });
     }
 
-    // ── ② AI Vision Director ──
-    const templateSpec = imageBuffers.length >= 6 ? V3_TEMPLATES.v3_grid4 : V3_TEMPLATES.v3_grid3;
+    // ── ② AI Vision Director — template "viral-safe" (rev.4 หลังบทเรียน CASE-038:
+    //    ช่องลอยกลางผืนของ template_5 บังหน้าฮีโร่ → ใช้ลูกผสม ตารางสะอาด + วงกลม/กรอบเหลืองแบบควบคุม) ──
+    let templateSpec;
+    if (imageBuffers.length >= 5) templateSpec = V3_TEMPLATES.v3_viral5;
+    else if (imageBuffers.length === 4) templateSpec = V3_TEMPLATES.v3_viral4;
+    else templateSpec = V3_TEMPLATES.v3_grid3;
     console.log(`[CoverV3] ③ Director (${templateSpec.id}, pool=${imageBuffers.length})...`);
     const { directCover, reviewCover } = await import('@/lib/services/coverDirectorService');
     const direction = await directCover({ imageBuffers, identity, templateSpec, newsTitle });
@@ -121,6 +124,23 @@ export async function POST(request) {
       console.log('[CoverV3] ⑤ QC passed first try');
     }
 
+    // ── ให้คะแนนปกด้วย mini-judge (แก้ป้าย 0/10 ในคลัง) ──
+    let score = 7;
+    try {
+      const { callAI } = await import('@/lib/ai/openai');
+      const smallForScore = await (await import('sharp')).default(coverBuffer).resize(600, null, { fit: 'inside' }).jpeg({ quality: 75 }).toBuffer();
+      const judgeRes = await callAI({
+        prompt: `ให้คะแนนปกข่าวนี้ 0-10 (องค์ประกอบ, ความเด่นของบุคคล, การเล่าเรื่อง, ความสะอาด) ข่าว: "${(newsTitle || '').slice(0, 80)}"\nตอบ JSON: {"score": 0-10, "reason": "สั้นๆ"}`,
+        imageContents: [{ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${smallForScore.toString('base64')}`, detail: 'low' } }],
+        model: 'gpt-4o-mini',
+        temperature: 0.2,
+        maxTokens: 300,
+      });
+      const j = typeof judgeRes === 'object' ? judgeRes : JSON.parse(String(judgeRes).match(/\{[\s\S]*\}/)?.[0] || '{}');
+      if (Number.isFinite(Number(j?.score))) score = Math.max(0, Math.min(10, Number(j.score)));
+      console.log(`[CoverV3] 🏆 Judge score: ${score}/10 — ${String(j?.reason || '').slice(0, 70)}`);
+    } catch (e) { console.log('[CoverV3] judge failed (non-fatal):', e.message?.slice(0, 50)); }
+
     // ── Archive (reuse v1 case archive) ──
     let caseId = null;
     try {
@@ -128,7 +148,7 @@ export async function POST(request) {
       const saved = await saveCase(coverBuffer, {
         newsTitle: newsTitle || (content || '').slice(0, 80),
         content: (content || '').slice(0, 500),
-        score: 0,
+        score,
         templateUsed: templateSpec.id,
         elapsed: (Date.now() - t0) / 1000,
         imageCount: assignments.length,
@@ -149,6 +169,7 @@ export async function POST(request) {
       assignments: assignments.map(a => ({ slot: a.slotId, image: a.imageIndex, crop: a.crop, why: a.why })),
       directorReason: direction.reason,
       qcApplied,
+      score,
       caseId,
       elapsed: `${elapsed}s`,
       identity: { mainCharacter: identity.mainCharacter, storyType: identity.storyType },
