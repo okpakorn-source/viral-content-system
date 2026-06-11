@@ -116,15 +116,20 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: msg, errorType: 'INSUFFICIENT_QUALITY_IMAGES' }, { status: 422 });
     }
 
-    // ── ② AI Vision Director — เลือกโครงเองจาก 5 แม่บทที่แกะจากปกไวรัลจริง (rev.6) ──
-    const templateOptions = [
-      V3_TEMPLATES.vt_hero_stack,   // 6 ภาพ — ผู้ดูแล/ผู้ช่วยเหลือ
-      V3_TEMPLATES.vt_quad_circle,  // 5 ภาพ — สองฝ่าย ให้-รับ
-      V3_TEMPLATES.vt_faces_circle, // 5 ภาพ — ครอบครัว/เด็ก
+    // ── ② AI Vision Director — เลือกโครงเองจากแม่บทที่แกะจากปกไวรัลจริง ──
+    // ★ rev.12: บังคับลุคไวรัลในโค้ด — ภาพพอเมื่อไหร่ ให้เลือกได้เฉพาะโครงที่มี "วงกลม+กรอบไฮไลต์"
+    //   (บทเรียน CASE-045/050: เตือนใน prompt แล้ว Director ยังหนีไปโครงเรียบ → "การนำเสนอห่วย")
+    const viralFirst = [
+      V3_TEMPLATES.vt_hero_stack,   // 6 ภาพ — ผู้ดูแล/ผู้ช่วยเหลือ (วงกลม+คลิป)
+      V3_TEMPLATES.vt_quad_circle,  // 5 ภาพ — สองฝ่าย ให้-รับ (วงกลมกลาง)
+      V3_TEMPLATES.vt_faces_circle, // 5 ภาพ — ครอบครัว/เด็ก (วงกลม)
+    ].filter(t => t.slots.length <= imageBuffers.length);
+    const plainFallbacks = [
       V3_TEMPLATES.vt_hero_br,      // 4 ภาพ — อารมณ์น้ำตาเป็นจุดขาย
       V3_TEMPLATES.vt_hero_wide,    // 4 ภาพ — คนเล่า/สัมภาษณ์ + คู่กรณี
       V3_TEMPLATES.v3_grid3,        // 3 ภาพ — fallback ตารางสะอาด
     ].filter(t => t.slots.length <= imageBuffers.length);
+    const templateOptions = viralFirst.length > 0 ? viralFirst : plainFallbacks;
 
     console.log(`[CoverV3] ③ Director (options: ${templateOptions.map(t => t.id).join(', ')} | pool=${imageBuffers.length})...`);
     const { directCover, reviewCover } = await import('@/lib/services/coverDirectorService');
@@ -141,8 +146,8 @@ export async function POST(request) {
     let coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec });
     console.log(`[CoverV3] ④ composed ${Math.round(coverBuffer.length / 1024)}KB`);
 
-    // ── ④ Self-QC 1 รอบ (rev.8: ส่งภาพสำรอง+กรอบหน้าให้ QC สลับรูปได้ ไม่ใช่แค่แก้ครอป) ──
-    const qc = await reviewCover({ coverBuffer, templateSpec, assignments, imageBuffers, faceBoxes });
+    // ── ④ Self-QC 1 รอบ (rev.8: สลับรูปได้ | rev.11: รู้เนื้อข่าว — จับภาพไม่เกี่ยวกับเรื่องได้) ──
+    const qc = await reviewCover({ coverBuffer, templateSpec, assignments, imageBuffers, faceBoxes, identity, newsTitle });
     let qcApplied = false;
     if (!qc.ok && qc.fixes.length > 0) {
       assignments = applyFixes(assignments, qc.fixes);
