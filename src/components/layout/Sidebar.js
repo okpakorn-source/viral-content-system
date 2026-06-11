@@ -39,6 +39,7 @@ export default function Sidebar() {
     { label: 'คอนเทนต์ทั้งหมด', icon: '📰', href: '/content' },
     { label: 'สร้างใหม่', icon: '✨', href: '/content/new', highlight: true },
     { type: 'divider', label: 'เครื่องมือ' },
+    { label: '🗞️ โต๊ะข่าวกลาง', icon: '🗞️', href: '/news-desk', highlight: true },
     { label: 'Viral Radar', icon: '📡', href: '/radar', highlight: true },
     { label: 'คลังข่าว', icon: '📦', href: '/news-archive' },
     { label: 'คลังรอตรวจ', icon: '📋', href: '/review', badge: reviewCount },
