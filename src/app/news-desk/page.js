@@ -456,6 +456,7 @@ export default function NewsDeskPage() {
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, fontSize: 12 }}>
                       <span style={{ padding: '2px 9px', borderRadius: 999, background: (CAT_COLORS[it.category] || '#666') + '22', color: CAT_COLORS[it.category] || '#999', fontWeight: 600 }}>{it.category}</span>
                       {it.foreignCountry && <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(59,130,246,0.15)', color: 'var(--desk-blue)', fontWeight: 700 }}>🌏 ข่าวต่างประเทศ · {it.foreignCountry}</span>}
+                      {it.sameStoryAs && <span title={it.sameStoryAs.title} style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(245,158,11,0.15)', color: 'var(--desk-amber)', fontWeight: 700 }}>⚠️ เรื่องนี้เคยส่งเจนแล้ว (ทำซ้ำได้ถ้าตั้งใจ)</span>}
                       <span style={{ color: 'var(--text-muted)' }}>{it.source}</span>
                       {it.pickedBy && <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(139,92,246,0.15)', color: 'var(--desk-purple)', fontWeight: 700 }}>{it.pickedByIcon || '🤖'} {it.pickedBy} เลือก</span>}
                       {it.status === 'claimed' && <span style={{ color: 'var(--desk-amber)', fontWeight: 700 }}>📌 {it.claimedBy} จองแล้ว</span>}

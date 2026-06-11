@@ -284,6 +284,24 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     claimedBy: null,
     harvestedAt: now,
   }));
+
+  // ★ ป้ายเตือนเรื่องซ้ำแบบไม่บล็อก (คำสั่งทีม 12 มิ.ย.): ใบใหม่เรื่องเดียวกับที่ "ส่งเจนไปแล้ว" ใน 72 ชม.
+  //   → ติดป้าย sameStoryAs ให้ทีมเห็น (ยังหยิบทำซ้ำได้ตามนโยบาย — กระแสใหญ่บางทีตั้งใจเล่นซ้ำ)
+  try {
+    const existing = (await store.getAll()).filter(i =>
+      i.status === 'sent' && Date.now() - new Date(i.sentAt || i.harvestedAt || 0).getTime() < 72 * 3600e3);
+    const normT = (s) => String(s || '').replace(/[\s"“”'‘’!|…]/g, '').slice(0, 60);
+    for (const it of finalItems) {
+      const nt = normT(it.title);
+      if (nt.length < 12) continue;
+      const hit = existing.find(ex => {
+        const ne = normT(ex.title);
+        return ne.length >= 12 && (ne.includes(nt.slice(0, 16)) || nt.includes(ne.slice(0, 16)));
+      });
+      if (hit) it.sameStoryAs = { id: hit.id, title: String(hit.title).slice(0, 60) };
+    }
+  } catch { /* เทียบไม่ได้ = ไม่มีป้าย ไม่พังการเก็บ */ }
+
   if (finalItems.length > 0) await store.addMany(finalItems);
   stats.added = finalItems.length;
 

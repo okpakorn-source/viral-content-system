@@ -36,11 +36,19 @@ export function detectFlags(versions, sourceText) {
   const problems = versions.map(() => []);
   const contents = versions.map(v => norm(v.content || v.text || ''));
 
-  // ① จบซ้ำข้ามเวอร์ชัน — ใบหลังถือว่าผิด (ใบแรกคือเจ้าของสำนวน)
+  // ① จบซ้ำ / เปิดซ้ำ / เนื้อท่อนกลางซ้ำ ข้ามเวอร์ชัน — ใบหลังถือว่าผิด (ใบแรกคือเจ้าของสำนวน)
   for (let i = 0; i < contents.length; i++) {
     for (let j = i + 1; j < contents.length; j++) {
       if (!contents[i] || !contents[j]) continue;
       if (contents[i].slice(-30) === contents[j].slice(-30)) problems[j].push('dup_closing');
+      if (contents[i].slice(0, 30) === contents[j].slice(0, 30)) problems[j].push('dup_opening');
+      // เนื้อกลางซ้ำ: หน้าต่าง 28 ตัวอักษรของใบแรกโผล่ในใบหลัง ≥3 จุด (เคส #00206 V3 ก๊อปท่อน V2)
+      let dupWin = 0, sample = '';
+      for (let p = 30; p + 28 <= contents[i].length && dupWin < 3; p += 14) {
+        const win = contents[i].substr(p, 28);
+        if (contents[j].includes(win)) { dupWin++; if (!sample) sample = win; }
+      }
+      if (dupWin >= 3) { problems[j].push('dup_body'); versions[j]._dupBodySample = sample; }
     }
   }
 
@@ -82,6 +90,12 @@ export async function fixFlaggedVersions(versions, newsData) {
     if (problems[i].includes('dup_closing')) {
       const otherClosing = norm(versions.find((_, j) => j !== i)?.content || '').slice(-120);
       orders.push(`- ย่อหน้าปิดท้ายซ้ำกับเวอร์ชันอื่นคำต่อคำ → เขียนย่อหน้าปิดใหม่ให้ใจความต่างจริง (ห้ามคล้ายกับ: "...${otherClosing}")`);
+    }
+    if (problems[i].includes('dup_opening')) {
+      orders.push('- ประโยคเปิดซ้ำกับเวอร์ชันอื่นคำต่อคำ → เขียนประโยคเปิดใหม่คนละแนว (อ่านเป็นธรรมชาติ ห้ามขึ้นต้นด้วยวันที่)');
+    }
+    if (problems[i].includes('dup_body')) {
+      orders.push(`- มีท่อนเนื้อหากลางเรื่องซ้ำกับเวอร์ชันอื่นคำต่อคำ (เช่นท่อน "${String(v._dupBodySample || '').slice(0, 28)}...") → เล่าท่อนที่ซ้ำใหม่ด้วยคำของตัวเอง ข้อเท็จจริงเดิมครบ`);
     }
     if (problems[i].includes('missing_numbers')) {
       orders.push(`- ตัวเลขสำคัญของข่าวหายจากเนื้อ → เติม ${v._fixNumbers.join(', ')} กลับเข้าเนื้ออย่างเป็นธรรมชาติในจุดที่เหมาะสม (ห้ามแปลงค่า ห้ามปัดเศษ)`);
