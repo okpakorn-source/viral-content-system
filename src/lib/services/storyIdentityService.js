@@ -277,7 +277,7 @@ Respond with ONLY a JSON object following this exact structure (ALL values in Th
           body: JSON.stringify({
             model: MODEL_PRIMARY,
             messages: [{ role: 'user', content: prompt }],
-            ...(_isNew ? { max_completion_tokens: 4000 } : { max_tokens: 4000 }),
+            ...(_isNew ? { max_completion_tokens: 8000 } : { max_tokens: 4000 }), // ★ 8000 (was 4000) — reasoning model กินงบคิดก่อนตอบ เนื้อ JSON เลยโดนตัด ("Unexpected end of JSON input" เคสพี่จ่า 11 มิ.ย.)
             ...(_isNew ? {} : { temperature: 0.2 }),
             response_format: { type: 'json_object' }
           })
@@ -286,7 +286,8 @@ Respond with ONLY a JSON object following this exact structure (ALL values in Th
         if (gptRes.ok) {
           const gptData = await gptRes.json();
           const gptText = gptData.choices?.[0]?.message?.content || '';
-          const parsed = JSON.parse(gptText);
+          if (!gptText.trim()) throw new Error(`empty content (finish=${gptData.choices?.[0]?.finish_reason})`);
+          const parsed = JSON.parse((gptText.match(/\{[\s\S]*\}/) || [gptText])[0]);
           // ★ Extract new visual priority fields with safe defaults
           parsed.storyType = parsed.storyType || 'general';
           parsed.mainVisualShouldBe = parsed.mainVisualShouldBe || '';

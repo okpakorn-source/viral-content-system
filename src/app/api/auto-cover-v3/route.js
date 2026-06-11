@@ -16,7 +16,23 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 800;
 
+// ★ ล็อกเร็นเดอร์ทีละใบต่อเครื่อง (ผู้ใช้สั่ง 11 มิ.ย.: ปกหลายใบพร้อมกัน = แย่งทรัพยากร/เสี่ยงระบบพัง)
+//   งานที่มาทีหลังต่อแถวรอใบก่อนเสร็จ — กันทั้งงานคิว+ยิงตรง API พร้อมกัน
+let _renderLock = Promise.resolve();
+
 export async function POST(request) {
+  const prevLock = _renderLock;
+  let releaseLock;
+  _renderLock = new Promise((r) => (releaseLock = r));
+  await prevLock;
+  try {
+    return await _renderCoverV3(request);
+  } finally {
+    releaseLock();
+  }
+}
+
+async function _renderCoverV3(request) {
   const t0 = Date.now();
   let markQueueJob = async () => {};
 
