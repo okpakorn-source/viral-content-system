@@ -103,7 +103,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     addLog('Step1', `✅ YouTube transcript: ${rawText.length} ตัวอักษร (${((Date.now() - step1Start) / 1000).toFixed(1)}s)`);
   } else {
     addLog('Step1', `🌐 กำลังดึง HTML จาก ${domain}...`);
-    const scrapeData = await withTimeout(extractContent({ url }), 60000, 'scrape');
+    const scrapeData = await withTimeout(extractContent({ url }), 90000, 'scrape'); // ★ 90s (was 60s) — เว็บข่าวไทยบางเจ้าช้า/กันบอท
     if (!scrapeData.success) throwStep('auto_scrape', `Scrape: ${scrapeData.error}`);
     rawText = scrapeData.text || '';
     addLog('Step1', `✅ ดึงเนื้อหา ${rawText.length} ตัวอักษร (${((Date.now() - step1Start) / 1000).toFixed(1)}s)`);
@@ -132,7 +132,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     mode: 'extract',
     workflowId: _autoWorkflowId,
     user: _user,
-  }), 60000, 'extract');
+  }), 120000, 'extract'); // ★ 120s (was 60s) — โดน timeout จริงบน production (Discord 11 มิ.ย.) เหตุผลเดียวกับ blueprint
 
   if (!extractRes.success || !extractRes.data?.newsBody) {
     throwStep('auto_extract', `สกัดข่าวไม่สำเร็จ: ${extractRes.error || 'ไม่มีเนื้อหา'}`);

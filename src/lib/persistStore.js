@@ -72,8 +72,10 @@ async function _fileFallbackLoad(name) {
 
 
 // Serverless (Vercel/Lambda) filesystem is read-only — disk writes always fail there.
-// Local dev keeps the file fallback working exactly as before.
-const _isServerless = !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+// ★ ห้ามเชื่อ env VERCEL ตรงๆ: `vercel env pull` เขียน VERCEL="1" ลง .env.local
+//   ทำให้เครื่อง dev จริงถูกมองเป็น serverless แล้วหยุด sync ไฟล์ fallback (ผิดกฎ Database Fallback Sync)
+// → ตัดสินจากผลเขียนจริง: เจอ error แนว read-only เมื่อไหร่ ค่อยปิดการเขียนถาวร + เตือนครั้งเดียว
+let _diskReadOnly = false;
 const _warnedWriteSkip = new Set();
 
 function _warnWriteSkipOnce(name, message) {
@@ -84,8 +86,8 @@ function _warnWriteSkipOnce(name, message) {
 
 async function _fileFallbackSave(name, items) {
   _memCache.set(name, items);
-  if (_isServerless) {
-    _warnWriteSkipOnce(name, 'Read-only serverless filesystem — skipping local JSON cache write (in-memory cache only)');
+  if (_diskReadOnly) {
+    _warnWriteSkipOnce(name, 'Read-only filesystem detected — skipping local JSON cache write (in-memory cache only)');
     return;
   }
   try {
@@ -93,6 +95,9 @@ async function _fileFallbackSave(name, items) {
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, `${name}.json`), JSON.stringify(items, null, 2), 'utf-8');
   } catch (e) {
+    if (/EROFS|read-only|EPERM|EACCES/i.test(e.message || '')) {
+      _diskReadOnly = true; // serverless จริง — เลิกพยายามทั้ง process กัน log spam
+    }
     _warnWriteSkipOnce(name, `File write failed (further failures suppressed): ${e.message}`);
   }
 }

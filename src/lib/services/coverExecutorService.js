@@ -252,8 +252,16 @@ export async function executeCover({ assignments, imageBuffers, templateSpec }) 
     .toBuffer();
 }
 
-/** apply QC fixes: ทับเฉพาะ crop ของช่องที่สั่งแก้ */
+/** apply QC fixes: ทับ crop ของช่องที่สั่งแก้ + rev.8: สลับรูปได้ด้วย imageIndex */
 export function applyFixes(assignments, fixes) {
-  const map = new Map(fixes.map(f => [f.slotId, f.crop]));
-  return assignments.map(a => (map.has(a.slotId) ? { ...a, crop: map.get(a.slotId) } : a));
+  const map = new Map(fixes.map(f => [f.slotId, f]));
+  return assignments.map(a => {
+    const f = map.get(a.slotId);
+    if (!f) return a;
+    return {
+      ...a,
+      ...(Number.isInteger(f.imageIndex) ? { imageIndex: f.imageIndex } : {}),
+      ...(f.crop ? { crop: f.crop } : {}),
+    };
+  });
 }

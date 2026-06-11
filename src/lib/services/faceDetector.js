@@ -56,9 +56,11 @@ Format:
   "main_subject_region": { "x_pct": 20, "y_pct": 5, "w_pct": 60, "h_pct": 90 },
   "has_faces": true,
   "face_count": 1,
-  "best_crop_focus": "center-top"
+  "best_crop_focus": "center-top",
+  "has_big_text": false
 }
-If no faces: has_faces=false, faces=[], and provide main_subject_region for the most interesting area.`;
+If no faces: has_faces=false, faces=[], and provide main_subject_region for the most interesting area.
+has_big_text = true if the image is a social-media post screenshot, chat screenshot, news graphic with headline, or has large burned-in text/captions/subtitles covering a noticeable part (small watermark/logo = false).`;
 
     const parsed = await callAI({
       prompt: gptPrompt,
@@ -96,6 +98,7 @@ If no faces: has_faces=false, faces=[], and provide main_subject_region for the 
         height: Math.round((subject.h_pct / 100) * metadata.height),
       },
       bestCropFocus: parsed.best_crop_focus || 'center',
+      hasBigText: !!parsed.has_big_text, // ★ สกรีนช็อต/กราฟิกข่าว/ซับฝังใหญ่ — cover v3 ใช้กันภาพพวกนี้ออกจากช่องคน
       imageWidth: metadata.width,
       imageHeight: metadata.height,
     };

@@ -3,5 +3,11 @@
     "deploymentEnabled": {
       "master": false
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/queue/worker",
+      "schedule": "* * * * *"
+    }
+  ]
 }

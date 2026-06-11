@@ -93,7 +93,8 @@ export async function POST(request) {
       const sharpLib = (await import('sharp')).default;
       faceBoxes = await Promise.all(imageBuffers.map(async (img, i) => {
         const fd = fdMap?.get?.(`v3_${i}`);
-        if (!fd?.hasFaces || !fd.faces?.length) return null;
+        const hasText = !!fd?.hasBigText; // ★ สกรีนช็อต/กราฟิกข่าว — ต้องส่งธงต่อแม้ไม่มีหน้า
+        if (!fd?.hasFaces || !fd.faces?.length) return hasText ? { hasText } : null;
         const meta = await sharpLib(img.buffer).metadata();
         const W = meta.width || 1, H = meta.height || 1;
         const largest = fd.faces.reduce((b, f) => (f.width * f.height > b.width * b.height ? f : b), fd.faces[0]);
@@ -101,9 +102,10 @@ export async function POST(request) {
           x1: +(largest.x / W).toFixed(2), y1: +(largest.y / H).toFixed(2),
           x2: +((largest.x + largest.width) / W).toFixed(2), y2: +((largest.y + largest.height) / H).toFixed(2),
           count: fd.faces.length,
+          ...(hasText ? { hasText } : {}),
         };
       }));
-      console.log(`[CoverV3] face boxes: ${faceBoxes.filter(Boolean).length}/${imageBuffers.length} images`);
+      console.log(`[CoverV3] face boxes: ${faceBoxes.filter(b => b && b.x1 !== undefined).length}/${imageBuffers.length} images | มีตัวหนังสือฝัง: ${faceBoxes.filter(b => b?.hasText).length}`);
     } catch (e) { console.log('[CoverV3] face detect failed (non-fatal):', e.message?.slice(0, 50)); }
 
     // ── Quality floor (หลักเดียวกับ v1) ──
@@ -139,8 +141,8 @@ export async function POST(request) {
     let coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec });
     console.log(`[CoverV3] ④ composed ${Math.round(coverBuffer.length / 1024)}KB`);
 
-    // ── ④ Self-QC 1 รอบ ──
-    const qc = await reviewCover({ coverBuffer, templateSpec, assignments });
+    // ── ④ Self-QC 1 รอบ (rev.8: ส่งภาพสำรอง+กรอบหน้าให้ QC สลับรูปได้ ไม่ใช่แค่แก้ครอป) ──
+    const qc = await reviewCover({ coverBuffer, templateSpec, assignments, imageBuffers, faceBoxes });
     let qcApplied = false;
     if (!qc.ok && qc.fixes.length > 0) {
       assignments = applyFixes(assignments, qc.fixes);

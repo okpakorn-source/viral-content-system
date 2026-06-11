@@ -43,6 +43,25 @@ async function getQueueStore() {
   return store;
 }
 
+// ★ Watchdog ในตัว (11 มิ.ย.): ลูกโซ่ worker ขาดได้ (trigger ตาย/server restart)
+// → เช็คทุก 60s ถ้ามี pending แต่ไม่มีงานวิ่ง ปลุก worker เองโดยไม่ต้องรอใคร poll
+// บน serverless interval จะถูก freeze (ไม่ได้ประโยชน์แต่ไม่เสียหาย) — เคสนั้นพึ่ง self-heal ใน status route แทน
+if (!globalThis.__queueWatchdog) {
+  globalThis.__queueWatchdog = setInterval(async () => {
+    try {
+      const store = await getQueueStore();
+      const all = await store.getAll();
+      const pending = all.filter(j => j.status === 'pending').length;
+      const processing = all.filter(j => j.status === 'processing').length;
+      if (pending > 0 && processing === 0) {
+        console.log(`[QueueService] 🚑 Watchdog: ${pending} pending แต่ไม่มี worker วิ่ง — ปลุกเอง`);
+        fetch(`http://localhost:${process.env.PORT || 3000}/api/queue/worker`, { method: 'POST' }).catch(() => {});
+      }
+    } catch { /* เงียบ — รอบหน้าค่อยลองใหม่ */ }
+  }, 60_000);
+  if (globalThis.__queueWatchdog.unref) globalThis.__queueWatchdog.unref();
+}
+
 /**
  * Adds a new job to the queue — ATOMIC with lock to prevent race conditions.
  * Two concurrent calls will be serialized so positions are always unique.

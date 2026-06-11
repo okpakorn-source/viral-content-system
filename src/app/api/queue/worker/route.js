@@ -8,6 +8,12 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 800; // ~13 min server limit (pipeline >12min + buffer)
 
+// ★ Vercel Cron (ทุก 1 นาที — vercel.json) เรียกด้วย GET → ใช้ logic เดียวกับ POST
+//   ชั้นกันสุดท้ายของเคส "สั่งงานผ่าน Discord แล้วปิดทุกอย่าง" บนโปรดักชัน
+export async function GET(req) {
+  return POST(req);
+}
+
 export async function POST(req) {
   try {
     // 1. Verify API Key — allow same-origin web triggers without auth
@@ -109,10 +115,22 @@ export async function POST(req) {
     }
     
     // 4. Trigger next batch asynchronously (if more pending jobs exist)
-    fetch(`${baseUrl}/api/queue/worker`, {
-      method: 'POST',
-      headers: { 'x-api-key': expectedKey }
-    }).catch(e => logger.error(`[Queue Worker] Failed to trigger next batch: ${e.message}`));
+    //    ★ retry 3 ครั้ง (11 มิ.ย.): fetch ตายครั้งเดียว = ลูกโซ่ขาด งานค้างเงียบ
+    //    (มี watchdog ใน queueService + self-heal ใน status route เป็นตาข่ายชั้นถัดไป)
+    const triggerNext = (attempt = 1) => {
+      fetch(`${baseUrl}/api/queue/worker`, {
+        method: 'POST',
+        headers: { 'x-api-key': expectedKey }
+      }).catch(e => {
+        if (attempt < 3) {
+          logger.info(`[Queue Worker] trigger next batch ล้ม (${e.message?.slice(0, 40)}) — retry ${attempt + 1}/3 ใน 5s`);
+          setTimeout(() => triggerNext(attempt + 1), 5000);
+        } else {
+          logger.error(`[Queue Worker] Failed to trigger next batch: ${e.message}`);
+        }
+      });
+    };
+    triggerNext();
     
     return NextResponse.json({ success: true, processed: jobs.length });
     
