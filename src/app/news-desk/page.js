@@ -631,16 +631,7 @@ export default function NewsDeskPage() {
                       style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'var(--bg-card)', color: 'var(--text-secondary)', fontSize: 13, border: '1px solid var(--border)' }}>
                       ✔️ หยิบไปใช้แล้ว</button>
                   )}
-                  {it.status === 'sent' && !it.performance && (
-                    <>
-                      <button onClick={() => act(it.id, 'viral')} title="โพสต์แล้วปัง — สอนระบบให้หาแนวนี้เพิ่ม"
-                        style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'rgba(251,146,60,0.18)', color: '#fb923c', fontSize: 13, fontWeight: 700 }}>
-                        🔥 ปังจริง</button>
-                      <button onClick={() => act(it.id, 'flop')} title="โพสต์แล้วแป้ก — สอนระบบให้เลี่ยงแนวนี้"
-                        style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'rgba(148,163,184,0.12)', color: 'var(--text-secondary)', fontSize: 13 }}>
-                        🧊 แป้ก</button>
-                    </>
-                  )}
+                  {/* ปุ่ม 🔥ปัง/🧊แป้ก ถอดออก (คำสั่งทีม 12 มิ.ย. — ไม่มีใครกด) — backend action 'viral'/'flop' ยังอยู่ เผื่อต่อสัญญาณอัตโนมัติในอนาคต */}
                 </div>
               </div>
             ))}
