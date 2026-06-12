@@ -474,6 +474,10 @@ export default function NewsDeskPage() {
                       {it.foreignCountry && <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(59,130,246,0.15)', color: 'var(--desk-blue)', fontWeight: 700 }}>🌏 ข่าวต่างประเทศ · {it.foreignCountry}</span>}
                       {it.sameStoryAs && <span title={it.sameStoryAs.title} style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(245,158,11,0.15)', color: 'var(--desk-amber)', fontWeight: 700 }}>⚠️ เรื่องนี้เคยส่งเจนแล้ว (ทำซ้ำได้ถ้าตั้งใจ)</span>}
                       <span style={{ color: 'var(--text-muted)' }}>{it.source}</span>
+                      {Array.isArray(it.altSources) && it.altSources.length > 0 && (
+                        <span title={it.altSources.map(a => a.source || a.url).join(' · ')} style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(34,197,94,0.12)', color: 'var(--desk-green, #16a34a)', fontWeight: 700 }}>
+                          🔗 อีก {it.altSources.length} แหล่งรายงานเรื่องเดียวกัน</span>
+                      )}
                       {it.pickedBy && <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(139,92,246,0.15)', color: 'var(--desk-purple)', fontWeight: 700 }}>{it.pickedByIcon || '🤖'} {it.pickedBy} เลือก</span>}
                       {it.status === 'claimed' && <span style={{ color: 'var(--desk-amber)', fontWeight: 700 }}>📌 {it.claimedBy} จองแล้ว</span>}
                       {it.status === 'sent' && (() => {

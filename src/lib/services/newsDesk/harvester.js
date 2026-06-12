@@ -258,6 +258,18 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
   // ทิ้งตัวพิษเกิน/เกลาไม่ได้
   classified = classified.filter(c => c.toxicity < 3 && c.fbRisk < 3 && c.toneable !== false);
 
+  // ── ★ กรองกระแสอดีต (ทีมสั่ง 12 มิ.ย. ค่ำ — เคสเจนนี่จ่ายหนี้แม่): "เหตุการณ์ครั้งเดียว" ที่เก่าแล้ว ≠ ข่าวน้ำดีไร้กาลเวลา ──
+  //   เลน evergreen ตั้งใจค้นย้อนทั้งปี → รับเฉพาะเรื่องแบบแผน (pattern) เท่านั้น
+  //   เลนอื่น: event ที่เผยแพร่เกิน 30 วัน = ขุดของเก่า ทิ้ง
+  stats.staleEvent = 0;
+  classified = classified.filter(c => {
+    if (c.storyNature !== 'event') return true;
+    const ageDays = c.publishedAt ? (Date.now() - new Date(c.publishedAt).getTime()) / 864e5 : null;
+    if (c.lane === 'evergreen') { stats.staleEvent++; console.log(`[Harvester] ⏳ ตัดกระแสอดีต (evergreen+event): ${String(c.title).slice(0, 55)}`); return false; }
+    if (ageDays !== null && ageDays > 30) { stats.staleEvent++; console.log(`[Harvester] ⏳ ตัดกระแสอดีต (event เก่า ${Math.round(ageDays)} วัน): ${String(c.title).slice(0, 55)}`); return false; }
+    return true;
+  });
+
   // ── ชั้น 2: กันซ้ำกับที่เพจเคยทำ (ยกเว้นเลน followup — ตั้งใจตามเรื่องคนเดิมอยู่แล้ว) ──
   const archiveTitles = await loadArchiveTitles();
   classified = classified.filter(c => {
@@ -287,36 +299,72 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
 
   // ★ ป้ายเตือนเรื่องซ้ำแบบไม่บล็อก (คำสั่งทีม 12 มิ.ย.): ใบใหม่เรื่องเดียวกับที่ "ส่งเจนไปแล้ว" ใน 72 ชม.
   //   → ติดป้าย sameStoryAs ให้ทีมเห็น (ยังหยิบทำซ้ำได้ตามนโยบาย — กระแสใหญ่บางทีตั้งใจเล่นซ้ำ)
+  // ★ + ควบเรื่องเดียวกันคนละแหล่ง (ทีมสั่ง 12 มิ.ย. ค่ำ): ใบใหม่ที่เรื่องตรงกับใบ "new" บนโต๊ะ
+  //   หรือตรงกันเองในรอบเดียวกัน → ไม่สร้างใบซ้ำ แต่เก็บเป็น "แหล่งเสริม" (altSources) บนใบหลัก
+  let toAdd = finalItems;
   try {
-    const existing = (await store.getAll()).filter(i =>
-      i.status === 'sent' && Date.now() - new Date(i.sentAt || i.harvestedAt || 0).getTime() < 72 * 3600e3);
+    const allExisting = await store.getAll();
     const normT = (s) => String(s || '').replace(/[\s"“”'‘’!|…]/g, '').slice(0, 60);
+    const sameStory = (a, b) => a.length >= 12 && b.length >= 12 && (a.includes(b.slice(0, 16)) || b.includes(a.slice(0, 16)));
+
+    const sentRecent = allExisting.filter(i =>
+      i.status === 'sent' && Date.now() - new Date(i.sentAt || i.harvestedAt || 0).getTime() < 72 * 3600e3);
+    const newOnDesk = allExisting.filter(i => i.status === 'new');
+
+    stats.mergedSources = 0;
+    const kept = [];
     for (const it of finalItems) {
       const nt = normT(it.title);
-      if (nt.length < 12) continue;
-      const hit = existing.find(ex => {
-        const ne = normT(ex.title);
-        return ne.length >= 12 && (ne.includes(nt.slice(0, 16)) || nt.includes(ne.slice(0, 16)));
-      });
-      if (hit) it.sameStoryAs = { id: hit.id, title: String(hit.title).slice(0, 60) };
-    }
-  } catch { /* เทียบไม่ได้ = ไม่มีป้าย ไม่พังการเก็บ */ }
+      // ป้ายเรื่องซ้ำกับที่ส่งเจนแล้ว (เดิม)
+      const hitSent = sentRecent.find(ex => sameStory(nt, normT(ex.title)));
+      if (hitSent) it.sameStoryAs = { id: hitSent.id, title: String(hitSent.title).slice(0, 60) };
 
-  if (finalItems.length > 0) await store.addMany(finalItems);
-  stats.added = finalItems.length;
+      // ควบกับใบ new บนโต๊ะ → อัพเดทใบเดิม ไม่สร้างใบใหม่
+      const hitDesk = nt.length >= 12 ? newOnDesk.find(ex => sameStory(nt, normT(ex.title))) : null;
+      if (hitDesk) {
+        try {
+          await store.update(hitDesk.id, (ex) => {
+            const alt = Array.isArray(ex.altSources) ? ex.altSources : [];
+            if (alt.length < 4 && !alt.some(a => a.url === it.url) && it.url !== ex.url) {
+              alt.push({ url: it.url, source: it.source || '', title: String(it.title).slice(0, 80) });
+            }
+            return { ...ex, altSources: alt };
+          });
+          stats.mergedSources++;
+          console.log(`[Harvester] 🔗 ควบแหล่งเสริมเข้าใบเดิม: ${String(it.title).slice(0, 50)}`);
+        } catch { /* ควบไม่ได้ = ปล่อยผ่านเป็นใบใหม่ตามเดิม */ kept.push(it); }
+        continue;
+      }
+      // ควบกันเองในรอบเดียวกัน (สองสำนักรายงานเรื่องเดียวกันพร้อมกัน)
+      const hitBatch = nt.length >= 12 ? kept.find(k => sameStory(nt, normT(k.title))) : null;
+      if (hitBatch) {
+        const alt = Array.isArray(hitBatch.altSources) ? hitBatch.altSources : [];
+        if (alt.length < 4 && it.url !== hitBatch.url) alt.push({ url: it.url, source: it.source || '', title: String(it.title).slice(0, 80) });
+        hitBatch.altSources = alt;
+        stats.mergedSources++;
+        continue;
+      }
+      kept.push(it);
+    }
+    toAdd = kept;
+    if (stats.mergedSources > 0) console.log(`[Harvester] 🔗 ควบเรื่องซ้ำคนละแหล่งรวม ${stats.mergedSources} ใบ`);
+  } catch { /* เทียบไม่ได้ = เก็บแบบเดิม ไม่พังการเก็บ */ }
+
+  if (toAdd.length > 0) await store.addMany(toAdd);
+  stats.added = toAdd.length;
 
   // ════════════════════════════════════════════════════
   // ★ AUTO-PILOT (ผู้ใช้ 11 มิ.ย.): บก.แต่ละคนเฝ้าโต๊ะ — ข่าวที่ บก.ประจำแนวให้ ≥8 = "ทำได้"
   //   ส่งเข้าเวิร์กโฟลว์เจนเองทันที ต่อคิวกัน คนมาหยิบผลงานที่แท็บ ✅ พร้อมใช้
   // ════════════════════════════════════════════════════
   try {
-    stats.autoPicked = await autoPilotPick(finalItems, store);
+    stats.autoPicked = await autoPilotPick(toAdd, store);
   } catch (e) { console.log('[AutoPilot] skip:', e.message?.slice(0, 50)); }
 
   // ★ Research Agent อัตโนมัติ: เจาะลึกตัวท็อป (judge ≥8) สูงสุด 3 ใบ/รอบ — การ์ดขึ้น feed แบบ "พร้อมเขียน"
   try {
     const { deepResearch } = await import('./researchAgent');
-    const tops = finalItems.filter(i => (i.judgeScore ?? 0) >= 8 && i.lane !== 'interview').slice(0, 3);
+    const tops = toAdd.filter(i => (i.judgeScore ?? 0) >= 8 && i.lane !== 'interview').slice(0, 3);
     for (const top of tops) {
       const r = await deepResearch(top).catch(e => ({ ok: false, reason: e.message }));
       if (r.ok) {
@@ -406,6 +454,11 @@ async function autoPilotPick(freshItems, store, opts = {}) {
     picks.sort((a, b) => (b.judgeScore || 0) - (a.judgeScore || 0));
     for (const pick of picks.slice(0, perRound)) {
       if (budget <= 0) break;
+      // ★ เช็คซ้ำอีกรอบ ณ วินาทีส่ง — กันสองสำนักเรื่องเดียวกันหลุดเข้ากลุ่มมาพร้อมกันแล้วถูกส่งคู่
+      if (_isDupStory(pick.title)) {
+        console.log(`[AutoPilot] ⏭️ ข้ามเรื่องซ้ำในรอบเดียวกัน: ${String(pick.title).slice(0, 50)}`);
+        continue;
+      }
       try {
         // ★ กฎเหล็ก (12 มิ.ย.): ส่งได้แค่ TEXT (บทถอดเสียงข่าวเดียว) หรือ URL — เหมือนคนทำแมนนวลเป๊ะ
         //   ห้ามส่งเนื้อสังเคราะห์หลายแหล่งเข้าไลน์ (เคยทำให้เนื้อหลายข่าวปนกัน)
@@ -433,6 +486,9 @@ async function autoPilotPick(freshItems, store, opts = {}) {
           await fb.add({ id: `${pick.id}_autosent_${Date.now()}`, newsId: pick.id, action: 'sent', title: pick.title, category: pick.category, lane: pick.lane, user: sp.name, at: new Date().toISOString() });
         } catch {}
         sent++; budget--;
+        // ★ กันส่งเรื่องเดียวกันคู่ในรอบเดียว: จดหัวข้อที่เพิ่งส่งเข้าลิสต์กันซ้ำทันที
+        const _justSent = _normT(pick.title);
+        if (_justSent.length >= 12) _sentKeys.push(_justSent);
         console.log(`[AutoPilot] ${sp.icon} ${sp.name} เลือก [${pick.judgeScore}] ${String(pick.title).slice(0, 50)} → คิว ${q.jobId.slice(0, 8)}`);
       } catch (e) {
         console.log('[AutoPilot] ส่งไม่สำเร็จ:', e.message?.slice(0, 60));
