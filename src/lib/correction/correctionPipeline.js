@@ -15,8 +15,8 @@ import { safeCorrect } from './safeCorrectionService';
 import { checkFactPreservation } from './factPreservationCheck';
 import { editorialPolish } from './editorialPolishService';
 import { semanticSanityCheck } from './semanticSanityCheck';
-import { fixFlaggedVersions } from './flagFixerService';
-import { viralPolish } from './viralPolishService';
+// ★ 12 มิ.ย.: FlagFixer + ViralPolish ถูกปลดออกตามคำสั่งทีม ("AI เพี้ยน — ย้อน workflow กลับแบบ 11 มิ.ย. หัวค่ำ")
+//   ไฟล์ flagFixerService.js / viralPolishService.js ยังอยู่ เผื่ออนาคต — ห้ามต่อกลับโดยไม่ผ่านทีม
 
 /**
  * รัน correction pipeline ทั้งหมดกับ versions array
@@ -43,14 +43,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
 
   // === ★ Layer 1.5: Flag Fixer (12 มิ.ย. 69) — จุดเดียวที่เห็นทุกเวอร์ชันพร้อมกัน ===
   //     จบซ้ำข้ามมุม / เลขหัวใจข่าวหายหมด / เปิดเรื่องต้องห้าม → AI แก้เฉพาะจุด (เคยตรวจเจอแต่ไม่มีใครแก้)
-  let workVersions = versions;
-  try {
-    const flagResult = await fixFlaggedVersions(versions, newsData);
-    workVersions = flagResult.versions;
-    if (flagResult.fixed > 0) console.log(`[Pipeline] L1.5 FlagFixer: แก้ ${flagResult.fixed} เวอร์ชัน`);
-  } catch (ffErr) {
-    console.warn(`[Pipeline] L1.5 FlagFixer skipped: ${ffErr.message}`);
-  }
+  const workVersions = versions; // FlagFixer ปลดออก 12 มิ.ย. (คำสั่งทีม — ย้อนกลับ workflow หัวค่ำ 11 มิ.ย.)
 
   const correctionTasks = workVersions.map(async (version, i) => {
     const vLabel = version._sourceLabel || version.style || `V${i + 1}`;
@@ -209,22 +202,12 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
     return { ...workVersions[i], _correctionApplied: false, _correctionError: r.reason?.message || 'Unknown' };
   });
 
-  // === Layer 6: ★ บก.ขัดเงาไวรัล (12 มิ.ย. — ลูปคุณภาพ) ===
-  // ชั้นซ่อมจบแล้ว → ขัดเสียง/ตัดน้ำ/จังหวะเฟซบุ๊กเทียบตัวอย่างไวรัลจริง (ล็อกข้อเท็จจริง+ตัวเลข)
-  let finalVersions = corrected;
-  try {
-    const polishResult = await viralPolish(corrected, newsData, breakdownData);
-    finalVersions = polishResult.versions;
-    if (polishResult.polished > 0) console.log(`[Pipeline] L6 ViralPolish: ✨ ขัด ${polishResult.polished}/${corrected.length} เวอร์ชัน`);
-  } catch (vpErr) {
-    console.warn(`[Pipeline] L6 ViralPolish skipped: ${vpErr.message}`);
-  }
-
+  // ViralPolish ปลดออก 12 มิ.ย. (คำสั่งทีม — ย้อนกลับ workflow หัวค่ำ 11 มิ.ย.)
   const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-  const appliedCount = finalVersions.filter(v => v._correctionApplied || v._viralPolished).length;
+  const appliedCount = corrected.filter(v => v._correctionApplied).length;
   console.log(`\n${'═'.repeat(50)}`);
   console.log(`🔧 CORRECTION COMPLETE — ${appliedCount}/${versions.length} corrected in ${totalTime}s`);
   console.log(`${'═'.repeat(50)}\n`);
 
-  return finalVersions;
+  return corrected;
 }
