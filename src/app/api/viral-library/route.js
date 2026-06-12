@@ -34,8 +34,9 @@ export async function GET(request) {
 }
 
 // POST — เพิ่มเนื้อหาไวรัลใหม่ (ทีละตัวหรือ batch)
-// ★ DNA v3 (12 มิ.ย. 69): มีด่านคัด 6 เกณฑ์ก่อนรับเข้า — หอสมุดต้องสะอาดตลอดกาล
-//   ไม่ผ่าน = ไม่บันทึก + แจ้งข่าย/วลีปัญหากลับให้ทีมเห็นทันที
+// ★ DNA v3.1 (12 มิ.ย. 69 — ทีมขอยืดหยุ่น): ด่านขาเข้าเป็น "ผู้ช่วยติดหมายเหตุ" ไม่ใช่ผู้พิพากษา
+//   บล็อกเฉพาะ harm (โจมตี/ทำให้คนเสียหาย/ชวนทัวร์ลง) — เทคนิคอ้อมๆ ของทีมรับเข้าพร้อม screenNote ⚠️
+//   ความเข้มจริงอยู่ขาออก: พร้อมท์ที่สร้างยังถูกคัด 6 เกณฑ์เต็มก่อนบันทึกเสมอ
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -48,13 +49,16 @@ export async function POST(request) {
       const text = String(c.content || '');
       if (text.length < 50) { rejected.push({ title: c.title || text.slice(0, 30), reason: 'เนื้อสั้นเกินไป' }); continue; }
       const screen = await screenContent(text, 'content');
-      if (!screen.pass) {
+      if (screen.hardFail) {
         rejected.push({
           title: c.title || text.slice(0, 30),
           reason: `${VERDICT_LABELS[screen.verdict] || screen.verdict}: ${screen.why}${screen.offending ? ` — "${screen.offending}"` : ''}`,
         });
         continue;
       }
+      let screenNote = 'ผ่านด่านคัด 6 เกณฑ์';
+      if (screen.needsReview) screenNote = 'ตรวจอัตโนมัติไม่สำเร็จ — ควรตรวจมือ';
+      else if (!screen.pass) screenNote = `⚠️ ข้อสังเกต (${VERDICT_LABELS[screen.verdict] || screen.verdict}): ${screen.why}`;
       accepted.push({
         id: randomUUID(),
         title: c.title || '',
@@ -66,7 +70,7 @@ export async function POST(request) {
         analysis: null,
         generatedPrompt: null,
         tags: c.tags || [],
-        screenNote: screen.needsReview ? 'ตรวจอัตโนมัติไม่สำเร็จ — ควรตรวจมือ' : 'ผ่านด่านคัด 6 เกณฑ์',
+        screenNote,
         createdAt: new Date().toISOString(),
       });
     }

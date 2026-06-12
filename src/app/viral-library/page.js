@@ -390,9 +390,9 @@ export default function ViralLibraryPage() {
             🧬 อัพเกรด DNA v3 — หอสมุดเรียนแต่ด้านดี (12 มิ.ย.)
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8, fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.7 }}>
-            <div>🛡️ <b style={{ color: 'var(--text-primary)' }}>ด่านคัดก่อนรับเข้า</b> — เนื้อหาที่ ยืดเยื้อ / กระชากอารมณ์ / ท็อกซิก-เหน็บสถานะ / ชี้นำคนอ่าน / อวยยืด / บังคับเศร้า จะถูกปัดตกพร้อมแจ้งเหตุผล+วลีที่เป็นปัญหา</div>
+            <div>🛡️ <b style={{ color: 'var(--text-primary)' }}>ด่านคัดแบบยืดหยุ่น</b> — บล็อกเฉพาะเนื้อหาที่โจมตี/ทำให้คนเสียหาย/ชวนทัวร์ลง ส่วนเทคนิคอ้อมๆ ที่ทีมคัดมารับเข้าได้ปกติ แค่ติดป้าย ⚠️ ข้อสังเกตไว้ให้เห็น</div>
             <div>🔬 <b style={{ color: 'var(--text-primary)' }}>วิเคราะห์เฉพาะด้านดี</b> — ถอดวิธีเขียนที่ทำให้คน "รัก" เรื่อง (กระชับ เข้าเรื่องทันที โทนบวกสม่ำเสมอ) เลิกถอดกลไกปั่นเอนเกจ/ดราม่าทั้งหมด</div>
-            <div>⚡ <b style={{ color: 'var(--text-primary)' }}>Prompt ที่สร้างถูกคัดซ้ำ</b> — พร้อมท์ทุกตัวต้องผ่านเกณฑ์เดียวกันก่อนบันทึก ตกแล้วระบบแก้เองอีก 1 รอบ ยังตกอีกจะแจ้งให้เปลี่ยนตัวอย่าง</div>
+            <div>⚡ <b style={{ color: 'var(--text-primary)' }}>Prompt ที่สร้างถูกคัดเข้มเต็ม 6 เกณฑ์</b> — ความเข้มจริงอยู่ขาออก: พร้อมท์ต้องสะอาดก่อนบันทึกเสมอ ตกแล้วระบบแก้เอง 1 รอบ ยังตกจะแจ้งให้เปลี่ยนตัวอย่าง</div>
             <div>🔁 <b style={{ color: 'var(--text-primary)' }}>ส่งต่อให้นักเขียนอัตโนมัติ</b> — เนื้อหาที่วิเคราะห์แล้วเข้าคลังตัวอย่างของระบบเขียนข่าวทันที ของสะอาดชุดเดียวใช้ทั้งระบบ</div>
           </div>
         </div>
@@ -522,7 +522,7 @@ export default function ViralLibraryPage() {
               📥 ป้อนเนื้อหาไวรัลเข้าหอสมุด
             </h4>
             <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 12px' }}>
-              วางเนื้อหาไวรัลที่เขียนดี — ระบบจะคัดด้วยเกณฑ์ 6 ข้อก่อนรับเข้า (ถ้าไม่ผ่านจะบอกเหตุผล) แล้ววิเคราะห์ด้านดีเพื่อสร้าง Prompt
+              วางเนื้อหาไวรัลที่ทีมคัดมา — รับเข้าหมดยกเว้นเนื้อหาที่โจมตี/ทำให้คนเสียหาย ถ้า AI มีข้อสังเกตจะติดป้าย ⚠️ ไว้บนการ์ด แล้ววิเคราะห์ด้านดีเพื่อสร้าง Prompt
             </p>
 
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10, marginBottom: 10 }}>
@@ -604,6 +604,12 @@ export default function ViralLibraryPage() {
                             fontSize: 9, padding: '2px 8px', borderRadius: 10,
                             background: 'rgba(34,197,94,0.12)', color: '#22c55e', fontWeight: 700,
                           }}>🔥 Viral {item.analysis.viral_score}/100</span>
+                        )}
+                        {item.screenNote?.startsWith('⚠️') && (
+                          <span title={item.screenNote} style={{
+                            fontSize: 9, padding: '2px 8px', borderRadius: 10,
+                            background: 'rgba(234,179,8,0.12)', color: '#eab308', fontWeight: 700,
+                          }}>{item.screenNote.length > 60 ? item.screenNote.slice(0, 60) + '…' : item.screenNote}</span>
                         )}
                         <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{item.content?.length || 0} ตัวอักษร</span>
                         <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>•</span>
