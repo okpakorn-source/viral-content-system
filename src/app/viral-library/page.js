@@ -70,8 +70,9 @@ export default function ViralLibraryPage() {
         }),
       });
       const data = await res.json();
+      let holdMs = 3000;
       if (data.success) {
-        setMsg(`✅ เพิ่มเนื้อหาแล้ว`);
+        setMsg(`✅ ผ่านด่านคัด — เพิ่มเข้าหอสมุดแล้ว`);
         setInputText('');
         setInputTitle('');
         setShowInput(false);
@@ -80,7 +81,11 @@ export default function ViralLibraryPage() {
         await loadItems();
       } else {
         setMsg('❌ ' + (data.error || 'บันทึกไม่สำเร็จ'));
+        // เหตุผลปัดตกจากด่านคัดยาว — ค้างไว้ให้อ่านทัน
+        if (data.errorType === 'SCREEN_REJECTED') holdMs = 10000;
       }
+      setTimeout(() => setMsg(''), holdMs);
+      return;
     } catch (err) {
       setMsg('❌ ' + err.message);
     }
@@ -376,8 +381,21 @@ export default function ViralLibraryPage() {
 
   return (
     <>
-      <Header title="📚 หอสมุดไวรัล" subtitle="ป้อนเนื้อหาไวรัล → AI วิเคราะห์ DNA → สร้าง Prompt อัตโนมัติ" />
+      <Header title="📚 หอสมุดไวรัล" subtitle="DNA v3 — ป้อนเนื้อหา → ด่านคัด 6 เกณฑ์ → วิเคราะห์ด้านดี → สร้าง Prompt อัตโนมัติ" />
       <div className="page-content">
+
+        {/* DNA v3 Upgrade Banner (12 มิ.ย. 69) */}
+        <div className="card" style={{ marginBottom: 16, border: '1px solid rgba(34,197,94,0.3)', background: 'linear-gradient(135deg, rgba(34,197,94,0.06), rgba(6,182,212,0.06))' }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: '#22c55e', marginBottom: 8 }}>
+            🧬 อัพเกรด DNA v3 — หอสมุดเรียนแต่ด้านดี (12 มิ.ย.)
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8, fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+            <div>🛡️ <b style={{ color: 'var(--text-primary)' }}>ด่านคัดก่อนรับเข้า</b> — เนื้อหาที่ ยืดเยื้อ / กระชากอารมณ์ / ท็อกซิก-เหน็บสถานะ / ชี้นำคนอ่าน / อวยยืด / บังคับเศร้า จะถูกปัดตกพร้อมแจ้งเหตุผล+วลีที่เป็นปัญหา</div>
+            <div>🔬 <b style={{ color: 'var(--text-primary)' }}>วิเคราะห์เฉพาะด้านดี</b> — ถอดวิธีเขียนที่ทำให้คน "รัก" เรื่อง (กระชับ เข้าเรื่องทันที โทนบวกสม่ำเสมอ) เลิกถอดกลไกปั่นเอนเกจ/ดราม่าทั้งหมด</div>
+            <div>⚡ <b style={{ color: 'var(--text-primary)' }}>Prompt ที่สร้างถูกคัดซ้ำ</b> — พร้อมท์ทุกตัวต้องผ่านเกณฑ์เดียวกันก่อนบันทึก ตกแล้วระบบแก้เองอีก 1 รอบ ยังตกอีกจะแจ้งให้เปลี่ยนตัวอย่าง</div>
+            <div>🔁 <b style={{ color: 'var(--text-primary)' }}>ส่งต่อให้นักเขียนอัตโนมัติ</b> — เนื้อหาที่วิเคราะห์แล้วเข้าคลังตัวอย่างของระบบเขียนข่าวทันที ของสะอาดชุดเดียวใช้ทั้งระบบ</div>
+          </div>
+        </div>
 
         {/* Toast */}
         {msg && (
@@ -504,7 +522,7 @@ export default function ViralLibraryPage() {
               📥 ป้อนเนื้อหาไวรัลเข้าหอสมุด
             </h4>
             <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 12px' }}>
-              วางเนื้อหาที่ได้แสนไลค์ AI จะวิเคราะห์ว่าทำไมมันไวรัล แล้วสร้าง Prompt เฉพาะทางให้
+              วางเนื้อหาไวรัลที่เขียนดี — ระบบจะคัดด้วยเกณฑ์ 6 ข้อก่อนรับเข้า (ถ้าไม่ผ่านจะบอกเหตุผล) แล้ววิเคราะห์ด้านดีเพื่อสร้าง Prompt
             </p>
 
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10, marginBottom: 10 }}>

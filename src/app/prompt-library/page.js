@@ -71,8 +71,20 @@ export default function PromptLibraryPage() {
 
   return (
     <>
-      <Header title="🏛️ หอสมุด Prompt" subtitle={`คลัง Prompt อัจฉริยะ ${stats.total || 0} รายการ — สร้างจาก AI วิเคราะห์คอนเทนต์ไวรัลจริง`} />
+      <Header title="🏛️ หอสมุด Prompt" subtitle={`DNA v3 — ${stats.total || 0} รายการ ทุกตัวผ่านด่านคัด 6 เกณฑ์ก่อนเข้าคลัง`} />
       <div className="page-content">
+
+        {/* DNA v3 Upgrade Banner (12 มิ.ย. 69) */}
+        <div className="card" style={{ marginBottom: 16, border: '1px solid rgba(34,197,94,0.3)', background: 'linear-gradient(135deg, rgba(34,197,94,0.06), rgba(6,182,212,0.06))' }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: '#22c55e', marginBottom: 8 }}>
+            🧬 อัพเกรด DNA v3 — มาตรฐานพร้อมท์ใหม่ (12 มิ.ย.)
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8, fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+            <div>📐 <b style={{ color: 'var(--text-primary)' }}>โครงตายตัว</b> — แอดมินเพจเล่าให้แฟนเพจฟัง / 3 ย่อหน้า / เข้าเรื่องตั้งแต่ประโยคแรก / จบที่ใจความไม่อวยยืด</div>
+            <div>🚫 <b style={{ color: 'var(--text-primary)' }}>ข้อห้ามบังคับทุกตัว</b> — ห้ามชี้นำคนอ่าน ห้ามเหน็บสถานะ ห้ามกระชากอารมณ์ ห้ามเกริ่นยาว ห้ามบังคับเศร้า/ลุ้นเกิน</div>
+            <div>🛡️ <b style={{ color: 'var(--text-primary)' }}>คัดอัตโนมัติก่อนบันทึก</b> — พร้อมท์ที่ AI สร้างต้องผ่านเกณฑ์ 6 ข้อเดียวกับหอสมุดไวรัล ของเก่ายุคปั่นเอนเกจถูกล้างหมดแล้ว</div>
+          </div>
+        </div>
 
         {/* Category Filter */}
         <div style={{
