@@ -308,6 +308,7 @@ ${text ? '=== ตัวอย่างเนื้อหาต้นฉบับ
 
       let promptData = null;
       let lastScreen = null;
+      let lastCandidate = null;
       for (let attempt = 1; attempt <= 2; attempt++) {
         const retryNote = attempt === 2 && lastScreen
           ? `\n⚠️ รอบที่แล้วพร้อมท์ถูกปัดตก (${lastScreen.verdict}: ${lastScreen.why}) — แก้จุดนี้ให้ขาด\n`
@@ -319,12 +320,13 @@ ${text ? '=== ตัวอย่างเนื้อหาต้นฉบับ
           const raw = typeof result === 'string' ? result : JSON.stringify(result);
           candidate = JSON.parse(raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
         } catch {
-          candidate = typeof result === 'object' ? result : { prompt_name: 'ไม่สามารถสร้างได้', raw: String(result).slice(0, 500) };
+          candidate = typeof result === 'object' ? result : null;
         }
+        if (candidate && candidate.prompt_text) lastCandidate = candidate;
 
         // ด่านคัดพร้อมท์: prompt_text ต้องไม่สอนผิดเกณฑ์ 6 ข้อ
-        const screen = await screenPrompt(String(candidate.prompt_text || ''), 'prompt');
-        if (screen.pass) {
+        const screen = await screenPrompt(String(candidate?.prompt_text || ''), 'prompt');
+        if (candidate?.prompt_text && screen.pass) {
           promptData = candidate;
           if (screen.needsReview) promptData.screen_note = 'ตรวจอัตโนมัติไม่สำเร็จ — ควรตรวจมือ';
           break;
@@ -333,11 +335,20 @@ ${text ? '=== ตัวอย่างเนื้อหาต้นฉบับ
         console.warn(`[Generate-Prompt] รอบ ${attempt} ตกด่านคัด: ${screen.verdict} — ${screen.why}`);
       }
 
+      // ★ v3.4 (คำสั่งทีม 12 มิ.ย. ค่ำ): เนื้อหาที่ทีมคัดมือมาทุกตัวต้องได้พร้อมท์ — ห้ามตัดทิ้ง
+      //   ตกเกณฑ์เชิงศิลปะ (ท็อกซิกอ้อม/เลี่ยงบาลี ฯลฯ ที่ไม่ใช่ harm) → รับเข้าพร้อมหมายเหตุ ⚠️ จับคู่ใช้งานได้ปกติ
+      //   ทิ้งจริงเฉพาะ harm (สอนให้โจมตี/ประจาน) หรือสร้างไม่ออกเลย
+      if (!promptData && lastCandidate && !lastScreen?.hardFail) {
+        promptData = lastCandidate;
+        promptData.screen_note = `⚠️ ติดข้อสังเกต (${SCREEN_LABELS[lastScreen?.verdict] || lastScreen?.verdict}): ${(lastScreen?.why || '').slice(0, 150)} — รับเข้าตามนโยบายทีม (เนื้อหาคัดมือ)`;
+        console.warn(`[Generate-Prompt] รับเข้าแบบติดหมายเหตุ: ${lastScreen?.verdict}`);
+      }
+
       if (!promptData) {
         logPipeline({ step: 'generate-prompt', status: 'failed', duration: Date.now() - _vaStart, error: 'ตกด่านคัด 2 รอบ: ' + (lastScreen?.verdict || '') }).catch(() => {});
         return NextResponse.json({
           success: false,
-          error: `พร้อมท์ที่สร้างไม่ผ่านมาตรฐานเพจ 2 รอบ (${SCREEN_LABELS[lastScreen?.verdict] || lastScreen?.verdict}: ${lastScreen?.why || ''}) — ลองวิเคราะห์เนื้อหาต้นทางใหม่หรือเปลี่ยนตัวอย่าง`,
+          error: `พร้อมท์ที่สร้างเข้าข่ายอันตราย (${SCREEN_LABELS[lastScreen?.verdict] || lastScreen?.verdict}: ${lastScreen?.why || ''}) — ตรวจเนื้อหาต้นทางอีกครั้ง`,
           errorType: 'PROMPT_SCREEN_REJECTED',
         }, { status: 422 });
       }
