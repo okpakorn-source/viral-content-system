@@ -80,14 +80,21 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
     const cutoff = new Date(Date.now() - 15 * 60 * 1000);
     for (const j of allJobs) {
       if (j.status === 'processing' && new Date(j.startedAt || j.createdAt) < cutoff) {
-        await store.update(j.id, (existing) => ({
-          ...existing,
-          status: 'failed',
-          error: `Stale job — stuck for >15 minutes, auto-reset by enqueue cleanup`,
-          completedAt: new Date().toISOString(),
-        }));
-        j.status = 'failed'; // Update in-memory too
-        console.log(`[QueueService] 🧹 Auto-cleaned stale job: ${j.id.slice(0, 8)}`);
+        // ★ 12 มิ.ย.: คืนเข้าคิวลองใหม่ 1 ครั้งก่อนตีตาย (สอดคล้อง cleanupStaleJobs)
+        if (!j.retriedOnce) {
+          await store.update(j.id, (existing) => ({ ...existing, status: 'pending', startedAt: null, retriedOnce: true }));
+          j.status = 'pending';
+          console.log(`[QueueService] ♻️ งานค้าง ${j.id.slice(0, 8)} คืนเข้าคิวลองใหม่ (enqueue cleanup)`);
+        } else {
+          await store.update(j.id, (existing) => ({
+            ...existing,
+            status: 'failed',
+            error: `Stale job — stuck >15 min twice, marked failed`,
+            completedAt: new Date().toISOString(),
+          }));
+          j.status = 'failed'; // Update in-memory too
+          console.log(`[QueueService] 🧹 งานค้างซ้ำรอบสอง ${j.id.slice(0, 8)} — ตีตาย (enqueue cleanup)`);
+        }
       }
     }
     
@@ -225,22 +232,30 @@ export async function getNextPendingJobs(limit = 1) {
     
     const availableSlots = Math.min(limit, maxConcurrency - processingCount);
 
-    // ★ งานคลิป Meta (FB Reel/IG) ใช้ yt-dlp.exe — รันได้เฉพาะเครื่องทีม (Windows)
-    //   บน Vercel (Linux) ให้ "ข้าม" งานพวกนี้ไว้เป็น pending รอเครื่องทีมคว้า (เครื่องทีม poll คิวร่วมกันอยู่แล้ว)
+    // ★ แบ่งงานตามเครื่องแบบไม่ทับซ้อน (12 มิ.ย. 69 — คำสั่งทีม: อุดช่องโหว่ ไม่ให้ทำงานทับซ้อน)
+    //   งานคลิป (yt-dlp.exe) → เครื่องทีม Windows เท่านั้น (เหมือนเดิม — Vercel รัน exe ไม่ได้)
+    //   งานข่าว/อื่นๆ → Vercel เท่านั้น (โค้ด deploy สดเสมอ — ตัดปัญหาเครื่องทีมโค้ดค้าง/hot-reload/เครื่องดับ
+    //   ที่เกิดจริง 3 รอบเมื่อ 12 มิ.ย. และตัด race สองเครื่องคว้างานเดียวกันไปในตัว)
+    //   ทางหนีไฟ: ตั้ง env QUEUE_LOCAL_NEWS=1 บนเครื่องทีม = ยอมให้เครื่องทีมคว้างานข่าวชั่วคราว (กรณี Vercel ล่ม)
     const isMetaVideoJob = (j) => {
       if (j.payload?.jobType === 'mineclip') return true; // ขุดนาทีทองใช้ yt-dlp — เครื่องทีมเท่านั้น
       const u = String(j.payload?.input || j.payload?.url || '');
       return /facebook\.com\/(reel|watch|share\/[rv]\/|video)|fb\.watch\/|instagram\.com\/(reel|reels|tv)\//i.test(u);
     };
-    const canRunHere = (j) => process.platform === 'win32' || !isMetaVideoJob(j);
+    const isLocalMachine = process.platform === 'win32';
+    const localNewsOverride = process.env.QUEUE_LOCAL_NEWS === '1';
+    const canRunHere = (j) => {
+      if (isMetaVideoJob(j)) return isLocalMachine;                 // คลิป = เครื่องทีมเท่านั้น
+      return !isLocalMachine || localNewsOverride;                  // ข่าว/อื่นๆ = Vercel เท่านั้น (เว้นเปิดทางหนีไฟ)
+    };
 
     const pendingJobs = allJobs
       .filter(j => j.status === 'pending' && canRunHere(j))
       .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
       .slice(0, availableSlots);
 
-    const skippedMeta = allJobs.filter(j => j.status === 'pending' && !canRunHere(j)).length;
-    if (skippedMeta > 0) console.log(`[QueueService] ⏭️ ข้ามงานคลิป Meta ${skippedMeta} งาน (รอเครื่องทีม Windows)`);
+    const skipped = allJobs.filter(j => j.status === 'pending' && !canRunHere(j)).length;
+    if (skipped > 0) console.log(`[QueueService] ⏭️ ข้าม ${skipped} งานที่เป็นของอีกเครื่อง (คลิป→เครื่องทีม | ข่าว→Vercel)`);
     
     // Immediately mark as 'processing' inside the lock to prevent double-pick
     for (const job of pendingJobs) {
@@ -271,17 +286,30 @@ export async function cleanupStaleJobs(maxAgeMinutes = 10) {
   let cleaned = 0;
   for (const job of allJobs) {
     if (job.status === 'processing' && new Date(job.startedAt || job.createdAt) < cutoff) {
-      await store.update(job.id, (existing) => ({
-        ...existing,
-        status: 'failed',
-        error: `Stale job — stuck for >${maxAgeMinutes} minutes, reset by cleanup`,
-        completedAt: new Date().toISOString(),
-      }));
-      cleaned++;
-      console.log(`[QueueService] 🧹 Cleaned stale job: ${job.id}`);
+      // ★ 12 มิ.ย.: งานค้าง (เครื่องดับ/deploy คร่อม) ให้ "คืนเข้าคิวลองใหม่ 1 ครั้ง" ก่อน — เดิมตีตายทันที
+      //   (12 มิ.ย. ต้องกู้มือ 2 รอบ) ถ้าค้างซ้ำรอบสองค่อยตีตายจริง (กันงานพังวนลูปไม่จบ)
+      if (!job.retriedOnce) {
+        await store.update(job.id, (existing) => ({
+          ...existing,
+          status: 'pending',
+          startedAt: null,
+          retriedOnce: true,
+        }));
+        cleaned++;
+        console.log(`[QueueService] ♻️ งานค้าง ${job.id.slice(0, 8)} คืนเข้าคิวลองใหม่ (ครั้งเดียว)`);
+      } else {
+        await store.update(job.id, (existing) => ({
+          ...existing,
+          status: 'failed',
+          error: `Stale job — stuck >${maxAgeMinutes} min twice, marked failed`,
+          completedAt: new Date().toISOString(),
+        }));
+        cleaned++;
+        console.log(`[QueueService] 🧹 งานค้างซ้ำรอบสอง ${job.id.slice(0, 8)} — ตีตาย`);
+      }
     }
   }
-  
+
   return cleaned;
 }
 

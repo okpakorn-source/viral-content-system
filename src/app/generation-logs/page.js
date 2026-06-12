@@ -39,7 +39,8 @@ function editorOf(c) {
   const uid = String(c.userId || '');
   if (uid.startsWith('ai-')) return `🤖 ${uid.slice(3)}`;
   if (uid.startsWith('desk-')) return `👤 ${uid.slice(5)}`;
-  if (c.sourceType === 'discord') return '💬 Discord';
+  // งานจากบอท Discord — userId เป็น discord-<เลขผู้ใช้> (เดิมหลุดไปขึ้น "เว็บ/ระบบ")
+  if (uid.startsWith('discord-') || c.sourceType === 'discord') return '💬 Discord';
   return '🌐 เว็บ/ระบบ';
 }
 
