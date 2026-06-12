@@ -69,3 +69,11 @@ quality-report.json
 rerun-plan.json
 rerun-results.json
 deleted-cases-backup-*.json
+
+# Local analysis artifacts (12 มิ.ย. screening)
+postrollback-cases.json
+prompt-classification.json
+prompt-final-verdict.json
+prompt-manipulate-screen.json
+prompt-toxic-screen.json
+viral-library-screen.json

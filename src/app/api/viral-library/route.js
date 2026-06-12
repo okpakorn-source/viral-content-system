@@ -34,32 +34,61 @@ export async function GET(request) {
 }
 
 // POST — เพิ่มเนื้อหาไวรัลใหม่ (ทีละตัวหรือ batch)
+// ★ DNA v3 (12 มิ.ย. 69): มีด่านคัด 6 เกณฑ์ก่อนรับเข้า — หอสมุดต้องสะอาดตลอดกาล
+//   ไม่ผ่าน = ไม่บันทึก + แจ้งข่าย/วลีปัญหากลับให้ทีมเห็นทันที
 export async function POST(request) {
   try {
     const body = await request.json();
     const contents = Array.isArray(body.contents) ? body.contents : [body];
+    const { screenContent, VERDICT_LABELS } = await import('@/lib/services/contentScreen');
 
-    const newItems = contents.map(c => ({
-      id: randomUUID(),
-      title: c.title || '',
-      content: c.content || '',
-      source: c.source || '',
-      platform: c.platform || 'other',
-      engagement: c.engagement || {},
-      status: 'raw',
-      analysis: null,
-      generatedPrompt: null,
-      tags: c.tags || [],
-      createdAt: new Date().toISOString(),
-    }));
+    const accepted = [];
+    const rejected = [];
+    for (const c of contents) {
+      const text = String(c.content || '');
+      if (text.length < 50) { rejected.push({ title: c.title || text.slice(0, 30), reason: 'เนื้อสั้นเกินไป' }); continue; }
+      const screen = await screenContent(text, 'content');
+      if (!screen.pass) {
+        rejected.push({
+          title: c.title || text.slice(0, 30),
+          reason: `${VERDICT_LABELS[screen.verdict] || screen.verdict}: ${screen.why}${screen.offending ? ` — "${screen.offending}"` : ''}`,
+        });
+        continue;
+      }
+      accepted.push({
+        id: randomUUID(),
+        title: c.title || '',
+        content: text,
+        source: c.source || '',
+        platform: c.platform || 'other',
+        engagement: c.engagement || {},
+        status: 'raw',
+        analysis: null,
+        generatedPrompt: null,
+        tags: c.tags || [],
+        screenNote: screen.needsReview ? 'ตรวจอัตโนมัติไม่สำเร็จ — ควรตรวจมือ' : 'ผ่านด่านคัด 6 เกณฑ์',
+        createdAt: new Date().toISOString(),
+      });
+    }
 
-    await store.addMany(newItems);
+    if (accepted.length > 0) await store.addMany(accepted);
     const total = await store.count();
+
+    if (accepted.length === 0) {
+      return NextResponse.json({
+        success: false,
+        error: `❌ ไม่ผ่านด่านคัดทั้งหมด: ${rejected.map(r => r.reason).join(' | ').slice(0, 300)}`,
+        errorType: 'SCREEN_REJECTED',
+        rejected,
+      }, { status: 422 });
+    }
 
     return NextResponse.json({
       success: true,
-      added: newItems.length,
-      ids: newItems.map(i => i.id),
+      added: accepted.length,
+      ids: accepted.map(i => i.id),
+      rejected,
+      message: rejected.length > 0 ? `รับ ${accepted.length} / ปัดตก ${rejected.length}: ${rejected.map(r => r.reason).join(' | ').slice(0, 200)}` : undefined,
       total,
     });
   } catch (error) {
@@ -86,6 +115,27 @@ export async function PUT(request) {
       if (body.tags) existing.tags = body.tags;
       return existing;
     });
+
+    // ★ DNA v3: เนื้อที่วิเคราะห์แล้ว (ผ่านด่านคัดตอนเข้ามาแล้ว) → sync เข้า viral_examples ด้วย
+    //   เพื่อให้ "few-shot ของนักเขียน" (viralFewshot) ได้ตัวอย่างสะอาดชุดเดียวกัน — หอสมุดเดียว สองระบบใช้ร่วม
+    if (body.analysis && item?.content) {
+      try {
+        const { getSupabase } = await import('@/lib/supabase');
+        const sb = getSupabase();
+        if (sb) {
+          await sb.from('viral_examples').insert({
+            category: body.analysis.dna_type || body.analysis.category || 'อื่นๆ',
+            title: item.title || String(item.content).slice(0, 80),
+            content: item.content,
+            source_url: item.source || null,
+            writing_notes: body.analysis.why_viral || null,
+          });
+          console.log('[Viral-Library] ✅ sync เข้า viral_examples (few-shot นักเขียน)');
+        }
+      } catch (syncErr) {
+        console.warn('[Viral-Library] sync viral_examples ล้ม (ไม่กระทบหลัก):', syncErr.message?.slice(0, 50));
+      }
+    }
 
     return NextResponse.json({ success: true, item });
   } catch (error) {
