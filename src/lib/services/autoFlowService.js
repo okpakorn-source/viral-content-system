@@ -357,7 +357,13 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
       return withTimeout((async () => {
         const focusAngle = `${angleObj.angle_name}: ${angleObj.description}`;
         // มุมเล่า + สไตล์เปิดเรื่องเฉพาะของเวอร์ชันนี้ (ส่งให้ตัวเขียนเท่านั้น — research ใช้ focusAngle เพียวๆ)
-        const writeAngle = `${focusAngle}\nสไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${OPENING_STYLES[index % OPENING_STYLES.length]}`;
+        // ★ DNA v3.3: พร้อมท์ที่จับคู่แน่น (score ≥60) มีเทคนิคเปิดจาก DNA จริง — ให้ชนะสูตรหมุนเวียนกลาง
+        const _ap = anglePrompts[index];
+        const _promptHook = (_ap && Number(_ap._matchScore) >= 60 && _ap.hookStyle) ? String(_ap.hookStyle) : null;
+        const _openingStyle = _promptHook
+          ? `${_promptHook} — ตามเทคนิคเปิดของพร้อมท์ที่จับคู่ ห้ามขึ้นต้นด้วยวันที่`
+          : OPENING_STYLES[index % OPENING_STYLES.length];
+        const writeAngle = `${focusAngle}\nสไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${_openingStyle}`;
 
         // 1. Research for this angle
         const resResult = await performResearch({
