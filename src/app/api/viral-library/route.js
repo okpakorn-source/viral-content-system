@@ -1,3 +1,4 @@
+export const maxDuration = 120; // POST มีด่านคัด AI — default 15s บน Vercel ไม่พอ
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { createStore } from '@/lib/persistStore';
@@ -45,10 +46,16 @@ export async function POST(request) {
 
     const accepted = [];
     const rejected = [];
-    for (const c of contents) {
+    // คัดขนานกัน — batch หลายชิ้นไม่ต้องรอทีละตัว (กัน timeout)
+    const screens = await Promise.all(contents.map(c => {
+      const text = String(c.content || '');
+      return text.length < 50 ? Promise.resolve(null) : screenContent(text, 'content');
+    }));
+    for (let ci = 0; ci < contents.length; ci++) {
+      const c = contents[ci];
       const text = String(c.content || '');
       if (text.length < 50) { rejected.push({ title: c.title || text.slice(0, 30), reason: 'เนื้อสั้นเกินไป' }); continue; }
-      const screen = await screenContent(text, 'content');
+      const screen = screens[ci];
       if (screen.hardFail) {
         rejected.push({
           title: c.title || text.slice(0, 30),
