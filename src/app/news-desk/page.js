@@ -83,6 +83,8 @@ export default function NewsDeskPage() {
       const d = await res.json();
       if (d.success) { setItems(d.items); setMixToday(d.mixToday || {}); setSentToday(d.sentToday || 0); setGovernor(d.governor || null); setChiefBrief(d.chiefBrief || null);
         setEditorStats(d.editorStats || {}); setQueueDepth(d.queueDepth || { pending: 0, processing: 0 }); setReadyCount(d.readyCount || 0);
+        // ★ สวิตช์ Auto-Pilot โชว์ค่าจริงจากระบบ (เดิม hardcode เปิด — ทีมเห็นว่า "เปิดเอง" ทุกครั้งที่เข้าหน้า)
+        if (typeof d.autopilot === 'boolean') setAutopilot(d.autopilot);
         // ★ ติดตามสถานะงานเขียนของการ์ดที่ส่งทำใน 2 ชม.ล่าสุด
         const recent = (d.items || []).filter(i => i.status === 'sent' && i.jobId && Date.now() - new Date(i.sentAt || 0).getTime() < 2 * 3600e3).slice(0, 8);
         for (const it of recent) {
@@ -281,10 +283,24 @@ export default function NewsDeskPage() {
   const toggleAutopilot = async () => {
     const next = !autopilot;
     setAutopilot(next);
-    await fetch('/api/news-desk', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'autopilot', enabled: next }),
-    }).catch(() => {});
+    try {
+      const res = await fetch('/api/news-desk', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'autopilot', enabled: next }),
+      });
+      const d = await res.json();
+      if (!d.success) {
+        setAutopilot(!next); // บันทึกไม่สำเร็จ — คืนสวิตช์ตามจริง อย่าหลอกทีม
+        setMsg('❌ บันทึกสวิตช์ไม่สำเร็จ ลองใหม่อีกครั้ง');
+        setTimeout(() => setMsg(''), 4000);
+        return;
+      }
+    } catch {
+      setAutopilot(!next);
+      setMsg('❌ บันทึกสวิตช์ไม่สำเร็จ ลองใหม่อีกครั้ง');
+      setTimeout(() => setMsg(''), 4000);
+      return;
+    }
     setMsg(next ? '🤖 Auto-Pilot เปิด — บก.จะเลือกข่าวคะแนน 8+ ส่งเจนเองทุกรอบเก็บข่าว' : '⏸️ Auto-Pilot ปิด — บก.แนะนำอย่างเดียว ทีมกดส่งเอง');
   };
 

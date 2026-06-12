@@ -341,7 +341,12 @@ async function getAutopilotConfig() {
     const all = await settings.getAll();
     const cfg = all.find(s => s.id === 'autopilot');
     return cfg ? { ...defaults, ...cfg } : defaults;
-  } catch { return defaults; }
+  } catch {
+    // ★ fail-closed (คำสั่งทีม 12 มิ.ย. ค่ำ): อ่านสวิตช์ไม่ได้ = ถือว่าปิด
+    //   เดิม fail-open เป็น enabled:true → DB สะดุดชั่วคราวทีไร Auto-Pilot "เปิดเอง" ทั้งที่ทีมสั่งปิด
+    console.warn('[AutoPilot] ⚠️ อ่านสวิตช์ไม่ได้ — ถือว่าปิด (fail-closed) รอบนี้');
+    return { ...defaults, enabled: false };
+  }
 }
 
 async function autoPilotPick(freshItems, store, opts = {}) {
@@ -361,11 +366,34 @@ async function autoPilotPick(freshItems, store, opts = {}) {
   }
   let budget = cfg.dailyCap - autoSentToday;
 
+  // ★ กันส่งเรื่องซ้ำเฉพาะโหมดออโต้ (คำสั่งทีม 12 มิ.ย. ค่ำ — เปลืองโทเคน): เทียบหัวข้อกับที่ "ส่งเจนไปแล้ว" ใน 7 วัน
+  //   คนกดส่งเองซ้ำได้เสมอ (คนเลือกเวอร์ชัน/แตกประเด็นเองอยู่แล้ว) — ด่านนี้คุมเฉพาะ บก.AI
+  const _normT = (s) => String(s || '').replace(/[\s"“”'‘’!|…]/g, '').slice(0, 60);
+  const _sentKeys = allItems
+    .filter(i => i.status === 'sent' && Date.now() - new Date(i.sentAt || 0).getTime() < 7 * 864e5)
+    .map(i => _normT(i.title)).filter(t => t.length >= 12);
+  const _isDupStory = (title) => {
+    const nt = _normT(title);
+    if (nt.length < 12) return false;
+    return _sentKeys.some(ne => ne.includes(nt.slice(0, 16)) || nt.includes(ne.slice(0, 16)));
+  };
+
   // จัดกลุ่มผู้สมัครตาม บก. — เอาเฉพาะที่ บก.ให้คะแนน "ทำได้" (judge ≥ minScore) และสะอาด
   const byEditor = new Map();
   for (const it of freshItems) {
     if ((it.judgeScore ?? 0) < cfg.minScore || it.status !== 'new') continue;
     if ((it.toxicity || 0) >= 2 || (it.fbRisk || 0) >= 2) continue;
+    // ★ เรื่องซ้ำ (ป้าย sameStoryAs หรือหัวข้อพ้องกับที่ส่งแล้วใน 7 วัน) → ออโต้ข้าม
+    if (it.sameStoryAs || _isDupStory(it.title)) {
+      console.log(`[AutoPilot] ⏭️ ข้ามเรื่องซ้ำ: ${String(it.title).slice(0, 50)}`);
+      continue;
+    }
+    // ★ ข่าวต่างประเทศ: ออโต้หยิบเฉพาะที่ บก.มั่นใจสูงสุด (9+) = บุคคล/เรื่องที่นิยมในไทยจริง
+    //   ต่างประเทศจ๋า (คนไทยเอี่ยวนิดเดียว/บุคคลไม่คุ้นหูไทย/แหล่งข่าวน้อย) ปล่อยให้คนตัดสินเองที่หน้าโต๊ะ
+    if (it.foreignCountry && (it.judgeScore ?? 0) < 9) {
+      console.log(`[AutoPilot] ⏭️ ข้ามต่างประเทศ (judge ${it.judgeScore} < 9): ${String(it.title).slice(0, 50)}`);
+      continue;
+    }
     const sp = specialistForLane(it.lane);
     if (opts.onlyEditor && sp.name !== opts.onlyEditor) continue; // โหมดสั่ง บก.รายฝ่าย
     if (!byEditor.has(sp.name)) byEditor.set(sp.name, { sp, picks: [] });

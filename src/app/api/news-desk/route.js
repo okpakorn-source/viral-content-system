@@ -50,11 +50,15 @@ export async function GET(request) {
     // fullText (บทถอดเสียงคลิป) ยาว — ไม่ส่งให้หน้า feed
     const lightItems = governed.slice(0, limit).map(({ fullText, ...rest }) => rest);
 
-    // ★ brief ล่าสุดจาก บก.ใหญ่ AI
+    // ★ brief ล่าสุดจาก บก.ใหญ่ AI + สถานะสวิตช์ Auto-Pilot จริง (UI ต้องโชว์ตามที่ทีมตั้ง ไม่ใช่ค่า default)
     let chiefBrief = null;
+    let autopilotEnabled = null;
     try {
       const settings = createStore('desk-settings');
-      chiefBrief = (await settings.getAll()).find(s => s.id === 'chief_brief') || null;
+      const allS = await settings.getAll();
+      chiefBrief = allS.find(s => s.id === 'chief_brief') || null;
+      const ap = allS.find(s => s.id === 'autopilot');
+      autopilotEnabled = ap ? !!ap.enabled : true;
     } catch {}
 
     // ★ สถิติ: บก.ไหนส่งไปเท่าไหร่วันนี้ + คิวตอนนี้ + ชั้นวางพร้อมใช้
@@ -73,7 +77,7 @@ export async function GET(request) {
     } catch {}
     const readyCount = (await store.getAll()).filter(i => i.status === 'sent' && !i.used).length;
 
-    return NextResponse.json({ success: true, items: lightItems, total: items.length, mixToday: mix, sentToday: sentToday.length, governor, chiefBrief, editorStats, queueDepth, readyCount });
+    return NextResponse.json({ success: true, items: lightItems, total: items.length, mixToday: mix, sentToday: sentToday.length, governor, chiefBrief, autopilot: autopilotEnabled, editorStats, queueDepth, readyCount });
   } catch (error) {
     console.error('[NewsDesk API]', error.message);
     return NextResponse.json({ success: false, error: error.message, errorType: 'DESK_FEED_ERROR' }, { status: 500 });
