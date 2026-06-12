@@ -16,6 +16,7 @@ import { checkFactPreservation } from './factPreservationCheck';
 import { editorialPolish } from './editorialPolishService';
 import { semanticSanityCheck } from './semanticSanityCheck';
 import { fixFlaggedVersions } from './flagFixerService';
+import { viralPolish } from './viralPolishService';
 
 /**
  * รัน correction pipeline ทั้งหมดกับ versions array
@@ -208,11 +209,22 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
     return { ...workVersions[i], _correctionApplied: false, _correctionError: r.reason?.message || 'Unknown' };
   });
 
+  // === Layer 6: ★ บก.ขัดเงาไวรัล (12 มิ.ย. — ลูปคุณภาพ) ===
+  // ชั้นซ่อมจบแล้ว → ขัดเสียง/ตัดน้ำ/จังหวะเฟซบุ๊กเทียบตัวอย่างไวรัลจริง (ล็อกข้อเท็จจริง+ตัวเลข)
+  let finalVersions = corrected;
+  try {
+    const polishResult = await viralPolish(corrected, newsData, breakdownData);
+    finalVersions = polishResult.versions;
+    if (polishResult.polished > 0) console.log(`[Pipeline] L6 ViralPolish: ✨ ขัด ${polishResult.polished}/${corrected.length} เวอร์ชัน`);
+  } catch (vpErr) {
+    console.warn(`[Pipeline] L6 ViralPolish skipped: ${vpErr.message}`);
+  }
+
   const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-  const appliedCount = corrected.filter(v => v._correctionApplied).length;
+  const appliedCount = finalVersions.filter(v => v._correctionApplied || v._viralPolished).length;
   console.log(`\n${'═'.repeat(50)}`);
   console.log(`🔧 CORRECTION COMPLETE — ${appliedCount}/${versions.length} corrected in ${totalTime}s`);
   console.log(`${'═'.repeat(50)}\n`);
 
-  return corrected;
+  return finalVersions;
 }
