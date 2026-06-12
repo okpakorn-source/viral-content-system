@@ -60,3 +60,12 @@ dev.db
 scratch/
 
 .vercel
+
+# ไฟล์ทำงาน/สำรองในเครื่อง — ห้ามเข้า git (12 มิ.ย. 69)
+backup-db/
+audit-*.json
+audit-scan.txt
+quality-report.json
+rerun-plan.json
+rerun-results.json
+deleted-cases-backup-*.json
