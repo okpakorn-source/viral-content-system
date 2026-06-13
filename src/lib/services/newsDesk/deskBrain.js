@@ -31,10 +31,22 @@ const BANNED_PATTERNS = [
 const FOREIGN_TLD = /\.(vn|la|kh|mm|cn|kr|jp|sg|id|ph|my|tw|hk|in|bd|np)(\/|$|:)/i;
 const FOREIGN_DOMAIN = /(vietnam|vnexpress|tuoitre|thanhnien|vovworld|\bvov\b|nhandan|vietnamplus|hanoitimes|laotian|laostimes|phnompenh|khmertimes|mizzima|irrawaddy|chinadaily|xinhua|globaltimes|peopledaily|scmp|koreaherald|koreatimes|yonhap|chosun|donga|japantimes|nikkei|\bnhk\b|kyodo|asahi|straitstimes|channelnewsasia|\bcna\b|antaranews|jakarta|inquirer|rappler|gmanews)/i;
 
+// ★ ข่าวนอกแบรนด์ (13 มิ.ย. 69): เพจน้ำดี/ดราม่าคน — พวกนี้ไม่เคยเข้าฟีดเลย ตัดที่ประตูกันรกโต๊ะ
+//   ระวัง: ตัดเฉพาะที่ชัดว่านอกแบรนด์ (พยากรณ์/ทายบอล/ราคาหุ้น) ไม่ตัดข่าวคนที่บังเอิญมีคำพวกนี้
+const OFF_BRAND_PATTERNS = [
+  /พยากรณ์อากาศ|กรมอุตุ.{0,15}(เตือน|ฉบับ|อากาศ)|อุณหภูมิ.{0,8}องศา|ฝนตก.{0,6}ร้อยละ/,
+  /ทีเด็ดบอล|ทายผลบอล|วิเคราะห์บอล|ราคาบอล|ตารางบอล|บอลเต็ง|ผลบอลเมื่อคืน|โปรแกรมบอล/,
+  /ราคาหุ้น.{0,10}วันนี้|ดัชนีหุ้น|ราคาทอง.{0,8}วันนี้|บิทคอยน์.{0,8}ราคา|คริปโต.{0,8}ราคา|ราคาน้ำมันวันนี้/,
+  /ผลสลากกินแบ่ง|ตรวจหวย|เลขเด็ด.{0,8}งวด|หวยออก/,
+];
+
 export function gateKeywords(item) {
   const text = `${item.title || ''} ${item.snippet || ''}`;
   for (const p of BANNED_PATTERNS) {
     if (p.test(text)) return { pass: false, reason: `ติดคำต้องห้าม: ${p.source.slice(0, 30)}` };
+  }
+  for (const p of OFF_BRAND_PATTERNS) {
+    if (p.test(text)) return { pass: false, reason: `นอกแบรนด์เพจ: ${p.source.slice(0, 25)}` };
   }
   // เช็คโดเมนต่างประเทศ — ตัดทิ้งทันที (เว้นโดเมนไทย .th)
   try {
