@@ -28,7 +28,9 @@ export async function GET(request) {
       const lightReady = items.slice(0, limit).map(({ fullText, ...rest }) => rest);
       return NextResponse.json({ success: true, items: lightReady, total: items.length, tab: 'ready' });
     }
-    items = items.filter(i => i.status !== 'dismissed');
+    // ★ 13 มิ.ย.: ซ่อนทั้งที่ทิ้ง (dismissed) และที่หยิบไปใช้แล้ว (used) จากฟีดหน้าหลัก
+    //   เดิมกรองแค่ dismissed → กด "หยิบไปใช้แล้ว" การ์ดไม่หาย ดูเหมือนปุ่มกดไม่ติด (ที่จริง backend ตั้ง used=true แล้ว)
+    items = items.filter(i => i.status !== 'dismissed' && !i.used);
 
     // ★ quick-fix: คะแนนเสื่อมตามอายุ — กระแสเก่าจมเอง (trend -8/วัน, good -3/วัน, เลนไร้กาลเวลาไม่เสื่อม)
     const DECAY = { trend: 8, good: 3, evergreen: 0, followup: 4, interview: 0, buzz: 10 }; // buzz แชร์จริงแต่หมดอายุไว
