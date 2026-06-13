@@ -40,16 +40,25 @@ const CELEB_REGISTRY = [
 // คำ "ทำดี" คู่กับชื่อดารา
 const GOOD_DEED_TERMS = ['บริจาค ช่วยเหลือ', 'สร้างบ้านให้ ยกที่ดิน', 'ทำบุญ การกุศล', 'ดูแลพ่อแม่ กตัญญู', 'ติดดิน ใจดี น้ำใจ'];
 
-/** หมุนชื่อดาราตามชั่วโมง — วนครบทั้งทะเบียนใน ~1 วัน */
+// คำค้นกว้าง "ดาราทำดี" — ไม่ระบุชื่อ ดูดได้เยอะ (Serper คืน ~10/คำ) จับว่าดาราไหนก็ตามที่เพิ่งทำดี
+const CELEB_BROAD_TERMS = [
+  'คนดัง สร้างบ้าน มอบ ยกที่ดิน', 'ดารา บริจาค ช่วยเหลือ ล่าสุด', 'นักร้อง นักแสดง ทำบุญ การกุศล',
+  'ดาราติดดิน ใจดี น้ำใจ', 'คนดัง ช่วยน้ำท่วม ผู้ประสบภัย', 'ดารา ดูแลพ่อแม่ กตัญญู ซื้อบ้าน',
+  'เซเลบ บริจาคโรงพยาบาล มูลนิธิ', 'ดารา เปิดตัวช่วยสังคม โครงการ',
+];
+
+/** คำค้นดาราทำดี: คำกว้าง 2 (เยอะ) + ชื่อเฉพาะ 1 (แม่น) — หมุนตามชั่วโมง */
 function pickRotatingCelebs(count = 3) {
   const hour = Math.floor(Date.now() / 3600e3);
   const out = [];
-  for (let i = 0; i < count; i++) {
-    const name = CELEB_REGISTRY[(hour * count + i) % CELEB_REGISTRY.length];
-    const deed = GOOD_DEED_TERMS[(hour + i) % GOOD_DEED_TERMS.length];
-    out.push(`${name} ${deed}`);
-  }
-  return out;
+  // 2 คำกว้าง (ดูดวอลุ่ม)
+  out.push(CELEB_BROAD_TERMS[(hour * 2) % CELEB_BROAD_TERMS.length]);
+  out.push(CELEB_BROAD_TERMS[(hour * 2 + 1) % CELEB_BROAD_TERMS.length]);
+  // 1 ชื่อเฉพาะ (เจาะดารา A-list — วนครบทะเบียนใน ~40 ชม.)
+  const name = CELEB_REGISTRY[hour % CELEB_REGISTRY.length];
+  const deed = GOOD_DEED_TERMS[hour % GOOD_DEED_TERMS.length];
+  out.push(`${name} ${deed}`);
+  return out.slice(0, count);
 }
 
 /** หมุนเวรเลือกแนวตามชั่วโมง (celeb แยกเป็นเครื่องค้นชื่อ + พัก thai_abroad เพราะตัดต่างประเทศแล้ว) */

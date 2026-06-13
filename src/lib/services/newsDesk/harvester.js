@@ -203,16 +203,18 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     }
   }
   if (lanes.includes('good')) {
-    // ★ กองสืบน้ำดี (13 มิ.ย. 69): สมองสืบคิดคำค้นสดเชิงลึก หมุน 7 แนว — ตกลงมาใช้คำค้นตายตัวถ้าล่ม
-    let goodQueries = [];
+    // ★ กองสืบน้ำดี (13 มิ.ย. 69): สมองสืบคิดคำค้นสด + ค้นดาราด้วยชื่อ — ตกลงมาใช้คำค้นตายตัวถ้าล่ม
+    //   คำค้นดารา (genre='ดาราดังทำดี') ใช้ qdr:m (1 เดือน) — ข่าวดาราทำดีไม่ได้เกิดทุกสัปดาห์ ย้อนเดือนเจอมากกว่า
+    //   storyNature filter ด้านล่างกันของเก่าเกินไปอยู่แล้ว
+    let goodQueries = []; // [{q, isCeleb}]
     try {
       const { generateScoutQueries } = await import('./goodNewsScout');
       const scout = await generateScoutQueries(6);
-      goodQueries = scout.map(x => x.q);
+      goodQueries = scout.map(x => ({ q: x.q, isCeleb: x.genre === 'ดาราดังทำดี' }));
     } catch (e) { console.log('[Harvester] scout import failed:', e.message?.slice(0, 50)); }
-    if (goodQueries.length < 3) goodQueries = pickGoodQueries(6); // fallback คำค้นตายตัวเดิม
-    for (const q of goodQueries) {
-      try { raw.push(...(await serperNews(q, { num: 8, timeRange: 'qdr:w' })).map(r => ({ ...r, lane: 'good' }))); }
+    if (goodQueries.length < 3) goodQueries = pickGoodQueries(6).map(q => ({ q, isCeleb: false })); // fallback
+    for (const { q, isCeleb } of goodQueries) {
+      try { raw.push(...(await serperNews(q, { num: 8, timeRange: isCeleb ? 'qdr:m' : 'qdr:w' })).map(r => ({ ...r, lane: 'good' }))); }
       catch (e) { console.log('[Harvester] good query failed:', e.message?.slice(0, 50)); }
     }
   }
