@@ -125,6 +125,18 @@ export default function NewsDeskPage() {
     setHarvesting(false);
   };
 
+  // ★ สั่งกองสืบน้ำดี (13 มิ.ย.): ยิงเลน good ที่ใช้สมองสืบ 7 แนวคิดคำค้นสด หมุนเวรตามชั่วโมง
+  const scoutHarvest = async () => {
+    setHarvesting(true); setMsg('🕵️ สั่งกองสืบน้ำดีออกล่า — AI คิดคำค้นเชิงลึกแล้วไปค้นข่าว (~2-3 นาที)...');
+    try {
+      const res = await fetch('/api/news-desk/harvest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lanes: ['good'], judgeTop: 12 }) });
+      const d = await res.json();
+      setMsg(d.success ? `🕵️ กองสืบกลับมาแล้ว · เก็บ ${d.harvested} · ผ่านคัด ${d.added} · ส่งเจน ${d.autoPicked || 0}` : `❌ ${d.error}`);
+      load();
+    } catch (e) { setMsg('❌ ' + e.message); }
+    setHarvesting(false);
+  };
+
   const act = async (id, action) => {
     const user = ensureName();
     if (!user && action !== 'dismiss') return;
@@ -347,6 +359,11 @@ export default function NewsDeskPage() {
           <button onClick={() => callChief()}
             style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid rgba(139,92,246,0.4)', cursor: 'pointer', background: 'rgba(139,92,246,0.12)', color: 'var(--desk-purple)', fontWeight: 700, fontSize: 13.5 }}>
             🧠 เรียก บก.ใหญ่</button>
+          <button onClick={scoutHarvest} disabled={harvesting} title="สมองสืบ 7 แนวคิดคำค้นน้ำดีสดๆ หมุนเวรตามชั่วโมง แล้วไปค้นข่าวที่คนอื่นไม่ขุด"
+            style={{
+              padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(34,197,94,0.5)', cursor: harvesting ? 'wait' : 'pointer',
+              background: harvesting ? '#4b5563' : 'rgba(34,197,94,0.15)', color: harvesting ? '#fff' : 'var(--desk-green, #16a34a)', fontWeight: 700, fontSize: 14,
+            }}>{harvesting ? '⏳...' : '🕵️ สั่งกองสืบน้ำดี'}</button>
           <button onClick={harvest} disabled={harvesting}
             style={{
               padding: '8px 18px', borderRadius: 10, border: 'none', cursor: harvesting ? 'wait' : 'pointer',
