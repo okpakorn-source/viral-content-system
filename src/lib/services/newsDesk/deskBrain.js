@@ -24,11 +24,25 @@ const BANNED_PATTERNS = [
   /ยาบ้า|ยาไอซ์|ยาเสพติด|เสพยา|ค้ายา/,
 ];
 
+// ── บล็อกเว็บต่างประเทศ/เพื่อนบ้านที่ประตู (13 มิ.ย. 69 คำสั่งทีม: "เอาแค่ในไทย ตปท.ไม่เอาเลย") ──
+//   เหตุ: vietnam.vn เผยแพร่ภาษาไทย → AI เดาประเทศจากเนื้อหาไม่ออก หลุดเข้าโต๊ะ 48 ใบ
+//   วิธีกันชัวร์สุด = เช็คโดเมน ไม่พึ่ง AI: ตัด ccTLD เพื่อนบ้าน/ตปท. + แบรนด์ข่าวตปท.ชื่อดัง
+//   ★ ปกป้องโดเมนไทยเสมอ (.th ทุกชนิด) — บล็อกเฉพาะที่ "ไม่ใช่ไทยแน่ๆ"
+const FOREIGN_TLD = /\.(vn|la|kh|mm|cn|kr|jp|sg|id|ph|my|tw|hk|in|bd|np)(\/|$|:)/i;
+const FOREIGN_DOMAIN = /(vietnam|vnexpress|tuoitre|thanhnien|vovworld|\bvov\b|nhandan|vietnamplus|hanoitimes|laotian|laostimes|phnompenh|khmertimes|mizzima|irrawaddy|chinadaily|xinhua|globaltimes|peopledaily|scmp|koreaherald|koreatimes|yonhap|chosun|donga|japantimes|nikkei|\bnhk\b|kyodo|asahi|straitstimes|channelnewsasia|\bcna\b|antaranews|jakarta|inquirer|rappler|gmanews)/i;
+
 export function gateKeywords(item) {
   const text = `${item.title || ''} ${item.snippet || ''}`;
   for (const p of BANNED_PATTERNS) {
     if (p.test(text)) return { pass: false, reason: `ติดคำต้องห้าม: ${p.source.slice(0, 30)}` };
   }
+  // เช็คโดเมนต่างประเทศ — ตัดทิ้งทันที (เว้นโดเมนไทย .th)
+  try {
+    const host = new URL(item.url || '').hostname.toLowerCase();
+    if (!/\.th(\/|$|:|\.)|\.th$/.test(host) && (FOREIGN_TLD.test(host) || FOREIGN_DOMAIN.test(host))) {
+      return { pass: false, reason: `เว็บต่างประเทศ: ${host.slice(0, 30)}` };
+    }
+  } catch { /* URL พัง = ปล่อยผ่านชั้นนี้ ไปตายชั้นอื่น */ }
   return { pass: true };
 }
 

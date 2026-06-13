@@ -436,10 +436,10 @@ async function autoPilotPick(freshItems, store, opts = {}) {
       console.log(`[AutoPilot] ⏭️ ข้ามเรื่องซ้ำ: ${String(it.title).slice(0, 50)}`);
       continue;
     }
-    // ★ ข่าวต่างประเทศ: ออโต้หยิบเฉพาะที่ บก.มั่นใจสูงสุด (9+) = บุคคล/เรื่องที่นิยมในไทยจริง
-    //   ต่างประเทศจ๋า (คนไทยเอี่ยวนิดเดียว/บุคคลไม่คุ้นหูไทย/แหล่งข่าวน้อย) ปล่อยให้คนตัดสินเองที่หน้าโต๊ะ
-    if (it.foreignCountry && (it.judgeScore ?? 0) < 9) {
-      console.log(`[AutoPilot] ⏭️ ข้ามต่างประเทศ (judge ${it.judgeScore} < 9): ${String(it.title).slice(0, 50)}`);
+    // ★ ข่าวต่างประเทศ: ออโต้ไม่แตะเลย (13 มิ.ย. 69 คำสั่งทีม "ตปท.ไม่เอา") — หาภาพยาก+ทำให้คนไทยชอบยาก
+    //   เหลือไว้บนโต๊ะให้คนตัดสินเองกรณีดาราดังไทยในต่างแดน (เช่น ลิซ่า) แต่ออโต้ห้ามส่ง
+    if (it.foreignCountry) {
+      console.log(`[AutoPilot] ⏭️ ข้ามต่างประเทศ (${it.foreignCountry}): ${String(it.title).slice(0, 50)}`);
       continue;
     }
     const sp = specialistForLane(it.lane);
