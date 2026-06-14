@@ -961,7 +961,8 @@ body {
 
 /* ===== RESPONSIVE — Tablet ===== */
 @media (max-width: 1024px) {
-  .sidebar { transform: translateX(-100%); }
+  /* ★ 13 มิ.ย.: ยก sidebar เหนือ overlay (overlay=999) — เดิม sidebar=100 ทำให้พื้นดำทับเมนู กดไม่ได้+จางในมือถือ */
+  .sidebar { transform: translateX(-100%); z-index: 1000; }
   .sidebar.sidebar-open { transform: translateX(0); }
   .main-content { margin-left: 0 !important; }
   .sidebar-toggle { display: flex !important; }

@@ -6,8 +6,8 @@ import WorkflowProvider from '@/components/WorkflowContext';
 import WorkflowTracker from '@/components/WorkflowTracker';
 
 // ★ หน้าสาธารณะ — ไม่ต้องล็อกอิน ไม่มี sidebar (เครื่องมือเดี่ยวให้พนักงานใช้ผ่านลิงก์เดียว)
-//   13 มิ.ย. 69: /cover-tester = หน้าทำปกแมนนวล เปิดให้พนักงานเข้าใช้ได้เลยไม่ต้องเข้าระบบ
-const PUBLIC_ROUTES = ['/login', '/cover-tester'];
+//   13 มิ.ย. 69: /cover-tester = หน้าทำปกแมนนวล, /news-filter = สกัดข่าวให้ทีมก่อนเจน — เปิดสาธารณะไม่ต้องล็อกอิน
+const PUBLIC_ROUTES = ['/login', '/cover-tester', '/news-filter'];
 
 export default function ClientLayout({ children }) {
   const pathname = usePathname();
