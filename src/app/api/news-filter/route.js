@@ -24,7 +24,9 @@ import { filterNews, filterNewsWithAI, extractFactCore } from '@/lib/services/ne
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { text, mode = 'balanced', options = {}, useAI = false } = body;
+    const { text, mode = 'balanced', options = {} } = body;
+    // ★ อ่าน useAI จาก top-level ก่อน แล้ว fallback ไป options.useAI (กันหน้าเว็บเวอร์ชันเก่าที่ส่งใน options)
+    const useAI = body.useAI ?? options.useAI ?? false;
 
     // ตรวจสอบ input
     if (!text || typeof text !== 'string') {

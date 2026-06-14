@@ -352,12 +352,13 @@ function NewsFilterContent() {
         body: JSON.stringify({
           text,
           mode,
+          useAI: options.useAI, // ★ ต้องอยู่ระดับบนสุด — API อ่าน useAI จาก body.useAI (เดิมส่งใน options API เลยได้ false เสมอ → ตกไป regex)
           options: {
             keepQuotes: options.keepQuotes,
             keepContext: options.keepContext,
             removeEmotional: options.removeEmotional,
             removeUnsupported: options.removeUnsupported,
-            useAI: options.useAI,
+            removeInterpretation: options.removeUnsupported, // map ชื่อให้ตรงกับที่ service ใช้
           },
         }),
       });
