@@ -99,6 +99,7 @@ export async function POST(request) {
         trimmedCount: result.stats.trimmedCount,
         sentenceAnalysis: result.sentenceAnalysis,
         removedPatterns: result.removedPatterns,
+        engine: result.engine || (useAI === 'classify' ? 'ai-classify' : useAI ? 'fact-core' : 'rule-based'),
         mode,
         useAI,
       },
