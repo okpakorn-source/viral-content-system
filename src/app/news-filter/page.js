@@ -77,7 +77,7 @@ function NewsFilterContent() {
     keepContext: true,
     removeEmotional: true,
     removeUnsupported: true,
-    useAI: false,
+    useAI: true, // ★ 13 มิ.ย.: ค่าเริ่มต้น = AI สกัดข้อเท็จจริงดิบ (เขียนใหม่เหลือแก่น) — ตรงเป้าทีม
   });
   const [expandedRows, setExpandedRows] = useState({});
   const [copySuccess, setCopySuccess] = useState(false);
@@ -406,6 +406,23 @@ function NewsFilterContent() {
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
     }
+  };
+
+  // ★ ส่งแก่นข้อเท็จจริงเข้าไลน์เจน (13 มิ.ย.) — ผ่านคิวเดียวกับ Discord (same-origin ไม่ต้อง auth)
+  const [sendingWf, setSendingWf] = useState(false);
+  const handleSendToWorkflow = async () => {
+    if (!outputData?.cleanText || sendingWf) return;
+    setSendingWf(true);
+    try {
+      const res = await fetch('/api/queue/add', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload: { input: outputData.cleanText, contentLength: 'short', userId: 'news-filter' } }),
+      });
+      const d = await res.json();
+      if (d.success) { setCopySuccess(true); setTimeout(() => setCopySuccess(false), 4000); alert('✅ ส่งแก่นข่าวเข้าคิวเขียนแล้ว — ไปดูผลที่ Generation Log / แท็บพร้อมใช้'); }
+      else alert('❌ ส่งไม่สำเร็จ: ' + (d.error || 'ไม่ทราบสาเหตุ'));
+    } catch (e) { alert('❌ ' + e.message); }
+    setSendingWf(false);
   };
 
   // Export TXT
@@ -1183,16 +1200,17 @@ function NewsFilterContent() {
                   📄 Export TXT
                 </button>
                 <button
-                  onClick={() => alert('ฟีเจอร์นี้กำลังพัฒนา')}
+                  onClick={handleSendToWorkflow}
+                  disabled={sendingWf || !outputData?.cleanText}
                   style={{
                     flex: 1, padding: '11px 0', borderRadius: 10,
-                    border: '1px solid var(--border)',
-                    background: 'rgba(255,255,255,0.04)',
-                    color: 'var(--text-muted)', fontSize: 13, fontWeight: 700,
-                    cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.2s',
+                    border: '1px solid rgba(34,197,94,0.4)',
+                    background: sendingWf ? 'rgba(255,255,255,0.04)' : 'rgba(34,197,94,0.12)',
+                    color: sendingWf ? 'var(--text-muted)' : '#22c55e', fontSize: 13, fontWeight: 700,
+                    cursor: sendingWf ? 'wait' : 'pointer', fontFamily: 'inherit', transition: 'all 0.2s',
                   }}
                 >
-                  📤 ส่งเข้า Workflow
+                  {sendingWf ? '⏳ กำลังส่ง...' : '📤 ส่งเข้า Workflow'}
                 </button>
               </div>
             )}

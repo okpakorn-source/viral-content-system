@@ -628,6 +628,77 @@ ${numberedSentences}
 }
 
 
+/**
+ * ★ สกัดข้อเท็จจริงดิบ (13 มิ.ย. 69 คำสั่งทีม) — AI เขียนข่าวใหม่ให้เหลือ "แก่นข้อเท็จจริง" ล้วน
+ *   ต่างจาก filterNewsWithAI (ตัดทีละประโยค): อันนี้ "เขียนใหม่" ตัดสำนวน/เกริ่น/อารมณ์/ตีความที่ฝังในประโยค
+ *   เป้า: ป้อนเข้าไลน์เจน input สะอาด → ข่าวออกมาดีขึ้น (ไม่ใช่ข่าวกากเพราะต้นฉบับสำนวนเยอะ)
+ *   ★ กฎเหล็ก anti-hallucination: ใช้เฉพาะข้อมูลในต้นฉบับ ห้ามเติม/เดา ชื่อ-ตัวเลข-วันที่ ตรงเป๊ะ
+ * @returns shape เดียวกับ filterNews (cleanText, stats, sentenceAnalysis, removedPatterns) — UI ไม่ต้องแก้
+ */
+export async function extractFactCore(text, options = {}) {
+  if (!text || typeof text !== 'string' || text.trim().length < 10) {
+    return filterNews(text || '', options);
+  }
+  const { mode = 'balanced', keepQuotes = true } = options;
+
+  const strictness = mode === 'strict'
+    ? 'เข้มงวดสุด: เหลือเฉพาะข้อเท็จจริงแกนหลัก (ใคร ทำอะไร ที่ไหน เมื่อไหร่ ทำไม ผลยังไง) ตัดบริบทรองทั้งหมด'
+    : mode === 'soft'
+      ? 'ผ่อน: เก็บข้อเท็จจริง + บริบทที่จำเป็นต่อความเข้าใจ ตัดเฉพาะสำนวน/อารมณ์/เกริ่นที่ชัดเจน'
+      : 'สมดุล: เก็บข้อเท็จจริงครบ + บริบทสำคัญ ตัดสำนวน/เกริ่น/อารมณ์/การตีความออกให้หมด';
+
+  const prompt = `คุณเป็นบรรณาธิการข่าวที่เก่งเรื่อง "สกัดแก่นข้อเท็จจริง" ออกจากข่าวที่เขียนด้วยสำนวนเยอะ
+
+หน้าที่: อ่านข่าวต้นฉบับด้านล่าง แล้ว "เขียนใหม่" ให้เหลือเฉพาะข้อเท็จจริงดิบที่จำเป็น เพื่อส่งต่อให้นักเขียนอีกทอด
+
+ระดับการตัด (${mode}): ${strictness}
+
+สิ่งที่ต้อง "ตัดทิ้ง":
+- สำนวนเกริ่นนำ ("ทำเอาชาวเน็ตใจหาย", "กลายเป็นกระแสทันที", "ไม่คิดเลยว่าจะมีวันนี้")
+- คำเร้าอารมณ์/ดราม่า ("สุดสะเทือนใจ", "สงสารน้องมาก", "น้ำตาแทบไหล")
+- การตีความ/สรุปเอง ("สะท้อนว่า", "น่าจะเป็นเพราะ", "ทุกคนต่างรู้ดีว่า")
+- คำฟุ่มเฟือยที่ไม่เพิ่มข้อมูล
+
+สิ่งที่ต้อง "เก็บไว้เป๊ะ":
+- ใคร ทำอะไร ที่ไหน เมื่อไหร่ ทำไม ผลเป็นอย่างไร
+- ชื่อบุคคล/สถานที่/องค์กร ตัวเลข วันที่ จำนวนเงิน — ตรงกับต้นฉบับ 100%
+${keepQuotes ? '- คำพูดตรงของบุคคลที่สำคัญต่อเนื้อข่าว (ใส่ในเครื่องหมายคำพูด)' : '- สรุปใจความคำพูด ไม่ต้องอ้างคำต่อคำ'}
+
+⛔ ห้ามเด็ดขาด: เติมข้อมูลที่ไม่มีในต้นฉบับ / เดารายละเอียด / เปลี่ยนตัวเลข-ชื่อ-วันที่ / ใส่ความเห็นตัวเอง
+ถ้าต้นฉบับไม่มีข้อมูลบางอย่าง ก็ไม่ต้องมี — เขียนเท่าที่มีจริง
+
+=== ข่าวต้นฉบับ ===
+${text.slice(0, 8000)}
+=== จบ ===
+
+ตอบ JSON: {"factCore": "ข้อเท็จจริงดิบที่เขียนใหม่แล้ว (เป็นย่อหน้าอ่านลื่น ไม่ใช่ bullet)", "removed": ["สิ่งที่ตัดทิ้ง 3-5 ตัวอย่าง"]}`;
+
+  try {
+    const aiResult = await callAI({ prompt, model: MODEL_FAST, temperature: 0.2, maxTokens: 3000 });
+    const parsed = typeof aiResult === 'object' ? aiResult : JSON.parse(String(aiResult).match(/\{[\s\S]*\}/)?.[0] || '{}');
+    const cleanText = String(parsed.factCore || '').trim();
+    if (cleanText.length < 20) {
+      console.warn('[NewsFilter] สกัดข้อเท็จจริงได้สั้นผิดปกติ → fallback rule-based');
+      return filterNews(text, options);
+    }
+    const originalWordCount = countThaiWords(text);
+    const cleanWordCount = countThaiWords(cleanText);
+    const removedPercent = originalWordCount > 0 ? Math.max(0, Math.round(((originalWordCount - cleanWordCount) / originalWordCount) * 100)) : 0;
+    const removedPatterns = (parsed.removed || []).slice(0, 8).map(r => ({ text: String(r).slice(0, 80), type: 'สำนวน/อารมณ์/ตีความ', reason: 'ตัดออกตอนสกัดแก่น' }));
+    return {
+      cleanText,
+      stats: { originalWordCount, cleanWordCount, removedPercent, sentenceCount: 0, removedCount: removedPatterns.length, trimmedCount: 0 },
+      sentenceAnalysis: [], // โหมดสกัดแก่นไม่วิเคราะห์ทีละประโยค
+      removedPatterns,
+      engine: 'fact-core',
+    };
+  } catch (error) {
+    console.error('[NewsFilter] extractFactCore failed → fallback rule-based:', error.message);
+    return filterNews(text, options);
+  }
+}
+
+
 // =============================================
 // UTILITIES — ฟังก์ชันช่วย
 // =============================================

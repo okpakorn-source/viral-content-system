@@ -1,6 +1,6 @@
 export const maxDuration = 60; // 60 วินาที — เพียงพอสำหรับ AI classification
 import { NextResponse } from 'next/server';
-import { filterNews, filterNewsWithAI } from '@/lib/services/newsFilterService';
+import { filterNews, filterNewsWithAI, extractFactCore } from '@/lib/services/newsFilterService';
 
 /**
  * POST /api/news-filter
@@ -73,10 +73,15 @@ export async function POST(request) {
 
     console.log(`[NewsFilter API] mode=${mode}, useAI=${useAI}, textLength=${text.length}`);
 
-    // เรียกระบบกรอง — AI หรือ rule-based
+    // เรียกระบบกรอง — 3 เครื่อง:
+    //   useAI=true (ค่าเริ่มต้นใหม่ 13 มิ.ย.) → extractFactCore: AI เขียนใหม่เหลือข้อเท็จจริงดิบ (ตรงเป้าทีม)
+    //   useAI='classify' → filterNewsWithAI: จำแนกประโยคทีละอัน (เก่า เก็บไว้เป็นทางเลือก)
+    //   useAI=false → filterNews: regex เร็ว/ออฟไลน์ (fallback)
     let result;
-    if (useAI) {
+    if (useAI === 'classify') {
       result = await filterNewsWithAI(text, filterOptions);
+    } else if (useAI) {
+      result = await extractFactCore(text, filterOptions);
     } else {
       result = filterNews(text, filterOptions);
     }
