@@ -71,6 +71,15 @@ function NewsFilterContent() {
   const [outputData, setOutputData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  // ★ คลังเคสสกัด (13 มิ.ย.) — ตรวจย้อนว่าตัดใจความสำคัญไปไหม
+  const [casesOpen, setCasesOpen] = useState(false);
+  const [cases, setCases] = useState([]);
+  const [caseExpanded, setCaseExpanded] = useState(null);
+  const loadCases = async () => {
+    try { const r = await fetch('/api/news-filter/cases?limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setCases(d.cases || []); } catch {}
+  };
+  const toggleCases = () => { const n = !casesOpen; setCasesOpen(n); if (n) loadCases(); };
+  const deleteCase = async (id) => { try { await fetch('/api/news-filter/cases?id=' + id, { method: 'DELETE' }); loadCases(); } catch {} };
   const [mode, setMode] = useState('balanced');
   const [options, setOptions] = useState({
     keepQuotes: true,
@@ -1297,6 +1306,67 @@ function NewsFilterContent() {
             </div>
           </div>
         )}
+
+        {/* ===== คลังเคสสกัด (13 มิ.ย.) — ตรวจย้อนว่าตัดใจความสำคัญไปไหม ===== */}
+        <div style={{ marginTop: 24 }}>
+          <button onClick={toggleCases}
+            style={{ padding: '10px 18px', borderRadius: 10, border: '1px solid var(--border)', background: casesOpen ? 'rgba(99,102,241,0.12)' : 'var(--bg-card)', color: casesOpen ? '#818cf8' : 'var(--text-primary)', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+            📦 คลังเคสที่สกัดแล้ว {casesOpen ? '▲' : '▼'}
+          </button>
+
+          {casesOpen && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{cases.length} เคสล่าสุด — กดดูเทียบ "ต้นฉบับ ↔ แก่นที่ได้" ว่าตัดใจความสำคัญไปไหม</span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={loadCases} style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>🔄 รีเฟรช</button>
+                  {cases.length > 0 && <button onClick={() => { if (confirm('ล้างคลังเคสทั้งหมด?')) fetch('/api/news-filter/cases?id=all', { method: 'DELETE' }).then(() => loadCases()); }} style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>🗑️ ล้างคลัง</button>}
+                </div>
+              </div>
+
+              {cases.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>ยังไม่มีเคส — สกัดข่าวสักครั้งแล้วจะถูกเก็บที่นี่อัตโนมัติ</div>}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {cases.map((c) => (
+                  <div key={c.id} style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+                    <div onClick={() => setCaseExpanded(caseExpanded === c.id ? null : c.id)}
+                      style={{ padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: 'var(--bg-card)' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title || '(ไม่มีหัวข้อ)'}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+                          {c.engine} · {c.mode} · ตัด {c.removedPercent}% ({c.originalWordCount}→{c.cleanWordCount} คำ) · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); deleteCase(c.id); }} style={{ marginLeft: 10, padding: '4px 8px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>ลบ</button>
+                    </div>
+                    {caseExpanded === c.id && (
+                      <div style={{ padding: 14, borderTop: '1px solid var(--border)' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>📄 ต้นฉบับ ({c.originalWordCount} คำ)</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', maxHeight: 320, overflowY: 'auto', background: 'rgba(0,0,0,0.15)', borderRadius: 8, padding: 10 }}>{c.original}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: '#22c55e', marginBottom: 6 }}>✨ แก่นที่ได้ ({c.cleanWordCount} คำ)</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', maxHeight: 320, overflowY: 'auto', background: 'rgba(34,197,94,0.06)', borderRadius: 8, padding: 10 }}>{c.clean}</div>
+                          </div>
+                        </div>
+                        {c.removedPatterns?.length > 0 && (
+                          <div style={{ marginTop: 12 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: '#ef4444', marginBottom: 6 }}>🗑️ ตัวอย่างสิ่งที่ตัดทิ้ง</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {c.removedPatterns.map((rp, i) => <div key={i} style={{ fontSize: 11, color: 'var(--text-muted)', background: 'rgba(239,68,68,0.06)', borderRadius: 6, padding: '4px 8px' }}>"{rp.text}"</div>)}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

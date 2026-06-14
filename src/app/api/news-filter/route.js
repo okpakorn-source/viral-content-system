@@ -1,6 +1,8 @@
 export const maxDuration = 60; // 60 วินาที — เพียงพอสำหรับ AI classification
 import { NextResponse } from 'next/server';
 import { filterNews, filterNewsWithAI, extractFactCore } from '@/lib/services/newsFilterService';
+import { createStore } from '@/lib/persistStore';
+import { randomUUID } from 'crypto';
 
 /**
  * POST /api/news-filter
@@ -88,6 +90,36 @@ export async function POST(request) {
       result = filterNews(text, filterOptions);
     }
 
+    const engine = result.engine || (useAI === 'classify' ? 'ai-classify' : useAI ? 'fact-core' : 'rule-based');
+
+    // ★ คลังเคส (13 มิ.ย. 69): เก็บทุกการสกัด (ต้นฉบับ+แก่น+สิ่งที่ตัด) ไว้ตรวจย้อนว่าตัดใจความสำคัญไปไหม
+    //   fire-and-forget ไม่บล็อก response | เก็บล่าสุด 60 เคส
+    if (body.save !== false) {
+      (async () => {
+        try {
+          const store = createStore('news-filter-cases');
+          await store.add({
+            id: randomUUID(),
+            original: String(text).slice(0, 8000),
+            clean: String(result.cleanText || '').slice(0, 8000),
+            mode, engine,
+            originalWordCount: result.stats.originalWordCount,
+            cleanWordCount: result.stats.cleanWordCount,
+            removedPercent: result.stats.removedPercent,
+            removedPatterns: (result.removedPatterns || []).slice(0, 12),
+            title: String(text).trim().slice(0, 60),
+            createdAt: new Date().toISOString(),
+          });
+          // ตัดให้เหลือ 60 เคสล่าสุด
+          const all = await store.getAll();
+          if (all.length > 60) {
+            const old = all.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).slice(0, all.length - 60);
+            for (const o of old) await store.remove(o.id).catch(() => {});
+          }
+        } catch (e) { console.warn('[NewsFilter] เก็บคลังเคสล้ม (ไม่กระทบผล):', e.message?.slice(0, 50)); }
+      })();
+    }
+
     // จัด response format
     return NextResponse.json({
       success: true,
@@ -101,7 +133,7 @@ export async function POST(request) {
         trimmedCount: result.stats.trimmedCount,
         sentenceAnalysis: result.sentenceAnalysis,
         removedPatterns: result.removedPatterns,
-        engine: result.engine || (useAI === 'classify' ? 'ai-classify' : useAI ? 'fact-core' : 'rule-based'),
+        engine,
         mode,
         useAI,
       },
