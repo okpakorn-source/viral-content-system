@@ -412,14 +412,17 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     const now = Date.now();
     let purged = 0;
     for (const it of allNow) {
-      if (it.status !== 'new') continue;
-      // ★ 15 มิ.ย. รอบ 2: รีเช็คด่านคำต้องห้าม "ล่าสุด" — ตัวที่หลุดเข้ามาก่อนอัปเดตด่าน (ธปท./เศรษฐกิจมหภาค/INSIGHT) เก็บออกเอง
+      if (it.status === 'dismissed' || it.used) continue;
+      // ★ 15 มิ.ย. รอบ 2-3: รีเช็คด่านคำต้องห้าม "ล่าสุด" ครอบทุกสถานะ (new/claimed/sent) —
+      //   เก็บของเก่าที่หลุดก่อนอัปเดตด่านแม้ส่งเขียนไปแล้ว (เช่น vietnam.vn, Hong Kong fire, บัตรคนจน)
       const g = gateKeywords(it);
       if (!g.pass) {
         await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: `🧹 ตัดอัตโนมัติ (${g.reason})` })).catch(() => {});
         purged++;
         continue;
       }
+      // ★ ล้างตามอายุ — เฉพาะการ์ด new ที่ยังไม่มีใครหยิบ
+      if (it.status !== 'new') continue;
       const ageHr = (now - new Date(it.harvestedAt || 0).getTime()) / 36e5;
       const cap = (it.judgeScore ?? 0) >= 9 ? 72 : 48;
       if (ageHr > cap) {
