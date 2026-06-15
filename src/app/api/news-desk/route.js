@@ -21,6 +21,13 @@ export async function GET(request) {
     let items = await store.getAll();
 
     if (['trend', 'good', 'evergreen', 'interview', 'followup', 'buzz', 'celeb', 'throwback', 'video'].includes(tab)) items = items.filter(i => i.lane === tab);
+    // ★ 15 มิ.ย.: แท็บ ⭐ คลังส่งเช้า — ข่าวที่เลือกเก็บไว้ส่งพนักงาน (เรียงเก็บล่าสุดก่อน, ไม่นับที่หยิบไปแล้ว)
+    if (tab === 'shortlist') {
+      items = items.filter(i => i.shortlisted && !i.used && i.status !== 'dismissed');
+      items.sort((a, b) => new Date(b.shortlistedAt || 0) - new Date(a.shortlistedAt || 0));
+      const lightSL = items.slice(0, limit).map(({ fullText, ...rest }) => rest);
+      return NextResponse.json({ success: true, items: lightSL, total: items.length, tab: 'shortlist' });
+    }
     // ★ แท็บ ✅ พร้อมใช้: ผลงานที่ส่งเจนแล้ว (คนมาหยิบเนื้อไปทำโพสต์/ปก) — เรียงใหม่สุดก่อน
     if (tab === 'ready') {
       items = items.filter(i => i.status === 'sent' && !i.used);
@@ -200,6 +207,11 @@ export async function POST(request) {
     } else if (action === 'used') {
       // ★ คนหยิบเนื้อไปทำโพสต์แล้ว — เก็บออกจากชั้นวาง
       patch.used = true; patch.usedBy = user; patch.usedAt = new Date().toISOString();
+    } else if (action === 'shortlist') {
+      // ★ 15 มิ.ย.: เลือกเก็บเข้า "คลังส่งเช้า" — รวมไว้พรุ่งนี้คัดลอกส่งพนักงานทีเดียว (ไม่ถูกล้างอัตโนมัติ)
+      patch.shortlisted = true; patch.shortlistedAt = new Date().toISOString(); patch.shortlistedBy = user;
+    } else if (action === 'unshortlist') {
+      patch.shortlisted = false;
     } else if (action === 'viral' || action === 'flop') {
       // ★ เฟส 3: รายงานผลโพสต์จริง — เข้าลูปเรียนรู้ (น้ำหนักหมวด + few-shot บรรณาธิการ AI)
       patch.performance = action;

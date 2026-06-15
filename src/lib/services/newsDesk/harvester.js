@@ -497,6 +497,8 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     let purged = 0;
     for (const it of allNow) {
       if (it.status === 'dismissed' || it.used) continue;
+      // ★ 15 มิ.ย.: ข่าวใน "คลังส่งเช้า" (shortlisted) = ทีมเลือกเก็บไว้เอง ห้ามล้าง/ตัดอัตโนมัติ (ต้องอยู่ถึงพรุ่งนี้)
+      if (it.shortlisted) continue;
       // ★ 15 มิ.ย. รอบ 2-3: รีเช็คด่านคำต้องห้าม "ล่าสุด" ครอบทุกสถานะ (new/claimed/sent) —
       //   เก็บของเก่าที่หลุดก่อนอัปเดตด่านแม้ส่งเขียนไปแล้ว (เช่น vietnam.vn, Hong Kong fire, บัตรคนจน)
       const g = gateKeywords(it);

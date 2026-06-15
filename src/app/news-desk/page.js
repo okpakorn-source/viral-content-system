@@ -18,6 +18,7 @@ const TABS = [
   { id: 'buzz', label: '📊 แชร์จริง' },
   { id: 'followup', label: '🔁 ตามรอย' },
   { id: 'interview', label: '🎙️ คลิปสัมภาษณ์' },
+  { id: 'shortlist', label: '⭐ คลังส่งเช้า' },
   { id: 'ready', label: '✅ พร้อมใช้' },
 ];
 
@@ -212,6 +213,23 @@ export default function NewsDeskPage() {
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
     setHarvesting(false);
+  };
+
+  // ★ คัดลอก "คลังส่งเช้า" เป็นข้อความ → วางในแชทส่งพนักงานได้เลย (title + แนว + ลิงก์ เรียงเข้าใจง่าย)
+  const copyShortlist = async () => {
+    if (!items.length) { setMsg('คลังว่าง — ไปเลือกข่าวกด ☆ เก็บส่งเช้า ก่อน'); return; }
+    const today = new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' });
+    const lines = items.map((it, i) => {
+      const g = qualityGrade(it);
+      return `${i + 1}. ${it.title}\n   📁 ${it.category || '-'} · ${g.emoji} ${g.label}\n   🔗 ${it.url || '(คลิป/บทถอดเสียง)'}`;
+    });
+    const text = `📰 ข่าวให้เจนวันนี้ (${today}) — ${items.length} ข่าว\n━━━━━━━━━━━━━━━\n\n${lines.join('\n\n')}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setMsg(`📋 คัดลอกแล้ว ${items.length} ข่าว — วางในแชท (Discord/Line) ส่งพนักงานได้เลย`);
+    } catch {
+      window.prompt('คัดลอกข้อความนี้ (Ctrl+C):', text);
+    }
   };
 
   const act = async (id, action) => {
@@ -565,6 +583,16 @@ export default function NewsDeskPage() {
 
         {msg && <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 10, background: 'rgba(139,92,246,0.12)', color: 'var(--desk-purple)', fontSize: 14 }}>{msg}</div>}
 
+        {/* ★ แบนเนอร์คลังส่งเช้า — ปุ่มคัดลอกส่งพนักงาน */}
+        {tab === 'shortlist' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', marginBottom: 12, borderRadius: 12, background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.35)' }}>
+            <div style={{ flex: 1, fontSize: 13.5, color: 'var(--text-secondary)' }}>⭐ <b>คลังส่งเช้า</b> — ข่าวที่เลือกไว้ส่งพนักงาน ({items.length} ข่าว) · เช้ามากดคัดลอกแล้ววางในแชทให้พนักงานไปเจนได้เลย</div>
+            <button onClick={copyShortlist} disabled={!items.length}
+              style={{ padding: '8px 18px', borderRadius: 10, border: 'none', cursor: items.length ? 'pointer' : 'not-allowed', background: items.length ? 'linear-gradient(135deg,#eab308,#ca8a04)' : '#4b5563', color: '#fff', fontWeight: 700, fontSize: 14 }}>
+              📋 คัดลอกส่งพนักงาน</button>
+          </div>
+        )}
+
         {/* รายการข่าว */}
         {loading ? (
           <div style={{ color: 'var(--text-secondary)', padding: 40, textAlign: 'center' }}>⏳ โหลด...</div>
@@ -760,6 +788,11 @@ export default function NewsDeskPage() {
                     <button onClick={() => act(it.id, 'claim')}
                       style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'rgba(245,158,11,0.2)', color: 'var(--desk-amber)', fontSize: 13, fontWeight: 700 }}>
                       📌 จองข่าวนี้</button>
+                  )}
+                  {it.status !== 'sent' && (
+                    <button onClick={() => act(it.id, it.shortlisted ? 'unshortlist' : 'shortlist')} title="เก็บเข้าคลังส่งเช้า — รวมไว้พรุ่งนี้คัดลอกส่งพนักงานทีเดียว"
+                      style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid ' + (it.shortlisted ? 'rgba(234,179,8,0.6)' : 'var(--border)'), cursor: 'pointer', background: it.shortlisted ? 'rgba(234,179,8,0.18)' : 'var(--bg-card)', color: it.shortlisted ? '#ca8a04' : 'var(--text-secondary)', fontSize: 13, fontWeight: 700 }}>
+                      {it.shortlisted ? '⭐ เก็บแล้ว' : '☆ เก็บส่งเช้า'}</button>
                   )}
                   {it.status === 'claimed' && it.claimedBy === me && (
                     <button onClick={() => act(it.id, 'unclaim')}
