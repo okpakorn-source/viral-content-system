@@ -11,6 +11,8 @@ const TABS = [
   { id: 'all', label: '📋 ทั้งหมด' },
   { id: 'trend', label: '🔥 กระแสวันนี้' },
   { id: 'good', label: '💎 ข่าวน้ำดี' },
+  { id: 'celeb', label: '🎬 ดาราทุกแนว' },
+  { id: 'throwback', label: '⏪ ย้อนสัมภาษณ์' },
   { id: 'evergreen', label: '🗄️ ข่าวเก่าน้ำดี' },
   { id: 'buzz', label: '📊 แชร์จริง' },
   { id: 'followup', label: '🔁 ตามรอย' },
@@ -18,7 +20,7 @@ const TABS = [
   { id: 'ready', label: '✅ พร้อมใช้' },
 ];
 
-const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁', buzz: '📊' };
+const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁', buzz: '📊', celeb: '🎬', throwback: '⏪', 'evergreen-celeb': '⭐' };
 
 // ★★ สวิตช์ปิดระบบหาภาพชั่วคราว (คำสั่งทีม 12 มิ.ย. 69): บัคภาพซ้ำข้ามข่าว + ออโต้รันถี่เกิน
 //    ให้คนหาภาพเองไปก่อน — เปิดกลับ: เปลี่ยนเป็น false (โค้ดหลังบ้านยังอยู่ครบ)

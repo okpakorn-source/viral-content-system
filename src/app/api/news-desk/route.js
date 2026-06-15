@@ -20,7 +20,7 @@ export async function GET(request) {
     const store = createStore('news-desk');
     let items = await store.getAll();
 
-    if (['trend', 'good', 'evergreen', 'interview', 'followup', 'buzz'].includes(tab)) items = items.filter(i => i.lane === tab);
+    if (['trend', 'good', 'evergreen', 'interview', 'followup', 'buzz', 'celeb', 'throwback'].includes(tab)) items = items.filter(i => i.lane === tab);
     // ★ แท็บ ✅ พร้อมใช้: ผลงานที่ส่งเจนแล้ว (คนมาหยิบเนื้อไปทำโพสต์/ปก) — เรียงใหม่สุดก่อน
     if (tab === 'ready') {
       items = items.filter(i => i.status === 'sent' && !i.used);
@@ -33,7 +33,7 @@ export async function GET(request) {
     items = items.filter(i => i.status !== 'dismissed' && !i.used);
 
     // ★ quick-fix: คะแนนเสื่อมตามอายุ — กระแสเก่าจมเอง (trend -8/วัน, good -3/วัน, เลนไร้กาลเวลาไม่เสื่อม)
-    const DECAY = { trend: 8, good: 3, evergreen: 0, 'evergreen-celeb': 0, followup: 4, interview: 0, buzz: 10 }; // evergreen-celeb = ดาราดีอมตะ ไม่เสื่อม
+    const DECAY = { trend: 8, good: 3, evergreen: 0, 'evergreen-celeb': 0, followup: 4, interview: 0, buzz: 10, celeb: 4, throwback: 0 }; // evergreen-celeb/throwback = ของตั้งใจหยิบ ไม่เสื่อม | celeb = ดรามาบันเทิง เสื่อมปานกลาง
     items = items.map(i => {
       const ageDays = Math.max(0, (Date.now() - new Date(i.harvestedAt || 0).getTime()) / 864e5);
       const decayed = Math.max(0, Math.round((i.finalScore || 0) - ageDays * (DECAY[i.lane] ?? 4)));

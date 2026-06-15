@@ -227,6 +227,20 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
         catch (e) { console.log('[Harvester] evergreen-celeb query failed:', e.message?.slice(0, 50)); }
       }
     } catch (e) { console.log('[Harvester] evergreen-celeb import failed:', e.message?.slice(0, 50)); }
+
+    // ★ เรดาร์ดาราทุกแนว v4 (15 มิ.ย.): ข่าวดาราทุกประเภท (รัก/เลิก/ครอบครัว/เงิน/ดราม่าวงการ/คัมแบ็ก/สัมภาษณ์)
+    //   lane='celeb' qdr:m num 10 → ดราม่านุ่มเล่นได้ (ด่าน soft-drama) | throwback qdr:y → สัมภาษณ์เก่ายกเว้นด่านตัดของเก่า
+    try {
+      const { generateCelebRadarQueries, generateThrowbackQueries } = await import('./goodNewsScout');
+      for (const { q } of generateCelebRadarQueries(6)) {
+        try { raw.push(...(await serperNews(q, { num: 10, timeRange: 'qdr:m' })).map(r => ({ ...r, lane: 'celeb' }))); }
+        catch (e) { console.log('[Harvester] celeb query failed:', e.message?.slice(0, 50)); }
+      }
+      for (const { q } of generateThrowbackQueries(4)) {
+        try { raw.push(...(await serperNews(q, { num: 8, timeRange: 'qdr:y' })).map(r => ({ ...r, lane: 'throwback' }))); }
+        catch (e) { console.log('[Harvester] throwback query failed:', e.message?.slice(0, 50)); }
+      }
+    } catch (e) { console.log('[Harvester] celeb-radar import failed:', e.message?.slice(0, 50)); }
   }
   // ★ คำค้นพิเศษจาก Chief Editor Agent — เติมตามช่องว่างของวัน
   for (const ex of extraQueries) {
@@ -293,8 +307,9 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
   stats.staleEvent = 0;
   classified = classified.filter(c => {
     if (c.storyNature !== 'event') return true;
-    // ★ เลน evergreen-celeb (14 มิ.ย.): ดาราดีอมตะที่ตั้งใจค้นย้อนทั้งปี — ความดีเก่าได้ รีเมคได้ ไม่ตัด
-    if (c.lane === 'evergreen-celeb') return true;
+    // ★ เลน evergreen-celeb (14 มิ.ย.) + throwback (15 มิ.ย.): ตั้งใจค้นของเก่ามาเล่าใหม่ — ไม่ตัด
+    //   throwback = สัมภาษณ์เก่า (ตอนเลิกกัน/อกหัก/ช่วงตกต่ำ) ที่หยิบมาทำ "ย้อนฟัง" ได้เสมอ
+    if (c.lane === 'evergreen-celeb' || c.lane === 'throwback') return true;
     const ageDays = c.publishedAt ? (Date.now() - new Date(c.publishedAt).getTime()) / 864e5 : null;
     if (c.lane === 'evergreen') { stats.staleEvent++; console.log(`[Harvester] ⏳ ตัดกระแสอดีต (evergreen+event): ${String(c.title).slice(0, 55)}`); return false; }
     if (ageDays !== null && ageDays > 30) { stats.staleEvent++; console.log(`[Harvester] ⏳ ตัดกระแสอดีต (event เก่า ${Math.round(ageDays)} วัน): ${String(c.title).slice(0, 55)}`); return false; }
