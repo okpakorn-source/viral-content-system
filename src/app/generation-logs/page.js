@@ -44,6 +44,19 @@ function editorOf(c) {
   return '🌐 เว็บ/ระบบ';
 }
 
+// ★ 16 มิ.ย. (ทีมขอ "หมวดหมู่ว่าเจนจากไหน"): แยกแหล่งเจน 3 หมวด — เจนเอง / ดิสคอร์ด / บก.AI ส่งเจน
+const GEN_SOURCE_CFG = {
+  manual:  { icon: '👤', label: 'เจนเอง',       color: '#16a34a', bg: 'rgba(34,197,94,0.13)' },
+  discord: { icon: '💬', label: 'จากดิสคอร์ด',  color: '#5865f2', bg: 'rgba(88,101,242,0.14)' },
+  editor:  { icon: '🤖', label: 'บก.AI ส่งเจน',  color: '#a855f7', bg: 'rgba(168,85,247,0.14)' },
+};
+function genSourceOf(c) {
+  const uid = String(c.userId || '');
+  if (uid.startsWith('discord-') || c.sourceType === 'discord') return 'discord';
+  if (uid.startsWith('ai-')) return 'editor';            // Auto-Pilot ส่งเอง userId=ai-<บก.>
+  return 'manual';                                        // desk-<คน> หรือ web = คนกดเจนเอง
+}
+
 function laneOf(c) {
   if (c.desk?.lane && LANE_CFG[c.desk.lane]) return c.desk.lane;
   const t = `${c.desk?.category || ''} ${c.newsType || ''}`;
@@ -93,6 +106,7 @@ export default function GenerationLogsPage() {
   const [error, setError]             = useState(null);
   const [search, setSearch]           = useState('');
   const [filterEditor, setFilterEditor] = useState('all');
+  const [filterGenSource, setFilterGenSource] = useState('all');
   const [filterLane, setFilterLane]   = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterUrgency, setFilterUrgency] = useState('all');
@@ -229,7 +243,13 @@ export default function GenerationLogsPage() {
   }, [detail]);
 
   // ── กรอง + นับ ──
-  const enriched = useMemo(() => cases.map(c => ({ ...c, _editor: editorOf(c), _lane: laneOf(c), _urgency: urgencyOf(c) })), [cases]);
+  const enriched = useMemo(() => cases.map(c => ({ ...c, _editor: editorOf(c), _lane: laneOf(c), _urgency: urgencyOf(c), _genSource: genSourceOf(c) })), [cases]);
+
+  const genSourceCounts = useMemo(() => {
+    const m = { manual: 0, discord: 0, editor: 0 };
+    for (const c of enriched) m[c._genSource] = (m[c._genSource] || 0) + 1;
+    return m;
+  }, [enriched]);
 
   const urgencyCounts = useMemo(() => {
     const m = {};
@@ -251,6 +271,7 @@ export default function GenerationLogsPage() {
 
   const filtered = useMemo(() => {
     let list = enriched;
+    if (filterGenSource !== 'all') list = list.filter(c => c._genSource === filterGenSource);
     if (filterEditor !== 'all') list = list.filter(c => c._editor === filterEditor);
     if (filterLane !== 'all') list = list.filter(c => c._lane === filterLane);
     if (filterStatus !== 'all') list = list.filter(c => c.status === filterStatus);
@@ -266,7 +287,7 @@ export default function GenerationLogsPage() {
       );
     }
     return list;
-  }, [enriched, filterEditor, filterLane, filterStatus, filterUrgency, todayOnly, search]);
+  }, [enriched, filterGenSource, filterEditor, filterLane, filterStatus, filterUrgency, todayOnly, search]);
 
   const chipStyle = (active) => ({
     padding: '6px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600, cursor: 'pointer',
@@ -313,6 +334,18 @@ export default function GenerationLogsPage() {
             <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{label}</div>
             <div style={{ fontSize: 26, fontWeight: 800, color }}>{val}</div>
           </div>
+        ))}
+      </div>
+
+      {/* ── แถวกรอง: เจนจากไหน (16 มิ.ย. ทีมขอ) ── */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700, minWidth: 52 }}>เจนจาก:</span>
+        <button onClick={() => setFilterGenSource('all')} style={chipStyle(filterGenSource === 'all')}>ทั้งหมด ({enriched.length})</button>
+        {Object.entries(GEN_SOURCE_CFG).map(([k, cfg]) => (
+          <button key={k} onClick={() => setFilterGenSource(filterGenSource === k ? 'all' : k)}
+            style={{ ...chipStyle(filterGenSource === k), ...(filterGenSource === k ? {} : { color: cfg.color, borderColor: cfg.color + '55' }) }}>
+            {cfg.icon} {cfg.label} ({genSourceCounts[k] || 0})
+          </button>
         ))}
       </div>
 
@@ -398,7 +431,10 @@ export default function GenerationLogsPage() {
                   <span style={{ fontSize: 12, color: st.color, fontWeight: 700, whiteSpace: 'nowrap' }}>{st.icon} {st.label}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
-                  <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(139,92,246,0.1)', fontWeight: 600 }}>{c._editor}</span>
+                  {(() => { const gs = GEN_SOURCE_CFG[c._genSource]; return gs ? (
+                    <span title="แหล่งที่สั่งเจน" style={{ padding: '2px 9px', borderRadius: 999, background: gs.bg, color: gs.color, fontWeight: 700 }}>{gs.icon} {gs.label}</span>
+                  ) : null; })()}
+                  <span title="ผู้สั่งเจน/บก." style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(139,92,246,0.1)', fontWeight: 600 }}>{c._editor}</span>
                   <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(59,130,246,0.1)', fontWeight: 600 }}>{lane.icon} {lane.label}</span>
                   {category && <span style={{ color: 'var(--text-muted)' }}>{category}</span>}
                   <span>📝 {c.versionCount} เวอร์ชัน</span>
