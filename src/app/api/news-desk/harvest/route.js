@@ -39,7 +39,7 @@ export async function POST(request) {
       }
       return await doHarvest({
         lanes: [],
-        extraQueries: fq.map(f => ({ q: f.q, lane: f.lane, timeRange: f.timeRange })),
+        extraQueries: fq.map(f => ({ q: f.q, lane: f.lane, timeRange: f.timeRange, endpoint: f.endpoint })),
         judgeTop: Math.min(40, Number(body.judgeTop) || 20),
       });
     }

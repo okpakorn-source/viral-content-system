@@ -178,6 +178,22 @@ export function generateEvergreenCelebQueries(count = 4) {
   return out.slice(0, count).map(q => ({ q, genre: 'ดาราดีอมตะ' }));
 }
 
+// ★ v5 (15 มิ.ย. ทีมยก "เปิดบ้านดารา/รับหมาจร/พลอยสร้างบ้าน"): ไลฟ์สไตล์ดารา — เปิดบ้าน/รับสัตว์จร/สร้างบ้าน/ชีวิตวัยเด็ก
+//   มักอยู่บนเว็บบันเทิง/ยูทูป (ค้นผ่าน /search, /videos) ที่ /news มองข้าม
+const CELEB_LIFESTYLE_BROAD = [
+  'เปิดบ้านดารา หรูหรา พาทัวร์', 'ดารา รับเลี้ยงหมาจร แมวจร ใจบุญ', 'ดารา สร้างบ้านใหม่ บ้านในฝัน',
+  'ดารา เปิดใจ ชีวิตวัยเด็ก ลำบาก', 'ดารา จุดเปลี่ยนชีวิต สู้ชีวิต', 'ดารา รีโนเวทบ้าน แต่งบ้านใหม่',
+  'ดารา พาเที่ยวบ้านเกิด ครอบครัว', 'คนดัง เปิดบ้านรับสัตว์จร เลี้ยงหมาแมว', 'ดารา ใช้ชีวิตบ้านสวน เรียบง่าย',
+];
+
+/** ★ ไลฟ์สไตล์ดารา (15 มิ.ย.) — เปิดบ้าน/รับสัตว์/สร้างบ้าน/วัยเด็ก: คำกว้าง count คำ (ใช้กับ /search หรือ /videos) */
+export function generateCelebLifestyleQueries(count = 6) {
+  const hour = Math.floor(Date.now() / 3600e3);
+  const out = [];
+  for (let i = 0; i < count; i++) out.push(CELEB_LIFESTYLE_BROAD[(hour * count + i) % CELEB_LIFESTYLE_BROAD.length]);
+  return out.map(q => ({ q, genre: 'ไลฟ์สไตล์ดารา' }));
+}
+
 // ════════════════════════════════════════════════════
 // ★ สั่งหาข่าว "เฉพาะแนว" (15 มิ.ย. คำสั่งทีม): เลือกโฟกัส → ค้นเฉพาะแนวนั้น (เติมช่องว่างของวันได้ตรงจุด)
 // ════════════════════════════════════════════════════
@@ -191,9 +207,11 @@ const FOCUS_FIXED = {
 /** รายการแนวที่สั่งได้ (ให้ UI ใช้ทำปุ่ม) — key ต้องตรงกับ generateFocusQueries */
 export const FOCUS_OPTIONS = [
   { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
+  { key: 'celeb_lifestyle', label: '🏡 เปิดบ้าน/รับสัตว์/ไลฟ์สไตล์ดารา' },
   { key: 'celeb_drama', label: '🎬 ดราม่า/ความรักดารา' },
   { key: 'throwback', label: '⏪ ย้อนสัมภาษณ์เก่า' },
   { key: 'celeb_good', label: '⭐ ดาราทำดี/อมตะ' },
+  { key: 'video', label: '📺 วิดีโอดารา (ยูทูป)' },
   { key: 'animal', label: '🐶 รักสัตว์' },
   { key: 'good_deed', label: '🙏 น้ำใจ/พลเมืองดี' },
   { key: 'fighter', label: '💪 สู้ชีวิต' },
@@ -201,16 +219,19 @@ export const FOCUS_OPTIONS = [
 ];
 
 /**
- * ★ สร้างคำค้นตามแนวที่สั่ง → [{q, lane, timeRange}] (ใช้เป็น extraQueries ใน runHarvest)
+ * ★ สร้างคำค้นตามแนวที่สั่ง → [{q, lane, timeRange, endpoint}] (ใช้เป็น extraQueries ใน runHarvest)
+ *   endpoint: undefined=/news | 'search'=เว็บกว้าง | 'videos'=ยูทูป
  * @param {string} focus - key จาก FOCUS_OPTIONS
  */
 export function generateFocusQueries(focus, count = 8) {
-  const wrap = (arr, lane, timeRange) => arr.map(x => ({ q: (x && x.q) || x, lane, timeRange })).filter(o => o.q && o.q.length >= 4);
+  const wrap = (arr, lane, timeRange, endpoint) => arr.map(x => ({ q: (x && x.q) || x, lane, timeRange, endpoint })).filter(o => o.q && o.q.length >= 4);
   switch (focus) {
     case 'celeb_family': return wrap(generateCelebFamilyQueries(count), 'good', 'qdr:m');
+    case 'celeb_lifestyle': return wrap(generateCelebLifestyleQueries(count), 'good', 'qdr:y', 'search'); // เว็บกว้าง + ย้อนทั้งปี
     case 'celeb_drama': return wrap(generateCelebRadarQueries(count), 'celeb', 'qdr:m');
     case 'throwback': return wrap(generateThrowbackQueries(count), 'throwback', 'qdr:y');
     case 'celeb_good': return wrap(generateEvergreenCelebQueries(count), 'evergreen-celeb', 'qdr:y');
+    case 'video': return wrap(generateCelebLifestyleQueries(count), 'video', '', 'videos'); // ยูทูป (ดิสคัฟเวอรี ไม่ auto-เขียน)
     case 'animal': return wrap((FOCUS_FIXED.animal || []).slice(0, count), 'good', 'qdr:w');
     case 'good_deed': return wrap((FOCUS_FIXED.good_deed || []).slice(0, count), 'good', 'qdr:w');
     case 'fighter': return wrap((FOCUS_FIXED.fighter || []).slice(0, count), 'good', 'qdr:w');

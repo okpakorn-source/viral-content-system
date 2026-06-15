@@ -12,6 +12,7 @@ const TABS = [
   { id: 'trend', label: '🔥 กระแสวันนี้' },
   { id: 'good', label: '💎 ข่าวน้ำดี' },
   { id: 'celeb', label: '🎬 ดาราทุกแนว' },
+  { id: 'video', label: '📺 วิดีโอดารา' },
   { id: 'throwback', label: '⏪ ย้อนสัมภาษณ์' },
   { id: 'evergreen', label: '🗄️ ข่าวเก่าน้ำดี' },
   { id: 'buzz', label: '📊 แชร์จริง' },
@@ -20,14 +21,16 @@ const TABS = [
   { id: 'ready', label: '✅ พร้อมใช้' },
 ];
 
-const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁', buzz: '📊', celeb: '🎬', throwback: '⏪', 'evergreen-celeb': '⭐' };
+const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁', buzz: '📊', celeb: '🎬', throwback: '⏪', 'evergreen-celeb': '⭐', video: '📺' };
 
 // ★ 15 มิ.ย.: แนวที่ "สั่งหาเฉพาะแนว" ได้ (key ต้องตรงกับ generateFocusQueries ใน goodNewsScout)
 const FOCUS_OPTIONS = [
   { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
+  { key: 'celeb_lifestyle', label: '🏡 เปิดบ้าน/รับสัตว์/ไลฟ์สไตล์ดารา' },
   { key: 'celeb_drama', label: '🎬 ดราม่า/ความรักดารา' },
   { key: 'throwback', label: '⏪ ย้อนสัมภาษณ์เก่า' },
   { key: 'celeb_good', label: '⭐ ดาราทำดี/อมตะ' },
+  { key: 'video', label: '📺 วิดีโอดารา (ยูทูป)' },
   { key: 'animal', label: '🐶 รักสัตว์' },
   { key: 'good_deed', label: '🙏 น้ำใจ/พลเมืองดี' },
   { key: 'fighter', label: '💪 สู้ชีวิต' },
