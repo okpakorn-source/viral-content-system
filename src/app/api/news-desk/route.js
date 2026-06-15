@@ -20,7 +20,14 @@ export async function GET(request) {
     const store = createStore('news-desk');
     let items = await store.getAll();
 
-    if (['trend', 'good', 'evergreen', 'interview', 'followup', 'buzz', 'celeb', 'throwback', 'video'].includes(tab)) items = items.filter(i => i.lane === tab);
+    // ★ 16 มิ.ย. (ยุบแท็บ 12→7): แต่ละแท็บรวมหลายเลน — งงน้อยลง
+    const TAB_LANES = {
+      trend: ['trend', 'buzz'],
+      good: ['good', 'evergreen', 'followup'],
+      celeb: ['celeb', 'throwback', 'evergreen-celeb'],
+      clip: ['video', 'interview'],
+    };
+    if (TAB_LANES[tab]) items = items.filter(i => TAB_LANES[tab].includes(i.lane));
     // ★ 15 มิ.ย.: แท็บ ⭐ คลังส่งเช้า — ข่าวที่เลือกเก็บไว้ส่งพนักงาน (เรียงเก็บล่าสุดก่อน, ไม่นับที่หยิบไปแล้ว)
     if (tab === 'shortlist') {
       items = items.filter(i => i.shortlisted && !i.used && i.status !== 'dismissed');

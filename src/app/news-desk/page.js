@@ -9,15 +9,10 @@ import Header from '@/components/layout/Header';
 
 const TABS = [
   { id: 'all', label: '📋 ทั้งหมด' },
-  { id: 'trend', label: '🔥 กระแสวันนี้' },
-  { id: 'good', label: '💎 ข่าวน้ำดี' },
-  { id: 'celeb', label: '🎬 ดาราทุกแนว' },
-  { id: 'video', label: '📺 คลิป/รีลส์/เพจ' },
-  { id: 'throwback', label: '⏪ ย้อนสัมภาษณ์' },
-  { id: 'evergreen', label: '🗄️ ข่าวเก่าน้ำดี' },
-  { id: 'buzz', label: '📊 แชร์จริง' },
-  { id: 'followup', label: '🔁 ตามรอย' },
-  { id: 'interview', label: '🎙️ คลิปสัมภาษณ์' },
+  { id: 'good', label: '💎 น้ำดี' },          // good + ข่าวเก่า + ตามรอย + ลำบาก
+  { id: 'celeb', label: '🎬 ดารา' },          // celeb + ย้อนสัมภาษณ์ + ดาราอมตะ
+  { id: 'trend', label: '🔥 กระแส' },         // trend + แชร์จริง
+  { id: 'clip', label: '📺 คลิป/เพจ' },        // video/รีลส์ + คลิปสัมภาษณ์
   { id: 'shortlist', label: '⭐ คลังส่งเช้า' },
   { id: 'ready', label: '✅ พร้อมใช้' },
 ];

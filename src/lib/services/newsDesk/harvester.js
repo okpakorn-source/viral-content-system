@@ -255,66 +255,39 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       catch (e) { console.log('[Harvester] good query failed:', e.message?.slice(0, 50)); }
     }
 
-    // ★ เครื่องล่า "ดาราดีอมตะ" (14 มิ.ย.): ค้นชื่อ×ความดีเฉพาะ ย้อนทั้งปี (qdr:y) — พลอยสร้างบ้าน/อั้มหมาแมว/บี้อยู่วัด
-    //   lane='evergreen-celeb' → ยกเว้นจากด่านตัดกระแสอดีต (ความดีอมตะเก่าได้ รีเมคได้)
+    // ★ 16 มิ.ย. (ทีมขอลดต้นทุน): เลน good มีกลุ่มคำค้นเยอะ (~9 ชนิด) — รัน "แกนหลัก" ทุกรอบ + "กลุ่มเสริม" หมุน 3 จาก 6 ต่อรอบ (ประหยัด ~32%)
     try {
-      const { generateEvergreenCelebQueries } = await import('./goodNewsScout');
-      for (const { q } of generateEvergreenCelebQueries(4)) {
-        try { raw.push(...(await serperNews(q, { num: 6, timeRange: 'qdr:y' })).map(r => ({ ...r, lane: 'evergreen-celeb' }))); }
-        catch (e) { console.log('[Harvester] evergreen-celeb query failed:', e.message?.slice(0, 50)); }
+      const G = await import('./goodNewsScout');
+      const _clipRe = /youtube\.com|youtu\.be|tiktok\.com|fb\.watch|facebook\.com\/(reel|watch)|instagram\.com/i;
+      const runGroup = async (queries, { ep = 'news', lane = 'good', tr = 'qdr:m', num = 10, noClip = false } = {}) => {
+        for (const { q } of queries) {
+          try {
+            let res = ep === 'search' ? await serperSearch(q, { num, timeRange: tr })
+              : ep === 'videos' ? await serperVideos(q, { num })
+                : await serperNews(q, { num, timeRange: tr });
+            if (noClip) res = res.filter(x => !_clipRe.test(x.url || ''));
+            raw.push(...res.map(r => ({ ...r, lane })));
+          } catch (e) { console.log('[Harvester] good group failed:', e.message?.slice(0, 50)); }
+        }
+      };
+      // ── แกนหลัก (รันทุกรอบ): คอนเทนต์น้ำดี 24 + เรื่องลำบาก + ดาราให้ของขวัญครอบครัว = แนวที่ปังสุด ──
+      await runGroup(G.generateGoodContentQueries(6), { ep: 'search', noClip: true });
+      await runGroup(G.generateHardshipQueries(4), { ep: 'search', noClip: true });
+      await runGroup(G.generateCelebFamilyQueries(5), { ep: 'news' });
+      // ── กลุ่มเสริม (หมุน 3 จาก 6 ต่อรอบ ตามชั่วโมง — วนครบใน 2 รอบ): ลดคำค้นซ้ำซ้อน/ต้นทุน ──
+      const _h = Math.floor(Date.now() / 3600e3);
+      const extra = [
+        () => runGroup(G.generateCelebLifestyleQueries(5), { ep: 'search', noClip: true }),       // ไลฟ์สไตล์ (เปิดบ้าน/รับสัตว์)
+        () => runGroup(G.generateCelebRadarQueries(6), { ep: 'news', lane: 'celeb' }),             // ดาราทุกแนว (ดราม่า/รัก)
+        () => runGroup(G.generateSocialClipQueries(5), { ep: 'search', lane: 'video' }),           // คลิป/เพจ (เว็บ+FB/IG)
+        () => runGroup(G.generateSocialClipQueries(3), { ep: 'videos', lane: 'video' }),           // คลิปครีเอเตอร์ (YT)
+        () => runGroup(G.generateThrowbackQueries(4), { ep: 'news', lane: 'throwback', tr: 'qdr:y', num: 8 }), // ย้อนสัมภาษณ์
+        () => runGroup(G.generateEvergreenCelebQueries(4), { ep: 'news', lane: 'evergreen-celeb', tr: 'qdr:y', num: 6 }), // ดาราดีอมตะ
+      ];
+      for (let i = 0; i < extra.length; i++) {
+        if ((i + _h) % extra.length < 3) await extra[i]();
       }
-    } catch (e) { console.log('[Harvester] evergreen-celeb import failed:', e.message?.slice(0, 50)); }
-
-    // ★ เรดาร์ดาราทุกแนว v4 (15 มิ.ย.): ข่าวดาราทุกประเภท (รัก/เลิก/ครอบครัว/เงิน/ดราม่าวงการ/คัมแบ็ก/สัมภาษณ์)
-    //   lane='celeb' qdr:m num 10 → ดราม่านุ่มเล่นได้ (ด่าน soft-drama) | throwback qdr:y → สัมภาษณ์เก่ายกเว้นด่านตัดของเก่า
-    try {
-      const { generateCelebRadarQueries, generateThrowbackQueries, generateCelebFamilyQueries, generateCelebLifestyleQueries, generateSocialClipQueries, generateGoodContentQueries, generateHardshipQueries } = await import('./goodNewsScout');
-      const _noClip = (x) => !/youtube\.com|youtu\.be|tiktok\.com|fb\.watch|facebook\.com\/(reel|watch)|instagram\.com/i.test(x.url || '');
-      // ★ v5.3 (15 มิ.ย.): คลังคีย์เวิร์ดคอนเทนต์น้ำดี 24 แนว ค้น /search ทุกแหล่ง (กรองคลิปออก — เลน good เขียนได้)
-      for (const { q } of generateGoodContentQueries(6)) {
-        try { raw.push(...(await serperSearch(q, { num: 10, timeRange: 'qdr:m' })).filter(_noClip).map(r => ({ ...r, lane: 'good' }))); }
-        catch (e) { console.log('[Harvester] good-content query failed:', e.message?.slice(0, 50)); }
-      }
-      // ★ v5.4 (15 มิ.ย.): เรื่องลำบาก/กินใจ (เด็กกำพร้า/อยู่กับยาย/ขาดโอกาส/วอนช่วย) ค้น /search ทุกแหล่ง
-      for (const { q } of generateHardshipQueries(5)) {
-        try { raw.push(...(await serperSearch(q, { num: 10, timeRange: 'qdr:m' })).filter(_noClip).map(r => ({ ...r, lane: 'good' }))); }
-        catch (e) { console.log('[Harvester] hardship query failed:', e.message?.slice(0, 50)); }
-      }
-      // ★ ทองคำ (15 มิ.ย.): ดาราให้ของขวัญ-ดูแลครอบครัว (เบสท์ออกรถให้น้อง/น้องอินเตอร์ออกรถให้พ่อแม่)
-      //   lane='good' → ขึ้นแท็บน้ำดี (AI ตีหมวดกตัญญู/ครอบครัวอบอุ่น = positive น้ำหนักสูง)
-      for (const { q } of generateCelebFamilyQueries(6)) {
-        try { raw.push(...(await serperNews(q, { num: 10, timeRange: 'qdr:m' })).map(r => ({ ...r, lane: 'good' }))); }
-        catch (e) { console.log('[Harvester] celeb-family query failed:', e.message?.slice(0, 50)); }
-      }
-      // ★ v5 (15 มิ.ย.): ไลฟ์สไตล์ดารา (เปิดบ้าน/รับสัตว์จร/สร้างบ้าน/ชีวิตวัยเด็ก) — ใช้ /search เว็บกว้าง จับเว็บบันเทิง/บล็อก
-      //   กรองลิงก์คลิป (ยูทูป/ติ๊กต๊อก) ออกจากเลน good — เขียนตรงไม่ได้ (คลิปไปดูที่ focus 📺 วิดีโอแทน)
-      for (const { q } of generateCelebLifestyleQueries(5)) {
-        try {
-          const arts = (await serperSearch(q, { num: 10, timeRange: 'qdr:m' }))
-            .filter(x => !/youtube\.com|youtu\.be|tiktok\.com|fb\.watch|instagram\.com/i.test(x.url || ''));
-          raw.push(...arts.map(r => ({ ...r, lane: 'good' })));
-        } catch (e) { console.log('[Harvester] celeb-lifestyle query failed:', e.message?.slice(0, 50)); }
-      }
-      for (const { q } of generateCelebRadarQueries(6)) {
-        try { raw.push(...(await serperNews(q, { num: 10, timeRange: 'qdr:m' })).map(r => ({ ...r, lane: 'celeb' }))); }
-        catch (e) { console.log('[Harvester] celeb query failed:', e.message?.slice(0, 50)); }
-      }
-      // ★ v5.2 (15 มิ.ย. ทีมย้ำ "อย่าโฟกัสแค่สำนักข่าว"): คลิป/เพจดารา ค้น 2 แหล่งทุกแพลตฟอร์ม
-      //   /search = เว็บ+เพจ FB/IG/X · /videos = คลิปครีเอเตอร์ YT — lane='video' (ดิสคัฟเวอรี autoPilot ข้าม)
-      const _socialQs = generateSocialClipQueries(8);
-      for (const { q } of _socialQs.slice(0, 5)) {
-        try { raw.push(...(await serperSearch(q, { num: 10, timeRange: 'qdr:m' })).map(r => ({ ...r, lane: 'video' }))); }
-        catch (e) { console.log('[Harvester] social-clip /search failed:', e.message?.slice(0, 50)); }
-      }
-      for (const { q } of _socialQs.slice(5)) {
-        try { raw.push(...(await serperVideos(q, { num: 8 })).map(r => ({ ...r, lane: 'video' }))); }
-        catch (e) { console.log('[Harvester] social-clip /videos failed:', e.message?.slice(0, 50)); }
-      }
-      for (const { q } of generateThrowbackQueries(4)) {
-        try { raw.push(...(await serperNews(q, { num: 8, timeRange: 'qdr:y' })).map(r => ({ ...r, lane: 'throwback' }))); }
-        catch (e) { console.log('[Harvester] throwback query failed:', e.message?.slice(0, 50)); }
-      }
-    } catch (e) { console.log('[Harvester] celeb-radar import failed:', e.message?.slice(0, 50)); }
+    } catch (e) { console.log('[Harvester] good-block failed:', e.message?.slice(0, 50)); }
   }
   // ★ คำค้นพิเศษ (Chief Agent / สั่งหาเฉพาะแนว) — เลือก endpoint ได้: news (default) | search (เว็บกว้าง) | videos (ยูทูป)
   for (const ex of extraQueries) {
