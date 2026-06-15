@@ -268,14 +268,17 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     // ★ เรดาร์ดาราทุกแนว v4 (15 มิ.ย.): ข่าวดาราทุกประเภท (รัก/เลิก/ครอบครัว/เงิน/ดราม่าวงการ/คัมแบ็ก/สัมภาษณ์)
     //   lane='celeb' qdr:m num 10 → ดราม่านุ่มเล่นได้ (ด่าน soft-drama) | throwback qdr:y → สัมภาษณ์เก่ายกเว้นด่านตัดของเก่า
     try {
-      const { generateCelebRadarQueries, generateThrowbackQueries, generateCelebFamilyQueries, generateCelebLifestyleQueries, generateSocialClipQueries, generateGoodContentQueries } = await import('./goodNewsScout');
+      const { generateCelebRadarQueries, generateThrowbackQueries, generateCelebFamilyQueries, generateCelebLifestyleQueries, generateSocialClipQueries, generateGoodContentQueries, generateHardshipQueries } = await import('./goodNewsScout');
+      const _noClip = (x) => !/youtube\.com|youtu\.be|tiktok\.com|fb\.watch|facebook\.com\/(reel|watch)|instagram\.com/i.test(x.url || '');
       // ★ v5.3 (15 มิ.ย.): คลังคีย์เวิร์ดคอนเทนต์น้ำดี 24 แนว ค้น /search ทุกแหล่ง (กรองคลิปออก — เลน good เขียนได้)
       for (const { q } of generateGoodContentQueries(6)) {
-        try {
-          const arts = (await serperSearch(q, { num: 10, timeRange: 'qdr:m' }))
-            .filter(x => !/youtube\.com|youtu\.be|tiktok\.com|fb\.watch|facebook\.com\/(reel|watch)|instagram\.com/i.test(x.url || ''));
-          raw.push(...arts.map(r => ({ ...r, lane: 'good' })));
-        } catch (e) { console.log('[Harvester] good-content query failed:', e.message?.slice(0, 50)); }
+        try { raw.push(...(await serperSearch(q, { num: 10, timeRange: 'qdr:m' })).filter(_noClip).map(r => ({ ...r, lane: 'good' }))); }
+        catch (e) { console.log('[Harvester] good-content query failed:', e.message?.slice(0, 50)); }
+      }
+      // ★ v5.4 (15 มิ.ย.): เรื่องลำบาก/กินใจ (เด็กกำพร้า/อยู่กับยาย/ขาดโอกาส/วอนช่วย) ค้น /search ทุกแหล่ง
+      for (const { q } of generateHardshipQueries(5)) {
+        try { raw.push(...(await serperSearch(q, { num: 10, timeRange: 'qdr:m' })).filter(_noClip).map(r => ({ ...r, lane: 'good' }))); }
+        catch (e) { console.log('[Harvester] hardship query failed:', e.message?.slice(0, 50)); }
       }
       // ★ ทองคำ (15 มิ.ย.): ดาราให้ของขวัญ-ดูแลครอบครัว (เบสท์ออกรถให้น้อง/น้องอินเตอร์ออกรถให้พ่อแม่)
       //   lane='good' → ขึ้นแท็บน้ำดี (AI ตีหมวดกตัญญู/ครอบครัวอบอุ่น = positive น้ำหนักสูง)

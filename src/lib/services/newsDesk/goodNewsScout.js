@@ -250,6 +250,27 @@ export function generateGoodContentQueries(count = 6) {
   return out.map(q => ({ q, genre: 'คอนเทนต์น้ำดี' }));
 }
 
+// ★ v5.4 (15 มิ.ย. ทีมขอ "เรื่องลำบาก/รันทด ที่กินใจ"): เด็กกำพร้า/อยู่กับยาย/กินข้าววัด/ขาดโอกาส/วอนช่วย
+//   = คอนเทนต์อารมณ์ร่วมสูง มักนำไปสู่การช่วยเหลือ (กฎเหล็กเดิมยังบล็อก เด็กถูกทำร้าย/ล่วงละเมิด ที่ชั้น 0)
+const HARDSHIP_KEYWORDS = [
+  // เด็กลำบาก / ขาดโอกาส
+  'เด็กยากจน ขาดโอกาส สู้ชีวิต', 'เด็กกำพร้า อยู่กับยาย ลำบาก', 'เด็กพ่อแม่ทิ้ง อยู่กับตายาย',
+  'เด็กกินข้าววัด ยากจน ลำบาก', 'เด็กเดินเท้าไกล ไปโรงเรียน', 'เด็กไม่มีเงินเรียน อยากเรียนต่อ',
+  'เด็กดูแลพ่อแม่ป่วย ลำพัง',
+  // ครอบครัว / คนลำบาก วอนช่วย
+  'ครอบครัวยากจน บ้านพัง วอนช่วย', 'ยายเลี้ยงหลาน ลำพัง ลำบาก', 'ป่วยหนัก ไม่มีเงินรักษา วอนช่วย',
+  'คนแก่อยู่ลำพัง ไม่มีคนดูแล', 'ลุงป้าเก็บขยะ หาเลี้ยงชีพ', 'คนพิการ ลำบาก ไม่มีคนดูแล',
+  'แม่ลูกอ่อน ลำบาก ขาดแคลน', 'ครอบครัวขาดแคลน วอนความช่วยเหลือ', 'ชีวิตรันทด สู้ชีวิต ไม่ท้อ',
+];
+
+/** ★ เรื่องลำบาก/กินใจ (15 มิ.ย. v5.4) — หมุนคลัง 16 แนว count คำ/รอบ (ค้น /search ทุกแหล่ง) */
+export function generateHardshipQueries(count = 5) {
+  const slot = Math.floor(Date.now() / (3600e3 * 2));
+  const out = [];
+  for (let i = 0; i < count; i++) out.push(HARDSHIP_KEYWORDS[(slot * count + i + 3) % HARDSHIP_KEYWORDS.length]);
+  return out.map(q => ({ q, genre: 'เรื่องลำบาก' }));
+}
+
 // ════════════════════════════════════════════════════
 // ★ สั่งหาข่าว "เฉพาะแนว" (15 มิ.ย. คำสั่งทีม): เลือกโฟกัส → ค้นเฉพาะแนวนั้น (เติมช่องว่างของวันได้ตรงจุด)
 // ════════════════════════════════════════════════════
@@ -272,6 +293,7 @@ export const FOCUS_OPTIONS = [
   { key: 'animal', label: '🐶 รักสัตว์' },
   { key: 'good_deed', label: '🙏 น้ำใจ/พลเมืองดี' },
   { key: 'fighter', label: '💪 สู้ชีวิต' },
+  { key: 'hardship', label: '💧 เรื่องลำบาก/กินใจ' },
   { key: 'trend', label: '🔥 กระแสไวรัล' },
 ];
 
@@ -293,6 +315,7 @@ export function generateFocusQueries(focus, count = 8) {
     case 'animal': return wrap((FOCUS_FIXED.animal || []).slice(0, count), 'good', 'qdr:w');
     case 'good_deed': return wrap((FOCUS_FIXED.good_deed || []).slice(0, count), 'good', 'qdr:w');
     case 'fighter': return wrap((FOCUS_FIXED.fighter || []).slice(0, count), 'good', 'qdr:w');
+    case 'hardship': return wrap(generateHardshipQueries(count), 'good', 'qdr:m', 'search'); // เรื่องลำบาก/กินใจ ทุกแหล่ง
     case 'trend': return wrap((FOCUS_FIXED.trend || []).slice(0, count), 'trend', 'qdr:d');
     default: return [];
   }

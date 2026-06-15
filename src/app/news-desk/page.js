@@ -35,6 +35,7 @@ const FOCUS_OPTIONS = [
   { key: 'animal', label: '🐶 รักสัตว์' },
   { key: 'good_deed', label: '🙏 น้ำใจ/พลเมืองดี' },
   { key: 'fighter', label: '💪 สู้ชีวิต' },
+  { key: 'hardship', label: '💧 เรื่องลำบาก/กินใจ' },
   { key: 'trend', label: '🔥 กระแสไวรัล' },
 ];
 
