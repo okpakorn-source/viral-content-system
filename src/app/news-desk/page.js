@@ -114,6 +114,11 @@ export default function NewsDeskPage() {
 
   useEffect(() => {
     setMe(localStorage.getItem('desk_username') || '');
+    // ★ 16 มิ.ย.: เปิดแท็บตาม ?tab= ใน URL (ให้ลิงก์ "คลังส่งเช้า" จาก sidebar เด้งมาที่แท็บคลังเลย)
+    try {
+      const t = new URLSearchParams(window.location.search).get('tab');
+      if (t && TABS.some(x => x.id === t)) setTab(t);
+    } catch {}
   }, []);
 
   const ensureName = () => {
@@ -219,33 +224,42 @@ export default function NewsDeskPage() {
   const copyShortlist = async () => {
     if (!items.length) { setMsg('คลังว่าง — ไปเลือกข่าวกด ☆ เก็บส่งเช้า ก่อน'); return; }
     const today = new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' });
-    const lines = items.map((it, i) => {
-      const g = qualityGrade(it);
-      return `${i + 1}. ${it.title}\n   📁 ${it.category || '-'} · ${g.emoji} ${g.label}\n   🔗 ${it.url || '(คลิป/บทถอดเสียง)'}`;
+    // ★ แยกหมวดหมู่ — ส่งพนักงานเห็นชัดว่าข่าวกลุ่มไหนมีอะไรบ้าง
+    const groups = {};
+    for (const it of items) { const cat = it.category || 'อื่นๆ'; (groups[cat] = groups[cat] || []).push(it); }
+    let n = 0;
+    const blocks = Object.entries(groups).map(([cat, arr]) => {
+      const lines = arr.map(it => { n++; return `${n}. ${it.title}\n🔗 ${it.url || '(คลิป/บทถอดเสียง — เปิดในโต๊ะข่าว)'}`; });
+      return `【 ${cat} 】\n${lines.join('\n\n')}`;
     });
-    const text = `📰 ข่าวให้เจนวันนี้ (${today}) — ${items.length} ข่าว\n━━━━━━━━━━━━━━━\n\n${lines.join('\n\n')}`;
+    const text = `📰 ข่าวให้เจนวันนี้ (${today}) — ${items.length} ข่าว\n━━━━━━━━━━━━━━━\n\n${blocks.join('\n\n\n')}`;
     try {
       await navigator.clipboard.writeText(text);
-      setMsg(`📋 คัดลอกแล้ว ${items.length} ข่าว — วางในแชท (Discord/Line) ส่งพนักงานได้เลย`);
+      setMsg(`📋 คัดลอกแล้ว ${items.length} ข่าว (แยกหมวด) — วางในแชท Discord/Line ส่งพนักงานได้เลย`);
     } catch {
       window.prompt('คัดลอกข้อความนี้ (Ctrl+C):', text);
     }
   };
 
   const act = async (id, action) => {
-    const user = ensureName();
-    if (!user && action !== 'dismiss') return;
-    // ★ 15 มิ.ย.: "ไม่เอา"/"หยิบไปใช้แล้ว" = ลบการ์ดออกจากจอทันที (optimistic) — กดปุ๊บหายปุ๊บ ไม่รอ refetch
-    const isRemove = action === 'dismiss' || action === 'used';
+    // ★ 16 มิ.ย.: เก็บคลัง/ไม่เอา ไม่ต้องบังคับใส่ชื่อ (เดิม ☆ เก็บส่งเช้า กดแล้วเงียบเพราะ return ตอนไม่มีชื่อ)
+    const noNameOk = ['dismiss', 'shortlist', 'unshortlist'].includes(action);
+    const user = ensureName() || (noNameOk ? 'ทีม' : '');
+    if (!user && !noNameOk) return;
+    // ★ optimistic: เก็บคลัง=สลับ ⭐ ทันที | ไม่เอา/หยิบใช้/เอาออกจากคลัง(ในแท็บคลัง)=ลบการ์ดทันที
+    const isRemove = action === 'dismiss' || action === 'used' || (action === 'unshortlist' && tab === 'shortlist');
     if (isRemove) setItems(prev => prev.filter(x => x.id !== id));
+    else if (action === 'shortlist') setItems(prev => prev.map(x => x.id === id ? { ...x, shortlisted: true } : x));
+    else if (action === 'unshortlist') setItems(prev => prev.map(x => x.id === id ? { ...x, shortlisted: false } : x));
     try {
       const res = await fetch('/api/news-desk', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, id, user }),
       });
       const d = await res.json();
-      if (!d.success) { alert(d.error); load(); return; }   // พลาด → คืนการ์ด
-      if (!isRemove) load();   // dismiss/used ลบจากจอแล้ว ไม่ refetch (กันเด้งกลับ); อื่นๆ refetch ปกติ
+      if (!d.success) { alert(d.error); load(); return; }   // พลาด → ดึงใหม่คืนสถานะ
+      // dismiss/used/shortlist/unshortlist อัปเดตจอแล้ว ไม่ refetch (กันเด้งกลับ); อื่นๆ refetch
+      if (!isRemove && action !== 'shortlist' && action !== 'unshortlist') load();
     } catch (e) {
       alert('บันทึกไม่สำเร็จ: ' + (e.message || '')); load();
     }

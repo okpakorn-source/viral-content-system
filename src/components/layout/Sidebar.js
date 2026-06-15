@@ -40,6 +40,7 @@ export default function Sidebar() {
     { label: 'สร้างใหม่', icon: '✨', href: '/content/new', highlight: true },
     { type: 'divider', label: 'เครื่องมือ' },
     { label: '🗞️ โต๊ะข่าวกลาง', icon: '🗞️', href: '/news-desk', highlight: true },
+    { label: '⭐ คลังส่งเช้า', icon: '⭐', href: '/news-desk?tab=shortlist' },
     { label: 'Viral Radar', icon: '📡', href: '/radar', highlight: true },
     { label: 'คลังข่าว', icon: '📦', href: '/news-archive' },
     { label: 'คลังรอตรวจ', icon: '📋', href: '/review', badge: reviewCount },
