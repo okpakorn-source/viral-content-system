@@ -274,14 +274,17 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       await runGroup(G.generateGoodContentQueries(6), { ep: 'search', noClip: true });
       await runGroup(G.generateHardshipQueries(4), { ep: 'search', noClip: true });
       await runGroup(G.generateCelebFamilyQueries(5), { ep: 'news' });
-      // ── กลุ่มเสริม (หมุน 3 จาก 6 ต่อรอบ ตามชั่วโมง — วนครบใน 2 รอบ): ลดคำค้นซ้ำซ้อน/ต้นทุน ──
+      // ★ v6 (16 มิ.ย. ทีมขอเน้น): ย้อนสัมภาษณ์เก่า เป็นแกนหลัก รันทุกรอบ — บทความ /news + "คลิปจริง" /videos (YT)
+      const _tbQs = G.generateThrowbackQueries(6);
+      await runGroup(_tbQs.slice(0, 4), { ep: 'news', lane: 'throwback', tr: 'qdr:y', num: 8 });   // บทความย้อนสัมภาษณ์
+      await runGroup(_tbQs.slice(0, 4), { ep: 'videos', lane: 'video', num: 8 });                  // คลิปสัมภาษณ์จริง (YT — ดิสคัฟเวอรี)
+      // ── กลุ่มเสริม (หมุน 3 จาก 5 ต่อรอบ ตามชั่วโมง): ลดคำค้นซ้ำซ้อน/ต้นทุน ──
       const _h = Math.floor(Date.now() / 3600e3);
       const extra = [
         () => runGroup(G.generateCelebLifestyleQueries(5), { ep: 'search', noClip: true }),       // ไลฟ์สไตล์ (เปิดบ้าน/รับสัตว์)
         () => runGroup(G.generateCelebRadarQueries(6), { ep: 'news', lane: 'celeb' }),             // ดาราทุกแนว (ดราม่า/รัก)
         () => runGroup(G.generateSocialClipQueries(5), { ep: 'search', lane: 'video' }),           // คลิป/เพจ (เว็บ+FB/IG)
         () => runGroup(G.generateSocialClipQueries(3), { ep: 'videos', lane: 'video' }),           // คลิปครีเอเตอร์ (YT)
-        () => runGroup(G.generateThrowbackQueries(4), { ep: 'news', lane: 'throwback', tr: 'qdr:y', num: 8 }), // ย้อนสัมภาษณ์
         () => runGroup(G.generateEvergreenCelebQueries(4), { ep: 'news', lane: 'evergreen-celeb', tr: 'qdr:y', num: 6 }), // ดาราดีอมตะ
       ];
       for (let i = 0; i < extra.length; i++) {
@@ -366,8 +369,12 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
 
   // ── ★ 16 มิ.ย. (ทีมชี้ "5 ดาราวิจารณ์โดนถล่ม + ปลูกถ่ายอวัยวะ รพ."): 2 กฎใหม่ ──
   //   ① ข่าวทางการ/สถาบัน/รพ.ที่ไม่มีตัวละครหลัก (ไม่ใช่ดารา) = ตัด  ② กระแส/ดราม่าเก่าที่เล่นใหม่ไม่ได้ = ตัด (เว้นเลนกระแสสด)
-  stats.noChar = 0; stats.staleTrend = 0;
+  stats.noChar = 0; stats.staleTrend = 0; stats.royalNeg = 0;
   classified = classified.filter(c => {
+    // ★ 16 มิ.ย. (สำคัญสุด): สถาบันแง่ลบ/เสื่อมเสีย/ประจาน/อ่อนไหว = ตัดเด็ดขาด (แง่ดี/ชื่นชมปล่อยผ่าน)
+    if (c.royalNegative === true) {
+      stats.royalNeg++; console.log(`[Harvester] 🚫 สถาบันแง่ลบ/อ่อนไหว: ${String(c.title).slice(0, 50)}`); return false;
+    }
     if (c.hasMainChar === false && c.subject !== 'celeb') {
       stats.noChar++; console.log(`[Harvester] 🚫 ไม่มีตัวละครหลัก (ทางการ/รพ.): ${String(c.title).slice(0, 50)}`); return false;
     }
