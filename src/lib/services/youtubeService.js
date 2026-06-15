@@ -3,7 +3,34 @@ import OpenAI from 'openai';
 import { writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createReadStream } from 'fs';
+import { createReadStream, existsSync } from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
+
+// ★ 15 มิ.ย.: ถอด "เสียงพูดจริง" ด้วย yt-dlp(โหลดเสียง)+Whisper — ใช้เมื่อคลิปไม่มีซับไตเติล
+//   yt-dlp.exe รันได้แค่ Windows (เครื่องทีม) — บน Vercel จะ throw แล้ว caller จัดการ error เอง
+async function whisperFromAudio(url) {
+  if (process.platform !== 'win32') throw new Error('ถอดเสียง (Whisper) ได้เฉพาะเครื่องทีม (Windows) — คลิปนี้ไม่มีซับไตเติล');
+  const exe = join(process.cwd(), 'bin', 'yt-dlp.exe');
+  if (!existsSync(exe)) throw new Error('ไม่พบ bin/yt-dlp.exe — ถอดเสียงคลิปไม่มีซับได้เฉพาะเครื่องทีม');
+  const audioPath = join(tmpdir(), `yt_${Date.now()}.m4a`);
+  try {
+    // โหลดเฉพาะเสียง m4a (เล็ก + Whisper รับได้ตรง)
+    await execFileAsync(exe, ['-f', 'ba[ext=m4a]/ba/b', '-o', audioPath, '--no-warnings', '--no-playlist', url], { maxBuffer: 1024 * 1024 * 20, timeout: 180_000 });
+    if (!existsSync(audioPath)) throw new Error('ดาวน์โหลดเสียงไม่สำเร็จ');
+    const tr = await getOpenai().audio.transcriptions.create({
+      file: createReadStream(audioPath), model: 'whisper-1', language: 'th',
+      response_format: 'verbose_json', prompt: 'ถอดเสียงภาษาไทยจากคลิป YouTube ข่าว รายการ สัมภาษณ์',
+    });
+    const text = String(tr.text || '').trim();
+    if (text.length < 10) throw new Error('ถอดเสียงไม่สำเร็จ — อาจไม่มีเสียงพูด');
+    return { text, duration: Math.round(tr.duration || 0) };
+  } finally {
+    try { await unlink(audioPath); } catch {}
+  }
+}
 
 // ★ lazy-init: ห้าม new OpenAI() ระดับ module — SDK throw ตอน build ถ้า env ไม่มี key (เช่น Vercel Preview)
 let _openai = null;
@@ -92,7 +119,8 @@ export async function transcribeYoutube({ url, videoBuffer, mimeType }) {
       if (process.env.SUPADATA_API_KEY) {
         try {
           console.log(`[YouTube-Service] Trying Supadata fallback...`);
-          const res = await fetch(`https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&lang=th`, {
+          // mode=auto → ถ้าไม่มีซับ supadata จะถอดเสียงด้วย AI ให้ (ถอดเสียงจริง บนคลาวด์)
+          const res = await fetch(`https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&lang=th&mode=auto`, {
             headers: {
               'x-api-key': process.env.SUPADATA_API_KEY,
               'Accept': 'application/json',
@@ -118,11 +146,26 @@ export async function transcribeYoutube({ url, videoBuffer, mimeType }) {
         }
       }
 
-      return {
-        success: false,
-        error: 'คลิปนี้ไม่มี subtitle — ลองอัปโหลดไฟล์วิดีโอเพื่อถอดเสียงด้วย AI แทน',
-        needUpload: true,
-      };
+      // ★ 15 มิ.ย.: ไม่มีซับ → ถอด "เสียงพูดจริง" ด้วย yt-dlp+Whisper (เครื่องทีม) — ไม่ใช่จบที่ error
+      try {
+        console.log(`[YouTube-Service] ไม่มีซับ → ลองถอดเสียงด้วย Whisper...`);
+        const { text, duration } = await whisperFromAudio(url);
+        return {
+          success: true,
+          text: `=== ถอดเสียงจากคลิป YouTube (Whisper) ===\nความยาว: ${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')} นาที\n\n${text}\n\n=== จบถอดเสียง ===`,
+          rawText: text,
+          title: text.substring(0, 80) + (text.length > 80 ? '...' : ''),
+          duration,
+          method: 'whisper',
+        };
+      } catch (we) {
+        console.log(`[YouTube-Service] Whisper fallback: ${we.message?.slice(0, 80)}`);
+        return {
+          success: false,
+          error: `คลิปนี้ไม่มีซับไตเติล — ${we.message || 'ถอดเสียงด้วย AI ไม่สำเร็จ'}`,
+          needUpload: true,
+        };
+      }
     }
 
     const fullText = transcript.map(s => s.text).join(' ').replace(/\s+/g, ' ').trim();
