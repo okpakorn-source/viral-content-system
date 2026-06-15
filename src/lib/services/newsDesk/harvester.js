@@ -364,6 +364,20 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     return true;
   });
 
+  // ── ★ 16 มิ.ย. (ทีมชี้ "5 ดาราวิจารณ์โดนถล่ม + ปลูกถ่ายอวัยวะ รพ."): 2 กฎใหม่ ──
+  //   ① ข่าวทางการ/สถาบัน/รพ.ที่ไม่มีตัวละครหลัก (ไม่ใช่ดารา) = ตัด  ② กระแส/ดราม่าเก่าที่เล่นใหม่ไม่ได้ = ตัด (เว้นเลนกระแสสด)
+  stats.noChar = 0; stats.staleTrend = 0;
+  classified = classified.filter(c => {
+    if (c.hasMainChar === false && c.subject !== 'celeb') {
+      stats.noChar++; console.log(`[Harvester] 🚫 ไม่มีตัวละครหลัก (ทางการ/รพ.): ${String(c.title).slice(0, 50)}`); return false;
+    }
+    // กระแสเก่าเล่นใหม่ไม่ได้ — เว้นเลนกระแสสด (trend/buzz/trend-track ตั้งใจตามกระแสปัจจุบัน)
+    if (c.staleTrend === true && !['trend', 'buzz', 'trend-track'].includes(c.lane)) {
+      stats.staleTrend++; console.log(`[Harvester] 🚫 กระแสเก่าเล่นใหม่ไม่ได้: ${String(c.title).slice(0, 50)}`); return false;
+    }
+    return true;
+  });
+
   // ── ★ กรองกระแสอดีต (ทีมสั่ง 12 มิ.ย. ค่ำ — เคสเจนนี่จ่ายหนี้แม่): "เหตุการณ์ครั้งเดียว" ที่เก่าแล้ว ≠ ข่าวน้ำดีไร้กาลเวลา ──
   //   เลน evergreen ตั้งใจค้นย้อนทั้งปี → รับเฉพาะเรื่องแบบแผน (pattern) เท่านั้น
   //   เลนอื่น: event ที่เผยแพร่เกิน 30 วัน = ขุดของเก่า ทิ้ง
