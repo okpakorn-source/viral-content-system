@@ -399,3 +399,62 @@ export function applyMixGovernor(items, mixToday) {
   adjusted.sort((a, b) => b._sortScore - a._sortScore);
   return { items: adjusted, governor };
 }
+
+// ════════════════════════════════════════════════════
+// Discovery Ranking (15 มิ.ย.) — แก้ "ฟีดวนข่าวเดิม + ข่าวคะแนนกลางจมล่างไม่เคยผ่านตา"
+//   เดิมเรียง _sortScore ล้วน → การ์ดคะแนนสูงเกาะหัวฟีดตลอด, 50-60 ไม่มีโอกาสถูกเห็น
+//   ใหม่ 3 กลไก: ① ดันข่าวใหม่/ยังไม่มีใครแตะ ② หมุนเวียนตามเวลา (สลับลำดับเองทุกช่วง)
+//             ③ สปอตไลต์ — แทรกข่าวคะแนนกลางที่ถูกฝัง ลงตำแหน่งที่มองเห็น
+//   *รักษาความนิ่งพอให้คนกดทำได้: ภายในช่วงเวลาเดิม ลำดับคงที่ (rotate เป็นช่วง ไม่ใช่ทุกรีเฟรช)
+// ════════════════════════════════════════════════════
+export function applyDiscoveryRanking(items, opts = {}) {
+  if (!Array.isArray(items) || items.length <= 3) return items || [];
+  const now = Date.now();
+  const rotateMs = opts.rotateMs ?? 10 * 60 * 1000;   // โครงหลักสลับลำดับทุก ~10 นาที
+  const spotMs = opts.spotMs ?? 4 * 60 * 1000;        // ช่องสปอตไลต์หมุนไวกว่า ~4 นาที
+  const mainBucket = Math.floor(now / rotateMs);
+  const spotBucket = Math.floor(now / spotMs);
+  // hash id+bucket → 0..1 (เปลี่ยน bucket = ได้ค่าใหม่ = หมุนเวียน)
+  const rnd = (id, bucket, salt = 0) => {
+    let h = (2166136261 ^ bucket ^ (salt * 2654435761)) >>> 0;
+    const s = String(id || '');
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    return (h % 100000) / 100000;
+  };
+
+  const scored = items.map(it => {
+    const base = it._sortScore ?? it.finalScore ?? 0;
+    const ageH = Math.max(0, (now - new Date(it.harvestedAt || 0).getTime()) / 36e5);
+    const freshBoost = ageH <= 6 ? 10 : ageH <= 24 ? 5 : 0;                       // ข่าวเพิ่งเข้าโต๊ะ ดันให้ผ่านตา
+    const untouchedBoost = (!it.claimedBy && it.status === 'new') ? 4 : 0;        // ยังไม่มีใครพิจารณา ดันให้เห็น
+    const jitter = (rnd(it.id, mainBucket) - 0.5) * 14;                           // ±7 หมุนเวียนตามเวลา
+    const _discBase = base + freshBoost + untouchedBoost;
+    return { ...it, _discBase, _disc: _discBase + jitter };
+  });
+  const ranked = [...scored].sort((a, b) => b._disc - a._disc);
+
+  // ── สปอตไลต์: แทรกข่าวคะแนนกลางที่ถูกฝัง ลงตำแหน่งที่มองเห็น ──
+  const SPOT_POSITIONS = opts.spotPositions ?? [5, 11, 17, 24]; // ตำแหน่ง 0-based ในฟีด
+  const MID_MIN = opts.midMin ?? 40;                            // ข่าวคะแนนฐาน ≥40 ถึงคู่ควรถูกหยิบขึ้น
+  const headIds = new Set(ranked.slice(0, (SPOT_POSITIONS.at(-1) || 0) + 1).map(i => i.id));
+  // กองค้นพบ = คะแนนฐานพอใช้ + ไม่ใช่กลุ่มที่ governor กดจม (_govBonus<0) + ยังไม่อยู่โซนหัว
+  const pool = ranked.filter(it => (it._discBase || 0) >= MID_MIN && (it._govBonus ?? 0) >= 0 && !headIds.has(it.id));
+  if (pool.length === 0) return ranked;
+
+  // หยิบจากกองค้นพบแบบหมุนเวียนเร็ว (spotBucket) — เปลี่ยนหน้าทุก ~4 นาที
+  const picks = [...pool].sort((a, b) => rnd(a.id, spotBucket, 3) - rnd(b.id, spotBucket, 3)).slice(0, SPOT_POSITIONS.length)
+    .map(p => ({ ...p, _spotlight: true }));
+  const pickIds = new Set(picks.map(p => p.id));
+
+  // ประกอบฟีดใหม่: เดินตาม ranked (ข้ามใบที่ถูกหยิบ) แล้ววางสปอตไลต์ตามตำแหน่ง
+  const flow = ranked.filter(it => !pickIds.has(it.id));
+  const out = [];
+  let fi = 0, si = 0;
+  for (let pos = 0; out.length < ranked.length; pos++) {
+    if (si < picks.length && pos === SPOT_POSITIONS[si]) out.push(picks[si++]);
+    else if (fi < flow.length) out.push(flow[fi++]);
+    else if (si < picks.length) out.push(picks[si++]);
+    else break;
+  }
+  return out;
+}

@@ -488,6 +488,7 @@ export default function NewsDeskPage() {
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, fontSize: 12 }}>
                       <span style={{ padding: '2px 9px', borderRadius: 999, background: (CAT_COLORS[it.category] || '#666') + '22', color: CAT_COLORS[it.category] || '#999', fontWeight: 600 }}>{it.category}</span>
+                      {it._spotlight && <span title="ข่าวคะแนนกลางที่ระบบดึงขึ้นมาให้ผ่านตา — กันข่าวดีจมล่าง (หมุนเวียนเรื่อยๆ)" style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(168,85,247,0.15)', color: 'var(--desk-purple, #a855f7)', fontWeight: 700 }}>💡 ค้นพบ</span>}
                       {it.foreignCountry && <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(59,130,246,0.15)', color: 'var(--desk-blue)', fontWeight: 700 }}>🌏 ข่าวต่างประเทศ · {it.foreignCountry}</span>}
                       {it.sameStoryAs && <span title={it.sameStoryAs.title} style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(245,158,11,0.15)', color: 'var(--desk-amber)', fontWeight: 700 }}>⚠️ เรื่องนี้เคยส่งเจนแล้ว (ทำซ้ำได้ถ้าตั้งใจ)</span>}
                       <span style={{ color: 'var(--text-muted)' }}>{it.source}</span>

@@ -6,7 +6,7 @@
  */
 import { NextResponse } from 'next/server';
 import { createStore } from '@/lib/persistStore';
-import { applyMixGovernor } from '@/lib/services/newsDesk/deskBrain';
+import { applyMixGovernor, applyDiscoveryRanking } from '@/lib/services/newsDesk/deskBrain';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -49,8 +49,12 @@ export async function GET(request) {
     // ★ Mix Governor (เฟส 2): เรียง feed ตามโควตาที่เหลือของวัน — เกินเพดานดราม่าแล้วการ์ดดราม่าจม น้ำดีลอย
     const { items: governed, governor } = applyMixGovernor(items, mix);
 
+    // ★ Discovery Ranking (15 มิ.ย.): หมุนเวียนหัวฟีด + ดันข่าวใหม่/ยังไม่แตะ + สปอตไลต์ข่าวคะแนนกลาง
+    //   แก้อาการ "เลื่อนดูก็วนข่าวเดิม ข่าว 50-60 ไม่เคยผ่านตา" — ไม่แตะคะแนนจริง แค่จัดลำดับการมองเห็น
+    const discovered = applyDiscoveryRanking(governed);
+
     // fullText (บทถอดเสียงคลิป) ยาว — ไม่ส่งให้หน้า feed
-    const lightItems = governed.slice(0, limit).map(({ fullText, ...rest }) => rest);
+    const lightItems = discovered.slice(0, limit).map(({ fullText, ...rest }) => rest);
 
     // ★ brief ล่าสุดจาก บก.ใหญ่ AI + สถานะสวิตช์ Auto-Pilot จริง (UI ต้องโชว์ตามที่ทีมตั้ง ไม่ใช่ค่า default)
     let chiefBrief = null;
