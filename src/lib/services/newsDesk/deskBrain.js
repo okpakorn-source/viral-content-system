@@ -292,7 +292,8 @@ async function getJudgeFewshot() {
     const viral = recent.filter(f => f.action === 'viral').slice(-5);
     const flop = recent.filter(f => f.action === 'flop').slice(-5);
     const picked = recent.filter(f => f.action === 'sent' || f.action === 'claimed').slice(-6);
-    const dropped = recent.filter(f => f.action === 'dismissed').slice(-6);
+    // ★ 15 มิ.ย.: จำ "ที่ทีมกดไม่เอา" มากขึ้น (8 ใบ) — ระบบเรียนรู้ว่าข่าวแบบไหนทีมไม่เอา ให้คะแนนต่ำลง
+    const dropped = recent.filter(f => f.action === 'dismissed').slice(-8);
     if (picked.length === 0 && dropped.length === 0 && viral.length === 0) return '';
     return '\n=== รสนิยมจริงของกองบรรณาธิการ (เรียนจากผลจริงล่าสุด) ===\n' +
       viral.map(f => `🔥 โพสต์แล้วปังจริง: ${String(f.title).slice(0, 80)} [${f.category || ''}]`).join('\n') + (viral.length ? '\n' : '') +

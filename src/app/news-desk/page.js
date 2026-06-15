@@ -157,13 +157,20 @@ export default function NewsDeskPage() {
   const act = async (id, action) => {
     const user = ensureName();
     if (!user && action !== 'dismiss') return;
-    const res = await fetch('/api/news-desk', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, id, user }),
-    });
-    const d = await res.json();
-    if (!d.success) alert(d.error);
-    load();
+    // ★ 15 มิ.ย.: "ไม่เอา"/"หยิบไปใช้แล้ว" = ลบการ์ดออกจากจอทันที (optimistic) — กดปุ๊บหายปุ๊บ ไม่รอ refetch
+    const isRemove = action === 'dismiss' || action === 'used';
+    if (isRemove) setItems(prev => prev.filter(x => x.id !== id));
+    try {
+      const res = await fetch('/api/news-desk', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, id, user }),
+      });
+      const d = await res.json();
+      if (!d.success) { alert(d.error); load(); return; }   // พลาด → คืนการ์ด
+      if (!isRemove) load();   // dismiss/used ลบจากจอแล้ว ไม่ refetch (กันเด้งกลับ); อื่นๆ refetch ปกติ
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e.message || '')); load();
+    }
   };
 
   const sendToWorkflow = async (item) => {
