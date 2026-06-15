@@ -12,12 +12,13 @@ const TABS = [
   { id: 'good', label: '💎 น้ำดี' },          // good + ข่าวเก่า + ตามรอย + ลำบาก
   { id: 'celeb', label: '🎬 ดารา' },          // celeb + ย้อนสัมภาษณ์ + ดาราอมตะ
   { id: 'trend', label: '🔥 กระแส' },         // trend + แชร์จริง
+  { id: 'trendtrack', label: '🔴 ติดตามกระแส' }, // ตามกระแสเฉพาะที่ทีมสั่ง
   { id: 'clip', label: '📺 คลิป/เพจ' },        // video/รีลส์ + คลิปสัมภาษณ์
   { id: 'shortlist', label: '⭐ คลังส่งเช้า' },
   { id: 'ready', label: '✅ พร้อมใช้' },
 ];
 
-const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁', buzz: '📊', celeb: '🎬', throwback: '⏪', 'evergreen-celeb': '⭐', video: '📺' };
+const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁', buzz: '📊', celeb: '🎬', throwback: '⏪', 'evergreen-celeb': '⭐', video: '📺', 'trend-track': '🔴' };
 
 // ★ 15 มิ.ย.: แนวที่ "สั่งหาเฉพาะแนว" ได้ (key ต้องตรงกับ generateFocusQueries ใน goodNewsScout)
 const FOCUS_OPTIONS = [
@@ -96,6 +97,7 @@ export default function NewsDeskPage() {
   const [loading, setLoading] = useState(true);
   const [harvesting, setHarvesting] = useState(false);
   const [focusSel, setFocusSel] = useState('celeb_family');
+  const [trendTopic, setTrendTopic] = useState('');
   const [msg, setMsg] = useState('');
   const [me, setMe] = useState('');
   const [governor, setGovernor] = useState(null);
@@ -106,6 +108,7 @@ export default function NewsDeskPage() {
   const [mktUrl, setMktUrl] = useState('');
   const [mktSending, setMktSending] = useState(false);
   const [researching, setResearching] = useState({}); // id → true
+  const [moreBtns, setMoreBtns] = useState({}); // id → กางปุ่มขั้นสูง (ปรึกษา บก./เจาะลึก)
 
   useEffect(() => {
     setMe(localStorage.getItem('desk_username') || '');
@@ -210,6 +213,23 @@ export default function NewsDeskPage() {
       const res = await fetch('/api/news-desk/harvest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ focus: focusSel }) });
       const d = await res.json();
       setMsg(d.success ? `🎯 หาแนว "${f?.label}" เสร็จ · เก็บ ${d.harvested} · ผ่านคัด ${d.added} · ส่งเจน ${d.autoPicked || 0}` : `❌ ${d.error}`);
+      load();
+    } catch (e) { setMsg('❌ ' + e.message); }
+    setHarvesting(false);
+  };
+
+  // ★ 16 มิ.ย.: ติดตามกระแส — ใส่ชื่อกระแส → AI วิเคราะห์ตัวละคร+คีย์เวิร์ด → ค้นทุกแหล่ง → แท็บ 🔴 ติดตามกระแส
+  const trackTrend = async () => {
+    const topic = trendTopic.trim();
+    if (!topic) { setMsg('ใส่ชื่อกระแสก่อน (เช่น "ตินติน ฟรีด้า")'); return; }
+    setHarvesting(true); setMsg(`🔴 วิเคราะห์กระแส "${topic}" — AI หาตัวละคร+คีย์เวิร์ด แล้วค้นทุกแหล่ง (ข่าว/เว็บ/ยูทูป/เพจ) ~1-2 นาที...`);
+    try {
+      const res = await fetch('/api/news-desk/trend-track', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic }) });
+      const d = await res.json();
+      if (d.success) {
+        setMsg(`🔴 กระแส "${topic}" — คีย์เวิร์ด ${(d.keywords || []).length} คำ (${(d.keywords || []).join(', ').slice(0, 80)}) · เก็บ ${d.harvested} · ผ่านคัด ${d.added}`);
+        setTab('trendtrack'); setTrendTopic('');
+      } else setMsg(`❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
     setHarvesting(false);
@@ -500,6 +520,18 @@ export default function NewsDeskPage() {
           <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>— เติมช่องว่างของวันได้ตรงจุด (เช่น วันนี้ขาดข่าวรักสัตว์)</span>
         </div>
 
+        {/* ★ 16 มิ.ย.: ติดตามกระแส — ใส่ชื่อกระแสวันนี้ → AI วิเคราะห์ตัวละคร+คีย์เวิร์ด → ค้นทุกแหล่ง */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', padding: '10px 12px', borderRadius: 12, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)' }}>
+          <span style={{ fontSize: 18 }}>🔴</span>
+          <input value={trendTopic} onChange={e => setTrendTopic(e.target.value)} disabled={harvesting}
+            onKeyDown={e => { if (e.key === 'Enter') trackTrend(); }}
+            placeholder='ติดตามกระแสวันนี้ — ใส่ชื่อกระแส/คน (เช่น "ตินติน ฟรีด้า") AI จะหาตัวละคร+ค้นทุกแหล่งให้'
+            style={{ flex: 1, padding: '9px 14px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 14 }} />
+          <button onClick={trackTrend} disabled={harvesting || !trendTopic.trim()}
+            style={{ padding: '9px 18px', borderRadius: 9, border: 'none', cursor: (harvesting || !trendTopic.trim()) ? 'not-allowed' : 'pointer', background: (harvesting || !trendTopic.trim()) ? '#4b5563' : 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap' }}>
+            {harvesting ? '⏳...' : '🔍 วิเคราะห์+ตามกระแส'}</button>
+        </div>
+
         {/* ช่องวางลิงก์คลิปสัมภาษณ์ (เหมืองนาทีทอง) */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
           <input value={clipUrl} onChange={e => setClipUrl(e.target.value)} disabled={mining}
@@ -592,6 +624,16 @@ export default function NewsDeskPage() {
 
         {msg && <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 10, background: 'rgba(139,92,246,0.12)', color: 'var(--desk-purple)', fontSize: 14 }}>{msg}</div>}
 
+        {/* ★ 16 มิ.ย.: แถบทางเดิน — เปิดมารู้เลยว่าทำอะไรก่อน-หลัง (ลดความงง) */}
+        {tab !== 'shortlist' && tab !== 'ready' && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '8px 14px', marginBottom: 12, borderRadius: 10, background: 'rgba(139,92,246,0.06)', border: '1px dashed rgba(139,92,246,0.3)', fontSize: 12.5, color: 'var(--text-secondary)' }}>
+            <span>🧭 <b>วิธีใช้:</b></span>
+            <span>① เลื่อนดูข่าว</span><span style={{ opacity: 0.5 }}>→</span>
+            <span>② เจอข่าวดีกด <b style={{ color: '#ca8a04' }}>☆ เก็บส่งเช้า</b></span><span style={{ opacity: 0.5 }}>→</span>
+            <span>③ เช้าเข้าแท็บ <b style={{ color: '#ca8a04' }}>⭐ คลังส่งเช้า</b> กด <b>📋 คัดลอกส่งพนักงาน</b></span>
+          </div>
+        )}
+
         {/* ★ แบนเนอร์คลังส่งเช้า — ปุ่มคัดลอกส่งพนักงาน */}
         {tab === 'shortlist' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', marginBottom: 12, borderRadius: 12, background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.35)' }}>
@@ -637,6 +679,7 @@ export default function NewsDeskPage() {
                         <span title="แหล่งที่มาของข่าว" style={{ padding: '2px 9px', borderRadius: 999, background: st.bg, color: st.color, fontWeight: 700 }}>{st.label}</span>
                       ); })()}
                       <span style={{ padding: '2px 9px', borderRadius: 999, background: (CAT_COLORS[it.category] || '#666') + '22', color: CAT_COLORS[it.category] || '#999', fontWeight: 600 }}>{it.category}</span>
+                      {it.trendTopic && <span title="ติดตามกระแส" style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(239,68,68,0.13)', color: 'var(--desk-red, #dc2626)', fontWeight: 700 }}>🔴 {it.trendTopic}</span>}
                       {it._spotlight && <span title="ข่าวคะแนนกลางที่ระบบดึงขึ้นมาให้ผ่านตา — กันข่าวดีจมล่าง (หมุนเวียนเรื่อยๆ)" style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(168,85,247,0.15)', color: 'var(--desk-purple, #a855f7)', fontWeight: 700 }}>💡 ค้นพบ</span>}
                       {it.foreignCountry && <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(59,130,246,0.15)', color: 'var(--desk-blue)', fontWeight: 700 }}>🌏 ข่าวต่างประเทศ · {it.foreignCountry}</span>}
                       {it.sameStoryAs && <span title={it.sameStoryAs.title} style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(245,158,11,0.15)', color: 'var(--desk-amber)', fontWeight: 700 }}>⚠️ เรื่องนี้เคยส่งเจนแล้ว (ทำซ้ำได้ถ้าตั้งใจ)</span>}
@@ -778,15 +821,21 @@ export default function NewsDeskPage() {
                       style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', fontSize: 13, fontWeight: 700 }}>
                       🚀 ส่งเข้า workflow</button>
                   )}
-                  {it.status !== 'sent' && !it.consult && (
+                  {/* ปุ่มขั้นสูง (ปรึกษา บก./เจาะลึก) ซ่อนใน ⋯ — ลดความรกของการ์ด */}
+                  {it.status !== 'sent' && moreBtns[it.id] && !it.consult && (
                     <button onClick={() => consult(it)} disabled={researching['c_' + it.id]}
                       style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: researching['c_' + it.id] ? 'wait' : 'pointer', background: 'rgba(139,92,246,0.15)', color: 'var(--desk-purple)', fontSize: 13, fontWeight: 700 }}>
                       {researching['c_' + it.id] ? '⏳ บก.กำลังดู...' : '💼 ปรึกษา บก.'}</button>
                   )}
-                  {it.status !== 'sent' && it.lane !== 'interview' && !it.research && (
+                  {it.status !== 'sent' && moreBtns[it.id] && it.lane !== 'interview' && !it.research && (
                     <button onClick={() => research(it)} disabled={researching[it.id]}
                       style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: researching[it.id] ? 'wait' : 'pointer', background: 'rgba(6,182,212,0.15)', color: 'var(--desk-cyan)', fontSize: 13, fontWeight: 700 }}>
                       {researching[it.id] ? '⏳ กำลังเจาะ...' : '🔬 เจาะลึก'}</button>
+                  )}
+                  {it.status !== 'sent' && (!it.consult || !it.research) && (
+                    <button onClick={() => setMoreBtns(p => ({ ...p, [it.id]: !p[it.id] }))} title="ปุ่มเพิ่มเติม: ปรึกษา บก. / เจาะลึก"
+                      style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', background: 'var(--bg-card)', color: 'var(--text-muted)', fontSize: 13, fontWeight: 700 }}>
+                      {moreBtns[it.id] ? '✕' : '⋯'}</button>
                   )}
                   {!PHOTO_SCOUT_OFF && (
                     <button onClick={() => scoutImg(it)} disabled={researching['img_' + it.id]}

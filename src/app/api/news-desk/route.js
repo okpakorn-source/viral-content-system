@@ -26,6 +26,7 @@ export async function GET(request) {
       good: ['good', 'evergreen', 'followup'],
       celeb: ['celeb', 'throwback', 'evergreen-celeb'],
       clip: ['video', 'interview'],
+      trendtrack: ['trend-track'],
     };
     if (TAB_LANES[tab]) items = items.filter(i => TAB_LANES[tab].includes(i.lane));
     // ★ 15 มิ.ย.: แท็บ ⭐ คลังส่งเช้า — ข่าวที่เลือกเก็บไว้ส่งพนักงาน (เรียงเก็บล่าสุดก่อน, ไม่นับที่หยิบไปแล้ว)
@@ -47,7 +48,7 @@ export async function GET(request) {
     items = items.filter(i => i.status !== 'dismissed' && !i.used);
 
     // ★ quick-fix: คะแนนเสื่อมตามอายุ — กระแสเก่าจมเอง (trend -8/วัน, good -3/วัน, เลนไร้กาลเวลาไม่เสื่อม)
-    const DECAY = { trend: 8, good: 3, evergreen: 0, 'evergreen-celeb': 0, followup: 4, interview: 0, buzz: 10, celeb: 4, throwback: 0, video: 0 }; // evergreen-celeb/throwback/video = ของตั้งใจหยิบ/ดิสคัฟเวอรี ไม่เสื่อม | celeb = ดรามาบันเทิง เสื่อมปานกลาง
+    const DECAY = { trend: 8, good: 3, evergreen: 0, 'evergreen-celeb': 0, followup: 4, interview: 0, buzz: 10, celeb: 4, throwback: 0, video: 0, 'trend-track': 6 }; // trend-track = กระแสสด เสื่อมปานกลาง | evergreen-celeb/throwback/video = ของตั้งใจหยิบ ไม่เสื่อม
     items = items.map(i => {
       const ageDays = Math.max(0, (Date.now() - new Date(i.harvestedAt || 0).getTime()) / 864e5);
       const decayed = Math.max(0, Math.round((i.finalScore || 0) - ageDays * (DECAY[i.lane] ?? 4)));

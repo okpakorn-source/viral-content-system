@@ -295,7 +295,7 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       const fetcher = ex.endpoint === 'search' ? serperSearch(ex.q, { num: 10, timeRange: ex.timeRange })
         : ex.endpoint === 'videos' ? serperVideos(ex.q, { num: 10 })
         : serperNews(ex.q, { num: 8, timeRange: ex.timeRange || 'qdr:d' });
-      raw.push(...(await fetcher).map(r => ({ ...r, lane: ex.lane || 'trend' })));
+      raw.push(...(await fetcher).map(r => ({ ...r, lane: ex.lane || 'trend', ...(ex.tag || {}) })));
     } catch (e) { console.log('[Harvester] extra query failed:', e.message?.slice(0, 50)); }
   }
   if (lanes.includes('evergreen')) {
@@ -571,8 +571,8 @@ async function autoPilotPick(freshItems, store, opts = {}) {
   for (const it of freshItems) {
     if ((it.judgeScore ?? 0) < cfg.minScore || it.status !== 'new') continue;
     if ((it.toxicity || 0) >= 2 || (it.fbRisk || 0) >= 2) continue;
-    // ★ v5: เลน video (ยูทูป) = ดิสคัฟเวอรีเท่านั้น — ลิงก์คลิปเขียนตรงไม่ได้ (ต้องถอดเสียงก่อน) ห้าม auto-ส่ง
-    if (it.lane === 'video') continue;
+    // ★ v5: เลน video (ยูทูป)/trend-track = ดิสคัฟเวอรีเท่านั้น — ทีมคัดเอง ห้าม auto-ส่ง (คลิป/กระแสอ่อนไหวเขียนตรงไม่ได้)
+    if (it.lane === 'video' || it.lane === 'trend-track') continue;
     // ★ เรื่องซ้ำ (ป้าย sameStoryAs หรือหัวข้อพ้องกับที่ส่งแล้วใน 7 วัน) → ออโต้ข้าม
     if (it.sameStoryAs || _isDupStory(it.title)) {
       console.log(`[AutoPilot] ⏭️ ข้ามเรื่องซ้ำ: ${String(it.title).slice(0, 50)}`);
