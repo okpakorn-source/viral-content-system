@@ -94,6 +94,20 @@ export async function POST(request) {
   try {
     const { action, id, user = 'ไม่ระบุ', enabled } = await request.json();
 
+    // ★ ล้างกระดาน (15 มิ.ย. คำสั่งทีม): เก็บการ์ด 'new' ทั้งหมดเข้ากรุ — เคลียร์โต๊ะก่อนสั่งหาข่าวชุดใหม่
+    if (action === 'clearBoard') {
+      const store = createStore('news-desk');
+      const all = await store.getAll();
+      let cleared = 0;
+      for (const it of all) {
+        if (it.status === 'new') {
+          await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: '🧹 ล้างกระดาน (ทีมสั่งเคลียร์)' })).catch(() => {});
+          cleared++;
+        }
+      }
+      return NextResponse.json({ success: true, cleared });
+    }
+
     // ★ สวิตช์ Auto-Pilot (ไม่ผูกกับข่าวใบไหน — จัดการก่อนหา item)
     if (action === 'autopilot') {
       const settings = createStore('desk-settings');

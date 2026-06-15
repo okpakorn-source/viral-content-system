@@ -30,6 +30,19 @@ async function doHarvest(opts) {
 export async function POST(request) {
   try {
     const body = await request.json().catch(() => ({}));
+    // ★ สั่งหาเฉพาะแนว (15 มิ.ย.): focus → คำค้นเฉพาะแนวนั้น → harvest แค่แนวนั้น (judge ได้ลึกขึ้นเพราะคำน้อย)
+    if (body.focus) {
+      const { generateFocusQueries } = await import('@/lib/services/newsDesk/goodNewsScout');
+      const fq = generateFocusQueries(body.focus, Number(body.count) || 8);
+      if (!fq.length) {
+        return NextResponse.json({ success: false, error: 'ไม่รู้จักแนวที่สั่ง', errorType: 'UNKNOWN_FOCUS' }, { status: 400 });
+      }
+      return await doHarvest({
+        lanes: [],
+        extraQueries: fq.map(f => ({ q: f.q, lane: f.lane, timeRange: f.timeRange })),
+        judgeTop: Math.min(40, Number(body.judgeTop) || 20),
+      });
+    }
     return await doHarvest({
       lanes: Array.isArray(body.lanes) && body.lanes.length ? body.lanes : ['trend', 'good'],
       judgeTop: Math.min(40, Number(body.judgeTop) || 24),

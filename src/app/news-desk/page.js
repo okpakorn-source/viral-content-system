@@ -22,6 +22,18 @@ const TABS = [
 
 const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁', buzz: '📊', celeb: '🎬', throwback: '⏪', 'evergreen-celeb': '⭐' };
 
+// ★ 15 มิ.ย.: แนวที่ "สั่งหาเฉพาะแนว" ได้ (key ต้องตรงกับ generateFocusQueries ใน goodNewsScout)
+const FOCUS_OPTIONS = [
+  { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
+  { key: 'celeb_drama', label: '🎬 ดราม่า/ความรักดารา' },
+  { key: 'throwback', label: '⏪ ย้อนสัมภาษณ์เก่า' },
+  { key: 'celeb_good', label: '⭐ ดาราทำดี/อมตะ' },
+  { key: 'animal', label: '🐶 รักสัตว์' },
+  { key: 'good_deed', label: '🙏 น้ำใจ/พลเมืองดี' },
+  { key: 'fighter', label: '💪 สู้ชีวิต' },
+  { key: 'trend', label: '🔥 กระแสไวรัล' },
+];
+
 // ★★ สวิตช์ปิดระบบหาภาพชั่วคราว (คำสั่งทีม 12 มิ.ย. 69): บัคภาพซ้ำข้ามข่าว + ออโต้รันถี่เกิน
 //    ให้คนหาภาพเองไปก่อน — เปิดกลับ: เปลี่ยนเป็น false (โค้ดหลังบ้านยังอยู่ครบ)
 const PHOTO_SCOUT_OFF = true;
@@ -70,6 +82,7 @@ export default function NewsDeskPage() {
   const [sentToday, setSentToday] = useState(0);
   const [loading, setLoading] = useState(true);
   const [harvesting, setHarvesting] = useState(false);
+  const [focusSel, setFocusSel] = useState('celeb_family');
   const [msg, setMsg] = useState('');
   const [me, setMe] = useState('');
   const [governor, setGovernor] = useState(null);
@@ -149,6 +162,36 @@ export default function NewsDeskPage() {
       const res = await fetch('/api/news-desk/harvest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lanes: ['good'], judgeTop: 12 }) });
       const d = await res.json();
       setMsg(d.success ? `🕵️ กองสืบกลับมาแล้ว · เก็บ ${d.harvested} · ผ่านคัด ${d.added} · ส่งเจน ${d.autoPicked || 0}` : `❌ ${d.error}`);
+      load();
+    } catch (e) { setMsg('❌ ' + e.message); }
+    setHarvesting(false);
+  };
+
+  // ★ ล้างกระดาน + หาข่าวชุดใหม่ (15 มิ.ย. คำสั่งทีม): เคลียร์ข่าวเก่าทั้งหมด แล้วสั่ง AI ไปเก็บใหม่
+  const clearAndRefresh = async () => {
+    if (!confirm('ล้างข่าวทั้งหมดบนกระดาน (เก็บเข้ากรุ ไม่ลบถาวร) แล้วสั่งหาข่าวชุดใหม่?')) return;
+    setHarvesting(true); setMsg('🧹 กำลังล้างกระดาน...');
+    try {
+      const r = await fetch('/api/news-desk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'clearBoard', user: ensureName() || 'ทีม' }) });
+      const cd = await r.json();
+      setItems([]); // เคลียร์จอทันที
+      setMsg(`🧹 ล้าง ${cd.cleared || 0} ใบ · กำลังหาข่าวชุดใหม่ (~2-4 นาที)...`);
+      const res = await fetch('/api/news-desk/harvest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await res.json();
+      setMsg(d.success ? `✅ ล้างแล้ว + เก็บใหม่ ${d.harvested} · ผ่านคัด ${d.added} · AI ให้คะแนน ${d.judged}` : `❌ ${d.error}`);
+      load();
+    } catch (e) { setMsg('❌ ' + e.message); }
+    setHarvesting(false);
+  };
+
+  // ★ สั่งหาข่าว "เฉพาะแนว" (15 มิ.ย.): เลือกโฟกัส → ค้นเฉพาะแนวนั้น เติมช่องว่างได้ตรงจุด
+  const focusHarvest = async () => {
+    const f = FOCUS_OPTIONS.find(x => x.key === focusSel);
+    setHarvesting(true); setMsg(`🎯 สั่งหาข่าวแนว "${f?.label || focusSel}" — AI ค้น+คัด (~2-3 นาที)...`);
+    try {
+      const res = await fetch('/api/news-desk/harvest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ focus: focusSel }) });
+      const d = await res.json();
+      setMsg(d.success ? `🎯 หาแนว "${f?.label}" เสร็จ · เก็บ ${d.harvested} · ผ่านคัด ${d.added} · ส่งเจน ${d.autoPicked || 0}` : `❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
     setHarvesting(false);
@@ -388,11 +431,29 @@ export default function NewsDeskPage() {
               padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(34,197,94,0.5)', cursor: harvesting ? 'wait' : 'pointer',
               background: harvesting ? '#4b5563' : 'rgba(34,197,94,0.15)', color: harvesting ? '#fff' : 'var(--desk-green, #16a34a)', fontWeight: 700, fontSize: 14,
             }}>{harvesting ? '⏳...' : '🕵️ สั่งกองสืบน้ำดี'}</button>
+          <button onClick={clearAndRefresh} disabled={harvesting} title="เก็บข่าวทั้งหมดบนกระดานเข้ากรุ (ไม่ลบถาวร) แล้วสั่ง AI หาข่าวชุดใหม่ทันที"
+            style={{
+              padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.45)', cursor: harvesting ? 'wait' : 'pointer',
+              background: harvesting ? '#4b5563' : 'rgba(239,68,68,0.12)', color: harvesting ? '#fff' : 'var(--desk-red, #dc2626)', fontWeight: 700, fontSize: 14,
+            }}>{harvesting ? '⏳...' : '🧹 ล้างกระดาน + หาใหม่'}</button>
           <button onClick={harvest} disabled={harvesting}
             style={{
               padding: '8px 18px', borderRadius: 10, border: 'none', cursor: harvesting ? 'wait' : 'pointer',
               background: harvesting ? '#4b5563' : 'linear-gradient(135deg,#8b5cf6,#6d28d9)', color: '#fff', fontWeight: 700, fontSize: 14,
             }}>{harvesting ? '⏳ กำลังคัดกรอง...' : '🔄 หาข่าวรอบใหม่'}</button>
+        </div>
+
+        {/* ★ สั่งหาข่าวเฉพาะแนว (15 มิ.ย.) — เลือกแนวที่อยากได้ แล้วยิงค้นเฉพาะแนวนั้น */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>🎯 สั่งหาเฉพาะแนว:</span>
+          <select value={focusSel} onChange={e => setFocusSel(e.target.value)} disabled={harvesting}
+            style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 13.5, fontWeight: 600, cursor: 'pointer' }}>
+            {FOCUS_OPTIONS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+          </select>
+          <button onClick={focusHarvest} disabled={harvesting}
+            style={{ padding: '7px 16px', borderRadius: 9, border: '1px solid rgba(59,130,246,0.5)', cursor: harvesting ? 'wait' : 'pointer', background: harvesting ? '#4b5563' : 'rgba(59,130,246,0.13)', color: harvesting ? '#fff' : 'var(--desk-blue, #2563eb)', fontWeight: 700, fontSize: 13.5 }}>
+            {harvesting ? '⏳...' : '🎯 หาแนวนี้'}</button>
+          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>— เติมช่องว่างของวันได้ตรงจุด (เช่น วันนี้ขาดข่าวรักสัตว์)</span>
         </div>
 
         {/* ช่องวางลิงก์คลิปสัมภาษณ์ (เหมืองนาทีทอง) */}

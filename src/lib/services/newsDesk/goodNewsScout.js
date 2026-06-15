@@ -178,6 +178,47 @@ export function generateEvergreenCelebQueries(count = 4) {
   return out.slice(0, count).map(q => ({ q, genre: 'ดาราดีอมตะ' }));
 }
 
+// ════════════════════════════════════════════════════
+// ★ สั่งหาข่าว "เฉพาะแนว" (15 มิ.ย. คำสั่งทีม): เลือกโฟกัส → ค้นเฉพาะแนวนั้น (เติมช่องว่างของวันได้ตรงจุด)
+// ════════════════════════════════════════════════════
+const FOCUS_FIXED = {
+  animal: ['ช่วยหมาแมวจร น้ำใจ ไวรัล', 'หนุ่มสาวเลี้ยงหมาแมวจร ใจบุญ', 'ช่วยชีวิตสัตว์ ซึ้ง ไวรัล', 'หมาแมว ผูกพันเจ้าของ ซึ้ง ไวรัล', 'สุนัขแสนรู้ ช่วยคน ไวรัล', 'รับเลี้ยงสัตว์พิการ ดูแล ไวรัล', 'สร้างบ้านให้หมาแมวจร ใจบุญ', 'ช้าง สัตว์ป่า ได้รับการช่วยเหลือ'],
+  good_deed: ['น้ำใจคนไทย ช่วยเหลือ ไวรัล', 'พลเมืองดี คืนเงิน คืนของ เจ้าของ', 'ช่วยชีวิต นาทีชีวิต ไวรัล', 'คนใจบุญ ช่วยคนเดือดร้อน ล่าสุด', 'วินมอเตอร์ไซค์ แท็กซี่ น้ำใจ คืนของ', 'กู้ภัย ช่วยชีวิต ประทับใจ', 'แจกอาหารฟรี ช่วยคนตกงาน', 'รวมเงินช่วย เพื่อนบ้าน ไวรัล'],
+  fighter: ['สู้ชีวิต ไม่ยอมแพ้ ไวรัล', 'คนพิการ สู้ชีวิต ทำธุรกิจ สำเร็จ', 'เด็กยากจน สอบติด ทุนการศึกษา', 'แม่ค้า สู้ชีวิต ส่งลูกเรียนจบ', 'ลุงป้า สู้ชีวิต ขายของ ไวรัล', 'พลิกชีวิตจากศูนย์ สำเร็จ ไวรัล', 'หาบเร่ แผงลอย สู้ชีวิต ไวรัล', 'คนสูงวัย สู้ชีวิต อาชีพน่าทึ่ง'],
+  trend: ['แห่ชื่นชม น้ำใจ ล่าสุด', 'คลิปไวรัล ประทับใจ ล่าสุด', 'สุดซึ้ง ชาวเน็ต ล่าสุด', 'ดราม่าร้านดัง ล่าสุด', 'เปิดใจทั้งน้ำตา ล่าสุด', 'สะเทือนใจ ชาวเน็ตแห่แชร์', 'คลิปกล้องวงจรปิด ช่วยเหลือ', 'ขอความเป็นธรรม ดราม่า ล่าสุด'],
+};
+
+/** รายการแนวที่สั่งได้ (ให้ UI ใช้ทำปุ่ม) — key ต้องตรงกับ generateFocusQueries */
+export const FOCUS_OPTIONS = [
+  { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
+  { key: 'celeb_drama', label: '🎬 ดราม่า/ความรักดารา' },
+  { key: 'throwback', label: '⏪ ย้อนสัมภาษณ์เก่า' },
+  { key: 'celeb_good', label: '⭐ ดาราทำดี/อมตะ' },
+  { key: 'animal', label: '🐶 รักสัตว์' },
+  { key: 'good_deed', label: '🙏 น้ำใจ/พลเมืองดี' },
+  { key: 'fighter', label: '💪 สู้ชีวิต' },
+  { key: 'trend', label: '🔥 กระแสไวรัล' },
+];
+
+/**
+ * ★ สร้างคำค้นตามแนวที่สั่ง → [{q, lane, timeRange}] (ใช้เป็น extraQueries ใน runHarvest)
+ * @param {string} focus - key จาก FOCUS_OPTIONS
+ */
+export function generateFocusQueries(focus, count = 8) {
+  const wrap = (arr, lane, timeRange) => arr.map(x => ({ q: (x && x.q) || x, lane, timeRange })).filter(o => o.q && o.q.length >= 4);
+  switch (focus) {
+    case 'celeb_family': return wrap(generateCelebFamilyQueries(count), 'good', 'qdr:m');
+    case 'celeb_drama': return wrap(generateCelebRadarQueries(count), 'celeb', 'qdr:m');
+    case 'throwback': return wrap(generateThrowbackQueries(count), 'throwback', 'qdr:y');
+    case 'celeb_good': return wrap(generateEvergreenCelebQueries(count), 'evergreen-celeb', 'qdr:y');
+    case 'animal': return wrap((FOCUS_FIXED.animal || []).slice(0, count), 'good', 'qdr:w');
+    case 'good_deed': return wrap((FOCUS_FIXED.good_deed || []).slice(0, count), 'good', 'qdr:w');
+    case 'fighter': return wrap((FOCUS_FIXED.fighter || []).slice(0, count), 'good', 'qdr:w');
+    case 'trend': return wrap((FOCUS_FIXED.trend || []).slice(0, count), 'trend', 'qdr:d');
+    default: return [];
+  }
+}
+
 /** หมุนเวรเลือกแนวตามชั่วโมง (celeb แยกเป็นเครื่องค้นชื่อ + พัก thai_abroad เพราะตัดต่างประเทศแล้ว) */
 export function pickRotatingGenres(count = 1) {
   // celeb_good → เครื่องค้นชื่อ (ทุกรอบ) | thai_abroad → พักไว้ (ติดด่านตัดต่างประเทศ 13 มิ.ย., ปลุกคืนเฟส 2)
