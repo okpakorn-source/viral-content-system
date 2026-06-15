@@ -48,6 +48,21 @@ function scoreColor(s) {
   return '#6b7280';
 }
 
+// ★ 15 มิ.ย.: เกรดคุณภาพอ่านเร็ว — อิงคะแนน บก.AI (น่าหยิบ 0-10) ก่อน ไม่มีค่อยใช้ finalScore
+//   ให้ทีมสแกนเร็วว่าข่าวไหน ดีมาก/ดี/ดีปนกลาง/ผ่าน + เห็นแนวโน้มว่าข่าว "ประเภทไหน" ดี
+function qualityGrade(it) {
+  const j = it.judgeScore;
+  let tier; // 0=ผ่าน 1=ดีปนกลาง 2=ดี 3=ดีมาก
+  if (typeof j === 'number') tier = j >= 9 ? 3 : j >= 7 ? 2 : j >= 5 ? 1 : 0;
+  else { const s = it.finalScore || 0; tier = s >= 85 ? 3 : s >= 70 ? 2 : s >= 55 ? 1 : 0; }
+  return [
+    { label: 'ผ่านเกณฑ์', emoji: '⚪', color: '#6b7280', bg: 'rgba(107,114,128,0.12)' },
+    { label: 'ดีปนกลาง', emoji: '🟡', color: '#d97706', bg: 'rgba(217,119,6,0.14)' },
+    { label: 'ดี', emoji: '✅', color: '#16a34a', bg: 'rgba(22,163,74,0.14)' },
+    { label: 'ดีมาก', emoji: '🌟', color: '#15803d', bg: 'rgba(21,128,61,0.16)' },
+  ][tier];
+}
+
 export default function NewsDeskPage() {
   const [tab, setTab] = useState('all');
   const [items, setItems] = useState([]);
@@ -480,10 +495,17 @@ export default function NewsDeskPage() {
                 border: it.status === 'claimed' ? '1px solid rgba(245,158,11,0.5)' : it.status === 'sent' ? '1px solid rgba(34,197,94,0.4)' : '1px solid var(--border)',
               }}>
                 <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                  {/* คะแนน */}
-                  <div style={{ minWidth: 52, textAlign: 'center', padding: '8px 0', borderRadius: 12, background: scoreColor(it.finalScore) + '1d', color: scoreColor(it.finalScore), fontWeight: 800, fontSize: 20 }}>
-                    {it.finalScore ?? '-'}
-                  </div>
+                  {/* คะแนน + เกรดคุณภาพ (อ่านเร็ว) */}
+                  {(() => { const g = qualityGrade(it); return (
+                    <div style={{ minWidth: 58, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                      <div style={{ width: '100%', textAlign: 'center', padding: '8px 0', borderRadius: 12, background: scoreColor(it.finalScore) + '1d', color: scoreColor(it.finalScore), fontWeight: 800, fontSize: 20 }}>
+                        {it.finalScore ?? '-'}
+                      </div>
+                      <div title={it.judgeScore != null ? `บก.AI ให้ ${it.judgeScore}/10` : 'ประเมินจากคะแนนรวม'} style={{ width: '100%', textAlign: 'center', padding: '2px 0', borderRadius: 7, background: g.bg, color: g.color, fontWeight: 700, fontSize: 10.5, lineHeight: 1.25 }}>
+                        {g.emoji} {g.label}
+                      </div>
+                    </div>
+                  ); })()}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 15, lineHeight: 1.45 }}>
                       {(LANE_ICONS[it.lane] || '📰') + ' '}{it.title}
