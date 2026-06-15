@@ -156,8 +156,24 @@ async function serperVideos(query, { num = 10 } = {}) {
   return (data.videos || []).map(n => ({
     title: n.title || '', snippet: n.channel ? `📺 ช่อง: ${n.channel}` : 'วิดีโอ', url: n.link || '',
     source: n.channel || n.source || 'YouTube', publishedAt: n.date ? parseSerperDate(n.date) : null,
-    imageUrl: n.imageUrl || '', isVideo: true,
+    imageUrl: n.imageUrl || '', isVideo: true, _rawDate: n.date || '',
   }));
+}
+
+// ★ 16 มิ.ย.: ประเมินอายุคลิป (เดือน) จากข้อความวันที่ Serper (ไทย/อังกฤษ) — ใช้กรองคลิปเก่า/ช่องไม่อัปเดต
+//   "8 ชั่วโมงที่ผ่านมา"=0 · "X เดือน"=X · "4 ปีที่แล้ว"=48 · "13 ก.ย. 2025"=ปีปัจจุบัน-2025
+function videoAgeMonths(d) {
+  if (!d) return null;
+  const s = String(d);
+  let m = s.match(/(\d+)\s*ปี/);  if (m) return Number(m[1]) * 12;
+  m = s.match(/(\d+)\s*year/i);    if (m) return Number(m[1]) * 12;
+  m = s.match(/(\d+)\s*เดือน/);    if (m) return Number(m[1]);
+  m = s.match(/(\d+)\s*month/i);   if (m) return Number(m[1]);
+  m = s.match(/(\d+)\s*สัปดาห์/);  if (m) return Number(m[1]) / 4.3;
+  if (/ชั่วโมง|นาที|วินาที|วัน|สัปดาห์|hour|minute|day|week|ago|ที่ผ่านมา/.test(s)) return 0; // recent
+  const y = s.match(/(20\d\d|25\d\d)/);
+  if (y) { let yr = Number(y[1]); if (yr > 2400) yr -= 543; return Math.max(0, (new Date().getFullYear() - yr) * 12); }
+  return null;
 }
 
 // Serper ส่งวันที่แบบ "3 hours ago" / "2 days ago" — แปลงเป็น ISO คร่าวๆ
@@ -259,13 +275,15 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     try {
       const G = await import('./goodNewsScout');
       const _clipRe = /youtube\.com|youtu\.be|tiktok\.com|fb\.watch|facebook\.com\/(reel|watch)|instagram\.com/i;
-      const runGroup = async (queries, { ep = 'news', lane = 'good', tr = 'qdr:m', num = 10, noClip = false } = {}) => {
+      const runGroup = async (queries, { ep = 'news', lane = 'good', tr = 'qdr:m', num = 10, noClip = false, maxAgeMo = 0 } = {}) => {
         for (const { q } of queries) {
           try {
             let res = ep === 'search' ? await serperSearch(q, { num, timeRange: tr })
               : ep === 'videos' ? await serperVideos(q, { num })
                 : await serperNews(q, { num, timeRange: tr });
             if (noClip) res = res.filter(x => !_clipRe.test(x.url || ''));
+            // ★ 16 มิ.ย.: กรองคลิปเก่า/ช่องไม่อัปเดต (เดือน) — เอาเฉพาะที่ยังลงได้ตอนนี้
+            if (maxAgeMo && ep === 'videos') res = res.filter(x => { const a = videoAgeMonths(x._rawDate); return a == null || a <= maxAgeMo; });
             raw.push(...res.map(r => ({ ...r, lane })));
           } catch (e) { console.log('[Harvester] good group failed:', e.message?.slice(0, 50)); }
         }
@@ -277,14 +295,14 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       // ★ v6 (16 มิ.ย. ทีมขอเน้น): ย้อนสัมภาษณ์เก่า เป็นแกนหลัก รันทุกรอบ — บทความ /news + "คลิปจริง" /videos (YT)
       const _tbQs = G.generateThrowbackQueries(6);
       await runGroup(_tbQs.slice(0, 4), { ep: 'news', lane: 'throwback', tr: 'qdr:y', num: 8 });   // บทความย้อนสัมภาษณ์
-      await runGroup(_tbQs.slice(0, 4), { ep: 'videos', lane: 'video', num: 8 });                  // คลิปสัมภาษณ์จริง (YT — ดิสคัฟเวอรี)
+      await runGroup(_tbQs.slice(0, 4), { ep: 'videos', lane: 'video', num: 8, maxAgeMo: 24 });     // คลิปสัมภาษณ์จริง (YT) — ย้อนได้ ≤2 ปี (กันช่องเก่า 4 ปี)
       // ── กลุ่มเสริม (หมุน 3 จาก 5 ต่อรอบ ตามชั่วโมง): ลดคำค้นซ้ำซ้อน/ต้นทุน ──
       const _h = Math.floor(Date.now() / 3600e3);
       const extra = [
         () => runGroup(G.generateCelebLifestyleQueries(5), { ep: 'search', noClip: true }),       // ไลฟ์สไตล์ (เปิดบ้าน/รับสัตว์)
         () => runGroup(G.generateCelebRadarQueries(6), { ep: 'news', lane: 'celeb' }),             // ดาราทุกแนว (ดราม่า/รัก)
         () => runGroup(G.generateSocialClipQueries(5), { ep: 'search', lane: 'video' }),           // คลิป/เพจ (เว็บ+FB/IG)
-        () => runGroup(G.generateSocialClipQueries(3), { ep: 'videos', lane: 'video' }),           // คลิปครีเอเตอร์ (YT)
+        () => runGroup(G.generateSocialClipQueries(3), { ep: 'videos', lane: 'video', maxAgeMo: 10 }), // คลิปครีเอเตอร์ (YT) — สดเท่านั้น ≤10 เดือน
         () => runGroup(G.generateEvergreenCelebQueries(4), { ep: 'news', lane: 'evergreen-celeb', tr: 'qdr:y', num: 6 }), // ดาราดีอมตะ
       ];
       for (let i = 0; i < extra.length; i++) {
@@ -298,7 +316,10 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       const fetcher = ex.endpoint === 'search' ? serperSearch(ex.q, { num: 10, timeRange: ex.timeRange })
         : ex.endpoint === 'videos' ? serperVideos(ex.q, { num: 10 })
         : serperNews(ex.q, { num: 8, timeRange: ex.timeRange || 'qdr:d' });
-      raw.push(...(await fetcher).map(r => ({ ...r, lane: ex.lane || 'trend', ...(ex.tag || {}) })));
+      let exRes = await fetcher;
+      // ★ 16 มิ.ย.: ติดตามกระแส/สั่งหาวิดีโอ — เอาคลิปสด ≤12 เดือน (กันคลิปเก่า/ช่องไม่อัปเดต)
+      if (ex.endpoint === 'videos') exRes = exRes.filter(x => { const a = videoAgeMonths(x._rawDate); return a == null || a <= 12; });
+      raw.push(...exRes.map(r => ({ ...r, lane: ex.lane || 'trend', ...(ex.tag || {}) })));
     } catch (e) { console.log('[Harvester] extra query failed:', e.message?.slice(0, 50)); }
   }
   if (lanes.includes('evergreen')) {
@@ -378,8 +399,8 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     if (c.hasMainChar === false && c.subject !== 'celeb') {
       stats.noChar++; console.log(`[Harvester] 🚫 ไม่มีตัวละครหลัก (ทางการ/รพ.): ${String(c.title).slice(0, 50)}`); return false;
     }
-    // กระแสเก่าเล่นใหม่ไม่ได้ — เว้นเลนกระแสสด (trend/buzz/trend-track ตั้งใจตามกระแสปัจจุบัน)
-    if (c.staleTrend === true && !['trend', 'buzz', 'trend-track'].includes(c.lane)) {
+    // กระแสเก่าเล่นใหม่ไม่ได้ — เว้นเฉพาะเลนข่าวสดเร็ว (trend/buzz); trend-track ก็ต้องตัดกระแสเก่า (ทีมอยากได้ของใช้ได้จริง)
+    if (c.staleTrend === true && !['trend', 'buzz'].includes(c.lane)) {
       stats.staleTrend++; console.log(`[Harvester] 🚫 กระแสเก่าเล่นใหม่ไม่ได้: ${String(c.title).slice(0, 50)}`); return false;
     }
     return true;
@@ -498,6 +519,14 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       const g = gateKeywords(it);
       if (!g.pass) {
         await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: `🧹 ตัดอัตโนมัติ (${g.reason})` })).catch(() => {});
+        purged++;
+        continue;
+      }
+      // ★ 16 มิ.ย.: รีเช็คสัญญาณ AI — ตัดของที่หลุดก่อนใส่ฟิลเตอร์ (กระแสเก่า/สถาบันลบ/ไม่มีตัวละคร) เว้นเลนข่าวสด
+      if (it.royalNegative === true
+        || (it.staleTrend === true && !['trend', 'buzz'].includes(it.lane))
+        || (it.hasMainChar === false && it.subject !== 'celeb')) {
+        await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: '🧹 ตัดอัตโนมัติ (กระแสเก่า/สถาบันลบ/ไม่มีตัวละคร)' })).catch(() => {});
         purged++;
         continue;
       }
