@@ -135,6 +135,7 @@ export async function transcribeYoutube({ url, videoBuffer, mimeType }) {
               return {
                 success: true,
                 text: `=== Transcript จาก YouTube (Supadata) ===\n\n${text}\n\n=== จบถอดเสียง ===`,
+                rawText: text,
                 title: text.substring(0, 80) + '...',
                 duration: 0,
                 method: 'supadata',

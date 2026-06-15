@@ -23,7 +23,8 @@ async function getRawTranscript(url, type) {
     const { transcribeYoutube } = await import('@/lib/services/youtubeService');
     const r = await transcribeYoutube({ url });
     if (!r.success) throw new Error(`YouTube: ${r.error || 'ถอดไม่สำเร็จ'}`);
-    return { text: r.transcript || r.text || '', caption: r.title || '' };
+    // rawText = เนื้อล้วน (ไม่มี header "=== ถอดเสียง ===") → เอาไปจับประเด็นง่ายกว่า
+    return { text: r.rawText || r.text || '', caption: r.title || '' };
   }
   if (type === 'tiktok') {
     const { transcribeTiktok } = await import('@/lib/services/tiktokService');
@@ -65,10 +66,11 @@ export async function POST(request) {
         const res = await callAI({
           model: MODEL_FAST, temperature: 0.2, maxTokens: 4000,
           prompt: `นี่คือบทถอดเสียงจากคลิปสัมภาษณ์ (ดิบ มักพูดวับไปวนมา มีคำซ้ำ/เสียงเอ้ออ้า)
-จัดเรียงให้ "อ่านลื่นเป็นบทสนทนา/บทพูด" — กฎ:
+จัดเรียงให้ "อ่านลื่นเป็นเนื้อความไหลต่อเนื่อง" เพื่อให้คนเอาไปจับประเด็นทำข่าวได้ง่าย — กฎ:
 - ห้ามสรุป ห้ามตัดใจความ ห้ามเติมข้อมูล — เก็บทุกประเด็นที่พูดไว้ครบ
 - แค่จัดลำดับให้ต่อเนื่อง ตัดคำซ้ำ/เสียงเอ้ออ้า/คำฟุ่มเฟือยที่ไม่มีความหมาย
-- ถ้ามีหลายคนพูด พยายามแยกผู้พูด (ผู้สัมภาษณ์/ผู้ให้สัมภาษณ์) ถ้าจับได้
+- 🚫 ห้ามใส่หัวข้อกำกับผู้พูดเด็ดขาด — ห้ามมี "ผู้ให้สัมภาษณ์:", "พิธีกร:", "ผู้สัมภาษณ์:", "นักข่าว:" หรือป้ายชื่อใดๆ นำหน้าประโยค
+- เขียนเป็นเนื้อความเล่าไหลต่อเนื่องเป็นธรรมชาติ (ย่อหน้าตามจังหวะเนื้อหาได้) เหมือนถอดความคำพูดมาเรียงเป็นบทความดิบ
 - คงคำพูดสำคัญตามต้นฉบับ
 
 === บทถอดเสียงดิบ ===
