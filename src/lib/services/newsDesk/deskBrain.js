@@ -289,7 +289,21 @@ ${item.judgeReason ? 'ความเห็นรอบคัด: ' + item.judge
 }
 
 // ── ชั้น 3: บรรณาธิการ AI (gpt-5.5) + few-shot จากการตัดสินใจจริงของทีม ──
+// ★ 15 มิ.ย. (ทีมสั่ง "ลงสมอง AI"): คลังตัวอย่างทอง — ข่าวที่เพจปังจริง (หมื่นไลค์) สอน บก.AI ให้ล่าแนวนี้+ให้คะแนนสูง
+//   แนวร่วม: "คนตัวเล็ก/ดารา ที่มีหัวใจ + การกระทำเป็นรูปธรรม + มีตัวละครชัด (ใครทำอะไรเพื่อใคร)"
+//   ขยายลิสต์นี้ได้เรื่อยๆ เมื่อทีมชี้ข่าวที่ปังจริง
+const GOLD_EXAMPLES = [
+  'น้องอินเตอร์ ถอยรถป้ายแดง ออกรถให้พ่อแม่ — ลูกซื้อรถตอบแทนพ่อแม่ มีตัวละครชัด [กตัญญู/ครอบครัวอบอุ่น]',
+  'เบสท์ คำสิงห์ ออกรถหรูให้น้องชาย เป็นของขวัญวันเกิด 18 ปี — ดาราให้ของขวัญ/ดูแลครอบครัว [กตัญญู/ครอบครัวอบอุ่น]',
+  'ครูปลา จิตรลดา ครูปฐมวัยหัวใจเดียวกับเด็ก — ครูทุ่มเทเสียสละเพื่อเด็กเล็ก คนตัวเล็กมีหัวใจ [สู้ชีวิต]',
+  'ลิลลี่ ภัณฑิลา ซื้อที่ดินสร้างบ้านให้คุณแม่ — ลูกกตัญญูสร้างบ้านให้แม่ [กตัญญู/ครอบครัวอบอุ่น]',
+];
+
 async function getJudgeFewshot() {
+  // ★ คลังทองสอนเสมอ (แม้ยังไม่มี feedback) — เป้าหมายที่ บก.AI ต้องล่า
+  const goldBlock = '\n=== 🏆 แนวที่เพจปังจริง (หมื่นไลค์+) — ข่าวคล้ายแบบนี้คือเป้าหมาย ให้คะแนนสูงเสมอ ===\n' +
+    GOLD_EXAMPLES.map(g => '🏆 ' + g).join('\n') + '\n' +
+    'หัวใจร่วม: คน/ดาราตัวจริงทำสิ่งดีเป็นรูปธรรม (ออกรถ/สร้างบ้าน/ทุ่มเทให้คน) + มีตัวละครชัด + อารมณ์ร่วมสูง — เจอแนวนี้ดันคะแนนขึ้น\n';
   try {
     const store = createStore('news-desk-feedback');
     const all = await store.getAll();
@@ -299,13 +313,13 @@ async function getJudgeFewshot() {
     const picked = recent.filter(f => f.action === 'sent' || f.action === 'claimed').slice(-6);
     // ★ 15 มิ.ย.: จำ "ที่ทีมกดไม่เอา" มากขึ้น (8 ใบ) — ระบบเรียนรู้ว่าข่าวแบบไหนทีมไม่เอา ให้คะแนนต่ำลง
     const dropped = recent.filter(f => f.action === 'dismissed').slice(-8);
-    if (picked.length === 0 && dropped.length === 0 && viral.length === 0) return '';
-    return '\n=== รสนิยมจริงของกองบรรณาธิการ (เรียนจากผลจริงล่าสุด) ===\n' +
+    if (picked.length === 0 && dropped.length === 0 && viral.length === 0) return goldBlock;
+    return goldBlock + '\n=== รสนิยมจริงของกองบรรณาธิการ (เรียนจากผลจริงล่าสุด) ===\n' +
       viral.map(f => `🔥 โพสต์แล้วปังจริง: ${String(f.title).slice(0, 80)} [${f.category || ''}]`).join('\n') + (viral.length ? '\n' : '') +
       flop.map(f => `🧊 โพสต์แล้วแป้ก: ${String(f.title).slice(0, 80)} [${f.category || ''}]`).join('\n') + (flop.length ? '\n' : '') +
       picked.map(f => `✅ ทีมเลือกทำ: ${String(f.title).slice(0, 80)} [${f.category || ''}]`).join('\n') + '\n' +
       dropped.map(f => `❌ ทีมกดทิ้ง: ${String(f.title).slice(0, 80)} [${f.category || ''}]`).join('\n') + '\n';
-  } catch { return ''; }
+  } catch { return goldBlock; }
 }
 
 export async function editorialJudge(items) {
