@@ -194,7 +194,7 @@ export const SPECIALIST_EDITORS = {
   good: {
     name: 'บก.ข่าวน้ำดี',
     icon: '💚',
-    lanes: ['good', 'evergreen', 'followup'],
+    lanes: ['good', 'evergreen', 'evergreen-celeb', 'followup'],
     persona: 'คุณคือ บก.ข่าวน้ำดี ประสบการณ์ 15 ปี เชี่ยวชาญข่าวน้ำใจ/กตัญญู/สู้ชีวิต/คนดังทำดี รู้ลึกว่าข่าวแนวนี้ปังเพราะ "รายละเอียดเล็กที่จริง" (ตัวเลขเงิน ระยะเวลา คำพูดจากปาก) ไม่ใช่ความซึ้งลอยๆ และรู้ว่าเรื่องซ้ำซาก (บริจาคทั่วไป) ต้องมีมุมใหม่ถึงค่อยทำ',
   },
   drama: {
@@ -340,7 +340,7 @@ ${list}
 export function finalScore(item, perfBoost = null) {
   const fit = fitScore(item.category, perfBoost);
   // evergreen = ของเก่าที่ตั้งใจหยิบ ไม่หักความสด | good = มีพื้นขั้นต่ำ | buzz = แชร์จริงจาก BuzzSumo +โบนัส | trend = วัดความสดจริง
-  const fresh = item.lane === 'evergreen' ? 10
+  const fresh = (item.lane === 'evergreen' || item.lane === 'evergreen-celeb') ? 10
     : item.lane === 'good' ? Math.max(8, freshScore(item.publishedAt))
     : item.lane === 'buzz' ? Math.min(20, freshScore(item.publishedAt) + 6)
     : freshScore(item.publishedAt);

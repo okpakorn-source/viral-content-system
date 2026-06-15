@@ -33,7 +33,7 @@ export async function GET(request) {
     items = items.filter(i => i.status !== 'dismissed' && !i.used);
 
     // ★ quick-fix: คะแนนเสื่อมตามอายุ — กระแสเก่าจมเอง (trend -8/วัน, good -3/วัน, เลนไร้กาลเวลาไม่เสื่อม)
-    const DECAY = { trend: 8, good: 3, evergreen: 0, followup: 4, interview: 0, buzz: 10 }; // buzz แชร์จริงแต่หมดอายุไว
+    const DECAY = { trend: 8, good: 3, evergreen: 0, 'evergreen-celeb': 0, followup: 4, interview: 0, buzz: 10 }; // evergreen-celeb = ดาราดีอมตะ ไม่เสื่อม
     items = items.map(i => {
       const ageDays = Math.max(0, (Date.now() - new Date(i.harvestedAt || 0).getTime()) / 864e5);
       const decayed = Math.max(0, Math.round((i.finalScore || 0) - ageDays * (DECAY[i.lane] ?? 4)));

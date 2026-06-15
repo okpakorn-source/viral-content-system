@@ -217,6 +217,16 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       try { raw.push(...(await serperNews(q, { num: 8, timeRange: isCeleb ? 'qdr:m' : 'qdr:w' })).map(r => ({ ...r, lane: 'good' }))); }
       catch (e) { console.log('[Harvester] good query failed:', e.message?.slice(0, 50)); }
     }
+
+    // ★ เครื่องล่า "ดาราดีอมตะ" (14 มิ.ย.): ค้นชื่อ×ความดีเฉพาะ ย้อนทั้งปี (qdr:y) — พลอยสร้างบ้าน/อั้มหมาแมว/บี้อยู่วัด
+    //   lane='evergreen-celeb' → ยกเว้นจากด่านตัดกระแสอดีต (ความดีอมตะเก่าได้ รีเมคได้)
+    try {
+      const { generateEvergreenCelebQueries } = await import('./goodNewsScout');
+      for (const { q } of generateEvergreenCelebQueries(4)) {
+        try { raw.push(...(await serperNews(q, { num: 6, timeRange: 'qdr:y' })).map(r => ({ ...r, lane: 'evergreen-celeb' }))); }
+        catch (e) { console.log('[Harvester] evergreen-celeb query failed:', e.message?.slice(0, 50)); }
+      }
+    } catch (e) { console.log('[Harvester] evergreen-celeb import failed:', e.message?.slice(0, 50)); }
   }
   // ★ คำค้นพิเศษจาก Chief Editor Agent — เติมตามช่องว่างของวัน
   for (const ex of extraQueries) {
@@ -283,6 +293,8 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
   stats.staleEvent = 0;
   classified = classified.filter(c => {
     if (c.storyNature !== 'event') return true;
+    // ★ เลน evergreen-celeb (14 มิ.ย.): ดาราดีอมตะที่ตั้งใจค้นย้อนทั้งปี — ความดีเก่าได้ รีเมคได้ ไม่ตัด
+    if (c.lane === 'evergreen-celeb') return true;
     const ageDays = c.publishedAt ? (Date.now() - new Date(c.publishedAt).getTime()) / 864e5 : null;
     if (c.lane === 'evergreen') { stats.staleEvent++; console.log(`[Harvester] ⏳ ตัดกระแสอดีต (evergreen+event): ${String(c.title).slice(0, 55)}`); return false; }
     if (ageDays !== null && ageDays > 30) { stats.staleEvent++; console.log(`[Harvester] ⏳ ตัดกระแสอดีต (event เก่า ${Math.round(ageDays)} วัน): ${String(c.title).slice(0, 55)}`); return false; }
@@ -371,6 +383,25 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
 
   if (toAdd.length > 0) await store.addMany(toAdd);
   stats.added = toAdd.length;
+
+  // ★ ล้างโต๊ะอัตโนมัติ (14 มิ.ย. คำสั่งทีม — โต๊ะบวม 420 ใบ ของเก่าลอยค้าง เช่นเจนนี่/ลุงธีระ):
+  //   การ์ด new เกิน 48 ชม.เก็บเข้ากรุเอง (บก.ให้ 9+ ยืดเป็น 72 ชม.) — โต๊ะเป็นหน้าต่างของสด ไม่ใช่กองสะสม
+  try {
+    const allNow = await store.getAll();
+    const now = Date.now();
+    let purged = 0;
+    for (const it of allNow) {
+      if (it.status !== 'new') continue;
+      const ageHr = (now - new Date(it.harvestedAt || 0).getTime()) / 36e5;
+      const cap = (it.judgeScore ?? 0) >= 9 ? 72 : 48;
+      if (ageHr > cap) {
+        await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: `🧹 ล้างอัตโนมัติ (ค้างเกิน ${cap} ชม.)` })).catch(() => {});
+        purged++;
+      }
+    }
+    stats.autoPurged = purged;
+    if (purged > 0) console.log(`[Harvester] 🧹 ล้างโต๊ะอัตโนมัติ: ${purged} ใบ (ค้างเกินเวลา)`);
+  } catch (e) { console.log('[Harvester] auto-purge skip:', e.message?.slice(0, 40)); }
 
   // ════════════════════════════════════════════════════
   // ★ AUTO-PILOT (ผู้ใช้ 11 มิ.ย.): บก.แต่ละคนเฝ้าโต๊ะ — ข่าวที่ บก.ประจำแนวให้ ≥8 = "ทำได้"
