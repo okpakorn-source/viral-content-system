@@ -60,6 +60,10 @@ export function gateKeywords(item) {
   for (const p of OFF_BRAND_PATTERNS) {
     if (p.test(text)) return { pass: false, reason: `นอกแบรนด์เพจ: ${p.source.slice(0, 25)}` };
   }
+  // ★ 15 มิ.ย. (ทีมชี้ "Hong Kong fire" จาก Thai PBS): หัวข้อแทบไม่มีภาษาไทย = ข่าวต่างประเทศ/อินเตอร์ภาษาอังกฤษ
+  //   ข่าวไทยไวรัลหัวข้อต้องเป็นไทย — หัวข้อ ENG ล้วน (Thai PBS World ฯลฯ) ตัดทิ้ง (เว้นข่าวไทยที่มี ENG ปนเล็กน้อยยังผ่าน)
+  const thaiCount = (String(item.title || '').match(/[฀-๿]/g) || []).length;
+  if (thaiCount < 4) return { pass: false, reason: 'หัวข้อไม่ใช่ภาษาไทย (ข่าวต่างประเทศ/อินเตอร์)' };
   // เช็คโดเมนต่างประเทศ — ตัดทิ้งทันที (เว้นโดเมนไทย .th)
   try {
     const host = new URL(item.url || '').hostname.toLowerCase();
