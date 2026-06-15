@@ -324,13 +324,26 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
   }
   stats.harvested = raw.length;
 
-  // ── กันซ้ำในคลังตัวเอง (url เดิม) ──
+  // ── กันซ้ำในคลังตัวเอง (url เดิม) + anti-recycle (หัวข้อที่เพิ่งทิ้ง/ส่งไปแล้ว วนกลับจาก url ใหม่) ──
+  // ★ 15 มิ.ย. (ทีมชี้ "ข่าวเก่าวนกลับมา"): กันซ้ำ url อย่างเดียวไม่พอ — เรื่องเดิมมาคนละสำนัก url ใหม่ก็หลุดเข้าได้
+  //   เทียบ "หัวข้อ" กับการ์ดที่ dismissed/sent ใน 10 วัน → ถ้าตรง = เคยปัด/เคยทำแล้ว ข้ามเลย (ไม่เปลือง classify ด้วย)
+  const _normRT = (s) => String(s || '').replace(/[\s"“”'‘’!|…\-–·]/g, '').slice(0, 40);
+  const _recycleCutoff = Date.now() - 10 * 864e5;
+  const _rejectedTitles = existing
+    .filter(i => (i.status === 'dismissed' || i.status === 'sent') && new Date(i.harvestedAt || 0).getTime() > _recycleCutoff)
+    .map(i => _normRT(i.title)).filter(t => t.length >= 12);
+  const _isRecycled = (title) => {
+    const nt = _normRT(title);
+    if (nt.length < 12) return false;
+    return _rejectedTitles.some(rt => rt.includes(nt.slice(0, 16)) || nt.includes(rt.slice(0, 16)));
+  };
   const fresh = [];
   const seen = new Set();
   for (const r of raw) {
     if (!r.url || !r.title) continue;
     const id = idOf(r.url);
     if (existingIds.has(id) || seen.has(id)) { stats.dupSkipped++; continue; }
+    if (_isRecycled(r.title)) { stats.recycled = (stats.recycled || 0) + 1; continue; }
     seen.add(id);
     fresh.push({ ...r, id });
   }
