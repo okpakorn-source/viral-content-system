@@ -413,6 +413,13 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     let purged = 0;
     for (const it of allNow) {
       if (it.status !== 'new') continue;
+      // ★ 15 มิ.ย. รอบ 2: รีเช็คด่านคำต้องห้าม "ล่าสุด" — ตัวที่หลุดเข้ามาก่อนอัปเดตด่าน (ธปท./เศรษฐกิจมหภาค/INSIGHT) เก็บออกเอง
+      const g = gateKeywords(it);
+      if (!g.pass) {
+        await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: `🧹 ตัดอัตโนมัติ (${g.reason})` })).catch(() => {});
+        purged++;
+        continue;
+      }
       const ageHr = (now - new Date(it.harvestedAt || 0).getTime()) / 36e5;
       const cap = (it.judgeScore ?? 0) >= 9 ? 72 : 48;
       if (ageHr > cap) {
