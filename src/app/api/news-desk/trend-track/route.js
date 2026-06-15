@@ -24,8 +24,9 @@ export async function POST(request) {
     }
 
     // ② สร้างคำค้นทุกแหล่ง: แต่ละคีย์เวิร์ด × news + search, 3 คำแรก × videos (ครบทุกประเภท)
+    //    จำกัด 6 คีย์เวิร์ด — กันช้าจนแพลตฟอร์ม timeout (เดิม 8 → ช้า ~3 นาที)
     const extraQueries = [];
-    keywords.forEach((kw, i) => {
+    keywords.slice(0, 6).forEach((kw, i) => {
       const tag = { trendTopic: clean };
       extraQueries.push({ q: kw, endpoint: 'news', lane: 'trend-track', timeRange: 'qdr:w', tag });
       extraQueries.push({ q: kw, endpoint: 'search', lane: 'trend-track', timeRange: 'qdr:w', tag });
@@ -33,8 +34,9 @@ export async function POST(request) {
     });
 
     // ③ ยิงผ่าน pipeline ปกติ (gate → classify → judge → ลงคลัง) — auto-pilot ข้ามเลนนี้เอง
+    //    judgeTop 8 (ไม่ใช่ 20) — เลนนี้เป็นดิสคัฟเวอรี ทีมคัดเอง ไม่ต้อง judge เยอะ + เร็วขึ้นมาก กัน timeout
     const { runHarvest } = await import('@/lib/services/newsDesk/harvester');
-    const stats = await runHarvest({ lanes: [], extraQueries, judgeTop: 20 });
+    const stats = await runHarvest({ lanes: [], extraQueries, judgeTop: 8 });
 
     return NextResponse.json({ success: true, topic: clean, people, keywords, ...stats });
   } catch (error) {

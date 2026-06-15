@@ -128,10 +128,17 @@ export default function NewsDeskPage() {
     return name;
   };
 
+  // ★ 16 มิ.ย.: อ่าน response แบบทน — งานหนัก (harvest/trend-track) บางทีแพลตฟอร์ม timeout ส่งข้อความ (ไม่ใช่ JSON) → กัน res.json() พัง crash หน้า
+  const parseRes = async (res) => {
+    const txt = await res.text();
+    try { return JSON.parse(txt); }
+    catch { return { success: false, _nonJson: true, error: 'เซิร์ฟเวอร์ใช้เวลานาน (timeout) — งานยังรันเบื้องหลังอยู่ รอสักครู่แล้วกดรีเฟรช ผลจะทยอยขึ้นเอง' }; }
+  };
+
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/news-desk?tab=${tab}&limit=80`, { cache: 'no-store' });
-      const d = await res.json();
+      const d = await parseRes(res);
       if (d.success) { setItems(d.items); setMixToday(d.mixToday || {}); setSentToday(d.sentToday || 0); setGovernor(d.governor || null); setChiefBrief(d.chiefBrief || null);
         setEditorStats(d.editorStats || {}); setQueueDepth(d.queueDepth || { pending: 0, processing: 0 }); setReadyCount(d.readyCount || 0);
         // ★ สวิตช์ Auto-Pilot โชว์ค่าจริงจากระบบ (เดิม hardcode เปิด — ทีมเห็นว่า "เปิดเอง" ทุกครั้งที่เข้าหน้า)
@@ -169,7 +176,7 @@ export default function NewsDeskPage() {
     setHarvesting(true); setMsg('🔄 กำลังเก็บ+คัดกรองข่าวรอบใหม่ (~2-4 นาที — AI ให้คะแนนทีละข่าว)...');
     try {
       const res = await fetch('/api/news-desk/harvest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      const d = await res.json();
+      const d = await parseRes(res);
       setMsg(d.success ? `✅ เก็บมา ${d.harvested} · ผ่านคัด ${d.added} · AI ให้คะแนน ${d.judged}` : `❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
@@ -181,7 +188,7 @@ export default function NewsDeskPage() {
     setHarvesting(true); setMsg('🕵️ สั่งกองสืบน้ำดีออกล่า — AI คิดคำค้นเชิงลึกแล้วไปค้นข่าว (~2-3 นาที)...');
     try {
       const res = await fetch('/api/news-desk/harvest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lanes: ['good'], judgeTop: 12 }) });
-      const d = await res.json();
+      const d = await parseRes(res);
       setMsg(d.success ? `🕵️ กองสืบกลับมาแล้ว · เก็บ ${d.harvested} · ผ่านคัด ${d.added} · ส่งเจน ${d.autoPicked || 0}` : `❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
@@ -198,7 +205,7 @@ export default function NewsDeskPage() {
       setItems([]); // เคลียร์จอทันที
       setMsg(`🧹 ล้าง ${cd.cleared || 0} ใบ · กำลังหาข่าวชุดใหม่ (~2-4 นาที)...`);
       const res = await fetch('/api/news-desk/harvest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      const d = await res.json();
+      const d = await parseRes(res);
       setMsg(d.success ? `✅ ล้างแล้ว + เก็บใหม่ ${d.harvested} · ผ่านคัด ${d.added} · AI ให้คะแนน ${d.judged}` : `❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
@@ -211,7 +218,7 @@ export default function NewsDeskPage() {
     setHarvesting(true); setMsg(`🎯 สั่งหาข่าวแนว "${f?.label || focusSel}" — AI ค้น+คัด (~2-3 นาที)...`);
     try {
       const res = await fetch('/api/news-desk/harvest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ focus: focusSel }) });
-      const d = await res.json();
+      const d = await parseRes(res);
       setMsg(d.success ? `🎯 หาแนว "${f?.label}" เสร็จ · เก็บ ${d.harvested} · ผ่านคัด ${d.added} · ส่งเจน ${d.autoPicked || 0}` : `❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
@@ -225,7 +232,7 @@ export default function NewsDeskPage() {
     setHarvesting(true); setMsg(`🔴 วิเคราะห์กระแส "${topic}" — AI หาตัวละคร+คีย์เวิร์ด แล้วค้นทุกแหล่ง (ข่าว/เว็บ/ยูทูป/เพจ) ~1-2 นาที...`);
     try {
       const res = await fetch('/api/news-desk/trend-track', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic }) });
-      const d = await res.json();
+      const d = await parseRes(res);
       if (d.success) {
         setMsg(`🔴 กระแส "${topic}" — คีย์เวิร์ด ${(d.keywords || []).length} คำ (${(d.keywords || []).join(', ').slice(0, 80)}) · เก็บ ${d.harvested} · ผ่านคัด ${d.added}`);
         setTab('trendtrack'); setTrendTopic('');
@@ -271,7 +278,7 @@ export default function NewsDeskPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, id, user }),
       });
-      const d = await res.json();
+      const d = await parseRes(res);
       if (!d.success) { alert(d.error); load(); return; }   // พลาด → ดึงใหม่คืนสถานะ
       // dismiss/used/shortlist/unshortlist อัปเดตจอแล้ว ไม่ refetch (กันเด้งกลับ); อื่นๆ refetch
       if (!isRemove && action !== 'shortlist' && action !== 'unshortlist') load();
@@ -290,7 +297,7 @@ export default function NewsDeskPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'sendWorkflow', id: item.id, user }),
       });
-      const d = await res.json();
+      const d = await parseRes(res);
       if (d.success) {
         setMsg(`✅ เข้าคิวแล้ว (คิวที่ ${d.position}) — ดูผลในหน้า Generation Log`);
         // ★ Auto Photo Board: ปิดชั่วคราว (PHOTO_SCOUT_OFF) — รอแก้บัคภาพซ้ำ
@@ -314,7 +321,7 @@ export default function NewsDeskPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: clipUrl }),
       });
-      const d = await res.json();
+      const d = await parseRes(res);
       if (d.success) {
         setMsg(`✅ ขุดสำเร็จ: "${d.item.title}" — นาทีทอง ${d.golden?.length || 0} จุด (อยู่แท็บ 🎙️)`);
         setClipUrl('');
@@ -333,7 +340,7 @@ export default function NewsDeskPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'research', id: item.id, user: me || 'ไม่ระบุ' }),
       });
-      const d = await res.json();
+      const d = await parseRes(res);
       setMsg(d.success ? `✅ เจาะลึกเสร็จ — พร้อมเขียน ${d.research.readyScore}/10 (${d.research.keyFacts?.length || 0} ข้อเท็จจริง)` : `❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
@@ -349,7 +356,7 @@ export default function NewsDeskPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newsId: item.id, force: !!item.imageSources }),
       });
-      const d = await res.json();
+      const d = await parseRes(res);
       setMsg(d.success ? `✅ เจอแหล่งภาพ ${d.imageSources.totalLinks} ลิงก์ — ${d.imageSources.event?.slice(0, 60)}` : `❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
@@ -365,7 +372,7 @@ export default function NewsDeskPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: mktUrl, user: me || 'ไม่ระบุ' }),
       });
-      const d = await res.json();
+      const d = await parseRes(res);
       setMsg(d.success ? `✅ เข้าคลังตลาดแล้ว: "${d.item.topic}" — ${d.item.whyViral}` : `❌ ${d.error}`);
       if (d.success) setMktUrl('');
     } catch (e) { setMsg('❌ ' + e.message); }
@@ -380,7 +387,7 @@ export default function NewsDeskPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'consult', id: item.id, user: me || 'ไม่ระบุ' }),
       });
-      const d = await res.json();
+      const d = await parseRes(res);
       setMsg(d.success ? `${d.consult.icon} ${d.consult.by}: ${d.consult.verdict} — แนะนำแนว "${d.consult.bestAngle}"` : `❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
@@ -394,7 +401,7 @@ export default function NewsDeskPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(instruction ? { instruction } : {}),
       });
-      const d = await res.json();
+      const d = await parseRes(res);
       setMsg(d.success ? `🧠 ${(d.orders || []).join(' · ') || d.brief || 'เสร็จแล้ว'}` : `❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
@@ -416,7 +423,7 @@ export default function NewsDeskPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ editor: key }),
       });
-      const d = await res.json();
+      const d = await parseRes(res);
       setMsg(d.success ? d.summary : `❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
@@ -431,7 +438,7 @@ export default function NewsDeskPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'autopilot', enabled: next }),
       });
-      const d = await res.json();
+      const d = await parseRes(res);
       if (!d.success) {
         setAutopilot(!next); // บันทึกไม่สำเร็จ — คืนสวิตช์ตามจริง อย่าหลอกทีม
         setMsg('❌ บันทึกสวิตช์ไม่สำเร็จ ลองใหม่อีกครั้ง');
@@ -453,7 +460,7 @@ export default function NewsDeskPage() {
     setMsg('📖 กำลังเปิดเนื้อที่เจนไว้...');
     try {
       const res = await fetch(`/api/queue/status?id=${item.jobId}`, { cache: 'no-store' });
-      const d = await res.json();
+      const d = await parseRes(res);
       const data = d.result?.data || d.result || {};
       const versions = data?.analysis?.versions || data?.versions || [];
       if (d.status !== 'completed') { setMsg(d.status === 'failed' ? `❌ งานเขียนล้มเหลว: ${d.error || ''}` : '⏳ ยังเขียนไม่เสร็จ รอแป๊บ'); return; }
