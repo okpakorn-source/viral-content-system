@@ -194,6 +194,22 @@ export function generateCelebLifestyleQueries(count = 6) {
   return out.map(q => ({ q, genre: 'ไลฟ์สไตล์ดารา' }));
 }
 
+// ★ v5.1 (15 มิ.ย. ทีมขอ "โฟกัสคลิป/เพจมากขึ้น"): ไฮไลท์สัมภาษณ์ + ดราม่าตามเพจ/รีลส์ (อยู่บน FB/ยูทูปเยอะ)
+//   ค้นผ่าน /search (คืนลิงก์ FB เพจ/รีลส์ + เว็บ) — เป็นเลน video (ดิสคัฟเวอรี ทีมเอาไปถอดคลิป/เขียนเอง)
+const SOCIAL_CLIP_BROAD = [
+  'ดารา สัมภาษณ์ ไฮไลท์ คลิป', 'ดารา เปิดใจ คลิปไวรัล ล่าสุด', 'ดารา ดราม่า คลิป เพจดัง',
+  'คนดัง ตอบโต้ ดราม่า ล่าสุด', 'สัมภาษณ์ดารา ประเด็นร้อน เปิดใจ', 'ดารา ไลฟ์สด เปิดใจ ไวรัล',
+  'ดารา เคลียร์ดราม่า คลิป', 'ไฮไลท์รายการ ดารา เปิดใจ น้ำตา',
+];
+
+/** ★ คลิป/เพจดารา (15 มิ.ย.) — ไฮไลท์สัมภาษณ์+ดราม่าจากเพจ/รีลส์: คำกว้าง count คำ (ใช้กับ /search ให้คืนลิงก์ FB) */
+export function generateSocialClipQueries(count = 6) {
+  const hour = Math.floor(Date.now() / 3600e3);
+  const out = [];
+  for (let i = 0; i < count; i++) out.push(SOCIAL_CLIP_BROAD[(hour * count + i) % SOCIAL_CLIP_BROAD.length]);
+  return out.map(q => ({ q, genre: 'คลิป/เพจดารา' }));
+}
+
 // ════════════════════════════════════════════════════
 // ★ สั่งหาข่าว "เฉพาะแนว" (15 มิ.ย. คำสั่งทีม): เลือกโฟกัส → ค้นเฉพาะแนวนั้น (เติมช่องว่างของวันได้ตรงจุด)
 // ════════════════════════════════════════════════════
@@ -212,6 +228,7 @@ export const FOCUS_OPTIONS = [
   { key: 'throwback', label: '⏪ ย้อนสัมภาษณ์เก่า' },
   { key: 'celeb_good', label: '⭐ ดาราทำดี/อมตะ' },
   { key: 'video', label: '📺 วิดีโอดารา (ยูทูป)' },
+  { key: 'social', label: '📘 เพจ/รีลส์ (สัมภาษณ์+ดราม่า)' },
   { key: 'animal', label: '🐶 รักสัตว์' },
   { key: 'good_deed', label: '🙏 น้ำใจ/พลเมืองดี' },
   { key: 'fighter', label: '💪 สู้ชีวิต' },
@@ -232,6 +249,7 @@ export function generateFocusQueries(focus, count = 8) {
     case 'throwback': return wrap(generateThrowbackQueries(count), 'throwback', 'qdr:y');
     case 'celeb_good': return wrap(generateEvergreenCelebQueries(count), 'evergreen-celeb', 'qdr:y');
     case 'video': return wrap(generateCelebLifestyleQueries(count), 'video', '', 'videos'); // ยูทูป (ดิสคัฟเวอรี ไม่ auto-เขียน)
+    case 'social': return wrap(generateSocialClipQueries(count), 'video', '', 'search'); // เพจ/รีลส์ FB ไฮไลท์สัมภาษณ์+ดราม่า (ดิสคัฟเวอรี)
     case 'animal': return wrap((FOCUS_FIXED.animal || []).slice(0, count), 'good', 'qdr:w');
     case 'good_deed': return wrap((FOCUS_FIXED.good_deed || []).slice(0, count), 'good', 'qdr:w');
     case 'fighter': return wrap((FOCUS_FIXED.fighter || []).slice(0, count), 'good', 'qdr:w');

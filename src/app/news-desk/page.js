@@ -12,7 +12,7 @@ const TABS = [
   { id: 'trend', label: '🔥 กระแสวันนี้' },
   { id: 'good', label: '💎 ข่าวน้ำดี' },
   { id: 'celeb', label: '🎬 ดาราทุกแนว' },
-  { id: 'video', label: '📺 วิดีโอดารา' },
+  { id: 'video', label: '📺 คลิป/รีลส์/เพจ' },
   { id: 'throwback', label: '⏪ ย้อนสัมภาษณ์' },
   { id: 'evergreen', label: '🗄️ ข่าวเก่าน้ำดี' },
   { id: 'buzz', label: '📊 แชร์จริง' },
@@ -31,6 +31,7 @@ const FOCUS_OPTIONS = [
   { key: 'throwback', label: '⏪ ย้อนสัมภาษณ์เก่า' },
   { key: 'celeb_good', label: '⭐ ดาราทำดี/อมตะ' },
   { key: 'video', label: '📺 วิดีโอดารา (ยูทูป)' },
+  { key: 'social', label: '📘 เพจ/รีลส์ (สัมภาษณ์+ดราม่า)' },
   { key: 'animal', label: '🐶 รักสัตว์' },
   { key: 'good_deed', label: '🙏 น้ำใจ/พลเมืองดี' },
   { key: 'fighter', label: '💪 สู้ชีวิต' },
@@ -76,6 +77,18 @@ function qualityGrade(it) {
     { label: 'ดี', emoji: '✅', color: '#16a34a', bg: 'rgba(22,163,74,0.14)' },
     { label: 'ดีมาก', emoji: '🌟', color: '#15803d', bg: 'rgba(21,128,61,0.16)' },
   ][tier];
+}
+
+// ★ 15 มิ.ย. (ทีมขอ "แยกแหล่งที่มา ไม่ให้ปนกัน"): ตรวจจากลิงก์ว่ามาจาก สำนักข่าว/โพสต์เพจ/รีลส์/ยูทูป/ลิงก์
+function sourceTypeOf(it) {
+  const u = String(it.url || '').toLowerCase();
+  if (/youtube\.com|youtu\.be/.test(u)) return { label: '▶️ ยูทูป', color: '#dc2626', bg: 'rgba(220,38,38,0.12)' };
+  if (/facebook\.com\/(reel|watch|share\/[rv]|[^/]+\/videos)|fb\.watch/.test(u)) return { label: '🎬 รีลส์ FB', color: '#7c3aed', bg: 'rgba(124,58,237,0.14)' };
+  if (/facebook\.com|m\.facebook|fb\.com/.test(u)) return { label: '📘 โพสต์เพจ', color: '#2563eb', bg: 'rgba(37,99,235,0.13)' };
+  if (/tiktok\.com/.test(u)) return { label: '🎵 TikTok', color: '#0f172a', bg: 'rgba(15,23,42,0.12)' };
+  if (/instagram\.com/.test(u)) return { label: '📸 IG', color: '#db2777', bg: 'rgba(219,39,119,0.12)' };
+  if (it.lane === 'interview' || it.lane === 'video' || it.fullText) return { label: '🎬 คลิป', color: '#7c3aed', bg: 'rgba(124,58,237,0.12)' };
+  return { label: '📰 สำนักข่าว', color: '#64748b', bg: 'rgba(100,116,139,0.12)' };
 }
 
 export default function NewsDeskPage() {
@@ -582,6 +595,9 @@ export default function NewsDeskPage() {
                       {(LANE_ICONS[it.lane] || '📰') + ' '}{it.title}
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, fontSize: 12 }}>
+                      {(() => { const st = sourceTypeOf(it); return (
+                        <span title="แหล่งที่มาของข่าว" style={{ padding: '2px 9px', borderRadius: 999, background: st.bg, color: st.color, fontWeight: 700 }}>{st.label}</span>
+                      ); })()}
                       <span style={{ padding: '2px 9px', borderRadius: 999, background: (CAT_COLORS[it.category] || '#666') + '22', color: CAT_COLORS[it.category] || '#999', fontWeight: 600 }}>{it.category}</span>
                       {it._spotlight && <span title="ข่าวคะแนนกลางที่ระบบดึงขึ้นมาให้ผ่านตา — กันข่าวดีจมล่าง (หมุนเวียนเรื่อยๆ)" style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(168,85,247,0.15)', color: 'var(--desk-purple, #a855f7)', fontWeight: 700 }}>💡 ค้นพบ</span>}
                       {it.foreignCountry && <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(59,130,246,0.15)', color: 'var(--desk-blue)', fontWeight: 700 }}>🌏 ข่าวต่างประเทศ · {it.foreignCountry}</span>}

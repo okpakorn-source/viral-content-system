@@ -268,7 +268,7 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     // ★ เรดาร์ดาราทุกแนว v4 (15 มิ.ย.): ข่าวดาราทุกประเภท (รัก/เลิก/ครอบครัว/เงิน/ดราม่าวงการ/คัมแบ็ก/สัมภาษณ์)
     //   lane='celeb' qdr:m num 10 → ดราม่านุ่มเล่นได้ (ด่าน soft-drama) | throwback qdr:y → สัมภาษณ์เก่ายกเว้นด่านตัดของเก่า
     try {
-      const { generateCelebRadarQueries, generateThrowbackQueries, generateCelebFamilyQueries, generateCelebLifestyleQueries } = await import('./goodNewsScout');
+      const { generateCelebRadarQueries, generateThrowbackQueries, generateCelebFamilyQueries, generateCelebLifestyleQueries, generateSocialClipQueries } = await import('./goodNewsScout');
       // ★ ทองคำ (15 มิ.ย.): ดาราให้ของขวัญ-ดูแลครอบครัว (เบสท์ออกรถให้น้อง/น้องอินเตอร์ออกรถให้พ่อแม่)
       //   lane='good' → ขึ้นแท็บน้ำดี (AI ตีหมวดกตัญญู/ครอบครัวอบอุ่น = positive น้ำหนักสูง)
       for (const { q } of generateCelebFamilyQueries(6)) {
@@ -287,6 +287,12 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       for (const { q } of generateCelebRadarQueries(6)) {
         try { raw.push(...(await serperNews(q, { num: 10, timeRange: 'qdr:m' })).map(r => ({ ...r, lane: 'celeb' }))); }
         catch (e) { console.log('[Harvester] celeb query failed:', e.message?.slice(0, 50)); }
+      }
+      // ★ v5.1 (15 มิ.ย. ทีมขอ "โฟกัสคลิป/เพจมากขึ้น"): ไฮไลท์สัมภาษณ์+ดราม่าจากเพจ/รีลส์ ผ่าน /search (เก็บลิงก์ FB ไว้)
+      //   lane='video' = ดิสคัฟเวอรี (autoPilot ข้าม ไม่ auto-เขียน) ทีมเอาไปถอดคลิป/เรียบเรียงเอง
+      for (const { q } of generateSocialClipQueries(4)) {
+        try { raw.push(...(await serperSearch(q, { num: 10, timeRange: 'qdr:m' })).map(r => ({ ...r, lane: 'video' }))); }
+        catch (e) { console.log('[Harvester] social-clip query failed:', e.message?.slice(0, 50)); }
       }
       for (const { q } of generateThrowbackQueries(4)) {
         try { raw.push(...(await serperNews(q, { num: 8, timeRange: 'qdr:y' })).map(r => ({ ...r, lane: 'throwback' }))); }
