@@ -194,19 +194,28 @@ export function generateCelebLifestyleQueries(count = 6) {
   return out.map(q => ({ q, genre: 'ไลฟ์สไตล์ดารา' }));
 }
 
-// ★ v5.1 (15 มิ.ย. ทีมขอ "โฟกัสคลิป/เพจมากขึ้น"): ไฮไลท์สัมภาษณ์ + ดราม่าตามเพจ/รีลส์ (อยู่บน FB/ยูทูปเยอะ)
-//   ค้นผ่าน /search (คืนลิงก์ FB เพจ/รีลส์ + เว็บ) — เป็นเลน video (ดิสคัฟเวอรี ทีมเอาไปถอดคลิป/เขียนเอง)
+// ★ v5.2 (15 มิ.ย. ทีมย้ำ "อย่าโฟกัสแค่สำนักข่าว — รีลส์ไฮไลท์มาจากเพจครีเอเตอร์/เพจตัดคลิปเยอะ"):
+//   คำกว้างเน้น เพจ/ครีเอเตอร์/ตัดคลิป/รวมคลิป + ชื่อดารา×คำคลิป (ครอบหลายร้อยคีย์เวิร์ด) — ค้น /search+/videos ทุกแหล่ง ไม่ผูกสำนักข่าว
 const SOCIAL_CLIP_BROAD = [
   'ดารา สัมภาษณ์ ไฮไลท์ คลิป', 'ดารา เปิดใจ คลิปไวรัล ล่าสุด', 'ดารา ดราม่า คลิป เพจดัง',
   'คนดัง ตอบโต้ ดราม่า ล่าสุด', 'สัมภาษณ์ดารา ประเด็นร้อน เปิดใจ', 'ดารา ไลฟ์สด เปิดใจ ไวรัล',
-  'ดารา เคลียร์ดราม่า คลิป', 'ไฮไลท์รายการ ดารา เปิดใจ น้ำตา',
+  'เพจดารา ตัดคลิป ไฮไลท์ ไวรัล', 'รวมคลิป ดารา ไวรัล เพจดัง', 'ครีเอเตอร์ คลิปดารา คอนเทนต์ ไวรัล',
+  'คลิปดารา น่ารัก โมเมนต์ ไวรัล', 'ดารา ฮา ตลก คลิป ไวรัล', 'ดารา เปิดใจ น้ำตา คลิปสะเทือนใจ',
 ];
+// คำคลิปคู่กับชื่อดารา (ชื่อ × คำพวกนี้ = หลายร้อยคีย์เวิร์ด)
+const CLIP_TERMS = ['คลิป ไวรัล', 'ไฮไลท์ สัมภาษณ์', 'เปิดใจ คลิป', 'ตัดคลิป ไวรัล', 'โมเมนต์ ไวรัล', 'ล่าสุด คลิป'];
 
-/** ★ คลิป/เพจดารา (15 มิ.ย.) — ไฮไลท์สัมภาษณ์+ดราม่าจากเพจ/รีลส์: คำกว้าง count คำ (ใช้กับ /search ให้คืนลิงก์ FB) */
-export function generateSocialClipQueries(count = 6) {
+/** ★ คลิป/เพจดารา (15 มิ.ย. v5.2) — คำกว้างเพจ/ครีเอเตอร์ + ชื่อดารา×คำคลิป (ครอบหลายคีย์เวิร์ด) ใช้กับ /search,/videos */
+export function generateSocialClipQueries(count = 8) {
   const hour = Math.floor(Date.now() / 3600e3);
+  const broadN = Math.min(4, count);
   const out = [];
-  for (let i = 0; i < count; i++) out.push(SOCIAL_CLIP_BROAD[(hour * count + i) % SOCIAL_CLIP_BROAD.length]);
+  for (let i = 0; i < broadN; i++) out.push(SOCIAL_CLIP_BROAD[(hour * broadN + i) % SOCIAL_CLIP_BROAD.length]);
+  for (let i = 0; i < count - broadN; i++) {
+    const name = CELEB_REGISTRY[(hour * 4 + i) % CELEB_REGISTRY.length];
+    const term = CLIP_TERMS[(hour + i) % CLIP_TERMS.length];
+    out.push(`${name} ${term}`);
+  }
   return out.map(q => ({ q, genre: 'คลิป/เพจดารา' }));
 }
 

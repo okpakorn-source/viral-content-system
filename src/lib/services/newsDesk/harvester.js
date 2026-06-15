@@ -288,11 +288,16 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
         try { raw.push(...(await serperNews(q, { num: 10, timeRange: 'qdr:m' })).map(r => ({ ...r, lane: 'celeb' }))); }
         catch (e) { console.log('[Harvester] celeb query failed:', e.message?.slice(0, 50)); }
       }
-      // ★ v5.1 (15 มิ.ย. ทีมขอ "โฟกัสคลิป/เพจมากขึ้น"): ไฮไลท์สัมภาษณ์+ดราม่าจากเพจ/รีลส์ ผ่าน /search (เก็บลิงก์ FB ไว้)
-      //   lane='video' = ดิสคัฟเวอรี (autoPilot ข้าม ไม่ auto-เขียน) ทีมเอาไปถอดคลิป/เรียบเรียงเอง
-      for (const { q } of generateSocialClipQueries(4)) {
+      // ★ v5.2 (15 มิ.ย. ทีมย้ำ "อย่าโฟกัสแค่สำนักข่าว"): คลิป/เพจดารา ค้น 2 แหล่งทุกแพลตฟอร์ม
+      //   /search = เว็บ+เพจ FB/IG/X · /videos = คลิปครีเอเตอร์ YT — lane='video' (ดิสคัฟเวอรี autoPilot ข้าม)
+      const _socialQs = generateSocialClipQueries(8);
+      for (const { q } of _socialQs.slice(0, 5)) {
         try { raw.push(...(await serperSearch(q, { num: 10, timeRange: 'qdr:m' })).map(r => ({ ...r, lane: 'video' }))); }
-        catch (e) { console.log('[Harvester] social-clip query failed:', e.message?.slice(0, 50)); }
+        catch (e) { console.log('[Harvester] social-clip /search failed:', e.message?.slice(0, 50)); }
+      }
+      for (const { q } of _socialQs.slice(5)) {
+        try { raw.push(...(await serperVideos(q, { num: 8 })).map(r => ({ ...r, lane: 'video' }))); }
+        catch (e) { console.log('[Harvester] social-clip /videos failed:', e.message?.slice(0, 50)); }
       }
       for (const { q } of generateThrowbackQueries(4)) {
         try { raw.push(...(await serperNews(q, { num: 8, timeRange: 'qdr:y' })).map(r => ({ ...r, lane: 'throwback' }))); }
