@@ -121,10 +121,13 @@ export async function extractClipInsight({ url, platform, rawText = '' }) {
 
 หน้าที่: ดูคลิปตั้งแต่ต้นจนจบ จับใจความว่าคลิปนี้ต้องการสื่อสารข่าวเรื่องอะไร เก็บทั้งเนื้อหา–คำพูด–บริบท แล้วสรุปเป็นข้อมูลดิบให้คนที่ "ยังไม่ได้ดูคลิป" อ่านแล้วเข้าใจว่าข่าวนี้คืออะไร
 
+⚠️ คลิปอาจยาว (5-15 นาที) — ต้อง "ดูจนจบจริง" ครอบคลุมทุกช่วง ตั้งแต่ต้น–กลาง–ท้าย ห้ามสรุปแค่ช่วงต้นแล้วข้ามที่เหลือ ประเด็นสำคัญมักโผล่ช่วงกลาง/ท้ายด้วย
+อ่านตัวหนังสือบนจอ (CG/ซับ/ป้ายชื่อ) ประกอบด้วยถ้ามี — ใช้ช่วยระบุชื่อคน/ตำแหน่ง/บริบท
+
 ${INSIGHT_RULES}
 
 ${INSIGHT_SCHEMA}`;
-    const r = await callGeminiVideo({ prompt, youtubeUrl: url });
+    const r = await callGeminiVideo({ prompt, youtubeUrl: url, maxTokens: 8000 });
     return normalizeInsight(r, 'gemini-video');
   }
 
