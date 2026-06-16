@@ -6,9 +6,9 @@ import ClientLayout from '@/components/ClientLayout';
 
 // ===== Constants =====
 const FILTER_MODES = [
-  { key: 'soft', label: 'Soft 🟢', color: '#22c55e', desc: 'ตัดเฉพาะคำเฟ้อชัดเจน' },
-  { key: 'balanced', label: 'Balanced 🟡', color: '#eab308', desc: 'สมดุลระหว่างเนื้อจริงและอารมณ์' },
-  { key: 'strict', label: 'Strict 🔴', color: '#ef4444', desc: 'เหลือเฉพาะข้อเท็จจริงล้วน' },
+  { key: 'soft', label: 'ผ่อน 🟢', color: '#22c55e', desc: 'ตัดเฉพาะคำเฟ้อชัดเจน เก็บรายละเอียดเยอะ' },
+  { key: 'balanced', label: 'สมดุล 🟡', color: '#eab308', desc: 'เก็บข้อเท็จจริงครบ ตัดสำนวน/อารมณ์/ตีความ' },
+  { key: 'strict', label: 'เข้มงวด 🔴', color: '#ef4444', desc: 'เหลือเฉพาะแก่นข้อเท็จจริงล้วน' },
 ];
 
 const LABEL_COLORS = {
@@ -958,15 +958,12 @@ function NewsFilterContent() {
               </div>
             </div>
 
-            {/* Options Checkboxes */}
+            {/* ตัวเลือกการกรอง — เหลือเฉพาะที่มีผลจริงในโหมด AI (16 มิ.ย.: ตัด 3 ปุ่มที่ AI ไม่ฟังออก) */}
             <div style={{
-              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
+              display: 'grid', gridTemplateColumns: '1fr', gap: 8,
             }}>
               {[
-                { key: 'keepQuotes', label: 'Keep direct quotes', icon: '💬' },
-                { key: 'keepContext', label: 'Keep necessary context', icon: '📎' },
-                { key: 'removeEmotional', label: 'Remove emotional writing', icon: '🎭' },
-                { key: 'removeUnsupported', label: 'Remove unsupported interpretation', icon: '⚠️' },
+                { key: 'keepQuotes', label: 'เก็บคำพูดตรง (คงคำพูดในเครื่องหมายคำพูด — ปิด = สรุปใจความแทน)', icon: '💬' },
               ].map(opt => (
                 <label
                   key={opt.key}
@@ -1009,7 +1006,7 @@ function NewsFilterContent() {
                   fontSize: 13, fontWeight: 700,
                   color: options.useAI ? '#818cf8' : 'var(--text-muted)',
                 }}>
-                  🤖 Use AI Analysis
+                  🤖 ใช้ AI วิเคราะห์
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
                   ใช้ AI วิเคราะห์ความถูกต้องของข้อมูลเชิงลึก
