@@ -26,6 +26,7 @@ const FOCUS_OPTIONS = [
   { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
   { key: 'celeb_lifestyle', label: '🏡 เปิดบ้าน/รับสัตว์/ไลฟ์สไตล์ดารา' },
   { key: 'celeb_drama', label: '🎬 ดราม่า/ความรักดารา' },
+  { key: 'circle_drama', label: '🏐 ดราม่าวงการ (กีฬา/บันเทิง สด)' },
   { key: 'throwback', label: '⏪ ย้อนสัมภาษณ์เก่า' },
   { key: 'celeb_good', label: '⭐ ดาราทำดี/อมตะ' },
   { key: 'video', label: '📺 วิดีโอดารา (ยูทูป)' },

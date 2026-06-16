@@ -212,6 +212,21 @@ const SOCIAL_CLIP_BROAD = [
 // คำคลิปคู่กับชื่อดารา (ชื่อ × คำพวกนี้ = หลายร้อยคีย์เวิร์ด)
 const CLIP_TERMS = ['คลิป ไวรัล', 'ไฮไลท์ สัมภาษณ์', 'เปิดใจ คลิป', 'ตัดคลิป ไวรัล', 'โมเมนต์ ไวรัล', 'ล่าสุด คลิป'];
 
+// ★ v6 (16 มิ.ย. ทีมขอ): ดราม่าวงการที่มีตัวละคร-กำลังฮอต (วอลเลย์บอล/บอลไทย/บันเทิง) — สด เล่นประเด็นได้ ≠ กระแสเก่า
+const CIRCLE_DRAMA_BROAD = [
+  'วอลเลย์บอลหญิงไทย ดราม่า ล่าสุด', 'นักวอลเลย์บอลไทย ประเด็นร้อน ล่าสุด', 'ฟุตบอลไทย ดราม่า นักเตะ ล่าสุด',
+  'วงการบันเทิง ประเด็นร้อน ดารา ล่าสุด', 'วงการลูกหนัง ทีมชาติไทย ดราม่า', 'นักกีฬาไทย ดราม่า ประเด็น ล่าสุด',
+  'วอลเลย์บอลไทย ปะทะ ดราม่า คลิป', 'วงการมวย-เพลง ดราม่า ศิลปิน ล่าสุด',
+];
+
+/** ★ ดราม่าวงการ (16 มิ.ย.) — กระแสสดในวงการที่มีตัวละครเยอะ (กีฬา/บันเทิง) ที่ไม่ร้ายแรง+เล่นประเด็นได้ */
+export function generateCircleDramaQueries(count = 6) {
+  const hour = Math.floor(Date.now() / 3600e3);
+  const out = [];
+  for (let i = 0; i < count; i++) out.push(CIRCLE_DRAMA_BROAD[(hour * count + i) % CIRCLE_DRAMA_BROAD.length]);
+  return out.map(q => ({ q, genre: 'ดราม่าวงการ' }));
+}
+
 /** ★ คลิป/เพจดารา (15 มิ.ย. v5.2) — คำกว้างเพจ/ครีเอเตอร์ + ชื่อดารา×คำคลิป (ครอบหลายคีย์เวิร์ด) ใช้กับ /search,/videos */
 export function generateSocialClipQueries(count = 8) {
   const hour = Math.floor(Date.now() / 3600e3);
@@ -294,6 +309,7 @@ export const FOCUS_OPTIONS = [
   { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
   { key: 'celeb_lifestyle', label: '🏡 เปิดบ้าน/รับสัตว์/ไลฟ์สไตล์ดารา' },
   { key: 'celeb_drama', label: '🎬 ดราม่า/ความรักดารา' },
+  { key: 'circle_drama', label: '🏐 ดราม่าวงการ (กีฬา/บันเทิง สด)' },
   { key: 'throwback', label: '⏪ ย้อนสัมภาษณ์เก่า' },
   { key: 'celeb_good', label: '⭐ ดาราทำดี/อมตะ' },
   { key: 'video', label: '📺 วิดีโอดารา (ยูทูป)' },
@@ -317,6 +333,7 @@ export function generateFocusQueries(focus, count = 8) {
     case 'celeb_family': return wrap(generateCelebFamilyQueries(count), 'good', 'qdr:m');
     case 'celeb_lifestyle': return wrap(generateCelebLifestyleQueries(count), 'good', 'qdr:y', 'search'); // เว็บกว้าง + ย้อนทั้งปี
     case 'celeb_drama': return wrap(generateCelebRadarQueries(count), 'celeb', 'qdr:m');
+    case 'circle_drama': return wrap(generateCircleDramaQueries(count), 'video', '', 'videos'); // ดราม่าวงการสด — คลิปยูทูป (ดิสคัฟเวอรี)
     case 'throwback': return wrap(generateThrowbackQueries(count), 'throwback', 'qdr:y');
     case 'celeb_good': return wrap(generateEvergreenCelebQueries(count), 'evergreen-celeb', 'qdr:y');
     case 'video': return wrap(generateCelebLifestyleQueries(count), 'video', '', 'videos'); // ยูทูป (ดิสคัฟเวอรี ไม่ auto-เขียน)

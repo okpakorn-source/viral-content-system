@@ -254,6 +254,16 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       try { raw.push(...(await serperNews(q, { num: 10, timeRange: 'qdr:d' })).map(r => ({ ...r, lane: 'trend' }))); }
       catch (e) { console.log('[Harvester] trend query failed:', e.message?.slice(0, 50)); }
     }
+    // ★ 16 มิ.ย. (ทีมขอ): ดราม่าวงการสด มีตัวละคร (วอลเลย์บอล/บอลไทย/บันเทิง) — คลิปยูทูป(สด≤3ด.) + บทความ; lane trend ยกเว้นด่านกระแสเก่า
+    try {
+      const { generateCircleDramaQueries } = await import('./goodNewsScout');
+      for (const { q } of generateCircleDramaQueries(3)) {
+        try { raw.push(...(await serperVideos(q, { num: 8 })).filter(x => { const a = videoAgeMonths(x._rawDate); return a == null || a <= 3; }).map(r => ({ ...r, lane: 'video' }))); }
+        catch (e) { console.log('[Harvester] circle /videos failed:', e.message?.slice(0, 50)); }
+        try { raw.push(...(await serperNews(q, { num: 6, timeRange: 'qdr:w' })).map(r => ({ ...r, lane: 'trend' }))); }
+        catch (e) { console.log('[Harvester] circle /news failed:', e.message?.slice(0, 50)); }
+      }
+    } catch (e) { console.log('[Harvester] circle-drama import failed:', e.message?.slice(0, 50)); }
   }
   if (lanes.includes('good')) {
     // ★ กองสืบน้ำดี (13 มิ.ย. 69): สมองสืบคิดคำค้นสด + ค้นดาราด้วยชื่อ — ตกลงมาใช้คำค้นตายตัวถ้าล่ม
