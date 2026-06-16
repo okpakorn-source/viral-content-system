@@ -12,6 +12,9 @@ export default function ClipTranscriptPage() {
   const [casesOpen, setCasesOpen] = useState(true);
   const [expanded, setExpanded] = useState(null);
   const [copied, setCopied] = useState('');
+  // ★ 16 มิ.ย.: ถอดประเด็นข่าว → ข้อมูลดิบ (Gemini ดูคลิป)
+  const [insight, setInsight] = useState(null);
+  const [insightLoading, setInsightLoading] = useState(false);
 
   const loadCases = async () => {
     try { const r = await fetch('/api/clip-transcript/cases?limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setCases(d.cases || []); } catch {}
@@ -30,6 +33,19 @@ export default function ClipTranscriptPage() {
       else { setOut(d.data); setView(d.data.tidyText ? 'tidy' : 'raw'); loadCases(); }
     } catch (e) { setErr(e.message); }
     setLoading(false);
+  };
+
+  // ★ ถอดประเด็นข่าว → ข้อมูลดิบ (Gemini ดูคลิป YouTube / ถอดเสียง+LLM สำหรับ TikTok-FB)
+  const extractInsight = async () => {
+    if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
+    setInsightLoading(true); setErr(''); setInsight(null);
+    try {
+      const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim() }) });
+      const d = await r.json();
+      if (!d.success) setErr(d.error || 'ถอดประเด็นไม่สำเร็จ');
+      else setInsight(d.data);
+    } catch (e) { setErr(e.message); }
+    setInsightLoading(false);
   };
 
   const copy = (text, key) => { navigator.clipboard?.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 2000); };
@@ -51,10 +67,17 @@ export default function ClipTranscriptPage() {
             <input value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && !loading && extract()}
               placeholder="วางลิงก์คลิป เช่น https://www.tiktok.com/... หรือ https://youtu.be/..."
               style={{ flex: 1, minWidth: 280, padding: '12px 14px', borderRadius: 10, border: '1px solid var(--border, #2a2a3e)', background: 'rgba(0,0,0,0.2)', color: 'inherit', fontSize: 14, fontFamily: 'inherit' }} />
-            <button onClick={extract} disabled={loading}
-              style={{ padding: '12px 24px', borderRadius: 10, border: 'none', background: loading ? '#4b5563' : 'linear-gradient(135deg,#f91880,#7c3aed)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: loading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
-              {loading ? '⏳ กำลังถอด... (อาจ 1-3 นาที)' : '🎙️ ถอดบทสัมภาษณ์'}
+            <button onClick={extract} disabled={loading || insightLoading}
+              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: loading ? '#4b5563' : 'linear-gradient(135deg,#f91880,#7c3aed)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: loading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+              {loading ? '⏳ กำลังถอด...' : '🎙️ ถอดบทสัมภาษณ์'}
             </button>
+            <button onClick={extractInsight} disabled={loading || insightLoading}
+              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: insightLoading ? '#4b5563' : 'linear-gradient(135deg,#2563eb,#0891b2)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: insightLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+              {insightLoading ? '⏳ Gemini กำลังดูคลิป...' : '🎯 ถอดประเด็นข่าว (ข้อมูลดิบ)'}
+            </button>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted, #888)', lineHeight: 1.6 }}>
+            🎙️ <b>ถอดบทสัมภาษณ์</b> = ได้บทพูดเต็ม + บอกประเภทคลิป (สัมภาษณ์/พูดเดี่ยว/อ่านข่าว) · 🎯 <b>ถอดประเด็นข่าว</b> = Gemini ดูคลิป YouTube ทั้งเรื่อง → สรุปเป็นข้อมูลดิบ (ประเด็น+คำพูด+ช่วงเวลา)
           </div>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 13, color: 'var(--text-muted, #888)', cursor: 'pointer' }}>
             <input type="checkbox" checked={tidy} onChange={e => setTidy(e.target.checked)} />
@@ -76,7 +99,91 @@ export default function ClipTranscriptPage() {
                 <button onClick={() => copy(shown, 'out')} style={{ padding: '5px 12px', borderRadius: 8, border: 'none', background: copied === 'out' ? 'rgba(34,197,94,0.2)' : 'rgba(59,130,246,0.15)', color: copied === 'out' ? '#22c55e' : '#3b82f6', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'out' ? '✅ คัดลอกแล้ว' : '📋 Copy'}</button>
               </div>
             </div>
+            {out.classify && out.classify.clipType !== 'other' && (
+              <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 10, background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 800, color: '#a78bfa' }}>{out.classify.emoji} ประเภท: {out.classify.clipTypeLabel}</span>
+                  {out.classify.speakerCount > 0 && <span style={{ fontSize: 11.5, color: 'var(--text-muted,#888)' }}>· {out.classify.speakerCount} คนพูด</span>}
+                  {out.classify.speakers?.length > 0 && <span style={{ fontSize: 11.5, color: 'var(--text-muted,#888)' }}>· 🗣️ {out.classify.speakers.join(', ')}</span>}
+                </div>
+                {out.classify.usageNote && <div style={{ fontSize: 11.5, color: 'var(--text-muted,#888)', marginTop: 5, lineHeight: 1.5 }}>💡 {out.classify.usageNote}</div>}
+              </div>
+            )}
             <div style={{ fontSize: 14, lineHeight: 1.8, whiteSpace: 'pre-wrap', maxHeight: 420, overflowY: 'auto', background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 14 }}>{shown}</div>
+          </div>
+        )}
+
+        {/* ★ ถอดประเด็นข่าว → ข้อมูลดิบ (Gemini ดูคลิป) */}
+        {insightLoading && (
+          <div className="card" style={{ background: 'var(--bg-card,#1a1a2e)', border: '1px solid rgba(37,99,235,0.3)', borderRadius: 14, padding: 24, marginBottom: 22, textAlign: 'center' }}>
+            <div style={{ fontSize: 14, color: '#60a5fa', fontWeight: 700 }}>🎯 Gemini กำลังดูคลิปและถอดประเด็น... (คลิปยาวอาจ 1-2 นาที)</div>
+          </div>
+        )}
+        {insight && !insightLoading && (
+          <div className="card" style={{ background: 'var(--bg-card,#1a1a2e)', border: '1px solid rgba(37,99,235,0.35)', borderRadius: 14, padding: 18, marginBottom: 22 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#60a5fa' }}>🎯 ข้อมูลดิบจากคลิป</div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>{insight.emoji} {insight.clipTypeLabel}</span>
+                <span style={{ fontSize: 10, color: 'var(--text-muted,#888)' }}>{insight.engine === 'gemini-video' ? '👁️ Gemini ดูคลิป' : '📝 จากบทถอดเสียง'}</span>
+                <button onClick={() => copy(insight.rawData, 'insight-raw')} style={{ padding: '4px 11px', borderRadius: 8, border: 'none', background: copied === 'insight-raw' ? 'rgba(34,197,94,0.2)' : 'rgba(59,130,246,0.15)', color: copied === 'insight-raw' ? '#22c55e' : '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'insight-raw' ? '✅ คัดลอกแล้ว' : '📋 คัดลอกข้อมูลดิบ'}</button>
+              </div>
+            </div>
+
+            {insight.headline && <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>📌 {insight.headline}</div>}
+            {insight.speakers?.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted,#888)', marginBottom: 10 }}>🗣️ ผู้พูด: {insight.speakers.join(', ')}</div>}
+            {insight.usageNote && <div style={{ fontSize: 11.5, color: '#a78bfa', marginBottom: 12, padding: '7px 11px', borderRadius: 8, background: 'rgba(124,58,237,0.07)' }}>💡 {insight.usageNote}</div>}
+
+            {insight.overview && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 5 }}>ภาพรวม</div>
+                <div style={{ fontSize: 13.5, lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{insight.overview}</div>
+              </div>
+            )}
+
+            {insight.keyPoints?.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 6 }}>🎯 ประเด็นสำคัญ ({insight.keyPoints.length})</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {insight.keyPoints.map((k, i) => (
+                    <div key={i} style={{ padding: '10px 12px', borderRadius: 9, background: 'rgba(0,0,0,0.2)', borderLeft: '3px solid #2563eb' }}>
+                      <div style={{ fontSize: 13, fontWeight: 700 }}>{i + 1}. {k.point}</div>
+                      {k.detail && <div style={{ fontSize: 12.5, color: 'var(--text-muted,#aaa)', marginTop: 4, lineHeight: 1.6 }}>{k.detail}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {insight.quotes?.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 6 }}>💬 คำพูดสำคัญ</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {insight.quotes.map((q, i) => (<div key={i} style={{ fontSize: 12.5, lineHeight: 1.6, padding: '7px 11px', borderRadius: 8, background: 'rgba(34,197,94,0.06)', borderLeft: '3px solid #22c55e' }}>&ldquo;{q}&rdquo;</div>))}
+                </div>
+              </div>
+            )}
+
+            {insight.timeline?.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 6 }}>⏱️ ช่วงจังหวะในคลิป</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  {insight.timeline.map((t, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12.5 }}>
+                      <span style={{ color: '#60a5fa', fontWeight: 700, minWidth: 84, flexShrink: 0 }}>{t.time || '—'}</span>
+                      <span style={{ color: 'var(--text-muted,#aaa)' }}>{t.topic}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {insight.rawData && (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 5 }}>📄 ข้อมูลดิบ (พร้อมเอาไปใช้)</div>
+                <div style={{ fontSize: 13.5, lineHeight: 1.8, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 14, maxHeight: 360, overflowY: 'auto' }}>{insight.rawData}</div>
+              </div>
+            )}
           </div>
         )}
 

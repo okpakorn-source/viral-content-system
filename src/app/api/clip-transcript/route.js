@@ -83,6 +83,13 @@ ${rawText.slice(0, 9000)}
       } catch (e) { console.warn('[ClipTranscript] tidy ล้ม (คืนดิบ):', e.message?.slice(0, 50)); }
     }
 
+    // ★ 16 มิ.ย.: จำแนกประเภทคลิป + ใครพูด (สัมภาษณ์/พูดเดี่ยว/อ่านข่าว/สนทนา) — ให้คนหยิบไปใช้รู้ที่มา
+    let classify = null;
+    try {
+      const { classifyTranscript } = await import('@/lib/services/clipInsightService');
+      classify = await classifyTranscript(rawText, caption);
+    } catch (e) { console.warn('[ClipTranscript] classify ล้ม (ข้าม):', e.message?.slice(0, 50)); }
+
     // ★ เก็บเข้าคลังอัตโนมัติ (fire-and-forget) — เก็บ 80 เคสล่าสุด
     const caseId = randomUUID();
     (async () => {
@@ -91,6 +98,7 @@ ${rawText.slice(0, 9000)}
         await store.add({
           id: caseId, url, platform: type, caption: String(caption || '').slice(0, 200),
           rawText: rawText.slice(0, 20000), tidyText: tidyText.slice(0, 20000),
+          classify,
           title: (caption || rawText).slice(0, 70), wordCount: rawText.length,
           createdAt: new Date().toISOString(),
         });
@@ -102,7 +110,7 @@ ${rawText.slice(0, 9000)}
       } catch (e) { console.warn('[ClipTranscript] เก็บคลังล้ม:', e.message?.slice(0, 50)); }
     })();
 
-    return NextResponse.json({ success: true, data: { id: caseId, platform: type, caption, rawText, tidyText } });
+    return NextResponse.json({ success: true, data: { id: caseId, platform: type, caption, rawText, tidyText, classify } });
   } catch (error) {
     console.error('[ClipTranscript]', error.message);
     return NextResponse.json({ success: false, error: error.message || 'ถอดเสียงล้มเหลว', errorType: 'TRANSCRIBE_ERROR' }, { status: 500 });

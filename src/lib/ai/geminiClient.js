@@ -100,6 +100,55 @@ export function isGeminiAvailable() {
 }
 
 /**
+ * ★ 16 มิ.ย. 69: Gemini "ดูคลิป YouTube" ตรงจากลิงก์ (ภาพ+เสียงทั้งคลิป) — ถอดประเด็นข่าว
+ *   ส่งลิงก์ YouTube สาธารณะผ่าน fileData.fileUri ให้ Gemini ดูเอง ไม่ต้องโหลด/ถอดเสียงก่อน
+ *   timeout ยาว (3 นาที) เพราะดูคลิปทั้งเรื่อง | ใช้กับเครื่องมือ clip-insight เท่านั้น (แยกจากเวิร์กโฟลว์ข่าว)
+ */
+export async function callGeminiVideo({ prompt, youtubeUrl, model = 'gemini-3.5-flash', temperature = 0.2, maxTokens = 6000 }) {
+  const client = getGeminiClient();
+  if (!client) throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า');
+
+  console.log(`[GeminiVideo] model=${model}, url=${String(youtubeUrl).slice(0, 70)}`);
+
+  const genModel = client.getGenerativeModel({
+    model,
+    generationConfig: {
+      temperature,
+      maxOutputTokens: maxTokens,
+      responseMimeType: 'application/json',
+    },
+  });
+
+  const result = await genModel.generateContent({
+    contents: [{
+      role: 'user',
+      parts: [
+        { fileData: { fileUri: youtubeUrl } },
+        { text: prompt },
+      ],
+    }],
+  }, { requestOptions: { timeout: 180000 } });
+
+  const content = result.response?.text();
+  const um = result.response?.usageMetadata;
+  console.log(`[GeminiVideo] OK: tokens input=${um?.promptTokenCount || 0}, output=${um?.candidatesTokenCount || 0}`);
+  logApiUsage({ provider: 'gemini_video', model, inputTokens: um?.promptTokenCount || 0, outputTokens: um?.candidatesTokenCount || 0, feature: 'callGeminiVideo' });
+
+  if (!content) throw new Error('Gemini ไม่ส่งข้อมูลกลับ (อาจดูคลิปไม่ได้ — คลิปส่วนตัว/อายุจำกัด)');
+
+  try {
+    return sanitizeOutput(JSON.parse(content));
+  } catch (e) {
+    const s = content.indexOf('{'), eIdx = content.lastIndexOf('}');
+    if (s !== -1 && eIdx !== -1) {
+      try { return sanitizeOutput(JSON.parse(content.slice(s, eIdx + 1))); } catch {}
+    }
+    console.error('[GeminiVideo] JSON parse failed:', content.slice(0, 400));
+    throw new Error('Gemini ส่งข้อมูลที่ parse ไม่ได้');
+  }
+}
+
+/**
  * เรียก Gemini Vision — ส่งภาพ (Base64) เข้าไปวิเคราะห์
  * images: [{ data: "base64...", mimeType: "image/jpeg" }, ...]
  */
