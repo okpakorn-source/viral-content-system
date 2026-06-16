@@ -23,6 +23,8 @@ const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', intervie
 
 // ★ 15 มิ.ย.: แนวที่ "สั่งหาเฉพาะแนว" ได้ (key ต้องตรงกับ generateFocusQueries ใน goodNewsScout)
 const FOCUS_OPTIONS = [
+  { key: 'celeb_gooddeed', label: '⭐ ดาราทำดี/ช่วยเหลือ/อวย' },
+  { key: 'celeb_highlight', label: '🎤 ไฮไลท์สัมภาษณ์ดาราด้านดี' },
   { key: 'viral_dna', label: '🧬 แนวที่ปังบนเพจ (DNA)' },
   { key: 'good_all', label: '💎 ข่าวน้ำดี (รวมทุกหมวด)' },
   { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
@@ -115,7 +117,7 @@ export default function NewsDeskPage() {
   const [sentToday, setSentToday] = useState(0);
   const [loading, setLoading] = useState(true);
   const [harvesting, setHarvesting] = useState(false);
-  const [focusSel, setFocusSel] = useState('celeb_family');
+  const [focusSel, setFocusSel] = useState('celeb_gooddeed');
   const [trendTopic, setTrendTopic] = useState('');
   const [trendCases, setTrendCases] = useState([]); // คลังค้นหาติดตาม (เคสคีย์เวิร์ด+ลิงก์)
   const [msg, setMsg] = useState('');

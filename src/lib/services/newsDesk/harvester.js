@@ -316,11 +316,13 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
         }));
         for (const arr of results) raw.push(...arr);
       };
-      // ── แกนหลัก (รันทุกรอบ): คอนเทนต์น้ำดี 24 + DNA เพจ + เรื่องลำบาก + ดาราให้ของขวัญครอบครัว = แนวที่ปังสุด ──
-      await runGroup(G.generateGoodContentQueries(6), { ep: 'search', noClip: true });
-      await runGroup(G.generateViralDnaQueries(5), { ep: 'search', noClip: true }); // ★ 16 มิ.ย.: DNA จากเพจ — สถาบันบวก/ทหาร/ยุติธรรม/ต่างชาติช่วยไทย/นักกีฬาสมถะ
-      await runGroup(G.generateHardshipQueries(4), { ep: 'news', tr: 'qdr:m' }); // ★ 16 มิ.ย.: ลำบาก→/news (มีวันที่) ป้ายความสดทำงาน — ทีมรู้ว่าเคสคนลำบากของวันนี้/เก่า
-      await runGroup(G.generateCelebFamilyQueries(5), { ep: 'news' });
+      // ── ★ แกนหลัก รอบ 3 (16 มิ.ย. ทีมขอ "เน้นดารา-อวย-ทำดี + คนลำบาก ให้เยอะ แบบในเพจ"): celeb-good ครองแกนหลัก ──
+      await runGroup(G.generateCelebGoodDeedQueries(7), { ep: 'search', noClip: true });   // ★ ดาราทำดี/บริจาค/ทำบุญ/ช่วยเหลือ/ติดดิน (แนวอวยที่ปังสุด)
+      await runGroup(G.generateCelebFamilyQueries(6), { ep: 'news' });                      // ★ ดาราให้ของขวัญครอบครัว (GOLD — เบสท์ออกรถให้น้อง)
+      await runGroup(G.generateCelebHighlightQueries(5), { ep: 'search', lane: 'celeb' });  // ★ ไฮไลท์สัมภาษณ์ดาราด้านดี (รีลส์/คลิป)
+      await runGroup(G.generateHardshipQueries(5), { ep: 'news', tr: 'qdr:m' });            // ★ คนลำบากน่าสงสาร (→/news มีวันที่)
+      await runGroup(G.generateGoodContentQueries(4), { ep: 'search', noClip: true });      // น้ำดีทั่วไป (ลดจาก 6)
+      await runGroup(G.generateViralDnaQueries(3), { ep: 'search', noClip: true });         // DNA สถาบัน/ทหาร/ฯลฯ (ลดจาก 5 — เน้นดาราแทน)
       // ★ v6 (16 มิ.ย. ทีมขอเน้น): ย้อนสัมภาษณ์เก่า เป็นแกนหลัก รันทุกรอบ — บทความ /news + "คลิปจริง" /videos (YT)
       const _tbQs = G.generateThrowbackQueries(6);
       await runGroup(_tbQs.slice(0, 4), { ep: 'news', lane: 'throwback', tr: 'qdr:y', num: 8 });   // บทความย้อนสัมภาษณ์

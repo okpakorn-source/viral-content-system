@@ -145,6 +145,50 @@ export function generateThrowbackQueries(count = 6) {
   return out.slice(0, count).map(q => ({ q, genre: 'ย้อนสัมภาษณ์' }));
 }
 
+// ★ 16 มิ.ย. รอบ 3 (ทีมขอ "เน้นดารา อวย/ทำดี/ช่วยเหลือ ให้เยอะ — แบบในเพจ"):
+//   ดาราทำดี/ช่วยเหลือ/ทำบุญ/บริจาค/ช่วยวัด/ติดดิน-พอเพียง/ช่วยเพื่อนดารา-ชาวบ้าน — แนวอวยที่เพจปังสุด
+const CELEB_GOODDEED_BROAD = [
+  'ดารา บริจาค ช่วยเหลือ ล่าสุด', 'ดารา ทำบุญ ถวายวัด สร้างวัด ล่าสุด', 'นักร้องนักแสดง ช่วยน้ำท่วม ผู้ประสบภัย',
+  'ดารา ช่วยเหลือ ชาวบ้าน คนลำบาก น่าสงสาร', 'คนดัง ช่วยเหลือ เพื่อนดารา ในวงการ', 'ดารา ติดดิน ใช้ชีวิตพอเพียง สมถะ',
+  'ดารา มอบเงิน มอบของ ช่วยคนเดือดร้อน', 'ดารา ลงพื้นที่ ช่วยเหลือ ผู้ยากไร้', 'นักแสดง ใจบุญ ช่วยเหลือเงียบๆ',
+  'ดารา ดูแลแฟนคลับ ช่วยแฟนคลับ ซึ้ง', 'คนดัง ออกค่ารักษา ช่วยชีวิต คนป่วย', 'ดารา ใจบุญ สร้างบ้าน ยกที่ดิน ให้คนจน',
+];
+const CELEB_GOODDEED_DEEDS = ['บริจาค ช่วยเหลือ', 'ทำบุญ ถวายวัด', 'ช่วยชาวบ้าน คนลำบาก', 'ติดดิน พอเพียง สมถะ', 'ช่วยเพื่อนดารา', 'มอบเงิน ช่วยคนป่วย', 'ลงพื้นที่ ช่วยเหลือ'];
+
+/** ★ ดาราทำดี/ช่วยเหลือ/อวย (16 มิ.ย. รอบ 3) — แนวที่เพจปังสุด: คำกว้าง 5 + ชื่อ×ความดี (qdr:m) */
+export function generateCelebGoodDeedQueries(count = 7) {
+  const h = Math.floor(Date.now() / 3600e3);
+  const out = [];
+  const broadN = Math.min(5, count);
+  for (let i = 0; i < broadN; i++) out.push(CELEB_GOODDEED_BROAD[(h * 5 + i) % CELEB_GOODDEED_BROAD.length]);
+  for (let i = 0; i < count - broadN; i++) {
+    const name = CELEB_REGISTRY[(h * 2 + i + 7) % CELEB_REGISTRY.length];
+    const deed = CELEB_GOODDEED_DEEDS[(h + i) % CELEB_GOODDEED_DEEDS.length];
+    out.push(`${name} ${deed}`);
+  }
+  return out.slice(0, count).map(q => ({ q, genre: 'ดาราทำดี/ช่วยเหลือ' }));
+}
+
+// ★ ไฮไลท์ดารา/สัมภาษณ์ด้านดี (16 มิ.ย. รอบ 3): ดาราพูด/สัมภาษณ์/โมเมนต์ดีๆ ที่ชาวเน็ตชื่นชม (รีลส์/คลิป/เว็บ)
+const CELEB_HIGHLIGHT_BROAD = [
+  'ไฮไลท์ สัมภาษณ์ ดารา ซึ้ง ล่าสุด', 'ดารา พูด ประทับใจ ชาวเน็ตชื่นชม', 'คลิป ดารา ช่วยเหลือ น้ำใจ ไวรัล',
+  'ไฮไลท์ ดารา เปิดใจ เรื่องดีๆ ล่าสุด', 'ดารา ให้สัมภาษณ์ คำพูดดีๆ สอนใจ', 'คลิป ดารา ทำดี ชาวเน็ตแห่ชื่นชม',
+  'โมเมนต์ ดารา น่ารัก ใจดี ไวรัล', 'ดารา ตอบคำถาม ประทับใจ คนชื่นชม',
+];
+
+/** ★ ไฮไลท์ดาราด้านดี (16 มิ.ย. รอบ 3) — คำกว้าง 4 + ชื่อ×ไฮไลท์ (เว็บ/รีลส์) */
+export function generateCelebHighlightQueries(count = 5) {
+  const h = Math.floor(Date.now() / 3600e3);
+  const out = [];
+  const broadN = Math.min(4, count);
+  for (let i = 0; i < broadN; i++) out.push(CELEB_HIGHLIGHT_BROAD[(h * 4 + i) % CELEB_HIGHLIGHT_BROAD.length]);
+  for (let i = 0; i < count - broadN; i++) {
+    const name = CELEB_REGISTRY[(h * 2 + i + 11) % CELEB_REGISTRY.length];
+    out.push(`ไฮไลท์ ${name} สัมภาษณ์ เปิดใจ ล่าสุด`);
+  }
+  return out.slice(0, count).map(q => ({ q, genre: 'ไฮไลท์ดารา' }));
+}
+
 // คำค้นกว้าง "ดาราทำดี" — ไม่ระบุชื่อ ดูดได้เยอะ (Serper คืน ~10/คำ) จับว่าดาราไหนก็ตามที่เพิ่งทำดี
 const CELEB_BROAD_TERMS = [
   'คนดัง สร้างบ้าน มอบ ยกที่ดิน', 'ดารา บริจาค ช่วยเหลือ ล่าสุด', 'นักร้อง นักแสดง ทำบุญ การกุศล',
@@ -332,6 +376,8 @@ const FOCUS_FIXED = {
 
 /** รายการแนวที่สั่งได้ (ให้ UI ใช้ทำปุ่ม) — key ต้องตรงกับ generateFocusQueries */
 export const FOCUS_OPTIONS = [
+  { key: 'celeb_gooddeed', label: '⭐ ดาราทำดี/ช่วยเหลือ/อวย' },
+  { key: 'celeb_highlight', label: '🎤 ไฮไลท์สัมภาษณ์ดาราด้านดี' },
   { key: 'viral_dna', label: '🧬 แนวที่ปังบนเพจ (DNA)' },
   { key: 'good_all', label: '💎 ข่าวน้ำดี (รวมทุกหมวด)' },
   { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
@@ -357,6 +403,8 @@ export const FOCUS_OPTIONS = [
 export function generateFocusQueries(focus, count = 8) {
   const wrap = (arr, lane, timeRange, endpoint) => arr.map(x => ({ q: (x && x.q) || x, lane, timeRange, endpoint })).filter(o => o.q && o.q.length >= 4);
   switch (focus) {
+    case 'celeb_gooddeed': return wrap(generateCelebGoodDeedQueries(count), 'good', 'qdr:m', 'search'); // ★ ดาราทำดี/ช่วยเหลือ/บริจาค/ทำบุญ/ติดดิน — แนวอวยที่เพจปังสุด
+    case 'celeb_highlight': return wrap(generateCelebHighlightQueries(count), 'celeb', 'qdr:m', 'search'); // ★ ไฮไลท์สัมภาษณ์ดาราด้านดี (เว็บ/รีลส์)
     case 'viral_dna': return wrap(generateViralDnaQueries(count), 'good', 'qdr:m', 'search'); // DNA เพจ — แนวที่สถิติพิสูจน์ว่าปัง (สถาบันบวก/ทหาร/ยุติธรรม/ต่างชาติช่วยไทย/นักกีฬาสมถะ/ดาราติดดิน)
     case 'good_all': return wrap(generateGoodContentQueries(8), 'good', 'qdr:m', 'search'); // น้ำดีรวมทุกหมวด (กตัญญู/สู้ชีวิต/น้ำใจ/สัตว์/เด็ก/ผู้สูงวัย/อาชีพหัวใจ)
     case 'celeb_family': return wrap(generateCelebFamilyQueries(count), 'good', 'qdr:m');
