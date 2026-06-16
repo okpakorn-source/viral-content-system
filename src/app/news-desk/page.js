@@ -100,6 +100,7 @@ export default function NewsDeskPage() {
   const [harvesting, setHarvesting] = useState(false);
   const [focusSel, setFocusSel] = useState('celeb_family');
   const [trendTopic, setTrendTopic] = useState('');
+  const [trendCases, setTrendCases] = useState([]); // คลังค้นหาติดตาม (เคสคีย์เวิร์ด+ลิงก์)
   const [msg, setMsg] = useState('');
   const [me, setMe] = useState('');
   const [governor, setGovernor] = useState(null);
@@ -159,6 +160,12 @@ export default function NewsDeskPage() {
 
   useEffect(() => { setLoading(true); load(); }, [load]);
   useEffect(() => { const t = setInterval(load, 60_000); return () => clearInterval(t); }, [load]);
+
+  // ★ 16 มิ.ย.: โหลดคลังค้นหาติดตามเมื่อเข้าแท็บ 🔴 (persistent — ไม่รีเซ็ตเวลาปิดเบราว์เซอร์)
+  const loadTrendCases = useCallback(() => {
+    fetch('/api/news-desk/trend-track').then(r => r.json()).then(d => { if (d.success) setTrendCases(d.cases || []); }).catch(() => {});
+  }, []);
+  useEffect(() => { if (tab === 'trendtrack') loadTrendCases(); }, [tab, loadTrendCases]);
 
   // ★ Auto Photo Board ที่ชั้นวาง ✅: ปิดชั่วคราว (PHOTO_SCOUT_OFF) — รอแก้บัคภาพซ้ำ/ออโต้ถี่เกิน
   const _autoScouted = useRef(new Set());
@@ -242,6 +249,14 @@ export default function NewsDeskPage() {
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
     setHarvesting(false);
+  };
+
+  // ★ คัดลอกเคสคลังค้นหาติดตาม (คีย์เวิร์ด + ลิงก์ทั้งหมด)
+  const copyCase = async (c) => {
+    const lines = (c.links || []).map((l, i) => `${i + 1}. ${l.title}\n🔗 ${l.url}`);
+    const text = `🔴 ติดตามกระแส: ${c.keyword} (${(c.links || []).length} ลิงก์)\n━━━━━━━━━━━━━━━\n\n${lines.join('\n\n')}`;
+    try { await navigator.clipboard.writeText(text); setMsg(`📋 คัดลอก "${c.keyword}" ${(c.links || []).length} ลิงก์ — วางในแชทได้เลย`); }
+    catch { window.prompt('คัดลอกข้อความนี้:', text); }
   };
 
   // ★ คัดลอก "คลังส่งเช้า" เป็นข้อความ → วางในแชทส่งพนักงานได้เลย (title + แนว + ลิงก์ เรียงเข้าใจง่าย)
@@ -640,6 +655,27 @@ export default function NewsDeskPage() {
             <span>① เลื่อนดูข่าว</span><span style={{ opacity: 0.5 }}>→</span>
             <span>② เจอข่าวดีกด <b style={{ color: '#ca8a04' }}>☆ เก็บส่งเช้า</b></span><span style={{ opacity: 0.5 }}>→</span>
             <span>③ เช้าเข้าแท็บ <b style={{ color: '#ca8a04' }}>⭐ คลังส่งเช้า</b> กด <b>📋 คัดลอกส่งพนักงาน</b></span>
+          </div>
+        )}
+
+        {/* ★ 16 มิ.ย.: คลังค้นหาติดตาม — เคสคีย์เวิร์ดที่เคยค้น + ลิงก์ (persistent ไม่รีเซ็ตเมื่อปิดเบราว์เซอร์) */}
+        {tab === 'trendtrack' && (
+          <div style={{ marginBottom: 14, padding: '12px 14px', borderRadius: 12, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.28)' }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>📁 คลังค้นหาติดตาม ({trendCases.length} คีย์เวิร์ด) — ปิดเบราว์เซอร์แล้วยังอยู่</div>
+            {trendCases.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>ยังไม่มี — ใส่ชื่อกระแสที่ช่อง 🔴 ด้านบนแล้วกด "วิเคราะห์+ตามกระแส" จะเก็บลิงก์ที่เจอไว้ที่นี่อัตโนมัติ</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {trendCases.map(c => (
+                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 9, background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--desk-red, #dc2626)' }}>🔴 {c.keyword}</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{(c.links || []).length} ลิงก์ · {c.createdAt ? new Date(c.updatedAt || c.createdAt).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : ''}</span>
+                    <div style={{ flex: 1 }} />
+                    <button onClick={() => copyCase(c)} style={{ padding: '5px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', fontSize: 12.5, fontWeight: 700 }}>📋 คัดลอกลิงก์</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

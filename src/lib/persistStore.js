@@ -187,7 +187,16 @@ export function createStore(name) {
       
       async addMany(newItems) {
         const sb = getSupabase();
-        const rows = newItems.map(item => ({
+        if (!newItems || newItems.length === 0) return newItems || [];
+        // ★ 16 มิ.ย. (แก้บั๊ก duplicate key): กรอง id ที่มีอยู่แล้วออกก่อน insert (เช่นค้นกระแสซ้ำ url เดิม)
+        let fresh = newItems;
+        try {
+          const { data: ex } = await sb.from(TABLE).select('id').eq('store_name', name).in('id', newItems.map(i => i.id));
+          const exIds = new Set((ex || []).map(r => r.id));
+          fresh = newItems.filter(i => !exIds.has(i.id));
+        } catch { /* เช็คไม่ได้ = ลอง insert ตรง แล้วจัดการ error ด้านล่าง */ }
+        if (fresh.length === 0) { console.log(`[Store:${name}] addMany: มีอยู่แล้วทั้งหมด ข้าม`); return newItems; }
+        const rows = fresh.map(item => ({
           id: item.id,
           store_name: name,
           data: item,
@@ -196,19 +205,24 @@ export function createStore(name) {
         }));
         const { error } = await sb.from(TABLE).insert(rows);
         if (error) {
+          // ★ ชน id ซ้ำ (race กับ cron) = ไม่ใช่เรื่องร้าย — ข้ามได้ ไม่ throw (กันงานหนักพังทั้งรอบ)
+          if (/duplicate key|_pkey|23505/i.test(error.message)) {
+            console.warn(`[Store:${name}] addMany dup (ข้าม ไม่พังทั้งรอบ): ${error.message.slice(0, 70)}`);
+            return newItems;
+          }
           console.error(`[Store:${name}] ADD MANY error:`, error.message);
           throw new Error(`บันทึกไม่สำเร็จ: ${error.message}`);
         }
-        
+
         // Sync to local file cache
         _fileFallbackLoad(name).then(items => {
-          const newIds = new Set(newItems.map(i => i.id));
+          const newIds = new Set(fresh.map(i => i.id));
           const filtered = items.filter(i => !newIds.has(i.id));
-          _fileFallbackSave(name, [...newItems, ...filtered]);
+          _fileFallbackSave(name, [...fresh, ...filtered]);
         }).catch(() => {});
-        
-        console.log(`[Store:${name}] ✅ Added ${newItems.length} items`);
-        return newItems;
+
+        console.log(`[Store:${name}] ✅ Added ${fresh.length} items (ข้ามซ้ำ ${newItems.length - fresh.length})`);
+        return fresh;
       },
       
       async update(id, updateFn) {
