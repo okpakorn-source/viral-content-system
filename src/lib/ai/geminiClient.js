@@ -149,6 +149,72 @@ export async function callGeminiVideo({ prompt, youtubeUrl, model = 'gemini-3.5-
 }
 
 /**
+ * ★ 16 มิ.ย. 69: Gemini ดู "ไฟล์วิดีโอ" ที่โหลดมาเอง (TikTok/Reels/FB) ผ่าน Files API
+ *   ใช้กับคลิปที่ Gemini ดูจากลิงก์ตรงไม่ได้ (ไม่ใช่ YouTube) — อัปโหลดไฟล์ → รอประมวลผล → ให้ดู
+ *   videoBuffer = Buffer ของวิดีโอ (mp4) | ลบไฟล์บน Gemini ทิ้งหลังใช้เสร็จ
+ */
+export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'video/mp4', model = 'gemini-3.5-flash', temperature = 0.2, maxTokens = 8000 }) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า');
+  if (!videoBuffer || videoBuffer.length < 10000) throw new Error('ไฟล์วิดีโอเล็ก/ว่างเกินไป');
+
+  const { GoogleAIFileManager, FileState } = await import('@google/generative-ai/server');
+  const { writeFile, unlink } = await import('fs/promises');
+  const { join } = await import('path');
+  const { tmpdir } = await import('os');
+
+  const fileManager = new GoogleAIFileManager(apiKey);
+  const tmpPath = join(tmpdir(), `gv_${Date.now()}.mp4`);
+  await writeFile(tmpPath, videoBuffer);
+  console.log(`[GeminiVideoFile] upload ${(videoBuffer.length / 1e6).toFixed(1)}MB, model=${model}`);
+
+  let uploadedName = null;
+  try {
+    const up = await fileManager.uploadFile(tmpPath, { mimeType, displayName: 'clip' });
+    uploadedName = up.file.name;
+
+    // รอ Gemini ประมวลผลวิดีโอจน ACTIVE (สูงสุด ~2 นาที)
+    let file = await fileManager.getFile(uploadedName);
+    let tries = 0;
+    while (file.state === FileState.PROCESSING && tries < 60) {
+      await new Promise(r => setTimeout(r, 2000));
+      file = await fileManager.getFile(uploadedName);
+      tries++;
+    }
+    if (file.state !== FileState.ACTIVE) throw new Error(`Gemini ประมวลผลวิดีโอไม่สำเร็จ (state=${file.state})`);
+
+    const client = getGeminiClient();
+    const genModel = client.getGenerativeModel({
+      model,
+      generationConfig: { temperature, maxOutputTokens: maxTokens, responseMimeType: 'application/json' },
+    });
+    const result = await genModel.generateContent({
+      contents: [{ role: 'user', parts: [
+        { fileData: { fileUri: file.uri, mimeType: file.mimeType } },
+        { text: prompt },
+      ] }],
+    }, { requestOptions: { timeout: 180000 } });
+
+    const content = result.response?.text();
+    const um = result.response?.usageMetadata;
+    console.log(`[GeminiVideoFile] OK: tokens input=${um?.promptTokenCount || 0}, output=${um?.candidatesTokenCount || 0}`);
+    logApiUsage({ provider: 'gemini_video_file', model, inputTokens: um?.promptTokenCount || 0, outputTokens: um?.candidatesTokenCount || 0, feature: 'callGeminiVideoFile' });
+
+    if (!content) throw new Error('Gemini ไม่ส่งข้อมูลกลับ');
+    try {
+      return sanitizeOutput(JSON.parse(content));
+    } catch (e) {
+      const s = content.indexOf('{'), eIdx = content.lastIndexOf('}');
+      if (s !== -1 && eIdx !== -1) { try { return sanitizeOutput(JSON.parse(content.slice(s, eIdx + 1))); } catch {} }
+      throw new Error('Gemini ส่งข้อมูลที่ parse ไม่ได้');
+    }
+  } finally {
+    await unlink(tmpPath).catch(() => {});
+    if (uploadedName) fileManager.deleteFile(uploadedName).catch(() => {}); // ไม่ค้างไฟล์บน Gemini
+  }
+}
+
+/**
  * เรียก Gemini Vision — ส่งภาพ (Base64) เข้าไปวิเคราะห์
  * images: [{ data: "base64...", mimeType: "image/jpeg" }, ...]
  */

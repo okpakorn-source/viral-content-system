@@ -77,7 +77,7 @@ export default function ClipTranscriptPage() {
             </button>
           </div>
           <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted, #888)', lineHeight: 1.6 }}>
-            🎙️ <b>ถอดบทสัมภาษณ์</b> = ได้บทพูดเต็ม + บอกประเภทคลิป (สัมภาษณ์/พูดเดี่ยว/อ่านข่าว) · 🎯 <b>ถอดประเด็นข่าว</b> = Gemini ดูคลิป YouTube ทั้งเรื่อง → สรุปเป็นข้อมูลดิบ (ประเด็น+คำพูด+ช่วงเวลา)
+            🎙️ <b>ถอดบทสัมภาษณ์</b> = ได้บทพูดเต็ม + บอกประเภทคลิป (สัมภาษณ์/พูดเดี่ยว/อ่านข่าว) · 🎯 <b>ถอดประเด็นข่าว</b> = Gemini ดูคลิปจริง (YouTube/TikTok/Reels — เห็นภาพ+ตัวหนังสือบนจอ) → ข้อมูลดิบ (ประเด็น+คำพูด+ช่วงเวลา) · FB/IG ทำได้บนเครื่องทีม
           </div>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 13, color: 'var(--text-muted, #888)', cursor: 'pointer' }}>
             <input type="checkbox" checked={tidy} onChange={e => setTidy(e.target.checked)} />

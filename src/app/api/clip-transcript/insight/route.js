@@ -1,8 +1,47 @@
 export const maxDuration = 300; // Gemini ดูคลิปทั้งเรื่อง — เผื่อเวลา
 import { NextResponse } from 'next/server';
-import { extractClipInsight } from '@/lib/services/clipInsightService';
+import { extractClipInsight, extractInsightFromVideoBuffer } from '@/lib/services/clipInsightService';
 import { createStore } from '@/lib/persistStore';
 import { randomUUID } from 'crypto';
+
+// โหลดไฟล์วิดีโอ TikTok (tikwm) — ใช้บนคลาวด์ได้
+async function downloadTiktokBuffer(url) {
+  const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`);
+  const data = await res.json();
+  const playUrl = data?.data?.hdplay || data?.data?.play;
+  if (!playUrl) throw new Error('tikwm: ไม่พบลิงก์วิดีโอ');
+  const vres = await fetch(playUrl);
+  const buf = Buffer.from(await vres.arrayBuffer());
+  if (buf.length < 10000) throw new Error('วิดีโอเล็กเกินไป');
+  if (buf.length > 150 * 1e6) throw new Error('วิดีโอใหญ่เกิน 150MB');
+  return buf;
+}
+
+// โหลดไฟล์วิดีโอ Facebook/IG (yt-dlp) — เครื่องทีม Windows เท่านั้น
+async function downloadMetaBuffer(url) {
+  if (process.platform !== 'win32') throw new Error('Facebook/IG โหลดวิดีโอได้เฉพาะเครื่องทีม (Windows)');
+  const { execFile } = await import('child_process');
+  const { promisify } = await import('util');
+  const { join } = await import('path');
+  const { tmpdir } = await import('os');
+  const { readFile, unlink } = await import('fs/promises');
+  const { existsSync } = await import('fs');
+  const execFileAsync = promisify(execFile);
+  const exe = join(process.cwd(), 'bin', 'yt-dlp.exe');
+  if (!existsSync(exe)) throw new Error('ไม่พบ bin/yt-dlp.exe');
+  const cookies = join(process.cwd(), 'bin', 'cookies.txt');
+  const out = join(tmpdir(), `meta_${Date.now()}.mp4`);
+  const args = ['-f', 'mp4/best[ext=mp4]/best', '-o', out, '--no-warnings', '--no-playlist'];
+  if (existsSync(cookies)) args.push('--cookies', cookies);
+  args.push(url);
+  try {
+    await execFileAsync(exe, args, { maxBuffer: 1024 * 1024 * 20, timeout: 180_000 });
+    if (!existsSync(out)) throw new Error('โหลดวิดีโอ Meta ไม่สำเร็จ');
+    const buf = await readFile(out);
+    if (buf.length < 10000) throw new Error('วิดีโอเล็กเกินไป');
+    return buf;
+  } finally { await unlink(out).catch(() => {}); }
+}
 
 /**
  * POST /api/clip-transcript/insight (16 มิ.ย. 69) — ถอดประเด็นข่าวจากคลิป → "ข้อมูลดิบ"
@@ -64,12 +103,22 @@ export async function POST(request) {
         insight = await extractClipInsight({ url, platform: 'transcript', rawText });
       }
     } else {
-      // TikTok/FB → ถอดเสียงก่อน แล้ววิเคราะห์
-      const rawText = await transcribeFor(url, type);
-      if (!rawText || rawText.length < 40) {
-        return NextResponse.json({ success: false, error: 'ถอดเสียงไม่สำเร็จ — คลิปอาจไม่มีเสียง หรือ Facebook/IG ถอดได้เฉพาะเครื่องทีม', errorType: 'TRANSCRIBE_FAILED' }, { status: 422 });
+      // TikTok/FB/IG → ① โหลดวิดีโอให้ Gemini "ดูจริง" (เห็นภาพ+ตัวหนังสือบนจอ) ② ล้ม→ถอดเสียง+LLM
+      let usedVideo = false;
+      try {
+        const buf = type === 'tiktok' ? await downloadTiktokBuffer(url) : await downloadMetaBuffer(url);
+        insight = await extractInsightFromVideoBuffer(buf, 'video/mp4');
+        usedVideo = true;
+      } catch (vErr) {
+        console.warn('[ClipInsight] Gemini ดูไฟล์วิดีโอล้ม → fallback ถอดเสียง:', vErr.message?.slice(0, 90));
       }
-      insight = await extractClipInsight({ url, platform: type, rawText });
+      if (!usedVideo) {
+        const rawText = await transcribeFor(url, type);
+        if (!rawText || rawText.length < 40) {
+          return NextResponse.json({ success: false, error: 'ดูคลิป/ถอดเสียงไม่สำเร็จ — คลิปอาจไม่มีเสียง หรือ Facebook/IG ทำได้เฉพาะเครื่องทีม', errorType: 'CLIP_FAILED' }, { status: 422 });
+        }
+        insight = await extractClipInsight({ url, platform: 'transcript', rawText });
+      }
     }
 
     // เก็บเข้าคลังประเด็น (fire-and-forget) — เก็บ 60 เคสล่าสุด

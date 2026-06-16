@@ -83,6 +83,18 @@ const INSIGHT_SCHEMA = `ตอบ JSON เท่านั้น:
   "rawData": "ข้อมูลดิบรวมของข่าวนี้ เรียบเรียงเป็นย่อหน้าอ่านเข้าใจง่าย ข้อเท็จจริงล้วน ครบทุกประเด็น พร้อมให้คนอ่านเข้าใจว่าข่าวนี้คืออะไรแล้วเอาไปใช้ต่อเอง"
 }`;
 
+// พรอมต์ "ดูคลิปทั้งเรื่อง → ข้อมูลดิบ" — ใช้ร่วมทั้งดูลิงก์ YouTube และดูไฟล์วิดีโอ (TikTok/FB)
+const VIDEO_INSIGHT_PROMPT = `คุณเป็นบรรณาธิการข่าว ดู "คลิปนี้ทั้งคลิป" (ภาพ + เสียง) แล้วถอดประเด็นข่าวออกมาเป็น "ข้อมูลดิบ"
+
+หน้าที่: ดูคลิปตั้งแต่ต้นจนจบ จับใจความว่าคลิปนี้ต้องการสื่อสารข่าวเรื่องอะไร เก็บทั้งเนื้อหา–คำพูด–บริบท แล้วสรุปเป็นข้อมูลดิบให้คนที่ "ยังไม่ได้ดูคลิป" อ่านแล้วเข้าใจว่าข่าวนี้คืออะไร
+
+⚠️ คลิปอาจยาว (5-15 นาที) — ต้อง "ดูจนจบจริง" ครอบคลุมทุกช่วง ตั้งแต่ต้น–กลาง–ท้าย ห้ามสรุปแค่ช่วงต้นแล้วข้ามที่เหลือ ประเด็นสำคัญมักโผล่ช่วงกลาง/ท้ายด้วย
+อ่านตัวหนังสือบนจอ (CG/ซับ/แคปชั่น/ป้ายชื่อ) ประกอบด้วย — คลิป TikTok/Reels มักมีตัวหนังสือบนจอที่บอกประเด็นข่าวสำคัญ ใช้ช่วยระบุชื่อคน/ตำแหน่ง/บริบท
+
+${INSIGHT_RULES}
+
+${INSIGHT_SCHEMA}`;
+
 function normalizeInsight(p, engine) {
   const t = pickType(p.clipType);
   return {
@@ -114,20 +126,10 @@ function normalizeInsight(p, engine) {
  * @param {string} args.rawText   บทถอดเสียง (จำเป็นเมื่อไม่ใช่ youtube หรือ fallback)
  */
 export async function extractClipInsight({ url, platform, rawText = '' }) {
-  // YouTube → ให้ Gemini ดูคลิปจริง (ภาพ+เสียงทั้งคลิป) — ปล่อย error ขึ้นไปให้ route จัดการ fallback
+  // YouTube → ให้ Gemini ดูคลิปจริงจากลิงก์ตรง — ปล่อย error ขึ้นไปให้ route จัดการ fallback
   if (platform === 'youtube') {
     const { callGeminiVideo } = await import('@/lib/ai/geminiClient');
-    const prompt = `คุณเป็นบรรณาธิการข่าว ดู "คลิปนี้ทั้งคลิป" (ภาพ + เสียง) แล้วถอดประเด็นข่าวออกมาเป็น "ข้อมูลดิบ"
-
-หน้าที่: ดูคลิปตั้งแต่ต้นจนจบ จับใจความว่าคลิปนี้ต้องการสื่อสารข่าวเรื่องอะไร เก็บทั้งเนื้อหา–คำพูด–บริบท แล้วสรุปเป็นข้อมูลดิบให้คนที่ "ยังไม่ได้ดูคลิป" อ่านแล้วเข้าใจว่าข่าวนี้คืออะไร
-
-⚠️ คลิปอาจยาว (5-15 นาที) — ต้อง "ดูจนจบจริง" ครอบคลุมทุกช่วง ตั้งแต่ต้น–กลาง–ท้าย ห้ามสรุปแค่ช่วงต้นแล้วข้ามที่เหลือ ประเด็นสำคัญมักโผล่ช่วงกลาง/ท้ายด้วย
-อ่านตัวหนังสือบนจอ (CG/ซับ/ป้ายชื่อ) ประกอบด้วยถ้ามี — ใช้ช่วยระบุชื่อคน/ตำแหน่ง/บริบท
-
-${INSIGHT_RULES}
-
-${INSIGHT_SCHEMA}`;
-    const r = await callGeminiVideo({ prompt, youtubeUrl: url, maxTokens: 8000 });
+    const r = await callGeminiVideo({ prompt: VIDEO_INSIGHT_PROMPT, youtubeUrl: url, maxTokens: 8000 });
     return normalizeInsight(r, 'gemini-video');
   }
 
@@ -149,4 +151,15 @@ ${INSIGHT_SCHEMA}`;
   const r = await callAI({ prompt, model: MODEL_FAST, temperature: 0.2, maxTokens: 5000 });
   const p = typeof r === 'object' ? r : JSON.parse(String(r).match(/\{[\s\S]*\}/)?.[0] || '{}');
   return normalizeInsight(p, 'transcript-llm');
+}
+
+/**
+ * ★ ถอดประเด็นจาก "ไฟล์วิดีโอ" ที่โหลดมาเอง (TikTok/Reels/FB) — Gemini ดูคลิปจริงจากไฟล์
+ * @param {Buffer} videoBuffer
+ * @param {string} mimeType
+ */
+export async function extractInsightFromVideoBuffer(videoBuffer, mimeType = 'video/mp4') {
+  const { callGeminiVideoFile } = await import('@/lib/ai/geminiClient');
+  const r = await callGeminiVideoFile({ prompt: VIDEO_INSIGHT_PROMPT, videoBuffer, mimeType });
+  return normalizeInsight(r, 'gemini-video');
 }
