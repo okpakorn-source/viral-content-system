@@ -176,13 +176,26 @@ function videoAgeMonths(d) {
   return null;
 }
 
-// Serper ส่งวันที่แบบ "3 hours ago" / "2 days ago" — แปลงเป็น ISO คร่าวๆ
+// ★ 16 มิ.ย.: แปลงวันที่ Serper → ISO รองรับทั้ง "3 hours ago" และไทย "3 ชั่วโมงที่ผ่านมา" + วันที่เต็ม "13 ก.ย. 2025"
+//   เดิมอ่านแค่อังกฤษ → ข่าวไทยส่วนใหญ่ได้ publishedAt=null (ป้ายความสดบนการ์ดเลยว่างเปล่า)
+const TH_MONTHS = { 'ม.ค.': 0, 'ก.พ.': 1, 'มี.ค.': 2, 'เม.ย.': 3, 'พ.ค.': 4, 'มิ.ย.': 5, 'ก.ค.': 6, 'ส.ค.': 7, 'ก.ย.': 8, 'ต.ค.': 9, 'พ.ย.': 10, 'ธ.ค.': 11, 'มกราคม': 0, 'กุมภาพันธ์': 1, 'มีนาคม': 2, 'เมษายน': 3, 'พฤษภาคม': 4, 'มิถุนายน': 5, 'กรกฎาคม': 6, 'สิงหาคม': 7, 'กันยายน': 8, 'ตุลาคม': 9, 'พฤศจิกายน': 10, 'ธันวาคม': 11 };
 function parseSerperDate(d) {
-  const m = String(d).match(/(\d+)\s*(minute|hour|day|week|month)/i);
-  if (!m) return null;
-  const n = Number(m[1]);
-  const unitMs = { minute: 6e4, hour: 36e5, day: 864e5, week: 6048e5, month: 2592e6 }[m[2].toLowerCase()];
-  return new Date(Date.now() - n * unitMs).toISOString();
+  if (!d) return null;
+  const s = String(d).trim();
+  // relative อังกฤษ
+  let m = s.match(/(\d+)\s*(minute|hour|day|week|month|year)s?\s*ago/i);
+  if (m) { const n = Number(m[1]); const u = { minute: 6e4, hour: 36e5, day: 864e5, week: 6048e5, month: 2592e6, year: 31536e6 }[m[2].toLowerCase()]; return new Date(Date.now() - n * u).toISOString(); }
+  // relative ไทย ("3 ชั่วโมงที่ผ่านมา", "2 วันที่แล้ว", "5 นาที")
+  m = s.match(/(\d+)\s*(นาที|ชั่วโมง|ชม\.?|วัน|สัปดาห์|เดือน|ปี)/);
+  if (m) { const n = Number(m[1]); const u = { 'นาที': 6e4, 'ชั่วโมง': 36e5, 'ชม': 36e5, 'ชม.': 36e5, 'วัน': 864e5, 'สัปดาห์': 6048e5, 'เดือน': 2592e6, 'ปี': 31536e6 }[m[2]]; if (u) return new Date(Date.now() - n * u).toISOString(); }
+  if (/เมื่อวาน/.test(s)) return new Date(Date.now() - 864e5).toISOString();
+  if (/เมื่อสักครู่|เพิ่งโพสต์|just now/i.test(s)) return new Date().toISOString();
+  // วันที่เต็มไทย "13 ก.ย. 2025" / "13 กันยายน 2568" (รองรับ พ.ศ.)
+  m = s.match(/(\d{1,2})\s*([ก-๙.]+)\s*(\d{4})/);
+  if (m && TH_MONTHS[m[2]] != null) { let y = Number(m[3]); if (y > 2400) y -= 543; const dt = new Date(y, TH_MONTHS[m[2]], Number(m[1])); if (!isNaN(dt)) return dt.toISOString(); }
+  // ISO / รูปแบบที่ Date อ่านได้
+  const dt = new Date(s); if (!isNaN(dt) && /\d{4}/.test(s)) return dt.toISOString();
+  return null;
 }
 
 const idOf = (url) => crypto.createHash('md5').update(String(url)).digest('hex').slice(0, 12);

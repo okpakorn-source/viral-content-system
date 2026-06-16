@@ -93,6 +93,21 @@ function sourceTypeOf(it) {
   return { label: '📰 สำนักข่าว', color: '#64748b', bg: 'rgba(100,116,139,0.12)' };
 }
 
+// ★ 16 มิ.ย. (ทีมขอ): ป้ายความสดของข่าว — แยกข่าวสดวันนี้/กี่ชั่วโมง vs ข่าวเก่า+วันที่ → รู้ว่าหยิบอันไหนก่อน
+//   ใช้ publishedAt (วันที่ "ข่าว" จริง) ไม่ใช่ harvestedAt (เวลาที่ระบบไปเก็บ)
+function freshnessBadge(it) {
+  const p = it.publishedAt ? new Date(it.publishedAt).getTime() : null;
+  if (!p || isNaN(p)) return { label: '⏳ ไม่ระบุวันที่', color: '#9ca3af', bg: 'rgba(156,163,175,0.12)', title: 'ไม่มีข้อมูลวันที่ของข่าว — เช็กต้นทางก่อนหยิบ' };
+  const hrs = (Date.now() - p) / 36e5;
+  if (hrs <= 24) {
+    const h = Math.round(hrs);
+    return { label: hrs < 2 ? '🟢 สดมาก (เพิ่งมา)' : `🟢 วันนี้ · ${h} ชม.ที่แล้ว`, color: '#16a34a', bg: 'rgba(34,197,94,0.16)', title: 'ข่าวสดวันนี้ — ควรหยิบก่อน' };
+  }
+  if (hrs <= 72) return { label: `🟡 ${Math.round(hrs / 24)} วันก่อน`, color: '#ca8a04', bg: 'rgba(234,179,8,0.16)', title: 'ยังพอสด' };
+  const ds = new Date(p).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+  return { label: `🗓️ ข่าวเก่า · ${ds}`, color: '#9ca3af', bg: 'rgba(156,163,175,0.14)', title: 'ข่าวเก่า — เช็กว่ายังเล่นได้ไหมก่อนหยิบ' };
+}
+
 export default function NewsDeskPage() {
   const [tab, setTab] = useState('all');
   const [items, setItems] = useState([]);
@@ -770,6 +785,9 @@ export default function NewsDeskPage() {
                       {(LANE_ICONS[it.lane] || '📰') + ' '}{it.title}
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, fontSize: 12 }}>
+                      {(() => { const f = freshnessBadge(it); return (
+                        <span title={f.title} style={{ padding: '2px 9px', borderRadius: 999, background: f.bg, color: f.color, fontWeight: 700 }}>{f.label}</span>
+                      ); })()}
                       {(() => { const st = sourceTypeOf(it); return (
                         <span title="แหล่งที่มาของข่าว" style={{ padding: '2px 9px', borderRadius: 999, background: st.bg, color: st.color, fontWeight: 700 }}>{st.label}</span>
                       ); })()}
