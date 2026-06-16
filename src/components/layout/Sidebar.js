@@ -58,6 +58,7 @@ export default function Sidebar() {
     { label: 'จัดการ AI Prompts', icon: '🤖', href: '/prompts' },
     { label: 'News Core Filter', icon: '🔬', href: '/news-filter', highlight: true },
     { label: 'ถอดบทสัมภาษณ์คลิป', icon: '🎙️', href: '/clip-transcript', highlight: true },
+    { label: 'เพิ่มความชัดภาพข่าว', icon: '🔍', href: '/photo-enhance', highlight: true },
     { type: 'divider', label: 'ชุมชน' },
     { label: '💬 ห้องแชท', icon: '💬', href: '/chat', highlight: true },
     { type: 'divider', label: 'ระบบ' },
