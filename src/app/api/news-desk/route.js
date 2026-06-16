@@ -20,6 +20,17 @@ export async function GET(request) {
     const store = createStore('news-desk');
     let items = await store.getAll();
 
+    // ★ 16 มิ.ย.: แท็บ 🗑️ คลังขยะ — ของที่ระบบตัดออก (แง่ลบ/นอกแนว/เสี่ยง) + ที่ทีมทิ้งเอง → รีวิว+เอากลับได้
+    if (tab === 'junk') {
+      const jstore = createStore('news-desk-junk');
+      const junkStore = (await jstore.getAll()).map(j => ({ ...j, _fromJunk: true }));
+      const dismissed = items
+        .filter(i => i.status === 'dismissed' && !i.used)
+        .map(i => ({ id: i.id, title: i.title, url: i.url, source: i.source || '', lane: i.lane || '', category: i.category || '', junkReason: i.dismissNote || 'ทีมทิ้ง/ล้างกระดาน', junkAt: i.dismissedAt || i.harvestedAt, _fromDesk: true, shortlisted: !!i.shortlisted }));
+      const all = [...junkStore, ...dismissed].sort((a, b) => new Date(b.junkAt || 0) - new Date(a.junkAt || 0));
+      return NextResponse.json({ success: true, items: all.slice(0, 200), total: all.length, tab: 'junk' });
+    }
+
     // ★ 16 มิ.ย. (ยุบแท็บ 12→7): แต่ละแท็บรวมหลายเลน — งงน้อยลง
     const TAB_LANES = {
       trend: ['trend', 'buzz'],
@@ -136,6 +147,28 @@ export async function POST(request) {
         }
       }
       return NextResponse.json({ success: true, restored });
+    }
+
+    // ★ 16 มิ.ย.: เอากลับจากคลังขยะ → คืนขึ้นโต๊ะเป็น new (ทีมเห็นว่าระบบตัดผิด)
+    if (action === 'restoreJunk') {
+      if (!id) return NextResponse.json({ success: false, error: 'ต้องระบุ id', errorType: 'VALIDATION_ERROR' }, { status: 400 });
+      const deskStore = createStore('news-desk');
+      const jstore = createStore('news-desk-junk');
+      const j = (await jstore.getAll()).find(x => x.id === id);
+      if (j) {
+        const deskAll = await deskStore.getAll();
+        if (deskAll.find(x => x.id === id)) {
+          await deskStore.update(id, (ex) => ({ ...ex, status: 'new', dismissNote: null }));
+        } else {
+          await deskStore.add({ id: j.id, title: j.title, url: j.url, source: j.source || '', lane: j.lane || 'good', category: j.category || '', status: 'new', finalScore: 50, restoredFromJunk: true, harvestedAt: new Date().toISOString() });
+        }
+        await jstore.remove(id).catch(() => {});
+        return NextResponse.json({ success: true, restored: 1, from: 'junk' });
+      }
+      // ของที่ทีมทิ้งบนโต๊ะ (status dismissed)
+      const d = (await deskStore.getAll()).find(x => x.id === id);
+      if (d) { await deskStore.update(id, (ex) => ({ ...ex, status: 'new', dismissNote: null })); return NextResponse.json({ success: true, restored: 1, from: 'desk' }); }
+      return NextResponse.json({ success: false, error: 'ไม่พบในคลังขยะ', errorType: 'NOT_FOUND' }, { status: 404 });
     }
 
     // ★ สวิตช์ Auto-Pilot (ไม่ผูกกับข่าวใบไหน — จัดการก่อนหา item)

@@ -16,12 +16,14 @@ const TABS = [
   { id: 'clip', label: '📺 คลิป/เพจ' },        // video/รีลส์ + คลิปสัมภาษณ์
   { id: 'shortlist', label: '⭐ คลังส่งเช้า' },
   { id: 'ready', label: '✅ พร้อมใช้' },
+  { id: 'junk', label: '🗑️ คลังขยะ' },        // ของที่ระบบตัดออก — รีวิว+เอากลับได้
 ];
 
 const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁', buzz: '📊', celeb: '🎬', throwback: '⏪', 'evergreen-celeb': '⭐', video: '📺', 'trend-track': '🔴' };
 
 // ★ 15 มิ.ย.: แนวที่ "สั่งหาเฉพาะแนว" ได้ (key ต้องตรงกับ generateFocusQueries ใน goodNewsScout)
 const FOCUS_OPTIONS = [
+  { key: 'viral_dna', label: '🧬 แนวที่ปังบนเพจ (DNA)' },
   { key: 'good_all', label: '💎 ข่าวน้ำดี (รวมทุกหมวด)' },
   { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
   { key: 'celeb_lifestyle', label: '🏡 เปิดบ้าน/รับสัตว์/ไลฟ์สไตล์ดารา' },
@@ -302,6 +304,20 @@ export default function NewsDeskPage() {
     } catch (e) {
       alert('บันทึกไม่สำเร็จ: ' + (e.message || '')); load();
     }
+  };
+
+  // ★ 16 มิ.ย.: เอากลับจากคลังขยะ → คืนขึ้นโต๊ะ
+  const restoreJunk = async (id) => {
+    setItems(prev => prev.filter(x => x.id !== id));
+    try {
+      const res = await fetch('/api/news-desk', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'restoreJunk', id, user: 'ทีม' }),
+      });
+      const d = await parseRes(res);
+      if (d.success) setMsg('♻️ เอากลับขึ้นโต๊ะแล้ว — ไปดูที่แท็บ 📋 ทั้งหมด');
+      else { alert(d.error || 'เอากลับไม่สำเร็จ'); load(); }
+    } catch (e) { alert('ไม่สำเร็จ: ' + (e.message || '')); load(); }
   };
 
   const sendToWorkflow = async (item) => {
@@ -689,8 +705,42 @@ export default function NewsDeskPage() {
           </div>
         )}
 
+        {/* ★ แบนเนอร์คลังขยะ */}
+        {tab === 'junk' && (
+          <div style={{ padding: '12px 16px', marginBottom: 12, borderRadius: 12, background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.28)', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            🗑️ <b>คลังขยะ</b> — ข่าวที่ระบบตัดออก (แง่ลบ/นอกแนว/เสี่ยง/ต่างประเทศ/กระแสเก่า) เก็บไว้ให้ตรวจ ไม่ได้ลบทิ้ง · ถ้าเจออันที่ตัดผิดกด <b>♻️ เอากลับ</b> ขึ้นโต๊ะได้ ({items.length} ชิ้น)
+          </div>
+        )}
+
         {/* รายการข่าว */}
-        {loading ? (
+        {tab === 'junk' ? (
+          loading ? (
+            <div style={{ color: 'var(--text-secondary)', padding: 40, textAlign: 'center' }}>⏳ โหลด...</div>
+          ) : items.length === 0 ? (
+            <div style={{ color: 'var(--text-secondary)', padding: 40, textAlign: 'center' }}>🗑️ คลังขยะว่าง — ยังไม่มีข่าวที่ระบบตัดออก</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {items.map(it => (
+                <div key={it.id} style={{ padding: '12px 14px', borderRadius: 12, background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-secondary)', lineHeight: 1.4 }}>{(LANE_ICONS[it.lane] || '📰') + ' '}{it.title}</div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, fontSize: 11.5, alignItems: 'center' }}>
+                        <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(239,68,68,0.12)', color: '#ef4444', fontWeight: 700 }}>🗑️ {it.junkReason}</span>
+                        {it.category && <span style={{ color: 'var(--text-muted)' }}>{it.category}</span>}
+                        {it.source && <span style={{ color: 'var(--text-muted)' }}>· {it.source}</span>}
+                        {it.url && <a href={it.url} target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>🔗 เปิด</a>}
+                      </div>
+                    </div>
+                    <button onClick={() => restoreJunk(it.id)}
+                      style={{ padding: '7px 14px', borderRadius: 9, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.12)', color: '#22c55e', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>
+                      ♻️ เอากลับ</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : loading ? (
           <div style={{ color: 'var(--text-secondary)', padding: 40, textAlign: 'center' }}>⏳ โหลด...</div>
         ) : items.length === 0 ? (
           <div style={{ color: 'var(--text-secondary)', padding: 40, textAlign: 'center' }}>

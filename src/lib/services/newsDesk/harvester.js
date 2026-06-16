@@ -298,8 +298,9 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
           } catch (e) { console.log('[Harvester] good group failed:', e.message?.slice(0, 50)); }
         }
       };
-      // ── แกนหลัก (รันทุกรอบ): คอนเทนต์น้ำดี 24 + เรื่องลำบาก + ดาราให้ของขวัญครอบครัว = แนวที่ปังสุด ──
+      // ── แกนหลัก (รันทุกรอบ): คอนเทนต์น้ำดี 24 + DNA เพจ + เรื่องลำบาก + ดาราให้ของขวัญครอบครัว = แนวที่ปังสุด ──
       await runGroup(G.generateGoodContentQueries(6), { ep: 'search', noClip: true });
+      await runGroup(G.generateViralDnaQueries(5), { ep: 'search', noClip: true }); // ★ 16 มิ.ย.: DNA จากเพจ — สถาบันบวก/ทหาร/ยุติธรรม/ต่างชาติช่วยไทย/นักกีฬาสมถะ
       await runGroup(G.generateHardshipQueries(4), { ep: 'search', noClip: true });
       await runGroup(G.generateCelebFamilyQueries(5), { ep: 'news' });
       // ★ v6 (16 มิ.ย. ทีมขอเน้น): ย้อนสัมภาษณ์เก่า เป็นแกนหลัก รันทุกรอบ — บทความ /news + "คลิปจริง" /videos (YT)
@@ -378,23 +379,28 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
   }
 
   // ── ชั้น 0: คำต้องห้าม ──
+  // ★ 16 มิ.ย.: ของที่ตัดออก (แง่ลบ/นอกแนว/เสี่ยง) ไม่ทิ้งหาย — เก็บเข้า "คลังขยะ" ให้ทีมรีวิว+เอากลับได้
+  const junk = [];
   const gated = [];
   for (const item of fresh) {
     const g = gateKeywords(item);
-    if (!g.pass) { stats.gated++; continue; }
+    if (!g.pass) { stats.gated++; junk.push({ ...item, junkReason: g.reason || 'คำต้องห้าม/นอกแนว' }); continue; }
     gated.push(item);
   }
 
   // ── ชั้น 1: จัดหมวด + วัดพิษ ──
   let classified = await classifyBatch(gated);
-  // ทิ้งตัวพิษเกิน/เกลาไม่ได้
-  classified = classified.filter(c => c.toxicity < 3 && c.fbRisk < 3 && c.toneable !== false);
+  // ทิ้งตัวพิษเกิน/เกลาไม่ได้ → คลังขยะ
+  classified = classified.filter(c => {
+    if (c.toxicity >= 3 || c.fbRisk >= 3 || c.toneable === false) { junk.push({ ...c, junkReason: 'เนื้อหาเสี่ยง/เกลาไม่ได้ (พิษ/เสี่ยง FB)' }); return false; }
+    return true;
+  });
 
   // ── ★ ตัดต่างประเทศทิ้งที่ชั้นนี้ (13 มิ.ย. 69 คำสั่งทีม "เอาแค่ไทย"): เนื้อหาที่ classify ตีเป็นเหตุการณ์ตปท. ──
   //   domain block จับเว็บนอกแล้ว ตรงนี้จับ "เว็บไทยลงข่าวต่างชาติ" (กอริลลา/เศรษฐกิจฟิลิปปินส์) ที่ติด foreignCountry
   stats.foreignDropped = 0;
   classified = classified.filter(c => {
-    if (c.foreignCountry) { stats.foreignDropped++; console.log(`[Harvester] 🌏 ตัดต่างประเทศ (${c.foreignCountry}): ${String(c.title).slice(0, 50)}`); return false; }
+    if (c.foreignCountry) { stats.foreignDropped++; junk.push({ ...c, junkReason: `ข่าวต่างประเทศ (${c.foreignCountry})` }); console.log(`[Harvester] 🌏 ตัดต่างประเทศ (${c.foreignCountry}): ${String(c.title).slice(0, 50)}`); return false; }
     return true;
   });
 
@@ -404,14 +410,14 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
   classified = classified.filter(c => {
     // ★ 16 มิ.ย. (สำคัญสุด): สถาบันแง่ลบ/เสื่อมเสีย/ประจาน/อ่อนไหว = ตัดเด็ดขาด (แง่ดี/ชื่นชมปล่อยผ่าน)
     if (c.royalNegative === true) {
-      stats.royalNeg++; console.log(`[Harvester] 🚫 สถาบันแง่ลบ/อ่อนไหว: ${String(c.title).slice(0, 50)}`); return false;
+      stats.royalNeg++; junk.push({ ...c, junkReason: 'สถาบันแง่ลบ/อ่อนไหว (ม.112)' }); console.log(`[Harvester] 🚫 สถาบันแง่ลบ/อ่อนไหว: ${String(c.title).slice(0, 50)}`); return false;
     }
     if (c.hasMainChar === false && c.subject !== 'celeb') {
-      stats.noChar++; console.log(`[Harvester] 🚫 ไม่มีตัวละครหลัก (ทางการ/รพ.): ${String(c.title).slice(0, 50)}`); return false;
+      stats.noChar++; junk.push({ ...c, junkReason: 'ไม่มีตัวละครหลัก (ทางการ/รพ./องค์กร)' }); console.log(`[Harvester] 🚫 ไม่มีตัวละครหลัก (ทางการ/รพ.): ${String(c.title).slice(0, 50)}`); return false;
     }
     // กระแสเก่าเล่นใหม่ไม่ได้ — เว้นเฉพาะเลนข่าวสดเร็ว (trend/buzz); trend-track ก็ต้องตัดกระแสเก่า (ทีมอยากได้ของใช้ได้จริง)
     if (c.staleTrend === true && !['trend', 'buzz'].includes(c.lane)) {
-      stats.staleTrend++; console.log(`[Harvester] 🚫 กระแสเก่าเล่นใหม่ไม่ได้: ${String(c.title).slice(0, 50)}`); return false;
+      stats.staleTrend++; junk.push({ ...c, junkReason: 'กระแสเก่าเล่นใหม่ไม่ได้' }); console.log(`[Harvester] 🚫 กระแสเก่าเล่นใหม่ไม่ได้: ${String(c.title).slice(0, 50)}`); return false;
     }
     return true;
   });
@@ -426,8 +432,8 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     //   throwback = สัมภาษณ์เก่า (ตอนเลิกกัน/อกหัก/ช่วงตกต่ำ) ที่หยิบมาทำ "ย้อนฟัง" ได้เสมอ
     if (c.lane === 'evergreen-celeb' || c.lane === 'throwback') return true;
     const ageDays = c.publishedAt ? (Date.now() - new Date(c.publishedAt).getTime()) / 864e5 : null;
-    if (c.lane === 'evergreen') { stats.staleEvent++; console.log(`[Harvester] ⏳ ตัดกระแสอดีต (evergreen+event): ${String(c.title).slice(0, 55)}`); return false; }
-    if (ageDays !== null && ageDays > 30) { stats.staleEvent++; console.log(`[Harvester] ⏳ ตัดกระแสอดีต (event เก่า ${Math.round(ageDays)} วัน): ${String(c.title).slice(0, 55)}`); return false; }
+    if (c.lane === 'evergreen') { stats.staleEvent++; junk.push({ ...c, junkReason: 'เหตุการณ์ครั้งเดียวที่เก่าแล้ว' }); console.log(`[Harvester] ⏳ ตัดกระแสอดีต (evergreen+event): ${String(c.title).slice(0, 55)}`); return false; }
+    if (ageDays !== null && ageDays > 30) { stats.staleEvent++; junk.push({ ...c, junkReason: `เหตุการณ์เก่า ${Math.round(ageDays)} วัน` }); console.log(`[Harvester] ⏳ ตัดกระแสอดีต (event เก่า ${Math.round(ageDays)} วัน): ${String(c.title).slice(0, 55)}`); return false; }
     return true;
   });
 
@@ -513,6 +519,30 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
 
   if (toAdd.length > 0) await store.addMany(toAdd);
   stats.added = toAdd.length;
+
+  // ★ 16 มิ.ย.: เก็บของที่ตัดออกเข้า "คลังขยะ" (news-desk-junk) — ทีมเข้าไปรีวิว+เอากลับได้ ไม่ใช่บล็อกหาย
+  //   เก็บเฉพาะที่ตัดด้วยเหตุผลบรรณาธิการ/แบรนด์/ความปลอดภัย (ไม่เก็บ url ซ้ำ/anti-recycle = ขยะจริงไม่ต้องรีวิว)
+  if (junk.length > 0) {
+    try {
+      const jstore = createStore('news-desk-junk');
+      const jnow = new Date().toISOString();
+      const rows = junk.filter(j => j && j.url && j.title).map(j => ({
+        id: j.id || idOf(j.url),
+        title: String(j.title).slice(0, 200), url: j.url, source: j.source || '',
+        lane: j.lane || '', category: j.category || '',
+        junkReason: j.junkReason || 'ตัดออก', junkAt: jnow,
+      }));
+      if (rows.length) {
+        await jstore.addMany(rows);
+        stats.junked = rows.length;
+        const jall = await jstore.getAll();
+        if (jall.length > 400) {
+          const old = jall.sort((a, b) => new Date(a.junkAt || 0) - new Date(b.junkAt || 0)).slice(0, jall.length - 400);
+          for (const o of old) await jstore.remove(o.id).catch(() => {});
+        }
+      }
+    } catch (e) { console.log('[Harvester] เก็บคลังขยะล้ม:', e.message?.slice(0, 50)); }
+  }
 
   // ★ ล้างโต๊ะอัตโนมัติ (14 มิ.ย. คำสั่งทีม — โต๊ะบวม 420 ใบ ของเก่าลอยค้าง เช่นเจนนี่/ลุงธีระ):
   //   การ์ด new เกิน 48 ชม.เก็บเข้ากรุเอง (บก.ให้ 9+ ยืดเป็น 72 ชม.) — โต๊ะเป็นหน้าต่างของสด ไม่ใช่กองสะสม
