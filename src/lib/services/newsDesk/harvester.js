@@ -545,8 +545,10 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     try {
       const jstore = createStore('news-desk-junk');
       const jnow = new Date().toISOString();
+      // ★ 16 มิ.ย. (แก้บั๊ก persist): id ต้อง prefix 'jk_' — store_items PK เป็น id แบบ global
+      //   ถ้าใช้ idOf(url) เฉยๆ จะชนกับ id ของโต๊ะ (url เดียวกัน) → insert ติด dup-key → ไม่เซฟเลย (store ว่าง)
       const rows = junk.filter(j => j && j.url && j.title).map(j => ({
-        id: j.id || idOf(j.url),
+        id: 'jk_' + (j.id || idOf(j.url)),
         title: String(j.title).slice(0, 200), url: j.url, source: j.source || '',
         lane: j.lane || '', category: j.category || '',
         junkReason: j.junkReason || 'ตัดออก', junkAt: jnow,

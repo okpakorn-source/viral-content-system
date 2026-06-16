@@ -157,11 +157,13 @@ export async function POST(request) {
       const jstore = createStore('news-desk-junk');
       const j = (await jstore.getAll()).find(x => x.id === id);
       if (j) {
+        // ★ ตัด prefix 'jk_' ออก → ใช้ id โต๊ะปกติ (idOf url) เพื่อให้ harvest รอบหน้ากันซ้ำได้
+        const cleanId = String(id).startsWith('jk_') ? String(id).slice(3) : id;
         const deskAll = await deskStore.getAll();
-        if (deskAll.find(x => x.id === id)) {
-          await deskStore.update(id, (ex) => ({ ...ex, status: 'new', dismissNote: null }));
+        if (deskAll.find(x => x.id === cleanId)) {
+          await deskStore.update(cleanId, (ex) => ({ ...ex, status: 'new', dismissNote: null }));
         } else {
-          await deskStore.add({ id: j.id, title: j.title, url: j.url, source: j.source || '', lane: j.lane || 'good', category: j.category || '', status: 'new', finalScore: 50, restoredFromJunk: true, harvestedAt: new Date().toISOString() });
+          await deskStore.add({ id: cleanId, title: j.title, url: j.url, source: j.source || '', lane: j.lane || 'good', category: j.category || '', status: 'new', finalScore: 50, restoredFromJunk: true, harvestedAt: new Date().toISOString() });
         }
         await jstore.remove(id).catch(() => {});
         return NextResponse.json({ success: true, restored: 1, from: 'junk' });
