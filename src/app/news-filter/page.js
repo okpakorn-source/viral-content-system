@@ -90,6 +90,11 @@ function NewsFilterContent() {
   });
   const [expandedRows, setExpandedRows] = useState({});
   const [copySuccess, setCopySuccess] = useState(false);
+  // ★ 16 มิ.ย.: แยกประเด็นย่อย — ข่าว/สัมภาษณ์ที่ยัดหลายเรื่องรวมกัน
+  const [splitData, setSplitData] = useState(null);
+  const [splitLoading, setSplitLoading] = useState(false);
+  const [copiedTopic, setCopiedTopic] = useState(null);
+  const [sendingTopic, setSendingTopic] = useState(null);
   // URL scraping state
   const [scrapeLoading, setScrapeLoading] = useState(false);
   const [scrapeStep, setScrapeStep] = useState('');
@@ -131,6 +136,47 @@ function NewsFilterContent() {
     setExpandedRows({});
     setSourceUrl('');
     setScrapeStep('');
+    setSplitData(null);
+  };
+
+  // ★ 16 มิ.ย.: แยกเนื้อแก่นออกเป็นประเด็นย่อย (เรียก /api/news-filter/split)
+  const handleSplitTopics = async () => {
+    if (!outputData?.cleanText || splitLoading) return;
+    setSplitLoading(true);
+    setSplitData(null);
+    setError(null);
+    try {
+      const res = await fetch('/api/news-filter/split', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: outputData.cleanText }),
+      });
+      const d = await res.json();
+      if (!d.success) throw new Error(d.error || 'แยกประเด็นไม่สำเร็จ');
+      setSplitData(d.data);
+    } catch (e) { setError('❌ แยกประเด็นไม่สำเร็จ: ' + e.message); }
+    setSplitLoading(false);
+  };
+
+  // คัดลอกท่อนเนื้อดิบของประเด็นเดียว
+  const copyTopic = async (t) => {
+    try { await navigator.clipboard.writeText(t.content); setCopiedTopic(t.id); setTimeout(() => setCopiedTopic(null), 2000); }
+    catch { const ta = document.createElement('textarea'); ta.value = t.content; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); setCopiedTopic(t.id); setTimeout(() => setCopiedTopic(null), 2000); }
+  };
+
+  // ส่งประเด็นเดียวเข้าคิวเขียน (เหมือนปุ่มส่งแก่น แต่ส่งเฉพาะประเด็นนี้)
+  const sendTopicToWorkflow = async (t) => {
+    if (sendingTopic) return;
+    setSendingTopic(t.id);
+    try {
+      const res = await fetch('/api/queue/add', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload: { input: t.content, contentLength: 'short', userId: 'news-filter-topic' } }),
+      });
+      const d = await res.json();
+      if (d.success) alert(`✅ ส่งประเด็น "${t.title}" เข้าคิวเขียนแล้ว — ดูผลที่ Generation Log / แท็บพร้อมใช้`);
+      else alert('❌ ส่งไม่สำเร็จ: ' + (d.error || 'ไม่ทราบสาเหตุ'));
+    } catch (e) { alert('❌ ' + e.message); }
+    setSendingTopic(null);
   };
 
   // URL Detection
@@ -353,6 +399,7 @@ function NewsFilterContent() {
     setError(null);
     setOutputData(null);
     setExpandedRows({});
+    setSplitData(null); // ★ ล้างผลแยกประเด็นเก่าเมื่อวิเคราะห์ใหม่
 
     try {
       const res = await fetch('/api/news-filter', {
@@ -1226,6 +1273,98 @@ function NewsFilterContent() {
             )}
           </div>
         </div>
+
+        {/* ===== 🧩 แยกประเด็นย่อย (16 มิ.ย.) — ข่าว/สัมภาษณ์ที่ยัดหลายเรื่องรวมกัน → แยกประเด็น พร้อมส่งเจนทีละเรื่อง ===== */}
+        {outputData && (
+          <div style={{
+            marginBottom: 24, background: 'var(--bg-card)', borderRadius: 16,
+            border: '1px solid var(--border)', overflow: 'hidden',
+            animation: 'fadeUp 0.4s ease-out both',
+          }}>
+            <div style={{
+              padding: '18px 24px', borderBottom: splitData ? '1px solid var(--border)' : 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+            }}>
+              <div style={{ minWidth: 0 }}>
+                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>🧩 แยกประเด็นย่อย</h2>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  ข่าว/บทสัมภาษณ์ที่พูดหลายเรื่องในชิ้นเดียว → แยกเป็นประเด็น พร้อมท่อนเนื้อดิบของแต่ละเรื่อง หยิบส่งเจนทีละประเด็นได้เลย
+                </p>
+              </div>
+              <button onClick={handleSplitTopics} disabled={splitLoading}
+                style={{
+                  padding: '11px 22px', borderRadius: 11, border: 'none',
+                  background: splitLoading ? 'rgba(139,92,246,0.2)' : 'linear-gradient(135deg, #8b5cf6, #6366f1)',
+                  color: '#fff', fontSize: 14, fontWeight: 800, cursor: splitLoading ? 'wait' : 'pointer',
+                  fontFamily: 'inherit', boxShadow: splitLoading ? 'none' : '0 4px 15px rgba(139,92,246,0.3)', whiteSpace: 'nowrap',
+                }}>
+                {splitLoading ? '⏳ กำลังแยกประเด็น...' : splitData ? '🔄 แยกใหม่อีกครั้ง' : '🧩 แยกประเด็นให้หน่อย'}
+              </button>
+            </div>
+
+            {splitLoading && (
+              <div style={{ padding: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 44, height: 44, border: '4px solid var(--border)', borderTopColor: '#8b5cf6', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>AI กำลังอ่านและแยกประเด็น...</div>
+              </div>
+            )}
+
+            {splitData && !splitLoading && (
+              <div style={{ padding: 24 }}>
+                {splitData.overview && (
+                  <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.2)', fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)', marginBottom: 16 }}>
+                    📋 {splitData.overview}
+                  </div>
+                )}
+
+                {(splitData.isSingleTopic && splitData.topics.length <= 1) ? (
+                  <div style={{ padding: '14px 18px', borderRadius: 10, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.2)', fontSize: 13.5, color: '#22c55e', fontWeight: 600, lineHeight: 1.6 }}>
+                    ✅ ข่าวนี้เป็นประเด็นเดียวชัดเจนอยู่แล้ว — ใช้เนื้อแก่นด้านบนส่งเจนได้เลย ไม่ต้องแยก
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {splitData.topics.map((t) => (
+                      <div key={t.id} style={{ borderRadius: 12, border: '1px solid var(--border)', overflow: 'hidden', background: 'var(--bg-primary)' }}>
+                        {/* หัวการ์ดประเด็น */}
+                        <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'flex-start', gap: 12, borderBottom: '1px solid var(--border)' }}>
+                          <span style={{ fontSize: 26, flexShrink: 0, lineHeight: 1 }}>{t.emoji}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 10px', borderRadius: 20, color: '#8b5cf6', background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.25)' }}>ประเด็นที่ {t.id} · {t.category}</span>
+                              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>~{t.wordCount} คำ</span>
+                            </div>
+                            <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', marginTop: 6 }}>{t.title}</div>
+                            {t.summary && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.5 }}>{t.summary}</div>}
+                          </div>
+                        </div>
+                        {/* ท่อนเนื้อดิบ + ปุ่ม */}
+                        <div style={{ padding: '14px 18px' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>📄 ท่อนเนื้อดิบประเด็นนี้ (พร้อมส่งเจน)</div>
+                          <div style={{ fontSize: 13.5, lineHeight: 1.8, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.12)', borderRadius: 8, padding: 12, maxHeight: 260, overflowY: 'auto' }}>{t.content}</div>
+                          {t.viralAngle && (
+                            <div style={{ fontSize: 12, color: '#f59e0b', marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(245,158,11,0.07)', borderLeft: '3px solid #f59e0b', lineHeight: 1.5 }}>
+                              💡 มุมน่าเล่น: {t.viralAngle}
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                            <button onClick={() => copyTopic(t)}
+                              style={{ flex: 1, padding: '10px 0', borderRadius: 9, border: 'none', background: copiedTopic === t.id ? 'rgba(34,197,94,0.15)' : 'rgba(59,130,246,0.1)', color: copiedTopic === t.id ? '#22c55e' : '#3b82f6', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                              {copiedTopic === t.id ? '✅ คัดลอกแล้ว!' : '📋 คัดลอกประเด็นนี้'}
+                            </button>
+                            <button onClick={() => sendTopicToWorkflow(t)} disabled={sendingTopic === t.id}
+                              style={{ flex: 1, padding: '10px 0', borderRadius: 9, border: '1px solid rgba(34,197,94,0.4)', background: sendingTopic === t.id ? 'rgba(255,255,255,0.04)' : 'rgba(34,197,94,0.12)', color: sendingTopic === t.id ? 'var(--text-muted)' : '#22c55e', fontSize: 13, fontWeight: 700, cursor: sendingTopic === t.id ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+                              {sendingTopic === t.id ? '⏳ กำลังส่ง...' : '📤 ส่งประเด็นนี้เข้า Workflow'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ===== SUMMARY STATS ===== */}
         {outputData && (
