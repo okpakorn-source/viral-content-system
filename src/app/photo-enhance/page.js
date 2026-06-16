@@ -36,27 +36,32 @@ export default function PhotoEnhancePage() {
   // เพิ่มความชัดทั้งหมดที่ยัง pending — สร้างงานฝั่ง Replicate (แต่ละภาพ = 1 งาน, คิวรองรับหลายคน/หลายภาพ)
   const enhanceAll = async () => {
     const pending = jobs.filter(j => j.status === 'pending');
-    if (!pending.length) return;
+    if (!pending.length || running) return;
     setRunning(true);
-    for (const j of pending) {
-      try {
-        const res = await fetch('/api/photo-enhance', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: j.dataUri, tier }),
-        });
-        const d = await res.json();
-        if (d.success) setJobs(prev => prev.map(x => x.uid === j.uid ? { ...x, predId: d.id, status: 'processing' } : x));
-        else setJobs(prev => prev.map(x => x.uid === j.uid ? { ...x, status: 'failed', error: d.error } : x));
-      } catch (e) {
-        setJobs(prev => prev.map(x => x.uid === j.uid ? { ...x, status: 'failed', error: e.message } : x));
+    try {
+      for (const j of pending) {
+        try {
+          const res = await fetch('/api/photo-enhance', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: j.dataUri, tier }),
+          });
+          const d = await res.json();
+          if (d.success) setJobs(prev => prev.map(x => x.uid === j.uid ? { ...x, predId: d.id, status: 'processing' } : x));
+          else setJobs(prev => prev.map(x => x.uid === j.uid ? { ...x, status: 'failed', error: d.error } : x));
+        } catch (e) {
+          setJobs(prev => prev.map(x => x.uid === j.uid ? { ...x, status: 'failed', error: e.message } : x));
+        }
       }
+    } finally {
+      // ★ ปลดล็อกปุ่มทันทีหลังส่งงานครบ — การประมวลผลจริงดูที่สถานะรายภาพ (กดเพิ่มภาพใหม่ได้เลย)
+      setRunning(false);
     }
   };
 
   // poll งานที่ยังทำอยู่ทุก 2.5 วิ
   const pollOnce = useCallback(async () => {
     const active = jobs.filter(j => j.predId && (j.status === 'processing' || j.status === 'starting'));
-    if (!active.length) { setRunning(false); return; }
+    if (!active.length) return;
     await Promise.all(active.map(async (j) => {
       try {
         const res = await fetch('/api/photo-enhance?id=' + encodeURIComponent(j.predId), { cache: 'no-store' });
