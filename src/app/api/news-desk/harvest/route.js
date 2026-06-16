@@ -37,9 +37,11 @@ export async function POST(request) {
       if (!fq.length) {
         return NextResponse.json({ success: false, error: 'ไม่รู้จักแนวที่สั่ง', errorType: 'UNKNOWN_FOCUS' }, { status: 400 });
       }
+      // ★ 16 มิ.ย.: ติดป้าย focusTag + searchedAt → ผลค้นไปรวมในแท็บ "🎯 ผลค้นหา" (กลับมาดูได้ ไม่หาย)
+      const _searchedAt = new Date().toISOString();
       return await doHarvest({
         lanes: [],
-        extraQueries: fq.map(f => ({ q: f.q, lane: f.lane, timeRange: f.timeRange, endpoint: f.endpoint })),
+        extraQueries: fq.map(f => ({ q: f.q, lane: f.lane, timeRange: f.timeRange, endpoint: f.endpoint, tag: { focusTag: body.focus, searchedAt: _searchedAt } })),
         judgeTop: Math.min(40, Number(body.judgeTop) || 20),
       });
     }

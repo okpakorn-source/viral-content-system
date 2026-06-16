@@ -32,6 +32,14 @@ export async function GET(request) {
       return NextResponse.json({ success: true, items: all.slice(0, 200), total: all.length, tab: 'junk' });
     }
 
+    // ★ 16 มิ.ย.: แท็บ 🎯 ผลค้นหา — ข่าวจากการ "สั่งหาเฉพาะแนว" ทุกหมวด รวมไว้ที่เดียว (เรียงรอบค้นล่าสุดก่อน) อยู่ถาวรกลับมาดูได้
+    if (tab === 'focus') {
+      let f = items.filter(i => i.focusTag && i.status !== 'dismissed' && !i.used);
+      f.sort((a, b) => new Date(b.searchedAt || b.harvestedAt || 0) - new Date(a.searchedAt || a.harvestedAt || 0));
+      const lightF = f.slice(0, limit).map(({ fullText, ...rest }) => rest);
+      return NextResponse.json({ success: true, items: lightF, total: f.length, tab: 'focus' });
+    }
+
     // ★ 16 มิ.ย. (ยุบแท็บ 12→7): แต่ละแท็บรวมหลายเลน — งงน้อยลง
     const TAB_LANES = {
       trend: ['trend', 'buzz'],

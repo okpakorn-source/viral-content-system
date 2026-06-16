@@ -596,7 +596,8 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       // ★ ล้างตามอายุ — เฉพาะการ์ด new ที่ยังไม่มีใครหยิบ (16 มิ.ย.: ลดชั่วโมง 72/48 → 48/36 กันบวม)
       if (it.status !== 'new') continue;
       const ageHr = (now - new Date(it.harvestedAt || 0).getTime()) / 36e5;
-      const cap = (it.judgeScore ?? 0) >= 9 ? 48 : 36;
+      // ★ 16 มิ.ย.: ผลค้นเฉพาะแนว (focusTag) อยู่นานๆ — 7 วัน (ทีมอยากกลับมาดูผลค้นได้ ไม่หายเร็ว)
+      const cap = it.focusTag ? 168 : ((it.judgeScore ?? 0) >= 9 ? 48 : 36);
       if (ageHr > cap) {
         await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: `🧹 ล้างอัตโนมัติ (ค้างเกิน ${cap} ชม.)` })).catch(() => {});
         purged++;
@@ -604,7 +605,7 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     }
     // ★ 16 มิ.ย. (แก้โต๊ะบวม 906 ใบ): เพดาน "จำนวน" — เก็บ new ท็อป 150 ตามคะแนน ที่เหลือเข้ากรุ
     //   (ล้างตามเวลาอย่างเดียวไล่ไม่ทันการเติม → สะสมจนเลื่อนเจอแต่ของจม)
-    const liveNew = (await store.getAll()).filter(i => i.status === 'new' && !i.shortlisted && !i.used);
+    const liveNew = (await store.getAll()).filter(i => i.status === 'new' && !i.shortlisted && !i.used && !i.focusTag);
     if (liveNew.length > 150) {
       liveNew.sort((a, b) => (b.finalScore || 0) - (a.finalScore || 0));
       for (const o of liveNew.slice(150)) {

@@ -13,6 +13,7 @@ const TABS = [
   { id: 'celeb', label: '🎬 ดารา' },          // celeb + ย้อนสัมภาษณ์ + ดาราอมตะ
   { id: 'trend', label: '🔥 กระแส' },         // trend + แชร์จริง
   { id: 'trendtrack', label: '🔴 ติดตามกระแส' }, // ตามกระแสเฉพาะที่ทีมสั่ง
+  { id: 'focus', label: '🎯 ผลค้นหา' },          // ผลจากสั่งหาเฉพาะแนว — รวมไว้ที่เดียว อยู่ถาวร
   { id: 'clip', label: '📺 คลิป/เพจ' },        // video/รีลส์ + คลิปสัมภาษณ์
   { id: 'shortlist', label: '⭐ คลังส่งเช้า' },
   { id: 'ready', label: '✅ พร้อมใช้' },
@@ -247,7 +248,10 @@ export default function NewsDeskPage() {
     try {
       const res = await fetch('/api/news-desk/harvest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ focus: focusSel }) });
       const d = await parseRes(res);
-      setMsg(d.success ? `🎯 หาแนว "${f?.label}" เสร็จ · เก็บ ${d.harvested} · ผ่านคัด ${d.added} · ส่งเจน ${d.autoPicked || 0}` : `❌ ${d.error}`);
+      if (d.success) {
+        setMsg(`🎯 หาแนว "${f?.label}" เสร็จ · เก็บ ${d.harvested} · ผ่านคัด ${d.added} — ดูที่แท็บ 🎯 ผลค้นหา`);
+        setTab('focus'); // ★ เด้งไปแท็บผลค้นหาให้เห็นทันที (เดิมผลไปอยู่คนละแท็บ เลยเหมือนไม่อัปเดต)
+      } else setMsg(`❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
     setHarvesting(false);
@@ -722,6 +726,13 @@ export default function NewsDeskPage() {
           </div>
         )}
 
+        {/* ★ 16 มิ.ย.: แบนเนอร์แท็บผลค้นหา — รวมผลจากสั่งหาเฉพาะแนวทุกหมวด อยู่ถาวร */}
+        {tab === 'focus' && (
+          <div style={{ padding: '12px 16px', marginBottom: 12, borderRadius: 12, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            🎯 <b>ผลค้นหา</b> — ข่าวจากการกด "สั่งหาเฉพาะแนว" ทุกหมวด รวมไว้ที่นี่ที่เดียว เรียงรอบค้นล่าสุดก่อน · <b>อยู่ได้ 7 วัน</b> กลับมาดูได้เรื่อยๆ ไม่หายตอนรีเฟรช ({items.length} ข่าว)
+          </div>
+        )}
+
         {/* ★ แบนเนอร์คลังขยะ */}
         {tab === 'junk' && (
           <div style={{ padding: '12px 16px', marginBottom: 12, borderRadius: 12, background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.28)', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
@@ -794,6 +805,7 @@ export default function NewsDeskPage() {
                         <span title="แหล่งที่มาของข่าว" style={{ padding: '2px 9px', borderRadius: 999, background: st.bg, color: st.color, fontWeight: 700 }}>{st.label}</span>
                       ); })()}
                       <span style={{ padding: '2px 9px', borderRadius: 999, background: (CAT_COLORS[it.category] || '#666') + '22', color: CAT_COLORS[it.category] || '#999', fontWeight: 600 }}>{it.category}</span>
+                      {it.focusTag && <span title="มาจากการสั่งหาเฉพาะแนว" style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(99,102,241,0.15)', color: '#818cf8', fontWeight: 700 }}>🎯 {FOCUS_OPTIONS.find(o => o.key === it.focusTag)?.label || it.focusTag}</span>}
                       {it.trendTopic && <span title="ติดตามกระแส" style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(239,68,68,0.13)', color: 'var(--desk-red, #dc2626)', fontWeight: 700 }}>🔴 {it.trendTopic}</span>}
                       {it._spotlight && <span title="ข่าวคะแนนกลางที่ระบบดึงขึ้นมาให้ผ่านตา — กันข่าวดีจมล่าง (หมุนเวียนเรื่อยๆ)" style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(168,85,247,0.15)', color: 'var(--desk-purple, #a855f7)', fontWeight: 700 }}>💡 ค้นพบ</span>}
                       {it.foreignCountry && <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(59,130,246,0.15)', color: 'var(--desk-blue)', fontWeight: 700 }}>🌏 ข่าวต่างประเทศ · {it.foreignCountry}</span>}
