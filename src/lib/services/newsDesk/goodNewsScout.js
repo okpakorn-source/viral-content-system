@@ -290,6 +290,7 @@ const FOCUS_FIXED = {
 
 /** รายการแนวที่สั่งได้ (ให้ UI ใช้ทำปุ่ม) — key ต้องตรงกับ generateFocusQueries */
 export const FOCUS_OPTIONS = [
+  { key: 'good_all', label: '💎 ข่าวน้ำดี (รวมทุกหมวด)' },
   { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
   { key: 'celeb_lifestyle', label: '🏡 เปิดบ้าน/รับสัตว์/ไลฟ์สไตล์ดารา' },
   { key: 'celeb_drama', label: '🎬 ดราม่า/ความรักดารา' },
@@ -312,6 +313,7 @@ export const FOCUS_OPTIONS = [
 export function generateFocusQueries(focus, count = 8) {
   const wrap = (arr, lane, timeRange, endpoint) => arr.map(x => ({ q: (x && x.q) || x, lane, timeRange, endpoint })).filter(o => o.q && o.q.length >= 4);
   switch (focus) {
+    case 'good_all': return wrap(generateGoodContentQueries(8), 'good', 'qdr:m', 'search'); // น้ำดีรวมทุกหมวด (กตัญญู/สู้ชีวิต/น้ำใจ/สัตว์/เด็ก/ผู้สูงวัย/อาชีพหัวใจ)
     case 'celeb_family': return wrap(generateCelebFamilyQueries(count), 'good', 'qdr:m');
     case 'celeb_lifestyle': return wrap(generateCelebLifestyleQueries(count), 'good', 'qdr:y', 'search'); // เว็บกว้าง + ย้อนทั้งปี
     case 'celeb_drama': return wrap(generateCelebRadarQueries(count), 'celeb', 'qdr:m');

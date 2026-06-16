@@ -22,6 +22,7 @@ const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', intervie
 
 // ★ 15 มิ.ย.: แนวที่ "สั่งหาเฉพาะแนว" ได้ (key ต้องตรงกับ generateFocusQueries ใน goodNewsScout)
 const FOCUS_OPTIONS = [
+  { key: 'good_all', label: '💎 ข่าวน้ำดี (รวมทุกหมวด)' },
   { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
   { key: 'celeb_lifestyle', label: '🏡 เปิดบ้าน/รับสัตว์/ไลฟ์สไตล์ดารา' },
   { key: 'celeb_drama', label: '🎬 ดราม่า/ความรักดารา' },
