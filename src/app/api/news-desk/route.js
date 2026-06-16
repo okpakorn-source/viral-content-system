@@ -109,18 +109,33 @@ export async function POST(request) {
   try {
     const { action, id, user = 'ไม่ระบุ', enabled } = await request.json();
 
-    // ★ ล้างกระดาน (15 มิ.ย. คำสั่งทีม): เก็บการ์ด 'new' ทั้งหมดเข้ากรุ — เคลียร์โต๊ะก่อนสั่งหาข่าวชุดใหม่
+    // ★ ล้างกระดาน (15 มิ.ย. คำสั่งทีม): เก็บการ์ด 'new' เข้ากรุ — เคลียร์โต๊ะก่อนสั่งหาข่าวชุดใหม่
+    //   ★ 16 มิ.ย. (แก้บั๊ก): ห้ามแตะการ์ดใน "คลังส่งเช้า" (shortlisted) — ทีมตั้งใจเก็บไว้ส่งพนักงาน!
     if (action === 'clearBoard') {
       const store = createStore('news-desk');
       const all = await store.getAll();
       let cleared = 0;
       for (const it of all) {
-        if (it.status === 'new') {
+        if (it.status === 'new' && !it.shortlisted) {
           await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: '🧹 ล้างกระดาน (ทีมสั่งเคลียร์)' })).catch(() => {});
           cleared++;
         }
       }
       return NextResponse.json({ success: true, cleared });
+    }
+
+    // ★ 16 มิ.ย. (กู้คืน): คืนการ์ด "คลังส่งเช้า" ที่ถูกล้างกระดานเก็บเข้ากรุพลาด → กลับมาเป็น new (ยังอยู่ในคลัง)
+    if (action === 'restoreShortlist') {
+      const store = createStore('news-desk');
+      const all = await store.getAll();
+      let restored = 0;
+      for (const it of all) {
+        if (it.shortlisted && it.status === 'dismissed' && /ล้างกระดาน/.test(String(it.dismissNote || '')) && !it.used) {
+          await store.update(it.id, (ex) => ({ ...ex, status: 'new', dismissNote: null })).catch(() => {});
+          restored++;
+        }
+      }
+      return NextResponse.json({ success: true, restored });
     }
 
     // ★ สวิตช์ Auto-Pilot (ไม่ผูกกับข่าวใบไหน — จัดการก่อนหา item)
