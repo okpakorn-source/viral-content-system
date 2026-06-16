@@ -24,9 +24,10 @@ export async function GET(request) {
     if (tab === 'junk') {
       const jstore = createStore('news-desk-junk');
       const junkStore = (await jstore.getAll()).map(j => ({ ...j, _fromJunk: true }));
+      // ★ 16 มิ.ย.: ซ่อน "ล้างกระดาน" (ทีมเคลียร์ทั้งโต๊ะ ไม่ใช่ของที่ระบบตัดเพราะนอกแนว) — ให้เห็นเฉพาะที่ควรรีวิวจริง
       const dismissed = items
-        .filter(i => i.status === 'dismissed' && !i.used)
-        .map(i => ({ id: i.id, title: i.title, url: i.url, source: i.source || '', lane: i.lane || '', category: i.category || '', junkReason: i.dismissNote || 'ทีมทิ้ง/ล้างกระดาน', junkAt: i.dismissedAt || i.harvestedAt, _fromDesk: true, shortlisted: !!i.shortlisted }));
+        .filter(i => i.status === 'dismissed' && !i.used && !/ล้างกระดาน/.test(String(i.dismissNote || '')))
+        .map(i => ({ id: i.id, title: i.title, url: i.url, source: i.source || '', lane: i.lane || '', category: i.category || '', junkReason: i.dismissNote || 'ตัดออกจากโต๊ะ', junkAt: i.dismissedAt || i.harvestedAt, _fromDesk: true, shortlisted: !!i.shortlisted }));
       const all = [...junkStore, ...dismissed].sort((a, b) => new Date(b.junkAt || 0) - new Date(a.junkAt || 0));
       return NextResponse.json({ success: true, items: all.slice(0, 200), total: all.length, tab: 'junk' });
     }

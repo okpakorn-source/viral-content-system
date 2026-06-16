@@ -77,6 +77,9 @@ export function gateKeywords(item) {
   if (thaiCount < 4) return { pass: false, reason: 'หัวข้อไม่ใช่ภาษาไทย (ข่าวต่างประเทศ/อินเตอร์)' };
   // ★ 16 มิ.ย. (ทีมขอ "ตัดโพสต์เอ็นเกจต่ำ"): โพสต์กลุ่ม Facebook = สุ่ม/ไลก์หลักหน่วย ไม่ใช่คอนเทนต์ไวรัล (เพจ/รีลส์ยังเอา)
   if (/facebook\.com\/groups\//i.test(item.url || '')) return { pass: false, reason: 'โพสต์กลุ่ม FB (เอ็นเกจต่ำ)' };
+  // ★ 16 มิ.ย. (แก้คีย์เวิร์ดกว้างลากขยะ): ตัดฟอรัม/วิกิ/นิทาน/ละครย่อ/ดูดวง/รีวิวหนัง — ตกลงคลังขยะ (กู้คืนได้ถ้าตัดผิด)
+  if (/pantip\.com|wikipedia\.org|\.wikipedia\.|dek-d\.com\/board|\/horoscope/i.test(item.url || '')) return { pass: false, reason: 'ฟอรัม/วิกิ (ไม่ใช่ข่าว)' };
+  if (/นิทาน|ละครย่อ|เรื่องย่อละคร|ดูดวง|ดวงรายวัน|ดวงประจำวัน|ดวงประจำสัปดาห์|รีวิวหนัง|สปอยหนัง|สปอยซีรีส์/.test(item.title || '')) return { pass: false, reason: 'นิทาน/ละครย่อ/ดูดวง/รีวิวหนัง' };
   // เช็คโดเมนต่างประเทศ — ตัดทิ้งทันที (เว้นโดเมนไทย .th)
   try {
     const host = new URL(item.url || '').hostname.toLowerCase();
@@ -102,8 +105,8 @@ const FIT_WEIGHTS = {
 // ── ชั้น 1: จัดหมวด + วัดพิษ (เรียกทีละก้อน ก้อนละ ≤10 ข่าว ใน 1 call) ──
 export async function classifyBatch(items) {
   const out = [];
-  for (let i = 0; i < items.length; i += 10) {
-    const chunk = items.slice(i, i + 10);
+  // ★ 16 มิ.ย. (เร่งความเร็ว): ก้อนละ 10 ข่าว ยิงขนานทีละ 5 ก้อน (เดิมเรียงกันทุกก้อน = ช้า)
+  const _runChunk = async (chunk) => {
     const list = chunk.map((it, idx) => {
       let domain = '';
       try { domain = new URL(it.url || '').hostname; } catch {}
@@ -167,6 +170,11 @@ ${list}
       // ก้อนที่จัดไม่ได้ → ใส่หมวดอื่นๆ ไว้ก่อน ไม่ทิ้งข่าว
       chunk.forEach(it => out.push({ ...it, category: 'อื่นๆ', tone: 'กลาง', toxicity: 1, fbRisk: 1, toneable: true }));
     }
+  };
+  const _chunks = [];
+  for (let i = 0; i < items.length; i += 10) _chunks.push(items.slice(i, i + 10));
+  for (let i = 0; i < _chunks.length; i += 5) {
+    await Promise.all(_chunks.slice(i, i + 5).map(_runChunk));
   }
   return out;
 }

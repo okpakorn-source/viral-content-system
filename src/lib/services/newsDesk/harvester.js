@@ -263,10 +263,12 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
   // ── เก็บดิบ ──
   const raw = [];
   if (lanes.includes('trend')) {
-    for (const q of pickTrendQueries(8)) {
-      try { raw.push(...(await serperNews(q, { num: 10, timeRange: 'qdr:d' })).map(r => ({ ...r, lane: 'trend' }))); }
-      catch (e) { console.log('[Harvester] trend query failed:', e.message?.slice(0, 50)); }
-    }
+    // ★ 16 มิ.ย. (เร่งความเร็ว): ยิงคำค้นกระแสพร้อมกัน
+    const _tRes = await Promise.all(pickTrendQueries(8).map(async q => {
+      try { return (await serperNews(q, { num: 10, timeRange: 'qdr:d' })).map(r => ({ ...r, lane: 'trend' })); }
+      catch (e) { console.log('[Harvester] trend query failed:', e.message?.slice(0, 50)); return []; }
+    }));
+    for (const arr of _tRes) raw.push(...arr);
     // ★ 16 มิ.ย. (ทีมขอ): ดราม่าวงการสด มีตัวละคร (วอลเลย์บอล/บอลไทย/บันเทิง) — คลิปยูทูป(สด≤3ด.) + บทความ; lane trend ยกเว้นด่านกระแสเก่า
     try {
       const { generateCircleDramaQueries } = await import('./goodNewsScout');
@@ -289,32 +291,35 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       goodQueries = scout.map(x => ({ q: x.q, isCeleb: x.genre === 'ดาราดังทำดี' }));
     } catch (e) { console.log('[Harvester] scout import failed:', e.message?.slice(0, 50)); }
     if (goodQueries.length < 3) goodQueries = pickGoodQueries(6).map(q => ({ q, isCeleb: false })); // fallback
-    for (const { q, isCeleb } of goodQueries) {
-      try { raw.push(...(await serperNews(q, { num: 8, timeRange: isCeleb ? 'qdr:m' : 'qdr:w' })).map(r => ({ ...r, lane: 'good' }))); }
-      catch (e) { console.log('[Harvester] good query failed:', e.message?.slice(0, 50)); }
-    }
+    // ★ 16 มิ.ย. (เร่งความเร็ว): ยิงคำค้นกองสืบพร้อมกัน
+    const _gRes = await Promise.all(goodQueries.map(async ({ q, isCeleb }) => {
+      try { return (await serperNews(q, { num: 8, timeRange: isCeleb ? 'qdr:m' : 'qdr:w' })).map(r => ({ ...r, lane: 'good' })); }
+      catch (e) { console.log('[Harvester] good query failed:', e.message?.slice(0, 50)); return []; }
+    }));
+    for (const arr of _gRes) raw.push(...arr);
 
     // ★ 16 มิ.ย. (ทีมขอลดต้นทุน): เลน good มีกลุ่มคำค้นเยอะ (~9 ชนิด) — รัน "แกนหลัก" ทุกรอบ + "กลุ่มเสริม" หมุน 3 จาก 6 ต่อรอบ (ประหยัด ~32%)
     try {
       const G = await import('./goodNewsScout');
       const _clipRe = /youtube\.com|youtu\.be|tiktok\.com|fb\.watch|facebook\.com\/(reel|watch)|instagram\.com/i;
+      // ★ 16 มิ.ย. (เร่งความเร็ว): ยิงทุกคำในกลุ่ม "พร้อมกัน" (Promise.all) แทนทีละคำ — harvest เร็วขึ้นมาก (เดิม 9.6 นาทีเกือบ timeout)
       const runGroup = async (queries, { ep = 'news', lane = 'good', tr = 'qdr:m', num = 10, noClip = false, maxAgeMo = 0 } = {}) => {
-        for (const { q } of queries) {
+        const results = await Promise.all(queries.map(async ({ q }) => {
           try {
             let res = ep === 'search' ? await serperSearch(q, { num, timeRange: tr })
               : ep === 'videos' ? await serperVideos(q, { num })
                 : await serperNews(q, { num, timeRange: tr });
             if (noClip) res = res.filter(x => !_clipRe.test(x.url || ''));
-            // ★ 16 มิ.ย.: กรองคลิปเก่า/ช่องไม่อัปเดต (เดือน) — เอาเฉพาะที่ยังลงได้ตอนนี้
             if (maxAgeMo && ep === 'videos') res = res.filter(x => { const a = videoAgeMonths(x._rawDate); return a == null || a <= maxAgeMo; });
-            raw.push(...res.map(r => ({ ...r, lane })));
-          } catch (e) { console.log('[Harvester] good group failed:', e.message?.slice(0, 50)); }
-        }
+            return res.map(r => ({ ...r, lane }));
+          } catch (e) { console.log('[Harvester] good group failed:', e.message?.slice(0, 50)); return []; }
+        }));
+        for (const arr of results) raw.push(...arr);
       };
       // ── แกนหลัก (รันทุกรอบ): คอนเทนต์น้ำดี 24 + DNA เพจ + เรื่องลำบาก + ดาราให้ของขวัญครอบครัว = แนวที่ปังสุด ──
       await runGroup(G.generateGoodContentQueries(6), { ep: 'search', noClip: true });
       await runGroup(G.generateViralDnaQueries(5), { ep: 'search', noClip: true }); // ★ 16 มิ.ย.: DNA จากเพจ — สถาบันบวก/ทหาร/ยุติธรรม/ต่างชาติช่วยไทย/นักกีฬาสมถะ
-      await runGroup(G.generateHardshipQueries(4), { ep: 'search', noClip: true });
+      await runGroup(G.generateHardshipQueries(4), { ep: 'news', tr: 'qdr:m' }); // ★ 16 มิ.ย.: ลำบาก→/news (มีวันที่) ป้ายความสดทำงาน — ทีมรู้ว่าเคสคนลำบากของวันนี้/เก่า
       await runGroup(G.generateCelebFamilyQueries(5), { ep: 'news' });
       // ★ v6 (16 มิ.ย. ทีมขอเน้น): ย้อนสัมภาษณ์เก่า เป็นแกนหลัก รันทุกรอบ — บทความ /news + "คลิปจริง" /videos (YT)
       const _tbQs = G.generateThrowbackQueries(6);
@@ -335,23 +340,24 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     } catch (e) { console.log('[Harvester] good-block failed:', e.message?.slice(0, 50)); }
   }
   // ★ คำค้นพิเศษ (Chief Agent / สั่งหาเฉพาะแนว) — เลือก endpoint ได้: news (default) | search (เว็บกว้าง) | videos (ยูทูป)
-  for (const ex of extraQueries) {
+  // ★ 16 มิ.ย. (เร่งความเร็ว): ยิงพร้อมกัน
+  const _exRes = await Promise.all(extraQueries.map(async ex => {
     try {
-      const fetcher = ex.endpoint === 'search' ? serperSearch(ex.q, { num: 10, timeRange: ex.timeRange })
-        : ex.endpoint === 'videos' ? serperVideos(ex.q, { num: 10 })
-        : serperNews(ex.q, { num: 8, timeRange: ex.timeRange || 'qdr:d' });
-      let exRes = await fetcher;
-      // ★ 16 มิ.ย.: ติดตามกระแส/สั่งหาวิดีโอ — เอาคลิปสด ≤12 เดือน (กันคลิปเก่า/ช่องไม่อัปเดต)
+      let exRes = ex.endpoint === 'search' ? await serperSearch(ex.q, { num: 10, timeRange: ex.timeRange })
+        : ex.endpoint === 'videos' ? await serperVideos(ex.q, { num: 10 })
+          : await serperNews(ex.q, { num: 8, timeRange: ex.timeRange || 'qdr:d' });
       if (ex.endpoint === 'videos') exRes = exRes.filter(x => { const a = videoAgeMonths(x._rawDate); return a == null || a <= 12; });
-      raw.push(...exRes.map(r => ({ ...r, lane: ex.lane || 'trend', ...(ex.tag || {}) })));
-    } catch (e) { console.log('[Harvester] extra query failed:', e.message?.slice(0, 50)); }
-  }
+      return exRes.map(r => ({ ...r, lane: ex.lane || 'trend', ...(ex.tag || {}) }));
+    } catch (e) { console.log('[Harvester] extra query failed:', e.message?.slice(0, 50)); return []; }
+  }));
+  for (const arr of _exRes) raw.push(...arr);
   if (lanes.includes('evergreen')) {
     // ไม่จำกัดเวลา — ของเก่าน้ำดีคือเป้าหมาย (วันไหนกระแสแห้ง เลนนี้คือบ่อสำรอง)
-    for (const q of pickEvergreenQueries(4)) {
-      try { raw.push(...(await serperNews(q, { num: 8, timeRange: 'qdr:y' })).map(r => ({ ...r, lane: 'evergreen' }))); }
-      catch (e) { console.log('[Harvester] evergreen query failed:', e.message?.slice(0, 50)); }
-    }
+    const _evRes = await Promise.all(pickEvergreenQueries(4).map(async q => {
+      try { return (await serperNews(q, { num: 8, timeRange: 'qdr:y' })).map(r => ({ ...r, lane: 'evergreen' })); }
+      catch (e) { console.log('[Harvester] evergreen query failed:', e.message?.slice(0, 50)); return []; }
+    }));
+    for (const arr of _evRes) raw.push(...arr);
   }
   if (lanes.includes('buzz')) {
     raw.push(...await harvestBuzzsumo());
@@ -583,12 +589,22 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
         purged++;
         continue;
       }
-      // ★ ล้างตามอายุ — เฉพาะการ์ด new ที่ยังไม่มีใครหยิบ
+      // ★ ล้างตามอายุ — เฉพาะการ์ด new ที่ยังไม่มีใครหยิบ (16 มิ.ย.: ลดชั่วโมง 72/48 → 48/36 กันบวม)
       if (it.status !== 'new') continue;
       const ageHr = (now - new Date(it.harvestedAt || 0).getTime()) / 36e5;
-      const cap = (it.judgeScore ?? 0) >= 9 ? 72 : 48;
+      const cap = (it.judgeScore ?? 0) >= 9 ? 48 : 36;
       if (ageHr > cap) {
         await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: `🧹 ล้างอัตโนมัติ (ค้างเกิน ${cap} ชม.)` })).catch(() => {});
+        purged++;
+      }
+    }
+    // ★ 16 มิ.ย. (แก้โต๊ะบวม 906 ใบ): เพดาน "จำนวน" — เก็บ new ท็อป 150 ตามคะแนน ที่เหลือเข้ากรุ
+    //   (ล้างตามเวลาอย่างเดียวไล่ไม่ทันการเติม → สะสมจนเลื่อนเจอแต่ของจม)
+    const liveNew = (await store.getAll()).filter(i => i.status === 'new' && !i.shortlisted && !i.used);
+    if (liveNew.length > 150) {
+      liveNew.sort((a, b) => (b.finalScore || 0) - (a.finalScore || 0));
+      for (const o of liveNew.slice(150)) {
+        await store.update(o.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: '🧹 ล้างอัตโนมัติ (เกินเพดานโต๊ะ 150 ใบ — คะแนนต่ำสุด)' })).catch(() => {});
         purged++;
       }
     }
@@ -604,16 +620,17 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     stats.autoPicked = await autoPilotPick(toAdd, store);
   } catch (e) { console.log('[AutoPilot] skip:', e.message?.slice(0, 50)); }
 
-  // ★ Research Agent อัตโนมัติ: เจาะลึกตัวท็อป (judge ≥8) สูงสุด 3 ใบ/รอบ — การ์ดขึ้น feed แบบ "พร้อมเขียน"
+  // ★ Research Agent อัตโนมัติ (16 มิ.ย.: ลด 3→1 ใบ + กันค้าง 45 วิ — ตัวนี้เคยกินเวลา harvest ไป 1-3 นาที)
   try {
     const { deepResearch } = await import('./researchAgent');
-    const tops = toAdd.filter(i => (i.judgeScore ?? 0) >= 8 && i.lane !== 'interview').slice(0, 3);
-    for (const top of tops) {
-      const r = await deepResearch(top).catch(e => ({ ok: false, reason: e.message }));
+    const top = toAdd.filter(i => (i.judgeScore ?? 0) >= 8 && i.lane !== 'interview').sort((a, b) => (b.judgeScore || 0) - (a.judgeScore || 0))[0];
+    if (top) {
+      const timeout = new Promise(res => setTimeout(() => res({ ok: false, reason: 'timeout' }), 45000));
+      const r = await Promise.race([deepResearch(top).catch(e => ({ ok: false, reason: e.message })), timeout]);
       if (r.ok) {
         const boosted = Math.min(100, (top.finalScore || 0) + Math.max(0, r.readyScore - 5) * 2);
         await store.update(top.id, (ex) => ({ ...ex, research: r, finalScore: boosted }));
-        stats.researched = (stats.researched || 0) + 1;
+        stats.researched = 1;
       }
     }
   } catch (e) { console.log('[Harvester] auto-research skip:', e.message?.slice(0, 50)); }
