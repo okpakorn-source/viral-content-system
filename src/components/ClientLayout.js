@@ -7,7 +7,7 @@ import WorkflowTracker from '@/components/WorkflowTracker';
 
 // ★ หน้าสาธารณะ — ไม่ต้องล็อกอิน ไม่มี sidebar (เครื่องมือเดี่ยวให้พนักงานใช้ผ่านลิงก์เดียว)
 //   13-15 มิ.ย. 69: /cover-tester = ทำปก, /news-filter = สกัดข่าว, /clip-transcript = ถอดบทสัมภาษณ์ — เปิดสาธารณะไม่ต้องล็อกอิน
-const PUBLIC_ROUTES = ['/login', '/cover-tester', '/news-filter', '/clip-transcript'];
+const PUBLIC_ROUTES = ['/login', '/cover-tester', '/news-filter', '/clip-transcript', '/photo-enhance'];
 
 export default function ClientLayout({ children }) {
   const pathname = usePathname();
