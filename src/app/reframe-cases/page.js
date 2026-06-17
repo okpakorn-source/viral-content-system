@@ -60,22 +60,35 @@ export default function ReframeCasesPage() {
 
   const runManual = async () => {
     if (manualInput.trim().length < 10) { setManualInfo({ err: 'กรอกข้อความข่าว หรือวางลิงก์ก่อน' }); return; }
+    const wasUrl = /^https?:\/\//i.test(manualInput.trim());
     setManualRunning(true); setManualInfo(null);
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 85000); // กันค้าง — ตัดที่ 85 วิ
     try {
       const r = await fetch('/api/news-desk/reframe-manual', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input: manualInput.trim() }),
+        signal: ctrl.signal,
       });
-      const d = await r.json();
-      if (d.success) {
+      let d = null;
+      try { d = await r.json(); } catch { d = null; }
+      if (d && d.success) {
         const cl = d.classify || {};
         setManualInfo({ ok: true, title: d.extracted?.title, isUrl: d.extracted?.isUrl, chars: d.extracted?.chars, category: cl.category, dramaType: cl.dramaType, angles: d.reframe?.angles?.length });
         setManualInput('');
         await load('all'); setFilter('all');
+      } else if (d && d.error) {
+        // 422/บล็อก — แนะให้วางข้อความถ้าเป็นลิงก์
+        setManualInfo({ err: d.error + (wasUrl ? ' · 💡 ลิงก์บางเว็บ (LINE Today/Facebook/ต้องล็อกอิน) ดึงอัตโนมัติไม่ได้ — ก๊อปเนื้อข่าวมาวางในช่องแทนจะชัวร์กว่า' : '') });
       } else {
-        setManualInfo({ err: d.error || 'แตกประเด็นไม่สำเร็จ' });
+        // ไม่ใช่ JSON (มัก = เซิร์ฟเวอร์หมดเวลา/บล็อก)
+        setManualInfo({ err: `เซิร์ฟเวอร์ตอบกลับไม่สำเร็จ (HTTP ${r.status})${wasUrl ? ' — ลิงก์นี้อาจถูกบล็อกหรือประมวลผลนานเกินไป 💡 ลองก๊อปเนื้อข่าวมาวางในช่องแทน' : ''}` });
       }
-    } catch (e) { setManualInfo({ err: e.message }); }
+    } catch (e) {
+      const aborted = e.name === 'AbortError';
+      setManualInfo({ err: aborted ? `หมดเวลา (เกิน 85 วิ)${wasUrl ? ' — ลิงก์นี้ดึงช้า/ถูกบล็อก 💡 ก๊อปเนื้อข่าวมาวางในช่องแทนจะเร็วและชัวร์กว่า' : ''}` : e.message });
+    }
+    clearTimeout(tid);
     setManualRunning(false);
   };
 
@@ -118,18 +131,25 @@ export default function ReframeCasesPage() {
         <textarea value={manualInput} onChange={(e) => setManualInput(e.target.value)} disabled={manualRunning}
           placeholder="วางข้อความข่าว เช่น 'พี่หนุ่ม กรรชัย ถามกลางรายการ...' หรือวางลิงก์ https://..."
           style={{ width: '100%', minHeight: 90, resize: 'vertical', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', padding: '10px 12px', fontSize: 13, lineHeight: 1.6, fontFamily: 'inherit' }} />
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.5 }}>
+          💡 ลิงก์ข่าวเว็บทั่วไปใช้ได้ · แต่ <b>LINE Today / Facebook / IG / เว็บที่ต้องล็อกอิน</b> มักดึงไม่ได้ (ถูกบล็อก) → <b>ก๊อปเนื้อข่าวมาวางในช่องนี้แทนจะชัวร์และเร็วกว่า</b>
+        </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 9, flexWrap: 'wrap' }}>
           <button onClick={runManual} disabled={manualRunning}
             style={{ background: manualRunning ? 'var(--bg-elevated)' : 'linear-gradient(135deg,#a855f7,#7c3aed)', color: manualRunning ? 'var(--text-muted)' : '#fff', border: 'none', borderRadius: 10, padding: '10px 20px', fontWeight: 800, cursor: manualRunning ? 'default' : 'pointer', fontSize: 14 }}>
-            {manualRunning ? '⏳ กำลังสกัด+แตกประเด็น... (~20-40 วิ)' : '🔍 สกัด + แตกประเด็น'}
+            {manualRunning ? '⏳ กำลังสกัด+แตกประเด็น... (อาจ ~30-60 วิ)' : '🔍 สกัด + แตกประเด็น'}
           </button>
           {manualInfo?.ok && (
             <span style={{ fontSize: 12.5, color: 'var(--desk-green)' }}>
-              ✅ เสร็จ — {manualInfo.isUrl ? 'สกัดจากลิงก์' : 'จากข้อความ'} {manualInfo.chars ? `(${manualInfo.chars} ตัว)` : ''} · หมวด {manualInfo.category || '—'}{manualInfo.dramaType ? ` · ดราม่า ${manualInfo.dramaType}` : ''} · ได้ {manualInfo.angles} มุม (ดูด้านล่าง ↓)
+              ✅ เสร็จ — {manualInfo.isUrl ? 'สกัดจากลิงก์' : 'จากข้อความ'} {manualInfo.chars ? `(${manualInfo.chars} ตัว)` : ''} · หมวด {manualInfo.category || '—'}{manualInfo.dramaType ? ` · ดราม่า ${manualInfo.dramaType}` : ''} · ได้ {manualInfo.angles} มุม (เคสใหม่อยู่ด้านล่าง ↓)
             </span>
           )}
-          {manualInfo?.err && <span style={{ fontSize: 12.5, color: 'var(--desk-red)' }}>❌ {manualInfo.err}</span>}
         </div>
+        {manualInfo?.err && (
+          <div style={{ marginTop: 9, padding: '9px 12px', background: 'rgba(248,113,113,0.12)', border: '1px solid var(--desk-red)', borderRadius: 8, fontSize: 12.5, color: 'var(--text-primary)', lineHeight: 1.55 }}>
+            ❌ {manualInfo.err}
+          </div>
+        )}
       </div>
 
       {/* สถิติ */}

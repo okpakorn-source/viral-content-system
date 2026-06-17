@@ -25,9 +25,14 @@ export async function POST(request) {
     // ── 1) สกัดเนื้อข่าว (ลิงก์ → scrape, ข้อความ → ใช้ตรงๆ) ──
     let title = '', text = '', sourceUrl = '';
     if (isUrl) {
-      const ex = await extractContent({ url: input });
-      if (!ex || ex.success === false || !ex.text || ex.text.trim().length < 40) {
-        return NextResponse.json({ success: false, error: 'สกัดเนื้อข่าวจากลิงก์ไม่ได้ (เพจอาจบล็อก/เป็นวิดีโอ) — ลองวางเป็นข้อความข่าวแทน', errorType: 'EXTRACT_FAILED' }, { status: 422 });
+      // ★ กันค้าง: ถ้าสกัดนานเกิน 25 วิ (เว็บบล็อก/หน่วง) → ตัดจบ คืน error ชัดๆ ไม่ปล่อยให้ route แขวน
+      const ex = await Promise.race([
+        extractContent({ url: input }).catch(() => null),
+        new Promise((resolve) => setTimeout(() => resolve({ _timeout: true }), 25000)),
+      ]);
+      if (!ex || ex._timeout || ex.success === false || !ex.text || ex.text.trim().length < 40) {
+        const why = ex && ex._timeout ? 'ลิงก์นี้ดึงนานเกินไป (เว็บอาจบล็อกเซิร์ฟเวอร์)' : 'สกัดเนื้อข่าวจากลิงก์ไม่ได้ (เพจบล็อก/เป็นวิดีโอ/โหลดด้วย JS)';
+        return NextResponse.json({ success: false, error: `${why} — โดยเฉพาะ LINE Today/Facebook/IG/เว็บที่ต้องล็อกอิน · ก๊อปเนื้อข่าวมาวางเป็นข้อความแทนจะชัวร์กว่า`, errorType: 'EXTRACT_FAILED' }, { status: 422 });
       }
       title = String(ex.title || '').replace(/\.\.\.$/, '').slice(0, 160) || ex.text.slice(0, 80);
       text = String(ex.text).trim();
