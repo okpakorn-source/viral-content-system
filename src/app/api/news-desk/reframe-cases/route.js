@@ -58,6 +58,20 @@ export async function POST(request) {
       for (const c of all) await store.remove(c.id).catch(() => {});
       return NextResponse.json({ success: true, cleared: all.length });
     }
+    // ★ 17 มิ.ย.: หาข้อมูลเสริม (เฉพาะคนดัง) ตามแกนมุมของเคสนี้ — กดเอง คุมค่า Serper/OpenAI
+    if (body.action === 'enrich') {
+      const store = createStore('reframe-cases');
+      const all = await store.getAll();
+      const c = all.find(x => x.id === body.id);
+      if (!c) return NextResponse.json({ success: false, error: 'ไม่พบเคสนี้', errorType: 'NOT_FOUND' }, { status: 404 });
+      const angle = (c.angles || [])[Number(body.angleIndex) || 0] || (c.angles || [])[0];
+      if (!angle) return NextResponse.json({ success: false, error: 'เคสนี้ไม่มีมุมให้เสริม', errorType: 'NO_ANGLE' }, { status: 422 });
+      const { enrichCelebAngle } = await import('@/lib/services/newsDesk/angleEnrich');
+      const e = await enrichCelebAngle({ sourceTitle: c.sourceTitle, sourceSnippet: c.sourceSnippet, angleType: angle.type, angleFocus: angle.focus });
+      if (!e.ok) return NextResponse.json({ success: false, error: e.reason, errorType: 'ENRICH_NONE' }, { status: 422 });
+      await store.update(c.id, (ex) => ({ ...ex, enrichment: e }));
+      return NextResponse.json({ success: true, enrichment: e });
+    }
     return NextResponse.json({ success: false, error: 'action ไม่รู้จัก', errorType: 'VALIDATION_ERROR' }, { status: 400 });
   } catch (error) {
     console.error('[ReframeCases POST]', error.message);

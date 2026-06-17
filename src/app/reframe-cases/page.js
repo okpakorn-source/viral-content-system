@@ -18,6 +18,7 @@ export default function ReframeCasesPage() {
   const [manualInput, setManualInput] = useState('');
   const [manualRunning, setManualRunning] = useState(false);
   const [manualInfo, setManualInfo] = useState(null);
+  const [enrichId, setEnrichId] = useState(null); // เคสที่กำลังหาข้อมูลเสริม
 
   const load = async (mode = filter) => {
     setLoading(true);
@@ -67,6 +68,20 @@ export default function ReframeCasesPage() {
       }
     } catch (e) { setManualInfo({ err: e.message }); }
     setManualRunning(false);
+  };
+
+  const runEnrich = async (id) => {
+    setEnrichId(id); setMsg('🔎 กำลังค้นข้อมูลเสริม (เฉพาะคนดัง) ~20-40 วิ...');
+    try {
+      const r = await fetch('/api/news-desk/reframe-cases', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'enrich', id }),
+      });
+      const d = await r.json();
+      if (d.success) { setMsg(`✅ ได้ข้อมูลเสริม ${d.enrichment?.facts?.length || 0} ข้อ + เทียบเคียง ${d.enrichment?.comparables?.length || 0} ข้อ`); await load(filter); }
+      else setMsg('ℹ️ ' + (d.error || 'หาข้อมูลเสริมไม่ได้'));
+    } catch (e) { setMsg('❌ ' + e.message); }
+    setEnrichId(null);
   };
 
   const copy = (t) => { navigator.clipboard?.writeText(t); setMsg('📋 คัดลอกเนื้อหาดิบแล้ว'); setTimeout(() => setMsg(''), 1500); };
@@ -237,6 +252,39 @@ export default function ReframeCasesPage() {
                   );
                 })}
               </div>
+
+              {/* ── 🔎 ข้อมูลเสริม (เฉพาะคนดัง) — กดเอง ── */}
+              {c.enrichment?.ok && (
+                <div style={{ marginTop: 10, background: 'rgba(125,211,252,0.08)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+                  <div style={{ ...fieldLabel, color: 'var(--desk-blue)', marginBottom: 5 }}>🔎 ข้อมูลเสริม{c.enrichment.person ? ` · ${c.enrichment.person}` : ''} (เอาไปประกอบการเขียน)</div>
+                  {(c.enrichment.facts || []).length > 0 && (
+                    <div style={{ marginBottom: (c.enrichment.comparables || []).length ? 8 : 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 3 }}>ข้อเท็จจริง (มีแหล่งยืนยัน):</div>
+                      {c.enrichment.facts.map((f, fi) => (
+                        <div key={fi} style={{ fontSize: 12.5, color: 'var(--text-primary)', marginTop: 2, lineHeight: 1.5 }}>
+                          • {f.text} {f.sourceUrl && <a href={f.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--desk-blue)', textDecoration: 'underline', fontSize: 11 }}>[ที่มา]</a>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {(c.enrichment.comparables || []).length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--desk-amber)', marginBottom: 3 }}>≈ ข้อมูลเทียบเคียง (ภาพรวมที่จริง — ไม่ใช่ตัวเลขตายตัว):</div>
+                      {c.enrichment.comparables.map((cm, ci) => (
+                        <div key={ci} style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 2, lineHeight: 1.5 }}>• {cm}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ปุ่มหาข้อมูลเสริม — โชว์เมื่อยังไม่มี (backend จะข้ามถ้าไม่ใช่คนดัง) */}
+              {!c.enrichment?.ok && (
+                <button onClick={() => runEnrich(c.id)} disabled={enrichId === c.id}
+                  style={{ marginTop: 10, background: 'transparent', color: 'var(--desk-blue)', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 14px', fontWeight: 700, cursor: enrichId === c.id ? 'default' : 'pointer', fontSize: 12.5 }}>
+                  {enrichId === c.id ? '⏳ กำลังค้น...' : '🔎 หาข้อมูลเสริม (เฉพาะคนดัง)'}
+                </button>
+              )}
 
               {/* ผู้ตรวจคุณภาพ (ท้ายเคส) */}
               {c.evalNote && (
