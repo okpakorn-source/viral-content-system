@@ -322,9 +322,9 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       await runGroup(G.generateCelebHighlightQueries(5), { ep: 'search', lane: 'celeb' });  // ★ ไฮไลท์สัมภาษณ์ดาราด้านดี (รีลส์/คลิป)
       // ★★ เรดาร์คนดัง — สลับ "เทรนด์สด" กับ "เรดาร์วงการ" ทีละตัว/รอบ (ครบทั้งคู่ใน 2 ชม.) เพื่อคุมเวลา harvest < เพดาน Vercel 300 วิ
       if (new Date().getHours() % 2 === 0) {
-        await runGroup(G.generateTrendRadarQueries(6), { ep: 'news', lane: 'celeb', tr: 'qdr:d', num: 8 }); // เทรนด์สด ทุกวงการ (คนกำลังดังวันนี้)
+        await runGroup(G.generateTrendRadarQueries(6), { ep: 'news', lane: 'trend', tr: 'qdr:d', num: 8 }); // ★ เทรนด์สด → เข้าหมวด 🔥 กระแส (lane=trend)
       } else {
-        await runGroup(G.generateFieldRadarQueries(6), { ep: 'search', lane: 'celeb', tr: 'qdr:m', noClip: true }); // เรดาร์วงการ×มุมดี (นักกีฬา/เชฟ/หมอ/สัตว์เซเลบ... ครอบทุกวงการ)
+        await runGroup(G.generateFieldRadarQueries(6), { ep: 'search', lane: 'celeb', tr: 'qdr:m', noClip: true }); // เรดาร์วงการ×มุมดี → ดาราน้ำดี (lane=celeb)
       }
       await runGroup(G.generateCommonerQueries(2), { ep: 'news', noClip: true, tr: 'qdr:w' }); // ชาวบ้านที่ "ไวรัลมีตัวตน" เท่านั้น (เล็กลง + /news มีวันที่/ภาพ · เลิกเลนคนลำบากนิรนาม)
       await runGroup(G.generateGoodContentQueries(3), { ep: 'search', noClip: true });      // น้ำดีทั่วไป (ลด 5→3 คุมเวลา harvest)
@@ -439,15 +439,19 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     if (c.royalNegative === true) {
       stats.royalNeg++; junk.push({ ...c, junkReason: 'สถาบันแง่ลบ/อ่อนไหว (ม.112)' }); console.log(`[Harvester] 🚫 สถาบันแง่ลบ/อ่อนไหว: ${String(c.title).slice(0, 50)}`); return false;
     }
-    // ★★ 17 มิ.ย. (ทีมสั่ง "เอาแต่คนมีชื่อเสียง ตัดชาวบ้านนิรนามออกเกือบหมด"): ตัวเอกต้องเป็นคนที่มีตัวตนบนโซเชียล
-    //   เก็บ famous (ดารา/อินฟลู/กีฬา/นางงาม/เซเลบ/ครีเอเตอร์) + semiKnown (ชาวบ้านที่เคยไวรัลจนมีชื่อ/ตัวตน) · ตัด unknown (นิรนาม)
-    //   กันตัดดาราพลาด: ตัดเฉพาะเมื่อ 2 สัญญาณตรงกัน (notability=unknown และ subject=ordinary) = นิรนามจริง
-    if (c.notability === 'unknown' && c.subject === 'ordinary') {
-      stats.unknownPerson++; junk.push({ ...c, junkReason: 'ชาวบ้านนิรนาม (ไม่มีชื่อเสียง/ไม่ไวรัล)' }); console.log(`[Harvester] 🚫 คนนิรนาม (ไม่มีชื่อเสียง): ${String(c.title).slice(0, 50)}`); return false;
-    }
-    // ชาวบ้านที่เคยไวรัล (semiKnown + คนทั่วไป) ต้อง "มีภาพ" — ไม่มีรูป = ทำคอนเทนต์ไม่ได้ (ทีมย้ำ)
-    if (c.notability === 'semiKnown' && c.subject === 'ordinary' && !c.imageUrl && !['video', 'interview', 'throwback'].includes(c.lane)) {
-      stats.noImage++; junk.push({ ...c, junkReason: 'ชาวบ้านไวรัลแต่ไม่มีภาพ (ทำคอนเทนต์ยาก)' }); console.log(`[Harvester] 🖼️ ไม่มีภาพ (ชาวบ้านไวรัล): ${String(c.title).slice(0, 50)}`); return false;
+    // ★★ 17 มิ.ย. (ทีมแก้: "กระแส=สังคมสนใจก็พอ ไม่ต้องเป็นดารา · ดาราน้ำดี=ต้องเป็นคนดังจริง"):
+    //   เลนกระแส (trend/buzz/trend-track) = เก็บชาวบ้านไวรัล/เอ็นเกจสูงไว้ (ไม่ตัดนิรนาม ไม่บังคับภาพ) — นั่นคือนิยามหมวดกระแส
+    //   เลนดาราน้ำดี (good/celeb/evergreen...) = ตัดนิรนาม + บังคับมีภาพ (ต้องเป็นคนดังที่ทำคอนเทนต์ได้)
+    const _isKratase = ['trend', 'buzz', 'trend-track'].includes(c.lane);
+    if (!_isKratase) {
+      // ตัดนิรนามเฉพาะเลนดาราน้ำดี (กันตัดพลาด: ต้อง notability=unknown และ subject=ordinary พร้อมกัน)
+      if (c.notability === 'unknown' && c.subject === 'ordinary') {
+        stats.unknownPerson++; junk.push({ ...c, junkReason: 'ชาวบ้านนิรนาม (ไม่มีชื่อเสียง) — เลนดาราน้ำดี' }); console.log(`[Harvester] 🚫 คนนิรนาม (ดาราน้ำดี): ${String(c.title).slice(0, 50)}`); return false;
+      }
+      // ดาราน้ำดีที่เป็นชาวบ้านไวรัล (semiKnown) ต้องมีภาพ
+      if (c.notability === 'semiKnown' && c.subject === 'ordinary' && !c.imageUrl && !['video', 'interview', 'throwback'].includes(c.lane)) {
+        stats.noImage++; junk.push({ ...c, junkReason: 'ไม่มีภาพ (เลนดาราน้ำดี)' }); console.log(`[Harvester] 🖼️ ไม่มีภาพ (ดาราน้ำดี): ${String(c.title).slice(0, 50)}`); return false;
+      }
     }
     // ★ 17 มิ.ย. (ทีมชี้ "กรองแคบเกิน เจอข่าวน้อย"): คลาย noChar — เก็บข่าวชาวบ้านน้ำใจ/สู้ชีวิต/กตัญญู แม้ AI ไม่เจอชื่อคนชัด
     //   (เช่น "น้ำใจคนไทยช่วยน้ำท่วม" = ทำได้จริง) → ตัดเฉพาะที่ "ไม่มีคน + หมวดนอกแนว" (องค์กร/สถิติ/เตือนภัย/อื่นๆ)
