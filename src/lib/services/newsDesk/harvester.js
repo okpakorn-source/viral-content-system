@@ -321,6 +321,7 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       await runGroup(G.generateCelebFamilyQueries(6), { ep: 'news' });                      // ★ ดาราให้ของขวัญครอบครัว (GOLD)
       await runGroup(G.generateCelebHighlightQueries(5), { ep: 'search', lane: 'celeb' });  // ★ ไฮไลท์สัมภาษณ์ดาราด้านดี (รีลส์/คลิป)
       await runGroup(G.generateTrendRadarQueries(7), { ep: 'news', lane: 'celeb', tr: 'qdr:d', num: 10 }); // ★★ เรดาร์เทรนด์สด ทุกวงการ (ดารา/อินฟลู/กีฬา/นางงาม/เซเลบ ที่กำลังดังวันนี้) — ด่าน notability คัดเอาคนมีชื่อ
+      await runGroup(G.generateFieldRadarQueries(7), { ep: 'search', lane: 'celeb', tr: 'qdr:m', noClip: true }); // ★★ เรดาร์วงการ (วงการ×มุมดี: นักกีฬา/เชฟ/หมอ/ทหาร/สัตว์เซเลบ/แดร็ก... ครอบทุกวงการแม้ไม่มีชื่อในทะเบียน)
       await runGroup(G.generateCommonerQueries(3), { ep: 'news', noClip: true, tr: 'qdr:w' }); // ชาวบ้านที่ "ไวรัลมีตัวตน" เท่านั้น (เล็กลง + /news มีวันที่/ภาพ · เลิกเลนคนลำบากนิรนาม)
       await runGroup(G.generateGoodContentQueries(5), { ep: 'search', noClip: true });      // น้ำดีทั่วไป
       await runGroup(G.generateViralDnaQueries(3), { ep: 'search', noClip: true });         // DNA สถาบัน/ทหาร/ยุติธรรม/ต่างชาติช่วยไทย
