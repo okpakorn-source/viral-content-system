@@ -317,14 +317,14 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
         for (const arr of results) raw.push(...arr);
       };
       // ── ★ แกนหลัก รอบ 5 (17 มิ.ย. ทีมสั่ง "เน้นคนมีชื่อเสียงทุกวงการ ตัดชาวบ้านนิรนาม+ทางการ"): ──
-      await runGroup(G.generateCelebGoodDeedQueries(8), { ep: 'search', noClip: true });   // ★ ดาราทำดี/บริจาค/ทำบุญ/ช่วยเหลือ/ติดดิน (แนวอวยที่ปังสุด)
+      await runGroup(G.generateCelebGoodDeedQueries(6), { ep: 'search', noClip: true });   // ★ ดาราทำดี/บริจาค/ทำบุญ/ช่วยเหลือ/ติดดิน (แนวอวยที่ปังสุด)
       await runGroup(G.generateCelebFamilyQueries(6), { ep: 'news' });                      // ★ ดาราให้ของขวัญครอบครัว (GOLD)
       await runGroup(G.generateCelebHighlightQueries(5), { ep: 'search', lane: 'celeb' });  // ★ ไฮไลท์สัมภาษณ์ดาราด้านดี (รีลส์/คลิป)
-      // ★★ เรดาร์คนดัง — สลับ "เทรนด์สด" กับ "เรดาร์วงการ" ทีละตัว/รอบ (ครบทั้งคู่ใน 2 ชม.) เพื่อคุมเวลา harvest < เพดาน Vercel 300 วิ
-      if (new Date().getHours() % 2 === 0) {
-        await runGroup(G.generateTrendRadarQueries(6), { ep: 'news', lane: 'trend', tr: 'qdr:d', num: 8 }); // ★ เทรนด์สด → เข้าหมวด 🔥 กระแส (lane=trend)
-      } else {
-        await runGroup(G.generateFieldRadarQueries(6), { ep: 'search', lane: 'celeb', tr: 'qdr:m', noClip: true }); // เรดาร์วงการ×มุมดี → ดาราน้ำดี (lane=celeb)
+      // 🔥 เทรนด์สด → หมวดกระแส: รันทุกรอบ (หมวดกระแสคือสิ่งที่ทีมต้องการเติมมากสุด) — lane=trend
+      await runGroup(G.generateTrendRadarQueries(7), { ep: 'news', lane: 'trend', tr: 'qdr:d', num: 8 });
+      // เรดาร์วงการ×มุมดี → ดาราน้ำดี: เฉพาะบางรอบ (ดาราน้ำดีมีสต็อกเยอะแล้ว) ทุก 3 ชม. เพื่อคุมเวลา harvest
+      if (new Date().getHours() % 3 === 0) {
+        await runGroup(G.generateFieldRadarQueries(5), { ep: 'search', lane: 'celeb', tr: 'qdr:m', noClip: true });
       }
       await runGroup(G.generateCommonerQueries(2), { ep: 'news', noClip: true, tr: 'qdr:w' }); // ชาวบ้านที่ "ไวรัลมีตัวตน" เท่านั้น (เล็กลง + /news มีวันที่/ภาพ · เลิกเลนคนลำบากนิรนาม)
       await runGroup(G.generateGoodContentQueries(3), { ep: 'search', noClip: true });      // น้ำดีทั่วไป (ลด 5→3 คุมเวลา harvest)
