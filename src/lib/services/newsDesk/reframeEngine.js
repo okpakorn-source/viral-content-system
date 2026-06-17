@@ -6,7 +6,7 @@
  *  + เก็บทุกผลลงคลัง 'reframe-cases' (เทส+จริง) + ประเมินคุณภาพเนื้อหาดิบ (AI judge)
  *  ★ แยกจากไลน์เขียน 100% — แค่แตกประเด็นเป็นวัตถุดิบ ไม่แตะ pipeline เจน/worker
  */
-import { callAI } from '@/lib/ai/openai';
+import { callRawJSON } from './aiRaw'; // ★ เรียก AI แบบคงเนื้อดิบ (ไม่ผ่านตัวกรอง FB กลางที่ตัดชื่อเพี้ยน)
 import { MODEL_FAST, MODEL_PRIMARY } from '@/lib/ai/modelConfig';
 import { createStore } from '@/lib/persistStore';
 import { gateKeywords } from './deskBrain';
@@ -129,7 +129,7 @@ ${angleList}
   ]
 }`;
   try {
-    const res = await callAI({ prompt, model: MODEL_FAST, temperature: 0.6, maxTokens: 2800 });
+    const res = await callRawJSON({ prompt, model: MODEL_FAST, temperature: 0.6, maxTokens: 2800 });
     const p = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
     if (!p.reframable || !Array.isArray(p.angles) || !p.angles.length) {
       return { ok: false, reason: 'ข่าวนี้แตกประเด็นเชิงบวกไม่ได้ (เป็นลบล้วน/ไม่มีมุมดี)' };
@@ -183,7 +183,7 @@ ${anglesText}
 (10 = แกนเดียวคมลึกถูกต้อง พร้อมเจน · 5 = พอใช้แต่ตื้น/เริ่มปนแกน · 0 = บิดเบือน/หลายมุนมั่ว/หักมุมไปมา)
 ตอบ JSON: {"score":0-10,"why":"เหตุผลสั้นๆ + ชี้ถ้ามีการปนแกน/หักมุม/บิดเบือน/ตื้น + แนะให้ลึกขึ้น"}`;
   try {
-    const res = await callAI({ prompt, model: MODEL_PRIMARY, temperature: 0.2, maxTokens: 450 });
+    const res = await callRawJSON({ prompt, model: MODEL_PRIMARY, temperature: 0.2, maxTokens: 450 });
     const p = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
     return { score: Math.max(0, Math.min(10, Number(p.score) || 0)), why: String(p.why || '').slice(0, 320) };
   } catch (e) { return { score: 0, why: 'ประเมินไม่สำเร็จ: ' + (e.message || '').slice(0, 50) }; }

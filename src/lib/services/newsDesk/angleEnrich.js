@@ -6,7 +6,7 @@
  *   ★ กดเองผ่านปุ่ม (คุมค่า Serper/OpenAI) · graceful fallback: ค้นไม่ได้ → เนื้อหาดิบเดิมใช้ได้ปกติ
  *   ★ แยกจากระบบทำข่าวอัตโนมัติ 100%
  */
-import { callAI } from '@/lib/ai/openai';
+import { callRawJSON } from './aiRaw'; // ★ คงชื่อ/ตัวเลขเดิม ไม่ผ่านตัวกรอง FB กลาง
 import { MODEL_FAST, MODEL_PRIMARY } from '@/lib/ai/modelConfig';
 
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
@@ -49,7 +49,7 @@ ${a.sourceSnippet ? 'เนื้อ: ' + String(a.sourceSnippet).slice(0, 300) 
 ตอบ JSON: {"celeb":true/false,"person":"ชื่อบุคคล","queries":["...","..."]}`;
   let person = a.personHint || '', queries = [];
   try {
-    const r = await callAI({ prompt: qPrompt, model: MODEL_FAST, temperature: 0.2, maxTokens: 300 });
+    const r = await callRawJSON({ prompt: qPrompt, model: MODEL_FAST, temperature: 0.2, maxTokens: 300 });
     const p = typeof r === 'object' ? r : JSON.parse(String(r).match(/\{[\s\S]*\}/)?.[0] || '{}');
     if (p.celeb === false) return { ok: false, reason: 'ไม่ใช่บุคคลคนดังที่ค้นข้อมูลได้ — ข้ามการหาข้อมูลเสริม (ใช้เนื้อหาดิบเดิมได้เลย)' };
     person = String(p.person || person).slice(0, 60);
@@ -77,7 +77,7 @@ ${srcList}
 ตอบ JSON: {"facts":[{"text":"...","src":1}],"comparables":["...","..."]}`;
   let facts = [], comparables = [];
   try {
-    const r = await callAI({ prompt: exPrompt, model: MODEL_PRIMARY, temperature: 0.3, maxTokens: 800 });
+    const r = await callRawJSON({ prompt: exPrompt, model: MODEL_PRIMARY, temperature: 0.3, maxTokens: 800 });
     const p = typeof r === 'object' ? r : JSON.parse(String(r).match(/\{[\s\S]*\}/)?.[0] || '{}');
     facts = (p.facts || [])
       .map(f => ({ text: String(f.text || '').slice(0, 220), sourceUrl: uniq[(Number(f.src) || 0) - 1]?.link || '' }))
