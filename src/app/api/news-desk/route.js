@@ -94,12 +94,15 @@ export async function GET(request) {
     // ★ brief ล่าสุดจาก บก.ใหญ่ AI + สถานะสวิตช์ Auto-Pilot จริง (UI ต้องโชว์ตามที่ทีมตั้ง ไม่ใช่ค่า default)
     let chiefBrief = null;
     let autopilotEnabled = null;
+    let reframeAuto = false;
     try {
       const settings = createStore('desk-settings');
       const allS = await settings.getAll();
       chiefBrief = allS.find(s => s.id === 'chief_brief') || null;
       const ap = allS.find(s => s.id === 'autopilot');
       autopilotEnabled = ap ? !!ap.enabled : true;
+      const rf = allS.find(s => s.id === 'reframe_auto');
+      reframeAuto = rf ? !!rf.enabled : false; // ดีฟอลต์ปิด
     } catch {}
 
     // ★ สถิติ: บก.ไหนส่งไปเท่าไหร่วันนี้ + คิวตอนนี้ + ชั้นวางพร้อมใช้
@@ -118,7 +121,7 @@ export async function GET(request) {
     } catch {}
     const readyCount = (await store.getAll()).filter(i => i.status === 'sent' && !i.used).length;
 
-    return NextResponse.json({ success: true, items: lightItems, total: items.length, mixToday: mix, sentToday: sentToday.length, governor, chiefBrief, autopilot: autopilotEnabled, editorStats, queueDepth, readyCount });
+    return NextResponse.json({ success: true, items: lightItems, total: items.length, mixToday: mix, sentToday: sentToday.length, governor, chiefBrief, autopilot: autopilotEnabled, reframeAuto, editorStats, queueDepth, readyCount });
   } catch (error) {
     console.error('[NewsDesk API]', error.message);
     return NextResponse.json({ success: false, error: error.message, errorType: 'DESK_FEED_ERROR' }, { status: 500 });
@@ -182,6 +185,18 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'ไม่พบในคลังขยะ', errorType: 'NOT_FOUND' }, { status: 404 });
     }
 
+    // ★ 17 มิ.ย.: สวิตช์ "แปลงมุมอัตโนมัติ" (เปิด/ปิด) — ดีฟอลต์ปิด กันเปลือง OpenAI ตอนระบบยังไม่สมบูรณ์
+    if (action === 'reframeAuto') {
+      const settings = createStore('desk-settings');
+      const allS = await settings.getAll();
+      if (allS.find(s => s.id === 'reframe_auto')) {
+        await settings.update('reframe_auto', (ex) => ({ ...ex, enabled: !!enabled }));
+      } else {
+        await settings.add({ id: 'reframe_auto', enabled: !!enabled });
+      }
+      return NextResponse.json({ success: true, enabled: !!enabled });
+    }
+
     // ★ สวิตช์ Auto-Pilot (ไม่ผูกกับข่าวใบไหน — จัดการก่อนหา item)
     if (action === 'autopilot') {
       const settings = createStore('desk-settings');
@@ -223,6 +238,17 @@ export async function POST(request) {
       const boosted = Math.min(100, (item.finalScore || 0) + Math.max(0, r.readyScore - 5) * 2);
       await store.update(id, (ex) => ({ ...ex, research: r, finalScore: boosted }));
       return NextResponse.json({ success: true, id, research: r, finalScore: boosted });
+    }
+
+    // ★ 17 มิ.ย.: ปุ่ม ♻️ แปลงมุม — ข่าวท็อกซิก/ดราม่า/ตรงไปตรงมา → มุมเชิงบวก 2-4 มุม (แยกจากไลน์เขียน)
+    if (action === 'reframe') {
+      const { reframeNews } = await import('@/lib/services/newsDesk/reframeEngine');
+      const r = await reframeNews(item);
+      if (!r.ok) {
+        return NextResponse.json({ success: false, error: r.reason, errorType: 'REFRAME_FAILED' }, { status: 422 });
+      }
+      await store.update(id, (ex) => ({ ...ex, reframe: r }));
+      return NextResponse.json({ success: true, id, reframe: r });
     }
 
     // ★ ส่งเข้า workflow ฝั่งเซิร์ฟเวอร์ — กฎเหล็ก (คำสั่งทีม 12 มิ.ย.): ส่งได้แค่ 2 รูปแบบเหมือนที่คนทำแมนนวล

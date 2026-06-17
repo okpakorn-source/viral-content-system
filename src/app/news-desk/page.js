@@ -167,6 +167,7 @@ export default function NewsDeskPage() {
         setEditorStats(d.editorStats || {}); setQueueDepth(d.queueDepth || { pending: 0, processing: 0 }); setReadyCount(d.readyCount || 0);
         // ★ สวิตช์ Auto-Pilot โชว์ค่าจริงจากระบบ (เดิม hardcode เปิด — ทีมเห็นว่า "เปิดเอง" ทุกครั้งที่เข้าหน้า)
         if (typeof d.autopilot === 'boolean') setAutopilot(d.autopilot);
+        if (typeof d.reframeAuto === 'boolean') setReframeAuto(d.reframeAuto);
         // ★ ติดตามสถานะงานเขียนของการ์ดที่ส่งทำใน 2 ชม.ล่าสุด
         const recent = (d.items || []).filter(i => i.status === 'sent' && i.jobId && Date.now() - new Date(i.sentAt || 0).getTime() < 2 * 3600e3).slice(0, 8);
         for (const it of recent) {
@@ -402,6 +403,22 @@ export default function NewsDeskPage() {
     setResearching(prev => ({ ...prev, [item.id]: false }));
   };
 
+  // ★ 17 มิ.ย.: ♻️ แปลงมุม — ข่าวท็อกซิก/ดราม่า/ตรงไปตรงมา → มุมเชิงบวก (แยกจากไลน์เขียน)
+  const reframe = async (item) => {
+    setResearching(prev => ({ ...prev, ['rf_' + item.id]: true }));
+    setMsg(`♻️ กำลังแปลงมุม "${item.title.slice(0, 40)}..." (AI หามุมบวก ~30 วิ)`);
+    try {
+      const res = await fetch('/api/news-desk', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reframe', id: item.id, user: me || 'ไม่ระบุ' }),
+      });
+      const d = await parseRes(res);
+      setMsg(d.success ? `♻️ แปลงมุมเสร็จ — ได้ ${d.reframe.angles.length} มุมบวก (ดูบนการ์ด)` : `❌ ${d.error}`);
+      load();
+    } catch (e) { setMsg('❌ ' + e.message); }
+    setResearching(prev => ({ ...prev, ['rf_' + item.id]: false }));
+  };
+
   // ★ หาแหล่งภาพประกอบข่าว — AI วิเคราะห์บริบท+ค้นทุกช่องทาง ส่งเป็นลิงก์จัดกลุ่ม (ไม่แคปภาพ)
   const scoutImg = async (item) => {
     setResearching(prev => ({ ...prev, ['img_' + item.id]: true }));
@@ -465,6 +482,7 @@ export default function NewsDeskPage() {
   const [chiefCmd, setChiefCmd] = useState('');
   const [expanded, setExpanded] = useState({}); // id → versions[] (แท็บพร้อมใช้)
   const [autopilot, setAutopilot] = useState(true);
+  const [reframeAuto, setReframeAuto] = useState(false); // ★ แปลงมุมอัตโนมัติ (ดีฟอลต์ปิด)
   const [editorStats, setEditorStats] = useState({});
   const [queueDepth, setQueueDepth] = useState({ pending: 0, processing: 0 });
   const [readyCount, setReadyCount] = useState(0);
@@ -483,6 +501,20 @@ export default function NewsDeskPage() {
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
     setEditorRunning('');
+  };
+
+  const toggleReframeAuto = async () => {
+    const next = !reframeAuto;
+    setReframeAuto(next);
+    try {
+      const res = await fetch('/api/news-desk', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reframeAuto', enabled: next }),
+      });
+      const d = await parseRes(res);
+      if (!d.success) { setReframeAuto(!next); setMsg('❌ สลับสวิตช์ไม่สำเร็จ'); }
+      else setMsg(next ? '♻️ แปลงมุมอัตโนมัติ: เปิด — ข่าวดราม่า/ปะทะจะถูกแปลงเป็นมุมบวก ≤3 ใบ/รอบ (เปลือง OpenAI เพิ่ม)' : '⏸️ แปลงมุมอัตโนมัติ: ปิด — กดแปลงเองที่ปุ่ม ♻️ บนการ์ด');
+    } catch (e) { setReframeAuto(!next); setMsg('❌ ' + e.message); }
   };
 
   const toggleAutopilot = async () => {
@@ -549,6 +581,9 @@ export default function NewsDeskPage() {
           <button onClick={toggleAutopilot} title="เปิด: บก.เลือกข่าวคะแนน 8+ ส่งเจนเองทุกรอบ / ปิด: บก.แนะนำอย่างเดียว"
             style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid ' + (autopilot ? 'rgba(34,197,94,0.45)' : 'var(--border)'), cursor: 'pointer', background: autopilot ? 'rgba(34,197,94,0.12)' : 'var(--bg-card)', color: autopilot ? '#22c55e' : 'var(--text-muted)', fontWeight: 700, fontSize: 13.5 }}>
             {autopilot ? '🤖 Auto-Pilot: เปิด' : '⏸️ Auto-Pilot: ปิด'}</button>
+          <button onClick={toggleReframeAuto} title="เปิด: ข่าวดราม่า/ปะทะถูกแปลงเป็นมุมบวกอัตโนมัติ ≤3 ใบ/รอบ (เปลือง OpenAI) / ปิด: กดแปลงเองที่ปุ่ม ♻️ บนการ์ด"
+            style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid ' + (reframeAuto ? 'rgba(139,92,246,0.5)' : 'var(--border)'), cursor: 'pointer', background: reframeAuto ? 'rgba(139,92,246,0.14)' : 'var(--bg-card)', color: reframeAuto ? 'var(--desk-purple, #a855f7)' : 'var(--text-muted)', fontWeight: 700, fontSize: 13.5 }}>
+            {reframeAuto ? '♻️ แปลงมุมอัตโนมัติ: เปิด' : '♻️ แปลงมุมอัตโนมัติ: ปิด'}</button>
           <button onClick={() => callChief()}
             style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid rgba(139,92,246,0.4)', cursor: 'pointer', background: 'rgba(139,92,246,0.12)', color: 'var(--desk-purple)', fontWeight: 700, fontSize: 13.5 }}>
             🧠 เรียก บก.ใหญ่</button>
@@ -865,6 +900,20 @@ export default function NewsDeskPage() {
                         {it.consult.doNot && <div style={{ fontSize: 12, color: 'var(--desk-red)', marginTop: 4 }}>🚫 ห้าม: {it.consult.doNot}</div>}
                       </div>
                     )}
+                    {/* ★ มุมที่แปลงแล้ว (เครื่องแปลงมุม) */}
+                    {it.reframe?.angles?.length > 0 && (
+                      <div style={{ marginTop: 8, padding: '9px 12px', borderRadius: 10, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.32)' }}>
+                        <div style={{ fontSize: 12.5, color: 'var(--desk-purple, #a855f7)', fontWeight: 700 }}>♻️ แปลงเป็นมุมบวกแล้ว ({it.reframe.angles.length} มุม) — หยิบมุมไหนก็ได้ไปทำ</div>
+                        {it.reframe.cleanBrief && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.5 }}>📄 {it.reframe.cleanBrief}</div>}
+                        {it.reframe.angles.map((a, ai) => (
+                          <div key={ai} style={{ marginTop: 6, paddingTop: 6, borderTop: ai > 0 ? '1px solid rgba(168,85,247,0.15)' : 'none' }}>
+                            <div style={{ fontSize: 12.5 }}><b style={{ color: '#a855f7' }}>{ai + 1}. {a.type}</b>{a.focus ? <span style={{ color: 'var(--text-muted)' }}> · {a.focus}</span> : ''}</div>
+                            {a.how && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>วิธีเล่า: {a.how}</div>}
+                            {a.caption && <div onClick={() => copyText(a.caption)} title="คลิกคัดลอกแคปชั่น" style={{ fontSize: 12.5, color: 'var(--desk-green, #22c55e)', marginTop: 3, cursor: 'pointer', fontStyle: 'italic' }}>💬 &ldquo;{a.caption}&rdquo; 📋</div>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {(it.goldenMoments || []).length > 0 && (
                       <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 10, background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.2)' }}>
                         {it.goldenMoments.map((g, gi) => (
@@ -960,8 +1009,14 @@ export default function NewsDeskPage() {
                       style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: researching[it.id] ? 'wait' : 'pointer', background: 'rgba(6,182,212,0.15)', color: 'var(--desk-cyan)', fontSize: 13, fontWeight: 700 }}>
                       {researching[it.id] ? '⏳ กำลังเจาะ...' : '🔬 เจาะลึก'}</button>
                   )}
-                  {it.status !== 'sent' && (!it.consult || !it.research) && (
-                    <button onClick={() => setMoreBtns(p => ({ ...p, [it.id]: !p[it.id] }))} title="ปุ่มเพิ่มเติม: ปรึกษา บก. / เจาะลึก"
+                  {/* ★ ปุ่มแปลงมุม — ข่าวท็อกซิก/ดราม่า → มุมบวก */}
+                  {it.status !== 'sent' && moreBtns[it.id] && !it.reframe && (
+                    <button onClick={() => reframe(it)} disabled={researching['rf_' + it.id]}
+                      style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: researching['rf_' + it.id] ? 'wait' : 'pointer', background: 'rgba(168,85,247,0.18)', color: 'var(--desk-purple, #a855f7)', fontSize: 13, fontWeight: 700 }}>
+                      {researching['rf_' + it.id] ? '⏳ กำลังแปลง...' : '♻️ แปลงมุม'}</button>
+                  )}
+                  {it.status !== 'sent' && (!it.consult || !it.research || !it.reframe) && (
+                    <button onClick={() => setMoreBtns(p => ({ ...p, [it.id]: !p[it.id] }))} title="ปุ่มเพิ่มเติม: ปรึกษา บก. / เจาะลึก / แปลงมุม"
                       style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', background: 'var(--bg-card)', color: 'var(--text-muted)', fontSize: 13, fontWeight: 700 }}>
                       {moreBtns[it.id] ? '✕' : '⋯'}</button>
                   )}

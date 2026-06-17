@@ -646,6 +646,20 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     }
   } catch (e) { console.log('[Harvester] auto-research skip:', e.message?.slice(0, 50)); }
 
+  // ★ 17 มิ.ย.: แปลงมุมอัตโนมัติ (ดีฟอลต์ปิด — เปิดที่สวิตช์โต๊ะ "♻️") กันเปลือง OpenAI ตอนระบบยังไม่นิ่ง
+  //   เปิดเมื่อไหร่ = ข่าวดราม่า/ปะทะที่เพิ่งเก็บ ≤3 ใบ/รอบ ถูกแปลงเป็นมุมบวกอัตโนมัติ
+  try {
+    const rfSetting = (await createStore('desk-settings').getAll()).find(s => s.id === 'reframe_auto');
+    if (rfSetting?.enabled) {
+      const { reframeNews, isReframeCandidate } = await import('./reframeEngine');
+      const cands = toAdd.filter(isReframeCandidate).slice(0, 3);
+      for (const c of cands) {
+        const r = await reframeNews(c).catch(() => ({ ok: false }));
+        if (r.ok) { await store.update(c.id, (ex) => ({ ...ex, reframe: r })); stats.reframed = (stats.reframed || 0) + 1; }
+      }
+    }
+  } catch (e) { console.log('[Harvester] auto-reframe skip:', e.message?.slice(0, 50)); }
+
   console.log(`[Harvester] ✅ ${JSON.stringify(stats)} in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
   return stats;
 }
