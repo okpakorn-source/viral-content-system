@@ -34,42 +34,55 @@ export default function Sidebar() {
     router.push('/login');
   };
 
+  // ★ 17 มิ.ย. (ผู้จัดการรื้อชื่อ/ลำดับเมนูให้เรียกง่าย จำง่าย): ชื่อไทยชัด + เรียงใช้บ่อยขึ้นบน +
+  //   จัดกลุ่มหัวข้อ + ไฮไลต์เฉพาะเมนูสำคัญให้เด่น · เปลี่ยนแค่ชื่อแสดงผล/ลำดับ/สี ไม่แตะ route/เวิร์กโฟลว์
   const navItems = [
-    { label: 'แดชบอร์ด', icon: '📊', href: '/' },
+    // ── ⭐ ใช้งานหลัก (ใช้บ่อยสุด — มาร์คสีเด่น) ──
+    { type: 'divider', label: '⭐ ใช้งานหลัก' },
+    { label: 'โต๊ะข่าวกลาง (หาข่าวไวรัล)', icon: '🗞️', href: '/news-desk', highlight: true },
+    { label: 'สร้างคอนเทนต์ใหม่', icon: '✨', href: '/content/new', highlight: true },
+    { label: 'คลังส่งเช้า (ข่าวที่เลือกไว้)', icon: '⭐', href: '/news-desk?tab=shortlist', highlight: true },
+    { label: 'ผลงานที่เขียนแล้ว', icon: '🧪', href: '/generation-logs' },
     { label: 'คอนเทนต์ทั้งหมด', icon: '📰', href: '/content' },
-    { label: 'สร้างใหม่', icon: '✨', href: '/content/new', highlight: true },
-    { type: 'divider', label: 'เครื่องมือ' },
-    { label: '🗞️ โต๊ะข่าวกลาง', icon: '🗞️', href: '/news-desk', highlight: true },
-    { label: '⭐ คลังส่งเช้า', icon: '⭐', href: '/news-desk?tab=shortlist' },
-    { label: 'Viral Radar', icon: '📡', href: '/radar', highlight: true },
-    { label: 'คลังข่าว', icon: '📦', href: '/news-archive' },
+    { label: 'หน้าแรก (แดชบอร์ด)', icon: '📊', href: '/' },
+
+    // ── 🛠️ เครื่องมือข่าว ──
+    { type: 'divider', label: '🛠️ เครื่องมือข่าว' },
+    { label: 'กรองแก่นข่าว (สกัดเนื้อ)', icon: '🔬', href: '/news-filter' },
+    { label: 'ถอดคลิปเป็นข้อความ', icon: '🎙️', href: '/clip-transcript' },
+    { label: 'เพิ่มความชัดภาพข่าว', icon: '🔍', href: '/photo-enhance' },
+    { label: 'แคสติ้งทดสอบเซนส์ข่าว', icon: '🎯', href: '/casting/admin' },
+    { label: 'เรดาร์หากระแส', icon: '📡', href: '/radar' },
+    { label: 'คลังข่าวเก่า', icon: '📦', href: '/news-archive' },
     { label: 'คลังรอตรวจ', icon: '📋', href: '/review', badge: reviewCount },
-    // 'เผยแพร่' (/publish) ซ่อนชั่วคราว — หน้ายังเป็น stub ไม่เชื่อมระบบจริง
-    { type: 'divider', label: 'ภาพปก & สื่อ' },
-    { label: '🔥 สร้างปกอัตโนมัติ', icon: '🖼️', href: '/cover-lab', highlight: true },
-    { label: 'แทมเพลตปก (14 แบบ)', icon: '🎨', href: '/cover-tester' },
-    { label: 'สร้างปก (Manual)', icon: '🎭', href: '/cover-maker' },
-    { label: 'สร้างภาพ AI', icon: '🖌️', href: '/image-maker' },
+
+    // ── 🖼️ ภาพปก & สื่อ ──
+    { type: 'divider', label: '🖼️ ภาพปก & สื่อ' },
+    { label: 'สร้างปกอัตโนมัติ', icon: '🔥', href: '/cover-lab', highlight: true },
+    { label: 'แม่แบบปก (14 แบบ)', icon: '🎨', href: '/cover-tester' },
+    { label: 'สร้างปกเอง', icon: '🎭', href: '/cover-maker' },
+    { label: 'สร้างภาพด้วย AI', icon: '🖌️', href: '/image-maker' },
     { label: 'คลังรูป', icon: '📸', href: '/cover-gallery' },
-    { label: 'คลังปก (Archive)', icon: '📁', href: '/cover-archive' },
-    { type: 'divider', label: 'AI Intelligence' },
-    { label: 'หอสมุดไวรัล', icon: '📚', href: '/viral-library' },
-    { label: 'หอสมุด Prompt', icon: '🏛️', href: '/prompt-library' },
-    { label: 'จัดการ AI Prompts', icon: '🤖', href: '/prompts' },
-    { label: 'News Core Filter', icon: '🔬', href: '/news-filter', highlight: true },
-    { label: 'ถอดบทสัมภาษณ์คลิป', icon: '🎙️', href: '/clip-transcript', highlight: true },
-    { label: 'เพิ่มความชัดภาพข่าว', icon: '🔍', href: '/photo-enhance', highlight: true },
-    { label: 'แคสติ้งเซนส์ข่าว (แอดมิน)', icon: '🎯', href: '/casting/admin', highlight: true },
-    { type: 'divider', label: 'ชุมชน' },
-    { label: '💬 ห้องแชท', icon: '💬', href: '/chat', highlight: true },
-    { type: 'divider', label: 'ระบบ' },
-    { label: 'เช็คสุขภาพระบบ', icon: '🔍', href: '/system-health' },
-    { label: 'Pipeline Logs', icon: '📋', href: '/pipeline-logs' },
-    { label: 'Generation Log', icon: '🧪', href: '/generation-logs' },
-    { label: 'สถิติ', icon: '📈', href: '/analytics' },
+    { label: 'คลังปกที่ทำแล้ว', icon: '📁', href: '/cover-archive' },
+
+    // ── 📚 คลังความรู้ AI ──
+    { type: 'divider', label: '📚 คลังความรู้ AI' },
+    { label: 'คลังตัวอย่างไวรัล', icon: '📚', href: '/viral-library' },
+    { label: 'คลังพรอมต์', icon: '🏛️', href: '/prompt-library' },
+    { label: 'ตั้งค่าพรอมต์ AI', icon: '🤖', href: '/prompts' },
+
+    // ── 💬 ชุมชน ──
+    { type: 'divider', label: '💬 ชุมชน' },
+    { label: 'ห้องแชททีม', icon: '💬', href: '/chat' },
+
+    // ── ⚙️ ระบบ & จัดการ ──
+    { type: 'divider', label: '⚙️ ระบบ & จัดการ' },
+    { label: 'เช็คสุขภาพระบบ', icon: '🩺', href: '/system-health' },
+    { label: 'บันทึกการทำงาน (Pipeline)', icon: '🧾', href: '/pipeline-logs' },
+    { label: 'สถิติการใช้งาน', icon: '📈', href: '/analytics' },
     { label: 'จัดการสมาชิก', icon: '👥', href: '/members' },
-    { label: 'Discord Bot', icon: '👾', href: '/discord-bot', highlight: true },
-    { label: 'ตั้งค่า', icon: '⚙️', href: '/settings' },
+    { label: 'บอท Discord', icon: '👾', href: '/discord-bot' },
+    { label: 'ตั้งค่าระบบ', icon: '⚙️', href: '/settings' },
   ];
 
   return (

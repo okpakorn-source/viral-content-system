@@ -540,7 +540,7 @@ function NewsFilterContent() {
               color: 'var(--text-primary)',
               display: 'flex', alignItems: 'center', gap: 10,
             }}>
-              🔬 News Core Filter
+              🔬 กรองแก่นข่าว (สกัดเนื้อข่าว)
             </h1>
             <button
               onClick={() => setShowGuide(!showGuide)}
