@@ -128,6 +128,10 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
       const dupeCutoff = new Date(Date.now() - 5 * 60 * 1000);
       const isDuplicate = allJobs.some(j => {
         if (j.status === 'pending') {
+          // ★ 17 มิ.ย. (แก้บั๊ก "อยู่ในคิวแล้ว" ค้างถาวร): pending ที่ค้างเกิน 20 นาที = worker ไม่หยิบ/งานตาย
+          //   → ไม่บล็อกการส่งใหม่ (mirror logic ของ processing ที่ข้ามตัวค้าง) — เดิม pending บล็อกทุกอายุ
+          const createdAt = new Date(j.createdAt || j.startedAt || 0);
+          if (createdAt < new Date(Date.now() - 20 * 60 * 1000)) return false; // ค้าง — ปล่อยส่งใหม่ได้
           return j.payload.input === inputToCheck || j.payload.url === inputToCheck || j.payload.text === inputToCheck;
         }
         if (j.status === 'processing') {
