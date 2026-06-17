@@ -68,7 +68,7 @@ export default function Sidebar() {
     // ── 📚 คลังความรู้ AI ──
     { type: 'divider', label: '📚 คลังความรู้ AI' },
     { label: 'คลังตัวอย่างไวรัล', icon: '📚', href: '/viral-library' },
-    { label: 'คลังแปลงมุมข่าว (ทดสอบ/ทำจริง)', icon: '♻️', href: '/reframe-cases' },
+    { label: 'คลังแตกประเด็นข่าว (เนื้อหาดิบ)', icon: '♻️', href: '/reframe-cases' },
     { label: 'คลังพรอมต์', icon: '🏛️', href: '/prompt-library' },
     { label: 'ตั้งค่าพรอมต์ AI', icon: '🤖', href: '/prompts' },
 

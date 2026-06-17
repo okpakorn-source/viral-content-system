@@ -29,7 +29,7 @@ export default function ReframeCasesPage() {
   useEffect(() => { load(filter); /* eslint-disable-next-line */ }, [filter]);
 
   const runTest = async () => {
-    setRunning(true); setMsg('⏳ กำลังรันชุดทดสอบ (แปลงมุม + ประเมินความใกล้ไวรัล) ~1-2 นาที...');
+    setRunning(true); setMsg('⏳ กำลังรันชุดทดสอบ (แตกประเด็นเป็นเนื้อหาดิบ + ประเมินคุณภาพ) ~1-2 นาที...');
     try {
       const r = await fetch('/api/news-desk/reframe-cases', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -38,7 +38,7 @@ export default function ReframeCasesPage() {
       const d = await r.json();
       if (d.success) {
         const s = d.stats;
-        setMsg(`✅ เสร็จ: แปลงสำเร็จ ${s.reframed}/${s.total} เคส · บล็อก ${s.blocked} · คะแนนเฉลี่ยความใกล้ไวรัล ${s.avgScore}/10`);
+        setMsg(`✅ เสร็จ: แตกประเด็นสำเร็จ ${s.reframed}/${s.total} เคส · บล็อก ${s.blocked} · คะแนนเฉลี่ยคุณภาพเนื้อหาดิบ ${s.avgScore}/10`);
         await load('all'); setFilter('all');
       } else { setMsg('❌ ' + (d.error || 'รันไม่สำเร็จ')); }
     } catch (e) { setMsg('❌ ' + e.message); }
@@ -49,9 +49,9 @@ export default function ReframeCasesPage() {
 
   return (
     <div style={{ maxWidth: 980, margin: '0 auto', padding: '24px 16px' }}>
-      <h1 style={{ fontSize: 24, fontWeight: 900, marginBottom: 4 }}>♻️ คลังแปลงมุมข่าว</h1>
+      <h1 style={{ fontSize: 24, fontWeight: 900, marginBottom: 4 }}>♻️ คลังแตกประเด็นข่าว (เนื้อหาดิบ)</h1>
       <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
-        บันทึกทุกครั้งที่ระบบแปลงข่าวกระแส/ดราม่า/ท็อกซิก → มุมนำเสนอเชิงบวก · ทั้งแบบทดสอบและทำจริง · มี AI ประเมินว่าใกล้บทความไวรัลแค่ไหน
+        แตกข่าวกระแส/ดราม่า/ท็อกซิก → "เนื้อหาดิบ" หลายมุมเชิงบวก (ที่มาที่ไป+เหตุผล+บริบท ไม่บิดเบือน) สำหรับเอาไปป้อนระบบทำข่าวอัตโนมัติเจนต่อ · เก็บทั้งแบบทดสอบและทำจริง · มี AI ประเมินคุณภาพเนื้อหาดิบ
       </p>
 
       {/* สถิติ */}
@@ -106,7 +106,7 @@ export default function ReframeCasesPage() {
                 {typeof c.evalScore === 'number' && (
                   <div style={{ textAlign: 'center', minWidth: 64 }}>
                     <div style={{ fontSize: 26, fontWeight: 900, color: scoreColor(c.evalScore), lineHeight: 1 }}>{c.evalScore}</div>
-                    <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>ใกล้ไวรัล /10</div>
+                    <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>คุณภาพดิบ /10</div>
                   </div>
                 )}
               </div>
@@ -121,19 +121,21 @@ export default function ReframeCasesPage() {
                 <div style={{ fontSize: 12, color: scoreColor(c.evalScore), marginBottom: 10 }}>🤖 ผู้ตรวจ: {c.evalNote}</div>
               )}
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {(c.angles || []).map((a, i) => (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {(c.angles || []).map((a, i) => {
+                  const raw = a.rawContent || a.caption || ''; // เคสเก่ารองรับ caption
+                  return (
                   <div key={i} style={{ borderLeft: '3px solid #7c3aed', paddingLeft: 10 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>🎯 {a.type} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>· {a.focus}</span></div>
-                    {a.how && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>วิธีเล่น: {a.how}</div>}
-                    {a.caption && (
-                      <div onClick={() => copy(a.caption)} title="คลิกเพื่อคัดลอก"
-                        style={{ fontSize: 13, marginTop: 4, background: 'rgba(124,58,237,0.1)', borderRadius: 6, padding: '6px 8px', cursor: 'pointer' }}>
-                        💬 {a.caption}
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>🎯 มุม{a.type} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>· {a.focus}</span></div>
+                    {raw && (
+                      <div onClick={() => copy(raw)} title="คลิกเพื่อคัดลอกเนื้อหาดิบ (เอาไปป้อนระบบเจน)"
+                        style={{ fontSize: 13, marginTop: 4, background: 'rgba(124,58,237,0.1)', borderRadius: 6, padding: '8px 10px', cursor: 'pointer', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                        📝 <b style={{ fontSize: 11, color: 'var(--text-muted)' }}>เนื้อหาดิบ (คลิกคัดลอก):</b><br />{raw}
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}

@@ -413,7 +413,7 @@ export default function NewsDeskPage() {
         body: JSON.stringify({ action: 'reframe', id: item.id, user: me || 'ไม่ระบุ' }),
       });
       const d = await parseRes(res);
-      setMsg(d.success ? `♻️ แปลงมุมเสร็จ — ได้ ${d.reframe.angles.length} มุมบวก (ดูบนการ์ด)` : `❌ ${d.error}`);
+      setMsg(d.success ? `♻️ แตกประเด็นเสร็จ — ได้เนื้อหาดิบ ${d.reframe.angles.length} มุมบวก (ดูบนการ์ด)` : `❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
     setResearching(prev => ({ ...prev, ['rf_' + item.id]: false }));
@@ -903,15 +903,17 @@ export default function NewsDeskPage() {
                     {/* ★ มุมที่แปลงแล้ว (เครื่องแปลงมุม) */}
                     {it.reframe?.angles?.length > 0 && (
                       <div style={{ marginTop: 8, padding: '9px 12px', borderRadius: 10, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.32)' }}>
-                        <div style={{ fontSize: 12.5, color: 'var(--desk-purple, #a855f7)', fontWeight: 700 }}>♻️ แปลงเป็นมุมบวกแล้ว ({it.reframe.angles.length} มุม) — หยิบมุมไหนก็ได้ไปทำ</div>
-                        {it.reframe.cleanBrief && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.5 }}>📄 {it.reframe.cleanBrief}</div>}
-                        {it.reframe.angles.map((a, ai) => (
+                        <div style={{ fontSize: 12.5, color: 'var(--desk-purple, #a855f7)', fontWeight: 700 }}>♻️ แตกประเด็นเป็นเนื้อหาดิบแล้ว ({it.reframe.angles.length} มุม) — คัดลอกไปป้อนระบบเจน</div>
+                        {it.reframe.cleanBrief && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.5 }}>📄 แก่นข่าว: {it.reframe.cleanBrief}</div>}
+                        {it.reframe.angles.map((a, ai) => {
+                          const raw = a.rawContent || a.caption || '';
+                          return (
                           <div key={ai} style={{ marginTop: 6, paddingTop: 6, borderTop: ai > 0 ? '1px solid rgba(168,85,247,0.15)' : 'none' }}>
-                            <div style={{ fontSize: 12.5 }}><b style={{ color: '#a855f7' }}>{ai + 1}. {a.type}</b>{a.focus ? <span style={{ color: 'var(--text-muted)' }}> · {a.focus}</span> : ''}</div>
-                            {a.how && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>วิธีเล่า: {a.how}</div>}
-                            {a.caption && <div onClick={() => copyText(a.caption)} title="คลิกคัดลอกแคปชั่น" style={{ fontSize: 12.5, color: 'var(--desk-green, #22c55e)', marginTop: 3, cursor: 'pointer', fontStyle: 'italic' }}>💬 &ldquo;{a.caption}&rdquo; 📋</div>}
+                            <div style={{ fontSize: 12.5 }}><b style={{ color: '#a855f7' }}>{ai + 1}. มุม{a.type}</b>{a.focus ? <span style={{ color: 'var(--text-muted)' }}> · {a.focus}</span> : ''}</div>
+                            {raw && <div onClick={() => copyText(raw)} title="คลิกคัดลอกเนื้อหาดิบ (เอาไปป้อนระบบเจน)" style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 3, cursor: 'pointer', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>📝 {raw} <span style={{ color: 'var(--desk-green, #22c55e)' }}>📋</span></div>}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                     {(it.goldenMoments || []).length > 0 && (
