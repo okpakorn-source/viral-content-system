@@ -11,9 +11,17 @@ export default function CastingPage() {
   const [result, setResult] = useState(null);
   const [err, setErr] = useState('');
 
+  // โหลดชุดข้อสอบตั้งแต่เปิดหน้า — จะได้รู้จำนวนข้อจริงมาโชว์ในคำอธิบาย
+  useEffect(() => {
+    fetch('/api/casting/quiz', { cache: 'no-store' }).then(r => r.json())
+      .then(d => { if (d.success) setQuestions(d.questions || []); }).catch(() => {});
+  }, []);
+
   const start = async () => {
     if (!name.trim()) { setErr('กรอกชื่อก่อนเริ่ม'); return; }
-    setLoading(true); setErr('');
+    setErr('');
+    if (questions.length) { setIdx(0); setAnswers({}); setStage('quiz'); return; }
+    setLoading(true);
     try {
       const r = await fetch('/api/casting/quiz', { cache: 'no-store' });
       const d = await r.json();
@@ -51,19 +59,45 @@ export default function CastingPage() {
 
         {err && <div style={{ marginBottom: 14, padding: '10px 14px', borderRadius: 9, background: 'rgba(239,68,68,0.12)', color: '#ef4444', fontSize: 13 }}>❌ {err}</div>}
 
-        {/* ── กรอกชื่อ ── */}
+        {/* ── กรอกชื่อ + คำอธิบาย ── */}
         {stage === 'name' && (
-          <div style={{ background: 'var(--bg-card,#1a1a2e)', border: '1px solid var(--border,#2a2a3e)', borderRadius: 14, padding: 24 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>กรอกชื่อ-นามสกุล แล้วเริ่มทำแบบทดสอบ</div>
-            <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && start()}
-              placeholder="ชื่อ-นามสกุล / ชื่อเล่น"
-              style={{ width: '100%', padding: '12px 14px', borderRadius: 10, border: '1px solid var(--border,#2a2a3e)', background: 'rgba(0,0,0,0.2)', color: 'inherit', fontSize: 15, fontFamily: 'inherit', boxSizing: 'border-box' }} />
-            <button onClick={start} disabled={loading}
-              style={{ marginTop: 14, width: '100%', padding: '13px 0', borderRadius: 11, border: 'none', background: loading ? '#4b5563' : 'linear-gradient(135deg,#f91880,#7c3aed)', color: '#fff', fontWeight: 800, fontSize: 15, cursor: loading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
-              {loading ? '⏳ กำลังโหลด...' : '🚀 เริ่มทำแบบทดสอบ'}
-            </button>
-            <div style={{ marginTop: 14, fontSize: 11.5, color: 'var(--text-muted,#888)', lineHeight: 1.6 }}>
-              💡 แต่ละข่าวมี 3 แคปชั่น เลือกอันที่ดีที่สุด · ดีสุด = 1 คะแนน · ปานกลาง = 0.5 · ไม่ดี = 0
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* แผงคำอธิบาย */}
+            <div style={{ background: 'linear-gradient(135deg, rgba(249,24,128,0.07), rgba(124,58,237,0.07))', border: '1px solid rgba(124,58,237,0.25)', borderRadius: 14, padding: 20 }}>
+              <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 12 }}>📋 รายละเอียดแบบฝึกหัด</div>
+
+              <div style={{ fontSize: 13.5, lineHeight: 1.85, color: 'var(--text-secondary,#cbd)' }}>
+                <p style={{ margin: '0 0 12px' }}>
+                  แบบฝึกหัดนี้มีทั้งหมด <b style={{ color: '#f91880' }}>{questions.length || 30} ข้อ</b> — แต่ละข้อจะมี <b>หัวข้อข่าว 1 หัวข้อ</b> และ <b>แคปชั่นให้เลือก 3 แบบ</b>
+                </p>
+
+                <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 6px' }}>🎯 วิธีทำ</div>
+                <p style={{ margin: '0 0 12px' }}>
+                  ให้คุณ <b>อ่านหัวข้อข่าว</b> แล้ว <b>ทำความเข้าใจ</b> ว่าข่าวนี้เกี่ยวกับอะไร จากนั้น <b>เลือกช้อยส์ในมุมมองของคุณ</b> ว่า <u>เนื้อหา/แคปชั่นแบบไหนที่ควรนำเสนอกับหัวข้อข่าวนี้</u> ให้น่าสนใจและปังที่สุด — เลือกข้อเดียวที่คุณคิดว่าดีที่สุด แล้วกดถัดไป
+                </p>
+
+                <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 6px' }}>🏆 เกณฑ์คะแนน (แต่ละข้อ)</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 4 }}>
+                  <div style={{ padding: '7px 12px', borderRadius: 8, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.25)' }}>✅ เลือกแคปชั่น <b>ดีที่สุด</b> = <b style={{ color: '#22c55e' }}>+1 คะแนน</b></div>
+                  <div style={{ padding: '7px 12px', borderRadius: 8, background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.25)' }}>🟡 เลือกแคปชั่น <b>ปานกลาง</b> = <b style={{ color: '#eab308' }}>+0.5 คะแนน</b></div>
+                  <div style={{ padding: '7px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)' }}>❌ เลือกแคปชั่น <b>ไม่ดี</b> = <b style={{ color: '#ef4444' }}>0 คะแนน</b></div>
+                </div>
+                <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text-muted,#888)' }}>
+                  💡 แบบฝึกหัดนี้วัด "เซนส์การมองข่าว" — ทำตามความรู้สึกของคุณได้เลย ไม่มีถูกผิดตายตัว แต่จะสะท้อนว่าคุณมองออกไหมว่าแบบไหนจะปัง · เมื่อทำครบทุกข้อจะเห็นคะแนนรวมและสรุปรายข้อ
+                </p>
+              </div>
+            </div>
+
+            {/* กรอกชื่อ */}
+            <div style={{ background: 'var(--bg-card,#1a1a2e)', border: '1px solid var(--border,#2a2a3e)', borderRadius: 14, padding: 20 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>กรอกชื่อก่อนเริ่ม (เพื่อบันทึกผล)</div>
+              <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && start()}
+                placeholder="ชื่อ-นามสกุล / ชื่อเล่น"
+                style={{ width: '100%', padding: '12px 14px', borderRadius: 10, border: '1px solid var(--border,#2a2a3e)', background: 'rgba(0,0,0,0.2)', color: 'inherit', fontSize: 15, fontFamily: 'inherit', boxSizing: 'border-box' }} />
+              <button onClick={start} disabled={loading}
+                style={{ marginTop: 14, width: '100%', padding: '13px 0', borderRadius: 11, border: 'none', background: loading ? '#4b5563' : 'linear-gradient(135deg,#f91880,#7c3aed)', color: '#fff', fontWeight: 800, fontSize: 15, cursor: loading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+                {loading ? '⏳ กำลังโหลด...' : `🚀 เริ่มทำแบบฝึกหัด (${questions.length || 30} ข้อ)`}
+              </button>
             </div>
           </div>
         )}
