@@ -320,11 +320,15 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       await runGroup(G.generateCelebGoodDeedQueries(8), { ep: 'search', noClip: true });   // ★ ดาราทำดี/บริจาค/ทำบุญ/ช่วยเหลือ/ติดดิน (แนวอวยที่ปังสุด)
       await runGroup(G.generateCelebFamilyQueries(6), { ep: 'news' });                      // ★ ดาราให้ของขวัญครอบครัว (GOLD)
       await runGroup(G.generateCelebHighlightQueries(5), { ep: 'search', lane: 'celeb' });  // ★ ไฮไลท์สัมภาษณ์ดาราด้านดี (รีลส์/คลิป)
-      await runGroup(G.generateTrendRadarQueries(7), { ep: 'news', lane: 'celeb', tr: 'qdr:d', num: 10 }); // ★★ เรดาร์เทรนด์สด ทุกวงการ (ดารา/อินฟลู/กีฬา/นางงาม/เซเลบ ที่กำลังดังวันนี้) — ด่าน notability คัดเอาคนมีชื่อ
-      await runGroup(G.generateFieldRadarQueries(7), { ep: 'search', lane: 'celeb', tr: 'qdr:m', noClip: true }); // ★★ เรดาร์วงการ (วงการ×มุมดี: นักกีฬา/เชฟ/หมอ/ทหาร/สัตว์เซเลบ/แดร็ก... ครอบทุกวงการแม้ไม่มีชื่อในทะเบียน)
-      await runGroup(G.generateCommonerQueries(3), { ep: 'news', noClip: true, tr: 'qdr:w' }); // ชาวบ้านที่ "ไวรัลมีตัวตน" เท่านั้น (เล็กลง + /news มีวันที่/ภาพ · เลิกเลนคนลำบากนิรนาม)
-      await runGroup(G.generateGoodContentQueries(5), { ep: 'search', noClip: true });      // น้ำดีทั่วไป
-      await runGroup(G.generateViralDnaQueries(3), { ep: 'search', noClip: true });         // DNA สถาบัน/ทหาร/ยุติธรรม/ต่างชาติช่วยไทย
+      // ★★ เรดาร์คนดัง — สลับ "เทรนด์สด" กับ "เรดาร์วงการ" ทีละตัว/รอบ (ครบทั้งคู่ใน 2 ชม.) เพื่อคุมเวลา harvest < เพดาน Vercel 300 วิ
+      if (new Date().getHours() % 2 === 0) {
+        await runGroup(G.generateTrendRadarQueries(6), { ep: 'news', lane: 'celeb', tr: 'qdr:d', num: 8 }); // เทรนด์สด ทุกวงการ (คนกำลังดังวันนี้)
+      } else {
+        await runGroup(G.generateFieldRadarQueries(6), { ep: 'search', lane: 'celeb', tr: 'qdr:m', noClip: true }); // เรดาร์วงการ×มุมดี (นักกีฬา/เชฟ/หมอ/สัตว์เซเลบ... ครอบทุกวงการ)
+      }
+      await runGroup(G.generateCommonerQueries(2), { ep: 'news', noClip: true, tr: 'qdr:w' }); // ชาวบ้านที่ "ไวรัลมีตัวตน" เท่านั้น (เล็กลง + /news มีวันที่/ภาพ · เลิกเลนคนลำบากนิรนาม)
+      await runGroup(G.generateGoodContentQueries(3), { ep: 'search', noClip: true });      // น้ำดีทั่วไป (ลด 5→3 คุมเวลา harvest)
+      await runGroup(G.generateViralDnaQueries(2), { ep: 'search', noClip: true });         // DNA สถาบัน/ทหาร/ยุติธรรม/ต่างชาติช่วยไทย (ลด 3→2)
       // ★ v6 (16 มิ.ย. ทีมขอเน้น): ย้อนสัมภาษณ์เก่า เป็นแกนหลัก รันทุกรอบ — บทความ /news + "คลิปจริง" /videos (YT)
       const _tbQs = G.generateThrowbackQueries(6);
       await runGroup(_tbQs.slice(0, 4), { ep: 'news', lane: 'throwback', tr: 'qdr:y', num: 8 });   // บทความย้อนสัมภาษณ์
