@@ -316,14 +316,14 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
         }));
         for (const arr of results) raw.push(...arr);
       };
-      // ── ★ แกนหลัก รอบ 4 (17 มิ.ย. ทีมขอ "ดาราเยอะ + ชาวบ้านเยอะ ที่ทำได้จริง" + คลายฟิลเตอร์ที่รัดเกิน): เพิ่มวอลุ่ม ──
+      // ── ★ แกนหลัก รอบ 5 (17 มิ.ย. ทีมสั่ง "เน้นคนมีชื่อเสียงทุกวงการ ตัดชาวบ้านนิรนาม+ทางการ"): ──
       await runGroup(G.generateCelebGoodDeedQueries(8), { ep: 'search', noClip: true });   // ★ ดาราทำดี/บริจาค/ทำบุญ/ช่วยเหลือ/ติดดิน (แนวอวยที่ปังสุด)
       await runGroup(G.generateCelebFamilyQueries(6), { ep: 'news' });                      // ★ ดาราให้ของขวัญครอบครัว (GOLD)
       await runGroup(G.generateCelebHighlightQueries(5), { ep: 'search', lane: 'celeb' });  // ★ ไฮไลท์สัมภาษณ์ดาราด้านดี (รีลส์/คลิป)
-      await runGroup(G.generateCommonerQueries(6), { ep: 'search', noClip: true });         // ★ ชาวบ้านน่าสนใจ — คนธรรมดาน่าทึ่ง/น้ำใจ/สู้ชีวิต (ใหม่)
-      await runGroup(G.generateHardshipQueries(5), { ep: 'news', tr: 'qdr:m' });            // ★ คนลำบากน่าสงสาร (→/news มีวันที่)
-      await runGroup(G.generateGoodContentQueries(6), { ep: 'search', noClip: true });      // น้ำดีทั่วไป (คืนเป็น 6)
-      await runGroup(G.generateViralDnaQueries(3), { ep: 'search', noClip: true });         // DNA สถาบัน/ทหาร/ยุติธรรม/ต่างชาติช่วยไทย (คงไว้ 3)
+      await runGroup(G.generateTrendRadarQueries(7), { ep: 'news', lane: 'celeb', tr: 'qdr:d', num: 10 }); // ★★ เรดาร์เทรนด์สด ทุกวงการ (ดารา/อินฟลู/กีฬา/นางงาม/เซเลบ ที่กำลังดังวันนี้) — ด่าน notability คัดเอาคนมีชื่อ
+      await runGroup(G.generateCommonerQueries(3), { ep: 'news', noClip: true, tr: 'qdr:w' }); // ชาวบ้านที่ "ไวรัลมีตัวตน" เท่านั้น (เล็กลง + /news มีวันที่/ภาพ · เลิกเลนคนลำบากนิรนาม)
+      await runGroup(G.generateGoodContentQueries(5), { ep: 'search', noClip: true });      // น้ำดีทั่วไป
+      await runGroup(G.generateViralDnaQueries(3), { ep: 'search', noClip: true });         // DNA สถาบัน/ทหาร/ยุติธรรม/ต่างชาติช่วยไทย
       // ★ v6 (16 มิ.ย. ทีมขอเน้น): ย้อนสัมภาษณ์เก่า เป็นแกนหลัก รันทุกรอบ — บทความ /news + "คลิปจริง" /videos (YT)
       const _tbQs = G.generateThrowbackQueries(6);
       await runGroup(_tbQs.slice(0, 4), { ep: 'news', lane: 'throwback', tr: 'qdr:y', num: 8 });   // บทความย้อนสัมภาษณ์
@@ -428,11 +428,21 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
 
   // ── ★ 16 มิ.ย. (ทีมชี้ "5 ดาราวิจารณ์โดนถล่ม + ปลูกถ่ายอวัยวะ รพ."): 2 กฎใหม่ ──
   //   ① ข่าวทางการ/สถาบัน/รพ.ที่ไม่มีตัวละครหลัก (ไม่ใช่ดารา) = ตัด  ② กระแส/ดราม่าเก่าที่เล่นใหม่ไม่ได้ = ตัด (เว้นเลนกระแสสด)
-  stats.noChar = 0; stats.staleTrend = 0; stats.royalNeg = 0;
+  stats.noChar = 0; stats.staleTrend = 0; stats.royalNeg = 0; stats.unknownPerson = 0; stats.noImage = 0;
   classified = classified.filter(c => {
     // ★ 16 มิ.ย. (สำคัญสุด): สถาบันแง่ลบ/เสื่อมเสีย/ประจาน/อ่อนไหว = ตัดเด็ดขาด (แง่ดี/ชื่นชมปล่อยผ่าน)
     if (c.royalNegative === true) {
       stats.royalNeg++; junk.push({ ...c, junkReason: 'สถาบันแง่ลบ/อ่อนไหว (ม.112)' }); console.log(`[Harvester] 🚫 สถาบันแง่ลบ/อ่อนไหว: ${String(c.title).slice(0, 50)}`); return false;
+    }
+    // ★★ 17 มิ.ย. (ทีมสั่ง "เอาแต่คนมีชื่อเสียง ตัดชาวบ้านนิรนามออกเกือบหมด"): ตัวเอกต้องเป็นคนที่มีตัวตนบนโซเชียล
+    //   เก็บ famous (ดารา/อินฟลู/กีฬา/นางงาม/เซเลบ/ครีเอเตอร์) + semiKnown (ชาวบ้านที่เคยไวรัลจนมีชื่อ/ตัวตน) · ตัด unknown (นิรนาม)
+    //   กันตัดดาราพลาด: ตัดเฉพาะเมื่อ 2 สัญญาณตรงกัน (notability=unknown และ subject=ordinary) = นิรนามจริง
+    if (c.notability === 'unknown' && c.subject === 'ordinary') {
+      stats.unknownPerson++; junk.push({ ...c, junkReason: 'ชาวบ้านนิรนาม (ไม่มีชื่อเสียง/ไม่ไวรัล)' }); console.log(`[Harvester] 🚫 คนนิรนาม (ไม่มีชื่อเสียง): ${String(c.title).slice(0, 50)}`); return false;
+    }
+    // ชาวบ้านที่เคยไวรัล (semiKnown + คนทั่วไป) ต้อง "มีภาพ" — ไม่มีรูป = ทำคอนเทนต์ไม่ได้ (ทีมย้ำ)
+    if (c.notability === 'semiKnown' && c.subject === 'ordinary' && !c.imageUrl && !['video', 'interview', 'throwback'].includes(c.lane)) {
+      stats.noImage++; junk.push({ ...c, junkReason: 'ชาวบ้านไวรัลแต่ไม่มีภาพ (ทำคอนเทนต์ยาก)' }); console.log(`[Harvester] 🖼️ ไม่มีภาพ (ชาวบ้านไวรัล): ${String(c.title).slice(0, 50)}`); return false;
     }
     // ★ 17 มิ.ย. (ทีมชี้ "กรองแคบเกิน เจอข่าวน้อย"): คลาย noChar — เก็บข่าวชาวบ้านน้ำใจ/สู้ชีวิต/กตัญญู แม้ AI ไม่เจอชื่อคนชัด
     //   (เช่น "น้ำใจคนไทยช่วยน้ำท่วม" = ทำได้จริง) → ตัดเฉพาะที่ "ไม่มีคน + หมวดนอกแนว" (องค์กร/สถิติ/เตือนภัย/อื่นๆ)

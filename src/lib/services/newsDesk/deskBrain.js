@@ -119,8 +119,13 @@ export async function classifyBatch(items) {
 ข่าว (รูปแบบ: เลข: [โดเมนต้นทาง] หัวข้อ | คำโปรย):
 ${list}
 
-ตอบ: {"items":[{"i":0,"category":"...","tone":"บวก|กลาง|ลบ","toxicity":0-3,"fbRisk":0-3,"toneable":true/false,"country":"","storyNature":"pattern|event","subject":"celeb|public|ordinary","dramaType":"none|soft|hard","hasMainChar":true/false,"staleTrend":true/false,"royalNegative":true/false}]}
+ตอบ: {"items":[{"i":0,"category":"...","tone":"บวก|กลาง|ลบ","toxicity":0-3,"fbRisk":0-3,"toneable":true/false,"country":"","storyNature":"pattern|event","subject":"celeb|public|ordinary","dramaType":"none|soft|hard","hasMainChar":true/false,"staleTrend":true/false,"royalNegative":true/false,"notability":"famous|semiKnown|unknown","field":"บันเทิง|อินฟลู|กีฬา|นางงาม|ครีเอเตอร์|เซเลบ|ไวรัล|อื่นๆ"}]}
 - toxicity: 0=สะอาด 3=หดหู่/รุนแรง | fbRisk: ความเสี่ยงโดน Facebook ลดรีช/ลบ (เลือด ความรุนแรง เนื้อหาล่อแหลม)
+- ★★ notability (17 มิ.ย. ทีมขอ "เอาแต่คนมีชื่อเสียง ตัดชาวบ้านนิรนาม"): ตัวเอกของข่าวนี้ดังแค่ไหน
+  · "famous" = คนมีชื่อเสียงที่ค้นเจอบนกูเกิล/โซเชียล (ดารา/นักร้อง/นักแสดง/แดนเซอร์/ไอดอล/พิธีกร/อินฟลู/ยูทูบเบอร์/ติ๊กต็อกเกอร์/เน็ตไอดอล/นักกีฬาดัง/นางงาม/เซเลบ/ไฮโซ/ผู้จัดดารา/ครีเอเตอร์ดัง)
+  · "semiKnown" = ชาวบ้าน/คนทั่วไปที่ "เคยไวรัลจนมีชื่อ/ฉายา/เพจ คนจำได้" (เช่น คนที่ดังจากคลิป มีตัวตน)
+  · "unknown" = ชาวบ้านนิรนาม/คนทั่วไปที่ไม่มีชื่อเสียง ไม่มีตัวตนบนโซเชียล ไม่เคยถูกพูดถึง (← เป้าที่ทีมต้องการตัดออก)
+- field: วงการของตัวเอก (บันเทิง=ดารา/นักร้อง/นักแสดง | อินฟลู=ยูทูบ/ติ๊กต็อก/เน็ตไอดอล | กีฬา | นางงาม | ครีเอเตอร์=สตรีมเมอร์/บล็อกเกอร์ | เซเลบ=ไฮโซ/นักธุรกิจดัง | ไวรัล=คนเคยดังจากคลิป | อื่นๆ)
 - ★ เรื่องลำบาก/ยากจน/สู้ชีวิต/ขาดโอกาส/เด็กกำพร้าอยู่กับยาย/วอนความช่วยเหลือ ที่ "กินใจ-ชวนคนช่วย" (ไม่มีความรุนแรง/เลือด/ทารุณ) = toxicity ไม่เกิน 2 — เป็นคอนเทนต์อารมณ์ร่วมเชิงบวกที่เพจเล่นได้ ห้ามตี 3 (สงวน 3 ให้เนื้อหารุนแรง/สยอง/เด็กถูกทำร้ายจริงๆ)
 - subject: ★ "celeb"=ดารา/นักร้อง/นักแสดง/คนดังบันเทิง | "public"=บุคคลสาธารณะอื่น (นักการเมือง/นักธุรกิจ) | "ordinary"=คนทั่วไป
 - dramaType: ★ "soft"=ดราม่านุ่มเล่นเป็นข่าวได้ (ความรัก/เลิกรา/อกหัก/ปัญหาครอบครัว/เพื่อน/หนี้สิน-เงิน/ดราม่าวงการบันเทิง) | "hard"=ของหนักห้ามแตะ (ฆ่า/ทารุณ/ล่วงละเมิด/เหล้า-พนัน-ยา) | "none"=ไม่ใช่ดราม่า
@@ -163,6 +168,9 @@ ${list}
           staleTrend: r.staleTrend === true,
           // ★ 16 มิ.ย.: สถาบันแง่ลบ/อ่อนไหว = ตัด (แง่ดีปล่อยผ่าน)
           royalNegative: r.royalNegative === true,
+          // ★ 17 มิ.ย.: ระดับชื่อเสียง + วงการ — default semiKnown (กันตัดเกินถ้า AI ไม่ตอบ)
+          notability: ['famous', 'semiKnown', 'unknown'].includes(r.notability) ? r.notability : 'semiKnown',
+          field: typeof r.field === 'string' && r.field.trim() ? r.field.trim().slice(0, 20) : 'อื่นๆ',
         });
       }
     } catch (e) {
@@ -432,7 +440,10 @@ export function finalScore(item, perfBoost = null) {
     : freshScore(item.publishedAt);
   const judge = (item.judgeScore ?? 5) * 5; // 0-50
   const toxPenalty = (item.toxicity || 0) * 3 + (item.fbRisk || 0) * 3;
-  return Math.max(0, Math.min(100, Math.round(fit + fresh + judge - toxPenalty)));
+  // ★ 17 มิ.ย. (ทีมเน้นคนมีชื่อเสียง): ดันคนดังขึ้น + มีภาพได้โบนัส (ข่าวมีรูป = ทำคอนเทนต์ได้จริง)
+  const fameBoost = item.notability === 'famous' ? 12 : 0;
+  const imgBoost = item.imageUrl ? 4 : 0;
+  return Math.max(0, Math.min(100, Math.round(fit + fresh + judge - toxPenalty + fameBoost + imgBoost)));
 }
 
 // ════════════════════════════════════════════════════
