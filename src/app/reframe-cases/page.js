@@ -7,6 +7,7 @@
 import { useState, useEffect } from 'react';
 
 const scoreColor = (s) => s == null ? 'var(--text-muted)' : s >= 8 ? 'var(--desk-green)' : s >= 6 ? 'var(--desk-amber)' : s >= 4 ? '#f97316' : 'var(--desk-red)';
+const domainOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return 'แหล่งอ้างอิง'; } };
 
 export default function ReframeCasesPage() {
   const [cases, setCases] = useState([]);
@@ -228,6 +229,10 @@ export default function ReframeCasesPage() {
 
               {/* ───────── STEP ③ มุมที่ดีที่สุด → เนื้อหาดิบเชิงลึก (เลือก 1 ไปป้อนระบบเจน) ───────── */}
               <div style={stepHeader('#a855f7')}>③ มุมที่ดีที่สุด{(c.angles || []).length > 1 ? ` (${(c.angles || []).length} ทางเลือก — เลือก 1)` : ''} <span style={stepNote}>— เล่าแกนเดียวให้ลึก คัดลอกไปป้อนระบบเจน</span></div>
+              {/* ป้ายบอกที่มาเนื้อหา — กันเข้าใจผิดว่ารีเสิร์ช/นั่งเทียน */}
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '0 0 7px', lineHeight: 1.5 }}>
+                📌 ที่มาเนื้อหาดิบ: <b style={{ color: 'var(--desk-green)' }}>สรุปจากข่าวต้นทางที่ให้มาเท่านั้น (ข้อ ①) — ไม่ได้แต่งขึ้นเอง ไม่ได้รีเสิร์ชเว็บเพิ่ม</b>{c.enrichment?.ok ? ' · มีข้อมูลเสริมจากรีเสิร์ช (ดูแหล่งอ้างอิงพร้อมลิงก์ด้านล่าง ↓)' : ' · กด 🔎 ด้านล่างถ้าต้องการข้อมูลเสริมจากเว็บพร้อมแหล่งอ้างอิง'}
+              </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {(c.angles || []).map((a, i) => {
                   const raw = a.rawContent || a.caption || ''; // รองรับเคสเก่า
@@ -259,17 +264,18 @@ export default function ReframeCasesPage() {
                   <div style={{ ...fieldLabel, color: 'var(--desk-blue)', marginBottom: 5 }}>🔎 ข้อมูลเสริม{c.enrichment.person ? ` · ${c.enrichment.person}` : ''} (เอาไปประกอบการเขียน)</div>
                   {(c.enrichment.facts || []).length > 0 && (
                     <div style={{ marginBottom: (c.enrichment.comparables || []).length ? 8 : 0 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 3 }}>ข้อเท็จจริง (มีแหล่งยืนยัน):</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 3 }}>ข้อเท็จจริง (รีเสิร์ชจากเว็บ — แต่ละท่อนมีแหล่งกำกับ):</div>
                       {c.enrichment.facts.map((f, fi) => (
-                        <div key={fi} style={{ fontSize: 12.5, color: 'var(--text-primary)', marginTop: 2, lineHeight: 1.5 }}>
-                          • {f.text} {f.sourceUrl && <a href={f.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--desk-blue)', textDecoration: 'underline', fontSize: 11 }}>[ที่มา]</a>}
+                        <div key={fi} style={{ fontSize: 12.5, color: 'var(--text-primary)', marginTop: 3, lineHeight: 1.5 }}>
+                          • {f.text}
+                          {f.sourceUrl && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}> — 📍 รีเสิร์ชจาก <a href={f.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--desk-blue)', textDecoration: 'underline' }}>{domainOf(f.sourceUrl)}</a></span>}
                         </div>
                       ))}
                     </div>
                   )}
                   {(c.enrichment.comparables || []).length > 0 && (
                     <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--desk-amber)', marginBottom: 3 }}>≈ ข้อมูลเทียบเคียง (ภาพรวมที่จริง — ไม่ใช่ตัวเลขตายตัว):</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--desk-amber)', marginBottom: 3 }}>≈ ข้อมูลเทียบเคียง (ภาพรวมที่จริง รู้กันกว้าง — ไม่ใช่ตัวเลขตายตัว ไม่ผูกแหล่งเดียว):</div>
                       {c.enrichment.comparables.map((cm, ci) => (
                         <div key={ci} style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 2, lineHeight: 1.5 }}>• {cm}</div>
                       ))}
