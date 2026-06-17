@@ -337,6 +337,22 @@ export function generateHardshipQueries(count = 5) {
   return out.map(q => ({ q, genre: 'เรื่องลำบาก' }));
 }
 
+// ★ 17 มิ.ย. (ทีมขอ "ข่าวชาวบ้านเยอะๆ ที่น่าสนใจ ทำได้จริง"): เรื่องคนธรรมดาที่น่าสนใจ/ไวรัล (ไม่ใช่แค่ลำบาก)
+const COMMONER_KEYWORDS = [
+  'พลเมืองดี ช่วยเหลือ ไวรัล ล่าสุด', 'คนธรรมดา ทำดี ชาวเน็ตชื่นชม ล่าสุด', 'หนุ่มสาว สู้ชีวิต น่าทึ่ง ไวรัล',
+  'ลุงป้า อาชีพน่าทึ่ง สู้ชีวิต ไวรัล', 'แม่ค้าพ่อค้า ใจดี น้ำใจ ไวรัล', 'คลิป คนธรรมดา น้ำใจ ประทับใจ ไวรัล',
+  'ชาวบ้าน เรื่องราวดีๆ น่าสนใจ ไวรัล', 'วินมอเตอร์ไซค์ แท็กซี่ น้ำใจ คืนของ', 'เด็กเยาวชน เก่ง น่าทึ่ง สร้างชื่อ',
+  'ครอบครัว อบอุ่น น่ารัก เรื่องซึ้ง ไวรัล', 'คนสูงวัย สู้ชีวิต ภูมิปัญญา น่าทึ่ง', 'หนุ่มโรงงาน สาวออฟฟิศ สู้ชีวิต ไวรัล',
+];
+
+/** ★ ชาวบ้านน่าสนใจ (17 มิ.ย.) — เรื่องคนธรรมดาที่น่าทึ่ง/น้ำใจ/สู้ชีวิต/ไวรัล หมุนคลัง 12 แนว */
+export function generateCommonerQueries(count = 5) {
+  const slot = Math.floor(Date.now() / (3600e3 * 2));
+  const out = [];
+  for (let i = 0; i < count; i++) out.push(COMMONER_KEYWORDS[(slot * count + i + 2) % COMMONER_KEYWORDS.length]);
+  return out.map(q => ({ q, genre: 'ชาวบ้านน่าสนใจ' }));
+}
+
 // ★ DNA ไวรัลเพจ (16 มิ.ย. v6 — วิเคราะห์ 192 โพสต์ 10k+ ของเพจ IG.dara): เติมแนวที่พิสูจน์ว่าปังแต่ generator เดิมยังไม่ครอบคลุม
 //   เฉพาะแง่บวก/น่าเคารพ — สถาบันเอาเฉพาะชื่นชม/พระราชกรณียกิจ/อาลัยด้วยความเคารพ (ด่าน royalNegative คัดแง่ลบออกเองที่ชั้น 1)
 const VIRAL_DNA_KEYWORDS = [
@@ -378,6 +394,7 @@ const FOCUS_FIXED = {
 export const FOCUS_OPTIONS = [
   { key: 'celeb_gooddeed', label: '⭐ ดาราทำดี/ช่วยเหลือ/อวย' },
   { key: 'celeb_highlight', label: '🎤 ไฮไลท์สัมภาษณ์ดาราด้านดี' },
+  { key: 'commoner', label: '🧑‍🌾 ชาวบ้านน่าสนใจ' },
   { key: 'viral_dna', label: '🧬 แนวที่ปังบนเพจ (DNA)' },
   { key: 'good_all', label: '💎 ข่าวน้ำดี (รวมทุกหมวด)' },
   { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
@@ -405,6 +422,7 @@ export function generateFocusQueries(focus, count = 8) {
   switch (focus) {
     case 'celeb_gooddeed': return wrap(generateCelebGoodDeedQueries(count), 'good', 'qdr:m', 'search'); // ★ ดาราทำดี/ช่วยเหลือ/บริจาค/ทำบุญ/ติดดิน — แนวอวยที่เพจปังสุด
     case 'celeb_highlight': return wrap(generateCelebHighlightQueries(count), 'celeb', 'qdr:m', 'search'); // ★ ไฮไลท์สัมภาษณ์ดาราด้านดี (เว็บ/รีลส์)
+    case 'commoner': return wrap(generateCommonerQueries(count), 'good', 'qdr:m', 'search'); // ★ ชาวบ้านน่าสนใจ — คนธรรมดาน่าทึ่ง/น้ำใจ/สู้ชีวิต
     case 'viral_dna': return wrap(generateViralDnaQueries(count), 'good', 'qdr:m', 'search'); // DNA เพจ — แนวที่สถิติพิสูจน์ว่าปัง (สถาบันบวก/ทหาร/ยุติธรรม/ต่างชาติช่วยไทย/นักกีฬาสมถะ/ดาราติดดิน)
     case 'good_all': return wrap(generateGoodContentQueries(8), 'good', 'qdr:m', 'search'); // น้ำดีรวมทุกหมวด (กตัญญู/สู้ชีวิต/น้ำใจ/สัตว์/เด็ก/ผู้สูงวัย/อาชีพหัวใจ)
     case 'celeb_family': return wrap(generateCelebFamilyQueries(count), 'good', 'qdr:m');

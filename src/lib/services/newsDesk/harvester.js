@@ -316,13 +316,14 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
         }));
         for (const arr of results) raw.push(...arr);
       };
-      // ── ★ แกนหลัก รอบ 3 (16 มิ.ย. ทีมขอ "เน้นดารา-อวย-ทำดี + คนลำบาก ให้เยอะ แบบในเพจ"): celeb-good ครองแกนหลัก ──
-      await runGroup(G.generateCelebGoodDeedQueries(7), { ep: 'search', noClip: true });   // ★ ดาราทำดี/บริจาค/ทำบุญ/ช่วยเหลือ/ติดดิน (แนวอวยที่ปังสุด)
-      await runGroup(G.generateCelebFamilyQueries(6), { ep: 'news' });                      // ★ ดาราให้ของขวัญครอบครัว (GOLD — เบสท์ออกรถให้น้อง)
+      // ── ★ แกนหลัก รอบ 4 (17 มิ.ย. ทีมขอ "ดาราเยอะ + ชาวบ้านเยอะ ที่ทำได้จริง" + คลายฟิลเตอร์ที่รัดเกิน): เพิ่มวอลุ่ม ──
+      await runGroup(G.generateCelebGoodDeedQueries(8), { ep: 'search', noClip: true });   // ★ ดาราทำดี/บริจาค/ทำบุญ/ช่วยเหลือ/ติดดิน (แนวอวยที่ปังสุด)
+      await runGroup(G.generateCelebFamilyQueries(6), { ep: 'news' });                      // ★ ดาราให้ของขวัญครอบครัว (GOLD)
       await runGroup(G.generateCelebHighlightQueries(5), { ep: 'search', lane: 'celeb' });  // ★ ไฮไลท์สัมภาษณ์ดาราด้านดี (รีลส์/คลิป)
+      await runGroup(G.generateCommonerQueries(6), { ep: 'search', noClip: true });         // ★ ชาวบ้านน่าสนใจ — คนธรรมดาน่าทึ่ง/น้ำใจ/สู้ชีวิต (ใหม่)
       await runGroup(G.generateHardshipQueries(5), { ep: 'news', tr: 'qdr:m' });            // ★ คนลำบากน่าสงสาร (→/news มีวันที่)
-      await runGroup(G.generateGoodContentQueries(4), { ep: 'search', noClip: true });      // น้ำดีทั่วไป (ลดจาก 6)
-      await runGroup(G.generateViralDnaQueries(3), { ep: 'search', noClip: true });         // DNA สถาบัน/ทหาร/ฯลฯ (ลดจาก 5 — เน้นดาราแทน)
+      await runGroup(G.generateGoodContentQueries(6), { ep: 'search', noClip: true });      // น้ำดีทั่วไป (คืนเป็น 6)
+      await runGroup(G.generateViralDnaQueries(3), { ep: 'search', noClip: true });         // DNA สถาบัน/ทหาร/ยุติธรรม/ต่างชาติช่วยไทย (คงไว้ 3)
       // ★ v6 (16 มิ.ย. ทีมขอเน้น): ย้อนสัมภาษณ์เก่า เป็นแกนหลัก รันทุกรอบ — บทความ /news + "คลิปจริง" /videos (YT)
       const _tbQs = G.generateThrowbackQueries(6);
       await runGroup(_tbQs.slice(0, 4), { ep: 'news', lane: 'throwback', tr: 'qdr:y', num: 8 });   // บทความย้อนสัมภาษณ์
@@ -433,8 +434,11 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     if (c.royalNegative === true) {
       stats.royalNeg++; junk.push({ ...c, junkReason: 'สถาบันแง่ลบ/อ่อนไหว (ม.112)' }); console.log(`[Harvester] 🚫 สถาบันแง่ลบ/อ่อนไหว: ${String(c.title).slice(0, 50)}`); return false;
     }
-    if (c.hasMainChar === false && c.subject !== 'celeb') {
-      stats.noChar++; junk.push({ ...c, junkReason: 'ไม่มีตัวละครหลัก (ทางการ/รพ./องค์กร)' }); console.log(`[Harvester] 🚫 ไม่มีตัวละครหลัก (ทางการ/รพ.): ${String(c.title).slice(0, 50)}`); return false;
+    // ★ 17 มิ.ย. (ทีมชี้ "กรองแคบเกิน เจอข่าวน้อย"): คลาย noChar — เก็บข่าวชาวบ้านน้ำใจ/สู้ชีวิต/กตัญญู แม้ AI ไม่เจอชื่อคนชัด
+    //   (เช่น "น้ำใจคนไทยช่วยน้ำท่วม" = ทำได้จริง) → ตัดเฉพาะที่ "ไม่มีคน + หมวดนอกแนว" (องค์กร/สถิติ/เตือนภัย/อื่นๆ)
+    if (c.hasMainChar === false && c.subject !== 'celeb'
+      && !['น้ำใจ/ช่วยเหลือ', 'สู้ชีวิต', 'กตัญญู/ครอบครัวอบอุ่น', 'คนดังทำดี/ติดดิน', 'สัมภาษณ์/บทสนทนาดี'].includes(c.category)) {
+      stats.noChar++; junk.push({ ...c, junkReason: 'ไม่มีตัวละครหลัก + หมวดนอกแนว (องค์กร/สถิติ)' }); console.log(`[Harvester] 🚫 ไม่มีตัวละครหลัก (องค์กร/สถิติ): ${String(c.title).slice(0, 50)}`); return false;
     }
     // กระแสเก่าเล่นใหม่ไม่ได้ — เว้นเฉพาะเลนข่าวสดเร็ว (trend/buzz); trend-track ก็ต้องตัดกระแสเก่า (ทีมอยากได้ของใช้ได้จริง)
     if (c.staleTrend === true && !['trend', 'buzz'].includes(c.lane)) {
@@ -454,7 +458,9 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     if (c.lane === 'evergreen-celeb' || c.lane === 'throwback') return true;
     const ageDays = c.publishedAt ? (Date.now() - new Date(c.publishedAt).getTime()) / 864e5 : null;
     if (c.lane === 'evergreen') { stats.staleEvent++; junk.push({ ...c, junkReason: 'เหตุการณ์ครั้งเดียวที่เก่าแล้ว' }); console.log(`[Harvester] ⏳ ตัดกระแสอดีต (evergreen+event): ${String(c.title).slice(0, 55)}`); return false; }
-    if (ageDays !== null && ageDays > 30) { stats.staleEvent++; junk.push({ ...c, junkReason: `เหตุการณ์เก่า ${Math.round(ageDays)} วัน` }); console.log(`[Harvester] ⏳ ตัดกระแสอดีต (event เก่า ${Math.round(ageDays)} วัน): ${String(c.title).slice(0, 55)}`); return false; }
+    // ★ 17 มิ.ย. (คลายให้กว้าง): กระแส (trend/buzz) ต้องสด ≤14 วัน · ข่าวดารา/น้ำดี/ชาวบ้าน ยืดได้ ≤75 วัน (เนื้อยังทำได้จริง)
+    const _ageCap = ['trend', 'buzz'].includes(c.lane) ? 14 : 75;
+    if (ageDays !== null && ageDays > _ageCap) { stats.staleEvent++; junk.push({ ...c, junkReason: `เหตุการณ์เก่า ${Math.round(ageDays)} วัน` }); console.log(`[Harvester] ⏳ ตัดเหตุการณ์เก่า ${Math.round(ageDays)} วัน (>${_ageCap}): ${String(c.title).slice(0, 50)}`); return false; }
     return true;
   });
 

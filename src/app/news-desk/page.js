@@ -26,6 +26,7 @@ const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', intervie
 const FOCUS_OPTIONS = [
   { key: 'celeb_gooddeed', label: '⭐ ดาราทำดี/ช่วยเหลือ/อวย' },
   { key: 'celeb_highlight', label: '🎤 ไฮไลท์สัมภาษณ์ดาราด้านดี' },
+  { key: 'commoner', label: '🧑‍🌾 ชาวบ้านน่าสนใจ' },
   { key: 'viral_dna', label: '🧬 แนวที่ปังบนเพจ (DNA)' },
   { key: 'good_all', label: '💎 ข่าวน้ำดี (รวมทุกหมวด)' },
   { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
