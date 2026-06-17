@@ -121,30 +121,22 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
     
     // 1. Use the already-fetched allJobs (with in-memory status updates) for position calc
 
-    // Duplicate Check: Prevents adding the exact same input if it's already pending/processing
-    // NOTE: Ignores 'processing' jobs older than 5 minutes (likely stuck — will be auto-cleaned)
+    // ★ 17 มิ.ย. (ทีมขอ "ส่งใหม่ต้องเจนใหม่ได้เสมอ ไม่ให้ข่าวเสีย"): ตัวกันงานซ้ำแบบฉลาด — ไม่บล็อกถาวร
+    //   • กำลังเจน "จริงๆ" (processing < 5 นาที) → บล็อก (ผลกำลังจะมา ไม่ต้องทำซ้ำให้เปลือง)
+    //   • งานเดิมที่ค้าง/รอคิว (pending หรือ processing ค้าง) → "ลบทิ้งแล้วให้ส่งใหม่นี้เจนใหม่" (กันข่าวค้างถาวร)
+    //   ★ ไม่แตะ pipeline เจน/worker — แค่ logic การรับงานเข้าคิว
     const inputToCheck = payload.input || payload.url || payload.text;
     if (inputToCheck) {
-      const dupeCutoff = new Date(Date.now() - 5 * 60 * 1000);
-      const isDuplicate = allJobs.some(j => {
-        if (j.status === 'pending') {
-          // ★ 17 มิ.ย. (แก้บั๊ก "อยู่ในคิวแล้ว" ค้างถาวร): pending ที่ค้างเกิน 20 นาที = worker ไม่หยิบ/งานตาย
-          //   → ไม่บล็อกการส่งใหม่ (mirror logic ของ processing ที่ข้ามตัวค้าง) — เดิม pending บล็อกทุกอายุ
-          const createdAt = new Date(j.createdAt || j.startedAt || 0);
-          if (createdAt < new Date(Date.now() - 20 * 60 * 1000)) return false; // ค้าง — ปล่อยส่งใหม่ได้
-          return j.payload.input === inputToCheck || j.payload.url === inputToCheck || j.payload.text === inputToCheck;
-        }
-        if (j.status === 'processing') {
-          // Only count as duplicate if processing started < 5 minutes ago
-          const startedAt = new Date(j.startedAt || j.createdAt);
-          if (startedAt < dupeCutoff) return false; // Stale — ignore
-          return j.payload.input === inputToCheck || j.payload.url === inputToCheck || j.payload.text === inputToCheck;
-        }
-        return false;
-      });
-      
-      if (isDuplicate) {
-        throw new Error("ข่าวนี้กำลังประมวลผลอยู่ หรืออยู่ในคิวแล้ว กรุณารอสักครู่...");
+      const matchInput = (j) => j.payload?.input === inputToCheck || j.payload?.url === inputToCheck || j.payload?.text === inputToCheck;
+      const sameNews = allJobs.filter(j => (j.status === 'pending' || j.status === 'processing') && matchInput(j));
+      const activeFresh = sameNews.find(j => j.status === 'processing' && new Date(j.startedAt || j.createdAt) >= new Date(Date.now() - 5 * 60 * 1000));
+      if (activeFresh) {
+        throw new Error("ข่าวนี้กำลังประมวลผลอยู่ ผลลัพธ์กำลังจะมา รออีกสักครู่นะครับ...");
+      }
+      // งานเดิมที่ค้าง/รอ (ไม่ใช่กำลังเจนจริง) → เคลียร์ทิ้ง ให้คำสั่งส่งใหม่นี้เจนใหม่ทันที
+      if (sameNews.length > 0) {
+        for (const stale of sameNews) await store.remove(stale.id).catch(() => {});
+        console.log(`[QueueService] ♻️ ส่งข่าวซ้ำ — เคลียร์งานค้าง ${sameNews.length} ตัว แล้วเจนใหม่`);
       }
     }
 
