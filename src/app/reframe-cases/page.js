@@ -48,6 +48,11 @@ export default function ReframeCasesPage() {
   const copy = (t) => { navigator.clipboard?.writeText(t); setMsg('📋 คัดลอกเนื้อหาดิบแล้ว'); setTimeout(() => setMsg(''), 1500); };
 
   const card = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 16, color: 'var(--text-primary)' };
+  // ป้ายขั้นตอน (มีเลข ①②③ + สีแถบ) ให้เห็นชัดว่าแต่ละส่วนคืออะไร
+  const stepHeader = (clr) => ({ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13.5, fontWeight: 900, color: 'var(--text-primary)', borderLeft: `4px solid ${clr}`, paddingLeft: 9, margin: '14px 0 7px' });
+  const stepNote = { fontWeight: 400, fontSize: 11.5, color: 'var(--text-muted)' };
+  const sectionBox = { background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' };
+  const fieldLabel = { fontSize: 10.5, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: 0.3, textTransform: 'uppercase' };
 
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto', padding: '24px 16px', color: 'var(--text-primary)' }}>
@@ -113,61 +118,72 @@ export default function ReframeCasesPage() {
                 )}
               </div>
 
-              {/* ── ข่าวต้นทาง (ที่มาของการแตกประเด็น) ── */}
-              <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', marginBottom: 10 }}>
-                <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 3 }}>📰 ข่าวต้นทาง{c.sourceName ? ` · ${c.sourceName}` : ''}</div>
-                <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--text-primary)', lineHeight: 1.45 }}>{c.sourceTitle}</div>
-                {c.sourceSnippet && <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 5, lineHeight: 1.55 }}>{c.sourceSnippet}</div>}
+              {/* ───────── STEP ① ข่าวต้นทาง (ข่าวดิบที่รับเข้ามา) ───────── */}
+              <div style={stepHeader('#7dd3fc')}>① ข่าวต้นทาง <span style={stepNote}>— ข่าวดิบที่รับเข้ามา (ยังไม่แปลง)</span></div>
+              <div style={sectionBox}>
+                <div style={fieldLabel}>หัวข้อข่าว</div>
+                <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--text-primary)', lineHeight: 1.45, marginTop: 2 }}>
+                  {c.sourceTitle}{c.sourceName ? <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}> · {c.sourceName}</span> : ''}
+                </div>
+                {c.sourceSnippet && <>
+                  <div style={{ ...fieldLabel, marginTop: 9 }}>เนื้อข่าว</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 2, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{c.sourceSnippet}</div>
+                </>}
                 {c.sourceUrl && (
                   <a href={c.sourceUrl} target="_blank" rel="noopener noreferrer"
-                    style={{ display: 'inline-block', marginTop: 6, fontSize: 12, color: 'var(--desk-blue)', textDecoration: 'underline', wordBreak: 'break-all' }}>
+                    style={{ display: 'inline-block', marginTop: 8, fontSize: 12, color: 'var(--desk-blue)', textDecoration: 'underline', wordBreak: 'break-all' }}>
                     🔗 เปิดข่าวต้นทาง
                   </a>
                 )}
+                {Array.isArray(c.sources) && c.sources.length > 0 && (
+                  <div style={{ marginTop: 9, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
+                    <div style={fieldLabel}>🔎 แหล่งอ้างอิง ({c.sources.length}){c.researchUsed ? ' · ใช้ข้อมูลรีเสิร์ชเสริม' : ''}</div>
+                    {c.sources.map((s, i) => (
+                      <div key={i} style={{ fontSize: 12, marginTop: 3 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>{s.type}: </span>
+                        <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--desk-blue)', textDecoration: 'underline', wordBreak: 'break-all' }}>{s.title || s.url}</a>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* ── แหล่งอ้างอิง / รีเสิร์ช (ตรวจที่มาที่ไปได้) ── */}
-              {Array.isArray(c.sources) && c.sources.length > 0 && (
-                <div style={{ background: 'rgba(125,211,252,0.07)', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 12px', marginBottom: 10 }}>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 4 }}>
-                    🔎 แหล่งอ้างอิง ({c.sources.length}){c.researchUsed ? ' · ใช้ข้อมูลรีเสิร์ชเสริม' : ''}
-                  </div>
-                  {c.sources.map((s, i) => (
-                    <div key={i} style={{ fontSize: 12, marginTop: 2 }}>
-                      <span style={{ color: 'var(--text-muted)' }}>{s.type}: </span>
-                      <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--desk-blue)', textDecoration: 'underline', wordBreak: 'break-all' }}>{s.title || s.url}</a>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {/* ───────── STEP ② แก่นข่าวที่ระบบสรุป (ตัดดราม่าออก) ───────── */}
+              {c.cleanBrief && <>
+                <div style={stepHeader('#4ade80')}>② แก่นข่าวที่ระบบสรุป <span style={stepNote}>— ใจความสะอาด ตัดโทนดราม่า/ฟาดออก (ระบบทำให้)</span></div>
+                <div style={{ ...sectionBox, fontSize: 13, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.65 }}>{c.cleanBrief}</div>
+              </>}
 
-              {c.cleanBrief && (
-                <div style={{ fontSize: 13, color: 'var(--text-secondary)', background: 'var(--bg-elevated)', borderRadius: 8, padding: '8px 10px', marginBottom: 10, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                  <b style={{ color: 'var(--text-primary)' }}>📋 แก่นข่าว (สะอาด):</b> {c.cleanBrief}
-                </div>
-              )}
-
-              {c.evalNote && (
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12, lineHeight: 1.55 }}>🤖 <b style={{ color: scoreColor(c.evalScore) }}>ผู้ตรวจคุณภาพ:</b> {c.evalNote}</div>
-              )}
-
-              {/* ── เนื้อหาดิบหลายมุม (คัดลอกไปป้อนระบบเจน) ── */}
+              {/* ───────── STEP ③ มุมที่แตกได้ → เนื้อหาดิบป้อนระบบเจน ───────── */}
+              <div style={stepHeader('#a855f7')}>③ มุมที่แตกได้ ({(c.angles || []).length} มุม) <span style={stepNote}>— เนื้อหาดิบแต่ละมุม คัดลอกไปป้อนระบบเจน</span></div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {(c.angles || []).map((a, i) => {
                   const raw = a.rawContent || a.caption || ''; // รองรับเคสเก่า
                   return (
-                  <div key={i} style={{ borderLeft: '3px solid #a855f7', paddingLeft: 11 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-primary)' }}>🎯 มุม{a.type} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>· {a.focus}</span></div>
-                    {raw && (
-                      <div onClick={() => copy(raw)} title="คลิกเพื่อคัดลอกเนื้อหาดิบ (เอาไปป้อนระบบเจน)"
-                        style={{ fontSize: 13, marginTop: 5, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: '9px 11px', cursor: 'pointer', whiteSpace: 'pre-wrap', lineHeight: 1.7, color: 'var(--text-primary)' }}>
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>📝 เนื้อหาดิบ (คลิกคัดลอก):</span><br />{raw}
-                      </div>
-                    )}
+                  <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+                    {/* แถบหัวมุม: บอกชัดว่า "มุมที่ N" + ชื่อมุม */}
+                    <div style={{ background: 'rgba(168,85,247,0.14)', padding: '7px 11px', fontWeight: 800, fontSize: 13.5, color: 'var(--text-primary)' }}>
+                      🎯 มุมที่ {i + 1} · {a.type}
+                    </div>
+                    <div style={{ padding: '9px 11px' }}>
+                      {a.focus && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 7 }}><b style={{ color: 'var(--text-muted)' }}>โฟกัส:</b> {a.focus}</div>}
+                      {raw && (
+                        <div onClick={() => copy(raw)} title="คลิกเพื่อคัดลอกเนื้อหาดิบ (เอาไปป้อนระบบเจน)"
+                          style={{ fontSize: 13, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: '9px 11px', cursor: 'pointer', whiteSpace: 'pre-wrap', lineHeight: 1.7, color: 'var(--text-primary)' }}>
+                          <div style={{ ...fieldLabel, color: 'var(--desk-purple)', marginBottom: 4 }}>📝 เนื้อหาดิบของมุมนี้ ↓ (คลิกคัดลอก)</div>
+                          {raw}
+                        </div>
+                      )}
+                    </div>
                   </div>
                   );
                 })}
               </div>
+
+              {/* ผู้ตรวจคุณภาพ (ท้ายเคส) */}
+              {c.evalNote && (
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 12, paddingTop: 9, borderTop: '1px solid var(--border)', lineHeight: 1.55 }}>🤖 <b style={{ color: scoreColor(c.evalScore) }}>ผู้ตรวจคุณภาพ:</b> {c.evalNote}</div>
+              )}
             </div>
           ))}
         </div>
