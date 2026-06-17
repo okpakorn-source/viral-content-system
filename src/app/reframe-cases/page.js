@@ -1,12 +1,12 @@
 'use client';
 /**
- * ♻️ คลังแปลงมุมข่าว — ดูผลทุกครั้งที่ระบบแปลงข่าวท็อกซิก/ดราม่า → มุมเชิงบวก
- *   ทั้งแบบ "ทดสอบ" (รันชุดเทส + ให้ AI ประเมินความใกล้บทความไวรัล) และ "ทำจริง" (ทีมกด ♻️ บนการ์ด)
+ * ♻️ คลังแตกประเด็นข่าว (เนื้อหาดิบ) — ดูผลทุกครั้งที่ระบบแตกข่าวท็อกซิก/ดราม่า → เนื้อหาดิบหลายมุมเชิงบวก
+ *   แสดงข่าวต้นทาง + แหล่งอ้างอิง/ลิงก์ ให้ตรวจสอบที่มาที่ไปของข้อมูลได้ · เก็บทั้งแบบทดสอบและทำจริง
  *   ผู้จัดการสร้างไว้ให้กลับมาเช็กย้อนหลังได้ — 17 มิ.ย. 69
  */
 import { useState, useEffect } from 'react';
 
-const scoreColor = (s) => s == null ? '#64748b' : s >= 8 ? '#22c55e' : s >= 6 ? '#eab308' : s >= 4 ? '#f97316' : '#ef4444';
+const scoreColor = (s) => s == null ? 'var(--text-muted)' : s >= 8 ? 'var(--desk-green)' : s >= 6 ? 'var(--desk-amber)' : s >= 4 ? '#f97316' : 'var(--desk-red)';
 
 export default function ReframeCasesPage() {
   const [cases, setCases] = useState([]);
@@ -45,13 +45,15 @@ export default function ReframeCasesPage() {
     setRunning(false);
   };
 
-  const copy = (t) => { navigator.clipboard?.writeText(t); setMsg('📋 คัดลอกแล้ว'); setTimeout(() => setMsg(''), 1500); };
+  const copy = (t) => { navigator.clipboard?.writeText(t); setMsg('📋 คัดลอกเนื้อหาดิบแล้ว'); setTimeout(() => setMsg(''), 1500); };
+
+  const card = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 16, color: 'var(--text-primary)' };
 
   return (
-    <div style={{ maxWidth: 980, margin: '0 auto', padding: '24px 16px' }}>
-      <h1 style={{ fontSize: 24, fontWeight: 900, marginBottom: 4 }}>♻️ คลังแตกประเด็นข่าว (เนื้อหาดิบ)</h1>
-      <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
-        แตกข่าวกระแส/ดราม่า/ท็อกซิก → "เนื้อหาดิบ" หลายมุมเชิงบวก (ที่มาที่ไป+เหตุผล+บริบท ไม่บิดเบือน) สำหรับเอาไปป้อนระบบทำข่าวอัตโนมัติเจนต่อ · เก็บทั้งแบบทดสอบและทำจริง · มี AI ประเมินคุณภาพเนื้อหาดิบ
+    <div style={{ maxWidth: 1000, margin: '0 auto', padding: '24px 16px', color: 'var(--text-primary)' }}>
+      <h1 style={{ fontSize: 24, fontWeight: 900, marginBottom: 4, color: 'var(--text-primary)' }}>♻️ คลังแตกประเด็นข่าว (เนื้อหาดิบ)</h1>
+      <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>
+        แตกข่าวกระแส/ดราม่า/ท็อกซิก → "เนื้อหาดิบ" หลายมุมเชิงบวก (ที่มาที่ไป+เหตุผล+บริบท ไม่บิดเบือน) สำหรับเอาไปป้อนระบบทำข่าวอัตโนมัติเจนต่อ · มีข่าวต้นทาง + แหล่งอ้างอิงพร้อมลิงก์ให้ตรวจที่มา · เก็บทั้งทดสอบและทำจริง
       </p>
 
       {/* สถิติ */}
@@ -64,9 +66,9 @@ export default function ReframeCasesPage() {
             { k: 'คะแนนเฉลี่ย (เทส)', v: stats.avgTestScore != null ? `${stats.avgTestScore}/10` : '—', c: scoreColor(stats.avgTestScore) },
             { k: 'คะแนนดีสุด', v: stats.bestScore != null ? `${stats.bestScore}/10` : '—', c: scoreColor(stats.bestScore) },
           ].map((b, i) => (
-            <div key={i} style={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 14px' }}>
+            <div key={i} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 14px' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{b.k}</div>
-              <div style={{ fontSize: 22, fontWeight: 900, color: b.c || 'inherit' }}>{b.v}</div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: b.c || 'var(--text-primary)' }}>{b.v}</div>
             </div>
           ))}
         </div>
@@ -75,33 +77,33 @@ export default function ReframeCasesPage() {
       {/* ปุ่ม + ฟิลเตอร์ */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
         <button onClick={runTest} disabled={running}
-          style={{ background: running ? '#475569' : 'linear-gradient(135deg,#f91880,#7c3aed)', color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 800, cursor: running ? 'default' : 'pointer', fontSize: 14 }}>
+          style={{ background: running ? 'var(--bg-elevated)' : 'linear-gradient(135deg,#f91880,#7c3aed)', color: running ? 'var(--text-muted)' : '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 800, cursor: running ? 'default' : 'pointer', fontSize: 14 }}>
           {running ? '⏳ กำลังรัน...' : '▶ รันชุดทดสอบใหม่'}
         </button>
         {['all', 'test', 'real'].map(m => (
           <button key={m} onClick={() => setFilter(m)}
-            style={{ background: filter === m ? '#7c3aed' : 'var(--surface,#1e293b)', color: filter === m ? '#fff' : 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
+            style={{ background: filter === m ? '#7c3aed' : 'var(--bg-card)', color: filter === m ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
             {m === 'all' ? 'ทั้งหมด' : m === 'test' ? '🧪 ทดสอบ' : '💼 ทำจริง'}
           </button>
         ))}
-        <button onClick={() => load(filter)} style={{ background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>↻ รีเฟรช</button>
+        <button onClick={() => load(filter)} style={{ background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>↻ รีเฟรช</button>
       </div>
 
-      {msg && <div style={{ padding: '10px 14px', background: 'rgba(124,58,237,0.12)', border: '1px solid var(--border)', borderRadius: 10, marginBottom: 14, fontSize: 13 }}>{msg}</div>}
+      {msg && <div style={{ padding: '10px 14px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, marginBottom: 14, fontSize: 13, color: 'var(--text-primary)' }}>{msg}</div>}
 
       {loading ? <div style={{ color: 'var(--text-muted)', padding: 30, textAlign: 'center' }}>กำลังโหลด...</div>
         : cases.length === 0 ? <div style={{ color: 'var(--text-muted)', padding: 30, textAlign: 'center' }}>ยังไม่มีเคสในคลัง — กด “รันชุดทดสอบใหม่” เพื่อเริ่ม</div>
         : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {cases.map((c) => (
-            <div key={c.id} style={{ background: 'var(--surface,#1e293b)', border: '1px solid var(--border)', borderRadius: 14, padding: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
+            <div key={c.id} style={card}>
+              {/* หัวเคส: ป้ายโหมด + เวลา + คะแนน */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
                 <div style={{ flex: 1 }}>
-                  <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 6, background: c.mode === 'test' ? 'rgba(234,179,8,0.18)' : 'rgba(34,197,94,0.18)', color: c.mode === 'test' ? '#eab308' : '#22c55e', marginRight: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 6, background: 'var(--bg-elevated)', color: c.mode === 'test' ? 'var(--desk-amber)' : 'var(--desk-green)', marginRight: 8 }}>
                     {c.mode === 'test' ? '🧪 ทดสอบ' : c.mode === 'auto' ? '🤖 อัตโนมัติ' : '💼 ทำจริง'}
                   </span>
                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{new Date(c.at).toLocaleString('th-TH')}</span>
-                  <div style={{ fontWeight: 800, fontSize: 15, marginTop: 4 }}>{c.sourceTitle}</div>
                 </div>
                 {typeof c.evalScore === 'number' && (
                   <div style={{ textAlign: 'center', minWidth: 64 }}>
@@ -111,26 +113,55 @@ export default function ReframeCasesPage() {
                 )}
               </div>
 
+              {/* ── ข่าวต้นทาง (ที่มาของการแตกประเด็น) ── */}
+              <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 3 }}>📰 ข่าวต้นทาง{c.sourceName ? ` · ${c.sourceName}` : ''}</div>
+                <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--text-primary)', lineHeight: 1.45 }}>{c.sourceTitle}</div>
+                {c.sourceSnippet && <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 5, lineHeight: 1.55 }}>{c.sourceSnippet}</div>}
+                {c.sourceUrl && (
+                  <a href={c.sourceUrl} target="_blank" rel="noopener noreferrer"
+                    style={{ display: 'inline-block', marginTop: 6, fontSize: 12, color: 'var(--desk-blue)', textDecoration: 'underline', wordBreak: 'break-all' }}>
+                    🔗 เปิดข่าวต้นทาง
+                  </a>
+                )}
+              </div>
+
+              {/* ── แหล่งอ้างอิง / รีเสิร์ช (ตรวจที่มาที่ไปได้) ── */}
+              {Array.isArray(c.sources) && c.sources.length > 0 && (
+                <div style={{ background: 'rgba(125,211,252,0.07)', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 12px', marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 4 }}>
+                    🔎 แหล่งอ้างอิง ({c.sources.length}){c.researchUsed ? ' · ใช้ข้อมูลรีเสิร์ชเสริม' : ''}
+                  </div>
+                  {c.sources.map((s, i) => (
+                    <div key={i} style={{ fontSize: 12, marginTop: 2 }}>
+                      <span style={{ color: 'var(--text-muted)' }}>{s.type}: </span>
+                      <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--desk-blue)', textDecoration: 'underline', wordBreak: 'break-all' }}>{s.title || s.url}</a>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {c.cleanBrief && (
-                <div style={{ fontSize: 13, color: 'var(--text-muted)', background: 'rgba(0,0,0,0.15)', borderRadius: 8, padding: '8px 10px', marginBottom: 8, whiteSpace: 'pre-wrap' }}>
-                  <b style={{ color: 'var(--text)' }}>📋 แก่นข่าว (สะอาด):</b> {c.cleanBrief}
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)', background: 'var(--bg-elevated)', borderRadius: 8, padding: '8px 10px', marginBottom: 10, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                  <b style={{ color: 'var(--text-primary)' }}>📋 แก่นข่าว (สะอาด):</b> {c.cleanBrief}
                 </div>
               )}
 
               {c.evalNote && (
-                <div style={{ fontSize: 12, color: scoreColor(c.evalScore), marginBottom: 10 }}>🤖 ผู้ตรวจ: {c.evalNote}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12, lineHeight: 1.55 }}>🤖 <b style={{ color: scoreColor(c.evalScore) }}>ผู้ตรวจคุณภาพ:</b> {c.evalNote}</div>
               )}
 
+              {/* ── เนื้อหาดิบหลายมุม (คัดลอกไปป้อนระบบเจน) ── */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {(c.angles || []).map((a, i) => {
-                  const raw = a.rawContent || a.caption || ''; // เคสเก่ารองรับ caption
+                  const raw = a.rawContent || a.caption || ''; // รองรับเคสเก่า
                   return (
-                  <div key={i} style={{ borderLeft: '3px solid #7c3aed', paddingLeft: 10 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>🎯 มุม{a.type} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>· {a.focus}</span></div>
+                  <div key={i} style={{ borderLeft: '3px solid #a855f7', paddingLeft: 11 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-primary)' }}>🎯 มุม{a.type} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>· {a.focus}</span></div>
                     {raw && (
                       <div onClick={() => copy(raw)} title="คลิกเพื่อคัดลอกเนื้อหาดิบ (เอาไปป้อนระบบเจน)"
-                        style={{ fontSize: 13, marginTop: 4, background: 'rgba(124,58,237,0.1)', borderRadius: 6, padding: '8px 10px', cursor: 'pointer', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                        📝 <b style={{ fontSize: 11, color: 'var(--text-muted)' }}>เนื้อหาดิบ (คลิกคัดลอก):</b><br />{raw}
+                        style={{ fontSize: 13, marginTop: 5, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: '9px 11px', cursor: 'pointer', whiteSpace: 'pre-wrap', lineHeight: 1.7, color: 'var(--text-primary)' }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>📝 เนื้อหาดิบ (คลิกคัดลอก):</span><br />{raw}
                       </div>
                     )}
                   </div>

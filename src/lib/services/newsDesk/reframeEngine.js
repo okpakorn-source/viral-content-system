@@ -64,6 +64,22 @@ export async function reframeNews(item, opts = {}) {
   if (isHardBlock(item)) {
     return { ok: false, reason: 'ข่าวนี้อ่อนไหว/รุนแรงเกินไป — แปลงมุมไม่ได้ (ฮาร์ดบล็อก)' };
   }
+  // ── รวบรวม "แหล่งที่มา" เพื่อให้ตรวจสอบที่มาที่ไปของข้อมูลได้ ──
+  //   ข่าวต้นทาง + (ถ้าการ์ดเคยกด 🔬 เจาะลึก) แหล่งรีเสิร์ชที่ตรวจแล้ว พร้อมลิงก์
+  const sources = [];
+  if (item.url) sources.push({ type: 'ข่าวต้นทาง', url: item.url, title: String(item.title || '').slice(0, 150) });
+  const rr = item.research && item.research.ok !== false ? item.research : null;
+  if (rr && Array.isArray(rr.sources)) {
+    for (const u of rr.sources) {
+      if (u && u !== item.url) sources.push({ type: 'แหล่งรีเสิร์ช', url: String(u), title: '' });
+    }
+  }
+  // บล็อกข้อมูลรีเสิร์ช (ถ้ามี) — ให้ AI ใช้ข้อเท็จจริงที่ "ตรวจแล้ว" เพิ่มได้ แต่ยังห้ามแต่งเอง
+  let researchBlock = '';
+  if (rr && (rr.enrichedSummary || (rr.keyFacts && rr.keyFacts.length))) {
+    researchBlock = `\n=== ข้อมูลรีเสิร์ชเพิ่มเติม (ตรวจจากหลายแหล่งแล้ว — ใช้ประกอบได้ ห้ามแต่งเกินนี้) ===\n${rr.enrichedSummary ? String(rr.enrichedSummary).slice(0, 800) + '\n' : ''}${(rr.keyFacts || []).slice(0, 6).map(f => '• ' + f).join('\n')}${(rr.quotes || []).length ? '\nคำพูดอ้างอิง:\n' + rr.quotes.slice(0, 3).map(q => '“' + q + '”').join('\n') : ''}\n=== จบข้อมูลรีเสิร์ช ===`;
+  }
+
   const angleList = REFRAME_ANGLES.map(a => `- ${a.name}: ${a.cue}`).join('\n');
   const prompt = `คุณเป็นบรรณาธิการอาวุโสเพจข่าวน้ำดีอันดับ 1 ของไทย หน้าที่: เอา "ข่าวกระแส/ดราม่า/ปะทะ/ตรงไปตรงมา" ที่เพจน้ำดีเล่นตรงๆ ไม่ได้ → มา "แตกประเด็นเป็นเนื้อหาดิบหลายมุมเชิงบวก" ให้ทีม
 
@@ -73,7 +89,7 @@ export async function reframeNews(item, opts = {}) {
 === ข่าว ===
 หัวข้อ: ${item.title}
 ${item.snippet ? 'รายละเอียด: ' + String(item.snippet).slice(0, 600) : ''}
-=== จบ ===
+=== จบ ===${researchBlock}
 
 เลือก "มุมเชิงบวก" ที่เข้ากับ "บริบทข่าวนี้" ที่สุด 2-4 มุม จากรายการนี้ (เลือกตามบริบท ไม่ต้องครบ):
 ${angleList}
@@ -114,9 +130,17 @@ ${angleList}
       rawContent: String(a.rawContent || a.raw || a.content || '').slice(0, 1200),
     })).filter(a => a.rawContent);
     if (!angles.length) return { ok: false, reason: 'แตกประเด็นได้ไม่ชัดเจน ลองใหม่' };
-    const result = { ok: true, cleanBrief: String(p.cleanBrief || '').slice(0, 1000), angles, at: new Date().toISOString() };
+    const result = { ok: true, cleanBrief: String(p.cleanBrief || '').slice(0, 1000), angles, sources, researchUsed: !!researchBlock, at: new Date().toISOString() };
     if (!opts.skipArchive) {
-      archiveReframe({ mode: opts.mode || 'manual', sourceTitle: String(item.title || '').slice(0, 200), sourceSnippet: String(item.snippet || '').slice(0, 300), cleanBrief: result.cleanBrief, angles, evalScore: null, evalNote: '' });
+      archiveReframe({
+        mode: opts.mode || 'manual',
+        sourceTitle: String(item.title || '').slice(0, 200),
+        sourceSnippet: String(item.snippet || '').slice(0, 600),
+        sourceUrl: item.url || '',
+        sourceName: item.source || '',
+        sources, researchUsed: !!researchBlock,
+        cleanBrief: result.cleanBrief, angles, evalScore: null, evalNote: '',
+      });
     }
     return result;
   } catch (e) {
@@ -170,7 +194,7 @@ export async function runReframeTest() {
     if (!r.ok) { stats.blocked++; stats.cases.push({ title: tc.title, ok: false, reason: r.reason }); continue; }
     const ev = await evaluateReframe(tc.title, r);
     sum += ev.score; stats.reframed++;
-    await archiveReframe({ mode: 'test', sourceTitle: tc.title, sourceSnippet: tc.snippet, cleanBrief: r.cleanBrief, angles: r.angles, evalScore: ev.score, evalNote: ev.why });
+    await archiveReframe({ mode: 'test', sourceTitle: tc.title, sourceSnippet: tc.snippet, sourceUrl: '', sourceName: '(เคสทดสอบจำลอง)', sources: r.sources || [], researchUsed: !!r.researchUsed, cleanBrief: r.cleanBrief, angles: r.angles, evalScore: ev.score, evalNote: ev.why });
     stats.cases.push({ title: tc.title, ok: true, score: ev.score, why: ev.why, angles: r.angles.length });
   }
   stats.avgScore = stats.reframed ? Math.round((sum / stats.reframed) * 10) / 10 : 0;
