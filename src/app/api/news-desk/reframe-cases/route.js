@@ -64,11 +64,17 @@ export async function POST(request) {
       const all = await store.getAll();
       const c = all.find(x => x.id === body.id);
       if (!c) return NextResponse.json({ success: false, error: 'ไม่พบเคสนี้', errorType: 'NOT_FOUND' }, { status: 404 });
-      const angle = (c.angles || [])[Number(body.angleIndex) || 0] || (c.angles || [])[0];
+      const angleIndex = Number(body.angleIndex) || 0;
+      const angle = (c.angles || [])[angleIndex] || (c.angles || [])[0];
       if (!angle) return NextResponse.json({ success: false, error: 'เคสนี้ไม่มีมุมให้เสริม', errorType: 'NO_ANGLE' }, { status: 422 });
-      const { enrichCelebAngle } = await import('@/lib/services/newsDesk/angleEnrich');
+      const { enrichCelebAngle, weaveEnrichment } = await import('@/lib/services/newsDesk/angleEnrich');
       const e = await enrichCelebAngle({ sourceTitle: c.sourceTitle, sourceSnippet: c.sourceSnippet, angleType: angle.type, angleFocus: angle.focus });
       if (!e.ok) return NextResponse.json({ success: false, error: e.reason, errorType: 'ENRICH_NONE' }, { status: 422 });
+      // ★ หลอมรวมข้อเท็จจริงรีเสิร์ชเข้ากับเนื้อหาดิบของมุมนี้ (อ่านลื่น + มาร์คท่อนที่เสริม)
+      if ((e.facts || []).length && angle.rawContent) {
+        const w = await weaveEnrichment({ rawContent: angle.rawContent, facts: e.facts }).catch(() => ({ ok: false }));
+        if (w.ok) e.merged = { angleIndex, content: w.merged };
+      }
       await store.update(c.id, (ex) => ({ ...ex, enrichment: e }));
       return NextResponse.json({ success: true, enrichment: e });
     }

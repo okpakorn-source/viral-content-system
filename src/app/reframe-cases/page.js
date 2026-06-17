@@ -8,6 +8,14 @@ import { useState, useEffect } from 'react';
 
 const scoreColor = (s) => s == null ? 'var(--text-muted)' : s >= 8 ? 'var(--desk-green)' : s >= 6 ? 'var(--desk-amber)' : s >= 4 ? '#f97316' : 'var(--desk-red)';
 const domainOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return 'แหล่งอ้างอิง'; } };
+// แยกเนื้อหลอมรวมเป็นท่อนๆ: ท่อนที่ครอบด้วย ⟦n⟧...⟦/⟧ = มาจากรีเสิร์ช (ref=n)
+const parseMerged = (s) => {
+  const out = []; const re = /⟦(\d+)⟧([\s\S]*?)⟦\/⟧/g; let last = 0, m;
+  while ((m = re.exec(s))) { if (m.index > last) out.push({ t: s.slice(last, m.index) }); out.push({ t: m[2], ref: Number(m[1]) }); last = m.index + m[0].length; }
+  if (last < s.length) out.push({ t: s.slice(last) });
+  return out;
+};
+const stripMarkers = (s) => String(s || '').replace(/⟦\d+⟧/g, '').replace(/⟦\/⟧/g, '');
 
 export default function ReframeCasesPage() {
   const [cases, setCases] = useState([]);
@@ -259,16 +267,30 @@ export default function ReframeCasesPage() {
               </div>
 
               {/* ── 🔎 ข้อมูลเสริม (เฉพาะคนดัง) — กดเอง ── */}
-              {c.enrichment?.ok && (
+              {c.enrichment?.ok && (() => { const srcFacts = (c.enrichment.facts || []).filter(f => f.sourceUrl); return (
                 <div style={{ marginTop: 10, background: 'rgba(125,211,252,0.08)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
                   <div style={{ ...fieldLabel, color: 'var(--desk-blue)', marginBottom: 5 }}>🔎 ข้อมูลเสริม{c.enrichment.person ? ` · ${c.enrichment.person}` : ''} (เอาไปประกอบการเขียน)</div>
-                  {(c.enrichment.facts || []).length > 0 && (
+
+                  {/* ★ ฉบับหลอมรวม: เนื้อหาดิบ + ข้อมูลเสริมแทรกเข้าจุดที่เนียน (ไฮไลต์ = มาจากรีเสิร์ช) */}
+                  {c.enrichment.merged?.content && (
+                    <div style={{ marginBottom: 9 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--desk-green)', marginBottom: 3 }}>📰 ฉบับหลอมรวม — เนื้อหาดิบ + ข้อมูลเสริม (พร้อมป้อนระบบเจน · คลิกคัดลอก · ส่วนไฮไลต์ = มาจากรีเสิร์ช)</div>
+                      <div onClick={() => copy(stripMarkers(c.enrichment.merged.content))} title="คลิกคัดลอก (เอาเครื่องหมายออกให้อัตโนมัติ)"
+                        style={{ fontSize: 13, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: '9px 11px', cursor: 'pointer', whiteSpace: 'pre-wrap', lineHeight: 1.7, color: 'var(--text-primary)' }}>
+                        {parseMerged(c.enrichment.merged.content).map((p, pi) => p.ref ? (
+                          <span key={pi} style={{ background: 'rgba(125,211,252,0.28)', borderRadius: 3, padding: '0 1px' }}>{p.t}<a href={srcFacts[p.ref - 1]?.sourceUrl} target="_blank" rel="noopener noreferrer" onClick={(ev) => ev.stopPropagation()} style={{ color: 'var(--desk-blue)', fontSize: 9, verticalAlign: 'super', textDecoration: 'none' }}>[{p.ref}]</a></span>
+                        ) : <span key={pi}>{p.t}</span>)}
+                      </div>
+                    </div>
+                  )}
+
+                  {srcFacts.length > 0 && (
                     <div style={{ marginBottom: (c.enrichment.comparables || []).length ? 8 : 0 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 3 }}>ข้อเท็จจริง (รีเสิร์ชจากเว็บ — แต่ละท่อนมีแหล่งกำกับ):</div>
-                      {c.enrichment.facts.map((f, fi) => (
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 3 }}>📋 แหล่งอ้างอิงข้อมูลเสริม (เลข [n] ตรงกับท่อนไฮไลต์ในฉบับหลอมรวม):</div>
+                      {srcFacts.map((f, fi) => (
                         <div key={fi} style={{ fontSize: 12.5, color: 'var(--text-primary)', marginTop: 3, lineHeight: 1.5 }}>
-                          • {f.text}
-                          {f.sourceUrl && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}> — 📍 รีเสิร์ชจาก <a href={f.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--desk-blue)', textDecoration: 'underline' }}>{domainOf(f.sourceUrl)}</a></span>}
+                          <b style={{ color: 'var(--desk-blue)' }}>[{fi + 1}]</b> {f.text}
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}> — 📍 รีเสิร์ชจาก <a href={f.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--desk-blue)', textDecoration: 'underline' }}>{domainOf(f.sourceUrl)}</a></span>
                         </div>
                       ))}
                     </div>
@@ -282,7 +304,7 @@ export default function ReframeCasesPage() {
                     </div>
                   )}
                 </div>
-              )}
+              ); })()}
 
               {/* ปุ่มหาข้อมูลเสริม — โชว์เมื่อยังไม่มี (backend จะข้ามถ้าไม่ใช่คนดัง) */}
               {!c.enrichment?.ok && (
