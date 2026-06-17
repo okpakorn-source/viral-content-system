@@ -15,6 +15,9 @@ export default function ReframeCasesPage() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [msg, setMsg] = useState('');
+  const [manualInput, setManualInput] = useState('');
+  const [manualRunning, setManualRunning] = useState(false);
+  const [manualInfo, setManualInfo] = useState(null);
 
   const load = async (mode = filter) => {
     setLoading(true);
@@ -45,6 +48,27 @@ export default function ReframeCasesPage() {
     setRunning(false);
   };
 
+  const runManual = async () => {
+    if (manualInput.trim().length < 10) { setManualInfo({ err: 'กรอกข้อความข่าว หรือวางลิงก์ก่อน' }); return; }
+    setManualRunning(true); setManualInfo(null);
+    try {
+      const r = await fetch('/api/news-desk/reframe-manual', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: manualInput.trim() }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        const cl = d.classify || {};
+        setManualInfo({ ok: true, title: d.extracted?.title, isUrl: d.extracted?.isUrl, chars: d.extracted?.chars, category: cl.category, dramaType: cl.dramaType, angles: d.reframe?.angles?.length });
+        setManualInput('');
+        await load('all'); setFilter('all');
+      } else {
+        setManualInfo({ err: d.error || 'แตกประเด็นไม่สำเร็จ' });
+      }
+    } catch (e) { setManualInfo({ err: e.message }); }
+    setManualRunning(false);
+  };
+
   const copy = (t) => { navigator.clipboard?.writeText(t); setMsg('📋 คัดลอกเนื้อหาดิบแล้ว'); setTimeout(() => setMsg(''), 1500); };
 
   const card = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 16, color: 'var(--text-primary)' };
@@ -58,8 +82,31 @@ export default function ReframeCasesPage() {
     <div style={{ maxWidth: 1000, margin: '0 auto', padding: '24px 16px', color: 'var(--text-primary)' }}>
       <h1 style={{ fontSize: 24, fontWeight: 900, marginBottom: 4, color: 'var(--text-primary)' }}>♻️ คลังแตกประเด็นข่าว (เนื้อหาดิบ)</h1>
       <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>
-        แตกข่าวกระแส/ดราม่า/ท็อกซิก → "เนื้อหาดิบ" หลายมุมเชิงบวก (ที่มาที่ไป+เหตุผล+บริบท ไม่บิดเบือน) สำหรับเอาไปป้อนระบบทำข่าวอัตโนมัติเจนต่อ · มีข่าวต้นทาง + แหล่งอ้างอิงพร้อมลิงก์ให้ตรวจที่มา · เก็บทั้งทดสอบและทำจริง
+        แตกข่าวกระแส/ดราม่า/ท็อกซิก → "เนื้อหาดิบเชิงลึก" 1 มุมที่ดีที่สุด (มากสุด 2 ทางเลือก) เล่าแกนเดียวให้ลึก ไม่กระชากอารมณ์หลายมุม · ใช้ข้อเท็จจริงไม่บิดเบือน · เอาไปป้อนระบบทำข่าวอัตโนมัติเจนต่อ · มีข่าวต้นทาง+แหล่งอ้างอิงให้ตรวจที่มา
       </p>
+
+      {/* ── ช่องแตกประเด็นแบบแมนนวล: วาง Text/URL → สกัด → ตัดขยะ → จัดหมวด → แตกประเด็น ── */}
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--desk-purple)', borderRadius: 14, padding: 16, marginBottom: 18 }}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: 'var(--text-primary)', marginBottom: 3 }}>✍️ แตกประเด็นเอง (วางข่าว/ลิงก์)</div>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 9, lineHeight: 1.55 }}>
+          วาง <b>ข้อความข่าวเต็ม</b> หรือ <b>ลิงก์ข่าวต้นทาง</b> → ระบบจะสกัดเนื้อ (จากลิงก์), ตัดขยะ/ด่านคำต้องห้าม, จัดหมวด+วัดดราม่า แล้วแตกประเด็นเป็นเนื้อหาดิบให้ (เก็บเข้าคลังหมวด "ทำจริง")
+        </div>
+        <textarea value={manualInput} onChange={(e) => setManualInput(e.target.value)} disabled={manualRunning}
+          placeholder="วางข้อความข่าว เช่น 'พี่หนุ่ม กรรชัย ถามกลางรายการ...' หรือวางลิงก์ https://..."
+          style={{ width: '100%', minHeight: 90, resize: 'vertical', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', padding: '10px 12px', fontSize: 13, lineHeight: 1.6, fontFamily: 'inherit' }} />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 9, flexWrap: 'wrap' }}>
+          <button onClick={runManual} disabled={manualRunning}
+            style={{ background: manualRunning ? 'var(--bg-elevated)' : 'linear-gradient(135deg,#a855f7,#7c3aed)', color: manualRunning ? 'var(--text-muted)' : '#fff', border: 'none', borderRadius: 10, padding: '10px 20px', fontWeight: 800, cursor: manualRunning ? 'default' : 'pointer', fontSize: 14 }}>
+            {manualRunning ? '⏳ กำลังสกัด+แตกประเด็น... (~20-40 วิ)' : '🔍 สกัด + แตกประเด็น'}
+          </button>
+          {manualInfo?.ok && (
+            <span style={{ fontSize: 12.5, color: 'var(--desk-green)' }}>
+              ✅ เสร็จ — {manualInfo.isUrl ? 'สกัดจากลิงก์' : 'จากข้อความ'} {manualInfo.chars ? `(${manualInfo.chars} ตัว)` : ''} · หมวด {manualInfo.category || '—'}{manualInfo.dramaType ? ` · ดราม่า ${manualInfo.dramaType}` : ''} · ได้ {manualInfo.angles} มุม (ดูด้านล่าง ↓)
+            </span>
+          )}
+          {manualInfo?.err && <span style={{ fontSize: 12.5, color: 'var(--desk-red)' }}>❌ {manualInfo.err}</span>}
+        </div>
+      </div>
 
       {/* สถิติ */}
       {stats && (
@@ -118,6 +165,16 @@ export default function ReframeCasesPage() {
                 )}
               </div>
 
+              {/* ป้ายเกณฑ์ที่ใช้คัด/หยิบข่าวนี้ (จากสมองโต๊ะข่าว) */}
+              {c.classify && (c.classify.category || c.classify.dramaType) && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+                  {c.classify.category && <span style={{ fontSize: 10.5, padding: '2px 7px', borderRadius: 5, background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>หมวด: {c.classify.category}</span>}
+                  {c.classify.dramaType && c.classify.dramaType !== 'none' && <span style={{ fontSize: 10.5, padding: '2px 7px', borderRadius: 5, background: 'var(--bg-elevated)', color: 'var(--desk-amber)' }}>ดราม่า: {c.classify.dramaType}</span>}
+                  {c.classify.tone && <span style={{ fontSize: 10.5, padding: '2px 7px', borderRadius: 5, background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>โทน: {c.classify.tone}</span>}
+                  {c.classify.subject && <span style={{ fontSize: 10.5, padding: '2px 7px', borderRadius: 5, background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>{c.classify.subject === 'celeb' ? 'ดารา/คนดัง' : c.classify.subject === 'public' ? 'บุคคลสาธารณะ' : 'คนทั่วไป'}</span>}
+                </div>
+              )}
+
               {/* ───────── STEP ① ข่าวต้นทาง (ข่าวดิบที่รับเข้ามา) ───────── */}
               <div style={stepHeader('#7dd3fc')}>① ข่าวต้นทาง <span style={stepNote}>— ข่าวดิบที่รับเข้ามา (ยังไม่แปลง)</span></div>
               <div style={sectionBox}>
@@ -154,16 +211,17 @@ export default function ReframeCasesPage() {
                 <div style={{ ...sectionBox, fontSize: 13, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.65 }}>{c.cleanBrief}</div>
               </>}
 
-              {/* ───────── STEP ③ มุมที่แตกได้ → เนื้อหาดิบป้อนระบบเจน ───────── */}
-              <div style={stepHeader('#a855f7')}>③ มุมที่แตกได้ ({(c.angles || []).length} มุม) <span style={stepNote}>— เนื้อหาดิบแต่ละมุม คัดลอกไปป้อนระบบเจน</span></div>
+              {/* ───────── STEP ③ มุมที่ดีที่สุด → เนื้อหาดิบเชิงลึก (เลือก 1 ไปป้อนระบบเจน) ───────── */}
+              <div style={stepHeader('#a855f7')}>③ มุมที่ดีที่สุด{(c.angles || []).length > 1 ? ` (${(c.angles || []).length} ทางเลือก — เลือก 1)` : ''} <span style={stepNote}>— เล่าแกนเดียวให้ลึก คัดลอกไปป้อนระบบเจน</span></div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {(c.angles || []).map((a, i) => {
                   const raw = a.rawContent || a.caption || ''; // รองรับเคสเก่า
+                  const many = (c.angles || []).length > 1;
                   return (
                   <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
-                    {/* แถบหัวมุม: บอกชัดว่า "มุมที่ N" + ชื่อมุม */}
+                    {/* แถบหัวมุม: บอกชัดว่าเป็นมุม/ทางเลือกไหน + ชื่อแกน */}
                     <div style={{ background: 'rgba(168,85,247,0.14)', padding: '7px 11px', fontWeight: 800, fontSize: 13.5, color: 'var(--text-primary)' }}>
-                      🎯 มุมที่ {i + 1} · {a.type}
+                      🎯 {many ? `ทางเลือกที่ ${i + 1}` : 'มุมที่เลือก'} · {a.type}
                     </div>
                     <div style={{ padding: '9px 11px' }}>
                       {a.focus && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 7 }}><b style={{ color: 'var(--text-muted)' }}>โฟกัส:</b> {a.focus}</div>}
