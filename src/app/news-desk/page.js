@@ -7,14 +7,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Header from '@/components/layout/Header';
 
+// ★ 17 มิ.ย. (ทีมสั่งยุบเหลือ 2 หมวดค้น + เก็บแท็บใช้งาน · เรียงใหม่สุดก่อน):
 const TABS = [
-  { id: 'all', label: '📋 ทั้งหมด' },
-  { id: 'good', label: '💎 น้ำดี' },          // good + ข่าวเก่า + ตามรอย + ลำบาก
-  { id: 'celeb', label: '🎬 ดารา' },          // celeb + ย้อนสัมภาษณ์ + ดาราอมตะ
-  { id: 'trend', label: '🔥 กระแส' },         // trend + แชร์จริง
-  { id: 'trendtrack', label: '🔴 ติดตามกระแส' }, // ตามกระแสเฉพาะที่ทีมสั่ง
-  { id: 'focus', label: '🎯 ผลค้นหา' },          // ผลจากสั่งหาเฉพาะแนว — รวมไว้ที่เดียว อยู่ถาวร
-  { id: 'clip', label: '📺 คลิป/เพจ' },        // video/รีลส์ + คลิปสัมภาษณ์
+  { id: 'kratase', label: '🔥 กระแส' },        // เรียลไทม์ ≤2 วัน — คนดัง/สังคมสนใจ (เอ็นเกจสูง) เรียงใหม่สุดก่อน
+  { id: 'namdee', label: '💚 ดาราน้ำดี' },     // ดาราทำดี/น้ำดี สต็อกทำได้ตลอด (เก่าก็ได้) เรียงใหม่สุดก่อน
+  { id: 'focus', label: '🎯 ผลค้นหา' },          // ผลจากค้นคีย์เวิร์ดคน/แนว — อยู่ถาวร
+  { id: 'trendtrack', label: '🔴 ติดตามกระแส' }, // (เก็บไว้) ใส่คีย์เวิร์ดติดตามกระแสเฉพาะเรื่อง
   { id: 'shortlist', label: '⭐ คลังส่งเช้า' },
   { id: 'ready', label: '✅ พร้อมใช้' },
   { id: 'junk', label: '🗑️ คลังขยะ' },        // ของที่ระบบตัดออก — รีวิว+เอากลับได้
@@ -113,7 +111,7 @@ function freshnessBadge(it) {
 }
 
 export default function NewsDeskPage() {
-  const [tab, setTab] = useState('all');
+  const [tab, setTab] = useState('kratase'); // ★ ดีฟอลต์ = กระแส (ยุบเหลือ 2 หมวด)
   const [items, setItems] = useState([]);
   const [mixToday, setMixToday] = useState({});
   const [sentToday, setSentToday] = useState(0);
@@ -121,6 +119,7 @@ export default function NewsDeskPage() {
   const [harvesting, setHarvesting] = useState(false);
   const [focusSel, setFocusSel] = useState('celeb_gooddeed');
   const [trendTopic, setTrendTopic] = useState('');
+  const [kwInput, setKwInput] = useState(''); // ★ ค้นด้วยคีย์เวิร์ดคน/เรื่องเอง
   const [trendCases, setTrendCases] = useState([]); // คลังค้นหาติดตาม (เคสคีย์เวิร์ด+ลิงก์)
   const [msg, setMsg] = useState('');
   const [me, setMe] = useState('');
@@ -254,6 +253,21 @@ export default function NewsDeskPage() {
         setMsg(`🎯 หาแนว "${f?.label}" เสร็จ · เก็บ ${d.harvested} · ผ่านคัด ${d.added} — ดูที่แท็บ 🎯 ผลค้นหา`);
         setTab('focus'); // ★ เด้งไปแท็บผลค้นหาให้เห็นทันที (เดิมผลไปอยู่คนละแท็บ เลยเหมือนไม่อัปเดต)
       } else setMsg(`❌ ${d.error}`);
+      load();
+    } catch (e) { setMsg('❌ ' + e.message); }
+    setHarvesting(false);
+  };
+
+  // ★ 17 มิ.ย. (ทีมขอ): ค้นด้วยคีย์เวิร์ดคน/เรื่องเอง (เผื่อปิ๊งไอเดีย) → ผลไปแท็บ 🎯 ผลค้นหา
+  const keywordSearch = async () => {
+    const kw = kwInput.trim();
+    if (kw.length < 2) { setMsg('ใส่ชื่อ/คีย์เวิร์ดก่อน (เช่น "ลิซ่า", "ดารากตัญญู", "หมูเด้ง")'); return; }
+    setHarvesting(true); setMsg(`🔎 ค้น "${kw}" ทุกแหล่ง (สด+อมตะ+สัมภาษณ์) — AI ค้น+คัด ~2-3 นาที...`);
+    try {
+      const res = await fetch('/api/news-desk/harvest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keyword: kw }) });
+      const d = await parseRes(res);
+      if (d.success) { setMsg(`🔎 ค้น "${kw}" เสร็จ · เก็บ ${d.harvested} · ผ่านคัด ${d.added} — ดูที่แท็บ 🎯 ผลค้นหา`); setTab('focus'); setKwInput(''); }
+      else setMsg(`❌ ${d.error}`);
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
     setHarvesting(false);
@@ -615,6 +629,18 @@ export default function NewsDeskPage() {
             style={{ padding: '7px 16px', borderRadius: 9, border: '1px solid rgba(59,130,246,0.5)', cursor: harvesting ? 'wait' : 'pointer', background: harvesting ? '#4b5563' : 'rgba(59,130,246,0.13)', color: harvesting ? '#fff' : 'var(--desk-blue, #2563eb)', fontWeight: 700, fontSize: 13.5 }}>
             {harvesting ? '⏳...' : '🎯 หาแนวนี้'}</button>
           <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>— เติมช่องว่างของวันได้ตรงจุด (เช่น วันนี้ขาดข่าวรักสัตว์)</span>
+        </div>
+
+        {/* ★ 17 มิ.ย.: ค้นด้วยคีย์เวิร์ดคน/เรื่องเอง (เผื่อปิ๊งไอเดีย) → ผลไปแท็บ 🎯 ผลค้นหา */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', padding: '10px 12px', borderRadius: 12, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.3)' }}>
+          <span style={{ fontSize: 18 }}>🔎</span>
+          <input value={kwInput} onChange={e => setKwInput(e.target.value)} disabled={harvesting}
+            onKeyDown={e => { if (e.key === 'Enter') keywordSearch(); }}
+            placeholder='ค้นเอง — ใส่ชื่อคน/แนวที่อยากได้ (เช่น "ลิซ่า", "ดารากตัญญู", "หมูเด้ง") ระบบค้นสด+อมตะ+สัมภาษณ์ให้'
+            style={{ flex: 1, padding: '9px 14px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 14 }} />
+          <button onClick={keywordSearch} disabled={harvesting || kwInput.trim().length < 2}
+            style={{ padding: '9px 18px', borderRadius: 9, border: 'none', cursor: (harvesting || kwInput.trim().length < 2) ? 'not-allowed' : 'pointer', background: (harvesting || kwInput.trim().length < 2) ? '#4b5563' : 'linear-gradient(135deg,#a855f7,#7c3aed)', color: '#fff', fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap' }}>
+            {harvesting ? '⏳...' : '🔎 ค้นคีย์เวิร์ดนี้'}</button>
         </div>
 
         {/* ★ 16 มิ.ย.: ติดตามกระแส — ใส่ชื่อกระแสวันนี้ → AI วิเคราะห์ตัวละคร+คีย์เวิร์ด → ค้นทุกแหล่ง */}

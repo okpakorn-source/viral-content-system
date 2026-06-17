@@ -40,15 +40,25 @@ export async function GET(request) {
       return NextResponse.json({ success: true, items: lightF, total: f.length, tab: 'focus' });
     }
 
-    // ★ 16 มิ.ย. (ยุบแท็บ 12→7): แต่ละแท็บรวมหลายเลน — งงน้อยลง
+    // ★ 17 มิ.ย. (ทีมสั่งยุบเหลือ 2 หมวดค้น + เรียงใหม่สุดก่อน): 🔥 กระแส / 💚 ดาราน้ำดี
+    const KRATASE_LANES = ['trend', 'buzz', 'trend-track'];                                             // กระแสเรียลไทม์
+    const NAMDEE_LANES = ['good', 'celeb', 'evergreen', 'evergreen-celeb', 'throwback', 'followup', 'interview', 'video']; // ดาราน้ำดี (สต็อก)
     const TAB_LANES = {
-      trend: ['trend', 'buzz'],
-      good: ['good', 'evergreen', 'followup'],
-      celeb: ['celeb', 'throwback', 'evergreen-celeb'],
-      clip: ['video', 'interview'],
-      trendtrack: ['trend-track'],
+      kratase: KRATASE_LANES,
+      namdee: NAMDEE_LANES,
+      // เก็บ alias เดิมไว้กันลิงก์/บุ๊กมาร์กเก่าพัง
+      trend: KRATASE_LANES, good: NAMDEE_LANES, celeb: ['celeb', 'throwback', 'evergreen-celeb'], clip: ['video', 'interview'], trendtrack: ['trend-track'],
     };
+    const isCategoryTab = tab === 'kratase' || tab === 'namdee';
     if (TAB_LANES[tab]) items = items.filter(i => TAB_LANES[tab].includes(i.lane));
+    // ★ กระแส = ต้องสด ≤2 วันเท่านั้น (ตัดกระแสเก่าทิ้งจากหน้านี้) · ดาราน้ำดี = สต็อกได้ ไม่ตัดอายุ
+    if (tab === 'kratase') {
+      items = items.filter(i => {
+        const ref = i.publishedAt || i.harvestedAt;
+        const ageDays = ref ? (Date.now() - new Date(ref).getTime()) / 864e5 : 99;
+        return ageDays <= 2;
+      });
+    }
     // ★ 15 มิ.ย.: แท็บ ⭐ คลังส่งเช้า — ข่าวที่เลือกเก็บไว้ส่งพนักงาน (เรียงเก็บล่าสุดก่อน, ไม่นับที่หยิบไปแล้ว)
     if (tab === 'shortlist') {
       items = items.filter(i => i.shortlisted && !i.used && i.status !== 'dismissed');
@@ -81,15 +91,19 @@ export async function GET(request) {
     const mix = {};
     for (const s of sentToday) mix[s.category || 'อื่นๆ'] = (mix[s.category || 'อื่นๆ'] || 0) + 1;
 
-    // ★ Mix Governor (เฟส 2): เรียง feed ตามโควตาที่เหลือของวัน — เกินเพดานดราม่าแล้วการ์ดดราม่าจม น้ำดีลอย
-    const { items: governed, governor } = applyMixGovernor(items, mix);
-
-    // ★ Discovery Ranking (15 มิ.ย.): หมุนเวียนหัวฟีด + ดันข่าวใหม่/ยังไม่แตะ + สปอตไลต์ข่าวคะแนนกลาง
-    //   แก้อาการ "เลื่อนดูก็วนข่าวเดิม ข่าว 50-60 ไม่เคยผ่านตา" — ไม่แตะคะแนนจริง แค่จัดลำดับการมองเห็น
-    const discovered = applyDiscoveryRanking(governed);
+    // ★ 17 มิ.ย. (ทีมสั่ง "เลิกเรียงสกอร์ ข่าวเดิมวนที่เดิม → เอาใหม่สุดขึ้นก่อน"):
+    let ranked, governor = null;
+    if (isCategoryTab) {
+      // หมวด กระแส/ดาราน้ำดี = เรียง "ใหม่สุดขึ้นก่อน" (เวลาเข้าโต๊ะ) ไม่ใช้สกอร์/ไม่หมุน → ข่าวใหม่ขึ้นบนเสมอ ไม่วนเดิม
+      ranked = items.slice().sort((a, b) => new Date(b.harvestedAt || 0) - new Date(a.harvestedAt || 0));
+    } else {
+      // แท็บรวม/เก่า: คงกลไกเดิม (governor + discovery)
+      const mg = applyMixGovernor(items, mix); governor = mg.governor;
+      ranked = applyDiscoveryRanking(mg.items);
+    }
 
     // fullText (บทถอดเสียงคลิป) ยาว — ไม่ส่งให้หน้า feed
-    const lightItems = discovered.slice(0, limit).map(({ fullText, ...rest }) => rest);
+    const lightItems = ranked.slice(0, limit).map(({ fullText, ...rest }) => rest);
 
     // ★ brief ล่าสุดจาก บก.ใหญ่ AI + สถานะสวิตช์ Auto-Pilot จริง (UI ต้องโชว์ตามที่ทีมตั้ง ไม่ใช่ค่า default)
     let chiefBrief = null;

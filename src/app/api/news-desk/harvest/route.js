@@ -30,6 +30,22 @@ async function doHarvest(opts) {
 export async function POST(request) {
   try {
     const body = await request.json().catch(() => ({}));
+    // ★ 17 มิ.ย. (ทีมขอ): ค้นด้วย "คีย์เวิร์ดคน/เรื่อง" เอง (เผื่อปิ๊งไอเดีย) เช่น "ลิซ่า" / "ดารากตัญญู" / "หมูเด้ง"
+    if (body.keyword && String(body.keyword).trim().length >= 2) {
+      const kw = String(body.keyword).trim().slice(0, 60);
+      const _searchedAt = new Date().toISOString();
+      const qs = [
+        { q: `${kw} ล่าสุด`, lane: 'trend', timeRange: 'qdr:w', endpoint: 'news' },          // สด
+        { q: `${kw} ข่าว ประเด็น`, lane: 'celeb', timeRange: 'qdr:m', endpoint: 'search' },   // กว้าง
+        { q: `${kw} ช่วยเหลือ ทำดี บริจาค กตัญญู`, lane: 'good', timeRange: 'qdr:y', endpoint: 'search' }, // น้ำดี/อมตะ
+        { q: `${kw} สัมภาษณ์ เปิดใจ`, lane: 'celeb', timeRange: 'qdr:y', endpoint: 'search' }, // สัมภาษณ์
+      ];
+      return await doHarvest({
+        lanes: [],
+        extraQueries: qs.map(f => ({ ...f, tag: { focusTag: `🔎 ${kw}`, searchedAt: _searchedAt } })),
+        judgeTop: Math.min(40, Number(body.judgeTop) || 20),
+      });
+    }
     // ★ สั่งหาเฉพาะแนว (15 มิ.ย.): focus → คำค้นเฉพาะแนวนั้น → harvest แค่แนวนั้น (judge ได้ลึกขึ้นเพราะคำน้อย)
     if (body.focus) {
       const { generateFocusQueries } = await import('@/lib/services/newsDesk/goodNewsScout');
