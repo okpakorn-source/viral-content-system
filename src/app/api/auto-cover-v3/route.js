@@ -56,7 +56,7 @@ async function _renderCoverV3(request) {
     };
 
     // ★ REV MARKER — ยืนยันว่าเซิร์ฟเวอร์รันโค้ดเวอร์ชันไหน (เช็ค log ก่อนเทสทุกครั้ง — กัน staleness)
-    const COVER_REV = 'rev-14w-2026-06-18 fix-edge-crop'; // + ค้นภาพอารมณ์/สัมภาษณ์ ให้ hero สื่ออารมณ์ทุกรอบ
+    const COVER_REV = 'rev-14x-2026-06-18 hero-single+dedup'; // + ค้นภาพอารมณ์/สัมภาษณ์ ให้ hero สื่ออารมณ์ทุกรอบ
     console.log(`[CoverV3] 🏷️ CODE ${COVER_REV} — รันโค้ดเวอร์ชันนี้`);
 
     // ── ① Identity + Scrape + Judge (สมองเดิม — พิสูจน์แล้ว) ──
@@ -215,7 +215,7 @@ async function _renderCoverV3(request) {
       imageBuffers.forEach((img, i) => {
         const h = hashes[i];
         if (h === null) { keep.push(i); return; }
-        const dup = kept.some(kh => { let x = kh ^ h, d = 0; while (x) { d += Number(x & 1n); x >>= 1n; } return d <= 6; });
+        const dup = kept.some(kh => { let x = kh ^ h, d = 0; while (x) { d += Number(x & 1n); x >>= 1n; } return d <= 10; }); // rev.14x: เข้มขึ้น 6→10 จับภาพคล้าย (คู่ยืนชุดเดียวกัน)
         if (!dup) { keep.push(i); kept.push(h); }
       });
       if (keep.length >= 4 && keep.length < imageBuffers.length) {

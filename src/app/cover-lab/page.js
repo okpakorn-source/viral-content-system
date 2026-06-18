@@ -144,6 +144,7 @@ export default function CoverLabPage() {
   const [library, setLibrary] = useState([]);
   const [loadingLib, setLoadingLib] = useState(false);
   const fileRef = useRef(null);
+  const pollingRef = useRef(false); // ★ กัน poll ซ้ำ (foreground + visibilitychange)
 
   // โหลด template จริง 6 แบบจากหน้าปกข่าว
   useEffect(() => {
@@ -183,6 +184,37 @@ export default function CoverLabPage() {
         }
       })
       .catch(() => {});
+  }, []);
+
+  // ★ Background-friendly (มือถือ): สลับแอป/ปิดจอแล้วกลับมา tab เดิม → poll เดิมถูก suspend
+  //   พอกลับมา visible อีกครั้ง เช็คงานค้างซ้ำ → ดึงผลที่ทำเสร็จเบื้องหลังมาแสดง (ไม่ต้องคาหน้าจอ)
+  useEffect(() => {
+    const resync = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (pollingRef.current) return; // กำลังตามผลอยู่แล้ว
+      let saved = null;
+      try { saved = JSON.parse(localStorage.getItem(COVER_JOB_KEY) || 'null'); } catch {}
+      if (!saved?.jobId) return;
+      if (Date.now() - (saved.at || 0) > 60 * 60 * 1000) { try { localStorage.removeItem(COVER_JOB_KEY); } catch {} return; }
+      fetch(`/api/queue/status?id=${saved.jobId}`, { cache: 'no-store' })
+        .then(r => r.json())
+        .then(st => {
+          if (st.success && st.status === 'completed' && st.result) {
+            setRecoveryCover(null);
+            applyCoverResult(st.result);
+            try { localStorage.removeItem(COVER_JOB_KEY); } catch {}
+          } else if (st.success && (st.status === 'pending' || st.status === 'processing')) {
+            resumeCoverJob(saved.jobId); // ตามต่อให้เอง
+          }
+        })
+        .catch(() => {});
+    };
+    document.addEventListener('visibilitychange', resync);
+    window.addEventListener('focus', resync);
+    return () => {
+      document.removeEventListener('visibilitychange', resync);
+      window.removeEventListener('focus', resync);
+    };
   }, []);
 
   // ★ FIX (10 มิ.ย.): error จาก Vercel platform (เช่น FUNCTION_INVOCATION_TIMEOUT) เป็น object {code,id,message}
@@ -298,6 +330,8 @@ export default function CoverLabPage() {
 
   // ★ Recovery: poll ต่อจาก job ที่ยังวิ่งอยู่ หลังรีเฟรชหน้า/เน็ตหลุด
   async function resumeCoverJob(jobId) {
+    if (pollingRef.current) return; // ★ กำลังตามอยู่แล้ว
+    pollingRef.current = true;
     setLoading(true);
     setError('');
     setJobProgress('🔄 พบงานสร้างปกค้างอยู่ — กำลังติดตามผลต่อ...');
@@ -307,6 +341,7 @@ export default function CoverLabPage() {
     } catch (e) {
       setError(errText(e.message || e));
     } finally {
+      pollingRef.current = false;
       setLoading(false);
       setJobProgress('');
     }
@@ -339,17 +374,19 @@ export default function CoverLabPage() {
         composer, // 'v3' = Vision Director | 'v1' = ระบบเดิม
         regenerate: isRegenerate, clearCache: !!isRegenerate && isFresh,
       });
-      // ★ Recovery: จำ jobId ไว้ — ถ้า UI หลุด/รีเฟรช ระบบกู้ผลลัพธ์คืนได้
+      // ★ Recovery: จำ jobId ไว้ — ถ้า UI หลุด/รีเฟรช/สลับแอป ระบบกู้ผลลัพธ์คืนได้
       try { localStorage.setItem(COVER_JOB_KEY, JSON.stringify({ jobId: addData.jobId, at: Date.now(), newsTitle })); } catch {}
       setJobProgress(addData.queuesAhead > 0
-        ? `📋 อยู่ในคิวลำดับที่ ${addData.position} (รอ ${addData.queuesAhead} คิวก่อนหน้า)`
-        : '⚡ เริ่มประมวลผล...');
+        ? `📋 อยู่ในคิวลำดับที่ ${addData.position} (รอ ${addData.queuesAhead} คิวก่อนหน้า) — ทำงานเบื้องหลัง ออกไปทำอย่างอื่นได้ กลับมาดูทีหลังได้เลย`
+        : '⚡ เริ่มประมวลผล... (ทำงานเบื้องหลัง — ออกจากหน้านี้/ปิดจอได้ กลับมาดูทีหลัง ระบบทำต่อให้)');
 
+      pollingRef.current = true;
       const result = await pollCoverJob(addData.jobId);
       applyCoverResult(result);
     } catch (e) {
       setError(errText(e.message || e));
     } finally {
+      pollingRef.current = false;
       setLoading(false);
       setJobProgress('');
     }

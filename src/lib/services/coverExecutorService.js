@@ -279,6 +279,19 @@ async function renderRectTile(src, crop, slot, fb) {
     const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
     // rev.14w: ครอปจากภาพหมู่ "แน่นขึ้น" (+0.12) — กันหน้าคนข้างเคียงคาบขอบกรอบ/ตกเฟรม (บทเรียน CASE-114 มิคตกเฟรม)
     region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, Math.min(0.96, faceFrac + 0.12), faceTopAt, Math.min(0.90, maxFaceHFrac + 0.08));
+    // rev.14x: เลื่อนกรอบแนวนอนให้ "พ้นหน้าคนข้างเคียง" — เหลือหน้าเดี่ยวเด่น ไม่มีครึ่งหน้าคนอื่นติดขอบ (CASE-119 ชมพู่ติดขอบ hero)
+    const lcx = ((largest.x1 + largest.x2) / 2) * imgW;
+    let rMin = 0, rMax = imgW;
+    for (const f of fb.allFaces) {
+      if (f === largest) continue;
+      const fcx = ((f.x1 + f.x2) / 2) * imgW;
+      if (fcx < lcx) rMin = Math.max(rMin, f.x2 * imgW); // คนอยู่ซ้าย → ขอบซ้ายของกรอบห้ามเลยขอบขวาของเขา
+      else rMax = Math.min(rMax, f.x1 * imgW);            // คนอยู่ขวา → ขอบขวาของกรอบห้ามเลยขอบซ้ายของเขา
+    }
+    let rl = region.left, rr = region.left + region.width;
+    if (rr > rMax) { const sh = rr - rMax; rl -= sh; rr -= sh; } // มีคนขวา → เลื่อนซ้าย
+    if (rl < rMin) { const sh = rMin - rl; rl += sh; rr += sh; } // มีคนซ้าย → เลื่อนขวา
+    region.left = Math.round(Math.max(0, Math.min(rl, imgW - region.width)));
   } else {
     region = fitCropToSlotAspect(crop, imgW, imgH, slot.w / slot.h);
   }
