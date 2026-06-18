@@ -187,6 +187,34 @@ async function _renderCoverV3(request) {
       }
     } catch (e) { console.log('[CoverV3] face-only filter skipped:', e.message?.slice(0, 40)); }
 
+    // ── rev.14j: ตัดภาพ "เกือบซ้ำ" (เฟรม/ชุดเดียวกัน) ด้วย average-hash — กัน hero โผล่ซ้ำช่องอื่น ──
+    //    บทเรียน CASE-090: hero เบนซ์ชุดน้ำเงิน + ขวาล่างเบนซ์ชุดน้ำเงิน = ซ้ำ. เก็บใบที่หน้าคมสุด(เรียงแล้ว)
+    try {
+      const sharpLib2 = (await import('sharp')).default;
+      const hashes = await Promise.all(imageBuffers.map(async (img) => {
+        try {
+          const raw = await sharpLib2(img.buffer).grayscale().resize(8, 8, { fit: 'fill' }).raw().toBuffer();
+          let sum = 0; for (let k = 0; k < raw.length; k++) sum += raw[k];
+          const avg = sum / raw.length;
+          let bits = 0n;
+          for (let k = 0; k < raw.length; k++) if (raw[k] > avg) bits |= (1n << BigInt(k));
+          return bits;
+        } catch { return null; }
+      }));
+      const keep = [], kept = [];
+      imageBuffers.forEach((img, i) => {
+        const h = hashes[i];
+        if (h === null) { keep.push(i); return; }
+        const dup = kept.some(kh => { let x = kh ^ h, d = 0; while (x) { d += Number(x & 1n); x >>= 1n; } return d <= 6; });
+        if (!dup) { keep.push(i); kept.push(h); }
+      });
+      if (keep.length >= 4 && keep.length < imageBuffers.length) {
+        imageBuffers = keep.map(i => imageBuffers[i]);
+        faceBoxes = keep.map(i => faceBoxes[i]);
+        console.log(`[CoverV3] 🧬 dedup near-duplicate → ${imageBuffers.length} ใบ`);
+      }
+    } catch (e) { console.log('[CoverV3] dedup skipped:', e.message?.slice(0, 40)); }
+
     // ── Quality floor (หลักเดียวกับ v1) ──
     const { V3_TEMPLATES, adaptRegistryTemplate } = await import('@/lib/services/coverExecutorService');
     if (imageBuffers.length < 3) {
@@ -201,7 +229,11 @@ async function _renderCoverV3(request) {
     const cleanFaceCount = faceBoxes.filter(fb =>
       fb && fb.x2 > fb.x1 && ((fb.x2 - fb.x1) * (fb.y2 - fb.y1)) >= 0.03 && (fb.count || 1) <= 3 && !fb.hasText
     ).length;
-    const slotBudget = Math.max(3, Math.min(imageBuffers.length, cleanFaceCount + 1)); // +1 = เผื่อช่องฉากเหตุการณ์ 1 ช่อง
+    let slotBudget = Math.max(3, Math.min(imageBuffers.length, cleanFaceCount + 1)); // +1 = เผื่อช่องฉากเหตุการณ์ 1 ช่อง
+    // rev.14m: ข่าวคู่รัก/ครอบครัว — รูปเดี่ยวคมจำกัด → บังคับโครง 4 ช่อง (faces_circle) ที่สะอาดสุด
+    //   บทเรียน CASE-094: 5-6 ช่องดูดภาพหมู่/กลุ่มมาเติม หน้าไม่เด่น; 4 ช่อง (hero+2+วงกลม) สะอาดกว่า
+    const stRel = (identity?.storyType || '').toLowerCase();
+    if (/warm|family|relationship|romance|couple|love/.test(stRel)) slotBudget = Math.min(slotBudget, 4);
     console.log(`[CoverV3] 🎯 หน้าคมใช้ได้ ${cleanFaceCount} ใบ → งบช่อง = ${slotBudget} (จากพูล ${imageBuffers.length})`);
 
     // ── ② AI Vision Director — เลือกโครงเองจากแม่บทที่แกะจากปกไวรัลจริง ──
