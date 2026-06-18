@@ -214,12 +214,13 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
 
 /** พารามิเตอร์การจัดหน้าตามชนิด/ขนาดช่อง */
 function faceParamsForSlot(slot) {
-  // หมายเหตุ: ค่าพวกนี้อ้างอิง "หัว" (รวมผม) แล้ว — สูงกว่าเดิมเพราะหัวใหญ่กว่าหน้า
+  // หมายเหตุ: ค่าพวกนี้อ้างอิง "หัว" (รวมผม) แล้ว
+  // rev.14r (feedback): hero ซูมออกนิด "เห็นทั้งหน้า+ไหล่" (เดิม 0.84 แน่นไปกับเซลฟี่จัด) · ช่องรองคงแน่นเน้นหน้า
   if (slot.shape === 'circle') return { faceFrac: 0.80, faceTopAt: 0.47, maxFaceHFrac: 0.80 };
   const big = (slot.w * slot.h) >= (520 * 800); // ช่องเด่น/ฮีโร่
-  // hero/ช่องเด่น: หัวใหญ่เต็มช่องแบบ CASE-072 (ครอปพื้นหลังลายตาทิ้ง) + ผมไม่ตกขอบ
-  if (slot.id === 'main' || big) return { faceFrac: 0.84, faceTopAt: 0.38, maxFaceHFrac: 0.80 };
-  return { faceFrac: 0.84, faceTopAt: 0.41, maxFaceHFrac: 0.80 };
+  // rev.14t (feedback): hero กลับมา "เด่น" แบบ CASE-103 (0.82) — เห็นทั้งหน้า+เด่น จับเฟซง่าย (0.72 เด่นน้อยไป)
+  if (slot.id === 'main' || big) return { faceFrac: 0.82, faceTopAt: 0.38, maxFaceHFrac: 0.78 };
+  return { faceFrac: 0.82, faceTopAt: 0.40, maxFaceHFrac: 0.78 };
 }
 
 /** มี face box เดี่ยวใช้ได้ไหม (1 หน้า) */
@@ -272,20 +273,11 @@ async function renderRectTile(src, crop, slot, fb) {
     const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
     region = faceRegionForSlot(fb, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
   } else if (usableGroupFaces(fb)) {
-    // rev.14g: ช่อง "แนวตั้งสูง" + ภาพคู่ "กว้าง" (ยืนเคียงกัน) → โชว์ทั้งคู่ไม่ได้โดยไม่เต็มตัว
-    //   → ครอปหน้าใหญ่สุดเดี่ยวแทน (หน้าชัดรู้ว่าใคร ดีกว่าคู่ไกลเต็มตัว — บทเรียน CASE-085)
-    const fs = fb.allFaces;
-    const gx1 = Math.min(...fs.map(f => f.x1)), gx2 = Math.max(...fs.map(f => f.x2));
-    const gy1 = Math.min(...fs.map(f => f.y1)), gy2 = Math.max(...fs.map(f => f.y2));
-    const groupWide = ((gx2 - gx1) * imgW) / Math.max(1, (gy2 - gy1) * imgH) > 1.4;
-    const slotTall = (slot.w / slot.h) < 0.85;
-    if (groupWide && slotTall) {
-      const largest = fs.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fs[0]);
-      const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
-      region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
-    } else {
-      region = groupRegionForSlot(fb.allFaces, imgW, imgH, slot.w / slot.h); // ภาพคู่/ครอบครัว: หน้าเต็มเฟรม ไม่ตัดหัว-ไหล่
-    }
+    // rev.14o: ทุกช่อง = "หน้าเดี่ยวใหญ่สุดเสมอ" (เด่น + ไม่ตกขอบ) — เลิกโชว์คู่/หมู่ในช่อง
+    //   บทเรียน CASE-098: ภาพคู่ในช่อง = หน้าเล็กไม่เด่น + คนตกขอบ. ครอปหน้าใหญ่สุดเดี่ยวเหมือน hero/วงกลม
+    const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
+    const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
+    region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
   } else {
     region = fitCropToSlotAspect(crop, imgW, imgH, slot.w / slot.h);
   }

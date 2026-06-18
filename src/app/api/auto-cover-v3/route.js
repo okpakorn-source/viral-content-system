@@ -55,6 +55,10 @@ async function _renderCoverV3(request) {
       } catch (e) { console.log('[CoverV3] markQueueJob failed:', e.message); }
     };
 
+    // ★ REV MARKER — ยืนยันว่าเซิร์ฟเวอร์รันโค้ดเวอร์ชันไหน (เช็ค log ก่อนเทสทุกครั้ง — กัน staleness)
+    const COVER_REV = 'rev-14t-2026-06-18'; // hero เด่น 0.82 + ผ่อนโทษครอบครัว + hero-emotion
+    console.log(`[CoverV3] 🏷️ CODE ${COVER_REV} — รันโค้ดเวอร์ชันนี้`);
+
     // ── ① Identity + Scrape + Judge (สมองเดิม — พิสูจน์แล้ว) ──
     console.log('[CoverV3] ① Story identity...');
     const { analyzeStoryIdentity } = await import('@/lib/services/storyIdentityService');
@@ -154,9 +158,9 @@ async function _renderCoverV3(request) {
           let s;
           if (fb && fb.x2 > fb.x1) {
             s = (fb.x2 - fb.x1) * (fb.y2 - fb.y1); // สัดส่วนพื้นที่หน้า/ภาพ — ใหญ่=โคลสอัพ=ดี
-            if (fb.count === 1) s += 0.05;          // จุดโฟกัสเดียว (ลุค ID ตามตัวอย่าง)
-            else if (fb.count === 2) s += 0.02;     // ภาพคู่ยังมีค่า (สื่อความสัมพันธ์)
-            else if (fb.count >= 4) s -= 0.05;      // คนเยอะลายตา
+            if (fb.count === 1) s += 0.06;          // จุดโฟกัสเดียว (หน้าเดี่ยวเด่น — มักเป็น hero)
+            else if (fb.count === 2) s += 0.02;     // ภาพคู่
+            else if (fb.count >= 4) s -= 0.05;      // rev.14t: ผ่อนโทษภาพหมู่ (ผู้ใช้ชอบภาพครอบครัว CASE-104) — โทษเฉพาะคนเยอะจริงๆ
             if (fb.hasText) s -= 0.08;              // ตัวหนังสือฝัง = เสี่ยงเข้าช่องคน
           } else if (fb && fb.hasText) {
             s = -0.2;                               // สกรีนช็อต/กราฟิก — ท้ายแถว
@@ -176,16 +180,22 @@ async function _renderCoverV3(request) {
     //    กฎเหล็กผู้ใช้: ทุกช่องต้องเห็นหน้าชัดรู้ว่าใคร (บทเรียน CASE-084 คู่เต็มตัวหน้าเล็ก)
     //    ทำเฉพาะเมื่อยังเหลือภาพมีหน้า ≥4 ใบ (พอจัดปกได้) — ไม่งั้นคงพูลเดิม
     try {
-      // ตัดภาพ "ตัวหนังสือฝังใหญ่" (quote card/กราฟิกข่าว) ออกด้วย — บทเรียน CASE-089 ขวาบนเป็น quote LINE
-      const faceIdx = imageBuffers.map((_, i) => { const fb = faceBoxes[i]; return !!(fb && fb.x2 > fb.x1 && !fb.hasText); });
-      const faceCount = faceIdx.filter(Boolean).length;
-      if (faceCount >= 4 && faceCount < imageBuffers.length) {
+      // ★★★ rev.14p: ROOT-CAUSE FIX ความนิ่ง — "ด่านคุณภาพภาพเข้าพูล"
+      //   variance หลัก = ค้นรูปได้ภาพต่างกันทุกรอบ (เต็มตัว/แคนดิด/พอร์ตเทรต) → คุมที่ด่านนี้
+      //   ผ่านเฉพาะ "หน้าใหญ่พอ (โคลสอัพ)" + ไม่มีตัวหนังสือ → ครอปแล้วคม+เด่น → output นิ่งแม้ input แกว่ง
+      const areaOf = (fb) => (fb && fb.x2 > fb.x1 && !fb.hasText) ? (fb.x2 - fb.x1) * (fb.y2 - fb.y1) : 0;
+      const pick = (minArea) => imageBuffers.map((_, i) => areaOf(faceBoxes[i]) >= minArea);
+      let mask = pick(0.045);                                    // เข้มสุด: หน้าโคลสอัพคม
+      if (mask.filter(Boolean).length < 3) mask = pick(0.028);   // ผ่อน 1: ครึ่งตัว+
+      if (mask.filter(Boolean).length < 3) mask = pick(0.012);   // ผ่อน 2: ขอแค่มีหน้าชัดพอ
+      const kept = mask.filter(Boolean).length;
+      if (kept >= 3 && kept < imageBuffers.length) {
         const ibNew = [], fbNew = [];
-        imageBuffers.forEach((img, i) => { if (faceIdx[i]) { ibNew.push(img); fbNew.push(faceBoxes[i]); } });
-        console.log(`[CoverV3] 👤 keep face-only pool: ${ibNew.length}/${imageBuffers.length} (ตัดภาพไม่เจอหน้า)`);
+        imageBuffers.forEach((img, i) => { if (mask[i]) { ibNew.push(img); fbNew.push(faceBoxes[i]); } });
+        console.log(`[CoverV3] 👤 close-up gate: เหลือ ${ibNew.length}/${imageBuffers.length} (เฉพาะหน้าใหญ่คม)`);
         imageBuffers = ibNew; faceBoxes = fbNew;
       }
-    } catch (e) { console.log('[CoverV3] face-only filter skipped:', e.message?.slice(0, 40)); }
+    } catch (e) { console.log('[CoverV3] close-up gate skipped:', e.message?.slice(0, 40)); }
 
     // ── rev.14j: ตัดภาพ "เกือบซ้ำ" (เฟรม/ชุดเดียวกัน) ด้วย average-hash — กัน hero โผล่ซ้ำช่องอื่น ──
     //    บทเรียน CASE-090: hero เบนซ์ชุดน้ำเงิน + ขวาล่างเบนซ์ชุดน้ำเงิน = ซ้ำ. เก็บใบที่หน้าคมสุด(เรียงแล้ว)
@@ -229,7 +239,9 @@ async function _renderCoverV3(request) {
     const cleanFaceCount = faceBoxes.filter(fb =>
       fb && fb.x2 > fb.x1 && ((fb.x2 - fb.x1) * (fb.y2 - fb.y1)) >= 0.03 && (fb.count || 1) <= 3 && !fb.hasText
     ).length;
-    let slotBudget = Math.max(3, Math.min(imageBuffers.length, cleanFaceCount + 1)); // +1 = เผื่อช่องฉากเหตุการณ์ 1 ช่อง
+    // rev.14n: ตัด "+1" ทิ้ง — ทุกช่องต้องเป็น "หน้าคม" เท่านั้น (เสถียรทุกรอบ, ห้ามภาพไม่เจอหน้า/เต็มตัวหลุดเข้าช่อง)
+    //   บทเรียน CASE-097: +1 เปิดช่องให้ภาพไม่เจอหน้า(เบนซ์เต็มตัว)เป็น hero → ครึ่งตัวหน้าเล็ก = พัง
+    let slotBudget = Math.max(3, Math.min(imageBuffers.length, cleanFaceCount));
     // rev.14m: ข่าวคู่รัก/ครอบครัว — รูปเดี่ยวคมจำกัด → บังคับโครง 4 ช่อง (faces_circle) ที่สะอาดสุด
     //   บทเรียน CASE-094: 5-6 ช่องดูดภาพหมู่/กลุ่มมาเติม หน้าไม่เด่น; 4 ช่อง (hero+2+วงกลม) สะอาดกว่า
     const stRel = (identity?.storyType || '').toLowerCase();
