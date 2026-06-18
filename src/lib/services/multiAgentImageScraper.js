@@ -282,8 +282,12 @@ async function agentGoogleCleanImages(identity) {
   const queries = [
     // === ภาพบุคคลหลัก ===
     { q: sq.person_portrait || mainChar || '', label: 'person portrait', num: 10 },
-    { q: sq.person_closeup || (mainChar ? `${mainChar} ภาพถ่ายหน้าชัด` : ''), label: 'person closeup', num: 8 },
-    { q: sq.secondary_person || secondaryChar || '', label: 'secondary person', num: 6 },
+    { q: sq.person_closeup || (mainChar ? `${mainChar} หน้าตรง โคลสอัพ ภาพหน้าชัด` : ''), label: 'person closeup', num: 10 },
+    { q: sq.secondary_person || secondaryChar || '', label: 'secondary person', num: 8 },
+    // ★★ 18 มิ.ย. (แก้ CASE-067 ลูกเยอะ-รูปเดี่ยว): โคลสอัพคนที่สอง + ภาพ "คู่ทั้งสองคน" สำหรับข่าวคู่รัก/สองฝ่าย
+    { q: secondaryChar ? `${secondaryChar} หน้าตรง โคลสอัพ ภาพหน้าชัด` : '', label: 'secondary closeup', num: 8 },
+    { q: (mainChar && secondaryChar) ? `${mainChar} ${secondaryChar}` : '', label: 'couple together', num: 10 },
+    { q: (mainChar && secondaryChar) ? `${mainChar} ${secondaryChar} ภาพคู่` : '', label: 'couple photo', num: 8 },
     // === ★★★ storySubject direct search — ค้นสิ่งที่ข่าวเล่าถึงโดยตรงๆ! ===
     { q: storySubject && storySubject !== mainChar ? `${mainChar} ${storySubject}` : '', label: 'hero+storySubject', num: 10 },
     { q: storySubject && storySubject !== mainChar ? storySubject : '', label: 'storySubject direct', num: 8 },
