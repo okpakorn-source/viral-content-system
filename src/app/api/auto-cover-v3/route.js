@@ -56,8 +56,22 @@ async function _renderCoverV3(request) {
     };
 
     // ★ REV MARKER — ยืนยันว่าเซิร์ฟเวอร์รันโค้ดเวอร์ชันไหน (เช็ค log ก่อนเทสทุกครั้ง — กัน staleness)
-    const COVER_REV = 'rev-14z-2026-06-18 strict-identity-balanced'; // + ค้นภาพอารมณ์/สัมภาษณ์ ให้ hero สื่ออารมณ์ทุกรอบ
+    const COVER_REV = 'rev-15g-2026-06-18 hero-zoomout+ctx-zoomin'; // + ค้นภาพอารมณ์/สัมภาษณ์ ให้ hero สื่ออารมณ์ทุกรอบ
     console.log(`[CoverV3] 🏷️ CODE ${COVER_REV} — รันโค้ดเวอร์ชันนี้`);
+
+    // ★ ตาข่ายชั้นท้าย (19 มิ.ย. — ผู้ใช้สั่ง): เช็ค "API หมดเครดิต/โควต้า" ก่อนเริ่ม
+    //   ฝั่ง UI เช็คตอนกดสร้างแล้ว — ชั้นนี้กันงานที่ลัดผ่าน UI (Discord/cron) + เครดิตหมดเพิ่งเกิด
+    //   ถ้าหมดเครดิต Director/Judge จะพังทั้งหมด → คืน error ชัด ไม่เสียเวลาทำจนได้ "ปกกาๆ"
+    try {
+      const { checkOpenAICredit } = await import('@/lib/aiCreditPreflight');
+      const credit = await checkOpenAICredit();
+      if (!credit.ok) {
+        console.warn(`[CoverV3] 🛑 preflight block: ${credit.errorType} — ${credit.error}`);
+        await markQueueJob('failed', { error: credit.error });
+        // 200 + success:false → worker เก็บข้อความสะอาดให้ UI โชว์ตรงๆ (ไม่ถูกห่อเป็น "HTTP 5xx — {json}")
+        return NextResponse.json({ success: false, error: credit.error, errorType: credit.errorType }, { status: 200 });
+      }
+    } catch (e) { console.log('[CoverV3] credit preflight skipped (non-fatal):', e.message?.slice(0, 50)); }
 
     // ── ① Identity + Scrape + Judge (สมองเดิม — พิสูจน์แล้ว) ──
     console.log('[CoverV3] ① Story identity...');
@@ -348,6 +362,13 @@ async function _renderCoverV3(request) {
     return NextResponse.json(responsePayload);
   } catch (error) {
     console.error('[CoverV3] Pipeline error:', error.message);
+    // ★ เครดิต/โควต้าหมดกลางทาง → แจ้งชัด (อย่าโยน error ดิบงงๆ ที่ดูเหมือน "ปกพัง")
+    const msg = String(error.message || '');
+    if (/insufficient_quota|exceeded your current quota|billing/i.test(msg)) {
+      const qmsg = '⚠️ ระบบ AI (OpenAI) หมดเครดิต/โควต้าระหว่างสร้างปก — กรุณาเติมเงินแล้วลองใหม่';
+      await markQueueJob('failed', { error: qmsg });
+      return NextResponse.json({ success: false, error: qmsg, errorType: 'API_QUOTA_EXCEEDED' }, { status: 200 });
+    }
     await markQueueJob('failed', { error: error.message });
     return NextResponse.json(
       { success: false, error: error.message, errorType: 'PIPELINE_ERROR' },

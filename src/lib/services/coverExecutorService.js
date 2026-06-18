@@ -216,11 +216,11 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
 function faceParamsForSlot(slot) {
   // หมายเหตุ: ค่าพวกนี้อ้างอิง "หัว" (รวมผม) แล้ว
   // rev.14r (feedback): hero ซูมออกนิด "เห็นทั้งหน้า+ไหล่" (เดิม 0.84 แน่นไปกับเซลฟี่จัด) · ช่องรองคงแน่นเน้นหน้า
-  if (slot.shape === 'circle') return { faceFrac: 0.80, faceTopAt: 0.47, maxFaceHFrac: 0.80 };
+  if (slot.shape === 'circle') return { faceFrac: 0.72, faceTopAt: 0.47, maxFaceHFrac: 0.72 };
   const big = (slot.w * slot.h) >= (520 * 800); // ช่องเด่น/ฮีโร่
-  // rev.14t (feedback): hero กลับมา "เด่น" แบบ CASE-103 (0.82) — เห็นทั้งหน้า+เด่น จับเฟซง่าย (0.72 เด่นน้อยไป)
-  if (slot.id === 'main' || big) return { faceFrac: 0.82, faceTopAt: 0.38, maxFaceHFrac: 0.78 };
-  return { faceFrac: 0.82, faceTopAt: 0.40, maxFaceHFrac: 0.78 };
+  // rev.15g (feedback CASE-126): hero ซูมออก "เห็นเต็มหน้า+ไหล่ ไม่ extreme-closeup จนหน้าแตก/เบลอ" (เดิม 0.82 แน่นไป)
+  if (slot.id === 'main' || big) return { faceFrac: 0.62, faceTopAt: 0.40, maxFaceHFrac: 0.62 };
+  return { faceFrac: 0.78, faceTopAt: 0.40, maxFaceHFrac: 0.74 };
 }
 
 /** มี face box เดี่ยวใช้ได้ไหม (1 หน้า) */
@@ -244,11 +244,11 @@ function groupRegionForSlot(faces, imgW, imgH, slotAspect) {
   const y1 = Math.min(...faces.map(f => f.y1)) * imgH, y2 = Math.max(...faces.map(f => f.y2)) * imgH;
   const avgFh = (faces.reduce((s, f) => s + (f.y2 - f.y1), 0) / faces.length) * imgH; // ความสูงหน้าเฉลี่ย
 
-  // rev.14c: เผื่อระยะรอบกลุ่ม "ตามขนาดหน้า" — กันหัว/ไหล่/ตัวโดนตัดที่ขอบ (แก้ CASE-079 มิคโดนตัด)
-  let L = x1 - avgFh * 0.40;   // ข้างซ้าย
-  let R = x2 + avgFh * 0.40;   // ข้างขวา (เผื่อไหล่/แขน)
-  let T = y1 - avgFh * 0.55;   // headroom เหนือหัว
-  let B = y2 + avgFh * 1.00;   // ไหล่-อก ใต้คาง
+  // rev.15g (feedback CASE-126): ช่องรองซูมเข้า "หน้าใหญ่ขึ้น" — ลดระยะเผื่อ (แต่ยังกันตัดหัว-ไหล่)
+  let L = x1 - avgFh * 0.24;   // ข้างซ้าย
+  let R = x2 + avgFh * 0.24;   // ข้างขวา
+  let T = y1 - avgFh * 0.38;   // headroom เหนือหัว
+  let B = y2 + avgFh * 0.62;   // ไหล่-อก ใต้คาง
   let cx = (L + R) / 2, cy = (T + B) / 2;
   let regionWpx = R - L, regionHpx = B - T;
 
@@ -273,29 +273,38 @@ async function renderRectTile(src, crop, slot, fb) {
     const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
     region = faceRegionForSlot(fb, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
   } else if (usableGroupFaces(fb)) {
-    // rev.14o: ทุกช่อง = "หน้าเดี่ยวใหญ่สุดเสมอ" (เด่น + ไม่ตกขอบ) — เลิกโชว์คู่/หมู่ในช่อง
-    //   บทเรียน CASE-098: ภาพคู่ในช่อง = หน้าเล็กไม่เด่น + คนตกขอบ. ครอปหน้าใหญ่สุดเดี่ยวเหมือน hero/วงกลม
-    const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
-    const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
-    // rev.14w: ครอปจากภาพหมู่ "แน่นขึ้น" (+0.12) — กันหน้าคนข้างเคียงคาบขอบกรอบ/ตกเฟรม (บทเรียน CASE-114 มิคตกเฟรม)
-    region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, Math.min(0.96, faceFrac + 0.12), faceTopAt, Math.min(0.90, maxFaceHFrac + 0.08));
-    // rev.14x: เลื่อนกรอบแนวนอนให้ "พ้นหน้าคนข้างเคียง" — เหลือหน้าเดี่ยวเด่น ไม่มีครึ่งหน้าคนอื่นติดขอบ (CASE-119 ชมพู่ติดขอบ hero)
-    const lcx = ((largest.x1 + largest.x2) / 2) * imgW;
-    let rMin = 0, rMax = imgW;
-    for (const f of fb.allFaces) {
-      if (f === largest) continue;
-      const fcx = ((f.x1 + f.x2) / 2) * imgW;
-      if (fcx < lcx) rMin = Math.max(rMin, f.x2 * imgW); // คนอยู่ซ้าย → ขอบซ้ายของกรอบห้ามเลยขอบขวาของเขา
-      else rMax = Math.min(rMax, f.x1 * imgW);            // คนอยู่ขวา → ขอบขวาของกรอบห้ามเลยขอบซ้ายของเขา
+    const isHeroSlot = slot.id === 'main' || (slot.w * slot.h) >= (520 * 800);
+    if (isHeroSlot) {
+      // ★ hero = "หน้าเดี่ยวใหญ่สุดเด่น" เสมอ (ครอปหน้าใหญ่สุด + เลื่อนพ้นคนข้างเคียง — บทเรียน CASE-119)
+      const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
+      const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
+      region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, Math.min(0.96, faceFrac + 0.12), faceTopAt, Math.min(0.90, maxFaceHFrac + 0.08));
+      const lcx = ((largest.x1 + largest.x2) / 2) * imgW;
+      let rMin = 0, rMax = imgW;
+      for (const f of fb.allFaces) {
+        if (f === largest) continue;
+        const fcx = ((f.x1 + f.x2) / 2) * imgW;
+        if (fcx < lcx) rMin = Math.max(rMin, f.x2 * imgW);
+        else rMax = Math.min(rMax, f.x1 * imgW);
+      }
+      let rl = region.left, rr = region.left + region.width;
+      if (rr > rMax) { const sh = rr - rMax; rl -= sh; rr -= sh; }
+      if (rl < rMin) { const sh = rMin - rl; rl += sh; rr += sh; }
+      region.left = Math.round(Math.max(0, Math.min(rl, imgW - region.width)));
+    } else {
+      // ★ rev.15f: ช่องรอง = โชว์ "ภาพคู่/ครอบครัว/บริบท" ตรงๆ (เล่าเรื่องตรงข่าว) หน้าทุกคนชัด-ไม่ตัด
+      //   (ผู้ใช้: ปกขาดรายละเอียด — ต้องมีภาพงานแต่ง/โมเมนต์/ครอบครัว ไม่ใช่หน้าเดี่ยวซ้ำทุกช่อง)
+      region = groupRegionForSlot(fb.allFaces, imgW, imgH, slot.w / slot.h);
     }
-    let rl = region.left, rr = region.left + region.width;
-    if (rr > rMax) { const sh = rr - rMax; rl -= sh; rr -= sh; } // มีคนขวา → เลื่อนซ้าย
-    if (rl < rMin) { const sh = rMin - rl; rl += sh; rr += sh; } // มีคนซ้าย → เลื่อนขวา
-    region.left = Math.round(Math.max(0, Math.min(rl, imgW - region.width)));
   } else {
     region = fitCropToSlotAspect(crop, imgW, imgH, slot.w / slot.h);
   }
-  let tile = await sharp(src).extract(region).resize(slot.w, slot.h, { fit: 'fill' }).jpeg({ quality: 92 }).toBuffer();
+  // rev.15c: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — ปรับแสง-สี-คม ให้ภาพ pop+สวย คุมโทนทุกช่องให้เข้ากัน
+  let tile = await sharp(src).extract(region).resize(slot.w, slot.h, { fit: 'fill' })
+    .modulate({ saturation: 1.10, brightness: 1.03 }) // สีสดขึ้น+สว่างขึ้นนิด
+    .linear(1.06, -8)                                  // คอนทราสต์อ่อนๆ ให้มีมิติ
+    .sharpen({ sigma: 1.0 })                           // คมชัดขึ้น
+    .jpeg({ quality: 92 }).toBuffer();
 
   if (slot.border && slot.borderWidth > 0) {
     const bw = slot.borderWidth;
@@ -328,7 +337,9 @@ async function renderCircleTile(src, crop, slot, fb) {
     region = fitCropToSlotAspect(crop, imgW, imgH, 1);
   }
 
-  const squared = await sharp(src).extract(region).resize(d, d, { fit: 'fill' }).png().toBuffer();
+  const squared = await sharp(src).extract(region).resize(d, d, { fit: 'fill' })
+    .modulate({ saturation: 1.10, brightness: 1.03 }).linear(1.06, -8).sharpen({ sigma: 1.0 }) // rev.15c: รีทัชให้เข้าโทนเดียวกับช่องอื่น
+    .png().toBuffer();
   const mask = Buffer.from(`<svg width="${d}" height="${d}"><circle cx="${d / 2}" cy="${d / 2}" r="${d / 2}" fill="#fff"/></svg>`);
   const circled = await sharp(squared).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
 
