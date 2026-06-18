@@ -1157,7 +1157,23 @@ ${(identity?.coreStory?.negativeFocus || []).map(f => `- ${f}`).join('\n') || '-
 - Solo portrait photos of ${mainChar} without story subject or any news context → score ≤ 2
 - If storySubject = "${identity?._storySubject || identity?.coreStory?.relationship || 'อื่นๆ'}" but the image contains NO storySubject, NO secondary characters/children/family/activity → score ≤ 2
 
-✅ Images that score HIGH for this news (8-10):
+${(() => {
+  const st = (identity?.storyType || '').toLowerCase();
+  const subj = (identity?._storySubject || identity?.coreStory?.relationship || identity?.coreStory?.storySubject || '');
+  const isRel = /warm|family|relationship|romance|couple|love|marriage|wedding/.test(st)
+    || /สามี|ภรรยา|คู่รัก|ครอบครัว|ความสัมพันธ์|แต่งงาน|รักกัน|คู่ชีวิต/.test(`${subj} ${identity?.story || ''}`);
+  if (!isRel) return '';
+  const sec = identity?.secondaryCharacter || 'คู่ของเขา';
+  return `=== ★★★ RELATIONSHIP / FEEL-GOOD MODE (ข่าวความสัมพันธ์-ครอบครัว ไม่มีกิจกรรม/เหตุการณ์เฉพาะ) ★★★ ===
+ตัวเรื่องคือ "ความสัมพันธ์ของ ${mainChar} กับ ${sec}" → ภาพพอร์ตเทรต/ภาพคู่ "คือเนื้อข่าวเอง" ไม่ใช่ glamour ลอยๆ ดังนั้น OVERRIDE กฎกดคะแนนพอร์ตเทรตด้านบนสำหรับข่าวแบบนี้:
+- โคลสอัพ/พอร์ตเทรตหน้าตรง"เดี่ยว"ของ ${mainChar} หรือ ${sec} (จากสัมภาษณ์/รายการ/โซเชียล) = ON-STORY → score 6-8 (ห้ามตีเป็น "unrelated glamour"!)
+- ภาพ"คู่สองคน" ${mainChar}+${sec} = ON-STORY ตรงแก่น → score 8-10
+- ★ เก็บหน้าคมเดี่ยวของ "ทั้งสองคน" ได้หลายใบ — PERSON_SUPPORT ขยายเป็น 2-3 ใบได้ (เพื่อปกมีหน้าหลากหลาย ไม่ซ้ำคนเดิม/ท่าเดิม)
+- ★ ยังคง REJECT ตามเดิมทุกข้อ: คนผิด / เบลอ-แตก / สกรีนช็อต-แชต / ลายน้ำใหญ่ / ภาพยืนเต็มตัวฉากหลังรก / ภาพยั่วยุ-ดราม่าลบ และห้ามภาพแฟชั่น-บิกินี-ท่องเที่ยวที่ไม่เกี่ยวข่าวเลย
+- ★ เป้าหมาย: ให้พูลมี "หน้าคมเดี่ยวหน้าตรง" ของทั้ง ${mainChar} และ ${sec} + ภาพคู่ ครบพอจัดปก 5 ช่องแบบไม่ต้องเอาภาพกว้าง/หมู่มาเติม
+
+`;
+})()}✅ Images that score HIGH for this news (8-10):
 - ${mainChar} together with ${identity?.coreStory?.relationship || 'ตัวละครรอง'} (parent-child, caregiving, embrace)
 - ${mainChar} performing ${identity?.coreStory?.celebratedAction || 'ทำกิจกรรมหลักในข่าว'}
 - Close-up face of ${identity?.coreStory?.relationship || 'ตัวละครรอง'} (emotional proof)

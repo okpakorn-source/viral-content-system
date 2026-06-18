@@ -88,7 +88,7 @@ async function _renderCoverV3(request) {
 
     // ดาวน์โหลดภาพเป็น buffer (เฉพาะตัวท็อปที่ judge คัดแล้ว)
     const candidates = (selected || []).filter(img => img?.url).slice(0, 10);
-    const imageBuffers = [];
+    let imageBuffers = [];
     await Promise.all(candidates.map(async (img) => {
       try {
         if (img.buffer) { imageBuffers.push(img); return; }
@@ -134,6 +134,35 @@ async function _renderCoverV3(request) {
       console.log(`[CoverV3] face boxes: ${faceBoxes.filter(b => b && b.x1 !== undefined).length}/${imageBuffers.length} images | มีตัวหนังสือฝัง: ${faceBoxes.filter(b => b?.hasText).length}`);
     } catch (e) { console.log('[CoverV3] face detect failed (non-fatal):', e.message?.slice(0, 50)); }
 
+    // ── rev.13: จัดลำดับสระภาพตาม "ความแน่นของใบหน้า" ก่อนส่ง Director ──
+    //    feedback (ตัวอย่างหนุ่ม กรรชัย): ทุกช่องหน้าเต็มกรอบคมชัด ไม่มีภาพกว้าง/หน้าเล็ก
+    //    → ภาพหน้าใหญ่/โคลสอัพลอยขึ้นก่อน, ภาพกว้าง-คนเยอะ-สกรีนช็อตจมท้ายแถว
+    //    (Director มี position bias—หยิบภาพต้นแถวเป็น hero; เรียงหน้าคมขึ้นบน = hero เด่นขึ้น)
+    if (faceBoxes.length === imageBuffers.length && imageBuffers.length > 3) {
+      try {
+        const scored = imageBuffers.map((img, i) => {
+          const fb = faceBoxes[i];
+          let s;
+          if (fb && fb.x2 > fb.x1) {
+            s = (fb.x2 - fb.x1) * (fb.y2 - fb.y1); // สัดส่วนพื้นที่หน้า/ภาพ — ใหญ่=โคลสอัพ=ดี
+            if (fb.count === 1) s += 0.05;          // จุดโฟกัสเดียว (ลุค ID ตามตัวอย่าง)
+            else if (fb.count === 2) s += 0.02;     // ภาพคู่ยังมีค่า (สื่อความสัมพันธ์)
+            else if (fb.count >= 4) s -= 0.05;      // คนเยอะลายตา
+            if (fb.hasText) s -= 0.08;              // ตัวหนังสือฝัง = เสี่ยงเข้าช่องคน
+          } else if (fb && fb.hasText) {
+            s = -0.2;                               // สกรีนช็อต/กราฟิก — ท้ายแถว
+          } else {
+            s = -0.1;                               // ฉากล้วน/ไม่มีหน้า — รองจากภาพคน
+          }
+          return { img, fb, s };
+        });
+        scored.sort((a, b) => b.s - a.s);
+        imageBuffers = scored.map(o => o.img);
+        faceBoxes = scored.map(o => o.fb);
+        console.log(`[CoverV3] 🔝 re-ranked pool by face tightness: [${scored.map(o => o.s.toFixed(2)).join(', ')}]`);
+      } catch (e) { console.log('[CoverV3] re-rank skipped (non-fatal):', e.message?.slice(0, 40)); }
+    }
+
     // ── Quality floor (หลักเดียวกับ v1) ──
     const { V3_TEMPLATES, adaptRegistryTemplate } = await import('@/lib/services/coverExecutorService');
     if (imageBuffers.length < 3) {
@@ -142,6 +171,15 @@ async function _renderCoverV3(request) {
       return NextResponse.json({ success: false, error: msg, errorType: 'INSUFFICIENT_QUALITY_IMAGES' }, { status: 422 });
     }
 
+    // ── rev.13: "งบช่อง" ตามจำนวนหน้าคมจริง — กันโครงช่องเยอะดูดภาพแย่มาเติม ──
+    //    บทเรียน CASE-069: บังคับ 6 ช่องทั้งที่หน้าคมมี ~3-4 ใบ → 2 ช่องเป็นขยะ (ไหล่ไม่มีหัว + วงกลมรก)
+    //    นับเฉพาะภาพที่มี "หน้าใหญ่พอ" (≥3% ของภาพ) คนไม่เกิน 3 ไม่มีตัวหนังสือ → เลือกโครงไม่เกินจำนวนนั้น+1
+    const cleanFaceCount = faceBoxes.filter(fb =>
+      fb && fb.x2 > fb.x1 && ((fb.x2 - fb.x1) * (fb.y2 - fb.y1)) >= 0.03 && (fb.count || 1) <= 3 && !fb.hasText
+    ).length;
+    const slotBudget = Math.max(3, Math.min(imageBuffers.length, cleanFaceCount + 1)); // +1 = เผื่อช่องฉากเหตุการณ์ 1 ช่อง
+    console.log(`[CoverV3] 🎯 หน้าคมใช้ได้ ${cleanFaceCount} ใบ → งบช่อง = ${slotBudget} (จากพูล ${imageBuffers.length})`);
+
     // ── ② AI Vision Director — เลือกโครงเองจากแม่บทที่แกะจากปกไวรัลจริง ──
     // ★ rev.12: บังคับลุคไวรัลในโค้ด — ภาพพอเมื่อไหร่ ให้เลือกได้เฉพาะโครงที่มี "วงกลม+กรอบไฮไลต์"
     //   (บทเรียน CASE-045/050: เตือนใน prompt แล้ว Director ยังหนีไปโครงเรียบ → "การนำเสนอห่วย")
@@ -149,12 +187,12 @@ async function _renderCoverV3(request) {
       V3_TEMPLATES.vt_hero_stack,   // 6 ภาพ — ผู้ดูแล/ผู้ช่วยเหลือ (วงกลม+คลิป)
       V3_TEMPLATES.vt_quad_circle,  // 5 ภาพ — สองฝ่าย ให้-รับ (วงกลมกลาง)
       V3_TEMPLATES.vt_faces_circle, // 5 ภาพ — ครอบครัว/เด็ก (วงกลม)
-    ].filter(t => t.slots.length <= imageBuffers.length);
+    ].filter(t => t.slots.length <= slotBudget);
     const plainFallbacks = [
       V3_TEMPLATES.vt_hero_br,      // 4 ภาพ — อารมณ์น้ำตาเป็นจุดขาย
       V3_TEMPLATES.vt_hero_wide,    // 4 ภาพ — คนเล่า/สัมภาษณ์ + คู่กรณี
       V3_TEMPLATES.v3_grid3,        // 3 ภาพ — fallback ตารางสะอาด
-    ].filter(t => t.slots.length <= imageBuffers.length);
+    ].filter(t => t.slots.length <= slotBudget);
     // forceTemplateId: บังคับโครงเจาะจง (ใช้ทดสอบ/Cover Lab เลือกเอง) — ข้าม viral-first logic
     const forced = forceTemplateId && V3_TEMPLATES[forceTemplateId] ? [V3_TEMPLATES[forceTemplateId]] : null;
     const templateOptions = forced || (viralFirst.length > 0 ? viralFirst : plainFallbacks);
