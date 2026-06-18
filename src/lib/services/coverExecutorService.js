@@ -277,7 +277,8 @@ async function renderRectTile(src, crop, slot, fb) {
     //   บทเรียน CASE-098: ภาพคู่ในช่อง = หน้าเล็กไม่เด่น + คนตกขอบ. ครอปหน้าใหญ่สุดเดี่ยวเหมือน hero/วงกลม
     const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
     const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
-    region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
+    // rev.14w: ครอปจากภาพหมู่ "แน่นขึ้น" (+0.12) — กันหน้าคนข้างเคียงคาบขอบกรอบ/ตกเฟรม (บทเรียน CASE-114 มิคตกเฟรม)
+    region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, Math.min(0.96, faceFrac + 0.12), faceTopAt, Math.min(0.90, maxFaceHFrac + 0.08));
   } else {
     region = fitCropToSlotAspect(crop, imgW, imgH, slot.w / slot.h);
   }
