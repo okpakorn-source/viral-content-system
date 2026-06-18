@@ -122,6 +122,11 @@ ${templatesBlock}
    — ทุกช่องที่มีคน: คนต้องกินพื้นที่ส่วนใหญ่ของช่อง ฉากหลังเหลือแค่พอบอกใบ้สถานที่
    — ช่อง "ฉากเหตุการณ์ล้วน" (มุมสูงน้ำท่วม/สถานที่) อนุญาตกว้างได้ไม่เกิน 1-2 ช่องต่อปก
    — ครอปแล้วคนยังตัวเล็ก/ห้องทั้งห้องยังอยู่ = ครอปผิด ต้องแน่นกว่านั้น
+0b. ⛔★★★ หลีกเลี่ยงภาพเหล่านี้ให้มากที่สุด — ให้คะแนนความน่าใช้ต่ำสุด เลือกเป็นอันดับท้ายเสมอ (บทเรียน CASE-081):
+   - ภาพถอดเสื้อ/โชว์ร่างกาย/ชุดชั้นใน/เซลฟี่กระจกในห้อง/ภาพออกกำลังกาย
+   - ภาพคุณภาพต่ำ-เบลอ-แสงแย่-หน้าสดไม่เรียบร้อย-เหงื่อ-หน้าแดง
+   - ภาพตัวหนังสือ/การ์ด/เอกสาร/ใบเชิญ/กราฟิก (ไม่ใช่หน้าคนจริง)
+   ★ ถ้ามีภาพดีพอเลือกอื่นแทนได้ ต้องไม่ใช้ภาพข้างบนเลย · ★ ทุกช่องของโครงต้องมีภาพครบเสมอ ห้ามเว้นว่าง — ถ้าจำเป็นต้องใช้ภาพไม่ดีจริงๆ ให้ครอปโชว์เฉพาะ "ใบหน้า" ส่วนที่ดูดีที่สุด ตัดส่วนที่ไม่เหมาะออก
 1. "main/hero" = ภาพเล่าเรื่องอารมณ์แรงสุด — ★★ ครอปแน่นแบบ "โคลสอัพ/ภาพ ID": ใบหน้าต้องกิน ≥60-65% ของกรอบ หน้าใหญ่เต็มช่อง (เหมือนปกตัวอย่างที่หน้าพระเอกเต็มช่องซ้าย) ⛔ ห้ามเอาภาพ "คนยืนเต็มตัว/ครึ่งตัวที่มีพื้น-เพดาน-หน้าต่าง-โต๊ะ-ฉากหลังเยอะ" — ถ้าภาพต้นฉบับเป็นเต็มตัว ให้ครอปเฉพาะ "หัว-ไหล่" ทิ้งส่วนตัว/ฉากหมด · ห้ามตัดหัว (เผื่อเหนือศีรษะ ~8%)
    ★★★ hero ต้อง "หน้าตรง มองกล้อง สีหน้าชัด" เสมอถ้าในคลังมี — ⛔ ห้ามภาพหันข้าง/เอียง 3/4/ก้มหน้า/เหลือบมองด้านข้าง/หลับตา มาเป็นช่องเอก (บทเรียน CASE-071: hero หันข้างหน้าไม่สู้กล้อง = ปกอ่อนลงทันที). ภาพ 3/4 หันข้างสวยๆ ให้ไปอยู่ "ช่องรอง" ได้ แต่ช่อง hero ขอภาพปะทะกล้องตรงๆ เท่านั้น
 2. ★ ทุกช่องต้องมี "จุดโฟกัสเดียว" ชัดเจน — คนหรือสิ่งสำคัญหนึ่งอย่างเด่นกลางกรอบ ไม่ใช่ภาพรวมกว้างๆ ที่ไม่รู้จะมองตรงไหน (ช่องโมเมนต์รับมอบ/จับมือ: โฟกัสที่ "คน+ของที่ส่งมอบ" ไม่ใช่ทั้งห้อง)
@@ -197,11 +202,14 @@ ${templatesBlock}
       seenImages.add(idx);
     }
 
-    // rev.13 guard: วงกลมต้องไม่ใช่ภาพหมู่ (≥3 หน้า) — สลับเป็นหน้าเดี่ยว/คู่ที่ใหญ่สุดที่ยังไม่ถูกใช้
+    // rev.14e guard: วงกลมต้องเป็น "หน้าใหญ่ชัด รู้ว่าใคร" — สลับถ้า: ไม่มีหน้า / หน้าจิ๋ว(เต็มตัว) / ภาพหมู่≥3
+    //    (กฎเหล็กผู้ใช้: ทุกช่องต้องรู้ว่าใคร — บทเรียน CASE-083 วงกลมเบนซ์ยืนเต็มตัวหน้าจิ๋ว)
     try {
       const circleA = valid.find(a => /circle/i.test(a.slotId));
       const fbC = circleA ? faceBoxes[circleA.imageIndex] : null;
-      if (circleA && fbC && (fbC.count || 1) >= 3) {
+      const circleArea = (fbC && fbC.x2 > fbC.x1) ? (fbC.x2 - fbC.x1) * (fbC.y2 - fbC.y1) : 0;
+      const needsSwap = circleA && (!fbC || !(fbC.x2 > fbC.x1) || (fbC.count || 1) >= 3 || circleArea < 0.02);
+      if (needsSwap) {
         const usedIdx = new Set(valid.map(a => a.imageIndex));
         let best = -1, bestArea = 0;
         faceBoxes.forEach((fb, i) => {
@@ -209,11 +217,35 @@ ${templatesBlock}
           const area = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);
           if (area > bestArea) { bestArea = area; best = i; }
         });
-        if (best >= 0) {
+        if (best >= 0 && bestArea > circleArea) {
           circleA.imageIndex = best;
           circleA.crop = cropFromFaceBox(faceBoxes[best]);
-          circleA.why = 'วงกลม: สลับเป็นหน้าเดี่ยวคม (กันภาพหมู่หน้าจิ๋ว)';
-          console.log(`[CoverDirector] 🔧 circle swap → #${best} (กันภาพหมู่ในวง)`);
+          circleA.why = 'วงกลม: สลับเป็นหน้าใหญ่ชัด (กันหน้าจิ๋ว/ภาพหมู่/ไม่มีหน้า)';
+          console.log(`[CoverDirector] 🔧 circle swap → #${best} area ${bestArea.toFixed(3)} (เดิม ${circleArea.toFixed(3)})`);
+        }
+      }
+    } catch { /* guard ไม่สำเร็จ ไม่ critical */ }
+
+    // rev.14h guard: ช่อง hero (main) ต้องเป็น "หน้าเดี่ยวใหญ่ชัด รู้ทันทีว่าใคร" (กฎเหล็กผู้ใช้)
+    //    บทเรียน CASE-087: Director เอาภาพคู่ใส่ hero ส่วนหน้าเดี่ยวสวยไปอยู่ช่องเล็ก → สลับให้หน้าเดี่ยวขึ้น hero
+    try {
+      const mainA = valid.find(a => a.slotId === 'main' || /hero/i.test(a.slotId));
+      const fbM = mainA ? faceBoxes[mainA.imageIndex] : null;
+      const mainArea = (fbM && fbM.x2 > fbM.x1) ? (fbM.x2 - fbM.x1) * (fbM.y2 - fbM.y1) : 0;
+      const mainIsBigSingle = fbM && fbM.x2 > fbM.x1 && (fbM.count || 1) === 1 && mainArea >= 0.04;
+      if (mainA && !mainIsBigSingle) {
+        const usedIdx = new Set(valid.map(a => a.imageIndex));
+        let best = -1, bestArea = 0;
+        faceBoxes.forEach((fb, i) => {
+          if (usedIdx.has(i) || !fb || !(fb.x2 > fb.x1) || (fb.count || 1) !== 1 || fb.hasText) return;
+          const area = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);
+          if (area > bestArea) { bestArea = area; best = i; }
+        });
+        if (best >= 0 && bestArea > mainArea) {
+          mainA.imageIndex = best;
+          mainA.crop = cropFromFaceBox(faceBoxes[best]);
+          mainA.why = 'hero: หน้าเดี่ยวใหญ่ชัด (รู้ทันทีว่าใคร)';
+          console.log(`[CoverDirector] 🔧 hero swap → #${best} area ${bestArea.toFixed(3)} (เดิม ${mainArea.toFixed(3)})`);
         }
       }
     } catch { /* guard ไม่สำเร็จ ไม่ critical */ }

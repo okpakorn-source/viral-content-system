@@ -124,10 +124,19 @@ async function _renderCoverV3(request) {
         const meta = await sharpLib(img.buffer).metadata();
         const W = meta.width || 1, H = meta.height || 1;
         const largest = fd.faces.reduce((b, f) => (f.width * f.height > b.width * b.height ? f : b), fd.faces[0]);
+        // rev.14d: กรอง "หน้าเล็กฉากหลัง" ทิ้งก่อนนับ (เล็กกว่า 35% ของหน้าใหญ่สุด = ฉากหลัง/คนผ่าน)
+        //    แก้ CASE-082: ฉาก TV มีหน้าเล็กหลัง → count≥2 → ระบบคิดว่าภาพกลุ่ม → hero ไม่ครอปหน้าเดี่ยว
+        const largestArea = largest.width * largest.height;
+        const sig = fd.faces.filter(f => (f.width * f.height) >= 0.35 * largestArea);
         return {
           x1: +(largest.x / W).toFixed(2), y1: +(largest.y / H).toFixed(2),
           x2: +((largest.x + largest.width) / W).toFixed(2), y2: +((largest.y + largest.height) / H).toFixed(2),
-          count: fd.faces.length,
+          count: sig.length, // นับเฉพาะหน้าเด่น (เดี่ยว=1 จะครอปหน้าเต็มช่อง)
+          // rev.14b: เก็บ "หน้าเด่นทุกใบ" (0-1) ให้ executor กระชับกลุ่มหน้า (ภาพคู่/ครอบครัว) ให้เต็มเฟรม
+          allFaces: sig.map(f => ({
+            x1: +(f.x / W).toFixed(3), y1: +(f.y / H).toFixed(3),
+            x2: +((f.x + f.width) / W).toFixed(3), y2: +((f.y + f.height) / H).toFixed(3),
+          })),
           ...(hasText ? { hasText, textRegion } : {}),
         };
       }));
@@ -163,6 +172,21 @@ async function _renderCoverV3(request) {
       } catch (e) { console.log('[CoverV3] re-rank skipped (non-fatal):', e.message?.slice(0, 40)); }
     }
 
+    // ── rev.14f: เก็บเฉพาะภาพ "ตรวจเจอหน้า" — กัน Director หยิบภาพเต็มตัว/ไกลที่ครอปหน้าไม่ได้ ──
+    //    กฎเหล็กผู้ใช้: ทุกช่องต้องเห็นหน้าชัดรู้ว่าใคร (บทเรียน CASE-084 คู่เต็มตัวหน้าเล็ก)
+    //    ทำเฉพาะเมื่อยังเหลือภาพมีหน้า ≥4 ใบ (พอจัดปกได้) — ไม่งั้นคงพูลเดิม
+    try {
+      // ตัดภาพ "ตัวหนังสือฝังใหญ่" (quote card/กราฟิกข่าว) ออกด้วย — บทเรียน CASE-089 ขวาบนเป็น quote LINE
+      const faceIdx = imageBuffers.map((_, i) => { const fb = faceBoxes[i]; return !!(fb && fb.x2 > fb.x1 && !fb.hasText); });
+      const faceCount = faceIdx.filter(Boolean).length;
+      if (faceCount >= 4 && faceCount < imageBuffers.length) {
+        const ibNew = [], fbNew = [];
+        imageBuffers.forEach((img, i) => { if (faceIdx[i]) { ibNew.push(img); fbNew.push(faceBoxes[i]); } });
+        console.log(`[CoverV3] 👤 keep face-only pool: ${ibNew.length}/${imageBuffers.length} (ตัดภาพไม่เจอหน้า)`);
+        imageBuffers = ibNew; faceBoxes = fbNew;
+      }
+    } catch (e) { console.log('[CoverV3] face-only filter skipped:', e.message?.slice(0, 40)); }
+
     // ── Quality floor (หลักเดียวกับ v1) ──
     const { V3_TEMPLATES, adaptRegistryTemplate } = await import('@/lib/services/coverExecutorService');
     if (imageBuffers.length < 3) {
@@ -184,9 +208,9 @@ async function _renderCoverV3(request) {
     // ★ rev.12: บังคับลุคไวรัลในโค้ด — ภาพพอเมื่อไหร่ ให้เลือกได้เฉพาะโครงที่มี "วงกลม+กรอบไฮไลต์"
     //   (บทเรียน CASE-045/050: เตือนใน prompt แล้ว Director ยังหนีไปโครงเรียบ → "การนำเสนอห่วย")
     const viralFirst = [
-      V3_TEMPLATES.vt_hero_stack,   // 6 ภาพ — ผู้ดูแล/ผู้ช่วยเหลือ (วงกลม+คลิป)
+      V3_TEMPLATES.vt_faces_circle, // 4 ภาพ — ★ โครงตัวอย่าง (hero เต็มซ้าย + ขวา 2 + วงกลมทับตัว) สะอาดสุด เลือกก่อน
+      V3_TEMPLATES.vt_hero_stack,   // 5 ภาพ — hero เต็มซ้าย + ขวา 3 (วงกลม+คลิป)
       V3_TEMPLATES.vt_quad_circle,  // 5 ภาพ — สองฝ่าย ให้-รับ (วงกลมกลาง)
-      V3_TEMPLATES.vt_faces_circle, // 5 ภาพ — ครอบครัว/เด็ก (วงกลม)
     ].filter(t => t.slots.length <= slotBudget);
     const plainFallbacks = [
       V3_TEMPLATES.vt_hero_br,      // 4 ภาพ — อารมณ์น้ำตาเป็นจุดขาย
@@ -209,7 +233,7 @@ async function _renderCoverV3(request) {
     // ── ③ Execute (พิกเซลแท้) ──
     const { executeCover, applyFixes } = await import('@/lib/services/coverExecutorService');
     let assignments = direction.assignments;
-    let coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec });
+    let coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec, faceBoxes });
     console.log(`[CoverV3] ④ composed ${Math.round(coverBuffer.length / 1024)}KB`);
 
     // ── ④ Self-QC 1 รอบ (rev.8: สลับรูปได้ | rev.11: รู้เนื้อข่าว — จับภาพไม่เกี่ยวกับเรื่องได้) ──
@@ -217,7 +241,7 @@ async function _renderCoverV3(request) {
     let qcApplied = false;
     if (!qc.ok && qc.fixes.length > 0) {
       assignments = applyFixes(assignments, qc.fixes);
-      coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec });
+      coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec, faceBoxes });
       qcApplied = true;
       console.log(`[CoverV3] ⑤ QC fixes applied (${qc.fixes.length}) → recomposed`);
     } else {
