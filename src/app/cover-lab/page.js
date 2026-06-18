@@ -795,8 +795,7 @@ export default function CoverLabPage() {
 
             <label style={labelStyle}>เครื่องยนต์จัดปก</label>
             <select value={composer} onChange={e => setComposer(e.target.value)} style={inputStyle}>
-              <option value="v3">🎬 v3 — AI Vision Director (ใหม่: AI เห็นภาพจริงแล้วสั่งครอปเอง + ตรวจงานตัวเอง)</option>
-              <option value="v1">⚙️ v1 — ระบบเดิม (สูตรอัตโนมัติเต็มรูปแบบ)</option>
+              <option value="v3">🎬 v3 — AI Vision Director (มาตรฐานหลัก: AI เห็นภาพจริง → ครอปเอง + ตรวจงานเอง)</option>
             </select>
 
             <label style={labelStyle}>Template ปก ({templates.length} แบบ)</label>
