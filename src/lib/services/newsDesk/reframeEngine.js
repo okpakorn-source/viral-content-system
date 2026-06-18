@@ -153,7 +153,8 @@ ${angleList}
     if (!angles.length) return { ok: false, reason: 'แตกประเด็นได้ไม่ชัดเจน ลองใหม่' };
     const result = { ok: true, cleanBrief: String(p.cleanBrief || '').slice(0, 1000), angles, sources, researchUsed: !!researchBlock, at: new Date().toISOString() };
     if (!opts.skipArchive) {
-      archiveReframe({
+      // ★ 18 มิ.ย. (แก้บั๊ก): ต้อง await — เดิม fire-and-forget บน Vercel ฟังก์ชันถูกหยุดหลังตอบ → เก็บคลังไม่ทัน เคสหายแบบสุ่ม
+      await archiveReframe({
         mode: opts.mode || 'manual',
         sourceTitle: String(item.title || '').slice(0, 200),
         sourceSnippet: String(item.snippet || '').slice(0, 600),
