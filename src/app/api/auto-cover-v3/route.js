@@ -56,7 +56,7 @@ async function _renderCoverV3(request) {
     };
 
     // ★ REV MARKER — ยืนยันว่าเซิร์ฟเวอร์รันโค้ดเวอร์ชันไหน (เช็ค log ก่อนเทสทุกครั้ง — กัน staleness)
-    const COVER_REV = 'rev-14t-2026-06-18'; // hero เด่น 0.82 + ผ่อนโทษครอบครัว + hero-emotion
+    const COVER_REV = 'rev-14v-2026-06-18 emotion-hero curator'; // + ค้นภาพอารมณ์/สัมภาษณ์ ให้ hero สื่ออารมณ์ทุกรอบ
     console.log(`[CoverV3] 🏷️ CODE ${COVER_REV} — รันโค้ดเวอร์ชันนี้`);
 
     // ── ① Identity + Scrape + Judge (สมองเดิม — พิสูจน์แล้ว) ──

@@ -279,10 +279,20 @@ async function agentGoogleCleanImages(identity) {
     }
   }
 
+  // ★ rev.14u: ข่าว "มีปม/ดราม่า" → ต้องดึงภาพ "อารมณ์/สัมภาษณ์/ครุ่นคิด" ของตัวหลักเข้าพูล
+  //   เพื่อให้ HERO สื่ออารมณ์ข่าวได้ "ทุกรอบ ไม่ฟลุ๊ค" (บทเรียน CASE-107) ใช้ได้ทุกข่าวที่มีปม
+  const _emoText = `${identity?.story || ''} ${identity?.coreStory?.emotionalHook || ''} ${identity?.coreStory?.storySubject || ''} ${identity?.coverEmotion || ''} ${identity?.emotion || ''} ${identity?.mainVisualShouldBe || ''}`;
+  const hasConflictArc = /ปัญหา|ขัดแย้ง|แตกแยก|ห่างเหิน|ห่าง|ละเลย|เลิก|หย่า|ทะเลาะ|น้ำตา|ร้องไห้|สูญเสีย|เสียใจ|ดราม่า|drama|sad|tragedy|shock|เครียด|ป่วย|จากไป|เสียชีวิต|อาลัย|คิดถึง|เกือบ|วิกฤต|สำนึก|เปิดใจ|ตื้นตัน/.test(_emoText);
+
   const queries = [
     // === ภาพบุคคลหลัก ===
     { q: sq.person_portrait || mainChar || '', label: 'person portrait', num: 10 },
     { q: sq.person_closeup || (mainChar ? `${mainChar} หน้าตรง โคลสอัพ ภาพหน้าชัด` : ''), label: 'person closeup', num: 10 },
+    // ★ ภาพอารมณ์/สัมภาษณ์ (เฉพาะข่าวมีปม) — ให้ hero สื่ออารมณ์
+    ...(hasConflictArc && mainChar ? [
+      { q: `${mainChar} สัมภาษณ์ เปิดใจ`, label: 'emotion interview', num: 10 },
+      { q: `${mainChar} สีหน้าครุ่นคิด จริงจัง`, label: 'emotion reflective', num: 8 },
+    ] : []),
     { q: sq.secondary_person || secondaryChar || '', label: 'secondary person', num: 8 },
     // ★★ 18 มิ.ย. (แก้ CASE-067 ลูกเยอะ-รูปเดี่ยว): โคลสอัพคนที่สอง + ภาพ "คู่ทั้งสองคน" สำหรับข่าวคู่รัก/สองฝ่าย
     { q: secondaryChar ? `${secondaryChar} หน้าตรง โคลสอัพ ภาพหน้าชัด` : '', label: 'secondary closeup', num: 8 },
@@ -1214,6 +1224,10 @@ There are ${imageParts.length} images (index 0 to ${imageParts.length - 1}) to j
 - ★★★ HERO MUST be professional quality: interview, TV show, press photo, professional portrait
 - ⛔ Selfie images (phone self-shot, wide angle, visible extended arm, too many faces too close) → MUST NOT be HERO_FACE! Assign to PERSON_SUPPORT only!
 - ⛔ Images with prominent watermark/logo → MUST NOT be HERO_FACE! score ≤ 2
+- ★★★★ สีหน้า HERO ต้องตรง "อารมณ์ข่าว" (ดู News emotion + เนื้อข่าวด้านบน) — rev.14v:
+    • ข่าวมี "ปม/ดราม่า/ความสัมพันธ์ที่เคยห่าง/ละเลย/สูญเสีย/สำนึก/เปิดใจ/น้ำตา/วิกฤต" → HERO_FACE ที่ดีที่สุด = ภาพ "สีหน้าครุ่นคิด/จริงจัง/สะเทือนใจ/เหม่อ/ตอนสัมภาษณ์เปิดใจ" ของ ${mainChar} → score 9-10
+    • ★ ภาพ "ยิ้มแฉ่ง/ถ่ายแบบกลามเมอร์" ของข่าวมีปมแบบนี้ → ไม่เหมาะเป็น HERO! ให้ role=PERSON_SUPPORT score 5-6 (เก็บรอยยิ้มไว้ช่องรอง เล่า before→after)
+    • ข่าวอวยความสำเร็จ/ดีใจล้วน → HERO ยิ้มมั่นใจได้เต็มที่ score 9-10
 - Score 7-10
 
 🏷️ PERSON_SUPPORT (0-1 images ONLY!):
