@@ -56,7 +56,7 @@ async function _renderCoverV3(request) {
     };
 
     // ★ REV MARKER — ยืนยันว่าเซิร์ฟเวอร์รันโค้ดเวอร์ชันไหน (เช็ค log ก่อนเทสทุกครั้ง — กัน staleness)
-    const COVER_REV = 'rev-14x-2026-06-18 hero-single+dedup'; // + ค้นภาพอารมณ์/สัมภาษณ์ ให้ hero สื่ออารมณ์ทุกรอบ
+    const COVER_REV = 'rev-14z-2026-06-18 strict-identity-balanced'; // + ค้นภาพอารมณ์/สัมภาษณ์ ให้ hero สื่ออารมณ์ทุกรอบ
     console.log(`[CoverV3] 🏷️ CODE ${COVER_REV} — รันโค้ดเวอร์ชันนี้`);
 
     // ── ① Identity + Scrape + Judge (สมองเดิม — พิสูจน์แล้ว) ──

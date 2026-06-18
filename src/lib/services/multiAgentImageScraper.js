@@ -1196,11 +1196,12 @@ ${(() => {
 
 There are ${imageParts.length} images (index 0 to ${imageParts.length - 1}) to judge.
 
-=== ★★★ MOST CRITICAL RULE: Verify person identity! ===
-- Each image MUST actually be ${mainChar}! DO NOT accept images of other people!
-- If the image shows a different person, different ethnicity, different industry → REJECT immediately!
-  Example: News about "เจนนี่ ได้หมดถ้าสดชื่น" but image shows Jennie BLACKPINK → REJECT!
-- Check image context: if metadata/labels indicate a different person → REJECT!
+=== ★★★★ กฎสำคัญสุด: ตรวจตัวบุคคลให้ตรงข่าว — ผิดคน = หมิ่นประมาท ฟ้องร้องได้! ===
+- ทุกหน้าในภาพต้องเป็น "${mainChar}"${identity?.secondaryCharacter ? ` หรือ "${identity.secondaryCharacter}"` : ''} — บุคคลที่ระบุชื่อในข่าวนี้
+- ⛔⛔ REJECT score 0 เด็ดขาด ถ้าภาพเป็น "บุคคลอื่นที่ระบุได้ว่าไม่ใช่คนในข่าว" — ดาราคนอื่นที่หน้าคล้าย / เพื่อนร่วมงาน / คู่จิ้น / แฟนเก่า / คนในวงการเดียวกันแต่คนละคน (แม้สวย/แม้เกี่ยวข่าว)
+- ★★★ "ตัวรอง"${identity?.secondaryCharacter ? ` (${identity.secondaryCharacter})` : ''} ต้องเข้มเท่าตัวหลัก: ห้ามเอาผู้หญิง/ผู้ชายคนอื่นมาสวมเป็นคู่/ภรรยา/สามี (บทเรียนร้ายแรง: เอา "แพททิเซีย" มาเป็น "ชมพู่ อารยา" ภรรยาน็อต = ผิดคน เสี่ยงฟ้อง)
+- ★ แต่ "ภาพโคลสอัพ/พอร์ตเทรตของคนในข่าว" = ใช้ได้ปกติ — **อย่า REJECT เพราะแค่ "ไม่ชัวร์ 100%"** ให้ REJECT เฉพาะเมื่อ "มีหลักฐาน/จำได้ว่าเป็นคนอื่นจริงๆ" (กันเผลอตัดภาพคนในข่าวทิ้งหมด)
+- ตรวจ context/metadata/แคปชั่นต้นทางประกอบ — ถ้าบ่งชี้ว่าเป็นคนอื่น → REJECT
 
 === ★★★ EQUALLY CRITICAL RULE: Verify news relevance! ===
 - Images MUST be strongly relevant to the news content! Not just showing the right person!
