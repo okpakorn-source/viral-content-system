@@ -412,13 +412,21 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'evergreen
     } catch (e) { console.log('[Harvester] good-block failed:', e.message?.slice(0, 50)); }
   }
   if (lanes.includes('broad')) {
-    // 🌐 เก็บกว้าง (19 มิ.ย.) — Google News RSS ฟรี ทั้ง pool พร้อมกัน: ครอบทุกหมวด หลายสำนัก ไม่กิน Serper credit
-    const _bRes = await Promise.all(BROAD_QUERY_POOL.map(async q => {
-      try { return (await googleNewsRss(q, { num: 20 })).map(r => ({ ...r, lane: 'broad' })); }
-      catch { return []; }
-    }));
-    for (const arr of _bRes) raw.push(...arr);
-    console.log(`[Harvester] 🌐 broad (Google News RSS): ${_bRes.reduce((s, a) => s + a.length, 0)} ดิบ จาก ${BROAD_QUERY_POOL.length} คำค้น`);
+    // 🌐 เก็บกว้าง "เชิงลึก" (19 มิ.ย. รอบ 2) — คีย์เฉพาะเจาะจง (วงการ×แนวเรื่อง) + กระแสรายวัน ผ่าน Google News RSS (ฟรี)
+    //   ★ คีย์เจาะจง = ข่าว "ทำได้จริง" (เช่น "นักร้อง กตัญญู ซื้อบ้านให้แม่") + รู้หมวดทันทีจากคีย์ (tag category ตรงๆ)
+    //   แทนคำกว้าง ("ข่าวบันเทิง") ที่เดิมดูดข่าวทำไม่ได้เข้ามาเยอะ
+    try {
+      const { generateThemeQueries, generateDailyTrend } = await import('./keywordBank');
+      const dailyQs = generateDailyTrend(14).map(q => ({ q, category: 'กระแสรายวัน' }));
+      const themeQs = generateThemeQueries(6); // [{q, category}] — หมุนชุดตามเวลา
+      const allQ = [...dailyQs, ...themeQs];
+      const _bRes = await Promise.all(allQ.map(async ({ q, category }) => {
+        try { return (await googleNewsRss(q, { num: 12 })).map(r => ({ ...r, lane: 'broad', category })); }
+        catch { return []; }
+      }));
+      for (const arr of _bRes) raw.push(...arr);
+      console.log(`[Harvester] 🌐 broad เชิงลึก: ${allQ.length} คำค้น (กระแสรายวัน ${dailyQs.length} + แนวเรื่อง ${themeQs.length}) → ${_bRes.reduce((s, a) => s + a.length, 0)} ดิบ`);
+    } catch (e) { console.log('[Harvester] broad-deep failed:', e.message?.slice(0, 50)); }
   }
   // ★ คำค้นพิเศษ (Chief Agent / สั่งหาเฉพาะแนว) — เลือก endpoint ได้: news (default) | search (เว็บกว้าง) | videos (ยูทูป)
   // ★ 16 มิ.ย. (เร่งความเร็ว): ยิงพร้อมกัน
@@ -561,7 +569,8 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'evergreen
   const broadFinal = [];
   for (const it of gatedBroad) {
     if (keywordGore(it)) { junk.push({ ...it, junkReason: 'รุนแรง/สยอง (คีย์เวิร์ด)' }); continue; }
-    broadFinal.push({ ...it, category: keywordCategorize(it), tone: 'กลาง', toxicity: 0, fbRisk: 0, toneable: true, _broad: true });
+    // ★ 19 มิ.ย. รอบ 2: category มาจาก "คีย์ที่ค้นเจอ" ตรงๆ (แม่นกว่า) — ตกไป keyword-guess เฉพาะที่ไม่มี
+    broadFinal.push({ ...it, category: it.category || keywordCategorize(it), tone: 'กลาง', toxicity: 0, fbRisk: 0, toneable: true, _broad: true });
   }
   stats.broadKept = broadFinal.length;
 

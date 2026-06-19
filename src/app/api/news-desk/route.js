@@ -63,13 +63,18 @@ export async function GET(request) {
       trend: KRATASE_LANES, good: NAMDEE_LANES, celeb: ['celeb', 'throwback', 'evergreen-celeb'], clip: ['video', 'interview'], trendtrack: ['trend-track'],
     };
     const isCategoryTab = tab === 'kratase' || tab === 'namdee';
-    if (TAB_LANES[tab]) items = items.filter(i => TAB_LANES[tab].includes(i.lane));
-    // ★ กระแส = ต้องสด ≤2 วันเท่านั้น (ตัดกระแสเก่าทิ้งจากหน้านี้) · ดาราน้ำดี = สต็อกได้ ไม่ตัดอายุ
+    // ★ 19 มิ.ย. รอบ 2: กระแสรายวัน = เลนกระแส (trend/buzz) "หรือ" หมวด 'กระแสรายวัน' (จากคีย์เชิงลึก broad)
+    if (tab === 'kratase') {
+      items = items.filter(i => KRATASE_LANES.includes(i.lane) || i.category === 'กระแสรายวัน');
+    } else if (TAB_LANES[tab]) {
+      items = items.filter(i => TAB_LANES[tab].includes(i.lane));
+    }
+    // ★ กระแสรายวัน = ต้องสด ≤3 วัน (ตัดของเก่าจากหน้านี้) · ดาราน้ำดี = สต็อกได้ ไม่ตัดอายุ
     if (tab === 'kratase') {
       items = items.filter(i => {
         const ref = i.publishedAt || i.harvestedAt;
         const ageDays = ref ? (Date.now() - new Date(ref).getTime()) / 864e5 : 99;
-        return ageDays <= 2;
+        return ageDays <= 3;
       });
     }
     // ★ 15 มิ.ย.: แท็บ ⭐ คลังส่งเช้า — ข่าวที่เลือกเก็บไว้ส่งพนักงาน (เรียงเก็บล่าสุดก่อน, ไม่นับที่หยิบไปแล้ว)
