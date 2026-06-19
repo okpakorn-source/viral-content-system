@@ -66,6 +66,9 @@ export async function GET(request) {
     // ★ 17 มิ.ย. (ทีมสั่งยุบเหลือ 2 หมวดค้น + เรียงใหม่สุดก่อน): 🔥 กระแส / 💚 ดาราน้ำดี
     const KRATASE_LANES = ['trend', 'buzz', 'trend-track'];                                             // กระแสเรียลไทม์
     const NAMDEE_LANES = ['good', 'celeb', 'evergreen', 'evergreen-celeb', 'throwback', 'followup', 'interview', 'video']; // ดาราน้ำดี (สต็อก)
+    // ★ 19 มิ.ย. รอบ 5 (ผู้ใช้: "ดาราน้ำดีมีแต่ดราม่า — ผิด"): ดาราน้ำดี = กรองด้วย "หมวดน้ำดี" ไม่ใช่เลน
+    //   เลน celeb มีข่าวดาราทุกแบบ (รวมดราม่า/ปะทะ) → ต้องคัดเฉพาะหมวดทำดี: กตัญญู/น้ำใจ/สู้ชีวิต/คนดังทำดี/สัมภาษณ์ดี
+    const NAMDEE_CATS = ['กตัญญู/ครอบครัวอบอุ่น', 'น้ำใจ/ช่วยเหลือ', 'สู้ชีวิต', 'คนดังทำดี/ติดดิน', 'สัมภาษณ์/บทสนทนาดี'];
     const TAB_LANES = {
       kratase: KRATASE_LANES,
       namdee: NAMDEE_LANES,
@@ -76,6 +79,9 @@ export async function GET(request) {
     // ★ 19 มิ.ย. รอบ 2: กระแสรายวัน = เลนกระแส (trend/buzz) "หรือ" หมวด 'กระแสรายวัน' (จากคีย์เชิงลึก broad)
     if (tab === 'kratase') {
       items = items.filter(i => KRATASE_LANES.includes(i.lane) || i.category === 'กระแสรายวัน');
+    } else if (tab === 'namdee') {
+      // ★ ดาราน้ำดี = เฉพาะหมวดทำดี (กตัญญู/น้ำใจ/สู้ชีวิต/คนดังทำดี/สัมภาษณ์) — ไม่เอาดราม่า/ปะทะ
+      items = items.filter(i => NAMDEE_CATS.includes(i.category));
     } else if (TAB_LANES[tab]) {
       items = items.filter(i => TAB_LANES[tab].includes(i.lane));
     }
