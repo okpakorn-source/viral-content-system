@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import AuthGuard from '@/components/AuthGuard';
 import ClientLayout from '@/components/ClientLayout';
 
@@ -101,6 +101,14 @@ function NewsFilterContent() {
   const [sourceUrl, setSourceUrl] = useState('');
   const [autoFilter, setAutoFilter] = useState(true); // auto-filter after scrape
   const [showGuide, setShowGuide] = useState(false); // usage guide toggle
+  // ★ 19 มิ.ย. (ผู้ใช้สั่งแก้มือถือ): responsive — จอแคบ <768px สลับเป็นคอลัมน์เดียว กันเฟรมขวาลน
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   // Word count helper
   const countWords = useCallback((text) => {
@@ -585,7 +593,7 @@ function NewsFilterContent() {
       {/* ===== USAGE GUIDE PANEL ===== */}
       {showGuide && (
         <div style={{
-          maxWidth: 1400, margin: '0 auto', padding: '0 32px',
+          maxWidth: 1400, margin: '0 auto', padding: isMobile ? '0 14px' : '0 32px',
           animation: 'fadeUp 0.3s ease-out both',
         }}>
           <div style={{
@@ -602,7 +610,7 @@ function NewsFilterContent() {
             </div>
 
             {/* Two usage modes */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 20, marginBottom: 24 }}>
               {/* Mode 1: URL */}
               <div style={{
                 padding: 20, borderRadius: 14,
@@ -690,7 +698,7 @@ function NewsFilterContent() {
               }}>
                 🎛️ อธิบายโหมดกรอง
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 12 }}>
                 {[
                   { mode: 'Soft 🟢', color: '#22c55e', desc: 'ตัดเฉพาะคำเฟ้อที่ชัดเจนมาก เช่น "สร้างความฮือฮา" "กลายเป็นกระแส" — เหมาะกับข่าวที่ต้องการเก็บรายละเอียดมาก' },
                   { mode: 'Balanced 🟡', color: '#eab308', desc: 'สมดุลระหว่างเนื้อจริงกับอารมณ์ — ตัดคำเฟ้อ + อารมณ์เกินส่วนใหญ่ เก็บข้อเท็จจริงครบ (แนะนำ)' },
@@ -761,13 +769,13 @@ function NewsFilterContent() {
       )}
 
       {/* ===== MAIN CONTENT ===== */}
-      <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 32px 60px' }}>
+      <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '16px 14px 48px' : '24px 32px 60px' }}>
 
-        {/* 2-Column Layout */}
+        {/* 2-Column Layout (มือถือ = คอลัมน์เดียว กันเฟรมขวาลน) */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 24,
+          gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+          gap: isMobile ? 16 : 24,
           marginBottom: 24,
         }}>
           {/* ===== LEFT PANEL (Input) ===== */}
@@ -775,7 +783,7 @@ function NewsFilterContent() {
             background: 'var(--bg-card)',
             borderRadius: 16,
             border: '1px solid var(--border)',
-            padding: 24,
+            padding: isMobile ? 16 : 24,
             display: 'flex', flexDirection: 'column', gap: 16,
           }}>
             {/* Panel Header */}
@@ -1105,7 +1113,7 @@ function NewsFilterContent() {
             background: 'var(--bg-card)',
             borderRadius: 16,
             border: '1px solid var(--border)',
-            padding: 24,
+            padding: isMobile ? 16 : 24,
             display: 'flex', flexDirection: 'column', gap: 16,
           }}>
             {/* Panel Header */}
@@ -1279,7 +1287,7 @@ function NewsFilterContent() {
             animation: 'fadeUp 0.4s ease-out both',
           }}>
             <div style={{
-              padding: '18px 24px', borderBottom: splitData ? '1px solid var(--border)' : 'none',
+              padding: isMobile ? '14px 16px' : '18px 24px', borderBottom: splitData ? '1px solid var(--border)' : 'none',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
             }}>
               <div style={{ minWidth: 0 }}>
@@ -1307,7 +1315,7 @@ function NewsFilterContent() {
             )}
 
             {splitData && !splitLoading && (
-              <div style={{ padding: 24 }}>
+              <div style={{ padding: isMobile ? 14 : 24 }}>
                 {splitData.overview && (
                   <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.2)', fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)', marginBottom: 16 }}>
                     📋 {splitData.overview}
@@ -1343,7 +1351,7 @@ function NewsFilterContent() {
                               💡 มุมน่าเล่น: {t.viralAngle}
                             </div>
                           )}
-                          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                          <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 8, marginTop: 12 }}>
                             <button onClick={() => copyTopic(t)}
                               style={{ flex: 1, padding: '10px 0', borderRadius: 9, border: 'none', background: copiedTopic === t.id ? 'rgba(34,197,94,0.15)' : 'rgba(59,130,246,0.1)', color: copiedTopic === t.id ? '#22c55e' : '#3b82f6', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                               {copiedTopic === t.id ? '✅ คัดลอกแล้ว!' : '📋 คัดลอกประเด็นนี้'}
@@ -1366,8 +1374,8 @@ function NewsFilterContent() {
         {/* ===== SUMMARY STATS ===== */}
         {outputData && (
           <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
-            gap: 16, marginBottom: 24,
+            display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+            gap: isMobile ? 10 : 16, marginBottom: 24,
             animation: 'fadeUp 0.4s ease-out both',
           }}>
             {/* Original words */}
@@ -1477,7 +1485,7 @@ function NewsFilterContent() {
                     </div>
                     {caseExpanded === c.id && (
                       <div style={{ padding: 14, borderTop: '1px solid var(--border)' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
                           <div>
                             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>📄 ต้นฉบับ ({c.originalWordCount} คำ)</div>
                             <div style={{ fontSize: 12, lineHeight: 1.7, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', maxHeight: 320, overflowY: 'auto', background: 'rgba(0,0,0,0.15)', borderRadius: 8, padding: 10 }}>{c.original}</div>
@@ -1658,7 +1666,7 @@ function SentenceRow({ sentence, index, expanded, onToggle }) {
           {/* Score Bars */}
           {sentence.scores && (
             <div style={{
-              display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)',
+              display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)',
               gap: '8px 24px',
             }}>
               {[
