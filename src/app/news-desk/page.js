@@ -117,6 +117,7 @@ export default function NewsDeskPage() {
   const [tab, setTab] = useState('kratase'); // ★ 19 มิ.ย. รอบ 2 ดีฟอลต์ = กระแสรายวัน (มาก่อนอันดับแรก)
   const [catFilter, setCatFilter] = useState('all'); // ★ กรองหมวดในแท็บ "ทุกหมวด"
   const [catCounts, setCatCounts] = useState({});    // ★ จำนวนข่าวต่อหมวด (ทำ chips)
+  const [showAdvanced, setShowAdvanced] = useState(false); // ★ 19 มิ.ย. รอบ 3: พับเครื่องมือขั้นสูง (เลิกงง)
   const [items, setItems] = useState([]);
   const [mixToday, setMixToday] = useState({});
   const [sentToday, setSentToday] = useState(0);
@@ -601,30 +602,19 @@ export default function NewsDeskPage() {
               }}>{t.label}</button>
           ))}
           <div style={{ flex: 1 }} />
-          <button onClick={toggleAutopilot} title="เปิด: บก.เลือกข่าวคะแนน 8+ ส่งเจนเองทุกรอบ / ปิด: บก.แนะนำอย่างเดียว"
-            style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid ' + (autopilot ? 'rgba(34,197,94,0.45)' : 'var(--border)'), cursor: 'pointer', background: autopilot ? 'rgba(34,197,94,0.12)' : 'var(--bg-card)', color: autopilot ? '#22c55e' : 'var(--text-muted)', fontWeight: 700, fontSize: 13.5 }}>
-            {autopilot ? '🤖 Auto-Pilot: เปิด' : '⏸️ Auto-Pilot: ปิด'}</button>
-          <button onClick={toggleReframeAuto} title="เปิด: ข่าวดราม่า/ปะทะถูกแปลงเป็นมุมบวกอัตโนมัติ ≤3 ใบ/รอบ (เปลือง OpenAI) / ปิด: กดแปลงเองที่ปุ่ม ♻️ บนการ์ด"
-            style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid ' + (reframeAuto ? 'rgba(139,92,246,0.5)' : 'var(--border)'), cursor: 'pointer', background: reframeAuto ? 'rgba(139,92,246,0.14)' : 'var(--bg-card)', color: reframeAuto ? 'var(--desk-purple, #a855f7)' : 'var(--text-muted)', fontWeight: 700, fontSize: 13.5 }}>
-            {reframeAuto ? '♻️ แปลงมุมอัตโนมัติ: เปิด' : '♻️ แปลงมุมอัตโนมัติ: ปิด'}</button>
-          <button onClick={() => callChief()}
-            style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid rgba(139,92,246,0.4)', cursor: 'pointer', background: 'rgba(139,92,246,0.12)', color: 'var(--desk-purple)', fontWeight: 700, fontSize: 13.5 }}>
-            🧠 เรียก บก.ใหญ่</button>
-          <button onClick={scoutHarvest} disabled={harvesting} title="สมองสืบ 7 แนวคิดคำค้นน้ำดีสดๆ หมุนเวรตามชั่วโมง แล้วไปค้นข่าวที่คนอื่นไม่ขุด"
-            style={{
-              padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(34,197,94,0.5)', cursor: harvesting ? 'wait' : 'pointer',
-              background: harvesting ? '#4b5563' : 'rgba(34,197,94,0.15)', color: harvesting ? '#fff' : 'var(--desk-green, #16a34a)', fontWeight: 700, fontSize: 14,
-            }}>{harvesting ? '⏳...' : '🕵️ สั่งกองสืบน้ำดี'}</button>
+          <button onClick={() => setShowAdvanced(s => !s)} title="เครื่องมือขั้นสูง: Auto-Pilot · บก.AI · หาเฉพาะแนว · ติดตามกระแส · ขุดคลิป"
+            style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid var(--border)', cursor: 'pointer', background: showAdvanced ? 'rgba(139,92,246,0.15)' : 'var(--bg-card)', color: showAdvanced ? 'var(--desk-purple, #a855f7)' : 'var(--text-muted)', fontWeight: 700, fontSize: 13.5 }}>
+            {showAdvanced ? '⚙️ ขั้นสูง ▲' : '⚙️ ขั้นสูง ▼'}</button>
           <button onClick={clearAndRefresh} disabled={harvesting} title="เก็บข่าวทั้งหมดบนกระดานเข้ากรุ (ไม่ลบถาวร) แล้วสั่ง AI หาข่าวชุดใหม่ทันที"
             style={{
               padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.45)', cursor: harvesting ? 'wait' : 'pointer',
               background: harvesting ? '#4b5563' : 'rgba(239,68,68,0.12)', color: harvesting ? '#fff' : 'var(--desk-red, #dc2626)', fontWeight: 700, fontSize: 14,
-            }}>{harvesting ? '⏳...' : '🧹 ล้างกระดาน + หาใหม่'}</button>
+            }}>{harvesting ? '⏳...' : '🧹 ล้าง+หาใหม่'}</button>
           <button onClick={harvest} disabled={harvesting}
             style={{
               padding: '8px 18px', borderRadius: 10, border: 'none', cursor: harvesting ? 'wait' : 'pointer',
               background: harvesting ? '#4b5563' : 'linear-gradient(135deg,#8b5cf6,#6d28d9)', color: '#fff', fontWeight: 700, fontSize: 14,
-            }}>{harvesting ? '⏳ กำลังคัดกรอง...' : '🔄 หาข่าวรอบใหม่'}</button>
+            }}>{harvesting ? '⏳ กำลังหา...' : '🔄 หาข่าวใหม่'}</button>
         </div>
 
         {/* ★ 19 มิ.ย. (เก็บกว้าง): chips เลือกหมวด — เฉพาะแท็บ "ทุกหมวด" */}
@@ -643,6 +633,35 @@ export default function NewsDeskPage() {
           </div>
         )}
 
+        {/* 🔎 ค้นข่าวเอง (หลัก) — พิมพ์ชื่อคน/แนว → แท็บ 🎯 ผลค้นหา */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', padding: '10px 12px', borderRadius: 12, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.3)' }}>
+          <span style={{ fontSize: 18 }}>🔎</span>
+          <input value={kwInput} onChange={e => setKwInput(e.target.value)} disabled={harvesting}
+            onKeyDown={e => { if (e.key === 'Enter') keywordSearch(); }}
+            placeholder='ค้นข่าวเอง — ใส่ชื่อคน/แนว (เช่น "ลิซ่า", "ดารากตัญญู", "หมูเด้ง")'
+            style={{ flex: 1, padding: '9px 14px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 14 }} />
+          <button onClick={keywordSearch} disabled={harvesting || kwInput.trim().length < 2}
+            style={{ padding: '9px 18px', borderRadius: 9, border: 'none', cursor: (harvesting || kwInput.trim().length < 2) ? 'not-allowed' : 'pointer', background: (harvesting || kwInput.trim().length < 2) ? '#4b5563' : 'linear-gradient(135deg,#a855f7,#7c3aed)', color: '#fff', fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap' }}>
+            {harvesting ? '⏳...' : '🔎 ค้น'}</button>
+        </div>
+
+        {/* ===== ⚙️ เครื่องมือขั้นสูง (พับเก็บ — เลิกงง) ===== */}
+        {showAdvanced && (<>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+          <button onClick={toggleAutopilot} title="เปิด: บก.AI เลือกข่าว 8+ ส่งเจนเอง / ปิด: แนะนำอย่างเดียว"
+            style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid ' + (autopilot ? 'rgba(34,197,94,0.45)' : 'var(--border)'), cursor: 'pointer', background: autopilot ? 'rgba(34,197,94,0.12)' : 'var(--bg-card)', color: autopilot ? '#22c55e' : 'var(--text-muted)', fontWeight: 700, fontSize: 13.5 }}>
+            {autopilot ? '🤖 Auto-Pilot: เปิด' : '⏸️ Auto-Pilot: ปิด'}</button>
+          <button onClick={toggleReframeAuto} title="เปิด: ดราม่าถูกแปลงเป็นมุมบวกอัตโนมัติ / ปิด: กดแปลงเองที่การ์ด"
+            style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid ' + (reframeAuto ? 'rgba(139,92,246,0.5)' : 'var(--border)'), cursor: 'pointer', background: reframeAuto ? 'rgba(139,92,246,0.14)' : 'var(--bg-card)', color: reframeAuto ? 'var(--desk-purple, #a855f7)' : 'var(--text-muted)', fontWeight: 700, fontSize: 13.5 }}>
+            {reframeAuto ? '♻️ แปลงมุมอัตโนมัติ: เปิด' : '♻️ แปลงมุมอัตโนมัติ: ปิด'}</button>
+          <button onClick={() => callChief()}
+            style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid rgba(139,92,246,0.4)', cursor: 'pointer', background: 'rgba(139,92,246,0.12)', color: 'var(--desk-purple)', fontWeight: 700, fontSize: 13.5 }}>
+            🧠 เรียก บก.ใหญ่</button>
+          <button onClick={scoutHarvest} disabled={harvesting} title="กองสืบน้ำดี — AI คิดคำค้นน้ำดีสดๆ ไปล่า"
+            style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid rgba(34,197,94,0.5)', cursor: harvesting ? 'wait' : 'pointer', background: harvesting ? '#4b5563' : 'rgba(34,197,94,0.15)', color: harvesting ? '#fff' : 'var(--desk-green, #16a34a)', fontWeight: 700, fontSize: 13.5 }}>
+            {harvesting ? '⏳...' : '🕵️ กองสืบน้ำดี'}</button>
+        </div>
+
         {/* ★ สั่งหาข่าวเฉพาะแนว (15 มิ.ย.) — เลือกแนวที่อยากได้ แล้วยิงค้นเฉพาะแนวนั้น */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>🎯 สั่งหาเฉพาะแนว:</span>
@@ -656,17 +675,7 @@ export default function NewsDeskPage() {
           <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>— เติมช่องว่างของวันได้ตรงจุด (เช่น วันนี้ขาดข่าวรักสัตว์)</span>
         </div>
 
-        {/* ★ 17 มิ.ย.: ค้นด้วยคีย์เวิร์ดคน/เรื่องเอง (เผื่อปิ๊งไอเดีย) → ผลไปแท็บ 🎯 ผลค้นหา */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', padding: '10px 12px', borderRadius: 12, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.3)' }}>
-          <span style={{ fontSize: 18 }}>🔎</span>
-          <input value={kwInput} onChange={e => setKwInput(e.target.value)} disabled={harvesting}
-            onKeyDown={e => { if (e.key === 'Enter') keywordSearch(); }}
-            placeholder='ค้นเอง — ใส่ชื่อคน/แนวที่อยากได้ (เช่น "ลิซ่า", "ดารากตัญญู", "หมูเด้ง") ระบบค้นสด+อมตะ+สัมภาษณ์ให้'
-            style={{ flex: 1, padding: '9px 14px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 14 }} />
-          <button onClick={keywordSearch} disabled={harvesting || kwInput.trim().length < 2}
-            style={{ padding: '9px 18px', borderRadius: 9, border: 'none', cursor: (harvesting || kwInput.trim().length < 2) ? 'not-allowed' : 'pointer', background: (harvesting || kwInput.trim().length < 2) ? '#4b5563' : 'linear-gradient(135deg,#a855f7,#7c3aed)', color: '#fff', fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap' }}>
-            {harvesting ? '⏳...' : '🔎 ค้นคีย์เวิร์ดนี้'}</button>
-        </div>
+        {/* (ช่องค้นย้ายขึ้นไปเป็นช่องหลักด้านบนแล้ว — ที่นี่เป็นเครื่องมือขั้นสูงต่อ) */}
 
         {/* ★ 16 มิ.ย.: ติดตามกระแส — ใส่ชื่อกระแสวันนี้ → AI วิเคราะห์ตัวละคร+คีย์เวิร์ด → ค้นทุกแหล่ง */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', padding: '10px 12px', borderRadius: 12, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)' }}>
@@ -746,6 +755,8 @@ export default function NewsDeskPage() {
             ✍️ กำลังเขียน <b style={{ color: 'var(--desk-blue)' }}>{queueDepth.processing}</b> · รอคิว <b style={{ color: 'var(--desk-amber)' }}>{queueDepth.pending}</b> · ✅ พร้อมใช้ <b style={{ color: 'var(--desk-green)' }}>{readyCount}</b>
           </span>
         </div>
+        </>)}
+        {/* ===== จบเครื่องมือขั้นสูง ===== */}
 
         {/* แถบส่วนผสมวันนี้ + Mix Governor */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14, padding: '10px 14px', background: 'var(--bg-card)', borderRadius: 12, fontSize: 13, color: 'var(--text-secondary)' }}>

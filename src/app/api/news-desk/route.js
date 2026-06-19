@@ -43,6 +43,16 @@ export async function GET(request) {
     // ★ 19 มิ.ย. (เก็บกว้าง): แท็บ 🗂️ ทุกหมวด — ดูข่าวทุกเลน/ทุกหมวด เลื่อนดูเยอะ + กรองตามหมวด (ไม่ดัน mix-governor)
     if (tab === 'browse') {
       let list = items.filter(i => i.status !== 'dismissed' && !i.used);
+      // ★ 19 มิ.ย. รอบ 3 (ผู้ใช้: กระแสเก่าไม่เอา เก็บเฉพาะเขียนใหม่ได้):
+      //   หมวด "เขียนใหม่ได้" (น้ำดี/กตัญญู/สู้ชีวิต/คนดังทำดี/สัมภาษณ์/ความรัก) = เก็บทุกอายุ
+      //   หมวดอื่น (กระแส/ดราม่า/คดี/บันเทิง/ไลฟ์สไตล์/กีฬา) = ตัดของเก่า >7 วันทิ้งจากหน้าโต๊ะ
+      const EVERGREEN_CATS = ['น้ำใจ/ช่วยเหลือ', 'กตัญญู/ครอบครัวอบอุ่น', 'สู้ชีวิต', 'คนดังทำดี/ติดดิน', 'สัมภาษณ์/บทสนทนาดี', 'ความรัก/แต่งงาน'];
+      const _oldCut = Date.now() - 7 * 864e5;
+      list = list.filter(i => {
+        if (EVERGREEN_CATS.includes(i.category)) return true;
+        const ref = i.publishedAt || i.harvestedAt;
+        return !ref || new Date(ref).getTime() >= _oldCut;
+      });
       const counts = {};
       for (const i of list) { const c = i.category || 'อื่นๆ'; counts[c] = (counts[c] || 0) + 1; }
       const catParam = searchParams.get('category');

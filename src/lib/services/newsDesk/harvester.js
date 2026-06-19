@@ -420,9 +420,14 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'evergreen
       const dailyQs = generateDailyTrend(14).map(q => ({ q, category: 'กระแสรายวัน' }));
       const themeQs = generateThemeQueries(6); // [{q, category}] — หมุนชุดตามเวลา
       const allQ = [...dailyQs, ...themeQs];
+      const _dailyCut = Date.now() - 5 * 864e5; // กระแสรายวัน = สด ≤5 วันเท่านั้น
       const _bRes = await Promise.all(allQ.map(async ({ q, category }) => {
-        try { return (await googleNewsRss(q, { num: 12 })).map(r => ({ ...r, lane: 'broad', category })); }
-        catch { return []; }
+        try {
+          let res = (await googleNewsRss(q, { num: 12 })).map(r => ({ ...r, lane: 'broad', category }));
+          // ★ 19 มิ.ย. รอบ 3 (ผู้ใช้: กระแสเก่าไม่เอา): กระแสรายวัน ตัดข่าวเก่าทิ้ง เก็บเฉพาะสด ≤5 วัน
+          if (category === 'กระแสรายวัน') res = res.filter(r => !r.publishedAt || new Date(r.publishedAt).getTime() >= _dailyCut);
+          return res;
+        } catch { return []; }
       }));
       for (const arr of _bRes) raw.push(...arr);
       console.log(`[Harvester] 🌐 broad เชิงลึก: ${allQ.length} คำค้น (กระแสรายวัน ${dailyQs.length} + แนวเรื่อง ${themeQs.length}) → ${_bRes.reduce((s, a) => s + a.length, 0)} ดิบ`);
