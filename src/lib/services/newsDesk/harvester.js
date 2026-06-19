@@ -120,9 +120,11 @@ function parseGoogleNews(xml) {
   return items;
 }
 
-async function googleNewsRss(query, { num = 20 } = {}) {
+async function googleNewsRss(query, { num = 20, when = '' } = {}) {
   try {
-    const u = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=th&gl=TH&ceid=TH:th`;
+    // ★ 19 มิ.ย. รอบ 4: operator when:Nd จำกัดข่าวสด N วัน (ฟรี ไม่พึ่ง Serper) — ใช้กับกระแสรายวันให้สดจริง
+    const q = when ? `${query} when:${when}` : query;
+    const u = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=th&gl=TH&ceid=TH:th`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
     const res = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: controller.signal });
@@ -423,9 +425,10 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'evergreen
       const _dailyCut = Date.now() - 5 * 864e5; // กระแสรายวัน = สด ≤5 วันเท่านั้น
       const _bRes = await Promise.all(allQ.map(async ({ q, category }) => {
         try {
-          let res = (await googleNewsRss(q, { num: 12 })).map(r => ({ ...r, lane: 'broad', category }));
-          // ★ 19 มิ.ย. รอบ 3 (ผู้ใช้: กระแสเก่าไม่เอา): กระแสรายวัน ตัดข่าวเก่าทิ้ง เก็บเฉพาะสด ≤5 วัน
-          if (category === 'กระแสรายวัน') res = res.filter(r => !r.publishedAt || new Date(r.publishedAt).getTime() >= _dailyCut);
+          const isDaily = category === 'กระแสรายวัน';
+          // ★ 19 มิ.ย. รอบ 4: กระแสรายวันใช้ operator when:3d (Google คืนเฉพาะข่าวสด 3 วัน ฟรี ไม่พึ่ง Serper)
+          let res = (await googleNewsRss(q, { num: 12, when: isDaily ? '3d' : '' })).map(r => ({ ...r, lane: 'broad', category }));
+          if (isDaily) res = res.filter(r => !r.publishedAt || new Date(r.publishedAt).getTime() >= _dailyCut);
           return res;
         } catch { return []; }
       }));
