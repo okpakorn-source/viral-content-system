@@ -135,6 +135,42 @@ async function googleNewsRss(query, { num = 20, when = '' } = {}) {
   } catch (e) { console.log('[Harvester] gnews rss failed:', e.message?.slice(0, 40)); return []; }
 }
 
+// ════════════════════════════════════════════════════
+// 🧠 Exa — neural/semantic search (19 มิ.ย. รอบ 6): ค้นเชิงความหมาย "คมกว่า Serper"
+//   ★ บทเรียนจากเทส: Exa อ่อนคำค้นไทยล้วน (ได้ผลจีน) แต่ "ค้นด้วยอังกฤษเชิงความหมาย → ดึงข่าวไทยตรงคอนเซ็ปต์ได้คมมาก"
+//   ใช้กับแนว "ดาราน้ำดี" (กตัญญู/สู้ชีวิต/ช่วยเหลือ) ที่ semantic เก่งสุด — env-gated (ไม่มี EXA_API_KEY = ข้ามเงียบ)
+// ════════════════════════════════════════════════════
+const EXA_GOOD_QUERIES = [
+  { q: 'Thai celebrity buys a house or car for their parents, heartwarming gratitude story', category: 'กตัญญู/ครอบครัวอบอุ่น' },
+  { q: 'Thai celebrity devotedly takes care of sick parents, repaying their kindness', category: 'กตัญญู/ครอบครัวอบอุ่น' },
+  { q: 'Thai actor or singer rags to riches, struggled through poverty to success', category: 'สู้ชีวิต' },
+  { q: 'Thai celebrity donates money or helps poor people and flood victims, charity', category: 'น้ำใจ/ช่วยเหลือ' },
+  { q: 'Thai famous celebrity humble and down to earth, simple lifestyle', category: 'คนดังทำดี/ติดดิน' },
+  { q: 'Thai celebrity heartfelt emotional interview sharing life lessons and hardship', category: 'สัมภาษณ์/บทสนทนาดี' },
+];
+
+async function exaSearch(query, { num = 10, days = 0 } = {}) {
+  const key = process.env.EXA_API_KEY;
+  if (!key) return [];
+  try {
+    const body = { query, numResults: num, type: 'auto', category: 'news', contents: { text: { maxCharacters: 220 } } };
+    if (days) body.startPublishedDate = new Date(Date.now() - days * 864e5).toISOString();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    const res = await fetch('https://api.exa.ai/search', {
+      method: 'POST', headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body), signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) { console.log('[Harvester] Exa', res.status); return []; }
+    const data = await res.json();
+    return (data.results || []).map(r => {
+      let src = ''; try { src = new URL(r.url).hostname.replace(/^www\./, ''); } catch {}
+      return { title: r.title || '', snippet: String(r.text || '').replace(/\s+/g, ' ').slice(0, 200), url: r.url || '', source: src, publishedAt: r.publishedDate || null, imageUrl: r.image || '' };
+    }).filter(x => x.title && x.url);
+  } catch (e) { console.log('[Harvester] Exa failed:', e.message?.slice(0, 40)); return []; }
+}
+
 // ── เลน 🔁 Follow-up (เฟส 3): ตามรอยข่าวที่เพจเคยทำ — "ตอนนี้เป็นยังไงแล้ว" ──
 // หยิบข่าวเก่าในคลังเพจ (อายุ ≥21 วัน, มีตัวบุคคล) วันละ 3 เรื่อง → ค้นความเคลื่อนไหวล่าสุดของคนนั้น
 async function buildFollowupQueries(count = 3) {
@@ -319,7 +355,7 @@ async function harvestBuzzsumo() {
  * รันเก็บ+คัดกรองครบ 4 ชั้น แล้วลงคลัง
  * @returns {Promise<{harvested, gated, classified, judged, added}>}
  */
-export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'evergreen', 'followup', 'buzz'], judgeTop = 24, extraQueries = [] } = {}) {
+export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'evergreen', 'followup', 'buzz'], judgeTop = 24, extraQueries = [] } = {}) {
   const t0 = Date.now();
   const store = createStore('news-desk');
   const existing = await store.getAll();
@@ -435,6 +471,18 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'evergreen
       for (const arr of _bRes) raw.push(...arr);
       console.log(`[Harvester] 🌐 broad เชิงลึก: ${allQ.length} คำค้น (กระแสรายวัน ${dailyQs.length} + แนวเรื่อง ${themeQs.length}) → ${_bRes.reduce((s, a) => s + a.length, 0)} ดิบ`);
     } catch (e) { console.log('[Harvester] broad-deep failed:', e.message?.slice(0, 50)); }
+  }
+  // 🧠 เลน Exa (semantic น้ำดี) — ค้นอังกฤษเชิงความหมาย → ดึงข่าวไทยน้ำดีที่คีย์เวิร์ดพลาด (env-gated)
+  if (lanes.includes('exa') && process.env.EXA_API_KEY) {
+    try {
+      const _eRes = await Promise.all(EXA_GOOD_QUERIES.map(async ({ q, category }) => {
+        // tag lane='broad' → ไหลผ่านไปป์ไลน์ฟรี (ไม่กิน AI) + ติด category น้ำดีจากคำค้นตรงๆ
+        try { return (await exaSearch(q, { num: 10, days: 365 })).map(r => ({ ...r, lane: 'broad', category, _exa: true })); }
+        catch { return []; }
+      }));
+      for (const arr of _eRes) raw.push(...arr);
+      console.log(`[Harvester] 🧠 Exa (semantic น้ำดี): ${EXA_GOOD_QUERIES.length} คำค้น → ${_eRes.reduce((s, a) => s + a.length, 0)} ดิบ`);
+    } catch (e) { console.log('[Harvester] exa lane failed:', e.message?.slice(0, 50)); }
   }
   // ★ คำค้นพิเศษ (Chief Agent / สั่งหาเฉพาะแนว) — เลือก endpoint ได้: news (default) | search (เว็บกว้าง) | videos (ยูทูป)
   // ★ 16 มิ.ย. (เร่งความเร็ว): ยิงพร้อมกัน
