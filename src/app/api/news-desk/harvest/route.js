@@ -19,7 +19,7 @@ async function doHarvest(opts) {
   _harvestLock = new Promise((r) => (release = r));
   await prev;
   try {
-    await pruneOldItems(3);
+    await pruneOldItems(12); // 19 มิ.ย. (เก็บกว้าง): ยืด 3→12 วัน ให้สอดคล้องเพดานเก็บข่าวใหม่
     const stats = await runHarvest(opts);
     return NextResponse.json({ success: true, ...stats });
   } finally {
@@ -62,7 +62,7 @@ export async function POST(request) {
       });
     }
     return await doHarvest({
-      lanes: Array.isArray(body.lanes) && body.lanes.length ? body.lanes : ['trend', 'good'],
+      lanes: Array.isArray(body.lanes) && body.lanes.length ? body.lanes : ['trend', 'good', 'broad'],
       judgeTop: Math.min(40, Number(body.judgeTop) || 24),
     });
   } catch (error) {

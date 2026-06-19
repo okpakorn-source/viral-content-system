@@ -12,7 +12,7 @@ import { createStore } from '@/lib/persistStore';
 import {
   gateKeywords, classifyBatch, fitScore, freshScore,
   loadArchiveTitles, isDuplicateOfArchive, editorialJudge, finalScore,
-  getCategoryPerformance,
+  getCategoryPerformance, keywordCategorize, keywordGore,
 } from './deskBrain';
 
 // ★ คลังคำค้นกระแส — ผ่าตัด 13 มิ.ย. 69 (ตัดคำกว้างที่ดูดขยะอากาศ/การเมือง/บอลออก)
@@ -67,6 +67,70 @@ function pickEvergreenQueries(count = 3) {
   const out = [];
   for (let i = 0; i < count; i++) out.push(EVERGREEN_PATTERNS[(day * count + i + 7) % EVERGREEN_PATTERNS.length]);
   return out;
+}
+
+// ════════════════════════════════════════════════════
+// ★ เลน 🌐 BROAD (19 มิ.ย. — คำสั่งผู้ใช้ "รื้อโต๊ะเป็นเก็บกว้าง"): กวาดข่าวไทยทุกหมวดให้เยอะสุด
+//   ยิงผ่าน Google News RSS (ฟรี ไม่กิน Serper credit) → ครอบทุกสำนัก/ทุกแนว
+//   ครอบหมวดที่ผู้ใช้ยกตัวอย่าง: บันเทิง/ดารา/ความสัมพันธ์-แต่งงาน/ดราม่าสังคม/น้ำดี/ไวรัล/อุทาหรณ์/กีฬา-คน/ไลฟ์สไตล์
+// ════════════════════════════════════════════════════
+const BROAD_QUERY_POOL = [
+  // 🎬 บันเทิง/ดารา/คนดัง
+  'ข่าวบันเทิง', 'ข่าวดารา ล่าสุด', 'คนดัง ล่าสุด', 'นักร้อง ศิลปิน ข่าว', 'ดารา เปิดใจ',
+  // 💍 ความสัมพันธ์/แต่งงาน/ครอบครัว
+  'ดารา แต่งงาน', 'ดารา หมั้น', 'ดารา ควงแฟน', 'คู่รักดารา ล่าสุด', 'ดารา ตั้งครรภ์ มีลูก',
+  // 🎭 ดราม่า/สังคม
+  'ดราม่า ไวรัล ล่าสุด', 'ดราม่าสังคม ล่าสุด', 'ดราม่าร้านดัง', 'ชาวเน็ตแห่แชร์ ล่าสุด', 'ดราม่าดารา ล่าสุด',
+  // 💎 น้ำดี/อบอุ่น/สู้ชีวิต
+  'น้ำใจ ช่วยเหลือ ไวรัล', 'ลูกกตัญญู ดูแลพ่อแม่', 'พลเมืองดี ไวรัล', 'สู้ชีวิต ไวรัล', 'ดาราใจบุญ บริจาค',
+  // 🔥 ไวรัล/กระแส
+  'คลิปไวรัล ล่าสุด', 'กระแสโซเชียล ล่าสุด', 'เรื่องราวไวรัล ล่าสุด', 'ทอล์กออฟเดอะทาวน์',
+  // ⚠️ อุทาหรณ์/เตือนภัย/คดีดัง (ไม่สยอง)
+  'อุทาหรณ์ เตือนภัย ไวรัล', 'มิจฉาชีพ หลอกลวง ไวรัล', 'คดีดัง สังคม ล่าสุด',
+  // 🏆 กีฬา-คน/อีสปอร์ต
+  'นักกีฬาไทย ข่าว ล่าสุด', 'วอลเลย์บอลหญิงไทย ล่าสุด', 'ฟุตบอลไทย นักเตะ ข่าว',
+  // 📱 ไลฟ์สไตล์/ครีเอเตอร์
+  'ยูทูบเบอร์ ติ๊กต็อก ไวรัล', 'เน็ตไอดอล ล่าสุด', 'รีวิวร้านเด็ด คนแห่',
+];
+
+// ★ Google News RSS (ฟรี) — ค้นข่าวไทยตามคำค้น คืนข่าวจากหลายสำนักพร้อมกัน
+function parseGoogleNews(xml) {
+  const items = [];
+  const blocks = String(xml).match(/<item>[\s\S]*?<\/item>/g) || [];
+  const pick = (b, tag) => {
+    const m = b.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i'));
+    if (!m) return '';
+    return m[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '').replace(/&[a-z]+;/g, ' ').trim();
+  };
+  for (const b of blocks) {
+    let title = pick(b, 'title');
+    const src = pick(b, 'source');
+    if (src && title.endsWith(`- ${src}`)) title = title.slice(0, -(src.length + 2)).trim();
+    const url = pick(b, 'link');
+    if (!title || !url) continue;
+    items.push({
+      title,
+      url,
+      snippet: pick(b, 'description').slice(0, 200),
+      publishedAt: (() => { const d = new Date(pick(b, 'pubDate')); return isNaN(d) ? null : d.toISOString(); })(),
+      source: src || 'Google News',
+      imageUrl: '',
+    });
+  }
+  return items;
+}
+
+async function googleNewsRss(query, { num = 20 } = {}) {
+  try {
+    const u = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=th&gl=TH&ceid=TH:th`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    const res = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return [];
+    const xml = await res.text();
+    return parseGoogleNews(xml).slice(0, num);
+  } catch (e) { console.log('[Harvester] gnews rss failed:', e.message?.slice(0, 40)); return []; }
 }
 
 // ── เลน 🔁 Follow-up (เฟส 3): ตามรอยข่าวที่เพจเคยทำ — "ตอนนี้เป็นยังไงแล้ว" ──
@@ -253,7 +317,7 @@ async function harvestBuzzsumo() {
  * รันเก็บ+คัดกรองครบ 4 ชั้น แล้วลงคลัง
  * @returns {Promise<{harvested, gated, classified, judged, added}>}
  */
-export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'followup', 'buzz'], judgeTop = 24, extraQueries = [] } = {}) {
+export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'evergreen', 'followup', 'buzz'], judgeTop = 24, extraQueries = [] } = {}) {
   const t0 = Date.now();
   const store = createStore('news-desk');
   const existing = await store.getAll();
@@ -347,6 +411,15 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
       }
     } catch (e) { console.log('[Harvester] good-block failed:', e.message?.slice(0, 50)); }
   }
+  if (lanes.includes('broad')) {
+    // 🌐 เก็บกว้าง (19 มิ.ย.) — Google News RSS ฟรี ทั้ง pool พร้อมกัน: ครอบทุกหมวด หลายสำนัก ไม่กิน Serper credit
+    const _bRes = await Promise.all(BROAD_QUERY_POOL.map(async q => {
+      try { return (await googleNewsRss(q, { num: 20 })).map(r => ({ ...r, lane: 'broad' })); }
+      catch { return []; }
+    }));
+    for (const arr of _bRes) raw.push(...arr);
+    console.log(`[Harvester] 🌐 broad (Google News RSS): ${_bRes.reduce((s, a) => s + a.length, 0)} ดิบ จาก ${BROAD_QUERY_POOL.length} คำค้น`);
+  }
   // ★ คำค้นพิเศษ (Chief Agent / สั่งหาเฉพาะแนว) — เลือก endpoint ได้: news (default) | search (เว็บกว้าง) | videos (ยูทูป)
   // ★ 16 มิ.ย. (เร่งความเร็ว): ยิงพร้อมกัน
   const _exRes = await Promise.all(extraQueries.map(async ex => {
@@ -415,11 +488,17 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     gated.push(item);
   }
 
-  // ── ชั้น 1: จัดหมวด + วัดพิษ ──
-  let classified = await classifyBatch(gated);
-  // ทิ้งตัวพิษเกิน/เกลาไม่ได้ → คลังขยะ
+  // ── ★ 19 มิ.ย. (เก็บกว้าง): แยกเลน broad ออกจากไปป์ไลน์ AI หนัก ──
+  //   broad = จัดหมวดคีย์เวิร์ด(ฟรี) + กรอง gore เท่านั้น (ปริมาณเยอะ ไม่ต้องยิง OpenAI ทีละ 10 ข่าว)
+  //   curated (trend/good/...) = ผ่าน AI classify + ด่านบรรณาธิการ + judge ตามเดิม
+  const gatedBroad = gated.filter(i => i.lane === 'broad');
+  const gatedCurated = gated.filter(i => i.lane !== 'broad');
+
+  // ── ชั้น 1: จัดหมวด + วัดพิษ (เฉพาะ curated) ──
+  let classified = await classifyBatch(gatedCurated);
+  // ★ safety floor (ผู้ใช้ 19 มิ.ย.): ตัดแค่ "รุนแรง/สยอง" (toxicity≥3) — คลาย fbRisk/toneable (เก็บกว้าง)
   classified = classified.filter(c => {
-    if (c.toxicity >= 3 || c.fbRisk >= 3 || c.toneable === false) { junk.push({ ...c, junkReason: 'เนื้อหาเสี่ยง/เกลาไม่ได้ (พิษ/เสี่ยง FB)' }); return false; }
+    if (c.toxicity >= 3) { junk.push({ ...c, junkReason: 'เนื้อหารุนแรง/สยอง (พิษ≥3)' }); return false; }
     return true;
   });
 
@@ -435,34 +514,12 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
   //   ① ข่าวทางการ/สถาบัน/รพ.ที่ไม่มีตัวละครหลัก (ไม่ใช่ดารา) = ตัด  ② กระแส/ดราม่าเก่าที่เล่นใหม่ไม่ได้ = ตัด (เว้นเลนกระแสสด)
   stats.noChar = 0; stats.staleTrend = 0; stats.royalNeg = 0; stats.unknownPerson = 0; stats.noImage = 0;
   classified = classified.filter(c => {
-    // ★ 16 มิ.ย. (สำคัญสุด): สถาบันแง่ลบ/เสื่อมเสีย/ประจาน/อ่อนไหว = ตัดเด็ดขาด (แง่ดี/ชื่นชมปล่อยผ่าน)
+    // ★ safety (คงไว้): สถาบันแง่ลบ/เสื่อมเสีย/อ่อนไหว = ตัดเด็ดขาด (ม.112) — แง่ดี/ชื่นชมปล่อยผ่าน
     if (c.royalNegative === true) {
       stats.royalNeg++; junk.push({ ...c, junkReason: 'สถาบันแง่ลบ/อ่อนไหว (ม.112)' }); console.log(`[Harvester] 🚫 สถาบันแง่ลบ/อ่อนไหว: ${String(c.title).slice(0, 50)}`); return false;
     }
-    // ★★ 17 มิ.ย. (ทีมแก้: "กระแส=สังคมสนใจก็พอ ไม่ต้องเป็นดารา · ดาราน้ำดี=ต้องเป็นคนดังจริง"):
-    //   เลนกระแส (trend/buzz/trend-track) = เก็บชาวบ้านไวรัล/เอ็นเกจสูงไว้ (ไม่ตัดนิรนาม ไม่บังคับภาพ) — นั่นคือนิยามหมวดกระแส
-    //   เลนดาราน้ำดี (good/celeb/evergreen...) = ตัดนิรนาม + บังคับมีภาพ (ต้องเป็นคนดังที่ทำคอนเทนต์ได้)
-    const _isKratase = ['trend', 'buzz', 'trend-track'].includes(c.lane);
-    if (!_isKratase) {
-      // ตัดนิรนามเฉพาะเลนดาราน้ำดี (กันตัดพลาด: ต้อง notability=unknown และ subject=ordinary พร้อมกัน)
-      if (c.notability === 'unknown' && c.subject === 'ordinary') {
-        stats.unknownPerson++; junk.push({ ...c, junkReason: 'ชาวบ้านนิรนาม (ไม่มีชื่อเสียง) — เลนดาราน้ำดี' }); console.log(`[Harvester] 🚫 คนนิรนาม (ดาราน้ำดี): ${String(c.title).slice(0, 50)}`); return false;
-      }
-      // ดาราน้ำดีที่เป็นชาวบ้านไวรัล (semiKnown) ต้องมีภาพ
-      if (c.notability === 'semiKnown' && c.subject === 'ordinary' && !c.imageUrl && !['video', 'interview', 'throwback'].includes(c.lane)) {
-        stats.noImage++; junk.push({ ...c, junkReason: 'ไม่มีภาพ (เลนดาราน้ำดี)' }); console.log(`[Harvester] 🖼️ ไม่มีภาพ (ดาราน้ำดี): ${String(c.title).slice(0, 50)}`); return false;
-      }
-    }
-    // ★ 17 มิ.ย. (ทีมชี้ "กรองแคบเกิน เจอข่าวน้อย"): คลาย noChar — เก็บข่าวชาวบ้านน้ำใจ/สู้ชีวิต/กตัญญู แม้ AI ไม่เจอชื่อคนชัด
-    //   (เช่น "น้ำใจคนไทยช่วยน้ำท่วม" = ทำได้จริง) → ตัดเฉพาะที่ "ไม่มีคน + หมวดนอกแนว" (องค์กร/สถิติ/เตือนภัย/อื่นๆ)
-    if (c.hasMainChar === false && c.subject !== 'celeb'
-      && !['น้ำใจ/ช่วยเหลือ', 'สู้ชีวิต', 'กตัญญู/ครอบครัวอบอุ่น', 'คนดังทำดี/ติดดิน', 'สัมภาษณ์/บทสนทนาดี'].includes(c.category)) {
-      stats.noChar++; junk.push({ ...c, junkReason: 'ไม่มีตัวละครหลัก + หมวดนอกแนว (องค์กร/สถิติ)' }); console.log(`[Harvester] 🚫 ไม่มีตัวละครหลัก (องค์กร/สถิติ): ${String(c.title).slice(0, 50)}`); return false;
-    }
-    // กระแสเก่าเล่นใหม่ไม่ได้ — เว้นเฉพาะเลนข่าวสดเร็ว (trend/buzz); trend-track ก็ต้องตัดกระแสเก่า (ทีมอยากได้ของใช้ได้จริง)
-    if (c.staleTrend === true && !['trend', 'buzz'].includes(c.lane)) {
-      stats.staleTrend++; junk.push({ ...c, junkReason: 'กระแสเก่าเล่นใหม่ไม่ได้' }); console.log(`[Harvester] 🚫 กระแสเก่าเล่นใหม่ไม่ได้: ${String(c.title).slice(0, 50)}`); return false;
-    }
+    // ★ 19 มิ.ย. (เก็บกว้าง — ผู้ใช้สั่งปลดล็อก): เลิกตัด "คนนิรนาม/ไม่มีภาพ/ไม่มีตัวละคร/กระแสเก่า"
+    //   ของพวกนี้เคยตัดทิ้งจนข่าวน้อย — ตอนนี้เก็บไว้ติดหมวดให้เลือกเอง (เหลือกรองแค่ safety + ต่างประเทศ)
     return true;
   });
 
@@ -477,8 +534,8 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     if (c.lane === 'evergreen-celeb' || c.lane === 'throwback') return true;
     const ageDays = c.publishedAt ? (Date.now() - new Date(c.publishedAt).getTime()) / 864e5 : null;
     if (c.lane === 'evergreen') { stats.staleEvent++; junk.push({ ...c, junkReason: 'เหตุการณ์ครั้งเดียวที่เก่าแล้ว' }); console.log(`[Harvester] ⏳ ตัดกระแสอดีต (evergreen+event): ${String(c.title).slice(0, 55)}`); return false; }
-    // ★ 17 มิ.ย. (คลายให้กว้าง): กระแส (trend/buzz) ต้องสด ≤14 วัน · ข่าวดารา/น้ำดี/ชาวบ้าน ยืดได้ ≤75 วัน (เนื้อยังทำได้จริง)
-    const _ageCap = ['trend', 'buzz'].includes(c.lane) ? 14 : 75;
+    // ★ 19 มิ.ย. (เก็บกว้าง): ยืดอายุ — กระแส (trend/buzz) ≤30 วัน · ข่าวอื่น ≤180 วัน (เก็บไว้ให้เลือกเอง)
+    const _ageCap = ['trend', 'buzz'].includes(c.lane) ? 30 : 180;
     if (ageDays !== null && ageDays > _ageCap) { stats.staleEvent++; junk.push({ ...c, junkReason: `เหตุการณ์เก่า ${Math.round(ageDays)} วัน` }); console.log(`[Harvester] ⏳ ตัดเหตุการณ์เก่า ${Math.round(ageDays)} วัน (>${_ageCap}): ${String(c.title).slice(0, 50)}`); return false; }
     return true;
   });
@@ -500,9 +557,17 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
   const judged = await editorialJudge(toJudge);
   stats.judged = judged.filter(j => j.judgeScore !== undefined).length;
 
+  // ── ★ 19 มิ.ย. (เก็บกว้าง): เลน broad — จัดหมวดคีย์เวิร์ด(ฟรี) + กรอง gore → ลงโต๊ะตรงๆ ไม่ผ่าน AI judge ──
+  const broadFinal = [];
+  for (const it of gatedBroad) {
+    if (keywordGore(it)) { junk.push({ ...it, junkReason: 'รุนแรง/สยอง (คีย์เวิร์ด)' }); continue; }
+    broadFinal.push({ ...it, category: keywordCategorize(it), tone: 'กลาง', toxicity: 0, fbRisk: 0, toneable: true, _broad: true });
+  }
+  stats.broadKept = broadFinal.length;
+
   // ── ลงคลัง ──
   const now = new Date().toISOString();
-  const finalItems = [...judged, ...rest].map(it => ({
+  const finalItems = [...judged, ...rest, ...broadFinal].map(it => ({
     ...it,
     finalScore: finalScore(it, perfBoost),
     status: 'new',
@@ -610,19 +675,17 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
         purged++;
         continue;
       }
-      // ★ 16 มิ.ย.: รีเช็คสัญญาณ AI — ตัดของที่หลุดก่อนใส่ฟิลเตอร์ (กระแสเก่า/สถาบันลบ/ไม่มีตัวละคร) เว้นเลนข่าวสด
-      if (it.royalNegative === true
-        || (it.staleTrend === true && !['trend', 'buzz'].includes(it.lane))
-        || (it.hasMainChar === false && it.subject !== 'celeb')) {
-        await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: '🧹 ตัดอัตโนมัติ (กระแสเก่า/สถาบันลบ/ไม่มีตัวละคร)' })).catch(() => {});
+      // ★ 19 มิ.ย. (เก็บกว้าง): รีเช็คเฉพาะ safety (สถาบันแง่ลบ ม.112) — เลิกตัดกระแสเก่า/ไม่มีตัวละครอัตโนมัติ
+      if (it.royalNegative === true) {
+        await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: '🧹 ตัดอัตโนมัติ (สถาบันแง่ลบ/อ่อนไหว)' })).catch(() => {});
         purged++;
         continue;
       }
-      // ★ ล้างตามอายุ — เฉพาะการ์ด new ที่ยังไม่มีใครหยิบ (16 มิ.ย.: ลดชั่วโมง 72/48 → 48/36 กันบวม)
+      // ★ ล้างตามอายุ — เฉพาะการ์ด new ที่ยังไม่มีใครหยิบ
       if (it.status !== 'new') continue;
       const ageHr = (now - new Date(it.harvestedAt || 0).getTime()) / 36e5;
-      // ★ 16 มิ.ย.: ผลค้นเฉพาะแนว (focusTag) อยู่นานๆ — 7 วัน (ทีมอยากกลับมาดูผลค้นได้ ไม่หายเร็ว)
-      const cap = it.focusTag ? 168 : ((it.judgeScore ?? 0) >= 9 ? 48 : 36);
+      // ★ 19 มิ.ย. (เก็บกว้าง): ยืดเวลาเก็บ — ปกติ 10 วัน · คะแนนดี 14 วัน · ผลค้นเฉพาะแนว 7 วัน
+      const cap = it.focusTag ? 168 : ((it.judgeScore ?? 0) >= 9 ? 336 : 240);
       if (ageHr > cap) {
         await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: `🧹 ล้างอัตโนมัติ (ค้างเกิน ${cap} ชม.)` })).catch(() => {});
         purged++;
@@ -630,11 +693,12 @@ export async function runHarvest({ lanes = ['trend', 'good', 'evergreen', 'follo
     }
     // ★ 16 มิ.ย. (แก้โต๊ะบวม 906 ใบ): เพดาน "จำนวน" — เก็บ new ท็อป 150 ตามคะแนน ที่เหลือเข้ากรุ
     //   (ล้างตามเวลาอย่างเดียวไล่ไม่ทันการเติม → สะสมจนเลื่อนเจอแต่ของจม)
+    // ★ 19 มิ.ย. (เก็บกว้าง): ยกเพดานโต๊ะ 150 → 2000 (เก็บข่าวให้เลือกเยอะๆ)
     const liveNew = (await store.getAll()).filter(i => i.status === 'new' && !i.shortlisted && !i.used && !i.focusTag);
-    if (liveNew.length > 150) {
+    if (liveNew.length > 2000) {
       liveNew.sort((a, b) => (b.finalScore || 0) - (a.finalScore || 0));
-      for (const o of liveNew.slice(150)) {
-        await store.update(o.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: '🧹 ล้างอัตโนมัติ (เกินเพดานโต๊ะ 150 ใบ — คะแนนต่ำสุด)' })).catch(() => {});
+      for (const o of liveNew.slice(2000)) {
+        await store.update(o.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: '🧹 ล้างอัตโนมัติ (เกินเพดานโต๊ะ 2000 ใบ — คะแนนต่ำสุด)' })).catch(() => {});
         purged++;
       }
     }

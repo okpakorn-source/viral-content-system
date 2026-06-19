@@ -197,6 +197,12 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
   const faceCxPx = ((hx1 + hx2) / 2) * imgW;
   const faceCyPx = ((hy1 + hy2) / 2) * imgH;
 
+  // rev.15j: มงกุฎหัว/หน้าชิดขอบบนในภาพต้นฉบับเอง (ส่วนหัวที่หลุดเฟรม crop ไหนก็กู้ไม่ได้)
+  //   → ซูมออก + ดันหน้าลงนิด ให้ส่วนขาดเป็นสัดส่วนเล็กลง ดูตั้งใจ ไม่เหมือนหัวขาด (แก้ CASE-141 ช่องล่าง)
+  if (typeof fb.y1 === 'number' && fb.y1 < 0.03) {
+    faceFrac = faceFrac * 0.86;             // ซูมออก หน้าเล็กลง เห็นไหล่/บริบทมากขึ้น
+    faceTopAt = Math.max(faceTopAt, 0.34);  // ดันหน้าลงจากขอบบน
+  }
   let regionWpx = faceWpx / faceFrac;       // หน้ากิน faceFrac ของความกว้างกรอบ
   let regionHpx = regionWpx / slotAspect;    // สัดส่วนตรงช่อง → fill ไม่ยืด
   const minH = faceHpx / maxFaceHFrac;       // หน้า ≤maxFaceHFrac ของความสูงกรอบ (สูงขึ้น=หน้าใหญ่ขึ้น)
@@ -264,6 +270,24 @@ function groupRegionForSlot(faces, imgW, imgH, slotAspect) {
   return { left: Math.round(left), top: Math.round(top), width: Math.max(8, Math.round(regionWpx)), height: Math.max(8, Math.round(regionHpx)) };
 }
 
+/**
+ * rev.16 (ด่าน C — คุมโทนรวม): คำนวณ gain ปรับ white-balance แบบ gray-world
+ *   ดึง mean แต่ละช่องสี (R/G/B) เข้าหาเทากลาง แบบเบลนด์ (strength) + clamp กันเพี้ยนแรง
+ *   → ภาพจากแหล่งต่างกัน (เหลืองสตูดิโอ/ฟ้าเดย์ไลต์/ม่วงเวที) เข้าโทนเดียวกัน เหมือนปกที่เกรดมาทั้งใบ
+ */
+async function grayWorldGains(buf, strength = 0.5) {
+  try {
+    const { channels } = await sharp(buf).stats();
+    if (!channels || channels.length < 3) return null;
+    const [r, g, b] = channels;
+    const gray = (r.mean + g.mean + b.mean) / 3;
+    if (!(gray > 0)) return null;
+    const clamp = (v) => Math.max(0.85, Math.min(1.2, v));
+    const gain = (m) => clamp(1 + ((gray / (m || gray)) - 1) * strength);
+    return [gain(r.mean), gain(g.mean), gain(b.mean)];
+  } catch { return null; }
+}
+
 /** ครอป+ย่อภาพลงช่องสี่เหลี่ยม (+กรอบสีถ้ามี) */
 async function renderRectTile(src, crop, slot, fb) {
   const meta = await sharp(src).metadata();
@@ -273,11 +297,13 @@ async function renderRectTile(src, crop, slot, fb) {
     const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
     region = faceRegionForSlot(fb, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
   } else if (usableGroupFaces(fb)) {
+    // ★ rev.15i (ผู้ใช้ติช่อง 3-4-5 พัง "ไม่จัดกึ่งกลาง ไม่เน้นคน มองไม่รู้เรื่อง"):
+    //   ทุกช่องครอป "หน้าใหญ่สุด" จัดกึ่งกลาง+เด่นชัดเสมอ — เลิกครอปกลุ่มหลวมที่คนตัวเล็กจมฉาก
+    const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
     const isHeroSlot = slot.id === 'main' || (slot.w * slot.h) >= (520 * 800);
+    const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
     if (isHeroSlot) {
-      // ★ hero = "หน้าเดี่ยวใหญ่สุดเด่น" เสมอ (ครอปหน้าใหญ่สุด + เลื่อนพ้นคนข้างเคียง — บทเรียน CASE-119)
-      const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
-      const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
+      // hero = หน้าเดี่ยวใหญ่สุดเด่น + เลื่อนพ้นคนข้างเคียง (บทเรียน CASE-119)
       region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, Math.min(0.96, faceFrac + 0.12), faceTopAt, Math.min(0.90, maxFaceHFrac + 0.08));
       const lcx = ((largest.x1 + largest.x2) / 2) * imgW;
       let rMin = 0, rMax = imgW;
@@ -292,18 +318,22 @@ async function renderRectTile(src, crop, slot, fb) {
       if (rl < rMin) { const sh = rMin - rl; rl += sh; rr += sh; }
       region.left = Math.round(Math.max(0, Math.min(rl, imgW - region.width)));
     } else {
-      // ★ rev.15f: ช่องรอง = โชว์ "ภาพคู่/ครอบครัว/บริบท" ตรงๆ (เล่าเรื่องตรงข่าว) หน้าทุกคนชัด-ไม่ตัด
-      //   (ผู้ใช้: ปกขาดรายละเอียด — ต้องมีภาพงานแต่ง/โมเมนต์/ครอบครัว ไม่ใช่หน้าเดี่ยวซ้ำทุกช่อง)
-      region = groupRegionForSlot(fb.allFaces, imgW, imgH, slot.w / slot.h);
+      // ช่องรอง = ครอปหน้าใหญ่สุด จัดกึ่งกลาง เด่นชัด (faceRegionForSlot จัดหน้าไว้กลางเฟรมให้เอง)
+      region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
     }
   } else {
     region = fitCropToSlotAspect(crop, imgW, imgH, slot.w / slot.h);
   }
-  // rev.15c: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — ปรับแสง-สี-คม ให้ภาพ pop+สวย คุมโทนทุกช่องให้เข้ากัน
-  let tile = await sharp(src).extract(region).resize(slot.w, slot.h, { fit: 'fill' })
-    .modulate({ saturation: 1.10, brightness: 1.03 }) // สีสดขึ้น+สว่างขึ้นนิด
-    .linear(1.06, -8)                                  // คอนทราสต์อ่อนๆ ให้มีมิติ
-    .sharpen({ sigma: 1.0 })                           // คมชัดขึ้น
+  // rev.16: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — WB คุมโทนรวม + รีทัชเบา
+  //   (1) gray-world WB ดึงคาสต์สีเข้าโทนเดียว  (2) sat/contrast บางๆ  (3) คมขึ้นพอดี
+  const base = await sharp(src).extract(region).resize(slot.w, slot.h, { fit: 'fill' }).toBuffer();
+  const wb = await grayWorldGains(base);
+  let pipe = sharp(base);
+  if (wb) pipe = pipe.linear(wb, [0, 0, 0]);           // คุม white-balance ให้เข้าโทนช่องอื่น
+  let tile = await pipe
+    .modulate({ saturation: 1.05, brightness: 1.0 })   // สีสดขึ้นนิดเดียว ไม่ดันจนเพี้ยน
+    .linear(1.03, -3)                                  // คอนทราสต์บางๆ
+    .sharpen({ sigma: 0.8 })                           // คมขึ้นพอดี
     .jpeg({ quality: 92 }).toBuffer();
 
   if (slot.border && slot.borderWidth > 0) {
@@ -337,8 +367,12 @@ async function renderCircleTile(src, crop, slot, fb) {
     region = fitCropToSlotAspect(crop, imgW, imgH, 1);
   }
 
-  const squared = await sharp(src).extract(region).resize(d, d, { fit: 'fill' })
-    .modulate({ saturation: 1.10, brightness: 1.03 }).linear(1.06, -8).sharpen({ sigma: 1.0 }) // rev.15c: รีทัชให้เข้าโทนเดียวกับช่องอื่น
+  const cbase = await sharp(src).extract(region).resize(d, d, { fit: 'fill' }).toBuffer();
+  const cwb = await grayWorldGains(cbase);
+  let cpipe = sharp(cbase);
+  if (cwb) cpipe = cpipe.linear(cwb, [0, 0, 0]);        // rev.16: WB เข้าโทนเดียวกับช่องอื่น
+  const squared = await cpipe
+    .modulate({ saturation: 1.05, brightness: 1.0 }).linear(1.03, -3).sharpen({ sigma: 0.8 })
     .png().toBuffer();
   const mask = Buffer.from(`<svg width="${d}" height="${d}"><circle cx="${d / 2}" cy="${d / 2}" r="${d / 2}" fill="#fff"/></svg>`);
   const circled = await sharp(squared).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();

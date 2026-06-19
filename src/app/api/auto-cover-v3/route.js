@@ -56,7 +56,7 @@ async function _renderCoverV3(request) {
     };
 
     // ★ REV MARKER — ยืนยันว่าเซิร์ฟเวอร์รันโค้ดเวอร์ชันไหน (เช็ค log ก่อนเทสทุกครั้ง — กัน staleness)
-    const COVER_REV = 'rev-15g-2026-06-18 hero-zoomout+ctx-zoomin'; // + ค้นภาพอารมณ์/สัมภาษณ์ ให้ hero สื่ออารมณ์ทุกรอบ
+    const COVER_REV = 'rev-16b-2026-06-19 holistic-fix'; // 3 ด่าน + แก้: count bug · hero ไม่แย่งตัวหลัก · cluster strict กันเติมฉากเบลอ
     console.log(`[CoverV3] 🏷️ CODE ${COVER_REV} — รันโค้ดเวอร์ชันนี้`);
 
     // ★ ตาข่ายชั้นท้าย (19 มิ.ย. — ผู้ใช้สั่ง): เช็ค "API หมดเครดิต/โควต้า" ก่อนเริ่ม
@@ -202,42 +202,83 @@ async function _renderCoverV3(request) {
       let mask = pick(0.045);                                    // เข้มสุด: หน้าโคลสอัพคม
       if (mask.filter(Boolean).length < 3) mask = pick(0.028);   // ผ่อน 1: ครึ่งตัว+
       if (mask.filter(Boolean).length < 3) mask = pick(0.012);   // ผ่อน 2: ขอแค่มีหน้าชัดพอ
-      const kept = mask.filter(Boolean).length;
+      // rev.15i: ผู้ใช้ติ rev.15h — ภาพฉากเปล่า (น้ำท่วม/เวทีคนตัวจิ๋ว) = "มองไม่รู้เรื่อง ไม่เน้นคน"
+      //   → เลิกเก็บภาพไร้หน้า ใช้เฉพาะภาพที่ "เห็นคนชัด" บริบทมาจากภาพที่มีคนอยู่ในเหตุการณ์ (ไม่ใช่ฉากเปล่า)
+      const finalMask = mask;
+      const kept = finalMask.filter(Boolean).length;
       if (kept >= 3 && kept < imageBuffers.length) {
         const ibNew = [], fbNew = [];
-        imageBuffers.forEach((img, i) => { if (mask[i]) { ibNew.push(img); fbNew.push(faceBoxes[i]); } });
-        console.log(`[CoverV3] 👤 close-up gate: เหลือ ${ibNew.length}/${imageBuffers.length} (เฉพาะหน้าใหญ่คม)`);
+        imageBuffers.forEach((img, i) => { if (finalMask[i]) { ibNew.push(img); fbNew.push(faceBoxes[i]); } });
+        console.log(`[CoverV3] 👤 close-up gate: เหลือ ${ibNew.length}/${imageBuffers.length} (หน้าคมเท่านั้น — เน้นคน)`);
         imageBuffers = ibNew; faceBoxes = fbNew;
       }
     } catch (e) { console.log('[CoverV3] close-up gate skipped:', e.message?.slice(0, 40)); }
 
-    // ── rev.14j: ตัดภาพ "เกือบซ้ำ" (เฟรม/ชุดเดียวกัน) ด้วย average-hash — กัน hero โผล่ซ้ำช่องอื่น ──
-    //    บทเรียน CASE-090: hero เบนซ์ชุดน้ำเงิน + ขวาล่างเบนซ์ชุดน้ำเงิน = ซ้ำ. เก็บใบที่หน้าคมสุด(เรียงแล้ว)
+    // ── rev.16 (รื้อ holistic — ด่าน A): คุณภาพ + กันคนซ้ำ ──
+    //    เดิม dedup จับแค่ "เฟรมเหมือนเป๊ะ" → คนเดิมคนละรูปหลุดผ่าน = ซ้ำ 3 ช่อง; ไม่เช็คคม/ละเอียด = เกรนปนคม
+    //    ใหม่: คะแนนคุณภาพ (ความละเอียด+ความคม) → คลัสเตอร์ภาพคล้าย เก็บใบ "คมสุด" ต่อคลัสเตอร์ + ตัดภาพเกรน/เบลอ
     try {
       const sharpLib2 = (await import('sharp')).default;
-      const hashes = await Promise.all(imageBuffers.map(async (img) => {
+      const sigs = await Promise.all(imageBuffers.map(async (img) => {
         try {
-          const raw = await sharpLib2(img.buffer).grayscale().resize(8, 8, { fit: 'fill' }).raw().toBuffer();
-          let sum = 0; for (let k = 0; k < raw.length; k++) sum += raw[k];
-          const avg = sum / raw.length;
+          // ลายเซ็นโครงสร้าง (average-hash 8x8)
+          const gray = await sharpLib2(img.buffer).grayscale().resize(8, 8, { fit: 'fill' }).raw().toBuffer();
+          let sum = 0; for (let k = 0; k < gray.length; k++) sum += gray[k];
+          const avg = sum / gray.length;
           let bits = 0n;
-          for (let k = 0; k < raw.length; k++) if (raw[k] > avg) bits |= (1n << BigInt(k));
-          return bits;
+          for (let k = 0; k < gray.length; k++) if (gray[k] > avg) bits |= (1n << BigInt(k));
+          // ลายเซ็นสี (4x4 RGB) — จับ "ชุด/ฉากเดียวกัน" ที่ hash อาจไม่จับ
+          const rgb = await sharpLib2(img.buffer).removeAlpha().resize(4, 4, { fit: 'fill' }).raw().toBuffer();
+          const colorSig = Array.from(rgb);
+          // ความละเอียด + ความคม (stdev ของ Laplacian บนภาพย่อ — สูง=คม)
+          const meta = await sharpLib2(img.buffer).metadata();
+          const minDim = Math.min(meta.width || 1, meta.height || 1);
+          const lap = await sharpLib2(img.buffer).resize(220, 220, { fit: 'inside' }).grayscale()
+            .convolve({ width: 3, height: 3, kernel: [0, -1, 0, -1, 4, -1, 0, -1, 0] }).stats();
+          const sharpness = lap?.channels?.[0]?.stdev || 0;
+          return { bits, colorSig, minDim, sharpness };
         } catch { return null; }
       }));
-      const keep = [], kept = [];
-      imageBuffers.forEach((img, i) => {
-        const h = hashes[i];
-        if (h === null) { keep.push(i); return; }
-        const dup = kept.some(kh => { let x = kh ^ h, d = 0; while (x) { d += Number(x & 1n); x >>= 1n; } return d <= 10; }); // rev.14x: เข้มขึ้น 6→10 จับภาพคล้าย (คู่ยืนชุดเดียวกัน)
-        if (!dup) { keep.push(i); kept.push(h); }
+      const maxSharp = Math.max(1, ...sigs.map(s => s?.sharpness || 0));
+      const quals = sigs.map(s => {
+        if (!s) return 0.4;
+        const resN = Math.min(1, s.minDim / 720);        // ≥720px = เต็ม
+        const shN = Math.min(1, s.sharpness / maxSharp);  // เทียบในชุด (กันสเกลต่างกัน)
+        return +(0.42 * resN + 0.58 * shN).toFixed(3);
       });
-      if (keep.length >= 4 && keep.length < imageBuffers.length) {
-        imageBuffers = keep.map(i => imageBuffers[i]);
-        faceBoxes = keep.map(i => faceBoxes[i]);
-        console.log(`[CoverV3] 🧬 dedup near-duplicate → ${imageBuffers.length} ใบ`);
+      const hamming = (a, b) => { let x = a ^ b, d = 0; while (x) { d += Number(x & 1n); x >>= 1n; } return d; };
+      // คลัสเตอร์ภาพคล้าย → เก็บ "ใบคุณภาพสูงสุด" ต่อคลัสเตอร์ (กันคนเดิม/เฟรมเดิมซ้ำ)
+      const clusters = [];
+      imageBuffers.forEach((img, i) => {
+        const s = sigs[i];
+        let hit = null;
+        if (s) for (const c of clusters) {
+          const cs = sigs[c.repIdx];
+          // rev.16b: คลัสเตอร์เฉพาะ "เฟรมเกือบเหมือนเป๊ะ" (โครงสร้าง hamming≤8) เท่านั้น
+          //   เลิกรวมด้วยสีล้วน — เผลอรวมภาพคนละช็อตของตัวหลัก (พื้นหลังสีเดียวกัน) → เหลือตัวหลักใบเดียว เติมช่องด้วยฉากเบลอ
+          if (cs && hamming(cs.bits, s.bits) <= 8) { hit = c; break; }
+        }
+        if (hit) { if (quals[i] > quals[hit.repIdx]) hit.repIdx = i; }
+        else clusters.push({ repIdx: i });
+      });
+      let keep = clusters.map(c => c.repIdx);
+      // ตัดภาพคุณภาพต่ำชัดเจน (<55% ของใบดีสุด) ถ้าพูลยังเหลือ ≥3
+      const maxQ = Math.max(...keep.map(i => quals[i]), 0.01);
+      const filtered = keep.filter(i => quals[i] >= maxQ * 0.55);
+      if (filtered.length >= 3) keep = filtered;
+      // ต้องมีอย่างน้อย min(3,pool) ช่อง — distinct ไม่พอ เติมด้วยใบคุณภาพรองที่เหลือ
+      const need = Math.min(3, imageBuffers.length);
+      if (keep.length < need) {
+        const extra = imageBuffers.map((_, i) => i).filter(i => !keep.includes(i)).sort((a, b) => quals[b] - quals[a]);
+        while (keep.length < need && extra.length) keep.push(extra.shift());
       }
-    } catch (e) { console.log('[CoverV3] dedup skipped:', e.message?.slice(0, 40)); }
+      keep.sort((a, b) => a - b);
+      if (keep.length < imageBuffers.length) {
+        console.log(`[CoverV3] 🧬 ด่านคุณภาพ+กันซ้ำ: ${clusters.length} คลัสเตอร์ → เหลือ ${keep.length}/${imageBuffers.length} ใบ (ตัดเกรน/เบลอ/ซ้ำ)`);
+      }
+      imageBuffers = keep.map(i => imageBuffers[i]);
+      faceBoxes = keep.map(i => faceBoxes[i] ? { ...faceBoxes[i], quality: quals[i] } : faceBoxes[i]);
+    } catch (e) { console.log('[CoverV3] quality+dedup skipped:', e.message?.slice(0, 50)); }
 
     // ── Quality floor (หลักเดียวกับ v1) ──
     const { V3_TEMPLATES, adaptRegistryTemplate } = await import('@/lib/services/coverExecutorService');
@@ -250,17 +291,18 @@ async function _renderCoverV3(request) {
     // ── rev.13: "งบช่อง" ตามจำนวนหน้าคมจริง — กันโครงช่องเยอะดูดภาพแย่มาเติม ──
     //    บทเรียน CASE-069: บังคับ 6 ช่องทั้งที่หน้าคมมี ~3-4 ใบ → 2 ช่องเป็นขยะ (ไหล่ไม่มีหัว + วงกลมรก)
     //    นับเฉพาะภาพที่มี "หน้าใหญ่พอ" (≥3% ของภาพ) คนไม่เกิน 3 ไม่มีตัวหนังสือ → เลือกโครงไม่เกินจำนวนนั้น+1
+    // rev.16 (ด่าน B): นับ "ภาพดี-ต่างกันจริง" — หน้าคมพอ + ไม่มีตัวหนังสือ + คุณภาพผ่านเกณฑ์
+    //   (พูลนี้ผ่านด่าน A กันซ้ำมาแล้ว = แต่ละใบต่างกันจริง → งบช่องสะท้อนจำนวนภาพดีที่ไม่ซ้ำ)
     const cleanFaceCount = faceBoxes.filter(fb =>
       fb && fb.x2 > fb.x1 && ((fb.x2 - fb.x1) * (fb.y2 - fb.y1)) >= 0.03 && (fb.count || 1) <= 3 && !fb.hasText
-    ).length;
-    // rev.14n: ตัด "+1" ทิ้ง — ทุกช่องต้องเป็น "หน้าคม" เท่านั้น (เสถียรทุกรอบ, ห้ามภาพไม่เจอหน้า/เต็มตัวหลุดเข้าช่อง)
-    //   บทเรียน CASE-097: +1 เปิดช่องให้ภาพไม่เจอหน้า(เบนซ์เต็มตัว)เป็น hero → ครึ่งตัวหน้าเล็ก = พัง
+    ).length; // rev.16b: พูลผ่านด่าน A กรองคุณภาพมาแล้ว ไม่ต้องเกณฑ์คุณภาพสัมพัทธ์ซ้ำ (เดิมทำ count=0)
     let slotBudget = Math.max(3, Math.min(imageBuffers.length, cleanFaceCount));
-    // rev.14m: ข่าวคู่รัก/ครอบครัว — รูปเดี่ยวคมจำกัด → บังคับโครง 4 ช่อง (faces_circle) ที่สะอาดสุด
-    //   บทเรียน CASE-094: 5-6 ช่องดูดภาพหมู่/กลุ่มมาเติม หน้าไม่เด่น; 4 ช่อง (hero+2+วงกลม) สะอาดกว่า
+    // rev.16: โครง 5 ช่องต่อเมื่อมีภาพดี-ต่างกันจริง ≥5 เท่านั้น — น้อยกว่านั้น cap 4 (กันเติมช่องด้วยภาพซ้ำ/แย่)
+    //   บทเรียน 136/138/141: ดันเต็มช่องทั้งที่ภาพดีไม่พอ → หน้าซ้ำ 3 ช่อง = เหมือนคอนแทคชีต
+    if (cleanFaceCount < 5) slotBudget = Math.min(slotBudget, 4);
     const stRel = (identity?.storyType || '').toLowerCase();
     if (/warm|family|relationship|romance|couple|love/.test(stRel)) slotBudget = Math.min(slotBudget, 4);
-    console.log(`[CoverV3] 🎯 หน้าคมใช้ได้ ${cleanFaceCount} ใบ → งบช่อง = ${slotBudget} (จากพูล ${imageBuffers.length})`);
+    console.log(`[CoverV3] 🎯 ภาพดี-ต่างกัน ${cleanFaceCount} ใบ → งบช่อง = ${slotBudget} (จากพูล ${imageBuffers.length})`);
 
     // ── ② AI Vision Director — เลือกโครงเองจากแม่บทที่แกะจากปกไวรัลจริง ──
     // ★ rev.12: บังคับลุคไวรัลในโค้ด — ภาพพอเมื่อไหร่ ให้เลือกได้เฉพาะโครงที่มี "วงกลม+กรอบไฮไลต์"

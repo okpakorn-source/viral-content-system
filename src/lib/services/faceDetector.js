@@ -61,7 +61,7 @@ Format:
   "text_region": null
 }
 If no faces: has_faces=false, faces=[], and provide main_subject_region for the most interesting area.
-has_big_text = true if the image is a social-media post screenshot, chat screenshot, news graphic with headline, or has large burned-in text/captions/subtitles covering a noticeable part (small watermark/logo = false).
+has_big_text = true if the image is a social-media post screenshot, chat screenshot, news graphic with headline, OR has ANY burned-in text/captions/subtitles/dialogue-overlay/quote-overlay that would be visible on a cover — INCLUDING TV-drama subtitles, interview lower-third captions, quoted-speech overlays, and lyric/quote text. Only a tiny corner watermark or small channel logo = false. When in doubt, set true (a clean cover should not show burned-in sentences).
 text_region: when has_big_text=true, give the bounding box of the main burned-in text block as { "x_pct": 0, "y_pct": 75, "w_pct": 100, "h_pct": 25 } (e.g. TV lower-third captions are usually the bottom strip) — so the system can crop the person while avoiding the text zone. null if has_big_text=false.`;
 
     const parsed = await callAI({

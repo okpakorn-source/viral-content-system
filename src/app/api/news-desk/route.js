@@ -40,6 +40,19 @@ export async function GET(request) {
       return NextResponse.json({ success: true, items: lightF, total: f.length, tab: 'focus' });
     }
 
+    // ★ 19 มิ.ย. (เก็บกว้าง): แท็บ 🗂️ ทุกหมวด — ดูข่าวทุกเลน/ทุกหมวด เลื่อนดูเยอะ + กรองตามหมวด (ไม่ดัน mix-governor)
+    if (tab === 'browse') {
+      let list = items.filter(i => i.status !== 'dismissed' && !i.used);
+      const counts = {};
+      for (const i of list) { const c = i.category || 'อื่นๆ'; counts[c] = (counts[c] || 0) + 1; }
+      const catParam = searchParams.get('category');
+      if (catParam && catParam !== 'all') list = list.filter(i => (i.category || 'อื่นๆ') === catParam);
+      list.sort((a, c) => new Date(c.harvestedAt || 0) - new Date(a.harvestedAt || 0));
+      const lim = Math.min(400, Number(searchParams.get('limit')) || 200);
+      const light = list.slice(0, lim).map(({ fullText, ...rest }) => rest);
+      return NextResponse.json({ success: true, items: light, total: list.length, tab: 'browse', categoryCounts: counts });
+    }
+
     // ★ 17 มิ.ย. (ทีมสั่งยุบเหลือ 2 หมวดค้น + เรียงใหม่สุดก่อน): 🔥 กระแส / 💚 ดาราน้ำดี
     const KRATASE_LANES = ['trend', 'buzz', 'trend-track'];                                             // กระแสเรียลไทม์
     const NAMDEE_LANES = ['good', 'celeb', 'evergreen', 'evergreen-celeb', 'throwback', 'followup', 'interview', 'video']; // ดาราน้ำดี (สต็อก)

@@ -228,6 +228,21 @@ export default function CoverLabPage() {
     return v.message || v.code || JSON.stringify(v);
   }
 
+  // ★ Preflight (19 มิ.ย. — ผู้ใช้สั่ง): เช็ค "API หมดเครดิต/โควต้า" ก่อนกดสร้าง
+  //   กันเคสรอคิวยาวแล้วได้ "ปกกาๆ"/ขึ้น error งงๆ — ถ้าหมดเครดิตแจ้งเตือนชัดทันที ไม่เข้าคิว
+  //   ล่ม/timeout = fail-open (ไม่บล็อก) ปล่อยให้ pipeline ลองเอง — กันบล็อกผิดพลาด
+  async function ensureApiReady() {
+    try {
+      const r = await fetch('/api/ai-preflight', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
+      const j = await r.json();
+      if (j && j.ok === false) {
+        setError(errText(j.error) || '⚠️ ระบบ AI หมดเครดิต/โควต้า — กรุณาเติมเงินก่อนกดสร้างปก');
+        return false;
+      }
+    } catch { /* preflight ล่ม = ไม่บล็อก */ }
+    return true;
+  }
+
   // ═══ ★ Queue Mode (10 มิ.ย.): สร้างปกผ่าน job queue แทน HTTP เดียวยาว 3-7 นาที ═══
   // Vercel ตัด request ยาวด้วย FUNCTION_INVOCATION_TIMEOUT — enqueue แล้ว poll ผลแทน
   // (รูปแบบเดียวกับ submitViaQueue ของ /content/new)
@@ -354,6 +369,8 @@ export default function CoverLabPage() {
     setError('');
     setRecoveryCover(null);
     if (!isRegenerate) setCoverResult(null);
+    // ★ เช็ค API ก่อนเข้าคิว — หมดเครดิตให้แจ้งเตือนทันที (ไม่ต้องรอคิว/ได้ปกขยะ)
+    if (!(await ensureApiReady())) { setLoading(false); return; }
     try {
       // ถ้า regenerate ให้สุ่ม template ใหม่
       let useTemplate = templateId;
@@ -417,7 +434,9 @@ export default function CoverLabPage() {
   async function handleBatchGenerate() {
     const items = parseBatchText(batchText);
     if (items.length === 0) return;
-    
+    // ★ เช็ค API ก่อนยิงเป็นชุด — หมดเครดิตแจ้งทันที ไม่เปลืองคิวทั้งกอง
+    if (!(await ensureApiReady())) return;
+
     setBatchLoading(true);
     setBatchResults([]);
     setBatchCoverProgress({ current: 0, total: items.length });

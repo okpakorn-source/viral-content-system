@@ -253,28 +253,33 @@ ${templatesBlock}
       const fbM = mainA ? faceBoxes[mainA.imageIndex] : null;
       const mainArea = (fbM && fbM.x2 > fbM.x1) ? (fbM.x2 - fbM.x1) * (fbM.y2 - fbM.y1) : 0;
       const mainIsBigSingle = fbM && fbM.x2 > fbM.x1 && (fbM.count || 1) === 1 && mainArea >= 0.04;
+      // rev.16 (ด่าน C): hero = หน้าเดี่ยว "ใหญ่ + คม/ละเอียดสุด" — ให้คะแนนคุณภาพร่วม ไม่ใช่แค่หน้าใหญ่
+      //   (บทเรียน CASE-140: hero เป็นเซลฟี่แคนดิดเบลอ ทั้งที่มีภาพคมกว่าในพูล)
+      const heroScore = (fb) => {
+        if (!fb || !(fb.x2 > fb.x1) || (fb.count || 1) !== 1 || fb.hasText) return 0;
+        const area = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);
+        const q = (fb.quality === undefined ? 0.6 : fb.quality);
+        return area * (0.55 + 0.45 * q);
+      };
+      // rev.16b: สลับเฉพาะเมื่อ hero เดิม "ไม่ใช่หน้าเดี่ยวใหญ่" (ภาพคู่/กลุ่ม/หน้าเล็ก) เท่านั้น
+      //   ห้ามแตะ hero เดี่ยวที่ Director ตั้งใจเลือก (Director รู้ว่าใครคือตัวหลัก)
+      //   บทเรียน CASE-143: บังคับสลับเป็น "หน้าใหญ่+คมสุด" → ได้หน้าลูกสาวขึ้น hero แทนศรราม = ผิดตัวหลัก
       if (mainA && !mainIsBigSingle) {
-        // rev.15b: หา "หน้าเดี่ยวใหญ่สุด" ในทุกภาพ (ใช้แล้วก็ได้) — ถ้าอยู่ช่องอื่นให้ "สลับช่อง" ขึ้น hero
-        //   บทเรียน CASE-121: Director เอาน็อตเดี่ยวจริงจังไปลงขวาบน → hero เป็นครอบครัว = ผิด ต้องสลับ
-        let best = -1, bestArea = 0;
-        faceBoxes.forEach((fb, i) => {
-          if (!fb || !(fb.x2 > fb.x1) || (fb.count || 1) !== 1 || fb.hasText) return;
-          const area = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);
-          if (area > bestArea) { bestArea = area; best = i; }
-        });
-        if (best >= 0 && bestArea > mainArea) {
+        let best = -1, bestScore = 0;
+        faceBoxes.forEach((fb, i) => { const s = heroScore(fb); if (s > bestScore) { bestScore = s; best = i; } });
+        const mainScore = heroScore(fbM);
+        if (best >= 0 && best !== mainA.imageIndex && bestScore > mainScore) {
           const ownerA = valid.find(a => a.imageIndex === best);
           if (ownerA && ownerA !== mainA) {
-            // ภาพเดี่ยวดีสุดอยู่ช่องอื่น → สลับ: หน้าเดี่ยวขึ้น hero, ภาพเดิมของ hero ลงช่องนั้น
             const tmpIdx = mainA.imageIndex, tmpCrop = mainA.crop;
             mainA.imageIndex = best; mainA.crop = cropFromFaceBox(faceBoxes[best]);
             ownerA.imageIndex = tmpIdx; ownerA.crop = tmpCrop;
-            mainA.why = 'hero: สลับเอาหน้าเดี่ยวใหญ่ชัดขึ้น';
-            console.log(`[CoverDirector] 🔧 hero SWAP slots: main↔${ownerA.slotId} (#${best} ขึ้น hero)`);
+            mainA.why = 'hero: สลับเอาหน้าเดี่ยวใหญ่+คมสุดขึ้น';
+            console.log(`[CoverDirector] 🔧 hero SWAP slots: main↔${ownerA.slotId} (#${best} ใหญ่+คมสุดขึ้น hero)`);
           } else if (!ownerA) {
             mainA.imageIndex = best; mainA.crop = cropFromFaceBox(faceBoxes[best]);
-            mainA.why = 'hero: หน้าเดี่ยวใหญ่ชัด';
-            console.log(`[CoverDirector] 🔧 hero ← #${best} (unused single)`);
+            mainA.why = 'hero: หน้าเดี่ยวใหญ่+คมชัด';
+            console.log(`[CoverDirector] 🔧 hero ← #${best} (unused single, คมสุด)`);
           }
         }
       }

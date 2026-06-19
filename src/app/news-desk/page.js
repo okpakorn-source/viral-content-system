@@ -9,6 +9,7 @@ import Header from '@/components/layout/Header';
 
 // ★ 17 มิ.ย. (ทีมสั่งยุบเหลือ 2 หมวดค้น + เก็บแท็บใช้งาน · เรียงใหม่สุดก่อน):
 const TABS = [
+  { id: 'browse', label: '🗂️ ทุกหมวด' },       // ★ 19 มิ.ย. เก็บกว้าง — ข่าวไทยทุกแนว เลือกหมวดดูได้
   { id: 'kratase', label: '🔥 กระแส' },        // เรียลไทม์ ≤2 วัน — คนดัง/สังคมสนใจ (เอ็นเกจสูง) เรียงใหม่สุดก่อน
   { id: 'namdee', label: '💚 ดาราน้ำดี' },     // ดาราทำดี/น้ำดี สต็อกทำได้ตลอด (เก่าก็ได้) เรียงใหม่สุดก่อน
   { id: 'focus', label: '🎯 ผลค้นหา' },          // ผลจากค้นคีย์เวิร์ดคน/แนว — อยู่ถาวร
@@ -59,6 +60,8 @@ const IMG_CHANNELS = {
 const CAT_COLORS = {
   'น้ำใจ/ช่วยเหลือ': '#22c55e', 'กตัญญู/ครอบครัวอบอุ่น': '#10b981', 'สู้ชีวิต': '#06b6d4',
   'คนดังทำดี/ติดดิน': '#a3e635', 'สัมภาษณ์/บทสนทนาดี': '#8b5cf6', 'บันเทิงกระแส': 'var(--desk-amber)',
+  'คนดัง/ดราม่าบันเทิง': '#ec4899', 'ความรัก/แต่งงาน': '#f472b6', 'กีฬา': '#0ea5e9',
+  'ไลฟ์สไตล์/ไวรัล': '#eab308', 'อาชญากรรม/คดีดัง': '#dc2626',
   'ดราม่าสังคม': '#ef4444', 'เตือนภัย/อุทาหรณ์': '#f97316', 'อื่นๆ': '#6b7280',
 };
 
@@ -111,7 +114,9 @@ function freshnessBadge(it) {
 }
 
 export default function NewsDeskPage() {
-  const [tab, setTab] = useState('kratase'); // ★ ดีฟอลต์ = กระแส (ยุบเหลือ 2 หมวด)
+  const [tab, setTab] = useState('browse'); // ★ 19 มิ.ย. ดีฟอลต์ = ทุกหมวด (เก็บกว้าง)
+  const [catFilter, setCatFilter] = useState('all'); // ★ กรองหมวดในแท็บ "ทุกหมวด"
+  const [catCounts, setCatCounts] = useState({});    // ★ จำนวนข่าวต่อหมวด (ทำ chips)
   const [items, setItems] = useState([]);
   const [mixToday, setMixToday] = useState({});
   const [sentToday, setSentToday] = useState(0);
@@ -160,8 +165,12 @@ export default function NewsDeskPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/news-desk?tab=${tab}&limit=80`, { cache: 'no-store' });
+      const url = tab === 'browse'
+        ? `/api/news-desk?tab=browse&limit=300&category=${encodeURIComponent(catFilter)}`
+        : `/api/news-desk?tab=${tab}&limit=80`;
+      const res = await fetch(url, { cache: 'no-store' });
       const d = await parseRes(res);
+      if (d.success && d.categoryCounts) setCatCounts(d.categoryCounts);
       if (d.success) { setItems(d.items); setMixToday(d.mixToday || {}); setSentToday(d.sentToday || 0); setGovernor(d.governor || null); setChiefBrief(d.chiefBrief || null);
         setEditorStats(d.editorStats || {}); setQueueDepth(d.queueDepth || { pending: 0, processing: 0 }); setReadyCount(d.readyCount || 0);
         // ★ สวิตช์ Auto-Pilot โชว์ค่าจริงจากระบบ (เดิม hardcode เปิด — ทีมเห็นว่า "เปิดเอง" ทุกครั้งที่เข้าหน้า)
@@ -177,7 +186,7 @@ export default function NewsDeskPage() {
         }
       }
     } catch {} finally { setLoading(false); }
-  }, [tab]);
+  }, [tab, catFilter]);
 
   useEffect(() => { setLoading(true); load(); }, [load]);
   useEffect(() => { const t = setInterval(load, 60_000); return () => clearInterval(t); }, [load]);
@@ -617,6 +626,22 @@ export default function NewsDeskPage() {
               background: harvesting ? '#4b5563' : 'linear-gradient(135deg,#8b5cf6,#6d28d9)', color: '#fff', fontWeight: 700, fontSize: 14,
             }}>{harvesting ? '⏳ กำลังคัดกรอง...' : '🔄 หาข่าวรอบใหม่'}</button>
         </div>
+
+        {/* ★ 19 มิ.ย. (เก็บกว้าง): chips เลือกหมวด — เฉพาะแท็บ "ทุกหมวด" */}
+        {tab === 'browse' && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>🗂️ หมวด:</span>
+            {[['all', `ทั้งหมด (${Object.values(catCounts).reduce((s, n) => s + n, 0)})`], ...Object.entries(catCounts).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, `${k} (${v})`])].map(([key, label]) => (
+              <button key={key} onClick={() => setCatFilter(key)}
+                style={{
+                  padding: '6px 13px', borderRadius: 999, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                  border: '1px solid ' + (catFilter === key ? 'transparent' : 'var(--border)'),
+                  background: catFilter === key ? (CAT_COLORS[key] || '#f59e0b') : 'rgba(255,255,255,0.05)',
+                  color: catFilter === key ? '#fff' : 'var(--text-primary)',
+                }}>{label}</button>
+            ))}
+          </div>
+        )}
 
         {/* ★ สั่งหาข่าวเฉพาะแนว (15 มิ.ย.) — เลือกแนวที่อยากได้ แล้วยิงค้นเฉพาะแนวนั้น */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
