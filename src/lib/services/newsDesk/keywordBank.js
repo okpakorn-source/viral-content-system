@@ -89,6 +89,74 @@ export function generateDailyTrend(n = 14) {
   return out;
 }
 
+// ════════════════════════════════════════════════════
+// 🧠 คลังคีย์ Exa (neural semantic) — 19 มิ.ย. รอบ 7 (ผู้ใช้: "Exa เก่งสุดกับดาราน้ำดี แตกคีย์เป็นร้อยพัน ขุดของอมตะ")
+//   ★ Exa ค้นด้วย "อังกฤษเชิงความหมาย" ได้ข่าวไทยตรงคอนเซ็ปต์คมสุด — เน้นข่าวน้ำดี "ไม่มีวันหมดอายุ" (เล่าใหม่ได้เรื่อยๆ)
+//   วงการ(16) × มุม(~38) = ~600 คีย์ combinatorial → หมุนชุดทุก ชม. ครอบคลังใน ~2 วัน ไม่เปลืองต่อรอบ
+// ════════════════════════════════════════════════════
+const EXA_SUBJECTS = [
+  'Thai actor', 'Thai actress', 'Thai singer', 'Thai luk thung singer', 'Thai idol',
+  'Thai TV host', 'Thai comedian', 'Thai influencer', 'Thai YouTuber', 'Thai TikToker',
+  'Thai celebrity', 'Thai superstar', 'Thai former beauty queen', 'Thai athlete', 'Thai net idol', 'famous Thai star',
+];
+
+// [template (มี {S}), category] — มุมข่าวน้ำดี "อมตะ" ที่เขียนใหม่ได้ตลอด
+const EXA_ANGLES = [
+  // 🙏 กตัญญู/ครอบครัวอบอุ่น
+  ['{S} buys a house for their parents, heartwarming gratitude story', 'กตัญญู/ครอบครัวอบอุ่น'],
+  ['{S} builds a new house for their parents in their hometown', 'กตัญญู/ครอบครัวอบอุ่น'],
+  ['{S} buys a brand new car for their mother or father', 'กตัญญู/ครอบครัวอบอุ่น'],
+  ['{S} pays off their parents debt out of gratitude', 'กตัญญู/ครอบครัวอบอุ่น'],
+  ['{S} devotedly takes care of their sick parents', 'กตัญญู/ครอบครัวอบอุ่น'],
+  ['{S} takes their parents on a trip abroad', 'กตัญญู/ครอบครัวอบอุ่น'],
+  ['{S} throws a lavish birthday for their mother', 'กตัญญู/ครอบครัวอบอุ่น'],
+  ['{S} supports their whole family financially after success', 'กตัญญู/ครอบครัวอบอุ่น'],
+  ['{S} buys land in hometown to build a family home', 'กตัญญู/ครอบครัวอบอุ่น'],
+  // 💚 น้ำใจ/ช่วยเหลือ
+  ['{S} donates a large sum of money to a hospital', 'น้ำใจ/ช่วยเหลือ'],
+  ['{S} helps flood and disaster victims with money and supplies', 'น้ำใจ/ช่วยเหลือ'],
+  ['{S} builds houses for poor families in need', 'น้ำใจ/ช่วยเหลือ'],
+  ['{S} funds the medical treatment of a stranger in need', 'น้ำใจ/ช่วยเหลือ'],
+  ['{S} gives free meals to homeless and poor people', 'น้ำใจ/ช่วยเหลือ'],
+  ['{S} rescues and cares for stray dogs and cats', 'น้ำใจ/ช่วยเหลือ'],
+  ['{S} gives scholarships to underprivileged students', 'น้ำใจ/ช่วยเหลือ'],
+  ['{S} donates generously to a temple or school', 'น้ำใจ/ช่วยเหลือ'],
+  ['{S} opens their home to shelter disaster victims', 'น้ำใจ/ช่วยเหลือ'],
+  // 💪 สู้ชีวิต
+  ['{S} inspiring rags to riches life story', 'สู้ชีวิต'],
+  ['{S} grew up very poor and became hugely successful', 'สู้ชีวิต'],
+  ['{S} worked humble menial jobs before becoming famous', 'สู้ชีวิต'],
+  ['{S} lived in a slum as a child and fought to success', 'สู้ชีวิต'],
+  ['{S} saved money for years to achieve their dream', 'สู้ชีวิต'],
+  ['{S} made a comeback after bankruptcy or downfall', 'สู้ชีวิต'],
+  ['{S} overcame poverty and hardship through hard work', 'สู้ชีวิต'],
+  ['{S} sold street food or did labor before fame', 'สู้ชีวิต'],
+  // 🌾 คนดังทำดี/ติดดิน
+  ['{S} humble and down to earth simple lifestyle despite fame', 'คนดังทำดี/ติดดิน'],
+  ['{S} eats cheap street food despite being wealthy', 'คนดังทำดี/ติดดิน'],
+  ['{S} still drives an old car or rides a motorbike', 'คนดังทำดี/ติดดิน'],
+  ['{S} returned to their hometown to farm and live simply', 'คนดังทำดี/ติดดิน'],
+  ['{S} known for treating staff and fans with great kindness', 'คนดังทำดี/ติดดิน'],
+  // 🎤 สัมภาษณ์/บทสนทนาดี
+  ['{S} emotional interview about life hardship and struggle', 'สัมภาษณ์/บทสนทนาดี'],
+  ['{S} shares inspiring life lessons in a heartfelt interview', 'สัมภาษณ์/บทสนทนาดี'],
+  ['{S} talks openly about overcoming loss or depression', 'สัมภาษณ์/บทสนทนาดี'],
+  ['{S} reflects on their humble poor past with gratitude', 'สัมภาษณ์/บทสนทนาดี'],
+  ['{S} touching interview about family and giving back', 'สัมภาษณ์/บทสนทนาดี'],
+];
+
+/** หมุนชุดคีย์ Exa (วงการ × มุม) ทุก ชม. — n คีย์/รอบ */
+export function generateExaQueries(n = 15) {
+  const combos = [];
+  for (const [tmpl, category] of EXA_ANGLES) {
+    for (const s of EXA_SUBJECTS) combos.push({ q: tmpl.replace('{S}', s), category });
+  }
+  const slot = Math.floor(Date.now() / 3600e3);
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(combos[(slot * n + i) % combos.length]);
+  return out;
+}
+
 /** ขนาดคลังทั้งหมด (ไว้ log/ตรวจ) */
 export function bankSize() {
   let combos = 0;

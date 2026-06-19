@@ -140,15 +140,6 @@ async function googleNewsRss(query, { num = 20, when = '' } = {}) {
 //   ★ บทเรียนจากเทส: Exa อ่อนคำค้นไทยล้วน (ได้ผลจีน) แต่ "ค้นด้วยอังกฤษเชิงความหมาย → ดึงข่าวไทยตรงคอนเซ็ปต์ได้คมมาก"
 //   ใช้กับแนว "ดาราน้ำดี" (กตัญญู/สู้ชีวิต/ช่วยเหลือ) ที่ semantic เก่งสุด — env-gated (ไม่มี EXA_API_KEY = ข้ามเงียบ)
 // ════════════════════════════════════════════════════
-const EXA_GOOD_QUERIES = [
-  { q: 'Thai celebrity buys a house or car for their parents, heartwarming gratitude story', category: 'กตัญญู/ครอบครัวอบอุ่น' },
-  { q: 'Thai celebrity devotedly takes care of sick parents, repaying their kindness', category: 'กตัญญู/ครอบครัวอบอุ่น' },
-  { q: 'Thai actor or singer rags to riches, struggled through poverty to success', category: 'สู้ชีวิต' },
-  { q: 'Thai celebrity donates money or helps poor people and flood victims, charity', category: 'น้ำใจ/ช่วยเหลือ' },
-  { q: 'Thai famous celebrity humble and down to earth, simple lifestyle', category: 'คนดังทำดี/ติดดิน' },
-  { q: 'Thai celebrity heartfelt emotional interview sharing life lessons and hardship', category: 'สัมภาษณ์/บทสนทนาดี' },
-];
-
 async function exaSearch(query, { num = 10, days = 0 } = {}) {
   const key = process.env.EXA_API_KEY;
   if (!key) return [];
@@ -475,13 +466,15 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'ev
   // 🧠 เลน Exa (semantic น้ำดี) — ค้นอังกฤษเชิงความหมาย → ดึงข่าวไทยน้ำดีที่คีย์เวิร์ดพลาด (env-gated)
   if (lanes.includes('exa') && process.env.EXA_API_KEY) {
     try {
-      const _eRes = await Promise.all(EXA_GOOD_QUERIES.map(async ({ q, category }) => {
-        // tag lane='broad' → ไหลผ่านไปป์ไลน์ฟรี (ไม่กิน AI) + ติด category น้ำดีจากคำค้นตรงๆ
-        try { return (await exaSearch(q, { num: 10, days: 365 })).map(r => ({ ...r, lane: 'broad', category, _exa: true })); }
+      const { generateExaQueries } = await import('./keywordBank');
+      const exaQs = generateExaQueries(15); // หมุนคลัง ~600 คีย์ ทีละ 15/รอบ → ครอบใน ~2 วัน
+      const _eRes = await Promise.all(exaQs.map(async ({ q, category }) => {
+        // ไม่จำกัดเวลา (days:0) — ขุดข่าวน้ำดี "อมตะ" ที่เล่าใหม่ได้แม้เป็นข่าวเก่า · tag lane='broad' ไหลผ่านฟรี ไม่กิน AI
+        try { return (await exaSearch(q, { num: 8 })).map(r => ({ ...r, lane: 'broad', category, _exa: true })); }
         catch { return []; }
       }));
       for (const arr of _eRes) raw.push(...arr);
-      console.log(`[Harvester] 🧠 Exa (semantic น้ำดี): ${EXA_GOOD_QUERIES.length} คำค้น → ${_eRes.reduce((s, a) => s + a.length, 0)} ดิบ`);
+      console.log(`[Harvester] 🧠 Exa (semantic น้ำดีอมตะ): ${exaQs.length} คำค้น/รอบ → ${_eRes.reduce((s, a) => s + a.length, 0)} ดิบ`);
     } catch (e) { console.log('[Harvester] exa lane failed:', e.message?.slice(0, 50)); }
   }
   // ★ คำค้นพิเศษ (Chief Agent / สั่งหาเฉพาะแนว) — เลือก endpoint ได้: news (default) | search (เว็บกว้าง) | videos (ยูทูป)
