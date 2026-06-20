@@ -98,6 +98,21 @@ function NewsFilterContent() {
     const iv = setInterval(tick, 2500);
     return () => { on = false; clearInterval(iv); };
   }, []);
+  // ★ 19 มิ.ย. (ผู้ใช้): ชื่อผู้ใช้ (ไม่มีรหัสผ่าน) — กำกับว่าใครส่งเจน เพื่อตรวจงานถูก (ใช้ key เดียวกับโต๊ะข่าว)
+  const [me, setMe] = useState('');
+  useEffect(() => { setMe(localStorage.getItem('desk_username') || ''); }, []);
+  const ensureName = () => {
+    let name = localStorage.getItem('desk_username');
+    if (!name) {
+      name = (prompt('ใส่ชื่อของคุณ (ใช้กำกับว่าใครส่งเจนข่าว — ไม่ต้องมีรหัสผ่าน):') || '').trim();
+      if (name) { localStorage.setItem('desk_username', name); setMe(name); }
+    }
+    return name;
+  };
+  const changeName = () => {
+    const name = (prompt('เปลี่ยนชื่อผู้ใช้:', me) || '').trim();
+    if (name) { localStorage.setItem('desk_username', name); setMe(name); }
+  };
   const [mode, setMode] = useState('soft'); // ★ 19 มิ.ย. เหลือโหมดเดียว เก็บครบ
   const [options, setOptions] = useState({
     keepQuotes: true,
@@ -192,14 +207,17 @@ function NewsFilterContent() {
   // ส่งประเด็นเดียวเข้าคิวเขียน (เหมือนปุ่มส่งแก่น แต่ส่งเฉพาะประเด็นนี้)
   const sendTopicToWorkflow = async (t) => {
     if (sendingTopic) return;
+    const name = ensureName();
+    if (!name) { alert('กรุณาใส่ชื่อก่อนส่งเจน (กำกับว่าใครเป็นคนส่ง)'); return; }
     setSendingTopic(t.id);
     try {
+      // ★ แก้รูปให้แบน (เดิมห่อ payload → queue/add อ่านไม่เจอ input) + ติดชื่อผู้ส่ง
       const res = await fetch('/api/queue/add', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payload: { input: t.content, contentLength: 'short', userId: 'news-filter-topic' } }),
+        body: JSON.stringify({ input: t.content, contentLength: 'short', userId: `news-filter-${name}`, deskMeta: { editor: name, editorIcon: '👤', source: 'แยกประเด็น', category: '', lane: 'news-filter' } }),
       });
       const d = await res.json();
-      if (d.success) alert(`✅ ส่งประเด็น "${t.title}" เข้าคิวเขียนแล้ว — ดูผลที่ Generation Log / แท็บพร้อมใช้`);
+      if (d.success) alert(`✅ ส่งประเด็น "${t.title}" เข้าคิวเขียนแล้ว (โดย ${name}) — ดูผลที่ Generation Log / แท็บพร้อมใช้`);
       else alert('❌ ส่งไม่สำเร็จ: ' + (d.error || 'ไม่ทราบสาเหตุ'));
     } catch (e) { alert('❌ ' + e.message); }
     setSendingTopic(null);
@@ -495,14 +513,17 @@ function NewsFilterContent() {
   const [sendingWf, setSendingWf] = useState(false);
   const handleSendToWorkflow = async () => {
     if (!outputData?.cleanText || sendingWf) return;
+    const name = ensureName();
+    if (!name) { alert('กรุณาใส่ชื่อก่อนส่งเจน (กำกับว่าใครเป็นคนส่ง)'); return; }
     setSendingWf(true);
     try {
+      // ★ แก้รูปให้แบน + ติดชื่อผู้ส่ง (deskMeta.editor → โชว์ใน Generation Log)
       const res = await fetch('/api/queue/add', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payload: { input: outputData.cleanText, contentLength: 'short', userId: 'news-filter' } }),
+        body: JSON.stringify({ input: outputData.cleanText, contentLength: 'short', userId: `news-filter-${name}`, deskMeta: { editor: name, editorIcon: '👤', source: 'สกัดข่าว', category: '', lane: 'news-filter' } }),
       });
       const d = await res.json();
-      if (d.success) { setCopySuccess(true); setTimeout(() => setCopySuccess(false), 4000); alert('✅ ส่งแก่นข่าวเข้าคิวเขียนแล้ว — ไปดูผลที่ Generation Log / แท็บพร้อมใช้'); }
+      if (d.success) { setCopySuccess(true); setTimeout(() => setCopySuccess(false), 4000); alert(`✅ ส่งแก่นข่าวเข้าคิวเขียนแล้ว (โดย ${name}) — ไปดูผลที่ Generation Log / แท็บพร้อมใช้`); }
       else alert('❌ ส่งไม่สำเร็จ: ' + (d.error || 'ไม่ทราบสาเหตุ'));
     } catch (e) { alert('❌ ' + e.message); }
     setSendingWf(false);
@@ -793,6 +814,11 @@ function NewsFilterContent() {
           <span style={{ fontSize: 13.5, fontWeight: 800, color: queue.processing > 0 ? '#22c55e' : 'var(--text-muted)' }}>🟢 กำลังสกัด {queue.processing}</span>
           <span style={{ fontSize: 13.5, fontWeight: 800, color: queue.queued > 0 ? '#f59e0b' : 'var(--text-muted)' }}>⏳ รอคิว {queue.queued}</span>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{(queue.processing + queue.queued) === 0 ? '— ระบบว่าง พร้อมใช้ทันที' : 'ทำพร้อมกันได้ 3 งาน ถ้าเต็มจะต่อคิวอัตโนมัติ'}</span>
+          <div style={{ flex: 1 }} />
+          <button onClick={me ? changeName : ensureName}
+            style={{ padding: '6px 14px', borderRadius: 999, border: '1px solid ' + (me ? 'rgba(99,102,241,0.4)' : 'rgba(245,158,11,0.5)'), background: me ? 'rgba(99,102,241,0.1)' : 'rgba(245,158,11,0.12)', color: me ? '#818cf8' : '#f59e0b', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+            👤 {me ? `${me} (เปลี่ยนชื่อ)` : 'ใส่ชื่อผู้ใช้ก่อนส่งเจน'}
+          </button>
         </div>
 
         {/* 2-Column Layout (มือถือ = คอลัมน์เดียว กันเฟรมขวาลน) */}
