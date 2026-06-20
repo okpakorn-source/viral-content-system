@@ -645,7 +645,7 @@ function NewsFilterContent() {
               fontSize: 18, fontWeight: 800, color: 'var(--text-primary)',
               marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8,
             }}>
-              📖 คู่มือการใช้งาน News Core Filter
+              📖 วิธีใช้งาน (How-to ทีละขั้น) — กรองแก่นข่าว → แยกประเด็น → ส่งเจน
             </div>
 
             {/* Two usage modes */}
@@ -699,11 +699,10 @@ function NewsFilterContent() {
                   📝 แบบที่ 2: วางข้อความข่าว
                 </div>
                 {[
-                  { step: '1', text: 'Copy เนื้อข่าวจากเว็บไซต์มาวาง', icon: '📋' },
-                  { step: '2', text: 'โหมด "เก็บเนื้อครบ 🟢" (ตัดคำเฟ้อ/อารมณ์ เก็บข้อเท็จจริงครบ)', icon: '🎛️' },
-                  { step: '3', text: 'ตั้งค่า checkbox ตามต้องการ', icon: '☑️' },
-                  { step: '4', text: 'กดปุ่ม "🔬 วิเคราะห์"', icon: '🔘' },
-                  { step: '5', text: 'ดูผลกรอง + Copy หรือ Export ได้เลย', icon: '✨' },
+                  { step: '1', text: 'Copy เนื้อข่าวจากเว็บไซต์ มาวางในช่องซ้าย', icon: '📋' },
+                  { step: '2', text: 'กดปุ่ม "🔬 วิเคราะห์" (โหมดเก็บเนื้อครบ 🟢 ตั้งไว้แล้ว ไม่ต้องเลือก)', icon: '🔘' },
+                  { step: '3', text: 'ได้ "แก่นข่าว" ฝั่งขวา — ตัดคำเฟ้อ/อารมณ์ เหลือข้อเท็จจริงครบ', icon: '✨' },
+                  { step: '4', text: 'Copy / Export TXT / หรือกด 🧩 แยกประเด็นต่อได้', icon: '➡️' },
                 ].map(s => (
                   <div key={s.step} style={{
                     display: 'flex', alignItems: 'center', gap: 10,
@@ -752,53 +751,38 @@ function NewsFilterContent() {
               </div>
             </div>
 
-            {/* Badge legend */}
+            {/* ★ 19 มิ.ย.: ขั้นต่อไป — แยกประเด็น + จุดตัดสินใจสำคัญ */}
             <div>
-              <div style={{
-                fontSize: 14, fontWeight: 800, color: 'var(--text-primary)',
-                marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8,
-              }}>
-                🏷️ ความหมายของ Badge สี
+              <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                🧩 ขั้นที่ 3: แยกประเด็น (ทำเมื่อข่าวเล่าได้หลายมุม)
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                {[
-                  { label: 'FACT', name: 'ข้อเท็จจริง', color: '#22c55e', desc: 'ตัวเลข ชื่อ สถานที่ วันที่' },
-                  { label: 'QUOTE', name: 'คำพูด', color: '#3b82f6', desc: 'คำพูด/สัมภาษณ์จากบุคคล' },
-                  { label: 'CONTEXT', name: 'บริบท', color: '#64748b', desc: 'ข้อมูลพื้นหลังที่จำเป็น' },
-                  { label: 'FILLER', name: 'คำเฟ้อ', color: '#eab308', desc: 'ไม่มีข้อมูลใหม่ ตัดได้' },
-                  { label: 'INTERPRETATION', name: 'ตีความ', color: '#f97316', desc: 'ผู้เขียนตีความเอง' },
-                  { label: 'EMOTIONAL', name: 'แต่งอารมณ์', color: '#ec4899', desc: 'ดราม่า เร้าอารมณ์เกิน' },
-                  { label: 'UNSUPPORTED', name: 'ไม่มีที่มา', color: '#ef4444', desc: 'กล่าวอ้างไม่มีหลักฐาน' },
-                ].map(b => (
-                  <div key={b.label} style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '6px 12px', borderRadius: 8,
-                    background: `${b.color}10`, border: `1px solid ${b.color}25`,
-                  }}>
-                    <span style={{
-                      padding: '2px 8px', borderRadius: 6,
-                      background: `${b.color}20`, color: b.color,
-                      fontSize: 10, fontWeight: 800,
-                    }}>{b.label}</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-primary)', fontWeight: 600 }}>{b.name}</span>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>— {b.desc}</span>
-                  </div>
-                ))}
+              <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.85, marginBottom: 14 }}>
+                ได้ "แก่นข่าว" ฝั่งขวาแล้ว ถ้าข่าวนั้นพูดหลายเรื่องในชิ้นเดียว (เช่น ความรัก + การเงิน + ครอบครัว) ให้กดปุ่ม
+                <span style={{ display: 'inline-block', margin: '0 5px', padding: '4px 11px', borderRadius: 8, background: 'linear-gradient(135deg,#8b5cf6,#6366f1)', color: '#fff', fontWeight: 800, fontSize: 12 }}>🧩 แยกประเด็นให้หน่อย</span>
+                — ระบบจะจัดเป็น "มุมขาย" ที่เล่าจบในตัว (แต่ละมุม = ทำได้ 1 โพสต์ มีที่มาที่ไปครบ)
+              </div>
+              {/* กล่องตัดสินใจ — สำคัญสุด */}
+              <div style={{ fontSize: 12, fontWeight: 800, color: '#f59e0b', marginBottom: 8 }}>⚠️ จุดสำคัญ — แยกเสร็จแล้วทำต่อยังไง:</div>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
+                <div style={{ padding: 14, borderRadius: 12, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.35)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#22c55e', marginBottom: 6 }}>🟢 ถ้าแยกแล้ว "ไม่มีประเด็นย่อย"</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.75 }}>(ระบบบอกว่าเป็นเรื่องเดียวจบในตัว) → <strong style={{ color: '#22c55e' }}>เอา "แก่นข่าว" ที่สกัดได้ ส่งเจนได้เลย</strong> ไม่ต้องเลือกมุม — กด 📤 ส่งเข้า Workflow ที่กล่องแก่นข่าวฝั่งขวา</div>
+                </div>
+                <div style={{ padding: 14, borderRadius: 12, background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.35)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#3b82f6', marginBottom: 6 }}>🔵 ถ้าแยกแล้ว "ได้หลายมุม"</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.75 }}>→ <strong style={{ color: '#3b82f6' }}>เลือกมุมที่อยากทำ</strong> แล้วกด 📤 ส่งเข้า Workflow "เฉพาะมุมนั้น" (ข่าวเดียวแยกได้หลายโพสต์ ทำทีละมุม)</div>
+                </div>
               </div>
             </div>
 
-            {/* Workflow tip */}
-            <div style={{
-              marginTop: 20, padding: '14px 18px', borderRadius: 12,
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid var(--border)',
-            }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
-                🔄 เชื่อมกับ Workflow ข่าว
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.7 }}>
-                ผลลัพธ์จาก News Core Filter สามารถ <strong style={{ color: '#22c55e' }}>Copy</strong> → วางใน "สร้างใหม่" เพื่อให้ AI เขียนข่าวจาก
-                เนื้อจริงเท่านั้น หรือ <strong style={{ color: '#8b5cf6' }}>Export TXT</strong> เก็บเป็นไฟล์อ้างอิง
+            {/* ★ 19 มิ.ย.: ขั้นที่ 4 — ส่งเจน + ใส่ชื่อ + ตรวจงาน */}
+            <div style={{ marginTop: 18, padding: '16px 18px', borderRadius: 12, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.25)' }}>
+              <div style={{ fontSize: 13.5, fontWeight: 800, color: '#f59e0b', marginBottom: 10 }}>📤 ขั้นที่ 4: ส่งเจน + ตรวจงานถูกคน</div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 2 }}>
+                <strong style={{ color: 'var(--text-primary)' }}>1.</strong> ครั้งแรกกด <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 999, background: 'rgba(245,158,11,0.15)', color: '#f59e0b', fontWeight: 700, fontSize: 11.5 }}>👤 ใส่ชื่อผู้ใช้</span> (มุมขวาบนของแถบสถานะ) ใส่ชื่อตัวเอง — <strong>ไม่ต้องมีรหัสผ่าน</strong> ใช้กำกับว่าใครเจน<br />
+                <strong style={{ color: 'var(--text-primary)' }}>2.</strong> กด <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 8, background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontWeight: 700, fontSize: 11.5 }}>📤 ส่งเข้า Workflow</span> (แก่นข่าว หรือ มุมที่เลือก) → เข้าคิวให้ AI เขียนข่าว<br />
+                <strong style={{ color: 'var(--text-primary)' }}>3.</strong> ไปดูผลที่ <strong style={{ color: '#a855f7' }}>Generation Log</strong> หรือโต๊ะข่าวแท็บ <strong style={{ color: '#22c55e' }}>✅ พร้อมใช้</strong> — จะขึ้น <strong style={{ color: '#f59e0b' }}>"👤 ชื่อคุณ"</strong> กำกับว่าใครเจน → หัวหน้าตรวจงานถูกคน<br />
+                <strong style={{ color: 'var(--text-primary)' }}>4.</strong> มุมที่เคยแยกไว้ หยิบกลับมาใช้ซ้ำได้ที่ <strong style={{ color: '#a855f7' }}>🧩 คลังประวัติแยกประเด็น</strong> (ปุ่มล่างสุดของหน้า)
               </div>
             </div>
           </div>
