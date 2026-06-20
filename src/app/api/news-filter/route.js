@@ -24,6 +24,11 @@ import { randomUUID } from 'crypto';
  *   { success: true, data: { cleanText, originalWordCount, cleanWordCount, removedPercent, sentenceAnalysis, removedPatterns } }
  */
 export async function POST(request) {
+  // ★ 19 มิ.ย. (ผู้ใช้): จัดคิวสกัดข่าว — พนักงานหลายคนยิงพร้อมกัน กันล้น + โชว์สถานะเรียลไทม์
+  const _qstore = createStore('news-filter-queue');
+  const _jobId = randomUUID();
+  let _registered = false;
+  const MAX_CONCURRENT = 3;
   try {
     const body = await request.json();
     const { text, mode = 'balanced', options = {} } = body;
@@ -76,6 +81,22 @@ export async function POST(request) {
     };
 
     console.log(`[NewsFilter API] mode=${mode}, useAI=${useAI}, textLength=${text.length}`);
+
+    // ── เข้าคิว: ลงทะเบียน → รอช่องว่าง (ทำพร้อมกันได้ ${MAX_CONCURRENT}) → ตั้งเป็น processing ──
+    try {
+      const all0 = await _qstore.getAll();
+      const cut = Date.now() - 120000; // เก็บกวาดงานค้าง >2 นาที
+      for (const j of all0) if (new Date(j.startedAt || j.queuedAt || 0).getTime() < cut) await _qstore.remove(j.id).catch(() => {});
+      await _qstore.add({ id: _jobId, status: 'queued', queuedAt: new Date().toISOString() });
+      _registered = true;
+      const t0 = Date.now();
+      while (Date.now() - t0 < 40000) { // รอสูงสุด 40 วิ ถ้านานเกินทำเลย (กันค้าง)
+        const all = await _qstore.getAll();
+        if (all.filter(j => j.status === 'processing').length < MAX_CONCURRENT) break;
+        await new Promise(r => setTimeout(r, 1200));
+      }
+      await _qstore.update(_jobId, ex => ({ ...ex, status: 'processing', startedAt: new Date().toISOString() }));
+    } catch { /* คิวล่ม = ไม่บล็อก ทำต่อเลย */ }
 
     // เรียกระบบกรอง — 3 เครื่อง:
     //   useAI=true (ค่าเริ่มต้นใหม่ 13 มิ.ย.) → extractFactCore: AI เขียนใหม่เหลือข้อเท็จจริงดิบ (ตรงเป้าทีม)
@@ -154,5 +175,8 @@ export async function POST(request) {
       },
       { status: 500 }
     );
+  } finally {
+    // ออกจากคิวเสมอ (ทั้งสำเร็จ/พลาด) — กันคิวค้าง
+    if (_registered) await _qstore.remove(_jobId).catch(() => {});
   }
 }

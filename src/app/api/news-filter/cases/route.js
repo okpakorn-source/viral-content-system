@@ -9,14 +9,18 @@ import { createStore } from '@/lib/persistStore';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// ★ 19 มิ.ย. (ผู้ใช้): type=splits → คลังประวัติ "แยกประเด็น" (ไม่ใช่สกัดเนื้อ)
+const storeName = (type) => (type === 'splits' ? 'news-filter-splits' : 'news-filter-cases');
+
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const limit = Math.min(60, Number(searchParams.get('limit')) || 30);
-    const store = createStore('news-filter-cases');
+    const type = searchParams.get('type') || 'cases';
+    const store = createStore(storeName(type));
     const all = await store.getAll();
     all.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    return NextResponse.json({ success: true, cases: all.slice(0, limit), total: all.length });
+    return NextResponse.json({ success: true, cases: all.slice(0, limit), total: all.length, type });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message, errorType: 'CASES_LIST_ERROR' }, { status: 500 });
   }
@@ -26,7 +30,7 @@ export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
-    const store = createStore('news-filter-cases');
+    const store = createStore(storeName(searchParams.get('type') || 'cases'));
     if (id === 'all') {
       const all = await store.getAll();
       for (const c of all) await store.remove(c.id).catch(() => {});

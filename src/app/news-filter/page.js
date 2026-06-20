@@ -5,10 +5,9 @@ import AuthGuard from '@/components/AuthGuard';
 import ClientLayout from '@/components/ClientLayout';
 
 // ===== Constants =====
+// ★ 19 มิ.ย. (ผู้ใช้): ตัดเหลือโหมดเดียว "เก็บครบ 🟢" (เดิมมี สมดุล/เข้มงวด — ทีมไม่ใช้)
 const FILTER_MODES = [
-  { key: 'soft', label: 'ผ่อน 🟢', color: '#22c55e', desc: 'ตัดเฉพาะคำเฟ้อชัดเจน เก็บรายละเอียดเยอะ' },
-  { key: 'balanced', label: 'สมดุล 🟡', color: '#eab308', desc: 'เก็บข้อเท็จจริงครบ ตัดสำนวน/อารมณ์/ตีความ' },
-  { key: 'strict', label: 'เข้มงวด 🔴', color: '#ef4444', desc: 'เหลือเฉพาะแก่นข้อเท็จจริงล้วน' },
+  { key: 'soft', label: 'เก็บเนื้อครบ 🟢', color: '#22c55e', desc: 'ตัดเฉพาะคำเฟ้อ/อารมณ์/เกริ่นที่ชัดเจน เก็บข้อเท็จจริง+รายละเอียดครบ' },
 ];
 
 const LABEL_COLORS = {
@@ -80,7 +79,26 @@ function NewsFilterContent() {
   };
   const toggleCases = () => { const n = !casesOpen; setCasesOpen(n); if (n) loadCases(); };
   const deleteCase = async (id) => { try { await fetch('/api/news-filter/cases?id=' + id, { method: 'DELETE' }); loadCases(); } catch {} };
-  const [mode, setMode] = useState('balanced');
+  // ★ 19 มิ.ย. (ผู้ใช้): คลังประวัติ "แยกประเด็น" — บางข่าวทำได้หลายหัวข้อ ทีมกลับมาหยิบใช้
+  const [splitsOpen, setSplitsOpen] = useState(false);
+  const [splits, setSplits] = useState([]);
+  const [splitExpanded, setSplitExpanded] = useState(null);
+  const loadSplits = async () => {
+    try { const r = await fetch('/api/news-filter/cases?type=splits&limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setSplits(d.cases || []); } catch {}
+  };
+  const toggleSplits = () => { const n = !splitsOpen; setSplitsOpen(n); if (n) loadSplits(); };
+  // ★ 19 มิ.ย. (ผู้ใช้): สถานะคิวเรียลไทม์ — พนักงานหลายคนใช้ เห็นว่ากำลังทำกี่/รอกี่
+  const [queue, setQueue] = useState({ processing: 0, queued: 0 });
+  useEffect(() => {
+    let on = true;
+    const tick = async () => {
+      try { const r = await fetch('/api/news-filter/queue', { cache: 'no-store' }); const d = await r.json(); if (on && d.success) setQueue({ processing: d.processing || 0, queued: d.queued || 0 }); } catch {}
+    };
+    tick();
+    const iv = setInterval(tick, 2500);
+    return () => { on = false; clearInterval(iv); };
+  }, []);
+  const [mode, setMode] = useState('soft'); // ★ 19 มิ.ย. เหลือโหมดเดียว เก็บครบ
   const [options, setOptions] = useState({
     keepQuotes: true,
     keepContext: true,
@@ -661,7 +679,7 @@ function NewsFilterContent() {
                 </div>
                 {[
                   { step: '1', text: 'Copy เนื้อข่าวจากเว็บไซต์มาวาง', icon: '📋' },
-                  { step: '2', text: 'เลือกโหมดกรอง: Soft / Balanced / Strict', icon: '🎛️' },
+                  { step: '2', text: 'โหมด "เก็บเนื้อครบ 🟢" (ตัดคำเฟ้อ/อารมณ์ เก็บข้อเท็จจริงครบ)', icon: '🎛️' },
                   { step: '3', text: 'ตั้งค่า checkbox ตามต้องการ', icon: '☑️' },
                   { step: '4', text: 'กดปุ่ม "🔬 วิเคราะห์"', icon: '🔘' },
                   { step: '5', text: 'ดูผลกรอง + Copy หรือ Export ได้เลย', icon: '✨' },
@@ -698,11 +716,9 @@ function NewsFilterContent() {
               }}>
                 🎛️ อธิบายโหมดกรอง
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
                 {[
-                  { mode: 'Soft 🟢', color: '#22c55e', desc: 'ตัดเฉพาะคำเฟ้อที่ชัดเจนมาก เช่น "สร้างความฮือฮา" "กลายเป็นกระแส" — เหมาะกับข่าวที่ต้องการเก็บรายละเอียดมาก' },
-                  { mode: 'Balanced 🟡', color: '#eab308', desc: 'สมดุลระหว่างเนื้อจริงกับอารมณ์ — ตัดคำเฟ้อ + อารมณ์เกินส่วนใหญ่ เก็บข้อเท็จจริงครบ (แนะนำ)' },
-                  { mode: 'Strict 🔴', color: '#ef4444', desc: 'เข้มงวดมาก — เหลือเฉพาะข้อเท็จจริง คำพูด และบริบทที่จำเป็น ตัดการตีความทั้งหมด' },
+                  { mode: 'เก็บเนื้อครบ 🟢', color: '#22c55e', desc: 'ตัดเฉพาะคำเฟ้อ/อารมณ์/เกริ่นที่ชัดเจน (เช่น "สร้างความฮือฮา" "กลายเป็นกระแส" "สุดสะเทือนใจ") เก็บข้อเท็จจริง+ชื่อ+ตัวเลข+รายละเอียดครบ พร้อมเอาไปแยกประเด็น/ส่งเจนต่อ' },
                 ].map(m => (
                   <div key={m.mode} style={{
                     padding: 14, borderRadius: 12,
@@ -770,6 +786,14 @@ function NewsFilterContent() {
 
       {/* ===== MAIN CONTENT ===== */}
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '16px 14px 48px' : '24px 32px 60px' }}>
+
+        {/* ★ 19 มิ.ย. (ผู้ใช้): แถบสถานะคิวสกัด เรียลไทม์ — พนักงานหลายคนเห็นว่าระบบว่าง/ยุ่ง */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16, padding: '10px 16px', borderRadius: 12, background: (queue.processing + queue.queued) > 0 ? 'rgba(34,197,94,0.08)' : 'var(--bg-card)', border: '1px solid ' + ((queue.processing + queue.queued) > 0 ? 'rgba(34,197,94,0.3)' : 'var(--border)') }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)' }}>📊 สถานะคิวสกัด (เรียลไทม์):</span>
+          <span style={{ fontSize: 13.5, fontWeight: 800, color: queue.processing > 0 ? '#22c55e' : 'var(--text-muted)' }}>🟢 กำลังสกัด {queue.processing}</span>
+          <span style={{ fontSize: 13.5, fontWeight: 800, color: queue.queued > 0 ? '#f59e0b' : 'var(--text-muted)' }}>⏳ รอคิว {queue.queued}</span>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{(queue.processing + queue.queued) === 0 ? '— ระบบว่าง พร้อมใช้ทันที' : 'ทำพร้อมกันได้ 3 งาน ถ้าเต็มจะต่อคิวอัตโนมัติ'}</span>
+        </div>
 
         {/* 2-Column Layout (มือถือ = คอลัมน์เดียว กันเฟรมขวาลน) */}
         <div style={{
@@ -1503,6 +1527,52 @@ function NewsFilterContent() {
                             </div>
                           </div>
                         )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ★ 19 มิ.ย. (ผู้ใช้): คลังประวัติแยกประเด็น — บางข่าวทำได้หลายหัวข้อ กลับมาหยิบใช้ซ้ำได้ */}
+        <div style={{ marginTop: 16 }}>
+          <button onClick={toggleSplits}
+            style={{ padding: '10px 18px', borderRadius: 10, border: '1px solid var(--border)', background: splitsOpen ? 'rgba(168,85,247,0.12)' : 'var(--bg-card)', color: splitsOpen ? '#a855f7' : 'var(--text-primary)', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+            🧩 คลังประวัติแยกประเด็น {splitsOpen ? '▲' : '▼'}
+          </button>
+          {splitsOpen && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{splits.length} รายการล่าสุด — เก็บมุมขายที่เคยแยกไว้ หยิบไปใช้ซ้ำ/คัดลอก/ส่งเจนได้เลย</span>
+                <button onClick={loadSplits} style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>🔄 รีเฟรช</button>
+              </div>
+              {splits.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>ยังไม่มี — กด "🧩 แยกประเด็น" สักครั้งแล้วจะถูกเก็บที่นี่อัตโนมัติ</div>}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {splits.map((s) => (
+                  <div key={s.id} style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+                    <div onClick={() => setSplitExpanded(splitExpanded === s.id ? null : s.id)}
+                      style={{ padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: 'var(--bg-card)' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title || '(ไม่มีหัวข้อ)'}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>🧩 {s.topicCount} มุม · {new Date(s.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); fetch('/api/news-filter/cases?type=splits&id=' + s.id, { method: 'DELETE' }).then(() => loadSplits()); }} style={{ marginLeft: 10, padding: '4px 8px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>ลบ</button>
+                    </div>
+                    {splitExpanded === s.id && (
+                      <div style={{ padding: 14, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {(s.topics || []).map((t, i) => (
+                          <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12, background: 'var(--bg-primary)' }}>
+                            <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--text-primary)' }}>{t.emoji} {t.title}</div>
+                            {t.viralAngle && <div style={{ fontSize: 11.5, color: '#f59e0b', marginTop: 3 }}>💡 {t.viralAngle}</div>}
+                            <div style={{ fontSize: 12.5, lineHeight: 1.75, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', marginTop: 6, maxHeight: 200, overflowY: 'auto', background: 'rgba(0,0,0,0.12)', borderRadius: 8, padding: 10 }}>{t.content}</div>
+                            <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 8, marginTop: 8 }}>
+                              <button onClick={() => copyText(t.content)} style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: 'none', background: 'rgba(59,130,246,0.1)', color: '#3b82f6', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>📋 คัดลอกมุมนี้</button>
+                              <button onClick={() => sendTopicToWorkflow(t)} disabled={sendingTopic === t.id} style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.12)', color: '#22c55e', fontSize: 12.5, fontWeight: 700, cursor: sendingTopic === t.id ? 'wait' : 'pointer', fontFamily: 'inherit' }}>{sendingTopic === t.id ? '⏳...' : '📤 ส่งเข้า Workflow'}</button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
