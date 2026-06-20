@@ -37,7 +37,94 @@ function normalizeStoryType(raw) {
   return 'default';
 }
 
-export async function analyzeStoryIdentity(newsTitle, breakdownData) {
+// ★★★ Identity Anchor (20 มิ.ย. — CV3): สืบ "ชื่อจริง/ชื่อในวงการ" จากผลค้นหาจริง
+//   ปัญหา: เนื้อข่าวบางชิ้นเอ่ยแค่ชื่อเล่นลอยๆ (เช่น "พลอย") ไม่มีนามสกุล → ค้นภาพได้คนผิด
+//   ทางแก้: เอา ชื่อเล่น + บริบทข่าว ไปค้น Google จริง → ให้ AI สกัด "ชื่อเต็มที่ปรากฏจริง" ในผลค้นหา
+//   ★ ไม่ใช่การเดา/generate — ยึดจากหัวข่าว/สนิปเพ็ตจริง (กันหน้าคนผิดขึ้นปก)
+// คำเหตุการณ์ (ชื่อรายการ/โรค/ดราม่า) + คำอาชีพ/คำขยาย (ไม่ใช่นามสกุล) — ตัดทิ้งก่อนนับว่า "มีนามสกุลจริงไหม"
+const _AMBIG_EVENT_TOKENS = /รายการ|วู้ดดี้|โหนกระแส|ทูไนท์|ตีท้ายครัว|คุยแซ่บ|ข่าว|มะเร็ง|ป่วย|โรค|ดราม่า|drama|สัมภาษณ์|เปิดใจ|คลิป|วิดีโอ|ล่าสุด|cover|thumbnail|ปก|งานแสดง|ละคร|ซีรีส์|นักแสดง|ดารา|นักร้อง|พิธีกร|เน็ตไอดอล|อินฟลูเอนเซอร์|อินฟลู|influencer|ไอดอล|นางแบบ|นางเอก|พระเอก|ซุปตาร์|ซุปตา|เซเลบ|คุณแม่|คุณพ่อ|สาว|หนุ่ม/gi;
+
+async function resolveCanonicalIdentity(parsed) {
+  try {
+    const raw = (parsed?.mainCharacter || '').trim();
+    if (!raw) return parsed;
+    // ตัดคำเหตุการณ์ออกก่อน เหลือ "แกน" ของชื่อ
+    const stripped = raw.replace(_AMBIG_EVENT_TOKENS, ' ').replace(/\s+/g, ' ').trim();
+    const words = stripped.split(/\s+/).filter(Boolean);
+    // มีนามสกุล/2 คำขึ้นไปแล้ว (เช่น "ก้อย รัชวิน") → เชื่อถือได้ ไม่ต้องสืบ (กันเปลือง)
+    if (words.length >= 2) return parsed;
+    const nickname = words[0] || stripped;
+    if (!nickname || nickname.length < 2) return parsed;
+
+    const serperKey = process.env.SERPER_API_KEY;
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (!serperKey || !openaiKey) return parsed;
+
+    const context = (parsed.story || parsed.mainVisualShouldBe || parsed.newsTitle || '').slice(0, 90);
+    // คีย์เหตุการณ์เด่น (ไม่ใช่ตัวเลข/คำกว้าง) — ใช้ยืนยันว่าชื่อที่ได้ "ผูกกับข่าวนี้จริง"
+    const eventKeyword = (() => {
+      const pool = `${(parsed.keyScenes || []).join(' ')} ${parsed.story || ''} ${parsed.newsTitle || ''}`;
+      const words = pool.replace(/[0-9]+/g, ' ').match(/[ก-๙]{4,}/g) || [];
+      const generic = new Set(['นักแสดง', 'ดารา', 'นักร้อง', 'เปิดใจ', 'ชีวิต', 'ครั้ง', 'กิโลกรัม', 'น้ำหนัก', 'เรื่อง', 'ตัวเอง', 'ร่างกาย', 'ผู้หญิง', 'ผู้ชาย', 'ล่าสุด', 'ปัจจุบัน']);
+      return words.find(w => !generic.has(w) && !w.includes(nickname)) || '';
+    })();
+    const q = `${nickname} ${context}`.trim().slice(0, 120);
+    const sres = await fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: { 'X-API-KEY': serperKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q, gl: 'th', hl: 'th', num: 8 }),
+    });
+    if (!sres.ok) { console.log('[IdentityAnchor] serper HTTP', sres.status); return parsed; }
+    const sdata = await sres.json();
+    const snippets = (sdata.organic || []).slice(0, 6)
+      .map(o => `${o.title || ''} — ${o.snippet || ''}`).join('\n').slice(0, 1600);
+    if (!snippets) { console.log('[IdentityAnchor] no organic results'); return parsed; }
+
+    const ask = `ข่าวนี้เรียกบุคคลด้วยชื่อเล่นว่า "${nickname}" บริบทข่าว: ${context}
+นี่คือผลค้นหาเว็บจริง:
+${snippets}
+
+จากสนิปเพ็ตจริงข้างบน ระบุ "ชื่อ-นามสกุล หรือชื่อในวงการเต็ม" (ภาษาไทย) ของบุคคลที่ข่าวนี้พูดถึง
+⛔ กฎเข้ม:
+1. ต้องเป็นชื่อที่ปรากฏจริงในสนิปเพ็ต — ห้ามเดา/เติมจากความรู้ของคุณเอง
+2. ชื่อนั้นต้องอยู่ในสนิปเพ็ตที่พูดถึง "เหตุการณ์เดียวกับข่าวนี้"${eventKeyword ? ` (เช่น มีคำว่า "${eventKeyword}")` : ''} ด้วย
+3. ★ ห้ามเลือก "คนดังที่ชื่อเล่นบังเอิญตรงกัน" แต่สนิปเพ็ตของเขาไม่ได้พูดถึงเหตุการณ์นี้ ← นี่คือกับดักที่ทำให้หน้าคนผิดขึ้นปก
+4. ถ้าไม่มีสนิปเพ็ตไหนเชื่อมชื่อกับเหตุการณ์นี้ชัดเจน → ตอบ null
+ตอบ JSON เท่านั้น: {"fullName": "ชื่อเต็มที่ปรากฏจริง หรือ null", "confidence": 0-1}`;
+    const ores = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini', messages: [{ role: 'user', content: ask }],
+        temperature: 0, max_tokens: 200, response_format: { type: 'json_object' },
+      }),
+    });
+    if (!ores.ok) { console.log('[IdentityAnchor] openai HTTP', ores.status); return parsed; }
+    const odata = await ores.json();
+    const pn = JSON.parse(odata.choices?.[0]?.message?.content || '{}');
+    const fullName = String(pn.fullName || '').trim();
+    const conf = Number(pn.confidence) || 0;
+    const basicOk = fullName && fullName.toLowerCase() !== 'null' && conf >= 0.6
+      && fullName.includes(nickname) && fullName.length > nickname.length;
+    if (!basicOk) {
+      console.log(`[IdentityAnchor] ไม่ resolve (fullName="${fullName || '-'}" conf=${conf})`);
+      parsed._identityAmbiguous = true; // ★ ธงบอกปลายทาง: ชื่อกำกวม-สืบไม่ได้ (ควรให้คนยืนยันชื่อ)
+      return parsed;
+    }
+    // ★ ผ่านเกณฑ์ → ใช้ชื่อจริงที่สืบได้ (query สืบรวมบริบทเหตุการณ์อยู่แล้ว + AI อ่านสนิปเพ็ตจริง = grounded)
+    //   ถ้าได้คนผิดในบางเคส ผู้ใช้แก้ด้วยช่อง "ชื่อเต็มตัวละครหลัก" (override) ได้เสมอ — ไม่ hard-reject
+    //   (เคยใส่ verify-guard แล้วมันปฏิเสธ "พลอย เฌอมาลย์" ที่ถูกต้อง — ถอดออก 20 มิ.ย.)
+    console.log(`[IdentityAnchor] 🎯 "${raw}" → "${fullName}" (conf ${conf})${eventKeyword ? ` [evt: ${eventKeyword}]` : ''}`);
+    const sq = parsed.searchQueries || (parsed.searchQueries = {});
+    parsed.mainCharacter = fullName;
+    sq.person_portrait = fullName;
+    sq.person_closeup = `${fullName} หน้าตรง โคลสอัพ ภาพหน้าชัด`;
+    parsed._identityResolved = { from: raw, to: fullName, conf };
+  } catch (e) { console.log('[IdentityAnchor] err:', e.message?.slice(0, 70)); }
+  return parsed;
+}
+
+export async function analyzeStoryIdentity(newsTitle, breakdownData, opts = {}) {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return null;
@@ -137,8 +224,8 @@ Respond with ONLY a JSON object following this exact structure (ALL values in Th
   },
 
   "searchQueries": {
-    "person_closeup": "Main person's name + terms for clear face photo, no occupation needed — in Thai",
-    "person_portrait": "★ Full name + title directly (if celebrity's child: 'น้องทาเรีย ลูกน้ำฝน') — in Thai",
+    "person_closeup": "★★ CLEAN NAME ONLY for a clear portrait — e.g. 'พลอย เฌอมาลย์' or just 'พลอย ดารา/นักแสดง' if surname unknown. ⛔ NEVER append event keywords (TV-show name, illness, scandal) — they pollute results into low-quality VIDEO FRAMES instead of clean studio portraits — in Thai",
+    "person_portrait": "★★ CLEAN NAME + 'ดารา/นักแสดง/สวย' for portfolio photos (if celebrity's child: 'น้องทาเรีย ลูกน้ำฝน'). ⛔ NO event/show/illness keywords — in Thai",
     "person_emotion": "Main person's name + emotion matching the news — in Thai",
     "secondary_person": "Secondary character's name (if any) for clear face — if relationship='แม่', use 'hero name แม่' — in Thai",
 
@@ -299,6 +386,20 @@ Respond with ONLY a JSON object following this exact structure (ALL values in Th
           parsed.rawStoryType = parsed.storyType;
           parsed.storyType = normalizeStoryType(parsed.storyType);
           console.log(`[StoryIdentity] ✅ ${MODEL_PRIMARY} fallback success: ${parsed.mainCharacter} | rawStoryType=${parsed.rawStoryType} | normalizedStoryType=${parsed.storyType} | coverageRequired=${parsed.coverageRequired.length} roles`);
+          // ★ ผู้ใช้ระบุชื่อเต็มเอง (กฎ: ข่าวชื่อเล่นกำกวม → คนยืนยันชื่อ = ชัวร์สุด) — ข้ามการสืบ ใช้ชื่อนี้ตรงๆ
+          const override = String(opts?.overrideMainCharacter || '').trim();
+          if (override) {
+            const sq = parsed.searchQueries || (parsed.searchQueries = {});
+            parsed.mainCharacter = override;
+            sq.person_portrait = override;
+            sq.person_closeup = `${override} หน้าตรง โคลสอัพ ภาพหน้าชัด`;
+            parsed._identityOverride = override;
+            console.log(`[StoryIdentity] 🖐️ override mainCharacter → "${override}" (ผู้ใช้ระบุชื่อเต็มเอง)`);
+          } else {
+            // ★ Identity Anchor: ถ้า mainCharacter เป็นชื่อเล่นโดดๆ → สืบชื่อจริงจากผลค้นหา (กันหยิบคนผิด)
+            if (!parsed.newsTitle) parsed.newsTitle = newsTitle || '';
+            await resolveCanonicalIdentity(parsed);
+          }
           return parsed;
         } else {
           console.log(`[StoryIdentity] ❌ ${MODEL_PRIMARY} HTTP ${gptRes.status}`);

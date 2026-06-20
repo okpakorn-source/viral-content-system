@@ -459,6 +459,58 @@ export function generateViralDnaQueries(count = 6) {
 }
 
 // ════════════════════════════════════════════════════
+// ★ 20 มิ.ย. (ผู้ใช้สั่ง "แตกคีย์หลักร้อยหลักพันต่อหมวด"): เครื่องแตกคีย์เชิงลึก combinatorial
+//   หมวดที่เคยใช้คีย์ตายตัว ≤8 คำ → subject × action หมุนตามเวลา = ร้อย-พันคีย์/หมวด ไม่ซ้ำต่อรอบ
+// ════════════════════════════════════════════════════
+function _combo(subjects, actions, count, salt = 0) {
+  const slot = Math.floor(Date.now() / (3600e3 * 2)); // หมุนทุก 2 ชม.
+  const out = [];
+  const total = subjects.length * actions.length;
+  for (let i = 0; i < count; i++) {
+    const idx = (slot * count + i + salt) % total;
+    const subj = subjects[idx % subjects.length];
+    const act = actions[Math.floor(idx / subjects.length) % actions.length];
+    out.push(`${subj} ${act}`.trim());
+  }
+  return out;
+}
+
+// 🐶 รักสัตว์ — ผู้ช่วย × การกระทำต่อสัตว์ (14 × 12 = 168 คอมโบ)
+const ANIMAL_SUBJ = ['หนุ่ม', 'สาว', 'ลุง', 'ป้า', 'ดารา', 'คนใจบุญ', 'ครอบครัว', 'เด็ก', 'คุณยาย', 'คุณตา', 'พระ', 'ทหาร', 'ตำรวจ', 'นักศึกษา'];
+const ANIMAL_ACT = ['ช่วยหมาแมวจร น้ำใจ', 'รับเลี้ยงหมาจร ใจบุญ', 'รับเลี้ยงแมวจร', 'รักษาสัตว์ป่วย ไวรัล', 'สร้างบ้านให้หมาแมว', 'ดูแลสัตว์พิการ', 'ช่วยชีวิตสัตว์ ซึ้ง', 'เลี้ยงหมาจรหลายสิบตัว', 'พาสัตว์จรไปรักษา', 'หมาแมวผูกพันเจ้าของ ซึ้ง', 'สุนัขแสนรู้ ช่วยคน', 'ช่วยช้าง สัตว์ป่า'];
+export function generateAnimalQueries(count = 8) {
+  return _combo(ANIMAL_SUBJ, ANIMAL_ACT, count, 0).map(q => ({ q, genre: 'รักสัตว์' }));
+}
+
+// 🙏 น้ำใจ/พลเมืองดี — อาชีพ × การช่วยเหลือ (12 × 8 = 96)
+const SAMARITAN_SUBJ = ['วินมอเตอร์ไซค์', 'แท็กซี่', 'พนักงาน', 'นักเรียน', 'ชาวบ้าน', 'พ่อค้าแม่ค้า', 'กู้ภัย', 'ตำรวจ', 'พนักงานส่งของ', 'รปภ.', 'คนเก็บขยะ', 'พลเมืองดี'];
+const SAMARITAN_ACT = ['คืนเงิน คืนของ เจ้าของ', 'ช่วยชีวิต นาทีชีวิต', 'ช่วยคนเดือดร้อน ไวรัล', 'ช่วยคนจมน้ำ', 'ช่วยคนแก่ข้ามถนน', 'เก็บกระเป๋าเงินคืน', 'ช่วยเหลือ อุบัติเหตุ', 'น้ำใจ ชาวเน็ตชื่นชม'];
+export function generateGoodSamaritanQueries(count = 8) {
+  return _combo(SAMARITAN_SUBJ, SAMARITAN_ACT, count, 3).map(q => ({ q, genre: 'น้ำใจพลเมืองดี' }));
+}
+
+// 💪 สู้ชีวิต — คนสู้ชีวิต × เส้นทาง (12 × 8 = 96)
+const FIGHTER_SUBJ = ['แม่ค้า', 'พ่อค้า', 'คนพิการ', 'เด็กยากจน', 'แม่เลี้ยงเดี่ยว', 'พ่อเลี้ยงเดี่ยว', 'ลุงป้า', 'คนสูงวัย', 'หนุ่มโรงงาน', 'สาวออฟฟิศ', 'นักเรียน', 'คนหาเช้ากินค่ำ'];
+const FIGHTER_ACT = ['สู้ชีวิต ไม่ยอมแพ้ ไวรัล', 'ส่งลูกเรียนจบ สู้ชีวิต', 'พลิกชีวิตจากศูนย์ สำเร็จ', 'ขายของสู้ชีวิต ไวรัล', 'ตั้งตัวจากติดลบ', 'สอบติด ทุนการศึกษา', 'ทำงานหนักจนสำเร็จ', 'อาชีพน่าทึ่ง สู้ชีวิต'];
+export function generateFighterQueries(count = 8) {
+  return _combo(FIGHTER_SUBJ, FIGHTER_ACT, count, 5).map(q => ({ q, genre: 'สู้ชีวิต' }));
+}
+
+// 🔥 กระแสไวรัล — คลังกระแสสด (หมุนรายชั่วโมง)
+const TREND_FOCUS = [
+  'แห่ชื่นชม น้ำใจ ล่าสุด', 'คลิปไวรัล ประทับใจ ล่าสุด', 'สุดซึ้ง ชาวเน็ต ล่าสุด', 'ดราม่าร้านดัง ล่าสุด',
+  'เปิดใจทั้งน้ำตา ล่าสุด', 'สะเทือนใจ ชาวเน็ตแห่แชร์', 'คลิปกล้องวงจรปิด ช่วยเหลือ', 'ขอความเป็นธรรม ดราม่า ล่าสุด',
+  'ไวรัล วันนี้ ชาวเน็ตแห่แชร์', 'ทอล์กออฟเดอะทาวน์ ล่าสุด', 'คนแห่ชื่นชม วันนี้', 'เรื่องราวน่าทึ่ง ไวรัล',
+  'คลิปประทับใจ ล่าสุด', 'ดาราเป็นข่าว วันนี้', 'เน็ตไอดอลเป็นข่าว ล่าสุด', 'กระแสโซเชียล วันนี้',
+];
+export function generateTrendFocusQueries(count = 8) {
+  const hour = Math.floor(Date.now() / 3600e3);
+  const out = [];
+  for (let i = 0; i < count; i++) out.push(TREND_FOCUS[(hour * count + i) % TREND_FOCUS.length]);
+  return out.map(q => ({ q, genre: 'กระแสไวรัล' }));
+}
+
+// ════════════════════════════════════════════════════
 // ★ สั่งหาข่าว "เฉพาะแนว" (15 มิ.ย. คำสั่งทีม): เลือกโฟกัส → ค้นเฉพาะแนวนั้น (เติมช่องว่างของวันได้ตรงจุด)
 // ════════════════════════════════════════════════════
 const FOCUS_FIXED = {
@@ -468,54 +520,94 @@ const FOCUS_FIXED = {
   trend: ['แห่ชื่นชม น้ำใจ ล่าสุด', 'คลิปไวรัล ประทับใจ ล่าสุด', 'สุดซึ้ง ชาวเน็ต ล่าสุด', 'ดราม่าร้านดัง ล่าสุด', 'เปิดใจทั้งน้ำตา ล่าสุด', 'สะเทือนใจ ชาวเน็ตแห่แชร์', 'คลิปกล้องวงจรปิด ช่วยเหลือ', 'ขอความเป็นธรรม ดราม่า ล่าสุด'],
 };
 
-/** รายการแนวที่สั่งได้ (ให้ UI ใช้ทำปุ่ม) — key ต้องตรงกับ generateFocusQueries */
+/** รายการแนวที่สั่งได้ (ให้ UI ใช้ทำปุ่ม) — 12 หมวดรวบแล้ว (20 มิ.ย. ผู้ใช้อนุมัติ key ต้องตรงกับ generateFocusQueries) */
 export const FOCUS_OPTIONS = [
-  { key: 'celeb_gooddeed', label: '⭐ ดาราทำดี/ช่วยเหลือ/อวย' },
-  { key: 'celeb_highlight', label: '🎤 ไฮไลท์สัมภาษณ์ดาราด้านดี' },
-  { key: 'commoner', label: '🧑‍🌾 ชาวบ้านน่าสนใจ' },
-  { key: 'viral_dna', label: '🧬 แนวที่ปังบนเพจ (DNA)' },
-  { key: 'good_all', label: '💎 ข่าวน้ำดี (รวมทุกหมวด)' },
-  { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
-  { key: 'celeb_lifestyle', label: '🏡 เปิดบ้าน/รับสัตว์/ไลฟ์สไตล์ดารา' },
-  { key: 'celeb_drama', label: '🎬 ดราม่า/ความรักดารา' },
-  { key: 'circle_drama', label: '🏐 ดราม่าวงการ (กีฬา/บันเทิง สด)' },
-  { key: 'throwback', label: '⏪ ย้อนสัมภาษณ์เก่า' },
-  { key: 'celeb_good', label: '⭐ ดาราทำดี/อมตะ' },
-  { key: 'video', label: '📺 วิดีโอดารา (ยูทูป)' },
-  { key: 'social', label: '📘 เพจ/รีลส์ (สัมภาษณ์+ดราม่า)' },
+  { key: 'celeb_good', label: '⭐ ดาราทำดี/ช่วยเหลือ/อมตะ' },         // รวม gooddeed + อมตะ
+  { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญ/กตัญญูครอบครัว' },
+  { key: 'celeb_interview', label: '🎤 สัมภาษณ์ดารา (ไฮไลท์+ย้อนเก่า)' }, // รวม highlight + throwback
+  { key: 'celeb_drama', label: '🎬 ดราม่าดารา/วงการ' },                // รวม celeb_drama + circle_drama
+  { key: 'celeb_lifestyle', label: '🏡 เปิดบ้าน/ไลฟ์สไตล์ดารา' },
+  { key: 'celeb_clip', label: '📱 คลิป/รีลส์ดารา (ดิสคัฟเวอรี)' },      // รวม video + social
+  { key: 'commoner', label: '🧑‍🌾 ชาวบ้าน/น้ำใจพลเมืองดี' },           // รวม commoner + good_deed
+  { key: 'fighter', label: '💪 สู้ชีวิต/เรื่องกินใจ' },                  // รวม fighter + hardship
   { key: 'animal', label: '🐶 รักสัตว์' },
-  { key: 'good_deed', label: '🙏 น้ำใจ/พลเมืองดี' },
-  { key: 'fighter', label: '💪 สู้ชีวิต' },
-  { key: 'hardship', label: '💧 เรื่องลำบาก/กินใจ' },
+  { key: 'viral_dna', label: '🧬 แนวที่ปังบนเพจ (DNA)' },
+  { key: 'good_all', label: '💎 ข่าวน้ำดีรวมทุกหมวด' },
   { key: 'trend', label: '🔥 กระแสไวรัล' },
 ];
 
 /**
  * ★ สร้างคำค้นตามแนวที่สั่ง → [{q, lane, timeRange, endpoint}] (ใช้เป็น extraQueries ใน runHarvest)
+ *   20 มิ.ย.: รวบ 12 หมวด — แต่ละหมวดยิง ~30 คีย์/คลิก (combinatorial หมุนไม่ซ้ำ) + รับ key เดิม (legacy) ไม่พัง
  *   endpoint: undefined=/news | 'search'=เว็บกว้าง | 'videos'=ยูทูป
  * @param {string} focus - key จาก FOCUS_OPTIONS
  */
-export function generateFocusQueries(focus, count = 8) {
+export function generateFocusQueries(focus, count = 30) {
   const wrap = (arr, lane, timeRange, endpoint) => arr.map(x => ({ q: (x && x.q) || x, lane, timeRange, endpoint })).filter(o => o.q && o.q.length >= 4);
+  const half = Math.ceil(count / 2);
   switch (focus) {
-    case 'celeb_gooddeed': return wrap(generateCelebGoodDeedQueries(count), 'good', 'qdr:m', 'search'); // ★ ดาราทำดี/ช่วยเหลือ/บริจาค/ทำบุญ/ติดดิน — แนวอวยที่เพจปังสุด
-    case 'celeb_highlight': return wrap(generateCelebHighlightQueries(count), 'celeb', 'qdr:m', 'search'); // ★ ไฮไลท์สัมภาษณ์ดาราด้านดี (เว็บ/รีลส์)
-    case 'commoner': return wrap(generateCommonerQueries(count), 'good', 'qdr:m', 'search'); // ★ ชาวบ้านน่าสนใจ — คนธรรมดาน่าทึ่ง/น้ำใจ/สู้ชีวิต
-    case 'viral_dna': return wrap(generateViralDnaQueries(count), 'good', 'qdr:m', 'search'); // DNA เพจ — แนวที่สถิติพิสูจน์ว่าปัง (สถาบันบวก/ทหาร/ยุติธรรม/ต่างชาติช่วยไทย/นักกีฬาสมถะ/ดาราติดดิน)
-    case 'good_all': return wrap(generateGoodContentQueries(8), 'good', 'qdr:m', 'search'); // น้ำดีรวมทุกหมวด (กตัญญู/สู้ชีวิต/น้ำใจ/สัตว์/เด็ก/ผู้สูงวัย/อาชีพหัวใจ)
-    case 'celeb_family': return wrap(generateCelebFamilyQueries(count), 'good', 'qdr:m');
-    case 'celeb_lifestyle': return wrap(generateCelebLifestyleQueries(count), 'good', 'qdr:y', 'search'); // เว็บกว้าง + ย้อนทั้งปี
-    case 'celeb_drama': return wrap(generateCelebRadarQueries(count), 'celeb', 'qdr:m');
-    case 'circle_drama': return wrap(generateCircleDramaQueries(count), 'video', '', 'videos'); // ดราม่าวงการสด — คลิปยูทูป (ดิสคัฟเวอรี)
-    case 'throwback': return wrap(generateThrowbackQueries(count), 'throwback', 'qdr:y');
-    case 'celeb_good': return wrap(generateEvergreenCelebQueries(count), 'evergreen-celeb', 'qdr:y');
-    case 'video': return wrap(generateCelebLifestyleQueries(count), 'video', '', 'videos'); // ยูทูป (ดิสคัฟเวอรี ไม่ auto-เขียน)
-    case 'social': return wrap(generateSocialClipQueries(count), 'video', '', 'search'); // เพจ/รีลส์ FB ไฮไลท์สัมภาษณ์+ดราม่า (ดิสคัฟเวอรี)
-    case 'animal': return wrap((FOCUS_FIXED.animal || []).slice(0, count), 'good', 'qdr:w');
-    case 'good_deed': return wrap((FOCUS_FIXED.good_deed || []).slice(0, count), 'good', 'qdr:w');
-    case 'fighter': return wrap((FOCUS_FIXED.fighter || []).slice(0, count), 'good', 'qdr:w');
-    case 'hardship': return wrap(generateHardshipQueries(count), 'good', 'qdr:m', 'search'); // เรื่องลำบาก/กินใจ ทุกแหล่ง
-    case 'trend': return wrap((FOCUS_FIXED.trend || []).slice(0, count), 'trend', 'qdr:d');
+    // ⭐ ดาราทำดี/ช่วยเหลือ/อมตะ (รวม gooddeed + evergreen)
+    case 'celeb_good':
+    case 'celeb_gooddeed': // legacy
+      return [
+        ...wrap(generateCelebGoodDeedQueries(half), 'good', 'qdr:m', 'search'),
+        ...wrap(generateEvergreenCelebQueries(count - half), 'evergreen-celeb', 'qdr:y'),
+      ];
+    // 🎁 ดาราให้ของขวัญ/กตัญญูครอบครัว
+    case 'celeb_family':
+      return wrap(generateCelebFamilyQueries(count), 'good', 'qdr:m');
+    // 🎤 สัมภาษณ์ดารา (รวม ไฮไลท์ + ย้อนเก่า)
+    case 'celeb_interview':
+    case 'celeb_highlight': // legacy
+    case 'throwback':       // legacy
+      return [
+        ...wrap(generateCelebHighlightQueries(half), 'celeb', 'qdr:m', 'search'),
+        ...wrap(generateThrowbackQueries(count - half), 'throwback', 'qdr:y'),
+      ];
+    // 🎬 ดราม่าดารา/วงการ (รวม บันเทิง + กีฬา/วงการ)
+    case 'celeb_drama':
+    case 'circle_drama': // legacy
+      return [
+        ...wrap(generateCelebRadarQueries(half), 'celeb', 'qdr:m'),
+        ...wrap(generateCircleDramaQueries(count - half), 'video', '', 'videos'),
+      ];
+    // 🏡 เปิดบ้าน/ไลฟ์สไตล์ดารา
+    case 'celeb_lifestyle':
+      return wrap(generateCelebLifestyleQueries(count), 'good', 'qdr:y', 'search');
+    // 📱 คลิป/รีลส์ดารา (รวม yt lifestyle + fb social clip)
+    case 'celeb_clip':
+    case 'video':  // legacy
+    case 'social': // legacy
+      return [
+        ...wrap(generateSocialClipQueries(half), 'video', '', 'search'),
+        ...wrap(generateCelebLifestyleQueries(count - half), 'video', '', 'videos'),
+      ];
+    // 🧑‍🌾 ชาวบ้าน/น้ำใจพลเมืองดี (รวม commoner + พลเมืองดี)
+    case 'commoner':
+    case 'good_deed': // legacy
+      return [
+        ...wrap(generateCommonerQueries(half), 'good', 'qdr:m', 'search'),
+        ...wrap(generateGoodSamaritanQueries(count - half), 'good', 'qdr:m', 'search'),
+      ];
+    // 💪 สู้ชีวิต/เรื่องกินใจ (รวม fighter + hardship)
+    case 'fighter':
+    case 'hardship': // legacy
+      return [
+        ...wrap(generateFighterQueries(half), 'good', 'qdr:m', 'search'),
+        ...wrap(generateHardshipQueries(count - half), 'good', 'qdr:m', 'search'),
+      ];
+    // 🐶 รักสัตว์
+    case 'animal':
+      return wrap(generateAnimalQueries(count), 'good', 'qdr:w', 'search');
+    // 🧬 DNA เพจ
+    case 'viral_dna':
+      return wrap(generateViralDnaQueries(count), 'good', 'qdr:m', 'search');
+    // 💎 ข่าวน้ำดีรวมทุกหมวด
+    case 'good_all':
+      return wrap(generateGoodContentQueries(count), 'good', 'qdr:m', 'search');
+    // 🔥 กระแสไวรัล
+    case 'trend':
+      return wrap(generateTrendFocusQueries(count), 'trend', 'qdr:d', 'search');
     default: return [];
   }
 }

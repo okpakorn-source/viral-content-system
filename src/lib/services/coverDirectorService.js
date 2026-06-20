@@ -300,6 +300,11 @@ ${templatesBlock}
       });
     } catch { /* ไม่ critical */ }
 
+    // rev.20 (ผู้ใช้ 20 มิ.ย.): ช่อง "โมเมนต์ขวา" ต้องโฟกัสหน้าคน สะอาด — บังคับครอปหน้า-ไหล่ (ตัด bg/ไมค์/โซฟา)
+    //   ★ rev.20f: ถอดตัว "สลับเป็นภาพเดี่ยว" (rev-20e) ออก — มันไปดึงภาพหลุดบริบท (ชายหาด/บิกินี) ที่ judge จัดอันดับต่ำมาใช้ (CASE-156 พัง)
+    //   เชื่อการคัดของ judge เหมือน CASE-155 (ดีแล้ว) แค่กระชับครอปให้แน่น โดยเฉพาะช่องล่างขวา
+    tightenMomentCrops(valid, faceBoxes);
+
     if (valid.length < chosenSpec.slots.length) {
       console.log(`[CoverDirector] ⚠️ assignments ใช้ได้ ${valid.length}/${chosenSpec.slots.length} ช่อง`);
       return null;
@@ -316,14 +321,38 @@ ${templatesBlock}
 }
 
 /** ครอปตั้งต้นจากกรอบหน้า (สูตรเดียวกับ rule 11): กว้าง ~2.5×หน้า + HEADROOM เหนือไรผม */
-function cropFromFaceBox(fb) {
+function cropFromFaceBox(fb, mult = 2.1) {
   if (!fb || !(fb.x2 > fb.x1)) return { x: 0, y: 0, w: 1, h: 1 };
   const fw = fb.x2 - fb.x1, fh = fb.y2 - fb.y1, cx = (fb.x1 + fb.x2) / 2;
-  const w = Math.min(1, Math.max(0.28, fw * 2.1)); // rev.13: แน่นขึ้น 2.5→2.1 (ตามตัวอย่างหน้าเต็มกรอบ)
-  const h = Math.min(1, Math.max(0.28, fh * 2.1));
+  const w = Math.min(1, Math.max(0.28, fw * mult)); // rev.13: แน่นขึ้น 2.5→2.1 (ตามตัวอย่างหน้าเต็มกรอบ)
+  const h = Math.min(1, Math.max(0.28, fh * mult));
   const x = Math.min(Math.max(cx - w / 2, 0), 1 - w);
   const y = Math.min(Math.max(fb.y1 - fh * 0.5, 0), 1 - h);
   return { x: +x.toFixed(2), y: +y.toFixed(2), w: +w.toFixed(2), h: +h.toFixed(2) };
+}
+
+/**
+ * rev.20: บังคับช่อง "โมเมนต์ขวา" (right_ , top_right, bottom_right, top, mid, bottom) ให้โฟกัสหน้า-ไหล่ สะอาด
+ *   ตัดพื้นหลัง/ไมค์/โซฟา — ใช้ทั้งหลัง Director จัด และหลัง QC แก้ (กัน QC คลายครอปกลับ)
+ *   เงื่อนไข: ช่องมีหน้าใหญ่พอ (≥1.2% ของภาพ) + (ครอปกว้างเกิน 2.6 เท่าหน้า หรือ ภาพหลายคน)
+ *   ★ ไม่แตะ main (ฮีโร่) / circle (มี guard เฉพาะ) / ช่องที่หน้าจิ๋ว (ปล่อยเล่าฉากตามตั้งใจ)
+ */
+export function tightenMomentCrops(assignments, faceBoxes = []) {
+  const MOMENT_SLOT = /^right_|^top_right$|^bottom_right$|^top$|^mid$|^bottom$/;
+  for (const a of assignments || []) {
+    if (!a || a.slotId === 'main' || /circle/i.test(a.slotId)) continue;
+    if (!MOMENT_SLOT.test(a.slotId)) continue;
+    const fb = faceBoxes[a.imageIndex];
+    if (!fb || !(fb.x2 > fb.x1)) continue;
+    const fArea = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);
+    if (fArea < 0.012) continue; // หน้าจิ๋ว/ภาพบริบทล้วน — ปล่อยตามตั้งใจ
+    // rev.20c (ผู้ใช้ย้ำ): บังคับ "ทุกช่องโมเมนต์ที่มีหน้าชัด" ครอปคน-เต็มเฟรมเสมอ (ตัดไมค์/ป้ายโฆษณา/อุปกรณ์/ครึ่งตัว)
+    //   rev.20f: ช่องล่างขวา (มักได้ช็อตกว้าง/2 คน) ครอปแน่นกว่า (2.0) = ซูมคนเดียวชัด ตัดบริบทกว้างทิ้ง
+    const isBottom = /bottom/.test(a.slotId);
+    a.crop = cropFromFaceBox(fb, isBottom ? 2.0 : 2.4); // หน้า-ไหล่ กลางกรอบ คนเต็มเฟรม
+    a.why = (a.why || '').slice(0, 52) + (isBottom ? ' [ซูมคนแน่น ตัดภาพกว้าง]' : ' [คนเต็มเฟรม ตัดอุปกรณ์]');
+  }
+  return assignments;
 }
 
 /**

@@ -112,6 +112,7 @@ export default function CoverLabPage() {
   const [content, setContent] = useState('');
   // ★ Agent 0 (11 มิ.ย.): ลิงก์ข่าวต้นทาง — ระบบดึงภาพจากบทความโดยตรง (ภาพตรงเนื้อที่สุด)
   const [sourceUrl, setSourceUrl] = useState('');
+  const [mainCharacterName, setMainCharacterName] = useState(''); // ★ ผู้ใช้ระบุชื่อเต็มเอง (ข่าวชื่อเล่นกำกวม)
   // ★ v3 (11 มิ.ย.): เลือกเครื่องยนต์ประกอบปก — v3 = AI Vision Director (ตาเลือกครอป + พิกเซลแท้ + QC ตัวเอง)
   const [composer, setComposer] = useState('v3');
   const [templateId, setTemplateId] = useState('auto');
@@ -388,6 +389,7 @@ export default function CoverLabPage() {
       const addData = await enqueueCoverJob({
         newsTitle, content, templateId: useTemplate,
         sourceUrl: sourceUrl.trim() || undefined,
+        mainCharacterName: mainCharacterName.trim() || undefined, // ★ ชื่อเต็มที่ผู้ใช้ยืนยัน
         composer, // 'v3' = Vision Director | 'v1' = ระบบเดิม
         regenerate: isRegenerate, clearCache: !!isRegenerate && isFresh,
       });
@@ -848,6 +850,17 @@ export default function CoverLabPage() {
               placeholder="https://... วางลิงก์ข่าว ระบบจะดึงภาพจริงจากบทความมาใช้ก่อน"
               style={inputStyle}
             />
+
+            <label style={labelStyle}>ชื่อเต็มตัวละครหลัก (optional — ใส่เมื่อข่าวเอ่ยแค่ชื่อเล่น เช่น "พลอย")</label>
+            <input
+              value={mainCharacterName}
+              onChange={e => setMainCharacterName(e.target.value)}
+              placeholder='เช่น "พลอย เอมานน์" — ระบุชื่อ-นามสกุล/ชื่อในวงการ กันระบบหยิบคนผิด'
+              style={inputStyle}
+            />
+            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: -8, marginBottom: 14 }}>
+              💡 ถ้าใส่ช่องนี้ ระบบจะ<b>ใช้ชื่อนี้ค้นภาพตรงๆ</b> (ข้ามการเดาชื่อ) — แม่นที่สุดเมื่อข่าวมีแต่ชื่อเล่นซ้ำกับดาราหลายคน
+            </div>
 
             <label style={labelStyle}>เครื่องยนต์จัดปก</label>
             <select value={composer} onChange={e => setComposer(e.target.value)} style={inputStyle}>

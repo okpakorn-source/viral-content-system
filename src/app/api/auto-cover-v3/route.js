@@ -38,7 +38,7 @@ async function _renderCoverV3(request) {
 
   try {
     const body = await request.json();
-    const { content, newsTitle = '', sourceUrl = '', _queueJobId = null, forceTemplateId = null } = body;
+    const { content, newsTitle = '', sourceUrl = '', _queueJobId = null, forceTemplateId = null, mainCharacterName = '' } = body;
 
     if (!content && !newsTitle) {
       return NextResponse.json(
@@ -56,7 +56,7 @@ async function _renderCoverV3(request) {
     };
 
     // ★ REV MARKER — ยืนยันว่าเซิร์ฟเวอร์รันโค้ดเวอร์ชันไหน (เช็ค log ก่อนเทสทุกครั้ง — กัน staleness)
-    const COVER_REV = 'rev-17a-2026-06-20 cover-overhaul'; // ยกเครื่อง: #1 ภาพต้นทาง Firecrawl (เรนเดอร์ JS)
+    const COVER_REV = 'rev-20h-2026-06-21 ภาพถ่ายจริงก่อนเฟรมวิดีโอ (กันฮีโร่หันหลัง) +ล็อก3ขวา';
     console.log(`[CoverV3] 🏷️ CODE ${COVER_REV} — รันโค้ดเวอร์ชันนี้`);
 
     // ★ ตาข่ายชั้นท้าย (19 มิ.ย. — ผู้ใช้สั่ง): เช็ค "API หมดเครดิต/โควต้า" ก่อนเริ่ม
@@ -78,7 +78,8 @@ async function _renderCoverV3(request) {
     const { analyzeStoryIdentity } = await import('@/lib/services/storyIdentityService');
     let identity = await analyzeStoryIdentity(
       newsTitle || (content || '').slice(0, 100),
-      { core_story: content || newsTitle }
+      { core_story: content || newsTitle },
+      { overrideMainCharacter: mainCharacterName }
     );
     if (!identity) {
       // ★ ข่าวฉาก/ฝูงชนไม่มีบุคคลตัวหลัก (เช่น ประชาชนเรียงแถวถวายบังคม) — เดิม fail ทั้งงาน (IDENTITY_FAILED 422)
@@ -105,7 +106,13 @@ async function _renderCoverV3(request) {
     );
 
     // ดาวน์โหลดภาพเป็น buffer (เฉพาะตัวท็อปที่ judge คัดแล้ว)
-    const candidates = (selected || []).filter(img => img?.url).slice(0, 10);
+    // rev.20: ดาวน์โหลด 14 (เดิม 10) — เผื่อ dedup/quality ตัดแล้วยังเหลือภาพดี-ต่างกัน ≥5 ใบ (โครง 3 ขวา + วงกลม)
+    // rev.20g: ★ ให้ความสำคัญ "ภาพถ่ายจริง" (Google/บทความ/Tavily = http url) ก่อน "เฟรมวิดีโอ" (data: URI จาก YouTube/Reels)
+    //   บทเรียน CASE-156/158: เฟรมวิดีโอหันหลัง/เบลอ หลุดมาเป็นฮีโร่/วงกลม → ดันภาพถ่ายขึ้นก่อน เฟรมวิดีโอเป็นตัวเสริมท้าย (ใช้เฉพาะเมื่อภาพถ่ายไม่พอ)
+    const _ranked = (selected || []).filter(img => img?.url);
+    const _photos = _ranked.filter(img => !String(img.url).startsWith('data:'));
+    const _frames = _ranked.filter(img => String(img.url).startsWith('data:'));
+    const candidates = [..._photos, ..._frames].slice(0, 14);
     let imageBuffers = [];
     await Promise.all(candidates.map(async (img) => {
       try {
@@ -262,10 +269,11 @@ async function _renderCoverV3(request) {
         else clusters.push({ repIdx: i });
       });
       let keep = clusters.map(c => c.repIdx);
-      // ตัดภาพคุณภาพต่ำชัดเจน (<55% ของใบดีสุด) ถ้าพูลยังเหลือ ≥3
+      // ตัดภาพคุณภาพต่ำชัดเจน (<55% ของใบดีสุด) — rev.20: ตัดต่อเมื่อยังเหลือ ≥5 ใบ
+      //   (กันพูลหดต่ำกว่า 5 จนโครง "3 ขวา + วงกลม" ขึ้นไม่ได้ — ผู้ใช้ต้องการ 3 ขวาเสมอสำหรับคนดังภาพเยอะ)
       const maxQ = Math.max(...keep.map(i => quals[i]), 0.01);
       const filtered = keep.filter(i => quals[i] >= maxQ * 0.55);
-      if (filtered.length >= 3) keep = filtered;
+      if (filtered.length >= 5) keep = filtered;
       // ต้องมีอย่างน้อย min(3,pool) ช่อง — distinct ไม่พอ เติมด้วยใบคุณภาพรองที่เหลือ
       const need = Math.min(3, imageBuffers.length);
       if (keep.length < need) {
@@ -308,8 +316,9 @@ async function _renderCoverV3(request) {
     // ★ rev.12: บังคับลุคไวรัลในโค้ด — ภาพพอเมื่อไหร่ ให้เลือกได้เฉพาะโครงที่มี "วงกลม+กรอบไฮไลต์"
     //   (บทเรียน CASE-045/050: เตือนใน prompt แล้ว Director ยังหนีไปโครงเรียบ → "การนำเสนอห่วย")
     const viralFirst = [
-      V3_TEMPLATES.vt_faces_circle, // 4 ภาพ — ★ โครงตัวอย่าง (hero เต็มซ้าย + ขวา 2 + วงกลมทับตัว) สะอาดสุด เลือกก่อน
-      V3_TEMPLATES.vt_hero_stack,   // 5 ภาพ — hero เต็มซ้าย + ขวา 3 (วงกลม+คลิป)
+      V3_TEMPLATES.vt_ref_tri,      // 5 ภาพ — ★★ โครงตัวอย่างทอง (hero + ขวา 3 สะอาด + วงกลมทอง) ผู้ใช้ยืนยัน 20 มิ.ย. เลือกก่อนเมื่อภาพดี ≥5
+      V3_TEMPLATES.vt_hero_stack,   // 5 ภาพ — hero เต็มซ้าย + ขวา 3 (มีกรอบคลิปเขียว)
+      V3_TEMPLATES.vt_faces_circle, // 4 ภาพ — fallback เมื่อภาพดี <5 (hero + ขวา 2 + วงกลม)
       V3_TEMPLATES.vt_quad_circle,  // 5 ภาพ — สองฝ่าย ให้-รับ (วงกลมกลาง)
     ].filter(t => t.slots.length <= slotBudget);
     const plainFallbacks = [
@@ -319,10 +328,14 @@ async function _renderCoverV3(request) {
     ].filter(t => t.slots.length <= slotBudget);
     // forceTemplateId: บังคับโครงเจาะจง (ใช้ทดสอบ/Cover Lab เลือกเอง) — ข้าม viral-first logic
     const forced = forceTemplateId && V3_TEMPLATES[forceTemplateId] ? [V3_TEMPLATES[forceTemplateId]] : null;
-    const templateOptions = forced || (viralFirst.length > 0 ? viralFirst : plainFallbacks);
+    // ★ rev.20f (ผู้ใช้ย้ำ "ขวาต้อง 3 ภาพเสมอ"): ภาพดี ≥5 → ล็อกโครง 3 ขวา (vt_ref_tri) เป็นตัวเลือกเดียว
+    //   กัน Director "ถอย" ไปเลือกโครง 2 ขวา (vt_faces_circle) เองทั้งที่ภาพพอ (บทเรียน rev-20f roll แรก)
+    const lockTri = !forced && slotBudget >= 5 && V3_TEMPLATES.vt_ref_tri.slots.length <= imageBuffers.length;
+    const templateOptions = forced
+      || (lockTri ? [V3_TEMPLATES.vt_ref_tri] : (viralFirst.length > 0 ? viralFirst : plainFallbacks));
 
     console.log(`[CoverV3] ③ Director (options: ${templateOptions.map(t => t.id).join(', ')} | pool=${imageBuffers.length})...`);
-    const { directCover, reviewCover } = await import('@/lib/services/coverDirectorService');
+    const { directCover, reviewCover, tightenMomentCrops } = await import('@/lib/services/coverDirectorService');
     const direction = await directCover({ imageBuffers, identity, templateOptions, templateSpec: templateOptions[0], newsTitle, faceBoxes });
     if (!direction) {
       await markQueueJob('failed', { error: 'AI Director จัดวางไม่สำเร็จ' });
@@ -341,6 +354,7 @@ async function _renderCoverV3(request) {
     let qcApplied = false;
     if (!qc.ok && qc.fixes.length > 0) {
       assignments = applyFixes(assignments, qc.fixes);
+      tightenMomentCrops(assignments, faceBoxes); // rev.20: กัน QC คลายครอปช่องโมเมนต์กลับ (โฟกัสหน้าเสมอ)
       coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec, faceBoxes });
       qcApplied = true;
       console.log(`[CoverV3] ⑤ QC fixes applied (${qc.fixes.length}) → recomposed`);

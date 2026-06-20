@@ -21,25 +21,19 @@ const TABS = [
 
 const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁', buzz: '📊', celeb: '🎬', throwback: '⏪', 'evergreen-celeb': '⭐', video: '📺', 'trend-track': '🔴' };
 
-// ★ 15 มิ.ย.: แนวที่ "สั่งหาเฉพาะแนว" ได้ (key ต้องตรงกับ generateFocusQueries ใน goodNewsScout)
+// ★ 20 มิ.ย.: แนวที่ "สั่งหาเฉพาะแนว" — รวบเหลือ 12 หมวด (key ต้องตรงกับ FOCUS_OPTIONS ใน goodNewsScout)
 const FOCUS_OPTIONS = [
-  { key: 'celeb_gooddeed', label: '⭐ ดาราทำดี/ช่วยเหลือ/อวย' },
-  { key: 'celeb_highlight', label: '🎤 ไฮไลท์สัมภาษณ์ดาราด้านดี' },
-  { key: 'commoner', label: '🧑‍🌾 ชาวบ้านน่าสนใจ' },
-  { key: 'viral_dna', label: '🧬 แนวที่ปังบนเพจ (DNA)' },
-  { key: 'good_all', label: '💎 ข่าวน้ำดี (รวมทุกหมวด)' },
-  { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญครอบครัว' },
-  { key: 'celeb_lifestyle', label: '🏡 เปิดบ้าน/รับสัตว์/ไลฟ์สไตล์ดารา' },
-  { key: 'celeb_drama', label: '🎬 ดราม่า/ความรักดารา' },
-  { key: 'circle_drama', label: '🏐 ดราม่าวงการ (กีฬา/บันเทิง สด)' },
-  { key: 'throwback', label: '⏪ ย้อนสัมภาษณ์เก่า' },
-  { key: 'celeb_good', label: '⭐ ดาราทำดี/อมตะ' },
-  { key: 'video', label: '📺 วิดีโอดารา (ยูทูป)' },
-  { key: 'social', label: '📘 เพจ/รีลส์ (สัมภาษณ์+ดราม่า)' },
+  { key: 'celeb_good', label: '⭐ ดาราทำดี/ช่วยเหลือ/อมตะ' },
+  { key: 'celeb_family', label: '🎁 ดาราให้ของขวัญ/กตัญญูครอบครัว' },
+  { key: 'celeb_interview', label: '🎤 สัมภาษณ์ดารา (ไฮไลท์+ย้อนเก่า)' },
+  { key: 'celeb_drama', label: '🎬 ดราม่าดารา/วงการ' },
+  { key: 'celeb_lifestyle', label: '🏡 เปิดบ้าน/ไลฟ์สไตล์ดารา' },
+  { key: 'celeb_clip', label: '📱 คลิป/รีลส์ดารา (ดิสคัฟเวอรี)' },
+  { key: 'commoner', label: '🧑‍🌾 ชาวบ้าน/น้ำใจพลเมืองดี' },
+  { key: 'fighter', label: '💪 สู้ชีวิต/เรื่องกินใจ' },
   { key: 'animal', label: '🐶 รักสัตว์' },
-  { key: 'good_deed', label: '🙏 น้ำใจ/พลเมืองดี' },
-  { key: 'fighter', label: '💪 สู้ชีวิต' },
-  { key: 'hardship', label: '💧 เรื่องลำบาก/กินใจ' },
+  { key: 'viral_dna', label: '🧬 แนวที่ปังบนเพจ (DNA)' },
+  { key: 'good_all', label: '💎 ข่าวน้ำดีรวมทุกหมวด' },
   { key: 'trend', label: '🔥 กระแสไวรัล' },
 ];
 
@@ -123,7 +117,7 @@ export default function NewsDeskPage() {
   const [sentToday, setSentToday] = useState(0);
   const [loading, setLoading] = useState(true);
   const [harvesting, setHarvesting] = useState(false);
-  const [focusSel, setFocusSel] = useState('celeb_gooddeed');
+  const [focusSel, setFocusSel] = useState('celeb_good');
   const [trendTopic, setTrendTopic] = useState('');
   const [kwInput, setKwInput] = useState(''); // ★ ค้นด้วยคีย์เวิร์ดคน/เรื่องเอง
   const [trendCases, setTrendCases] = useState([]); // คลังค้นหาติดตาม (เคสคีย์เวิร์ด+ลิงก์)
