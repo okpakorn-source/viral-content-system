@@ -55,7 +55,7 @@ export async function analyzeStoryIdentity(newsTitle, breakdownData) {
 CRITICAL: ALL output field values (names, descriptions, search queries, story, emotionalHook, keywords, etc.) MUST be in Thai language. Only the JSON keys and enum values (emotion, coverEmotion) are in English.
 
 News title: "${newsTitle}"
-Full article content: "${(breakdownData?.core_story || '').slice(0, 3000)}"
+Full article content: "${(breakdownData?.core_story || '').slice(0, 6000)}"
 People involved: ${JSON.stringify(breakdownData?.key_facts?.people || [])}
 
 Generate diverse search queries from multiple angles to find images that best match the news story.
@@ -126,7 +126,7 @@ Respond with ONLY a JSON object following this exact structure (ALL values in Th
   "coverEmotion": "drama | tragedy | shocking | hope | warm | neutral",
   "location": "Full name of the location where the event occurred (if any) — in Thai",
   "timeframe": "Date/time of the event (if any) — in Thai",
-  "keywords": ["Important keywords for image tagging, should have 5-10 words — in Thai"],
+  "keywords": ["★ Comprehensive image-tagging keywords — 15-30 words covering: every named person, the main action/event, the location, the time/occasion, and the story-objects that tell the story (e.g. for a celebrity buying a house for parents: ชื่อดารา, ชื่อพ่อแม่, บ้านหลังใหม่, มอบบ้าน, กตัญญู, ป้ายโฉนด, งานขึ้นบ้านใหม่...). The more complete, the more accurate the image selection — in Thai"],
   "keyScenes": ["★ Activity scenes to find images for, e.g. 'มอบเงิน บริจาคโรงเรียน', 'ทำสวน ปลูกผัก', 'ในถ้ำ ช่วยเด็ก' — in Thai"],
   
   "specific_details": {

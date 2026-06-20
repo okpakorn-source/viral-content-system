@@ -56,7 +56,7 @@ async function _renderCoverV3(request) {
     };
 
     // ★ REV MARKER — ยืนยันว่าเซิร์ฟเวอร์รันโค้ดเวอร์ชันไหน (เช็ค log ก่อนเทสทุกครั้ง — กัน staleness)
-    const COVER_REV = 'rev-16b-2026-06-19 holistic-fix'; // 3 ด่าน + แก้: count bug · hero ไม่แย่งตัวหลัก · cluster strict กันเติมฉากเบลอ
+    const COVER_REV = 'rev-17a-2026-06-20 cover-overhaul'; // ยกเครื่อง: #1 ภาพต้นทาง Firecrawl (เรนเดอร์ JS)
     console.log(`[CoverV3] 🏷️ CODE ${COVER_REV} — รันโค้ดเวอร์ชันนี้`);
 
     // ★ ตาข่ายชั้นท้าย (19 มิ.ย. — ผู้ใช้สั่ง): เช็ค "API หมดเครดิต/โควต้า" ก่อนเริ่ม
