@@ -100,7 +100,14 @@ function NewsFilterContent() {
   }, []);
   // ★ 19 มิ.ย. (ผู้ใช้): ชื่อผู้ใช้ (ไม่มีรหัสผ่าน) — กำกับว่าใครส่งเจน เพื่อตรวจงานถูก (ใช้ key เดียวกับโต๊ะข่าว)
   const [me, setMe] = useState('');
-  useEffect(() => { setMe(localStorage.getItem('desk_username') || ''); }, []);
+  const [nameLoaded, setNameLoaded] = useState(false); // ★ อ่าน localStorage เสร็จยัง (กันแฟลชประตูชื่อ)
+  const [nameInput, setNameInput] = useState('');      // ★ ช่องกรอกชื่อในประตู
+  useEffect(() => { setMe(localStorage.getItem('desk_username') || ''); setNameLoaded(true); }, []);
+  const submitName = () => {
+    const n = (nameInput || '').trim();
+    if (n.length < 2) { alert('กรุณาใส่ชื่ออย่างน้อย 2 ตัวอักษร'); return; }
+    localStorage.setItem('desk_username', n); setMe(n);
+  };
   const ensureName = () => {
     let name = localStorage.getItem('desk_username');
     if (!name) {
@@ -560,6 +567,46 @@ function NewsFilterContent() {
         return sorted.length > 0 ? LABEL_NAMES[sorted[0][0]] || sorted[0][0] : '-';
       })()
     : '-';
+
+  // ★ ประตูกรอกชื่อ (ผู้ใช้สั่ง 21 มิ.ย.: บังคับใส่ชื่อก่อนใช้งาน) — ไม่มีชื่อ = ใช้ไม่ได้
+  if (!nameLoaded) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-primary, #0d0d1a)' }}>
+        <div style={{ color: '#888', fontSize: 13 }}>⚡ กำลังโหลด...</div>
+      </div>
+    );
+  }
+  if (!me) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 50%, #0d0d2b 100%)', padding: 20 }}>
+        <div style={{ width: '100%', maxWidth: 420, padding: 40, borderRadius: 20,
+          background: 'rgba(26,26,46,0.85)', border: '1px solid rgba(255,255,255,0.1)', textAlign: 'center',
+          boxShadow: '0 25px 60px rgba(0,0,0,0.5)' }}>
+          <div style={{ fontSize: 52, marginBottom: 14 }}>✍️</div>
+          <h2 style={{ fontSize: 20, fontWeight: 900, margin: '0 0 8px', color: '#fff' }}>ใส่ชื่อของคุณก่อนเริ่มใช้งาน</h2>
+          <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', margin: '0 0 22px' }}>
+            ใช้กำกับว่าใครเป็นคนส่งเจนข่าว (ไม่ต้องมีรหัสผ่าน)
+          </p>
+          <input
+            value={nameInput}
+            onChange={e => setNameInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') submitName(); }}
+            placeholder="เช่น สมชาย, น้องเอ, ทีมข่าว A"
+            autoFocus
+            style={{ width: '100%', padding: '13px 16px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.15)',
+              background: 'rgba(0,0,0,0.3)', color: '#fff', fontSize: 15, fontFamily: 'inherit', marginBottom: 16, outline: 'none', boxSizing: 'border-box' }}
+          />
+          <button onClick={submitName}
+            style={{ width: '100%', padding: '14px 0', borderRadius: 12, border: 'none',
+              background: 'linear-gradient(135deg, #f91880, #7c3aed)', color: '#fff', fontSize: 15, fontWeight: 800,
+              cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 8px 25px rgba(249,24,128,0.3)' }}>
+            🚀 เริ่มใช้งาน
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary)' }}>
