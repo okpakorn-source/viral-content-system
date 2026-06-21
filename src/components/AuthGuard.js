@@ -4,6 +4,9 @@ import { usePathname, useRouter } from 'next/navigation';
 
 const AuthContext = createContext(null);
 
+// ★ หน้าสาธารณะ — เข้าได้โดยไม่ต้องล็อกอิน (กรอกชื่อในหน้าเอง) — ต้อง sync กับ PUBLIC_ROUTES ใน ClientLayout.js
+const PUBLIC_ROUTES = ['/login', '/cover-tester', '/news-filter', '/clip-transcript', '/photo-enhance', '/casting', '/casting/admin'];
+
 export function useAuth() {
   return useContext(AuthContext) || {};
 }
@@ -48,6 +51,12 @@ export default function AuthGuard({ children }) {
 
   // Login page is always accessible
   if (pathname === '/login') return children;
+
+  // ★ หน้าสาธารณะ — ผ่านได้เลยไม่ต้องล็อกอิน/ไม่ต้องรอเช็ค (ผู้ใช้สั่ง: /news-filter ฯลฯ กรอกชื่อในหน้าใช้ได้เลย)
+  //   ยังส่ง user ผ่าน context (ถ้าบังเอิญล็อกอินอยู่ = โชว์ชื่อได้) แต่ไม่บังคับ
+  if (PUBLIC_ROUTES.includes(pathname)) {
+    return <AuthContext.Provider value={user}>{children}</AuthContext.Provider>;
+  }
 
   // Still checking - show loading
   if (!checked) {
