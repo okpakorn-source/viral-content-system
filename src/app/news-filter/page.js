@@ -248,8 +248,10 @@ function NewsFilterContent() {
 
     try {
       // Step 1: Scrape raw content
+      // ★ 21 มิ.ย.: ใช้ /api/news-filter/scrape (Firecrawl onlyMainContent ดึงเฉพาะเนื้อบทความ ตัดเมนู/โฆษณา)
+      //   แยกเดี่ยวจาก /api/extract (เวิร์กโฟลว์ทำข่าว 🔴 ห้ามแตะ) — แก้เคส amarintv ที่ได้แต่เมนู+พาดหัว
       setScrapeStep('📡 กำลังดึงเนื้อหาจากเว็บ...');
-      const scrapeRes = await fetch('/api/extract', {
+      const scrapeRes = await fetch('/api/news-filter/scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: targetUrl }),
