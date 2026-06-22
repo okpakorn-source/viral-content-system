@@ -15,11 +15,18 @@ export default function ClipTranscriptPage() {
   // ★ 16 มิ.ย.: ถอดประเด็นข่าว → ข้อมูลดิบ (Gemini ดูคลิป)
   const [insight, setInsight] = useState(null);
   const [insightLoading, setInsightLoading] = useState(false);
+  // ★ 22 มิ.ย.: คลัง "ถอดประเด็นข่าว" แยก (เก็บทุกครั้งที่ถอดสำเร็จ หยิบกลับมาใช้ได้)
+  const [insightCases, setInsightCases] = useState([]);
+  const [insightCasesOpen, setInsightCasesOpen] = useState(true);
+  const [insightExpanded, setInsightExpanded] = useState(null);
 
   const loadCases = async () => {
     try { const r = await fetch('/api/clip-transcript/cases?limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setCases(d.cases || []); } catch {}
   };
-  useEffect(() => { loadCases(); }, []);
+  const loadInsightCases = async () => {
+    try { const r = await fetch('/api/clip-transcript/cases?kind=insight&limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setInsightCases(d.cases || []); } catch {}
+  };
+  useEffect(() => { loadCases(); loadInsightCases(); }, []);
 
   const platformIcon = (p) => p === 'youtube' ? '📺' : p === 'tiktok' ? '🎵' : p === 'meta' ? '📘' : '🎬';
 
@@ -43,13 +50,26 @@ export default function ClipTranscriptPage() {
       const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim() }) });
       const d = await r.json();
       if (!d.success) setErr(d.error || 'ถอดประเด็นไม่สำเร็จ');
-      else setInsight(d.data);
+      else { setInsight(d.data); loadInsightCases(); }   // ★ รีเฟรชคลังประเด็นทันทีที่ถอดสำเร็จ
     } catch (e) { setErr(e.message); }
     setInsightLoading(false);
   };
 
   const copy = (text, key) => { navigator.clipboard?.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 2000); };
   const deleteCase = async (id) => { await fetch('/api/clip-transcript/cases?id=' + id, { method: 'DELETE' }); loadCases(); };
+  const deleteInsightCase = async (id) => { await fetch('/api/clip-transcript/cases?kind=insight&id=' + id, { method: 'DELETE' }); loadInsightCases(); };
+
+  // รวมข้อความข้อมูลดิบของเคสประเด็น (เอาไปคัดลอกทั้งก้อน)
+  const insightCaseText = (ins) => {
+    if (!ins) return '';
+    const parts = [];
+    if (ins.headline) parts.push(`📌 ${ins.headline}`);
+    if (ins.overview) parts.push(ins.overview);
+    if (ins.keyPoints?.length) parts.push('— ประเด็นสำคัญ —\n' + ins.keyPoints.map((k, i) => `${i + 1}. ${k.point}${k.detail ? ' — ' + k.detail : ''}`).join('\n'));
+    if (ins.quotes?.length) parts.push('— คำพูดสำคัญ —\n' + ins.quotes.map(q => `“${q}”`).join('\n'));
+    if (ins.rawData) parts.push('— ข้อมูลดิบ —\n' + ins.rawData);
+    return parts.join('\n\n');
+  };
 
   const shown = out ? (view === 'tidy' && out.tidyText ? out.tidyText : out.rawText) : '';
 
@@ -219,6 +239,55 @@ export default function ClipTranscriptPage() {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ★ 22 มิ.ย.: คลังถอดประเด็นข่าว (ข้อมูลดิบ) — เก็บทุกครั้งที่ถอดสำเร็จ */}
+        <button onClick={() => setInsightCasesOpen(!insightCasesOpen)} style={{ marginTop: 16, padding: '10px 18px', borderRadius: 10, border: '1px solid rgba(37,99,235,0.3)', background: insightCasesOpen ? 'rgba(37,99,235,0.12)' : 'var(--bg-card, #1a1a2e)', color: insightCasesOpen ? '#60a5fa' : 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+          🎯 คลังถอดประเด็นข่าว ({insightCases.length}) {insightCasesOpen ? '▲' : '▼'}
+        </button>
+        {insightCasesOpen && (
+          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {insightCases.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: 13 }}>ยังไม่มีประเด็นข่าว — กด &ldquo;ถอดประเด็นข่าว&rdquo; สักครั้งแล้วจะเก็บที่นี่อัตโนมัติ</div>}
+            {insightCases.map((c) => {
+              const ins = c.insight || {};
+              return (
+                <div key={c.id} style={{ border: '1px solid rgba(37,99,235,0.25)', borderRadius: 10, overflow: 'hidden' }}>
+                  <div onClick={() => setInsightExpanded(insightExpanded === c.id ? null : c.id)} style={{ padding: '11px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: 'var(--bg-card, #1a1a2e)' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3, flexWrap: 'wrap' }}>
+                        {ins.clipTypeLabel && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>{ins.emoji || '🎬'} {ins.clipTypeLabel}</span>}
+                        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(37,99,235,0.15)', color: '#60a5fa', fontWeight: 700 }}>{ins.engine === 'gemini-video' ? '👁️ ดูคลิป' : '📝 บทถอด'}</span>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platformIcon(c.platform)} {ins.headline || c.title || c.url}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{c.platform} · {ins.keyPoints?.length || 0} ประเด็น · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); deleteInsightCase(c.id); }} style={{ marginLeft: 10, padding: '4px 10px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>ลบ</button>
+                  </div>
+                  {insightExpanded === c.id && (
+                    <div style={{ padding: 14, borderTop: '1px solid rgba(37,99,235,0.2)' }}>
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                        <a href={c.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#3b82f6' }}>🔗 เปิดคลิป</a>
+                        {ins.rawData && <button onClick={() => copy(ins.rawData, 'ic-raw-' + c.id)} style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: 'rgba(59,130,246,0.15)', color: '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'ic-raw-' + c.id ? '✅' : '📋 คัดลอกข้อมูลดิบ'}</button>}
+                        <button onClick={() => copy(insightCaseText(ins), 'ic-all-' + c.id)} style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'ic-all-' + c.id ? '✅' : '📋 คัดลอกทั้งหมด'}</button>
+                      </div>
+                      {ins.overview && <div style={{ fontSize: 13, lineHeight: 1.7, marginBottom: 10, whiteSpace: 'pre-wrap' }}>{ins.overview}</div>}
+                      {ins.keyPoints?.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+                          {ins.keyPoints.map((k, i) => (
+                            <div key={i} style={{ padding: '8px 11px', borderRadius: 8, background: 'rgba(0,0,0,0.2)', borderLeft: '3px solid #2563eb' }}>
+                              <div style={{ fontSize: 12.5, fontWeight: 700 }}>{i + 1}. {k.point}</div>
+                              {k.detail && <div style={{ fontSize: 12, color: 'var(--text-muted,#aaa)', marginTop: 3, lineHeight: 1.6 }}>{k.detail}</div>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {ins.rawData && <div style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', maxHeight: 280, overflowY: 'auto', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 12 }}>{ins.rawData}</div>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

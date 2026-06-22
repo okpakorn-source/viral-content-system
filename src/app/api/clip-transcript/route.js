@@ -1,6 +1,7 @@
 export const maxDuration = 300; // ถอดเสียงคลิปยาวใช้เวลา — 5 นาที
 import { NextResponse } from 'next/server';
 import { createStore } from '@/lib/persistStore';
+import { getClipVideoQueue } from '@/lib/services/clipQueue';
 import { randomUUID } from 'crypto';
 import { callAI } from '@/lib/ai/openai';
 import { MODEL_FAST } from '@/lib/ai/modelConfig';
@@ -66,7 +67,8 @@ export async function POST(request) {
     }
 
     console.log(`[ClipTranscript] ${type}: ${url.slice(0, 80)}`);
-    const { text, caption } = await getRawTranscript(url, type);
+    // ★ 22 มิ.ย.: ผ่าน "คิวงานหนัก" เดียวกับถอดประเด็น — กันถอดเสียง/Whisper ยิงซ้อนกันจนล่ม
+    const { text, caption } = await getClipVideoQueue().run(() => getRawTranscript(url, type), { label: `transcript:${type}` });
     const rawText = String(text || '').trim();
     if (rawText.length < 40) {
       return NextResponse.json({ success: false, error: 'ถอดเสียงได้สั้นเกินไป — คลิปอาจไม่มีเสียงพูด หรือลิงก์ไม่ถูก', errorType: 'TRANSCRIPT_TOO_SHORT' }, { status: 422 });
