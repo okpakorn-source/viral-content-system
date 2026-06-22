@@ -1153,6 +1153,22 @@ function NewsFilterContent() {
               </button>
             </div>
 
+            {/* ★ 22 มิ.ย.: ปุ่มตรวจคะแนนเนื้อดิบ — กด "ก่อน" วิเคราะห์ เพื่อเช็คว่าเนื้อดิบครบพอเจนไหม */}
+            <button
+              onClick={handleScore}
+              disabled={scoreLoading || !inputText.trim()}
+              style={{
+                width: '100%', padding: '13px 0', borderRadius: 12, marginBottom: 10,
+                border: '2px solid rgba(245,158,11,0.55)',
+                background: scoreLoading || !inputText.trim() ? 'rgba(245,158,11,0.06)' : 'rgba(245,158,11,0.16)',
+                color: '#f59e0b', fontSize: 15, fontWeight: 800,
+                cursor: scoreLoading || !inputText.trim() ? 'not-allowed' : 'pointer',
+                fontFamily: 'inherit', opacity: scoreLoading || !inputText.trim() ? 0.55 : 1,
+              }}
+            >
+              {scoreLoading ? '⏳ กำลังตรวจคะแนน...' : '📊 ตรวจคะแนนเนื้อดิบ (กดก่อนวิเคราะห์)'}
+            </button>
+
             {/* Action Buttons */}
             <div style={{ display: 'flex', gap: 10 }}>
               {isUrlOnly ? (
@@ -1218,22 +1234,7 @@ function NewsFilterContent() {
               </button>
             </div>
 
-            {/* ★ 22 มิ.ย.: ตรวจคะแนนเนื้อดิบก่อนส่งเจน */}
-            <button
-              onClick={handleScore}
-              disabled={scoreLoading || !inputText.trim()}
-              style={{
-                marginTop: 10, width: '100%', padding: '12px 0', borderRadius: 12,
-                border: '1px solid rgba(245,158,11,0.45)',
-                background: scoreLoading || !inputText.trim() ? 'rgba(245,158,11,0.06)' : 'rgba(245,158,11,0.14)',
-                color: '#f59e0b', fontSize: 14, fontWeight: 800,
-                cursor: scoreLoading || !inputText.trim() ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit', opacity: scoreLoading || !inputText.trim() ? 0.55 : 1,
-              }}
-            >
-              {scoreLoading ? '⏳ กำลังตรวจคะแนน...' : '📊 ตรวจคะแนนเนื้อดิบ (ก่อนส่งเจน)'}
-            </button>
-
+            {/* ★ การ์ดผลคะแนนเนื้อดิบ (ปุ่ม "📊 ตรวจคะแนน" อยู่เหนือปุ่มวิเคราะห์) */}
             {scoreData && (() => {
               const gColor = scoreData.grade === 'green' ? '#22c55e' : scoreData.grade === 'yellow' ? '#f59e0b' : '#ef4444';
               const gLabel = scoreData.grade === 'green' ? '🟢 เจนได้เลย' : scoreData.grade === 'yellow' ? '🟡 เจนได้ แต่ควรเติม' : '🔴 ต้องเติมก่อน';
