@@ -198,6 +198,10 @@ export default function ClipTranscriptPage() {
               <div key={c.id} style={{ border: '1px solid var(--border, #2a2a3e)', borderRadius: 10, overflow: 'hidden' }}>
                 <div onClick={() => setExpanded(expanded === c.id ? null : c.id)} style={{ padding: '11px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: 'var(--bg-card, #1a1a2e)' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3, flexWrap: 'wrap' }}>
+                      {(c.category || c.classify?.category) && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(245,158,11,0.16)', color: '#f59e0b', fontWeight: 800 }}>📂 {c.category || c.classify?.category}</span>}
+                      {(c.clipTypeLabel || c.classify?.clipTypeLabel) && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>{c.classify?.emoji || '🎬'} {c.clipTypeLabel || c.classify?.clipTypeLabel}</span>}
+                    </div>
                     <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platformIcon(c.platform)} {c.title || c.url}</div>
                     <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{c.platform} · {c.wordCount} ตัวอักษร · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
                   </div>

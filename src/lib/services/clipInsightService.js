@@ -27,12 +27,14 @@ export async function classifyTranscript(rawText, caption = '') {
   }
   const prompt = `อ่านบทถอดเสียงจากคลิปด้านล่าง แล้วจำแนกว่าเป็นคลิปประเภทไหน + ใครพูดบ้าง
 
-ประเภท (เลือก 1):
+ประเภทคลิป (เลือก 1):
 - interview = บทสัมภาษณ์ (มีคนถาม–คนตอบ)
 - monologue = พูดคนเดียว/เล่า/ระบายฝ่ายเดียว
 - news_report = อ่านข่าว/ผู้ประกาศ/ผู้สื่อข่าวรายงาน
 - conversation = สนทนาหลายคนคุยกัน
 - other = อื่นๆ
+
+หมวดเนื้อหา (เลือก 1 ให้ตรงสุด): บันเทิง/ดารา · กีฬา · สังคม/ชีวิตคน · น้ำใจ/ทำดี · ไลฟ์สไตล์/ไวรัล · การเมือง · อาชญากรรม/คดี · อื่นๆ
 
 ${caption ? `แคปชั่น/ชื่อคลิป: ${caption}\n` : ''}=== บทถอดเสียง ===
 ${text.slice(0, 5000)}
@@ -40,6 +42,7 @@ ${text.slice(0, 5000)}
 
 ตอบ JSON: {
   "clipType": "interview|monologue|news_report|conversation|other",
+  "category": "หมวดเนื้อหา 1 หมวดจากรายการข้างบน",
   "speakerCount": จำนวนคนพูดโดยประมาณ (ตัวเลข),
   "speakers": ["ชื่อ/บทบาทคนพูดที่ระบุได้จากเนื้อหา เช่น 'พิธีกร', 'น้องเบล (ผู้ถูกสัมภาษณ์)' — ไม่รู้ชื่อใส่บทบาท"],
   "mainSpeaker": "ใครคือคนพูดหลัก/เจ้าของเรื่อง (ถ้ามี)"
@@ -52,6 +55,7 @@ ${text.slice(0, 5000)}
       clipType: t,
       clipTypeLabel: CLIP_TYPES[t].label,
       emoji: CLIP_TYPES[t].emoji,
+      category: String(p.category || 'อื่นๆ').slice(0, 30), // ★ 21 มิ.ย.: หมวดเนื้อหา (แยกคลังให้ชัด)
       speakerCount: Number(p.speakerCount) || 0,
       speakers: Array.isArray(p.speakers) ? p.speakers.slice(0, 8).map(s => String(s).slice(0, 60)) : [],
       mainSpeaker: String(p.mainSpeaker || '').slice(0, 80),

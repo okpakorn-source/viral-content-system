@@ -99,6 +99,8 @@ ${rawText.slice(0, 9000)}
           id: caseId, url, platform: type, caption: String(caption || '').slice(0, 200),
           rawText: rawText.slice(0, 20000), tidyText: tidyText.slice(0, 20000),
           classify,
+          category: classify?.category || 'อื่นๆ',          // ★ 21 มิ.ย.: หมวดเนื้อหา (แยกคลังให้ชัด)
+          clipTypeLabel: classify?.clipTypeLabel || '',       // ประเภทคลิป (สัมภาษณ์/อ่านข่าว)
           title: (caption || rawText).slice(0, 70), wordCount: rawText.length,
           createdAt: new Date().toISOString(),
         });
