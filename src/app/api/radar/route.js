@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { RADAR_ENABLED, radarDisabledResponse } from '@/lib/radarKillSwitch';
 import { expandKeywords } from '@/lib/services/radar/keywordExpansion';
 import { collectFromAllSources } from '@/lib/services/radar/sourceCollector';
 import { detectDuplicates } from '@/lib/services/radar/duplicateDetector';
@@ -14,6 +15,7 @@ export const maxDuration = 120;
 
 // === Main GET handler — รองรับ 2 modes ===
 export async function GET(request) {
+  if (!RADAR_ENABLED) return radarDisabledResponse(); // ★ 22 มิ.ย.: ปิดเรดาร์ — ไม่ยิง API/AI = ไม่กินโทเคน
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get('mode');
 

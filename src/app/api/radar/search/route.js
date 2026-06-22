@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
+import { RADAR_ENABLED, radarDisabledResponse } from '@/lib/radarKillSwitch';
 
 // POST endpoint สำหรับ advanced search — รับ body แทน query params
 export const maxDuration = 120;
 
 export async function POST(request) {
+  if (!RADAR_ENABLED) return radarDisabledResponse(); // ★ 22 มิ.ย.: ปิดเรดาร์ — ไม่ยิงแหล่งข่าว/AI = ไม่กินโทเคน
   try {
     const { keyword, sources, timeRange, category } = await request.json();
 

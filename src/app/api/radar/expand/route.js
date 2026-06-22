@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
+import { RADAR_ENABLED, radarDisabledResponse } from '@/lib/radarKillSwitch';
 import { expandKeywords } from '@/lib/services/radar/keywordExpansion';
 
 // POST endpoint สำหรับ preview การขยายคีย์เวิร์ด
 export async function POST(request) {
+  if (!RADAR_ENABLED) return radarDisabledResponse(); // ★ 22 มิ.ย.: ปิดเรดาร์ — ไม่ขยายคีย์ด้วย AI = ไม่กินโทเคน
   try {
     const { keyword } = await request.json();
 

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { RADAR_ENABLED, radarDisabledResponse } from '@/lib/radarKillSwitch';
 
 const RADAR_CATEGORIES = [
   { id: 'hot',      label: '🔥 ข่าวร้อนรวม',   icon: '🔥', color: '#ef4444' },
@@ -12,5 +13,6 @@ const RADAR_CATEGORIES = [
 ];
 
 export async function GET() {
+  if (!RADAR_ENABLED) return radarDisabledResponse(); // ★ 22 มิ.ย.: ปิดเรดาร์
   return NextResponse.json({ success: true, categories: RADAR_CATEGORIES });
 }

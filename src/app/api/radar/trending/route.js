@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { RADAR_ENABLED, radarDisabledResponse } from '@/lib/radarKillSwitch';
 
 // Cache ข่าว trending ใน memory (TTL 30 นาที)
 let _trendingCache = null;
@@ -6,6 +7,7 @@ let _trendingExpiry = 0;
 const CACHE_TTL = 30 * 60 * 1000; // 30 นาที
 
 export async function GET() {
+  if (!RADAR_ENABLED) return radarDisabledResponse(); // ★ 22 มิ.ย.: ปิดเรดาร์ — ไม่กินโทเคน
   try {
     // ถ้ามี cache ที่ยังไม่หมดอายุ → ใช้เลย
     if (_trendingCache && Date.now() < _trendingExpiry) {
