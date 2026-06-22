@@ -397,18 +397,22 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'ev
       const _clipRe = /youtube\.com|youtu\.be|tiktok\.com|fb\.watch|facebook\.com\/(reel|watch)|instagram\.com/i;
       // ★ 16 มิ.ย. (เร่งความเร็ว): ยิงทุกคำในกลุ่ม "พร้อมกัน" (Promise.all) แทนทีละคำ — harvest เร็วขึ้นมาก (เดิม 9.6 นาทีเกือบ timeout)
       const runGroup = async (queries, { ep = 'news', lane = 'good', tr = 'qdr:m', num = 10, noClip = false, maxAgeMo = 0 } = {}) => {
-        const results = await Promise.all(queries.map(async ({ q }) => {
+        const results = await Promise.all(queries.map(async ({ q, category }) => {
           try {
             let res = ep === 'search' ? await serperSearch(q, { num, timeRange: tr })
               : ep === 'videos' ? await serperVideos(q, { num })
                 : await serperNews(q, { num, timeRange: tr });
             if (noClip) res = res.filter(x => !_clipRe.test(x.url || ''));
             if (maxAgeMo && ep === 'videos') res = res.filter(x => { const a = videoAgeMonths(x._rawDate); return a == null || a <= maxAgeMo; });
-            return res.map(r => ({ ...r, lane }));
+            // ★ 21 มิ.ย.: ถ้าคีย์มี category ติดมา → tag ตรงจากคีย์ (แม่นกว่าให้ AI เดา แก้ "หมวดผิด")
+            return res.map(r => ({ ...r, lane, ...(category ? { category } : {}) }));
           } catch (e) { console.log('[Harvester] good group failed:', e.message?.slice(0, 50)); return []; }
         }));
         for (const arr of results) raw.push(...arr);
       };
+      // ── ★★★ แกนน้ำดีอมตะ 21 มิ.ย. (ผู้ใช้สั่ง "ดาราเล่าชีวิต/บทเรียน/ทำดี/ช่วยคน ให้เยอะมากๆ"): ──
+      //   ยิงทุกรอบ 24 คีย์ (ชื่อ×มุมน้ำดี ~2,000 คีย์หมุนไม่ซ้ำ) qdr:y เขียนใหม่ได้เรื่อยๆ + category ติดจากคีย์
+      await runGroup(G.generateGoodEvergreenQueries(18), { ep: 'search', lane: 'evergreen-celeb', tr: 'qdr:y', noClip: true });
       // ── ★ แกนหลัก รอบ 5 (17 มิ.ย. ทีมสั่ง "เน้นคนมีชื่อเสียงทุกวงการ ตัดชาวบ้านนิรนาม+ทางการ"): ──
       await runGroup(G.generateCelebGoodDeedQueries(6), { ep: 'search', noClip: true });   // ★ ดาราทำดี/บริจาค/ทำบุญ/ช่วยเหลือ/ติดดิน (แนวอวยที่ปังสุด)
       await runGroup(G.generateCelebFamilyQueries(6), { ep: 'news' });                      // ★ ดาราให้ของขวัญครอบครัว (GOLD)
@@ -420,7 +424,7 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'ev
         await runGroup(G.generateFieldRadarQueries(5), { ep: 'search', lane: 'celeb', tr: 'qdr:m', noClip: true });
       }
       await runGroup(G.generateCommonerQueries(2), { ep: 'news', noClip: true, tr: 'qdr:w' }); // ชาวบ้านที่ "ไวรัลมีตัวตน" เท่านั้น (เล็กลง + /news มีวันที่/ภาพ · เลิกเลนคนลำบากนิรนาม)
-      await runGroup(G.generateGoodContentQueries(3), { ep: 'search', noClip: true });      // น้ำดีทั่วไป (ลด 5→3 คุมเวลา harvest)
+      // ★ 21 มิ.ย.: ตัด generateGoodContentQueries ออก — ซ้ำซ้อนกับคลัง "น้ำดีอมตะ" ใหม่ (18 คีย์) + คุมเวลา harvest <300s
       await runGroup(G.generateViralDnaQueries(2), { ep: 'search', noClip: true });         // DNA สถาบัน/ทหาร/ยุติธรรม/ต่างชาติช่วยไทย (ลด 3→2)
       // ★ v6 (16 มิ.ย. ทีมขอเน้น): ย้อนสัมภาษณ์เก่า เป็นแกนหลัก รันทุกรอบ — บทความ /news + "คลิปจริง" /videos (YT)
       const _tbQs = G.generateThrowbackQueries(6);
@@ -717,51 +721,35 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'ev
 
   // ★ ล้างโต๊ะอัตโนมัติ (14 มิ.ย. คำสั่งทีม — โต๊ะบวม 420 ใบ ของเก่าลอยค้าง เช่นเจนนี่/ลุงธีระ):
   //   การ์ด new เกิน 48 ชม.เก็บเข้ากรุเอง (บก.ให้ 9+ ยืดเป็น 72 ชม.) — โต๊ะเป็นหน้าต่างของสด ไม่ใช่กองสะสม
+  // ★★ 21 มิ.ย. (ผู้ใช้สั่ง): โต๊ะข่าว = "หน้าต่างของสด" ไม่ใช่กองสะสม — เกิน 48 ชม. "ลบจริง" ออกจาก DB
+  //    เหตุผล: ตารางใหญ่ = getAll/อ่านหนัก = egress พุ่ง (เคยโดน Supabase ระงับ) · ค้นใหม่มาเติมเรื่อยอยู่แล้ว ลบของเก่าได้ปลอดภัย
+  //    🔒 เก็บไว้เสมอ: คลังส่งเช้า(shortlisted) · ใช้แล้ว(used) · ส่งเขียน/กำลังหยิบ(sent/claimed) — ของทีม ห้ามแตะ
   try {
     const allNow = await store.getAll();
     const now = Date.now();
-    let purged = 0;
+    let removed = 0;
+    const toRemove = [];
     for (const it of allNow) {
-      if (it.status === 'dismissed' || it.used) continue;
-      // ★ 15 มิ.ย.: ข่าวใน "คลังส่งเช้า" (shortlisted) = ทีมเลือกเก็บไว้เอง ห้ามล้าง/ตัดอัตโนมัติ (ต้องอยู่ถึงพรุ่งนี้)
-      if (it.shortlisted) continue;
-      // ★ 15 มิ.ย. รอบ 2-3: รีเช็คด่านคำต้องห้าม "ล่าสุด" ครอบทุกสถานะ (new/claimed/sent) —
-      //   เก็บของเก่าที่หลุดก่อนอัปเดตด่านแม้ส่งเขียนไปแล้ว (เช่น vietnam.vn, Hong Kong fire, บัตรคนจน)
+      if (it.shortlisted || it.used || it.status === 'sent' || it.status === 'claimed') continue; // ของทีม — ไม่ลบ
+      const ageHr = (now - new Date(it.harvestedAt || it.createdAt || 0).getTime()) / 36e5;
+      // 1) safety re-check ล่าสุด — ผิดกฎ/สถาบันแง่ลบ = ลบทิ้งเลย (กันของหลุดก่อนอัปเดตด่าน)
       const g = gateKeywords(it);
-      if (!g.pass) {
-        await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: `🧹 ตัดอัตโนมัติ (${g.reason})` })).catch(() => {});
-        purged++;
-        continue;
-      }
-      // ★ 19 มิ.ย. (เก็บกว้าง): รีเช็คเฉพาะ safety (สถาบันแง่ลบ ม.112) — เลิกตัดกระแสเก่า/ไม่มีตัวละครอัตโนมัติ
-      if (it.royalNegative === true) {
-        await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: '🧹 ตัดอัตโนมัติ (สถาบันแง่ลบ/อ่อนไหว)' })).catch(() => {});
-        purged++;
-        continue;
-      }
-      // ★ ล้างตามอายุ — เฉพาะการ์ด new ที่ยังไม่มีใครหยิบ
-      if (it.status !== 'new') continue;
-      const ageHr = (now - new Date(it.harvestedAt || 0).getTime()) / 36e5;
-      // ★ 19 มิ.ย. (เก็บกว้าง): ยืดเวลาเก็บ — ปกติ 10 วัน · คะแนนดี 14 วัน · ผลค้นเฉพาะแนว 7 วัน
-      const cap = it.focusTag ? 168 : ((it.judgeScore ?? 0) >= 9 ? 336 : 240);
-      if (ageHr > cap) {
-        await store.update(it.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: `🧹 ล้างอัตโนมัติ (ค้างเกิน ${cap} ชม.)` })).catch(() => {});
-        purged++;
-      }
+      if (!g.pass || it.royalNegative === true) { toRemove.push(it.id); continue; }
+      // 2) อายุเกินกำหนด → ลบจริง (ผลค้นเฉพาะแนว 7 วัน · คะแนนดี≥9 72ชม. · ปกติ 48ชม.)
+      const cap = it.focusTag ? 168 : ((it.judgeScore ?? 0) >= 9 ? 72 : 48);
+      if (it.status === 'new' && ageHr > cap) { toRemove.push(it.id); continue; }
+      // 3) ที่ถูก dismiss ไว้ + เกิน 24 ชม. → ลบจริงเคลียร์ DB (ไม่ปล่อยค้างกินที่)
+      if (it.status === 'dismissed' && ageHr > 24) { toRemove.push(it.id); continue; }
     }
-    // ★ 16 มิ.ย. (แก้โต๊ะบวม 906 ใบ): เพดาน "จำนวน" — เก็บ new ท็อป 150 ตามคะแนน ที่เหลือเข้ากรุ
-    //   (ล้างตามเวลาอย่างเดียวไล่ไม่ทันการเติม → สะสมจนเลื่อนเจอแต่ของจม)
-    // ★ 19 มิ.ย. (เก็บกว้าง): ยกเพดานโต๊ะ 150 → 2000 (เก็บข่าวให้เลือกเยอะๆ)
+    for (const id of toRemove) { await store.remove(id).catch(() => {}); removed++; }
+    // ★ เพดานจำนวน (กัน DB ล้นระหว่างวัน): เก็บ new ท็อป 800 ตามคะแนน ที่เหลือ "ลบจริง"
     const liveNew = (await store.getAll()).filter(i => i.status === 'new' && !i.shortlisted && !i.used && !i.focusTag);
-    if (liveNew.length > 2000) {
+    if (liveNew.length > 800) {
       liveNew.sort((a, b) => (b.finalScore || 0) - (a.finalScore || 0));
-      for (const o of liveNew.slice(2000)) {
-        await store.update(o.id, (ex) => ({ ...ex, status: 'dismissed', dismissNote: '🧹 ล้างอัตโนมัติ (เกินเพดานโต๊ะ 2000 ใบ — คะแนนต่ำสุด)' })).catch(() => {});
-        purged++;
-      }
+      for (const o of liveNew.slice(800)) { await store.remove(o.id).catch(() => {}); removed++; }
     }
-    stats.autoPurged = purged;
-    if (purged > 0) console.log(`[Harvester] 🧹 ล้างโต๊ะอัตโนมัติ: ${purged} ใบ (ค้างเกินเวลา)`);
+    stats.autoPurged = removed;
+    if (removed > 0) console.log(`[Harvester] 🧹 ลบของเก่าจริงออกจาก DB: ${removed} ใบ (เกิน 48 ชม./เกินเพดาน 800/ผิดกฎ) — กัน egress ล้น`);
   } catch (e) { console.log('[Harvester] auto-purge skip:', e.message?.slice(0, 40)); }
 
   // ════════════════════════════════════════════════════

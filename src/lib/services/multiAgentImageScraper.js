@@ -262,7 +262,14 @@ async function agentGoogleCleanImages(identity) {
   const allImages = [];
 
   const rawMainChar = identity?.mainCharacter || '';
-  const mainChar = sanitizeHeroName(rawMainChar);
+  // rev.20j: ตัด "ชื่อรายการ + จังหวัด + คำว่าเด็ก/จังหวัด" ออกจากชื่อค้นภาพคน — กันได้ภาพวัด/วิว/สถานที่ (บทเรียน CASE-163 "สุโขทัย" ลากวัดเข้ามา)
+  let mainChar = sanitizeHeroName(rawMainChar)
+    .replace(/ปัญญาปันสุข|โหนกระแส|วู้ดดี้|ตีท้ายครัว|ทุบโต๊ะข่าว|เรื่องจริงผ่านจอ|คุยแซ่บ|รายการ\S*/g, '');
+  if (identity?.location) {
+    const _loc = String(identity.location).slice(0, 18).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (_loc) mainChar = mainChar.replace(new RegExp(_loc, 'g'), '');
+  }
+  mainChar = mainChar.replace(/\bจังหวัด\b|^เด็ก\s|\sเด็ก(?=สุโขทัย|พิษณุโลก|จังหวัด)/g, '').replace(/\s+/g, ' ').trim() || sanitizeHeroName(rawMainChar);
   const secondaryChar = sanitizeHeroName(identity?.secondaryCharacter || '');
   // ★ storySubject: ไม่ผ่าน sanitizeHeroName เพราะต้องรักษาคำสำคัญเช่น "ดูแลแม่", "อัลไซเมอร์", "กอดแม่" ไว้ในการค้นหา
   const storySubject = identity?.coreStory?.storySubject || identity?.coreStory?.relationship || '';
@@ -419,6 +426,27 @@ async function agentYouTubeFrames(identity) {
       sq.event_scene || '',
     ].filter(q => q && q.trim());
     console.log(`[Agent2: YouTube] ⚠️ No coreImageQueries, using legacy: ${JSON.stringify(youtubeQueries)}`);
+  }
+
+  // ★★★ rev.20j (ผู้ใช้ 21 มิ.ย.): ข่าว "คนธรรมดาออกรายการทีวี" — ล็อกคลิปจริงด้วย "ชื่อรายการ + ชื่อตัวละคร"
+  //   บทเรียน CASE-163 (น้องข้าวหอม): ค้นยูทูปกว้างเกิน → ได้คลิปลูกเสือ/พระ/อนุบาลมั่ว (ไม่ใช่คลิปรายการตัวจริง)
+  //   ภาพคนธรรมดาตัวจริงมีแค่ใน "คลิปรายการ" → ต้องค้นเจาะจงชื่อรายการก่อน
+  const _showBlob = `${rawMainChar} ${identity?.story || ''} ${(identity?.keywords || []).join(' ')} ${identity?.newsTitle || ''}`;
+  const _SHOWS = /ปัญญาปันสุข|โหนกระแส|วู้ดดี้|ตีท้ายครัว|ทุบโต๊ะข่าว|เรื่องจริงผ่านจอ|คุยแซ่บ|ลุยไม่รู้โรย|ฟ้ามีตา|บ่ายนี้มีคำตอบ|ดูให้รู้|ตกมันส์|3แซ่บ|โหนกระเเส/;
+  const _showMatch = _showBlob.match(_SHOWS) || _showBlob.match(/รายการ\s*([ก-๙A-Za-z0-9]{2,18})/);
+  const _showName = _showMatch ? (_showMatch[1] || _showMatch[0]).trim() : '';
+  if (_showName) {
+    // ชื่อตัวละครสะอาด: ตัดชื่อรายการ + จังหวัด + คำว่า "เด็ก/จังหวัด" ออก (เก็บ "น้องข้าวหอม" ไว้)
+    let _nick = mainChar.replace(_SHOWS, '').replace(/รายการ/g, '');
+    if (identity?.location) {
+      const _loc = String(identity.location).slice(0, 18).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (_loc) _nick = _nick.replace(new RegExp(_loc, 'g'), '');
+    }
+    _nick = _nick.replace(/เด็ก|จังหวัด/g, '').replace(/\s+/g, ' ').trim() || mainChar;
+    const _showQ = `${_showName} ${_nick}`.trim();
+    youtubeQueries = [_showQ, `${_showName} ${_nick} ${storySubject}`.trim(), ...youtubeQueries]
+      .map(q => (q || '').trim()).filter((q, i, a) => q && q.length > 3 && a.indexOf(q) === i);
+    console.log(`[Agent2: YouTube] 🎯 ล็อกคลิปรายการ: "${_showQ}" (show=${_showName})`);
   }
 
   // ★ Safeguard YouTube queries: ลบคีย์เวิร์ดช้าง/สัตวแพทย์สำหรับข่าวครอบครัว

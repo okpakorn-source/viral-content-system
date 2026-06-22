@@ -356,6 +356,29 @@ export function tightenMomentCrops(assignments, faceBoxes = []) {
 }
 
 /**
+ * rev.20k: เฟรมคลิปรายการมีคำบรรยายเบิร์น (lower-third) — ครอปแน่นที่ "ใบหน้า" ทุกช่อง (รวมฮีโร่)
+ *   เพื่อตัดแถบคำบรรยายออก + ดันกรอบขึ้นพ้นโซนข้อความถ้ารู้ตำแหน่ง (textRegion)
+ *   ใช้กับข่าว "คนธรรมดาจากรายการทีวี" ที่ภาพมาจากเฟรมคลิปล้วน
+ */
+export function faceTightenAll(assignments, faceBoxes = [], mult = 2.2) {
+  for (const a of assignments || []) {
+    if (!a || /circle/i.test(a.slotId)) continue; // วงกลมมี guard เฉพาะ
+    const fb = faceBoxes[a.imageIndex];
+    if (!fb || !(fb.x2 > fb.x1)) continue;
+    if (((fb.x2 - fb.x1) * (fb.y2 - fb.y1)) < 0.012) continue; // หน้าจิ๋ว/ฉากล้วน — ข้าม
+    const c = cropFromFaceBox(fb, mult); // หน้า-ไหล่ ตัดแถบคำบรรยายบน/ล่างออก
+    // ถ้ารู้โซนข้อความและอยู่ "ครึ่งล่าง" → กันกรอบไม่ให้ลงไปแตะ (ดันขึ้น)
+    const tr = fb.textRegion;
+    if (tr && typeof tr.y1 === 'number' && tr.y1 > 0.5 && (c.y + c.h) > tr.y1) {
+      c.y = Math.max(0, Math.min(c.y, tr.y1 - c.h));
+    }
+    a.crop = c;
+    a.why = (a.why || '').slice(0, 50) + ' [คลิป:ครอปหน้าตัดคำบรรยาย]';
+  }
+  return assignments;
+}
+
+/**
  * AI ตรวจปกที่ประกอบแล้ว 1 รอบ — สั่งแก้กรอบครอป และ rev.8: สั่งสลับรูปได้ (imageIndex)
  * @returns {Promise<{ok: boolean, fixes: Array<{slotId, crop?, imageIndex?}>}>}
  */

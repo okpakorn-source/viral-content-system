@@ -56,7 +56,7 @@ async function _renderCoverV3(request) {
     };
 
     // ★ REV MARKER — ยืนยันว่าเซิร์ฟเวอร์รันโค้ดเวอร์ชันไหน (เช็ค log ก่อนเทสทุกครั้ง — กัน staleness)
-    const COVER_REV = 'rev-20h-2026-06-21 ภาพถ่ายจริงก่อนเฟรมวิดีโอ (กันฮีโร่หันหลัง) +ล็อก3ขวา';
+    const COVER_REV = 'rev-20k-2026-06-21 เฟรมคลิป: นับหน้า+ตัดตึก+ครอปหน้าตัดคำบรรยาย';
     console.log(`[CoverV3] 🏷️ CODE ${COVER_REV} — รันโค้ดเวอร์ชันนี้`);
 
     // ★ ตาข่ายชั้นท้าย (19 มิ.ย. — ผู้ใช้สั่ง): เช็ค "API หมดเครดิต/โควต้า" ก่อนเริ่ม
@@ -112,7 +112,14 @@ async function _renderCoverV3(request) {
     const _ranked = (selected || []).filter(img => img?.url);
     const _photos = _ranked.filter(img => !String(img.url).startsWith('data:'));
     const _frames = _ranked.filter(img => String(img.url).startsWith('data:'));
-    const candidates = [..._photos, ..._frames].slice(0, 14);
+    // ★ rev.20j (ผู้ใช้ 21 มิ.ย.): ข่าว "คนธรรมดา/เด็ก ออกรายการทีวี" → ภาพคนตัวจริงมีแค่ในเฟรมคลิป
+    //   (เว็บคืนวิว/สถานที่/คนผิด เพราะไม่ใช่คนดัง) → กลับด้านให้ "เฟรมคลิปมาก่อน"; ข่าวคนดังยังภาพเว็บก่อนเหมือนเดิม
+    const _clipBlob = `${newsTitle} ${(content || '').slice(0, 1500)}`;
+    const _isShowClip = /รายการ|ปัญญาปันสุข|โหนกระแส|ตีท้ายครัว|เรื่องจริงผ่านจอ|คุยแซ่บ|ทุบโต๊ะ|ออกรายการ/.test(_clipBlob);
+    const _isOrdinary = /เด็ก|ชาวบ้าน|ยากจน|ป่วย|สู้ชีวิต|พิการ|กตัญญู|ยาย|ลุง|ป้า|แม่ค้า|ลำบาก|หาเช้ากินค่ำ|รถเข็น|วอนช่วย/.test(_clipBlob);
+    const _preferFrames = _isShowClip && _isOrdinary;
+    const candidates = (_preferFrames ? [..._frames, ..._photos] : [..._photos, ..._frames]).slice(0, 14);
+    if (_preferFrames) console.log('[CoverV3] 🎬 ข่าวคนธรรมดาจากรายการ → ใช้เฟรมคลิปก่อนภาพเว็บ (กันได้วิว/คนผิด)');
     let imageBuffers = [];
     await Promise.all(candidates.map(async (img) => {
       try {
@@ -288,6 +295,20 @@ async function _renderCoverV3(request) {
       faceBoxes = keep.map(i => faceBoxes[i] ? { ...faceBoxes[i], quality: quals[i] } : faceBoxes[i]);
     } catch (e) { console.log('[CoverV3] quality+dedup skipped:', e.message?.slice(0, 50)); }
 
+    // ★ rev.20k: ข่าวคลิปรายการ (คนธรรมดา) — ตัด "ภาพไม่มีหน้าคน" (ตึก/โรงเรียน/ฉากเปล่า) ออกจากพูล
+    //   บทเรียน CASE-165: ตึกโรงเรียน/บ้านหลุดมาเติมช่องปกข่าวเด็ก — ปกข่าวคนต้องเป็น "คน" ทุกช่อง
+    if (_preferFrames && imageBuffers.length > 3) {
+      const withFace = imageBuffers
+        .map((img, i) => ({ img, fb: faceBoxes[i], i }))
+        .filter(o => o.fb && o.fb.x2 > o.fb.x1 && ((o.fb.x2 - o.fb.x1) * (o.fb.y2 - o.fb.y1)) >= 0.02);
+      if (withFace.length >= 3) {
+        const dropped = imageBuffers.length - withFace.length;
+        imageBuffers = withFace.map(o => o.img);
+        faceBoxes = withFace.map(o => o.fb);
+        if (dropped > 0) console.log(`[CoverV3] 🧹 ข่าวคลิปคน → ตัดภาพไม่มีหน้า (ตึก/ฉาก) ${dropped} ใบ เหลือ ${imageBuffers.length}`);
+      }
+    }
+
     // ── Quality floor (หลักเดียวกับ v1) ──
     const { V3_TEMPLATES, adaptRegistryTemplate } = await import('@/lib/services/coverExecutorService');
     if (imageBuffers.length < 3) {
@@ -302,14 +323,18 @@ async function _renderCoverV3(request) {
     // rev.16 (ด่าน B): นับ "ภาพดี-ต่างกันจริง" — หน้าคมพอ + ไม่มีตัวหนังสือ + คุณภาพผ่านเกณฑ์
     //   (พูลนี้ผ่านด่าน A กันซ้ำมาแล้ว = แต่ละใบต่างกันจริง → งบช่องสะท้อนจำนวนภาพดีที่ไม่ซ้ำ)
     const cleanFaceCount = faceBoxes.filter(fb =>
-      fb && fb.x2 > fb.x1 && ((fb.x2 - fb.x1) * (fb.y2 - fb.y1)) >= 0.03 && (fb.count || 1) <= 3 && !fb.hasText
+      fb && fb.x2 > fb.x1 && ((fb.x2 - fb.x1) * (fb.y2 - fb.y1)) >= 0.03 && (fb.count || 1) <= 3
+      // rev.20k: ข่าวคลิปรายการ — เฟรมมีคำบรรยายเบิร์นทุกเฟรม ถ้าตัด text-frame ทิ้งหมด งบช่อง=0 ได้กริดเรียบ
+      //   → ยอมนับเฟรมที่ "มีหน้าจริง" แม้ติดตัวหนังสือ (เดี๋ยว faceTightenAll ครอปหน้าตัด caption ออกให้)
+      && (!fb.hasText || _preferFrames)
     ).length; // rev.16b: พูลผ่านด่าน A กรองคุณภาพมาแล้ว ไม่ต้องเกณฑ์คุณภาพสัมพัทธ์ซ้ำ (เดิมทำ count=0)
     let slotBudget = Math.max(3, Math.min(imageBuffers.length, cleanFaceCount));
     // rev.16: โครง 5 ช่องต่อเมื่อมีภาพดี-ต่างกันจริง ≥5 เท่านั้น — น้อยกว่านั้น cap 4 (กันเติมช่องด้วยภาพซ้ำ/แย่)
     //   บทเรียน 136/138/141: ดันเต็มช่องทั้งที่ภาพดีไม่พอ → หน้าซ้ำ 3 ช่อง = เหมือนคอนแทคชีต
     if (cleanFaceCount < 5) slotBudget = Math.min(slotBudget, 4);
-    const stRel = (identity?.storyType || '').toLowerCase();
-    if (/warm|family|relationship|romance|couple|love/.test(stRel)) slotBudget = Math.min(slotBudget, 4);
+    // ★ rev.20i (ผู้ใช้ยืนยันจากปกตัวอย่าง 21 มิ.ย.): ข่าวครอบครัว/คู่รักที่ "ภาพดี ≥5" ก็ใช้โครง 3 ขวาได้
+    //   เดิม cap ครอบครัวไว้ 4 เสมอ → เจมส์มีภาพดี 8 ใบยังได้แค่ 2 ขวา. ตอนนี้ปล่อยตามจำนวนภาพจริง
+    //   (ภาพ <5 ยังถูก cap เป็น 4 ที่บรรทัดบนอยู่แล้ว = กันคอนแทคชีตเหมือนเดิม)
     console.log(`[CoverV3] 🎯 ภาพดี-ต่างกัน ${cleanFaceCount} ใบ → งบช่อง = ${slotBudget} (จากพูล ${imageBuffers.length})`);
 
     // ── ② AI Vision Director — เลือกโครงเองจากแม่บทที่แกะจากปกไวรัลจริง ──
@@ -335,7 +360,7 @@ async function _renderCoverV3(request) {
       || (lockTri ? [V3_TEMPLATES.vt_ref_tri] : (viralFirst.length > 0 ? viralFirst : plainFallbacks));
 
     console.log(`[CoverV3] ③ Director (options: ${templateOptions.map(t => t.id).join(', ')} | pool=${imageBuffers.length})...`);
-    const { directCover, reviewCover, tightenMomentCrops } = await import('@/lib/services/coverDirectorService');
+    const { directCover, reviewCover, tightenMomentCrops, faceTightenAll } = await import('@/lib/services/coverDirectorService');
     const direction = await directCover({ imageBuffers, identity, templateOptions, templateSpec: templateOptions[0], newsTitle, faceBoxes });
     if (!direction) {
       await markQueueJob('failed', { error: 'AI Director จัดวางไม่สำเร็จ' });
@@ -360,6 +385,13 @@ async function _renderCoverV3(request) {
       console.log(`[CoverV3] ⑤ QC fixes applied (${qc.fixes.length}) → recomposed`);
     } else {
       console.log('[CoverV3] ⑤ QC passed first try');
+    }
+
+    // ★ rev.20k: ข่าวคลิปรายการ — บังคับครอปทุกช่อง (รวมฮีโร่) ที่ "ใบหน้า" ตัดแถบคำบรรยายเบิร์นออก แล้วประกอบใหม่
+    if (_preferFrames) {
+      faceTightenAll(assignments, faceBoxes, 2.2);
+      coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec, faceBoxes });
+      console.log('[CoverV3] ⑤.5 ข่าวคลิป → ครอปหน้าตัดคำบรรยายทุกช่อง → ประกอบใหม่');
     }
 
     // ── ให้คะแนนปกด้วย mini-judge (แก้ป้าย 0/10 ในคลัง) ──
