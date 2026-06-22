@@ -119,36 +119,62 @@ export async function callGeminiVideo({ prompt, youtubeUrl, model = 'gemini-3.5-
     },
   });
 
-  const result = await genModel.generateContent({
-    contents: [{
-      role: 'user',
-      parts: [
-        { fileData: { fileUri: youtubeUrl } },
-        { text: prompt },
-      ],
-    }],
-  }, { requestOptions: { timeout: 180000 } });
+  // ★ 22 มิ.ย.: ห่อด้วย retry — 503 "high demand" สุ่มๆ ลองใหม่อัตโนมัติแทนที่จะตกทันที
+  return await _withGeminiRetry(async () => {
+    const result = await genModel.generateContent({
+      contents: [{
+        role: 'user',
+        parts: [
+          { fileData: { fileUri: youtubeUrl } },
+          { text: prompt },
+        ],
+      }],
+    }, { requestOptions: { timeout: 180000 } });
 
-  const content = result.response?.text();
-  const um = result.response?.usageMetadata;
-  console.log(`[GeminiVideo] OK: tokens input=${um?.promptTokenCount || 0}, output=${um?.candidatesTokenCount || 0}`);
-  logApiUsage({ provider: 'gemini_video', model, inputTokens: um?.promptTokenCount || 0, outputTokens: um?.candidatesTokenCount || 0, feature: 'callGeminiVideo' });
+    const content = result.response?.text();
+    const um = result.response?.usageMetadata;
+    console.log(`[GeminiVideo] OK: tokens input=${um?.promptTokenCount || 0}, output=${um?.candidatesTokenCount || 0}`);
+    logApiUsage({ provider: 'gemini_video', model, inputTokens: um?.promptTokenCount || 0, outputTokens: um?.candidatesTokenCount || 0, feature: 'callGeminiVideo' });
 
-  if (!content) throw new Error('Gemini ไม่ส่งข้อมูลกลับ (อาจดูคลิปไม่ได้ — คลิปส่วนตัว/อายุจำกัด)');
+    if (!content) throw new Error('Gemini ไม่ส่งข้อมูลกลับ (อาจดูคลิปไม่ได้ — คลิปส่วนตัว/อายุจำกัด)');
 
-  try {
-    return sanitizeOutput(JSON.parse(content));
-  } catch (e) {
-    const s = content.indexOf('{'), eIdx = content.lastIndexOf('}');
-    if (s !== -1 && eIdx !== -1) {
-      try { return sanitizeOutput(JSON.parse(content.slice(s, eIdx + 1))); } catch {}
+    try {
+      return sanitizeOutput(JSON.parse(content));
+    } catch (e) {
+      const s = content.indexOf('{'), eIdx = content.lastIndexOf('}');
+      if (s !== -1 && eIdx !== -1) {
+        try { return sanitizeOutput(JSON.parse(content.slice(s, eIdx + 1))); } catch {}
+      }
+      // ★ 21 มิ.ย.: ซ่อม JSON ที่ "โดนตัดกลางคัน" (output ยาวเกิน maxTokens) — ตัดถึงโครงสมบูรณ์ล่าสุด + ปิดวงเล็บ
+      const repaired = _repairTruncatedJson(content.slice(s >= 0 ? s : 0));
+      if (repaired) { try { return sanitizeOutput(JSON.parse(repaired)); } catch {} }
+      console.error('[GeminiVideo] JSON parse failed:', content.slice(0, 400));
+      throw new Error('Gemini ส่งข้อมูลที่ parse ไม่ได้');
     }
-    // ★ 21 มิ.ย.: ซ่อม JSON ที่ "โดนตัดกลางคัน" (output ยาวเกิน maxTokens) — ตัดถึงโครงสมบูรณ์ล่าสุด + ปิดวงเล็บ
-    const repaired = _repairTruncatedJson(content.slice(s >= 0 ? s : 0));
-    if (repaired) { try { return sanitizeOutput(JSON.parse(repaired)); } catch {} }
-    console.error('[GeminiVideo] JSON parse failed:', content.slice(0, 400));
-    throw new Error('Gemini ส่งข้อมูลที่ parse ไม่ได้');
+  }, { label: 'GeminiVideo', tries: 4 });
+}
+
+// ★ 22 มิ.ย.: ลองใหม่อัตโนมัติเมื่อ Gemini ล่มชั่วคราว (503 high demand / 429 / เน็ต / parse ไม่ได้)
+//   สาเหตุจริงที่ "เมื่อกี้ทำได้ อยู่ๆพัง" = gemini-3.5-flash โดนใช้งานหนักเป็นช่วง ตอบ 503 สุ่มๆ
+//   ★ ใช้กับเครื่องมือ clip-insight (วิดีโอ) เท่านั้น — ไม่แตะ callGemini(text) ของเวิร์กโฟลว์ข่าว
+async function _withGeminiRetry(fn, { tries = 4, label = 'Gemini' } = {}) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try { return await fn(); }
+    catch (e) {
+      lastErr = e;
+      const msg = String(e?.message || '');
+      const status = Number(e?.status) || 0;
+      // ลองใหม่เฉพาะอาการ "ชั่วคราว" — ไม่ลองใหม่กับคลิปส่วนตัว/อายุจำกัด/คีย์ผิด (ไร้ประโยชน์)
+      const transient = [429, 500, 502, 503, 504].includes(status)
+        || /high demand|overload|unavailable|temporar|deadline|fetch failed|ECONNRESET|ETIMEDOUT|socket hang up|network|timed out|parse ไม่ได้|ไม่ส่งข้อมูลกลับ \(/i.test(msg);
+      if (!transient || i === tries - 1) throw e;
+      const wait = 2000 * Math.pow(2, i) + Math.floor(Math.random() * 700); // 2s · 4s · 8s + jitter
+      console.warn(`[${label}] ชั่วคราว (${status || ''} ${msg.slice(0, 60)}) → ลองใหม่ ${i + 1}/${tries - 1} ใน ${wait}ms`);
+      await new Promise(r => setTimeout(r, wait));
+    }
   }
+  throw lastErr;
 }
 
 // ซ่อม JSON ที่ถูกตัดท้าย: ตัดถึงตัวอักษรปลอดภัยล่าสุด แล้วปิด " ] } ที่ค้างไว้ (best-effort)
@@ -212,26 +238,31 @@ export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'vid
       model,
       generationConfig: { temperature, maxOutputTokens: maxTokens, responseMimeType: 'application/json' },
     });
-    const result = await genModel.generateContent({
-      contents: [{ role: 'user', parts: [
-        { fileData: { fileUri: file.uri, mimeType: file.mimeType } },
-        { text: prompt },
-      ] }],
-    }, { requestOptions: { timeout: 180000 } });
+    // ★ 22 มิ.ย.: ไฟล์อัปแล้ว (ACTIVE) — ลองใหม่เฉพาะ "ดูคลิป+parse" ตอน Gemini 503/แน่นชั่วคราว (ไม่อัปไฟล์ซ้ำ)
+    return await _withGeminiRetry(async () => {
+      const result = await genModel.generateContent({
+        contents: [{ role: 'user', parts: [
+          { fileData: { fileUri: file.uri, mimeType: file.mimeType } },
+          { text: prompt },
+        ] }],
+      }, { requestOptions: { timeout: 180000 } });
 
-    const content = result.response?.text();
-    const um = result.response?.usageMetadata;
-    console.log(`[GeminiVideoFile] OK: tokens input=${um?.promptTokenCount || 0}, output=${um?.candidatesTokenCount || 0}`);
-    logApiUsage({ provider: 'gemini_video_file', model, inputTokens: um?.promptTokenCount || 0, outputTokens: um?.candidatesTokenCount || 0, feature: 'callGeminiVideoFile' });
+      const content = result.response?.text();
+      const um = result.response?.usageMetadata;
+      console.log(`[GeminiVideoFile] OK: tokens input=${um?.promptTokenCount || 0}, output=${um?.candidatesTokenCount || 0}`);
+      logApiUsage({ provider: 'gemini_video_file', model, inputTokens: um?.promptTokenCount || 0, outputTokens: um?.candidatesTokenCount || 0, feature: 'callGeminiVideoFile' });
 
-    if (!content) throw new Error('Gemini ไม่ส่งข้อมูลกลับ');
-    try {
-      return sanitizeOutput(JSON.parse(content));
-    } catch (e) {
-      const s = content.indexOf('{'), eIdx = content.lastIndexOf('}');
-      if (s !== -1 && eIdx !== -1) { try { return sanitizeOutput(JSON.parse(content.slice(s, eIdx + 1))); } catch {} }
-      throw new Error('Gemini ส่งข้อมูลที่ parse ไม่ได้');
-    }
+      if (!content) throw new Error('Gemini ไม่ส่งข้อมูลกลับ');
+      try {
+        return sanitizeOutput(JSON.parse(content));
+      } catch (e) {
+        const s = content.indexOf('{'), eIdx = content.lastIndexOf('}');
+        if (s !== -1 && eIdx !== -1) { try { return sanitizeOutput(JSON.parse(content.slice(s, eIdx + 1))); } catch {} }
+        const repaired = _repairTruncatedJson(content.slice(s >= 0 ? s : 0));
+        if (repaired) { try { return sanitizeOutput(JSON.parse(repaired)); } catch {} }
+        throw new Error('Gemini ส่งข้อมูลที่ parse ไม่ได้');
+      }
+    }, { label: 'GeminiVideoFile', tries: 4 });
   } finally {
     await unlink(tmpPath).catch(() => {});
     if (uploadedName) fileManager.deleteFile(uploadedName).catch(() => {}); // ไม่ค้างไฟล์บน Gemini

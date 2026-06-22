@@ -56,6 +56,15 @@ function detectClipType(url) {
   return null;
 }
 
+// ★ 22 มิ.ย.: แปลง error ดิบให้คนเข้าใจ — กรณี Gemini แน่นชั่วคราว (503) บอกให้กดใหม่ ไม่ใช่ "parse ไม่ได้" งงๆ
+function humanizeErr(raw) {
+  const m = String(raw || '');
+  if (/503|high demand|overload|unavailable|temporar|parse ไม่ได้|ไม่ส่งข้อมูล|deadline|timed out|ETIMEDOUT/i.test(m)) {
+    return 'ตอนนี้ Gemini มีคนใช้งานหนัก (แน่นชั่วคราว) — กดปุ่ม "ถอดประเด็นข่าว" อีกครั้งได้เลย เดี๋ยวก็ผ่าน';
+  }
+  return m.slice(0, 120) || 'ถอดประเด็นล้มเหลว';
+}
+
 // ★ 21 มิ.ย. (บั๊ก: URL ติด &fbclid=... ยาว → Gemini ดูคลิปไม่ได้): ล้าง URL ให้สะอาด
 //   YouTube → ดึง video ID สร้าง watch URL ใหม่ (กันพารามิเตอร์เฟซบุ๊ก/ติดตามทำพัง) · อื่นๆ → ตัด tracking params
 export function cleanClipUrl(raw) {
@@ -112,7 +121,7 @@ export async function POST(request) {
         console.warn('[ClipInsight] Gemini video ล้ม → fallback ถอดเสียง:', gErr.message?.slice(0, 80));
         const rawText = await transcribeFor(url, 'youtube');
         if (!rawText || rawText.length < 40) {
-          return NextResponse.json({ success: false, error: `ดูคลิปด้วย Gemini ไม่ได้ และถอดเสียงสำรองก็ไม่สำเร็จ (${gErr.message?.slice(0, 60) || ''})`, errorType: 'INSIGHT_FAILED' }, { status: 422 });
+          return NextResponse.json({ success: false, error: humanizeErr(gErr.message), errorType: 'INSIGHT_FAILED' }, { status: 422 });
         }
         insight = await extractClipInsight({ url, platform: 'transcript', rawText });
       }
@@ -156,6 +165,6 @@ export async function POST(request) {
     return NextResponse.json({ success: true, data: { id: caseId, platform: type, ...insight } });
   } catch (error) {
     console.error('[ClipInsight]', error.message);
-    return NextResponse.json({ success: false, error: error.message || 'ถอดประเด็นล้มเหลว', errorType: 'INSIGHT_ERROR' }, { status: 500 });
+    return NextResponse.json({ success: false, error: humanizeErr(error.message), errorType: 'INSIGHT_ERROR' }, { status: 500 });
   }
 }
