@@ -18,6 +18,18 @@ function detectClipType(url) {
   return null;
 }
 
+// ★ 21 มิ.ย.: ล้าง URL ให้สะอาด (ตัด &fbclid/utm/tracking ที่ทำให้ถอด/ดูคลิปพัง) — YouTube ดึง video ID ใหม่
+function cleanClipUrl(raw) {
+  const u = String(raw || '').trim();
+  const yt = u.match(/(?:youtube\.com\/(?:watch\?(?:[^#]*&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+  if (yt) return `https://www.youtube.com/watch?v=${yt[1]}`;
+  try {
+    const url = new URL(u);
+    ['fbclid', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'si', 'feature', 'app_id', '_aem', 'mibextid'].forEach(p => url.searchParams.delete(p));
+    return url.toString();
+  } catch { return u.split('#')[0]; }
+}
+
 async function getRawTranscript(url, type) {
   if (type === 'youtube') {
     const { transcribeYoutube } = await import('@/lib/services/youtubeService');
@@ -43,10 +55,11 @@ async function getRawTranscript(url, type) {
 
 export async function POST(request) {
   try {
-    const { url, tidy = false } = await request.json();
-    if (!url || typeof url !== 'string') {
+    const { url: _rawUrl, tidy = false } = await request.json();
+    if (!_rawUrl || typeof _rawUrl !== 'string') {
       return NextResponse.json({ success: false, error: 'กรุณาวางลิงก์คลิป', errorType: 'MISSING_URL' }, { status: 400 });
     }
+    const url = cleanClipUrl(_rawUrl); // ★ ล้าง fbclid/tracking ก่อน (กันถอด/ดูคลิปพัง)
     const type = detectClipType(url);
     if (!type) {
       return NextResponse.json({ success: false, error: 'ลิงก์ไม่รองรับ — ใช้ได้เฉพาะ TikTok / YouTube / Facebook(IG)', errorType: 'UNSUPPORTED_URL' }, { status: 400 });
