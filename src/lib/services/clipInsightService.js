@@ -133,7 +133,8 @@ export async function extractClipInsight({ url, platform, rawText = '' }) {
   // YouTube → ให้ Gemini ดูคลิปจริงจากลิงก์ตรง — ปล่อย error ขึ้นไปให้ route จัดการ fallback
   if (platform === 'youtube') {
     const { callGeminiVideo } = await import('@/lib/ai/geminiClient');
-    const r = await callGeminiVideo({ prompt: VIDEO_INSIGHT_PROMPT, youtubeUrl: url, maxTokens: 8000 });
+    // ★ 21 มิ.ย.: 8000→16000 — คลิปรายการเล่าหลายข่าว 8 นาที output JSON ยาว เคยโดนตัดจน parse พัง
+    const r = await callGeminiVideo({ prompt: VIDEO_INSIGHT_PROMPT, youtubeUrl: url, maxTokens: 16000 });
     return normalizeInsight(r, 'gemini-video');
   }
 

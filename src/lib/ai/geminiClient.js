@@ -143,9 +143,33 @@ export async function callGeminiVideo({ prompt, youtubeUrl, model = 'gemini-3.5-
     if (s !== -1 && eIdx !== -1) {
       try { return sanitizeOutput(JSON.parse(content.slice(s, eIdx + 1))); } catch {}
     }
+    // ★ 21 มิ.ย.: ซ่อม JSON ที่ "โดนตัดกลางคัน" (output ยาวเกิน maxTokens) — ตัดถึงโครงสมบูรณ์ล่าสุด + ปิดวงเล็บ
+    const repaired = _repairTruncatedJson(content.slice(s >= 0 ? s : 0));
+    if (repaired) { try { return sanitizeOutput(JSON.parse(repaired)); } catch {} }
     console.error('[GeminiVideo] JSON parse failed:', content.slice(0, 400));
     throw new Error('Gemini ส่งข้อมูลที่ parse ไม่ได้');
   }
+}
+
+// ซ่อม JSON ที่ถูกตัดท้าย: ตัดถึงตัวอักษรปลอดภัยล่าสุด แล้วปิด " ] } ที่ค้างไว้ (best-effort)
+function _repairTruncatedJson(raw) {
+  let str = String(raw || '');
+  if (!str.trim().startsWith('{')) return null;
+  // ตัดหางที่ค้างหลัง , หรือกลางค่า → ถอยถึง } หรือ " ที่ปิดล่าสุด
+  let cut = Math.max(str.lastIndexOf('}'), str.lastIndexOf('"'));
+  if (cut < 0) return null;
+  str = str.slice(0, cut + 1);
+  // นับวงเล็บที่ยังเปิดค้าง (ข้าม content ใน string)
+  let inStr = false, esc = false, depthC = 0, depthB = 0;
+  for (const ch of str) {
+    if (esc) { esc = false; continue; }
+    if (ch === '\\') { esc = true; continue; }
+    if (ch === '"') inStr = !inStr;
+    else if (!inStr) { if (ch === '{') depthC++; else if (ch === '}') depthC--; else if (ch === '[') depthB++; else if (ch === ']') depthB--; }
+  }
+  if (inStr) str += '"';
+  str = str.replace(/,\s*$/, ''); // ตัด comma ท้ายที่ค้าง
+  return str + ']'.repeat(Math.max(0, depthB)) + '}'.repeat(Math.max(0, depthC));
 }
 
 /**
