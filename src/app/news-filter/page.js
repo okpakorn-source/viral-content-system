@@ -205,7 +205,9 @@ function NewsFilterContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
       });
-      const data = await res.json();
+      let data;
+      try { data = await res.json(); }
+      catch { throw new Error(res.status >= 500 ? 'ระบบประมวลผลไม่ทัน/ขัดข้องชั่วคราว — กด "ตรวจคะแนน" ใหม่อีกครั้งได้เลย' : 'ตอบกลับผิดรูปแบบ — ลองใหม่อีกครั้ง'); }
       if (!data.success) throw new Error(data.error || 'ตรวจคะแนนไม่สำเร็จ');
       setScoreData(data.data);
     } catch (err) {
@@ -500,7 +502,9 @@ function NewsFilterContent() {
         }),
       });
 
-      const data = await res.json();
+      let data;
+      try { data = await res.json(); }
+      catch { throw new Error(res.status >= 500 ? 'ระบบประมวลผลไม่ทัน/ขัดข้องชั่วคราว — กด "วิเคราะห์" ใหม่อีกครั้งได้เลย' : 'ตอบกลับผิดรูปแบบ — ลองใหม่อีกครั้ง'); }
       if (!data.success) {
         throw new Error(data.error || 'เกิดข้อผิดพลาดในการวิเคราะห์');
       }
