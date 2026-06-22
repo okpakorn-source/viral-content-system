@@ -141,10 +141,6 @@ function NewsFilterContent() {
   const [sourceUrl, setSourceUrl] = useState('');
   const [autoFilter, setAutoFilter] = useState(true); // auto-filter after scrape
   const [showGuide, setShowGuide] = useState(false); // usage guide toggle
-
-  // ★ 22 มิ.ย.: ตรวจคะแนนเนื้อดิบก่อนส่งเจน (เรียก /api/news-filter/score)
-  const [scoreData, setScoreData] = useState(null);
-  const [scoreLoading, setScoreLoading] = useState(false);
   // ★ 19 มิ.ย. (ผู้ใช้สั่งแก้มือถือ): responsive — จอแคบ <768px สลับเป็นคอลัมน์เดียว กันเฟรมขวาลน
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
@@ -189,32 +185,6 @@ function NewsFilterContent() {
     setSourceUrl('');
     setScrapeStep('');
     setSplitData(null);
-    setScoreData(null);
-  };
-
-  // ★ 22 มิ.ย.: ตรวจคะแนนเนื้อดิบ (ก่อนส่งเจน) — บอกว่าครบพอไหม ขาดอะไร ต้องรีเสิร์ชอะไรเพิ่ม
-  const handleScore = async () => {
-    const text = inputText.trim();
-    if (!text) return;
-    setScoreLoading(true);
-    setScoreData(null);
-    setError(null);
-    try {
-      const res = await fetch('/api/news-filter/score', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      let data;
-      try { data = await res.json(); }
-      catch { throw new Error(res.status >= 500 ? 'ระบบประมวลผลไม่ทัน/ขัดข้องชั่วคราว — กด "ตรวจคะแนน" ใหม่อีกครั้งได้เลย' : 'ตอบกลับผิดรูปแบบ — ลองใหม่อีกครั้ง'); }
-      if (!data.success) throw new Error(data.error || 'ตรวจคะแนนไม่สำเร็จ');
-      setScoreData(data.data);
-    } catch (err) {
-      setError(err.message || 'ตรวจคะแนนไม่สำเร็จ');
-    } finally {
-      setScoreLoading(false);
-    }
   };
 
   // ★ 16 มิ.ย.: แยกเนื้อแก่นออกเป็นประเด็นย่อย (เรียก /api/news-filter/split)
@@ -1157,22 +1127,6 @@ function NewsFilterContent() {
               </button>
             </div>
 
-            {/* ★ 22 มิ.ย.: ปุ่มตรวจคะแนนเนื้อดิบ — กด "ก่อน" วิเคราะห์ เพื่อเช็คว่าเนื้อดิบครบพอเจนไหม */}
-            <button
-              onClick={handleScore}
-              disabled={scoreLoading || !inputText.trim()}
-              style={{
-                width: '100%', padding: '13px 0', borderRadius: 12, marginBottom: 10,
-                border: '2px solid rgba(245,158,11,0.55)',
-                background: scoreLoading || !inputText.trim() ? 'rgba(245,158,11,0.06)' : 'rgba(245,158,11,0.16)',
-                color: '#f59e0b', fontSize: 15, fontWeight: 800,
-                cursor: scoreLoading || !inputText.trim() ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit', opacity: scoreLoading || !inputText.trim() ? 0.55 : 1,
-              }}
-            >
-              {scoreLoading ? '⏳ กำลังตรวจคะแนน...' : '📊 ตรวจคะแนนเนื้อดิบ (กดก่อนวิเคราะห์)'}
-            </button>
-
             {/* Action Buttons */}
             <div style={{ display: 'flex', gap: 10 }}>
               {isUrlOnly ? (
@@ -1237,51 +1191,6 @@ function NewsFilterContent() {
                 🗑️ ล้าง
               </button>
             </div>
-
-            {/* ★ การ์ดผลคะแนนเนื้อดิบ (ปุ่ม "📊 ตรวจคะแนน" อยู่เหนือปุ่มวิเคราะห์) */}
-            {scoreData && (() => {
-              const gColor = scoreData.grade === 'green' ? '#22c55e' : scoreData.grade === 'yellow' ? '#f59e0b' : '#ef4444';
-              const gLabel = scoreData.grade === 'green' ? '🟢 เจนได้เลย' : scoreData.grade === 'yellow' ? '🟡 เจนได้ แต่ควรเติม' : '🔴 ต้องเติมก่อน';
-              const sIcon = (s) => s === 'good' ? '✅' : s === 'weak' ? '⚠️' : '❌';
-              return (
-                <div style={{ marginTop: 12, border: `1px solid ${gColor}55`, borderRadius: 14, padding: 16, background: 'rgba(0,0,0,0.15)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                    <div style={{ fontSize: 30, fontWeight: 900, color: gColor, lineHeight: 1 }}>{scoreData.total}<span style={{ fontSize: 15, color: 'var(--text-muted)' }}>/10</span></div>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: gColor }}>{gLabel}</div>
-                  </div>
-                  {scoreData.autoFail && <div style={{ fontSize: 12, color: '#ef4444', marginBottom: 10, fontWeight: 700 }}>⛔ เล่าเรื่องต่อเนื่องไม่ได้ (เหตุการณ์ขาดช่วง) — ห้ามเจน เสี่ยง AI นั่งเทียน</div>}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
-                    {scoreData.elements.map(e => (
-                      <div key={e.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5 }}>
-                        <span style={{ width: 16, flexShrink: 0 }}>{sIcon(e.status)}</span>
-                        <span style={{ flex: '0 0 132px', fontWeight: 700 }}>{e.label}</span>
-                        <span style={{ flex: '0 0 46px', color: e.status === 'good' ? '#22c55e' : e.status === 'weak' ? '#f59e0b' : '#ef4444', fontWeight: 800 }}>{e.score}/{e.max}</span>
-                        <span style={{ flex: 1, minWidth: 0, color: 'var(--text-muted)' }}>{e.note}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {scoreData.strengths?.length > 0 && (
-                    <div style={{ marginBottom: 10 }}>
-                      <div style={{ fontSize: 12, fontWeight: 800, color: '#22c55e', marginBottom: 4 }}>✅ ดีแล้ว</div>
-                      {scoreData.strengths.map((s, i) => <div key={i} style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 2, lineHeight: 1.5 }}>• {s}</div>)}
-                    </div>
-                  )}
-                  {scoreData.missing?.length > 0 && (
-                    <div style={{ marginBottom: 10 }}>
-                      <div style={{ fontSize: 12, fontWeight: 800, color: '#f59e0b', marginBottom: 4 }}>⚠️ ยังขาด (ทำให้เห็นภาพเหตุการณ์ไม่ครบ)</div>
-                      {scoreData.missing.map((s, i) => <div key={i} style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 2, lineHeight: 1.5 }}>• {s}</div>)}
-                    </div>
-                  )}
-                  {scoreData.researchToAdd?.length > 0 && (
-                    <div style={{ marginBottom: 10 }}>
-                      <div style={{ fontSize: 12, fontWeight: 800, color: '#3b82f6', marginBottom: 4 }}>🔎 ต้องไปรีเสิร์ช/เติมก่อนเจน</div>
-                      {scoreData.researchToAdd.map((s, i) => <div key={i} style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 2, lineHeight: 1.5 }}>{i + 1}. {s}</div>)}
-                    </div>
-                  )}
-                  {scoreData.verdict && <div style={{ fontSize: 12.5, lineHeight: 1.6, padding: '8px 11px', borderRadius: 8, background: `${gColor}14`, color: gColor, fontWeight: 600 }}>📌 {scoreData.verdict}</div>}
-                </div>
-              );
-            })()}
           </div>
 
           {/* ===== RIGHT PANEL (Output) ===== */}

@@ -23,7 +23,7 @@
  */
 
 import { callAI } from '@/lib/ai/openai';
-import { MODEL_FAST, MODEL_PRIMARY } from '@/lib/ai/modelConfig';
+import { MODEL_FAST } from '@/lib/ai/modelConfig';
 
 // =============================================
 // PATTERN DEFINITIONS — คำ/วลีสำหรับจำแนกประโยค
@@ -720,100 +720,6 @@ ${text.slice(0, 8000)}
   }
 }
 
-
-// =============================================
-// 📊 scoreRawContent — ให้คะแนน "เนื้อข่าวดิบ" ก่อนส่งเจน (22 มิ.ย. 69)
-//   จุดประสงค์: บอกพนักงานว่าเนื้อดิบครบพอจะเจนหรือยัง / ขาดองค์ประกอบไหน / ต้องไปรีเสิร์ชอะไรเพิ่ม
-//   หลักคิด: "ถ้าอ่านแล้วยังต้องเดาเองว่าเกิดอะไร → AI ก็ต้องเดา = นั่งเทียน"
-//   ★ เครื่องมือช่วยคน — แยกจากระบบทำข่าวอัตโนมัติ 100% (เรียก callAI ตรงๆ ไม่แตะไลน์ออโต้)
-// =============================================
-const RAW_SCORE_RUBRIC = [
-  { key: 'who',        label: 'ใคร (ตัวละคร)',           max: 2 },
-  { key: 'what',       label: 'เกิดอะไร (เหตุการณ์)',      max: 2 },
-  { key: 'continuity', label: 'ที่มาที่ไป (เล่าต่อเนื่อง)', max: 2 },
-  { key: 'details',    label: 'รายละเอียดเฉพาะ',           max: 1.5 },
-  { key: 'quotes',     label: 'คำพูดจริง (quote)',         max: 1.5 },
-  { key: 'source',     label: 'แหล่งน่าเชื่อถือ',           max: 1 },
-];
-
-export async function scoreRawContent(text) {
-  const raw = String(text || '').trim();
-  if (raw.length < 30) {
-    return { success: false, error: 'เนื้อหาสั้นเกินไป — วางเนื้อข่าวดิบอย่างน้อย 1 ย่อหน้า', errorType: 'TOO_SHORT' };
-  }
-  const prompt = `คุณเป็น "กรรมการตรวจเนื้อข่าวดิบ" ที่เข้มงวดมาก หน้าที่: ตรวจว่าเนื้อดิบนี้ครบพอจะให้ AI เขียนเป็นข่าวไวรัลโดย "ไม่ต้องนั่งเทียน" หรือยัง
-
-⚖️ การให้คะแนนต้องเข้ม — ให้เต็มยากมาก:
-- ข่าวทั่วไปส่วนใหญ่ควรได้ 5-7 คะแนน · จะได้ 9-10 เฉพาะข่าวที่เหตุการณ์ครบจริงๆ เล่าได้ทุกสเต็ปโดยไม่ต้องเดาเลย
-- หลักตัดสินสำคัญสุด: "ถ้าจะเขียนข่าวนี้เอง ต้องเดา/แต่งช่วงไหนไหม?" ถ้าต้องเดา = หักหนัก
-- ⚠️ กับดักที่พบบ่อย: ข่าว "อารมณ์/ชื่นชมเยอะ" (เช่น คนใจดี ฮีโร่ น่ารัก) ที่ฟังดูครบ แต่จริงๆ ไม่บอกว่า "เหตุการณ์จริงคืออะไร เกิดยังไง ทำอะไรเป็นขั้นตอน" → ต้องหักข้อ "เกิดอะไร" และ "รายละเอียด" ให้ชัด
-
-ให้คะแนน 6 องค์ประกอบ อิงจาก "เนื้อดิบ" ที่ให้เท่านั้น ⛔ ห้ามเดาว่ามีข้อมูลที่ไม่ได้เขียนไว้:
-1. ใคร (เต็ม 2): ตัวละครหลักชัดพอจะเล่าได้ไหม | 2=ชื่อ+ตัวตนชัด · 1=มีแค่ชื่อเล่น/บทบาท ไม่มีรายละเอียด · 0=ไม่รู้ว่าใคร
-2. เกิดอะไร (เต็ม 2): เหตุการณ์แกนเป็นรูปธรรมไหม | 2=รู้ชัดว่าเกิดอะไร เกิดยังไง ทำอะไรเป็นขั้นตอน · 1=รู้แค่กว้างๆ ("ช่วยเหลือ"/"มีอุบัติเหตุ") แต่ไม่รู้รายละเอียดการกระทำจริง · 0=มีแต่บรรยายอารมณ์
-3. ที่มาที่ไป-ต่อเนื่อง (เต็ม 2) ★: ลำดับเรื่องตามได้ไหม (ต้น→กลาง→จบ) | 2=ตามได้ลื่นครบ · 1=ตามเรื่องได้แต่มีช่วงข้ามรายละเอียด · 0=ลำดับขาด/กระโดดจน "อ่านแล้วงง ไม่รู้ว่าเกิดอะไรต่อ"
-   ⚠️ "ขาดรายละเอียดของเหตุการณ์" ให้หักข้อ 2+ข้อ 4 — ข้อ 3 ให้ 0 เฉพาะเมื่อลำดับขาดจน "อ่านไม่รู้เรื่อง"; ถ้าเรื่องยังเล่าตามได้แม้ดีเทลบาง = อย่างน้อย 1
-4. รายละเอียดเฉพาะ (เต็ม 1.5): ตัวเลข+วันเวลา+สถานที่+ชื่อเฉพาะ ครบไหม | หักถ้าขาดวันที่หรือตัวเลข/รายละเอียดสำคัญ
-5. คำพูดจริง (เต็ม 1.5): มี quote ของคนในข่าวไหม | 1.5=หลาย quote ที่ให้ข้อมูล · 0.75=มี 1 quote สั้นๆ · 0=ไม่มี
-6. แหล่งน่าเชื่อถือ (เต็ม 1): ระบุแหล่ง/สำนักข่าว/เจ้าตัวได้ไหม (ไม่ใช่เพจมโน)
-
-=== เนื้อข่าวดิบ ===
-${raw.slice(0, 7000)}
-=== จบ ===
-
-กฎการตอบ:
-- note/strengths/missing/researchToAdd ต้อง "เจาะจงกับข่าวนี้" ไม่ใช่คำกว้างๆ (เช่น แทนที่จะบอก "ขาดรายละเอียด" ให้บอก "ไม่ระบุว่าอุบัติเหตุคือรถอะไรชนอะไร")
-- ⛔ ถ้าคะแนนรวมไม่เต็ม (ต่ำกว่า 9) → "missing" และ "researchToAdd" ต้องมีอย่างน้อย 2 ข้อเสมอ ห้ามปล่อยว่าง
-- researchToAdd = สั่งเป็นงานทำได้จริง เช่น "ไปหาข่าวต้นเรื่องจากสำนักข่าว X เพื่อดูว่าอุบัติเหตุเกิดอะไรขึ้น + วันที่"
-
-ตอบ JSON เท่านั้น:
-{
-  "elements": [
-    {"key":"who","score":0,"status":"good|weak|missing","note":""},
-    {"key":"what","score":0,"status":"good|weak|missing","note":""},
-    {"key":"continuity","score":0,"status":"good|weak|missing","note":""},
-    {"key":"details","score":0,"status":"good|weak|missing","note":""},
-    {"key":"quotes","score":0,"status":"good|weak|missing","note":""},
-    {"key":"source","score":0,"status":"good|weak|missing","note":""}
-  ],
-  "strengths": ["สิ่งที่ดีแล้วของข่าวนี้ 1-3 ข้อ"],
-  "missing": ["สิ่งที่ขาดทำให้ภาพเหตุการณ์ไม่ครบ — เจาะจง"],
-  "researchToAdd": ["ต้องไปหา/รีเสิร์ชอะไรมาเติม — สั่งเป็นงานได้จริง"],
-  "verdict": "สรุป 1-2 ประโยคว่าเจนได้ไหม เพราะอะไร"
-}`;
-  try {
-    const r = await callAI({ prompt, model: MODEL_PRIMARY, temperature: 0.2, maxTokens: 1800 });
-    const p = typeof r === 'object' ? r : JSON.parse(String(r).match(/\{[\s\S]*\}/)?.[0] || '{}');
-    // normalize + คำนวณคะแนนรวม/เกรดฝั่งเราเอง (กัน AI บวกเลขพลาด)
-    const byKey = {};
-    for (const e of (Array.isArray(p.elements) ? p.elements : [])) if (e?.key) byKey[e.key] = e;
-    let total = 0;
-    const elements = RAW_SCORE_RUBRIC.map(rb => {
-      const e = byKey[rb.key] || {};
-      const score = Math.max(0, Math.min(rb.max, Number(e.score) || 0));
-      total += score;
-      const status = ['good', 'weak', 'missing'].includes(e.status) ? e.status : (score >= rb.max * 0.75 ? 'good' : score > 0 ? 'weak' : 'missing');
-      return { key: rb.key, label: rb.label, score: Math.round(score * 10) / 10, max: rb.max, status, note: String(e.note || '').slice(0, 200) };
-    });
-    total = Math.round(total * 10) / 10;
-    const continuity = elements.find(e => e.key === 'continuity');
-    const autoFail = !!continuity && continuity.score < 0.5; // เล่าต่อเนื่องไม่ได้ = เสี่ยงนั่งเทียน → แดงทันที
-    const grade = autoFail ? 'red' : total >= 8 ? 'green' : total >= 6 ? 'yellow' : 'red';
-    return {
-      success: true,
-      data: {
-        total, grade, autoFail, canGenerate: grade !== 'red', elements,
-        strengths: (Array.isArray(p.strengths) ? p.strengths : []).slice(0, 5).map(s => String(s).slice(0, 160)).filter(Boolean),
-        missing: (Array.isArray(p.missing) ? p.missing : []).slice(0, 6).map(s => String(s).slice(0, 160)).filter(Boolean),
-        researchToAdd: (Array.isArray(p.researchToAdd) ? p.researchToAdd : []).slice(0, 6).map(s => String(s).slice(0, 160)).filter(Boolean),
-        verdict: String(p.verdict || '').slice(0, 300),
-      },
-    };
-  } catch (e) {
-    console.error('[NewsFilter] scoreRawContent failed:', e.message);
-    return { success: false, error: 'ตรวจคะแนนไม่สำเร็จ: ' + (e.message || ''), errorType: 'SCORE_ERROR' };
-  }
-}
 
 // =============================================
 // 🧩 splitTopics — แยกประเด็นย่อย (16 มิ.ย. 69)
