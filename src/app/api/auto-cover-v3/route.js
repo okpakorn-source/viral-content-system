@@ -432,16 +432,16 @@ async function _renderCoverV3(request) {
 
     // rev.21b: คุมเวลา (เคยชน 727s/800s) — 2 retries + เผื่อเวลาเหลือพอเท่านั้น (กัน timeout ปกพัง)
     const TARGET_SCORE = 9, MAX_RETRY = 2, _timeBudgetMs = 560000; // หยุดลูปถ้าใช้ไปเกิน ~9.3 นาที
+    // ★ rev.21c (ผู้ใช้: "ให้ใช้เทมเพลตที่กำหนด 5 รูป ห้ามยุบเป็น 3"):
+    //   ลูป retry ต้อง "ไม่ยุบต่ำกว่าจำนวนช่องของเทมเพลตที่กำหนด" (vt_ref_tri 5) → คงโครง 5 รูปเสมอ
+    //   แก้ภาพหลุดเรื่องด้วยการ "ให้ Director เลือกภาพใหม่ในโครงเดิม" ไม่ใช่ตัดช่องทิ้ง
+    const _minSlots = templateSpec.slots.length; // จำนวนช่องที่กำหนด (attempt 1)
     const _retryT = [...new Set([...templateOptions, ...viralFirst, ...plainFallbacks])]
-      .filter(t => t && t.slots.length <= imageBuffers.length);
+      .filter(t => t && t.slots.length <= imageBuffers.length && t.slots.length >= _minSlots);
     for (let k = 0; k < MAX_RETRY && _best.eff < TARGET_SCORE && (Date.now() - t0) < _timeBudgetMs; k++) {
       try {
-        // เปลี่ยนกลยุทธ์ทุกรอบ: ดันเทมเพลตอื่นขึ้นนำ → Director เลือกภาพ/ครอป/เลย์เอาต์ใหม่
-        // ★ Phase3 (hero-rescue): ถ้ารอบดีสุด "มีภาพหลุดเรื่อง/รก" → บีบเทมเพลตช่องน้อยสุด (ฮีโร่เด่น) ตัดภาพขยะออก
-        const _heroRescue = !_best.jr.onTopic || !_best.jr.clean;
-        const _smallT = _retryT.slice().sort((a, b) => a.slots.length - b.slots.length)[0];
-        const lead = (_heroRescue && _smallT) ? _smallT : (_retryT[(k + 1) % Math.max(1, _retryT.length)] || templateSpec);
-        if (_heroRescue && _smallT) console.log(`[CoverV3] 🎯 hero-rescue → บีบ ${_smallT.id} (ช่องน้อยสุด) ตัดภาพหลุดเรื่อง`);
+        // เปลี่ยนกลยุทธ์ทุกรอบ: หมุนเทมเพลต "ขนาดเท่าหรือใหญ่กว่าที่กำหนด" → Director เลือกภาพ/ครอปใหม่ในโครงเดิม
+        const lead = _retryT[(k + 1) % Math.max(1, _retryT.length)] || templateSpec;
         const opts = [...new Set([lead, ..._retryT])].slice(0, 3);
         const dir2 = await directCover({ imageBuffers, identity, templateOptions: opts, templateSpec: opts[0], newsTitle, faceBoxes });
         if (!dir2) continue;
