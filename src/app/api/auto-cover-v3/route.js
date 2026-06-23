@@ -429,10 +429,11 @@ async function _renderCoverV3(request) {
     let _best = { buffer: coverBuffer, assignments, templateSpec, jr: _jr0, eff: _eff(_jr0), reason: direction.reason, qcApplied };
     console.log(`[CoverV3] 🏆 attempt 1 (${templateSpec.id}) → ${_jr0.score}/10 eff=${_best.eff} — ${_jr0.reason}`);
 
-    const TARGET_SCORE = 9, MAX_RETRY = 3;
+    // rev.21b: คุมเวลา (เคยชน 727s/800s) — 2 retries + เผื่อเวลาเหลือพอเท่านั้น (กัน timeout ปกพัง)
+    const TARGET_SCORE = 9, MAX_RETRY = 2, _timeBudgetMs = 560000; // หยุดลูปถ้าใช้ไปเกิน ~9.3 นาที
     const _retryT = [...new Set([...templateOptions, ...viralFirst, ...plainFallbacks])]
       .filter(t => t && t.slots.length <= imageBuffers.length);
-    for (let k = 0; k < MAX_RETRY && _best.eff < TARGET_SCORE; k++) {
+    for (let k = 0; k < MAX_RETRY && _best.eff < TARGET_SCORE && (Date.now() - t0) < _timeBudgetMs; k++) {
       try {
         // เปลี่ยนกลยุทธ์ทุกรอบ: ดันเทมเพลตอื่นขึ้นนำ → Director เลือกภาพ/ครอป/เลย์เอาต์ใหม่
         const lead = _retryT[(k + 1) % Math.max(1, _retryT.length)] || templateSpec;
