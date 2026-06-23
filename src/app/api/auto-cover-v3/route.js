@@ -399,7 +399,8 @@ async function _renderCoverV3(request) {
     //   ★ เฉพาะระบบปก ไม่แตะระบบทำข่าวอัตโนมัติ
     const { callAI: _callAIJ } = await import('@/lib/ai/openai');
     const _sharpJ = (await import('sharp')).default;
-    const _judgeCtx = (newsTitle || content || identity?.mainCharacter || identity?.storyType || '').slice(0, 140);
+    const _judgeCtx = ((newsTitle || content || identity?.mainCharacter || identity?.storyType || '')
+      + (identity?.coverEmotion ? ` | อารมณ์ข่าว: ${identity.coverEmotion}` : '')).slice(0, 170);
     async function _judgeRigorous(buf) {
       try {
         const small = await _sharpJ(buf).resize(760, null, { fit: 'inside' }).jpeg({ quality: 82 }).toBuffer();
@@ -436,7 +437,11 @@ async function _renderCoverV3(request) {
     for (let k = 0; k < MAX_RETRY && _best.eff < TARGET_SCORE && (Date.now() - t0) < _timeBudgetMs; k++) {
       try {
         // เปลี่ยนกลยุทธ์ทุกรอบ: ดันเทมเพลตอื่นขึ้นนำ → Director เลือกภาพ/ครอป/เลย์เอาต์ใหม่
-        const lead = _retryT[(k + 1) % Math.max(1, _retryT.length)] || templateSpec;
+        // ★ Phase3 (hero-rescue): ถ้ารอบดีสุด "มีภาพหลุดเรื่อง/รก" → บีบเทมเพลตช่องน้อยสุด (ฮีโร่เด่น) ตัดภาพขยะออก
+        const _heroRescue = !_best.jr.onTopic || !_best.jr.clean;
+        const _smallT = _retryT.slice().sort((a, b) => a.slots.length - b.slots.length)[0];
+        const lead = (_heroRescue && _smallT) ? _smallT : (_retryT[(k + 1) % Math.max(1, _retryT.length)] || templateSpec);
+        if (_heroRescue && _smallT) console.log(`[CoverV3] 🎯 hero-rescue → บีบ ${_smallT.id} (ช่องน้อยสุด) ตัดภาพหลุดเรื่อง`);
         const opts = [...new Set([lead, ..._retryT])].slice(0, 3);
         const dir2 = await directCover({ imageBuffers, identity, templateOptions: opts, templateSpec: opts[0], newsTitle, faceBoxes });
         if (!dir2) continue;
