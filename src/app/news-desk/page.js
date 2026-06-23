@@ -132,6 +132,9 @@ export default function NewsDeskPage() {
   const [mktSending, setMktSending] = useState(false);
   const [researching, setResearching] = useState({}); // id → true
   const [moreBtns, setMoreBtns] = useState({}); // id → กางปุ่มขั้นสูง (ปรึกษา บก./เจาะลึก)
+  // ★ 23 มิ.ย.: กรองข่าวที่โหลดมาแล้ว "สด" (ไม่ harvest ใหม่) — หาข่าวในหลายร้อยข่าวได้ทันที
+  const [feedFilter, setFeedFilter] = useState('');     // พิมพ์ชื่อคน/คำในหัวข้อ → กรองทันที
+  const [quickChip, setQuickChip] = useState('all');    // all | today | clip | celeb
 
   useEffect(() => {
     setMe(localStorage.getItem('desk_username') || '');
@@ -161,8 +164,8 @@ export default function NewsDeskPage() {
   const load = useCallback(async () => {
     try {
       const url = tab === 'browse'
-        ? `/api/news-desk?tab=browse&limit=300&category=${encodeURIComponent(catFilter)}`
-        : `/api/news-desk?tab=${tab}&limit=80`;
+        ? `/api/news-desk?tab=browse&limit=400&category=${encodeURIComponent(catFilter)}`
+        : `/api/news-desk?tab=${tab}&limit=120`;
       const res = await fetch(url, { cache: 'no-store' });
       const d = await parseRes(res);
       if (d.success && d.categoryCounts) setCatCounts(d.categoryCounts);
@@ -580,6 +583,20 @@ export default function NewsDeskPage() {
     catch { setMsg('❌ คัดลอกไม่สำเร็จ'); }
   };
 
+  // ★ 23 มิ.ย.: กรองสด client-side — หาข่าวในหลายร้อยข่าวได้ทันที (ไม่ใช้สกอร์ ไม่ harvest ใหม่)
+  const _todayStr = new Date().toISOString().slice(0, 10);
+  const _isClipItem = (it) => it.lane === 'interview' || it.lane === 'video' || !!it.fullText;
+  const _isCelebItem = (it) => /ดารา|นักร้อง|นักแสดง|ศิลปิน|บันเทิง|celeb/i.test(`${it.category || ''} ${it.lane || ''}`);
+  const matchesFeed = (it) => {
+    const kw = feedFilter.trim().toLowerCase();
+    if (kw && !`${it.title || ''} ${it.category || ''} ${it.source || ''} ${it.lane || ''}`.toLowerCase().includes(kw)) return false;
+    if (quickChip === 'today' && !String(it.harvestedAt || '').startsWith(_todayStr)) return false;
+    if (quickChip === 'clip' && !_isClipItem(it)) return false;
+    if (quickChip === 'celeb' && !_isCelebItem(it)) return false;
+    return true;
+  };
+  const shown = (feedFilter.trim() || quickChip !== 'all') ? items.filter(matchesFeed) : items;
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary, #0f1419)' }}>
       <Header title="🗞️ โต๊ะข่าวกลาง" subtitle="ข่าวคัดกรองด้วยสมอง 4 ชั้น — เรียงตามความน่าทำของเพจเรา" />
@@ -839,6 +856,34 @@ export default function NewsDeskPage() {
           </div>
         )}
 
+        {/* ★ 23 มิ.ย.: แถบกรองสด — หาข่าวในหลายร้อยข่าวได้ทันที (ไม่ harvest ใหม่ ไม่ใช้สกอร์) */}
+        {tab !== 'junk' && !loading && items.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+            <input
+              value={feedFilter}
+              onChange={e => setFeedFilter(e.target.value)}
+              placeholder='🔍 กรองข่าวที่มีอยู่ — พิมพ์ชื่อคน/คำในหัวข้อ (กรองทันที)'
+              style={{ flex: 1, minWidth: 220, padding: '9px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' }}
+            />
+            {[['all', 'ทั้งหมด'], ['today', '🆕 วันนี้'], ['clip', '🎬 มีคลิป'], ['celeb', '⭐ ดารา']].map(([key, label]) => (
+              <button key={key} onClick={() => setQuickChip(key)}
+                style={{ padding: '8px 14px', borderRadius: 999, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
+                  border: '1px solid ' + (quickChip === key ? 'transparent' : 'var(--border)'),
+                  background: quickChip === key ? 'linear-gradient(135deg,#f59e0b,#d97706)' : 'rgba(255,255,255,0.05)',
+                  color: quickChip === key ? '#000' : 'var(--text-primary)' }}>
+                {label}
+              </button>
+            ))}
+            {(feedFilter.trim() || quickChip !== 'all') && (
+              <button onClick={() => { setFeedFilter(''); setQuickChip('all'); }}
+                style={{ padding: '8px 12px', borderRadius: 999, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 700, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>
+                ✕ ล้าง
+              </button>
+            )}
+            <span style={{ fontSize: 12.5, color: 'var(--text-muted)', marginLeft: 'auto' }}>แสดง {shown.length} / {items.length} ข่าว</span>
+          </div>
+        )}
+
         {/* รายการข่าว */}
         {tab === 'junk' ? (
           loading ? (
@@ -875,23 +920,23 @@ export default function NewsDeskPage() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {items.map(it => (
+            {shown.length === 0 && (
+              <div style={{ color: 'var(--text-secondary)', padding: 30, textAlign: 'center', fontSize: 13 }}>
+                ไม่พบข่าวตรงคำกรอง — ลองล้างคำค้น หรือกดชิป &quot;ทั้งหมด&quot;
+              </div>
+            )}
+            {shown.map(it => (
               <div key={it.id} style={{
                 padding: '14px 16px', borderRadius: 14, background: 'var(--bg-card)',
                 border: it.status === 'claimed' ? '1px solid rgba(245,158,11,0.5)' : it.status === 'sent' ? '1px solid rgba(34,197,94,0.4)' : '1px solid var(--border)',
               }}>
                 <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                  {/* คะแนน + เกรดคุณภาพ (อ่านเร็ว) */}
-                  {(() => { const g = qualityGrade(it); return (
-                    <div style={{ minWidth: 58, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                      <div style={{ width: '100%', textAlign: 'center', padding: '8px 0', borderRadius: 12, background: scoreColor(it.finalScore) + '1d', color: scoreColor(it.finalScore), fontWeight: 800, fontSize: 20 }}>
-                        {it.finalScore ?? '-'}
-                      </div>
-                      <div title={it.judgeScore != null ? `บก.AI ให้ ${it.judgeScore}/10` : 'ประเมินจากคะแนนรวม'} style={{ width: '100%', textAlign: 'center', padding: '2px 0', borderRadius: 7, background: g.bg, color: g.color, fontWeight: 700, fontSize: 10.5, lineHeight: 1.25 }}>
-                        {g.emoji} {g.label}
-                      </div>
+                  {/* ★ 23 มิ.ย.: เลิกโชว์ตัวเลขสกอร์ (ทีมแจ้งไม่แม่น+ทำข่าวดีจม) — โชว์แค่ "🆕 วันนี้" ช่วยสแกน */}
+                  {String(it.harvestedAt || '').startsWith(_todayStr) && (
+                    <div style={{ minWidth: 44, textAlign: 'center', paddingTop: 2 }}>
+                      <span style={{ fontSize: 9.5, fontWeight: 800, color: '#22c55e', background: 'rgba(34,197,94,0.12)', borderRadius: 6, padding: '2px 6px', whiteSpace: 'nowrap' }}>🆕 วันนี้</span>
                     </div>
-                  ); })()}
+                  )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 15, lineHeight: 1.45 }}>
                       {(LANE_ICONS[it.lane] || '📰') + ' '}{it.title}
