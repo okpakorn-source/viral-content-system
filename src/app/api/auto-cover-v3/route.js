@@ -366,7 +366,7 @@ async function _renderCoverV3(request) {
       await markQueueJob('failed', { error: 'AI Director จัดวางไม่สำเร็จ' });
       return NextResponse.json({ success: false, error: 'AI Director จัดวางไม่สำเร็จ', errorType: 'DIRECTOR_FAILED' }, { status: 422 });
     }
-    const templateSpec = direction.templateSpec; // โครงที่ Director เลือก
+    let templateSpec = direction.templateSpec; // โครงที่ Director เลือก (let — ลูป self-heal สลับเทมเพลตได้)
 
     // ── ③ Execute (พิกเซลแท้) ──
     const { executeCover, applyFixes } = await import('@/lib/services/coverExecutorService');
@@ -394,24 +394,65 @@ async function _renderCoverV3(request) {
       console.log('[CoverV3] ⑤.5 ข่าวคลิป → ครอปหน้าตัดคำบรรยายทุกช่อง → ประกอบใหม่');
     }
 
-    // ── ให้คะแนนปกด้วย mini-judge (แก้ป้าย 0/10 ในคลัง) ──
-    let score = 7;
-    try {
-      const { callAI } = await import('@/lib/ai/openai');
-      const smallForScore = await (await import('sharp')).default(coverBuffer).resize(600, null, { fit: 'inside' }).jpeg({ quality: 75 }).toBuffer();
-      // งานจากคิวมักไม่มี newsTitle → ใช้ identity แทน และบังคับให้คะแนนจากภาพเสมอ (กัน "ข้อมูลไม่พอ" = 0/10)
-      const judgeCtx = (newsTitle || identity?.mainCharacter || identity?.storyType || '').slice(0, 80);
-      const judgeRes = await callAI({
-        prompt: `ให้คะแนนปกข่าวนี้ 0-10 จากภาพที่แนบ (องค์ประกอบ, ความเด่นของบุคคล, การเล่าเรื่อง, ความสะอาด)${judgeCtx ? ` บริบท: "${judgeCtx}"` : ''}\nต้องประเมินจากภาพเสมอแม้ไม่มีบริบทข่าว ห้ามตอบว่าข้อมูลไม่เพียงพอ\nตอบ JSON: {"score": 0-10, "reason": "สั้นๆ"}`,
-        imageContents: [{ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${smallForScore.toString('base64')}`, detail: 'low' } }],
-        model: 'gpt-4o-mini',
-        temperature: 0.2,
-        maxTokens: 300,
-      });
-      const j = typeof judgeRes === 'object' ? judgeRes : JSON.parse(String(judgeRes).match(/\{[\s\S]*\}/)?.[0] || '{}');
-      if (Number.isFinite(Number(j?.score))) score = Math.max(0, Math.min(10, Number(j.score)));
-      console.log(`[CoverV3] 🏆 Judge score: ${score}/10 — ${String(j?.reason || '').slice(0, 70)}`);
-    } catch (e) { console.log('[CoverV3] judge failed (non-fatal):', e.message?.slice(0, 50)); }
+    // ── ④★ Judge เข้ม + Self-heal loop (rev.21, 23 มิ.ย.): เจนซ้ำเปลี่ยนกลยุทธ์จนได้ ≥9 ──
+    //   เกณฑ์ 4 แกน: บุคคลเด่นชัด / ภาพตรงเรื่อง / องค์ประกอบสวย / สะอาด — แกนบังคับไม่ผ่าน = กดคะแนนลง
+    //   ★ เฉพาะระบบปก ไม่แตะระบบทำข่าวอัตโนมัติ
+    const { callAI: _callAIJ } = await import('@/lib/ai/openai');
+    const _sharpJ = (await import('sharp')).default;
+    const _judgeCtx = (newsTitle || content || identity?.mainCharacter || identity?.storyType || '').slice(0, 140);
+    async function _judgeRigorous(buf) {
+      try {
+        const small = await _sharpJ(buf).resize(760, null, { fit: 'inside' }).jpeg({ quality: 82 }).toBuffer();
+        const res = await _callAIJ({
+          prompt: `คุณเป็นบรรณาธิการภาพอาวุโสของเพจข่าวไวรัล ให้คะแนน "ปกข่าว" นี้แบบเข้มงวดสุด (เต็ม 10)
+บริบทข่าว: "${_judgeCtx}"
+ประเมิน 4 แกน (ให้เต็มยากมาก — ปกใช้งานจริงต้อง ≥9 ทุกแกน):
+① บุคคลเด่นชัด — หน้าคน คมชัด ไม่ถูกตัดครึ่ง/เบลอ/เล็กจนหาไม่เจอ
+② ภาพ/โทนตรงกับเรื่อง — ไม่หลุดธีม ไม่มีภาพมั่วที่ไม่เกี่ยว
+③ องค์ประกอบ-เลย์เอาต์ — สวยระดับปกเพจดัง จัดวางลงตัว
+④ สะอาด — ไม่มีคำบรรยาย/ลายน้ำค้าง ไม่มีช่องว่าง/ภาพซ้ำ/ขอบแหว่ง/หน้าโดนตัด
+ถ้ามีตำหนิชัด (หน้าโดนตัด/ช่องว่าง/ภาพไม่เกี่ยว/รก/ลายน้ำ) ห้ามให้เกิน 7
+ตอบ JSON: {"score":0-10,"personClear":true,"onTopic":true,"clean":true,"issues":["ปัญหาเด่นถ้ามี"],"reason":"สั้นๆ"}`,
+          imageContents: [{ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${small.toString('base64')}`, detail: 'high' } }],
+          model: 'gpt-4o', temperature: 0.15, maxTokens: 450,
+        });
+        const j = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
+        const sc = Math.max(0, Math.min(10, Number(j?.score) || 0));
+        return { score: sc, personClear: j?.personClear !== false, onTopic: j?.onTopic !== false, clean: j?.clean !== false, issues: Array.isArray(j?.issues) ? j.issues.slice(0, 4) : [], reason: String(j?.reason || '').slice(0, 110) };
+      } catch (e) { console.log('[CoverV3] judge fail (non-fatal):', e.message?.slice(0, 40)); return { score: 7, personClear: true, onTopic: true, clean: true, issues: [], reason: 'judge error' }; }
+    }
+    // แกนบังคับ (บุคคล/ตรงเรื่อง/สะอาด) ไม่ผ่าน → กดคะแนนเพดาน 6.5 (ห้ามชนะแม้สวย)
+    const _eff = (jr) => (jr.personClear && jr.onTopic && jr.clean) ? jr.score : Math.min(jr.score, 6.5);
+
+    // attempt 1 = ผลที่ประกอบไว้แล้วข้างบน
+    const _jr0 = await _judgeRigorous(coverBuffer);
+    let _best = { buffer: coverBuffer, assignments, templateSpec, jr: _jr0, eff: _eff(_jr0), reason: direction.reason, qcApplied };
+    console.log(`[CoverV3] 🏆 attempt 1 (${templateSpec.id}) → ${_jr0.score}/10 eff=${_best.eff} — ${_jr0.reason}`);
+
+    const TARGET_SCORE = 9, MAX_RETRY = 3;
+    const _retryT = [...new Set([...templateOptions, ...viralFirst, ...plainFallbacks])]
+      .filter(t => t && t.slots.length <= imageBuffers.length);
+    for (let k = 0; k < MAX_RETRY && _best.eff < TARGET_SCORE; k++) {
+      try {
+        // เปลี่ยนกลยุทธ์ทุกรอบ: ดันเทมเพลตอื่นขึ้นนำ → Director เลือกภาพ/ครอป/เลย์เอาต์ใหม่
+        const lead = _retryT[(k + 1) % Math.max(1, _retryT.length)] || templateSpec;
+        const opts = [...new Set([lead, ..._retryT])].slice(0, 3);
+        const dir2 = await directCover({ imageBuffers, identity, templateOptions: opts, templateSpec: opts[0], newsTitle, faceBoxes });
+        if (!dir2) continue;
+        const tS = dir2.templateSpec; let asg2 = dir2.assignments;
+        let buf2 = await executeCover({ assignments: asg2, imageBuffers, templateSpec: tS, faceBoxes });
+        const qc2 = await reviewCover({ coverBuffer: buf2, templateSpec: tS, assignments: asg2, imageBuffers, faceBoxes, identity, newsTitle });
+        let qa2 = false;
+        if (!qc2.ok && qc2.fixes?.length > 0) { asg2 = applyFixes(asg2, qc2.fixes); tightenMomentCrops(asg2, faceBoxes); buf2 = await executeCover({ assignments: asg2, imageBuffers, templateSpec: tS, faceBoxes }); qa2 = true; }
+        if (_preferFrames) { faceTightenAll(asg2, faceBoxes, 2.2); buf2 = await executeCover({ assignments: asg2, imageBuffers, templateSpec: tS, faceBoxes }); }
+        const jr2 = await _judgeRigorous(buf2); const eff2 = _eff(jr2);
+        console.log(`[CoverV3] 🔁 retry ${k + 1}/${MAX_RETRY} (${tS.id}) → ${jr2.score}/10 eff=${eff2} — ${jr2.reason}`);
+        if (eff2 > _best.eff) _best = { buffer: buf2, assignments: asg2, templateSpec: tS, jr: jr2, eff: eff2, reason: dir2.reason, qcApplied: qa2 };
+      } catch (e) { console.log(`[CoverV3] retry ${k + 1} err:`, e.message?.slice(0, 45)); }
+    }
+    coverBuffer = _best.buffer; assignments = _best.assignments; templateSpec = _best.templateSpec; qcApplied = _best.qcApplied;
+    const score = Math.round(_best.jr.score * 10) / 10;
+    console.log(`[CoverV3] ✅ best ${score}/10 (${templateSpec.id}) | แกนบังคับ person=${_best.jr.personClear} topic=${_best.jr.onTopic} clean=${_best.jr.clean} | issues: ${_best.jr.issues.join(', ') || 'none'}`);
 
     // ── Archive (reuse v1 case archive) ──
     let caseId = null;
