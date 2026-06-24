@@ -56,12 +56,22 @@ export async function extractYouTubeHiResFrames(videoUrl, { maxFrames = 12, dlTi
     await execFileAsync(exe, dlArgs, { timeout: dlTimeoutMs, maxBuffer: 1024 * 1024 * 30 });
     if (!fs.existsSync(videoPath) || fs.statSync(videoPath).size < 50000) return [];
 
-    // 2) ffmpeg ตัด "เฟรมตอนฉากเปลี่ยน" (scene-detect) — ได้ห้อง/มุมต่างๆ ของบ้าน/สวน · scale ≥ ความกว้างเดิม สูงสุด 1280
+    // 2) ffmpeg ตัดเฟรม — "เท่าๆ กันทั้งคลิป" (ครอบคลุมทุกห้อง/มุมของบ้าน-สวน) · scale สูงสุด 1280
+    //    หาความยาวคลิป (ffprobe) → fps=จำนวนเฟรม/ความยาว = กระจายทั่วทั้งคลิป (scene-detect ได้น้อย/รวมกระจุก)
     const framesDir = path.join(tmpDir, 'f');
     fs.mkdirSync(framesDir, { recursive: true });
+    let dur = 0;
+    try {
+      const { stdout } = await execFileAsync('ffprobe',
+        ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', videoPath],
+        { timeout: 15000 });
+      dur = parseFloat(String(stdout).trim()) || 0;
+    } catch {}
+    const vf = dur > 5
+      ? `fps=${maxFrames}/${dur.toFixed(1)},scale='min(1280\\,iw):-2'`        // เท่าๆ กันทั้งคลิป
+      : `select='gt(scene\\,0.3)',scale='min(1280\\,iw):-2'`;                  // fallback: ฉากเปลี่ยน
     await execFileAsync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', videoPath,
-      '-vf', "select='gt(scene\\,0.35)',scale='min(1280\\,iw):-2'",
-      '-fps_mode', 'vfr', '-q:v', '2', '-frames:v', String(maxFrames),
+      '-vf', vf, '-fps_mode', 'vfr', '-q:v', '2', '-frames:v', String(maxFrames),
       path.join(framesDir, 'f_%04d.jpg')], { timeout: 90000, maxBuffer: 1024 * 1024 * 10 });
 
     // 3) อ่านเฟรม + กรองความละเอียด (≥350px = ผ่านด่าน judge) + รีทัชคมเบาๆ
