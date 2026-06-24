@@ -561,11 +561,29 @@ async function agentYouTubeFrames(identity) {
 
     const qualityFrames = [];
 
+    // === Tier 2.5 (NEW 24 มิ.ย.): yt-dlp Hi-Res Frames (เครื่องทีม Windows) ===
+    //   ดึงเฟรม "ความละเอียดสูงจริง" จากคลิป (yt-dlp โหลด ≤480p + ffmpeg ตัดเฟรมฉากเปลี่ยน)
+    //   → ได้ห้อง/สวน/บริบทจริงคมชัด ≥350px (เหนือกว่า storyboard 160×90 ที่ judge ตัดทิ้ง)
+    //   🔴 โมดูลแยกอิสระ · มีเฉพาะเครื่องที่มี yt-dlp+ffmpeg → ไม่มีก็ข้ามไปใช้ Tier เดิม (ไม่พัง)
+    try {
+      const { hiResFramesAvailable, extractHiResFromVideos } = await import('@/lib/services/youtubeHiResFrameExtractor');
+      if (await hiResFramesAvailable()) {
+        const hiUrls = videoIds.slice(0, 2).map(id => `https://www.youtube.com/watch?v=${id}`);
+        console.log(`[Agent2: YouTube] 🎬 Tier 2.5: yt-dlp hi-res frames จาก ${hiUrls.length} คลิป...`);
+        const hiFrames = await extractHiResFromVideos(hiUrls, { targetTotal: 12, perVideo: 8 });
+        if (hiFrames.length > 0) {
+          qualityFrames.push(...hiFrames.map(f => ({ buffer: f.buffer, source: 'youtube-hires', sourceUrl: f.sourceUrl })));
+          console.log(`[Agent2: YouTube] ✅ Tier 2.5: ได้เฟรมคมชัด ${hiFrames.length} ใบ (yt-dlp+ffmpeg) — ข้าม storyboard เบลอ`);
+        }
+      }
+    } catch (e) { console.log(`[Agent2: YouTube] Tier 2.5 hi-res ข้าม: ${e.message?.slice(0, 50)}`); }
+
     // === Tier 2.8: Try Playwright Frame Capture first (highly reliable on local environment) ===
     // ★ FIX (11 มิ.ย.): Vercel serverless ไม่มี Chrome binary — การ launch browser พังแรงระดับ process
     //   (เกิน try/catch) → ข้ามไป Tier 3 storyboard (HTTP ล้วน) บน serverless
-    if (process.env.VERCEL) {
-      console.log('[Agent2: YouTube] ⏭️ Skip Playwright on serverless (no browser) → Tier 3 storyboard');
+    if (process.env.VERCEL || qualityFrames.length > 0) {
+      if (qualityFrames.length > 0) console.log('[Agent2: YouTube] ⏭️ มีเฟรม hi-res แล้ว → ข้าม Playwright/storyboard');
+      else console.log('[Agent2: YouTube] ⏭️ Skip Playwright on serverless (no browser) → Tier 3 storyboard');
     } else
     try {
       console.log(`[Agent2: YouTube] 🚀 Tier 2.8: Trying Playwright frame capture...`);
