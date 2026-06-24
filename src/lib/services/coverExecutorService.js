@@ -238,13 +238,14 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
 function faceParamsForSlot(slot) {
   // หมายเหตุ: ค่าพวกนี้อ้างอิง "หัว" (รวมผม) แล้ว
   // rev.14r (feedback): hero ซูมออกนิด "เห็นทั้งหน้า+ไหล่" (เดิม 0.84 แน่นไปกับเซลฟี่จัด) · ช่องรองคงแน่นเน้นหน้า
-  if (slot.shape === 'circle') return { faceFrac: 0.72, faceTopAt: 0.47, maxFaceHFrac: 0.72 };
+  // rev.21g (ผู้ใช้: ทุกช่อง "หน้าใหญ่ เต็มเฟรม ตัดพื้นว่าง เด่นขึ้น"): ขยายหน้า + ดันขึ้น = ตัดพื้นโล่งเหนือหัว
+  if (slot.shape === 'circle') return { faceFrac: 0.80, faceTopAt: 0.45, maxFaceHFrac: 0.80 };
   const big = (slot.w * slot.h) >= (520 * 800); // ช่องเด่น/ฮีโร่
-  // rev.15g (feedback CASE-126): hero ซูมออก "เห็นเต็มหน้า+ไหล่ ไม่ extreme-closeup จนหน้าแตก/เบลอ" (เดิม 0.82 แน่นไป)
-  if (slot.id === 'main' || big) return { faceFrac: 0.62, faceTopAt: 0.40, maxFaceHFrac: 0.62 };
+  // hero (ช่องสูง): faceFrac 0.62→0.72 (หน้าใหญ่ขึ้น) · faceTopAt 0.40→0.32 (ดันหน้าขึ้น ตัดพื้นว่างเหนือหัว) · maxFaceHFrac 0.62→0.68
+  if (slot.id === 'main' || big) return { faceFrac: 0.72, faceTopAt: 0.32, maxFaceHFrac: 0.68 };
   // rev.21f (ผู้ใช้ CASE-170: ช่องขวา "หัวโดนตัด/คนเบียดตกขอบ"): หน้าเล็กลง+ดันหน้าลง = เห็นหัวเต็ม-หน้าเต็ม อยู่กลาง ไม่โดนตัด
-  //   faceFrac 0.78→0.68 (เผื่อขอบมากขึ้น) · faceTopAt 0.40→0.46 (ดันหน้าลง = headroom เหนือหัว) · maxFaceHFrac 0.74→0.66 (หัวไม่ใหญ่จนชนขอบ)
-  return { faceFrac: 0.68, faceTopAt: 0.46, maxFaceHFrac: 0.66 };
+  //   rev.21g: หน้าใหญ่ขึ้น+ดันขึ้น = ตัดพื้นว่างเหนือหัว (faceFrac 0.68→0.76 · faceTopAt 0.46→0.40 · maxFaceHFrac 0.66→0.74) — มี guard หัวชิดขอบบนกันหัวขาดอยู่แล้ว
+  return { faceFrac: 0.76, faceTopAt: 0.40, maxFaceHFrac: 0.74 };
 }
 
 /** มี face box เดี่ยวใช้ได้ไหม (1 หน้า) */
