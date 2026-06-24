@@ -340,17 +340,25 @@ function cropFromFaceBox(fb, mult = 2.1) {
 export function tightenMomentCrops(assignments, faceBoxes = []) {
   const MOMENT_SLOT = /^right_|^top_right$|^bottom_right$|^top$|^mid$|^bottom$/;
   for (const a of assignments || []) {
-    if (!a || a.slotId === 'main' || /circle/i.test(a.slotId)) continue;
-    if (!MOMENT_SLOT.test(a.slotId)) continue;
+    if (!a || /circle/i.test(a.slotId)) continue;
     const fb = faceBoxes[a.imageIndex];
     if (!fb || !(fb.x2 > fb.x1)) continue;
     const fArea = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);
+    // ★ rev.21d (ผู้ใช้ CASE-170: "ฮีโร่ต้องเต็มเฟรม หน้าใหญ่ ให้จำหน้าได้ ไม่เหลือพื้นว่าง"):
+    //   ครอปฮีโร่ให้ "ใบหน้าเต็มกรอบ" (mult 1.9 = หน้าเด่นสุด + headroom พอดี) — เดิมข้าม main เลยหลวม/มีพื้นเทา
+    if (a.slotId === 'main') {
+      if (fArea < 0.008) continue; // หน้าจิ๋วมากในภาพต้นทาง — ปล่อย (กันครอปแล้วเบลอ)
+      a.crop = cropFromFaceBox(fb, 1.9);
+      a.why = (a.why || '').slice(0, 52) + ' [ฮีโร่หน้าเต็มเฟรม]';
+      continue;
+    }
+    if (!MOMENT_SLOT.test(a.slotId)) continue;
     if (fArea < 0.012) continue; // หน้าจิ๋ว/ภาพบริบทล้วน — ปล่อยตามตั้งใจ
-    // rev.20c (ผู้ใช้ย้ำ): บังคับ "ทุกช่องโมเมนต์ที่มีหน้าชัด" ครอปคน-เต็มเฟรมเสมอ (ตัดไมค์/ป้ายโฆษณา/อุปกรณ์/ครึ่งตัว)
-    //   rev.20f: ช่องล่างขวา (มักได้ช็อตกว้าง/2 คน) ครอปแน่นกว่า (2.0) = ซูมคนเดียวชัด ตัดบริบทกว้างทิ้ง
+    // rev.20c: บังคับช่องโมเมนต์ที่มีหน้าชัด ครอปคน-เต็มเฟรม (ตัดไมค์/ป้าย/อุปกรณ์)
+    //   rev.21d: ขยายหน้าทุกช่องอีกหน่อยให้จำได้ง่าย (non-bottom 2.4→2.1, bottom 2.0→1.9)
     const isBottom = /bottom/.test(a.slotId);
-    a.crop = cropFromFaceBox(fb, isBottom ? 2.0 : 2.4); // หน้า-ไหล่ กลางกรอบ คนเต็มเฟรม
-    a.why = (a.why || '').slice(0, 52) + (isBottom ? ' [ซูมคนแน่น ตัดภาพกว้าง]' : ' [คนเต็มเฟรม ตัดอุปกรณ์]');
+    a.crop = cropFromFaceBox(fb, isBottom ? 1.9 : 2.1);
+    a.why = (a.why || '').slice(0, 52) + (isBottom ? ' [ซูมคนแน่น]' : ' [หน้าเต็มเฟรม]');
   }
   return assignments;
 }
