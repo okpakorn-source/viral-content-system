@@ -339,14 +339,12 @@ async function _renderCoverV3(request) {
       //   → ยอมนับเฟรมที่ "มีหน้าจริง" แม้ติดตัวหนังสือ (เดี๋ยว faceTightenAll ครอปหน้าตัด caption ออกให้)
       && (!fb.hasText || _preferFrames)
     ).length; // rev.16b: พูลผ่านด่าน A กรองคุณภาพมาแล้ว ไม่ต้องเกณฑ์คุณภาพสัมพัทธ์ซ้ำ (เดิมทำ count=0)
-    let slotBudget = Math.max(3, Math.min(imageBuffers.length, cleanFaceCount));
-    // rev.16: โครง 5 ช่องต่อเมื่อมีภาพดี-ต่างกันจริง ≥5 เท่านั้น — น้อยกว่านั้น cap 4 (กันเติมช่องด้วยภาพซ้ำ/แย่)
-    //   บทเรียน 136/138/141: ดันเต็มช่องทั้งที่ภาพดีไม่พอ → หน้าซ้ำ 3 ช่อง = เหมือนคอนแทคชีต
-    if (cleanFaceCount < 5) slotBudget = Math.min(slotBudget, 4);
-    // ★ rev.20i (ผู้ใช้ยืนยันจากปกตัวอย่าง 21 มิ.ย.): ข่าวครอบครัว/คู่รักที่ "ภาพดี ≥5" ก็ใช้โครง 3 ขวาได้
-    //   เดิม cap ครอบครัวไว้ 4 เสมอ → เจมส์มีภาพดี 8 ใบยังได้แค่ 2 ขวา. ตอนนี้ปล่อยตามจำนวนภาพจริง
-    //   (ภาพ <5 ยังถูก cap เป็น 4 ที่บรรทัดบนอยู่แล้ว = กันคอนแทคชีตเหมือนเดิม)
-    console.log(`[CoverV3] 🎯 ภาพดี-ต่างกัน ${cleanFaceCount} ใบ → งบช่อง = ${slotBudget} (จากพูล ${imageBuffers.length})`);
+    // ★ rev.22f (24 มิ.ย. — ผู้ใช้: "ห้ามใช้แทมเพลต 3 รูป ใช้ 4-5 ขึ้นไปเสมอ"):
+    //   งบช่องนับ "ภาพดีในพูลทั้งหมด" (หน้าคม + ภาพบริบท on-topic ที่ผ่านด่าน) ไม่ใช่นับแต่หน้า
+    //   → ข่าวที่มีภาพบริบท (สวน/กิจกรรม) จะมีภาพพอเติม 4-5 ช่อง · พูลผ่าน dedup แล้วจึงไม่ใช่คอนแทคชีต
+    let slotBudget = Math.min(5, imageBuffers.length);
+    if (slotBudget < 4) slotBudget = imageBuffers.length; // พูลน้อยกว่า 4 = ใช้เท่าที่มี (กันบังคับเกินจำนวนภาพจริง)
+    console.log(`[CoverV3] 🎯 พูลภาพดี ${imageBuffers.length} ใบ (หน้าคม ${cleanFaceCount}) → งบช่อง = ${slotBudget}`);
 
     // ── ② AI Vision Director — เลือกโครงเองจากแม่บทที่แกะจากปกไวรัลจริง ──
     // ★ rev.12: บังคับลุคไวรัลในโค้ด — ภาพพอเมื่อไหร่ ให้เลือกได้เฉพาะโครงที่มี "วงกลม+กรอบไฮไลต์"
@@ -357,18 +355,20 @@ async function _renderCoverV3(request) {
       V3_TEMPLATES.vt_faces_circle, // 4 ภาพ — fallback เมื่อภาพดี <5 (hero + ขวา 2 + วงกลม)
       V3_TEMPLATES.vt_quad_circle,  // 5 ภาพ — สองฝ่าย ให้-รับ (วงกลมกลาง)
     ].filter(t => t.slots.length <= slotBudget);
+    // ★ rev.22f: ตัด v3_grid3 (กริด 3 รูปแบน ไม่มีมิติ) ออกถาวรตามคำสั่งผู้ใช้ — ใช้แต่โครง ≥4 ที่มีมิติ
     const plainFallbacks = [
       V3_TEMPLATES.vt_hero_br,      // 4 ภาพ — อารมณ์น้ำตาเป็นจุดขาย
       V3_TEMPLATES.vt_hero_wide,    // 4 ภาพ — คนเล่า/สัมภาษณ์ + คู่กรณี
-      V3_TEMPLATES.v3_grid3,        // 3 ภาพ — fallback ตารางสะอาด
     ].filter(t => t.slots.length <= slotBudget);
     // forceTemplateId: บังคับโครงเจาะจง (ใช้ทดสอบ/Cover Lab เลือกเอง) — ข้าม viral-first logic
     const forced = forceTemplateId && V3_TEMPLATES[forceTemplateId] ? [V3_TEMPLATES[forceTemplateId]] : null;
     // ★ rev.20f (ผู้ใช้ย้ำ "ขวาต้อง 3 ภาพเสมอ"): ภาพดี ≥5 → ล็อกโครง 3 ขวา (vt_ref_tri) เป็นตัวเลือกเดียว
     //   กัน Director "ถอย" ไปเลือกโครง 2 ขวา (vt_faces_circle) เองทั้งที่ภาพพอ (บทเรียน rev-20f roll แรก)
     const lockTri = !forced && slotBudget >= 5 && V3_TEMPLATES.vt_ref_tri.slots.length <= imageBuffers.length;
-    const templateOptions = forced
+    let templateOptions = forced
       || (lockTri ? [V3_TEMPLATES.vt_ref_tri] : (viralFirst.length > 0 ? viralFirst : plainFallbacks));
+    // ★ rev.22f: กันต่ำกว่า 4 ช่อง — ถ้าไม่มีโครงไหนผ่าน (พูลน้อย) ใช้ vt_faces_circle (4 ช่อง มีวงกลม) เป็นพื้น ไม่ใช้กริด 3
+    if (!templateOptions || templateOptions.length === 0) templateOptions = [V3_TEMPLATES.vt_faces_circle];
 
     console.log(`[CoverV3] ③ Director (options: ${templateOptions.map(t => t.id).join(', ')} | pool=${imageBuffers.length})...`);
     const { directCover, reviewCover, tightenMomentCrops, faceTightenAll } = await import('@/lib/services/coverDirectorService');
