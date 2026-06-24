@@ -239,11 +239,22 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
 
   let left = faceCxPx - regionWpx / 2;
   let top = faceCyPx - regionHpx * faceTopAt;
-  // ★ ดันกรอบให้คลุมหัวครบก่อน clamp ขอบภาพ — แม้หน้าชิดขอบภาพต้นฉบับ หัวก็ไม่ขาด/ไม่แหว่งข้าง
-  if (left > headLpx) left = headLpx;
-  if (left + regionWpx < headRpx) left = headRpx - regionWpx;
-  if (top > headTpx) top = headTpx;
-  if (top + regionHpx < headBpx) top = headBpx - regionHpx;
+  // ★ rev.22b (CASE-178 เคน: hero ซูมเบี้ยว/แหว่ง): คลุมหัวครบ "โดยไม่บิดภาพ"
+  //   - หัวพอดีในกรอบ → ขยับน้อยสุดให้ครบ (กันมงกุฎหัว/คางขาด)
+  //   - หัวกว้าง/สูงกว่ากรอบ (เซลฟี่หน้าชิด/ภาพ portrait ในช่องสูงแคบ) → จัด "กึ่งกลางหัว"
+  //     (เดิม rev.22 ดันไปข้างเดียว → แหว่งครึ่งหน้า; ตอนนี้สมมาตร เหมือนมาตรฐาน CASE-177)
+  if (regionWpx >= headRpx - headLpx) {
+    if (left > headLpx) left = headLpx;
+    if (left + regionWpx < headRpx) left = headRpx - regionWpx;
+  } else {
+    left = (headLpx + headRpx) / 2 - regionWpx / 2;
+  }
+  if (regionHpx >= headBpx - headTpx) {
+    if (top > headTpx) top = headTpx;
+    if (top + regionHpx < headBpx) top = headBpx - regionHpx;
+  } else {
+    top = (headTpx + headBpx) / 2 - regionHpx / 2;
+  }
   left = Math.min(Math.max(left, 0), imgW - regionWpx);
   top = Math.min(Math.max(top, 0), imgH - regionHpx);
   return { left: Math.round(left), top: Math.round(top), width: Math.max(8, Math.round(regionWpx)), height: Math.max(8, Math.round(regionHpx)) };
@@ -258,7 +269,10 @@ function faceParamsForSlot(slot) {
   const big = (slot.w * slot.h) >= (520 * 800); // ช่องเด่น/ฮีโร่
   // rev.21h (ผู้ใช้ น้องลียา: ฮีโร่ยังหน้าเล็ก พื้นหลังเยอะ): ช่องฮีโร่สูงมาก (660×1350) → ดัน faceFrac เกือบเต็มกว้าง
   //   faceFrac 0.72→0.90 (หน้าเกือบเต็มความกว้าง = ใหญ่สุดที่ช่องสูงทำได้) · faceTopAt 0.32→0.26 (ชิดบน ตัดพื้นว่าง/ตัวล่าง) · maxFaceHFrac 0.68→0.82
-  if (slot.id === 'main' || big) return { faceFrac: 0.90, faceTopAt: 0.26, maxFaceHFrac: 0.82 };
+  // rev.22b (CASE-178 เคน: hero หน้าอัดเต็มเฟรมเกินไป จนดูซูม/แหว่ง — ผู้ใช้ขอมาตรฐาน CASE-177):
+  //   ลดซูม → เห็นหน้า+ไหล่+headroom (medium close-up) ไม่ใช่หน้าอัดเต็มกรอบ
+  //   (faceFrac 0.90→0.78 หน้าเล็กลงเห็นไหล่ · faceTopAt 0.26→0.32 มี headroom เหนือหัว · maxFaceHFrac 0.82→0.74)
+  if (slot.id === 'main' || big) return { faceFrac: 0.78, faceTopAt: 0.32, maxFaceHFrac: 0.74 };
   // rev.21f (ผู้ใช้ CASE-170: ช่องขวา "หัวโดนตัด/คนเบียดตกขอบ"): หน้าเล็กลง+ดันหน้าลง = เห็นหัวเต็ม-หน้าเต็ม อยู่กลาง ไม่โดนตัด
   //   rev.21g: หน้าใหญ่ขึ้น+ดันขึ้น = ตัดพื้นว่างเหนือหัว (faceFrac 0.68→0.76 · faceTopAt 0.46→0.40 · maxFaceHFrac 0.66→0.74) — มี guard หัวชิดขอบบนกันหัวขาดอยู่แล้ว
   return { faceFrac: 0.76, faceTopAt: 0.40, maxFaceHFrac: 0.74 };
@@ -341,7 +355,8 @@ async function renderRectTile(src, crop, slot, fb) {
     const mainFaces = fb.allFaces.filter((f) => areaOf(f) >= maxArea * 0.35);
     if (isHeroSlot) {
       // hero = หน้าเดี่ยวใหญ่สุดเด่น + เลื่อนพ้นคนข้างเคียง (บทเรียน CASE-119)
-      region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, Math.min(0.96, faceFrac + 0.12), faceTopAt, Math.min(0.90, maxFaceHFrac + 0.08));
+      // rev.22b: ลด boost (เดิม +0.12/+0.08 อัดแน่นเกิน) — ยังเด่นกว่าช่องรองแต่ไม่หน้าอัดเต็ม
+      region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, Math.min(0.90, faceFrac + 0.08), faceTopAt, Math.min(0.84, maxFaceHFrac + 0.06));
       const lcx = ((largest.x1 + largest.x2) / 2) * imgW;
       let rMin = 0, rMax = imgW;
       for (const f of fb.allFaces) {
