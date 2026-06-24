@@ -47,7 +47,12 @@ export async function GET(req) {
     const jobStatus = await getJobStatus(jobId);
     
     if (!jobStatus) {
-      return NextResponse.json({ success: false, error: 'Job not found' }, { status: 404 });
+      // ★ 24 มิ.ย.: งานไม่เจอ (เก่าเกิน/ถูกล้าง) — ข้อความที่บอก "ต้องทำอะไรต่อ" แทน "Job not found" ดิบๆ
+      return NextResponse.json({
+        success: false,
+        error: 'ไม่พบงานนี้แล้ว (อาจเสร็จไปแล้วหรือถูกส่งใหม่) — ถ้ายังไม่ได้ผล ส่งข่าวใหม่อีกครั้งได้เลย',
+        errorType: 'JOB_NOT_FOUND',
+      }, { status: 404 });
     }
     
     return NextResponse.json({

@@ -103,7 +103,7 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
     //     Then keep only the newest 10 beyond that
     const purgeMinAge = 30 * 60 * 1000; // 30 minutes — must keep results long enough for bot to poll
     const finishedJobs = allJobs
-      .filter(j => j.status === 'completed' || j.status === 'failed')
+      .filter(j => j.status === 'completed' || j.status === 'failed' || j.status === 'superseded')
       .sort((a, b) => new Date(b.completedAt || b.createdAt) - new Date(a.completedAt || a.createdAt));
     
     if (finishedJobs.length > 10) {
@@ -133,10 +133,16 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
       if (activeFresh) {
         throw new Error("ข่าวนี้กำลังประมวลผลอยู่ ผลลัพธ์กำลังจะมา รออีกสักครู่นะครับ...");
       }
-      // งานเดิมที่ค้าง/รอ (ไม่ใช่กำลังเจนจริง) → เคลียร์ทิ้ง ให้คำสั่งส่งใหม่นี้เจนใหม่ทันที
+      // งานเดิมที่ค้าง/รอ (ไม่ใช่กำลังเจนจริง) → ชี้ไปงานใหม่นี้ (superseded) แทนการลบทิ้ง
+      //   ★ 24 มิ.ย.: เดิมลบทิ้ง (store.remove) → id งานเก่าหาย → บอท/หน้าเว็บที่ poll id เก่าได้ 404
+      //   "Job not found" (บอท Discord ตีความ "Request failed..404" เป็นงานล้ม เด้ง error ใส่ผู้ใช้)
+      //   → ตอนนี้ mark 'superseded' + supersededBy=jobId ใหม่ → getJobStatus เด้งไปสถานะงานใหม่ให้เนียน
+      //   (ยังเจนใหม่เสมอตามที่ทีมขอ — แค่ไม่ทำให้ข้อความเก่ากลายเป็น error)
       if (sameNews.length > 0) {
-        for (const stale of sameNews) await store.remove(stale.id).catch(() => {});
-        console.log(`[QueueService] ♻️ ส่งข่าวซ้ำ — เคลียร์งานค้าง ${sameNews.length} ตัว แล้วเจนใหม่`);
+        for (const stale of sameNews) {
+          await store.update(stale.id, (ex) => ({ ...ex, status: 'superseded', supersededBy: jobId })).catch(() => {});
+        }
+        console.log(`[QueueService] ♻️ ส่งข่าวซ้ำ — ชี้งานเก่า ${sameNews.length} ตัว → งานใหม่ ${jobId.slice(0, 8)} (เจนใหม่)`);
       }
     }
 
@@ -175,9 +181,19 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
  */
 export async function getJobStatus(jobId) {
   const store = await getQueueStore();
-  const job = await store.findById(jobId);
+  let job = await store.findById(jobId);
   if (!job) return null;
-  
+
+  // ★ 24 มิ.ย.: งานถูกส่งซ้ำ (superseded) → ตามไปงานใหม่ ให้คนที่ poll id เก่าเห็นสถานะงานใหม่
+  //   (กัน "Job not found" เด้งใส่บอท/หน้าเว็บ — เพราะงานใหม่กำลังเจนข่าวเดียวกันให้อยู่)
+  let hops = 0;
+  while (job && job.status === 'superseded' && job.supersededBy && hops < 5) {
+    const next = await store.findById(job.supersededBy);
+    if (!next) break;
+    job = next;
+    hops++;
+  }
+
   if (job.status === 'completed' || job.status === 'failed') {
     return { ...job, position: 0, queuesAhead: 0 };
   }
