@@ -195,17 +195,14 @@ function fitCropToSlotAspect(crop, imgW, imgH, slotAspect) {
 }
 
 /**
- * ════════════════════════════════════════════════════════════════════════════
- * 🔒 faceCropCore — คอร์เรขาคณิตกลาง (GENERIC + แช่แข็ง) — ใช้ร่วมทุกเลย์เอาต์
- * ════════════════════════════════════════════════════════════════════════════
- *   หน้าที่เดียว: คำนวณกรอบครอป "หน้าเดี่ยว 1 คน" จากพิกัดใบหน้า ตามพารามิเตอร์ที่ส่งเข้ามา
- *   - สัดส่วนกรอบ = สัดส่วนช่อง → resize fill ไม่ยืดไม่เพี้ยน
- *   - หน้ากิน faceFrac ของความกว้าง · maxFaceHFrac คุมขนาดหน้าต่อความสูง
- *   - กฎเหล็ก rev.22b: คลุม "หัว" (รวมผม/แก้ม/คาง) ครบทุกด้าน; ถ้าหัวกว้าง/สูงกว่ากรอบ→กึ่งกลางหัว
- *   ⚠️ ฟังก์ชันนี้ไม่มี "ความเห็นเฉพาะเลย์เอาต์" — ค่า/ตรรกะของแต่ละเลย์เอาต์อยู่ใน cropHero/cropCircle/cropMoment
- *   ⚠️ แก้ที่นี่ = กระทบทุกเลย์เอาต์ → แตะเฉพาะกรณีเรขาคณิตผิดสากลจริงๆ เท่านั้น (ปกติแก้ที่ฟังก์ชันเลย์เอาต์)
+ * rev.14: คำนวณกรอบครอปจาก "พิกัดใบหน้า" โดยตรง — ให้หน้าเต็มช่องตามสัดส่วนช่องเป๊ะ
+ * แก้ปัญหาหลักที่ผู้ใช้ชี้: รูปไม่เต็มเฟรม / หน้าจมตัว-ฉากหลัง / หัวขาด-หลุดกรอบ
+ * - สัดส่วนกรอบ = สัดส่วนช่อง → resize fill ไม่ยืดไม่เพี้ยน
+ * - หน้ากิน faceFrac ของความกว้าง + การันตี headroom (หน้า ≤60% ความสูงกรอบ)
+ * - จัดหน้าให้อยู่กึ่งกลางแนวนอน + faceTopAt (กันหัวชนขอบ/คางหลุด)
+ * ใช้กับ "ช่องหน้าเดี่ยว 1 คน" เท่านั้น (ภาพคู่/หมู่ใช้กรอบจาก Director ตามเดิม)
  */
-function faceCropCore(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxFaceHFrac = 0.60) {
+function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxFaceHFrac = 0.60) {
   // rev.14k: ขยาย "face box" → "หัว" (รวมผม) ก่อนคำนวณ — กันผมตกขอบ (บทเรียน CASE-090 hero ผมตก)
   const fwN = fb.x2 - fb.x1, fhN = fb.y2 - fb.y1;
   const hx1 = fb.x1 - fwN * 0.20, hx2 = fb.x2 + fwN * 0.20; // เผื่อผม/หูข้าง
@@ -227,106 +224,29 @@ function faceCropCore(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxFaceHF
   const minH = faceHpx / maxFaceHFrac;       // หน้า ≤maxFaceHFrac ของความสูงกรอบ (สูงขึ้น=หน้าใหญ่ขึ้น)
   if (regionHpx < minH) { regionHpx = minH; regionWpx = regionHpx * slotAspect; }
 
-  // ★ rev.22 กฎเหล็ก (CASE-178): "หัวต้องอยู่ในกรอบครบทุกด้าน" — ไม่ตัดมงกุฎหัว/คาง/แก้มเด็ดขาด
-  //   หา bbox ของ "หัว" (clip กับขอบภาพ) แล้วการันตีว่ากรอบครอปต้องคลุมหัวทั้งก้อน
-  //   ถ้ากรอบเล็กกว่าหัว → ขยายกรอบ (ยอมหน้าเล็กลง ดีกว่าหัวขาด)
-  const headLpx = Math.max(0, hx1 * imgW) - faceWpx * 0.02;
-  const headRpx = Math.min(imgW, hx2 * imgW) + faceWpx * 0.02;
-  const headTpx = Math.max(0, hy1 * imgH) - faceHpx * 0.03;
-  const headBpx = Math.min(imgH, hy2 * imgH) + faceHpx * 0.02;
-  if (regionWpx < headRpx - headLpx) { regionWpx = headRpx - headLpx; regionHpx = regionWpx / slotAspect; }
-  if (regionHpx < headBpx - headTpx) { regionHpx = headBpx - headTpx; regionWpx = regionHpx * slotAspect; }
-
   if (regionWpx > imgW) { regionWpx = imgW; regionHpx = regionWpx / slotAspect; }
   if (regionHpx > imgH) { regionHpx = imgH; regionWpx = regionHpx * slotAspect; }
 
   let left = faceCxPx - regionWpx / 2;
   let top = faceCyPx - regionHpx * faceTopAt;
-  // ★ rev.22b (CASE-178 เคน: hero ซูมเบี้ยว/แหว่ง): คลุมหัวครบ "โดยไม่บิดภาพ"
-  //   - หัวพอดีในกรอบ → ขยับน้อยสุดให้ครบ (กันมงกุฎหัว/คางขาด)
-  //   - หัวกว้าง/สูงกว่ากรอบ (เซลฟี่หน้าชิด/ภาพ portrait ในช่องสูงแคบ) → จัด "กึ่งกลางหัว"
-  //     (เดิม rev.22 ดันไปข้างเดียว → แหว่งครึ่งหน้า; ตอนนี้สมมาตร เหมือนมาตรฐาน CASE-177)
-  if (regionWpx >= headRpx - headLpx) {
-    if (left > headLpx) left = headLpx;
-    if (left + regionWpx < headRpx) left = headRpx - regionWpx;
-  } else {
-    left = (headLpx + headRpx) / 2 - regionWpx / 2;
-  }
-  if (regionHpx >= headBpx - headTpx) {
-    if (top > headTpx) top = headTpx;
-    if (top + regionHpx < headBpx) top = headBpx - regionHpx;
-  } else {
-    top = (headTpx + headBpx) / 2 - regionHpx / 2;
-  }
   left = Math.min(Math.max(left, 0), imgW - regionWpx);
   top = Math.min(Math.max(top, 0), imgH - regionHpx);
   return { left: Math.round(left), top: Math.round(top), width: Math.max(8, Math.round(regionWpx)), height: Math.max(8, Math.round(regionHpx)) };
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 🧠 สมองครอป "แยกต่อเลย์เอาต์" (rev.22c) — แก้ตัวไหนกระทบแค่ตัวนั้น
-//   หลักการ (ผู้ใช้สั่ง 24 มิ.ย.): เลย์เอาต์ไหน "นิ่งแล้ว" → ห้ามแตะ; แก้เฉพาะเลย์เอาต์ที่มีปัญหา
-//   ค่า + ตรรกะการเลือกหน้าของแต่ละเลย์เอาต์ อยู่ในฟังก์ชันของเลย์เอาต์นั้น "เท่านั้น"
-//   (ทุกตัวเรียก faceCropCore ร่วมกัน แต่ส่งค่าของตัวเอง → จูนค่าตัวนึงไม่กระทบตัวอื่น)
-// ════════════════════════════════════════════════════════════════════════════
-
-// ── HERO (ช่องเอกใหญ่) — rev.22d (เสก: ขอหน้าเด่นเต็มเฟรมกว่านี้ พื้นที่ว่างเหลือเยอะ) ──
-//   faceFrac 0.78→0.84 (หน้าใหญ่ขึ้น เต็มกว้างกว่าเดิม) · maxFaceHFrac 0.74→0.80 (หน้าสูงขึ้น ตัดพื้นว่าง)
-//   ยังมี center-bias guard กันแหว่ง/เบี้ยว (ไม่กลับไปพังแบบ 0.90) · faceTopAt 0.32 คง headroom
-const HERO_CROP = { faceFrac: 0.84, faceTopAt: 0.32, maxFaceHFrac: 0.80 };
-function cropHero(fb, imgW, imgH, slotAspect) {
-  // หน้าเดี่ยว → ครอปเด่นตรงๆ
-  if (!fb.allFaces || fb.allFaces.length <= 1) {
-    return faceCropCore(fb, imgW, imgH, slotAspect, HERO_CROP.faceFrac, HERO_CROP.faceTopAt, HERO_CROP.maxFaceHFrac);
-  }
-  // ภาพหลายหน้า → ครอปหน้าใหญ่สุด + เลื่อนพ้นคนข้างเคียง (บทเรียน CASE-119) · zoom เพิ่มเล็กน้อยให้เด่นกว่าช่องรอง
-  const areaOf = (f) => (f.x2 - f.x1) * (f.y2 - f.y1);
-  const largest = fb.allFaces.reduce((b, f) => (areaOf(f) > areaOf(b) ? f : b), fb.allFaces[0]);
-  const region = faceCropCore(largest, imgW, imgH, slotAspect,
-    Math.min(0.90, HERO_CROP.faceFrac + 0.08), HERO_CROP.faceTopAt, Math.min(0.84, HERO_CROP.maxFaceHFrac + 0.06));
-  const lcx = ((largest.x1 + largest.x2) / 2) * imgW;
-  let rMin = 0, rMax = imgW;
-  for (const f of fb.allFaces) {
-    if (f === largest) continue;
-    const fcx = ((f.x1 + f.x2) / 2) * imgW;
-    if (fcx < lcx) rMin = Math.max(rMin, f.x2 * imgW);
-    else rMax = Math.min(rMax, f.x1 * imgW);
-  }
-  let rl = region.left, rr = region.left + region.width;
-  if (rr > rMax) { const sh = rr - rMax; rl -= sh; rr -= sh; }
-  if (rl < rMin) { const sh = rMin - rl; rl += sh; rr += sh; }
-  region.left = Math.round(Math.max(0, Math.min(rl, imgW - region.width)));
-  return region;
-}
-
-// ── CIRCLE (วงกลม) — โชว์หน้าเดี่ยวคมเสมอ (rev.22b faceFrac 0.74 เผื่อมุมวงกลม กันแหว่ง) ──
-const CIRCLE_CROP = { faceFrac: 0.74, faceTopAt: 0.47, maxFaceHFrac: 0.80 };
-function cropCircle(fb, imgW, imgH) {
-  let face = fb;
-  if (fb.allFaces && fb.allFaces.length >= 1) {
-    const areaOf = (f) => (f.x2 - f.x1) * (f.y2 - f.y1);
-    face = fb.allFaces.reduce((b, f) => (areaOf(f) > areaOf(b) ? f : b), fb.allFaces[0]); // หน้าใหญ่สุดเดี่ยว
-  }
-  return faceCropCore(face, imgW, imgH, 1, CIRCLE_CROP.faceFrac, CIRCLE_CROP.faceTopAt, CIRCLE_CROP.maxFaceHFrac);
-}
-
-// ── MOMENT (ช่องรอง/กลางขวา) — rev.22d (เสก: ต้องเห็นหน้าเด่น ไม่เน้นพื้นหลัง ไม่เหลือพื้นที่ว่าง + หัวไม่ขาด) ──
-//   faceFrac 0.76→0.82 (หน้าใหญ่เด่นขึ้น) · faceTopAt 0.40→0.36 (หน้าเต็มกรอบขึ้น พื้นว่างน้อยลง) · maxFaceHFrac 0.74→0.80
-const MOMENT_CROP = { faceFrac: 0.82, faceTopAt: 0.36, maxFaceHFrac: 0.80 };
-function cropMoment(fb, imgW, imgH, slotAspect) {
-  if (!fb.allFaces || fb.allFaces.length <= 1) {
-    return faceCropCore(fb, imgW, imgH, slotAspect, MOMENT_CROP.faceFrac, MOMENT_CROP.faceTopAt, MOMENT_CROP.maxFaceHFrac);
-  }
-  const areaOf = (f) => (f.x2 - f.x1) * (f.y2 - f.y1);
-  const largest = fb.allFaces.reduce((b, f) => (areaOf(f) > areaOf(b) ? f : b), fb.allFaces[0]);
-  const maxArea = areaOf(largest);
-  // "คนสำคัญ" = หน้า ≥35% ของหน้าใหญ่สุด (กรองคนฉากหลังหน้าจิ๋ว)
-  const mainFaces = fb.allFaces.filter((f) => areaOf(f) >= maxArea * 0.35);
-  if (mainFaces.length >= 2) {
-    // ★ กฎเหล็ก CASE-178: คนสำคัญหลายคน (พ่อ-ลูก/คู่รัก) → โชว์ทุกคนเต็มหัว ห้ามตัดใครหัวขาด
-    return groupRegionForSlot(mainFaces, imgW, imgH, slotAspect);
-  }
-  return faceCropCore(largest, imgW, imgH, slotAspect, MOMENT_CROP.faceFrac, MOMENT_CROP.faceTopAt, MOMENT_CROP.maxFaceHFrac);
+/** พารามิเตอร์การจัดหน้าตามชนิด/ขนาดช่อง */
+function faceParamsForSlot(slot) {
+  // หมายเหตุ: ค่าพวกนี้อ้างอิง "หัว" (รวมผม) แล้ว
+  // rev.14r (feedback): hero ซูมออกนิด "เห็นทั้งหน้า+ไหล่" (เดิม 0.84 แน่นไปกับเซลฟี่จัด) · ช่องรองคงแน่นเน้นหน้า
+  // rev.21g (ผู้ใช้: ทุกช่อง "หน้าใหญ่ เต็มเฟรม ตัดพื้นว่าง เด่นขึ้น"): ขยายหน้า + ดันขึ้น = ตัดพื้นโล่งเหนือหัว
+  if (slot.shape === 'circle') return { faceFrac: 0.80, faceTopAt: 0.45, maxFaceHFrac: 0.80 };
+  const big = (slot.w * slot.h) >= (520 * 800); // ช่องเด่น/ฮีโร่
+  // rev.21h (ผู้ใช้ น้องลียา: ฮีโร่ยังหน้าเล็ก พื้นหลังเยอะ): ช่องฮีโร่สูงมาก (660×1350) → ดัน faceFrac เกือบเต็มกว้าง
+  //   faceFrac 0.72→0.90 (หน้าเกือบเต็มความกว้าง = ใหญ่สุดที่ช่องสูงทำได้) · faceTopAt 0.32→0.26 (ชิดบน ตัดพื้นว่าง/ตัวล่าง) · maxFaceHFrac 0.68→0.82
+  if (slot.id === 'main' || big) return { faceFrac: 0.90, faceTopAt: 0.26, maxFaceHFrac: 0.82 };
+  // rev.21f (ผู้ใช้ CASE-170: ช่องขวา "หัวโดนตัด/คนเบียดตกขอบ"): หน้าเล็กลง+ดันหน้าลง = เห็นหัวเต็ม-หน้าเต็ม อยู่กลาง ไม่โดนตัด
+  //   rev.21g: หน้าใหญ่ขึ้น+ดันขึ้น = ตัดพื้นว่างเหนือหัว (faceFrac 0.68→0.76 · faceTopAt 0.46→0.40 · maxFaceHFrac 0.66→0.74) — มี guard หัวชิดขอบบนกันหัวขาดอยู่แล้ว
+  return { faceFrac: 0.76, faceTopAt: 0.40, maxFaceHFrac: 0.74 };
 }
 
 /** มี face box เดี่ยวใช้ได้ไหม (1 หน้า) */
@@ -351,12 +271,10 @@ function groupRegionForSlot(faces, imgW, imgH, slotAspect) {
   const avgFh = (faces.reduce((s, f) => s + (f.y2 - f.y1), 0) / faces.length) * imgH; // ความสูงหน้าเฉลี่ย
 
   // rev.15g (feedback CASE-126): ช่องรองซูมเข้า "หน้าใหญ่ขึ้น" — ลดระยะเผื่อ (แต่ยังกันตัดหัว-ไหล่)
-  // rev.22d (เสก ช่องกลางขวา: หัวขาด + พื้นหลังเยอะ) — เผื่อผมเหนือหัวให้พอ (กันมงกุฎขาด) + กระชับข้าง/ล่าง (หน้าเด่น พื้นว่างน้อย)
-  // ★ groupRegionForSlot ใช้เฉพาะ MOMENT เท่านั้น (rev.22c) — จูนตรงนี้ไม่กระทบ hero/circle
-  let L = x1 - avgFh * 0.18;   // ข้างซ้าย (กระชับ)
-  let R = x2 + avgFh * 0.18;   // ข้างขวา (กระชับ)
-  let T = y1 - avgFh * 0.55;   // เผื่อผมเหนือหัว — กันหัว/มงกุฎขาด (เดิม 0.38 ไม่พอคลุมผม)
-  let B = y2 + avgFh * 0.45;   // ไหล่-อก ใต้คาง (กระชับ ลดพื้นว่าง)
+  let L = x1 - avgFh * 0.24;   // ข้างซ้าย
+  let R = x2 + avgFh * 0.24;   // ข้างขวา
+  let T = y1 - avgFh * 0.38;   // headroom เหนือหัว
+  let B = y2 + avgFh * 0.62;   // ไหล่-อก ใต้คาง
   let cx = (L + R) / 2, cy = (T + B) / 2;
   let regionWpx = R - L, regionHpx = B - T;
 
@@ -394,13 +312,35 @@ async function grayWorldGains(buf, strength = 0.5) {
 async function renderRectTile(src, crop, slot, fb) {
   const meta = await sharp(src).metadata();
   const imgW = meta.width || 1, imgH = meta.height || 1;
-  // ★ rev.22c: เลือก "สมองครอป" ตามชนิดช่อง — hero ↔ moment แยกขาดจากกัน (จูนตัวนึงไม่กระทบอีกตัว)
-  const isHeroSlot = slot.id === 'main' || (slot.w * slot.h) >= (520 * 800);
   let region;
-  if (usableSingleFace(fb) || usableGroupFaces(fb)) {
-    region = isHeroSlot
-      ? cropHero(fb, imgW, imgH, slot.w / slot.h)
-      : cropMoment(fb, imgW, imgH, slot.w / slot.h);
+  if (usableSingleFace(fb)) {
+    const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
+    region = faceRegionForSlot(fb, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
+  } else if (usableGroupFaces(fb)) {
+    // ★ rev.15i (ผู้ใช้ติช่อง 3-4-5 พัง "ไม่จัดกึ่งกลาง ไม่เน้นคน มองไม่รู้เรื่อง"):
+    //   ทุกช่องครอป "หน้าใหญ่สุด" จัดกึ่งกลาง+เด่นชัดเสมอ — เลิกครอปกลุ่มหลวมที่คนตัวเล็กจมฉาก
+    const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
+    const isHeroSlot = slot.id === 'main' || (slot.w * slot.h) >= (520 * 800);
+    const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
+    if (isHeroSlot) {
+      // hero = หน้าเดี่ยวใหญ่สุดเด่น + เลื่อนพ้นคนข้างเคียง (บทเรียน CASE-119)
+      region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, Math.min(0.96, faceFrac + 0.12), faceTopAt, Math.min(0.90, maxFaceHFrac + 0.08));
+      const lcx = ((largest.x1 + largest.x2) / 2) * imgW;
+      let rMin = 0, rMax = imgW;
+      for (const f of fb.allFaces) {
+        if (f === largest) continue;
+        const fcx = ((f.x1 + f.x2) / 2) * imgW;
+        if (fcx < lcx) rMin = Math.max(rMin, f.x2 * imgW);
+        else rMax = Math.min(rMax, f.x1 * imgW);
+      }
+      let rl = region.left, rr = region.left + region.width;
+      if (rr > rMax) { const sh = rr - rMax; rl -= sh; rr -= sh; }
+      if (rl < rMin) { const sh = rMin - rl; rl += sh; rr += sh; }
+      region.left = Math.round(Math.max(0, Math.min(rl, imgW - region.width)));
+    } else {
+      // ช่องรอง = ครอปหน้าใหญ่สุด จัดกึ่งกลาง เด่นชัด (faceRegionForSlot จัดหน้าไว้กลางเฟรมให้เอง)
+      region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
+    }
   } else {
     region = fitCropToSlotAspect(crop, imgW, imgH, slot.w / slot.h);
   }
@@ -435,10 +375,14 @@ async function renderCircleTile(src, crop, slot, fb) {
   const bw = slot.borderWidth || 6;
   const meta = await sharp(src).metadata();
   const imgW = meta.width || 1, imgH = meta.height || 1;
-  // ★ rev.22c: วงกลมใช้ "สมอง cropCircle" แยกขาด (rev.14L: หน้าเดี่ยวใหญ่สุดเสมอ — ภาพหมู่ก็ครอปหน้าเดี่ยว)
+  // rev.14L: วงกลม = "หน้าเดี่ยวใหญ่สุดเสมอ" (ผู้ใช้ย้ำ CASE-089/092: วงกลมต้องเห็นหน้าชัด ไม่ใช่กลุ่มหน้าเล็ก)
+  //   ถ้าภาพมีหลายหน้า → ครอปหน้าใหญ่สุดเดี่ยว (ชัดกว่าโชว์ทั้งกลุ่มในวงเล็ก)
   let region;
-  if (fb && (fb.x2 > fb.x1 || (Array.isArray(fb.allFaces) && fb.allFaces.length >= 1))) {
-    region = cropCircle(fb, imgW, imgH);
+  if (fb && fb.x2 > fb.x1 && (!fb.allFaces || fb.allFaces.length <= 1)) {
+    region = faceRegionForSlot(fb, imgW, imgH, 1, 0.80, 0.47, 0.80);
+  } else if (fb && Array.isArray(fb.allFaces) && fb.allFaces.length >= 1) {
+    const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
+    region = faceRegionForSlot(largest, imgW, imgH, 1, 0.80, 0.47, 0.80);
   } else {
     region = fitCropToSlotAspect(crop, imgW, imgH, 1);
   }

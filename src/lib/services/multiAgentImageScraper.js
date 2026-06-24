@@ -1351,8 +1351,6 @@ How to distinguish:
 - HERO_FACE images MUST be professional quality (interview, TV show, news photo, professional portrait)
 - Selfie images (self-shot, front camera, abnormally wide angle, visible arm holding phone, too many faces too close) → role=PERSON_SUPPORT ONLY (MUST NOT be HERO_FACE!)
 - Single person, clear face, NOT a selfie (interview/news/portrait) → score 8-10 (ideal for hero)
-- ⛔ HERO face blocked by mic/hand/instrument/object (e.g. singing into a mic) → MUST NOT be HERO_FACE! Face must be CLEAN & clearly visible. Assign PERSON_SUPPORT.
-- ✅ Side/profile/angled face is FINE as long as the person is still recognizable — do NOT force a perfectly front-facing shot. The only rule: "can you tell who it is?"
 - Group/couple selfie → score 5-6 (suitable for circle/PERSON_SUPPORT only)
 - Solo selfie → score 5-6 (PERSON_SUPPORT, NOT HERO)
 - ★★★ Images with prominent watermark/logo (center, large, obvious) → score ≤ 2 (REJECT!)
@@ -1363,18 +1361,13 @@ How to distinguish:
 - ⛔ REJECT score ≤ 2 (ใช้เป็นภาพคนไม่ได้เด็ดขาด):
    • ใบหน้าใส่หน้ากากอนามัย/ผ้าปิดหน้า/แว่นดำบังตา (จำไม่ได้ว่าใคร)
    • หน้าเล็กจิ๋วในภาพหมู่/คนยืนเรียงกันหลายคนตัวเล็ก (จำไม่ได้ว่าใครเป็นคนในข่าว)
-   • หันหลัง 100% / ก้มหน้ามิด / หันข้างจน "จำไม่ได้ว่าใคร" · หน้าเบลอมาก
-   • ★ หน้าถูกวัตถุบัง — ไมโครโฟน/มือ/เครื่องดนตรี/ป้าย พาดหรือบังหน้าจนหน้าหาย-ดูไม่ออกว่าใคร
-- ✅ มุมข้าง/เฉียง/โปรไฟล์ "ที่ยังเห็นหน้าพอรู้ว่าเป็นใคร" = ใช้ได้ปกติ (ไม่บังคับหน้าตรงเป๊ะ) — เกณฑ์เดียวคือ "จำได้ว่าใคร"
+   • หันหลัง/หันข้างจนไม่เห็นหน้าชัด · หน้าเบลอ/ถูกวัตถุบัง
 - ★ ภาพหลายคนที่ "ไม่มีใบหน้าใครเด่น-ใหญ่-ชัดพอจำได้" → score ≤ 3 (อย่าเลือกเป็นช่องคน)
-- ★★★ ${mainChar} ที่มีภาพในเน็ตหลายแบบ → **เลือก "ภาพที่หน้าชัดสุด ใหญ่สุด จำได้ทันที" ก่อนเสมอ**
+- ★★★ ${mainChar} ที่มีภาพในเน็ตหลายแบบ → **เลือก "ภาพที่หน้าชัดสุด ใหญ่สุด จำได้ทันที" ก่อนเสมอ** (สัมภาษณ์/พอร์ตเทรต/ข่าว หน้าตรง)
    เกณฑ์: ต้องได้ภาพที่ "ดีที่สุด-หน้าชัดสุด" มาก่อน → ถ้าไม่มีจริงๆ ค่อยลดหลั่นลงมา (ห้ามหยิบภาพหน้าไม่ชัดทั้งที่มีภาพดีกว่าในพูล)
-- ★ ภาพคู่ (คนในข่าว + แฟน/คู่) ใช้ได้ถ้า "เห็นหน้าทั้งคู่ชัด"
-- ★★★★ HERO = เข้มสุด ต้อง "คลีน หน้าเด่น ไม่มีอะไรบังหน้าเลย":
-   • ⛔ ไมโครโฟน/มือ/เครื่องดนตรี/ของ บังหรือพาดหน้า → ห้ามเป็น HERO เด็ดขาด (เลือกภาพหน้าโล่งแทน)
-   • ต้องเป็นภาพหน้าใหญ่ (โคลสอัพ/ครึ่งตัวบน) เห็นสีหน้า-อารมณ์ชัด · หน้าตรงหรือเฉียงนิดได้ แต่หน้าต้องเด่นเต็ม เห็นชัด
-   • ⛔ ภาพเต็มตัว/มุมกว้าง/คนตัวเล็กในฉากรก (หน้ากินพื้นที่น้อย) → ห้ามเป็น HERO (role=PERSON_SUPPORT score ≤5) แม้เป็นคนในข่าว
-- 🔵 ช่องอื่น (ไม่ใช่ HERO) = ยืดหยุ่นได้ — มุมข้าง/กำลังทำกิจกรรม/มุมเฉียงได้ ขอแค่ "รู้ว่าเป็นใคร + ภาพเต็มเฟรมไม่ตัดหัว"
+- ★ ภาพคู่ (คนในข่าว + แฟน/คู่) ใช้ได้ถ้า "เห็นหน้าทั้งคู่ชัด" — แต่ถ้าจะใช้ช่องวงกลม/ช่องเดี่ยว ให้เป็น "หน้าคนเดียวชัดเต็มกรอบ" จะจำง่ายกว่า
+- ★★★★ HERO ต้องเป็น "ภาพหน้าใหญ่ (โคลสอัพ/ครึ่งตัวบน)" ที่เห็นสีหน้า-อารมณ์ชัด — ⛔ ภาพ "เต็มตัว/มุมกว้าง/คนตัวเล็กในฉากมืดหรือฉากรก" (หน้ากินพื้นที่ภาพน้อย) → ห้ามให้เป็น HERO (role=PERSON_SUPPORT score ≤5) แม้จะเป็นคนในข่าว
+   เหตุผล: ฮีโร่หน้าเล็ก = ปกไม่เด่น จำหน้าไม่ได้ ต้องเลือกภาพที่ "หน้าใหญ่เต็ม เห็นอารมณ์" มาเป็นฮีโร่เสมอ
 
 === SCORING GUIDE ===
 - 9-10: Perfect — sharpest quality, no text, no watermark, professional-grade image (not a selfie)
