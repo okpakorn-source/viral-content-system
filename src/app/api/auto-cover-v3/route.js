@@ -232,10 +232,12 @@ async function _renderCoverV3(request) {
         //   พูลนี้ judge คัด on-topic มาแล้ว (KEY_ACTIVITY/CONTEXT/EVIDENCE) → ไม่ใช่ฉากเปล่า/ขยะ
         //   เดิมบังคับ areaOf≥0.008 (ต้องมีหน้าเล็กๆ) → ภาพบ้าน/ห้องที่ไม่มีคนโดนตัดทิ้งหมด = ปกมีแต่รูปคน
         //   เรียงให้ "ภาพมีคนในเหตุการณ์" มาก่อน แล้วค่อยภาพสถานที่ล้วน
+        // ★ rev.22h (ผู้ใช้: ภาพบ้านเยอะ/มั่ว → เอาแค่ 1-2 ภาพประกอบที่ตรงข่าว ที่เหลือเป็นคน):
+        //   เก็บภาพบริบทแค่ 2 ใบที่ดีสุด (เดิม 3 ทำให้ปกมีตึกรกหลายใบ)
         const ctxIdx = imageBuffers.map((_, i) => i)
           .filter(i => !finalMask[i])
           .sort((a, b) => areaOf(faceBoxes[b]) - areaOf(faceBoxes[a]))
-          .slice(0, 3);
+          .slice(0, 2);
         const finalIdx = [...bigIdx, ...ctxIdx].sort((a, b) => a - b);
         const ibNew = finalIdx.map(i => imageBuffers[i]);
         const fbNew = finalIdx.map(i => faceBoxes[i]);

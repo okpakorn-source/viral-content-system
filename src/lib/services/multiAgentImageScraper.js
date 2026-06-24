@@ -570,7 +570,9 @@ async function agentYouTubeFrames(identity) {
       if (await hiResFramesAvailable()) {
         const hiUrls = videoIds.slice(0, 2).map(id => `https://www.youtube.com/watch?v=${id}`);
         console.log(`[Agent2: YouTube] 🎬 Tier 2.5: yt-dlp hi-res frames จาก ${hiUrls.length} คลิป...`);
-        const hiFrames = await extractHiResFromVideos(hiUrls, { targetTotal: 12, perVideo: 8 });
+        // ★ rev.22h: เอาแค่ 6 เฟรม (เดิม 12 ท่วมพูล → เฟรมคนพูดในคลิปแย่งเป็นฮีโร่เพี้ยน)
+        //   ใช้เป็น "ภาพประกอบบ้าน/สถานที่" 1-2 ใบ — ฮีโร่ยังมาจากพอร์ตเทรตคมจาก Google เหมือนเดิม
+        const hiFrames = await extractHiResFromVideos(hiUrls, { targetTotal: 6, perVideo: 4 });
         if (hiFrames.length > 0) {
           qualityFrames.push(...hiFrames.map(f => ({ buffer: f.buffer, source: 'youtube-hires', sourceUrl: f.sourceUrl })));
           console.log(`[Agent2: YouTube] ✅ Tier 2.5: ได้เฟรมคมชัด ${hiFrames.length} ใบ (yt-dlp+ffmpeg) — ข้าม storyboard เบลอ`);
