@@ -19,6 +19,9 @@ export default function ClipTranscriptPage() {
   const [insightCases, setInsightCases] = useState([]);
   const [insightCasesOpen, setInsightCasesOpen] = useState(true);
   const [insightExpanded, setInsightExpanded] = useState(null);
+  // ★ 24 มิ.ย.: ส่งเข้าคิว "เครื่องทีม" (พนักงานทำงานที่บ้านส่งผ่านเว็บ → เครื่องทีมถอด FB/IG ให้)
+  const [queueJob, setQueueJob] = useState(null); // { jobId, status, position, platform, result, error }
+  const [submitting, setSubmitting] = useState(false);
 
   const loadCases = async () => {
     try { const r = await fetch('/api/clip-transcript/cases?limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setCases(d.cases || []); } catch {}
@@ -53,6 +56,35 @@ export default function ClipTranscriptPage() {
       else { setInsight(d.data); loadInsightCases(); }   // ★ รีเฟรชคลังประเด็นทันทีที่ถอดสำเร็จ
     } catch (e) { setErr(e.message); }
     setInsightLoading(false);
+  };
+
+  // ★ ส่งลิงก์เข้าคิว "เครื่องทีม" → poll สถานะจนเสร็จ (สำหรับ FB/IG หรือเมื่อทำในเว็บไม่ได้)
+  const submitToQueue = async () => {
+    if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
+    setSubmitting(true); setErr(''); setQueueJob(null);
+    try {
+      const me = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
+      const r = await fetch('/api/clip-transcript/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), kind: 'insight', tidy, user: me }) });
+      const d = await r.json();
+      if (!d.success) { setErr(d.error || 'ส่งเข้าคิวไม่สำเร็จ'); setSubmitting(false); return; }
+      setQueueJob({ jobId: d.jobId, status: d.status || 'pending', position: d.position, platform: d.platform });
+      pollJob(d.jobId);
+    } catch (e) { setErr(e.message); }
+    setSubmitting(false);
+  };
+  const pollJob = async (jobId) => {
+    for (let i = 0; i < 240; i++) { // poll สูงสุด ~16 นาที (4 วิ/รอบ)
+      await new Promise(res => setTimeout(res, 4000));
+      try {
+        const r = await fetch('/api/clip-transcript/job-status?id=' + jobId, { cache: 'no-store' });
+        const d = await r.json();
+        if (!d.success) { setQueueJob(j => ({ ...j, status: 'error', error: d.error || 'หางานในคิวไม่เจอ' })); return; }
+        setQueueJob({ jobId, status: d.status, position: d.position, platform: d.platform, result: d.result, error: d.error });
+        if (d.status === 'done') { setInsight(d.result); loadInsightCases(); return; }
+        if (d.status === 'error') return;
+      } catch { /* เน็ตสะดุด — รอบหน้าลองใหม่ */ }
+    }
+    setQueueJob(j => ({ ...(j || {}), status: 'error', error: 'รอนานเกินไป — ลองเช็กในคลังหรือส่งใหม่' }));
   };
 
   const copy = (text, key) => { navigator.clipboard?.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 2000); };
@@ -95,7 +127,24 @@ export default function ClipTranscriptPage() {
               style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: insightLoading ? '#4b5563' : 'linear-gradient(135deg,#2563eb,#0891b2)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: insightLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
               {insightLoading ? '⏳ Gemini กำลังดูคลิป...' : '🎯 ถอดประเด็นข่าว (ข้อมูลดิบ)'}
             </button>
+            <button onClick={submitToQueue} disabled={loading || insightLoading || submitting || (queueJob && queueJob.status !== 'done' && queueJob.status !== 'error')}
+              title="ส่งลิงก์ให้เครื่องทีมถอดให้ — เหมาะกับ Facebook/IG หรือเมื่อทำในเว็บไม่ได้"
+              style={{ padding: '12px 22px', borderRadius: 10, border: '1px solid #f59e0b', background: submitting ? '#4b5563' : 'rgba(245,158,11,0.12)', color: '#fbbf24', fontWeight: 800, fontSize: 14, cursor: submitting ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+              {submitting ? '⏳ กำลังส่ง...' : '📥 ส่งเข้าคิว (เครื่องทีม)'}
+            </button>
           </div>
+
+          {/* ★ สถานะงานในคิวเครื่องทีม */}
+          {queueJob && (
+            <div style={{ marginTop: 12, padding: '12px 14px', borderRadius: 10, fontSize: 13, lineHeight: 1.6,
+              border: '1px solid ' + (queueJob.status === 'error' ? '#ef4444' : queueJob.status === 'done' ? '#22c55e' : '#f59e0b'),
+              background: queueJob.status === 'error' ? 'rgba(239,68,68,0.08)' : queueJob.status === 'done' ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.08)' }}>
+              {queueJob.status === 'pending' && <>⏳ <b>อยู่ในคิวเครื่องทีม</b> — ลำดับที่ {queueJob.position || '?'} · {platformIcon({ youtube: 'youtube', tiktok: 'tiktok', meta: 'meta' }[queueJob.platform])} กำลังรอเครื่องทีมดึงไปถอด (เปิดหน้านี้ค้างไว้ ผลจะเด้งขึ้นเอง)</>}
+              {queueJob.status === 'processing' && <>🔧 <b>เครื่องทีมกำลังถอดอยู่...</b> {platformIcon(queueJob.platform)} (อาจใช้เวลา 1-3 นาทีต่อคลิป)</>}
+              {queueJob.status === 'done' && <>✅ <b>ถอดเสร็จแล้ว</b> — ผลอยู่ด้านล่าง + เก็บเข้าคลังประเด็นข่าวให้แล้ว</>}
+              {queueJob.status === 'error' && <>❌ <b>ถอดไม่สำเร็จ</b> — {queueJob.error || 'ลองส่งใหม่อีกครั้ง'}</>}
+            </div>
+          )}
           <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted, #888)', lineHeight: 1.6 }}>
             🎙️ <b>ถอดบทสัมภาษณ์</b> = ได้บทพูดเต็ม + บอกประเภทคลิป (สัมภาษณ์/พูดเดี่ยว/อ่านข่าว) · 🎯 <b>ถอดประเด็นข่าว</b> = Gemini ดูคลิปจริง (YouTube/TikTok/Reels — เห็นภาพ+ตัวหนังสือบนจอ) → ข้อมูลดิบ (ประเด็น+คำพูด+ช่วงเวลา) · FB/IG ทำได้บนเครื่องทีม
           </div>

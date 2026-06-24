@@ -14,7 +14,8 @@
     "test-api-auto": "node scratch/test_api_auto.mjs",
     "watchdog": "node scripts/watchdog/check-system.mjs",
     "watchdog:build": "node scripts/watchdog/check-system.mjs --build",
-    "audit": "node scripts/weekly-audit.mjs"
+    "audit": "node scripts/weekly-audit.mjs",
+    "clip-worker": "node scripts/clip-worker.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
