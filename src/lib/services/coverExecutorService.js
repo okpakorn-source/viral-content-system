@@ -214,9 +214,10 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
 
   // rev.15j: มงกุฎหัว/หน้าชิดขอบบนในภาพต้นฉบับเอง (ส่วนหัวที่หลุดเฟรม crop ไหนก็กู้ไม่ได้)
   //   → ซูมออก + ดันหน้าลงนิด ให้ส่วนขาดเป็นสัดส่วนเล็กลง ดูตั้งใจ ไม่เหมือนหัวขาด (แก้ CASE-141 ช่องล่าง)
-  if (typeof fb.y1 === 'number' && fb.y1 < 0.03) {
-    faceFrac = faceFrac * 0.86;             // ซูมออก หน้าเล็กลง เห็นไหล่/บริบทมากขึ้น
-    faceTopAt = Math.max(faceTopAt, 0.34);  // ดันหน้าลงจากขอบบน
+  // rev.21f: ขยายเกณฑ์ 0.03→0.06 — หัว/มงกุฎหัวชิดขอบบนในภาพต้นฉบับ → ซูมออก+ดันหน้าลง (กันหัวขาด ครอบคลุมเคสมากขึ้น)
+  if (typeof fb.y1 === 'number' && fb.y1 < 0.06) {
+    faceFrac = faceFrac * 0.85;             // ซูมออก หน้าเล็กลง เห็นไหล่/บริบทมากขึ้น
+    faceTopAt = Math.max(faceTopAt, 0.40);  // ดันหน้าลงจากขอบบน
   }
   let regionWpx = faceWpx / faceFrac;       // หน้ากิน faceFrac ของความกว้างกรอบ
   let regionHpx = regionWpx / slotAspect;    // สัดส่วนตรงช่อง → fill ไม่ยืด
@@ -241,7 +242,9 @@ function faceParamsForSlot(slot) {
   const big = (slot.w * slot.h) >= (520 * 800); // ช่องเด่น/ฮีโร่
   // rev.15g (feedback CASE-126): hero ซูมออก "เห็นเต็มหน้า+ไหล่ ไม่ extreme-closeup จนหน้าแตก/เบลอ" (เดิม 0.82 แน่นไป)
   if (slot.id === 'main' || big) return { faceFrac: 0.62, faceTopAt: 0.40, maxFaceHFrac: 0.62 };
-  return { faceFrac: 0.78, faceTopAt: 0.40, maxFaceHFrac: 0.74 };
+  // rev.21f (ผู้ใช้ CASE-170: ช่องขวา "หัวโดนตัด/คนเบียดตกขอบ"): หน้าเล็กลง+ดันหน้าลง = เห็นหัวเต็ม-หน้าเต็ม อยู่กลาง ไม่โดนตัด
+  //   faceFrac 0.78→0.68 (เผื่อขอบมากขึ้น) · faceTopAt 0.40→0.46 (ดันหน้าลง = headroom เหนือหัว) · maxFaceHFrac 0.74→0.66 (หัวไม่ใหญ่จนชนขอบ)
+  return { faceFrac: 0.68, faceTopAt: 0.46, maxFaceHFrac: 0.66 };
 }
 
 /** มี face box เดี่ยวใช้ได้ไหม (1 หน้า) */
