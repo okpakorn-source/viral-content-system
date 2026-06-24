@@ -221,22 +221,20 @@ async function _renderCoverV3(request) {
       const finalMask = mask;
       const kept = finalMask.filter(Boolean).length;
       if (kept >= 3 && kept < imageBuffers.length) {
-        // ภาพโคลสอัพ (หน้าคม) = โครงหลักของปก
-        const bigIdx = imageBuffers.map((_, i) => i).filter(i => finalMask[i]);
-        // ★ 24 มิ.ย. (ผู้ใช้ CASE-184: ช่องขวาต้องมี "ภาพบริบทข่าว" 1-2 ใบ ไม่ใช่พอร์ตเทรตคนเดี่ยวล้วน):
-        //   เก็บ "ภาพบริบท" เพิ่มสูงสุด 2 ใบ = ภาพที่มี "คนอยู่ในเหตุการณ์" (หน้าเล็กกว่าเกณฑ์โคลสอัพ แต่ ≥0.008)
-        //   พูลนี้ judge คัด on-topic มาแล้ว → ภาพหน้าเล็กที่เหลือ = คนกำลังทำกิจกรรม/บริบท (ไม่ใช่ฉากเปล่า/ขยะ)
-        //   Director (กฎ: ช่องรอง 1-2 ช่องต้องเป็นภาพบริบทตรงแก่นข่าว) จะหยิบไปใส่ช่องโมเมนต์เอง
-        // ★ rev.22g (24 มิ.ย. — ข่าวเปิดบ้าน/กิจกรรม CASE-185/186 "ไม่มีรูปบริบทเลย เอาแต่รูปคน"):
-        //   เก็บภาพบริบทเพิ่มสูงสุด 3 ใบ — รวม "ภาพไม่มีหน้า" (บ้าน/ห้อง/สถานที่/กิจกรรม) ด้วย
-        //   พูลนี้ judge คัด on-topic มาแล้ว (KEY_ACTIVITY/CONTEXT/EVIDENCE) → ไม่ใช่ฉากเปล่า/ขยะ
-        //   เดิมบังคับ areaOf≥0.008 (ต้องมีหน้าเล็กๆ) → ภาพบ้าน/ห้องที่ไม่มีคนโดนตัดทิ้งหมด = ปกมีแต่รูปคน
-        //   เรียงให้ "ภาพมีคนในเหตุการณ์" มาก่อน แล้วค่อยภาพสถานที่ล้วน
-        // ★ rev.22h (ผู้ใช้: ภาพบ้านเยอะ/มั่ว → เอาแค่ 1-2 ภาพประกอบที่ตรงข่าว ที่เหลือเป็นคน):
-        //   เก็บภาพบริบทแค่ 2 ใบที่ดีสุด (เดิม 3 ทำให้ปกมีตึกรกหลายใบ)
+        // ★ rev.22i (ผู้ใช้: ฮีโร่ต้องคน-เด่น-คม / ภาพบ้าน 1-2 ใบสวยเห็นทั้งหลัง — แก้แค่เลือกภาพ):
+        //   ⛔ เฟรม hi-res (จากคลิป) "ห้ามเป็นฮีโร่/ช่องหน้า" — เฟรมคนพูดในคลิปเอียงๆ เคยแย่งเป็นฮีโร่เพี้ยน
+        //   ฮีโร่/ช่องหน้า = หน้าคมจาก "ภาพถ่าย/พอร์ตเทรต" (ไม่ใช่เฟรมคลิป)
+        const isHiRes = (i) => imageBuffers[i]?.source === 'youtube-hires';
+        const bigIdx = imageBuffers.map((_, i) => i).filter(i => finalMask[i] && !isHiRes(i));
+        // ★ ภาพประกอบบ้าน/บริบท สูงสุด 2 ใบ — เลือก "ภาพบ้าน/สถานที่" ก่อน (หน้าเล็ก/ไม่มีหน้า + เฟรม hi-res คมชัด)
+        //   พูล judge คัด on-topic มาแล้ว · รวมภาพไม่มีหน้า (บ้าน/ห้อง/สวน) ด้วย
         const ctxIdx = imageBuffers.map((_, i) => i)
-          .filter(i => !finalMask[i])
-          .sort((a, b) => areaOf(faceBoxes[b]) - areaOf(faceBoxes[a]))
+          .filter(i => !bigIdx.includes(i))
+          .sort((a, b) => {
+            const sceneScore = (i) => (areaOf(faceBoxes[i]) < 0.03 ? 2 : 0) + (isHiRes(i) ? 1 : 0);
+            const d = sceneScore(b) - sceneScore(a);   // ภาพบ้าน/สถานที่คมชัดมาก่อน
+            return d !== 0 ? d : (areaOf(faceBoxes[b]) - areaOf(faceBoxes[a]));
+          })
           .slice(0, 2);
         const finalIdx = [...bigIdx, ...ctxIdx].sort((a, b) => a - b);
         const ibNew = finalIdx.map(i => imageBuffers[i]);
