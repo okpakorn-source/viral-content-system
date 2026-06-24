@@ -1260,10 +1260,10 @@ There are ${imageParts.length} images (index 0 to ${imageParts.length - 1}) to j
 
 === ROLE ASSIGNMENTS ===
 
-★ Ideal ratio for viral news covers:
-  People images (HERO+PERSON_SUPPORT): 2-3 images
-  Storytelling images (KEY_ACTIVITY+CONTEXT+RELATIONSHIP+EVIDENCE): 2-3 images
-  ★ MUST have at least 2 "storytelling" images! Do NOT select only face portraits!
+★ Ideal ratio (★ 25 มิ.ย.: ตัวละครเป็นหลัก + บ้าน/สถานที่แค่ 1-2 ใบสวยๆ — กันบ้านท่วมจนคนหาย):
+  People images (HERO + PERSON_SUPPORT + RELATIONSHIP): 3-4 images ← คน-เด่น เป็นหลักของปก
+  Storytelling/place images (KEY_ACTIVITY+CONTEXT+EVIDENCE): 1-2 images ONLY ← ภาพประกอบบ้าน/สถานที่ "แค่ 1-2 ใบที่สวยสุด"
+  ★ ต้องมี HERO portrait คน-เด่น-คม-หน้าตรง 1 ใบเสมอ + ภาพคนอีก ≥2 ใบ · ⛔ ห้ามเลือกภาพบ้าน/สถานที่เกิน 2 ใบ
 
 🏷️ HERO_FACE (1 image — Most important!):
 - Sharpest close-up face shot of ${mainChar}
@@ -1408,9 +1408,9 @@ How to distinguish:
 === OUTPUT FORMAT ===
 Return JSON array ONLY. No markdown blocks, no \`\`\`
 Judge ALL images (even REJECT must include score=0)
-★ MUST include at least 2 images of ${mainChar} (1 HERO_FACE + 1 KEY_ACTIVITY/CONTEXT_SCENE/RELATIONSHIP)
-★ MUST include at least 2 storytelling images (KEY_ACTIVITY/CONTEXT/RELATIONSHIP/EVIDENCE)
-★ PERSON_SUPPORT MUST NOT exceed 1 image! Prioritize storytelling images instead!
+★ MUST select 1 strong HERO_FACE (คน-เด่น-คม หน้าตรง) + person images ≥2 (PERSON_SUPPORT/RELATIONSHIP) = ตัวละครเป็นหลักของปก
+★ Storytelling/place (KEY_ACTIVITY/CONTEXT/EVIDENCE) = เลือกแค่ 1-2 ใบที่ "สวยสุด-เห็นชัดสุด" (เช่นบ้านเห็นทั้งหลัง) ⛔ ห้ามเกิน 2 ใบ
+★ PERSON_SUPPORT can be 1-2 images (ต้องมีภาพคนพอให้ตัวละครเด่น ไม่ใช่บ้านล้วน)
 
 [{"index": 0, "score": 10, "role": "HERO_FACE", "reason": "..."}, {"index": 1, "score": 9, "role": "KEY_ACTIVITY", "reason": "..."}, {"index": 5, "score": 0, "role": "REJECT", "reason": "Wrong person, not the news subject"}]`;
 

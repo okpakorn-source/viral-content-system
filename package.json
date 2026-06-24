@@ -8,6 +8,7 @@
     "prebuild": "node scripts/validate-workflow.mjs",
     "build": "prisma generate && next build",
     "start": "next start",
+    "cover-server": "node --max-old-space-size=4096 node_modules/next/dist/bin/next start -p 3000",
     "postinstall": "prisma generate",
     "lint": "eslint",
     "test-scrape": "node scratch/test_khaosod_extraction.mjs",
