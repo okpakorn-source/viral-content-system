@@ -241,8 +241,9 @@ function faceParamsForSlot(slot) {
   // rev.21g (ผู้ใช้: ทุกช่อง "หน้าใหญ่ เต็มเฟรม ตัดพื้นว่าง เด่นขึ้น"): ขยายหน้า + ดันขึ้น = ตัดพื้นโล่งเหนือหัว
   if (slot.shape === 'circle') return { faceFrac: 0.80, faceTopAt: 0.45, maxFaceHFrac: 0.80 };
   const big = (slot.w * slot.h) >= (520 * 800); // ช่องเด่น/ฮีโร่
-  // hero (ช่องสูง): faceFrac 0.62→0.72 (หน้าใหญ่ขึ้น) · faceTopAt 0.40→0.32 (ดันหน้าขึ้น ตัดพื้นว่างเหนือหัว) · maxFaceHFrac 0.62→0.68
-  if (slot.id === 'main' || big) return { faceFrac: 0.72, faceTopAt: 0.32, maxFaceHFrac: 0.68 };
+  // rev.21h (ผู้ใช้ น้องลียา: ฮีโร่ยังหน้าเล็ก พื้นหลังเยอะ): ช่องฮีโร่สูงมาก (660×1350) → ดัน faceFrac เกือบเต็มกว้าง
+  //   faceFrac 0.72→0.90 (หน้าเกือบเต็มความกว้าง = ใหญ่สุดที่ช่องสูงทำได้) · faceTopAt 0.32→0.26 (ชิดบน ตัดพื้นว่าง/ตัวล่าง) · maxFaceHFrac 0.68→0.82
+  if (slot.id === 'main' || big) return { faceFrac: 0.90, faceTopAt: 0.26, maxFaceHFrac: 0.82 };
   // rev.21f (ผู้ใช้ CASE-170: ช่องขวา "หัวโดนตัด/คนเบียดตกขอบ"): หน้าเล็กลง+ดันหน้าลง = เห็นหัวเต็ม-หน้าเต็ม อยู่กลาง ไม่โดนตัด
   //   rev.21g: หน้าใหญ่ขึ้น+ดันขึ้น = ตัดพื้นว่างเหนือหัว (faceFrac 0.68→0.76 · faceTopAt 0.46→0.40 · maxFaceHFrac 0.66→0.74) — มี guard หัวชิดขอบบนกันหัวขาดอยู่แล้ว
   return { faceFrac: 0.76, faceTopAt: 0.40, maxFaceHFrac: 0.74 };
