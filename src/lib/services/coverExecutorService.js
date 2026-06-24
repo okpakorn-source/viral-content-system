@@ -224,11 +224,26 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
   const minH = faceHpx / maxFaceHFrac;       // หน้า ≤maxFaceHFrac ของความสูงกรอบ (สูงขึ้น=หน้าใหญ่ขึ้น)
   if (regionHpx < minH) { regionHpx = minH; regionWpx = regionHpx * slotAspect; }
 
+  // ★ rev.22 กฎเหล็ก (CASE-178): "หัวต้องอยู่ในกรอบครบทุกด้าน" — ไม่ตัดมงกุฎหัว/คาง/แก้มเด็ดขาด
+  //   หา bbox ของ "หัว" (clip กับขอบภาพ) แล้วการันตีว่ากรอบครอปต้องคลุมหัวทั้งก้อน
+  //   ถ้ากรอบเล็กกว่าหัว → ขยายกรอบ (ยอมหน้าเล็กลง ดีกว่าหัวขาด)
+  const headLpx = Math.max(0, hx1 * imgW) - faceWpx * 0.02;
+  const headRpx = Math.min(imgW, hx2 * imgW) + faceWpx * 0.02;
+  const headTpx = Math.max(0, hy1 * imgH) - faceHpx * 0.03;
+  const headBpx = Math.min(imgH, hy2 * imgH) + faceHpx * 0.02;
+  if (regionWpx < headRpx - headLpx) { regionWpx = headRpx - headLpx; regionHpx = regionWpx / slotAspect; }
+  if (regionHpx < headBpx - headTpx) { regionHpx = headBpx - headTpx; regionWpx = regionHpx * slotAspect; }
+
   if (regionWpx > imgW) { regionWpx = imgW; regionHpx = regionWpx / slotAspect; }
   if (regionHpx > imgH) { regionHpx = imgH; regionWpx = regionHpx * slotAspect; }
 
   let left = faceCxPx - regionWpx / 2;
   let top = faceCyPx - regionHpx * faceTopAt;
+  // ★ ดันกรอบให้คลุมหัวครบก่อน clamp ขอบภาพ — แม้หน้าชิดขอบภาพต้นฉบับ หัวก็ไม่ขาด/ไม่แหว่งข้าง
+  if (left > headLpx) left = headLpx;
+  if (left + regionWpx < headRpx) left = headRpx - regionWpx;
+  if (top > headTpx) top = headTpx;
+  if (top + regionHpx < headBpx) top = headBpx - regionHpx;
   left = Math.min(Math.max(left, 0), imgW - regionWpx);
   top = Math.min(Math.max(top, 0), imgH - regionHpx);
   return { left: Math.round(left), top: Math.round(top), width: Math.max(8, Math.round(regionWpx)), height: Math.max(8, Math.round(regionHpx)) };
@@ -317,11 +332,13 @@ async function renderRectTile(src, crop, slot, fb) {
     const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
     region = faceRegionForSlot(fb, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
   } else if (usableGroupFaces(fb)) {
-    // ★ rev.15i (ผู้ใช้ติช่อง 3-4-5 พัง "ไม่จัดกึ่งกลาง ไม่เน้นคน มองไม่รู้เรื่อง"):
-    //   ทุกช่องครอป "หน้าใหญ่สุด" จัดกึ่งกลาง+เด่นชัดเสมอ — เลิกครอปกลุ่มหลวมที่คนตัวเล็กจมฉาก
-    const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
-    const isHeroSlot = slot.id === 'main' || (slot.w * slot.h) >= (520 * 800);
     const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
+    const isHeroSlot = slot.id === 'main' || (slot.w * slot.h) >= (520 * 800);
+    const areaOf = (f) => (f.x2 - f.x1) * (f.y2 - f.y1);
+    const largest = fb.allFaces.reduce((b, f) => (areaOf(f) > areaOf(b) ? f : b), fb.allFaces[0]);
+    // ★ rev.22 (CASE-178): "คนสำคัญ" = หน้าที่ใหญ่พอ (≥35% ของหน้าใหญ่สุด) — กรองคนฉากหลังหน้าจิ๋วทิ้ง
+    const maxArea = areaOf(largest);
+    const mainFaces = fb.allFaces.filter((f) => areaOf(f) >= maxArea * 0.35);
     if (isHeroSlot) {
       // hero = หน้าเดี่ยวใหญ่สุดเด่น + เลื่อนพ้นคนข้างเคียง (บทเรียน CASE-119)
       region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, Math.min(0.96, faceFrac + 0.12), faceTopAt, Math.min(0.90, maxFaceHFrac + 0.08));
@@ -337,8 +354,12 @@ async function renderRectTile(src, crop, slot, fb) {
       if (rr > rMax) { const sh = rr - rMax; rl -= sh; rr -= sh; }
       if (rl < rMin) { const sh = rMin - rl; rl += sh; rr += sh; }
       region.left = Math.round(Math.max(0, Math.min(rl, imgW - region.width)));
+    } else if (mainFaces.length >= 2) {
+      // ★ กฎเหล็ก: มีคนสำคัญหลายคน (พ่อ-ลูก/คู่รัก) → โชว์ "ทุกคนเต็มหัว" ห้ามตัดใครหัวขาด
+      //   groupRegionForSlot คลุม bbox ของทุกหน้า+headroom → ไม่มีใครเหลือแต่ตัวหัวหาย
+      region = groupRegionForSlot(mainFaces, imgW, imgH, slot.w / slot.h);
     } else {
-      // ช่องรอง = ครอปหน้าใหญ่สุด จัดกึ่งกลาง เด่นชัด (faceRegionForSlot จัดหน้าไว้กลางเฟรมให้เอง)
+      // คนสำคัญคนเดียว (คนอื่นเป็นฉากหลังหน้าจิ๋ว) → โชว์คนเด่นเต็มหน้า (หัวครบจาก guard ใน faceRegionForSlot)
       region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
     }
   } else {
@@ -379,10 +400,10 @@ async function renderCircleTile(src, crop, slot, fb) {
   //   ถ้าภาพมีหลายหน้า → ครอปหน้าใหญ่สุดเดี่ยว (ชัดกว่าโชว์ทั้งกลุ่มในวงเล็ก)
   let region;
   if (fb && fb.x2 > fb.x1 && (!fb.allFaces || fb.allFaces.length <= 1)) {
-    region = faceRegionForSlot(fb, imgW, imgH, 1, 0.80, 0.47, 0.80);
+    region = faceRegionForSlot(fb, imgW, imgH, 1, 0.74, 0.47, 0.80);
   } else if (fb && Array.isArray(fb.allFaces) && fb.allFaces.length >= 1) {
     const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
-    region = faceRegionForSlot(largest, imgW, imgH, 1, 0.80, 0.47, 0.80);
+    region = faceRegionForSlot(largest, imgW, imgH, 1, 0.74, 0.47, 0.80);
   } else {
     region = fitCropToSlotAspect(crop, imgW, imgH, 1);
   }
