@@ -270,8 +270,10 @@ function faceCropCore(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxFaceHF
 //   (ทุกตัวเรียก faceCropCore ร่วมกัน แต่ส่งค่าของตัวเอง → จูนค่าตัวนึงไม่กระทบตัวอื่น)
 // ════════════════════════════════════════════════════════════════════════════
 
-// ── 🔒 HERO (ช่องเอกใหญ่) — นิ่งแล้ว rev.22b (มาตรฐาน CASE-177) · ⛔ อย่าแก้เมื่อไปแก้เลย์เอาต์อื่น ──
-const HERO_CROP = { faceFrac: 0.78, faceTopAt: 0.32, maxFaceHFrac: 0.74 }; // medium close-up: หน้า+ไหล่+headroom
+// ── HERO (ช่องเอกใหญ่) — rev.22d (เสก: ขอหน้าเด่นเต็มเฟรมกว่านี้ พื้นที่ว่างเหลือเยอะ) ──
+//   faceFrac 0.78→0.84 (หน้าใหญ่ขึ้น เต็มกว้างกว่าเดิม) · maxFaceHFrac 0.74→0.80 (หน้าสูงขึ้น ตัดพื้นว่าง)
+//   ยังมี center-bias guard กันแหว่ง/เบี้ยว (ไม่กลับไปพังแบบ 0.90) · faceTopAt 0.32 คง headroom
+const HERO_CROP = { faceFrac: 0.84, faceTopAt: 0.32, maxFaceHFrac: 0.80 };
 function cropHero(fb, imgW, imgH, slotAspect) {
   // หน้าเดี่ยว → ครอปเด่นตรงๆ
   if (!fb.allFaces || fb.allFaces.length <= 1) {
@@ -308,8 +310,9 @@ function cropCircle(fb, imgW, imgH) {
   return faceCropCore(face, imgW, imgH, 1, CIRCLE_CROP.faceFrac, CIRCLE_CROP.faceTopAt, CIRCLE_CROP.maxFaceHFrac);
 }
 
-// ── MOMENT (ช่องรอง เช่น 3-image-right) — คนสำคัญหลายคน=โชว์ครบทุกหัว / คนเดียว=เด่น ──
-const MOMENT_CROP = { faceFrac: 0.76, faceTopAt: 0.40, maxFaceHFrac: 0.74 };
+// ── MOMENT (ช่องรอง/กลางขวา) — rev.22d (เสก: ต้องเห็นหน้าเด่น ไม่เน้นพื้นหลัง ไม่เหลือพื้นที่ว่าง + หัวไม่ขาด) ──
+//   faceFrac 0.76→0.82 (หน้าใหญ่เด่นขึ้น) · faceTopAt 0.40→0.36 (หน้าเต็มกรอบขึ้น พื้นว่างน้อยลง) · maxFaceHFrac 0.74→0.80
+const MOMENT_CROP = { faceFrac: 0.82, faceTopAt: 0.36, maxFaceHFrac: 0.80 };
 function cropMoment(fb, imgW, imgH, slotAspect) {
   if (!fb.allFaces || fb.allFaces.length <= 1) {
     return faceCropCore(fb, imgW, imgH, slotAspect, MOMENT_CROP.faceFrac, MOMENT_CROP.faceTopAt, MOMENT_CROP.maxFaceHFrac);
@@ -348,10 +351,12 @@ function groupRegionForSlot(faces, imgW, imgH, slotAspect) {
   const avgFh = (faces.reduce((s, f) => s + (f.y2 - f.y1), 0) / faces.length) * imgH; // ความสูงหน้าเฉลี่ย
 
   // rev.15g (feedback CASE-126): ช่องรองซูมเข้า "หน้าใหญ่ขึ้น" — ลดระยะเผื่อ (แต่ยังกันตัดหัว-ไหล่)
-  let L = x1 - avgFh * 0.24;   // ข้างซ้าย
-  let R = x2 + avgFh * 0.24;   // ข้างขวา
-  let T = y1 - avgFh * 0.38;   // headroom เหนือหัว
-  let B = y2 + avgFh * 0.62;   // ไหล่-อก ใต้คาง
+  // rev.22d (เสก ช่องกลางขวา: หัวขาด + พื้นหลังเยอะ) — เผื่อผมเหนือหัวให้พอ (กันมงกุฎขาด) + กระชับข้าง/ล่าง (หน้าเด่น พื้นว่างน้อย)
+  // ★ groupRegionForSlot ใช้เฉพาะ MOMENT เท่านั้น (rev.22c) — จูนตรงนี้ไม่กระทบ hero/circle
+  let L = x1 - avgFh * 0.18;   // ข้างซ้าย (กระชับ)
+  let R = x2 + avgFh * 0.18;   // ข้างขวา (กระชับ)
+  let T = y1 - avgFh * 0.55;   // เผื่อผมเหนือหัว — กันหัว/มงกุฎขาด (เดิม 0.38 ไม่พอคลุมผม)
+  let B = y2 + avgFh * 0.45;   // ไหล่-อก ใต้คาง (กระชับ ลดพื้นว่าง)
   let cx = (L + R) / 2, cy = (T + B) / 2;
   let regionWpx = R - L, regionHpx = B - T;
 
