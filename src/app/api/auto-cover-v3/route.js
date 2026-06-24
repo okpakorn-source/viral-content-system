@@ -227,10 +227,15 @@ async function _renderCoverV3(request) {
         //   เก็บ "ภาพบริบท" เพิ่มสูงสุด 2 ใบ = ภาพที่มี "คนอยู่ในเหตุการณ์" (หน้าเล็กกว่าเกณฑ์โคลสอัพ แต่ ≥0.008)
         //   พูลนี้ judge คัด on-topic มาแล้ว → ภาพหน้าเล็กที่เหลือ = คนกำลังทำกิจกรรม/บริบท (ไม่ใช่ฉากเปล่า/ขยะ)
         //   Director (กฎ: ช่องรอง 1-2 ช่องต้องเป็นภาพบริบทตรงแก่นข่าว) จะหยิบไปใส่ช่องโมเมนต์เอง
+        // ★ rev.22g (24 มิ.ย. — ข่าวเปิดบ้าน/กิจกรรม CASE-185/186 "ไม่มีรูปบริบทเลย เอาแต่รูปคน"):
+        //   เก็บภาพบริบทเพิ่มสูงสุด 3 ใบ — รวม "ภาพไม่มีหน้า" (บ้าน/ห้อง/สถานที่/กิจกรรม) ด้วย
+        //   พูลนี้ judge คัด on-topic มาแล้ว (KEY_ACTIVITY/CONTEXT/EVIDENCE) → ไม่ใช่ฉากเปล่า/ขยะ
+        //   เดิมบังคับ areaOf≥0.008 (ต้องมีหน้าเล็กๆ) → ภาพบ้าน/ห้องที่ไม่มีคนโดนตัดทิ้งหมด = ปกมีแต่รูปคน
+        //   เรียงให้ "ภาพมีคนในเหตุการณ์" มาก่อน แล้วค่อยภาพสถานที่ล้วน
         const ctxIdx = imageBuffers.map((_, i) => i)
-          .filter(i => !finalMask[i] && areaOf(faceBoxes[i]) >= 0.008)
+          .filter(i => !finalMask[i])
           .sort((a, b) => areaOf(faceBoxes[b]) - areaOf(faceBoxes[a]))
-          .slice(0, 2);
+          .slice(0, 3);
         const finalIdx = [...bigIdx, ...ctxIdx].sort((a, b) => a - b);
         const ibNew = finalIdx.map(i => imageBuffers[i]);
         const fbNew = finalIdx.map(i => faceBoxes[i]);
