@@ -168,3 +168,92 @@ export async function extractInsightFromVideoBuffer(videoBuffer, mimeType = 'vid
   const r = await callGeminiVideoFile({ prompt: VIDEO_INSIGHT_PROMPT, videoBuffer, mimeType });
   return normalizeInsight(r, 'gemini-video');
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// 🧠 สมอง "คลิปยาว — แยกทุกประเด็น" (rev. 24 มิ.ย.) — แยกขาดจาก single-topic ด้านบน
+//   ใช้กับรายการ/สัมภาษณ์ยาว (หลายสิบนาที-ชั่วโมง) ที่คุยหลายประเด็น → ถอด "ทุกประเด็น" + ช่วงเวลา
+//   🔴 แก้เฉพาะส่วนนี้เวลาจูน multi-topic — ไม่กระทบ single-topic (คลิปสั้น) ที่ทำงานดีอยู่แล้ว
+// ════════════════════════════════════════════════════════════════════════════
+const MULTITOPIC_SCHEMA = `ตอบเป็น JSON เท่านั้น (ห้ามมี markdown):
+{
+  "headline": "ภาพรวมทั้งคลิปนี้คือรายการ/สัมภาษณ์อะไร (1 ประโยค)",
+  "overview": "ภาพรวมว่าคลิปนี้คุยเรื่องอะไรบ้างโดยรวม 2-4 บรรทัด",
+  "topics": [
+    {
+      "no": 1,
+      "title": "ชื่อประเด็นนี้ (สั้น กระชับ ชัดเจน)",
+      "timeStart": "เวลาเริ่มโดยประมาณ เช่น 0:00",
+      "timeEnd": "เวลาจบโดยประมาณ เช่น 5:30",
+      "summary": "สรุปประเด็นนี้ 2-4 บรรทัด ข้อเท็จจริงล้วน อ่านแล้วเข้าใจว่าช่วงนี้คุยอะไร",
+      "keyPoints": ["ข้อเท็จจริง/ประเด็นย่อยสำคัญในช่วงนี้"],
+      "quotes": ["คำพูดสำคัญตรงจากช่วงนี้ (ใส่ชื่อคนพูดถ้ารู้)"]
+    }
+  ]
+}`;
+
+const VIDEO_MULTITOPIC_PROMPT = `คุณเป็นบรรณาธิการข่าว ดู "คลิปยาวนี้ทั้งคลิป" (ภาพ+เสียง) ซึ่งเป็นรายการ/สัมภาษณ์ที่คุยหลายประเด็น
+
+🎯 ภารกิจสำคัญที่สุด: คลิปนี้ "ยาวและมีหลายประเด็น" — ⛔ ห้ามเลือกมาแค่ประเด็นเดียวหรือบางช่วงเด็ดขาด!
+ให้ไล่ดู "ตั้งแต่ต้นจนจบจริง" แล้ว "แยกออกเป็นทุกประเด็นที่คุยกัน" — ถอดได้กี่ประเด็นส่งมาให้ครบทุกประเด็น
+(คลิปยาวปกติมี 3-15 ประเด็น บางทีมากกว่า — เก็บให้ครบ อย่าให้เสียโอกาส)
+
+นิยาม "1 ประเด็น" = 1 เรื่อง/หัวข้อที่คุยต่อเนื่องช่วงหนึ่ง พร้อมช่วงเวลา (เริ่ม–จบ) โดยประมาณ
+
+กฎ:
+- เรียงตามลำดับเวลาในคลิป (ต้น→ท้าย) · ครอบคลุมทุกช่วง อย่าข้ามกลาง/ท้าย
+- ทุกประเด็นต้องมี: title + ช่วงเวลา + สรุป + ข้อเท็จจริงสำคัญ + คำพูดเด่น (ถ้ามี)
+- อ่านตัวหนังสือบนจอ (CG/ซับ/ป้ายชื่อ) ประกอบ — ระบุชื่อคน/ตำแหน่ง/บริบท
+- ข้อเท็จจริงล้วน ไม่แต่งเติม ไม่เดา — ไม่ชัดให้บอกว่าไม่ชัด
+
+${MULTITOPIC_SCHEMA}`;
+
+function normalizeMultiTopic(p, engine) {
+  const topics = Array.isArray(p.topics) ? p.topics.slice(0, 50).map((t, i) => ({
+    no: Number(t?.no) || (i + 1),
+    title: String(t?.title || '').slice(0, 200),
+    timeStart: String(t?.timeStart || '').slice(0, 20),
+    timeEnd: String(t?.timeEnd || '').slice(0, 20),
+    summary: String(t?.summary || '').slice(0, 1500),
+    keyPoints: Array.isArray(t?.keyPoints) ? t.keyPoints.slice(0, 12).map(k => String(k?.point || k || '').slice(0, 300)).filter(Boolean) : [],
+    quotes: Array.isArray(t?.quotes) ? t.quotes.slice(0, 10).map(q => String(q).slice(0, 400)).filter(Boolean) : [],
+  })).filter(t => t.title || t.summary) : [];
+  const ct = pickType(p.clipType);
+  return {
+    engine,
+    multiTopic: true,
+    clipType: ct,
+    clipTypeLabel: CLIP_TYPES[ct].label,
+    emoji: CLIP_TYPES[ct].emoji,
+    usageNote: CLIP_TYPES[ct].note,
+    headline: String(p.headline || '').slice(0, 200),
+    overview: String(p.overview || '').slice(0, 1500),
+    totalTopics: topics.length,
+    topics,
+  };
+}
+
+/** ★ คลิปยาว (ไฟล์วิดีโอ TikTok/FB/Reels) → แยกทุกประเด็น */
+export async function extractMultiTopicFromVideoBuffer(videoBuffer, mimeType = 'video/mp4') {
+  const { callGeminiVideoFile } = await import('@/lib/ai/geminiClient');
+  const r = await callGeminiVideoFile({ prompt: VIDEO_MULTITOPIC_PROMPT, videoBuffer, mimeType, maxTokens: 24000 });
+  return normalizeMultiTopic(r, 'gemini-video-multitopic');
+}
+
+/** ★ คลิปยาว (YouTube ลิงก์ตรง / fallback บทถอดเสียง) → แยกทุกประเด็น */
+export async function extractMultiTopicInsight({ url, platform, rawText = '' }) {
+  if (platform === 'youtube') {
+    const { callGeminiVideo } = await import('@/lib/ai/geminiClient');
+    const r = await callGeminiVideo({ prompt: VIDEO_MULTITOPIC_PROMPT, youtubeUrl: url, maxTokens: 24000 });
+    return normalizeMultiTopic(r, 'gemini-video-multitopic');
+  }
+  const text = String(rawText || '').trim();
+  if (text.length < 40) throw new Error('ไม่มีบทถอดให้วิเคราะห์ (คลิปอาจไม่มีเสียง/ถอดไม่ได้)');
+  const prompt = `${VIDEO_MULTITOPIC_PROMPT}
+
+=== บทถอดเสียงทั้งคลิป ===
+${text.slice(0, 24000)}
+=== จบ ===`;
+  const r = await callAI({ prompt, model: MODEL_FAST, temperature: 0.2, maxTokens: 8000 });
+  const pp = typeof r === 'object' ? r : JSON.parse(String(r).match(/\{[\s\S]*\}/)?.[0] || '{}');
+  return normalizeMultiTopic(pp, 'transcript-llm-multitopic');
+}

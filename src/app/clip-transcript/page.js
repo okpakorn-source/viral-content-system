@@ -91,12 +91,26 @@ export default function ClipTranscriptPage() {
   const deleteCase = async (id) => { await fetch('/api/clip-transcript/cases?id=' + id, { method: 'DELETE' }); loadCases(); };
   const deleteInsightCase = async (id) => { await fetch('/api/clip-transcript/cases?kind=insight&id=' + id, { method: 'DELETE' }); loadInsightCases(); };
 
-  // รวมข้อความข้อมูลดิบของเคสประเด็น (เอาไปคัดลอกทั้งก้อน)
+  // ข้อความคัดลอกของ "1 ประเด็น" (ใช้ทั้งคลิปยาวรายประเด็น)
+  const topicText = (t) => {
+    const lines = [`【${t.no}】 ${t.title || ''}${(t.timeStart || t.timeEnd) ? `  (${t.timeStart || '?'}–${t.timeEnd || '?'})` : ''}`];
+    if (t.summary) lines.push(t.summary);
+    if (t.keyPoints?.length) lines.push(t.keyPoints.map((k) => `• ${k}`).join('\n'));
+    if (t.quotes?.length) lines.push(t.quotes.map((q) => `“${q}”`).join('\n'));
+    return lines.join('\n');
+  };
+
+  // รวมข้อความข้อมูลดิบของเคสประเด็น (เอาไปคัดลอกทั้งก้อน) — รองรับทั้ง single + multi-topic (คลิปยาว)
   const insightCaseText = (ins) => {
     if (!ins) return '';
     const parts = [];
     if (ins.headline) parts.push(`📌 ${ins.headline}`);
     if (ins.overview) parts.push(ins.overview);
+    if (ins.multiTopic && ins.topics?.length) {
+      parts.push(`— แยก ${ins.topics.length} ประเด็น —`);
+      ins.topics.forEach((t) => parts.push(topicText(t)));
+      return parts.join('\n\n');
+    }
     if (ins.keyPoints?.length) parts.push('— ประเด็นสำคัญ —\n' + ins.keyPoints.map((k, i) => `${i + 1}. ${k.point}${k.detail ? ' — ' + k.detail : ''}`).join('\n'));
     if (ins.quotes?.length) parts.push('— คำพูดสำคัญ —\n' + ins.quotes.map(q => `“${q}”`).join('\n'));
     if (ins.rawData) parts.push('— ข้อมูลดิบ —\n' + ins.rawData);
@@ -194,11 +208,36 @@ export default function ClipTranscriptPage() {
               <div style={{ fontSize: 15, fontWeight: 800, color: '#60a5fa' }}>🎯 ข้อมูลดิบจากคลิป</div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>{insight.emoji} {insight.clipTypeLabel}</span>
-                <span style={{ fontSize: 10, color: 'var(--text-muted,#888)' }}>{insight.engine === 'gemini-video' ? '👁️ Gemini ดูคลิป' : '📝 จากบทถอดเสียง'}</span>
-                <button onClick={() => copy(insight.rawData, 'insight-raw')} style={{ padding: '4px 11px', borderRadius: 8, border: 'none', background: copied === 'insight-raw' ? 'rgba(34,197,94,0.2)' : 'rgba(59,130,246,0.15)', color: copied === 'insight-raw' ? '#22c55e' : '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'insight-raw' ? '✅ คัดลอกแล้ว' : '📋 คัดลอกข้อมูลดิบ'}</button>
+                {insight.multiTopic && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(245,158,11,0.18)', color: '#fbbf24', fontWeight: 800 }}>📚 คลิปยาว · {insight.totalTopics || insight.topics?.length || 0} ประเด็น</span>}
+                <span style={{ fontSize: 10, color: 'var(--text-muted,#888)' }}>{String(insight.engine || '').includes('gemini-video') ? '👁️ Gemini ดูคลิป' : '📝 จากบทถอดเสียง'}</span>
+                <button onClick={() => copy(insightCaseText(insight), 'insight-raw')} style={{ padding: '4px 11px', borderRadius: 8, border: 'none', background: copied === 'insight-raw' ? 'rgba(34,197,94,0.2)' : 'rgba(59,130,246,0.15)', color: copied === 'insight-raw' ? '#22c55e' : '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'insight-raw' ? '✅ คัดลอกแล้ว' : '📋 คัดลอกทั้งหมด'}</button>
               </div>
             </div>
 
+            {/* ★ 24 มิ.ย.: คลิปยาว = แยกทุกประเด็น (รายงานทุกช่วง) · คลิปสั้น = แสดงแบบเดิม */}
+            {insight.multiTopic ? (
+              <>
+                {insight.headline && <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>📌 {insight.headline}</div>}
+                {insight.overview && <div style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-muted,#bbb)', marginBottom: 14, whiteSpace: 'pre-wrap' }}>{insight.overview}</div>}
+                <div style={{ fontSize: 12, fontWeight: 800, color: '#fbbf24', marginBottom: 10 }}>📚 แยกได้ {insight.topics?.length || 0} ประเด็น (เรียงตามเวลาในคลิป)</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {(insight.topics || []).map((t, i) => (
+                    <div key={i} style={{ borderRadius: 11, background: 'rgba(0,0,0,0.22)', border: '1px solid rgba(245,158,11,0.25)', padding: '12px 14px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 800, flex: 1, minWidth: 160 }}><span style={{ color: '#fbbf24' }}>【{t.no}】</span> {t.title}</div>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          {(t.timeStart || t.timeEnd) && <span style={{ fontSize: 11, color: '#60a5fa', fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>⏱️ {t.timeStart || '?'}–{t.timeEnd || '?'}</span>}
+                          <button onClick={() => copy(topicText(t), 'tp-' + i)} style={{ padding: '3px 9px', borderRadius: 7, border: 'none', background: copied === 'tp-' + i ? 'rgba(34,197,94,0.2)' : 'rgba(255,255,255,0.07)', color: copied === 'tp-' + i ? '#22c55e' : 'var(--text-muted,#aaa)', fontSize: 10.5, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'tp-' + i ? '✅' : '📋'}</button>
+                        </div>
+                      </div>
+                      {t.summary && <div style={{ fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', marginBottom: (t.keyPoints?.length || t.quotes?.length) ? 8 : 0 }}>{t.summary}</div>}
+                      {t.keyPoints?.length > 0 && <ul style={{ margin: '0 0 6px', paddingLeft: 18, fontSize: 12.5, lineHeight: 1.7, color: 'var(--text-muted,#bbb)' }}>{t.keyPoints.map((k, j) => <li key={j}>{k}</li>)}</ul>}
+                      {t.quotes?.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>{t.quotes.map((q, j) => <div key={j} style={{ fontSize: 12, lineHeight: 1.55, padding: '5px 9px', borderRadius: 7, background: 'rgba(34,197,94,0.06)', borderLeft: '2px solid #22c55e' }}>&ldquo;{q}&rdquo;</div>)}</div>}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (<>
             {insight.headline && <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>📌 {insight.headline}</div>}
             {insight.speakers?.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted,#888)', marginBottom: 10 }}>🗣️ ผู้พูด: {insight.speakers.join(', ')}</div>}
             {insight.usageNote && <div style={{ fontSize: 11.5, color: '#a78bfa', marginBottom: 12, padding: '7px 11px', borderRadius: 8, background: 'rgba(124,58,237,0.07)' }}>💡 {insight.usageNote}</div>}
@@ -253,6 +292,7 @@ export default function ClipTranscriptPage() {
                 <div style={{ fontSize: 13.5, lineHeight: 1.8, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 14, maxHeight: 360, overflowY: 'auto' }}>{insight.rawData}</div>
               </div>
             )}
+            </>)}
           </div>
         )}
 
@@ -306,10 +346,10 @@ export default function ClipTranscriptPage() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3, flexWrap: 'wrap' }}>
                         {ins.clipTypeLabel && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>{ins.emoji || '🎬'} {ins.clipTypeLabel}</span>}
-                        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(37,99,235,0.15)', color: '#60a5fa', fontWeight: 700 }}>{ins.engine === 'gemini-video' ? '👁️ ดูคลิป' : '📝 บทถอด'}</span>
+                        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(37,99,235,0.15)', color: '#60a5fa', fontWeight: 700 }}>{String(ins.engine || '').includes('gemini-video') ? '👁️ ดูคลิป' : '📝 บทถอด'}</span>
                       </div>
                       <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platformIcon(c.platform)} {ins.headline || c.title || c.url}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{c.platform} · {ins.keyPoints?.length || 0} ประเด็น · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{c.platform} · {ins.multiTopic ? `📚 ${ins.topics?.length || 0} ประเด็น (คลิปยาว)` : `${ins.keyPoints?.length || 0} ประเด็น`} · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
                     </div>
                     <button onClick={(e) => { e.stopPropagation(); deleteInsightCase(c.id); }} style={{ marginLeft: 10, padding: '4px 10px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>ลบ</button>
                   </div>
@@ -321,6 +361,17 @@ export default function ClipTranscriptPage() {
                         <button onClick={() => copy(insightCaseText(ins), 'ic-all-' + c.id)} style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'ic-all-' + c.id ? '✅' : '📋 คัดลอกทั้งหมด'}</button>
                       </div>
                       {ins.overview && <div style={{ fontSize: 13, lineHeight: 1.7, marginBottom: 10, whiteSpace: 'pre-wrap' }}>{ins.overview}</div>}
+                      {ins.multiTopic && ins.topics?.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+                          {ins.topics.map((t, i) => (
+                            <div key={i} style={{ padding: '9px 11px', borderRadius: 8, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                              <div style={{ fontSize: 12.5, fontWeight: 800 }}><span style={{ color: '#fbbf24' }}>【{t.no}】</span> {t.title} {(t.timeStart || t.timeEnd) && <span style={{ fontSize: 10.5, color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600 }}>⏱️{t.timeStart || '?'}–{t.timeEnd || '?'}</span>}</div>
+                              {t.summary && <div style={{ fontSize: 12, color: 'var(--text-muted,#aaa)', marginTop: 3, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{t.summary}</div>}
+                              {t.keyPoints?.length > 0 && <ul style={{ margin: '5px 0 0', paddingLeft: 18, fontSize: 11.5, lineHeight: 1.6, color: 'var(--text-muted,#aaa)' }}>{t.keyPoints.map((k, j) => <li key={j}>{k}</li>)}</ul>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {ins.keyPoints?.length > 0 && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
                           {ins.keyPoints.map((k, i) => (

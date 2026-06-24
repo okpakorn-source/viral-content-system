@@ -1,6 +1,6 @@
 export const maxDuration = 300; // Gemini ดูคลิปทั้งเรื่อง — เผื่อเวลา
 import { NextResponse } from 'next/server';
-import { extractClipInsight, extractInsightFromVideoBuffer } from '@/lib/services/clipInsightService';
+import { extractClipInsight, extractInsightFromVideoBuffer, extractMultiTopicInsight, extractMultiTopicFromVideoBuffer } from '@/lib/services/clipInsightService';
 import { createStore } from '@/lib/persistStore';
 import { getClipVideoQueue } from '@/lib/services/clipQueue';
 import { randomUUID } from 'crypto';
@@ -42,6 +42,31 @@ async function downloadMetaBuffer(url) {
     if (buf.length < 10000) throw new Error('วิดีโอเล็กเกินไป');
     return buf;
   } finally { await unlink(out).catch(() => {}); }
+}
+
+// ★ 24 มิ.ย.: หาความยาวคลิป (วินาที) ด้วย yt-dlp — ใช้ตัดสินใจ "คลิปยาว→แยกทุกประเด็น"
+//   คืน 0 ถ้าหาไม่ได้ (ไม่มี yt-dlp/cloud) → ระบบจะใช้โหมด single (คลิปสั้น) เป็นค่าปลอดภัย ไม่ทำของเดิมพัง
+async function getClipDurationSec(url) {
+  try {
+    if (process.platform !== 'win32') return 0;
+    const { execFile } = await import('child_process');
+    const { promisify } = await import('util');
+    const { join } = await import('path');
+    const { existsSync } = await import('fs');
+    const execFileAsync = promisify(execFile);
+    const exe = join(process.cwd(), 'bin', 'yt-dlp.exe');
+    if (!existsSync(exe)) return 0;
+    const cookies = join(process.cwd(), 'bin', 'cookies.txt');
+    const args = ['--no-warnings', '--no-playlist', '--get-duration'];
+    if (existsSync(cookies)) args.push('--cookies', cookies);
+    args.push(url);
+    const { stdout } = await execFileAsync(exe, args, { timeout: 60_000, maxBuffer: 1024 * 1024 });
+    const line = String(stdout).trim().split('\n').filter(Boolean).pop() || '';
+    const parts = line.trim().split(':').map(n => parseInt(n, 10));
+    if (!parts.length || parts.some(isNaN)) return 0;
+    let sec = 0; for (const n of parts) sec = sec * 60 + (n || 0);
+    return sec;
+  } catch { return 0; }
 }
 
 /**
@@ -101,10 +126,19 @@ async function transcribeFor(url, type) {
 // ★ 22 มิ.ย.: รวมตรรกะสกัด "ข้อมูลดิบ" ไว้ในฟังก์ชันเดียว (ดูคลิป→fallback ถอดเสียง) — โยน error ที่มี .code
 //   เพื่อให้ห่อด้วยคิวได้สะอาด (ไม่ปน NextResponse กับงานหนัก)
 async function buildInsight({ url, type }) {
+  // ★ 24 มิ.ย.: คลิปยาว (≥ CLIP_MULTITOPIC_MIN_SEC, default 10 นาที) → "แยกทุกประเด็น" (multi-topic)
+  //   คลิปสั้น → single (โหมดเดิม ไม่แตะ) · หาความยาวไม่ได้ → single (ปลอดภัย)
+  const LONG_SEC = Number(process.env.CLIP_MULTITOPIC_MIN_SEC) || 600;
+  const durSec = await getClipDurationSec(url).catch(() => 0);
+  const isLong = durSec >= LONG_SEC;
+  console.log(`[ClipInsight] duration=${durSec || '?'}s → mode=${isLong ? 'MULTI-TOPIC (คลิปยาว)' : 'single (คลิปสั้น)'}`);
+
   if (type === 'youtube') {
     // ① ให้ Gemini ดูคลิปจริงก่อน
     try {
-      return await extractClipInsight({ url, platform: 'youtube' });
+      return isLong
+        ? await extractMultiTopicInsight({ url, platform: 'youtube' })
+        : await extractClipInsight({ url, platform: 'youtube' });
     } catch (gErr) {
       // ② Gemini ดูไม่ได้ (คลิปส่วนตัว/รุ่นไม่รองรับ/เน็ต) → fallback ถอดเสียง + LLM
       console.warn('[ClipInsight] Gemini video ล้ม → fallback ถอดเสียง:', gErr.message?.slice(0, 80));
@@ -112,13 +146,17 @@ async function buildInsight({ url, type }) {
       if (!rawText || rawText.length < 40) {
         const e = new Error(gErr.message); e.code = 'INSIGHT_FAILED'; throw e;
       }
-      return await extractClipInsight({ url, platform: 'transcript', rawText });
+      return isLong
+        ? await extractMultiTopicInsight({ url, platform: 'transcript', rawText })
+        : await extractClipInsight({ url, platform: 'transcript', rawText });
     }
   }
   // TikTok/FB/IG → ① โหลดวิดีโอให้ Gemini "ดูจริง" (เห็นภาพ+ตัวหนังสือบนจอ) ② ล้ม→ถอดเสียง+LLM
   try {
     const buf = type === 'tiktok' ? await downloadTiktokBuffer(url) : await downloadMetaBuffer(url);
-    return await extractInsightFromVideoBuffer(buf, 'video/mp4');
+    return isLong
+      ? await extractMultiTopicFromVideoBuffer(buf, 'video/mp4')
+      : await extractInsightFromVideoBuffer(buf, 'video/mp4');
   } catch (vErr) {
     console.warn('[ClipInsight] Gemini ดูไฟล์วิดีโอล้ม → fallback ถอดเสียง:', vErr.message?.slice(0, 90));
   }
@@ -126,7 +164,9 @@ async function buildInsight({ url, type }) {
   if (!rawText || rawText.length < 40) {
     const e = new Error('ดูคลิป/ถอดเสียงไม่สำเร็จ — คลิปอาจไม่มีเสียง หรือ Facebook/IG ทำได้เฉพาะเครื่องทีม'); e.code = 'CLIP_FAILED'; throw e;
   }
-  return await extractClipInsight({ url, platform: 'transcript', rawText });
+  return isLong
+    ? await extractMultiTopicInsight({ url, platform: 'transcript', rawText })
+    : await extractClipInsight({ url, platform: 'transcript', rawText });
 }
 
 export async function POST(request) {
