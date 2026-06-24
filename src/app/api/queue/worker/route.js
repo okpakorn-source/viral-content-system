@@ -117,24 +117,12 @@ export async function POST(req) {
       }
     }
     
-    // 4. Trigger next batch asynchronously (if more pending jobs exist)
-    //    ★ retry 3 ครั้ง (11 มิ.ย.): fetch ตายครั้งเดียว = ลูกโซ่ขาด งานค้างเงียบ
-    //    (มี watchdog ใน queueService + self-heal ใน status route เป็นตาข่ายชั้นถัดไป)
-    const triggerNext = (attempt = 1) => {
-      fetch(`${baseUrl}/api/queue/worker`, {
-        method: 'POST',
-        headers: { 'x-api-key': expectedKey }
-      }).catch(e => {
-        if (attempt < 3) {
-          logger.info(`[Queue Worker] trigger next batch ล้ม (${e.message?.slice(0, 40)}) — retry ${attempt + 1}/3 ใน 5s`);
-          setTimeout(() => triggerNext(attempt + 1), 5000);
-        } else {
-          logger.error(`[Queue Worker] Failed to trigger next batch: ${e.message}`);
-        }
-      });
-    };
-    triggerNext();
-    
+    // 4. งานถัดไป: ★ 24 มิ.ย. (ทางเลือก A — ผู้ใช้เลือก) ตัด self-fetch worker→worker ออก
+    //    เดิม triggerNext() ยิง /api/queue/worker หาตัวเอง → บน Vercel งานปกยาว worker หลายตัว
+    //    (triggerNext + cron ทุกนาที + status self-heal) วนยิงกัน → Vercel ตรวจเป็น loop → 508 INFINITE_LOOP
+    //    ตอนนี้พึ่ง 2 ตาข่ายที่ไม่วน: (1) Vercel cron /api/queue/worker ทุก 1 นาที (vercel.json)
+    //    (2) status route self-heal ยิง worker เมื่อ pending>0 && processing===0 (ผู้ใช้/บอท poll ทุก 3 วิ)
+    //    → งานข่าว/ปกถัดไปยังถูกหยิบเสมอ (ช้าสุด ~1 นาที) แต่ไม่เกิด loop อีก · ไม่แตะตรรกะเจนข่าว
     return NextResponse.json({ success: true, processed: jobs.length });
     
   } catch (error) {
