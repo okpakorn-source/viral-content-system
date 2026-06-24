@@ -15,7 +15,7 @@ const storeName = (type) => (type === 'splits' ? 'news-filter-splits' : 'news-fi
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const limit = Math.min(60, Number(searchParams.get('limit')) || 30);
+    const limit = Math.min(500, Number(searchParams.get('limit')) || 30); // ★ 24 มิ.ย.: เพดาน 500 — ตรวจสถิติรายคนย้อนหลัง
     const type = searchParams.get('type') || 'cases';
     const store = createStore(storeName(type));
     const all = await store.getAll();

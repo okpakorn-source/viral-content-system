@@ -74,8 +74,9 @@ function NewsFilterContent() {
   const [casesOpen, setCasesOpen] = useState(false);
   const [cases, setCases] = useState([]);
   const [caseExpanded, setCaseExpanded] = useState(null);
+  const [caseUserFilter, setCaseUserFilter] = useState(''); // ★ 24 มิ.ย.: กรองคลังตามชื่อพนักงาน (ตรวจรายคน)
   const loadCases = async () => {
-    try { const r = await fetch('/api/news-filter/cases?limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setCases(d.cases || []); } catch {}
+    try { const r = await fetch('/api/news-filter/cases?limit=300', { cache: 'no-store' }); const d = await r.json(); if (d.success) setCases(d.cases || []); } catch {}
   };
   const toggleCases = () => { const n = !casesOpen; setCasesOpen(n); if (n) loadCases(); };
   const deleteCase = async (id) => { try { await fetch('/api/news-filter/cases?id=' + id, { method: 'DELETE' }); loadCases(); } catch {} };
@@ -468,6 +469,7 @@ function NewsFilterContent() {
         body: JSON.stringify({
           text,
           mode,
+          user: me || 'ไม่ระบุชื่อ', // ★ 24 มิ.ย.: ส่งชื่อพนักงาน → เก็บสถิติรายคน ตรวจย้อนหลังได้
           useAI: options.useAI, // ★ ต้องอยู่ระดับบนสุด — API อ่าน useAI จาก body.useAI (เดิมส่งใน options API เลยได้ false เสมอ → ตกไป regex)
           options: {
             keepQuotes: options.keepQuotes,
@@ -1556,7 +1558,7 @@ function NewsFilterContent() {
         <div style={{ marginTop: 24 }}>
           <button onClick={toggleCases}
             style={{ padding: '10px 18px', borderRadius: 10, border: '1px solid var(--border)', background: casesOpen ? 'rgba(99,102,241,0.12)' : 'var(--bg-card)', color: casesOpen ? '#818cf8' : 'var(--text-primary)', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-            📦 คลังเคสที่สกัดแล้ว {casesOpen ? '▲' : '▼'}
+            📦 คลังการใช้งานรายคน — ใครวางแบบไหน ได้ผลไหน {casesOpen ? '▲' : '▼'}
           </button>
 
           {casesOpen && (
@@ -1571,14 +1573,34 @@ function NewsFilterContent() {
 
               {cases.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>ยังไม่มีเคส — สกัดข่าวสักครั้งแล้วจะถูกเก็บที่นี่อัตโนมัติ</div>}
 
+              {/* ★ 24 มิ.ย.: กรองตามพนักงาน — ตรวจสถิติว่าใครวางแบบไหน (สรุปจริง/ก๊อปชุ่ยๆ) */}
+              {cases.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <input value={caseUserFilter} onChange={e => setCaseUserFilter(e.target.value)}
+                    placeholder="🔍 กรองตามชื่อพนักงาน — พิมพ์ชื่อเพื่อดูเฉพาะคนนั้น"
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'inherit', marginBottom: 8 }} />
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {Object.entries(cases.reduce((m, c) => { const u = c.user || 'ไม่ระบุ'; m[u] = (m[u] || 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]).map(([u, n]) => (
+                      <button key={u} onClick={() => setCaseUserFilter(caseUserFilter === u ? '' : u)}
+                        style={{ padding: '4px 11px', borderRadius: 999, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700, border: '1px solid ' + (caseUserFilter === u ? 'transparent' : 'var(--border)'), background: caseUserFilter === u ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : 'rgba(255,255,255,0.05)', color: caseUserFilter === u ? '#fff' : 'var(--text-primary)' }}>
+                        👤 {u} ({n})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {cases.map((c) => (
+                {cases.filter(c => !caseUserFilter.trim() || (c.user || 'ไม่ระบุ').toLowerCase().includes(caseUserFilter.trim().toLowerCase())).map((c) => (
                   <div key={c.id} style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
                     <div onClick={() => setCaseExpanded(caseExpanded === c.id ? null : c.id)}
                       style={{ padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: 'var(--bg-card)' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title || '(ไม่มีหัวข้อ)'}</div>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                          <span style={{ fontSize: 10.5, fontWeight: 800, color: '#818cf8', background: 'rgba(99,102,241,0.12)', borderRadius: 6, padding: '1px 8px', whiteSpace: 'nowrap', flexShrink: 0 }}>👤 {c.user || 'ไม่ระบุ'}</span>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title || '(ไม่มีหัวข้อ)'}</div>
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
                           {c.engine} · {c.mode} · ตัด {c.removedPercent}% ({c.originalWordCount}→{c.cleanWordCount} คำ) · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                         </div>
                       </div>

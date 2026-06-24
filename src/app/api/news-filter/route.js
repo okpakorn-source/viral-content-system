@@ -121,6 +121,7 @@ export async function POST(request) {
           const store = createStore('news-filter-cases');
           await store.add({
             id: randomUUID(),
+            user: String(body.user || 'ไม่ระบุชื่อ').slice(0, 40), // ★ 24 มิ.ย.: เก็บชื่อพนักงาน — ตรวจย้อนหลังว่าใครวางแบบไหน
             original: String(text).slice(0, 8000),
             clean: String(result.cleanText || '').slice(0, 8000),
             mode, engine,
@@ -131,10 +132,10 @@ export async function POST(request) {
             title: String(text).trim().slice(0, 60),
             createdAt: new Date().toISOString(),
           });
-          // ตัดให้เหลือ 60 เคสล่าสุด
+          // ★ ตัดให้เหลือ 500 เคสล่าสุด (เก็บมากขึ้นเพื่อตรวจสอบสถิติรายคนย้อนหลัง)
           const all = await store.getAll();
-          if (all.length > 60) {
-            const old = all.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).slice(0, all.length - 60);
+          if (all.length > 500) {
+            const old = all.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).slice(0, all.length - 500);
             for (const o of old) await store.remove(o.id).catch(() => {});
           }
         } catch (e) { console.warn('[NewsFilter] เก็บคลังเคสล้ม (ไม่กระทบผล):', e.message?.slice(0, 50)); }
