@@ -233,7 +233,9 @@ function NewsFilterContent() {
   // URL Detection
   const detectedUrl = inputText.trim().match(/^https?:\/\/\S+$/)?.[0] || '';
   const hasUrlInInput = /https?:\/\/\S+/.test(inputText.trim());
-  const isUrlOnly = !!detectedUrl;
+  // ★ 24 มิ.ย. (ผู้ใช้): ปิดสกัดจากลิงก์ชั่วคราว — รับเฉพาะข้อความคุณภาพที่ก๊อปมาวาง (ลิงก์ต้นทางคุณภาพไม่แน่นอน สกัดไม่ได้)
+  const URL_SCRAPE_DISABLED = true;
+  const isUrlOnly = URL_SCRAPE_DISABLED ? false : !!detectedUrl;
 
   // === URL Scrape Handler ===
   const handleScrapeUrl = async (urlToScrape) => {
@@ -448,6 +450,11 @@ function NewsFilterContent() {
   const doAnalyze = async (textToAnalyze) => {
     const text = textToAnalyze || inputText;
     if (!text.trim()) return;
+    // ★ 24 มิ.ย.: ปิดสกัดจากลิงก์ — ถ้าวางเป็น URL ล้วน ให้แจ้งเตือนให้ก๊อปเนื้อข่าวมาวางแทน
+    if (URL_SCRAPE_DISABLED && /^https?:\/\/\S+$/.test(text.trim())) {
+      setError('🔗 ปิดการสกัดจากลิงก์ชั่วคราว — กรุณาก๊อป "เนื้อข่าว" มาวางเป็นข้อความแทน (ลิงก์ต้นทางคุณภาพไม่แน่นอน สกัดไม่ครบ)');
+      return;
+    }
     setLoading(true);
     setError(null);
     setOutputData(null);
@@ -993,7 +1000,7 @@ function NewsFilterContent() {
             <textarea
               value={inputText}
               onChange={e => { setInputText(e.target.value); setSourceUrl(''); }}
-              placeholder="วาง URL ข่าว หรือ ข้อความต้นฉบับที่นี่...&#10;&#10;ตัวอย่าง URL:&#10;https://www.thairath.co.th/news/...&#10;https://www.khaosod.co.th/...&#10;&#10;หรือวางข้อความข่าวยาวๆ ได้เลย"
+              placeholder="วาง 'เนื้อข่าว' เป็นข้อความที่นี่ (ก๊อปเนื้อข่าวเต็มๆ มาวาง)&#10;&#10;⚠️ ปิดการสกัดจากลิงก์ชั่วคราว — รับเฉพาะข้อความ&#10;(วาง URL จะสกัดไม่ได้ ให้ก๊อปเนื้อข่าวมาวางแทน)"
               style={{
                 width: '100%', minHeight: isUrlOnly ? 100 : 400, padding: 16,
                 borderRadius: 12, border: '1px solid var(--border)',
