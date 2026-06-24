@@ -347,17 +347,16 @@ export function tightenMomentCrops(assignments, faceBoxes = []) {
     // ★ rev.21d (ผู้ใช้ CASE-170: "ฮีโร่ต้องเต็มเฟรม หน้าใหญ่ ให้จำหน้าได้ ไม่เหลือพื้นว่าง"):
     //   ครอปฮีโร่ให้ "ใบหน้าเต็มกรอบ" (mult 1.9 = หน้าเด่นสุด + headroom พอดี) — เดิมข้าม main เลยหลวม/มีพื้นเทา
     if (a.slotId === 'main') {
-      if (fArea < 0.008) continue; // หน้าจิ๋วมากในภาพต้นทาง — ปล่อย (กันครอปแล้วเบลอ)
-      a.crop = cropFromFaceBox(fb, 1.9);
+      if (fArea < 0.006) continue; // หน้าจิ๋วมากในภาพต้นทาง — ปล่อย (กันครอปแล้วเบลอ)
+      a.crop = cropFromFaceBox(fb, 1.8); // rev.21e: แน่นขึ้น 1.9→1.8 = หน้าเต็มเฟรมจริง ไม่เหลือพื้นว่าง/ชุดครุยล้น
       a.why = (a.why || '').slice(0, 52) + ' [ฮีโร่หน้าเต็มเฟรม]';
       continue;
     }
     if (!MOMENT_SLOT.test(a.slotId)) continue;
     if (fArea < 0.012) continue; // หน้าจิ๋ว/ภาพบริบทล้วน — ปล่อยตามตั้งใจ
-    // rev.20c: บังคับช่องโมเมนต์ที่มีหน้าชัด ครอปคน-เต็มเฟรม (ตัดไมค์/ป้าย/อุปกรณ์)
-    //   rev.21d: ขยายหน้าทุกช่องอีกหน่อยให้จำได้ง่าย (non-bottom 2.4→2.1, bottom 2.0→1.9)
+    // rev.21e: ครอปแน่นขึ้นอีก (non-bottom 2.1→1.9, bottom 1.9→1.8) = ซูมหน้าเดียว ตัดคนที่เบียด/ตกเฟรมออก
     const isBottom = /bottom/.test(a.slotId);
-    a.crop = cropFromFaceBox(fb, isBottom ? 1.9 : 2.1);
+    a.crop = cropFromFaceBox(fb, isBottom ? 1.8 : 1.9);
     a.why = (a.why || '').slice(0, 52) + (isBottom ? ' [ซูมคนแน่น]' : ' [หน้าเต็มเฟรม]');
   }
   return assignments;
