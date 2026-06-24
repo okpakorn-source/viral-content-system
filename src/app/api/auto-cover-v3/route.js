@@ -221,9 +221,20 @@ async function _renderCoverV3(request) {
       const finalMask = mask;
       const kept = finalMask.filter(Boolean).length;
       if (kept >= 3 && kept < imageBuffers.length) {
-        const ibNew = [], fbNew = [];
-        imageBuffers.forEach((img, i) => { if (finalMask[i]) { ibNew.push(img); fbNew.push(faceBoxes[i]); } });
-        console.log(`[CoverV3] 👤 close-up gate: เหลือ ${ibNew.length}/${imageBuffers.length} (หน้าคมเท่านั้น — เน้นคน)`);
+        // ภาพโคลสอัพ (หน้าคม) = โครงหลักของปก
+        const bigIdx = imageBuffers.map((_, i) => i).filter(i => finalMask[i]);
+        // ★ 24 มิ.ย. (ผู้ใช้ CASE-184: ช่องขวาต้องมี "ภาพบริบทข่าว" 1-2 ใบ ไม่ใช่พอร์ตเทรตคนเดี่ยวล้วน):
+        //   เก็บ "ภาพบริบท" เพิ่มสูงสุด 2 ใบ = ภาพที่มี "คนอยู่ในเหตุการณ์" (หน้าเล็กกว่าเกณฑ์โคลสอัพ แต่ ≥0.008)
+        //   พูลนี้ judge คัด on-topic มาแล้ว → ภาพหน้าเล็กที่เหลือ = คนกำลังทำกิจกรรม/บริบท (ไม่ใช่ฉากเปล่า/ขยะ)
+        //   Director (กฎ: ช่องรอง 1-2 ช่องต้องเป็นภาพบริบทตรงแก่นข่าว) จะหยิบไปใส่ช่องโมเมนต์เอง
+        const ctxIdx = imageBuffers.map((_, i) => i)
+          .filter(i => !finalMask[i] && areaOf(faceBoxes[i]) >= 0.008)
+          .sort((a, b) => areaOf(faceBoxes[b]) - areaOf(faceBoxes[a]))
+          .slice(0, 2);
+        const finalIdx = [...bigIdx, ...ctxIdx].sort((a, b) => a - b);
+        const ibNew = finalIdx.map(i => imageBuffers[i]);
+        const fbNew = finalIdx.map(i => faceBoxes[i]);
+        console.log(`[CoverV3] 👤 close-up gate: เหลือ ${ibNew.length}/${imageBuffers.length} (โคลสอัพ ${bigIdx.length} + บริบท ${ctxIdx.length})`);
         imageBuffers = ibNew; faceBoxes = fbNew;
       }
     } catch (e) { console.log('[CoverV3] close-up gate skipped:', e.message?.slice(0, 40)); }
