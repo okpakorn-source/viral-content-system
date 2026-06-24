@@ -682,7 +682,7 @@ function NewsFilterContent() {
             margin: '6px 0 0', fontSize: 13,
             color: 'var(--text-muted)', lineHeight: 1.5,
           }}>
-            วาง URL ข่าว หรือ ข้อความต้นฉบับ → ระบบดึงเนื้อ + กรองให้เหลือเฉพาะ &quot;เนื้อจริง&quot; ตัดคำเฟ้อ คำตีความ คำแต่งอารมณ์ออก
+            ✍️ สรุปใจความข่าวมาก่อน แล้ววางเป็นข้อความ → ระบบกรองให้เหลือเฉพาะ &quot;แก่นข้อเท็จจริง&quot; ตัดคำเฟ้อ คำตีความ คำแต่งอารมณ์ออก (ห้ามก๊อปเนื้อเต็มจากเว็บ · ปิดสกัดลิงก์ชั่วคราว)
           </p>
         </div>
       </div>
@@ -886,7 +886,7 @@ function NewsFilterContent() {
                 margin: 0, fontSize: 16, fontWeight: 800,
                 color: 'var(--text-primary)',
               }}>
-                📝 ข้อความต้นฉบับ / URL
+                ✍️ วางสรุปใจความข่าว
               </h2>
               <button
                 onClick={loadSample}
@@ -996,11 +996,20 @@ function NewsFilterContent() {
               </div>
             )}
 
+            {/* ★ 24 มิ.ย.: ย้ำกฎสำคัญ — สรุปก่อนวาง ห้ามก๊อปเนื้อเต็ม */}
+            <div style={{
+              marginBottom: 10, padding: '10px 14px', borderRadius: 10,
+              background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+              fontSize: 12.5, color: '#ef4444', fontWeight: 700, lineHeight: 1.6,
+            }}>
+              🔴 ต้อง &quot;สรุปใจความข่าว&quot; มาก่อนเท่านั้น แล้วค่อยวาง — ⛔ ห้ามก๊อปเนื้อข่าวเต็มๆ จากเว็บมาวาง (จะได้เนื้อกากๆ ไม่มีคุณภาพ)
+            </div>
+
             {/* Textarea */}
             <textarea
               value={inputText}
               onChange={e => { setInputText(e.target.value); setSourceUrl(''); }}
-              placeholder="วาง 'เนื้อข่าว' เป็นข้อความที่นี่ (ก๊อปเนื้อข่าวเต็มๆ มาวาง)&#10;&#10;⚠️ ปิดการสกัดจากลิงก์ชั่วคราว — รับเฉพาะข้อความ&#10;(วาง URL จะสกัดไม่ได้ ให้ก๊อปเนื้อข่าวมาวางแทน)"
+              placeholder="✍️ สรุปใจความข่าวก่อน แล้ววาง 'สรุป' ที่นี่&#10;&#10;🔴 สำคัญสุด: ต้องสรุปใจความข่าวมาก่อนเท่านั้น&#10;⛔ ห้ามก๊อปเนื้อข่าวเต็มๆ จากเว็บมาวาง — จะได้เนื้อกากๆ ไม่มีคุณภาพ&#10;&#10;(ปิดสกัดจากลิงก์ชั่วคราว — รับเฉพาะข้อความสรุป)"
               style={{
                 width: '100%', minHeight: isUrlOnly ? 100 : 400, padding: 16,
                 borderRadius: 12, border: '1px solid var(--border)',
