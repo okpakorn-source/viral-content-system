@@ -202,7 +202,7 @@ function fitCropToSlotAspect(crop, imgW, imgH, slotAspect) {
  * - จัดหน้าให้อยู่กึ่งกลางแนวนอน + faceTopAt (กันหัวชนขอบ/คางหลุด)
  * ใช้กับ "ช่องหน้าเดี่ยว 1 คน" เท่านั้น (ภาพคู่/หมู่ใช้กรอบจาก Director ตามเดิม)
  */
-function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxFaceHFrac = 0.60) {
+function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxFaceHFrac = 0.60, minFaceHFrac = 0) {
   // rev.14k: ขยาย "face box" → "หัว" (รวมผม) ก่อนคำนวณ — กันผมตกขอบ (บทเรียน CASE-090 hero ผมตก)
   const fwN = fb.x2 - fb.x1, fhN = fb.y2 - fb.y1;
   const hx1 = fb.x1 - fwN * 0.20, hx2 = fb.x2 + fwN * 0.20; // เผื่อผม/หูข้าง
@@ -224,8 +224,29 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
   const minH = faceHpx / maxFaceHFrac;       // หน้า ≤maxFaceHFrac ของความสูงกรอบ (สูงขึ้น=หน้าใหญ่ขึ้น)
   if (regionHpx < minH) { regionHpx = minH; regionWpx = regionHpx * slotAspect; }
 
+  // ★ HERO เท่านั้น (minFaceHFrac>0 — moment/circle ส่ง 0 ไม่เข้าบล็อกนี้):
+  //   พื้นหน้าขั้นต่ำ — หน้าต้องกิน ≥minFaceHFrac ของความสูงกรอบ ถ้าหลวมกว่านี้ "ซูมเข้า"
+  //   กันฮีโร่หน้าเล็ก/เน้นลำตัว+พื้นหลังเยอะ จนดูไม่ออกว่าใคร (แก้ CASE-200) · ภาพหน้าใหญ่อยู่แล้วไม่กระทบ
+  if (minFaceHFrac > 0) {
+    const maxRegionH = faceHpx / minFaceHFrac;
+    if (regionHpx > maxRegionH) { regionHpx = maxRegionH; regionWpx = regionHpx * slotAspect; }
+  }
+
   if (regionWpx > imgW) { regionWpx = imgW; regionHpx = regionWpx / slotAspect; }
   if (regionHpx > imgH) { regionHpx = imgH; regionWpx = regionHpx * slotAspect; }
+
+  // ★ HERO เท่านั้น — ล็อกหน้าไว้ "กึ่งกลาง": ถ้ากรอบล้นขอบภาพ ให้ "ซูมเข้า" พอดี
+  //   ไม่ปล่อยให้ clamp ด้านล่างดันหน้าเบี้ยวออกข้างจนหน้าโดนตัดครึ่ง (แก้ CASE-198)
+  //   🔒 กันซูมแรงเกิน: ทำเฉพาะเมื่อ "ยังครอบหัวได้เต็ม" (maxHalfW*2 ≥ ความกว้างหัว)
+  //      ถ้าหน้าชิดขอบมากจนซูมแล้วหัวขาด → ไม่ซูม (ปล่อย clamp เดิม ดีกว่าหัวโดนตัด)
+  if (minFaceHFrac > 0) {
+    const maxHalfW = Math.min(faceCxPx, imgW - faceCxPx);
+    const zoomW = maxHalfW * 2, zoomH = zoomW / slotAspect;
+    // ซูมได้เฉพาะเมื่อกรอบที่เล็กลงยัง "ครอบหัวได้ครบทั้งกว้างและสูง" (ไม่งั้นหัวขาด → ปล่อย clamp เดิม)
+    if (maxHalfW > 0 && regionWpx / 2 > maxHalfW && zoomW >= faceWpx && zoomH >= faceHpx) {
+      regionWpx = zoomW; regionHpx = zoomH;
+    }
+  }
 
   let left = faceCxPx - regionWpx / 2;
   let top = faceCyPx - regionHpx * faceTopAt;
@@ -242,7 +263,8 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
 // ════════════════════════════════════════════════════════════════════════════
 // ── HERO (ช่องเอกใหญ่) — rev.22e: คืนค่า rev-14v ที่ "หน้าเด่นเต็มเฟรม ไม่ตัด" (ยุค CASE-096/159) ──
 //   (ค่าก่อนหน้า 0.90/0.26/0.82 ดัน faceTopAt 0.26 ชิดบนเกิน → หน้าโดนตัด/โชว์ตัว+กีตาร์ = CASE-183)
-const HERO_CROP   = { faceFrac: 0.82, faceTopAt: 0.38, maxFaceHFrac: 0.78 };
+//   + minFaceHFrac (25 มิ.ย.): หน้าต้องเด่นขั้นต่ำ — ซูมเข้าถ้าหน้าเล็ก/เน้นลำตัว (แก้ CASE-200) · ล็อกแบบ CASE-199
+const HERO_CROP   = { faceFrac: 0.82, faceTopAt: 0.38, maxFaceHFrac: 0.78, minFaceHFrac: 0.50 };
 // ── CIRCLE (วงกลม) — ⛔ คงค่าเดิม ห้ามแก้เมื่อแก้เลย์เอาต์อื่น ──
 const CIRCLE_CROP = { faceFrac: 0.80, faceTopAt: 0.45, maxFaceHFrac: 0.80 };
 // ── MOMENT (ช่องรอง) — ⛔ คงค่าเดิม ห้ามแก้เมื่อแก้เลย์เอาต์อื่น ──
@@ -321,17 +343,17 @@ async function renderRectTile(src, crop, slot, fb) {
   const imgW = meta.width || 1, imgH = meta.height || 1;
   let region;
   if (usableSingleFace(fb)) {
-    const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
-    region = faceRegionForSlot(fb, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
+    const { faceFrac, faceTopAt, maxFaceHFrac, minFaceHFrac } = faceParamsForSlot(slot);
+    region = faceRegionForSlot(fb, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac, minFaceHFrac || 0);
   } else if (usableGroupFaces(fb)) {
     // ★ rev.15i (ผู้ใช้ติช่อง 3-4-5 พัง "ไม่จัดกึ่งกลาง ไม่เน้นคน มองไม่รู้เรื่อง"):
     //   ทุกช่องครอป "หน้าใหญ่สุด" จัดกึ่งกลาง+เด่นชัดเสมอ — เลิกครอปกลุ่มหลวมที่คนตัวเล็กจมฉาก
     const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
     const isHeroSlot = slot.id === 'main' || (slot.w * slot.h) >= (520 * 800);
-    const { faceFrac, faceTopAt, maxFaceHFrac } = faceParamsForSlot(slot);
+    const { faceFrac, faceTopAt, maxFaceHFrac, minFaceHFrac } = faceParamsForSlot(slot);
     if (isHeroSlot) {
       // hero = หน้าเดี่ยวใหญ่สุดเด่น + เลื่อนพ้นคนข้างเคียง (บทเรียน CASE-119)
-      region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, Math.min(0.96, faceFrac + 0.12), faceTopAt, Math.min(0.90, maxFaceHFrac + 0.08));
+      region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, Math.min(0.96, faceFrac + 0.12), faceTopAt, Math.min(0.90, maxFaceHFrac + 0.08), minFaceHFrac || 0);
       const lcx = ((largest.x1 + largest.x2) / 2) * imgW;
       let rMin = 0, rMax = imgW;
       for (const f of fb.allFaces) {

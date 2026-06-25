@@ -337,6 +337,34 @@ async function _renderCoverV3(request) {
     //   (ภาพ <5 ยังถูก cap เป็น 4 ที่บรรทัดบนอยู่แล้ว = กันคอนแทคชีตเหมือนเดิม)
     console.log(`[CoverV3] 🎯 ภาพดี-ต่างกัน ${cleanFaceCount} ใบ → งบช่อง = ${slotBudget} (จากพูล ${imageBuffers.length})`);
 
+    // ── ★ 25 มิ.ย. — ด่านเลือก "ฮีโร่แบบ CASE-199" (ผู้ใช้สั่งแก้เฉพาะฮีโร่): ──
+    //   ปัญหา: re-rank เดิมเลือก "หน้าใหญ่สุด" อย่างเดียว → ได้หน้าชิดขอบ (ครอปแล้วตัด=CASE-198)
+    //          หรือหน้าเล็ก/เห็นลำตัว (=CASE-200). 199 ดีเพราะหน้าใหญ่+เดี่ยว+อยู่กลาง+ไม่ชิดขอบ
+    //   → เลือกฮีโร่ที่ดีสุด (ใหญ่+เดี่ยว+ไม่ชิดขอบ) ย้ายขึ้นหน้าสุดเท่านั้น — ★ ไม่แตะลำดับช่องอื่น/ครอป/โครง
+    if (faceBoxes.length === imageBuffers.length && imageBuffers.length >= 2) {
+      const heroFit = (fb) => {
+        if (!fb || !(fb.x2 > fb.x1) || fb.hasText) return -1;       // ไม่มีหน้า/มีตัวหนังสือ = ไม่เหมาะเป็นฮีโร่
+        const area = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);            // หน้าใหญ่=โคลสอัพ (กัน 200 หน้าเล็ก/ลำตัว)
+        const cx = (fb.x1 + fb.x2) / 2;
+        const edgeNear = Math.min(fb.x1, 1 - fb.x2);              // ระยะหน้าถึงขอบซ้าย/ขวา
+        let s = area;
+        if ((fb.count || 1) === 1) s += 0.04;                     // หน้าเดี่ยวเด่น (ฮีโร่ที่ดี)
+        if (edgeNear < 0.05) s -= 0.15;                           // หน้าแทบติดขอบ → ครอปแล้วตัด (กัน 198) หักแรง
+        else s -= Math.abs(cx - 0.5) * 0.10;                      // เยื้องกลาง = หักเบาๆ (ชอบหน้ากลางเฟรม)
+        return s;
+      };
+      let bestIdx = 0, bestFit = heroFit(faceBoxes[0]);
+      for (let i = 1; i < imageBuffers.length; i++) {
+        const f = heroFit(faceBoxes[i]);
+        if (f > bestFit) { bestFit = f; bestIdx = i; }
+      }
+      if (bestIdx > 0 && bestFit > 0) {
+        const [bImg] = imageBuffers.splice(bestIdx, 1); imageBuffers.unshift(bImg);
+        const [bFb] = faceBoxes.splice(bestIdx, 1); faceBoxes.unshift(bFb);
+        console.log(`[CoverV3] 🦸 เลือกฮีโร่แบบ 199: ย้าย idx ${bestIdx} ขึ้นหน้า (fit ${bestFit.toFixed(3)} — ใหญ่+เดี่ยว+ไม่ชิดขอบ)`);
+      }
+    }
+
     // ── ② AI Vision Director — เลือกโครงเองจากแม่บทที่แกะจากปกไวรัลจริง ──
     // ★ rev.12: บังคับลุคไวรัลในโค้ด — ภาพพอเมื่อไหร่ ให้เลือกได้เฉพาะโครงที่มี "วงกลม+กรอบไฮไลต์"
     //   (บทเรียน CASE-045/050: เตือนใน prompt แล้ว Director ยังหนีไปโครงเรียบ → "การนำเสนอห่วย")
