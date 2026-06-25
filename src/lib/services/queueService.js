@@ -1,8 +1,37 @@
 import { createStore } from '@/lib/persistStore';
 import { v4 as uuidv4 } from 'uuid';
+import { createHash } from 'crypto';
 import { getSupabase, isSupabaseReady } from '@/lib/supabase';
 
 const QUEUE_STORE = 'job_queue';
+const DEDUP_WINDOW_MS = 60 * 1000; // ส่งข่าวเดิมซ้ำภายในช่วงนี้ = job เดียวกัน (กันเจนซ้ำข้ามโปรเซส)
+
+// ★ 25 มิ.ย. — job id แบบ deterministic ต่อ (เนื้อหา+ช่วงเวลา) = กุญแจกันซ้ำข้ามโปรเซส
+//   in-memory lock กันได้แค่ในโปรเซสเดียว แต่ระบบรันหลายโปรเซส (Railway+Vercel/หลาย lambda)
+//   → ส่งซ้ำใน WINDOW เดียวกัน = id เดียวกัน → Postgres PK กันชน insert ซ้ำ atomic ทุกโปรเซส
+function _deterministicJobId(input, bucketOffset = 0) {
+  const norm = String(input).trim().replace(/\s+/g, ' ').toLowerCase().slice(0, 1000);
+  const h = createHash('sha1').update(norm).digest('hex').slice(0, 16);
+  const bucket = Math.floor(Date.now() / DEDUP_WINDOW_MS) + bucketOffset;
+  return `q_${h}_${bucket}`;
+}
+
+// ★ Claim แบบ atomic ผ่าน Supabase conditional update — คืน true=ชนะ, false=แพ้ race, null=error(ให้ caller ถอย)
+//   conditional update: set processing เฉพาะแถวที่ยัง pending → Postgres lock ให้ชนะแค่ตัวเดียว
+async function _atomicClaimSupabase(job) {
+  const sb = getSupabase();
+  const startedAt = new Date().toISOString();
+  const newData = { ...job, status: 'processing', startedAt, updatedAt: startedAt };
+  const { data, error } = await sb
+    .from('store_items')
+    .update({ data: newData, updated_at: startedAt })
+    .eq('id', job.id)
+    .eq('store_name', QUEUE_STORE)
+    .filter('data->>status', 'eq', 'pending') // ★ คว้าได้เฉพาะที่ยัง pending = atomic
+    .select('id');
+  if (error) return null;                       // error → caller ถอยใช้ update เดิม (ระบบไม่หยุด)
+  return Array.isArray(data) && data.length > 0; // 1 = ชนะ, 0 = อีกโปรเซสคว้าไปแล้ว
+}
 
 // === In-memory lock to prevent concurrent enqueue race conditions ===
 let _enqueueLock = false;
@@ -69,10 +98,13 @@ if (!globalThis.__queueWatchdog) {
 export async function enqueueJob(payload, sourceUserId = 'system') {
   return withEnqueueLock(async () => {
     const store = await getQueueStore();
-    
-    const jobId = uuidv4();
+
     const createdAt = new Date().toISOString();
-    
+    // ★ 25 มิ.ย. — job id แบบ deterministic (เนื้อหา+ช่วง 60 วิ) = กันเจนซ้ำข้ามโปรเซส
+    //   ส่งซ้ำใน WINDOW เดียวกัน = id เดียวกัน → ด่านล่าง + Postgres PK กันชนให้เหลือ job เดียว
+    const _dedupInput = payload.input || payload.url || payload.text || '';
+    const jobId = _dedupInput ? _deterministicJobId(_dedupInput) : uuidv4();
+
     // 0. Single getAll() call — then do cleanup in-memory to avoid multiple round-trips
     const allJobs = await store.getAll();
     
@@ -126,9 +158,25 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
     //   • งานเดิมที่ค้าง/รอคิว (pending หรือ processing ค้าง) → "ลบทิ้งแล้วให้ส่งใหม่นี้เจนใหม่" (กันข่าวค้างถาวร)
     //   ★ ไม่แตะ pipeline เจน/worker — แค่ logic การรับงานเข้าคิว
     const inputToCheck = payload.input || payload.url || payload.text;
+
+    // ★ 25 มิ.ย. — ด่านกันซ้ำข้ามโปรเซส (Railway+Vercel/หลาย lambda/หลายบอท ส่งข่าวเดียวพร้อมกัน):
+    //   เจอ job id เดียวกัน (ส่งซ้ำใน 60 วิ) หรือ window ก่อนหน้าที่ยังทำงานอยู่ → คืน job เดิม ไม่เจนซ้ำ
+    if (_dedupInput) {
+      const prevId = _deterministicJobId(_dedupInput, -1);
+      const existingDup = allJobs.find(j => j.id === jobId)
+        || allJobs.find(j => j.id === prevId && (j.status === 'pending' || j.status === 'processing'));
+      if (existingDup) {
+        const pend = allJobs.filter(j => j.status === 'pending' || j.status === 'processing')
+          .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        const pos = pend.findIndex(j => j.id === existingDup.id) + 1;
+        console.log(`[QueueService] 🛑 ส่งซ้ำใน ${DEDUP_WINDOW_MS / 1000}s — ใช้ job เดิม ${existingDup.id} (กันเจนซ้ำเปลือง token)`);
+        return { jobId: existingDup.id, position: pos > 0 ? pos : 0, queuesAhead: pos > 1 ? pos - 1 : 0, status: existingDup.status, duplicate: true };
+      }
+    }
+
     if (inputToCheck) {
       const matchInput = (j) => j.payload?.input === inputToCheck || j.payload?.url === inputToCheck || j.payload?.text === inputToCheck;
-      const sameNews = allJobs.filter(j => (j.status === 'pending' || j.status === 'processing') && matchInput(j));
+      const sameNews = allJobs.filter(j => j.id !== jobId && (j.status === 'pending' || j.status === 'processing') && matchInput(j));
       const activeFresh = sameNews.find(j => j.status === 'processing' && new Date(j.startedAt || j.createdAt) >= new Date(Date.now() - 5 * 60 * 1000));
       if (activeFresh) {
         throw new Error("ข่าวนี้กำลังประมวลผลอยู่ ผลลัพธ์กำลังจะมา รออีกสักครู่นะครับ...");
@@ -168,10 +216,19 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
     };
     
     // 2. Add to store AFTER calculating position
-    await store.add(job);
-    
+    //    ★ 25 มิ.ย. — ถ้าอีกโปรเซสสร้าง id เดียวกันชนะไปก่อน (PK ชน) = ข่าวซ้ำ → ใช้ตัวนั้น ไม่เจนซ้ำ
+    try {
+      await store.add(job);
+    } catch (addErr) {
+      if (/duplicate key|_pkey|23505|already exists/i.test(addErr.message || '')) {
+        console.log(`[QueueService] 🛑 ชน race insert id ${jobId} — อีกโปรเซสสร้างก่อนแล้ว ใช้ตัวนั้น (กันเจนซ้ำเปลือง token)`);
+        return { jobId, position: 1, queuesAhead: 0, status: 'pending', duplicate: true };
+      }
+      throw addErr;
+    }
+
     console.log(`[QueueService] ✅ Job ${jobId} enqueued at position ${position} (${queuesAhead} ahead)`);
-    
+
     return { jobId, position, queuesAhead, status: 'pending' };
   });
 }
@@ -269,20 +326,32 @@ export async function getNextPendingJobs(limit = 1) {
     const skipped = allJobs.filter(j => j.status === 'pending' && !canRunHere(j)).length;
     if (skipped > 0) console.log(`[QueueService] ⏭️ ข้าม ${skipped} งานที่เป็นของอีกเครื่อง (คลิป→เครื่องทีม | ข่าว→Vercel)`);
     
-    // Immediately mark as 'processing' inside the lock to prevent double-pick
+    // ★ 25 มิ.ย. — คว้างานแบบ atomic ระดับ DB (กัน worker 2 ตัวข้ามโปรเซสคว้างานเดียวกัน → เจนซ้ำเปลือง token)
+    //   เดิม: update mark processing แบบไม่มีเงื่อนไข → 2 โปรเซสคว้าตัวเดียวกันได้
+    //   ใหม่: conditional update (pending→processing เฉพาะที่ยัง pending) → Postgres ให้ชนะแค่ตัวเดียว
+    //   fail-safe: error/ปิดสวิตช์ (QUEUE_ATOMIC_CLAIM=0) → ถอยใช้ update เดิม (ระบบข่าวต้องไม่หยุดเด็ดขาด)
+    const claimed = [];
+    const atomicOff = process.env.QUEUE_ATOMIC_CLAIM === '0';
+    const startedAt = new Date().toISOString();
     for (const job of pendingJobs) {
-      await store.update(job.id, (existing) => ({
-        ...existing,
-        status: 'processing',
-        startedAt: new Date().toISOString(),
-      }));
+      let won = true;
+      if (!atomicOff && isSupabaseReady()) {
+        won = await _atomicClaimSupabase(job).catch(() => null);
+        if (won === null) { // error → ถอยใช้ update เดิม (ไม่ atomic แต่ระบบไม่หยุด)
+          await store.update(job.id, (ex) => ({ ...ex, status: 'processing', startedAt })).catch(() => {});
+          won = true;
+        }
+      } else {
+        await store.update(job.id, (ex) => ({ ...ex, status: 'processing', startedAt }));
+      }
+      if (won) claimed.push({ ...job, status: 'processing', startedAt });
     }
-    
-    if (pendingJobs.length > 0) {
-      console.log(`[QueueService] 🔄 Claimed ${pendingJobs.length} job(s): ${pendingJobs.map(j => j.id.slice(0, 8)).join(', ')}`);
+
+    if (claimed.length > 0) {
+      console.log(`[QueueService] 🔄 Claimed ${claimed.length} job(s): ${claimed.map(j => j.id.slice(0, 8)).join(', ')}`);
     }
-    
-    return pendingJobs;
+
+    return claimed;
   });
 }
 
