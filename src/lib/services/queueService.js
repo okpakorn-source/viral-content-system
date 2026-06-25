@@ -4,16 +4,14 @@ import { createHash } from 'crypto';
 import { getSupabase, isSupabaseReady } from '@/lib/supabase';
 
 const QUEUE_STORE = 'job_queue';
-const DEDUP_WINDOW_MS = 60 * 1000; // ส่งข่าวเดิมซ้ำภายในช่วงนี้ = job เดียวกัน (กันเจนซ้ำข้ามโปรเซส)
 
-// ★ 25 มิ.ย. — job id แบบ deterministic ต่อ (เนื้อหา+ช่วงเวลา) = กุญแจกันซ้ำข้ามโปรเซส
-//   in-memory lock กันได้แค่ในโปรเซสเดียว แต่ระบบรันหลายโปรเซส (Railway+Vercel/หลาย lambda)
-//   → ส่งซ้ำใน WINDOW เดียวกัน = id เดียวกัน → Postgres PK กันชน insert ซ้ำ atomic ทุกโปรเซส
-function _deterministicJobId(input, bucketOffset = 0) {
+// ★ 25 มิ.ย. (rev.2 — อุดช่องโหว่ขอบเวลา): job id "เสถียรต่อเนื้อหา" (ไม่มี time bucket)
+//   เนื้อหาเดียวกัน = id เดียวกัน "เสมอ" → Postgres PK กันชน insert ให้เหลือ job เดียว atomic ทุกโปรเซส
+//   → การันตี "เจนรอบเดียว" ต่อเนื้อหา ไม่มีช่องโหว่ 2 บอทยิงคร่อมขอบ window (เดิมใช้ bucket 60 วิ มีรู ~10%)
+//   ส่งใหม่หลังงานเก่า "เสร็จแล้ว" → enqueueJob ต่อ _<timestamp> เป็น id ใหม่ = เจนใหม่ได้ (คงพฤติกรรม)
+function _contentHashId(input) {
   const norm = String(input).trim().replace(/\s+/g, ' ').toLowerCase().slice(0, 1000);
-  const h = createHash('sha1').update(norm).digest('hex').slice(0, 16);
-  const bucket = Math.floor(Date.now() / DEDUP_WINDOW_MS) + bucketOffset;
-  return `q_${h}_${bucket}`;
+  return `q_${createHash('sha1').update(norm).digest('hex').slice(0, 16)}`;
 }
 
 // ★ Claim แบบ atomic ผ่าน Supabase conditional update — คืน true=ชนะ, false=แพ้ race, null=error(ให้ caller ถอย)
@@ -100,10 +98,11 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
     const store = await getQueueStore();
 
     const createdAt = new Date().toISOString();
-    // ★ 25 มิ.ย. — job id แบบ deterministic (เนื้อหา+ช่วง 60 วิ) = กันเจนซ้ำข้ามโปรเซส
-    //   ส่งซ้ำใน WINDOW เดียวกัน = id เดียวกัน → ด่านล่าง + Postgres PK กันชนให้เหลือ job เดียว
+    // ★ 25 มิ.ย. (rev.2) — job id "เสถียรต่อเนื้อหา" = กันเจนซ้ำข้ามโปรเซส 100% (ไม่มีรูขอบเวลา)
+    //   เนื้อหาเดียวกัน = id เดียวกันเสมอ → ด่านล่าง + Postgres PK กันชนให้เหลือ job เดียว (เจนรอบเดียว)
     const _dedupInput = payload.input || payload.url || payload.text || '';
-    const jobId = _dedupInput ? _deterministicJobId(_dedupInput) : uuidv4();
+    const _stableId = _dedupInput ? _contentHashId(_dedupInput) : null;
+    let jobId = _stableId || uuidv4(); // let — เคสส่งใหม่หลังงานเก่าเสร็จ จะต่อ timestamp เป็น id ใหม่
 
     // 0. Single getAll() call — then do cleanup in-memory to avoid multiple round-trips
     const allJobs = await store.getAll();
@@ -159,18 +158,20 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
     //   ★ ไม่แตะ pipeline เจน/worker — แค่ logic การรับงานเข้าคิว
     const inputToCheck = payload.input || payload.url || payload.text;
 
-    // ★ 25 มิ.ย. — ด่านกันซ้ำข้ามโปรเซส (Railway+Vercel/หลาย lambda/หลายบอท ส่งข่าวเดียวพร้อมกัน):
-    //   เจอ job id เดียวกัน (ส่งซ้ำใน 60 วิ) หรือ window ก่อนหน้าที่ยังทำงานอยู่ → คืน job เดิม ไม่เจนซ้ำ
-    if (_dedupInput) {
-      const prevId = _deterministicJobId(_dedupInput, -1);
-      const existingDup = allJobs.find(j => j.id === jobId)
-        || allJobs.find(j => j.id === prevId && (j.status === 'pending' || j.status === 'processing'));
-      if (existingDup) {
-        const pend = allJobs.filter(j => j.status === 'pending' || j.status === 'processing')
-          .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-        const pos = pend.findIndex(j => j.id === existingDup.id) + 1;
-        console.log(`[QueueService] 🛑 ส่งซ้ำใน ${DEDUP_WINDOW_MS / 1000}s — ใช้ job เดิม ${existingDup.id} (กันเจนซ้ำเปลือง token)`);
-        return { jobId: existingDup.id, position: pos > 0 ? pos : 0, queuesAhead: pos > 1 ? pos - 1 : 0, status: existingDup.status, duplicate: true };
+    // ★ 25 มิ.ย. (rev.2) — ด่านกันซ้ำข้ามโปรเซสด้วย "id เสถียรต่อเนื้อหา" (การันตีเจนรอบเดียว ไม่มีรูขอบเวลา):
+    //   เนื้อหาเดียวกันที่ "กำลังทำ/รออยู่" = ซ้ำ → คืน job เดิม ไม่เจนซ้ำ · งานเก่า "เสร็จแล้ว" = ส่งใหม่เจนใหม่ได้
+    if (_stableId) {
+      const existing = allJobs.find(j => j.id === _stableId);
+      if (existing) {
+        if (existing.status === 'pending' || existing.status === 'processing') {
+          const pend = allJobs.filter(j => j.status === 'pending' || j.status === 'processing')
+            .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+          const pos = pend.findIndex(j => j.id === _stableId) + 1;
+          console.log(`[QueueService] 🛑 ข่าวซ้ำ (กำลังทำอยู่) — ใช้ job ${_stableId} ไม่เจนซ้ำ (กันเปลือง token)`);
+          return { jobId: _stableId, position: pos > 0 ? pos : 0, queuesAhead: pos > 1 ? pos - 1 : 0, status: existing.status, duplicate: true };
+        }
+        // งานเก่าเสร็จแล้ว → ส่งใหม่ = เจนใหม่ได้ → ใช้ id ใหม่ (stable id ถูกจองโดยงานเก่าที่เสร็จ)
+        jobId = `${_stableId}_${Date.now().toString(36)}`;
       }
     }
 
