@@ -7,34 +7,43 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Header from '@/components/layout/Header';
 
-// ★ 17 มิ.ย. (ทีมสั่งยุบเหลือ 2 หมวดค้น + เก็บแท็บใช้งาน · เรียงใหม่สุดก่อน):
+// ★ 25 มิ.ย. — ยกเครื่อง: 2 โซน (คลิป/ลิงก์) + แท็บใช้งาน (เลิกแท็บมั่ว 8 อัน)
 const TABS = [
-  { id: 'kratase', label: '🔥 กระแสรายวัน' },   // ★ 19 มิ.ย. รอบ 2: กระแสโซเชียลสด ≤3 วัน — มาก่อนอันดับแรก (ผู้ใช้สั่ง)
-  { id: 'browse', label: '🗂️ ทุกหมวด' },       // เก็บกว้างเชิงลึก — เลือกตามคีย์/แนวเรื่อง
-  { id: 'namdee', label: '💚 ดาราน้ำดี' },     // ดาราทำดี/น้ำดี สต็อกทำได้ตลอด (เก่าก็ได้) เรียงใหม่สุดก่อน
-  { id: 'focus', label: '🎯 ผลค้นหา' },          // ผลจากค้นคีย์เวิร์ดคน/แนว — อยู่ถาวร
-  { id: 'trendtrack', label: '🔴 ติดตามกระแส' }, // (เก็บไว้) ใส่คีย์เวิร์ดติดตามกระแสเฉพาะเรื่อง
+  { id: 'clip', label: '🎬 คลิป' },          // คลิปจากโซเชียล (YouTube/TikTok/FB/IG) จัดตามคลัง
+  { id: 'link', label: '📰 ลิงก์บทความ' },   // ลิงก์ข่าว/บทความ จัดตามคลัง
   { id: 'shortlist', label: '⭐ คลังส่งเช้า' },
   { id: 'ready', label: '✅ พร้อมใช้' },
-  { id: 'junk', label: '🗑️ คลังขยะ' },        // ของที่ระบบตัดออก — รีวิว+เอากลับได้
+];
+// ชิป 6 คลังเนื้อหา (ใช้ทั้งโซนคลิป/ลิงก์) — ตรงกับ taxonomy.js
+const LIB_CHIPS = [
+  { key: 'all', label: '🗂️ ทั้งหมด' },
+  { key: 'namdee', label: '💚 น้ำดี' },
+  { key: 'interview', label: '🎤 สัมภาษณ์/รายการ' },
+  { key: 'drama', label: '🎬 ดราม่า/กระแส' },
+  { key: 'celeb', label: '⭐ คนดัง/ดารา' },
+  { key: 'commoner', label: '🧑‍🌾 ชาวบ้าน' },
+  { key: 'help', label: '🆘 ช่วยเหลือ' },
+];
+// ตัวกรองชนิดแหล่ง (เฉพาะโซนคลิป)
+const SRC_CHIPS = [
+  { key: 'all', label: 'ทุกแหล่ง' },
+  { key: 'youtube', label: '▶️ YouTube' },
+  { key: 'tiktok', label: '🎵 TikTok' },
+  { key: 'fb-clip', label: '🎬 FB' },
+  { key: 'ig', label: '📷 IG' },
 ];
 
 const LANE_ICONS = { trend: '🔥', good: '💎', evergreen: '🗄️', interview: '🎙️', followup: '🔁', buzz: '📊', celeb: '🎬', throwback: '⏪', 'evergreen-celeb': '⭐', video: '📺', 'trend-track': '🔴' };
 
 // ★ 21 มิ.ย.: แนว "สั่งหาเฉพาะแนว" 12 หมวด + คำอธิบายชัด (key/desc ต้องตรงกับ FOCUS_OPTIONS ใน goodNewsScout)
+// ★ 25 มิ.ย. — ยุบเหลือ 6 ปุ่ม = 6 คลังเนื้อหา (key ตรงกับ goodNewsScout เดิม harvest ทำงานต่อได้)
 const FOCUS_OPTIONS = [
-  { key: 'celeb_interview', label: '🎤 ดาราเล่าชีวิต / เปิดใจบทเรียน', desc: 'ดาราเล่าความลำบาก "กว่าจะมาถึงวันนี้" · ปมวัยเด็ก/ความจน · เคยล้ม-โดนโกง · จุดเปลี่ยนชีวิต · ข้อคิดสอนใจ (สัมภาษณ์ใหม่+ย้อนเก่า · Google+เพจ+ยูทูป)' },
-  { key: 'celeb_good', label: '⭐ ดาราทำดี / ใจบุญ / ช่วยเหลือ', desc: 'ดาราบริจาค ช่วยคนป่วย/คนจน สร้างบ้านให้ มอบทุน ทำบุญ ติดดินสมถะ (ของอมตะ เขียนใหม่ได้ตลอด)' },
-  { key: 'celeb_family', label: '🎁 ดารากตัญญู / ดูแลครอบครัว', desc: 'ซื้อบ้าน-ออกรถให้พ่อแม่ · ดูแลพ่อแม่ป่วย · พาครอบครัวเที่ยว · ของขวัญตอบแทนครอบครัว' },
-  { key: 'celeb_lifestyle', label: '🏡 เปิดบ้าน / ไลฟ์สไตล์ดารา', desc: 'พาทัวร์บ้านดารา · รับเลี้ยงสัตว์ · สร้าง/รีโนเวทบ้าน · ชีวิตประจำวัน-บ้านสวน' },
-  { key: 'celeb_drama', label: '🎬 ดราม่าดารา / ข่าวร้อนวงการ', desc: 'ดาราเลิก-รัก-เคลียร์ปม · ดราม่าวงการบันเทิง/กีฬา · ประเด็นร้อนสด' },
-  { key: 'celeb_clip', label: '📱 คลิป/รีลส์ดารา (เอาไว้ดู)', desc: 'คลิปไฮไลท์/สัมภาษณ์ดาราจากเพจ-รีลส์-ยูทูป (ดิสคัฟเวอรี — ยังเขียนตรงจากลิงก์ไม่ได้)' },
-  { key: 'commoner', label: '🧑‍🌾 ชาวบ้าน / น้ำใจพลเมืองดี', desc: 'คนธรรมดาน่าทึ่ง · คืนเงิน-คืนของ · ช่วยชีวิต · วิน/แท็กซี่/กู้ภัยใจดี' },
-  { key: 'fighter', label: '💪 สู้ชีวิต / เรื่องกินใจ', desc: 'คนสู้ชีวิตจากศูนย์ · แม่ค้า/คนพิการ/เด็กยากจน · พลิกชีวิตสำเร็จ' },
-  { key: 'animal', label: '🐶 รักสัตว์ / ช่วยหมาแมว', desc: 'ช่วย-เลี้ยงหมาแมวจร · รักษาสัตว์ป่วย · ความผูกพันคนกับสัตว์' },
-  { key: 'viral_dna', label: '🧬 แนวที่ปังบนเพจ (สูตรไวรัล)', desc: 'แนวที่สถิติพิสูจน์ว่าปัง: สถาบันแง่บวก · ทหาร/ตำรวจ · ความยุติธรรม · ต่างชาติช่วยไทย · นักกีฬาสมถะ' },
-  { key: 'good_all', label: '💎 ข่าวน้ำดีรวมทุกแนว', desc: 'รวมทุกแนวน้ำดี (กตัญญู/สู้ชีวิต/น้ำใจ/สัตว์/เด็ก/ผู้สูงวัย) ในคลิกเดียว' },
-  { key: 'trend', label: '🔥 กระแสไวรัลวันนี้', desc: 'ของร้อนสด ชาวเน็ตแห่แชร์วันนี้ · คลิปไวรัล · ดราม่าล่าสุด (เน้นสด ≤3 วัน)' },
+  { key: 'good_all', label: '💚 น้ำดี', desc: 'รวมทุกแนวน้ำดี: กตัญญู/สู้ชีวิต/น้ำใจ/ดาราทำดี/สัตว์/เด็ก/ผู้สูงวัย' },
+  { key: 'celeb_interview', label: '🎤 สัมภาษณ์/รายการ', desc: 'ดารา/คนดังเปิดใจ เล่าชีวิต บทเรียน จุดเปลี่ยน · สัมภาษณ์ใหม่+ย้อนเก่า (เพจ/ยูทูป)' },
+  { key: 'trend', label: '🎬 ดราม่า/กระแส', desc: 'ของร้อนสด ชาวเน็ตแห่แชร์วันนี้ · คลิปไวรัล · ดราม่าล่าสุด (เน้นสด ≤3 วัน)' },
+  { key: 'celeb_drama', label: '⭐ คนดัง/ดารา', desc: 'ดาราทุกแนว: รัก-เลิก-เคลียร์ปม · ไลฟ์สไตล์/เปิดบ้าน · ประเด็นร้อนวงการ' },
+  { key: 'commoner', label: '🧑‍🌾 ชาวบ้าน/พลเมืองดี', desc: 'คนธรรมดาน่าทึ่ง · คืนเงิน-คืนของ · ช่วยชีวิต · วิน/แท็กซี่/กู้ภัยใจดี' },
+  { key: 'celeb_good', label: '🆘 ช่วยเหลือ/บริจาค', desc: 'ดารา/คนดังบริจาค ช่วยคนป่วย-คนจน สร้างบ้าน มอบทุน ทำบุญ (อมตะ เขียนใหม่ได้)' },
 ];
 
 // ★★ สวิตช์ปิดระบบหาภาพชั่วคราว (คำสั่งทีม 12 มิ.ย. 69): บัคภาพซ้ำข้ามข่าว + ออโต้รันถี่เกิน
@@ -108,7 +117,11 @@ function freshnessBadge(it) {
 }
 
 export default function NewsDeskPage() {
-  const [tab, setTab] = useState('kratase'); // ★ 19 มิ.ย. รอบ 2 ดีฟอลต์ = กระแสรายวัน (มาก่อนอันดับแรก)
+  const [tab, setTab] = useState('clip'); // ★ 25 มิ.ย. ดีฟอลต์ = โซนคลิป
+  const [library, setLibrary] = useState('all');     // ★ 25 มิ.ย. คลังเนื้อหา 6 (โซนคลิป/ลิงก์)
+  const [clipSource, setClipSource] = useState('all'); // ★ ตัวกรองชนิดแหล่ง (โซนคลิป)
+  const [libraryCounts, setLibraryCounts] = useState({}); // จำนวนต่อคลัง (ทำ chips)
+  const [sourceCounts, setSourceCounts] = useState({});   // จำนวนต่อแหล่ง (โซนคลิป)
   const [catFilter, setCatFilter] = useState('all'); // ★ กรองหมวดในแท็บ "ทุกหมวด"
   const [catCounts, setCatCounts] = useState({});    // ★ จำนวนข่าวต่อหมวด (ทำ chips)
   const [showAdvanced, setShowAdvanced] = useState(false); // ★ 19 มิ.ย. รอบ 3: พับเครื่องมือขั้นสูง (เลิกงง)
@@ -117,7 +130,7 @@ export default function NewsDeskPage() {
   const [sentToday, setSentToday] = useState(0);
   const [loading, setLoading] = useState(true);
   const [harvesting, setHarvesting] = useState(false);
-  const [focusSel, setFocusSel] = useState('celeb_good');
+  const [focusSel, setFocusSel] = useState('good_all');
   const [trendTopic, setTrendTopic] = useState('');
   const [kwInput, setKwInput] = useState(''); // ★ ค้นด้วยคีย์เวิร์ดคน/เรื่องเอง
   const [trendCases, setTrendCases] = useState([]); // คลังค้นหาติดตาม (เคสคีย์เวิร์ด+ลิงก์)
@@ -163,12 +176,16 @@ export default function NewsDeskPage() {
 
   const load = useCallback(async () => {
     try {
-      const url = tab === 'browse'
-        ? `/api/news-desk?tab=browse&limit=400&category=${encodeURIComponent(catFilter)}`
-        : `/api/news-desk?tab=${tab}&limit=120`;
+      const url = (tab === 'clip' || tab === 'link')
+        ? `/api/news-desk?zone=${tab}&library=${library}&source=${clipSource}&limit=200`
+        : tab === 'browse'
+          ? `/api/news-desk?tab=browse&limit=400&category=${encodeURIComponent(catFilter)}`
+          : `/api/news-desk?tab=${tab}&limit=120`;
       const res = await fetch(url, { cache: 'no-store' });
       const d = await parseRes(res);
       if (d.success && d.categoryCounts) setCatCounts(d.categoryCounts);
+      if (d.success && d.libraryCounts) setLibraryCounts(d.libraryCounts);
+      if (d.success && d.sourceCounts) setSourceCounts(d.sourceCounts);
       if (d.success) { setItems(d.items); setMixToday(d.mixToday || {}); setSentToday(d.sentToday || 0); setGovernor(d.governor || null); setChiefBrief(d.chiefBrief || null);
         setEditorStats(d.editorStats || {}); setQueueDepth(d.queueDepth || { pending: 0, processing: 0 }); setReadyCount(d.readyCount || 0);
         // ★ สวิตช์ Auto-Pilot โชว์ค่าจริงจากระบบ (เดิม hardcode เปิด — ทีมเห็นว่า "เปิดเอง" ทุกครั้งที่เข้าหน้า)
@@ -184,7 +201,7 @@ export default function NewsDeskPage() {
         }
       }
     } catch {} finally { setLoading(false); }
-  }, [tab, catFilter]);
+  }, [tab, catFilter, library, clipSource]);
 
   useEffect(() => { setLoading(true); load(); }, [load]);
   useEffect(() => { const t = setInterval(load, 60_000); return () => clearInterval(t); }, [load]);
@@ -628,6 +645,41 @@ export default function NewsDeskPage() {
             }}>{harvesting ? '⏳ กำลังหา...' : '🔄 หาข่าวใหม่'}</button>
         </div>
 
+        {/* ★ 25 มิ.ย.: ชิป 6 คลังเนื้อหา + ตัวกรองแหล่ง — โซนคลิป/ลิงก์ */}
+        {(tab === 'clip' || tab === 'link') && (<>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+            {LIB_CHIPS.map(c => {
+              const cnt = c.key === 'all' ? Object.values(libraryCounts).reduce((s, n) => s + n, 0) : (libraryCounts[c.key] || 0);
+              return (
+                <button key={c.key} onClick={() => setLibrary(c.key)}
+                  style={{ padding: '7px 14px', borderRadius: 999, cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                    border: '1px solid ' + (library === c.key ? 'transparent' : 'var(--border)'),
+                    background: library === c.key ? 'linear-gradient(135deg,#f59e0b,#d97706)' : 'rgba(255,255,255,0.05)',
+                    color: library === c.key ? '#000' : 'var(--text-primary)' }}>
+                  {c.label} <span style={{ opacity: 0.7, fontWeight: 600 }}>{cnt}</span>
+                </button>
+              );
+            })}
+          </div>
+          {tab === 'clip' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontWeight: 600 }}>แหล่ง:</span>
+              {SRC_CHIPS.map(c => {
+                const cnt = c.key === 'all' ? Object.values(sourceCounts).reduce((s, n) => s + n, 0) : (sourceCounts[c.key] || 0);
+                return (
+                  <button key={c.key} onClick={() => setClipSource(c.key)}
+                    style={{ padding: '5px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 600,
+                      border: '1px solid ' + (clipSource === c.key ? 'rgba(124,58,237,0.6)' : 'var(--border)'),
+                      background: clipSource === c.key ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.04)',
+                      color: clipSource === c.key ? '#a855f7' : 'var(--text-secondary)' }}>
+                    {c.label}{cnt > 0 ? <span style={{ opacity: 0.7 }}> {cnt}</span> : ''}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </>)}
+
         {/* ★ 19 มิ.ย. (เก็บกว้าง): chips เลือกหมวด — เฉพาะแท็บ "ทุกหมวด" */}
         {tab === 'browse' && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
@@ -931,6 +983,18 @@ export default function NewsDeskPage() {
                 border: it.status === 'claimed' ? '1px solid rgba(245,158,11,0.5)' : it.status === 'sent' ? '1px solid rgba(34,197,94,0.4)' : '1px solid var(--border)',
               }}>
                 <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                  {/* ★ 25 มิ.ย.: ภาพพรีวิว (เหมือนเปิด YouTube) — คลิกเปิดต้นทาง · มี ▶ บนคลิป */}
+                  {it.imageUrl && (
+                    <a href={it.url || '#'} target="_blank" rel="noopener noreferrer" title="เปิดต้นทาง"
+                      style={{ flexShrink: 0, display: 'block', width: 132, height: 86, borderRadius: 10, overflow: 'hidden', position: 'relative', background: '#0b0f17', border: '1px solid var(--border)' }}>
+                      <img src={it.imageUrl} alt="" loading="lazy"
+                        onError={(e) => { e.currentTarget.parentElement.style.display = 'none'; }}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      {['youtube', 'tiktok', 'fb-clip', 'ig'].includes(it.sourceType) && (
+                        <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', fontSize: 24, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>▶</span>
+                      )}
+                    </a>
+                  )}
                   {/* ★ 23 มิ.ย.: เลิกโชว์ตัวเลขสกอร์ (ทีมแจ้งไม่แม่น+ทำข่าวดีจม) — โชว์แค่ "🆕 วันนี้" ช่วยสแกน */}
                   {String(it.harvestedAt || '').startsWith(_todayStr) && (
                     <div style={{ minWidth: 44, textAlign: 'center', paddingTop: 2 }}>

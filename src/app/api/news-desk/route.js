@@ -7,6 +7,7 @@
 import { NextResponse } from 'next/server';
 import { createStore } from '@/lib/persistStore';
 import { applyMixGovernor, applyDiscoveryRanking } from '@/lib/services/newsDesk/deskBrain';
+import { enrichDeskItem, isClip, LIBRARY_KEYS, CLIP_SOURCES } from '@/lib/services/newsDesk/taxonomy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,6 +20,35 @@ export async function GET(request) {
 
     const store = createStore('news-desk');
     let items = await store.getAll();
+
+    // ★ 25 มิ.ย. — ยกเครื่องโต๊ะข่าว: 2 โซน (คลิป/ลิงก์) × 6 คลัง + พรีวิวภาพ
+    //   classify แบบ derive ตอนตอบ (ไม่ migrate ข้อมูล) → ของเดิมจัดกลุ่มใหม่ทันที
+    //   ?zone=clip|link  ?library=<6 คลัง>|all  ?source=<ชนิดแหล่ง>|all (โซนคลิป)
+    const zone = searchParams.get('zone');
+    if (zone === 'clip' || zone === 'link') {
+      const wantClip = zone === 'clip';
+      const lib = searchParams.get('library') || 'all';
+      const src = searchParams.get('source') || 'all';
+      const active = items
+        .filter(i => i.status !== 'dismissed' && !i.used)
+        .map(enrichDeskItem)
+        .filter(i => isClip(i) === wantClip);
+      // นับต่อคลัง/ต่อแหล่ง "ก่อน" กรอง — เอาไปโชว์บนชิป
+      const libraryCounts = {}; for (const k of LIBRARY_KEYS) libraryCounts[k] = 0;
+      const sourceCounts = {};
+      for (const i of active) {
+        libraryCounts[i.library] = (libraryCounts[i.library] || 0) + 1;
+        if (wantClip) sourceCounts[i.sourceType] = (sourceCounts[i.sourceType] || 0) + 1;
+      }
+      let list = active;
+      if (lib !== 'all' && LIBRARY_KEYS.includes(lib)) list = list.filter(i => i.library === lib);
+      if (wantClip && src !== 'all' && CLIP_SOURCES.includes(src)) list = list.filter(i => i.sourceType === src);
+      // เรียงใหม่สุดก่อน (เวลาเข้าโต๊ะ)
+      list.sort((a, b) => new Date(b.harvestedAt || 0) - new Date(a.harvestedAt || 0));
+      const lim = Math.min(400, Number(searchParams.get('limit')) || 120);
+      const light = list.slice(0, lim).map(({ fullText, ...rest }) => rest);
+      return NextResponse.json({ success: true, items: light, total: list.length, zone, library: lib, source: src, libraryCounts, sourceCounts });
+    }
 
     // ★ 16 มิ.ย.: แท็บ 🗑️ คลังขยะ — ของที่ระบบตัดออก (แง่ลบ/นอกแนว/เสี่ยง) + ที่ทีมทิ้งเอง → รีวิว+เอากลับได้
     if (tab === 'junk') {
