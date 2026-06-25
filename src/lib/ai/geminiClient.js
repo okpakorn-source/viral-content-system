@@ -129,7 +129,7 @@ export async function callGeminiVideo({ prompt, youtubeUrl, model = 'gemini-3.5-
           { text: prompt },
         ],
       }],
-    }, { requestOptions: { timeout: 180000 } });
+    }, { requestOptions: { timeout: 280000 } });
 
     const content = result.response?.text();
     const um = result.response?.usageMetadata;
@@ -165,9 +165,10 @@ async function _withGeminiRetry(fn, { tries = 4, label = 'Gemini' } = {}) {
       lastErr = e;
       const msg = String(e?.message || '');
       const status = Number(e?.status) || 0;
-      // ลองใหม่เฉพาะอาการ "ชั่วคราว" — ไม่ลองใหม่กับคลิปส่วนตัว/อายุจำกัด/คีย์ผิด (ไร้ประโยชน์)
-      const transient = [429, 500, 502, 503, 504].includes(status)
-        || /high demand|overload|unavailable|temporar|deadline|fetch failed|ECONNRESET|ETIMEDOUT|socket hang up|network|timed out|parse ไม่ได้|ไม่ส่งข้อมูลกลับ \(/i.test(msg);
+      // ลองใหม่เฉพาะอาการ "ชั่วคราว" (Gemini แน่น/เน็ตสะดุด) — ★ 25 มิ.ย.: ไม่ retry ตอน "timeout/deadline"
+      //   เพราะคลิปยาว/ช้าจะ timeout ซ้ำทุกรอบ = เสียเวลา ~12 นาทีแล้วค่อย fail (วนเปล่า) → ให้ fail เร็วแทน
+      const transient = [429, 500, 502, 503].includes(status) // ตัด 504 (deadline/our-timeout) ออก
+        || /high demand|overload|unavailable|temporar|fetch failed|ECONNRESET|socket hang up|network|parse ไม่ได้|ไม่ส่งข้อมูลกลับ \(/i.test(msg);
       if (!transient || i === tries - 1) throw e;
       const wait = 2000 * Math.pow(2, i) + Math.floor(Math.random() * 700); // 2s · 4s · 8s + jitter
       console.warn(`[${label}] ชั่วคราว (${status || ''} ${msg.slice(0, 60)}) → ลองใหม่ ${i + 1}/${tries - 1} ใน ${wait}ms`);
@@ -245,7 +246,7 @@ export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'vid
           { fileData: { fileUri: file.uri, mimeType: file.mimeType } },
           { text: prompt },
         ] }],
-      }, { requestOptions: { timeout: 180000 } });
+      }, { requestOptions: { timeout: 280000 } });
 
       const content = result.response?.text();
       const um = result.response?.usageMetadata;

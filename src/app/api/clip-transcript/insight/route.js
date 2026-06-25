@@ -85,7 +85,13 @@ function detectClipType(url) {
 // ★ 22 มิ.ย.: แปลง error ดิบให้คนเข้าใจ — กรณี Gemini แน่นชั่วคราว (503) บอกให้กดใหม่ ไม่ใช่ "parse ไม่ได้" งงๆ
 function humanizeErr(raw) {
   const m = String(raw || '');
-  if (/503|high demand|overload|unavailable|temporar|parse ไม่ได้|ไม่ส่งข้อมูล|deadline|timed out|ETIMEDOUT/i.test(m)) {
+  // ★ 25 มิ.ย.: แยก 2 กรณีให้ผู้ใช้รู้ — (ก) ระบบเรา timeout เอง (คลิปยาว/ช้า)  (ข) Gemini แน่นจริง
+  // (ก) timeout/deadline = คลิปยาวเกินเวลาที่ตั้ง (ไม่ใช่ Gemini ล่ม) → บอกตรงๆ + ทางออก
+  if (/deadline|timed out|timeout|ETIMEDOUT|aborted|\b504\b/i.test(m)) {
+    return 'คลิปนี้ยาว/ประมวลผลนานเกินเวลาที่ตั้งไว้ (ระบบขยายเวลาเป็น ~4.5 นาทีแล้ว) — ลองกด "ถอดประเด็นข่าว" อีกครั้ง · ถ้าคลิปยาวมาก (เกิน ~15 นาที) แนะนำกด "ส่งเข้าคิว (เครื่องทีม)" ที่ให้เวลานานกว่า';
+  }
+  // (ข) Gemini แน่น/ล่มชั่วคราวจริง (503/429/overload) → รอแล้วกดใหม่
+  if (/503|429|high demand|overload|unavailable|temporar|rate limit|parse ไม่ได้|ไม่ส่งข้อมูล/i.test(m)) {
     return 'ตอนนี้ Gemini มีคนใช้งานหนัก (แน่นชั่วคราว) — กดปุ่ม "ถอดประเด็นข่าว" อีกครั้งได้เลย เดี๋ยวก็ผ่าน';
   }
   return m.slice(0, 120) || 'ถอดประเด็นล้มเหลว';
