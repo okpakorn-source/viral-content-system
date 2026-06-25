@@ -561,6 +561,22 @@ async function agentYouTubeFrames(identity) {
 
     const qualityFrames = [];
 
+    // === Tier HQ (NEW 25 มิ.ย.): YouTube auto-thumbnail frames (hq1/2/3 = 480×360 เฟรมจริงในคลิป) ===
+    //   ★ ความละเอียดใช้ได้จริง (เหนือ storyboard 160×90 ที่ judge ตัดทิ้ง) · HTTPS ล้วน → รันบน Vercel ได้
+    //   เป็น "ภาพบริบทข่าว" (อะไรก็ได้ในคลิปที่ตรงข่าว) · เฟรมแปลงเป็น data: URI = จัดเป็น frame = ไม่เป็นฮีโร่ในตัว
+    //   ผ่าน judge คัด "ตรงข่าว+ชัด" ต่อ + ตัวครอป (rev.22e) ครอปพอดีช่องเอง · เปิด/ปิดด้วย env YT_THUMB_FRAMES
+    //   🔴 try/catch ครอบ — ล้ม = ข้ามไปใช้ Tier เดิม (ไม่กระทบของเดิม)
+    if (process.env.YT_THUMB_FRAMES !== '0') {
+      try {
+        const { fetchYouTubeThumbFrames } = await import('@/lib/services/youtubeThumbFrames');
+        const thumbs = await fetchYouTubeThumbFrames(videoIds.slice(0, 3), { perVideo: 3, maxTotal: 5 });
+        if (thumbs.length > 0) {
+          qualityFrames.push(...thumbs);
+          console.log(`[Agent2: YouTube] 🖼️ Tier HQ: เฟรมคมชัด ${thumbs.length} ใบ (auto-thumbnail 480p) — ภาพบริบท (ข้าม storyboard เบลอ)`);
+        }
+      } catch (e) { console.log(`[Agent2: YouTube] Tier HQ ข้าม: ${e.message?.slice(0, 50)}`); }
+    }
+
     // === Tier 2.8: Try Playwright Frame Capture first (highly reliable on local environment) ===
     // ★ FIX (11 มิ.ย.): Vercel serverless ไม่มี Chrome binary — การ launch browser พังแรงระดับ process
     //   (เกิน try/catch) → ข้ามไป Tier 3 storyboard (HTTP ล้วน) บน serverless
