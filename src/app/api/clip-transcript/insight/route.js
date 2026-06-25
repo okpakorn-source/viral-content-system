@@ -1,4 +1,4 @@
-export const maxDuration = 300; // Gemini ดูคลิปทั้งเรื่อง — เผื่อเวลา
+export const maxDuration = 800; // ★ 25 มิ.ย.: 300→800 — Gemini retry ได้ 4×180s=720s เกิน 300 → Vercel ฆ่าฟังก์ชันกลางคัน คืน error page (text) ทำหน้าเว็บ parse JSON พัง "An error o..." (แพลนรองรับ 800 เท่า queue worker)
 import { NextResponse } from 'next/server';
 import { extractClipInsight, extractInsightFromVideoBuffer, extractMultiTopicInsight, extractMultiTopicFromVideoBuffer } from '@/lib/services/clipInsightService';
 import { createStore } from '@/lib/persistStore';

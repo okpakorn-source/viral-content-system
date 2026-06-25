@@ -1,6 +1,19 @@
 'use client';
 import { useState, useEffect } from 'react';
 
+// ★ 25 มิ.ย.: อ่าน response แบบปลอดภัย — กัน "Unexpected token 'A'..." เมื่อเซิร์ฟเวอร์
+//   timeout แล้ว Vercel คืน error page เป็น text (ไม่ใช่ JSON) → แปลงเป็นข้อความที่อ่านออก
+async function safeJson(r) {
+  const text = await r.text();
+  try { return JSON.parse(text); }
+  catch {
+    if (!r.ok && /timeout|FUNCTION_INVOCATION|error occurred|deadline/i.test(text)) {
+      return { success: false, error: 'เซิร์ฟเวอร์ใช้เวลานานเกินไป (timeout) — คลิปอาจยาว/Gemini แน่น กดใหม่อีกครั้งได้เลย' };
+    }
+    return { success: false, error: !r.ok ? `เซิร์ฟเวอร์ตอบกลับผิดพลาด (${r.status}) — ลองใหม่อีกครั้ง` : 'อ่านผลลัพธ์ไม่ได้ ลองใหม่อีกครั้ง' };
+  }
+}
+
 export default function ClipTranscriptPage() {
   const [url, setUrl] = useState('');
   const [tidy, setTidy] = useState(true);
@@ -38,7 +51,7 @@ export default function ClipTranscriptPage() {
     setLoading(true); setErr(''); setOut(null);
     try {
       const r = await fetch('/api/clip-transcript', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), tidy }) });
-      const d = await r.json();
+      const d = await safeJson(r);
       if (!d.success) { setErr(d.error || 'ถอดไม่สำเร็จ'); }
       else { setOut(d.data); setView(d.data.tidyText ? 'tidy' : 'raw'); loadCases(); }
     } catch (e) { setErr(e.message); }
@@ -51,7 +64,7 @@ export default function ClipTranscriptPage() {
     setInsightLoading(true); setErr(''); setInsight(null);
     try {
       const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim() }) });
-      const d = await r.json();
+      const d = await safeJson(r);
       if (!d.success) setErr(d.error || 'ถอดประเด็นไม่สำเร็จ');
       else { setInsight(d.data); loadInsightCases(); }   // ★ รีเฟรชคลังประเด็นทันทีที่ถอดสำเร็จ
     } catch (e) { setErr(e.message); }
@@ -65,7 +78,7 @@ export default function ClipTranscriptPage() {
     try {
       const me = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
       const r = await fetch('/api/clip-transcript/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), kind: 'insight', tidy, user: me }) });
-      const d = await r.json();
+      const d = await safeJson(r);
       if (!d.success) { setErr(d.error || 'ส่งเข้าคิวไม่สำเร็จ'); setSubmitting(false); return; }
       setQueueJob({ jobId: d.jobId, status: d.status || 'pending', position: d.position, platform: d.platform });
       pollJob(d.jobId);
@@ -77,7 +90,7 @@ export default function ClipTranscriptPage() {
       await new Promise(res => setTimeout(res, 4000));
       try {
         const r = await fetch('/api/clip-transcript/job-status?id=' + jobId, { cache: 'no-store' });
-        const d = await r.json();
+        const d = await safeJson(r);
         if (!d.success) { setQueueJob(j => ({ ...j, status: 'error', error: d.error || 'หางานในคิวไม่เจอ' })); return; }
         setQueueJob({ jobId, status: d.status, position: d.position, platform: d.platform, result: d.result, error: d.error });
         if (d.status === 'done') { setInsight(d.result); loadInsightCases(); return; }
