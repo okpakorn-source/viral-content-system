@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { enqueueJob } from '@/lib/services/queueService';
+import { createStore } from '@/lib/persistStore';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('QUEUE_ADD');
@@ -69,6 +70,26 @@ export async function POST(req) {
       }
     }
     
+    // ★ 25 มิ.ย. (สืบบอทซ้ำ): บันทึก ping — ใคร (instance) ยิงข้อความไหน (msgId) เข้าคิว · เก็บ 30 ล่าสุด
+    //   query store 'bot-pings' → instance ต่างกัน 2 ตัว = 2 บอท · msgId เดียวจาก 2 instance = 2 บอทจริง
+    if (payload._botInstance || payload._msgId) {
+      try {
+        const pingStore = createStore('bot-pings');
+        await pingStore.add({
+          id: `ping_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          instance: payload._botInstance || 'unknown',
+          msgId: payload._msgId || '',
+          content: String(payload.input || payload.url || '').slice(0, 40),
+          at: new Date().toISOString(),
+        });
+        const all = await pingStore.getAll();
+        if (all.length > 30) {
+          const old = all.sort((a, b) => new Date(a.at) - new Date(b.at)).slice(0, all.length - 30);
+          for (const o of old) await pingStore.remove(o.id).catch(() => {});
+        }
+      } catch { /* ping ล้มเหลว = ไม่เป็นไร ไม่กระทบการเข้าคิว */ }
+    }
+
     // 3. Add to Queue
     const sourceUserId = payload.userId || 'discord-bot';
     const queueData = await enqueueJob(payload, sourceUserId);

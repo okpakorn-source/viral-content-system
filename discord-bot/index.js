@@ -14,6 +14,8 @@ const client = new Client({
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const API_URL = process.env.API_URL || 'http://localhost:3000/api/auto/process';
 const API_KEY = process.env.API_KEY || '';
+// ★ 25 มิ.ย.: รหัสประจำตัว instance นี้ (hostname+สุ่ม) — ใช้สืบว่ามีบอทกี่ตัวยิงเข้าคิว (double-event vs 2 instance)
+const BOT_INSTANCE = require('os').hostname() + '_' + Math.random().toString(36).slice(2, 7);
 
 // ═══════════════════════════════════════════
 // 🔧 QUEUE SYSTEM — ป้องกัน concurrent overload
@@ -103,6 +105,16 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
   // ไม่ตอบโต้บอทด้วยกันเอง
   if (message.author.bot) return;
+
+  // ★ 25 มิ.ย.: กันประมวลผล "ข้อความเดียวกันซ้ำ" — Discord อาจส่ง messageCreate ซ้ำ (gateway resume)
+  //   หรือบอทรับ event ซ้ำ → ดักด้วย message.id ที่เคยเห็นแล้ว = ข้าม (ต้นเหตุจริงของการเห็น 2 ข้อความ)
+  if (!global.__seenMsgIds) global.__seenMsgIds = new Set();
+  if (global.__seenMsgIds.has(message.id)) {
+    console.log(`[Bot] ⏭️ ข้ามข้อความซ้ำ (message.id ${message.id} เคยรับแล้ว) — กันรายงาน/เจนซ้ำ`);
+    return;
+  }
+  global.__seenMsgIds.add(message.id);
+  if (global.__seenMsgIds.size > 500) global.__seenMsgIds = new Set([...global.__seenMsgIds].slice(-200));
 
   const content = message.content.trim();
 
@@ -244,6 +256,8 @@ async function processNewsJob(job) {
       images: [],
       contentLength: 'short',
       userId: `discord-${message.author.id}`,
+      _botInstance: BOT_INSTANCE,   // ★ ใครยิงเข้าคิว (สืบจำนวนบอท)
+      _msgId: message.id,           // ★ ข้อความ Discord ไหน (สืบ double-event)
     };
 
     const headers = { 'Content-Type': 'application/json' };
