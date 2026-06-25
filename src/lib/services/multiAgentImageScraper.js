@@ -1952,7 +1952,42 @@ function fallbackSelection(candidates) {
 // Main Orchestrator
 // Run all 3 agents in parallel → deduplicate → judge
 // ==========================================
-export async function runMultiAgentImageSearch(url, sourceType, entities, newsTitle, identity) {
+// ★ 25 มิ.ย. — Agent U: แหล่งรูปที่พนักงานระบุเอง (ไม่บังคับ) → ดึงรูปจากลิงก์ตรงๆ "ก่อนรีเสิร์ช"
+//   YouTube/คลิป → เฟรมหลายจุดในคลิป · TikTok → ปกคลิป (tikwm) · ข่าว/บทความ/IG/FB → og:image + <img>
+//   🔴 ภาพพวกนี้ "บูสต์ให้มาก่อน" แต่ยังส่งเข้า judge (คัดคุณภาพ+ตรวจคน) — ไม่บังคับใช้ภาพแย่/ผิดคน
+async function extractFromUserSources(sourceLinks = []) {
+  if (!Array.isArray(sourceLinks) || !sourceLinks.length) return [];
+  const out = [];
+  for (const raw of sourceLinks.slice(0, 6)) {
+    const link = String(raw || '').trim();
+    if (!/^https?:\/\//i.test(link)) continue;
+    try {
+      if (/youtube\.com|youtu\.be/i.test(link)) {
+        const { fetchYouTubeThumbFrames } = await import('@/lib/services/youtubeThumbFrames');
+        const { youtubeVideoId } = await import('@/lib/services/newsDesk/taxonomy');
+        const id = youtubeVideoId(link);
+        if (id) {
+          const frames = await fetchYouTubeThumbFrames([id], { perVideo: 3, maxTotal: 4 });
+          for (const f of frames) out.push(`data:image/jpeg;base64,${f.buffer.toString('base64')}`);
+        }
+      } else if (/tiktok\.com/i.test(link)) {
+        const r = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(link)}`).then(x => x.json()).catch(() => null);
+        const cover = r?.data?.origin_cover || r?.data?.cover;
+        if (cover) out.push(cover);
+      } else {
+        const { extractSourceArticleImages } = await import('@/lib/services/sourceArticleImages');
+        out.push(...(await extractSourceArticleImages(link, 6)));
+      }
+    } catch (e) { console.log('[AgentU:UserSource] skip:', e.message?.slice(0, 40)); }
+  }
+  const seen = new Set(); const uniq = [];
+  for (const u of out) { if (u && !seen.has(u)) { seen.add(u); uniq.push(u); } }
+  console.log(`[AgentU:UserSource] 🔗 ลิงก์พนักงาน ${sourceLinks.length} → ${uniq.length} ภาพ (บูสต์ก่อน · ยังผ่าน judge)`);
+  return uniq;
+}
+
+export async function runMultiAgentImageSearch(url, sourceType, entities, newsTitle, identity, sourceLinks = []) {
+  const userSrcPromise = extractFromUserSources(sourceLinks);
   console.log('============================================');
   console.log('[MultiAgent] 🚀 Starting parallel image search');
   console.log(`[MultiAgent] News: "${(newsTitle || '').slice(0, 60)}..."`);
@@ -2020,9 +2055,12 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
   const tavilyImages = tavilyResult.status === 'fulfilled' ? (tavilyResult.value || []).filter(u => typeof u === 'string' && u.startsWith('http')) : [];
   const youtubeImages = youtubeResult.status === 'fulfilled' ? (youtubeResult.value || []) : [];
   const articleImages = articleResult.status === 'fulfilled' ? (articleResult.value || []) : [];
+  const userImages = await userSrcPromise.catch(() => []); // ★ แหล่งรูปพนักงาน (บูสต์ก่อน)
+  const userSrcSet = new Set(userImages); // ใช้ติด flag userSource ตอน return
 
   console.log('============================================');
   console.log(`[MultiAgent] Agent results:`);
+  console.log(`  Agent U (UserSrc):  ${userImages.length} images (ลิงก์พนักงานระบุ — บูสต์ก่อน)`);
   console.log(`  Agent 0 (Article):  ${articleImages.length} images ${articleResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + articleResult.reason : ''}`);
   console.log(`  Agent 1 (Google):   ${googleImages.length} images ${googleResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + googleResult.reason : ''}`);
   console.log(`  Agent 2 (YouTube):  ${youtubeImages.length} frames ${youtubeResult.status !== 'fulfilled' ? '⚠️ FAILED: ' + youtubeResult.reason : ''}`);
@@ -2038,6 +2076,7 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
     ...reelsImages.map((url, i) => ({ url, queryLabel: 'reels-core', queryText: coreQueriesForMeta[0] || '' })),
     ...articleImages.map((url, i) => ({ url, queryLabel: 'article-source', queryText: 'ภาพจากบทความข่าวต้นทาง' })),
     ...tavilyImages.map((url, i) => ({ url, queryLabel: 'tavily-core', queryText: coreQueriesForMeta[0] || '' })),
+    ...userImages.map((url, i) => ({ url, queryLabel: 'user-source', queryText: 'แหล่งรูปที่พนักงานระบุ' })),
   ];
 
   // ══════════════════════════════════════════════════════════════
@@ -2155,7 +2194,10 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
     }
   }
   
-  let candidates = prioritized;
+  // ★ 25 มิ.ย.: แหล่งรูปพนักงาน (Agent U) "บูสต์ขึ้นหน้าสุด" — รอดด่านตัด 100/รอด judge batch ก่อนภาพรีเสิร์ช
+  let candidates = userImages.length
+    ? [...userImages, ...prioritized.filter(u => !userSrcSet.has(u))]
+    : prioritized;
   // ★ Attach _meta to candidates so judgeImages can look up source page URLs for reliability scoring
   candidates._meta = allMeta;
   if (candidates.length > 100) {
@@ -2205,6 +2247,7 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
       title: meta.title || img.title || '',
       snippet: meta.snippet || img.snippet || '',
       evidenceCat: meta.evidenceCat || img.evidenceCat || '',
+      userSource: userSrcSet.has(img.url), // ★ ภาพจากลิงก์พนักงาน → route บูสต์ขึ้นก่อน
     };
   });
   result.allCandidates = allScrapedUrls;

@@ -39,6 +39,11 @@ async function _renderCoverV3(request) {
   try {
     const body = await request.json();
     const { content, newsTitle = '', sourceUrl = '', _queueJobId = null, forceTemplateId = null, mainCharacterName = '' } = body;
+    // ★ 25 มิ.ย.: แหล่งรูปที่พนักงานระบุเอง (ไม่บังคับ) — ลิงก์ YouTube/ข่าว/TikTok/IG ที่มีภาพบุคคลนั้นเยอะ
+    //   รับได้หลายลิงก์ (array หรือ string คั่นบรรทัด) → ระบบดึงรูปจากตรงนี้ก่อน บูสต์ขึ้นหน้า (ยังผ่าน judge)
+    const sourceLinks = Array.isArray(body.sourceLinks)
+      ? body.sourceLinks
+      : String(body.sourceLinks || '').split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
 
     if (!content && !newsTitle) {
       return NextResponse.json(
@@ -98,11 +103,13 @@ async function _renderCoverV3(request) {
 
     console.log('[CoverV3] ② Multi-agent search + judge...');
     const { runMultiAgentImageSearch } = await import('@/lib/services/multiAgentImageScraper');
+    if (sourceLinks.length) console.log(`[CoverV3] 🔗 แหล่งรูปพนักงาน ${sourceLinks.length} ลิงก์ — ดึงก่อน บูสต์ขึ้นหน้า`);
     const selected = await runMultiAgentImageSearch(
       sourceUrl || '', sourceUrl ? 'url' : 'text',
       identity.characters || [],
       newsTitle || (content || '').slice(0, 100),
-      identity
+      identity,
+      sourceLinks
     );
 
     // ดาวน์โหลดภาพเป็น buffer (เฉพาะตัวท็อปที่ judge คัดแล้ว)
@@ -110,8 +117,11 @@ async function _renderCoverV3(request) {
     // rev.20g: ★ ให้ความสำคัญ "ภาพถ่ายจริง" (Google/บทความ/Tavily = http url) ก่อน "เฟรมวิดีโอ" (data: URI จาก YouTube/Reels)
     //   บทเรียน CASE-156/158: เฟรมวิดีโอหันหลัง/เบลอ หลุดมาเป็นฮีโร่/วงกลม → ดันภาพถ่ายขึ้นก่อน เฟรมวิดีโอเป็นตัวเสริมท้าย (ใช้เฉพาะเมื่อภาพถ่ายไม่พอ)
     const _ranked = (selected || []).filter(img => img?.url);
-    const _photos = _ranked.filter(img => !String(img.url).startsWith('data:'));
-    const _frames = _ranked.filter(img => String(img.url).startsWith('data:'));
+    // ★ 25 มิ.ย.: ภาพจาก "แหล่งรูปพนักงาน" (userSource) บูสต์ขึ้นก่อนในแต่ละกลุ่ม
+    //   คงกฎ "ภาพถ่ายก่อนเฟรม" สำหรับฮีโร่ — เฟรมพนักงานบูสต์ในกลุ่มเฟรม (เป็นบริบท) ไม่ดันเป็นฮีโร่เบลอ
+    const _isData = (img) => String(img.url).startsWith('data:');
+    const _photos = [..._ranked.filter(i => i.userSource && !_isData(i)), ..._ranked.filter(i => !i.userSource && !_isData(i))];
+    const _frames = [..._ranked.filter(i => i.userSource && _isData(i)), ..._ranked.filter(i => !i.userSource && _isData(i))];
     // ★ rev.20j (ผู้ใช้ 21 มิ.ย.): ข่าว "คนธรรมดา/เด็ก ออกรายการทีวี" → ภาพคนตัวจริงมีแค่ในเฟรมคลิป
     //   (เว็บคืนวิว/สถานที่/คนผิด เพราะไม่ใช่คนดัง) → กลับด้านให้ "เฟรมคลิปมาก่อน"; ข่าวคนดังยังภาพเว็บก่อนเหมือนเดิม
     const _clipBlob = `${newsTitle} ${(content || '').slice(0, 1500)}`;
