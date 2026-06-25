@@ -561,31 +561,11 @@ async function agentYouTubeFrames(identity) {
 
     const qualityFrames = [];
 
-    // === Tier 2.5 (NEW 24 มิ.ย.): yt-dlp Hi-Res Frames (เครื่องทีม Windows) ===
-    //   ดึงเฟรม "ความละเอียดสูงจริง" จากคลิป (yt-dlp โหลด ≤480p + ffmpeg ตัดเฟรมฉากเปลี่ยน)
-    //   → ได้ห้อง/สวน/บริบทจริงคมชัด ≥350px (เหนือกว่า storyboard 160×90 ที่ judge ตัดทิ้ง)
-    //   🔴 โมดูลแยกอิสระ · มีเฉพาะเครื่องที่มี yt-dlp+ffmpeg → ไม่มีก็ข้ามไปใช้ Tier เดิม (ไม่พัง)
-    try {
-      const { hiResFramesAvailable, extractHiResFromVideos } = await import('@/lib/services/youtubeHiResFrameExtractor');
-      if (await hiResFramesAvailable()) {
-        const hiUrls = videoIds.slice(0, 2).map(id => `https://www.youtube.com/watch?v=${id}`);
-        console.log(`[Agent2: YouTube] 🎬 Tier 2.5: yt-dlp hi-res frames จาก ${hiUrls.length} คลิป...`);
-        // ★ rev.22h: เอาแค่ 6 เฟรม (เดิม 12 ท่วมพูล → เฟรมคนพูดในคลิปแย่งเป็นฮีโร่เพี้ยน)
-        //   ใช้เป็น "ภาพประกอบบ้าน/สถานที่" 1-2 ใบ — ฮีโร่ยังมาจากพอร์ตเทรตคมจาก Google เหมือนเดิม
-        const hiFrames = await extractHiResFromVideos(hiUrls, { targetTotal: 6, perVideo: 4 });
-        if (hiFrames.length > 0) {
-          qualityFrames.push(...hiFrames.map(f => ({ buffer: f.buffer, source: 'youtube-hires', sourceUrl: f.sourceUrl })));
-          console.log(`[Agent2: YouTube] ✅ Tier 2.5: ได้เฟรมคมชัด ${hiFrames.length} ใบ (yt-dlp+ffmpeg) — ข้าม storyboard เบลอ`);
-        }
-      }
-    } catch (e) { console.log(`[Agent2: YouTube] Tier 2.5 hi-res ข้าม: ${e.message?.slice(0, 50)}`); }
-
     // === Tier 2.8: Try Playwright Frame Capture first (highly reliable on local environment) ===
     // ★ FIX (11 มิ.ย.): Vercel serverless ไม่มี Chrome binary — การ launch browser พังแรงระดับ process
     //   (เกิน try/catch) → ข้ามไป Tier 3 storyboard (HTTP ล้วน) บน serverless
-    if (process.env.VERCEL || qualityFrames.length > 0) {
-      if (qualityFrames.length > 0) console.log('[Agent2: YouTube] ⏭️ มีเฟรม hi-res แล้ว → ข้าม Playwright/storyboard');
-      else console.log('[Agent2: YouTube] ⏭️ Skip Playwright on serverless (no browser) → Tier 3 storyboard');
+    if (process.env.VERCEL) {
+      console.log('[Agent2: YouTube] ⏭️ Skip Playwright on serverless (no browser) → Tier 3 storyboard');
     } else
     try {
       console.log(`[Agent2: YouTube] 🚀 Tier 2.8: Trying Playwright frame capture...`);
@@ -1260,10 +1240,10 @@ There are ${imageParts.length} images (index 0 to ${imageParts.length - 1}) to j
 
 === ROLE ASSIGNMENTS ===
 
-★ Ideal ratio (★ 25 มิ.ย.: ตัวละครเป็นหลัก + บ้าน/สถานที่แค่ 1-2 ใบสวยๆ — กันบ้านท่วมจนคนหาย):
-  People images (HERO + PERSON_SUPPORT + RELATIONSHIP): 3-4 images ← คน-เด่น เป็นหลักของปก
-  Storytelling/place images (KEY_ACTIVITY+CONTEXT+EVIDENCE): 1-2 images ONLY ← ภาพประกอบบ้าน/สถานที่ "แค่ 1-2 ใบที่สวยสุด"
-  ★ ต้องมี HERO portrait คน-เด่น-คม-หน้าตรง 1 ใบเสมอ + ภาพคนอีก ≥2 ใบ · ⛔ ห้ามเลือกภาพบ้าน/สถานที่เกิน 2 ใบ
+★ Ideal ratio for viral news covers:
+  People images (HERO+PERSON_SUPPORT): 2-3 images
+  Storytelling images (KEY_ACTIVITY+CONTEXT+RELATIONSHIP+EVIDENCE): 2-3 images
+  ★ MUST have at least 2 "storytelling" images! Do NOT select only face portraits!
 
 🏷️ HERO_FACE (1 image — Most important!):
 - Sharpest close-up face shot of ${mainChar}
@@ -1408,9 +1388,9 @@ How to distinguish:
 === OUTPUT FORMAT ===
 Return JSON array ONLY. No markdown blocks, no \`\`\`
 Judge ALL images (even REJECT must include score=0)
-★ MUST select 1 strong HERO_FACE (คน-เด่น-คม หน้าตรง) + person images ≥2 (PERSON_SUPPORT/RELATIONSHIP) = ตัวละครเป็นหลักของปก
-★ Storytelling/place (KEY_ACTIVITY/CONTEXT/EVIDENCE) = เลือกแค่ 1-2 ใบที่ "สวยสุด-เห็นชัดสุด" (เช่นบ้านเห็นทั้งหลัง) ⛔ ห้ามเกิน 2 ใบ
-★ PERSON_SUPPORT can be 1-2 images (ต้องมีภาพคนพอให้ตัวละครเด่น ไม่ใช่บ้านล้วน)
+★ MUST include at least 2 images of ${mainChar} (1 HERO_FACE + 1 KEY_ACTIVITY/CONTEXT_SCENE/RELATIONSHIP)
+★ MUST include at least 2 storytelling images (KEY_ACTIVITY/CONTEXT/RELATIONSHIP/EVIDENCE)
+★ PERSON_SUPPORT MUST NOT exceed 1 image! Prioritize storytelling images instead!
 
 [{"index": 0, "score": 10, "role": "HERO_FACE", "reason": "..."}, {"index": 1, "score": 9, "role": "KEY_ACTIVITY", "reason": "..."}, {"index": 5, "score": 0, "role": "REJECT", "reason": "Wrong person, not the news subject"}]`;
 
