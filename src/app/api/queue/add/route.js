@@ -98,6 +98,7 @@ export async function POST(req) {
       position: queueData.position,
       queuesAhead: queueData.queuesAhead,
       status: queueData.status,
+      duplicate: queueData.duplicate || false, // ★ 25 มิ.ย.: บอกบอทว่าเป็นงานซ้ำ → ตัวที่ยิงทีหลังเงียบ ไม่ทำซ้ำ
       message: `Job queued at position ${queueData.position}`,
       _workerUrl: `${baseUrl}/api/queue/worker`,
     });

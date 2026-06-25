@@ -268,6 +268,14 @@ async function processNewsJob(job) {
       throw new Error(addData.error || 'Failed to add to queue');
     }
 
+    // ★ 25 มิ.ย.: คิวบอกว่าเป็น "งานซ้ำ" (อีกบอท/อีกเครื่อง/อีกรอบยิงเข้ามาก่อนแล้ว เจนตัวเดียวกันอยู่)
+    //   → บอทตัวนี้เงียบ ไม่ poll ไม่รายงานซ้ำ (กันบอทหลาย instance เห็น 2 ข้อความ + กันเจน/เปลือง token ซ้ำ)
+    if (addData.duplicate) {
+      console.log(`[Bot] ⏭️ งานซ้ำ jobId=${String(addData.jobId).slice(0, 8)} — อีก instance ทำอยู่แล้ว ข้าม`);
+      await processingMsg.edit('⏭️ ข่าวนี้กำลังถูกประมวลผลอยู่แล้ว — ไม่ทำซ้ำให้เปลือง (ผลจะมาจากรอบที่กำลังทำ)').catch(() => {});
+      return;
+    }
+
     const jobId = addData.jobId;
     const initialPosition = addData.position;
     const queuesAhead = addData.queuesAhead || 0;
