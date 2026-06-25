@@ -67,5 +67,32 @@ export async function fetchYouTubeThumbFrames(videoIds = [], { perVideo = 3, max
   }
   out.sort((a, b) => b.sharpness - a.sharpness); // คมสุดก่อน
   console.log(`${LOG} สแกน ${scanned} เฟรม → คมพอ ${out.length} (เบลอทิ้ง ${blurDropped}) จาก ${videoIds.length} คลิป`);
-  return out.slice(0, maxTotal);
+  if (out.length === 0) return out;
+
+  // ★ ด่านนับคน (25 มิ.ย. — ผู้ใช้: เลือกเฟรมที่คนไม่โดนตัดท่อนน่าเกลียด):
+  //   executor ครอปช่องรอบ "หน้าใหญ่สุดคนเดียว" → เฟรมหลายคนพอๆ กันจะตัดคนอื่นแหว่ง
+  //   → เก็บเฉพาะเฟรมที่ "มีคนเด่นชัดคนเดียว" (1 หน้า หรือหน้าใหญ่สุด ≥1.8x คนรอง = คนอื่นเป็นฉากหลัง)
+  //   เฟรมที่มี 2+ คนขนาดพอๆ กัน (ครอปแล้วตัดคนน่าเกลียด) → ทิ้ง เลือกเฟรมคนน้อย/คนเด่นแทน
+  try {
+    const { batchDetectFaces } = await import('@/lib/services/faceDetector');
+    const fdMap = await batchDetectFaces(out.map((f, i) => ({ id: 'yt' + i, buffer: f.buffer })));
+    const kept = [];
+    let crowdDropped = 0;
+    for (let i = 0; i < out.length; i++) {
+      const faces = (fdMap.get('yt' + i)?.faces) || [];
+      const n = faces.length;
+      if (n >= 2) {
+        const areas = faces.map(f => (f.width || 0) * (f.height || 0)).sort((a, b) => b - a);
+        const dominant = areas[0] >= (areas[1] || 0) * 1.8; // คนใหญ่สุดเด่นกว่าคนรองชัด → ครอปได้ คนอื่นเป็นฉากหลัง
+        if (!dominant) { crowdDropped++; continue; }          // คนหลายคนพอๆ กัน → ตัดทิ้ง (เลือกคนน้อยแทน)
+      }
+      out[i].faceCount = n;
+      kept.push(out[i]);
+    }
+    console.log(`${LOG} ด่านนับคน: เหลือ ${kept.length}/${out.length} (ตัดเฟรมคนเยอะ-ครอปแล้วแหว่ง ${crowdDropped})`);
+    return (kept.length > 0 ? kept : out).slice(0, maxTotal);
+  } catch (e) {
+    console.log(`${LOG} ด่านนับคนข้าม: ${e.message?.slice(0, 40)}`);
+    return out.slice(0, maxTotal);
+  }
 }
