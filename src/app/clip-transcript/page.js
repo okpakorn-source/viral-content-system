@@ -126,7 +126,11 @@ export default function ClipTranscriptPage() {
     }
     if (ins.keyPoints?.length) parts.push('— ประเด็นสำคัญ —\n' + ins.keyPoints.map((k, i) => `${i + 1}. ${k.point}${k.detail ? ' — ' + k.detail : ''}`).join('\n'));
     if (ins.quotes?.length) parts.push('— คำพูดสำคัญ —\n' + ins.quotes.map(q => `“${q}”`).join('\n'));
-    if (ins.rawData) parts.push('— ข้อมูลดิบ —\n' + ins.rawData);
+    if (ins.rawData) parts.push('— ข้อมูลดิบรวม —\n' + ins.rawData);
+    // ★ 25 มิ.ย.: เนื้อดิบแยกประเด็น
+    if (ins.subStories?.length) {
+      ins.subStories.forEach((s, i) => parts.push(`— เนื้อดิบประเด็น ${s.no || i + 1}: ${s.topic}${s.timeRange ? ` (${s.timeRange})` : ''} —\n${s.rawData}${s.quotes?.length ? '\n\nคำพูด:\n' + s.quotes.map(q => `“${q}”`).join('\n') : ''}`));
+    }
     return parts.join('\n\n');
   };
 
@@ -301,8 +305,31 @@ export default function ClipTranscriptPage() {
 
             {insight.rawData && (
               <div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 5 }}>📄 ข้อมูลดิบ (พร้อมเอาไปใช้)</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 5 }}>📄 ข้อมูลดิบรวม (ภาพรวมทั้งคลิป)</div>
                 <div style={{ fontSize: 13.5, lineHeight: 1.8, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 14, maxHeight: 360, overflowY: 'auto' }}>{insight.rawData}</div>
+              </div>
+            )}
+            {/* ★ 25 มิ.ย.: เนื้อดิบแยกประเด็น (เพิ่มจากของรวม) — คลิปหลายประเด็นเท่านั้น */}
+            {insight.subStories?.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#fbbf24', marginBottom: 9 }}>🧩 เนื้อดิบแยกประเด็น ({insight.subStories.length}) — แต่ละอันเจาะลึก พร้อมเขียนเป็นข่าวเดี่ยว</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {insight.subStories.map((s, i) => (
+                    <div key={i} style={{ border: '1px solid rgba(245,158,11,0.3)', borderRadius: 10, padding: 12, background: 'rgba(245,158,11,0.04)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 7 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 800 }}>
+                          <span style={{ color: '#fbbf24' }}>ประเด็น {s.no || i + 1}:</span> {s.topic}
+                          {s.timeRange && <span style={{ fontSize: 11, color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600, marginLeft: 6 }}>⏱️ {s.timeRange}</span>}
+                        </div>
+                        <button onClick={() => navigator.clipboard?.writeText(`${s.topic}\n\n${s.rawData}${s.quotes?.length ? '\n\nคำพูด:\n' + s.quotes.map(q => `“${q}”`).join('\n') : ''}`)}
+                          style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid rgba(245,158,11,0.4)', background: 'transparent', color: '#fbbf24', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>📋 คัดลอก</button>
+                      </div>
+                      <div style={{ fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 11 }}>{s.rawData}</div>
+                      {s.keyPoints?.length > 0 && <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12.5, lineHeight: 1.7, color: 'var(--text-muted,#bbb)' }}>{s.keyPoints.map((k, j) => <li key={j}>{k}</li>)}</ul>}
+                      {s.quotes?.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>{s.quotes.map((q, j) => <div key={j} style={{ fontSize: 12, lineHeight: 1.55, padding: '5px 9px', borderRadius: 7, background: 'rgba(34,197,94,0.06)', borderLeft: '2px solid #22c55e' }}>&ldquo;{q}&rdquo;</div>)}</div>}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
             </>)}

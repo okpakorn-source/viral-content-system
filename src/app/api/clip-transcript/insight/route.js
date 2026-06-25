@@ -132,19 +132,13 @@ async function transcribeFor(url, type) {
 // ★ 22 มิ.ย.: รวมตรรกะสกัด "ข้อมูลดิบ" ไว้ในฟังก์ชันเดียว (ดูคลิป→fallback ถอดเสียง) — โยน error ที่มี .code
 //   เพื่อให้ห่อด้วยคิวได้สะอาด (ไม่ปน NextResponse กับงานหนัก)
 async function buildInsight({ url, type }) {
-  // ★ 24 มิ.ย.: คลิปยาว (≥ CLIP_MULTITOPIC_MIN_SEC, default 10 นาที) → "แยกทุกประเด็น" (multi-topic)
-  //   คลิปสั้น → single (โหมดเดิม ไม่แตะ) · หาความยาวไม่ได้ → single (ปลอดภัย)
-  const LONG_SEC = Number(process.env.CLIP_MULTITOPIC_MIN_SEC) || 600;
-  const durSec = await getClipDurationSec(url).catch(() => 0);
-  const isLong = durSec >= LONG_SEC;
-  console.log(`[ClipInsight] duration=${durSec || '?'}s → mode=${isLong ? 'MULTI-TOPIC (คลิปยาว)' : 'single (คลิปสั้น)'}`);
-
+  // ★ 25 มิ.ย.: ใช้ insight เดียว (enhanced) เสมอ — Gemini "ตัดสินเอง" (content-aware) ว่าคลิปมีหลายประเด็นไหม
+  //   มีหลายประเด็น → ใส่ subStories (เนื้อดิบแยกประเด็น) เพิ่มจาก rawData รวม · เรื่องเดียว → subStories ว่าง
+  //   เลิกพึ่ง getClipDurationSec (ยึด yt-dlp = พังบนคลาวด์ → เคยได้ single เสมอ) — ตอนนี้ทำงานทั้ง cloud+โลคัล
   if (type === 'youtube') {
     // ① ให้ Gemini ดูคลิปจริงก่อน
     try {
-      return isLong
-        ? await extractMultiTopicInsight({ url, platform: 'youtube' })
-        : await extractClipInsight({ url, platform: 'youtube' });
+      return await extractClipInsight({ url, platform: 'youtube' });
     } catch (gErr) {
       // ② Gemini ดูไม่ได้ (คลิปส่วนตัว/รุ่นไม่รองรับ/เน็ต) → fallback ถอดเสียง + LLM
       console.warn('[ClipInsight] Gemini video ล้ม → fallback ถอดเสียง:', gErr.message?.slice(0, 80));
@@ -152,17 +146,13 @@ async function buildInsight({ url, type }) {
       if (!rawText || rawText.length < 40) {
         const e = new Error(gErr.message); e.code = 'INSIGHT_FAILED'; throw e;
       }
-      return isLong
-        ? await extractMultiTopicInsight({ url, platform: 'transcript', rawText })
-        : await extractClipInsight({ url, platform: 'transcript', rawText });
+      return await extractClipInsight({ url, platform: 'transcript', rawText });
     }
   }
   // TikTok/FB/IG → ① โหลดวิดีโอให้ Gemini "ดูจริง" (เห็นภาพ+ตัวหนังสือบนจอ) ② ล้ม→ถอดเสียง+LLM
   try {
     const buf = type === 'tiktok' ? await downloadTiktokBuffer(url) : await downloadMetaBuffer(url);
-    return isLong
-      ? await extractMultiTopicFromVideoBuffer(buf, 'video/mp4')
-      : await extractInsightFromVideoBuffer(buf, 'video/mp4');
+    return await extractInsightFromVideoBuffer(buf, 'video/mp4');
   } catch (vErr) {
     console.warn('[ClipInsight] Gemini ดูไฟล์วิดีโอล้ม → fallback ถอดเสียง:', vErr.message?.slice(0, 90));
   }
@@ -170,9 +160,7 @@ async function buildInsight({ url, type }) {
   if (!rawText || rawText.length < 40) {
     const e = new Error('ดูคลิป/ถอดเสียงไม่สำเร็จ — คลิปอาจไม่มีเสียง หรือ Facebook/IG ทำได้เฉพาะเครื่องทีม'); e.code = 'CLIP_FAILED'; throw e;
   }
-  return isLong
-    ? await extractMultiTopicInsight({ url, platform: 'transcript', rawText })
-    : await extractClipInsight({ url, platform: 'transcript', rawText });
+  return await extractClipInsight({ url, platform: 'transcript', rawText });
 }
 
 export async function POST(request) {
