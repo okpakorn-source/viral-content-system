@@ -14,6 +14,18 @@ let _cache = { at: 0, result: null };
 const CACHE_MS = 30_000; // เช็กจริงทุก 30 วิ
 
 export async function GET() {
+  // ★ 26 มิ.ย.: สถานะ "endpoint วิดีโอ" จริง (ถอดประเด็นใช้ video ไม่ใช่ text — text/video โหลดคนละตัว!)
+  //   อ่านจากผลถอดล่าสุดจริง (callGeminiVideo/VideoFile บันทึกไว้ใน global) — แม่นกว่า probe text
+  //   ใช้ได้เฉพาะโปรเซสเดียวกับที่ถอด (โลคอลเครื่องทีม = เคส FB) · ถ้าไม่มีข้อมูลสด → ถอย probe text
+  const vh = global.__geminiVideoHealth;
+  if (vh && Date.now() - vh.at < 180_000) { // มีผลถอดวิดีโอจริงภายใน 3 นาที
+    const ageS = Math.round((Date.now() - vh.at) / 1000);
+    if (vh.ok) {
+      return NextResponse.json({ light: 'green', ok: true, src: 'video', msg: `Gemini (วิดีโอ) ใช้งานได้จริง — กดถอดได้เลย (ล่าสุด ${ageS} วิ)` });
+    }
+    return NextResponse.json({ light: 'red', ok: false, code: vh.code, src: 'video', msg: `Gemini (วิดีโอ) แน่น ${vh.code || 503} — ถอดประเด็นยังไม่ผ่าน (ล่าสุด ${ageS} วิ) รอ/กดทิ้งไว้ให้ลองเอง` });
+  }
+
   if (_cache.result && Date.now() - _cache.at < CACHE_MS) {
     return NextResponse.json({ ..._cache.result, cached: true });
   }
@@ -38,9 +50,10 @@ export async function GET() {
       const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('probe-timeout')), HARD_MS));
       await Promise.race([probe, timeout]);
       const ms = Date.now() - t0;
+      // หมายเหตุ: นี่คือ probe "ข้อความ" — endpoint วิดีโออาจโหลดต่างกัน (ถ้ามีผลวิดีโอสดจะใช้อันนั้นแทน)
       result = ms > 4000
-        ? { light: 'yellow', ok: true, ms, msg: 'Gemini ตอบช้า (เริ่มแน่น) — กดได้ แต่จะช้า' }
-        : { light: 'green', ok: true, ms, msg: 'Gemini พร้อมใช้งาน — กดถอดได้เลย' };
+        ? { light: 'yellow', ok: true, ms, src: 'text', msg: 'Gemini ตอบช้า (เริ่มแน่น) — ลองถอดได้ แต่อาจช้า/ติด' }
+        : { light: 'yellow', ok: true, ms, src: 'text', msg: 'Gemini (ข้อความ) ปกติ — แต่ยังไม่มีผลถอดวิดีโอสด ลองกดดูได้' };
     }
   } catch (e) {
     const msg = String(e?.message || '');

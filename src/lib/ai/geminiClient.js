@@ -160,11 +160,20 @@ export async function callGeminiVideo({ prompt, youtubeUrl, model = 'gemini-3.5-
 async function _withGeminiRetry(fn, { tries = 5, label = 'Gemini' } = {}) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
-    try { return await fn(); }
+    try {
+      const r = await fn();
+      // ★ 26 มิ.ย.: บันทึกสุขภาพ "endpoint วิดีโอ" จริง (ใช้กับไฟสัญญาณ Gemini บนหน้าถอดประเด็น)
+      //   _withGeminiRetry ใช้เฉพาะ callGeminiVideo/VideoFile = วิดีโอล้วน → สะท้อนสถานะที่ถอดประเด็นใช้จริง
+      global.__geminiVideoHealth = { at: Date.now(), ok: true };
+      return r;
+    }
     catch (e) {
       lastErr = e;
       const msg = String(e?.message || '');
       const status = Number(e?.status) || 0;
+      if (status === 503 || status === 429 || /\b503\b|\b429\b|overload|unavailable|high demand|temporar|quota|rate limit/i.test(msg)) {
+        global.__geminiVideoHealth = { at: Date.now(), ok: false, code: status || 503 };
+      }
       // ลองใหม่เฉพาะอาการ "ชั่วคราว" (Gemini แน่น/เน็ตสะดุด) — ★ 25 มิ.ย.: ไม่ retry ตอน "timeout/deadline"
       //   เพราะคลิปยาว/ช้าจะ timeout ซ้ำทุกรอบ = เสียเวลา ~12 นาทีแล้วค่อย fail (วนเปล่า) → ให้ fail เร็วแทน
       const transient = [429, 500, 502, 503].includes(status) // ตัด 504 (deadline/our-timeout) ออก
