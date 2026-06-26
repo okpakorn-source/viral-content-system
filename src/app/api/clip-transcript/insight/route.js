@@ -90,11 +90,14 @@ function humanizeErr(raw) {
   if (/deadline|timed out|timeout|ETIMEDOUT|aborted|\b504\b/i.test(m)) {
     return 'คลิปนี้ยาว/ประมวลผลนานเกินเวลาที่ตั้งไว้ (ระบบขยายเวลาเป็น ~4.5 นาทีแล้ว) — ลองกด "ถอดประเด็นข่าว" อีกครั้ง · ถ้าคลิปยาวมาก (เกิน ~15 นาที) แนะนำกด "ส่งเข้าคิว (เครื่องทีม)" ที่ให้เวลานานกว่า';
   }
-  // (ข) Gemini แน่น/ล่มชั่วคราวจริง (503/429/overload) → กดใหม่ หรือใช้ทางที่ไม่ง้อ Gemini
-  //   ★ 26 มิ.ย.: ระบบถอยไป "ถอดเสียง+OpenAI" อัตโนมัติแล้วถ้าคลิปมีซับ/อยู่เครื่องทีม —
-  //   เคสที่ยังตกคือ "ไม่มีซับ + อยู่บน Vercel (ถอดเสียงเองไม่ได้)" → แนะกดเข้าคิวเครื่องทีม (Whisper ถอดเองไม่ง้อ Gemini)
-  if (/503|429|high demand|overload|unavailable|temporar|rate limit|parse ไม่ได้|ไม่ส่งข้อมูล/i.test(m)) {
-    return 'ตอนนี้ Gemini แน่นชั่วคราว — กด "ถอดประเด็นข่าว" อีกครั้งได้เลย · หรือกด "ส่งเข้าคิว (เครื่องทีม)" ระบบจะถอดเสียงเองด้วย Whisper+OpenAI ไม่ง้อ Gemini (ได้ผลชัวร์กว่า)';
+  // (ข2) Gemini เปิดดูคลิปไม่ได้จริง (ส่วนตัว/จำกัดอายุ/ลิงก์เสีย) — กดใหม่ไม่ช่วย
+  if (/ดูคลิปไม่ได้|ส่วนตัว|private|age.?restrict|จำกัดอายุ|unsupported|ไม่ส่งข้อมูล/i.test(m)) {
+    return 'Gemini เปิดดูคลิปนี้ไม่ได้ (อาจเป็นคลิปส่วนตัว/จำกัดอายุ/ลิงก์มีปัญหา) — ลองเช็คว่าคลิปเปิดสาธารณะ หรือใช้คลิปอื่น';
+  }
+  // (ข) Gemini แน่น/ล่มชั่วคราว (503/429/overload) → รอแล้วกดใหม่ (ระบบใช้ Gemini ดูคลิปจริงเท่านั้น เพื่อคุณภาพสูงสุด)
+  //   ★ 26 มิ.ย. (ผู้ใช้สั่ง): ไม่ถอย fallback OpenAI — รอ Gemini ดูคลิปจริงดีกว่า (ข้อมูลดิบดีกว่ามาก)
+  if (/503|429|high demand|overload|unavailable|temporar|rate limit|parse ไม่ได้/i.test(m)) {
+    return 'ตอนนี้ Gemini มีคนใช้งานหนัก (แน่นชั่วคราว) — กดปุ่ม "ถอดประเด็นข่าว" อีกครั้งได้เลย เดี๋ยวก็ผ่าน (ระบบรอ Gemini ดูคลิปจริงเพื่อข้อมูลดิบคุณภาพสูงสุด ไม่ถอยไปสรุปจากเสียงล้วน)';
   }
   return m.slice(0, 120) || 'ถอดประเด็นล้มเหลว';
 }
@@ -137,27 +140,20 @@ async function buildInsight({ url, type }) {
   // ★ 25 มิ.ย.: ใช้ insight เดียว (enhanced) เสมอ — Gemini "ตัดสินเอง" (content-aware) ว่าคลิปมีหลายประเด็นไหม
   //   มีหลายประเด็น → ใส่ subStories (เนื้อดิบแยกประเด็น) เพิ่มจาก rawData รวม · เรื่องเดียว → subStories ว่าง
   //   เลิกพึ่ง getClipDurationSec (ยึด yt-dlp = พังบนคลาวด์ → เคยได้ single เสมอ) — ตอนนี้ทำงานทั้ง cloud+โลคัล
+  // ★ 26 มิ.ย. (ผู้ใช้สั่ง): ใช้ "Gemini ดูคลิปจริง" เท่านั้น — ปิด fallback ถอดเสียง+OpenAI
+  //   เหตุผล: Gemini ดูคลิป (เห็นภาพ+ตัวหนังสือบนจอ+ฟังเสียง) ถอดข้อมูลดิบมีประสิทธิภาพกว่ามาก
+  //   ถ้า Gemini แน่น → โยน error ให้ผู้ใช้ "รอ/กดใหม่" ดีกว่าได้ผลด้อยจาก transcript ล้วน
+  //   (ฟังก์ชัน transcript ยังอยู่ในโค้ด เผื่อเปิดใช้ภายหลัง — แค่ไม่เรียกในเส้นทาง insight)
   if (type === 'youtube') {
-    // ① ให้ Gemini ดูคลิปจริงก่อน
-    try {
-      return await extractClipInsight({ url, platform: 'youtube' });
-    } catch (gErr) {
-      // ② Gemini ดูไม่ได้ (คลิปส่วนตัว/รุ่นไม่รองรับ/เน็ต) → fallback ถอดเสียง + LLM
-      console.warn('[ClipInsight] Gemini video ล้ม → fallback ถอดเสียง:', gErr.message?.slice(0, 80));
-      const rawText = await transcribeFor(url, 'youtube');
-      if (!rawText || rawText.length < 40) {
-        const e = new Error(gErr.message); e.code = 'INSIGHT_FAILED'; throw e;
-      }
-      return await extractClipInsight({ url, platform: 'transcript', rawText });
-    }
+    return await extractClipInsight({ url, platform: 'youtube' }); // Gemini ดูคลิปจริง — ไม่มี fallback
   }
-  // TikTok/FB/IG → ① โหลดวิดีโอให้ Gemini "ดูจริง" (เห็นภาพ+ตัวหนังสือบนจอ) ② ล้ม→ถอดเสียง+LLM
-  try {
-    const buf = type === 'tiktok' ? await downloadTiktokBuffer(url) : await downloadMetaBuffer(url);
-    return await extractInsightFromVideoBuffer(buf, 'video/mp4');
-  } catch (vErr) {
-    console.warn('[ClipInsight] Gemini ดูไฟล์วิดีโอล้ม → fallback ถอดเสียง:', vErr.message?.slice(0, 90));
-  }
+  // TikTok/FB/IG → โหลดไฟล์ให้ Gemini "ดูจริง" (เห็นภาพ+ตัวหนังสือบนจอ) — ไม่มี fallback ถอดเสียง
+  const buf = type === 'tiktok' ? await downloadTiktokBuffer(url) : await downloadMetaBuffer(url);
+  return await extractInsightFromVideoBuffer(buf, 'video/mp4');
+}
+
+// ★ (เลิกใช้ชั่วคราว 26 มิ.ย. — เก็บไว้เผื่อเปิด fallback ถอดเสียงภายหลัง)
+async function _buildInsightTranscriptFallback({ url, type }) {
   const rawText = await transcribeFor(url, type);
   if (!rawText || rawText.length < 40) {
     const e = new Error('ดูคลิป/ถอดเสียงไม่สำเร็จ — คลิปอาจไม่มีเสียง หรือ Facebook/IG ทำได้เฉพาะเครื่องทีม'); e.code = 'CLIP_FAILED'; throw e;
