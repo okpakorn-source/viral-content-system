@@ -126,6 +126,7 @@ export default function CoverLabPage() {
   // ★ Agent 0 (11 มิ.ย.): ลิงก์ข่าวต้นทาง — ระบบดึงภาพจากบทความโดยตรง (ภาพตรงเนื้อที่สุด)
   const [sourceUrl, setSourceUrl] = useState('');
   const [sourceLinks, setSourceLinks] = useState(''); // ★ 25 มิ.ย. แหล่งรูปพนักงาน (หลายลิงก์ บรรทัดละ 1 — YouTube/ข่าว/TikTok/IG)
+  const [sourceOnly, setSourceOnly] = useState(false); // ★ 26 มิ.ย. true = ใช้ภาพจากลิงก์ล้วน ไม่รีเสิร์ชเพิ่ม
   const [mainCharacterName, setMainCharacterName] = useState(''); // ★ ผู้ใช้ระบุชื่อเต็มเอง (ข่าวชื่อเล่นกำกวม)
   // ★ v3 (11 มิ.ย.): เลือกเครื่องยนต์ประกอบปก — v3 = AI Vision Director (ตาเลือกครอป + พิกเซลแท้ + QC ตัวเอง)
   const [composer, setComposer] = useState('v3');
@@ -404,6 +405,7 @@ export default function CoverLabPage() {
         newsTitle, content, templateId: useTemplate,
         sourceUrl: sourceUrl.trim() || undefined,
         sourceLinks: sourceLinks.trim() || undefined, // ★ แหล่งรูปพนักงาน (ดึงก่อน บูสต์ขึ้นหน้า)
+        sourceOnly: sourceLinks.trim() ? sourceOnly : undefined, // ★ 26 มิ.ย. เฉพาะภาพในลิงก์ (มีผลเมื่อมีแหล่งรูป)
         mainCharacterName: mainCharacterName.trim() || undefined, // ★ ชื่อเต็มที่ผู้ใช้ยืนยัน
         composer, // 'v3' = Vision Director | 'v1' = ระบบเดิม
         regenerate: isRegenerate, clearCache: !!isRegenerate && isFresh,
@@ -874,9 +876,27 @@ export default function CoverLabPage() {
               rows={3}
               style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
             />
-            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: -8, marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: -8, marginBottom: sourceLinks.trim() ? 8 : 14 }}>
               💡 ใส่ลิงก์คลิป/ข่าวที่มีภาพคนในข่าวชัดๆ → ระบบดึงเฟรม/ภาพจากตรงนั้นก่อน (ยังคัดคุณภาพ+ตรวจคน) · ไม่ใส่ = รีเสิร์ชเองเหมือนเดิม
             </div>
+
+            {/* ★ 26 มิ.ย.: เลือกแหล่งภาพ — เมื่อมีลิงก์แหล่งรูปเท่านั้น */}
+            {sourceLinks.trim() && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', marginBottom: 14, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+                  <input type="radio" name="srcMode" checked={!sourceOnly} onChange={() => setSourceOnly(false)} style={{ marginTop: 3 }} />
+                  <span style={{ fontSize: 13, color: '#e2e8f0' }}>
+                    <b>🔀 ผสม</b> — ใช้ภาพจากลิงก์ก่อน + รีเสิร์ชเสริมให้ครบ (ภาพเยอะ เลือกหลากหลาย)
+                  </span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+                  <input type="radio" name="srcMode" checked={sourceOnly} onChange={() => setSourceOnly(true)} style={{ marginTop: 3 }} />
+                  <span style={{ fontSize: 13, color: '#e2e8f0' }}>
+                    <b>🎯 เฉพาะภาพในลิงก์</b> — ใช้แค่ภาพจากคลิป/ลิงก์ที่ใส่ ไม่รีเสิร์ชเพิ่ม (ตรง ไม่มีภาพมั่วปน · เหมาะเมื่อในคลิปมีภาพครบดีแล้ว)
+                  </span>
+                </label>
+              </div>
+            )}
 
             <label style={labelStyle}>ชื่อเต็มตัวละครหลัก (optional — ใส่เมื่อข่าวเอ่ยแค่ชื่อเล่น เช่น "พลอย")</label>
             <input

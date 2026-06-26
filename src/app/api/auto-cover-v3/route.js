@@ -44,6 +44,9 @@ async function _renderCoverV3(request) {
     const sourceLinks = Array.isArray(body.sourceLinks)
       ? body.sourceLinks
       : String(body.sourceLinks || '').split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+    // ★ 26 มิ.ย.: โหมด "เฉพาะภาพในคลิป/แหล่งที่ระบุ" — ใช้ภาพจากลิงก์ล้วน ไม่รีเสิร์ชเพิ่ม
+    //   (มีผลเฉพาะเมื่อมี sourceLinks · ถ้าดึงไม่ได้เลย route จะถอยไปรีเสิร์ชปกติเอง)
+    const sourceOnly = !!body.sourceOnly && sourceLinks.length > 0;
 
     if (!content && !newsTitle) {
       return NextResponse.json(
@@ -103,13 +106,14 @@ async function _renderCoverV3(request) {
 
     console.log('[CoverV3] ② Multi-agent search + judge...');
     const { runMultiAgentImageSearch } = await import('@/lib/services/multiAgentImageScraper');
-    if (sourceLinks.length) console.log(`[CoverV3] 🔗 แหล่งรูปพนักงาน ${sourceLinks.length} ลิงก์ — ดึงก่อน บูสต์ขึ้นหน้า`);
+    if (sourceLinks.length) console.log(`[CoverV3] 🔗 แหล่งรูปพนักงาน ${sourceLinks.length} ลิงก์ — ${sourceOnly ? 'โหมดเฉพาะแหล่ง (ไม่รีเสิร์ชเพิ่ม)' : 'ดึงก่อน บูสต์ขึ้นหน้า + รีเสิร์ชเสริม'}`);
     const selected = await runMultiAgentImageSearch(
       sourceUrl || '', sourceUrl ? 'url' : 'text',
       identity.characters || [],
       newsTitle || (content || '').slice(0, 100),
       identity,
-      sourceLinks
+      sourceLinks,
+      { sourceOnly }
     );
 
     // ดาวน์โหลดภาพเป็น buffer (เฉพาะตัวท็อปที่ judge คัดแล้ว)

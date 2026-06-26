@@ -1997,8 +1997,31 @@ async function extractFromUserSources(sourceLinks = []) {
   return uniq;
 }
 
-export async function runMultiAgentImageSearch(url, sourceType, entities, newsTitle, identity, sourceLinks = []) {
+export async function runMultiAgentImageSearch(url, sourceType, entities, newsTitle, identity, sourceLinks = [], opts = {}) {
+  const sourceOnly = !!opts.sourceOnly; // ★ 26 มิ.ย.: true = ใช้ภาพจากลิงก์แหล่งรูปล้วน ไม่รีเสิร์ชเพิ่ม
   const userSrcPromise = extractFromUserSources(sourceLinks);
+
+  // ★ 26 มิ.ย. (ผู้ใช้สั่ง) — โหมด "เฉพาะภาพในคลิป/แหล่งที่ระบุ":
+  //   ภาพในคลิปครบดีอยู่แล้ว แต่พอรีเสิร์ชเพิ่มเองได้ภาพไม่เกี่ยวมาปน (เช่น มอเตอร์ไซค์)
+  //   → ข้ามรีเสิร์ชทั้งหมด ใช้ภาพจากลิงก์ล้วน (ยังผ่าน judge คัดคุณภาพ+ตรวจคน) · ประหยัด API ด้วย
+  if (sourceOnly) {
+    const userImages = await userSrcPromise.catch(() => []);
+    if (userImages.length) {
+      console.log(`[MultiAgent] 🎯 โหมดเฉพาะแหล่งที่ระบุ: ${userImages.length} ภาพจากลิงก์ → ข้ามรีเสิร์ชทั้งหมด (ยังผ่าน judge)`);
+      const cands = [...userImages];
+      cands._meta = userImages.map(u => ({ url: u, queryLabel: 'user-source', queryText: 'แหล่งรูปที่พนักงานระบุ' }));
+      const judged = await judgeImages(cands, newsTitle, identity);
+      const srcSet = new Set(userImages);
+      const out = (judged || []).map(img => ({ ...img, userSource: srcSet.has(img.url) }));
+      out.allCandidates = [...userImages];
+      out._storyAnchorCandidates = judged._storyAnchorCandidates || [];
+      out._bucketCounts = judged._bucketCounts || null;
+      return out;
+    }
+    // ดึงจากลิงก์ไม่ได้เลย (เช่น FB scrape ล้ม) → ถอยไปรีเสิร์ชปกติ กันปกว่างไม่มีภาพ
+    console.log('[MultiAgent] ⚠️ โหมดเฉพาะแหล่ง แต่ดึงรูปจากลิงก์ไม่ได้เลย → ถอยไปรีเสิร์ชปกติ กันปกว่างเปล่า');
+  }
+
   console.log('============================================');
   console.log('[MultiAgent] 🚀 Starting parallel image search');
   console.log(`[MultiAgent] News: "${(newsTitle || '').slice(0, 60)}..."`);
