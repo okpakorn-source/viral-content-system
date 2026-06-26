@@ -6,7 +6,7 @@
  *     • TikTok/FB หรือ fallback → ใช้บทถอดเสียง + LLM อ่าน
  */
 import { callAI } from '@/lib/ai/openai';
-import { MODEL_FAST } from '@/lib/ai/modelConfig';
+import { MODEL_FAST, MODEL_NEWS_ANALYSIS } from '@/lib/ai/modelConfig';
 
 // ป้ายประเภทคลิป + คำแนะนำการใช้ (ให้คนหยิบไปใช้รู้ว่าข้อมูลมาจากคลิปแบบไหน)
 export const CLIP_TYPES = {
@@ -176,7 +176,9 @@ ${text.slice(0, 12000)}
 === จบ ===
 
 ${INSIGHT_SCHEMA}`;
-  const r = await callAI({ prompt, model: MODEL_FAST, temperature: 0.2, maxTokens: 8000 });
+  // ★ 26 มิ.ย.: ใช้ gpt-5.5 (ตัวเก่งสุด) ไม่ใช่ mini — fallback นี้ทำงานตอน Gemini แน่น
+  //   ผู้ใช้ให้ความสำคัญคุณภาพข้อมูลดิบสูง → ยอมจ่ายแพงขึ้นในเส้นทางสำรอง (ใช้นานๆครั้ง) เพื่อคงคุณภาพ
+  const r = await callAI({ prompt, model: MODEL_NEWS_ANALYSIS, temperature: 0.2, maxTokens: 8000 });
   const p = typeof r === 'object' ? r : JSON.parse(String(r).match(/\{[\s\S]*\}/)?.[0] || '{}');
   return normalizeInsight(p, 'transcript-llm');
 }
@@ -276,7 +278,8 @@ export async function extractMultiTopicInsight({ url, platform, rawText = '' }) 
 === บทถอดเสียงทั้งคลิป ===
 ${text.slice(0, 24000)}
 === จบ ===`;
-  const r = await callAI({ prompt, model: MODEL_FAST, temperature: 0.2, maxTokens: 8000 });
+  // ★ 26 มิ.ย.: gpt-5.5 (ตัวเก่งสุด) — fallback แตกหลายประเด็นต้องคุณภาพสูง เหมือนเส้นทางหลัก
+  const r = await callAI({ prompt, model: MODEL_NEWS_ANALYSIS, temperature: 0.2, maxTokens: 8000 });
   const pp = typeof r === 'object' ? r : JSON.parse(String(r).match(/\{[\s\S]*\}/)?.[0] || '{}');
   return normalizeMultiTopic(pp, 'transcript-llm-multitopic');
 }
