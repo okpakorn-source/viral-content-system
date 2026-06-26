@@ -87,16 +87,18 @@ export async function extractMetaVideoFrames(url, numFrames = 12) {
       return [];
     }
 
-    // ③ แตกเฟรม "คม + กระจายทั้งคลิป" — แบ่งคลิปเป็น N ช่วง แต่ละช่วงให้ ffmpeg `thumbnail`
+    // ③ แตกเฟรม "คม + กระจายทั้งคลิป" — แบ่งคลิปเป็นช่วง แต่ละช่วงให้ ffmpeg `thumbnail`
     //    เลือกเฟรมตัวแทนที่คมที่สุด (เลี่ยงภาพเบลอ/ช่วงเปลี่ยนฉาก ที่ -ss ตายตัวมักโดน)
-    //    เลี่ยงต้น/ท้ายคลิป 6% (intro/outro)
+    //    ★ แตกเกินจำนวนที่ต้องการ ~1.7 เท่า เผื่อคัดเฉพาะเฟรมเห็นหน้า · เลี่ยงต้น/ท้ายคลิป 6%
+    const want = Math.max(numFrames, 1);
+    const extractCount = Math.min(Math.ceil(want * 1.7), 20);
     const dur = duration > 1 ? duration : 30; // ถ้าไม่รู้ความยาว เดา 30s
     const usable = Math.max(dur * 0.88, 5);
     const start = Math.max(dur * 0.06, 0.5);
-    const segLen = usable / Math.max(numFrames, 1);
-    const frames = [];
+    const segLen = usable / extractCount;
+    const shots = []; // { buffer, idx }
     let ffmpegMissing = false;
-    for (let i = 0; i < numFrames; i++) {
+    for (let i = 0; i < extractCount; i++) {
       const segStart = start + segLen * i;
       const out = path.join(tmpDir, `${id}-${String(i).padStart(2, '0')}.jpg`);
       try {
@@ -106,7 +108,7 @@ export async function extractMetaVideoFrames(url, numFrames = 12) {
           { maxBuffer: 1024 * 1024 * 10, timeout: 30_000 });
         if (existsSync(out)) {
           const buf = await fs.readFile(out);
-          if (buf.length > 2000) frames.push(`data:image/jpeg;base64,${buf.toString('base64')}`);
+          if (buf.length > 2000) shots.push({ buffer: buf, idx: i });
         }
       } catch (e) {
         // ffmpeg ไม่อยู่ใน PATH → เลิกทั้งชุด (ไม่มีประโยชน์ลองต่อ)
@@ -118,8 +120,37 @@ export async function extractMetaVideoFrames(url, numFrames = 12) {
         console.log(`${LOG} เฟรม ${i} ล้ม:`, e.message?.slice(0, 60));
       }
     }
-    if (ffmpegMissing) return [];
-    console.log(`${LOG} ✅ FB/IG คลิป → ${frames.length}/${numFrames} เฟรม (thumbnail คมสุดต่อช่วง)`);
+    if (ffmpegMissing || !shots.length) return [];
+
+    // ④ คัด+เรียง "เฟรมที่เห็นหน้าคน" ขึ้นก่อน (gpt-4o-mini — ถูก ไม่เปลือง Gemini)
+    //    คลิป POV (ถนน/มอเตอร์ไซค์/หมวกกันน็อก ไม่เห็นหน้า) จมท้าย/ถูกตัด → กันฮีโร่ไม่เด่น + หัวขาด
+    //    ระบบจัดปก (close-up gate) ทำงานได้เพราะมีเฟรมหน้าพอ · ตรวจหน้าล้ม → ถอยใช้ลำดับเวลา
+    let ordered = shots;
+    try {
+      const { batchDetectFaces } = await import('@/lib/services/faceDetector');
+      const fdMap = await batchDetectFaces(shots.map((s, i) => ({ id: `mf_${i}`, buffer: s.buffer })));
+      const scored = shots.map((s, i) => {
+        const fd = fdMap?.get?.(`mf_${i}`);
+        let score = -1; // ไม่เห็นหน้า = ท้ายแถว
+        if (fd?.hasFaces && fd.faces?.length && fd.imageWidth && fd.imageHeight) {
+          const imgArea = fd.imageWidth * fd.imageHeight;
+          const big = fd.faces.reduce((b, x) => (x.width * x.height > b.width * b.height ? x : b), fd.faces[0]);
+          score = (big.width * big.height) / imgArea; // สัดส่วนพื้นที่หน้า/ภาพ (0-1) — ใหญ่=โคลสอัพ=ดี
+          if (fd.faces.length === 1) score += 0.05;    // หน้าเดี่ยวเด่น (มักเป็น hero)
+        }
+        if (fd?.hasBigText) score -= 0.15;             // ตัวหนังสือฝัง = เลี่ยงเข้าช่องคน
+        return { s, score };
+      });
+      const faceCount = scored.filter(o => o.score > 0).length;
+      scored.sort((a, b) => b.score - a.score);
+      ordered = scored.map(o => o.s);
+      console.log(`${LOG} 👤 คัดหน้า: ${faceCount}/${shots.length} เฟรมเห็นหน้า → เรียงหน้าเด่นขึ้นก่อน`);
+    } catch (e) {
+      console.log(`${LOG} ตรวจหน้าเฟรมข้าม (ใช้ลำดับเวลา):`, e.message?.slice(0, 50));
+    }
+
+    const frames = ordered.slice(0, want).map(s => `data:image/jpeg;base64,${s.buffer.toString('base64')}`);
+    console.log(`${LOG} ✅ FB/IG คลิป → ${frames.length} เฟรม (เห็นหน้าก่อน)`);
     return frames;
   } catch (e) {
     const stderr = String(e.stderr || '').trim().split('\n').slice(-2).join(' | ');
