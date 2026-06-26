@@ -499,7 +499,7 @@ export default function ClipTranscriptPage() {
                         <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(37,99,235,0.15)', color: '#60a5fa', fontWeight: 700 }}>{String(ins.engine || '').includes('gemini-video') ? '👁️ ดูคลิป' : '📝 บทถอด'}</span>
                       </div>
                       <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platformIcon(c.platform)} {ins.headline || c.title || c.url}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{c.platform} · {ins.multiTopic ? `📚 ${ins.topics?.length || 0} ประเด็น (คลิปยาว)` : `${ins.keyPoints?.length || 0} ประเด็น`} · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{c.platform} · {ins.multiTopic ? `📚 ${ins.topics?.length || 0} ประเด็น (คลิปยาว)` : `${ins.keyPoints?.length || 0} ประเด็น${ins.subStories?.length ? ` · 🧩 ${ins.subStories.length} เนื้อดิบแยก` : ''}`} · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
                     </div>
                     <button onClick={(e) => { e.stopPropagation(); deleteInsightCase(c.id); }} style={{ marginLeft: 10, padding: '4px 10px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>ลบ</button>
                   </div>
@@ -533,6 +533,41 @@ export default function ClipTranscriptPage() {
                         </div>
                       )}
                       {ins.rawData && <div style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', maxHeight: 280, overflowY: 'auto', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 12 }}>{ins.rawData}</div>}
+                      {/* ★ 26 มิ.ย.: เติมให้คลังแสดงครบเท่าเรียลไทม์ — คำพูด + ช่วงเวลา + เนื้อดิบแยกประเด็น (รองรับทุกทรงผลลัพธ์) */}
+                      {ins.quotes?.length > 0 && (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 5 }}>💬 คำพูดสำคัญ ({ins.quotes.length})</div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                            {ins.quotes.map((q, i) => <div key={i} style={{ fontSize: 12, lineHeight: 1.55, padding: '6px 10px', borderRadius: 7, background: 'rgba(34,197,94,0.06)', borderLeft: '2px solid #22c55e' }}>&ldquo;{q}&rdquo;</div>)}
+                          </div>
+                        </div>
+                      )}
+                      {ins.timeline?.length > 0 && (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 5 }}>⏱️ ช่วงจังหวะในคลิป</div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {ins.timeline.map((t, i) => <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12 }}><span style={{ color: '#60a5fa', fontWeight: 700, minWidth: 80, flexShrink: 0 }}>{t.time || '—'}</span><span style={{ color: 'var(--text-muted,#aaa)' }}>{t.topic}</span></div>)}
+                          </div>
+                        </div>
+                      )}
+                      {ins.subStories?.length > 0 && (
+                        <div style={{ marginTop: 14 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 800, color: '#fbbf24', marginBottom: 8 }}>🧩 เนื้อดิบแยกประเด็น ({ins.subStories.length}) — แต่ละอันพร้อมเขียนเป็นข่าวเดี่ยว</div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            {ins.subStories.map((s, i) => (
+                              <div key={i} style={{ border: '1px solid rgba(245,158,11,0.3)', borderRadius: 9, padding: 11, background: 'rgba(245,158,11,0.04)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 800 }}><span style={{ color: '#fbbf24' }}>ประเด็น {s.no || i + 1}:</span> {s.topic}{s.timeRange && <span style={{ fontSize: 10.5, color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600, marginLeft: 6 }}>⏱️ {s.timeRange}</span>}</div>
+                                  <button onClick={() => copy(`${s.topic}\n\n${s.rawData}${s.quotes?.length ? '\n\nคำพูด:\n' + s.quotes.map(q => `“${q}”`).join('\n') : ''}`, 'ic-sub-' + c.id + '-' + i)} style={{ padding: '3px 9px', borderRadius: 7, border: '1px solid rgba(245,158,11,0.4)', background: 'transparent', color: '#fbbf24', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{copied === 'ic-sub-' + c.id + '-' + i ? '✅' : '📋'}</button>
+                                </div>
+                                <div style={{ fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 10 }}>{s.rawData}</div>
+                                {s.keyPoints?.length > 0 && <ul style={{ margin: '7px 0 0', paddingLeft: 18, fontSize: 12, lineHeight: 1.65, color: 'var(--text-muted,#bbb)' }}>{s.keyPoints.map((k, j) => <li key={j}>{k}</li>)}</ul>}
+                                {s.quotes?.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>{s.quotes.map((q, j) => <div key={j} style={{ fontSize: 11.5, lineHeight: 1.5, padding: '5px 9px', borderRadius: 7, background: 'rgba(34,197,94,0.06)', borderLeft: '2px solid #22c55e' }}>&ldquo;{q}&rdquo;</div>)}</div>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
