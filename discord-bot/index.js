@@ -16,6 +16,9 @@ const API_URL = process.env.API_URL || 'http://localhost:3000/api/auto/process';
 const API_KEY = process.env.API_KEY || '';
 // ★ 25 มิ.ย.: รหัสประจำตัว instance นี้ (hostname+สุ่ม) — ใช้สืบว่ามีบอทกี่ตัวยิงเข้าคิว (double-event vs 2 instance)
 const BOT_INSTANCE = require('os').hostname() + '_' + Math.random().toString(36).slice(2, 7);
+// ★ 26 มิ.ย.: ธงปิดตัวนุ่มนวล — ตอน Railway redeploy ส่ง SIGTERM ให้ตัวเก่า → หยุดรับข้อความทันที
+//   + ตัดการเชื่อมต่อ Discord เพื่อไม่ให้ตัวเก่า+ตัวใหม่ฟัง event ทับกัน (ต้นเหตุเห็น 2 ตอบช่วง deploy)
+let shuttingDown = false;
 
 // ═══════════════════════════════════════════
 // 🔧 QUEUE SYSTEM — ป้องกัน concurrent overload
@@ -105,6 +108,9 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
   // ไม่ตอบโต้บอทด้วยกันเอง
   if (message.author.bot) return;
+
+  // ★ 26 มิ.ย.: กำลังปิดตัว (ถูก redeploy) → ไม่รับงานใหม่ ปล่อยให้ตัวใหม่จัดการ (กันตอบซ้ำช่วง deploy)
+  if (shuttingDown) { console.log('[Bot] 🛑 กำลังปิดตัว — ข้ามข้อความใหม่ ให้ instance ใหม่ทำ'); return; }
 
   // ★ 25 มิ.ย.: กันประมวลผล "ข้อความเดียวกันซ้ำ" — Discord อาจส่ง messageCreate ซ้ำ (gateway resume)
   //   หรือบอทรับ event ซ้ำ → ดักด้วย message.id ที่เคยเห็นแล้ว = ข้าม (ต้นเหตุจริงของการเห็น 2 ข้อความ)
@@ -494,5 +500,19 @@ async function processNewsJob(job) {
     await processingMsg.edit(`❌ เกิดข้อผิดพลาดในการประมวลผล: ${error.response?.data?.error || error.message}`).catch(() => {});
   }
 }
+
+// ★ 26 มิ.ย.: ปิดตัวนุ่มนวลตอน redeploy (Railway/Docker ส่ง SIGTERM, Ctrl+C ส่ง SIGINT)
+//   หยุดรับข้อความ → รองานที่ทำอยู่จบสั้นๆ → ตัดการเชื่อมต่อ Discord → ออก
+//   ผล: ตัวเก่าเลิกฟัง event ทันที ไม่ทับกับ instance ใหม่ → ไม่เด้ง 2 ตอบช่วง deploy
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[Bot] 🛑 ได้รับ ${signal} — ปิดตัวนุ่มนวล (หยุดรับข้อความใหม่, ตัดการเชื่อมต่อ Discord)`);
+  try { await client.destroy(); } catch (e) { console.log('[Bot] destroy error:', e.message); }
+  // เผื่องานค้างเขียนผลลง Discord สั้นๆ แล้วออก
+  setTimeout(() => process.exit(0), 2500);
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 client.login(TOKEN);
