@@ -61,12 +61,18 @@ export default function ClipTranscriptPage() {
   // ★ ถอดประเด็นข่าว → ข้อมูลดิบ (Gemini ดูคลิป YouTube / ถอดเสียง+LLM สำหรับ TikTok-FB)
   const extractInsight = async () => {
     if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
-    setInsightLoading(true); setErr(''); setInsight(null);
+    setInsightLoading(true); setErr(''); setInsight(null); setQueueJob(null);
     try {
       const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim() }) });
       const d = await safeJson(r);
-      if (!d.success) setErr(d.error || 'ถอดประเด็นไม่สำเร็จ');
-      else { setInsight(d.data); loadInsightCases(); }   // ★ รีเฟรชคลังประเด็นทันทีที่ถอดสำเร็จ
+      if (d.success) { setInsight(d.data); loadInsightCases(); }   // ★ รีเฟรชคลังประเด็นทันทีที่ถอดสำเร็จ
+      // ★ 26 มิ.ย.: Gemini แน่น → ไม่ขึ้น error ให้กดเอง · ส่งเข้าคิว auto-retry ให้เลย (ปิดหน้าได้ ผลเข้าคลัง)
+      else if (/Gemini มีคนใช้งานหนัก|แน่นชั่วคราว|503|overload/i.test(String(d.error || ''))) {
+        setInsightLoading(false);
+        await submitToQueue(); // เข้าคิว → ระบบลองใหม่เองทุก ~3 นาทีจนได้ผล
+        return;
+      }
+      else setErr(d.error || 'ถอดประเด็นไม่สำเร็จ');
     } catch (e) { setErr(e.message); }
     setInsightLoading(false);
   };
@@ -86,18 +92,21 @@ export default function ClipTranscriptPage() {
     setSubmitting(false);
   };
   const pollJob = async (jobId) => {
-    for (let i = 0; i < 240; i++) { // poll สูงสุด ~16 นาที (4 วิ/รอบ)
+    for (let i = 0; i < 300; i++) { // poll สูงสุด ~20 นาที (4 วิ/รอบ) — ปิดหน้าได้ งานทำต่อเบื้องหลัง
       await new Promise(res => setTimeout(res, 4000));
       try {
         const r = await fetch('/api/clip-transcript/job-status?id=' + jobId, { cache: 'no-store' });
         const d = await safeJson(r);
         if (!d.success) { setQueueJob(j => ({ ...j, status: 'error', error: d.error || 'หางานในคิวไม่เจอ' })); return; }
-        setQueueJob({ jobId, status: d.status, position: d.position, platform: d.platform, result: d.result, error: d.error });
+        // ★ 26 มิ.ย.: เก็บ statusNote/attempts → โชว์ตอน retry_wait (Gemini แน่น รอลองใหม่อัตโนมัติ)
+        setQueueJob({ jobId, status: d.status, position: d.position, platform: d.platform, result: d.result, error: d.error, statusNote: d.statusNote, attempts: d.attempts });
         if (d.status === 'done') { setInsight(d.result); loadInsightCases(); return; }
         if (d.status === 'error') return;
+        // 'pending' | 'processing' | 'retry_wait' → poll ต่อ (retry_wait = Gemini แน่น ระบบลองใหม่เองทุก ~3 นาที)
       } catch { /* เน็ตสะดุด — รอบหน้าลองใหม่ */ }
     }
-    setQueueJob(j => ({ ...(j || {}), status: 'error', error: 'รอนานเกินไป — ลองเช็กในคลังหรือส่งใหม่' }));
+    // poll หมดเวลาแสดงผลสด — งานยัง "ทำต่อเบื้องหลัง" ผลจะเข้าคลังเอง (ไม่ใช่ error)
+    setQueueJob(j => ({ ...(j || {}), _pollEnded: true }));
   };
 
   const copy = (text, key) => { navigator.clipboard?.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 2000); };
@@ -158,7 +167,7 @@ export default function ClipTranscriptPage() {
               style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: insightLoading ? '#4b5563' : 'linear-gradient(135deg,#2563eb,#0891b2)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: insightLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
               {insightLoading ? '⏳ Gemini กำลังดูคลิป...' : '🎯 ถอดประเด็นข่าว (ข้อมูลดิบ)'}
             </button>
-            <button onClick={submitToQueue} disabled={loading || insightLoading || submitting || (queueJob && queueJob.status !== 'done' && queueJob.status !== 'error')}
+            <button onClick={submitToQueue} disabled={loading || insightLoading || submitting || (queueJob && !queueJob._pollEnded && queueJob.status !== 'done' && queueJob.status !== 'error')}
               title="ส่งลิงก์ให้เครื่องทีมถอดให้ — เหมาะกับ Facebook/IG หรือเมื่อทำในเว็บไม่ได้"
               style={{ padding: '12px 22px', borderRadius: 10, border: '1px solid #f59e0b', background: submitting ? '#4b5563' : 'rgba(245,158,11,0.12)', color: '#fbbf24', fontWeight: 800, fontSize: 14, cursor: submitting ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
               {submitting ? '⏳ กำลังส่ง...' : '📥 ส่งเข้าคิว (เครื่องทีม)'}
@@ -172,8 +181,11 @@ export default function ClipTranscriptPage() {
               background: queueJob.status === 'error' ? 'rgba(239,68,68,0.08)' : queueJob.status === 'done' ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.08)' }}>
               {queueJob.status === 'pending' && <>⏳ <b>อยู่ในคิวเครื่องทีม</b> — ลำดับที่ {queueJob.position || '?'} · {platformIcon({ youtube: 'youtube', tiktok: 'tiktok', meta: 'meta' }[queueJob.platform])} กำลังรอเครื่องทีมดึงไปถอด (เปิดหน้านี้ค้างไว้ ผลจะเด้งขึ้นเอง)</>}
               {queueJob.status === 'processing' && <>🔧 <b>เครื่องทีมกำลังถอดอยู่...</b> {platformIcon(queueJob.platform)} (อาจใช้เวลา 1-3 นาทีต่อคลิป)</>}
+              {/* ★ 26 มิ.ย.: Gemini แน่น → ระบบลองใหม่เองทุก ~3 นาที จนได้ผล (ปิดหน้าได้ ผลเข้าคลัง) */}
+              {queueJob.status === 'retry_wait' && <>🟡 <b>Gemini แน่นชั่วคราว — ระบบกำลังลองใหม่เองอัตโนมัติ</b><br />{queueJob.statusNote || `จะลองใหม่ทุก ~3 นาที จนได้ผล${queueJob.attempts ? ` (ลองไปแล้ว ${queueJob.attempts} ครั้ง)` : ''}`}<br /><span style={{ fontSize: 11.5, opacity: 0.85 }}>👉 ปิดหน้านี้/มือถือได้เลย ไม่ต้องส่งซ้ำ — พอ Gemini ว่าง ระบบถอดให้แล้วเก็บเข้า "คลังบทถอด" ด้านล่างอัตโนมัติ</span></>}
               {queueJob.status === 'done' && <>✅ <b>ถอดเสร็จแล้ว</b> — ผลอยู่ด้านล่าง + เก็บเข้าคลังประเด็นข่าวให้แล้ว</>}
               {queueJob.status === 'error' && <>❌ <b>ถอดไม่สำเร็จ</b> — {queueJob.error || 'ลองส่งใหม่อีกครั้ง'}</>}
+              {queueJob._pollEnded && queueJob.status !== 'done' && queueJob.status !== 'error' && <><br /><span style={{ fontSize: 11.5, opacity: 0.85 }}>⏱️ หยุดอัปเดตสดแล้ว แต่ <b>งานยังทำต่อเบื้องหลัง</b> — กลับมาดูผลที่ "คลังบทถอด" ด้านล่างได้เลย</span></>}
             </div>
           )}
           <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted, #888)', lineHeight: 1.6 }}>

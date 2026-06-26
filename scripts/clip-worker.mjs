@@ -34,10 +34,18 @@ async function processJob(job) {
   return { ok: false, error: d?.error || `HTTP ${r.status}` };
 }
 
-async function report(id, ok, payload) {
+// ★ 26 มิ.ย.: Gemini แน่นชั่วคราว = ไม่ fail · ขอ retry (server ตั้งเวลารอ → หยิบทำใหม่อัตโนมัติ)
+//   อาการ "ชั่วคราว" (503/แน่น/เน็ตสะดุด) → retry · อาการถาวร (ดูคลิปไม่ได้/ส่วนตัว) → error เลย
+const isTransient = (err = '') =>
+  /503|429|high demand|overload|unavailable|temporar|rate limit|แน่น|มีคนใช้งานหนัก|parse ไม่ได้|fetch failed|ECONNRESET|socket hang up|network|ETIMEDOUT/i.test(String(err));
+
+async function report(id, statusOrOk, payload) {
+  // statusOrOk: true='done' · 'retry'='retry' · false/อื่น='error'
+  const status = statusOrOk === true ? 'done' : statusOrOk === 'retry' ? 'retry' : 'error';
+  const body = status === 'done' ? { id, status, result: payload } : { id, status, error: payload };
   await fetch(`${BASE}/api/clip-transcript/worker`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(ok ? { id, status: 'done', result: payload } : { id, status: 'error', error: payload }),
+    body: JSON.stringify(body),
   }).catch((e) => log('report ล้ม:', e.message));
 }
 
@@ -54,9 +62,11 @@ async function loop() {
     try {
       const res = await processJob(job);
       if (res.ok) { await report(job.id, true, res.result); log(`✅ เสร็จ: ${job.id.slice(0, 8)}`); }
+      else if (isTransient(res.error)) { await report(job.id, 'retry', res.error); log(`⏳ Gemini แน่น → ขอลองใหม่ภายหลัง: ${res.error?.slice(0, 60)}`); }
       else { await report(job.id, false, res.error); log(`❌ ถอดไม่สำเร็จ: ${res.error?.slice(0, 80)}`); }
     } catch (e) {
-      await report(job.id, false, e.message); log(`❌ error: ${e.message?.slice(0, 80)}`);
+      if (isTransient(e.message)) { await report(job.id, 'retry', e.message); log(`⏳ Gemini แน่น → ขอลองใหม่: ${e.message?.slice(0, 60)}`); }
+      else { await report(job.id, false, e.message); log(`❌ error: ${e.message?.slice(0, 80)}`); }
     }
   }
 }

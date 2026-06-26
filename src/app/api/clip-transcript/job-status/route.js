@@ -28,6 +28,10 @@ export async function GET(request) {
       success: true, status: job.status, position,
       result: job.status === 'done' ? job.result : null,
       error: job.status === 'error' ? job.error : '',
+      // ★ 26 มิ.ย.: สถานะ retry_wait (Gemini แน่น รอลองใหม่อัตโนมัติ) — บอกผู้ใช้ว่าทำไมยังไม่ได้ผล + นับครั้ง
+      statusNote: job.statusNote || '',
+      attempts: job.attempts || 0,
+      nextRetryAt: job.nextRetryAt || null,
       platform: job.platform, kind: job.kind,
     });
   } catch (error) {

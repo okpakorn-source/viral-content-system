@@ -14,17 +14,21 @@ export async function GET() {
   try {
     const store = createStore('clip-jobs');
     const all = await store.getAll();
+    const now = Date.now();
     // ★ กู้งานค้าง: processing ค้างเกิน 8 นาที → คืนเป็น pending (เครื่องทีมหลุด/รีสตาร์ท)
-    const stuckCut = Date.now() - 8 * 60 * 1000;
+    const stuckCut = now - 8 * 60 * 1000;
     for (const j of all) {
       if (j.status === 'processing' && new Date(j.startedAt || 0).getTime() < stuckCut) {
         await store.update(j.id, ex => ({ ...ex, status: 'pending', startedAt: null })).catch(() => {});
       }
     }
-    const pending = all.filter(j => j.status === 'pending')
-      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    if (pending.length === 0) return NextResponse.json({ success: true, job: null });
-    const next = pending[0];
+    // ★ 26 มิ.ย.: หยิบงาน pending + งาน retry_wait ที่ถึงเวลาลองใหม่แล้ว (Gemini แน่น → รอครบเวลา → ลองอีก)
+    const claimable = all.filter(j =>
+      j.status === 'pending' ||
+      (j.status === 'retry_wait' && new Date(j.nextRetryAt || 0).getTime() <= now)
+    ).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    if (claimable.length === 0) return NextResponse.json({ success: true, job: null });
+    const next = claimable[0];
     await store.update(next.id, ex => ({ ...ex, status: 'processing', startedAt: new Date().toISOString() }));
     return NextResponse.json({ success: true, job: { id: next.id, url: next.url, kind: next.kind, tidy: next.tidy, platform: next.platform } });
   } catch (error) {
@@ -33,18 +37,44 @@ export async function GET() {
   }
 }
 
+// ★ 26 มิ.ย.: auto-retry ตอน Gemini แน่น — ลองใหม่ทุก ~3 นาที จนได้ผล (สูงสุด ~2 ชม.)
+const RETRY_DELAY_MS = 3 * 60 * 1000; // รอ 3 นาที/ครั้ง
+const MAX_ATTEMPTS = 40;              // ~2 ชม. แล้วเลิก (Gemini ไม่น่าจะแน่นนานขนาดนั้น)
+
 export async function POST(request) {
   try {
     const { id, status, result = null, error = '' } = await request.json();
-    if (!id || !['done', 'error'].includes(status)) {
-      return NextResponse.json({ success: false, error: 'ต้องระบุ id + status (done|error)' }, { status: 400 });
+    if (!id || !['done', 'error', 'retry'].includes(status)) {
+      return NextResponse.json({ success: false, error: 'ต้องระบุ id + status (done|error|retry)' }, { status: 400 });
     }
     const store = createStore('clip-jobs');
+
+    // ★ retry = Gemini แน่นชั่วคราว → ไม่ fail · ตั้งเวลารอแล้วให้ worker หยิบทำใหม่อัตโนมัติ
+    if (status === 'retry') {
+      await store.update(id, ex => {
+        const attempts = (ex.attempts || 0) + 1;
+        if (attempts >= MAX_ATTEMPTS) {
+          return {
+            ...ex, status: 'error', attempts, startedAt: null, statusNote: '',
+            error: `Gemini แน่นต่อเนื่องนานมาก (ลองอัตโนมัติ ${attempts} ครั้ง ~${Math.round(attempts * RETRY_DELAY_MS / 60000)} นาที) — ลองส่งใหม่ภายหลัง`,
+            doneAt: new Date().toISOString(),
+          };
+        }
+        return {
+          ...ex, status: 'retry_wait', attempts, startedAt: null,
+          nextRetryAt: new Date(Date.now() + RETRY_DELAY_MS).toISOString(),
+          statusNote: `Gemini แน่นชั่วคราว — ระบบจะลองใหม่เองทุก ~3 นาที จนได้ผล (ลองไปแล้ว ${attempts} ครั้ง) · ปิดหน้าได้ ผลจะเข้าคลัง`,
+          lastError: String(error).slice(0, 200),
+        };
+      });
+      return NextResponse.json({ success: true, retrying: true });
+    }
+
     await store.update(id, ex => ({
       ...ex, status,
       result: status === 'done' ? result : null,
       error: status === 'error' ? String(error).slice(0, 300) : '',
-      doneAt: new Date().toISOString(),
+      statusNote: '', doneAt: new Date().toISOString(),
     }));
     return NextResponse.json({ success: true });
   } catch (error) {

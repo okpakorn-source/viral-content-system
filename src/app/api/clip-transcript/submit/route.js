@@ -29,12 +29,13 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'ลิงก์ไม่รองรับ — ใช้ได้เฉพาะ TikTok / YouTube / Facebook(IG)', errorType: 'UNSUPPORTED_URL' }, { status: 400 });
     }
     const store = createStore('clip-jobs');
-    // กันส่งซ้ำ: ลิงก์เดียวกันที่ยัง pending/processing < 10 นาที → คืน job เดิม
+    // กันส่งซ้ำ: ลิงก์เดียวกันที่ยังทำงานอยู่ (pending/processing/retry_wait) → คืน job เดิม
+    //   ★ 26 มิ.ย.: รวม retry_wait (กำลังรอลองใหม่เพราะ Gemini แน่น) — กันสร้างงานซ้ำซ้อน · ขยายเป็น 3 ชม. (auto-retry อาจนาน)
     const all = await store.getAll();
-    const recent = all.find(j => j.url === url && (j.status === 'pending' || j.status === 'processing')
-      && Date.now() - new Date(j.createdAt || 0).getTime() < 10 * 60 * 1000);
+    const recent = all.find(j => j.url === url && (j.status === 'pending' || j.status === 'processing' || j.status === 'retry_wait')
+      && Date.now() - new Date(j.createdAt || 0).getTime() < 3 * 60 * 60 * 1000);
     if (recent) {
-      return NextResponse.json({ success: true, jobId: recent.id, status: recent.status, dup: true, message: 'คลิปนี้อยู่ในคิวแล้ว' });
+      return NextResponse.json({ success: true, jobId: recent.id, status: recent.status, dup: true, message: 'คลิปนี้อยู่ในคิวแล้ว (กำลังทำ/รอลองใหม่)' });
     }
     const jobId = randomUUID();
     await store.add({
