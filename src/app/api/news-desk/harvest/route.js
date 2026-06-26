@@ -10,6 +10,16 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 600; // harvest + auto-research ตัวท็อป 3 ใบ
 
+// ★ 26 มิ.ย. (ผู้ใช้สั่ง): พักการหาข่าวใหม่ชั่วคราว — ลดภาระ API (Serper/YouTube) ระหว่างปรับปรุงคุณภาพข่าว
+//   ปิดทุกทาง (cron/ปุ่มหาข่าว/keyword) · เปิดคืนทีหลัง: เปลี่ยนเป็น false (ตัด cron ออกจาก vercel.json ด้วย)
+//   🔴 พักเฉพาะ "การหาข่าวเข้าโต๊ะ" — ไม่กระทบระบบทำข่าวอัตโนมัติ/ถอดประเด็น/ทำปก
+const HARVEST_PAUSED = true;
+const pausedResponse = () => NextResponse.json({
+  success: false, paused: true,
+  error: 'ระบบหาข่าวใหม่พักชั่วคราว (พัก API ระหว่างปรับปรุงคุณภาพข่าว) — ข่าวเดิมในโต๊ะยังใช้ได้ปกติ',
+  errorType: 'HARVEST_PAUSED',
+}, { status: 200 });
+
 // กันเก็บซ้อนกัน — เครื่องหนึ่งเก็บทีละรอบ
 let _harvestLock = Promise.resolve();
 
@@ -28,6 +38,7 @@ async function doHarvest(opts) {
 }
 
 export async function POST(request) {
+  if (HARVEST_PAUSED) return pausedResponse(); // ★ พักหาข่าวใหม่ชั่วคราว
   try {
     const body = await request.json().catch(() => ({}));
     // ★ 17 มิ.ย. (ทีมขอ): ค้นด้วย "คีย์เวิร์ดคน/เรื่อง" เอง (เผื่อปิ๊งไอเดีย) เช่น "ลิซ่า" / "ดารากตัญญู" / "หมูเด้ง"

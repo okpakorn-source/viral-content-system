@@ -346,7 +346,16 @@ async function harvestBuzzsumo() {
  * รันเก็บ+คัดกรองครบ 4 ชั้น แล้วลงคลัง
  * @returns {Promise<{harvested, gated, classified, judged, added}>}
  */
+// ★ 26 มิ.ย. (ผู้ใช้สั่ง): พักการหาข่าวใหม่ทั้งหมด — ลดภาระ API (Serper/YouTube/Exa) ระหว่างปรับคุณภาพ
+//   จุดเดียวที่ทุกทางเรียกผ่าน (route harvest / morning-menu / chief) → ปิดที่นี่ = ปิดหมด
+//   เปิดคืนทีหลัง: เปลี่ยนเป็น false + คืน cron ใน vercel.json · 🔴 ไม่กระทบระบบทำข่าว/ถอดประเด็น/ปก
+const HARVEST_PAUSED = true;
+
 export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'evergreen', 'followup', 'buzz'], judgeTop = 24, extraQueries = [] } = {}) {
+  if (HARVEST_PAUSED) {
+    console.log('[Harvester] ⏸️ พักหาข่าวใหม่ (HARVEST_PAUSED=true) — ข้าม ไม่ยิง API');
+    return { paused: true, added: 0, judged: 0, kept: 0, lanes: [], note: 'พักหาข่าวใหม่ชั่วคราว' };
+  }
   const t0 = Date.now();
   const store = createStore('news-desk');
   const existing = await store.getAll();
