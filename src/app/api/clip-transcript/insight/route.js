@@ -144,6 +144,12 @@ function _raceTimeout(promise, ms, label) {
     new Promise((_, rej) => setTimeout(() => { const e = new Error(`${label} ค้างเกิน ${Math.round(ms / 1000)} วิ`); e.code = 'URL_TIMEOUT'; rej(e); }, ms)),
   ]);
 }
+// ★ 26 มิ.ย. (ค่ำ): จำว่า "Gemini โหลด YouTube URL เองค้าง" → ข้ามไปโหลดเองเลยชั่วคราว (กันเสีย 170 วิ ซ้ำ ๆ ทุกคลิป)
+//   เครื่องทีมที่มี yt-dlp: เจอค้างครั้งแรก → จำ 20 นาที → คลิปถัดไปข้าม URL ไปโหลดเองทันที (เร็วขึ้นมาก)
+//   ครบ 20 นาทีลอง URL ใหม่ (เผื่อ Gemini ฝั่งโหลด YouTube ฟื้น) — ปรับอัตโนมัติ ไม่ต้องแก้มือ
+//   ★ เริ่มต้น = ข้าม URL ไว้ก่อน 20 นาที (26 มิ.ย. Gemini โหลด YouTube เองพังทั้งวัน) → YouTube เร็วทันทีทุกตัว
+//     ถ้าฝั่งโหลด YouTube ฟื้น: ครบ 20 นาทีจะลอง URL เอง · ถ้าอยากกลับไปลอง URL ก่อนเสมอ ตั้งเป็น 0
+let _ytUrlBrokenUntil = Date.now() + 20 * 60 * 1000;
 
 async function buildInsight({ url, type }) {
   // ★ 25 มิ.ย.: ใช้ insight เดียว (enhanced) เสมอ — Gemini "ตัดสินเอง" (content-aware) ว่าคลิปมีหลายประเด็นไหม
@@ -154,17 +160,29 @@ async function buildInsight({ url, type }) {
   //   ถ้า Gemini แน่น → โยน error ให้ผู้ใช้ "รอ/กดใหม่" ดีกว่าได้ผลด้อยจาก transcript ล้วน
   //   (ฟังก์ชัน transcript ยังอยู่ในโค้ด เผื่อเปิดใช้ภายหลัง — แค่ไม่เรียกในเส้นทาง insight)
   if (type === 'youtube') {
-    // ★ 26 มิ.ย. (ผู้ใช้สั่ง): YouTube ไฮบริด — ลอง "ให้ Gemini โหลด URL เอง" ก่อน (เร็ว ใช้ได้ทั้ง cloud + เมื่อ Google ปกติ)
-    //   ถ้าค้าง/ล้ม (Gemini โหลด YouTube ไม่ได้ — เคสจริง 26 มิ.ย. ค้าง >50 วิ ทั้งที่ model ขึ้น) + อยู่เครื่องทีม (win32 มี yt-dlp)
-    //   → สลับมา "โหลดเอง + อัปไฟล์ให้ Gemini" เหมือน TikTok/FB/IG ที่ใช้ได้อยู่ (คุณภาพเท่าเดิม Gemini ดูวิดีโอจริง)
-    try {
-      return await _raceTimeout(extractClipInsight({ url, platform: 'youtube' }), 170_000, 'YouTube URL passthrough');
-    } catch (e) {
-      if (process.platform !== 'win32') throw e; // บน cloud ไม่มี yt-dlp → โยน error เดิม (ผู้ใช้ส่งเข้าคิวเครื่องทีมแทน)
-      console.log(`[ClipInsight] 🔄 YouTube URL ล้ม/ค้าง → สลับโหลดเอง (yt-dlp): ${String(e.message).slice(0, 70)}`);
-      const buf = await downloadMetaBuffer(url, 'best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best');
+    // ★ 26 มิ.ย. (ผู้ใช้สั่ง + ปรับเร็วขึ้น): YouTube ไฮบริด "อัจฉริยะ"
+    //   - เครื่องทีม (win32 มี yt-dlp): ถ้าเพิ่งเจอ URL ค้าง (ใน 20 นาที) → ข้ามไปโหลดเองเลย (ไม่เสีย 170 วิ ซ้ำ)
+    //     ไม่งั้นลอง URL ก่อน (170 วิ) → ค้าง → จำไว้ + สลับโหลดเอง+อัปไฟล์ (เหมือน TikTok/FB คุณภาพเท่าเดิม)
+    //   - cloud (Vercel ไม่มี yt-dlp): ใช้ URL อย่างเดียว (ทางเลือกเดียว)
+    const YT_FMT = 'best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best';
+    const downloadAndExtract = async () => {
+      const buf = await downloadMetaBuffer(url, YT_FMT);
       return await extractInsightFromVideoBuffer(buf, 'video/mp4');
+    };
+    if (process.platform === 'win32') {
+      if (Date.now() < _ytUrlBrokenUntil) {
+        console.log('[ClipInsight] ⏩ YouTube: ข้าม URL (เพิ่งค้าง) → โหลดเองเลย');
+        return await downloadAndExtract();
+      }
+      try {
+        return await _raceTimeout(extractClipInsight({ url, platform: 'youtube' }), 170_000, 'YouTube URL passthrough');
+      } catch (e) {
+        _ytUrlBrokenUntil = Date.now() + 20 * 60 * 1000; // จำว่า URL ค้าง → ข้าม 20 นาที
+        console.log(`[ClipInsight] 🔄 YouTube URL ค้าง → โหลดเอง + ข้าม URL 20 นาที: ${String(e.message).slice(0, 60)}`);
+        return await downloadAndExtract();
+      }
     }
+    return await extractClipInsight({ url, platform: 'youtube' }); // cloud: URL passthrough เท่านั้น
   }
   // TikTok/FB/IG → โหลดไฟล์ให้ Gemini "ดูจริง" (เห็นภาพ+ตัวหนังสือบนจอ) — ไม่มี fallback ถอดเสียง
   const buf = type === 'tiktok' ? await downloadTiktokBuffer(url) : await downloadMetaBuffer(url);
