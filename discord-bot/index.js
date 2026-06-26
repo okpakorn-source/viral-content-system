@@ -291,8 +291,11 @@ async function processNewsJob(job) {
     // ★ 25 มิ.ย.: คิวบอกว่าเป็น "งานซ้ำ" (อีกบอท/อีกเครื่อง/อีกรอบยิงเข้ามาก่อนแล้ว เจนตัวเดียวกันอยู่)
     //   → บอทตัวนี้เงียบ ไม่ poll ไม่รายงานซ้ำ (กันบอทหลาย instance เห็น 2 ข้อความ + กันเจน/เปลือง token ซ้ำ)
     if (addData.duplicate) {
-      console.log(`[Bot] ⏭️ งานซ้ำ jobId=${String(addData.jobId).slice(0, 8)} — อีก instance ทำอยู่แล้ว ข้าม`);
-      await processingMsg.edit('⏭️ ข่าวนี้กำลังถูกประมวลผลอยู่แล้ว — ไม่ทำซ้ำให้เปลือง (ผลจะมาจากรอบที่กำลังทำ)').catch(() => {});
+      console.log(`[Bot] ⏭️ งานซ้ำ jobId=${String(addData.jobId).slice(0, 8)} — อีก instance ทำอยู่แล้ว ลบข้อความรับทราบซ้ำทิ้ง`);
+      // ★ 26 มิ.ย. (ผู้ใช้สั่ง): ตัวซ้ำต้องเงียบสนิท — ลบข้อความ "รับทราบครับ..." ของ "ตัวซ้ำ" ทิ้งเลย
+      //   เหลือแค่ข้อความของ "ตัวที่ประมวลผลจริง" → ช่องสะอาด เหลืออันเดียวเหมือนเดิม (ไม่แตะ reaction
+      //   ที่เป็นของ bot user เดียวกัน เดี๋ยวไปลบของตัวที่ทำงานด้วย)
+      await processingMsg.delete().catch(() => {});
       return;
     }
 
@@ -497,6 +500,16 @@ async function processNewsJob(job) {
   } catch (error) {
     console.error('[Discord Bot Error Detail]:', error);
     console.error('[Discord Bot Error]:', error.message);
+    // ★ 26 มิ.ย.: ถ้า error คือ "งานซ้ำ" (server คืน 409/DUPLICATE_JOB ตอน overlap) → เงียบ ลบ reply ทิ้ง
+    //   เหมือนเส้น duplicate:true ด้านบน — ไม่โชว์ "❌ เกิดข้อผิดพลาด" ที่ทำให้เห็น 2 อัน
+    const _eMsg = String(error.response?.data?.error || error.message || '');
+    const _isDup = error.response?.status === 409 || error.response?.data?.errorType === 'DUPLICATE_JOB'
+      || /กำลังประมวลผลอยู่|อยู่ในคิวแล้ว|DUPLICATE/i.test(_eMsg);
+    if (_isDup) {
+      console.log('[Bot] ⏭️ งานซ้ำ (409) — ลบข้อความรับทราบซ้ำทิ้ง เหลือตัวที่ทำงานจริง');
+      await processingMsg.delete().catch(() => {});
+      return;
+    }
     await processingMsg.edit(`❌ เกิดข้อผิดพลาดในการประมวลผล: ${error.response?.data?.error || error.message}`).catch(() => {});
   }
 }
