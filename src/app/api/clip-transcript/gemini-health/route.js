@@ -32,9 +32,10 @@ export async function GET() {
 
   let result;
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
+    // ★ ใช้คีย์เดียวกับที่ถอดคลิป (GEMINI_VIDEO_API_KEY) → สถานะตรงกับงานจริง
+    const apiKey = process.env.GEMINI_VIDEO_API_KEY || process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      result = { light: 'yellow', ok: null, msg: 'ยังไม่ได้ตั้งค่า GEMINI_API_KEY' };
+      result = { light: 'yellow', ok: null, msg: 'ยังไม่ได้ตั้งค่าคีย์ Gemini' };
     } else {
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
       const genAI = new GoogleGenerativeAI(apiKey);
