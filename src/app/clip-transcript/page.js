@@ -82,11 +82,10 @@ export default function ClipTranscriptPage() {
       const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim() }) });
       const d = await safeJson(r);
       if (d.success) { setInsight(d.data); loadInsightCases(); }   // ★ รีเฟรชคลังประเด็นทันทีที่ถอดสำเร็จ
-      // ★ 26 มิ.ย.: Gemini แน่น → ไม่ขึ้น error ให้กดเอง · ส่งเข้าคิว auto-retry ให้เลย (ปิดหน้าได้ ผลเข้าคลัง)
+      // ★ 26 มิ.ย. (ผู้ใช้สั่งปิด auto-retry): Gemini แน่น → ขึ้น error ทันที บอกให้รอแล้วกดใหม่เอง
+      //   ไม่ส่งเข้าคิว/ไม่วน retry ลับหลัง (ผู้ใช้จะได้รู้ชัดว่าต้องส่งใหม่เมื่อไหร่ ไม่งงว่าทำซ้ำอยู่ไหม)
       else if (/Gemini มีคนใช้งานหนัก|แน่นชั่วคราว|503|overload/i.test(String(d.error || ''))) {
-        setInsightLoading(false);
-        await submitToQueue(); // เข้าคิว → ระบบลองใหม่เองทุก ~3 นาทีจนได้ผล
-        return;
+        setErr('⏳ ตอนนี้ Gemini แน่น ถอดไม่ผ่าน — รอสัก 1-2 นาทีแล้วกด "ถอดประเด็นข่าว" ใหม่อีกครั้ง (ดูไฟสัญญาณ เขียวค่อยกด)');
       }
       else setErr(d.error || 'ถอดประเด็นไม่สำเร็จ');
     } catch (e) { setErr(e.message); }

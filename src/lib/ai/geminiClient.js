@@ -157,7 +157,7 @@ export async function callGeminiVideo({ prompt, youtubeUrl, model = 'gemini-3.5-
 // ★ 22 มิ.ย.: ลองใหม่อัตโนมัติเมื่อ Gemini ล่มชั่วคราว (503 high demand / 429 / เน็ต / parse ไม่ได้)
 //   สาเหตุจริงที่ "เมื่อกี้ทำได้ อยู่ๆพัง" = gemini-3.5-flash โดนใช้งานหนักเป็นช่วง ตอบ 503 สุ่มๆ
 //   ★ ใช้กับเครื่องมือ clip-insight (วิดีโอ) เท่านั้น — ไม่แตะ callGemini(text) ของเวิร์กโฟลว์ข่าว
-async function _withGeminiRetry(fn, { tries = 5, label = 'Gemini' } = {}) {
+async function _withGeminiRetry(fn, { tries = 2, label = 'Gemini' } = {}) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
     try {
