@@ -163,7 +163,7 @@ export async function callGeminiVideo({ prompt, youtubeUrl, model = 'gemini-3.5-
           console.error('[GeminiVideo] JSON parse failed:', content.slice(0, 400));
           throw new Error('Gemini ส่งข้อมูลที่ parse ไม่ได้');
         }
-      }, { label: `GeminiVideo:${m}`, tries: 2 });
+      }, { label: `GeminiVideo:${m}`, tries: 1 });
     } catch (e) {
       lastErr = e;
       if (_isOverload(e) && m !== models[models.length - 1]) {
@@ -300,7 +300,7 @@ export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'vid
             if (repaired) { try { return sanitizeOutput(JSON.parse(repaired)); } catch {} }
             throw new Error('Gemini ส่งข้อมูลที่ parse ไม่ได้');
           }
-        }, { label: `GeminiVideoFile:${m}`, tries: 2 });
+        }, { label: `GeminiVideoFile:${m}`, tries: 1 });
       } catch (e) {
         lastErr = e;
         if (_isOverload(e) && m !== models[models.length - 1]) {
