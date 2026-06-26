@@ -1991,7 +1991,7 @@ async function extractFromUserSources(sourceLinks = [], context = '') {
           //   บน Vercel/ไม่มี yt-dlp → คืน [] → fallback og:image (มักไม่ได้) → route แจ้งผู้ใช้ลองลิงก์อื่น
           try {
             const { extractMetaVideoFrames } = await import('@/lib/services/metaFrameExtractor');
-            const frames = await extractMetaVideoFrames(link, 8);
+            const frames = await extractMetaVideoFrames(link, 12);
             if (frames && frames.length) return frames;
           } catch (e) {
             console.log('[AgentU:UserSource] FB/IG แตกเฟรมล้ม → fallback og:image:', e.message?.slice(0, 50));

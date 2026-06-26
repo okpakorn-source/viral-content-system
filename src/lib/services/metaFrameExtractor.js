@@ -46,7 +46,7 @@ async function runYtdlp(args, timeout = 180_000) {
  * @param {number} numFrames - จำนวนเฟรมที่อยากได้ (กระจายทั้งคลิป)
  * @returns {Promise<string[]>} - array ของ data:image/jpeg;base64 URI (หรือ [] ถ้าทำไม่ได้)
  */
-export async function extractMetaVideoFrames(url, numFrames = 8) {
+export async function extractMetaVideoFrames(url, numFrames = 12) {
   // yt-dlp.exe เป็นไบนารี Windows — บน Vercel (Linux) รันไม่ได้
   if (process.platform !== 'win32') {
     console.log(`${LOG} ข้าม — แตกเฟรม FB/IG ได้เฉพาะเครื่องทีม (Windows)`);
@@ -87,18 +87,22 @@ export async function extractMetaVideoFrames(url, numFrames = 8) {
       return [];
     }
 
-    // ③ แตกเฟรมเว้นช่วงเท่ากันด้วย system ffmpeg (เลี่ยงต้น/ท้ายคลิป 8%)
+    // ③ แตกเฟรม "คม + กระจายทั้งคลิป" — แบ่งคลิปเป็น N ช่วง แต่ละช่วงให้ ffmpeg `thumbnail`
+    //    เลือกเฟรมตัวแทนที่คมที่สุด (เลี่ยงภาพเบลอ/ช่วงเปลี่ยนฉาก ที่ -ss ตายตัวมักโดน)
+    //    เลี่ยงต้น/ท้ายคลิป 6% (intro/outro)
     const dur = duration > 1 ? duration : 30; // ถ้าไม่รู้ความยาว เดา 30s
-    const start = Math.max(dur * 0.08, 1);
-    const span = Math.max(dur * 0.84, dur - start - 1);
-    const step = span / Math.max(numFrames, 1);
+    const usable = Math.max(dur * 0.88, 5);
+    const start = Math.max(dur * 0.06, 0.5);
+    const segLen = usable / Math.max(numFrames, 1);
     const frames = [];
+    let ffmpegMissing = false;
     for (let i = 0; i < numFrames; i++) {
-      const t = start + step * (i + 0.5);
+      const segStart = start + segLen * i;
       const out = path.join(tmpDir, `${id}-${String(i).padStart(2, '0')}.jpg`);
       try {
-        // -ss ก่อน -i = seek เร็ว · -frames:v 1 = 1 เฟรม · -q:v 3 = คุณภาพดี
-        await execFileAsync('ffmpeg', ['-y', '-ss', t.toFixed(2), '-i', videoPath, '-frames:v', '1', '-q:v', '3', out],
+        // -ss segStart -t segLen = ดูเฉพาะช่วงนี้ · -vf thumbnail = เลือกเฟรมตัวแทนคมสุดในช่วง
+        await execFileAsync('ffmpeg', ['-y', '-ss', segStart.toFixed(2), '-t', Math.max(segLen, 1).toFixed(2),
+          '-i', videoPath, '-vf', 'thumbnail', '-frames:v', '1', '-q:v', '2', out],
           { maxBuffer: 1024 * 1024 * 10, timeout: 30_000 });
         if (existsSync(out)) {
           const buf = await fs.readFile(out);
@@ -108,12 +112,14 @@ export async function extractMetaVideoFrames(url, numFrames = 8) {
         // ffmpeg ไม่อยู่ใน PATH → เลิกทั้งชุด (ไม่มีประโยชน์ลองต่อ)
         if (/ENOENT/.test(e.message || '')) {
           console.log(`${LOG} ❌ ไม่พบ ffmpeg ใน PATH — แตกเฟรมไม่ได้`);
+          ffmpegMissing = true;
           break;
         }
         console.log(`${LOG} เฟรม ${i} ล้ม:`, e.message?.slice(0, 60));
       }
     }
-    console.log(`${LOG} ✅ FB/IG คลิป → ${frames.length}/${numFrames} เฟรม`);
+    if (ffmpegMissing) return [];
+    console.log(`${LOG} ✅ FB/IG คลิป → ${frames.length}/${numFrames} เฟรม (thumbnail คมสุดต่อช่วง)`);
     return frames;
   } catch (e) {
     const stderr = String(e.stderr || '').trim().split('\n').slice(-2).join(' | ');
