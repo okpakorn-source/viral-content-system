@@ -232,7 +232,7 @@ export default function ClipTranscriptPage() {
               border: '1px solid ' + (queueJob.status === 'error' ? '#ef4444' : queueJob.status === 'done' ? '#22c55e' : '#f59e0b'),
               background: queueJob.status === 'error' ? 'rgba(239,68,68,0.08)' : queueJob.status === 'done' ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.08)' }}>
               {queueJob.status === 'pending' && <>⏳ <b>อยู่ในคิวเครื่องทีม</b> — ลำดับที่ {queueJob.position || '?'} · {platformIcon({ youtube: 'youtube', tiktok: 'tiktok', meta: 'meta' }[queueJob.platform])} กำลังรอเครื่องทีมดึงไปถอด (เปิดหน้านี้ค้างไว้ ผลจะเด้งขึ้นเอง)</>}
-              {queueJob.status === 'processing' && <>🔧 <b>เครื่องทีมกำลังถอดอยู่...</b> {platformIcon(queueJob.platform)} (อาจใช้เวลา 1-3 นาทีต่อคลิป)</>}
+              {queueJob.status === 'processing' && <>🔧 <b>เครื่องทีมกำลังถอดอยู่...</b>{queueJob.attempts > 0 ? <span style={{ color: '#fbbf24' }}> (ลองรอบที่ {queueJob.attempts + 1} — Gemini แน่น กำลังสู้อยู่)</span> : ''} {platformIcon(queueJob.platform)} (อาจใช้เวลา 1-3 นาทีต่อคลิป)</>}
               {/* ★ 26 มิ.ย.: Gemini แน่น → ระบบลองใหม่เองทุก ~3 นาที จนได้ผล + นับถอยหลังสด (ปิดหน้าได้ ผลเข้าคลัง) */}
               {queueJob.status === 'retry_wait' && (() => {
                 const remainS = Math.max(0, Math.round(((queueJob.nextRetryAt ? new Date(queueJob.nextRetryAt).getTime() : nowMs) - nowMs) / 1000));
@@ -262,7 +262,7 @@ export default function ClipTranscriptPage() {
                     const remainS = j.status === 'retry_wait' && j.nextRetryAt ? Math.max(0, Math.round((new Date(j.nextRetryAt).getTime() - nowMs) / 1000)) : 0;
                     const badge = j.status === 'retry_wait'
                       ? `🟡 รอ Gemini (ลอง ${j.attempts} ครั้ง${remainS > 0 ? ` · อีก ${Math.floor(remainS / 60) > 0 ? `${Math.floor(remainS / 60)}น ` : ''}${remainS % 60}ว` : ' · กำลังลอง'})`
-                      : j.status === 'processing' ? '🔧 กำลังถอด' : '⏳ รอคิว';
+                      : j.status === 'processing' ? `🔧 กำลังถอด${j.attempts > 0 ? ` (รอบ ${j.attempts + 1})` : ''}` : '⏳ รอคิว';
                     return (
                       <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', borderTop: '1px solid rgba(255,255,255,0.05)', fontSize: 12 }}>
                         <span>{platformIcon(j.platform)}</span>
