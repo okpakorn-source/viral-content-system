@@ -4,6 +4,19 @@ import { useCoverCanvas } from '@/lib/cover/useCoverCanvas';
 import { W, H } from '@/lib/cover/constants';
 import CoverEditor from './CoverEditor';
 
+// ★ 26 มิ.ย.: อ่าน response แบบปลอดภัย — กัน "Unexpected token '<' <!DOCTYPE" เมื่อเซิร์ฟเวอร์
+//   คืนหน้า HTML (timeout/crash/500) แทน JSON → แปลงเป็นข้อความที่อ่านออก
+async function safeJsonCover(r) {
+  const text = await r.text();
+  try { return JSON.parse(text); }
+  catch {
+    if (/timeout|FUNCTION_INVOCATION|<!DOCTYPE|error occurred|deadline/i.test(text)) {
+      return { success: false, error: 'เซิร์ฟเวอร์ใช้เวลานานเกินไป/ขัดข้องชั่วคราว — ลองสร้างปกใหม่อีกครั้ง (ถ้าวางลิงก์แหล่งรูปไว้ ลองเอาออกก่อน)' };
+    }
+    return { success: false, error: !r.ok ? `เซิร์ฟเวอร์ตอบกลับผิดพลาด (${r.status}) — ลองใหม่อีกครั้ง` : 'อ่านผลลัพธ์ไม่ได้ ลองใหม่อีกครั้ง' };
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // BUILTIN TEMPLATE DEFINITIONS (copied from cover-tester)
 // Canvas = 1200 x 1350 px
@@ -255,7 +268,7 @@ export default function CoverLabPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jobType: 'cover', ...payload }),
     });
-    const addData = await addRes.json();
+    const addData = await safeJsonCover(addRes);
     if (!addData.success) throw new Error(errText(addData.error));
     return addData; // { jobId, position, queuesAhead }
   }
@@ -281,7 +294,7 @@ export default function CoverLabPage() {
           cache: 'no-store',
           signal: AbortSignal.timeout(8000), // 8s per poll — แยกจาก React lifecycle
         });
-        const statusData = await statusRes.json();
+        const statusData = await safeJsonCover(statusRes);
 
         if (!statusData.success) {
           notFoundCount++;

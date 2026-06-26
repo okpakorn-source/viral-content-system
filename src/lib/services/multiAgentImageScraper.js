@@ -1958,26 +1958,37 @@ function fallbackSelection(candidates) {
 async function extractFromUserSources(sourceLinks = []) {
   if (!Array.isArray(sourceLinks) || !sourceLinks.length) return [];
   const out = [];
+  // 🔴 26 มิ.ย. — กันลิงก์ค้าง (เช่น FB share/v ที่ scrape ช้า/ไม่ตอบ) ทำ route ทำปก timeout → คืน HTML
+  //   ครอบทุกลิงก์ด้วย race 20 วิ — ลิงก์ไหนช้าเกินก็ข้าม ไม่ลากทั้งระบบล่ม
+  const PER_LINK_MS = 20000;
+  const withTimeout = (p, ms) => Promise.race([
+    p,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('source-link-timeout')), ms)),
+  ]);
   for (const raw of sourceLinks.slice(0, 6)) {
     const link = String(raw || '').trim();
     if (!/^https?:\/\//i.test(link)) continue;
     try {
-      if (/youtube\.com|youtu\.be/i.test(link)) {
-        const { fetchYouTubeThumbFrames } = await import('@/lib/services/youtubeThumbFrames');
-        const { youtubeVideoId } = await import('@/lib/services/newsDesk/taxonomy');
-        const id = youtubeVideoId(link);
-        if (id) {
-          const frames = await fetchYouTubeThumbFrames([id], { perVideo: 3, maxTotal: 4 });
-          for (const f of frames) out.push(`data:image/jpeg;base64,${f.buffer.toString('base64')}`);
+      const got = await withTimeout((async () => {
+        if (/youtube\.com|youtu\.be/i.test(link)) {
+          const { fetchYouTubeThumbFrames } = await import('@/lib/services/youtubeThumbFrames');
+          const { youtubeVideoId } = await import('@/lib/services/newsDesk/taxonomy');
+          const id = youtubeVideoId(link);
+          if (id) {
+            const frames = await fetchYouTubeThumbFrames([id], { perVideo: 3, maxTotal: 4 });
+            return frames.map(f => `data:image/jpeg;base64,${f.buffer.toString('base64')}`);
+          }
+          return [];
+        } else if (/tiktok\.com/i.test(link)) {
+          const r = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(link)}`).then(x => x.json()).catch(() => null);
+          const cover = r?.data?.origin_cover || r?.data?.cover;
+          return cover ? [cover] : [];
+        } else {
+          const { extractSourceArticleImages } = await import('@/lib/services/sourceArticleImages');
+          return await extractSourceArticleImages(link, 6);
         }
-      } else if (/tiktok\.com/i.test(link)) {
-        const r = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(link)}`).then(x => x.json()).catch(() => null);
-        const cover = r?.data?.origin_cover || r?.data?.cover;
-        if (cover) out.push(cover);
-      } else {
-        const { extractSourceArticleImages } = await import('@/lib/services/sourceArticleImages');
-        out.push(...(await extractSourceArticleImages(link, 6)));
-      }
+      })(), PER_LINK_MS);
+      if (Array.isArray(got)) out.push(...got);
     } catch (e) { console.log('[AgentU:UserSource] skip:', e.message?.slice(0, 40)); }
   }
   const seen = new Set(); const uniq = [];
