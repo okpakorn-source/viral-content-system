@@ -43,9 +43,10 @@ function getGeminiVideoClient() {
   return geminiVideoClient;
 }
 
-// ★ 26 มิ.ย.: โมเดลสำรองเมื่อ "ตัวหลักแน่น (503)" — เรียงตามคุณภาพ (Pro คุณภาพสูงสุดก่อน)
-//   เทสจริง 26 มิ.ย.: gemini-2.5-pro ดูวิดีโอได้ คุณภาพสูง เร็ว (~19วิ) ตอน gemini-3.5-flash แน่น
-const VIDEO_FALLBACK_MODELS = ['gemini-2.5-pro'];
+// ★ 26 มิ.ย. (ผู้ใช้สั่งกลับ): ปิด fallback — ใช้ gemini-3.5-flash ตัวเดียวเท่านั้น (แม่นสุด)
+//   เหตุผล: 2.5-pro "มั่ว/แต่งเรื่อง" (เคสจริง: คลิป อั้ม อมรินทร์ แต่แต่งเป็น อั้ม อธิชาติ+เสก โลโซ ที่ไม่มีในคลิป)
+//   ยอมรอ/503 บ้าง ดีกว่าได้ข้อมูลผิด · เปิดคืนเมื่อมั่นใจคุณภาพ: ใส่โมเดลในอาเรย์นี้
+const VIDEO_FALLBACK_MODELS = [];
 // อาการ "แน่น/ชั่วคราว" (ควรสลับโมเดล/ลองใหม่) — แยกจาก "ดูคลิปไม่ได้/parse พัง" (ไม่สลับ)
 const _isOverload = (e) => {
   const status = Number(e?.status) || 0;
@@ -163,7 +164,7 @@ export async function callGeminiVideo({ prompt, youtubeUrl, model = 'gemini-3.5-
           console.error('[GeminiVideo] JSON parse failed:', content.slice(0, 400));
           throw new Error('Gemini ส่งข้อมูลที่ parse ไม่ได้');
         }
-      }, { label: `GeminiVideo:${m}`, tries: 1 });
+      }, { label: `GeminiVideo:${m}`, tries: 2 });
     } catch (e) {
       lastErr = e;
       if (_isOverload(e) && m !== models[models.length - 1]) {
@@ -300,7 +301,7 @@ export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'vid
             if (repaired) { try { return sanitizeOutput(JSON.parse(repaired)); } catch {} }
             throw new Error('Gemini ส่งข้อมูลที่ parse ไม่ได้');
           }
-        }, { label: `GeminiVideoFile:${m}`, tries: 1 });
+        }, { label: `GeminiVideoFile:${m}`, tries: 2 });
       } catch (e) {
         lastErr = e;
         if (_isOverload(e) && m !== models[models.length - 1]) {
