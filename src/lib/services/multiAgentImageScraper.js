@@ -1955,19 +1955,22 @@ function fallbackSelection(candidates) {
 // ★ 25 มิ.ย. — Agent U: แหล่งรูปที่พนักงานระบุเอง (ไม่บังคับ) → ดึงรูปจากลิงก์ตรงๆ "ก่อนรีเสิร์ช"
 //   YouTube/คลิป → เฟรมหลายจุดในคลิป · TikTok → ปกคลิป (tikwm) · ข่าว/บทความ/IG/FB → og:image + <img>
 //   🔴 ภาพพวกนี้ "บูสต์ให้มาก่อน" แต่ยังส่งเข้า judge (คัดคุณภาพ+ตรวจคน) — ไม่บังคับใช้ภาพแย่/ผิดคน
-async function extractFromUserSources(sourceLinks = []) {
+async function extractFromUserSources(sourceLinks = [], context = '') {
   if (!Array.isArray(sourceLinks) || !sourceLinks.length) return [];
   const out = [];
   // 🔴 26 มิ.ย. — กันลิงก์ค้าง (เช่น FB share/v ที่ scrape ช้า/ไม่ตอบ) ทำ route ทำปก timeout → คืน HTML
-  //   ครอบทุกลิงก์ด้วย race 20 วิ — ลิงก์ไหนช้าเกินก็ข้าม ไม่ลากทั้งระบบล่ม
-  const PER_LINK_MS = 20000;
+  //   ครอบทุกลิงก์ด้วย race — ลิงก์ไหนช้าเกินก็ข้าม ไม่ลากทั้งระบบล่ม
+  //   (ลิงก์ FB/IG วิดีโอที่ต้องโหลด+แตกเฟรมด้วย yt-dlp ให้เวลามากกว่า)
   const withTimeout = (p, ms) => Promise.race([
     p,
     new Promise((_, rej) => setTimeout(() => rej(new Error('source-link-timeout')), ms)),
   ]);
+  // FB/IG วิดีโอ — ต้องโหลดคลิป+แตกเฟรม (yt-dlp+ffmpeg) ทำได้เฉพาะเครื่องทีม
+  const FB_IG_VIDEO = /facebook\.com\/(reel|watch|share\/[rv]\/|video|\d|[\w.]+\/(videos|posts))|fb\.watch\/|instagram\.com\/(reel|reels|tv)\//i;
   for (const raw of sourceLinks.slice(0, 6)) {
     const link = String(raw || '').trim();
     if (!/^https?:\/\//i.test(link)) continue;
+    const isFbIgVideo = FB_IG_VIDEO.test(link);
     try {
       const got = await withTimeout((async () => {
         if (/youtube\.com|youtu\.be/i.test(link)) {
@@ -1983,11 +1986,23 @@ async function extractFromUserSources(sourceLinks = []) {
           const r = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(link)}`).then(x => x.json()).catch(() => null);
           const cover = r?.data?.origin_cover || r?.data?.cover;
           return cover ? [cover] : [];
+        } else if (isFbIgVideo) {
+          // ★ 26 มิ.ย. (ผู้ใช้สั่ง): FB/IG วิดีโอ → โหลดคลิป+แตกเฟรมจริง (yt-dlp + system ffmpeg) เครื่องทีมเท่านั้น
+          //   บน Vercel/ไม่มี yt-dlp → คืน [] → fallback og:image (มักไม่ได้) → route แจ้งผู้ใช้ลองลิงก์อื่น
+          try {
+            const { extractMetaVideoFrames } = await import('@/lib/services/metaFrameExtractor');
+            const frames = await extractMetaVideoFrames(link, 8);
+            if (frames && frames.length) return frames;
+          } catch (e) {
+            console.log('[AgentU:UserSource] FB/IG แตกเฟรมล้ม → fallback og:image:', e.message?.slice(0, 50));
+          }
+          const { extractSourceArticleImages } = await import('@/lib/services/sourceArticleImages');
+          return await extractSourceArticleImages(link, 6);
         } else {
           const { extractSourceArticleImages } = await import('@/lib/services/sourceArticleImages');
           return await extractSourceArticleImages(link, 6);
         }
-      })(), PER_LINK_MS);
+      })(), isFbIgVideo ? 180000 : 20000); // FB/IG วิดีโอ: 180 วิ (โหลด+แตกเฟรม) · อื่นๆ: 20 วิ
       if (Array.isArray(got)) out.push(...got);
     } catch (e) { console.log('[AgentU:UserSource] skip:', e.message?.slice(0, 40)); }
   }
@@ -1999,7 +2014,7 @@ async function extractFromUserSources(sourceLinks = []) {
 
 export async function runMultiAgentImageSearch(url, sourceType, entities, newsTitle, identity, sourceLinks = [], opts = {}) {
   const sourceOnly = !!opts.sourceOnly; // ★ 26 มิ.ย.: true = ใช้ภาพจากลิงก์แหล่งรูปล้วน ไม่รีเสิร์ชเพิ่ม
-  const userSrcPromise = extractFromUserSources(sourceLinks);
+  const userSrcPromise = extractFromUserSources(sourceLinks, newsTitle); // ★ ส่งหัวข้อให้ Gemini คัดเฟรม FB ตรงเรื่อง
 
   // ★ 26 มิ.ย. (ผู้ใช้สั่ง) — โหมด "เฉพาะภาพในคลิป/แหล่งที่ระบุ":
   //   ภาพในคลิปครบดีอยู่แล้ว แต่พอรีเสิร์ชเพิ่มเองได้ภาพไม่เกี่ยวมาปน (เช่น มอเตอร์ไซค์)

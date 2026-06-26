@@ -309,8 +309,16 @@ export async function getNextPendingJobs(limit = 1) {
     //   ทางหนีไฟ: ตั้ง env QUEUE_LOCAL_NEWS=1 บนเครื่องทีม = ยอมให้เครื่องทีมคว้างานข่าวชั่วคราว (กรณี Vercel ล่ม)
     const isMetaVideoJob = (j) => {
       if (j.payload?.jobType === 'mineclip') return true; // ขุดนาทีทองใช้ yt-dlp — เครื่องทีมเท่านั้น
+      const fbig = /facebook\.com\/(reel|watch|share\/[rv]\/|video)|fb\.watch\/|instagram\.com\/(reel|reels|tv)\//i;
       const u = String(j.payload?.input || j.payload?.url || '');
-      return /facebook\.com\/(reel|watch|share\/[rv]\/|video)|fb\.watch\/|instagram\.com\/(reel|reels|tv)\//i.test(u);
+      if (fbig.test(u)) return true;
+      // ★ 26 มิ.ย. (ผู้ใช้สั่ง): งานปกที่มีลิงก์แหล่งรูปเป็นคลิป FB/IG → ต้องเครื่องทีม (yt-dlp+ffmpeg แตกเฟรม)
+      //   YouTube/TikTok/ข่าว = ดึงภาพได้บน Vercel จึงไม่ต้องบังคับเครื่องทีม (กฎงานข่าวไม่กระทบ — ข่าวไม่มี sourceLinks)
+      const src = Array.isArray(j.payload?.sourceLinks)
+        ? j.payload.sourceLinks.join(' ')
+        : String(j.payload?.sourceLinks || '');
+      if (src && fbig.test(src)) return true;
+      return false;
     };
     const isLocalMachine = process.platform === 'win32';
     const localNewsOverride = process.env.QUEUE_LOCAL_NEWS === '1';
