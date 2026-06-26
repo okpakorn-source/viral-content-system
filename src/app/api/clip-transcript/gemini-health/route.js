@@ -14,6 +14,8 @@ let _cache = { at: 0, result: null };
 const CACHE_MS = 30_000; // เช็กจริงทุก 30 วิ
 
 export async function GET() {
+  // ★ 26 มิ.ย.: บอกว่าใช้คีย์ตัวไหน (ไม่โชว์ค่า) — ยืนยันคีย์แยกถอดคลิปทำงานบน Vercel
+  const keySource = process.env.GEMINI_VIDEO_API_KEY ? 'GEMINI_VIDEO_API_KEY (คีย์แยกถอดคลิป)' : 'GEMINI_API_KEY (fallback)';
   // ★ 26 มิ.ย.: สถานะ "endpoint วิดีโอ" จริง (ถอดประเด็นใช้ video ไม่ใช่ text — text/video โหลดคนละตัว!)
   //   อ่านจากผลถอดล่าสุดจริง (callGeminiVideo/VideoFile บันทึกไว้ใน global) — แม่นกว่า probe text
   //   ใช้ได้เฉพาะโปรเซสเดียวกับที่ถอด (โลคอลเครื่องทีม = เคส FB) · ถ้าไม่มีข้อมูลสด → ถอย probe text
@@ -27,7 +29,7 @@ export async function GET() {
   }
 
   if (_cache.result && Date.now() - _cache.at < CACHE_MS) {
-    return NextResponse.json({ ..._cache.result, cached: true });
+    return NextResponse.json({ ..._cache.result, cached: true, keySource });
   }
 
   let result;
@@ -71,5 +73,5 @@ export async function GET() {
   }
 
   _cache = { at: Date.now(), result };
-  return NextResponse.json({ ...result, cached: false });
+  return NextResponse.json({ ...result, cached: false, keySource });
 }
