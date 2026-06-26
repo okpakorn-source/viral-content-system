@@ -346,10 +346,9 @@ async function harvestBuzzsumo() {
  * รันเก็บ+คัดกรองครบ 4 ชั้น แล้วลงคลัง
  * @returns {Promise<{harvested, gated, classified, judged, added}>}
  */
-// ★ 26 มิ.ย. (ผู้ใช้สั่ง): พักการหาข่าวใหม่ทั้งหมด — ลดภาระ API (Serper/YouTube/Exa) ระหว่างปรับคุณภาพ
-//   จุดเดียวที่ทุกทางเรียกผ่าน (route harvest / morning-menu / chief) → ปิดที่นี่ = ปิดหมด
-//   เปิดคืนทีหลัง: เปลี่ยนเป็น false + คืน cron ใน vercel.json · 🔴 ไม่กระทบระบบทำข่าว/ถอดประเด็น/ปก
-const HARVEST_PAUSED = true;
+// ★ 26 มิ.ย. (เย็น) เปิดคืน: ปรับ "สมองคัด ทำใหม่ได้ (remakeable)" บังคับทุกแหล่งแล้ว → หาข่าวที่ใช้ได้จริง
+//   (เคยพักชั่วคราวตอนปรับคุณภาพ · ตอนนี้คืน cron ใน vercel.json แล้ว) · 🔴 ไม่กระทบระบบทำข่าว/ถอดประเด็น/ปก
+const HARVEST_PAUSED = false;
 
 export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'evergreen', 'followup', 'buzz'], judgeTop = 24, extraQueries = [] } = {}) {
   if (HARVEST_PAUSED) {
@@ -593,6 +592,19 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'ev
     return true;
   });
 
+  // ── ★ 26 มิ.ย. (ผู้ใช้สั่ง): ด่าน "ทำใหม่ได้" — เก็บเฉพาะข่าวที่หยิบมาทำคอนเทนต์ใหม่ได้จริง (เรื่องคน/มีสตอรี่) ──
+  //   ตัด: กระแสเก่าจบแล้ว / เหตุการณ์ผูกเวลาที่ผ่านไป / PR-สถิติ-การเมืองที่ไม่มีคนเป็นตัวเอก → ไป junk (ไม่ทิ้ง ดูที่แท็บกระแสได้)
+  //   remakeable เป็นแกนรวม (ครอบ hasMainChar+staleTrend+มีประเด็น) — ใช้เกณฑ์เดียวกันทุกเลน รวม broad ด้านล่าง
+  stats.notRemakeable = 0;
+  classified = classified.filter(c => {
+    if (c.remakeable === false) {
+      stats.notRemakeable++;
+      junk.push({ ...c, junkReason: 'ทำใหม่ไม่ได้ (กระแสเก่า/ผูกเหตุการณ์/ไม่มีสตอรี่)' });
+      return false;
+    }
+    return true;
+  });
+
   // ── ★ กรองกระแสอดีต (ทีมสั่ง 12 มิ.ย. ค่ำ — เคสเจนนี่จ่ายหนี้แม่): "เหตุการณ์ครั้งเดียว" ที่เก่าแล้ว ≠ ข่าวน้ำดีไร้กาลเวลา ──
   //   เลน evergreen ตั้งใจค้นย้อนทั้งปี → รับเฉพาะเรื่องแบบแผน (pattern) เท่านั้น
   //   เลนอื่น: event ที่เผยแพร่เกิน 30 วัน = ขุดของเก่า ทิ้ง
@@ -627,12 +639,21 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'ev
   const judged = await editorialJudge(toJudge);
   stats.judged = judged.filter(j => j.judgeScore !== undefined).length;
 
-  // ── ★ 19 มิ.ย. (เก็บกว้าง): เลน broad — จัดหมวดคีย์เวิร์ด(ฟรี) + กรอง gore → ลงโต๊ะตรงๆ ไม่ผ่าน AI judge ──
+  // ── ★ 26 มิ.ย. (ผู้ใช้สั่ง): broad ต้องผ่าน "สมองคัด ทำใหม่ได้" เหมือนกันทุกแหล่ง (เดิมข้าม → กระแสเก่า/PR หลุดเข้า) ──
+  //   ผ่าน classifyBatch (remakeable + safety เกณฑ์เดียวกับ curated) แต่คง category เดิมจากคีย์ที่ค้นเจอ (แม่นกว่า)
+  //   ไม่ผ่าน editorialJudge (ปริมาณเยอะ) — แค่ผ่านด่าน "ทำใหม่ได้" ก็พอกันกระแสเก่า/ขยะ PR
   const broadFinal = [];
-  for (const it of gatedBroad) {
-    if (keywordGore(it)) { junk.push({ ...it, junkReason: 'รุนแรง/สยอง (คีย์เวิร์ด)' }); continue; }
-    // ★ 19 มิ.ย. รอบ 2: category มาจาก "คีย์ที่ค้นเจอ" ตรงๆ (แม่นกว่า) — ตกไป keyword-guess เฉพาะที่ไม่มี
-    broadFinal.push({ ...it, category: it.category || keywordCategorize(it), tone: 'กลาง', toxicity: 0, fbRisk: 0, toneable: true, _broad: true });
+  if (gatedBroad.length) {
+    const broadClassified = await classifyBatch(gatedBroad);
+    for (const c of broadClassified) {
+      const orig = gatedBroad.find(b => b.url === c.url);
+      const category = (orig && orig.category) || c.category; // คง category จากคีย์ค้น
+      if (c.toxicity >= 3) { junk.push({ ...c, junkReason: 'เนื้อหารุนแรง/สยอง (พิษ≥3)' }); continue; }
+      if (c.foreignCountry) { stats.foreignDropped++; junk.push({ ...c, junkReason: `ข่าวต่างประเทศ (${c.foreignCountry})` }); continue; }
+      if (c.royalNegative === true) { stats.royalNeg++; junk.push({ ...c, junkReason: 'สถาบันแง่ลบ/อ่อนไหว (ม.112)' }); continue; }
+      if (c.remakeable === false) { stats.notRemakeable++; junk.push({ ...c, junkReason: 'ทำใหม่ไม่ได้ (กระแสเก่า/ผูกเหตุการณ์/ไม่มีสตอรี่)' }); continue; }
+      broadFinal.push({ ...c, category, _broad: true });
+    }
   }
   stats.broadKept = broadFinal.length;
 

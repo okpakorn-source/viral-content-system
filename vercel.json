@@ -8,6 +8,18 @@
     {
       "path": "/api/queue/worker",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/news-desk/morning-menu",
+      "schedule": "30 22 * * *"
+    },
+    {
+      "path": "/api/news-desk/chief",
+      "schedule": "30 5,11 * * *"
+    },
+    {
+      "path": "/api/news-desk/harvest",
+      "schedule": "0 23,0-16 * * *"
     }
   ]
 }

@@ -10,10 +10,9 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 600; // harvest + auto-research ตัวท็อป 3 ใบ
 
-// ★ 26 มิ.ย. (ผู้ใช้สั่ง): พักการหาข่าวใหม่ชั่วคราว — ลดภาระ API (Serper/YouTube) ระหว่างปรับปรุงคุณภาพข่าว
-//   ปิดทุกทาง (cron/ปุ่มหาข่าว/keyword) · เปิดคืนทีหลัง: เปลี่ยนเป็น false (ตัด cron ออกจาก vercel.json ด้วย)
-//   🔴 พักเฉพาะ "การหาข่าวเข้าโต๊ะ" — ไม่กระทบระบบทำข่าวอัตโนมัติ/ถอดประเด็น/ทำปก
-const HARVEST_PAUSED = true;
+// ★ 26 มิ.ย. (เย็น) เปิดคืน: ปรับสมองคัด "ทำใหม่ได้ (remakeable)" บังคับทุกแหล่งแล้ว → หาข่าวที่ใช้ได้จริง
+//   (คืน cron ใน vercel.json แล้ว) · 🔴 ไม่กระทบระบบทำข่าวอัตโนมัติ/ถอดประเด็น/ทำปก
+const HARVEST_PAUSED = false;
 const pausedResponse = () => NextResponse.json({
   success: false, paused: true,
   error: 'ระบบหาข่าวใหม่พักชั่วคราว (พัก API ระหว่างปรับปรุงคุณภาพข่าว) — ข่าวเดิมในโต๊ะยังใช้ได้ปกติ',
