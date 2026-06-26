@@ -14,6 +14,15 @@ const BASE = process.env.CLIP_WORKER_BASE || 'http://localhost:3000';
 const IDLE_MS = Number(process.env.CLIP_WORKER_IDLE_MS) || 5000;   // ว่าง → เช็กใหม่ทุก 5 วิ
 const ERR_MS = 8000;
 
+// ★ 26 มิ.ย.: คลิปยาว/FB reel (โหลด+อัป Gemini+ดู) ใช้เวลา >5 นาทีได้ — แต่ fetch ของ Node (undici)
+//   ตัดที่ headersTimeout 5 นาทีโดยปริยาย → "fetch failed" ทั้งที่ insight ยังทำอยู่ → เข้าใจผิดว่าล้ม
+//   ใช้ Agent ตั้ง timeout ยาว 15 นาที (เท่า maxDuration 800 ของ route + เผื่อ)
+let longDispatcher = null;
+try {
+  const { Agent } = await import('undici');
+  longDispatcher = new Agent({ headersTimeout: 900_000, bodyTimeout: 900_000, connectTimeout: 30_000 });
+} catch (e) { console.log('[clip-worker] ⚠️ ตั้ง undici Agent ไม่ได้ (ใช้ timeout เริ่มต้น):', e.message); }
+
 const log = (...a) => console.log(`[clip-worker ${new Date().toLocaleTimeString('th-TH')}]`, ...a);
 
 async function pullJob() {
@@ -28,6 +37,7 @@ async function processJob(job) {
   const body = job.kind === 'transcript' ? { url: job.url, tidy: !!job.tidy } : { url: job.url };
   const r = await fetch(`${BASE}${endpoint}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    ...(longDispatcher ? { dispatcher: longDispatcher } : {}), // ★ timeout ยาว — กัน fetch failed ที่ 5 นาที
   });
   const d = await r.json().catch(() => ({}));
   if (d?.success) return { ok: true, result: d.data };
