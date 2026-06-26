@@ -18,9 +18,10 @@ async function downloadTiktokBuffer(url) {
   return buf;
 }
 
-// โหลดไฟล์วิดีโอ Facebook/IG (yt-dlp) — เครื่องทีม Windows เท่านั้น
-async function downloadMetaBuffer(url) {
-  if (process.platform !== 'win32') throw new Error('Facebook/IG โหลดวิดีโอได้เฉพาะเครื่องทีม (Windows)');
+// โหลดไฟล์วิดีโอ Facebook/IG/YouTube (yt-dlp) — เครื่องทีม Windows เท่านั้น
+//   ★ 26 มิ.ย.: รับ fmt ได้ (YouTube ใช้ ≤480p กันไฟล์ใหญ่/อัปนาน · FB/IG ใช้ค่าเดิม)
+async function downloadMetaBuffer(url, fmt) {
+  if (process.platform !== 'win32') throw new Error('Facebook/IG/YouTube โหลดวิดีโอได้เฉพาะเครื่องทีม (Windows)');
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
   const { join } = await import('path');
@@ -32,7 +33,7 @@ async function downloadMetaBuffer(url) {
   if (!existsSync(exe)) throw new Error('ไม่พบ bin/yt-dlp.exe');
   const cookies = join(process.cwd(), 'bin', 'cookies.txt');
   const out = join(tmpdir(), `meta_${Date.now()}.mp4`);
-  const args = ['-f', 'mp4/best[ext=mp4]/best', '-o', out, '--no-warnings', '--no-playlist'];
+  const args = ['-f', fmt || 'mp4/best[ext=mp4]/best', '-o', out, '--no-warnings', '--no-playlist'];
   if (existsSync(cookies)) args.push('--cookies', cookies);
   args.push(url);
   try {
@@ -136,6 +137,14 @@ async function transcribeFor(url, type) {
 
 // ★ 22 มิ.ย.: รวมตรรกะสกัด "ข้อมูลดิบ" ไว้ในฟังก์ชันเดียว (ดูคลิป→fallback ถอดเสียง) — โยน error ที่มี .code
 //   เพื่อให้ห่อด้วยคิวได้สะอาด (ไม่ปน NextResponse กับงานหนัก)
+// ★ 26 มิ.ย.: ตัดเวลา promise — กัน YouTube URL passthrough ค้างนาน (Gemini โหลด YouTube ไม่ได้) → รีบสลับเส้นทาง
+function _raceTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => { const e = new Error(`${label} ค้างเกิน ${Math.round(ms / 1000)} วิ`); e.code = 'URL_TIMEOUT'; rej(e); }, ms)),
+  ]);
+}
+
 async function buildInsight({ url, type }) {
   // ★ 25 มิ.ย.: ใช้ insight เดียว (enhanced) เสมอ — Gemini "ตัดสินเอง" (content-aware) ว่าคลิปมีหลายประเด็นไหม
   //   มีหลายประเด็น → ใส่ subStories (เนื้อดิบแยกประเด็น) เพิ่มจาก rawData รวม · เรื่องเดียว → subStories ว่าง
@@ -145,7 +154,17 @@ async function buildInsight({ url, type }) {
   //   ถ้า Gemini แน่น → โยน error ให้ผู้ใช้ "รอ/กดใหม่" ดีกว่าได้ผลด้อยจาก transcript ล้วน
   //   (ฟังก์ชัน transcript ยังอยู่ในโค้ด เผื่อเปิดใช้ภายหลัง — แค่ไม่เรียกในเส้นทาง insight)
   if (type === 'youtube') {
-    return await extractClipInsight({ url, platform: 'youtube' }); // Gemini ดูคลิปจริง — ไม่มี fallback
+    // ★ 26 มิ.ย. (ผู้ใช้สั่ง): YouTube ไฮบริด — ลอง "ให้ Gemini โหลด URL เอง" ก่อน (เร็ว ใช้ได้ทั้ง cloud + เมื่อ Google ปกติ)
+    //   ถ้าค้าง/ล้ม (Gemini โหลด YouTube ไม่ได้ — เคสจริง 26 มิ.ย. ค้าง >50 วิ ทั้งที่ model ขึ้น) + อยู่เครื่องทีม (win32 มี yt-dlp)
+    //   → สลับมา "โหลดเอง + อัปไฟล์ให้ Gemini" เหมือน TikTok/FB/IG ที่ใช้ได้อยู่ (คุณภาพเท่าเดิม Gemini ดูวิดีโอจริง)
+    try {
+      return await _raceTimeout(extractClipInsight({ url, platform: 'youtube' }), 170_000, 'YouTube URL passthrough');
+    } catch (e) {
+      if (process.platform !== 'win32') throw e; // บน cloud ไม่มี yt-dlp → โยน error เดิม (ผู้ใช้ส่งเข้าคิวเครื่องทีมแทน)
+      console.log(`[ClipInsight] 🔄 YouTube URL ล้ม/ค้าง → สลับโหลดเอง (yt-dlp): ${String(e.message).slice(0, 70)}`);
+      const buf = await downloadMetaBuffer(url, 'best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best');
+      return await extractInsightFromVideoBuffer(buf, 'video/mp4');
+    }
   }
   // TikTok/FB/IG → โหลดไฟล์ให้ Gemini "ดูจริง" (เห็นภาพ+ตัวหนังสือบนจอ) — ไม่มี fallback ถอดเสียง
   const buf = type === 'tiktok' ? await downloadTiktokBuffer(url) : await downloadMetaBuffer(url);
