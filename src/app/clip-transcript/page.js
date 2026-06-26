@@ -35,6 +35,8 @@ export default function ClipTranscriptPage() {
   // ★ 24 มิ.ย.: ส่งเข้าคิว "เครื่องทีม" (พนักงานทำงานที่บ้านส่งผ่านเว็บ → เครื่องทีมถอด FB/IG ให้)
   const [queueJob, setQueueJob] = useState(null); // { jobId, status, position, platform, result, error }
   const [submitting, setSubmitting] = useState(false);
+  // ★ 26 มิ.ย.: ไฟสัญญาณ Gemini แบบเรียลไทม์ (เขียว=พร้อม แดง=แน่น เหลือง=ช้า/ไม่แน่ใจ)
+  const [gem, setGem] = useState(null); // { light, msg, ms }
 
   const loadCases = async () => {
     try { const r = await fetch('/api/clip-transcript/cases?limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setCases(d.cases || []); } catch {}
@@ -43,6 +45,20 @@ export default function ClipTranscriptPage() {
     try { const r = await fetch('/api/clip-transcript/cases?kind=insight&limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setInsightCases(d.cases || []); } catch {}
   };
   useEffect(() => { loadCases(); loadInsightCases(); }, []);
+  // ★ 26 มิ.ย.: เช็กสถานะ Gemini เรียลไทม์ — โหลดหน้า + ทุก 45 วิ (server cache 30 วิ กันยิงถี่)
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      try {
+        const r = await fetch('/api/clip-transcript/gemini-health', { cache: 'no-store', signal: AbortSignal.timeout(12000) });
+        const d = await r.json();
+        if (alive) setGem(d);
+      } catch { if (alive) setGem({ light: 'yellow', msg: 'เช็กสถานะไม่ได้ชั่วคราว' }); }
+    };
+    check();
+    const t = setInterval(check, 45000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
 
   const platformIcon = (p) => p === 'youtube' ? '📺' : p === 'tiktok' ? '🎵' : p === 'meta' ? '📘' : '🎬';
 
@@ -173,6 +189,23 @@ export default function ClipTranscriptPage() {
               {submitting ? '⏳ กำลังส่ง...' : '📥 ส่งเข้าคิว (เครื่องทีม)'}
             </button>
           </div>
+
+          {/* ★ 26 มิ.ย.: ไฟสัญญาณ Gemini เรียลไทม์ — งานจะได้รู้ว่าควรกดถอดตอนนี้ไหม */}
+          {gem && (() => {
+            const c = gem.light === 'green' ? { dot: '#22c55e', bg: 'rgba(34,197,94,0.10)', bd: '#22c55e', label: '🟢 Gemini พร้อม' }
+              : gem.light === 'red' ? { dot: '#ef4444', bg: 'rgba(239,68,68,0.10)', bd: '#ef4444', label: '🔴 Gemini แน่น' }
+              : { dot: '#f59e0b', bg: 'rgba(245,158,11,0.10)', bd: '#f59e0b', label: '🟡 Gemini ช้า/ไม่แน่ใจ' };
+            return (
+              <div style={{ marginTop: 10, padding: '9px 13px', borderRadius: 10, fontSize: 12.5, lineHeight: 1.5,
+                display: 'flex', alignItems: 'center', gap: 9, border: '1px solid ' + c.bd, background: c.bg }}>
+                <span style={{ width: 10, height: 10, borderRadius: '50%', background: c.dot, flexShrink: 0, boxShadow: `0 0 7px ${c.dot}` }} />
+                <span><b>{c.label}</b> — {gem.msg || ''}{gem.ms ? ` (${(gem.ms / 1000).toFixed(1)} วิ)` : ''}
+                  {gem.light === 'red' && <span style={{ opacity: 0.85 }}> · กดได้ ระบบจะลองให้เองจน Gemini ว่าง หรือรอไฟเขียวค่อยกด</span>}
+                  {gem.light === 'green' && <span style={{ opacity: 0.85 }}> · กดถอดประเด็นได้เลย</span>}
+                </span>
+              </div>
+            );
+          })()}
 
           {/* ★ สถานะงานในคิวเครื่องทีม */}
           {queueJob && (
