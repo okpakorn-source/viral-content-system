@@ -41,14 +41,24 @@ async function processJob(job) {
   });
   const d = await r.json().catch(() => ({}));
   if (d?.success) return { ok: true, result: d.data };
-  return { ok: false, error: d?.error || `HTTP ${r.status}` };
+  return { ok: false, error: d?.error || `HTTP ${r.status}`, errorType: d?.errorType || '' };
 }
 
-// ★ 26 มิ.ย. (ผู้ใช้สั่งปิด auto-retry): ลองครั้งเดียว — ถ้าล้ม (รวม Gemini แน่น) = error เลย
-//   ไม่วน retry ลับหลัง (ผู้ใช้งงว่ามันทำซ้ำอยู่จริงไหม) → ให้ผู้ใช้เห็น error แล้วกดส่งใหม่เอง
+// ★ 26 มิ.ย. (เปิด auto-retry แบบ "เห็นชัด"): แยก "Gemini แน่นชั่วคราว" (รอลองใหม่เอง) ออกจาก "ดูคลิปไม่ได้จริง" (error เลย)
+//   - แน่น/503/timeout/เน็ตสะดุด → report 'retry' → เข้า retry_wait → worker หยิบทำใหม่เองทุก ~3 นาที จน Gemini ว่าง
+//   - คลิปส่วนตัว/ดูไม่ได้/ลิงก์ไม่รองรับ → report 'error' ทันที (วนใหม่ก็ไม่ช่วย)
+//   ต่างจากเดิม: ผู้ใช้เห็นสถานะ "อยู่ในคิว ลองครั้งที่ N" ตลอด — ไม่ใช่ retry เงียบ
+function isTransient(error = '', errorType = '') {
+  const s = `${error} ${errorType}`.toLowerCase();
+  // (ก) ถาวร — กดใหม่ไม่ช่วย → ไม่ retry
+  if (/ดูคลิปไม่ได้|ส่วนตัว|private|age.?restrict|จำกัดอายุ|unsupported|ลิงก์ไม่รองรับ|missing_url|cant_watch|กดใหม่ไม่ช่วย|ดูไม่ได้/.test(s)) return false;
+  // (ข) ชั่วคราว — Gemini แน่น/เน็ต/timeout → รอลองใหม่
+  if (/503|429|overload|unavailable|high demand|temporar|rate limit|แน่น|ใช้งานหนัก|timeout|deadline|fetch failed|econn|network|socket|parse|เดี๋ยวก็ผ่าน/.test(s)) return true;
+  // ไม่ชัด → ถือเป็นชั่วคราว (ผู้ใช้อยากให้ "รอจนได้") · MAX_ATTEMPTS คุมไม่ให้วนฟรีตลอด
+  return true;
+}
 
-async function report(id, ok, payload) {
-  const status = ok === true ? 'done' : 'error';
+async function report(id, status, payload) { // status: 'done' | 'error' | 'retry'
   const body = status === 'done' ? { id, status, result: payload } : { id, status, error: payload };
   await fetch(`${BASE}/api/clip-transcript/worker`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -65,13 +75,18 @@ async function loop() {
 
     if (!job) { await sleep(IDLE_MS); continue; }
 
-    log(`▶️ งานใหม่: [${job.platform}/${job.kind}] ${String(job.url).slice(0, 60)}`);
+    const tag = job.id.slice(0, 8);
+    const tries = (job.attempts || 0) + 1;
+    log(`▶️ ทำงาน [${job.platform}/${job.kind}] ครั้งที่ ${tries}: ${String(job.url).slice(0, 55)}`);
     try {
       const res = await processJob(job);
-      if (res.ok) { await report(job.id, true, res.result); log(`✅ เสร็จ: ${job.id.slice(0, 8)}`); }
-      else { await report(job.id, false, res.error); log(`❌ ไม่สำเร็จ (ไม่ retry — ให้ส่งใหม่เอง): ${res.error?.slice(0, 80)}`); }
+      if (res.ok) { await report(job.id, 'done', res.result); log(`✅ เสร็จ: ${tag}`); }
+      else if (isTransient(res.error, res.errorType)) { await report(job.id, 'retry', res.error); log(`⏳ Gemini แน่น → เข้าคิวรอลองใหม่เองใน ~3 นาที (${tag}): ${res.error?.slice(0, 70)}`); }
+      else { await report(job.id, 'error', res.error); log(`❌ ถอดไม่ได้จริง (กดใหม่ไม่ช่วย) ${tag}: ${res.error?.slice(0, 70)}`); }
     } catch (e) {
-      await report(job.id, false, e.message); log(`❌ error (ไม่ retry): ${e.message?.slice(0, 80)}`);
+      // exception ระดับเครือข่าย/โค้ด = ชั่วคราว → รอลองใหม่ (ไม่ทิ้งงาน)
+      if (isTransient(e.message, '')) { await report(job.id, 'retry', e.message); log(`⏳ สะดุด → รอลองใหม่เอง (${tag}): ${e.message?.slice(0, 70)}`); }
+      else { await report(job.id, 'error', e.message); log(`❌ error (${tag}): ${e.message?.slice(0, 70)}`); }
     }
   }
 }

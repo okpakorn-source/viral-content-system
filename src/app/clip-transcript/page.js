@@ -37,6 +37,11 @@ export default function ClipTranscriptPage() {
   const [submitting, setSubmitting] = useState(false);
   // ★ 26 มิ.ย.: ไฟสัญญาณ Gemini แบบเรียลไทม์ (เขียว=พร้อม แดง=แน่น เหลือง=ช้า/ไม่แน่ใจ)
   const [gem, setGem] = useState(null); // { light, msg, ms }
+  // ★ 26 มิ.ย.: นาฬิกาเดินวินาที — ใช้นับถอยหลัง "ลองใหม่ในอีก ~X" ตอนงานรอ Gemini หาย (retry_wait)
+  const [nowMs, setNowMs] = useState(Date.now());
+  // ★ 26 มิ.ย.: แผงคิวรวม — เห็นทุกคลิปที่รออยู่/กำลังลองใหม่/เสร็จล่าสุด
+  const [queueList, setQueueList] = useState(null); // { counts, active[], recent[] }
+  const [queueListOpen, setQueueListOpen] = useState(true);
 
   const loadCases = async () => {
     try { const r = await fetch('/api/clip-transcript/cases?limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setCases(d.cases || []); } catch {}
@@ -44,7 +49,13 @@ export default function ClipTranscriptPage() {
   const loadInsightCases = async () => {
     try { const r = await fetch('/api/clip-transcript/cases?kind=insight&limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setInsightCases(d.cases || []); } catch {}
   };
-  useEffect(() => { loadCases(); loadInsightCases(); }, []);
+  // ★ 26 มิ.ย.: โหลดแผงคิวรวม (ทุกคลิปที่กำลังรอ/ลองใหม่/เสร็จล่าสุด)
+  const loadQueueList = async () => {
+    try { const r = await fetch('/api/clip-transcript/queue-list', { cache: 'no-store' }); const d = await r.json(); if (d.success) setQueueList(d); } catch {}
+  };
+  useEffect(() => { loadCases(); loadInsightCases(); loadQueueList(); }, []);
+  // ★ 26 มิ.ย.: รีเฟรชแผงคิวทุก 10 วิ — เห็นคิวเดินสด แม้ไม่ได้ส่งงานเอง (คนอื่นในทีมส่งก็เห็น)
+  useEffect(() => { const t = setInterval(loadQueueList, 10000); return () => clearInterval(t); }, []);
   // ★ 26 มิ.ย.: เช็กสถานะ Gemini เรียลไทม์ — โหลดหน้า + ทุก 45 วิ (server cache 30 วิ กันยิงถี่)
   useEffect(() => {
     let alive = true;
@@ -59,6 +70,12 @@ export default function ClipTranscriptPage() {
     const t = setInterval(check, 45000);
     return () => { alive = false; clearInterval(t); };
   }, []);
+  // ★ 26 มิ.ย.: เดินนาฬิกาทุก 1 วิ เฉพาะตอนมีงาน "รอลองใหม่" (retry_wait) — ให้ตัวนับถอยหลังขยับเห็นชัด
+  useEffect(() => {
+    if (queueJob?.status !== 'retry_wait' || !queueJob?.nextRetryAt) return;
+    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [queueJob?.status, queueJob?.nextRetryAt]);
 
   const platformIcon = (p) => p === 'youtube' ? '📺' : p === 'tiktok' ? '🎵' : p === 'meta' ? '📘' : '🎬';
 
@@ -82,10 +99,10 @@ export default function ClipTranscriptPage() {
       const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim() }) });
       const d = await safeJson(r);
       if (d.success) { setInsight(d.data); loadInsightCases(); }   // ★ รีเฟรชคลังประเด็นทันทีที่ถอดสำเร็จ
-      // ★ 26 มิ.ย. (ผู้ใช้สั่งปิด auto-retry): Gemini แน่น → ขึ้น error ทันที บอกให้รอแล้วกดใหม่เอง
-      //   ไม่ส่งเข้าคิว/ไม่วน retry ลับหลัง (ผู้ใช้จะได้รู้ชัดว่าต้องส่งใหม่เมื่อไหร่ ไม่งงว่าทำซ้ำอยู่ไหม)
+      // ★ 26 มิ.ย.: กดถอด "ทันที" แล้ว Gemini แน่น → ชวนไปกด "ส่งเข้าคิว" (ระบบรอ+รันเองจน Gemini ว่าง)
+      //   ปุ่มถอดตรง = ลองเดี๋ยวนี้ (ไม่วนเงียบ) · ปุ่มคิว = หย่อนทิ้งไว้ ระบบจัดการให้ → แยกชัด ไม่งง
       else if (/Gemini มีคนใช้งานหนัก|แน่นชั่วคราว|503|overload/i.test(String(d.error || ''))) {
-        setErr('⏳ ตอนนี้ Gemini แน่น ถอดไม่ผ่าน — รอสัก 1-2 นาทีแล้วกด "ถอดประเด็นข่าว" ใหม่อีกครั้ง (ดูไฟสัญญาณ เขียวค่อยกด)');
+        setErr('⏳ ตอนนี้ Gemini แน่น ถอดทันทีไม่ผ่าน — กดปุ่ม "📥 ส่งเข้าคิว" ด้านล่างแทน ระบบจะรอแล้วรันให้เองจน Gemini ว่าง (ปิดหน้าได้ ผลเข้าคลังเอง ไม่ต้องเฝ้า/กดซ้ำ)');
       }
       else setErr(d.error || 'ถอดประเด็นไม่สำเร็จ');
     } catch (e) { setErr(e.message); }
@@ -107,18 +124,21 @@ export default function ClipTranscriptPage() {
     setSubmitting(false);
   };
   const pollJob = async (jobId) => {
-    for (let i = 0; i < 300; i++) { // poll สูงสุด ~20 นาที (4 วิ/รอบ) — ปิดหน้าได้ งานทำต่อเบื้องหลัง
-      await new Promise(res => setTimeout(res, 4000));
+    // poll นานพอครอบ ~4 ชม. (retry_wait หน่วง 15 วิ ลดภาระ) — ปิดหน้าได้ งานทำต่อเบื้องหลัง ผลเข้าคลังเอง
+    for (let i = 0; i < 2000; i++) {
+      let st = 'pending';
       try {
         const r = await fetch('/api/clip-transcript/job-status?id=' + jobId, { cache: 'no-store' });
         const d = await safeJson(r);
         if (!d.success) { setQueueJob(j => ({ ...j, status: 'error', error: d.error || 'หางานในคิวไม่เจอ' })); return; }
-        // ★ 26 มิ.ย.: เก็บ statusNote/attempts → โชว์ตอน retry_wait (Gemini แน่น รอลองใหม่อัตโนมัติ)
-        setQueueJob({ jobId, status: d.status, position: d.position, platform: d.platform, result: d.result, error: d.error, statusNote: d.statusNote, attempts: d.attempts });
+        st = d.status;
+        // ★ 26 มิ.ย.: เก็บ statusNote/attempts/nextRetryAt → โชว์ตอน retry_wait (Gemini แน่น รอลองใหม่อัตโนมัติ + นับถอยหลัง)
+        setQueueJob({ jobId, status: d.status, position: d.position, platform: d.platform, result: d.result, error: d.error, statusNote: d.statusNote, attempts: d.attempts, nextRetryAt: d.nextRetryAt });
         if (d.status === 'done') { setInsight(d.result); loadInsightCases(); return; }
         if (d.status === 'error') return;
         // 'pending' | 'processing' | 'retry_wait' → poll ต่อ (retry_wait = Gemini แน่น ระบบลองใหม่เองทุก ~3 นาที)
       } catch { /* เน็ตสะดุด — รอบหน้าลองใหม่ */ }
+      await new Promise(res => setTimeout(res, st === 'retry_wait' ? 15000 : 4000));
     }
     // poll หมดเวลาแสดงผลสด — งานยัง "ทำต่อเบื้องหลัง" ผลจะเข้าคลังเอง (ไม่ใช่ error)
     setQueueJob(j => ({ ...(j || {}), _pollEnded: true }));
@@ -213,11 +233,57 @@ export default function ClipTranscriptPage() {
               background: queueJob.status === 'error' ? 'rgba(239,68,68,0.08)' : queueJob.status === 'done' ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.08)' }}>
               {queueJob.status === 'pending' && <>⏳ <b>อยู่ในคิวเครื่องทีม</b> — ลำดับที่ {queueJob.position || '?'} · {platformIcon({ youtube: 'youtube', tiktok: 'tiktok', meta: 'meta' }[queueJob.platform])} กำลังรอเครื่องทีมดึงไปถอด (เปิดหน้านี้ค้างไว้ ผลจะเด้งขึ้นเอง)</>}
               {queueJob.status === 'processing' && <>🔧 <b>เครื่องทีมกำลังถอดอยู่...</b> {platformIcon(queueJob.platform)} (อาจใช้เวลา 1-3 นาทีต่อคลิป)</>}
-              {/* ★ 26 มิ.ย.: Gemini แน่น → ระบบลองใหม่เองทุก ~3 นาที จนได้ผล (ปิดหน้าได้ ผลเข้าคลัง) */}
-              {queueJob.status === 'retry_wait' && <>🟡 <b>Gemini แน่นชั่วคราว — ระบบกำลังลองใหม่เองอัตโนมัติ</b><br />{queueJob.statusNote || `จะลองใหม่ทุก ~3 นาที จนได้ผล${queueJob.attempts ? ` (ลองไปแล้ว ${queueJob.attempts} ครั้ง)` : ''}`}<br /><span style={{ fontSize: 11.5, opacity: 0.85 }}>👉 ปิดหน้านี้/มือถือได้เลย ไม่ต้องส่งซ้ำ — พอ Gemini ว่าง ระบบถอดให้แล้วเก็บเข้า "คลังบทถอด" ด้านล่างอัตโนมัติ</span></>}
+              {/* ★ 26 มิ.ย.: Gemini แน่น → ระบบลองใหม่เองทุก ~3 นาที จนได้ผล + นับถอยหลังสด (ปิดหน้าได้ ผลเข้าคลัง) */}
+              {queueJob.status === 'retry_wait' && (() => {
+                const remainS = Math.max(0, Math.round(((queueJob.nextRetryAt ? new Date(queueJob.nextRetryAt).getTime() : nowMs) - nowMs) / 1000));
+                const mm = Math.floor(remainS / 60), ss = remainS % 60;
+                return <>🟡 <b>Gemini แน่นอยู่ — งานของคุณ &quot;อยู่ในคิว&quot; ระบบลองใหม่ให้เองอัตโนมัติ</b><br />
+                  ✅ ลองไปแล้ว <b>{queueJob.attempts || 0}</b> ครั้ง · {remainS > 0
+                    ? <>⏱️ รอบถัดไปในอีก <b>{mm > 0 ? `${mm} นาที ` : ''}{ss} วินาที</b></>
+                    : <>🔄 <b>กำลังลองใหม่เดี๋ยวนี้…</b></>}
+                  <br /><span style={{ fontSize: 11.5, opacity: 0.85 }}>👉 ปิดหน้านี้/ปิดมือถือได้เลย ไม่ต้องเฝ้า/ไม่ต้องส่งซ้ำ — พอ Gemini ว่าง ระบบถอดให้แล้วเก็บเข้า &quot;คลังประเด็นข่าว&quot; ด้านล่างอัตโนมัติ</span></>;
+              })()}
               {queueJob.status === 'done' && <>✅ <b>ถอดเสร็จแล้ว</b> — ผลอยู่ด้านล่าง + เก็บเข้าคลังประเด็นข่าวให้แล้ว</>}
               {queueJob.status === 'error' && <>❌ <b>ถอดไม่สำเร็จ</b> — {queueJob.error || 'ลองส่งใหม่อีกครั้ง'}</>}
               {queueJob._pollEnded && queueJob.status !== 'done' && queueJob.status !== 'error' && <><br /><span style={{ fontSize: 11.5, opacity: 0.85 }}>⏱️ หยุดอัปเดตสดแล้ว แต่ <b>งานยังทำต่อเบื้องหลัง</b> — กลับมาดูผลที่ "คลังบทถอด" ด้านล่างได้เลย</span></>}
+            </div>
+          )}
+          {/* ★ 26 มิ.ย.: แผงคิวรวม — เห็นทุกคลิปที่ส่งเข้าคิว (รออยู่/รอ Gemini หาย/ถอดอยู่/เสร็จล่าสุด) */}
+          {queueList && (queueList.counts.active > 0 || (queueList.recent && queueList.recent.length > 0)) && (
+            <div style={{ marginTop: 14, border: '1px solid rgba(245,158,11,0.25)', borderRadius: 12, background: 'rgba(245,158,11,0.04)', overflow: 'hidden' }}>
+              <button onClick={() => setQueueListOpen(o => !o)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 14px', background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 800 }}>
+                <span>📋 คิวคลิป {queueList.counts.active > 0 ? `— รออยู่ ${queueList.counts.active} คลิป` : '— ว่าง'}{queueList.counts.retry_wait > 0 ? ` · 🟡 รอ Gemini ${queueList.counts.retry_wait}` : ''}{queueList.counts.processing > 0 ? ` · 🔧 ถอดอยู่ ${queueList.counts.processing}` : ''}</span>
+                <span style={{ opacity: 0.6 }}>{queueListOpen ? '▲' : '▼'}</span>
+              </button>
+              {queueListOpen && (
+                <div style={{ padding: '0 12px 12px' }}>
+                  {queueList.active.length === 0 && <div style={{ fontSize: 12, opacity: 0.7, padding: '4px 2px' }}>ไม่มีคลิปรออยู่ — ส่งลิงก์เข้าคิวได้เลย</div>}
+                  {queueList.active.map(j => {
+                    const remainS = j.status === 'retry_wait' && j.nextRetryAt ? Math.max(0, Math.round((new Date(j.nextRetryAt).getTime() - nowMs) / 1000)) : 0;
+                    const badge = j.status === 'retry_wait'
+                      ? `🟡 รอ Gemini (ลอง ${j.attempts} ครั้ง${remainS > 0 ? ` · อีก ${Math.floor(remainS / 60) > 0 ? `${Math.floor(remainS / 60)}น ` : ''}${remainS % 60}ว` : ' · กำลังลอง'})`
+                      : j.status === 'processing' ? '🔧 กำลังถอด' : '⏳ รอคิว';
+                    return (
+                      <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', borderTop: '1px solid rgba(255,255,255,0.05)', fontSize: 12 }}>
+                        <span>{platformIcon(j.platform)}</span>
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.85 }}>{String(j.url).replace(/^https?:\/\/(www\.)?/, '').slice(0, 46)}</span>
+                        <span style={{ fontWeight: 700, color: j.status === 'retry_wait' ? '#fbbf24' : j.status === 'processing' ? '#60a5fa' : '#9ca3af', whiteSpace: 'nowrap' }}>{badge}</span>
+                      </div>
+                    );
+                  })}
+                  {queueList.recent && queueList.recent.length > 0 && (
+                    <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed rgba(255,255,255,0.1)' }}>
+                      <div style={{ fontSize: 10.5, opacity: 0.55, marginBottom: 3 }}>เสร็จ/ล้ม ล่าสุด</div>
+                      {queueList.recent.map(j => (
+                        <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 2px', fontSize: 11.5, opacity: 0.7 }}>
+                          <span>{j.status === 'done' ? '✅' : '❌'}</span>
+                          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(j.url).replace(/^https?:\/\/(www\.)?/, '').slice(0, 44)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
           <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted, #888)', lineHeight: 1.6 }}>

@@ -37,9 +37,10 @@ export async function GET() {
   }
 }
 
-// ★ 26 มิ.ย.: auto-retry ตอน Gemini แน่น — ลองใหม่ทุก ~3 นาที จนได้ผล (สูงสุด ~2 ชม.)
+// ★ 26 มิ.ย.: auto-retry ตอน Gemini แน่น — ลองใหม่ทุก ~3 นาที จนได้ผล (สูงสุด ~4 ชม.)
+//   ขยาย 2→4 ชม. (ผู้ใช้สั่ง): บางวัน Gemini แน่นยาว — ให้คิวรอจน Gemini ว่างแล้วรันเอง ไม่ทิ้งงานเร็วเกิน
 const RETRY_DELAY_MS = 3 * 60 * 1000; // รอ 3 นาที/ครั้ง
-const MAX_ATTEMPTS = 40;              // ~2 ชม. แล้วเลิก (Gemini ไม่น่าจะแน่นนานขนาดนั้น)
+const MAX_ATTEMPTS = 80;              // ~4 ชม. แล้วเลิก
 
 export async function POST(request) {
   try {
@@ -63,7 +64,7 @@ export async function POST(request) {
         return {
           ...ex, status: 'retry_wait', attempts, startedAt: null,
           nextRetryAt: new Date(Date.now() + RETRY_DELAY_MS).toISOString(),
-          statusNote: `Gemini แน่นชั่วคราว — ระบบจะลองใหม่เองทุก ~3 นาที จนได้ผล (ลองไปแล้ว ${attempts} ครั้ง) · ปิดหน้าได้ ผลจะเข้าคลัง`,
+          statusNote: `⏳ Gemini แน่น — อยู่ในคิว ระบบลองใหม่ให้เองทุก ~3 นาที จน Gemini ว่าง (ลองไปแล้ว ${attempts} ครั้ง) · ปิดหน้าได้ ผลจะเข้าคลังอัตโนมัติ`,
           lastError: String(error).slice(0, 200),
         };
       });
