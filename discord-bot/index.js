@@ -55,12 +55,12 @@ async function processQueue() {
   // แจ้งคนที่อยู่ในคิวว่าตำแหน่งเปลี่ยน
   queue.forEach(async (q, idx) => {
     try {
-      await q.processingMsg.edit(`📋 คิวลำดับที่ **${idx + 1}** — ${getQueueStatus()}\nรอสักครู่นะครับ...`).catch(() => {});
+      await q.processingMsg.edit(`📋 อยู่ในคิว — ลำดับที่ **${idx + 1}** · รอสักครู่นะครับ ⏳`).catch(() => {});
     } catch {}
   });
 
   try {
-    await job.processingMsg.edit(`⚡ เริ่มประมวลผลแล้ว! กำลังอ่านข้อมูลและปั้นบทความไวรัล...\n${getQueueStatus()}`);
+    await job.processingMsg.edit('⚡ เริ่มประมวลผลแล้ว — กำลังปั้นบทความให้ครับ...');
     await processNewsJob(job);
   } catch (err) {
     console.error('[Queue] Job failed:', err.message);
