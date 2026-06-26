@@ -157,7 +157,7 @@ export async function callGeminiVideo({ prompt, youtubeUrl, model = 'gemini-3.5-
 // ★ 22 มิ.ย.: ลองใหม่อัตโนมัติเมื่อ Gemini ล่มชั่วคราว (503 high demand / 429 / เน็ต / parse ไม่ได้)
 //   สาเหตุจริงที่ "เมื่อกี้ทำได้ อยู่ๆพัง" = gemini-3.5-flash โดนใช้งานหนักเป็นช่วง ตอบ 503 สุ่มๆ
 //   ★ ใช้กับเครื่องมือ clip-insight (วิดีโอ) เท่านั้น — ไม่แตะ callGemini(text) ของเวิร์กโฟลว์ข่าว
-async function _withGeminiRetry(fn, { tries = 6, label = 'Gemini' } = {}) {
+async function _withGeminiRetry(fn, { tries = 3, label = 'Gemini' } = {}) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
     try { return await fn(); }
@@ -170,9 +170,10 @@ async function _withGeminiRetry(fn, { tries = 6, label = 'Gemini' } = {}) {
       const transient = [429, 500, 502, 503].includes(status) // ตัด 504 (deadline/our-timeout) ออก
         || /high demand|overload|unavailable|temporar|fetch failed|ECONNRESET|socket hang up|network|parse ไม่ได้|ไม่ส่งข้อมูลกลับ \(/i.test(msg);
       if (!transient || i === tries - 1) throw e;
-      // ★ 26 มิ.ย.: 503 ของ gemini-3.5-flash video มักแน่นเป็นช่วง 10-60 วิ → กระจาย retry กว้างขึ้น
-      //   (เดิม 4 ครั้งใน ~15 วิ โดน 503 หมด) ตอนนี้ 6 ครั้ง หน่วงสูงสุด 30 วิ ครอบสปก์ยาวกว่า → ผู้ใช้กดเองน้อยลง
-      const wait = Math.min(2500 * Math.pow(2, i), 30000) + Math.floor(Math.random() * 800); // ~2.5·5·10·20·30s + jitter
+      // ★ 26 มิ.ย.: retry สั้นๆ พอจับ "503 ชั่ววูบ" (gemini-3.5-flash video แน่นเป็นช่วง)
+      //   ถ้ายังไม่ผ่าน → ปล่อยให้ throw เพื่อให้ buildInsight ถอยไป fallback "ถอดเสียง+OpenAI" เร็วๆ
+      //   (ไม่หน่วงนานก่อน fallback — fallback คือทางที่ไม่ง้อ Gemini ได้ผลชัวร์กว่ารอ 503 หาย)
+      const wait = 2500 * Math.pow(2, i) + Math.floor(Math.random() * 700); // ~2.5s · 5s + jitter
       console.warn(`[${label}] ชั่วคราว (${status || ''} ${msg.slice(0, 60)}) → ลองใหม่ ${i + 1}/${tries - 1} ใน ${wait}ms`);
       await new Promise(r => setTimeout(r, wait));
     }
