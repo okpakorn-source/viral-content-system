@@ -29,6 +29,20 @@ function getGeminiClient() {
   return geminiClient;
 }
 
+// ★ 26 มิ.ย. (ผู้ใช้สั่ง): คีย์แยกสำหรับ "ถอดประเด็นจากคลิป (วิดีโอ)" เท่านั้น — แยกโควต้าจากระบบทำข่าว
+//   ใช้ GEMINI_VIDEO_API_KEY ถ้าตั้งไว้ · ไม่ตั้ง = fallback คีย์เดิม (กันพังถ้าลืมตั้ง) · 🔴 ใช้เฉพาะ callGeminiVideo/VideoFile
+let geminiVideoClient = null;
+function videoApiKey() { return process.env.GEMINI_VIDEO_API_KEY || process.env.GEMINI_API_KEY; }
+function getGeminiVideoClient() {
+  if (!geminiVideoClient) {
+    const apiKey = videoApiKey();
+    if (!apiKey) { console.warn('⚠️ ไม่มีคีย์ Gemini สำหรับวิดีโอ'); return null; }
+    geminiVideoClient = new GoogleGenerativeAI(apiKey);
+    console.log(`[GeminiVideo] 🔑 ใช้คีย์: ${process.env.GEMINI_VIDEO_API_KEY ? 'GEMINI_VIDEO_API_KEY (แยกสำหรับถอดคลิป)' : 'GEMINI_API_KEY (fallback)'}`);
+  }
+  return geminiVideoClient;
+}
+
 /**
  * เรียก Gemini — ส่ง prompt + response เป็น JSON
  * เหมาะสำหรับ: extraction, summarization, fast tasks
@@ -105,8 +119,8 @@ export function isGeminiAvailable() {
  *   timeout ยาว (3 นาที) เพราะดูคลิปทั้งเรื่อง | ใช้กับเครื่องมือ clip-insight เท่านั้น (แยกจากเวิร์กโฟลว์ข่าว)
  */
 export async function callGeminiVideo({ prompt, youtubeUrl, model = 'gemini-3.5-flash', temperature = 0.2, maxTokens = 8000 }) {
-  const client = getGeminiClient();
-  if (!client) throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า');
+  const client = getGeminiVideoClient(); // ★ คีย์แยกสำหรับถอดคลิป
+  if (!client) throw new Error('คีย์ Gemini สำหรับวิดีโอไม่ได้ตั้งค่า');
 
   console.log(`[GeminiVideo] model=${model}, url=${String(youtubeUrl).slice(0, 70)}`);
 
@@ -217,8 +231,8 @@ function _repairTruncatedJson(raw) {
  *   videoBuffer = Buffer ของวิดีโอ (mp4) | ลบไฟล์บน Gemini ทิ้งหลังใช้เสร็จ
  */
 export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'video/mp4', model = 'gemini-3.5-flash', temperature = 0.2, maxTokens = 8000 }) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า');
+  const apiKey = videoApiKey(); // ★ คีย์แยกสำหรับถอดคลิป (Files API ก็ใช้คีย์เดียวกัน)
+  if (!apiKey) throw new Error('คีย์ Gemini สำหรับวิดีโอไม่ได้ตั้งค่า');
   if (!videoBuffer || videoBuffer.length < 10000) throw new Error('ไฟล์วิดีโอเล็ก/ว่างเกินไป');
 
   const { GoogleAIFileManager, FileState } = await import('@google/generative-ai/server');
@@ -246,7 +260,7 @@ export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'vid
     }
     if (file.state !== FileState.ACTIVE) throw new Error(`Gemini ประมวลผลวิดีโอไม่สำเร็จ (state=${file.state})`);
 
-    const client = getGeminiClient();
+    const client = getGeminiVideoClient(); // ★ คีย์แยกสำหรับถอดคลิป
     const genModel = client.getGenerativeModel({
       model,
       generationConfig: { temperature, maxOutputTokens: maxTokens, responseMimeType: 'application/json' },
