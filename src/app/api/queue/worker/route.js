@@ -83,8 +83,22 @@ export async function POST(req) {
           throw new Error(`process API failed: ${res.status} — ${errText.substring(0, 200)}`);
         }
 
-        const data = await res.json();
-        
+        // ★ 26 มิ.ย.: route อาจคืนหน้า HTML (timeout/crash ระดับ platform) แทน JSON
+        //   เดิม res.json() พังเป็น "Unexpected token '<'" → job.error เก็บข้อความดิบ → โชว์ให้ผู้ใช้
+        //   parse แบบปลอดภัย: ถ้าได้ HTML แปลงเป็นข้อความสะอาดอ่านออก
+        let data;
+        {
+          const rawText = await res.text();
+          try {
+            data = JSON.parse(rawText);
+          } catch {
+            const looksHtml = /<!DOCTYPE|<html|FUNCTION_INVOCATION|error occurred|deadline|timed? ?out/i.test(rawText);
+            throw new Error(looksHtml
+              ? 'เซิร์ฟเวอร์ทำปกใช้เวลานานเกิน/ขัดข้องชั่วคราว — ลองสร้างปกใหม่อีกครั้ง (ถ้าใส่ลิงก์แหล่งรูปเป็นคลิป FB/วิดีโอ ลองเอาออกก่อน)'
+              : `เซิร์ฟเวอร์ตอบกลับผิดรูปแบบ (${res.status}) — ลองใหม่อีกครั้ง`);
+          }
+        }
+
         // ★ Cover ที่ render สำเร็จแต่ติด save-gate (success:false + base64) ก็นับเป็น completed
         //   — เก็บ result เต็มให้ client ตัดสินใจแสดง warning เอง (เทียบเท่า sync path ที่ได้ JSON เต็ม)
         if (res.ok && (data.success || (isCoverJob && data.base64))) {

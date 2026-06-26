@@ -2018,8 +2018,14 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
       out._bucketCounts = judged._bucketCounts || null;
       return out;
     }
-    // ดึงจากลิงก์ไม่ได้เลย (เช่น FB scrape ล้ม) → ถอยไปรีเสิร์ชปกติ กันปกว่างไม่มีภาพ
-    console.log('[MultiAgent] ⚠️ โหมดเฉพาะแหล่ง แต่ดึงรูปจากลิงก์ไม่ได้เลย → ถอยไปรีเสิร์ชปกติ กันปกว่างเปล่า');
+    // ดึงจากลิงก์ไม่ได้เลย (เช่น FB วิดีโอ scrape เฟรมไม่ได้) — ไม่ถอยไปรีเสิร์ชเต็ม
+    //   เพราะผู้ใช้เลือก "เฉพาะภาพในลิงก์" เจตนาชัด + กันวิ่ง pipeline ยาว (ที่ผู้ใช้ไม่ต้องการ + เคยทำ dev ค้าง)
+    //   → คืนว่าง ให้ route แจ้งผู้ใช้ชัดเจน (ลองลิงก์อื่น/โหมดผสม) เร็ว ไม่ค้าง
+    console.log('[MultiAgent] ⚠️ โหมดเฉพาะแหล่ง แต่ดึงรูปจากลิงก์ไม่ได้เลย → คืนว่าง (ไม่รีเสิร์ชแทน)');
+    const empty = [];
+    empty.allCandidates = [];
+    empty._sourceOnlyEmpty = true;
+    return empty;
   }
 
   console.log('============================================');

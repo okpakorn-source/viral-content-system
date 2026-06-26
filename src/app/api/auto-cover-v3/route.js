@@ -116,6 +116,15 @@ async function _renderCoverV3(request) {
       { sourceOnly }
     );
 
+    // ★ 26 มิ.ย.: โหมดเฉพาะแหล่ง แต่ดึงรูปจากลิงก์ไม่ได้เลย → แจ้งชัดเจน ไม่วิ่ง pipeline ต่อ (กันค้าง/ปกว่าง)
+    //   มักเกิดกับลิงก์ FB วิดีโอ (ดึงเฟรมไม่ได้บนเซิร์ฟเวอร์เบา) — บอกผู้ใช้ให้ลองลิงก์อื่น/โหมดผสม
+    if (sourceOnly && (!selected || selected.length === 0)) {
+      const msg = 'ดึงรูปจากลิงก์แหล่งรูปไม่ได้เลย (โหมด "เฉพาะภาพในลิงก์") — ลิงก์คลิป Facebook มักดึงเฟรมไม่ได้จากเซิร์ฟเวอร์ ลองวางลิงก์ YouTube/TikTok/ข่าวที่มีภาพ หรือสลับเป็นโหมด "ผสม"';
+      console.warn('[CoverV3] 🛑 sourceOnly แต่ไม่ได้ภาพจากลิงก์เลย → แจ้งผู้ใช้');
+      await markQueueJob('failed', { error: msg });
+      return NextResponse.json({ success: false, error: msg, errorType: 'SOURCE_ONLY_NO_IMAGES' }, { status: 200 });
+    }
+
     // ดาวน์โหลดภาพเป็น buffer (เฉพาะตัวท็อปที่ judge คัดแล้ว)
     // rev.20: ดาวน์โหลด 14 (เดิม 10) — เผื่อ dedup/quality ตัดแล้วยังเหลือภาพดี-ต่างกัน ≥5 ใบ (โครง 3 ขวา + วงกลม)
     // rev.20g: ★ ให้ความสำคัญ "ภาพถ่ายจริง" (Google/บทความ/Tavily = http url) ก่อน "เฟรมวิดีโอ" (data: URI จาก YouTube/Reels)
