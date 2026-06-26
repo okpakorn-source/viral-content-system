@@ -123,12 +123,24 @@ export function createStore(name) {
       async getAll() {
         try {
           const sb = getSupabase();
-          const { data, error } = await sb
-            .from(TABLE)
-            .select('data')
-            .eq('store_name', name)
-            .order('created_at', { ascending: false });
-          
+          // ★ 26 มิ.ย.: ดึงครบทุกแถว (แบ่งหน้า 1000) — เดิม Supabase คืนแค่ 1000 แถวใหม่สุด → แถวเก่าเกินนั้น "กำพร้า"
+          //   ระบบลบของเก่า (auto-purge) ใช้ getAll → มองไม่เห็นแถวกำพร้า → ตารางบวมจน egress พุ่ง (เคยโดน 21k)
+          //   เลนเล็ก: จบหน้าเดียว (เร็วเท่าเดิม) · cap 20000 กัน loop ค้าง
+          let data = [];
+          let error = null;
+          for (let from = 0; from < 20000; from += 1000) {
+            const page = await sb
+              .from(TABLE)
+              .select('data')
+              .eq('store_name', name)
+              .order('created_at', { ascending: false })
+              .range(from, from + 999);
+            if (page.error) { if (from === 0) error = page.error; break; }
+            if (!page.data || page.data.length === 0) break;
+            data.push(...page.data);
+            if (page.data.length < 1000) break;
+          }
+
           if (error) {
             console.warn(`[Store:${name}] Supabase query error: ${error.message} — falling back to local file`);
             const localData = await _fileFallbackLoad(name);
