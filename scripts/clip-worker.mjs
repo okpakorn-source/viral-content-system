@@ -26,7 +26,8 @@ try {
 const log = (...a) => console.log(`[clip-worker ${new Date().toLocaleTimeString('th-TH')}]`, ...a);
 
 async function pullJob() {
-  const r = await fetch(`${BASE}/api/clip-transcript/worker`, { method: 'GET' });
+  // ★ 26 มิ.ย.: timeout 12 วิ — poll ต้องเร็ว (<2 วิ) ถ้าค้าง = connection เก่าตาย (server รีสตาร์ท) → ตัดทิ้ง เปิดใหม่
+  const r = await fetch(`${BASE}/api/clip-transcript/worker`, { method: 'GET', signal: AbortSignal.timeout(12000) });
   const d = await r.json().catch(() => ({}));
   return d?.job || null;
 }
@@ -79,7 +80,11 @@ async function loop() {
     const tries = (job.attempts || 0) + 1;
     log(`▶️ ทำงาน [${job.platform}/${job.kind}] ครั้งที่ ${tries}: ${String(job.url).slice(0, 55)}`);
     try {
-      const res = await processJob(job);
+      // ★ 26 มิ.ย.: กัน worker ค้าง — ถ้า processJob ค้างเกิน 16 นาที (เช่น server รีสตาร์ท → fetch ค้าง) → ข้ามไปลองใหม่ ไม่บล็อกคิว
+      const res = await Promise.race([
+        processJob(job),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('processJob timeout 16 นาที — server อาจรีสตาร์ท ข้ามไปลองใหม่')), 16 * 60 * 1000)),
+      ]);
       if (res.ok) { await report(job.id, 'done', res.result); log(`✅ เสร็จ: ${tag}`); }
       else if (isTransient(res.error, res.errorType)) { await report(job.id, 'retry', res.error); log(`⏳ Gemini แน่น → เข้าคิวรอลองใหม่เองใน ~3 นาที (${tag}): ${res.error?.slice(0, 70)}`); }
       else { await report(job.id, 'error', res.error); log(`❌ ถอดไม่ได้จริง (กดใหม่ไม่ช่วย) ${tag}: ${res.error?.slice(0, 70)}`); }
