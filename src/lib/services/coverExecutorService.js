@@ -256,7 +256,10 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
 // ── HERO (ช่องเอกใหญ่) — rev.22e: คืนค่า rev-14v ที่ "หน้าเด่นเต็มเฟรม ไม่ตัด" (ยุค CASE-096/159) ──
 //   (ค่าก่อนหน้า 0.90/0.26/0.82 ดัน faceTopAt 0.26 ชิดบนเกิน → หน้าโดนตัด/โชว์ตัว+กีตาร์ = CASE-183)
 //   + minFaceHFrac (25 มิ.ย.): หน้าต้องเด่นขั้นต่ำ — ซูมเข้าถ้าหน้าเล็ก/เน้นลำตัว (แก้ CASE-200) · ล็อกแบบ CASE-199
-const HERO_CROP   = { faceFrac: 0.82, faceTopAt: 0.38, maxFaceHFrac: 0.78, minFaceHFrac: 0.50 };
+// ★ 27 มิ.ย. (ผู้ใช้สั่ง CASE-224): ฮีโร่หน้าเล็กไป เหลือพื้นที่ว่าง/ตัวเยอะ หน้าไม่นำทรง → ซูมหน้าเข้าให้เต็มเฟรม
+//   faceFrac 0.82→0.94 (หน้ากินกว้างเฟรมเกือบเต็ม) + minFaceHFrac 0.50→0.60 (บังคับหน้าใหญ่ขั้นต่ำ)
+//   ★ ภาพไม่เสีย: guard "ซูมเฉพาะเมื่อหัวยังครบทั้งกว้าง-สูง" (บรรทัด ~234-241) กันหัวขาด/หน้าตัดครึ่งอยู่แล้ว
+const HERO_CROP   = { faceFrac: 0.94, faceTopAt: 0.38, maxFaceHFrac: 0.78, minFaceHFrac: 0.60 };
 // ── CIRCLE (วงกลม) — ⛔ คงค่าเดิม ห้ามแก้เมื่อแก้เลย์เอาต์อื่น ──
 const CIRCLE_CROP = { faceFrac: 0.80, faceTopAt: 0.45, maxFaceHFrac: 0.80 };
 // ── MOMENT (ช่องรอง) — ⛔ คงค่าเดิม ห้ามแก้เมื่อแก้เลย์เอาต์อื่น ──
