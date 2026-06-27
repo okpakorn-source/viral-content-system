@@ -240,20 +240,28 @@ ${templatesBlock}
       const circleA = valid.find(a => /circle/i.test(a.slotId));
       const fbC = circleA ? faceBoxes[circleA.imageIndex] : null;
       const circleArea = (fbC && fbC.x2 > fbC.x1) ? (fbC.x2 - fbC.x1) * (fbC.y2 - fbC.y1) : 0;
-      const needsSwap = circleA && (!fbC || !(fbC.x2 > fbC.x1) || (fbC.count || 1) >= 3 || circleArea < 0.02);
+      // ★ rev.22 (CASE-215): วงกลมต้องเป็น "หน้าเดี่ยวใหญ่ชัด" — เข้มขึ้น: ผิดถ้า ไม่มีหน้า/หน้า ≥2 คน/หน้าเล็กกว่า 3.5%
+      const needsSwap = circleA && (!fbC || !(fbC.x2 > fbC.x1) || (fbC.count || 1) >= 2 || circleArea < 0.035);
       if (needsSwap) {
         const usedIdx = new Set(valid.map(a => a.imageIndex));
         let best = -1, bestArea = 0;
         faceBoxes.forEach((fb, i) => {
-          if (usedIdx.has(i) || !fb || !(fb.x2 > fb.x1) || (fb.count || 1) > 2 || fb.hasText) return;
+          if (usedIdx.has(i) || !fb || !(fb.x2 > fb.x1) || (fb.count || 1) !== 1 || fb.hasText) return; // ★ เอาหน้าเดี่ยวเท่านั้น
           const area = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);
           if (area > bestArea) { bestArea = area; best = i; }
         });
         if (best >= 0 && bestArea > circleArea) {
           circleA.imageIndex = best;
-          circleA.crop = cropFromFaceBox(faceBoxes[best]);
-          circleA.why = 'วงกลม: สลับเป็นหน้าใหญ่ชัด (กันหน้าจิ๋ว/ภาพหมู่/ไม่มีหน้า)';
+          circleA.why = 'วงกลม: สลับเป็นหน้าเดี่ยวใหญ่ชัด (กันหน้าจิ๋ว/ภาพหมู่/ผม/ไม่มีหน้า)';
           console.log(`[CoverDirector] 🔧 circle swap → #${best} area ${bestArea.toFixed(3)} (เดิม ${circleArea.toFixed(3)})`);
+        }
+      }
+      // ★★ บังคับ "ทุกกรณี": วงกลมครอปที่ "ใบหน้า" เสมอ (1.5 = หน้าเต็มวง) — กันครอป Director ลงผม/ปาก/ช่วงตัว (CASE-215)
+      if (circleA) {
+        const fbNow = faceBoxes[circleA.imageIndex];
+        if (fbNow && fbNow.x2 > fbNow.x1) {
+          circleA.crop = cropFromFaceBox(fbNow, 1.5);
+          circleA.why = (circleA.why || 'วงกลม').slice(0, 60) + ' [หน้าเต็มวง]';
         }
       }
     } catch { /* guard ไม่สำเร็จ ไม่ critical */ }
@@ -365,11 +373,12 @@ export function tightenMomentCrops(assignments, faceBoxes = []) {
       continue;
     }
     if (!MOMENT_SLOT.test(a.slotId)) continue;
-    if (fArea < 0.012) continue; // หน้าจิ๋ว/ภาพบริบทล้วน — ปล่อยตามตั้งใจ
-    // rev.21e: ครอปแน่นขึ้นอีก (non-bottom 2.1→1.9, bottom 1.9→1.8) = ซูมหน้าเดียว ตัดคนที่เบียด/ตกเฟรมออก
+    if (fArea < 0.007) continue; // ★ rev.22 (CASE-215): ลด 0.012→0.007 ให้ช็อต "ยืน/หน้าเล็ก" โดนครอปอกขึ้นไปด้วย (เดิมเห็นลำตัว)
     const isBottom = /bottom/.test(a.slotId);
-    a.crop = cropFromFaceBox(fb, isBottom ? 1.8 : 1.9);
-    a.why = (a.why || '').slice(0, 52) + (isBottom ? ' [ซูมคนแน่น]' : ' [หน้าเต็มเฟรม]');
+    // ★ rev.22 (CASE-215): ภาพ ≥2 คนในช่องรอง → ครอปแน่นเหลือ "หน้าคนเด่นคนเดียวสะอาด" (กันหน้าคนข้างๆโดนตัดครึ่ง)
+    const multi = (fb.count || 1) >= 2;
+    a.crop = cropFromFaceBox(fb, multi ? 1.5 : (isBottom ? 1.8 : 1.9));
+    a.why = (a.why || '').slice(0, 52) + (multi ? ' [แยกคนเดียวสะอาด]' : (isBottom ? ' [ซูมคนแน่น]' : ' [หน้าเต็มเฟรม]'));
   }
   return assignments;
 }
