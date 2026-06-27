@@ -284,12 +284,28 @@ export async function updateJobStatus(jobId, status, extraData = {}) {
  * 
  * IMPORTANT: limit=1 by default to process ONE at a time (true queue behavior).
  */
+let _startupResetDone = false; // ★ 27 มิ.ย.: รีเซ็ตงานเครื่องทีมที่ค้างจาก restart ครั้งเดียวตอน module โหลดใหม่
+
 export async function getNextPendingJobs(limit = 1) {
   const store = await getQueueStore();
-  
+
   return withEnqueueLock(async () => {
     const allJobs = await store.getAll();
-    
+
+    // ★ 27 มิ.ย. (ผู้ใช้สั่ง): auto-reset ตอนเซิร์ฟเวอร์ "เพิ่งสตาร์ท" — งาน "เครื่องทีม" (ปก/ขุดคลิป) ที่ค้าง processing
+    //   เพราะ restart ฆ่ากลางคัน → กลับ pending ทันที (ไม่ต้องรอ cleanup 15 นาที + ไม่เห็น UI ค้าง "กำลังสร้างปก")
+    //   🔴 win32 เท่านั้น (เครื่องทีม long-lived process) · เฉพาะ jobType cover/mineclip — ไม่แตะงานข่าวที่รันบน Vercel
+    if (!_startupResetDone && process.platform === 'win32') {
+      _startupResetDone = true;
+      const orphans = allJobs.filter(j => j.status === 'processing' && (j.payload?.jobType === 'cover' || j.payload?.jobType === 'mineclip'));
+      for (const o of orphans) {
+        await store.update(o.id, (ex) => ({ ...ex, status: 'pending', startedAt: null, processingAt: null, updatedAt: new Date().toISOString(), _resetOnStartup: true })).catch(() => {});
+        o.status = 'pending'; // mutate in-memory ให้ processingCount นับถูก (สล็อตว่างทันที)
+        console.log(`[QueueService] 🔄 startup-reset: งาน ${o.payload?.jobType} ${String(o.id).slice(0, 10)} ค้างจาก restart → pending`);
+      }
+      if (orphans.length) console.log(`[QueueService] ✅ startup-reset รีเซ็ต ${orphans.length} งานเครื่องทีมที่ค้าง → จะหยิบทำใหม่`);
+    }
+
     // Count currently processing jobs
     const processingCount = allJobs.filter(j => j.status === 'processing').length;
     

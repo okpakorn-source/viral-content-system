@@ -396,16 +396,18 @@ async function _renderCoverV3(request) {
     //   v3_grid3 (3 ภาพ) เหลือเป็น "ทางเลือกสุดท้าย" เฉพาะตอนภาพ <4 ใบจริงๆ (เติม 4 ช่องไม่ได้)
     //   🔴 เดิม (rev.20f) ล็อก vt_ref_tri ตัวเดียวเมื่อภาพ ≥5 → ทุกปกหน้าตาเหมือนกันหมด = ที่ผู้ใช้ติว่า "ล็อก"
     // งบช่อง ≥5 → ใช้ "โครง 4+1 (5 ช่อง)" เท่านั้น (Director สลับเลือกตามเรื่อง ไม่ล็อก) · =4 → โครง 4 ช่อง
-    const fivePlusTemplates = [   // 4+1: hero เด่น + 3-4 ช่องขวา/รอบ + วงกลม
-      V3_TEMPLATES.vt_ref_tri,      // hero + ขวา 3 สะอาด + วงกลมทอง
-      V3_TEMPLATES.vt_hero_stack,   // hero + ขวา 3 + กรอบคลิปเขียว
-      V3_TEMPLATES.vt_quad_circle,  // สองฝ่าย ให้-รับ + วงกลมกลาง
-      V3_TEMPLATES.v3_viral5,       // hero + บน/กลาง/ล่าง + วงกลม
+    // ★ 27 มิ.ย. (ผู้ใช้สั่ง — ยึดโครง 215/212/206): vt_ref_tri (hero ซ้าย + 3 ขวา + วงกลม) เป็นหลักเสมอ
+    //   ตัด v3_viral5 ออก (ไม่ proven) · vt_quad_circle เหลือไว้เฉพาะข่าว "สองฝ่าย ให้-รับ" จริงๆ
+    const fivePlusTemplates = [
+      V3_TEMPLATES.vt_ref_tri,      // ★★ หลัก: hero + ขวา 3 สะอาด + วงกลมทอง (CASE-215/206/212)
+      V3_TEMPLATES.vt_hero_stack,   // สำรอง: hero + ขวา 3 + กรอบคลิปเขียว (ทรงเดียวกัน)
+      V3_TEMPLATES.vt_quad_circle,  // เฉพาะข่าวสองฝ่าย ให้-รับ + วงกลมกลาง
     ];
-    const fourTemplates = [       // โครง 4 ช่อง (มีวงกลม/กรอบไฮไลต์) — fallback เมื่อภาพดีได้แค่ 4
-      V3_TEMPLATES.vt_faces_circle, // hero + ขวา 2 + วงกลม
-      V3_TEMPLATES.vt_hero_br,      // อารมณ์น้ำตา (กรอบเหลือง)
-      V3_TEMPLATES.vt_hero_wide,    // คนเล่า/สัมภาษณ์ + คู่กรณี (กรอบขาว)
+    // ★ ตัด vt_hero_wide ออก — มีช่อง "คู่กรณี" ทำให้ดูดคนไม่เกี่ยวเข้ามา (บทเรียน CASE-217 เป๊ก)
+    //   เหลือแต่โครงตระกูล "hero + วงกลม" (ใกล้ vt_ref_tri สุด) + อารมณ์
+    const fourTemplates = [       // โครง 4 ช่อง (มีวงกลม) — เมื่อภาพดีได้แค่ 4
+      V3_TEMPLATES.vt_faces_circle, // ★ หลัก 4 ช่อง: hero + ขวา 2 + วงกลม (ทรงเดียวกับ vt_ref_tri)
+      V3_TEMPLATES.vt_hero_br,      // อารมณ์น้ำตา (กรอบเหลือง) — เฉพาะข่าวอารมณ์
     ];
     const richTemplates = (slotBudget >= 5 ? fivePlusTemplates : (slotBudget === 4 ? fourTemplates : []))
       .filter(t => t.slots.length <= imageBuffers.length);
