@@ -36,42 +36,14 @@ function buildProgressBar(elapsedSec, totalSec = 320, barLen = 14) {
   return `\`[${bar}] ${pctStr}%\``;
 }
 
-function getQueuePosition(item) {
-  return queue.indexOf(item) + 1;
-}
-
 function getQueueStatus() {
   if (activeCount === 0 && queue.length === 0) return '🟢 ว่าง';
   if (activeCount > 0 && queue.length === 0) return `🟡 กำลังทำงาน (${activeCount})`;
   return `🔴 กำลังทำงาน (${activeCount}) | รอคิว: ${queue.length}`;
 }
 
-async function processQueue() {
-  if (activeCount >= MAX_CONCURRENT || queue.length === 0) return;
-
-  const job = queue.shift();
-  activeCount++;
-
-  // แจ้งคนที่อยู่ในคิวว่าตำแหน่งเปลี่ยน
-  queue.forEach(async (q, idx) => {
-    try {
-      await q.processingMsg.edit(`📋 อยู่ในคิว — ลำดับที่ **${idx + 1}** · รอสักครู่นะครับ ⏳`).catch(() => {});
-    } catch {}
-  });
-
-  try {
-    await job.processingMsg.edit('⚡ เริ่มประมวลผลแล้ว — กำลังปั้นบทความให้ครับ...');
-    await processNewsJob(job);
-  } catch (err) {
-    console.error('[Queue] Job failed:', err.message);
-  } finally {
-    activeCount--;
-    // ดึงงานถัดไป
-    if (queue.length > 0) {
-      processQueue();
-    }
-  }
-}
+// ★ 27 มิ.ย.: ลบ processQueue/getQueuePosition (คิวภายในบอท) ทิ้ง — ย้ายไปใช้ "คิวเซิร์ฟเวอร์"
+//   (/api/queue/add serialize + atomic claim) แทน · ตัวแปร queue[]/MAX_CONCURRENT เหลือไว้แค่ !status แสดงผล
 
 // ═══════════════════════════════════════════
 // 🔧 Duplicate Detection — ป้องกันข่าวเดียวกันซ้ำ
@@ -100,9 +72,12 @@ function isDuplicate(content) {
 
 // ═══════════════════════════════════════════
 
+// ★ 27 มิ.ย.: marker เวอร์ชันโค้ด — ใช้ยืนยันใน Railway logs ว่า container ที่รันอยู่เป็น "โค้ดใหม่"
+//   โค้ดใหม่ = single-message (atomic claim ก่อน ack) · ถ้า logs ไม่ขึ้นบรรทัดนี้ = ยังรัน container เก่า
+const BOT_BUILD = '2026-06-27-singlemsg-atomicclaim';
 client.once('ready', () => {
   console.log(`✅ บอทพร้อมทำงานแล้ว! ล็อกอินในชื่อ ${client.user.tag}`);
-  console.log(`📋 Queue System: max ${MAX_CONCURRENT} concurrent | Dedup window: ${DEDUP_WINDOW_MS / 1000}s`);
+  console.log(`🟢 [BOT_BUILD=${BOT_BUILD}] instance=${BOT_INSTANCE} | คิว: เซิร์ฟเวอร์ (atomic claim) | Dedup URL: ${DEDUP_WINDOW_MS / 1000}s`);
 });
 
 client.on('messageCreate', async (message) => {
