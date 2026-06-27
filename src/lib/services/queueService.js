@@ -317,7 +317,12 @@ export async function getNextPendingJobs(limit = 1) {
       const src = Array.isArray(j.payload?.sourceLinks)
         ? j.payload.sourceLinks.join(' ')
         : String(j.payload?.sourceLinks || '');
-      if (src && fbig.test(src)) return true;
+      if (src) {
+        if (fbig.test(src)) return true;
+        // ★ 27 มิ.ย. (ผู้ใช้สั่ง): งานปกที่ sourceLinks เป็นคลิปวิดีโอ "ทุกแพลตฟอร์ม" (YouTube/TikTok ด้วย) → เครื่องทีม
+        //   เพราะตอนนี้แตกเฟรมจริง 16 เฟรม (yt-dlp+ffmpeg) เดิม YouTube/TikTok ได้แค่ thumbnail เล็กบน Vercel → ปกไม่คม
+        if (j.payload?.jobType === 'cover' && /youtube\.com|youtu\.be|tiktok\.com/i.test(src)) return true;
+      }
       return false;
     };
     const isLocalMachine = process.platform === 'win32';
