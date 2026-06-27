@@ -90,6 +90,32 @@ export async function POST(req) {
       } catch { /* ping ล้มเหลว = ไม่เป็นไร ไม่กระทบการเข้าคิว */ }
     }
 
+    // ★ 27 มิ.ย. (แก้ Discord เบิ้ลถาวร): ATOMIC CLAIM ตาม msgId — กันแน่นกว่า content-hash
+    //   Discord 1 ข้อความ = msgId เดียว · 2 instance เห็นข้อความเดียวกัน → claim id `mc_<msgId>` ตัวเดียวกัน
+    //   Postgres PK (id ซ้ำ insert ไม่ได้) = คนแรกชนะ คนหลัง insert ชน 23505 → คืน duplicate:true → บอทตัวซ้ำเงียบ+ลบ ack
+    //   ★ จับ race ที่ content-hash dedup พลาด (2 job ลำดับ 1+2) — เพราะ msgId ล็อกก่อน enqueue เลย
+    if (payload._msgId) {
+      try {
+        const claimStore = createStore('msg-claims');
+        await claimStore.add({ id: `mc_${payload._msgId}`, msgId: String(payload._msgId), instance: payload._botInstance || '', at: new Date().toISOString() });
+        // prune เบา ๆ (นาน ๆ ที) กันตารางบวม — เก็บล่าสุด ~1000
+        if (Math.random() < 0.03) {
+          const all = await claimStore.getAll();
+          if (all.length > 1000) {
+            const old = all.sort((a, b) => new Date(a.at) - new Date(b.at)).slice(0, all.length - 1000);
+            for (const o of old) await claimStore.remove(o.id).catch(() => {});
+          }
+        }
+      } catch (e) {
+        if (/duplicate key|23505|_pkey|already exists/i.test(String(e?.message || ''))) {
+          logger.info(`[Queue] ⏭️ msgId ${payload._msgId} ถูก claim แล้ว (อีก instance) → duplicate เงียบ`);
+          return NextResponse.json({ success: true, duplicate: true, jobId: `mc_${payload._msgId}`, position: 0, message: 'duplicate message — already claimed by another instance' });
+        }
+        // error อื่น (Supabase สะดุด) → ไม่บล็อก ปล่อยเข้าคิวปกติ (ยอมเสี่ยงเบิ้ลดีกว่าค้างทั้งระบบ)
+        logger.warn(`[Queue] msg-claim error (ปล่อยผ่าน): ${String(e?.message || '').slice(0, 60)}`);
+      }
+    }
+
     // 3. Add to Queue
     const sourceUserId = payload.userId || 'discord-bot';
     const queueData = await enqueueJob(payload, sourceUserId);
