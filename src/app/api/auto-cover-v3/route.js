@@ -389,26 +389,25 @@ async function _renderCoverV3(request) {
     }
 
     // ── ② AI Vision Director — เลือกโครงเองจากแม่บทที่แกะจากปกไวรัลจริง ──
-    // ★ rev.12: บังคับลุคไวรัลในโค้ด — ภาพพอเมื่อไหร่ ให้เลือกได้เฉพาะโครงที่มี "วงกลม+กรอบไฮไลต์"
-    //   (บทเรียน CASE-045/050: เตือนใน prompt แล้ว Director ยังหนีไปโครงเรียบ → "การนำเสนอห่วย")
-    const viralFirst = [
-      V3_TEMPLATES.vt_ref_tri,      // 5 ภาพ — ★★ โครงตัวอย่างทอง (hero + ขวา 3 สะอาด + วงกลมทอง) ผู้ใช้ยืนยัน 20 มิ.ย. เลือกก่อนเมื่อภาพดี ≥5
-      V3_TEMPLATES.vt_hero_stack,   // 5 ภาพ — hero เต็มซ้าย + ขวา 3 (มีกรอบคลิปเขียว)
-      V3_TEMPLATES.vt_faces_circle, // 4 ภาพ — fallback เมื่อภาพดี <5 (hero + ขวา 2 + วงกลม)
+    // ★ 27 มิ.ย. (ผู้ใช้สั่ง): เลิก "ล็อกโครงเดียว (vt_ref_tri)" — ให้ Director "สลับหลายเทมเพลต" ตามเรื่อง/สไตล์/จำนวนภาพ
+    //   + บล็อกโครง 3 ภาพ (v3_grid3): ปกต้อง "อย่างน้อย 4-5 ภาพ" มีวงกลม/กรอบไฮไลต์ ตามสไตล์
+    //   ปรับตามภาพเยอะ/น้อยอัตโนมัติผ่าน slotBudget: ≥5 หน้าคม → โครง 5 ภาพ · 4 → โครง 4 ภาพ
+    //   v3_grid3 (3 ภาพ) เหลือเป็น "ทางเลือกสุดท้าย" เฉพาะตอนภาพ <4 ใบจริงๆ (เติม 4 ช่องไม่ได้)
+    //   🔴 เดิม (rev.20f) ล็อก vt_ref_tri ตัวเดียวเมื่อภาพ ≥5 → ทุกปกหน้าตาเหมือนกันหมด = ที่ผู้ใช้ติว่า "ล็อก"
+    const richTemplates = [
+      V3_TEMPLATES.vt_ref_tri,      // 5 ภาพ — hero + ขวา 3 สะอาด + วงกลมทอง
+      V3_TEMPLATES.vt_hero_stack,   // 5 ภาพ — hero เต็มซ้าย + ขวา 3 + กรอบคลิปเขียว
       V3_TEMPLATES.vt_quad_circle,  // 5 ภาพ — สองฝ่าย ให้-รับ (วงกลมกลาง)
+      V3_TEMPLATES.vt_faces_circle, // 4 ภาพ — hero + ขวา 2 + วงกลม
+      V3_TEMPLATES.vt_hero_br,      // 4 ภาพ — อารมณ์น้ำตา (กรอบเหลือง)
+      V3_TEMPLATES.vt_hero_wide,    // 4 ภาพ — คนเล่า/สัมภาษณ์ + คู่กรณี (กรอบขาว)
     ].filter(t => t.slots.length <= slotBudget);
-    const plainFallbacks = [
-      V3_TEMPLATES.vt_hero_br,      // 4 ภาพ — อารมณ์น้ำตาเป็นจุดขาย
-      V3_TEMPLATES.vt_hero_wide,    // 4 ภาพ — คนเล่า/สัมภาษณ์ + คู่กรณี
-      V3_TEMPLATES.v3_grid3,        // 3 ภาพ — fallback ตารางสะอาด
-    ].filter(t => t.slots.length <= slotBudget);
-    // forceTemplateId: บังคับโครงเจาะจง (ใช้ทดสอบ/Cover Lab เลือกเอง) — ข้าม viral-first logic
+    // forceTemplateId: บังคับโครงเจาะจง (Cover Lab เลือกเอง) — ข้าม logic อัตโนมัติ
     const forced = forceTemplateId && V3_TEMPLATES[forceTemplateId] ? [V3_TEMPLATES[forceTemplateId]] : null;
-    // ★ rev.20f (ผู้ใช้ย้ำ "ขวาต้อง 3 ภาพเสมอ"): ภาพดี ≥5 → ล็อกโครง 3 ขวา (vt_ref_tri) เป็นตัวเลือกเดียว
-    //   กัน Director "ถอย" ไปเลือกโครง 2 ขวา (vt_faces_circle) เองทั้งที่ภาพพอ (บทเรียน rev-20f roll แรก)
-    const lockTri = !forced && slotBudget >= 5 && V3_TEMPLATES.vt_ref_tri.slots.length <= imageBuffers.length;
+    // โครง 3 ภาพ = ทางเลือกสุดท้ายตอนภาพน้อยจริงๆ (เติมโครง 4-5 ไม่ได้)
+    const lastResort = [V3_TEMPLATES.v3_grid3].filter(t => t.slots.length <= slotBudget);
     const templateOptions = forced
-      || (lockTri ? [V3_TEMPLATES.vt_ref_tri] : (viralFirst.length > 0 ? viralFirst : plainFallbacks));
+      || (richTemplates.length > 0 ? richTemplates : lastResort);
 
     console.log(`[CoverV3] ③ Director (options: ${templateOptions.map(t => t.id).join(', ')} | pool=${imageBuffers.length})...`);
     const { directCover, reviewCover, tightenMomentCrops, faceTightenAll } = await import('@/lib/services/coverDirectorService');
@@ -487,7 +486,7 @@ async function _renderCoverV3(request) {
     //   ลูป retry ต้อง "ไม่ยุบต่ำกว่าจำนวนช่องของเทมเพลตที่กำหนด" (vt_ref_tri 5) → คงโครง 5 รูปเสมอ
     //   แก้ภาพหลุดเรื่องด้วยการ "ให้ Director เลือกภาพใหม่ในโครงเดิม" ไม่ใช่ตัดช่องทิ้ง
     const _minSlots = templateSpec.slots.length; // จำนวนช่องที่กำหนด (attempt 1)
-    const _retryT = [...new Set([...templateOptions, ...viralFirst, ...plainFallbacks])]
+    const _retryT = [...new Set([...templateOptions, ...richTemplates])]
       .filter(t => t && t.slots.length <= imageBuffers.length && t.slots.length >= _minSlots);
     for (let k = 0; k < MAX_RETRY && _best.eff < TARGET_SCORE && (Date.now() - t0) < _timeBudgetMs; k++) {
       try {
