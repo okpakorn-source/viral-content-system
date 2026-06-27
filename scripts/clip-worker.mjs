@@ -53,6 +53,8 @@ function isTransient(error = '', errorType = '') {
   const s = `${error} ${errorType}`.toLowerCase();
   // (ก) ถาวร — กดใหม่ไม่ช่วย → ไม่ retry
   if (/ดูคลิปไม่ได้|ส่วนตัว|private|age.?restrict|จำกัดอายุ|unsupported|ลิงก์ไม่รองรับ|missing_url|cant_watch|กดใหม่ไม่ช่วย|ดูไม่ได้/.test(s)) return false;
+  // ★ 27 มิ.ย. (ผู้ใช้สั่ง): ลิงก์เสีย/ไม่พบคอนเทนต์ → ถาวร (เลิก retry วนซ้ำ 80 รอบ) แจ้งชัดว่าลิงก์เสีย
+  if (/ไม่พบคอนเทนต์|ไม่พบเนื้อหา|ไม่พบคลิป|ไม่พบวิดีโอ|ไม่มีเนื้อหา|ไม่มีคอนเทนต์|ถูกลบ|โหลดคลิปไม่ได้|ดึงคอนเทนต์ไม่ได้|not\s?found|404|video\s?unavailable|deleted|removed|no\s?content|content\s?not\s?(available|found)|empty\s?(content|video)/.test(s)) return false;
   // (ข) ชั่วคราว — Gemini แน่น/เน็ต/timeout → รอลองใหม่
   if (/503|429|overload|unavailable|high demand|temporar|rate limit|แน่น|ใช้งานหนัก|timeout|deadline|fetch failed|econn|network|socket|parse|เดี๋ยวก็ผ่าน/.test(s)) return true;
   // ไม่ชัด → ถือเป็นชั่วคราว (ผู้ใช้อยากให้ "รอจนได้") · MAX_ATTEMPTS คุมไม่ให้วนฟรีตลอด

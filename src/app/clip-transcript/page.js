@@ -53,6 +53,14 @@ export default function ClipTranscriptPage() {
   const loadQueueList = async () => {
     try { const r = await fetch('/api/clip-transcript/queue-list', { cache: 'no-store' }); const d = await r.json(); if (d.success) setQueueList(d); } catch {}
   };
+  // ★ 27 มิ.ย. (ผู้ใช้สั่ง): ลบงานคลิปออกจากคิวจริงๆ — หยุดถอด/หยุด retry (ลิงก์เสีย/วนซ้ำ)
+  const cancelClip = async (id) => {
+    if (!confirm('ลบคลิปนี้ออกจากคิว? (หยุดถอด/หยุดลองใหม่)')) return;
+    try {
+      await fetch('/api/clip-transcript/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    } catch {}
+    loadQueueList(); // รีเฟรชให้คลิปหายจากคิวทันที
+  };
   useEffect(() => { loadCases(); loadInsightCases(); loadQueueList(); }, []);
   // ★ 26 มิ.ย.: รีเฟรชแผงคิวทุก 10 วิ — เห็นคิวเดินสด แม้ไม่ได้ส่งงานเอง (คนอื่นในทีมส่งก็เห็น)
   useEffect(() => { const t = setInterval(loadQueueList, 10000); return () => clearInterval(t); }, []);
@@ -266,8 +274,12 @@ export default function ClipTranscriptPage() {
                     return (
                       <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', borderTop: '1px solid rgba(255,255,255,0.05)', fontSize: 12 }}>
                         <span>{platformIcon(j.platform)}</span>
-                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.85 }}>{String(j.url).replace(/^https?:\/\/(www\.)?/, '').slice(0, 46)}</span>
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.85 }}>{String(j.url).replace(/^https?:\/\/(www\.)?/, '').slice(0, 40)}</span>
                         <span style={{ fontWeight: 700, color: j.status === 'retry_wait' ? '#fbbf24' : j.status === 'processing' ? '#60a5fa' : '#9ca3af', whiteSpace: 'nowrap' }}>{badge}</span>
+                        {/* ★ 27 มิ.ย.: retry ≥3 รอบ = น่าจะลิงก์เสีย/ไม่พบคอนเทนต์ → เตือน + ปุ่มลบ */}
+                        {(j.attempts || 0) >= 3 && <span style={{ fontSize: 10.5, color: '#f87171', whiteSpace: 'nowrap' }}>· อาจลิงก์เสีย</span>}
+                        <button onClick={() => cancelClip(j.id)} title="ลบออกจากคิว (หยุดถอด/หยุดลองใหม่)"
+                          style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>🗑️ ลบ</button>
                       </div>
                     );
                   })}
@@ -277,7 +289,9 @@ export default function ClipTranscriptPage() {
                       {queueList.recent.map(j => (
                         <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 2px', fontSize: 11.5, opacity: 0.7 }}>
                           <span>{j.status === 'done' ? '✅' : '❌'}</span>
-                          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(j.url).replace(/^https?:\/\/(www\.)?/, '').slice(0, 44)}</span>
+                          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(j.url).replace(/^https?:\/\/(www\.)?/, '').slice(0, 36)}</span>
+                          {/* ★ 27 มิ.ย.: โชว์เหตุผลที่ล้ม (ไม่พบคอนเทนต์/ลิงก์เสีย ฯลฯ) ให้รู้ว่าลิงก์เสียจริง */}
+                          {j.status === 'error' && j.error && <span title={j.error} style={{ fontSize: 10.5, color: '#f87171', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.error.slice(0, 34)}</span>}
                         </div>
                       ))}
                     </div>
