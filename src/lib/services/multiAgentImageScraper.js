@@ -1970,39 +1970,56 @@ async function extractFromUserSources(sourceLinks = [], context = '') {
   for (const raw of sourceLinks.slice(0, 6)) {
     const link = String(raw || '').trim();
     if (!/^https?:\/\//i.test(link)) continue;
+    const isYouTube = /youtube\.com|youtu\.be/i.test(link);
+    const isTikTok = /tiktok\.com/i.test(link);
     const isFbIgVideo = FB_IG_VIDEO.test(link);
+    const isVideo = isYouTube || isTikTok || isFbIgVideo;
     try {
       const got = await withTimeout((async () => {
-        if (/youtube\.com|youtu\.be/i.test(link)) {
-          const { fetchYouTubeThumbFrames } = await import('@/lib/services/youtubeThumbFrames');
-          const { youtubeVideoId } = await import('@/lib/services/newsDesk/taxonomy');
-          const id = youtubeVideoId(link);
-          if (id) {
-            const frames = await fetchYouTubeThumbFrames([id], { perVideo: 3, maxTotal: 4 });
-            return frames.map(f => `data:image/jpeg;base64,${f.buffer.toString('base64')}`);
-          }
-          return [];
-        } else if (/tiktok\.com/i.test(link)) {
-          const r = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(link)}`).then(x => x.json()).catch(() => null);
-          const cover = r?.data?.origin_cover || r?.data?.cover;
-          return cover ? [cover] : [];
-        } else if (isFbIgVideo) {
-          // ★ 26 มิ.ย. (ผู้ใช้สั่ง): FB/IG วิดีโอ → โหลดคลิป+แตกเฟรมจริง (yt-dlp + system ffmpeg) เครื่องทีมเท่านั้น
-          //   บน Vercel/ไม่มี yt-dlp → คืน [] → fallback og:image (มักไม่ได้) → route แจ้งผู้ใช้ลองลิงก์อื่น
+        if (isVideo) {
+          // ★ 27 มิ.ย. (ผู้ใช้สั่ง): ทุกแพลตฟอร์มวิดีโอ → แตกเฟรม "จริง" (yt-dlp + system ffmpeg เครื่องทีม)
+          //   แตกเยอะ (16) ให้ Gemini มีให้เลือก → 🧠 Gemini คัด "เฟรมดีสุด" (ฮีโร่/บริบท) ตรงข่าว
+          //   เดิม YouTube ได้แค่ thumbnail / TikTok ได้แค่ cover → เฟรมน้อย เลือกไม่ดี
+          let frames = [];
           try {
             const { extractMetaVideoFrames } = await import('@/lib/services/metaFrameExtractor');
-            const frames = await extractMetaVideoFrames(link, 12);
-            if (frames && frames.length) return frames;
-          } catch (e) {
-            console.log('[AgentU:UserSource] FB/IG แตกเฟรมล้ม → fallback og:image:', e.message?.slice(0, 50));
+            frames = await extractMetaVideoFrames(link, 16) || [];
+          } catch (e) { console.log('[AgentU:UserSource] แตกเฟรมวิดีโอล้ม:', e.message?.slice(0, 50)); }
+          // fallback (Vercel/ไม่มี yt-dlp/แตกไม่ได้) → thumbnail ตามแพลตฟอร์ม (เฟรมน้อยแต่ยังดีกว่าไม่มี)
+          if (!frames.length) {
+            if (isYouTube) {
+              try {
+                const { fetchYouTubeThumbFrames } = await import('@/lib/services/youtubeThumbFrames');
+                const { youtubeVideoId } = await import('@/lib/services/newsDesk/taxonomy');
+                const id = youtubeVideoId(link);
+                if (id) {
+                  const tf = await fetchYouTubeThumbFrames([id], { perVideo: 3, maxTotal: 4 });
+                  frames = tf.map(f => `data:image/jpeg;base64,${f.buffer.toString('base64')}`);
+                }
+              } catch {}
+            } else if (isTikTok) {
+              const r = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(link)}`).then(x => x.json()).catch(() => null);
+              const cover = r?.data?.origin_cover || r?.data?.cover;
+              if (cover) frames = [cover];
+            } else {
+              const { extractSourceArticleImages } = await import('@/lib/services/sourceArticleImages');
+              frames = await extractSourceArticleImages(link, 6);
+            }
           }
-          const { extractSourceArticleImages } = await import('@/lib/services/sourceArticleImages');
-          return await extractSourceArticleImages(link, 6);
+          // ★ 🧠 Gemini คัดเฟรม (ต้องมีหลายเฟรมถึงคุ้ม) — เลือกฮีโร่/บริบท + ตัดเบลอ/textเต็มจอ/หลุดเรื่อง
+          if (frames.length >= 4) {
+            try {
+              const { curateFrames } = await import('@/lib/services/geminiFrameCurator');
+              const res = await curateFrames(frames, context);
+              if (res.curated && res.frames?.length) frames = res.frames;
+            } catch (e) { console.log('[AgentU:UserSource] Gemini คัดเฟรมล้ม → ใช้ลำดับเดิม:', e.message?.slice(0, 40)); }
+          }
+          return frames;
         } else {
           const { extractSourceArticleImages } = await import('@/lib/services/sourceArticleImages');
           return await extractSourceArticleImages(link, 6);
         }
-      })(), isFbIgVideo ? 180000 : 20000); // FB/IG วิดีโอ: 180 วิ (โหลด+แตกเฟรม) · อื่นๆ: 20 วิ
+      })(), isVideo ? 210000 : 20000); // วิดีโอ: 210 วิ (โหลด+แตกเฟรม+Gemini คัด) · อื่นๆ: 20 วิ
       if (Array.isArray(got)) out.push(...got);
     } catch (e) { console.log('[AgentU:UserSource] skip:', e.message?.slice(0, 40)); }
   }
