@@ -336,8 +336,10 @@ async function _renderCoverV3(request) {
 
     // ── Quality floor (หลักเดียวกับ v1) ──
     const { V3_TEMPLATES, adaptRegistryTemplate } = await import('@/lib/services/coverExecutorService');
-    if (imageBuffers.length < 3) {
-      const msg = `ภาพใช้ได้ ${imageBuffers.length} ใบ (ต้องการอย่างน้อย 3) — ข่าวนี้ภาพหายาก`;
+    // ★ 27 มิ.ย. (ผู้ใช้สั่ง): ปกขั้นต่ำ "4 ช่องขึ้นไป" เท่านั้น — เลิกโครง 3 ภาพ (v3_grid3) ถาวร
+    //   ภาพใช้ได้ <4 → ไม่ทำปก (แจ้ง error) แทนที่จะหล่นไปโครง 3 รูปที่ผู้ใช้ไม่เอา
+    if (imageBuffers.length < 4) {
+      const msg = `ภาพใช้ได้ ${imageBuffers.length} ใบ (ต้องการอย่างน้อย 4 — ปกต้อง 4+1) — ข่าวนี้ภาพหายาก ลองใส่ลิงก์แหล่งรูป/คลิป`;
       await markQueueJob('failed', { error: msg });
       return NextResponse.json({ success: false, error: msg, errorType: 'INSUFFICIENT_QUALITY_IMAGES' }, { status: 422 });
     }
@@ -409,8 +411,9 @@ async function _renderCoverV3(request) {
       .filter(t => t.slots.length <= imageBuffers.length);
     // forceTemplateId: บังคับโครงเจาะจง (Cover Lab เลือกเอง) — ข้าม logic อัตโนมัติ
     const forced = forceTemplateId && V3_TEMPLATES[forceTemplateId] ? [V3_TEMPLATES[forceTemplateId]] : null;
-    // ★ v3_grid3 (3 ภาพ) = ทางเลือกสุดท้ายเฉพาะ "พูล <4 ใบจริงๆ" เท่านั้น (เติมโครง 4+1 ไม่ได้) — ปกติห้ามโผล่
-    const lastResort = [V3_TEMPLATES.vt_faces_circle, V3_TEMPLATES.v3_grid3].filter(t => t.slots.length <= imageBuffers.length);
+    // ★ 27 มิ.ย. (ผู้ใช้สั่ง): ลบโครง 3 ภาพ (v3_grid3) ถาวร — ทางเลือกสุดท้าย = โครง 4 ช่อง (มีวงกลม) เท่านั้น
+    //   (พูลผ่านด่าน ≥4 มาแล้ว → vt_faces_circle 4 ช่องลงได้เสมอ · ไม่มีทางหล่นไป 3 ภาพอีก)
+    const lastResort = [V3_TEMPLATES.vt_faces_circle].filter(t => t.slots.length <= imageBuffers.length);
     const templateOptions = forced
       || (richTemplates.length > 0 ? richTemplates : lastResort);
 
