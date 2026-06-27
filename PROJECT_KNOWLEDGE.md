@@ -1,127 +1,111 @@
 # 🧠 Project Knowledge Base — Viral Content System
-# อัพเดทล่าสุด: 25 พ.ค. 2026
+# อัพเดทล่าสุด: 27 มิ.ย. 2026
 
-> **ไฟล์นี้คือ "สมอง" ของโปรเจกต์**
-> ถ้าเปิดแชทใหม่ ให้ AI อ่านไฟล์นี้ก่อนทำงาน
-> จะได้เข้าใจ context ทั้งหมดโดยไม่ต้องอธิบายใหม่
+> **ไฟล์นี้ = ภาพรวมโปรเจกต์ให้คนอ่านเข้าใจเร็ว (resume point)**
+> 🔑 **เซฟพอยต์จริงที่ทันสมัยเสมอคือ "Memory ของ AI (โหลดอัตโนมัติทุกแชทใหม่)" + "Git history (ทุก commit มีเหตุผลไทยละเอียด)"**
+> ไฟล์นี้อัปเดต **ทุกครั้งที่จบงานใหญ่** (ไม่ auto — ต้องสั่ง/ทำเป็นรอบ) · ถ้าค้าง ให้ยึด git log + memory เป็นหลัก
 
 ---
 
 ## 📋 ระบบคืออะไร
-AI Pipeline สร้างข่าวไวรัลสำหรับ Facebook
-- **Stack**: Next.js 15+ (App Router) + React 19
-- **DB**: Supabase (PostgreSQL) → fallback SQLite/file
-- **AI**: Claude Sonnet (เขียน) + GPT-4o (วิเคราะห์) + Gemini Flash (สกัด)
-- **Deploy**: Vercel
-- **Bot**: Discord Bot ส่งข่าวเข้าระบบผ่าน Queue API
+AI Pipeline สร้างข่าวไวรัลด้านบวกสำหรับ Facebook/IG
+- **Stack**: Next.js **16.2.6** (App Router) + React **19.2.4**
+- **DB**: Supabase (PostgreSQL) → fallback SQLite (Prisma) → in-memory Map (`persistStore.js`)
+- **AI**: Claude Sonnet (เขียน) · GPT-4o/5.5 (วิเคราะห์) · Gemini Flash (สกัด/ดูคลิป)
+- **Deploy**: **Railway (บอท/worker หลัก) + Vercel (เว็บ)** — auto-deploy ทั้งคู่จาก `git push origin HEAD:main`
+- **Bot**: Discord Bot (โฟลเดอร์ `discord-bot/` แยก package.json) รันบน Railway service `viral-content-system`
+- **Repo**: github.com/okpakorn-source/viral-content-system · **working branch `ai/post-selection-quality`** · deploy branch `main`
 
 ---
 
-## 🏗️ Architecture Flow
+## 🔴 IRON RULE — ระบบ "ทำข่าวอัตโนมัติ" ห้ามแตะเด็ดขาด
+ระบบเขียนข่าวคือหัวใจที่ผู้ใช้ห้ามแก้ 100% (เว้นแต่สั่งชัดเจน) — ไฟล์ต้องห้าม:
+`autoFlowService.js` · `autoFlowServiceText.js` · `summarizeService*.js` · `aiRouter.js` · `openai.js` ·
+`promptStore*.js` · `api/auto/*` · `api/extract` · `api/summarize` · `api/research-search` · `validate-workflow.mjs`
+
+**Pipeline (ห้ามแก้):**
 ```
-Input (URL/Text/Image/TikTok/YouTube)
-  → /api/auto/process (Universal Router)
-    → detectInputType() → routePipeline()
-    → Delegate to:
-      - processAutoFlow() [URL] — src/lib/services/autoFlowService.js
-      - processAutoFlowText() [Text] — src/lib/services/autoFlowServiceText.js
-    
-    Inside autoFlow:
-      Step 1: Scrape/Transcribe → rawText
-      Step 2: Extract (Gemini Flash) → newsData {newsTitle, newsBody}
-      Step 3: Breakdown (GPT-4o) → breakdownData {angles, emotions, key_facts}
-      Step 4: Blueprint (emotional structure)
-      Step 5: Smart Research (6-agent fact pool via Serper)
-      Step 6: Pre-select prompts from Library (ไม่ซ้ำกัน)
-      Step 7: Parallel Generate (Claude/GPT) → 7 versions per 4 angles
-      Step 8: Correction Pipeline → final versions
+Input (URL/Text/คลิป) → /api/auto/process (router) → autoFlow(Service|ServiceText)
+  1 Scrape/Transcribe  2 Extract(Gemini)  3 Breakdown(GPT)  4 Blueprint
+  5 Smart Research(6 agent/Serper)  6 Pre-select prompts(Library ไม่ซ้ำ)
+  7 Parallel Generate(Claude/GPT) → หลายเวอร์ชัน  8 Correction → final
 ```
+ก่อน push ระบบข่าว: `node scripts/validate-workflow.mjs` ต้องผ่าน 100% (68/68) + `npx next build`
 
 ---
 
-## 🔧 บัคสำคัญที่แก้แล้ว (ห้ามแก้กลับ)
+## 🧩 ระบบย่อย "แก้ได้" (แยกขาดจาก iron-rule)
 
-### 1. Prompt Skip ไม่ Crash (25 พ.ค.)
-- **ไฟล์**: autoFlowService.js + autoFlowServiceText.js
-- **ปัญหา**: ถ้า angle ไม่มี prompt match → `throw` → ทุก angle ตาย
-- **แก้**: return `{success:false, error:'NO_MATCHING_PROMPT'}` แทน throw
-- **ผล**: angle ที่ไม่มี prompt ถูกข้าม, angle อื่นยังทำงานต่อ
+### 🎨 ระบบทำปก (Cover Lab v3 — AI Vision Director)
+- เครื่องมือ: `auto-cover-v3/route.js` → `multiAgentImageScraper.js` (หาภาพ) → `coverDirectorService.js` (AI เห็นภาพจริง→สั่งครอป) → `coverExecutorService.js` (sharp ครอป/ประกอบ)
+- **เทมเพลต** (`V3_TEMPLATES`): 8 โครง · **กฎปัจจุบัน: ปก "4+1 เสมอ"** (5 ช่อง: hero + 3-4 + วงกลม) — บล็อก `v3_grid3` (3 ภาพ) เว้นภาพ <4 · Director สลับโครงเองตามเรื่อง (ไม่ล็อก)
+- **ครอป**: ทุกช่องเน้นหน้า "อกขึ้นไป" · คนกลางกรอบ · ⛔ห้ามเต็มตัว/ครึ่งตัว/หน้าตัดครึ่ง (rule 0a, 0a-2)
+- **เฟรมจริงจากคลิป**: ใส่ลิงก์วิดีโอ → `metaFrameExtractor` (yt-dlp + ffmpeg) แตกเฟรมจริง → `geminiFrameCurator` (Gemini คัดฮีโร่/บริบท) — **เครื่องทีม (win32) เท่านั้น** · Vercel คืน [] · งานปกวิดีโอ route เด้งเครื่องทีมผ่าน `queueService.isMetaVideoJob`
+- โหมด: "เฉพาะภาพในลิงก์" vs "ผสมรีเสิร์ช" (`sourceOnly`)
 
-### 2. Queue Race Condition (25 พ.ค.)
-- **ไฟล์**: src/lib/services/queueService.js
-- **ปัญหา**: 2 คนส่งพร้อมกัน ได้คิวที่ 1 ทั้งคู่
-- **แก้**: serialized lock + คำนวณ position ก่อน add + worker ทำ 1 job/รอบ
-- **ผล**: คิวทำงานถูกต้อง ไม่ซ้ำ
+### 🗞️ โต๊ะข่าวกลาง (News Desk)
+- `src/app/news-desk/` + `src/lib/services/newsDesk/*` · สมอง 4 ชั้น + harvester หลายเลน + เมนูเช้า Discord
+- **สมองคัด "remakeable"**: บังคับทุกแหล่งว่ากระแสเก่าทำใหม่ได้/ไม่ได้ (`deskBrain.classifyBatch`)
+- 2 โซน (คลิป/ลิงก์) + 6 คลัง + การ์ดพรีวิวภาพ (`taxonomy.js`)
 
-### 3. Discord ไม่เข้าคลังข่าว (25 พ.ค.)
-- **ไฟล์**: src/app/api/auto/process/route.js
-- **ปัญหา**: เนื้อหาจาก Discord/queue ไม่ถูก save เข้า news-archive
-- **แก้**: เพิ่ม saveToArchiveServerSide() เรียกเมื่อ isFromQueue=true
-- **ผล**: Discord content เข้าคลังเหมือนเว็บ
+### 🎬 ถอดประเด็นคลิป (clip-insight / clip-transcript)
+- `api/clip-transcript/insight/route.js` · **Gemini gemini-3.5-flash ตัวเดียว** (ปิด fallback ที่ hallucinate) · คีย์แยก `GEMINI_VIDEO_API_KEY`
+- 503 = Google โหลดเต็ม (จ่ายเงินไม่ช่วย เว้น Provisioned Throughput) → **คิวอัจฉริยะ รอหาย→รันเอง** + ไฟสัญญาณเขียว/เหลือง/แดง
+- YouTube/TikTok รัน Vercel ได้ · **Facebook → เครื่องทีม** (yt-dlp) · `scripts/clip-worker.mjs` (ตัวเลี้ยง restart เอง)
 
-### 4. Default Prompt ถูกปิด (25 พ.ค.)
-- **ปัญหา**: user ไม่ต้องการ default prompt (fallback prompt ทั่วไป)
-- **แก้**: ถ้าไม่มี prompt match → ข้าม angle นั้น (ไม่ใช้ default)
-- **นโยบาย**: user จะเติม prompt เองใน library เพื่อครอบคลุมมากขึ้น
+### 🖼️ photo-enhance · 🤖 Discord bot
+- photo-enhance: Replicate Real-ESRGAN, `face_enhance=false` (ห้ามแตะหน้า)
+- Discord bot: **single-message ถาวร** — เคลม atomic (`mc_<msgId>` Postgres PK) "ก่อนโพสต์ ack" → instance ที่แพ้เงียบสนิท · เลิกคิวภายในบอท ใช้คิวเซิร์ฟเวอร์ · marker `BOT_BUILD` ใน Railway logs ยืนยันโค้ดใหม่
 
 ---
 
-## 📁 ไฟล์สำคัญ (ห้ามแก้โดยไม่เข้าใจ)
-
-| ไฟล์ | หน้าที่ | หมายเหตุ |
-|---|---|---|
-| `src/lib/services/autoFlowServiceText.js` | Pipeline หลัก (Text input) | 397 บรรทัด |
-| `src/lib/services/autoFlowService.js` | Pipeline หลัก (URL input) | 398 บรรทัด |
-| `src/lib/services/summarizeServiceText.js` | AI Prompt + Generate | 1819 บรรทัด, ไฟล์ใหญ่สุด |
-| `src/lib/services/queueService.js` | ระบบคิว (มี lock) | แก้ race condition แล้ว |
-| `src/app/api/auto/process/route.js` | Universal Router | จุดเข้าหลักทุก flow |
-| `src/app/content/new/page.js` | หน้า UI สร้างเนื้อหา | 1055 บรรทัด |
-| `src/components/content/ResultVersions.js` | แสดงผลบทความ | รวม research อ้างอิง |
-| `data/prompt-library.json` | คลัง Prompt DNA | 1.3MB, 50+ prompts |
-| `src/lib/ai/promptStoreText.js` | Built-in prompts | extraction, breakdown, presets |
-| `src/lib/ai/aiRouter.js` | AI Model routing | ห้ามแก้โดยไม่ได้รับอนุญาต |
+## 🚀 Deploy & Infra
+- **Deploy**: `git push origin HEAD:main` → Railway + Vercel auto · (มี direct-to-main authorization 10 มิ.ย. — verify validate+build ก่อน)
+- **เครื่องทีม (win32)**: `viralflow-team-autostart.cmd` รัน 3 ตัว auto-restart →
+  `server-forever.cmd` (production `npm start` พอร์ต 3000, เก็บ log `_prodserver.log`) · `clip-worker-forever.cmd` · `team-queue-poller.cmd` (คว้างานปก/คลิปวิดีโอที่ Vercel เด้งมา)
+- **ทำไม production mode**: `npm run dev` (turbopack) รันยาวป่วย "Cannot find module @supabase" → worker 500 → คิวตาย
+- **Queue cross-process dedup**: Railway+Vercel แย่งคิว Supabase เดียว → deterministic job id + atomic claim (kill-switch `QUEUE_ATOMIC_CLAIM=0`)
 
 ---
 
-## ⚙️ ความชอบของ User (กฎพิเศษ)
-
-1. **ห้ามแก้ทันที** — วิเคราะห์ปัญหาให้เห็นก่อนเสมอ
-2. **ไม่เอา default prompt** — ให้แสดงผลตาม prompt ที่มี ถ้าไม่มี match ให้ข้าม
-3. **สำรองไฟล์ก่อนแก้** — cp file file.bak
-4. **ภาษาไทย** — User สื่อสารภาษาไทย
-5. **Build ก่อน push เสมอ** — `npx next build` + `node scripts/validate-workflow.mjs`
-6. **ห้าม rewrite ไฟล์ใหญ่ทั้งหมด** — แก้ incremental เท่านั้น
-7. **Git push เฉพาะไฟล์ที่แก้** — ไม่ใช้ `git add -A` (มี backup folder ชื่อไทยยาว)
+## 🐞 บัคใหญ่ที่แก้แล้ว (ห้ามแก้กลับ)
+1. **Discord เบิ้ล** → atomic msgId claim ก่อน ack (เหลือ 1 ตอบ/ข้อความ แม้ deploy overlap)
+2. **Queue race / ข่าวเจนซ้ำ 2 instance** → deterministic id + atomic claim
+3. **persistStore getAll cap 1000** → paginate (cap 20000) กัน orphan บวม
+4. **clip-insight hallucinate** (2.5-pro แต่งเอง) → 3.5-flash ตัวเดียว, ปิด fallback
+5. **Cover เต็มตัว/3 ภาพ** → กฎครอปหน้า-ไหล่ทุกช่อง + บังคับ 4+1
+6. (เดิม 25 พ.ค.) prompt skip ไม่ crash · Discord เข้าคลังข่าว · ไม่ใช้ default prompt
 
 ---
 
-## 📦 สำรองล่าสุด
-
-| ชื่อ | ที่อยู่ |
-|---|---|
-| ชุด 1 | `C:\Users\User\viral-content-system\สำรองล่าสุดเกือบสมบูรณ์25-5-14.16_ชุด1\` |
-| ชุด 2 | `C:\Users\User\Desktop\สำรองล่าสุดเกือบสมบูรณ์25-5-14.16_ชุด2\` |
+## ⚙️ กฎ/ความชอบ User
+1. 🔴 **ห้ามแตะระบบทำข่าวอัตโนมัติ** (iron rule ข้างบน)
+2. **แยกโค้ดต่อส่วนย่อย + mark ชัด · แก้ทีละจุด → เทส → ยืนยัน ก่อนไปต่อ · แก้แล้วแย่ลง = revert ทันที**
+3. ห้ามแก้ทันที — วิเคราะห์ให้เห็นก่อน · ห้าม rewrite ไฟล์ใหญ่ทั้งไฟล์ (แก้ incremental)
+4. สำรองไฟล์ก่อนแก้ (`.bak`) แต่ **commit ห้าม include .bak** · ไม่ `git add -A` (มีโฟลเดอร์สำรองชื่อไทยยาว)
+5. สื่อสารภาษาไทย · ทดสอบปกต้องใช้เนื้อข่าวเต็ม (ห้ามตัดสั้น)
+6. ทำงานแบบผู้จัดการ: รับโจทย์ใหญ่ → สร้าง+เทสเอง → ส่งของที่ใช้ได้จริง
 
 ---
 
-## 🚧 งานค้าง (ยังไม่ทำ)
-
-1. **Discord notifications** — แจ้งเตือนถ้า flow ติดขัด
-2. **5 templates ปกข่าว** — สร้างแทมเพลตลงระบบภาพปก
-3. **UI แหล่งอ้างอิง** — แสดงว่า research เจออะไรมาในแต่ละบทความ
-4. **รองรับ input สำนวนดีอยู่แล้ว** — ปัจจุบัน Extract ตัดสำนวนออก ทำให้เสียคุณภาพ
+## 🚧 งานค้าง
+1. โต๊ะข่าว เฟส C — harvester หาคลิปเยอะขึ้นต่อคลัง
+2. Cover: ถ้าข่าวภาพหายาก (พูล <5) ยังได้โครง 4 ช่อง — หาวิธีดันเป็น 5 อย่างมีคุณภาพ (เคยลอง Tier REAL แต่ revert เพราะภาพหลุดเรื่อง)
 
 ---
 
 ## 🔑 Environment Variables สำคัญ
 ```
-OPENAI_API_KEY          — GPT-4o
-ANTHROPIC_API_KEY       — Claude Sonnet
-GEMINI_API_KEY          — Gemini Flash
-SERPER_API_KEY          — Google Search (research)
-DISCORD_API_SECRET      — Discord bot auth
-SUPABASE_URL            — Database
-SUPABASE_SERVICE_ROLE_KEY
-NEXT_PUBLIC_SUPABASE_ANON_KEY
-FIRECRAWL_API_KEY       — Web scraping
+OPENAI_API_KEY · ANTHROPIC_API_KEY · GEMINI_API_KEY (ข่าว/text)
+GEMINI_VIDEO_API_KEY (แยกเฉพาะถอดคลิป) · SERPER_API_KEY (research)
+DISCORD_BOT_TOKEN + API_URL (บอท) · SUPABASE_URL/SERVICE_KEY/ANON_KEY
+FIRECRAWL_API_KEY · REPLICATE (photo-enhance) · YOUTUBE_API_KEY (optional)
 ```
+
+---
+
+## 🗂️ โปรเจกต์แยก (คนละ repo/โฟลเดอร์ — ห้ามปนกัน)
+- **ไทยนิวส์** `C:\Users\User\ไทยนิวส์` (พอร์ต 3300) — แปลไทยไวรัล→อังกฤษ transcreation
+- **โปรเจกต์ทรู** `C:\Users\User\โปรเจกต์ทรู` (3100) — แคปเฟรมสินค้า RedNote → Postiz
+- **ปกคอลลาจ** `C:\Users\User\โปรเจกต์ปกคอลลาจ` (3200) · **ClipForge** `C:\Users\User\ClipForge` (3400) — ตัดคลิปยาว→สั้น
+- เครื่องถอดบทสัมภาษณ์ `/clip-transcript` · reframe `/reframe-cases` (แยกจากระบบทำข่าว 100%)
