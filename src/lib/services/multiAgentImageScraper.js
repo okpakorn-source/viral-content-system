@@ -1688,13 +1688,17 @@ Judge ALL images (even REJECT must include score=0)
   }
 }
 
-// ★★★ GPT-4o Vision Fallback Judge ★★★
+// ★★★ Vision Fallback Judge (OpenAI → Claude) ★★★
 async function judgeWithFallback(validCandidates, imageParts, prompt, newsTitle, identity) {
-  // === Attempt 1: GPT-4o Vision ===
+  // === Attempt 1: OpenAI Vision ===
+  // ★ 27 มิ.ย. (แก้ "ไม่นิ่ง"/ช้า): ข้าม gpt-5.x — MODEL_VISION='gpt-5.5' เป็นโมเดล reasoning ตอบ vision-JSON ไม่ได้
+  //   ("unparseable" ทุกครั้ง = เสียเวลาฟรี ~30 วิ) → ไป Claude Sonnet ที่ให้คะแนนภาพได้นิ่งเป็นหลักเลย
+  //   🔴 cover-only (ระบบข่าว/ถอดประเด็นไม่ใช้ judge) · ถ้าเปลี่ยน MODEL_VISION กลับเป็น gpt-4o เส้นนี้ทำงานเองอัตโนมัติ
+  const _visionIsReasoning = /^(gpt-5|o1|o3)/.test(String(MODEL_VISION || ''));
   const openaiKey = process.env.OPENAI_API_KEY;
-  if (openaiKey) {
+  if (openaiKey && !_visionIsReasoning) {
     try {
-      console.log('[Judge Fallback] 📤 Sending to GPT-4o Vision...');
+      console.log(`[Judge Fallback] 📤 Sending to ${MODEL_VISION} Vision...`);
       
       // สร้าง content array สำหรับ GPT-4o (text + images)
       const gptContent = [{ type: 'text', text: prompt }];
