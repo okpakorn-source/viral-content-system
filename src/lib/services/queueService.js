@@ -306,17 +306,9 @@ export async function getNextPendingJobs(limit = 1) {
       if (orphans.length) console.log(`[QueueService] ✅ startup-reset รีเซ็ต ${orphans.length} งานเครื่องทีมที่ค้าง → จะหยิบทำใหม่`);
     }
 
-    // Count currently processing jobs
-    const processingCount = allJobs.filter(j => j.status === 'processing').length;
-    
-    // Concurrency limit: only 1 job at a time for true queue behavior
-    const maxConcurrency = 1;
-    if (processingCount >= maxConcurrency) {
-      console.log(`[QueueService] ⏸️ Concurrency limit reached (${processingCount}/${maxConcurrency} processing)`);
-      return [];
-    }
-    
-    const availableSlots = Math.min(limit, maxConcurrency - processingCount);
+    // ★ 27 มิ.ย. (แก้ "ข่าวล่ม/หมดเวลารอคิว 15 นาที"): ย้ายเช็ค concurrency ไปนับ "แยกตามเครื่อง" (หลัง canRunHere)
+    //   เดิมนับ processing รวมทุกเครื่อง → ปก (เครื่องทีม 5-11 นาที) ยึด slot เดียว → ข่าว (Vercel) รอจนบอท timeout
+    //   ใหม่: ปกเครื่องทีม ≠ ข่าว Vercel นับแยก ไม่บล็อกกันข้ามเครื่อง (ข่าวยังทำทีละ 1 บน Vercel เหมือนเดิม)
 
     // ★ แบ่งงานตามเครื่องแบบไม่ทับซ้อน (12 มิ.ย. 69 — คำสั่งทีม: อุดช่องโหว่ ไม่ให้ทำงานทับซ้อน)
     //   งานคลิป (yt-dlp.exe) → เครื่องทีม Windows เท่านั้น (เหมือนเดิม — Vercel รัน exe ไม่ได้)
@@ -350,9 +342,19 @@ export async function getNextPendingJobs(limit = 1) {
     const isLocalMachine = process.platform === 'win32';
     const localNewsOverride = process.env.QUEUE_LOCAL_NEWS === '1';
     const canRunHere = (j) => {
-      if (isMetaVideoJob(j)) return isLocalMachine;                 // คลิป = เครื่องทีมเท่านั้น
+      if (isMetaVideoJob(j)) return isLocalMachine;                 // คลิป/ปก = เครื่องทีมเท่านั้น
       return !isLocalMachine || localNewsOverride;                  // ข่าว/อื่นๆ = Vercel เท่านั้น (เว้นเปิดทางหนีไฟ)
     };
+
+    // ★ Concurrency "แยกตามเครื่อง": นับเฉพาะงานที่ processing "บนเครื่องนี้" (canRunHere) — ปก/ข่าวคนละเครื่องไม่บล็อกกัน
+    //   เครื่องทีม: นับปก/คลิปที่ทำอยู่ · Vercel: นับข่าวที่ทำอยู่ — ต่างเครื่องไม่เกี่ยวกัน
+    const maxConcurrency = 1;
+    const processingHere = allJobs.filter(j => j.status === 'processing' && canRunHere(j)).length;
+    if (processingHere >= maxConcurrency) {
+      console.log(`[QueueService] ⏸️ Concurrency limit (เครื่องนี้) ${processingHere}/${maxConcurrency} — งานเครื่องอื่นไม่นับ`);
+      return [];
+    }
+    const availableSlots = Math.min(limit, maxConcurrency - processingHere);
 
     const pendingJobs = allJobs
       .filter(j => j.status === 'pending' && canRunHere(j))
