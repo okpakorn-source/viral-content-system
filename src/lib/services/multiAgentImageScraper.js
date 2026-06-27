@@ -559,6 +559,49 @@ async function agentYouTubeFrames(identity) {
       return [];
     }
 
+    // === Tier REAL v2 (27 มิ.ย. — ผู้ใช้สั่ง): เครื่องทีมแตกเฟรม "จริง" จาก "คลิปรีเสิร์ช" + Gemini คัดตรงข่าวเข้ม ===
+    //   "ข่าวหนึ่งมีหลายแหล่ง" → เอา top 3 คลิปที่ค้นด้วยคีย์เวิร์ด/ตัวละคร มาแตกเฟรมจริง (yt-dlp+ffmpeg)
+    //   แล้ว Gemini "ดูทุกซีนจริง" คัดเฉพาะเฟรมที่ "เป็นบุคคลในข่าว + บริบทข่าวนี้จริง" (strict) — คลิปผิดคน/ผิดเรื่อง = ตัดทั้งคลิป
+    //   แก้ปัญหาเดิม (Tier REAL v1 เคยได้ภาพหลุดเรื่อง → revert) ด้วยด่าน strict relevance ของ curator
+    //   🔴 เครื่องทีมเท่านั้น (Vercel: extractMetaVideoFrames คืน []) · kill-switch YT_RESEARCH_REAL_FRAMES=0
+    //   ⏱️ คุมเวลา: top 3 คลิป + timeout 90 วิ/คลิป · พอ ≥12 เฟรมตรงข่าวหยุด
+    //   ⚠️ จับเครื่องทีมด้วย process.platform==='win32' เท่านั้น — ห้ามใช้ process.env.VERCEL (เครื่องทีมมี VERCEL=1 ใน .env.local จาก `vercel env pull` → เคยบล็อก Tier REAL ผิดๆ)
+    if (process.platform === 'win32' && process.env.YT_RESEARCH_REAL_FRAMES !== '0') {
+      try {
+        const { extractMetaVideoFrames } = await import('@/lib/services/metaFrameExtractor');
+        const { curateFrames } = await import('@/lib/services/geminiFrameCurator');
+        const _person = rawMainChar || identity?.mainCharacter || '';
+        const _story = identity?.newsTitle || identity?.story || identity?.coreStory?.celebratedAction || '';
+        const kept = [];
+        for (const vid of videoIds.slice(0, 3)) {
+          let fr = [];
+          try {
+            fr = await Promise.race([
+              extractMetaVideoFrames(`https://www.youtube.com/watch?v=${vid}`, 8),
+              new Promise((res) => setTimeout(() => res([]), 90000)),
+            ]) || [];
+          } catch (e) { console.log(`[Agent2: YouTube] Tier REAL คลิป ${vid} แตกเฟรมล้ม: ${e.message?.slice(0, 40)}`); }
+          if (fr.length < 2) continue;
+          // 🧠 Gemini ดูทุกซีน "คัดเฉพาะที่ตรงข่าว" (strict) — คลิปผิดคน/ผิดเรื่อง → คืน [] (ทิ้งทั้งคลิป)
+          try {
+            const res = await curateFrames(fr, `${_person} ${_story}`.trim(), { strict: true, person: _person, story: _story, maxContext: 3 });
+            if (res.curated && res.frames?.length) {
+              kept.push(...res.frames);
+              console.log(`[Agent2: YouTube] 🎬 Tier REAL: คลิป ${vid} → เก็บ ${res.frames.length} เฟรมตรงข่าว`);
+            } else {
+              console.log(`[Agent2: YouTube] ⏭️ Tier REAL: คลิป ${vid} ไม่ตรงข่าว → ข้ามทั้งคลิป`);
+            }
+          } catch {}
+          if (kept.length >= 12) break;
+        }
+        if (kept.length) {
+          console.log(`[Agent2: YouTube] ✅ Tier REAL v2: เฟรมจริง "ตรงข่าว" ${kept.length} ใบ (yt-dlp+ffmpeg + Gemini strict เครื่องทีม)`);
+          return kept;
+        }
+        console.log('[Agent2: YouTube] Tier REAL v2: ไม่ได้เฟรมตรงข่าวจากคลิปรีเสิร์ชเลย → ใช้ Tier thumbnail/storyboard ต่อ');
+      } catch (e) { console.log(`[Agent2: YouTube] Tier REAL v2 ข้าม: ${e.message?.slice(0, 50)}`); }
+    }
+
     const qualityFrames = [];
 
     // === Tier HQ (NEW 25 มิ.ย.): YouTube auto-thumbnail frames (hq1/2/3 = 480×360 เฟรมจริงในคลิป) ===
