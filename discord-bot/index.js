@@ -217,22 +217,14 @@ client.on('messageCreate', async (message) => {
       console.log('Cannot react:', e.message);
     }
 
-    // === QUEUE SYSTEM ===
-    if (activeCount >= MAX_CONCURRENT) {
-      const queuePosition = queue.length + 1;
-      const processingMsg = await message.reply(`📋 รับทราบครับ! คิวลำดับที่ **${queuePosition}** — ตอนนี้กำลังทำข่าวของคนอื่นอยู่\nรอสักครู่นะครับ จะทำให้เร็วที่สุด! ⏳`);
-
-      const job = { message, content, processingMsg, addedAt: Date.now() };
-      queue.push(job);
-
-      console.log(`[Queue] Added job #${queuePosition} from ${message.author.tag} | Queue: ${queue.length}`);
-      return; // จะถูกเรียกอัตโนมัติเมื่อ slot ว่าง
-    }
-
-    // Slot ว่าง — ทำเลย
-    const processingMsg = await message.reply('รับทราบครับ! กำลังอ่านข้อมูลและปั้นบทความไวรัล รอสักครู่นะครับ ⚡...');
-    const job = { message, content, processingMsg, addedAt: Date.now() };
-
+    // === ยิงเข้า "คิวเซิร์ฟเวอร์" ทันที (★ 27 มิ.ย. ผู้ใช้สั่ง — บล็อกถาวรเหลือ 1 การประมวลผล/1 ข้อความ) ===
+    //   ปัญหาเดิม (เห็น 2 ข้อความค้าง): ถ้า instance นี้ไม่ว่าง → โพสต์ ack "คิวลำดับที่ 1" + เก็บ "คิวภายในบอท"
+    //     "ก่อน" ผ่าน atomic dedup (dedup อยู่ใน /api/queue/add ที่เรียกทีหลัง) → บอท 2 instance ต่างมีคิวของตัวเอง
+    //     ต่างโพสต์ ack คนละแบบ → ค้าง 2 อันยาวๆ
+    //   แก้: เลิก "คิวภายในบอท" — ทุกข้อความเข้า /api/queue/add (atomic claim) "ก่อนโพสต์ ack ใดๆ"
+    //     เซิร์ฟเวอร์ serialize งานทีละ 1 + คืนตำแหน่งคิวเอง · instance ที่ "แพ้เคลม" = เงียบสนิท (ดู processNewsJob)
+    //   → ต่อให้รันกี่ instance ก็ตอบแค่ตัวเดียวต่อข้อความ (เคลม Postgres PK มีผู้ชนะคนเดียวเสมอ)
+    const job = { message, content, processingMsg: null, addedAt: Date.now() };
     activeCount++;
     try {
       await processNewsJob(job);
@@ -240,10 +232,6 @@ client.on('messageCreate', async (message) => {
       console.error('[Direct] Job failed:', err.message);
     } finally {
       activeCount--;
-      // ดึงงานถัดไปจากคิว
-      if (queue.length > 0) {
-        processQueue();
-      }
     }
   }
 });
@@ -252,7 +240,9 @@ client.on('messageCreate', async (message) => {
 // 📰 Process News Job — ฟังก์ชันประมวลผลข่าวจริง
 // ═══════════════════════════════════════════
 async function processNewsJob(job) {
-  const { message, content, processingMsg } = job;
+  const { message, content } = job;
+  // ★ 27 มิ.ย.: เริ่มเป็น null — โพสต์ ack "หลังชนะเคลม atomic" เท่านั้น (instance ที่แพ้ไม่เคยโพสต์อะไร)
+  let processingMsg = job.processingMsg || null;
   const jobStartTime = Date.now();
 
   try {
@@ -288,14 +278,12 @@ async function processNewsJob(job) {
       throw new Error(addData.error || 'Failed to add to queue');
     }
 
-    // ★ 25 มิ.ย.: คิวบอกว่าเป็น "งานซ้ำ" (อีกบอท/อีกเครื่อง/อีกรอบยิงเข้ามาก่อนแล้ว เจนตัวเดียวกันอยู่)
-    //   → บอทตัวนี้เงียบ ไม่ poll ไม่รายงานซ้ำ (กันบอทหลาย instance เห็น 2 ข้อความ + กันเจน/เปลือง token ซ้ำ)
+    // ★ 25–27 มิ.ย.: คิวบอกว่าเป็น "งานซ้ำ" (อีก instance ยิงเข้าคิว = ข้อความ Discord เดียวกันก่อนแล้ว)
+    //   → instance นี้ "แพ้เคลม" = เงียบสนิท: ยังไม่เคยโพสต์ ack เลย (ยกไปโพสต์หลังชนะเคลม) → ไม่มีอะไรต้องลบ
+    //   ดีกว่าเดิม (เดิมโพสต์ ack ก่อนแล้วค่อยลบ = เห็นแว้บ 2 อัน) · ตอนนี้ "ตัวซ้ำไม่โผล่ตั้งแต่แรก"
     if (addData.duplicate) {
-      console.log(`[Bot] ⏭️ งานซ้ำ jobId=${String(addData.jobId).slice(0, 8)} — อีก instance ทำอยู่แล้ว ลบข้อความรับทราบซ้ำทิ้ง`);
-      // ★ 26 มิ.ย. (ผู้ใช้สั่ง): ตัวซ้ำต้องเงียบสนิท — ลบข้อความ "รับทราบครับ..." ของ "ตัวซ้ำ" ทิ้งเลย
-      //   เหลือแค่ข้อความของ "ตัวที่ประมวลผลจริง" → ช่องสะอาด เหลืออันเดียวเหมือนเดิม (ไม่แตะ reaction
-      //   ที่เป็นของ bot user เดียวกัน เดี๋ยวไปลบของตัวที่ทำงานด้วย)
-      await processingMsg.delete().catch(() => {});
+      console.log(`[Bot] ⏭️ งานซ้ำ jobId=${String(addData.jobId).slice(0, 8)} — instance นี้แพ้เคลม เงียบสนิท (ไม่โพสต์ ack)`);
+      if (processingMsg) await processingMsg.delete().catch(() => {}); // เผื่อกรณีมี ack ค้างจากเส้นทางเก่า
       return;
     }
 
@@ -303,11 +291,12 @@ async function processNewsJob(job) {
     const initialPosition = addData.position;
     const queuesAhead = addData.queuesAhead || 0;
 
-    if (queuesAhead > 0) {
-      await processingMsg.edit(`📋 คิวลำดับที่ **${initialPosition}** — มี ${queuesAhead} คิวก่อนหน้า\nประมาณ ${queuesAhead * 3} นาที ⏳`).catch(() => {});
-    } else {
-      await processingMsg.edit(`⚡ เริ่มประมวลผลแล้ว! กำลังอ่านข้อมูลและปั้นบทความไวรัล...`).catch(() => {});
-    }
+    // ★ ชนะเคลม → "เพิ่งโพสต์ ack ครั้งแรกตรงนี้" (มีแค่ instance เดียวที่มาถึงจุดนี้ต่อ 1 ข้อความ)
+    const ackText = queuesAhead > 0
+      ? `📋 รับทราบครับ! คิวลำดับที่ **${initialPosition}** — มี ${queuesAhead} คิวก่อนหน้า\nประมาณ ${queuesAhead * 3} นาที ⏳`
+      : `รับทราบครับ! กำลังอ่านข้อมูลและปั้นบทความไวรัล รอสักครู่นะครับ ⚡...`;
+    if (processingMsg) await processingMsg.edit(ackText).catch(() => {});
+    else processingMsg = await message.reply(ackText);
 
     // 2. Poll for result
     const statusUrl = queueUrl.replace('/api/queue/add', '/api/queue/status');
@@ -506,11 +495,13 @@ async function processNewsJob(job) {
     const _isDup = error.response?.status === 409 || error.response?.data?.errorType === 'DUPLICATE_JOB'
       || /กำลังประมวลผลอยู่|อยู่ในคิวแล้ว|DUPLICATE/i.test(_eMsg);
     if (_isDup) {
-      console.log('[Bot] ⏭️ งานซ้ำ (409) — ลบข้อความรับทราบซ้ำทิ้ง เหลือตัวที่ทำงานจริง');
-      await processingMsg.delete().catch(() => {});
+      console.log('[Bot] ⏭️ งานซ้ำ (409) — instance นี้เงียบสนิท (ไม่โพสต์ ack)');
+      if (processingMsg) await processingMsg.delete().catch(() => {});
       return;
     }
-    await processingMsg.edit(`❌ เกิดข้อผิดพลาดในการประมวลผล: ${error.response?.data?.error || error.message}`).catch(() => {});
+    // error จริง — โพสต์เฉพาะถ้าเคยโพสต์ ack แล้ว (ชนะเคลม) · ตัวที่แพ้เคลมไม่ควรโผล่ error
+    if (processingMsg) await processingMsg.edit(`❌ เกิดข้อผิดพลาดในการประมวลผล: ${error.response?.data?.error || error.message}`).catch(() => {});
+    else await message.reply(`❌ เกิดข้อผิดพลาดในการประมวลผล: ${error.response?.data?.error || error.message}`).catch(() => {});
   }
 }
 
