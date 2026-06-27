@@ -309,6 +309,12 @@ export async function getNextPendingJobs(limit = 1) {
     //   ทางหนีไฟ: ตั้ง env QUEUE_LOCAL_NEWS=1 บนเครื่องทีม = ยอมให้เครื่องทีมคว้างานข่าวชั่วคราว (กรณี Vercel ล่ม)
     const isMetaVideoJob = (j) => {
       if (j.payload?.jobType === 'mineclip') return true; // ขุดนาทีทองใช้ yt-dlp — เครื่องทีมเท่านั้น
+      // ★ 27 มิ.ย. (ผู้ใช้สั่ง — ปกล่มบน Vercel): "ทุกงานปก" → เครื่องทีมเท่านั้น
+      //   ปก v3 (4+1/Vision Director + หลาย AI call + retry) ใช้เวลา >5 นาที → เกินลิมิต Vercel (~300s)
+      //   → FUNCTION_INVOCATION_TIMEOUT คืน HTML → ผู้ใช้เห็น "เซิร์ฟเวอร์ทำปกใช้เวลานานเกิน"
+      //   เครื่องทีม (production maxDuration 800s, ไม่มี platform kill) ทำจนเสร็จ + self-report สถานะผ่านคิว
+      //   🔴 กฎงานข่าวไม่กระทบ (เช็ค jobType='cover' เท่านั้น) · ทางหนีไฟ: env QUEUE_COVER_ON_VERCEL=1 = ยอมให้ Vercel ทำปก
+      if (j.payload?.jobType === 'cover' && process.env.QUEUE_COVER_ON_VERCEL !== '1') return true;
       const fbig = /facebook\.com\/(reel|watch|share\/[rv]\/|video)|fb\.watch\/|instagram\.com\/(reel|reels|tv)\//i;
       const u = String(j.payload?.input || j.payload?.url || '');
       if (fbig.test(u)) return true;
