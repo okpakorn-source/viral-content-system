@@ -236,9 +236,11 @@ async function _renderCoverV3(request) {
       //   ผ่านเฉพาะ "หน้าใหญ่พอ (โคลสอัพ)" + ไม่มีตัวหนังสือ → ครอปแล้วคม+เด่น → output นิ่งแม้ input แกว่ง
       const areaOf = (fb) => (fb && fb.x2 > fb.x1 && !fb.hasText) ? (fb.x2 - fb.x1) * (fb.y2 - fb.y1) : 0;
       const pick = (minArea) => imageBuffers.map((_, i) => areaOf(faceBoxes[i]) >= minArea);
+      // ★ 27 มิ.ย. (ผู้ใช้สั่ง — ปก 4+1 เสมอ): เล็งเก็บ "≥5 ใบ" เพื่อเลี้ยงโครง 4+1 (5 ช่อง)
+      //   ภาพหน้ากลาง/ไกล ที่เก็บเพิ่มจะถูกครอปแน่นที่หน้าในช่องขวา (เกือบสี่เหลี่ยม) → ออกมาเป็นหน้าชัด ไม่ใช่ลำตัว
       let mask = pick(0.045);                                    // เข้มสุด: หน้าโคลสอัพคม
-      if (mask.filter(Boolean).length < 3) mask = pick(0.028);   // ผ่อน 1: ครึ่งตัว+
-      if (mask.filter(Boolean).length < 3) mask = pick(0.012);   // ผ่อน 2: ขอแค่มีหน้าชัดพอ
+      if (mask.filter(Boolean).length < 5) mask = pick(0.028);   // ผ่อน 1: ครึ่งตัว+
+      if (mask.filter(Boolean).length < 5) mask = pick(0.012);   // ผ่อน 2: ขอแค่มีหน้าชัดพอ
       // rev.15i: ผู้ใช้ติ rev.15h — ภาพฉากเปล่า (น้ำท่วม/เวทีคนตัวจิ๋ว) = "มองไม่รู้เรื่อง ไม่เน้นคน"
       //   → เลิกเก็บภาพไร้หน้า ใช้เฉพาะภาพที่ "เห็นคนชัด" บริบทมาจากภาพที่มีคนอยู่ในเหตุการณ์ (ไม่ใช่ฉากเปล่า)
       const finalMask = mask;
@@ -351,14 +353,11 @@ async function _renderCoverV3(request) {
       //   → ยอมนับเฟรมที่ "มีหน้าจริง" แม้ติดตัวหนังสือ (เดี๋ยว faceTightenAll ครอปหน้าตัด caption ออกให้)
       && (!fb.hasText || _preferFrames)
     ).length; // rev.16b: พูลผ่านด่าน A กรองคุณภาพมาแล้ว ไม่ต้องเกณฑ์คุณภาพสัมพัทธ์ซ้ำ (เดิมทำ count=0)
-    let slotBudget = Math.max(3, Math.min(imageBuffers.length, cleanFaceCount));
-    // rev.16: โครง 5 ช่องต่อเมื่อมีภาพดี-ต่างกันจริง ≥5 เท่านั้น — น้อยกว่านั้น cap 4 (กันเติมช่องด้วยภาพซ้ำ/แย่)
-    //   บทเรียน 136/138/141: ดันเต็มช่องทั้งที่ภาพดีไม่พอ → หน้าซ้ำ 3 ช่อง = เหมือนคอนแทคชีต
-    if (cleanFaceCount < 5) slotBudget = Math.min(slotBudget, 4);
-    // ★ rev.20i (ผู้ใช้ยืนยันจากปกตัวอย่าง 21 มิ.ย.): ข่าวครอบครัว/คู่รักที่ "ภาพดี ≥5" ก็ใช้โครง 3 ขวาได้
-    //   เดิม cap ครอบครัวไว้ 4 เสมอ → เจมส์มีภาพดี 8 ใบยังได้แค่ 2 ขวา. ตอนนี้ปล่อยตามจำนวนภาพจริง
-    //   (ภาพ <5 ยังถูก cap เป็น 4 ที่บรรทัดบนอยู่แล้ว = กันคอนแทคชีตเหมือนเดิม)
-    console.log(`[CoverV3] 🎯 ภาพดี-ต่างกัน ${cleanFaceCount} ใบ → งบช่อง = ${slotBudget} (จากพูล ${imageBuffers.length})`);
+    // ★ 27 มิ.ย. (ผู้ใช้สั่ง): ปก "ต้อง 4+1 เสมอ" — งบช่อง = 5 ถ้าพูล ≥5 ใบ · ไม่งั้น 4 · (3 เฉพาะพูลน้อยจริงๆ)
+    //   เดิม cap ที่ 4 เมื่อ "หน้าต่างกัน <5" → ได้โครง 3-4 บ่อย (ผู้ใช้ติว่าไม่สวย: ปกต้อง 4+1 ลงรายละเอียดเยอะ)
+    //   ภาพคนเดียวกันคนละช็อต/อารมณ์ = เติมช่องได้ (ปกไวรัลจริงก็โชว์คนเดิมหลายมุม) · dedup กันเฟรมซ้ำเป๊ะมาแล้ว
+    let slotBudget = Math.min(5, imageBuffers.length);
+    console.log(`[CoverV3] 🎯 ภาพดี-ต่างกัน ${cleanFaceCount} ใบ → งบช่อง = ${slotBudget} (จากพูล ${imageBuffers.length}) [บังคับ 4+1]`);
 
     // ── ★ 25 มิ.ย. — ด่านเลือก "ฮีโร่แบบ CASE-199" (ผู้ใช้สั่งแก้เฉพาะฮีโร่): ──
     //   ปัญหา: re-rank เดิมเลือก "หน้าใหญ่สุด" อย่างเดียว → ได้หน้าชิดขอบ (ครอปแล้วตัด=CASE-198)
@@ -394,18 +393,24 @@ async function _renderCoverV3(request) {
     //   ปรับตามภาพเยอะ/น้อยอัตโนมัติผ่าน slotBudget: ≥5 หน้าคม → โครง 5 ภาพ · 4 → โครง 4 ภาพ
     //   v3_grid3 (3 ภาพ) เหลือเป็น "ทางเลือกสุดท้าย" เฉพาะตอนภาพ <4 ใบจริงๆ (เติม 4 ช่องไม่ได้)
     //   🔴 เดิม (rev.20f) ล็อก vt_ref_tri ตัวเดียวเมื่อภาพ ≥5 → ทุกปกหน้าตาเหมือนกันหมด = ที่ผู้ใช้ติว่า "ล็อก"
-    const richTemplates = [
-      V3_TEMPLATES.vt_ref_tri,      // 5 ภาพ — hero + ขวา 3 สะอาด + วงกลมทอง
-      V3_TEMPLATES.vt_hero_stack,   // 5 ภาพ — hero เต็มซ้าย + ขวา 3 + กรอบคลิปเขียว
-      V3_TEMPLATES.vt_quad_circle,  // 5 ภาพ — สองฝ่าย ให้-รับ (วงกลมกลาง)
-      V3_TEMPLATES.vt_faces_circle, // 4 ภาพ — hero + ขวา 2 + วงกลม
-      V3_TEMPLATES.vt_hero_br,      // 4 ภาพ — อารมณ์น้ำตา (กรอบเหลือง)
-      V3_TEMPLATES.vt_hero_wide,    // 4 ภาพ — คนเล่า/สัมภาษณ์ + คู่กรณี (กรอบขาว)
-    ].filter(t => t.slots.length <= slotBudget);
+    // งบช่อง ≥5 → ใช้ "โครง 4+1 (5 ช่อง)" เท่านั้น (Director สลับเลือกตามเรื่อง ไม่ล็อก) · =4 → โครง 4 ช่อง
+    const fivePlusTemplates = [   // 4+1: hero เด่น + 3-4 ช่องขวา/รอบ + วงกลม
+      V3_TEMPLATES.vt_ref_tri,      // hero + ขวา 3 สะอาด + วงกลมทอง
+      V3_TEMPLATES.vt_hero_stack,   // hero + ขวา 3 + กรอบคลิปเขียว
+      V3_TEMPLATES.vt_quad_circle,  // สองฝ่าย ให้-รับ + วงกลมกลาง
+      V3_TEMPLATES.v3_viral5,       // hero + บน/กลาง/ล่าง + วงกลม
+    ];
+    const fourTemplates = [       // โครง 4 ช่อง (มีวงกลม/กรอบไฮไลต์) — fallback เมื่อภาพดีได้แค่ 4
+      V3_TEMPLATES.vt_faces_circle, // hero + ขวา 2 + วงกลม
+      V3_TEMPLATES.vt_hero_br,      // อารมณ์น้ำตา (กรอบเหลือง)
+      V3_TEMPLATES.vt_hero_wide,    // คนเล่า/สัมภาษณ์ + คู่กรณี (กรอบขาว)
+    ];
+    const richTemplates = (slotBudget >= 5 ? fivePlusTemplates : (slotBudget === 4 ? fourTemplates : []))
+      .filter(t => t.slots.length <= imageBuffers.length);
     // forceTemplateId: บังคับโครงเจาะจง (Cover Lab เลือกเอง) — ข้าม logic อัตโนมัติ
     const forced = forceTemplateId && V3_TEMPLATES[forceTemplateId] ? [V3_TEMPLATES[forceTemplateId]] : null;
-    // โครง 3 ภาพ = ทางเลือกสุดท้ายตอนภาพน้อยจริงๆ (เติมโครง 4-5 ไม่ได้)
-    const lastResort = [V3_TEMPLATES.v3_grid3].filter(t => t.slots.length <= slotBudget);
+    // ★ v3_grid3 (3 ภาพ) = ทางเลือกสุดท้ายเฉพาะ "พูล <4 ใบจริงๆ" เท่านั้น (เติมโครง 4+1 ไม่ได้) — ปกติห้ามโผล่
+    const lastResort = [V3_TEMPLATES.vt_faces_circle, V3_TEMPLATES.v3_grid3].filter(t => t.slots.length <= imageBuffers.length);
     const templateOptions = forced
       || (richTemplates.length > 0 ? richTemplates : lastResort);
 
