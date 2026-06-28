@@ -1217,6 +1217,11 @@ ${(identity?.coreImageQueries || []).map((q, i) => `  ${i+1}. "${q}"`).join('\n'
 🎯 Story Theme: "${identity?._smartQueryTheme || identity?.coreStory?.celebratedAction || 'ไม่ระบุ'}"
 
 ★ IMPORTANT: Images that match these smart keywords → HIGH score (7-10)!
+
+★★★ 📸 DOCUMENTARY > GLAMOUR — ปกข่าวต้องดู "เป็นข่าว" ไม่ใช่โฆษณา (สำคัญมาก 27 มิ.ย. — ผู้ใช้สั่ง บทเรียน CASE-224/226 ออกมาเป็นคอลลาจกลามเมอร์) ★★★
+- ✅ UPRANK (+1 ถึง +2): ภาพ "แคนดิด / เฟรมจากคลิปสัมภาษณ์ / ข่าว / รายการทีวี / ถ่ายสดเหตุการณ์" — สีหน้า/แสง/ฉากเป็นธรรมชาติจริง = ตรงสไตล์ปกข่าวไวรัลที่ปัง (เหมือนดูข่าว)
+- ⛔ DOWNRANK (score ≤ 5, ห้ามเป็นฮีโร่): ภาพ "สตูดิโอ / บิวตี้ช็อต / ถ่ายแบบ / โฆษณา / โพสท่าแฟชั่น / รีทัชหนักจนหน้าเกลี้ยง / พื้นหลังสตูดิโอเรียบ/ขาว" — แม้เป็นคนถูกคนในข่าว ก็ "ดูเป็นโฆษณาไม่ใช่ข่าว" → กดคะแนน (เว้นข้อยกเว้นเดียว: ถ้าทั้งพูลไม่มีภาพแคนดิด/เฟรมข่าวเลยจริงๆ ค่อยยอมใช้สตูดิโอเป็นตัวสำรอง)
+- เป้าหมาย: ปกที่ดู "ดิบจริงเหมือนข่าว" ชนะปกที่ดู "สวยเกลี้ยงเหมือนนิตยสาร" เสมอ
 ★ Images that DON'T match any keyword but show ${mainChar} looking nice → LOW score (≤ 3)!
 
 ★★★ GOAL: Select images that TELL THE STORY of this news — NOT just "pretty" photos of the person!
