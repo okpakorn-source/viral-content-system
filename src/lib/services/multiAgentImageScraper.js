@@ -1243,6 +1243,7 @@ Before scoring every image, ask yourself:
 
 ⛔⛔⛔ FORBIDDEN — ZERO TOLERANCE — SCORE = 0 IMMEDIATELY ⛔⛔⛔
 If ANY of the following appear in an image, even as a background element or in the smallest amount → score = 0, role = REJECT immediately:
+- 🤖 AI-GENERATED / CGI / 3D-render / digital art / illustration / cartoon / drawing / painting / heavily-stylized or fantasy fake images (ภาพที่ AI สร้าง / การ์ตูน / ภาพวาด / เรนเดอร์ 3D / กล้ามโตผิดธรรมชาติ / ตัดต่อแฟนตาซี) → score = 0, REJECT! ปกข่าวต้องเป็น "ภาพถ่ายจริง" ของคน/เหตุการณ์ในข่าวเท่านั้น ห้ามภาพ AI/วาด/เรนเดอร์เด็ดขาด
 ${(identity?.coreStory?.negativeFocus || []).map(f => `- ${f}`).join('\n') || '- (no negativeFocus specified)'}
 - Elephants or elephant care equipment (unless the news is specifically about tourism or elephants, not about family/Alzheimer's caregiving)
 - Veterinary/vet/animal treatment scenes (unless the news is specifically about veterinary work, not about family devotion/Alzheimer's caregiving)
@@ -1513,9 +1514,10 @@ Judge ALL images (even REJECT must include score=0)
       }
       
       // แยก accepted vs rejected สำหรับ log — ★ ลดเกณฑ์จาก 5 → 4 เพื่อให้ได้ภาพเพียงพอ
-      const accepted = parsed.filter(s => s.score >= 4);
-      const nearMiss = parsed.filter(s => s.score === 3);
-      const rejected = parsed.filter(s => s.score < 3);
+      // ★ 27 มิ.ย. (ผู้ใช้สั่งห้ามภาพขยะ — CASE-225 ภาพ AI กล้ามโตหลุดเข้า): role=REJECT ห้ามนับเป็น accepted แม้ score≥4
+      const accepted = parsed.filter(s => s.score >= 4 && s.role !== 'REJECT');
+      const nearMiss = parsed.filter(s => s.score === 3 && s.role !== 'REJECT');
+      const rejected = parsed.filter(s => s.score < 3 || s.role === 'REJECT');
 
       console.log(`[Judge] AI scores: ${parsed.map(s => `#${s.index}=${s.score}(${s.role})`).join(', ')}`);
       console.log(`[Judge] 📊 Accepted(≥4): ${accepted.length}, Near-miss(3): ${nearMiss.length}, Rejected(<3): ${rejected.length}`);
@@ -1584,29 +1586,11 @@ Judge ALL images (even REJECT must include score=0)
           console.log(`[Judge] 📦 Supplemented with near-miss → total ${selectedImages.length}`);
         }
 
-        // ถ้ายังไม่พอ → ดึง score 1-3 มาเสริม (ดีกว่าไม่มีเลย)
-        if (selectedImages.length < 4) {
-          const selectedUrls = new Set(selectedImages.map(i => i.url));
-          const lowScored = rejected
-            .filter(s => s.score > 0 && s.index >= 0 && s.index < validCandidates.length)
-            .sort((a, b) => b.score - a.score);
-
-          for (const s of lowScored) {
-            if (selectedImages.length >= 6) break;
-            const url = validCandidates[s.index];
-            if (!selectedUrls.has(url)) {
-              selectedImages.push({
-                url: url,
-                role: 'SUPPORT',
-                score: s.score
-              });
-              selectedUrls.add(url);
-            }
-          }
-          if (lowScored.length > 0) {
-            console.log(`[Judge] 📦 Added low-scored supplements → total ${selectedImages.length}`);
-          }
-        }
+        // ★ 27 มิ.ย. (ผู้ใช้สั่งห้ามภาพขยะเด็ดขาด — CASE-225 ภาพ AI กล้ามโตหลุดเข้าปกเป็น filler):
+        //   ❌ ลบบล็อกเดิม "ภาพดี <4 → ดึง low-scored/rejected (score 1-3) มาเติมให้ครบ" ออก
+        //   เหตุผล: โครงปกล็อก 5 ช่อง → เดิมเติมภาพ REJECT/ไม่เกี่ยว/AI ให้ครบช่อง = ปกมีภาพขยะ
+        //   ตอนนี้: ภาพดีมีเท่าไหร่ใช้เท่านั้น → route จะเลือกโครง 4 ช่อง (ภาพดี 4) หรือ 422 (ภาพดี <4)
+        //   ดีกว่าเอาภาพขยะมาลง · ไม่มี supplement จาก rejected อีก
 
         // ════════════════════════════════════════════════
         // ★ TOP RANKED IMAGES REPORT
