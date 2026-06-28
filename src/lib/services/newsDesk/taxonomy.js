@@ -31,6 +31,29 @@ export const SOURCE_TYPES = {
 // ตัวกรองชนิดแหล่งในโซนคลิป
 export const CLIP_SOURCES = ['youtube', 'tiktok', 'fb-clip', 'ig'];
 
+// ── ♾️ อมตะ vs 🔥 กระแส (28 มิ.ย. — ผู้ใช้สั่ง: แยก "ทำใหม่ได้ตลอด" ออกจาก "จบในตอนนั้น") ──
+//   ใช้คู่กับ remakeable/lane จาก deskBrain — ป้ายนี้ช่วย บก คัดเฉพาะ "ข่าวที่หยิบมาทำใหม่ได้จริง"
+export const FRESH_CLASSES = {
+  timeless: { key: 'timeless', label: '♾️ อมตะ', emoji: '♾️', desc: 'ทำใหม่ได้ตลอด (บริจาค/กตัญญู/ช่วยเหลือ/สัมภาษณ์ชีวิต)' },
+  trend:    { key: 'trend',    label: '🔥 กระแส', emoji: '🔥', desc: 'ผูกเหตุการณ์เฉพาะ ทำตอนนี้เท่านั้น (น้ำท่วม/ดราม่าสด)' },
+};
+
+/**
+ * แยก "อมตะ (ทำใหม่ได้ตลอด)" vs "กระแส (จบในตอนนั้น)" — บทเรียนผู้ใช้:
+ *   ดาราช่วยน้ำท่วมหาดใหญ่ = น้ำดี "กระแส" (ทำใหม่ไม่ได้) · บริจาคโรงพยาบาล/ปัญญาปันสุข = น้ำดี "อมตะ"
+ *   อิงจาก remakeable (deskBrain ประเมินแล้ว) + lane เป็นหลัก → fallback ดู library
+ */
+export function freshClass(item) {
+  const lane = String((item && item.lane) || '');
+  const remakeable = item && item.remakeable;
+  if (/evergreen|throwback/.test(lane)) return 'timeless'; // เลนของเก่าตั้งใจหยิบ = อมตะชัด
+  if (/\b(trend|buzz)\b/.test(lane)) return 'trend';       // เลนกระแสสด
+  if (remakeable === false) return 'trend';                 // บก ฟันธงว่าทำใหม่ไม่ได้
+  if (remakeable === true) return 'timeless';               // บก ฟันธงว่าทำใหม่ได้
+  // ไม่ชัด → ดราม่า/กระแสรายวัน มักเป็นกระแส · ที่เหลือ default อมตะ (กันตัดเกิน)
+  return libraryOf(item) === 'drama' ? 'trend' : 'timeless';
+}
+
 /** ชนิดแหล่งจาก URL — เรียงเงื่อนไขเฉพาะก่อนกว้าง (รีลส์ FB ต้องมาก่อนโพสต์ FB) */
 export function classifySource(item) {
   const u = String((item && item.url) || '');
@@ -92,5 +115,5 @@ export function enrichDeskItem(item) {
   const sourceType = classifySource(item);
   let imageUrl = item.imageUrl || '';
   if (!imageUrl && sourceType === 'youtube') imageUrl = youtubeThumb(item.url) || '';
-  return { ...item, sourceType, library: libraryOf(item), imageUrl };
+  return { ...item, sourceType, library: libraryOf(item), imageUrl, freshClass: freshClass(item) };
 }
