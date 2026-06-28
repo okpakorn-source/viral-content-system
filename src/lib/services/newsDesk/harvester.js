@@ -966,7 +966,7 @@ export async function notifyDiscord(content) {
 /**
  * ★ สั่ง บก.รายฝ่ายทำทันที (ปุ่ม/Discord) — สแกนเลนตัวเอง ตัดสินตัวที่ยังไม่มีคะแนน แล้วเลือกส่งเจน
  */
-export async function runEditorNow(editorKey) {
+export async function runEditorNow(editorKey, mode = 'select') {
   const { SPECIALIST_EDITORS, editorialJudge, finalScore, getCategoryPerformance } = await import('./deskBrain');
   const sp = SPECIALIST_EDITORS[editorKey];
   if (!sp) throw new Error('ไม่รู้จัก บก.: ' + editorKey);
@@ -991,14 +991,30 @@ export async function runEditorNow(editorKey) {
     }
   }
 
-  // เลือกส่งเจน (บังคับรันแม้ Auto-Pilot ปิด — เพราะคนกดสั่งเอง)
+  // ★ 28 มิ.ย. (ผู้ใช้สั่ง — เฟส 1): บก "คัดข่าวเข้าคลัง" ก่อน (ยังไม่เจน) เป็นค่าเริ่มต้น
+  //   เหตุผล: เลือก ≠ เจน — เก็บข่าวดีเข้าคลังให้เยอะก่อน แล้วค่อยกดเจนทีหลังเป็นขั้นแยก (กันเปลืองโทเคนเจนมั่ว)
   const fresh = await store.getAll();
   const pool = fresh.filter(i => i.status === 'new' && sp.lanes.includes(i.lane));
-  const picked = await autoPilotPick(pool, store, { force: true, onlyEditor: sp.name, perRound: 3 });
-
-  const summary = `${sp.icon} **${sp.name}** สแกนเลนตัวเองแล้ว: ดูใหม่ ${unjudged.length} ใบ · เลือกส่งเจน ${picked} ข่าว${picked > 0 ? ' (ดูที่แท็บ ✅ พร้อมใช้เมื่อเขียนเสร็จ)' : ' — ยังไม่มีตัวที่ถึงเกณฑ์ 8+'}`;
+  let picked = 0, summary = '';
+  if (mode === 'generate') {
+    // โหมดเดิม: เลือกแล้วส่งเจนทันที (ใช้เฉพาะเมื่อสั่ง mode=generate ชัดเจน)
+    picked = await autoPilotPick(pool, store, { force: true, onlyEditor: sp.name, perRound: 3 });
+    summary = `${sp.icon} **${sp.name}** สแกนเลน: ดูใหม่ ${unjudged.length} ใบ · ส่งเจน ${picked} ข่าว${picked > 0 ? ' (ดูแท็บ ✅ พร้อมใช้)' : ' — ยังไม่มีตัวถึงเกณฑ์ 8+'}`;
+  } else {
+    // ★ โหมดคัดเข้าคลัง (default): หยิบข่าวดี (judgeScore≥7 = มีสตอรี่/ทำได้จริง) ที่ยังไม่อยู่คลัง → ติด shortlisted (ยังไม่เจน)
+    const now = new Date().toISOString();
+    const ranked = pool
+      .filter(i => !i.shortlisted && !i.used && (i.judgeScore ?? 0) >= 7)
+      .sort((a, b) => (b.finalScore || 0) - (a.finalScore || 0))
+      .slice(0, 10);
+    for (const it of ranked) {
+      await store.update(it.id, (ex) => ({ ...ex, shortlisted: true, shortlistedAt: now, shortlistedBy: sp.name, shortlistedIcon: sp.icon }));
+    }
+    picked = ranked.length;
+    summary = `${sp.icon} **${sp.name}** คัดข่าวเข้าคลัง: ดูใหม่ ${unjudged.length} ใบ · เก็บเข้าคลัง ${picked} ข่าว (ยังไม่เจน — ดูที่ ⭐ คลังส่งเช้า แล้วค่อยกดส่งทำทีหลัง)`;
+  }
   await notifyDiscord(summary);
-  return { editor: sp.name, icon: sp.icon, scanned: candidates.length, judgedNew: unjudged.length, picked, summary };
+  return { editor: sp.name, icon: sp.icon, scanned: candidates.length, judgedNew: unjudged.length, picked, mode, summary };
 }
 
 /** ลบข่าวเก่าเกิน N วัน กันคลังบวม (เรียกตอน harvest) */

@@ -17,11 +17,13 @@ export async function POST(request) {
   _lock = new Promise((r) => (release = r));
   await prev;
   try {
-    const { editor } = await request.json();
+    const { editor, mode } = await request.json();
     if (!['good', 'drama', 'interview'].includes(editor)) {
       return NextResponse.json({ success: false, error: 'editor ต้องเป็น good | drama | interview', errorType: 'VALIDATION_ERROR' }, { status: 400 });
     }
-    const result = await runEditorNow(editor);
+    // ★ 28 มิ.ย.: default = 'select' (คัดเข้าคลัง ยังไม่เจน) · 'generate' = เลือกส่งเจนเลย (โหมดเดิม)
+    const runMode = mode === 'generate' ? 'generate' : 'select';
+    const result = await runEditorNow(editor, runMode);
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
     console.error('[EditorRun]', error.message);

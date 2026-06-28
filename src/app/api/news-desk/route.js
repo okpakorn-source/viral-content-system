@@ -127,7 +127,8 @@ export async function GET(request) {
     if (tab === 'shortlist') {
       items = items.filter(i => i.shortlisted && !i.used && i.status !== 'dismissed');
       items.sort((a, b) => new Date(b.shortlistedAt || 0) - new Date(a.shortlistedAt || 0));
-      const lightSL = items.slice(0, limit).map(({ fullText, ...rest }) => rest);
+      // ★ 28 มิ.ย.: enrich ให้ป้าย ♾️อมตะ/🔥กระแส + library + sourceType โชว์ในคลังด้วย
+      const lightSL = items.slice(0, limit).map(({ fullText, ...rest }) => enrichDeskItem(rest));
       return NextResponse.json({ success: true, items: lightSL, total: items.length, tab: 'shortlist' });
     }
     // ★ แท็บ ✅ พร้อมใช้: ผลงานที่ส่งเจนแล้ว (คนมาหยิบเนื้อไปทำโพสต์/ปก) — เรียงใหม่สุดก่อน
