@@ -577,8 +577,11 @@ async function agentYouTubeFrames(identity) {
           let fr = [];
           try {
             fr = await Promise.race([
-              extractMetaVideoFrames(`https://www.youtube.com/watch?v=${vid}`, 8),
-              new Promise((res) => setTimeout(() => res([]), 90000)),
+              // ★ 27 มิ.ย. (ระบบ ① — CASE-227: ได้แต่เฟรมฉาก ไม่มีหน้าโคลสอัพให้ฮีโร่):
+              //   8→16 เฟรม/คลิป = สุ่มถี่ขึ้น จับ "จังหวะหน้าชัด" ในคลิปสัมภาษณ์ได้มากขึ้น
+              //   yt-dlp โหลดคลิปครั้งเดียว → แตกเฟรมเพิ่มแทบไม่เสียเวลา (ffmpeg ถูก) · curator/Judge คัดต่อ
+              extractMetaVideoFrames(`https://www.youtube.com/watch?v=${vid}`, 16),
+              new Promise((res) => setTimeout(() => res([]), 100000)),
             ]) || [];
           } catch (e) { console.log(`[Agent2: YouTube] Tier REAL คลิป ${vid} แตกเฟรมล้ม: ${e.message?.slice(0, 40)}`); }
           if (fr.length < 2) continue;
