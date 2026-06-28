@@ -3,7 +3,8 @@
  * POST { editor: 'good' | 'drama' | 'interview' }
  */
 import { NextResponse } from 'next/server';
-import { runEditorNow } from '@/lib/services/newsDesk/harvester';
+import { runEditorNow, runAllEditors } from '@/lib/services/newsDesk/harvester';
+import { SPECIALIST_EDITORS } from '@/lib/services/newsDesk/deskBrain';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,12 +19,14 @@ export async function POST(request) {
   await prev;
   try {
     const { editor, mode } = await request.json();
-    if (!['good', 'drama', 'interview'].includes(editor)) {
-      return NextResponse.json({ success: false, error: 'editor ต้องเป็น good | drama | interview', errorType: 'VALIDATION_ERROR' }, { status: 400 });
+    // ★ 28 มิ.ย.: รับ บก ทุกแนว (good|drama|interview|celeb|citizen) + 'all' (สั่งทุก บก ไล่เก็บรอบเดียว)
+    const validEditors = Object.keys(SPECIALIST_EDITORS);
+    if (editor !== 'all' && !validEditors.includes(editor)) {
+      return NextResponse.json({ success: false, error: `editor ต้องเป็น all | ${validEditors.join(' | ')}`, errorType: 'VALIDATION_ERROR' }, { status: 400 });
     }
-    // ★ 28 มิ.ย.: default = 'select' (คัดเข้าคลัง ยังไม่เจน) · 'generate' = เลือกส่งเจนเลย (โหมดเดิม)
+    // ★ default = 'select' (คัดเข้าคลัง ยังไม่เจน) · 'generate' = เลือกส่งเจนเลย (โหมดเดิม)
     const runMode = mode === 'generate' ? 'generate' : 'select';
-    const result = await runEditorNow(editor, runMode);
+    const result = editor === 'all' ? await runAllEditors(runMode) : await runEditorNow(editor, runMode);
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
     console.error('[EditorRun]', error.message);

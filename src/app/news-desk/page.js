@@ -528,7 +528,7 @@ export default function NewsDeskPage() {
 
   const runEditor = async (key, label) => {
     setEditorRunning(key);
-    setMsg(`${label} กำลังสแกนเลนตัวเอง + เลือกส่งเจน (~1-3 นาที)...`);
+    setMsg(`${label} กำลังสแกน + คัดข่าวดีเข้าคลัง (ยังไม่เจน, ~1-3 นาที)...`);
     try {
       const res = await fetch('/api/news-desk/editor-run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -643,6 +643,13 @@ export default function NewsDeskPage() {
               padding: '8px 18px', borderRadius: 10, border: 'none', cursor: harvesting ? 'wait' : 'pointer',
               background: harvesting ? '#4b5563' : 'linear-gradient(135deg,#8b5cf6,#6d28d9)', color: '#fff', fontWeight: 700, fontSize: 14,
             }}>{harvesting ? '⏳ กำลังหา...' : '🔄 หาข่าวใหม่'}</button>
+          {/* ★ 28 มิ.ย. (ผู้ใช้สั่ง): สั่ง บก ทุกแนวไล่เก็บข่าวเข้าคลัง (กดหลังล้างกระดาน/หาข่าวใหม่ — บก คัดให้ ไม่ต้องเลื่อนดูเองหมด) */}
+          <button onClick={() => runEditor('all', '🤖 บก ทุกแนว')} disabled={harvesting || !!editorRunning}
+            title="ให้ บก ทุกแนว (น้ำดี/ดราม่า/สัมภาษณ์/คนดัง/พลเมืองดี) อ่านข่าวบนกระดาน → คัดข่าวดีเข้าคลังส่งเช้า (ยังไม่เจน) · เหมาะกดหลังล้างกระดาน/หาข่าวใหม่"
+            style={{
+              padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(34,197,94,0.5)', cursor: (harvesting || editorRunning) ? 'wait' : 'pointer',
+              background: editorRunning === 'all' ? '#4b5563' : 'rgba(34,197,94,0.13)', color: editorRunning === 'all' ? '#fff' : 'var(--desk-green, #16a34a)', fontWeight: 700, fontSize: 14,
+            }}>{editorRunning === 'all' ? '⏳ บก กำลังคัด...' : '🤖 บก ไล่เก็บเข้าคลัง'}</button>
         </div>
 
         {/* ★ 25 มิ.ย.: ชิป 6 คลังเนื้อหา + ตัวกรองแหล่ง — โซนคลิป/ลิงก์ */}

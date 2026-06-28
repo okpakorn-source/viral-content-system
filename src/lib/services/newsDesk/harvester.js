@@ -1017,6 +1017,28 @@ export async function runEditorNow(editorKey, mode = 'select') {
   return { editor: sp.name, icon: sp.icon, scanned: candidates.length, judgedNew: unjudged.length, picked, mode, summary };
 }
 
+/**
+ * ★ 28 มิ.ย. (ผู้ใช้สั่ง): สั่ง บก "ทุกแนว" ไล่เก็บข่าวเข้าคลังรอบเดียว (กดหลังล้างกระดาน/หาข่าวใหม่)
+ *   วน บก ทุกฝ่าย (น้ำดี/ดราม่า/สัมภาษณ์/คนดัง/พลเมืองดี) แบบคัดเข้าคลัง (ยังไม่เจน) — ครอบทุกเลน
+ */
+export async function runAllEditors(mode = 'select') {
+  const { SPECIALIST_EDITORS } = await import('./deskBrain');
+  const results = [];
+  let totalPicked = 0, totalJudged = 0;
+  for (const k of Object.keys(SPECIALIST_EDITORS)) {
+    try {
+      const r = await runEditorNow(k, mode);
+      results.push({ editor: k, name: r.editor, icon: r.icon, judgedNew: r.judgedNew, picked: r.picked });
+      totalPicked += r.picked || 0;
+      totalJudged += r.judgedNew || 0;
+    } catch (e) {
+      results.push({ editor: k, error: e.message });
+    }
+  }
+  const summary = `🗞️ บก ทุกแนวไล่เก็บข่าวเข้าคลังเสร็จ: ดูใหม่รวม ${totalJudged} ใบ · เก็บเข้าคลังรวม ${totalPicked} ข่าว (ยังไม่เจน) — ดูที่ ⭐ คลังส่งเช้า`;
+  return { mode, editors: results, totalPicked, totalJudged, summary };
+}
+
 /** ลบข่าวเก่าเกิน N วัน กันคลังบวม (เรียกตอน harvest) */
 export async function pruneOldItems(days = 3) {
   try {
