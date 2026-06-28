@@ -1531,6 +1531,15 @@ Judge ALL images (even REJECT must include score=0)
 
       console.log(`[Judge] AI scores: ${parsed.map(s => `#${s.index}=${s.score}(${s.role})`).join(', ')}`);
       console.log(`[Judge] 📊 Accepted(≥4): ${accepted.length}, Near-miss(3): ${nearMiss.length}, Rejected(<3): ${rejected.length}`);
+      // ★ 28 มิ.ย. (#2 ผู้ใช้สั่ง — debug report ต่อใบ): โชว์ score/role/แหล่ง/เหตุผล ต่อภาพ → เห็นว่าทำไมเลือก/ตัด
+      try {
+        console.log('[Judge] 🔍 DEBUG ต่อใบ:');
+        parsed.slice(0, 30).forEach(s => {
+          let host = '?'; try { host = new URL(String(validCandidates[s.index] || '')).hostname.replace(/^www\./, ''); } catch {}
+          const verdict = (s.score >= 4 && s.role !== 'REJECT') ? '✅รับ ' : (s.score === 3 ? '🟡near' : '❌ตัด ');
+          console.log(`   #${s.index} ${verdict} score=${s.score} role=${s.role} src=${host} | ${String(s.reason || '').slice(0, 55)}`);
+        });
+      } catch {}
 
       // ★ STORY SUBJECT CHECK: ถ้า storySubject ไม่ใช่ตัวเอก ให้ filter glamour-only hero shots ออก
       const _subject = identity?._storySubject || identity?.coreStory?.storySubject || '';

@@ -81,7 +81,16 @@ export async function extractMetaVideoFrames(url, numFrames = 12) {
     }
 
     // ② ดาวน์โหลดคลิป (ไม่เกิน 720p — เล็ก เร็ว พอทำปก) · FB sd/hd = ไฟล์เดี่ยวมีภาพในตัว
-    await runYtdlp(['-f', 'best[height<=720]/sd/hd/b[ext=mp4]/b', '-o', videoPath, '--no-warnings', '--no-playlist', url], 180_000);
+    // ★ 28 มิ.ย. (#1 แก้รอบเบิร์ดค้าง: คลิป 6 นาทีโหลดทั้งคลิป → ช้า บล็อก agents Google/Context จน timeout):
+    //   คลิปยาว → โหลด "แค่ช่วงต้น" (มากสุด CAP_SEC) พอแตกเฟรมหน้า — เร็วขึ้นหลายเท่า ไม่กิน bandwidth ยาว
+    const CAP_SEC = 180; // โหลดมากสุด 3 นาที (เฟรมสัมภาษณ์/หน้าคนมักอยู่ช่วงต้น)
+    const _dlArgs = ['-f', 'best[height<=720]/sd/hd/b[ext=mp4]/b', '-o', videoPath, '--no-warnings', '--no-playlist'];
+    if (duration > CAP_SEC + 20) {
+      _dlArgs.push('--download-sections', `*0-${CAP_SEC}`, '--force-keyframes-at-cuts');
+      console.log(`${LOG} คลิปยาว ${Math.round(duration / 60)} นาที → โหลดแค่ช่วงต้น ${CAP_SEC}s (เร็วขึ้น ไม่บล็อก agents)`);
+    }
+    _dlArgs.push(url);
+    await runYtdlp(_dlArgs, 180_000);
     if (!existsSync(videoPath)) {
       console.log(`${LOG} ❌ ดาวน์โหลดคลิปไม่สำเร็จ`);
       return [];
@@ -92,7 +101,9 @@ export async function extractMetaVideoFrames(url, numFrames = 12) {
     //    ★ แตกเกินจำนวนที่ต้องการ ~1.7 เท่า เผื่อคัดเฉพาะเฟรมเห็นหน้า · เลี่ยงต้น/ท้ายคลิป 6%
     const want = Math.max(numFrames, 1);
     const extractCount = Math.min(Math.ceil(want * 1.7), 20);
-    const dur = duration > 1 ? duration : 30; // ถ้าไม่รู้ความยาว เดา 30s
+    // ★ ถ้าโหลดแค่ช่วงต้น (capped) → แตกเฟรมในช่วงที่โหลดจริงเท่านั้น (กัน -ss เลยไฟล์)
+    const _full = duration > 1 ? duration : 30;
+    const dur = (duration > CAP_SEC + 20) ? CAP_SEC : _full; // ถ้าไม่รู้ความยาว เดา 30s
     const usable = Math.max(dur * 0.88, 5);
     const start = Math.max(dur * 0.06, 0.5);
     const segLen = usable / extractCount;
