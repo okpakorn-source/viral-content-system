@@ -1006,6 +1006,10 @@ export default function NewsDeskPage() {
                       {(LANE_ICONS[it.lane] || '📰') + ' '}{it.title}
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, fontSize: 12 }}>
+                      {/* ★ 28 มิ.ย. (ผู้ใช้สั่ง): ป้าย อมตะ/กระแส — แยก "ทำใหม่ได้ตลอด" จาก "จบในตอนนั้น" */}
+                      {it.freshClass && (
+                        <span title={it.freshClass === 'timeless' ? 'ทำใหม่ได้ตลอด — บก เลือกได้เพราะอมตะ' : 'ผูกเหตุการณ์เฉพาะ ทำได้แค่ตอนนี้ (เช่น น้ำท่วม/ดราม่าสด)'} style={{ padding: '2px 9px', borderRadius: 999, background: it.freshClass === 'timeless' ? 'rgba(34,197,94,0.18)' : 'rgba(239,68,68,0.16)', color: it.freshClass === 'timeless' ? '#16a34a' : '#dc2626', fontWeight: 800 }}>{it.freshClass === 'timeless' ? '♾️ อมตะ' : '🔥 กระแส'}</span>
+                      )}
                       {(() => { const f = freshnessBadge(it); return (
                         <span title={f.title} style={{ padding: '2px 9px', borderRadius: 999, background: f.bg, color: f.color, fontWeight: 700 }}>{f.label}</span>
                       ); })()}
