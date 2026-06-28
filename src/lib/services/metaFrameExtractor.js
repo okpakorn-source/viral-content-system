@@ -84,7 +84,8 @@ export async function extractMetaVideoFrames(url, numFrames = 12) {
     // ★ 28 มิ.ย. (#1 แก้รอบเบิร์ดค้าง: คลิป 6 นาทีโหลดทั้งคลิป → ช้า บล็อก agents Google/Context จน timeout):
     //   คลิปยาว → โหลด "แค่ช่วงต้น" (มากสุด CAP_SEC) พอแตกเฟรมหน้า — เร็วขึ้นหลายเท่า ไม่กิน bandwidth ยาว
     const CAP_SEC = 180; // โหลดมากสุด 3 นาที (เฟรมสัมภาษณ์/หน้าคนมักอยู่ช่วงต้น)
-    const _dlArgs = ['-f', 'best[height<=720]/sd/hd/b[ext=mp4]/b', '-o', videoPath, '--no-warnings', '--no-playlist'];
+    // ★ 28 มิ.ย. (#1b): --limit-rate 3M = ไม่ให้โหลด FB กินแบนด์วิดท์หมด → fetch ของ agents หาภาพ identity ไม่ถูก abort
+    const _dlArgs = ['-f', 'best[height<=720]/sd/hd/b[ext=mp4]/b', '--limit-rate', '3M', '-o', videoPath, '--no-warnings', '--no-playlist'];
     if (duration > CAP_SEC + 20) {
       _dlArgs.push('--download-sections', `*0-${CAP_SEC}`, '--force-keyframes-at-cuts');
       console.log(`${LOG} คลิปยาว ${Math.round(duration / 60)} นาที → โหลดแค่ช่วงต้น ${CAP_SEC}s (เร็วขึ้น ไม่บล็อก agents)`);

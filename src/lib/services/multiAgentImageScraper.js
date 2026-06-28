@@ -12,7 +12,9 @@ const DEFAULT_HEADERS = {
 };
 
 async function fetchWithTimeout(resource, options = {}) {
-  const { timeout = 10000 } = options;
+  // ★ 28 มิ.ย. (#1b แก้รอบเบิร์ด: โหลด FB กินแบนด์วิดท์ → fetch agents Google/Context timeout 10วิ ไม่ทัน → abort
+  //   จน query "person portrait" (ภาพ identity หน้าชัด) หาย → ฮีโร่ไม่มีหน้าคม): เพิ่ม default เป็น 22 วิ ให้รอดช่วงโหลด FB
+  const { timeout = 22000 } = options;
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
   try {
