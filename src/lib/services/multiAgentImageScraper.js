@@ -1227,6 +1227,13 @@ ${(identity?.coreImageQueries || []).map((q, i) => `  ${i+1}. "${q}"`).join('\n'
 - ✅ UPRANK (+1 ถึง +2) เฉพาะภาพที่ "คมชัดจริง": ภาพ "แคนดิด / เฟรมจากคลิปสัมภาษณ์ / ข่าว / รายการทีวี / ถ่ายสดเหตุการณ์" — สีหน้า/แสง/ฉากเป็นธรรมชาติจริง = ตรงสไตล์ปกข่าวไวรัลที่ปัง (เหมือนดูข่าว)
 - ⛔ DOWNRANK (score ≤ 5, ห้ามเป็นฮีโร่): ภาพ "สตูดิโอ / บิวตี้ช็อต / ถ่ายแบบ / โฆษณา / โพสท่าแฟชั่น / รีทัชหนักจนหน้าเกลี้ยง / พื้นหลังสตูดิโอเรียบ/ขาว" — แม้เป็นคนถูกคนในข่าว ก็ "ดูเป็นโฆษณาไม่ใช่ข่าว" → กดคะแนน (เว้นข้อยกเว้นเดียว: ถ้าทั้งพูลไม่มีภาพแคนดิด/เฟรมข่าวเลยจริงๆ ค่อยยอมใช้สตูดิโอเป็นตัวสำรอง)
 - เป้าหมาย: ปกที่ดู "ดิบจริงเหมือนข่าว" ชนะปกที่ดู "สวยเกลี้ยงเหมือนนิตยสาร" เสมอ
+
+★★★ 🦸 HERO ต้อง "หน้าคนชัด รู้ว่าใครทันที" — ฮีโร่ไม่จำเป็นต้องมาจากคลิปต้นทาง (28 มิ.ย. ผู้ใช้+GPT สั่ง · บทเรียน CASE-231 เฟรมคลิปเป็นฉาก ไม่เห็นหน้า → ฮีโร่ไม่เด่น) ★★★
+- ✅ HERO_FACE ให้เฉพาะภาพที่: เห็น "หน้าชัด หน้าตรง/เกือบตรง" · รู้ทันทีว่าใคร · เด่นดึงสายตา · crop แน่นพอดี (Facebook ดันรีชภาพ "ใบหน้าเด่น+บุคคลชัด")
+- ⛔ ห้ามให้ HERO_FACE + กด score ≤5 (เป็นได้แค่ CONTEXT_SCENE) กับภาพ: เบลอ/มัว/แตก · หันข้างมาก/หันหลัง · ไมค์บังหน้า · แว่นดำบังตา · เฟรมไกล/ตัวเล็ก · โล่งเกินไป/รกเกินไป · ดูไม่ออกว่าใคร
+- ★ เฟรมจาก "คลิปต้นทาง": ใช้ได้ แต่ "ถ้าไม่เห็นหน้าชัด = CONTEXT (ภาพบริบท) ไม่ใช่ HERO" — อย่าฝืนดันเฟรมคลิปเป็นฮีโร่ · ถ้าเป็นคนดัง/ดารา/บุคคลสาธารณะ → ภาพหน้าชัดจาก research (Google/ข่าว) ควรเป็นฮีโร่แทน · เฟรมคลิปเก็บไว้เล่า "สถานการณ์/หน้างาน/บริบท" เท่านั้น และเลือกเฉพาะเฟรมที่ "เห็นหน้ามากที่สุด"
+- ★ ลำดับฮีโร่: (1) หน้าชัดสุด (2) ระบุตัวได้ทันที (3) องค์ประกอบแน่นพอดีไม่โล่ง (4) เด่นเหมาะไวรัล FB
+- ★ วงกลม: หน้าเด่นชัดมีพลัง หรือบริบทเด่นเล่าเรื่องได้จริง — ⛔ ห้ามเบลอ/มัว/มองไม่ออกว่าอะไร
 ★ Images that DON'T match any keyword but show ${mainChar} looking nice → LOW score (≤ 3)!
 
 ★★★ GOAL: Select images that TELL THE STORY of this news — NOT just "pretty" photos of the person!
@@ -1904,12 +1911,21 @@ function processJudgeResults(parsed, validCandidates) {
   }
 
   // ★ Fix 8: ลด threshold จาก ≥4 → ≥3 เพื่อให้ได้ภาพเพียงพอ (ข่าวใหม่อาจมีภาพน้อย)
-  const accepted = parsed.filter(s => s.score >= 3);
-  const nearMiss = parsed.filter(s => s.score === 2);
-  const rejected = parsed.filter(s => s.score < 2);
+  // ★ 28 มิ.ย. (#1 ผู้ใช้สั่งห้ามภาพขยะ — path นี้คือ Claude fallback ที่ใช้จริง CASE-231 มี 1 REJECT หลุด): ตัด role=REJECT ออกแม้ score≥3
+  const accepted = parsed.filter(s => s.score >= 3 && s.role !== 'REJECT');
+  const nearMiss = parsed.filter(s => s.score === 2 && s.role !== 'REJECT');
+  const rejected = parsed.filter(s => s.score < 2 || s.role === 'REJECT');
 
   console.log(`[Judge] AI scores: ${parsed.map(s => `#${s.index}=${s.score}(${s.role})`).join(', ')}`);
-  console.log(`[Judge] 📊 Accepted(≥4): ${accepted.length}, Near-miss(3): ${nearMiss.length}, Rejected(<3): ${rejected.length}`);
+  console.log(`[Judge] 📊 Accepted(≥3): ${accepted.length}, Near-miss(2): ${nearMiss.length}, Rejected: ${rejected.length}`);
+  // ★ 28 มิ.ย. (#2 debug ต่อใบ): โชว์ score/role/แหล่ง ต่อภาพ → เห็นว่าทำไมเลือก/ตัด
+  try {
+    parsed.slice(0, 30).forEach(s => {
+      let host = '?'; try { host = new URL(String(validCandidates[s.index] || '')).hostname.replace(/^www\./, ''); } catch {}
+      const verdict = (s.score >= 3 && s.role !== 'REJECT') ? '✅รับ ' : (s.score === 2 ? '🟡near' : '❌ตัด ');
+      console.log(`   🔍 #${s.index} ${verdict} score=${s.score} role=${s.role} src=${host}`);
+    });
+  } catch {}
 
   let heroAssigned = false;
   const HERO_ROLE = 'HERO_FACE';
