@@ -153,6 +153,8 @@ export function editorialCard(item) {
   if (staleTrend) coverageGap.push('เป็นกระแสเก่าที่จบแล้ว');
   if (isDup) coverageGap.push('มุมซ้ำของเดิม');
   if (!score) coverageGap.push('ยังไม่ผ่าน บก.ประเมิน');
+  const relScore = it.reliability ? Number(it.reliability.score) : 60; // ★ เฟส 4: ความน่าเชื่อแหล่ง
+  if (relScore < 40) coverageGap.push('แหล่งอ่อน ควรหาแหล่งยืนยัน');
 
   // ── readiness 0-100 (ข้อ 9) ──
   let readiness = Math.round(score * 4);                          // คะแนน บก. → สูงสุด 40
@@ -170,7 +172,7 @@ export function editorialCard(item) {
   if (royalNeg || toxicity >= 3 || (foreign && notability !== 'famous')) status = 'reject';
   else if (!hasMainChar) status = 'lowValue';
   else if (isDup && !remakeable) status = 'duplicate';
-  else if (notability === 'unknown') status = 'weakSource';
+  else if (notability === 'unknown' || relScore < 38) status = 'weakSource';
   else if (!remakeable && score < 6) status = 'lowValue';
   else if (readiness >= 78 && hasImage) status = 'ready';
   else if (readiness >= 55) status = 'needsResearch';
@@ -279,14 +281,45 @@ export function sameCluster(a, b) {
   return overlap >= 3;
 }
 
-/** เติมฟิลด์จัดระเบียบให้ item (sourceType + library + thumbnail + editorial + scores + cluster) */
+// ════════════════════════════════════════════════════════════════════════════
+// 🏷️ SOURCE RELIABILITY (เฟส 4 — 29 มิ.ย. ตามแผน GPT ข้อ 10)
+//   จัดชั้นความน่าเชื่อถือของแหล่งจากโดเมน + หลายแหล่งยืนยัน (altSources) = น่าเชื่อขึ้น
+// ════════════════════════════════════════════════════════════════════════════
+const NEWS_DOMAINS = /thairath|matichon|dailynews|khaosod|sanook|mgronline|posttoday|thaipbs|pptvhd36|ch3|ch7|one31|amarin|nationtv|nationthailand|bangkokpost|thaipost|komchadluek|naewna|springnews|tnnthailand|workpoint|thestandard|themomentum|siamrath|innnews|brighttv|mcot|prachachat|kapook|thairathonline|ejan|tnews|siamsport|goal\.com|footballthai/i;
+const ENTERTAIN_PAGES = /entertain|dara|บันเทิง|spokedark|thairath-entertainment|gossip|mello/i;
+const FARM_HINT = /blogspot|wordpress|medium\.com|\.xyz|\.info|\.top|content|viral.*blog/i;
+
+export function sourceReliability(item) {
+  const it = item || {};
+  const url = String(it.url || '');
+  let host = ''; try { host = new URL(url).hostname.replace(/^www\./, ''); } catch {}
+  const sType = classifySource(it);
+  const altN = Array.isArray(it.altSources) ? it.altSources.length : 0;
+
+  let tier, score;
+  if (NEWS_DOMAINS.test(host)) { tier = 'newsOutlet'; score = 82; }       // สำนักข่าวไทยที่รู้จัก
+  else if (sType === 'youtube') { tier = 'youtube'; score = 60; }          // ช่องยูทูป (ทางการ/รีโพสต์ปนกัน)
+  else if (sType === 'fb-clip' || sType === 'tiktok' || sType === 'ig') { tier = 'socialCreator'; score = 52; }
+  else if (ENTERTAIN_PAGES.test(host) || sType === 'fb-post') { tier = 'entertainPage'; score = 48; }
+  else if (FARM_HINT.test(host) || (sType === 'article' && !NEWS_DOMAINS.test(host))) { tier = 'unverified'; score = 34; }
+  else { tier = 'other'; score = 45; }
+
+  // หลายแหล่งยืนยัน = ดันความน่าเชื่อ (ข้อ 10: source diversity)
+  if (altN >= 1) score = Math.min(95, score + Math.min(20, altN * 7));
+
+  const labels = { newsOutlet: '📰 สำนักข่าว', youtube: '▶️ ยูทูป', socialCreator: '🎬 ครีเอเตอร์โซเชียล', entertainPage: '📘 เพจบันเทิง', unverified: '⚠️ แหล่งไม่ยืนยัน', other: '• แหล่งทั่วไป' };
+  return { tier, score, label: labels[tier] || tier, multiSource: altN >= 1 };
+}
+
+/** เติมฟิลด์จัดระเบียบให้ item (sourceType + library + thumbnail + editorial + scores + cluster + reliability) */
 export function enrichDeskItem(item) {
   const sourceType = classifySource(item);
   let imageUrl = item.imageUrl || '';
   if (!imageUrl && sourceType === 'youtube') imageUrl = youtubeThumb(item.url) || '';
   const base = { ...item, sourceType, library: libraryOf(item), imageUrl, freshClass: freshClass(item) };
-  base.editorial = editorialCard(base);   // ★ เฟส 1: การ์ดบรรณาธิการ
-  base.scores = multiScores(base);          // ★ เฟส 2: คะแนนหลายมิติ
-  base.clusterKey = storySignature(base);   // ★ เฟส 3: ลายเซ็นเรื่อง (จับซ้ำข้ามแพลตฟอร์ม)
+  base.reliability = sourceReliability(base); // ★ เฟส 4: ความน่าเชื่อแหล่ง (คำนวณก่อน — ให้ editorial ใช้)
+  base.editorial = editorialCard(base);       // ★ เฟส 1: การ์ดบรรณาธิการ
+  base.scores = multiScores(base);              // ★ เฟส 2: คะแนนหลายมิติ
+  base.clusterKey = storySignature(base);       // ★ เฟส 3: ลายเซ็นเรื่อง
   return base;
 }
