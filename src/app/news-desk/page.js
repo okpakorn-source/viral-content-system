@@ -14,6 +14,8 @@ const TABS = [
   { id: 'shortlist', label: '⭐ คลังส่งเช้า' },
   { id: 'ready', label: '✅ พร้อมใช้' },
 ];
+// ★ 29 มิ.ย. (ค่ำ) รื้อ UI: แท็บที่เข้าผ่าน handler (ไม่อยู่ใน TABS bar) — โชว์เป็นชิป active ให้ผู้ใช้ไม่งงว่ากำลังดูอะไรอยู่
+const DYNAMIC_TABS = { focus: '🎯 ผลค้นหา', trendtrack: '🔴 ติดตามกระแส', interview: '🎙️ นาทีทอง', browse: '🗂️ ทุกหมวด', junk: '🗑️ คลังขยะ' };
 // ชิป 6 คลังเนื้อหา (ใช้ทั้งโซนคลิป/ลิงก์) — ตรงกับ taxonomy.js
 const LIB_CHIPS = [
   { key: 'all', label: '🗂️ ทั้งหมด' },
@@ -624,50 +626,76 @@ export default function NewsDeskPage() {
     if (quickChip === 'celeb' && !_isCelebItem(it)) return false;
     return true;
   };
-  const shown = (feedFilter.trim() || quickChip !== 'all') ? items.filter(matchesFeed) : items;
+  const _shownBase = (feedFilter.trim() || quickChip !== 'all') ? items.filter(matchesFeed) : items;
+  // ★ 29 มิ.ย. (ค่ำ) รื้อ UI: เรียง "ความพร้อมเขียน" (readiness) มาก→น้อย เฉพาะแท็บฟีดข่าว
+  //   (shortlist/ready/trendtrack/interview คงลำดับเดิมจากเซิร์ฟเวอร์ — ลำดับมีความหมาย)
+  const _readiness = (it) => (it?.editorial && typeof it.editorial.readiness === 'number') ? it.editorial.readiness : -1;
+  const shown = ['clip', 'link', 'browse', 'focus'].includes(tab)
+    ? [..._shownBase].sort((a, b) => _readiness(b) - _readiness(a))
+    : _shownBase;
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary, #0f1419)' }}>
       <Header title="🗞️ โต๊ะข่าวกลาง" subtitle="ข่าวคัดกรองด้วยสมอง 4 ชั้น — เรียงตามความน่าทำของเพจเรา" />
 
-      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '16px 20px 60px' }}>
-        {/* แถวบน: แท็บ + ปุ่มเก็บข่าว */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-          {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              style={{
-                padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border)', cursor: 'pointer',
-                background: tab === t.id ? 'linear-gradient(135deg,#f59e0b,#d97706)' : 'rgba(255,255,255,0.05)',
-                color: tab === t.id ? '#000' : 'var(--text-primary)', fontWeight: 600, fontSize: 14,
-              }}>{t.label}</button>
-          ))}
-          <div style={{ flex: 1 }} />
-          <button onClick={() => setShowAdvanced(s => !s)} title="เครื่องมือขั้นสูง: Auto-Pilot · บก.AI · หาเฉพาะแนว · ติดตามกระแส · ขุดคลิป"
-            style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid var(--border)', cursor: 'pointer', background: showAdvanced ? 'rgba(139,92,246,0.15)' : 'var(--bg-card)', color: showAdvanced ? 'var(--desk-purple, #a855f7)' : 'var(--text-muted)', fontWeight: 700, fontSize: 13.5 }}>
-            {showAdvanced ? '⚙️ ขั้นสูง ▲' : '⚙️ ขั้นสูง ▼'}</button>
-          <button onClick={clearAndRefresh} disabled={harvesting} title="เก็บข่าวทั้งหมดบนกระดานเข้ากรุ (ไม่ลบถาวร) แล้วสั่ง AI หาข่าวชุดใหม่ทันที"
-            style={{
-              padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.45)', cursor: harvesting ? 'wait' : 'pointer',
-              background: harvesting ? '#4b5563' : 'rgba(239,68,68,0.12)', color: harvesting ? '#fff' : 'var(--desk-red, #dc2626)', fontWeight: 700, fontSize: 14,
-            }}>{harvesting ? '⏳...' : '🧹 ล้าง+หาใหม่'}</button>
-          <button onClick={harvest} disabled={harvesting}
-            style={{
-              padding: '8px 18px', borderRadius: 10, border: 'none', cursor: harvesting ? 'wait' : 'pointer',
-              background: harvesting ? '#4b5563' : 'linear-gradient(135deg,#8b5cf6,#6d28d9)', color: '#fff', fontWeight: 700, fontSize: 14,
-            }}>{harvesting ? '⏳ กำลังหา...' : '🔄 หาข่าวใหม่'}</button>
-          {/* ★ เฟส 5 (29 มิ.ย.): โหมดหาข่าว — แต่ละโหมด = ชุดเลนคนละแบบ (ทุกรอบสำรวจพื้นที่ข่าวใหม่ ไม่วนเดิม) */}
-          {[['fresh', '⚡ สดวันนี้'], ['viral', '🔥 ไวรัล'], ['evergreen', '♾️ น้ำดีอมตะ'], ['celeb', '⭐ ดารา'], ['followup', '🔁 ตามรอย']].map(([k, l]) => (
-            <button key={k} onClick={() => harvestMode(k, l)} disabled={harvesting}
-              title={'หาข่าวโหมด ' + l + ' — ชุดเลนเฉพาะ (ทุกรอบสำรวจพื้นที่ใหม่)'}
-              style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid var(--border)', cursor: harvesting ? 'wait' : 'pointer', background: 'var(--bg-card)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: 12.5 }}>{l}</button>
-          ))}
-          {/* ★ 28 มิ.ย. (ผู้ใช้สั่ง): สั่ง บก ทุกแนวไล่เก็บข่าวเข้าคลัง (กดหลังล้างกระดาน/หาข่าวใหม่ — บก คัดให้ ไม่ต้องเลื่อนดูเองหมด) */}
-          <button onClick={() => runEditor('all', '🤖 บก ทุกแนว')} disabled={harvesting || !!editorRunning}
-            title="ให้ บก ทุกแนว (น้ำดี/ดราม่า/สัมภาษณ์/คนดัง/พลเมืองดี) อ่านข่าวบนกระดาน → คัดข่าวดีเข้าคลังส่งเช้า (ยังไม่เจน) · เหมาะกดหลังล้างกระดาน/หาข่าวใหม่"
-            style={{
-              padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(34,197,94,0.5)', cursor: (harvesting || editorRunning) ? 'wait' : 'pointer',
-              background: editorRunning === 'all' ? '#4b5563' : 'rgba(34,197,94,0.13)', color: editorRunning === 'all' ? '#fff' : 'var(--desk-green, #16a34a)', fontWeight: 700, fontSize: 14,
-            }}>{editorRunning === 'all' ? '⏳ บก กำลังคัด...' : '🤖 บก ไล่เก็บเข้าคลัง'}</button>
+      <div style={{ maxWidth: 1180, margin: '0 auto', padding: '16px 20px 60px' }}>
+        {/* ===== 🎛️ Command bar (รื้อใหม่ 29 มิ.ย.): แท็บ + สั่งหาข่าว จัดกลุ่มสะอาด/sticky ===== */}
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 20, marginBottom: 14, padding: '12px 14px',
+          borderRadius: 16, background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 6px 20px rgba(0,0,0,0.22)',
+        }}>
+          {/* แถวแท็บ */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {TABS.map(t => (
+              <button key={t.id} onClick={() => setTab(t.id)}
+                style={{
+                  padding: '8px 16px', borderRadius: 999, cursor: 'pointer',
+                  border: '1px solid ' + (tab === t.id ? 'transparent' : 'var(--border)'),
+                  background: tab === t.id ? 'linear-gradient(135deg,#f59e0b,#d97706)' : 'rgba(255,255,255,0.04)',
+                  color: tab === t.id ? '#000' : 'var(--text-primary)', fontWeight: 700, fontSize: 13.5,
+                }}>{t.label}</button>
+            ))}
+            {/* ★ ชิปแท็บ active ที่เข้าผ่าน handler (ผลค้นหา/ติดตามกระแส/นาทีทอง) — ผู้ใช้รู้ว่ากำลังดูอะไรอยู่ */}
+            {DYNAMIC_TABS[tab] && (
+              <span title="แท็บนี้เปิดจากการสั่งงาน — กดแท็บอื่นด้านบนเพื่อกลับ"
+                style={{ padding: '8px 16px', borderRadius: 999, background: 'linear-gradient(135deg,#6366f1,#4f46e5)', color: '#fff', fontWeight: 700, fontSize: 13.5 }}>{DYNAMIC_TABS[tab]}</span>
+            )}
+            <div style={{ flex: 1 }} />
+            <button onClick={() => setShowAdvanced(s => !s)} title="เครื่องมือขั้นสูง: Auto-Pilot · บก.AI · หาเฉพาะแนว · ติดตามกระแส · ขุดคลิป"
+              style={{ padding: '8px 14px', borderRadius: 999, border: '1px solid ' + (showAdvanced ? 'rgba(139,92,246,0.5)' : 'var(--border)'), cursor: 'pointer', background: showAdvanced ? 'rgba(139,92,246,0.15)' : 'rgba(255,255,255,0.04)', color: showAdvanced ? 'var(--desk-purple, #a855f7)' : 'var(--text-muted)', fontWeight: 700, fontSize: 13 }}>
+              {showAdvanced ? '⚙️ ขั้นสูง ▲' : '⚙️ ขั้นสูง ▼'}</button>
+          </div>
+
+          <div style={{ height: 1, background: 'var(--border)', opacity: 0.7, margin: '12px 0' }} />
+
+          {/* แถวสั่งหาข่าว — หลัก: หาข่าวใหม่ · กลุ่มโหมด · บก คัด · (ขวา) ล้าง+หาใหม่ */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button onClick={harvest} disabled={harvesting}
+              style={{ padding: '9px 18px', borderRadius: 10, border: 'none', cursor: harvesting ? 'wait' : 'pointer', background: harvesting ? '#4b5563' : 'linear-gradient(135deg,#8b5cf6,#6d28d9)', color: '#fff', fontWeight: 700, fontSize: 14 }}>
+              {harvesting ? '⏳ กำลังหา...' : '🔄 หาข่าวใหม่'}</button>
+
+            {/* ★ เฟส 5 (29 มิ.ย.): กลุ่มโหมดหาข่าว — แต่ละโหมด = ชุดเลนคนละแบบ (ทุกรอบสำรวจพื้นที่ใหม่ ไม่วนเดิม) */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 6px 4px 11px', borderRadius: 999, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+              <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontWeight: 700 }}>โหมด</span>
+              {[['fresh', '⚡ สดวันนี้'], ['viral', '🔥 ไวรัล'], ['evergreen', '♾️ น้ำดีอมตะ'], ['celeb', '⭐ ดารา'], ['followup', '🔁 ตามรอย']].map(([k, l]) => (
+                <button key={k} onClick={() => harvestMode(k, l)} disabled={harvesting}
+                  title={'หาข่าวโหมด ' + l + ' — ชุดเลนเฉพาะ (ทุกรอบสำรวจพื้นที่ใหม่)'}
+                  style={{ padding: '6px 11px', borderRadius: 999, border: '1px solid var(--border)', cursor: harvesting ? 'wait' : 'pointer', background: 'var(--bg-card)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: 12.5 }}>{l}</button>
+              ))}
+            </div>
+
+            {/* ★ 28 มิ.ย.: สั่ง บก ทุกแนวไล่เก็บข่าวเข้าคลัง (กดหลังล้าง/หาใหม่ — บก คัดให้ ไม่ต้องเลื่อนเอง) */}
+            <button onClick={() => runEditor('all', '🤖 บก ทุกแนว')} disabled={harvesting || !!editorRunning}
+              title="ให้ บก ทุกแนว (น้ำดี/ดราม่า/สัมภาษณ์/คนดัง/พลเมืองดี) อ่านข่าวบนกระดาน → คัดข่าวดีเข้าคลังส่งเช้า (ยังไม่เจน) · เหมาะกดหลังล้างกระดาน/หาข่าวใหม่"
+              style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid rgba(34,197,94,0.5)', cursor: (harvesting || editorRunning) ? 'wait' : 'pointer', background: editorRunning === 'all' ? '#4b5563' : 'rgba(34,197,94,0.13)', color: editorRunning === 'all' ? '#fff' : 'var(--desk-green, #16a34a)', fontWeight: 700, fontSize: 14 }}>
+              {editorRunning === 'all' ? '⏳ บก กำลังคัด...' : '🤖 บก ไล่เก็บเข้าคลัง'}</button>
+
+            <div style={{ flex: 1 }} />
+
+            <button onClick={clearAndRefresh} disabled={harvesting} title="เก็บข่าวทั้งหมดบนกระดานเข้ากรุ (ไม่ลบถาวร) แล้วสั่ง AI หาข่าวชุดใหม่ทันที"
+              style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.45)', cursor: harvesting ? 'wait' : 'pointer', background: harvesting ? '#4b5563' : 'rgba(239,68,68,0.1)', color: harvesting ? '#fff' : 'var(--desk-red, #dc2626)', fontWeight: 700, fontSize: 14 }}>
+              {harvesting ? '⏳...' : '🧹 ล้าง+หาใหม่'}</button>
+          </div>
         </div>
 
         {/* ★ 25 มิ.ย.: ชิป 6 คลังเนื้อหา + ตัวกรองแหล่ง — โซนคลิป/ลิงก์ */}
@@ -721,20 +749,22 @@ export default function NewsDeskPage() {
           </div>
         )}
 
-        {/* 🔎 ค้นข่าวเอง (หลัก) — พิมพ์ชื่อคน/แนว → แท็บ 🎯 ผลค้นหา */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', padding: '10px 12px', borderRadius: 12, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.3)' }}>
-          <span style={{ fontSize: 18 }}>🔎</span>
+        {/* 🔎 ค้นข่าวเอง (Hero — รื้อใหม่ 29 มิ.ย.) — พิมพ์ชื่อคน/แนว → AI ค้นทุกแหล่ง → แท็บ 🎯 ผลค้นหา */}
+        <div style={{ display: 'flex', gap: 10, marginBottom: 14, alignItems: 'center', padding: '14px 16px', borderRadius: 16, background: 'linear-gradient(135deg, rgba(168,85,247,0.12), rgba(124,58,237,0.06))', border: '1px solid rgba(168,85,247,0.35)' }}>
+          <span style={{ fontSize: 24, lineHeight: 1 }}>🔎</span>
           <input value={kwInput} onChange={e => setKwInput(e.target.value)} disabled={harvesting}
             onKeyDown={e => { if (e.key === 'Enter') keywordSearch(); }}
-            placeholder='ค้นข่าวเอง — ใส่ชื่อคน/แนว (เช่น "ลิซ่า", "ดารากตัญญู", "หมูเด้ง")'
-            style={{ flex: 1, padding: '9px 14px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 14 }} />
+            placeholder='ค้นข่าวเอง — ใส่ชื่อคน/แนว (เช่น "ลิซ่า", "ดารากตัญญู", "หมูเด้ง") แล้วกด Enter'
+            style={{ flex: 1, padding: '12px 16px', borderRadius: 11, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 15, fontFamily: 'inherit', outline: 'none' }} />
           <button onClick={keywordSearch} disabled={harvesting || kwInput.trim().length < 2}
-            style={{ padding: '9px 18px', borderRadius: 9, border: 'none', cursor: (harvesting || kwInput.trim().length < 2) ? 'not-allowed' : 'pointer', background: (harvesting || kwInput.trim().length < 2) ? '#4b5563' : 'linear-gradient(135deg,#a855f7,#7c3aed)', color: '#fff', fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap' }}>
-            {harvesting ? '⏳...' : '🔎 ค้น'}</button>
+            style={{ padding: '12px 24px', borderRadius: 11, border: 'none', cursor: (harvesting || kwInput.trim().length < 2) ? 'not-allowed' : 'pointer', background: (harvesting || kwInput.trim().length < 2) ? '#4b5563' : 'linear-gradient(135deg,#a855f7,#7c3aed)', color: '#fff', fontWeight: 700, fontSize: 15, whiteSpace: 'nowrap' }}>
+            {harvesting ? '⏳...' : '🔎 ค้นข่าว'}</button>
         </div>
 
-        {/* ===== ⚙️ เครื่องมือขั้นสูง (พับเก็บ — เลิกงง) ===== */}
-        {showAdvanced && (<>
+        {/* ===== ⚙️ เครื่องมือขั้นสูง (พับเก็บ — เลิกงง · รื้อ UI 29 มิ.ย. ห่อเป็น panel เดียว) ===== */}
+        {showAdvanced && (
+        <div style={{ marginBottom: 14, padding: '14px 16px', borderRadius: 16, background: 'rgba(139,92,246,0.05)', border: '1px solid rgba(139,92,246,0.22)' }}>
+          <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--desk-purple, #a855f7)', marginBottom: 10, letterSpacing: 0.3 }}>⚙️ เครื่องมือขั้นสูง — Auto-Pilot · บก.AI · หาเฉพาะแนว · ติดตามกระแส · ขุดคลิป</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
           <button onClick={toggleAutopilot} title="เปิด: บก.AI เลือกข่าว 8+ ส่งเจนเอง / ปิด: แนะนำอย่างเดียว"
             style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid ' + (autopilot ? 'rgba(34,197,94,0.45)' : 'var(--border)'), cursor: 'pointer', background: autopilot ? 'rgba(34,197,94,0.12)' : 'var(--bg-card)', color: autopilot ? '#22c55e' : 'var(--text-muted)', fontWeight: 700, fontSize: 13.5 }}>
@@ -850,7 +880,8 @@ export default function NewsDeskPage() {
             ✍️ กำลังเขียน <b style={{ color: 'var(--desk-blue)' }}>{queueDepth.processing}</b> · รอคิว <b style={{ color: 'var(--desk-amber)' }}>{queueDepth.pending}</b> · ✅ พร้อมใช้ <b style={{ color: 'var(--desk-green)' }}>{readyCount}</b>
           </span>
         </div>
-        </>)}
+        </div>
+        )}
         {/* ===== จบเครื่องมือขั้นสูง ===== */}
 
         {/* แถบส่วนผสมวันนี้ + Mix Governor */}
@@ -935,18 +966,18 @@ export default function NewsDeskPage() {
 
         {/* ★ 23 มิ.ย.: แถบกรองสด — หาข่าวในหลายร้อยข่าวได้ทันที (ไม่ harvest ใหม่ ไม่ใช้สกอร์) */}
         {tab !== 'junk' && !loading && items.length > 0 && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14, padding: '10px 12px', borderRadius: 14, background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
             <input
               value={feedFilter}
               onChange={e => setFeedFilter(e.target.value)}
-              placeholder='🔍 กรองข่าวที่มีอยู่ — พิมพ์ชื่อคน/คำในหัวข้อ (กรองทันที)'
-              style={{ flex: 1, minWidth: 220, padding: '9px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' }}
+              placeholder='🔍 กรองข่าวที่มีอยู่ทันที — พิมพ์ชื่อคน/คำในหัวข้อ (ไม่หาใหม่)'
+              style={{ flex: 1, minWidth: 240, padding: '11px 16px', borderRadius: 11, border: '1px solid var(--border)', background: 'var(--bg-primary, #0f1419)', color: 'var(--text-primary)', fontSize: 14.5, fontFamily: 'inherit', outline: 'none' }}
             />
             {[['all', 'ทั้งหมด'], ['today', '🆕 วันนี้'], ['clip', '🎬 มีคลิป'], ['celeb', '⭐ ดารา']].map(([key, label]) => (
               <button key={key} onClick={() => setQuickChip(key)}
                 style={{ padding: '8px 14px', borderRadius: 999, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
                   border: '1px solid ' + (quickChip === key ? 'transparent' : 'var(--border)'),
-                  background: quickChip === key ? 'linear-gradient(135deg,#f59e0b,#d97706)' : 'rgba(255,255,255,0.05)',
+                  background: quickChip === key ? 'linear-gradient(135deg,#f59e0b,#d97706)' : 'rgba(255,255,255,0.04)',
                   color: quickChip === key ? '#000' : 'var(--text-primary)' }}>
                 {label}
               </button>
@@ -957,7 +988,7 @@ export default function NewsDeskPage() {
                 ✕ ล้าง
               </button>
             )}
-            <span style={{ fontSize: 12.5, color: 'var(--text-muted)', marginLeft: 'auto' }}>แสดง {shown.length} / {items.length} ข่าว</span>
+            <span style={{ fontSize: 12.5, color: 'var(--text-muted)', marginLeft: 'auto', fontWeight: 600 }}>แสดง <b style={{ color: 'var(--text-secondary)' }}>{shown.length}</b> / {items.length} ข่าว</span>
           </div>
         )}
 
@@ -1002,10 +1033,17 @@ export default function NewsDeskPage() {
                 ไม่พบข่าวตรงคำกรอง — ลองล้างคำค้น หรือกดชิป &quot;ทั้งหมด&quot;
               </div>
             )}
-            {shown.map(it => (
+            {shown.map(it => {
+              // ★ รื้อ UI 29 มิ.ย.: แถบสี accent ซ้ายการ์ด สื่อสถานะ บก./งานเขียนแบบสแกนเร็ว
+              const _accent = it.status === 'sent' ? '#22c55e'
+                : it.status === 'claimed' ? '#f59e0b'
+                : it.editorial ? ({ ready: '#22c55e', needsResearch: '#d97706', weakSource: '#ca8a04', duplicate: '#6b7280', lowValue: '#94a3b8', reject: '#dc2626' }[it.editorial.status] || 'var(--border)')
+                : 'var(--border)';
+              return (
               <div key={it.id} style={{
-                padding: '14px 16px', borderRadius: 14, background: 'var(--bg-card)',
-                border: it.status === 'claimed' ? '1px solid rgba(245,158,11,0.5)' : it.status === 'sent' ? '1px solid rgba(34,197,94,0.4)' : '1px solid var(--border)',
+                padding: '14px 16px', borderRadius: 16, background: 'var(--bg-card)',
+                border: '1px solid ' + (it.status === 'claimed' ? 'rgba(245,158,11,0.5)' : it.status === 'sent' ? 'rgba(34,197,94,0.4)' : 'var(--border)'),
+                borderLeft: '3px solid ' + _accent, boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
               }}>
                 <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
                   {/* ★ 25 มิ.ย.: ภาพพรีวิว (เหมือนเปิด YouTube) — คลิกเปิดต้นทาง · มี ▶ บนคลิป */}
@@ -1074,7 +1112,12 @@ export default function NewsDeskPage() {
                       return (
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 5, fontSize: 11.5, alignItems: 'center' }}>
                           <span title={it.editorial.whyNot ? ('ติด: ' + it.editorial.whyNot) : ('เหตุผลควรทำ: ' + it.editorial.whyDo)} style={{ padding: '2px 9px', borderRadius: 999, background: col + '22', color: col, fontWeight: 800 }}>{lbl}</span>
-                          <span title="ความพร้อมให้พนักงานหยิบไปทำ (0-100)" style={{ color: 'var(--text-muted)', fontWeight: 700 }}>พร้อม {it.editorial.readiness}%</span>
+                          <span title="ความพร้อมให้พนักงานหยิบไปทำ (0-100)" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ display: 'inline-block', width: 60, height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                              <span style={{ display: 'block', height: '100%', width: Math.max(0, Math.min(100, it.editorial.readiness || 0)) + '%', background: col, borderRadius: 999 }} />
+                            </span>
+                            <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>พร้อม {it.editorial.readiness}%</span>
+                          </span>
                           {(it.editorial.coverageGap || []).slice(0, 3).map((g, gi) => (
                             <span key={gi} title="สิ่งที่ข่าวนี้ยังขาด" style={{ padding: '1px 7px', borderRadius: 999, background: 'rgba(217,119,6,0.12)', color: '#d97706', fontWeight: 600 }}>⛏️ {g}</span>
                           ))}
@@ -1207,10 +1250,10 @@ export default function NewsDeskPage() {
                     ))}
                   </div>
                 )}
-                {/* ปุ่ม */}
-                <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                {/* ปุ่ม (รื้อ UI 29 มิ.ย.: เส้นคั่นบน + ปุ่มหลักเด่น) */}
+                <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 12, flexWrap: 'wrap', borderTop: '1px solid var(--border)' }}>
                   <a href={it.url} target="_blank" rel="noreferrer"
-                    style={{ padding: '6px 14px', borderRadius: 8, background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 13, textDecoration: 'none', fontWeight: 600 }}>🔗 เปิดลิงก์</a>
+                    style={{ padding: '6px 14px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 13, textDecoration: 'none', fontWeight: 600 }}>🔗 เปิดลิงก์</a>
                   {it.status !== 'sent' && (
                     <button onClick={() => sendToWorkflow(it)}
                       style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', fontSize: 13, fontWeight: 700 }}>
@@ -1276,7 +1319,8 @@ export default function NewsDeskPage() {
                   {/* ปุ่ม 🔥ปัง/🧊แป้ก ถอดออก (คำสั่งทีม 12 มิ.ย. — ไม่มีใครกด) — backend action 'viral'/'flop' ยังอยู่ เผื่อต่อสัญญาณอัตโนมัติในอนาคต */}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
