@@ -191,12 +191,70 @@ export function editorialCard(item) {
   return { status, readiness, coverageGap, whyDo, whyNot };
 }
 
-/** เติมฟิลด์จัดระเบียบให้ item (sourceType + library + thumbnail + editorial card) */
+// ════════════════════════════════════════════════════════════════════════════
+// 📊 MULTI-DIMENSION SCORES (เฟส 2 — 29 มิ.ย. ตามแผน GPT ข้อ 11)
+//   แยกคะแนนหลายมิติ — อย่าใช้ "ความสด" ตัดสินทุกข่าว (ข่าวเก่า freshness ต่ำ แต่ evergreen+emotional สูง = เก็บได้)
+//   deterministic จากฟิลด์ที่ deskBrain ประเมินไว้แล้ว — ไม่เพิ่ม AI call
+// ════════════════════════════════════════════════════════════════════════════
+export function multiScores(item) {
+  const it = item || {};
+  const lane = String(it.lane || '');
+  const lib = libraryOf(it);
+  const remakeable = it.remakeable !== false;
+  const pattern = it.storyNature !== 'event';
+  const foreign = !!it.foreignCountry;
+  const notability = it.notability || 'semiKnown';
+  const tox = Number(it.toxicity || 0);
+  const alt = Array.isArray(it.altSources) ? it.altSources.length : 0;
+  const fresh = freshClass(it);
+  const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
+  // อายุข่าว (วัน) — ใช้คำนวณ freshness
+  let ageDays = null;
+  const dt = it.publishedAt || it._rawDate || it.addedAt;
+  if (dt) { const t = new Date(dt).getTime(); if (t > 0) ageDays = (Date.now() - t) / 86400e3; }
+
+  // freshness: สด/กำลังเป็นกระแสไหม
+  let freshness;
+  if (/trend|buzz|video/.test(lane)) freshness = 88;
+  else if (ageDays != null) freshness = ageDays <= 1 ? 95 : ageDays <= 3 ? 80 : ageDays <= 7 ? 60 : ageDays <= 30 ? 35 : 15;
+  else freshness = fresh === 'trend' ? 70 : 40;
+
+  // evergreen: เก่าแต่ยังทำได้ไหม
+  let evergreen = remakeable ? (pattern ? 85 : 60) : 20;
+  if (['namdee', 'interview', 'help', 'commoner'].includes(lib)) evergreen += 8;
+  if (/evergreen|throwback/.test(lane)) evergreen += 7;
+
+  // momentum: คนกำลังพูดถึงไหม
+  let momentum = /trend|buzz/.test(lane) ? 78 : 45;
+  momentum += alt * 8;                              // หลายสำนักรายงาน = กระแสแรง
+  if (it.performance === 'viral') momentum = 100;
+  if (it.trendTopic) momentum += 10;
+
+  // emotional: พลังอารมณ์
+  const emoBase = { namdee: 82, help: 85, commoner: 80, interview: 70, drama: 66, celeb: 55 };
+  let emotional = (emoBase[lib] || 55) - tox * 4;
+
+  // remake_potential: ทำใหม่ได้ไหม
+  const remakePotential = remakeable ? (pattern ? 88 : 62) : 22;
+
+  // thaiRelevance: ตรงตลาดไทยไหม
+  let thaiRelevance;
+  if (foreign) thaiRelevance = notability === 'famous' ? 55 : 18;
+  else thaiRelevance = notability === 'famous' ? 95 : notability === 'semiKnown' ? 80 : 58;
+
+  return {
+    freshness: clamp(freshness), evergreen: clamp(evergreen), momentum: clamp(momentum),
+    emotional: clamp(emotional), remakePotential: clamp(remakePotential), thaiRelevance: clamp(thaiRelevance),
+  };
+}
+
+/** เติมฟิลด์จัดระเบียบให้ item (sourceType + library + thumbnail + editorial card + multi-scores) */
 export function enrichDeskItem(item) {
   const sourceType = classifySource(item);
   let imageUrl = item.imageUrl || '';
   if (!imageUrl && sourceType === 'youtube') imageUrl = youtubeThumb(item.url) || '';
   const base = { ...item, sourceType, library: libraryOf(item), imageUrl, freshClass: freshClass(item) };
-  base.editorial = editorialCard(base); // ★ เฟส 1: การ์ดบรรณาธิการ (คำนวณหลังเติม imageUrl/library แล้ว)
+  base.editorial = editorialCard(base);   // ★ เฟส 1: การ์ดบรรณาธิการ
+  base.scores = multiScores(base);          // ★ เฟส 2: คะแนนหลายมิติ
   return base;
 }
