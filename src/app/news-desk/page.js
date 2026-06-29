@@ -237,6 +237,18 @@ export default function NewsDeskPage() {
     setHarvesting(false);
   };
 
+  // ★ เฟส 5 (29 มิ.ย.): หาข่าวตามโหมด — แต่ละโหมด = ชุดเลนคนละแบบ (ทุกรีเฟรชสำรวจพื้นที่ใหม่ ไม่วนเดิม)
+  const harvestMode = async (mode, label) => {
+    setHarvesting(true); setMsg(`🔄 หาข่าวโหมด "${label}" — สำรวจพื้นที่ข่าวใหม่ (~2-4 นาที)...`);
+    try {
+      const res = await fetch('/api/news-desk/harvest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
+      const d = await parseRes(res);
+      setMsg(d.success ? `✅ โหมด ${label}: เก็บ ${d.harvested} · ผ่านคัด ${d.added} · ให้คะแนน ${d.judged}` : `❌ ${d.error}`);
+      load();
+    } catch (e) { setMsg('❌ ' + e.message); }
+    setHarvesting(false);
+  };
+
   // ★ สั่งกองสืบน้ำดี (13 มิ.ย.): ยิงเลน good ที่ใช้สมองสืบ 7 แนวคิดคำค้นสด หมุนเวรตามชั่วโมง
   const scoutHarvest = async () => {
     setHarvesting(true); setMsg('🕵️ สั่งกองสืบน้ำดีออกล่า — AI คิดคำค้นเชิงลึกแล้วไปค้นข่าว (~2-3 นาที)...');
@@ -643,6 +655,12 @@ export default function NewsDeskPage() {
               padding: '8px 18px', borderRadius: 10, border: 'none', cursor: harvesting ? 'wait' : 'pointer',
               background: harvesting ? '#4b5563' : 'linear-gradient(135deg,#8b5cf6,#6d28d9)', color: '#fff', fontWeight: 700, fontSize: 14,
             }}>{harvesting ? '⏳ กำลังหา...' : '🔄 หาข่าวใหม่'}</button>
+          {/* ★ เฟส 5 (29 มิ.ย.): โหมดหาข่าว — แต่ละโหมด = ชุดเลนคนละแบบ (ทุกรอบสำรวจพื้นที่ข่าวใหม่ ไม่วนเดิม) */}
+          {[['fresh', '⚡ สดวันนี้'], ['viral', '🔥 ไวรัล'], ['evergreen', '♾️ น้ำดีอมตะ'], ['celeb', '⭐ ดารา'], ['followup', '🔁 ตามรอย']].map(([k, l]) => (
+            <button key={k} onClick={() => harvestMode(k, l)} disabled={harvesting}
+              title={'หาข่าวโหมด ' + l + ' — ชุดเลนเฉพาะ (ทุกรอบสำรวจพื้นที่ใหม่)'}
+              style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid var(--border)', cursor: harvesting ? 'wait' : 'pointer', background: 'var(--bg-card)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: 12.5 }}>{l}</button>
+          ))}
           {/* ★ 28 มิ.ย. (ผู้ใช้สั่ง): สั่ง บก ทุกแนวไล่เก็บข่าวเข้าคลัง (กดหลังล้างกระดาน/หาข่าวใหม่ — บก คัดให้ ไม่ต้องเลื่อนดูเองหมด) */}
           <button onClick={() => runEditor('all', '🤖 บก ทุกแนว')} disabled={harvesting || !!editorRunning}
             title="ให้ บก ทุกแนว (น้ำดี/ดราม่า/สัมภาษณ์/คนดัง/พลเมืองดี) อ่านข่าวบนกระดาน → คัดข่าวดีเข้าคลังส่งเช้า (ยังไม่เจน) · เหมาะกดหลังล้างกระดาน/หาข่าวใหม่"
