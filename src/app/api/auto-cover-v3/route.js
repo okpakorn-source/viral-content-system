@@ -243,9 +243,29 @@ async function _renderCoverV3(request) {
       if (mask.filter(Boolean).length < 5) mask = pick(0.012);   // ผ่อน 2: ขอแค่มีหน้าชัดพอ
       // rev.15i: ผู้ใช้ติ rev.15h — ภาพฉากเปล่า (น้ำท่วม/เวทีคนตัวจิ๋ว) = "มองไม่รู้เรื่อง ไม่เน้นคน"
       //   → เลิกเก็บภาพไร้หน้า ใช้เฉพาะภาพที่ "เห็นคนชัด" บริบทมาจากภาพที่มีคนอยู่ในเหตุการณ์ (ไม่ใช่ฉากเปล่า)
-      const finalMask = mask;
+      // ★ 29 มิ.ย. (CASE-242): กันด่านหน้าคมตัด "ภาพเหตุการณ์/ตัวรอง" (EVIDENCE/RELATIONSHIP/CONTEXT) ทิ้งหมด
+      //   ปัญหา: ภาพทักษิณ/เหตุการณ์(matichon/thaipost) ไม่ใช่หน้าคมโคลสอัพ → โดนตัด → reserve-context ไม่มีภาพใช้
+      //   → สำรองภาพเหตุการณ์คะแนนสูงสุด 1 ใบ ให้พ้นด่าน (ผู้ใช้ย้ำ: ต้องมีทักษิณ/ภาพเหตุการณ์ในปก)
+      const finalMask = [...mask];
+      try {
+        const _ctxRe = /EVIDENCE|RELATIONSHIP|CONTEXT_SCENE/i;
+        const _secRe = /secondary|couple|pair/i; // queryLabel = ภาพมาจากค้นตัวรอง(ทักษิณ)/คู่
+        let _bc = -1, _bcKey = -1;
+        imageBuffers.forEach((img, i) => {
+          if (finalMask[i]) return;
+          const isSec = _secRe.test(String(img?.queryLabel || ''));
+          const isCtx = _ctxRe.test(img?.role || '');
+          if (!isSec && !isCtx) return;
+          const key = (isSec ? 1000 : 0) + (Number(img.score) || 0); // ★ ภาพตัวรอง(ทักษิณ)มาก่อนภาพเหตุการณ์ทั่วไป
+          if (key > _bcKey) { _bcKey = key; _bc = i; }
+        });
+        if (_bc >= 0) { finalMask[_bc] = true; console.log(`[CoverV3] 📎 สำรอง${_secRe.test(String(imageBuffers[_bc].queryLabel || '')) ? 'ภาพตัวรอง(ทักษิณ)' : 'ภาพเหตุการณ์'}พ้นด่านหน้าคม: #${_bc} (${imageBuffers[_bc].role}/${imageBuffers[_bc].queryLabel || '?'} score ${imageBuffers[_bc].score})`); }
+      } catch { /* non-fatal */ }
       const kept = finalMask.filter(Boolean).length;
-      if (kept >= 3 && kept < imageBuffers.length) {
+      // ★ 29 มิ.ย. (แก้บั๊กปกล้ม INSUFFICIENT_QUALITY_IMAGES): ยกพื้นจาก 3→4 ให้ตรงกับ minimum (ปกต้อง 4+1)
+      //   เดิม kept>=3 → ตัดเหลือ 3 ใบ แล้วไปล้มด่าน "ต้อง ≥4" · โดยเฉพาะข่าว 2 ตัวละคร (co-story รับภาพเหตุการณ์ไม่มีหน้ามากขึ้น)
+      //   ถ้าตัดหน้าคมแล้วเหลือ <4 → คงพูลเต็มไว้ (รวมภาพเหตุการณ์) ดีกว่าล้มทั้งปก · Director/ครอปจัดการภาพไม่มีหน้าเองได้
+      if (kept >= 4 && kept < imageBuffers.length) {
         const ibNew = [], fbNew = [];
         imageBuffers.forEach((img, i) => { if (finalMask[i]) { ibNew.push(img); fbNew.push(faceBoxes[i]); } });
         console.log(`[CoverV3] 👤 close-up gate: เหลือ ${ibNew.length}/${imageBuffers.length} (หน้าคมเท่านั้น — เน้นคน)`);
@@ -286,6 +306,8 @@ async function _renderCoverV3(request) {
         return +(0.42 * resN + 0.58 * shN).toFixed(3);
       });
       const hamming = (a, b) => { let x = a ^ b, d = 0; while (x) { d += Number(x & 1n); x >>= 1n; } return d; };
+      // rev.23 (CASE-235: เด็กพนมมือซ้ำ 3 ใบคนละครอป — hamming>8 รอด): ระยะสี (avg |Δ| ต่อช่อง 0-255) จาก colorSig 4x4
+      const colorDist = (a, b) => { if (!a || !b) return 1e9; let d = 0, n = Math.min(a.length, b.length); for (let k = 0; k < n; k++) d += Math.abs(a[k] - b[k]); return d / Math.max(1, n); };
       // คลัสเตอร์ภาพคล้าย → เก็บ "ใบคุณภาพสูงสุด" ต่อคลัสเตอร์ (กันคนเดิม/เฟรมเดิมซ้ำ)
       const clusters = [];
       imageBuffers.forEach((img, i) => {
@@ -295,7 +317,9 @@ async function _renderCoverV3(request) {
           const cs = sigs[c.repIdx];
           // rev.16b: คลัสเตอร์เฉพาะ "เฟรมเกือบเหมือนเป๊ะ" (โครงสร้าง hamming≤8) เท่านั้น
           //   เลิกรวมด้วยสีล้วน — เผลอรวมภาพคนละช็อตของตัวหลัก (พื้นหลังสีเดียวกัน) → เหลือตัวหลักใบเดียว เติมช่องด้วยฉากเบลอ
-          if (cs && hamming(cs.bits, s.bits) <= 8) { hit = c; break; }
+          // rev.23 (CASE-235): เพิ่มจับ "ฉากเดียวกันคนละครอป/คนละเฟรมใกล้กัน" = โครงสร้างใกล้ (hamming≤18) + สีเกือบเหมือน (colorDist≤16)
+          //   ★ ต้องเข้าทั้ง 2 เงื่อนไขพร้อมกัน — สีต่าง(คนละช็อตตัวหลัก)จะไม่ถูกรวม (คงบทเรียน rev.16b) · จับเด็กพนมมือ 3 ใบซ้ำได้
+          if (cs && (hamming(cs.bits, s.bits) <= 8 || (hamming(cs.bits, s.bits) <= 18 && colorDist(cs.colorSig, s.colorSig) <= 16))) { hit = c; break; }
         }
         if (hit) { if (quals[i] > quals[hit.repIdx]) hit.repIdx = i; }
         else clusters.push({ repIdx: i });
@@ -371,10 +395,16 @@ async function _renderCoverV3(request) {
         const area = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);            // หน้าใหญ่=โคลสอัพ (กัน 200 หน้าเล็ก/ลำตัว)
         const cx = (fb.x1 + fb.x2) / 2;
         const edgeNear = Math.min(fb.x1, 1 - fb.x2);              // ระยะหน้าถึงขอบซ้าย/ขวา
-        let s = area;
+        // ★ 28 มิ.ย. (CASE-234 "พี่ก้อง ห้วยไร่"): ฮีโร่ต้อง "ใหญ่ + คม" — เดิมคิดแค่ขนาด+ตำแหน่ง+เดี่ยว
+        //   → เฟรมเบลอ(motion blur ตอนร้องเพลง)หน้าใหญ่/กลาง ชนะเฟรมคมหน้าเล็กกว่า = ฮีโร่เบลอ
+        //   fb.quality = 0.42×ความละเอียด + 0.58×ความคม(Laplacian stdev) จากด่าน A (~บรรทัด 282)
+        //   undefined/null = 0.7 (เป็นกลาง คูณเท่ากันทุกใบ = ไม่เปลี่ยนลำดับ → เข้ากันได้ย้อนหลัง)
+        const _q = (fb.quality === undefined || fb.quality === null) ? 0.7 : fb.quality;
+        let s = area * (0.35 + 0.65 * _q);                        // ★ คะแนนฐาน = ขนาด × ความคม (เบลอ → พื้นที่ถูกลดทอนตามจริง)
         if ((fb.count || 1) === 1) s += 0.04;                     // หน้าเดี่ยวเด่น (ฮีโร่ที่ดี)
         if (edgeNear < 0.05) s -= 0.15;                           // หน้าแทบติดขอบ → ครอปแล้วตัด (กัน 198) หักแรง
         else s -= Math.abs(cx - 0.5) * 0.10;                      // เยื้องกลาง = หักเบาๆ (ชอบหน้ากลางเฟรม)
+        if (_q < 0.5) s -= (0.5 - _q) * 0.30;                     // ★ QUALITY FIRST: เฟรมเบลอชัด (q<0.5) หักหนักเพิ่ม — กันฮีโร่เบลอเด็ดขาด (CASE-228/234)
         return s;
       };
       let bestIdx = 0, bestFit = heroFit(faceBoxes[0]);
@@ -511,6 +541,55 @@ async function _renderCoverV3(request) {
       } catch (e) { console.log(`[CoverV3] retry ${k + 1} err:`, e.message?.slice(0, 45)); }
     }
     coverBuffer = _best.buffer; assignments = _best.assignments; templateSpec = _best.templateSpec; qcApplied = _best.qcApplied;
+
+    // ★ 29 มิ.ย. (CASE-238/240/241 ผู้ใช้สั่ง — DETERMINISTIC จองช่องบริบท · เฉพาะระบบปก ไม่แตะระบบข่าว/ถอดประเด็น):
+    //   ปัญหา: Judge รับภาพเหตุการณ์/ตัวรองแล้ว (co-story) แต่ AI Director มักไม่หยิบ → ปกข่าว 2 ตัวละครเหลือแต่ตัวหลัก
+    //   แก้แบบ "บังคับด้วยโค้ด ไม่พึ่ง AI": ปกที่มี "ตัวรอง" ต้องมีช่อง role บริบท/เหตุการณ์ ≥1 ช่อง
+    //   ใช้ role ที่ติดมากับ imageBuffers (จาก Judge) · เลือก EVIDENCE>CONTEXT_SCENE>RELATIONSHIP (ภาพข่าวเหตุการณ์/คู่ = น่าจะมีตัวรอง)
+    //   สลับเฉพาะ "ช่องรองที่อ่อนสุด" (คะแนนภาพต่ำสุด) · ⛔ ไม่แตะ main/hero และ circle (วงต้องหน้าเดี่ยว)
+    try {
+      const hasSecondary = !!String(identity?.secondaryCharacter || '').trim();
+      // ★ "มีช่องเหตุการณ์แล้ว" = นับเฉพาะ EVIDENCE/RELATIONSHIP ในช่องสี่เหลี่ยม (ไม่นับ circle + ไม่นับ CONTEXT_SCENE ที่อาจเป็นแค่คอนเสิร์ต)
+      const eventRe = /EVIDENCE|RELATIONSHIP/i;
+      const secRe = /secondary|couple|pair/i; // ★ queryLabel = ภาพมาจากค้นตัวรอง(ทักษิณ)/คู่
+      const isSecImg = (img) => secRe.test(String(img?.queryLabel || ''));
+      const rolePrio = (r) => /EVIDENCE/i.test(r) ? 3 : (/RELATIONSHIP/i.test(r) ? 2 : (/CONTEXT_SCENE/i.test(r) ? 1 : 0));
+      if (hasSecondary && Array.isArray(assignments) && assignments.length) {
+        const usedIdx = new Set(assignments.map(a => a.imageIndex));
+        // "มีช่องตัวรอง/เหตุการณ์แล้ว" = ช่องสี่เหลี่ยมมีภาพตัวรอง(ทักษิณ) หรือ role เหตุการณ์ (EVIDENCE/RELATIONSHIP)
+        const alreadyHasEvent = assignments.some(a => a.slotId !== 'circle' && (isSecImg(imageBuffers[a.imageIndex]) || eventRe.test(imageBuffers[a.imageIndex]?.role || '')));
+        if (!alreadyHasEvent) {
+          let best = -1, bestKey = -1;
+          imageBuffers.forEach((img, i) => {
+            if (usedIdx.has(i)) return;
+            const isSec = isSecImg(img);
+            const p = rolePrio(img?.role || '');
+            if (!isSec && p === 0) return;
+            const key = (isSec ? 1000 : 0) + p * 100 + (Number(img.score) || 0); // ★ ภาพตัวรอง(ทักษิณ)มาก่อนเสมอ
+            if (key > bestKey) { bestKey = key; best = i; }
+          });
+          if (best >= 0) {
+            const swappable = assignments.filter(a => !/main|hero/i.test(a.slotId) && a.slotId !== 'circle');
+            swappable.sort((a, b) => (Number(imageBuffers[a.imageIndex]?.score) || 0) - (Number(imageBuffers[b.imageIndex]?.score) || 0));
+            const target = swappable[0] || assignments.find(a => !/main|hero/i.test(a.slotId));
+            if (target && target.imageIndex !== best) {
+              const fb = faceBoxes[best];
+              target.imageIndex = best;
+              target.crop = (fb && fb.x2 > fb.x1)
+                ? { x: Math.max(0, fb.x1 - (fb.x2 - fb.x1) * 0.5), y: Math.max(0, fb.y1 - (fb.y2 - fb.y1) * 0.4), w: Math.min(1, (fb.x2 - fb.x1) * 2.0), h: Math.min(1, (fb.y2 - fb.y1) * 2.0) }
+                : { x: 0.05, y: 0.05, w: 0.9, h: 0.9 };
+              const _isSec = isSecImg(imageBuffers[best]);
+              target.why = _isSec ? 'จองช่องภาพตัวรอง(ทักษิณ) (deterministic — เล่าครบ 2 ตัวละคร)' : 'จองช่องภาพเหตุการณ์ข่าว (deterministic)';
+              console.log(`[CoverV3] 📌 reserve-${_isSec ? 'ตัวรอง(ทักษิณ)' : 'เหตุการณ์'}: ${target.slotId} ← #${best} (role=${imageBuffers[best].role}/${imageBuffers[best].queryLabel || '?'} score=${imageBuffers[best].score})`);
+              coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec, faceBoxes });
+            }
+          } else {
+            console.log('[CoverV3] 📌 reserve-context: ข่าว 2 ตัวละคร แต่ไม่มีภาพบริบทเหลือในพูล (คงเดิม)');
+          }
+        }
+      }
+    } catch (e) { console.log('[CoverV3] reserve-context skipped (non-fatal):', e.message?.slice(0, 50)); }
+
     const score = Math.round(_best.jr.score * 10) / 10;
     console.log(`[CoverV3] ✅ best ${score}/10 (${templateSpec.id}) | แกนบังคับ person=${_best.jr.personClear} topic=${_best.jr.onTopic} clean=${_best.jr.clean} | issues: ${_best.jr.issues.join(', ') || 'none'}`);
 

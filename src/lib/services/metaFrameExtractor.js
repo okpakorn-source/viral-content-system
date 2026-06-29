@@ -75,8 +75,11 @@ export async function extractMetaVideoFrames(url, numFrames = 12) {
     } catch (e) {
       console.log(`${LOG} ⚠️ metadata failed:`, e.message?.slice(0, 80));
     }
-    if (duration > 20 * 60) {
-      console.log(`${LOG} คลิปยาว ${Math.round(duration / 60)} นาที — ข้าม (เกินลิมิต)`);
+    // ★ 29 มิ.ย. (CASE-239 ผู้ใช้: ไม่มีภาพสัมภาษณ์/รายการ/คุก เพราะคลิปพวกนั้นยาว >20 นาที เลยถูกข้ามหมด):
+    //   ยกลิมิต 20→60 นาที — คลิปสัมภาษณ์/รายการ(ที่มีหน้าเต็ม+บริบทคุก/ทักษิณ) มักยาว 20-60 นาที ต้องให้ผ่าน
+    //   ★ ปลอดภัยเรื่องเวลา: section-load (บรรทัด ~89) โหลดแค่ 180วิแรกเสมอไม่ว่าคลิปยาวเท่าไหร่ → ดาวน์โหลดไม่บาน
+    if (duration > 60 * 60) {
+      console.log(`${LOG} คลิปยาว ${Math.round(duration / 60)} นาที — ข้าม (เกิน 60 นาที = น่าจะ live/รวมคลิป ไม่ตรงประเด็น)`);
       return [];
     }
 

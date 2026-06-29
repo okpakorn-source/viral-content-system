@@ -276,7 +276,9 @@ export default function CoverLabPage() {
 
   // Poll จนงานเสร็จ — คืน result object เต็มของ /api/auto-cover
   async function pollCoverJob(jobId, { trackLocal = true } = {}) {
-    const maxPollTime = 15 * 60 * 1000; // 15 นาที (pipeline ปก 3-7+ นาที)
+    // ★ 29 มิ.ย. (CASE-235): ปกข่าวคนดัง/คลิป (FB extract + Judge 24 ภาพ) ใช้ ~15 นาที = ชนเพดานเดิม 15 พอดี
+    //   → ขึ้น "หมดเวลา" หลอกทั้งที่ server ทำเสร็จ+เก็บคลังแล้ว · ขยายเป็น 22 นาที ให้ catch ผลได้จริง (worker server cap 15 อยู่แล้ว)
+    const maxPollTime = 22 * 60 * 1000; // 22 นาที
     const startTime = Date.now();
     let workerRetriggerCount = 0;
     let notFoundCount = 0;
@@ -343,7 +345,7 @@ export default function CoverLabPage() {
       }
     }
 
-    throw new Error('หมดเวลารอผลปก (15 นาที) — งานอาจยังทำอยู่ฝั่งเซิร์ฟเวอร์ รีเฟรชหน้าภายหลังเพื่อกู้ผลลัพธ์');
+    throw new Error('หมดเวลารอผลปก (22 นาที) — งานอาจยังทำอยู่ฝั่งเซิร์ฟเวอร์ รีเฟรชหน้าภายหลังเพื่อกู้ผลลัพธ์');
   }
 
   // ★ รับ result จาก queue → แสดงปก (รวมเคส save-gate ไม่ผ่านที่ยังมี base64 ให้ดู)

@@ -1287,11 +1287,14 @@ ${(() => {
   const st = (identity?.storyType || '').toLowerCase();
   const subj = (identity?._storySubject || identity?.coreStory?.relationship || identity?.coreStory?.storySubject || '');
   const isRel = /warm|family|relationship|romance|couple|love|marriage|wedding/.test(st)
-    || /สามี|ภรรยา|คู่รัก|ครอบครัว|ความสัมพันธ์|แต่งงาน|รักกัน|คู่ชีวิต/.test(`${subj} ${identity?.story || ''}`);
+    || /สามี|ภรรยา|คู่รัก|ครอบครัว|ความสัมพันธ์|แต่งงาน|รักกัน|คู่ชีวิต/.test(`${subj} ${identity?.story || ''}`)
+    // ★ 29 มิ.ย. (CASE-238/240: ข่าวเสก+ทักษิณ "การเมือง" 2 ตัวละคร — ภาพทักษิณ/ภาพคู่โดน Judge ตัดเป็น "glamour ไม่เกี่ยว" score≤2 เพราะโหมดนี้ไม่ติด):
+    //   หลักการ: ข่าวที่มี "ตัวรอง" = ข่าว 2 ตัวละครทุกแนว (การเมือง/ดราม่า/คู่กรณี/เพื่อน) → ภาพของตัวรอง+ภาพคู่ "คือเนื้อข่าว" ต้องบูสต์ ไม่ใช่ตัดทิ้ง
+    || !!String(identity?.secondaryCharacter || '').trim();
   if (!isRel) return '';
   const sec = identity?.secondaryCharacter || 'คู่ของเขา';
-  return `=== ★★★ RELATIONSHIP / FEEL-GOOD MODE (ข่าวความสัมพันธ์-ครอบครัว ไม่มีกิจกรรม/เหตุการณ์เฉพาะ) ★★★ ===
-ตัวเรื่องคือ "ความสัมพันธ์ของ ${mainChar} กับ ${sec}" → ภาพพอร์ตเทรต/ภาพคู่ "คือเนื้อข่าวเอง" ไม่ใช่ glamour ลอยๆ ดังนั้น OVERRIDE กฎกดคะแนนพอร์ตเทรตด้านบนสำหรับข่าวแบบนี้:
+  return `=== ★★★ CO-STORY MODE (ข่าวที่มี "2 ตัวละคร" — ความสัมพันธ์/ครอบครัว/การเมือง/ดราม่า/คู่กรณี) ★★★ ===
+ตัวเรื่องมี "ทั้ง ${mainChar} และ ${sec}" → ภาพพอร์ตเทรต/ภาพคู่/ภาพตัวรอง "คือเนื้อข่าวเอง" (เล่าความเกี่ยวข้องของสองคน) ไม่ใช่ glamour ลอยๆ → OVERRIDE กฎกดคะแนนพอร์ตเทรต/secondary สำหรับข่าวแบบนี้:
 - โคลสอัพ/พอร์ตเทรตหน้าตรง"เดี่ยว"ของ ${mainChar} หรือ ${sec} (จากสัมภาษณ์/รายการ/โซเชียล) = ON-STORY → score 6-8 (ห้ามตีเป็น "unrelated glamour"!)
 - ภาพ"คู่สองคน" ${mainChar}+${sec} = ON-STORY ตรงแก่น → score 8-10
 - ★ เก็บหน้าคมเดี่ยวของ "ทั้งสองคน" ได้หลายใบ — PERSON_SUPPORT ขยายเป็น 2-3 ใบได้ (เพื่อปกมีหน้าหลากหลาย ไม่ซ้ำคนเดิม/ท่าเดิม)
@@ -1494,7 +1497,11 @@ Judge ALL images (even REJECT must include score=0)
 
   // Fix 16: Gemini 503 all day - skip directly to GPT-4o fallback
   console.log('[Judge] Gemini disabled - using GPT-4o directly');
-  return await judgeWithFallback(validCandidates, imageParts, prompt, newsTitle, identity);
+  // ★ 29 มิ.ย. (CASE-243 ผู้ใช้สั่ง: ต้องมีทักษิณ): ต่อ "subject ของภาพ" (queryLabel จากการค้น) ให้ภาพที่คัด
+  //   → route/reserve รู้ว่าภาพไหนมาจากค้น "secondary(ทักษิณ)/couple" = น่าจะมีทักษิณ (ไม่ต้องพึ่ง Judge แท็ก) · เฉพาะระบบปก
+  const _selResult = await judgeWithFallback(validCandidates, imageParts, prompt, newsTitle, identity);
+  try { if (Array.isArray(_selResult)) for (const img of _selResult) { const m = _metaLookup.get(img.url); if (m) { img.queryLabel = m.queryLabel || ''; img.queryText = m.queryText || ''; } } } catch { /* non-fatal */ }
+  return _selResult;
 
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);

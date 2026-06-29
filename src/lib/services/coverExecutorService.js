@@ -198,7 +198,11 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
   // rev.14k: ขยาย "face box" → "หัว" (รวมผม) ก่อนคำนวณ — กันผมตกขอบ (บทเรียน CASE-090 hero ผมตก)
   const fwN = fb.x2 - fb.x1, fhN = fb.y2 - fb.y1;
   const hx1 = fb.x1 - fwN * 0.20, hx2 = fb.x2 + fwN * 0.20; // เผื่อผม/หูข้าง
-  const hy1 = fb.y1 - fhN * 0.50, hy2 = fb.y2 + fhN * 0.18; // เผื่อผมบน + คาง
+  // ★ 29 มิ.ย. (CASE-237/239 ผู้ใช้ย้ำ 2 รอบ: ฮีโร่เหลือช่องว่างเหนือหัว เห็นหน้าต่าง/บันได = พื้นหลังแย่งจุดเด่น):
+  //   ฮีโร่ (minFaceHFrac>0) ลด padding เผื่อผมเหนือหัว 0.50→0.30 → กล่องหัวชิดผมจริง พื้นหลังเหนือหัวน้อยลง หน้าเต็มเฟรมขึ้น
+  //   ช่องรอง (minFaceHFrac=0) คง 0.50 เผื่อผม (กัน CASE-090 ผมตก) · การ์ดกันผมตก (บรรทัด ~213) ยังทำงานปกติ
+  const topPad = minFaceHFrac > 0 ? 0.30 : 0.50;
+  const hy1 = fb.y1 - fhN * topPad, hy2 = fb.y2 + fhN * 0.18; // เผื่อผมบน + คาง
   const faceWpx = (hx2 - hx1) * imgW;       // ความกว้าง "หัว"
   const faceHpx = (hy2 - hy1) * imgH;       // ความสูง "หัว"
   const faceCxPx = ((hx1 + hx2) / 2) * imgW;
@@ -259,7 +263,10 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
 // ★ 27 มิ.ย. (ผู้ใช้สั่ง CASE-224): ฮีโร่หน้าเล็กไป เหลือพื้นที่ว่าง/ตัวเยอะ หน้าไม่นำทรง → ซูมหน้าเข้าให้เต็มเฟรม
 //   faceFrac 0.82→0.94 (หน้ากินกว้างเฟรมเกือบเต็ม) + minFaceHFrac 0.50→0.60 (บังคับหน้าใหญ่ขั้นต่ำ)
 //   ★ ภาพไม่เสีย: guard "ซูมเฉพาะเมื่อหัวยังครบทั้งกว้าง-สูง" (บรรทัด ~234-241) กันหัวขาด/หน้าตัดครึ่งอยู่แล้ว
-const HERO_CROP   = { faceFrac: 0.94, faceTopAt: 0.38, maxFaceHFrac: 0.78, minFaceHFrac: 0.60 };
+// rev.23 (CASE-235 ผู้ใช้สั่ง: ฮีโร่หน้าต้องเด่น ห้ามโชว์เต็มตัว/ครึ่งตัว): ดันกล่องหัวจาก 60-78% → 72-84% ของความสูงกรอบ
+//   กล่องหัวรวม hair padding ใหญ่กว่าหน้าจริง ~1.68× → ค่าเดิม 0.60 ทำหน้าจริงเหลือ ~36% (โชว์ตัว) · ค่าใหม่ → หน้าจริง ~45% เด่นขึ้นชัด
+//   (การ์ดกันหัวขาด: บรรทัด 210-213 + 234-241 ยังทำงาน — ภาพหน้าชิดขอบบนจะซูมออกอัตโนมัติ ไม่ตัดหัว)
+const HERO_CROP   = { faceFrac: 0.94, faceTopAt: 0.34, maxFaceHFrac: 0.84, minFaceHFrac: 0.72 };
 // ── CIRCLE (วงกลม) — ⛔ คงค่าเดิม ห้ามแก้เมื่อแก้เลย์เอาต์อื่น ──
 const CIRCLE_CROP = { faceFrac: 0.80, faceTopAt: 0.45, maxFaceHFrac: 0.80 };
 // ── MOMENT (ช่องรอง) — ⛔ คงค่าเดิม ห้ามแก้เมื่อแก้เลย์เอาต์อื่น ──
@@ -366,7 +373,16 @@ async function renderRectTile(src, crop, slot, fb) {
       region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
     }
   } else {
-    region = fitCropToSlotAspect(crop, imgW, imgH, slot.w / slot.h);
+    // ★ rev.23 (CASE-237 ผู้ใช้สั่ง — กฎ "ห้ามภาพช่วงลำตัวเยอะ/ภาพยืนเต็มตัว" ทุกช่อง):
+    //   ช่องที่ "ตรวจไม่เจอหน้า" + ครอป Director สูง (>0.5 ของภาพ = เห็นลำตัว/เต็มตัว) → ซูมเข้า "ช่วงบน-กลาง"
+    //   (หัว-อก) แทนครอปเต็ม กันคนยืนเต็มตัวหลุดมา (รูที่ภาพคู่ยืนขวาล่างหลุด) · ภาพบริบท/ฉากได้ส่วนบนพอ (บริบทเป็นรอง)
+    let _c = crop;
+    if (crop && crop.h > 0.5) {
+      const nw = crop.w * 0.80;                                  // แคบเข้าหน่อย (กันเก็บฉากซ้าย-ขวา)
+      const nx = Math.max(0, Math.min(crop.x + (crop.w - nw) / 2, 1 - nw));
+      _c = { x: nx, y: crop.y, w: nw, h: crop.h * 0.55 };        // เก็บช่วงบน 55% (หัว-อก) ทิ้งช่วงล่าง(ขา/ลำตัว)
+    }
+    region = fitCropToSlotAspect(_c, imgW, imgH, slot.w / slot.h);
   }
   // rev.16: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — WB คุมโทนรวม + รีทัชเบา
   //   (1) gray-world WB ดึงคาสต์สีเข้าโทนเดียว  (2) sat/contrast บางๆ  (3) คมขึ้นพอดี
