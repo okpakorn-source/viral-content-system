@@ -264,16 +264,18 @@ export function storySignature(item) {
   return key.join('|');
 }
 
-/** เรื่องเดียวกันไหม — ใช้รวม cluster ข้ามแพลตฟอร์ม
- *  เกณฑ์: คำสำคัญทับกัน ≥2 คำ (ไทยคำประสมไม่มีช่องว่าง → ชื่อคน/คำเฉพาะที่ทับกันคือสัญญาณแข็งสุด)
- *  หรือทับ ≥1 + เกินครึ่งของฝั่งสั้น (หัวข้อสั้น) · ⚠️ heuristic: จับได้เมื่อ "มีชื่อ/คำเฉพาะร่วม" (เคสคนดังส่วนใหญ่) */
+/** เรื่องเดียวกันไหม — ใช้เสริม dedup เดิม (กันเรื่องเดิมหัวข้อใกล้มากหลุดเข้าซ้ำ)
+ *  ★ CONSERVATIVE โดยตั้งใจ: ทับ ≥2 คำสำคัญ "และ" ≥60% ของฝั่งสั้น → จับเฉพาะหัวข้อใกล้กันมาก
+ *  ⚠️ ไม่พยายามจับ "เรื่องเดียวกันแต่เรียบเรียงต่างมาก" เพราะ token ไทยแยก "ซ้ำบุคคล(เบิร์ดป่วย≠เบิร์ดคอนเสิร์ต)"
+ *     จาก "ซ้ำเหตุการณ์" ไม่ได้ → false-merge ทำข่าวดีหาย (อันตรายกว่าพลาดจับ)
+ *  → cluster ข้ามแพลตฟอร์มเต็มรูป (story_cluster_id) ต้องใช้ AI สกัด person+event (งานเฟสอนาคต บน deskBrain) */
 export function sameCluster(a, b) {
   const sa = storySignature(a).split('|').filter(Boolean);
   const sb = storySignature(b).split('|').filter(Boolean);
   if (sa.length < 2 || sb.length < 2) return false;
   const setB = new Set(sb);
   const overlap = sa.filter(t => setB.has(t)).length;
-  return overlap >= 2 || (overlap >= 1 && overlap / Math.min(sa.length, sb.length) >= 0.5);
+  return overlap >= 2 && (overlap / Math.min(sa.length, sb.length)) >= 0.6;
 }
 
 /** เติมฟิลด์จัดระเบียบให้ item (sourceType + library + thumbnail + editorial + scores + cluster) */
