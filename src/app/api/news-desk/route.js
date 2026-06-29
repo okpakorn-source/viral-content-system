@@ -45,7 +45,8 @@ export async function GET(request) {
       if (wantClip && src !== 'all' && CLIP_SOURCES.includes(src)) list = list.filter(i => i.sourceType === src);
       // เรียงใหม่สุดก่อน (เวลาเข้าโต๊ะ)
       list.sort((a, b) => new Date(b.harvestedAt || 0) - new Date(a.harvestedAt || 0));
-      const lim = Math.min(400, Number(searchParams.get('limit')) || 120);
+      // ★ 29 มิ.ย. (ผู้ใช้สั่ง: UI ต้องเห็นข่าวครบ): ขยาย cap 400→2000 + default 120→600 → โหลดเต็มโซน (กรองด้วยหมวด/ค้นเรียลไทม์ได้)
+      const lim = Math.min(2000, Number(searchParams.get('limit')) || 600);
       const light = list.slice(0, lim).map(({ fullText, ...rest }) => rest);
       return NextResponse.json({ success: true, items: light, total: list.length, zone, library: lib, source: src, libraryCounts, sourceCounts });
     }

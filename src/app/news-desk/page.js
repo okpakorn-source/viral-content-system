@@ -177,7 +177,7 @@ export default function NewsDeskPage() {
   const load = useCallback(async () => {
     try {
       const url = (tab === 'clip' || tab === 'link')
-        ? `/api/news-desk?zone=${tab}&library=${library}&source=${clipSource}&limit=200`
+        ? `/api/news-desk?zone=${tab}&library=${library}&source=${clipSource}&limit=1500`
         : tab === 'browse'
           ? `/api/news-desk?tab=browse&limit=400&category=${encodeURIComponent(catFilter)}`
           : `/api/news-desk?tab=${tab}&limit=120`;

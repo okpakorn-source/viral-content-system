@@ -150,16 +150,14 @@ export function editorialCard(item) {
   const foreign = !!it.foreignCountry;
   const royalNeg = it.royalNegative === true;
   const toxicity = Number(it.toxicity || 0);
-  const sType = classifySource(it);
-  const hasImage = !!(it.imageUrl || sType === 'youtube'); // ยูทูปมี thumbnail เสมอ
   const isDup = !!(it.sameStoryAs || it.duplicateOf || it.dupOfArchive);
+  // ★ 29 มิ.ย. (ผู้ใช้สั่ง): ตัด "มีภาพ/ไม่มีภาพ" ออกจากตัวแปรประเมินข่าว — คนดังหาภาพได้อยู่แล้ว · วัดเฉพาะ "ประเด็นดี"
   const lib = libraryOf(it);
   const fresh = freshClass(it);
 
   // ── coverage gap: ข่าวนี้ขาดอะไร (ข้อ 14) ──
   const coverageGap = [];
   if (!hasMainChar) coverageGap.push('ขาดตัวละครหลักชัด');
-  if (!hasImage) coverageGap.push('ขาดภาพ/คลิปประกอบ');
   if (foreign) coverageGap.push(`นอกไทย (${it.foreignCountry})`);
   if (notability === 'unknown') coverageGap.push('คนยังไม่เป็นที่รู้จัก');
   if (staleTrend) coverageGap.push('เป็นกระแสเก่าที่จบแล้ว');
@@ -169,13 +167,12 @@ export function editorialCard(item) {
   if (relScore < 40) coverageGap.push('แหล่งอ่อน ควรหาแหล่งยืนยัน');
 
   // ── readiness 0-100 (ข้อ 9) ──
-  let readiness = Math.round(score * 4);                          // คะแนน บก. → สูงสุด 40
+  // ★ วัด "คุณภาพประเด็น" เป็นหลัก — ไม่นับเรื่องภาพ (ผู้ใช้: ต้องการประเด็นดีเท่านั้น)
+  let readiness = Math.round(score * 5);                          // คะแนน บก.(ประเด็นน่าทำ) = ตัวหลัก สูงสุด 50
   if (hasMainChar) readiness += 18;
-  if (remakeable) readiness += 12;
+  if (remakeable) readiness += 14;
   readiness += (notability === 'famous' ? 14 : notability === 'semiKnown' ? 7 : 0);
-  if (!staleTrend) readiness += 6;
-  if (!foreign) readiness += 6;
-  if (hasImage) readiness += 14;
+  if (!staleTrend) readiness += 4;
   if (toxicity >= 2) readiness -= 8;
   readiness = Math.max(0, Math.min(100, readiness));
 
@@ -186,7 +183,7 @@ export function editorialCard(item) {
   else if (isDup && !remakeable) status = 'duplicate';
   else if (notability === 'unknown' || relScore < 38) status = 'weakSource';
   else if (!remakeable && score < 6) status = 'lowValue';
-  else if (readiness >= 78 && hasImage) status = 'ready';
+  else if (readiness >= 78) status = 'ready';
   else if (readiness >= 55) status = 'needsResearch';
   else status = 'weakSource';
 
