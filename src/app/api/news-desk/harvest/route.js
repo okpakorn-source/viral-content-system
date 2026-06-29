@@ -5,6 +5,7 @@
  */
 import { NextResponse } from 'next/server';
 import { runHarvest, pruneOldItems } from '@/lib/services/newsDesk/harvester';
+import { HARVEST_MODES } from '@/lib/services/newsDesk/taxonomy'; // ★ เฟส 5: โหมดหาข่าว
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -40,6 +41,11 @@ export async function POST(request) {
   if (HARVEST_PAUSED) return pausedResponse(); // ★ พักหาข่าวใหม่ชั่วคราว
   try {
     const body = await request.json().catch(() => ({}));
+    // ★ เฟส 5 (29 มิ.ย.): โหมดหาข่าว — แต่ละโหมด = ชุดเลนคนละแบบ (ทุกรีเฟรชสำรวจพื้นที่ใหม่ ไม่วนเดิม)
+    if (body.mode) {
+      const m = HARVEST_MODES.find(x => x.key === body.mode);
+      if (m) return await doHarvest({ lanes: m.lanes, judgeTop: Math.min(40, Number(body.judgeTop) || 24) });
+    }
     // ★ 17 มิ.ย. (ทีมขอ): ค้นด้วย "คีย์เวิร์ดคน/เรื่อง" เอง (เผื่อปิ๊งไอเดีย) เช่น "ลิซ่า" / "ดารากตัญญู" / "หมูเด้ง"
     if (body.keyword && String(body.keyword).trim().length >= 2) {
       const kw = String(body.keyword).trim().slice(0, 60);

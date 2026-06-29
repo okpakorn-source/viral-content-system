@@ -19,6 +19,18 @@ export const LIBRARIES = [
 ];
 export const LIBRARY_KEYS = LIBRARIES.map(l => l.key);
 
+// ── 🌀 REFRESH MODES (เฟส 5 — 29 มิ.ย. ตามแผน GPT ข้อ 3/4/13) ──
+//   ปุ่มหาข่าวไม่ทำงานแบบเดียว — แต่ละโหมด = ชุดเลน(query+scoring)คนละแบบ → ทุกรีเฟรชสำรวจพื้นที่ใหม่
+export const HARVEST_MODES = [
+  { key: 'fresh',     label: '⚡ สดวันนี้',     lanes: ['trend', 'buzz'],                                          desc: 'ข่าว/ดราม่ากระแสสดวันนี้' },
+  { key: 'viral',     label: '🔥 ไวรัล',        lanes: ['trend', 'buzz', 'video'],                                desc: 'คลิป/โพสต์ไวรัลไทยกำลังขึ้น' },
+  { key: 'evergreen', label: '♾️ น้ำดีอมตะ',    lanes: ['good', 'evergreen'],                                     desc: 'เรื่องน้ำดี/อมตะ ทำใหม่ได้ตลอด' },
+  { key: 'celeb',     label: '⭐ ดารา',          lanes: ['celeb', 'good'],                                         desc: 'ข่าวดารา/คนดังไทยจาก watchlist' },
+  { key: 'followup',  label: '🔁 ตามรอย',        lanes: ['followup'],                                              desc: 'ตามต่อข่าวที่เคยมี momentum' },
+  { key: 'all',       label: '🌀 ครบทุกเลน',     lanes: ['trend', 'good', 'broad', 'exa', 'evergreen', 'followup', 'buzz'], desc: 'หากว้างทุกแนว (รอบใหญ่)' },
+];
+export const HARVEST_MODE_KEYS = HARVEST_MODES.map(m => m.key);
+
 // ── ชนิดแหล่ง + ป้าย/สี (ใช้ทำ badge บนการ์ด) ──
 export const SOURCE_TYPES = {
   youtube:   { label: '▶️ ยูทูป',     color: '#dc2626', bg: 'rgba(220,38,38,0.12)' },
