@@ -248,7 +248,35 @@ export function multiScores(item) {
   };
 }
 
-/** เติมฟิลด์จัดระเบียบให้ item (sourceType + library + thumbnail + editorial card + multi-scores) */
+// ════════════════════════════════════════════════════════════════════════════
+// 🧬 STORY CLUSTER (เฟส 3 — 29 มิ.ย. ตามแผน GPT ข้อ 2)
+//   ซ้ำไม่ได้เกิดจาก URL อย่างเดียว — เรื่องเดียวกันมาคนละแพลตฟอร์ม/สำนัก = ควรเป็น cluster เดียว
+//   storySignature: ลายเซ็นจาก "คำสำคัญในหัวข้อ" (ตัดคำทั่วไป) → เทียบข้ามลิงก์ได้
+// ════════════════════════════════════════════════════════════════════════════
+const _STOP_RE = /^(ข่าว|ล่าสุด|เปิดใจ|เผย|งานนี้|ชาวเน็ต|โซเชียล|คลิป|ภาพ|วิดีโอ|ที่|และ|กับ|ของ|ใน|เป็น|คือ|จาก|ให้|มา|ไป|ได้|แล้ว|ก็|จะ|ทำ|ถึง|นี้|นั้น|เมื่อ|the|and|a|an|to|of|in|on|for|with)$/;
+
+export function storySignature(item) {
+  const title = String((item && item.title) || '');
+  const norm = title.toLowerCase().replace(/[^฀-๿a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  const tokens = norm.split(' ').filter(w => w.length >= 3 && !_STOP_RE.test(w));
+  // เก็บคำยาวสุด 5 คำ (มักเป็นชื่อ/คำสำคัญ) เรียง → ลายเซ็นคงที่
+  const key = [...new Set(tokens)].sort((a, b) => b.length - a.length).slice(0, 5).sort();
+  return key.join('|');
+}
+
+/** เรื่องเดียวกันไหม — ใช้รวม cluster ข้ามแพลตฟอร์ม
+ *  เกณฑ์: คำสำคัญทับกัน ≥2 คำ (ไทยคำประสมไม่มีช่องว่าง → ชื่อคน/คำเฉพาะที่ทับกันคือสัญญาณแข็งสุด)
+ *  หรือทับ ≥1 + เกินครึ่งของฝั่งสั้น (หัวข้อสั้น) · ⚠️ heuristic: จับได้เมื่อ "มีชื่อ/คำเฉพาะร่วม" (เคสคนดังส่วนใหญ่) */
+export function sameCluster(a, b) {
+  const sa = storySignature(a).split('|').filter(Boolean);
+  const sb = storySignature(b).split('|').filter(Boolean);
+  if (sa.length < 2 || sb.length < 2) return false;
+  const setB = new Set(sb);
+  const overlap = sa.filter(t => setB.has(t)).length;
+  return overlap >= 2 || (overlap >= 1 && overlap / Math.min(sa.length, sb.length) >= 0.5);
+}
+
+/** เติมฟิลด์จัดระเบียบให้ item (sourceType + library + thumbnail + editorial + scores + cluster) */
 export function enrichDeskItem(item) {
   const sourceType = classifySource(item);
   let imageUrl = item.imageUrl || '';
@@ -256,5 +284,6 @@ export function enrichDeskItem(item) {
   const base = { ...item, sourceType, library: libraryOf(item), imageUrl, freshClass: freshClass(item) };
   base.editorial = editorialCard(base);   // ★ เฟส 1: การ์ดบรรณาธิการ
   base.scores = multiScores(base);          // ★ เฟส 2: คะแนนหลายมิติ
+  base.clusterKey = storySignature(base);   // ★ เฟส 3: ลายเซ็นเรื่อง (จับซ้ำข้ามแพลตฟอร์ม)
   return base;
 }
