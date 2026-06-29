@@ -275,7 +275,8 @@ export function sameCluster(a, b) {
   if (sa.length < 2 || sb.length < 2) return false;
   const setB = new Set(sb);
   const overlap = sa.filter(t => setB.has(t)).length;
-  return overlap >= 2 && (overlap / Math.min(sa.length, sb.length)) >= 0.6;
+  // ★ ทับ 2 คำ = มักเป็นแค่ "ชื่อคน" (คนเดียวกันคนละข่าว) → ไม่รวม · ทับ ≥3 = ชื่อ+คำเหตุการณ์ตรงกัน = เรื่องเดียวกัน
+  return overlap >= 3;
 }
 
 /** เติมฟิลด์จัดระเบียบให้ item (sourceType + library + thumbnail + editorial + scores + cluster) */
