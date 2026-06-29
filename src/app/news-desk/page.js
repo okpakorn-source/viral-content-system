@@ -626,13 +626,9 @@ export default function NewsDeskPage() {
     if (quickChip === 'celeb' && !_isCelebItem(it)) return false;
     return true;
   };
-  const _shownBase = (feedFilter.trim() || quickChip !== 'all') ? items.filter(matchesFeed) : items;
-  // ★ 29 มิ.ย. (ค่ำ) รื้อ UI: เรียง "ความพร้อมเขียน" (readiness) มาก→น้อย เฉพาะแท็บฟีดข่าว
-  //   (shortlist/ready/trendtrack/interview คงลำดับเดิมจากเซิร์ฟเวอร์ — ลำดับมีความหมาย)
-  const _readiness = (it) => (it?.editorial && typeof it.editorial.readiness === 'number') ? it.editorial.readiness : -1;
-  const shown = ['clip', 'link', 'browse', 'focus'].includes(tab)
-    ? [..._shownBase].sort((a, b) => _readiness(b) - _readiness(a))
-    : _shownBase;
+  // ★ 30 มิ.ย. (ผู้ใช้แจ้ง "เห็นข่าวเดิมๆ เหมือนไม่อัปเดต"): คงลำดับ "ใหม่สุดก่อน" จากเซิร์ฟเวอร์ (harvestedAt DESC)
+  //   เลิกเรียงตาม readiness ฝั่ง client (เคยดันข่าวเก่าที่ enrich แล้วขึ้นบน ข่าวใหม่จมล่าง) — readiness ยังโชว์เป็นแถบบนการ์ด
+  const shown = (feedFilter.trim() || quickChip !== 'all') ? items.filter(matchesFeed) : items;
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary, #0f1419)' }}>
