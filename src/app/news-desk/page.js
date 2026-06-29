@@ -1049,6 +1049,21 @@ export default function NewsDeskPage() {
                       {it.performance === 'flop' && <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>🧊 แป้ก</span>}
                       {it.followupOf && <span style={{ color: '#c084fc' }}>🔁 ตามรอย: {String(it.followupOf).slice(0, 40)}</span>}
                     </div>
+                    {/* ★ เฟส 1 (29 มิ.ย.): Editorial Card — สถานะทำได้จริง + ความพร้อม + ขาดอะไร + ทำไมควร */}
+                    {it.editorial && (() => {
+                      const ES = { ready: ['✅ พร้อมเขียน', '#16a34a'], needsResearch: ['🔎 ต้องหาเพิ่ม', '#d97706'], weakSource: ['⚠️ แหล่งอ่อน', '#ca8a04'], duplicate: ['🔁 มุมซ้ำ', '#6b7280'], lowValue: ['💤 คุณค่าน้อย', '#94a3b8'], reject: ['🚫 ไม่ควรทำ', '#dc2626'] };
+                      const [lbl, col] = ES[it.editorial.status] || ['', '#888'];
+                      return (
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 5, fontSize: 11.5, alignItems: 'center' }}>
+                          <span title={it.editorial.whyNot ? ('ติด: ' + it.editorial.whyNot) : ('เหตุผลควรทำ: ' + it.editorial.whyDo)} style={{ padding: '2px 9px', borderRadius: 999, background: col + '22', color: col, fontWeight: 800 }}>{lbl}</span>
+                          <span title="ความพร้อมให้พนักงานหยิบไปทำ (0-100)" style={{ color: 'var(--text-muted)', fontWeight: 700 }}>พร้อม {it.editorial.readiness}%</span>
+                          {(it.editorial.coverageGap || []).slice(0, 3).map((g, gi) => (
+                            <span key={gi} title="สิ่งที่ข่าวนี้ยังขาด" style={{ padding: '1px 7px', borderRadius: 999, background: 'rgba(217,119,6,0.12)', color: '#d97706', fontWeight: 600 }}>⛏️ {g}</span>
+                          ))}
+                          {it.editorial.whyDo && <span style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>💡 {it.editorial.whyDo}</span>}
+                        </div>
+                      );
+                    })()}
                     {it.judgeReason && (
                       <div style={{ marginTop: 6, fontSize: 13, color: 'var(--text-secondary)' }}>🧠 {it.judgeReason}</div>
                     )}

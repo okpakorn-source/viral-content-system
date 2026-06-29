@@ -110,10 +110,93 @@ export function youtubeThumb(url) {
   return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
 }
 
-/** เติมฟิลด์จัดระเบียบให้ item (sourceType + library + เติม thumbnail ยูทูปถ้าว่าง) */
+// ════════════════════════════════════════════════════════════════════════════
+// 📋 EDITORIAL CARD (เฟส 1 — 29 มิ.ย. ตามแผน GPT ข้อ 1/9/14/15)
+//   สังเคราะห์ "การ์ดบรรณาธิการ" จากฟิลด์ที่ deskBrain/harvester ประเมินไว้แล้ว — deterministic ไม่เพิ่ม AI call
+//   เปลี่ยนโต๊ะข่าวจาก "กองลิงก์+คะแนน" → "ทำได้เลย/ต้องหาเพิ่มอะไร/ทำไมควร-ไม่ควร"
+// ════════════════════════════════════════════════════════════════════════════
+export const EDITORIAL_STATUS = {
+  ready:         { key: 'ready',         label: '✅ พร้อมเขียน',  color: '#16a34a', desc: 'ข้อมูล/มุม/ภาพครบ ส่ง workflow ได้เลย' },
+  needsResearch: { key: 'needsResearch', label: '🔎 ต้องหาเพิ่ม', color: '#d97706', desc: 'น่าทำ แต่ยังขาดบางอย่าง (ดู coverageGap)' },
+  weakSource:    { key: 'weakSource',    label: '⚠️ แหล่งอ่อน',   color: '#ca8a04', desc: 'คน/แหล่งยังไม่แข็งพอ ควรหาแหล่งที่ดีกว่า' },
+  duplicate:     { key: 'duplicate',     label: '🔁 มุมซ้ำ',      color: '#6b7280', desc: 'ประเด็นซ้ำของเดิม ไม่มีมุมใหม่' },
+  lowValue:      { key: 'lowValue',      label: '💤 คุณค่าน้อย',  color: '#94a3b8', desc: 'มีข่าวแต่ไม่น่าทำ (ตื้น/ไม่มีตัวละคร)' },
+  reject:        { key: 'reject',        label: '🚫 ไม่ควรทำ',    color: '#dc2626', desc: 'ไม่ควรเข้าสต็อก (อ่อนไหว/นอกไทย/พิษ)' },
+};
+
+/**
+ * editorialCard — ประเมิน "ความพร้อมทำข่าว" จากฟิลด์ที่มี (ข้อ 1+9+14+15)
+ * คืน { status, readiness(0-100), coverageGap[], whyDo, whyNot }
+ */
+export function editorialCard(item) {
+  const it = item || {};
+  const score = Number(it.judgeScore ?? it.score ?? 0);          // 0-10 (ถ้ายังไม่ judge = 0)
+  const hasMainChar = it.hasMainChar !== false;
+  const remakeable = it.remakeable !== false;
+  const notability = it.notability || 'semiKnown';
+  const staleTrend = it.staleTrend === true;
+  const foreign = !!it.foreignCountry;
+  const royalNeg = it.royalNegative === true;
+  const toxicity = Number(it.toxicity || 0);
+  const sType = classifySource(it);
+  const hasImage = !!(it.imageUrl || sType === 'youtube'); // ยูทูปมี thumbnail เสมอ
+  const isDup = !!(it.sameStoryAs || it.duplicateOf || it.dupOfArchive);
+  const lib = libraryOf(it);
+  const fresh = freshClass(it);
+
+  // ── coverage gap: ข่าวนี้ขาดอะไร (ข้อ 14) ──
+  const coverageGap = [];
+  if (!hasMainChar) coverageGap.push('ขาดตัวละครหลักชัด');
+  if (!hasImage) coverageGap.push('ขาดภาพ/คลิปประกอบ');
+  if (foreign) coverageGap.push(`นอกไทย (${it.foreignCountry})`);
+  if (notability === 'unknown') coverageGap.push('คนยังไม่เป็นที่รู้จัก');
+  if (staleTrend) coverageGap.push('เป็นกระแสเก่าที่จบแล้ว');
+  if (isDup) coverageGap.push('มุมซ้ำของเดิม');
+  if (!score) coverageGap.push('ยังไม่ผ่าน บก.ประเมิน');
+
+  // ── readiness 0-100 (ข้อ 9) ──
+  let readiness = Math.round(score * 4);                          // คะแนน บก. → สูงสุด 40
+  if (hasMainChar) readiness += 18;
+  if (remakeable) readiness += 12;
+  readiness += (notability === 'famous' ? 14 : notability === 'semiKnown' ? 7 : 0);
+  if (!staleTrend) readiness += 6;
+  if (!foreign) readiness += 6;
+  if (hasImage) readiness += 14;
+  if (toxicity >= 2) readiness -= 8;
+  readiness = Math.max(0, Math.min(100, readiness));
+
+  // ── status (ข้อ 1) ──
+  let status;
+  if (royalNeg || toxicity >= 3 || (foreign && notability !== 'famous')) status = 'reject';
+  else if (!hasMainChar) status = 'lowValue';
+  else if (isDup && !remakeable) status = 'duplicate';
+  else if (notability === 'unknown') status = 'weakSource';
+  else if (!remakeable && score < 6) status = 'lowValue';
+  else if (readiness >= 78 && hasImage) status = 'ready';
+  else if (readiness >= 55) status = 'needsResearch';
+  else status = 'weakSource';
+
+  // ── เหตุผลควรทำ / ไม่ควรทำ (ข้อ 15) ──
+  const libWhy = {
+    namdee: 'ข่าวน้ำดี อารมณ์ร่วมสูง', help: 'ข่าวน้ำใจ/ช่วยเหลือ ชวนแชร์',
+    interview: 'สัมภาษณ์/รายการ มีคำพูดเจาะใจ', drama: 'ดราม่ากระแส คนกำลังพูดถึง',
+    celeb: 'คนดังคนไทยรู้จัก ตามอยู่', commoner: 'คนธรรมดาเรื่องกินใจ',
+  };
+  let whyDo = libWhy[lib] || 'มีตัวละคร+ประเด็นเล่าได้';
+  if (fresh === 'timeless') whyDo += ' · อมตะทำใหม่ได้ตลอด';
+  const whyNot = status === 'reject'
+    ? (royalNeg ? 'อ่อนไหวสถาบัน' : toxicity >= 3 ? 'เนื้อหารุนแรง/พิษ' : `นอกไทย (${it.foreignCountry || ''})`)
+    : (coverageGap[0] || (status === 'ready' ? '' : 'ข้อมูลยังไม่แข็งพอ'));
+
+  return { status, readiness, coverageGap, whyDo, whyNot };
+}
+
+/** เติมฟิลด์จัดระเบียบให้ item (sourceType + library + thumbnail + editorial card) */
 export function enrichDeskItem(item) {
   const sourceType = classifySource(item);
   let imageUrl = item.imageUrl || '';
   if (!imageUrl && sourceType === 'youtube') imageUrl = youtubeThumb(item.url) || '';
-  return { ...item, sourceType, library: libraryOf(item), imageUrl, freshClass: freshClass(item) };
+  const base = { ...item, sourceType, library: libraryOf(item), imageUrl, freshClass: freshClass(item) };
+  base.editorial = editorialCard(base); // ★ เฟส 1: การ์ดบรรณาธิการ (คำนวณหลังเติม imageUrl/library แล้ว)
+  return base;
 }
