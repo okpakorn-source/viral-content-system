@@ -253,13 +253,15 @@ async function _renderCoverV3(request) {
         let _bc = -1, _bcKey = -1;
         imageBuffers.forEach((img, i) => {
           if (finalMask[i]) return;
+          if (faceBoxes[i]?.hasText) return;          // ★ 29 มิ.ย. (CASE-245): กันสกรีนช็อต/ตัวหนังสือฝัง (รายการทีวี/กราฟิกข่าว)
+          if ((Number(img.score) || 0) < 5) return;   // ★ เอาเฉพาะคุณภาพพอใช้ — ไม่ฝืนดันภาพแย่เข้าปก
           const isSec = _secRe.test(String(img?.queryLabel || ''));
           const isCtx = _ctxRe.test(img?.role || '');
           if (!isSec && !isCtx) return;
-          const key = (isSec ? 1000 : 0) + (Number(img.score) || 0); // ★ ภาพตัวรอง(ทักษิณ)มาก่อนภาพเหตุการณ์ทั่วไป
+          const key = (isSec ? 1000 : 0) + (Number(img.score) || 0); // ★ ภาพตัวรองมาก่อนภาพเหตุการณ์ทั่วไป
           if (key > _bcKey) { _bcKey = key; _bc = i; }
         });
-        if (_bc >= 0) { finalMask[_bc] = true; console.log(`[CoverV3] 📎 สำรอง${_secRe.test(String(imageBuffers[_bc].queryLabel || '')) ? 'ภาพตัวรอง(ทักษิณ)' : 'ภาพเหตุการณ์'}พ้นด่านหน้าคม: #${_bc} (${imageBuffers[_bc].role}/${imageBuffers[_bc].queryLabel || '?'} score ${imageBuffers[_bc].score})`); }
+        if (_bc >= 0) { finalMask[_bc] = true; const _sn = String(identity?.secondaryCharacter || 'ตัวรอง').slice(0, 20); console.log(`[CoverV3] 📎 สำรอง${_secRe.test(String(imageBuffers[_bc].queryLabel || '')) ? `ภาพตัวรอง(${_sn})` : 'ภาพเหตุการณ์'}พ้นด่านหน้าคม: #${_bc} (${imageBuffers[_bc].role}/${imageBuffers[_bc].queryLabel || '?'} score ${imageBuffers[_bc].score})`); }
       } catch { /* non-fatal */ }
       const kept = finalMask.filter(Boolean).length;
       // ★ 29 มิ.ย. (แก้บั๊กปกล้ม INSUFFICIENT_QUALITY_IMAGES): ยกพื้นจาก 3→4 ให้ตรงกับ minimum (ปกต้อง 4+1)
@@ -562,10 +564,12 @@ async function _renderCoverV3(request) {
           let best = -1, bestKey = -1;
           imageBuffers.forEach((img, i) => {
             if (usedIdx.has(i)) return;
+            if (faceBoxes[i]?.hasText) return;          // ★ 29 มิ.ย. (CASE-245): กันสกรีนช็อต/ตัวหนังสือฝัง
+            if ((Number(img.score) || 0) < 5) return;   // ★ ฝืนเฉพาะภาพคุณภาพพอใช้ — ไม่มีภาพสะอาด=ไม่ฝืน (ปกสะอาดดีกว่าเละ)
             const isSec = isSecImg(img);
             const p = rolePrio(img?.role || '');
             if (!isSec && p === 0) return;
-            const key = (isSec ? 1000 : 0) + p * 100 + (Number(img.score) || 0); // ★ ภาพตัวรอง(ทักษิณ)มาก่อนเสมอ
+            const key = (isSec ? 1000 : 0) + p * 100 + (Number(img.score) || 0); // ★ ภาพตัวรองมาก่อนเสมอ
             if (key > bestKey) { bestKey = key; best = i; }
           });
           if (best >= 0) {
@@ -579,8 +583,9 @@ async function _renderCoverV3(request) {
                 ? { x: Math.max(0, fb.x1 - (fb.x2 - fb.x1) * 0.5), y: Math.max(0, fb.y1 - (fb.y2 - fb.y1) * 0.4), w: Math.min(1, (fb.x2 - fb.x1) * 2.0), h: Math.min(1, (fb.y2 - fb.y1) * 2.0) }
                 : { x: 0.05, y: 0.05, w: 0.9, h: 0.9 };
               const _isSec = isSecImg(imageBuffers[best]);
-              target.why = _isSec ? 'จองช่องภาพตัวรอง(ทักษิณ) (deterministic — เล่าครบ 2 ตัวละคร)' : 'จองช่องภาพเหตุการณ์ข่าว (deterministic)';
-              console.log(`[CoverV3] 📌 reserve-${_isSec ? 'ตัวรอง(ทักษิณ)' : 'เหตุการณ์'}: ${target.slotId} ← #${best} (role=${imageBuffers[best].role}/${imageBuffers[best].queryLabel || '?'} score=${imageBuffers[best].score})`);
+              const _sn2 = String(identity?.secondaryCharacter || 'ตัวรอง').slice(0, 20);
+              target.why = _isSec ? `จองช่องภาพตัวรอง(${_sn2}) (deterministic — เล่าครบ 2 ตัวละคร)` : 'จองช่องภาพเหตุการณ์ข่าว (deterministic)';
+              console.log(`[CoverV3] 📌 reserve-${_isSec ? `ตัวรอง(${_sn2})` : 'เหตุการณ์'}: ${target.slotId} ← #${best} (role=${imageBuffers[best].role}/${imageBuffers[best].queryLabel || '?'} score=${imageBuffers[best].score})`);
               coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec, faceBoxes });
             }
           } else {
