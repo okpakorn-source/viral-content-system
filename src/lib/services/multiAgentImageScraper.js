@@ -2025,10 +2025,20 @@ function processJudgeResults(parsed, validCandidates) {
 }
 
 function fallbackSelection(candidates) {
-  const shuffled = [...candidates].sort(() => 0.5 - Math.random());
-  return shuffled.slice(0, 10).map((url, i) => ({
+  // ★ 1 ก.ค. (CASE-247): เลิก "สุ่มล้วน" — เมื่อ AI Judge ล่มทุกตัว ใช้สัญญาณที่มีอยู่จัดอันดับแทน
+  //   (Identity Anchor = ตรงตัวคน/เรื่อง + ความน่าเชื่อแหล่ง) → กันภาพหลุดบริบท/ผิดคน (เช่นภาพโรงเรียน) เด้งเข้าปก
+  const anchorMap = candidates._storyAnchorMap;          // Set/Map ของ url ที่ผ่าน Identity Anchor (ตรงตัวคน/เรื่อง)
+  const srcScores = candidates._sourceScores || {};
+  const rankOf = (url) => {
+    let s = Number(srcScores[url]) || 0;                 // แหล่งข่าวจริง=สูง · stock/ทั่วไป=ต่ำ
+    if (anchorMap?.has?.(url)) s += 10;                  // ★ ตรงตัวคน/เรื่อง = ดันขึ้นก่อน (กันภาพผิดคน)
+    return s;
+  };
+  const ranked = [...candidates].sort((a, b) => rankOf(b) - rankOf(a));
+  console.log(`[Judge Fallback] 🧭 last-resort จัดอันดับด้วย anchor+แหล่ง (เลิกสุ่มมั่ว) — top10 มี anchor ${ranked.slice(0, 10).filter(u => anchorMap?.has?.(u)).length} ใบ`);
+  return ranked.slice(0, 10).map((url, i) => ({
     url,
-    role: i === 0 ? 'HERO' : 'SUPPORT'
+    role: i === 0 ? 'HERO' : 'SUPPORT',
   }));
 }
 

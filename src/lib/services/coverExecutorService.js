@@ -350,10 +350,18 @@ async function renderRectTile(src, crop, slot, fb) {
   } else if (usableGroupFaces(fb)) {
     // ★ rev.15i (ผู้ใช้ติช่อง 3-4-5 พัง "ไม่จัดกึ่งกลาง ไม่เน้นคน มองไม่รู้เรื่อง"):
     //   ทุกช่องครอป "หน้าใหญ่สุด" จัดกึ่งกลาง+เด่นชัดเสมอ — เลิกครอปกลุ่มหลวมที่คนตัวเล็กจมฉาก
-    const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
+    const _sortedF = [...fb.allFaces].sort((a, b) => ((b.x2 - b.x1) * (b.y2 - b.y1)) - ((a.x2 - a.x1) * (a.y2 - a.y1)));
+    const largest = _sortedF[0];
+    const _second = _sortedF[1];
+    const _aL = (largest.x2 - largest.x1) * (largest.y2 - largest.y1);
+    const _aS = _second ? (_second.x2 - _second.x1) * (_second.y2 - _second.y1) : 0;
     const isHeroSlot = slot.id === 'main' || (slot.w * slot.h) >= (520 * 800);
     const { faceFrac, faceTopAt, maxFaceHFrac, minFaceHFrac } = faceParamsForSlot(slot);
-    if (isHeroSlot) {
+    if (slot.id === 'circle' && _second && _aS >= 0.40 * _aL) {
+      // ★ 1 ก.ค. (CASE-246): วงกลม = ช่องสื่อ "คู่/ความสัมพันธ์" → 2 หน้าเด่นขนาดใกล้กัน เก็บทั้งคู่
+      //   (กันตัดคนที่ 2 เช่น พ่อ-ลูกสาว/คู่รัก — เดิมครอปหน้าใหญ่สุดอย่างเดียว ทำคนที่ 2 หลุดเฟรม)
+      region = groupRegionForSlot([largest, _second], imgW, imgH, slot.w / slot.h);
+    } else if (isHeroSlot) {
       // hero = หน้าเดี่ยวใหญ่สุดเด่น + เลื่อนพ้นคนข้างเคียง (บทเรียน CASE-119)
       region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, Math.min(0.96, faceFrac + 0.12), faceTopAt, Math.min(0.90, maxFaceHFrac + 0.08), minFaceHFrac || 0);
       const lcx = ((largest.x1 + largest.x2) / 2) * imgW;

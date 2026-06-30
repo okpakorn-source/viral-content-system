@@ -225,6 +225,16 @@ async function _renderCoverV3(request) {
             else if (fb.count === 2) s += 0.02;     // ภาพคู่
             else if (fb.count >= 4) s -= 0.05;      // rev.14t: ผ่อนโทษภาพหมู่ (ผู้ใช้ชอบภาพครอบครัว CASE-104) — โทษเฉพาะคนเยอะจริงๆ
             if (fb.hasText) s -= 0.08;              // ตัวหนังสือฝัง = เสี่ยงเข้าช่องคน
+            // ★ 1 ก.ค. (CASE-246): 2 หน้าซ้อนกันหนัก = ภาพจูบ/กอด หน้าเบือนไม่ชัด → กดจมพูล (เลี่ยงเข้าช่องโชว์หน้า)
+            //   หน้าคู่ปกติ (ยืนข้างกัน) ไม่ซ้อน = ไม่โดนโทษ · ต่างกับ "ซ้อน" ที่หน้าทับกันจริง
+            if (Array.isArray(fb.allFaces) && fb.allFaces.length >= 2) {
+              const ff = [...fb.allFaces].sort((a, b) => ((b.x2 - b.x1) * (b.y2 - b.y1)) - ((a.x2 - a.x1) * (a.y2 - a.y1)));
+              const [f1, f2] = ff;
+              const ix = Math.max(0, Math.min(f1.x2, f2.x2) - Math.max(f1.x1, f2.x1));
+              const iy = Math.max(0, Math.min(f1.y2, f2.y2) - Math.max(f1.y1, f2.y1));
+              const minA = Math.min((f1.x2 - f1.x1) * (f1.y2 - f1.y1), (f2.x2 - f2.x1) * (f2.y2 - f2.y1));
+              if (minA > 0 && (ix * iy) / minA > 0.20) s -= 0.14; // ซ้อน >20% ของหน้าที่เล็กกว่า = จูบ/กอด
+            }
           } else if (fb && fb.hasText) {
             s = -0.2;                               // สกรีนช็อต/กราฟิก — ท้ายแถว
           } else {
