@@ -471,6 +471,13 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         enhancedCount: enhancedVersionCount,
         totalTime: parseFloat(totalTime),
         contentLength: selectedLength,
+        // ★ 30 มิ.ย.: บันทึกพร้อมท์ที่ใช้จริง (ปิดจุดบอด — ท่อ text เดิมไม่บันทึก promptName)
+        promptName: usedPreset?.promptName || usedPreset?.name || anglePrompts[0]?.promptName || '',
+        promptSource: usedPreset?.promptSource || usedPreset?.source || (anglePrompts[0] ? 'library' : ''),
+        promptScore: usedPreset?.matchScore ?? usedPreset?.viralScore ?? anglePrompts[0]?.viralScore ?? 0,
+        promptMatchType: usedPreset?.matchType || (usedPreset?.isBorrowed ? 'BORROWED' : (anglePrompts[0] ? 'MATCHED' : '')),
+        promptId: usedPreset?.promptId || anglePrompts[0]?.id || '',
+        newsType: newsType || '',
         desk: deskMeta || null, // ★ ป้ายโต๊ะข่าว {newsId, lane, category, editor, editorIcon}
       },
       userId: _user.userId,

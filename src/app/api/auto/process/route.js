@@ -572,6 +572,13 @@ export async function POST(request) {
           totalTime: parseFloat(totalTime),
           contentLength,
           pipelineId: route.pipelineId,
+          // ★ 30 มิ.ย.: บันทึก "พร้อมท์ที่ใช้จริง" — ปิดจุดบอด 90% ที่ promptName ว่าง (ตรวจย้อนหลังได้ว่าใช้/ใกล้พร้อมท์ไหน)
+          promptName: analysisResult.usedPreset?.promptName || analysisResult.usedPreset?.name || '',
+          promptSource: analysisResult.usedPreset?.promptSource || analysisResult.usedPreset?.source || '',
+          promptScore: analysisResult.usedPreset?.matchScore ?? analysisResult.usedPreset?.viralScore ?? 0,
+          promptMatchType: analysisResult.usedPreset?.matchType || (analysisResult.usedPreset?.isBorrowed ? 'BORROWED' : 'MATCHED'),
+          promptId: analysisResult.usedPreset?.promptId || '',
+          newsType: breakdownData?.primaryCategory || genData.debug?.newsTypeDetected || '',
           desk: body.deskMeta || null,
         },
       });

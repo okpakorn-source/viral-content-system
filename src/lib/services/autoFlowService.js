@@ -519,9 +519,11 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
       pipelineInfo: {
         contentLength: selectedLength,
         totalTime: parseFloat(totalTime),
-        promptName: usedPreset?.name || anglePrompts[0]?.promptName || '',
-        promptSource: usedPreset?.source || (anglePrompts[0] ? 'library' : ''),
-        promptScore: usedPreset?.viralScore || anglePrompts[0]?.viralScore || 0,
+        promptName: usedPreset?.promptName || usedPreset?.name || anglePrompts[0]?.promptName || '',
+        promptSource: usedPreset?.promptSource || usedPreset?.source || (anglePrompts[0] ? 'library' : ''),
+        promptScore: usedPreset?.matchScore ?? usedPreset?.viralScore ?? anglePrompts[0]?.viralScore ?? 0,
+        promptMatchType: usedPreset?.matchType || (usedPreset?.isBorrowed ? 'BORROWED' : (anglePrompts[0] ? 'MATCHED' : '')), // ★ 30 มิ.ย.
+        promptId: usedPreset?.promptId || anglePrompts[0]?.id || '', // ★ 30 มิ.ย.
         newsType: newsType || '',
         stepTimings: {
           detect: ((step1Start - step0Start) / 1000).toFixed(1),

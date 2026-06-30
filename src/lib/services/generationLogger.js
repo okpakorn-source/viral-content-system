@@ -134,6 +134,8 @@ export async function logGeneration({
         promptName: pipelineInfo.promptName || '',
         promptSource: pipelineInfo.promptSource || '',
         promptScore: pipelineInfo.promptScore || 0,
+        promptMatchType: pipelineInfo.promptMatchType || '', // ★ 30 มิ.ย.: MATCHED/BORROWED/EXACT/CLOSE — ตรงหรือยืมพร้อมท์ใกล้สุด
+        promptId: pipelineInfo.promptId || '',               // ★ 30 มิ.ย.: id พร้อมท์จริง ไว้ตรวจย้อนหลัง
         newsType: pipelineInfo.newsType || '',
         stepTimings: pipelineInfo.stepTimings || {},
         desk: pipelineInfo.desk || null, // ★ ป้ายโต๊ะข่าว {newsId, lane, category, editor, editorIcon}
@@ -234,6 +236,10 @@ function mapSupabaseCase(row) {
     createdAt: row.created_at,
     totalTime: row.pipeline_info?.totalTime || 0,
     promptName: row.pipeline_info?.promptName || '',
+    promptSource: row.pipeline_info?.promptSource || '',
+    promptScore: row.pipeline_info?.promptScore || 0,
+    promptMatchType: row.pipeline_info?.promptMatchType || '',
+    promptId: row.pipeline_info?.promptId || '',
     newsType: row.pipeline_info?.newsType || '',
     userId: row.user_id || 'anonymous',
     desk: row.pipeline_info?.desk || null,
@@ -268,6 +274,10 @@ async function getCasesLocal({ limit, offset, status, sourceType, search }) {
       createdAt: l.createdAt,
       totalTime: l.pipelineInfo?.totalTime || 0,
       promptName: l.pipelineInfo?.promptName || '',
+      promptSource: l.pipelineInfo?.promptSource || '',
+      promptScore: l.pipelineInfo?.promptScore || 0,
+      promptMatchType: l.pipelineInfo?.promptMatchType || '',
+      promptId: l.pipelineInfo?.promptId || '',
       newsType: l.pipelineInfo?.newsType || '',
       userId: l.userId || 'anonymous',
       desk: l.pipelineInfo?.desk || null,
