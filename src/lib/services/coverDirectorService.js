@@ -278,7 +278,8 @@ ${templatesBlock}
       const mainA = valid.find(a => a.slotId === 'main' || /hero/i.test(a.slotId));
       const fbM = mainA ? faceBoxes[mainA.imageIndex] : null;
       const mainArea = (fbM && fbM.x2 > fbM.x1) ? (fbM.x2 - fbM.x1) * (fbM.y2 - fbM.y1) : 0;
-      const mainIsBigSingle = fbM && fbM.x2 > fbM.x1 && (fbM.count || 1) === 1 && mainArea >= 0.04;
+      // ★ 1 ก.ค. (CASE-248 ฮีโร่เป็นแบนเนอร์/หน้าเล็กหันหลัง): +!hasText — ภาพมีตัวหนังสือฝัง (แบนเนอร์) ไม่นับเป็นฮีโร่หน้าชัด
+      const mainIsBigSingle = fbM && fbM.x2 > fbM.x1 && (fbM.count || 1) === 1 && mainArea >= 0.04 && !fbM.hasText;
       // rev.16 (ด่าน C): hero = หน้าเดี่ยว "ใหญ่ + คม/ละเอียดสุด" — ให้คะแนนคุณภาพร่วม ไม่ใช่แค่หน้าใหญ่
       //   (บทเรียน CASE-140: hero เป็นเซลฟี่แคนดิดเบลอ ทั้งที่มีภาพคมกว่าในพูล)
       const heroScore = (fb) => {
@@ -287,13 +288,15 @@ ${templatesBlock}
         const q = (fb.quality === undefined ? 0.6 : fb.quality);
         return area * (0.55 + 0.45 * q);
       };
-      // rev.16b: สลับเฉพาะเมื่อ hero เดิม "ไม่ใช่หน้าเดี่ยวใหญ่" (ภาพคู่/กลุ่ม/หน้าเล็ก) เท่านั้น
-      //   ห้ามแตะ hero เดี่ยวที่ Director ตั้งใจเลือก (Director รู้ว่าใครคือตัวหลัก)
-      //   บทเรียน CASE-143: บังคับสลับเป็น "หน้าใหญ่+คมสุด" → ได้หน้าลูกสาวขึ้น hero แทนศรราม = ผิดตัวหลัก
-      if (mainA && !mainIsBigSingle) {
-        let best = -1, bestScore = 0;
-        faceBoxes.forEach((fb, i) => { const s = heroScore(fb); if (s > bestScore) { bestScore = s; best = i; } });
-        const mainScore = heroScore(fbM);
+      // หาคู่แข่งฮีโร่ดีสุด (หน้าเดี่ยวใหญ่+คม ไม่มีตัวหนังสือ) ก่อน — ใช้เทียบทั้ง 2 เงื่อนไขสลับ
+      let best = -1, bestScore = 0;
+      faceBoxes.forEach((fb, i) => { const s = heroScore(fb); if (s > bestScore) { bestScore = s; best = i; } });
+      const mainScore = heroScore(fbM);
+      const bestArea = best >= 0 ? (faceBoxes[best].x2 - faceBoxes[best].x1) * (faceBoxes[best].y2 - faceBoxes[best].y1) : 0;
+      // rev.16b: ห้ามแตะ hero เดี่ยวที่ Director ตั้งใจเลือก (กัน CASE-143 ผิดตัวหลัก)
+      // ★ 1 ก.ค.: ยกเว้น — ฮีโร่ "หน้าเล็ก/แบนเนอร์" ทั้งที่ในพูลมีหน้าสะอาด "ใหญ่กว่า ≥2 เท่า + คะแนนชนะ ≥1.4 เท่า" → ดึงหน้าใหญ่สุดขึ้น
+      const heroIsWeak = !mainIsBigSingle || (best >= 0 && mainArea < 0.5 * bestArea && bestScore > mainScore * 1.4);
+      if (mainA && heroIsWeak) {
         if (best >= 0 && best !== mainA.imageIndex && bestScore > mainScore) {
           const ownerA = valid.find(a => a.imageIndex === best);
           if (ownerA && ownerA !== mainA) {
