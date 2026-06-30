@@ -168,14 +168,26 @@ async function _renderCoverV3(request) {
     //    (rev.7 — feedback: ฮีโร่ไม่เด่น/วงกลมล้น เพราะ Director กะกรอบด้วยตาแล้วหลวม)
     let faceBoxes = [];
     try {
-      const { batchDetectFaces } = await import('@/lib/services/faceDetector');
+      const { batchDetectFaces, detectFaces } = await import('@/lib/services/faceDetector');
       const fdMap = await batchDetectFaces(imageBuffers.map((img, i) => ({ id: `v3_${i}`, buffer: img.buffer })));
       const sharpLib = (await import('sharp')).default;
       faceBoxes = await Promise.all(imageBuffers.map(async (img, i) => {
-        const fd = fdMap?.get?.(`v3_${i}`);
+        let fd = fdMap?.get?.(`v3_${i}`);
+        // ★ 30 มิ.ย.: รอบแรกไม่เจอหน้า → ลองซ้ำ "คมชัดสูง" (กันหน้าเล็ก/เบลอจากเฟรมวิดีโอตรวจไม่เจอ → ครอป fallback ตัดหน้า)
+        if ((!fd?.hasFaces || !fd.faces?.length) && img.buffer) {
+          try { const hi = await detectFaces(img.buffer, { maxDim: 1280, detail: 'high' }); if (hi && ((hi.hasFaces && hi.faces?.length) || !fd)) fd = hi; } catch {}
+        }
         const hasText = !!fd?.hasBigText; // ★ สกรีนช็อต/กราฟิกข่าว — ต้องส่งธงต่อแม้ไม่มีหน้า
         const textRegion = fd?.textRegion || null; // ★ โซนข้อความ — ครอปคนหลบโซนนี้ = ใช้เฟรมรายการได้
-        if (!fd?.hasFaces || !fd.faces?.length) return hasText ? { hasText, textRegion } : null;
+        if (!fd?.hasFaces || !fd.faces?.length) {
+          // ★ 30 มิ.ย.: ยังไม่เจอหน้า แต่ AI ชี้ "บริเวณคน/ซับเจกต์หลัก" → ส่ง subject ให้ executor ครอปรอบคน (กฎกันตัดหน้าใช้ตอน fallback ด้วย)
+          const s = fd?.mainSubject, fW = fd?.imageWidth || 1, fH = fd?.imageHeight || 1;
+          const subject = (s && s.width > 0 && s.height > 0) ? {
+            x1: +(s.x / fW).toFixed(3), y1: +(s.y / fH).toFixed(3),
+            x2: +((s.x + s.width) / fW).toFixed(3), y2: +((s.y + s.height) / fH).toFixed(3),
+          } : null;
+          return (hasText || subject) ? { ...(hasText ? { hasText, textRegion } : {}), ...(subject ? { subject } : {}) } : null;
+        }
         const meta = await sharpLib(img.buffer).metadata();
         const W = meta.width || 1, H = meta.height || 1;
         const largest = fd.faces.reduce((b, f) => (f.width * f.height > b.width * b.height ? f : b), fd.faces[0]);

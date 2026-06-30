@@ -372,6 +372,16 @@ async function renderRectTile(src, crop, slot, fb) {
       // ช่องรอง = ครอปหน้าใหญ่สุด จัดกึ่งกลาง เด่นชัด (faceRegionForSlot จัดหน้าไว้กลางเฟรมให้เอง)
       region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
     }
+  } else if (fb && fb.subject && fb.subject.y2 > fb.subject.y1) {
+    // ★ 30 มิ.ย.: ไม่เจอหน้าชัด แต่ AI ชี้ "บริเวณคน/ซับเจกต์หลัก" → ครอปรอบคน เผื่อเหนือหัว กันตัดหัว/หน้า
+    //   (กฎ "ห้ามหน้าตก/ขาดท่อน" ใช้ตอน fallback ด้วย — เดิม fallback เดาครอป "ช่วงบน 55%" ทำหน้าท่อน)
+    const s = fb.subject;
+    const subH = Math.max(0.02, s.y2 - s.y1);
+    const cy1 = Math.max(0, s.y1 - subH * 0.12);            // เผื่อเหนือหัว 12%
+    const cy2 = Math.min(1, s.y2 + subH * 0.05);
+    const sx1 = Math.max(0, Math.min(s.x1, 0.95));
+    const _c = { x: sx1, y: cy1, w: Math.min(1 - sx1, Math.max(0.05, s.x2 - s.x1)), h: Math.max(0.05, cy2 - cy1) };
+    region = fitCropToSlotAspect(_c, imgW, imgH, slot.w / slot.h);
   } else {
     // ★ rev.23 (CASE-237 ผู้ใช้สั่ง — กฎ "ห้ามภาพช่วงลำตัวเยอะ/ภาพยืนเต็มตัว" ทุกช่อง):
     //   ช่องที่ "ตรวจไม่เจอหน้า" + ครอป Director สูง (>0.5 ของภาพ = เห็นลำตัว/เต็มตัว) → ซูมเข้า "ช่วงบน-กลาง"

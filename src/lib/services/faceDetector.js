@@ -17,9 +17,11 @@ const LOG = '[FaceDetector]';
  * @param {Buffer} imageBuffer - ภาพที่จะตรวจ
  * @returns {{ faces: Array<{x,y,width,height,confidence}>, hasFaces: boolean }}
  */
-export async function detectFaces(imageBuffer) {
-  const MAX_RETRIES = 1;
-  
+export async function detectFaces(imageBuffer, opts = {}) {
+  // ★ 30 มิ.ย.: รับ maxDim/detail — เรียกซ้ำ "คมชัดสูง" ได้เมื่อรอบแรกตรวจหน้าไม่เจอ (หน้าเล็ก/เบลอจากเฟรมวิดีโอ)
+  const maxDim = opts.maxDim || 800;
+  const detail = opts.detail || 'low';
+
   let metadata = { width: 0, height: 0 };
   try {
     metadata = await sharp(imageBuffer).metadata();
@@ -27,14 +29,13 @@ export async function detectFaces(imageBuffer) {
     console.error(`${LOG} Failed to read image metadata:`, e.message);
   }
 
-  // Resize ภาพให้เล็กลงก่อนส่ง (ลด cost)
-  const maxDim = 800;
+  // Resize ภาพให้เล็กลงก่อนส่ง (ลด cost) — รอบ "คมชัดสูง" ใช้ภาพใหญ่+คุณภาพสูงกว่า เพื่อจับหน้าเล็ก/เบลอ
   let resized = imageBuffer;
   if (metadata.width > maxDim || metadata.height > maxDim) {
     try {
       resized = await sharp(imageBuffer)
         .resize(maxDim, maxDim, { fit: 'inside' })
-        .jpeg({ quality: 70 })
+        .jpeg({ quality: detail === 'high' ? 85 : 70 })
         .toBuffer();
     } catch (e) {
       console.error(`${LOG} Failed to resize image:`, e.message);
@@ -69,7 +70,7 @@ text_region: when has_big_text=true, give the bounding box of the main burned-in
       imageContents: [
         {
           type: 'image_url',
-          image_url: { url: `data:image/jpeg;base64,${base64}`, detail: 'low' }
+          image_url: { url: `data:image/jpeg;base64,${base64}`, detail }
         }
       ],
       model: 'gpt-4o-mini',
