@@ -6,6 +6,8 @@
 ## ไฟล์ที่ถูกล็อก (ระบบเขียนข่าว เท่านั้น)
 - `src/lib/services/autoFlowService.js`
 - `src/lib/services/autoFlowServiceText.js`
+- `src/lib/services/summarizeService.js` ⬅️ เพิ่ม 2 ก.ค. (ไฟล์แกนเขียนข่าว — เคยหลุดจากล็อก)
+- `src/lib/services/summarizeServiceText.js` ⬅️ เพิ่ม 2 ก.ค.
 - `src/lib/ai/aiRouter.js`
 - `src/lib/ai/openai.js`
 - `src/lib/ai/promptStore.js`
@@ -16,6 +18,7 @@
 - `src/app/api/extract/**`
 - `src/app/api/research-search/**`
 - `src/app/content/new/page.js`
+- `scripts/validate-workflow.mjs` ⬅️ เพิ่ม 2 ก.ค. (CI gate ระบบข่าว)
 
 ## ล็อก 2 ชั้น (enforced จริง ไม่ใช่แค่คอมเมนต์)
 | ชั้น | กลไก | ป้องกันอะไร |

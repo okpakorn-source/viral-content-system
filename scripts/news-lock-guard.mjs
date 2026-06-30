@@ -22,6 +22,8 @@ const norm = String(fp).replace(/\\/g, '/');
 const PROTECTED = [
   /\/src\/lib\/services\/autoFlowService\.js$/i,
   /\/src\/lib\/services\/autoFlowServiceText\.js$/i,
+  /\/src\/lib\/services\/summarizeService\.js$/i,
+  /\/src\/lib\/services\/summarizeServiceText\.js$/i,
   /\/src\/lib\/ai\/aiRouter\.js$/i,
   /\/src\/lib\/ai\/openai\.js$/i,
   /\/src\/lib\/ai\/promptStore\.js$/i,
@@ -32,6 +34,7 @@ const PROTECTED = [
   /\/src\/app\/api\/extract\//i,
   /\/src\/app\/api\/research-search\//i,
   /\/src\/app\/content\/new\/page\.js$/i,
+  /\/scripts\/validate-workflow\.mjs$/i,
 ];
 
 if (norm && PROTECTED.some((re) => re.test(norm))) {
