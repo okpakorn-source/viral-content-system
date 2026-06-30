@@ -107,10 +107,12 @@ export async function enqueueJob(payload, sourceUserId = 'system') {
     // 0. Single getAll() call — then do cleanup in-memory to avoid multiple round-trips
     const allJobs = await store.getAll();
     
-    // 0a. Auto-cleanup: reset stale "processing" jobs stuck > 15 minutes (pipeline uses 5-12 min)
-    const cutoff = new Date(Date.now() - 15 * 60 * 1000);
+    // 0a. Auto-cleanup: reset stale "processing" jobs
+    // ★ 1 ก.ค. (แก้ปกทำซ้ำ): ปก (เครื่องทีม) ใช้ได้ถึง ~16 นาที → ให้ buffer 25 นาที (เดิม 15 → ปกโดนรีเซ็ตกลางคัน+หยิบซ้ำ)
+    //   งานข่าว (Vercel, เร็ว) คง 15 นาทีเท่าเดิม
     for (const j of allJobs) {
-      if (j.status === 'processing' && new Date(j.startedAt || j.createdAt) < cutoff) {
+      const _staleMs = ((j.payload?.jobType === 'cover') ? 25 : 15) * 60 * 1000;
+      if (j.status === 'processing' && new Date(j.startedAt || j.createdAt) < new Date(Date.now() - _staleMs)) {
         // ★ 12 มิ.ย.: คืนเข้าคิวลองใหม่ 1 ครั้งก่อนตีตาย (สอดคล้อง cleanupStaleJobs)
         if (!j.retriedOnce) {
           await store.update(j.id, (existing) => ({ ...existing, status: 'pending', startedAt: null, retriedOnce: true }));
@@ -400,10 +402,11 @@ export async function getNextPendingJobs(limit = 1) {
 export async function cleanupStaleJobs(maxAgeMinutes = 10) {
   const store = await getQueueStore();
   const allJobs = await store.getAll();
-  const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
-  
   let cleaned = 0;
   for (const job of allJobs) {
+    // ★ 1 ก.ค.: ปก (เครื่องทีม) ใช้ได้ถึง ~16 นาที → ใช้อย่างน้อย 25 นาที (เดิม 10 → ปกโดนรีเซ็ตกลางคัน+หยิบซ้ำ)
+    const _maxMin = (job.payload?.jobType === 'cover') ? Math.max(maxAgeMinutes, 25) : maxAgeMinutes;
+    const cutoff = new Date(Date.now() - _maxMin * 60 * 1000);
     if (job.status === 'processing' && new Date(job.startedAt || job.createdAt) < cutoff) {
       // ★ 12 มิ.ย.: งานค้าง (เครื่องดับ/deploy คร่อม) ให้ "คืนเข้าคิวลองใหม่ 1 ครั้ง" ก่อน — เดิมตีตายทันที
       //   (12 มิ.ย. ต้องกู้มือ 2 รอบ) ถ้าค้างซ้ำรอบสองค่อยตีตายจริง (กันงานพังวนลูปไม่จบ)
@@ -420,7 +423,7 @@ export async function cleanupStaleJobs(maxAgeMinutes = 10) {
         await store.update(job.id, (existing) => ({
           ...existing,
           status: 'failed',
-          error: `Stale job — stuck >${maxAgeMinutes} min twice, marked failed`,
+          error: `Stale job — stuck >${_maxMin} min twice, marked failed`,
           completedAt: new Date().toISOString(),
         }));
         cleaned++;

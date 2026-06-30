@@ -575,7 +575,7 @@ async function agentYouTubeFrames(identity) {
         const _person = rawMainChar || identity?.mainCharacter || '';
         const _story = identity?.newsTitle || identity?.story || identity?.coreStory?.celebratedAction || '';
         const kept = [];
-        for (const vid of videoIds.slice(0, 3)) {
+        for (const vid of videoIds.slice(0, 2)) { // ★ 1 ก.ค.: 3→2 ลดเวลา Tier REAL (yt-dlp+ffmpeg+Gemini/คลิป หนักสุด) — ภาพถ่ายจาก Agent1 ครอบคลุมแล้ว
           let fr = [];
           try {
             fr = await Promise.race([
@@ -1716,71 +1716,66 @@ Judge ALL images (even REJECT must include score=0)
   }
 }
 
-// ★★★ Vision Fallback Judge (OpenAI → Claude) ★★★
+// ★ 1 ก.ค.: parse ผล Judge ให้ทน — กัน markdown fence + คำตอบถูกตัด (truncate) ที่ทำให้ "unparseable" → random
+function _parseJudgeArray(text) {
+  if (!text) return null;
+  const t = String(text).replace(/```json/gi, '').replace(/```/g, '').trim();
+  // 1) ลองจับ array ทั้งก้อนก่อน
+  const m = t.match(/\[\s*\{[\s\S]*\}\s*\]/);
+  if (m) { try { const p = JSON.parse(m[0]); if (Array.isArray(p) && p.length) return p; } catch { /* ตกไปวิธี 2 */ } }
+  // 2) กันคำตอบถูกตัดกลางคัน: เก็บเฉพาะ object ที่สมบูรณ์ (มี "index") แล้วประกอบ array เอง
+  const objs = [];
+  const re = /\{[^{}]*?"index"[^{}]*?\}/g; let mm;
+  while ((mm = re.exec(t)) !== null) { try { const o = JSON.parse(mm[0]); if (typeof o.index === 'number') objs.push(o); } catch { /* ข้าม object ที่พัง */ } }
+  return objs.length ? objs : null;
+}
+
+// ★★★ Vision Judge (gpt-4o → Claude) ★★★
 async function judgeWithFallback(validCandidates, imageParts, prompt, newsTitle, identity) {
-  // === Attempt 1: OpenAI Vision ===
-  // ★ 27 มิ.ย. (แก้ "ไม่นิ่ง"/ช้า): ข้าม gpt-5.x — MODEL_VISION='gpt-5.5' เป็นโมเดล reasoning ตอบ vision-JSON ไม่ได้
-  //   ("unparseable" ทุกครั้ง = เสียเวลาฟรี ~30 วิ) → ไป Claude Sonnet ที่ให้คะแนนภาพได้นิ่งเป็นหลักเลย
-  //   🔴 cover-only (ระบบข่าว/ถอดประเด็นไม่ใช้ judge) · ถ้าเปลี่ยน MODEL_VISION กลับเป็น gpt-4o เส้นนี้ทำงานเองอัตโนมัติ
-  const _visionIsReasoning = /^(gpt-5|o1|o3)/.test(String(MODEL_VISION || ''));
+  // === Attempt 1: OpenAI gpt-4o Vision ===
+  // ★ 1 ก.ค. (แก้ Judge ล่มทุกใบ→random): เดิมใช้ MODEL_VISION='gpt-5.5' (reasoning ตอบ vision-JSON ไม่ได้) → ถูกข้าม
+  //   → เหลือ Claude ตัวเดียว + token น้อย คำตอบถูกตัด → "unparseable" → random ทุกใบ
+  //   แก้: ใช้ gpt-4o ตรงๆ (vision นิ่ง+ตอบ JSON ดี) + token 8000 (กันตัด) + parser ทน · 🔴 cover-only
+  const VISION_JUDGE_MODEL = 'gpt-4o';
   const openaiKey = process.env.OPENAI_API_KEY;
-  if (openaiKey && !_visionIsReasoning) {
+  if (openaiKey) {
     try {
-      console.log(`[Judge Fallback] 📤 Sending to ${MODEL_VISION} Vision...`);
-      
-      // สร้าง content array สำหรับ GPT-4o (text + images)
+      console.log(`[Judge] 📤 ส่งให้ ${VISION_JUDGE_MODEL} Vision คัดภาพ...`);
       const gptContent = [{ type: 'text', text: prompt }];
-      
-      // เพิ่มภาพ (จำกัด 28 ภาพ — ต้องครอบคลุม context/evidence ที่อยู่ท้ายด้วย!)
-      const maxImages = Math.min(imageParts.length, 28);
+      const maxImages = Math.min(imageParts.length, 28); // ครอบคลุม context/evidence ท้ายแถวด้วย
       for (let i = 0; i < maxImages; i++) {
         const part = imageParts[i];
         if (part?.inlineData) {
           gptContent.push({
             type: 'image_url',
-            image_url: {
-              url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
-              detail: 'low' // ประหยัด token
-            }
+            image_url: { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`, detail: 'low' },
           });
         }
       }
-
-      // ★ GPT-5.5 compatibility
-      const _isNew = MODEL_VISION.startsWith('gpt-5') || MODEL_VISION.startsWith('o1') || MODEL_VISION.startsWith('o3');
       const gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openaiKey}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: MODEL_VISION,
+          model: VISION_JUDGE_MODEL,
           messages: [{ role: 'user', content: gptContent }],
-          ...(_isNew ? { max_completion_tokens: 4000 } : { max_tokens: 4000 }),
-          ...(_isNew ? {} : { temperature: 0.2 })
-        })
+          max_tokens: 8000,        // ★ เดิม 4000 → ตัดกลางคันเมื่อมี 28 ภาพ → ขึ้น 8000 กันตัด
+          temperature: 0.2,
+        }),
       });
-
       if (gptRes.ok) {
         const gptData = await gptRes.json();
-        const gptText = gptData.choices?.[0]?.message?.content || '';
-        const gptMatch = gptText.match(/\[\s*\{[\s\S]*\}\s*\]/);
-        
-        if (gptMatch) {
-          const parsed = JSON.parse(gptMatch[0]);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            console.log(`[Judge Fallback] ✅ GPT-4o scored ${parsed.length} images`);
-            return processJudgeResults(parsed, validCandidates);
-          }
+        const parsed = _parseJudgeArray(gptData.choices?.[0]?.message?.content || '');
+        if (parsed && parsed.length > 0) {
+          console.log(`[Judge] ✅ ${VISION_JUDGE_MODEL} คัดได้ ${parsed.length} ภาพ`);
+          return processJudgeResults(parsed, validCandidates);
         }
-        console.log('[Judge Fallback] ⚠️ GPT-4o returned unparseable response');
+        console.log('[Judge] ⚠️ gpt-4o คืนคำตอบ parse ไม่ได้ → ลอง Claude');
       } else {
         const errData = await gptRes.json().catch(() => ({}));
-        console.log(`[Judge Fallback] ❌ GPT-4o HTTP ${gptRes.status}: ${errData.error?.message?.substring(0, 80) || ''}`);
+        console.log(`[Judge] ❌ gpt-4o HTTP ${gptRes.status}: ${errData.error?.message?.substring(0, 80) || ''}`);
       }
     } catch (gptErr) {
-      console.log(`[Judge Fallback] ❌ GPT-4o Error: ${gptErr.message?.substring(0, 80)}`);
+      console.log(`[Judge] ❌ gpt-4o Error: ${gptErr.message?.substring(0, 80)}`);
     }
   }
 
@@ -1815,24 +1810,19 @@ async function judgeWithFallback(validCandidates, imageParts, prompt, newsTitle,
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-6', // ★ 10 มิ.ย.: sonnet-4-20250514 ปลดระวาง 15 มิ.ย. 2026
-          max_tokens: 4000,
+          max_tokens: 8000,           // ★ 1 ก.ค.: เดิม 4000 → ตัดกลางคัน (28 ภาพ) → ขึ้น 8000 กันตัด
           messages: [{ role: 'user', content: claudeContent }]
         })
       });
 
       if (claudeRes.ok) {
         const claudeData = await claudeRes.json();
-        const claudeText = claudeData.content?.[0]?.text || '';
-        const claudeMatch = claudeText.match(/\[\s*\{[\s\S]*\}\s*\]/);
-        
-        if (claudeMatch) {
-          const parsed = JSON.parse(claudeMatch[0]);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            console.log(`[Judge Fallback] ✅ Claude scored ${parsed.length} images`);
-            return processJudgeResults(parsed, validCandidates);
-          }
+        const parsed = _parseJudgeArray(claudeData.content?.[0]?.text || '');
+        if (parsed && parsed.length > 0) {
+          console.log(`[Judge] ✅ Claude คัดได้ ${parsed.length} ภาพ`);
+          return processJudgeResults(parsed, validCandidates);
         }
-        console.log('[Judge Fallback] ⚠️ Claude returned unparseable response');
+        console.log('[Judge] ⚠️ Claude คืนคำตอบ parse ไม่ได้');
       } else {
         const errData = await claudeRes.json().catch(() => ({}));
         console.log(`[Judge Fallback] ❌ Claude HTTP ${claudeRes.status}: ${errData.error?.message?.substring(0, 80) || ''}`);
