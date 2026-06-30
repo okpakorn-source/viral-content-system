@@ -150,6 +150,7 @@ export default function NewsDeskPage() {
   // ★ 23 มิ.ย.: กรองข่าวที่โหลดมาแล้ว "สด" (ไม่ harvest ใหม่) — หาข่าวในหลายร้อยข่าวได้ทันที
   const [feedFilter, setFeedFilter] = useState('');     // พิมพ์ชื่อคน/คำในหัวข้อ → กรองทันที
   const [quickChip, setQuickChip] = useState('all');    // all | today | clip | celeb
+  const [page, setPage] = useState(1);                  // ★ 30 มิ.ย.: หน้า pagination (กันคอมค้างจาก render 1000+ ใบรวดเดียว)
 
   useEffect(() => {
     setMe(localStorage.getItem('desk_username') || '');
@@ -159,6 +160,9 @@ export default function NewsDeskPage() {
       if (t && TABS.some(x => x.id === t)) setTab(t);
     } catch {}
   }, []);
+
+  // ★ 30 มิ.ย.: เปลี่ยนโซน/คลัง/ตัวกรอง → เด้งกลับหน้า 1 (กันค้างหน้าที่เกินจำนวนข่าวชุดใหม่)
+  useEffect(() => { setPage(1); }, [tab, library, clipSource, catFilter, feedFilter, quickChip]);
 
   const ensureName = () => {
     let name = localStorage.getItem('desk_username');
@@ -630,6 +634,36 @@ export default function NewsDeskPage() {
   //   เลิกเรียงตาม readiness ฝั่ง client (เคยดันข่าวเก่าที่ enrich แล้วขึ้นบน ข่าวใหม่จมล่าง) — readiness ยังโชว์เป็นแถบบนการ์ด
   const shown = (feedFilter.trim() || quickChip !== 'all') ? items.filter(matchesFeed) : items;
 
+  // ★ 30 มิ.ย.: PAGINATION — render แค่ PAGE_SIZE ใบ/หน้า (เดิม render ทุกใบ 1000+ → คอมค้าง/ฟีดยาว)
+  const PAGE_SIZE = 30;
+  const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const curPage = Math.min(Math.max(1, page), pageCount);
+  const paged = shown.slice((curPage - 1) * PAGE_SIZE, curPage * PAGE_SIZE);
+  const gotoPage = (p) => { setPage(p); try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {} };
+  // เลขหน้าแบบหน้าต่าง (1 … current±2 … last) กันปุ่มล้นจอเวลามีหลายสิบหน้า
+  const pageWindow = (() => {
+    const out = [1];
+    const lo = Math.max(2, curPage - 2), hi = Math.min(pageCount - 1, curPage + 2);
+    if (lo > 2) out.push('…');
+    for (let p = lo; p <= hi; p++) out.push(p);
+    if (hi < pageCount - 1) out.push('…');
+    if (pageCount > 1) out.push(pageCount);
+    return out;
+  })();
+  const Pager = () => pageCount <= 1 ? null : (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexWrap: 'wrap', padding: '10px 0' }}>
+      <button onClick={() => gotoPage(curPage - 1)} disabled={curPage <= 1}
+        style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-secondary)', cursor: curPage <= 1 ? 'default' : 'pointer', opacity: curPage <= 1 ? 0.4 : 1, fontSize: 13, fontWeight: 600, fontFamily: 'inherit' }}>‹ ก่อนหน้า</button>
+      {pageWindow.map((p, i) => p === '…'
+        ? <span key={'e' + i} style={{ color: 'var(--text-muted)', padding: '0 4px' }}>…</span>
+        : <button key={p} onClick={() => gotoPage(p)}
+            style={{ minWidth: 34, padding: '6px 10px', borderRadius: 8, border: '1px solid ' + (p === curPage ? 'var(--desk-blue, #3b82f6)' : 'var(--border)'), background: p === curPage ? 'var(--desk-blue, #3b82f6)' : 'var(--bg-card)', color: p === curPage ? '#fff' : 'var(--text-secondary)', cursor: 'pointer', fontSize: 13, fontWeight: p === curPage ? 800 : 600, fontFamily: 'inherit' }}>{p}</button>)}
+      <button onClick={() => gotoPage(curPage + 1)} disabled={curPage >= pageCount}
+        style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-secondary)', cursor: curPage >= pageCount ? 'default' : 'pointer', opacity: curPage >= pageCount ? 0.4 : 1, fontSize: 13, fontWeight: 600, fontFamily: 'inherit' }}>ถัดไป ›</button>
+      <span style={{ fontSize: 12.5, color: 'var(--text-muted)', marginLeft: 8, fontWeight: 600 }}>หน้า {curPage}/{pageCount} · ทั้งหมด {shown.length} ใบ</span>
+    </div>
+  );
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary, #0f1419)' }}>
       <Header title="🗞️ โต๊ะข่าวกลาง" subtitle="ข่าวคัดกรองด้วยสมอง 4 ชั้น — เรียงตามความน่าทำของเพจเรา" />
@@ -1024,12 +1058,13 @@ export default function NewsDeskPage() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <Pager />
             {shown.length === 0 && (
               <div style={{ color: 'var(--text-secondary)', padding: 30, textAlign: 'center', fontSize: 13 }}>
                 ไม่พบข่าวตรงคำกรอง — ลองล้างคำค้น หรือกดชิป &quot;ทั้งหมด&quot;
               </div>
             )}
-            {shown.map(it => {
+            {paged.map(it => {
               // ★ รื้อ UI 29 มิ.ย.: แถบสี accent ซ้ายการ์ด สื่อสถานะ บก./งานเขียนแบบสแกนเร็ว
               const _accent = it.status === 'sent' ? '#22c55e'
                 : it.status === 'claimed' ? '#f59e0b'
@@ -1317,6 +1352,7 @@ export default function NewsDeskPage() {
               </div>
               );
             })}
+            <Pager />
           </div>
         )}
       </div>
