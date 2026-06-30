@@ -59,9 +59,13 @@ Format:
   "face_count": 1,
   "best_crop_focus": "center-top",
   "has_big_text": false,
-  "text_region": null
+  "text_region": null,
+  "face_emotion": "smiling | laughing | crying | sad | angry | shocked | serious | neutral | unknown",
+  "emotion_intensity": "strong | mild | none"
 }
 If no faces: has_faces=false, faces=[], and provide main_subject_region for the most interesting area.
+face_emotion = the ACTUAL facial expression of the MAIN face — read the mouth/eyes/brows directly, do NOT guess from the scene/background/mood. Use "unknown" if there is no clear face.
+emotion_intensity = how strong that expression is (strong = very clear & dominant / mild = somewhat visible / none = flat or neutral).
 has_big_text = true if the image is a social-media post screenshot, chat screenshot, news graphic with headline, OR has ANY burned-in text/captions/subtitles/dialogue-overlay/quote-overlay that would be visible on a cover — INCLUDING TV-drama subtitles, interview lower-third captions, quoted-speech overlays, and lyric/quote text. Only a tiny corner watermark or small channel logo = false. When in doubt, set true (a clean cover should not show burned-in sentences).
 text_region: when has_big_text=true, give the bounding box of the main burned-in text block as { "x_pct": 0, "y_pct": 75, "w_pct": 100, "h_pct": 25 } (e.g. TV lower-third captions are usually the bottom strip) — so the system can crop the person while avoiding the text zone. null if has_big_text=false.`;
 
@@ -101,6 +105,9 @@ text_region: when has_big_text=true, give the bounding box of the main burned-in
         height: Math.round((subject.h_pct / 100) * metadata.height),
       },
       bestCropFocus: parsed.best_crop_focus || 'center',
+      // ★ Emotion Gate (เฟส 1, 2 ก.ค.): อารมณ์สีหน้า — ใช้กรองภาพอารมณ์ขัดข่าวก่อนทำฮีโร่/ประกอบปก (ฟรี ขอจาก call เดิม)
+      faceEmotion: parsed.face_emotion || 'unknown',
+      emotionIntensity: parsed.emotion_intensity || 'none',
       hasBigText: !!parsed.has_big_text, // ★ สกรีนช็อต/กราฟิกข่าว/ซับฝังใหญ่ — cover v3 ใช้ระวังภาพพวกนี้ในช่องคน
       // ★ โซนข้อความ (สัดส่วน 0-1) — ครอปคนหลบโซนนี้ได้ = ใช้เฟรมรายการทีวีได้โดยไม่ติดซับ
       textRegion: parsed.text_region && Number.isFinite(Number(parsed.text_region.x_pct))
@@ -126,6 +133,8 @@ text_region: when has_big_text=true, give the bounding box of the main burned-in
     faceCount: 0,
     mainSubject: null,
     bestCropFocus: 'center',
+    faceEmotion: 'unknown',
+    emotionIntensity: 'none',
     imageWidth: metadata.width || 0,
     imageHeight: metadata.height || 0,
   };

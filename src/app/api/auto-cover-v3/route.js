@@ -20,6 +20,17 @@ export const maxDuration = 800;
 //   งานที่มาทีหลังต่อแถวรอใบก่อนเสร็จ — กันทั้งงานคิว+ยิงตรง API พร้อมกัน
 let _renderLock = Promise.resolve();
 
+// ★ Emotion Gate (เฟส 1, 2 ก.ค.): อารมณ์ข่าว (coverEmotion) → อารมณ์สีหน้าที่ "ขัดรุนแรง" (กันเป็นฮีโร่/ดันท้ายแถว)
+//   หลักการเหล็ก: "ภาพอารมณ์ผิด แย่กว่าช่องว่าง" · neutral/ค่าอื่นๆ = ไม่มี key = ไม่กรอง (no-op)
+//   warm/hope ผ่อน "crying" ไว้ (อาจเป็นน้ำตาดีใจ) — ขัดเฉพาะ angry
+const EMOTION_CONFLICT = {
+  tragedy:  ['smiling', 'laughing'],
+  shocking: ['smiling', 'laughing'],
+  drama:    ['smiling', 'laughing'],
+  warm:     ['angry'],
+  hope:     ['angry'],
+};
+
 export async function POST(request) {
   const prevLock = _renderLock;
   let releaseLock;
@@ -199,6 +210,9 @@ async function _renderCoverV3(request) {
           x1: +(largest.x / W).toFixed(2), y1: +(largest.y / H).toFixed(2),
           x2: +((largest.x + largest.width) / W).toFixed(2), y2: +((largest.y + largest.height) / H).toFixed(2),
           count: sig.length, // นับเฉพาะหน้าเด่น (เดี่ยว=1 จะครอปหน้าเต็มช่อง)
+          // ★ Emotion Gate (เฟส 1, 2 ก.ค.): ติดอารมณ์สีหน้าไว้บน faceBox → ไหลผ่าน re-rank/dedup เองทุกครั้งที่ map ใหม่ (ไม่หาย)
+          faceEmotion: fd.faceEmotion || 'unknown',
+          emotionIntensity: fd.emotionIntensity || 'none',
           // rev.14b: เก็บ "หน้าเด่นทุกใบ" (0-1) ให้ executor กระชับกลุ่มหน้า (ภาพคู่/ครอบครัว) ให้เต็มเฟรม
           allFaces: sig.map(f => ({
             x1: +(f.x / W).toFixed(3), y1: +(f.y / H).toFixed(3),
@@ -209,6 +223,32 @@ async function _renderCoverV3(request) {
       }));
       console.log(`[CoverV3] face boxes: ${faceBoxes.filter(b => b && b.x1 !== undefined).length}/${imageBuffers.length} images | มีตัวหนังสือฝัง: ${faceBoxes.filter(b => b?.hasText).length}`);
     } catch (e) { console.log('[CoverV3] face detect failed (non-fatal):', e.message?.slice(0, 50)); }
+
+    // ★ Emotion Gate (เฟส 1, 2 ก.ค.): กรอง "ภาพอารมณ์สีหน้าขัดข่าวรุนแรง" ก่อนจัดพูล (กันหน้ายิ้มในข่าวเศร้า/ช็อกเป็นฮีโร่)
+    //   หลักการ "ภาพอารมณ์ผิด แย่กว่าช่องว่าง" · ข่าว neutral/ว่าง = ข้ามด่าน (no-op) · กันพูลหด <4 (ปกล้ม) ด้วยการ demote แทนตัดถ้าไม่พอ
+    try {
+      const _ce = String(identity?.coverEmotion || '').toLowerCase();
+      const _conflict = EMOTION_CONFLICT[_ce];                       // undefined ถ้า neutral/ค่าอื่น → ข้ามทั้งด่าน
+      if (_conflict && faceBoxes.length === imageBuffers.length) {
+        const _isConflict = (fb) => !!(fb && fb.x2 > fb.x1 && fb.emotionIntensity === 'strong' && _conflict.includes(String(fb.faceEmotion || '')));
+        const conflictIdx = imageBuffers.map((_, i) => i).filter(i => _isConflict(faceBoxes[i]));
+        const okCount = imageBuffers.length - conflictIdx.length;    // ภาพอารมณ์ตรง/เป็นกลาง/ไม่มีหน้า ที่เหลือ
+        if (conflictIdx.length > 0) {
+          const _list = conflictIdx.map(i => faceBoxes[i].faceEmotion).join(',');
+          if (okCount >= 4) {
+            // เหลือภาพใช้ได้พอ (≥4 เลี้ยง 4+1) → ตัดภาพอารมณ์ผิดทิ้งเลย
+            const ibNew = [], fbNew = [];
+            imageBuffers.forEach((img, i) => { if (!_isConflict(faceBoxes[i])) { ibNew.push(img); fbNew.push(faceBoxes[i]); } });
+            imageBuffers = ibNew; faceBoxes = fbNew;
+            console.log(`[CoverV3] 🎭 Emotion Gate: ข่าว=${_ce} | ตัด ${conflictIdx.length} ภาพอารมณ์ขัด (${_list}) — เหลือ ${ibNew.length} ใบ`);
+          } else {
+            // ตัดแล้วพูลจะหด <4 (ปกเสี่ยงล้ม) → ไม่ตัด แค่ flag ให้ re-rank/heroFit ดันท้ายแถว (ไม่เป็นฮีโร่)
+            conflictIdx.forEach(i => { if (faceBoxes[i]) faceBoxes[i]._emotionConflict = true; });
+            console.log(`[CoverV3] 🎭 Emotion Gate: ข่าว=${_ce} | demote ${conflictIdx.length} ภาพอารมณ์ขัด (${_list}) — พูลเหลือน้อย ไม่ตัด (กันปกล้ม)`);
+          }
+        }
+      }
+    } catch (e) { console.log('[CoverV3] Emotion Gate skipped (non-fatal):', e.message?.slice(0, 40)); }
 
     // ── rev.13: จัดลำดับสระภาพตาม "ความแน่นของใบหน้า" ก่อนส่ง Director ──
     //    feedback (ตัวอย่างหนุ่ม กรรชัย): ทุกช่องหน้าเต็มกรอบคมชัด ไม่มีภาพกว้าง/หน้าเล็ก
@@ -225,6 +265,7 @@ async function _renderCoverV3(request) {
             else if (fb.count === 2) s += 0.02;     // ภาพคู่
             else if (fb.count >= 4) s -= 0.05;      // rev.14t: ผ่อนโทษภาพหมู่ (ผู้ใช้ชอบภาพครอบครัว CASE-104) — โทษเฉพาะคนเยอะจริงๆ
             if (fb.hasText) s -= 0.08;              // ตัวหนังสือฝัง = เสี่ยงเข้าช่องคน
+            if (fb._emotionConflict) s -= 0.5;      // ★ Emotion Gate (เฟส 1): ภาพอารมณ์ขัดข่าว (ตัดไม่ได้เพราะพูลน้อย) → ดันท้ายแถว ไม่เป็นฮีโร่
             // ★ 1 ก.ค. (CASE-246): 2 หน้าซ้อนกันหนัก = ภาพจูบ/กอด หน้าเบือนไม่ชัด → กดจมพูล (เลี่ยงเข้าช่องโชว์หน้า)
             //   หน้าคู่ปกติ (ยืนข้างกัน) ไม่ซ้อน = ไม่โดนโทษ · ต่างกับ "ซ้อน" ที่หน้าทับกันจริง
             if (Array.isArray(fb.allFaces) && fb.allFaces.length >= 2) {
@@ -414,7 +455,9 @@ async function _renderCoverV3(request) {
     //          หรือหน้าเล็ก/เห็นลำตัว (=CASE-200). 199 ดีเพราะหน้าใหญ่+เดี่ยว+อยู่กลาง+ไม่ชิดขอบ
     //   → เลือกฮีโร่ที่ดีสุด (ใหญ่+เดี่ยว+ไม่ชิดขอบ) ย้ายขึ้นหน้าสุดเท่านั้น — ★ ไม่แตะลำดับช่องอื่น/ครอป/โครง
     if (faceBoxes.length === imageBuffers.length && imageBuffers.length >= 2) {
-      const heroFit = (fb) => {
+      // ★ Emotion Gate (เฟส 1, ขั้น 1.3): อารมณ์สีหน้าที่ขัดข่าว — ใช้หักคะแนนฮีโร่ (กันหน้ายิ้มเป็นฮีโร่ข่าวเศร้า)
+      const _heroEmoConflict = EMOTION_CONFLICT[String(identity?.coverEmotion || '').toLowerCase()] || null;
+      const heroFit = (fb, img) => {
         if (!fb || !(fb.x2 > fb.x1) || fb.hasText) return -1;       // ไม่มีหน้า/มีตัวหนังสือ = ไม่เหมาะเป็นฮีโร่
         const area = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);            // หน้าใหญ่=โคลสอัพ (กัน 200 หน้าเล็ก/ลำตัว)
         const cx = (fb.x1 + fb.x2) / 2;
@@ -429,11 +472,16 @@ async function _renderCoverV3(request) {
         if (edgeNear < 0.05) s -= 0.15;                           // หน้าแทบติดขอบ → ครอปแล้วตัด (กัน 198) หักแรง
         else s -= Math.abs(cx - 0.5) * 0.10;                      // เยื้องกลาง = หักเบาๆ (ชอบหน้ากลางเฟรม)
         if (_q < 0.5) s -= (0.5 - _q) * 0.30;                     // ★ QUALITY FIRST: เฟรมเบลอชัด (q<0.5) หักหนักเพิ่ม — กันฮีโร่เบลอเด็ดขาด (CASE-228/234)
+        // ★ Emotion Gate (1.3): อารมณ์สีหน้าขัดข่าวรุนแรง → หักแรง (กันหน้ายิ้มเป็นฮีโร่ข่าวเศร้า · ทำงานร่วมขั้น 1.2)
+        if (fb._emotionConflict || (_heroEmoConflict && fb.emotionIntensity === 'strong' && _heroEmoConflict.includes(String(fb.faceEmotion || '')))) s -= 0.5;
+        // ★ Identity (1.3): ภาพที่ Judge ชี้เป็น "หน้าตัวหลักข่าว" (role=HERO_FACE = HERO_ROLE) → ดันขึ้นฮีโร่ (กันคนผิด/แบนเนอร์ CASE-247/248)
+        //   ตัด '|| HERO' (ไม่มี path ไหนเซ็ต role='HERO') + '|| _storyAnchor' (per-image ไม่เสถียร—มีเฉพาะ main path ของ Judge บรรทัด 1959, supplement/fallback 1993/2023/2042 ไม่มี) ตาม Hermes review
+        if (img && img.role === 'HERO_FACE') s += 0.10;
         return s;
       };
-      let bestIdx = 0, bestFit = heroFit(faceBoxes[0]);
+      let bestIdx = 0, bestFit = heroFit(faceBoxes[0], imageBuffers[0]);
       for (let i = 1; i < imageBuffers.length; i++) {
-        const f = heroFit(faceBoxes[i]);
+        const f = heroFit(faceBoxes[i], imageBuffers[i]);
         if (f > bestFit) { bestFit = f; bestIdx = i; }
       }
       if (bestIdx > 0 && bestFit > 0) {
