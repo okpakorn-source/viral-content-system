@@ -1848,7 +1848,7 @@ async function judgeWithFallback(validCandidates, imageParts, prompt, newsTitle,
 }
 
 // ★ แยก processJudgeResults ออกมาเพื่อใช้ร่วมกัน (Gemini, GPT-4o, Claude)
-function processJudgeResults(parsed, validCandidates) {
+function processJudgeResults(parsed, validCandidates, allowFallback = true) {
   // ★★★ POST-PROCESSING: Selfie & Watermark enforcement (safety net)
   // แม้ prompt จะบอกแล้ว AI อาจยัง assign HERO_FACE ให้ selfie/watermark → บังคับ demote
   const SELFIE_KEYWORDS = /selfie|เซลฟี่|ถ่ายตัวเอง|มือถือถ่าย|กล้องหน้า|แขนยื่น|wide.?angle.*face|arm.*visible|front.*camera/i;
@@ -2021,25 +2021,40 @@ function processJudgeResults(parsed, validCandidates) {
     return selectedImages;
   }
 
-  return fallbackSelection(validCandidates);
+  return allowFallback ? fallbackSelection(validCandidates) : rawLastResort(validCandidates);
+}
+
+// ★ 1 ก.ค.: last-resort แบบไม่วิ่งกฎซ้ำ (กัน recursion เมื่อภาพผ่านเกณฑ์ 0 ใบ) — เรียงด้วย anchor+แหล่ง
+function rawLastResort(candidates) {
+  const anchorMap = candidates._storyAnchorMap;
+  const srcScores = candidates._sourceScores || {};
+  const rankOf = (url) => (Number(srcScores[url]) || 0) + (anchorMap?.has?.(url) ? 10 : 0);
+  return [...candidates].sort((a, b) => rankOf(b) - rankOf(a)).slice(0, 10)
+    .map((url, i) => ({ url, role: i === 0 ? 'HERO_FACE' : 'SUPPORT', score: 1 }));
 }
 
 function fallbackSelection(candidates) {
-  // ★ 1 ก.ค. (CASE-247): เลิก "สุ่มล้วน" — เมื่อ AI Judge ล่มทุกตัว ใช้สัญญาณที่มีอยู่จัดอันดับแทน
-  //   (Identity Anchor = ตรงตัวคน/เรื่อง + ความน่าเชื่อแหล่ง) → กันภาพหลุดบริบท/ผิดคน (เช่นภาพโรงเรียน) เด้งเข้าปก
-  const anchorMap = candidates._storyAnchorMap;          // Set/Map ของ url ที่ผ่าน Identity Anchor (ตรงตัวคน/เรื่อง)
+  // ★ 1 ก.ค. (CASE-247): AI Judge ล่ม → เดิม "สุ่มมั่ว" ข้ามกฎทั้งหมด → ภาพผิด/หลุดบริบทเข้าปก
+  //   แก้: สร้างคะแนนจากสัญญาณจริง (Identity Anchor ตรงตัวคน/เรื่อง + ความน่าเชื่อแหล่ง)
+  //   ★★ แล้ววิ่งผ่าน processJudgeResults "ตัวเดียวกับทาง AI" → กฎ source-bias / anchor-rescue / ตัด REJECT
+  //   บังคับใช้เหมือนกันทุกทาง (fallback ก็ทำตามกฎ ไม่ใช่สุ่มข้ามกฎ)
+  const anchorMap = candidates._storyAnchorMap;
   const srcScores = candidates._sourceScores || {};
-  const rankOf = (url) => {
-    let s = Number(srcScores[url]) || 0;                 // แหล่งข่าวจริง=สูง · stock/ทั่วไป=ต่ำ
-    if (anchorMap?.has?.(url)) s += 10;                  // ★ ตรงตัวคน/เรื่อง = ดันขึ้นก่อน (กันภาพผิดคน)
-    return s;
-  };
-  const ranked = [...candidates].sort((a, b) => rankOf(b) - rankOf(a));
-  console.log(`[Judge Fallback] 🧭 last-resort จัดอันดับด้วย anchor+แหล่ง (เลิกสุ่มมั่ว) — top10 มี anchor ${ranked.slice(0, 10).filter(u => anchorMap?.has?.(u)).length} ใบ`);
-  return ranked.slice(0, 10).map((url, i) => ({
-    url,
-    role: i === 0 ? 'HERO' : 'SUPPORT',
+  const ranked = candidates.map((url, index) => {
+    const src = Number(srcScores[url]) || 0;
+    const anchored = !!anchorMap?.has?.(url);
+    let sc = anchored ? 6 : 3;                            // anchored=ผ่านเกณฑ์รับ · ไม่ anchored=รับแบบรอง
+    if (src >= 5) sc += 1; else if (src <= 1) sc -= 1;    // แหล่งดีบวก · stock/ทั่วไปลบ
+    return { index, url, sc: Math.max(2, Math.min(10, sc)), anchored };
+  }).sort((a, b) => b.sc - a.sc);
+  const parsed = ranked.map((o, rank) => ({
+    index: o.index,
+    role: rank === 0 ? 'HERO_FACE' : (o.anchored ? 'CONTEXT_SCENE' : 'SUPPORT'),
+    score: o.sc,
+    reason: '[fallback] AI Judge ล่ม — จัดอันดับด้วย anchor+แหล่ง',
   }));
+  console.log(`[Judge Fallback] 🧭 last-resort: anchor+แหล่ง → วิ่งผ่านกฎเดียวกับ AI (processJudgeResults) — anchored ${ranked.filter(o => o.anchored).length}/${ranked.length}`);
+  return processJudgeResults(parsed, candidates, false);
 }
 
 // ==========================================
