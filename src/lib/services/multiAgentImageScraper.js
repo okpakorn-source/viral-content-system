@@ -293,14 +293,24 @@ async function agentGoogleCleanImages(identity) {
   const _emoText = `${identity?.story || ''} ${identity?.coreStory?.emotionalHook || ''} ${identity?.coreStory?.storySubject || ''} ${identity?.coverEmotion || ''} ${identity?.emotion || ''} ${identity?.mainVisualShouldBe || ''}`;
   const hasConflictArc = /ปัญหา|ขัดแย้ง|แตกแยก|ห่างเหิน|ห่าง|ละเลย|เลิก|หย่า|ทะเลาะ|น้ำตา|ร้องไห้|สูญเสีย|เสียใจ|ดราม่า|drama|sad|tragedy|shock|เครียด|ป่วย|จากไป|เสียชีวิต|อาลัย|คิดถึง|เกือบ|วิกฤต|สำนึก|เปิดใจ|ตื้นตัน/.test(_emoText);
 
+  // ★ เฟส 3-1b: block term สำหรับ query "หน้าคนสะอาด" เท่านั้น — ตัดภาพปก/ข่าว/โลโก้/ลายน้ำ/เวที/คอนเสิร์ต
+  //   ที่ครอง search ของ celeb ดัง (แพท/เจมส์) ทำให้ pool เต็มไปด้วยภาพติด text/เวที → clean face <4 → 422
+  //   ⚠️ ใส่เฉพาะ portrait/closeup/emotion/studio (ไม่ใส่ event/context/couple ที่ต้องการภาพเหตุการณ์)
+  const cleanFaceBlock = '-ปก -cover -logo -banner -watermark -ลายน้ำ -ปกข่าว -คอนเสิร์ต -concert -เวที -stage';
+
   const queries = [
     // === ภาพบุคคลหลัก ===
-    { q: sq.person_portrait || mainChar || '', label: 'person portrait', num: 10 },
-    { q: sq.person_closeup || (mainChar ? `${mainChar} หน้าตรง โคลสอัพ ภาพหน้าชัด` : ''), label: 'person closeup', num: 10 },
+    { q: sq.person_portrait ? `${sq.person_portrait} ${cleanFaceBlock}` : (mainChar ? `${mainChar} ${cleanFaceBlock}` : ''), label: 'person portrait', num: 10 },
+    { q: sq.person_closeup ? `${sq.person_closeup} ${cleanFaceBlock}` : (mainChar ? `${mainChar} หน้าตรง โคลสอัพ ภาพหน้าชัด ${cleanFaceBlock}` : ''), label: 'person closeup', num: 10 },
+    // ★ เฟส 3-1b จุดที่ 2: ภาพพอร์ตเทรตสะอาดสำหรับ celeb (ถ่ายแบบนิตยสาร/หน้าใส — ครอปง่าย ไม่ติด text)
+    //   คำค้นเลือกจากเทสจริง 3 celeb: "นิตยสาร ถ่ายแบบ"=5/8/8 clean, "หน้าใส portrait"=6/8/5
+    //   (ทิ้งคำเดิม "ภาพถ่ายสตูดิโอ พื้นหลังเรียบ"/"โปรไฟล์ หน้าตรง" ที่ให้ 0-1 ภาพ — คำค้นไม่เป็นธรรมชาติ)
+    { q: mainChar ? `${mainChar} นิตยสาร ถ่ายแบบ ${cleanFaceBlock}` : '', label: 'magazine portrait', num: 8 },
+    { q: mainChar ? `${mainChar} หน้าใส portrait ${cleanFaceBlock}` : '', label: 'clean face portrait', num: 8 },
     // ★ ภาพอารมณ์/สัมภาษณ์ (เฉพาะข่าวมีปม) — ให้ hero สื่ออารมณ์
     ...(hasConflictArc && mainChar ? [
-      { q: `${mainChar} สัมภาษณ์ เปิดใจ`, label: 'emotion interview', num: 10 },
-      { q: `${mainChar} สีหน้าครุ่นคิด จริงจัง`, label: 'emotion reflective', num: 8 },
+      { q: `${mainChar} สัมภาษณ์ เปิดใจ ${cleanFaceBlock}`, label: 'emotion interview', num: 10 },
+      { q: `${mainChar} สีหน้าครุ่นคิด จริงจัง ${cleanFaceBlock}`, label: 'emotion reflective', num: 8 },
     ] : []),
     { q: sq.secondary_person || secondaryChar || '', label: 'secondary person', num: 8 },
     // ★★ 18 มิ.ย. (แก้ CASE-067 ลูกเยอะ-รูปเดี่ยว): โคลสอัพคนที่สอง + ภาพ "คู่ทั้งสองคน" สำหรับข่าวคู่รัก/สองฝ่าย
