@@ -165,6 +165,12 @@ You must capture the essence of the story, emotional scenes, locations, and impo
   Example: "น้องมะลิ ลูกพ่อโน้ต อุดม" not "น้องมะลิ"
 - ★ mainCharacter + searchQueries MUST always include parent's name!
 
+★★★ CRITICAL RULE — mainCharacter MUST come from the news text itself (ห้ามเดาชื่อดารา!):
+- If the news does NOT explicitly name a specific real person → mainCharacter = role description (e.g. "ลูกชายผู้บริจาค", "แม่ผู้ป่วย"), NOT a guessed celebrity name
+- ★ NEVER infer/guess a celebrity name that is NOT written in the news text (เคยเดา "ณเดชน์" ในข่าวลูกชายบริจาคเงิน = หน้าคนผิดขึ้นเต็มปก!)
+- Generic role words alone — "ลูกชาย", "แม่", "พ่อ", "หนุ่ม", "สาว", "ชายคนหนึ่ง" — are NOT celebrity names → do NOT map them to any celebrity
+- If you cannot name the person from the news text → use role + context (e.g. "ลูกชายผู้ใจบุญ", "แม่ผู้โพสต์"), NEVER a guessed name
+
 ★★★ IMPORTANT RULE — Search queries must "tell the story", not just find faces!
 A good viral news cover needs 5 types of images:
 1. Clear face of main character (HERO) — beautiful portrait
@@ -386,6 +392,14 @@ Respond with ONLY a JSON object following this exact structure (ALL values in Th
           parsed.rawStoryType = parsed.storyType;
           parsed.storyType = normalizeStoryType(parsed.storyType);
           console.log(`[StoryIdentity] ✅ ${MODEL_PRIMARY} fallback success: ${parsed.mainCharacter} | rawStoryType=${parsed.rawStoryType} | normalizedStoryType=${parsed.storyType} | coverageRequired=${parsed.coverageRequired.length} roles`);
+          // ★ identity2 (Hermes CASE-285): guard ชื่อผิด — เตือนถ้า mainCharacter ไม่พบในเนื้อข่าว (gpt อาจเดาชื่อดารามั่วในข่าวคนทั่วไป) · แค่ log ไม่ override (กันพัง logic เดิม)
+          try {
+            const _nameWords = String(parsed.mainCharacter || '').split(/\s+/).filter(w => w.length > 1);
+            const _hay = `${newsTitle || ''} ${breakdownData?.core_story || ''}`;
+            if (_nameWords.length > 0 && !_nameWords.some(w => _hay.includes(w))) {
+              console.warn(`[StoryIdentity] ⚠️ mainCharacter "${parsed.mainCharacter}" ไม่พบในเนื้อข่าว → อาจ infer/เดาชื่อผิด (identity2 guard)`);
+            }
+          } catch {}
           // ★ ผู้ใช้ระบุชื่อเต็มเอง (กฎ: ข่าวชื่อเล่นกำกวม → คนยืนยันชื่อ = ชัวร์สุด) — ข้ามการสืบ ใช้ชื่อนี้ตรงๆ
           const override = String(opts?.overrideMainCharacter || '').trim();
           if (override) {
