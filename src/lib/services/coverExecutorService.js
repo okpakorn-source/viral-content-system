@@ -202,7 +202,7 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
   //   ฮีโร่ (minFaceHFrac>0) ลด padding เผื่อผมเหนือหัว 0.50→0.30 → กล่องหัวชิดผมจริง พื้นหลังเหนือหัวน้อยลง หน้าเต็มเฟรมขึ้น
   //   ช่องรอง (minFaceHFrac=0) คง 0.50 เผื่อผม (กัน CASE-090 ผมตก) · การ์ดกันผมตก (บรรทัด ~213) ยังทำงานปกติ
   const topPad = minFaceHFrac > 0 ? 0.30 : 0.50;
-  const hy1 = fb.y1 - fhN * topPad, hy2 = fb.y2 + fhN * 0.18; // เผื่อผมบน + คาง
+  const hy1 = fb.y1 - fhN * topPad, hy2 = fb.y2 + fhN * 0.32; // เผื่อผมบน + คาง (เฟส2.5 จุด1: 0.18→0.32 กล่องหัวคลุมถึงใต้คาง/คอ กันตัดคาง ทุกช่อง — Hermes CASE-254)
   const faceWpx = (hx2 - hx1) * imgW;       // ความกว้าง "หัว"
   const faceHpx = (hy2 - hy1) * imgH;       // ความสูง "หัว"
   const faceCxPx = ((hx1 + hx2) / 2) * imgW;
@@ -248,6 +248,26 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
   let top = faceCyPx - regionHpx * faceTopAt;
   left = Math.min(Math.max(left, 0), imgW - regionWpx);
   top = Math.min(Math.max(top, 0), imgH - regionHpx);
+
+  // ★ เฟส 2.5 จุด4 (safety clamp — Hermes CASE-255/256 ฮีโร่ตัดบนหัว(ผม)+หูขวา):
+  //   เช็ค "กล่องหัว(รวมผม+หู)" vs กรอบจริง *หลัง* clamp ขอบ — ถ้ายื่นออก จัดใหม่ให้คลุมหัวครบ
+  //   ★ ส่วนใหญ่ guard เดิมทำกรอบใหญ่พอแล้ว แค่ "วางผิดตำแหน่ง" (faceTopAt ดันสูงไป/edge-clamp เลื่อน) →
+  //     re-center บนกล่องหัว = หน้าคงขนาดเดิม ไม่ซูมออก (กัน regression หน้าเล็ก CASE-224/235)
+  //   ★ ขยาย region "เฉพาะเท่าที่หัวใหญ่กว่ากรอบจริง" เท่านั้น (targeted) · ฮีโร่เท่านั้น (minFaceHFrac>0) · ไม่เกินขอบภาพ
+  if (minFaceHFrac > 0) {
+    const hL = hx1 * imgW, hT = hy1 * imgH, hR = hx2 * imgW, hB = hy2 * imgH; // กล่องหัว (px)
+    const pokes = (hL < left - 0.5) || (hR > left + regionWpx + 0.5) || (hT < top - 0.5) || (hB > top + regionHpx + 0.5);
+    if (pokes) {
+      let nW = Math.max(regionWpx, (hR - hL) * 1.06), nH = Math.max(regionHpx, (hB - hT) * 1.06); // ขยายเฉพาะเท่าที่หัวใหญ่กว่า (+~3%/ข้าง)
+      if (nW / nH > slotAspect) nH = nW / slotAspect; else nW = nH * slotAspect;                   // คง aspect ช่อง
+      nW = Math.min(nW, imgW); nH = Math.min(nH, imgH);                                            // ไม่เกินภาพ
+      if (nW / nH > slotAspect) nW = nH * slotAspect; else nH = nW / slotAspect;
+      regionWpx = nW; regionHpx = nH;
+      const hcx = (hL + hR) / 2, hcy = (hT + hB) / 2;                                              // วางกรอบกลางกล่องหัว → หัวครบทุกด้าน
+      left = Math.min(Math.max(hcx - regionWpx / 2, 0), imgW - regionWpx);
+      top = Math.min(Math.max(hcy - regionHpx / 2, 0), imgH - regionHpx);
+    }
+  }
   return { left: Math.round(left), top: Math.round(top), width: Math.max(8, Math.round(regionWpx)), height: Math.max(8, Math.round(regionHpx)) };
 }
 
@@ -266,9 +286,15 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
 // rev.23 (CASE-235 ผู้ใช้สั่ง: ฮีโร่หน้าต้องเด่น ห้ามโชว์เต็มตัว/ครึ่งตัว): ดันกล่องหัวจาก 60-78% → 72-84% ของความสูงกรอบ
 //   กล่องหัวรวม hair padding ใหญ่กว่าหน้าจริง ~1.68× → ค่าเดิม 0.60 ทำหน้าจริงเหลือ ~36% (โชว์ตัว) · ค่าใหม่ → หน้าจริง ~45% เด่นขึ้นชัด
 //   (การ์ดกันหัวขาด: บรรทัด 210-213 + 234-241 ยังทำงาน — ภาพหน้าชิดขอบบนจะซูมออกอัตโนมัติ ไม่ตัดหัว)
-const HERO_CROP   = { faceFrac: 0.94, faceTopAt: 0.34, maxFaceHFrac: 0.84, minFaceHFrac: 0.72 };
+// ★ เฟส 2.5 (Hermes CASE-254 ฮีโร่ตัดคาง): ผ่อนจาก 0.94/0.34/0.84/0.72 → หน้าครบไม่ตัดคาง/หัว/หู แต่ยังเด่น
+//   maxFaceHFrac 0.84→0.74 (เพดานหน้าใหญ่ลง ไม่บีบจนคางหลุด) · minFaceHFrac 0.72→0.60 (ซูมเบาลง ยังเด่น)
+//   faceTopAt 0.34→0.40 (ดันหน้าลงจากขอบบน กันตัดหัว) · faceFrac 0.94→0.88 (เผื่อหู/แก้มข้าง ไม่ชิดขอบ)
+//   ⚠️ ถ้าเทสแล้วหน้าเล็กไป (ติแบบ CASE-200/224) ปรับขึ้นทีละ 0.02-0.04
+const HERO_CROP   = { faceFrac: 0.88, faceTopAt: 0.40, maxFaceHFrac: 0.74, minFaceHFrac: 0.60 };
 // ── CIRCLE (วงกลม) — ⛔ คงค่าเดิม ห้ามแก้เมื่อแก้เลย์เอาต์อื่น ──
-const CIRCLE_CROP = { faceFrac: 0.80, faceTopAt: 0.45, maxFaceHFrac: 0.80 };
+// ★ เฟส 2.5: วงกลมตัดมุมโค้ง → ต้องเผื่อมากกว่าสี่เหลี่ยม (กันตัดบนหัว+คางพร้อมกัน — Hermes CASE-254)
+//   faceFrac 0.80→0.66 (หน้ากินกว้างน้อยลง เผื่อขอบโค้งตัดข้าง) · maxFaceHFrac 0.80→0.66 (หน้าเล็กลงในวง กันตัดบน-ล่าง)
+const CIRCLE_CROP = { faceFrac: 0.66, faceTopAt: 0.45, maxFaceHFrac: 0.66 };
 // ── MOMENT (ช่องรอง) — ⛔ คงค่าเดิม ห้ามแก้เมื่อแก้เลย์เอาต์อื่น ──
 const MOMENT_CROP = { faceFrac: 0.76, faceTopAt: 0.40, maxFaceHFrac: 0.74 };
 
@@ -437,10 +463,10 @@ async function renderCircleTile(src, crop, slot, fb) {
   //   ถ้าภาพมีหลายหน้า → ครอปหน้าใหญ่สุดเดี่ยว (ชัดกว่าโชว์ทั้งกลุ่มในวงเล็ก)
   let region;
   if (fb && fb.x2 > fb.x1 && (!fb.allFaces || fb.allFaces.length <= 1)) {
-    region = faceRegionForSlot(fb, imgW, imgH, 1, 0.80, 0.47, 0.80);
+    region = faceRegionForSlot(fb, imgW, imgH, 1, 0.66, 0.47, 0.66); // เฟส2.5: วงกลมเผื่อขอบโค้ง (faceFrac/maxFaceHFrac 0.80→0.66) ให้ตรง CIRCLE_CROP
   } else if (fb && Array.isArray(fb.allFaces) && fb.allFaces.length >= 1) {
     const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
-    region = faceRegionForSlot(largest, imgW, imgH, 1, 0.80, 0.47, 0.80);
+    region = faceRegionForSlot(largest, imgW, imgH, 1, 0.66, 0.47, 0.66); // เฟส2.5: วงกลมเผื่อขอบโค้ง (faceFrac/maxFaceHFrac 0.80→0.66) ให้ตรง CIRCLE_CROP
   } else {
     region = fitCropToSlotAspect(crop, imgW, imgH, 1);
   }
