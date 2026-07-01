@@ -1981,10 +1981,15 @@ function processJudgeResults(parsed, validCandidates, allowFallback = true) {
     }
 
     // Low-scored supplement (ลดเกณฑ์จาก <4 → <5)
+    // ★ เฟส3#1 (Hermes CASE-270/272: ปกยัด text/เวที/คนผิด): เดิมดึง rejected score>0 = ยัดภาพที่ Judge "ตัดแล้ว" (score-1 + role=REJECT) กลับเข้าปก
+    //   → 🔴 ห้ามดึง role='REJECT' (ตัดเพราะเหตุต้องห้าม: ติด text/คนผิด/เวที/stock) + เว้น reason ต้องห้าม · เหลือแค่ score-1 ที่ "ไม่ใช่ REJECT" เป็น last resort
+    //   ภาพสะอาดไม่พอ → ปล่อย layout ยืดหยุ่น (เฟส 3A) เลือกโครงเล็กแทน (สะอาด > ครบช่อง) · 🔴 ห้ามเจนภาพ
+    const _FORBID_SUPP = /watermark|logo|caption|subtitle|screenshot|ตัวหนังสือ|ลายน้ำ|โลโก้|ปกข่าว|stock|generated|illustration|wrong.?person|mismatch|ผิดคน|คนอื่น|different.?person|\bstage\b|concert|เวที|คอนเสิร์ต|crowd|ฝูงชน|glamour|selfie/i;
     if (selectedImages.length < 5) {
       const selectedUrls = new Set(selectedImages.map(i => i.url));
       const lowScored = rejected
-        .filter(s => s.score > 0 && s.index >= 0 && s.index < validCandidates.length)
+        .filter(s => s.score > 0 && s.role !== 'REJECT' && s.index >= 0 && s.index < validCandidates.length
+          && !_FORBID_SUPP.test(String(s.reason || '')))   // ★ เฟส3#1: ไม่ยัดภาพ REJECT/เหตุต้องห้ามกลับ
         .sort((a, b) => b.score - a.score);
       for (const s of lowScored) {
         if (selectedImages.length >= 6) break;
