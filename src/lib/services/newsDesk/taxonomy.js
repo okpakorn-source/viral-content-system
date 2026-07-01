@@ -158,12 +158,16 @@ export function editorialCard(item) {
   const _isClipItem = isClip(it);
   const _clipWorthy = it.clipWorthy;
 
+  // ★★ 2 ก.ค. (ผลจริง 949 โพสต์ มิ.ย.): "สตอรี่เข้ม" (contrast+ตัวเลข ประเมินโดย deskBrain) ปลดล็อกชาวบ้านนิรนาม
+  //   โพสต์อันดับ 1 ของเดือน (243k) คือนักเรียนโนเนม — ไม่ดังแต่เรื่องเข้มจัด ต้องไม่ถูกตราหน้า "แหล่งอ่อน"
+  const strongStory = Number(it.storyIntensity || 0) >= 2;
+
   // ── coverage gap: ข่าวนี้ขาดอะไร (ข้อ 14) ──
   const coverageGap = [];
   if (_isClipItem && _clipWorthy === false) coverageGap.push('คลิปไม่มีประเด็นทำข่าว (โปรโมท/รีวิว/ไร้ประเด็น)');
   if (!hasMainChar) coverageGap.push('ขาดตัวละครหลักชัด');
   if (foreign) coverageGap.push(`นอกไทย (${it.foreignCountry})`);
-  if (notability === 'unknown') coverageGap.push('คนยังไม่เป็นที่รู้จัก');
+  if (notability === 'unknown' && !strongStory) coverageGap.push('คนยังไม่เป็นที่รู้จัก');
   if (staleTrend) coverageGap.push('เป็นกระแสเก่าที่จบแล้ว');
   if (isDup) coverageGap.push('มุมซ้ำของเดิม');
   if (!score) coverageGap.push('ยังไม่ผ่าน บก.ประเมิน');
@@ -175,7 +179,8 @@ export function editorialCard(item) {
   let readiness = Math.round(score * 5);                          // คะแนน บก.(ประเด็นน่าทำ) = ตัวหลัก สูงสุด 50
   if (hasMainChar) readiness += 18;
   if (remakeable) readiness += 14;
-  readiness += (notability === 'famous' ? 14 : notability === 'semiKnown' ? 7 : 0);
+  // ★ 2 ก.ค.: ชาวบ้านสตอรี่เข้ม ได้เครดิตใกล้ semiKnown+ (ข้อมูลจริงพิสูจน์ว่าปังได้เท่าดารา)
+  readiness += (notability === 'famous' ? 14 : notability === 'semiKnown' ? 7 : strongStory ? 10 : 0);
   if (!staleTrend) readiness += 4;
   if (toxicity >= 2) readiness -= 8;
   if (_isClipItem && _clipWorthy === true) readiness += 8;   // ★ คลิปมีประเด็นทำข่าวได้ = ดันขึ้น
@@ -187,7 +192,7 @@ export function editorialCard(item) {
   if (royalNeg || toxicity >= 3 || (foreign && notability !== 'famous')) status = 'reject';
   else if (!hasMainChar) status = 'lowValue';
   else if (isDup && !remakeable) status = 'duplicate';
-  else if (notability === 'unknown' || relScore < 38) status = 'weakSource';
+  else if ((notability === 'unknown' && !strongStory) || relScore < 38) status = 'weakSource'; // ★ 2 ก.ค.: สตอรี่เข้มไม่ถือว่าแหล่งอ่อน
   else if (!remakeable && score < 6) status = 'lowValue';
   else if (readiness >= 78) status = 'ready';
   else if (readiness >= 55) status = 'needsResearch';
