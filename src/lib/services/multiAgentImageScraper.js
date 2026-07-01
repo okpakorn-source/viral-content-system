@@ -1404,6 +1404,7 @@ There are ${imageParts.length} images (index 0 to ${imageParts.length - 1}) to j
 - ★ Groups of people (students, participants) in a news-related scene → CONTEXT_SCENE score 6-8
 - ★ Location signage → should be EVIDENCE, NOT CONTEXT_SCENE
 - ★★★ DO NOT assign portrait/closeup of strangers as CONTEXT_SCENE!
+- ★★ Group of people holding/receiving ceremonial check/donation plaque/certificate at a formal event → CONTEXT_SCENE score ≤ 4 · ห้ามเป็น SUPPORT/HERO (ภาพ formal ceremony ไม่เล่าเรื่องคนได้)
 
 🏷️ EVIDENCE (0-1 images):
 - Real signage, documents, proof, apps, screenshots related to the news
@@ -1456,6 +1457,7 @@ How to distinguish:
 - Clear image of ${mainChar} with light text in a corner → score ≥ 4 (PERSON_SUPPORT)
 - Image of ${mainChar} with small watermark in a corner → score ≥ 4
 - Image of ${mainChar} from social media (TikTok, Instagram, YouTube) with clearly visible face → score ≥ 5
+- ★★ Image where the MOST PROMINENT element is a corporate logo (Chevron, MGR, organization name on check/banner) → score ≤ 3 (logo เด่นกว่าคน = ไม่เหมาะปก)
 
 === ★★★ HERO IMAGE REQUIREMENTS (Check BEFORE assigning score!) ===
 - HERO_FACE images MUST be professional quality (interview, TV show, news photo, professional portrait)
