@@ -290,6 +290,22 @@ async function _renderCoverV3(request) {
       } catch (e) { console.log('[CoverV3] re-rank skipped (non-fatal):', e.message?.slice(0, 40)); }
     }
 
+    // ★ #6 Emotion Gate (2 ก.ค. — CASE-259): หลัง re-rank → บังคับภาพอารมณ์ขัด (_emotionConflict = demote path okCount<4)
+    //   ไปท้าย pool "เสมอ" (hard partition) — re-rank หัก -0.5 ยังแพ้ "ภาพยิ้มหน้าใหญ่" ได้ → ยิ้มหลุดเข้าช่องรอง
+    //   ⚠️ แค่เรียงลำดับ ไม่ตัดภาพ (ไม่เพิ่มเสี่ยง 422) · faceBoxes sync กับ imageBuffers เป๊ะ · ทำงานเฉพาะเมื่อมี demote จริง (remove path ไม่ตั้ง flag)
+    if (faceBoxes.length === imageBuffers.length) {
+      const _nc = [], _nfb = [], _cc = [], _cfb = [];
+      imageBuffers.forEach((img, i) => {
+        if (faceBoxes[i]?._emotionConflict) { _cc.push(img); _cfb.push(faceBoxes[i]); }
+        else { _nc.push(img); _nfb.push(faceBoxes[i]); }
+      });
+      if (_cc.length > 0) {
+        imageBuffers = [..._nc, ..._cc];
+        faceBoxes = [..._nfb, ..._cfb];
+        console.log(`[CoverV3] 🎭 demote → pushed ${_cc.length} ภาพยิ้มไปท้าย pool`);
+      }
+    }
+
     // ── rev.14f: เก็บเฉพาะภาพ "ตรวจเจอหน้า" — กัน Director หยิบภาพเต็มตัว/ไกลที่ครอปหน้าไม่ได้ ──
     //    กฎเหล็กผู้ใช้: ทุกช่องต้องเห็นหน้าชัดรู้ว่าใคร (บทเรียน CASE-084 คู่เต็มตัวหน้าเล็ก)
     //    ทำเฉพาะเมื่อยังเหลือภาพมีหน้า ≥4 ใบ (พอจัดปกได้) — ไม่งั้นคงพูลเดิม
