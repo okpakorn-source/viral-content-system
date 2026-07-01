@@ -79,7 +79,7 @@ export async function POST(request) {
       });
     }
     return await doHarvest({
-      lanes: Array.isArray(body.lanes) && body.lanes.length ? body.lanes : ['trend', 'good', 'broad', 'exa'],
+      lanes: Array.isArray(body.lanes) && body.lanes.length ? body.lanes : ['trend', 'good', 'broad', 'exa', 'clip'],
       judgeTop: Math.min(40, Number(body.judgeTop) || 24),
     });
   } catch (error) {

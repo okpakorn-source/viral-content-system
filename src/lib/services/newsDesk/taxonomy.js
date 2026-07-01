@@ -23,11 +23,11 @@ export const LIBRARY_KEYS = LIBRARIES.map(l => l.key);
 //   ปุ่มหาข่าวไม่ทำงานแบบเดียว — แต่ละโหมด = ชุดเลน(query+scoring)คนละแบบ → ทุกรีเฟรชสำรวจพื้นที่ใหม่
 export const HARVEST_MODES = [
   { key: 'fresh',     label: '⚡ สดวันนี้',     lanes: ['trend', 'buzz'],                                          desc: 'ข่าว/ดราม่ากระแสสดวันนี้' },
-  { key: 'viral',     label: '🔥 ไวรัล',        lanes: ['trend', 'buzz', 'video'],                                desc: 'คลิป/โพสต์ไวรัลไทยกำลังขึ้น' },
+  { key: 'viral',     label: '🔥 ไวรัล',        lanes: ['trend', 'buzz', 'video', 'clip'],                        desc: 'คลิป/โพสต์ไวรัลไทยกำลังขึ้น (แยกแพลตฟอร์ม YT/TikTok/IG/Reels/FB)' },
   { key: 'evergreen', label: '♾️ น้ำดีอมตะ',    lanes: ['good', 'evergreen'],                                     desc: 'เรื่องน้ำดี/อมตะ ทำใหม่ได้ตลอด' },
   { key: 'celeb',     label: '⭐ ดารา',          lanes: ['celeb', 'good'],                                         desc: 'ข่าวดารา/คนดังไทยจาก watchlist' },
   { key: 'followup',  label: '🔁 ตามรอย',        lanes: ['followup'],                                              desc: 'ตามต่อข่าวที่เคยมี momentum' },
-  { key: 'all',       label: '🌀 ครบทุกเลน',     lanes: ['trend', 'good', 'broad', 'exa', 'evergreen', 'followup', 'buzz'], desc: 'หากว้างทุกแนว (รอบใหญ่)' },
+  { key: 'all',       label: '🌀 ครบทุกเลน',     lanes: ['trend', 'good', 'broad', 'exa', 'clip', 'evergreen', 'followup', 'buzz'], desc: 'หากว้างทุกแนว (รอบใหญ่)' },
 ];
 export const HARVEST_MODE_KEYS = HARVEST_MODES.map(m => m.key);
 
@@ -154,9 +154,13 @@ export function editorialCard(item) {
   // ★ 29 มิ.ย. (ผู้ใช้สั่ง): ตัด "มีภาพ/ไม่มีภาพ" ออกจากตัวแปรประเมินข่าว — คนดังหาภาพได้อยู่แล้ว · วัดเฉพาะ "ประเด็นดี"
   const lib = libraryOf(it);
   const fresh = freshClass(it);
+  // ★ 2 ก.ค.: clipWorthy (deskBrain ประเมิน) มีผล "เฉพาะคลิป" — คลิปมีประเด็น=ดันขึ้น · คลิปโปรโมท/ไร้ประเด็น=กด · บทความไม่เกี่ยว
+  const _isClipItem = isClip(it);
+  const _clipWorthy = it.clipWorthy;
 
   // ── coverage gap: ข่าวนี้ขาดอะไร (ข้อ 14) ──
   const coverageGap = [];
+  if (_isClipItem && _clipWorthy === false) coverageGap.push('คลิปไม่มีประเด็นทำข่าว (โปรโมท/รีวิว/ไร้ประเด็น)');
   if (!hasMainChar) coverageGap.push('ขาดตัวละครหลักชัด');
   if (foreign) coverageGap.push(`นอกไทย (${it.foreignCountry})`);
   if (notability === 'unknown') coverageGap.push('คนยังไม่เป็นที่รู้จัก');
@@ -174,6 +178,8 @@ export function editorialCard(item) {
   readiness += (notability === 'famous' ? 14 : notability === 'semiKnown' ? 7 : 0);
   if (!staleTrend) readiness += 4;
   if (toxicity >= 2) readiness -= 8;
+  if (_isClipItem && _clipWorthy === true) readiness += 8;   // ★ คลิปมีประเด็นทำข่าวได้ = ดันขึ้น
+  if (_isClipItem && _clipWorthy === false) readiness -= 12;  // ★ คลิปโปรโมท/ไร้ประเด็น = กดลง
   readiness = Math.max(0, Math.min(100, readiness));
 
   // ── status (ข้อ 1) ──

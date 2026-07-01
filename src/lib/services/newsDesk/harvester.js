@@ -350,7 +350,7 @@ async function harvestBuzzsumo() {
 //   (เคยพักชั่วคราวตอนปรับคุณภาพ · ตอนนี้คืน cron ใน vercel.json แล้ว) · 🔴 ไม่กระทบระบบทำข่าว/ถอดประเด็น/ปก
 const HARVEST_PAUSED = false;
 
-export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'evergreen', 'followup', 'buzz'], judgeTop = 24, extraQueries = [] } = {}) {
+export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'clip', 'evergreen', 'followup', 'buzz'], judgeTop = 24, extraQueries = [] } = {}) {
   if (HARVEST_PAUSED) {
     console.log('[Harvester] ⏸️ พักหาข่าวใหม่ (HARVEST_PAUSED=true) — ข้าม ไม่ยิง API');
     return { paused: true, added: 0, judged: 0, kept: 0, lanes: [], note: 'พักหาข่าวใหม่ชั่วคราว' };
@@ -457,10 +457,11 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'ev
     //   ★ คีย์เจาะจง = ข่าว "ทำได้จริง" (เช่น "นักร้อง กตัญญู ซื้อบ้านให้แม่") + รู้หมวดทันทีจากคีย์ (tag category ตรงๆ)
     //   แทนคำกว้าง ("ข่าวบันเทิง") ที่เดิมดูดข่าวทำไม่ได้เข้ามาเยอะ
     try {
-      const { generateThemeQueries, generateDailyTrend } = await import('./keywordBank');
+      const { generateThemeQueries, generateDailyTrend, generateFieldQueries } = await import('./keywordBank');
       const dailyQs = generateDailyTrend(14).map(q => ({ q, category: 'กระแสรายวัน' }));
       const themeQs = generateThemeQueries(6); // [{q, category}] — หมุนชุดตามเวลา
-      const allQ = [...dailyQs, ...themeQs];
+      const fieldQs = generateFieldQueries(8); // ★ 2 ก.ค.: วงการเฉพาะทาง (พระ/หมอ/ครู/กู้ภัย/หมอดู/นักธุรกิจ...) — RSS ฟรี
+      const allQ = [...dailyQs, ...themeQs, ...fieldQs];
       const _dailyCut = Date.now() - 5 * 864e5; // กระแสรายวัน = สด ≤5 วันเท่านั้น
       const _bRes = await Promise.all(allQ.map(async ({ q, category }) => {
         try {
@@ -472,8 +473,32 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'ev
         } catch { return []; }
       }));
       for (const arr of _bRes) raw.push(...arr);
-      console.log(`[Harvester] 🌐 broad เชิงลึก: ${allQ.length} คำค้น (กระแสรายวัน ${dailyQs.length} + แนวเรื่อง ${themeQs.length}) → ${_bRes.reduce((s, a) => s + a.length, 0)} ดิบ`);
+      console.log(`[Harvester] 🌐 broad เชิงลึก: ${allQ.length} คำค้น (กระแสรายวัน ${dailyQs.length} + แนวเรื่อง ${themeQs.length} + วงการเฉพาะ ${fieldQs.length}) → ${_bRes.reduce((s, a) => s + a.length, 0)} ดิบ`);
     } catch (e) { console.log('[Harvester] broad-deep failed:', e.message?.slice(0, 50)); }
+  }
+  // 🎬 โหมดคลิป (2 ก.ค.) — ยิงแยกแพลตฟอร์ม: YouTube(/videos) · TikTok/IG/Reels/FB(site: /search)
+  //   ★ หาคลิปไฮไลท์/สัมภาษณ์/โมเมนต์/ประเด็น "ทุกวงการ" ให้เยอะสุด (รวมคลิปพูดน้อยแต่การกระทำมีประเด็น — มี AI ถอดคลิป)
+  if (lanes.includes('clip')) {
+    try {
+      const { generateClipQueriesByPlatform } = await import('./keywordBank');
+      const clipQs = generateClipQueriesByPlatform(4); // 4/แพลตฟอร์ม × 5 = 20 คำค้น/รอบ
+      const PLATFORM_SITE = { tiktok: 'site:tiktok.com', instagram: 'site:instagram.com', reels: 'reels', facebook: 'site:facebook.com' };
+      const _cRes = await Promise.all(clipQs.map(async ({ q, platform, category }) => {
+        try {
+          let res;
+          if (platform === 'youtube') {
+            res = (await serperVideos(q, { num: 8 })).filter(x => { const a = videoAgeMonths(x._rawDate); return a == null || a <= 12; });
+          } else {
+            res = await serperSearch(`${q} ${PLATFORM_SITE[platform] || ''}`.trim(), { num: 8 });
+          }
+          // ★ ไม่ force isVideo — YouTube(/videos) มี isVideo อยู่แล้ว · ตัวอื่นให้ classifySource ตัดสินจาก URL
+          //   (site: search อาจคืนบทความ "เกี่ยวกับคลิป" ปน → ให้เป็นลิงก์ ไม่ใช่คลิปปลอม)
+          return res.map(r => ({ ...r, lane: 'clip', category, _clipPlatform: platform }));
+        } catch (e) { console.log(`[Harvester] clip ${platform} failed:`, e.message?.slice(0, 40)); return []; }
+      }));
+      for (const arr of _cRes) raw.push(...arr);
+      console.log(`[Harvester] 🎬 clip×platform: ${clipQs.length} คำค้น (5 แพลตฟอร์ม) → ${_cRes.reduce((s, a) => s + a.length, 0)} ดิบ`);
+    } catch (e) { console.log('[Harvester] clip lane failed:', e.message?.slice(0, 50)); }
   }
   // 🧠 เลน Exa (semantic น้ำดี) — ค้นอังกฤษเชิงความหมาย → ดึงข่าวไทยน้ำดีที่คีย์เวิร์ดพลาด (env-gated)
   if (lanes.includes('exa') && process.env.EXA_API_KEY) {
