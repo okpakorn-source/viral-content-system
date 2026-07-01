@@ -93,6 +93,12 @@ export async function getPoolCache(key) {
 export async function setPoolCache(key, images, meta = {}) {
   const clean = sanitizeImages(images);
   if (clean.length < 4) return false; // ภาพ http ไม่พอทำปก → ไม่ cache (กัน cache ชุดใช้ไม่ได้)
+  // ★ CASE-290 safeguard (Hermes): เช็ค "คุณภาพ pool" ไม่ใช่แค่จำนวน — ไม่มี HERO_FACE = ไม่มีหน้าตัวหลักชัด
+  //   (identity ผิดคน / pool แกว่ง) → ไม่ cache · lock ภาพผิดไว้ให้รอบหน้าใช้ซ้ำ = ยิ่งพัง · ปล่อยค้นใหม่ทุกรอบดีกว่า
+  if (!clean.some(img => img.role === 'HERO_FACE')) {
+    console.warn(`[PoolCache] ⛔ ไม่ cache (key=${key}) — pool ไม่มี HERO_FACE (คุณภาพต่ำ/อาจ identity ผิดคน)`);
+    return false;
+  }
   const createdAt = new Date().toISOString();
   const expiresAt = new Date(Date.now() + CACHE_TTL_MS).toISOString();
   let ok = false;
