@@ -457,6 +457,9 @@ async function _renderCoverV3(request) {
     if (faceBoxes.length === imageBuffers.length && imageBuffers.length >= 2) {
       // ★ Emotion Gate (เฟส 1, ขั้น 1.3): อารมณ์สีหน้าที่ขัดข่าว — ใช้หักคะแนนฮีโร่ (กันหน้ายิ้มเป็นฮีโร่ข่าวเศร้า)
       const _heroEmoConflict = EMOTION_CONFLICT[String(identity?.coverEmotion || '').toLowerCase()] || null;
+      // ★ เฟส 3 ข้อ5 (Hero-pick floor — ผู้ใช้สั่ง 1 ก.ค.): ฮีโร่ต้อง "หน้าใหญ่พอ" (โคลสอัพ/อกขึ้นไป) — กันคนยืนไกล/หน้าเล็ก/เต็มตัว (แพทบิกินี CASE-260)
+      const HERO_MIN_FACE_AREA = 0.035; // face box ≥3.5% ของภาพต้นฉบับถึงคู่ควรเป็นฮีโร่ (ใกล้ close-up gate เข้มสุด 0.045; ฮีโร่เข้มกว่าช่องรอง)
+      const _fArea = (fb) => (fb && fb.x2 > fb.x1 && fb.y2 > fb.y1) ? (fb.x2 - fb.x1) * (fb.y2 - fb.y1) : 0;
       const heroFit = (fb, img) => {
         if (!fb || !(fb.x2 > fb.x1) || fb.hasText) return -1;       // ไม่มีหน้า/มีตัวหนังสือ = ไม่เหมาะเป็นฮีโร่
         const area = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);            // หน้าใหญ่=โคลสอัพ (กัน 200 หน้าเล็ก/ลำตัว)
@@ -477,17 +480,27 @@ async function _renderCoverV3(request) {
         // ★ Identity (1.3): ภาพที่ Judge ชี้เป็น "หน้าตัวหลักข่าว" (role=HERO_FACE = HERO_ROLE) → ดันขึ้นฮีโร่ (กันคนผิด/แบนเนอร์ CASE-247/248)
         //   ตัด '|| HERO' (ไม่มี path ไหนเซ็ต role='HERO') + '|| _storyAnchor' (per-image ไม่เสถียร—มีเฉพาะ main path ของ Judge บรรทัด 1959, supplement/fallback 1993/2023/2042 ไม่มี) ตาม Hermes review
         if (img && img.role === 'HERO_FACE') s += 0.10;
+        // ★ เฟส 3 ข้อ5: หน้าเล็กเกิน (< floor) = ไม่คู่ควรเป็นฮีโร่ → หักแรง (ไม่ return -1 → ทั้งพูลหน้าเล็กยังมี fallback เลือกใบใหญ่สุดได้)
+        if (area < HERO_MIN_FACE_AREA) s -= 0.5;
         return s;
       };
+      // ★ เฟส 3 ข้อ5: เลือกฮีโร่ = heroFit สูงสุด (มี floor penalty ในตัวแล้ว → ภาพหน้าใหญ่ชนะ, หน้าเล็กถูกหักตกไป)
       let bestIdx = 0, bestFit = heroFit(faceBoxes[0], imageBuffers[0]);
       for (let i = 1; i < imageBuffers.length; i++) {
         const f = heroFit(faceBoxes[i], imageBuffers[i]);
         if (f > bestFit) { bestFit = f; bestIdx = i; }
       }
-      if (bestIdx > 0 && bestFit > 0) {
+      // ★ fallback (จุด2): ตัวชนะยัง "หน้าเล็ก" = ทั้งพูลไม่มีโคลสอัพ (ข่าวคนยืนไกล) → ยังเลือกใบใหญ่สุด (🔴ห้ามล้มปก/ห้ามเจน) + เตือน
+      const _heroArea = _fArea(faceBoxes[bestIdx]);
+      if (_heroArea < HERO_MIN_FACE_AREA) {
+        console.log(`[CoverV3] ⚠️ hero floor: ทั้งพูลหน้าเล็ก (<${HERO_MIN_FACE_AREA}) — เลือกใบหน้าใหญ่สุด idx ${bestIdx} (area ${_heroArea.toFixed(3)}) จะครอปแน่นสุด (ไม่ปล่อยเต็มตัว)`);
+      }
+      // swap ขึ้นหน้า: เช็ค "มีหน้าจริง" ตรงๆ (ไม่ใช้ fit>0) — รองรับทั้งปกติ + fallback (fit ติดลบเพราะ floor penalty แต่ยังเป็นหน้าใหญ่สุด)
+      const _wfb = faceBoxes[bestIdx];
+      if (bestIdx > 0 && _wfb && _wfb.x2 > _wfb.x1 && !_wfb.hasText) {
         const [bImg] = imageBuffers.splice(bestIdx, 1); imageBuffers.unshift(bImg);
         const [bFb] = faceBoxes.splice(bestIdx, 1); faceBoxes.unshift(bFb);
-        console.log(`[CoverV3] 🦸 เลือกฮีโร่แบบ 199: ย้าย idx ${bestIdx} ขึ้นหน้า (fit ${bestFit.toFixed(3)} — ใหญ่+เดี่ยว+ไม่ชิดขอบ)`);
+        console.log(`[CoverV3] 🦸 เลือกฮีโร่แบบ 199+floor: ย้าย idx ${bestIdx} ขึ้นหน้า (fit ${bestFit.toFixed(3)}, area ${_heroArea.toFixed(3)})`);
       }
     }
 
