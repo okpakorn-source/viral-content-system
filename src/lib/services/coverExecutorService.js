@@ -297,9 +297,11 @@ const HERO_CROP   = { faceFrac: 0.88, faceTopAt: 0.40, maxFaceHFrac: 0.74, minFa
 // ── CIRCLE (วงกลม) — ⛔ คงค่าเดิม ห้ามแก้เมื่อแก้เลย์เอาต์อื่น ──
 // ★ เฟส 2.5: วงกลมตัดมุมโค้ง → ต้องเผื่อมากกว่าสี่เหลี่ยม (กันตัดบนหัว+คางพร้อมกัน — Hermes CASE-254)
 //   faceFrac 0.80→0.66 (หน้ากินกว้างน้อยลง เผื่อขอบโค้งตัดข้าง) · maxFaceHFrac 0.80→0.66 (หน้าเล็กลงในวง กันตัดบน-ล่าง)
-const CIRCLE_CROP = { faceFrac: 0.66, faceTopAt: 0.45, maxFaceHFrac: 0.66 };
-// ── MOMENT (ช่องรอง) — ⛔ คงค่าเดิม ห้ามแก้เมื่อแก้เลย์เอาต์อื่น ──
-const MOMENT_CROP = { faceFrac: 0.76, faceTopAt: 0.40, maxFaceHFrac: 0.74 };
+// ★ เฟส 3B (CASE-267): ซูมหน้าเต็มวงขึ้น faceFrac 0.66→0.72 + maxFaceHFrac 0.66→0.72 (ยังเผื่อขอบโค้ง ไม่เกิน 0.74)
+const CIRCLE_CROP = { faceFrac: 0.72, faceTopAt: 0.45, maxFaceHFrac: 0.72 };
+// ── MOMENT (ช่องรอง) ──
+// ★ เฟส 3B (CASE-267 เจมส์ ช่องรองหน้าเล็กเห็นตัว/หมา/เวที): ซูมหน้าเด่นเต็มเฟรม faceFrac 0.76→0.84 + maxFaceHFrac 0.74→0.80
+const MOMENT_CROP = { faceFrac: 0.84, faceTopAt: 0.40, maxFaceHFrac: 0.80 };
 
 /** พารามิเตอร์การจัดหน้าตามชนิด/ขนาดช่อง — ดึงจากค่าที่แยกต่อเลย์เอาต์ด้านบน (แก้ที่ const นั้นๆ) */
 function faceParamsForSlot(slot) {
