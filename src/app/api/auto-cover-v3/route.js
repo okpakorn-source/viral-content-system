@@ -49,7 +49,9 @@ async function _renderCoverV3(request) {
 
   try {
     const body = await request.json();
-    const { content, newsTitle = '', sourceUrl = '', _queueJobId = null, forceTemplateId = null, mainCharacterName = '' } = body;
+    const { content, newsTitle = '', sourceUrl = '', _queueJobId = null, forceTemplateId = null, mainCharacterName = '',
+      // ★ preflight-gate: override fields จากหน้าวิเคราะห์ข่าว (ผู้ใช้ยืนยัน/แก้ก่อนสร้างปก)
+      secondaryCharacterName = '', coverEmotionOverride = '', celebratedActionOverride = '' } = body;
     // ★ 25 มิ.ย.: แหล่งรูปที่พนักงานระบุเอง (ไม่บังคับ) — ลิงก์ YouTube/ข่าว/TikTok/IG ที่มีภาพบุคคลนั้นเยอะ
     //   รับได้หลายลิงก์ (array หรือ string คั่นบรรทัด) → ระบบดึงรูปจากตรงนี้ก่อน บูสต์ขึ้นหน้า (ยังผ่าน judge)
     const sourceLinks = Array.isArray(body.sourceLinks)
@@ -98,7 +100,10 @@ async function _renderCoverV3(request) {
     let identity = await analyzeStoryIdentity(
       newsTitle || (content || '').slice(0, 100),
       { core_story: content || newsTitle },
-      { overrideMainCharacter: mainCharacterName }
+      { overrideMainCharacter: mainCharacterName,
+        overrideSecondaryCharacter: secondaryCharacterName,
+        overrideCoverEmotion: coverEmotionOverride,
+        overrideCelebratedAction: celebratedActionOverride }
     );
     if (!identity) {
       // ★ ข่าวฉาก/ฝูงชนไม่มีบุคคลตัวหลัก (เช่น ประชาชนเรียงแถวถวายบังคม) — เดิม fail ทั้งงาน (IDENTITY_FAILED 422)

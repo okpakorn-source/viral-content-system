@@ -128,6 +128,14 @@ export default function CoverLabPage() {
   const [sourceLinks, setSourceLinks] = useState(''); // ★ 25 มิ.ย. แหล่งรูปพนักงาน (หลายลิงก์ บรรทัดละ 1 — YouTube/ข่าว/TikTok/IG)
   const [sourceOnly, setSourceOnly] = useState(false); // ★ 26 มิ.ย. true = ใช้ภาพจากลิงก์ล้วน ไม่รีเสิร์ชเพิ่ม
   const [mainCharacterName, setMainCharacterName] = useState(''); // ★ ผู้ใช้ระบุชื่อเต็มเอง (ข่าวชื่อเล่นกำกวม)
+
+  // ★ preflight-gate: วิเคราะห์ข่าวก่อนสร้างปก (2-step) — extract fields + แก้/ยืนยันก่อนเสียเวลา 10 นาที
+  const [preflightResult, setPreflightResult] = useState(null); // { identity, warnings, missing, timedOut }
+  const [preflightLoading, setPreflightLoading] = useState(false);
+  const [overrideMainChar, setOverrideMainChar] = useState('');
+  const [overrideSecondaryChar, setOverrideSecondaryChar] = useState('');
+  const [overrideCoverEmotion, setOverrideCoverEmotion] = useState('');
+  const [overrideCelebratedAction, setOverrideCelebratedAction] = useState('');
   // ★ v3 (11 มิ.ย.): เลือกเครื่องยนต์ประกอบปก — v3 = AI Vision Director (ตาเลือกครอป + พิกเซลแท้ + QC ตัวเอง)
   const [composer, setComposer] = useState('v3');
   const [templateId, setTemplateId] = useState('auto');
@@ -403,12 +411,20 @@ export default function CoverLabPage() {
         }
       }
 
+      // ★ preflight-gate: ส่ง fields ที่ผู้ใช้ยืนยัน/แก้จากหน้าวิเคราะห์ข่าว (ถ้าไม่ได้วิเคราะห์ = ใช้ค่าเดิม)
+      const _pfId = preflightResult?.identity || {};
+      // ชื่อหลัก: force override "เฉพาะเมื่อผู้ใช้แก้จริง" — ถ้าไม่แก้ ปล่อยให้ generate สืบ canonical เอง (ไม่ทับ Identity Anchor CV3)
+      const _pfMain = String(_pfId.mainCharacter || '').trim();
+      const _mainEdited = overrideMainChar.trim() && overrideMainChar.trim() !== _pfMain;
       const addData = await enqueueCoverJob({
         newsTitle, content, templateId: useTemplate,
         sourceUrl: sourceUrl.trim() || undefined,
         sourceLinks: sourceLinks.trim() || undefined, // ★ แหล่งรูปพนักงาน (ดึงก่อน บูสต์ขึ้นหน้า)
         sourceOnly: sourceLinks.trim() ? sourceOnly : undefined, // ★ 26 มิ.ย. เฉพาะภาพในลิงก์ (มีผลเมื่อมีแหล่งรูป)
-        mainCharacterName: mainCharacterName.trim() || undefined, // ★ ชื่อเต็มที่ผู้ใช้ยืนยัน
+        mainCharacterName: (_mainEdited ? overrideMainChar.trim() : mainCharacterName.trim()) || undefined, // ★ แก้แล้ว→force · ไม่แก้→ปล่อย canonical
+        secondaryCharacterName: (overrideSecondaryChar.trim() || '') || undefined,
+        coverEmotionOverride: (overrideCoverEmotion.trim() || '') || undefined, // ส่งเฉพาะที่ผู้ใช้ยืนยัน/แก้ (ว่าง = ให้ AI ตัดสินตอนสร้าง)
+        celebratedActionOverride: (overrideCelebratedAction.trim() || '') || undefined,
         composer, // 'v3' = Vision Director | 'v1' = ระบบเดิม
         regenerate: isRegenerate, clearCache: !!isRegenerate && isFresh,
       });
@@ -429,6 +445,39 @@ export default function CoverLabPage() {
       setJobProgress('');
     }
   }
+
+  // ★ preflight-gate: วิเคราะห์ข่าวก่อนสร้างปก — รัน storyIdentity เดี่ยว (~5-10 วิ) แสดง fields ให้แก้ก่อน
+  async function handlePreflight() {
+    if (!newsTitle && !content) return setError('ใส่หัวข้อหรือเนื้อหาข่าว');
+    setError('');
+    setPreflightLoading(true);
+    setPreflightResult(null);
+    try {
+      const r = await fetch('/api/cover-preflight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, newsTitle }),
+      });
+      const j = await safeJsonCover(r);
+      setPreflightResult(j);
+      // เติมค่าเริ่มต้นให้ช่องแก้ = ค่าที่ AI สืบได้ (ผู้ใช้แก้ทับได้)
+      const id = j?.identity || {};
+      // ถ้า mainCharacter ถูกตีว่า "ขาด" (ว่าง/role-only) → เว้นช่องว่างให้ผู้ใช้กรอกชื่อจริง (ปุ่มสร้างปกจะ disable จนกรอก)
+      const _mainMissing = (j?.missing || []).some(m => m.field === 'mainCharacter');
+      setOverrideMainChar(_mainMissing ? '' : (id.mainCharacter && id.mainCharacter !== 'ไม่ระบุ' ? id.mainCharacter : ''));
+      setOverrideSecondaryChar(id.secondaryCharacter || '');
+      setOverrideCoverEmotion(id.coverEmotion && id.coverEmotion !== 'neutral' ? id.coverEmotion : '');
+      setOverrideCelebratedAction(id.coreStory?.celebratedAction || '');
+    } catch (e) {
+      // graceful: preflight ไม่บังคับ — กดสร้างปกได้เลย (ระบบวิเคราะห์เองตอนสร้าง)
+      setPreflightResult({ identity: null, warnings: [], missing: [], _clientError: true });
+    } finally {
+      setPreflightLoading(false);
+    }
+  }
+
+  // มี error (severity=error) ค้างอยู่ → ยังกรอกไม่ครบ → ปุ่มสร้างปก disable
+  const preflightBlocked = !!(preflightResult?.missing?.some(m => m.severity === 'error') && !overrideMainChar.trim());
 
   // ★ Parse batch text into news items
   function parseBatchText(text) {
@@ -932,17 +981,87 @@ export default function CoverLabPage() {
               </optgroup>
             </select>
 
+            {/* ★ preflight-gate: วิเคราะห์ข่าวก่อนสร้างปก (2-step) — extract fields + แก้ก่อนเสียเวลา 10 นาที */}
             <button
-              onClick={() => handleGenerate(false)}
-              disabled={loading}
+              onClick={handlePreflight}
+              disabled={preflightLoading || loading}
               style={{
-                width: '100%', padding: '14px 24px', marginTop: 16,
-                background: loading ? '#374151' : 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
-                color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, fontWeight: 700,
-                cursor: loading ? 'wait' : 'pointer',
+                width: '100%', padding: '12px 24px', marginTop: 16,
+                background: (preflightLoading || loading) ? '#374151' : 'linear-gradient(135deg, #0891b2, #0e7490)',
+                color: '#fff', border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 700,
+                cursor: preflightLoading ? 'wait' : (loading ? 'not-allowed' : 'pointer'),
               }}
             >
-              {loading ? '⏳ กำลังสร้างปก... (ปกติ 3-7 นาที)' : '🖼️ สร้างปกอัตโนมัติ'}
+              {preflightLoading ? '🔍 กำลังวิเคราะห์ข่าว... (~30-60 วิ)' : '🔍 วิเคราะห์ข่าวก่อนสร้างปก'}
+            </button>
+
+            {/* ผลวิเคราะห์ข่าว — แสดง fields ที่ extract ได้ + แก้ได้คลิกเดียว */}
+            {preflightResult && (
+              <div style={{ marginTop: 12, padding: 16, background: '#0f172a', border: `1px solid ${preflightBlocked ? '#7f1d1d' : '#1e293b'}`, borderRadius: 10 }}>
+                {(!preflightResult.identity) ? (
+                  <div style={{ color: '#fbbf24', fontSize: 13 }}>
+                    ⏱️ วิเคราะห์ไม่ทัน/ขัดข้อง — กดสร้างปกได้เลย (ระบบจะวิเคราะห์เองตอนสร้าง)
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, color: preflightBlocked ? '#f87171' : (preflightResult.warnings?.length ? '#fbbf24' : '#4ade80') }}>
+                      {preflightBlocked ? '❌' : (preflightResult.warnings?.length ? '⚠️' : '✅')} ผลวิเคราะห์ข่าว — ตรวจ/แก้ก่อนสร้างปก
+                    </div>
+
+                    <label style={{ ...labelStyle, marginTop: 4 }}>
+                      👤 ตัวละครหลัก {preflightResult.missing?.some(m => m.field === 'mainCharacter') && <span style={{ color: '#f87171' }}>(จำเป็น)</span>}
+                    </label>
+                    <input value={overrideMainChar} onChange={e => setOverrideMainChar(e.target.value)}
+                      placeholder="ไม่พบชื่อในข่าว — กรุณากรอกชื่อ-นามสกุล/ชื่อในวงการ"
+                      style={{ ...inputStyle, borderColor: (preflightResult.missing?.some(m => m.field === 'mainCharacter') && !overrideMainChar.trim()) ? '#f87171' : inputStyle.border }} />
+
+                    <label style={labelStyle}>🎭 อารมณ์ข่าว</label>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                      {['warm', 'hope', 'drama', 'tragedy', 'shocking', 'neutral'].map(em => (
+                        <button key={em} type="button" onClick={() => setOverrideCoverEmotion(em)}
+                          style={{ padding: '5px 12px', borderRadius: 6, fontSize: 13, cursor: 'pointer',
+                            border: overrideCoverEmotion === em ? '2px solid #60a5fa' : '1px solid #374151',
+                            background: overrideCoverEmotion === em ? 'rgba(96,165,250,0.15)' : '#1a1a2e', color: '#e2e8f0' }}>
+                          {({ warm: '😊 อบอุ่น/ดีใจ', hope: '🌟 มีความหวัง', drama: '🔥 ดราม่า', tragedy: '😢 เศร้า/สูญเสีย', shocking: '😱 ช็อก', neutral: '😐 กลาง' })[em] || em}
+                        </button>
+                      ))}
+                    </div>
+
+                    <label style={labelStyle}>📰 ข่าวนี้เล่าเรื่องอะไร</label>
+                    <input value={overrideCelebratedAction} onChange={e => setOverrideCelebratedAction(e.target.value)}
+                      placeholder="เช่น ซื้อรถ Vellfire 5.5 ล้าน / บริจาคเงินให้โรงพยาบาล" style={inputStyle} />
+
+                    <label style={labelStyle}>👥 ตัวละครรอง (optional — คู่/ครอบครัว)</label>
+                    <input value={overrideSecondaryChar} onChange={e => setOverrideSecondaryChar(e.target.value)}
+                      placeholder="เช่น ครอบครัว / แฟน / ลูก" style={inputStyle} />
+
+                    {(preflightResult.missing?.length > 0 || preflightResult.warnings?.length > 0) && (
+                      <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {preflightResult.missing?.map((m, i) => (
+                          <div key={'m' + i} style={{ fontSize: 12, color: '#fca5a5', background: 'rgba(248,113,113,0.08)', padding: '6px 10px', borderRadius: 6 }}>❌ {m.label}: {m.reason}</div>
+                        ))}
+                        {preflightResult.warnings?.map((w, i) => (
+                          <div key={'w' + i} style={{ fontSize: 12, color: '#fcd34d', background: 'rgba(251,191,36,0.08)', padding: '6px 10px', borderRadius: 6 }}>⚠️ {w.label}: {w.reason}</div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            <button
+              onClick={() => handleGenerate(false)}
+              disabled={loading || preflightBlocked}
+              title={preflightBlocked ? 'กรุณากรอกชื่อตัวละครหลักก่อนสร้างปก' : ''}
+              style={{
+                width: '100%', padding: '14px 24px', marginTop: 12,
+                background: (loading || preflightBlocked) ? '#374151' : 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+                color: (loading || preflightBlocked) ? '#94a3b8' : '#fff', border: 'none', borderRadius: 8, fontSize: 16, fontWeight: 700,
+                cursor: loading ? 'wait' : (preflightBlocked ? 'not-allowed' : 'pointer'),
+              }}
+            >
+              {loading ? '⏳ กำลังสร้างปก... (ปกติ 3-7 นาที)' : (preflightBlocked ? '🔒 กรอกชื่อตัวละครหลักก่อน' : '🖼️ สร้างปกอัตโนมัติ')}
             </button>
 
             {/* ★ Queue progress: สถานะคิว/ความคืบหน้าระหว่างรอ job */}

@@ -409,10 +409,27 @@ Respond with ONLY a JSON object following this exact structure (ALL values in Th
             sq.person_closeup = `${override} หน้าตรง โคลสอัพ ภาพหน้าชัด`;
             parsed._identityOverride = override;
             console.log(`[StoryIdentity] 🖐️ override mainCharacter → "${override}" (ผู้ใช้ระบุชื่อเต็มเอง)`);
+          } else if (opts?.skipCanonicalResolve) {
+            // ★ preflight-gate: โหมดวิเคราะห์เร็ว — ข้าม canonical resolution (Google search ~1-2 นาที)
+            //   คืนชื่อดิบจาก gpt ทันที (~10 วิ) ให้ผู้ใช้ตรวจ/แก้ · ตัว resolve จริงจะทำตอนกดสร้างปก
+            if (!parsed.newsTitle) parsed.newsTitle = newsTitle || '';
           } else {
             // ★ Identity Anchor: ถ้า mainCharacter เป็นชื่อเล่นโดดๆ → สืบชื่อจริงจากผลค้นหา (กันหยิบคนผิด)
             if (!parsed.newsTitle) parsed.newsTitle = newsTitle || '';
             await resolveCanonicalIdentity(parsed);
+          }
+          // ★ preflight-gate: ผู้ใช้แก้ field จากหน้าวิเคราะห์ข่าว → override เพิ่ม (secondary/emotion/action)
+          if (opts?.overrideSecondaryCharacter) {
+            parsed.secondaryCharacter = opts.overrideSecondaryCharacter;
+            console.log(`[StoryIdentity] 🖐️ override secondaryCharacter → "${opts.overrideSecondaryCharacter}"`);
+          }
+          if (opts?.overrideCoverEmotion) {
+            parsed.coverEmotion = opts.overrideCoverEmotion;
+            console.log(`[StoryIdentity] 🖐️ override coverEmotion → "${opts.overrideCoverEmotion}"`);
+          }
+          if (opts?.overrideCelebratedAction) {
+            parsed.coreStory = { ...(parsed.coreStory || {}), celebratedAction: opts.overrideCelebratedAction };
+            console.log(`[StoryIdentity] 🖐️ override celebratedAction → "${opts.overrideCelebratedAction}"`);
           }
           return parsed;
         } else {
