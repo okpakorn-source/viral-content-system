@@ -201,7 +201,7 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
   // ★ 29 มิ.ย. (CASE-237/239 ผู้ใช้ย้ำ 2 รอบ: ฮีโร่เหลือช่องว่างเหนือหัว เห็นหน้าต่าง/บันได = พื้นหลังแย่งจุดเด่น):
   //   ฮีโร่ (minFaceHFrac>0) ลด padding เผื่อผมเหนือหัว 0.50→0.30 → กล่องหัวชิดผมจริง พื้นหลังเหนือหัวน้อยลง หน้าเต็มเฟรมขึ้น
   //   ช่องรอง (minFaceHFrac=0) คง 0.50 เผื่อผม (กัน CASE-090 ผมตก) · การ์ดกันผมตก (บรรทัด ~213) ยังทำงานปกติ
-  const topPad = minFaceHFrac > 0 ? 0.30 : 0.50;
+  const topPad = minFaceHFrac > 0 ? 0.42 : 0.50; // ★ เฟส2.5b จุด1 (Hermes CASE-261 ฮีโร่บนหัวตัด+อึดอัด): ฮีโร่ 0.30→0.42 เผื่อเหนือหัวมากขึ้น (หัวครบ+ไม่อึดอัด แต่ยังไม่โล่งเท่า 0.50 = CASE-237/239)
   const hy1 = fb.y1 - fhN * topPad, hy2 = fb.y2 + fhN * 0.32; // เผื่อผมบน + คาง (เฟส2.5 จุด1: 0.18→0.32 กล่องหัวคลุมถึงใต้คาง/คอ กันตัดคาง ทุกช่อง — Hermes CASE-254)
   const faceWpx = (hx2 - hx1) * imgW;       // ความกว้าง "หัว"
   const faceHpx = (hy2 - hy1) * imgH;       // ความสูง "หัว"
@@ -267,6 +267,9 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
       left = Math.min(Math.max(hcx - regionWpx / 2, 0), imgW - regionWpx);
       top = Math.min(Math.max(hcy - regionHpx / 2, 0), imgH - regionHpx);
     }
+  } else if (minFaceHFrac === 0 && (hy1 * imgH) < top - 0.5) {
+    // ★ เฟส 2.5b จุด2 (Hermes CASE-261 ช่องรองตัดบนหัว): ช่องรอง (MOMENT/circle) กันตัดบนหัว — top-only (ไม่ re-center/ไม่แตะขนาด กัน regression ช่องรองที่ดีอยู่แล้ว)
+    top = Math.max(0, hy1 * imgH); // ดัน top ขึ้นคลุมบนหัว (regionH ใหญ่พอคลุมคางอยู่แล้ว = maxFaceHFrac 0.74)
   }
   return { left: Math.round(left), top: Math.round(top), width: Math.max(8, Math.round(regionWpx)), height: Math.max(8, Math.round(regionHpx)) };
 }
