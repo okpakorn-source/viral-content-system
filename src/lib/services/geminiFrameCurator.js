@@ -13,6 +13,7 @@
  *    ตัวนี้เติม "Gemini เข้าใจภาพ" — เลือกช็อตเด็ดที่ตรงข่าวจริง (เติมสิ่งที่ comment ตั้งใจไว้แต่ไม่เคยทำ)
  */
 import { callGeminiVision } from '@/lib/ai/geminiClient';
+import { briefToInstruction } from '@/lib/services/coverShotPlanner';
 
 const LOG = '[FrameCurator]';
 
@@ -29,11 +30,15 @@ export async function curateFrames(frames, context = '', opts = {}) {
   const strict = !!opts.strict;
   const person = String(opts.person || '').slice(0, 60);
   const story = String(opts.story || '').slice(0, 200);
+  // ★ 1 ก.ค. (ผู้ใช้สั่ง): Shot Brief — "ใบสั่งช็อต" จาก coverShotPlanner
+  //   ถ้ามี brief → Gemini เลือกเฟรมตามโควตา (คน %/เหตุการณ์ %/ของ %) แทนเลือกมั่ว
+  const shotBrief = opts.shotBrief || null;
+  const briefBlock = shotBrief ? briefToInstruction(shotBrief) : '';
   if (!Array.isArray(frames) || frames.length < 2) {
     return { frames: frames || [], heroIndex: 0, picked: (frames || []).map((_, i) => i), reason: 'เฟรมน้อยเกินไป ไม่ต้องคัด', curated: false };
   }
-  // จำกัดจำนวนที่ส่งให้ Gemini — 12 เฟรม (พอเลือกได้ดี + พอดี timeout 25 วิ ของ callGeminiVision)
-  const N = Math.min(frames.length, 12);
+  // จำกัดจำนวนที่ส่งให้ Gemini — ปกติ 12 เฟรม · มี brief → 20 เฟรม (ตัวเลือกเยอะขึ้น จับครบทุกหมวด)
+  const N = Math.min(frames.length, briefBlock ? 20 : 12);
   const use = frames.slice(0, N);
   // ★ callGeminiVision รับ { data(base64 ไม่มี prefix), mimeType } — แปลงจาก data URI · ถ้ามีเฟรมไม่ใช่ data URI (url) ข้ามการคัด (กัน index เพี้ยน)
   const imageObjs = [];
@@ -55,7 +60,7 @@ ${strict ? `
 เก็บ (ไม่ reject) เฉพาะเฟรมที่ "มั่นใจว่าเป็นบุคคลในข่าว หรือเป็นเหตุการณ์/บริบทของข่าวนี้จริง" เท่านั้น
 ถ้าทั้งคลิปไม่มีเฟรมไหนตรงข่าวเลย → reject ทุกเฟรม (ตอบ context:[] และใส่ทุก index ใน reject)
 ` : ''}
-เลือกและจัดอันดับเฟรมที่ "ดีที่สุดสำหรับทำปก":
+${briefBlock ? briefBlock + '\n' : ''}เลือกและจัดอันดับเฟรมที่ "ดีที่สุดสำหรับทำปก":
 - 🦸 hero (เลือก 1 เฟรม) = เฟรมเด่นสุด: เห็นหน้าตัวละครหลักชัด / อารมณ์พีค / ตรงประเด็นข่าว / องค์ประกอบสวย คมชัด
 - 🖼️ context (เลือกสูงสุด ${maxContext} เฟรม) = ภาพประกอบเสริมเรื่อง: เห็นคน/สถานที่/เหตุการณ์ที่เกี่ยวข้อง มุมต่างจาก hero
 - ⛔ reject = เฟรมที่ "ห้ามใช้ทำปก": เบลอ/มืด/หน้าเบลอ/ตัวหนังสือหรือซับเต็มจอ/โลโก้ช่อง/จอดำ/หลุดประเด็น/ซ้ำกับที่เลือกแล้ว

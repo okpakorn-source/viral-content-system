@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import sharp from 'sharp';
 import { MODEL_VISION } from '@/lib/ai/modelConfig';
+import * as coverTrace from '@/lib/services/coverTrace'; // ★ observability (non-fatal ทุกจุด)
 
 // ==========================================
 // Helper: Fetch with timeout
@@ -584,30 +585,46 @@ async function agentYouTubeFrames(identity) {
         const { curateFrames } = await import('@/lib/services/geminiFrameCurator');
         const _person = rawMainChar || identity?.mainCharacter || '';
         const _story = identity?.newsTitle || identity?.story || identity?.coreStory?.celebratedAction || '';
+        // ★ 1 ก.ค. (Shot Planner — ผู้ใช้สั่ง): "สมองสั่งช็อต" อ่านเนื้อข่าวเต็ม → แตกคีย์ (คน/เหตุการณ์/ของ)
+        //   → สั่ง Gemini แคปเฟรมตามโควตา แทนเลือกมั่ว · opt-in env COVER_SHOT_PLANNER=true
+        //   เมื่อเปิด: 3 คลิป × 32 เฟรม, เก็บได้ถึง 25 (ตัวเลือกเยอะ) · ปิด: 2 คลิป × 16, เก็บ 12 (เดิม)
+        let _shotBrief = null;
+        if (process.env.COVER_SHOT_PLANNER === 'true') {
+          try {
+            const { planShots } = await import('@/lib/services/coverShotPlanner');
+            _shotBrief = await planShots(identity?._newsContent || _story, identity);
+          } catch (e) { console.log(`[Agent2: YouTube] Shot Planner ข้าม: ${String(e?.message||'').slice(0,50)}`); }
+        }
+        const _hasBrief = !!_shotBrief;
+        const _maxClips = _hasBrief ? 3 : 2;
+        const _framesPerClip = _hasBrief ? 32 : 16;
+        const _keepCap = _hasBrief ? 25 : 12;
+        const _maxCtx = _hasBrief ? 10 : 3;
         const kept = [];
-        for (const vid of videoIds.slice(0, 2)) { // ★ 1 ก.ค.: 3→2 ลดเวลา Tier REAL (yt-dlp+ffmpeg+Gemini/คลิป หนักสุด) — ภาพถ่ายจาก Agent1 ครอบคลุมแล้ว
+        for (const vid of videoIds.slice(0, _maxClips)) { // ★ 1 ก.ค.: 2 คลิป (เดิม) · 3 คลิปเมื่อมี Shot Brief (ตัวเลือกเยอะ)
           let fr = [];
           try {
             fr = await Promise.race([
               // ★ 27 มิ.ย. (ระบบ ① — CASE-227: ได้แต่เฟรมฉาก ไม่มีหน้าโคลสอัพให้ฮีโร่):
-              //   8→16 เฟรม/คลิป = สุ่มถี่ขึ้น จับ "จังหวะหน้าชัด" ในคลิปสัมภาษณ์ได้มากขึ้น
+              //   16 เฟรม/คลิป (เดิม) · 32 เฟรมเมื่อมี Shot Brief = สุ่มถี่ขึ้น จับครบทุกหมวดตามโควตา
               //   yt-dlp โหลดคลิปครั้งเดียว → แตกเฟรมเพิ่มแทบไม่เสียเวลา (ffmpeg ถูก) · curator/Judge คัดต่อ
-              extractMetaVideoFrames(`https://www.youtube.com/watch?v=${vid}`, 16),
+              extractMetaVideoFrames(`https://www.youtube.com/watch?v=${vid}`, _framesPerClip),
               new Promise((res) => setTimeout(() => res([]), 100000)),
             ]) || [];
           } catch (e) { console.log(`[Agent2: YouTube] Tier REAL คลิป ${vid} แตกเฟรมล้ม: ${e.message?.slice(0, 40)}`); }
           if (fr.length < 2) continue;
           // 🧠 Gemini ดูทุกซีน "คัดเฉพาะที่ตรงข่าว" (strict) — คลิปผิดคน/ผิดเรื่อง → คืน [] (ทิ้งทั้งคลิป)
+          //   ★ shotBrief: ถ้ามี → Gemini เลือกตามโควตา (คน %/เหตุการณ์ %/ของ %) แทนเลือกมั่ว
           try {
-            const res = await curateFrames(fr, `${_person} ${_story}`.trim(), { strict: true, person: _person, story: _story, maxContext: 3 });
+            const res = await curateFrames(fr, `${_person} ${_story}`.trim(), { strict: true, person: _person, story: _story, maxContext: _maxCtx, shotBrief: _shotBrief });
             if (res.curated && res.frames?.length) {
               kept.push(...res.frames);
-              console.log(`[Agent2: YouTube] 🎬 Tier REAL: คลิป ${vid} → เก็บ ${res.frames.length} เฟรมตรงข่าว`);
+              console.log(`[Agent2: YouTube] 🎬 Tier REAL: คลิป ${vid} → เก็บ ${res.frames.length} เฟรมตรงข่าว${_hasBrief ? ' (ตาม Shot Brief)' : ''}`);
             } else {
               console.log(`[Agent2: YouTube] ⏭️ Tier REAL: คลิป ${vid} ไม่ตรงข่าว → ข้ามทั้งคลิป`);
             }
           } catch {}
-          if (kept.length >= 12) break;
+          if (kept.length >= _keepCap) break;
         }
         if (kept.length) {
           console.log(`[Agent2: YouTube] ✅ Tier REAL v2: เฟรมจริง "ตรงข่าว" ${kept.length} ใบ (yt-dlp+ffmpeg + Gemini strict เครื่องทีม)`);
@@ -1947,6 +1964,24 @@ function processJudgeResults(parsed, validCandidates, allowFallback = true) {
     });
   } catch {}
 
+  // ★ HERO_FACE emergency fallback (hero-fallback / CASE-290-292): pool ทั้งหมดไม่มี HERO_FACE เลย
+  //   (Judge "DOCUMENTARY>GLAMOUR" เข้ม → ภาพแฟชั่น/วันเกิด = PERSON_SUPPORT หมด) → promote ใบ score สูงสุด
+  //   (PERSON_SUPPORT/EMOTION เท่านั้น) เป็น HERO_FACE ชั่วคราว → ปกยังทำได้ + Director มี hero + cache SAVED ได้
+  //   🔴 ห้ามลดเกณฑ์ HERO เดิม — ทำงานเฉพาะเมื่อ "ไม่มี HERO_FACE เลย" · แก้ "ปกพัง" ไม่ใช่ "ปกสวย" (pool สวย=แก้ที่ search)
+  //   หมายเหตุ: วางที่ processJudgeResults (live path) — judgeImages inline block ที่สเปคชี้เป็น dead code (return judgeWithFallback ก่อน)
+  const _hasHero = accepted.some(s => s.role === 'HERO_FACE');
+  if (!_hasHero && accepted.length >= 3) {
+    const _bestSupport = accepted
+      .filter(s => s.role === 'PERSON_SUPPORT' || s.role === 'EMOTION')
+      .sort((a, b) => b.score - a.score)[0];
+    if (_bestSupport) {
+      const _origRole = _bestSupport.role;
+      _bestSupport.role = 'HERO_FACE';
+      _bestSupport._heroFallback = true; // mark สำหรับ debug
+      console.log(`[Judge] ⚠️ HERO_FACE fallback: upgrade "${_origRole}" score=${_bestSupport.score} → HERO_FACE (pool ไม่มี documentary hero)`);
+    }
+  }
+
   let heroAssigned = false;
   const HERO_ROLE = 'HERO_FACE';
 
@@ -2164,6 +2199,10 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
       out.allCandidates = [...userImages];
       out._storyAnchorCandidates = judged._storyAnchorCandidates || [];
       out._bucketCounts = judged._bucketCounts || null;
+      try {
+        coverTrace.step('search', 'โหมดเฉพาะแหล่ง: ใช้ภาพจากลิงก์ (ไม่รีเสิร์ช)', { agents: { userSource: userImages.length }, rawTotal: userImages.length, raw: userImages });
+        coverTrace.step('judge', 'Judge คัดภาพจากลิงก์', { acceptedCount: out.length, selected: out.map(img => ({ url: img.url, score: img.score, role: img.role })) });
+      } catch {}
       return out;
     }
     // ดึงจากลิงก์ไม่ได้เลย (เช่น FB วิดีโอ scrape เฟรมไม่ได้) — ไม่ถอยไปรีเสิร์ชเต็ม
@@ -2442,5 +2481,29 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
   // ★ Fix 25: Pass story anchor diagnostics to route.js
   result._storyAnchorCandidates = selectedImages._storyAnchorCandidates || candidates._storyAnchorCandidates || [];
   result._bucketCounts = selectedImages._bucketCounts || candidates._bucketCounts || null;
+
+  // ★ observability (2 ก.ค.): บันทึก "ค้นภาพ" (แหล่ง+ภาพดิบ) + "Judge คัด" (คะแนน/บทบาท) เข้าคลัง trace
+  try {
+    coverTrace.step('search', 'ค้นภาพจากทุกแหล่ง (multi-agent)', {
+      agents: {
+        userSource: userImages.length,
+        article: articleImages.length,
+        google: googleImages.length,
+        youtube: youtubeImages.length,
+        context: contextImages.length,
+        tavily: tavilyImages.length,
+        fbReels: reelsImages.length,
+      },
+      rawTotal: allMeta.length,
+      candidateCount: candidates.length,
+      raw: allMeta, // sanitize อัตโนมัติใน coverTrace (url/source/query/label/title)
+    });
+    coverTrace.step('judge', 'Judge (gpt-4o Vision) คัดภาพ + ให้บทบาท', {
+      acceptedCount: result.length,
+      buckets: result._bucketCounts || null,
+      selected: result.map(img => ({ url: img.url, score: img.score, role: img.role, queryLabel: img.evidenceCat || img.queryLabel, source: img.source })),
+    });
+  } catch {}
+
   return result;
 }

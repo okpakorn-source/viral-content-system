@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import * as coverTrace from '@/lib/services/coverTrace'; // ★ observability panel (non-fatal ทุกจุด)
 
 /**
  * =====================================================
@@ -68,6 +69,16 @@ async function _renderCoverV3(request) {
       );
     }
 
+    // ★ observability (2 ก.ค.): เริ่มบันทึกทุกขั้นตอนเข้าคลัง trace (runId จาก UI ถ้ามี ไม่งั้นสร้างเอง)
+    coverTrace.begin({ runId: body.traceId, newsTitle, content, sourceLinks });
+    coverTrace.step('input', 'รับข่าวเข้าระบบ', {
+      newsTitle,
+      contentLen: (content || '').length,
+      contentPreview: (content || '').slice(0, 400),
+      sourceLinks,
+      sourceOnly,
+    });
+
     markQueueJob = async (status, extra = {}) => {
       if (!_queueJobId) return;
       try {
@@ -89,6 +100,7 @@ async function _renderCoverV3(request) {
       if (!credit.ok) {
         console.warn(`[CoverV3] 🛑 preflight block: ${credit.errorType} — ${credit.error}`);
         await markQueueJob('failed', { error: credit.error });
+        coverTrace.end({ success: false, error: credit.error });
         // 200 + success:false → worker เก็บข้อความสะอาดให้ UI โชว์ตรงๆ (ไม่ถูกห่อเป็น "HTTP 5xx — {json}")
         return NextResponse.json({ success: false, error: credit.error, errorType: credit.errorType }, { status: 200 });
       }
@@ -119,6 +131,21 @@ async function _renderCoverV3(request) {
       console.log('[CoverV3] ⚠️ identity fallback: ข่าวไม่มีตัวหลัก → โหมดเหตุการณ์นำ');
     }
     console.log(`[CoverV3] identity: ${identity.mainCharacter} | ${identity.storyType}`);
+    // ★ 1 ก.ค. (Shot Planner): แนบเนื้อข่าวเต็มเข้า identity เพื่อให้ Agent 2 (แคปเฟรมคลิป)
+    //   ส่งต่อให้ coverShotPlanner อ่านเนื้อเต็ม → แตกคีย์คน/เหตุการณ์/ของ → สั่ง Gemini ตามโควตา
+    //   (ไม่กระทบ path เดิม — แค่แนบ field เสริม · planner ทำงานเฉพาะ env COVER_SHOT_PLANNER=true)
+    identity._newsContent = content || newsTitle || '';
+    coverTrace.step('identity', 'วิเคราะห์ประเด็น + แตกคีย์เวิร์ดค้นภาพ', {
+      mainCharacter: identity.mainCharacter,
+      secondaryCharacter: identity.secondaryCharacter || null,
+      storyType: identity.storyType,
+      coverEmotion: identity.coverEmotion || identity.emotion || null,
+      location: identity.location || null,
+      searchGoogle: identity.searchGoogle || null,
+      searchQueries: identity.searchQueries || null,
+      coreImageQueries: identity.coreImageQueries || null,
+      fallback: !!identity._fallback,
+    });
 
     console.log('[CoverV3] ② Multi-agent search + judge...');
     if (sourceLinks.length) console.log(`[CoverV3] 🔗 แหล่งรูปพนักงาน ${sourceLinks.length} ลิงก์ — ${sourceOnly ? 'โหมดเฉพาะแหล่ง (ไม่รีเสิร์ชเพิ่ม)' : 'ดึงก่อน บูสต์ขึ้นหน้า + รีเสิร์ชเสริม'}`);
@@ -171,6 +198,7 @@ async function _renderCoverV3(request) {
       const msg = 'ดึงรูปจากลิงก์แหล่งรูปไม่ได้เลย (โหมด "เฉพาะภาพในลิงก์") — ลิงก์คลิป Facebook มักดึงเฟรมไม่ได้จากเซิร์ฟเวอร์ ลองวางลิงก์ YouTube/TikTok/ข่าวที่มีภาพ หรือสลับเป็นโหมด "ผสม"';
       console.warn('[CoverV3] 🛑 sourceOnly แต่ไม่ได้ภาพจากลิงก์เลย → แจ้งผู้ใช้');
       await markQueueJob('failed', { error: msg });
+      coverTrace.end({ success: false, error: msg });
       return NextResponse.json({ success: false, error: msg, errorType: 'SOURCE_ONLY_NO_IMAGES' }, { status: 200 });
     }
 
@@ -212,6 +240,12 @@ async function _renderCoverV3(request) {
       } catch { /* ข้ามภาพโหลดไม่ได้ */ }
     }));
     console.log(`[CoverV3] downloaded ${imageBuffers.length}/${candidates.length} buffers`);
+    coverTrace.step('download', 'ดาวน์โหลดภาพดิบเป็นไฟล์', {
+      downloaded: imageBuffers.length,
+      candidates: candidates.length,
+      preferFrames: _preferFrames,
+      images: imageBuffers.map(img => ({ url: img.url, source: img.source, role: img.role, score: img.score, userSource: img.userSource })),
+    });
 
     // ── ตรวจจับตำแหน่งใบหน้า → ป้อนเป็น "ข้อมูลพิกัด" ให้ Director คำนวณกรอบแน่นแบบตัวเลข
     //    (rev.7 — feedback: ฮีโร่ไม่เด่น/วงกลมล้น เพราะ Director กะกรอบด้วยตาแล้วหลวม)
@@ -260,6 +294,19 @@ async function _renderCoverV3(request) {
         };
       }));
       console.log(`[CoverV3] face boxes: ${faceBoxes.filter(b => b && b.x1 !== undefined).length}/${imageBuffers.length} images | มีตัวหนังสือฝัง: ${faceBoxes.filter(b => b?.hasText).length}`);
+      coverTrace.step('facedetect', 'ตรวจจับใบหน้า + อารมณ์สีหน้า', {
+        withFace: faceBoxes.filter(b => b && b.x1 !== undefined).length,
+        total: imageBuffers.length,
+        withText: faceBoxes.filter(b => b?.hasText).length,
+        faces: faceBoxes.map((b, i) => ({
+          idx: i,
+          hasFace: !!(b && b.x1 !== undefined),
+          faceCount: b?.count ?? 0,
+          faceEmotion: b?.faceEmotion || null,
+          emotionIntensity: b?.emotionIntensity || null,
+          hasText: !!b?.hasText,
+        })),
+      });
     } catch (e) { console.log('[CoverV3] face detect failed (non-fatal):', e.message?.slice(0, 50)); }
 
     // ★ Emotion Gate (เฟส 1, 2 ก.ค.): กรอง "ภาพอารมณ์สีหน้าขัดข่าวรุนแรง" ก่อนจัดพูล (กันหน้ายิ้มในข่าวเศร้า/ช็อกเป็นฮีโร่)
@@ -484,6 +531,8 @@ async function _renderCoverV3(request) {
     if (imageBuffers.length < 4) {
       const msg = `ภาพใช้ได้ ${imageBuffers.length} ใบ (ต้องการอย่างน้อย 4 — ปกต้อง 4+1) — ข่าวนี้ภาพหายาก ลองใส่ลิงก์แหล่งรูป/คลิป`;
       await markQueueJob('failed', { error: msg });
+      coverTrace.step('pool', 'ภาพสะอาดไม่พอทำปก (<4)', { usable: imageBuffers.length, need: 4 });
+      coverTrace.end({ success: false, error: msg });
       return NextResponse.json({ success: false, error: msg, errorType: 'INSUFFICIENT_QUALITY_IMAGES' }, { status: 422 });
     }
 
@@ -590,9 +639,17 @@ async function _renderCoverV3(request) {
     const direction = await directCover({ imageBuffers, identity, templateOptions, templateSpec: templateOptions[0], newsTitle, faceBoxes });
     if (!direction) {
       await markQueueJob('failed', { error: 'AI Director จัดวางไม่สำเร็จ' });
+      coverTrace.step('director', 'AI Director จัดวางไม่สำเร็จ (empty content)', { failed: true, poolSize: imageBuffers.length });
+      coverTrace.end({ success: false, error: 'AI Director จัดวางไม่สำเร็จ (DIRECTOR_FAILED)' });
       return NextResponse.json({ success: false, error: 'AI Director จัดวางไม่สำเร็จ', errorType: 'DIRECTOR_FAILED' }, { status: 422 });
     }
     let templateSpec = direction.templateSpec; // โครงที่ Director เลือก (let — ลูป self-heal สลับเทมเพลตได้)
+    coverTrace.step('director', 'AI Director เลือกโครง + จัดวางช่อง/ครอป', {
+      template: templateSpec.id,
+      reason: direction.reason,
+      poolSize: imageBuffers.length,
+      assignments: (direction.assignments || []).map(a => ({ slot: a.slotId, image: a.imageIndex, why: a.why })),
+    });
 
     // ── ③ Execute (พิกเซลแท้) ──
     const { executeCover, applyFixes } = await import('@/lib/services/coverExecutorService');
@@ -773,9 +830,23 @@ async function _renderCoverV3(request) {
       poolCache: _poolCacheMeta, // ★ null=ไม่ใช้ cache · {hit:true,ageHours}=ใช้ภาพเดิม · {saved:true}=ค้นใหม่+บันทึก
     };
     await markQueueJob('completed', { result: responsePayload });
+    coverTrace.step('compose', 'ประกอบปกจริง + QC + เก็บคลัง', {
+      template: templateSpec.id,
+      score,
+      qcApplied,
+      caseId,
+      elapsed: `${elapsed}s`,
+      assignments: responsePayload.assignments,
+    });
+    coverTrace.end({
+      success: true,
+      coverBase64: responsePayload.base64,
+      result: { template: templateSpec.id, score, caseId, qcApplied, elapsed: `${elapsed}s`, directorReason: direction.reason },
+    });
     return NextResponse.json(responsePayload);
   } catch (error) {
     console.error('[CoverV3] Pipeline error:', error.message);
+    try { coverTrace.end({ success: false, error: error.message }); } catch {}
     // ★ เครดิต/โควต้าหมดกลางทาง → แจ้งชัด (อย่าโยน error ดิบงงๆ ที่ดูเหมือน "ปกพัง")
     const msg = String(error.message || '');
     if (/insufficient_quota|exceeded your current quota|billing/i.test(msg)) {
