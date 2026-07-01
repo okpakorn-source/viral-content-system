@@ -350,7 +350,7 @@ async function harvestBuzzsumo() {
 //   (เคยพักชั่วคราวตอนปรับคุณภาพ · ตอนนี้คืน cron ใน vercel.json แล้ว) · 🔴 ไม่กระทบระบบทำข่าว/ถอดประเด็น/ปก
 const HARVEST_PAUSED = false;
 
-export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'clip', 'evergreen', 'followup', 'buzz'], judgeTop = 24, extraQueries = [] } = {}) {
+export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'clip', 'evergreen', 'followup', 'buzz', 'saga', 'entrss', 'ytwatch'], judgeTop = 24, extraQueries = [] } = {}) {
   if (HARVEST_PAUSED) {
     console.log('[Harvester] ⏸️ พักหาข่าวใหม่ (HARVEST_PAUSED=true) — ข้าม ไม่ยิง API');
     return { paused: true, added: 0, judged: 0, kept: 0, lanes: [], note: 'พักหาข่าวใหม่ชั่วคราว' };
@@ -500,6 +500,19 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
       console.log(`[Harvester] 🎬 clip×platform: ${clipQs.length} คำค้น (5 แพลตฟอร์ม) → ${_cRes.reduce((s, a) => s + a.length, 0)} ดิบ`);
     } catch (e) { console.log('[Harvester] clip lane failed:', e.message?.slice(0, 50)); }
   }
+  // 📡 เลนเฝ้าแหล่งตรง (2 ก.ค. — ฟรี ไม่กิน Serper): RSS สำนักบันเทิง + เฝ้าช่องยูทูบรายการสัมภาษณ์
+  if (lanes.includes('entrss')) {
+    try {
+      const { fetchEntRss } = await import('./directFeeds');
+      raw.push(...await fetchEntRss());
+    } catch (e) { console.log('[Harvester] entrss lane failed:', e.message?.slice(0, 50)); }
+  }
+  if (lanes.includes('ytwatch')) {
+    try {
+      const { fetchYouTubeChannels } = await import('./directFeeds');
+      raw.push(...await fetchYouTubeChannels());
+    } catch (e) { console.log('[Harvester] ytwatch lane failed:', e.message?.slice(0, 50)); }
+  }
   // 🧠 เลน Exa (semantic น้ำดี) — ค้นอังกฤษเชิงความหมาย → ดึงข่าวไทยน้ำดีที่คีย์เวิร์ดพลาด (env-gated)
   if (lanes.includes('exa') && process.env.EXA_API_KEY) {
     try {
@@ -536,6 +549,26 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
   }
   if (lanes.includes('buzz')) {
     raw.push(...await harvestBuzzsumo());
+  }
+  // 🌊 เลน SAGA (2 ก.ค. — ผลจริง 949 โพสต์: เกาะซากากระแสใหญ่ = ธีมแชมป์ median 21k):
+  //   detect กระแสใหญ่จากโต๊ะ (throttle 2 ชม.) → ยิงคำค้นตามตัวละคร/มุมข้างเคียงของซากาที่ยัง active ทุกรอบ
+  if (lanes.includes('trend') || lanes.includes('saga')) {
+    try {
+      const S = await import('./sagaTracker');
+      await S.detectSagas().catch(e => console.log('[Harvester] saga detect skip:', e.message?.slice(0, 40)));
+      const sagaQs = await S.getSagaQueries(4);
+      if (sagaQs.length) {
+        const _sgRes = await Promise.all(sagaQs.map(async sq => {
+          try {
+            return (await serperNews(sq.q, { num: 6, timeRange: sq.timeRange || 'qdr:d' }))
+              .map(r => ({ ...r, lane: 'saga', sagaId: sq.sagaId, sagaTopic: sq.sagaTopic }));
+          } catch (e) { console.log('[Harvester] saga query failed:', e.message?.slice(0, 40)); return []; }
+        }));
+        for (const arr of _sgRes) raw.push(...arr);
+        stats.sagaQueries = sagaQs.length;
+        console.log(`[Harvester] 🌊 saga: ${sagaQs.length} คำค้น → ${_sgRes.reduce((s, a) => s + a.length, 0)} ดิบ`);
+      }
+    } catch (e) { console.log('[Harvester] saga lane failed:', e.message?.slice(0, 50)); }
   }
   if (lanes.includes('followup')) {
     // ตามรอยบุคคลจากข่าวที่เพจเคยทำ — ความเคลื่อนไหวสัปดาห์ล่าสุด
@@ -748,6 +781,12 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
   if (toAdd.length > 0) await store.addMany(toAdd);
   stats.added = toAdd.length;
 
+  // 🌊 อัพเดทความเคลื่อนไหวซากา (นับใบใหม่ที่แมทช์ + ปิดซากาที่เงียบ 3 วัน) — ไม่ยิง AI
+  try {
+    const { updateSagaActivity } = await import('./sagaTracker');
+    await updateSagaActivity(toAdd);
+  } catch (e) { console.log('[Harvester] saga activity skip:', e.message?.slice(0, 40)); }
+
   // ★ 16 มิ.ย.: เก็บของที่ตัดออกเข้า "คลังขยะ" (news-desk-junk) — ทีมเข้าไปรีวิว+เอากลับได้ ไม่ใช่บล็อกหาย
   //   เก็บเฉพาะที่ตัดด้วยเหตุผลบรรณาธิการ/แบรนด์/ความปลอดภัย (ไม่เก็บ url ซ้ำ/anti-recycle = ขยะจริงไม่ต้องรีวิว)
   if (junk.length > 0) {
@@ -829,6 +868,38 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
       }
     }
   } catch (e) { console.log('[Harvester] auto-research skip:', e.message?.slice(0, 50)); }
+
+  // ⛏️ AUTO-MINE (2 ก.ค. — แก้ "คลิป 22% ของโต๊ะแต่ถูกใช้ 0.6%"): คลิปที่ บก.ให้ ≥8 → ถอดเสียง+ขุดนาทีทองเองทันที
+  //   การ์ดคลิปมีเนื้อ (fullText/นาทีทอง) ให้ทีมอ่านตัดสินได้เลย ไม่ต้องกดถอดเอง · สูงสุด 2 ใบ/รอบ กันกินเวลา harvest
+  //   แพลตฟอร์ม: YouTube/TikTok ทุกเครื่อง · FB/IG เฉพาะเครื่องทีม (win32 — ตาม metaFrameExtractor)
+  try {
+    const _minePlatformOk = (u) => /youtube\.com|youtu\.be|tiktok\.com/i.test(u)
+      || (process.platform === 'win32' && /facebook\.com|fb\.watch|instagram\.com/i.test(u));
+    const mineCands = toAdd
+      .filter(i => (i.judgeScore ?? 0) >= 8 && !i.fullText && (i.isVideo || ['clip', 'video'].includes(i.lane)) && _minePlatformOk(String(i.url || '')))
+      .sort((a, b) => (b.judgeScore || 0) - (a.judgeScore || 0))
+      .slice(0, 2);
+    stats.mined = 0;
+    if (mineCands.length) console.log(`[AutoMine] ⛏️ คลิปเข้าเกณฑ์ถอดอัตโนมัติ ${mineCands.length} ใบ`);
+    for (const c of mineCands) {
+      try {
+        const { mineClip } = await import('./interviewMiner');
+        const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('mine timeout 90s')), 90000));
+        const mined = await Promise.race([mineClip(c.url), timeout]);
+        if (mined?.fullText) {
+          await store.update(c.id, (ex) => ({
+            ...ex,
+            fullText: mined.fullText, goldenMoments: mined.goldenMoments, captionSkeleton: mined.captionSkeleton,
+            mined: true, minedAt: new Date().toISOString(),
+            judgeScore: Math.max(ex.judgeScore || 0, mined.judgeScore || 0),
+            judgeReason: mined.judgeReason || ex.judgeReason,
+          }));
+          stats.mined++;
+          console.log(`[AutoMine] ✅ ถอดสำเร็จ: ${String(c.title).slice(0, 50)}`);
+        }
+      } catch (e) { console.log('[AutoMine] ⛏️ ถอดไม่สำเร็จ (ข้าม):', e.message?.slice(0, 60)); }
+    }
+  } catch (e) { console.log('[AutoMine] skip:', e.message?.slice(0, 40)); }
 
   // ★ 17 มิ.ย.: แปลงมุมอัตโนมัติ (ดีฟอลต์ปิด — เปิดที่สวิตช์โต๊ะ "♻️") กันเปลือง OpenAI ตอนระบบยังไม่นิ่ง
   //   เปิดเมื่อไหร่ = ข่าวดราม่า/ปะทะที่เพิ่งเก็บ ≤3 ใบ/รอบ ถูกแปลงเป็นมุมบวกอัตโนมัติ
@@ -933,7 +1004,8 @@ async function autoPilotPick(freshItems, store, opts = {}) {
       try {
         // ★ กฎเหล็ก (12 มิ.ย.): ส่งได้แค่ TEXT (บทถอดเสียงข่าวเดียว) หรือ URL — เหมือนคนทำแมนนวลเป๊ะ
         //   ห้ามส่งเนื้อสังเคราะห์หลายแหล่งเข้าไลน์ (เคยทำให้เนื้อหลายข่าวปนกัน)
-        let input = (pick.lane === 'interview' && pick.fullText) ? pick.fullText : pick.url;
+        // ★ 2 ก.ค.: คลิปที่ auto-mine แล้ว (mined) = มีบทถอดเสียงข่าวเดียว → ส่ง TEXT ได้ตามกฎเดิม
+        let input = ((pick.lane === 'interview' || pick.mined) && pick.fullText) ? pick.fullText : pick.url;
         // ★ ข่าวต่างประเทศส่งเป็นลิงก์ตรง — แนบข้อเท็จจริงประเทศ (กันเขียนแบบไม่บอกประเทศ)
         if (pick.foreignCountry && input === pick.url) {
           input = `${pick.url}\n\nหมายเหตุบรรณาธิการ (ข้อเท็จจริง): ข่าวนี้เกิดที่ประเทศ${pick.foreignCountry} ไม่ใช่ประเทศไทย — ต้องระบุประเทศชัดเจนตั้งแต่ย่อหน้าแรกของโพสต์`;

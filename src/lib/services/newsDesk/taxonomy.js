@@ -22,12 +22,13 @@ export const LIBRARY_KEYS = LIBRARIES.map(l => l.key);
 // ── 🌀 REFRESH MODES (เฟส 5 — 29 มิ.ย. ตามแผน GPT ข้อ 3/4/13) ──
 //   ปุ่มหาข่าวไม่ทำงานแบบเดียว — แต่ละโหมด = ชุดเลน(query+scoring)คนละแบบ → ทุกรีเฟรชสำรวจพื้นที่ใหม่
 export const HARVEST_MODES = [
-  { key: 'fresh',     label: '⚡ สดวันนี้',     lanes: ['trend', 'buzz'],                                          desc: 'ข่าว/ดราม่ากระแสสดวันนี้' },
-  { key: 'viral',     label: '🔥 ไวรัล',        lanes: ['trend', 'buzz', 'video', 'clip'],                        desc: 'คลิป/โพสต์ไวรัลไทยกำลังขึ้น (แยกแพลตฟอร์ม YT/TikTok/IG/Reels/FB)' },
+  // ★ 2 ก.ค.: +saga (ซากากระแสใหญ่ — ธีมแชมป์จากผลจริง 949 โพสต์) +entrss (RSS ตรงสำนักบันเทิง ฟรี) +ytwatch (เฝ้าช่องรายการสัมภาษณ์)
+  { key: 'fresh',     label: '⚡ สดวันนี้',     lanes: ['trend', 'buzz', 'saga'],                                  desc: 'ข่าว/ดราม่ากระแสสดวันนี้ + ซากากระแสใหญ่' },
+  { key: 'viral',     label: '🔥 ไวรัล',        lanes: ['trend', 'buzz', 'saga', 'video', 'clip'],                desc: 'คลิป/โพสต์ไวรัลไทยกำลังขึ้น (แยกแพลตฟอร์ม YT/TikTok/IG/Reels/FB)' },
   { key: 'evergreen', label: '♾️ น้ำดีอมตะ',    lanes: ['good', 'evergreen'],                                     desc: 'เรื่องน้ำดี/อมตะ ทำใหม่ได้ตลอด' },
-  { key: 'celeb',     label: '⭐ ดารา',          lanes: ['celeb', 'good'],                                         desc: 'ข่าวดารา/คนดังไทยจาก watchlist' },
+  { key: 'celeb',     label: '⭐ ดารา',          lanes: ['celeb', 'good', 'entrss'],                               desc: 'ข่าวดารา/คนดังไทยจาก watchlist + RSS สำนักบันเทิง' },
   { key: 'followup',  label: '🔁 ตามรอย',        lanes: ['followup'],                                              desc: 'ตามต่อข่าวที่เคยมี momentum' },
-  { key: 'all',       label: '🌀 ครบทุกเลน',     lanes: ['trend', 'good', 'broad', 'exa', 'clip', 'evergreen', 'followup', 'buzz'], desc: 'หากว้างทุกแนว (รอบใหญ่)' },
+  { key: 'all',       label: '🌀 ครบทุกเลน',     lanes: ['trend', 'good', 'broad', 'exa', 'clip', 'evergreen', 'followup', 'buzz', 'saga', 'entrss', 'ytwatch'], desc: 'หากว้างทุกแนว (รอบใหญ่)' },
 ];
 export const HARVEST_MODE_KEYS = HARVEST_MODES.map(m => m.key);
 
@@ -59,7 +60,7 @@ export function freshClass(item) {
   const lane = String((item && item.lane) || '');
   const remakeable = item && item.remakeable;
   if (/evergreen|throwback/.test(lane)) return 'timeless'; // เลนของเก่าตั้งใจหยิบ = อมตะชัด
-  if (/\b(trend|buzz)\b/.test(lane)) return 'trend';       // เลนกระแสสด
+  if (/\b(trend|buzz|saga)\b/.test(lane)) return 'trend';  // เลนกระแสสด (+saga 2 ก.ค.)
   if (remakeable === false) return 'trend';                 // บก ฟันธงว่าทำใหม่ไม่ได้
   if (remakeable === true) return 'timeless';               // บก ฟันธงว่าทำใหม่ได้
   // ไม่ชัด → ดราม่า/กระแสรายวัน มักเป็นกระแส · ที่เหลือ default อมตะ (กันตัดเกิน)
@@ -246,8 +247,8 @@ export function multiScores(item) {
   if (['namdee', 'interview', 'help', 'commoner'].includes(lib)) evergreen += 8;
   if (/evergreen|throwback/.test(lane)) evergreen += 7;
 
-  // momentum: คนกำลังพูดถึงไหม
-  let momentum = /trend|buzz/.test(lane) ? 78 : 45;
+  // momentum: คนกำลังพูดถึงไหม (★ 2 ก.ค. +saga = ซากากระแสใหญ่ momentum สูงสุด)
+  let momentum = lane === 'saga' ? 85 : /trend|buzz/.test(lane) ? 78 : 45;
   momentum += alt * 8;                              // หลายสำนักรายงาน = กระแสแรง
   if (it.performance === 'viral') momentum = 100;
   if (it.trendTopic) momentum += 10;

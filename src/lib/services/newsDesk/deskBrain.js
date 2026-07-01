@@ -318,7 +318,7 @@ export const SPECIALIST_EDITORS = {
   drama: {
     name: 'บก.ดราม่า',
     icon: '🌶️',
-    lanes: ['trend', 'buzz'],
+    lanes: ['trend', 'buzz', 'saga'], // ★ 2 ก.ค.: saga = ซากากระแสใหญ่ (ธีมแชมป์จากผลจริง)
     persona: 'คุณคือ บก.ดราม่า/กระแส ที่เก่งสุดเรื่อง "เล่นดราม่าแบบไม่ไหม้" — รู้ว่าเพจโดน Facebook กดรีชถ้า toxic จึงถนัดแปลงเรื่องร้อนให้เล่าได้แบบมีชั้นเชิง: เล่าผ่านข้อเท็จจริง+คำพูดจริง ไม่ตัดสินแทนคนอ่าน ไม่โจมตีใคร และเตือนได้แม่นว่าเรื่องไหน "อย่าแตะ" เพราะเสี่ยงกฎหมาย/ดราม่าย้อนเข้าเพจ',
   },
   interview: {
@@ -331,7 +331,7 @@ export const SPECIALIST_EDITORS = {
   celeb: {
     name: 'บก.บันเทิง-คนดัง',
     icon: '🎬',
-    lanes: ['celeb', 'throwback'],
+    lanes: ['celeb', 'throwback', 'entrss'], // ★ 2 ก.ค.: entrss = RSS ตรงสำนักบันเทิง
     persona: 'คุณคือ บก.สายบันเทิง/คนดัง รู้ลึกว่าข่าวดารา "ทุกแนว" เล่นเป็นโพสต์ได้ — ความรัก เลิกรา อกหัก ปัญหาครอบครัว หนี้สิน-เงิน คัมแบ็ก ดราม่าวงการ และสัมภาษณ์เก่าที่หยิบมาเล่าใหม่ได้ (ย้อนฟังตอนเลิกกัน/อกหัก/ช่วงตกต่ำ) ถนัดเล่าดราม่านุ่มแบบมีรสนิยม เล่าผ่านข้อเท็จจริง+คำพูดจริง ไม่ตัดสินแทนคนอ่าน ไม่โจมตี และรู้ชัดว่าเรื่องไหนข้ามเส้นกฎเหล็ก (ฆ่า/ทารุณ/ล่วงละเมิด/เหล้า/พนัน/ยา) ต้องไม่แตะ',
   },
   // ★ 28 มิ.ย. (ผู้ใช้สั่ง — ครอบคลุมทุกแนว): บก.พลเมืองดี/ทั่วไป — คุมเลน broad/exa (ค้นกว้าง+AI) ที่เดิมไม่มี บก ดูแล
@@ -525,7 +525,7 @@ export function finalScore(item, perfBoost = null) {
   const fit = fitScore(item.category, perfBoost);
   // evergreen/throwback = ของเก่าตั้งใจหยิบ ไม่หักความสด | good/celeb = มีพื้นขั้นต่ำ | buzz = แชร์จริง+โบนัส | trend = วัดความสดจริง
   const fresh = (item.lane === 'evergreen' || item.lane === 'evergreen-celeb' || item.lane === 'throwback') ? 10
-    : (item.lane === 'good' || item.lane === 'celeb') ? Math.max(8, freshScore(item.publishedAt))
+    : (item.lane === 'good' || item.lane === 'celeb' || item.lane === 'entrss') ? Math.max(8, freshScore(item.publishedAt))
     : item.lane === 'buzz' ? Math.min(20, freshScore(item.publishedAt) + 6)
     : freshScore(item.publishedAt);
   const judge = (item.judgeScore ?? 5) * 5; // 0-50

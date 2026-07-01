@@ -95,7 +95,7 @@ export async function GET(request) {
     }
 
     // ★ 17 มิ.ย. (ทีมสั่งยุบเหลือ 2 หมวดค้น + เรียงใหม่สุดก่อน): 🔥 กระแส / 💚 ดาราน้ำดี
-    const KRATASE_LANES = ['trend', 'buzz', 'trend-track'];                                             // กระแสเรียลไทม์
+    const KRATASE_LANES = ['trend', 'buzz', 'trend-track', 'saga'];                                     // กระแสเรียลไทม์ (+saga 2 ก.ค.)
     const NAMDEE_LANES = ['good', 'celeb', 'evergreen', 'evergreen-celeb', 'throwback', 'followup', 'interview', 'video']; // ดาราน้ำดี (สต็อก)
     // ★ 19 มิ.ย. รอบ 5 (ผู้ใช้: "ดาราน้ำดีมีแต่ดราม่า — ผิด"): ดาราน้ำดี = กรองด้วย "หมวดน้ำดี" ไม่ใช่เลน
     //   เลน celeb มีข่าวดาราทุกแบบ (รวมดราม่า/ปะทะ) → ต้องคัดเฉพาะหมวดทำดี: กตัญญู/น้ำใจ/สู้ชีวิต/คนดังทำดี/สัมภาษณ์ดี
@@ -104,7 +104,7 @@ export async function GET(request) {
       kratase: KRATASE_LANES,
       namdee: NAMDEE_LANES,
       // เก็บ alias เดิมไว้กันลิงก์/บุ๊กมาร์กเก่าพัง
-      trend: KRATASE_LANES, good: NAMDEE_LANES, celeb: ['celeb', 'throwback', 'evergreen-celeb'], clip: ['video', 'interview'], trendtrack: ['trend-track'],
+      trend: KRATASE_LANES, good: NAMDEE_LANES, celeb: ['celeb', 'throwback', 'evergreen-celeb', 'entrss'], clip: ['video', 'interview'], trendtrack: ['trend-track'],
     };
     const isCategoryTab = tab === 'kratase' || tab === 'namdee';
     // ★ 19 มิ.ย. รอบ 2: กระแสรายวัน = เลนกระแส (trend/buzz) "หรือ" หมวด 'กระแสรายวัน' (จากคีย์เชิงลึก broad)
@@ -144,7 +144,7 @@ export async function GET(request) {
     items = items.filter(i => i.status !== 'dismissed' && !i.used);
 
     // ★ quick-fix: คะแนนเสื่อมตามอายุ — กระแสเก่าจมเอง (trend -8/วัน, good -3/วัน, เลนไร้กาลเวลาไม่เสื่อม)
-    const DECAY = { trend: 8, good: 3, evergreen: 0, 'evergreen-celeb': 0, followup: 4, interview: 0, buzz: 10, celeb: 4, throwback: 0, video: 0, 'trend-track': 6 }; // trend-track = กระแสสด เสื่อมปานกลาง | evergreen-celeb/throwback/video = ของตั้งใจหยิบ ไม่เสื่อม
+    const DECAY = { trend: 8, good: 3, evergreen: 0, 'evergreen-celeb': 0, followup: 4, interview: 0, buzz: 10, celeb: 4, throwback: 0, video: 0, 'trend-track': 6, saga: 8, entrss: 4 }; // trend-track = กระแสสด เสื่อมปานกลาง | evergreen-celeb/throwback/video = ของตั้งใจหยิบ ไม่เสื่อม | saga = กระแสใหญ่เสื่อมเร็วเท่า trend (2 ก.ค.)
     items = items.map(i => {
       const ageDays = Math.max(0, (Date.now() - new Date(i.harvestedAt || 0).getTime()) / 864e5);
       const decayed = Math.max(0, Math.round((i.finalScore || 0) - ageDays * (DECAY[i.lane] ?? 4)));
@@ -336,7 +336,8 @@ export async function POST(request) {
     //   ห้ามส่งเนื้อสังเคราะห์หลายแหล่ง (buildEnrichedInput) เข้าไลน์เขียน — เคยทำให้เนื้อหลายข่าวปนกัน
     //   (ผลเจาะลึก research ยังอยู่บนการ์ดให้คนอ่านประกอบ แต่ไม่ feed เข้าไลน์)
     if (action === 'sendWorkflow') {
-      let input = (item.lane === 'interview' && item.fullText)
+      // ★ 2 ก.ค.: คลิปที่ถอดเสียงแล้ว (mined จาก AutoMine/mine-clip) = ส่งบทถอดเสียง (TEXT ข่าวเดียว ตามกฎเหล็ก 12 มิ.ย.)
+      let input = ((item.lane === 'interview' || item.mined) && item.fullText)
         ? item.fullText
         : item.url;
       // ★ ข่าวต่างประเทศ — แนบข้อเท็จจริงประเทศไปกับลิงก์ (pipeline ผนวกเป็นข้อมูลเพิ่มเติม ไม่ใช่เนื้อแทน)
