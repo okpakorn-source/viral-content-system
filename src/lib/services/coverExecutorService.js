@@ -406,8 +406,16 @@ async function renderRectTile(src, crop, slot, fb) {
       if (rl < rMin) { const sh = rMin - rl; rl += sh; rr += sh; }
       region.left = Math.round(Math.max(0, Math.min(rl, imgW - region.width)));
     } else {
-      // ช่องรอง = ครอปหน้าใหญ่สุด จัดกึ่งกลาง เด่นชัด (faceRegionForSlot จัดหน้าไว้กลางเฟรมให้เอง)
-      region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
+      // ★ เฟส 3 จุด3 (CASE-265/266): วัด "การกระจายตัว" หน้าทุกคน = bbox กว้างรวม / ความกว้างภาพ
+      const _spread = Math.max(...fb.allFaces.map(f => f.x2)) - Math.min(...fb.allFaces.map(f => f.x1));
+      if (_spread > 0.55) {
+        // คนยืนห่างกัน → group-crop คลุมทุกคน = คนริมโดนขอบตัดสกปรก → ครอปหน้าใหญ่สุดคนเดียวเด่น
+        console.log(`[CoverV3] 👥 spread-crop: bbox ${(_spread * 100).toFixed(1)}% > 55% → ครอปหน้าเดียว (largest)`);
+        region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
+      } else {
+        // คนชิดกัน (ครอบครัว/คู่ถ่ายใกล้กัน) → group-crop เก็บทุกคนพอดีเฟรม (คง CASE-104)
+        region = groupRegionForSlot(fb.allFaces, imgW, imgH, slot.w / slot.h);
+      }
     }
   } else if (fb && fb.subject && fb.subject.y2 > fb.subject.y1) {
     // ★ 30 มิ.ย.: ไม่เจอหน้าชัด แต่ AI ชี้ "บริเวณคน/ซับเจกต์หลัก" → ครอปรอบคน เผื่อเหนือหัว กันตัดหัว/หน้า
