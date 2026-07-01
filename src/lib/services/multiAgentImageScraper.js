@@ -1988,8 +1988,8 @@ function processJudgeResults(parsed, validCandidates, allowFallback = true) {
     if (selectedImages.length < 5) {
       const selectedUrls = new Set(selectedImages.map(i => i.url));
       const lowScored = rejected
-        .filter(s => s.score > 0 && s.role !== 'REJECT' && s.index >= 0 && s.index < validCandidates.length
-          && !_FORBID_SUPP.test(String(s.reason || '')))   // ★ เฟส3#1: ไม่ยัดภาพ REJECT/เหตุต้องห้ามกลับ
+        .filter(s => s.score >= 2 && s.role !== 'REJECT' && s.index >= 0 && s.index < validCandidates.length
+          && !_FORBID_SUPP.test(String(s.reason || '')))   // ★ เฟส3#1: score≥2 + ไม่ REJECT/เหตุต้องห้าม · score-1 = junk (text/press ที่เพิ่งตัด) ห้ามยัดกลับเด็ดขาด (near-miss score-2 คุมภาพสะอาดแล้ว) → pool แย่ยอม 422
         .sort((a, b) => b.score - a.score);
       for (const s of lowScored) {
         if (selectedImages.length >= 6) break;
