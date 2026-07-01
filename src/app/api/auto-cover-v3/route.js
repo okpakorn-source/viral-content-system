@@ -121,16 +121,49 @@ async function _renderCoverV3(request) {
     console.log(`[CoverV3] identity: ${identity.mainCharacter} | ${identity.storyType}`);
 
     console.log('[CoverV3] ② Multi-agent search + judge...');
-    const { runMultiAgentImageSearch } = await import('@/lib/services/multiAgentImageScraper');
     if (sourceLinks.length) console.log(`[CoverV3] 🔗 แหล่งรูปพนักงาน ${sourceLinks.length} ลิงก์ — ${sourceOnly ? 'โหมดเฉพาะแหล่ง (ไม่รีเสิร์ชเพิ่ม)' : 'ดึงก่อน บูสต์ขึ้นหน้า + รีเสิร์ชเสริม'}`);
-    const selected = await runMultiAgentImageSearch(
-      sourceUrl || '', sourceUrl ? 'url' : 'text',
-      identity.characters || [],
-      newsTitle || (content || '').slice(0, 100),
-      identity,
-      sourceLinks,
-      { sourceOnly }
-    );
+    // ★ Image Pool Cache (opt-in COVER_POOL_CACHE) — ข่าวเดิม=ภาพชุดเดิม=ปกนิ่ง
+    //   guard: เฉพาะข่าว "รีเสิร์ชล้วน" (ไม่มี sourceLinks) เพราะ key = title|mainChar ไม่รวมลิงก์ (กันคีย์ชนกัน)
+    let selected;
+    let _poolCacheMeta = null;
+    const _usePoolCache = process.env.COVER_POOL_CACHE === 'true' && !sourceLinks.length;
+    const _forcePoolRefresh = (body && body.forceRefresh === true) || (request.nextUrl?.searchParams?.get('forceRefresh') === 'true');
+    let _poolCacheKey = null;
+    if (_usePoolCache) {
+      try { const { makeCacheKey } = await import('@/lib/services/coverImagePoolCache'); _poolCacheKey = makeCacheKey(newsTitle, identity?.mainCharacter); } catch {}
+    }
+    if (_usePoolCache && _poolCacheKey && _forcePoolRefresh) {
+      try { const { clearPoolCache } = await import('@/lib/services/coverImagePoolCache'); await clearPoolCache(_poolCacheKey); console.log(`[CoverV3] 🗄️ Pool cache CLEARED (forceRefresh, key=${_poolCacheKey})`); } catch {}
+    }
+    if (_usePoolCache && _poolCacheKey && !_forcePoolRefresh) {
+      try {
+        const { getPoolCache } = await import('@/lib/services/coverImagePoolCache');
+        const rec = await getPoolCache(_poolCacheKey);
+        if (rec?.images?.length >= 4) {
+          selected = rec.images;
+          _poolCacheMeta = { hit: true, ageHours: rec.ageHours, createdAt: rec.createdAt, count: rec.images.length };
+          console.log(`[CoverV3] 🗄️ Pool cache HIT (key=${_poolCacheKey}, ${rec.images.length} ภาพ, อายุ ${rec.ageHours} ชม.) → ข้าม scraper (ปกนิ่ง)`);
+        }
+      } catch (e) { console.warn('[CoverV3] pool cache read error (ข้าม cache):', e.message); }
+    }
+    if (!selected) {
+      const { runMultiAgentImageSearch } = await import('@/lib/services/multiAgentImageScraper');
+      selected = await runMultiAgentImageSearch(
+        sourceUrl || '', sourceUrl ? 'url' : 'text',
+        identity.characters || [],
+        newsTitle || (content || '').slice(0, 100),
+        identity,
+        sourceLinks,
+        { sourceOnly }
+      );
+      if (_usePoolCache && _poolCacheKey && Array.isArray(selected) && selected.length >= 4) {
+        try {
+          const { setPoolCache } = await import('@/lib/services/coverImagePoolCache');
+          const saved = await setPoolCache(_poolCacheKey, selected, { newsTitle, mainCharacter: identity?.mainCharacter });
+          if (saved) { _poolCacheMeta = { hit: false, saved: true }; console.log(`[CoverV3] 🗄️ Pool cache SAVED (key=${_poolCacheKey}, ${selected.length} ภาพ)`); }
+        } catch (e) { console.warn('[CoverV3] pool cache save error (ข้าม):', e.message); }
+      }
+    }
 
     // ★ 26 มิ.ย.: โหมดเฉพาะแหล่ง แต่ดึงรูปจากลิงก์ไม่ได้เลย → แจ้งชัดเจน ไม่วิ่ง pipeline ต่อ (กันค้าง/ปกว่าง)
     //   มักเกิดกับลิงก์ FB วิดีโอ (ดึงเฟรมไม่ได้บนเซิร์ฟเวอร์เบา) — บอกผู้ใช้ให้ลองลิงก์อื่น/โหมดผสม
@@ -737,6 +770,7 @@ async function _renderCoverV3(request) {
       caseId,
       elapsed: `${elapsed}s`,
       identity: { mainCharacter: identity.mainCharacter, storyType: identity.storyType },
+      poolCache: _poolCacheMeta, // ★ null=ไม่ใช้ cache · {hit:true,ageHours}=ใช้ภาพเดิม · {saved:true}=ค้นใหม่+บันทึก
     };
     await markQueueJob('completed', { result: responsePayload });
     return NextResponse.json(responsePayload);

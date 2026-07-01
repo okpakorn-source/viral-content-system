@@ -389,7 +389,7 @@ export default function CoverLabPage() {
   }
 
   // Generate auto cover — ★ Queue mode: enqueue → poll (กัน Vercel FUNCTION_INVOCATION_TIMEOUT)
-  async function handleGenerate(isRegenerate = false, isFresh = false) {
+  async function handleGenerate(isRegenerate = false, isFresh = false, forcePoolRefresh = false) {
     if (!newsTitle && !content) return setError('ใส่หัวข้อหรือเนื้อหาข่าว');
     setLoading(true);
     setError('');
@@ -425,6 +425,7 @@ export default function CoverLabPage() {
         secondaryCharacterName: (overrideSecondaryChar.trim() || '') || undefined,
         coverEmotionOverride: (overrideCoverEmotion.trim() || '') || undefined, // ส่งเฉพาะที่ผู้ใช้ยืนยัน/แก้ (ว่าง = ให้ AI ตัดสินตอนสร้าง)
         celebratedActionOverride: (overrideCelebratedAction.trim() || '') || undefined,
+        forceRefresh: forcePoolRefresh || undefined, // ★ pool cache: ล้าง cache ภาพแล้วค้นใหม่ (ปุ่ม "ค้นภาพใหม่")
         composer, // 'v3' = Vision Director | 'v1' = ระบบเดิม
         regenerate: isRegenerate, clearCache: !!isRegenerate && isFresh,
       });
@@ -1084,6 +1085,16 @@ export default function CoverLabPage() {
                   <span style={badgeStyle}>🖼️ {coverResult.imageCount} ภาพ</span>
                   <span style={badgeStyle}>⭐ {coverResult.score}/10</span>
                   <span style={badgeStyle}>⏱️ {coverResult.elapsed}</span>
+                  {coverResult.poolCache?.hit && (
+                    <span style={{ ...badgeStyle, background: 'rgba(16,185,129,0.15)', color: '#6ee7b7', border: '1px solid rgba(16,185,129,0.35)' }}>
+                      🗄️ ภาพจาก cache ({coverResult.poolCache.ageHours === 0 ? 'เพิ่งบันทึก' : `${coverResult.poolCache.ageHours} ชม.ที่แล้ว`})
+                    </span>
+                  )}
+                  {coverResult.poolCache?.saved && (
+                    <span style={{ ...badgeStyle, background: 'rgba(96,165,250,0.15)', color: '#93c5fd', border: '1px solid rgba(96,165,250,0.35)' }}>
+                      🔎 ค้นภาพใหม่ + บันทึก cache
+                    </span>
+                  )}
                 </div>
                 {coverResult.identity && (
                   <p style={{ color: '#94a3b8', fontSize: 13, marginBottom: 8 }}>
@@ -1120,14 +1131,14 @@ export default function CoverLabPage() {
                     {loading ? '⏳ กำลังสร้างใหม่...' : '🔄 สร้างปกใหม่ (สลับ template)'}
                   </button>
                   <button
-                    onClick={() => handleGenerate(true, true)}
+                    onClick={() => handleGenerate(true, true, true)}
                     disabled={loading}
                     style={{
                       padding: '12px 16px', background: loading ? '#374151' : '#7f1d1d',
                       color: '#fff', border: '1px solid #ef4444', borderRadius: 8, fontSize: 13, fontWeight: 700,
                       cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.6 : 1,
                     }}
-                    title="ล้าง cache ภาพเก่า แล้วค้น Google ใหม่ทั้งหมด"
+                    title="ล้าง cache ภาพเก่า (pool cache) แล้วค้น Google ใหม่ทั้งหมด"
                   >
                     🗑️ ค้นภาพใหม่
                   </button>
