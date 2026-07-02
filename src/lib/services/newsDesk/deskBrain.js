@@ -149,7 +149,7 @@ export async function classifyBatch(items) {
 ข่าว (รูปแบบ: เลข: [โดเมนต้นทาง] หัวข้อ | คำโปรย):
 ${list}
 
-ตอบ: {"items":[{"i":0,"category":"...","tone":"บวก|กลาง|ลบ","toxicity":0-3,"fbRisk":0-3,"toneable":true/false,"country":"","storyNature":"pattern|event","subject":"celeb|public|ordinary","dramaType":"none|soft|hard","hasMainChar":true/false,"staleTrend":true/false,"remakeable":true/false,"clipWorthy":true/false,"royalNegative":true/false,"notability":"famous|semiKnown|unknown","storyIntensity":0-3,"field":"บันเทิง|ดนตรี|อินฟลู|กีฬา|อีสปอร์ต|นางงาม|ครีเอเตอร์|เชฟ|ศิลปิน|ฮีโร่|การแพทย์|การศึกษา|ศาสนา|สายมู|ธุรกิจ|สัตว์เซเลบ|เซเลบ|ไวรัล|อื่นๆ"}]}
+ตอบ: {"items":[{"i":0,"category":"...","tone":"บวก|กลาง|ลบ","toxicity":0-3,"fbRisk":0-3,"toneable":true/false,"country":"","storyNature":"pattern|event","subject":"celeb|public|ordinary","dramaType":"none|soft|hard","hasMainChar":true/false,"staleTrend":true/false,"remakeable":true/false,"clipWorthy":true/false,"royalNegative":true/false,"notability":"famous|semiKnown|unknown","storyIntensity":0-3,"prelimScore":0-10,"field":"บันเทิง|ดนตรี|อินฟลู|กีฬา|อีสปอร์ต|นางงาม|ครีเอเตอร์|เชฟ|ศิลปิน|ฮีโร่|การแพทย์|การศึกษา|ศาสนา|สายมู|ธุรกิจ|สัตว์เซเลบ|เซเลบ|ไวรัล|อื่นๆ"}]}
 - toxicity: 0=สะอาด 3=หดหู่/รุนแรง | fbRisk: ความเสี่ยงโดน Facebook ลดรีช/ลบ (เลือด ความรุนแรง เนื้อหาล่อแหลม)
 - ★★ notability (17 มิ.ย. ทีมขอ "เอาแต่คนมีชื่อเสียง ตัดชาวบ้านนิรนาม"): ตัวเอกของข่าวนี้ดังแค่ไหน
   · "famous" = คนมีชื่อเสียงที่ค้นเจอบนกูเกิล/โซเชียล — ครอบทุกวงการ: ดารา/นักร้อง/นักแสดง/แดนเซอร์/ไอดอล/พิธีกร/อินฟลู/ยูทูบเบอร์/ติ๊กต็อกเกอร์/เน็ตไอดอล/สตรีมเมอร์/นักกีฬาดัง(บอล/วอลเลย์/มวย/แบด/อีสปอร์ต)/นางงาม/เซเลบ/ไฮโซ/ผู้จัดดารา/เชฟดัง/นักวาด-ศิลปินดัง/แดร็กควีน/หมอ-พยาบาลที่ดังบนโซเชียล/ตำรวจ-ทหาร-กู้ภัยที่ดัง/นักธุรกิจ-เจ้าของแบรนด์ดัง/สัตว์เซเลบ-เพจสัตว์ดัง (เช่น หมูเด้ง)
@@ -186,7 +186,10 @@ ${list}
   · 2 = มี contrast ชัด หรือ ตัวเลข/รายละเอียดเจาะใจ อย่างใดอย่างหนึ่ง (เช่น "ดูแลแม่อัลไซเมอร์ 9 ปี หมด 10 ล้าน")
   · 1 = เรื่องดี/น่าสนใจ แต่เล่าเรียบ ไม่มีปม-ไม่มีตัวเลข (เช่น "ดาราใจบุญไปทำบุญที่วัด")
   · 0 = ไม่มีสตอรี่ (ข่าวแจก/ประกาศ/PR/ลิสต์รวม)
-  contrast = ช่องว่างสุดขั้วในเรื่อง: จนมาก↔เก่งมาก · ตำแหน่งใหญ่↔ถ่อมตัวสุด · ให้ทั้งที่ตัวเองก็ลำบาก · เด็กเล็ก↔ความรับผิดชอบใหญ่`,
+  contrast = ช่องว่างสุดขั้วในเรื่อง: จนมาก↔เก่งมาก · ตำแหน่งใหญ่↔ถ่อมตัวสุด · ให้ทั้งที่ตัวเองก็ลำบาก · เด็กเล็ก↔ความรับผิดชอบใหญ่
+- ★★★ prelimScore (3 ก.ค. — แก้คอขวด "ข่าวส่วนใหญ่ไม่เคยถูกประเมิน"): คะแนนเบื้องต้น 0-10 "น่าหยิบมาทำโพสต์เพจไวรัลไทยแค่ไหน"
+  เกณฑ์เดียวกับ บก.: ตัวละครจริง+สตอรี่เข้ม (contrast/ตัวเลข/คำพูดเจาะใจ) = 7-10 · เรื่องดีแต่เรียบ = 4-6 · PR/ประกาศ/การเมือง/ไม่มีคน = 0-3
+  นี่คือคะแนนคัดรอบแรก (บก.ตัวจริงจะตัดสินซ้ำเฉพาะตัวท็อป) — ให้ตามจริง อย่าใจดีเกิน`,
         model: 'gpt-4o-mini',
         temperature: 0.1,
         maxTokens: 1500,
@@ -222,6 +225,8 @@ ${list}
           notability: ['famous', 'semiKnown', 'unknown'].includes(r.notability) ? r.notability : 'semiKnown',
           // ★★ 2 ก.ค.: ความเข้มสตอรี่ (contrast+ตัวเลข) จากผลจริง 949 โพสต์ — default 1 (เรื่องดีเล่าเรียบ)
           storyIntensity: Math.min(3, Math.max(0, Number.isFinite(Number(r.storyIntensity)) ? Number(r.storyIntensity) : 1)),
+          // ★★★ 3 ก.ค.: คะแนนเบื้องต้นทุกใบ (คัดรอบแรกโดย mini) — default 4 กลางๆ ถ้า AI ไม่ตอบ
+          prelimScore: Math.min(10, Math.max(0, Number.isFinite(Number(r.prelimScore)) ? Number(r.prelimScore) : 4)),
           field: typeof r.field === 'string' && r.field.trim() ? r.field.trim().slice(0, 20) : 'อื่นๆ',
         });
       }
@@ -260,6 +265,13 @@ export async function getCategoryPerformance() {
       boost[cat] = Math.max(-6, Math.min(8, (n.viral - n.flop) * 2));
     }
   } catch { /* อ่าน feedback ไม่ได้ = ไม่ปรับ */ }
+  // ★ 3 ก.ค.: รวม boost จากผลเรียนรู้รายเดือน (learn-performance: median หมวดเทียบ median เพจ) — รวมแล้ว cap ±10
+  try {
+    const learn = await getMonthlyLearning();
+    for (const [cat, b] of Object.entries(learn?.catBoost || {})) {
+      boost[cat] = Math.max(-10, Math.min(10, (boost[cat] || 0) + b));
+    }
+  } catch { /* ไม่มีผลเรียนรู้ = ใช้ feedback อย่างเดียว */ }
   _perfCache = { at: Date.now(), boost };
   return boost;
 }
@@ -424,14 +436,31 @@ const FLOP_EXAMPLES = [
   'เรื่องกตัญญูสูตรถูกต้อง แต่เล่าแบบไม่มีตัวเลข-ไม่มีจุดหักมุม-คนไม่ดัง = จมหาย (319) — หมวดถูกไม่พอ ต้องมี "ความเข้ม"',
 ];
 
+// ★ 3 ก.ค.: อ่านผลเรียนรู้รายเดือนจาก /api/news-desk/learn-performance (store 'desk-learning')
+//   มีข้อมูลเดือนล่าสุด = ใช้แทนคลัง hardcode → สมองตามรสนิยมคนดูทันทุกเดือน (cache 10 นาที)
+let _learnCache = { at: 0, data: null };
+async function getMonthlyLearning() {
+  if (Date.now() - _learnCache.at < 10 * 60 * 1000) return _learnCache.data;
+  try {
+    const all = await createStore('desk-learning').getAll();
+    _learnCache = { at: Date.now(), data: all.find(x => x.id === 'latest') || null };
+  } catch { _learnCache = { at: Date.now(), data: null }; }
+  return _learnCache.data;
+}
+
 async function getJudgeFewshot() {
   // ★ คลังทองสอนเสมอ (แม้ยังไม่มี feedback) — เป้าหมายที่ บก.AI ต้องล่า
   // ★★ 2 ก.ค. 69: ชุดใหม่จากผลจริงเดือน มิ.ย. (949 โพสต์) + เพิ่มฝั่งแป้กให้เห็นทั้งสองด้าน
-  const goldBlock = '\n=== 🏆 โพสต์ที่ปังจริงบนเพจ เดือน มิ.ย. 69 (ตัวเลข = รีแอกชันจริง) — ข่าวคล้ายแบบนี้คือเป้าหมาย ให้คะแนนสูง ===\n' +
-    GOLD_EXAMPLES.map(g => '🏆 ' + g).join('\n') + '\n' +
+  // ★★★ 3 ก.ค.: ถ้ามีผลเรียนรู้เดือนล่าสุด (learn-performance) ใช้ชุดนั้นแทน hardcode
+  const learn = await getMonthlyLearning();
+  const gold = (learn?.goldExamples?.length >= 6) ? learn.goldExamples : GOLD_EXAMPLES;
+  const flops = (learn?.flopExamples?.length >= 3) ? learn.flopExamples : FLOP_EXAMPLES;
+  const monthLabel = learn?.month ? `เดือน ${learn.month} (อัพเดตอัตโนมัติจาก ${learn.posts} โพสต์จริง)` : 'เดือน มิ.ย. 69';
+  const goldBlock = `\n=== 🏆 โพสต์ที่ปังจริงบนเพจ ${monthLabel} (ตัวเลข = รีแอกชันจริง) — ข่าวคล้ายแบบนี้คือเป้าหมาย ให้คะแนนสูง ===\n` +
+    gold.map(g => '🏆 ' + g).join('\n') + '\n' +
     'หัวใจร่วม: ตัวละครจริง + การกระทำเป็นรูปธรรม + "ความเข้ม" (contrast สุดขั้ว / ตัวเลขเห็นภาพ / คำพูดเจาะใจ) — เจอครบดันคะแนนขึ้น\n' +
-    '\n=== 🧊 โพสต์ที่แป้กจริงเดือนเดียวกัน (<500 รีแอกชัน) — เจอแบบนี้กดคะแนนลง ===\n' +
-    FLOP_EXAMPLES.map(f => '🧊 ' + f).join('\n') + '\n';
+    '\n=== 🧊 โพสต์ที่แป้กจริงเดือนเดียวกัน — เจอแบบนี้กดคะแนนลง ===\n' +
+    flops.map(f => '🧊 ' + f).join('\n') + '\n';
   try {
     const store = createStore('news-desk-feedback');
     const all = await store.getAll();
@@ -528,7 +557,8 @@ export function finalScore(item, perfBoost = null) {
     : (item.lane === 'good' || item.lane === 'celeb' || item.lane === 'entrss') ? Math.max(8, freshScore(item.publishedAt))
     : item.lane === 'buzz' ? Math.min(20, freshScore(item.publishedAt) + 6)
     : freshScore(item.publishedAt);
-  const judge = (item.judgeScore ?? 5) * 5; // 0-50
+  // ★ 3 ก.ค.: ใบที่ บก.ใหญ่ยังไม่ตัดสิน ใช้คะแนนเบื้องต้น (prelim จาก classify ทุกใบ) แทนค่ากลางตายตัว
+  const judge = (item.judgeScore ?? item.prelimScore ?? 5) * 5; // 0-50
   const toxPenalty = (item.toxicity || 0) * 3 + (item.fbRisk || 0) * 3;
   // ★ 17 มิ.ย. (ทีมเน้นคนมีชื่อเสียง): ดันคนดังขึ้น + มีภาพได้โบนัส (ข่าวมีรูป = ทำคอนเทนต์ได้จริง)
   // ★★ 2 ก.ค. (ผลจริง 949 โพสต์ มิ.ย.): ชาวบ้านนิรนาม "สตอรี่เข้ม" (contrast+ตัวเลข) ปังได้เท่าดารา

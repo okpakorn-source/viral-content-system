@@ -18,11 +18,15 @@ const LANE_HEADERS = {
   buzz: '📊 แชร์จริงในไทยตอนนี้ (BuzzSumo)',
   trend: '🔥 กระแสวันนี้',
   good: '💎 ข่าวน้ำดี',
+  celeb: '🎬 ดารา/คนดัง',                      // ★ 3 ก.ค.: เลนหัวใจเพจ เดิมไม่เคยขึ้นเมนูเช้าเลย
   entrss: '⭐ ตรงจากสำนักบันเทิง (RSS)',
+  throwback: '⏪ ย้อนสัมภาษณ์ดารา (เล่าใหม่ได้)',   // ★ 3 ก.ค.
+  video: '🎞️ คลิปเด่น (ทีมคัด/สั่งถอดได้)',          // ★ 3 ก.ค.: รวมคลิปที่ AutoMine ถอดแล้ว
+  'evergreen-celeb': '♾️ ดาราดีอมตะ',            // ★ 3 ก.ค.
   evergreen: '🗄️ ข่าวเก่าน้ำดี (หยิบมาทำใหม่ได้)',
   followup: '🔁 ตามรอยข่าวที่เพจเคยทำ',
 };
-const LANE_QUOTA = { saga: 5, buzz: 5, trend: 8, good: 10, entrss: 5, evergreen: 4, followup: 3 }; // ★ 2 ก.ค.: +saga/+entrss
+const LANE_QUOTA = { saga: 5, buzz: 5, trend: 8, good: 10, celeb: 6, entrss: 5, throwback: 4, video: 4, 'evergreen-celeb': 4, evergreen: 4, followup: 3 }; // ★ 3 ก.ค.: +celeb/throwback/video/evergreen-celeb
 
 function buildMenu(items) {
   const menu = {};
@@ -79,7 +83,7 @@ async function sendDiscord(menu, deskUrl, extraPayloads = []) {
   if (!webhook) return { sent: false, reason: 'ไม่มี webhook — ตั้งใน env DISCORD_WEBHOOK_URL หรือ store desk-settings' };
 
   const date = new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Bangkok' });
-  const LANE_COLORS = { saga: 0x0ea5e9, buzz: 0x3b82f6, trend: 0xef4444, good: 0x22c55e, entrss: 0xec4899, evergreen: 0x8b5cf6, followup: 0xf59e0b };
+  const LANE_COLORS = { saga: 0x0ea5e9, buzz: 0x3b82f6, trend: 0xef4444, good: 0x22c55e, celeb: 0xf43f5e, entrss: 0xec4899, throwback: 0xa78bfa, video: 0xf59e0b, 'evergreen-celeb': 0x14b8a6, evergreen: 0x8b5cf6, followup: 0xf59e0b };
 
   // ★ ใช้ embed: ลิงก์ฝังในชื่อข่าว ไม่มี URL ยาวเกะกะ อ่านง่ายกว่ากำแพงข้อความ (feedback ผู้ใช้)
   const payloads = [{ content: `# 🗞️ เมนูข่าวเช้า — ${date}\nคัดโดยสมองโต๊ะข่าว · จอง/ส่งทำได้ที่ ${deskUrl}` }];

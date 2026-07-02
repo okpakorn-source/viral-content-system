@@ -76,6 +76,32 @@ export async function deactivateSaga(id) {
 }
 
 /**
+ * ★ 3 ก.ค.: 📈 Google Trends ไทย (RSS ฟรี) — ตาอีกดวงที่มองทั้งประเทศ (เดิม detect ได้เฉพาะ cluster บนโต๊ะตัวเอง
+ *   = ตาบอดกับกระแสที่คีย์เวิร์ดเราไม่แตะ) · ดึงเทรนด์ traffic สูงเป็น candidate เพิ่ม ให้ AI ตัวเดิมคัดว่าเป็นซากาจริงไหม
+ */
+async function fetchTrendsTH() {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    const res = await fetch('https://trends.google.com/trending/rss?geo=TH', {
+      headers: { 'User-Agent': 'Mozilla/5.0' }, signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return [];
+    const xml = await res.text();
+    const dec = (s) => String(s || '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim();
+    const out = [];
+    for (const b of (xml.match(/<item>[\s\S]*?<\/item>/g) || []).slice(0, 12)) {
+      const title = dec((b.match(/<title>([^<]+)</) || [])[1]);
+      const traffic = parseInt(String((b.match(/<ht:approx_traffic>([^<]+)</) || [])[1] || '0').replace(/[^\d]/g, '')) || 0;
+      const newsTitles = [...b.matchAll(/<ht:news_item_title>([^<]+)</g)].map(m => dec(m[1])).slice(0, 2);
+      if (title) out.push({ title, traffic, newsTitles });
+    }
+    return out;
+  } catch { return []; }
+}
+
+/**
  * สแกนโต๊ะหา "กระแสใหญ่กำลังเกิด" — เรื่องเดียวกันโผล่หลายใบ/หลายสำนักใน 48 ชม.
  * → AI (gpt-4o-mini) ตัดสินว่าเป็น "ซากาใหญ่ระดับชาติที่ยังไม่จบ" ไหม + แตกตัวละคร/มุมข้างเคียง
  * throttle: รันจริงทุก ≥2 ชม. (เก็บ lastDetectAt ใน row _meta)
@@ -116,6 +142,15 @@ export async function detectSagas() {
       candidates.push({ titles: items.slice(0, 3).map(i => String(i.title).slice(0, 90)), score: items.length * 2 + altMax + (best.judgeScore || 0) });
     }
   }
+  // ★ 3 ก.ค.: เติม candidate จาก Google Trends ไทย (traffic ≥2000 = คนค้นจริงทั้งประเทศ) — AI คัดขั้นสุดท้ายเหมือนกัน
+  try {
+    const trends = await fetchTrendsTH();
+    for (const t of trends.filter(x => x.traffic >= 2000)) {
+      candidates.push({ titles: [t.title, ...t.newsTitles].filter(Boolean), score: 5 + Math.min(30, t.traffic / 1000), _fromTrends: true });
+    }
+    if (trends.length) console.log(`[SagaTracker] 📈 Google Trends TH: ${trends.length} เทรนด์ (traffic≥2k เข้ารอบ ${trends.filter(x => x.traffic >= 2000).length})`);
+  } catch { /* trends ล่ม = ใช้ cluster โต๊ะอย่างเดียว */ }
+
   if (!candidates.length) return { detected: 0, reason: 'ไม่พบ cluster กระแสใหญ่' };
   candidates.sort((a, b) => b.score - a.score);
   const top = candidates.slice(0, 5);

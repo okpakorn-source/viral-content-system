@@ -17,10 +17,19 @@ async function readJson(rel) {
 
 export async function GET(request) {
   try {
-    const d = await readJson('data/news-desk.json');
-    const fbd = await readJson('data/news-desk-feedback.json');
-    const items = Array.isArray(d) ? d : (d?.items || (d ? Object.values(d) : []));
-    const feedback = Array.isArray(fbd) ? fbd : (fbd?.items || fbd?.rejects || (fbd ? Object.values(fbd) : []));
+    // ★ 3 ก.ค.: อ่านจาก store (Supabase = ความจริง) — ไฟล์ local sync ไม่ครบ (พิสูจน์: ฟิลด์ mined/สถานะบางส่วนหาย)
+    //   local file เป็น fallback เมื่อ store ล่ม (persistStore จัดการ fallback ให้เองอยู่แล้ว)
+    let items = [], feedback = [];
+    try {
+      const { createStore } = await import('@/lib/persistStore');
+      items = await createStore('news-desk').getAll();
+      feedback = await createStore('news-desk-feedback').getAll();
+    } catch {
+      const d = await readJson('data/news-desk.json');
+      const fbd = await readJson('data/news-desk-feedback.json');
+      items = Array.isArray(d) ? d : (d?.items || (d ? Object.values(d) : []));
+      feedback = Array.isArray(fbd) ? fbd : (fbd?.items || fbd?.rejects || (fbd ? Object.values(fbd) : []));
+    }
     // enrich (ให้มี editorial/reliability) แบบเบาๆ — ตัด fullText กันหน่วง
     const enriched = (items || []).slice(0, 2000).map((it) => {
       try { const { fullText, ...rest } = it || {}; return enrichDeskItem(rest); } catch { return it; }

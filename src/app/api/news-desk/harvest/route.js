@@ -78,8 +78,14 @@ export async function POST(request) {
         judgeTop: Math.min(60, Number(body.judgeTop) || 36),
       });
     }
+    // ★ 3 ก.ค.: รอบหนัก/เบาสลับ — cron รายชั่วโมงไม่ยิงเลนแพงทุกรอบ (ลด Serper ~50%)
+    //   หนัก (ชั่วโมงหาร 3 ลงตัว): ครบทุกเลน · เบา: เลนสด (trend/saga/followup) + เลนฟรี (entrss/ytwatch/buzz)
+    //   สั่ง lanes ชัดเจนใน body = override ได้เสมอ
+    const HEAVY_LANES = ['trend', 'good', 'broad', 'exa', 'clip', 'evergreen', 'buzz', 'saga', 'entrss', 'ytwatch', 'followup'];
+    const LIGHT_LANES = ['trend', 'saga', 'buzz', 'entrss', 'ytwatch', 'followup'];
+    const _heavy = new Date().getHours() % 3 === 0;
     return await doHarvest({
-      lanes: Array.isArray(body.lanes) && body.lanes.length ? body.lanes : ['trend', 'good', 'broad', 'exa', 'clip'],
+      lanes: Array.isArray(body.lanes) && body.lanes.length ? body.lanes : (_heavy ? HEAVY_LANES : LIGHT_LANES),
       judgeTop: Math.min(40, Number(body.judgeTop) || 24),
     });
   } catch (error) {

@@ -143,7 +143,9 @@ export const EDITORIAL_STATUS = {
  */
 export function editorialCard(item) {
   const it = item || {};
-  const score = Number(it.judgeScore ?? it.score ?? 0);          // 0-10 (ถ้ายังไม่ judge = 0)
+  // ★ 3 ก.ค.: ไม่มีคะแนน บก.ใหญ่ → ใช้คะแนนเบื้องต้น (prelim จาก classify ทุกใบ) — แก้ "แหล่งอ่อน 67%" เพราะไม่เคยถูกประเมิน
+  const score = Number(it.judgeScore ?? it.prelimScore ?? it.score ?? 0); // 0-10
+  const hasAnyScore = it.judgeScore !== undefined || it.prelimScore !== undefined;
   const hasMainChar = it.hasMainChar !== false;
   const remakeable = it.remakeable !== false;
   const notability = it.notability || 'semiKnown';
@@ -171,7 +173,7 @@ export function editorialCard(item) {
   if (notability === 'unknown' && !strongStory) coverageGap.push('คนยังไม่เป็นที่รู้จัก');
   if (staleTrend) coverageGap.push('เป็นกระแสเก่าที่จบแล้ว');
   if (isDup) coverageGap.push('มุมซ้ำของเดิม');
-  if (!score) coverageGap.push('ยังไม่ผ่าน บก.ประเมิน');
+  if (!hasAnyScore && !score) coverageGap.push('ยังไม่ผ่าน บก.ประเมิน'); // ★ 3 ก.ค.: มี prelim = ถือว่าประเมินรอบแรกแล้ว
   const relScore = it.reliability ? Number(it.reliability.score) : 60; // ★ เฟส 4: ความน่าเชื่อแหล่ง
   if (relScore < 40) coverageGap.push('แหล่งอ่อน ควรหาแหล่งยืนยัน');
 

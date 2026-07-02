@@ -80,7 +80,7 @@ export function computeQueryYield(items, days = 7) {
     if (!byQuery[k]) byQuery[k] = { query: k, lane: it.lane || '?', found: 0, good: 0, used: 0 };
     const row = byQuery[k];
     row.found++;
-    if ((it.judgeScore ?? 0) >= 7) row.good++;                                  // บก.ให้ ≥7 = ข่าวมีคุณภาพ
+    if ((it.judgeScore ?? it.prelimScore ?? 0) >= 7) row.good++;                // บก./คะแนนเบื้องต้น ≥7 = ข่าวมีคุณภาพ (★ 3 ก.ค. +prelim)
     if (it.status === 'sent' || it.shortlisted || it.used) row.used++;          // ทีมใช้จริง
   }
   const rows = Object.values(byQuery);

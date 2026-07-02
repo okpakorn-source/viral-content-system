@@ -361,12 +361,23 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
   const existingIds = new Set(existing.map(e => e.id));
   const stats = { harvested: 0, dupSkipped: 0, gated: 0, archiveDup: 0, judged: 0, added: 0 };
 
+  // ★ 3 ก.ค.: 💀 คีย์ตาย 7 วันล่าสุด (เจอ ≥8 ใบ แต่ไม่มีตัวคุณภาพ/ไม่ถูกใช้เลย) — ข้ามการยิงรอบนี้ ประหยัด Serper
+  //   หน้าต่างเลื่อนเอง: พ้น 7 วันข้อมูลเก่าหลุด คีย์ได้โอกาสใหม่ (ไม่ตายถาวร)
+  let _deadQueries = new Set();
+  try {
+    const { computeQueryYield } = await import('./deskMetrics');
+    _deadQueries = new Set(computeQueryYield(existing, 7).deadQueries.map(d => d.query));
+    if (_deadQueries.size) console.log(`[Harvester] 💀 คีย์ตายรอบนี้ ${_deadQueries.size} คีย์ (ข้ามไม่ยิง): ${[..._deadQueries].slice(0, 3).map(q => q.slice(0, 25)).join(' · ')}...`);
+  } catch { /* คำนวณไม่ได้ = ไม่ข้ามอะไร */ }
+  const _isDead = (q) => { const hit = _deadQueries.has(String(q).slice(0, 80)); if (hit) stats.deadSkipped = (stats.deadSkipped || 0) + 1; return hit; };
+
   // ── เก็บดิบ ──
   const raw = [];
   if (lanes.includes('trend')) {
     // ★ 16 มิ.ย. (เร่งความเร็ว): ยิงคำค้นกระแสพร้อมกัน
     // ★ 2 ก.ค.: ติดป้าย _query ทุกใบ (ทุกเลน) → รายงาน "คีย์ไหนผลิตข่าวที่ถูกใช้จริง" ที่ /api/news-desk/metrics
     const _tRes = await Promise.all(pickTrendQueries(8).map(async q => {
+      if (_isDead(q)) return [];
       try { return (await serperNews(q, { num: 10, timeRange: 'qdr:d' })).map(r => ({ ...r, lane: 'trend', _query: q })); }
       catch (e) { console.log('[Harvester] trend query failed:', e.message?.slice(0, 50)); return []; }
     }));
@@ -407,6 +418,7 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
       // ★ 16 มิ.ย. (เร่งความเร็ว): ยิงทุกคำในกลุ่ม "พร้อมกัน" (Promise.all) แทนทีละคำ — harvest เร็วขึ้นมาก (เดิม 9.6 นาทีเกือบ timeout)
       const runGroup = async (queries, { ep = 'news', lane = 'good', tr = 'qdr:m', num = 10, noClip = false, maxAgeMo = 0 } = {}) => {
         const results = await Promise.all(queries.map(async ({ q, category }) => {
+          if (_isDead(q)) return []; // ★ 3 ก.ค.: คีย์ตายไม่ยิง
           try {
             let res = ep === 'search' ? await serperSearch(q, { num, timeRange: tr })
               : ep === 'videos' ? await serperVideos(q, { num })
@@ -501,6 +513,7 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
       const clipQs = generateClipQueriesByPlatform(4); // 4/แพลตฟอร์ม × 5 = 20 คำค้น/รอบ
       const PLATFORM_SITE = { tiktok: 'site:tiktok.com', instagram: 'site:instagram.com', reels: 'reels', facebook: 'site:facebook.com' };
       const _cRes = await Promise.all(clipQs.map(async ({ q, platform, category }) => {
+        if (_isDead(q)) return []; // ★ 3 ก.ค.: คีย์ตายไม่ยิง
         try {
           let res;
           if (platform === 'youtube') {
@@ -601,7 +614,9 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
   // ── กันซ้ำในคลังตัวเอง (url เดิม) + anti-recycle (หัวข้อที่เพิ่งทิ้ง/ส่งไปแล้ว วนกลับจาก url ใหม่) ──
   // ★ 15 มิ.ย. (ทีมชี้ "ข่าวเก่าวนกลับมา"): กันซ้ำ url อย่างเดียวไม่พอ — เรื่องเดิมมาคนละสำนัก url ใหม่ก็หลุดเข้าได้
   //   เทียบ "หัวข้อ" กับการ์ดที่ dismissed/sent ใน 10 วัน → ถ้าตรง = เคยปัด/เคยทำแล้ว ข้ามเลย (ไม่เปลือง classify ด้วย)
-  const _normRT = (s) => String(s || '').replace(/[\s"“”'‘’!|…\-–·]/g, '').slice(0, 40);
+  // ★ 3 ก.ค. (แก้บั๊กจริงจาก log): ตัด #hashtag ก่อน normalize — คลิปชื่อ "#เม้ามอยส์ดารา #รายการไวรัล..." คนละเรื่อง
+  //   เคยถูกจับควบเป็นเรื่องเดียวกันเพราะ 16 ตัวแรกเหมือนกัน · เหลือแต่แท็ก = สั้นเกินเกณฑ์ = ไม่ควบ (ถูกต้อง)
+  const _normRT = (s) => String(s || '').replace(/#[^\s#]+/g, ' ').replace(/[\s"“”'‘’!|…\-–·]/g, '').slice(0, 40);
   const _recycleCutoff = Date.now() - 10 * 864e5;
   const _rejectedTitles = existing
     .filter(i => (i.status === 'dismissed' || i.status === 'sent') && new Date(i.harvestedAt || 0).getTime() > _recycleCutoff)
@@ -708,7 +723,8 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
   // ── ชั้น 3: บรรณาธิการ AI เฉพาะตัวท็อป (เรียงคร่าวด้วย fit+fresh ก่อน) ──
   // ★ เฟส 3: น้ำหนักหมวดปรับตามผลโพสต์จริง (ปัง/แป้ก) ที่ทีมรายงานกลับ
   const perfBoost = await getCategoryPerformance();
-  classified.sort((a, b) => (fitScore(b.category, perfBoost) + freshScore(b.publishedAt)) - (fitScore(a.category, perfBoost) + freshScore(a.publishedAt)));
+  // ★ 3 ก.ค.: เลือกตัวเข้ารอบ บก.ใหญ่ด้วย prelimScore ด้วย (เดิม fit+fresh ล้วน — ข่าวสตอรี่แรงแต่หมวดกลางๆ ไม่เคยถึงมือ บก.)
+  classified.sort((a, b) => (fitScore(b.category, perfBoost) + freshScore(b.publishedAt) + (b.prelimScore || 0) * 2) - (fitScore(a.category, perfBoost) + freshScore(a.publishedAt) + (a.prelimScore || 0) * 2));
   const toJudge = classified.slice(0, judgeTop);
   const rest = classified.slice(judgeTop);
   const judged = await editorialJudge(toJudge);
@@ -749,7 +765,7 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
   let toAdd = finalItems;
   try {
     const allExisting = await store.getAll();
-    const normT = (s) => String(s || '').replace(/[\s"“”'‘’!|…]/g, '').slice(0, 60);
+    const normT = (s) => String(s || '').replace(/#[^\s#]+/g, ' ').replace(/[\s"“”'‘’!|…]/g, '').slice(0, 60); // ★ 3 ก.ค.: ตัด #hashtag กันควบผิด
     const sameStory = (a, b) => a.length >= 12 && b.length >= 12 && (a.includes(b.slice(0, 16)) || b.includes(a.slice(0, 16)));
 
     const sentRecent = allExisting.filter(i =>
@@ -973,7 +989,7 @@ async function autoPilotPick(freshItems, store, opts = {}) {
 
   // ★ กันส่งเรื่องซ้ำเฉพาะโหมดออโต้ (คำสั่งทีม 12 มิ.ย. ค่ำ — เปลืองโทเคน): เทียบหัวข้อกับที่ "ส่งเจนไปแล้ว" ใน 7 วัน
   //   คนกดส่งเองซ้ำได้เสมอ (คนเลือกเวอร์ชัน/แตกประเด็นเองอยู่แล้ว) — ด่านนี้คุมเฉพาะ บก.AI
-  const _normT = (s) => String(s || '').replace(/[\s"“”'‘’!|…]/g, '').slice(0, 60);
+  const _normT = (s) => String(s || '').replace(/#[^\s#]+/g, ' ').replace(/[\s"“”'‘’!|…]/g, '').slice(0, 60); // ★ 3 ก.ค.: ตัด #hashtag กันกันซ้ำผิด
   const _sentKeys = allItems
     .filter(i => i.status === 'sent' && Date.now() - new Date(i.sentAt || 0).getTime() < 7 * 864e5)
     .map(i => _normT(i.title)).filter(t => t.length >= 12);
