@@ -171,6 +171,12 @@ You must capture the essence of the story, emotional scenes, locations, and impo
 - Generic role words alone — "ลูกชาย", "แม่", "พ่อ", "หนุ่ม", "สาว", "ชายคนหนึ่ง" — are NOT celebrity names → do NOT map them to any celebrity
 - If you cannot name the person from the news text → use role + context (e.g. "ลูกชายผู้ใจบุญ", "แม่ผู้โพสต์"), NEVER a guessed name
 
+★★★ CRITICAL RULE — mainCharacter MUST be a PERSON, never a product/brand/thing (ห้ามเลือกชื่อสินค้า/รถ!):
+- ข่าวที่ "คนซื้อ/ใช้/รีวิว/โชว์/เทิร์น" สินค้า (รถ/มือถือ/นาฬิกา/บ้าน) → mainCharacter = "คนนั้น" เท่านั้น — NEVER the product
+- ★ เคยผิด: ข่าว "เบสท์ คำสิงห์ เทิร์น Alphard แลก Vellfire" → เลือก "โตโยต้า อัลฟาร์ด" (รถ) = ผิด! ต้องเป็น "เบสท์ คำสิงห์" (คน)
+- สินค้า/แบรนด์/รุ่นรถ (โตโยต้า/Alphard/Vellfire/iPhone/Benz) = "ของ" ในเรื่อง ไม่ใช่ตัวเอก → ตัวเอกคือ "คนในข่าว" เสมอ
+- ยกเว้นข่าวสินค้าล้วนที่ไม่มีคนเลย (เปิดตัวรถรุ่นใหม่โดยบริษัท) → ใช้แบรนด์ได้ · แต่ถ้ามี "คน" ในข่าว = ต้องเลือกคน
+
 ★★★ IMPORTANT RULE — Search queries must "tell the story", not just find faces!
 A good viral news cover needs 5 types of images:
 1. Clear face of main character (HERO) — beautiful portrait
@@ -361,7 +367,8 @@ Respond with ONLY a JSON object following this exact structure (ALL values in Th
         console.log(`[StoryIdentity] 🔄 Trying ${MODEL_PRIMARY} fallback...`);
         // ★ GPT-5.5 compatibility
         const _isNew = MODEL_PRIMARY.startsWith('gpt-5') || MODEL_PRIMARY.startsWith('o1') || MODEL_PRIMARY.startsWith('o3');
-        const gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        // ★ rev.S2c (2 ก.ค. — 502 ชั่วคราวเคยพังทั้งท่อปก 5 นาที): ลองซ้ำ 1 ครั้งเฉพาะ 5xx/network (4xx ไม่ซ้ำ)
+        const _gptCall = () => fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${openaiKey}`,
@@ -375,6 +382,18 @@ Respond with ONLY a JSON object following this exact structure (ALL values in Th
             response_format: { type: 'json_object' }
           })
         });
+        let gptRes = null;
+        for (let _a = 0; _a < 2; _a++) {
+          try {
+            gptRes = await _gptCall();
+            if (gptRes.ok || gptRes.status < 500) break; // สำเร็จ หรือ 4xx (ซ้ำไปก็เหมือนเดิม) → พอ
+            if (_a === 0) console.log(`[StoryIdentity] ⚠️ ${MODEL_PRIMARY} HTTP ${gptRes.status} (ชั่วคราว) — รอ 3s ลองซ้ำ...`);
+          } catch (_netErr) {
+            if (_a === 0) console.log(`[StoryIdentity] ⚠️ ${MODEL_PRIMARY} network error: ${String(_netErr?.message || '').slice(0, 50)} — รอ 3s ลองซ้ำ...`);
+            else throw _netErr; // ซ้ำแล้วยังพัง → โยนให้ catch เดิมจัดการ
+          }
+          if (_a === 0) await new Promise(r => setTimeout(r, 3000));
+        }
 
         if (gptRes.ok) {
           const gptData = await gptRes.json();
@@ -398,6 +417,32 @@ Respond with ONLY a JSON object following this exact structure (ALL values in Th
             const _hay = `${newsTitle || ''} ${breakdownData?.core_story || ''}`;
             if (_nameWords.length > 0 && !_nameWords.some(w => _hay.includes(w))) {
               console.warn(`[StoryIdentity] ⚠️ mainCharacter "${parsed.mainCharacter}" ไม่พบในเนื้อข่าว → อาจ infer/เดาชื่อผิด (identity2 guard)`);
+            }
+          } catch {}
+          // ★ Bug#1 (Hermes CASE-296): บังคับ — ถ้า mainCharacter เป็น "ชื่อสินค้า/รถ" ให้หา "คน" ในหัวข้อมาแทน
+          //   (ข่าว "เบสท์ เทิร์น Alphard" → gpt เลือก "โตโยต้า อัลฟาร์ด" (รถ) แทนคน = ปกได้ภาพรถ ไม่ใช่คน)
+          try {
+            const _mc = String(parsed.mainCharacter || '').trim();
+            const _PRODUCT_RE = /โตโยต้า|toyota|ฮอนด้า|honda|อัลฟาร์ด|alphard|vellfire|เวลไฟร์|มาสด้า|mazda|นิสสัน|nissan|อีซูซุ|isuzu|เบนซ์|benz|\bbmw\b|\baudi\b|iphone|ไอโฟน|ซัมซุง|samsung|รถยนต์|รถเก๋ง|รถกระบะ|รถหรู|รถตู้|รถสปอร์ต|มอเตอร์ไซค์|บิ๊กไบค์|มือถือ|โทรศัพท์|นาฬิกาหรู|กระเป๋าแบรนด์/i;
+            // ทริกเกอร์เฉพาะเมื่อ mainCharacter "มีคำสินค้า" (คนจริงชื่อไม่ตรง regex นี้) — กัน false trigger กับชื่อคน
+            if (_mc && _PRODUCT_RE.test(_mc)) {
+              const _title = String(newsTitle || parsed.newsTitle || '').trim();
+              // แยก "คน" = คำนำหน้า title ก่อน action verb (เทิร์น/ซื้อ/แลก/รีวิว/โชว์/ถอย/เปลี่ยน...)
+              const _m = _title.match(/^(.{2,40}?)\s*(?:เทิร์น|ซื้อ|แลก|ขาย|เปลี่ยน|รีวิว|โชว์|อวด|ควง|พา|ถอย|จอง|ขับ|เปิดตัว|ได้รับ|รับมอบ|ปล่อยรถ|ส่งมอบ)/);
+              let _person = _m ? _m[1].trim().replace(/^[!?\s]+|[!?\s]+$/g, '') : '';
+              // ตัด prefix ชื่นชม/ไวรัล ที่มักนำหน้าชื่อ
+              _person = _person.replace(/^(ชื่นชม|แห่ชื่นชม|ชาวเน็ตแห่|เผย|ไวรัล|ด่วน|ล่าสุด)[!\s]*/,'').trim();
+              // ยอมรับเฉพาะเมื่อได้ "คน" ที่ไม่ใช่สินค้า + ยาวพอเป็นชื่อ
+              if (_person && !_PRODUCT_RE.test(_person) && _person.length >= 2 && _person.length <= 30) {
+                console.log(`[StoryIdentity] 🔧 Bug#1: mainCharacter เป็นสินค้า "${_mc}" (rawStoryType=${parsed.rawStoryType}) → บังคับเป็นคน "${_person}"`);
+                parsed.mainCharacter = _person;
+                const sq = parsed.searchQueries || (parsed.searchQueries = {});
+                sq.person_portrait = _person;
+                sq.person_closeup = `${_person} หน้าตรง โคลสอัพ ภาพหน้าชัด`;
+                parsed._productNameFixed = { was: _mc, now: _person };
+              } else {
+                console.warn(`[StoryIdentity] ⚠️ Bug#1: mainCharacter เป็นสินค้า "${_mc}" แต่หา "คน" ในหัวข้อไม่ได้ (คงค่าเดิม — พึ่ง prompt rule)`);
+              }
             }
           } catch {}
           // ★ ผู้ใช้ระบุชื่อเต็มเอง (กฎ: ข่าวชื่อเล่นกำกวม → คนยืนยันชื่อ = ชัวร์สุด) — ข้ามการสืบ ใช้ชื่อนี้ตรงๆ

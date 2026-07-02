@@ -11,6 +11,7 @@
 
 import sharp from 'sharp';
 import { callAI } from '@/lib/ai/openai';
+import { brainPromptBlock } from '@/lib/services/coverBenchmarkBrain'; // 🧠 rev.BRAIN: DNA ปกแสนไลค์คุมทุกจุดตัดสินใจ
 
 // เฟส 2 (1 ก.ค.): gpt-5.5 (reasoning) อ่อน vision-layout → เคยเลือกฮีโร่หน้าเล็ก/แบนเนอร์/หันหลัง (CASE-248)
 //   เปลี่ยนเป็น gpt-4o (vision จริง) เหมือนที่ Judge เปลี่ยนแล้วได้ผลดี · ครอบทั้ง directCover(211) + reviewCover/QC(493)
@@ -89,12 +90,22 @@ export async function directCover({ imageBuffers, identity, templateSpec, templa
       ? ` | ใบหน้าหลัก: x ${fb.x1}-${fb.x2}, y ${fb.y1}-${fb.y2} (กว้าง ${(fb.x2 - fb.x1).toFixed(2)})${fb.count > 1 ? ` [มี ${fb.count} หน้า]` : ''}`
       : '';
     const tr = fb?.textRegion;
+    // ★ rev.S3: ภาพบทบาท EVIDENCE = เอกสาร/ของจริง (natural text) — ตัวหนังสือคือเนื้อหา ไม่ใช่กราฟิกฝัง → ใช้ได้ (รวม circle ตามกฎข้อ 7)
+    const _isEvidence = /EVIDENCE/i.test(imageBuffers[t.index]?.role || '');
     const textWarn = fb?.hasText
-      ? (tr
-        ? ` ⚠️ มีตัวหนังสือฝังโซน x ${tr.x1.toFixed(2)}-${tr.x2.toFixed(2)}, y ${tr.y1.toFixed(2)}-${tr.y2.toFixed(2)} — ใช้ได้ถ้าครอปแน่นที่คนโดยกรอบ "ไม่ทับโซนนี้" (เฟรมรายการทีวี: ซับอยู่แถบล่าง ครอปหน้า-ไหล่หลบได้) | ห้ามใช้กับช่อง circle`
-        : ' ⛔ มีตัวหนังสือฝัง/สกรีนช็อต ไม่รู้ตำแหน่งข้อความ — ห้ามใช้กับช่องคนทุกช่อง')
+      ? (_isEvidence
+        ? ' 📄 หลักฐานจริง (natural text) — ใช้กับช่องหลักฐาน/circle ได้ ซูมให้ตัวเอกสาร/ของเต็มกรอบ'
+        : (tr
+          ? ` ⚠️ มีตัวหนังสือฝังโซน x ${tr.x1.toFixed(2)}-${tr.x2.toFixed(2)}, y ${tr.y1.toFixed(2)}-${tr.y2.toFixed(2)} — ใช้ได้ถ้าครอปแน่นที่คนโดยกรอบ "ไม่ทับโซนนี้" (เฟรมรายการทีวี: ซับอยู่แถบล่าง ครอปหน้า-ไหล่หลบได้) | ห้ามใช้กับช่อง circle`
+          : ' ⛔ มีตัวหนังสือฝัง/สกรีนช็อต ไม่รู้ตำแหน่งข้อความ — ห้ามใช้กับช่องคนทุกช่อง'))
       : '';
-    return `#${t.index}: ${t.width}x${t.height}px${faceTxt}${textWarn}`;
+    // ★ rev.24 (S1 Story Slot Plan): บอกบทบาทที่ Judge ให้ไว้ต่อภาพ → Director จัดช่องตามหน้าที่เล่าเรื่องได้จริง
+    const _role = imageBuffers[t.index]?.role || '';
+    const roleTxt = _role ? ` | บทบาท(Judge): ${_role}` : '';
+    // 👁️ E1: สิ่งที่ "ตาคัดเข้า" เห็นจริงต่อภาพ — Director ใช้เลือกภาพเข้ากับข่าวต่อช่อง (ตา+สมองทำงานร่วม)
+    const _em = imageBuffers[t.index]?.eyeMeta;
+    const eyeTxt = _em ? ` | 👁️ตาเห็น: ${_em.person} · อารมณ์ ${_em.emotion} · ฉาก ${_em.scene} · เข้าข่าว ${_em.fit}/10${_em.facing && _em.facing !== '-' ? ` · หน้า${_em.facing}` : ''}${_em.clean === false ? ' · ⚠️ไม่สะอาด(กราฟิก/รก)' : ''}` : '';
+    return `#${t.index}: ${t.width}x${t.height}px${roleTxt}${eyeTxt}${faceTxt}${textWarn}`;
   }).join('\n');
 
   const templatesBlock = usable.map(t =>
@@ -102,6 +113,8 @@ export async function directCover({ imageBuffers, identity, templateSpec, templa
   ).join('\n\n');
 
   const prompt = `คุณคือ Art Director มืออาชีพของเพจข่าวไวรัล กำลังจัดปกข่าวจากภาพจริง ${thumbs.length} ใบ (เรียงตามลำดับ #0 ถึง #${thumbs.length - 1})
+
+${brainPromptBlock('director')}
 
 === ข่าว ===
 หัวข้อ: ${newsTitle || '-'}
@@ -120,6 +133,29 @@ ${templatesBlock}
 ★ ทุกโครงมี circle/clip (ลุคไวรัล) และมี 4-5 ช่องเสมอ — เลือกโครงที่เล่าเรื่องดีสุด (ปกนี้ไม่มีโครง 3 ภาพแล้ว)
 ขั้น 2: เลือกภาพลงทุกช่องของโครงนั้น + กำหนดกรอบครอปเป็นสัดส่วน 0-1 ของภาพต้นฉบับ
 (x,y = มุมซ้ายบนของกรอบ, w,h = กว้าง/สูงของกรอบ — เทียบกับขนาดเต็มของภาพนั้น)
+ขั้น 2.5 ★★★ 👁️ E2 "ตา+สมองทำงานร่วม" (ผู้ใช้ 2 ก.ค. — เลิกเดาจากบทบาทอย่างเดียว): ทุกภาพมีข้อมูล "👁️ตาเห็น" (ใคร·อารมณ์·ฉาก·เข้าข่าว X/10) จากตาที่ส่องภาพจริงมาแล้ว — ใช้เป็นหลักในการจัดช่อง:
+- ช่องคน (main/ขวา): เลือกภาพที่ตาเห็น "ตัวเอก/ตัวรองตัวจริง" + อารมณ์ตรงกับหน้าที่ช่อง — ภาพเข้าข่าว ≥7 มาก่อนเสมอ ภาพเข้าข่าว ≤4 เป็นตัวเลือกสุดท้าย
+- ⛔ ห้ามวางภาพที่ตาเห็น "ไม่มีคน/คนไม่รู้จัก" ลงช่องคน ตราบใดที่ยังมีภาพตัวเอก/ตัวรองเหลือในพูล
+- ⛔ main: เลือกเฉพาะภาพที่ตาเห็น "หน้าตรง" เท่านั้นถ้ามี (หน้าข้าง = ช่องรองได้เท่านั้น) · ภาพติด ⚠️ไม่สะอาด ให้เลี่ยงทุกช่องถ้ามีภาพสะอาดแทนได้
+- ★ ทุกช่องต้อง "ฉากไม่ซ้ำกัน" ตามที่ตาบรรยาย (scene ต่างกันจริง) — ปกแสนไลค์คือ 4-5 ฉากคนละเหตุการณ์ ไม่ใช่คนเดิมชุดเดิมทุกช่อง
+- "why" ของทุกช่องต้องอ้างสิ่งที่ตาเห็นจริง (คน+อารมณ์+ฉาก ตรงหน้าที่ช่องยังไง) — ห้ามให้เหตุผลลอยๆ
+
+=== ★★★★★ STORY SLOT PLAN (rev.24 — แกะจากปกแสนไลค์จริง: "5 ช่อง = 5 ฉาก ไม่มีฉากซ้ำ") ===
+แต่ละช่องมี "หน้าที่เล่าเรื่อง" ต่างกัน — ใช้ "บทบาท(Judge)" ที่ให้ไว้ต่อภาพด้านบนเป็นตัวจัด:
+1. main (hero) = "อารมณ์แรงสุดของตัวเอก" → HERO_FACE/EMOTION (หน้าโคลสอัพ เห็นความรู้สึก)
+   ⛔⛔ rev.A (batch รอบ1): main ห้ามเด็ดขาด — ภาพ "ไร้หน้าคน" (วิวถนน/พวงมาลัย/สิ่งของล้วน แม้จะสื่อแอ็กชัน) · ภาพ "แว่นดำ/หน้าถูกบัง" (จำหน้าไม่ได้) · ภาพที่ "ตัวเอกจริงของข่าว" ไม่อยู่หรือไม่เด่น
+   ★ "ตัวเอกจริง" = คนที่ข่าวเล่าถึง ไม่ใช่คนดังสุดในพูล: ข่าวลูกดารา → main คือ "เด็ก" ไม่ใช่พ่อแม่ · ข่าวคู่ตายาย → main เป็นหน้าตา/ยาย หรือคู่กัน
+   ★★ rev.A4 (CASE-319 ฮีโร่ได้หน้าหัวเราะในรายการ ทั้งที่มีภาพอุ้มหมา): ข่าวช่วยเหลือ/รับเลี้ยงสัตว์/คนกับสัตว์ — ถ้าพูลมีภาพ "ตัวเอกกับสัตว์" ที่เห็นหน้าคนชัด → **ต้องใช้เป็น main เสมอ** (หน้าเดี่ยวในรายการทีวี = ช่องรองเท่านั้น) — โมเมนต์คน+สัตว์คือหัวใจข่าวแนวนี้
+   ★★★ rev.A6 (CASE-321 อุ้มหมาถูกวางลงวงกลมแทน main — กฎชนกัน): ถ้ากฎ A4 ใช้ได้ (มีภาพตัวเอก+สัตว์) → **ลำดับชี้ขาด: ภาพคน+สัตว์ที่ดีที่สุด = main ก่อนเสมอ** · circle ใช้ภาพคน+สัตว์ "ใบรอง" หรือสัตว์เดี่ยว — ห้ามเอาใบที่ดีที่สุดไปลงวงกลมแล้วปล่อย main เป็นพอร์ตเทรต
+   ⛔ rev.A6b: ข่าว human-interest/สัตว์/ช่วยเหลือ — ห้ามภาพ "ถ่ายแบบ/แฟชั่น/สตูดิโอโพส" เป็น main เด็ดขาด (ผิดโทนข่าว — DOCUMENTARY>GLAMOUR) แม้หน้าจะใหญ่คมสุดในพูลก็ตาม
+   ★★ rev.A5 (CASE-319 hero+ขวาบนฉากเดียวกัน 2 ช่องใหญ่ = ปกแบน): main ต้องเป็น "ฉากที่ไม่ซ้ำกับช่องอื่นใดเลย" — ห้ามช่องไหนใช้ภาพจากฉาก/ชุด/สถานที่เดียวกับ main เด็ดขาด (กฎซ้ำ ≤2 ช่องใช้กับช่องรองด้วยกันเท่านั้น)
+   ★ ภาพในรายการทีวีที่ฉากหลังมี "ป้ายไฟ/โลโก้รายการตัวใหญ่" → ใช้ได้ไม่เกิน 1 ช่อง และห้ามเป็น main ถ้ามีภาพแคนดิด/โมเมนต์เรื่องจริงให้เลือก
+2. ช่องขวาใบหนึ่ง = "ปฏิกิริยา/อีกบุคคลของเรื่อง" → RELATIONSHIP (หน้าตัวรอง/คนเกี่ยวข้องที่ข่าวระบุ) — ★ ถ้ามีในพูล ต้องใช้ 1 ช่องเสมอ
+3. ช่องขวาอีกใบ = "แอ็กชันของข่าว" → KEY_ACTIVITY (ตัวเอกกำลังทำสิ่งที่ข่าวเล่า) — ★ ถ้ามี ต้องใช้
+4. ช่องขวาที่เหลือ = "บริบท/สถานที่/หลักฐาน" → CONTEXT_SCENE/EVIDENCE
+5. circle = "โมเมนต์พิเศษ" (กอด/ปลอบ/ช่วยเหลือ/อารมณ์คนละฉากกับ hero)
+⛔⛔ กฎเหล็กฉากซ้ำ: ห้ามใช้ภาพ "ฉากเดียวกัน" (คนเดิม+ชุดเสื้อผ้าเดิม+ฉากหลังเดิม) เกิน 2 ช่อง — ปกที่หน้าตัวเอกชุดเดิมโผล่ทุกช่อง = ปกแบน ไม่เล่าเรื่อง (ตรงข้ามปกไวรัลจริง)
+★ ถ้าพูลไม่มีบทบาทไหน → เติมด้วยหน้าตัวเอก "คนละฉาก/คนละชุด/คนละอารมณ์" · ลำดับความสำคัญ: บทบาทตรง > ฉากต่าง > จำใจใช้หน้าซ้ำ (ครอปต่างมุมให้มากที่สุด)
 
 กฎเหล็ก:
 0. ★★★ หลักเหนือทุกข้อ (DNA ปกไวรัลจริง): "เน้นใบหน้าคนให้มากที่สุด ฉากหลังเอาแค่จำเป็น"
@@ -165,7 +201,9 @@ ${templatesBlock}
 2. ★ ทุกช่องต้องมี "จุดโฟกัสเดียว" ชัดเจน — คนหรือสิ่งสำคัญหนึ่งอย่างเด่นกลางกรอบ ไม่ใช่ภาพรวมกว้างๆ ที่ไม่รู้จะมองตรงไหน (ช่องโมเมนต์รับมอบ/จับมือ: โฟกัสที่ "คน+ของที่ส่งมอบ" ไม่ใช่ทั้งห้อง)
 3. ห้ามใช้ภาพเดียวกันเกิน 1 ช่อง / ห้ามภาพคนละเหตุการณ์กับข่าว / ห้ามภาพที่มีตัวหนังสือ-โลโก้ฝังใหญ่
    ★ ภาพที่มีตัวหนังสือฝังแบบรู้ตำแหน่ง (มีโซน ⚠️ ระบุ): ใช้กับช่องคนได้ "เฉพาะเมื่อกรอบครอปไม่ทับโซนข้อความ" — คำนวณจากพิกัดที่ให้ เช่น ซับรายการอยู่ y 0.75-1.0 → ครอปหน้า-ไหล่จบที่ y ≤0.70 (วิธีนี้ได้ภาพเหตุการณ์จริงจากรายการโดยไม่ติดซับ)
-   ★ ช่อง circle: ห้ามภาพมีตัวหนังสือฝังเด็ดขาดทุกกรณี (วงเล็ก ครอปพลาดนิดเดียวข้อความเต็มวง) / สกรีนช็อตโพสต์-แชท: ห้ามทุกช่องคนเหมือนเดิม
+   ★ ช่อง circle: ห้ามภาพมี "ตัวหนังสือกราฟิกฝัง/ซับ/แบนเนอร์" เด็ดขาด (วงเล็ก ครอปพลาดนิดเดียวข้อความเต็มวง) / สกรีนช็อตโพสต์-แชท: ห้ามทุกช่องคนเหมือนเดิม
+   ★ rev.C (CASE-313): circle ห้ามภาพที่มี "ลายน้ำ/URL เว็บ" ทุกตำแหน่งด้วย (วงเล็กหนีลายน้ำไม่ได้) — เลือกภาพสะอาดใบอื่นเสมอ
+     — ★ rev.S3 ข้อยกเว้นเดียว: ภาพบทบาท EVIDENCE (เอกสาร/ของจริง natural text เช่น ใบเกรด) ลงวงได้ตามกฎข้อ 7 (ตัวหนังสือบนเอกสารจริง ≠ กราฟิกฝัง)
 4. สัดส่วนกรอบครอปควรใกล้เคียงสัดส่วนช่อง (ต่างได้ไม่เกิน ~25% — ระบบจะขยายให้พอดีเอง)
 5. แต่ละช่องเล่าคนละ "โมเมนต์" ของเรื่อง (เหตุการณ์/สถานที่/ความสัมพันธ์ ไม่ใช่ portrait ซ้ำๆ)
    ★★★ สื่อเรื่องสำคัญกว่าสวย: ก่อนเลือกภาพ ให้ไล่ "beat หลักของข่าวนี้" จากเรื่องย่อก่อน
@@ -182,6 +220,8 @@ ${templatesBlock}
      — ⛔ ห้ามเอา "หน้าเดี่ยว portrait ซ้ำๆ" มาเติมทุกช่องจนปกไม่มีรายละเอียดเล่าเรื่อง
 6. กรอบครอปต้องไม่เล็กกว่า 0.15 ของภาพ (กันซูมจนแตก) — แต่ถ้าภาพต้นฉบับใหญ่ ครอปแน่นได้เต็มที่
 7. ช่อง "circle" (ถ้ามี): ครอปหน้าคนแน่นเต็มวง 1 คน — ★ ต้องเป็น "คนละบุคคล" หรือ "คนละอารมณ์เด่นชัด" จากช่อง main (วงกลมที่หน้าซ้ำฮีโร่เฉยๆ = เสียช่องไปฟรี)
+   ★ rev.S3 (สูตรปกแสนไลค์ — วงกลมใบเกรด 4.00): หรือใช้ "หลักฐานชิ้นสำคัญของข่าว" (ภาพบทบาท EVIDENCE — เอกสาร/ใบเกรด/โฉนด/ของจริงที่ข่าวเล่า) ซูมให้ชิ้นนั้นเต็มวง = ช็อตไวรัลจริง
+   ⛔ เงื่อนไข EVIDENCE ลงวง: ต้องเป็น "ภาพถ่ายของจริง/เอกสารจริง" (natural text อ่านได้) เท่านั้น — สกรีนช็อตโพสต์/แชท/ภาพมีกราฟิก-แบนเนอร์ซ้อน ยังห้ามเด็ดขาดทุกกรณี
    ⛔★★★ ห้ามภาพหมู่/ภาพครอบครัวที่มี ≥3 หน้าในวงกลมเด็ดขาด — วงเล็ก หน้าจะจิ๋วมองไม่ออก (บทเรียน CASE-070: เอาภาพครอบครัว 5 คนใส่วง หน้าเล็กหมด). เลือก "หน้าเดี่ยวคมๆ" เท่านั้น; ถ้าไม่มีหน้าเดี่ยวอื่นเหลือ ใช้ "ภาพคู่ 2 คน" ได้ แต่ห้ามเกิน 2 หน้า
 8. ช่อง "highlight" (ถ้ามี): วินาทีสำคัญของเหตุการณ์ (การส่งมอบ/การกระทำ/หลักฐาน)
 9. ★★ HEADROOM: ขอบบนของกรอบครอปต้องอยู่ "เหนือเส้นผม" เสมอ — ถ้าหัวคนชิดขอบบนของภาพต้นฉบับให้เริ่ม y=0 ได้ แต่ห้ามตั้ง y ที่ทำให้ผม/ศีรษะหลุดกรอบเด็ดขาด
@@ -257,7 +297,14 @@ ${templatesBlock}
       const fbC = circleA ? faceBoxes[circleA.imageIndex] : null;
       const circleArea = (fbC && fbC.x2 > fbC.x1) ? (fbC.x2 - fbC.x1) * (fbC.y2 - fbC.y1) : 0;
       // ★ rev.22 (CASE-215): วงกลมต้องเป็น "หน้าเดี่ยวใหญ่ชัด" — เข้มขึ้น: ผิดถ้า ไม่มีหน้า/หน้า ≥2 คน/หน้าเล็กกว่า 3.5%
-      const needsSwap = circleA && (!fbC || !(fbC.x2 > fbC.x1) || (fbC.count || 1) >= 2 || circleArea < 0.035);
+      // ★ rev.S3: ยกเว้น "EVIDENCE ลงวง" (เอกสาร/ของจริง ไม่มีหน้าโดยธรรมชาติ — Director ตั้งใจเลือกตามกฎข้อ 7) → ห้ามสลับทิ้ง
+      // ★ S3b (CASE-323 วงกลมได้หน้าร้านเปล่า+ถังขยะ): เข้มขึ้น — EVIDENCE ลงวงได้เฉพาะ "เอกสาร/ป้ายที่มีตัวหนังสือจริง" (hasText)
+      //   ฉากสถานที่เปล่าๆ ไม่มีจุดเด่น = ไม่ใช่หลักฐานที่เล่าเรื่องได้ → สลับเป็นหน้าคน/โมเมนต์ตามปกติ
+      // ★ S3c (CASE-328 วงกลมได้ "ในเซเว่นเปล่า" เพราะป้ายราคานับเป็น hasText): ต้องมาจากคำค้นหลักฐานจริงด้วย (evidence_items เช่น ใบเกรด/เอกสาร)
+      const _evCircle = circleA && /EVIDENCE/i.test(imageBuffers[circleA.imageIndex]?.role || '')
+        && !!faceBoxes[circleA.imageIndex]?.hasText
+        && /evidence/i.test(String(imageBuffers[circleA.imageIndex]?.queryLabel || ''));
+      const needsSwap = circleA && !_evCircle && (!fbC || !(fbC.x2 > fbC.x1) || (fbC.count || 1) >= 2 || circleArea < 0.035);
       if (needsSwap) {
         const usedIdx = new Set(valid.map(a => a.imageIndex));
         let best = -1, bestArea = 0;
@@ -276,11 +323,15 @@ ${templatesBlock}
       if (circleA) {
         const fbNow = faceBoxes[circleA.imageIndex];
         if (fbNow && fbNow.x2 > fbNow.x1) {
-          circleA.crop = cropFromFaceBox(fbNow, 1.5);
+          circleA.crop = cropFromFaceBox(fbNow, 1.42, 0.34); // rev.23 (CASE-298): ซูมหน้าเข้าอีก (1.5→1.42) + ลด headroom กันตัดคาง
           circleA.why = (circleA.why || 'วงกลม').slice(0, 60) + ' [หน้าเต็มวง]';
         }
       }
     } catch { /* guard ไม่สำเร็จ ไม่ critical */ }
+
+    // ★ rev.FINAL: เมื่อ Final Cropper เปิด (default) — ปลด "สงคราม guard" ที่แย่งกันสลับ/ครอป hero (14h/G2/A7/rev.13/tighten)
+    //   เหลือ Director+brain เลือกภาพ แล้ว Final Cropper (เห็นภาพจริง) ตัดสินครอปครั้งเดียว — จบสงครามเขียนทับ
+    const _FINAL_ON = process.env.COVER_FINAL_CROPPER !== '0';
 
     // rev.14h guard: ช่อง hero (main) ต้องเป็น "หน้าเดี่ยวใหญ่ชัด รู้ทันทีว่าใคร" (กฎเหล็กผู้ใช้)
     //    บทเรียน CASE-087: Director เอาภาพคู่ใส่ hero ส่วนหน้าเดี่ยวสวยไปอยู่ช่องเล็ก → สลับให้หน้าเดี่ยวขึ้น hero
@@ -301,12 +352,29 @@ ${templatesBlock}
       // หาคู่แข่งฮีโร่ดีสุด (หน้าเดี่ยวใหญ่+คม ไม่มีตัวหนังสือ) ก่อน — ใช้เทียบทั้ง 2 เงื่อนไขสลับ
       let best = -1, bestScore = 0;
       faceBoxes.forEach((fb, i) => { const s = heroScore(fb); if (s > bestScore) { bestScore = s; best = i; } });
+      // ★ rev.A2 (batch#2 CASE-312 ฮีโร่ไร้หน้า): พูลไม่มี "หน้าเดี่ยวสะอาด" เลย + main ก็ไร้หน้า
+      //   → ชั้นสำรอง: ยอมรับภาพ ≤2 หน้า ไม่มีตัวหนังสือ (คู่ตายาย/คู่แม่ลูก = ฮีโร่ที่ดีกว่าภาพไร้หน้าแน่นอน)
+      if (best < 0 && (!fbM || !(fbM.x2 > fbM.x1))) {
+        let bestArea2 = 0;
+        faceBoxes.forEach((fb, i) => {
+          if (!fb || !(fb.x2 > fb.x1) || (fb.count || 1) > 2 || fb.hasText) return;
+          const area = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);
+          if (area > bestArea2) { bestArea2 = area; best = i; bestScore = area * 0.5; }
+        });
+        if (best >= 0) console.log(`[CoverDirector] 🔧 hero tier-2: main ไร้หน้า + ไม่มีหน้าเดี่ยวสะอาด → ใช้ภาพ ≤2 หน้า #${best}`);
+      }
       const mainScore = heroScore(fbM);
       const bestArea = best >= 0 ? (faceBoxes[best].x2 - faceBoxes[best].x1) * (faceBoxes[best].y2 - faceBoxes[best].y1) : 0;
       // rev.16b: ห้ามแตะ hero เดี่ยวที่ Director ตั้งใจเลือก (กัน CASE-143 ผิดตัวหลัก)
       // ★ 1 ก.ค.: ยกเว้น — ฮีโร่ "หน้าเล็ก/แบนเนอร์" ทั้งที่ในพูลมีหน้าสะอาด "ใหญ่กว่า ≥2 เท่า + คะแนนชนะ ≥1.4 เท่า" → ดึงหน้าใหญ่สุดขึ้น
       const heroIsWeak = !mainIsBigSingle || (best >= 0 && mainArea < 0.5 * bestArea && bestScore > mainScore * 1.4);
-      if (mainA && heroIsWeak) {
+      // ★★ rev.G (CASE-320 ฮีโร่โดนแย่งกลับเป็นหน้าไลฟ์ ทั้งที่ Director เลือกภาพอุ้มหมา): Director เลือก "โมเมนต์เล่าเรื่อง"
+      //   (role KEY_ACTIVITY/RELATIONSHIP — คน+สัตว์/ภาพคู่/แอ็กชันข่าว) เป็นฮีโร่โดยตั้งใจ + เห็นหน้าคนพอจำได้ (≥0.5%)
+      //   → guard ห้ามแย่งไปหา "หน้าใหญ่เฉยๆ" — ปกแสนไลค์ใช้ฮีโร่โมเมนต์แบบนี้ทั้งนั้น
+      const _mainRole = String(imageBuffers[mainA?.imageIndex]?.role || '');
+      const _mainStoryMoment = /KEY_ACTIVITY|RELATIONSHIP/i.test(_mainRole) && fbM && fbM.x2 > fbM.x1 && mainArea >= 0.005 && !fbM.hasText;
+      if (_mainStoryMoment && heroIsWeak) console.log(`[CoverDirector] 🛡️ hero=โมเมนต์เล่าเรื่อง (${_mainRole}) — guard ไม่แย่ง (rev.G)`);
+      if (!_FINAL_ON && mainA && heroIsWeak && !_mainStoryMoment) { // ★ rev.FINAL: ปิดเมื่อ FinalCropper คุม
         if (best >= 0 && best !== mainA.imageIndex && bestScore > mainScore) {
           const ownerA = valid.find(a => a.imageIndex === best);
           if (ownerA && ownerA !== mainA) {
@@ -324,11 +392,96 @@ ${templatesBlock}
       }
     } catch { /* guard ไม่สำเร็จ ไม่ critical */ }
 
+    // ★★★ rev.G2 (CASE-321/322 ฮีโร่ลายม้าลายแฟชั่น 2 รอบ — prompt A4/A6b โดนเมิน): บังคับด้วยโค้ด
+    //   main มาจาก "คำค้นพอร์ตเทรต/แฟชั่น" ทั้งที่พูลมี "ภาพโมเมนต์ข่าว" (role เล่าเรื่อง / ค้นจาก key_activity ฯลฯ)
+    //   → สลับ main เป็นภาพโมเมนต์ที่หน้าคนใหญ่สุด (ปกแสนไลค์ทุกใบ hero = โมเมนต์/อารมณ์ ไม่ใช่ถ่ายแบบ)
+    try {
+      const mainA2 = valid.find(a => a.slotId === 'main' || /hero/i.test(a.slotId));
+      if (mainA2) {
+        const _PORTRAIT_Q = /portrait|magazine|closeup|โคลสอัพ|หน้าใส|clean face|ถ่ายแบบ|นิตยสาร/i; // ★ G2b: +closeup (CASE-323 "person closeup" หลุด)
+        const _STORY_Q = /key.?activity|reaction|emotion.?moment|pair|secondary|news context|event context|evidence/i;
+        const _mq = String(imageBuffers[mainA2.imageIndex]?.queryLabel || '');
+        const _mr = String(imageBuffers[mainA2.imageIndex]?.role || '');
+        const _mainIsPortraitShot = _PORTRAIT_Q.test(_mq) && !/KEY_ACTIVITY|RELATIONSHIP|EMOTION/i.test(_mr);
+        if (!_FINAL_ON && _mainIsPortraitShot) { // ★ rev.FINAL: ปิดเมื่อ FinalCropper คุม (Director+brain เลือกเอง)
+          let _cand = -1, _candArea = 0;
+          imageBuffers.forEach((im, i) => {
+            if (i === mainA2.imageIndex) return;
+            const _q = String(im?.queryLabel || ''), _r = String(im?.role || '');
+            if (!(/KEY_ACTIVITY|RELATIONSHIP|EMOTION/i.test(_r) || _STORY_Q.test(_q))) return;
+            const fb2 = faceBoxes[i];
+            if (!fb2 || !(fb2.x2 > fb2.x1) || fb2.hasText) return;
+            const _area = (fb2.x2 - fb2.x1) * (fb2.y2 - fb2.y1);
+            if (_area >= 0.005 && _area > _candArea) { _candArea = _area; _cand = i; }
+          });
+          // ★ G2c (CASE-326 พูลไม่มี role เล่าเรื่องเลย แต่มีภาพไลฟ์+หมา): ชั้นสำรอง — ภาพหน้าเดี่ยวใดๆ ที่ "ไม่ใช่ค้นพอร์ตเทรต"
+          //   ปกข่าวจริงเอาภาพถ่ายแบบเป็นฮีโร่ไม่ได้ทุกกรณี (DOCUMENTARY>GLAMOUR) — แคนดิด/ไลฟ์/เฟรมข่าวชนะเสมอ
+          if (_cand < 0) {
+            imageBuffers.forEach((im, i) => {
+              if (i === mainA2.imageIndex) return;
+              const _q2 = String(im?.queryLabel || '');
+              if (_PORTRAIT_Q.test(_q2)) return; // พอร์ตเทรตเหมือนกัน = ไม่ช่วย
+              const fb2 = faceBoxes[i];
+              if (!fb2 || !(fb2.x2 > fb2.x1) || (fb2.count || 1) > 2 || fb2.hasText) return;
+              const _area = (fb2.x2 - fb2.x1) * (fb2.y2 - fb2.y1);
+              if (_area >= 0.008 && _area > _candArea) { _candArea = _area; _cand = i; }
+            });
+            if (_cand >= 0) console.log(`[CoverDirector] 🎯 G2c: ไม่มี role เล่าเรื่อง → ใช้หน้าเดี่ยว non-portrait #${_cand}`);
+          }
+          if (_cand >= 0) {
+            const _owner = valid.find(a => a.imageIndex === _cand);
+            if (_owner && _owner !== mainA2) {
+              const _ti = mainA2.imageIndex, _tc = mainA2.crop;
+              mainA2.imageIndex = _cand; mainA2.crop = cropFromFaceBox(faceBoxes[_cand], 1.62);
+              _owner.imageIndex = _ti; _owner.crop = _tc;
+              console.log(`[CoverDirector] 🎯 rev.G2 hero SWAP: main(ถ่ายแบบ "${_mq.slice(0, 20)}") ↔ ${_owner.slotId}(โมเมนต์ข่าว #${_cand})`);
+            } else if (!_owner) {
+              mainA2.imageIndex = _cand; mainA2.crop = cropFromFaceBox(faceBoxes[_cand], 1.62);
+              console.log(`[CoverDirector] 🎯 rev.G2 hero ← #${_cand} (โมเมนต์ข่าวแทนภาพถ่ายแบบ)`);
+            }
+            mainA2.why = 'hero: โมเมนต์ข่าวแทนภาพถ่ายแบบ (rev.G2)';
+          }
+        }
+      }
+    } catch { /* ไม่ critical */ }
+
+    // ★ rev.A7 (CASE-325 ฮีโร่หน้าพูดในรายการ ทั้งที่พูลมีหมาเลียหน้า): ข่าวสัตว์ → hero = ภาพ "คน+สัตว์" (RELATIONSHIP) ที่ดีที่สุดเสมอ
+    try {
+      const _newsBlob = `${newsTitle || ''} ${identity?.story || ''} ${identity?.coreStory?.celebratedAction || ''}`;
+      if (!_FINAL_ON && /หมา|สุนัข|แมว|ลูกหมา|ลูกแมว|สัตว์เลี้ยง|สี่ขา/.test(_newsBlob)) { // ★ rev.FINAL: ปิดเมื่อ FinalCropper คุม
+        const mainA3 = valid.find(a => a.slotId === 'main' || /hero/i.test(a.slotId));
+        const _isPet = (i) => /RELATIONSHIP/i.test(String(imageBuffers[i]?.role || ''));
+        if (mainA3 && !_isPet(mainA3.imageIndex)) {
+          let _b = -1, _ba = 0;
+          imageBuffers.forEach((im, i) => {
+            if (!_isPet(i)) return;
+            const fb3 = faceBoxes[i];
+            if (!fb3 || !(fb3.x2 > fb3.x1) || fb3.hasText) return;
+            if (fb3.y1 >= 0.45) return; // ★ A7b (CASE-331 หัวขาด): fb ต่ำผิดปกติ = อาจจับหน้าหมาแทนหน้าคน — ห้ามใช้เป็นฐานครอปฮีโร่
+            const _a3 = (fb3.x2 - fb3.x1) * (fb3.y2 - fb3.y1);
+            if (_a3 >= 0.004 && _a3 > _ba) { _ba = _a3; _b = i; }
+          });
+          if (_b >= 0) {
+            const _ow = valid.find(a => a.imageIndex === _b);
+            if (_ow && _ow !== mainA3) {
+              const _ti = mainA3.imageIndex, _tc = mainA3.crop;
+              mainA3.imageIndex = _b; mainA3.crop = cropFromFaceBox(faceBoxes[_b], 1.62);
+              _ow.imageIndex = _ti; _ow.crop = _tc;
+            } else if (!_ow) {
+              mainA3.imageIndex = _b; mainA3.crop = cropFromFaceBox(faceBoxes[_b], 1.62);
+            }
+            mainA3.why = 'hero: โมเมนต์คน+สัตว์ (rev.A7 ข่าวสัตว์)';
+            console.log(`[CoverDirector] 🐕 rev.A7 hero ← #${_b} (คน+สัตว์ RELATIONSHIP)`);
+          }
+        }
+      }
+    } catch { /* ไม่ critical */ }
+
     // rev.13 guard: ภาพ "เดี่ยว 1 หน้า" ช่องไหนครอปหลวมเกินไป → กระชับเป็นหัว-ไหล่อัตโนมัติ
     //    บทเรียน CASE-072: ช่องรองเบนซ์ชุดแดงยืนครึ่งตัวหน้าเล็ก (Director คุมแน่นแค่ hero) — ทุกช่องคนต้องเต็มกรอบ
     //    เฉพาะ count===1 (ภาพคู่/หมู่ปล่อยกว้างตามเดิม กันครอปทิ้งคนอื่น)
     try {
-      valid.forEach(a => {
+      if (!_FINAL_ON) valid.forEach(a => { // ★ rev.FINAL: ปิดเมื่อ FinalCropper คุมครอป
         const fb = faceBoxes[a.imageIndex];
         if (!fb || !(fb.x2 > fb.x1) || (fb.count || 1) !== 1) return;
         const fw = fb.x2 - fb.x1;
@@ -342,7 +495,7 @@ ${templatesBlock}
     // rev.20 (ผู้ใช้ 20 มิ.ย.): ช่อง "โมเมนต์ขวา" ต้องโฟกัสหน้าคน สะอาด — บังคับครอปหน้า-ไหล่ (ตัด bg/ไมค์/โซฟา)
     //   ★ rev.20f: ถอดตัว "สลับเป็นภาพเดี่ยว" (rev-20e) ออก — มันไปดึงภาพหลุดบริบท (ชายหาด/บิกินี) ที่ judge จัดอันดับต่ำมาใช้ (CASE-156 พัง)
     //   เชื่อการคัดของ judge เหมือน CASE-155 (ดีแล้ว) แค่กระชับครอปให้แน่น โดยเฉพาะช่องล่างขวา
-    tightenMomentCrops(valid, faceBoxes);
+    if (!_FINAL_ON) tightenMomentCrops(valid, faceBoxes); // ★ rev.FINAL: FinalCropper คุมครอปแทน
 
     if (valid.length < chosenSpec.slots.length) {
       console.log(`[CoverDirector] ⚠️ assignments ใช้ได้ ${valid.length}/${chosenSpec.slots.length} ช่อง`);
@@ -359,15 +512,67 @@ ${templatesBlock}
   }
 }
 
-/** ครอปตั้งต้นจากกรอบหน้า (สูตรเดียวกับ rule 11): กว้าง ~2.5×หน้า + HEADROOM เหนือไรผม */
-function cropFromFaceBox(fb, mult = 2.1) {
+/** ครอปตั้งต้นจากกรอบหน้า (สูตรเดียวกับ rule 11): กว้าง ~2.5×หน้า + HEADROOM เหนือไรผม
+ *  rev.23 (CASE-298 ผู้ใช้ 2 ก.ค.): เพิ่ม headFactor คุมช่องว่างเหนือหัว — วงกลมซูมหน้าเข้าได้ (mult<1.5) โดยไม่ตัดคาง */
+function cropFromFaceBox(fb, mult = 2.1, headFactor = 0.5) {
   if (!fb || !(fb.x2 > fb.x1)) return { x: 0, y: 0, w: 1, h: 1 };
   const fw = fb.x2 - fb.x1, fh = fb.y2 - fb.y1, cx = (fb.x1 + fb.x2) / 2;
   const w = Math.min(1, Math.max(0.28, fw * mult)); // rev.13: แน่นขึ้น 2.5→2.1 (ตามตัวอย่างหน้าเต็มกรอบ)
   const h = Math.min(1, Math.max(0.28, fh * mult));
   const x = Math.min(Math.max(cx - w / 2, 0), 1 - w);
-  const y = Math.min(Math.max(fb.y1 - fh * 0.5, 0), 1 - h);
+  const y = Math.min(Math.max(fb.y1 - fh * headFactor, 0), 1 - h);
   return { x: +x.toFixed(2), y: +y.toFixed(2), w: +w.toFixed(2), h: +h.toFixed(2) };
+}
+
+/**
+ * ★ rev.S4 (2 ก.ค. — CASE-300/304/305 ลายน้ำ "ผู้จัดการ" หลุดขึ้นปก): ครอปหลบโซนลายน้ำ (watermarkRegion จาก FaceDetector)
+ *   หลักการ: "คงสัดส่วนกรอบเดิม" (หด+เลื่อน ไม่ใช่ตัดด้านเดียว — กัน executor ขยายกลับมาติดลายน้ำอีก)
+ *   เงื่อนไขปลอดภัย: กรอบใหม่ต้องยังคลุม "หัวถึงใต้คาง" ครบ — หลบไม่ได้โดยไม่ตัดหน้า → คงเดิม (หน้าขาดแย่กว่าลายน้ำ)
+ */
+function dodgeWatermark(crop, fb) {
+  // ★ S4b: หลบทั้ง "ลายน้ำ" และ "แคปชั่นฝัง" (textRegion) — ตรรกะเดียวกัน (บทเรียน CASE-308 วงกลมติดแคปชั่น)
+  let out = _dodgeBox(crop, fb, fb?.watermarkRegion);
+  out = _dodgeBox(out, fb, (fb?.hasText && fb?.textRegion) ? fb.textRegion : null) || out;
+  return out;
+}
+function _dodgeBox(crop, fb, wm) {
+  if (!wm || !crop || !(wm.x2 > wm.x1)) return crop;
+  const cx2 = crop.x + crop.w, cy2 = crop.y + crop.h;
+  const ox = Math.min(cx2, wm.x2) - Math.max(crop.x, wm.x1);
+  const oy = Math.min(cy2, wm.y2) - Math.max(crop.y, wm.y1);
+  if (ox <= 0.005 || oy <= 0.005) return crop; // ไม่ทับ
+  const ratio = crop.w / Math.max(0.01, crop.h);
+  // กล่อง "หัวถึงใต้คาง" ที่ห้ามหลุดกรอบ
+  const _hasFace = fb.x2 > fb.x1;
+  const fh = _hasFace ? (fb.y2 - fb.y1) : 0;
+  const headTop = _hasFace ? Math.max(0, fb.y1 - fh * 0.45) : null;
+  const chin = _hasFace ? Math.min(1, fb.y2 + fh * 0.18) : null;
+  const faceL = _hasFace ? fb.x1 : null, faceR = _hasFace ? fb.x2 : null;
+  const _fits = (nx, ny, nw, nh) => !_hasFace
+    ? true
+    : (faceL >= nx && faceR <= nx + nw && headTop >= ny && chin <= ny + nh);
+  // เคสหลัก: ลายน้ำอยู่โซนล่างของกรอบ → หดกรอบให้จบเหนือลายน้ำ (คงสัดส่วน กึ่งกลางหน้าเดิม)
+  if (wm.y1 > crop.y + crop.h * 0.45) {
+    const nh = wm.y1 - crop.y - 0.005;
+    const nw = nh * ratio;
+    const cxMid = _hasFace ? (fb.x1 + fb.x2) / 2 : crop.x + crop.w / 2;
+    const nx = Math.min(Math.max(cxMid - nw / 2, 0), 1 - nw);
+    if (nh >= 0.12 && nw >= 0.1 && _fits(nx, crop.y, nw, nh)) {
+      return { x: +nx.toFixed(3), y: crop.y, w: +nw.toFixed(3), h: +nh.toFixed(3), _wmDodged: true };
+    }
+  }
+  // ลายน้ำโซนบน → เลื่อนขอบบนลงใต้ลายน้ำ (คงสัดส่วน)
+  if (wm.y2 < crop.y + crop.h * 0.55) {
+    const ny = wm.y2 + 0.005;
+    const nh = cy2 - ny;
+    const nw = nh * ratio;
+    const cxMid = _hasFace ? (fb.x1 + fb.x2) / 2 : crop.x + crop.w / 2;
+    const nx = Math.min(Math.max(cxMid - nw / 2, 0), 1 - nw);
+    if (nh >= 0.12 && nw >= 0.1 && _fits(nx, ny, nw, nh)) {
+      return { x: +nx.toFixed(3), y: +ny.toFixed(3), w: +nw.toFixed(3), h: +nh.toFixed(3), _wmDodged: true };
+    }
+  }
+  return crop; // หลบไม่ได้แบบปลอดภัย → คงเดิม
 }
 
 /**
@@ -377,27 +582,45 @@ function cropFromFaceBox(fb, mult = 2.1) {
  *   ★ ไม่แตะ main (ฮีโร่) / circle (มี guard เฉพาะ) / ช่องที่หน้าจิ๋ว (ปล่อยเล่าฉากตามตั้งใจ)
  */
 export function tightenMomentCrops(assignments, faceBoxes = []) {
-  const MOMENT_SLOT = /^right_|^top_right$|^bottom_right$|^top$|^mid$|^bottom$/;
+  const MOMENT_SLOT = /^right_|^top_right$|^bottom_right$|^top$|^bottom$|^mid$/;
   for (const a of assignments || []) {
-    if (!a || /circle/i.test(a.slotId)) continue;
+    if (!a) continue;
     const fb = faceBoxes[a.imageIndex];
     if (!fb || !(fb.x2 > fb.x1)) continue;
     const fArea = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);
+    // ★ rev.23b (CASE-299): วงกลมเคยถูก QC คลายครอปกลับ (tighten เดิมข้าม circle เพราะ guard อยู่แค่ใน directCover)
+    //   → บังคับสูตร "หน้าเต็มวง" ซ้ำที่นี่ (รันหลัง QC เสมอ) ค่าเดียวกับ guard: 1.42 + headroom 0.34
+    if (/circle/i.test(a.slotId)) {
+      if (fArea >= 0.006) {
+        a.crop = cropFromFaceBox(fb, 1.42, 0.34);
+        a.why = (a.why || '').slice(0, 52) + ' [วงกลมหน้าเต็มวง]';
+      }
+      a.crop = dodgeWatermark(a.crop, fb); // ★ rev.S4: หลบลายน้ำ (คงสัดส่วน ไม่ตัดหน้า)
+      if (a.crop._wmDodged) { console.log(`[CoverDirector] 💧 หลบลายน้ำ: ${a.slotId} ← #${a.imageIndex}`); delete a.crop._wmDodged; }
+      continue;
+    }
     // ★ rev.21d (ผู้ใช้ CASE-170: "ฮีโร่ต้องเต็มเฟรม หน้าใหญ่ ให้จำหน้าได้ ไม่เหลือพื้นว่าง"):
     //   ครอปฮีโร่ให้ "ใบหน้าเต็มกรอบ" (mult 1.9 = หน้าเด่นสุด + headroom พอดี) — เดิมข้าม main เลยหลวม/มีพื้นเทา
     if (a.slotId === 'main') {
-      if (fArea < 0.006) continue; // หน้าจิ๋วมากในภาพต้นทาง — ปล่อย (กันครอปแล้วเบลอ)
-      a.crop = cropFromFaceBox(fb, 1.8); // rev.21e: แน่นขึ้น 1.9→1.8 = หน้าเต็มเฟรมจริง ไม่เหลือพื้นว่าง/ชุดครุยล้น
-      a.why = (a.why || '').slice(0, 52) + ' [ฮีโร่หน้าเต็มเฟรม]';
+      // ★ A7b (CASE-331 ฮีโร่หัวขาด): fb อยู่ครึ่งล่างของภาพ = อาจเป็นหน้าหมา/จับผิดจุด → อย่า re-tighten ทับ QC (เชื่อครอป Director/QC แทน)
+      if (fArea >= 0.004 && fb.y1 < 0.45) { // ★ rev.I (CASE-320 คนจมฉาก): 0.006→0.004 — S2 enhance ช่วยความคมแล้ว ซูมแรงขึ้นได้
+        a.crop = cropFromFaceBox(fb, 1.62); // rev.23 (CASE-298 ผู้ใช้: "ฮีโร่เด่นกว่านี้ ลดพื้นโล่งหน้าตัวละคร"): 1.8→1.62 หน้ากิน ~62% เต็มเฟรม
+        a.why = (a.why || '').slice(0, 52) + ' [ฮีโร่หน้าเต็มเฟรม]';
+      }
+      a.crop = dodgeWatermark(a.crop, fb); // ★ rev.S4
+      if (a.crop._wmDodged) { console.log(`[CoverDirector] 💧 หลบลายน้ำ: main ← #${a.imageIndex}`); delete a.crop._wmDodged; }
       continue;
     }
     if (!MOMENT_SLOT.test(a.slotId)) continue;
-    if (fArea < 0.007) continue; // ★ rev.22 (CASE-215): ลด 0.012→0.007 ให้ช็อต "ยืน/หน้าเล็ก" โดนครอปอกขึ้นไปด้วย (เดิมเห็นลำตัว)
-    const isBottom = /bottom/.test(a.slotId);
-    // ★ rev.22 (CASE-215): ภาพ ≥2 คนในช่องรอง → ครอปแน่นเหลือ "หน้าคนเด่นคนเดียวสะอาด" (กันหน้าคนข้างๆโดนตัดครึ่ง)
-    const multi = (fb.count || 1) >= 2;
-    a.crop = cropFromFaceBox(fb, multi ? 1.5 : (isBottom ? 1.8 : 1.9));
-    a.why = (a.why || '').slice(0, 52) + (multi ? ' [แยกคนเดียวสะอาด]' : (isBottom ? ' [ซูมคนแน่น]' : ' [หน้าเต็มเฟรม]'));
+    if (fArea >= 0.004) { // ★ rev.I (CASE-320): 0.007→0.004 — หน้าเล็กจมโซฟา/ฉากต้องโดนซูมด้วย (S2 enhance คุมความคมให้แล้ว)
+      const isBottom = /bottom/.test(a.slotId);
+      // ★ rev.22 (CASE-215): ภาพ ≥2 คนในช่องรอง → ครอปแน่นเหลือ "หน้าคนเด่นคนเดียวสะอาด" (กันหน้าคนข้างๆโดนตัดครึ่ง)
+      const multi = (fb.count || 1) >= 2;
+      a.crop = cropFromFaceBox(fb, multi ? 1.5 : (isBottom ? 1.6 : 1.68)); // rev.23 (CASE-298 ผู้ใช้: "ช่องขวาเต็มเฟรม/กึ่งกลางขึ้น"): เดี่ยว 1.9→1.68, ล่าง 1.8→1.6 (คู่คง 1.5 เผื่อ 2 หน้า)
+      a.why = (a.why || '').slice(0, 52) + (multi ? ' [แยกคนเดียวสะอาด]' : (isBottom ? ' [ซูมคนแน่น]' : ' [หน้าเต็มเฟรม]'));
+    }
+    a.crop = dodgeWatermark(a.crop, fb); // ★ rev.S4: หลบลายน้ำทุกช่องโมเมนต์
+    if (a.crop._wmDodged) { console.log(`[CoverDirector] 💧 หลบลายน้ำ: ${a.slotId} ← #${a.imageIndex}`); delete a.crop._wmDodged; }
   }
   return assignments;
 }
@@ -423,6 +646,135 @@ export function faceTightenAll(assignments, faceBoxes = [], mult = 2.2) {
     a.why = (a.why || '').slice(0, 50) + ' [คลิป:ครอปหน้าตัดคำบรรยาย]';
   }
   return assignments;
+}
+
+/**
+ * ═══ rev.FINAL (2 ก.ค. — ผู้ใช้เคาะ "ตาเดียว ตัดครั้งเดียว") ═══
+ * ✂️ Final Cropper — ผู้ตัดสินครอปคนสุดท้ายที่ "เห็นภาพจริงเต็มตา" (ไม่ใช่ thumbnail/กล่องหน้า)
+ * แก้ที่รากของ หัวขาด/หน้าเล็ก/ฉากรก/หลุดเฟรม: ส่งภาพจริง (ยาวสุด 1024px) ของทุกช่อง + สเปคช่อง
+ * ให้ gpt-4o ตัดสินครอปครั้งเดียวตาม DNA ปกแสนไลค์ → executor เชื่อ 100% (crop._final)
+ * เปิด/ปิด: COVER_FINAL_CROPPER (default เปิด · =0 เพื่อปิด)
+ */
+/**
+ * ★ 👁️ EYE-AFTER (ผู้ใช้ 2 ก.ค.: "ทุก layout ต้องมีตาเห็น") — ตาตรวจสุดท้ายดูปกที่ประกอบเสร็จจริง
+ * เทียบ DNA ทีละช่อง: หัวขาด/หน้าริมเฟรม/ฉากรก/ฉากเปล่า → คืนรายการช่องพัง + วิธีแก้ (recrop/swap)
+ */
+export async function eyeAfter({ coverBuffer, templateSpec, identity, newsTitle }) {
+  const small = await sharp(coverBuffer).resize(760, null, { fit: 'inside' }).jpeg({ quality: 82 }).toBuffer();
+  const slotList = templateSpec.slots.map(s => s.id).join(', ');
+  const prompt = `${brainPromptBlock('qc')}
+คุณคือ "ตาตรวจสุดท้าย" — ดูปกที่ประกอบเสร็จจริงใบนี้ (ช่องทั้งหมด: ${slotList}) เทียบ DNA ปกแสนไลค์ทีละช่อง
+ข่าว: "${(newsTitle || '').slice(0, 90)}" ตัวเอก: "${identity?.mainCharacter || '-'}"
+ตรวจ 6 อย่าง:
+① หัว/หน้าคนโดนตัดขอบช่องไหม  ② หน้าคนอยู่ริมเฟรมแทนที่จะกึ่งกลางไหม  ③ ฉากหลังรก/ตัวอักษร-ป้ายไฟใหญ่แย่งสายตาไหม  ④ ช่อง/วงกลมเป็นฉากเปล่าไร้จุดเด่น (ไม่มีคน/สัตว์/หลักฐาน) ไหม
+⑤ ★ ฉากซ้ำ (บทเรียน CASE-341): มี "ฉากเดียวกัน" (คนเดิม+ชุดเสื้อผ้าเดิม+ฉากหลังเดิม) เกิน 2 ช่องไหม — ถ้าเกิน ให้สั่ง fix "swap" ช่องรอง/วงกลมที่ซ้ำ (เก็บ main ไว้) จนเหลือฉากละ ≤2 ช่อง
+⑥ ★ ช่องใหญ่สุด (main): เป็นภาพ "หันข้าง/มองข้าง/ไม่ปะทะกล้อง" หรือหน้าโดนขอบตัดจนไม่เห็นเต็มหน้าไหม — ถ้าใช่ ให้ fix "swap" (recrop ช่วยไม่ได้ ภาพต้นทางผิด) — hero ปกแสนไลค์ = หน้าตรงปะทะกล้องเสมอ
+ตอบ JSON เท่านั้น: {"ok":true|false,"issues":[{"slot":"<ชื่อช่องจริง>","fix":"recrop","hint":"หน้าคนไปอยู่ริมขวา ให้เฟรมกึ่งกลางหน้าคน ตัดป้ายไฟซ้ายทิ้ง"},{"slot":"<ชื่อช่องจริง>","fix":"swap","hint":"ฉากเปล่าไม่มีจุดเด่น"}]}
+⛔ "slot" ต้องเป็นชื่อจริงจากรายการนี้เท่านั้น: ${slotList}
+fix: "recrop" = ภาพใช้ได้แต่ครอปใหม่ · "swap" = ภาพนี้ใช้ไม่ได้ ต้องเปลี่ยนภาพ · ถ้าทุกช่องผ่าน → {"ok":true,"issues":[]}`;
+  const res = await callAI({
+    prompt,
+    imageContents: [{ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${small.toString('base64')}`, detail: 'high' } }],
+    model: 'gpt-4o', temperature: 0, maxTokens: 500,
+  });
+  const j = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
+  // Normalize ชื่อช่องจากตา → slotId จริง (บทเรียน CASE-339: gpt ตอบ "right_top" แต่ช่องจริงคือ "top_right" → recrop ถูกข้ามเงียบ)
+  const _ids = templateSpec.slots.map(s => s.id);
+  const _tok = (v) => String(v || '').toLowerCase().split(/[^a-z]+/).filter(Boolean).sort().join('|');
+  const _normSlot = (v) => {
+    const s = String(v || '').toLowerCase().trim();
+    return _ids.includes(s) ? s : (_ids.find(id => _tok(id) === _tok(s)) || null);
+  };
+  const issues = (Array.isArray(j?.issues) ? j.issues : [])
+    .map(i => (i ? { ...i, slot: _normSlot(i.slot) } : null))
+    .filter(i => i && i.slot && /recrop|swap/.test(String(i.fix)));
+  console.log(`[CoverDirector] 👁️ Eye-After: ${j?.ok !== false && issues.length === 0 ? 'ผ่านทุกช่อง' : `พบปัญหา ${issues.length} ช่อง — ${issues.map(i => `${i.slot}:${i.fix}`).join(', ')}`}`);
+  return { ok: j?.ok !== false && issues.length === 0, issues };
+}
+
+export async function finalCrop({ assignments, imageBuffers, templateSpec, identity, newsTitle, faceBoxes = [], hints = {} }) {
+  const items = [];
+  for (const a of assignments || []) {
+    const im = imageBuffers[a.imageIndex];
+    if (!im?.buffer) continue;
+    const slot = templateSpec.slots.find(s => s.id === a.slotId);
+    if (!slot) continue;
+    try {
+      const meta = await sharp(im.buffer).metadata();
+      const big = await sharp(im.buffer).resize(1024, 1024, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
+      items.push({ a, slot, w: meta.width || 1, h: meta.height || 1, b64: big.toString('base64') });
+    } catch { /* ข้ามภาพเสีย */ }
+  }
+  if (!items.length) return null;
+  const spec = items.map((it, k) => `ภาพที่ ${k + 1} → ช่อง "${it.a.slotId}" ${it.slot.shape === 'circle' ? '(วงกลม สัดส่วน 1.00)' : `(สัดส่วนช่อง กว้าง/สูง = ${(it.slot.w / it.slot.h).toFixed(2)})`} · ขนาดภาพจริง ${it.w}x${it.h}px${hints[it.a.slotId] ? ` · 👁️ คำสั่งจากตาตรวจ: "${String(hints[it.a.slotId]).slice(0, 90)}"` : ''}`).join('\n');
+  const prompt = `${brainPromptBlock('qc')}
+คุณคือ "ช่างครอปมือหนึ่งของเพจข่าวไวรัล" — คุณเห็นภาพจริงเต็มตาทีละใบ หน้าที่เดียว: กำหนดกรอบครอปสุดท้าย (สัดส่วน 0-1 ของภาพต้นฉบับ) ให้แต่ละช่องออกมาเหมือนปกแสนไลค์
+ข่าว: "${(newsTitle || '').slice(0, 100)}" · ตัวเอก: "${identity?.mainCharacter || '-'}"
+${spec}
+
+กฎครอป (เด็ดขาดทุกข้อ):
+1. หัวครบเสมอ + เว้นที่ว่างเหนือผม ~5-10% ของกรอบ — ⛔ ห้ามตัดหัว/หน้าผาก/คางแม้แต่นิดเดียว
+2. ช่องที่มีคน: ใบหน้าคนต้องสูง 35-60% ของกรอบ (โคลสอัพหน้า-ไหล่) — ไม่ใช่ครึ่งตัวโชว์เสื้อผ้า/ลำตัว
+3. กรอบต้องกันสิ่งรบกวนออก: ป้ายไฟ/ตัวหนังสือฉาก/ลายน้ำ/หัวโพสต์เฟซบุ๊ก/แคปชั่น/ของรก — ขยับ/หดกรอบหนีให้หมด
+4. สัดส่วนกรอบ (w/h × ขนาดภาพจริง px) ต้องใกล้สัดส่วนช่องที่ระบุมากที่สุด (คลาดได้ ~10%)
+5. ช่องวงกลม: หน้า/จุดเด่นอยู่กึ่งกลางเป๊ะ เผื่อขอบว่างรอบ ~15% กันขอบโค้งตัด
+6. ภาพคน+สัตว์: เก็บทั้งหน้าคนและสัตว์ให้ครบถ้าทำได้ (โมเมนต์คือจุดขาย) — แต่หน้าคนต้องชัดเป็นหลัก
+7. ★★★ สำคัญสุด — "กล่องใบหน้าหลัก" ของแต่ละภาพ: fx,fy = จุดกึ่งกลางใบหน้า · fw,fh = กว้าง/สูงของใบหน้า (จากไรผมถึงคาง) — ทั้งหมดเป็นสัดส่วน 0-1 ของภาพเต็ม ต้องแม่นที่สุด (ระบบใช้คำนวณเฟรมให้หน้าอยู่กึ่งกลางเด่นเป๊ะ)
+   ⛔⛔ fx,fy ต้องเป็นใบหน้า "คน" เสมอ — ห้ามปักที่หน้าสัตว์/สิ่งของเด็ดขาด (บทเรียน: ปักหน้าหมา→หน้าคนตกริมขอบ) · ภาพคน+สัตว์: สมอ=หน้าคน แล้วสัตว์จะติดเฟรมเองจากขนาดกรอบ · ภาพไม่มีคนจริงๆ เท่านั้น จึงชี้จุดเด่น (สัตว์/เอกสาร) แทน
+ตอบ JSON เท่านั้น: {"crops":[{"slot":"main","x":0.10,"y":0.05,"w":0.50,"h":0.70,"fx":0.35,"fy":0.25,"fw":0.18,"fh":0.24},...]} ครบทุกช่องที่ให้มา`;
+  const imageContents = items.map(it => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${it.b64}`, detail: 'high' } }));
+  const res = await callAI({ prompt, imageContents, model: 'gpt-4o', temperature: 0, maxTokens: 700 });
+  const j = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
+  let applied = 0;
+  for (const c of (j?.crops || [])) {
+    const it = items.find(x => x.a.slotId === c.slot);
+    if (!it) continue;
+    let _fx = Number(c.fx), _fy = Number(c.fy), _fw = Number(c.fw), _fh = Number(c.fh);
+    let _hasFace = [_fx, _fy, _fw, _fh].every(Number.isFinite) && _fw > 0.01 && _fh > 0.01 && _fx > 0 && _fx < 1 && _fy > 0 && _fy < 1;
+    let _anchorSrc = _hasFace ? 'gpt' : '';
+    // ★ FINAL4 (CASE-336 บางช่อง gpt ไม่ส่งกล่องหน้า → เคยตกไปใช้กล่องดิบ = หน้าริมกรอบ): สมอสำรองจาก FaceDetector
+    if (!_hasFace) {
+      const _fb = faceBoxes[it.a.imageIndex];
+      if (_fb && _fb.x2 > _fb.x1 && _fb.y1 < 0.5) {
+        _fx = (_fb.x1 + _fb.x2) / 2; _fy = (_fb.y1 + _fb.y2) / 2;
+        _fw = _fb.x2 - _fb.x1; _fh = _fb.y2 - _fb.y1;
+        _hasFace = true; _anchorSrc = 'fb';
+      }
+    }
+    const isCircle = it.slot.shape === 'circle';
+    const slotAspect = isCircle ? 1 : (it.slot.w / it.slot.h);
+    if (_hasFace) {
+      // ★★★ FINAL3 — Face-Lock Geometry (ผู้ใช้ 2 ก.ค.: "หน้าตรง หน้าเด่น ต้องแม่นยำ"):
+      //   gpt (เห็นภาพจริง) รายงานกล่องหน้า → โค้ดคำนวณเฟรมทั้งหมด: หน้าสูง 40-45% ของช่อง
+      //   วางหน้า "กึ่งกลางแนวนอน + ระดับ 38%" (วงกลม 45%) — การันตีเชิงเรขาคณิต ไม่มีทางหน้าหลุด/หน้าเล็ก
+      const frac = isCircle ? 0.45 : (it.a.slotId === 'main' ? 0.42 : 0.40);
+      let hN = Math.min(1, _fh / frac);                                   // ความสูงเฟรม (สัดส่วนของภาพ)
+      let wN = Math.min(1, hN * slotAspect * (it.h / it.w));              // ความกว้างเฟรมให้ aspect ตรงช่องเป๊ะ (คิดข้ามหน่วย px)
+      if (wN >= 1) { wN = 1; hN = Math.min(1, wN * (it.w / it.h) / slotAspect); }
+      const faceLevel = isCircle ? 0.45 : 0.38;
+      let xN = _fx - wN / 2;                                              // หน้ากึ่งกลางแนวนอน
+      let yN = _fy - hN * faceLevel;                                      // หน้าอยู่ระดับ 38%/45% ของเฟรม
+      xN = Math.min(Math.max(xN, 0), 1 - wN);
+      yN = Math.min(Math.max(yN, 0), 1 - hN);
+      it.a.crop = { x: +xN.toFixed(3), y: +yN.toFixed(3), w: +wN.toFixed(3), h: +hN.toFixed(3), _final: true };
+      it.a.why = ((it.a.why || '').slice(0, 36)) + ' [FaceLock]';
+      console.log(`[CoverDirector] ✂️ ${it.a.slotId}: FaceLock(${_anchorSrc}) หน้า(${_fx.toFixed(2)},${_fy.toFixed(2)}) เฟรม(${xN.toFixed(2)},${yN.toFixed(2)},${wN.toFixed(2)},${hN.toFixed(2)})`);
+      applied++;
+    } else if (isCircle) {
+      // วงกลมไม่มีหน้า (เอกสาร/หลักฐาน) → ใช้กล่องของ gpt (executor หดเป็นจัตุรัส)
+      const x = Number(c.x), y = Number(c.y), w = Number(c.w), h = Number(c.h);
+      if (!(w > 0.05 && h > 0.05 && x >= 0 && y >= 0 && x + w <= 1.02 && y + h <= 1.02)) continue;
+      it.a.crop = { x: Math.max(0, Math.min(x, 0.95)), y: Math.max(0, Math.min(y, 0.95)), w: Math.min(1, w), h: Math.min(1, h), _final: true };
+      it.a.why = ((it.a.why || '').slice(0, 40)) + ' [FinalCrop-box]';
+      console.log(`[CoverDirector] ✂️ ${it.a.slotId}: box (วงกลมไร้หน้า)`);
+      applied++;
+    } else {
+      // ★ FINAL4: ช่องสี่เหลี่ยมที่หา "สมอหน้า" ไม่ได้เลย → คงครอปเดิมของ Director (ห้ามใช้กล่องดิบ — เคยทำหน้าริมกรอบ)
+      console.log(`[CoverDirector] ✂️ ${it.a.slotId}: skip (ไร้สมอหน้า — คงครอป Director)`);
+    }
+  }
+  console.log(`[CoverDirector] ✂️ FinalCropper (FaceLock) ตัดสิน ${applied}/${items.length} ช่อง`);
+  return { applied };
 }
 
 /**
@@ -461,6 +813,8 @@ export async function reviewCover({ coverBuffer, templateSpec, assignments, imag
       : '';
 
     const prompt = `คุณคือ QC ปกข่าว ตรวจปกที่เพิ่งประกอบเสร็จ (canvas ${templateSpec.canvasW}x${templateSpec.canvasH})
+
+${brainPromptBlock('qc')}
 ${storyText}ผังช่อง:
 ${templateText(templateSpec)}
 การจัดวางปัจจุบัน:
@@ -472,11 +826,14 @@ ${sparesText}
 3. ★ ใบหน้า/จุดโฟกัสโดน "ช่องที่ลอยทับ" บัง (กรอบไฮไลต์/วงกลมทับหน้าคนของช่องล่าง) — ต้องแก้ครอปให้หน้าย้ายไปโซนเปิดโล่ง
 4. ครอปจนเหลือแต่พื้นหลัง คนหาย/เล็กจนมองไม่ออก
 5. ★ คนจมฉากหลัง: ช่องที่มีคน (โมเมนต์รับมอบ/วงกลม/portrait) แต่คนกินพื้นที่ไม่ถึงครึ่งช่อง เห็นห้อง/เพดาน/ผนังเยอะกว่าคน → สั่งครอปแน่นขึ้น (จากเหนือหัวถึงเอว ตัดฉากหลังทิ้ง) — ปกไวรัลจริงเน้นหน้าคน ฉากหลังแค่จำเป็น (ยกเว้นช่องฉากเหตุการณ์ล้วน เช่น มุมสูงน้ำท่วม)
+5b. ★★★ rev.K2 (เกณฑ์ตัวเลขเทียบปกแสนไลค์ — CASE-321 หน้าจม 5%): วัดทุกช่องที่มีคน "ความสูงใบหน้า ต้อง ≥25% ของความสูงช่อง" (ปกต้นแบบอยู่ 40-70%) — ต่ำกว่านี้ = สั่งครอปใหม่ทันทีให้หน้า ≥35% (คำนวณจากกรอบหน้าที่ให้มา) · ฉากหลังรก (ป้ายไฟ/ตัวอักษรฉาก/ของเยอะ) ให้ครอปตัดทิ้งให้เหลือคนเป็นหลัก
 6. ภาพเบลอ/แตกจากการซูมเกิน
 6.5 ★ ตัวหนังสือฝัง/ซับรายการโผล่ในช่องคน → สั่งครอปแน่นขึ้นที่หน้า-ไหล่ให้พ้นโซนข้อความ (อย่าทิ้งภาพถ้าครอปหลบได้)
 7. ★ บุคคลเดียวกันโผล่เกิน 2 ช่อง (นับวงกลมด้วย) — ปกไวรัลจริงห้ามหน้าซ้ำเกิน 2 ช่อง
    → ช่องที่ซ้ำ (เก็บช่องฮีโร่ไว้) ให้สลับเป็นภาพสำรอง: ใส่ "imageIndex" ของภาพสำรอง + crop ใหม่
    (คำนวณ crop จากกรอบหน้าที่ให้: กว้าง ≈ 2.5 เท่าของหน้า หน้าอยู่กึ่งกลาง เผื่อที่ว่างเหนือไรผม)
+7b. ★★★ rev.H (CASE-320 ฉากรายการสูทม่วงซ้ำ 3 ช่อง = ปกลายตา): "ฉากเดียวกัน" (คนใส่ชุดเดิม+สถานที่/ฉากหลังเดิม เช่น มาจากรายการทีวีเทปเดียวกัน) โผล่เกิน 2 ช่อง (นับวงกลมด้วย)
+   → ข่าวตัวหลักคนเดียวก็ห้าม! ช่องที่ฉากซ้ำเกิน ให้สลับเป็นภาพสำรอง "ฉากอื่น/ชุดอื่น/โมเมนต์อื่น" (โดยเฉพาะภาพที่มีสัตว์/แอ็กชัน/สถานที่ของข่าว) — ปกที่ทุกช่องคือคนเดิมชุดเดิมฉากเดิม = แบน เล่าเรื่องไม่ได้
 8. ★★ ช่องที่ "ไม่เล่าข่าวนี้": ภาพคนละเหตุการณ์/คนละบุคคลกับข่าว หรือภาพสวยเฉยๆ ที่ไม่สื่อเรื่อง
    (เทียบกับเนื้อข่าวด้านบน — เช่น ข่าวมอบที่ดิน ต้องเห็น โมเมนต์ส่งมอบ/เอกสาร/ผู้ให้/ผู้รับ)
    → สลับเป็นภาพสำรองที่เล่าเรื่องตรงกว่า ถ้าภาพสำรองก็ไม่ตรง ให้คงเดิมไว้ (อย่าสลับมั่ว)

@@ -262,6 +262,7 @@ async function _renderCoverV3(request) {
         }
         const hasText = !!fd?.hasBigText; // ★ สกรีนช็อต/กราฟิกข่าว — ต้องส่งธงต่อแม้ไม่มีหน้า
         const textRegion = fd?.textRegion || null; // ★ โซนข้อความ — ครอปคนหลบโซนนี้ = ใช้เฟรมรายการได้
+        const _wmRegion = fd?.watermarkRegion || null; // ★ rev.S4: โซนลายน้ำสำนักข่าว — ครอปหลบ (ไม่ reject)
         if (!fd?.hasFaces || !fd.faces?.length) {
           // ★ 30 มิ.ย.: ยังไม่เจอหน้า แต่ AI ชี้ "บริเวณคน/ซับเจกต์หลัก" → ส่ง subject ให้ executor ครอปรอบคน (กฎกันตัดหน้าใช้ตอน fallback ด้วย)
           const s = fd?.mainSubject, fW = fd?.imageWidth || 1, fH = fd?.imageHeight || 1;
@@ -269,7 +270,7 @@ async function _renderCoverV3(request) {
             x1: +(s.x / fW).toFixed(3), y1: +(s.y / fH).toFixed(3),
             x2: +((s.x + s.width) / fW).toFixed(3), y2: +((s.y + s.height) / fH).toFixed(3),
           } : null;
-          return (hasText || subject) ? { ...(hasText ? { hasText, textRegion } : {}), ...(subject ? { subject } : {}) } : null;
+          return (hasText || subject || _wmRegion) ? { ...(hasText ? { hasText, textRegion } : {}), ...(subject ? { subject } : {}), ...(_wmRegion ? { watermarkRegion: _wmRegion } : {}) } : null;
         }
         const meta = await sharpLib(img.buffer).metadata();
         const W = meta.width || 1, H = meta.height || 1;
@@ -291,9 +292,10 @@ async function _renderCoverV3(request) {
             x2: +((f.x + f.width) / W).toFixed(3), y2: +((f.y + f.height) / H).toFixed(3),
           })),
           ...(hasText ? { hasText, textRegion } : {}),
+          ...(_wmRegion ? { watermarkRegion: _wmRegion } : {}), // ★ rev.S4
         };
       }));
-      console.log(`[CoverV3] face boxes: ${faceBoxes.filter(b => b && b.x1 !== undefined).length}/${imageBuffers.length} images | มีตัวหนังสือฝัง: ${faceBoxes.filter(b => b?.hasText).length}`);
+      console.log(`[CoverV3] face boxes: ${faceBoxes.filter(b => b && b.x1 !== undefined).length}/${imageBuffers.length} images | มีตัวหนังสือฝัง: ${faceBoxes.filter(b => b?.hasText).length} | ลายน้ำ: ${faceBoxes.filter(b => b?.watermarkRegion).length}`); // ★ rev.S4 นับลายน้ำ
       coverTrace.step('facedetect', 'ตรวจจับใบหน้า + อารมณ์สีหน้า', {
         withFace: faceBoxes.filter(b => b && b.x1 !== undefined).length,
         total: imageBuffers.length,
@@ -662,7 +664,7 @@ async function _renderCoverV3(request) {
     let qcApplied = false;
     if (!qc.ok && qc.fixes.length > 0) {
       assignments = applyFixes(assignments, qc.fixes);
-      tightenMomentCrops(assignments, faceBoxes); // rev.20: กัน QC คลายครอปช่องโมเมนต์กลับ (โฟกัสหน้าเสมอ)
+      if (process.env.COVER_FINAL_CROPPER === '0') tightenMomentCrops(assignments, faceBoxes); // rev.20 · ★rev.FINAL: FinalCropper คุมแทน
       coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec, faceBoxes });
       qcApplied = true;
       console.log(`[CoverV3] ⑤ QC fixes applied (${qc.fixes.length}) → recomposed`);
@@ -672,7 +674,7 @@ async function _renderCoverV3(request) {
 
     // ★ rev.20k: ข่าวคลิปรายการ — บังคับครอปทุกช่อง (รวมฮีโร่) ที่ "ใบหน้า" ตัดแถบคำบรรยายเบิร์นออก แล้วประกอบใหม่
     if (_preferFrames) {
-      faceTightenAll(assignments, faceBoxes, 2.2);
+      if (process.env.COVER_FINAL_CROPPER === '0') faceTightenAll(assignments, faceBoxes, 2.2); // ★rev.FINAL: FinalCropper คุมแทน
       coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec, faceBoxes });
       console.log('[CoverV3] ⑤.5 ข่าวคลิป → ครอปหน้าตัดคำบรรยายทุกช่อง → ประกอบใหม่');
     }
@@ -732,8 +734,8 @@ async function _renderCoverV3(request) {
         let buf2 = await executeCover({ assignments: asg2, imageBuffers, templateSpec: tS, faceBoxes });
         const qc2 = await reviewCover({ coverBuffer: buf2, templateSpec: tS, assignments: asg2, imageBuffers, faceBoxes, identity, newsTitle });
         let qa2 = false;
-        if (!qc2.ok && qc2.fixes?.length > 0) { asg2 = applyFixes(asg2, qc2.fixes); tightenMomentCrops(asg2, faceBoxes); buf2 = await executeCover({ assignments: asg2, imageBuffers, templateSpec: tS, faceBoxes }); qa2 = true; }
-        if (_preferFrames) { faceTightenAll(asg2, faceBoxes, 2.2); buf2 = await executeCover({ assignments: asg2, imageBuffers, templateSpec: tS, faceBoxes }); }
+        if (!qc2.ok && qc2.fixes?.length > 0) { asg2 = applyFixes(asg2, qc2.fixes); if (process.env.COVER_FINAL_CROPPER === '0') tightenMomentCrops(asg2, faceBoxes); buf2 = await executeCover({ assignments: asg2, imageBuffers, templateSpec: tS, faceBoxes }); qa2 = true; }
+        if (_preferFrames && process.env.COVER_FINAL_CROPPER === '0') { faceTightenAll(asg2, faceBoxes, 2.2); buf2 = await executeCover({ assignments: asg2, imageBuffers, templateSpec: tS, faceBoxes }); }
         const jr2 = await _judgeRigorous(buf2); const eff2 = _eff(jr2);
         console.log(`[CoverV3] 🔁 retry ${k + 1}/${MAX_RETRY} (${tS.id}) → ${jr2.score}/10 eff=${eff2} — ${jr2.reason}`);
         if (eff2 > _best.eff) _best = { buffer: buf2, assignments: asg2, templateSpec: tS, jr: jr2, eff: eff2, reason: dir2.reason, qcApplied: qa2 };
@@ -792,6 +794,162 @@ async function _renderCoverV3(request) {
       }
     } catch (e) { console.log('[CoverV3] reserve-context skipped (non-fatal):', e.message?.slice(0, 50)); }
 
+    // ═══ 🎨 E5 Diversity Guard (2 ก.ค. — ผู้ใช้ชี้ CASE-343: "เลือกภาพแทบซ้ำกัน+ลายตา ทั้งที่มีรูปดีกว่าเยอะ") ═══
+    //   DNA ปกแสนไลค์ = ทุกช่องคนละฉาก + สะอาดตา — บังคับด้วยโค้ดจากข้อมูลตา E1 (eyeMeta) ไม่พึ่ง prompt (พิสูจน์แล้วว่าถูกฝ่า):
+    //   ① ฉากเดิม (ตาบรรยาย scene คล้ายกัน) ถูกใช้ ≥2 ช่องแล้ว → ช่องที่ 3 ขึ้นไปสลับเป็นภาพ unused "ฉากใหม่" (เรียง สะอาด > เข้าข่าว)
+    //   ② ช่องภาพ "ไม่สะอาด" (กราฟิก/แคปชั่น/ฉากรก) → ถ้ามี unused สะอาดฉากใหม่ fit ใกล้กัน → สลับ
+    //   ⛔ ไม่แตะ main (FinalCropper + Eye-After ⑥ ดูแลฮีโร่) · ครอปจริงปล่อยให้ FinalCropper ตัดถัดไป
+    try {
+      const _grams = (s) => { const t = String(s || '').replace(/\s+/g, ''); const g = new Set(); for (let i = 0; i < t.length - 1; i++) g.add(t.slice(i, i + 2)); return g; };
+      const _scnSim = (a, b) => { const A = _grams(a), B = _grams(b); if (!A.size || !B.size) return 0; let n = 0; for (const x of A) if (B.has(x)) n++; return n / Math.min(A.size, B.size); };
+      const _emOf = (i) => imageBuffers[i]?.eyeMeta;
+      if (Array.isArray(assignments) && assignments.length && imageBuffers.some(im => im?.eyeMeta)) {
+        const isMainSlot = (a) => /main|hero/i.test(a.slotId);
+        const ordered = [...assignments].sort((a, b) => (isMainSlot(b) ? 1 : 0) - (isMainSlot(a) ? 1 : 0));
+        const keptScenes = [];
+        let _changed = 0;
+        for (const a of ordered) {
+          const em = _emOf(a.imageIndex);
+          const scene = em?.scene || '';
+          const dupCount = keptScenes.filter(k => _scnSim(k, scene) >= 0.45).length;
+          const dirty = !!(em && em.clean === false);
+          const needSwap = !isMainSlot(a) && em && (dupCount >= 2 || dirty);
+          if (!needSwap) { keptScenes.push(scene); continue; }
+          const _usedNow = new Set(assignments.map(x => x.imageIndex));
+          let best = -1, bestKey = -1;
+          imageBuffers.forEach((im, i) => {
+            if (_usedNow.has(i)) return;
+            const e2 = im?.eyeMeta;
+            if (!e2) return;
+            if ((e2.fit || 0) < (dirty ? Math.max(4, (em.fit || 0) - 1) : 6)) return; // ตัวแทนต้องเข้าข่าวพอ
+            if (keptScenes.some(k => _scnSim(k, e2.scene || '') >= 0.45)) return;      // ต้องเป็นฉากใหม่จริง
+            const key = (e2.clean ? 100 : 0) + (e2.fit || 0) * 10 + (Number(im.score) || 0);
+            if (key > bestKey) { bestKey = key; best = i; }
+          });
+          if (best >= 0) {
+            console.log(`[CoverV3] 🎨 Diversity Guard: ${a.slotId} ${dupCount >= 2 ? `ฉากซ้ำช่องที่ ${dupCount + 1}` : 'ภาพไม่สะอาด'} → สลับ ← #${best} (${String(_emOf(best)?.scene || '').slice(0, 35)} · clean=${_emOf(best)?.clean})`);
+            a.imageIndex = best;
+            a.crop = { x: 0, y: 0, w: 1, h: 1 };
+            a.why = '🎨 diversity guard (ตา+โค้ด: ฉากใหม่/สะอาด)';
+            keptScenes.push(_emOf(best)?.scene || '');
+            _changed++;
+          } else {
+            keptScenes.push(scene);
+          }
+        }
+        if (_changed) {
+          coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec, faceBoxes });
+          console.log(`[CoverV3] 🎨 Diversity Guard สลับ ${_changed} ช่อง → ประกอบใหม่`);
+        } else {
+          console.log('[CoverV3] 🎨 Diversity Guard: ผ่าน (ฉากหลากหลาย/ไม่มีตัวแทนที่ดีกว่า)');
+        }
+      }
+    } catch (e) { console.log('[CoverV3] 🎨 Diversity Guard skipped (non-fatal):', e.message?.slice(0, 50)); }
+
+    // ═══ rev.FINAL (2 ก.ค. — ผู้ใช้เคาะ "Final Cropper ตาเดียว ตัดครั้งเดียว") ═══
+    //   ผู้ตัดสินครอปคนสุดท้ายที่เห็น "ภาพจริงเต็มตา" — แก้รากของ หัวขาด/หน้าเล็ก/ฉากรก/หลุดเฟรม
+    //   วางหลังทุก mutation (Director/QC/retry/reserve จบแล้ว) ก่อน enhance · ปิดได้: COVER_FINAL_CROPPER=0
+    if (process.env.COVER_FINAL_CROPPER !== '0') {
+      try {
+        const { finalCrop } = await import('@/lib/services/coverDirectorService');
+        const _fc = await finalCrop({ assignments, imageBuffers, templateSpec, identity, newsTitle, faceBoxes });
+        if (_fc && _fc.applied > 0) {
+          coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec, faceBoxes });
+          console.log(`[CoverV3] ✂️ FinalCropper ใช้จริง ${_fc.applied}/${assignments.length} ช่อง → ประกอบใหม่`);
+        }
+      } catch (e) { console.log('[CoverV3] ✂️ FinalCropper skipped (non-fatal):', e.message?.slice(0, 60)); }
+    }
+
+    // ═══ rev.S2 (2 ก.ค. — สูตรปกแสนไลค์: "ภาพคมกริบทุกช่อง") ═══
+    //   enhance "เฉพาะภาพที่ถูกเลือกลงช่องจริง" (≤5 ใบ) ด้วย Real-ESRGAN 2x ผ่าน Replicate
+    //   กฎเหล็ก photo-enhance: face_enhance=false ตายตัว (upscaleImage บังคับไว้แล้ว) — คงหน้า/บริบทต้นฉบับ 100%
+    //   ★ ปิดได้: COVER_ENHANCE=0 · ภาพใหญ่คมอยู่แล้ว (≥1600px) = ข้าม ไม่เปลืองเงิน · ล้ม = ใช้ภาพเดิม (non-fatal)
+    //   วางหลังทุก mutation (QC/retry/reserve จบแล้ว) → enhance ครั้งเดียว ประกอบใหม่ครั้งเดียว
+    if (process.env.COVER_ENHANCE !== '0') {
+      try {
+        const _t2 = Date.now();
+        const { upscaleImage } = await import('@/lib/services/replicateEnhancer');
+        const _idxs = [...new Set(assignments.map(a => a.imageIndex))].filter(i => imageBuffers[i]?.buffer);
+        // ★ S2b: Replicate จำกัด rate (เจอ 429 เมื่อยิงขนาน) → ทำ "ทีละใบ" + เจอ 429 รอ 12s ลองซ้ำ 1 ครั้ง + งบเวลารวม 150s
+        const _budgetEnd = Date.now() + 150000;
+        const _enhanceOne = async (i) => {
+          const src = imageBuffers[i].buffer;
+          const meta = await _sharpJ(src).metadata();
+          if (Math.max(meta.width || 0, meta.height || 0) >= 1600) return { i, skip: true }; // คมพอแล้ว
+          const _try = () => Promise.race([
+            upscaleImage(src.toString('base64'), 2),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('enhance timeout 75s')), 75000)),
+          ]);
+          try {
+            const out = await _try();
+            return { i, buf: Buffer.from(out.base64, 'base64') };
+          } catch (e1) {
+            if (/429|throttle/i.test(String(e1?.message)) && Date.now() < _budgetEnd) {
+              await new Promise(r => setTimeout(r, 12000)); // รอ rate limit คลาย แล้วซ้ำ 1 ครั้ง
+              const out = await _try();
+              return { i, buf: Buffer.from(out.base64, 'base64') };
+            }
+            throw e1;
+          }
+        };
+        let _ok = 0, _skip = 0, _fail = 0;
+        for (const i of _idxs) {
+          if (Date.now() > _budgetEnd) { console.log('[CoverV3] ✨ enhance หมดงบเวลา — ที่เหลือใช้ภาพเดิม'); break; }
+          try {
+            const r = await _enhanceOne(i);
+            if (r?.buf && r.buf.length > 1000) { imageBuffers[i].buffer = r.buf; _ok++; }
+            else if (r?.skip) _skip++;
+          } catch (e) { _fail++; console.log(`[CoverV3] ✨ enhance #${i} ล้ม: ${String(e?.message || '?').slice(0, 110)}`); }
+        }
+        if (_ok > 0) coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec, faceBoxes }); // faceBoxes เป็นสัดส่วน 0-1 → ไม่กระทบ
+        console.log(`[CoverV3] ✨ S2 enhance: ${_ok} upscaled, ${_skip} คมพอแล้ว(ข้าม), ${_fail} ล้ม(ใช้เดิม) — ${((Date.now() - _t2) / 1000).toFixed(1)}s`);
+      } catch (e) { console.log('[CoverV3] ✨ S2 enhance skipped (non-fatal):', e.message?.slice(0, 50)); }
+    }
+
+    // ═══ 👁️ EYE-AFTER (ผู้ใช้ 2 ก.ค.: "ทุก layout ต้องมีตาเห็น") ═══
+    //   ตาตรวจสุดท้ายดู "ปกไฟนอลจริง" (หลัง FinalCrop+enhance) ทีละช่อง — พัง→สั่ง recrop พร้อม hint / ฉากเปล่า→สลับภาพ · 1 รอบ
+    if (process.env.COVER_FINAL_CROPPER !== '0') {
+      try {
+        const { eyeAfter, finalCrop: _fcrop } = await import('@/lib/services/coverDirectorService');
+        const _eye = await eyeAfter({ coverBuffer, templateSpec, identity, newsTitle });
+        if (!_eye.ok && _eye.issues.length) {
+          // swap: ภาพใช้ไม่ได้ (ฉากเปล่า/ไร้จุดเด่น) → เปลี่ยนเป็นภาพ unused ที่ดีสุด (มีหน้า/เล่าเรื่อง)
+          for (const iss of _eye.issues.filter(i => i.fix === 'swap')) {
+            const a = assignments.find(x => x.slotId === iss.slot);
+            if (!a) continue;
+            const _used = new Set(assignments.map(x => x.imageIndex));
+            let _best2 = -1, _bk = -1;
+            imageBuffers.forEach((im, i) => {
+              if (_used.has(i)) return;
+              const fb2 = faceBoxes[i];
+              const _hasF = !!(fb2 && fb2.x2 > fb2.x1 && !fb2.hasText);
+              const _story = /RELATIONSHIP|KEY_ACTIVITY|EMOTION/i.test(String(im?.role || ''));
+              // 👁️ E-swap (CASE-341): ตัวแทนต้องผ่านตา — ใช้ eyeMeta (เข้าข่าว/สะอาด) เป็นน้ำหนักหลัก ไม่ใช่แค่ role
+              const _em = im?.eyeMeta;
+              if (!_hasF && !_story && !(_em && _em.fit >= 7)) return;
+              const _key = (_hasF ? 100 : 0) + (_story ? 50 : 0) + (_em ? _em.fit * 20 : 0) + (_em?.clean ? 30 : 0) + (Number(im?.score) || 0);
+              if (_key > _bk) { _bk = _key; _best2 = i; }
+            });
+            if (_best2 >= 0) { a.imageIndex = _best2; a.crop = { x: 0, y: 0, w: 1, h: 1 }; a.why = '👁️ eye-after swap'; console.log(`[CoverV3] 👁️ swap ${iss.slot} ← #${_best2}`); }
+          }
+          // recrop ช่องที่มีปัญหาทั้งหมด (รวมช่องที่เพิ่ง swap) ด้วยตา FinalCropper + hint จากตาตรวจ
+          const _slots = _eye.issues.map(i => i.slot);
+          const _subset = assignments.filter(a => _slots.includes(a.slotId));
+          if (_subset.length) {
+            await _fcrop({ assignments: _subset, imageBuffers, templateSpec, identity, newsTitle, faceBoxes, hints: Object.fromEntries(_eye.issues.map(i => [i.slot, i.hint || ''])) });
+            coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec, faceBoxes });
+            console.log(`[CoverV3] 👁️ Eye-After แก้ ${_slots.join(',')} → ประกอบใหม่`);
+            // 👁️ E4b (CASE-343): คะแนนที่เก็บต้องวัด "ปกไฟนอลหลังตาแก้" — เดิมวัดก่อน swap/recrop ทำให้ลูปคุณภาพไม่มีวันเห็นของจริง
+            try {
+              const _jr2 = await _judgeRigorous(coverBuffer);
+              console.log(`[CoverV3] 👁️ re-judge หลังตาแก้: ${_jr2.score}/10 (ก่อนแก้ ${_best.jr.score}/10)`);
+              _best.jr = _jr2;
+            } catch { /* คงคะแนนเดิม */ }
+          }
+        }
+      } catch (e) { console.log('[CoverV3] 👁️ Eye-After skipped (non-fatal):', e.message?.slice(0, 50)); }
+    }
+
     const score = Math.round(_best.jr.score * 10) / 10;
     console.log(`[CoverV3] ✅ best ${score}/10 (${templateSpec.id}) | แกนบังคับ person=${_best.jr.personClear} topic=${_best.jr.onTopic} clean=${_best.jr.clean} | issues: ${_best.jr.issues.join(', ') || 'none'}`);
 
@@ -801,7 +959,8 @@ async function _renderCoverV3(request) {
       const { saveCase } = await import('@/lib/services/coverCaseArchive');
       const saved = await saveCase(coverBuffer, {
         newsTitle: newsTitle || (content || '').slice(0, 80),
-        content: (content || '').slice(0, 500),
+        // ★ กฎเหล็กผู้ใช้ 2 ก.ค.: เก็บ "เนื้อเต็ม" ในคลังเคส (เดิม 500 ตัว = replay เทสด้วยเนื้อตัดทอน ผิดกฎเทสเนื้อเต็ม)
+        content: (content || '').slice(0, 8000),
         score,
         templateUsed: templateSpec.id,
         elapsed: (Date.now() - t0) / 1000,

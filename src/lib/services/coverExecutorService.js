@@ -298,10 +298,12 @@ const HERO_CROP   = { faceFrac: 0.88, faceTopAt: 0.40, maxFaceHFrac: 0.74, minFa
 // ★ เฟส 2.5: วงกลมตัดมุมโค้ง → ต้องเผื่อมากกว่าสี่เหลี่ยม (กันตัดบนหัว+คางพร้อมกัน — Hermes CASE-254)
 //   faceFrac 0.80→0.66 (หน้ากินกว้างน้อยลง เผื่อขอบโค้งตัดข้าง) · maxFaceHFrac 0.80→0.66 (หน้าเล็กลงในวง กันตัดบน-ล่าง)
 // ★ เฟส 3B (CASE-267): ซูมหน้าเต็มวงขึ้น faceFrac 0.66→0.72 + maxFaceHFrac 0.66→0.72 (ยังเผื่อขอบโค้ง ไม่เกิน 0.74)
-const CIRCLE_CROP = { faceFrac: 0.72, faceTopAt: 0.45, maxFaceHFrac: 0.72 };
+const CIRCLE_CROP = { faceFrac: 0.72, faceTopAt: 0.45, maxFaceHFrac: 0.72, minFaceHFrac: 0.35 }; // ★ rev.K1: หน้าต้อง ≥35% ของวง (กันคนเต็มตัวจมวง CASE-321)
 // ── MOMENT (ช่องรอง) ──
 // ★ เฟส 3B (CASE-267 เจมส์ ช่องรองหน้าเล็กเห็นตัว/หมา/เวที): ซูมหน้าเด่นเต็มเฟรม faceFrac 0.76→0.84 + maxFaceHFrac 0.74→0.80
-const MOMENT_CROP = { faceFrac: 0.84, faceTopAt: 0.40, maxFaceHFrac: 0.80 };
+// ★ rev.K1 (CASE-321 ลายตา — เทียบปกแสนไลค์: "ทุกช่อง" หน้าคน ~40-70% ของช่อง ไม่ใช่แค่ hero):
+//   เพิ่ม minFaceHFrac ช่องรอง 0.30 + วงกลม 0.35 — เดิม 0 = ภาพ wide หน้าจิ๋วผ่านออกทั้งฉาก (จมโซฟา/ป้ายไฟ)
+const MOMENT_CROP = { faceFrac: 0.84, faceTopAt: 0.40, maxFaceHFrac: 0.80, minFaceHFrac: 0.30 };
 
 /** พารามิเตอร์การจัดหน้าตามชนิด/ขนาดช่อง — ดึงจากค่าที่แยกต่อเลย์เอาต์ด้านบน (แก้ที่ const นั้นๆ) */
 function faceParamsForSlot(slot) {
@@ -370,12 +372,86 @@ async function grayWorldGains(buf, strength = 0.5) {
   } catch { return null; }
 }
 
+/** ★ rev.S4 (2 ก.ค. — ลายน้ำ "ผู้จัดการ" หลุดขึ้นปก CASE-300/304/305): หลบโซนลายน้ำระดับพิกเซล
+ *  ต้องทำที่ executor เพราะช่องมีหน้า executor คำนวณ region เองจาก faceBox (ไม่ใช้ crop Director)
+ *  หลักการ: คงสัดส่วน region เดิม (หด+จัดกึ่งกลางหน้า) — หัวถึงใต้คางต้องอยู่ครบ ไม่งั้นคงเดิม (หน้าขาดแย่กว่าลายน้ำ) */
+function dodgeWatermarkPx(region, fb, imgW, imgH, tag = '') {
+  // ★ S4b: หลบทั้ง "ลายน้ำ" และ "แคปชั่นฝัง" (textRegion) — บทเรียน CASE-308 วงกลมติดแคปชั่น
+  let out = _dodgeBoxPx(region, fb, fb?.watermarkRegion, imgW, imgH, tag + '·ลายน้ำ');
+  out = _dodgeBoxPx(out, fb, (fb?.hasText && fb?.textRegion) ? fb.textRegion : null, imgW, imgH, tag + '·แคปชั่น');
+  return out;
+}
+function _dodgeBoxPx(region, fb, wm, imgW, imgH, tag = '') {
+  if (!wm || !(wm.x2 > wm.x1) || !region) return region;
+  const wy1 = wm.y1 * imgH, wy2 = wm.y2 * imgH, wx1 = wm.x1 * imgW, wx2 = wm.x2 * imgW;
+  const rx2 = region.left + region.width, ry2 = region.top + region.height;
+  const ox = Math.min(rx2, wx2) - Math.max(region.left, wx1);
+  const oy = Math.min(ry2, wy2) - Math.max(region.top, wy1);
+  if (ox <= 2 || oy <= 2) return region; // ไม่ทับ
+  const ratio = region.width / Math.max(1, region.height);
+  const hasFace = fb.x2 > fb.x1;
+  const fhPx = hasFace ? (fb.y2 - fb.y1) * imgH : 0;
+  const headTop = hasFace ? Math.max(0, fb.y1 * imgH - fhPx * 0.45) : 0;
+  const chin = hasFace ? Math.min(imgH, fb.y2 * imgH + fhPx * 0.18) : 0;
+  const faceL = hasFace ? fb.x1 * imgW : 0, faceR = hasFace ? fb.x2 * imgW : 0;
+  const faceCx = hasFace ? ((fb.x1 + fb.x2) / 2) * imgW : region.left + region.width / 2;
+  const fits = (nl, nt, nw, nh) => !hasFace || (faceL >= nl && faceR <= nl + nw && headTop >= nt && chin <= nt + nh);
+  // ลายน้ำโซนล่างของ region → หดให้จบเหนือลายน้ำ
+  if (wy1 > region.top + region.height * 0.45) {
+    const nh = Math.floor(wy1 - region.top - 2);
+    const nw = Math.floor(nh * ratio);
+    const nl = Math.max(0, Math.min(Math.round(faceCx - nw / 2), imgW - nw));
+    if (nh >= 60 && nw >= 60 && fits(nl, region.top, nw, nh)) {
+      console.log(`[CoverV3] 💧 หลบลายน้ำ${tag} (โซนล่าง)`);
+      return { left: nl, top: region.top, width: nw, height: nh };
+    }
+  }
+  // ลายน้ำโซนบน → เลื่อนขอบบนลงใต้ลายน้ำ
+  if (wy2 < region.top + region.height * 0.55) {
+    const nt = Math.ceil(wy2 + 2);
+    const nh = Math.floor(ry2 - nt);
+    const nw = Math.floor(nh * ratio);
+    const nl = Math.max(0, Math.min(Math.round(faceCx - nw / 2), imgW - nw));
+    if (nh >= 60 && nw >= 60 && fits(nl, nt, nw, nh)) {
+      console.log(`[CoverV3] 💧 หลบลายน้ำ${tag} (โซนบน)`);
+      return { left: nl, top: nt, width: nw, height: nh };
+    }
+  }
+  return region; // หลบแบบปลอดภัยไม่ได้ → คงเดิม
+}
+
+/** ★ rev.FINAL: ปรับ crop ของ Final Cropper เข้าสัดส่วนช่องด้วยการ "หด" เท่านั้น (ห้ามขยาย — ขยาย=ฉากรกกลับมา)
+ *  แนวตั้งหดแบบ bias บน 20% (กันตัดหัว) · แนวนอนหดกึ่งกลาง */
+function fitCropInsideAspect(crop, imgW, imgH, slotAspect) {
+  let px = crop.x * imgW, py = crop.y * imgH, pw = crop.w * imgW, ph = crop.h * imgH;
+  const ca = pw / Math.max(1, ph);
+  // ★ FINAL2 (CASE-334 หน้าโดนเฉือน): มีสมอหน้า (_fx,_fy จาก gpt ที่เห็นภาพจริง) → หดแบบล็อกหน้าไว้ในเฟรมเสมอ
+  const _hasAnchor = Number.isFinite(crop._fx) && Number.isFinite(crop._fy);
+  const ax = _hasAnchor ? crop._fx * imgW : px + pw / 2;
+  const ay = _hasAnchor ? crop._fy * imgH : py + ph * 0.35;
+  if (ca > slotAspect) {
+    const nw = ph * slotAspect;
+    px = Math.min(Math.max(ax - nw / 2, px), px + pw - nw); // หน้าอยู่กึ่งกลางแนวนอน — clamp ในกรอบเดิม
+    pw = nw;
+  } else if (ca < slotAspect) {
+    const nh = pw / slotAspect;
+    py = Math.min(Math.max(ay - nh * 0.38, py), py + ph - nh); // หน้าอยู่ระดับ ~38% ของเฟรม (rule of thirds) — clamp ในกรอบเดิม
+    ph = nh;
+  }
+  px = Math.min(Math.max(px, 0), Math.max(0, imgW - pw));
+  py = Math.min(Math.max(py, 0), Math.max(0, imgH - ph));
+  return { left: Math.round(px), top: Math.round(py), width: Math.max(8, Math.round(pw)), height: Math.max(8, Math.round(ph)) };
+}
+
 /** ครอป+ย่อภาพลงช่องสี่เหลี่ยม (+กรอบสีถ้ามี) */
 async function renderRectTile(src, crop, slot, fb) {
   const meta = await sharp(src).metadata();
   const imgW = meta.width || 1, imgH = meta.height || 1;
   let region;
-  if (usableSingleFace(fb)) {
+  if (crop && crop._final) {
+    // ★ rev.FINAL: Final Cropper เห็นภาพจริงแล้วตัดสิน — เชื่อ 100% ห้ามชั้นไหนคำนวณทับ
+    region = fitCropInsideAspect(crop, imgW, imgH, slot.w / slot.h);
+  } else if (usableSingleFace(fb)) {
     const { faceFrac, faceTopAt, maxFaceHFrac, minFaceHFrac } = faceParamsForSlot(slot);
     region = faceRegionForSlot(fb, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac, minFaceHFrac || 0);
   } else if (usableGroupFaces(fb)) {
@@ -441,6 +517,7 @@ async function renderRectTile(src, crop, slot, fb) {
     }
     region = fitCropToSlotAspect(_c, imgW, imgH, slot.w / slot.h);
   }
+  if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ` ${slot.id}`); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
   // rev.16: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — WB คุมโทนรวม + รีทัชเบา
   //   (1) gray-world WB ดึงคาสต์สีเข้าโทนเดียว  (2) sat/contrast บางๆ  (3) คมขึ้นพอดี
   const base = await sharp(src).extract(region).resize(slot.w, slot.h, { fit: 'fill' }).toBuffer();
@@ -475,15 +552,28 @@ async function renderCircleTile(src, crop, slot, fb) {
   // rev.14L: วงกลม = "หน้าเดี่ยวใหญ่สุดเสมอ" (ผู้ใช้ย้ำ CASE-089/092: วงกลมต้องเห็นหน้าชัด ไม่ใช่กลุ่มหน้าเล็ก)
   //   ถ้าภาพมีหลายหน้า → ครอปหน้าใหญ่สุดเดี่ยว (ชัดกว่าโชว์ทั้งกลุ่มในวงเล็ก)
   let region;
-  if (fb && fb.x2 > fb.x1 && (!fb.allFaces || fb.allFaces.length <= 1)) {
-    region = faceRegionForSlot(fb, imgW, imgH, 1, 0.66, 0.47, 0.66); // เฟส2.5: วงกลมเผื่อขอบโค้ง (faceFrac/maxFaceHFrac 0.80→0.66) ให้ตรง CIRCLE_CROP
+  if (crop && crop._final) {
+    // ★ rev.FINAL: เชื่อ Final Cropper 100% — หดเป็นจัตุรัสภายในกรอบ (bias บนกันตัดหัว)
+    region = fitCropInsideAspect(crop, imgW, imgH, 1);
+  } else if (fb && fb.x2 > fb.x1 && (!fb.allFaces || fb.allFaces.length <= 1)) {
+    region = faceRegionForSlot(fb, imgW, imgH, 1, 0.66, 0.47, 0.66, 0.35); // ★rev.K1 +minFace 0.35 · เฟส2.5: วงกลมเผื่อขอบโค้ง (faceFrac/maxFaceHFrac 0.80→0.66) ให้ตรง CIRCLE_CROP
   } else if (fb && Array.isArray(fb.allFaces) && fb.allFaces.length >= 1) {
     const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
-    region = faceRegionForSlot(largest, imgW, imgH, 1, 0.66, 0.47, 0.66); // เฟส2.5: วงกลมเผื่อขอบโค้ง (faceFrac/maxFaceHFrac 0.80→0.66) ให้ตรง CIRCLE_CROP
+    region = faceRegionForSlot(largest, imgW, imgH, 1, 0.66, 0.47, 0.66, 0.35); // ★rev.K1 +minFace 0.35 · เฟส2.5: วงกลมเผื่อขอบโค้ง (faceFrac/maxFaceHFrac 0.80→0.66) ให้ตรง CIRCLE_CROP
   } else {
-    region = fitCropToSlotAspect(crop, imgW, imgH, 1);
+    // ★ rev.S3 (CASE-299 วงกลมครึ่งตัว): ภาพไม่มีพิกัดหน้า (เอกสาร EVIDENCE / ตรวจหน้าไม่เจอ)
+    //   เดิม fitCropToSlotAspect "ขยาย" ด้านสั้นให้เป็นจัตุรัส = เห็นตัว/ฉากเพิ่ม → เปลี่ยนเป็น "หด" ด้านยาวลง
+    //   จัตุรัสแน่นกึ่งกลางแนวนอน + เอนขึ้นบน (จุดสำคัญของภาพคน/เอกสารมักอยู่บนของกรอบ Director)
+    let px = crop.x * imgW, py = crop.y * imgH, pw = crop.w * imgW, ph = crop.h * imgH;
+    const side = Math.max(8, Math.min(pw, ph));
+    px = px + (pw - side) / 2;
+    py = py + (ph - side) * 0.25; // bias บน 25%
+    px = Math.min(Math.max(px, 0), imgW - side);
+    py = Math.min(Math.max(py, 0), imgH - side);
+    region = { left: Math.round(px), top: Math.round(py), width: Math.round(side), height: Math.round(side) };
   }
 
+  if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ' circle'); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
   const cbase = await sharp(src).extract(region).resize(d, d, { fit: 'fill' }).toBuffer();
   const cwb = await grayWorldGains(cbase);
   let cpipe = sharp(cbase);

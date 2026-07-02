@@ -60,6 +60,7 @@ Format:
   "best_crop_focus": "center-top",
   "has_big_text": false,
   "text_region": null,
+  "watermark_region": null,
   "face_emotion": "smiling | laughing | crying | sad | angry | shocked | serious | neutral | unknown",
   "emotion_intensity": "strong | mild | none"
 }
@@ -67,7 +68,8 @@ If no faces: has_faces=false, faces=[], and provide main_subject_region for the 
 face_emotion = the ACTUAL facial expression of the MAIN face — read the mouth/eyes/brows directly, do NOT guess from the scene/background/mood. Use "unknown" if there is no clear face.
 emotion_intensity = how strong that expression is (strong = very clear & dominant / mild = somewhat visible / none = flat or neutral).
 has_big_text = true if the image is a social-media post screenshot, chat screenshot, news graphic with headline, OR has ANY burned-in text/captions/subtitles/dialogue-overlay/quote-overlay that would be visible on a cover — INCLUDING TV-drama subtitles, interview lower-third captions, quoted-speech overlays, and lyric/quote text. Only a tiny corner watermark or small channel logo = false. When in doubt, set true (a clean cover should not show burned-in sentences).
-text_region: when has_big_text=true, give the bounding box of the main burned-in text block as { "x_pct": 0, "y_pct": 75, "w_pct": 100, "h_pct": 25 } (e.g. TV lower-third captions are usually the bottom strip) — so the system can crop the person while avoiding the text zone. null if has_big_text=false.`;
+text_region: when has_big_text=true, give the bounding box of the main burned-in text block as { "x_pct": 0, "y_pct": 75, "w_pct": 100, "h_pct": 25 } (e.g. TV lower-third captions are usually the bottom strip) — so the system can crop the person while avoiding the text zone. null if has_big_text=false.
+watermark_region: SEPARATE from has_big_text — if the photo has a press/agency watermark or channel logo ANYWHERE (even small, faint, semi-transparent, or in a corner — e.g. "ผู้จัดการ", "ไทยรัฐ", channel logos), give its bounding box e.g. { "x_pct": 55, "y_pct": 88, "w_pct": 45, "h_pct": 12 } — ★ numbers MUST be 0-100 percent of image (NOT 0-1 fractions). null if none. This field does NOT change has_big_text (keep its rule unchanged) — it is only used to crop AROUND the watermark.`;
 
     const parsed = await callAI({
       prompt: gptPrompt,
@@ -79,7 +81,7 @@ text_region: when has_big_text=true, give the bounding box of the main burned-in
       ],
       model: 'gpt-4o-mini',
       temperature: 0.1,
-      maxTokens: 500,
+      maxTokens: 700, // ★ rev.S4: 500→700 — เพิ่ม watermark_region แล้ว output เดิม ~460-640ch เสี่ยง JSON โดนตัด
     });
 
     const faces = (parsed.faces || []).map(f => ({
@@ -118,6 +120,19 @@ text_region: when has_big_text=true, give the bounding box of the main burned-in
             y2: Math.min(1, (Number(parsed.text_region.y_pct) + Number(parsed.text_region.h_pct || 0)) / 100),
           }
         : null,
+      // ★ rev.S4 (2 ก.ค.): โซนลายน้ำ/โลโก้สำนักข่าว (แยกจาก has_big_text) — ใช้ครอปหลบ ไม่ใช้ตัดสิน reject
+      //   ★ S4b: โมเดลบางทีตอบ "เศษส่วน 0-1" แทนเปอร์เซ็นต์ (เจอจริง: y_pct 0.8 แทน 80) → เดา scale จากค่าที่ได้
+      watermarkRegion: (() => {
+        const r = parsed.watermark_region;
+        if (!r || !Number.isFinite(Number(r.x_pct))) return null;
+        const x = Number(r.x_pct), y = Number(r.y_pct), w = Number(r.w_pct || 0), h = Number(r.h_pct || 0);
+        const scale = (x <= 1.5 && y <= 1.5 && w <= 1.5 && h <= 1.5) ? 1 : 100; // 0-1 fraction หรือ 0-100 percent
+        const box = {
+          x1: Math.max(0, x / scale), y1: Math.max(0, y / scale),
+          x2: Math.min(1, (x + w) / scale), y2: Math.min(1, (y + h) / scale),
+        };
+        return (box.x2 > box.x1 && box.y2 > box.y1) ? box : null;
+      })(),
       imageWidth: metadata.width,
       imageHeight: metadata.height,
     };

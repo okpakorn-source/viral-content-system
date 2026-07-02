@@ -3,6 +3,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import sharp from 'sharp';
 import { MODEL_VISION } from '@/lib/ai/modelConfig';
 import * as coverTrace from '@/lib/services/coverTrace'; // ★ observability (non-fatal ทุกจุด)
+import { brainPromptBlock } from '@/lib/services/coverBenchmarkBrain'; // 🧠 rev.BRAIN: DNA ปกแสนไลค์คุมทุกจุดตัดสินใจ
 
 // ==========================================
 // Helper: Fetch with timeout
@@ -172,22 +173,35 @@ const SOURCE_RELIABILITY = {
   '123rf.com': 0,
 };
 
+// ★ rev.Q1 (Quality Lock 2 ก.ค.): โดเมนขยะ/โฆษณา/สติกเกอร์ — กดคะแนน 0 กันภาพโลโก้/โฆษณายึดคิว Judge
+const JUNK_DOMAIN_RE = /(clinic|hospital|โรงพยาบาล|line-scdn|sticker|lazada|shopee|aliexpress|line\.me)/i;
+// ★ rev.Q1: multi-part TLD ของไทย/ทั่วไป → ตัดโดเมนถึง "รากจริง" (static.thairath.co.th → thairath.co.th)
+const _MULTI_TLD = new Set(['co.th', 'in.th', 'or.th', 'ac.th', 'go.th', 'net.th', 'mi.th', 'co.uk', 'com.au']);
+function registrableDomain(hostname) {
+  const h = String(hostname || '').replace(/^www\./, '');
+  const parts = h.split('.');
+  if (parts.length <= 2) return h;
+  const last2 = parts.slice(-2).join('.');
+  if (_MULTI_TLD.has(last2)) return parts.slice(-3).join('.'); // .co.th → เอา 3 ส่วนท้าย
+  return last2;
+}
+
 function getSourceScore(url) {
   try {
-    // ★ Handle bare domain names (e.g. "thairath.co.th" from Serper's source field)
-    const bare = url?.replace(/^www\./, '');
-    if (bare && !bare.includes('/') && SOURCE_RELIABILITY[bare] !== undefined) {
-      return SOURCE_RELIABILITY[bare];
+    if (!url) return 4;
+    // ★ rev.Q1: รองรับทั้ง full URL และ bare domain (Serper's source field เช่น "thairath.co.th")
+    let hostname;
+    if (/^https?:/i.test(url)) {
+      hostname = new URL(url).hostname.replace(/^www\./, '');
+    } else {
+      hostname = String(url).replace(/^www\./, '').split('/')[0].split('?')[0];
     }
-    const hostname = new URL(url).hostname.replace(/^www\./, '');
-    // Check exact match first
+    if (JUNK_DOMAIN_RE.test(hostname)) return 0; // ★ โฆษณา/คลินิก/สติกเกอร์/ร้านค้า → ต่ำสุด
+    // Check exact hostname first (e.g. 'instagram.com')
     if (SOURCE_RELIABILITY[hostname] !== undefined) return SOURCE_RELIABILITY[hostname];
-    // Check parent domain (e.g., 'th.news.yahoo.com' -> 'yahoo.com')
-    const parts = hostname.split('.');
-    if (parts.length >= 2) {
-      const parentDomain = parts.slice(-2).join('.');
-      if (SOURCE_RELIABILITY[parentDomain] !== undefined) return SOURCE_RELIABILITY[parentDomain];
-    }
+    // ★ rev.Q1: ตัดถึงรากจริง (static.thairath.co.th → thairath.co.th=7, mpics.mgronline.com → mgronline.com=7)
+    const root = registrableDomain(hostname);
+    if (SOURCE_RELIABILITY[root] !== undefined) return SOURCE_RELIABILITY[root];
     return 4; // default neutral score
   } catch {
     return 4;
@@ -322,16 +336,17 @@ async function agentGoogleCleanImages(identity) {
     { q: storySubject && storySubject !== mainChar ? `${mainChar} ${storySubject}` : '', label: 'hero+storySubject', num: 10 },
     { q: storySubject && storySubject !== mainChar ? storySubject : '', label: 'storySubject direct', num: 8 },
     // === ★★★ Story-specific queries ===
-    { q: sq.person_context || cleanQueryString(identity?.searchGoogle, rawMainChar, mainChar) || '', label: 'person context', num: 8 },
-    { q: sq.event_scene || '', label: 'event scene', num: 8 },
-    { q: sq.emotion_moment || '', label: 'emotion moment', num: 6 },
+    // ★ 👁️ E3 (2 ก.ค.): เพิ่ม num คำค้นสายโมเมนต์/แอ็กชัน — Serper คิดเงินต่อ "คำค้น" ไม่ใช่ต่อภาพ → num สูงขึ้น = วัตถุดิบเข้าตาเยอะขึ้นฟรี (เป้าพูลผ่านตา ≥12)
+    { q: sq.person_context || cleanQueryString(identity?.searchGoogle, rawMainChar, mainChar) || '', label: 'person context', num: 10 },
+    { q: sq.event_scene || '', label: 'event scene', num: 10 },
+    { q: sq.emotion_moment || '', label: 'emotion moment', num: 10 },
     { q: sq.location_photo || identity?.location || '', label: 'location', num: 6 },
     { q: sq.related_people || '', label: 'related people', num: 5 },
-    { q: sq.person_emotion || '', label: 'person emotion', num: 8 },
+    { q: sq.person_emotion || '', label: 'person emotion', num: 10 },
     { q: sq.person_past || '', label: 'person past/timeline', num: 6 },
-    { q: sq.key_relationship || '', label: 'key relationship', num: 8 },
-    { q: sq.key_activity || '', label: 'key activity', num: 8 },
-    { q: sq.story_contrast || '', label: 'story contrast', num: 6 },
+    { q: sq.key_relationship || '', label: 'key relationship', num: 10 },
+    { q: sq.key_activity || '', label: 'key activity', num: 10 },
+    { q: sq.story_contrast || '', label: 'story contrast', num: 8 },
     { q: sq.storySubject_direct || '', label: 'storySubject direct (AI)', num: 10 }, // ★ คำค้นตรงๆ ที่ AI สร้าง
   ].filter(q => q.q && q.q.trim());
 
@@ -881,7 +896,12 @@ async function agentContextImages(identity) {
       queries.push({ q: `${mainChar} ${sec} -ปก -cover ${blockTerms}`, label: `pair: ${sec.slice(0, 20)}` });
     }
   }
-  if (secondaries.length > 0) console.log(`[Agent3: Context] 👥 บุคคลรอง ${secondaries.length} คน: ${secondaries.join(', ')}`);
+  // ★ rev.S5 (2 ก.ค. — สูตรปกแสนไลค์ต้องมีช่อง "ปฏิกิริยา" REACTION): ค้นเจาะ "ช็อตสีหน้า/สัมภาษณ์" ของบุคคลรอง
+  //   solo query ข้างบนได้ภาพทั่วไป (โพส/อีเวนต์) — ปกไวรัลจริงใช้หน้า "กำลังรู้สึก" (ซึ้ง/ห่วง/สะเทือนใจ) ของคนเกี่ยวข้อง
+  for (const sec of secondaries.slice(0, 2)) {
+    queries.push({ q: `"${sec}" สัมภาษณ์ สีหน้า -ปก -cover ${blockTerms}`, label: `reaction: ${sec.slice(0, 20)}` });
+  }
+  if (secondaries.length > 0) console.log(`[Agent3: Context] 👥 บุคคลรอง ${secondaries.length} คน: ${secondaries.join(', ')} (+reaction query ${Math.min(secondaries.length, 2)})`);
 
   // ★ Fix 8: queries จาก specific_details (ชื่อสถานที่/หลักฐานเฉพาะ)
   if (identity?.specific_details?.place_names) {
@@ -1053,9 +1073,30 @@ function prepareJudgeBatch(candidates, identity) {
     anchorBucket.forEach(b => console.log(`  [#${b.idx}] "${b.title.substring(0, 60)}"`));
   }
   const MAX_JUDGE = 24;
-  const anchorsToSend = anchorBucket.slice(0, 8);
-  const othersToSend = otherBucket.slice(0, MAX_JUDGE - anchorsToSend.length);
+  // ★★★ rev.Q2 (Quality Lock 2 ก.ค. — ผู้ใช้: "หาภาพอย่าแกว่งไปติดโลโก้"): เลือก 24 ใบด้วย "คะแนนคุณภาพ" ไม่ใช่ลำดับพูล(สุ่ม)
+  //   คะแนน = ความน่าเชื่อถือแหล่ง(0-10) + ตรงเรื่อง(anchor +3) + ชื่อคนตรงในหัวข้อ(+2) → เรียงมากไปน้อย
+  //   deterministic (input เดิม→ผลเดิม): tiebreak ด้วย idx เดิม → ล็อกให้ Judge เห็นภาพแหล่งข่าวจริง+ตรงเรื่องก่อนเสมอ
+  const _mcTokens = String(identity?.mainCharacter || '').toLowerCase().split(/\s+/).filter(t => t.length >= 2);
+  const _preScore = (item) => {
+    const meta = item.meta || {};
+    const srcUrl = meta.link || meta.source || item.url;
+    let s = getSourceScore(srcUrl);                                  // 0-10 แหล่ง
+    if (item.isAnchor) s += 3;                                       // ตรงเรื่อง (title match anchor)
+    const _t = (item.title || '').toLowerCase();
+    if (_mcTokens.length && _mcTokens.some(tok => _t.includes(tok))) s += 2; // ชื่อคนตรง
+    return s;
+  };
+  const _byScore = (a, b) => (_preScore(b) - _preScore(a)) || (a.idx - b.idx); // มาก→น้อย, เสมอ=ลำดับเดิม (เสถียร)
+  const anchorSorted = [...anchorBucket].sort(_byScore);
+  const otherSorted = [...otherBucket].sort(_byScore);
+  const anchorsToSend = anchorSorted.slice(0, 8);
+  const othersToSend = otherSorted.slice(0, MAX_JUDGE - anchorsToSend.length);
   const batch = [...anchorsToSend, ...othersToSend];
+  // log ให้เห็น "ตัวล็อก" ทำงาน: คะแนนภาพที่ถูกเลือกจริง (สูงสุด/ต่ำสุดในชุด)
+  try {
+    const _scores = batch.map(_preScore);
+    console.log(`[QualityLock] 🔒 เลือก ${batch.length} ใบด้วยคะแนนคุณภาพ (แหล่ง+ตรงเรื่อง+ชื่อ) — สูงสุด ${Math.max(..._scores)} / ต่ำสุด ${Math.min(..._scores)} · anchor ${anchorsToSend.length}/${anchorBucket.length}, other ${othersToSend.length}/${otherBucket.length}`);
+  } catch { /* log ไม่สำคัญ */ }
   const resultUrls = batch.map(b => b.url);
   const anchorMap = new Map();
   for (const b of batch) { if (b.isAnchor) anchorMap.set(b.url, true); }
@@ -1072,6 +1113,49 @@ function prepareJudgeBatch(candidates, identity) {
     },
     _storyAnchorCandidates: anchorBucket.map(b => ({ originalIndex: b.idx, title: b.title, url: b.url })),
   });
+}
+
+/**
+ * 👁️ E1 — "ตาคัดเข้า" (ผู้ใช้ 2 ก.ค.: ทุกภาพต้องมีตาเห็นจริงก่อนเข้าพูล — เลิกส่งรูปแบบสุ่ม)
+ * ส่องภาพจริงทีละใบ (ชุดละ 6, detail HIGH — Judge เดิมเห็นแค่ low 24 ใบรวด): ใคร/อารมณ์/ฉาก/เข้าข่าว/สะอาด
+ * ผลเป็น _eyeMeta: ป้อนเข้า prompt Judge (น้ำหนักสูงสุด) + ติดไปกับภาพถึง Director (ตา+สมองทำงานร่วม)
+ */
+async function eyeScreenImages(validCandidates, imageParts, identity, newsTitle) {
+  const out = new Array(validCandidates.length).fill(null);
+  try {
+    const { callAI } = await import('@/lib/ai/openai');
+    const B = 6;
+    for (let s = 0; s < imageParts.length; s += B) {
+      const parts = imageParts.slice(s, s + B);
+      const prompt = `${brainPromptBlock('judge')}
+คุณคือ "ตาคัดภาพ" — ส่องภาพจริงทีละใบ (${parts.length} ใบ ลำดับ 1..${parts.length}) ก่อนให้ภาพเข้าพูลทำปก
+ข่าว: "${(newsTitle || '').slice(0, 110)}" · ตัวเอก: "${identity?.mainCharacter || '-'}" · ตัวรอง: "${identity?.secondaryCharacter || '-'}"
+ต่อภาพให้ตอบ: person=ใครในภาพ (ชื่อถ้าระบุได้ / คนไม่รู้จัก / ไม่มีคน) · emotion=อารมณ์สีหน้า · scene=ฉากสั้นๆ · fit=เข้ากับข่าวนี้ 0-10 (คน+ฉาก+อารมณ์ตรงเนื้อข่าวแค่ไหน) · clean=true/false (ไม่มีกราฟิก/แคปชั่น/ลายน้ำ/ฉากรกลายตา) · facing="ตรง"|"ข้าง"|"-" (หน้าคนหลักปะทะกล้อง หรือหันข้าง/ก้ม · "-"=ไม่มีคน)
+JSON เท่านั้น: {"images":[{"i":1,"person":"","emotion":"","scene":"","fit":7,"clean":true,"facing":"ตรง"}]}`;
+      const res = await callAI({
+        prompt,
+        imageContents: parts.map(p => ({ type: 'image_url', image_url: { url: `data:${p.inlineData.mimeType};base64,${p.inlineData.data}`, detail: 'high' } })),
+        model: 'gpt-4o', temperature: 0, maxTokens: 900,
+      });
+      const j = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
+      for (const im of (j?.images || [])) {
+        const k = s + (Number(im.i) - 1);
+        if (k >= 0 && k < out.length) {
+          out[k] = {
+            person: String(im.person || '').slice(0, 40),
+            emotion: String(im.emotion || '').slice(0, 30),
+            scene: String(im.scene || '').slice(0, 50),
+            fit: Math.max(0, Math.min(10, Number(im.fit) || 0)),
+            clean: im.clean !== false,
+            facing: String(im.facing || '-').slice(0, 6),
+          };
+        }
+      }
+    }
+    const _seen = out.filter(Boolean).length;
+    console.log(`[Judge] 👁️ EyeScreen ส่องแล้ว ${_seen}/${validCandidates.length} ใบ (เข้าข่าว≥7: ${out.filter(o => o && o.fit >= 7).length}, ไม่สะอาด: ${out.filter(o => o && !o.clean).length})`);
+  } catch (e) { console.log(`[Judge] 👁️ EyeScreen ล้ม (ใช้ Judge ปกติ): ${String(e?.message || '').slice(0, 60)}`); }
+  return out;
 }
 
 // ==========================================
@@ -1195,6 +1279,13 @@ async function judgeImages(candidates, newsTitle, identity) {
     return [];
   }
 
+  // 👁️ E1 (ผู้ใช้ 2 ก.ค.): ตาส่องทุกใบก่อนเข้า Judge — เลิกส่งรูปแบบสุ่ม
+  const _eyeMeta = await eyeScreenImages(validCandidates, imageParts, identity, newsTitle);
+  validCandidates._eyeMeta = _eyeMeta;
+  const eyeBlock = _eyeMeta.some(Boolean)
+    ? `\n👁️ EYE-SCREEN — ตาส่องภาพจริงทีละใบมาแล้ว (น้ำหนักสูงสุดในการตัดสิน ใช้ก่อนความเห็นตัวเอง):\n${_eyeMeta.map((o, i) => o ? `#${i}: คน=${o.person} | อารมณ์=${o.emotion} | ฉาก=${o.scene} | เข้าข่าว=${o.fit}/10 | สะอาด=${o.clean ? 'ใช่' : 'ไม่'}` : `#${i}: (ตาไม่เห็น — ตัดสินเอง)`).join('\n')}\nกฎจากตา: เข้าข่าว ≤3 → REJECT (เว้น story anchor) · สะอาด=ไม่ → บังคับใช้กฎ text/ลายน้ำเข้มสุด · เข้าข่าว ≥8 + สะอาด → ควรรับเข้าพูล\n`
+    : '';
+
   console.log(`[Judge] 📤 Sending ${imageParts.length} valid images to Gemini Vision...`);
 
   // ★ ย้ายมาไว้นอก try เพื่อให้ catch block เข้าถึง prompt ได้ (แก้ "prompt is not defined")
@@ -1218,6 +1309,9 @@ async function judgeImages(candidates, newsTitle, identity) {
   const keyScenes = identity?.keyScenes?.join(', ') || '';
 
   const prompt = `You are a Senior Photo Editor for a professional viral news agency, selecting images for a news cover.
+
+${brainPromptBlock('judge')}
+${eyeBlock}
 
 📰 News story: "${storyContext}"
 📝 Full news content: "${(newsContent || '').slice(0, 800)}"
@@ -1348,9 +1442,13 @@ There are ${imageParts.length} images (index 0 to ${imageParts.length - 1}) to j
 - ★★★ "ตัวรอง"${identity?.secondaryCharacter ? ` (${identity.secondaryCharacter})` : ''} ต้องเข้มเท่าตัวหลัก: ห้ามเอาผู้หญิง/ผู้ชายคนอื่นมาสวมเป็นคู่/ภรรยา/สามี (บทเรียนร้ายแรง: เอา "แพททิเซีย" มาเป็น "ชมพู่ อารยา" ภรรยาน็อต = ผิดคน เสี่ยงฟ้อง)
 - ★ แต่ "ภาพโคลสอัพ/พอร์ตเทรตของคนในข่าว" = ใช้ได้ปกติ — **อย่า REJECT เพราะแค่ "ไม่ชัวร์ 100%"** ให้ REJECT เฉพาะเมื่อ "มีหลักฐาน/จำได้ว่าเป็นคนอื่นจริงๆ" (กันเผลอตัดภาพคนในข่าวทิ้งหมด)
 - ตรวจ context/metadata/แคปชั่นต้นทางประกอบ — ถ้าบ่งชี้ว่าเป็นคนอื่น → REJECT
+★★★ rev.B (บทเรียนร้ายแรง CASE-316 งานแต่ง "คนละคู่" ขึ้นปก / CASE-317 ภาพท้องของดาราคนอื่น) — กัน "คนผิดที่บริบทคล้าย":
+- ⚠️ ชื่อเล่นซ้ำ: ดาราไทยหลายคนใช้ชื่อเล่นเดียวกัน (เช่น "วิกกี้" มีทั้ง วิกกี้ สุนิสา และ วิกกี้ พีรญา ภรรยาเวียร์ / "ตั๊ก" มีหลายคน) — ตัดสินด้วย "ชื่อเต็ม-นามสกุล + คู่ชีวิต/ตัวรองที่ข่าวระบุ" เสมอ ไม่ใช่แค่ชื่อเล่นตรงกับคำค้น
+- ★★ ภาพคู่/งานแต่ง/พรีเวดดิ้ง/คู่รัก/ครอบครัว: "อีกคนในภาพ" ต้องเป็น "${identity?.secondaryCharacter || 'ตัวรองที่ข่าวระบุ'}" เท่านั้น — คู่ในภาพเป็นคนละคน (งานแต่งของดาราชื่อเล่นเดียวกันแต่คนละคู่) → REJECT score 0 ทันที (นั่นคือภาพข่าวของคนอื่น!)
+- ★★ ภาพเหตุการณ์เฉพาะตัว (ตั้งครรภ์/อัลตราซาวด์/จูบท้อง/งานแต่ง/รับปริญญา/รับรางวัล): ถ้า "ไม่เห็นหน้า ${mainChar} ชัดพอยืนยันได้" ว่าเป็นเจ้าตัวจริง → REJECT (ภาพ generic ของคนอื่นในเหตุการณ์คล้ายกันขึ้นปก = ผิดคน = ฟ้องได้)
 
 === ★★★★★ คน "เด่นในภาพ" ต้องเกี่ยวข้องกับข่าวจริง เท่านั้น (กัน PDPA + คนนอกข่าวขึ้นปก) — 25 มิ.ย. ===
-หลักการ: ช่อง "คน" ทุกช่อง บุคคลที่เห็นหน้าเด่นต้องเป็น ${mainChar}${identity?.secondaryCharacter ? ` หรือ ${identity.secondaryCharacter}` : ''} หรือ "คนที่เป็นแกนของข่าวนี้โดยตรง" (พ่อ/แม่/พี่/น้อง/คู่กรณีที่ข่าวพูดถึง) เท่านั้น
+หลักการ: ช่อง "คน" ทุกช่อง บุคคลที่เห็นหน้าเด่นต้องเป็น ${mainChar}${identity?.secondaryCharacter ? ` หรือ ${identity.secondaryCharacter}` : ''} หรือ "คนที่เป็นแกนของข่าวนี้โดยตรง" (พ่อ/แม่/พี่/น้อง/ปู่ย่าตายาย/คู่กรณีที่ข่าวพูดถึง · rev.24: รวม "พิธีกรรายการที่สัมภาษณ์ตัวเอกในข่าวนี้" และ "ผู้ช่วยเหลือ/ผู้บริจาคที่เนื้อข่าวระบุ" — คนกลุ่มนี้คือภาพ "ปฏิกิริยา" ที่ปกไวรัลต้องมี) เท่านั้น
 - ⛔⛔ ถ้าในภาพมี "บุคคลอื่นที่เห็นหน้าเด่นชัด" ซึ่งไม่ใช่ ${mainChar} และพิสูจน์ไม่ได้ว่าเป็นตัวรอง/ครอบครัวที่ข่าวระบุ → REJECT score 0 (แม้ถ่ายคู่/ออกงานร่วมกับ ${mainChar}ก็ตาม)
    เหตุผล: "ถ่ายรูปด้วยกันในงานทั่วไป ≠ เกี่ยวข้องกับข่าว" — เอาคนนอกข่าวขึ้นปก = ทำให้เข้าใจผิดว่าเขาเกี่ยว + เสี่ยง PDPA/ฟ้องร้อง
 - ★ RELATIONSHIP ใช้ได้เฉพาะเมื่อ "อีกคนคือตัวรอง/ครอบครัวที่ข่าวระบุจริง" — ถ้าอีกคนเป็นใครไม่รู้/แค่ร่วมเฟรม → ไม่ใช่ RELATIONSHIP → REJECT
@@ -1400,6 +1498,9 @@ There are ${imageParts.length} images (index 0 to ${imageParts.length - 1}) to j
 - Examples: live streaming, gardening, helping dogs, cooking, donating
 - Images that instantly communicate "what this news is about" without reading!
 - ★ If ${mainChar} is performing the news-related activity → Score 8-9!
+- ⛔⛔ rev.24 (บทเรียน CASE-300 หน้าซ้ำทุกช่อง): KEY_ACTIVITY must show the person DOING something in-scene (carrying, donating, explaining on the program, helping, working)
+  — A portrait/posed shot of ${mainChar} at another event (red carpet, press wall, different unrelated venue) is NOT KEY_ACTIVITY → that is PERSON_SUPPORT!
+  — Ask: "Is the person's BODY doing the news action, or just standing/posing?" Posing = NOT KEY_ACTIVITY.
 - Score 6-9
 
 🏷️ TIMELINE_PAST (0-1 images — if the news has a timeline):
@@ -1411,10 +1512,14 @@ There are ${imageParts.length} images (index 0 to ${imageParts.length - 1}) to j
 - Close-up emotion shot — crying, shocked, angry, smiling, sad
 - ${mainChar} MUST be visibly showing clear emotion
 
-🏷️ RELATIONSHIP (0-1 images):
+🏷️ RELATIONSHIP (0-2 images):
 - ${mainChar} with another person — MUST be news-related!
 - ★ Photo with the news story's secondary character + matching context → score 6-8
 - ★ Couple/family photos UNRELATED to news (wedding/travel/other events) → score = 4
+- ★★★ rev.24 (สูตรปกแสนไลค์ต้องมี "ภาพปฏิกิริยา"): SOLO face of a person whose ROLE IS NAMED IN THE NEWS CONTENT
+  (secondary character / parent-grandparent-relative the news tells about / the TV host who interviews the subject in THIS news / the helper-donor the news names)
+  showing emotion about the story (moved, crying, concerned, comforting) = RELATIONSHIP score 6-8 — this "reaction face" is what real viral covers use!
+  ⛔ Still REJECT: strangers/bystanders/people merely in-frame whom the news content does NOT name — the allowance is ONLY for people whose role you can point to in the news text above.
 
 🏷️ CONTEXT_SCENE (0-2 images):
 - Wide shot of location/event/context — wide angle, NOT a portrait!
@@ -1498,6 +1603,13 @@ How to distinguish:
 - ★★★★ HERO ต้องเป็น "ภาพหน้าใหญ่ (โคลสอัพ/ครึ่งตัวบน)" ที่เห็นสีหน้า-อารมณ์ชัด — ⛔ ภาพ "เต็มตัว/มุมกว้าง/คนตัวเล็กในฉากมืดหรือฉากรก" (หน้ากินพื้นที่ภาพน้อย) → ห้ามให้เป็น HERO (role=PERSON_SUPPORT score ≤5) แม้จะเป็นคนในข่าว
    เหตุผล: ฮีโร่หน้าเล็ก = ปกไม่เด่น จำหน้าไม่ได้ ต้องเลือกภาพที่ "หน้าใหญ่เต็ม เห็นอารมณ์" มาเป็นฮีโร่เสมอ
 
+=== ★★★ SCENE DIVERSITY — rev.24 (สูตรปกแสนไลค์: "5 ช่อง = 5 ฉาก ไม่มีฉากซ้ำ") ===
+หลักการ: ปกไวรัลจริงไม่เคยมี "หน้าคนเดิม ฉากเดิม" เกิน 2 ช่อง — พูลที่ส่งต่อต้องมีฉากหลากหลาย
+- พอร์ตเทรต/หน้าเดี่ยวของ "คนเดียวกัน" ให้คะแนนสูง (≥6) ได้ไม่เกิน 2 ใบ → เลือก 2 ใบที่ "คนละฉาก/คนละชุดเสื้อผ้า/คนละอารมณ์" ชัดที่สุด
+- ใบที่ 3 ขึ้นไปของคนเดิมที่เป็นแค่พอร์ตเทรต (ฉาก/ชุดซ้ำกับใบที่ให้คะแนนสูงแล้ว) → score ≤ 4 บังคับ (เก็บเป็นตัวสำรองพอ)
+- เป้าหมายพูลในอุดมคติ: HERO อารมณ์ 1 + ปฏิกิริยาคนเกี่ยวข้อง (RELATIONSHIP) ≥1 ถ้ามี + แอ็กชันของข่าว (KEY_ACTIVITY) ≥1 ถ้ามี + บริบท/หลักฐาน (CONTEXT/EVIDENCE) ≥1 ถ้ามี
+- ⛔ อย่าใช้โควตาคะแนนสูงหมดไปกับ "หน้าตัวเอกหลายมุม" — ถ้ามีภาพเล่าเรื่อง (แอ็กชัน/ปฏิกิริยา/หลักฐาน) ที่คุณภาพพอใช้ ต้องให้มันติดพูล (score ≥6) ก่อนพอร์ตเทรตใบที่ 3
+
 === SCORING GUIDE ===
 - 9-10: Perfect — sharpest quality, no text, no watermark, professional-grade image (not a selfie)
 - 7-8: Very good — reliable quality, suitable for use
@@ -1508,6 +1620,8 @@ How to distinguish:
 
 === IMAGE QUALITY PENALTIES ===
 - ★★★ Prominent watermark/logo (center/large) → score ≤ 2 (REJECT!)
+- ★★★ rev.C (CASE-313 วงกลมติด URL กลางภาพ): Website URL / press watermark text visible in the MIDDLE band of the image (y 25-75% — cannot be cropped away) → score 0 REJECT! Always mention "watermark" in your reason when you see one.
+- ★★ rev.K3 (CASE-321 ปกลายตา — benchmark ทุกช่องฉากสะอาด): ภาพ "ฉากหลังรก" (ป้ายไฟรายการ/ตัวอักษรฉากใหญ่/พร็อพเยอะ/ของแย่งสายตา) → score ≤ 5 และห้ามเกิน 1 ใบในพูลที่รับ — ภาพ "ฉากสะอาด subject เด่นชัด" ให้ +1 (ปกแสนไลค์จริงทุกช่องพื้นหลังเรียบ/เบลอ ไม่มีอะไรแย่งตา)
 - Small watermark/logo in a corner → Deduct 2 points from score
 - Pre-cropped image (incomplete/head cut off) → score ≤ 4
 - Blurry/low resolution → score ≤ 4
@@ -1870,8 +1984,11 @@ async function judgeWithFallback(validCandidates, imageParts, prompt, newsTitle,
 function processJudgeResults(parsed, validCandidates, allowFallback = true) {
   // ★★★ POST-PROCESSING: Selfie & Watermark enforcement (safety net)
   // แม้ prompt จะบอกแล้ว AI อาจยัง assign HERO_FACE ให้ selfie/watermark → บังคับ demote
-  const SELFIE_KEYWORDS = /selfie|เซลฟี่|ถ่ายตัวเอง|มือถือถ่าย|กล้องหน้า|แขนยื่น|wide.?angle.*face|arm.*visible|front.*camera/i;
+  const SELFIE_KEYWORDS = /selfie|เซลฟี่|ถ่ายตัวเอง|มือถือถ่าย|กล้องหน้า|แขนยื่น|wide.?angle.*face|arm.*visible|front.?camera/i;
   const WATERMARK_KEYWORDS = /watermark|ลายน้ำ|logo.*ใหญ่|logo.*ชัด|โลโก้.*เด่น|branded|stock.*photo/i;
+  // ★ rev.E (batch#5 CASE-315 ปกกราฟิก RIP 3 ช่อง): เหตุต้องห้าม — ใช้ทั้ง supplement เดิม + กัน Anchor Rescue ชุบภาพขยะ
+  //   (ย้ายขึ้นบนจากบล็อกเฟส3#1 เพื่อให้ rescue อ้างถึงได้ — ตัว supplement ด้านล่างใช้ตัวเดียวกันนี้)
+  const _FORBID_SUPP = /watermark|logo|caption|subtitle|screenshot|ตัวหนังสือ|ลายน้ำ|โลโก้|ปกข่าว|stock|generated|illustration|wrong.?person|mismatch|ผิดคน|คนอื่น|different.?person|\bstage\b|concert|เวที|คอนเสิร์ต|crowd|ฝูงชน|glamour|selfie|graphic|กราฟิก|overlay|headline|พาดหัว|collage|คอลลาจ|tribute|ไว้อาลัย|card|การ์ด/i;
   
   for (const item of parsed) {
     const reason = (item.reason || '').toLowerCase();
@@ -1934,7 +2051,9 @@ function processJudgeResults(parsed, validCandidates, allowFallback = true) {
       if (item.index >= 0 && item.index < validCandidates.length) {
         const imgUrl = validCandidates[item.index];
         const isAnchor = validCandidates._storyAnchorMap.has(imgUrl);
-        if (isAnchor && item.score < 5) {
+        // ★ rev.E (CASE-315 หมอโบ๊ท): rescue ห้ามชุบภาพที่ Judge ตัดด้วย "เหตุต้องห้าม" (กราฟิกข่าว/การ์ดไว้อาลัย/ลายน้ำ/คนผิด)
+        //   — ข่าว tragedy title ตรง anchor เกือบทุกภาพ ทำให้กราฟิก RIP ถูกชุบกลับเข้าพูลทั้งชุด
+        if (isAnchor && item.score < 5 && !_FORBID_SUPP.test(String(item.reason || ''))) {
           const oldScore = item.score;
           const oldRole = item.role;
           item.score = Math.max(item.score, 6);
@@ -2006,6 +2125,7 @@ function processJudgeResults(parsed, validCandidates, allowFallback = true) {
       _storyAnchor: validCandidates._storyAnchorMap?.has(validCandidates[s.index]) || false,
       _rescued: s._rescued || false,
       _rescueReason: s._rescueReason || null,
+      eyeMeta: validCandidates._eyeMeta?.[s.index] || null, // 👁️ E1: ผลตาส่อง ไหลถึง Director
     });
   }
 
@@ -2031,7 +2151,7 @@ function processJudgeResults(parsed, validCandidates, allowFallback = true) {
     // ★ เฟส3#1 (Hermes CASE-270/272: ปกยัด text/เวที/คนผิด): เดิมดึง rejected score>0 = ยัดภาพที่ Judge "ตัดแล้ว" (score-1 + role=REJECT) กลับเข้าปก
     //   → 🔴 ห้ามดึง role='REJECT' (ตัดเพราะเหตุต้องห้าม: ติด text/คนผิด/เวที/stock) + เว้น reason ต้องห้าม · เหลือแค่ score-1 ที่ "ไม่ใช่ REJECT" เป็น last resort
     //   ภาพสะอาดไม่พอ → ปล่อย layout ยืดหยุ่น (เฟส 3A) เลือกโครงเล็กแทน (สะอาด > ครบช่อง) · 🔴 ห้ามเจนภาพ
-    const _FORBID_SUPP = /watermark|logo|caption|subtitle|screenshot|ตัวหนังสือ|ลายน้ำ|โลโก้|ปกข่าว|stock|generated|illustration|wrong.?person|mismatch|ผิดคน|คนอื่น|different.?person|\bstage\b|concert|เวที|คอนเสิร์ต|crowd|ฝูงชน|glamour|selfie/i;
+    // ★ rev.E: _FORBID_SUPP ย้ายไปประกาศต้นฟังก์ชัน (ใช้ร่วมกับ Anchor Rescue)
     if (selectedImages.length < 5) {
       const selectedUrls = new Set(selectedImages.map(i => i.url));
       const lowScored = rejected
@@ -2440,6 +2560,38 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
   console.log('============================================');
 
   const selectedImages = await judgeImages(candidates, newsTitle, identity);
+
+  // ★★★ rev.Q3 (Quality Lock เฟส 2 — Judge Collapse Guard 2 ก.ค.): กัน "Judge ล้มทั้งชุด" ทำปกล้มทั้งใบ
+  //   หลักฐาน: ข่าวตุ๊ก ญาณี รันคนละรอบ → รอบหนึ่งรับ 8 ใบ / อีกรอบกด 0 ทั้งชุด (เหลือ 2) ทั้งที่ภาพชุดเดียวกันจาก thairath/mgronline
+  //   ทางแก้: รับ <5 ทั้งที่พูลยังมีตัวไม่เคยถูกตัดสิน → ส่ง "ชุดสำรอง" (อันดับถัดไปตาม Quality Lock) ให้ Judge อีก 1 รอบ แล้วรวมผล
+  //   จำกัด 1 รอบเท่านั้น (คุมต้นทุน) · ไม่แตะกรณีปกติ (รับ ≥5 = ข้ามทันที)
+  // ★ rev.Q3b (2 ก.ค.): เกณฑ์ <5 → <7 — route มีด่านกรองต่อ (emotion/close-up gate) ตัดได้อีก 1-2 ใบ
+  // ★ rev.Q3c (ลูปบูม CASE-324): เติมได้สูงสุด 2 รอบ (รวม 3 ชุด) — พูลรับ 4-5 ใบ = Director ไม่มีตัวเลือกทำ "5 ช่อง 5 ฉาก"
+  //   ภาพโมเมนต์ดีๆ (หมาเลียหน้า/หน้าเซเว่น) มักอยู่ชุดถัดไป — ต้องรับ ≥7 ใบให้มีวัตถุดิบหลากฉากเสมอ
+  if (Array.isArray(selectedImages) && candidates.length > 24) {
+    try {
+      const _cumJudged = new Set([...prepareJudgeBatch(candidates, identity)]); // deterministic → ชุดเดียวกับรอบแรก
+      // ★ 👁️ E3 (2 ก.ค.): เป้าพูล 9→12 + สำรองสูงสุด 3 รอบ — Director ต้องมีตัวเลือกจริง (5 ช่อง 5 ฉาก + เผื่อ Eye-After สั่ง swap)
+      let _round = 0;
+      while (selectedImages.length < 12 && _round < 3) {
+        const _remainder = candidates.filter(u => !_cumJudged.has(u));
+        if (_remainder.length < 4) break;
+        _remainder._meta = candidates._meta; // ส่ง meta ต่อ (anchor/source scoring ใช้)
+        _round++;
+        console.log(`[QualityLock] 🛟 รับแล้ว ${selectedImages.length} ใบ (<12) เหลือ ${_remainder.length} ใบไม่เคยถูกตัดสิน → ชุดสำรองรอบ ${_round + 1}`);
+        const _batchSent = prepareJudgeBatch(_remainder, identity);
+        for (const u of _batchSent) _cumJudged.add(u);
+        const _more = await judgeImages(_remainder, newsTitle, identity);
+        if (Array.isArray(_more) && _more.length) {
+          const _seenSel = new Set(selectedImages.map(s => s && s.url));
+          for (const s of _more) {
+            if (s && s.url && !_seenSel.has(s.url)) { selectedImages.push(s); _seenSel.add(s.url); }
+          }
+        }
+        console.log(`[QualityLock] 🛟 รวมผลสะสม: ${selectedImages.length} ใบ`);
+      }
+    } catch (e) { console.log(`[QualityLock] 🛟 ชุดสำรองล้ม (ไม่ critical): ${String(e?.message || '').slice(0, 60)}`); }
+  }
 
   console.log('============================================');
   console.log(`[MultiAgent] 🏁 Final selection: ${selectedImages.length} images`);
