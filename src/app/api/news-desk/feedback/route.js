@@ -53,6 +53,14 @@ export async function GET(request) {
       });
     } catch (e) { console.log('[Feedback] fb save failed:', e.message?.slice(0, 40)); }
 
+    // ★ 2 ก.ค.: โพสต์ปังจริง → ดึงชื่อคนเข้า Living Watchlist (น้ำหนัก 3) — ระบบจะเกาะคนนี้ในรอบหาข่าวถัดๆ ไป
+    if (action === 'viral' && item?.title) {
+      try {
+        const { addFromTitle } = await import('@/lib/services/newsDesk/watchlistService');
+        await Promise.race([addFromTitle(item.title, 'viral'), new Promise(r => setTimeout(r, 6000))]);
+      } catch (e) { console.log('[Feedback] watchlist skip:', e.message?.slice(0, 40)); }
+    }
+
     console.log(`[Feedback] ${action === 'viral' ? '🔥' : '🧊'} discord-click: ${title}`);
     return action === 'viral'
       ? page('🔥', 'บันทึกแล้ว: โพสต์นี้ปัง!', `"${title}" — บก.AI จะล่าข่าวแนวนี้มากขึ้น`)

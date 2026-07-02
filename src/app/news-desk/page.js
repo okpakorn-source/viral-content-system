@@ -147,6 +147,7 @@ export default function NewsDeskPage() {
   const [mktSending, setMktSending] = useState(false);
   const [researching, setResearching] = useState({}); // id → true
   const [moreBtns, setMoreBtns] = useState({}); // id → กางปุ่มขั้นสูง (ปรึกษา บก./เจาะลึก)
+  const [sagas, setSagas] = useState([]);               // ★ 2 ก.ค.: ซากากระแสใหญ่ที่เกาะอยู่ (Saga Tracker)
   // ★ 23 มิ.ย.: กรองข่าวที่โหลดมาแล้ว "สด" (ไม่ harvest ใหม่) — หาข่าวในหลายร้อยข่าวได้ทันที
   const [feedFilter, setFeedFilter] = useState('');     // พิมพ์ชื่อคน/คำในหัวข้อ → กรองทันที
   const [quickChip, setQuickChip] = useState('all');    // all | today | clip | celeb
@@ -206,6 +207,11 @@ export default function NewsDeskPage() {
             .catch(() => {});
         }
       }
+      // ★ 2 ก.ค.: โหลดซากาที่เกาะอยู่ (แถบ 🌊 เหนือฟีด) — พังเงียบได้ ไม่กระทบฟีดหลัก
+      fetch('/api/news-desk/saga', { cache: 'no-store' })
+        .then(r => r.json())
+        .then(s => { if (s.success) setSagas((s.sagas || []).filter(x => x.active)); })
+        .catch(() => {});
     } catch {} finally { setLoading(false); }
   }, [tab, catFilter, library, clipSource]);
 
@@ -253,6 +259,27 @@ export default function NewsDeskPage() {
       load();
     } catch (e) { setMsg('❌ ' + e.message); }
     setHarvesting(false);
+  };
+
+  // ★ 2 ก.ค.: จัดการซากากระแสใหญ่ — เพิ่มเอง (AI แตกตัวละครให้) / ปิดซากาที่จบแล้ว
+  const addSagaUI = async () => {
+    const topic = prompt('🌊 เปิดซากากระแสใหญ่ (เช่น "ป้าขยัน หวย 6 ล้าน") — ระบบจะแตกตัวละคร/มุมข้างเคียงแล้วเกาะติดทุกรอบหาข่าว:');
+    if (!topic || topic.trim().length < 3) return;
+    setMsg('🌊 กำลังเปิดซากา + แตกตัวละคร...');
+    try {
+      const res = await fetch('/api/news-desk/saga', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: topic.trim() }) });
+      const d = await parseRes(res);
+      setMsg(d.success ? `✅ เปิดซากา "${d.saga.topic}" — ตัวละคร ${d.saga.people?.length || 0} คน (รอบหาข่าวถัดไปจะเกาะติดอัตโนมัติ)` : `❌ ${d.error}`);
+      load();
+    } catch (e) { setMsg('❌ ' + e.message); }
+  };
+  const closeSaga = async (id, topic) => {
+    if (!confirm(`ปิดซากา "${topic}" ? (กระแสจบแล้ว/ไม่อยากเกาะต่อ)`)) return;
+    try {
+      await fetch('/api/news-desk/saga', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action: 'deactivate' }) });
+      setSagas(prev => prev.filter(s => s.id !== id));
+      setMsg(`💤 ปิดซากา "${topic}" แล้ว`);
+    } catch (e) { setMsg('❌ ' + e.message); }
   };
 
   // ★ สั่งกองสืบน้ำดี (13 มิ.ย.): ยิงเลน good ที่ใช้สมองสืบ 7 แนวคิดคำค้นสด หมุนเวรตามชั่วโมง
@@ -726,6 +753,23 @@ export default function NewsDeskPage() {
               style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.45)', cursor: harvesting ? 'wait' : 'pointer', background: harvesting ? '#4b5563' : 'rgba(239,68,68,0.1)', color: harvesting ? '#fff' : 'var(--desk-red, #dc2626)', fontWeight: 700, fontSize: 14 }}>
               {harvesting ? '⏳...' : '🧹 ล้าง+หาใหม่'}</button>
           </div>
+
+          {/* ★ 2 ก.ค.: แถบซากากระแสใหญ่ — โชว์ซากาที่ระบบเกาะอยู่ (Saga Tracker: ธีมแชมป์ median 21k) + เพิ่ม/ปิดเองได้ */}
+          <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+            <span title="ซากากระแสใหญ่ = เหตุการณ์ที่คนทั้งประเทศตามหลายวัน — ระบบยิงคำค้นตามตัวละคร/มุมข้างเคียงทุกรอบหาข่าว (ธีมที่ปังสุดจากผลจริง 949 โพสต์)"
+              style={{ fontSize: 12, color: '#0ea5e9', fontWeight: 800 }}>🌊 ซากาที่เกาะอยู่:</span>
+            {sagas.length === 0 && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>ไม่มี — ระบบสแกนเองทุก 2 ชม. หรือกดเพิ่มเอง</span>}
+            {sagas.map(s => (
+              <span key={s.id} title={`ตัวละคร: ${(s.people || []).join(', ') || '-'} · เจอใหม่ ${s.hits || 0} ใบ · เงียบ 3 วันปิดเอง`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 6px 4px 11px', borderRadius: 999, background: 'rgba(14,165,233,0.12)', border: '1px solid rgba(14,165,233,0.35)', color: '#0ea5e9', fontWeight: 700, fontSize: 12 }}>
+                🌊 {String(s.topic).slice(0, 36)} <span style={{ opacity: 0.75, fontWeight: 600 }}>({s.hits || 0})</span>
+                <button onClick={() => closeSaga(s.id, s.topic)} title="ปิดซากานี้ (กระแสจบแล้ว)"
+                  style={{ border: 'none', background: 'rgba(14,165,233,0.18)', color: '#0ea5e9', borderRadius: 999, width: 18, height: 18, lineHeight: '16px', cursor: 'pointer', fontSize: 11, fontWeight: 800, padding: 0 }}>✕</button>
+              </span>
+            ))}
+            <button onClick={addSagaUI} disabled={harvesting}
+              style={{ padding: '4px 11px', borderRadius: 999, border: '1px dashed rgba(14,165,233,0.5)', background: 'transparent', color: '#0ea5e9', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>+ เพิ่มซากา</button>
+          </div>
         </div>
 
         {/* ★ 25 มิ.ย.: ชิป 6 คลังเนื้อหา + ตัวกรองแหล่ง — โซนคลิป/ลิงก์ */}
@@ -1113,6 +1157,7 @@ export default function NewsDeskPage() {
                       <span style={{ padding: '2px 9px', borderRadius: 999, background: (CAT_COLORS[it.category] || '#666') + '22', color: CAT_COLORS[it.category] || '#999', fontWeight: 600 }}>{it.category}</span>
                       {it.focusTag && <span title="มาจากการสั่งหาเฉพาะแนว" style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(99,102,241,0.15)', color: '#818cf8', fontWeight: 700 }}>🎯 {FOCUS_OPTIONS.find(o => o.key === it.focusTag)?.label || it.focusTag}</span>}
                       {it.trendTopic && <span title="ติดตามกระแส" style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(239,68,68,0.13)', color: 'var(--desk-red, #dc2626)', fontWeight: 700 }}>🔴 {it.trendTopic}</span>}
+                      {it.sagaTopic && <span title="มาจากการเกาะซากากระแสใหญ่ (Saga Tracker)" style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(14,165,233,0.13)', color: '#0ea5e9', fontWeight: 700 }}>🌊 {String(it.sagaTopic).slice(0, 28)}</span>}
                       {it._spotlight && <span title="ข่าวคะแนนกลางที่ระบบดึงขึ้นมาให้ผ่านตา — กันข่าวดีจมล่าง (หมุนเวียนเรื่อยๆ)" style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(168,85,247,0.15)', color: 'var(--desk-purple, #a855f7)', fontWeight: 700 }}>💡 ค้นพบ</span>}
                       {it.foreignCountry && <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(59,130,246,0.15)', color: 'var(--desk-blue)', fontWeight: 700 }}>🌏 ข่าวต่างประเทศ · {it.foreignCountry}</span>}
                       {it.sameStoryAs && <span title={it.sameStoryAs.title} style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(245,158,11,0.15)', color: 'var(--desk-amber)', fontWeight: 700 }}>⚠️ เรื่องนี้เคยส่งเจนแล้ว (ทำซ้ำได้ถ้าตั้งใจ)</span>}

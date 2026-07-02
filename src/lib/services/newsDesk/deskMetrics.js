@@ -59,3 +59,46 @@ export function computeDeskMetrics(items, feedback = []) {
     rejectCount: fb.length,
   };
 }
+
+/**
+ * ★ 2 ก.ค. — รายงานผลผลิตรายคีย์ค้น (computeQueryYield)
+ * ตอบคำถาม: "คีย์/ฟีดไหนผลิตข่าวที่ทีมใช้จริง (ส่งเจน/เก็บคลัง) — คีย์ไหนตายเปล่า"
+ * ใช้ _query ที่ harvester ติดไว้ทุกใบ · pure function (เทสง่าย)
+ * @param {Array} items - ข่าวในคลัง (มี _query, status, shortlisted, judgeScore, harvestedAt)
+ * @param {number} days - หน้าต่างเวลา (default 7 วัน)
+ * @returns {{ window:string, totalTagged:number, topProducers:[], deadQueries:[], byLane:{} }}
+ */
+export function computeQueryYield(items, days = 7) {
+  const cutoff = Date.now() - days * 864e5;
+  const byQuery = {};
+  let totalTagged = 0;
+  for (const it of (Array.isArray(items) ? items : [])) {
+    if (!it || !it._query) continue;
+    if (new Date(it.harvestedAt || 0).getTime() < cutoff) continue;
+    totalTagged++;
+    const k = String(it._query).slice(0, 80);
+    if (!byQuery[k]) byQuery[k] = { query: k, lane: it.lane || '?', found: 0, good: 0, used: 0 };
+    const row = byQuery[k];
+    row.found++;
+    if ((it.judgeScore ?? 0) >= 7) row.good++;                                  // บก.ให้ ≥7 = ข่าวมีคุณภาพ
+    if (it.status === 'sent' || it.shortlisted || it.used) row.used++;          // ทีมใช้จริง
+  }
+  const rows = Object.values(byQuery);
+  // คีย์รุ่ง: ผลิตข่าวถูกใช้จริงมากสุด (รอง: คุณภาพ) — เอาไปขยาย/ยิงถี่ขึ้น
+  const topProducers = [...rows]
+    .filter(r => r.used > 0 || r.good > 0)
+    .sort((a, b) => (b.used - a.used) || (b.good - a.good) || (b.found - a.found))
+    .slice(0, 15);
+  // คีย์ตาย: เจอเยอะ (≥8) แต่ไม่มีใครใช้+ไม่มีตัวคุณภาพเลย — เอาไปตัด/แก้ (ประหยัด Serper+AI classify)
+  const deadQueries = [...rows]
+    .filter(r => r.found >= 8 && r.used === 0 && r.good === 0)
+    .sort((a, b) => b.found - a.found)
+    .slice(0, 15);
+  // สรุปต่อเลน — เห็นภาพรวมว่าเลนไหนคุ้ม
+  const byLane = {};
+  for (const r of rows) {
+    if (!byLane[r.lane]) byLane[r.lane] = { queries: 0, found: 0, good: 0, used: 0 };
+    byLane[r.lane].queries++; byLane[r.lane].found += r.found; byLane[r.lane].good += r.good; byLane[r.lane].used += r.used;
+  }
+  return { window: `${days}d`, totalTagged, queries: rows.length, topProducers, deadQueries, byLane };
+}

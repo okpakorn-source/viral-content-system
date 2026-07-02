@@ -359,6 +359,11 @@ export async function POST(request) {
       }
       // ★ เก็บ jobId ไว้กับการ์ด — UI ใช้ติดตามสถานะงานเขียนได้ (feedback ผู้ใช้ 11 มิ.ย.)
       await store.update(id, (ex) => ({ ...ex, status: 'sent', claimedBy: ex.claimedBy || user, sentAt: new Date().toISOString(), jobId: qData.jobId }));
+      // ★ 2 ก.ค.: ทีมเลือกทำข่าวนี้ = สัญญาณรสนิยม → ดึงชื่อคนเข้า Living Watchlist (น้ำหนัก 1)
+      try {
+        const { addFromTitle } = await import('@/lib/services/newsDesk/watchlistService');
+        await Promise.race([addFromTitle(item.title, 'sent'), new Promise(r => setTimeout(r, 6000))]);
+      } catch (e) { console.log('[NewsDesk] watchlist skip:', e.message?.slice(0, 40)); }
       try {
         const fb = createStore('news-desk-feedback');
         await fb.add({ id: `${id}_sent_${Date.now()}`, newsId: id, action: 'sent', title: item.title, category: item.category, lane: item.lane, user, at: new Date().toISOString() });
@@ -394,6 +399,14 @@ export async function POST(request) {
     }
 
     await store.update(id, (ex) => ({ ...ex, ...patch }));
+
+    // ★ 2 ก.ค.: กด 🔥 ปังบนเว็บ → ดึงชื่อคนเข้า Living Watchlist (เหมือนคลิกจาก Discord)
+    if (action === 'viral' && item.title) {
+      try {
+        const { addFromTitle } = await import('@/lib/services/newsDesk/watchlistService');
+        await Promise.race([addFromTitle(item.title, 'viral'), new Promise(r => setTimeout(r, 6000))]);
+      } catch (e) { console.log('[NewsDesk] watchlist skip:', e.message?.slice(0, 40)); }
+    }
 
     // ★ ทุกการตัดสินใจ = บทเรียนของบรรณาธิการ AI (few-shot + น้ำหนักหมวด ใน deskBrain)
     if (['claim', 'dismiss', 'sent', 'viral', 'flop'].includes(action)) {

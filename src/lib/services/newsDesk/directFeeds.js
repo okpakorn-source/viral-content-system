@@ -97,7 +97,7 @@ export async function fetchEntRss({ maxAgeDays = 3 } = {}) {
     if (!xml) { console.log(`[DirectFeeds] 📰 ${f.name}: feed ว่าง/ล่ม`); return []; }
     return parseRss2(xml, f.name).filter(i => !i.publishedAt || new Date(i.publishedAt).getTime() >= cutoff);
   }));
-  const all = results.flat().map(r => ({ ...r, lane: 'entrss' }));
+  const all = results.flat().map(r => ({ ...r, lane: 'entrss', _query: 'feed:' + r.source }));
   console.log(`[DirectFeeds] 📰 entrss: ${ENT_RSS_FEEDS.length} สำนัก → ${all.length} ใบ`);
   return all;
 }
@@ -111,7 +111,7 @@ export async function fetchYouTubeChannels({ maxAgeDays = 14 } = {}) {
     return parseYouTubeAtom(xml, c.name).filter(i => i.publishedAt && new Date(i.publishedAt).getTime() >= cutoff);
   }));
   // lane 'video' = โซนคลิป/ดิสคัฟเวอรี (autopilot ไม่ auto-ส่ง — ทีมคัด/ถอดคลิปก่อน) + ป้ายช่องที่เฝ้า
-  const all = results.flat().map(r => ({ ...r, lane: 'video', watchChannel: r.source }));
+  const all = results.flat().map(r => ({ ...r, lane: 'video', watchChannel: r.source, _query: 'yt:' + r.source }));
   console.log(`[DirectFeeds] 📺 ytwatch: ${YT_WATCH_CHANNELS.length} ช่อง → ${all.length} คลิปใหม่ (≤${maxAgeDays} วัน)`);
   return all;
 }
