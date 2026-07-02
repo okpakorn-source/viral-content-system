@@ -10,6 +10,8 @@
  */
 
 import crypto from 'crypto';
+import { writeFile, mkdir } from 'fs/promises';
+import path from 'path';
 import { createStore } from '@/lib/persistStore';
 
 const STORE = 'image-hunt-cases';
@@ -89,55 +91,47 @@ async function serper(endpoint, q, num = 10) {
 
 const ytId = (url) => (String(url).match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/) || [])[1] || null;
 
-/** TikTok oEmbed → thumbnail (แคปหน้าปกคลิป) — ฟรี ไม่ต้องคีย์ */
-async function tiktokThumb(url) {
-  try {
-    const r = await fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(8000) });
-    if (!r.ok) return null;
-    const j = await r.json();
-    return j.thumbnail_url || null;
-  } catch { return null; }
-}
-
 export async function searchAllSources(analysis, { onLog = () => {} } = {}) {
   const found = [];
   const push = (arr) => { for (const x of arr) if (x && x.url) found.push(x); };
 
   const tasks = [];
   // 📷 Google Images — ภาพถ่าย/ภาพข่าวตรงตัว
+  // ★ 3 ก.ค.: กรอง "ปกคลิป/ปกลิงก์" ที่ปนมากับผลค้น (i.ytimg/img.youtube/tiktokcdn = thumbnail ต้องห้าม)
+  const THUMB_CDN = /i\.ytimg\.com|img\.youtube\.com|tiktokcdn|p16-sign|lookaside\.fbsbx/i;
   for (const q of analysis.queries.images) {
-    tasks.push(serper('images', q, 10).then(d => push((d.images || []).map(im => ({
-      url: im.imageUrl, w: im.imageWidth, h: im.imageHeight,
-      origin: im.link || '', originTitle: String(im.title || '').slice(0, 90),
-      source: 'google-images', kind: 'photo', query: q,
-    })))).catch(e => onLog(`images "${q.slice(0, 25)}" ล่ม: ${e.message.slice(0, 30)}`)));
+    tasks.push(serper('images', q, 15).then(d => push((d.images || [])
+      .filter(im => im.imageUrl && !THUMB_CDN.test(im.imageUrl))
+      .map(im => ({
+        url: im.imageUrl, w: im.imageWidth, h: im.imageHeight,
+        origin: im.link || '', originTitle: String(im.title || '').slice(0, 90),
+        source: 'google-images', kind: 'photo', query: q,
+      })))).catch(e => onLog(`images "${q.slice(0, 25)}" ล่ม: ${e.message.slice(0, 30)}`)));
   }
-  // 🎞️ YouTube — "แคปเฟรม": ทุกคลิปดึง 4 เฟรม (hq1/hq2/hq3 = เฟรมจริงคนละช่วง + hqdefault)
+  // 🎞️ YouTube — ★ 3 ก.ค. (feedback ผู้ใช้: "ห้ามแคปปกคลิป/ปกลิงก์ทุกแบบ"): ไม่เก็บ thumbnail เลย
+  //   เก็บแค่รายชื่อคลิป → สเตจ 2.5 จะ "แตกเฟรมจริงจากเนื้อคลิป + ให้ Gemini ดูคัด" แทน
+  const videos = [];
   for (const q of analysis.queries.videos) {
     tasks.push(serper('videos', q, 6).then(d => {
       for (const v of (d.videos || [])) {
         const id = ytId(v.link || '');
-        if (!id) continue;
-        const frames = [
-          { f: 'maxresdefault', kind: 'thumb' }, { f: 'hq1', kind: 'frame' }, { f: 'hq2', kind: 'frame' }, { f: 'hq3', kind: 'frame' },
-        ];
-        push(frames.map(({ f, kind }) => ({
-          url: `https://i.ytimg.com/vi/${id}/${f}.jpg`,
-          origin: v.link, originTitle: String(v.title || '').slice(0, 90),
-          source: 'youtube', kind, query: q, videoId: id,
-        })));
+        if (id) videos.push({ id, link: v.link, title: String(v.title || '').slice(0, 90), query: q });
       }
     }).catch(e => onLog(`videos "${q.slice(0, 25)}" ล่ม: ${e.message.slice(0, 30)}`)));
   }
-  // 🎵 TikTok — site: search → oEmbed thumbnail (แคปหน้าปกคลิป)
-  for (const q of analysis.queries.tiktok) {
-    tasks.push(serper('search', `${q} site:tiktok.com`, 8).then(async d => {
-      const links = (d.organic || []).map(o => o.link).filter(u => /tiktok\.com\/@[^/]+\/video\//.test(u)).slice(0, 5);
-      const thumbs = await Promise.all(links.map(async u => ({ u, t: await tiktokThumb(u) })));
-      push(thumbs.filter(x => x.t).map(x => ({
-        url: x.t, origin: x.u, originTitle: '', source: 'tiktok', kind: 'frame', query: q,
-      })));
-    }).catch(e => onLog(`tiktok "${q.slice(0, 25)}" ล่ม: ${e.message.slice(0, 30)}`)));
+  // 🎵 TikTok — ★ เลิกใช้ oEmbed thumbnail (= ปกคลิป ต้องห้าม) → แตกเฟรมจริงจากคลิป (เครื่องแตกเฟรมของระบบ)
+  for (const q of analysis.queries.tiktok.slice(0, 2)) {
+    tasks.push((async () => {
+      try {
+        const { searchAndExtractTikTokFrames } = await import('./tiktokFrameExtractor');
+        const frames = await searchAndExtractTikTokFrames(q);
+        for (const f of (frames || []).slice(0, 8)) {
+          const dataUri = f.dataUri || (f.buffer ? `data:image/jpeg;base64,${f.buffer.toString('base64')}` : null);
+          if (!dataUri) continue;
+          push([{ _dataUri: dataUri, url: '', origin: f.source || f.url || '', originTitle: String(f.title || '').slice(0, 90), source: 'tiktok', kind: 'frame', query: q }]);
+        }
+      } catch (e) { onLog(`tiktok frames "${q.slice(0, 22)}" ข้าม: ${e.message?.slice(0, 40)}`); }
+    })());
   }
   // 📰 ภาพจากสำนักข่าว
   for (const q of analysis.queries.news) {
@@ -148,22 +142,95 @@ export async function searchAllSources(analysis, { onLog = () => {} } = {}) {
   }
   await Promise.all(tasks);
 
-  // dedupe: url ซ้ำ + จำกัดเฟรมต่อวิดีโอไม่ให้ยึดโควตา
-  const seen = new Set(); const out = []; const perVideo = {};
+  // dedupe (เฟรม data URI ใช้เนื้อ base64 เป็น key แทน url)
+  const seen = new Set(); const out = [];
   for (const im of found) {
-    const key = md5(im.url);
+    const key = md5(im.url || (im._dataUri || '').slice(0, 400));
     if (seen.has(key)) continue;
-    if (im.videoId) { perVideo[im.videoId] = (perVideo[im.videoId] || 0) + 1; if (perVideo[im.videoId] > 4) continue; }
     seen.add(key);
     out.push({ ...im, id: key.slice(0, 10) });
   }
+  // dedupe รายชื่อคลิป (id ซ้ำจากหลายคำค้น)
+  const vSeen = new Set(); const vOut = [];
+  for (const v of videos) { if (vSeen.has(v.id)) continue; vSeen.add(v.id); vOut.push(v); }
+  return { images: out, videos: vOut };
+}
+
+// ════════════════════════════════════════════════════
+// STEP 2.5 — 🎬 แคปเฟรมจาก "เนื้อคลิป" จริง + Gemini ดูคลิปคัดเฟรมตรงเรื่อง (3 ก.ค. — feedback ผู้ใช้)
+//   ใช้เครื่องที่มีอยู่: extractYouTubeFrames (storyboard = เฟรมจริงในคลิป ไม่ใช่ปก) + curateFrames (Gemini vision)
+// ════════════════════════════════════════════════════
+// ★ แคปเฟรม "คมจริง" ณ วินาทีที่ Gemini เลือก — yt-dlp (bin/yt-dlp.exe) + system ffmpeg (เครื่องทีม/win32 เท่านั้น)
+//   storyboard ใช้เป็น "สายตา" หาช่วงเวลาดี (ถูก+เร็ว) → ffmpeg แคปเฟรม 720p เฉพาะจุดที่คัดแล้ว
+async function captureHiResFrame(videoId, seconds, outPath) {
+  if (process.platform !== 'win32') return false;
+  try {
+    const { execFile } = await import('child_process');
+    const { promisify } = await import('util');
+    const run = promisify(execFile);
+    const exe = path.join(process.cwd(), 'bin', 'yt-dlp.exe');
+    const { stdout } = await run(exe, ['-f', 'best[height<=720]', '--get-url', `https://www.youtube.com/watch?v=${videoId}`], { maxBuffer: 1024 * 1024 * 4, timeout: 30000 });
+    const streamUrl = String(stdout).trim().split('\n')[0];
+    if (!/^https?:/.test(streamUrl)) return false;
+    await run('ffmpeg', ['-ss', String(Math.max(0, seconds)), '-i', streamUrl, '-frames:v', '1', '-q:v', '2', '-y', outPath], { maxBuffer: 1024 * 1024 * 8, timeout: 40000 });
+    return true;
+  } catch { return false; }
+}
+
+const parseTs = (t) => { const m = String(t || '').match(/(\d+(?:\.\d+)?)/); return m ? Math.round(Number(m[1])) : 0; };
+
+export async function extractClipFrames(videos, analysis, { maxVideos = 5, onLog = () => {} } = {}) {
+  if (!videos.length) return [];
+  const out = [];
+  try {
+    const { readFile: readF } = await import('fs/promises');
+    const os = await import('os');
+    const { extractYouTubeFrames } = await import('./youtubeFrameExtractor');
+    const { curateFrames } = await import('./geminiFrameCurator');
+    const pick = videos.slice(0, maxVideos);
+    onLog(`🎬 แตกเฟรมจากเนื้อคลิป ${pick.length} คลิป (storyboard จริง ไม่ใช่ปก)...`);
+    const frames = await extractYouTubeFrames(pick.map(v => v.id)); // [{buffer, videoId, timestamp}]
+    const byVideo = {};
+    for (const f of (frames || [])) {
+      if (!f?.buffer) continue;
+      (byVideo[f.videoId] = byVideo[f.videoId] || []).push(f);
+    }
+    const ctx = `${analysis.title} · ตัวละคร: ${analysis.people.map(p => `${p.name}${p.nick ? ` (${p.nick})` : ''}`).join(', ')} · ${analysis.events.join(' / ')}`;
+    // Gemini ดูเฟรมของแต่ละคลิป → คัดเฉพาะเฟรมที่ตรงเรื่อง/เห็นตัวละครชัด (คลิปละ ≤4 เฟรม)
+    for (const [vid, fs] of Object.entries(byVideo)) {
+      const v = pick.find(x => x.id === vid) || {};
+      const dataUris = fs.map(f => `data:image/jpeg;base64,${f.buffer.toString('base64')}`);
+      let pickedIdx = fs.map((_, i) => i);
+      try {
+        const cur = await curateFrames(dataUris, ctx, { maxContext: 4 });
+        if (cur.curated) pickedIdx = (cur.picked || []).length ? cur.picked : [];
+      } catch (e) { onLog(`Gemini คัดเฟรม ${vid} ข้าม: ${e.message?.slice(0, 40)}`); }
+      // ★ เฟรมที่ Gemini เลือก → แคปคมจริง 720p ณ วินาทีนั้น (win32) · ล้มเหลว = ใช้ storyboard เดิม
+      for (const fi of pickedIdx.slice(0, 3)) {
+        const f = fs[fi];
+        if (!f) continue;
+        let uri = `data:image/jpeg;base64,${f.buffer.toString('base64')}`;
+        const sec = parseTs(f.timestamp);
+        const tmp = path.join(os.tmpdir(), `ih_${vid}_${sec}.jpg`);
+        if (await captureHiResFrame(vid, sec, tmp)) {
+          try { uri = `data:image/jpeg;base64,${(await readF(tmp)).toString('base64')}`; onLog(`🎯 แคปคม 720p ${vid}@${sec}s`); } catch {}
+        }
+        out.push({
+          _dataUri: uri, url: '', origin: v.link || `https://www.youtube.com/watch?v=${vid}`,
+          originTitle: v.title || '', source: 'youtube', kind: 'frame', query: v.query || '',
+          id: md5(uri.slice(0, 400)).slice(0, 10),
+        });
+      }
+    }
+    onLog(`🎬 ได้เฟรมเนื้อคลิปหลัง Gemini คัด ${out.length} เฟรม`);
+  } catch (e) { onLog(`แตกเฟรมคลิปล่ม (ข้ามสเตจนี้): ${e.message?.slice(0, 60)}`); }
   return out;
 }
 
 // ════════════════════════════════════════════════════
 // STEP 3 — 🧹 สมองคัดภาพ (vision): ตัดขยะ (text ทับคน/ลายน้ำ/คอลลาจ/เบลอ/มีม) + เช็คคนตรง + ให้บทบาทปก
 // ════════════════════════════════════════════════════
-export async function qcImages(images, analysis, { batchSize = 5, maxQc = 35, onLog = () => {} } = {}) {
+export async function qcImages(images, analysis, { batchSize = 5, maxQc = 60, onLog = () => {} } = {}) {
   // ★ สลับคิวแบบ round-robin ตามแหล่ง — เทสจริง: youtube เฟรมมาเป็นกอง 80 ใบ ถ้าเรียงตามลำดับเจอ
   //   แหล่งอื่น (google/news/tiktok) จะไม่ได้โควตา QC เลย → แบ่งรอบละ 1 ใบต่อแหล่งวนไป
   const bySource = {};
@@ -187,14 +254,17 @@ export async function qcImages(images, analysis, { batchSize = 5, maxQc = 35, on
 ${ctx}
 
 ต่อภาพ ตอบ JSON: {"items":[{"i":0,"person":"match|maybe|no|none","clean":true/false,"dirt":"สิ่งสกปรกที่เจอ ('' ถ้าสะอาด)","role":"hero|scene|detail|reaction|none","score":0-10,"why":"สั้นๆ"}]}
-เกณฑ์:
+เกณฑ์ (★ เข้มงวด — ภาพจะถูกเอาไปทำปกข่าวจริง ตัวหนังสือบนภาพ = ใช้ไม่ได้):
 - person: match=คนในภาพคือตัวละครที่ต้องการชัดเจน · maybe=น่าจะใช่ไม่ชัวร์ · no=คนละคนชัดๆ · none=ไม่มีคน (ภาพสถานที่/ของ)
-- clean=false เมื่อ: มีตัวอักษร/กราฟิกทับตัวคนหรือกินพื้นที่มาก · ลายน้ำ/โลโก้ใหญ่ · เป็นภาพคอลลาจ/ตารางหลายรูป · เบลอ/ละลาย · เป็นมีม/สกรีนช็อตแชท · ขอบดำหนา
-  (โลโก้ช่องเล็กๆ มุมภาพ หรือ subtitle บรรทัดเดียวขอบล่าง = ยังถือว่า clean ได้ถ้าตัวคนเด่นชัด)
-- role: hero=หน้าชัดใหญ่ อารมณ์ดี ทำภาพหลักได้ · scene=ฉาก/เหตุการณ์/เต็มตัว · detail=ของ/สถานที่/หลักฐาน (บ้าน/สินค้า/ป้าย) · reaction=สีหน้าอารมณ์ · none=ใช้ไม่ได้
-- score = ความน่าใช้ทำปก (คม สะอาด องค์ประกอบดี คนตรง) — person=no ให้ ≤2 · ภาพ none/สกปรกมาก ให้ 0-3`,
+- clean=false ทันที ไม่มีข้อยกเว้น เมื่อ:
+  ① เป็น "ปกคลิป/ปกข่าว/thumbnail ที่ออกแบบ" — มีพาดหัว/ตัวหนังสือกราฟิก/สติกเกอร์แต่งบนภาพ (แม้ตัวเล็ก)
+  ② มีตัวอักษรใดๆ ทับตัวคน หรือกินพื้นที่เกิน ~10% ของภาพ (รวมซับไตเติล/แคปชันแถบล่างที่เด่น)
+  ③ ลายน้ำ/โลโก้ขนาดใหญ่ · ภาพคอลลาจ/ตารางหลายรูป/มีเส้นแบ่งช่อง · เบลอ/ละลาย/พิกเซลแตก · มีม/สกรีนช็อตแชท/กราฟิกล้วน · ขอบดำ-กรอบหนา
+  (อนุโลมได้อย่างเดียว: โลโก้ช่องจิ๋วที่มุมภาพ — แต่หัก 1 คะแนน)
+- role: hero=หน้าชัดใหญ่ ทำภาพหลักได้ · scene=ฉาก/เหตุการณ์/เต็มตัว · detail=ของ/สถานที่/หลักฐาน (บ้าน/สินค้า/ป้าย) · reaction=สีหน้าอารมณ์ · none=ใช้ไม่ได้
+- score = ความน่าใช้ทำปก (คม สะอาด องค์ประกอบดี คนตรง) — person=no ให้ ≤2 · clean=false ให้ ≤3 · ภาพสวยคมคนตรงไร้ตัวหนังสือ = 8-10`,
       },
-      ...chunk.map(im => ({ type: 'image_url', image_url: { url: im.url, detail: 'low' } })),
+      ...chunk.map(im => ({ type: 'image_url', image_url: { url: im.url || im._dataUri, detail: 'low' } })),
     ];
     try {
       const parsed = await openaiJSON({ model: 'gpt-4o-mini', temperature: 0.1, maxTokens: 1200, messages: [{ role: 'user', content }] });
@@ -219,8 +289,8 @@ ${ctx}
 
   const chunks = [];
   for (let i = 0; i < toQc.length; i += batchSize) chunks.push(toQc.slice(i, i + batchSize));
-  // ยิงขนานทีละ 3 ก้อน — เร็วแต่ไม่ชน rate limit
-  for (let i = 0; i < chunks.length; i += 3) await Promise.all(chunks.slice(i, i + 3).map(runBatch));
+  // ยิงขนานทีละ 4 ก้อน — เร็วแต่ไม่ชน rate limit
+  for (let i = 0; i < chunks.length; i += 4) await Promise.all(chunks.slice(i, i + 4).map(runBatch));
   return results;
 }
 
@@ -247,19 +317,24 @@ export async function runHunt(content, { caseName = '', keepMin = 5 } = {}) {
   const analysis = await analyzeContent(content);
   onLog(`ตัวละคร ${analysis.people.length} คน: ${analysis.people.map(p => p.nick || p.name).join(', ')} · คำค้นรวม ${Object.values(analysis.queries).flat().length}`);
 
-  onLog('🔍 ล่าภาพจากทุกแหล่ง (Google/YouTube เฟรม/TikTok/ข่าว)...');
-  const rawImages = await searchAllSources(analysis, { onLog });
+  onLog('🔍 ล่าภาพจากทุกแหล่ง (Google/ข่าว/TikTok เฟรมจริง) + รวบรายชื่อคลิป...');
+  const { images: searched, videos } = await searchAllSources(analysis, { onLog });
+
+  // ★ 3 ก.ค. (feedback ผู้ใช้): แคปจาก "เนื้อคลิป" จริง + Gemini ดูคัด — ห้ามใช้ปกคลิป/ปกลิงก์ทุกแบบ
+  const clipFrames = await extractClipFrames(videos, analysis, { onLog });
+  const rawImages = [...searched, ...clipFrames];
   const bySrc = {};
   for (const im of rawImages) bySrc[im.source] = (bySrc[im.source] || 0) + 1;
   onLog(`เจอดิบ ${rawImages.length} ภาพ (${Object.entries(bySrc).map(([k, v]) => `${k}:${v}`).join(' · ')})`);
 
-  onLog('🧹 สมองวิชั่นคัดภาพ (ตัด text ทับคน/ลายน้ำ/คอลลาจ/เบลอ/คนไม่ตรง)...');
+  onLog('🧹 สมองวิชั่นคัดเข้ม (ปก/text ทับ = ตกทันที · ลายน้ำ/คอลลาจ/เบลอ/คนไม่ตรง = ตก)...');
   const qced = await qcImages(rawImages, analysis, { onLog });
-  // เกณฑ์เก็บ: สะอาด + คนตรง (match/maybe) หรือเป็นภาพ detail ของ entity + คะแนน ≥5
-  let kept = qced.filter(im => im.clean && im.person !== 'no' && im.role !== 'none' && im.score >= 5);
-  // ถ้าคัดโหดจนเหลือน้อยกว่า keepMin → ผ่อนเกณฑ์ (เอา score สูงสุดที่เหลือ ติดป้าย borderline)
+  // ★ เกณฑ์เก็บเข้มขึ้น (feedback: ภาพต้องทำปกได้จริง): สะอาดเท่านั้น + คนไม่ผิดตัว + คะแนน ≥6
+  //   เฟรมเนื้อคลิป (Gemini คัดบริบทมาแล้ว + เป็นภาพที่ไม่มีใครใช้ซ้ำ) เก็บที่ ≥5 — แต่ต้อง clean เท่ากัน
+  let kept = qced.filter(im => im.clean && im.person !== 'no' && im.role !== 'none' && im.score >= (im._dataUri ? 5 : 6));
+  // เหลือน้อย → ผ่อนได้เฉพาะ "ภาพสะอาด" คะแนน 4-5 (ภาพสกปรกห้ามกลับเข้ามาเด็ดขาด)
   if (kept.length < keepMin) {
-    const spare = qced.filter(im => !kept.includes(im) && im.person !== 'no' && im.score >= 3)
+    const spare = qced.filter(im => !kept.includes(im) && im.clean && im.person !== 'no' && im.score >= 4)
       .sort((a, b) => b.score - a.score).slice(0, keepMin - kept.length)
       .map(im => ({ ...im, borderline: true }));
     kept = [...kept, ...spare];
@@ -270,6 +345,22 @@ export async function runHunt(content, { caseName = '', keepMin = 5 } = {}) {
 
   // เก็บเคส
   const id = await nextCaseId();
+
+  // ★ เซฟเฟรมเนื้อคลิป (data URI) ลงดิสก์ → ได้ URL ถาวรของเราเอง (ไม่หมดอายุแบบ CDN นอก)
+  try {
+    const dir = path.join(process.cwd(), 'public', 'image-hunt', id);
+    let saved = 0;
+    for (const im of kept) {
+      if (!im._dataUri) continue;
+      if (saved === 0) await mkdir(dir, { recursive: true });
+      const fname = `f${++saved}.jpg`;
+      await writeFile(path.join(dir, fname), Buffer.from(im._dataUri.split(',')[1], 'base64'));
+      im.url = `/image-hunt/${id}/${fname}`;
+      delete im._dataUri;
+    }
+    if (saved) onLog(`💾 เซฟเฟรมเนื้อคลิปลงเครื่อง ${saved} ไฟล์ (public/image-hunt/${id})`);
+  } catch (e) { onLog(`เซฟเฟรมลงดิสก์ล่ม: ${e.message?.slice(0, 40)}`); }
+  kept = kept.filter(im => im.url); // เฟรมที่เซฟไม่ได้ = ตัดออก (ไม่มีที่อยู่ให้เรียกดู)
   const record = {
     id,
     title: caseName.trim() || analysis.title,
