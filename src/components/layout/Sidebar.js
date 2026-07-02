@@ -51,6 +51,7 @@ export default function Sidebar() {
     { label: 'กรองแก่นข่าว (สกัดเนื้อ)', icon: '🔬', href: '/news-filter' },
     { label: 'ถอดคลิปเป็นข้อความ', icon: '🎙️', href: '/clip-transcript' },
     { label: 'เพิ่มความชัดภาพข่าว', icon: '🔍', href: '/photo-enhance' },
+    { label: 'สืบหาภาพข่าว (คลังเคส)', icon: '🕵️', href: '/image-hunt' }, // ★ 3 ก.ค.: ระบบสืบภาพจากเนื้อหาข่าว
     { label: 'แคสติ้งทดสอบเซนส์ข่าว', icon: '🎯', href: '/casting/admin' },
     // ★ 22 มิ.ย.: ปิดเมนู "เรดาร์หากระแส" (เลิกใช้ ใช้โต๊ะข่าวกลางแทน — กันเปิดแล้วกินโทเคน) · เปิดคืน: ปลดคอมเมนต์ + ตั้ง env RADAR_ENABLED=1
     // { label: 'เรดาร์หากระแส', icon: '📡', href: '/radar' },
