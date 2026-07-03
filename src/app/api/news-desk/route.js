@@ -12,6 +12,38 @@ import { enrichDeskItem, isClip, LIBRARY_KEYS, CLIP_SOURCES } from '@/lib/servic
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// ★ 4 ก.ค. (ผู้ใช้: เลื่อนฟีดเจอข่าวเดิมซ้ำเยอะมาก): ยุบ "เรื่องเดียวกันหลายใบ" ตอนแสดงผล
+//   วัดจริง: ซ้ำ ~33 ใบ (เรื่องเดิมคนละสำนัก/เลน หัวข้อต่างเล็กน้อยทะลุด่าน harvester) + id ซ้ำ 1 กลุ่ม
+//   เก็บใบใหม่สุด · ใบซ้ำพับเป็น altSources (การ์ดมีที่โชว์ "หลายสำนักรายงาน" อยู่แล้ว) — ไม่ลบข้อมูลจริงใน DB
+function collapseDupes(list) {
+  const norm = (s) => String(s || '').replace(/#[^\s#]+/g, ' ').replace(/[\s"“”'‘’!|…]/g, '').slice(0, 60);
+  const seenId = new Set();
+  const out = []; const keys = [];
+  for (const it of list) {
+    if (seenId.has(it.id)) continue; // กัน id ซ้ำเป๊ะ (row ซ้ำจาก pagination ระหว่าง insert)
+    seenId.add(it.id);
+    const ck = it.clusterKey && it.clusterKey.split('|').filter(Boolean).length >= 2 ? it.clusterKey : null;
+    const nt = norm(it.title);
+    let hit = -1;
+    for (let i = 0; i < out.length; i++) {
+      const k = keys[i];
+      if (ck && k.ck && ck === k.ck) { hit = i; break; }
+      if (nt.length >= 12 && k.nt.length >= 12 && (nt.includes(k.nt.slice(0, 16)) || k.nt.includes(nt.slice(0, 16)))) { hit = i; break; }
+    }
+    if (hit >= 0) {
+      const h = out[hit];
+      h.dupCount = (h.dupCount || 1) + 1;
+      const alt = Array.isArray(h.altSources) ? h.altSources : (h.altSources = []);
+      if (alt.length < 6 && it.url && it.url !== h.url && !alt.some(a => a.url === it.url)) {
+        alt.push({ url: it.url, source: it.source || '', title: String(it.title).slice(0, 80) });
+      }
+      continue;
+    }
+    out.push(it); keys.push({ ck, nt });
+  }
+  return out;
+}
+
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -32,19 +64,20 @@ export async function GET(request) {
       const active = items
         .filter(i => i.status !== 'dismissed' && !i.used)
         .map(enrichDeskItem)
-        .filter(i => isClip(i) === wantClip);
-      // นับต่อคลัง/ต่อแหล่ง "ก่อน" กรอง — เอาไปโชว์บนชิป
+        .filter(i => isClip(i) === wantClip)
+        // เรียงใหม่สุดก่อน "แล้วค่อยยุบซ้ำ" — collapse เก็บใบแรกที่เจอ = ใบใหม่สุดเสมอ
+        .sort((a, b) => new Date(b.harvestedAt || 0) - new Date(a.harvestedAt || 0));
+      // ★ 4 ก.ค.: ยุบเรื่องซ้ำก่อนนับ/ส่ง — ชิปนับจากชุดที่ยุบแล้ว (ตรงกับที่ตาเห็น)
+      const deduped = collapseDupes(active);
       const libraryCounts = {}; for (const k of LIBRARY_KEYS) libraryCounts[k] = 0;
       const sourceCounts = {};
-      for (const i of active) {
+      for (const i of deduped) {
         libraryCounts[i.library] = (libraryCounts[i.library] || 0) + 1;
         if (wantClip) sourceCounts[i.sourceType] = (sourceCounts[i.sourceType] || 0) + 1;
       }
-      let list = active;
+      let list = deduped;
       if (lib !== 'all' && LIBRARY_KEYS.includes(lib)) list = list.filter(i => i.library === lib);
       if (wantClip && src !== 'all' && CLIP_SOURCES.includes(src)) list = list.filter(i => i.sourceType === src);
-      // เรียงใหม่สุดก่อน (เวลาเข้าโต๊ะ)
-      list.sort((a, b) => new Date(b.harvestedAt || 0) - new Date(a.harvestedAt || 0));
       // ★ 29 มิ.ย. (ผู้ใช้สั่ง: UI ต้องเห็นข่าวครบ): ขยาย cap 400→2000 + default 120→600 → โหลดเต็มโซน (กรองด้วยหมวด/ค้นเรียลไทม์ได้)
       const lim = Math.min(2000, Number(searchParams.get('limit')) || 600);
       const light = list.slice(0, lim).map(({ fullText, ...rest }) => rest);
@@ -84,11 +117,13 @@ export async function GET(request) {
         const ref = i.publishedAt || i.harvestedAt;
         return !ref || new Date(ref).getTime() >= _oldCut;
       });
+      // ★ 4 ก.ค.: เรียงใหม่สุดก่อน → ยุบเรื่องซ้ำ (เหมือนโซนคลิป/ลิงก์) → ค่อยนับ/กรองหมวด
+      list.sort((a, c) => new Date(c.harvestedAt || 0) - new Date(a.harvestedAt || 0));
+      list = collapseDupes(list.map(enrichDeskItem));
       const counts = {};
       for (const i of list) { const c = i.category || 'อื่นๆ'; counts[c] = (counts[c] || 0) + 1; }
       const catParam = searchParams.get('category');
       if (catParam && catParam !== 'all') list = list.filter(i => (i.category || 'อื่นๆ') === catParam);
-      list.sort((a, c) => new Date(c.harvestedAt || 0) - new Date(a.harvestedAt || 0));
       const lim = Math.min(400, Number(searchParams.get('limit')) || 200);
       const light = list.slice(0, lim).map(({ fullText, ...rest }) => rest);
       return NextResponse.json({ success: true, items: light, total: list.length, tab: 'browse', categoryCounts: counts });
