@@ -37,7 +37,9 @@ async function doHarvest(opts) {
   }
 }
 
-export async function POST(request) {
+export async function POST(request) { return handleHarvest(request, false); }
+
+async function handleHarvest(request, isCron) {
   if (HARVEST_PAUSED) return pausedResponse(); // ★ พักหาข่าวใหม่ชั่วคราว
   try {
     const body = await request.json().catch(() => ({}));
@@ -78,14 +80,13 @@ export async function POST(request) {
         judgeTop: Math.min(60, Number(body.judgeTop) || 36),
       });
     }
-    // ★ 3 ก.ค.: รอบหนัก/เบาสลับ — cron รายชั่วโมงไม่ยิงเลนแพงทุกรอบ (ลด Serper ~50%)
-    //   หนัก (ชั่วโมงหาร 3 ลงตัว): ครบทุกเลน · เบา: เลนสด (trend/saga/followup) + เลนฟรี (entrss/ytwatch/buzz)
-    //   สั่ง lanes ชัดเจนใน body = override ได้เสมอ
+    // ★ 3 ก.ค. (+แก้ 4 ก.ค. — บัค "กดหาใหม่แล้วเหมือนไม่หา"): รอบหนัก/เบาสลับ ใช้กับ "cron (GET)" เท่านั้น
+    //   คนกดปุ่มบนหน้า (POST) = ตั้งใจสั่งหา → หาเต็มทุกเลนเสมอ ไม่โดนลดรอบ
     const HEAVY_LANES = ['trend', 'good', 'broad', 'exa', 'clip', 'evergreen', 'buzz', 'saga', 'entrss', 'ytwatch', 'followup'];
     const LIGHT_LANES = ['trend', 'saga', 'buzz', 'entrss', 'ytwatch', 'followup'];
-    const _heavy = new Date().getHours() % 3 === 0;
+    const _cronLight = isCron && new Date().getHours() % 3 !== 0;
     return await doHarvest({
-      lanes: Array.isArray(body.lanes) && body.lanes.length ? body.lanes : (_heavy ? HEAVY_LANES : LIGHT_LANES),
+      lanes: Array.isArray(body.lanes) && body.lanes.length ? body.lanes : (_cronLight ? LIGHT_LANES : HEAVY_LANES),
       judgeTop: Math.min(40, Number(body.judgeTop) || 24),
     });
   } catch (error) {
@@ -95,5 +96,5 @@ export async function POST(request) {
 }
 
 export async function GET(request) {
-  return POST(request);
+  return handleHarvest(request, true); // cron — สลับรอบหนัก/เบาได้ (ประหยัด Serper)
 }
