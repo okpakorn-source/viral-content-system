@@ -116,6 +116,43 @@ export async function POST(req) {
       }
     }
 
+    // ★ 4 ก.ค. (ผู้ใช้: "Discord ประมวลผลเบิ้ล ให้เหลืออันเดียว"): ด่านกัน "ข่าวเนื้อเดิม/เกือบเดิมส่งซ้ำ" ใน 45 นาที
+    //   หลักฐาน 3 ก.ค.: "บอย ปกรณ์" ถูกส่ง 2 ข้อความห่าง 10 นาที (แก้คำนิดเดียว) → เจน 2 เคส (20:48/20:58)
+    //   ช่องโหว่เดิม: dedup เทียบ hash เป๊ะ + งาน "เสร็จแล้ว" ส่งซ้ำ=เจนใหม่ได้เสมอ (ทีมขอ 17 มิ.ย.) → เนื้อเดิมวางซ้ำ = เบิ้ล
+    //   ประนีประนอม: บล็อกเฉพาะ "คล้าย ≥62% ภายใน 45 นาที" + งานล้ม/ยกเลิกส่งซ้ำได้เสมอ + เกิน 45 นาทีเจนใหม่ได้ตามเดิม
+    //   ★ เฉพาะงานข่าว (ไม่แตะ cover — เทสปกซ้ำโดยตั้งใจ) · ล้มเงียบ = ปล่อยผ่าน (ห้ามบล็อกทั้งระบบเพราะด่านตัวเอง)
+    if (payload.jobType !== 'cover') {
+      try {
+        const _norm = (s) => String(s || '').toLowerCase().replace(/https?:\/\/\S+/g, '').replace(/\s+/g, '');
+        const _grams = (s) => { const g = new Set(); const t = _norm(s); for (let i = 0; i < t.length - 1; i++) g.add(t.slice(i, i + 2)); return g; };
+        const _jac = (a, b) => { if (!a.size || !b.size) return 0; let n = 0; for (const x of a) if (b.has(x)) n++; return n / (a.size + b.size - n); };
+        const _inpNow = String(payload.input || payload.url || payload.text || '');
+        if (_inpNow.length >= 60) { // ข้อความสั้น/URL เดี่ยว ไม่เช็ค (URL มี dedup ฝั่งบอทอยู่แล้ว)
+          const qStore = createStore('job_queue');
+          const _all = await qStore.getAll();
+          const _cut = Date.now() - 45 * 60 * 1000;
+          const _gNow = _grams(_inpNow);
+          for (const j of _all) {
+            if (!j || j.status === 'failed' || j.status === 'cancelled' || j.status === 'superseded') continue; // ล้มแล้วส่งซ้ำ = ต้องผ่าน
+            if (new Date(j.createdAt || 0).getTime() < _cut) continue;
+            const _inpOld = String(j.payload?.input || j.payload?.url || j.payload?.text || '');
+            if (_inpOld.length < 60) continue;
+            const _sim = _jac(_gNow, _grams(_inpOld));
+            // ★ เกณฑ์ 0.62 จากเทสจริง: เนื้อเดิมแก้คำ=0.745 / ส่งซ้ำเป๊ะ=1.0 / คนเดิมคนละข่าว=0.138 / คนละข่าว=0.083 — ช่องว่างกว้าง ปลอดภัยทั้งสองทาง
+            if (_sim >= 0.62) {
+              const _mins = Math.max(1, Math.round((Date.now() - new Date(j.createdAt).getTime()) / 60000));
+              logger.info(`[Queue] ⏭️ near-duplicate (คล้าย ${Math.round(_sim * 100)}%) กับ job ${String(j.id).slice(0, 10)} เมื่อ ${_mins} นาทีก่อน — บล็อกกันเบิ้ล`);
+              return NextResponse.json({
+                success: false,
+                error: `ข่าวนี้เพิ่งถูกส่งทำไปแล้วเมื่อ ${_mins} นาทีก่อน (เนื้อหาเหมือนเดิม ~${Math.round(_sim * 100)}% · สถานะ: ${j.status === 'completed' ? 'เสร็จแล้ว — เลื่อนดูผลด้านบนได้เลย' : 'กำลังทำอยู่ รอผลได้เลย'}) — ถ้าต้องการทำใหม่จริงๆ ให้รอเกิน 45 นาที หรือแก้เนื้อหาให้ต่างจากเดิม`,
+                errorType: 'NEAR_DUPLICATE',
+              }, { status: 409 });
+            }
+          }
+        }
+      } catch (e) { logger.warn(`[Queue] near-dup check skipped (non-fatal): ${String(e?.message || '').slice(0, 60)}`); }
+    }
+
     // 3. Add to Queue
     const sourceUserId = payload.userId || 'discord-bot';
     const queueData = await enqueueJob(payload, sourceUserId);

@@ -464,6 +464,14 @@ async function processNewsJob(job) {
   } catch (error) {
     console.error('[Discord Bot Error Detail]:', error);
     console.error('[Discord Bot Error]:', error.message);
+    // ★ 4 ก.ค.: ข่าวเนื้อเดิม/เกือบเดิมส่งซ้ำใน 45 นาที (NEAR_DUPLICATE จาก server) → ตอบเตือนสั้นๆ 1 ครั้ง
+    //   ไม่เงียบแบบ claim-ซ้ำ — คนส่งต้องรู้ว่า "งานแรกมีอยู่แล้ว" จะได้ไม่ส่งวนอีก (ต้นเหตุที่เห็นประมวลผลเบิ้ล)
+    if (error.response?.data?.errorType === 'NEAR_DUPLICATE') {
+      const warnText = `⚠️ ${error.response.data.error}`;
+      if (processingMsg) await processingMsg.edit(warnText).catch(() => {});
+      else await message.reply(warnText).catch(() => {});
+      return;
+    }
     // ★ 26 มิ.ย.: ถ้า error คือ "งานซ้ำ" (server คืน 409/DUPLICATE_JOB ตอน overlap) → เงียบ ลบ reply ทิ้ง
     //   เหมือนเส้น duplicate:true ด้านบน — ไม่โชว์ "❌ เกิดข้อผิดพลาด" ที่ทำให้เห็น 2 อัน
     const _eMsg = String(error.response?.data?.error || error.message || '');
