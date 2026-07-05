@@ -205,33 +205,97 @@ export default function ImageSearchPage() {
               {busy || notice}
             </div>
           )}
-          {cur?.analysis && (
-            <div id="analysis-result" style={{ marginTop: 12, padding: 12, borderRadius: 10, background: 'rgba(96,165,250,0.05)', border: '1px solid rgba(96,165,250,0.18)', fontSize: 13, lineHeight: 1.8 }}>
-              <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>📰 {cur.analysis.headline}</div>
-              <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
-                โทน: {cur.analysis.context?.emotional_tone || '-'} · โมเมนต์สำคัญ: {(cur.analysis.context?.key_moment || '-').slice(0, 70)}
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-                {(cur.keywords?.subjects || []).map((su, i) => (
-                  <span key={i} style={{ padding: '5px 11px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: su.must_have ? 'rgba(96,165,250,0.14)' : 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: su.must_have ? ACCENT : 'var(--text-secondary)' }}>
-                    {su.kind === 'object' ? '📦' : '👤'} {su.name}{su.role ? ` · ${String(su.role).slice(0, 18)}` : ''}
-                  </span>
-                ))}
-              </div>
-              {(cur.keywords?.queries_th?.length || 0) > 0 && (
-                <details style={{ marginTop: 8 }}>
-                  <summary style={{ fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                    ดูคำค้นที่สกัดได้ ({(cur.keywords.queries_th || []).length + (cur.keywords.queries_en || []).length + (cur.keywords.object_queries || []).length} คำ)
-                  </summary>
-                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 7 }}>
-                    {[...(cur.keywords.queries_th || []), ...(cur.keywords.object_queries || []), ...(cur.keywords.queries_en || [])].slice(0, 30).map((q, i) => (
-                      <span key={i} style={{ padding: '3px 9px', borderRadius: 6, fontSize: 11, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>{q}</span>
+          {cur?.analysis && (() => {
+            // ★ 5 ก.ค.: จอผลวิเคราะห์เต็มแบบต้นฉบับ (คลังถาวร — เปิดเคสเก่าดูย้อนหลังได้ทุกใบ)
+            const a = cur.analysis;
+            const cc = a.content || {};
+            const ctx = a.context || {};
+            const kvK = { fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' };
+            const chip = { padding: '3px 9px', borderRadius: 6, fontSize: 11, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text-secondary)' };
+            return (
+              <div id="analysis-result" style={{ marginTop: 12, padding: 14, borderRadius: 10, background: 'rgba(96,165,250,0.05)', border: '1px solid rgba(96,165,250,0.18)', fontSize: 13, lineHeight: 1.8 }}>
+                <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
+                  📰 ผลวิเคราะห์ · {cur.id}{cur.createdAt ? ` · ${new Date(cur.createdAt).toLocaleString('th-TH')}` : ''}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', alignItems: 'start' }}>
+                  <span style={kvK}>แก่นข่าว</span><span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{a.headline}</span>
+                  <span style={kvK}>สรุป</span><span style={{ color: 'var(--text-secondary)' }}>{a.summary}</span>
+                  <span style={kvK}>โทนอารมณ์</span><span style={{ color: ACCENT, fontWeight: 600 }}>{ctx.emotional_tone || '-'}</span>
+                  <span style={kvK}>ความมั่นใจ</span><span style={{ color: 'var(--text-secondary)' }}>{a.confidence || '-'}</span>
+                </div>
+                {/* ตัวละคร — การ์ดละเอียด (ชื่อ/บทบาท/เพศ/ลักษณะ/คำยืนยันจากข่าว) */}
+                {(a.characters || []).length > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>ตัวละคร ({a.characters.length})</div>
+                    {a.characters.map((p, i) => (
+                      <div key={i} style={{ padding: '9px 12px', borderRadius: 9, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', marginBottom: 6 }}>
+                        <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{p.name}</span>
+                        {p.role && <span style={{ color: ACCENT, fontSize: 12, marginLeft: 8 }}>{p.role}</span>}
+                        <span style={{ ...chip, marginLeft: 8 }}>เพศ: {p.gender || 'ไม่ระบุ'}</span>
+                        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 5 }}>
+                          {(p.descriptors || []).map((d, j) => <span key={j} style={chip}>{d}</span>)}
+                        </div>
+                        {p.evidence && p.evidence !== 'ไม่ระบุในข่าว' && (
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', marginTop: 5 }}>“{String(p.evidence).slice(0, 140)}”</div>
+                        )}
+                      </div>
                     ))}
                   </div>
+                )}
+                {/* subjects จากคีย์เวิร์ด (👤 คน / 📦 วัตถุผูกเจ้าของ) */}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                  {(cur.keywords?.subjects || []).map((su, i) => (
+                    <span key={i} style={{ padding: '5px 11px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: su.must_have ? 'rgba(96,165,250,0.14)' : 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: su.must_have ? ACCENT : 'var(--text-secondary)' }}>
+                      {su.kind === 'object' ? '📦' : '👤'} {su.name}
+                    </span>
+                  ))}
+                </div>
+                {/* เนื้อข่าว + บริบทเต็ม (พับได้ — คลังถาวรดูย้อนหลัง) */}
+                <details style={{ marginTop: 8 }}>
+                  <summary style={{ fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>📖 เนื้อข่าว + บริบทเต็ม (ลำดับเหตุการณ์ / ตัวเลข / ภูมิหลัง / ข้อมูลที่ขาด)</summary>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', alignItems: 'start', marginTop: 8 }}>
+                    <span style={kvK}>เกิดอะไรขึ้น</span><span style={{ color: 'var(--text-secondary)' }}>{cc.what_happened || '-'}</span>
+                    <span style={kvK}>สถานที่</span><span style={{ color: 'var(--text-secondary)' }}>{cc.location || '-'}</span>
+                    <span style={kvK}>เวลา</span><span style={{ color: 'var(--text-secondary)' }}>{cc.time || '-'}</span>
+                    <span style={kvK}>ภูมิหลัง</span><span style={{ color: 'var(--text-secondary)' }}>{ctx.background || '-'}</span>
+                    <span style={kvK}>ทำไมน่าสนใจ</span><span style={{ color: 'var(--text-secondary)' }}>{ctx.why_notable || '-'}</span>
+                    <span style={kvK}>หลักฐานโทน</span><span style={{ color: 'var(--text-secondary)' }}>{ctx.tone_evidence || '-'}</span>
+                    <span style={kvK}>โมเมนต์สำคัญ</span><span style={{ color: 'var(--text-secondary)' }}>{ctx.key_moment || '-'}</span>
+                  </div>
+                  {(cc.key_events || []).length > 0 && (
+                    <div style={{ marginTop: 7 }}>
+                      <span style={kvK}>ลำดับเหตุการณ์:</span>
+                      <ol style={{ margin: '4px 0 0 20px', padding: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
+                        {cc.key_events.map((e, i) => <li key={i}>{e}</li>)}
+                      </ol>
+                    </div>
+                  )}
+                  {(cc.numbers_facts || []).length > 0 && (
+                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 7 }}>
+                      {cc.numbers_facts.map((n, i) => <span key={i} style={chip}>{n}</span>)}
+                    </div>
+                  )}
+                  {(a.missing_info || []).length > 0 && (
+                    <div style={{ marginTop: 7, fontSize: 12, color: 'var(--text-muted)' }}>
+                      ⚠️ ข่าวไม่ได้ระบุ: {a.missing_info.join(' · ')}
+                    </div>
+                  )}
                 </details>
-              )}
-            </div>
-          )}
+                {(cur.keywords?.queries_th?.length || 0) > 0 && (
+                  <details style={{ marginTop: 6 }}>
+                    <summary style={{ fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                      🔎 คำค้นที่สกัดได้ ({(cur.keywords.queries_th || []).length + (cur.keywords.queries_en || []).length + (cur.keywords.object_queries || []).length} คำ)
+                    </summary>
+                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 7 }}>
+                      {[...(cur.keywords.queries_th || []), ...(cur.keywords.object_queries || []), ...(cur.keywords.queries_en || [])].slice(0, 40).map((q, i) => (
+                        <span key={i} style={chip}>{q}</span>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         {/* ── ② เลือกแหล่ง + ค้นภาพ (หลัก = ใช้คีย์เวิร์ดจากข่าว · ขั้นสูง = พิมพ์เอง) ── */}
@@ -296,7 +360,7 @@ export default function ImageSearchPage() {
             <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>📁 คลังรูปเคส{cur ? ` · ${images.length} รูป` : ''}</span>
             <select value={cur?.id || ''} onChange={e => openCase(e.target.value)} style={{ ...s.input, padding: '8px 10px', fontSize: 12, maxWidth: 280 }}>
               <option value="">— เลือกเคสเก่า / ค้นใหม่=เคสใหม่อัตโนมัติ —</option>
-              {cases.map(c => <option key={c.id} value={c.id}>{c.title} ({c.total})</option>)}
+              {cases.map(c => <option key={c.id} value={c.id}>{c.id} · {c.title} ({c.total} รูป)</option>)}
             </select>
             {cur && <button onClick={() => { setCur(null); setPicked(new Set()); setNotice('เริ่มเคสใหม่ — ค้นครั้งถัดไปจะสร้างเคสใหม่ให้'); }} style={s.btn(false)}>➕ เคสใหม่</button>}
             {cur && (

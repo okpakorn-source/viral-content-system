@@ -67,6 +67,16 @@ async function loadCase(store, caseId) {
   return all.find((c) => c.id === caseId) || null;
 }
 
+// ★ 5 ก.ค. (แบบต้นฉบับ AC-0001...): เลขเคสรันต่อเนื่องอ่านง่าย IS-0001, IS-0002, ...
+//   นับจากเลขสูงสุดที่มี (ทนต่อการลบเคส) · ล้มเหลว → ถอย timestamp (ไม่บล็อกงาน)
+async function nextCaseId(store) {
+  try {
+    const all = await store.getAll();
+    const nums = all.map((c) => parseInt(String(c.id).match(/^IS-(\d+)$/)?.[1] || '0', 10));
+    return 'IS-' + String(Math.max(0, ...nums) + 1).padStart(4, '0');
+  } catch { return `IS-${Date.now().toString(36)}`; }
+}
+
 export async function GET(req) {
   try {
     const store = createStore(STORE);
@@ -145,9 +155,10 @@ export async function POST(req) {
       // เคสใหม่ (หรืออัปเดตเคสเดิมถ้าส่ง caseId มา)
       let c = body.caseId ? await loadCase(store, body.caseId) : null;
       const isNew = !c;
-      if (!c) c = { id: `IS-${Date.now().toString(36)}`, createdAt: new Date().toISOString(), images: [], queries: [], log: [] };
+      if (!c) c = { id: await nextCaseId(store), createdAt: new Date().toISOString(), images: [], queries: [], log: [] };
       c.title = String(analysis.headline || '').slice(0, 80) || c.title || 'เคสใหม่';
-      c.newsSnippet = newsText.slice(0, 1200);
+      c.newsText = newsText;                 // ★ 5 ก.ค.: เก็บเนื้อข่าวเต็มถาวร (แบบต้นฉบับ — ย้อนดูได้ทุกเคส)
+      c.newsSnippet = newsText.replace(/\s+/g, ' ').slice(0, 160);
       c.analysis = analysis;
       c.keywords = keywords;
       c.log = [...(c.log || []), { at: new Date().toISOString(), action: 'analyze', provider: a.provider }].slice(-30);
@@ -271,7 +282,7 @@ export async function POST(req) {
       let isNew = false;
       if (!c) {
         c = {
-          id: `IS-${Date.now().toString(36)}`,
+          id: await nextCaseId(store),
           title: (body.title || queries[0]).slice(0, 80),
           createdAt: new Date().toISOString(),
           images: [], queries: [], log: [],
@@ -298,7 +309,7 @@ export async function POST(req) {
       let c = body.caseId ? await loadCase(store, body.caseId) : null;
       let isNew = false;
       if (!c) {
-        c = { id: `IS-${Date.now().toString(36)}`, title: 'ค้นย้อนกลับจากภาพ', createdAt: new Date().toISOString(), images: [], queries: [], log: [] };
+        c = { id: await nextCaseId(store), title: 'ค้นย้อนกลับจากภาพ', createdAt: new Date().toISOString(), images: [], queries: [], log: [] };
         isNew = true;
       }
       const imgs = await reverseImageMulti(imageUrl);
@@ -316,7 +327,7 @@ export async function POST(req) {
       let c = body.caseId ? await loadCase(store, body.caseId) : null;
       let isNew = false;
       if (!c) {
-        c = { id: `IS-${Date.now().toString(36)}`, title: `โปรไฟล์ ${username}`, createdAt: new Date().toISOString(), images: [], queries: [], log: [] };
+        c = { id: await nextCaseId(store), title: `โปรไฟล์ ${username}`, createdAt: new Date().toISOString(), images: [], queries: [], log: [] };
         isNew = true;
       }
       const imgs = network === 'facebook' ? await facebookProfileImages(username) : await instagramProfileImages(username);
