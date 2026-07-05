@@ -224,7 +224,7 @@ function createFadeMask(w, h, f) {
 
 function drawRectSlot(ctx, img, slot, offset, crop) {
   const ox = offset?.dx||0, oy = offset?.dy||0;
-  const { x:bx, y:by, w, h, fadeRight:fR=0, fadeLeft:fL=0, fadeTop:fT=0, fadeBottom:fB=0, border, borderWidth:bw=0 } = slot;
+  const { x:bx, y:by, w, h, fadeRight:fR=0, fadeLeft:fL=0, fadeTop:fT=0, fadeBottom:fB=0, border, borderWidth:bw=0, _gray=0 } = slot;
   const x = bx+ox, y = by+oy;
   const dw = border ? w-bw*2 : w, dh = border ? h-bw*2 : h;
   const dx = border ? x+bw : x, dy = border ? y+bw : y;
@@ -232,19 +232,22 @@ function drawRectSlot(ctx, img, slot, offset, crop) {
   const o = document.createElement('canvas'); o.width=dw; o.height=dh;
   const c = o.getContext('2d');
   const {sx,sy,sw,sh} = coverFit(img,dw,dh,0.3,crop);
+  if (_gray > 0) c.filter = `grayscale(${_gray})`; // ★ 4 ก.ค.: โทนไว้อาลัยรายช่อง
   c.drawImage(img,sx,sy,sw,sh,0,0,dw,dh);
+  c.filter = 'none';
   if (!border && (fR||fL||fT||fB)) { const mask = createFadeMask(dw,dh,{right:fR,left:fL,top:fT,bottom:fB}); c.globalCompositeOperation='destination-in'; c.drawImage(mask,0,0); c.globalCompositeOperation='source-over'; }
   ctx.drawImage(o,dx,dy);
 }
 
 function drawCircleSlot(ctx, img, slot, offset, crop) {
   const ox = offset?.dx||0, oy = offset?.dy||0;
-  const { x:bx, y:by, diameter:d, border='#fff', borderWidth:bw=4 } = slot;
+  const { x:bx, y:by, diameter:d, border='#fff', borderWidth:bw=4, _gray=0 } = slot;
   const x = bx+ox, y = by+oy, r = d/2, cx = x+r, cy = y+r;
   ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r+bw,0,Math.PI*2);
   ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=16; ctx.shadowOffsetY=4;
   ctx.fillStyle=border; ctx.fill(); ctx.restore();
   ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.clip();
+  if (_gray > 0) ctx.filter = `grayscale(${_gray})`; // ★ 4 ก.ค.: โทนไว้อาลัยรายช่อง
   const {sx,sy,sw,sh} = coverFit(img,d,d,0.3,crop);
   ctx.drawImage(img,sx,sy,sw,sh,x,y,d,d); ctx.restore();
 }
@@ -368,6 +371,14 @@ export default function CoverPage() {
   // ★ 4 ก.ค. (ผู้ใช้สั่ง "มือถือใช้ง่ายสุด เห็นทุกฟังก์ชัน"): จอเล็กเรียงคอลัมน์เดียว + เลือกช่องแล้วแต่งจากแผงรวมใต้ปก
   const [isMobile, setIsMobile] = useState(false);
   const [selectedSlotId, setSelectedSlotId] = useState(null);
+  // ★ 4 ก.ค. รอบ 2 (ผู้ใช้สั่ง 4 ฟีเจอร์): เฟดเลือกได้ / วง-กรอบแดงเน้นจุด / สีขอบช่อง / โทนไว้อาลัยขาวดำ
+  const [slotFades, setSlotFades] = useState({});           // slotId → 'off' = ปิดเฟดช่องนั้น (default ตามแทมเพลต)
+  const [fadeAllOff, setFadeAllOff] = useState(false);      // ปิดเฟดทั้งใบ
+  const [slotBorderColors, setSlotBorderColors] = useState({}); // slotId → สีขอบ override
+  const [slotGray, setSlotGray] = useState({});             // slotId → 0..1 ขาวดำรายช่อง
+  const [grayAll, setGrayAll] = useState(0);                // 0..1 ขาวดำทั้งใบ (โทนไว้อาลัย)
+  const [markers, setMarkers] = useState([]);               // วง/กรอบแดงเน้นจุด [{id,type,x,y,w,h,color,width}]
+  const [selectedMarkerId, setSelectedMarkerId] = useState(null);
   const touchScaleRef = useRef(1);  // canvas จริง (1200) / ที่แสดงบนจอ — ใช้ขยาย hit zone ให้นิ้วจับถูกบนจอเล็ก
   const pinchRef = useRef(null);    // สถานะจีบ 2 นิ้ว (ซูมภาพในช่อง)
   useEffect(() => {
@@ -659,6 +670,14 @@ export default function CoverPage() {
   // ── Pointer handlers ──
   const handleDown = (cx, cy) => {
     const {mx,my} = getCoords(cx,cy);
+    // ★ 4 ก.ค. รอบ 2: วง/กรอบแดงอยู่บนสุด — เช็คก่อนทุกอย่าง
+    const mHit = hitTestMarker(mx, my);
+    if (mHit) {
+      setSelectedMarkerId(mHit.marker.id);
+      setDragState({ markerId: mHit.marker.id, mode: mHit.mode === 'move' ? 'marker-move' : 'marker-resize', startX: mx, startY: my, orig: { ...mHit.marker } });
+      return;
+    }
+    if (selectedMarkerId) setSelectedMarkerId(null); // แตะที่อื่น = วางมือจากวงแดง
     // ★ 4 ก.ค.: แตะช่องไหน = เลือกช่องนั้น (แผงเครื่องมือใต้ปกสลับตาม + วาดกรอบไฮไลต์)
     const _selHit = hitTestAll(mx, my);
     if (_selHit) setSelectedSlotId(_selHit.id);
@@ -719,6 +738,25 @@ export default function CoverPage() {
       return;
     }
 
+    // ★ 4 ก.ค. รอบ 2: ลากวง/กรอบแดง — ย้าย/ย่อขยายรอบจุดกึ่งกลาง (วงกลมคงความกลมเสมอ)
+    if (dragState.mode === 'marker-move') {
+      const dx = mx - dragState.startX, dy = my - dragState.startY;
+      setMarkers(prev => prev.map(m => m.id === dragState.markerId ? { ...m, x: dragState.orig.x + dx, y: dragState.orig.y + dy } : m));
+      return;
+    }
+    if (dragState.mode === 'marker-resize') {
+      const o = dragState.orig;
+      const ccx = o.x + o.w / 2, ccy = o.y + o.h / 2;
+      const startDist = Math.hypot(dragState.startX - ccx, dragState.startY - ccy);
+      const ratio = startDist > 5 ? Math.hypot(mx - ccx, my - ccy) / startDist : 1;
+      setMarkers(prev => prev.map(m => {
+        if (m.id !== dragState.markerId) return m;
+        const w = Math.max(70, o.w * ratio);
+        const h = m.type === 'circle' ? w : Math.max(70, o.h * ratio);
+        return { ...m, w, h, x: ccx - w / 2, y: ccy - h / 2 };
+      }));
+      return;
+    }
     if (dragState.mode === 'textmove') {
       // Text drag — update dx, dy in textOverrides
       setTextOverrides(prev => ({
@@ -793,6 +831,75 @@ export default function CoverPage() {
 
   const resetAll = () => { setSlotOffsets({}); setSlotScales({}); setSlotCrops({}); };
 
+  // ★ 4 ก.ค. รอบ 2 — รวม override ต่อช่อง (เฟด/สีขอบ/ขาวดำ) ใช้ทั้งพรีวิว render และดาวน์โหลด
+  const effWithOverrides = (slot) => {
+    let eff = getEffSlot(slot, slotScales[slot.id]);
+    const noFade = fadeAllOff || slotFades[slot.id] === 'off';
+    if (noFade && (eff.fadeLeft || eff.fadeRight || eff.fadeTop || eff.fadeBottom)) {
+      eff = { ...eff, fadeLeft: 0, fadeRight: 0, fadeTop: 0, fadeBottom: 0 };
+    }
+    if (slotBorderColors[slot.id] && eff.border) eff = { ...eff, border: slotBorderColors[slot.id] };
+    const g = slotGray[slot.id] || 0;
+    if (g > 0) eff = { ...eff, _gray: g };
+    return eff;
+  };
+
+  // ★ โทนไว้อาลัยทั้งใบ: ก๊อปภาพที่วาดเสร็จ → วาดทับตัวเองด้วย filter grayscale (ข้อความ/ขอบโดนด้วย = โทนเดียวทั้งใบ)
+  const applyGlobalGray = (ctx) => {
+    if (!grayAll || grayAll <= 0) return;
+    const canvas = canvasRef.current; if (!canvas) return;
+    const snap = document.createElement('canvas'); snap.width = W; snap.height = H;
+    snap.getContext('2d').drawImage(canvas, 0, 0);
+    ctx.save(); ctx.filter = `grayscale(${grayAll})`; ctx.drawImage(snap, 0, 0); ctx.restore();
+  };
+
+  // ★ วง/กรอบแดงเน้นจุดข่าว — วาด "หลัง" โทนไว้อาลัย (วงยังแดงสด เด่นบนภาพขาวดำ)
+  const drawMarkers = (ctx, showSelection) => {
+    for (const m of markers) {
+      ctx.save();
+      ctx.strokeStyle = m.color || '#FF0000';
+      ctx.lineWidth = m.width || 10;
+      ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 7;
+      if (m.type === 'circle') { ctx.beginPath(); ctx.ellipse(m.x + m.w / 2, m.y + m.h / 2, m.w / 2, m.h / 2, 0, 0, Math.PI * 2); ctx.stroke(); }
+      else ctx.strokeRect(m.x, m.y, m.w, m.h);
+      if (showSelection && m.id === selectedMarkerId) {
+        ctx.shadowBlur = 0; ctx.strokeStyle = 'rgba(96,165,250,0.9)'; ctx.lineWidth = 3; ctx.setLineDash([10, 6]);
+        ctx.strokeRect(m.x - 10, m.y - 10, m.w + 20, m.h + 20);
+      }
+      ctx.restore();
+    }
+  };
+
+  // hit test วง/กรอบแดง (อยู่บนสุด เช็คก่อนช่องภาพ) — วงกลม: ในวง=ย้าย ขอบวง=ย่อขยาย · กรอบ: ขอบ/มุม=จับ ตรงกลางทะลุลงช่องล่าง
+  const hitTestMarker = (mx, my) => {
+    const pad = 30 * _zoneScale();
+    for (let i = markers.length - 1; i >= 0; i--) {
+      const m = markers[i];
+      if (m.type === 'circle') {
+        const cx = m.x + m.w / 2, cy = m.y + m.h / 2, r = m.w / 2;
+        const dist = Math.hypot(mx - cx, my - cy);
+        if (Math.abs(dist - r) <= pad) return { marker: m, mode: 'resize' };
+        if (dist < r) return { marker: m, mode: 'move' };
+      } else {
+        const nearCorner = [[m.x, m.y], [m.x + m.w, m.y], [m.x, m.y + m.h], [m.x + m.w, m.y + m.h]]
+          .some(([hx, hy]) => Math.abs(mx - hx) <= pad && Math.abs(my - hy) <= pad);
+        if (nearCorner) return { marker: m, mode: 'resize' };
+        const inOuter = mx >= m.x - pad && mx <= m.x + m.w + pad && my >= m.y - pad && my <= m.y + m.h + pad;
+        const inInner = mx > m.x + pad && mx < m.x + m.w - pad && my > m.y + pad && my < m.y + m.h - pad;
+        if (inOuter && !inInner) return { marker: m, mode: 'move' };
+      }
+    }
+    return null;
+  };
+  const addMarker = (type) => {
+    const id = `mk_${Date.now().toString(36)}`;
+    const m = type === 'circle'
+      ? { id, type, x: W / 2 - 170, y: H / 2 - 170, w: 340, h: 340, color: '#FF0000', width: 10 }
+      : { id, type, x: W / 2 - 260, y: H / 2 - 170, w: 520, h: 340, color: '#FF0000', width: 10 };
+    setMarkers(prev => [...prev, m]);
+    setSelectedMarkerId(id);
+  };
+
   // ── Render ──
   const render = useCallback(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -814,7 +921,7 @@ export default function CoverPage() {
       if ((slot.zIndex||0) >= 3) continue;
       const img = slotImages[slot.id]; if (!img) continue;
       const offset = slotOffsets[slot.id];
-      const eff = getEffSlot(slot, slotScales[slot.id]);
+      const eff = effWithOverrides(slot); // ★ 4 ก.ค. รอบ 2: เฟด/สีขอบ/ขาวดำ ตามที่ผู้ใช้ตั้ง
       if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, offset, slotCrops[slot.id]);
       else drawRectSlot(ctx, img, eff, offset, slotCrops[slot.id]);
     }
@@ -830,10 +937,14 @@ export default function CoverPage() {
       if ((slot.zIndex||0) < 3) continue;
       const img = slotImages[slot.id]; if (!img) continue;
       const offset = slotOffsets[slot.id];
-      const eff = getEffSlot(slot, slotScales[slot.id]);
+      const eff = effWithOverrides(slot); // ★ 4 ก.ค. รอบ 2
       if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, offset, slotCrops[slot.id]);
       else drawRectSlot(ctx, img, eff, offset, slotCrops[slot.id]);
     }
+
+    // ★ 4 ก.ค. รอบ 2: โทนไว้อาลัยทั้งใบ → แล้วค่อยวาดวง/กรอบแดง (วงยังแดงสดบนภาพขาวดำ)
+    applyGlobalGray(ctx);
+    drawMarkers(ctx, true);
 
     // Empty state
     if (!Object.keys(slotImages).length) {
@@ -897,7 +1008,8 @@ export default function CoverPage() {
         ctx.restore();
       }
     }
-  }, [slotImages, slotOffsets, slotScales, slotCrops, template, textValues, textBgColors, dragState, draggableSlots, selectedSlotId]);
+  }, [slotImages, slotOffsets, slotScales, slotCrops, template, textValues, textBgColors, dragState, draggableSlots, selectedSlotId,
+      slotFades, fadeAllOff, slotBorderColors, slotGray, grayAll, markers, selectedMarkerId]); // ★ 4 ก.ค. รอบ 2
 
   useEffect(() => { render(); }, [render]);
 
@@ -913,7 +1025,7 @@ export default function CoverPage() {
     for (const slot of sorted) {
       if ((slot.zIndex||0) >= 3) continue;
       const img = slotImages[slot.id]; if (!img) continue;
-      const eff = getEffSlot(slot, slotScales[slot.id]);
+      const eff = effWithOverrides(slot); // ★ 4 ก.ค. รอบ 2: ไฟล์ดาวน์โหลดได้เอฟเฟกต์ครบเหมือนพรีวิว
       if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, slotOffsets[slot.id], slotCrops[slot.id]);
       else drawRectSlot(ctx, img, eff, slotOffsets[slot.id], slotCrops[slot.id]);
     }
@@ -925,10 +1037,14 @@ export default function CoverPage() {
     for (const slot of sorted) {
       if ((slot.zIndex||0) < 3) continue;
       const img = slotImages[slot.id]; if (!img) continue;
-      const eff = getEffSlot(slot, slotScales[slot.id]);
+      const eff = effWithOverrides(slot); // ★ 4 ก.ค. รอบ 2
       if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, slotOffsets[slot.id], slotCrops[slot.id]);
       else drawRectSlot(ctx, img, eff, slotOffsets[slot.id], slotCrops[slot.id]);
     }
+
+    // ★ 4 ก.ค. รอบ 2: โทนไว้อาลัยทั้งใบ + วง/กรอบแดง (ไม่มีเส้นประเลือก — ไฟล์จริงสะอาด)
+    applyGlobalGray(ctx);
+    drawMarkers(ctx, false);
 
     canvas.toBlob((blob) => {
       const url = URL.createObjectURL(blob);
@@ -1518,6 +1634,35 @@ export default function CoverPage() {
                               style={{ ...bigBtn, width: 'auto', padding: '0 13px', fontSize: 11 }}>↺ รีเซ็ตช่องนี้</button>
                           </div>
                         )}
+                        {/* ★ 4 ก.ค. รอบ 2 — ลูกเล่นรายช่อง: เฟด / สีขอบ / ขาวดำไว้อาลัย */}
+                        {img && (
+                          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
+                            {(sl.fadeLeft || sl.fadeRight || sl.fadeTop || sl.fadeBottom) ? (
+                              <button onClick={() => setSlotFades(p => ({ ...p, [sl.id]: p[sl.id] === 'off' ? undefined : 'off' }))}
+                                style={{ ...bigBtn, width: 'auto', padding: '0 12px', fontSize: 11, color: slotFades[sl.id] === 'off' ? '#f87171' : '#a3e635', border: `1px solid ${slotFades[sl.id] === 'off' ? 'rgba(239,68,68,0.35)' : 'rgba(163,230,53,0.35)'}` }}>
+                                🌫️ เฟดช่องนี้: {slotFades[sl.id] === 'off' ? 'ปิด' : 'เปิด'}
+                              </button>
+                            ) : null}
+                            {sl.border && (
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700 }}>🎨 สีขอบ</span>
+                                <input type="color" value={slotBorderColors[sl.id] || sl.border || '#ffffff'}
+                                  onChange={e => setSlotBorderColors(p => ({ ...p, [sl.id]: e.target.value }))}
+                                  style={{ width: 34, height: 34, border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', padding: 0, background: 'none' }} />
+                                {slotBorderColors[sl.id] && (
+                                  <button onClick={() => setSlotBorderColors(p => { const n = { ...p }; delete n[sl.id]; return n; })} style={{ ...bigBtn, width: 34, height: 34, fontSize: 12 }}>↺</button>
+                                )}
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <span style={{ fontSize: 11, color: '#cbd5e1', fontWeight: 700 }}>🕯️ ขาวดำช่องนี้</span>
+                              <input type="range" min="0" max="100" step="10" value={Math.round((slotGray[sl.id] || 0) * 100)}
+                                onChange={e => setSlotGray(p => ({ ...p, [sl.id]: Number(e.target.value) / 100 }))}
+                                style={{ width: 110 }} />
+                              <span style={{ fontSize: 11, fontWeight: 800, minWidth: 34, color: (slotGray[sl.id] || 0) > 0 ? '#cbd5e1' : 'var(--text-muted)' }}>{Math.round((slotGray[sl.id] || 0) * 100)}%</span>
+                            </div>
+                          </div>
+                        )}
                         {img && enhanceResults[sl.id] && !enhancing[sl.id] && (
                           <div style={{ marginTop: 8, fontSize: 10, color: '#22c55e', fontWeight: 600 }}>
                             ✅ เพิ่มคมแล้ว {enhanceResults[sl.id].originalResolution} → {enhanceResults[sl.id].enhancedResolution} · เหมือนต้นฉบับ {enhanceResults[sl.id].similarityScore}%
@@ -1526,6 +1671,48 @@ export default function CoverPage() {
                       </div>
                     );
                   })()}
+
+                  {/* ★ 4 ก.ค. รอบ 2 — 🎛️ ลูกเล่นทั้งใบ: เฟดรวม · โทนไว้อาลัย · วง/กรอบแดงเน้นจุดข่าว */}
+                  <div style={{ marginTop: 9, padding: 11, borderRadius: 11, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <button onClick={() => setFadeAllOff(v => !v)}
+                        style={{ padding: '9px 13px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer',
+                          border: `1px solid ${fadeAllOff ? 'rgba(239,68,68,0.4)' : 'rgba(163,230,53,0.35)'}`,
+                          background: fadeAllOff ? 'rgba(239,68,68,0.1)' : 'rgba(163,230,53,0.06)',
+                          color: fadeAllOff ? '#f87171' : '#a3e635' }}>
+                        🌫️ เฟดขอบภาพทั้งใบ: {fadeAllOff ? 'ปิดหมด' : 'ตามแทมเพลต'}
+                      </button>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, color: '#cbd5e1', fontWeight: 700 }}>🕯️ โทนไว้อาลัยทั้งใบ</span>
+                        <input type="range" min="0" max="100" step="10" value={Math.round(grayAll * 100)}
+                          onChange={e => setGrayAll(Number(e.target.value) / 100)} style={{ width: 120 }} />
+                        <span style={{ fontSize: 11, fontWeight: 800, minWidth: 34, color: grayAll > 0 ? '#cbd5e1' : 'var(--text-muted)' }}>{Math.round(grayAll * 100)}%</span>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
+                      <span style={{ fontSize: 11, color: '#f87171', fontWeight: 700 }}>🔴 เน้นจุดข่าว</span>
+                      <button onClick={() => addMarker('circle')} style={{ padding: '9px 13px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.07)', color: '#f87171' }}>⭕ เพิ่มวงแดง</button>
+                      <button onClick={() => addMarker('rect')} style={{ padding: '9px 13px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.07)', color: '#f87171' }}>▭ เพิ่มกรอบแดง</button>
+                      {(() => {
+                        const mk = markers.find(m => m.id === selectedMarkerId);
+                        if (!mk) return markers.length > 0
+                          ? <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>แตะวง/กรอบบนปกเพื่อเลือก · ลากใน=ย้าย ขอบ=ย่อขยาย</span>
+                          : null;
+                        return (
+                          <>
+                            <input type="color" value={mk.color} onChange={e => setMarkers(prev => prev.map(m => m.id === mk.id ? { ...m, color: e.target.value } : m))}
+                              style={{ width: 34, height: 34, border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', padding: 0, background: 'none' }} />
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>เส้น</span>
+                            <button onClick={() => setMarkers(prev => prev.map(m => m.id === mk.id ? { ...m, width: Math.max(3, (m.width || 10) - 3) } : m))} style={{ ...s.scaleBtn, width: 34, height: 34 }}>−</button>
+                            <span style={{ fontSize: 12, fontWeight: 800, minWidth: 22, textAlign: 'center', color: 'var(--text-primary)' }}>{mk.width || 10}</span>
+                            <button onClick={() => setMarkers(prev => prev.map(m => m.id === mk.id ? { ...m, width: Math.min(30, (m.width || 10) + 3) } : m))} style={{ ...s.scaleBtn, width: 34, height: 34 }}>＋</button>
+                            <button onClick={() => { setMarkers(prev => prev.filter(m => m.id !== mk.id)); setSelectedMarkerId(null); }}
+                              style={{ padding: '8px 12px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.12)', color: '#f87171' }}>🗑 ลบวงนี้</button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
                 </div>
               )}
 
