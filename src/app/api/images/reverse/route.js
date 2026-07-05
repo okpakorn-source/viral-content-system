@@ -131,11 +131,34 @@ export async function POST(req) {
       );
     }
 
-    const saved = await addImages(caseId, collected);
+    // ★ DEVIATION ตากรองตอนค้นย้อนกลับ (ผู้ใช้สั่ง 6 ก.ค.): Lens อาจดริฟท์ไปคนหน้าคล้าย/สินค้า
+    //   → ให้ตาดูก่อนเก็บแบบเดียวกับ /api/images/search (ตาล้มทั้งชุด → เก็บทั้งหมดแบบต้นฉบับ)
+    let toStore = collected;
+    let vetDropped = 0;
+    if (process.env.SEARCH_VET !== '0' && body.vet !== false) {
+      try {
+        const { vetImages } = await import('@/lib/libraryTriage');
+        const subjects = c.keywords?.subjects || [];
+        const newsGist = (c.analysis?.summary || c.analysis?.content || c.newsSnippet || '').slice(0, 600);
+        const { vetted } = await vetImages({ images: collected, subjects, newsGist, caseId });
+        const anyTag = vetted.some((x) => x.triage);
+        if (anyTag) {
+          toStore = process.env.SEARCH_VET_STRICT !== '0'
+            ? vetted.filter((x) => x.triage?.relevant === true)
+            : vetted.filter((x) => x.triage?.relevant !== false);
+          vetDropped = collected.length - toStore.length;
+        }
+      } catch {
+        /* ตาล้ม → เก็บทั้งหมดแบบต้นฉบับ */
+      }
+    }
+
+    const saved = await addImages(caseId, toStore);
     return NextResponse.json({
       success: true,
       caseId,
       platform: 'reverse',
+      vetDropped,
       seedsUsed: seeds.length,
       found: collected.length,
       added: saved.added,

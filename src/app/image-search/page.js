@@ -166,7 +166,7 @@ function ResultView({ data }) {
   const [handle, setHandle] = useState('');
   const uploadRef = useRef(null);
   // ค้นหลายแหล่งพร้อมกัน (ติ๊กเลือก → จัดคิวค้นทีละแหล่ง)
-  const [batchSel, setBatchSel] = useState(() => new Set(['google', 'google_news', 'bing', 'facebook', 'tiktok']));
+  const [batchSel, setBatchSel] = useState(() => new Set(['google', 'google_news', 'facebook', 'tiktok']));
 
   // โหลดคลังรูปที่เคยค้นไว้ของเคสนี้ (ดูย้อนหลัง)
   useEffect(() => {
@@ -804,8 +804,6 @@ const SEARCH_SOURCES = [
   { p: 'google', label: '🖼️ Google' },
   { p: 'google_news', label: '📰 Google News' },
   { p: 'yandex', label: '🌐 Yandex' },
-  { p: 'bing', label: '🔎 Bing' },
-  { p: 'bing_news', label: '🗞️ Bing News' },
   { p: 'facebook', label: '📘 FB (เว็บ)' },
   { p: 'tiktok', label: '🎵 TikTok' },
   { p: 'youtube', label: '▶️ YouTube (ช้า)' },
@@ -816,7 +814,7 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
   const [emoFilter, setEmoFilter] = useState('all');
   const [personFilter, setPersonFilter] = useState('all'); // 🧠 กรองตาม "คน" จาก triage
   const [catFilter, setCatFilter] = useState('all'); // 🧠 กรองตาม "หมวด" จาก triage
-  const [hideJunk, setHideJunk] = useState(false); // 🧠 ซ่อนภาพที่ตาตีว่า "ขยะ/ไม่เกี่ยว"
+  const [hideJunk, setHideJunk] = useState(true); // 🧠 ซ่อนภาพขยะเป็นค่าเริ่มต้น (★ DEVIATION ผู้ใช้สั่ง 6 ก.ค. — ต้นฉบับ false)
   const [lb, setLb] = useState(null); // index ในรายการที่กรองแล้ว
   const [selMode, setSelMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
@@ -846,14 +844,22 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
   const cats = Object.keys(byCat).sort((a, b) => byCat[b] - byCat[a]);
   const hasTriage = triagedCount > 0;
 
-  const shown = images.filter(
-    (im) =>
-      (filter === 'all' || im.platform === filter) &&
-      (emoFilter === 'all' || im.emotion === emoFilter) &&
-      (personFilter === 'all' || im.triage?.person === personFilter) &&
-      (catFilter === 'all' || im.triage?.category === catFilter) &&
-      (!hideJunk || im.triage?.relevant !== false)
-  );
+  const shown = images
+    .filter(
+      (im) =>
+        (filter === 'all' || im.platform === filter) &&
+        (emoFilter === 'all' || im.emotion === emoFilter) &&
+        (personFilter === 'all' || im.triage?.person === personFilter) &&
+        (catFilter === 'all' || im.triage?.category === catFilter) &&
+        (!hideJunk || im.triage?.relevant !== false)
+    )
+    // ★ DEVIATION (ผู้ใช้สั่ง 6 ก.ค.): ภาพที่ตายืนยันว่าเกี่ยว+คุณภาพสูง ขึ้นก่อนเสมอ (ต้นฉบับเรียงตามลำดับเก็บ)
+    .sort((a, b) => {
+      const ra = a.triage?.relevant === true ? 1 : 0;
+      const rb = b.triage?.relevant === true ? 1 : 0;
+      if (ra !== rb) return rb - ra;
+      return (b.triage?.quality || 0) - (a.triage?.quality || 0);
+    });
 
   useEffect(() => {
     setLb(null); // เปลี่ยนตัวกรอง = ปิด lightbox

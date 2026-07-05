@@ -127,9 +127,16 @@ export async function POST(req) {
       const subjects = (c.keywords?.subjects || []).map((s) => ({ ...s, gender: s.gender || genderOf(s.name) }));
       const newsGist = (c.analysis?.summary || c.analysis?.content || c.newsSnippet || '').slice(0, 600);
       try {
-        const { vetted, dropped } = await vetImages({ images: collected, subjects, newsGist, caseId });
-        toStore = vetted.filter((x) => x.triage?.relevant !== false); // เก็บที่เกี่ยว + ที่ตาไม่ทัน(ไม่ติดป้าย)
-        vetDropped = dropped;
+        const { vetted } = await vetImages({ images: collected, subjects, newsGist, caseId });
+        // ★ DEVIATION โหมดตาเข้ม (ผู้ใช้สั่ง 6 ก.ค.): เก็บเฉพาะใบที่ตา "ยืนยันว่าเกี่ยว" เท่านั้น
+        //   (ต้นฉบับเก็บใบที่ตาดูไม่ทัน/ไม่ติดป้ายด้วย → ขยะเล็ดได้) — ถ้าตาล้มทั้งชุดจนไม่มีป้ายเลย
+        //   ค่อย fail-open เก็บแบบต้นฉบับ กัน "ค้นแล้วได้ศูนย์" ตอน Gemini ล่ม · ปิดกลับ: SEARCH_VET_STRICT=0
+        const strict = process.env.SEARCH_VET_STRICT !== '0';
+        const anyTag = vetted.some((x) => x.triage);
+        toStore = strict && anyTag
+          ? vetted.filter((x) => x.triage?.relevant === true)
+          : vetted.filter((x) => x.triage?.relevant !== false);
+        vetDropped = collected.length - toStore.length;
         vetOn = true;
       } catch {
         toStore = collected; // ตาล้ม/ไม่มีคีย์ → เก็บทั้งหมดไปก่อน

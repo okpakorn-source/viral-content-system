@@ -19,7 +19,9 @@ const SITE_FILTER = {
 };
 
 // แพลตฟอร์มที่ค้นด้วย "คำค้น" ผ่าน /api/images/search (reverse/profile/youtube มี endpoint แยก)
-export const PLATFORMS = ['google', 'google_news', 'yandex', 'bing', 'bing_news', 'facebook', 'tiktok'];
+// ★ DEVIATION จากต้นฉบับ (ผู้ใช้สั่ง 6 ก.ค.): ตัด bing/bing_news ทิ้ง — bing อ่านคำไทยไม่ออก ตอบขยะ 100%
+//   (พิสูจน์ AC-0002: 133/133 เป็นบทความแมวเปอร์เซีย) เปลืองทั้งเครดิต SerpApi และตา Gemini
+export const PLATFORMS = ['google', 'google_news', 'yandex', 'facebook', 'tiktok'];
 
 export const PLATFORM_LABEL = {
   google: 'Google',
@@ -124,19 +126,10 @@ export async function searchImages(platform, query, { num = 30, gl = 'th', hl = 
     const d = await serpGet({ engine: 'google_news', q: query, gl, hl }, co);
     return d._empty ? [] : normList(d.news_results, num);
   }
-  if (platform === 'bing_news') {
-    const d = await serpGet({ engine: 'bing_news', q: query }, co);
-    return d._empty ? [] : normList(d.news_results || d.organic_results, num);
-  }
   if (platform === 'yandex') {
     const d = await serpGet({ engine: 'yandex_images', text: query }, co);
     return d._empty ? [] : normList(d.images_results, num);
   }
-  if (platform === 'bing') {
-    const d = await serpGet({ engine: 'bing_images', q: query }, co);
-    return d._empty ? [] : normList(d.images_results, num);
-  }
-
   // google / facebook / tiktok → google_images (+ site filter)
   const site = SITE_FILTER[platform];
   const q = site ? `${query} site:${site}` : query;
