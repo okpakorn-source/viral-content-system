@@ -82,6 +82,7 @@ function parseYouTubeAtom(xml, channelName) {
     const d = new Date(pickTag(b, 'published'));
     items.push({
       title, url,
+      videoId: pickTag(b, 'yt:videoId') || (url.match(/[?&]v=([A-Za-z0-9_-]{11})/) || [])[1] || '',
       snippet: pickTag(b, 'media:description').slice(0, 200) || `📺 ช่อง: ${channelName}`,
       publishedAt: isNaN(d) ? null : d.toISOString(),
       source: channelName,
@@ -90,6 +91,27 @@ function parseYouTubeAtom(xml, channelName) {
     });
   }
   return items;
+}
+
+// ★ 4 ก.ค.: เติม "ยอดวิว/ความยาว" จริงจาก YouTube Data API (1 หน่วยโควตา/50 คลิป — ถูกมาก)
+//   → จัดอันดับ/กรองคลิปด้วยยอดวิวจริง (feedback: อยากได้คลิปดีที่คนดูเยอะ ไม่ใช่คลิปช่องอัปทิ้ง)
+//   env-gated: ไม่มี YOUTUBE_API_KEY = คืน clips เดิม (ไม่พัง)
+const _dur = (iso) => { const m = String(iso || '').match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/); return m ? (+(m[1] || 0)) * 3600 + (+(m[2] || 0)) * 60 + (+(m[3] || 0)) : 0; };
+export async function enrichWithStats(clips) {
+  const key = process.env.YOUTUBE_API_KEY;
+  const ids = [...new Set(clips.map(c => c.videoId).filter(Boolean))];
+  if (!key || !ids.length) return clips;
+  const stats = {};
+  try {
+    for (let i = 0; i < ids.length; i += 50) {
+      const batch = ids.slice(i, i + 50);
+      const r = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=statistics,contentDetails&id=${batch.join(',')}&key=${key}`, { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) { console.log('[DirectFeeds] YouTube stats', r.status); break; }
+      const d = await r.json();
+      for (const it of (d.items || [])) stats[it.id] = { views: Number(it.statistics?.viewCount || 0), durationSec: _dur(it.contentDetails?.duration) };
+    }
+  } catch (e) { console.log('[DirectFeeds] stats fail:', e.message?.slice(0, 40)); return clips; }
+  return clips.map(c => ({ ...c, ...(stats[c.videoId] || {}) }));
 }
 
 async function fetchXml(url, timeoutMs = 12000) {
@@ -133,8 +155,22 @@ export async function fetchYouTubeChannels({ maxAgeDays = 21 } = {}) {
     return vids;
   }));
   // lane 'video' = โซนคลิป/ดิสคัฟเวอรี (autopilot ไม่ auto-ส่ง — ทีมคัด/ถอดคลิปก่อน) + ป้ายช่องที่เฝ้า
-  const all = results.flat().map(r => ({ ...r, lane: 'video', watchChannel: r.source, _query: 'yt:' + r.source }));
+  let all = results.flat().map(r => ({ ...r, lane: 'video', watchChannel: r.source, _query: 'yt:' + r.source }));
+  // ★ 4 ก.ค.: เติมยอดวิวจริง → ตัดคลิปดูน้อย (ช่องอัปทิ้ง/ไม่ปัง) + ตัด Shorts <60s + เรียงวิวมากก่อน
+  //   ⚖️ ยุติธรรมกับคลิปสด: อัปใน 3 วัน = ยกเว้นเกณฑ์วิว (ยังไม่ทันมีคนดู แต่อาจดีมาก) · เก่ากว่านั้นต้อง ≥8k วิว
+  const before = all.length;
+  all = await enrichWithStats(all);
+  if (all.some(c => c.views !== undefined)) {
+    const freshCut = Date.now() - 3 * 864e5;
+    all = all.filter(c => {
+      if (c.views === undefined) return true;                                   // ดึงวิวไม่ได้ = ปล่อยผ่าน
+      if (c.durationSec !== undefined && c.durationSec > 0 && c.durationSec < 60) return false; // Shorts ตัด
+      const isFresh = c.publishedAt && new Date(c.publishedAt).getTime() >= freshCut;
+      return isFresh || c.views >= 8000;                                        // สด=ยกเว้น · เก่า=ต้องวิวถึง
+    });
+    all.sort((a, b) => (b.views || 0) - (a.views || 0));
+  }
   const pureN = YT_WATCH_CHANNELS.filter(c => c.pure).length;
-  console.log(`[DirectFeeds] 📺 ytwatch: ${YT_WATCH_CHANNELS.length} ช่อง (pure ${pureN}) → ${all.length} คลิปดี (ข้ามช่องใหญ่ที่ชื่อไม่เข้าเกณฑ์ ${skipped})`);
+  console.log(`[DirectFeeds] 📺 ytwatch: ${YT_WATCH_CHANNELS.length} ช่อง (pure ${pureN}) → ${all.length} คลิปดี (ชื่อไม่เข้าเกณฑ์ ${skipped} · ยอดวิวน้อย/สั้น ${before - all.length})`);
   return all;
 }
