@@ -1070,7 +1070,14 @@ export default function CoverPage() {
 
       {/* ===== HELP BUTTON + GUIDE ===== */}
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8, gap: 8 }}>
+          {/* ★ 5 ก.ค.: ปุ่มไปหน้าค้นภาพหลายแหล่ง (หน้านี้เป็น public ไม่มี sidebar — ผู้ใช้หาทางเข้าไม่เจอ) */}
+          <a href="/image-search" style={{
+            padding: '7px 14px', borderRadius: 10, fontSize: 12, fontWeight: 700, textDecoration: 'none',
+            border: '1px solid rgba(96,165,250,0.4)', background: 'rgba(96,165,250,0.1)', color: '#60a5fa',
+          }}>
+            🔎 หารูปจากทุกแหล่ง
+          </a>
           <button
             onClick={() => setShowGuide(!showGuide)}
             style={{

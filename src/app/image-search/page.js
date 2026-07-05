@@ -133,7 +133,12 @@ export default function ImageSearchPage() {
 
         {/* ── ① เลือกแหล่ง + คำค้น ── */}
         <div style={s.card}>
-          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10, color: 'var(--text-primary)' }}>🔍 ค้นหลายแหล่งพร้อมกัน (ติ๊กเลือก)</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>🔍 ค้นหลายแหล่งพร้อมกัน (ติ๊กเลือก)</span>
+            <a href="/cover-tester" style={{ marginLeft: 'auto', padding: '7px 13px', borderRadius: 10, fontSize: 12, fontWeight: 700, textDecoration: 'none', border: '1px solid rgba(163,230,53,0.4)', background: 'rgba(163,230,53,0.08)', color: '#a3e635' }}>
+              🎨 ไปหน้าทำปก
+            </a>
+          </div>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 10 }}>
             {PLATFORMS.map(p => {
               const on = selected.includes(p.id);
