@@ -1,0 +1,1019 @@
+/* ★ 5 ก.ค. 2026: globals.css จากระบบทำปกออโต้ ครอบ scope .acsys กันชนสไตล์แอปหลัก (โค้ดต้นฉบับเป๊ะ) */
+ .acsys {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-2: #1e222b;
+  --border: #2a2f3a;
+  --text: #e7e9ee;
+  --muted: #9aa3b2;
+  --accent: #4f8cff;
+  --accent-2: #7c5cff;
+  --good: #3ecf8e;
+  --warn: #ffb020;
+  --bad: #ff5c6c;
+} .acsys {
+  box-sizing: border-box;
+} .acsys {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Sarabun',
+    'Noto Sans Thai', Tahoma, sans-serif;
+  line-height: 1.55;
+} .acsys button {
+  font-family: inherit;
+} .acsys .wrap {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px 20px 80px;
+} .acsys .brand {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 6px;
+} .acsys .brand h1 {
+  font-size: 22px;
+  margin: 0;
+} .acsys .brand .step {
+  font-size: 13px;
+  color: var(--muted);
+} .acsys .sub {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0 0 24px;
+} .acsys .card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 20px;
+} .acsys .card h2 {
+  font-size: 15px;
+  margin: 0 0 12px;
+  letter-spacing: 0.2px;
+} .acsys textarea {
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  font-size: 15px;
+  font-family: inherit;
+  line-height: 1.6;
+} .acsys textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+} .acsys .row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+} .acsys .count {
+  color: var(--muted);
+  font-size: 13px;
+} .acsys .btn {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 22px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.05s;
+} .acsys .btn:hover {
+  opacity: 0.92;
+} .acsys .btn:active {
+  transform: translateY(1px);
+} .acsys .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+} .acsys .btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 10px;
+  padding: 12px 18px;
+  font-size: 14px;
+  cursor: pointer;
+} .acsys .err {
+  background: rgba(255, 92, 108, 0.1);
+  border: 1px solid rgba(255, 92, 108, 0.4);
+  color: #ffb3ba;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 14px;
+  margin-top: 14px;
+  white-space: pre-wrap;
+} .acsys /* ---- ป๊อปอัพสถานะเรียลไทม์ ---- */
+.job-pop {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 200;
+  animation: jobin 0.2s ease;
+}
+
+@keyframes jobin {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+} .acsys .job-card {
+  width: 320px;
+  max-width: 82vw;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+} .acsys .job-head {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+} .acsys .job-step {
+  font-size: 13px;
+  color: var(--accent);
+  margin-top: 8px;
+  font-weight: 600;
+} .acsys .job-detail {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+  line-height: 1.5;
+} .acsys .job-detail.retry {
+  color: var(--warn);
+} .acsys .job-bar {
+  height: 6px;
+  background: var(--panel-2);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 10px;
+} .acsys .job-bar > div {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.4s ease;
+} .acsys .mood-bar {
+  background: rgba(124, 92, 255, 0.1);
+  border: 1px solid rgba(124, 92, 255, 0.35);
+  color: #d9cfff;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  margin-bottom: 12px;
+} .acsys .info-box {
+  background: rgba(62, 207, 142, 0.12);
+  border: 1px solid rgba(62, 207, 142, 0.4);
+  color: #9ff0c6;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+  margin-top: 12px;
+} .acsys .result h3 {
+  font-size: 14px;
+  color: var(--accent);
+  margin: 22px 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+} .acsys .result h3:first-child {
+  margin-top: 0;
+} .acsys .kv {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 6px 14px;
+  font-size: 14px;
+} .acsys .kv .k {
+  color: var(--muted);
+} .acsys .chip {
+  display: inline-block;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  margin: 2px 4px 2px 0;
+  color: var(--text);
+} .acsys .person {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+} .acsys .person .name {
+  font-weight: 600;
+  font-size: 15px;
+} .acsys .person .role {
+  color: var(--accent);
+  font-size: 13px;
+  margin-left: 8px;
+} .acsys .person .ev {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 6px;
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+} .acsys .tone {
+  font-weight: 600;
+} .acsys ul.clean {
+  margin: 6px 0;
+  padding-left: 20px;
+  font-size: 14px;
+} .acsys ul.clean li {
+  margin-bottom: 4px;
+} .acsys .meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 18px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+} .acsys details.raw {
+  margin-top: 16px;
+} .acsys details.raw summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+} .acsys details.raw pre {
+  background: #0b0d11;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  overflow: auto;
+  font-size: 12px;
+} .acsys .archive-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+} .acsys .archive-item:last-child {
+  border-bottom: none;
+} .acsys .archive-item.clickable {
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 10px 10px;
+  transition: background 0.12s;
+} .acsys .archive-item.clickable:hover {
+  background: var(--panel-2);
+} .acsys .archive-item.active {
+  background: rgba(79, 140, 255, 0.1);
+} .acsys .archive-item .id {
+  color: var(--accent);
+  font-weight: 600;
+} .acsys .archive-item .snip {
+  color: var(--muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+} .acsys .kw-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border);
+} .acsys .kwbox {
+  margin-top: 16px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+} .acsys .kwbox h3 {
+  margin: 0 0 12px;
+  color: var(--good);
+} .acsys .kwgroup {
+  margin-bottom: 14px;
+} .acsys .kwlabel {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+} .acsys .chip-key {
+  background: rgba(79, 140, 255, 0.16);
+  border-color: var(--accent);
+  color: #cfe0ff;
+  font-weight: 600;
+} .acsys .imgsec {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border);
+} .acsys .src-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+} .acsys /* ค้นหลายแหล่งพร้อมกัน */
+.src-multi {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+} .acsys .src-multi-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+} .acsys .src-multi-chks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 8px 0;
+} .acsys .src-chk {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  user-select: none;
+} .acsys .src-chk.on {
+  border-color: var(--accent);
+  background: rgba(79, 140, 255, 0.12);
+  color: #cfe0ff;
+} .acsys .src-chk input {
+  cursor: pointer;
+} .acsys .src-multi-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+} .acsys .src-bar-sep {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  margin: 2px 0 8px;
+} .acsys .src-profile {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+} .acsys .src-input {
+  flex: 1;
+  min-width: 200px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+} .acsys .src-input:focus {
+  outline: none;
+  border-color: var(--accent);
+} .acsys .btn-src {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+} .acsys .btn-src:hover:not(:disabled) {
+  border-color: var(--accent);
+} .acsys .btn-src:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+} .acsys .btn-src.accent {
+  background: rgba(124, 92, 255, 0.16);
+  border-color: var(--accent-2);
+  color: #d9cfff;
+} .acsys .gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+} .acsys .gallery-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+} .acsys .fchip {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.12s;
+} .acsys .fchip:hover {
+  color: var(--text);
+} .acsys .fchip.active {
+  background: rgba(79, 140, 255, 0.16);
+  border-color: var(--accent);
+  color: #cfe0ff;
+  font-weight: 600;
+} .acsys .thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #0b0d11;
+  text-decoration: none;
+  cursor: pointer;
+  font: inherit;
+} .acsys .thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.2s;
+} .acsys .thumb:hover img {
+  transform: scale(1.06);
+} .acsys .fchip.emo.active {
+  background: rgba(124, 92, 255, 0.18);
+  border-color: var(--accent-2);
+  color: #d9cfff;
+} .acsys .thumb-emo {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  font-size: 15px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 6px;
+  padding: 1px 5px;
+  line-height: 1.2;
+} .acsys .thumb.selected {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+} .acsys .thumb.selected img {
+  opacity: 0.6;
+} .acsys .thumb-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid #fff;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+} .acsys .thumb.selected .thumb-check {
+  background: var(--accent);
+} .acsys .thumb-plat {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+} .acsys .thumb-src {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+  color: #d7dce6;
+  font-size: 10px;
+  padding: 14px 6px 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+} .acsys /* ---- ตัวเลือกเทมเพลตปก ---- */
+.coversec {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border);
+} .acsys .tpl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+} .acsys .tpl-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel-2);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+  text-align: center;
+  transition: border-color 0.15s, transform 0.05s;
+  position: relative;
+} .acsys .tpl-card:hover {
+  border-color: var(--muted);
+} .acsys .tpl-card.active {
+  border-color: var(--accent);
+  background: rgba(79, 140, 255, 0.08);
+} .acsys .tpl-svg {
+  border-radius: 8px;
+  display: block;
+} .acsys .tpl-meta {
+  width: 100%;
+} .acsys .tpl-name {
+  font-size: 13px;
+  font-weight: 600;
+} .acsys .tpl-theme {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+} .acsys .tpl-ratio {
+  font-size: 11px;
+  color: var(--accent);
+  margin-top: 4px;
+} .acsys .tpl-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+} .acsys /* ---- ผลปกที่ประกอบได้ ---- */
+.cover-out {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+} .acsys .cover-img {
+  display: block;
+  flex: 0 0 auto;
+} .acsys .cover-img img {
+  width: 300px;
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  display: block;
+} .acsys .cover-map {
+  flex: 1;
+  min-width: 220px;
+} .acsys .map-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+} .acsys .map-slot {
+  width: 62px;
+  font-weight: 600;
+  color: var(--accent);
+  flex: 0 0 auto;
+} .acsys .map-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+} .acsys .map-info {
+  color: var(--muted);
+} .acsys /* ---- หน้าอีดิตปก ---- */
+.ed-wrap {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+} .acsys .ed-canvas {
+  position: relative;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  flex: 0 0 auto;
+  touch-action: none;
+} .acsys .ed-slot {
+  position: absolute;
+  overflow: hidden;
+  cursor: grab;
+  outline: 1px solid rgba(255, 255, 255, 0.6);
+} .acsys .ed-slot:active {
+  cursor: grabbing;
+} .acsys .ed-slot.sel {
+  outline: 2px solid var(--accent);
+  z-index: 5;
+} .acsys .ed-circle {
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-sizing: border-box;
+  z-index: 6;
+} .acsys .ed-circle-ctrl {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.15);
+} .acsys .ed-color {
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+} .acsys .ed-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  padding: 0;
+} .acsys .ed-swatch.sel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+} .acsys .ed-fade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, transparent 58%, #fff 100%);
+} .acsys .ed-panel {
+  flex: 1;
+  min-width: 240px;
+} .acsys .ed-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+} .acsys .ed-tab {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+} .acsys .ed-tab.active {
+  background: rgba(79, 140, 255, 0.16);
+  border-color: var(--accent);
+  color: #cfe0ff;
+} .acsys .ed-ctrl {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+} .acsys .ed-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+} .acsys .ed-lbl {
+  font-size: 12px;
+  color: var(--muted);
+} .acsys .ed-btn {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+} .acsys .ed-btn:hover {
+  border-color: var(--accent);
+} .acsys .ed-btn.wide {
+  flex: 1;
+} .acsys .ed-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+} .acsys .ed-chk {
+  font-size: 13px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+} .acsys .ed-dl {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+} .acsys .btn.hd {
+  background: linear-gradient(135deg, #7c5cff, #b53cff);
+} .acsys .ed-gallery {
+  margin-top: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+} .acsys .ed-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+  max-height: 480px;
+  overflow: auto;
+} .acsys .ed-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: transform 0.08s, border-color 0.08s;
+} .acsys .ed-thumb:hover {
+  border-color: var(--accent);
+  transform: scale(1.04);
+} .acsys /* ---- คลังปก ---- */
+.covers-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px;
+} .acsys .cover-tile {
+  display: block;
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 11px;
+} .acsys .cover-tile img {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: block;
+  margin-bottom: 4px;
+} .acsys /* ---- Lightbox ตัวดูรูปเต็ม ---- */
+.lb-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  backdrop-filter: blur(2px);
+} .acsys .lb-box {
+  width: min(920px, 100%);
+  max-height: 92vh;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+} .acsys .lb-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+} .acsys .lb-src {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+} .acsys .lb-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+} .acsys .lb-close {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+} .acsys .lb-close:hover {
+  background: var(--bad);
+  color: #fff;
+} .acsys .lb-imgwrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0b0d11;
+} .acsys .lb-img {
+  max-width: 100%;
+  max-height: 62vh;
+  object-fit: contain;
+  display: block;
+} .acsys .lb-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+} .acsys .lb-nav:hover {
+  background: var(--accent);
+} .acsys .lb-prev {
+  left: 10px;
+} .acsys .lb-next {
+  right: 10px;
+} .acsys .lb-bottom {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+} .acsys .lb-title {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 10px;
+  line-height: 1.5;
+} .acsys .lb-links {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+} .acsys .lb-links .btn-ghost {
+  text-decoration: none;
+  padding: 8px 14px;
+  font-size: 13px;
+} .acsys .spin {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: -2px;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+} .acsys /* ===== หน้าสรุปต้นทุน /cost ===== */
+.cost-wrap {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+} .acsys .cost-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+} .acsys .cost-head h1 {
+  margin: 0;
+  font-size: 22px;
+} .acsys .cost-total {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px;
+  text-align: center;
+  margin-bottom: 24px;
+} .acsys .cost-total-usd {
+  font-size: 42px;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1.1;
+} .acsys .cost-total-thb {
+  font-size: 20px;
+  margin-top: 4px;
+} .acsys .cost-wrap section {
+  margin-bottom: 22px;
+} .acsys .cost-wrap h2 {
+  font-size: 16px;
+  margin: 0 0 8px;
+} .acsys .cost-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+}
+@media (max-width: 640px) { .acsys .cost-cols {
+    grid-template-columns: 1fr;
+  }
+} .acsys .cost-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+} .acsys .cost-table th, .acsys .cost-table td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+} .acsys .cost-table th {
+  color: var(--muted, #999);
+  font-weight: 600;
+  font-size: 12px;
+} .acsys .cost-table td:nth-child(2), .acsys .cost-table td:nth-child(3), .acsys .cost-table td:nth-child(4) {
+  white-space: nowrap;
+} .acsys .bar-col {
+  width: 26%;
+} .acsys .cost-bar {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--accent);
+  min-width: 2px;
+} .acsys .cost-note {
+  margin-top: 18px;
+  line-height: 1.6;
+} .acsys .cost-note code {
+  background: var(--panel);
+  padding: 1px 5px;
+  border-radius: 4px;
+} .acsys .cost-link {
+  display: inline-block;
+  margin-left: 12px;
+  padding: 4px 12px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--accent);
+  text-decoration: none;
+  vertical-align: middle;
+} .acsys .cost-link:hover {
+  border-color: var(--accent);
+} .acsys /* ===== แปลนภาพปก (Cover Plan) ===== */
+.plan-view {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-top: 10px;
+} .acsys .plan-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 8px;
+} .acsys .plan-concept {
+  font-size: 14px;
+  font-weight: 600;
+  color: #cfe0ff;
+  background: rgba(79, 140, 255, 0.1);
+  border-left: 3px solid var(--accent);
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+} .acsys .plan-shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+} .acsys .plan-shot {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+} .acsys .plan-shot-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+} .acsys .plan-slot {
+  font-weight: 700;
+  font-size: 12px;
+  background: var(--accent);
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 999px;
+} .acsys .plan-prio, .acsys .plan-emo {
+  font-size: 12px;
+  color: var(--muted);
+} .acsys .plan-ideal {
+  font-size: 13px;
+  line-height: 1.5;
+} .acsys .plan-fb {
+  font-size: 12.5px;
+  margin-top: 6px;
+  color: var(--text);
+} .acsys .plan-fb ol {
+  margin: 3px 0 0;
+  padding-left: 20px;
+} .acsys .plan-fb li {
+  margin: 1px 0;
+  color: var(--muted);
+} .acsys .plan-hint {
+  font-size: 12px;
+  color: var(--accent);
+  margin-top: 6px;
+} .acsys .plan-block {
+  font-size: 13px;
+  margin-top: 8px;
+} .acsys .plan-block ul {
+  margin: 4px 0 0;
+  padding-left: 20px;
+} .acsys .plan-block.plan-avoid b {
+  color: #ff8a8a;
+} .acsys .plan-reason {
+  margin-top: 8px;
+  font-style: italic;
+}

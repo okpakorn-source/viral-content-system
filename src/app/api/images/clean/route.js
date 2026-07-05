@@ -1,0 +1,95 @@
+// ============================================================
+// [ระบบทำปกออโต้] POST /api/images/clean
+// ------------------------------------------------------------
+// คัด "ภาพขยะ" ออกจากคลังด้วย Gemini (ตกไตเติล/ปกคลิป/UI/เบลอ/
+// ไม่เกี่ยวข่าว/ไม่ใช่บุคคลเป้าหมาย) → ลบทิ้ง
+// body: { caseId }
+// ============================================================
+
+import { NextResponse } from 'next/server';
+import sharp from 'sharp';
+import { getCase } from '@/lib/caseStore';
+import { readImages, removeByIds, countByPlatform } from '@/lib/imageStore';
+import { loadImageBuffer } from '@/lib/imageBuffer';
+import { geminiJunkScan } from '@/lib/gemini';
+import { isCatalogSource } from '@/lib/junkSources';
+import { reporter, doneProgress, failProgress } from '@/lib/progress';
+
+export const runtime = 'nodejs';
+export const maxDuration = 300;
+
+const CAP = parseInt(process.env.CLEAN_CAP || '200', 10);
+const BATCH = 8;
+
+export async function POST(req) {
+  const body = await req.json().catch(() => ({}));
+  const jobId = body.jobId || null;
+  const P = reporter(jobId);
+  try {
+    const { caseId } = body;
+    const c = caseId ? await getCase(caseId) : null;
+    if (!c) {
+      return NextResponse.json({ success: false, error: 'ไม่พบเคส ' + caseId, errorType: 'CASE_NOT_FOUND' }, { status: 404 });
+    }
+    const subjects = c.keywords?.subjects || [];
+    // แก่นข่าว → ให้ AI รู้ว่า "ข่าวเกี่ยวกับอะไร" เพื่อคัดวัตถุมั่ว (บ้าน/รถที่ไม่ใช่ของคนในข่าว)
+    const newsGist = (c.analysis?.summary || c.analysis?.content || c.newsSnippet || '').slice(0, 600);
+
+    const all = await readImages(caseId);
+
+    // 🚫 ชั้น 1 (ฟรี ไม่ใช้ AI): ลบ "บ้านแคตตาล็อก/อสังหา/รับสร้างบ้าน/วัสดุก่อสร้าง" ทุกใบ (ไม่ติด CAP)
+    //    (แหล่งพวกนี้ไม่มีทางเป็นบ้านของคนในข่าว) — ที่เหลือให้ Gemini คัดต่อ (จำกัด CAP)
+    const catalogIds = all.filter((im) => isCatalogSource(im)).map((im) => im.id);
+    const toScan = all.filter((im) => !isCatalogSource(im)).slice(0, CAP);
+    P('เตรียมรูป', `กันแหล่งแคตตาล็อก ${catalogIds.length} ใบ → โหลด+ย่อรูปที่เหลือ ${toScan.length} ใบ`, { pct: 8 });
+
+    // โหลด + ย่อ เป็น base64 (ใช้ thumbnail เพื่อความเร็ว) — ตัวที่โหลดไม่ได้ = เก็บไว้ก่อน
+    const withB64 = [];
+    for (const im of toScan) {
+      const buf = await loadImageBuffer({ imageUrl: im.thumbnailUrl || im.imageUrl, thumbnailUrl: im.imageUrl });
+      if (!buf) continue;
+      try {
+        const small = await sharp(buf, { failOn: 'none' }).resize(400, 400, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 78 }).toBuffer();
+        withB64.push({ im, base64: small.toString('base64') });
+      } catch {
+        /* รูปเสีย = ปล่อยให้ผู้ใช้เคลียร์เอง */
+      }
+    }
+
+    const junkIds = [...catalogIds]; // เริ่มด้วยแคตตาล็อกที่กันไว้แล้ว
+    let scanned = 0;
+    const totalBatches = Math.ceil(withB64.length / BATCH);
+    for (let i = 0; i < withB64.length; i += BATCH) {
+      const bi = Math.floor(i / BATCH) + 1;
+      P('สแกนขยะด้วย AI', `Gemini สแกน แบตช์ ${bi}/${totalBatches} (พบขยะ ${junkIds.length})`, { pct: 10 + Math.round((bi / totalBatches) * 85) });
+      const batch = withB64.slice(i, i + BATCH);
+      const frames = batch.map((b, k) => ({ index: i + k, base64: b.base64, source: b.im.source, title: b.im.title }));
+      let res;
+      try {
+        res = await geminiJunkScan({ frames, subjects, newsGist, onRetry: P.onRetry, caseId });
+      } catch (err) {
+        if (err.errorType === 'NO_GEMINI_KEY') {
+          failProgress(jobId, err.message);
+          return NextResponse.json({ success: false, error: err.message, errorType: 'NO_GEMINI_KEY' }, { status: 400 });
+        }
+        continue; // แบตช์นี้พลาด ข้ามไป
+      }
+      scanned += batch.length;
+      for (const r of res) {
+        if (r.junk && withB64[r.index]) junkIds.push(withB64[r.index].im.id);
+      }
+    }
+
+    if (junkIds.length === 0) {
+      doneProgress(jobId, { step: 'เสร็จ', detail: 'ไม่พบภาพขยะ' });
+      return NextResponse.json({ success: true, caseId, scanned, removed: 0, total: all.length, byPlatform: countByPlatform(all), images: all });
+    }
+
+    const out = await removeByIds(caseId, junkIds);
+    doneProgress(jobId, { step: 'เสร็จ', detail: `คัดขยะออก ${out.removed} รูป (แคตตาล็อก ${catalogIds.length} + AI ${out.removed - catalogIds.length})` });
+    return NextResponse.json({ success: true, caseId, scanned, removed: out.removed, catalogRemoved: catalogIds.length, aiRemoved: out.removed - catalogIds.length, total: out.total, byPlatform: out.byPlatform, images: out.images });
+  } catch (err) {
+    failProgress(jobId, err.message);
+    return NextResponse.json({ success: false, error: err.message || 'คัดขยะไม่สำเร็จ', errorType: 'UNEXPECTED' }, { status: 500 });
+  }
+}

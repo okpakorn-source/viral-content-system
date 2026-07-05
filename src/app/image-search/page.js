@@ -1,446 +1,1133 @@
 'use client';
-// ============================================================
-// 🔎 /image-search — ค้นภาพจากหลายแหล่งพร้อมกัน → คลังให้เลือกภาพลงปกเอง
-// ★ 4 ก.ค. 2026 พอร์ตส่วนรีเสิร์ชภาพจากโปรเจกต์ระบบทำปกออโต้ (ผู้ใช้สั่ง)
-//   "แค่ค้นภาพจากทุกแหล่ง" — ผู้ใช้พิมพ์คำค้นเอง เลือกแหล่งเอง เลือกภาพเอง
-// ============================================================
-import { useState, useEffect, useCallback } from 'react';
-import Header from '@/components/layout/Header';
 
-const PLATFORMS = [
-  { id: 'google', label: '🌄 Google', def: true },
-  { id: 'google_news', label: '📰 Google News', def: true },
-  { id: 'yandex', label: '🌐 Yandex', def: false },
-  { id: 'bing', label: '🔷 Bing', def: true },
-  { id: 'bing_news', label: '📑 Bing News', def: false },
-  { id: 'facebook', label: '📘 FB (เว็บ)', def: true },
-  { id: 'tiktok', label: '🎵 TikTok', def: true },
-  { id: 'youtube', label: '▶️ YouTube (ธัมบ์)', def: false },
-];
-const PLABEL = Object.fromEntries(PLATFORMS.map(p => [p.id, p.label]));
-PLABEL.reverse = '🔍 ย้อนกลับ'; PLABEL.instagram = '📷 IG'; PLABEL.fb_profile = '📘 FB โปรไฟล์';
+// ★ 5 ก.ค. 2026: copy ทั้งระบบจาก C:\Users\User\ระบบทำปกออโต้ (ผู้ใช้สั่ง 'เหมือนเป๊ะ' ยกเว้นส่วนประกอบปก)
+import './acsys.css';
 
-// ★ 5 ก.ค.: หมวดอารมณ์ภาพ (สมองแยกอารมณ์ พอร์ตจากระบบทำปกออโต้)
-const EMOTION_LABEL = {
-  happy: '😊 ยิ้ม', laugh: '😂 หัวเราะ', sad: '😢 เศร้า', serious: '😐 จริงจัง', angry: '😠 โกรธ',
-  shock: '😱 ตกใจ', warm: '🤗 อบอุ่น', worried: '😟 กังวล', context: '🏞 ฉาก', document: '📄 เอกสาร', other: '❔ อื่นๆ',
-};
+import { useEffect, useRef, useState } from 'react';
+import { startJob, stopJob, subscribeJob } from '@/lib/jobClient';
 
-// ★ 5 ก.ค. (ผู้ใช้: "อ่านยาก ขอสะอาดตา มินิมอล"): โทนเดียว — ฟ้า=ปุ่มหลัก/เลือก · เขียว=สำเร็จ · แดง=ลบ · ที่เหลือเทากลาง
-const ACCENT = '#60a5fa';
-const s = {
-  card: { background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 14, marginBottom: 16, padding: 16 },
-  btn: (active, color = ACCENT) => ({
-    padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
-    border: `1px solid ${active ? color + '55' : 'var(--border)'}`,
-    background: active ? color + '14' : 'transparent',
-    color: active ? color : 'var(--text-secondary)',
-  }),
-  input: { padding: '11px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' },
-};
+export default function Home() {
+  const [news, setNews] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+  const [archive, setArchive] = useState([]);
+  const [openingId, setOpeningId] = useState('');
 
-export default function ImageSearchPage() {
-  const [selected, setSelected] = useState(PLATFORMS.filter(p => p.def).map(p => p.id));
-  const [queriesText, setQueriesText] = useState('');
-  const [reverseUrl, setReverseUrl] = useState('');
-  const [profileName, setProfileName] = useState('');
-  const [busy, setBusy] = useState('');            // ข้อความสถานะกำลังทำงาน
-  const [notice, setNotice] = useState('');        // ผลล่าสุด
-  const [cases, setCases] = useState([]);          // รายชื่อเคส
-  const [cur, setCur] = useState(null);            // เคสปัจจุบัน (เต็ม)
-  const [tab, setTab] = useState('all');           // แท็บแหล่งในคลัง
-  const [picked, setPicked] = useState(new Set()); // ภาพที่เลือก (โหมดเลือก)
-  const [pickMode, setPickMode] = useState(false);
-  // ★ 5 ก.ค.: สมองครบชุด — เนื้อข่าวเต็ม → วิเคราะห์ → สกัดคีย์เวิร์ด → ค้นอัตโนมัติ
-  const [newsText, setNewsText] = useState('');
-  const [emoTab, setEmoTab] = useState('all');     // แท็บกรองอารมณ์ในคลัง
-
-  const loadCases = useCallback(async () => {
+  async function loadArchive() {
     try {
-      const r = await fetch('/api/image-search');
-      const d = await r.json();
-      if (d.success) setCases(d.cases || []);
-    } catch { /* เงียบ */ }
-  }, []);
-  useEffect(() => { loadCases(); }, [loadCases]);
-
-  const openCase = async (id) => {
-    if (!id) { setCur(null); return; }
-    try {
-      const r = await fetch(`/api/image-search?caseId=${encodeURIComponent(id)}`);
-      const d = await r.json();
-      if (d.success) { setCur(d.case); setTab('all'); setPicked(new Set()); }
-    } catch { /* เงียบ */ }
-  };
-
-  const post = async (payload, busyText) => {
-    setBusy(busyText); setNotice('');
-    try {
-      const r = await fetch('/api/image-search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const d = await r.json();
-      if (!d.success) { setNotice('❌ ' + (d.error || 'ไม่สำเร็จ')); return null; }
-      if (d.case) { setCur(d.case); }
-      loadCases();
-      return d;
-    } catch (e) {
-      setNotice('❌ ' + e.message);
-      return null;
-    } finally { setBusy(''); }
-  };
-
-  const doSearch = async (platforms) => {
-    const queries = queriesText.split('\n').map(q => q.trim()).filter(Boolean);
-    if (!queries.length) { setNotice('⚠️ พิมพ์คำค้นก่อน (บรรทัดละ 1 คำค้น)'); return; }
-    if (!platforms.length) { setNotice('⚠️ เลือกแหล่งอย่างน้อย 1 แหล่ง'); return; }
-    const d = await post(
-      { action: 'search', caseId: cur?.id || null, queries, platforms },
-      `🔎 กำลังค้น ${platforms.length} แหล่ง × ${queries.length} คำค้น... (อาจใช้ ~10-40 วิ)`
-    );
-    if (d) {
-      const parts = Object.entries(d.addedByPlatform || {}).map(([p, n]) => `${PLABEL[p] || p} +${n}`).join(' · ');
-      setNotice(`✅ ได้ภาพใหม่ ${Object.values(d.addedByPlatform || {}).reduce((a, b) => a + b, 0)} ใบ (${parts}) · รวมในเคส ${d.total} ใบ${d.errors?.length ? ` · ⚠️ ล้ม ${d.errors.length} จุด` : ''}`);
+      const r = await fetch('/api/cases');
+      const j = await r.json();
+      if (j.success) setArchive(j.items || []);
+    } catch {
+      /* เงียบไว้ ไม่ให้ล้มหน้า */
     }
-  };
-
-  const doReverse = async () => {
-    if (!/^https?:/.test(reverseUrl.trim())) { setNotice('⚠️ วางลิงก์ภาพ (http...) ก่อนค้นย้อนกลับ'); return; }
-    const d = await post({ action: 'reverse', caseId: cur?.id || null, imageUrl: reverseUrl.trim() }, '🔍 Lens กำลังค้นย้อนกลับ...');
-    if (d) setNotice(`✅ ย้อนกลับได้ ${d.added} ใบ · รวม ${d.total} ใบ`);
-  };
-
-  const doProfile = async (network) => {
-    if (!profileName.trim()) { setNotice('⚠️ ใส่ username หรือลิงก์โปรไฟล์ก่อน'); return; }
-    const d = await post({ action: 'profile', caseId: cur?.id || null, username: profileName.trim(), network }, `📥 กำลังดึงรูปโปรไฟล์ ${network === 'facebook' ? 'FB' : 'IG'}...`);
-    if (d) setNotice(`✅ ได้ ${d.added} ใบจากโปรไฟล์ · รวม ${d.total} ใบ`);
-  };
-
-  // ★ 5 ก.ค.: สมองขั้น 1+2 — วิเคราะห์เนื้อข่าวเต็ม + สกัดคีย์เวิร์ด (สร้าง/อัปเดตเคส)
-  const doAnalyze = async () => {
-    if (newsText.trim().length < 40) { setNotice('⚠️ วางเนื้อข่าวเต็มก่อน (อย่างน้อย 40 ตัวอักษร)'); return; }
-    const d = await post({ action: 'analyze', caseId: cur?.id || null, newsText: newsText.trim() },
-      '🧠 AI กำลังอ่านข่าวทั้งหมด → วิเคราะห์ตัวละคร/แก่นเรื่อง → สกัดคีย์เวิร์ดค้นภาพ... (ข่าวสั้น ~1 นาที · ข่าวยาว/ตัวละครเยอะ ~2 นาที — อย่าเพิ่งปิดหน้า)');
-    if (d) {
-      setNotice(`✅ วิเคราะห์เสร็จ: "${(d.case?.analysis?.headline || '').slice(0, 60)}" · ตัวละคร ${(d.case?.keywords?.subjects || []).length} · คำค้นพร้อมยิง ${d.queriesPreview?.length || 0} คำ — กดค้นภาพ (ขั้น ②) ได้เลย`);
-      setTimeout(() => { try { document.getElementById('analysis-result')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { /* เงียบ */ } }, 350);
-    }
-  };
-
-  // ★ ค้นด้วยคีย์เวิร์ดที่สกัดจากข่าว (buildQueries: สมดุลต่อคน + การันตีหลักฐาน/สถานที่)
-  const doSearchAuto = async (platforms) => {
-    if (!cur?.keywords) { setNotice('⚠️ ต้องวิเคราะห์ข่าวก่อน (ขั้น ①) แล้วค่อยค้นภาพ'); return; }
-    if (!platforms.length) { setNotice('⚠️ เลือกแหล่งอย่างน้อย 1 แหล่ง'); return; }
-    const d = await post({ action: 'searchAuto', caseId: cur.id, platforms },
-      `🔎 ค้นภาพด้วยคีย์เวิร์ดจากข่าว × ${platforms.length} แหล่ง... (~20-60 วิ)`);
-    if (d) {
-      const parts = Object.entries(d.addedByPlatform || {}).map(([p, n]) => `${PLABEL[p] || p} +${n}`).join(' · ');
-      setNotice(`✅ ใช้ ${d.queriesUsed?.length || 0} คำค้น ได้ภาพใหม่ ${Object.values(d.addedByPlatform || {}).reduce((a, b) => a + b, 0)} ใบ (${parts})${d.blockedCatalog ? ` · 🚫 กันแคตตาล็อก ${d.blockedCatalog}` : ''} · รวม ${d.total} ใบ`);
-    }
-  };
-
-  // ★ AI คัดขยะออก (แคตตาล็อกฟรี + Gemini ส่องทีละใบ)
-  const doClean = async () => {
-    if (!cur) return;
-    const d = await post({ action: 'clean', caseId: cur.id }, '🧹 AI กำลังส่องทุกภาพ คัดขยะออก (ตัวหนังสือทับ/ลายน้ำ/ปกคลิป/วัตถุมั่ว/ไม่เกี่ยวข่าว)... (~1-3 นาที)');
-    if (d) setNotice(`✅ คัดขยะออก ${d.removed} ใบ (แคตตาล็อก ${d.catalogRemoved} + AI ${d.aiRemoved}) · เหลือ ${d.total} ใบ`);
-  };
-
-  // ★ AI แยกอารมณ์ภาพ → กรองในคลังได้
-  const doEmotions = async () => {
-    if (!cur) return;
-    const d = await post({ action: 'emotions', caseId: cur.id }, '🎭 AI กำลังส่องสีหน้า/อารมณ์ทุกภาพ แยกหมวด... (~1-3 นาที)');
-    if (d) setNotice(`✅ แยกอารมณ์แล้ว ${d.classified} ใบ — กดชิปอารมณ์ในคลังเพื่อกรอง`);
-  };
-
-  const images = cur?.images || [];
-  const byPlatform = {};
-  const byEmotion = {};
-  for (const im of images) {
-    const p = im.platform || 'อื่นๆ'; byPlatform[p] = (byPlatform[p] || 0) + 1;
-    if (im.emotion) byEmotion[im.emotion] = (byEmotion[im.emotion] || 0) + 1;
   }
-  const shown = (tab === 'all' ? images : images.filter(im => (im.platform || 'อื่นๆ') === tab))
-    .filter(im => emoTab === 'all' || im.emotion === emoTab);
 
-  const togglePick = (id) => setPicked(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const bulk = async (action) => {
-    if (!cur || picked.size === 0) return;
-    const d = await post({ action, caseId: cur.id, ids: [...picked] }, action === 'remove' ? '🗑 กำลังลบ...' : '💾 กำลังเก็บเฉพาะที่เลือก...');
-    if (d) { setPicked(new Set()); setNotice(`✅ เหลือ ${d.total} ใบในเคส`); }
-  };
-  const downloadPicked = () => {
-    const sel = images.filter(im => picked.has(im.id));
-    sel.slice(0, 20).forEach((im, i) => {
-      setTimeout(() => {
-        const a = document.createElement('a');
-        a.href = `/api/image-search/fetch?dl=1&url=${encodeURIComponent(im.imageUrl)}`;
-        a.download = ''; a.click();
-      }, i * 600);
-    });
-    setNotice(`📥 กำลังดาวน์โหลด ${Math.min(sel.length, 20)} ใบ (ทีละไฟล์)...`);
-  };
+  useEffect(() => {
+    loadArchive();
+  }, []);
+
+  async function analyze() {
+    setError('');
+    setResult(null);
+    setLoading(true);
+    const jobId = startJob('วิเคราะห์ข่าว');
+    try {
+      const r = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ newsText: news, jobId }),
+      });
+      const j = await r.json();
+      if (!j.success) {
+        setError(`[${j.errorType || 'ERROR'}] ${j.error}`);
+      } else {
+        setResult(j);
+        loadArchive();
+      }
+    } catch (e) {
+      setError('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ: ' + e.message);
+    } finally {
+      stopJob();
+      setLoading(false);
+    }
+  }
+
+  async function openCase(id) {
+    setError('');
+    setOpeningId(id);
+    try {
+      const r = await fetch(`/api/cases/${id}`);
+      const j = await r.json();
+      if (!j.success) setError(`[${j.errorType || 'ERROR'}] ${j.error}`);
+      else {
+        setResult(j.case);
+        setTimeout(() => {
+          document
+            .getElementById('result-card')
+            ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 60);
+      }
+    } catch (e) {
+      setError('เปิดเคสไม่สำเร็จ: ' + e.message);
+    } finally {
+      setOpeningId('');
+    }
+  }
+
+  const canSubmit = news.trim().length >= 40 && !loading;
 
   return (
-    <>
-      <Header title="🔎 ค้นภาพหลายแหล่ง" subtitle="ค้นภาพจากทุกแหล่งพร้อมกัน → คลังรูปเคส → เลือกภาพที่ดีที่สุดไปทำปกเอง" />
-      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 14px 60px' }}>
+    <div className="acsys"><div className="wrap">
+      <ProgressPopup />
+      <div className="brand">
+        <h1>🖼️ ระบบทำปกออโต้</h1>
+        <span className="step">ขั้นที่ 1 — วิเคราะห์ข่าวด้วยสมอง AI</span>
+      </div>
+      <p className="sub">
+        วางเนื้อข่าว "เต็ม" แล้วกดให้สมองที่วิเคราะห์ข่าวเก่งที่สุดอ่านครบทั้งข่าว
+        ถอดตัวละคร เนื้อข่าว และบริบท ออกมาตามกรอบตายตัว แล้วเก็บเข้าคลังผลลัพธ์
+      </p>
 
-        {/* ── ① 🧠 วางเนื้อข่าวเต็ม → AI วิเคราะห์ + สกัดคีย์เวิร์ด (สมองจากระบบทำปกออโต้) ── */}
-        <div style={s.card}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>① 🧠 วางเนื้อข่าวเต็ม → AI สกัดคีย์เวิร์ดค้นภาพ</span>
-            <a href="/cover-tester" style={{ marginLeft: 'auto', padding: '8px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, textDecoration: 'none', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)' }}>
-              🎨 ไปหน้าทำปก
-            </a>
-          </div>
-          <textarea value={newsText} onChange={e => setNewsText(e.target.value)} rows={5}
-            placeholder={'วางเนื้อข่าวเต็มตรงนี้ (ยิ่งเต็มยิ่งแม่น)\nAI จะอ่านทั้งหมด → ถอดตัวละคร/แก่นเรื่อง/โทนอารมณ์ → สกัดคำค้นภาพผูกชื่อบุคคลให้เอง'}
-            style={{ ...s.input, width: '100%', resize: 'vertical', marginBottom: 10, minHeight: 110 }} />
-          <button onClick={doAnalyze} disabled={!!busy}
-            style={{ padding: '12px 20px', borderRadius: 10, fontSize: 14, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', border: 'none', background: '#2563eb', color: '#fff', opacity: busy ? 0.6 : 1 }}>
-            {busy && busy.startsWith('🧠') ? '⏳ กำลังวิเคราะห์... รอสักครู่' : '🧠 วิเคราะห์ + สกัดคีย์เวิร์ด'}
+      <div className="card">
+        <h2>1) ใส่เนื้อข่าวเต็ม</h2>
+        <textarea
+          value={news}
+          onChange={(e) => setNews(e.target.value)}
+          placeholder="วางเนื้อข่าวเต็มที่นี่… (ต้องเป็นเนื้อข่าวจริงแบบครบถ้วน ไม่ใช่เนื้อสั้นตัดทอน)"
+        />
+        <div className="row">
+          <button className="btn" onClick={analyze} disabled={!canSubmit}>
+            {loading ? (
+              <>
+                <span className="spin" />
+                กำลังวิเคราะห์…
+              </>
+            ) : (
+              '🧠 วิเคราะห์ด้วยสมอง'
+            )}
           </button>
-          {/* ★ 5 ก.ค.: สถานะโชว์ใต้ปุ่มที่กดเลย (เดิมไปโผล่การ์ดล่าง ผู้ใช้ไม่เห็น = คิดว่าไม่มีผลลัพธ์) */}
-          {(busy || notice) && (
-            <div style={{ marginTop: 10, padding: '11px 14px', borderRadius: 10, fontSize: 13, fontWeight: 500, background: busy ? 'rgba(96,165,250,0.08)' : 'rgba(74,222,128,0.07)', border: `1px solid ${busy ? 'rgba(96,165,250,0.25)' : 'rgba(74,222,128,0.2)'}`, color: 'var(--text-primary)', lineHeight: 1.6 }}>
-              {busy || notice}
-            </div>
-          )}
-          {cur?.analysis && (() => {
-            // ★ 5 ก.ค.: จอผลวิเคราะห์เต็มแบบต้นฉบับ (คลังถาวร — เปิดเคสเก่าดูย้อนหลังได้ทุกใบ)
-            const a = cur.analysis;
-            const cc = a.content || {};
-            const ctx = a.context || {};
-            const kvK = { fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' };
-            const chip = { padding: '3px 9px', borderRadius: 6, fontSize: 11, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text-secondary)' };
-            return (
-              <div id="analysis-result" style={{ marginTop: 12, padding: 14, borderRadius: 10, background: 'rgba(96,165,250,0.05)', border: '1px solid rgba(96,165,250,0.18)', fontSize: 13, lineHeight: 1.8 }}>
-                <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
-                  📰 ผลวิเคราะห์ · {cur.id}{cur.createdAt ? ` · ${new Date(cur.createdAt).toLocaleString('th-TH')}` : ''}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', alignItems: 'start' }}>
-                  <span style={kvK}>แก่นข่าว</span><span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{a.headline}</span>
-                  <span style={kvK}>สรุป</span><span style={{ color: 'var(--text-secondary)' }}>{a.summary}</span>
-                  <span style={kvK}>โทนอารมณ์</span><span style={{ color: ACCENT, fontWeight: 600 }}>{ctx.emotional_tone || '-'}</span>
-                  <span style={kvK}>ความมั่นใจ</span><span style={{ color: 'var(--text-secondary)' }}>{a.confidence || '-'}</span>
-                </div>
-                {/* ตัวละคร — การ์ดละเอียด (ชื่อ/บทบาท/เพศ/ลักษณะ/คำยืนยันจากข่าว) */}
-                {(a.characters || []).length > 0 && (
-                  <div style={{ marginTop: 10 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>ตัวละคร ({a.characters.length})</div>
-                    {a.characters.map((p, i) => (
-                      <div key={i} style={{ padding: '9px 12px', borderRadius: 9, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', marginBottom: 6 }}>
-                        <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{p.name}</span>
-                        {p.role && <span style={{ color: ACCENT, fontSize: 12, marginLeft: 8 }}>{p.role}</span>}
-                        <span style={{ ...chip, marginLeft: 8 }}>เพศ: {p.gender || 'ไม่ระบุ'}</span>
-                        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 5 }}>
-                          {(p.descriptors || []).map((d, j) => <span key={j} style={chip}>{d}</span>)}
-                        </div>
-                        {p.evidence && p.evidence !== 'ไม่ระบุในข่าว' && (
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', marginTop: 5 }}>“{String(p.evidence).slice(0, 140)}”</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {/* subjects จากคีย์เวิร์ด (👤 คน / 📦 วัตถุผูกเจ้าของ) */}
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-                  {(cur.keywords?.subjects || []).map((su, i) => (
-                    <span key={i} style={{ padding: '5px 11px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: su.must_have ? 'rgba(96,165,250,0.14)' : 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: su.must_have ? ACCENT : 'var(--text-secondary)' }}>
-                      {su.kind === 'object' ? '📦' : '👤'} {su.name}
-                    </span>
-                  ))}
-                </div>
-                {/* เนื้อข่าว + บริบทเต็ม (พับได้ — คลังถาวรดูย้อนหลัง) */}
-                <details style={{ marginTop: 8 }}>
-                  <summary style={{ fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>📖 เนื้อข่าว + บริบทเต็ม (ลำดับเหตุการณ์ / ตัวเลข / ภูมิหลัง / ข้อมูลที่ขาด)</summary>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', alignItems: 'start', marginTop: 8 }}>
-                    <span style={kvK}>เกิดอะไรขึ้น</span><span style={{ color: 'var(--text-secondary)' }}>{cc.what_happened || '-'}</span>
-                    <span style={kvK}>สถานที่</span><span style={{ color: 'var(--text-secondary)' }}>{cc.location || '-'}</span>
-                    <span style={kvK}>เวลา</span><span style={{ color: 'var(--text-secondary)' }}>{cc.time || '-'}</span>
-                    <span style={kvK}>ภูมิหลัง</span><span style={{ color: 'var(--text-secondary)' }}>{ctx.background || '-'}</span>
-                    <span style={kvK}>ทำไมน่าสนใจ</span><span style={{ color: 'var(--text-secondary)' }}>{ctx.why_notable || '-'}</span>
-                    <span style={kvK}>หลักฐานโทน</span><span style={{ color: 'var(--text-secondary)' }}>{ctx.tone_evidence || '-'}</span>
-                    <span style={kvK}>โมเมนต์สำคัญ</span><span style={{ color: 'var(--text-secondary)' }}>{ctx.key_moment || '-'}</span>
-                  </div>
-                  {(cc.key_events || []).length > 0 && (
-                    <div style={{ marginTop: 7 }}>
-                      <span style={kvK}>ลำดับเหตุการณ์:</span>
-                      <ol style={{ margin: '4px 0 0 20px', padding: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
-                        {cc.key_events.map((e, i) => <li key={i}>{e}</li>)}
-                      </ol>
-                    </div>
-                  )}
-                  {(cc.numbers_facts || []).length > 0 && (
-                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 7 }}>
-                      {cc.numbers_facts.map((n, i) => <span key={i} style={chip}>{n}</span>)}
-                    </div>
-                  )}
-                  {(a.missing_info || []).length > 0 && (
-                    <div style={{ marginTop: 7, fontSize: 12, color: 'var(--text-muted)' }}>
-                      ⚠️ ข่าวไม่ได้ระบุ: {a.missing_info.join(' · ')}
-                    </div>
-                  )}
-                </details>
-                {(cur.keywords?.queries_th?.length || 0) > 0 && (
-                  <details style={{ marginTop: 6 }}>
-                    <summary style={{ fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                      🔎 คำค้นที่สกัดได้ ({(cur.keywords.queries_th || []).length + (cur.keywords.queries_en || []).length + (cur.keywords.object_queries || []).length} คำ)
-                    </summary>
-                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 7 }}>
-                      {[...(cur.keywords.queries_th || []), ...(cur.keywords.object_queries || []), ...(cur.keywords.queries_en || [])].slice(0, 40).map((q, i) => (
-                        <span key={i} style={chip}>{q}</span>
-                      ))}
-                    </div>
-                  </details>
-                )}
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* ── ② เลือกแหล่ง + ค้นภาพ (หลัก = ใช้คีย์เวิร์ดจากข่าว · ขั้นสูง = พิมพ์เอง) ── */}
-        <div style={s.card}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>② 🔍 เลือกแหล่ง แล้วค้นภาพ</div>
-          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 10 }}>
-            {PLATFORMS.map(p => {
-              const on = selected.includes(p.id);
-              return (
-                <button key={p.id} onClick={() => setSelected(prev => on ? prev.filter(x => x !== p.id) : [...prev, p.id])} style={s.btn(on, '#60a5fa')}>
-                  {on ? '☑' : '☐'} {p.label}
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <button onClick={() => doSearchAuto(selected)} disabled={!!busy || !cur?.keywords}
-              title={!cur?.keywords ? 'วิเคราะห์ข่าวก่อน (ขั้น ①)' : ''}
-              style={{ padding: '12px 20px', borderRadius: 10, fontSize: 14, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', border: 'none', background: '#2563eb', color: '#fff', opacity: (busy || !cur?.keywords) ? 0.5 : 1 }}>
-              🔍 ค้นด้วยคีย์เวิร์ดจากข่าว ({selected.length} แหล่ง)
+          {news && !loading && (
+            <button className="btn-ghost" onClick={() => setNews('')}>
+              ล้าง
             </button>
-            <button onClick={() => setSelected(PLATFORMS.map(p => p.id))} style={s.btn(false)}>เลือกทั้งหมด</button>
-            <button onClick={() => setSelected([])} style={s.btn(false)}>ล้าง</button>
+          )}
+          <span className="count">{news.trim().length} ตัวอักษร</span>
+        </div>
+        {error && <div className="err">{error}</div>}
+      </div>
+
+      {result && <ResultView key={result.id} data={result} />}
+
+      <div className="card">
+        <h2>📁 คลังผลลัพธ์ (ล่าสุด)</h2>
+        <p className="count" style={{ marginTop: -4, marginBottom: 10 }}>
+          คลิกที่เคสเพื่อดูผลวิเคราะห์เต็ม + คีย์เวิร์ดที่สกัดไว้ ย้อนหลังได้ทุกใบ
+        </p>
+        {archive.length === 0 ? (
+          <p className="count">ยังไม่มีเคสในคลัง</p>
+        ) : (
+          archive.map((c) => (
+            <div
+              className={'archive-item clickable' + (result?.id === c.id ? ' active' : '')}
+              key={c.id}
+              onClick={() => openCase(c.id)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && openCase(c.id)}
+            >
+              <span className="id">{c.id}</span>
+              <span className="snip">{c.headline || c.newsSnippet}</span>
+              <span className="count">{openingId === c.id ? 'กำลังเปิด…' : c.tone}</span>
+            </div>
+          ))
+        )}
+      </div>
+
+    </div></div>
+  );
+}
+
+function ResultView({ data }) {
+  const a = data.analysis || {};
+  const c = a.content || {};
+  const ctx = a.context || {};
+
+  const [kw, setKw] = useState(data.keywords || null);
+  const [kwLoading, setKwLoading] = useState(false);
+  const [kwError, setKwError] = useState('');
+
+  const [images, setImages] = useState([]);
+  const [imgStats, setImgStats] = useState({ total: 0, byPlatform: {} });
+  const [imgLoading, setImgLoading] = useState('');
+  const [imgError, setImgError] = useState('');
+  const [imgInfo, setImgInfo] = useState('');
+  const [handle, setHandle] = useState('');
+  const uploadRef = useRef(null);
+  // ค้นหลายแหล่งพร้อมกัน (ติ๊กเลือก → จัดคิวค้นทีละแหล่ง)
+  const [batchSel, setBatchSel] = useState(() => new Set(['google', 'google_news', 'bing', 'facebook', 'tiktok']));
+
+  // โหลดคลังรูปที่เคยค้นไว้ของเคสนี้ (ดูย้อนหลัง)
+  useEffect(() => {
+    let ok = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/images/${data.id}`);
+        const j = await r.json();
+        if (ok && j.success) {
+          setImages(j.images || []);
+          setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
+        }
+      } catch {
+        /* เงียบ ไม่ให้ล้ม */
+      }
+    })();
+    return () => {
+      ok = false;
+    };
+  }, [data.id]);
+
+  async function searchPlatform(platform, extra = {}) {
+    setImgError('');
+    setImgLoading(platform);
+    const jobId = startJob(platform === 'youtube' ? 'แคปเฟรม YouTube' : platform === 'reverse' ? 'ค้นย้อนกลับ' : 'ค้นภาพ ' + platform);
+    try {
+      const endpoint =
+        platform === 'youtube' ? '/api/images/youtube'
+        : platform === 'reverse' ? '/api/images/reverse'
+        : platform === 'instagram' || platform === 'facebook_profile' ? '/api/images/profile'
+        : '/api/images/search';
+      const payload = { caseId: data.id, platform, jobId, ...extra };
+      const r = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json();
+      if (!j.success) {
+        // แนบรายละเอียด log (เช่น YouTube: แต่ละคลิปล้มเพราะอะไร) ให้ผู้ใช้เห็น
+        const detail = Array.isArray(j.log) && j.log.length ? '\n• ' + j.log.join('\n• ') : '';
+        setImgError(`[${j.errorType || 'ERROR'}] ${j.error}${detail}`);
+      } else {
+        setImages(j.images || []);
+        setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
+        const vetMsg = j.vetOn ? ` · 👁️ กรองรูปไม่เกี่ยวออก ${j.vetDropped}` : '';
+        if (j.added === 0) setImgError(`ไม่พบรูปใหม่จาก ${platform} (อาจซ้ำของเดิม${j.vetOn && j.vetDropped ? ` · ตากรองไม่เกี่ยวออก ${j.vetDropped}` : ''})`);
+        else {
+          setImgInfo(`✅ ค้น ${PLATFORM_LABEL[platform] || platform}: เพิ่มรูปที่เกี่ยว ${j.added}${vetMsg}${j.blockedCatalog ? ` · กันแคตตาล็อก ${j.blockedCatalog}` : ''}`);
+          if (j.errors && j.errors.length) setImgError(`บางคำค้นล้มเหลว ${j.errors.length} รายการ`);
+        }
+      }
+    } catch (e) {
+      setImgError('เชื่อมต่อไม่สำเร็จ: ' + e.message);
+    } finally {
+      stopJob();
+      setImgLoading('');
+    }
+  }
+
+  function toggleBatch(p) {
+    setBatchSel((s) => {
+      const n = new Set(s);
+      n.has(p) ? n.delete(p) : n.add(p);
+      return n;
+    });
+  }
+
+  // ค้น "หลายแหล่ง" ตามที่ติ๊กเลือก — จัดคิวทีละแหล่ง แล้วส่งรูปเข้าคลังต่อเนื่อง
+  async function runBatch() {
+    const list = SEARCH_SOURCES.filter((s) => batchSel.has(s.p)).map((s) => s.p);
+    if (list.length === 0) {
+      setImgError('ยังไม่ได้เลือกแหล่ง — ติ๊กอย่างน้อย 1 แหล่ง');
+      return;
+    }
+    setImgError('');
+    setImgInfo('');
+    setImgLoading('batch');
+    let totalAdded = 0;
+    const fails = [];
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      const label = PLATFORM_LABEL[p] || p;
+      setImgInfo(`⏳ คิวค้น ${i + 1}/${list.length}: ${label}${p === 'youtube' ? ' (แคปเฟรม ช้า)' : ''} … เพิ่มแล้ว ${totalAdded} รูป`);
+      const jobId = startJob('ค้นภาพ ' + p);
+      try {
+        const endpoint = p === 'youtube' ? '/api/images/youtube' : '/api/images/search';
+        const r = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ caseId: data.id, platform: p, jobId }),
+        });
+        const j = await r.json();
+        if (j.success) {
+          setImages(j.images || []);
+          setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
+          totalAdded += j.added || 0;
+        } else {
+          fails.push(`${label}: ${j.error || 'ล้มเหลว'}`);
+        }
+      } catch (e) {
+        fails.push(`${label}: ${e.message}`);
+      } finally {
+        stopJob();
+      }
+    }
+    setImgLoading('');
+    setImgInfo(`✅ ค้นครบ ${list.length} แหล่ง — เพิ่มรูปใหม่รวม ${totalAdded} รูป${fails.length ? ` · ล้มเหลว ${fails.length} แหล่ง` : ''}`);
+    if (fails.length) setImgError('บางแหล่งล้มเหลว:\n• ' + fails.join('\n• '));
+  }
+
+  async function clearPlatform(platform) {
+    setImgError('');
+    setImgInfo('');
+    setImgLoading('clear:' + platform);
+    try {
+      const r = await fetch('/api/images/clear', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ caseId: data.id, platform }),
+      });
+      const j = await r.json();
+      if (!j.success) setImgError(`[${j.errorType || 'ERROR'}] ${j.error}`);
+      else {
+        setImages(j.images || []);
+        setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
+        setImgInfo(`เคลียร์ ${PLATFORM_LABEL[platform] || platform} แล้ว (ลบ ${j.removed} รูป เหลือ ${j.total})`);
+      }
+    } catch (e) {
+      setImgError('เชื่อมต่อไม่สำเร็จ: ' + e.message);
+    } finally {
+      setImgLoading('');
+    }
+  }
+
+  async function cleanJunk() {
+    setImgError('');
+    setImgInfo('');
+    setImgLoading('clean');
+    const jobId = startJob('คัดขยะออก (AI)');
+    try {
+      const r = await fetch('/api/images/clean', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ caseId: data.id, jobId }),
+      });
+      const j = await r.json();
+      if (!j.success) setImgError(`[${j.errorType || 'ERROR'}] ${j.error}`);
+      else {
+        setImages(j.images || []);
+        setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
+        setImgInfo(`🧹 คัดขยะออก ${j.removed} รูป (สแกน ${j.scanned} · เหลือ ${j.total})`);
+      }
+    } catch (e) {
+      setImgError('เชื่อมต่อไม่สำเร็จ: ' + e.message);
+    } finally {
+      stopJob();
+      setImgLoading('');
+    }
+  }
+
+  async function sortEmotions() {
+    setImgError('');
+    setImgInfo('');
+    setImgLoading('emotions');
+    const jobId = startJob('แยกอารมณ์ภาพ (AI)');
+    try {
+      const r = await fetch('/api/images/emotions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ caseId: data.id, jobId }),
+      });
+      const j = await r.json();
+      if (!j.success) setImgError(`[${j.errorType || 'ERROR'}] ${j.error}`);
+      else {
+        setImages(j.images || []);
+        setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
+        setImgInfo(`🎭 แยกอารมณ์แล้ว ${j.classified} รูป — กดชิปอารมณ์ใต้แกลเลอรีเพื่อดูแต่ละหมวด`);
+      }
+    } catch (e) {
+      setImgError('เชื่อมต่อไม่สำเร็จ: ' + e.message);
+    } finally {
+      stopJob();
+      setImgLoading('');
+    }
+  }
+
+  // 🧠 คัดกรองคลังทั้งใบ (Full Library Triage) — วนเรียก endpoint ทีละก้อนจนครบ แล้วโหลดคลังใหม่ (ให้ป้ายโผล่)
+  async function runTriage() {
+    setImgError('');
+    setImgInfo('');
+    setImgLoading('triage');
+    const jobId = startJob('คัดกรองคลัง (AI)');
+    try {
+      let done = false;
+      let guard = 0;
+      let last = null;
+      while (!done && guard < 80) {
+        guard++;
+        const r = await fetch('/api/images/triage', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ caseId: data.id, jobId }),
+        });
+        const j = await r.json();
+        if (!j.success) {
+          setImgError(`[${j.errorType || 'ERROR'}] ${j.error}`);
+          break;
+        }
+        last = j;
+        done = j.done;
+        const tagged = (j.summary?.relevant || 0) + (j.summary?.junk || 0);
+        setImgInfo(`🧠 คัดกรองคลัง… ติดป้าย ${tagged}/${j.summary?.total || 0} · เหลือ ${j.remaining}`);
+      }
+      if (last?.summary) {
+        setImgInfo(`🧠 คัดกรองคลังเสร็จ — เกี่ยวข้อง ${last.summary.relevant} · ขยะ/ไม่เกี่ยว ${last.summary.junk} · จากทั้งหมด ${last.summary.total} (กดชิป "คน/หมวด" ใต้แกลเลอรีเพื่อกรอง)`);
+      }
+      const rr = await fetch(`/api/images/${data.id}`);
+      const jj = await rr.json();
+      if (jj.images) setImages(jj.images);
+    } catch (e) {
+      setImgError('เชื่อมต่อไม่สำเร็จ: ' + e.message);
+    } finally {
+      stopJob();
+      setImgLoading('');
+    }
+  }
+
+  async function uploadToLibrary(fileList) {
+    const files = [...(fileList || [])].filter((f) => f.type.startsWith('image/'));
+    if (files.length === 0) return;
+    setImgError('');
+    setImgInfo('');
+    setImgLoading('upload');
+    try {
+      const dataUrls = await Promise.all(
+        files.map(
+          (f) =>
+            new Promise((res) => {
+              const rd = new FileReader();
+              rd.onload = () => res(rd.result);
+              rd.onerror = () => res(null);
+              rd.readAsDataURL(f);
+            })
+        )
+      );
+      const imgs = dataUrls.filter(Boolean);
+      const r = await fetch('/api/images/upload', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ caseId: data.id, images: imgs }),
+      });
+      const j = await r.json();
+      if (!j.success) setImgError(`[${j.errorType || 'ERROR'}] ${j.error}`);
+      else {
+        setImages(j.images || []);
+        setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
+        setImgInfo(`⬆️ อัปโหลดเข้าคลัง ${j.added} รูป (แล้วกด 🔁 ค้นเพิ่มจากรูปนี้ได้)`);
+      }
+    } catch (e) {
+      setImgError('อัปโหลดไม่สำเร็จ: ' + e.message);
+    } finally {
+      setImgLoading('');
+    }
+  }
+
+  async function reverseFrom(imageUrl) {
+    setImgError('');
+    setImgInfo('');
+    setImgLoading('reverse');
+    try {
+      const r = await fetch('/api/images/reverse', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ caseId: data.id, seedImageUrl: imageUrl }),
+      });
+      const j = await r.json();
+      if (!j.success) setImgError(`[${j.errorType || 'ERROR'}] ${j.error}`);
+      else {
+        setImages(j.images || []);
+        setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
+        setImgInfo(`🔁 ค้นเพิ่มจากรูปนี้ได้ ${j.added} รูป`);
+      }
+    } catch (e) {
+      setImgError('เชื่อมต่อไม่สำเร็จ: ' + e.message);
+    } finally {
+      setImgLoading('');
+    }
+  }
+
+  async function removeImages(mode, ids) {
+    setImgError('');
+    setImgInfo('');
+    const body = mode === 'keep' ? { caseId: data.id, keepIds: ids } : { caseId: data.id, removeIds: ids };
+    try {
+      const r = await fetch('/api/images/remove', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json();
+      if (!j.success) setImgError(`[${j.errorType || 'ERROR'}] ${j.error}`);
+      else {
+        setImages(j.images || []);
+        setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
+        setImgInfo(`ลบ ${j.removed} รูป เหลือ ${j.total}`);
+      }
+    } catch (e) {
+      setImgError('เชื่อมต่อไม่สำเร็จ: ' + e.message);
+    }
+  }
+
+  async function searchProfile(network, profileId) {
+    if (!profileId) { setImgError('ใส่ username/ลิงก์โปรไฟล์ก่อน'); return; }
+    setImgError('');
+    setImgLoading(network === 'instagram' ? 'instagram' : 'facebook_profile');
+    try {
+      const r = await fetch('/api/images/profile', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ caseId: data.id, network, profileId }),
+      });
+      const j = await r.json();
+      if (!j.success) setImgError(`[${j.errorType || 'ERROR'}] ${j.error}`);
+      else {
+        setImages(j.images || []);
+        setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
+      }
+    } catch (e) {
+      setImgError('เชื่อมต่อไม่สำเร็จ: ' + e.message);
+    } finally {
+      setImgLoading('');
+    }
+  }
+
+  async function extractKeywords() {
+    setKwError('');
+    setKwLoading(true);
+    try {
+      const r = await fetch('/api/keywords', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ caseId: data.id, analysis: a, newsText: data.newsText }),
+      });
+      const j = await r.json();
+      if (!j.success) setKwError(`[${j.errorType || 'ERROR'}] ${j.error}`);
+      else setKw(j.keywords);
+    } catch (e) {
+      setKwError('เชื่อมต่อไม่สำเร็จ: ' + e.message);
+    } finally {
+      setKwLoading(false);
+    }
+  }
+
+  return (
+    <div className="card result" id="result-card">
+      <h3>
+        ผลวิเคราะห์ · {data.id}
+        {data.createdAt && (
+          <span className="count"> · {new Date(data.createdAt).toLocaleString('th-TH')}</span>
+        )}
+      </h3>
+      <div className="kv">
+        <span className="k">แก่นข่าว</span>
+        <span>{a.headline}</span>
+        <span className="k">สรุป</span>
+        <span>{a.summary}</span>
+        <span className="k">ความมั่นใจ</span>
+        <span>{a.confidence || '-'}</span>
+      </div>
+
+      <h3>ตัวละคร</h3>
+      {(a.characters || []).length === 0 && <p className="count">— ไม่พบตัวละครที่ระบุชัด —</p>}
+      {(a.characters || []).map((p, i) => (
+        <div className="person" key={i}>
+          <span className="name">{p.name}</span>
+          <span className="role">{p.role}</span>
+          <span className="chip">เพศ: {p.gender || 'ไม่ระบุ'}</span>
+          {(p.descriptors || []).map((d, j) => (
+            <span className="chip" key={j}>
+              {d}
+            </span>
+          ))}
+          {p.evidence && <div className="ev">“{p.evidence}”</div>}
+        </div>
+      ))}
+
+      <h3>เนื้อข่าว</h3>
+      <div className="kv">
+        <span className="k">เกิดอะไรขึ้น</span>
+        <span>{c.what_happened}</span>
+        <span className="k">สถานที่</span>
+        <span>{c.location}</span>
+        <span className="k">เวลา</span>
+        <span>{c.time}</span>
+      </div>
+      {(c.key_events || []).length > 0 && (
+        <>
+          <div className="k" style={{ marginTop: 10, color: 'var(--muted)', fontSize: 13 }}>
+            ลำดับเหตุการณ์
           </div>
-          {!cur?.keywords && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 7 }}>⬆️ วิเคราะห์ข่าวก่อน (ขั้น ①) แล้วปุ่มนี้จะกดได้ — ระบบจะค้นด้วยคำค้นที่ผูกชื่อบุคคลจากข่าวจริง</div>}
-          <details style={{ marginTop: 10 }}>
-            <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>ขั้นสูง: พิมพ์คำค้นเอง (ไม่ผ่านสมองวิเคราะห์ — ระวังได้ภาพมั่ว)</summary>
-            <textarea value={queriesText} onChange={e => setQueriesText(e.target.value)} rows={2}
-              placeholder={'พิมพ์คำค้น บรรทัดละ 1 คำ (สูงสุด 5)'}
-              style={{ ...s.input, width: '100%', resize: 'vertical', margin: '8px 0', minHeight: 58 }} />
-            <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-              <button onClick={() => doSearch(selected)} disabled={!!busy} style={s.btn(true)}>ค้นเอง ({selected.length} แหล่ง)</button>
-              {PLATFORMS.map(p => (
-                <button key={p.id} onClick={() => doSearch([p.id])} disabled={!!busy} style={{ ...s.btn(false), opacity: busy ? 0.6 : 1 }}>{p.label}</button>
+          <ul className="clean">
+            {c.key_events.map((e, i) => (
+              <li key={i}>{e}</li>
+            ))}
+          </ul>
+        </>
+      )}
+      {(c.numbers_facts || []).length > 0 && (
+        <div>
+          {c.numbers_facts.map((n, i) => (
+            <span className="chip" key={i}>
+              {n}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <h3>บริบท</h3>
+      <div className="kv">
+        <span className="k">ภูมิหลัง</span>
+        <span>{ctx.background}</span>
+        <span className="k">ทำไมน่าสนใจ</span>
+        <span>{ctx.why_notable}</span>
+        <span className="k">โทนอารมณ์</span>
+        <span className="tone">{ctx.emotional_tone}</span>
+        <span className="k">หลักฐานโทน</span>
+        <span>{ctx.tone_evidence}</span>
+        <span className="k">โมเมนต์สำคัญ</span>
+        <span>{ctx.key_moment}</span>
+      </div>
+
+      {(a.missing_info || []).length > 0 && (
+        <>
+          <h3>ข้อมูลที่ข่าวไม่ได้ระบุ</h3>
+          <ul className="clean">
+            {a.missing_info.map((m, i) => (
+              <li key={i}>{m}</li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <div className="kw-action">
+        <button className="btn" onClick={extractKeywords} disabled={kwLoading}>
+          {kwLoading ? (
+            <>
+              <span className="spin" />
+              กำลังสกัดคีย์เวิร์ด…
+            </>
+          ) : kw ? (
+            '🔄 สกัดคีย์เวิร์ดใหม่'
+          ) : (
+            '🔎 วิเคราะห์คีย์เวิร์ดค้นหาภาพ'
+          )}
+        </button>
+        <span className="count">สกัดคำค้นภาพจากเนื้อหา จุดสำคัญ และบริบททั้งหมด</span>
+      </div>
+      {kwError && <div className="err">{kwError}</div>}
+      {kw && <KeywordView kw={kw} />}
+
+      {kw && (
+        <div className="imgsec">
+          {/* ค้นหลายแหล่งพร้อมกัน — ติ๊กเลือกแล้วกดค้นทีเดียว จัดคิวทีละแหล่ง */}
+          <div className="src-multi">
+            <span className="src-multi-title">🔍 ค้นหลายแหล่งพร้อมกัน (ติ๊กเลือก):</span>
+            <div className="src-multi-chks">
+              {SEARCH_SOURCES.map((s) => (
+                <label key={s.p} className={'src-chk' + (batchSel.has(s.p) ? ' on' : '')}>
+                  <input type="checkbox" checked={batchSel.has(s.p)} disabled={!!imgLoading} onChange={() => toggleBatch(s.p)} />
+                  {s.label}
+                </label>
               ))}
             </div>
-          </details>
+            <div className="src-multi-actions">
+              <button className="btn-src accent" disabled={!!imgLoading || batchSel.size === 0} onClick={runBatch}>
+                {imgLoading === 'batch' ? (<><span className="spin" />กำลังค้นชุด…</>) : `🚀 ค้นแหล่งที่เลือก (${batchSel.size})`}
+              </button>
+              <button className="btn-src" disabled={!!imgLoading} onClick={() => setBatchSel(new Set(SEARCH_SOURCES.map((s) => s.p)))}>เลือกทั้งหมด</button>
+              <button className="btn-src" disabled={!!imgLoading} onClick={() => setBatchSel(new Set())}>ล้าง</button>
+            </div>
+          </div>
+          <div className="src-bar-sep">— หรือค้นทีละแหล่ง —</div>
+          <div className="src-bar">
+            {SEARCH_SOURCES.filter((s) => s.p !== 'youtube').map((s) => (
+              <button key={s.p} className="btn-src" disabled={!!imgLoading} onClick={() => searchPlatform(s.p)}>
+                {imgLoading === s.p ? (<><span className="spin" />กำลังค้น…</>) : s.label}
+              </button>
+            ))}
+            <button className="btn-src" disabled={!!imgLoading} onClick={() => searchPlatform('youtube')}>
+              {imgLoading === 'youtube' ? (<><span className="spin" />แคปเฟรม…</>) : '▶️ YouTube (แคปเฟรม)'}
+            </button>
+            <button className="btn-src accent" disabled={!!imgLoading} onClick={() => searchPlatform('reverse')}>
+              {imgLoading === 'reverse' ? (<><span className="spin" />ค้นย้อนกลับ…</>) : '🔁 ค้นย้อนกลับ (Lens)'}
+            </button>
+            <button className="btn-src accent" disabled={!!imgLoading} onClick={() => uploadRef.current?.click()}>
+              {imgLoading === 'upload' ? (<><span className="spin" />อัปโหลด…</>) : '⬆️ อัปโหลดรูปเข้าคลัง'}
+            </button>
+            <input
+              ref={uploadRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => {
+                uploadToLibrary(e.target.files);
+                e.target.value = '';
+              }}
+            />
+          </div>
+          <div className="src-profile">
+            <input
+              className="src-input"
+              placeholder="username หรือลิงก์โปรไฟล์ IG/FB (เช่น bestrw หรือ instagram.com/bestrw)"
+              value={handle}
+              onChange={(e) => setHandle(e.target.value)}
+            />
+            <button className="btn-src" disabled={!!imgLoading} onClick={() => searchProfile('instagram', handle)}>
+              {imgLoading === 'instagram' ? (<><span className="spin" />…</>) : '📸 IG'}
+            </button>
+            <button className="btn-src" disabled={!!imgLoading} onClick={() => searchProfile('facebook', handle)}>
+              {imgLoading === 'facebook_profile' ? (<><span className="spin" />…</>) : '📘 FB โปรไฟล์'}
+            </button>
+          </div>
+          <span className="count">
+            ข่าว (Google/Bing News) ตรงประเด็น · Yandex เก่งหาคน · 🔁 ค้นย้อนกลับจากภาพในคลัง = เจอคนคนเดิมเป๊ะ · IG/FB ต้องรู้ username
+          </span>
+          {imgError && <div className="err" style={{ whiteSpace: 'pre-line' }}>{imgError}</div>}
+          {imgInfo && <div className="info-box">{imgInfo}</div>}
 
-          {/* ค้นย้อนกลับ + โปรไฟล์ */}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12, alignItems: 'center' }}>
-            <input value={reverseUrl} onChange={e => setReverseUrl(e.target.value)} placeholder="วางลิงก์ภาพ → ค้นย้อนกลับ (Lens) เจอคนเดิมทุกเว็บ" style={{ ...s.input, flex: 1, minWidth: 220 }} />
-            <button onClick={doReverse} disabled={!!busy} style={s.btn(true)}>🔍 ค้นย้อนกลับ (Lens)</button>
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
-            <input value={profileName} onChange={e => setProfileName(e.target.value)} placeholder="username หรือลิงก์โปรไฟล์ IG/FB (เช่น bestrw)" style={{ ...s.input, flex: 1, minWidth: 220 }} />
-            <button onClick={() => doProfile('instagram')} disabled={!!busy} style={s.btn(false)}>📷 IG</button>
-            <button onClick={() => doProfile('facebook')} disabled={!!busy} style={s.btn(false)}>📘 FB โปรไฟล์</button>
-          </div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.7 }}>
-            ข่าวสด (Google/Bing News) ตรงประเด็น · Yandex เก่งหาคนไทย · 🔍 ค้นย้อนกลับจากภาพในคลัง = เจอคนเดิมเป๊ะ · IG/FB ต้องรู้ username
-          </div>
-          {(busy || notice) && (
-            <div style={{ marginTop: 12, padding: '11px 14px', borderRadius: 10, fontSize: 13, fontWeight: 500, background: busy ? 'rgba(96,165,250,0.08)' : 'rgba(74,222,128,0.07)', border: `1px solid ${busy ? 'rgba(96,165,250,0.25)' : 'rgba(74,222,128,0.2)'}`, color: 'var(--text-primary)', lineHeight: 1.6 }}>
-              {busy || notice}
+          {imgStats.total > 0 && (
+            <div className="src-bar" style={{ marginTop: 10 }}>
+              <button className="btn-src accent" disabled={!!imgLoading} onClick={runTriage} title="ตาดูทุกรูปในคลัง → ติดป้าย เกี่ยว/ขยะ + คน + หมวด + คุณภาพ (ทำครั้งเดียว เก็บถาวร)">
+                {imgLoading === 'triage' ? (<><span className="spin" />กำลังคัดกรองคลัง…</>) : '🧠 คัดกรองคลัง (AI)'}
+              </button>
+              <button className="btn-src accent" disabled={!!imgLoading} onClick={cleanJunk}>
+                {imgLoading === 'clean' ? (<><span className="spin" />กำลังสแกนขยะ…</>) : '🧹 คัดขยะออก (AI)'}
+              </button>
+              <button className="btn-src accent" disabled={!!imgLoading} onClick={sortEmotions}>
+                {imgLoading === 'emotions' ? (<><span className="spin" />กำลังแยกอารมณ์…</>) : '🎭 แยกอารมณ์ (AI)'}
+              </button>
+              {Object.keys(imgStats.byPlatform || {}).map((p) => (
+                <button key={p} className="btn-src" disabled={!!imgLoading} onClick={() => clearPlatform(p)}>
+                  {imgLoading === 'clear:' + p ? (<><span className="spin" />…</>) : `🗑️ ${PLATFORM_LABEL[p] || p} (${imgStats.byPlatform[p]})`}
+                </button>
+              ))}
+              <button className="btn-src" disabled={!!imgLoading} onClick={() => clearPlatform('all')}>
+                {imgLoading === 'clear:all' ? (<><span className="spin" />…</>) : '🗑️ ทั้งหมด'}
+              </button>
             </div>
           )}
-        </div>
 
-        {/* ── ② คลังรูปเคส ── */}
-        <div style={s.card}>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>📁 คลังรูปเคส{cur ? ` · ${images.length} รูป` : ''}</span>
-            <select value={cur?.id || ''} onChange={e => openCase(e.target.value)} style={{ ...s.input, padding: '8px 10px', fontSize: 12, maxWidth: 280 }}>
-              <option value="">— เลือกเคสเก่า / ค้นใหม่=เคสใหม่อัตโนมัติ —</option>
-              {cases.map(c => <option key={c.id} value={c.id}>{c.id} · {c.title} ({c.total} รูป)</option>)}
-            </select>
-            {cur && <button onClick={() => { setCur(null); setPicked(new Set()); setNotice('เริ่มเคสใหม่ — ค้นครั้งถัดไปจะสร้างเคสใหม่ให้'); }} style={s.btn(false)}>➕ เคสใหม่</button>}
-            {cur && (
-              <button onClick={() => { setPickMode(v => !v); setPicked(new Set()); }} style={s.btn(pickMode, '#60a5fa')}>
-                {pickMode ? '☑ กำลังเลือก (แตะรูป)' : '☐ เลือกรูปเอง (ลบ/เก็บ/โหลด)'}
+          <ImageGallery images={images} stats={imgStats} onRemove={removeImages} onReverseFrom={reverseFrom} />
+        </div>
+      )}
+
+      <div className="meta">
+        สมอง: {data.meta?.provider} · {data.meta?.model} · schema {data.meta?.schema}
+      </div>
+
+      <details className="raw">
+        <summary>ดู JSON ดิบ</summary>
+        <pre>{JSON.stringify(a, null, 2)}</pre>
+      </details>
+    </div>
+  );
+}
+
+function ProgressPopup() {
+  const [s, setS] = useState({ active: false });
+  useEffect(() => subscribeJob(setS), []);
+  if (!s.active) return null;
+  const p = s.progress || {};
+  const pct = typeof p.pct === 'number' ? Math.min(100, Math.max(3, p.pct)) : null;
+  return (
+    <div className="job-pop">
+      <div className="job-card">
+        <div className="job-head">
+          <span className="spin" />
+          {s.label || 'กำลังทำงาน'}
+        </div>
+        <div className="job-step">{p.step || 'กำลังเริ่ม…'}</div>
+        {p.detail && <div className={'job-detail' + (p.retry ? ' retry' : '')}>{p.detail}</div>}
+        {pct !== null && (
+          <div className="job-bar">
+            <div style={{ width: pct + '%' }} />
+          </div>
+        )}
+        {p.status === 'error' && <div className="job-detail retry">❌ {p.error || 'ผิดพลาด'}</div>}
+      </div>
+    </div>
+  );
+}
+
+const EMOTION_ORDER = ['happy', 'laugh', 'sad', 'serious', 'angry', 'shock', 'warm', 'worried', 'context', 'document', 'other'];
+const EMOTION_LABEL = {
+  happy: '😊 สุข/ยิ้ม',
+  laugh: '😄 หัวเราะ',
+  sad: '😢 เศร้า/ร้องไห้',
+  serious: '😐 จริงจัง/นิ่ง',
+  angry: '😠 โกรธ',
+  shock: '😲 ตกใจ',
+  warm: '🥹 อบอุ่น/ซึ้ง',
+  worried: '😟 กังวล/เครียด',
+  context: '🏞️ บริบท/ฉาก',
+  document: '📄 เอกสาร',
+  other: '❓ อื่นๆ',
+};
+
+// หมวดภาพจากการคัดกรองคลัง (triage)
+const CAT_LABEL = {
+  'face-emotional': '😢 หน้าอารมณ์',
+  'face-neutral': '🙂 หน้านิ่ง',
+  group: '👥 ภาพหมู่',
+  context: '🏞️ ฉาก/บริบท',
+  document: '📄 เอกสาร',
+  other: '❓ อื่นๆ',
+};
+
+const PLATFORM_LABEL = {
+  google: 'Google',
+  google_news: 'Google News',
+  yandex: 'Yandex',
+  bing: 'Bing',
+  bing_news: 'Bing News',
+  facebook: 'Facebook',
+  tiktok: 'TikTok',
+  youtube: 'YouTube',
+  reverse: 'ค้นย้อนกลับ',
+  instagram: 'Instagram',
+};
+
+// แหล่งที่ค้นแบบ "หลายแหล่งพร้อมกัน" ได้ (จัดคิวทีละแหล่ง) — YouTube ช้า (แคปเฟรม) ติ๊กได้แต่กินเวลา
+const SEARCH_SOURCES = [
+  { p: 'google', label: '🖼️ Google' },
+  { p: 'google_news', label: '📰 Google News' },
+  { p: 'yandex', label: '🌐 Yandex' },
+  { p: 'bing', label: '🔎 Bing' },
+  { p: 'bing_news', label: '🗞️ Bing News' },
+  { p: 'facebook', label: '📘 FB (เว็บ)' },
+  { p: 'tiktok', label: '🎵 TikTok' },
+  { p: 'youtube', label: '▶️ YouTube (ช้า)' },
+];
+
+function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
+  const [filter, setFilter] = useState('all');
+  const [emoFilter, setEmoFilter] = useState('all');
+  const [personFilter, setPersonFilter] = useState('all'); // 🧠 กรองตาม "คน" จาก triage
+  const [catFilter, setCatFilter] = useState('all'); // 🧠 กรองตาม "หมวด" จาก triage
+  const [hideJunk, setHideJunk] = useState(false); // 🧠 ซ่อนภาพที่ตาตีว่า "ขยะ/ไม่เกี่ยว"
+  const [lb, setLb] = useState(null); // index ในรายการที่กรองแล้ว
+  const [selMode, setSelMode] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const [busy, setBusy] = useState(false);
+
+  const byPlat = stats.byPlatform || {};
+  const platforms = Object.keys(byPlat);
+
+  const byEmotion = {};
+  for (const im of images) if (im.emotion) byEmotion[im.emotion] = (byEmotion[im.emotion] || 0) + 1;
+  const emotions = EMOTION_ORDER.filter((e) => byEmotion[e]);
+  const hasEmotion = emotions.length > 0;
+
+  // 🧠 นับป้ายจากการคัดกรองคลัง (triage)
+  const byPerson = {};
+  const byCat = {};
+  let triagedCount = 0;
+  let junkCount = 0;
+  for (const im of images) {
+    if (!im.triage) continue;
+    triagedCount++;
+    if (im.triage.relevant === false) junkCount++;
+    if (im.triage.person) byPerson[im.triage.person] = (byPerson[im.triage.person] || 0) + 1;
+    if (im.triage.category) byCat[im.triage.category] = (byCat[im.triage.category] || 0) + 1;
+  }
+  const persons = Object.keys(byPerson).sort((a, b) => byPerson[b] - byPerson[a]);
+  const cats = Object.keys(byCat).sort((a, b) => byCat[b] - byCat[a]);
+  const hasTriage = triagedCount > 0;
+
+  const shown = images.filter(
+    (im) =>
+      (filter === 'all' || im.platform === filter) &&
+      (emoFilter === 'all' || im.emotion === emoFilter) &&
+      (personFilter === 'all' || im.triage?.person === personFilter) &&
+      (catFilter === 'all' || im.triage?.category === catFilter) &&
+      (!hideJunk || im.triage?.relevant !== false)
+  );
+
+  useEffect(() => {
+    setLb(null); // เปลี่ยนตัวกรอง = ปิด lightbox
+  }, [filter, emoFilter, personFilter, catFilter, hideJunk]);
+
+  useEffect(() => {
+    if (lb === null || selMode) return;
+    function onKey(e) {
+      if (e.key === 'Escape') setLb(null);
+      else if (e.key === 'ArrowRight') setLb((i) => (i + 1) % shown.length);
+      else if (e.key === 'ArrowLeft') setLb((i) => (i - 1 + shown.length) % shown.length);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lb, shown.length, selMode]);
+
+  function toggleSel(id) {
+    setSelected((s) => {
+      const n = new Set(s);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  }
+  function clickThumb(im, i) {
+    if (selMode) toggleSel(im.id);
+    else setLb(i);
+  }
+  async function doRemove(mode) {
+    const ids = [...selected];
+    if (ids.length === 0 || !onRemove) return;
+    setBusy(true);
+    try {
+      await onRemove(mode, ids);
+      setSelected(new Set());
+      setSelMode(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!images || images.length === 0) {
+    return (
+      <p className="count" style={{ marginTop: 12 }}>
+        ยังไม่มีรูปในคลังเคสนี้ — กดปุ่มด้านบนเพื่อค้นภาพ
+      </p>
+    );
+  }
+
+  return (
+    <div className="gallery-wrap">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, margin: '16px 0 8px' }}>
+        <h3 style={{ margin: 0 }}>🗂️ คลังรูปเคสนี้ · {stats.total} รูป</h3>
+        <button className={'btn-src' + (selMode ? ' accent' : '')} onClick={() => { setSelMode((m) => !m); setSelected(new Set()); setLb(null); }}>
+          {selMode ? '✕ ออกจากโหมดเลือก' : '☑️ เลือกรูปเอง (ลบ/เก็บ)'}
+        </button>
+      </div>
+
+      {selMode && (
+        <div className="src-bar" style={{ marginBottom: 8, alignItems: 'center' }}>
+          <span className="count">เลือกแล้ว {selected.size} รูป · แตะรูปเพื่อติ๊ก</span>
+          <button className="btn-src" onClick={() => setSelected(new Set(shown.map((i) => i.id)))}>เลือกทั้งหมดที่แสดง</button>
+          <button className="btn-src" onClick={() => setSelected(new Set())}>ล้างเลือก</button>
+          <button className="btn-src" disabled={busy || selected.size === 0} onClick={() => doRemove('remove')}>
+            {busy ? <span className="spin" /> : '🗑️'} ลบที่เลือก ({selected.size})
+          </button>
+          <button className="btn-src accent" disabled={busy || selected.size === 0} onClick={() => doRemove('keep')}>
+            {busy ? <span className="spin" /> : '✅'} เก็บเฉพาะที่เลือก
+          </button>
+        </div>
+      )}
+
+      <div className="gallery-filter">
+        <button className={'fchip' + (filter === 'all' ? ' active' : '')} onClick={() => setFilter('all')}>
+          ทั้งหมด {stats.total}
+        </button>
+        {platforms.map((p) => (
+          <button key={p} className={'fchip' + (filter === p ? ' active' : '')} onClick={() => setFilter(p)}>
+            {PLATFORM_LABEL[p] || p} {byPlat[p]}
+          </button>
+        ))}
+      </div>
+      {hasEmotion && (
+        <div className="gallery-filter" style={{ marginTop: -4 }}>
+          <span className="count" style={{ alignSelf: 'center', marginRight: 4 }}>อารมณ์:</span>
+          <button className={'fchip emo' + (emoFilter === 'all' ? ' active' : '')} onClick={() => setEmoFilter('all')}>
+            ทุกอารมณ์
+          </button>
+          {emotions.map((e) => (
+            <button key={e} className={'fchip emo' + (emoFilter === e ? ' active' : '')} onClick={() => setEmoFilter(e)}>
+              {EMOTION_LABEL[e] || e} {byEmotion[e]}
+            </button>
+          ))}
+        </div>
+      )}
+      {hasTriage && (
+        <>
+          {persons.length > 0 && (
+            <div className="gallery-filter" style={{ marginTop: -4 }}>
+              <span className="count" style={{ alignSelf: 'center', marginRight: 4 }}>👤 คน:</span>
+              <button className={'fchip' + (personFilter === 'all' ? ' active' : '')} onClick={() => setPersonFilter('all')}>ทุกคน</button>
+              {persons.map((p) => (
+                <button key={p} className={'fchip' + (personFilter === p ? ' active' : '')} onClick={() => setPersonFilter(p)}>{p} {byPerson[p]}</button>
+              ))}
+            </div>
+          )}
+          {cats.length > 0 && (
+            <div className="gallery-filter" style={{ marginTop: -4 }}>
+              <span className="count" style={{ alignSelf: 'center', marginRight: 4 }}>🗂️ หมวด:</span>
+              <button className={'fchip' + (catFilter === 'all' ? ' active' : '')} onClick={() => setCatFilter('all')}>ทุกหมวด</button>
+              {cats.map((cat) => (
+                <button key={cat} className={'fchip' + (catFilter === cat ? ' active' : '')} onClick={() => setCatFilter(cat)}>{CAT_LABEL[cat] || cat} {byCat[cat]}</button>
+              ))}
+              <button className={'fchip' + (hideJunk ? ' active' : '')} onClick={() => setHideJunk((v) => !v)} title="ซ่อนภาพที่ตาตีว่าไม่เกี่ยวข่าว/ขยะ">
+                {hideJunk ? '🙈 ซ่อนขยะแล้ว' : `🗑️ ซ่อนขยะ (${junkCount})`}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+      <div className="gallery">
+        {shown.map((im, i) => (
+          <button
+            className={'thumb' + (selMode && selected.has(im.id) ? ' selected' : '')}
+            key={im.id}
+            onClick={() => clickThumb(im, i)}
+            title={im.title || im.source}
+          >
+            <img src={im.thumbnailUrl || im.imageUrl} alt={im.title || ''} loading="lazy" style={im.triage?.relevant === false ? { opacity: 0.4 } : undefined} />
+            <span className="thumb-plat">{PLATFORM_LABEL[im.platform] || im.platform}</span>
+            {im.emotion && <span className="thumb-emo" title={EMOTION_LABEL[im.emotion]}>{(EMOTION_LABEL[im.emotion] || '').split(' ')[0]}</span>}
+            {im.triage?.relevant === false && <span className="thumb-plat" style={{ top: 'auto', bottom: 4, left: 4, background: 'rgba(200,40,40,.85)' }}>🗑️ ขยะ</span>}
+            {im.source && <span className="thumb-src">{im.source}</span>}
+            {selMode && <span className="thumb-check">{selected.has(im.id) ? '✓' : ''}</span>}
+          </button>
+        ))}
+      </div>
+      {lb !== null && !selMode && shown[lb] && (
+        <Lightbox
+          image={shown[lb]}
+          index={lb}
+          total={shown.length}
+          onClose={() => setLb(null)}
+          onPrev={() => setLb((i) => (i - 1 + shown.length) % shown.length)}
+          onNext={() => setLb((i) => (i + 1) % shown.length)}
+          onReverseFrom={onReverseFrom}
+        />
+      )}
+    </div>
+  );
+}
+
+function Lightbox({ image, index, total, onClose, onPrev, onNext, onReverseFrom }) {
+  return (
+    <div className="lb-overlay" onClick={onClose}>
+      <div className="lb-box" onClick={(e) => e.stopPropagation()}>
+        <div className="lb-top">
+          <span className="chip chip-key">{PLATFORM_LABEL[image.platform] || image.platform}</span>
+          <span className="lb-src">{image.source || '—'}</span>
+          <span className="lb-count">
+            {index + 1} / {total}
+          </span>
+          <button className="lb-close" onClick={onClose} aria-label="ปิด">
+            ✕
+          </button>
+        </div>
+        <div className="lb-imgwrap">
+          <button className="lb-nav lb-prev" onClick={onPrev} aria-label="ก่อนหน้า">
+            ‹
+          </button>
+          <img
+            className="lb-img"
+            src={image.imageUrl || image.thumbnailUrl}
+            alt={image.title || ''}
+            onError={(e) => {
+              if (image.thumbnailUrl && e.target.src !== image.thumbnailUrl) {
+                e.target.src = image.thumbnailUrl;
+              }
+            }}
+          />
+          <button className="lb-nav lb-next" onClick={onNext} aria-label="ถัดไป">
+            ›
+          </button>
+        </div>
+        <div className="lb-bottom">
+          {image.title && <div className="lb-title">{image.title}</div>}
+          <div className="lb-links">
+            <a
+              href={image.sourceLink || image.imageUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-ghost"
+            >
+              🔗 เปิดหน้าต้นทาง
+            </a>
+            <a href={image.imageUrl} target="_blank" rel="noreferrer" className="btn-ghost">
+              🖼️ เปิดรูปเต็ม
+            </a>
+            {onReverseFrom && (
+              <button
+                className="btn-ghost"
+                onClick={() => {
+                  onReverseFrom(image.imageUrl);
+                  onClose();
+                }}
+              >
+                🔁 ค้นเพิ่มจากรูปนี้
               </button>
             )}
           </div>
-
-          {cur && pickMode && (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: '#60a5fa', alignSelf: 'center' }}>เลือกแล้ว {picked.size} ใบ:</span>
-              <button onClick={() => bulk('remove')} disabled={!picked.size} style={s.btn(true, '#f87171')}>🗑 ลบที่เลือก</button>
-              <button onClick={() => bulk('keep')} disabled={!picked.size} style={s.btn(true, ACCENT)}>💾 เก็บเฉพาะที่เลือก</button>
-              <button onClick={downloadPicked} disabled={!picked.size} style={s.btn(true)}>📥 ดาวน์โหลดที่เลือก (ไปทำปก)</button>
-            </div>
-          )}
-
-          {cur ? (
-            <>
-              {/* ★ 5 ก.ค.: ปุ่มสมอง AI จัดคลัง (พอร์ตจากระบบทำปกออโต้) */}
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-                <button onClick={doClean} disabled={!!busy || !images.length} style={s.btn(true)}>🧹 AI คัดขยะออก</button>
-                <button onClick={doEmotions} disabled={!!busy || !images.length} style={s.btn(true)}>🎭 AI แยกอารมณ์</button>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)', alignSelf: 'center' }}>คัดขยะ = ลบตัวหนังสือทับ/ลายน้ำ/ปกคลิป/วัตถุมั่ว/ไม่เกี่ยวข่าว · แยกอารมณ์ = ติดป้ายกรองได้</span>
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-                <button onClick={() => setTab('all')} style={s.btn(tab === 'all', ACCENT)}>ทั้งหมด {images.length}</button>
-                {Object.entries(byPlatform).map(([p, n]) => (
-                  <button key={p} onClick={() => setTab(p)} style={s.btn(tab === p, ACCENT)}>{PLABEL[p] || p} {n}</button>
-                ))}
-              </div>
-              {Object.keys(byEmotion).length > 0 && (
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-                  <button onClick={() => setEmoTab('all')} style={s.btn(emoTab === 'all', ACCENT)}>ทุกอารมณ์</button>
-                  {Object.entries(byEmotion).sort((a, b) => b[1] - a[1]).map(([e, n]) => (
-                    <button key={e} onClick={() => setEmoTab(emoTab === e ? 'all' : e)} style={s.btn(emoTab === e, ACCENT)}>{EMOTION_LABEL[e] || e} {n}</button>
-                  ))}
-                </div>
-              )}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(112px, 1fr))', gap: 8 }}>
-                {shown.map(im => {
-                  const isPicked = picked.has(im.id);
-                  return (
-                    <div key={im.id}
-                      onClick={() => pickMode ? togglePick(im.id) : window.open(im.sourceLink || im.imageUrl, '_blank')}
-                      style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', cursor: 'pointer', border: isPicked ? '3px solid #60a5fa' : '1px solid var(--border)', background: '#111', aspectRatio: '3/4' }}>
-                      {/* ใช้ thumbnail ก่อน (โหลดไว) — เต็มจริงอยู่ที่ imageUrl */}
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={im.thumbnailUrl || im.imageUrl} alt="" loading="lazy"
-                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: isPicked ? 0.75 : 1 }}
-                        onError={e => { e.currentTarget.style.opacity = 0.15; }} />
-                      <span style={{ position: 'absolute', top: 5, left: 5, fontSize: 9, fontWeight: 800, padding: '2px 7px', borderRadius: 5, background: 'rgba(0,0,0,0.72)', color: '#93c5fd' }}>
-                        {(PLABEL[im.platform] || im.platform || '').replace(/^[^ ]+ /, '') || im.platform}
-                      </span>
-                      {isPicked && <span style={{ position: 'absolute', top: 5, right: 5, fontSize: 15 }}>✅</span>}
-                      {!isPicked && im.emotion && EMOTION_LABEL[im.emotion] && (
-                        <span style={{ position: 'absolute', top: 5, right: 5, fontSize: 11, padding: '1px 5px', borderRadius: 5, background: 'rgba(0,0,0,0.72)' }}>{EMOTION_LABEL[im.emotion].split(' ')[0]}</span>
-                      )}
-                      {im.source && (
-                        <span style={{ position: 'absolute', bottom: 0, left: 0, right: 0, fontSize: 9, padding: '3px 6px', background: 'rgba(0,0,0,0.72)', color: '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {im.source}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              {shown.length === 0 && <div style={{ padding: 24, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>ยังไม่มีรูปในแท็บนี้</div>}
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.7 }}>
-                💡 แตะรูป = เปิดหน้าต้นทาง · โหมดเลือก = แตะติ๊กหลายใบแล้ว ลบ/เก็บเฉพาะ/ดาวน์โหลด · ภาพที่โหลดมา → อัปโหลดเข้า <a href="/cover-tester" style={{ color: ACCENT }}>หน้าทำปก</a> ได้เลย
-              </div>
-            </>
-          ) : (
-            <div style={{ padding: 24, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
-              🔍 ค้นครั้งแรกจะสร้างเคสใหม่อัตโนมัติ — หรือเลือกเคสเก่าจากเมนูด้านบน
-            </div>
-          )}
         </div>
       </div>
-    </>
+    </div>
+  );
+}
+
+const KW_GROUPS = [
+  { key: 'queries_th', label: 'คำค้นภาษาไทย' },
+  { key: 'queries_en', label: 'คำค้นภาษาอังกฤษ' },
+  { key: 'scene_place', label: 'ฉาก / สถานที่' },
+  { key: 'moment_action', label: 'โมเมนต์ / แอ็คชัน' },
+  { key: 'emotion', label: 'อารมณ์' },
+  { key: 'source_show', label: 'รายการ / แหล่งที่มา' },
+  { key: 'hashtags', label: 'แฮชแท็ก' },
+];
+
+const PLAN_PRIO = { must: '🔴 ต้องมี', should: '🟡 ควรมี', nice: '⚪ มีก็ดี' };
+function KeywordView({ kw }) {
+  const total =
+    kw.total_count ??
+    KW_GROUPS.reduce((n, g) => n + (kw[g.key]?.length || 0), 0);
+
+  function copyAll() {
+    const all = KW_GROUPS.flatMap((g) => kw[g.key] || []);
+    if (navigator.clipboard) navigator.clipboard.writeText(all.join('\n'));
+  }
+
+  return (
+    <div className="kwbox">
+      <h3>🔎 คีย์เวิร์ดค้นหาภาพ · {total} คำ</h3>
+
+      {(kw.subjects || []).length > 0 && (
+        <div className="kwgroup">
+          <div className="kwlabel">ตัวหลักที่ภาพต้องมี</div>
+          <div>
+            {kw.subjects.map((s, i) => (
+              <span className={'chip' + (s.must_have ? ' chip-key' : '')} key={i}>
+                {s.name}
+                {s.role ? ` · ${s.role}` : ''}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {KW_GROUPS.map((g) =>
+        kw[g.key]?.length > 0 ? (
+          <div className="kwgroup" key={g.key}>
+            <div className="kwlabel">
+              {g.label} <span className="count">({kw[g.key].length})</span>
+            </div>
+            <div>
+              {kw[g.key].map((t, i) => (
+                <span className="chip" key={i}>
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null
+      )}
+
+      <button className="btn-ghost" style={{ marginTop: 12 }} onClick={copyAll}>
+        📋 คัดลอกคำค้นทั้งหมด
+      </button>
+    </div>
   );
 }
