@@ -365,6 +365,20 @@ export default function CoverPage() {
   const canvasRef = useRef(null);
   const fileRefs = useRef({});
 
+  // ★ 4 ก.ค. (ผู้ใช้สั่ง "มือถือใช้ง่ายสุด เห็นทุกฟังก์ชัน"): จอเล็กเรียงคอลัมน์เดียว + เลือกช่องแล้วแต่งจากแผงรวมใต้ปก
+  const [isMobile, setIsMobile] = useState(false);
+  const [selectedSlotId, setSelectedSlotId] = useState(null);
+  const touchScaleRef = useRef(1);  // canvas จริง (1200) / ที่แสดงบนจอ — ใช้ขยาย hit zone ให้นิ้วจับถูกบนจอเล็ก
+  const pinchRef = useRef(null);    // สถานะจีบ 2 นิ้ว (ซูมภาพในช่อง)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const apply = () => setIsMobile(mq.matches || window.innerWidth <= 768);
+    apply();
+    mq.addEventListener('change', apply);
+    window.addEventListener('resize', apply); // กันเคส matchMedia change ไม่ยิง (emulation/หมุนจอ/พับจอ)
+    return () => { mq.removeEventListener('change', apply); window.removeEventListener('resize', apply); };
+  }, []);
+
   // Dynamic template management
   const [templates, setTemplates] = useState([...BUILTIN_TEMPLATES]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
@@ -559,12 +573,17 @@ export default function CoverPage() {
   const getCoords = (cx, cy) => {
     const c = canvasRef.current; if (!c) return {mx:0,my:0};
     const r = c.getBoundingClientRect();
+    touchScaleRef.current = W / Math.max(1, r.width); // จอเล็ก = ค่าสูง (มือถือ ~3.3, PC ~1.7)
     return { mx: (cx-r.left)*(W/r.width), my: (cy-r.top)*(H/r.height) };
   };
 
   // ── Hit test: draggable slots — 3 zones: corner=resize, border=move, center=crop ──
   const MOVE_BORDER = 25; // px border zone for move (smaller = more crop area)
+  // ★ 4 ก.ค.: โซนจับขยายตามจอ — จอมือถือ canvas ถูกย่อ ~3 เท่า โซน 36px เหลือ ~11px จริง นิ้วจับไม่ถูก
+  const _zoneScale = () => Math.min(2.4, Math.max(1, touchScaleRef.current / 1.7));
   const hitTest = (mx, my) => {
+    const _zs = _zoneScale();
+    const HS = HANDLE_SIZE * _zs, ER = EDGE_RING * _zs, MB = MOVE_BORDER * _zs;
     const sorted = [...draggableSlots].filter(sl => slotImages[sl.id]).sort((a,b) => (b.zIndex||0)-(a.zIndex||0));
     for (const slot of sorted) {
       const off = slotOffsets[slot.id] || {dx:0,dy:0};
@@ -575,20 +594,20 @@ export default function CoverPage() {
         const r = eff.diameter/2, ecx = sx+r, ecy = sy+r;
         const dist = Math.hypot(mx-ecx, my-ecy);
         if (dist <= r + (slot.borderWidth||0)) {
-          if (dist >= r - EDGE_RING) return { slot, mode: 'resize' };
+          if (dist >= r - ER) return { slot, mode: 'resize' };
           if (dist >= r * 0.55) return { slot, mode: 'move' };
           return { slot, mode: 'crop' };
         }
       } else {
         const ew = eff.w, eh = eff.h;
         if (mx >= sx && mx <= sx+ew && my >= sy && my <= sy+eh) {
-          const nearL = mx - sx < HANDLE_SIZE, nearR = sx+ew - mx < HANDLE_SIZE;
-          const nearT = my - sy < HANDLE_SIZE, nearB = sy+eh - my < HANDLE_SIZE;
+          const nearL = mx - sx < HS, nearR = sx+ew - mx < HS;
+          const nearT = my - sy < HS, nearB = sy+eh - my < HS;
           const nearCorner = (nearL || nearR) && (nearT || nearB);
           if (nearCorner) return { slot, mode: 'resize' };
           // Border zone = move, center = crop
-          const inBorderL = mx - sx < MOVE_BORDER, inBorderR = sx+ew - mx < MOVE_BORDER;
-          const inBorderT = my - sy < MOVE_BORDER, inBorderB = sy+eh - my < MOVE_BORDER;
+          const inBorderL = mx - sx < MB, inBorderR = sx+ew - mx < MB;
+          const inBorderT = my - sy < MB, inBorderB = sy+eh - my < MB;
           if (inBorderL || inBorderR || inBorderT || inBorderB) return { slot, mode: 'move' };
           return { slot, mode: 'crop' };
         }
@@ -640,6 +659,9 @@ export default function CoverPage() {
   // ── Pointer handlers ──
   const handleDown = (cx, cy) => {
     const {mx,my} = getCoords(cx,cy);
+    // ★ 4 ก.ค.: แตะช่องไหน = เลือกช่องนั้น (แผงเครื่องมือใต้ปกสลับตาม + วาดกรอบไฮไลต์)
+    const _selHit = hitTestAll(mx, my);
+    if (_selHit) setSelectedSlotId(_selHit.id);
     // First try text drag
     const textHit = hitTestText(mx, my);
     if (textHit) {
@@ -860,7 +882,22 @@ export default function CoverPage() {
       }
       ctx.restore();
     }
-  }, [slotImages, slotOffsets, slotScales, slotCrops, template, textValues, textBgColors, dragState, draggableSlots]);
+
+    // ★ 4 ก.ค.: กรอบฟ้าช่องที่เลือก (จากแตะ/ชิป) — เห็นชัดว่ากำลังแต่งช่องไหน ทุกช่องไม่ใช่แค่ draggable
+    if (selectedSlotId) {
+      const slot = template.slots.find(sl => sl.id === selectedSlotId);
+      if (slot && slotImages[slot.id]) {
+        const off = slotOffsets[slot.id] || { dx: 0, dy: 0 };
+        const eff = getEffSlot(slot, slotScales[slot.id]);
+        const sx = eff.x + off.dx, sy = eff.y + off.dy;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(96,165,250,0.95)'; ctx.lineWidth = 5; ctx.setLineDash([14, 9]);
+        if (slot.shape === 'circle') { const r = eff.diameter / 2; ctx.beginPath(); ctx.arc(sx + r, sy + r, r + 7, 0, Math.PI * 2); ctx.stroke(); }
+        else ctx.strokeRect(sx - 4, sy - 4, eff.w + 8, eff.h + 8);
+        ctx.restore();
+      }
+    }
+  }, [slotImages, slotOffsets, slotScales, slotCrops, template, textValues, textBgColors, dragState, draggableSlots, selectedSlotId]);
 
   useEffect(() => { render(); }, [render]);
 
@@ -1004,10 +1041,11 @@ export default function CoverPage() {
       </div>
 
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 16px 60px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 16, alignItems: 'start' }}>
+        {/* ★ 4 ก.ค.: จอเล็ก = คอลัมน์เดียว "ปกขึ้นก่อน" (order สลับ) เครื่องมือทั้งหมดอยู่ใต้ปก */}
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '340px 1fr', gap: 16, alignItems: 'start' }}>
 
           {/* ═══ LEFT ═══ */}
-          <div>
+          <div style={{ order: isMobile ? 2 : 0, minWidth: 0 }}>
             {/* ── Template Selector ── */}
             <div style={s.card}>
               <div style={s.head}>
@@ -1353,7 +1391,7 @@ export default function CoverPage() {
           </div>
 
           {/* ═══ RIGHT: Canvas ═══ */}
-          <div style={{ ...s.card, position: 'sticky', top: 70, alignSelf: 'start' }}>
+          <div style={{ ...s.card, position: isMobile ? 'static' : 'sticky', top: 70, alignSelf: 'start', order: isMobile ? 1 : 0, minWidth: 0 }}>
             <div style={s.head}>
               ตัวอย่างปก
               <span style={{ fontSize:10, fontWeight:400, color:'var(--text-muted)', marginLeft:'auto' }}>{W}×{H}px • {template?.name || '—'}</span>
@@ -1370,11 +1408,127 @@ export default function CoverPage() {
                   onMouseDown={e => handleDown(e.clientX, e.clientY)}
                   onMouseMove={e => handleMove(e.clientX, e.clientY)}
                   onMouseUp={handleUp} onMouseLeave={handleUp}
-                  onTouchStart={e => { const t=e.touches[0]; handleDown(t.clientX, t.clientY); }}
-                  onTouchMove={e => { e.preventDefault(); const t=e.touches[0]; handleMove(t.clientX, t.clientY); }}
-                  onTouchEnd={handleUp}
+                  onTouchStart={e => {
+                    // ★ 4 ก.ค.: จีบ 2 นิ้ว = ซูมภาพในช่อง (มือถือไม่มีสกอลล์เมาส์)
+                    if (e.touches.length === 2) {
+                      const [a, b] = [e.touches[0], e.touches[1]];
+                      const { mx, my } = getCoords((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+                      const slot = hitTestAll(mx, my) || (selectedSlotId ? template?.slots.find(sl => sl.id === selectedSlotId && slotImages[sl.id]) : null);
+                      if (slot) {
+                        pinchRef.current = { slotId: slot.id, startDist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), startZoom: slotCrops[slot.id]?.zoom || 1 };
+                        setDragState(null); // ยกเลิกลากนิ้วเดียวที่เริ่มไว้ก่อนนิ้วที่สองแตะ
+                        setSelectedSlotId(slot.id);
+                      }
+                      return;
+                    }
+                    const t = e.touches[0]; handleDown(t.clientX, t.clientY);
+                  }}
+                  onTouchMove={e => {
+                    e.preventDefault();
+                    if (pinchRef.current && e.touches.length === 2) {
+                      const [a, b] = [e.touches[0], e.touches[1]];
+                      const ratio = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / Math.max(1, pinchRef.current.startDist);
+                      const z = Math.max(1, Math.min(5, +(pinchRef.current.startZoom * ratio).toFixed(2)));
+                      const sid = pinchRef.current.slotId;
+                      setSlotCrops(prev => ({ ...prev, [sid]: { ...(prev[sid] || { panX: 0, panY: 0 }), zoom: z } }));
+                      return;
+                    }
+                    const t = e.touches[0]; handleMove(t.clientX, t.clientY);
+                  }}
+                  onTouchEnd={e => { if (!e.touches || e.touches.length < 2) pinchRef.current = null; handleUp(); }}
                 />
               </div>
+
+              {/* ★ 4 ก.ค. — ชิปเลือกช่อง + แถบสถานะ + แผงเครื่องมือรวม (มือถือครบจบใต้ปก · PC ก็ใช้ได้) */}
+              {template && (
+                <div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {template.slots.map(sl => {
+                      const has = !!slotImages[sl.id];
+                      const sel = selectedSlotId === sl.id;
+                      const shortLabel = String(sl.label).replace(/\(.*?\)/g, '').trim().slice(0, 16);
+                      return (
+                        <button key={sl.id} onClick={() => setSelectedSlotId(sel ? null : sl.id)} style={{
+                          padding: '8px 11px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer',
+                          border: sel ? '2px solid #60a5fa' : has ? '1px solid rgba(163,230,53,0.4)' : '1px dashed var(--border)',
+                          background: sel ? 'rgba(96,165,250,0.15)' : has ? 'rgba(163,230,53,0.08)' : 'var(--bg-primary)',
+                          color: sel ? '#60a5fa' : has ? '#a3e635' : 'var(--text-muted)',
+                        }}>
+                          {shortLabel} {has ? '✓' : '＋'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 7, lineHeight: 1.6 }}>
+                    {(() => {
+                      const sl = template.slots.find(x => x.id === selectedSlotId);
+                      if (!sl) return '👆 แตะช่องบนปก หรือกดชิปข้างบน เพื่อเลือกช่องที่จะแต่ง · ลาก 1 นิ้ว=เลื่อนภาพ · จีบ 2 นิ้ว/สกอลล์=ซูม';
+                      const crop = slotCrops[sl.id] || {};
+                      const modeTxt = dragState ? (dragState.mode === 'crop' ? ' · 🖐️ กำลังเลื่อนภาพ' : dragState.mode === 'move' ? ' · ✋ กำลังย้ายช่อง' : dragState.mode === 'resize' ? ' · ↔️ กำลังปรับขนาด' : '') : '';
+                      return <span style={{ color: '#60a5fa', fontWeight: 700 }}>✏️ กำลังแต่ง: {sl.label} · ซูม {(crop.zoom || 1).toFixed(1)}x{modeTxt}</span>;
+                    })()}
+                  </div>
+                  {(() => {
+                    const sl = template.slots.find(x => x.id === selectedSlotId);
+                    if (!sl) return null;
+                    const img = slotImages[sl.id];
+                    const crop = slotCrops[sl.id] || { zoom: 1, panX: 0, panY: 0 };
+                    const bump = (axis, d) => setSlotCrops(prev => { const old = prev[sl.id] || { zoom: 1, panX: 0, panY: 0 }; return { ...prev, [sl.id]: { ...old, [axis]: (old[axis] || 0) + d } }; });
+                    const zoomBy = (d) => setSlotCrops(prev => { const old = prev[sl.id] || { zoom: 1, panX: 0, panY: 0 }; return { ...prev, [sl.id]: { ...old, zoom: Math.max(1, Math.min(5, +(old.zoom + d).toFixed(1))) } }; });
+                    const bigBtn = { ...s.scaleBtn, width: 40, height: 40, fontSize: 18, borderRadius: 9 };
+                    return (
+                      <div style={{ marginTop: 9, padding: 11, borderRadius: 11, background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.22)' }}>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                          <label style={{ padding: '10px 13px', borderRadius: 9, border: '1px solid rgba(163,230,53,0.35)', background: 'rgba(163,230,53,0.08)', color: '#a3e635', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                            📷 {img ? 'เปลี่ยนรูป' : 'เลือกรูป'}
+                            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { handleFile(sl.id, e.target.files?.[0]); e.target.value = ''; }} />
+                          </label>
+                          {img && <>
+                            <button onClick={() => enhanceSlotImage(sl.id)} disabled={enhancing[sl.id]} style={{ ...bigBtn, width: 'auto', padding: '0 13px', fontSize: 12, color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>
+                              {enhancing[sl.id] ? '⏳ กำลังเพิ่มคม...' : '✨ คมชัด'}
+                            </button>
+                            <button onClick={() => removeImage(sl.id)} style={{ ...bigBtn, width: 'auto', padding: '0 13px', fontSize: 12, color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>🗑 ลบ</button>
+                            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{img.naturalWidth}×{img.naturalHeight}</span>
+                          </>}
+                        </div>
+                        {img && (
+                          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <span style={{ fontSize: 11, color: '#60a5fa', fontWeight: 700 }}>🔍 ซูม</span>
+                              <button onClick={() => zoomBy(-0.2)} style={bigBtn}>−</button>
+                              <span style={{ fontSize: 13, fontWeight: 800, minWidth: 38, textAlign: 'center', color: 'var(--text-primary)' }}>{(crop.zoom || 1).toFixed(1)}x</span>
+                              <button onClick={() => zoomBy(0.2)} style={bigBtn}>＋</button>
+                            </div>
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <span style={{ fontSize: 11, color: '#60a5fa', fontWeight: 700 }}>🖐️ เลื่อนภาพ</span>
+                              <button onClick={() => bump('panX', -40)} style={bigBtn}>◀</button>
+                              <button onClick={() => bump('panY', -40)} style={bigBtn}>▲</button>
+                              <button onClick={() => bump('panY', 40)} style={bigBtn}>▼</button>
+                              <button onClick={() => bump('panX', 40)} style={bigBtn}>▶</button>
+                            </div>
+                            {sl.draggable && (
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700 }}>📐 ขนาดช่อง</span>
+                                <button onClick={() => adjustScale(sl.id, -0.1)} style={bigBtn}>−</button>
+                                <span style={{ fontSize: 13, fontWeight: 800, minWidth: 44, textAlign: 'center', color: 'var(--text-primary)' }}>{Math.round((slotScales[sl.id] || 1) * 100)}%</span>
+                                <button onClick={() => adjustScale(sl.id, 0.1)} style={bigBtn}>＋</button>
+                              </div>
+                            )}
+                            <button onClick={() => { setSlotCrops(p => ({ ...p, [sl.id]: { zoom: 1, panX: 0, panY: 0 } })); setSlotOffsets(p => ({ ...p, [sl.id]: { dx: 0, dy: 0 } })); setSlotScales(p => ({ ...p, [sl.id]: 1 })); }}
+                              style={{ ...bigBtn, width: 'auto', padding: '0 13px', fontSize: 11 }}>↺ รีเซ็ตช่องนี้</button>
+                          </div>
+                        )}
+                        {img && enhanceResults[sl.id] && !enhancing[sl.id] && (
+                          <div style={{ marginTop: 8, fontSize: 10, color: '#22c55e', fontWeight: 600 }}>
+                            ✅ เพิ่มคมแล้ว {enhanceResults[sl.id].originalResolution} → {enhanceResults[sl.id].enhancedResolution} · เหมือนต้นฉบับ {enhanceResults[sl.id].similarityScore}%
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
               {/* Quick download + status */}
               <div style={{ display:'flex', gap:8, alignItems:'center' }}>
                 <button onClick={handleDownload} disabled={!Object.keys(slotImages).length}
