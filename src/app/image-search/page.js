@@ -20,15 +20,17 @@ const PLATFORMS = [
 const PLABEL = Object.fromEntries(PLATFORMS.map(p => [p.id, p.label]));
 PLABEL.reverse = '🔍 ย้อนกลับ'; PLABEL.instagram = '📷 IG'; PLABEL.fb_profile = '📘 FB โปรไฟล์';
 
+// ★ 5 ก.ค. (ผู้ใช้: "อ่านยาก ขอสะอาดตา มินิมอล"): โทนเดียว — ฟ้า=ปุ่มหลัก/เลือก · เขียว=สำเร็จ · แดง=ลบ · ที่เหลือเทากลาง
+const ACCENT = '#60a5fa';
 const s = {
-  card: { background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 14, marginBottom: 14, padding: 14 },
-  btn: (active, color = '#a3e635') => ({
-    padding: '9px 13px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer',
-    border: `1px solid ${active ? color + '66' : 'var(--border)'}`,
-    background: active ? color + '14' : 'var(--bg-primary)',
+  card: { background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 14, marginBottom: 16, padding: 16 },
+  btn: (active, color = ACCENT) => ({
+    padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
+    border: `1px solid ${active ? color + '55' : 'var(--border)'}`,
+    background: active ? color + '14' : 'transparent',
     color: active ? color : 'var(--text-secondary)',
   }),
-  input: { padding: '10px 13px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' },
+  input: { padding: '11px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' },
 };
 
 export default function ImageSearchPage() {
@@ -135,7 +137,7 @@ export default function ImageSearchPage() {
         <div style={s.card}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>🔍 ค้นหลายแหล่งพร้อมกัน (ติ๊กเลือก)</span>
-            <a href="/cover-tester" style={{ marginLeft: 'auto', padding: '7px 13px', borderRadius: 10, fontSize: 12, fontWeight: 700, textDecoration: 'none', border: '1px solid rgba(163,230,53,0.4)', background: 'rgba(163,230,53,0.08)', color: '#a3e635' }}>
+            <a href="/cover-tester" style={{ marginLeft: 'auto', padding: '8px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, textDecoration: 'none', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)' }}>
               🎨 ไปหน้าทำปก
             </a>
           </div>
@@ -154,7 +156,7 @@ export default function ImageSearchPage() {
             style={{ ...s.input, width: '100%', resize: 'vertical', marginBottom: 10, minHeight: 58 }} />
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <button onClick={() => doSearch(selected)} disabled={!!busy}
-              style={{ ...s.btn(true, '#a78bfa'), fontSize: 13, padding: '11px 18px', opacity: busy ? 0.6 : 1 }}>
+              style={{ padding: '12px 20px', borderRadius: 10, fontSize: 14, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', border: 'none', background: '#2563eb', color: '#fff', opacity: busy ? 0.6 : 1 }}>
               🔍 ค้นแหล่งที่เลือก ({selected.length})
             </button>
             <button onClick={() => setSelected(PLATFORMS.map(p => p.id))} style={s.btn(false)}>เลือกทั้งหมด</button>
@@ -170,7 +172,7 @@ export default function ImageSearchPage() {
           {/* ค้นย้อนกลับ + โปรไฟล์ */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12, alignItems: 'center' }}>
             <input value={reverseUrl} onChange={e => setReverseUrl(e.target.value)} placeholder="วางลิงก์ภาพ → ค้นย้อนกลับ (Lens) เจอคนเดิมทุกเว็บ" style={{ ...s.input, flex: 1, minWidth: 220 }} />
-            <button onClick={doReverse} disabled={!!busy} style={s.btn(true, '#f59e0b')}>🔍 ค้นย้อนกลับ (Lens)</button>
+            <button onClick={doReverse} disabled={!!busy} style={s.btn(true)}>🔍 ค้นย้อนกลับ (Lens)</button>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
             <input value={profileName} onChange={e => setProfileName(e.target.value)} placeholder="username หรือลิงก์โปรไฟล์ IG/FB (เช่น bestrw)" style={{ ...s.input, flex: 1, minWidth: 220 }} />
@@ -181,7 +183,7 @@ export default function ImageSearchPage() {
             ข่าวสด (Google/Bing News) ตรงประเด็น · Yandex เก่งหาคนไทย · 🔍 ค้นย้อนกลับจากภาพในคลัง = เจอคนเดิมเป๊ะ · IG/FB ต้องรู้ username
           </div>
           {(busy || notice) && (
-            <div style={{ marginTop: 10, padding: '9px 13px', borderRadius: 9, fontSize: 12, fontWeight: 600, background: busy ? 'rgba(96,165,250,0.08)' : 'rgba(163,230,53,0.07)', border: `1px solid ${busy ? 'rgba(96,165,250,0.25)' : 'rgba(163,230,53,0.2)'}`, color: busy ? '#60a5fa' : 'var(--text-primary)' }}>
+            <div style={{ marginTop: 12, padding: '11px 14px', borderRadius: 10, fontSize: 13, fontWeight: 500, background: busy ? 'rgba(96,165,250,0.08)' : 'rgba(74,222,128,0.07)', border: `1px solid ${busy ? 'rgba(96,165,250,0.25)' : 'rgba(74,222,128,0.2)'}`, color: 'var(--text-primary)', lineHeight: 1.6 }}>
               {busy || notice}
             </div>
           )}
@@ -190,7 +192,7 @@ export default function ImageSearchPage() {
         {/* ── ② คลังรูปเคส ── */}
         <div style={s.card}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
-            <span style={{ fontSize: 13, fontWeight: 800, color: '#fbbf24' }}>📁 คลังรูปเคส{cur ? ` · ${images.length} รูป` : ''}</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>📁 คลังรูปเคส{cur ? ` · ${images.length} รูป` : ''}</span>
             <select value={cur?.id || ''} onChange={e => openCase(e.target.value)} style={{ ...s.input, padding: '8px 10px', fontSize: 12, maxWidth: 280 }}>
               <option value="">— เลือกเคสเก่า / ค้นใหม่=เคสใหม่อัตโนมัติ —</option>
               {cases.map(c => <option key={c.id} value={c.id}>{c.title} ({c.total})</option>)}
@@ -207,17 +209,17 @@ export default function ImageSearchPage() {
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: '#60a5fa', alignSelf: 'center' }}>เลือกแล้ว {picked.size} ใบ:</span>
               <button onClick={() => bulk('remove')} disabled={!picked.size} style={s.btn(true, '#f87171')}>🗑 ลบที่เลือก</button>
-              <button onClick={() => bulk('keep')} disabled={!picked.size} style={s.btn(true, '#a3e635')}>💾 เก็บเฉพาะที่เลือก</button>
-              <button onClick={downloadPicked} disabled={!picked.size} style={s.btn(true, '#fbbf24')}>📥 ดาวน์โหลดที่เลือก (ไปทำปก)</button>
+              <button onClick={() => bulk('keep')} disabled={!picked.size} style={s.btn(true, ACCENT)}>💾 เก็บเฉพาะที่เลือก</button>
+              <button onClick={downloadPicked} disabled={!picked.size} style={s.btn(true)}>📥 ดาวน์โหลดที่เลือก (ไปทำปก)</button>
             </div>
           )}
 
           {cur ? (
             <>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-                <button onClick={() => setTab('all')} style={s.btn(tab === 'all', '#a3e635')}>ทั้งหมด {images.length}</button>
+                <button onClick={() => setTab('all')} style={s.btn(tab === 'all', ACCENT)}>ทั้งหมด {images.length}</button>
                 {Object.entries(byPlatform).map(([p, n]) => (
-                  <button key={p} onClick={() => setTab(p)} style={s.btn(tab === p, '#a3e635')}>{PLABEL[p] || p} {n}</button>
+                  <button key={p} onClick={() => setTab(p)} style={s.btn(tab === p, ACCENT)}>{PLABEL[p] || p} {n}</button>
                 ))}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(112px, 1fr))', gap: 8 }}>
@@ -247,7 +249,7 @@ export default function ImageSearchPage() {
               </div>
               {shown.length === 0 && <div style={{ padding: 24, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>ยังไม่มีรูปในแท็บนี้</div>}
               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.7 }}>
-                💡 แตะรูป = เปิดหน้าต้นทาง · โหมดเลือก = แตะติ๊กหลายใบแล้ว ลบ/เก็บเฉพาะ/ดาวน์โหลด · ภาพที่โหลดมา → อัปโหลดเข้า <a href="/cover-tester" style={{ color: '#a3e635' }}>หน้าทำปก</a> ได้เลย
+                💡 แตะรูป = เปิดหน้าต้นทาง · โหมดเลือก = แตะติ๊กหลายใบแล้ว ลบ/เก็บเฉพาะ/ดาวน์โหลด · ภาพที่โหลดมา → อัปโหลดเข้า <a href="/cover-tester" style={{ color: ACCENT }}>หน้าทำปก</a> ได้เลย
               </div>
             </>
           ) : (

@@ -163,9 +163,9 @@ const BUILTIN_TEMPLATES = [
 // ═══════════════════════════════════════════════════════════
 const s = {
   card: { background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 14, marginBottom: 16 },
-  head: { fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 },
+  head: { fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 },
   body: { padding: 18 },
-  label: { display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 6 },
+  label: { display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 6 },
   scaleBtn: {
     width: 28, height: 28, borderRadius: 6, border: '1px solid var(--border)',
     background: 'var(--bg-primary)', color: 'var(--text-primary)',
@@ -337,12 +337,12 @@ function getEffSlot(slot, scale) {
 function TemplateThumbnail({ template, isActive, onClick }) {
   const sc = 72/W, th = H*sc;
   return (
-    <button onClick={onClick} style={{ padding:0, border: isActive ? '2px solid #a3e635':'2px solid var(--border)', borderRadius:8, background:'#1a1a2e', cursor:'pointer', width:76, height:th+4, overflow:'hidden', transition:'all .15s', boxShadow: isActive ? '0 0 12px rgba(163,230,53,0.3)':'none', flexShrink:0 }}>
+    <button onClick={onClick} style={{ padding:0, border: isActive ? '2px solid #60a5fa':'2px solid var(--border)', borderRadius:8, background:'#1a1a2e', cursor:'pointer', width:76, height:th+4, overflow:'hidden', transition:'all .15s', boxShadow: isActive ? '0 0 12px rgba(96,165,250,0.3)':'none', flexShrink:0 }}>
       <svg width={72} height={th} viewBox={`0 0 ${W} ${H}`}>
         <rect width={W} height={H} fill="#111"/>
         {template.slots.map(sl => sl.shape==='circle'
           ? <circle key={sl.id} cx={sl.x+sl.diameter/2} cy={sl.y+sl.diameter/2} r={sl.diameter/2} fill="none" stroke={sl.border||'#4FC3F7'} strokeWidth={14} opacity={0.7}/>
-          : <rect key={sl.id} x={sl.x} y={sl.y} width={sl.w} height={sl.h} fill={sl.border||(sl.id==='main'?'#a3e635':'#556')} opacity={sl.id==='main'?0.4:0.25} stroke={sl.border||'none'} strokeWidth={sl.border?12:0}/>
+          : <rect key={sl.id} x={sl.x} y={sl.y} width={sl.w} height={sl.h} fill={sl.border||(sl.id==='main'?'#60a5fa':'#556')} opacity={sl.id==='main'?0.4:0.25} stroke={sl.border||'none'} strokeWidth={sl.border?12:0}/>
         )}
       </svg>
     </button>
@@ -960,7 +960,7 @@ export default function CoverPage() {
       const eff = getEffSlot(slot, slotScales[slot.id]);
       const sx = eff.x + off.dx, sy = eff.y + off.dy;
       const isActive = dragState?.slotId === slot.id;
-      const handleColor = isActive ? 'rgba(163,230,53,0.9)' : 'rgba(255,255,255,0.5)';
+      const handleColor = isActive ? 'rgba(96,165,250,0.9)' : 'rgba(255,255,255,0.5)';
       const hs = 10; // handle visual size
 
       ctx.save();
@@ -987,7 +987,7 @@ export default function CoverPage() {
 
       // Dashed outline when active
       if (isActive) {
-        ctx.strokeStyle = 'rgba(163,230,53,0.6)'; ctx.lineWidth = 2; ctx.setLineDash([8,4]);
+        ctx.strokeStyle = 'rgba(96,165,250,0.6)'; ctx.lineWidth = 2; ctx.setLineDash([8,4]);
         if (slot.shape === 'circle') { const r = eff.diameter/2; ctx.beginPath(); ctx.arc(sx+r,sy+r,r+8,0,Math.PI*2); ctx.stroke(); }
         else ctx.strokeRect(sx-4, sy-4, eff.w+8, eff.h+8);
       }
@@ -1082,9 +1082,9 @@ export default function CoverPage() {
             onClick={() => setShowGuide(!showGuide)}
             style={{
               padding: '7px 14px', borderRadius: 10, fontSize: 12, fontWeight: 700,
-              border: `1px solid ${showGuide ? 'rgba(234,179,8,0.4)' : 'var(--border)'}`,
-              background: showGuide ? 'rgba(234,179,8,0.1)' : 'rgba(255,255,255,0.04)',
-              color: showGuide ? '#eab308' : 'var(--text-muted)',
+              border: `1px solid ${showGuide ? 'rgba(148,163,184,0.4)' : 'var(--border)'}`,
+              background: showGuide ? 'rgba(148,163,184,0.1)' : 'rgba(255,255,255,0.04)',
+              color: showGuide ? '#94a3b8' : 'var(--text-muted)',
               cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.3s',
             }}
           >
@@ -1095,8 +1095,8 @@ export default function CoverPage() {
         {showGuide && (
           <div style={{
             marginBottom: 20, padding: 24, borderRadius: 16,
-            background: 'linear-gradient(135deg, rgba(234,179,8,0.05), rgba(249,115,22,0.05))',
-            border: '1px solid rgba(234,179,8,0.15)',
+            background: 'linear-gradient(135deg, rgba(148,163,184,0.05), rgba(249,115,22,0.05))',
+            border: '1px solid rgba(148,163,184,0.15)',
             animation: 'fadeUp 0.3s ease-out both',
           }}>
             <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 18 }}>
@@ -1105,8 +1105,8 @@ export default function CoverPage() {
 
             {/* Steps */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-              <div style={{ padding: 16, borderRadius: 12, background: 'rgba(234,179,8,0.06)', border: '1px solid rgba(234,179,8,0.12)' }}>
-                <div style={{ fontSize: 14, fontWeight: 800, color: '#eab308', marginBottom: 12 }}>🎯 ขั้นตอนการใช้</div>
+              <div style={{ padding: 16, borderRadius: 12, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.12)' }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: '#94a3b8', marginBottom: 12 }}>🎯 ขั้นตอนการใช้</div>
                 {[
                   { s: '1', t: 'เลือกแทมเพลตจาก 14 แบบ (แถบซ้าย)', i: '🖼️' },
                   { s: '2', t: 'อัปโหลดรูปตามช่อง (★ ภาพหลัก, 🖼 ฉากหลัง, ⭐ ไฮไลท์, ⭕ วงกลม)', i: '📤' },
@@ -1115,28 +1115,28 @@ export default function CoverPage() {
                   { s: '5', t: 'พิมพ์ข้อความ (ถ้าแทมเพลตรองรับ)', i: '✏️' },
                   { s: '6', t: 'กด 📥 Download — ได้ภาพ 1200×1350px', i: '💾' },
                 ].map(x => (
-                  <div key={x.s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid rgba(234,179,8,0.08)' }}>
-                    <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'rgba(234,179,8,0.15)', color: '#eab308', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, flexShrink: 0 }}>{x.s}</div>
-                    <span style={{ fontSize: 11, color: 'var(--text-primary)', lineHeight: 1.5 }}>{x.i} {x.t}</span>
+                  <div key={x.s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid rgba(148,163,184,0.08)' }}>
+                    <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'rgba(148,163,184,0.15)', color: '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, flexShrink: 0 }}>{x.s}</div>
+                    <span style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5 }}>{x.i} {x.t}</span>
                   </div>
                 ))}
               </div>
 
-              <div style={{ padding: 16, borderRadius: 12, background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.12)' }}>
-                <div style={{ fontSize: 14, fontWeight: 800, color: '#8b5cf6', marginBottom: 12 }}>📐 ประเภทแทมเพลต</div>
+              <div style={{ padding: 16, borderRadius: 12, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.12)' }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: '#94a3b8', marginBottom: 12 }}>📐 ประเภทแทมเพลต</div>
                 {[
                   { cat: 'ฮีโร่ + กรอบ', ids: '1, 2, 4, 8, 10, 12, 14', color: '#FFD700' },
                   { cat: 'ฮีโร่ + วงกลม', ids: '3, 5', color: '#4FC3F7' },
                   { cat: 'ซ้อนภาพ + ข้อความ', ids: '6, 7, 9, 13', color: '#FFFFFF' },
                   { cat: 'ฮีโร่ + กรอบดำ', ids: '11', color: '#666' },
                 ].map(c => (
-                  <div key={c.cat} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid rgba(139,92,246,0.08)' }}>
+                  <div key={c.cat} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid rgba(148,163,184,0.08)' }}>
                     <div style={{ width: 14, height: 14, borderRadius: 4, background: c.color, border: '1px solid rgba(255,255,255,0.2)', flexShrink: 0 }} />
                     <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>{c.cat}</span>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>แบบ {c.ids}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>แบบ {c.ids}</span>
                   </div>
                 ))}
-                <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(139,92,246,0.08)', fontSize: 11, color: '#a78bfa' }}>
+                <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(148,163,184,0.08)', fontSize: 12, color: '#94a3b8' }}>
                   💡 แทมเพลตที่มี 📝 ข้อความ: แบบ 6, 7, 8, 9, 13
                 </div>
               </div>
@@ -1150,12 +1150,12 @@ export default function CoverPage() {
                 { icon: '⭐', label: 'ไฮไลท์', desc: 'กรอบสี ลากได้', color: '#FFD700' },
                 { icon: '⭕', label: 'วงกลม', desc: 'รูปวงกลม ลากได้', color: '#4FC3F7' },
                 { icon: '📝', label: 'ข้อความ', desc: 'พิมพ์ข้อความบนภาพ', color: '#f97316' },
-                { icon: '🤖', label: 'AI Enhance', desc: 'ปรับภาพด้วย AI', color: '#8b5cf6' },
+                { icon: '🤖', label: 'AI Enhance', desc: 'ปรับภาพด้วย AI', color: '#94a3b8' },
               ].map(s => (
-                <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 8, background: `${s.color}10`, border: `1px solid ${s.color}25`, fontSize: 11 }}>
+                <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 8, background: `${s.color}10`, border: `1px solid ${s.color}25`, fontSize: 12 }}>
                   <span>{s.icon}</span>
                   <span style={{ fontWeight: 700, color: s.color }}>{s.label}</span>
-                  <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>— {s.desc}</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>— {s.desc}</span>
                 </div>
               ))}
             </div>
@@ -1173,7 +1173,7 @@ export default function CoverPage() {
             <div style={s.card}>
               <div style={s.head}>
                 ① เลือกแทมเพลต
-                <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 'auto' }}>{templates.length} แบบ</span>
+                <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 'auto' }}>{templates.length} แบบ</span>
               </div>
               <div style={{ ...s.body, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {loadingTemplates ? (
@@ -1187,10 +1187,10 @@ export default function CoverPage() {
                   templates.map(t => (
                     <div key={t.id} style={{ textAlign: 'center', position: 'relative' }}>
                       <TemplateThumbnail template={t} isActive={templateId===t.id} onClick={() => switchTemplate(t.id)} />
-                      <div style={{ fontSize: 10, color: templateId===t.id ? '#a3e635':'var(--text-muted)', marginTop: 4, fontWeight: 700 }}>{t.name}</div>
+                      <div style={{ fontSize: 11, color: templateId===t.id ? '#60a5fa':'var(--text-muted)', marginTop: 4, fontWeight: 700 }}>{t.name}</div>
                       {t.source === 'ai_analyzed' && (
                         <button onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(t.id); }}
-                          style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', border: 'none', background: 'rgba(239,68,68,0.8)', color: '#fff', fontSize: 10, cursor: 'pointer', lineHeight: '18px', padding: 0 }}>×</button>
+                          style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', border: 'none', background: 'rgba(239,68,68,0.8)', color: '#fff', fontSize: 11, cursor: 'pointer', lineHeight: '18px', padding: 0 }}>×</button>
                       )}
                     </div>
                   ))
@@ -1201,9 +1201,9 @@ export default function CoverPage() {
                 <label style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                   padding: '10px 16px', borderRadius: 10,
-                  border: '2px dashed rgba(163,230,53,0.3)',
-                  background: 'rgba(163,230,53,0.05)',
-                  color: '#a3e635', fontSize: 12, fontWeight: 700,
+                  border: '2px dashed rgba(96,165,250,0.3)',
+                  background: 'rgba(96,165,250,0.05)',
+                  color: '#60a5fa', fontSize: 12, fontWeight: 700,
                   cursor: uploadingTemplate ? 'wait' : 'pointer',
                   transition: 'all .15s',
                   opacity: uploadingTemplate ? 0.6 : 1,
@@ -1211,26 +1211,26 @@ export default function CoverPage() {
                   {uploadingTemplate ? uploadProgress : '➕ อัพโหลดแทมเพลตใหม่ (AI วิเคราะห์อัตโนมัติ)'}
                   <input type="file" accept="image/*" onChange={handleUploadTemplate} disabled={uploadingTemplate} style={{ display: 'none' }} />
                 </label>
-                {template && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>📐 {template.desc}</div>}
+                {template && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>📐 {template.desc}</div>}
               </div>
             </div>
 
             {/* ── Image Upload ── */}
             <div style={s.card}>
-              <div style={s.head}>② อัปโหลดรูป <span style={{ fontSize:10, fontWeight:400, color:'var(--text-muted)', marginLeft:'auto' }}>{template ? `${Object.keys(slotImages).filter(k => template.slots.some(sl => sl.id===k)).length}/${template.slots.length}` : '0/0'}</span></div>
+              <div style={s.head}>② อัปโหลดรูป <span style={{ fontSize:11, fontWeight:400, color:'var(--text-muted)', marginLeft:'auto' }}>{template ? `${Object.keys(slotImages).filter(k => template.slots.some(sl => sl.id===k)).length}/${template.slots.length}` : '0/0'}</span></div>
               <div style={s.body}>
                 {uiSlots.map(slot => (
                   <div key={slot.id} style={{ marginBottom: 16 }}>
                     <label style={s.label}>
                       {slot.label}
-                      {slot.draggable && <span style={{ color:'#fbbf24', marginLeft:6, fontSize:10 }}>🔀 ลาก+ปรับขนาดได้</span>}
+                      {slot.draggable && <span style={{ color:'#94a3b8', marginLeft:6, fontSize:11 }}>🔀 ลาก+ปรับขนาดได้</span>}
                     </label>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       <label style={{
                         flex:1, padding:'10px 14px', borderRadius:10,
-                        border: slotImages[slot.id] ? '1px solid rgba(163,230,53,0.3)':'1px dashed var(--border)',
-                        background: slotImages[slot.id] ? 'rgba(163,230,53,0.06)':'var(--bg-primary)',
-                        color: slotImages[slot.id] ? '#a3e635':'var(--text-muted)',
+                        border: slotImages[slot.id] ? '1px solid rgba(96,165,250,0.3)':'1px dashed var(--border)',
+                        background: slotImages[slot.id] ? 'rgba(96,165,250,0.06)':'var(--bg-primary)',
+                        color: slotImages[slot.id] ? '#60a5fa':'var(--text-muted)',
                         fontSize:12, fontWeight:600, cursor:'pointer', textAlign:'center', transition:'all .15s',
                       }}>
                         {slotImages[slot.id] ? `✅ ${slotImages[slot.id].naturalWidth}×${slotImages[slot.id].naturalHeight}` : '📷 เลือกรูป'}
@@ -1246,9 +1246,9 @@ export default function CoverPage() {
                             title="Enhance 2x — Real-ESRGAN"
                             style={{
                               padding:'8px 10px', borderRadius:10,
-                              border:'1px solid rgba(168,85,247,0.3)',
-                              background: enhancing[slot.id] ? 'rgba(168,85,247,0.15)' : 'rgba(168,85,247,0.06)',
-                              color:'#a855f7', fontSize:10, fontWeight:700,
+                              border:'1px solid rgba(148,163,184,0.3)',
+                              background: enhancing[slot.id] ? 'rgba(148,163,184,0.15)' : 'rgba(148,163,184,0.06)',
+                              color:'#94a3b8', fontSize:11, fontWeight:700,
                               cursor: enhancing[slot.id] ? 'wait' : 'pointer',
                               fontFamily:'inherit', opacity: enhancing[slot.id] ? 0.7 : 1,
                               animation: enhancing[slot.id] ? 'pulse 1.5s infinite' : 'none',
@@ -1262,9 +1262,9 @@ export default function CoverPage() {
                             title="Enhance 4x — Real-ESRGAN"
                             style={{
                               padding:'8px 10px', borderRadius:10,
-                              border:'1px solid rgba(234,179,8,0.3)',
-                              background:'rgba(234,179,8,0.06)',
-                              color:'#eab308', fontSize:10, fontWeight:700,
+                              border:'1px solid rgba(148,163,184,0.3)',
+                              background:'rgba(148,163,184,0.06)',
+                              color:'#94a3b8', fontSize:11, fontWeight:700,
                               cursor: enhancing[slot.id] ? 'wait' : 'pointer',
                               fontFamily:'inherit',
                             }}
@@ -1279,14 +1279,14 @@ export default function CoverPage() {
                               padding:'8px 10px', borderRadius:10,
                               border:'1px solid rgba(34,197,94,0.3)',
                               background:'rgba(34,197,94,0.06)',
-                              color:'#22c55e', fontSize:10, fontWeight:700,
+                              color:'#22c55e', fontSize:11, fontWeight:700,
                               cursor: enhancing[slot.id] ? 'wait' : 'pointer',
                               fontFamily:'inherit',
                             }}
                           >
                             Auto
                           </button>
-                          <button onClick={() => removeImage(slot.id)} style={{ padding:'8px 10px', borderRadius:10, border:'1px solid rgba(239,68,68,0.3)', background:'rgba(239,68,68,0.06)', color:'#f87171', fontSize:10, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>✕</button>
+                          <button onClick={() => removeImage(slot.id)} style={{ padding:'8px 10px', borderRadius:10, border:'1px solid rgba(239,68,68,0.3)', background:'rgba(239,68,68,0.06)', color:'#f87171', fontSize:11, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>✕</button>
                         </>
                       )}
                     </div>
@@ -1299,7 +1299,7 @@ export default function CoverPage() {
                       const isVerySmall = maxDim > 0 && maxDim < 300;
                       if (enhancing[slot.id]) {
                         return (
-                          <div style={{ marginTop:4, padding:'6px 10px', borderRadius:8, background:'rgba(168,85,247,0.1)', border:'1px solid rgba(168,85,247,0.2)', fontSize:10, color:'#a855f7', fontWeight:600 }}>
+                          <div style={{ marginTop:4, padding:'6px 10px', borderRadius:8, background:'rgba(148,163,184,0.1)', border:'1px solid rgba(148,163,184,0.2)', fontSize:11, color:'#94a3b8', fontWeight:600 }}>
                             ⏳ กำลังเพิ่มความชัดด้วย Real-ESRGAN... (อาจใช้เวลา 10-30 วินาที)
                           </div>
                         );
@@ -1308,7 +1308,7 @@ export default function CoverPage() {
                       const eResult = enhanceResults[slot.id];
                       if (eResult && !isSmall && !isVerySmall) {
                         return (
-                          <div style={{ marginTop:4, padding:'8px 10px', borderRadius:8, background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.15)', fontSize:10, lineHeight:1.7 }}>
+                          <div style={{ marginTop:4, padding:'8px 10px', borderRadius:8, background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.15)', fontSize:11, lineHeight:1.7 }}>
                             <div style={{ fontWeight:700, color:'#22c55e', marginBottom:2 }}>✅ Enhanced — {eResult.enhancerUsed}</div>
                             <div style={{ color:'var(--text-muted)' }}>
                               📐 {eResult.originalResolution} → <span style={{color:'#22c55e',fontWeight:700}}>{eResult.enhancedResolution}</span>
@@ -1324,14 +1324,14 @@ export default function CoverPage() {
                       }
                       if (isVerySmall) {
                         return (
-                          <div style={{ marginTop:4, padding:'4px 10px', borderRadius:6, background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.2)', fontSize:10, color:'#f87171', fontWeight:600 }}>
+                          <div style={{ marginTop:4, padding:'4px 10px', borderRadius:6, background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.2)', fontSize:11, color:'#f87171', fontWeight:600 }}>
                             ⚠️ ภาพเล็กมาก ({iw}×{ih}) — กด ✨ เพิ่มความชัดก่อนทำปก!
                           </div>
                         );
                       }
                       if (isSmall) {
                         return (
-                          <div style={{ marginTop:4, padding:'4px 10px', borderRadius:6, background:'rgba(251,191,36,0.08)', border:'1px solid rgba(251,191,36,0.2)', fontSize:10, color:'#fbbf24', fontWeight:600 }}>
+                          <div style={{ marginTop:4, padding:'4px 10px', borderRadius:6, background:'rgba(148,163,184,0.08)', border:'1px solid rgba(148,163,184,0.2)', fontSize:11, color:'#94a3b8', fontWeight:600 }}>
                             ⚠️ ภาพเล็ก ({iw}×{ih}) — แนะนำกด ✨ เพิ่มความชัด
                           </div>
                         );
@@ -1340,14 +1340,14 @@ export default function CoverPage() {
                     })()}
                     {/* Scale controls for draggable */}
                     {slot.draggable && slotImages[slot.id] && (
-                      <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:8, padding:'6px 10px', background:'rgba(251,191,36,0.04)', borderRadius:8, border:'1px solid rgba(251,191,36,0.12)' }}>
-                        <span style={{ fontSize:10, color:'#fbbf24', fontWeight:600, whiteSpace:'nowrap' }}>📐 ขนาด</span>
+                      <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:8, padding:'6px 10px', background:'rgba(148,163,184,0.04)', borderRadius:8, border:'1px solid rgba(148,163,184,0.12)' }}>
+                        <span style={{ fontSize:11, color:'#94a3b8', fontWeight:600, whiteSpace:'nowrap' }}>📐 ขนาด</span>
                         <button onClick={() => adjustScale(slot.id, -0.1)} style={s.scaleBtn}>−</button>
                         <div style={{ flex:1, textAlign:'center', fontSize:12, fontWeight:700, color:'var(--text-primary)', minWidth:40 }}>
                           {Math.round((slotScales[slot.id]||1)*100)}%
                         </div>
                         <button onClick={() => adjustScale(slot.id, 0.1)} style={s.scaleBtn}>+</button>
-                        <button onClick={() => setSlotScales(prev => ({...prev,[slot.id]:1}))} style={{ ...s.scaleBtn, fontSize:10, width:36 }} title="รีเซ็ต">↺</button>
+                        <button onClick={() => setSlotScales(prev => ({...prev,[slot.id]:1}))} style={{ ...s.scaleBtn, fontSize:11, width:36 }} title="รีเซ็ต">↺</button>
                       </div>
                     )}
                     {slotImages[slot.id] && (
@@ -1362,12 +1362,12 @@ export default function CoverPage() {
                       return (
                         <div style={{ marginTop:6, padding:'6px 10px', background:'rgba(59,130,246,0.04)', borderRadius:8, border:'1px solid rgba(59,130,246,0.12)' }}>
                           <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-                            <span style={{ fontSize:10, color:'#60a5fa', fontWeight:600 }}>🔍</span>
+                            <span style={{ fontSize:11, color:'#60a5fa', fontWeight:600 }}>🔍</span>
                             <button onClick={() => setSlotCrops(prev => {
                               const old = prev[slot.id] || { zoom: 1, panX: 0, panY: 0 };
                               return { ...prev, [slot.id]: { ...old, zoom: Math.max(1, Math.round((old.zoom - 0.2) * 10) / 10) } };
                             })} style={s.scaleBtn}>−</button>
-                            <div style={{ flex:1, textAlign:'center', fontSize:11, fontWeight:700, color: (crop.zoom||1) > 1 ? '#60a5fa' : 'var(--text-muted)' }}>
+                            <div style={{ flex:1, textAlign:'center', fontSize:12, fontWeight:700, color: (crop.zoom||1) > 1 ? '#60a5fa' : 'var(--text-muted)' }}>
                               {(crop.zoom||1).toFixed(1)}x
                             </div>
                             <button onClick={() => setSlotCrops(prev => {
@@ -1375,10 +1375,10 @@ export default function CoverPage() {
                               return { ...prev, [slot.id]: { ...old, zoom: Math.min(5, Math.round((old.zoom + 0.2) * 10) / 10) } };
                             })} style={s.scaleBtn}>+</button>
                             {!isDefault && (
-                              <button onClick={() => setSlotCrops(prev => ({...prev, [slot.id]: { zoom: 1, panX: 0, panY: 0 }}))} style={{ ...s.scaleBtn, fontSize:10, width:28 }} title="รีเซ็ต">↺</button>
+                              <button onClick={() => setSlotCrops(prev => ({...prev, [slot.id]: { zoom: 1, panX: 0, panY: 0 }}))} style={{ ...s.scaleBtn, fontSize:11, width:28 }} title="รีเซ็ต">↺</button>
                             )}
                           </div>
-                          <div style={{ fontSize:9, color:'var(--text-muted)', marginTop:4, textAlign:'center' }}>
+                          <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4, textAlign:'center' }}>
                             🖱️ ลากบนปก = เลื่อนภาพ • Scroll = ซูม
                           </div>
                         </div>
@@ -1395,16 +1395,16 @@ export default function CoverPage() {
                         });
                       };
                       return (
-                        <div style={{ marginTop:4, padding:'4px 10px', background:'rgba(251,191,36,0.04)', borderRadius:8, border:'1px solid rgba(251,191,36,0.12)', display:'flex', gap:4, alignItems:'center' }}>
-                          <span style={{ fontSize:10, color:'#fbbf24', fontWeight:600, width:32 }}>📐</span>
+                        <div style={{ marginTop:4, padding:'4px 10px', background:'rgba(148,163,184,0.04)', borderRadius:8, border:'1px solid rgba(148,163,184,0.12)', display:'flex', gap:4, alignItems:'center' }}>
+                          <span style={{ fontSize:11, color:'#94a3b8', fontWeight:600, width:32 }}>📐</span>
                           <button onClick={() => moveSlot('dx', -30)} style={s.scaleBtn} title="เลื่อนซ้าย">◀</button>
                           <button onClick={() => moveSlot('dy', -30)} style={s.scaleBtn} title="เลื่อนขึ้น">▲</button>
                           <button onClick={() => moveSlot('dy', 30)} style={s.scaleBtn} title="เลื่อนลง">▼</button>
                           <button onClick={() => moveSlot('dx', 30)} style={s.scaleBtn} title="เลื่อนขวา">▶</button>
                           {hasOff && (
                             <>
-                              <button onClick={() => setSlotOffsets(prev => ({...prev, [slot.id]: {dx:0,dy:0}}))} style={{...s.scaleBtn, fontSize:10, width:28}} title="รีเซ็ต">↺</button>
-                              <span style={{ fontSize:9, color:'var(--text-muted)', marginLeft:2 }}>
+                              <button onClick={() => setSlotOffsets(prev => ({...prev, [slot.id]: {dx:0,dy:0}}))} style={{...s.scaleBtn, fontSize:11, width:28}} title="รีเซ็ต">↺</button>
+                              <span style={{ fontSize:10, color:'var(--text-muted)', marginLeft:2 }}>
                                 X:{off.dx||0} Y:{off.dy||0}
                               </span>
                             </>
@@ -1436,41 +1436,41 @@ export default function CoverPage() {
                           fontSize:13, fontFamily:'inherit', boxSizing:'border-box', outline:'none',
                         }} />
                       {/* Font Size + Text Color controls */}
-                      <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:6, padding:'6px 10px', background:'rgba(163,230,53,0.04)', borderRadius:8, border:'1px solid rgba(163,230,53,0.12)', flexWrap:'wrap' }}>
-                        <span style={{ fontSize:10, color:'#a3e635', fontWeight:600, whiteSpace:'nowrap' }}>🔤 ขนาด</span>
+                      <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:6, padding:'6px 10px', background:'rgba(96,165,250,0.04)', borderRadius:8, border:'1px solid rgba(96,165,250,0.12)', flexWrap:'wrap' }}>
+                        <span style={{ fontSize:11, color:'#60a5fa', fontWeight:600, whiteSpace:'nowrap' }}>🔤 ขนาด</span>
                         <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], fontSize: Math.max(20, curSize - 4)}}))} style={s.scaleBtn}>−</button>
-                        <span style={{ fontSize:11, fontWeight:700, color:'var(--text-primary)', minWidth:30, textAlign:'center' }}>{curSize}</span>
+                        <span style={{ fontSize:12, fontWeight:700, color:'var(--text-primary)', minWidth:30, textAlign:'center' }}>{curSize}</span>
                         <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], fontSize: Math.min(80, curSize + 4)}}))} style={s.scaleBtn}>+</button>
                         <span style={{ width:1, height:16, background:'var(--border)', margin:'0 4px' }} />
-                        <span style={{ fontSize:10, color:'#a3e635', fontWeight:600, whiteSpace:'nowrap' }}>🎨 สี</span>
+                        <span style={{ fontSize:11, color:'#60a5fa', fontWeight:600, whiteSpace:'nowrap' }}>🎨 สี</span>
                         <input type="color" value={curColor}
                           onChange={e => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], color: e.target.value}}))}
                           style={{ width:24, height:24, border:'1px solid var(--border)', borderRadius:6, cursor:'pointer', padding:0, background:'none' }} />
                       </div>
                       {/* Position controls */}
                       <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:4, padding:'6px 10px', background:'rgba(96,165,250,0.04)', borderRadius:8, border:'1px solid rgba(96,165,250,0.12)' }}>
-                        <span style={{ fontSize:10, color:'#60a5fa', fontWeight:600, whiteSpace:'nowrap' }}>📍 ตำแหน่ง</span>
+                        <span style={{ fontSize:11, color:'#60a5fa', fontWeight:600, whiteSpace:'nowrap' }}>📍 ตำแหน่ง</span>
                         <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], dy: (ov.dy||0) - 30}}))} style={s.scaleBtn}>▲</button>
                         <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], dy: (ov.dy||0) + 30}}))} style={s.scaleBtn}>▼</button>
                         <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], dx: (ov.dx||0) - 30}}))} style={s.scaleBtn}>◀</button>
                         <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], dx: (ov.dx||0) + 30}}))} style={s.scaleBtn}>▶</button>
-                        {(ov.dx || ov.dy) && <span style={{ fontSize:9, color:'var(--text-muted)' }}>x{ov.dx>0?'+':''}{ov.dx||0} y{ov.dy>0?'+':''}{ov.dy||0}</span>}
+                        {(ov.dx || ov.dy) && <span style={{ fontSize:10, color:'var(--text-muted)' }}>x{ov.dx>0?'+':''}{ov.dx||0} y{ov.dy>0?'+':''}{ov.dy||0}</span>}
                         {(ov.fontSize || ov.color || ov.dx || ov.dy) && (
                           <button onClick={() => setTextOverrides(p => { const n={...p}; delete n[ts.id]; return n; })}
-                            style={{ fontSize:10, padding:'2px 8px', borderRadius:4, border:'1px solid var(--border)', background:'none', color:'var(--text-muted)', cursor:'pointer', fontFamily:'inherit', marginLeft:'auto' }}>↺ รีเซ็ต</button>
+                            style={{ fontSize:11, padding:'2px 8px', borderRadius:4, border:'1px solid var(--border)', background:'none', color:'var(--text-muted)', cursor:'pointer', fontFamily:'inherit', marginLeft:'auto' }}>↺ รีเซ็ต</button>
                         )}
                       </div>
                       {/* Color picker for editable bg */}
                       {(ts.bg || ts.bgEditable) && (
                         <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:4, padding:'6px 10px', background:'rgba(255,215,0,0.04)', borderRadius:8, border:'1px solid rgba(255,215,0,0.12)' }}>
-                          <span style={{ fontSize:10, color:'#fbbf24', fontWeight:600, whiteSpace:'nowrap' }}>🎨 สีแถบ</span>
+                          <span style={{ fontSize:11, color:'#94a3b8', fontWeight:600, whiteSpace:'nowrap' }}>🎨 สีแถบ</span>
                           <input type="color" value={textBgColors[ts.id] || ts.bg || '#1a1a2e'}
                             onChange={e => setTextBgColors(p => ({...p,[ts.id]:e.target.value}))}
                             style={{ width:24, height:24, border:'1px solid var(--border)', borderRadius:6, cursor:'pointer', padding:0, background:'none' }} />
-                          <span style={{ fontSize:10, color:'var(--text-muted)', flex:1 }}>{textBgColors[ts.id] || ts.bg || 'default'}</span>
+                          <span style={{ fontSize:11, color:'var(--text-muted)', flex:1 }}>{textBgColors[ts.id] || ts.bg || 'default'}</span>
                           {textBgColors[ts.id] && (
                             <button onClick={() => setTextBgColors(p => { const n={...p}; delete n[ts.id]; return n; })}
-                              style={{ fontSize:10, padding:'2px 8px', borderRadius:4, border:'1px solid var(--border)', background:'none', color:'var(--text-muted)', cursor:'pointer', fontFamily:'inherit' }}>↺</button>
+                              style={{ fontSize:11, padding:'2px 8px', borderRadius:4, border:'1px solid var(--border)', background:'none', color:'var(--text-muted)', cursor:'pointer', fontFamily:'inherit' }}>↺</button>
                           )}
                         </div>
                       )}
@@ -1483,10 +1483,10 @@ export default function CoverPage() {
 
             {/* ── Drag/Resize hint ── */}
             {hasDraggables && (
-              <div style={{ padding:'10px 14px', borderRadius:10, marginBottom:12, background:'rgba(251,191,36,0.06)', border:'1px solid rgba(251,191,36,0.2)', fontSize:11, color:'#fbbf24', lineHeight:1.7 }}>
+              <div style={{ padding:'10px 14px', borderRadius:10, marginBottom:12, background:'rgba(148,163,184,0.06)', border:'1px solid rgba(148,163,184,0.2)', fontSize:12, color:'#94a3b8', lineHeight:1.7 }}>
                 🔀 <strong>ลาก</strong>ตรงกลาง = ขยับ &nbsp;|&nbsp; ลาก<strong>ขอบ/มุม</strong> = ปรับขนาด
                 {(hasOffsets || hasScaleChanges) && (
-                  <button onClick={resetAll} style={{ display:'block', marginTop:6, padding:'4px 12px', borderRadius:6, border:'1px solid rgba(251,191,36,0.3)', background:'rgba(251,191,36,0.1)', color:'#fbbf24', fontSize:10, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>🔄 รีเซ็ตตำแหน่ง+ขนาดทั้งหมด</button>
+                  <button onClick={resetAll} style={{ display:'block', marginTop:6, padding:'4px 12px', borderRadius:6, border:'1px solid rgba(148,163,184,0.3)', background:'rgba(148,163,184,0.1)', color:'#94a3b8', fontSize:11, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>🔄 รีเซ็ตตำแหน่ง+ขนาดทั้งหมด</button>
                 )}
               </div>
             )}
@@ -1494,16 +1494,16 @@ export default function CoverPage() {
             {/* ── Download ── */}
             <button onClick={handleDownload} disabled={!allSlotsFilled} style={{
               width:'100%', padding:'16px', borderRadius:12, border:'none',
-              background: allSlotsFilled ? 'linear-gradient(135deg,#a3e635,#059669)':'var(--bg-elevated)',
-              color: allSlotsFilled ? '#000':'var(--text-muted)',
+              background: allSlotsFilled ? '#2563eb' : 'var(--bg-elevated)',
+              color: allSlotsFilled ? '#fff' : 'var(--text-muted)',
               fontWeight:900, fontSize:15, cursor: allSlotsFilled ? 'pointer':'not-allowed',
               fontFamily:'inherit', transition:'all .2s',
-              boxShadow: allSlotsFilled ? '0 6px 25px rgba(163,230,53,0.25)':'none',
+              boxShadow: allSlotsFilled ? '0 6px 25px rgba(96,165,250,0.25)':'none',
             }}>
               {downloaded ? '✅ ดาวน์โหลดแล้ว!' : `📥 ดาวน์โหลดปก (${W}×${H})`}
             </button>
 
-            <div style={{ marginTop:12, padding:'12px 14px', background:'rgba(163,230,53,0.04)', borderRadius:10, fontSize:11, color:'var(--text-muted)', lineHeight:1.8 }}>
+            <div style={{ marginTop:12, padding:'12px 14px', background:'rgba(96,165,250,0.04)', borderRadius:10, fontSize:12, color:'var(--text-muted)', lineHeight:1.8 }}>
               💡 <strong style={{ color:'var(--text-secondary)' }}>วิธีใช้:</strong><br/>
               1. เลือกแทมเพลต (แบบ 1-{templates.length})<br/>
               2. อัปโหลดรูปแต่ละช่อง<br/>
@@ -1517,12 +1517,12 @@ export default function CoverPage() {
           <div style={{ ...s.card, position: isMobile ? 'static' : 'sticky', top: 70, alignSelf: 'start', order: isMobile ? 1 : 0, minWidth: 0 }}>
             <div style={s.head}>
               ตัวอย่างปก
-              <span style={{ fontSize:10, fontWeight:400, color:'var(--text-muted)', marginLeft:'auto' }}>{W}×{H}px • {template?.name || '—'}</span>
+              <span style={{ fontSize:11, fontWeight:400, color:'var(--text-muted)', marginLeft:'auto' }}>{W}×{H}px • {template?.name || '—'}</span>
             </div>
             <div style={{ ...s.body, display:'flex', flexDirection:'column', gap:12 }}>
               <div style={{
                 borderRadius:12, overflow:'hidden',
-                border: allSlotsFilled ? '2px solid #a3e635':'2px dashed rgba(255,255,255,0.08)',
+                border: allSlotsFilled ? '2px solid #60a5fa':'2px dashed rgba(255,255,255,0.08)',
                 background:'#111119',
                 cursor: dragState ? (dragState.mode==='resize' ? 'nwse-resize':'grabbing') : hoverCursor,
               }}>
@@ -1573,16 +1573,16 @@ export default function CoverPage() {
                       return (
                         <button key={sl.id} onClick={() => setSelectedSlotId(sel ? null : sl.id)} style={{
                           padding: '8px 11px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer',
-                          border: sel ? '2px solid #60a5fa' : has ? '1px solid rgba(163,230,53,0.4)' : '1px dashed var(--border)',
-                          background: sel ? 'rgba(96,165,250,0.15)' : has ? 'rgba(163,230,53,0.08)' : 'var(--bg-primary)',
-                          color: sel ? '#60a5fa' : has ? '#a3e635' : 'var(--text-muted)',
+                          border: sel ? '2px solid #60a5fa' : has ? '1px solid rgba(96,165,250,0.4)' : '1px dashed var(--border)',
+                          background: sel ? 'rgba(96,165,250,0.15)' : has ? 'rgba(96,165,250,0.08)' : 'var(--bg-primary)',
+                          color: sel ? '#60a5fa' : has ? '#60a5fa' : 'var(--text-muted)',
                         }}>
                           {shortLabel} {has ? '✓' : '＋'}
                         </button>
                       );
                     })}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 7, lineHeight: 1.6 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 7, lineHeight: 1.6 }}>
                     {(() => {
                       const sl = template.slots.find(x => x.id === selectedSlotId);
                       if (!sl) return '👆 แตะช่องบนปก หรือกดชิปข้างบน เพื่อเลือกช่องที่จะแต่ง · ลาก 1 นิ้ว=เลื่อนภาพ · จีบ 2 นิ้ว/สกอลล์=ซูม';
@@ -1602,7 +1602,7 @@ export default function CoverPage() {
                     return (
                       <div style={{ marginTop: 9, padding: 11, borderRadius: 11, background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.22)' }}>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                          <label style={{ padding: '10px 13px', borderRadius: 9, border: '1px solid rgba(163,230,53,0.35)', background: 'rgba(163,230,53,0.08)', color: '#a3e635', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                          <label style={{ padding: '10px 13px', borderRadius: 9, border: '1px solid rgba(96,165,250,0.35)', background: 'rgba(96,165,250,0.08)', color: '#60a5fa', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
                             📷 {img ? 'เปลี่ยนรูป' : 'เลือกรูป'}
                             <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { handleFile(sl.id, e.target.files?.[0]); e.target.value = ''; }} />
                           </label>
@@ -1611,19 +1611,19 @@ export default function CoverPage() {
                               {enhancing[sl.id] ? '⏳ กำลังเพิ่มคม...' : '✨ คมชัด'}
                             </button>
                             <button onClick={() => removeImage(sl.id)} style={{ ...bigBtn, width: 'auto', padding: '0 13px', fontSize: 12, color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>🗑 ลบ</button>
-                            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{img.naturalWidth}×{img.naturalHeight}</span>
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{img.naturalWidth}×{img.naturalHeight}</span>
                           </>}
                         </div>
                         {img && (
                           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <span style={{ fontSize: 11, color: '#60a5fa', fontWeight: 700 }}>🔍 ซูม</span>
+                              <span style={{ fontSize: 12, color: '#60a5fa', fontWeight: 700 }}>🔍 ซูม</span>
                               <button onClick={() => zoomBy(-0.2)} style={bigBtn}>−</button>
                               <span style={{ fontSize: 13, fontWeight: 800, minWidth: 38, textAlign: 'center', color: 'var(--text-primary)' }}>{(crop.zoom || 1).toFixed(1)}x</span>
                               <button onClick={() => zoomBy(0.2)} style={bigBtn}>＋</button>
                             </div>
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <span style={{ fontSize: 11, color: '#60a5fa', fontWeight: 700 }}>🖐️ เลื่อนภาพ</span>
+                              <span style={{ fontSize: 12, color: '#60a5fa', fontWeight: 700 }}>🖐️ เลื่อนภาพ</span>
                               <button onClick={() => bump('panX', -40)} style={bigBtn}>◀</button>
                               <button onClick={() => bump('panY', -40)} style={bigBtn}>▲</button>
                               <button onClick={() => bump('panY', 40)} style={bigBtn}>▼</button>
@@ -1631,14 +1631,14 @@ export default function CoverPage() {
                             </div>
                             {sl.draggable && (
                               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700 }}>📐 ขนาดช่อง</span>
+                                <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>📐 ขนาดช่อง</span>
                                 <button onClick={() => adjustScale(sl.id, -0.1)} style={bigBtn}>−</button>
                                 <span style={{ fontSize: 13, fontWeight: 800, minWidth: 44, textAlign: 'center', color: 'var(--text-primary)' }}>{Math.round((slotScales[sl.id] || 1) * 100)}%</span>
                                 <button onClick={() => adjustScale(sl.id, 0.1)} style={bigBtn}>＋</button>
                               </div>
                             )}
                             <button onClick={() => { setSlotCrops(p => ({ ...p, [sl.id]: { zoom: 1, panX: 0, panY: 0 } })); setSlotOffsets(p => ({ ...p, [sl.id]: { dx: 0, dy: 0 } })); setSlotScales(p => ({ ...p, [sl.id]: 1 })); }}
-                              style={{ ...bigBtn, width: 'auto', padding: '0 13px', fontSize: 11 }}>↺ รีเซ็ตช่องนี้</button>
+                              style={{ ...bigBtn, width: 'auto', padding: '0 13px', fontSize: 12 }}>↺ รีเซ็ตช่องนี้</button>
                           </div>
                         )}
                         {/* ★ 4 ก.ค. รอบ 2 — ลูกเล่นรายช่อง: เฟด / สีขอบ / ขาวดำไว้อาลัย */}
@@ -1646,13 +1646,13 @@ export default function CoverPage() {
                           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
                             {(sl.fadeLeft || sl.fadeRight || sl.fadeTop || sl.fadeBottom) ? (
                               <button onClick={() => setSlotFades(p => ({ ...p, [sl.id]: p[sl.id] === 'off' ? undefined : 'off' }))}
-                                style={{ ...bigBtn, width: 'auto', padding: '0 12px', fontSize: 11, color: slotFades[sl.id] === 'off' ? '#f87171' : '#a3e635', border: `1px solid ${slotFades[sl.id] === 'off' ? 'rgba(239,68,68,0.35)' : 'rgba(163,230,53,0.35)'}` }}>
+                                style={{ ...bigBtn, width: 'auto', padding: '0 12px', fontSize: 12, color: slotFades[sl.id] === 'off' ? '#f87171' : '#60a5fa', border: `1px solid ${slotFades[sl.id] === 'off' ? 'rgba(239,68,68,0.35)' : 'rgba(96,165,250,0.35)'}` }}>
                                 🌫️ เฟดช่องนี้: {slotFades[sl.id] === 'off' ? 'ปิด' : 'เปิด'}
                               </button>
                             ) : null}
                             {sl.border && (
                               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700 }}>🎨 สีขอบ</span>
+                                <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>🎨 สีขอบ</span>
                                 <input type="color" value={slotBorderColors[sl.id] || sl.border || '#ffffff'}
                                   onChange={e => setSlotBorderColors(p => ({ ...p, [sl.id]: e.target.value }))}
                                   style={{ width: 34, height: 34, border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', padding: 0, background: 'none' }} />
@@ -1662,16 +1662,16 @@ export default function CoverPage() {
                               </div>
                             )}
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <span style={{ fontSize: 11, color: '#cbd5e1', fontWeight: 700 }}>🕯️ ขาวดำช่องนี้</span>
+                              <span style={{ fontSize: 12, color: '#cbd5e1', fontWeight: 700 }}>🕯️ ขาวดำช่องนี้</span>
                               <input type="range" min="0" max="100" step="10" value={Math.round((slotGray[sl.id] || 0) * 100)}
                                 onChange={e => setSlotGray(p => ({ ...p, [sl.id]: Number(e.target.value) / 100 }))}
                                 style={{ width: 110 }} />
-                              <span style={{ fontSize: 11, fontWeight: 800, minWidth: 34, color: (slotGray[sl.id] || 0) > 0 ? '#cbd5e1' : 'var(--text-muted)' }}>{Math.round((slotGray[sl.id] || 0) * 100)}%</span>
+                              <span style={{ fontSize: 12, fontWeight: 800, minWidth: 34, color: (slotGray[sl.id] || 0) > 0 ? '#cbd5e1' : 'var(--text-muted)' }}>{Math.round((slotGray[sl.id] || 0) * 100)}%</span>
                             </div>
                           </div>
                         )}
                         {img && enhanceResults[sl.id] && !enhancing[sl.id] && (
-                          <div style={{ marginTop: 8, fontSize: 10, color: '#22c55e', fontWeight: 600 }}>
+                          <div style={{ marginTop: 8, fontSize: 11, color: '#22c55e', fontWeight: 600 }}>
                             ✅ เพิ่มคมแล้ว {enhanceResults[sl.id].originalResolution} → {enhanceResults[sl.id].enhancedResolution} · เหมือนต้นฉบับ {enhanceResults[sl.id].similarityScore}%
                           </div>
                         )}
@@ -1684,32 +1684,32 @@ export default function CoverPage() {
                     <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
                       <button onClick={() => setFadeAllOff(v => !v)}
                         style={{ padding: '9px 13px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer',
-                          border: `1px solid ${fadeAllOff ? 'rgba(239,68,68,0.4)' : 'rgba(163,230,53,0.35)'}`,
-                          background: fadeAllOff ? 'rgba(239,68,68,0.1)' : 'rgba(163,230,53,0.06)',
-                          color: fadeAllOff ? '#f87171' : '#a3e635' }}>
+                          border: `1px solid ${fadeAllOff ? 'rgba(239,68,68,0.4)' : 'rgba(96,165,250,0.35)'}`,
+                          background: fadeAllOff ? 'rgba(239,68,68,0.1)' : 'rgba(96,165,250,0.06)',
+                          color: fadeAllOff ? '#f87171' : '#60a5fa' }}>
                         🌫️ เฟดขอบภาพทั้งใบ: {fadeAllOff ? 'ปิดหมด' : 'ตามแทมเพลต'}
                       </button>
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                        <span style={{ fontSize: 11, color: '#cbd5e1', fontWeight: 700 }}>🕯️ โทนไว้อาลัยทั้งใบ</span>
+                        <span style={{ fontSize: 12, color: '#cbd5e1', fontWeight: 700 }}>🕯️ โทนไว้อาลัยทั้งใบ</span>
                         <input type="range" min="0" max="100" step="10" value={Math.round(grayAll * 100)}
                           onChange={e => setGrayAll(Number(e.target.value) / 100)} style={{ width: 120 }} />
-                        <span style={{ fontSize: 11, fontWeight: 800, minWidth: 34, color: grayAll > 0 ? '#cbd5e1' : 'var(--text-muted)' }}>{Math.round(grayAll * 100)}%</span>
+                        <span style={{ fontSize: 12, fontWeight: 800, minWidth: 34, color: grayAll > 0 ? '#cbd5e1' : 'var(--text-muted)' }}>{Math.round(grayAll * 100)}%</span>
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
-                      <span style={{ fontSize: 11, color: '#f87171', fontWeight: 700 }}>🔴 เน้นจุดข่าว</span>
+                      <span style={{ fontSize: 12, color: '#f87171', fontWeight: 700 }}>🔴 เน้นจุดข่าว</span>
                       <button onClick={() => addMarker('circle')} style={{ padding: '9px 13px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.07)', color: '#f87171' }}>⭕ เพิ่มวงแดง</button>
                       <button onClick={() => addMarker('rect')} style={{ padding: '9px 13px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.07)', color: '#f87171' }}>▭ เพิ่มกรอบแดง</button>
                       {(() => {
                         const mk = markers.find(m => m.id === selectedMarkerId);
                         if (!mk) return markers.length > 0
-                          ? <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>แตะวง/กรอบบนปกเพื่อเลือก · ลากใน=ย้าย ขอบ=ย่อขยาย</span>
+                          ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>แตะวง/กรอบบนปกเพื่อเลือก · ลากใน=ย้าย ขอบ=ย่อขยาย</span>
                           : null;
                         return (
                           <>
                             <input type="color" value={mk.color} onChange={e => setMarkers(prev => prev.map(m => m.id === mk.id ? { ...m, color: e.target.value } : m))}
                               style={{ width: 34, height: 34, border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', padding: 0, background: 'none' }} />
-                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>เส้น</span>
+                            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>เส้น</span>
                             <button onClick={() => setMarkers(prev => prev.map(m => m.id === mk.id ? { ...m, width: Math.max(3, (m.width || 10) - 3) } : m))} style={{ ...s.scaleBtn, width: 34, height: 34 }}>−</button>
                             <span style={{ fontSize: 12, fontWeight: 800, minWidth: 22, textAlign: 'center', color: 'var(--text-primary)' }}>{mk.width || 10}</span>
                             <button onClick={() => setMarkers(prev => prev.map(m => m.id === mk.id ? { ...m, width: Math.min(30, (m.width || 10) + 3) } : m))} style={{ ...s.scaleBtn, width: 34, height: 34 }}>＋</button>
@@ -1728,15 +1728,15 @@ export default function CoverPage() {
                 <button onClick={handleDownload} disabled={!Object.keys(slotImages).length}
                   style={{
                     flex:1, padding:'10px 0', borderRadius:10, border:'none',
-                    background: allSlotsFilled ? 'linear-gradient(135deg,#a3e635,#22c55e)' : 'rgba(163,230,53,0.15)',
-                    color: allSlotsFilled ? '#000' : '#a3e635',
+                    background: allSlotsFilled ? '#2563eb' : 'rgba(96,165,250,0.12)',
+                    color: allSlotsFilled ? '#fff' : '#60a5fa',
                     fontSize:13, fontWeight:800, cursor:'pointer', fontFamily:'inherit',
                     opacity: Object.keys(slotImages).length ? 1 : 0.4,
                     transition:'all .2s',
                   }}>
                   📥 {downloaded ? 'ดาวน์โหลดอีกครั้ง' : 'Download JPEG'}
                 </button>
-                <span style={{ fontSize:10, color:'var(--text-muted)', whiteSpace:'nowrap' }}>
+                <span style={{ fontSize:11, color:'var(--text-muted)', whiteSpace:'nowrap' }}>
                   {template ? `${Object.keys(slotImages).filter(k => template.slots.some(sl => sl.id===k)).length}/${template.slots.length} รูป` : ''}
                 </span>
               </div>
