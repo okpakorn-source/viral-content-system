@@ -119,17 +119,28 @@ export async function POST(req) {
       if (newsText.length < 40) {
         return NextResponse.json({ success: false, error: 'กรุณาใส่เนื้อข่าวเต็ม (อย่างน้อย 40 ตัวอักษร)', errorType: 'NEWS_TOO_SHORT' }, { status: 400 });
       }
+      // เรียกสมอง + parse — ล้ม (JSON โดนตัด/มีข้อความปน) → ลองซ้ำ 1 ครั้ง
+      // ★ 5 ก.ค.: maxTokens 4000→8000 — ข่าวตัวละครเยอะ (ทายาท/อัยการ/หลายฝ่าย) ผลวิเคราะห์ยาวจน JSON โดนตัด = ล้มเงียบ
+      const brainJson = async (system, user) => {
+        let r = await callBrain({ system, user, maxTokens: 8000 });
+        let j = safeParseJson(r.text);
+        if (!j) {
+          r = await callBrain({ system, user: user + '\n\n(ย้ำอีกครั้ง: ตอบเป็น JSON ล้วนเท่านั้น ห้ามมีข้อความอื่นใดนอก JSON)', maxTokens: 8000 });
+          j = safeParseJson(r.text);
+        }
+        return { json: j, provider: r.provider };
+      };
       // ขั้น 1: วิเคราะห์ข่าวตามกรอบตายตัว (ห้ามเดา/ห้ามเดาเพศ)
-      const a = await callBrain({ system: buildAnalysisSystemPrompt(), user: buildAnalysisUserPrompt(newsText), maxTokens: 4000 });
-      const analysis = safeParseJson(a.text);
+      const a = await brainJson(buildAnalysisSystemPrompt(), buildAnalysisUserPrompt(newsText));
+      const analysis = a.json;
       if (!analysis || !analysis.headline) {
-        return NextResponse.json({ success: false, error: 'สมอง AI วิเคราะห์ไม่สำเร็จ (ตอบไม่เป็น JSON)', errorType: 'BAD_AI_JSON' }, { status: 502 });
+        return NextResponse.json({ success: false, error: 'สมอง AI วิเคราะห์ไม่สำเร็จ (ตอบไม่เป็น JSON แม้ลองซ้ำ) — ลองกดใหม่อีกครั้ง', errorType: 'BAD_AI_JSON' }, { status: 502 });
       }
       // ขั้น 2: สกัดคีย์เวิร์ดค้นภาพ (ผูกชื่อบุคคลเสมอ ห้ามคำค้นวัตถุลอย)
-      const k = await callBrain({ system: buildKeywordSystemPrompt(), user: buildKeywordUserPrompt(analysis, newsText), maxTokens: 4000 });
-      const keywords = safeParseJson(k.text);
+      const k = await brainJson(buildKeywordSystemPrompt(), buildKeywordUserPrompt(analysis, newsText));
+      const keywords = k.json;
       if (!keywords || !Array.isArray(keywords.subjects)) {
-        return NextResponse.json({ success: false, error: 'สกัดคีย์เวิร์ดไม่สำเร็จ (ตอบไม่เป็น JSON)', errorType: 'BAD_AI_JSON' }, { status: 502 });
+        return NextResponse.json({ success: false, error: 'สกัดคีย์เวิร์ดไม่สำเร็จ (ตอบไม่เป็น JSON แม้ลองซ้ำ) — ลองกดใหม่อีกครั้ง', errorType: 'BAD_AI_JSON' }, { status: 502 });
       }
       // เคสใหม่ (หรืออัปเดตเคสเดิมถ้าส่ง caseId มา)
       let c = body.caseId ? await loadCase(store, body.caseId) : null;

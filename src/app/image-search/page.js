@@ -118,8 +118,11 @@ export default function ImageSearchPage() {
   const doAnalyze = async () => {
     if (newsText.trim().length < 40) { setNotice('⚠️ วางเนื้อข่าวเต็มก่อน (อย่างน้อย 40 ตัวอักษร)'); return; }
     const d = await post({ action: 'analyze', caseId: cur?.id || null, newsText: newsText.trim() },
-      '🧠 AI กำลังอ่านข่าวทั้งหมด → วิเคราะห์ตัวละคร/แก่นเรื่อง → สกัดคีย์เวิร์ดค้นภาพ... (~30-60 วิ)');
-    if (d) setNotice(`✅ วิเคราะห์เสร็จ: "${(d.case?.analysis?.headline || '').slice(0, 60)}" · ตัวละคร ${(d.case?.keywords?.subjects || []).length} · คำค้นพร้อมยิง ${d.queriesPreview?.length || 0} คำ — กดค้นภาพได้เลย`);
+      '🧠 AI กำลังอ่านข่าวทั้งหมด → วิเคราะห์ตัวละคร/แก่นเรื่อง → สกัดคีย์เวิร์ดค้นภาพ... (ข่าวสั้น ~1 นาที · ข่าวยาว/ตัวละครเยอะ ~2 นาที — อย่าเพิ่งปิดหน้า)');
+    if (d) {
+      setNotice(`✅ วิเคราะห์เสร็จ: "${(d.case?.analysis?.headline || '').slice(0, 60)}" · ตัวละคร ${(d.case?.keywords?.subjects || []).length} · คำค้นพร้อมยิง ${d.queriesPreview?.length || 0} คำ — กดค้นภาพ (ขั้น ②) ได้เลย`);
+      setTimeout(() => { try { document.getElementById('analysis-result')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { /* เงียบ */ } }, 350);
+    }
   };
 
   // ★ ค้นด้วยคีย์เวิร์ดที่สกัดจากข่าว (buildQueries: สมดุลต่อคน + การันตีหลักฐาน/สถานที่)
@@ -194,10 +197,16 @@ export default function ImageSearchPage() {
             style={{ ...s.input, width: '100%', resize: 'vertical', marginBottom: 10, minHeight: 110 }} />
           <button onClick={doAnalyze} disabled={!!busy}
             style={{ padding: '12px 20px', borderRadius: 10, fontSize: 14, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', border: 'none', background: '#2563eb', color: '#fff', opacity: busy ? 0.6 : 1 }}>
-            🧠 วิเคราะห์ + สกัดคีย์เวิร์ด
+            {busy && busy.startsWith('🧠') ? '⏳ กำลังวิเคราะห์... รอสักครู่' : '🧠 วิเคราะห์ + สกัดคีย์เวิร์ด'}
           </button>
+          {/* ★ 5 ก.ค.: สถานะโชว์ใต้ปุ่มที่กดเลย (เดิมไปโผล่การ์ดล่าง ผู้ใช้ไม่เห็น = คิดว่าไม่มีผลลัพธ์) */}
+          {(busy || notice) && (
+            <div style={{ marginTop: 10, padding: '11px 14px', borderRadius: 10, fontSize: 13, fontWeight: 500, background: busy ? 'rgba(96,165,250,0.08)' : 'rgba(74,222,128,0.07)', border: `1px solid ${busy ? 'rgba(96,165,250,0.25)' : 'rgba(74,222,128,0.2)'}`, color: 'var(--text-primary)', lineHeight: 1.6 }}>
+              {busy || notice}
+            </div>
+          )}
           {cur?.analysis && (
-            <div style={{ marginTop: 12, padding: 12, borderRadius: 10, background: 'rgba(96,165,250,0.05)', border: '1px solid rgba(96,165,250,0.18)', fontSize: 13, lineHeight: 1.8 }}>
+            <div id="analysis-result" style={{ marginTop: 12, padding: 12, borderRadius: 10, background: 'rgba(96,165,250,0.05)', border: '1px solid rgba(96,165,250,0.18)', fontSize: 13, lineHeight: 1.8 }}>
               <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>📰 {cur.analysis.headline}</div>
               <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
                 โทน: {cur.analysis.context?.emotional_tone || '-'} · โมเมนต์สำคัญ: {(cur.analysis.context?.key_moment || '-').slice(0, 70)}
