@@ -60,17 +60,21 @@ export default function Sidebar() {
 
     // ── 🖼️ ภาพปก & สื่อ ──
     { type: 'divider', label: '🖼️ ภาพปก & สื่อ' },
-    { label: 'สร้างปกอัตโนมัติ', icon: '🔥', href: '/cover-lab', highlight: true },
+    // ⛔ 2 ก.ค. 2026: ปิดชั่วคราวตามคำสั่งผู้ใช้ (รอรื้อสร้างใหม่) · เปิดคืน: ปลดคอมเมนต์ + คืน export default ใน page.js
+    // { label: 'สร้างปกอัตโนมัติ', icon: '🔥', href: '/cover-lab', highlight: true },
     { label: 'แม่แบบปก (14 แบบ)', icon: '🎨', href: '/cover-tester' },
+    { label: 'ค้นภาพหลายแหล่ง (เลือกลงปก)', icon: '🔎', href: '/image-search' }, // ★ 4 ก.ค.: พอร์ตรีเสิร์ชภาพจากระบบทำปกออโต้
     { label: 'สร้างปกเอง', icon: '🎭', href: '/cover-maker' },
     { label: 'สร้างภาพด้วย AI', icon: '🖌️', href: '/image-maker' },
     { label: 'คลังรูป', icon: '📸', href: '/cover-gallery' },
-    { label: 'คลังปกที่ทำแล้ว', icon: '📁', href: '/cover-archive' },
+    // ⛔ 2 ก.ค. 2026: ปิดชั่วคราวตามคำสั่งผู้ใช้ (รอรื้อสร้างใหม่)
+    // { label: 'คลังปกที่ทำแล้ว', icon: '📁', href: '/cover-archive' },
 
     // ── 📚 คลังความรู้ AI ──
     { type: 'divider', label: '📚 คลังความรู้ AI' },
     { label: 'คลังตัวอย่างไวรัล', icon: '📚', href: '/viral-library' },
-    { label: 'คลังแตกประเด็นข่าว (เนื้อหาดิบ)', icon: '♻️', href: '/reframe-cases' },
+    // ⛔ 2 ก.ค. 2026: ปิดชั่วคราวตามคำสั่งผู้ใช้ (รอรื้อสร้างใหม่)
+    // { label: 'คลังแตกประเด็นข่าว (เนื้อหาดิบ)', icon: '♻️', href: '/reframe-cases' },
     { label: 'คลังพรอมต์', icon: '🏛️', href: '/prompt-library' },
     { label: 'ตั้งค่าพรอมต์ AI', icon: '🤖', href: '/prompts' },
 
