@@ -19,6 +19,13 @@ import { createStore } from '@/lib/persistStore';
 import {
   searchImagesMulti, reverseImageMulti, instagramProfileImages, facebookProfileImages, PLATFORMS,
 } from '@/lib/services/imageSearchMulti';
+// ★ 5 ก.ค.: สมองครบชุดพอร์ตจากระบบทำปกออโต้ (วิเคราะห์ข่าว→สกัดคีย์เวิร์ด→คำค้นผูกชื่อ + คัดขยะ/แยกอารมณ์)
+import {
+  callBrain, safeParseJson, buildQueries, isCatalogSource,
+  buildAnalysisSystemPrompt, buildAnalysisUserPrompt,
+  buildKeywordSystemPrompt, buildKeywordUserPrompt,
+} from '@/lib/services/imageSearchBrain';
+import { geminiJunkScan, geminiEmotionScan, loadImageBuffer } from '@/lib/services/imageSearchVision';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -77,13 +84,170 @@ export async function GET(req) {
   }
 }
 
+// ค้นหลายแพลตฟอร์มขนานกันด้วยชุดคำค้น → รวมเข้าเคส (ใช้ทั้ง search แมนนวลและ searchAuto)
+async function runMultiSearch(c, queries, platforms) {
+  const errors = [];
+  const perPlatform = {};
+  let blockedCatalog = 0;
+  await Promise.all(platforms.map(async (p) => {
+    let addedP = 0;
+    for (const q of queries) {
+      try {
+        const imgs = await searchImagesMulti(p, q, { num: PER_QUERY });
+        // 🚫 บล็อกแหล่งแคตตาล็อก/อสังหา/โฆษณาตั้งแต่ต้นทาง (ภาพวัตถุมั่ว ไม่ใช่ของคนในข่าว)
+        const ok = imgs.filter((im) => { const bad = isCatalogSource(im); if (bad) blockedCatalog++; return !bad; });
+        addedP += mergeImages(c, ok, p, q);
+      } catch (err) {
+        if (err.errorType === 'NO_SERPAPI_KEY') throw err;
+        errors.push({ platform: p, query: q, error: String(err.message).slice(0, 120) });
+      }
+    }
+    perPlatform[p] = addedP;
+  }));
+  return { errors, perPlatform, blockedCatalog };
+}
+
 export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}));
     const action = body.action || 'search';
     const store = createStore(STORE);
 
-    // ── ค้นหลายแหล่งพร้อมกัน ──
+    // ── 🧠 วิเคราะห์เนื้อข่าวเต็ม + สกัดคีย์เวิร์ด (สมองขั้น 1+2 จากระบบทำปกออโต้) ──
+    if (action === 'analyze') {
+      const newsText = String(body.newsText || '').trim();
+      if (newsText.length < 40) {
+        return NextResponse.json({ success: false, error: 'กรุณาใส่เนื้อข่าวเต็ม (อย่างน้อย 40 ตัวอักษร)', errorType: 'NEWS_TOO_SHORT' }, { status: 400 });
+      }
+      // ขั้น 1: วิเคราะห์ข่าวตามกรอบตายตัว (ห้ามเดา/ห้ามเดาเพศ)
+      const a = await callBrain({ system: buildAnalysisSystemPrompt(), user: buildAnalysisUserPrompt(newsText), maxTokens: 4000 });
+      const analysis = safeParseJson(a.text);
+      if (!analysis || !analysis.headline) {
+        return NextResponse.json({ success: false, error: 'สมอง AI วิเคราะห์ไม่สำเร็จ (ตอบไม่เป็น JSON)', errorType: 'BAD_AI_JSON' }, { status: 502 });
+      }
+      // ขั้น 2: สกัดคีย์เวิร์ดค้นภาพ (ผูกชื่อบุคคลเสมอ ห้ามคำค้นวัตถุลอย)
+      const k = await callBrain({ system: buildKeywordSystemPrompt(), user: buildKeywordUserPrompt(analysis, newsText), maxTokens: 4000 });
+      const keywords = safeParseJson(k.text);
+      if (!keywords || !Array.isArray(keywords.subjects)) {
+        return NextResponse.json({ success: false, error: 'สกัดคีย์เวิร์ดไม่สำเร็จ (ตอบไม่เป็น JSON)', errorType: 'BAD_AI_JSON' }, { status: 502 });
+      }
+      // เคสใหม่ (หรืออัปเดตเคสเดิมถ้าส่ง caseId มา)
+      let c = body.caseId ? await loadCase(store, body.caseId) : null;
+      const isNew = !c;
+      if (!c) c = { id: `IS-${Date.now().toString(36)}`, createdAt: new Date().toISOString(), images: [], queries: [], log: [] };
+      c.title = String(analysis.headline || '').slice(0, 80) || c.title || 'เคสใหม่';
+      c.newsSnippet = newsText.slice(0, 1200);
+      c.analysis = analysis;
+      c.keywords = keywords;
+      c.log = [...(c.log || []), { at: new Date().toISOString(), action: 'analyze', provider: a.provider }].slice(-30);
+      if (isNew) await store.add(c); else await store.update(c.id, () => c);
+      const preview = buildQueries(keywords, parseInt(process.env.IMAGES_MAX_QUERIES || '3', 10));
+      return NextResponse.json({ success: true, caseId: c.id, case: c, queriesPreview: preview });
+    }
+
+    // ── 🔍 ค้นด้วย "คีย์เวิร์ดที่สกัดจากข่าว" (buildQueries: สมดุลต่อคน + การันตีหลักฐาน/สถานที่) ──
+    if (action === 'searchAuto') {
+      const c = await loadCase(store, body.caseId);
+      if (!c) return NextResponse.json({ success: false, error: 'ไม่พบเคส', errorType: 'CASE_NOT_FOUND' }, { status: 404 });
+      if (!c.keywords || !Array.isArray(c.keywords.subjects)) {
+        return NextResponse.json({ success: false, error: 'เคสนี้ยังไม่ได้วิเคราะห์+สกัดคีย์เวิร์ด — วางเนื้อข่าวแล้วกดวิเคราะห์ก่อน', errorType: 'NO_KEYWORDS' }, { status: 400 });
+      }
+      const platforms = (body.platforms || []).filter((p) => PLATFORMS.includes(p));
+      if (!platforms.length) return NextResponse.json({ success: false, error: 'ต้องเลือกแหล่งอย่างน้อย 1 แหล่ง', errorType: 'NO_PLATFORMS' }, { status: 400 });
+      // จำนวนคำค้น: ทุกบุคคลได้อย่างน้อย PER_SUBJECT คำ (เหมือนต้นฉบับ)
+      const MAXQ = parseInt(process.env.IMAGES_MAX_QUERIES || '3', 10);
+      const PER_SUBJECT = parseInt(process.env.IMAGES_PER_SUBJECT || '2', 10);
+      const CAP_Q = parseInt(process.env.IMAGES_MAX_QUERIES_CAP || '8', 10);
+      const nSubjects = (c.keywords.subjects || []).length || 1;
+      const queries = buildQueries(c.keywords, Math.min(CAP_Q, Math.max(MAXQ, nSubjects * PER_SUBJECT)));
+      if (!queries.length) return NextResponse.json({ success: false, error: 'ไม่มีคำค้นในคีย์เวิร์ด', errorType: 'NO_QUERIES' }, { status: 400 });
+
+      const { errors, perPlatform, blockedCatalog } = await runMultiSearch(c, queries, platforms);
+      c.queries = [...new Set([...(c.queries || []), ...queries])].slice(0, 60);
+      c.log = [...(c.log || []), { at: new Date().toISOString(), action: 'searchAuto', platforms, queries, added: perPlatform, blockedCatalog }].slice(-30);
+      await store.update(c.id, () => c);
+      return NextResponse.json({ success: true, caseId: c.id, queriesUsed: queries, addedByPlatform: perPlatform, blockedCatalog, total: c.images.length, byPlatform: countBy(c.images), errors, case: c });
+    }
+
+    // ── 🧹 AI คัดขยะออก (แคตตาล็อกฟรีชั้น 1 + Gemini ส่องทีละแบตช์) ──
+    if (action === 'clean') {
+      const c = await loadCase(store, body.caseId);
+      if (!c) return NextResponse.json({ success: false, error: 'ไม่พบเคส', errorType: 'CASE_NOT_FOUND' }, { status: 404 });
+      const sharp = (await import('sharp')).default;
+      const subjects = c.keywords?.subjects || [];
+      const newsGist = (c.analysis?.summary || c.newsSnippet || '').slice(0, 600);
+      const all = c.images || [];
+      const CAP = parseInt(process.env.CLEAN_CAP || '150', 10);
+      const catalogIds = all.filter((im) => isCatalogSource(im)).map((im) => im.id);
+      const toScan = all.filter((im) => !isCatalogSource(im)).slice(0, CAP);
+
+      const withB64 = [];
+      for (const im of toScan) {
+        const buf = await loadImageBuffer({ imageUrl: im.thumbnailUrl || im.imageUrl, thumbnailUrl: im.imageUrl });
+        if (!buf) continue;
+        try {
+          const small = await sharp(buf, { failOn: 'none' }).resize(400, 400, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 78 }).toBuffer();
+          withB64.push({ im, base64: small.toString('base64') });
+        } catch { /* รูปเสีย ข้าม */ }
+      }
+      const junkIds = [...catalogIds];
+      const BATCH = 8;
+      for (let i = 0; i < withB64.length; i += BATCH) {
+        const batch = withB64.slice(i, i + BATCH);
+        const frames = batch.map((b, k) => ({ index: i + k, base64: b.base64, source: b.im.source, title: b.im.title }));
+        try {
+          const res = await geminiJunkScan({ frames, subjects, newsGist });
+          for (const r of res) { if (r.junk && withB64[r.index]) junkIds.push(withB64[r.index].im.id); }
+        } catch (err) {
+          if (err.errorType === 'NO_GEMINI_KEY') return NextResponse.json({ success: false, error: err.message, errorType: 'NO_GEMINI_KEY' }, { status: 400 });
+          /* แบตช์นี้พลาด ข้าม */
+        }
+      }
+      const junkSet = new Set(junkIds);
+      c.images = all.filter((im) => !junkSet.has(im.id));
+      c.log = [...(c.log || []), { at: new Date().toISOString(), action: 'clean', removed: junkIds.length, catalog: catalogIds.length }].slice(-30);
+      await store.update(c.id, () => c);
+      return NextResponse.json({ success: true, caseId: c.id, scanned: withB64.length, removed: junkIds.length, catalogRemoved: catalogIds.length, aiRemoved: junkIds.length - catalogIds.length, total: c.images.length, byPlatform: countBy(c.images), case: c });
+    }
+
+    // ── 🎭 แยกอารมณ์ภาพ (Gemini เซ็ต emotion ต่อรูป → กรองในคลังได้) ──
+    if (action === 'emotions') {
+      const c = await loadCase(store, body.caseId);
+      if (!c) return NextResponse.json({ success: false, error: 'ไม่พบเคส', errorType: 'CASE_NOT_FOUND' }, { status: 404 });
+      const sharp = (await import('sharp')).default;
+      const subjects = c.keywords?.subjects || [];
+      const CAP = parseInt(process.env.EMOTION_CAP || '200', 10);
+      const targets = (c.images || []).slice(0, CAP);
+      const withB64 = [];
+      for (const im of targets) {
+        const buf = await loadImageBuffer({ imageUrl: im.thumbnailUrl || im.imageUrl, thumbnailUrl: im.imageUrl });
+        if (!buf) continue;
+        try {
+          const small = await sharp(buf, { failOn: 'none' }).resize(400, 400, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 78 }).toBuffer();
+          withB64.push({ im, base64: small.toString('base64') });
+        } catch { /* ข้าม */ }
+      }
+      const emotionMap = {};
+      const BATCH = 8;
+      for (let i = 0; i < withB64.length; i += BATCH) {
+        const batch = withB64.slice(i, i + BATCH);
+        const frames = batch.map((b, k) => ({ index: i + k, base64: b.base64 }));
+        try {
+          const res = await geminiEmotionScan({ frames, subjects });
+          for (const r of res) { const src = withB64[r.index]; if (src) emotionMap[src.im.id] = r.emotion; }
+        } catch (err) {
+          if (err.errorType === 'NO_GEMINI_KEY') return NextResponse.json({ success: false, error: err.message, errorType: 'NO_GEMINI_KEY' }, { status: 400 });
+        }
+      }
+      for (const im of c.images || []) { if (emotionMap[im.id]) im.emotion = emotionMap[im.id]; }
+      c.log = [...(c.log || []), { at: new Date().toISOString(), action: 'emotions', classified: Object.keys(emotionMap).length }].slice(-30);
+      await store.update(c.id, () => c);
+      const byEmotion = {};
+      for (const im of c.images || []) { if (im.emotion) byEmotion[im.emotion] = (byEmotion[im.emotion] || 0) + 1; }
+      return NextResponse.json({ success: true, caseId: c.id, classified: Object.keys(emotionMap).length, byEmotion, total: c.images.length, byPlatform: countBy(c.images), case: c });
+    }
+
+    // ── ค้นหลายแหล่งพร้อมกัน (แมนนวล — พิมพ์คำค้นเอง) ──
     if (action === 'search') {
       const queries = (Array.isArray(body.queries) ? body.queries : String(body.queries || '').split(/\n/))
         .map((q) => String(q).trim()).filter(Boolean).slice(0, 5);
@@ -104,30 +268,16 @@ export async function POST(req) {
         isNew = true;
       }
 
-      // ยิงขนานรายแพลตฟอร์ม (แต่ละแพลตฟอร์มไล่คำค้นตามลำดับ) — ล้มรายแหล่งไม่พังทั้งชุด
-      const errors = [];
-      const perPlatform = {};
-      await Promise.all(platforms.map(async (p) => {
-        let addedP = 0;
-        for (const q of queries) {
-          try {
-            const imgs = await searchImagesMulti(p, q, { num: PER_QUERY });
-            addedP += mergeImages(c, imgs, p, q);
-          } catch (err) {
-            if (err.errorType === 'NO_SERPAPI_KEY') throw err;
-            errors.push({ platform: p, query: q, error: String(err.message).slice(0, 120) });
-          }
-        }
-        perPlatform[p] = addedP;
-      }));
+      // ยิงขนานรายแพลตฟอร์ม + บล็อกแหล่งแคตตาล็อก (ตัวเดียวกับ searchAuto)
+      const { errors, perPlatform, blockedCatalog } = await runMultiSearch(c, queries, platforms);
 
-      c.queries = [...new Set([...(c.queries || []), ...queries])].slice(0, 40);
-      c.log = [...(c.log || []), { at: new Date().toISOString(), action: 'search', platforms, queries, added: perPlatform }].slice(-30);
+      c.queries = [...new Set([...(c.queries || []), ...queries])].slice(0, 60);
+      c.log = [...(c.log || []), { at: new Date().toISOString(), action: 'search', platforms, queries, added: perPlatform, blockedCatalog }].slice(-30);
 
       if (isNew) await store.add(c);
       else await store.update(c.id, () => c);
 
-      return NextResponse.json({ success: true, caseId: c.id, addedByPlatform: perPlatform, total: c.images.length, byPlatform: countBy(c.images), errors, case: c });
+      return NextResponse.json({ success: true, caseId: c.id, addedByPlatform: perPlatform, blockedCatalog, total: c.images.length, byPlatform: countBy(c.images), errors, case: c });
     }
 
     // ── ค้นย้อนกลับจากภาพ (Google Lens) ──

@@ -123,13 +123,14 @@ export async function searchImagesMulti(platform, query, { num = 40, gl = 'th', 
     return d._empty ? [] : normList(d.images_results, num);
   }
   if (platform === 'bing') {
-    const d = await serpGet({ engine: 'bing_images', q: query });
+    // ★ 5 ก.ค.: SafeSearch เข้ม — กันภาพไม่เหมาะสมตั้งแต่ engine
+    const d = await serpGet({ engine: 'bing_images', q: query, safeSearch: 'strict' });
     return d._empty ? [] : normList(d.images_results, num);
   }
   // google / facebook / tiktok → google_images (+ site filter)
   const site = SITE_FILTER[platform];
   const q = site ? `${query} site:${site}` : query;
-  const d = await serpGet({ engine: 'google_images', q, gl, hl });
+  const d = await serpGet({ engine: 'google_images', q, gl, hl, safe: 'active' }); // ★ 5 ก.ค.: SafeSearch
   return d._empty ? [] : normList(d.images_results, num);
 }
 
