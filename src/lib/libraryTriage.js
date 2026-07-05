@@ -42,6 +42,62 @@ async function loadOne(im) {
   }
 }
 
+// สร้างป้าย triage จากผล classify (it) + ค่าโหลด (src มี brightness/detail)
+function buildTriage(it, src) {
+  return {
+    // "เกี่ยวข่าว" แยกจาก "คุณภาพ" — ทิ้งเฉพาะที่ AI ตีว่าไม่เกี่ยวชัด (undefined = เก็บไว้ กัน false drop)
+    relevant: it.relevant !== false,
+    clean: it.clean !== false, // พร้อมขึ้นปก (ไม่มีลายน้ำ/ตัวหนังสือ) — คนละเรื่องกับ relevant
+    category: it.category || 'other',
+    person: it.person || null,
+    persons: Array.isArray(it.persons) ? it.persons.filter(Boolean) : it.person ? [it.person] : [],
+    emotion: it.emotion || null,
+    quality: typeof it.quality === 'number' ? it.quality : 5,
+    faceCount: typeof it.faceCount === 'number' ? it.faceCount : it.faceBox ? 1 : 0,
+    faceBox: it.faceBox || null,
+    peopleBox: it.peopleBox || null,
+    brightness: Math.round(src?.brightness ?? 128),
+    detail: Math.round(src?.detail ?? 60),
+    note: it.note || '',
+  };
+}
+
+// 👁️ กรองรูป "ดิบ" ตอนค้น (ยังไม่มี id) → คืนรูปพร้อมป้าย triage ในตัว (เก็บได้เลย)
+//   caller filter `triage.relevant !== false` เพื่อเก็บเฉพาะที่เกี่ยว (ใบที่โหลด/ตาล้ม = คงไว้ไม่ติดป้าย กัน false drop)
+export async function vetImages({ images, subjects, newsGist, onProgress, onRetry, caseId, batchSize = 10 }) {
+  const vetted = [];
+  let kept = 0, dropped = 0, failed = 0;
+  const total = images.length;
+  for (let i = 0; i < images.length; i += batchSize) {
+    const slice = images.slice(i, i + batchSize);
+    const loads = await Promise.all(slice.map(async (im) => ({ im, r: await loadOne(im) })));
+    if (onProgress) onProgress({ done: Math.min(i + batchSize, total), total, kept, dropped });
+    const ok = loads.filter((x) => x.r);
+    const failedLoads = loads.filter((x) => !x.r);
+    failedLoads.forEach((x) => { vetted.push({ ...x.im }); failed++; }); // โหลดไม่ได้ → คงไว้ไม่ติดป้าย
+    if (!ok.length) continue;
+    const frames = ok.map((x, k) => ({ index: k, base64: x.r.base64, source: x.im.source, title: x.im.title }));
+    let items = [];
+    try {
+      items = await geminiClassifyFrames({ frames, subjects, newsGist, onRetry, caseId });
+    } catch (e) {
+      if (e?.errorType === 'NO_GEMINI_KEY') throw e; // ไม่มีคีย์ = แจ้ง caller (จะได้ fallback ไม่กรอง)
+      ok.forEach((x) => { vetted.push({ ...x.im }); failed++; }); // ตาล้ม → คงไว้ไม่ติดป้าย
+      continue;
+    }
+    const byIdx = {};
+    for (const it of items) byIdx[it.index] = it;
+    ok.forEach((x, k) => {
+      const it = byIdx[k];
+      if (!it) { vetted.push({ ...x.im }); failed++; return; }
+      const triage = buildTriage(it, x.r);
+      vetted.push({ ...x.im, triage });
+      if (triage.relevant === false) dropped++; else kept++;
+    });
+  }
+  return { vetted, kept, dropped, failed };
+}
+
 // คัดกรองคลัง → คืน { map: {imageId: triage}, tagged, failed, byCategory, byPerson }
 export async function triageLibrary({ images, subjects, newsGist, onProgress, onRetry, caseId, batchSize = 10 }) {
   const map = {};
@@ -74,22 +130,7 @@ export async function triageLibrary({ images, subjects, newsGist, onProgress, on
     for (const it of items) {
       const src = loaded[it.index];
       if (!src) continue;
-      const relevant = it.clean !== false; // clean gate ครอบคลุมความเกี่ยวข้อง/ownership/ขยะแล้ว
-      const triage = {
-        relevant,
-        clean: it.clean !== false,
-        category: it.category || 'other',
-        person: it.person || null,
-        persons: Array.isArray(it.persons) ? it.persons.filter(Boolean) : it.person ? [it.person] : [],
-        emotion: it.emotion || null,
-        quality: typeof it.quality === 'number' ? it.quality : 5,
-        faceCount: typeof it.faceCount === 'number' ? it.faceCount : it.faceBox ? 1 : 0,
-        faceBox: it.faceBox || null,
-        peopleBox: it.peopleBox || null,
-        brightness: Math.round(src.brightness),
-        detail: Math.round(src.detail),
-        note: it.note || '',
-      };
+      const triage = buildTriage(it, src);
       map[src.im.id] = triage;
       tagged++;
       byCategory[triage.category] = (byCategory[triage.category] || 0) + 1;

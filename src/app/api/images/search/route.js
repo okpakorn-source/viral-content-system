@@ -11,14 +11,16 @@ import { getCase } from '@/lib/caseStore';
 import { searchImages, buildQueries, PLATFORMS } from '@/lib/imageSearch';
 import { addImages } from '@/lib/imageStore';
 import { isCatalogSource } from '@/lib/junkSources';
+import { vetImages } from '@/lib/libraryTriage';
 
 export const runtime = 'nodejs';
+export const maxDuration = 300;
 
 const MAX_QUERIES = parseInt(process.env.IMAGES_MAX_QUERIES || '3', 10);
 const PER_SUBJECT = parseInt(process.env.IMAGES_PER_SUBJECT || '2', 10); // คำค้นขั้นต่ำต่อบุคคล
 const MAX_QUERIES_CAP = parseInt(process.env.IMAGES_MAX_QUERIES_CAP || '8', 10);
-const PER_QUERY = parseInt(process.env.IMAGES_PER_QUERY || '60', 10); // รูปต่อคำค้น (เพิ่มเป็น 60)
-const HARD_CAP = parseInt(process.env.IMAGES_HARD_CAP || '250', 10); // เพดานรวมสูงสุด
+const PER_QUERY = parseInt(process.env.IMAGES_PER_QUERY || '20', 10); // รูปต่อคำค้น — เอาเฉพาะผลบนสุดที่ตรงสุด (>20 เริ่มมั่ว/ไม่เกี่ยว)
+const HARD_CAP = parseInt(process.env.IMAGES_HARD_CAP || '120', 10); // เพดานรวม/แหล่ง — น้อยลงแต่ตรงกว่า (ปรับที่ env ได้)
 
 export async function POST(req) {
   try {
@@ -109,7 +111,32 @@ export async function POST(req) {
       );
     }
 
-    const saved = await addImages(caseId, collected);
+    // 👁️ ตากรองตอนค้น: ให้ตาดูรูปที่ค้นได้ "ก่อนเก็บ" → เก็บเฉพาะที่เกี่ยวข้องจริง + ติดป้าย triage ในตัว
+    //   (ปิดได้ด้วย body.vet=false หรือ env SEARCH_VET=0 ; ตาล้ม/ไม่มีคีย์ → เก็บทั้งหมด กันค้นแล้วได้ศูนย์)
+    const VET = process.env.SEARCH_VET !== '0' && body.vet !== false;
+    let toStore = collected;
+    let vetDropped = 0;
+    let vetOn = false;
+    if (VET && collected.length) {
+      const chars = c.analysis?.characters || [];
+      const genderOf = (name) => {
+        const n = (name || '').trim();
+        const hit = chars.find((ch) => ch.name === n || (ch.name && (n.includes(ch.name) || ch.name.includes(n))));
+        return hit?.gender || '';
+      };
+      const subjects = (c.keywords?.subjects || []).map((s) => ({ ...s, gender: s.gender || genderOf(s.name) }));
+      const newsGist = (c.analysis?.summary || c.analysis?.content || c.newsSnippet || '').slice(0, 600);
+      try {
+        const { vetted, dropped } = await vetImages({ images: collected, subjects, newsGist, caseId });
+        toStore = vetted.filter((x) => x.triage?.relevant !== false); // เก็บที่เกี่ยว + ที่ตาไม่ทัน(ไม่ติดป้าย)
+        vetDropped = dropped;
+        vetOn = true;
+      } catch {
+        toStore = collected; // ตาล้ม/ไม่มีคีย์ → เก็บทั้งหมดไปก่อน
+      }
+    }
+
+    const saved = await addImages(caseId, toStore);
 
     return NextResponse.json({
       success: true,
@@ -119,6 +146,8 @@ export async function POST(req) {
       added: saved.added,
       total: saved.total,
       blockedCatalog, // 🚫 กันบ้านแคตตาล็อก/อสังหาออกกี่ใบ (โปร่งใส)
+      vetOn, // 👁️ ตากรองตอนค้นทำงานไหม
+      vetDropped, // 👁️ ตากรองรูป "ไม่เกี่ยว" ออกกี่ใบ
       byPlatform: saved.byPlatform,
       images: saved.images,
       queriesUsed: queries,
