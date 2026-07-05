@@ -21,6 +21,16 @@ export async function POST(req) {
   const jobId = body.jobId || null;
   const P = reporter(jobId);
   try {
+    // ★ 5 ก.ค. (copy เข้า repo ไวรัล): แคปเฟรมใช้ yt-dlp+ffmpeg+เขียนดิสก์ = เครื่องทีม (Windows) เท่านั้น
+    //   บนเว็บ (Vercel/Linux) เดิมพัง ENOENT mkdir /var/task/public — ตอบสุภาพแทน
+    //   ⚠️ ใช้ platform ไม่ใช่ env.VERCEL (เครื่องทีมมี VERCEL=1 หลอกใน .env.local — บทเรียนเก่า)
+    if (process.platform !== 'win32') {
+      failProgress(jobId, 'แคปเฟรม YouTube ทำได้เฉพาะเครื่องทีม');
+      return NextResponse.json(
+        { success: false, error: 'แคปเฟรม YouTube ทำได้เฉพาะบนเครื่องทีม (ต้องใช้ yt-dlp+ffmpeg) — แหล่งอื่นทุกแหล่งใช้บนเว็บได้ปกติ', errorType: 'TEAM_MACHINE_ONLY' },
+        { status: 400 }
+      );
+    }
     const caseId = (body.caseId || '').trim();
 
     const c = caseId ? await getCase(caseId) : null;
