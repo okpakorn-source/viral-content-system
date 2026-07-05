@@ -23,15 +23,29 @@ export const ENT_RSS_FEEDS = [
   { name: 'Workpoint Today', url: 'https://workpointtoday.com/feed/' },
 ];
 
-// ── ช่องยูทูบรายการสัมภาษณ์/เล่าชีวิต (resolve channelId จริงจากผลค้น YouTube 2 ก.ค. 69) ──
-//   เกณฑ์เลือก: รายการที่ผลิต "สตอรี่คน" แบบที่เพจปังจริง (โหนกระแส=ซากา/น้ำใจ · เจาะใจ=สู้ชีวิต · WOODY/ตีท้ายครัว=ดาราเปิดใจ)
+// ── ช่องยูทูบรายการ (resolve channelId จริงจากผลค้น + verify RSS 4 ก.ค. 69) ──
+//   ★ 4 ก.ค. (feedback ผู้ใช้ "คลิปรายการดีๆ/สัมภาษณ์เจอน้อย"): ขยายเป็น 2 ระดับ + กรองชื่อรายการ
+//   pure:true  = ช่องเฉพาะทาง คลิปเกือบทั้งช่องคือของดี → เอาทุกใบ (verify: เรื่องจริงผ่านจอ 12/15 ดี)
+//   pure:false = ช่องใหญ่ปนเกมโชว์/ทั่วไป → เอาเฉพาะคลิปที่ชื่อเข้าเกณฑ์ good-content (verify: Workpoint 1/15)
 export const YT_WATCH_CHANNELS = [
-  { name: 'โหนกระแส', channelId: 'UCXm0bpjlfB0AF-ZdPhT0K1A' },        // พี่หนุ่ม กรรชัย — ต้นทางโพสต์แชมป์ 167k
-  { name: 'WoodyWorld', channelId: 'UCPWauUGtqP4B1Aw3UoHI2ew' },       // WOODY สัมภาษณ์เปิดใจ
-  { name: 'Polyplus (ตีท้ายครัว/3แซ่บ)', channelId: 'UCMSLmwkXFhkxKFv2gS4NBww' },
-  { name: 'GMM25 (แฉ)', channelId: 'UCTP5z0kFg6-nPcZ79gTC67Q' },
-  { name: 'เจาะใจ (JSL)', channelId: 'UCDlAjVM03Oce5mywNDHpHZw' },     // เล่าชีวิต/สู้ชีวิต — DNA ตรงเพจสุด
+  // ── สายทำดี/สารคดีชีวิต (pure) — DNA ตรงเพจสุด ──
+  { name: 'เรื่องจริงผ่านจอ', channelId: 'UC9Vqj1lqElub-pT6gEXlWYQ', pure: true }, // สารคดีชีวิต/น้ำใจ/เตือนภัย
+  { name: 'เจาะใจ (JSL)', channelId: 'UCDlAjVM03Oce5mywNDHpHZw', pure: true },      // เล่าชีวิต/สู้ชีวิต
+  // ── สายสัมภาษณ์/เปิดใจ (pure — เกือบทุกใบคือสัมภาษณ์) ──
+  { name: 'โหนกระแส', channelId: 'UCXm0bpjlfB0AF-ZdPhT0K1A', pure: true },          // พี่หนุ่ม กรรชัย — ต้นทางโพสต์แชมป์
+  { name: 'WoodyWorld', channelId: 'UCPWauUGtqP4B1Aw3UoHI2ew', pure: true },        // WOODY สัมภาษณ์เปิดใจ
+  { name: 'Orange Mama (คุยแซ่บ)', channelId: 'UC01guxmF_fLAVpUopImHzyg', pure: true }, // คุยแซ่บโชว์ สัมภาษณ์ดารา
+  // ── ช่องใหญ่ปนกัน (mixed) → กรองด้วยชื่อรายการ good-content เท่านั้น ──
+  { name: 'WorkpointOfficial (ปัญญาปันสุข)', channelId: 'UC3ZkCd7XtUREnjjt3cyY_gg', pure: false }, // ปัญญาปันสุข/ชิงร้อยฯ ช่วยคน
+  { name: 'Burabha (คนค้นฅน)', channelId: 'UCoEOBYHusSP-0ZlDe8cqMng', pure: false }, // คนค้นฅน สารคดีคน
+  { name: 'NineEntertain', channelId: 'UCFJbA88W7NtghiTuCns-eYw', pure: false },     // ข่าวบันเทิง+สัมภาษณ์ดารา
+  { name: 'oneบันเทิง', channelId: 'UC-FKx2wxE8CGWsCfSc2TaGg', pure: false },        // วันบันเทิง สัมภาษณ์ดารา
+  { name: 'Polyplus (ตีท้ายครัว/3แซ่บ)', channelId: 'UCMSLmwkXFhkxKFv2gS4NBww', pure: false },
+  { name: 'GMM25 (แฉ)', channelId: 'UCTP5z0kFg6-nPcZ79gTC67Q', pure: false },
 ];
+
+// ★ ชื่อคลิปที่ "เป็นของดี" — ใช้กรองช่องใหญ่ (pure:false) เอาเฉพาะสัมภาษณ์/ทำดี/สู้ชีวิต/ไฮไลท์ ตัดเกมโชว์/โปรโมท
+const GOOD_CLIP_TITLE = /ปันสุข|ช่วยเหลือ|ช่วยชีวิต|สู้ชีวิต|กตัญญู|สัมภาษณ์|เปิดใจ|เปิดอก|ไฮไลท์|ไฮไลต์|เรื่องจริง|น้ำใจ|บริจาค|ยอดกตัญญู|ฅนค้นฅน|คนค้นฅน|ชีวิต|ปาฏิหาริย์|เล่าเรื่อง|ให้กำลังใจ|แรงบันดาลใจ|โมเมนต์|ดราม่า|เคลียร์|ตอบทุกคำถาม|ที่สุดในชีวิต|วันวาน/;
 
 // ── ตัวแปลง RSS/Atom → items (รองรับทั้ง <item> ของ RSS2 และ <entry> ของ Atom/YouTube) ──
 const pickTag = (block, tag) => {
@@ -102,16 +116,25 @@ export async function fetchEntRss({ maxAgeDays = 3 } = {}) {
   return all;
 }
 
-/** 📺 เลน ytwatch — อัพโหลดใหม่จากช่องรายการสัมภาษณ์ (≤14 วัน) → เข้าเลน video (ดิสคัฟเวอรี) */
-export async function fetchYouTubeChannels({ maxAgeDays = 14 } = {}) {
+/** 📺 เลน ytwatch — อัพโหลดใหม่จากช่องรายการ (≤N วัน) → เข้าเลน video (ดิสคัฟเวอรี)
+ *  ★ 4 ก.ค.: ช่อง pure=เอาทุกใบ · ช่องใหญ่ mixed=เอาเฉพาะคลิปชื่อเข้าเกณฑ์ good-content (กันเกมโชว์/โปรโมทปน) */
+export async function fetchYouTubeChannels({ maxAgeDays = 21 } = {}) {
   const cutoff = Date.now() - maxAgeDays * 864e5;
+  let skipped = 0;
   const results = await Promise.all(YT_WATCH_CHANNELS.map(async c => {
     const xml = await fetchXml(`https://www.youtube.com/feeds/videos.xml?channel_id=${c.channelId}`);
     if (!xml) { console.log(`[DirectFeeds] 📺 ${c.name}: feed ว่าง/ล่ม`); return []; }
-    return parseYouTubeAtom(xml, c.name).filter(i => i.publishedAt && new Date(i.publishedAt).getTime() >= cutoff);
+    let vids = parseYouTubeAtom(xml, c.name).filter(i => i.publishedAt && new Date(i.publishedAt).getTime() >= cutoff);
+    if (c.pure === false) {
+      const before = vids.length;
+      vids = vids.filter(v => GOOD_CLIP_TITLE.test(v.title));
+      skipped += before - vids.length;
+    }
+    return vids;
   }));
   // lane 'video' = โซนคลิป/ดิสคัฟเวอรี (autopilot ไม่ auto-ส่ง — ทีมคัด/ถอดคลิปก่อน) + ป้ายช่องที่เฝ้า
   const all = results.flat().map(r => ({ ...r, lane: 'video', watchChannel: r.source, _query: 'yt:' + r.source }));
-  console.log(`[DirectFeeds] 📺 ytwatch: ${YT_WATCH_CHANNELS.length} ช่อง → ${all.length} คลิปใหม่ (≤${maxAgeDays} วัน)`);
+  const pureN = YT_WATCH_CHANNELS.filter(c => c.pure).length;
+  console.log(`[DirectFeeds] 📺 ytwatch: ${YT_WATCH_CHANNELS.length} ช่อง (pure ${pureN}) → ${all.length} คลิปดี (ข้ามช่องใหญ่ที่ชื่อไม่เข้าเกณฑ์ ${skipped})`);
   return all;
 }
