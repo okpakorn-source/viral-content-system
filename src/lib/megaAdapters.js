@@ -298,7 +298,9 @@ export async function s4_choose(job) {
 // ============================================================
 
 const MIN_RELEVANT_IMAGES = parseInt(process.env.MEGA_MIN_RELEVANT_IMAGES || '8', 10);
-const SEARCH_PLATFORMS = ['google', 'facebook', 'youtube', 'tiktok']; // bing ตายแล้ว (ลบ 6 ก.ค.)
+// แพลตฟอร์มตามที่ /api/images/search รองรับจริง (PLATFORMS ใน imageSearch.js — bing ตายแล้ว,
+// youtube เป็นท่อแคปเฟรมแยก /api/images/youtube ไม่ใช่ท่อนี้ — บทเรียนเทสเฟส 2 รอบแรก)
+const SEARCH_PLATFORMS = ['google', 'google_news', 'facebook', 'tiktok'];
 const MAX_TRIAGE_ROUNDS = 8;
 
 // เนื้อเต็มสำหรับเปิดเคสภาพ — กฎเดิมของระบบปก: ห้ามใช้เนื้อย่อ
