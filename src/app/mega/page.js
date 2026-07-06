@@ -1,8 +1,8 @@
 'use client';
 
 // ============================================================
-// 🏭 /mega — ห้องควบคุมสายพานข่าวครบวงจร (UI ใหม่ของตัวเอง — เฟส 1: S1→S4)
-// การ์ดต่องาน: ไฟ 8 สถานี · สถานะสด · ไทม์ไลน์ · เนื้อที่เลือก · ปุ่มสั่งงาน
+// 🏭 /mega — ห้องควบคุมสายพานข่าวครบวงจร (UI ใหม่ของตัวเอง — เฟส 1+2: S1→S6)
+// การ์ดต่องาน: ไฟสถานี · สถานะสด · ไทม์ไลน์ · เนื้อที่เลือก · ภาพลงช่อง · ปุ่มสั่งงาน
 // ============================================================
 
 import { useEffect, useRef, useState } from 'react';
@@ -15,20 +15,26 @@ const STATIONS = [
   { key: 's3_generate', label: 'S3 เจนข่าว' },
   { key: 's3_wait', label: 'S3 รอผล' },
   { key: 's4_choose', label: 'S4 เลือกเนื้อ' },
-  { key: 'content_ready', label: '📄 เนื้อพร้อม' },
-  { key: 's5', label: 'S5 ภาพ (เฟส 2)', future: true },
+  { key: 's5_case', label: 'S5 เคสภาพ' },
+  { key: 's5_keywords', label: 'S5 คีย์เวิร์ด' },
+  { key: 's5_search', label: 'S5 ค้นภาพ' },
+  { key: 's5_triage', label: 'S5 ตาคัด' },
+  { key: 's6_slots', label: 'S6 ภาพลงช่อง' },
+  { key: 'assets_ready', label: '🧺 ครบชุด' },
   { key: 's7', label: 'S7 ปก (เฟส 3)', future: true },
 ];
 
 const STAGE_ORDER = STATIONS.filter((s) => !s.future).map((s) => s.key);
+const DONE_STATUSES = ['content_ready', 'assets_ready'];
 
 function lightColor(job, stationKey) {
   if (STATIONS.find((s) => s.key === stationKey)?.future) return '#333';
-  const cur = STAGE_ORDER.indexOf(job.stage);
+  // งานเก่าที่จบเฟส 1 (content_ready) = ผ่านถึง S4 — ไฟ S5+ ยังไม่ถึง
+  const cur = STAGE_ORDER.indexOf(job.stage === 'content_ready' ? 's5_case' : job.stage);
   const idx = STAGE_ORDER.indexOf(stationKey);
-  if (job.status === 'content_ready' && stationKey === 'content_ready') return '#22c55e';
+  if (job.status === 'assets_ready' && stationKey === 'assets_ready') return '#22c55e';
   if (idx < cur) return '#22c55e'; // ผ่านแล้ว
-  if (idx === cur) {
+  if (idx === cur && !DONE_STATUSES.includes(job.status)) {
     if (job.status === 'failed') return '#ef4444';
     if (job.status === 'waiting') return '#eab308';
     if (job.status === 'skipped') return '#666';
@@ -109,11 +115,11 @@ export default function MegaPage() {
     <div style={{ maxWidth: 980, margin: '0 auto', padding: '18px 14px 60px', fontFamily: 'inherit' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 4 }}>
         <h1 style={{ fontSize: 22, margin: 0 }}>🏭 สายพานข่าวครบวงจร</h1>
-        <span style={chipStyle('rgba(96,165,250,0.12)', '#60a5fa')}>เฟส 1: คัดข่าว → เนื้อพร้อมโพสต์</span>
+        <span style={chipStyle('rgba(96,165,250,0.12)', '#60a5fa')}>เฟส 1+2: คัดข่าว → เนื้อ+ภาพครบชุด</span>
         {flags.paused && <span style={chipStyle('rgba(239,68,68,0.15)', '#f87171')}>⛔ พักสายพาน (ล้มติดกัน {flags.consecutiveFails})</span>}
       </div>
       <div style={{ fontSize: 13, color: 'var(--text-muted, #8a8fa3)', marginBottom: 14 }}>
-        ระบบทำงานแทนคน: คัดข่าวจากโต๊ะข่าว → เช็ควัตถุดิบ → สกัดเนื้อ → เข็มทิศเรื่อง → เจนข่าว (คิวเดิม) → บก.เลือกเวอร์ชันดีสุด — ทุกสมองอ่าน/เขียน "แฟ้มงาน" เดียวกัน
+        ระบบทำงานแทนคน: คัดข่าวจากโต๊ะข่าว → เช็ควัตถุดิบ → สกัดเนื้อ → เข็มทิศเรื่อง → เจนข่าว (คิวเดิม) → บก.เลือกเวอร์ชันดีสุด → ค้นภาพ 4 แหล่ง+ตาคัด → ผู้กำกับจับคู่ 5 ช่องปก — ทุกสมองอ่าน/เขียน "แฟ้มงาน" เดียวกัน
       </div>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -140,11 +146,11 @@ export default function MegaPage() {
       {jobs.map((job) => {
         const d = job.dossier || {};
         const statusChip =
-          job.status === 'content_ready' ? chipStyle('rgba(34,197,94,0.15)', '#22c55e')
+          DONE_STATUSES.includes(job.status) ? chipStyle('rgba(34,197,94,0.15)', '#22c55e')
           : job.status === 'failed' ? chipStyle('rgba(239,68,68,0.15)', '#f87171')
           : job.status === 'waiting' ? chipStyle('rgba(234,179,8,0.15)', '#eab308')
           : chipStyle('rgba(96,165,250,0.12)', '#60a5fa');
-        const statusText = { pending: 'รอเริ่ม', running: 'กำลังทำ', waiting: 'รอคิวเจน', content_ready: '✅ เนื้อพร้อม', failed: 'ล้มเหลว', skipped: 'ข้าม' }[job.status] || job.status;
+        const statusText = { pending: 'รอเริ่ม', running: 'กำลังทำ', waiting: 'รอขั้นถัดไป', content_ready: '📄 เนื้อพร้อม (จบเฟส 1)', assets_ready: '✅ เนื้อ+ภาพครบชุด', failed: 'ล้มเหลว', skipped: 'ข้าม' }[job.status] || job.status;
         const mins = Math.round((new Date(job.updatedAt) - new Date(job.createdAt)) / 60000);
         return (
           <div key={job.id} style={{ border: '1px solid var(--border, #333)', borderRadius: 14, padding: 16, marginBottom: 14, background: 'var(--bg-secondary, rgba(255,255,255,0.02))' }}>
@@ -179,8 +185,47 @@ export default function MegaPage() {
               </div>
             )}
 
+            {/* เฟส 2: สถิติภาพ + ตาราง 5 ช่อง */}
+            {d.images?.caseId && (
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted, #8a8fa3)', marginTop: 6 }}>
+                🖼️ เคสภาพ <a href={`/image-search?case=${d.images.caseId}`} target="_blank" rel="noreferrer" style={{ color: '#60a5fa' }}>{d.images.caseId}</a>
+                {d.images.triage && <> · ตายืนยันเกี่ยวจริง <b style={{ color: (d.images.triage.relevant || 0) >= 8 ? '#22c55e' : '#eab308' }}>{d.images.triage.relevant}</b>/{d.images.triage.total} ใบ</>}
+                {(d.images.searchStats || []).length > 0 && <> · {(d.images.searchStats || []).map((s) => `${s.platform}:${s.error ? '✗' : s.added}`).join(' ')}</>}
+              </div>
+            )}
+            {d.pickImages?.slots && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                {['hero', 'reaction', 'action', 'context', 'circle'].map((slot) => {
+                  const s = d.pickImages.slots[slot];
+                  return (
+                    <div key={slot} style={{ width: 110, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border, #2a2a3a)', background: 'rgba(255,255,255,0.03)' }}>
+                      <div style={{ height: 72, background: '#111', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {s?.imageUrl
+                          ? <img src={s.imageUrl} alt={slot} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          : <span style={{ fontSize: 11, color: '#666' }}>— ว่าง —</span>}
+                      </div>
+                      <div style={{ padding: '5px 7px' }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', color: slot === 'hero' ? '#f59e0b' : '#8a8fa3' }}>{slot}</div>
+                        <div style={{ fontSize: 10.5, color: 'var(--text-muted, #8a8fa3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s?.reason || ''}>
+                          {s?.person || s?.category || (s ? '' : 'ไม่มีภาพเข้าเกณฑ์')}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* งานจบเฟส 1 ค้างเก่า → ปุ่มต่อเฟส 2 */}
+            {job.status === 'content_ready' && (
+              <button onClick={() => act('retry', { id: job.id, stage: 's5_case' })} disabled={!!busy}
+                style={{ marginTop: 10, padding: '9px 15px', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: '1px solid rgba(96,165,250,0.4)', background: 'rgba(96,165,250,0.08)', color: '#60a5fa', fontFamily: 'inherit' }}>
+                🖼️ ทำภาพต่อ (เฟส 2: ค้นภาพ + จับคู่ช่อง)
+              </button>
+            )}
+
             {/* เนื้อที่เลือก */}
-            {job.status === 'content_ready' && d.pick?.chosenText && (
+            {DONE_STATUSES.includes(job.status) && d.pick?.chosenText && (
               <div style={{ marginTop: 10 }}>
                 <button onClick={() => setExpand(expand === job.id ? null : job.id)}
                   style={{ padding: '8px 14px', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.08)', color: '#22c55e', fontFamily: 'inherit' }}>

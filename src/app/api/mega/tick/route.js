@@ -16,6 +16,8 @@ export const runtime = 'nodejs';
 export const maxDuration = 600;
 
 const MAX_STAGE_ATTEMPTS = 2;
+// ป้ายปลายทางของแต่ละเฟส (ไม่ใช่ stage ที่รันได้ — เป็น status จบ)
+const TERMINALS = new Set(['content_ready', 'assets_ready']);
 
 function stageInputHash(job) {
   // input ประจำขั้น — เปลี่ยนเมื่อของที่ขั้นนี้ใช้เปลี่ยน (กันเอาผลเก่าปน input ใหม่)
@@ -30,6 +32,8 @@ function stageInputHash(job) {
     retriedWithText: !!d.generate?.retriedWithText,
     // rewind ด้วยมือ = เจตนารันใหม่ → เลขรอบต้องพา key หนีผลเก่าทุกขั้น
     rewind: d.rewind || 0,
+    // เฟส 2: caseId เป็น input ของทุกขั้น S5/S6 หลังเปิดเคส (ห้ามใส่ค่าที่ "ขั้นตัวเองเขียน" — กติกาเดียวกับ queueJobId)
+    imagesCase: d.images?.caseId || null,
   };
   return crypto.createHash('sha256').update(JSON.stringify(basis)).digest('hex').slice(0, 16);
 }
@@ -70,7 +74,7 @@ export async function POST(req) {
     const prior = await findDoneRun(job.id, job.stage, idemKey);
     if (prior) {
       const next = stageDef.next;
-      const patch = next === 'content_ready' ? { status: 'content_ready', stage: next } : { stage: next, status: 'running' };
+      const patch = TERMINALS.has(next) ? { status: next, stage: next } : { stage: next, status: 'running' };
       await updateJob(job.id, patch);
       return NextResponse.json({ success: true, jobId: job.id, stage: job.stage, skipped: 'เคยสำเร็จแล้ว (idempotent) → เลื่อนขั้นถัดไป' });
     }
@@ -106,8 +110,8 @@ export async function POST(req) {
     const act = result.nextAction || 'continue';
     if (act === 'continue') {
       const next = stageDef.next;
-      if (next === 'content_ready') {
-        await updateJob(job.id, { ...basePatch, stage: next, status: 'content_ready' });
+      if (TERMINALS.has(next)) {
+        await updateJob(job.id, { ...basePatch, stage: next, status: next });
         await setFlags({ consecutiveFails: 0 });
       } else {
         await updateJob(job.id, { ...basePatch, stage: next, status: 'running' });

@@ -6,7 +6,7 @@
 // 🔴 ไม่แตะโค้ดระบบข่าว: คิว/extract เรียกผ่าน HTTP same-origin แบบเดียวกับโต๊ะข่าว
 // ============================================================
 
-import { preflightBrain, compassBrain, judgeBrain } from '@/lib/megaBrains';
+import { preflightBrain, compassBrain, judgeBrain, slotDirectorBrain } from '@/lib/megaBrains';
 
 const MEGA_USER = 'mega-bot';
 const MIN_EXTRACT_CHARS = parseInt(process.env.MEGA_MIN_EXTRACT_CHARS || '400', 10);
@@ -293,7 +293,239 @@ export async function s4_choose(job) {
   };
 }
 
-// ---------- ตารางเดินสายพาน เฟส 1 ----------
+// ============================================================
+// เฟส 2 — S5 ค้นภาพครบวงจร (/image-search เดิมทั้งระบบ) + S6 ผู้กำกับจับคู่ช่อง
+// ============================================================
+
+const MIN_RELEVANT_IMAGES = parseInt(process.env.MEGA_MIN_RELEVANT_IMAGES || '8', 10);
+const SEARCH_PLATFORMS = ['google', 'facebook', 'youtube', 'tiktok']; // bing ตายแล้ว (ลบ 6 ก.ค.)
+const MAX_TRIAGE_ROUNDS = 8;
+
+// เนื้อเต็มสำหรับเปิดเคสภาพ — กฎเดิมของระบบปก: ห้ามใช้เนื้อย่อ
+function fullNewsText(job) {
+  const d = job.dossier || {};
+  const nd = d.generate?.newsData;
+  if (nd?.newsBody && nd.newsBody.length >= 300) return [nd.newsTitle, nd.newsBody].filter(Boolean).join('\n\n');
+  const ex = d.extract?.text || '';
+  if (ex.length >= 300) return [d.desk?.title, ex].filter(Boolean).join('\n\n');
+  return [d.desk?.title, ex || d.desk?.fullText || ''].filter(Boolean).join('\n\n');
+}
+
+// ---------- S5a เปิดเคสภาพ: วิเคราะห์เนื้อเต็ม → ได้ AC-xxxx ----------
+export async function s5_case(job, { origin }) {
+  const im = job.dossier.images || {};
+  if (im.caseId) return { status: 'done', nextAction: 'continue', summary: `มีเคสภาพอยู่แล้ว ${im.caseId} — ใช้ต่อ ไม่เปิดซ้ำ` };
+  const newsText = fullNewsText(job);
+  if (newsText.length < 200) {
+    return { status: 'failed', nextAction: 'fail', summary: `เนื้อไม่พอเปิดเคสภาพ (${newsText.length} ตัว) — ต้องเนื้อเต็มเท่านั้น`, quality: 'red' };
+  }
+  const r = await jfetch(`${origin}/api/analyze`, { method: 'POST', body: JSON.stringify({ newsText }) }, 240000);
+  if (!r.success || !r.id) {
+    return { status: 'failed', nextAction: 'retry', summary: 'เปิดเคสภาพไม่สำเร็จ: ' + (r.error || r.httpStatus) };
+  }
+  return {
+    status: 'done',
+    nextAction: 'continue',
+    summary: `เปิดเคสภาพ ${r.id} (ตัวละคร ${(r.analysis?.characters || []).length} คน · เนื้อ ${newsText.length} ตัว)`,
+    dossierPatch: { images: { caseId: r.id, characters: (r.analysis?.characters || []).map((c) => c.name).slice(0, 8) } },
+  };
+}
+
+// ---------- S5b สกัดคีย์เวิร์ด (สมองอารมณ์ครบสเปกตรัม + ผูกชื่อ) ----------
+export async function s5_keywords(job, { origin }) {
+  const im = job.dossier.images || {};
+  const r = await jfetch(`${origin}/api/keywords`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId }) }, 240000);
+  if (!r.success || !r.keywords) {
+    return { status: 'failed', nextAction: 'retry', summary: 'สกัดคีย์เวิร์ดไม่สำเร็จ: ' + (r.error || r.httpStatus) };
+  }
+  const kw = r.keywords;
+  const nQueries = ['queries_th', 'queries_en', 'object_queries', 'moment_action', 'scene_place']
+    .reduce((n, k) => n + (kw[k] || []).length, 0);
+  return {
+    status: 'done',
+    nextAction: 'continue',
+    summary: `สกัดคีย์ ${nQueries} คำค้น · บุคคล ${(kw.subjects || []).length} คน`,
+    dossierPatch: { images: { ...im, keywordsCount: nQueries, subjects: (kw.subjects || []).map((s) => s.name).slice(0, 8) } },
+  };
+}
+
+// ---------- S5c ค้นภาพ 4 แหล่ง — ทีละแหล่งต่อ 1 tick (กันชน timeout ของ tick) ----------
+// ห้ามคืน status:'done' ระหว่างยังไม่ครบทุกแหล่ง — done จะโดน idempotency นับ "เคยสำเร็จ" แล้วข้ามแหล่งที่เหลือ
+export async function s5_search(job, { origin }) {
+  const im = job.dossier.images || {};
+  const done = im.searchedPlatforms || [];
+  const next = SEARCH_PLATFORMS.find((p) => !done.includes(p));
+  if (next) {
+    const r = await jfetch(`${origin}/api/images/search`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, platform: next }) }, 300000);
+    const stat = r.success
+      ? { platform: next, found: r.found || 0, added: r.added || 0, vetDropped: r.vetDropped || 0 }
+      : { platform: next, error: (r.error || String(r.httpStatus)).slice(0, 80) };
+    const patch = {
+      images: {
+        ...im,
+        searchedPlatforms: [...done, next],
+        searchStats: [...(im.searchStats || []), stat],
+      },
+    };
+    const remaining = SEARCH_PLATFORMS.length - (done.length + 1);
+    return {
+      status: 'waiting', // กลางคัน = waiting เสมอ (กัน idempotent ข้ามแหล่งที่เหลือ)
+      nextAction: 'wait',
+      summary: `ค้น ${next}: ${r.success ? `เก็บ ${stat.added}/${stat.found} ใบ` : 'ล้ม — ' + stat.error} (เหลือ ${remaining} แหล่ง)`,
+      dossierPatch: patch,
+    };
+  }
+  // ครบทุกแหล่งแล้ว → สรุป
+  const totalAdded = (im.searchStats || []).reduce((n, s) => n + (s.added || 0), 0);
+  const failedAll = (im.searchStats || []).every((s) => s.error);
+  if (failedAll || totalAdded === 0) {
+    return { status: 'failed', nextAction: 'fail', summary: 'ค้นครบทุกแหล่งแต่ไม่ได้ภาพเลย', quality: 'red' };
+  }
+  return {
+    status: 'done',
+    nextAction: 'continue',
+    summary: `ค้นครบ ${SEARCH_PLATFORMS.length} แหล่ง — เก็บเข้าคลังรวม ${totalAdded} ใบ`,
+    dossierPatch: { images: { ...im, totalAdded } },
+  };
+}
+
+// ---------- S5d ตาคัดคลัง: ติดป้ายให้ครบทุกใบ (วนหลายรอบ) + เกณฑ์ขั้นต่ำ ----------
+export async function s5_triage(job, { origin }) {
+  const im = job.dossier.images || {};
+  const rounds = im.triageRounds || 0;
+  const r = await jfetch(`${origin}/api/images/triage`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, limit: 60 }) }, 420000);
+  if (!r.success) {
+    // ตาล้มชั่วคราว (Gemini แกว่ง) → รออีกรอบ สูงสุด 2 ครั้ง — ไม่ใช้ระบบ attempt (โดน waiting นับปนจนเพี้ยน)
+    const errs = (im.triageErrors || 0) + 1;
+    if (errs <= 2) {
+      return { status: 'waiting', nextAction: 'wait', summary: `ตาคัดล้มชั่วคราว (${(r.error || '').slice(0, 60)}) — รอลองใหม่ (${errs}/2)`, dossierPatch: { images: { ...im, triageErrors: errs } } };
+    }
+    return { status: 'failed', nextAction: 'fail', summary: 'ตาคัดคลังล้มซ้ำ: ' + (r.error || r.httpStatus), quality: 'red' };
+  }
+  if (!r.done && rounds + 1 < MAX_TRIAGE_ROUNDS) {
+    return {
+      status: 'waiting',
+      nextAction: 'wait',
+      summary: `ตาคัดรอบ ${rounds + 1}: ติดป้าย ${r.tagged} ใบ เหลือ ${r.remaining}`,
+      dossierPatch: { images: { ...im, triageRounds: rounds + 1 } },
+    };
+  }
+  const relevant = r.summary?.relevant ?? 0;
+  const triage = {
+    total: r.summary?.total ?? 0,
+    relevant,
+    junk: r.summary?.junk ?? 0,
+    byPerson: r.byPerson || {},
+    byCategory: r.byCategory || {},
+  };
+  // Quality gate ตามแผน: ภาพเกี่ยวจริง < เกณฑ์ → เดินต่อได้แต่ติดธงเหลือง (โหมด auto)
+  const under = relevant < MIN_RELEVANT_IMAGES;
+  return {
+    status: 'done',
+    nextAction: 'continue',
+    summary: `ตาคัดครบ: เกี่ยวจริง ${relevant}/${triage.total} ใบ` + (under ? ` ⚠️ ต่ำกว่าเกณฑ์ ${MIN_RELEVANT_IMAGES}` : ''),
+    dossierPatch: { images: { ...im, triage, triageDone: true } },
+    quality: under ? 'yellow' : undefined,
+  };
+}
+
+// ---------- S6 เลือกภาพลงช่อง: สมองจับคู่ + ด่านโค้ดกันซ้ำ/ผิดคน + fallback กฎเดียวกัน ----------
+const SLOT_ORDER = ['hero', 'reaction', 'action', 'context', 'circle'];
+const SLOT_CATEGORY_HINT = {
+  action: ['action', 'moment', 'event'],
+  context: ['place', 'object', 'context', 'scene'],
+  circle: ['evidence', 'moment', 'object'],
+};
+
+export async function s6_slots(job, { origin }) {
+  const im = job.dossier.images || {};
+  const r = await jfetch(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
+  if (!r.success) return { status: 'failed', nextAction: 'retry', summary: 'อ่านคลังรูปไม่ได้: ' + (r.error || r.httpStatus) };
+
+  const pool = (r.images || []).filter((x) => x.triage && x.triage.relevant !== false);
+  if (!pool.length) return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพที่ตายืนยันว่าเกี่ยวเลย — ทำปกไม่ได้', quality: 'red' };
+
+  // metadata กะทัดรัด (เรียงคุณภาพสูงก่อน · เพดาน 80 ใบกัน prompt บวม)
+  const sorted = pool.slice().sort((a, b) => (b.triage?.quality ?? 0) - (a.triage?.quality ?? 0)).slice(0, 80);
+  const meta = sorted.map((x) => ({
+    id: x.id,
+    person: x.triage?.person || null,
+    persons: x.triage?.persons || [],
+    category: x.triage?.category || 'other',
+    emotion: x.triage?.emotion || null,
+    quality: x.triage?.quality ?? 5,
+    faces: x.triage?.faceCount ?? 0,
+    src: x.platform || '',
+  }));
+
+  let brain = { slots: {}, note: '' };
+  let brainOk = true;
+  try {
+    brain = await slotDirectorBrain({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title });
+  } catch (err) {
+    brainOk = false; // สมองล่ม → fallback ล้วน (กฎเดียวกับทางหลัก)
+  }
+
+  // ด่านโค้ด: id ต้องมีจริง + ห้ามซ้ำข้ามช่อง + hero ต้องถูกคน (ถูกคน 100% เหนือทุกข้อ)
+  const byId = new Map(sorted.map((x) => [String(x.id), x]));
+  const mainNames = (job.dossier.compass?.mainCharacters || []).map((c) => c.name).filter(Boolean);
+  const isMainChar = (img) => {
+    const ps = [img.triage?.person, ...(img.triage?.persons || [])].filter(Boolean);
+    return mainNames.length === 0 || ps.some((p) => mainNames.some((m) => p.includes(m) || m.includes(p)));
+  };
+  const used = new Set();
+  const slots = {};
+  let fallbackUsed = 0;
+
+  for (const slot of SLOT_ORDER) {
+    const want = brainOk ? brain.slots?.[slot] : null;
+    let img = want?.id != null ? byId.get(String(want.id)) : null;
+    let reason = want?.reason || '';
+    if (img && used.has(String(img.id))) img = null; // ซ้ำข้ามช่อง = ตัด
+    if (img && slot === 'hero' && !isMainChar(img)) { img = null; reason = ''; } // ผิดคน = ตัด
+    if (!img) {
+      // fallback กฎเดียวกับทางหลัก: hero=ตัวเอกหน้าชัดคุณภาพสูง / อื่นๆ=หมวดใกล้เคียง → คุณภาพสูงสุดที่เหลือ
+      const cands = sorted.filter((x) => !used.has(String(x.id)));
+      const hint = SLOT_CATEGORY_HINT[slot] || [];
+      img =
+        (slot === 'hero' ? cands.find((x) => isMainChar(x) && (x.triage?.faceCount ?? 0) >= 1) : null) ||
+        cands.find((x) => hint.includes(x.triage?.category)) ||
+        (slot === 'reaction' ? cands.find((x) => (x.triage?.faceCount ?? 0) >= 1) : null) ||
+        cands[0] ||
+        null;
+      if (img && slot === 'hero' && !isMainChar(img)) img = null; // ไม่มีตัวเอกจริง → ปล่อยว่าง ห้ามฝืนผิดคน
+      if (img) { fallbackUsed++; reason = reason || 'fallback ตามสูตรแสนไลค์ (หมวด/คุณภาพ)'; }
+    }
+    if (img) {
+      used.add(String(img.id));
+      slots[slot] = {
+        id: img.id,
+        imageUrl: img.imageUrl, // rehost สลับเป็นไฟล์ถาวรให้เองในคลัง (ต้นทางอยู่ originUrl)
+        person: img.triage?.person || null,
+        category: img.triage?.category || null,
+        emotion: img.triage?.emotion || null,
+        reason,
+        backups: (want?.backups || []).filter((b) => byId.has(String(b)) && !used.has(String(b))).slice(0, 2),
+      };
+    } else {
+      slots[slot] = null;
+    }
+  }
+
+  const filled = SLOT_ORDER.filter((s) => slots[s]).length;
+  if (!slots.hero) {
+    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '' } } };
+  }
+  return {
+    status: 'done',
+    nextAction: 'continue',
+    summary: `จับคู่ ${filled}/5 ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'} — ${(brain.note || '').slice(0, 80)}`,
+    dossierPatch: { pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed } },
+    quality: filled < 5 ? 'yellow' : undefined,
+  };
+}
+
+// ---------- ตารางเดินสายพาน เฟส 1+2 ----------
 export const STAGE_FLOW = {
   s1_pick: { run: s1_pick, next: 's1_5_preflight', label: 'S1 คัดข่าว' },
   s1_5_preflight: { run: s1_5_preflight, next: 's2_extract', label: 'S1.5 เช็ควัตถุดิบ' },
@@ -301,5 +533,10 @@ export const STAGE_FLOW = {
   s2_5_compass: { run: s2_5_compass, next: 's3_generate', label: 'S2.5 เข็มทิศเรื่อง' },
   s3_generate: { run: s3_generate, next: 's3_wait', label: 'S3 ส่งเจนข่าว' },
   s3_wait: { run: s3_wait, next: 's4_choose', label: 'S3 รอผลเจน' },
-  s4_choose: { run: s4_choose, next: 'content_ready', label: 'S4 เลือกเนื้อดีสุด' },
+  s4_choose: { run: s4_choose, next: 's5_case', label: 'S4 เลือกเนื้อดีสุด' },
+  s5_case: { run: s5_case, next: 's5_keywords', label: 'S5 เปิดเคสภาพ' },
+  s5_keywords: { run: s5_keywords, next: 's5_search', label: 'S5 สกัดคีย์เวิร์ด' },
+  s5_search: { run: s5_search, next: 's5_triage', label: 'S5 ค้นภาพ 4 แหล่ง' },
+  s5_triage: { run: s5_triage, next: 's6_slots', label: 'S5 ตาคัดคลัง' },
+  s6_slots: { run: s6_slots, next: 'assets_ready', label: 'S6 เลือกภาพลงช่อง' },
 };
