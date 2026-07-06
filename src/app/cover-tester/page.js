@@ -19,7 +19,7 @@ const BUILTIN_TEMPLATES = [
   // อ้างอิง: ปกข่าวดารายิ้ม + สถานที่ปฏิบัติธรรม + ป้ายเรือนธรรม + กลุ่มนั่งสมาธิ
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'template_1', name: 'ข่าวดราม่า 5 ช่อง', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight + ภาพรอง', textSlots: [],
+    id: 'template_1', name: 'ข่าวดราม่า 5 ช่อง', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight + ภาพรอง', hint: 'ข่าวดราม่าทั่วไปที่มีภาพครบมือ (คนเด่น + สถานที่ + หลักฐานใส่กรอบเขียว)', textSlots: [],
     slots: [
       // Hero: ซ้ายเต็มสูง — ใบหน้า closeup ยาวจากบนลงล่าง, fade ขวาเพื่อ blend กับ scene
       { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 750, h: 1350, fadeRight: 320,                  zIndex: 2 },
@@ -39,7 +39,7 @@ const BUILTIN_TEMPLATES = [
   // Layout สะอาด 4 slots — เหมาะกับข่าวที่มีภาพน้อย (3 ภาพ + 1 หลักฐาน)
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'template_2', name: 'ข่าวสะอาด 4 ช่อง', desc: '4 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight กลาง', textSlots: [],
+    id: 'template_2', name: 'ข่าวสะอาด 4 ช่อง', desc: '4 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight กลาง', hint: 'ข่าวที่มีภาพน้อย (3-4 ใบ) / ข่าวสายบุญ-เรียบง่าย ไม่มีวงกลม', textSlots: [],
     slots: [
       // Hero: ซ้ายเต็มสูง — ใบหน้า closeup, fade ขวา blend กับวัด/สถานที่
       { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 720, h: 1350, fadeRight: 300,                  zIndex: 2 },
@@ -57,7 +57,7 @@ const BUILTIN_TEMPLATES = [
   // Layout ครบ 5 ช่อง มี Circle — เหมาะกับข่าวดราม่าที่มีตัวละคร 2+ คน
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'template_3', name: 'ข่าวดราม่า + วงกลม', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Emotion ขวาล่าง + Highlight + Circle', textSlots: [],
+    id: 'template_3', name: 'ข่าวดราม่า + วงกลม', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Emotion ขวาล่าง + Highlight + Circle', hint: 'ดราม่าที่มีตัวละคร 2 คนขึ้นไป — วงกลมไว้ใส่ภาพคู่/อีกฝ่าย', textSlots: [],
     slots: [
       // Hero: ซ้ายเต็มสูง — ใบหน้า profile/closeup, fade ขวา
       { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 740, h: 1350, fadeRight: 310,                  zIndex: 2 },
@@ -77,7 +77,7 @@ const BUILTIN_TEMPLATES = [
   // Layout 6 ช่อง: 3 พื้นหลัง + 2 วงกลม + 2 ข้อความ — เหมาะข่าวสังคม/สะเทือนใจ
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'template_4', name: 'ข่าวสังคม + 2 วงกลม', desc: '5 รูป + 2 ข้อความ — Hero + Scene + Context + Circle ใหญ่ + Circle เล็กแดง',
+    id: 'template_4', name: 'ข่าวสังคม + 2 วงกลม', desc: '5 รูป + 2 ข้อความ — Hero + Scene + Context + Circle ใหญ่ + Circle เล็กแดง', hint: 'ข่าวสังคม/พลเมืองดี — วงใหญ่ใส่ของกลาง วงแดงเล็กชี้จุด + พิมพ์พาดหัวได้ 2 บรรทัด',
     textSlots: [
       { id: 'line1', label: '📝 บรรทัด 1 (ขาว)', x: 730, y: 680, fontSize: 48, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 500, stroke: '#000', strokeWidth: 4, placeholder: 'พาดหัวหลัก...' },
       { id: 'line2', label: '📝 บรรทัด 2 (เหลือง)', x: 730, y: 760, fontSize: 40, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 520, stroke: '#000', strokeWidth: 3, bg: 'rgba(0,0,0,0.65)', bgPadY: 12, bgFullWidth: false, bgEditable: true, placeholder: 'รายละเอียด...' },
@@ -101,7 +101,7 @@ const BUILTIN_TEMPLATES = [
   // Layout 5 ช่อง ไม่มีข้อความ — เหมาะข่าวผจญภัย/เหตุการณ์มืด/กลางคืน
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'template_5', name: 'ข่าวเหตุการณ์ 5 ช่อง', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight เหลือง + Circle ขาว', textSlots: [],
+    id: 'template_5', name: 'ข่าวเหตุการณ์ 5 ช่อง', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight เหลือง + Circle ขาว', hint: 'ข่าวเหตุการณ์/กู้ภัย/ที่เกิดเหตุ — เน้นฉากสถานที่ + วงกลมโคลสอัพคน', textSlots: [],
     slots: [
       // Hero: ซ้ายเต็มสูง — ใบหน้า closeup, fade ขวา
       { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 730, h: 1350, fadeRight: 300,                  zIndex: 2 },
@@ -121,7 +121,7 @@ const BUILTIN_TEMPLATES = [
   // Layout 5 ช่อง + ข้อความกลาง — เหมาะข่าวสะเทือนใจ/ทหาร/ตำรวจ
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'template_6', name: 'ข่าวสะเทือนใจ + ข้อความ', desc: '5 รูป + 2 ข้อความ — Hero + Scene + Context + Circle แดงกลาง + Circle ขาวล่าง',
+    id: 'template_6', name: 'ข่าวสะเทือนใจ + ข้อความ', desc: '5 รูป + 2 ข้อความ — Hero + Scene + Context + Circle แดงกลาง + Circle ขาวล่าง', hint: 'ข่าวสะเทือนใจ/ทหาร-ตำรวจ — มีคำพูดเด่นกลางปก + วงแดงชี้รายละเอียด',
     textSlots: [
       { id: 'line1', label: '📝 บรรทัด 1 (ขาว)', x: 620, y: 580, fontSize: 46, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 480, stroke: '#000', strokeWidth: 4, placeholder: 'พาดหัวหลัก...' },
       { id: 'line2', label: '📝 บรรทัด 2 (ขาว)', x: 620, y: 660, fontSize: 40, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 500, stroke: '#000', strokeWidth: 3, placeholder: 'รายละเอียด...' },
@@ -144,7 +144,7 @@ const BUILTIN_TEMPLATES = [
   // Layout from sample: Left Hero half, Right split top/bottom, Central Circle overlap
   // ═══════════════════════════════════════════════════════════
   {
-    id: 'template_9', name: '3 ฉากแยกชัด + วงกลมกลาง', desc: '4 รูป — Hero ซ้าย 50% + ฉากขวาบน 50% + ฉากขวาล่าง 50% + วงกลมกลางซ้อนทับ', textSlots: [],
+    id: 'template_9', name: '3 ฉากแยกชัด + วงกลมกลาง', desc: '4 รูป — Hero ซ้าย 50% + ฉากขวาบน 50% + ฉากขวาล่าง 50% + วงกลมกลางซ้อนทับ', hint: 'เล่าเรื่อง 3 ฉากแยกชัดไม่เบลนด์กัน + คนเดี่ยวเด่นในวงกลมกลาง', textSlots: [],
     slots: [
       // Hero: ซ้าย 50% สูงเต็ม 1350 — fade ขวาเพื่อ blend
       { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 650, h: 1350, fadeRight: 100, zIndex: 1 },
@@ -333,6 +333,26 @@ function getEffSlot(slot, scale) {
   return { ...slot, x: slot.x + (slot.w - sw)/2, y: slot.y + (slot.h - sh)/2, w: sw, h: sh };
 }
 
+// สรุปส่วนประกอบแทมเพลตเป็นป้ายสั้น (🖼️รูป ⭕วงกลม ⭐กรอบ 📝ข้อความ)
+function templateBadges(t) {
+  const slots = t.slots || [];
+  const circles = slots.filter((sl) => sl.shape === 'circle').length;
+  const frames = slots.filter((sl) => sl.border && sl.shape !== 'circle').length;
+  const texts = (t.textSlots || []).length;
+  const parts = [`🖼️${slots.length}`];
+  if (circles) parts.push(`⭕${circles}`);
+  if (frames) parts.push(`⭐${frames}`);
+  if (texts) parts.push(`📝${texts}`);
+  return parts.join(' ');
+}
+
+// ชื่อไฟล์ดิบจากการอัปโหลด (ตัวเลข/ขีดล่างยาว) → ชื่ออ่านง่าย
+function tidyTemplateName(t, idx) {
+  const n = (t.name || '').trim();
+  if (!n || /^[\d_()\s.\-]+$/.test(n) || /^\d{6,}/.test(n)) return `แทมเพลตอัปโหลด #${idx + 1}`;
+  return n;
+}
+
 // ═══════════════════════════════════════════════════════════
 function TemplateThumbnail({ template, isActive, onClick }) {
   const sc = 72/W, th = H*sc;
@@ -481,6 +501,24 @@ export default function CoverPage() {
       }
     } catch (e) {
       console.warn('Delete failed:', e.message);
+    }
+  };
+
+  // เปลี่ยนชื่อแทมเพลตอัปโหลด (เก็บถาวรผ่าน PATCH /api/templates/[id])
+  const handleRenameTemplate = async (t) => {
+    const name = prompt('ตั้งชื่อแทมเพลตนี้', t.name || '');
+    if (!name || !name.trim() || name === t.name) return;
+    try {
+      const res = await fetch(`/api/templates/${t.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) setTemplates(prev => prev.map(x => x.id === t.id ? { ...x, name: name.trim() } : x));
+      else alert('ตั้งชื่อไม่สำเร็จ: ' + (data.error || ''));
+    } catch (e) {
+      alert('ตั้งชื่อไม่สำเร็จ: ' + e.message);
     }
   };
 
@@ -1108,7 +1146,7 @@ export default function CoverPage() {
               <div style={{ padding: 16, borderRadius: 12, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.12)' }}>
                 <div style={{ fontSize: 14, fontWeight: 800, color: '#94a3b8', marginBottom: 12 }}>🎯 ขั้นตอนการใช้</div>
                 {[
-                  { s: '1', t: 'เลือกแทมเพลตจาก 14 แบบ (แถบซ้าย)', i: '🖼️' },
+                  { s: '1', t: 'เลือกแทมเพลต — ดูป้าย 🖼️รูป ⭕วงกลม 📝ข้อความ ใต้แต่ละแบบ', i: '🖼️' },
                   { s: '2', t: 'อัปโหลดรูปตามช่อง (★ ภาพหลัก, 🖼 ฉากหลัง, ⭐ ไฮไลท์, ⭕ วงกลม)', i: '📤' },
                   { s: '3', t: 'ลากจัดตำแหน่งภาพ ⭐ และ ⭕ ได้อิสระ', i: '✋' },
                   { s: '4', t: 'ปรับขนาดภาพด้วย slider (50%–200%)', i: '🔍' },
@@ -1184,16 +1222,42 @@ export default function CoverPage() {
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>ยังไม่มีแทมเพลต — อัพโหลดรูปตัวอย่างเพื่อเริ่มต้น</div>
                   </div>
                 ) : (
-                  templates.map(t => (
-                    <div key={t.id} style={{ textAlign: 'center', position: 'relative' }}>
-                      <TemplateThumbnail template={t} isActive={templateId===t.id} onClick={() => switchTemplate(t.id)} />
-                      <div style={{ fontSize: 11, color: templateId===t.id ? '#60a5fa':'var(--text-muted)', marginTop: 4, fontWeight: 700 }}>{t.name}</div>
-                      {t.source === 'ai_analyzed' && (
-                        <button onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(t.id); }}
-                          style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', border: 'none', background: 'rgba(239,68,68,0.8)', color: '#fff', fontSize: 11, cursor: 'pointer', lineHeight: '18px', padding: 0 }}>×</button>
-                      )}
-                    </div>
-                  ))
+                  (() => {
+                    const builtinIds = new Set(BUILTIN_TEMPLATES.map(t => t.id));
+                    const builtins = templates.filter(t => builtinIds.has(t.id));
+                    const customs = templates.filter(t => !builtinIds.has(t.id));
+                    const card = (t, i, isCustom) => (
+                      <div key={t.id} style={{ textAlign: 'center', position: 'relative', width: 92 }}>
+                        <TemplateThumbnail template={t} isActive={templateId===t.id} onClick={() => switchTemplate(t.id)} />
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>{isCustom ? `อัปโหลด ${i+1}` : `แบบ ${i+1}`} · {templateBadges(t)}</div>
+                        <div style={{ fontSize: 11, color: templateId===t.id ? '#60a5fa':'var(--text-primary)', fontWeight: 700, lineHeight: 1.25, wordBreak: 'break-word' }}>
+                          {isCustom ? tidyTemplateName(t, i) : t.name}
+                        </div>
+                        {isCustom && (
+                          <>
+                            <button onClick={(e) => { e.stopPropagation(); handleRenameTemplate(t); }} title="ตั้งชื่อแทมเพลต"
+                              style={{ position: 'absolute', top: -6, right: 16, width: 18, height: 18, borderRadius: '50%', border: 'none', background: 'rgba(96,165,250,0.85)', color: '#fff', fontSize: 10, cursor: 'pointer', lineHeight: '18px', padding: 0 }}>✏️</button>
+                            <button onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(t.id); }} title="ลบแทมเพลต"
+                              style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', border: 'none', background: 'rgba(239,68,68,0.8)', color: '#fff', fontSize: 11, cursor: 'pointer', lineHeight: '18px', padding: 0 }}>×</button>
+                          </>
+                        )}
+                      </div>
+                    );
+                    return (
+                      <div style={{ width: '100%' }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>📐 แม่แบบมาตรฐาน ({builtins.length})</div>
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{builtins.map((t, i) => card(t, i, false))}</div>
+                        {customs.length > 0 && (
+                          <>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', margin: '14px 0 8px', paddingTop: 10, borderTop: '1px dashed var(--border)' }}>
+                              📤 แทมเพลตอัปโหลดเอง ({customs.length}) <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>— กด ✏️ ตั้งชื่อ / × ลบ</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{customs.map((t, i) => card(t, i, true))}</div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()
                 )}
               </div>
               {/* Upload new template button */}
@@ -1211,7 +1275,23 @@ export default function CoverPage() {
                   {uploadingTemplate ? uploadProgress : '➕ อัพโหลดแทมเพลตใหม่ (AI วิเคราะห์อัตโนมัติ)'}
                   <input type="file" accept="image/*" onChange={handleUploadTemplate} disabled={uploadingTemplate} style={{ display: 'none' }} />
                 </label>
-                {template && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>📐 {template.desc}</div>}
+                {template && (
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ color: 'var(--text-primary)', fontWeight: 700 }}>
+                      📐 {template.name} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>· {templateBadges(template)}</span>
+                    </div>
+                    {template.hint && <div>🎯 เหมาะกับ: {template.hint}</div>}
+                    <div>{template.desc}</div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {template.slots.map(sl => (
+                        <span key={sl.id} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 999, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>{sl.label}</span>
+                      ))}
+                      {(template.textSlots || []).map(ts => (
+                        <span key={ts.id} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 999, border: '1px dashed var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>{ts.label}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
