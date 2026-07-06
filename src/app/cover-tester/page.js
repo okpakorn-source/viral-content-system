@@ -392,8 +392,9 @@ export default function CoverPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [selectedSlotId, setSelectedSlotId] = useState(null);
   // ★ 4 ก.ค. รอบ 2 (ผู้ใช้สั่ง 4 ฟีเจอร์): เฟดเลือกได้ / วง-กรอบแดงเน้นจุด / สีขอบช่อง / โทนไว้อาลัยขาวดำ
-  const [slotFades, setSlotFades] = useState({});           // slotId → 'off' = ปิดเฟดช่องนั้น (default ตามแทมเพลต)
+  const [slotFades, setSlotFades] = useState({});           // slotId → 'off' = ปิดเฟดช่องนั้น / ตัวเลข = ระดับเฟด % รายช่อง (★ 6 ก.ค.)
   const [fadeAllOff, setFadeAllOff] = useState(false);      // ปิดเฟดทั้งใบ
+  const [fadeAllLevel, setFadeAllLevel] = useState(100);    // ★ 6 ก.ค. ระดับเฟดทั้งใบ % (ช่องที่ตั้งสไลเดอร์เองชนะค่านี้)
   const [slotBorderColors, setSlotBorderColors] = useState({}); // slotId → สีขอบ override
   const [slotGray, setSlotGray] = useState({});             // slotId → 0..1 ขาวดำรายช่อง
   const [grayAll, setGrayAll] = useState(0);                // 0..1 ขาวดำทั้งใบ (โทนไว้อาลัย)
@@ -872,9 +873,24 @@ export default function CoverPage() {
   // ★ 4 ก.ค. รอบ 2 — รวม override ต่อช่อง (เฟด/สีขอบ/ขาวดำ) ใช้ทั้งพรีวิว render และดาวน์โหลด
   const effWithOverrides = (slot) => {
     let eff = getEffSlot(slot, slotScales[slot.id]);
-    const noFade = fadeAllOff || slotFades[slot.id] === 'off';
-    if (noFade && (eff.fadeLeft || eff.fadeRight || eff.fadeTop || eff.fadeBottom)) {
+    const hasFade = eff.fadeLeft || eff.fadeRight || eff.fadeTop || eff.fadeBottom;
+    const lv = slotFades[slot.id];
+    const noFade = fadeAllOff || lv === 'off';
+    if (noFade && hasFade) {
       eff = { ...eff, fadeLeft: 0, fadeRight: 0, fadeTop: 0, fadeBottom: 0 };
+    } else if (hasFade) {
+      // ★ 6 ก.ค. ระดับเฟดปรับได้: รายช่อง (ตัวเลข) ชนะระดับทั้งใบ — 100% = ตามแทมเพลตเดิม
+      const pct = typeof lv === 'number' ? lv : fadeAllLevel;
+      if (pct !== 100) {
+        const k = pct / 100;
+        eff = {
+          ...eff,
+          fadeLeft: Math.round((eff.fadeLeft || 0) * k),
+          fadeRight: Math.round((eff.fadeRight || 0) * k),
+          fadeTop: Math.round((eff.fadeTop || 0) * k),
+          fadeBottom: Math.round((eff.fadeBottom || 0) * k),
+        };
+      }
     }
     if (slotBorderColors[slot.id] && eff.border) eff = { ...eff, border: slotBorderColors[slot.id] };
     const g = slotGray[slot.id] || 0;
@@ -1047,7 +1063,7 @@ export default function CoverPage() {
       }
     }
   }, [slotImages, slotOffsets, slotScales, slotCrops, template, textValues, textBgColors, dragState, draggableSlots, selectedSlotId,
-      slotFades, fadeAllOff, slotBorderColors, slotGray, grayAll, markers, selectedMarkerId]); // ★ 4 ก.ค. รอบ 2
+      slotFades, fadeAllOff, fadeAllLevel, slotBorderColors, slotGray, grayAll, markers, selectedMarkerId]); // ★ 4 ก.ค. รอบ 2 + ระดับเฟด 6 ก.ค.
 
   useEffect(() => { render(); }, [render]);
 
@@ -1725,10 +1741,30 @@ export default function CoverPage() {
                         {img && (
                           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
                             {(sl.fadeLeft || sl.fadeRight || sl.fadeTop || sl.fadeBottom) ? (
-                              <button onClick={() => setSlotFades(p => ({ ...p, [sl.id]: p[sl.id] === 'off' ? undefined : 'off' }))}
-                                style={{ ...bigBtn, width: 'auto', padding: '0 12px', fontSize: 12, color: slotFades[sl.id] === 'off' ? '#f87171' : '#60a5fa', border: `1px solid ${slotFades[sl.id] === 'off' ? 'rgba(239,68,68,0.35)' : 'rgba(96,165,250,0.35)'}` }}>
-                                🌫️ เฟดช่องนี้: {slotFades[sl.id] === 'off' ? 'ปิด' : 'เปิด'}
-                              </button>
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <button onClick={() => setSlotFades(p => ({ ...p, [sl.id]: p[sl.id] === 'off' ? undefined : 'off' }))}
+                                  style={{ ...bigBtn, width: 'auto', padding: '0 12px', fontSize: 12, color: slotFades[sl.id] === 'off' ? '#f87171' : '#60a5fa', border: `1px solid ${slotFades[sl.id] === 'off' ? 'rgba(239,68,68,0.35)' : 'rgba(96,165,250,0.35)'}` }}>
+                                  🌫️ เฟดช่องนี้: {slotFades[sl.id] === 'off' ? 'ปิด (ขอบคม)' : 'เปิด'}
+                                </button>
+                                {/* ★ 6 ก.ค. สไลเดอร์ระดับเฟดรายช่อง — เฟดน้อย←→เฟดมาก (100% = ตามแทมเพลต) */}
+                                {slotFades[sl.id] !== 'off' && !fadeAllOff && (
+                                  <>
+                                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>น้อย</span>
+                                    <input type="range" min="10" max="150" step="10"
+                                      value={typeof slotFades[sl.id] === 'number' ? slotFades[sl.id] : fadeAllLevel}
+                                      onChange={e => setSlotFades(p => ({ ...p, [sl.id]: Number(e.target.value) }))}
+                                      style={{ width: 100 }} />
+                                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>มาก</span>
+                                    <span style={{ fontSize: 12, fontWeight: 800, minWidth: 38, color: typeof slotFades[sl.id] === 'number' ? '#60a5fa' : 'var(--text-muted)' }}>
+                                      {typeof slotFades[sl.id] === 'number' ? slotFades[sl.id] : fadeAllLevel}%
+                                    </span>
+                                    {typeof slotFades[sl.id] === 'number' && (
+                                      <button onClick={() => setSlotFades(p => { const n = { ...p }; delete n[sl.id]; return n; })}
+                                        title="กลับไปใช้ระดับทั้งใบ" style={{ ...bigBtn, width: 34, height: 34, fontSize: 12 }}>↺</button>
+                                    )}
+                                  </>
+                                )}
+                              </div>
                             ) : null}
                             {sl.border && (
                               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -1767,8 +1803,22 @@ export default function CoverPage() {
                           border: `1px solid ${fadeAllOff ? 'rgba(239,68,68,0.4)' : 'rgba(96,165,250,0.35)'}`,
                           background: fadeAllOff ? 'rgba(239,68,68,0.1)' : 'rgba(96,165,250,0.06)',
                           color: fadeAllOff ? '#f87171' : '#60a5fa' }}>
-                        🌫️ เฟดขอบภาพทั้งใบ: {fadeAllOff ? 'ปิดหมด' : 'ตามแทมเพลต'}
+                        🌫️ เฟดขอบภาพทั้งใบ: {fadeAllOff ? 'ปิดหมด (ขอบคม)' : 'เปิด'}
                       </button>
+                      {/* ★ 6 ก.ค. ระดับเฟดทั้งใบ — ใช้กับทุกช่องที่ไม่ได้ตั้งสไลเดอร์ของตัวเอง */}
+                      {!fadeAllOff && (
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>ระดับเฟด</span>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>น้อย</span>
+                          <input type="range" min="10" max="150" step="10" value={fadeAllLevel}
+                            onChange={e => setFadeAllLevel(Number(e.target.value))} style={{ width: 110 }} />
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>มาก</span>
+                          <span style={{ fontSize: 12, fontWeight: 800, minWidth: 38, color: fadeAllLevel !== 100 ? '#60a5fa' : 'var(--text-muted)' }}>{fadeAllLevel}%</span>
+                          {fadeAllLevel !== 100 && (
+                            <button onClick={() => setFadeAllLevel(100)} title="กลับค่าแทมเพลต (100%)" style={{ width: 34, height: 34, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 12, cursor: 'pointer' }}>↺</button>
+                          )}
+                        </div>
+                      )}
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                         <span style={{ fontSize: 12, color: '#cbd5e1', fontWeight: 700 }}>🕯️ โทนไว้อาลัยทั้งใบ</span>
                         <input type="range" min="0" max="100" step="10" value={Math.round(grayAll * 100)}
