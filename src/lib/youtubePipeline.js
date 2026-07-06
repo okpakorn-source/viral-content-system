@@ -252,17 +252,21 @@ async function extractFrames(videoFile, dir, dense = false) {
   }
   const step = 1 / fps;
 
+  // ★ 6 ก.ค. (ผู้ใช้สั่ง "คุณภาพสูงสุด"): โหมดเจาะจงคลิป — ไม่ย่อทิ้งพิกเซล (เพดาน 1920) + JPEG เกรดสูงสุด (q:v 2)
+  //   เดิม scale 1280 + q:v 3 ทำคลิป 1080p แนวนอนเสียพิกเซล ~44% ก่อนถึงคลังด้วยซ้ำ
+  const scaleCap = dense ? 1920 : 1280;
+  const jpegQ = dense ? '2' : '3';
   await exec(
     'ffmpeg',
     [
       '-i',
       videoFile,
       '-vf',
-      `fps=${fps},scale='min(1280,iw)':-2`,
+      `fps=${fps},scale='min(${scaleCap},iw)':-2`,
       '-q:v',
-      '3',
+      jpegQ,
       '-frames:v',
-      String(MAX_CAND_PER_CLIP + 5),
+      String((dense ? Math.max(60, MAX_CAND_PER_CLIP) : MAX_CAND_PER_CLIP) + 5),
       pattern,
     ],
     { timeout: 300000 }

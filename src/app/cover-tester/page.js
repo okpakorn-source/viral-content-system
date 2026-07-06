@@ -242,6 +242,8 @@ function drawRectSlot(ctx, img, slot, offset, crop) {
 
   const o = document.createElement('canvas'); o.width=ow; o.height=oh;
   const c = o.getContext('2d');
+  // ★ 6 ก.ค. (คุณภาพสูงสุด): ย่อ/ขยายภาพแบบเกรดสูง — ขอบคม ไม่หยาบ
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
   const {sx,sy,sw,sh} = coverFit(img,ow,oh,0.3,crop);
   if (_gray > 0) c.filter = `grayscale(${_gray})`; // ★ 4 ก.ค.: โทนไว้อาลัยรายช่อง
   c.drawImage(img,sx,sy,sw,sh,0,0,ow,oh);
@@ -267,6 +269,7 @@ function drawRectSlot(ctx, img, slot, offset, crop) {
     const k = Math.min(80, Math.max(2, be.blur || Math.round(bpx / 6)));
     const bo = document.createElement('canvas'); bo.width = ow; bo.height = oh;
     const bc = bo.getContext('2d');
+    bc.imageSmoothingEnabled = true; bc.imageSmoothingQuality = 'high';
     bc.filter = `blur(${k}px)`;
     bc.drawImage(o, 0, 0);
     bc.filter = 'none';
@@ -293,6 +296,7 @@ function drawRectSlot(ctx, img, slot, offset, crop) {
 }
 
 function drawCircleSlot(ctx, img, slot, offset, crop) {
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; // ★ คุณภาพสูงสุด
   const ox = offset?.dx||0, oy = offset?.dy||0;
   const { x:bx, y:by, diameter:d, border='#fff', borderWidth:bw=4, _gray=0 } = slot;
   const x = bx+ox, y = by+oy, r = d/2, cx = x+r, cy = y+r;
@@ -741,13 +745,9 @@ export default function CoverPage() {
       const img = new Image();
       img.onload = () => {
         setSlotImages(prev => ({ ...prev, [slotId]: img }));
-        // Auto-enhance if image is too small for cover (< 600px)
-        const maxDim = Math.max(img.naturalWidth || 0, img.naturalHeight || 0);
-        if (maxDim > 0 && maxDim < 600) {
-          console.log(`[Cover] ⚠️ Image ${slotId} is small (${img.naturalWidth}×${img.naturalHeight}) — auto-enhancing...`);
-          // Slight delay so state updates first
-          setTimeout(() => enhanceSlotImage(slotId), 100);
-        }
+        // ★ 6 ก.ค. (ผู้ใช้สั่ง): ❌ ปิด auto-enhance — ห้าม AI แตะภาพเองทุกกรณี ภาพต้องเป็นต้นฉบับตรงๆ
+        //   ปุ่ม "ปรับชัด 2x/4x/Auto" ยังกดเองได้ (ภายใต้กฎเดิม: ห้ามแตะหน้า/คงต้นฉบับ 100%)
+        //   (เดิม: รูป <600px ถูกส่งเข้า Real-ESRGAN อัตโนมัติโดยไม่ถาม)
       };
       img.src = reader.result;
     };
@@ -1155,6 +1155,7 @@ export default function CoverPage() {
   const render = useCallback(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; // ★ คุณภาพสูงสุด
     ctx.fillStyle = '#111119'; ctx.fillRect(0,0,W,H);
     if (!template) {
       ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.font = 'bold 36px sans-serif'; ctx.textAlign = 'center';
@@ -1269,6 +1270,7 @@ export default function CoverPage() {
     const canvas = canvasRef.current; if (!canvas || !template) return;
     // Render clean (no handles)
     const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; // ★ คุณภาพสูงสุด (ไฟล์ดาวน์โหลด)
     ctx.fillStyle = '#111119'; ctx.fillRect(0,0,W,H);
     drawBlurredBg(ctx, slotImages, template);
     const sorted = [...template.slots].sort((a,b) => (a.zIndex||0)-(b.zIndex||0));
