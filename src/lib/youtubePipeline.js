@@ -126,8 +126,21 @@ export async function runYouTubePipeline({ caseId, keywords, progress, clipUrls,
       }
 
       P('Gemini คัดเฟรม', `คลิป ${clipIdx} — คัดจาก ${cand.length} เฟรม (ได้ ${collected.length} แล้ว)`, { pct: 22 + clipIdx * 12 });
-      const selected = await selectWithGemini(cand, subjects, P.onRetry, caseId, newsGist);
+      let selected = await selectWithGemini(cand, subjects, P.onRetry, caseId, newsGist, pinpoint);
       log.push(`คลิป ${clipIdx} "${clip.title.slice(0, 40)}": เฟรมดิบ ${cand.length} → Gemini เลือก ${selected.length}`);
+
+      // ★ 6 ก.ค. (ผู้ใช้สั่ง "ต้องได้ 10+ ภาพ"): โหมดเจาะจงคลิป — ตาคัดน้อยไป (คลิปถ่ายมือ/สั่น
+      //   โดนเกณฑ์ความคมตัดเกือบหมด) → เติมเฟรมกระจายทั่วช่วงเวลาให้ถึงขั้นต่ำ ผู้ใช้ไปคัดเองต่อได้
+      const PINPOINT_MIN = int(process.env.YT_PINPOINT_MIN, 12);
+      if (pinpoint && selected.length < PINPOINT_MIN && cand.length > selected.length) {
+        const have = new Set(selected);
+        const rest = cand.filter((c) => !have.has(c.index));
+        const need = Math.min(PINPOINT_MIN - selected.length, rest.length);
+        const step = rest.length / need;
+        for (let k = 0; k < need; k++) selected.push(rest[Math.floor(k * step)].index);
+        log.push(`โหมดเจาะจง: ตาเลือก ${have.size} < ขั้นต่ำ ${PINPOINT_MIN} → เติมเฟรมกระจายเวลาเป็น ${selected.length}`);
+        P('เติมเฟรมขั้นต่ำ', `ตาคัด ${have.size} → เติมเป็น ${selected.length} (กระจายทั่วคลิป)`);
+      }
 
       let frameNo = 0;
       for (const ci of selected) {
@@ -264,7 +277,7 @@ async function extractFrames(videoFile, dir, dense = false) {
 }
 
 // ---- Gemini: คัดเฟรมเป็นแบตช์ คืน index ที่เลือก ----
-async function selectWithGemini(cand, subjects, onRetry, caseId, newsGist) {
+async function selectWithGemini(cand, subjects, onRetry, caseId, newsGist, pinpoint) {
   const keep = [];
   for (let i = 0; i < cand.length; i += GEMINI_BATCH) {
     const batch = cand.slice(i, i + GEMINI_BATCH);
@@ -273,7 +286,7 @@ async function selectWithGemini(cand, subjects, onRetry, caseId, newsGist) {
       const buf = await fs.readFile(c.file);
       frames.push({ index: c.index, base64: buf.toString('base64') });
     }
-    const sel = await geminiSelectFrames({ frames, subjects, onRetry, caseId, newsGist });
+    const sel = await geminiSelectFrames({ frames, subjects, onRetry, caseId, newsGist, pinpoint });
     for (const s of sel) keep.push(s.index);
   }
   return [...new Set(keep)];
