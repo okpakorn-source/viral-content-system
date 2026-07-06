@@ -157,8 +157,13 @@ export async function s2_5_compass(job) {
 // ---------- S3 เจนข่าว: ส่งเข้าคิวเดิม (ประตูเดียวกับพนักงาน) ----------
 export async function s3_generate(job, { origin }) {
   const ex = job.dossier.extract || {};
-  // extract เองไม่ผ่าน → ส่ง URL ให้ท่อข่าว scrape เอง (ตัวสกัดของท่อข่าวครบเครื่องกว่า)
-  const payload = ex.urlOnly && job.dossier.desk?.url ? { url: job.dossier.desk.url } : { input: ex.text };
+  const gen = job.dossier.generate || {};
+  // รอบแก้ตัว (คิวล้มรอบแรก): บังคับส่งเป็นเนื้อ text ตรงๆ แทน URL
+  const payload = gen.forceTextInput
+    ? { input: gen.forceTextInput }
+    : ex.urlOnly && job.dossier.desk?.url
+      ? { url: job.dossier.desk.url }
+      : { input: ex.text };
   const q = await jfetch(`${origin}/api/queue/add`, { method: 'POST', body: JSON.stringify(payload) }, 60000);
   if (q.httpStatus === 409) {
     return { status: 'failed', nextAction: 'fail', summary: 'คิวตีเป็นข่าวซ้ำ (NEAR_DUPLICATE) — มีคนทำเรื่องนี้อยู่แล้ว', quality: 'yellow' };
@@ -191,8 +196,23 @@ export async function s3_wait(job, { origin }) {
       dossierPatch: { generate: { ...gen, versions, pipeline: st.result.pipeline || '', completedAt: new Date().toISOString() } },
     };
   }
-  if (status === 'failed' || status === 'superseded') {
-    return { status: 'failed', nextAction: 'fail', summary: `คิวจบแบบ ${status}: ${st.error || ''}`.slice(0, 150), quality: 'red' };
+  const purged = !status && st.error; // งานหายจากคิว (ถูก purge/ไม่พบ) = กู้ผลไม่ได้แล้ว
+  if (status === 'failed' || status === 'superseded' || purged) {
+    // 🛟 แก้ตัว 1 รอบ: ล้มจาก URL/ชั่วคราว → ส่งใหม่เป็นเนื้อ text ตรงๆ (ท่อไม่ต้อง scrape เอง)
+    if (!gen.retriedWithText) {
+      const desk = job.dossier.desk || {};
+      const fallbackInput = [desk.title, job.dossier.extract?.text || desk.fullText]
+        .filter(Boolean)
+        .join('\n\n');
+      return {
+        status: 'done',
+        nextAction: 'goto:s3_generate',
+        summary: `คิวจบแบบ ${status || 'หายจากคิว'} (${(st.error || '').slice(0, 60)}) → ส่งใหม่รอบแก้ตัวด้วยเนื้อ text`,
+        dossierPatch: { generate: { ...gen, retriedWithText: true, forceTextInput: fallbackInput, queueJobId: null } },
+        quality: 'yellow',
+      };
+    }
+    return { status: 'failed', nextAction: 'fail', summary: `คิวจบแบบ ${status || 'หายจากคิว'} (ลองซ้ำแล้ว): ${st.error || ''}`.slice(0, 150), quality: 'red' };
   }
   // ยังไม่เสร็จ → รอ tick หน้า
   const age = gen.enqueuedAt ? Math.round((Date.now() - new Date(gen.enqueuedAt).getTime()) / 60000) : 0;
