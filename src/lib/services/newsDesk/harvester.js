@@ -448,6 +448,12 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
       //   /news (มีวันที่+ภาพ) 12 คำ + /search (กว้าง เจอเพจ/บล็อก) 8 คำ = 20 คำ/รอบ → ครองโต๊ะด้วยเรื่องคนจริงกินใจ
       await runGroup(G.generateDeepGoodQueries(12), { ep: 'news', noClip: true, tr: 'qdr:m' });
       await runGroup(G.generateDeepGoodQueries(8), { ep: 'search', noClip: true, tr: 'qdr:y' });
+      // ★★★ 4 ก.ค. (ผู้ใช้สั่ง): คลัง DNA จากโพสต์จริงเพจ — ทุกเลนใช้ร่วมกัน (มี DNA ค่อยยิง ไม่มี=ข้าม)
+      try {
+        const { dnaNewsQueries } = await import('./dnaQueries');
+        const dnaQ = await dnaNewsQueries(16);
+        if (dnaQ.length) await runGroup(dnaQ, { ep: 'news', noClip: true, tr: 'qdr:m' });
+      } catch (e) { console.log('[Harvester] dna news skip:', e.message?.slice(0, 40)); }
       await runGroup(G.generateHardshipQueries(5), { ep: 'news', noClip: true, tr: 'qdr:m' }); // เด็ก/ครอบครัวลำบาก (คลังมีแต่เดิมไม่เคยถูกเรียก!)
       await runGroup(G.generateCommonerQueries(4), { ep: 'news', noClip: true, tr: 'qdr:w' }); // ชาวบ้านไวรัลมีตัวตน (เพิ่ม 2→4)
       // ★ 21 มิ.ย.: ตัด generateGoodContentQueries ออก — ซ้ำซ้อนกับคลัง "น้ำดีอมตะ" ใหม่ (18 คีย์) + คุมเวลา harvest <300s
@@ -498,7 +504,10 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
       const fieldQs = generateFieldQueries(6); // ★ 2 ก.ค.: วงการเฉพาะทาง (พระ/หมอ/ครู/กู้ภัย/หมอดู/นักธุรกิจ...) — RSS ฟรี (ลด 8→6)
       // ★★★ 4 ก.ค. (ผู้ใช้สั่ง): น้ำดีลึกทุกวงการ ผ่าน Google News RSS ฟรี — เติมแนวปัญญาปันสุขให้โต๊ะเยอะ
       const deepQs = generateDeepGoodQueries(14).map(x => ({ q: x.q, category: '' })); // ให้ AI ตีหมวดตามเนื้อ
-      const allQ = [...deepQs, ...dailyQs, ...themeQs, ...fieldQs];
+      // ★★★ 4 ก.ค.: คลัง DNA (บทความ) ผ่าน Google News RSS ฟรี — ทุกเลนใช้ DNA เดียวกัน
+      let dnaBroad = [];
+      try { const { dnaNewsQueries } = await import('./dnaQueries'); dnaBroad = (await dnaNewsQueries(12)).map(x => ({ q: x.q, category: x.category || '' })); } catch {}
+      const allQ = [...dnaBroad, ...deepQs, ...dailyQs, ...themeQs, ...fieldQs];
       const _dailyCut = Date.now() - 5 * 864e5; // กระแสรายวัน = สด ≤5 วันเท่านั้น
       const _bRes = await Promise.all(allQ.map(async ({ q, category }) => {
         try {
@@ -518,9 +527,10 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
   if (lanes.includes('clip')) {
     try {
       const { generateClipQueriesByPlatform, generateDeepGoodClipQueries } = await import('./keywordBank');
-      // ★★★ 4 ก.ค. (ผู้ใช้สั่ง "คลิปน้ำดีเยอะๆ คลิปทำยอดดีกว่าลิงก์"): คลิปน้ำดีลึก 4/แพลตฟอร์ม + คลิปทั่วไป 2/แพลตฟอร์ม
-      //   = น้ำดี 20 + ทั่วไป 10 = 30 คำค้น/รอบ (เดิม 20 ล้วนดารา) → คลิปน้ำดีครองเลนคลิป
-      const clipQs = [...generateDeepGoodClipQueries(4), ...generateClipQueriesByPlatform(2)];
+      // ★★★ 4 ก.ค. (ผู้ใช้สั่ง "คลิปน้ำดีเยอะๆ + ทุกเลนใช้ DNA เดียวกัน"): DNA + น้ำดีลึก + ทั่วไป ทุกแพลตฟอร์ม
+      let dnaClip = [];
+      try { const { dnaClipQueries } = await import('./dnaQueries'); dnaClip = await dnaClipQueries(3); } catch {}
+      const clipQs = [...dnaClip, ...generateDeepGoodClipQueries(3), ...generateClipQueriesByPlatform(2)];
       const PLATFORM_SITE = { tiktok: 'site:tiktok.com', instagram: 'site:instagram.com', reels: 'reels', facebook: 'site:facebook.com' };
       const _cRes = await Promise.all(clipQs.map(async ({ q, platform, category }) => {
         if (_isDead(q)) return []; // ★ 3 ก.ค.: คีย์ตายไม่ยิง
