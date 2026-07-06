@@ -236,6 +236,36 @@ function drawRectSlot(ctx, img, slot, offset, crop) {
   c.drawImage(img,sx,sy,sw,sh,0,0,dw,dh);
   c.filter = 'none';
   if (!border && (fR||fL||fT||fB)) { const mask = createFadeMask(dw,dh,{right:fR,left:fL,top:fT,bottom:fB}); c.globalCompositeOperation='destination-in'; c.drawImage(mask,0,0); c.globalCompositeOperation='source-over'; }
+  // ★ 6 ก.ค. รอบ 3 (ผู้ใช้สั่ง): โหมด "เบลอละลาย" — ขอบภาพเบลอฟุ้งค่อยๆ ชัดเข้าใน (ภาพละลายเข้าหากัน)
+  //   ต่างจากเฟด: ภาพไม่จางหายเป็นใส แต่ขอบถูกเบลอแรงสุดที่ริมแล้วไล่กลับมาคม
+  const be = slot._blurEdges;
+  if (!border && be && (be.left || be.right || be.top || be.bottom)) {
+    const bpx = Math.max(40, be.px || 200);
+    const k = Math.min(40, Math.max(8, Math.round(bpx / 6)));
+    const bo = document.createElement('canvas'); bo.width = dw; bo.height = dh;
+    const bc = bo.getContext('2d');
+    bc.filter = `blur(${k}px)`;
+    bc.drawImage(o, 0, 0);
+    bc.filter = 'none';
+    // mask: โชว์ภาพเบลอเฉพาะแถบขอบที่เลือก (ทึบสุดริมขอบ → จางเข้าหากลางภาพ)
+    const mk = document.createElement('canvas'); mk.width = dw; mk.height = dh;
+    const mc = mk.getContext('2d');
+    const strip = (x1, y1, x2, y2, rx, ry, rw, rh) => {
+      const g = mc.createLinearGradient(x1, y1, x2, y2);
+      g.addColorStop(0, 'rgba(0,0,0,1)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      mc.fillStyle = g;
+      mc.fillRect(rx, ry, rw, rh);
+    };
+    const pw = Math.min(bpx, dw), ph = Math.min(bpx, dh);
+    if (be.left) strip(0, 0, pw, 0, 0, 0, pw, dh);
+    if (be.right) strip(dw, 0, dw - pw, 0, dw - pw, 0, pw, dh);
+    if (be.top) strip(0, 0, 0, ph, 0, 0, dw, ph);
+    if (be.bottom) strip(0, dh, 0, dh - ph, 0, dh - ph, dw, ph);
+    bc.globalCompositeOperation = 'destination-in';
+    bc.drawImage(mk, 0, 0);
+    c.drawImage(bo, 0, 0);
+  }
   ctx.drawImage(o,dx,dy);
 }
 
@@ -427,15 +457,31 @@ export default function CoverPage() {
       </button>
     );
     const anyOn = fe.left || fe.right || fe.top || fe.bottom;
+    const mode = fe.mode || 'fade';
+    const setMode = (m) => setSlotFadeEdges(p => {
+      const cur = p[sl.id] || fadeEdgesOf(sl);
+      return { ...p, [sl.id]: { ...cur, mode: m } };
+    });
+    const modeChip = (m, label, title) => (
+      <button key={m} onClick={() => setMode(m)} title={title}
+        style={{ ...btn,
+          color: mode === m ? '#facc15' : 'var(--text-muted)',
+          background: mode === m ? 'rgba(250,204,21,0.1)' : 'var(--bg-primary)',
+          border: `1px solid ${mode === m ? 'rgba(250,204,21,0.5)' : 'var(--border)'}` }}>
+        {label}
+      </button>
+    );
     return (
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
-        <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>🌫️ เฟดขอบ</span>
+        <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>🌫️ ขอบภาพ</span>
         {chip('left', '◀ ซ้าย')}
         {chip('right', 'ขวา ▶')}
         {chip('top', '▲ บน')}
         {chip('bottom', 'ล่าง ▼')}
         {anyOn && (
           <>
+            {modeChip('blur', '💧 เบลอละลาย', 'ขอบเบลอฟุ้ง ภาพละลายเข้าหากัน (ภาพไม่จางหาย)')}
+            {modeChip('fade', '🌫️ จางใส', 'ขอบค่อยๆ จางหายเป็นใส (แบบแทมเพลตเดิม)')}
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>บาง</span>
             <input type="range" min="40" max="600" step="20" value={fe.px}
               onChange={e => setSlotFadeEdges(p => {
@@ -937,14 +983,18 @@ export default function CoverPage() {
       // ปิดเฟดทั้งใบ = ขอบคมหมดทุกช่อง (ชนะทุกอย่าง — คาดเดาง่าย)
       eff = { ...eff, fadeLeft: 0, fadeRight: 0, fadeTop: 0, fadeBottom: 0 };
     } else if (ov) {
-      // ★ 6 ก.ค. รอบ 2: ช่องนี้ตั้งเฟดรายขอบเอง — ขอบไหนติ๊ก = เฟดด้วยความหนา px ที่ตั้ง (ไม่ผูกค่าแทมเพลต)
-      eff = {
-        ...eff,
-        fadeLeft: ov.left ? ov.px : 0,
-        fadeRight: ov.right ? ov.px : 0,
-        fadeTop: ov.top ? ov.px : 0,
-        fadeBottom: ov.bottom ? ov.px : 0,
-      };
+      // ★ 6 ก.ค. รอบ 2: ช่องนี้ตั้งขอบเอง — โหมดจาง (fade) หรือเบลอละลาย (blur) ตามที่เลือก
+      if (ov.mode === 'blur') {
+        eff = { ...eff, fadeLeft: 0, fadeRight: 0, fadeTop: 0, fadeBottom: 0, _blurEdges: ov };
+      } else {
+        eff = {
+          ...eff,
+          fadeLeft: ov.left ? ov.px : 0,
+          fadeRight: ov.right ? ov.px : 0,
+          fadeTop: ov.top ? ov.px : 0,
+          fadeBottom: ov.bottom ? ov.px : 0,
+        };
+      }
     } else if (eff.fadeLeft || eff.fadeRight || eff.fadeTop || eff.fadeBottom) {
       // ช่องที่ยังไม่ปรับเอง = ตามแทมเพลต × ระดับเฟดทั้งใบ
       if (fadeAllLevel !== 100) {

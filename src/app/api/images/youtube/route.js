@@ -14,6 +14,25 @@ import { runYouTubePipeline } from '@/lib/youtubePipeline';
 import { addImages } from '@/lib/imageStore';
 import { enqueueJob, patchJob, queuePosition, finishJob } from '@/lib/ytJobStore';
 import { hostImagePublic } from '@/lib/publicHost';
+import { createClient } from '@supabase/supabase-js';
+
+// ★ 6 ก.ค.: เฟรมที่ต้องโชว์บนเว็บ ต้องอยู่ "ถาวร" — tmpfiles (publicHost) หมดอายุใน ~1 ชม.
+//   → เก็บลง Supabase Storage (bucket สาธารณะ acs-frames) · ล้มค่อย fallback tmpfiles ชั่วคราว
+const FRAME_BUCKET = 'acs-frames';
+async function persistFrame(buf, name) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) throw new Error('ไม่มี Supabase env');
+  const c = createClient(url, key);
+  const p = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}_${name}`;
+  let { error } = await c.storage.from(FRAME_BUCKET).upload(p, buf, { contentType: 'image/jpeg' });
+  if (error && /bucket|not found/i.test(error.message)) {
+    await c.storage.createBucket(FRAME_BUCKET, { public: true }).catch(() => {});
+    ({ error } = await c.storage.from(FRAME_BUCKET).upload(p, buf, { contentType: 'image/jpeg' }));
+  }
+  if (error) throw new Error('อัป Storage ไม่สำเร็จ: ' + error.message);
+  return c.storage.from(FRAME_BUCKET).getPublicUrl(p).data.publicUrl;
+}
 
 import { reporter, doneProgress, failProgress } from '@/lib/progress';
 
@@ -110,7 +129,7 @@ export async function POST(req) {
           try {
             if (!f.imageUrl || !f.imageUrl.startsWith('/')) return f;
             const buf = await fs.readFile(path.join(process.cwd(), 'public', f.imageUrl.replace(/^\//, '')));
-            const url = await hostImagePublic(buf, path.basename(f.imageUrl));
+            const url = await persistFrame(buf, path.basename(f.imageUrl)).catch(() => hostImagePublic(buf, path.basename(f.imageUrl)));
             hosted++;
             P2('อัปเฟรมขึ้นโฮสต์สาธารณะ', `${hosted}/${frames.length}`);
             return { ...f, imageUrl: url, thumbnailUrl: url };
