@@ -26,6 +26,8 @@ function stageInputHash(job) {
     extractChars: d.extract?.chars || 0,
     queueJobId: d.generate?.queueJobId || null,
     versions: (d.generate?.versions || []).length,
+    // รอบแก้ตัว S3 ต้องได้ key ใหม่ (บั๊กเทสทองคำ: basis ซ้ำรอบแรก → โดน idempotent ข้ามการส่งใหม่)
+    retriedWithText: !!d.generate?.retriedWithText,
   };
   return crypto.createHash('sha256').update(JSON.stringify(basis)).digest('hex').slice(0, 16);
 }

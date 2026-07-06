@@ -159,11 +159,27 @@ export async function s3_generate(job, { origin }) {
   const ex = job.dossier.extract || {};
   const gen = job.dossier.generate || {};
   // รอบแก้ตัว (คิวล้มรอบแรก): บังคับส่งเป็นเนื้อ text ตรงๆ แทน URL
-  const payload = gen.forceTextInput
-    ? { input: gen.forceTextInput }
+  const input = gen.forceTextInput
+    ? gen.forceTextInput
     : ex.urlOnly && job.dossier.desk?.url
-      ? { url: job.dossier.desk.url }
-      : { input: ex.text };
+      ? job.dossier.desk.url
+      : ex.text;
+  // payload เลียนแบบโต๊ะข่าวเป๊ะ (เส้นทางที่พิสูจน์ทุกวัน) — ต่างแค่ editor เป็น mega-bot
+  const desk = job.dossier.desk || {};
+  const payload = {
+    input,
+    contentLength: 'short',
+    userId: 'desk-mega-bot',
+    deskMeta: {
+      newsId: desk.cardId || '',
+      lane: desk.lane || '',
+      category: desk.category || '',
+      editor: 'mega-bot',
+      editorIcon: '🏭',
+      judgeScore: null,
+      finalScore: desk.score ?? null,
+    },
+  };
   const q = await jfetch(`${origin}/api/queue/add`, { method: 'POST', body: JSON.stringify(payload) }, 60000);
   if (q.httpStatus === 409) {
     return { status: 'failed', nextAction: 'fail', summary: 'คิวตีเป็นข่าวซ้ำ (NEAR_DUPLICATE) — มีคนทำเรื่องนี้อยู่แล้ว', quality: 'yellow' };

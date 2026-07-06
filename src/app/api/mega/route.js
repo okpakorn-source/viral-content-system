@@ -45,7 +45,13 @@ export async function POST(req) {
     if (action === 'retry') {
       const job = await getJob(body.id);
       if (!job) return NextResponse.json({ success: false, error: 'ไม่พบงาน' }, { status: 404 });
-      const updated = await updateJob(job.id, { status: 'running', quality: job.quality === 'red' ? 'yellow' : job.quality });
+      const patch = { status: 'running', quality: job.quality === 'red' ? 'yellow' : job.quality };
+      // ย้อนขั้นได้ (เช่น กลับไปส่งเจนใหม่แบบสะอาด): {action:'retry', id, stage:'s3_generate'}
+      if (body.stage) {
+        patch.stage = body.stage;
+        if (body.stage === 's3_generate') patch.dossier = { generate: null };
+      }
+      const updated = await updateJob(job.id, patch);
       await setFlags({ paused: false, consecutiveFails: 0 });
       return NextResponse.json({ success: true, job: updated });
     }
