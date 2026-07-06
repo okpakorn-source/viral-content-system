@@ -462,8 +462,29 @@ export default function NewsDeskPage() {
       });
       const d = await parseRes(res);
       if (d.success && d.queued) {
-        setMsg(`⏳ ส่งเครื่องทีมขุดแล้ว — เสร็จจะโผล่ในแท็บ 🎙️ เอง (${d.message ? '' : '~3-6 นาที'})`);
+        setMsg('⏳ ส่งเครื่องทีมขุดแล้ว — กำลังรอผล (FB/IG ~3-6 นาที)...');
         setClipUrl('');
+        // ★ 4 ก.ค.: เช็คสถานะคิวเองจนเสร็จ (เดิมค้างข้อความ ไม่รู้ว่าเสร็จ)
+        if (d.jobId) {
+          let tries = 0;
+          const poll = setInterval(async () => {
+            tries++;
+            try {
+              const q = await (await fetch(`/api/queue/status?id=${d.jobId}`, { cache: 'no-store' })).json();
+              if (q.status === 'completed' || (q.success === false && q.errorType === 'JOB_NOT_FOUND' && tries > 2)) {
+                clearInterval(poll);
+                setMsg('✅ ขุดคลิปเสร็จแล้ว! — ดูผล+คะแนนที่แท็บ 🎙️ สัมภาษณ์');
+                load();
+              } else if (q.status === 'failed' || q.status === 'cancelled') {
+                clearInterval(poll);
+                setMsg(`❌ ขุดคลิปไม่สำเร็จ: ${String(q.error || 'คลิปอาจโหลดไม่ได้/ไม่มีเสียง').slice(0, 80)}`);
+              } else if (tries > 40) { // ~10 นาที
+                clearInterval(poll);
+                setMsg('⏱️ ใช้เวลานานผิดปกติ — เช็คเครื่องทีมว่าเปิดอยู่ไหม (ผลอาจโผล่ในแท็บ 🎙️ ทีหลัง)');
+              }
+            } catch {}
+          }, 15000);
+        }
       } else if (d.success) {
         const sc = d.item?.judgeScore;
         setMsg(`✅ ประเมินแล้ว: "${d.item.title}" — คะแนน ${sc ?? '-'}/10 · ${sc >= 7 ? '👍 น่าทำ' : sc >= 4 ? 'พอได้' : '👎 ไม่ค่อยน่าทำ'} (อยู่แท็บ 🎙️)`);
