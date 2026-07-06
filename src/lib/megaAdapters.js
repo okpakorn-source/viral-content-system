@@ -12,13 +12,13 @@ const MEGA_USER = 'mega-bot';
 const MIN_EXTRACT_CHARS = parseInt(process.env.MEGA_MIN_EXTRACT_CHARS || '400', 10);
 const MAX_S1_ATTEMPTS = 3;
 
-// 🔴 คิวข่าว: queue/add จะเตะ worker ที่ "origin ของคนส่ง" — ถ้า MEGA (:3900) ส่งเอง :3900 จะกลายเป็น
-//   ตัวประมวลข่าวเสียเอง (ผิดหลักแยกงานหนัก + เส้นทางไม่ถูกพิสูจน์) → บังคับส่งผ่านเซิร์ฟเวอร์ข่าว :3000
-//   (เส้นทางเดียวกับโต๊ะข่าวเป๊ะ) — override ได้ด้วย env MEGA_QUEUE_ORIGIN
-function queueOrigin(origin) {
-  if (process.env.MEGA_QUEUE_ORIGIN) return process.env.MEGA_QUEUE_ORIGIN;
-  if (process.platform === 'win32') return 'http://localhost:3000'; // เครื่องทีม → เซิร์ฟเวอร์ข่าวตัวจริง
-  return origin; // บนเว็บ → origin ตัวเอง (เส้นทางเดียวกับที่พนักงานใช้)
+// 🔴 คิวข่าว: queue/add เตะ worker ที่ "origin ของคนส่ง" + กติกาคิว "ข่าว→คลาวด์เท่านั้น" (เครื่องทีมข้าม)
+//   บทเรียนเทสทองคำ 7 ก.ค.: ส่งจากเครื่องทีม → ไม่มีใครเตะ Vercel → งานนั่งรอจน Railway คว้า →
+//   โดน edge ตัด ~60-90 วิ ตอบ HTML = ล้มเร็วทุกครั้ง · พนักงานรอดเพราะส่งจากเว็บ Vercel (เตะ worker
+//   Vercel ทันที) → MEGA ต้องส่งผ่าน Vercel origin เหมือนพนักงานเป๊ะ — override: MEGA_QUEUE_ORIGIN
+const QUEUE_ORIGIN_DEFAULT = 'https://viral-content-system.vercel.app';
+function queueOrigin() {
+  return process.env.MEGA_QUEUE_ORIGIN || QUEUE_ORIGIN_DEFAULT;
 }
 
 async function jfetch(url, opts = {}, timeoutMs = 60000) {
@@ -189,7 +189,7 @@ export async function s3_generate(job, { origin }) {
       finalScore: desk.score ?? null,
     },
   };
-  const q = await jfetch(`${queueOrigin(origin)}/api/queue/add`, { method: 'POST', body: JSON.stringify(payload) }, 60000);
+  const q = await jfetch(`${queueOrigin()}/api/queue/add`, { method: 'POST', body: JSON.stringify(payload) }, 60000);
   if (q.httpStatus === 409) {
     return { status: 'failed', nextAction: 'fail', summary: 'คิวตีเป็นข่าวซ้ำ (NEAR_DUPLICATE) — มีคนทำเรื่องนี้อยู่แล้ว', quality: 'yellow' };
   }
@@ -207,7 +207,7 @@ export async function s3_generate(job, { origin }) {
 // ---------- S3w รอผลเจน: โพล + "ก๊อบผลทันที" (คิว purge ~30 นาที) ----------
 export async function s3_wait(job, { origin }) {
   const gen = job.dossier.generate || {};
-  const st = await jfetch(`${queueOrigin(origin)}/api/queue/status?id=${encodeURIComponent(gen.queueJobId)}`, {}, 30000);
+  const st = await jfetch(`${queueOrigin()}/api/queue/status?id=${encodeURIComponent(gen.queueJobId)}`, {}, 30000);
   const status = st.status || st.jobStatus;
   if (status === 'completed' && st.result) {
     // สัณฐานจริง (พิสูจน์จากโพรบ 7 ก.ค.): versions อยู่ที่ result.data.versions
