@@ -517,8 +517,10 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
   //   ★ หาคลิปไฮไลท์/สัมภาษณ์/โมเมนต์/ประเด็น "ทุกวงการ" ให้เยอะสุด (รวมคลิปพูดน้อยแต่การกระทำมีประเด็น — มี AI ถอดคลิป)
   if (lanes.includes('clip')) {
     try {
-      const { generateClipQueriesByPlatform } = await import('./keywordBank');
-      const clipQs = generateClipQueriesByPlatform(4); // 4/แพลตฟอร์ม × 5 = 20 คำค้น/รอบ
+      const { generateClipQueriesByPlatform, generateDeepGoodClipQueries } = await import('./keywordBank');
+      // ★★★ 4 ก.ค. (ผู้ใช้สั่ง "คลิปน้ำดีเยอะๆ คลิปทำยอดดีกว่าลิงก์"): คลิปน้ำดีลึก 4/แพลตฟอร์ม + คลิปทั่วไป 2/แพลตฟอร์ม
+      //   = น้ำดี 20 + ทั่วไป 10 = 30 คำค้น/รอบ (เดิม 20 ล้วนดารา) → คลิปน้ำดีครองเลนคลิป
+      const clipQs = [...generateDeepGoodClipQueries(4), ...generateClipQueriesByPlatform(2)];
       const PLATFORM_SITE = { tiktok: 'site:tiktok.com', instagram: 'site:instagram.com', reels: 'reels', facebook: 'site:facebook.com' };
       const _cRes = await Promise.all(clipQs.map(async ({ q, platform, category }) => {
         if (_isDead(q)) return []; // ★ 3 ก.ค.: คีย์ตายไม่ยิง
