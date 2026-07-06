@@ -32,7 +32,7 @@ export async function compassBrain({ card, extractText }) {
 กฎ: อิงเฉพาะข้อเท็จจริงในเนื้อข่าว ห้ามแต่งเพิ่ม · อารมณ์ต้องตรงหลักฐาน · ช็อตภาพในฝันต้องเป็นภาพที่ "มีโอกาสหาเจอจริง"
 ตอบ JSON เท่านั้น:
 {"angle":"มุมเล่าหลัก 1 ประโยค","primaryEmotion":"อารมณ์หลัก","secondaryEmotions":["อารมณ์รอง 2-3"],
-"mainCharacters":[{"name":"ชื่อตรงตามข่าว","role":"hero|reaction|context"}],
+"mainCharacters":[{"name":"ชื่อ-นามสกุลจริงตามข่าว พร้อมฉายา/ชื่อเล่นในวงเล็บถ้ามี เช่น 'จุน วนวิทย์ (อากงจุน)' — ห้ามใช้ฉายาลอยๆ โดยไม่มีชื่อจริง","role":"hero|reaction|context"}],
 "visualDreamShots":[{"slot":"hero|reaction|action|context|evidence","description":"ช็อตที่อยากได้"}],
 "doNotUse":["สิ่งที่ห้ามใช้ เช่น ภาพคนผิด/เหตุการณ์อื่น"],
 "contentComplete":bool,"missingFacts":["ข้อเท็จจริงที่ยังขาด ถ้ามี"]}`;

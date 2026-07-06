@@ -471,9 +471,22 @@ export async function s6_slots(job, { origin }) {
   // ด่านโค้ด: id ต้องมีจริง + ห้ามซ้ำข้ามช่อง + hero ต้องถูกคน (ถูกคน 100% เหนือทุกข้อ)
   const byId = new Map(sorted.map((x) => [String(x.id), x]));
   const mainNames = (job.dossier.compass?.mainCharacters || []).map((c) => c.name).filter(Boolean);
+  // เทียบชื่อระดับ "คำ" ไม่ใช่ทั้งก้อน — บทเรียน MG-0001: เข็มทิศเรียก "อากงจุน (ผู้ก่อตั้งฮาตาริ)"
+  // แต่ตาติดป้าย "จุน วนวิทย์ (อากงจุน)" → ไม่มีใครครอบใคร ทั้งที่คนเดียวกัน 108 ใบ
+  const TITLE_WORDS = new Set(['นาย', 'นาง', 'นางสาว', 'คุณ', 'ดร.', 'หมอ', 'ผู้ก่อตั้ง', 'อดีต']);
+  const nameTokens = (s) =>
+    String(s || '')
+      .replace(/[()"'“”]/g, ' ')
+      .split(/\s+/)
+      .filter((t) => t.length >= 2 && !TITLE_WORDS.has(t));
+  const namesMatch = (a, b) => {
+    const ta = nameTokens(a);
+    const tb = nameTokens(b);
+    return ta.some((x) => tb.some((y) => x === y || (x.length >= 3 && y.includes(x)) || (y.length >= 3 && x.includes(y))));
+  };
   const isMainChar = (img) => {
     const ps = [img.triage?.person, ...(img.triage?.persons || [])].filter(Boolean);
-    return mainNames.length === 0 || ps.some((p) => mainNames.some((m) => p.includes(m) || m.includes(p)));
+    return mainNames.length === 0 || ps.some((p) => mainNames.some((m) => namesMatch(p, m)));
   };
   const used = new Set();
   const slots = {};
