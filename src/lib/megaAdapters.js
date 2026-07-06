@@ -12,6 +12,15 @@ const MEGA_USER = 'mega-bot';
 const MIN_EXTRACT_CHARS = parseInt(process.env.MEGA_MIN_EXTRACT_CHARS || '400', 10);
 const MAX_S1_ATTEMPTS = 3;
 
+// 🔴 คิวข่าว: queue/add จะเตะ worker ที่ "origin ของคนส่ง" — ถ้า MEGA (:3900) ส่งเอง :3900 จะกลายเป็น
+//   ตัวประมวลข่าวเสียเอง (ผิดหลักแยกงานหนัก + เส้นทางไม่ถูกพิสูจน์) → บังคับส่งผ่านเซิร์ฟเวอร์ข่าว :3000
+//   (เส้นทางเดียวกับโต๊ะข่าวเป๊ะ) — override ได้ด้วย env MEGA_QUEUE_ORIGIN
+function queueOrigin(origin) {
+  if (process.env.MEGA_QUEUE_ORIGIN) return process.env.MEGA_QUEUE_ORIGIN;
+  if (process.platform === 'win32') return 'http://localhost:3000'; // เครื่องทีม → เซิร์ฟเวอร์ข่าวตัวจริง
+  return origin; // บนเว็บ → origin ตัวเอง (เส้นทางเดียวกับที่พนักงานใช้)
+}
+
 async function jfetch(url, opts = {}, timeoutMs = 60000) {
   const r = await fetch(url, {
     ...opts,
@@ -180,7 +189,7 @@ export async function s3_generate(job, { origin }) {
       finalScore: desk.score ?? null,
     },
   };
-  const q = await jfetch(`${origin}/api/queue/add`, { method: 'POST', body: JSON.stringify(payload) }, 60000);
+  const q = await jfetch(`${queueOrigin(origin)}/api/queue/add`, { method: 'POST', body: JSON.stringify(payload) }, 60000);
   if (q.httpStatus === 409) {
     return { status: 'failed', nextAction: 'fail', summary: 'คิวตีเป็นข่าวซ้ำ (NEAR_DUPLICATE) — มีคนทำเรื่องนี้อยู่แล้ว', quality: 'yellow' };
   }
@@ -198,18 +207,30 @@ export async function s3_generate(job, { origin }) {
 // ---------- S3w รอผลเจน: โพล + "ก๊อบผลทันที" (คิว purge ~30 นาที) ----------
 export async function s3_wait(job, { origin }) {
   const gen = job.dossier.generate || {};
-  const st = await jfetch(`${origin}/api/queue/status?id=${encodeURIComponent(gen.queueJobId)}`, {}, 30000);
+  const st = await jfetch(`${queueOrigin(origin)}/api/queue/status?id=${encodeURIComponent(gen.queueJobId)}`, {}, 30000);
   const status = st.status || st.jobStatus;
   if (status === 'completed' && st.result) {
-    const versions = st.result.versions || [];
+    // สัณฐานจริง (พิสูจน์จากโพรบ 7 ก.ค.): versions อยู่ที่ result.data.versions
+    const r = st.result;
+    const versions = r.data?.versions || r.versions || r.data?.analysisResult?.versions || [];
     if (!versions.length) {
       return { status: 'failed', nextAction: 'fail', summary: 'คิวจบแต่ไม่มีเวอร์ชันเนื้อในผล', quality: 'red' };
     }
+    // 🎁 newsData (หัว+เนื้อข่าวสะอาดจากท่อ) = วัตถุดิบชั้นดีให้เฟส 2 (ค้นภาพ) — เก็บเข้าแฟ้มด้วย
+    const newsData = r.newsData || r.data?.newsData || null;
     return {
       status: 'done',
       nextAction: 'continue',
       summary: `เจนเสร็จ ${versions.length} เวอร์ชัน — ก๊อบผลเข้าแฟ้มแล้ว (กัน purge)`,
-      dossierPatch: { generate: { ...gen, versions, pipeline: st.result.pipeline || '', completedAt: new Date().toISOString() } },
+      dossierPatch: {
+        generate: {
+          ...gen,
+          versions,
+          newsData: newsData ? { newsTitle: newsData.newsTitle || '', newsBody: (newsData.newsBody || '').slice(0, 8000) } : null,
+          pipeline: r.data?.analysisResult?.pipeline || '',
+          completedAt: new Date().toISOString(),
+        },
+      },
     };
   }
   const purged = !status && st.error; // งานหายจากคิว (ถูก purge/ไม่พบ) = กู้ผลไม่ได้แล้ว
