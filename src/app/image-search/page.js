@@ -192,6 +192,30 @@ function ResultView({ data }) {
     };
   }, [data.id]);
 
+  // ★ 6 ก.ค. รอบ 5 (ผู้ใช้สั่ง): 🎯 เรดาร์คลิป — ยาข่าวชาวบ้าน: หน้าชัดในคลังน้อย → หาคลิป/Lens/เพจต้นทางให้เอง
+  const [radar, setRadar] = useState(null);
+  const radarFired = useRef(false);
+  async function runClipRadar(auto = true) {
+    try {
+      const r = await fetch('/api/images/clip-radar', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ caseId: data.id }),
+      });
+      const j = await r.json();
+      if (!j.success) return;
+      setRadar(j);
+      if (auto && j.needMore && !radarFired.current) {
+        radarFired.current = true;
+        // อัตโนมัติ: Lens จากหน้าที่ยืนยันแล้ว (เร็ว ได้คนเดิมเพิ่ม) → แล้วส่งแคปคลิปแรกเข้าคิวเครื่องทีม
+        if (j.canLens) await searchPlatform('reverse');
+        if (j.clips && j.clips.length) searchPlatform('youtube', { clipUrl: j.clips[0].link });
+      }
+    } catch {
+      /* เงียบ */
+    }
+  }
+
   // ★ 6 ก.ค.: เฝ้างานแคปเฟรมบนเครื่องทีม — เสร็จเมื่อไหร่ดึงรูปเข้าจอเองทันที (พนักงานไม่ต้องรีเฟรช)
   function watchYtJob(ytJobId) {
     let tries = 0;
@@ -331,6 +355,7 @@ function ResultView({ data }) {
     setImgLoading('');
     setImgInfo(`✅ ค้นครบ ${list.length} แหล่ง — เพิ่มรูปใหม่รวม ${totalAdded} รูป${queuedMsgs.length ? `\n🕐 ${queuedMsgs.join(' · ')}` : ''}${fails.length ? ` · ล้มเหลว ${fails.length} แหล่ง` : ''}`);
     if (fails.length) setImgError('บางแหล่งล้มเหลว:\n• ' + fails.join('\n• '));
+    runClipRadar(true); // 🎯 หน้าชัดพอไหม — ไม่พอจะหาคลิป/Lens ให้เอง
   }
 
   async function clearPlatform(platform) {
@@ -768,6 +793,37 @@ function ResultView({ data }) {
           </span>
           {imgError && <div className="err" style={{ whiteSpace: 'pre-line' }}>{imgError}</div>}
           {imgInfo && <div className="info-box">{imgInfo}</div>}
+          {/* ★ 6 ก.ค. รอบ 5: 🎯 แผงเรดาร์คลิป — ข่าวชาวบ้านหน้าชัดน้อย ระบบหาคลิป/เพจให้เอง */}
+          {radar && (
+            <div className="info-box" style={{ marginTop: 8 }}>
+              <b>🎯 เรดาร์คลิป:</b> หน้าชัดในคลัง {radar.faceCount} ใบ
+              {radar.needMore
+                ? ` (ต่ำกว่าเกณฑ์ ${radar.faceMin}) — ${radar.canLens ? 'ยิงค้นย้อนกลับให้แล้ว · ' : ''}${radar.clips?.length ? 'ส่งแคปคลิปแรกเข้าคิวแล้ว · คลิปอื่นกดเพิ่มได้:' : 'ไม่เจอคลิปเพิ่ม — ลองวางลิงก์คลิปเอง'}`
+                : ' — เพียงพอแล้ว ✅'}
+              {radar.needMore &&
+                (radar.clips || []).map((v, i) => (
+                  <div key={i} style={{ marginTop: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button className="btn-src" disabled={!!imgLoading} onClick={() => searchPlatform('youtube', { clipUrl: v.link })}>
+                      🎬 แคป
+                    </button>
+                    <a href={v.link} target="_blank" rel="noreferrer" className="count" style={{ textDecoration: 'underline' }}>
+                      {(v.title || v.link).slice(0, 60)}
+                    </a>
+                    <span className="count">{v.channel} {v.length}</span>
+                  </div>
+                ))}
+              {(radar.pageNames || []).length > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  <span className="count">เพจ/รายการที่พบในข่าว (กดเพื่อใส่ช่องโปรไฟล์): </span>
+                  {radar.pageNames.map((n, i) => (
+                    <button key={i} className="btn-src" style={{ marginRight: 6 }} onClick={() => setHandle(n)}>
+                      📘 {n}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {imgStats.total > 0 && (
             <div className="src-bar" style={{ marginTop: 10 }}>
@@ -776,6 +832,9 @@ function ResultView({ data }) {
               </button>
               <button className="btn-src accent" disabled={!!imgLoading} onClick={cleanJunk}>
                 {imgLoading === 'clean' ? (<><span className="spin" />กำลังสแกนขยะ…</>) : '🧹 คัดขยะออก (AI)'}
+              </button>
+              <button className="btn-src" disabled={!!imgLoading} onClick={() => runClipRadar(false)} title="เช็คว่าหน้าชัดพอไหม + หาคลิป/เพจต้นทางให้ (ไม่ยิงอัตโนมัติ)">
+                🎯 เรดาร์คลิป
               </button>
               <button className="btn-src accent" disabled={!!imgLoading} onClick={sortEmotions}>
                 {imgLoading === 'emotions' ? (<><span className="spin" />กำลังแยกอารมณ์…</>) : '🎭 แยกอารมณ์ (AI)'}
