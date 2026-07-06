@@ -241,7 +241,8 @@ function drawRectSlot(ctx, img, slot, offset, crop) {
   const be = slot._blurEdges;
   if (!border && be && (be.left || be.right || be.top || be.bottom)) {
     const bpx = Math.max(40, be.px || 200);
-    const k = Math.min(40, Math.max(8, Math.round(bpx / 6)));
+    // ★ ความแรงเบลอปรับแยกได้ (be.blur) — ไม่ตั้ง = คำนวณจากระยะ (บทเรียน: ผู้ใช้ขอคุมเองได้)
+    const k = Math.min(80, Math.max(2, be.blur || Math.round(bpx / 6)));
     const bo = document.createElement('canvas'); bo.width = dw; bo.height = dh;
     const bc = bo.getContext('2d');
     bc.filter = `blur(${k}px)`;
@@ -491,6 +492,24 @@ export default function CoverPage() {
               style={{ width: 100 }} />
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>หนา</span>
             <span style={{ fontSize: 12, fontWeight: 800, minWidth: 42, color: slotFadeEdges[sl.id] ? '#60a5fa' : 'var(--text-muted)' }}>{fe.px}px</span>
+            {/* ★ 6 ก.ค. รอบ 4 (ผู้ใช้ขอ): ความแรงเบลอปรับแยกจากระยะ — โชว์เฉพาะโหมดเบลอละลาย */}
+            {mode === 'blur' && (
+              <>
+                <span style={{ fontSize: 12, color: '#facc15', fontWeight: 700, marginLeft: 4 }}>💧 แรงเบลอ</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>เบา</span>
+                <input type="range" min="2" max="80" step="2"
+                  value={fe.blur || Math.min(80, Math.max(2, Math.round((fe.px || 200) / 6)))}
+                  onChange={e => setSlotFadeEdges(p => {
+                    const cur = p[sl.id] || fadeEdgesOf(sl);
+                    return { ...p, [sl.id]: { ...cur, blur: Number(e.target.value) } };
+                  })}
+                  style={{ width: 90 }} />
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>แรง</span>
+                <span style={{ fontSize: 12, fontWeight: 800, minWidth: 34, color: fe.blur ? '#facc15' : 'var(--text-muted)' }}>
+                  {fe.blur || Math.min(80, Math.max(2, Math.round((fe.px || 200) / 6)))}
+                </span>
+              </>
+            )}
           </>
         )}
         {slotFadeEdges[sl.id] && (
