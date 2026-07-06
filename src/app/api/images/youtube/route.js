@@ -34,6 +34,7 @@ async function persistFrame(buf, name) {
   return c.storage.from(FRAME_BUCKET).getPublicUrl(p).data.publicUrl;
 }
 
+import { vetImages } from '@/lib/libraryTriage';
 import { reporter, doneProgress, failProgress } from '@/lib/progress';
 
 export const runtime = 'nodejs';
@@ -143,6 +144,17 @@ export async function POST(req) {
           }
         })
       );
+    }
+
+    // ★ 6 ก.ค. รอบ 5: ติดป้ายตา (triage) ให้เฟรมทันทีตอนเข้าคลัง — เรดาร์คลิป/ชิปกรอง "หน้าชัด" นับได้เลย
+    //   ใช้ตาแค่ "ติดป้าย" ไม่คัดทิ้ง (เฟรมผ่านตาคัดตอนแคปแล้ว + ห้ามลบเฟรมเติมขั้นต่ำของโหมดเจาะจง)
+    try {
+      P2('ติดป้ายตาให้เฟรม', `${frames.length} ใบ`);
+      const newsGist2 = (c.analysis?.summary || c.analysis?.content || c.newsSnippet || '').slice(0, 600);
+      const { vetted } = await vetImages({ images: frames, subjects: c.keywords?.subjects || [], newsGist: newsGist2, caseId });
+      if (Array.isArray(vetted) && vetted.length === frames.length) frames = vetted;
+    } catch {
+      /* ตาล้ม → เก็บแบบไม่มีป้าย (กดคัดกรองคลังทีหลังได้) */
     }
 
     // ★ 6 ก.ค. (ผู้ใช้สั่ง): เฟรมจาก "คลิปที่วางลิงก์เอง" แยกหมวดเป็น 'clip' — คลังมีชิปกรองแยกให้เลือกดู/ประเมินง่าย
