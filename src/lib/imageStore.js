@@ -105,6 +105,65 @@ export async function addImages(caseId, incoming) {
   return { added: fresh.length, total: all.length, byPlatform: countByPlatform(all), images: all };
 }
 
+// ★ DEVIATION 6 ก.ค. (ผู้ใช้สั่ง "ภาพพร้อมใช้"): ภาพที่ยังเป็นลิงก์เว็บนอก (hotlink หมดอายุได้/ครอปไม่ได้)
+//   → worker เครื่องทีมจะโหลดไฟล์ต้นฉบับเต็มมาเก็บ Supabase Storage แล้วสลับ imageUrl เป็นไฟล์ถาวร
+export async function listNeedingRehost(limit = 8) {
+  const c = sb();
+  if (!c) return [];
+  const { data, error } = await c
+    .from(TABLE)
+    .select('data')
+    .eq('store_name', STORE_NAME)
+    .ilike('data->>imageUrl', 'http%')
+    .not('data->>imageUrl', 'ilike', '%supabase.co%')
+    .is('data->rehostFailed', null)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error('หารายการภาพรอเซฟไม่สำเร็จ: ' + error.message);
+  return (data || []).map((r) => r.data).filter(Boolean);
+}
+
+// อัปเดตภาพหลังเซฟไฟล์ถาวร (หรือ mark ว่าเซฟไม่ได้ จะได้ไม่วนซ้ำ)
+export async function applyRehost(id, patch) {
+  const c = sb();
+  if (!c) return null;
+  const { data, error } = await c.from(TABLE).select('data').eq('store_name', STORE_NAME).eq('id', id).single();
+  if (error || !data?.data) return null;
+  const merged = { ...data.data, ...patch };
+  const { error: e2 } = await c
+    .from(TABLE)
+    .update({ data: merged, updated_at: new Date().toISOString() })
+    .eq('store_name', STORE_NAME)
+    .eq('id', id);
+  if (e2) throw new Error('อัปเดตภาพไม่สำเร็จ: ' + e2.message);
+  return merged;
+}
+
+// ล้างธง rehostFailed (หลังปรับวิธีโหลดใหม่ ให้ตัวที่เคยพลาดกลับเข้าคิว)
+export async function resetRehostFailed(limit = 200) {
+  const c = sb();
+  if (!c) return 0;
+  const { data, error } = await c
+    .from(TABLE)
+    .select('id, data')
+    .eq('store_name', STORE_NAME)
+    .not('data->rehostFailed', 'is', null)
+    .limit(limit);
+  if (error) throw new Error('หารายการพลาดไม่สำเร็จ: ' + error.message);
+  let n = 0;
+  for (const row of data || []) {
+    const d = { ...row.data };
+    delete d.rehostFailed;
+    const { error: e2 } = await c
+      .from(TABLE)
+      .update({ data: d, updated_at: new Date().toISOString() })
+      .eq('store_name', STORE_NAME)
+      .eq('id', row.id);
+    if (!e2) n++;
+  }
+  return n;
+}
+
 export async function imageStats(caseId) {
   const imgs = await readImages(caseId);
   return { total: imgs.length, byPlatform: countByPlatform(imgs) };

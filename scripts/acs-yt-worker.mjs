@@ -99,6 +99,24 @@ for (;;) {
         log('⚠️ สายหลุดจากงาน', job.id, ':', e.message, '— รอ route ปิดงานเอง/ระบบ requeue');
       }
       wait = 3000; // เพิ่งจบงาน → เช็กต่อเร็วเผื่อมีคิวค้าง
+    } else {
+      // ★ 6 ก.ค. (ผู้ใช้สั่ง "ภาพพร้อมใช้"): คิวแคปเฟรมว่าง → เซฟไฟล์ภาพต้นฉบับคุณภาพเต็ม
+      //   เข้าคลังถาวรทีละก้อนเล็ก (ภาพที่ยังเป็นลิงก์เว็บนอก โหลดมาเก็บ Supabase Storage)
+      try {
+        const r = await fetch(`${BASE}/api/images/rehost`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'run', limit: 8 }),
+          signal: AbortSignal.timeout(300000),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (d.success && d.checked > 0) {
+          log(`💾 เซฟภาพต้นฉบับเข้าคลังถาวร ${d.hosted}/${d.checked} ใบ${d.failed ? ` (พลาด ${d.failed})` : ''}`);
+          wait = 3000; // ยังมีคิวภาพ → เก็บต่อทันที
+        }
+      } catch {
+        /* เงียบ — รอบหน้าลองใหม่ */
+      }
     }
   } catch (e) {
     log('⚠️ เช็กคิวไม่ได้ (เซิร์ฟเวอร์ :3000 ล่ม/รีสตาร์ท?):', e.message);
