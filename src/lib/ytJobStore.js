@@ -87,10 +87,26 @@ export async function enqueueJob(caseId) {
 }
 
 // worker หยิบงานเก่าสุดที่ pending (ตัวหยิบมีตัวเดียว = ไม่ต้อง atomic)
+// + งานค้าง: running เกิน 30 นาที = ถือว่าตาย (worker พัง/รีสตาร์ทกลางคัน) → หยิบมาทำใหม่ได้
 export async function claimJob() {
-  const pending = await listJobs('pending');
-  if (!pending.length) return null;
-  const job = { ...pending[0], status: 'running', claimedAt: new Date().toISOString() };
+  const all = await listJobs();
+  const staleMs = 30 * 60 * 1000;
+  const now = Date.now();
+  const pick =
+    all.find((j) => j.status === 'pending') ||
+    all.find((j) => j.status === 'running' && now - new Date(j.claimedAt || j.createdAt).getTime() > staleMs);
+  if (!pick) return null;
+  const job = {
+    ...pick,
+    status: 'running',
+    claimedAt: new Date().toISOString(),
+    retries: pick.status === 'running' ? (pick.retries || 0) + 1 : pick.retries || 0,
+  };
+  if (job.retries > 2) {
+    // ลองซ้ำเกิน 2 รอบแล้วยังค้าง → ปิดงานกันวนไม่รู้จบ
+    await saveJob({ ...job, status: 'failed', error: 'งานค้างเกิน 2 รอบ (pipeline ไม่จบ)', finishedAt: new Date().toISOString() });
+    return claimJob();
+  }
   await saveJob(job);
   return job;
 }

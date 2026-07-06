@@ -188,6 +188,35 @@ function ResultView({ data }) {
     };
   }, [data.id]);
 
+  // ★ 6 ก.ค.: เฝ้างานแคปเฟรมบนเครื่องทีม — เสร็จเมื่อไหร่ดึงรูปเข้าจอเองทันที (พนักงานไม่ต้องรีเฟรช)
+  function watchYtJob(ytJobId) {
+    let tries = 0;
+    const timer = setInterval(async () => {
+      tries++;
+      if (tries > 120) { clearInterval(timer); return; } // เฝ้าสูงสุด ~30 นาที
+      try {
+        const r = await fetch('/api/images/youtube-jobs');
+        const j = await r.json();
+        const job = (j.jobs || []).find((x) => x.id === ytJobId);
+        if (!job || job.status === 'pending' || job.status === 'running') return;
+        clearInterval(timer);
+        if (job.status === 'done') {
+          const ri = await fetch(`/api/images/${data.id}`);
+          const ji = await ri.json();
+          if (ji.success) {
+            setImages(ji.images || []);
+            setImgStats({ total: ji.total, byPlatform: ji.byPlatform || {} });
+          }
+          setImgInfo(`✅ เครื่องทีมแคปเฟรม YouTube เสร็จแล้ว — เพิ่ม ${job.added ?? '?'} เฟรมเข้าคลัง (ดูในแกลเลอรีได้เลย)`);
+        } else {
+          setImgError('เครื่องทีมแคปเฟรม YouTube ไม่สำเร็จ: ' + (job.error || 'ไม่ทราบสาเหตุ'));
+        }
+      } catch {
+        /* เงียบ — รอบหน้าลองใหม่ */
+      }
+    }, 15000);
+  }
+
   async function searchPlatform(platform, extra = {}) {
     setImgError('');
     setImgLoading(platform);
@@ -210,8 +239,9 @@ function ResultView({ data }) {
         const detail = Array.isArray(j.log) && j.log.length ? '\n• ' + j.log.join('\n• ') : '';
         setImgError(`[${j.errorType || 'ERROR'}] ${j.error}${detail}`);
       } else if (j.queued) {
-        // ★ 6 ก.ค.: เว็บแคปเฟรมเองไม่ได้ → ฝากงานให้เครื่องทีมรันอัตโนมัติ
+        // ★ 6 ก.ค.: เว็บแคปเฟรมเองไม่ได้ → ฝากงานให้เครื่องทีมรันอัตโนมัติ + เฝ้าจนเสร็จ
         setImgInfo(j.message || '🕐 ส่งงานไปรันบนเครื่องทีมแล้ว — เสร็จแล้วรูปจะเข้าคลังเอง');
+        if (j.ytJobId) watchYtJob(j.ytJobId);
       } else {
         if (j.images) setImages(j.images);
         setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
@@ -265,7 +295,10 @@ function ResultView({ data }) {
         });
         const j = await r.json();
         if (j.success) {
-          if (j.queued) queuedMsgs.push(`${label}: ${j.message || 'ส่งไปรันบนเครื่องทีมแล้ว'}`);
+          if (j.queued) {
+            queuedMsgs.push(`${label}: ${j.message || 'ส่งไปรันบนเครื่องทีมแล้ว'}`);
+            if (j.ytJobId) watchYtJob(j.ytJobId);
+          }
           if (j.images) setImages(j.images);
           if (j.total !== undefined) setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
           totalAdded += j.added || 0;
