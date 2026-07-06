@@ -209,8 +209,11 @@ function ResultView({ data }) {
         // แนบรายละเอียด log (เช่น YouTube: แต่ละคลิปล้มเพราะอะไร) ให้ผู้ใช้เห็น
         const detail = Array.isArray(j.log) && j.log.length ? '\n• ' + j.log.join('\n• ') : '';
         setImgError(`[${j.errorType || 'ERROR'}] ${j.error}${detail}`);
+      } else if (j.queued) {
+        // ★ 6 ก.ค.: เว็บแคปเฟรมเองไม่ได้ → ฝากงานให้เครื่องทีมรันอัตโนมัติ
+        setImgInfo(j.message || '🕐 ส่งงานไปรันบนเครื่องทีมแล้ว — เสร็จแล้วรูปจะเข้าคลังเอง');
       } else {
-        setImages(j.images || []);
+        if (j.images) setImages(j.images);
         setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
         const vetMsg = j.vetOn ? ` · 👁️ กรองรูปไม่เกี่ยวออก ${j.vetDropped}` : '';
         if (j.added === 0) setImgError(`ไม่พบรูปใหม่จาก ${platform} (อาจซ้ำของเดิม${j.vetOn && j.vetDropped ? ` · ตากรองไม่เกี่ยวออก ${j.vetDropped}` : ''})`);
@@ -247,6 +250,7 @@ function ResultView({ data }) {
     setImgLoading('batch');
     let totalAdded = 0;
     const fails = [];
+    const queuedMsgs = []; // ★ 6 ก.ค.: แหล่งที่ฝากงานให้เครื่องทีมรัน (YouTube บนเว็บ)
     for (let i = 0; i < list.length; i++) {
       const p = list[i];
       const label = PLATFORM_LABEL[p] || p;
@@ -261,8 +265,9 @@ function ResultView({ data }) {
         });
         const j = await r.json();
         if (j.success) {
-          setImages(j.images || []);
-          setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
+          if (j.queued) queuedMsgs.push(`${label}: ${j.message || 'ส่งไปรันบนเครื่องทีมแล้ว'}`);
+          if (j.images) setImages(j.images);
+          if (j.total !== undefined) setImgStats({ total: j.total, byPlatform: j.byPlatform || {} });
           totalAdded += j.added || 0;
         } else {
           fails.push(`${label}: ${j.error || 'ล้มเหลว'}`);
@@ -274,7 +279,7 @@ function ResultView({ data }) {
       }
     }
     setImgLoading('');
-    setImgInfo(`✅ ค้นครบ ${list.length} แหล่ง — เพิ่มรูปใหม่รวม ${totalAdded} รูป${fails.length ? ` · ล้มเหลว ${fails.length} แหล่ง` : ''}`);
+    setImgInfo(`✅ ค้นครบ ${list.length} แหล่ง — เพิ่มรูปใหม่รวม ${totalAdded} รูป${queuedMsgs.length ? `\n🕐 ${queuedMsgs.join(' · ')}` : ''}${fails.length ? ` · ล้มเหลว ${fails.length} แหล่ง` : ''}`);
     if (fails.length) setImgError('บางแหล่งล้มเหลว:\n• ' + fails.join('\n• '));
   }
 

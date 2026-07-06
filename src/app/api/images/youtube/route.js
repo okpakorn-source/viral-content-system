@@ -7,9 +7,13 @@
 // ============================================================
 
 import { NextResponse } from 'next/server';
+import { promises as fs } from 'fs';
+import path from 'path';
 import { getCase } from '@/lib/caseStore';
 import { runYouTubePipeline } from '@/lib/youtubePipeline';
 import { addImages } from '@/lib/imageStore';
+import { enqueueJob } from '@/lib/ytJobStore';
+import { hostImagePublic } from '@/lib/publicHost';
 
 import { reporter, doneProgress, failProgress } from '@/lib/progress';
 
@@ -21,17 +25,22 @@ export async function POST(req) {
   const jobId = body.jobId || null;
   const P = reporter(jobId);
   try {
-    // ★ 5 ก.ค. (copy เข้า repo ไวรัล): แคปเฟรมใช้ yt-dlp+ffmpeg+เขียนดิสก์ = เครื่องทีม (Windows) เท่านั้น
-    //   บนเว็บ (Vercel/Linux) เดิมพัง ENOENT mkdir /var/task/public — ตอบสุภาพแทน
+    const caseId = (body.caseId || '').trim();
+
+    // ★ 6 ก.ค. (ผู้ใช้สั่ง): บนเว็บ (Vercel/Linux) แคปเฟรมเองไม่ได้ → "ฝากงานให้เครื่องทีมรันอัตโนมัติ"
+    //   แทนการตอบ error — worker (scripts/acs-yt-worker.mjs) จะหยิบไปรัน แล้วรูปเข้าคลังเคสนี้เอง
     //   ⚠️ ใช้ platform ไม่ใช่ env.VERCEL (เครื่องทีมมี VERCEL=1 หลอกใน .env.local — บทเรียนเก่า)
     if (process.platform !== 'win32') {
-      failProgress(jobId, 'แคปเฟรม YouTube ทำได้เฉพาะเครื่องทีม');
-      return NextResponse.json(
-        { success: false, error: 'แคปเฟรม YouTube ทำได้เฉพาะบนเครื่องทีม (ต้องใช้ yt-dlp+ffmpeg) — แหล่งอื่นทุกแหล่งใช้บนเว็บได้ปกติ', errorType: 'TEAM_MACHINE_ONLY' },
-        { status: 400 }
-      );
+      if (!caseId) {
+        return NextResponse.json({ success: false, error: 'ต้องมี caseId', errorType: 'BAD_INPUT' }, { status: 400 });
+      }
+      const { job, existing } = await enqueueJob(caseId);
+      const message = existing
+        ? `🕐 เคสนี้มีงานแคปเฟรมค้างอยู่บนเครื่องทีมแล้ว (${job.status === 'running' ? 'กำลังรัน' : 'รอคิว'}) — เสร็จแล้วรูปจะเข้าคลังเอง`
+        : '🕐 ส่งงานแคปเฟรม YouTube ไปรันบนเครื่องทีมแล้ว — เสร็จแล้วรูปจะเข้าคลังเคสนี้เอง (รีเฟรชดูได้)';
+      doneProgress(jobId, { step: 'ฝากงานแล้ว', detail: message });
+      return NextResponse.json({ success: true, queued: true, ytJobId: job.id, message, added: 0 });
     }
-    const caseId = (body.caseId || '').trim();
 
     const c = caseId ? await getCase(caseId) : null;
     if (!c) {
@@ -70,7 +79,30 @@ export async function POST(req) {
       );
     }
 
-    const records = result.frames.map((f) => ({ ...f, platform: 'youtube', query: 'youtube' }));
+    let frames = result.frames;
+
+    // ★ 6 ก.ค. (ผู้ใช้สั่ง): งานที่มาจากเว็บ (hostPublic) — อัปเฟรมขึ้นโฮสต์สาธารณะก่อนเก็บ
+    //   (เฟรมเป็นไฟล์ local /case-frames/... เว็บมองไม่เห็น) อัปพลาดใบไหนคงพาธ local ไว้ (ใช้บนเครื่องทีมได้)
+    if (body.hostPublic) {
+      P('อัปเฟรมขึ้นโฮสต์สาธารณะ', `0/${frames.length}`);
+      let hosted = 0;
+      frames = await Promise.all(
+        frames.map(async (f) => {
+          try {
+            if (!f.imageUrl || !f.imageUrl.startsWith('/')) return f;
+            const buf = await fs.readFile(path.join(process.cwd(), 'public', f.imageUrl.replace(/^\//, '')));
+            const url = await hostImagePublic(buf, path.basename(f.imageUrl));
+            hosted++;
+            P('อัปเฟรมขึ้นโฮสต์สาธารณะ', `${hosted}/${frames.length}`);
+            return { ...f, imageUrl: url, thumbnailUrl: url };
+          } catch {
+            return f; // อัปพลาด → เก็บพาธ local (อย่างน้อยเครื่องทีมยังใช้ได้)
+          }
+        })
+      );
+    }
+
+    const records = frames.map((f) => ({ ...f, platform: 'youtube', query: 'youtube' }));
     const saved = await addImages(caseId, records);
     doneProgress(jobId, { step: 'เสร็จ', detail: `ได้ ${result.frames.length} เฟรมเข้าคลัง` });
 
