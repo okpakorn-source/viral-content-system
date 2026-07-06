@@ -540,7 +540,111 @@ export async function s6_slots(job, { origin }) {
   };
 }
 
-// ---------- ตารางเดินสายพาน เฟส 1+2 ----------
+// ============================================================
+// เฟส 3 — S7 ทำปก (auto-cover-v3 ผ่านคิวเดิม — งานปกวิ่ง "เครื่องทีมเท่านั้น" กลับด้านกับงานข่าว)
+// ============================================================
+
+// งานปก: queueService ให้เครื่องทีมเท่านั้น claim (QUEUE_COVER_ON_VERCEL!=1) →
+// ส่งเข้าคิวผ่าน :3000 (kick worker เครื่องทีมทันที เส้นเดียวกับที่พนักงานใช้บนเว็บแล้ววิ่ง local)
+const COVER_ORIGIN_DEFAULT = 'http://localhost:3000';
+function coverOrigin() {
+  return process.env.MEGA_COVER_ORIGIN || COVER_ORIGIN_DEFAULT;
+}
+
+// ---------- S7a ส่งงานปก: ภาพ 5 ช่องที่ S6 คัด → ช่อง "แหล่งรูป" ของ v3 (sourceOnly) ----------
+export async function s7_cover(job) {
+  const d = job.dossier;
+  const slots = d.pickImages?.slots || {};
+  // ลำดับสำคัญ: hero มาก่อน (ตัวดึงภาพ boost ตามลำดับ) + เพดาน 6 ลิงก์ (extractFromUserSources slice(0,6))
+  const links = ['hero', 'reaction', 'action', 'context', 'circle']
+    .map((s) => slots[s]?.imageUrl)
+    .filter(Boolean);
+  const backup = Object.values(slots).flatMap((s) => s?.backups || []).length; // นับไว้รายงานเฉยๆ
+  if (links.length < 3) {
+    return { status: 'failed', nextAction: 'fail', summary: `ภาพจาก S6 ไม่พอทำปก (${links.length} ใบ ต้อง ≥3)`, quality: 'red' };
+  }
+  const nd = d.generate?.newsData || {};
+  const payload = {
+    jobType: 'cover',
+    composer: 'v3',
+    newsTitle: nd.newsTitle || d.desk?.title || '',
+    content: (nd.newsBody || d.extract?.text || '').slice(0, 8000),
+    mainCharacterName: (d.compass?.mainCharacters || [])[0]?.name || '',
+    sourceLinks: links.slice(0, 6),
+    sourceOnly: true, // ใช้เฉพาะภาพที่สายพานคัดแล้ว — ห้ามรีเสิร์ชปนภาพนอกสายตา
+    userId: MEGA_USER,
+  };
+  const q = await jfetch(`${coverOrigin()}/api/queue/add`, { method: 'POST', body: JSON.stringify(payload) }, 60000);
+  if (!q.success || !q.jobId) {
+    return { status: 'failed', nextAction: 'retry', summary: 'ส่งงานปกไม่สำเร็จ: ' + (q.error || q.httpStatus) };
+  }
+  return {
+    status: 'done',
+    nextAction: 'continue',
+    summary: `ส่งทำปกแล้ว job ${String(q.jobId).slice(0, 10)} (ภาพ ${links.length} ใบจาก 5 ช่อง · สำรอง ${backup})`,
+    dossierPatch: { cover: { queueJobId: q.jobId, enqueuedAt: new Date().toISOString(), sourceLinks: links } },
+  };
+}
+
+// ---------- S7w รอปกเสร็จ: โพล + เซฟไฟล์ปกถาวรทันที (result มี base64 — ห้ามเก็บลงแฟ้ม) ----------
+export async function s7_wait(job) {
+  const cv = job.dossier.cover || {};
+  const st = cv.queueJobId
+    ? await jfetch(`${coverOrigin()}/api/queue/status?id=${encodeURIComponent(cv.queueJobId)}`, {}, 30000)
+    : { error: 'ไม่มีเลขงานปกในแฟ้ม (ขั้นส่งงานโดนข้าม)' };
+  const status = st.status || st.jobStatus;
+  if (status === 'completed' && st.result) {
+    const r = st.result;
+    const base64 = r.base64 || r.coverBase64 || r.data?.base64 || '';
+    const m = /^data:image\/(\w+);base64,(.+)$/.exec(base64);
+    if (!m) {
+      return { status: 'failed', nextAction: 'fail', summary: 'ปกเสร็จแต่ไม่พบรูปในผล (ไม่มี base64)', quality: 'red' };
+    }
+    // เซฟเป็นไฟล์ให้ UI ใช้ได้เลย — แฟ้มเก็บแค่ path+สรุป (กติกา: dossier ห้ามเก็บก้อนใหญ่)
+    const { promises: fs } = await import('fs');
+    const path = await import('path');
+    const dir = path.join(process.cwd(), 'public', 'mega-covers');
+    await fs.mkdir(dir, { recursive: true });
+    const file = `${job.id}-${Date.now().toString(36)}.${m[1] === 'png' ? 'png' : 'jpg'}`;
+    await fs.writeFile(path.join(dir, file), Buffer.from(m[2], 'base64'));
+    return {
+      status: 'done',
+      nextAction: 'continue',
+      summary: `ปกเสร็จ! template ${r.template || '-'} · คะแนน QC ${r.score ?? '-'} · เคสปก ${r.caseId || '-'}`,
+      dossierPatch: {
+        cover: {
+          ...cv,
+          coverPath: `/mega-covers/${file}`,
+          template: r.template || '',
+          score: r.score ?? null,
+          coverCaseId: r.caseId || '',
+          directorReason: (r.directorReason || '').slice(0, 300),
+          completedAt: new Date().toISOString(),
+        },
+      },
+    };
+  }
+  const purged = !status && st.error;
+  if (status === 'failed' || status === 'superseded' || purged) {
+    if (!cv.retriedCover) {
+      return {
+        status: 'done',
+        nextAction: 'goto:s7_cover',
+        summary: `งานปกจบแบบ ${status || 'หายจากคิว'} (${(st.error || '').slice(0, 60)}) → ส่งใหม่รอบแก้ตัว`,
+        dossierPatch: { cover: { retriedCover: true, queueJobId: null } },
+        quality: 'yellow',
+      };
+    }
+    return { status: 'failed', nextAction: 'fail', summary: `งานปกจบแบบ ${status || 'หายจากคิว'} (ลองซ้ำแล้ว): ${st.error || ''}`.slice(0, 150), quality: 'red' };
+  }
+  const age = cv.enqueuedAt ? Math.round((Date.now() - new Date(cv.enqueuedAt).getTime()) / 60000) : 0;
+  if (age > 30) {
+    return { status: 'failed', nextAction: 'fail', summary: `รอปกเกิน 30 นาที (สถานะล่าสุด: ${status || 'ไม่พบงาน'})`, quality: 'red' };
+  }
+  return { status: 'waiting', nextAction: 'wait', summary: `รอประกอบปก… (${status || 'pending'} · ${age} นาที)` };
+}
+
+// ---------- ตารางเดินสายพาน เฟส 1+2+3 ----------
 export const STAGE_FLOW = {
   s1_pick: { run: s1_pick, next: 's1_5_preflight', label: 'S1 คัดข่าว' },
   s1_5_preflight: { run: s1_5_preflight, next: 's2_extract', label: 'S1.5 เช็ควัตถุดิบ' },
@@ -553,5 +657,7 @@ export const STAGE_FLOW = {
   s5_keywords: { run: s5_keywords, next: 's5_search', label: 'S5 สกัดคีย์เวิร์ด' },
   s5_search: { run: s5_search, next: 's5_triage', label: 'S5 ค้นภาพ 4 แหล่ง' },
   s5_triage: { run: s5_triage, next: 's6_slots', label: 'S5 ตาคัดคลัง' },
-  s6_slots: { run: s6_slots, next: 'assets_ready', label: 'S6 เลือกภาพลงช่อง' },
+  s6_slots: { run: s6_slots, next: 's7_cover', label: 'S6 เลือกภาพลงช่อง' },
+  s7_cover: { run: s7_cover, next: 's7_wait', label: 'S7 ส่งทำปก' },
+  s7_wait: { run: s7_wait, next: 'cover_ready', label: 'S7 รอปกเสร็จ' },
 };

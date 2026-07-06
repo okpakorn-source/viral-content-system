@@ -77,3 +77,6 @@ prompt-final-verdict.json
 prompt-manipulate-screen.json
 prompt-toxic-screen.json
 viral-library-screen.json
+
+# MEGA — ไฟล์ปกที่สายพานประกอบ (generated)
+/public/mega-covers/

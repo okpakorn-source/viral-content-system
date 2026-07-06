@@ -21,11 +21,13 @@ const STATIONS = [
   { key: 's5_triage', label: 'S5 ตาคัด' },
   { key: 's6_slots', label: 'S6 ภาพลงช่อง' },
   { key: 'assets_ready', label: '🧺 ครบชุด' },
-  { key: 's7', label: 'S7 ปก (เฟส 3)', future: true },
+  { key: 's7_cover', label: 'S7 ส่งทำปก' },
+  { key: 's7_wait', label: 'S7 ประกอบปก' },
+  { key: 'cover_ready', label: '🏁 ปกเสร็จ' },
 ];
 
 const STAGE_ORDER = STATIONS.filter((s) => !s.future).map((s) => s.key);
-const DONE_STATUSES = ['content_ready', 'assets_ready'];
+const DONE_STATUSES = ['content_ready', 'assets_ready', 'cover_ready'];
 
 function lightColor(job, stationKey) {
   if (STATIONS.find((s) => s.key === stationKey)?.future) return '#333';
@@ -150,7 +152,7 @@ export default function MegaPage() {
           : job.status === 'failed' ? chipStyle('rgba(239,68,68,0.15)', '#f87171')
           : job.status === 'waiting' ? chipStyle('rgba(234,179,8,0.15)', '#eab308')
           : chipStyle('rgba(96,165,250,0.12)', '#60a5fa');
-        const statusText = { pending: 'รอเริ่ม', running: 'กำลังทำ', waiting: 'รอขั้นถัดไป', content_ready: '📄 เนื้อพร้อม (จบเฟส 1)', assets_ready: '✅ เนื้อ+ภาพครบชุด', failed: 'ล้มเหลว', skipped: 'ข้าม' }[job.status] || job.status;
+        const statusText = { pending: 'รอเริ่ม', running: 'กำลังทำ', waiting: 'รอขั้นถัดไป', content_ready: '📄 เนื้อพร้อม (จบเฟส 1)', assets_ready: '🧺 เนื้อ+ภาพครบชุด', cover_ready: '🏁 ปกเสร็จครบวงจร', failed: 'ล้มเหลว', skipped: 'ข้าม' }[job.status] || job.status;
         const mins = Math.round((new Date(job.updatedAt) - new Date(job.createdAt)) / 60000);
         return (
           <div key={job.id} style={{ border: '1px solid var(--border, #333)', borderRadius: 14, padding: 16, marginBottom: 14, background: 'var(--bg-secondary, rgba(255,255,255,0.02))' }}>
@@ -216,11 +218,33 @@ export default function MegaPage() {
               </div>
             )}
 
+            {/* เฟส 3: ปกเสร็จ — โชว์ปกจริง */}
+            {d.cover?.coverPath && (
+              <div style={{ marginTop: 12, display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                <a href={d.cover.coverPath} target="_blank" rel="noreferrer">
+                  <img src={d.cover.coverPath} alt="ปกที่ประกอบเสร็จ" style={{ width: 230, borderRadius: 12, border: '2px solid rgba(34,197,94,0.5)', display: 'block' }} />
+                </a>
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted, #8a8fa3)', maxWidth: 380, lineHeight: 1.7 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 800, color: '#22c55e' }}>🏁 ปกเสร็จ · QC {d.cover.score ?? '-'} คะแนน</div>
+                  <div>เทมเพลต {d.cover.template || '-'} · เคสปก {d.cover.coverCaseId || '-'}</div>
+                  {d.cover.directorReason && <div style={{ marginTop: 4 }}>🎬 {d.cover.directorReason}</div>}
+                  <a href={d.cover.coverPath} download style={{ color: '#60a5fa' }}>⬇️ ดาวน์โหลดปกเต็ม</a>
+                </div>
+              </div>
+            )}
+
             {/* งานจบเฟส 1 ค้างเก่า → ปุ่มต่อเฟส 2 */}
             {job.status === 'content_ready' && (
               <button onClick={() => act('retry', { id: job.id, stage: 's5_case' })} disabled={!!busy}
                 style={{ marginTop: 10, padding: '9px 15px', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: '1px solid rgba(96,165,250,0.4)', background: 'rgba(96,165,250,0.08)', color: '#60a5fa', fontFamily: 'inherit' }}>
                 🖼️ ทำภาพต่อ (เฟส 2: ค้นภาพ + จับคู่ช่อง)
+              </button>
+            )}
+            {/* งานจบเฟส 2 → ปุ่มต่อเฟส 3 ทำปก */}
+            {job.status === 'assets_ready' && (
+              <button onClick={() => act('retry', { id: job.id, stage: 's7_cover' })} disabled={!!busy}
+                style={{ marginTop: 10, padding: '9px 15px', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.08)', color: '#22c55e', fontFamily: 'inherit' }}>
+                🎬 ทำปกต่อ (เฟส 3: ประกอบปกจากภาพ 5 ช่อง)
               </button>
             )}
 

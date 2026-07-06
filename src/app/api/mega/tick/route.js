@@ -17,7 +17,7 @@ export const maxDuration = 600;
 
 const MAX_STAGE_ATTEMPTS = 2;
 // ป้ายปลายทางของแต่ละเฟส (ไม่ใช่ stage ที่รันได้ — เป็น status จบ)
-const TERMINALS = new Set(['content_ready', 'assets_ready']);
+const TERMINALS = new Set(['content_ready', 'assets_ready', 'cover_ready']);
 
 function stageInputHash(job) {
   // input ประจำขั้น — เปลี่ยนเมื่อของที่ขั้นนี้ใช้เปลี่ยน (กันเอาผลเก่าปน input ใหม่)
@@ -34,6 +34,9 @@ function stageInputHash(job) {
     rewind: d.rewind || 0,
     // เฟส 2: caseId เป็น input ของทุกขั้น S5/S6 หลังเปิดเคส (ห้ามใส่ค่าที่ "ขั้นตัวเองเขียน" — กติกาเดียวกับ queueJobId)
     imagesCase: d.images?.caseId || null,
+    // เฟส 3: เลขงานปก + รอบแก้ตัวปก (กติกาเดียวกับ S3)
+    coverJobId: d.cover?.queueJobId || null,
+    coverRetried: !!d.cover?.retriedCover,
   };
   return crypto.createHash('sha256').update(JSON.stringify(basis)).digest('hex').slice(0, 16);
 }

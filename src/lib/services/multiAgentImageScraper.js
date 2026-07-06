@@ -670,7 +670,9 @@ async function agentYouTubeFrames(identity) {
     // === Tier 2.8: Try Playwright Frame Capture first (highly reliable on local environment) ===
     // ★ FIX (11 มิ.ย.): Vercel serverless ไม่มี Chrome binary — การ launch browser พังแรงระดับ process
     //   (เกิน try/catch) → ข้ามไป Tier 3 storyboard (HTTP ล้วน) บน serverless
-    if (process.env.VERCEL) {
+    // ★ FIX (2 ก.ค. CASE-345): เครื่องทีมมี VERCEL=1 ค้างใน .env.local → บล็อก Playwright เงียบทั้งที่มี chromium จริง
+    //   (บทเรียนเดิม memory vercel-env-on-team-machine) → win32 = เครื่องทีมเสมอ ให้รัน Playwright ได้
+    if (process.env.VERCEL && process.platform !== 'win32') {
       console.log('[Agent2: YouTube] ⏭️ Skip Playwright on serverless (no browser) → Tier 3 storyboard');
     } else
     try {
@@ -2241,6 +2243,9 @@ async function extractFromUserSources(sourceLinks = [], context = '') {
   for (const raw of sourceLinks.slice(0, 6)) {
     const link = String(raw || '').trim();
     if (!/^https?:\/\//i.test(link)) continue;
+    // ★ 7 ก.ค. (MEGA S7): ลิงก์เป็น "ไฟล์รูปโดยตรง" (.jpg/.png/… เช่นไฟล์ถาวร Supabase จากคลังภาพ)
+    //   → ใช้ตรงๆ ไม่ต้อง scrape (เดิมโดนส่งเข้า extractSourceArticleImages ที่อ่าน HTML → ได้ 0 ภาพ)
+    if (/\.(jpe?g|png|webp|gif)([?#]|$)/i.test(link)) { out.push(link); continue; }
     const isYouTube = /youtube\.com|youtu\.be/i.test(link);
     const isTikTok = /tiktok\.com/i.test(link);
     const isFbIgVideo = FB_IG_VIDEO.test(link);
