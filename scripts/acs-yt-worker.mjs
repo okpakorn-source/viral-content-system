@@ -57,7 +57,7 @@ async function processJob(job) {
   const r = await fetch(`${BASE}/api/images/youtube`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ caseId: job.caseId, hostPublic: true }),
+    body: JSON.stringify({ caseId: job.caseId, hostPublic: true, ytJobId: job.id }),
     ...(longDispatcher ? { dispatcher: longDispatcher } : {}),
   });
   const d = await r.json().catch(() => ({}));

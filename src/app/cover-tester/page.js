@@ -407,6 +407,53 @@ export default function CoverPage() {
       px: Math.max(sl.fadeLeft || 0, sl.fadeRight || 0, sl.fadeTop || 0, sl.fadeBottom || 0) || 300,
     };
   };
+
+  // ตัวแก้เฟดรายขอบ (ใช้ซ้ำทั้งรายการช่องซ้าย + แผงใต้ปก) — ทุกช่องสี่เหลี่ยมทุกแทมเพลต
+  const renderFadeEdges = (sl) => {
+    if (sl.shape === 'circle') return null;
+    const fe = fadeEdgesOf(sl);
+    const btn = { padding: '7px 11px', borderRadius: 8, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer' };
+    const setEdge = (edge) => setSlotFadeEdges(p => {
+      const cur = p[sl.id] || fadeEdgesOf(sl);
+      return { ...p, [sl.id]: { ...cur, [edge]: !cur[edge] } };
+    });
+    const chip = (edge, label) => (
+      <button key={edge} onClick={() => setEdge(edge)}
+        style={{ ...btn,
+          color: fe[edge] ? '#60a5fa' : 'var(--text-muted)',
+          background: fe[edge] ? 'rgba(96,165,250,0.12)' : 'var(--bg-primary)',
+          border: `1px solid ${fe[edge] ? 'rgba(96,165,250,0.5)' : 'var(--border)'}` }}>
+        {label}
+      </button>
+    );
+    const anyOn = fe.left || fe.right || fe.top || fe.bottom;
+    return (
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+        <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>🌫️ เฟดขอบ</span>
+        {chip('left', '◀ ซ้าย')}
+        {chip('right', 'ขวา ▶')}
+        {chip('top', '▲ บน')}
+        {chip('bottom', 'ล่าง ▼')}
+        {anyOn && (
+          <>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>บาง</span>
+            <input type="range" min="40" max="600" step="20" value={fe.px}
+              onChange={e => setSlotFadeEdges(p => {
+                const cur = p[sl.id] || fadeEdgesOf(sl);
+                return { ...p, [sl.id]: { ...cur, px: Number(e.target.value) } };
+              })}
+              style={{ width: 100 }} />
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>หนา</span>
+            <span style={{ fontSize: 12, fontWeight: 800, minWidth: 42, color: slotFadeEdges[sl.id] ? '#60a5fa' : 'var(--text-muted)' }}>{fe.px}px</span>
+          </>
+        )}
+        {slotFadeEdges[sl.id] && (
+          <button onClick={() => setSlotFadeEdges(p => { const n = { ...p }; delete n[sl.id]; return n; })}
+            title="กลับค่าแทมเพลต" style={{ ...btn, border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>↺</button>
+        )}
+      </div>
+    );
+  };
   const [slotBorderColors, setSlotBorderColors] = useState({}); // slotId → สีขอบ override
   const [slotGray, setSlotGray] = useState({});             // slotId → 0..1 ขาวดำรายช่อง
   const [grayAll, setGrayAll] = useState(0);                // 0..1 ขาวดำทั้งใบ (โทนไว้อาลัย)
@@ -1405,6 +1452,8 @@ export default function CoverPage() {
                         </>
                       )}
                     </div>
+                    {/* ★ 6 ก.ค. รอบ 2: เฟดรายขอบ ตรงนี้เลย (จุดที่คนทำงานจริง) — รูปไหนเฟด รูปไหนคม เลือกอิสระ */}
+                    {slotImages[slot.id] && renderFadeEdges(slot)}
                     {/* Small image warning + enhancing status */}
                     {slotImages[slot.id] && (() => {
                       const iw = slotImages[slot.id].naturalWidth || 0;
@@ -1759,50 +1808,8 @@ export default function CoverPage() {
                         {/* ★ 4 ก.ค. รอบ 2 — ลูกเล่นรายช่อง: เฟด / สีขอบ / ขาวดำไว้อาลัย */}
                         {img && (
                           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
-                            {/* ★ 6 ก.ค. รอบ 2 (ผู้ใช้สั่ง): เฟดรายขอบอิสระ — ทุกช่องทุกแทมเพลต (รวมแทมเพลตอัปโหลดที่ไม่มีเฟดติดมา) */}
-                            {sl.shape !== 'circle' && (() => {
-                              const fe = fadeEdgesOf(sl);
-                              const setEdge = (edge) => setSlotFadeEdges(p => {
-                                const cur = p[sl.id] || fadeEdgesOf(sl);
-                                return { ...p, [sl.id]: { ...cur, [edge]: !cur[edge] } };
-                              });
-                              const chip = (edge, label) => (
-                                <button key={edge} onClick={() => setEdge(edge)}
-                                  style={{ ...bigBtn, width: 'auto', padding: '0 11px', fontSize: 12, fontWeight: 700,
-                                    color: fe[edge] ? '#60a5fa' : 'var(--text-muted)',
-                                    background: fe[edge] ? 'rgba(96,165,250,0.12)' : 'var(--bg-primary)',
-                                    border: `1px solid ${fe[edge] ? 'rgba(96,165,250,0.5)' : 'var(--border)'}` }}>
-                                  {label}
-                                </button>
-                              );
-                              const anyOn = fe.left || fe.right || fe.top || fe.bottom;
-                              return (
-                                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
-                                  <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>🌫️ เฟดขอบ</span>
-                                  {chip('left', '◀ ซ้าย')}
-                                  {chip('right', 'ขวา ▶')}
-                                  {chip('top', '▲ บน')}
-                                  {chip('bottom', 'ล่าง ▼')}
-                                  {anyOn && (
-                                    <>
-                                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>บาง</span>
-                                      <input type="range" min="40" max="600" step="20" value={fe.px}
-                                        onChange={e => setSlotFadeEdges(p => {
-                                          const cur = p[sl.id] || fadeEdgesOf(sl);
-                                          return { ...p, [sl.id]: { ...cur, px: Number(e.target.value) } };
-                                        })}
-                                        style={{ width: 100 }} />
-                                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>หนา</span>
-                                      <span style={{ fontSize: 12, fontWeight: 800, minWidth: 42, color: slotFadeEdges[sl.id] ? '#60a5fa' : 'var(--text-muted)' }}>{fe.px}px</span>
-                                    </>
-                                  )}
-                                  {slotFadeEdges[sl.id] && (
-                                    <button onClick={() => setSlotFadeEdges(p => { const n = { ...p }; delete n[sl.id]; return n; })}
-                                      title="กลับค่าแทมเพลต" style={{ ...bigBtn, width: 34, height: 34, fontSize: 12 }}>↺</button>
-                                  )}
-                                </div>
-                              );
-                            })()}
+                            {/* ★ 6 ก.ค. รอบ 2 (ผู้ใช้สั่ง): เฟดรายขอบอิสระ — ทุกช่องทุกแทมเพลต (ตัวเดียวกับรายการช่องซ้าย) */}
+                            {renderFadeEdges(sl)}
                             {sl.border && (
                               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                                 <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>🎨 สีขอบ</span>

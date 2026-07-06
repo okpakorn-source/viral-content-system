@@ -12,7 +12,7 @@ import path from 'path';
 import { getCase } from '@/lib/caseStore';
 import { runYouTubePipeline } from '@/lib/youtubePipeline';
 import { addImages } from '@/lib/imageStore';
-import { enqueueJob } from '@/lib/ytJobStore';
+import { enqueueJob, patchJob, queuePosition } from '@/lib/ytJobStore';
 import { hostImagePublic } from '@/lib/publicHost';
 
 import { reporter, doneProgress, failProgress } from '@/lib/progress';
@@ -35,11 +35,13 @@ export async function POST(req) {
         return NextResponse.json({ success: false, error: 'ต้องมี caseId', errorType: 'BAD_INPUT' }, { status: 400 });
       }
       const { job, existing } = await enqueueJob(caseId);
+      const pos = await queuePosition(job.id);
+      const posMsg = pos > 1 ? ` (รอคิวอันดับ ${pos})` : '';
       const message = existing
-        ? `🕐 เคสนี้มีงานแคปเฟรมค้างอยู่บนเครื่องทีมแล้ว (${job.status === 'running' ? 'กำลังรัน' : 'รอคิว'}) — เสร็จแล้วรูปจะเข้าคลังเอง`
-        : '🕐 ส่งงานแคปเฟรม YouTube ไปรันบนเครื่องทีมแล้ว — เสร็จแล้วรูปจะเข้าคลังเคสนี้เอง (รีเฟรชดูได้)';
+        ? `🕐 เคสนี้มีงานแคปเฟรมอยู่บนเครื่องทีมแล้ว${job.status === 'running' ? ' — กำลังรัน' : posMsg} ดูสถานะสดได้ในแถบนี้`
+        : `🕐 ส่งงานแคปเฟรม YouTube ไปรันบนเครื่องทีมแล้ว${posMsg} — สถานะสดจะโชว์ตรงนี้ เสร็จแล้วรูปเข้าคลังเอง`;
       doneProgress(jobId, { step: 'ฝากงานแล้ว', detail: message });
-      return NextResponse.json({ success: true, queued: true, ytJobId: job.id, message, added: 0 });
+      return NextResponse.json({ success: true, queued: true, ytJobId: job.id, position: pos, message, added: 0 });
     }
 
     const c = caseId ? await getCase(caseId) : null;
@@ -57,9 +59,24 @@ export async function POST(req) {
       );
     }
 
+    // ★ 6 ก.ค.: งานจาก worker (มี ytJobId) → เขียนความคืบหน้าทุกขั้นลงคิว Supabase ให้เว็บโชว์สด
+    //   (progress เดิมเป็น in-memory เห็นเฉพาะเครื่องที่รัน — เว็บ Vercel มองไม่เห็น)
+    let lastPatch = 0;
+    const P2 = (step, detail, extra = {}) => {
+      P(step, detail, extra);
+      if (body.ytJobId) {
+        const now = Date.now();
+        if (now - lastPatch > 3000) {
+          lastPatch = now;
+          patchJob(body.ytJobId, { progress: { step, detail: String(detail || ''), at: new Date().toISOString() } }).catch(() => {});
+        }
+      }
+    };
+    P2.onRetry = P.onRetry;
+
     let result;
     try {
-      result = await runYouTubePipeline({ caseId, keywords: c.keywords, progress: P });
+      result = await runYouTubePipeline({ caseId, keywords: c.keywords, progress: P2 });
     } catch (err) {
       failProgress(jobId, err.message);
       const map = {
@@ -84,7 +101,7 @@ export async function POST(req) {
     // ★ 6 ก.ค. (ผู้ใช้สั่ง): งานที่มาจากเว็บ (hostPublic) — อัปเฟรมขึ้นโฮสต์สาธารณะก่อนเก็บ
     //   (เฟรมเป็นไฟล์ local /case-frames/... เว็บมองไม่เห็น) อัปพลาดใบไหนคงพาธ local ไว้ (ใช้บนเครื่องทีมได้)
     if (body.hostPublic) {
-      P('อัปเฟรมขึ้นโฮสต์สาธารณะ', `0/${frames.length}`);
+      P2('อัปเฟรมขึ้นโฮสต์สาธารณะ', `0/${frames.length}`);
       let hosted = 0;
       frames = await Promise.all(
         frames.map(async (f) => {
@@ -93,7 +110,7 @@ export async function POST(req) {
             const buf = await fs.readFile(path.join(process.cwd(), 'public', f.imageUrl.replace(/^\//, '')));
             const url = await hostImagePublic(buf, path.basename(f.imageUrl));
             hosted++;
-            P('อัปเฟรมขึ้นโฮสต์สาธารณะ', `${hosted}/${frames.length}`);
+            P2('อัปเฟรมขึ้นโฮสต์สาธารณะ', `${hosted}/${frames.length}`);
             return { ...f, imageUrl: url, thumbnailUrl: url };
           } catch {
             return f; // อัปพลาด → เก็บพาธ local (อย่างน้อยเครื่องทีมยังใช้ได้)

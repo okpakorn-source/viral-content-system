@@ -111,6 +111,24 @@ export async function claimJob() {
   return job;
 }
 
+// อัปเดตความคืบหน้าระหว่างรัน (step/detail) — เว็บโพลอ่านไปโชว์เรียลไทม์
+export async function patchJob(id, patch) {
+  const all = await listJobs();
+  const job = all.find((j) => j.id === id);
+  if (!job) return null;
+  const updated = { ...job, ...patch };
+  await saveJob(updated);
+  return updated;
+}
+
+// ลำดับคิวของงาน (นับงานที่ยังไม่จบซึ่งมาก่อน) — 1 = กำลังทำ/คิวแรก
+export async function queuePosition(jobId) {
+  const all = await listJobs();
+  const active = all.filter((j) => j.status === 'pending' || j.status === 'running');
+  const idx = active.findIndex((j) => j.id === jobId);
+  return idx < 0 ? 0 : idx + 1;
+}
+
 // worker รายงานผล — done/failed + ข้อมูลแนบ (added/error)
 export async function finishJob(id, patch) {
   const all = await listJobs();

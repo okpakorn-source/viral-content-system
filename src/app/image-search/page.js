@@ -197,8 +197,21 @@ function ResultView({ data }) {
       try {
         const r = await fetch('/api/images/youtube-jobs');
         const j = await r.json();
-        const job = (j.jobs || []).find((x) => x.id === ytJobId);
-        if (!job || job.status === 'pending' || job.status === 'running') return;
+        const jobs = j.jobs || [];
+        const job = jobs.find((x) => x.id === ytJobId);
+        if (!job) return;
+        // ★ สถานะสดทุกขั้น: รอคิวบอกอันดับ · กำลังรันบอกขั้นตอนจริงจากเครื่องทีม
+        if (job.status === 'pending') {
+          const active = jobs.filter((x) => x.status === 'pending' || x.status === 'running');
+          const pos = active.findIndex((x) => x.id === ytJobId) + 1;
+          setImgInfo(`🕐 YouTube รอคิวบนเครื่องทีม${pos > 1 ? ` — อันดับ ${pos} (มีงานคนอื่นก่อนหน้า)` : ' — ใกล้ถึงคิวแล้ว'}`);
+          return;
+        }
+        if (job.status === 'running') {
+          const pg = job.progress;
+          setImgInfo(pg ? `⚙️ เครื่องทีมกำลังทำ: ${pg.step}${pg.detail ? ' — ' + pg.detail : ''}` : '⚙️ เครื่องทีมกำลังเริ่มงานแคปเฟรม…');
+          return;
+        }
         clearInterval(timer);
         if (job.status === 'done') {
           const ri = await fetch(`/api/images/${data.id}`);
