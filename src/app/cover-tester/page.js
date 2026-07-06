@@ -229,27 +229,41 @@ function drawRectSlot(ctx, img, slot, offset, crop) {
   const dw = border ? w-bw*2 : w, dh = border ? h-bw*2 : h;
   const dx = border ? x+bw : x, dy = border ? y+bw : y;
   if (border) { ctx.save(); ctx.fillStyle=border; ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=12; ctx.shadowOffsetY=4; ctx.fillRect(x,y,w,h); ctx.restore(); }
-  const o = document.createElement('canvas'); o.width=dw; o.height=dh;
+
+  // ★ 6 ก.ค. รอบ 4 (ผู้ใช้ชี้เป้าจากปกตัวอย่าง): โหมด "ละลายทับ" — เนื้อภาพคมทั้งใบ
+  //   แต่ขยายภาพ "ลามออกนอกกรอบ" ด้านที่เลือก แล้วไล่ความใสเฉพาะส่วนที่ลาม
+  //   → ส่วนที่ลามไปทับช่องข้างเคียง = สองภาพซ้อนจางเข้าหากันเนียนเป็นภาพเดียว (ไม่เบลอเนื้อภาพ)
+  const me = (!border && slot._meltEdges && (slot._meltEdges.left || slot._meltEdges.right || slot._meltEdges.top || slot._meltEdges.bottom)) ? slot._meltEdges : null;
+  const mpx = me ? Math.max(40, me.px || 200) : 0;
+  const mL = me && me.left ? mpx : 0, mR = me && me.right ? mpx : 0, mT = me && me.top ? mpx : 0, mB = me && me.bottom ? mpx : 0;
+  const ow = dw + mL + mR, oh = dh + mT + mB; // ขนาดผืนวาดจริง (รวมส่วนลาม)
+
+  const o = document.createElement('canvas'); o.width=ow; o.height=oh;
   const c = o.getContext('2d');
-  const {sx,sy,sw,sh} = coverFit(img,dw,dh,0.3,crop);
+  const {sx,sy,sw,sh} = coverFit(img,ow,oh,0.3,crop);
   if (_gray > 0) c.filter = `grayscale(${_gray})`; // ★ 4 ก.ค.: โทนไว้อาลัยรายช่อง
-  c.drawImage(img,sx,sy,sw,sh,0,0,dw,dh);
+  c.drawImage(img,sx,sy,sw,sh,0,0,ow,oh);
   c.filter = 'none';
-  if (!border && (fR||fL||fT||fB)) { const mask = createFadeMask(dw,dh,{right:fR,left:fL,top:fT,bottom:fB}); c.globalCompositeOperation='destination-in'; c.drawImage(mask,0,0); c.globalCompositeOperation='source-over'; }
+  if (me) {
+    // ไล่ความใสเฉพาะแถบที่ลามออก (ใจกลางทึบ 100% = คมชัดเต็ม)
+    const mask = createFadeMask(ow,oh,{ left: mL, right: mR, top: mT, bottom: mB });
+    c.globalCompositeOperation='destination-in'; c.drawImage(mask,0,0); c.globalCompositeOperation='source-over';
+  }
+  if (!border && !me && (fR||fL||fT||fB)) { const mask = createFadeMask(ow,oh,{right:fR,left:fL,top:fT,bottom:fB}); c.globalCompositeOperation='destination-in'; c.drawImage(mask,0,0); c.globalCompositeOperation='source-over'; }
   // ★ 6 ก.ค. รอบ 3 (ผู้ใช้สั่ง): โหมด "เบลอละลาย" — ขอบภาพเบลอฟุ้งค่อยๆ ชัดเข้าใน (ภาพละลายเข้าหากัน)
   //   ต่างจากเฟด: ภาพไม่จางหายเป็นใส แต่ขอบถูกเบลอแรงสุดที่ริมแล้วไล่กลับมาคม
   const be = slot._blurEdges;
-  if (!border && be && (be.left || be.right || be.top || be.bottom)) {
+  if (!border && !me && be && (be.left || be.right || be.top || be.bottom)) {
     const bpx = Math.max(40, be.px || 200);
     // ★ ความแรงเบลอปรับแยกได้ (be.blur) — ไม่ตั้ง = คำนวณจากระยะ (บทเรียน: ผู้ใช้ขอคุมเองได้)
     const k = Math.min(80, Math.max(2, be.blur || Math.round(bpx / 6)));
-    const bo = document.createElement('canvas'); bo.width = dw; bo.height = dh;
+    const bo = document.createElement('canvas'); bo.width = ow; bo.height = oh;
     const bc = bo.getContext('2d');
     bc.filter = `blur(${k}px)`;
     bc.drawImage(o, 0, 0);
     bc.filter = 'none';
     // mask: โชว์ภาพเบลอเฉพาะแถบขอบที่เลือก (ทึบสุดริมขอบ → จางเข้าหากลางภาพ)
-    const mk = document.createElement('canvas'); mk.width = dw; mk.height = dh;
+    const mk = document.createElement('canvas'); mk.width = ow; mk.height = oh;
     const mc = mk.getContext('2d');
     const strip = (x1, y1, x2, y2, rx, ry, rw, rh) => {
       const g = mc.createLinearGradient(x1, y1, x2, y2);
@@ -258,16 +272,16 @@ function drawRectSlot(ctx, img, slot, offset, crop) {
       mc.fillStyle = g;
       mc.fillRect(rx, ry, rw, rh);
     };
-    const pw = Math.min(bpx, dw), ph = Math.min(bpx, dh);
-    if (be.left) strip(0, 0, pw, 0, 0, 0, pw, dh);
-    if (be.right) strip(dw, 0, dw - pw, 0, dw - pw, 0, pw, dh);
-    if (be.top) strip(0, 0, 0, ph, 0, 0, dw, ph);
-    if (be.bottom) strip(0, dh, 0, dh - ph, 0, dh - ph, dw, ph);
+    const pw = Math.min(bpx, ow), ph = Math.min(bpx, oh);
+    if (be.left) strip(0, 0, pw, 0, 0, 0, pw, oh);
+    if (be.right) strip(ow, 0, ow - pw, 0, ow - pw, 0, pw, oh);
+    if (be.top) strip(0, 0, 0, ph, 0, 0, ow, ph);
+    if (be.bottom) strip(0, oh, 0, oh - ph, 0, oh - ph, ow, ph);
     bc.globalCompositeOperation = 'destination-in';
     bc.drawImage(mk, 0, 0);
     c.drawImage(bo, 0, 0);
   }
-  ctx.drawImage(o,dx,dy);
+  ctx.drawImage(o, dx - mL, dy - mT);
 }
 
 function drawCircleSlot(ctx, img, slot, offset, crop) {
@@ -481,7 +495,8 @@ export default function CoverPage() {
         {chip('bottom', 'ล่าง ▼')}
         {anyOn && (
           <>
-            {modeChip('blur', '💧 เบลอละลาย', 'ขอบเบลอฟุ้ง ภาพละลายเข้าหากัน (ภาพไม่จางหาย)')}
+            {modeChip('melt', '🫠 ละลายทับ', 'ภาพคมทั้งใบ แต่ลามออกทับช่องข้างเคียงแล้วจางเข้าหากัน = สองภาพหลอมเป็นภาพเดียว (แบบปกแสนไลค์)')}
+            {modeChip('blur', '💧 เบลอฟุ้ง', 'ขอบภาพถูกเบลอฟุ้งไล่เข้าใน')}
             {modeChip('fade', '🌫️ จางใส', 'ขอบค่อยๆ จางหายเป็นใส (แบบแทมเพลตเดิม)')}
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>บาง</span>
             <input type="range" min="40" max="600" step="20" value={fe.px}
@@ -1002,8 +1017,10 @@ export default function CoverPage() {
       // ปิดเฟดทั้งใบ = ขอบคมหมดทุกช่อง (ชนะทุกอย่าง — คาดเดาง่าย)
       eff = { ...eff, fadeLeft: 0, fadeRight: 0, fadeTop: 0, fadeBottom: 0 };
     } else if (ov) {
-      // ★ 6 ก.ค. รอบ 2: ช่องนี้ตั้งขอบเอง — โหมดจาง (fade) หรือเบลอละลาย (blur) ตามที่เลือก
-      if (ov.mode === 'blur') {
+      // ★ 6 ก.ค. รอบ 2: ช่องนี้ตั้งขอบเอง — โหมดละลายทับ (melt) / เบลอฟุ้ง (blur) / จางใส (fade)
+      if (ov.mode === 'melt') {
+        eff = { ...eff, fadeLeft: 0, fadeRight: 0, fadeTop: 0, fadeBottom: 0, _meltEdges: ov };
+      } else if (ov.mode === 'blur') {
         eff = { ...eff, fadeLeft: 0, fadeRight: 0, fadeTop: 0, fadeBottom: 0, _blurEdges: ov };
       } else {
         eff = {
