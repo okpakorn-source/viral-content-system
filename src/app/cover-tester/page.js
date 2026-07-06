@@ -235,7 +235,9 @@ function drawRectSlot(ctx, img, slot, offset, crop) {
   //   → ส่วนที่ลามไปทับช่องข้างเคียง = สองภาพซ้อนจางเข้าหากันเนียนเป็นภาพเดียว (ไม่เบลอเนื้อภาพ)
   const me = (!border && slot._meltEdges && (slot._meltEdges.left || slot._meltEdges.right || slot._meltEdges.top || slot._meltEdges.bottom)) ? slot._meltEdges : null;
   const mpx = me ? Math.max(40, me.px || 200) : 0;
-  const mL = me && me.left ? mpx : 0, mR = me && me.right ? mpx : 0, mT = me && me.top ? mpx : 0, mB = me && me.bottom ? mpx : 0;
+  // ★ รอบ 5: ละลาย "สมมาตร" — ครึ่งหนึ่งจางขอบตัวเอง (เห็นผลเสมอ) + อีกครึ่งลามทับเพื่อนบ้าน
+  const ext = Math.round(mpx / 2); // ระยะลามออกนอกกรอบ
+  const mL = me && me.left ? ext : 0, mR = me && me.right ? ext : 0, mT = me && me.top ? ext : 0, mB = me && me.bottom ? ext : 0;
   const ow = dw + mL + mR, oh = dh + mT + mB; // ขนาดผืนวาดจริง (รวมส่วนลาม)
 
   const o = document.createElement('canvas'); o.width=ow; o.height=oh;
@@ -245,8 +247,14 @@ function drawRectSlot(ctx, img, slot, offset, crop) {
   c.drawImage(img,sx,sy,sw,sh,0,0,ow,oh);
   c.filter = 'none';
   if (me) {
-    // ไล่ความใสเฉพาะแถบที่ลามออก (ใจกลางทึบ 100% = คมชัดเต็ม)
-    const mask = createFadeMask(ow,oh,{ left: mL, right: mR, top: mT, bottom: mB });
+    // ไล่ความใสคร่อมเส้นขอบเดิม: เริ่มจางจาก "ครึ่งในกรอบ" → ใสสุดที่ปลายส่วนลาม
+    // = ขอบตัวเองหายจาง (เห็นผลทันทีทุกกรณี) + เนื้อที่ลามซ้อนบนช่องข้างเคียงจางเข้าหากัน
+    const mask = createFadeMask(ow, oh, {
+      left: me.left ? mpx : 0,
+      right: me.right ? mpx : 0,
+      top: me.top ? mpx : 0,
+      bottom: me.bottom ? mpx : 0,
+    });
     c.globalCompositeOperation='destination-in'; c.drawImage(mask,0,0); c.globalCompositeOperation='source-over';
   }
   if (!border && !me && (fR||fL||fT||fB)) { const mask = createFadeMask(ow,oh,{right:fR,left:fL,top:fT,bottom:fB}); c.globalCompositeOperation='destination-in'; c.drawImage(mask,0,0); c.globalCompositeOperation='source-over'; }
