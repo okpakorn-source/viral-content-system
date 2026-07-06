@@ -758,6 +758,43 @@ export default function CoverPage() {
     if (fileRefs.current[slotId]) fileRefs.current[slotId].value = '';
   };
 
+  // ★ 6 ก.ค. (ผู้ใช้สั่ง): 🧺 ถาดภาพจากคลังค้นรูป — /image-search ส่งรูปที่ติ๊กมาทาง localStorage
+  //   แตะรูปในถาด → แตะชิปช่อง = วางทันที ไม่ต้องเซฟลงเครื่อง · วางทับ = เปลี่ยนรูป สลับได้ตลอด
+  const [tray, setTray] = useState([]);
+  const [armedTray, setArmedTray] = useState(null);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('acs_picked_images');
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr) && arr.length) setTray(arr.slice(0, 60));
+      }
+    } catch { /* เงียบ */ }
+  }, []);
+  const loadUrlImage = (url) => new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous'; // รูป rehost อยู่ Supabase Storage = CORS เปิด วาดลง canvas ได้
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+  const assignTrayToSlot = async (slotId) => {
+    const t = armedTray != null ? tray[armedTray] : null;
+    if (!t) return false;
+    try {
+      let img;
+      try { img = await loadUrlImage(t.url); } catch { img = await loadUrlImage(t.thumb || t.url); }
+      setSlotImages(prev => ({ ...prev, [slotId]: img }));
+      setSlotCrops(p => ({ ...p, [slotId]: { zoom: 1, panX: 0, panY: 0 } }));
+      setSelectedSlotId(slotId);
+      setArmedTray(null);
+      return true;
+    } catch {
+      alert('โหลดรูปนี้ไม่สำเร็จ (ต้นทางอาจบล็อก) — ลองรูปอื่นในถาด');
+      return false;
+    }
+  };
+
   // ── Scale controls ──
   const adjustScale = (slotId, delta) => {
     setSlotScales(prev => {
@@ -1823,19 +1860,43 @@ export default function CoverPage() {
               {/* ★ 4 ก.ค. — ชิปเลือกช่อง + แถบสถานะ + แผงเครื่องมือรวม (มือถือครบจบใต้ปก · PC ก็ใช้ได้) */}
               {template && (
                 <div>
+                  {/* ★ 6 ก.ค. — 🧺 ถาดภาพจากคลังค้นรูป: แตะรูป → แตะชิปช่อง = วางทันที */}
+                  {tray.length > 0 && (
+                    <div style={{ marginBottom: 8, padding: 9, borderRadius: 11, border: '1px solid rgba(250,204,21,0.35)', background: 'rgba(250,204,21,0.05)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 12, fontWeight: 800, color: '#facc15' }}>🧺 ภาพจากคลังค้นรูป ({tray.length})</span>
+                        <span style={{ fontSize: 11, color: armedTray != null ? '#facc15' : 'var(--text-muted)', fontWeight: armedTray != null ? 700 : 400 }}>
+                          {armedTray != null ? '👉 แตะชิปช่องด้านล่าง เพื่อวางรูปนี้ลงช่อง' : 'แตะรูป แล้วแตะช่องที่จะวาง · วางทับช่องเดิม = เปลี่ยนรูป'}
+                        </span>
+                        <button onClick={() => { setTray([]); setArmedTray(null); try { localStorage.removeItem('acs_picked_images'); } catch { /* เงียบ */ } }}
+                          style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 8, fontSize: 11, border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'inherit' }}>
+                          ✕ ปิดถาด
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+                        {tray.map((t, i) => (
+                          <img key={i} src={t.thumb || t.url} alt="" loading="lazy"
+                            onClick={() => setArmedTray(armedTray === i ? null : i)}
+                            style={{ width: 62, height: 62, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', flexShrink: 0,
+                              border: armedTray === i ? '3px solid #facc15' : '1px solid var(--border)', opacity: armedTray === i ? 1 : 0.9 }} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {template.slots.map(sl => {
                       const has = !!slotImages[sl.id];
                       const sel = selectedSlotId === sl.id;
+                      const armed = armedTray != null;
                       const shortLabel = String(sl.label).replace(/\(.*?\)/g, '').trim().slice(0, 16);
                       return (
-                        <button key={sl.id} onClick={() => setSelectedSlotId(sel ? null : sl.id)} style={{
+                        <button key={sl.id} onClick={() => { if (armed) assignTrayToSlot(sl.id); else setSelectedSlotId(sel ? null : sl.id); }} style={{
                           padding: '8px 11px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer',
-                          border: sel ? '2px solid #60a5fa' : has ? '1px solid rgba(96,165,250,0.4)' : '1px dashed var(--border)',
-                          background: sel ? 'rgba(96,165,250,0.15)' : has ? 'rgba(96,165,250,0.08)' : 'var(--bg-primary)',
-                          color: sel ? '#60a5fa' : has ? '#60a5fa' : 'var(--text-muted)',
+                          border: armed ? '2px dashed #facc15' : sel ? '2px solid #60a5fa' : has ? '1px solid rgba(96,165,250,0.4)' : '1px dashed var(--border)',
+                          background: armed ? 'rgba(250,204,21,0.08)' : sel ? 'rgba(96,165,250,0.15)' : has ? 'rgba(96,165,250,0.08)' : 'var(--bg-primary)',
+                          color: armed ? '#facc15' : sel ? '#60a5fa' : has ? '#60a5fa' : 'var(--text-muted)',
                         }}>
-                          {shortLabel} {has ? '✓' : '＋'}
+                          {armed ? '📥 ' : ''}{shortLabel} {has ? '✓' : '＋'}
                         </button>
                       );
                     })}

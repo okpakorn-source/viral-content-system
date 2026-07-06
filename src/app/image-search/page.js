@@ -1000,6 +1000,30 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
           <button className="btn-src accent" disabled={busy || selected.size === 0} onClick={() => doRemove('keep')}>
             {busy ? <span className="spin" /> : '✅'} เก็บเฉพาะที่เลือก
           </button>
+          {/* ★ 6 ก.ค. (ผู้ใช้สั่ง): ส่งรูปที่ติ๊กไปจัดแทมเพลตปกทันที — ไม่ต้องเซฟลงเครื่อง */}
+          <button
+            className="btn-src accent"
+            disabled={selected.size === 0}
+            onClick={() => {
+              const picked = images
+                .filter((im) => selected.has(im.id))
+                .map((im) => ({
+                  id: im.id,
+                  url: im.imageUrl,
+                  thumb: im.thumbnailUrl || im.imageUrl,
+                  title: (im.title || '').slice(0, 80),
+                  caseId: im.caseId || '',
+                }));
+              try {
+                localStorage.setItem('acs_picked_images', JSON.stringify(picked));
+              } catch {
+                /* เงียบ */
+              }
+              window.location.href = '/cover-tester?fromLib=1';
+            }}
+          >
+            🖼️ นำไปใส่แทมเพลต ({selected.size})
+          </button>
         </div>
       )}
 
