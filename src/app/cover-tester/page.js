@@ -392,9 +392,21 @@ export default function CoverPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [selectedSlotId, setSelectedSlotId] = useState(null);
   // ★ 4 ก.ค. รอบ 2 (ผู้ใช้สั่ง 4 ฟีเจอร์): เฟดเลือกได้ / วง-กรอบแดงเน้นจุด / สีขอบช่อง / โทนไว้อาลัยขาวดำ
-  const [slotFades, setSlotFades] = useState({});           // slotId → 'off' = ปิดเฟดช่องนั้น / ตัวเลข = ระดับเฟด % รายช่อง (★ 6 ก.ค.)
+  // ★ 6 ก.ค. รอบ 2 (ผู้ใช้สั่ง): เฟดรายขอบอิสระทุกช่องทุกแทมเพลต — ไม่ผูกกับค่าเฟดเดิมของแทมเพลต
+  //   slotFadeEdges[slotId] = { left,right,top,bottom: bool, px: ความหนา } — ไม่มี entry = ตามแทมเพลต×ระดับรวม
+  const [slotFadeEdges, setSlotFadeEdges] = useState({});
   const [fadeAllOff, setFadeAllOff] = useState(false);      // ปิดเฟดทั้งใบ
-  const [fadeAllLevel, setFadeAllLevel] = useState(100);    // ★ 6 ก.ค. ระดับเฟดทั้งใบ % (ช่องที่ตั้งสไลเดอร์เองชนะค่านี้)
+  const [fadeAllLevel, setFadeAllLevel] = useState(100);    // ★ 6 ก.ค. ระดับเฟดทั้งใบ % (ช่องที่ตั้งขอบเองไม่ถูกทับ)
+
+  // ค่าตั้งต้นของตัวแก้เฟดรายขอบ: ช่องที่ยังไม่ปรับ = ตามแทมเพลต (ขอบไหนมีเฟด = ติ๊กอยู่)
+  const fadeEdgesOf = (sl) => {
+    const ov = slotFadeEdges[sl.id];
+    if (ov) return ov;
+    return {
+      left: !!sl.fadeLeft, right: !!sl.fadeRight, top: !!sl.fadeTop, bottom: !!sl.fadeBottom,
+      px: Math.max(sl.fadeLeft || 0, sl.fadeRight || 0, sl.fadeTop || 0, sl.fadeBottom || 0) || 300,
+    };
+  };
   const [slotBorderColors, setSlotBorderColors] = useState({}); // slotId → สีขอบ override
   const [slotGray, setSlotGray] = useState({});             // slotId → 0..1 ขาวดำรายช่อง
   const [grayAll, setGrayAll] = useState(0);                // 0..1 ขาวดำทั้งใบ (โทนไว้อาลัย)
@@ -873,16 +885,23 @@ export default function CoverPage() {
   // ★ 4 ก.ค. รอบ 2 — รวม override ต่อช่อง (เฟด/สีขอบ/ขาวดำ) ใช้ทั้งพรีวิว render และดาวน์โหลด
   const effWithOverrides = (slot) => {
     let eff = getEffSlot(slot, slotScales[slot.id]);
-    const hasFade = eff.fadeLeft || eff.fadeRight || eff.fadeTop || eff.fadeBottom;
-    const lv = slotFades[slot.id];
-    const noFade = fadeAllOff || lv === 'off';
-    if (noFade && hasFade) {
+    const ov = slotFadeEdges[slot.id];
+    if (fadeAllOff) {
+      // ปิดเฟดทั้งใบ = ขอบคมหมดทุกช่อง (ชนะทุกอย่าง — คาดเดาง่าย)
       eff = { ...eff, fadeLeft: 0, fadeRight: 0, fadeTop: 0, fadeBottom: 0 };
-    } else if (hasFade) {
-      // ★ 6 ก.ค. ระดับเฟดปรับได้: รายช่อง (ตัวเลข) ชนะระดับทั้งใบ — 100% = ตามแทมเพลตเดิม
-      const pct = typeof lv === 'number' ? lv : fadeAllLevel;
-      if (pct !== 100) {
-        const k = pct / 100;
+    } else if (ov) {
+      // ★ 6 ก.ค. รอบ 2: ช่องนี้ตั้งเฟดรายขอบเอง — ขอบไหนติ๊ก = เฟดด้วยความหนา px ที่ตั้ง (ไม่ผูกค่าแทมเพลต)
+      eff = {
+        ...eff,
+        fadeLeft: ov.left ? ov.px : 0,
+        fadeRight: ov.right ? ov.px : 0,
+        fadeTop: ov.top ? ov.px : 0,
+        fadeBottom: ov.bottom ? ov.px : 0,
+      };
+    } else if (eff.fadeLeft || eff.fadeRight || eff.fadeTop || eff.fadeBottom) {
+      // ช่องที่ยังไม่ปรับเอง = ตามแทมเพลต × ระดับเฟดทั้งใบ
+      if (fadeAllLevel !== 100) {
+        const k = fadeAllLevel / 100;
         eff = {
           ...eff,
           fadeLeft: Math.round((eff.fadeLeft || 0) * k),
@@ -1063,7 +1082,7 @@ export default function CoverPage() {
       }
     }
   }, [slotImages, slotOffsets, slotScales, slotCrops, template, textValues, textBgColors, dragState, draggableSlots, selectedSlotId,
-      slotFades, fadeAllOff, fadeAllLevel, slotBorderColors, slotGray, grayAll, markers, selectedMarkerId]); // ★ 4 ก.ค. รอบ 2 + ระดับเฟด 6 ก.ค.
+      slotFadeEdges, fadeAllOff, fadeAllLevel, slotBorderColors, slotGray, grayAll, markers, selectedMarkerId]); // ★ 4 ก.ค. รอบ 2 + เฟดรายขอบ 6 ก.ค.
 
   useEffect(() => { render(); }, [render]);
 
@@ -1740,32 +1759,50 @@ export default function CoverPage() {
                         {/* ★ 4 ก.ค. รอบ 2 — ลูกเล่นรายช่อง: เฟด / สีขอบ / ขาวดำไว้อาลัย */}
                         {img && (
                           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
-                            {(sl.fadeLeft || sl.fadeRight || sl.fadeTop || sl.fadeBottom) ? (
-                              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                                <button onClick={() => setSlotFades(p => ({ ...p, [sl.id]: p[sl.id] === 'off' ? undefined : 'off' }))}
-                                  style={{ ...bigBtn, width: 'auto', padding: '0 12px', fontSize: 12, color: slotFades[sl.id] === 'off' ? '#f87171' : '#60a5fa', border: `1px solid ${slotFades[sl.id] === 'off' ? 'rgba(239,68,68,0.35)' : 'rgba(96,165,250,0.35)'}` }}>
-                                  🌫️ เฟดช่องนี้: {slotFades[sl.id] === 'off' ? 'ปิด (ขอบคม)' : 'เปิด'}
+                            {/* ★ 6 ก.ค. รอบ 2 (ผู้ใช้สั่ง): เฟดรายขอบอิสระ — ทุกช่องทุกแทมเพลต (รวมแทมเพลตอัปโหลดที่ไม่มีเฟดติดมา) */}
+                            {sl.shape !== 'circle' && (() => {
+                              const fe = fadeEdgesOf(sl);
+                              const setEdge = (edge) => setSlotFadeEdges(p => {
+                                const cur = p[sl.id] || fadeEdgesOf(sl);
+                                return { ...p, [sl.id]: { ...cur, [edge]: !cur[edge] } };
+                              });
+                              const chip = (edge, label) => (
+                                <button key={edge} onClick={() => setEdge(edge)}
+                                  style={{ ...bigBtn, width: 'auto', padding: '0 11px', fontSize: 12, fontWeight: 700,
+                                    color: fe[edge] ? '#60a5fa' : 'var(--text-muted)',
+                                    background: fe[edge] ? 'rgba(96,165,250,0.12)' : 'var(--bg-primary)',
+                                    border: `1px solid ${fe[edge] ? 'rgba(96,165,250,0.5)' : 'var(--border)'}` }}>
+                                  {label}
                                 </button>
-                                {/* ★ 6 ก.ค. สไลเดอร์ระดับเฟดรายช่อง — เฟดน้อย←→เฟดมาก (100% = ตามแทมเพลต) */}
-                                {slotFades[sl.id] !== 'off' && !fadeAllOff && (
-                                  <>
-                                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>น้อย</span>
-                                    <input type="range" min="10" max="150" step="10"
-                                      value={typeof slotFades[sl.id] === 'number' ? slotFades[sl.id] : fadeAllLevel}
-                                      onChange={e => setSlotFades(p => ({ ...p, [sl.id]: Number(e.target.value) }))}
-                                      style={{ width: 100 }} />
-                                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>มาก</span>
-                                    <span style={{ fontSize: 12, fontWeight: 800, minWidth: 38, color: typeof slotFades[sl.id] === 'number' ? '#60a5fa' : 'var(--text-muted)' }}>
-                                      {typeof slotFades[sl.id] === 'number' ? slotFades[sl.id] : fadeAllLevel}%
-                                    </span>
-                                    {typeof slotFades[sl.id] === 'number' && (
-                                      <button onClick={() => setSlotFades(p => { const n = { ...p }; delete n[sl.id]; return n; })}
-                                        title="กลับไปใช้ระดับทั้งใบ" style={{ ...bigBtn, width: 34, height: 34, fontSize: 12 }}>↺</button>
-                                    )}
-                                  </>
-                                )}
-                              </div>
-                            ) : null}
+                              );
+                              const anyOn = fe.left || fe.right || fe.top || fe.bottom;
+                              return (
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
+                                  <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>🌫️ เฟดขอบ</span>
+                                  {chip('left', '◀ ซ้าย')}
+                                  {chip('right', 'ขวา ▶')}
+                                  {chip('top', '▲ บน')}
+                                  {chip('bottom', 'ล่าง ▼')}
+                                  {anyOn && (
+                                    <>
+                                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>บาง</span>
+                                      <input type="range" min="40" max="600" step="20" value={fe.px}
+                                        onChange={e => setSlotFadeEdges(p => {
+                                          const cur = p[sl.id] || fadeEdgesOf(sl);
+                                          return { ...p, [sl.id]: { ...cur, px: Number(e.target.value) } };
+                                        })}
+                                        style={{ width: 100 }} />
+                                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>หนา</span>
+                                      <span style={{ fontSize: 12, fontWeight: 800, minWidth: 42, color: slotFadeEdges[sl.id] ? '#60a5fa' : 'var(--text-muted)' }}>{fe.px}px</span>
+                                    </>
+                                  )}
+                                  {slotFadeEdges[sl.id] && (
+                                    <button onClick={() => setSlotFadeEdges(p => { const n = { ...p }; delete n[sl.id]; return n; })}
+                                      title="กลับค่าแทมเพลต" style={{ ...bigBtn, width: 34, height: 34, fontSize: 12 }}>↺</button>
+                                  )}
+                                </div>
+                              );
+                            })()}
                             {sl.border && (
                               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                                 <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>🎨 สีขอบ</span>
