@@ -444,7 +444,12 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
       if (new Date().getHours() % 3 === 0) {
         await runGroup(G.generateFieldRadarQueries(5), { ep: 'search', lane: 'celeb', tr: 'qdr:m', noClip: true });
       }
-      await runGroup(G.generateCommonerQueries(2), { ep: 'news', noClip: true, tr: 'qdr:w' }); // ชาวบ้านที่ "ไวรัลมีตัวตน" เท่านั้น (เล็กลง + /news มีวันที่/ภาพ · เลิกเลนคนลำบากนิรนาม)
+      // ★★★ 4 ก.ค. (ผู้ใช้สั่ง "น้ำดีลึกทุกวงการ แนวปัญญาปันสุข"): แกนหลักใหม่ — ยิงเยอะทุกรอบ (เดิม human-interest แค่ 2 คำ = 4% ของโต๊ะ)
+      //   /news (มีวันที่+ภาพ) 12 คำ + /search (กว้าง เจอเพจ/บล็อก) 8 คำ = 20 คำ/รอบ → ครองโต๊ะด้วยเรื่องคนจริงกินใจ
+      await runGroup(G.generateDeepGoodQueries(12), { ep: 'news', noClip: true, tr: 'qdr:m' });
+      await runGroup(G.generateDeepGoodQueries(8), { ep: 'search', noClip: true, tr: 'qdr:y' });
+      await runGroup(G.generateHardshipQueries(5), { ep: 'news', noClip: true, tr: 'qdr:m' }); // เด็ก/ครอบครัวลำบาก (คลังมีแต่เดิมไม่เคยถูกเรียก!)
+      await runGroup(G.generateCommonerQueries(4), { ep: 'news', noClip: true, tr: 'qdr:w' }); // ชาวบ้านไวรัลมีตัวตน (เพิ่ม 2→4)
       // ★ 21 มิ.ย.: ตัด generateGoodContentQueries ออก — ซ้ำซ้อนกับคลัง "น้ำดีอมตะ" ใหม่ (18 คีย์) + คุมเวลา harvest <300s
       await runGroup(G.generateViralDnaQueries(2), { ep: 'search', noClip: true });         // DNA สถาบัน/ทหาร/ยุติธรรม/ต่างชาติช่วยไทย (ลด 3→2)
       // ★ v6 (16 มิ.ย. ทีมขอเน้น): ย้อนสัมภาษณ์เก่า เป็นแกนหลัก รันทุกรอบ — บทความ /news + "คลิปจริง" /videos (YT)
@@ -487,10 +492,13 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
     //   แทนคำกว้าง ("ข่าวบันเทิง") ที่เดิมดูดข่าวทำไม่ได้เข้ามาเยอะ
     try {
       const { generateThemeQueries, generateDailyTrend, generateFieldQueries } = await import('./keywordBank');
-      const dailyQs = generateDailyTrend(14).map(q => ({ q, category: 'กระแสรายวัน' }));
+      const { generateDeepGoodQueries } = await import('./goodNewsScout');
+      const dailyQs = generateDailyTrend(10).map(q => ({ q, category: 'กระแสรายวัน' })); // ★ 4 ก.ค. ลด 14→10 (กระแสรายวันดูดข่าวทั่วไป/กีฬาปน)
       const themeQs = generateThemeQueries(6); // [{q, category}] — หมุนชุดตามเวลา
-      const fieldQs = generateFieldQueries(8); // ★ 2 ก.ค.: วงการเฉพาะทาง (พระ/หมอ/ครู/กู้ภัย/หมอดู/นักธุรกิจ...) — RSS ฟรี
-      const allQ = [...dailyQs, ...themeQs, ...fieldQs];
+      const fieldQs = generateFieldQueries(6); // ★ 2 ก.ค.: วงการเฉพาะทาง (พระ/หมอ/ครู/กู้ภัย/หมอดู/นักธุรกิจ...) — RSS ฟรี (ลด 8→6)
+      // ★★★ 4 ก.ค. (ผู้ใช้สั่ง): น้ำดีลึกทุกวงการ ผ่าน Google News RSS ฟรี — เติมแนวปัญญาปันสุขให้โต๊ะเยอะ
+      const deepQs = generateDeepGoodQueries(14).map(x => ({ q: x.q, category: '' })); // ให้ AI ตีหมวดตามเนื้อ
+      const allQ = [...deepQs, ...dailyQs, ...themeQs, ...fieldQs];
       const _dailyCut = Date.now() - 5 * 864e5; // กระแสรายวัน = สด ≤5 วันเท่านั้น
       const _bRes = await Promise.all(allQ.map(async ({ q, category }) => {
         try {
