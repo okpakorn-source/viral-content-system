@@ -301,9 +301,17 @@ ${templatesBlock}
       // ★ S3b (CASE-323 วงกลมได้หน้าร้านเปล่า+ถังขยะ): เข้มขึ้น — EVIDENCE ลงวงได้เฉพาะ "เอกสาร/ป้ายที่มีตัวหนังสือจริง" (hasText)
       //   ฉากสถานที่เปล่าๆ ไม่มีจุดเด่น = ไม่ใช่หลักฐานที่เล่าเรื่องได้ → สลับเป็นหน้าคน/โมเมนต์ตามปกติ
       // ★ S3c (CASE-328 วงกลมได้ "ในเซเว่นเปล่า" เพราะป้ายราคานับเป็น hasText): ต้องมาจากคำค้นหลักฐานจริงด้วย (evidence_items เช่น ใบเกรด/เอกสาร)
-      const _evCircle = circleA && /EVIDENCE/i.test(imageBuffers[circleA.imageIndex]?.role || '')
+      // ★ S3d (CASE-347 MEGA ฮาตาริ — ไว้อาลัย): ข่าวโทนเศร้า/สูญเสีย "หลักฐานมีตัวหนังสือ" เกือบทั้งหมด
+      //   = การ์ด RIP / กำหนดการงานศพ / ป้ายไว้อาลัย (กราฟิกฝังข้อความ) ไม่ใช่หลักฐานเล่าเรื่องแบบใบเกรด/โฉนด
+      //   → ปิดข้อยกเว้น evidence-circle สำหรับข่าวโทนนี้: วงกลมต้องเป็นหน้า/โมเมนต์คนจริงเท่านั้น (โยงเคส-E)
+      const _toneBlob = `${String(identity?.coverEmotion || identity?.emotion || '')} ${String(newsTitle || '')} ${String(identity?.story || '')}`.toLowerCase();
+      const _tragedyTone = /tragedy|shocking|grief|mourn|เศร้า|อาลัย|สูญเสีย|เสียชีวิต|ไว้อาลัย|จากไป|ร่ำไห้/.test(_toneBlob);
+      const _evCircle = !_tragedyTone && circleA && /EVIDENCE/i.test(imageBuffers[circleA.imageIndex]?.role || '')
         && !!faceBoxes[circleA.imageIndex]?.hasText
         && /evidence/i.test(String(imageBuffers[circleA.imageIndex]?.queryLabel || ''));
+      if (_tragedyTone && circleA && faceBoxes[circleA.imageIndex]?.hasText) {
+        console.log(`[CoverDirector] 🕯️ tragedy-tone: ปิด evidence-circle (วงกลมต้องเป็นหน้า/โมเมนต์ ไม่ใช่การ์ดข้อความ)`);
+      }
       const needsSwap = circleA && !_evCircle && (!fbC || !(fbC.x2 > fbC.x1) || (fbC.count || 1) >= 2 || circleArea < 0.035);
       if (needsSwap) {
         const usedIdx = new Set(valid.map(a => a.imageIndex));
@@ -388,6 +396,40 @@ ${templatesBlock}
             mainA.why = 'hero: หน้าเดี่ยวใหญ่+คมชัด';
             console.log(`[CoverDirector] 🔧 hero ← #${best} (unused single, คมสุด)`);
           }
+        }
+      }
+    } catch { /* guard ไม่สำเร็จ ไม่ critical */ }
+
+    // ★ S3e (CASE-348 MEGA ฮาตาริ: ฮีโร่กลายเป็น "โลโก้/มาสคอต Hi" ทั้งที่พูลมีหน้าผู้ก่อตั้งจริงในช่องรอง)
+    //   raก: rev.14h/G2 (ที่เคยดึงหน้าเดี่ยวขึ้น hero) ถูกปิดใต้ FinalCropper → ไม่มีใครกู้ "hero=กราฟิก/โลโก้" เลย
+    //   → กู้เฉพาะกฎเดิมชิ้นเดียว (hero ต้อง "ไม่มีตัวหนังสือฝัง" — rev.14h line mainIsBigSingle) แบบ always-on แคบๆ:
+    //   ฮีโร่ที่เป็น โลโก้/แบนเนอร์/กราฟิก (hasText) หรือ ไม่มีหน้าจริงเลย + มี "หน้าเดี่ยวสะอาด" ในพูล → สลับขึ้น hero
+    //   (ผู้ใช้สั่ง 7 ก.ค.: โลโก้ห้ามขึ้น hero · แคบพอที่จะไม่แตะ hero ที่เป็นหน้า/โมเมนต์จริง = fbM มีหน้า+ไม่มี text)
+    try {
+      const mainA = valid.find(a => a.slotId === 'main' || /hero/i.test(a.slotId));
+      const fbM = mainA ? faceBoxes[mainA.imageIndex] : null;
+      const mainNoRealFace = !fbM || !(fbM.x2 > fbM.x1) || !!fbM.hasText; // ไม่มีหน้าจริง / เป็นกราฟิก-โลโก้-แบนเนอร์
+      if (mainA && mainNoRealFace) {
+        let best = -1, bestArea = 0;
+        faceBoxes.forEach((fb, i) => {
+          if (i === mainA.imageIndex) return;
+          if (!fb || !(fb.x2 > fb.x1) || (fb.count || 1) !== 1 || fb.hasText) return; // หน้าเดี่ยวสะอาด ไม่มี text เท่านั้น
+          const area = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);
+          if (area >= 0.02 && area > bestArea) { bestArea = area; best = i; }
+        });
+        if (best >= 0) {
+          const ownerA = valid.find(a => a.imageIndex === best);
+          if (ownerA && ownerA !== mainA) {
+            const _ti = mainA.imageIndex, _tc = mainA.crop;
+            mainA.imageIndex = best; mainA.crop = cropFromFaceBox(faceBoxes[best], 1.62);
+            ownerA.imageIndex = _ti; ownerA.crop = _tc;
+          } else if (!ownerA) {
+            mainA.imageIndex = best; mainA.crop = cropFromFaceBox(faceBoxes[best], 1.62);
+          }
+          mainA.why = 'hero: ห้ามโลโก้/กราฟิก → สลับหน้าเดี่ยวสะอาด (S3e)';
+          console.log(`[CoverDirector] 🚫🎭 hero=กราฟิก/โลโก้/ไร้หน้า → swap ← #${best} (หน้าเดี่ยวสะอาด area ${bestArea.toFixed(3)})`);
+        } else {
+          console.log(`[CoverDirector] ⚠️ hero=กราฟิก/โลโก้/ไร้หน้า แต่พูลไม่มีหน้าเดี่ยวสะอาดให้สลับ`);
         }
       }
     } catch { /* guard ไม่สำเร็จ ไม่ critical */ }
@@ -726,8 +768,12 @@ ${spec}
   const res = await callAI({ prompt, imageContents, model: 'gpt-4o', temperature: 0, maxTokens: 700 });
   const j = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
   let applied = 0;
+  // ★ FINAL5 (บทเรียนเดียวกับ CASE-339 ใน eyeAfter): gpt อาจตอบชื่อช่องสลับ token (right_top ≠ top_right) → normalize ก่อนจับคู่ ไม่งั้นครอปถูกข้ามเงียบ
+  const _slotIdsFC = items.map(x => x.a.slotId);
+  const _tokFC = (v) => String(v || '').toLowerCase().split(/[^a-z]+/).filter(Boolean).sort().join('|');
+  const _normFC = (v) => { const s = String(v || '').toLowerCase().trim(); return _slotIdsFC.includes(s) ? s : (_slotIdsFC.find(id => _tokFC(id) === _tokFC(s)) || s); };
   for (const c of (j?.crops || [])) {
-    const it = items.find(x => x.a.slotId === c.slot);
+    const it = items.find(x => x.a.slotId === _normFC(c.slot));
     if (!it) continue;
     let _fx = Number(c.fx), _fy = Number(c.fy), _fw = Number(c.fw), _fh = Number(c.fh);
     let _hasFace = [_fx, _fy, _fw, _fh].every(Number.isFinite) && _fw > 0.01 && _fh > 0.01 && _fx > 0 && _fx < 1 && _fy > 0 && _fy < 1;
@@ -756,7 +802,8 @@ ${spec}
       let yN = _fy - hN * faceLevel;                                      // หน้าอยู่ระดับ 38%/45% ของเฟรม
       xN = Math.min(Math.max(xN, 0), 1 - wN);
       yN = Math.min(Math.max(yN, 0), 1 - hN);
-      it.a.crop = { x: +xN.toFixed(3), y: +yN.toFixed(3), w: +wN.toFixed(3), h: +hN.toFixed(3), _final: true };
+      // ★ FINAL2b: ต้องเก็บสมอหน้าลง crop ด้วย — executor (fitCropInsideAspect) ใช้ _fx/_fy ล็อกหน้าไว้ในเฟรมตอนหดสัดส่วน (เดิมไม่เคยถูกเก็บ = FINAL2 ไม่ทำงานจริง)
+      it.a.crop = { x: +xN.toFixed(3), y: +yN.toFixed(3), w: +wN.toFixed(3), h: +hN.toFixed(3), _fx: +_fx.toFixed(3), _fy: +_fy.toFixed(3), _final: true };
       it.a.why = ((it.a.why || '').slice(0, 36)) + ' [FaceLock]';
       console.log(`[CoverDirector] ✂️ ${it.a.slotId}: FaceLock(${_anchorSrc}) หน้า(${_fx.toFixed(2)},${_fy.toFixed(2)}) เฟรม(${xN.toFixed(2)},${yN.toFixed(2)},${wN.toFixed(2)},${hN.toFixed(2)})`);
       applied++;
