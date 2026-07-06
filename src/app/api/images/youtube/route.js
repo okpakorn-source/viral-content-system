@@ -12,7 +12,7 @@ import path from 'path';
 import { getCase } from '@/lib/caseStore';
 import { runYouTubePipeline } from '@/lib/youtubePipeline';
 import { addImages } from '@/lib/imageStore';
-import { enqueueJob, patchJob, queuePosition } from '@/lib/ytJobStore';
+import { enqueueJob, patchJob, queuePosition, finishJob } from '@/lib/ytJobStore';
 import { hostImagePublic } from '@/lib/publicHost';
 
 import { reporter, doneProgress, failProgress } from '@/lib/progress';
@@ -79,6 +79,8 @@ export async function POST(req) {
       result = await runYouTubePipeline({ caseId, keywords: c.keywords, progress: P2 });
     } catch (err) {
       failProgress(jobId, err.message);
+      // ★ 6 ก.ค.: route เป็นคนปิดงานในคิวเอง (worker อาจวางสายไปแล้วถ้างานยาว)
+      if (body.ytJobId) await finishJob(body.ytJobId, { status: 'failed', error: `[${err.errorType || 'ERROR'}] ${err.message || ''}`.slice(0, 500) }).catch(() => {});
       const map = {
         NO_GEMINI_KEY: 400,
         NO_SERPAPI_KEY: 400,
@@ -122,6 +124,8 @@ export async function POST(req) {
     const records = frames.map((f) => ({ ...f, platform: 'youtube', query: 'youtube' }));
     const saved = await addImages(caseId, records);
     doneProgress(jobId, { step: 'เสร็จ', detail: `ได้ ${result.frames.length} เฟรมเข้าคลัง` });
+    // ★ 6 ก.ค.: route ปิดงานในคิวเอง = เว็บเห็น "เสร็จ" แน่นอนแม้ worker วางสายไปก่อน
+    if (body.ytJobId) await finishJob(body.ytJobId, { status: 'done', added: saved.added }).catch(() => {});
 
     return NextResponse.json({
       success: true,

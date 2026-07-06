@@ -16,12 +16,13 @@ const BASE = process.env.ACS_WORKER_BASE || 'http://localhost:3000';
 const IDLE_MS = Number(process.env.ACS_WORKER_IDLE_MS) || 20000; // ว่าง → เช็กใหม่ทุก 20 วิ
 const ERR_MS = 30000;
 
-// แคปเฟรม 1 งาน (ค้นคลิป+โหลด+แคป+ตาคัด+อัปโฮสต์) กินเวลาได้ >5 นาที
-// → ตั้ง undici timeout ยาว 15 นาที (บทเรียนเดียวกับ clip-worker)
+// แคปเฟรม 1 งาน (ค้นคลิป+โหลด+แคป+ตาคัด+อัปโฮสต์) กินเวลาได้ 15-40 นาทีเมื่อ Gemini คิวแน่น
+// → timeout 60 นาที (บทเรียน 6 ก.ค.: 15 นาทีสั้นไป งานจริงโดนตัดกลางคัน)
+//   และ "route เป็นคนปิดงานในคิวเอง" — ต่อให้สายหลุด งานก็จบถูกสถานะ
 let longDispatcher = null;
 try {
   const { Agent } = await import('undici');
-  longDispatcher = new Agent({ headersTimeout: 900_000, bodyTimeout: 900_000, connectTimeout: 30_000 });
+  longDispatcher = new Agent({ headersTimeout: 3_600_000, bodyTimeout: 3_600_000, connectTimeout: 30_000 });
 } catch (e) {
   console.log('[acs-yt-worker] ⚠️ ตั้ง undici Agent ไม่ได้ (ใช้ timeout เริ่มต้น):', e.message);
 }
@@ -52,6 +53,18 @@ async function report(id, ok, extra = {}) {
   }
 }
 
+// สถานะจริงจากคิว — route ปิดงานเองได้ ดังนั้นก่อน worker จะรายงาน ให้เช็คก่อนว่างานยังค้างไหม
+async function jobStatus(id) {
+  try {
+    const r = await fetch(`${BASE}/api/images/youtube-jobs`, { signal: AbortSignal.timeout(15000) });
+    const d = await r.json().catch(() => ({}));
+    const j = (d?.jobs || []).find((x) => x.id === id);
+    return j?.status || 'gone';
+  } catch {
+    return 'unknown';
+  }
+}
+
 async function processJob(job) {
   log(`▶️ เริ่มงาน ${job.id} เคส ${job.caseId}`);
   const r = await fetch(`${BASE}/api/images/youtube`, {
@@ -61,12 +74,14 @@ async function processJob(job) {
     ...(longDispatcher ? { dispatcher: longDispatcher } : {}),
   });
   const d = await r.json().catch(() => ({}));
+  // route ปิดงานในคิวเองแล้ว — worker รายงานซ้ำเฉพาะกรณี route ยังไม่ทันปิด (กันสถานะทับกัน)
+  const st = await jobStatus(job.id);
   if (d.success) {
     log(`✅ เสร็จ ${job.id} — เพิ่ม ${d.added} เฟรมเข้าคลัง ${job.caseId}`);
-    await report(job.id, true, { added: d.added });
+    if (st === 'running') await report(job.id, true, { added: d.added });
   } else {
     log(`❌ ล้ม ${job.id}: [${d.errorType || 'ERROR'}] ${d.error || 'ไม่ทราบสาเหตุ'}`);
-    await report(job.id, false, { error: `[${d.errorType || 'ERROR'}] ${d.error || ''}`.slice(0, 500) });
+    if (st === 'running') await report(job.id, false, { error: `[${d.errorType || 'ERROR'}] ${d.error || ''}`.slice(0, 500) });
   }
 }
 
@@ -79,8 +94,9 @@ for (;;) {
       try {
         await processJob(job);
       } catch (e) {
-        log('❌ processJob พัง:', e.message);
-        await report(job.id, false, { error: e.message.slice(0, 500) });
+        // สายหลุด/timeout — "ไม่รายงานล้ม" เพราะ pipeline อาจยังวิ่งอยู่ใน server และ route จะปิดงานเอง
+        // ถ้า server ตายจริง งานค้าง 30 นาทีแล้วโดนหยิบมาทำใหม่อัตโนมัติ (สูงสุด 2 รอบ)
+        log('⚠️ สายหลุดจากงาน', job.id, ':', e.message, '— รอ route ปิดงานเอง/ระบบ requeue');
       }
       wait = 3000; // เพิ่งจบงาน → เช็กต่อเร็วเผื่อมีคิวค้าง
     }
