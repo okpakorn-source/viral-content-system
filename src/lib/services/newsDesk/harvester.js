@@ -526,11 +526,12 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
   //   ★ หาคลิปไฮไลท์/สัมภาษณ์/โมเมนต์/ประเด็น "ทุกวงการ" ให้เยอะสุด (รวมคลิปพูดน้อยแต่การกระทำมีประเด็น — มี AI ถอดคลิป)
   if (lanes.includes('clip')) {
     try {
-      const { generateClipQueriesByPlatform, generateDeepGoodClipQueries } = await import('./keywordBank');
-      // ★★★ 4 ก.ค. (ผู้ใช้สั่ง "คลิปน้ำดีเยอะๆ + ทุกเลนใช้ DNA เดียวกัน"): DNA + น้ำดีลึก + ทั่วไป ทุกแพลตฟอร์ม
+      const { generateClipQueriesByPlatform, generateDeepGoodClipQueries, generateSocialGoodQueries } = await import('./keywordBank');
+      // ★★★ 4 ก.ค. (ผู้ใช้สั่ง "ข่าวชาวบ้าน/พลเมืองดี เจอน้อย"): ล่าโซเชียล TikTok/FB หนัก (แตะข่าวที่ Google News ไม่มี)
+      //   + DNA + น้ำดีลึก + ทั่วไป → เลนคลิปเน้นข่าวชาวบ้านน้ำดีจากโซเชียลจริง
       let dnaClip = [];
       try { const { dnaClipQueries } = await import('./dnaQueries'); dnaClip = await dnaClipQueries(3); } catch {}
-      const clipQs = [...dnaClip, ...generateDeepGoodClipQueries(3), ...generateClipQueriesByPlatform(2)];
+      const clipQs = [...generateSocialGoodQueries(6), ...dnaClip, ...generateDeepGoodClipQueries(3), ...generateClipQueriesByPlatform(2)];
       const PLATFORM_SITE = { tiktok: 'site:tiktok.com', instagram: 'site:instagram.com', reels: 'reels', facebook: 'site:facebook.com' };
       const _cRes = await Promise.all(clipQs.map(async ({ q, platform, category }) => {
         if (_isDead(q)) return []; // ★ 3 ก.ค.: คีย์ตายไม่ยิง

@@ -37,6 +37,7 @@ export const YT_WATCH_CHANNELS = [
   { name: 'Orange Mama (คุยแซ่บ)', channelId: 'UC01guxmF_fLAVpUopImHzyg', pure: true }, // คุยแซ่บโชว์ สัมภาษณ์ดารา
   // ── สายช่วยเหลือ/น้ำดีโดยตรง (mixed → กรองชื่อ) ──
   { name: 'ร่วมด้วยช่วยกัน', channelId: 'UCYi0Z-_bKHPJDQcEErJ1-cA', pure: false }, // ★ 4 ก.ค.: รายการช่วยเหลือคน น้ำใจ โดยตรง
+  { name: 'คนสู้ชีวิต', channelId: 'UCuETCsRpXqpuUrFodIKLlTQ', pure: true }, // ★ 4 ก.ค.: ช่องรวมข่าวน้ำใจ/ชาวบ้านช่วยกัน (15/15 คลิปเป็นน้ำดี)
   // ── ช่องใหญ่ปนกัน (mixed) → กรองด้วยชื่อรายการ good-content เท่านั้น ──
   { name: 'WorkpointOfficial (ปัญญาปันสุข)', channelId: 'UC3ZkCd7XtUREnjjt3cyY_gg', pure: false }, // ปัญญาปันสุข/ชิงร้อยฯ ช่วยคน
   { name: 'Burabha (คนค้นฅน)', channelId: 'UCoEOBYHusSP-0ZlDe8cqMng', pure: false }, // คนค้นฅน สารคดีคน
