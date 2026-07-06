@@ -65,6 +65,7 @@ Format:
   "emotion_intensity": "strong | mild | none"
 }
 If no faces: has_faces=false, faces=[], and provide main_subject_region for the most interesting area.
+★ "faces" = REAL HUMAN faces in the photograph ONLY. Do NOT count as faces: royal emblems/crests/insignia, logos, ornaments, patterns on fabric/curtains, statues, dolls, paintings, drawings, cartoons, posters or photos-of-photos in the background. If a human stands in front of decorated fabric/backdrop, the face box must be on the HUMAN's head — double-check the box actually contains eyes+nose+mouth of a person. (Real bug: a gold royal emblem on a purple curtain was returned as the face while the actual person stood beside it.)
 face_emotion = the ACTUAL facial expression of the MAIN face — read the mouth/eyes/brows directly, do NOT guess from the scene/background/mood. Use "unknown" if there is no clear face.
 emotion_intensity = how strong that expression is (strong = very clear & dominant / mild = somewhat visible / none = flat or neutral).
 has_big_text = true if the image is a social-media post screenshot, chat screenshot, news graphic with headline, OR has ANY burned-in text/captions/subtitles/dialogue-overlay/quote-overlay that would be visible on a cover — INCLUDING TV-drama subtitles, interview lower-third captions, quoted-speech overlays, and lyric/quote text. Only a tiny corner watermark or small channel logo = false. When in doubt, set true (a clean cover should not show burned-in sentences).
