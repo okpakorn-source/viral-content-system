@@ -71,14 +71,19 @@ async function saveJob(job) {
   return job;
 }
 
-// ฝากงานใหม่ — เคสเดียวกันมีงานค้าง (pending/running) อยู่แล้ว = ไม่สร้างซ้ำ
-export async function enqueueJob(caseId) {
+// ฝากงานใหม่ — งานซ้ำ (เคส+ลิงก์คลิปเดียวกัน) ที่ยังค้างอยู่ = ไม่สร้างซ้ำ
+// clipUrl มีค่า = โหมดเจาะจงคลิป (แคปเฟรมจากลิงก์ที่ผู้ใช้วางเอง)
+export async function enqueueJob(caseId, clipUrl = '') {
   const all = await listJobs();
-  const existing = all.find((j) => j.caseId === caseId && (j.status === 'pending' || j.status === 'running'));
+  const cu = (clipUrl || '').trim();
+  const existing = all.find(
+    (j) => j.caseId === caseId && (j.clipUrl || '') === cu && (j.status === 'pending' || j.status === 'running')
+  );
   if (existing) return { job: existing, existing: true };
   const job = {
     id: 'ytj_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
     caseId,
+    ...(cu ? { clipUrl: cu } : {}),
     status: 'pending',
     createdAt: new Date().toISOString(),
   };

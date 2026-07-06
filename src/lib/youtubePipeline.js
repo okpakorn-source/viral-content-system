@@ -35,10 +35,20 @@ function num(v, d) {
   return isNaN(n) ? d : n;
 }
 
-export async function runYouTubePipeline({ caseId, keywords, progress }) {
+export async function runYouTubePipeline({ caseId, keywords, progress, clipUrls }) {
   const P = progress || (() => {});
   const subjects = keywords.subjects || [];
   const log = [];
+
+  let clips = [];
+  const seen = new Set();
+
+  // ★ DEVIATION 6 ก.ค. (ผู้ใช้สั่ง): โหมด "เจาะจงคลิป" — ผู้ใช้วางลิงก์ FB/YouTube/TikTok/IG มาเอง
+  //   yt-dlp โหลดได้ทุกเจ้า → ข้ามการค้น/คัดคลิป ไปแคปเฟรมคลิปนั้นตรงๆ แล้วให้ตาเลือกเฟรมตามบริบทข่าว
+  if (Array.isArray(clipUrls) && clipUrls.length) {
+    clips = clipUrls.filter(Boolean).map((u, i) => ({ link: String(u).trim(), title: `คลิปที่ผู้ใช้ระบุ ${i + 1}` }));
+    P('ใช้คลิปที่ผู้ใช้ระบุ', `${clips.length} คลิป — ข้ามการค้นหา`, { pct: 10 });
+  } else {
 
   P('ค้นคลิป YouTube', 'ค้นจากคีย์เวิร์ด', { pct: 8 });
 
@@ -47,9 +57,6 @@ export async function runYouTubePipeline({ caseId, keywords, progress }) {
     ...subjects.map((s) => s.name),
     ...(keywords.queries_th || []),
   ].filter(Boolean);
-
-  let clips = [];
-  const seen = new Set();
   for (const q of queries) {
     if (clips.length >= MAX_CLIPS * 3) break;
     try {
@@ -83,6 +90,8 @@ export async function runYouTubePipeline({ caseId, keywords, progress }) {
   };
   clips.sort((a, b) => relevance(b) - relevance(a) || (b.views || 0) - (a.views || 0));
   clips = clips.slice(0, MAX_CLIPS);
+
+  } // จบโหมดค้นอัตโนมัติ (else ของโหมดเจาะจงคลิป)
 
   if (clips.length === 0) {
     const e = new Error('ไม่พบคลิป YouTube ที่เหมาะสมจากคีย์เวิร์ด');

@@ -164,6 +164,10 @@ function ResultView({ data }) {
   const [imgError, setImgError] = useState('');
   const [imgInfo, setImgInfo] = useState('');
   const [handle, setHandle] = useState('');
+  // ★ 6 ก.ค. (ผู้ใช้สั่ง): ติ๊กคีย์เวิร์ดออกได้ (ชุดที่ไม่ใช้ค้น) + วางลิงก์คลิปให้เครื่องทีมแคปเฟรมเจาะจง
+  const [qOff, setQOff] = useState(() => new Set());
+  const toggleQ = (t) => setQOff((s) => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n; });
+  const [clipLink, setClipLink] = useState('');
   const uploadRef = useRef(null);
   // ค้นหลายแหล่งพร้อมกัน (ติ๊กเลือก → จัดคิวค้นทีละแหล่ง)
   const [batchSel, setBatchSel] = useState(() => new Set(['google', 'google_news', 'facebook', 'tiktok']));
@@ -240,7 +244,7 @@ function ResultView({ data }) {
         : platform === 'reverse' ? '/api/images/reverse'
         : platform === 'instagram' || platform === 'facebook_profile' ? '/api/images/profile'
         : '/api/images/search';
-      const payload = { caseId: data.id, platform, jobId, ...extra };
+      const payload = { caseId: data.id, platform, jobId, ...(qOff.size ? { excludeQueries: [...qOff] } : {}), ...extra };
       const r = await fetch(endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -304,7 +308,7 @@ function ResultView({ data }) {
         const r = await fetch(endpoint, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ caseId: data.id, platform: p, jobId }),
+          body: JSON.stringify({ caseId: data.id, platform: p, jobId, ...(qOff.size ? { excludeQueries: [...qOff] } : {}) }),
         });
         const j = await r.json();
         if (j.success) {
@@ -677,7 +681,7 @@ function ResultView({ data }) {
         <span className="count">สกัดคำค้นภาพจากเนื้อหา จุดสำคัญ และบริบททั้งหมด</span>
       </div>
       {kwError && <div className="err">{kwError}</div>}
-      {kw && <KeywordView kw={kw} />}
+      {kw && <KeywordView kw={kw} qOff={qOff} onToggleQ={toggleQ} />}
 
       {kw && (
         <div className="imgsec">
@@ -742,8 +746,25 @@ function ResultView({ data }) {
               {imgLoading === 'facebook_profile' ? (<><span className="spin" />…</>) : '📘 FB โปรไฟล์'}
             </button>
           </div>
+          {/* ★ 6 ก.ค. (ผู้ใช้สั่ง): วางลิงก์คลิป FB/YouTube/TikTok/IG → เครื่องทีมถอดคลิปแล้วแคปเฟรมสำคัญตามบริบทข่าว */}
+          <div className="src-profile">
+            <input
+              className="src-input"
+              placeholder="🎬 วางลิงก์คลิป FB / YouTube / TikTok / IG — ให้ AI แคปเฟรมสำคัญจากคลิปนี้ตามบริบทข่าว"
+              value={clipLink}
+              onChange={(e) => setClipLink(e.target.value)}
+            />
+            <button
+              className="btn-src"
+              disabled={!!imgLoading || !/^https?:\/\//.test(clipLink.trim())}
+              onClick={() => { searchPlatform('youtube', { clipUrl: clipLink.trim() }); }}
+              title="ส่งไปเครื่องทีม: ถอดคลิปนี้ → แคปเฟรมอารมณ์/เฟรมสำคัญตามคีย์เวิร์ดข่าว → เข้าคลังเอง"
+            >
+              🎯 แคปเฟรมจากคลิปนี้
+            </button>
+          </div>
           <span className="count">
-            ข่าว (Google/Bing News) ตรงประเด็น · Yandex เก่งหาคน · 🔁 ค้นย้อนกลับจากภาพในคลัง = เจอคนคนเดิมเป๊ะ · IG/FB ต้องรู้ username
+            ข่าว (Google News) ตรงประเด็น · Yandex เก่งหาคน · 🔁 ค้นย้อนกลับจากภาพในคลัง = เจอคนคนเดิมเป๊ะ · IG/FB ต้องรู้ username · 🎬 วางลิงก์คลิป = เจาะเฟรมจากคลิปเดียวตรงๆ
           </span>
           {imgError && <div className="err" style={{ whiteSpace: 'pre-line' }}>{imgError}</div>}
           {imgInfo && <div className="info-box">{imgInfo}</div>}
@@ -1137,7 +1158,10 @@ const KW_GROUPS = [
 ];
 
 const PLAN_PRIO = { must: '🔴 ต้องมี', should: '🟡 ควรมี', nice: '⚪ มีก็ดี' };
-function KeywordView({ kw }) {
+// ★ 6 ก.ค. (ผู้ใช้สั่ง): หมวดที่ถูกใช้ค้นจริง = ติ๊กเปิด/ปิดรายคำได้ (ปิด = ขีดฆ่า ไม่ถูกใช้ค้น)
+const KW_SEARCHABLE = new Set(['queries_th', 'queries_en', 'object_queries', 'scene_place', 'moment_action']);
+
+function KeywordView({ kw, qOff, onToggleQ }) {
   const total =
     kw.total_count ??
     KW_GROUPS.reduce((n, g) => n + (kw[g.key]?.length || 0), 0);
@@ -1147,9 +1171,13 @@ function KeywordView({ kw }) {
     if (navigator.clipboard) navigator.clipboard.writeText(all.join('\n'));
   }
 
+  const offCount = qOff ? qOff.size : 0;
   return (
     <div className="kwbox">
-      <h3>🔎 คีย์เวิร์ดค้นหาภาพ · {total} คำ</h3>
+      <h3>🔎 คีย์เวิร์ดค้นหาภาพ · {total} คำ{offCount ? ` · ปิดไว้ ${offCount}` : ''}</h3>
+      <div className="count" style={{ marginBottom: 6 }}>
+        💡 กดที่คำเพื่อ เปิด/ปิด การใช้ค้นจริง — คำที่ขีดฆ่าจะไม่ถูกใช้ (หมวดอารมณ์/แฮชแท็ก/รายการ ไว้ดูประกอบ ไม่ได้ยิงค้นตรง)
+      </div>
 
       {(kw.subjects || []).length > 0 && (
         <div className="kwgroup">
@@ -1172,11 +1200,21 @@ function KeywordView({ kw }) {
               {g.label} <span className="count">({kw[g.key].length})</span>
             </div>
             <div>
-              {kw[g.key].map((t, i) => (
-                <span className="chip" key={i}>
-                  {t}
-                </span>
-              ))}
+              {kw[g.key].map((t, i) => {
+                const searchable = KW_SEARCHABLE.has(g.key) && typeof onToggleQ === 'function';
+                const off = searchable && qOff && qOff.has(t);
+                return (
+                  <span
+                    className="chip"
+                    key={i}
+                    onClick={searchable ? () => onToggleQ(t) : undefined}
+                    title={searchable ? (off ? 'ถูกปิดไว้ — กดเพื่อใช้ค้นอีกครั้ง' : 'กดเพื่อปิด ไม่ใช้คำนี้ค้น') : undefined}
+                    style={searchable ? { cursor: 'pointer', opacity: off ? 0.35 : 1, textDecoration: off ? 'line-through' : 'none' } : undefined}
+                  >
+                    {t}
+                  </span>
+                );
+              })}
             </div>
           </div>
         ) : null

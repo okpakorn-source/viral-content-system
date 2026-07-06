@@ -43,7 +43,21 @@ export async function POST(req) {
       );
     }
 
-    const keywords = c.keywords;
+    let keywords = c.keywords;
+    // ★ DEVIATION 6 ก.ค. (ผู้ใช้สั่ง): ติ๊กเลือกคีย์เวิร์ดได้ — UI ส่งรายการที่ "ไม่ติ๊ก" มา
+    //   กรองออกจากทุกหมวดก่อนเข้า buildQueries (โควตา/round-robin/การันตีหลักฐานยังทำงานเหมือนเดิม)
+    if (keywords && Array.isArray(body.excludeQueries) && body.excludeQueries.length) {
+      const ex = new Set(body.excludeQueries.map((s) => String(s).trim()));
+      const keep = (arr) => (arr || []).filter((q) => !ex.has(String(q).trim()));
+      keywords = {
+        ...keywords,
+        queries_th: keep(keywords.queries_th),
+        queries_en: keep(keywords.queries_en),
+        object_queries: keep(keywords.object_queries),
+        moment_action: keep(keywords.moment_action),
+        scene_place: keep(keywords.scene_place),
+      };
+    }
     if (!keywords || typeof keywords !== 'object') {
       return NextResponse.json(
         {

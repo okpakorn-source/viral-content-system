@@ -53,12 +53,14 @@ export async function POST(req) {
       if (!caseId) {
         return NextResponse.json({ success: false, error: 'ต้องมี caseId', errorType: 'BAD_INPUT' }, { status: 400 });
       }
-      const { job, existing } = await enqueueJob(caseId);
+      const clipUrl = (body.clipUrl || '').trim();
+      const { job, existing } = await enqueueJob(caseId, clipUrl);
       const pos = await queuePosition(job.id);
       const posMsg = pos > 1 ? ` (รอคิวอันดับ ${pos})` : '';
+      const kind = clipUrl ? 'แคปเฟรมจากคลิปที่ระบุ' : 'แคปเฟรม YouTube';
       const message = existing
-        ? `🕐 เคสนี้มีงานแคปเฟรมอยู่บนเครื่องทีมแล้ว${job.status === 'running' ? ' — กำลังรัน' : posMsg} ดูสถานะสดได้ในแถบนี้`
-        : `🕐 ส่งงานแคปเฟรม YouTube ไปรันบนเครื่องทีมแล้ว${posMsg} — สถานะสดจะโชว์ตรงนี้ เสร็จแล้วรูปเข้าคลังเอง`;
+        ? `🕐 งาน${kind}ของเคสนี้อยู่บนเครื่องทีมแล้ว${job.status === 'running' ? ' — กำลังรัน' : posMsg} ดูสถานะสดได้ในแถบนี้`
+        : `🕐 ส่งงาน${kind}ไปรันบนเครื่องทีมแล้ว${posMsg} — สถานะสดจะโชว์ตรงนี้ เสร็จแล้วรูปเข้าคลังเอง`;
       doneProgress(jobId, { step: 'ฝากงานแล้ว', detail: message });
       return NextResponse.json({ success: true, queued: true, ytJobId: job.id, position: pos, message, added: 0 });
     }
@@ -95,7 +97,9 @@ export async function POST(req) {
 
     let result;
     try {
-      result = await runYouTubePipeline({ caseId, keywords: c.keywords, progress: P2 });
+      // ★ 6 ก.ค.: โหมดเจาะจงคลิป — วางลิงก์ FB/YouTube/TikTok/IG มาเอง = แคปจากคลิปนั้นตรงๆ
+      const clipUrls = (body.clipUrl || '').trim() ? [(body.clipUrl || '').trim()] : undefined;
+      result = await runYouTubePipeline({ caseId, keywords: c.keywords, progress: P2, clipUrls });
     } catch (err) {
       failProgress(jobId, err.message);
       // ★ 6 ก.ค.: route เป็นคนปิดงานในคิวเอง (worker อาจวางสายไปแล้วถ้างานยาว)
