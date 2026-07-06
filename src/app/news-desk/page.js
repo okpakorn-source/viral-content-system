@@ -454,15 +454,19 @@ export default function NewsDeskPage() {
   const mineClip = async () => {
     if (!/^https?:\/\//.test(clipUrl)) { setMsg('❌ วางลิงก์คลิปก่อน (YouTube / Facebook / IG / TikTok)'); return; }
     setMining(true);
-    setMsg('⛏️ กำลังถอดเสียง + ขุดนาทีทอง... (คลิปยาวใช้เวลาหลายนาที)');
+    setMsg('⛏️ กำลังถอด + ประเมินคลิป... (FB/IG ส่งเครื่องทีมขุด ~3-6 นาที)');
     try {
       const res = await fetch('/api/news-desk/mine-clip', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: clipUrl }),
       });
       const d = await parseRes(res);
-      if (d.success) {
-        setMsg(`✅ ขุดสำเร็จ: "${d.item.title}" — นาทีทอง ${d.golden?.length || 0} จุด (อยู่แท็บ 🎙️)`);
+      if (d.success && d.queued) {
+        setMsg(`⏳ ส่งเครื่องทีมขุดแล้ว — เสร็จจะโผล่ในแท็บ 🎙️ เอง (${d.message ? '' : '~3-6 นาที'})`);
+        setClipUrl('');
+      } else if (d.success) {
+        const sc = d.item?.judgeScore;
+        setMsg(`✅ ประเมินแล้ว: "${d.item.title}" — คะแนน ${sc ?? '-'}/10 · ${sc >= 7 ? '👍 น่าทำ' : sc >= 4 ? 'พอได้' : '👎 ไม่ค่อยน่าทำ'} (อยู่แท็บ 🎙️)`);
         setClipUrl('');
         setTab('interview');
       } else setMsg(`❌ ${d.error}`);
@@ -891,11 +895,12 @@ export default function NewsDeskPage() {
         {/* ช่องวางลิงก์คลิปสัมภาษณ์ (เหมืองนาทีทอง) */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
           <input value={clipUrl} onChange={e => setClipUrl(e.target.value)} disabled={mining}
-            placeholder="🎙️ วางลิงก์คลิปสัมภาษณ์/รายการ (YouTube / FB Reel / TikTok) — ระบบถอดเสียง+ขุดนาทีทองให้"
+            onKeyDown={e => { if (e.key === 'Enter') mineClip(); }}
+            placeholder="🎬 เจอคลิปน้ำดีตอนเลื่อนฟีด? วางลิงก์ที่นี่ (TikTok / FB / YouTube / IG) — AI ถอด+ประเมินให้เลย"
             style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 13.5, outline: 'none' }} />
           <button onClick={mineClip} disabled={mining}
             style={{ padding: '10px 18px', borderRadius: 10, border: 'none', cursor: mining ? 'wait' : 'pointer', background: mining ? '#4b5563' : 'linear-gradient(135deg,#06b6d4,#0e7490)', color: '#fff', fontWeight: 700, fontSize: 13.5, whiteSpace: 'nowrap' }}>
-            {mining ? '⏳ กำลังขุด...' : '⛏️ ขุดนาทีทอง'}</button>
+            {mining ? '⏳ กำลังประเมิน...' : '🎬 ถอด+ประเมิน'}</button>
         </div>
 
         {/* ช่องรายงานโพสต์แรงตลาด — ตา engagement ของระบบ */}
