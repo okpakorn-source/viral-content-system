@@ -839,6 +839,18 @@ export default function NewsDeskPage() {
             {harvesting ? '⏳...' : '🔎 ค้นข่าว'}</button>
         </div>
 
+        {/* ★★★ 4 ก.ค.: โหมดทีมวางลิงก์เอง — เห็นตลอด (เดิมซ่อนในขั้นสูง หาไม่เจอ) */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14, padding: '10px 12px', borderRadius: 12, background: 'rgba(6,182,212,0.07)', border: '1px solid rgba(6,182,212,0.3)' }}>
+          <span style={{ fontSize: 18, alignSelf: 'center' }}>🎬</span>
+          <input value={clipUrl} onChange={e => setClipUrl(e.target.value)} disabled={mining}
+            onKeyDown={e => { if (e.key === 'Enter') mineClip(); }}
+            placeholder="เจอคลิปน้ำดีตอนเลื่อน TikTok/FB/YouTube? วางลิงก์ที่นี่ — AI ถอด+ประเมิน+เก็บให้เลย"
+            style={{ flex: 1, padding: '11px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 14, outline: 'none' }} />
+          <button onClick={mineClip} disabled={mining}
+            style={{ padding: '11px 20px', borderRadius: 10, border: 'none', cursor: mining ? 'wait' : 'pointer', background: mining ? '#4b5563' : 'linear-gradient(135deg,#06b6d4,#0e7490)', color: '#fff', fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap' }}>
+            {mining ? '⏳ กำลังประเมิน...' : '🎬 ถอด+ประเมิน'}</button>
+        </div>
+
         {/* ===== ⚙️ เครื่องมือขั้นสูง (พับเก็บ — เลิกงง · รื้อ UI 29 มิ.ย. ห่อเป็น panel เดียว) ===== */}
         {showAdvanced && (
         <div style={{ marginBottom: 14, padding: '14px 16px', borderRadius: 16, background: 'rgba(139,92,246,0.05)', border: '1px solid rgba(139,92,246,0.22)' }}>
@@ -892,16 +904,7 @@ export default function NewsDeskPage() {
             {harvesting ? '⏳...' : '🔍 วิเคราะห์+ตามกระแส'}</button>
         </div>
 
-        {/* ช่องวางลิงก์คลิปสัมภาษณ์ (เหมืองนาทีทอง) */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <input value={clipUrl} onChange={e => setClipUrl(e.target.value)} disabled={mining}
-            onKeyDown={e => { if (e.key === 'Enter') mineClip(); }}
-            placeholder="🎬 เจอคลิปน้ำดีตอนเลื่อนฟีด? วางลิงก์ที่นี่ (TikTok / FB / YouTube / IG) — AI ถอด+ประเมินให้เลย"
-            style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 13.5, outline: 'none' }} />
-          <button onClick={mineClip} disabled={mining}
-            style={{ padding: '10px 18px', borderRadius: 10, border: 'none', cursor: mining ? 'wait' : 'pointer', background: mining ? '#4b5563' : 'linear-gradient(135deg,#06b6d4,#0e7490)', color: '#fff', fontWeight: 700, fontSize: 13.5, whiteSpace: 'nowrap' }}>
-            {mining ? '⏳ กำลังประเมิน...' : '🎬 ถอด+ประเมิน'}</button>
-        </div>
+        {/* (ช่องวางลิงก์คลิปย้ายขึ้นไปเห็นตลอดด้านบนแล้ว — 4 ก.ค.) */}
 
         {/* ช่องรายงานโพสต์แรงตลาด — ตา engagement ของระบบ */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
