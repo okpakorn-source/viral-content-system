@@ -117,6 +117,21 @@ for (;;) {
       } catch {
         /* เงียบ — รอบหน้าลองใหม่ */
       }
+
+      // 🏭 MEGA (7 ก.ค.): เดินสายพานข่าวครบวงจร 1 จังหวะตอนว่าง — ไม่มีงาน = no-op เร็วมาก
+      try {
+        const r = await fetch(`${BASE}/api/mega/tick`, {
+          method: 'POST',
+          ...(longDispatcher ? { dispatcher: longDispatcher } : {}),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (d.success && !d.idle) {
+          log(`🏭 MEGA ${d.jobId} · ${d.stageLabel || d.stage}: ${(d.result && d.result.summary) || d.skipped || ''}`);
+          wait = 3000; // สายพานยังเดินอยู่ → จังหวะถัดไปเร็วๆ
+        }
+      } catch {
+        /* เงียบ */
+      }
     }
   } catch (e) {
     log('⚠️ เช็กคิวไม่ได้ (เซิร์ฟเวอร์ :3000 ล่ม/รีสตาร์ท?):', e.message);

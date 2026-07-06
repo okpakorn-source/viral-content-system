@@ -1,0 +1,62 @@
+// ============================================================
+// 🏭 MEGA — GET/POST /api/mega : จัดการงานสายพาน
+// GET → รายการงาน + ธงระบบ
+// POST { action:'create', mode? }  → เปิดงานใหม่ (MG-xxxx)
+// POST { action:'resume' }         → ปลด circuit breaker
+// POST { action:'retry', id }      → ปลุกงาน failed กลับมาเดินต่อจากขั้นเดิม
+// ============================================================
+
+import { NextResponse } from 'next/server';
+import { newJob, listJobs, getJob, updateJob, listRuns, getFlags, setFlags } from '@/lib/megaJobStore';
+
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
+export async function GET() {
+  try {
+    const [jobs, flags] = await Promise.all([listJobs(30), getFlags()]);
+    return NextResponse.json({ success: true, jobs, flags });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req) {
+  try {
+    const body = await req.json().catch(() => ({}));
+    const action = body.action || '';
+
+    if (action === 'create') {
+      // ทีละงาน: มีงานเดินอยู่แล้ว → ไม่เปิดซ้อน (serial-first)
+      const jobs = await listJobs(20);
+      const active = jobs.find((j) => ['pending', 'running', 'waiting'].includes(j.status));
+      if (active) {
+        return NextResponse.json({ success: false, error: `มีงาน ${active.id} เดินอยู่ (${active.stage}) — รอจบก่อน`, errorType: 'BUSY' }, { status: 409 });
+      }
+      const job = await newJob({ mode: body.mode || 'auto' });
+      return NextResponse.json({ success: true, job });
+    }
+
+    if (action === 'resume') {
+      const flags = await setFlags({ paused: false, consecutiveFails: 0 });
+      return NextResponse.json({ success: true, flags });
+    }
+
+    if (action === 'retry') {
+      const job = await getJob(body.id);
+      if (!job) return NextResponse.json({ success: false, error: 'ไม่พบงาน' }, { status: 404 });
+      const updated = await updateJob(job.id, { status: 'running', quality: job.quality === 'red' ? 'yellow' : job.quality });
+      await setFlags({ paused: false, consecutiveFails: 0 });
+      return NextResponse.json({ success: true, job: updated });
+    }
+
+    if (action === 'runs') {
+      const runs = await listRuns(body.id);
+      return NextResponse.json({ success: true, runs });
+    }
+
+    return NextResponse.json({ success: false, error: 'action ไม่รู้จัก: ' + action }, { status: 400 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
