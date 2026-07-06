@@ -867,6 +867,7 @@ const PLATFORM_LABEL = {
   facebook: 'Facebook',
   tiktok: 'TikTok',
   youtube: 'YouTube',
+  clip: '🎬 คลิปที่วางเอง', // ★ 6 ก.ค.: เฟรมจากลิงก์คลิปที่ผู้ใช้ระบุ — หมวดแยก เลือกดู/ประเมินง่าย
   reverse: 'ค้นย้อนกลับ',
   instagram: 'Instagram',
 };

@@ -97,9 +97,10 @@ export async function POST(req) {
 
     let result;
     try {
-      // ★ 6 ก.ค.: โหมดเจาะจงคลิป — วางลิงก์ FB/YouTube/TikTok/IG มาเอง = แคปจากคลิปนั้นตรงๆ
+      // ★ 6 ก.ค.: โหมดเจาะจงคลิป — วางลิงก์ FB/YouTube/TikTok/IG มาเอง = แคปจากคลิปนั้นตรงๆ (1080p+ถี่)
       const clipUrls = (body.clipUrl || '').trim() ? [(body.clipUrl || '').trim()] : undefined;
-      result = await runYouTubePipeline({ caseId, keywords: c.keywords, progress: P2, clipUrls });
+      const newsGist = (c.analysis?.summary || c.analysis?.content || c.newsSnippet || '').slice(0, 600);
+      result = await runYouTubePipeline({ caseId, keywords: c.keywords, progress: P2, clipUrls, newsGist });
     } catch (err) {
       failProgress(jobId, err.message);
       // ★ 6 ก.ค.: route เป็นคนปิดงานในคิวเอง (worker อาจวางสายไปแล้วถ้างานยาว)
@@ -144,7 +145,9 @@ export async function POST(req) {
       );
     }
 
-    const records = frames.map((f) => ({ ...f, platform: 'youtube', query: 'youtube' }));
+    // ★ 6 ก.ค. (ผู้ใช้สั่ง): เฟรมจาก "คลิปที่วางลิงก์เอง" แยกหมวดเป็น 'clip' — คลังมีชิปกรองแยกให้เลือกดู/ประเมินง่าย
+    const framePlatform = (body.clipUrl || '').trim() ? 'clip' : 'youtube';
+    const records = frames.map((f) => ({ ...f, platform: framePlatform, query: (body.clipUrl || '').trim() || 'youtube' }));
     const saved = await addImages(caseId, records);
     doneProgress(jobId, { step: 'เสร็จ', detail: `ได้ ${result.frames.length} เฟรมเข้าคลัง` });
     // ★ 6 ก.ค.: route ปิดงานในคิวเอง = เว็บเห็น "เสร็จ" แน่นอนแม้ worker วางสายไปก่อน

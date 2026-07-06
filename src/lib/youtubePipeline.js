@@ -35,10 +35,12 @@ function num(v, d) {
   return isNaN(n) ? d : n;
 }
 
-export async function runYouTubePipeline({ caseId, keywords, progress, clipUrls }) {
+export async function runYouTubePipeline({ caseId, keywords, progress, clipUrls, newsGist }) {
   const P = progress || (() => {});
   const subjects = keywords.subjects || [];
   const log = [];
+  // โหมดเจาะจงคลิป = คุณภาพสูง (1080p) + แคปถี่ (เก็บโมเมนต์ครบ) — ผู้ใช้ชี้คลิปเองแปลว่าคลิปนี้สำคัญ
+  const pinpoint = Array.isArray(clipUrls) && clipUrls.length > 0;
 
   let clips = [];
   const seen = new Set();
@@ -115,16 +117,16 @@ export async function runYouTubePipeline({ caseId, keywords, progress, clipUrls 
 
     try {
       P('โหลดคลิป', `คลิป ${clipIdx}/${clips.length}: ${clip.title.slice(0, 40)}`, { pct: 15 + clipIdx * 12 });
-      const videoFile = await downloadClip(clip.link, tmp);
-      P('แคปเฟรม', `คลิป ${clipIdx} — ffmpeg ตัดเฟรม`, { pct: 18 + clipIdx * 12 });
-      const cand = await extractFrames(videoFile, tmp);
+      const videoFile = await downloadClip(clip.link, tmp, pinpoint);
+      P('แคปเฟรม', `คลิป ${clipIdx} — ffmpeg ตัดเฟรม${pinpoint ? ' (ละเอียด 1080p)' : ''}`, { pct: 18 + clipIdx * 12 });
+      const cand = await extractFrames(videoFile, tmp, pinpoint);
       if (cand.length === 0) {
         log.push(`คลิป ${clipIdx} แคปเฟรมไม่ได้`);
         continue;
       }
 
       P('Gemini คัดเฟรม', `คลิป ${clipIdx} — คัดจาก ${cand.length} เฟรม (ได้ ${collected.length} แล้ว)`, { pct: 22 + clipIdx * 12 });
-      const selected = await selectWithGemini(cand, subjects, P.onRetry, caseId);
+      const selected = await selectWithGemini(cand, subjects, P.onRetry, caseId, newsGist);
       log.push(`คลิป ${clipIdx} "${clip.title.slice(0, 40)}": เฟรมดิบ ${cand.length} → Gemini เลือก ${selected.length}`);
 
       let frameNo = 0;
@@ -176,13 +178,15 @@ export async function runYouTubePipeline({ caseId, keywords, progress, clipUrls 
 }
 
 // ---- yt-dlp: โหลดวิดีโอ ≤720p (เอาเฉพาะภาพ ไม่เอาเสียง เร็วกว่า) ----
-async function downloadClip(url, dir) {
+async function downloadClip(url, dir, hq = false) {
   const out = path.join(dir, 'clip.%(ext)s');
+  // ★ 6 ก.ค.: โหมดเจาะจงคลิป (hq) — คลิปเดียว เอาชัดสุด ≤1080p (โหมดค้นอัตโนมัติคง 720p เพื่อความเร็ว)
+  const fmt = hq ? 'bv*[height<=1080]/b[height<=1080]/b' : 'bv*[height<=720]/b[height<=720]/b';
   await exec(
     'yt-dlp',
     [
       '-f',
-      'bv*[height<=720]/b[height<=720]/b',
+      fmt,
       '--no-playlist',
       '--no-warnings',
       '--no-progress',
@@ -218,15 +222,18 @@ async function probeDuration(videoFile) {
 }
 
 // ---- ffmpeg: ไล่แคปเฟรม "กระจายทั้งคลิป" (ไม่ใช่แค่ช่วงต้น) ----
-async function extractFrames(videoFile, dir) {
+async function extractFrames(videoFile, dir, dense = false) {
   const pattern = path.join(dir, 'f_%04d.jpg');
   const duration = await probeDuration(videoFile);
 
   // กระจาย MAX_CAND เฟรมให้ทั่วทั้งคลิป: fps = จำนวนเฟรม / ความยาว
+  // ★ 6 ก.ค.: โหมดเจาะจงคลิป (dense) — แคปถี่ขึ้น (สูงสุด 2 เฟรม/วิ, เป้า 60 เฟรม) เก็บโมเมนต์ครบกว่า
+  const candTarget = dense ? Math.max(60, MAX_CAND_PER_CLIP) : MAX_CAND_PER_CLIP;
+  const fpsMax = dense ? 2 : 1;
   let fps;
   if (duration && duration > 0) {
-    fps = MAX_CAND_PER_CLIP / duration;
-    fps = Math.min(Math.max(fps, 0.02), 1); // 1 เฟรม/50วิ ถึง 1 เฟรม/วิ
+    fps = candTarget / duration;
+    fps = Math.min(Math.max(fps, 0.02), fpsMax);
   } else {
     fps = 1 / FRAME_EVERY_SEC;
   }
@@ -257,7 +264,7 @@ async function extractFrames(videoFile, dir) {
 }
 
 // ---- Gemini: คัดเฟรมเป็นแบตช์ คืน index ที่เลือก ----
-async function selectWithGemini(cand, subjects, onRetry, caseId) {
+async function selectWithGemini(cand, subjects, onRetry, caseId, newsGist) {
   const keep = [];
   for (let i = 0; i < cand.length; i += GEMINI_BATCH) {
     const batch = cand.slice(i, i + GEMINI_BATCH);
@@ -266,7 +273,7 @@ async function selectWithGemini(cand, subjects, onRetry, caseId) {
       const buf = await fs.readFile(c.file);
       frames.push({ index: c.index, base64: buf.toString('base64') });
     }
-    const sel = await geminiSelectFrames({ frames, subjects, onRetry, caseId });
+    const sel = await geminiSelectFrames({ frames, subjects, onRetry, caseId, newsGist });
     for (const s of sel) keep.push(s.index);
   }
   return [...new Set(keep)];
