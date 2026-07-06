@@ -28,6 +28,8 @@ function stageInputHash(job) {
     versions: (d.generate?.versions || []).length,
     // รอบแก้ตัว S3 ต้องได้ key ใหม่ (บั๊กเทสทองคำ: basis ซ้ำรอบแรก → โดน idempotent ข้ามการส่งใหม่)
     retriedWithText: !!d.generate?.retriedWithText,
+    // rewind ด้วยมือ = เจตนารันใหม่ → เลขรอบต้องพา key หนีผลเก่าทุกขั้น
+    rewind: d.rewind || 0,
   };
   return crypto.createHash('sha256').update(JSON.stringify(basis)).digest('hex').slice(0, 16);
 }

@@ -207,7 +207,10 @@ export async function s3_generate(job, { origin }) {
 // ---------- S3w รอผลเจน: โพล + "ก๊อบผลทันที" (คิว purge ~30 นาที) ----------
 export async function s3_wait(job, { origin }) {
   const gen = job.dossier.generate || {};
-  const st = await jfetch(`${queueOrigin()}/api/queue/status?id=${encodeURIComponent(gen.queueJobId)}`, {}, 30000);
+  // 🛑 ไม่มีเลขงานคิวในแฟ้ม (ขั้นส่งคิวโดนข้าม/ล้าง) → เข้าเส้นกู้เหมือนงานหาย ห้ามเดินต่อมือเปล่า
+  const st = gen.queueJobId
+    ? await jfetch(`${queueOrigin()}/api/queue/status?id=${encodeURIComponent(gen.queueJobId)}`, {}, 30000)
+    : { error: 'ไม่มีเลขงานคิวในแฟ้ม (ขั้นส่งคิวโดนข้าม)' };
   const status = st.status || st.jobStatus;
   if (status === 'completed' && st.result) {
     // สัณฐานจริง (พิสูจน์จากโพรบ 7 ก.ค.): versions อยู่ที่ result.data.versions
@@ -262,6 +265,10 @@ export async function s3_wait(job, { origin }) {
 // ---------- S4 บก.เลือกเนื้อดีสุด (กันตาเอียง) ----------
 export async function s4_choose(job) {
   const versions = job.dossier.generate?.versions || [];
+  // 🛑 ไม่มีร่างให้ตัดสิน = ห้ามเรียก Judge (เปลืองเงิน) + ห้ามปิดงานเป็นสำเร็จปลอม
+  if (!versions.length) {
+    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีฉบับร่างให้ บก. ตัดสิน (versions=0) — ย้อนกลับไปเจนใหม่ด้วยปุ่มลองต่อ', quality: 'red' };
+  }
   const pick = await judgeBrain({
     versions,
     extractText: job.dossier.extract?.text,

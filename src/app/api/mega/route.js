@@ -49,7 +49,10 @@ export async function POST(req) {
       // ย้อนขั้นได้ (เช่น กลับไปส่งเจนใหม่แบบสะอาด): {action:'retry', id, stage:'s3_generate'}
       if (body.stage) {
         patch.stage = body.stage;
-        if (body.stage === 's3_generate') patch.dossier = { generate: null };
+        // 🔑 เลขรอบ rewind เข้า basis ของ idempotency — บทเรียน MG-0001: ล้าง generate แล้ว basis
+        //   กลับไปเหมือนรอบแรกเป๊ะ → โดน "เคยสำเร็จ" ข้ามยาวถึง content_ready ทั้งที่ 0 เวอร์ชัน
+        patch.dossier = { rewind: Date.now() };
+        if (body.stage === 's3_generate') patch.dossier.generate = null;
       }
       const updated = await updateJob(job.id, patch);
       await setFlags({ paused: false, consecutiveFails: 0 });
