@@ -153,6 +153,11 @@ ${newsText.slice(0, 1500)}
 
       if (res.ok) {
         const data = await res.json();
+        // ★ 7 ก.ค. อุดรูรั่วต้นทุน: Claude fallback ยิงตรง → log เข้า api_usage_logs (/cost เห็น)
+        try {
+          const { logApiUsage } = await import('@/lib/ai/usageLogger');
+          await logApiUsage({ provider: 'anthropic', model: 'claude-sonnet-4-6', inputTokens: data.usage?.input_tokens || 0, outputTokens: data.usage?.output_tokens || 0, feature: 'smart-query-fallback' });
+        } catch { /* log ล้มไม่กระทบท่อ */ }
         const text = data.content?.[0]?.text || '';
         const jsonMatch = text.match(/\{[\s\S]*\}/);
         if (jsonMatch) {

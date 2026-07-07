@@ -119,7 +119,18 @@ function TemplateThumbnail({ template, isActive, onClick }) {
   );
 }
 
-export default function CoverLabPage() {
+// ⛔ ปิดใช้งานชั่วคราว (2 ก.ค. 2026 — ผู้ใช้สั่งถอดจาก UI รอรื้อสร้างใหม่)
+//    เปิดคืน: ลบ DisabledPage แล้วคืน `export default` ให้ CoverLabPage ด้านล่าง
+export default function DisabledPage() {
+  return (
+    <div style={{ padding: 80, textAlign: 'center', color: '#94a3b8' }}>
+      <div style={{ fontSize: 48 }}>⛔</div>
+      <h2>ปิดปรับปรุงชั่วคราว</h2>
+      <p>ระบบสร้างปกอัตโนมัติ (Cover Lab) ถูกปิดใช้งานชั่วคราว — กำลังรื้อสร้างใหม่</p>
+    </div>
+  );
+}
+function CoverLabPage() {
   // Auto Cover state
   const [newsTitle, setNewsTitle] = useState('');
   const [content, setContent] = useState('');

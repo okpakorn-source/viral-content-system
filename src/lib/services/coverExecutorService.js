@@ -69,6 +69,22 @@ export const V3_TEMPLATES = {
     ],
   },
 
+  // ★ vt_ref_5x4 (7 ก.ค. — ยึดภาพแสนไลค์ reference "cover fable" เป็นกฎ): 4:5 · ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย
+  //   ต่างจาก vt_ref_tri: (1) canvas 4:5 (1080×1350) ไม่ใช่ 8:9 (2) ขวา 2 ช่องใหญ่ ไม่ใช่ 3 ช่องเล็ก
+  //   (3) ชนขอบไม่มีเส้นขาว/ช่องว่าง (4) ไม่มีขอบสีสี่เหลี่ยม — มีแค่วงกลมขอบขาวหนา (สไตล์ collage ไวรัลจริง)
+  vt_ref_5x4: {
+    id: 'vt_ref_5x4',
+    storyFit: '★★ โครงแสนไลค์ 4:5 (reference lock): ฮีโร่ close-up ซ้ายเต็มสูง + ขวาบนคู่/ปฏิกิริยา + ขวาล่าง close-up คนที่สอง + วงกลมโมเมนต์ล่างซ้าย',
+    canvasW: 1080, canvasH: 1350,
+    feather: 26, // ★ B: เบลอรอยต่อระหว่างช่อง (ลบเส้นกริดคม) — สไตล์ collage ไวรัลตาม reference (เฉพาะเทมเพลตนี้)
+    slots: [
+      { id: 'main',         x: 0,   y: 0,   w: 616, h: 1350, zIndex: 0, note: '★ ฮีโร่ close-up เต็มสูง ~57% กว้าง — หน้าใหญ่ครึ่งบน (วงกลมทับช่วงตัวล่าง ไม่ทับหน้า)' },
+      { id: 'right_top',    x: 616, y: 0,   w: 464, h: 540, zIndex: 0, note: 'ขวาบน 40% — คู่/ปฏิกิริยา/บริบท (เล็กกว่าตาม ref) ชนขอบฮีโร่' },
+      { id: 'right_bottom', x: 616, y: 540, w: 464, h: 810, zIndex: 0, note: 'ขวาล่าง 60% — close-up คนที่สอง/เหยื่อ หน้าใหญ่เด่น (ใหญ่กว่าตาม ref)' },
+      { id: 'circle', shape: 'circle', x: 34, y: 940, w: 380, h: 380, zIndex: 4, border: '#FFFFFF', borderWidth: 14, note: '⭕ วงกลมกรอบขาวหนา ล่างซ้ายคร่อมตัวฮีโร่ (ขวาสุด 414 < 616 ไม่ทับช่องขวา) — โมเมนต์/หลักฐาน/คนคู่' },
+    ],
+  },
+
   // B. "quad_circle" — พบ 3/10: เรื่องสองฝ่าย ให้-รับ / then-vs-now (วงกลมกลาง = วินาทีสำคัญ)
   vt_quad_circle: {
     id: 'vt_quad_circle',
@@ -609,23 +625,52 @@ export async function executeCover({ assignments, imageBuffers, templateSpec, fa
     return za - zb;
   });
 
-  const composites = [];
+  const rectComps = [];
+  const circleComps = [];
   for (const a of ordered) {
     const slot = templateSpec.slots.find(s => s.id === a.slotId);
     const src = imageBuffers[a.imageIndex]?.buffer;
     if (!slot || !src) throw new Error(`EXECUTE_MISSING: slot=${a.slotId} image=#${a.imageIndex}`);
     const fb = faceBoxes?.[a.imageIndex] || null; // rev.14: ป้อนพิกัดหน้าให้ครอปหน้าเต็มช่อง
-    composites.push(slot.shape === 'circle'
-      ? await renderCircleTile(src, a.crop, slot, fb)
-      : await renderRectTile(src, a.crop, slot, fb));
+    if (slot.shape === 'circle') circleComps.push(await renderCircleTile(src, a.crop, slot, fb));
+    else rectComps.push(await renderRectTile(src, a.crop, slot, fb));
   }
 
-  return sharp({
-    create: { width: canvasW, height: canvasH, channels: 3, background: { r: 255, g: 255, b: 255 } },
-  })
-    .composite(composites)
-    .jpeg({ quality: 90 })
-    .toBuffer();
+  const bg = { create: { width: canvasW, height: canvasH, channels: 3, background: { r: 255, g: 255, b: 255 } } };
+  const feather = Number(templateSpec.feather) || 0;
+  // เส้นทางเดิม (ไม่มี feather): composite รวดเดียว — ไม่แตะพฤติกรรมเทมเพลตเก่าทุกตัว
+  if (!feather) {
+    return sharp(bg).composite([...rectComps, ...circleComps]).jpeg({ quality: 90 }).toBuffer();
+  }
+  // ★ B feather path (vt_ref_5x4): วางสี่เหลี่ยมก่อน → เบลอ "แถบรอยต่อ" ให้นุ่ม (ลบเส้นกริดคม) → วางวงกลมทับ (คงกรอบขาว)
+  let canvas = await sharp(bg).composite(rectComps).png().toBuffer();
+  canvas = await featherSeams(canvas, templateSpec, feather);
+  return sharp(canvas).composite(circleComps).jpeg({ quality: 90 }).toBuffer();
+}
+
+/** เบลอเฉพาะ "แถบรอยต่อ" ระหว่างช่องสี่เหลี่ยม (ขอบด้านในที่ติดช่องอื่น เท่านั้น) — รอยต่อนุ่มแบบ collage ไวรัล
+ *  ไม่แตะกลางภาพ/หน้าคน (แถบกว้าง ~2·F รอบเส้นรอยต่อ) · extract จากสำเนา canvas เดิม → blur → composite กลับ */
+async function featherSeams(canvasBuf, templateSpec, F) {
+  const { canvasW: W, canvasH: H } = templateSpec;
+  const bands = [];
+  for (const s of templateSpec.slots) {
+    if (s.shape === 'circle') continue;
+    if (s.x > 0) bands.push({ left: s.x - F, top: s.y, width: 2 * F, height: s.h });            // ขอบซ้ายด้านใน
+    if (s.x + s.w < W) bands.push({ left: s.x + s.w - F, top: s.y, width: 2 * F, height: s.h }); // ขอบขวาด้านใน
+    if (s.y > 0) bands.push({ left: s.x, top: s.y - F, width: s.w, height: 2 * F });             // ขอบบนด้านใน
+    if (s.y + s.h < H) bands.push({ left: s.x, top: s.y + s.h - F, width: s.w, height: 2 * F }); // ขอบล่างด้านใน
+  }
+  const overlays = [];
+  for (const raw of bands) {
+    const left = Math.max(0, Math.min(raw.left, W - 1));
+    const top = Math.max(0, Math.min(raw.top, H - 1));
+    const width = Math.max(1, Math.min(raw.width, W - left));
+    const height = Math.max(1, Math.min(raw.height, H - top));
+    const patch = await sharp(canvasBuf).extract({ left, top, width, height }).blur(Math.max(0.4, F / 2)).toBuffer();
+    overlays.push({ input: patch, left, top });
+  }
+  if (!overlays.length) return canvasBuf;
+  return sharp(canvasBuf).composite(overlays).png().toBuffer();
 }
 
 /** apply QC fixes: ทับ crop ของช่องที่สั่งแก้ + rev.8: สลับรูปได้ด้วย imageIndex */

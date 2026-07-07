@@ -473,7 +473,8 @@ export default function GenerationLogsPage() {
                             {imgScouting[c.caseId] ? '⏳ กำลังหาภาพ...' : '📸 หาแหล่งภาพ'}
                           </button>
                         )}
-                        <a href="/cover-lab" target="_blank" rel="noopener noreferrer" style={{ ...btnStyle, textDecoration: 'none' }} title="เปิด Cover Lab ทำภาพปก">🎨 ไปทำปก</a>
+                        {/* ⛔ 2 ก.ค. 2026: ปิดชั่วคราว (cover-lab ถูกถอดตามคำสั่งผู้ใช้)
+                        <a href="/cover-lab" target="_blank" rel="noopener noreferrer" style={{ ...btnStyle, textDecoration: 'none' }} title="เปิด Cover Lab ทำภาพปก">🎨 ไปทำปก</a> */}
                       </div>
 
                       {/* แหล่งภาพของข่าวนี้ — ลิงก์จัดกลุ่มตามช่องทาง */}

@@ -21,11 +21,23 @@ function queueOrigin() {
   return process.env.MEGA_QUEUE_ORIGIN || QUEUE_ORIGIN_DEFAULT;
 }
 
+// ★ 7 ก.ค.: ปิด undici headersTimeout/bodyTimeout ภายใน (default 5 นาที) — ขั้นหาภาพ/วิชั่นช้าเกิน 5 นาทีได้จริง
+//   (เช่น search+EyeScreen 5 นาที) → เดิม undici ตัดที่ 5 นาที = "fetch failed"/abort ทั้งที่งานยังไม่เสร็จ
+//   ให้ AbortSignal.timeout(timeoutMs) เป็นเพดานเดียวที่คุมจริง
+let _undiciDispatcher;
+async function _getDispatcher() {
+  if (_undiciDispatcher !== undefined) return _undiciDispatcher;
+  try { const { Agent } = await import('undici'); _undiciDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 }); }
+  catch { _undiciDispatcher = null; }
+  return _undiciDispatcher;
+}
 async function jfetch(url, opts = {}, timeoutMs = 60000) {
+  const dispatcher = await _getDispatcher();
   const r = await fetch(url, {
     ...opts,
     headers: { 'content-type': 'application/json', ...(opts.headers || {}) },
     signal: AbortSignal.timeout(timeoutMs),
+    ...(dispatcher ? { dispatcher } : {}),
   });
   const j = await r.json().catch(() => ({}));
   return { httpStatus: r.status, ...j };
@@ -301,6 +313,8 @@ const MIN_RELEVANT_IMAGES = parseInt(process.env.MEGA_MIN_RELEVANT_IMAGES || '8'
 // แพลตฟอร์มตามที่ /api/images/search รองรับจริง (PLATFORMS ใน imageSearch.js — bing ตายแล้ว,
 // youtube เป็นท่อแคปเฟรมแยก /api/images/youtube ไม่ใช่ท่อนี้ — บทเรียนเทสเฟส 2 รอบแรก)
 const SEARCH_PLATFORMS = ['google', 'google_news', 'facebook', 'tiktok'];
+// ★ 7 ก.ค. STAGED: ค้นชุดแรกกี่แหล่งก่อนเช็ค "พอไหม" (คนดังเจอครบใน 2 แหล่งแรก = เร็ว ไม่ต้องแตะ fb/tiktok)
+const SEARCH_INITIAL_BATCH = parseInt(process.env.MEGA_SEARCH_INITIAL_BATCH || '2', 10);
 const MAX_TRIAGE_ROUNDS = 8;
 
 // เนื้อเต็มสำหรับเปิดเคสภาพ — กฎเดิมของระบบปก: ห้ามใช้เนื้อย่อ
@@ -358,7 +372,7 @@ export async function s5_search(job, { origin }) {
   const done = im.searchedPlatforms || [];
   const next = SEARCH_PLATFORMS.find((p) => !done.includes(p));
   if (next) {
-    const r = await jfetch(`${origin}/api/images/search`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, platform: next }) }, 300000);
+    const r = await jfetch(`${origin}/api/images/search`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, platform: next }) }, 480000); // ★ 7 ก.ค.: 5→8 นาที (search+EyeScreen ต่อแหล่งแตะ 5 นาทีได้ → เดิม abort พอดี)
     const stat = r.success
       ? { platform: next, found: r.found || 0, added: r.added || 0, vetDropped: r.vetDropped || 0 }
       : { platform: next, error: (r.error || String(r.httpStatus)).slice(0, 80) };
@@ -369,11 +383,29 @@ export async function s5_search(job, { origin }) {
         searchStats: [...(im.searchStats || []), stat],
       },
     };
-    const remaining = SEARCH_PLATFORMS.length - (done.length + 1);
+    // ★ 7 ก.ค. STAGED (ผู้ใช้สั่ง): ค้น 2 แหล่งก่อน (google+google_news) → เก็บได้พอ (≥MIN หลัง vet) ก็ "หยุดเลย" ข้ามแหล่งที่เหลือ
+    //   คนดัง/ข่าวดังเจอครบใน 2 แหล่ง = เร็ว/ประหยัด ไม่ต้องแตะ fb/tiktok · ไม่พอ → ค้นต่อทีละแหล่งจนพอ/ครบ
+    //   done กลางคัน "ตั้งใจ" (ไม่ใช่บั๊ก) = ข้ามแหล่งที่เหลือตามดีไซน์ → tick ไปต่อ s5_triage ถูกต้อง
+    const searchedCount = done.length + 1;
+    const totalAddedNow = patch.images.searchStats.reduce((n, s) => n + (s.added || 0), 0);
+    const remaining = SEARCH_PLATFORMS.length - searchedCount;
+    const enough = searchedCount >= SEARCH_INITIAL_BATCH && totalAddedNow >= MIN_RELEVANT_IMAGES;
+    if (enough || remaining <= 0) {
+      const anyOk = patch.images.searchStats.some((s) => !s.error);
+      if (!anyOk || totalAddedNow === 0) {
+        return { status: 'failed', nextAction: 'fail', summary: 'ค้นแล้วไม่ได้ภาพเลย', quality: 'red', dossierPatch: patch };
+      }
+      return {
+        status: 'done',
+        nextAction: 'continue',
+        summary: `ค้น ${searchedCount} แหล่ง เก็บ ${totalAddedNow} ใบ${enough && remaining > 0 ? ` — พอแล้ว ข้าม ${remaining} แหล่ง (staged)` : ' — ครบแหล่ง'}`,
+        dossierPatch: { images: { ...patch.images, totalAdded: totalAddedNow } },
+      };
+    }
     return {
-      status: 'waiting', // กลางคัน = waiting เสมอ (กัน idempotent ข้ามแหล่งที่เหลือ)
+      status: 'waiting', // ยังไม่พอ + มีแหล่งเหลือ → ค้นต่อแหล่งถัดไป (waiting กัน idempotent ข้าม)
       nextAction: 'wait',
-      summary: `ค้น ${next}: ${r.success ? `เก็บ ${stat.added}/${stat.found} ใบ` : 'ล้ม — ' + stat.error} (เหลือ ${remaining} แหล่ง)`,
+      summary: `ค้น ${next}: ${r.success ? `เก็บ ${stat.added}/${stat.found} ใบ` : 'ล้ม — ' + stat.error} (รวม ${totalAddedNow} · เหลือ ${remaining} แหล่ง)`,
       dossierPatch: patch,
     };
   }
@@ -460,10 +492,28 @@ export async function s6_slots(job, { origin }) {
     src: x.platform || '',
   }));
 
+  // 🎯 7 ก.ค. (ผู้ใช้สั่ง ref-first): เลือก "ปกเป้า" จากคลัง reference ก่อนคัดภาพ — ให้ DNA ขับการเลือกภาพลงช่อง
+  //   คำนวณครั้งเดียวเก็บใน dossier.refMatch (s7 ใช้ต่อ ไม่คำนวณซ้ำ) · คลังว่าง/ล้ม → ทำงานแบบเดิม
+  if (!job.dossier.refMatch) {
+    try {
+      const { pickBestRef } = await import('@/lib/refCoverMatch');
+      const c = job.dossier.compass || {};
+      const m = await pickBestRef({
+        emotion: c.primaryEmotion || '',
+        text: [c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '),
+        charCount: (c.mainCharacters || []).length,
+        dreamShots: (c.visualDreamShots || []).map((v) => v.slot || v.description || ''),
+      });
+      if (m?.ref?.dna) job.dossier.refMatch = { dna: m.ref.dna, styleName: m.ref.styleName || m.ref.id, imagePath: m.ref.imagePath, reason: m.reason };
+    } catch { /* ไม่มีคลัง ref → เดินแบบเดิม */ }
+  }
+  const _refDNA = job.dossier.refMatch?.dna || null;
+  if (_refDNA) console.log(`[MEGA S6] 🎯 ปกเป้า: ${job.dossier.refMatch.styleName || '-'} (${job.dossier.refMatch.reason || ''}) — ใช้ขับการเลือกภาพ + โครง`);
+
   let brain = { slots: {}, note: '' };
   let brainOk = true;
   try {
-    brain = await slotDirectorBrain({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title });
+    brain = await slotDirectorBrain({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title, refDNA: _refDNA });
   } catch (err) {
     brainOk = false; // สมองล่ม → fallback ล้วน (กฎเดียวกับทางหลัก)
   }
@@ -535,7 +585,7 @@ export async function s6_slots(job, { origin }) {
     status: 'done',
     nextAction: 'continue',
     summary: `จับคู่ ${filled}/5 ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'} — ${(brain.note || '').slice(0, 80)}`,
-    dossierPatch: { pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed } },
+    dossierPatch: { pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed }, ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}) },
     quality: filled < 5 ? 'yellow' : undefined,
   };
 }
@@ -552,27 +602,62 @@ function coverOrigin() {
 }
 
 // ---------- S7a ส่งงานปก: ภาพ 5 ช่องที่ S6 คัด → ช่อง "แหล่งรูป" ของ v3 (sourceOnly) ----------
-export async function s7_cover(job) {
+export async function s7_cover(job, { origin } = {}) {
   const d = job.dossier;
   const slots = d.pickImages?.slots || {};
-  // ลำดับสำคัญ: hero มาก่อน (ตัวดึงภาพ boost ตามลำดับ) + เพดาน 6 ลิงก์ (extractFromUserSources slice(0,6))
+  // ลำดับสำคัญ: hero มาก่อน (ตัวดึงภาพ boost ตามลำดับ) + เพดาน 10 ลิงก์ (extractFromUserSources slice(0,10))
   const links = ['hero', 'reaction', 'action', 'context', 'circle']
     .map((s) => slots[s]?.imageUrl)
     .filter(Boolean);
-  const backup = Object.values(slots).flatMap((s) => s?.backups || []).length; // นับไว้รายงานเฉยๆ
   if (links.length < 3) {
     return { status: 'failed', nextAction: 'fail', summary: `ภาพจาก S6 ไม่พอทำปก (${links.length} ใบ ต้อง ≥3)`, quality: 'red' };
   }
+  // ★ 7 ก.ค. FIX "คลังแน่นแต่ปกล้มภาพไม่พอ": เดิม backups เป็น id ถูกทิ้ง (นับรายงานเฉยๆ) แล้วส่งแค่ 5 ลิงก์เป๊ะ —
+  //   ลิงก์หน้าเว็บ/วิดีโอพัง 1-2 ใบ (403) = พูลต่ำกว่า 4 ล้มทั้งปก → แปลง id→URL จากคลังเคส ต่อท้าย (ไฟล์รูปตรงก่อน) เพดาน 10
+  let backupUrls = [];
+  try {
+    const backupIds = Object.values(slots).flatMap((s) => s?.backups || []);
+    if (backupIds.length && origin && d.images?.caseId) {
+      const lib = await jfetch(`${origin}/api/images/${encodeURIComponent(d.images.caseId)}`, {}, 30000);
+      const byId = new Map((lib?.images || []).map((x) => [String(x.id), x.imageUrl]));
+      const isDirect = (u) => /\.(jpe?g|png|webp|gif)([?#]|$)/i.test(String(u || ''));
+      backupUrls = backupIds.map((b) => byId.get(String(b))).filter(Boolean)
+        .sort((a, b) => (isDirect(b) ? 1 : 0) - (isDirect(a) ? 1 : 0));
+    }
+  } catch { /* สำรองไม่ critical — ได้แค่ลิงก์หลักก็เดินต่อ */ }
+  const _seenL = new Set();
+  const allLinks = [...links, ...backupUrls]
+    .filter((u) => { const k = String(u); if (_seenL.has(k)) return false; _seenL.add(k); return true; })
+    .slice(0, 10);
+  const backup = allLinks.length - links.length; // จำนวนสำรองที่ส่งจริง
   const nd = d.generate?.newsData || {};
+  // 🎯 ref-first (7 ก.ค.): ใช้ "ปกเป้าเดียวกับที่ s6 ใช้เลือกภาพ" (dossier.refMatch) — เป้าเดียวกันทั้งท่อ
+  //   (fallback: ถ้าแฟ้มเก่าไม่มี refMatch เช่นงานค้างก่อนอัป → หาใหม่ตรงนี้)
+  let refDNA = d.refMatch?.dna || null;
+  let refInfo = refDNA ? ` · 🎯ref ${d.refMatch.styleName || ''} (${d.refMatch.reason || ''})`.slice(0, 90) : '';
+  if (!refDNA) {
+    try {
+      const { pickBestRef } = await import('@/lib/refCoverMatch');
+      const c = d.compass || {};
+      const m = await pickBestRef({
+        emotion: c.primaryEmotion || '',
+        text: [c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '),
+        charCount: (c.mainCharacters || []).length,
+        dreamShots: (c.visualDreamShots || []).map((v) => v.slot || v.description || ''),
+      });
+      if (m?.ref?.dna) { refDNA = m.ref.dna; refInfo = ` · 🎯ref ${m.ref.styleName || m.ref.id} (${m.reason})`.slice(0, 90); }
+    } catch { /* คลัง ref ว่าง/ล้ม → ไม่มี ref (ใช้ template ปกติ) ไม่กระทบ */ }
+  }
   const payload = {
     jobType: 'cover',
     composer: 'v3',
     newsTitle: nd.newsTitle || d.desk?.title || '',
     content: (nd.newsBody || d.extract?.text || '').slice(0, 8000),
     mainCharacterName: (d.compass?.mainCharacters || [])[0]?.name || '',
-    sourceLinks: links.slice(0, 6),
+    sourceLinks: allLinks, // ★ 7 ก.ค.: หลัก 5 + สำรอง (เพดาน 10)
     sourceOnly: true, // ใช้เฉพาะภาพที่สายพานคัดแล้ว — ห้ามรีเสิร์ชปนภาพนอกสายตา
     userId: MEGA_USER,
+    ...(refDNA ? { refDNA } : {}), // 🎯 ปกเป้าจากคลัง (มีเฉพาะเมื่อ match ได้)
   };
   const q = await jfetch(`${coverOrigin()}/api/queue/add`, { method: 'POST', body: JSON.stringify(payload) }, 60000);
   if (!q.success || !q.jobId) {
@@ -581,8 +666,8 @@ export async function s7_cover(job) {
   return {
     status: 'done',
     nextAction: 'continue',
-    summary: `ส่งทำปกแล้ว job ${String(q.jobId).slice(0, 10)} (ภาพ ${links.length} ใบจาก 5 ช่อง · สำรอง ${backup})`,
-    dossierPatch: { cover: { queueJobId: q.jobId, enqueuedAt: new Date().toISOString(), sourceLinks: links } },
+    summary: `ส่งทำปกแล้ว job ${String(q.jobId).slice(0, 10)} (ภาพ ${links.length} ใบจาก 5 ช่อง · สำรอง ${backup})${refInfo}`,
+    dossierPatch: { cover: { queueJobId: q.jobId, enqueuedAt: new Date().toISOString(), sourceLinks: links, refStyle: refInfo || null } },
   };
 }
 
@@ -607,6 +692,11 @@ export async function s7_wait(job) {
     await fs.mkdir(dir, { recursive: true });
     const file = `${job.id}-${Date.now().toString(36)}.${m[1] === 'png' ? 'png' : 'jpg'}`;
     await fs.writeFile(path.join(dir, file), Buffer.from(m[2], 'base64'));
+    // 🗂️ ส่งเข้าคลังงานปก MEGA อัตโนมัติ (ล้มไม่ critical ต่อสายพาน)
+    try {
+      const { addMegaCover } = await import('@/lib/megaCoverArchive');
+      await addMegaCover({ id: job.id, title: job.dossier.desk?.title || '', source: 'mega', imageCaseId: job.dossier.images?.caseId || null, coverCaseId: r.caseId || '', coverPath: `/mega-covers/${file}`, template: r.template || '', score: r.score ?? null, throughMega: true });
+    } catch { /* คลังไม่ critical */ }
     return {
       status: 'done',
       nextAction: 'continue',

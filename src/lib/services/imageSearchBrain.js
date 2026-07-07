@@ -9,6 +9,10 @@
 // 🔴 แยกเดี่ยวจากท่อทำข่าว/ปกอัตโนมัติ 100%
 // ============================================================
 
+// ★ 7 ก.ค. อุดรูรั่วต้นทุน: log ทุก call เข้า api_usage_logs (ตัวเดียวกับ openai/claudeClient — /cost อ่านเจอ)
+//   logApiUsage error-safe ในตัว (try/catch) — ล้มก็ไม่กระทบท่อ
+import { logApiUsage } from '@/lib/ai/usageLogger';
+
 // ── retry + backoff (กัน AI 503/429/overloaded) ──
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 529]);
 function isRetryable(err) {
@@ -69,6 +73,7 @@ async function callAnthropic({ system, user, model, maxTokens }) {
     throw e;
   }
   const data = await res.json();
+  await logApiUsage({ provider: 'anthropic', model, inputTokens: data.usage?.input_tokens || 0, outputTokens: data.usage?.output_tokens || 0, feature: 'image-search-brain' });
   const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
   return { text, provider: 'anthropic', model };
 }
@@ -86,6 +91,7 @@ async function callOpenAI({ system, user, model, maxTokens, temperature }) {
     throw e;
   }
   const data = await res.json();
+  await logApiUsage({ provider: 'openai', model, inputTokens: data.usage?.prompt_tokens || 0, outputTokens: data.usage?.completion_tokens || 0, feature: 'image-search-brain' });
   return { text: (data.choices?.[0]?.message?.content || '').trim(), provider: 'openai', model };
 }
 

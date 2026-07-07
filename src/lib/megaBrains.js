@@ -80,7 +80,16 @@ ${blinded.map((b) => `--- ฉบับ ${b.label} ---\n${b.text}`).join('\n\n')}
 
 // ---------- S6 ผู้กำกับจับคู่ช่อง: ป้าย triage (จ่ายเงินแล้วใน S5) + สูตรปกแสนไลค์ → ช่องละใบ+สำรอง ----------
 // ไม่ดูภาพซ้ำ (ประหยัด) — ตัดสินจาก metadata ที่ตาติดป้ายไว้: ใคร/หมวด/อารมณ์/คุณภาพ/จำนวนหน้า
-export async function slotDirectorBrain({ imagesMeta, compass, deskTitle }) {
+export async function slotDirectorBrain({ imagesMeta, compass, deskTitle, refDNA = null }) {
+  // 🎯 7 ก.ค. (ผู้ใช้สั่ง ref-first): ปกเป้าจากคลัง reference ต้อง "ขับการเลือกภาพ" ไม่ใช่แค่ตอนจัดวาง
+  //   gated: ไม่มี refDNA = prompt เดิมเป๊ะ
+  const refBlock = refDNA ? `
+=== 🎯 ปกเป้าหมาย (คัดจากคลังปกไวรัลที่แนวตรงข่าวนี้ — เลือกภาพให้ตอบโจทย์ปกแบบนี้) ===
+โครง: ${refDNA.layoutType || '-'}
+ช่องของปกเป้า: ${(refDNA.slots || []).map((s) => `${s.role}=${s.desc || s.subject || ''}${s.emotion ? `(${s.emotion})` : ''}`).join(' · ') || '-'}
+เล่าเรื่อง: ${String(refDNA.storyFlow || refDNA.compositionLogic || '').slice(0, 180)}
+→ เลือกภาพลงช่องให้ได้ "บทบาท+อารมณ์" ใกล้ปกเป้าที่สุดเท่าที่พูลมีจริง (กฎเหล็กเดิมยังเหนือกว่าเสมอ)
+` : '';
   const system = `คุณคือผู้กำกับภาพปกข่าวไวรัลไทย จับคู่ "ภาพ → ช่องปก" ตามสูตรปกแสนไลค์ (5 ช่อง 5 บทบาท):
 - hero: ตัวเอกของข่าว อารมณ์ตรงเรื่อง หน้าชัด (สำคัญสุด)
 - reaction: บุคคลที่สอง/ปฏิกิริยาต่อเหตุการณ์
@@ -92,7 +101,7 @@ export async function slotDirectorBrain({ imagesMeta, compass, deskTitle }) {
 {"slots":{"hero":{"id":"...","reason":"สั้นๆ","backups":["id","id"]},"reaction":{...},"action":{...},"context":{...},"circle":{...}},"note":"ข้อสังเกตรวม 1 ประโยค"}`;
   const user = `ข่าว: ${String(deskTitle || '').slice(0, 120)}
 เข็มทิศเรื่อง: ${JSON.stringify(compass || {}, null, 0).slice(0, 1200)}
-
+${refBlock}
 คลังภาพที่ตายืนยันแล้วว่าเกี่ยวข้อง (metadata ต่อใบ):
 ${JSON.stringify(imagesMeta, null, 0).slice(0, 9000)}`;
   const out = await callBrain({ system, user, maxTokens: 1100, temperature: 0.1, cost: { step: 'MEGA S6 slot director' } });

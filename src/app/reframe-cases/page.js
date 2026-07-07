@@ -17,7 +17,18 @@ const parseMerged = (s) => {
 };
 const stripMarkers = (s) => String(s || '').replace(/⟦\d+⟧/g, '').replace(/⟦\/⟧/g, '');
 
-export default function ReframeCasesPage() {
+// ⛔ ปิดใช้งานชั่วคราว (2 ก.ค. 2026 — ผู้ใช้สั่งถอดจาก UI รอรื้อสร้างใหม่)
+//    เปิดคืน: ลบ DisabledPage แล้วคืน `export default` ให้ ReframeCasesPage ด้านล่าง
+export default function DisabledPage() {
+  return (
+    <div style={{ padding: 80, textAlign: 'center', color: '#94a3b8' }}>
+      <div style={{ fontSize: 48 }}>⛔</div>
+      <h2>ปิดปรับปรุงชั่วคราว</h2>
+      <p>คลังแตกประเด็นข่าว (Reframe Cases) ถูกปิดใช้งานชั่วคราว — กำลังรื้อสร้างใหม่</p>
+    </div>
+  );
+}
+function ReframeCasesPage() {
   const [cases, setCases] = useState([]);
   const [stats, setStats] = useState(null);
   const [filter, setFilter] = useState('all');

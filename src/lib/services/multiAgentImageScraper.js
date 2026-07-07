@@ -1962,6 +1962,11 @@ async function judgeWithFallback(validCandidates, imageParts, prompt, newsTitle,
 
       if (claudeRes.ok) {
         const claudeData = await claudeRes.json();
+        // ★ 7 ก.ค. อุดรูรั่วต้นทุน: judge fallback ยิง Anthropic ตรง → log เข้า api_usage_logs (/cost เห็น)
+        try {
+          const { logApiUsage } = await import('@/lib/ai/usageLogger');
+          await logApiUsage({ provider: 'anthropic', model: 'claude-sonnet-4-6', inputTokens: claudeData.usage?.input_tokens || 0, outputTokens: claudeData.usage?.output_tokens || 0, feature: 'cover-judge-fallback' });
+        } catch { /* log ล้มไม่กระทบท่อ */ }
         const parsed = _parseJudgeArray(claudeData.content?.[0]?.text || '');
         if (parsed && parsed.length > 0) {
           console.log(`[Judge] ✅ Claude คัดได้ ${parsed.length} ภาพ`);
@@ -2240,7 +2245,9 @@ async function extractFromUserSources(sourceLinks = [], context = '') {
   ]);
   // FB/IG วิดีโอ — ต้องโหลดคลิป+แตกเฟรม (yt-dlp+ffmpeg) ทำได้เฉพาะเครื่องทีม
   const FB_IG_VIDEO = /facebook\.com\/(reel|watch|share\/[rv]\/|video|\d|[\w.]+\/(videos|posts))|fb\.watch\/|instagram\.com\/(reel|reels|tv)\//i;
-  for (const raw of sourceLinks.slice(0, 6)) {
+  // ★ 7 ก.ค.: เพดาน 6→10 รองรับ "ลิงก์หลัก 5 + สำรอง" จากท่อ MEGA (ลิงก์พังบางใบยังเหลือเกิน 4)
+  //   พนักงานวางลิงก์เอง ≤6 พฤติกรรมเดิมเป๊ะ — มีผลเฉพาะผู้เรียกที่ส่งเกิน 6
+  for (const raw of sourceLinks.slice(0, 10)) {
     const link = String(raw || '').trim();
     if (!/^https?:\/\//i.test(link)) continue;
     // ★ 7 ก.ค. (MEGA S7): ลิงก์เป็น "ไฟล์รูปโดยตรง" (.jpg/.png/… เช่นไฟล์ถาวร Supabase จากคลังภาพ)
@@ -2320,7 +2327,16 @@ export async function runMultiAgentImageSearch(url, sourceType, entities, newsTi
       cands._meta = userImages.map(u => ({ url: u, queryLabel: 'user-source', queryText: 'แหล่งรูปที่พนักงานระบุ' }));
       const judged = await judgeImages(cands, newsTitle, identity);
       const srcSet = new Set(userImages);
-      const out = (judged || []).map(img => ({ ...img, userSource: srcSet.has(img.url) }));
+      // ★ 7 ก.ค. FIX double-filter (MEGA s6 คัดภาพส่งมาแล้ว แต่ Judge ตัดซ้ำเหลือ 2 < 4 → 422 ทั้งที่ต้นน้ำคัดผ่าน triage+slotDirector แล้ว):
+      //   โหมดเฉพาะแหล่ง = ต้นน้ำ (MEGA / พนักงาน) เจตนาเลือกภาพชุดนี้มาแล้ว → Judge ยังให้ role/score ได้
+      //   แต่ "ห้ามทิ้งใบที่ reject" — กู้กลับเป็น SUPPORT ให้ด่านปลายทาง (faceDetect/close-up/dedup/Director) ตัดสินเอง
+      //   scoped เฉพาะ sourceOnly — โหมดรีเสิร์ชปกติไม่แตะ (ของเดิมคงเดิม)
+      const _acceptedUrls = new Set((judged || []).map(im => im.url));
+      const _rescued = userImages
+        .filter(u => !_acceptedUrls.has(u))
+        .map(u => ({ url: u, score: 5, role: 'SUPPORT', source: 'user-source', queryLabel: 'user-source', rescuedSourceOnly: true }));
+      if (_rescued.length) console.log(`[MultiAgent] 🛟 sourceOnly: กู้ ${_rescued.length} ใบที่ Judge ตัดกลับเข้าพูล (ต้นน้ำคัดมาแล้ว — ให้ด่านปลายทางตัดสิน)`);
+      const out = [...(judged || []), ..._rescued].map(img => ({ ...img, userSource: srcSet.has(img.url) }));
       out.allCandidates = [...userImages];
       out._storyAnchorCandidates = judged._storyAnchorCandidates || [];
       out._bucketCounts = judged._bucketCounts || null;

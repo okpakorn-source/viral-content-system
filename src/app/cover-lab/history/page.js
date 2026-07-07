@@ -4,7 +4,17 @@ import { useState, useEffect, useCallback } from 'react';
 
 const PAGE_SIZE = 20;
 
-export default function CoverHistoryPage() {
+// ⛔ ปิดใช้งานชั่วคราว (2 ก.ค. 2026 — ปิดพร้อม /cover-lab)
+export default function DisabledPage() {
+  return (
+    <div style={{ padding: 80, textAlign: 'center', color: '#94a3b8' }}>
+      <div style={{ fontSize: 48 }}>⛔</div>
+      <h2>ปิดปรับปรุงชั่วคราว</h2>
+      <p>ประวัติปก (Cover Lab History) ถูกปิดใช้งานชั่วคราว — กำลังรื้อสร้างใหม่</p>
+    </div>
+  );
+}
+function CoverHistoryPage() {
   const [covers, setCovers] = useState([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);

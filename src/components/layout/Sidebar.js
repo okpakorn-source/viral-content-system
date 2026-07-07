@@ -46,6 +46,13 @@ export default function Sidebar() {
     { label: 'คอนเทนต์ทั้งหมด', icon: '📰', href: '/content' },
     { label: 'หน้าแรก (แดชบอร์ด)', icon: '📊', href: '/' },
 
+    // ── 🏭 MEGA สายพานครบวงจร (7 ก.ค.) ──
+    { type: 'divider', label: '🏭 MEGA สายพาน' },
+    { label: 'MEGA คุมสายพาน', icon: '🏭', href: '/mega', highlight: true },
+    { label: 'เทสปกเทียบ ref', icon: '🎯', href: '/cover-ref-test' },
+    { label: 'คลังปก reference + DNA', icon: '🧬', href: '/ref-covers' },
+    { label: 'คลังงานปก MEGA', icon: '🗂️', href: '/mega-covers' },
+
     // ── 🛠️ เครื่องมือข่าว ──
     { type: 'divider', label: '🛠️ เครื่องมือข่าว' },
     { label: 'กรองแก่นข่าว (สกัดเนื้อ)', icon: '🔬', href: '/news-filter' },

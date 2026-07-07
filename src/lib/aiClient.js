@@ -9,6 +9,7 @@
 
 import { withRetry } from './retry.js';
 import { recordLLM } from './costStore.js';
+import { logApiUsage } from '@/lib/ai/usageLogger'; // ★ 7 ก.ค. อุดรูรั่วต้นทุน → /cost เห็นยอดจริง
 
 const DEFAULTS = {
   anthropic: 'claude-opus-4-8',
@@ -55,6 +56,17 @@ export async function callBrain({ system, user, maxTokens = 4000, temperature = 
     { retries: 5, onAttempt: onRetry }
   );
   if (cost) await recordLLM({ provider: r.provider, model: r.model, usage: r.usage, step: cost.step, caseId: cost.caseId });
+  // ★ 7 ก.ค. อุดรูรั่วต้นทุน: recordLLM เขียนลง costStore ที่ /cost ไม่อ่าน (ตายด้าน) → log เข้า api_usage_logs
+  //   ด้วยตัวเดียวกับ openai/claudeClient (error-safe ในตัว) — คง recordLLM ไว้ตามเดิม
+  try {
+    const u = r.usage || {};
+    await logApiUsage({
+      provider: r.provider, model: r.model,
+      inputTokens: u.input_tokens ?? u.prompt_tokens ?? 0,
+      outputTokens: u.output_tokens ?? u.completion_tokens ?? 0,
+      feature: cost?.step || 'ai-client',
+    });
+  } catch { /* log ล้มไม่กระทบท่อ */ }
   return r;
 }
 

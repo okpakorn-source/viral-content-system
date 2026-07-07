@@ -85,3 +85,5 @@ viral-library-screen.json
 # หมายเหตุ: ล็อกเฉพาะ root (/_*) จึงไม่กระทบไฟล์ใน src/ data/ ที่อาจขึ้นต้น _
 # ไฟล์ยังอยู่บนดิสก์ครบ ระบบข่าว/ปกไม่ได้อ่านไฟล์พวกนี้ตอนรัน
 /_*
+.next-verify/
+data/mega-cover-runs.json

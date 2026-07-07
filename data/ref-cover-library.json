@@ -1,0 +1,3301 @@
+[
+  {
+    "id": "REF-mram1jm0-hs9a",
+    "uploadedAt": "2026-07-07T12:13:38.568Z",
+    "styleName": "730437041_1746790559837840_2497438960967723786_n",
+    "imagePath": "/ref-covers/ref-mram16qw-7ye2.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": true,
+            "borderColor": "#00FF00",
+            "borderWidthPct": 1
+          },
+          {
+            "role": "action",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 5,
+            "yPct": 70,
+            "wPct": 40,
+            "hPct": 40,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "edge-to-edge",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 70,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 5,
+          "yPct": 70,
+          "diameterPct": 40,
+          "position": "bottom-left",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "ชายคนหนึ่ง",
+          "emotion": "เศร้า",
+          "faceSizePct": 70,
+          "facing": "ตรง",
+          "desc": "ชายคนหนึ่งมีสีหน้าเศร้า"
+        },
+        {
+          "role": "context",
+          "subject": "กลุ่มคน",
+          "emotion": "สงบ",
+          "faceSizePct": 30,
+          "facing": "-",
+          "desc": "กลุ่มคนกำลังนั่งอยู่"
+        },
+        {
+          "role": "action",
+          "subject": "หญิงคนหนึ่ง",
+          "emotion": "ร้องไห้",
+          "faceSizePct": 50,
+          "facing": "ตรง",
+          "desc": "หญิงคนหนึ่งกำลังร้องไห้"
+        },
+        {
+          "role": "moment",
+          "subject": "คู่รัก",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 50,
+          "facing": "ตรง",
+          "desc": "คู่รักยิ้มแย้ม"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=กลุ่มคน, วงกลม=โมเมนต์คู่รัก",
+      "style": {
+        "tone": "อบอุ่น",
+        "palette": [
+          "#FFFFFF",
+          "#00FF00",
+          "#000000"
+        ],
+        "hasText": false,
+        "textNote": "-",
+        "effects": [
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "-"
+      },
+      "emotion": "เศร้า",
+      "compositionLogic": "ฮีโร่ซ้ายดึงดูดสายตา, วงกลมล่างซ้ายเพิ่มมิติ",
+      "storyFlow": "ชายเศร้า→กลุ่มคนสงบ→หญิงร้องไห้→โมเมนต์คู่รัก",
+      "matchNewsType": [
+        "human-interest",
+        "ครอบครัว-ดราม่า"
+      ],
+      "matchEmotion": [
+        "เศร้า"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram1tei-j87a",
+    "uploadedAt": "2026-07-07T12:13:51.258Z",
+    "styleName": "730653577_1009002392057584_5530203811277465016_n",
+    "imagePath": "/ref-covers/ref-mram1jmm-zmd9.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": true,
+            "borderColor": "#FFFF00",
+            "borderWidthPct": 2
+          },
+          {
+            "role": "action",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 25,
+            "yPct": 75,
+            "wPct": 30,
+            "hPct": 30,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "edge-to-edge",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 70,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 25,
+          "yPct": 75,
+          "diameterPct": 30,
+          "position": "bottom-left",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "หญิงถือไมค์",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 70,
+          "facing": "ตรง",
+          "desc": "หญิงสาวยิ้มถือไมค์"
+        },
+        {
+          "role": "context",
+          "subject": "คนเล่นน้ำ",
+          "emotion": "สนุก",
+          "faceSizePct": 20,
+          "facing": "-",
+          "desc": "คนเล่นน้ำในสวน"
+        },
+        {
+          "role": "action",
+          "subject": "ชายหญิง",
+          "emotion": "สนุก",
+          "faceSizePct": 30,
+          "facing": "ข้าง",
+          "desc": "หญิงทาครีมให้ชาย"
+        },
+        {
+          "role": "moment",
+          "subject": "กอด",
+          "emotion": "ดีใจ",
+          "faceSizePct": 40,
+          "facing": "-",
+          "desc": "ชายกอดกัน"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=บริบท, ขวาล่าง=กิจกรรม, วงกลม=โมเมนต์ดีใจ",
+      "style": {
+        "tone": "อุ่น",
+        "palette": [
+          "#E8C9A0",
+          "#FFFF00",
+          "#FFFFFF"
+        ],
+        "hasText": false,
+        "textNote": "-",
+        "effects": [
+          "no-border",
+          "drop-shadow",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "-"
+      },
+      "emotion": "ดีใจ",
+      "compositionLogic": "วางฮีโร่เด่นซ้ายเพื่อดึงดูดความสนใจ, ขวาเป็นกิจกรรมและบริบท, วงกลมล่างซ้ายเป็นโมเมนต์สำคัญ",
+      "storyFlow": "หญิงสาวยิ้มถือไมค์→สนุกกับกิจกรรม→โมเมนต์ดีใจ→บริบทการเล่นน้ำ",
+      "matchNewsType": [
+        "human-interest",
+        "บันเทิง"
+      ],
+      "matchEmotion": [
+        "ดีใจ",
+        "สนุก"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram218o-8bzo",
+    "uploadedAt": "2026-07-07T12:14:01.416Z",
+    "styleName": "731292784_1373057311383065_8154726915616637472_n",
+    "imagePath": "/ref-covers/ref-mram1tf9-c0g5.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "victim",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 25,
+            "yPct": 75,
+            "wPct": 30,
+            "hPct": 30,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "edge-to-edge",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 70,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 25,
+          "yPct": 75,
+          "diameterPct": 30,
+          "position": "bottom-left",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "ชายหนุ่ม",
+          "emotion": "เศร้า",
+          "faceSizePct": 70,
+          "facing": "ตรง",
+          "desc": "ชายหนุ่มหน้าตรง"
+        },
+        {
+          "role": "context",
+          "subject": "ตำรวจ",
+          "emotion": "จริงจัง",
+          "faceSizePct": 30,
+          "facing": "-",
+          "desc": "ตำรวจเซ็นเอกสาร"
+        },
+        {
+          "role": "victim",
+          "subject": "หญิงชรา",
+          "emotion": "กังวล",
+          "faceSizePct": 60,
+          "facing": "ตรง",
+          "desc": "หญิงชราหน้าตรง"
+        },
+        {
+          "role": "moment",
+          "subject": "กลุ่มคน",
+          "emotion": "เป็นทางการ",
+          "faceSizePct": 30,
+          "facing": "-",
+          "desc": "กลุ่มคนถือเอกสาร"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=ตำรวจ, ขวาล่าง=หญิงชรา, วงกลม=โมเมนต์ตัวเอก+คนอื่น",
+      "style": {
+        "tone": "โทนสีอุ่น",
+        "palette": [
+          "#A67C52",
+          "#D9BBA9",
+          "#FFFFFF"
+        ],
+        "hasText": false,
+        "textNote": "-",
+        "effects": [
+          "no-border",
+          "drop-shadow",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "-"
+      },
+      "emotion": "เศร้า",
+      "compositionLogic": "วางฮีโร่ซ้ายเพื่อเน้นตัวเอก, ขวาแบ่งสองช่องเพื่อแสดงบริบทและผู้เกี่ยวข้อง",
+      "storyFlow": "ชายหนุ่มเศร้า→ตำรวจเซ็นเอกสาร→หญิงชรากังวล→โมเมนต์กลุ่มคนถือเอกสาร",
+      "matchNewsType": [
+        "human-interest",
+        "ครอบครัว-ดราม่า"
+      ],
+      "matchEmotion": [
+        "เศร้า"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram2af7-eji6",
+    "uploadedAt": "2026-07-07T12:14:13.315Z",
+    "styleName": "731935060_1378489364245637_4372878469190196521_n",
+    "imagePath": "/ref-covers/ref-mram219d-a2dd.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "circle-center",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมกลางล่าง",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "reaction",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "action",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 25,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "edge-to-edge",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 70,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 25,
+          "yPct": 50,
+          "diameterPct": 50,
+          "position": "center",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "ชายยิ้ม",
+          "emotion": "ยิ้มแย้ม",
+          "faceSizePct": 70,
+          "facing": "ตรง",
+          "desc": "ชายยิ้มแย้ม"
+        },
+        {
+          "role": "reaction",
+          "subject": "หญิงมือปิดปาก",
+          "emotion": "ตกใจ",
+          "faceSizePct": 50,
+          "facing": "ตรง",
+          "desc": "หญิงมือปิดปาก"
+        },
+        {
+          "role": "action",
+          "subject": "ชายยื่นถุง",
+          "emotion": "ให้ของ",
+          "faceSizePct": 30,
+          "facing": "-",
+          "desc": "ชายยื่นถุงให้หญิง"
+        },
+        {
+          "role": "moment",
+          "subject": "ชายหญิง",
+          "emotion": "ให้ของ",
+          "faceSizePct": 40,
+          "facing": "-",
+          "desc": "ชายยื่นถุงให้หญิง"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=คู่คนละคน, วงกลม=โมเมนต์ตัวเอก+คนอื่น",
+      "style": {
+        "tone": "อุ่น",
+        "palette": [
+          "#E8C9A0",
+          "#FFFFFF",
+          "#000000"
+        ],
+        "hasText": true,
+        "textNote": "มีตัวหนังสือกลางบน",
+        "effects": [
+          "no-border",
+          "faces-fill",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "เนียน"
+      },
+      "emotion": "ดีใจ",
+      "compositionLogic": "วางฮีโร่ซ้ายเพื่อเน้นตัวเอก, วงกลมกลางล่างเพื่อเน้นโมเมนต์สำคัญ",
+      "storyFlow": "ชายยิ้ม→หญิงตกใจ→ชายให้ของ→โมเมนต์สำคัญ",
+      "matchNewsType": [
+        "human-interest",
+        "บันเทิง"
+      ],
+      "matchEmotion": [
+        "ดีใจ",
+        "เซอร์ไพรส์"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram2ko0-dfai",
+    "uploadedAt": "2026-07-07T12:14:26.592Z",
+    "styleName": "732068745_27206974642257732_3470367796095234634_n",
+    "imagePath": "/ref-covers/ref-mram2ag3-gcou.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-top-strip",
+      "layoutType": "ฮีโร่บนเต็มกว้าง + ล่าง 2 ช่อง + วงกลมกลาง",
+      "panelCount": 5,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 100,
+            "hPct": 40,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "action",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 40,
+            "wPct": 50,
+            "hPct": 60,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 40,
+            "wPct": 50,
+            "hPct": 60,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 25,
+            "yPct": 30,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "feather",
+        "featherPx": 10
+      },
+      "layout": {
+        "hero": {
+          "position": "top",
+          "widthPct": 100,
+          "facePct": 60,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "horizontal",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 25,
+          "yPct": 30,
+          "diameterPct": 50,
+          "position": "center",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "น้องลูก้าและคุณโอ๋",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 60,
+          "facing": "ตรง",
+          "desc": "ภาพคู่ยิ้มแย้ม"
+        },
+        {
+          "role": "action",
+          "subject": "น้องลูก้า",
+          "emotion": "สงบ",
+          "faceSizePct": 50,
+          "facing": "ตรง",
+          "desc": "ภาพน้องลูก้า"
+        },
+        {
+          "role": "context",
+          "subject": "คุณโอ๋และน้องลูก้า",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 40,
+          "facing": "ตรง",
+          "desc": "ภาพคู่"
+        },
+        {
+          "role": "moment",
+          "subject": "น้องลูก้าและคุณโอ๋",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 70,
+          "facing": "ตรง",
+          "desc": "ภาพคู่ในวงกลม"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ล่างซ้าย=น้องลูก้า, ล่างขวา=คู่, วงกลม=โมเมนต์ตัวเอก",
+      "style": {
+        "tone": "อุ่น",
+        "palette": [
+          "#FFFFFF",
+          "#FFCC00",
+          "#FF6666"
+        ],
+        "hasText": true,
+        "textNote": "มีตัวหนังสือที่มุมบนซ้ายและขวา",
+        "effects": [
+          "feathered-seams",
+          "drop-shadow",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "เนียน"
+      },
+      "emotion": "ยิ้มแย้ม",
+      "compositionLogic": "ใช้ภาพฮีโร่บนเพื่อดึงดูดความสนใจ และวงกลมกลางเพื่อเน้นโมเมนต์สำคัญ",
+      "storyFlow": "น้องลูก้าและคุณโอ๋ยิ้มแย้ม → ความสัมพันธ์ที่ดี → โมเมนต์สำคัญ",
+      "matchNewsType": [
+        "human-interest",
+        "ครอบครัว-ดราม่า"
+      ],
+      "matchEmotion": [
+        "ยิ้มแย้ม",
+        "อบอุ่น"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram2x6q-8e3e",
+    "uploadedAt": "2026-07-07T12:14:42.818Z",
+    "styleName": "732269448_1559273832476374_7344741407078893654_n (1)",
+    "imagePath": "/ref-covers/ref-mram2kor-ci1a.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 60,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 60,
+            "yPct": 0,
+            "wPct": 40,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": true,
+            "borderColor": "#00FF00",
+            "borderWidthPct": 2
+          },
+          {
+            "role": "action",
+            "shape": "rect",
+            "xPct": 60,
+            "yPct": 50,
+            "wPct": 40,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 10,
+            "yPct": 70,
+            "wPct": 30,
+            "hPct": 30,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "edge-to-edge",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 60,
+          "facePct": 50,
+          "facePosition": "upper-center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 10,
+          "yPct": 70,
+          "diameterPct": 30,
+          "position": "bottom-left",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "หญิงสาว",
+          "emotion": "เศร้า",
+          "faceSizePct": 50,
+          "facing": "ข้าง",
+          "desc": "หญิงสาวน้ำตาคลอ"
+        },
+        {
+          "role": "context",
+          "subject": "บ้าน",
+          "emotion": "-",
+          "faceSizePct": 0,
+          "facing": "-",
+          "desc": "ภาพบ้าน"
+        },
+        {
+          "role": "action",
+          "subject": "กลุ่มคน",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 20,
+          "facing": "ตรง",
+          "desc": "กลุ่มคนยืนหน้ารถ"
+        },
+        {
+          "role": "moment",
+          "subject": "หญิงสาว",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 80,
+          "facing": "ตรง",
+          "desc": "หญิงสาวในชุดครุย"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=บริบท, ขวาล่าง=กลุ่มคน, วงกลม=โมเมนต์ตัวเอก",
+      "style": {
+        "tone": "อบอุ่น",
+        "palette": [
+          "#FFFFFF",
+          "#00FF00",
+          "#FF0000"
+        ],
+        "hasText": false,
+        "textNote": "-",
+        "effects": [
+          "drop-shadow",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "-"
+      },
+      "emotion": "เศร้า",
+      "compositionLogic": "วางฮีโร่ซ้ายเพื่อเน้นอารมณ์เศร้า ขวาเป็นบริบทและการกระทำ วงกลมล่างซ้ายเป็นโมเมนต์สำคัญ",
+      "storyFlow": "หญิงสาวเศร้า→บ้าน→กลุ่มคนยิ้ม→โมเมนต์สำคัญ",
+      "matchNewsType": [
+        "human-interest",
+        "ครอบครัว-ดราม่า"
+      ],
+      "matchEmotion": [
+        "เศร้า"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram36iw-qa2o",
+    "uploadedAt": "2026-07-07T12:14:54.920Z",
+    "styleName": "732269448_1559273832476374_7344741407078893654_n",
+    "imagePath": "/ref-covers/ref-mram2x7e-bwjq.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": true,
+            "borderColor": "#00FF00",
+            "borderWidthPct": 1
+          },
+          {
+            "role": "action",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 25,
+            "yPct": 75,
+            "wPct": 30,
+            "hPct": 30,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "edge-to-edge",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 70,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 25,
+          "yPct": 75,
+          "diameterPct": 30,
+          "position": "bottom-left",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "หญิงสาว",
+          "emotion": "เศร้า",
+          "faceSizePct": 70,
+          "facing": "ตรง",
+          "desc": "หญิงสาวน้ำตาคลอ"
+        },
+        {
+          "role": "context",
+          "subject": "บ้าน",
+          "emotion": "-",
+          "faceSizePct": 0,
+          "facing": "-",
+          "desc": "ภาพบ้าน"
+        },
+        {
+          "role": "action",
+          "subject": "ชาย",
+          "emotion": "สงสัย",
+          "faceSizePct": 50,
+          "facing": "ตรง",
+          "desc": "ชายพูดคุย"
+        },
+        {
+          "role": "moment",
+          "subject": "หญิงสาว",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 80,
+          "facing": "ตรง",
+          "desc": "หญิงสาวในชุดครุย"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=บริบท, ขวาล่าง=คู่คนละคน, วงกลม=โมเมนต์ตัวเอก",
+      "style": {
+        "tone": "อบอุ่น",
+        "palette": [
+          "#FFFFFF",
+          "#00FF00",
+          "#FF0000"
+        ],
+        "hasText": false,
+        "textNote": "-",
+        "effects": [
+          "drop-shadow",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "เนียน"
+      },
+      "emotion": "เศร้า",
+      "compositionLogic": "วางฮีโร่เด่นทางซ้ายเพื่อเน้นอารมณ์, วงกลมล่างซ้ายเพิ่มมิติของเรื่อง",
+      "storyFlow": "หญิงสาวเศร้า→บ้าน→ชายพูดคุย→โมเมนต์ยิ้มในชุดครุย",
+      "matchNewsType": [
+        "human-interest",
+        "ครอบครัว-ดราม่า"
+      ],
+      "matchEmotion": [
+        "เศร้า"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram3gtn-3426",
+    "uploadedAt": "2026-07-07T12:15:08.267Z",
+    "styleName": "732269634_1050832944034457_6193254309698150895_n",
+    "imagePath": "/ref-covers/ref-mram36jj-lz1a.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "evidence",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 1
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 0,
+            "yPct": 70,
+            "wPct": 40,
+            "hPct": 40,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "gap",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 70,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 10,
+          "yPct": 70,
+          "diameterPct": 40,
+          "position": "bottom-left",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "ชายยิ้ม",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 70,
+          "facing": "ตรง",
+          "desc": "ชายยิ้มแสดงความสุข"
+        },
+        {
+          "role": "context",
+          "subject": "ชายในฝูงชน",
+          "emotion": "สงบ",
+          "faceSizePct": 20,
+          "facing": "ตรง",
+          "desc": "ชายในฝูงชน"
+        },
+        {
+          "role": "evidence",
+          "subject": "แผนที่",
+          "emotion": "-",
+          "faceSizePct": 0,
+          "facing": "-",
+          "desc": "แผนที่แสดงข้อมูล"
+        },
+        {
+          "role": "moment",
+          "subject": "ชายกอด",
+          "emotion": "อบอุ่น",
+          "faceSizePct": 50,
+          "facing": "ข้าง",
+          "desc": "ชายกอดแสดงความอบอุ่น"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=บริบท, วงกลม=โมเมนต์ตัวเอก+คนอื่น",
+      "style": {
+        "tone": "อุ่น",
+        "palette": [
+          "#E8C9A0",
+          "#FFFFFF"
+        ],
+        "hasText": false,
+        "textNote": "-",
+        "effects": [
+          "no-border",
+          "faces-fill",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "-"
+      },
+      "emotion": "อบอุ่น",
+      "compositionLogic": "วางฮีโร่เด่นซ้ายเพื่อดึงดูดความสนใจ, วงกลมล่างซ้ายเพิ่มความน่าสนใจ",
+      "storyFlow": "ชายยิ้ม→รู้สึกอบอุ่น→อยู่ในบริบทฝูงชน→แผนที่แสดงข้อมูล→โมเมนต์กอด",
+      "matchNewsType": [
+        "human-interest",
+        "กตัญญู"
+      ],
+      "matchEmotion": [
+        "อบอุ่น",
+        "ยิ้ม"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram3set-4oab",
+    "uploadedAt": "2026-07-07T12:15:23.285Z",
+    "styleName": "732269650_1385734283619237_465743537686798968_n",
+    "imagePath": "/ref-covers/ref-mram3guh-pc15.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 5,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": true,
+            "borderColor": "#00FF00",
+            "borderWidthPct": 1
+          },
+          {
+            "role": "pair",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 0,
+            "yPct": 70,
+            "wPct": 30,
+            "hPct": 30,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          },
+          {
+            "role": "reaction",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 80,
+            "wPct": 30,
+            "hPct": 20,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          }
+        ],
+        "seamStyle": "edge-to-edge",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 60,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 0,
+          "yPct": 70,
+          "diameterPct": 30,
+          "position": "bottom-left",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "ชายคนหนึ่ง",
+          "emotion": "สงบ",
+          "faceSizePct": 60,
+          "facing": "ตรง",
+          "desc": "ชายคนหนึ่งยิ้มเล็กน้อย"
+        },
+        {
+          "role": "context",
+          "subject": "บ้าน",
+          "emotion": "-",
+          "faceSizePct": 0,
+          "facing": "-",
+          "desc": "ภาพบ้านหลังใหญ่"
+        },
+        {
+          "role": "pair",
+          "subject": "กลุ่มคน",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 30,
+          "facing": "-",
+          "desc": "กลุ่มคนยิ้ม"
+        },
+        {
+          "role": "moment",
+          "subject": "คู่รัก",
+          "emotion": "สุข",
+          "faceSizePct": 40,
+          "facing": "-",
+          "desc": "คู่รักยืนด้วยกัน"
+        },
+        {
+          "role": "reaction",
+          "subject": "หญิงคนหนึ่ง",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 50,
+          "facing": "-",
+          "desc": "หญิงคนหนึ่งยิ้ม"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=กลุ่มคน, วงกลม=โมเมนต์คู่รัก",
+      "style": {
+        "tone": "อุ่น",
+        "palette": [
+          "#E8C9A0",
+          "#FFFFFF",
+          "#00FF00"
+        ],
+        "hasText": false,
+        "textNote": "-",
+        "effects": [
+          "no-border",
+          "faces-fill",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "-"
+      },
+      "emotion": "สุข",
+      "compositionLogic": "ฮีโร่เด่นซ้ายดึงดูดความสนใจ, ขวาเป็นบริบทและโมเมนต์เสริม",
+      "storyFlow": "ชายคนหนึ่ง→ยิ้ม→บ้าน→กลุ่มคน→โมเมนต์คู่รัก",
+      "matchNewsType": [
+        "human-interest",
+        "ครอบครัว-ดราม่า"
+      ],
+      "matchEmotion": [
+        "สุข",
+        "อบอุ่น"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram41rj-hdz4",
+    "uploadedAt": "2026-07-07T12:15:35.407Z",
+    "styleName": "732831858_856038477238487_1057825895495227075_n",
+    "imagePath": "/ref-covers/ref-mram3sfi-jsbg.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "pair",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "reaction",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 5,
+            "yPct": 70,
+            "wPct": 30,
+            "hPct": 30,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "edge-to-edge",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 60,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 5,
+          "yPct": 70,
+          "diameterPct": 30,
+          "position": "bottom-left",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "หญิงสาว",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 60,
+          "facing": "ข้าง",
+          "desc": "หญิงสาวยิ้ม"
+        },
+        {
+          "role": "pair",
+          "subject": "หญิงสาวและชายหนุ่ม",
+          "emotion": "สนทนา",
+          "faceSizePct": 30,
+          "facing": "-",
+          "desc": "คู่สนทนา"
+        },
+        {
+          "role": "reaction",
+          "subject": "ชายหนุ่ม",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 40,
+          "facing": "ตรง",
+          "desc": "ชายหนุ่มยิ้ม"
+        },
+        {
+          "role": "moment",
+          "subject": "หญิงสาวและชายหนุ่ม",
+          "emotion": "มอบของขวัญ",
+          "faceSizePct": 20,
+          "facing": "-",
+          "desc": "มอบของขวัญ"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=คู่คนละคน, วงกลม=โมเมนต์ตัวเอก+คนอื่น",
+      "style": {
+        "tone": "อุ่น",
+        "palette": [
+          "#E8C9A0",
+          "#FFFFFF",
+          "#000000"
+        ],
+        "hasText": false,
+        "textNote": "-",
+        "effects": [
+          "no-border",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "เนียน"
+      },
+      "emotion": "ดีใจ",
+      "compositionLogic": "วางฮีโร่ซ้ายเพื่อเน้นตัวเอกและใช้วงกลมเพื่อเน้นโมเมนต์สำคัญ",
+      "storyFlow": "หญิงสาวยิ้ม→สนทนากับชายหนุ่ม→ชายหนุ่มยิ้ม→มอบของขวัญ",
+      "matchNewsType": [
+        "human-interest",
+        "บันเทิง"
+      ],
+      "matchEmotion": [
+        "ดีใจ"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram4at9-vljl",
+    "uploadedAt": "2026-07-07T12:15:47.133Z",
+    "styleName": "733062882_1297329705716408_7132923545132450174_n",
+    "imagePath": "/ref-covers/ref-mram41sq-3it7.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "reaction",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "action",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 5,
+            "yPct": 70,
+            "wPct": 30,
+            "hPct": 30,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "edge-to-edge",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 60,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 5,
+          "yPct": 70,
+          "diameterPct": 30,
+          "position": "bottom-left",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "น้องกระแต",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 60,
+          "facing": "ตรง",
+          "desc": "พยาบาลยิ้ม"
+        },
+        {
+          "role": "reaction",
+          "subject": "น้องจ๋า",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 50,
+          "facing": "ตรง",
+          "desc": "พยาบาลยิ้ม"
+        },
+        {
+          "role": "action",
+          "subject": "กลุ่มคน",
+          "emotion": "ตั้งใจ",
+          "faceSizePct": 20,
+          "facing": "-",
+          "desc": "ช่วยเหลือกัน"
+        },
+        {
+          "role": "moment",
+          "subject": "หญิงผมแดง",
+          "emotion": "ตั้งใจ",
+          "faceSizePct": 50,
+          "facing": "ข้าง",
+          "desc": "ทำงาน"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=คู่คนละคน, วงกลม=โมเมนต์ตัวเอก+คนอื่น",
+      "style": {
+        "tone": "อุ่น",
+        "palette": [
+          "#FFFFFF",
+          "#FFCCCC",
+          "#FF9999"
+        ],
+        "hasText": true,
+        "textNote": "มีตัวหนังสือใต้ภาพฮีโร่และขวาบน",
+        "effects": [
+          "no-border",
+          "faces-fill",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "เนียน"
+      },
+      "emotion": "กตัญญู",
+      "compositionLogic": "วางฮีโร่เด่นซ้ายเพื่อดึงดูดความสนใจ และมีวงกลมล่างซ้ายเพื่อเน้นโมเมนต์สำคัญ",
+      "storyFlow": "พยาบาลยิ้ม→รู้สึกดี→ช่วยเหลือกัน→บริบทการทำงาน→โมเมนต์การทำงาน",
+      "matchNewsType": [
+        "human-interest",
+        "กตัญญู"
+      ],
+      "matchEmotion": [
+        "กตัญญู",
+        "อบอุ่น"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram4iqk-4kkz",
+    "uploadedAt": "2026-07-07T12:15:57.404Z",
+    "styleName": "733415118_1016133148072485_4574962453240648662_n",
+    "imagePath": "/ref-covers/ref-mram4au0-kqkj.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 5,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": true,
+            "borderColor": "#00FF00",
+            "borderWidthPct": 1
+          },
+          {
+            "role": "reaction",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 5,
+            "yPct": 70,
+            "wPct": 30,
+            "hPct": 30,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "gap",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 60,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 5,
+          "yPct": 70,
+          "diameterPct": 30,
+          "position": "bottom-left",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "หญิงสาว",
+          "emotion": "สงบ",
+          "faceSizePct": 60,
+          "facing": "ตรง",
+          "desc": "หญิงสาวมองตรง"
+        },
+        {
+          "role": "context",
+          "subject": "กลุ่มคน",
+          "emotion": "สนุกสนาน",
+          "faceSizePct": 30,
+          "facing": "-",
+          "desc": "กลุ่มคนยิ้มแย้ม"
+        },
+        {
+          "role": "reaction",
+          "subject": "ชายหนุ่ม",
+          "emotion": "สงบ",
+          "faceSizePct": 40,
+          "facing": "ข้าง",
+          "desc": "ชายหนุ่มมองข้าง"
+        },
+        {
+          "role": "moment",
+          "subject": "แม่และลูก",
+          "emotion": "อบอุ่น",
+          "faceSizePct": 70,
+          "facing": "ตรง",
+          "desc": "แม่และลูกยิ้ม"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=กลุ่มคน, วงกลม=โมเมนต์แม่และลูก",
+      "style": {
+        "tone": "อบอุ่น",
+        "palette": [
+          "#E8C9A0",
+          "#FFFFFF",
+          "#00FF00"
+        ],
+        "hasText": false,
+        "textNote": "-",
+        "effects": [
+          "faces-fill",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "-"
+      },
+      "emotion": "อบอุ่น",
+      "compositionLogic": "วางฮีโร่ซ้ายเพื่อเน้นตัวเอก, วงกลมล่างซ้ายเพิ่มความน่าสนใจ",
+      "storyFlow": "หญิงสาว→สงบ→กลุ่มคน→สนุกสนาน→โมเมนต์แม่และลูก",
+      "matchNewsType": [
+        "human-interest",
+        "ครอบครัว-ดราม่า"
+      ],
+      "matchEmotion": [
+        "อบอุ่น"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพกลุ่มคน",
+        "โมเมนต์แม่และลูก"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram4r98-qz3f",
+    "uploadedAt": "2026-07-07T12:16:08.444Z",
+    "styleName": "733630294_2213808886137772_5025319125394291234_n",
+    "imagePath": "/ref-covers/ref-mram4irg-kvko.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 1
+          },
+          {
+            "role": "moment",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "evidence",
+            "shape": "circle",
+            "xPct": 0,
+            "yPct": 70,
+            "wPct": 30,
+            "hPct": 30,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "edge-to-edge",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 70,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 0,
+          "yPct": 70,
+          "diameterPct": 30,
+          "position": "bottom-left",
+          "role": "evidence"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "เด็กชาย",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 70,
+          "facing": "ตรง",
+          "desc": "เด็กชายยิ้ม"
+        },
+        {
+          "role": "context",
+          "subject": "เด็กชายและพระ",
+          "emotion": "สงบ",
+          "faceSizePct": 40,
+          "facing": "ข้าง",
+          "desc": "เด็กชายและพระนั่งด้วยกัน"
+        },
+        {
+          "role": "moment",
+          "subject": "เด็กชายไหว้",
+          "emotion": "เคารพ",
+          "faceSizePct": 50,
+          "facing": "ข้าง",
+          "desc": "เด็กชายไหว้"
+        },
+        {
+          "role": "evidence",
+          "subject": "พระ",
+          "emotion": "สงบ",
+          "faceSizePct": 80,
+          "facing": "ตรง",
+          "desc": "ภาพพระ"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=คู่คนละคน, วงกลม=โมเมนต์ตัวเอก+คนอื่น",
+      "style": {
+        "tone": "อบอุ่น",
+        "palette": [
+          "#E8C9A0",
+          "#FFFFFF"
+        ],
+        "hasText": true,
+        "textNote": "มีตัวหนังสืออยู่ตรงกลางด้านล่าง",
+        "effects": [
+          "feathered-seams",
+          "drop-shadow",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "เนียน"
+      },
+      "emotion": "อบอุ่น",
+      "compositionLogic": "วางฮีโร่ด้านซ้ายเพื่อเน้นตัวเอก, ช่องขวาแสดงบริบทและโมเมนต์",
+      "storyFlow": "เด็กชายยิ้ม→สงบ→ไหว้→บริบทกับพระ→โมเมนต์",
+      "matchNewsType": [
+        "human-interest",
+        "ครอบครัว-ดราม่า"
+      ],
+      "matchEmotion": [
+        "อบอุ่น",
+        "สงบ"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram50t4-lpew",
+    "uploadedAt": "2026-07-07T12:16:20.824Z",
+    "styleName": "733756927_2304264613730886_3092515863812632770_n",
+    "imagePath": "/ref-covers/ref-mram4r9z-90k0.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "action",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 5,
+            "yPct": 70,
+            "wPct": 30,
+            "hPct": 30,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "feather",
+        "featherPx": 10
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 70,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 5,
+          "yPct": 70,
+          "diameterPct": 30,
+          "position": "bottom-left",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "ชายยิ้ม",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 70,
+          "facing": "ตรง",
+          "desc": "ชายยิ้มใส่กล้อง"
+        },
+        {
+          "role": "context",
+          "subject": "ชายในชุดแพทย์",
+          "emotion": "จริงจัง",
+          "faceSizePct": 50,
+          "facing": "ตรง",
+          "desc": "ชายในชุดแพทย์"
+        },
+        {
+          "role": "action",
+          "subject": "ชายช่วยเหลือ",
+          "emotion": "มุ่งมั่น",
+          "faceSizePct": 30,
+          "facing": "ข้าง",
+          "desc": "ชายกำลังช่วยเหลือคน"
+        },
+        {
+          "role": "moment",
+          "subject": "ชายอีกคน",
+          "emotion": "สงบ",
+          "faceSizePct": 60,
+          "facing": "ตรง",
+          "desc": "ชายอีกคนในวงกลม"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=บริบท, ขวาล่าง=การกระทำ, วงกลม=โมเมนต์ตัวเอก+คนอื่น",
+      "style": {
+        "tone": "อบอุ่น",
+        "palette": [
+          "#FFFFFF",
+          "#000000",
+          "#E8C9A0"
+        ],
+        "hasText": false,
+        "textNote": "-",
+        "effects": [
+          "feathered-seams",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "-"
+      },
+      "emotion": "อบอุ่น",
+      "compositionLogic": "วางฮีโร่ซ้ายเพื่อดึงดูดสายตา, ขวาแสดงบริบทและการกระทำ, วงกลมเน้นโมเมนต์สำคัญ",
+      "storyFlow": "ชายยิ้ม→จริงจัง→ช่วยเหลือ→บริบทแพทย์→โมเมนต์สำคัญ",
+      "matchNewsType": [
+        "human-interest",
+        "กตัญญู"
+      ],
+      "matchEmotion": [
+        "อบอุ่น",
+        "มุ่งมั่น"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram595k-dedt",
+    "uploadedAt": "2026-07-07T12:16:31.640Z",
+    "styleName": "733758476_1017456204020282_6109370354156671553_n",
+    "imagePath": "/ref-covers/ref-mram50ub-g48a.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "circle-center",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมกลาง",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "pair",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "action",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 25,
+            "yPct": 25,
+            "wPct": 30,
+            "hPct": 30,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "feather",
+        "featherPx": 10
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 60,
+          "facePosition": "upper-center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 25,
+          "yPct": 25,
+          "diameterPct": 30,
+          "position": "center",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "หญิงสาว",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 60,
+          "facing": "ตรง",
+          "desc": "หญิงสาวยิ้มและพนมมือ"
+        },
+        {
+          "role": "pair",
+          "subject": "ชายหญิง",
+          "emotion": "เป็นกันเอง",
+          "faceSizePct": 40,
+          "facing": "-",
+          "desc": "ชายหญิงยืนคู่กัน"
+        },
+        {
+          "role": "action",
+          "subject": "ชายหนุ่ม",
+          "emotion": "สงบ",
+          "faceSizePct": 40,
+          "facing": "ตรง",
+          "desc": "ชายหนุ่มพนมมือ"
+        },
+        {
+          "role": "moment",
+          "subject": "ชายคนหนึ่ง",
+          "emotion": "พูดคุย",
+          "faceSizePct": 50,
+          "facing": "ข้าง",
+          "desc": "ชายคนหนึ่งกำลังพูด"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=คู่คนละคน, วงกลม=โมเมนต์ตัวเอก+คนอื่น",
+      "style": {
+        "tone": "อุ่น",
+        "palette": [
+          "#E8C9A0",
+          "#FFFFFF",
+          "#000000"
+        ],
+        "hasText": false,
+        "textNote": "-",
+        "effects": [
+          "feathered-seams",
+          "faces-fill",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "เนียน"
+      },
+      "emotion": "ดีใจ",
+      "compositionLogic": "วางฮีโร่เด่นซ้ายเพื่อดึงความสนใจ, วงกลมกลางเน้นโมเมนต์สำคัญ",
+      "storyFlow": "หญิงสาวยิ้มและพนมมือ → ชายหญิงยืนคู่กัน → ชายหนุ่มพนมมือ → โมเมนต์พูดคุย",
+      "matchNewsType": [
+        "human-interest",
+        "บันเทิง"
+      ],
+      "matchEmotion": [
+        "ดีใจ"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram5jyq-io7d",
+    "uploadedAt": "2026-07-07T12:16:45.650Z",
+    "styleName": "734505696_1341501930753775_554574127098559420_n",
+    "imagePath": "/ref-covers/ref-mram596r-xu1c.jpg",
+    "dna": {
+      "aspectRatio": "4:3",
+      "canvasWpx": 960,
+      "canvasHpx": 720,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "action",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 0,
+            "yPct": 60,
+            "wPct": 30,
+            "hPct": 30,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "feather",
+        "featherPx": 5
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 70,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 0,
+          "yPct": 60,
+          "diameterPct": 30,
+          "position": "bottom-left",
+          "role": "moment"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "ชายในชุดขาว",
+          "emotion": "สงบ",
+          "faceSizePct": 70,
+          "facing": "ตรง",
+          "desc": "ชายในชุดขาวยืนอยู่หน้าดอกไม้"
+        },
+        {
+          "role": "context",
+          "subject": "ชายในรถ",
+          "emotion": "จริงจัง",
+          "faceSizePct": 30,
+          "facing": "ข้าง",
+          "desc": "ชายสองคนในรถ"
+        },
+        {
+          "role": "action",
+          "subject": "ชายยิ้ม",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 50,
+          "facing": "ตรง",
+          "desc": "ชายยิ้มในชุดดำ"
+        },
+        {
+          "role": "moment",
+          "subject": "ชายบนเก้าอี้",
+          "emotion": "ครุ่นคิด",
+          "faceSizePct": 20,
+          "facing": "-",
+          "desc": "ชายคนหนึ่งนั่งบนเก้าอี้"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=บริบท, วงกลม=โมเมนต์ตัวเอก",
+      "style": {
+        "tone": "อุ่น",
+        "palette": [
+          "#FFFFFF",
+          "#000000",
+          "#00FF00"
+        ],
+        "hasText": true,
+        "textNote": "มีตัวหนังสืออยู่ตรงกลางขวา",
+        "effects": [
+          "feathered-seams",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "เนียน"
+      },
+      "emotion": "กตัญญู",
+      "compositionLogic": "วางฮีโร่ซ้ายเพื่อเน้นตัวเอก, ขวาเป็นบริบทและการกระทำ, วงกลมล่างซ้ายเป็นโมเมนต์สำคัญ",
+      "storyFlow": "ฮีโร่สงบ→บริบทจริงจัง→ยิ้ม→โมเมนต์ครุ่นคิด",
+      "matchNewsType": [
+        "human-interest",
+        "ครอบครัว-ดราม่า"
+      ],
+      "matchEmotion": [
+        "กตัญญู"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram5ua5-t0ys",
+    "uploadedAt": "2026-07-07T12:16:59.021Z",
+    "styleName": "734862807_2923060021381161_4301114354277641511_n",
+    "imagePath": "/ref-covers/ref-mram5jzv-akdm.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 1
+          },
+          {
+            "role": "moment",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "evidence",
+            "shape": "circle",
+            "xPct": 5,
+            "yPct": 65,
+            "wPct": 40,
+            "hPct": 40,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "edge-to-edge",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 60,
+          "facePosition": "upper-center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 5,
+          "yPct": 65,
+          "diameterPct": 40,
+          "position": "bottom-left",
+          "role": "evidence"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "ชายสวมหมวก",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 60,
+          "facing": "ตรง",
+          "desc": "ชายสวมหมวกยิ้ม"
+        },
+        {
+          "role": "context",
+          "subject": "คนเดินในงานรับปริญญา",
+          "emotion": "ปกติ",
+          "faceSizePct": 10,
+          "facing": "-",
+          "desc": "บรรยากาศงานรับปริญญา"
+        },
+        {
+          "role": "moment",
+          "subject": "ชายกอดกัน",
+          "emotion": "ซึ้ง",
+          "faceSizePct": 40,
+          "facing": "-",
+          "desc": "ชายสองคนกอดกัน"
+        },
+        {
+          "role": "evidence",
+          "subject": "เด็กชายและผู้ใหญ่",
+          "emotion": "สงสัย",
+          "faceSizePct": 50,
+          "facing": "ตรง",
+          "desc": "เด็กชายและผู้ใหญ่ในวงกลม"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=บริบท, วงกลม=โมเมนต์ตัวเอก+คนอื่น",
+      "style": {
+        "tone": "อุ่น",
+        "palette": [
+          "#E8C9A0",
+          "#FFFFFF",
+          "#FF0000"
+        ],
+        "hasText": false,
+        "textNote": "-",
+        "effects": [
+          "drop-shadow",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "-"
+      },
+      "emotion": "อบอุ่น",
+      "compositionLogic": "วางฮีโร่เด่นซ้ายเพื่อดึงดูดความสนใจ ส่วนขวาเป็นบริบทและโมเมนต์เสริม",
+      "storyFlow": "ฮีโร่ยิ้ม → บริบทงานรับปริญญา → โมเมนต์กอด → โมเมนต์ในอดีต",
+      "matchNewsType": [
+        "human-interest",
+        "ครอบครัว-ดราม่า"
+      ],
+      "matchEmotion": [
+        "อบอุ่น",
+        "ซึ้ง"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram6346-dkkn",
+    "uploadedAt": "2026-07-07T12:17:10.470Z",
+    "styleName": "735563396_2013930885893761_6511373257075723340_n (1)",
+    "imagePath": "/ref-covers/ref-mram5ubj-yirr.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "reaction",
+            "shape": "circle",
+            "xPct": 5,
+            "yPct": 70,
+            "wPct": 25,
+            "hPct": 25,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "feather",
+        "featherPx": 10
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 60,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 5,
+          "yPct": 70,
+          "diameterPct": 25,
+          "position": "bottom-left",
+          "role": "reaction"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "พระสงฆ์",
+          "emotion": "สงบ",
+          "faceSizePct": 60,
+          "facing": "ตรง",
+          "desc": "พระสงฆ์ยืนอยู่กลางแจ้ง"
+        },
+        {
+          "role": "context",
+          "subject": "โรงพยาบาล",
+          "emotion": "ปกติ",
+          "faceSizePct": 30,
+          "facing": "-",
+          "desc": "ภาพหน้าหอผู้ป่วยชาย"
+        },
+        {
+          "role": "moment",
+          "subject": "พระสงฆ์และผู้ป่วย",
+          "emotion": "อบอุ่น",
+          "faceSizePct": 20,
+          "facing": "-",
+          "desc": "พระสงฆ์เยี่ยมผู้ป่วย"
+        },
+        {
+          "role": "reaction",
+          "subject": "หญิงยิ้ม",
+          "emotion": "ยิ้มแย้ม",
+          "faceSizePct": 70,
+          "facing": "ตรง",
+          "desc": "หญิงยิ้มแย้มในวงกลม"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=พระสงฆ์, ขวาบน=บริบทโรงพยาบาล, ขวาล่าง=โมเมนต์เยี่ยมผู้ป่วย, วงกลม=ปฏิกิริยาหญิงยิ้ม",
+      "style": {
+        "tone": "อุ่น",
+        "palette": [
+          "#E8C9A0",
+          "#FFFFFF",
+          "#8B4513"
+        ],
+        "hasText": true,
+        "textNote": "มีตัวหนังสือบนป้ายหอผู้ป่วยชาย",
+        "effects": [
+          "feathered-seams",
+          "drop-shadow",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "เนียน"
+      },
+      "emotion": "อบอุ่น",
+      "compositionLogic": "วางพระสงฆ์เป็นตัวเอกด้านซ้ายเพื่อดึงดูดความสนใจ, ด้านขวาเป็นบริบทและโมเมนต์ที่เกี่ยวข้อง",
+      "storyFlow": "พระสงฆ์→สงบ→เยี่ยมผู้ป่วย→โรงพยาบาล→ปฏิกิริยาหญิงยิ้ม",
+      "matchNewsType": [
+        "human-interest",
+        "กตัญญู",
+        "ครอบครัว-ดราม่า"
+      ],
+      "matchEmotion": [
+        "อบอุ่น",
+        "กตัญญู"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram6d78-9wel",
+    "uploadedAt": "2026-07-07T12:17:23.540Z",
+    "styleName": "735563396_2013930885893761_6511373257075723340_n",
+    "imagePath": "/ref-covers/ref-mram635j-l5od.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "reaction",
+            "shape": "circle",
+            "xPct": 5,
+            "yPct": 70,
+            "wPct": 25,
+            "hPct": 25,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "feather",
+        "featherPx": 5
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 60,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 5,
+          "yPct": 70,
+          "diameterPct": 25,
+          "position": "bottom-left",
+          "role": "reaction"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "พระ",
+          "emotion": "สงบ",
+          "faceSizePct": 60,
+          "facing": "ตรง",
+          "desc": "พระยืนอยู่ในวัด"
+        },
+        {
+          "role": "context",
+          "subject": "พระและบุคคลอื่น",
+          "emotion": "เป็นกันเอง",
+          "faceSizePct": 30,
+          "facing": "-",
+          "desc": "พระและบุคคลอื่นในโรงพยาบาล"
+        },
+        {
+          "role": "moment",
+          "subject": "พระและผู้ป่วย",
+          "emotion": "อบอุ่น",
+          "faceSizePct": 20,
+          "facing": "-",
+          "desc": "พระเยี่ยมผู้ป่วยในโรงพยาบาล"
+        },
+        {
+          "role": "reaction",
+          "subject": "หญิง",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 80,
+          "facing": "ตรง",
+          "desc": "หญิงยิ้มแย้ม"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=พระ, ขวาบน=พระกับบุคคลอื่น, วงกลม=หญิงยิ้ม",
+      "style": {
+        "tone": "อุ่น",
+        "palette": [
+          "#E8C9A0",
+          "#FFFFFF",
+          "#A0522D"
+        ],
+        "hasText": false,
+        "textNote": "-",
+        "effects": [
+          "feathered-seams",
+          "faces-fill",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "เนียน"
+      },
+      "emotion": "อบอุ่น",
+      "compositionLogic": "ฮีโร่ซ้ายดึงดูดสายตา, ขวาเล่าเรื่องราวในโรงพยาบาล, วงกลมเพิ่มความรู้สึกอบอุ่น",
+      "storyFlow": "พระ→สงบ→เยี่ยมผู้ป่วย→โรงพยาบาล→หญิงยิ้ม",
+      "matchNewsType": [
+        "human-interest",
+        "กตัญญู",
+        "ครอบครัว-ดราม่า"
+      ],
+      "matchEmotion": [
+        "อบอุ่น",
+        "กตัญญู"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram6ly2-mga6",
+    "uploadedAt": "2026-07-07T12:17:34.874Z",
+    "styleName": "736218065_1044626421584903_3139001543213948651_n",
+    "imagePath": "/ref-covers/ref-mram6d8e-a10g.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมกลาง",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "pair",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "moment",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "evidence",
+            "shape": "circle",
+            "xPct": 50,
+            "yPct": 25,
+            "wPct": 30,
+            "hPct": 30,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "edge-to-edge",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 30,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 50,
+          "yPct": 25,
+          "diameterPct": 30,
+          "position": "center",
+          "role": "evidence"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "ผู้หญิง",
+          "emotion": "สงบ",
+          "faceSizePct": 30,
+          "facing": "ตรง",
+          "desc": "ผู้หญิงมองกล้อง"
+        },
+        {
+          "role": "pair",
+          "subject": "คู่รัก",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 40,
+          "facing": "ตรง",
+          "desc": "คู่รักยิ้ม"
+        },
+        {
+          "role": "moment",
+          "subject": "ผู้ชาย",
+          "emotion": "ห่วงใย",
+          "faceSizePct": 20,
+          "facing": "ข้าง",
+          "desc": "ผู้ชายดูแลคนป่วย"
+        },
+        {
+          "role": "evidence",
+          "subject": "ผู้ชาย",
+          "emotion": "คิด",
+          "faceSizePct": 50,
+          "facing": "ข้าง",
+          "desc": "ผู้ชายคิด"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=คู่รัก, วงกลม=โมเมนต์ผู้ชาย",
+      "style": {
+        "tone": "อบอุ่น",
+        "palette": [
+          "#FFFFFF",
+          "#000000",
+          "#FFD700"
+        ],
+        "hasText": true,
+        "textNote": "ข้อความด้านล่าง",
+        "effects": [
+          "drop-shadow",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "เนียน"
+      },
+      "emotion": "อบอุ่น",
+      "compositionLogic": "ฮีโร่ซ้ายดึงดูดความสนใจ, ขวาแสดงความสัมพันธ์และเหตุการณ์",
+      "storyFlow": "ผู้หญิง→สงบ→คู่รัก→บริบท→โมเมนต์ผู้ชาย",
+      "matchNewsType": [
+        "human-interest",
+        "ครอบครัว-ดราม่า"
+      ],
+      "matchEmotion": [
+        "อบอุ่น",
+        "ห่วงใย"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  },
+  {
+    "id": "REF-mram6t5q-1biu",
+    "uploadedAt": "2026-07-07T12:17:44.222Z",
+    "styleName": "736440438_2424112044732395_5190398213706949392_n",
+    "imagePath": "/ref-covers/ref-mram6lz5-ysn7.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมกลาง",
+      "panelCount": 4,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "victim",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 50,
+            "wPct": 50,
+            "hPct": 50,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0
+          },
+          {
+            "role": "evidence",
+            "shape": "circle",
+            "xPct": 35,
+            "yPct": 35,
+            "wPct": 30,
+            "hPct": 30,
+            "zIndex": 1,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2
+          }
+        ],
+        "seamStyle": "edge-to-edge",
+        "featherPx": 0
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 60,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 2,
+          "stack": "vertical",
+          "split": "50/50"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 35,
+          "yPct": 35,
+          "diameterPct": 30,
+          "position": "center",
+          "role": "evidence"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "หญิงสาว",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 60,
+          "facing": "ตรง",
+          "desc": "หญิงสาวยิ้ม"
+        },
+        {
+          "role": "context",
+          "subject": "รูปภาพในกรอบ",
+          "emotion": "สงบ",
+          "faceSizePct": 40,
+          "facing": "-",
+          "desc": "รูปภาพหญิงสาวในกรอบ"
+        },
+        {
+          "role": "victim",
+          "subject": "หญิงสาว",
+          "emotion": "ยิ้ม",
+          "faceSizePct": 50,
+          "facing": "ตรง",
+          "desc": "หญิงสาวยิ้ม"
+        },
+        {
+          "role": "evidence",
+          "subject": "รถยนต์",
+          "emotion": "-",
+          "faceSizePct": 100,
+          "facing": "-",
+          "desc": "ภาพรถยนต์"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=บริบท, วงกลม=หลักฐาน",
+      "style": {
+        "tone": "เย็น",
+        "palette": [
+          "#C0C0C0",
+          "#FFFFFF",
+          "#F5A9BC"
+        ],
+        "hasText": false,
+        "textNote": "-",
+        "effects": [
+          "no-border",
+          "faces-fill",
+          "วงกลมขอบขาว"
+        ],
+        "retouch": "เนียน"
+      },
+      "emotion": "เศร้า",
+      "compositionLogic": "วางฮีโร่ซ้ายเพื่อเน้นตัวเอก, วงกลมกลางเพื่อดึงดูดความสนใจไปที่หลักฐาน",
+      "storyFlow": "หญิงสาว→ยิ้ม→เหตุการณ์→บริบท→หลักฐาน",
+      "matchNewsType": [
+        "human-interest",
+        "ครอบครัว-ดราม่า",
+        "สูญเสีย"
+      ],
+      "matchEmotion": [
+        "เศร้า"
+      ],
+      "neededShots": [
+        "ฮีโร่หน้าอารมณ์",
+        "ภาพคู่",
+        "โมเมนต์เหตุการณ์"
+      ]
+    },
+    "dnaError": null
+  }
+]

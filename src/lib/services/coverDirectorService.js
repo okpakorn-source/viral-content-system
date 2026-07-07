@@ -70,7 +70,7 @@ function templateText(templateSpec) {
  * @param {Array} [templateOptions] — ถ้าส่งหลาย template มา Director จะ "เลือกโครงที่เล่าเรื่องนี้ได้ดีสุด" เอง
  * @returns {Promise<{templateSpec, assignments: Array<{slotId, imageIndex, crop:{x,y,w,h}}>, reason: string}|null>}
  */
-export async function directCover({ imageBuffers, identity, templateSpec, templateOptions = null, newsTitle, faceBoxes = [] }) {
+export async function directCover({ imageBuffers, identity, templateSpec, templateOptions = null, newsTitle, faceBoxes = [], refDNA = null }) {
   const options = (templateOptions && templateOptions.length > 0) ? templateOptions : [templateSpec];
   const thumbs = await buildThumbnails(imageBuffers);
   const usable = options.filter(t => thumbs.length >= t.slots.length);
@@ -112,6 +112,17 @@ export async function directCover({ imageBuffers, identity, templateSpec, templa
     `▼ "${t.id}"${t.storyFit ? ` — เหมาะกับ: ${t.storyFit}` : ''} (ใช้ ${t.slots.length} ภาพ, canvas ${t.canvasW}x${t.canvasH})\n${templateText(t)}`
   ).join('\n\n');
 
+  // ★ 7 ก.ค. Phase 2: ปกเป้าหมายจากคลัง reference (match ตามแนวข่าว) — gated: มีเฉพาะเมื่อส่ง refDNA มา (ปกเดิมไม่มี = prompt เท่าเดิม)
+  const refBlock = refDNA ? `
+=== 🎯 ปกเป้าหมาย (จัดวางให้ใกล้แนวนี้ที่สุด — คัดจากคลังปกไวรัลที่แนวตรงข่าวนี้) ===
+โครง: ${refDNA.layoutType || '-'}
+ฮีโร่: ${refDNA.hero?.position || '-'} · หน้ากิน ~${refDNA.hero?.facePct ?? '-'}% · อารมณ์ ${refDNA.hero?.emotion || '-'}
+ช่องรอง: ${refDNA.sidePanels?.arrangement || '-'}${refDNA.circle?.present ? ` · วงกลม: ${refDNA.circle.position || ''} (${refDNA.circle.role || ''})` : ''}
+บทบาทช่องที่ควรมี: ${(refDNA.slots || []).map((s) => s.role).filter(Boolean).join(' · ') || '-'}
+ตรรกะ: ${String(refDNA.compositionLogic || '').slice(0, 200)}
+→ จัดช่อง/บทบาท/อารมณ์ให้สื่อแบบปกเป้าหมายนี้ (ยังยึดกฎด้านบน + ใช้เฉพาะภาพที่มีจริง)
+` : '';
+
   const prompt = `คุณคือ Art Director มืออาชีพของเพจข่าวไวรัล กำลังจัดปกข่าวจากภาพจริง ${thumbs.length} ใบ (เรียงตามลำดับ #0 ถึง #${thumbs.length - 1})
 
 ${brainPromptBlock('director')}
@@ -127,6 +138,7 @@ ${dimsText}
 
 === โครงปกให้เลือก (${usable.length} แบบ — แกะจากปกไวรัลจริงที่ได้หลักหมื่นไลก์) ===
 ${templatesBlock}
+${refBlock}
 
 === งานของคุณ ===
 ขั้น 1: เลือก "โครงปก" ที่เล่าเรื่องนี้ได้ดีที่สุด (ดูจาก storyFit + ภาพที่มีจริง — เช่น เรื่องให้-รับที่มีภาพสองฝ่าย = quad_circle, เรื่องผู้ดูแล = hero_stack)
@@ -556,6 +568,39 @@ ${templatesBlock}
 
 /** ครอปตั้งต้นจากกรอบหน้า (สูตรเดียวกับ rule 11): กว้าง ~2.5×หน้า + HEADROOM เหนือไรผม
  *  rev.23 (CASE-298 ผู้ใช้ 2 ก.ค.): เพิ่ม headFactor คุมช่องว่างเหนือหัว — วงกลมซูมหน้าเข้าได้ (mult<1.5) โดยไม่ตัดคาง */
+/** ★ 7 ก.ค. (บั๊กวงกลมไม่ตรง ref): QC/applyFixes สลับภาพวงกลม "ทีหลัง" โดยไม่ผ่านด่าน S3b/S3d
+ *  → ฉากหลายคน/บ้านหลุดลงวง หน้าไม่เต็ม · ด่านนี้ = กฎวงกลมฉบับเรียกซ้ำได้ ให้ route เรียกหลัง applyFixes ทุกจุด
+ *  ผิดกฎ (ไม่ใช่หลักฐาน + ไร้หน้า/หลายหน้า/หน้าเล็ก/มีตัวหนังสือ) → สลับเป็นหน้าเดี่ยวสะอาดใหญ่สุดที่ยังไม่ใช้ + ครอปหน้าเต็มวง */
+export function enforceCircleFace({ assignments, imageBuffers, faceBoxes, identity, newsTitle }) {
+  try {
+    const circleA = (assignments || []).find(a => a.slotId === 'circle' || /circle/i.test(String(a.slotId)));
+    if (!circleA) return false;
+    const _toneBlob = `${String(identity?.coverEmotion || identity?.emotion || '')} ${String(newsTitle || '')} ${String(identity?.story || '')}`.toLowerCase();
+    const _tragedy = /tragedy|shocking|grief|mourn|เศร้า|อาลัย|สูญเสีย|เสียชีวิต|ไว้อาลัย|จากไป|ร่ำไห้/.test(_toneBlob);
+    const fbC = faceBoxes[circleA.imageIndex];
+    const _area = (fbC && fbC.x2 > fbC.x1) ? (fbC.x2 - fbC.x1) * (fbC.y2 - fbC.y1) : 0;
+    const _ev = !_tragedy && /EVIDENCE/i.test(imageBuffers[circleA.imageIndex]?.role || '') && !!fbC?.hasText
+      && /evidence/i.test(String(imageBuffers[circleA.imageIndex]?.queryLabel || ''));
+    const bad = !_ev && (!fbC || !(fbC.x2 > fbC.x1) || (fbC.count || 1) >= 2 || _area < 0.035 || !!fbC?.hasText);
+    if (!bad) return false;
+    const used = new Set(assignments.map(a => a.imageIndex));
+    let best = -1, bestArea = 0;
+    faceBoxes.forEach((fb, i) => {
+      if (used.has(i) || !fb || !(fb.x2 > fb.x1) || (fb.count || 1) !== 1 || fb.hasText) return;
+      const im = imageBuffers[i];
+      if (im?.rescuedSourceOnly && im?.eyeMeta?.clean !== true) return; // ภาพกู้คืนที่ไม่ยืนยันสะอาด ห้ามลงวง
+      const a = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);
+      if (a >= 0.035 && a > bestArea) { bestArea = a; best = i; }
+    });
+    if (best < 0) return false;
+    circleA.imageIndex = best;
+    circleA.crop = cropFromFaceBox(faceBoxes[best], 1.42, 0.34);
+    circleA.why = 'วงกลม: บังคับหน้าเดี่ยวเต็มวง (ด่านหลัง QC-swap)';
+    console.log(`[CoverDirector] ⭕🔒 enforceCircleFace: วงกลมผิดกฎหลัง QC-swap → สลับ ← #${best} (area ${bestArea.toFixed(3)})`);
+    return true;
+  } catch { return false; }
+}
+
 function cropFromFaceBox(fb, mult = 2.1, headFactor = 0.5) {
   if (!fb || !(fb.x2 > fb.x1)) return { x: 0, y: 0, w: 1, h: 1 };
   const fw = fb.x2 - fb.x1, fh = fb.y2 - fb.y1, cx = (fb.x1 + fb.x2) / 2;
@@ -772,12 +817,34 @@ ${spec}
   const _slotIdsFC = items.map(x => x.a.slotId);
   const _tokFC = (v) => String(v || '').toLowerCase().split(/[^a-z]+/).filter(Boolean).sort().join('|');
   const _normFC = (v) => { const s = String(v || '').toLowerCase().trim(); return _slotIdsFC.includes(s) ? s : (_slotIdsFC.find(id => _tokFC(id) === _tokFC(s)) || s); };
+  // ★ FINAL6 pre-pass (CASE-354 ฮีโร่โดนโซนเบลอครอง): นับสมอหน้าที่ gpt ตอบ "ซ้ำกันหลายช่อง" (ปัดกริด 0.05)
+  //   ซ้ำ ≥3 ช่อง = ค่า generic (เดา ไม่ได้ดูภาพจริง เช่น 0.50,0.25 ทุกช่อง) → ช่องนั้นให้เชื่อ FaceDetector แทน
+  const _akey = (x, y) => `${Math.round(x * 20)}:${Math.round(y * 20)}`;
+  const _aCount = {};
+  for (const c of (j?.crops || [])) {
+    const fx = Number(c.fx), fy = Number(c.fy);
+    if (Number.isFinite(fx) && Number.isFinite(fy)) { const k = _akey(fx, fy); _aCount[k] = (_aCount[k] || 0) + 1; }
+  }
+  const _genericAnchors = new Set(Object.keys(_aCount).filter(k => _aCount[k] >= 3));
   for (const c of (j?.crops || [])) {
     const it = items.find(x => x.a.slotId === _normFC(c.slot));
     if (!it) continue;
     let _fx = Number(c.fx), _fy = Number(c.fy), _fw = Number(c.fw), _fh = Number(c.fh);
     let _hasFace = [_fx, _fy, _fw, _fh].every(Number.isFinite) && _fw > 0.01 && _fh > 0.01 && _fx > 0 && _fx < 1 && _fy > 0 && _fy < 1;
     let _anchorSrc = _hasFace ? 'gpt' : '';
+    // ★ FINAL6 (CASE-354): สมอ gpt เป็นค่า generic (ซ้ำ ≥3 ช่อง) + FaceDetector เห็นหน้าคนละตำแหน่ง (>0.10)
+    //   → เชื่อ detector (กันล็อกเฟรมไปโซนเบลอ/ฉาก ทั้งที่หน้าจริงอยู่อีกที่)
+    if (_hasFace && _genericAnchors.has(_akey(_fx, _fy))) {
+      const _fbg = faceBoxes[it.a.imageIndex];
+      if (_fbg && _fbg.x2 > _fbg.x1) {
+        const _gcx = (_fbg.x1 + _fbg.x2) / 2, _gcy = (_fbg.y1 + _fbg.y2) / 2;
+        if (Math.abs(_gcy - _fy) > 0.10 || Math.abs(_gcx - _fx) > 0.10) {
+          console.log(`[CoverDirector] 🧲 ${it.a.slotId}: สมอ gpt generic (${_fx.toFixed(2)},${_fy.toFixed(2)}) → ใช้ detector (${_gcx.toFixed(2)},${_gcy.toFixed(2)})`);
+          _fx = _gcx; _fy = _gcy; _fw = _fbg.x2 - _fbg.x1; _fh = _fbg.y2 - _fbg.y1;
+          _anchorSrc = 'fb-generic';
+        }
+      }
+    }
     // ★ FINAL4 (CASE-336 บางช่อง gpt ไม่ส่งกล่องหน้า → เคยตกไปใช้กล่องดิบ = หน้าริมกรอบ): สมอสำรองจาก FaceDetector
     if (!_hasFace) {
       const _fb = faceBoxes[it.a.imageIndex];
@@ -793,9 +860,19 @@ ${spec}
       // ★★★ FINAL3 — Face-Lock Geometry (ผู้ใช้ 2 ก.ค.: "หน้าตรง หน้าเด่น ต้องแม่นยำ"):
       //   gpt (เห็นภาพจริง) รายงานกล่องหน้า → โค้ดคำนวณเฟรมทั้งหมด: หน้าสูง 40-45% ของช่อง
       //   วางหน้า "กึ่งกลางแนวนอน + ระดับ 38%" (วงกลม 45%) — การันตีเชิงเรขาคณิต ไม่มีทางหน้าหลุด/หน้าเล็ก
-      const frac = isCircle ? 0.45 : (it.a.slotId === 'main' ? 0.42 : 0.40);
+      // ★ hero-tight (item #1 ขอบซ้ายฮีโร่ยังเห็นม่าน/ตรา): FaceLock ฮีโร่เดิม 0.42 = หน้ากิน 42% เฟรม → พื้นหลัง/ม่านโผล่ข้างเยอะ
+      //   ดันเป็น ~0.56 (หน้า ~56% เฟรม) ให้ตรงเจตนา cropFromFaceBox 1.62 (~62%) + เกณฑ์ปกแสนไลค์ "หน้า ≥60%" → เฟรมแคบลง ม่านหาย
+      //   (headroom/คาง ยังปลอดภัยเชิงเรขาคณิต: yN=_fy-0.38·hN, chin ต่ำกว่าเฟรมเสมอ) · ปรับได้ที่ env COVER_HERO_FACE_FRAC
+      const _isMainHero = it.a.slotId === 'main';
+      const frac = isCircle ? 0.45 : (_isMainHero ? (parseFloat(process.env.COVER_HERO_FACE_FRAC) || 0.56) : 0.40);
       let hN = Math.min(1, _fh / frac);                                   // ความสูงเฟรม (สัดส่วนของภาพ)
       let wN = Math.min(1, hN * slotAspect * (it.h / it.w));              // ความกว้างเฟรมให้ aspect ตรงช่องเป๊ะ (คิดข้ามหน่วย px)
+      // ★ hero-tight guard (sim จับได้): ภาพแนวนอน + หน้าใหญ่ + frac แน่นขึ้น → เฟรมพอร์ตเทรตอาจแคบกว่าหน้า = เฉือนหู/แก้มข้าง
+      //   → เฟรมฮีโร่ต้องกว้างพอคลุม "หน้าเต็มกว้าง +12%" เสมอ; ถ้าต้องขยาย = ยอมหน้าเล็กลงนิด ดีกว่าเฉือนหน้า (ไม่แตะช่องอื่น)
+      if (_isMainHero) {
+        const _wFloor = Math.min(1, _fw * 1.12);
+        if (wN < _wFloor) { wN = _wFloor; hN = Math.min(1, wN / (slotAspect * (it.h / it.w))); }
+      }
       if (wN >= 1) { wN = 1; hN = Math.min(1, wN * (it.w / it.h) / slotAspect); }
       const faceLevel = isCircle ? 0.45 : 0.38;
       let xN = _fx - wN / 2;                                              // หน้ากึ่งกลางแนวนอน

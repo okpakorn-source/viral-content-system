@@ -288,7 +288,18 @@ function CaseCard({ caseData, onClick, index }) {
 // ═══════════════════════════════════════════════════════════
 // Main Page Component
 // ═══════════════════════════════════════════════════════════
-export default function CoverArchivePage() {
+// ⛔ ปิดใช้งานชั่วคราว (2 ก.ค. 2026 — ผู้ใช้สั่งถอดจาก UI รอรื้อสร้างใหม่)
+//    เปิดคืน: ลบ DisabledPage แล้วคืน `export default` ให้ CoverArchivePage ด้านล่าง
+export default function DisabledPage() {
+  return (
+    <div style={{ padding: 80, textAlign: 'center', color: '#94a3b8' }}>
+      <div style={{ fontSize: 48 }}>⛔</div>
+      <h2>ปิดปรับปรุงชั่วคราว</h2>
+      <p>คลังปกที่ทำแล้ว (Cover Archive) ถูกปิดใช้งานชั่วคราว — กำลังรื้อสร้างใหม่</p>
+    </div>
+  );
+}
+function CoverArchivePage() {
   const [cases, setCases] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);

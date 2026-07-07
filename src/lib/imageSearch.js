@@ -281,6 +281,9 @@ function isObjectSubject(s) {
 const EVIDENCE_SLOTS = parseInt(process.env.IMAGES_EVIDENCE_SLOTS || '3', 10);
 // จำนวนคำค้น "สถานที่สาธารณะชื่อเฉพาะ" ที่การันตียิงเสมอ (มหาลัย/รพ./วัด ที่ข่าวเอ่ยชื่อ)
 const PLACE_SLOTS = parseInt(process.env.IMAGES_PLACE_SLOTS || '2', 10);
+// ★ item #4 (พูลล้มเป็นพอร์ตเทรตซ้ำ CASE-349): จำนวนคำค้น "โมเมนต์/แอ็กชัน/ปฏิกิริยา" (ฉากไม่ใช่หน้าพอร์ตเทรต)
+//   ที่การันตียิงเสมอ — แยกโควตาออกจาก "หลักฐานเอกสาร" ไม่ให้เอกสารเบียดทิ้ง (ปกแสนไลค์ต้องมีช่องแอ็กชัน/รีแอกชัน/โมเมนต์)
+const MOMENT_SLOTS = parseInt(process.env.IMAGES_MOMENT_SLOTS || '3', 10);
 // คำบ่ง "สถาบัน/สถานที่สาธารณะ" — ภาพจาก Google ใช้ได้เลย ไม่ต้องผูกชื่อคน (ชื่อเฉพาะระบุตัวตนสถานที่แล้ว)
 const PLACE_INST = /มหาวิทยาลัย|วิทยาลัย|โรงเรียน|โรงพยาบาล|วัด|มูลนิธิ|สนามบิน|สถานี|ตลาด|ห้าง|อุทยาน|university|college|hospital|school|temple|airport/i;
 
@@ -303,19 +306,25 @@ export function buildQueries(keywords, maxQueries) {
   //    (บั๊กเดิม: จดหมาย/เช็คถูกสกัดไว้ใน moment_action แต่ "ไม่เคยถูกยิง" เพราะไม่อยู่ใน pool
   //     และโควตา round-robin (~4 คำ) หมดไปกับคำ generic ชื่อดาราก่อน → ภาพหลักฐานไม่เคยเข้าคลัง)
   const mainName = personNames[0] || '';
+  // ไม่มีชื่อบุคคลในคำค้น → ผูกชื่อตัวหลักเข้าไป (กันได้ภาพหลักฐาน/โมเมนต์ของใครก็ไม่รู้)
+  const bindName = (q) => {
+    const t = String(q || '').trim();
+    if (!t) return '';
+    return hasPerson(t) || !mainName ? t : `${t} ${mainName}`;
+  };
   const HARD_EVIDENCE = /จดหมาย|เช็ค|ป้าย|เอกสาร|ลายมือ|สลิป|แชท|ใบประกาศ|มอบเงิน|บริจาค|โพสต์/;
+  const moments = keywords.moment_action || [];
+  // 🧾 หลักฐาน (เอกสาร/ป้าย/วัตถุผูกชื่อ) = "ของเด็ด" ช่องวงกลม → การันตียิงเสมอ
+  //    (บั๊กเดิม: จดหมาย/เช็คถูกสกัดไว้ใน moment_action แต่ "ไม่เคยถูกยิง" เพราะไม่อยู่ใน pool)
   const evidence = dedupeTake(
-    [...objq, ...(keywords.moment_action || [])]
-      // หลักฐานจริง (จดหมาย/เช็ค/ป้าย) มาก่อนโมเมนต์ทั่วไป (ให้สัมภาษณ์/ยิ้ม) — กันโควตาโดนคำ generic กิน
-      .sort((a, b) => (HARD_EVIDENCE.test(String(b)) ? 1 : 0) - (HARD_EVIDENCE.test(String(a)) ? 1 : 0))
-      .map((q) => {
-        const t = String(q || '').trim();
-        if (!t) return '';
-        // ไม่มีชื่อบุคคล → ผูกชื่อตัวหลักเข้าไป (กันได้ภาพจดหมาย/เช็คของใครก็ไม่รู้)
-        return hasPerson(t) || !mainName ? t : `${t} ${mainName}`;
-      })
-      .filter(Boolean),
+    [...objq, ...moments.filter((q) => HARD_EVIDENCE.test(String(q)))].map(bindName).filter(Boolean),
     EVIDENCE_SLOTS
+  );
+  // 🎬 ★ item #4: โมเมนต์/แอ็กชัน/ปฏิกิริยา (ฉากคนละแบบ ไม่ใช่หลักฐานเอกสาร) → ช่องแอ็กชัน/รีแอกชัน/โมเมนต์
+  //    แยกโควตาต่างหาก ไม่ให้เอกสารเบียดทิ้ง (CASE-349 พูลล้มเป็นพอร์ตเทรตซ้ำเพราะฉากพวกนี้ไม่เคยได้ยิง)
+  const momentScenes = dedupeTake(
+    moments.filter((q) => !HARD_EVIDENCE.test(String(q))).map(bindName).filter(Boolean),
+    MOMENT_SLOTS
   );
 
   // 🏛️ คำค้น "สถานที่สาธารณะชื่อเฉพาะ" จาก scene_place (เช่น "มหาวิทยาลัยแม่ฟ้าหลวง", "โรงเรียนนานาชาติโชรส์เบอรี")
@@ -336,7 +345,8 @@ export function buildQueries(keywords, maxQueries) {
     PLACE_SLOTS
   );
 
-  const guaranteed = dedupeTake([...evidence, ...places], EVIDENCE_SLOTS + PLACE_SLOTS);
+  // 🧾🎬🏛️ หลักฐาน + โมเมนต์/แอ็กชัน + สถานที่ = การันตียิงทุกช่อง (เพิ่มจากโควตา round-robin ต่อบุคคล — ไม่เบียดสมดุลคน)
+  const guaranteed = dedupeTake([...evidence, ...momentScenes, ...places], EVIDENCE_SLOTS + MOMENT_SLOTS + PLACE_SLOTS);
 
   // round-robin ยึด "ชื่อบุคคล" (ถ้าข่าวไม่มีบุคคลเลย ค่อยใช้ทุก subject)
   const names = personNames.length ? personNames : subjects.map((s) => s.name).filter(Boolean);

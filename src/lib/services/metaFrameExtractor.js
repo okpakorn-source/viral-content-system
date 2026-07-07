@@ -37,7 +37,23 @@ async function runYtdlp(args, timeout = 180_000) {
       console.log(`${LOG} cookies.txt failed:`, e.message?.slice(0, 70));
     }
   }
-  return await execFileAsync(exe, args, { maxBuffer: 1024 * 1024 * 20, timeout });
+  try {
+    return await execFileAsync(exe, args, { maxBuffer: 1024 * 1024 * 20, timeout });
+  } catch (e) {
+    // ★ FIX (2 ก.ค. CASE-345): YouTube bot-check "Sign in to confirm you're not a bot" ฆ่า Tier REAL ทุกคลิป
+    //   → เฟรมโมเมนต์ (หัวใจปกแสนไลค์) ไม่เคยเข้าพูล — ลองดึงคุกกี้จากเบราว์เซอร์เครื่องทีมก่อนยอมแพ้ (non-fatal ต่อชั้น)
+    if (!/sign in to confirm|not a bot|login required/i.test(String(e?.message || ''))) throw e;
+    for (const br of ['chrome', 'edge']) {
+      try {
+        const r = await execFileAsync(exe, ['--cookies-from-browser', br, ...args], { maxBuffer: 1024 * 1024 * 20, timeout });
+        console.log(`${LOG} 🍪 bot-check ผ่านด้วยคุกกี้ ${br}`);
+        return r;
+      } catch (e2) {
+        console.log(`${LOG} cookies-from-browser ${br} failed:`, e2.message?.slice(0, 60));
+      }
+    }
+    throw e;
+  }
 }
 
 /**
