@@ -80,10 +80,16 @@ export async function PATCH(req) {
             yPct: Math.max(0, Math.min(100, Math.round(+s.yPct))),
             wPct: Math.max(5, Math.min(100, Math.round(+s.wPct))),
             hPct: Math.max(5, Math.min(100, Math.round(+s.hPct))),
-            zIndex: s.shape === 'circle' ? 1 : 0,
+            // ★ 9 ก.ค.: เก็บ zIndex ที่ส่งมา (inset ลอยทับต้อง z สูง) — เดิมบังคับ 0 ทำ inset จมใต้ช่องข้างเคียง
+            zIndex: Number.isFinite(+s.zIndex) ? Math.max(0, Math.min(9, Math.round(+s.zIndex))) : (s.shape === 'circle' ? 1 : 0),
             border: !!s.border,
             borderColor: s.border ? (s.borderColor || '#FFFFFF') : '-',
-            borderWidthPct: s.border ? 1.5 : 0,
+            borderWidthPct: s.border ? (Number.isFinite(+s.borderWidthPct) ? Math.max(0.5, Math.min(4, +s.borderWidthPct)) : 1.5) : 0,
+            // ★ 9 ก.ค.: เก็บข้อมูลจัดวางของ ref (pos/subject/shot/emotion) — refTemplate ใช้ทำโน้ตต่อช่องให้ S6
+            ...(s.pos ? { pos: String(s.pos).slice(0, 40) } : {}),
+            ...(s.subject ? { subject: String(s.subject).slice(0, 60) } : {}),
+            ...(s.shot ? { shot: String(s.shot).slice(0, 20) } : {}),
+            ...(s.emotion ? { emotion: String(s.emotion).slice(0, 20) } : {}),
           }));
         if (slots.length < 3) return NextResponse.json({ success: false, error: 'ต้องมี ≥3 ช่อง' }, { status: 400 });
         dna.template = { ...(dna.template || {}), slots, seamStyle: dna.template?.seamStyle || 'edge-to-edge' };

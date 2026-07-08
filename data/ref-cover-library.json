@@ -18,85 +18,77 @@
             "shape": "rect",
             "xPct": 0,
             "yPct": 0,
-            "wPct": 50,
-            "hPct": 50,
+            "wPct": 46,
+            "hPct": 100,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
-            "pos": "บนซ้าย",
-            "subject": "ชายคนหนึ่ง",
+            "pos": "ซ้ายเต็มสูง",
+            "subject": "ชายร้องไห้",
             "shot": "closeup",
-            "emotion": "เศร้า",
-            "facing": "ข้าง"
+            "emotion": "เศร้า"
           },
           {
             "role": "context",
             "shape": "rect",
-            "xPct": 50,
+            "xPct": 46,
             "yPct": 0,
-            "wPct": 50,
-            "hPct": 50,
+            "wPct": 54,
+            "hPct": 60,
             "zIndex": 0,
-            "border": true,
-            "borderColor": "#00FF00",
-            "borderWidthPct": 2,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0,
             "pos": "บนขวา",
-            "subject": "คนสองคนกำลังนั่ง",
-            "shot": "medium",
-            "emotion": "สงบ",
-            "facing": "-"
+            "subject": "คนสองคนนั่งพื้น",
+            "shot": "wide"
           },
           {
             "role": "evidence",
             "shape": "rect",
-            "xPct": 50,
-            "yPct": 50,
-            "wPct": 50,
-            "hPct": 50,
+            "xPct": 44,
+            "yPct": 33,
+            "wPct": 53,
+            "hPct": 29,
+            "zIndex": 3,
+            "border": true,
+            "borderColor": "#00FF00",
+            "borderWidthPct": 1.5,
+            "pos": "inset ลอยทับ",
+            "subject": "ภาพขาวดำสถานที่+วงแดง",
+            "shot": "wide"
+          },
+          {
+            "role": "victim",
+            "shape": "rect",
+            "xPct": 46,
+            "yPct": 60,
+            "wPct": 54,
+            "hPct": 40,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างขวา",
-            "subject": "ภาพขาวดำของต้นไม้",
-            "shot": "wide",
-            "emotion": "-",
-            "facing": "-"
+            "subject": "หญิงร้องไห้เช็ดน้ำตา",
+            "shot": "closeup",
+            "emotion": "เศร้า"
           },
           {
             "role": "pair",
             "shape": "circle",
-            "xPct": 5,
-            "yPct": 50,
-            "wPct": 40,
-            "hPct": 40,
-            "zIndex": 1,
+            "xPct": 14,
+            "yPct": 57,
+            "wPct": 36,
+            "hPct": 29,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
-            "subject": "คู่รัก",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
-          },
-          {
-            "role": "victim",
-            "shape": "rect",
-            "xPct": 0,
-            "yPct": 50,
-            "wPct": 50,
-            "hPct": 50,
-            "zIndex": 0,
-            "border": false,
-            "borderColor": "-",
-            "borderWidthPct": 0,
-            "pos": "ล่างซ้าย",
-            "subject": "หญิงคนหนึ่งกำลังร้องไห้",
+            "subject": "คู่รักยิ้ม",
             "shot": "closeup",
-            "emotion": "เศร้า",
-            "facing": "ข้าง"
+            "emotion": "สุข"
           }
         ],
         "seamStyle": "feather",
@@ -201,7 +193,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -229,7 +222,11 @@
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
-            "borderWidthPct": 0
+            "borderWidthPct": 0,
+            "pos": "ซ้ายบน",
+            "subject": "ผู้หญิงถือไมโครโฟน",
+            "shot": "closeup",
+            "emotion": "ยิ้ม"
           },
           {
             "role": "context",
@@ -241,7 +238,11 @@
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
-            "borderWidthPct": 0
+            "borderWidthPct": 0,
+            "pos": "บนขวา",
+            "subject": "คนเล่นน้ำ",
+            "shot": "wide",
+            "emotion": "-"
           },
           {
             "role": "action",
@@ -250,10 +251,14 @@
             "yPct": 34,
             "wPct": 50,
             "hPct": 28,
-            "zIndex": 0,
+            "zIndex": 3,
             "border": true,
             "borderColor": "#00FF00",
-            "borderWidthPct": 1.5
+            "borderWidthPct": 1.5,
+            "pos": "inset กลางขวาลอยทับ",
+            "subject": "ผู้ชายและผู้หญิงสัมภาษณ์",
+            "shot": "medium",
+            "emotion": "ยิ้ม"
           },
           {
             "role": "reaction",
@@ -265,7 +270,11 @@
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
-            "borderWidthPct": 0
+            "borderWidthPct": 0,
+            "pos": "แถบล่างเต็มกว้าง",
+            "subject": "ผู้ชายผมสั้น",
+            "shot": "medium",
+            "emotion": "ยิ้ม"
           },
           {
             "role": "moment",
@@ -274,10 +283,14 @@
             "yPct": 58,
             "wPct": 36,
             "hPct": 30,
-            "zIndex": 1,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
-            "borderWidthPct": 1.5
+            "borderWidthPct": 2,
+            "pos": "วงกลมล่างซ้าย",
+            "subject": "คนกอดกัน",
+            "shot": "closeup",
+            "emotion": "ซึ้งใจ"
           }
         ],
         "seamStyle": "feather",
@@ -408,68 +421,61 @@
             "shape": "rect",
             "xPct": 0,
             "yPct": 0,
-            "wPct": 50,
-            "hPct": 50,
+            "wPct": 52,
+            "hPct": 100,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
-            "pos": "บนซ้าย",
+            "pos": "ซ้ายเต็มสูง",
             "subject": "ชายหนุ่ม",
             "shot": "closeup",
-            "emotion": "เศร้า",
-            "facing": "ตรง"
+            "emotion": "นิ่ง"
           },
           {
             "role": "context",
             "shape": "rect",
-            "xPct": 50,
+            "xPct": 52,
             "yPct": 0,
-            "wPct": 50,
-            "hPct": 50,
+            "wPct": 48,
+            "hPct": 42,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
-            "subject": "ตำรวจและเจ้าหน้าที่",
-            "shot": "medium",
-            "emotion": "จริงจัง",
-            "facing": "ข้าง"
+            "subject": "ตำรวจและเจ้าหน้าที่ที่โต๊ะ",
+            "shot": "medium"
           },
           {
             "role": "victim",
             "shape": "rect",
-            "xPct": 0,
-            "yPct": 50,
-            "wPct": 50,
-            "hPct": 50,
+            "xPct": 52,
+            "yPct": 42,
+            "wPct": 48,
+            "hPct": 58,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
-            "pos": "ล่างซ้าย",
+            "pos": "ล่างขวา",
             "subject": "หญิงชรา",
             "shot": "closeup",
-            "emotion": "ตกใจ",
-            "facing": "ตรง"
+            "emotion": "กังวล"
           },
           {
             "role": "moment",
             "shape": "circle",
-            "xPct": 50,
-            "yPct": 50,
-            "wPct": 50,
-            "hPct": 50,
-            "zIndex": 1,
+            "xPct": 6,
+            "yPct": 59,
+            "wPct": 36,
+            "hPct": 29,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
             "subject": "กลุ่มคนถือเอกสาร",
-            "shot": "medium",
-            "emotion": "ภูมิใจ",
-            "facing": "ตรง"
+            "shot": "medium"
           }
         ],
         "seamStyle": "feather",
@@ -565,7 +571,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -580,7 +587,7 @@
       "canvasHpx": 1350,
       "layoutFamily": "circle-center",
       "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
-      "panelCount": 3,
+      "panelCount": 4,
       "template": {
         "slots": [
           {
@@ -588,7 +595,7 @@
             "shape": "rect",
             "xPct": 0,
             "yPct": 0,
-            "wPct": 60,
+            "wPct": 55,
             "hPct": 100,
             "zIndex": 0,
             "border": false,
@@ -597,42 +604,53 @@
             "pos": "ซ้ายเต็มสูง",
             "subject": "ชายยิ้ม",
             "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ข้าง"
+            "emotion": "สุข"
           },
           {
             "role": "reaction",
             "shape": "rect",
-            "xPct": 60,
+            "xPct": 55,
             "yPct": 0,
-            "wPct": 40,
-            "hPct": 50,
+            "wPct": 45,
+            "hPct": 55,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
-            "subject": "หญิงยิ้ม",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "subject": "หญิงยิ้มทั้งน้ำตา",
+            "shot": "closeup",
+            "emotion": "ซึ้งใจ"
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 55,
+            "yPct": 55,
+            "wPct": 45,
+            "hPct": 45,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0,
+            "pos": "ล่างขวา",
+            "subject": "ชายสูงวัย",
+            "shot": "closeup",
+            "emotion": "นิ่ง"
           },
           {
             "role": "moment",
             "shape": "circle",
             "xPct": 10,
             "yPct": 60,
-            "wPct": 40,
-            "hPct": 40,
-            "zIndex": 1,
+            "wPct": 36,
+            "hPct": 29,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
-            "subject": "ชายและหญิงกับถุงของขวัญ",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "-"
+            "subject": "ชายหญิงกับถุงของขวัญ",
+            "shot": "medium"
           }
         ],
         "seamStyle": "feather",
@@ -721,7 +739,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -745,16 +764,14 @@
             "xPct": 0,
             "yPct": 0,
             "wPct": 50,
-            "hPct": 50,
+            "hPct": 57,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนซ้าย",
             "subject": "ชายหนุ่ม",
-            "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "shot": "closeup"
           },
           {
             "role": "hero",
@@ -762,67 +779,59 @@
             "xPct": 50,
             "yPct": 0,
             "wPct": 50,
-            "hPct": 50,
+            "hPct": 57,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
             "subject": "หญิงสาว",
-            "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
-          },
-          {
-            "role": "moment",
-            "shape": "circle",
-            "xPct": 25,
-            "yPct": 25,
-            "wPct": 50,
-            "hPct": 50,
-            "zIndex": 1,
-            "border": true,
-            "borderColor": "#FFFFFF",
-            "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
-            "subject": "ชายหนุ่มและหญิงสาวในชุดสีสด",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "shot": "closeup"
           },
           {
             "role": "context",
             "shape": "rect",
             "xPct": 0,
-            "yPct": 50,
+            "yPct": 57,
             "wPct": 50,
-            "hPct": 50,
+            "hPct": 43,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างซ้าย",
-            "subject": "ชายหนุ่มในเสื้อเชิ้ต",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "subject": "ชายหนุ่มเสื้อเชิ้ต",
+            "shot": "medium"
           },
           {
             "role": "context",
             "shape": "rect",
             "xPct": 50,
-            "yPct": 50,
+            "yPct": 57,
             "wPct": 50,
-            "hPct": 50,
+            "hPct": 43,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างขวา",
-            "subject": "ชายหนุ่มและหญิงสาวในชุดลำลอง",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "subject": "คู่ชายหญิง",
+            "shot": "medium"
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 34,
+            "yPct": 38,
+            "wPct": 32,
+            "hPct": 26,
+            "zIndex": 4,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2,
+            "subject": "คู่ชายหญิงชุดแดง",
+            "shot": "closeup",
+            "emotion": "สุข"
           }
         ],
         "seamStyle": "feather",
@@ -928,7 +937,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -956,7 +966,11 @@
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
-            "borderWidthPct": 0
+            "borderWidthPct": 0,
+            "pos": "ซ้ายบน",
+            "subject": "ผู้หญิงผมยาวร้องไห้",
+            "shot": "closeup",
+            "emotion": "เศร้า"
           },
           {
             "role": "context",
@@ -968,7 +982,11 @@
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
-            "borderWidthPct": 0
+            "borderWidthPct": 0,
+            "pos": "บนขวา",
+            "subject": "บ้าน",
+            "shot": "wide",
+            "emotion": "-"
           },
           {
             "role": "action",
@@ -977,10 +995,14 @@
             "yPct": 33,
             "wPct": 49,
             "hPct": 25,
-            "zIndex": 0,
+            "zIndex": 3,
             "border": true,
             "borderColor": "#00FF00",
-            "borderWidthPct": 1.5
+            "borderWidthPct": 1.5,
+            "pos": "inset กลางขวาลอยทับ",
+            "subject": "กลุ่มคนกับรถ",
+            "shot": "medium",
+            "emotion": "ยิ้ม"
           },
           {
             "role": "reaction",
@@ -992,7 +1014,11 @@
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
-            "borderWidthPct": 0
+            "borderWidthPct": 0,
+            "pos": "แถบล่างเต็มกว้าง",
+            "subject": "ผู้ชาย",
+            "shot": "medium",
+            "emotion": "พูด"
           },
           {
             "role": "moment",
@@ -1001,10 +1027,14 @@
             "yPct": 60,
             "wPct": 36,
             "hPct": 29,
-            "zIndex": 1,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
-            "borderWidthPct": 1.5
+            "borderWidthPct": 2,
+            "pos": "วงกลมล่างซ้าย",
+            "subject": "ผู้หญิงในชุดครุย",
+            "shot": "closeup",
+            "emotion": "ยิ้ม"
           }
         ],
         "seamStyle": "feather",
@@ -1137,7 +1167,11 @@
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
-            "borderWidthPct": 0
+            "borderWidthPct": 0,
+            "pos": "ซ้ายบน",
+            "subject": "ผู้หญิงผมยาวร้องไห้",
+            "shot": "closeup",
+            "emotion": "เศร้า"
           },
           {
             "role": "context",
@@ -1149,7 +1183,11 @@
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
-            "borderWidthPct": 0
+            "borderWidthPct": 0,
+            "pos": "บนขวา",
+            "subject": "บ้าน",
+            "shot": "wide",
+            "emotion": "-"
           },
           {
             "role": "action",
@@ -1158,10 +1196,14 @@
             "yPct": 33,
             "wPct": 49,
             "hPct": 25,
-            "zIndex": 0,
+            "zIndex": 3,
             "border": true,
             "borderColor": "#00FF00",
-            "borderWidthPct": 1.5
+            "borderWidthPct": 1.5,
+            "pos": "inset กลางขวาลอยทับ",
+            "subject": "กลุ่มคนกับรถ",
+            "shot": "medium",
+            "emotion": "ยิ้ม"
           },
           {
             "role": "reaction",
@@ -1173,7 +1215,11 @@
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
-            "borderWidthPct": 0
+            "borderWidthPct": 0,
+            "pos": "แถบล่างเต็มกว้าง",
+            "subject": "ผู้ชาย",
+            "shot": "medium",
+            "emotion": "พูด"
           },
           {
             "role": "moment",
@@ -1182,10 +1228,14 @@
             "yPct": 60,
             "wPct": 36,
             "hPct": 29,
-            "zIndex": 1,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
-            "borderWidthPct": 1.5
+            "borderWidthPct": 2,
+            "pos": "วงกลมล่างซ้าย",
+            "subject": "ผู้หญิงในชุดครุย",
+            "shot": "closeup",
+            "emotion": "ยิ้ม"
           }
         ],
         "seamStyle": "feather",
@@ -1307,7 +1357,7 @@
       "canvasHpx": 1350,
       "layoutFamily": "hero-left-collage",
       "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
-      "panelCount": 6,
+      "panelCount": 5,
       "template": {
         "slots": [
           {
@@ -1315,102 +1365,76 @@
             "shape": "rect",
             "xPct": 0,
             "yPct": 0,
-            "wPct": 50,
-            "hPct": 70,
+            "wPct": 52,
+            "hPct": 60,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
-            "pos": "ซ้ายเต็มสูง",
+            "pos": "ซ้ายบน",
             "subject": "ชายยิ้ม",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "shot": "closeup",
+            "emotion": "สุข"
           },
           {
             "role": "context",
             "shape": "rect",
-            "xPct": 50,
+            "xPct": 52,
             "yPct": 0,
-            "wPct": 50,
-            "hPct": 40,
+            "wPct": 48,
+            "hPct": 60,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
-            "subject": "ชายในวงล้อม",
-            "shot": "medium",
-            "emotion": "จริงจัง",
-            "facing": "ตรง"
+            "subject": "ชายในวงล้อมคน (วงแดงชี้)",
+            "shot": "wide"
           },
           {
             "role": "evidence",
             "shape": "rect",
             "xPct": 50,
-            "yPct": 40,
-            "wPct": 50,
-            "hPct": 30,
-            "zIndex": 0,
+            "yPct": 31,
+            "wPct": 47,
+            "hPct": 26,
+            "zIndex": 3,
             "border": true,
             "borderColor": "#FFFFFF",
-            "borderWidthPct": 1,
-            "pos": "กลางขวา",
-            "subject": "แผนผัง",
-            "shot": "wide",
-            "emotion": "-",
-            "facing": "-"
-          },
-          {
-            "role": "moment",
-            "shape": "circle",
-            "xPct": 0,
-            "yPct": 70,
-            "wPct": 30,
-            "hPct": 30,
-            "zIndex": 1,
-            "border": true,
-            "borderColor": "#FFFFFF",
-            "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
-            "subject": "ชายใส่หมวกนิรภัย",
-            "shot": "medium",
-            "emotion": "เหนื่อย",
-            "facing": "ลง"
+            "borderWidthPct": 1.5,
+            "pos": "inset ลอยทับ",
+            "subject": "แผนผัง/ชาร์ตเขียว",
+            "shot": "graphic"
           },
           {
             "role": "action",
             "shape": "rect",
-            "xPct": 50,
-            "yPct": 70,
-            "wPct": 50,
-            "hPct": 30,
+            "xPct": 0,
+            "yPct": 60,
+            "wPct": 100,
+            "hPct": 40,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
-            "pos": "ล่างขวา",
+            "pos": "แถบล่างเต็มกว้าง",
             "subject": "ชายกอดกัน",
             "shot": "medium",
-            "emotion": "อบอุ่น",
-            "facing": "ข้าง"
+            "emotion": "ซึ้งใจ"
           },
           {
-            "role": "reaction",
+            "role": "moment",
             "shape": "circle",
-            "xPct": 70,
-            "yPct": 10,
-            "wPct": 20,
-            "hPct": 20,
-            "zIndex": 1,
+            "xPct": 8,
+            "yPct": 61,
+            "wPct": 36,
+            "hPct": 29,
+            "zIndex": 4,
             "border": true,
-            "borderColor": "#FF0000",
+            "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
-            "pos": "วงกลมบนขวา",
-            "subject": "ชายในวงกลม",
-            "shot": "closeup",
-            "emotion": "ตกใจ",
-            "facing": "ตรง"
+            "subject": "ชายใส่หมวกนิรภัย",
+            "shot": "closeup"
           }
         ],
         "seamStyle": "feather",
@@ -1526,7 +1550,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -1549,85 +1574,75 @@
             "shape": "rect",
             "xPct": 0,
             "yPct": 0,
-            "wPct": 50,
+            "wPct": 45,
             "hPct": 100,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ซ้ายเต็มสูง",
-            "subject": "ชายคนหนึ่ง",
-            "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "subject": "ชายเสื้อน้ำเงิน",
+            "shot": "closeup"
           },
           {
             "role": "pair",
             "shape": "rect",
-            "xPct": 50,
+            "xPct": 45,
             "yPct": 0,
-            "wPct": 50,
-            "hPct": 33,
-            "zIndex": 0,
-            "border": true,
-            "borderColor": "#00FF00",
-            "borderWidthPct": 1,
-            "pos": "บนขวา",
-            "subject": "กลุ่มคนสามคน",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
-          },
-          {
-            "role": "context",
-            "shape": "rect",
-            "xPct": 50,
-            "yPct": 33,
-            "wPct": 50,
-            "hPct": 33,
+            "wPct": 55,
+            "hPct": 35,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
-            "pos": "กลางขวา",
-            "subject": "บ้านหลังใหญ่",
-            "shot": "wide",
-            "emotion": "-",
-            "facing": "-"
+            "pos": "บนขวา",
+            "subject": "ครอบครัวสามคน",
+            "shot": "medium",
+            "emotion": "สุข"
           },
           {
-            "role": "moment",
-            "shape": "circle",
-            "xPct": 0,
-            "yPct": 66,
-            "wPct": 33,
-            "hPct": 34,
-            "zIndex": 1,
+            "role": "context",
+            "shape": "rect",
+            "xPct": 42,
+            "yPct": 33,
+            "wPct": 51,
+            "hPct": 29,
+            "zIndex": 3,
             "border": true,
-            "borderColor": "#FFFFFF",
-            "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
-            "subject": "คู่ชายหญิง",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "borderColor": "#00FF00",
+            "borderWidthPct": 1.5,
+            "pos": "inset ลอยทับ",
+            "subject": "บ้านหลังใหญ่",
+            "shot": "wide"
           },
           {
             "role": "reaction",
             "shape": "rect",
-            "xPct": 50,
-            "yPct": 66,
-            "wPct": 50,
-            "hPct": 34,
+            "xPct": 45,
+            "yPct": 35,
+            "wPct": 55,
+            "hPct": 65,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างขวา",
-            "subject": "หญิงคนหนึ่ง",
-            "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "subject": "หญิงยิ้ม",
+            "shot": "closeup"
+          },
+          {
+            "role": "moment",
+            "shape": "circle",
+            "xPct": 5,
+            "yPct": 66,
+            "wPct": 36,
+            "hPct": 29,
+            "zIndex": 4,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2,
+            "subject": "คู่ชายหญิง",
+            "shot": "medium"
           }
         ],
         "seamStyle": "feather",
@@ -1733,7 +1748,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -1763,10 +1779,8 @@
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ซ้ายเต็มสูง",
-            "subject": "ผู้หญิง",
-            "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ข้าง"
+            "subject": "ผู้หญิงผมบลอนด์",
+            "shot": "closeup"
           },
           {
             "role": "pair",
@@ -1774,50 +1788,43 @@
             "xPct": 50,
             "yPct": 0,
             "wPct": 50,
-            "hPct": 50,
+            "hPct": 54,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
-            "subject": "ผู้หญิงและผู้ชาย",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ข้าง"
+            "subject": "คู่ชายหญิงยืน",
+            "shot": "medium"
           },
           {
             "role": "reaction",
             "shape": "rect",
             "xPct": 50,
-            "yPct": 50,
+            "yPct": 54,
             "wPct": 50,
-            "hPct": 50,
+            "hPct": 46,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างขวา",
-            "subject": "ผู้ชาย",
-            "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "subject": "ชายยิ้ม",
+            "shot": "closeup"
           },
           {
             "role": "moment",
             "shape": "circle",
-            "xPct": 5,
-            "yPct": 75,
-            "wPct": 30,
-            "hPct": 30,
-            "zIndex": 1,
+            "xPct": 9,
+            "yPct": 66,
+            "wPct": 36,
+            "hPct": 29,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
-            "subject": "ผู้หญิงและผู้ชายกับถุงของขวัญ",
-            "shot": "medium",
-            "emotion": "-",
-            "facing": "ข้าง"
+            "subject": "หญิงกับถุงช้อปปิ้ง",
+            "shot": "medium"
           }
         ],
         "seamStyle": "feather",
@@ -1914,7 +1921,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -1929,7 +1937,7 @@
       "canvasHpx": 1350,
       "layoutFamily": "hero-left-collage",
       "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
-      "panelCount": 3,
+      "panelCount": 4,
       "template": {
         "slots": [
           {
@@ -1944,10 +1952,8 @@
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ซ้ายเต็มสูง",
-            "subject": "หญิงสาวในชุดพยาบาล",
-            "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "subject": "พยาบาลสาว",
+            "shot": "closeup"
           },
           {
             "role": "reaction",
@@ -1955,33 +1961,43 @@
             "xPct": 50,
             "yPct": 0,
             "wPct": 50,
-            "hPct": 50,
+            "hPct": 45,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
-            "subject": "หญิงสาวในชุดพยาบาล",
-            "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "subject": "พยาบาลสาวอีกคน",
+            "shot": "closeup"
           },
           {
             "role": "moment",
             "shape": "rect",
             "xPct": 50,
-            "yPct": 50,
+            "yPct": 45,
             "wPct": 50,
-            "hPct": 50,
+            "hPct": 55,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างขวา",
-            "subject": "กลุ่มคนกำลังทำกิจกรรมกลางแจ้ง",
-            "shot": "wide",
-            "emotion": "-",
-            "facing": "-"
+            "subject": "ฉากช่วยเหลือริมถนน",
+            "shot": "wide"
+          },
+          {
+            "role": "circle",
+            "shape": "circle",
+            "xPct": 9,
+            "yPct": 65,
+            "wPct": 36,
+            "hPct": 29,
+            "zIndex": 4,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2,
+            "subject": "หญิงผมแดงในรถ",
+            "shot": "closeup"
           }
         ],
         "seamStyle": "feather",
@@ -2070,7 +2086,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -2098,7 +2115,11 @@
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
-            "borderWidthPct": 0
+            "borderWidthPct": 0,
+            "pos": "ซ้ายเต็มสูง",
+            "subject": "หญิงสาวผมยาว",
+            "shot": "closeup",
+            "emotion": "จริงจัง"
           },
           {
             "role": "context",
@@ -2110,7 +2131,11 @@
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
-            "borderWidthPct": 0
+            "borderWidthPct": 0,
+            "pos": "บนขวา",
+            "subject": "กลุ่มคนในร้าน",
+            "shot": "medium",
+            "emotion": "ยิ้ม"
           },
           {
             "role": "evidence",
@@ -2119,10 +2144,14 @@
             "yPct": 33,
             "wPct": 51,
             "hPct": 24,
-            "zIndex": 0,
+            "zIndex": 3,
             "border": true,
             "borderColor": "#BFFF00",
-            "borderWidthPct": 1.5
+            "borderWidthPct": 1.5,
+            "pos": "inset กลางขวาลอยทับ",
+            "subject": "โทรศัพท์มือถือ",
+            "shot": "closeup",
+            "emotion": "-"
           },
           {
             "role": "reaction",
@@ -2134,7 +2163,11 @@
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
-            "borderWidthPct": 0
+            "borderWidthPct": 0,
+            "pos": "ล่างขวา",
+            "subject": "ชายผมทอง",
+            "shot": "closeup",
+            "emotion": "นิ่ง"
           },
           {
             "role": "moment",
@@ -2143,10 +2176,14 @@
             "yPct": 60,
             "wPct": 36,
             "hPct": 28,
-            "zIndex": 1,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
-            "borderWidthPct": 1.5
+            "borderWidthPct": 2,
+            "pos": "วงกลมล่างซ้าย",
+            "subject": "หญิงสาวกับเด็ก",
+            "shot": "closeup",
+            "emotion": "อบอุ่น"
           }
         ],
         "seamStyle": "feather",
@@ -2274,7 +2311,7 @@
       "canvasHpx": 1350,
       "layoutFamily": "hero-left-collage",
       "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 2 ช่อง + วงกลมล่างซ้าย",
-      "panelCount": 4,
+      "panelCount": 5,
       "template": {
         "slots": [
           {
@@ -2282,68 +2319,75 @@
             "shape": "rect",
             "xPct": 0,
             "yPct": 0,
-            "wPct": 60,
-            "hPct": 100,
+            "wPct": 48,
+            "hPct": 62,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
-            "pos": "ซ้ายเต็มสูง",
-            "subject": "เด็กชายและพระ",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "pos": "ซ้ายบน",
+            "subject": "เด็กชาย",
+            "shot": "closeup"
           },
           {
             "role": "context",
             "shape": "rect",
-            "xPct": 60,
+            "xPct": 48,
             "yPct": 0,
-            "wPct": 40,
-            "hPct": 50,
-            "zIndex": 0,
-            "border": true,
-            "borderColor": "#FFFFFF",
-            "borderWidthPct": 1,
-            "pos": "บนขวา",
-            "subject": "เด็กชายและพระในห้อง",
-            "shot": "medium",
-            "emotion": "สงบ",
-            "facing": "ข้าง"
-          },
-          {
-            "role": "moment",
-            "shape": "rect",
-            "xPct": 60,
-            "yPct": 50,
-            "wPct": 40,
-            "hPct": 50,
+            "wPct": 52,
+            "hPct": 62,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
-            "pos": "ล่างขวา",
-            "subject": "เด็กชายไหว้",
-            "shot": "closeup",
-            "emotion": "เคารพ",
-            "facing": "ข้าง"
+            "pos": "บนขวา",
+            "subject": "พระกับเด็กชายในวัด",
+            "shot": "medium"
           },
           {
             "role": "evidence",
-            "shape": "circle",
+            "shape": "rect",
+            "xPct": 46,
+            "yPct": 36,
+            "wPct": 51,
+            "hPct": 28,
+            "zIndex": 3,
+            "border": true,
+            "borderColor": "#00FF00",
+            "borderWidthPct": 1.5,
+            "pos": "inset ลอยทับ",
+            "subject": "ครอบครัวในบ้าน",
+            "shot": "medium"
+          },
+          {
+            "role": "moment",
+            "shape": "rect",
             "xPct": 0,
-            "yPct": 70,
-            "wPct": 30,
-            "hPct": 30,
-            "zIndex": 1,
+            "yPct": 62,
+            "wPct": 100,
+            "hPct": 38,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0,
+            "pos": "แถบล่างเต็มกว้าง",
+            "subject": "เด็กชายพนมมือไหว้",
+            "shot": "closeup",
+            "emotion": "ซึ้งใจ"
+          },
+          {
+            "role": "reaction",
+            "shape": "circle",
+            "xPct": 7,
+            "yPct": 60,
+            "wPct": 36,
+            "hPct": 29,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
             "subject": "พระ",
-            "shot": "closeup",
-            "emotion": "สงบ",
-            "facing": "ข้าง"
+            "shot": "closeup"
           }
         ],
         "seamStyle": "feather",
@@ -2440,7 +2484,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -2463,7 +2508,7 @@
             "shape": "rect",
             "xPct": 0,
             "yPct": 0,
-            "wPct": 50,
+            "wPct": 52,
             "hPct": 100,
             "zIndex": 0,
             "border": false,
@@ -2471,60 +2516,51 @@
             "borderWidthPct": 0,
             "pos": "ซ้ายเต็มสูง",
             "subject": "ชายยิ้ม",
-            "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "shot": "closeup"
           },
           {
             "role": "context",
             "shape": "rect",
-            "xPct": 50,
+            "xPct": 52,
             "yPct": 0,
-            "wPct": 50,
+            "wPct": 48,
             "hPct": 50,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
-            "subject": "ชายในชุดแพทย์",
-            "shot": "medium",
-            "emotion": "สงบ",
-            "facing": "ตรง"
+            "subject": "ชายชุดแพทย์ยืน",
+            "shot": "medium"
           },
           {
             "role": "action",
             "shape": "rect",
-            "xPct": 50,
+            "xPct": 52,
             "yPct": 50,
-            "wPct": 50,
+            "wPct": 48,
             "hPct": 50,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างขวา",
-            "subject": "ชายช่วยเหลือคน",
-            "shot": "medium",
-            "emotion": "ตั้งใจ",
-            "facing": "ข้าง"
+            "subject": "ชายช่วยเหลือผู้บาดเจ็บ (วงเหลืองชี้)",
+            "shot": "wide"
           },
           {
             "role": "moment",
             "shape": "circle",
-            "xPct": 5,
-            "yPct": 70,
-            "wPct": 30,
-            "hPct": 30,
-            "zIndex": 1,
+            "xPct": 12,
+            "yPct": 63,
+            "wPct": 36,
+            "hPct": 29,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
             "subject": "ชายมองกล้อง",
-            "shot": "closeup",
-            "emotion": "สงบ",
-            "facing": "ตรง"
+            "shot": "closeup"
           }
         ],
         "seamStyle": "feather",
@@ -2621,7 +2657,8 @@
         "ภาพบริบท",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -2645,16 +2682,15 @@
             "xPct": 0,
             "yPct": 0,
             "wPct": 50,
-            "hPct": 60,
+            "hPct": 50,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนซ้าย",
-            "subject": "ผู้หญิงยิ้ม",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "subject": "หญิงหัวเราะ",
+            "shot": "closeup",
+            "emotion": "สุข"
           },
           {
             "role": "pair",
@@ -2668,27 +2704,24 @@
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
-            "subject": "ชายหญิงจับมือ",
-            "shot": "medium",
-            "emotion": "-",
-            "facing": "ข้าง"
+            "subject": "คู่ชายหญิง (วงแดงชี้มือ)",
+            "shot": "medium"
           },
           {
             "role": "action",
             "shape": "rect",
             "xPct": 0,
-            "yPct": 60,
+            "yPct": 50,
             "wPct": 50,
-            "hPct": 40,
+            "hPct": 50,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างซ้าย",
-            "subject": "ผู้หญิงไหว้",
-            "shot": "medium",
-            "emotion": "สงบ",
-            "facing": "ตรง"
+            "subject": "หญิงพนมมือร้องไห้",
+            "shot": "closeup",
+            "emotion": "ซึ้งใจ"
           },
           {
             "role": "reaction",
@@ -2702,27 +2735,22 @@
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างขวา",
-            "subject": "ผู้ชายยิ้ม",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "subject": "ชายหนุ่ม",
+            "shot": "closeup"
           },
           {
             "role": "context",
             "shape": "circle",
-            "xPct": 25,
-            "yPct": 30,
-            "wPct": 20,
-            "hPct": 20,
-            "zIndex": 1,
+            "xPct": 33,
+            "yPct": 36,
+            "wPct": 34,
+            "hPct": 27,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
-            "subject": "ผู้ชายพูด",
-            "shot": "closeup",
-            "emotion": "พูด",
-            "facing": "ตรง"
+            "subject": "ชายสูทพูด",
+            "shot": "closeup"
           }
         ],
         "seamStyle": "feather",
@@ -2828,7 +2856,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -2852,16 +2881,14 @@
             "xPct": 0,
             "yPct": 0,
             "wPct": 50,
-            "hPct": 100,
+            "hPct": 60,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
-            "pos": "ซ้ายเต็มสูง",
-            "subject": "ชายในชุดขาว",
-            "shot": "medium",
-            "emotion": "สงบ",
-            "facing": "ตรง"
+            "pos": "ซ้ายบน",
+            "subject": "ชายชุดขาว",
+            "shot": "closeup"
           },
           {
             "role": "context",
@@ -2869,50 +2896,44 @@
             "xPct": 50,
             "yPct": 0,
             "wPct": 50,
-            "hPct": 50,
+            "hPct": 60,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
-            "subject": "ชายสองคนในรถ",
-            "shot": "medium",
-            "emotion": "จริงจัง",
-            "facing": "ข้าง"
+            "subject": "บุคคลในรถ",
+            "shot": "medium"
           },
           {
-            "role": "moment",
+            "role": "reaction",
             "shape": "rect",
-            "xPct": 50,
-            "yPct": 50,
-            "wPct": 50,
-            "hPct": 50,
+            "xPct": 0,
+            "yPct": 60,
+            "wPct": 100,
+            "hPct": 40,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
-            "pos": "ล่างขวา",
-            "subject": "ชายยิ้ม",
+            "pos": "แถบล่างเต็มกว้าง",
+            "subject": "ชายยิ้มกว้าง",
             "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "emotion": "สุข"
           },
           {
-            "role": "action",
+            "role": "moment",
             "shape": "circle",
-            "xPct": 5,
-            "yPct": 55,
-            "wPct": 40,
-            "hPct": 40,
-            "zIndex": 1,
+            "xPct": 10,
+            "yPct": 60,
+            "wPct": 36,
+            "hPct": 29,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
-            "subject": "ชายบนเก้าอี้",
-            "shot": "medium",
-            "emotion": "สงบ",
-            "facing": "ข้าง"
+            "subject": "ชายนั่งเก้าอี้",
+            "shot": "wide"
           }
         ],
         "seamStyle": "feather",
@@ -3010,7 +3031,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -3040,10 +3062,9 @@
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ซ้ายเต็มสูง",
-            "subject": "ชายสวมหมวกและแว่น",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "subject": "ชายหมวกแก๊ป+แว่น",
+            "shot": "closeup",
+            "emotion": "สุข"
           },
           {
             "role": "context",
@@ -3051,67 +3072,59 @@
             "xPct": 50,
             "yPct": 0,
             "wPct": 50,
-            "hPct": 50,
+            "hPct": 58,
             "zIndex": 0,
-            "border": true,
-            "borderColor": "#00FF00",
-            "borderWidthPct": 2,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0,
             "pos": "บนขวา",
-            "subject": "ชายสองคนเดินในชุดครุย",
-            "shot": "wide",
-            "emotion": "-",
-            "facing": "ข้าง"
+            "subject": "บัณฑิตเดินกลางแจ้ง",
+            "shot": "wide"
           },
           {
             "role": "evidence",
             "shape": "rect",
+            "xPct": 44,
+            "yPct": 32,
+            "wPct": 53,
+            "hPct": 26,
+            "zIndex": 3,
+            "border": true,
+            "borderColor": "#00FF00",
+            "borderWidthPct": 1.5,
+            "pos": "inset ลอยทับ",
+            "subject": "ท้ายทอยเด็ก (วงแดงชี้หูฟัง)",
+            "shot": "closeup"
+          },
+          {
+            "role": "reaction",
+            "shape": "rect",
             "xPct": 50,
-            "yPct": 50,
+            "yPct": 58,
             "wPct": 50,
-            "hPct": 25,
-            "zIndex": 1,
-            "border": true,
-            "borderColor": "#FF0000",
-            "borderWidthPct": 2,
-            "pos": "กลางขวา",
-            "subject": "ด้านหลังศีรษะเด็ก",
+            "hPct": 42,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0,
+            "pos": "ล่างขวา",
+            "subject": "ชายกอดกัน",
             "shot": "closeup",
-            "emotion": "-",
-            "facing": "-"
+            "emotion": "ซึ้งใจ"
           },
           {
             "role": "moment",
             "shape": "circle",
-            "xPct": 25,
-            "yPct": 75,
-            "wPct": 50,
-            "hPct": 50,
-            "zIndex": 1,
+            "xPct": 9,
+            "yPct": 63,
+            "wPct": 36,
+            "hPct": 29,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
             "subject": "ชายอุ้มเด็ก",
-            "shot": "medium",
-            "emotion": "สงสัย",
-            "facing": "ตรง"
-          },
-          {
-            "role": "moment",
-            "shape": "circle",
-            "xPct": 75,
-            "yPct": 75,
-            "wPct": 50,
-            "hPct": 50,
-            "zIndex": 1,
-            "border": true,
-            "borderColor": "#FFFFFF",
-            "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
-            "subject": "ชายสองคนกอดกัน",
-            "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ข้าง"
+            "shot": "closeup"
           }
         ],
         "seamStyle": "feather",
@@ -3218,7 +3231,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -3249,9 +3263,7 @@
             "borderWidthPct": 0,
             "pos": "ซ้ายเต็มสูง",
             "subject": "พระสงฆ์",
-            "shot": "medium",
-            "emotion": "สงบ",
-            "facing": "ตรง"
+            "shot": "closeup"
           },
           {
             "role": "context",
@@ -3265,10 +3277,8 @@
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
-            "subject": "พระสงฆ์และบุคคลอื่นหน้าหอผู้ป่วยชาย",
-            "shot": "medium",
-            "emotion": "เป็นทางการ",
-            "facing": "ตรง"
+            "subject": "พระสงฆ์และบุคคลหน้าหอผู้ป่วย",
+            "shot": "medium"
           },
           {
             "role": "action",
@@ -3282,10 +3292,8 @@
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "กลางขวา",
-            "subject": "พระสงฆ์เยี่ยมผู้ป่วย",
-            "shot": "medium",
-            "emotion": "ห่วงใย",
-            "facing": "ข้าง"
+            "subject": "พระสงฆ์เยี่ยมผู้ป่วย (วงเหลืองชี้)",
+            "shot": "medium"
           },
           {
             "role": "moment",
@@ -3299,27 +3307,22 @@
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างขวา",
-            "subject": "บุคคลดูแลผู้ป่วย",
-            "shot": "medium",
-            "emotion": "เอาใจใส่",
-            "facing": "ข้าง"
+            "subject": "ผู้ดูแลป้อนยาผู้ป่วย (วงเหลืองชี้)",
+            "shot": "medium"
           },
           {
             "role": "reaction",
             "shape": "circle",
-            "xPct": 5,
-            "yPct": 75,
-            "wPct": 20,
-            "hPct": 20,
-            "zIndex": 1,
+            "xPct": 17,
+            "yPct": 61,
+            "wPct": 26,
+            "hPct": 21,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
             "subject": "ผู้หญิงยิ้ม",
-            "shot": "closeup",
-            "emotion": "ยิ้มแย้ม",
-            "facing": "ตรง"
+            "shot": "closeup"
           }
         ],
         "seamStyle": "feather",
@@ -3427,7 +3430,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -3458,9 +3462,7 @@
             "borderWidthPct": 0,
             "pos": "ซ้ายเต็มสูง",
             "subject": "พระสงฆ์",
-            "shot": "medium",
-            "emotion": "สงบ",
-            "facing": "ตรง"
+            "shot": "closeup"
           },
           {
             "role": "context",
@@ -3474,10 +3476,8 @@
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
-            "subject": "พระสงฆ์และบุคคลอื่นหน้าหอผู้ป่วยชาย",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "subject": "พระสงฆ์และบุคคลหน้าหอผู้ป่วย",
+            "shot": "medium"
           },
           {
             "role": "action",
@@ -3491,10 +3491,8 @@
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "กลางขวา",
-            "subject": "พระสงฆ์เยี่ยมผู้ป่วย",
-            "shot": "medium",
-            "emotion": "ห่วงใย",
-            "facing": "ข้าง"
+            "subject": "พระสงฆ์เยี่ยมผู้ป่วย (วงเหลืองชี้)",
+            "shot": "medium"
           },
           {
             "role": "moment",
@@ -3508,27 +3506,22 @@
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างขวา",
-            "subject": "ผู้หญิงดูแลผู้ป่วย",
-            "shot": "medium",
-            "emotion": "เอาใจใส่",
-            "facing": "ข้าง"
+            "subject": "ผู้ดูแลป้อนยาผู้ป่วย (วงเหลืองชี้)",
+            "shot": "medium"
           },
           {
             "role": "reaction",
             "shape": "circle",
-            "xPct": 5,
-            "yPct": 75,
-            "wPct": 20,
-            "hPct": 20,
-            "zIndex": 1,
+            "xPct": 17,
+            "yPct": 61,
+            "wPct": 26,
+            "hPct": 21,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
             "subject": "ผู้หญิงยิ้ม",
-            "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "shot": "closeup"
           }
         ],
         "seamStyle": "feather",
@@ -3636,7 +3629,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -3655,38 +3649,19 @@
       "template": {
         "slots": [
           {
-            "role": "hero",
-            "shape": "rect",
-            "xPct": 0,
-            "yPct": 50,
-            "wPct": 50,
-            "hPct": 50,
-            "zIndex": 0,
-            "border": false,
-            "borderColor": "-",
-            "borderWidthPct": 0,
-            "pos": "ซ้ายล่าง",
-            "subject": "ผู้หญิง",
-            "shot": "closeup",
-            "emotion": "สงบ",
-            "facing": "ตรง"
-          },
-          {
             "role": "action",
             "shape": "rect",
             "xPct": 0,
             "yPct": 0,
             "wPct": 50,
-            "hPct": 50,
+            "hPct": 47,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
-            "pos": "ซ้ายบน",
-            "subject": "ชายหญิงกอดกัน",
-            "shot": "medium",
-            "emotion": "อบอุ่น",
-            "facing": "-"
+            "pos": "บนซ้าย",
+            "subject": "ชายหญิงกอดกันกับกระเป๋าเดินทาง",
+            "shot": "wide"
           },
           {
             "role": "pair",
@@ -3694,50 +3669,60 @@
             "xPct": 50,
             "yPct": 0,
             "wPct": 50,
-            "hPct": 50,
+            "hPct": 47,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
-            "pos": "ขวาบน",
-            "subject": "คู่ชายหญิง",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "pos": "บนขวา",
+            "subject": "คู่บ่าวสาว",
+            "shot": "closeup",
+            "emotion": "สุข"
+          },
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 47,
+            "wPct": 50,
+            "hPct": 53,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0,
+            "pos": "ล่างซ้าย",
+            "subject": "หญิงสัมภาษณ์",
+            "shot": "closeup"
           },
           {
             "role": "moment",
             "shape": "rect",
             "xPct": 50,
-            "yPct": 50,
+            "yPct": 47,
             "wPct": 50,
-            "hPct": 50,
+            "hPct": 53,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
-            "pos": "ขวาล่าง",
-            "subject": "ชายดูแลผู้ป่วย",
-            "shot": "medium",
-            "emotion": "ห่วงใย",
-            "facing": "-"
+            "pos": "ล่างขวา",
+            "subject": "ชายดูแลผู้ป่วยติดเตียง",
+            "shot": "medium"
           },
           {
             "role": "evidence",
             "shape": "circle",
-            "xPct": 25,
-            "yPct": 25,
-            "wPct": 30,
-            "hPct": 30,
-            "zIndex": 1,
+            "xPct": 33,
+            "yPct": 31,
+            "wPct": 33,
+            "hPct": 26,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
-            "subject": "ชายโทรศัพท์",
+            "subject": "ชายร้องไห้กุมมือ",
             "shot": "closeup",
-            "emotion": "ครุ่นคิด",
-            "facing": "ข้าง"
+            "emotion": "เศร้า"
           }
         ],
         "seamStyle": "feather",
@@ -3842,7 +3827,8 @@
         "ภาพคู่",
         "โมเมนต์เหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   },
@@ -3866,16 +3852,14 @@
             "xPct": 0,
             "yPct": 0,
             "wPct": 50,
-            "hPct": 100,
+            "hPct": 52,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
-            "pos": "ซ้ายเต็มสูง",
-            "subject": "ผู้หญิงยิ้ม",
-            "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "pos": "บนซ้าย",
+            "subject": "หญิงยิ้ม",
+            "shot": "closeup"
           },
           {
             "role": "context",
@@ -3883,67 +3867,58 @@
             "xPct": 50,
             "yPct": 0,
             "wPct": 50,
-            "hPct": 50,
+            "hPct": 52,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
-            "subject": "รูปภาพในกรอบดอกไม้",
-            "shot": "medium",
-            "emotion": "-",
-            "facing": "ตรง"
-          },
-          {
-            "role": "reaction",
-            "shape": "rect",
-            "xPct": 50,
-            "yPct": 50,
-            "wPct": 50,
-            "hPct": 50,
-            "zIndex": 0,
-            "border": false,
-            "borderColor": "-",
-            "borderWidthPct": 0,
-            "pos": "ล่างขวา",
-            "subject": "ผู้หญิงยิ้ม",
-            "shot": "closeup",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "subject": "รูปในกรอบล้อมดอกไม้ (อาลัย)",
+            "shot": "medium"
           },
           {
             "role": "moment",
             "shape": "rect",
             "xPct": 0,
-            "yPct": 50,
-            "wPct": 25,
-            "hPct": 50,
+            "yPct": 52,
+            "wPct": 46,
+            "hPct": 48,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างซ้าย",
-            "subject": "ผู้หญิงใส่แว่น",
-            "shot": "medium",
-            "emotion": "ยิ้ม",
-            "facing": "ตรง"
+            "subject": "หญิงใส่แว่นชุดพยาบาล",
+            "shot": "closeup"
+          },
+          {
+            "role": "reaction",
+            "shape": "rect",
+            "xPct": 46,
+            "yPct": 52,
+            "wPct": 54,
+            "hPct": 48,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0,
+            "pos": "ล่างขวา",
+            "subject": "หญิงชุดชมพูยิ้ม",
+            "shot": "closeup"
           },
           {
             "role": "evidence",
             "shape": "circle",
-            "xPct": 35,
-            "yPct": 40,
-            "wPct": 30,
-            "hPct": 30,
-            "zIndex": 1,
+            "xPct": 30,
+            "yPct": 39,
+            "wPct": 34,
+            "hPct": 27,
+            "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
-            "pos": "วงกลมกลาง",
             "subject": "รถยนต์ข้างถนน",
-            "shot": "wide",
-            "emotion": "-",
-            "facing": "-"
+            "shot": "wide"
           }
         ],
         "seamStyle": "feather",
@@ -4049,7 +4024,8 @@
         "ภาพในกรอบ",
         "หลักฐานเหตุการณ์"
       ],
-      "_geometryRefined": true
+      "_geometryRefined": true,
+      "_humanVerified": true
     },
     "dnaError": null
   }
