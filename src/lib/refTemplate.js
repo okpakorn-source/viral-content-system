@@ -90,6 +90,38 @@ export function dnaToTemplateSpec(dna) {
       };
     });
 
+    // ②b ★ 9 ก.ค. (REF-mrbq6y74: DNA วัด 2 ช่องพิกัดทับกันเป๊ะ → ภาพโดนบังมิด "ไม่ทำตาม ref"):
+    //   ด่านกันช่องชนกัน — rect คู่ไหนซ้อนทับ (IoU) > 0.6 = DNA วัดพลาดแน่นอน (ปกจริงไม่มีช่องทับกันขนาดนี้)
+    //   → ช่องที่มี "กรอบสี" = ภาพแปะกรอบของปกไวรัล → หดเป็น inset 62% ลอยทับ (zIndex สูง) ตามธรรมชาติปกจริง
+    //   → ไม่มีกรอบแยกไม่ออก → ตัดช่องหลังทิ้ง (ยังไงก็ถูกบังมิด เสียภาพเปล่า)
+    for (let a = 0; a < rectBounds.length; a++) {
+      for (let b = a + 1; b < rectBounds.length; b++) {
+        const A = rectBounds[a], B = rectBounds[b];
+        if (!A || !B) continue;
+        const ix = Math.max(0, Math.min(A.x2, B.x2) - Math.max(A.x1, B.x1));
+        const iy = Math.max(0, Math.min(A.y2, B.y2) - Math.max(A.y1, B.y1));
+        const inter = ix * iy;
+        const areaA = (A.x2 - A.x1) * (A.y2 - A.y1), areaB = (B.x2 - B.x1) * (B.y2 - B.y1);
+        const iou = inter / Math.max(1, areaA + areaB - inter);
+        if (iou <= 0.6) continue;
+        const sA = slots[A.i], sB = slots[B.i];
+        if (!sA || !sB) continue;
+        const pick = (sA.border && !sB.border) ? { s: sA, r: a } : (sB.border && !sA.border) ? { s: sB, r: b } : null;
+        if (pick) {
+          const nw = Math.round(pick.s.w * 0.62), nh = Math.round(pick.s.h * 0.62);
+          pick.s.x = Math.round(pick.s.x + (pick.s.w - nw) / 2);
+          pick.s.y = Math.round(pick.s.y + (pick.s.h - nh) / 2);
+          pick.s.w = nw; pick.s.h = nh;
+          pick.s.zIndex = Math.max(3, (Number(pick.s.zIndex) || 0) + 3);
+          rectBounds[pick.r] = null; // inset ไม่ร่วมปิดผืน — โซนนั้นช่องอีกใบคลุมเต็มอยู่แล้ว
+        } else {
+          slots[B.i] = null;   // ตัดช่องหลัง (ถูกบังมิด)
+          rectBounds[b] = null;
+        }
+      }
+    }
+    for (let k = rectBounds.length - 1; k >= 0; k--) { if (!rectBounds[k]) rectBounds.splice(k, 1); }
+
     // ③ ด่านปิดผืน: เซลล์กริดไหนไม่มีช่องครอบ → ขยายช่องที่เพิ่มพื้นที่น้อยสุดเข้าปิด (การันตีเต็ม 100% ไม่มีร่อง "ภาพแหว่ง")
     //   ขยายแล้วอาจซ้อนช่องข้างเล็กน้อย = ยอมรับ (zIndex+feather กลบรอยต่อ) ดีกว่าเหลือร่องขาว
     try {
@@ -121,18 +153,22 @@ export function dnaToTemplateSpec(dna) {
       }
     } catch { /* ปิดผืนล้ม → ใช้ช่องหลัง snap ตามเดิม (แค่เสี่ยงร่องเท่าเดิม ไม่พังปก) */ }
 
+    // ★ 9 ก.ค.: กรองช่องที่ถูกด่านกันชนตัดทิ้ง (null) ออกก่อนใช้ต่อ
+    const live = slots.filter(Boolean);
+    if (live.filter((s) => s.shape !== 'circle').length < 2 || live.length < 3) return null; // ตัดแล้วเหลือไม่พอ = โครงใช้ไม่ได้
+
     // ไม่มี hero ระบุ → ช่องสี่เหลี่ยมใหญ่สุด = main (hero-tight/guards ต้องมีเป้า)
-    if (!slots.some((s) => s.id === 'main')) {
-      const r = slots.filter((s) => s.shape !== 'circle').sort((a, b) => b.w * b.h - a.w * a.h)[0];
+    if (!live.some((s) => s.id === 'main')) {
+      const r = live.filter((s) => s.shape !== 'circle').sort((a, b) => b.w * b.h - a.w * a.h)[0];
       if (!r) return null;
       r.id = 'main';
     }
     // กัน id ซ้ำ (เช่น circle 2 วง)
     const seen = new Set();
-    for (const s of slots) { const base = s.id; let n = 1; while (seen.has(s.id)) s.id = `${base}${n++}`; seen.add(s.id); }
+    for (const s of live) { const base = s.id; let n = 1; while (seen.has(s.id)) s.id = `${base}${n++}`; seen.add(s.id); }
 
     const feather = Number(t.featherPx) || (t.seamStyle === 'feather' ? 26 : 0);
-    return { id: 'ref_dna', storyFit: `โครงตามปกเป้า: ${dna.layoutType || ''}`.slice(0, 120), canvasW: W, canvasH: H, feather, slots };
+    return { id: 'ref_dna', storyFit: `โครงตามปกเป้า: ${dna.layoutType || ''}`.slice(0, 120), canvasW: W, canvasH: H, feather, slots: live };
   } catch {
     return null;
   }
