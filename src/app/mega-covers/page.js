@@ -35,7 +35,7 @@ export default function MegaCoversPage() {
         <button onClick={load} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', fontSize: 13 }}>↻ รีเฟรช</button>
         <span style={{ color: '#64748b', fontSize: 13 }}>{items.length} ใบ</span>
       </div>
-      <p style={{ color: '#64748b', fontSize: 13, marginTop: 0 }}>ปกที่ทำเสร็จจาก /cover-ref-test + MEGA s7 เด้งเข้าคลังนี้อัตโนมัติ · คลิกปกเพื่อเทียบ reference</p>
+      <p style={{ color: '#64748b', fontSize: 13, marginTop: 0 }}>ทุกจุดกดสร้างปก (MEGA s7 · ทางลัดเทส · cover-ref-test) เด้งเข้าคลังนี้อัตโนมัติ — เก็บบนคลาวด์ เห็นเหมือนกันทั้งเครื่องทีมและ Vercel · คลิกปกเพื่อดูใหญ่ · ⬇️ โหลดภาพได้ทุกใบ</p>
 
       {loading && <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>⏳ กำลังโหลด…</div>}
       {err && <div style={{ padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#b91c1c', fontSize: 13 }}>{err}</div>}
@@ -46,19 +46,33 @@ export default function MegaCoversPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginTop: 12 }}>
         {items.map((it) => (
           <div key={it.id} style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
-            {it.coverPath
-              ? <img src={it.coverPath} alt={it.title} onClick={() => setZoom(it.coverPath)} style={{ width: '100%', display: 'block', cursor: 'zoom-in', aspectRatio: '4/5', objectFit: 'cover' }} />
-              : <div style={{ aspectRatio: '4/5', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>ไม่มีภาพ</div>}
+            {/* ★ 9 ก.ค.: ภาพผ่าน /api/mega-covers/img (ไฟล์เครื่อง→คลาวด์) — Vercel เห็นคลังเดียวกับเครื่องทีม
+                · onError ถอยไป coverPath (record เก่าก่อนคลาวด์) ก่อนโชว์ "ไม่มีภาพ" */}
+            <img
+              src={`/api/mega-covers/img?id=${encodeURIComponent(it.id)}`}
+              alt={it.title}
+              onClick={() => setZoom(`/api/mega-covers/img?id=${encodeURIComponent(it.id)}`)}
+              onError={(e) => {
+                if (it.coverPath && e.currentTarget.dataset.fb !== '1') { e.currentTarget.dataset.fb = '1'; e.currentTarget.src = it.coverPath; }
+                else e.currentTarget.style.display = 'none';
+              }}
+              style={{ width: '100%', display: 'block', cursor: 'zoom-in', aspectRatio: '4/5', objectFit: 'cover', background: '#f1f5f9' }}
+            />
             <div style={{ padding: 10 }}>
               <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.3, marginBottom: 4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{it.title || '(ไม่มีหัวข้อ)'}</div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: '#475569' }}>
-                {it.score != null && <span style={{ fontWeight: 800, color: scoreColor(it.score) }}>QC {it.score}/10</span>}
+                {it.score != null && <span style={{ fontWeight: 800, color: scoreColor(it.score) }}>{typeof it.score === 'number' ? `QC ${it.score}/10` : it.score}</span>}
                 <span>{it.template || '-'}</span>
                 <span style={{ padding: '0 6px', borderRadius: 4, background: it.source === 'mega' ? '#ecfccb' : '#eff6ff' }}>{it.source}</span>
               </div>
               <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
                 {it.imageCaseId && <span>{it.imageCaseId} · </span>}{fmt(it.at)}
               </div>
+              {/* ⬇️ ปุ่มโหลดภาพ (ผู้ใช้สั่ง 9 ก.ค.) — &dl=1 บังคับดาวน์โหลดเป็นไฟล์ */}
+              <a
+                href={`/api/mega-covers/img?id=${encodeURIComponent(it.id)}&dl=1`}
+                style={{ display: 'inline-block', marginTop: 8, padding: '5px 12px', borderRadius: 8, background: '#4f46e5', color: '#fff', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}
+              >⬇️ โหลดภาพ</a>
             </div>
           </div>
         ))}

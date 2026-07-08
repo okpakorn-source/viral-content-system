@@ -127,10 +127,29 @@ export async function POST(req) {
     });
     if (out.success && out.refSimilarity != null) out.score = `เหมือน ref ${out.refSimilarity}%`;
 
+    // 🗂️ 9 ก.ค. (ผู้ใช้สั่ง "ทุกครั้งที่กดสร้างปกเข้าคลังออโต้"): ผลสำเร็จเด้งเข้าคลังงาน MEGA เสมอ
+    let archived = null;
+    if (out.success && out.base64) {
+      try {
+        const { addMegaCover } = await import('@/lib/megaCoverArchive');
+        archived = await addMegaCover({
+          title: c.analysis?.headline || c.newsSnippet || caseId,
+          source: 'compose-test',
+          imageCaseId: caseId,
+          refId: ref?.id || null,
+          refSimilarity: out.refSimilarity ?? null,
+          template: out.template || '',
+          score: out.score || null,
+          base64: out.base64,
+        });
+      } catch { /* คลังล้มไม่กระทบผลเทส */ }
+    }
+
     return NextResponse.json({
       ...out,
       caseId,
       refUsed: ref ? { id: ref.id, styleName: ref.styleName || ref.id, imagePath: ref.imagePath } : null,
+      archivedId: archived?.id || null, // เข้าคลัง /mega-covers แล้ว (โหลดภาพ: /api/mega-covers/img?id=..&dl=1)
       poolSize: pool.length,
       elapsed: `${((Date.now() - t0) / 1000).toFixed(1)}s`,
     }, { status: out.success ? 200 : 422 });

@@ -77,7 +77,15 @@ export default function MegaComposeTest() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
-              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>ปกที่ประกอบ</div>
+              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span>ปกที่ประกอบ</span>
+                {/* ⬇️ 9 ก.ค.: โหลดภาพจากผลตรงหน้านี้ + ป้ายยืนยันเข้าคลังออโต้ */}
+                {result.base64 && (
+                  <a href={result.base64} download={`${result.archivedId || result.caseId || 'mega-cover'}.jpg`}
+                    style={{ padding: '3px 10px', borderRadius: 6, background: '#4f46e5', color: '#fff', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>⬇️ โหลดภาพ</a>
+                )}
+                {result.archivedId && <a href="/mega-covers" style={{ color: '#16a34a', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>🗂️ เข้าคลังแล้ว ({result.archivedId})</a>}
+              </div>
               {result.base64 && <img src={result.base64} alt="cover" style={{ width: '100%', borderRadius: 10, border: '2px solid #4f46e5' }} />}
             </div>
             <div>

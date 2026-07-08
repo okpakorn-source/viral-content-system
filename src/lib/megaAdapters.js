@@ -833,17 +833,22 @@ export async function s7_wait(job) {
       return { status: 'failed', nextAction: 'fail', summary: 'ปกเสร็จแต่ไม่พบรูปในผล (ไม่มี base64)', quality: 'red' };
     }
     // เซฟเป็นไฟล์ให้ UI ใช้ได้เลย — แฟ้มเก็บแค่ path+สรุป (กติกา: dossier ห้ามเก็บก้อนใหญ่)
+    // ★ 9 ก.ค.: เขียนดิสก์ล้ม (Vercel/Railway อ่านอย่างเดียว) ห้ามพังงาน — คลังคลาวด์รับช่วงเสิร์ฟภาพแทน
     const { promises: fs } = await import('fs');
     const path = await import('path');
-    const dir = path.join(process.cwd(), 'public', 'mega-covers');
-    await fs.mkdir(dir, { recursive: true });
     const file = `${job.id}-${Date.now().toString(36)}.${m[1] === 'png' ? 'png' : 'jpg'}`;
-    await fs.writeFile(path.join(dir, file), Buffer.from(m[2], 'base64'));
-    // 🗂️ ส่งเข้าคลังงานปก MEGA อัตโนมัติ (ล้มไม่ critical ต่อสายพาน)
+    let coverPath = `/mega-covers/${file}`;
+    try {
+      const dir = path.join(process.cwd(), 'public', 'mega-covers');
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, file), Buffer.from(m[2], 'base64'));
+    } catch { coverPath = null; }
+    // 🗂️ ส่งเข้าคลังงานปก MEGA อัตโนมัติ (ล้มไม่ critical ต่อสายพาน) — base64 ขึ้นคลาวด์ให้ Vercel เห็นด้วย
     try {
       const { addMegaCover } = await import('@/lib/megaCoverArchive');
-      await addMegaCover({ id: job.id, title: job.dossier.desk?.title || '', source: 'mega', imageCaseId: job.dossier.images?.caseId || null, coverCaseId: r.caseId || '', coverPath: `/mega-covers/${file}`, template: r.template || '', score: r.score ?? null, throughMega: true });
-    } catch { /* คลังไม่ critical */ }
+      const ent = await addMegaCover({ id: job.id, title: job.dossier.desk?.title || '', source: 'mega', imageCaseId: job.dossier.images?.caseId || null, coverCaseId: r.caseId || '', coverPath, base64, template: r.template || '', score: r.score ?? null, throughMega: true });
+      if (!coverPath) coverPath = `/api/mega-covers/img?id=${encodeURIComponent(ent?.id || job.id)}`;
+    } catch { if (!coverPath) coverPath = ''; /* คลังไม่ critical */ }
     return {
       status: 'done',
       nextAction: 'continue',
@@ -851,7 +856,7 @@ export async function s7_wait(job) {
       dossierPatch: {
         cover: {
           ...cv,
-          coverPath: `/mega-covers/${file}`,
+          coverPath,
           template: r.template || '',
           score: r.score ?? null,
           coverCaseId: r.caseId || '',

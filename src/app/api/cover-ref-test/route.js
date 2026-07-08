@@ -170,23 +170,27 @@ export async function POST(req) {
     try {
       const m = /^data:image\/(\w+);base64,(.+)$/.exec(cover.base64 || '');
       if (m) {
-        const { promises: fsp } = await import('fs');
-        const pathMod = await import('path');
-        const dir = pathMod.join(process.cwd(), 'public', 'mega-covers');
-        await fsp.mkdir(dir, { recursive: true });
-        const fname = `reftest-${Date.now().toString(36)}.${m[1] === 'png' ? 'png' : 'jpg'}`;
-        await fsp.writeFile(pathMod.join(dir, fname), Buffer.from(m[2], 'base64'));
-        coverPath = `/mega-covers/${fname}`;
+        // ★ 9 ก.ค.: เขียนดิสก์ล้ม (Vercel) ไม่ข้ามคลัง — base64 ขึ้นคลาวด์ให้เห็นทุกเครื่อง
+        try {
+          const { promises: fsp } = await import('fs');
+          const pathMod = await import('path');
+          const dir = pathMod.join(process.cwd(), 'public', 'mega-covers');
+          await fsp.mkdir(dir, { recursive: true });
+          const fname = `reftest-${Date.now().toString(36)}.${m[1] === 'png' ? 'png' : 'jpg'}`;
+          await fsp.writeFile(pathMod.join(dir, fname), Buffer.from(m[2], 'base64'));
+          coverPath = `/mega-covers/${fname}`;
+        } catch { /* พึ่งคลาวด์แทน */ }
         const { addMegaCover } = await import('@/lib/megaCoverArchive');
-        await addMegaCover({
+        const ent = await addMegaCover({
           title: newsTitle || content.slice(0, 60),
           source: 'cover-ref-test',
           imageCaseId: job.dossier.images?.caseId || null,
           coverCaseId: cover.caseId || null,
-          coverPath, template: cover.template, score: cover.score, throughMega: true, trace,
+          coverPath, base64: cover.base64, template: cover.template, score: cover.score, throughMega: true, trace,
         });
+        if (!coverPath && ent?.id) coverPath = `/api/mega-covers/img?id=${encodeURIComponent(ent.id)}`;
       }
-    } catch { /* เซฟไฟล์/คลังล้ม ไม่ให้กระทบผลปก */ }
+    } catch { /* คลังล้ม ไม่ให้กระทบผลปก */ }
 
     return NextResponse.json({
       ...cover,          // base64, template, score, directorReason, assignments, caseId...
