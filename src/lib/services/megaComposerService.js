@@ -157,8 +157,30 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
 
   // ── ② ตาหาหน้า (perception — อินพุตให้สูตร ไม่ใช่คนตัดสิน) ──
   const { batchDetectFaces } = await import('@/lib/services/faceDetector');
-  const fdMap = await batchDetectFaces(loaded.map((im, i) => ({ id: `mc_${i}`, buffer: im.buffer })));
-  const faceBoxes = loaded.map((im, i) => normalizeFaceBox(fdMap?.get?.(`mc_${i}`)));
+  let fdMap = await batchDetectFaces(loaded.map((im, i) => ({ id: `mc_${i}`, buffer: im.buffer })));
+  let faceBoxes = loaded.map((im, i) => normalizeFaceBox(fdMap?.get?.(`mc_${i}`)));
+  // ★ 9 ก.ค. (hero ไม่นิ่ง — บางรอบตาหาหน้าล้มทั้งชุดแบบเงียบ → ทุกช่องครอปไร้หน้า): เห็น + ซ่อมตัวเอง
+  const faceHits = faceBoxes.filter(Boolean).length;
+  console.log(`[MegaComposer] ตาหาหน้า: เจอ ${faceHits}/${loaded.length} ใบ`);
+  if (faceHits === 0 && loaded.length) {
+    console.log('[MegaComposer] ⚠️ ตาหาหน้าล้มทั้งชุด → ลองใหม่ 1 รอบ');
+    fdMap = await batchDetectFaces(loaded.map((im, i) => ({ id: `mc_${i}`, buffer: im.buffer })));
+    faceBoxes = loaded.map((im, i) => normalizeFaceBox(fdMap?.get?.(`mc_${i}`)));
+    console.log(`[MegaComposer] ตาหาหน้า (รอบ 2): เจอ ${faceBoxes.filter(Boolean).length}/${loaded.length} ใบ`);
+  }
+
+  // ── ②b 🔢 aHash 8x8 ต่อภาพ (คณิตล้วน) — กันภาพซ้ำ/เฟรมติดกันจากคลิปลงหลายช่อง (ลายตา) ──
+  const sharp = (await import('sharp')).default;
+  const aHashes = await Promise.all(loaded.map(async (im) => {
+    try {
+      const raw = await sharp(im.buffer).greyscale().resize(8, 8, { fit: 'fill' }).raw().toBuffer();
+      const mean = raw.reduce((n, v) => n + v, 0) / 64;
+      let bits = 0n;
+      for (let i = 0; i < 64; i++) if (raw[i] >= mean) bits |= (1n << BigInt(i));
+      return bits;
+    } catch { return null; }
+  }));
+  const hamming = (a, b) => { if (a == null || b == null) return 64; let x = a ^ b, n = 0; while (x) { n += Number(x & 1n); x >>= 1n; } return n; };
 
   // ── ③ โครง: จริงจาก ref DNA → family จูนมือ → มาตรฐาน ──
   const { V3_TEMPLATES } = await import('@/lib/services/coverExecutorService');
@@ -226,17 +248,23 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
   //   goodFace = หน้าเด่น + สะอาด (ไม่ใช่กราฟิก/ลายน้ำ) — ใช้ล็อก hero + วงกลม
   const bigFace = (fb) => fb && fb.x2 > fb.x1 && (fb.y2 - fb.y1) >= 0.16 && fb.y1 >= 0.01 && fb.y2 <= 0.99;
 
-  // main: 🔒 LOCK หน้าเด่น "เดี่ยว" — (8 ก.ค. AC-0027: hero ภาพกอด 2 หน้าหลุดมาได้) ทุก tier บังคับ count===1 ก่อน
-  //   หน้าเดี่ยวหมดจริงๆ ค่อยยอมหลายหน้า (ดีกว่าไร้หน้า) → ไร้หน้า → ใบแรก
-  let mi = pickIdx((im, fb) => im.isHero && bigFace(fb) && fb.count === 1 && im.clean !== false);
-  if (mi < 0) mi = pickIdx((im, fb) => im.isHero && bigFace(fb) && fb.count === 1);
-  if (mi < 0) mi = pickIdx((im, fb) => bigFace(fb) && fb.count === 1 && im.clean !== false);
-  if (mi < 0) mi = pickIdx((im, fb) => bigFace(fb) && fb.count === 1);
-  if (mi < 0) mi = pickIdx((im, fb) => fb && fb.count === 1 && im.clean !== false);
-  if (mi < 0) mi = pickIdx((im, fb) => im.isHero && bigFace(fb));   // หน้าเดี่ยวไม่มีเลย → hero แผนแม้หลายหน้า
-  if (mi < 0) mi = pickIdx((im, fb) => bigFace(fb));
-  if (mi < 0) mi = pickIdx((im, fb) => !!fb);
-  if (mi < 0) mi = pickIdx(() => true);
+  // main: 🔒 LOCK หน้าเด่น — ★ 9 ก.ค. (ผู้ใช้: "hero ไม่นิ่ง บางปกไม่เด่น ดูไม่รู้ใคร — ตัวอย่างดี 0042/0043"):
+  //   เปลี่ยนจาก tier-เจอใบแรก (ลำดับโหลดพาเพี้ยน) → "ให้คะแนนทุกใบแล้วเอาที่ดีสุด" = นิ่ง deterministic
+  //   คะแนน: หน้าใหญ่ + เดี่ยว + สะอาด + ภาพข่าวจริง + ไม่ชิดขอบ (ครอปสวยได้) + โบนัสใบที่ S6 เลือก
+  const heroScore = (im, fb) => {
+    if (!fb || !(fb.x2 > fb.x1)) return 0;
+    let s = Math.min(fb.y2 - fb.y1, 0.55) * 100;            // หน้าใหญ่ = เด่น (cap 55% กันหน้าล้นเกิน)
+    s += (fb.count || 1) === 1 ? 25 : -20;                  // หน้าเดี่ยวก่อนเสมอ (กฎ 8 ก.ค. AC-0027)
+    if (im.clean !== false) s += 18;
+    if (im.newsScene !== false) s += 6;
+    if (fb.y1 < 0.02 || fb.y2 > 0.98) s -= 14;              // หน้าชิดขอบบน/ล่างในต้นฉบับ = ครอปเสี่ยงหัว/คางขาด
+    if (fb.x1 < 0.02 || fb.x2 > 0.98) s -= 8;
+    if (im.isHero) s += 10;                                  // เคารพ S6 เมื่อคะแนนสูสี
+    return s;
+  };
+  let mi = -1, miBest = 0;
+  loaded.forEach((im, i) => { const sc = heroScore(im, faceBoxes[i]); if (sc > miBest) { miBest = sc; mi = i; } });
+  if (mi < 0) { mi = loaded.findIndex((im) => im.isHero); if (mi < 0) mi = 0; } // ไร้หน้าทั้งชุด → ตามแผน S6/ใบแรก
   if (mainSlot && mi >= 0) {
     used.add(mi);
     const mIdx = spec.slots.indexOf(mainSlot);
@@ -248,8 +276,9 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
     // 👁️ goodCircleFace: วงกลมต้องหน้าเดี่ยวเด่นสะอาด (กันกราฟิก/ข่าว-overlay/หน้าจิ๋วลงวง)
     //   ★ 8 ก.ค. (ผู้ใช้: "วงกลมไกลเกิน ดูไม่รู้ใคร"): เพิ่ม tier "มีหน้า (แม้ไม่สะอาด)" ก่อนยอมภาพไร้หน้า
     //   + ภาพไร้หน้าห้าม full-frame → ครอปสี่เหลี่ยมกลาง-บน (ซูมขึ้น อย่างน้อยเห็นตัวเรื่องใกล้ๆ)
-    let ci = pickIdx((im, fb) => im.slot === 'circle' && bigFace(fb) && fb.count === 1 && im.clean !== false);
-    if (ci < 0) ci = pickIdx((im, fb) => bigFace(fb) && fb.count === 1 && im.clean !== false);
+    const cNotDup = (i) => ![...used].some((u) => hamming(aHashes[i], aHashes[u]) <= 6); // ★ 9 ก.ค.2: วงห้ามซ้ำเฟรมกับ hero
+    let ci = pickIdx((im, fb, i) => im.slot === 'circle' && bigFace(fb) && fb.count === 1 && cNotDup(i) && im.clean !== false);
+    if (ci < 0) ci = pickIdx((im, fb, i) => bigFace(fb) && fb.count === 1 && cNotDup(i) && im.clean !== false);
     if (ci < 0) ci = pickIdx((im, fb) => bigFace(fb) && im.clean !== false);
     if (ci < 0) ci = pickIdx((im, fb) => bigFace(fb));
     if (ci < 0) ci = pickIdx((im, fb) => fb && fb.x2 > fb.x1 && im.clean !== false);
@@ -280,10 +309,24 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
     // ลำดับบท: บทของช่องนี้ (ตาม ref) มาก่อน แล้วค่อยบทอื่น — เดิมทุกช่องใช้ลำดับเดียวกัน = ภาพผิดบทลงช่อง
     const order = slotRole && ROLE_ORDER.includes(slotRole) ? [slotRole, ...ROLE_ORDER.filter((r) => r !== slotRole)] : ROLE_ORDER;
     const faceOk = (fb) => !needFace || (fb && fb.x2 > fb.x1);
+    // ★ 9 ก.ค.2 (AC-0023 คอลัมน์ขวาซ้ำหน้าเดิม 3 ช่อง): เคารพ "ระยะช็อตตาม ref" + กันภาพซ้ำ
+    //   shot ของ ref (ตาคนยืนยัน): closeup=หน้าใหญ่ · medium=เห็นคน+บริบท · wide=ฉากกว้าง — วัดจากสัดส่วนหน้าในภาพ
+    const refShot = String(refSlotMeta?.[oIdx0]?.shot || '').toLowerCase();
+    const shotOk = (fb) => {
+      const fh = fb && fb.x2 > fb.x1 ? fb.y2 - fb.y1 : 0;
+      if (/close/.test(refShot)) return fh >= 0.18;
+      if (/med/.test(refShot)) return fh >= 0.05 && fh < 0.32;
+      if (/wide/.test(refShot)) return fh < 0.14;
+      return true;
+    };
+    //   กันซ้ำ: aHash ใกล้ภาพที่ใช้ไปแล้ว ≤6 บิต = เฟรมเดิม/รูปซ้ำ — ห้ามลงอีกช่อง (ผ่อนเมื่อไม่มีตัวเลือก)
+    const notDup = (i) => ![...used].some((u) => hamming(aHashes[i], aHashes[u]) <= 6);
     let oi = -1;
     // ★ 9 ก.ค.: ภาพข่าวจริง (newsScene≠false) ก่อนภาพแฟ้มเสมอ — กันชุดกาล่า/พรมแดงหลุดเข้าปกข่าวครอบครัว
-    for (const role of order) { oi = pickIdx((im, fb) => im.slot === role && faceOk(fb) && im.clean !== false && im.newsScene !== false); if (oi >= 0) break; }
-    if (oi < 0) { for (const role of order) { oi = pickIdx((im, fb) => im.slot === role && faceOk(fb) && im.clean !== false); if (oi >= 0) break; } }
+    for (const role of order) { oi = pickIdx((im, fb, i) => im.slot === role && faceOk(fb) && shotOk(fb) && notDup(i) && im.clean !== false && im.newsScene !== false); if (oi >= 0) break; }
+    if (oi < 0) { for (const role of order) { oi = pickIdx((im, fb, i) => im.slot === role && faceOk(fb) && notDup(i) && im.clean !== false && im.newsScene !== false); if (oi >= 0) break; } }
+    if (oi < 0) oi = pickIdx((im, fb, i) => faceOk(fb) && shotOk(fb) && notDup(i) && im.clean !== false && im.newsScene !== false); // บทไม่ตรงแต่ช็อต+ไม่ซ้ำ ยังดีกว่าซ้ำหน้าเดิม
+    if (oi < 0) { for (const role of order) { oi = pickIdx((im, fb, i) => im.slot === role && faceOk(fb) && notDup(i) && im.clean !== false); if (oi >= 0) break; } }
     if (oi < 0 && needFace) oi = pickIdx((im, fb) => fb && fb.x2 > fb.x1 && im.clean !== false && im.newsScene !== false); // ช่องคน: ภาพมีหน้าใดก็ได้ที่สะอาด
     if (oi < 0 && needFace) oi = pickIdx((im, fb) => fb && fb.x2 > fb.x1 && im.clean !== false);
     if (oi < 0) oi = pickIdx((im, fb) => bigFace(fb) && im.clean !== false && im.newsScene !== false);

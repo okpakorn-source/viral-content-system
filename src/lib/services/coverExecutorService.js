@@ -257,6 +257,16 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
     // ซูมได้เฉพาะเมื่อกรอบที่เล็กลงยัง "ครอบหัวได้ครบทั้งกว้างและสูง" (ไม่งั้นหัวขาด → ปล่อย clamp เดิม)
     if (maxHalfW > 0 && regionWpx / 2 > maxHalfW && zoomW >= faceWpx && zoomH >= faceHpx) {
       regionWpx = zoomW; regionHpx = zoomH;
+    } else if (maxHalfW > 0 && regionWpx / 2 > maxHalfW) {
+      // ★ 9 ก.ค. (ผู้ใช้: "hero บางปกไม่เด่น" — เคสหน้าชิดขอบภาพ): เดิมยอมแพ้ไม่ซูม → หน้าจมฉากกว้าง
+      //   ซูมแบบ "ไม่บังคับกึ่งกลาง": กรอบเล็กสุดที่ยังคลุมหัวครบ วางออฟเซ็นเตอร์ได้ (ปกไวรัลจริงก็ทำ)
+      //   การ์ดกล่องหัว (จุด4 ด้านล่าง) ยังตรวจซ้ำ — หัวโผล่พ้นกรอบเมื่อไหร่ถูก re-center ทันที
+      const nW = Math.min(imgW, Math.max(faceWpx * 1.12, regionWpx * 0.62));
+      const nH = nW / slotAspect;
+      if (nW < regionWpx && nH >= faceHpx * 1.06 && nH <= imgH) {
+        regionWpx = nW; regionHpx = nH;
+        console.log('[CoverV3] 🔍 hero หน้าชิดขอบ → ซูมออฟเซ็นเตอร์ (คลุมหัวครบ)');
+      }
     }
   }
 
