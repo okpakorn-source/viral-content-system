@@ -10,7 +10,7 @@ import { NextResponse } from 'next/server';
 import { getCase } from '@/lib/caseStore';
 import { searchImages, buildQueries, PLATFORMS } from '@/lib/imageSearch';
 import { addImages, readImages } from '@/lib/imageStore';
-import { isCatalogSource, isOwnPageSource } from '@/lib/junkSources';
+import { isCatalogSource, isOwnPageSource, isMismatchedFbMedia } from '@/lib/junkSources';
 import { vetImages } from '@/lib/libraryTriage';
 
 export const runtime = 'nodejs';
@@ -92,6 +92,7 @@ export async function POST(req) {
     const errors = [];
     let blockedCatalog = 0; // 🚫 บ้านแคตตาล็อก/อสังหา/โฆษณา ที่บล็อกตั้งแต่ต้นทาง
     let blockedOwnPage = 0; // 🚫 ★ 8 ก.ค.: ภาพจากเพจของเราเอง (คอลลาจวนกลับ = กับดักผิดคน)
+    let blockedMismatch = 0; // 🚫 ★ 8 ก.ค. ดึก: ภาพ FB ที่ Google จับคู่ผิดโพสต์ (media_id ≠ เลขภาพในลิงก์)
 
     // ★ แก้ 1: ยิงเป็น "ชุด" ชุดละ QUERY_CONC คำพร้อมกัน แล้วเก็บผล "เรียงตามลำดับคำค้นเดิม"
     //   (ลำดับ collected/ตัดซ้ำ/เพดาน เหมือนยิงทีละคำทุกประการ — QUERY_CONC=1 คือชุดละ 1 = โค้ดเดิม)
@@ -128,6 +129,8 @@ export async function POST(req) {
           if (isCatalogSource(im)) { blockedCatalog++; continue; }
           // 🚫 ★ 8 ก.ค.: กันภาพจากเพจเราเอง (บทเรียน AC-0043-61: คอลลาจ IG.dara → เดาผิดคน)
           if (isOwnPageSource(im)) { blockedOwnPage++; continue; }
+          // 🚫 ★ 8 ก.ค. ดึก: กันภาพ FB ที่ Google จับคู่ผิดโพสต์ (ภาพไม่เคยอยู่ในโพสต์ที่ลิงก์อ้าง)
+          if (isMismatchedFbMedia(im)) { blockedMismatch++; continue; }
           seen.add(im.imageUrl);
           collected.push({ ...im, platform, query: q });
         }
@@ -205,6 +208,7 @@ export async function POST(req) {
       total: saved.total,
       blockedCatalog, // 🚫 กันบ้านแคตตาล็อก/อสังหาออกกี่ใบ (โปร่งใส)
       blockedOwnPage, // 🚫 ★ 8 ก.ค.: กันภาพจากเพจเราเองออกกี่ใบ
+      blockedMismatch, // 🚫 ★ 8 ก.ค. ดึก: กันภาพ FB จับคู่ผิดโพสต์ออกกี่ใบ
       skippedDup, // ⚡ ตัดรูปที่คลังมีแล้วก่อนส่งตา (ไม่เสียเวลา/ค่า Gemini ซ้ำ)
       vetOn, // 👁️ ตากรองตอนค้นทำงานไหม
       vetDropped, // 👁️ ตากรองรูป "ไม่เกี่ยว" ออกกี่ใบ

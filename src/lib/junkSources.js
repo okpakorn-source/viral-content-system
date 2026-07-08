@@ -46,6 +46,21 @@ export function isCatalogSource(im) {
 //   คอลลาจของเพจปนภาพหลายเรื่อง/ภาพประกอบนิรนาม → ตาเดาผิดคนได้ (หญิงนิรนามถูกป้ายเป็น "ป้าหน่อย")
 //   และไม่ใช่ "แหล่งข่าวต้นทาง" อยู่แล้ว → บล็อกตั้งแต่ตอนค้นทุกทาง (search + reverse)
 //   เพิ่มเพจอื่นของเราได้ที่ env OWN_PAGE_PATTERNS (คั่นด้วย , เทียบ lowercase/substring)
+// ★ 8 ก.ค. รอบดึก (บทเรียน AC-0043-61 ยืนยันโดยเจ้าของเพจ): Google Images จับคู่ "ไฟล์ภาพพรีวิว FB"
+//   (lookaside.fbsbx.com/...media_id=X) กับ "ลิงก์โพสต์" แบบหลวมๆ — ภาพที่ไม่เคยอยู่ในโพสต์นั้นเลย
+//   ถูกแปะลิงก์โพสต์ที่ตรงคำค้น → หญิงนิรนามคนละคนโผล่มาพร้อมลิงก์เพจเรา = กับดักผิดคนร้ายแรง
+//   เช็คได้เฉพาะลิงก์แบบ "photo permalink" (มีเลขภาพในลิงก์): /photos/.../Y/ หรือ fbid=Y
+//   → ถ้า media_id=X ≠ Y = จับคู่มั่วแน่นอน ทิ้งตั้งแต่ต้นทาง (ลิงก์เพจราก/โพสต์ /posts/ ไม่แตะ
+//   เพราะเลขโพสต์กับเลขภาพต่างกันโดยธรรมชาติ — กันลูกหลงภาพจริงจากเพจต้นทาง)
+export function isMismatchedFbMedia(im) {
+  const mMedia = String(im?.imageUrl || '').match(/lookaside\.fbsbx\.com[^\s"']*?media_id=(\d{6,})/i);
+  if (!mMedia) return false;
+  const link = String(im?.sourceLink || '');
+  const mPhoto = link.match(/\/photos\/[^\s"']*?(\d{9,})\/?(?:[?#]|$)/) || link.match(/[?&]fbid=(\d{9,})/);
+  if (!mPhoto) return false; // ลิงก์ไม่มีเลขภาพให้เทียบ → ไม่ตัดสิน
+  return mMedia[1] !== mPhoto[1];
+}
+
 const OWN_PAGE_BASE = ['facebook.com/ig.dara', 'รวมไอจีดารา'];
 export function isOwnPageSource(im) {
   if (!im) return false;
