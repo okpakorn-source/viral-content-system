@@ -171,7 +171,13 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
       console.log(`[MegaComposer] โครง ref ${spec.slots.length} ช่อง > ภาพ ${loaded.length} → ลด`);
       spec = null;
     }
-    if (spec) refSlotMeta = (refDNA.slots || []); // rev.2 การันตีลำดับ 1:1 กับ template.slots
+    // ★ 9 ก.ค. แก้บั๊กเงียบ (AC-0023): DNA slots จริงอยู่ที่ template.slots — เดิมชี้ refDNA.slots (ไม่มีจริง)
+    //   → meta ว่างตลอด ข้อมูล subject/faceSizePct ต่อช่องจาก ref ที่ตาคนยืนยันไม่เคยถูกใช้
+    //   ใช้ได้เฉพาะเมื่อจำนวนช่องตรงกับ spec (ด่านกันชนอาจตัดช่อง → ลำดับเพี้ยน = ไม่ใช้ ปลอดภัยกว่า)
+    if (spec) {
+      const tSlots = refDNA.template?.slots || refDNA.slots || [];
+      refSlotMeta = tSlots.length === spec.slots.length ? tSlots : null;
+    }
     if (!spec) {
       const { pickTemplateForDNA } = await import('@/lib/refTemplatePicker');
       const fam = pickTemplateForDNA(refDNA, V3_TEMPLATES);
@@ -261,17 +267,30 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
     }
   }
   const ROLE_ORDER = ['reaction', 'action', 'context'];
+  // ★ 9 ก.ค. (AC-0023 ช่อง "คนรีแอค" ได้ภาพกริดต้นปาล์ม → ไม่ตรง ref): เคารพ "บทของช่อง" ตาม ref
+  //   ช่องคน = id ขึ้นต้น reaction/moment/pair/victim หรือ subject ของ ref ระบุคน → ต้องได้ภาพมีหน้า
+  const PEOPLE_WORD = /คน|ชาย|หญิง|พระ|เด็ก|คู่|กลุ่ม|บัณฑิต|พยาบาล|หมอ|ตำรวจ|แม่|พ่อ|ลูก|ยาย|ตา|ป้า|ลุง|ครอบครัว/;
   for (const os of otherSlots) {
-    // ช่องรอง: ตรงบทบาท+สะอาด → หน้าเด่นสะอาด → สะอาด (ไม่ใช่ขยะ) → อะไรก็ได้
+    // ช่องรอง: บทตรงช่อง+สะอาด → บทอื่น → หน้าเด่นสะอาด → สะอาด → อะไรก็ได้
     //   หลบ clean=false (ลายน้ำ/text/กราฟิกข่าว) ให้ถึงที่สุด — ยอมเฉพาะไม่มีตัวเลือกจริง
+    const oIdx0 = spec.slots.indexOf(os);
+    const slotRole = (String(os.id).match(/^(reaction|action|context|evidence|moment|pair|victim)/) || [])[1] || null;
+    const refSubject = String(refSlotMeta?.[oIdx0]?.subject || '');
+    const needFace = /^(reaction|moment|pair|victim)/.test(String(os.id)) || PEOPLE_WORD.test(refSubject);
+    // ลำดับบท: บทของช่องนี้ (ตาม ref) มาก่อน แล้วค่อยบทอื่น — เดิมทุกช่องใช้ลำดับเดียวกัน = ภาพผิดบทลงช่อง
+    const order = slotRole && ROLE_ORDER.includes(slotRole) ? [slotRole, ...ROLE_ORDER.filter((r) => r !== slotRole)] : ROLE_ORDER;
+    const faceOk = (fb) => !needFace || (fb && fb.x2 > fb.x1);
     let oi = -1;
     // ★ 9 ก.ค.: ภาพข่าวจริง (newsScene≠false) ก่อนภาพแฟ้มเสมอ — กันชุดกาล่า/พรมแดงหลุดเข้าปกข่าวครอบครัว
-    for (const role of ROLE_ORDER) { oi = pickIdx((im) => im.slot === role && im.clean !== false && im.newsScene !== false); if (oi >= 0) break; }
-    if (oi < 0) { for (const role of ROLE_ORDER) { oi = pickIdx((im) => im.slot === role && im.clean !== false); if (oi >= 0) break; } }
+    for (const role of order) { oi = pickIdx((im, fb) => im.slot === role && faceOk(fb) && im.clean !== false && im.newsScene !== false); if (oi >= 0) break; }
+    if (oi < 0) { for (const role of order) { oi = pickIdx((im, fb) => im.slot === role && faceOk(fb) && im.clean !== false); if (oi >= 0) break; } }
+    if (oi < 0 && needFace) oi = pickIdx((im, fb) => fb && fb.x2 > fb.x1 && im.clean !== false && im.newsScene !== false); // ช่องคน: ภาพมีหน้าใดก็ได้ที่สะอาด
+    if (oi < 0 && needFace) oi = pickIdx((im, fb) => fb && fb.x2 > fb.x1 && im.clean !== false);
     if (oi < 0) oi = pickIdx((im, fb) => bigFace(fb) && im.clean !== false && im.newsScene !== false);
     if (oi < 0) oi = pickIdx((im, fb) => bigFace(fb) && im.clean !== false);
     if (oi < 0) oi = pickIdx((im) => im.clean !== false);
     if (oi < 0) oi = pickIdx(() => true);
+    if (oi >= 0 && needFace && !(faceBoxes[oi] && faceBoxes[oi].x2 > faceBoxes[oi].x1)) console.log(`[MegaComposer] ⚠️ ${os.id} เป็นช่องคนแต่พูลไม่เหลือภาพมีหน้า — ใช้เท่าที่มี`);
     if (oi >= 0) {
       used.add(oi);
       const oIdx = spec.slots.indexOf(os);
