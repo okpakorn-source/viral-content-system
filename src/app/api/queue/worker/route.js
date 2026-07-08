@@ -56,7 +56,8 @@ export async function POST(req) {
         // ★ Routing ตามชนิดงาน: cover → auto-cover | mineclip → ขุดนาทีทอง | อื่นๆ → /api/auto/process
         const isCoverJob = job.payload?.jobType === 'cover';
         const isMineClipJob = job.payload?.jobType === 'mineclip';
-        const coverPath = job.payload?.composer === 'v3' ? '/api/auto-cover-v3' : '/api/auto-cover';
+        // 🏭 8 ก.ค.: auto-cover-v3 ถอดทิ้ง (ผู้ใช้สั่ง) — งานปก MEGA (composer:'mega') → โรงประกอบใหม่ · อื่นๆ → โรงเดิม v1
+        const coverPath = job.payload?.composer === 'mega' ? '/api/mega/compose' : '/api/auto-cover';
         const processUrl = isCoverJob ? `${baseUrl}${coverPath}`
           : isMineClipJob ? `${baseUrl}/api/news-desk/mine-clip`
           : `${baseUrl}/api/auto/process`;

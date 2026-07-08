@@ -145,35 +145,25 @@ export async function POST(req) {
     });
 
     // ── S7 ทำปก: ส่งภาพที่คัดแล้วเข้า auto-cover-v3 (sourceOnly) เหมือน s7_cover ──
-    const mainCharacterName = (job.dossier.compass?.mainCharacters || [])[0]?.name || '';
-    const coverPayload = {
+    // ── S7 🏭 โรงประกอบใหม่ (ทีมกราฟฟิก 8 ก.ค. — แทน auto-cover-v3 ที่ถอดทิ้ง) ──
+    //   เรียกตรงใน process (ไม่ผ่าน HTTP = ไม่มีปัญหา timeout/undici อีก) · deterministic + 👁️ ตาเทียบ ref จริง
+    const { composeAndVerify } = await import('@/lib/services/megaComposerService');
+    const cover = await composeAndVerify({
       newsTitle,
-      content: content.slice(0, 8000),
-      mainCharacterName,
-      sourceLinks, // ★ 7 ก.ค.: ส่งครบหลัก+สำรอง (เพดาน 10 — extractFromUserSources รองรับแล้ว)
-      slotPlan, // ★ 8 ก.ค.: แผนช่อง S6 → v3 บังคับ main=hero + เชื่อ clean ตาคัด
-      sourceOnly: true,
-    };
-    if (forceTemplateId) coverPayload.forceTemplateId = forceTemplateId;
-    if (matchedRef?.ref?.dna) coverPayload.refDNA = matchedRef.ref.dna; // 🎯 แนบ DNA ปกเป้าให้งานทำปก (Director ใช้ได้ในอนาคต)
-
-    // ★ 7 ก.ค. FIX "fetch failed ทั้งที่ปกเสร็จ": auto-cover-v3 render ~5-10 นาที > undici headersTimeout default 300s (5 นาที)
-    //   → fetch ตัดก่อน orchestrator รับผล = throw + ไม่ถึงโค้ดเซฟคลัง · ใส่ dispatcher ขยาย timeout ให้ยาวพอ (AbortSignal คุมเพดานจริง)
-    let _dispatcher;
-    try { const { Agent } = await import('undici'); _dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 }); } catch { /* ไม่มี undici → ใช้ default */ }
-    const cv = await fetch(`${origin}/api/auto-cover-v3`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(coverPayload),
-      signal: AbortSignal.timeout(1500000), // 25 นาที — cover render + retry + enhance กว้างพอ (undici ปิด timeout ในตัวแล้ว)
-      ...(_dispatcher ? { dispatcher: _dispatcher } : {}),
+      slotPlan, // แผนช่องจาก S6 (ภาพ→ช่อง/hero/clean/thumbnail) — โรงประกอบทำตามเป๊ะ
+      refDNA: matchedRef?.ref?.dna || null,
+      refImagePath: matchedRef?.ref?.imagePath || null, // 👁️ ภาพปกต้นแบบจริงจากคลัง → ตาเทียบภาพชนภาพ
     });
-    const cover = await cv.json().catch(() => ({}));
-    trace.push({ stage: 's7_cover', status: cover?.success ? 'done' : 'failed', summary: `template ${cover?.template || '-'} · QC ${cover?.score ?? '-'}` });
+    trace.push({
+      stage: 's7_compose',
+      status: cover?.success ? 'done' : 'failed',
+      summary: `โรงประกอบใหม่: ${cover?.template || '-'}${cover?.refSimilarity != null ? ` · เหมือน ref ${cover.refSimilarity}%` : ''}${cover?.eyeFixed ? ` · ตาแก้ ${cover.eyeFixed} จุด` : ''}`,
+    });
 
     if (!cover?.success) {
-      return NextResponse.json({ success: false, error: cover?.error || 'auto-cover-v3 ล้ม', errorType: cover?.errorType || 'COVER_FAILED', trace, sourceLinks }, { status: 502 });
+      return NextResponse.json({ success: false, error: cover?.error || 'โรงประกอบล้ม', errorType: cover?.errorType || 'COVER_FAILED', trace, sourceLinks }, { status: 502 });
     }
+    cover.score = cover.refSimilarity != null ? `เหมือน ref ${cover.refSimilarity}%` : '-'; // ให้หน้าเดิมโชว์ได้โดยไม่แก้ UI
 
     // ── เซฟไฟล์ปก + ส่งเข้าคลังงาน MEGA อัตโนมัติ (ล้มไม่ critical ต่อผลปก) ──
     let coverPath = null;

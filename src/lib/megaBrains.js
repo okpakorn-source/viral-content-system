@@ -78,19 +78,56 @@ ${blinded.map((b) => `--- ฉบับ ${b.label} ---\n${b.text}`).join('\n\n')}
   };
 }
 
+// ---------- S6a 🎨 บก.ศิลป์ (ทีมกราฟฟิก 8 ก.ค.): ref DNA + เข็มทิศข่าว → "ใบสั่งงาน" ต่อช่อง ----------
+// AI ทำงาน "ความหมาย" อย่างเดียว: แปลงปกต้นแบบ (คนใน ref) → คำสั่งของข่าวนี้ (คนในข่าวนี้)
+// เรขาคณิต (พิกัด/ขนาด) ไม่ผ่าน AI — โครงจริงมาจาก dnaToTemplateSpec · faceSizePct ส่งตรงให้สูตรครอป
+export async function artBriefBrain({ refDNA, compass, deskTitle, typeMatched = false }) {
+  const slots = (refDNA?.slots || []).map((s, i) => ({
+    i, role: s.role, pos: s.pos || '', shot: s.shot || '', emotion: s.emotion || '',
+    faceSizePct: Number(s.faceSizePct) || null,
+    // แนวข่าวไม่ตรง ref จริง (แมตช์หลวม) → ไม่ให้เห็น subject ของ ref (กัน bias เลือกคนผิดแบบ CASE-356)
+    ...(typeMatched ? { refSubject: s.subject || '' } : {}),
+  }));
+  const system = `คุณคือบรรณาธิการศิลป์ (Art Director) ของเพจข่าวไวรัลไทย งานเดียว: เขียน "ใบสั่งงาน" ให้มือคัดภาพ
+โจทย์: ปกต้นแบบ (ref) จัดช่องไว้แบบหนึ่ง — คุณต้องสั่งว่า "ข่าวนี้" แต่ละช่องควรใส่ภาพแบบไหน (ใคร/ช็อตอะไร/อารมณ์ไหน) ให้เล่าเรื่องแบบเดียวกับ ref แต่เป็นคนและเหตุการณ์ของข่าวนี้
+กฎเหล็ก: (1) hero = หน้าเดี่ยวตัวเอกของข่าวเสมอ ห้ามภาพหมู่ (2) สั่งเฉพาะภาพที่ข่าวนี้มีโอกาสมีจริง (3) ช่องไหน ref ใส่โมเมนต์/หลักฐาน ให้แปลงเป็นโมเมนต์/หลักฐานของข่าวนี้
+ตอบ JSON เท่านั้น: {"orders":[{"i":<ดัชนีช่องตาม ref>,"want":"สั่ง 1 ประโยค: ใคร+ช็อต+อารมณ์","personHint":"ชื่อคนที่ควรอยู่ช่องนี้ หรือ null"}],"storyNote":"ปกนี้เล่าเรื่องยังไง 1 ประโยค"}`;
+  const user = `ข่าว: ${String(deskTitle || '').slice(0, 120)}
+เข็มทิศข่าว: ${JSON.stringify({ angle: compass?.angle, primaryEmotion: compass?.primaryEmotion, mainCharacters: compass?.mainCharacters, visualDreamShots: compass?.visualDreamShots }, null, 0).slice(0, 1200)}
+ช่องของปกต้นแบบ (เรขาคณิตล็อกแล้ว — สั่งแค่เนื้อหา):
+${JSON.stringify(slots, null, 0).slice(0, 1800)}`;
+  const out = await callBrain({ system, user, maxTokens: 700, temperature: 0.15, cost: { step: 'MEGA S6a art brief' } });
+  const brief = parseJson(out.text || out);
+  // ผูกใบสั่งกลับเข้าช่อง (ตามดัชนี) + พก faceSizePct ไปให้สูตรครอป
+  return {
+    storyNote: brief.storyNote || '',
+    orders: slots.map((s) => {
+      const o = (brief.orders || []).find((x) => Number(x.i) === s.i) || {};
+      return { i: s.i, role: s.role, pos: s.pos, shot: s.shot, emotion: s.emotion, faceSizePct: s.faceSizePct, want: o.want || '', personHint: o.personHint || null };
+    }),
+  };
+}
+
 // ---------- S6 ผู้กำกับจับคู่ช่อง: ป้าย triage (จ่ายเงินแล้วใน S5) + สูตรปกแสนไลค์ → ช่องละใบ+สำรอง ----------
 // ไม่ดูภาพซ้ำ (ประหยัด) — ตัดสินจาก metadata ที่ตาติดป้ายไว้: ใคร/หมวด/อารมณ์/คุณภาพ/จำนวนหน้า
-export async function slotDirectorBrain({ imagesMeta, compass, deskTitle, refDNA = null }) {
+export async function slotDirectorBrain({ imagesMeta, compass, deskTitle, refDNA = null, artBrief = null }) {
+  // 🎨 8 ก.ค. (ทีมกราฟฟิก): มีใบสั่งจากบก.ศิลป์ → ใช้ใบสั่งนำ (แปลงเป็นข่าวนี้แล้ว แม่นกว่า ref ดิบ)
+  const briefBlock = artBrief?.orders?.length ? `
+=== 🎨 ใบสั่งงานจากบก.ศิลป์ (แปลงปกต้นแบบเป็นข่าวนี้แล้ว — ทำตามใกล้ที่สุดเท่าที่พูลมีจริง) ===
+เรื่องที่ปกต้องเล่า: ${String(artBrief.storyNote || '').slice(0, 150)}
+${artBrief.orders.map((o) => `- ช่อง ${o.role}${o.pos ? `@${o.pos}` : ''}: ${o.want}${o.personHint ? ` (คน: ${o.personHint})` : ''}`).join('\n')}
+⛔ กฎเหล็กเหนือใบสั่ง: hero = "หน้าเดี่ยว" ตัวเอกเสมอ (faces=1) ห้ามภาพหมู่/คู่
+` : '';
   // 🎯 7 ก.ค. (ผู้ใช้สั่ง ref-first): ปกเป้าจากคลัง reference ต้อง "ขับการเลือกภาพ" ไม่ใช่แค่ตอนจัดวาง
-  //   gated: ไม่มี refDNA = prompt เดิมเป๊ะ
-  const refBlock = refDNA ? `
+  //   gated: ไม่มี refDNA = prompt เดิมเป๊ะ · มีใบสั่งแล้ว = ใบสั่งแทน (กันข้อมูลซ้ำ/ขัดกัน)
+  const refBlock = briefBlock || (refDNA ? `
 === 🎯 ปกเป้าหมาย (คัดจากคลังปกไวรัลที่แนวตรงข่าวนี้ — เลือกภาพให้ตอบโจทย์ปกแบบนี้) ===
 โครง: ${refDNA.layoutType || '-'}
 ช่องของปกเป้า: ${(refDNA.slots || []).map((s) => `${s.role}=${s.desc || s.subject || ''}${s.emotion ? `(${s.emotion})` : ''}`).join(' · ') || '-'}
 เล่าเรื่อง: ${String(refDNA.storyFlow || refDNA.compositionLogic || '').slice(0, 180)}
 → เลือกภาพลงช่องให้ได้ "บทบาท+อารมณ์" ใกล้ปกเป้าที่สุดเท่าที่พูลมีจริง (กฎเหล็กเดิมยังเหนือกว่าเสมอ)
 ⛔ กฎเหล็กเหนือปกเป้า: hero = "หน้าเดี่ยว" ของตัวเอกเสมอ (faces=1) — ห้ามภาพหมู่/ครอบครัว/คู่ขึ้น hero แม้ปกเป้าเป็นแนวครอบครัว (ภาพหมู่/คู่ไว้ช่อง reaction/context)
-` : '';
+` : '');
   const system = `คุณคือผู้กำกับภาพปกข่าวไวรัลไทย จับคู่ "ภาพ → ช่องปก" ตามสูตรปกแสนไลค์ (5 ช่อง 5 บทบาท):
 - hero: ตัวเอกของข่าว อารมณ์ตรงเรื่อง หน้าชัด (สำคัญสุด)
 - reaction: บุคคลที่สอง/ปฏิกิริยาต่อเหตุการณ์

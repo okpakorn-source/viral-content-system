@@ -6,7 +6,7 @@
 // 🔴 ไม่แตะโค้ดระบบข่าว: คิว/extract เรียกผ่าน HTTP same-origin แบบเดียวกับโต๊ะข่าว
 // ============================================================
 
-import { preflightBrain, compassBrain, judgeBrain, slotDirectorBrain } from '@/lib/megaBrains';
+import { preflightBrain, compassBrain, judgeBrain, slotDirectorBrain, artBriefBrain } from '@/lib/megaBrains';
 
 const MEGA_USER = 'mega-bot';
 const MIN_EXTRACT_CHARS = parseInt(process.env.MEGA_MIN_EXTRACT_CHARS || '400', 10);
@@ -608,10 +608,23 @@ export async function s6_slots(job, { origin }) {
     console.log(`[MEGA S6] 🎯 ปกเป้า: ${job.dossier.refMatch.styleName || '-'} (${job.dossier.refMatch.reason || ''}) — ${_refDNA ? 'ใช้ขับการเลือกภาพ + โครง' : 'แมตช์หลวม → ใช้เฉพาะโครง (เลือกภาพตามเข็มทิศข่าว)'}${activeSlots.length !== SLOT_ORDER.length ? ` · ตัดเหลือ ${activeSlots.length} ช่องตาม panelCount ref` : ''}`);
   }
 
+  // 🎨 S6a บก.ศิลป์ (ทีมกราฟฟิก 8 ก.ค.): ref → "ใบสั่งงาน" ของข่าวนี้ (ครั้งเดียว เก็บแฟ้ม) — ล้ม = เดินต่อแบบไม่มีใบสั่ง
+  if (!job.dossier.artBrief && job.dossier.refMatch?.dna) {
+    try {
+      job.dossier.artBrief = await artBriefBrain({
+        refDNA: job.dossier.refMatch.dna,
+        compass: job.dossier.compass,
+        deskTitle: job.dossier.desk?.title,
+        typeMatched: !!job.dossier.refMatch.typeMatched,
+      });
+      console.log(`[MEGA S6a] 🎨 ใบสั่งงาน ${job.dossier.artBrief.orders?.length || 0} ช่อง — ${String(job.dossier.artBrief.storyNote || '').slice(0, 80)}`);
+    } catch (e) { console.log('[MEGA S6a] บก.ศิลป์ล้ม (เดินต่อไม่มีใบสั่ง):', e.message?.slice(0, 50)); }
+  }
+
   let brain = { slots: {}, note: '' };
   let brainOk = true;
   try {
-    brain = await slotDirectorBrain({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title, refDNA: _refDNA });
+    brain = await slotDirectorBrain({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title, refDNA: _refDNA, artBrief: job.dossier.artBrief || null });
   } catch (err) {
     brainOk = false; // สมองล่ม → fallback ล้วน (กฎเดียวกับทางหลัก)
   }
@@ -693,7 +706,7 @@ export async function s6_slots(job, { origin }) {
     status: 'done',
     nextAction: 'continue',
     summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'} — ${(brain.note || '').slice(0, 80)}`,
-    dossierPatch: { pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed }, ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}) },
+    dossierPatch: { pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed }, ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}), ...(job.dossier.artBrief ? { artBrief: job.dossier.artBrief } : {}) },
     quality: filled < activeSlots.length ? 'yellow' : undefined,
   };
 }
@@ -777,15 +790,12 @@ export async function s7_cover(job, { origin } = {}) {
   }
   const payload = {
     jobType: 'cover',
-    composer: 'v3',
+    composer: 'mega', // 🏭 8 ก.ค. (ทีมกราฟฟิก): โรงประกอบใหม่ /api/mega/compose — auto-cover-v3 ถอดทิ้งแล้ว
     newsTitle: nd.newsTitle || d.desk?.title || '',
-    content: (nd.newsBody || d.extract?.text || '').slice(0, 8000),
-    mainCharacterName: (d.compass?.mainCharacters || [])[0]?.name || '',
-    sourceLinks: allLinks, // ★ 7 ก.ค.: หลัก 5 + สำรอง (เพดาน 10)
-    sourceOnly: true, // ใช้เฉพาะภาพที่สายพานคัดแล้ว — ห้ามรีเสิร์ชปนภาพนอกสายตา
-    slotPlan, // ★ 8 ก.ค.: แผนช่องจาก S6 (hero + clean/faces ต่อ url) — v3 บังคับ main=hero + เชื่อ clean ตาคัด
+    slotPlan, // แผนช่องจาก S6 (ภาพ→ช่อง/hero/clean/thumbnail) — โรงประกอบทำตามเป๊ะ ไม่ตัดสินใหม่
     userId: MEGA_USER,
-    ...(refDNA ? { refDNA } : {}), // 🎯 ปกเป้าจากคลัง (มีเฉพาะเมื่อ match ได้)
+    ...(refDNA ? { refDNA } : {}), // 🎯 โครงจริงจากปกเป้า
+    ...(d.refMatch?.imagePath ? { refImagePath: d.refMatch.imagePath } : {}), // 👁️ ภาพ ref จริงให้ตาเทียบ
   };
   const q = await jfetch(`${coverOrigin()}/api/queue/add`, { method: 'POST', body: JSON.stringify(payload) }, 60000);
   if (!q.success || !q.jobId) {
