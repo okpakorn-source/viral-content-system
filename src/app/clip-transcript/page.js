@@ -275,36 +275,87 @@ export default function ClipTranscriptPage() {
     return parts.join('\n\n');
   };
 
-  // ★ 8 ก.ค.: ข้อความคัดลอก "ทั้งเคสค้นประเด็น" (ลิงก์ต้นทาง + เนื้อดิบ + ข่าวที่เจอ)
+  // ★ 8 ก.ค. rev.2: จัดหมวดผล — dna(คนละคน แยกระดับ ใกล้/กลาง/กว้าง) vs same(คนเดิม)
+  //   รองรับเคสเก่า: tag 'follow'→คนเดิม · 'theme'→แนวเดียวกันกว้าง
+  const resultKind = (r) => {
+    if (r.tag === 'same' || r.tag === 'follow') return { group: 'same', level: 0 };
+    const lvl = [1, 2, 3].includes(Number(r.level)) ? Number(r.level) : 3;
+    return { group: 'dna', level: lvl };
+  };
+  const LEVEL_META = {
+    1: { label: '🎯 แนวเดียวกัน · ใกล้', color: '#34d399', bg: 'rgba(16,185,129,0.15)' },
+    2: { label: '🧬 แนวเดียวกัน · กลาง', color: '#22d3ee', bg: 'rgba(6,182,212,0.13)' },
+    3: { label: '🌐 แนวเดียวกัน · กว้าง', color: '#c084fc', bg: 'rgba(168,85,247,0.14)' },
+  };
+  const SAME_META = { label: '👤 คนเดิม/ตามต่อ', color: '#fbbf24', bg: 'rgba(245,158,11,0.16)' };
+  const levelText = (lv) => (lv === 1 ? 'ใกล้' : lv === 2 ? 'กลาง' : 'กว้าง');
+
+  // ★ ข้อความคัดลอก "ทั้งเคส" (ลิงก์ต้นทาง + เนื้อดิบ + ข่าวแนวเดียวกันคนละคน + คนเดิม)
   const huntCaseText = (c) => {
     if (!c) return '';
     const p = c.styleProfile || {};
+    const d = p.dna || {};
+    const results = c.results || [];
+    const dnaR = results.filter(r => resultKind(r).group === 'dna');
+    const sameR = results.filter(r => resultKind(r).group === 'same');
+    const rowTxt = (r, i) => `${i + 1}. [${r.score}/10 · ${r.type}${resultKind(r).group === 'dna' ? ' · ' + levelText(resultKind(r).level) : ''}] ${r.title}\n   ${r.url}${r.reason ? `\n   เหตุผล: ${r.reason}` : ''}`;
     const lines = [
       `${c.sourceType === 'article' ? '📰 เคสวิจัยลิงก์ข่าว' : '🎬 เคสค้นประเด็นจากคลิป'}: ${c.title || ''}`,
       `ลิงก์ต้นทาง: ${c.sourceUrl || ''}`,
-      `ธีม: ${p.theme || '-'} · อารมณ์: ${p.emotion || '-'} · ทำไมไวรัล: ${p.whyViral || '-'}`,
+      `DNA แนวข่าว: ${d.who || '-'} · ${d.what || '-'} · ${d.core || '-'} · ${d.emotion || '-'}`,
       '', `=== ${c.sourceType === 'article' ? 'ผลวิจัยเชิงลึก' : 'เนื้อดิบจากคลิป'} ===`, c.insight?.rawData || '-',
-      '', `=== ข่าว/คลิปคล้ายที่เจอ (${(c.results || []).length}) ===`,
-      ...(c.results || []).map((r, i) => `${i + 1}. [${r.score}/10 · ${r.type} · ${r.tag === 'follow' ? 'ตามต่อเรื่องนี้' : 'ธีมเดียวกัน'}] ${r.title}\n   ${r.url}${r.reason ? `\n   เหตุผล: ${r.reason}` : ''}`),
+      '', `=== ข่าวแนวเดียวกัน — คนละคน (${dnaR.length}) ===`,
+      ...dnaR.map(rowTxt),
     ];
+    if (sameR.length) { lines.push('', `=== ข่าวคนเดิม/ตามต่อ (${sameR.length}) ===`, ...sameR.map(rowTxt)); }
     return lines.join('\n');
   };
+
+  // แถวผล 1 รายการ
+  const huntRow = (r, key) => {
+    const k = resultKind(r);
+    const meta = k.group === 'same' ? SAME_META : LEVEL_META[k.level];
+    return (
+      <div key={key} style={{ display: 'flex', gap: 7, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 12.5 }}>
+        <span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 20, background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontWeight: 800, flexShrink: 0 }}>{r.score}</span>
+        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: r.type === 'คลิป' ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.08)', color: r.type === 'คลิป' ? '#a78bfa' : 'var(--text-muted,#aaa)', fontWeight: 700, flexShrink: 0 }}>{r.type}</span>
+        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: meta.bg, color: meta.color, fontWeight: 700, flexShrink: 0 }}>{meta.label}</span>
+        <a href={r.url} target="_blank" rel="noopener noreferrer" title={r.reason || ''} style={{ color: '#60a5fa', textDecoration: 'none', fontWeight: 600 }}>{r.title}</a>
+        <span style={{ fontSize: 10.5, color: 'var(--text-muted,#777)' }}>{r.source}</span>
+        <button onClick={() => copy(`${r.title}\n${r.url}`, key)} style={{ padding: '1px 8px', borderRadius: 6, border: 'none', background: 'rgba(255,255,255,0.06)', color: copied === key ? '#22c55e' : 'var(--text-muted,#999)', fontSize: 10.5, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === key ? '✅' : '📋'}</button>
+      </div>
+    );
+  };
+
   // ★ เนื้อการ์ดเคสค้นประเด็น — ใช้ทั้งผลสดและในคลัง (kp = key prefix กัน id ชนกัน)
   const renderHuntCase = (c, kp) => {
     const p = c.styleProfile || {};
+    const d = p.dna || {};
     const isArticle = c.sourceType === 'article';
+    const results = c.results || [];
+    const dnaR = results.filter(r => resultKind(r).group === 'dna');
+    const sameR = results.filter(r => resultKind(r).group === 'same');
+    const dnaChip = (v, c2) => v ? <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: c2.bg, color: c2.fg, fontWeight: 700 }}>{c2.icon} {v}</span> : null;
     return (
       <div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
-          {/* ★ 8 ก.ค.: ป้ายที่มา — แยกคลิป vs ลิงก์ข่าว ชัดเจน (คลังเดียวกัน) */}
           <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, fontWeight: 800, background: isArticle ? 'rgba(37,99,235,0.18)' : 'rgba(124,58,237,0.18)', color: isArticle ? '#60a5fa' : '#a78bfa' }}>{isArticle ? '📰 จากลิงก์ข่าว' : '🎬 จากคลิป'}</span>
-          {p.theme && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>🧬 {p.theme}</span>}
           {c.insight?.category && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(245,158,11,0.16)', color: '#f59e0b', fontWeight: 700 }}>📂 {c.insight.category}</span>}
-          <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontWeight: 800 }}>✅ เจอ {(c.results || []).length} เรื่อง</span>
+          <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontWeight: 800 }}>✅ คนละคน {dnaR.length}{sameR.length ? ` · คนเดิม ${sameR.length}` : ''}</span>
           <button onClick={() => copy(huntCaseText(c), kp + '-all')} style={{ padding: '4px 11px', borderRadius: 8, border: 'none', background: copied === kp + '-all' ? 'rgba(34,197,94,0.2)' : 'rgba(59,130,246,0.15)', color: copied === kp + '-all' ? '#22c55e' : '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === kp + '-all' ? '✅ คัดลอกแล้ว' : '📋 คัดลอกทั้งเคส'}</button>
           <button onClick={() => huntMore(c)} disabled={hunting} style={{ padding: '4px 11px', borderRadius: 8, border: '1px solid rgba(13,148,136,0.5)', background: 'transparent', color: '#2dd4bf', fontSize: 11, fontWeight: 700, cursor: hunting ? 'wait' : 'pointer', fontFamily: 'inherit' }}>{hunting ? '⏳...' : '🔁 ค้นเพิ่มอีกรอบ'}</button>
         </div>
-        <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 4 }}>{isArticle ? '📰 ข่าวต้นทาง' : '🎬 คลิปต้นทาง'}: {c.title} <a href={c.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#3b82f6', fontWeight: 400 }}>🔗 {isArticle ? 'เปิดข่าว' : 'เปิดคลิป'}</a></div>
+        <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>{isArticle ? '📰 ข่าวต้นทาง' : '🎬 คลิปต้นทาง'}: {c.title} <a href={c.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#3b82f6', fontWeight: 400 }}>🔗 {isArticle ? 'เปิดข่าว' : 'เปิดคลิป'}</a></div>
+        {/* ★ DNA แนวข่าว (สกัดจากต้นทาง) */}
+        {(d.who || d.what || d.core || d.emotion) && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted,#888)', fontWeight: 700 }}>🧬 DNA:</span>
+            {dnaChip(d.who, { icon: '👤', bg: 'rgba(124,58,237,0.15)', fg: '#a78bfa' })}
+            {dnaChip(d.what, { icon: '⚡', bg: 'rgba(16,185,129,0.13)', fg: '#34d399' })}
+            {dnaChip(d.core, { icon: '🎯', bg: 'rgba(217,90,48,0.14)', fg: '#fb923c' })}
+            {dnaChip(d.emotion, { icon: '💗', bg: 'rgba(236,72,153,0.13)', fg: '#f472b6' })}
+          </div>
+        )}
         {c.insight?.rawData && (
           <details style={{ marginBottom: 10 }} open={isArticle}>
             <summary style={{ fontSize: 12, color: 'var(--text-muted,#888)', cursor: 'pointer' }}>{isArticle ? '🔬 ผลวิจัยเชิงลึก' : '📄 เนื้อดิบที่ถอดได้'} ({c.insight.rawData.length} ตัวอักษร) — กดกาง/คัดลอก</summary>
@@ -312,19 +363,23 @@ export default function ClipTranscriptPage() {
             <button onClick={() => copy(c.insight.rawData, kp + '-raw')} style={{ marginTop: 5, padding: '3px 10px', borderRadius: 7, border: 'none', background: 'rgba(59,130,246,0.15)', color: copied === kp + '-raw' ? '#22c55e' : '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === kp + '-raw' ? '✅' : '📋 คัดลอกเนื้อดิบ'}</button>
           </details>
         )}
-        {(c.searchKeys || []).length > 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted,#888)', marginBottom: 10 }}>🔑 คีย์ที่สมองใช้ค้น: {c.searchKeys.join(' · ')}</div>}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 7, borderTop: '1px solid var(--border,#2a2a3e)', paddingTop: 10 }}>
-          {(c.results || []).map((r, i) => (
-            <div key={i} style={{ display: 'flex', gap: 7, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 12.5 }}>
-              <span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 20, background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontWeight: 800, flexShrink: 0 }}>{r.score}</span>
-              <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: r.type === 'คลิป' ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.08)', color: r.type === 'คลิป' ? '#a78bfa' : 'var(--text-muted,#aaa)', fontWeight: 700, flexShrink: 0 }}>{r.type}</span>
-              <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: r.tag === 'follow' ? 'rgba(245,158,11,0.16)' : 'rgba(6,182,212,0.13)', color: r.tag === 'follow' ? '#fbbf24' : '#22d3ee', fontWeight: 700, flexShrink: 0 }}>{r.tag === 'follow' ? '🔗 ตามต่อเรื่องนี้' : '🧬 ธีมเดียวกัน'}</span>
-              <a href={r.url} target="_blank" rel="noopener noreferrer" title={r.reason || ''} style={{ color: '#60a5fa', textDecoration: 'none', fontWeight: 600 }}>{r.title}</a>
-              <span style={{ fontSize: 10.5, color: 'var(--text-muted,#777)' }}>{r.source}</span>
-              <button onClick={() => copy(`${r.title}\n${r.url}`, kp + '-r' + i)} style={{ padding: '1px 8px', borderRadius: 6, border: 'none', background: 'rgba(255,255,255,0.06)', color: copied === kp + '-r' + i ? '#22c55e' : 'var(--text-muted,#999)', fontSize: 10.5, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === kp + '-r' + i ? '✅' : '📋'}</button>
+        {(c.searchKeys || []).length > 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted,#888)', marginBottom: 10 }}>🔑 คีย์ที่สมองใช้ค้น (คนละคน): {c.searchKeys.join(' · ')}</div>}
+        {/* ★ ผลหลัก: ข่าวแนวเดียวกัน คนละคน (เรียงใกล้→กว้าง) */}
+        <div style={{ borderTop: '1px solid var(--border,#2a2a3e)', paddingTop: 10 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 800, color: '#34d399', marginBottom: 7 }}>🎯 ข่าวแนวเดียวกัน — คนละคน ({dnaR.length}) <span style={{ fontSize: 10.5, fontWeight: 400, color: 'var(--text-muted,#888)' }}>เรียงจากใกล้ DNA → กว้างขึ้น</span></div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {dnaR.map((r, i) => huntRow(r, kp + '-d' + i))}
+            {!dnaR.length && <div style={{ fontSize: 12, color: 'var(--text-muted,#888)' }}>ยังไม่เจอข่าวแนวเดียวกันคนละคนที่ผ่านเกณฑ์ — ลองกด &quot;ค้นเพิ่มอีกรอบ&quot; ให้สมองคิดคีย์ชุดใหม่</div>}
+          </div>
+          {/* กลุ่มเล็ก: ข่าวคนเดิม/ตามต่อ */}
+          {sameR.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: '#fbbf24', marginBottom: 6 }}>👤 ข่าวคนเดิม/ตามต่อ ({sameR.length}) <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted,#888)' }}>— เผื่ออยากได้มุมเพิ่มของเรื่องเดิม</span></div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, opacity: 0.9 }}>
+                {sameR.map((r, i) => huntRow(r, kp + '-s' + i))}
+              </div>
             </div>
-          ))}
-          {!(c.results || []).length && <div style={{ fontSize: 12, color: 'var(--text-muted,#888)' }}>ยังไม่เจอเรื่องที่ผ่านเกณฑ์ (≥6/10) — ลองกด &quot;ค้นเพิ่มอีกรอบ&quot; ให้สมองคิดคีย์ชุดใหม่</div>}
+          )}
         </div>
       </div>
     );

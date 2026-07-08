@@ -64,7 +64,7 @@ export async function POST(request) {
       await store.update(ex.id, (e) => ({
         ...e, results: merged, insight: hunt.insight, styleProfile: hunt.styleProfile,
         searchKeys: [...new Set([...(e.searchKeys || []), ...hunt.searchKeys])],
-        stats: { ...(e.stats || {}), kept: merged.length, lastHuntAt: new Date().toISOString() },
+        stats: { ...(e.stats || {}), ...hunt.stats, kept: merged.length, lastHuntAt: new Date().toISOString() },
         updatedAt: new Date().toISOString(),
       }));
       const updated = await store.findById(ex.id);
