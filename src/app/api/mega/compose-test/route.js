@@ -71,16 +71,26 @@ export async function POST(req) {
     //   สร้าง job dossier ขั้นต่ำ → เรียก s6_slots (มี S6a บก.ศิลป์ + hero-authority + clean-sort + typeMatched gate ครบ)
     const t0 = Date.now();
     const origin = new URL(req.url).origin;
-    const compass = {
-      angle: c.analysis?.headline || c.newsSnippet || '',
-      primaryEmotion: c.analysis?.context?.emotional_tone || '',
-      secondaryEmotions: [],
-      mainCharacters: (c.analysis?.characters || []).map((ch) => ({ name: typeof ch === 'string' ? ch : ch.name, role: 'hero' })).filter((x) => x.name),
-      visualDreamShots: [],
-    };
+    // ★ A rev.2 (8 ก.ค. ผู้ใช้ชี้ "สมองไม่อ่านเนื้อข่าว"): รัน compassBrain บน "เนื้อข่าวเต็ม" ที่เคสเก็บไว้
+    //   → ได้ angle/อารมณ์/ตัวละคร/visualDreamShots จริง (เท่า production) → S6 เลือกภาพตามบริบทข่าวได้
+    //   ล้ม/ไม่มีเนื้อ → compass บางจาก analysis (ไม่พังเทส)
+    const fullText = [c.analysis?.headline, c.newsText || c.analysis?.content || c.analysis?.summary || c.newsSnippet].filter(Boolean).join('\n\n');
+    let compass;
+    try {
+      const { compassBrain } = await import('@/lib/megaBrains');
+      compass = await compassBrain({ card: { title: c.analysis?.headline || '', lane: '', category: '' }, extractText: fullText });
+    } catch (e) {
+      compass = {
+        angle: c.analysis?.headline || c.newsSnippet || '',
+        primaryEmotion: c.analysis?.context?.emotional_tone || '',
+        secondaryEmotions: [],
+        mainCharacters: (c.analysis?.characters || []).map((ch) => ({ name: typeof ch === 'string' ? ch : ch.name, role: 'hero' })).filter((x) => x.name),
+        visualDreamShots: [],
+      };
+    }
     // hero hint → ดันตัวละครที่ระบุขึ้นหัว mainCharacters (ให้ s6 hero-authority ล็อกถูกคน)
     const heroName = (body.heroPersonHint || '').trim();
-    if (heroName) compass.mainCharacters = [{ name: heroName, role: 'hero' }, ...compass.mainCharacters.filter((x) => !x.name.includes(heroName))];
+    if (heroName) compass.mainCharacters = [{ name: heroName, role: 'hero' }, ...(compass.mainCharacters || []).filter((x) => !String(x.name || '').includes(heroName))];
 
     const job = { dossier: { images: { caseId }, compass, desk: { title: compass.angle } } };
     if (ref) job.dossier.refMatch = { dna: ref.dna, styleName: ref.styleName || ref.id, imagePath: ref.imagePath, reason: 'เลือกในหน้าเทส', typeMatched: true };
@@ -93,7 +103,7 @@ export async function POST(req) {
     const slots = job.dossier.pickImages?.slots || s6.dossierPatch?.pickImages?.slots || {};
 
     // สร้าง slotPlan จากผล S6 (หลัก + สำรอง + thumbnail) — เหมือน s7_cover เป๊ะ
-    const urlTriage = new Map(imgs.map((x) => [String(x.imageUrl), { clean: x.triage?.clean !== false, faces: Number(x.triage?.faceCount) || 0, thumbnailUrl: x.thumbnailUrl || '' }]));
+    const urlTriage = new Map(imgs.map((x) => [String(x.imageUrl), { clean: x.triage?.clean !== false, newsScene: x.triage?.newsScene !== false, faces: Number(x.triage?.faceCount) || 0, thumbnailUrl: x.thumbnailUrl || '' }]));
     const byId = new Map(imgs.map((x) => [String(x.id), x.imageUrl]));
     const primaryLinks = SLOT_ORDER.map((s) => slots[s]?.imageUrl).filter(Boolean);
     const backupUrls = SLOT_ORDER.flatMap((s) => slots[s]?.backups || []).map((b) => byId.get(String(b))).filter(Boolean)
@@ -107,7 +117,7 @@ export async function POST(req) {
     const slotPlan = allLinks.map((u) => {
       const primary = SLOT_ORDER.find((s) => slots[s]?.imageUrl === u);
       const tt = urlTriage.get(String(u)) || {};
-      return { url: u, thumbnailUrl: tt.thumbnailUrl || '', slot: primary || null, clean: tt.clean !== false, faces: tt.faces || 0, isHero: u === heroUrl };
+      return { url: u, thumbnailUrl: tt.thumbnailUrl || '', slot: primary || null, clean: tt.clean !== false, newsScene: tt.newsScene !== false, faces: tt.faces || 0, isHero: u === heroUrl };
     });
     const out = await composeAndVerify({
       newsTitle: c.analysis?.headline || c.newsSnippet || caseId,

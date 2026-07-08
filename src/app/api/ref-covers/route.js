@@ -62,6 +62,38 @@ export async function PATCH(req) {
     if (!id) return NextResponse.json({ success: false, error: 'ต้องระบุ id' }, { status: 400 });
     const patch = {};
     if (typeof body.styleName === 'string') patch.styleName = body.styleName.slice(0, 80);
+    // 🛠 เฟส 2 (8 ก.ค. ผู้ใช้เคาะ): ตาคนแก้เทมเพลตเอง + ยืนยัน — ทางแก้ถาวรของ "ตา AI วัดโครงผิด" (733630294 วัดซ้ำก็ผิดเดิม)
+    //   บันทึก template ที่คนแก้ + ธง _humanVerified → ระบบ match ให้แต้มใบยืนยันก่อน · panelCount อัปตามช่องจริง
+    if (Array.isArray(body.template?.slots) || typeof body.verified === 'boolean') {
+      const items0 = await listRefCovers(1000);
+      const cur0 = items0.find((x) => x.id === id);
+      if (!cur0) return NextResponse.json({ success: false, error: 'ไม่พบ id' }, { status: 404 });
+      const dna = { ...(cur0.dna || {}) };
+      if (Array.isArray(body.template?.slots)) {
+        const slots = body.template.slots
+          .filter((s) => Number.isFinite(+s.xPct) && Number.isFinite(+s.yPct) && Number.isFinite(+s.wPct) && Number.isFinite(+s.hPct))
+          .slice(0, 8)
+          .map((s) => ({
+            role: String(s.role || 'context').slice(0, 20),
+            shape: s.shape === 'circle' ? 'circle' : 'rect',
+            xPct: Math.max(0, Math.min(100, Math.round(+s.xPct))),
+            yPct: Math.max(0, Math.min(100, Math.round(+s.yPct))),
+            wPct: Math.max(5, Math.min(100, Math.round(+s.wPct))),
+            hPct: Math.max(5, Math.min(100, Math.round(+s.hPct))),
+            zIndex: s.shape === 'circle' ? 1 : 0,
+            border: !!s.border,
+            borderColor: s.border ? (s.borderColor || '#FFFFFF') : '-',
+            borderWidthPct: s.border ? 1.5 : 0,
+          }));
+        if (slots.length < 3) return NextResponse.json({ success: false, error: 'ต้องมี ≥3 ช่อง' }, { status: 400 });
+        dna.template = { ...(dna.template || {}), slots, seamStyle: dna.template?.seamStyle || 'edge-to-edge' };
+        dna.panelCount = slots.length;
+        dna._humanVerified = true; // แก้มือ = ยืนยันในตัว
+        delete dna._geometryMismatch;
+      }
+      if (typeof body.verified === 'boolean') dna._humanVerified = body.verified;
+      patch.dna = dna;
+    }
     if (body.reanalyze) {
       // re-analyze DNA จากไฟล์เดิม
       const items = await listRefCovers(1000);

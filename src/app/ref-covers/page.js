@@ -74,6 +74,31 @@ export default function RefCoversPage() {
 
   const chip = (t, bg = '#eef2ff', c = '#3730a3') => <span key={t} style={{ padding: '1px 7px', borderRadius: 5, background: bg, color: c, fontSize: 11 }}>{t}</span>;
 
+  // 🛠 เฟส 2 (8 ก.ค.): editor แก้เทมเพลตด้วยตาคน — ทางแก้ถาวรของ "ตา AI วัดโครงผิด"
+  const [editId, setEditId] = useState(null);
+  const [editSlots, setEditSlots] = useState([]);
+  const ROLES = ['hero', 'reaction', 'action', 'context', 'moment', 'evidence', 'pair', 'victim'];
+  const openEditor = (it) => {
+    setEditId(it.id);
+    setEditSlots((it.dna?.template?.slots || []).map((s) => ({
+      role: s.role || 'context', shape: s.shape === 'circle' ? 'circle' : 'rect',
+      xPct: Math.round(s.xPct || 0), yPct: Math.round(s.yPct || 0), wPct: Math.round(s.wPct || 30), hPct: Math.round(s.hPct || 30),
+      border: !!s.border, borderColor: (s.borderColor && s.borderColor !== '-') ? s.borderColor : '#FFFFFF',
+    })));
+  };
+  const setSlotVal = (i, k, v) => setEditSlots((arr) => arr.map((s, j) => (j === i ? { ...s, [k]: v } : s)));
+  const saveTemplate = async () => {
+    setUploading('กำลังบันทึกเทมเพลต…');
+    const r = await fetch('/api/ref-covers', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: editId, template: { slots: editSlots } }) }).then((x) => x.json()).catch(() => ({}));
+    setUploading('');
+    if (!r.success) { alert('บันทึกล้ม: ' + (r.error || '')); return; }
+    setEditId(null); load();
+  };
+  const quickVerify = async (id, v) => {
+    await fetch('/api/ref-covers', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, verified: v }) }).catch(() => {});
+    load();
+  };
+
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: 20, fontFamily: 'system-ui, sans-serif', color: '#0f172a' }}>
       <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 2 }}>🎯 คลังปก reference + DNA</h1>
@@ -128,7 +153,9 @@ export default function RefCoversPage() {
                 <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>{it.styleName || '(ไม่มีชื่อแนว)'}</div>
                 {it.dnaError && <div style={{ color: '#b91c1c', fontSize: 11 }}>⚠️ สกัด DNA ล้ม: {it.dnaError}</div>}
                 {d._geometryMismatch && <div style={{ color: '#b45309', background: '#fef3c7', borderRadius: 6, padding: '2px 8px', fontSize: 11, marginBottom: 4 }}>👁️ {d._geometryMismatch}</div>}
-                {d._geometryRefined && <div style={{ color: '#166534', fontSize: 10, marginBottom: 4 }}>✓ วัดละเอียด 2 ขั้น (นับภาพ→วัด) แล้ว</div>}
+                {d._humanVerified
+                  ? <div style={{ color: '#166534', background: '#dcfce7', borderRadius: 6, padding: '2px 8px', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>✅ ตาคนยืนยันเทมเพลตแล้ว (ระบบใช้ก่อน)</div>
+                  : d._geometryRefined && <div style={{ color: '#166534', fontSize: 10, marginBottom: 4 }}>✓ วัดละเอียด 2 ขั้น (AI — ยังไม่ผ่านตาคน)</div>}
                 {d.layoutType && <div style={{ marginBottom: 4 }}><b>โครง:</b> {d.layoutType}{d.layoutFamily ? ` · ${d.layoutFamily}` : ''}</div>}
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 4 }}>
                   {d.aspectRatio && chip(d.aspectRatio, '#dcfce7', '#166534')}
@@ -162,10 +189,66 @@ export default function RefCoversPage() {
                 {d.storyFlow && <div style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>📖 {d.storyFlow}</div>}
                 {d.compositionLogic && <div style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>🧬 {d.compositionLogic}</div>}
               </div>
-              <div style={{ display: 'flex', gap: 6, padding: '6px 10px', borderTop: '1px solid #f1f5f9' }}>
+              <div style={{ display: 'flex', gap: 6, padding: '6px 10px', borderTop: '1px solid #f1f5f9', flexWrap: 'wrap' }}>
                 <button onClick={() => reanalyze(it.id)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}>🔄 วิเคราะห์ใหม่</button>
+                <button onClick={() => openEditor(it)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid #c7d2fe', background: '#eef2ff', color: '#4338ca', cursor: 'pointer', fontWeight: 700 }}>🛠 แก้เทมเพลต</button>
+                {!d._humanVerified
+                  ? <button onClick={() => quickVerify(it.id, true)} title="wireframe ตรงกับปกจริงแล้ว — ยืนยันเลยไม่ต้องแก้" style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid #bbf7d0', background: '#f0fdf4', color: '#166534', cursor: 'pointer', fontWeight: 700 }}>✔ ยืนยันถูกต้อง</button>
+                  : <button onClick={() => quickVerify(it.id, false)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', cursor: 'pointer' }}>↩ ถอนยืนยัน</button>}
                 <button onClick={() => del(it.id)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid #fecaca', background: '#fff', color: '#b91c1c', cursor: 'pointer' }}>🗑️ ลบ</button>
               </div>
+
+              {/* 🛠 editor แก้เทมเพลต (เฟส 2) — wireframe สดใหญ่ + ปรับเลขทีละช่อง */}
+              {editId === it.id && (
+                <div style={{ borderTop: '2px solid #4338ca', padding: 10, background: '#f8fafc' }}>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <svg viewBox="0 0 108 135" style={{ width: 150, height: 187, background: '#1e293b', borderRadius: 6, flexShrink: 0 }}>
+                      {editSlots.map((s, i) => s.shape !== 'circle' ? (
+                        <g key={i}>
+                          <rect x={s.xPct * 1.08} y={s.yPct * 1.35} width={s.wPct * 1.08} height={s.hPct * 1.35}
+                            fill={['#334155', '#475569', '#3b4f6b', '#52525b', '#44403c', '#3f3f46'][i % 6]}
+                            stroke={s.border ? s.borderColor : '#0f172a'} strokeWidth={s.border ? 2 : 0.6} />
+                          <text x={s.xPct * 1.08 + 3} y={s.yPct * 1.35 + 10} fontSize="8" fill="#e2e8f0">{i + 1}</text>
+                        </g>
+                      ) : (
+                        <g key={i}>
+                          <circle cx={(s.xPct + s.wPct / 2) * 1.08} cy={(s.yPct + s.hPct / 2) * 1.35} r={(s.wPct / 2) * 1.08}
+                            fill="#64748b" stroke={s.border ? s.borderColor : '#fff'} strokeWidth={2} />
+                          <text x={(s.xPct + s.wPct / 2) * 1.08 - 3} y={(s.yPct + s.hPct / 2) * 1.35 + 3} fontSize="8" fill="#fff">{i + 1}</text>
+                        </g>
+                      ))}
+                    </svg>
+                    <div style={{ flex: 1, fontSize: 11 }}>
+                      {editSlots.map((s, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 4, flexWrap: 'wrap' }}>
+                          <b style={{ width: 14 }}>{i + 1}</b>
+                          <select value={s.role} onChange={(e) => setSlotVal(i, 'role', e.target.value)} style={{ fontSize: 11, padding: 2 }}>
+                            {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                          <select value={s.shape} onChange={(e) => setSlotVal(i, 'shape', e.target.value)} style={{ fontSize: 11, padding: 2 }}>
+                            <option value="rect">▭</option><option value="circle">⭕</option>
+                          </select>
+                          {['xPct', 'yPct', 'wPct', 'hPct'].map((k) => (
+                            <input key={k} type="number" value={s[k]} min={0} max={100} title={k}
+                              onChange={(e) => setSlotVal(i, k, +e.target.value)}
+                              style={{ width: 44, fontSize: 11, padding: 2 }} />
+                          ))}
+                          <label style={{ fontSize: 10 }}><input type="checkbox" checked={s.border} onChange={(e) => setSlotVal(i, 'border', e.target.checked)} /> กรอบ</label>
+                          <button onClick={() => setEditSlots((a) => a.filter((_, j) => j !== i))} style={{ fontSize: 10, border: 'none', background: 'none', color: '#b91c1c', cursor: 'pointer' }}>🗑</button>
+                        </div>
+                      ))}
+                      <div style={{ fontSize: 10, color: '#94a3b8', margin: '2px 0 6px' }}>x,y = มุมซ้ายบน (%) · w,h = กว้าง,สูง (%) — ดู wireframe ซ้ายเทียบปกจริงด้านบน</div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => setEditSlots((a) => [...a, { role: 'context', shape: 'rect', xPct: 60, yPct: 60, wPct: 40, hPct: 40, border: false, borderColor: '#FFFFFF' }])}
+                          style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}>＋ เพิ่มช่อง</button>
+                        <button onClick={saveTemplate} disabled={editSlots.length < 3}
+                          style={{ fontSize: 11, padding: '3px 12px', borderRadius: 6, border: 'none', background: '#16a34a', color: '#fff', cursor: 'pointer', fontWeight: 700 }}>✔ บันทึก + ยืนยันเทมเพลต</button>
+                        <button onClick={() => setEditId(null)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer' }}>ปิด</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

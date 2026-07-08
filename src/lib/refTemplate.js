@@ -64,6 +64,15 @@ export function dnaToTemplateSpec(dna) {
       }
       x = Math.max(0, Math.min(x, 95)); y = Math.max(0, Math.min(y, 95));
       w = Math.max(8, Math.min(w, 100 - x)); h = Math.max(8, Math.min(h, 100 - y));
+      // ⭕ 9 ก.ค. (ผู้ใช้: "วงต้องใหญ่เท่ากับ ref ห้ามใหญ่กว่า"): ใช้ขนาดจริงจาก DNA (=ref) clamp [24,36]
+      //   (เดิม cap 32 ทำวงเล็กกว่า ref · DNA วัดเกิน 36 = ผิดปกติค่อยหด — คงจุดศูนย์กลางเดิมเสมอ)
+      if (isC && (w > 36 || w < 30)) { // rev.2 (9 ก.ค. "วงยังเล็กไป"): floor 24→30 (วงปกไวรัลจริง 30-36)
+        const cx0 = x + w / 2, cy0 = y + h / 2;
+        const d = Math.max(30, Math.min(36, w));
+        w = d; h = d;
+        x = Math.max(0, Math.min(cx0 - d / 2, 100 - d));
+        y = Math.max(0, Math.min(cy0 - d / 2, 100 - d));
+      }
       let id;
       if (isC) id = 'circle';
       else if (!heroDone && /hero/i.test(String(s.role || ''))) { id = 'main'; heroDone = true; }

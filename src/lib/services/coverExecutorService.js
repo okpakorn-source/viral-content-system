@@ -287,6 +287,13 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
     // ★ เฟส 2.5b จุด2 (Hermes CASE-261 ช่องรองตัดบนหัว): ช่องรอง (MOMENT/circle) กันตัดบนหัว — top-only (ไม่ re-center/ไม่แตะขนาด กัน regression ช่องรองที่ดีอยู่แล้ว)
     top = Math.max(0, hy1 * imgH); // ดัน top ขึ้นคลุมบนหัว (regionH ใหญ่พอคลุมคางอยู่แล้ว = maxFaceHFrac 0.74)
   }
+  // ★ 9 ก.ค. (ผู้ใช้: "หัวแหว่งตรงผม เกินขอบบน — เน้นหน้า ลดช่วงตัว จัดกึ่งกลาง"): การ์ดผมทรงสูง/มัดจุก
+  //   กล่องหัว (topPad 0.42/0.50) ประเมินผมทรงสูงต่ำไป → ใช้ "เส้นผมสูงสุด" = y1 - 0.55·fh
+  //   ครอปเริ่มต่ำกว่าเส้นนี้ = เสี่ยงผมล้นขอบ → เลื่อนกรอบขึ้นเท่าที่ขาด (ขนาดเดิม: ผมครบ + ตัดช่วงตัวล่างแทน
+  //   หน้ายังกึ่งกลางแนวนอน) · ช่องที่ top อยู่เหนือเส้นอยู่แล้ว = ไม่ถูกแตะ · เลื่อนขึ้นอย่างเดียว bottom ไม่มีทางหลุดภาพ
+  //   (คางปลอดภัย: regionH ≥ ~2.3·fh เสมอ — เลื่อนสุด bottom ยังต่ำกว่าคาง ≥0.8·fh)
+  const hairTopPx = Math.max(0, (fb.y1 - fhN * 0.55) * imgH);
+  if (top > hairTopPx) top = hairTopPx;
   return { left: Math.round(left), top: Math.round(top), width: Math.max(8, Math.round(regionWpx)), height: Math.max(8, Math.round(regionHpx)) };
 }
 

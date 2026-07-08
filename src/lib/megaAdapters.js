@@ -573,6 +573,7 @@ export async function s6_slots(job, { origin }) {
     quality: x.triage?.quality ?? 5,
     faces: x.triage?.faceCount ?? 0,
     clean: isClean(x), // false = มีลายน้ำ/ตัวหนังสือ ห้ามขึ้นช่องถ้ามีตัวเลือกสะอาด
+    newsScene: x.triage?.newsScene !== false, // ★ 9 ก.ค.: false = ภาพแฟ้ม/งานอื่น (คนถูกแต่บริบทผิด) — เลี่ยงถ้ามีภาพข่าวจริง
     src: x.platform || '',
   }));
 
@@ -659,6 +660,12 @@ export async function s6_slots(job, { origin }) {
     let reason = want?.reason || '';
     if (img && used.has(String(img.id))) img = null; // ซ้ำข้ามช่อง = ตัด
     if (img && slot === 'hero' && !isMainChar(img)) { img = null; reason = ''; } // ผิดคน = ตัด
+    // 👤 8 ก.ค. (AC-0027 hero=ภาพกอดแม่ 2 หน้า): brain ฝ่ากฎ "hero หน้าเดี่ยว" ได้ — ด่านโค้ดบังคับ:
+    //   hero หลายหน้า + พูลมี "หน้าเดี่ยวถูกคน สะอาด" → สลับเป็นหน้าเดี่ยว (ภาพกอด/คู่ไปช่อง reaction แทนได้)
+    if (img && slot === 'hero' && (img.triage?.faceCount ?? 0) > 1) {
+      const solo = sorted.find((x) => !used.has(String(x.id)) && isMainChar(x) && (x.triage?.faceCount ?? 0) === 1 && isClean(x));
+      if (solo) { console.log(`[MEGA S6] 👤 hero ${img.id} มี ${img.triage.faceCount} หน้า → สลับหน้าเดี่ยว ${solo.id}`); img = solo; reason = 'hero หน้าเดี่ยว (โค้ดบังคับ — brain เลือกภาพหลายหน้า)'; }
+    }
     if (!img) {
       // fallback กฎเดียวกับทางหลัก: hero=ตัวเอกหน้าชัดคุณภาพสูง / อื่นๆ=หมวดใกล้เคียง → คุณภาพสูงสุดที่เหลือ
       const cands = sorted.filter((x) => !used.has(String(x.id)));
@@ -685,6 +692,7 @@ export async function s6_slots(job, { origin }) {
         category: img.triage?.category || null,
         emotion: img.triage?.emotion || null,
         clean: isClean(img),                       // ★ 8 ก.ค.: พก clean/faces ไป slotPlan → v3 เชื่อป้ายตาคัด (แม่นกว่า detector)
+        newsScene: img.triage?.newsScene !== false, // ★ 9 ก.ค.: ภาพแฟ้ม=false
         faces: Number(img.triage?.faceCount) || 0,
         reason,
         // ★ 8 ก.ค. (CASE-360): backups เรียงสะอาดก่อน — v3 QC สลับภาพเสียแล้วต้องมี "ของสะอาด" ให้หยิบ
@@ -741,7 +749,7 @@ export async function s7_cover(job, { origin } = {}) {
     const backupIds = Object.values(slots).flatMap((s) => s?.backups || []);
     if (origin && d.images?.caseId) {
       const lib = await jfetch(`${origin}/api/images/${encodeURIComponent(d.images.caseId)}`, {}, 30000);
-      urlTriage = new Map((lib?.images || []).map((x) => [String(x.imageUrl), { clean: x.triage?.clean !== false, faces: Number(x.triage?.faceCount) || 0, thumbnailUrl: x.thumbnailUrl || '' }]));
+      urlTriage = new Map((lib?.images || []).map((x) => [String(x.imageUrl), { clean: x.triage?.clean !== false, newsScene: x.triage?.newsScene !== false, faces: Number(x.triage?.faceCount) || 0, thumbnailUrl: x.thumbnailUrl || '' }]));
       const byId = new Map((lib?.images || []).map((x) => [String(x.id), x.imageUrl]));
       const isDirect = (u) => /\.(jpe?g|png|webp|gif)([?#]|$)/i.test(String(u || ''));
       backupUrls = backupIds.map((b) => byId.get(String(b))).filter(Boolean)
@@ -763,6 +771,7 @@ export async function s7_cover(job, { origin } = {}) {
       url: u,
       slot: primary || null, // hero/reaction/action/context/circle ถ้าเป็นภาพหลัก · null=สำรอง
       clean: primary ? (slots[primary].clean !== false) : (t.clean !== false),
+      newsScene: primary ? (slots[primary].newsScene !== false) : (t.newsScene !== false),
       faces: primary ? (slots[primary].faces || 0) : (t.faces || 0),
       isHero: u === heroUrl,
       // ★ 8 ก.ค. (CASE-366): thumbnail สำรอง (gstatic cache) — sourceLinks เป็น string เปล่า ไม่พก thumbnailUrl

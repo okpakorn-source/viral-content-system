@@ -55,6 +55,9 @@ export async function pickBestRef(signals = {}) {
     }
     // ④ จำนวนคน ↔ จำนวนช่อง
     if (cc >= 2 && (Number(d.panelCount) || 0) >= 4) score += 0.5;
+    // ⑤ 🛠 เฟส 2 (8 ก.ค.): ใบที่ "ตาคนยืนยันเทมเพลตแล้ว" เชื่อถือได้กว่า AI วัด → บวกแต้มให้ชนะ near-tie
+    //   (1.5 > MARGIN 1 = ใบยืนยันชนะใบไม่ยืนยันที่คะแนนเนื้อหาเท่ากันเสมอ แต่ไม่ล้ม matchNewsType ที่ต่าง 3)
+    if (d._humanVerified) score += 1.5;
 
     scored.push({ it, score, reason: hits.join(' · '), covered, typeHit });
     if (score > bestScore) bestScore = score;
