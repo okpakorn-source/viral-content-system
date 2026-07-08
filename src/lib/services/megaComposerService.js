@@ -182,6 +182,26 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
   }));
   const hamming = (a, b) => { if (a == null || b == null) return 64; let x = a ^ b, n = 0; while (x) { n += Number(x & 1n); x >>= 1n; } return n; };
 
+  // ── ②c 🧩 ตรวจภาพคอลลาจ (คณิตล้วน): เส้นตะเข็บตรงยาว ≥86% ของภาพ = หลายเฟรมต่อกัน (IG carousel/แคปคลิป)
+  //   ภาพพวกนี้ลงช่องแล้วดู "แตกเป็นหลายช่องปลอม" ไม่ตรง ref — เลี่ยงทุกช่องเมื่อมีทางเลือก ──
+  const isCollage = await Promise.all(loaded.map(async (im) => {
+    try {
+      const S = 200, COVER = 0.86, STEP = 26;
+      const raw = await sharp(im.buffer).greyscale().resize(S, S, { fit: 'fill' }).raw().toBuffer();
+      const px = (x, y) => raw[y * S + x];
+      for (let x = Math.round(S * 0.15); x <= Math.round(S * 0.85); x++) {
+        let hit = 0; for (let y = 0; y < S; y++) if (Math.abs(px(x, y) - px(x - 1, y)) >= STEP) hit++;
+        if (hit / S >= COVER) return true;
+      }
+      for (let y = Math.round(S * 0.15); y <= Math.round(S * 0.85); y++) {
+        let hit = 0; for (let x = 0; x < S; x++) if (Math.abs(px(x, y) - px(x, y - 1)) >= STEP) hit++;
+        if (hit / S >= COVER) return true;
+      }
+      return false;
+    } catch { return false; }
+  }));
+  if (isCollage.some(Boolean)) console.log(`[MegaComposer] 🧩 ภาพคอลลาจ: ${isCollage.map((c, i) => (c ? '#' + i : null)).filter(Boolean).join(' ')} — เลี่ยงเมื่อมีทางเลือก`);
+
   // ── ③ โครง: จริงจาก ref DNA → family จูนมือ → มาตรฐาน ──
   const { V3_TEMPLATES } = await import('@/lib/services/coverExecutorService');
   let spec = null;
@@ -211,6 +231,34 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
       .find((t) => t && t.slots.length <= loaded.length) || V3_TEMPLATES.vt_faces_circle;
   }
   console.log(`[MegaComposer] โครง: ${spec.id} (${spec.slots.length} ช่อง) · ${spec.canvasW}x${spec.canvasH}`);
+
+  // ── ③b 👁️‍🗨️ โซนมองเห็นต่อช่อง (9 ก.ค. ผู้ใช้: "โดนทับแล้วหน้าหาย ต้องย่อ/ขยับให้หน้าอยู่โซนที่เห็น") ──
+  //   ช่องรองที่มี inset (z≥3)/วงกลมลอยทับ: หาแถบว่างใหญ่สุด (บน/ล่าง/ซ้าย/ขวาของส่วนทับ)
+  //   → ติด slot._vis ให้ executor วางหน้า+จำกัดขนาดหน้าในแถบนั้น · hero/วงกลมไม่แตะ (ผู้ใช้ยืนยันดีแล้ว)
+  try {
+    const overlays = spec.slots.filter((s) => s.shape === 'circle' || (Number(s.zIndex) || 0) >= 3);
+    for (const s of spec.slots) {
+      if (s.shape === 'circle' || (Number(s.zIndex) || 0) >= 3 || /main|hero/i.test(String(s.id))) continue;
+      let vis = { x0: 0, y0: 0, x1: 1, y1: 1 };
+      for (const o of overlays) {
+        const ix0 = Math.max(0, (o.x - s.x) / s.w), iy0 = Math.max(0, (o.y - s.y) / s.h);
+        const ix1 = Math.min(1, (o.x + o.w - s.x) / s.w), iy1 = Math.min(1, (o.y + o.h - s.y) / s.h);
+        if (ix1 <= ix0 || iy1 <= iy0) continue;
+        if ((ix1 - ix0) * (iy1 - iy0) < 0.08) continue; // ทับนิดเดียว ไม่ต้องหลบ
+        const cands = [
+          { ...vis, y1: Math.min(vis.y1, iy0) },  // แถบบน
+          { ...vis, y0: Math.max(vis.y0, iy1) },  // แถบล่าง
+          { ...vis, x1: Math.min(vis.x1, ix0) },  // แถบซ้าย
+          { ...vis, x0: Math.max(vis.x0, ix1) },  // แถบขวา
+        ].filter((c) => c.x1 - c.x0 > 0.18 && c.y1 - c.y0 > 0.18);
+        if (cands.length) vis = cands.sort((a, b) => (b.x1 - b.x0) * (b.y1 - b.y0) - (a.x1 - a.x0) * (a.y1 - a.y0))[0];
+      }
+      if (vis.x0 > 0.02 || vis.y0 > 0.02 || vis.x1 < 0.98 || vis.y1 < 0.98) {
+        s._vis = { x0: +vis.x0.toFixed(2), y0: +vis.y0.toFixed(2), x1: +vis.x1.toFixed(2), y1: +vis.y1.toFixed(2) };
+        console.log(`[MegaComposer] 👁️‍🗨️ ${s.id} โดนทับ → โซนหน้า x${s._vis.x0}-${s._vis.x1} y${s._vis.y0}-${s._vis.y1}`);
+      }
+    }
+  } catch { /* คำนวณโซนล้ม → วางแบบเดิม */ }
 
   // ── ④ จับคู่ภาพ→ช่อง ตายตัว (เคารพ S6) + ✂️ ครอปด้วย faceSizePct ของ ref จริง ──
   const used = new Set();
@@ -263,7 +311,7 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
     return s;
   };
   let mi = -1, miBest = 0;
-  loaded.forEach((im, i) => { const sc = heroScore(im, faceBoxes[i]); if (sc > miBest) { miBest = sc; mi = i; } });
+  loaded.forEach((im, i) => { const sc = isCollage[i] ? 0 : heroScore(im, faceBoxes[i]); if (sc > miBest) { miBest = sc; mi = i; } }); // 🧩 hero ห้ามคอลลาจเด็ดขาด
   if (mi < 0) { mi = loaded.findIndex((im) => im.isHero); if (mi < 0) mi = 0; } // ไร้หน้าทั้งชุด → ตามแผน S6/ใบแรก
   if (mainSlot && mi >= 0) {
     used.add(mi);
@@ -276,7 +324,7 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
     // 👁️ goodCircleFace: วงกลมต้องหน้าเดี่ยวเด่นสะอาด (กันกราฟิก/ข่าว-overlay/หน้าจิ๋วลงวง)
     //   ★ 8 ก.ค. (ผู้ใช้: "วงกลมไกลเกิน ดูไม่รู้ใคร"): เพิ่ม tier "มีหน้า (แม้ไม่สะอาด)" ก่อนยอมภาพไร้หน้า
     //   + ภาพไร้หน้าห้าม full-frame → ครอปสี่เหลี่ยมกลาง-บน (ซูมขึ้น อย่างน้อยเห็นตัวเรื่องใกล้ๆ)
-    const cNotDup = (i) => ![...used].some((u) => hamming(aHashes[i], aHashes[u]) <= 6); // ★ 9 ก.ค.2: วงห้ามซ้ำเฟรมกับ hero
+    const cNotDup = (i) => !isCollage[i] && ![...used].some((u) => hamming(aHashes[i], aHashes[u]) <= 6); // ★ 9 ก.ค.2-3: วงห้ามซ้ำเฟรมกับ hero + ห้ามคอลลาจ
     let ci = pickIdx((im, fb, i) => im.slot === 'circle' && bigFace(fb) && fb.count === 1 && cNotDup(i) && im.clean !== false);
     if (ci < 0) ci = pickIdx((im, fb, i) => bigFace(fb) && fb.count === 1 && cNotDup(i) && im.clean !== false);
     if (ci < 0) ci = pickIdx((im, fb) => bigFace(fb) && im.clean !== false);
@@ -320,7 +368,8 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
       return true;
     };
     //   กันซ้ำ: aHash ใกล้ภาพที่ใช้ไปแล้ว ≤6 บิต = เฟรมเดิม/รูปซ้ำ — ห้ามลงอีกช่อง (ผ่อนเมื่อไม่มีตัวเลือก)
-    const notDup = (i) => ![...used].some((u) => hamming(aHashes[i], aHashes[u]) <= 6);
+    //   + 🧩 ห้ามคอลลาจในชั้นเข้มงวด (ช่องดูแตกเป็นหลายช่องปลอม ไม่ตรง ref)
+    const notDup = (i) => !isCollage[i] && ![...used].some((u) => hamming(aHashes[i], aHashes[u]) <= 6);
     let oi = -1;
     // ★ 9 ก.ค.: ภาพข่าวจริง (newsScene≠false) ก่อนภาพแฟ้มเสมอ — กันชุดกาล่า/พรมแดงหลุดเข้าปกข่าวครอบครัว
     for (const role of order) { oi = pickIdx((im, fb, i) => im.slot === role && faceOk(fb) && shotOk(fb) && notDup(i) && im.clean !== false && im.newsScene !== false); if (oi >= 0) break; }

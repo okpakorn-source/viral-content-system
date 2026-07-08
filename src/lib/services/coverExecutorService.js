@@ -210,7 +210,7 @@ function fitCropToSlotAspect(crop, imgW, imgH, slotAspect) {
  * - จัดหน้าให้อยู่กึ่งกลางแนวนอน + faceTopAt (กันหัวชนขอบ/คางหลุด)
  * ใช้กับ "ช่องหน้าเดี่ยว 1 คน" เท่านั้น (ภาพคู่/หมู่ใช้กรอบจาก Director ตามเดิม)
  */
-function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxFaceHFrac = 0.60, minFaceHFrac = 0) {
+function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxFaceHFrac = 0.60, minFaceHFrac = 0, faceCxAt = 0.5) {
   // rev.14k: ขยาย "face box" → "หัว" (รวมผม) ก่อนคำนวณ — กันผมตกขอบ (บทเรียน CASE-090 hero ผมตก)
   const fwN = fb.x2 - fb.x1, fhN = fb.y2 - fb.y1;
   const hx1 = fb.x1 - fwN * 0.20, hx2 = fb.x2 + fwN * 0.20; // เผื่อผม/หูข้าง
@@ -270,7 +270,8 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
     }
   }
 
-  let left = faceCxPx - regionWpx / 2;
+  // ★ 9 ก.ค.3: faceCxAt = ตำแหน่งแนวนอนของหน้าในเฟรม (0.5=กึ่งกลาง) — ช่องโดน inset/วงทับใช้ค่าโซนมองเห็น
+  let left = faceCxPx - regionWpx * faceCxAt;
   let top = faceCyPx - regionHpx * faceTopAt;
   left = Math.min(Math.max(left, 0), imgW - regionWpx);
   top = Math.min(Math.max(top, 0), imgH - regionHpx);
@@ -485,8 +486,19 @@ async function renderRectTile(src, crop, slot, fb) {
     // ★ rev.FINAL: Final Cropper เห็นภาพจริงแล้วตัดสิน — เชื่อ 100% ห้ามชั้นไหนคำนวณทับ
     region = fitCropInsideAspect(crop, imgW, imgH, slot.w / slot.h);
   } else if (usableSingleFace(fb)) {
-    const { faceFrac, faceTopAt, maxFaceHFrac, minFaceHFrac } = faceParamsForSlot(slot);
-    region = faceRegionForSlot(fb, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac, minFaceHFrac || 0);
+    let { faceFrac, faceTopAt, maxFaceHFrac, minFaceHFrac } = faceParamsForSlot(slot);
+    let faceCxAt = 0.5;
+    // ★ 9 ก.ค.3 (ผู้ใช้: "โดนทับแล้วหน้าหาย ต้องย่อ/ขยับ"): ช่องที่ composer ติด _vis (โซนมองเห็น
+    //   หลัง inset/วงกลมทับ) → วางหน้ากลางโซนนั้น + จำกัดขนาดหน้าไม่ให้ล้นเข้าใต้ส่วนที่ถูกทับ
+    if (slot._vis && slot.id !== 'main') {
+      const v = slot._vis;
+      faceTopAt = Math.max(0.18, Math.min(0.82, (v.y0 + v.y1) / 2));
+      faceCxAt = Math.max(0.22, Math.min(0.78, (v.x0 + v.x1) / 2));
+      const vh = Math.max(0.25, v.y1 - v.y0);
+      maxFaceHFrac = Math.min(maxFaceHFrac, vh * 0.85);
+      minFaceHFrac = Math.min(minFaceHFrac || 0, vh * 0.55);
+    }
+    region = faceRegionForSlot(fb, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac, minFaceHFrac || 0, faceCxAt);
   } else if (usableGroupFaces(fb)) {
     // ★ rev.15i (ผู้ใช้ติช่อง 3-4-5 พัง "ไม่จัดกึ่งกลาง ไม่เน้นคน มองไม่รู้เรื่อง"):
     //   ทุกช่องครอป "หน้าใหญ่สุด" จัดกึ่งกลาง+เด่นชัดเสมอ — เลิกครอปกลุ่มหลวมที่คนตัวเล็กจมฉาก
