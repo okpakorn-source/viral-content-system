@@ -309,7 +309,11 @@ function ResultView({ data }) {
     });
   }
 
-  // ค้น "หลายแหล่ง" ตามที่ติ๊กเลือก — จัดคิวทีละแหล่ง แล้วส่งรูปเข้าคลังต่อเนื่อง
+  // ค้น "หลายแหล่ง" ตามที่ติ๊กเลือก — ★ 8 ก.ค. (เร่งค้นภาพ แก้ 4): ยิงขนานครั้งละ SRC_CONC แหล่ง
+  //   (เดิมต่อคิวทีละแหล่ง เวลารวม = บวกกันทุกแหล่ง → ขนานแล้วเวลารวม ≈ แหล่งที่ช้าสุด)
+  //   ใช้ job เดียวทั้งชุด เพราะ jobClient เป็นตัวเดียวทั้งหน้า ห้ามให้แต่ละแหล่งแย่ง start/stop กัน
+  //   ปรับ SRC_CONC = 1 เพื่อกลับพฤติกรรมต่อคิวแบบเดิม
+  const SRC_CONC = 3;
   async function runBatch() {
     const list = SEARCH_SOURCES.filter((s) => batchSel.has(s.p)).map((s) => s.p);
     if (list.length === 0) {
@@ -320,13 +324,19 @@ function ResultView({ data }) {
     setImgInfo('');
     setImgLoading('batch');
     let totalAdded = 0;
+    let doneCount = 0;
     const fails = [];
     const queuedMsgs = []; // ★ 6 ก.ค.: แหล่งที่ฝากงานให้เครื่องทีมรัน (YouTube บนเว็บ)
-    for (let i = 0; i < list.length; i++) {
-      const p = list[i];
+    const active = new Set();
+    const jobId = startJob('ค้นภาพหลายแหล่ง');
+    const report = () => {
+      const doing = [...active].map((x) => PLATFORM_LABEL[x] || x).join(', ');
+      setImgInfo(`⏳ ค้นขนาน — เสร็จ ${doneCount}/${list.length}${doing ? ` · กำลังค้น: ${doing}` : ''} … เพิ่มแล้ว ${totalAdded} รูป`);
+    };
+    async function searchOne(p) {
       const label = PLATFORM_LABEL[p] || p;
-      setImgInfo(`⏳ คิวค้น ${i + 1}/${list.length}: ${label}${p === 'youtube' ? ' (แคปเฟรม ช้า)' : ''} … เพิ่มแล้ว ${totalAdded} รูป`);
-      const jobId = startJob('ค้นภาพ ' + p);
+      active.add(p);
+      report();
       try {
         const endpoint = p === 'youtube' ? '/api/images/youtube' : '/api/images/search';
         const r = await fetch(endpoint, {
@@ -349,8 +359,30 @@ function ResultView({ data }) {
       } catch (e) {
         fails.push(`${label}: ${e.message}`);
       } finally {
-        stopJob();
+        active.delete(p);
+        doneCount++;
+        report();
       }
+    }
+    let next = 0;
+    const workers = Array.from({ length: Math.min(SRC_CONC, list.length) }, async () => {
+      while (next < list.length) {
+        const p = list[next++];
+        await searchOne(p);
+      }
+    });
+    await Promise.all(workers);
+    stopJob();
+    // ★ ขนานเสร็จ: ดึงคลังรอบสุดท้าย — response ที่มาถึงช้าสุดอาจถือ snapshot เก่ากว่าของจริง
+    try {
+      const ri = await fetch(`/api/images/${data.id}`);
+      const ji = await ri.json();
+      if (ji.success) {
+        setImages(ji.images || []);
+        setImgStats({ total: ji.total, byPlatform: ji.byPlatform || {} });
+      }
+    } catch {
+      /* เงียบ — ใช้ snapshot ล่าสุดที่มีอยู่ */
     }
     setImgLoading('');
     setImgInfo(`✅ ค้นครบ ${list.length} แหล่ง — เพิ่มรูปใหม่รวม ${totalAdded} รูป${queuedMsgs.length ? `\n🕐 ${queuedMsgs.join(' · ')}` : ''}${fails.length ? ` · ล้มเหลว ${fails.length} แหล่ง` : ''}`);

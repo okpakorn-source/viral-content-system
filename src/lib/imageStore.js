@@ -70,8 +70,25 @@ export function countByPlatform(images) {
   return m;
 }
 
+// ★ 8 ก.ค. (เร่งค้นภาพขนาน): คิวเขียน "ต่อเคส" — ค้นหลายแหล่งพร้อมกันทำให้ addImages
+//   ถูกเรียกขนานบนเคสเดียว ถ้าไม่เข้าคิว: ทั้งคู่อ่าน existing ชุดเดียวกัน → fs mode เขียนทับกัน
+//   (รูปแหล่งแรกหายยกชุด) / Supabase mode สร้าง id ชนกัน → แถวโดน skip เงียบ
+//   เข้าคิวแล้วพฤติกรรมต่อ caller เท่าเดิมทุกอย่าง (signature/ผลลัพธ์เดิม) แค่เรียงลำดับเขียนทีละงานต่อเคส
+const addQueues = globalThis.__IMG_ADD_QUEUES || (globalThis.__IMG_ADD_QUEUES = new Map());
+
 // เพิ่มรูปใหม่ (ตัดซ้ำจาก imageUrl) → คืนสถิติ
 export async function addImages(caseId, incoming) {
+  const prev = addQueues.get(caseId) || Promise.resolve();
+  const run = prev.then(() => addImagesUnlocked(caseId, incoming));
+  const tail = run.catch(() => {}); // งานก่อนหน้าพัง ไม่ลามงานถัดไปในคิว
+  addQueues.set(caseId, tail);
+  tail.then(() => {
+    if (addQueues.get(caseId) === tail) addQueues.delete(caseId);
+  });
+  return run;
+}
+
+async function addImagesUnlocked(caseId, incoming) {
   const c = sb();
   const existing = await readImages(caseId);
   const seen = new Set(existing.map((i) => i.imageUrl));
