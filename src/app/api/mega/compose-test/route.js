@@ -32,7 +32,8 @@ export async function GET(req) {
         const cleanFace = rel.filter((x) => x.triage.clean !== false && Number(x.triage.faceCount) === 1);
         return { id: c.id, headline: c.headline, tone: c.tone, total: imgs.length, relevant: rel.length, cleanFace: cleanFace.length };
       }));
-      const refs = (await listRefCovers(500)).filter((r) => r.dna && r.imagePath)
+      // ★ 9 ก.ค.: โชว์เฉพาะ ref ที่ทำตามได้จริง (_reproducible≠false — เครื่องวัดตะเข็บคัดแล้ว)
+      const refs = (await listRefCovers(500)).filter((r) => r.dna && r.imagePath && r.dna._reproducible !== false)
         .map((r) => ({ id: r.id, styleName: r.styleName || r.id, layoutFamily: r.dna.layoutFamily, panelCount: r.dna.panelCount, imagePath: r.imagePath }));
       return NextResponse.json({ success: true, cases: withCounts.filter((c) => c.relevant >= 3), refs });
     }
@@ -54,8 +55,8 @@ export async function POST(req) {
     const pool = imgs.filter((x) => x.triage && x.triage.relevant !== false);
     if (pool.length < 3) return NextResponse.json({ success: false, error: `พูลเคสนี้มีแค่ ${pool.length} ใบ (ต้อง ≥3) — ยังตาคัดไม่พอ`, errorType: 'POOL_TOO_THIN' }, { status: 422 });
 
-    // ── เลือก ref (ระบุเอง หรือ auto-match ตามอารมณ์ข่าว) ──
-    const refs = (await listRefCovers(500)).filter((r) => r.dna && r.imagePath);
+    // ── เลือก ref (ระบุเอง หรือ auto-match ตามอารมณ์ข่าว) — เฉพาะใบที่ทำตามได้จริง ──
+    const refs = (await listRefCovers(500)).filter((r) => r.dna && r.imagePath && r.dna._reproducible !== false);
     let ref = body.refId ? refs.find((r) => r.id === body.refId) : null;
     if (!ref && refs.length) {
       const { pickBestRef } = await import('@/lib/refCoverMatch');

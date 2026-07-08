@@ -661,7 +661,8 @@ async function featherSeams(canvasBuf, templateSpec, F) {
   const { canvasW: W, canvasH: H } = templateSpec;
   const bands = [];
   for (const s of templateSpec.slots) {
-    if (s.shape === 'circle') continue;
+    // ★ 9 ก.ค.: ข้าม inset ลอย (z≥3) — กรอบสีของ inset ต้องคม ห้ามโดนเบลอตะเข็บ (ตาม ref จริง)
+    if (s.shape === 'circle' || (Number(s.zIndex) || 0) >= 3) continue;
     if (s.x > 0) bands.push({ left: s.x - F, top: s.y, width: 2 * F, height: s.h });            // ขอบซ้ายด้านใน
     if (s.x + s.w < W) bands.push({ left: s.x + s.w - F, top: s.y, width: 2 * F, height: s.h }); // ขอบขวาด้านใน
     if (s.y > 0) bands.push({ left: s.x, top: s.y - F, width: s.w, height: 2 * F });             // ขอบบนด้านใน

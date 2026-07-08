@@ -16,7 +16,9 @@ const norm = (s) => String(s || '').toLowerCase().trim();
  */
 export async function pickBestRef(signals = {}) {
   const items = await listRefCovers(500);
-  const pool = items.filter((x) => x.dna && x.imagePath);
+  // ★ 9 ก.ค. (ผู้ใช้เคาะ "ใช้เฉพาะ ref ที่ทำตามได้จริง 100%"): ตัด ref ที่เครื่องวัดตะเข็บชี้ว่า
+  //   ขอบภาพถูกกลืน/ตกแต่งจนวางช่องตามไม่ได้ (_reproducible=false จาก _ref_apply_reproducible.mjs)
+  const pool = items.filter((x) => x.dna && x.imagePath && x.dna._reproducible !== false);
   if (!pool.length) return null;
 
   const emo = norm(signals.emotion);
