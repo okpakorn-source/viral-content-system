@@ -36,7 +36,9 @@ async function loadOne(im) {
     } catch {
       /* วัดไม่ได้ = ปกติ */
     }
-    return { im, base64: await toB64(buf), brightness, detail };
+    // ★ 8 ก.ค. (CASE-360): 512→1024 — ที่ 512px ตามองไม่เห็นลายน้ำ/ตัวหนังสือเล็ก → clean=true ผิด
+    //   ปลายน้ำพังยกแผง (s6 ไม่ตัดภาพเสีย + s5e ไม่แคปเฟรม) · v3 detector ใช้ 1280px เห็นจริง — ตาคัดต้องเห็นใกล้เคียงกัน
+    return { im, base64: await toB64(buf, 1024), brightness, detail };
   } catch {
     return null;
   }

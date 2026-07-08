@@ -14,7 +14,7 @@ import { isCatalogSource } from '@/lib/junkSources';
 import { vetImages } from '@/lib/libraryTriage';
 
 export const runtime = 'nodejs';
-export const maxDuration = 300;
+export const maxDuration = 600; // ★ 7 ก.ค.: 300→600 — ค้น+vet (EyeScreen ทุกใบ) ต่อแหล่งแตะ 5+ นาทีได้ (กันตายถ้าย้ายขึ้น Vercel)
 
 const MAX_QUERIES = parseInt(process.env.IMAGES_MAX_QUERIES || '3', 10);
 const PER_SUBJECT = parseInt(process.env.IMAGES_PER_SUBJECT || '2', 10); // คำค้นขั้นต่ำต่อบุคคล

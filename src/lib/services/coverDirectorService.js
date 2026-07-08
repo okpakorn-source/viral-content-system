@@ -118,9 +118,10 @@ export async function directCover({ imageBuffers, identity, templateSpec, templa
 โครง: ${refDNA.layoutType || '-'}
 ฮีโร่: ${refDNA.hero?.position || '-'} · หน้ากิน ~${refDNA.hero?.facePct ?? '-'}% · อารมณ์ ${refDNA.hero?.emotion || '-'}
 ช่องรอง: ${refDNA.sidePanels?.arrangement || '-'}${refDNA.circle?.present ? ` · วงกลม: ${refDNA.circle.position || ''} (${refDNA.circle.role || ''})` : ''}
-บทบาทช่องที่ควรมี: ${(refDNA.slots || []).map((s) => s.role).filter(Boolean).join(' · ') || '-'}
+การจัดวางของปกเป้า (ต่อช่อง — จัดภาพจากพูลให้ใกล้แบบนี้ที่สุด): ${(refDNA.slots || []).map((s) => `${s.role}${s.pos ? `@${s.pos}` : ''}=${s.subject || s.desc || '?'}${s.shot || s.emotion ? ` (${[s.shot, s.emotion].filter(Boolean).join('·')})` : ''}`).join(' · ') || '-'}
 ตรรกะ: ${String(refDNA.compositionLogic || '').slice(0, 200)}
 → จัดช่อง/บทบาท/อารมณ์ให้สื่อแบบปกเป้าหมายนี้ (ยังยึดกฎด้านบน + ใช้เฉพาะภาพที่มีจริง)
+⛔ กฎเหล็กเหนือปกเป้า (ห้ามฝ่าเด็ดขาด): main/hero = "หน้าเดี่ยวโคลสอัพอารมณ์" เสมอ — เลือกภาพบทบาท HERO_FACE ก่อนถ้ามี · ห้ามภาพหมู่/ครอบครัว/คู่ขึ้น hero แม้ปกเป้าเป็นแนวครอบครัว (ภาพหมู่/คู่ไว้ช่องรอง)
 ` : '';
 
   const prompt = `คุณคือ Art Director มืออาชีพของเพจข่าวไวรัล กำลังจัดปกข่าวจากภาพจริง ${thumbs.length} ใบ (เรียงตามลำดับ #0 ถึง #${thumbs.length - 1})
@@ -526,6 +527,41 @@ ${refBlock}
             }
             mainA3.why = 'hero: โมเมนต์คน+สัตว์ (rev.A7 ข่าวสัตว์)';
             console.log(`[CoverDirector] 🐕 rev.A7 hero ← #${_b} (คน+สัตว์ RELATIONSHIP)`);
+          }
+        }
+      }
+    } catch { /* ไม่ critical */ }
+
+    // ★ 7 ก.ค. 👑 HERO-FACE AUTHORITY (CASE-356: Director เลือก "ภาพครอบครัวกลุ่ม" score 5 เป็น hero ทั้งที่พูลมี HERO_FACE score 10
+    //   — ref-first guidance แนวครอบครัวไป bias จน Director ฝ่ากฎ): กฎเหล็กปกแสนไลค์ hero = หน้าเดี่ยวโคลสอัพเสมอ
+    //   → main เป็นภาพหมู่/ไร้หน้า ทั้งที่พูลมีภาพ Judge ตีตรา HERO_FACE หน้าเดี่ยวสะอาด → บังคับสลับด้วยโค้ด
+    //   วางท้ายสุดของ guard สาย hero (S3e/G2/A7 วิ่งก่อน) = authority สุดท้าย ไม่มีใคร override
+    try {
+      const mainH = valid.find(a => a.slotId === 'main' || /hero/i.test(String(a.slotId)));
+      if (mainH) {
+        const fbM = faceBoxes[mainH.imageIndex];
+        const mainIsHeroFace = /HERO_FACE/i.test(imageBuffers[mainH.imageIndex]?.role || '');
+        const mainBad = (fbM && (fbM.count || 1) >= 2) || !fbM || !(fbM.x2 > fbM.x1); // ภาพหมู่ หรือไร้หน้า
+        if (!mainIsHeroFace && mainBad) {
+          let best = -1, bestArea = 0;
+          faceBoxes.forEach((fb, i) => {
+            if (i === mainH.imageIndex) return;
+            if (!/HERO_FACE/i.test(imageBuffers[i]?.role || '')) return;
+            if (!fb || !(fb.x2 > fb.x1) || (fb.count || 1) !== 1 || fb.hasText) return;
+            const ar = (fb.x2 - fb.x1) * (fb.y2 - fb.y1);
+            if (ar >= 0.02 && ar > bestArea) { bestArea = ar; best = i; }
+          });
+          if (best >= 0) {
+            const owner = valid.find(a => a.imageIndex === best);
+            if (owner && owner !== mainH) {
+              const _ti = mainH.imageIndex, _tc = mainH.crop;
+              mainH.imageIndex = best; mainH.crop = cropFromFaceBox(faceBoxes[best], 1.62);
+              owner.imageIndex = _ti; owner.crop = _tc;
+            } else if (!owner) {
+              mainH.imageIndex = best; mainH.crop = cropFromFaceBox(faceBoxes[best], 1.62);
+            }
+            mainH.why = 'hero: บังคับ HERO_FACE หน้าเดี่ยว (authority)';
+            console.log(`[CoverDirector] 👑 HERO-FACE authority: main เป็นภาพหมู่/ไร้หน้า → สลับ ← #${best} (HERO_FACE เดี่ยว area ${bestArea.toFixed(3)})`);
           }
         }
       }

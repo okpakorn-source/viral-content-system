@@ -389,7 +389,20 @@ export async function s5_search(job, { origin }) {
     const searchedCount = done.length + 1;
     const totalAddedNow = patch.images.searchStats.reduce((n, s) => n + (s.added || 0), 0);
     const remaining = SEARCH_PLATFORMS.length - searchedCount;
-    const enough = searchedCount >= SEARCH_INITIAL_BATCH && totalAddedNow >= MIN_RELEVANT_IMAGES;
+    let enough = searchedCount >= SEARCH_INITIAL_BATCH && totalAddedNow >= MIN_RELEVANT_IMAGES;
+    // ★ 7 ก.ค. (CASE-356 hero พังเพราะพูลมีแต่ภาพหมู่): "พอ" ไม่ใช่แค่นับใบ — ต้องมี "หน้าเดี่ยว" ให้เป็น hero ≥1 ใบ
+    //   ยังไม่มี → ค้นแหล่งถัดไปต่อ (จนครบ 4 แหล่ง) · เช็คไม่ได้ (store ล่ม) → ใช้เกณฑ์จำนวนเดิม ไม่บล็อกสายพาน
+    if (enough && remaining > 0) {
+      try {
+        const lib = await jfetch(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 30000);
+        const hasSingleFace = (lib?.images || []).some((x) => x.triage?.relevant !== false
+          && (Number(x.triage?.faceCount) === 1 || /หน้า(เดี่ยว|นิ่ง|อารมณ์)|portrait|single.?face/i.test(String(x.triage?.category || ''))));
+        if (!hasSingleFace) {
+          enough = false;
+          console.log('[MEGA S5] 👤 เก็บครบจำนวนแต่ยังไม่มี "หน้าเดี่ยว" ให้เป็น hero → ค้นแหล่งถัดไป');
+        }
+      } catch { /* เช็คไม่ได้ → เกณฑ์จำนวนตามเดิม */ }
+    }
     if (enough || remaining <= 0) {
       const anyOk = patch.images.searchStats.some((s) => !s.error);
       if (!anyOk || totalAddedNow === 0) {
@@ -463,6 +476,69 @@ export async function s5_triage(job, { origin }) {
   };
 }
 
+// ---------- S5e เฟรมคลิป (ยาเฉพาะทาง): หน้าเดี่ยวสะอาดไม่พอ → แคปเฟรมจากคลิปข่าว/YouTube ----------
+// A (7 ก.ค. ผู้ใช้สั่ง "แก้ให้จบ"): เว็บมักได้แต่พอร์ตเทรตโปรโมท/ลายน้ำ ไม่มีโมเมนต์เล่าเรื่อง →
+//   นับ "หน้าเดี่ยวสะอาด" ในคลัง ถ้าต่ำกว่าเกณฑ์ → เรียก /api/images/youtube
+//   (win32: ค้นคลิป→โหลด→แคปเฟรม→Gemini คัด→vet ติดป้าย→เข้าคลังเอง · เว็บ: ฝากเครื่องทีม)
+//   ทำครั้งเดียว (clipFrameDone) · พอแล้ว/อ่านคลังไม่ได้/แคปล้ม = ข้าม ไม่ถ่วง ไม่ล้มทั้งงาน (เดินต่อด้วยของเดิม)
+//   เฟรมเข้าคลังพร้อม triage แล้ว → s6 อ่านคลังสดเห็นเอง ไม่ต้อง re-triage
+const CLIPFRAME_MIN_CLEAN_FACES = parseInt(process.env.MEGA_CLIPFRAME_MIN_CLEAN_FACES || '3', 10);
+const CLIPFRAME_MIN_CLEAN_STORY = parseInt(process.env.MEGA_CLIPFRAME_MIN_CLEAN_STORY || '1', 10);
+const VIDEO_URL_RE = /youtube\.com|youtu\.be|tiktok\.com|facebook\.com|fb\.watch|instagram\.com/i;
+const isCleanFaceImg = (x) =>
+  x?.triage?.relevant !== false && x?.triage?.clean !== false
+  && (Number(x?.triage?.faceCount) === 1
+    || /หน้า(เดี่ยว|นิ่ง|อารมณ์)|portrait|single.?face|^face/i.test(String(x?.triage?.category || '')));
+// ★ 8 ก.ค. (CASE-360): "หน้าพอแต่ไม่มีภาพเล่าเรื่อง" = ปกยังพัง (ช่องขวาได้พอร์ตเทรตมั่ว)
+//   → นับ "โมเมนต์สะอาด" (action/moment/event) แยกอีกแกน — ขาดแกนไหนก็แคปเฟรม (คลิปคือแหล่งโมเมนต์จริง)
+const isCleanStoryImg = (x) =>
+  x?.triage?.relevant !== false && x?.triage?.clean !== false
+  && /action|moment|event|เหตุการณ์|โมเมนต์/i.test(String(x?.triage?.category || ''));
+
+export async function s5_clipframe(job, { origin }) {
+  const im = job.dossier.images || {};
+  if (im.clipFrameDone) return { status: 'done', nextAction: 'continue', summary: 'เฟรมคลิป: ทำแล้ว — ข้าม' };
+
+  // นับ 2 แกน: "หน้าเดี่ยวสะอาด" (hero/reaction/circle) + "โมเมนต์สะอาด" (action/เล่าเรื่อง)
+  let cleanFaces = 0;
+  let cleanStory = 0;
+  try {
+    const lib = await jfetch(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
+    cleanFaces = (lib?.images || []).filter(isCleanFaceImg).length;
+    cleanStory = (lib?.images || []).filter(isCleanStoryImg).length;
+  } catch {
+    return { status: 'done', nextAction: 'continue', summary: 'เฟรมคลิป: อ่านคลังไม่ได้ — ข้าม', dossierPatch: { images: { ...im, clipFrameDone: true } } };
+  }
+
+  if (cleanFaces >= CLIPFRAME_MIN_CLEAN_FACES && cleanStory >= CLIPFRAME_MIN_CLEAN_STORY) {
+    return { status: 'done', nextAction: 'continue', summary: `เฟรมคลิป: หน้าเดี่ยวสะอาด ${cleanFaces} + โมเมนต์ ${cleanStory} ใบ (พอ) — ไม่ต้องแคปเฟรม` };
+  }
+
+  // ขาด → แคปเฟรมจากคลิป (ช้า 3-5 นาที · ลิงก์ข่าวเป็นคลิป = แคปตรง / ไม่ใช่ = ค้น YouTube จากคีย์เวิร์ด)
+  const clipUrl = VIDEO_URL_RE.test(String(job.dossier.desk?.url || '')) ? job.dossier.desk.url : '';
+  const lack = cleanFaces < CLIPFRAME_MIN_CLEAN_FACES ? `หน้าเดี่ยวสะอาดแค่ ${cleanFaces}/${CLIPFRAME_MIN_CLEAN_FACES}` : `ไม่มีภาพโมเมนต์เล่าเรื่อง (${cleanStory}/${CLIPFRAME_MIN_CLEAN_STORY})`;
+  console.log(`[MEGA S5e] 🎬 ${lack} → แคปเฟรมจากคลิป${clipUrl ? ' (ลิงก์ข่าว)' : ' (ค้น YouTube)'}`);
+  let r;
+  try {
+    r = await jfetch(`${origin}/api/images/youtube`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, ...(clipUrl ? { clipUrl } : {}) }) }, 600000);
+  } catch (err) {
+    return { status: 'done', nextAction: 'continue', summary: `เฟรมคลิป: เรียกไม่สำเร็จ (${String(err?.message || '').slice(0, 50)}) — เดินต่อด้วยของเดิม`, dossierPatch: { images: { ...im, clipFrameDone: true } }, quality: 'yellow' };
+  }
+  const added = r?.added || 0;
+  const summary = r?.queued
+    ? `เฟรมคลิป: ฝากเครื่องทีมแคป (หน้าน้อย ${cleanFaces}) — สายพานเดินต่อ เฟรมตามมาทีหลัง`
+    : r?.success
+      ? `เฟรมคลิป: แคปได้ ${added} เฟรมเข้าคลัง (หน้าเดิม ${cleanFaces})`
+      : `เฟรมคลิป: แคปไม่ได้ (${(r?.error || '').slice(0, 60)}) — เดินต่อด้วยของเดิม`;
+  return {
+    status: 'done',
+    nextAction: 'continue',
+    summary,
+    dossierPatch: { images: { ...im, clipFrameDone: true, clipFramesAdded: added } },
+    quality: (!r?.success && !r?.queued) ? 'yellow' : undefined,
+  };
+}
+
 // ---------- S6 เลือกภาพลงช่อง: สมองจับคู่ + ด่านโค้ดกันซ้ำ/ผิดคน + fallback กฎเดียวกัน ----------
 const SLOT_ORDER = ['hero', 'reaction', 'action', 'context', 'circle'];
 const SLOT_CATEGORY_HINT = {
@@ -479,8 +555,15 @@ export async function s6_slots(job, { origin }) {
   const pool = (r.images || []).filter((x) => x.triage && x.triage.relevant !== false);
   if (!pool.length) return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพที่ตายืนยันว่าเกี่ยวเลย — ทำปกไม่ได้', quality: 'red' };
 
-  // metadata กะทัดรัด (เรียงคุณภาพสูงก่อน · เพดาน 80 ใบกัน prompt บวม)
-  const sorted = pool.slice().sort((a, b) => (b.triage?.quality ?? 0) - (a.triage?.quality ?? 0)).slice(0, 80);
+  // metadata กะทัดรัด (สะอาดก่อน → คุณภาพสูงก่อน · เพดาน 80 ใบกัน prompt บวม)
+  //   B (reject ลายน้ำ 7 ก.ค.): triage ติดป้าย clean=false เมื่อมีลายน้ำ/ตัวหนังสือ — ยกภาพสะอาดขึ้นหัวคิว
+  //   ให้ทั้ง Director และ fallback หยิบสะอาดก่อนเสมอ (ยอมลายน้ำเฉพาะไม่มีตัวเลือกสะอาดจริงๆ)
+  const isClean = (x) => x.triage?.clean !== false;
+  const sorted = pool.slice().sort((a, b) => {
+    const c = (isClean(b) ? 1 : 0) - (isClean(a) ? 1 : 0);
+    if (c) return c;
+    return (b.triage?.quality ?? 0) - (a.triage?.quality ?? 0);
+  }).slice(0, 80);
   const meta = sorted.map((x) => ({
     id: x.id,
     person: x.triage?.person || null,
@@ -489,6 +572,7 @@ export async function s6_slots(job, { origin }) {
     emotion: x.triage?.emotion || null,
     quality: x.triage?.quality ?? 5,
     faces: x.triage?.faceCount ?? 0,
+    clean: isClean(x), // false = มีลายน้ำ/ตัวหนังสือ ห้ามขึ้นช่องถ้ามีตัวเลือกสะอาด
     src: x.platform || '',
   }));
 
@@ -504,11 +588,25 @@ export async function s6_slots(job, { origin }) {
         charCount: (c.mainCharacters || []).length,
         dreamShots: (c.visualDreamShots || []).map((v) => v.slot || v.description || ''),
       });
-      if (m?.ref?.dna) job.dossier.refMatch = { dna: m.ref.dna, styleName: m.ref.styleName || m.ref.id, imagePath: m.ref.imagePath, reason: m.reason };
+      if (m?.ref?.dna) {
+        // ★ 8 ก.ค. (CASE-360): แนวข่าวไม่ตรงจริง (แมตช์แค่อารมณ์/role generic) = "หลวม"
+        //   → ตัด slot subject/storyFlow ทิ้ง (กัน ref รับปริญญาพาเลือก "คนกอด/เด็กในวง" ที่ข่าวนี้ไม่มี)
+        //   คงไว้แค่ "โครง" (layoutFamily/template) ซึ่งพิสูจน์แล้วว่าตรง — vt_ref_5x4 จัดถูก
+        const weak = !m.typeMatched;
+        const dna = weak ? { ...m.ref.dna, slots: [], neededShots: [], storyFlow: '', compositionLogic: '' } : m.ref.dna;
+        job.dossier.refMatch = { dna, styleName: m.ref.styleName || m.ref.id, imagePath: m.ref.imagePath, reason: m.reason, typeMatched: !weak };
+      }
     } catch { /* ไม่มีคลัง ref → เดินแบบเดิม */ }
   }
-  const _refDNA = job.dossier.refMatch?.dna || null;
-  if (_refDNA) console.log(`[MEGA S6] 🎯 ปกเป้า: ${job.dossier.refMatch.styleName || '-'} (${job.dossier.refMatch.reason || ''}) — ใช้ขับการเลือกภาพ + โครง`);
+  // แมตช์หลวม → ไม่ส่ง DNA เข้าสมองเลือกภาพ (เลือกตามเข็มทิศข่าวล้วน) · โครงยังใช้ตอน s7
+  const _refDNA = job.dossier.refMatch?.typeMatched ? job.dossier.refMatch.dna : null;
+  // ★ 8 ก.ค. (CASE-361): เทมเพลตของ ref ตระกูลหลัก (vt_ref_5x4) มีแค่ 4 ช่องภาพ แต่เดิมเลือกครบ 5 บทบาทเสมอ
+  //   → ช่องที่ 5 ไม่ได้ถูกใช้จริงตอนประกอบ (จำนวนภาพไม่ตรงกับที่ ref กำหนด) — ตัดให้เหลือเท่า panelCount ของ ref ที่แมตช์ (ไม่มี ref/เลขแปลก → คงเดิม 5 ปลอดภัย)
+  const _panelCount = Number(job.dossier.refMatch?.dna?.panelCount);
+  const activeSlots = (_panelCount >= 3 && _panelCount <= SLOT_ORDER.length) ? SLOT_ORDER.slice(0, _panelCount) : SLOT_ORDER;
+  if (job.dossier.refMatch) {
+    console.log(`[MEGA S6] 🎯 ปกเป้า: ${job.dossier.refMatch.styleName || '-'} (${job.dossier.refMatch.reason || ''}) — ${_refDNA ? 'ใช้ขับการเลือกภาพ + โครง' : 'แมตช์หลวม → ใช้เฉพาะโครง (เลือกภาพตามเข็มทิศข่าว)'}${activeSlots.length !== SLOT_ORDER.length ? ` · ตัดเหลือ ${activeSlots.length} ช่องตาม panelCount ref` : ''}`);
+  }
 
   let brain = { slots: {}, note: '' };
   let brainOk = true;
@@ -542,7 +640,7 @@ export async function s6_slots(job, { origin }) {
   const slots = {};
   let fallbackUsed = 0;
 
-  for (const slot of SLOT_ORDER) {
+  for (const slot of activeSlots) {
     const want = brainOk ? brain.slots?.[slot] : null;
     let img = want?.id != null ? byId.get(String(want.id)) : null;
     let reason = want?.reason || '';
@@ -552,12 +650,16 @@ export async function s6_slots(job, { origin }) {
       // fallback กฎเดียวกับทางหลัก: hero=ตัวเอกหน้าชัดคุณภาพสูง / อื่นๆ=หมวดใกล้เคียง → คุณภาพสูงสุดที่เหลือ
       const cands = sorted.filter((x) => !used.has(String(x.id)));
       const hint = SLOT_CATEGORY_HINT[slot] || [];
-      img =
-        (slot === 'hero' ? cands.find((x) => isMainChar(x) && (x.triage?.faceCount ?? 0) >= 1) : null) ||
-        cands.find((x) => hint.includes(x.triage?.category)) ||
-        (slot === 'reaction' ? cands.find((x) => (x.triage?.faceCount ?? 0) >= 1) : null) ||
-        cands[0] ||
+      const pickFrom = (arr) =>
+        (slot === 'hero' ? arr.find((x) => isMainChar(x) && (x.triage?.faceCount ?? 0) >= 1) : null) ||
+        arr.find((x) => hint.includes(x.triage?.category)) ||
+        (slot === 'reaction' ? arr.find((x) => (x.triage?.faceCount ?? 0) >= 1) : null) ||
+        arr[0] ||
         null;
+      // B (reject ลายน้ำ): ช่องทั่วไปหยิบภาพสะอาดก่อน ไม่มีค่อยยอมลายน้ำ · hero ยึด "ถูกคน 100%" เหนือทุกข้อ
+      img = slot === 'hero'
+        ? pickFrom(cands)
+        : (pickFrom(cands.filter((x) => x.triage?.clean !== false)) || pickFrom(cands));
       if (img && slot === 'hero' && !isMainChar(img)) img = null; // ไม่มีตัวเอกจริง → ปล่อยว่าง ห้ามฝืนผิดคน
       if (img) { fallbackUsed++; reason = reason || 'fallback ตามสูตรแสนไลค์ (หมวด/คุณภาพ)'; }
     }
@@ -569,24 +671,30 @@ export async function s6_slots(job, { origin }) {
         person: img.triage?.person || null,
         category: img.triage?.category || null,
         emotion: img.triage?.emotion || null,
+        clean: isClean(img),                       // ★ 8 ก.ค.: พก clean/faces ไป slotPlan → v3 เชื่อป้ายตาคัด (แม่นกว่า detector)
+        faces: Number(img.triage?.faceCount) || 0,
         reason,
-        backups: (want?.backups || []).filter((b) => byId.has(String(b)) && !used.has(String(b))).slice(0, 2),
+        // ★ 8 ก.ค. (CASE-360): backups เรียงสะอาดก่อน — v3 QC สลับภาพเสียแล้วต้องมี "ของสะอาด" ให้หยิบ
+        backups: (want?.backups || [])
+          .filter((b) => byId.has(String(b)) && !used.has(String(b)))
+          .sort((a, b) => (isClean(byId.get(String(b))) ? 1 : 0) - (isClean(byId.get(String(a))) ? 1 : 0))
+          .slice(0, 2),
       };
     } else {
       slots[slot] = null;
     }
   }
 
-  const filled = SLOT_ORDER.filter((s) => slots[s]).length;
+  const filled = activeSlots.filter((s) => slots[s]).length;
   if (!slots.hero) {
     return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '' } } };
   }
   return {
     status: 'done',
     nextAction: 'continue',
-    summary: `จับคู่ ${filled}/5 ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'} — ${(brain.note || '').slice(0, 80)}`,
+    summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'} — ${(brain.note || '').slice(0, 80)}`,
     dossierPatch: { pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed }, ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}) },
-    quality: filled < 5 ? 'yellow' : undefined,
+    quality: filled < activeSlots.length ? 'yellow' : undefined,
   };
 }
 
@@ -615,10 +723,12 @@ export async function s7_cover(job, { origin } = {}) {
   // ★ 7 ก.ค. FIX "คลังแน่นแต่ปกล้มภาพไม่พอ": เดิม backups เป็น id ถูกทิ้ง (นับรายงานเฉยๆ) แล้วส่งแค่ 5 ลิงก์เป๊ะ —
   //   ลิงก์หน้าเว็บ/วิดีโอพัง 1-2 ใบ (403) = พูลต่ำกว่า 4 ล้มทั้งปก → แปลง id→URL จากคลังเคส ต่อท้าย (ไฟล์รูปตรงก่อน) เพดาน 10
   let backupUrls = [];
+  let urlTriage = new Map(); // ★ 8 ก.ค.: url → {clean,faces} จากคลัง (ส่งเป็น slotPlan ให้ v3 เชื่อป้ายตาคัด)
   try {
     const backupIds = Object.values(slots).flatMap((s) => s?.backups || []);
-    if (backupIds.length && origin && d.images?.caseId) {
+    if (origin && d.images?.caseId) {
       const lib = await jfetch(`${origin}/api/images/${encodeURIComponent(d.images.caseId)}`, {}, 30000);
+      urlTriage = new Map((lib?.images || []).map((x) => [String(x.imageUrl), { clean: x.triage?.clean !== false, faces: Number(x.triage?.faceCount) || 0 }]));
       const byId = new Map((lib?.images || []).map((x) => [String(x.id), x.imageUrl]));
       const isDirect = (u) => /\.(jpe?g|png|webp|gif)([?#]|$)/i.test(String(u || ''));
       backupUrls = backupIds.map((b) => byId.get(String(b))).filter(Boolean)
@@ -630,6 +740,20 @@ export async function s7_cover(job, { origin } = {}) {
     .filter((u) => { const k = String(u); if (_seenL.has(k)) return false; _seenL.add(k); return true; })
     .slice(0, 10);
   const backup = allLinks.length - links.length; // จำนวนสำรองที่ส่งจริง
+  // ★ 8 ก.ค. (CASE-363/AC-0035 hero โดนดึงลง + ภาพ text หลุดเข้า main): ส่ง "แผนช่อง" ให้ v3
+  //   หลักการ: S6 ตัดสิน · v3 แค่ประกอบ — v3 บังคับ main=hero ของแผน + เชื่อ clean ของตาคัด (แม่นกว่า detector 512→1024)
+  const heroUrl = slots.hero?.imageUrl || null;
+  const slotPlan = allLinks.map((u) => {
+    const primary = SLOT_ORDER.find((s) => slots[s]?.imageUrl === u);
+    const t = urlTriage.get(String(u)) || {};
+    return {
+      url: u,
+      slot: primary || null, // hero/reaction/action/context/circle ถ้าเป็นภาพหลัก · null=สำรอง
+      clean: primary ? (slots[primary].clean !== false) : (t.clean !== false),
+      faces: primary ? (slots[primary].faces || 0) : (t.faces || 0),
+      isHero: u === heroUrl,
+    };
+  });
   const nd = d.generate?.newsData || {};
   // 🎯 ref-first (7 ก.ค.): ใช้ "ปกเป้าเดียวกับที่ s6 ใช้เลือกภาพ" (dossier.refMatch) — เป้าเดียวกันทั้งท่อ
   //   (fallback: ถ้าแฟ้มเก่าไม่มี refMatch เช่นงานค้างก่อนอัป → หาใหม่ตรงนี้)
@@ -656,6 +780,7 @@ export async function s7_cover(job, { origin } = {}) {
     mainCharacterName: (d.compass?.mainCharacters || [])[0]?.name || '',
     sourceLinks: allLinks, // ★ 7 ก.ค.: หลัก 5 + สำรอง (เพดาน 10)
     sourceOnly: true, // ใช้เฉพาะภาพที่สายพานคัดแล้ว — ห้ามรีเสิร์ชปนภาพนอกสายตา
+    slotPlan, // ★ 8 ก.ค.: แผนช่องจาก S6 (hero + clean/faces ต่อ url) — v3 บังคับ main=hero + เชื่อ clean ตาคัด
     userId: MEGA_USER,
     ...(refDNA ? { refDNA } : {}), // 🎯 ปกเป้าจากคลัง (มีเฉพาะเมื่อ match ได้)
   };
@@ -746,7 +871,8 @@ export const STAGE_FLOW = {
   s5_case: { run: s5_case, next: 's5_keywords', label: 'S5 เปิดเคสภาพ' },
   s5_keywords: { run: s5_keywords, next: 's5_search', label: 'S5 สกัดคีย์เวิร์ด' },
   s5_search: { run: s5_search, next: 's5_triage', label: 'S5 ค้นภาพ 4 แหล่ง' },
-  s5_triage: { run: s5_triage, next: 's6_slots', label: 'S5 ตาคัดคลัง' },
+  s5_triage: { run: s5_triage, next: 's5_clipframe', label: 'S5 ตาคัดคลัง' },
+  s5_clipframe: { run: s5_clipframe, next: 's6_slots', label: 'S5 เฟรมคลิป (ถ้าหน้าน้อย)' },
   s6_slots: { run: s6_slots, next: 's7_cover', label: 'S6 เลือกภาพลงช่อง' },
   s7_cover: { run: s7_cover, next: 's7_wait', label: 'S7 ส่งทำปก' },
   s7_wait: { run: s7_wait, next: 'cover_ready', label: 'S7 รอปกเสร็จ' },

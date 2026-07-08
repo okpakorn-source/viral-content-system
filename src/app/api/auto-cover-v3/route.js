@@ -240,6 +240,23 @@ async function _renderCoverV3(request) {
       } catch { /* ข้ามภาพโหลดไม่ได้ */ }
     }));
     console.log(`[CoverV3] downloaded ${imageBuffers.length}/${candidates.length} buffers`);
+    // ★ 8 ก.ค. (CASE-363): แนบ "แผนช่อง" จาก S6 ให้ทุกภาพ (by url) — S6 ตัดสิน · v3 แค่ประกอบ
+    //   _planClean=false (ตาคัด 1024px เห็น text/ลายน้ำที่ detector v3 พลาด) → บังคับเป็น hasText
+    //   _planHero=true (ภาพ hero ที่ S6 เลือก) → บังคับเป็น main หลัง Director (ไม่ปล่อยให้ Director ดึงลง)
+    if (Array.isArray(body.slotPlan) && body.slotPlan.length) {
+      const planByUrl = new Map(body.slotPlan.map((p) => [String(p.url), p]));
+      let _pHero = 0, _pDirty = 0;
+      for (const img of imageBuffers) {
+        const p = planByUrl.get(String(img.url));
+        if (!p) continue;
+        img._planSlot = p.slot || null;
+        img._planClean = p.clean !== false;
+        img._planHero = !!p.isHero;
+        if (p.isHero) _pHero++;
+        if (p.clean === false) _pDirty++;
+      }
+      console.log(`[CoverV3] 📋 slotPlan: ${imageBuffers.filter(i => i._planSlot).length} ภาพหลักติดป้าย · hero ${_pHero} · ตาคัดชี้ไม่สะอาด ${_pDirty}`);
+    }
     coverTrace.step('download', 'ดาวน์โหลดภาพดิบเป็นไฟล์', {
       downloaded: imageBuffers.length,
       candidates: candidates.length,
@@ -260,7 +277,8 @@ async function _renderCoverV3(request) {
         if ((!fd?.hasFaces || !fd.faces?.length) && img.buffer) {
           try { const hi = await detectFaces(img.buffer, { maxDim: 1280, detail: 'high' }); if (hi && ((hi.hasFaces && hi.faces?.length) || !fd)) fd = hi; } catch {}
         }
-        const hasText = !!fd?.hasBigText; // ★ สกรีนช็อต/กราฟิกข่าว — ต้องส่งธงต่อแม้ไม่มีหน้า
+        // ★ 8 ก.ค.: ตาคัด (1024px) ชี้ไม่สะอาด → บังคับ hasText แม้ detector v3 (ที่พลาด CASE-363 #6) ไม่เจอ
+        const hasText = !!fd?.hasBigText || img._planClean === false; // ★ สกรีนช็อต/กราฟิกข่าว/ตาคัดชี้ text — ต้องส่งธงต่อแม้ไม่มีหน้า
         const textRegion = fd?.textRegion || null; // ★ โซนข้อความ — ครอปคนหลบโซนนี้ = ใช้เฟรมรายการได้
         const _wmRegion = fd?.watermarkRegion || null; // ★ rev.S4: โซนลายน้ำสำนักข่าว — ครอปหลบ (ไม่ reject)
         if (!fd?.hasFaces || !fd.faces?.length) {
@@ -636,11 +654,32 @@ async function _renderCoverV3(request) {
     let refSpec = null;
     if (body.refDNA) {
       try {
+        // ★ 8 ก.ค. (ผู้ใช้ชี้ "แทมเพลตล็อคแบบเดิม ไม่ปรับตาม ref" — CASE-364): กลับลำดับ
+        //   ① โครงเรขาคณิตจริงจาก DNA ก่อน (จำนวนช่อง/กรอบเหลี่ยม/วงกลม/ตำแหน่ง ตาม ref เป๊ะ)
+        //     เดิม family จูนมือมาก่อน → 18/21 ref ยุบเหลือ vt_ref_5x4 ตัวเดียว กรอบขาวของ ref หายหมด
+        //     การ์ดกันตัดหน้า (hero-tight/width-floor/FaceLock/enforceCircleFace) จับ slot id 'main'/'circle'
+        //     ซึ่ง dnaToTemplateSpec map ให้แล้ว → ใช้โครงดิบก็ได้การ์ดครบชุด (เหตุกลัว CASE-356/357 ถูกแก้แยกไปแล้ว)
+        //   ② แปลงไม่ได้/ช่องเกินภาพ → fallback family จูนมือ · ③ kill switch: COVER_REF_GEOMETRY=0 → family-first แบบเดิม
+        const geometryFirst = process.env.COVER_REF_GEOMETRY !== '0';
         const { dnaToTemplateSpec } = await import('@/lib/refTemplate');
-        refSpec = dnaToTemplateSpec(body.refDNA);
-        if (refSpec && refSpec.slots.length > imageBuffers.length) { console.log(`[CoverV3] 🎯 โครงตามปกเป้าต้องการ ${refSpec.slots.length} ช่อง แต่ภาพมี ${imageBuffers.length} → fallback โครงปกติ`); refSpec = null; }
-        if (refSpec) console.log(`[CoverV3] 🎯 ใช้โครงตามปกเป้า: ${refSpec.storyFit} (${refSpec.slots.length} ช่อง · ${refSpec.canvasW}x${refSpec.canvasH} · feather ${refSpec.feather})`);
-      } catch (e) { console.log('[CoverV3] refTemplate แปลงพัง (ใช้โครงปกติ):', e.message?.slice(0, 50)); }
+        const { pickTemplateForDNA } = await import('@/lib/refTemplatePicker');
+        if (geometryFirst) {
+          refSpec = dnaToTemplateSpec(body.refDNA);
+          if (refSpec && refSpec.slots.length > imageBuffers.length) { console.log(`[CoverV3] 🎯 โครงจริง ref ต้องการ ${refSpec.slots.length} ช่อง แต่ภาพมี ${imageBuffers.length} → ลอง family จูนมือ`); refSpec = null; }
+          if (refSpec) console.log(`[CoverV3] 🎯 โครงเรขาคณิตจริงตามปกเป้า: ${refSpec.slots.length} ช่อง (กรอบ ${refSpec.slots.filter(s => s.border).length}) · ${refSpec.canvasW}x${refSpec.canvasH}`);
+        }
+        if (!refSpec) {
+          const fam = pickTemplateForDNA(body.refDNA, V3_TEMPLATES);
+          if (fam?.spec && fam.spec.slots.length <= imageBuffers.length) {
+            refSpec = fam.spec;
+            console.log(`[CoverV3] 🎯 โครงตามปกเป้า (family "${body.refDNA.layoutFamily || '-'}") → template จูนมือ: ${fam.key} (${refSpec.slots.length} ช่อง · ${refSpec.canvasW}x${refSpec.canvasH})`);
+          } else if (!geometryFirst) {
+            refSpec = dnaToTemplateSpec(body.refDNA);
+            if (refSpec && refSpec.slots.length > imageBuffers.length) refSpec = null;
+            if (refSpec) console.log(`[CoverV3] 🎯 ใช้โครง % ดิบตามปกเป้า (ไม่มี family จูนมือ): ${refSpec.slots.length} ช่อง · ${refSpec.canvasW}x${refSpec.canvasH}`);
+          }
+        }
+      } catch (e) { console.log('[CoverV3] refTemplate เลือกพัง (ใช้โครงปกติ):', e.message?.slice(0, 50)); }
     }
     const forced = (forceTemplateId && V3_TEMPLATES[forceTemplateId]) ? [V3_TEMPLATES[forceTemplateId]] : (refSpec ? [refSpec] : null);
     // ★ 27 มิ.ย. (ผู้ใช้สั่ง): ลบโครง 3 ภาพ (v3_grid3) ถาวร — ทางเลือกสุดท้าย = โครง 4 ช่อง (มีวงกลม) เท่านั้น
@@ -669,6 +708,45 @@ async function _renderCoverV3(request) {
     // ── ③ Execute (พิกเซลแท้) ──
     const { executeCover, applyFixes } = await import('@/lib/services/coverExecutorService');
     let assignments = direction.assignments;
+    // 👑 8 ก.ค. (CASE-363 hero โดน Director ดึงลง right_top): S6 ตัดสิน hero แล้ว → v3 บังคับ main = ภาพ hero ของแผน
+    //   เงื่อนไข: ภาพ hero ยังอยู่ในพูล + มีหน้าจริง + ไม่ใช่ text · ไม่เข้าเงื่อน = ปล่อยตาม Director (ไม่ฝืน ไม่ทำปกล้ม)
+    //   ★ C1 (CASE-365): เป็นฟังก์ชัน — เรียกทุกรอบที่ Director จัดใหม่ (แรก + retry) ไม่ใช่แค่รอบแรก
+    const enforcePlanHero = (asg) => {
+      try {
+        if (!Array.isArray(asg) || !asg.length) return;
+        const heroIdx = imageBuffers.findIndex((im, i) => im?._planHero && faceBoxes[i] && faceBoxes[i].x2 > faceBoxes[i].x1 && !faceBoxes[i].hasText);
+        if (heroIdx < 0) return;
+        const mainA = asg.find((a) => /main|hero/i.test(a.slotId));
+        if (mainA && mainA.imageIndex !== heroIdx) {
+          const oldMainIdx = mainA.imageIndex;
+          const dupA = asg.find((a) => a.imageIndex === heroIdx && a !== mainA); // ช่องอื่นที่กำลังใช้ภาพ hero → สลับกลับกัน กันซ้ำ
+          mainA.imageIndex = heroIdx; mainA.crop = { x: 0, y: 0, w: 1, h: 1 }; mainA.why = '👑 บังคับ main = hero ที่ S6 เลือก';
+          if (dupA) { dupA.imageIndex = oldMainIdx; dupA.crop = { x: 0, y: 0, w: 1, h: 1 }; }
+          console.log(`[CoverV3] 👑 บังคับ main ← #${heroIdx} (hero ที่ S6 เลือก) — เดิม Director ให้ #${oldMainIdx}`);
+        }
+      } catch { /* บังคับ hero ล้ม → ปล่อยตาม Director */ }
+    };
+    // ★ C3 (CASE-365 Judge ตำหนิ "ภาพซ้ำ"): ด่านกันภาพซ้ำหลังทุกรอบสลับ (QC/Diversity/Eye-After ต่างคนต่างสลับ)
+    //   เจอ imageIndex ซ้ำ → ช่องหลัง (ไม่ใช่ main) แทนด้วยภาพสะอาดที่ยังไม่ถูกใช้ · ไม่มีเหลือ → ปล่อย (ดีกว่าทำปกล้ม)
+    const dedupeAssignments = (asg) => {
+      try {
+        if (!Array.isArray(asg) || !asg.length) return;
+        const used = new Set();
+        for (const a of asg) {
+          if (!used.has(a.imageIndex)) { used.add(a.imageIndex); continue; }
+          if (/main|hero/i.test(a.slotId)) continue; // main ไม่โดนแทน (hero authority คุมแล้ว)
+          const sub = imageBuffers.findIndex((im, i) =>
+            !used.has(i) && im?.buffer && faceBoxes[i] && !faceBoxes[i].hasText && im._planClean !== false);
+          if (sub >= 0) {
+            console.log(`[CoverV3] ♻️ กันภาพซ้ำ: ${a.slotId} #${a.imageIndex} ซ้ำ → แทน #${sub}`);
+            a.imageIndex = sub; a.crop = { x: 0, y: 0, w: 1, h: 1 }; a.why = (a.why || '') + ' [♻️กันซ้ำ]';
+            used.add(sub);
+          }
+        }
+      } catch { /* กันซ้ำล้ม → คงเดิม */ }
+    };
+    enforcePlanHero(assignments);
+    dedupeAssignments(assignments);
     let coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec, faceBoxes });
     console.log(`[CoverV3] ④ composed ${Math.round(coverBuffer.length / 1024)}KB`);
 
@@ -679,6 +757,7 @@ async function _renderCoverV3(request) {
       assignments = applyFixes(assignments, qc.fixes);
       // ⭕🔒 7 ก.ค. (บั๊กวงกลมไม่ตรง ref): QC สลับภาพวงกลมโดยไม่ผ่านด่าน S3b/S3d → บังคับกฎวงกลมซ้ำหลัง applyFixes
       enforceCircleFace({ assignments, imageBuffers, faceBoxes, identity, newsTitle });
+      enforcePlanHero(assignments); dedupeAssignments(assignments); // ★ C1+C3: QC-swap ก็ห้ามดึง hero ลง/สร้างภาพซ้ำ
       if (process.env.COVER_FINAL_CROPPER === '0') tightenMomentCrops(assignments, faceBoxes); // rev.20 · ★rev.FINAL: FinalCropper คุมแทน
       coverBuffer = await executeCover({ assignments, imageBuffers, templateSpec, faceBoxes });
       qcApplied = true;
@@ -748,10 +827,11 @@ async function _renderCoverV3(request) {
         const dir2 = await directCover({ imageBuffers, identity, templateOptions: opts, templateSpec: opts[0], newsTitle, faceBoxes, refDNA: body.refDNA || null });
         if (!dir2) continue;
         const tS = dir2.templateSpec; let asg2 = dir2.assignments;
+        enforcePlanHero(asg2); dedupeAssignments(asg2); // ★ C1 (CASE-365): retry ก็ต้องเคารพ hero ของ S6 — เดิมหลุดเฉพาะรอบแรก
         let buf2 = await executeCover({ assignments: asg2, imageBuffers, templateSpec: tS, faceBoxes });
         const qc2 = await reviewCover({ coverBuffer: buf2, templateSpec: tS, assignments: asg2, imageBuffers, faceBoxes, identity, newsTitle });
         let qa2 = false;
-        if (!qc2.ok && qc2.fixes?.length > 0) { asg2 = applyFixes(asg2, qc2.fixes); enforceCircleFace({ assignments: asg2, imageBuffers, faceBoxes, identity, newsTitle }); if (process.env.COVER_FINAL_CROPPER === '0') tightenMomentCrops(asg2, faceBoxes); buf2 = await executeCover({ assignments: asg2, imageBuffers, templateSpec: tS, faceBoxes }); qa2 = true; }
+        if (!qc2.ok && qc2.fixes?.length > 0) { asg2 = applyFixes(asg2, qc2.fixes); enforceCircleFace({ assignments: asg2, imageBuffers, faceBoxes, identity, newsTitle }); enforcePlanHero(asg2); dedupeAssignments(asg2); if (process.env.COVER_FINAL_CROPPER === '0') tightenMomentCrops(asg2, faceBoxes); buf2 = await executeCover({ assignments: asg2, imageBuffers, templateSpec: tS, faceBoxes }); qa2 = true; }
         if (_preferFrames && process.env.COVER_FINAL_CROPPER === '0') { faceTightenAll(asg2, faceBoxes, 2.2); buf2 = await executeCover({ assignments: asg2, imageBuffers, templateSpec: tS, faceBoxes }); }
         const jr2 = await _judgeRigorous(buf2); const eff2 = _eff(jr2);
         console.log(`[CoverV3] 🔁 retry ${k + 1}/${MAX_RETRY} (${tS.id}) → ${jr2.score}/10 eff=${eff2} — ${jr2.reason}`);
@@ -956,6 +1036,7 @@ async function _renderCoverV3(request) {
             if (_best2 >= 0) { a.imageIndex = _best2; a.crop = { x: 0, y: 0, w: 1, h: 1 }; a.why = '👁️ eye-after swap'; console.log(`[CoverV3] 👁️ swap ${iss.slot} ← #${_best2}`); }
           }
           // recrop ช่องที่มีปัญหาทั้งหมด (รวมช่องที่เพิ่ง swap) ด้วยตา FinalCropper + hint จากตาตรวจ
+          enforcePlanHero(assignments); dedupeAssignments(assignments); // ★ C1+C3 (CASE-365): Eye-After swap ก็ห้ามดึง hero/สร้างซ้ำ
           const _slots = _eye.issues.map(i => i.slot);
           const _subset = assignments.filter(a => _slots.includes(a.slotId));
           if (_subset.length) {

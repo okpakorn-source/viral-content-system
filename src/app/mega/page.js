@@ -19,6 +19,7 @@ const STATIONS = [
   { key: 's5_keywords', label: 'S5 คีย์เวิร์ด' },
   { key: 's5_search', label: 'S5 ค้นภาพ' },
   { key: 's5_triage', label: 'S5 ตาคัด' },
+  { key: 's5_clipframe', label: 'S5 เฟรมคลิป' },
   { key: 's6_slots', label: 'S6 ภาพลงช่อง' },
   { key: 'assets_ready', label: '🧺 ครบชุด' },
   { key: 's7_cover', label: 'S7 ส่งทำปก' },

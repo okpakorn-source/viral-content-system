@@ -99,10 +99,36 @@ export default function RefCoversPage() {
           const d = it.dna || {};
           return (
             <div key={it.id} style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden', background: '#fff', display: 'flex', flexDirection: 'column' }}>
-              {it.imagePath && <img src={it.imagePath} alt={it.styleName} onClick={() => setZoom(it.imagePath)} style={{ width: '100%', display: 'block', cursor: 'zoom-in', maxHeight: 260, objectFit: 'contain', background: '#0f172a' }} />}
+              {it.imagePath && (
+                <div style={{ display: 'flex', background: '#0f172a' }}>
+                  <img src={it.imagePath} alt={it.styleName} onClick={() => setZoom(it.imagePath)} style={{ flex: 1, minWidth: 0, display: 'block', cursor: 'zoom-in', maxHeight: 260, objectFit: 'contain' }} />
+                  {/* ★ A3 (8 ก.ค.): wireframe "เทมเพลตเปล่า" จาก DNA — เห็นทันทีว่าถอดตรง ref ไหม (เพี้ยน = กด reanalyze) */}
+                  {Array.isArray(it.dna?.template?.slots) && it.dna.template.slots.length > 0 && (
+                    <svg viewBox="0 0 108 135" style={{ width: 84, height: 105, alignSelf: 'center', margin: '0 6px', background: '#1e293b', borderRadius: 4, flexShrink: 0 }}
+                      title={`เทมเพลตเปล่า${it.dna._geometryRefined ? ' (วัดละเอียดแล้ว)' : ''}`}>
+                      {it.dna.template.slots.filter((s) => s.shape !== 'circle').map((s, i) => (
+                        <rect key={i} x={(Number(s.xPct) || 0) * 1.08} y={(Number(s.yPct) || 0) * 1.35}
+                          width={(Number(s.wPct) || 0) * 1.08} height={(Number(s.hPct) || 0) * 1.35}
+                          fill={['#334155', '#475569', '#3b4f6b', '#52525b', '#44403c'][i % 5]}
+                          stroke={s.border ? (s.borderColor && s.borderColor !== '-' ? s.borderColor : '#fff') : '#0f172a'}
+                          strokeWidth={s.border ? 2 : 0.6} />
+                      ))}
+                      {it.dna.template.slots.filter((s) => s.shape === 'circle').map((s, i) => (
+                        <circle key={'c' + i}
+                          cx={((Number(s.xPct) || 0) + (Number(s.wPct) || 0) / 2) * 1.08}
+                          cy={((Number(s.yPct) || 0) + (Number(s.hPct) || 0) / 2) * 1.35}
+                          r={((Number(s.wPct) || 10) / 2) * 1.08}
+                          fill="#64748b" stroke="#fff" strokeWidth={2} />
+                      ))}
+                    </svg>
+                  )}
+                </div>
+              )}
               <div style={{ padding: 10, fontSize: 12, color: '#334155', flex: 1 }}>
                 <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>{it.styleName || '(ไม่มีชื่อแนว)'}</div>
                 {it.dnaError && <div style={{ color: '#b91c1c', fontSize: 11 }}>⚠️ สกัด DNA ล้ม: {it.dnaError}</div>}
+                {d._geometryMismatch && <div style={{ color: '#b45309', background: '#fef3c7', borderRadius: 6, padding: '2px 8px', fontSize: 11, marginBottom: 4 }}>👁️ {d._geometryMismatch}</div>}
+                {d._geometryRefined && <div style={{ color: '#166534', fontSize: 10, marginBottom: 4 }}>✓ วัดละเอียด 2 ขั้น (นับภาพ→วัด) แล้ว</div>}
                 {d.layoutType && <div style={{ marginBottom: 4 }}><b>โครง:</b> {d.layoutType}{d.layoutFamily ? ` · ${d.layoutFamily}` : ''}</div>}
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 4 }}>
                   {d.aspectRatio && chip(d.aspectRatio, '#dcfce7', '#166534')}

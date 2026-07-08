@@ -10,7 +10,7 @@
 
 import { NextResponse } from 'next/server';
 import { compassBrain } from '@/lib/megaBrains';
-import { s5_case, s5_keywords, s5_search, s5_triage, s6_slots } from '@/lib/megaAdapters';
+import { s5_case, s5_keywords, s5_search, s5_triage, s5_clipframe, s6_slots } from '@/lib/megaAdapters';
 
 export const runtime = 'nodejs';
 export const maxDuration = 1800; // ★ 7 ก.ค.: ท่อ MEGA เต็มใช้ ~12-18 นาที (search+cover) — 10 นาทีไม่พอ
@@ -65,8 +65,11 @@ export async function POST(req) {
       });
       if (matchedRef?.ref) {
         // 🎯 ref-first: เก็บลงแฟ้ม → s6_slots ใช้ DNA นี้ "เลือกภาพ" + s7 ใช้ตัวเดียวกัน (เป้าเดียวทั้งท่อ)
-        job.dossier.refMatch = { dna: matchedRef.ref.dna, styleName: matchedRef.ref.styleName || matchedRef.ref.id, imagePath: matchedRef.ref.imagePath, reason: matchedRef.reason };
-        trace.push({ stage: 'ref_match', status: 'done', summary: `เป้า: ${matchedRef.ref.styleName || matchedRef.ref.id} (${matchedRef.reason})`.slice(0, 160) });
+        // ★ 8 ก.ค. (CASE-360): แมตช์หลวม (แนวข่าวไม่ตรงจริง) → ตัด slot subject/storyFlow ใช้เฉพาะโครง (กฎเดียวกับ s6 ใน megaAdapters)
+        const weak = !matchedRef.typeMatched;
+        const dna = weak ? { ...matchedRef.ref.dna, slots: [], neededShots: [], storyFlow: '', compositionLogic: '' } : matchedRef.ref.dna;
+        job.dossier.refMatch = { dna, styleName: matchedRef.ref.styleName || matchedRef.ref.id, imagePath: matchedRef.ref.imagePath, reason: matchedRef.reason, typeMatched: !weak };
+        trace.push({ stage: 'ref_match', status: 'done', summary: `เป้า: ${matchedRef.ref.styleName || matchedRef.ref.id} (${matchedRef.reason})${weak ? ' · แมตช์หลวม→ใช้เฉพาะโครง' : ''}`.slice(0, 160) });
       }
     } catch { /* คลัง ref ว่าง/ล้ม → ไม่มีเป้าจากคลัง (ใช้ jpg เดิม) */ }
 
@@ -92,6 +95,9 @@ export async function POST(req) {
       if (r.nextAction !== 'wait') break;
     }
 
+    // ── S5e เฟรมคลิป (หน้าเดี่ยวสะอาดไม่พอ → แคปเฟรมจากคลิป) — ล้ม≠ล้มทั้งงาน เดินต่อ ──
+    r = merge(step('s5_clipframe', await s5_clipframe(job, { origin })));
+
     // ── S6 เลือกภาพลงช่อง (slotDirectorBrain + ด่านโค้ด) ──
     r = merge(step('s6_slots', await s6_slots(job, { origin })));
     if (failed('s6_slots', r)) return NextResponse.json({ success: false, error: r.summary, errorType: 'S6_SLOTS_FAILED', trace, pickImages: job.dossier.pickImages }, { status: 502 });
@@ -105,10 +111,12 @@ export async function POST(req) {
     //   ลิงก์พัง 2 (หน้าเว็บ/วิดีโอโดน 403) = ต่ำกว่า 4 ล้มทั้งปก ทั้งที่ s6 มี backups (id) แต่ถูกทิ้ง
     //   → แปลง backup id → URL จากคลังเคส ต่อท้ายลิงก์หลัก (เรียงไฟล์รูปตรงก่อน — ดึงผ่านเสมอ) เพดาน 10
     let backupUrls = [];
+    let urlTriage = new Map(); // ★ 8 ก.ค.: url → {clean,faces} สำหรับ slotPlan
     try {
       const backupIds = SLOT_ORDER.flatMap((s) => slots[s]?.backups || []);
+      const lib = await fetch(`${origin}/api/images/${encodeURIComponent(job.dossier.images?.caseId || '')}`, { signal: AbortSignal.timeout(30000) }).then((x) => x.json()).catch(() => null);
+      urlTriage = new Map((lib?.images || []).map((x) => [String(x.imageUrl), { clean: x.triage?.clean !== false, faces: Number(x.triage?.faceCount) || 0 }]));
       if (backupIds.length) {
-        const lib = await fetch(`${origin}/api/images/${encodeURIComponent(job.dossier.images?.caseId || '')}`, { signal: AbortSignal.timeout(30000) }).then((x) => x.json()).catch(() => null);
         const byId = new Map((lib?.images || []).map((x) => [String(x.id), x.imageUrl]));
         const isDirect = (u) => /\.(jpe?g|png|webp|gif)([?#]|$)/i.test(String(u || ''));
         backupUrls = backupIds.map((b) => byId.get(String(b))).filter(Boolean)
@@ -121,6 +129,20 @@ export async function POST(req) {
       .slice(0, 10);
     trace.push({ stage: 's6_links', status: 'done', summary: `หลัก ${primaryLinks.length} + สำรอง ${sourceLinks.length - primaryLinks.length} = ส่ง ${sourceLinks.length} ลิงก์` });
 
+    // ★ 8 ก.ค.: แผนช่องจาก S6 (hero + clean/faces ต่อ url) — v3 บังคับ main=hero + เชื่อ clean ตาคัด (เหมือน s7_cover)
+    const heroUrl = slots.hero?.imageUrl || null;
+    const slotPlan = sourceLinks.map((u) => {
+      const primary = SLOT_ORDER.find((s) => slots[s]?.imageUrl === u);
+      const t = urlTriage.get(String(u)) || {};
+      return {
+        url: u,
+        slot: primary || null,
+        clean: primary ? (slots[primary].clean !== false) : (t.clean !== false),
+        faces: primary ? (slots[primary].faces || 0) : (t.faces || 0),
+        isHero: u === heroUrl,
+      };
+    });
+
     // ── S7 ทำปก: ส่งภาพที่คัดแล้วเข้า auto-cover-v3 (sourceOnly) เหมือน s7_cover ──
     const mainCharacterName = (job.dossier.compass?.mainCharacters || [])[0]?.name || '';
     const coverPayload = {
@@ -128,6 +150,7 @@ export async function POST(req) {
       content: content.slice(0, 8000),
       mainCharacterName,
       sourceLinks, // ★ 7 ก.ค.: ส่งครบหลัก+สำรอง (เพดาน 10 — extractFromUserSources รองรับแล้ว)
+      slotPlan, // ★ 8 ก.ค.: แผนช่อง S6 → v3 บังคับ main=hero + เชื่อ clean ตาคัด
       sourceOnly: true,
     };
     if (forceTemplateId) coverPayload.forceTemplateId = forceTemplateId;
