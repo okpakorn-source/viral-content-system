@@ -455,9 +455,46 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
     console.log(`[MegaComposer] ${a.slotId} ← #${a.imageIndex} (${loaded[a.imageIndex].slot || 'สำรอง'}) ${a.crop._final ? 'crop' : 'hint'}(${a.crop.x},${a.crop.y},${a.crop.w},${a.crop.h})${fb ? ` face(y1=${fb.y1},y2=${fb.y2},n=${fb.count})` : ' ไร้หน้า'}`);
   });
 
-  // ── ⑤ 🧩 ประกอบพิกเซล ──
+  // ── ⑤ 🧩 ประกอบพิกเซล + 🛡️ ด่านบังคับ hero (9 ก.ค. ผู้ใช้: "ถ้าภาพไม่ผ่านต้องเปลี่ยนจนผ่าน") ──
+  //   ตรวจ "ผลจริงหลังประกอบ": ครอปช่อง main จากปกจริงแล้วส่องหน้า — หน้าต้องเด่น (สูง ≥20% ของช่อง)
+  //   ไม่ผ่าน (เช่น ตาหาหน้าเคยตอบพิกัดมั่ว AC-0026 กองกระสอบ) → แบนใบนั้น เลื่อนใบคะแนนถัดไป ประกอบใหม่ ≤2 รอบ
   const { executeCover } = await import('@/lib/services/coverExecutorService');
-  const buffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: spec, faceBoxes });
+  const { detectFaces } = await import('@/lib/services/faceDetector');
+  const mainSlotSpec = spec.slots.find((s) => /main|hero/i.test(String(s.id))) || null;
+  const mainAssign = assignments.find((a) => /main|hero/i.test(String(a.slotId))) || null;
+  let buffer;
+  const heroBanned = new Set();
+  for (let attempt = 0; ; attempt++) {
+    buffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: spec, faceBoxes });
+    if (!mainSlotSpec || !mainAssign || attempt >= 2) break;
+    let heroOk = true;
+    try {
+      const ex = {
+        left: Math.max(0, mainSlotSpec.x), top: Math.max(0, mainSlotSpec.y),
+        width: Math.min(spec.canvasW - Math.max(0, mainSlotSpec.x), mainSlotSpec.w),
+        height: Math.min(spec.canvasH - Math.max(0, mainSlotSpec.y), mainSlotSpec.h),
+      };
+      const tile = await sharp(buffer).extract(ex).jpeg({ quality: 85 }).toBuffer();
+      const fd = await detectFaces(tile);
+      const th = fd?.imageHeight || 1;
+      heroOk = (fd?.faces || []).some((f) => f.height / th >= 0.20);
+    } catch { heroOk = true; /* ด่านตรวจล้มเอง = ไม่บล็อกงาน */ }
+    if (heroOk) { if (attempt > 0) console.log(`[MegaComposer] 🛡️ hero ผ่านด่านบังคับ (รอบ ${attempt + 1})`); break; }
+    heroBanned.add(mainAssign.imageIndex);
+    let ni = -1, nBest = 0;
+    loaded.forEach((im, i) => {
+      if (heroBanned.has(i) || (i !== mainAssign.imageIndex && used.has(i)) || isCollage[i]) return;
+      const sc = heroScore(im, faceBoxes[i]);
+      if (sc > nBest) { nBest = sc; ni = i; }
+    });
+    if (ni < 0) { console.log('[MegaComposer] 🛡️ hero ไม่ผ่านด่านแต่ไม่มีตัวเลือกอื่น — ใช้ที่ดีสุดเท่าที่มี'); break; }
+    console.log(`[MegaComposer] 🛡️ hero #${mainAssign.imageIndex} ไม่ผ่าน (หน้าไม่เด่นในผลจริง) → เปลี่ยนเป็น #${ni} ประกอบใหม่`);
+    used.delete(mainAssign.imageIndex);
+    used.add(ni);
+    mainAssign.imageIndex = ni;
+    const hsw = faceSpec(spec.slots.indexOf(mainSlotSpec), 'hero');
+    mainAssign.crop = faceBoxes[ni] ? cropFromFace(faceBoxes[ni], hsw.pct, hsw.pos, mainSlotSpec.w / mainSlotSpec.h) : { x: 0, y: 0, w: 1, h: 1 };
+  }
   console.log(`[MegaComposer] ✅ ประกอบเสร็จ ${Math.round(buffer.length / 1024)}KB (${spec.id})`);
   return { buffer, spec, assignments, loaded, faceBoxes, used, refSlotMeta };
 }
@@ -537,6 +574,8 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
     if (refImagePath) {
       try {
         eye = await refCompareEye({ coverBuffer: buffer, refImagePath, newsTitle });
+        // ★ 9 ก.ค. (AC-0026 "เหมือน ref -%"): ตาเทียบล้มชั่วคราว (AI/parse) → ลองอีก 1 ครั้งก่อนยอมแพ้
+        if (!eye) eye = await refCompareEye({ coverBuffer: buffer, refImagePath, newsTitle }).catch(() => null);
         if (eye) {
           console.log(`[MegaComposer] 👁️ เหมือน ref ${eye.similarity}% — ${eye.diffs.join(' · ').slice(0, 120)}`);
           if (eye.fixes?.length && eye.similarity < 85) {
