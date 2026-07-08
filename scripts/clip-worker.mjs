@@ -34,9 +34,13 @@ async function pullJob() {
 
 async function processJob(job) {
   // transcript → /api/clip-transcript | insight → /api/clip-transcript/insight
-  const endpoint = job.kind === 'transcript' ? '/api/clip-transcript' : '/api/clip-transcript/insight';
-  // ★ 8 ก.ค.: ส่ง user ไปด้วย — insight API เก็บ "ใครส่ง" เป็น metadata คลัง (วิเคราะห์ย้อนหลังได้)
-  const body = job.kind === 'transcript' ? { url: job.url, tidy: !!job.tidy } : { url: job.url, user: job.user || '' };
+  // ★ 8 ก.ค.: เพิ่ม kind 'hunt' (ถอด+ค้นข่าวคล้าย) + ส่ง user เก็บเป็น metadata คลัง
+  const endpoint = job.kind === 'transcript' ? '/api/clip-transcript'
+    : job.kind === 'hunt' ? '/api/clip-transcript/hunt'
+    : '/api/clip-transcript/insight';
+  const body = job.kind === 'transcript' ? { url: job.url, tidy: !!job.tidy }
+    : job.kind === 'hunt' ? { url: job.url, user: job.user || '', _fromWorker: true }
+    : { url: job.url, user: job.user || '' };
   const r = await fetch(`${BASE}${endpoint}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     ...(longDispatcher ? { dispatcher: longDispatcher } : {}), // ★ timeout ยาว — กัน fetch failed ที่ 5 นาที

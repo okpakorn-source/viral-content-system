@@ -38,8 +38,9 @@ export async function POST(request) {
       return NextResponse.json({ success: true, jobId: recent.id, status: recent.status, dup: true, message: 'คลิปนี้อยู่ในคิวแล้ว (กำลังทำ/รอลองใหม่)' });
     }
     const jobId = randomUUID();
+    // ★ 8 ก.ค.: เพิ่ม kind 'hunt' (ถอด+ค้นข่าวคล้าย → คลังค้นประเด็นยูสเซอร์)
     await store.add({
-      id: jobId, url, platform, kind: kind === 'transcript' ? 'transcript' : 'insight', tidy: !!tidy,
+      id: jobId, url, platform, kind: kind === 'transcript' ? 'transcript' : kind === 'hunt' ? 'hunt' : 'insight', tidy: !!tidy,
       user: String(user || 'ไม่ระบุชื่อ').slice(0, 40),
       status: 'pending', createdAt: new Date().toISOString(),
     });

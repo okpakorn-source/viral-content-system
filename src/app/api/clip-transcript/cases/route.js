@@ -9,8 +9,8 @@ import { createStore } from '@/lib/persistStore';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// kind → ชื่อ store (กันค่ามั่ว: รับแค่ 2 ค่า)
-const storeName = (kind) => (kind === 'insight' ? 'clip-insights' : 'clip-transcripts');
+// kind → ชื่อ store (กันค่ามั่ว: รับแค่ 3 ค่า) — ★ 8 ก.ค.: เพิ่ม hunt = คลังค้นประเด็นยูสเซอร์
+const storeName = (kind) => (kind === 'insight' ? 'clip-insights' : kind === 'hunt' ? 'user-topic-hunts' : 'clip-transcripts');
 
 export async function GET(request) {
   try {
