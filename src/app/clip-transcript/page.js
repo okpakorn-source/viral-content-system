@@ -100,11 +100,13 @@ export default function ClipTranscriptPage() {
   };
 
   // ★ ถอดประเด็นข่าว → ข้อมูลดิบ (Gemini ดูคลิป YouTube / ถอดเสียง+LLM สำหรับ TikTok-FB)
-  const extractInsight = async () => {
+  //   ★ 8 ก.ค.: force=true (ปุ่ม "ถอดใหม่") ข้ามผลจากคลัง ถอดสดเสมอ + ส่ง user เก็บ metadata คลัง
+  const extractInsight = async (force = false) => {
     if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
     setInsightLoading(true); setErr(''); setInsight(null); setQueueJob(null);
     try {
-      const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim() }) });
+      const me = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
+      const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), force: !!force, user: me }) });
       const d = await safeJson(r);
       if (d.success) { setInsight(d.data); loadInsightCases(); }   // ★ รีเฟรชคลังประเด็นทันทีที่ถอดสำเร็จ
       // ★ 26 มิ.ย.: กดถอด "ทันที" แล้ว Gemini แน่น → ชวนไปกด "ส่งเข้าคิว" (ระบบรอ+รันเองจน Gemini ว่าง)
@@ -206,7 +208,7 @@ export default function ClipTranscriptPage() {
               style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: loading ? '#4b5563' : 'linear-gradient(135deg,#f91880,#7c3aed)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: loading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
               {loading ? '⏳ กำลังถอด...' : '🎙️ ถอดบทสัมภาษณ์'}
             </button>
-            <button onClick={extractInsight} disabled={loading || insightLoading}
+            <button onClick={() => extractInsight()} disabled={loading || insightLoading}
               style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: insightLoading ? '#4b5563' : 'linear-gradient(135deg,#2563eb,#0891b2)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: insightLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
               {insightLoading ? '⏳ Gemini กำลังดูคลิป...' : '🎯 ถอดประเด็นข่าว (ข้อมูลดิบ)'}
             </button>
@@ -349,11 +351,26 @@ export default function ClipTranscriptPage() {
               <div style={{ fontSize: 15, fontWeight: 800, color: '#60a5fa' }}>🎯 ข้อมูลดิบจากคลิป</div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>{insight.emoji} {insight.clipTypeLabel}</span>
+                {insight.category && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(245,158,11,0.16)', color: '#f59e0b', fontWeight: 800 }}>📂 {insight.category}</span>}
                 {insight.multiTopic && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(245,158,11,0.18)', color: '#fbbf24', fontWeight: 800 }}>📚 คลิปยาว · {insight.totalTopics || insight.topics?.length || 0} ประเด็น</span>}
                 <span style={{ fontSize: 10, color: 'var(--text-muted,#888)' }}>{String(insight.engine || '').includes('gemini-video') ? '👁️ Gemini ดูคลิป' : '📝 จากบทถอดเสียง'}</span>
                 <button onClick={() => copy(insightCaseText(insight), 'insight-raw')} style={{ padding: '4px 11px', borderRadius: 8, border: 'none', background: copied === 'insight-raw' ? 'rgba(34,197,94,0.2)' : 'rgba(59,130,246,0.15)', color: copied === 'insight-raw' ? '#22c55e' : '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'insight-raw' ? '✅ คัดลอกแล้ว' : '📋 คัดลอกทั้งหมด'}</button>
               </div>
             </div>
+
+            {/* ★ 8 ก.ค.: dedup — คลิปนี้เคยถอดแล้ว ระบบคืนผลจากคลังทันที (ฟรี ไม่เสียเวลา Gemini) + ปุ่มถอดสดใหม่ */}
+            {insight.cached && (
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, padding: '9px 12px', borderRadius: 9, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)', color: '#22c55e', marginBottom: 12 }}>
+                <span>⚡ <b>ผลจากคลัง</b> — คลิปนี้เคยถอดไว้เมื่อ {insight.cachedAt ? new Date(insight.cachedAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'ก่อนหน้านี้'} (ไม่เสียเวลา/ค่าถอดซ้ำ)</span>
+                <button onClick={() => extractInsight(true)} style={{ padding: '4px 12px', borderRadius: 7, border: '1px solid rgba(34,197,94,0.5)', background: 'transparent', color: '#22c55e', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>🔁 ถอดใหม่</button>
+              </div>
+            )}
+            {/* ★ 8 ก.ค.: ด่านตรวจคุณภาพ — ผลไม่สมบูรณ์ (ลองซ้ำแล้ว) → เตือนชัด อย่าใช้เงียบๆ */}
+            {insight.lowQuality && (
+              <div style={{ fontSize: 12, padding: '9px 12px', borderRadius: 9, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.35)', color: '#f87171', marginBottom: 12 }}>
+                ⚠️ <b>{insight.qualityNote || 'ผลอาจไม่สมบูรณ์ — แนะนำกดถอดใหม่'}</b>
+              </div>
+            )}
 
             {/* ★ 24 มิ.ย.: คลิปยาว = แยกทุกประเด็น (รายงานทุกช่วง) · คลิปสั้น = แสดงแบบเดิม */}
             {insight.multiTopic ? (
@@ -510,10 +527,13 @@ export default function ClipTranscriptPage() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3, flexWrap: 'wrap' }}>
                         {ins.clipTypeLabel && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>{ins.emoji || '🎬'} {ins.clipTypeLabel}</span>}
+                        {(c.category || ins.category) && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(245,158,11,0.16)', color: '#f59e0b', fontWeight: 800 }}>📂 {c.category || ins.category}</span>}
                         <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(37,99,235,0.15)', color: '#60a5fa', fontWeight: 700 }}>{String(ins.engine || '').includes('gemini-video') ? '👁️ ดูคลิป' : '📝 บทถอด'}</span>
+                        {/* ★ 8 ก.ค.: ธงคุณภาพ — เคสที่ไม่ผ่านด่านตรวจ (ลองซ้ำแล้ว) เห็นชัด ไม่ปนกับเคสดี */}
+                        {c.lowQuality && <span title={c.qualityNote || ''} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(239,68,68,0.14)', color: '#f87171', fontWeight: 800 }}>⚠️ ไม่สมบูรณ์</span>}
                       </div>
                       <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platformIcon(c.platform)} {ins.headline || c.title || c.url}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{c.platform} · {ins.multiTopic ? `📚 ${ins.topics?.length || 0} ประเด็น (คลิปยาว)` : `${ins.keyPoints?.length || 0} ประเด็น${ins.subStories?.length ? ` · 🧩 ${ins.subStories.length} เนื้อดิบแยก` : ''}`} · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{c.platform} · {ins.multiTopic ? `📚 ${ins.topics?.length || 0} ประเด็น (คลิปยาว)` : `${ins.keyPoints?.length || 0} ประเด็น${ins.subStories?.length ? ` · 🧩 ${ins.subStories.length} เนื้อดิบแยก` : ''}`}{c.user ? ` · 👤 ${c.user}` : ''} · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
                     </div>
                     <button onClick={(e) => { e.stopPropagation(); deleteInsightCase(c.id); }} style={{ marginLeft: 10, padding: '4px 10px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>ลบ</button>
                   </div>

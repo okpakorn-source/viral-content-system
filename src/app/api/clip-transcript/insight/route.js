@@ -198,9 +198,21 @@ async function _buildInsightTranscriptFallback({ url, type }) {
   return await extractClipInsight({ url, platform: 'transcript', rawText });
 }
 
+// ★ 8 ก.ค.: ด่านตรวจคุณภาพก่อนเก็บคลัง — เช็คง่ายๆ ไม่เรียก AI (เคยมีเคส rawData ว่าง 0 ตัวอักษรหลุดเข้าคลัง
+//   จาก JSON ถูกตัดท้ายแล้วซ่อมไม่ครบ) — คืน [] = ผ่าน, ไม่ผ่านคืนรายการปัญหา
+const RAWDATA_MIN_CHARS = 300;
+function insightQualityIssues(insight) {
+  const issues = [];
+  const raw = String(insight?.rawData || '');
+  if (raw.length < RAWDATA_MIN_CHARS) issues.push(`เนื้อดิบสั้นผิดปกติ (${raw.length} ตัวอักษร)`);
+  if (!String(insight?.headline || '').trim()) issues.push('ไม่มีหัวข้อข่าว');
+  return issues;
+}
+
 export async function POST(request) {
   try {
-    const { url: _rawUrl } = await request.json();
+    // ★ 8 ก.ค.: รับเพิ่ม force (ถอดใหม่ ไม่เอาผลจากคลัง) + user (ใครส่ง — เก็บเป็น metadata คลัง)
+    const { url: _rawUrl, force = false, user = '' } = await request.json();
     if (!_rawUrl || typeof _rawUrl !== 'string') {
       return NextResponse.json({ success: false, error: 'กรุณาวางลิงก์คลิป', errorType: 'MISSING_URL' }, { status: 400 });
     }
@@ -210,10 +222,29 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'ลิงก์ไม่รองรับ — ใช้ได้เฉพาะ TikTok / YouTube / Facebook(IG)', errorType: 'UNSUPPORTED_URL' }, { status: 400 });
     }
 
+    // ★ 8 ก.ค.: dedup ข้ามเวลา — คลิปนี้เคยถอดสำเร็จแล้ว (คุณภาพผ่านเกณฑ์) → คืนผลเดิมทันที ฟรี+เร็ว
+    //   (เดิมกันซ้ำแค่งานที่ยังรันอยู่ 3 ชม. — กดซ้ำ/ส่งซ้ำคนละวัน = จ่ายค่า Gemini ดูคลิปเดิมเต็มราคา)
+    //   force=true (ปุ่ม "ถอดใหม่" ใน UI) → ข้ามคลัง ถอดสดเสมอ
+    if (!force) {
+      try {
+        const store = createStore('clip-insights');
+        const all = await store.getAll();
+        const hit = all
+          .filter(c => c.url === url && !c.lowQuality && String(c.insight?.rawData || '').length >= RAWDATA_MIN_CHARS)
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+        if (hit) {
+          console.log(`[ClipInsight] ⚡ ผลจากคลัง (เคยถอดแล้ว ${hit.createdAt}): ${url.slice(0, 60)}`);
+          return NextResponse.json({ success: true, data: { id: hit.id, platform: hit.platform, ...hit.insight, cached: true, cachedAt: hit.createdAt } });
+        }
+      } catch (e) { console.warn('[ClipInsight] เช็คคลัง dedup ล้ม (ถอดสดตามปกติ):', e.message?.slice(0, 50)); }
+    }
+
     console.log(`[ClipInsight] ${type}: ${url.slice(0, 80)}`);
 
     // ★ 22 มิ.ย.: ผ่าน "คิวงานหนัก" — กันยิง Gemini/Whisper ซ้อนกัน + เว้นช่วงอัตโนมัติเมื่อ API แน่น
+    const startedAt = Date.now();
     let insight;
+    let attempts = 1;
     try {
       insight = await getClipVideoQueue().run(() => buildInsight({ url, type }), { label: `insight:${type}` });
     } catch (e) {
@@ -221,25 +252,60 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: humanizeErr(e.message), errorType: code }, { status: 422 });
     }
 
-    // เก็บเข้าคลังประเด็น (fire-and-forget) — เก็บ 60 เคสล่าสุด
+    // ★ 8 ก.ค.: ด่านตรวจคุณภาพ — ไม่ผ่าน → ถอดใหม่อัตโนมัติ 1 ครั้ง (เฉพาะเมื่อรอบแรกเร็วพอ ไม่ชน timeout)
+    //   ยังไม่ผ่านอีก → เก็บพร้อมธง lowQuality ให้เห็นชัดในคลัง (ไม่ทิ้งเงียบ ไม่ปนกับเคสดี)
+    let lowQuality = false, qualityNote = '';
+    let issues = insightQualityIssues(insight);
+    if (issues.length && Date.now() - startedAt < 5 * 60 * 1000) {
+      console.warn(`[ClipInsight] ⚠️ ไม่ผ่านด่านคุณภาพ (${issues.join(' · ')}) → ถอดใหม่อัตโนมัติ 1 ครั้ง`);
+      attempts = 2;
+      try {
+        const retryInsight = await getClipVideoQueue().run(() => buildInsight({ url, type }), { label: `insight-qc-retry:${type}` });
+        const retryIssues = insightQualityIssues(retryInsight);
+        if (retryIssues.length < issues.length || String(retryInsight?.rawData || '').length > String(insight?.rawData || '').length) {
+          insight = retryInsight; issues = retryIssues; // เอารอบที่ดีกว่า
+        }
+      } catch (e) { console.warn('[ClipInsight] ถอดซ้ำรอบ QC ล้ม (ใช้ผลรอบแรก):', e.message?.slice(0, 50)); }
+    }
+    if (issues.length) {
+      lowQuality = true;
+      qualityNote = `ผลอาจไม่สมบูรณ์: ${issues.join(' · ')} — แนะนำกดถอดใหม่`;
+      console.warn(`[ClipInsight] ⚠️ เก็บแบบติดธง lowQuality: ${qualityNote}`);
+    }
+
+    // เก็บเข้าคลังประเด็น (fire-and-forget) — ★ 8 ก.ค.: ขยาย 60→400 เคส (เดิมคลังหมุนทิ้งทุก ~2 วัน
+    //   ประวัติเคสข่าวปังหายหมด) + เก็บ metadata (หมวด/ความยาวคลิป/ผู้ส่ง/เวลาถอด) + สำเนาถาวร NDJSON
     const caseId = randomUUID();
+    const elapsedMs = Date.now() - startedAt;
+    const record = {
+      id: caseId, url, platform: type,
+      title: (insight.headline || insight.overview || url).slice(0, 80),
+      insight,
+      category: insight.category || '', clipDurationSec: insight.clipDurationSec || 0,
+      user: String(user || '').slice(0, 40), elapsedMs, attempts,
+      ...(lowQuality ? { lowQuality: true, qualityNote } : {}),
+      createdAt: new Date().toISOString(),
+    };
     (async () => {
       try {
         const store = createStore('clip-insights');
-        await store.add({
-          id: caseId, url, platform: type,
-          title: (insight.headline || insight.overview || url).slice(0, 80),
-          insight, createdAt: new Date().toISOString(),
-        });
+        await store.add(record);
         const all = await store.getAll();
-        if (all.length > 60) {
-          const old = all.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).slice(0, all.length - 60);
+        if (all.length > 400) {
+          const old = all.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).slice(0, all.length - 400);
           for (const o of old) await store.remove(o.id).catch(() => {});
         }
       } catch (e) { console.warn('[ClipInsight] เก็บคลังล้ม:', e.message?.slice(0, 50)); }
+      // ★ สำเนาถาวร append-only (ไม่ถูกลบตาม retention — ไว้วิเคราะห์ย้อนหลัง/ลูปเรียนรู้ในอนาคต)
+      //   เขียนได้เฉพาะเครื่องที่มีดิสก์จริง (เครื่องทีม ~82% ของงาน) — บน Vercel จะเงียบๆ ข้ามไป ไม่กระทบงานหลัก
+      try {
+        const { appendFile } = await import('fs/promises');
+        const { join } = await import('path');
+        await appendFile(join(process.cwd(), 'data', 'clip-insights-archive.ndjson'), JSON.stringify(record) + '\n', 'utf8');
+      } catch { /* Vercel filesystem อ่านอย่างเดียว — ข้าม */ }
     })();
 
-    return NextResponse.json({ success: true, data: { id: caseId, platform: type, ...insight } });
+    return NextResponse.json({ success: true, data: { id: caseId, platform: type, ...insight, ...(lowQuality ? { lowQuality: true, qualityNote } : {}) } });
   } catch (error) {
     console.error('[ClipInsight]', error.message);
     return NextResponse.json({ success: false, error: humanizeErr(error.message), errorType: 'INSIGHT_ERROR' }, { status: 500 });

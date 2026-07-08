@@ -30,7 +30,8 @@ export async function GET() {
     if (claimable.length === 0) return NextResponse.json({ success: true, job: null });
     const next = claimable[0];
     await store.update(next.id, ex => ({ ...ex, status: 'processing', startedAt: new Date().toISOString() }));
-    return NextResponse.json({ success: true, job: { id: next.id, url: next.url, kind: next.kind, tidy: next.tidy, platform: next.platform } });
+    // ★ 8 ก.ค.: ส่ง user (ใครส่งงาน) ไปด้วย — worker ส่งต่อให้ insight API เก็บเป็น metadata คลัง
+    return NextResponse.json({ success: true, job: { id: next.id, url: next.url, kind: next.kind, tidy: next.tidy, platform: next.platform, user: next.user || '' } });
   } catch (error) {
     console.error('[ClipWorker:GET]', error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
