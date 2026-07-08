@@ -15,6 +15,7 @@ import { getCase } from '@/lib/caseStore';
 import { reverseImage } from '@/lib/imageSearch';
 import { addImages, readImages } from '@/lib/imageStore';
 import { hostImagePublic } from '@/lib/publicHost';
+import { isOwnPageSource } from '@/lib/junkSources';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -113,6 +114,8 @@ export async function POST(req) {
         for (const im of found) {
           if (collected.length >= revCap) break;
           if (!im.imageUrl || seen.has(im.imageUrl)) continue;
+          // 🚫 ★ 8 ก.ค.: กันภาพจากเพจเราเองวนกลับ (Lens ชอบเจอโพสต์คอลลาจของเราเป็นอันดับแรก)
+          if (isOwnPageSource(im)) continue;
           seen.add(im.imageUrl);
           collected.push({ ...im, platform: 'reverse', query: 'reverse' });
         }

@@ -41,3 +41,18 @@ export function isCatalogSource(im) {
   const hay = `${im.source || ''} ${im.sourceLink || ''}`.toLowerCase();
   return CATALOG_PATTERNS.some((p) => hay.includes(p));
 }
+
+// ★ 8 ก.ค. (บทเรียน AC-0043-61): เพจ "ของเราเอง" — ภาพจากโพสต์เรา (โดยเฉพาะคอลลาจ) วนกลับเข้าคลัง
+//   คอลลาจของเพจปนภาพหลายเรื่อง/ภาพประกอบนิรนาม → ตาเดาผิดคนได้ (หญิงนิรนามถูกป้ายเป็น "ป้าหน่อย")
+//   และไม่ใช่ "แหล่งข่าวต้นทาง" อยู่แล้ว → บล็อกตั้งแต่ตอนค้นทุกทาง (search + reverse)
+//   เพิ่มเพจอื่นของเราได้ที่ env OWN_PAGE_PATTERNS (คั่นด้วย , เทียบ lowercase/substring)
+const OWN_PAGE_BASE = ['facebook.com/ig.dara', 'รวมไอจีดารา'];
+export function isOwnPageSource(im) {
+  if (!im) return false;
+  const extra = (process.env.OWN_PAGE_PATTERNS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const hay = `${im.source || ''} ${im.sourceLink || ''} ${im.title || ''}`.toLowerCase();
+  return [...OWN_PAGE_BASE, ...extra].some((p) => hay.includes(p));
+}
