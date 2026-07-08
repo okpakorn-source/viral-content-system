@@ -115,7 +115,7 @@ export async function POST(req) {
     try {
       const backupIds = SLOT_ORDER.flatMap((s) => slots[s]?.backups || []);
       const lib = await fetch(`${origin}/api/images/${encodeURIComponent(job.dossier.images?.caseId || '')}`, { signal: AbortSignal.timeout(30000) }).then((x) => x.json()).catch(() => null);
-      urlTriage = new Map((lib?.images || []).map((x) => [String(x.imageUrl), { clean: x.triage?.clean !== false, faces: Number(x.triage?.faceCount) || 0 }]));
+      urlTriage = new Map((lib?.images || []).map((x) => [String(x.imageUrl), { clean: x.triage?.clean !== false, faces: Number(x.triage?.faceCount) || 0, thumbnailUrl: x.thumbnailUrl || '' }]));
       if (backupIds.length) {
         const byId = new Map((lib?.images || []).map((x) => [String(x.id), x.imageUrl]));
         const isDirect = (u) => /\.(jpe?g|png|webp|gif)([?#]|$)/i.test(String(u || ''));
@@ -140,6 +140,7 @@ export async function POST(req) {
         clean: primary ? (slots[primary].clean !== false) : (t.clean !== false),
         faces: primary ? (slots[primary].faces || 0) : (t.faces || 0),
         isHero: u === heroUrl,
+        thumbnailUrl: t.thumbnailUrl || '',
       };
     });
 

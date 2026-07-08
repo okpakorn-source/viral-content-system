@@ -728,7 +728,7 @@ export async function s7_cover(job, { origin } = {}) {
     const backupIds = Object.values(slots).flatMap((s) => s?.backups || []);
     if (origin && d.images?.caseId) {
       const lib = await jfetch(`${origin}/api/images/${encodeURIComponent(d.images.caseId)}`, {}, 30000);
-      urlTriage = new Map((lib?.images || []).map((x) => [String(x.imageUrl), { clean: x.triage?.clean !== false, faces: Number(x.triage?.faceCount) || 0 }]));
+      urlTriage = new Map((lib?.images || []).map((x) => [String(x.imageUrl), { clean: x.triage?.clean !== false, faces: Number(x.triage?.faceCount) || 0, thumbnailUrl: x.thumbnailUrl || '' }]));
       const byId = new Map((lib?.images || []).map((x) => [String(x.id), x.imageUrl]));
       const isDirect = (u) => /\.(jpe?g|png|webp|gif)([?#]|$)/i.test(String(u || ''));
       backupUrls = backupIds.map((b) => byId.get(String(b))).filter(Boolean)
@@ -752,6 +752,9 @@ export async function s7_cover(job, { origin } = {}) {
       clean: primary ? (slots[primary].clean !== false) : (t.clean !== false),
       faces: primary ? (slots[primary].faces || 0) : (t.faces || 0),
       isHero: u === heroUrl,
+      // ★ 8 ก.ค. (CASE-366): thumbnail สำรอง (gstatic cache) — sourceLinks เป็น string เปล่า ไม่พก thumbnailUrl
+      //   ส่งผ่าน slotPlan แทน ให้ v3 ใช้ตอนโหลดตรงพัง (Instagram/TikTok โดน anti-hotlink)
+      thumbnailUrl: t.thumbnailUrl || '',
     };
   });
   const nd = d.generate?.newsData || {};

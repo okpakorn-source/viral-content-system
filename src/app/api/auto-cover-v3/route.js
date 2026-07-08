@@ -220,23 +220,50 @@ async function _renderCoverV3(request) {
     const _preferFrames = _isShowClip && _isOrdinary;
     const candidates = (_preferFrames ? [..._frames, ..._photos] : [..._photos, ..._frames]).slice(0, 14);
     if (_preferFrames) console.log('[CoverV3] 🎬 ข่าวคนธรรมดาจากรายการ → ใช้เฟรมคลิปก่อนภาพเว็บ (กันได้วิว/คนผิด)');
+    // ★ 8 ก.ค. (CASE-366): slotPlan ยกมาก่อน download (เดิมแนบทีหลัง) — ต้องใช้ .thumbnailUrl เป็น fallback ตอนโหลด
+    //   sourceLinks เป็น array string เปล่า ไม่พก thumbnailUrl ของตัวเอง → ต้องพ่วงมาจาก slotPlan (มี metadata เต็ม)
+    const _planByUrl = new Map((Array.isArray(body.slotPlan) ? body.slotPlan : []).map((p) => [String(p.url), p]));
+    // ★ 8 ก.ค. (CASE-366): โหลด 1 URL → buffer (data: / local / remote+fallback thumbnail)
+    //   เดิม: มีแค่ data:+fetch ตรง → (1) path local (/case-frames/... จากเฟรมคลิป S5e) fetch ไม่ได้เลย (relative URL)
+    //   (2) ลิงก์ Instagram/TikTok โดน hotlink-block (403/200-แต่เป็น HTML) ทั้งที่ตาคัดโหลดดูได้ตอน triage
+    //   → พิสูจน์แล้วว่า thumbnailUrl (gstatic cache) โหลดได้เกือบเสมอ (ใช้แพทเทิร์นเดียวกับ /api/images/rehost)
+    const fetchOne = async (url, ms = 15000) => {
+      if (!url) return null;
+      if (String(url).startsWith('data:')) {
+        try { return Buffer.from(String(url).split(',')[1], 'base64'); } catch { return null; }
+      }
+      if (String(url).startsWith('/')) {
+        try {
+          const { promises: fsp } = await import('fs');
+          const path = (await import('path')).default;
+          return await fsp.readFile(path.join(process.cwd(), 'public', url.replace(/^\//, '')));
+        } catch { return null; }
+      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), ms);
+      try {
+        const res = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
+        clearTimeout(timer);
+        if (!res.ok) return null;
+        // ★ 8 ก.ค. (พิสูจน์จริง CASE-366): Instagram ตอบ 200 แต่เป็นหน้า HTML เต็มหน้า (anti-hotlink) ไม่ใช่ภาพ
+        //   res.ok ผ่านหลอกๆ → ต้องเช็ค content-type ด้วย (แพทเทิร์นเดียวกับ /api/images/rehost ที่พิสูจน์แล้วว่าทำงาน)
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        if (!ct.startsWith('image/')) return null;
+        return Buffer.from(await res.arrayBuffer());
+      } catch { clearTimeout(timer); return null; }
+    };
     let imageBuffers = [];
     await Promise.all(candidates.map(async (img) => {
       try {
         if (img.buffer) { imageBuffers.push(img); return; }
-        const isData = String(img.url).startsWith('data:');
-        if (isData) {
-          const b64 = String(img.url).split(',')[1];
-          imageBuffers.push({ ...img, buffer: Buffer.from(b64, 'base64') });
-          return;
+        let buf = await fetchOne(img.url);
+        // โหลดตรงพัง (403/HTML/relative path พัง) → ลอง thumbnailUrl (มักเป็น gstatic cache โหลดได้เสมอ)
+        //   img.thumbnailUrl (จากผลค้น/scrape) ก่อน · ไม่มี → slotPlan.thumbnailUrl (จาก sourceLinks ของ MEGA)
+        const thumb = img.thumbnailUrl || _planByUrl.get(String(img.url))?.thumbnailUrl || '';
+        if (!buf && thumb && thumb !== img.url) {
+          buf = await fetchOne(thumb);
         }
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 15000);
-        const res = await fetch(img.url, { signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
-        clearTimeout(timer);
-        if (!res.ok) return;
-        const buf = Buffer.from(await res.arrayBuffer());
-        if (buf.length > 5000) imageBuffers.push({ ...img, buffer: buf });
+        if (buf && buf.length > 5000) imageBuffers.push({ ...img, buffer: buf });
       } catch { /* ข้ามภาพโหลดไม่ได้ */ }
     }));
     console.log(`[CoverV3] downloaded ${imageBuffers.length}/${candidates.length} buffers`);
@@ -244,10 +271,9 @@ async function _renderCoverV3(request) {
     //   _planClean=false (ตาคัด 1024px เห็น text/ลายน้ำที่ detector v3 พลาด) → บังคับเป็น hasText
     //   _planHero=true (ภาพ hero ที่ S6 เลือก) → บังคับเป็น main หลัง Director (ไม่ปล่อยให้ Director ดึงลง)
     if (Array.isArray(body.slotPlan) && body.slotPlan.length) {
-      const planByUrl = new Map(body.slotPlan.map((p) => [String(p.url), p]));
       let _pHero = 0, _pDirty = 0;
       for (const img of imageBuffers) {
-        const p = planByUrl.get(String(img.url));
+        const p = _planByUrl.get(String(img.url));
         if (!p) continue;
         img._planSlot = p.slot || null;
         img._planClean = p.clean !== false;

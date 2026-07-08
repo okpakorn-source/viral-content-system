@@ -2300,7 +2300,12 @@ async function extractFromUserSources(sourceLinks = [], context = '') {
           return frames;
         } else {
           const { extractSourceArticleImages } = await import('@/lib/services/sourceArticleImages');
-          return await extractSourceArticleImages(link, 6);
+          const arts = await extractSourceArticleImages(link, 6);
+          // ★ 8 ก.ค. (CASE-366): ลิงก์จาก CDN ภาพ (Instagram lookaside/TikTok api/img ฯลฯ) ไม่มีนามสกุลไฟล์
+          //   → เข้าเงื่อนไข "ไม่ใช่ .jpg/.png" ด้านบน เลยถูกส่งมา scrape เป็น "หน้าบทความ" ทั้งที่ตัวมันคือรูปตรงๆ
+          //   scrape ได้ 0 ภาพ (ไม่ใช่ HTML บทความจริง) → ลองใช้ลิงก์นี้เองเป็นภาพ (ปลอดภัย: download loop ท้ายทาง
+          //   เช็ค content-type จริงก่อนรับอยู่แล้ว ถ้าไม่ใช่ภาพจริงก็ถูกทิ้งเงียบ ไม่กระทบอะไร)
+          return arts.length ? arts : [link];
         }
       })(), isVideo ? 210000 : 20000); // วิดีโอ: 210 วิ (โหลด+แตกเฟรม+Gemini คัด) · อื่นๆ: 20 วิ
       if (Array.isArray(got)) out.push(...got);
