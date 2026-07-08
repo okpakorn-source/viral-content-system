@@ -155,6 +155,7 @@ export async function runTopicHunt({ url, insight, user = '' }) {
   console.log(`[TopicHunt] ✅ ผ่านคัด ${kept.length} เรื่อง (≥${KEEP_SCORE}/10)`);
   return {
     sourceUrl: url,
+    sourceType: 'clip',               // ★ 8 ก.ค.: แยกจากลิงก์ข่าว (คลัง user-topic-hunts ใช้ร่วม)
     title: String(insight.headline || url).slice(0, 140),
     insight,
     styleProfile: profile,

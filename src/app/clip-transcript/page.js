@@ -49,6 +49,7 @@ export default function ClipTranscriptPage() {
   const [huntCases, setHuntCases] = useState([]);
   const [huntCasesOpen, setHuntCasesOpen] = useState(true);
   const [huntExpanded, setHuntExpanded] = useState(null);
+  const [huntFilter, setHuntFilter] = useState('all'); // all | clip | article — กรองคลังตามที่มา
 
   const loadCases = async () => {
     try { const r = await fetch('/api/clip-transcript/cases?limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setCases(d.cases || []); } catch {}
@@ -133,6 +134,7 @@ export default function ClipTranscriptPage() {
   // ★ 8 ก.ค.: ถอด+ค้นข่าวคล้าย — เนื้อดิบ (เครื่องถอดเดิม เคยถอด=ฟรีทันที) → สไตล์→คีย์ → ค้น Serper → คัด
   //   ผลเก็บเข้า "คลังค้นประเด็นยูสเซอร์" ถาวร · FB/IG บนคลาวด์ → server ส่งคิวเครื่องทีมเอง (kind=hunt)
   const isMetaUrl = (u) => /facebook\.com|fb\.watch|instagram\.com/i.test(u);
+  const isClipUrl = (u) => /youtube\.com|youtu\.be|tiktok\.com|facebook\.com|fb\.watch|instagram\.com/i.test(u);
   const extractHunt = async () => {
     if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
     setHunting(true); setHuntPhase(1); setErr(''); setHunt(null); setQueueJob(null);
@@ -172,12 +174,30 @@ export default function ClipTranscriptPage() {
     } catch (e) { setErr(e.message); }
     setHuntPhase(0); setHunting(false);
   };
+  // ★ 8 ก.ค.: วิจัยลิงก์ข่าว (เว็บข่าว ไม่ใช่คลิป) — ดึงเนื้อข่าว → วิจัยเชิงลึก → หาข่าวเสริม
+  //   คลังเดียวกับคลิป (user-topic-hunts) แต่ผลติดป้าย 📰 ลิงก์ข่าว แยกจาก 🎬 คลิป
+  const extractNewsHunt = async () => {
+    if (!url.trim()) { setErr('วางลิงก์ข่าวก่อน'); return; }
+    if (isClipUrl(url.trim())) { setErr('ลิงก์นี้เป็นคลิป — ใช้ปุ่ม "🧭 ถอด+ค้นข่าวคล้าย" แทน (ปุ่ม 📰 สำหรับลิงก์ข่าวเว็บ)'); return; }
+    setHunting(true); setHuntPhase(2); setErr(''); setHunt(null); setQueueJob(null);
+    try {
+      const me = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
+      const r = await fetch('/api/clip-transcript/news-hunt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), user: me }) });
+      const d = await safeJson(r);
+      if (d.success) { setHunt(d.data); loadHuntCases(); }
+      else setErr(d.error || 'วิจัยลิงก์ข่าวไม่สำเร็จ');
+    } catch (e) { setErr(e.message); }
+    setHuntPhase(0); setHunting(false);
+  };
+
   // ★ ค้นเพิ่มอีกรอบ — สมองคิดคีย์ชุดใหม่ ค้นแล้ว "รวมผล" เข้าเคสเดิม (ไม่สร้างเคสซ้ำ)
+  //   ★ 8 ก.ค.: รู้ที่มา — เคสข่าว (article) ยิง news-hunt · เคสคลิป ยิง hunt
   const huntMore = async (c) => {
     setHunting(true); setHuntPhase(2); setErr('');
     try {
       const me = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
-      const r = await fetch('/api/clip-transcript/hunt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: c.sourceUrl, user: me, caseId: c.id }) });
+      const endpoint = c.sourceType === 'article' ? '/api/clip-transcript/news-hunt' : '/api/clip-transcript/hunt';
+      const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: c.sourceUrl, user: me, caseId: c.id }) });
       const d = await safeJson(r);
       if (d.success && d.queued) setErr('⏳ ส่งเครื่องทีมค้นเพิ่มแล้ว — ผลรวมเข้าเคสเดิมในคลังเอง');
       else if (d.success) { setHunt(d.data); loadHuntCases(); }
@@ -260,10 +280,10 @@ export default function ClipTranscriptPage() {
     if (!c) return '';
     const p = c.styleProfile || {};
     const lines = [
-      `🧭 เคสค้นประเด็น: ${c.title || ''}`,
+      `${c.sourceType === 'article' ? '📰 เคสวิจัยลิงก์ข่าว' : '🎬 เคสค้นประเด็นจากคลิป'}: ${c.title || ''}`,
       `ลิงก์ต้นทาง: ${c.sourceUrl || ''}`,
       `ธีม: ${p.theme || '-'} · อารมณ์: ${p.emotion || '-'} · ทำไมไวรัล: ${p.whyViral || '-'}`,
-      '', '=== เนื้อดิบจากคลิป ===', c.insight?.rawData || '-',
+      '', `=== ${c.sourceType === 'article' ? 'ผลวิจัยเชิงลึก' : 'เนื้อดิบจากคลิป'} ===`, c.insight?.rawData || '-',
       '', `=== ข่าว/คลิปคล้ายที่เจอ (${(c.results || []).length}) ===`,
       ...(c.results || []).map((r, i) => `${i + 1}. [${r.score}/10 · ${r.type} · ${r.tag === 'follow' ? 'ตามต่อเรื่องนี้' : 'ธีมเดียวกัน'}] ${r.title}\n   ${r.url}${r.reason ? `\n   เหตุผล: ${r.reason}` : ''}`),
     ];
@@ -272,19 +292,22 @@ export default function ClipTranscriptPage() {
   // ★ เนื้อการ์ดเคสค้นประเด็น — ใช้ทั้งผลสดและในคลัง (kp = key prefix กัน id ชนกัน)
   const renderHuntCase = (c, kp) => {
     const p = c.styleProfile || {};
+    const isArticle = c.sourceType === 'article';
     return (
       <div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+          {/* ★ 8 ก.ค.: ป้ายที่มา — แยกคลิป vs ลิงก์ข่าว ชัดเจน (คลังเดียวกัน) */}
+          <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, fontWeight: 800, background: isArticle ? 'rgba(37,99,235,0.18)' : 'rgba(124,58,237,0.18)', color: isArticle ? '#60a5fa' : '#a78bfa' }}>{isArticle ? '📰 จากลิงก์ข่าว' : '🎬 จากคลิป'}</span>
           {p.theme && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>🧬 {p.theme}</span>}
           {c.insight?.category && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(245,158,11,0.16)', color: '#f59e0b', fontWeight: 700 }}>📂 {c.insight.category}</span>}
           <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontWeight: 800 }}>✅ เจอ {(c.results || []).length} เรื่อง</span>
           <button onClick={() => copy(huntCaseText(c), kp + '-all')} style={{ padding: '4px 11px', borderRadius: 8, border: 'none', background: copied === kp + '-all' ? 'rgba(34,197,94,0.2)' : 'rgba(59,130,246,0.15)', color: copied === kp + '-all' ? '#22c55e' : '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === kp + '-all' ? '✅ คัดลอกแล้ว' : '📋 คัดลอกทั้งเคส'}</button>
           <button onClick={() => huntMore(c)} disabled={hunting} style={{ padding: '4px 11px', borderRadius: 8, border: '1px solid rgba(13,148,136,0.5)', background: 'transparent', color: '#2dd4bf', fontSize: 11, fontWeight: 700, cursor: hunting ? 'wait' : 'pointer', fontFamily: 'inherit' }}>{hunting ? '⏳...' : '🔁 ค้นเพิ่มอีกรอบ'}</button>
         </div>
-        <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 4 }}>🎬 คลิปต้นทาง: {c.title} <a href={c.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#3b82f6', fontWeight: 400 }}>🔗 เปิดคลิป</a></div>
+        <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 4 }}>{isArticle ? '📰 ข่าวต้นทาง' : '🎬 คลิปต้นทาง'}: {c.title} <a href={c.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#3b82f6', fontWeight: 400 }}>🔗 {isArticle ? 'เปิดข่าว' : 'เปิดคลิป'}</a></div>
         {c.insight?.rawData && (
-          <details style={{ marginBottom: 10 }}>
-            <summary style={{ fontSize: 12, color: 'var(--text-muted,#888)', cursor: 'pointer' }}>📄 เนื้อดิบที่ถอดได้ ({c.insight.rawData.length} ตัวอักษร) — กดกาง/คัดลอก</summary>
+          <details style={{ marginBottom: 10 }} open={isArticle}>
+            <summary style={{ fontSize: 12, color: 'var(--text-muted,#888)', cursor: 'pointer' }}>{isArticle ? '🔬 ผลวิจัยเชิงลึก' : '📄 เนื้อดิบที่ถอดได้'} ({c.insight.rawData.length} ตัวอักษร) — กดกาง/คัดลอก</summary>
             <div style={{ fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 11, maxHeight: 240, overflowY: 'auto', marginTop: 6 }}>{c.insight.rawData}</div>
             <button onClick={() => copy(c.insight.rawData, kp + '-raw')} style={{ marginTop: 5, padding: '3px 10px', borderRadius: 7, border: 'none', background: 'rgba(59,130,246,0.15)', color: copied === kp + '-raw' ? '#22c55e' : '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === kp + '-raw' ? '✅' : '📋 คัดลอกเนื้อดิบ'}</button>
           </details>
@@ -321,7 +344,7 @@ export default function ClipTranscriptPage() {
         <div className="card" style={{ background: 'var(--bg-card, #1a1a2e)', border: '1px solid var(--border, #2a2a3e)', borderRadius: 14, padding: 18, marginBottom: 18 }}>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <input value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && !loading && extract()}
-              placeholder="วางลิงก์คลิป เช่น https://www.tiktok.com/... หรือ https://youtu.be/..."
+              placeholder="วางลิงก์คลิป (TikTok/YouTube/FB) หรือลิงก์ข่าวเว็บ (เช่น TrueID) แล้วเลือกปุ่มด้านขวา"
               style={{ flex: 1, minWidth: 280, padding: '12px 14px', borderRadius: 10, border: '1px solid var(--border, #2a2a3e)', background: 'rgba(0,0,0,0.2)', color: 'inherit', fontSize: 14, fontFamily: 'inherit' }} />
             <button onClick={extract} disabled={loading || insightLoading}
               style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: loading ? '#4b5563' : 'linear-gradient(135deg,#f91880,#7c3aed)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: loading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
@@ -331,10 +354,16 @@ export default function ClipTranscriptPage() {
               style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: insightLoading ? '#4b5563' : 'linear-gradient(135deg,#2563eb,#0891b2)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: insightLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
               {insightLoading ? '⏳ Gemini กำลังดูคลิป...' : '🎯 ถอดประเด็นข่าว (ข้อมูลดิบ)'}
             </button>
-            {/* ★ 8 ก.ค.: ถอด+ค้นข่าวคล้าย → คลังค้นประเด็นยูสเซอร์ */}
+            {/* ★ 8 ก.ค.: สองปุ่ม "หาข่าวเสริม" อยู่ติดกัน — คลิป (🧭) / ลิงก์ข่าวเว็บ (📰) · คลังเดียวกัน ผลแยกป้าย */}
             <button onClick={extractHunt} disabled={loading || insightLoading || hunting}
+              title="สำหรับลิงก์คลิป (YouTube/TikTok/FB/IG) — ถอดเนื้อดิบแล้วหาข่าว/คลิปคล้าย"
               style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: hunting ? '#4b5563' : 'linear-gradient(135deg,#059669,#0d9488)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: hunting ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
-              {hunting ? '⏳ กำลังถอด+ค้น...' : '🧭 ถอด+ค้นข่าวคล้าย'}
+              {hunting ? '⏳ กำลังทำ...' : '🧭 คลิป → ค้นข่าวคล้าย'}
+            </button>
+            <button onClick={extractNewsHunt} disabled={loading || insightLoading || hunting}
+              title="สำหรับลิงก์ข่าวเว็บ (เช่น TrueID, ข่าวสด) — วิจัยเชิงลึกแล้วหาข่าวเสริม"
+              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: hunting ? '#4b5563' : 'linear-gradient(135deg,#2563eb,#1d4ed8)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: hunting ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+              {hunting ? '⏳ กำลังทำ...' : '📰 ลิงก์ข่าว → วิจัย+หาเสริม'}
             </button>
             <button onClick={submitToQueue} disabled={loading || insightLoading || submitting || (queueJob && !queueJob._pollEnded && queueJob.status !== 'done' && queueJob.status !== 'error')}
               title="ส่งลิงก์ให้เครื่องทีมถอดให้ — เหมาะกับ Facebook/IG หรือเมื่อทำในเว็บไม่ได้"
@@ -606,7 +635,7 @@ export default function ClipTranscriptPage() {
           <div className="card" style={{ background: 'var(--bg-card,#1a1a2e)', border: '1px solid rgba(13,148,136,0.4)', borderRadius: 14, padding: 18, marginBottom: 22 }}>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: 150, padding: '9px 12px', borderRadius: 9, fontSize: 12, fontWeight: 700, background: huntPhase > 1 ? 'rgba(34,197,94,0.12)' : 'rgba(13,148,136,0.15)', color: huntPhase > 1 ? '#22c55e' : '#2dd4bf', border: '1px solid ' + (huntPhase > 1 ? 'rgba(34,197,94,0.35)' : 'rgba(13,148,136,0.45)') }}>
-                {huntPhase > 1 ? '✅' : '⏳'} 1. ถอดเนื้อดิบ (Gemini ดูคลิป){huntPhase === 1 ? ' — คลิปที่เคยถอดผ่านทันที' : ''}
+                {huntPhase > 1 ? '✅' : '⏳'} 1. อ่านเนื้อหาต้นทาง (คลิป=Gemini ดู · ข่าว=ดึงเนื้อ){huntPhase === 1 ? ' — ที่เคยทำผ่านทันที' : ''}
               </div>
               <div style={{ flex: 1, minWidth: 150, padding: '9px 12px', borderRadius: 9, fontSize: 12, fontWeight: 700, background: huntPhase === 2 ? 'rgba(13,148,136,0.15)' : 'rgba(255,255,255,0.04)', color: huntPhase === 2 ? '#2dd4bf' : 'var(--text-muted,#777)', border: '1px solid ' + (huntPhase === 2 ? 'rgba(13,148,136,0.45)' : 'var(--border,#2a2a3e)') }}>
                 {huntPhase === 2 ? '⏳' : '·'} 2. วิเคราะห์สไตล์ → สร้างคีย์ → ค้นทุกแหล่ง → คัด (~1-2 นาที)
@@ -621,7 +650,7 @@ export default function ClipTranscriptPage() {
         )}
         {hunt && !hunting && (
           <div className="card" style={{ background: 'var(--bg-card,#1a1a2e)', border: '1px solid rgba(13,148,136,0.4)', borderRadius: 14, padding: 18, marginBottom: 22 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: '#2dd4bf', marginBottom: 10 }}>🧭 ผลถอด+ค้นข่าวคล้าย <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted,#888)' }}>— เก็บเข้า &quot;คลังค้นประเด็นยูสเซอร์&quot; ให้แล้ว</span></div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: '#2dd4bf', marginBottom: 10 }}>{hunt.sourceType === 'article' ? '📰 ผลวิจัยลิงก์ข่าว + ข่าวเสริม' : '🧭 ผลถอด+ค้นข่าวคล้าย'} <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted,#888)' }}>— เก็บเข้า &quot;คลังค้นประเด็นยูสเซอร์&quot; ให้แล้ว</span></div>
             {renderHuntCase(hunt, 'hl')}
           </div>
         )}
@@ -759,23 +788,40 @@ export default function ClipTranscriptPage() {
           </div>
         )}
 
-        {/* ★ 8 ก.ค.: คลังค้นประเด็นยูสเซอร์ — เก็บถาวรทุกเคส (ลิงก์ต้นทาง+เนื้อดิบ+ข่าวที่เจอ) */}
+        {/* ★ 8 ก.ค.: คลังค้นประเด็นยูสเซอร์ — คลังเดียว เก็บทั้งคลิป+ลิงก์ข่าว (ผลแยกด้วยป้าย+ตัวกรอง) */}
         <button onClick={() => setHuntCasesOpen(!huntCasesOpen)} style={{ marginTop: 16, padding: '10px 18px', borderRadius: 10, border: '1px solid rgba(13,148,136,0.4)', background: huntCasesOpen ? 'rgba(13,148,136,0.12)' : 'var(--bg-card, #1a1a2e)', color: huntCasesOpen ? '#2dd4bf' : 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-          🧭 คลังค้นประเด็นยูสเซอร์ ({huntCases.length}) {huntCasesOpen ? '▲' : '▼'}
+          🗂️ คลังค้นประเด็นยูสเซอร์ ({huntCases.length}) {huntCasesOpen ? '▲' : '▼'}
         </button>
-        {huntCasesOpen && (
+        {huntCasesOpen && (() => {
+          const clipN = huntCases.filter(c => c.sourceType !== 'article').length;
+          const artN = huntCases.filter(c => c.sourceType === 'article').length;
+          const shownCases = huntCases.filter(c => huntFilter === 'all' || (huntFilter === 'article' ? c.sourceType === 'article' : c.sourceType !== 'article'));
+          const chip = (key, label) => (
+            <button onClick={() => setHuntFilter(key)} style={{ padding: '5px 13px', borderRadius: 999, cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'inherit', border: '1px solid ' + (huntFilter === key ? 'rgba(13,148,136,0.6)' : 'var(--border,#2a2a3e)'), background: huntFilter === key ? 'rgba(13,148,136,0.18)' : 'transparent', color: huntFilter === key ? '#2dd4bf' : 'var(--text-muted,#999)' }}>{label}</button>
+          );
+          return (
           <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {huntCases.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: 13 }}>ยังไม่มีเคส — กด &ldquo;🧭 ถอด+ค้นข่าวคล้าย&rdquo; สักครั้งแล้วจะเก็บที่นี่ถาวร หยิบใช้ได้ตลอด</div>}
-            {huntCases.map((c) => (
-              <div key={c.id} style={{ border: '1px solid rgba(13,148,136,0.3)', borderRadius: 10, overflow: 'hidden' }}>
+            {/* ตัวกรองที่มา */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
+              {chip('all', `ทั้งหมด (${huntCases.length})`)}
+              {chip('clip', `🎬 จากคลิป (${clipN})`)}
+              {chip('article', `📰 จากลิงก์ข่าว (${artN})`)}
+            </div>
+            {huntCases.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: 13 }}>ยังไม่มีเคส — กด &ldquo;🧭 คลิป → ค้นข่าวคล้าย&rdquo; หรือ &ldquo;📰 ลิงก์ข่าว → วิจัย+หาเสริม&rdquo; สักครั้งแล้วจะเก็บที่นี่ถาวร</div>}
+            {huntCases.length > 0 && shownCases.length === 0 && <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: 12.5 }}>ยังไม่มีเคสในหมวดนี้</div>}
+            {shownCases.map((c) => {
+              const isArticle = c.sourceType === 'article';
+              return (
+              <div key={c.id} style={{ border: '1px solid ' + (isArticle ? 'rgba(37,99,235,0.3)' : 'rgba(124,58,237,0.3)'), borderRadius: 10, overflow: 'hidden' }}>
                 <div onClick={() => setHuntExpanded(huntExpanded === c.id ? null : c.id)} style={{ padding: '11px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: 'var(--bg-card, #1a1a2e)' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, fontWeight: 800, background: isArticle ? 'rgba(37,99,235,0.18)' : 'rgba(124,58,237,0.18)', color: isArticle ? '#60a5fa' : '#a78bfa' }}>{isArticle ? '📰 ลิงก์ข่าว' : '🎬 คลิป'}</span>
                       {c.styleProfile?.theme && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>🧬 {c.styleProfile.theme}</span>}
                       <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontWeight: 800 }}>เจอ {(c.results || []).length} เรื่อง</span>
                     </div>
-                    <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platformIcon(c.platform)} {c.title || c.sourceUrl}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{c.platform}{c.user ? ` · 👤 ${c.user}` : ''} · {new Date(c.updatedAt || c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isArticle ? '📰' : platformIcon(c.platform)} {c.title || c.sourceUrl}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{isArticle ? 'ลิงก์ข่าว' : c.platform}{c.user ? ` · 👤 ${c.user}` : ''} · {new Date(c.updatedAt || c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
                   </div>
                   <button onClick={(e) => { e.stopPropagation(); if (confirm('ลบเคสนี้ออกจากคลัง?')) fetch('/api/clip-transcript/cases?kind=hunt&id=' + c.id, { method: 'DELETE' }).then(loadHuntCases); }} style={{ marginLeft: 10, padding: '4px 10px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>ลบ</button>
                 </div>
@@ -785,9 +831,11 @@ export default function ClipTranscriptPage() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
