@@ -828,10 +828,11 @@ function ResultView({ data }) {
           {/* ★ 6 ก.ค. รอบ 5: 🎯 แผงเรดาร์คลิป — ข่าวชาวบ้านหน้าชัดน้อย ระบบหาคลิป/เพจให้เอง */}
           {radar && (
             <div className="info-box" style={{ marginTop: 8 }}>
-              <b>🎯 เรดาร์คลิป:</b> หน้าชัดในคลัง {radar.faceCount} ใบ
+              <b>🎯 เรดาร์คลิป:</b> หน้าชัดในคลัง {radar.faceCount}/{radar.faceMin} ใบ
+              {radar.emotionCount !== undefined ? ` · อารมณ์ ${radar.emotionCount}/${radar.emoMin} แบบ${radar.emotions?.length ? ` (${radar.emotions.join(', ')})` : ''}` : ''}
               {radar.needMore
-                ? ` (ต่ำกว่าเกณฑ์ ${radar.faceMin}) — ${radar.canLens ? 'ยิงค้นย้อนกลับให้แล้ว · ' : ''}${radar.clips?.length ? 'ส่งแคปคลิปแรกเข้าคิวแล้ว · คลิปอื่นกดเพิ่มได้:' : 'ไม่เจอคลิปเพิ่ม — ลองวางลิงก์คลิปเอง'}`
-                : ' — เพียงพอแล้ว ✅'}
+                ? ` — ยังไม่พอ ล่าต่อ: ${radar.canLens ? 'ยิงค้นย้อนกลับให้แล้ว · ' : ''}${radar.clips?.length ? 'ส่งแคปคลิปแรกเข้าคิวแล้ว · คลิปอื่นกดเพิ่มได้:' : 'ไม่เจอคลิปเพิ่ม — ลองวางลิงก์คลิปเอง'}`
+                : ' — ✅ ครบเกณฑ์ทั้งจำนวนและอารมณ์'}
               {radar.needMore &&
                 (radar.clips || []).map((v, i) => (
                   <div key={i} style={{ marginTop: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>

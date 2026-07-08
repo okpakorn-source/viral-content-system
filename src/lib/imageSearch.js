@@ -285,7 +285,13 @@ const PLACE_SLOTS = parseInt(process.env.IMAGES_PLACE_SLOTS || '2', 10);
 //   ที่การันตียิงเสมอ — แยกโควตาออกจาก "หลักฐานเอกสาร" ไม่ให้เอกสารเบียดทิ้ง (ปกแสนไลค์ต้องมีช่องแอ็กชัน/รีแอกชัน/โมเมนต์)
 const MOMENT_SLOTS = parseInt(process.env.IMAGES_MOMENT_SLOTS || '3', 10);
 // คำบ่ง "สถาบัน/สถานที่สาธารณะ" — ภาพจาก Google ใช้ได้เลย ไม่ต้องผูกชื่อคน (ชื่อเฉพาะระบุตัวตนสถานที่แล้ว)
-const PLACE_INST = /มหาวิทยาลัย|วิทยาลัย|โรงเรียน|โรงพยาบาล|วัด|มูลนิธิ|สนามบิน|สถานี|ตลาด|ห้าง|อุทยาน|university|college|hospital|school|temple|airport/i;
+// ★ 8 ก.ค. บั๊กซ่อนเดิม: "จังหวัด"/"หวัด" มีคำว่า "วัด" ซ่อนอยู่ → regex เคยตีความ "จังหวัดแม่ฮ่องสอน" เป็นชื่อวัด
+//   แล้วปล่อยคำค้นพื้นที่เปล่าผ่านช่องสถาบัน (ที่มาวิวอำเภอ 14 ใบใน AC-0043) — ใส่ lookbehind กัน ห/หนำหน้า วัด
+const PLACE_INST = /มหาวิทยาลัย|วิทยาลัย|โรงเรียน|โรงพยาบาล|(?<!ห)วัด|มูลนิธิ|สนามบิน|สถานี|ตลาด|ห้าง|อุทยาน|university|college|hospital|school|temple|airport/i;
+// ★ 8 ก.ค. (ผู้ใช้สั่ง "ห้ามคีย์มั่ว"): คำบ่ง "เขตปกครอง/พื้นที่" — ค้นเปล่าๆ ได้แต่วิวทั่วไปของพื้นที่
+//   ทั้งเน็ต ไม่ใช่ภาพข่าวนี้ (บทเรียน AC-0043: "อำเภอแม่สะเรียง จังหวัดแม่ฮ่องสอน" ได้วิวอำเภอ 14 ใบ)
+//   → คำค้นแนวนี้ต้อง "ผูกชื่อคนในข่าว" เสมอ ถึงจะยิงได้ (ได้ภาพลงพื้นที่จริงแทน)
+const GEO_KW = /หมู่บ้าน|ตำบล|อำเภอ|จังหวัด|แขวง|ชุมชน|ซอย|ถนน|พื้นที่|\bdistrict\b|\bprovince\b|\bvillage\b|\bsubdistrict\b/i;
 
 // เลือกคำค้น "สมดุลต่อบุคคล" (round-robin) + P2: ผูกวัตถุกับเจ้าของ, ตัดคำค้นวัตถุลอย
 export function buildQueries(keywords, maxQueries) {
@@ -312,6 +318,9 @@ export function buildQueries(keywords, maxQueries) {
     if (!t) return '';
     return hasPerson(t) || !mainName ? t : `${t} ${mainName}`;
   };
+  // ★ 8 ก.ค. (ผู้ใช้สั่ง "ห้ามคีย์มั่ว"): คำค้นภูมิศาสตร์เปล่าใน pool (ไม่เอ่ยชื่อคน) → ผูกชื่อตัวหลักก่อนยิง
+  //   (ข่าวไม่มีบุคคลเลย = พื้นที่คือตัวข่าว เช่นน้ำท่วมอำเภอ X — คงไว้ตามเดิม)
+  pool = pool.map((q) => (GEO_KW.test(String(q)) && !hasPerson(q) ? bindName(q) : q)).filter(Boolean);
   const HARD_EVIDENCE = /จดหมาย|เช็ค|ป้าย|เอกสาร|ลายมือ|สลิป|แชท|ใบประกาศ|มอบเงิน|บริจาค|โพสต์/;
   const moments = keywords.moment_action || [];
   // 🧾 หลักฐาน (เอกสาร/ป้าย/วัตถุผูกชื่อ) = "ของเด็ด" ช่องวงกลม → การันตียิงเสมอ
@@ -332,18 +341,24 @@ export function buildQueries(keywords, maxQueries) {
   //    กัน generic 2 ชั้น: (1) ต้องมีอะไรตามหลังคำสถาบัน (2) คำขยาย generic (นานาชาติ/เอกชน/ดัง...) ไม่นับเป็นชื่อ
   //    — บทเรียน AC-0003: "งานจบการศึกษาโรงเรียนนานาชาติ" เคยผ่าน → ได้งานจบของเด็กใครก็ไม่รู้ทั้งเน็ต 188 ใบ
   const PLACE_GENERIC = /^(?:(?:นานาชาติ|เอกชน|รัฐบาล|อนุบาล|ประถม|มัธยม|ชั้นนำ|ชื่อดัง|ดัง|หรู|ใหญ่|ไทย|แห่งหนึ่ง)\s*)+/;
-  const places = dedupeTake(
-    (keywords.scene_place || [])
-      .map((s) => String(s || '').trim())
-      .filter((s) => {
-        const m = s.match(PLACE_INST);
-        if (!m) return false;
-        // ตัดคำขยาย generic หลังคำสถาบันออกก่อน — ต้องเหลือ "ชื่อเฉพาะจริง" ≥3 ตัวอักษร
-        const after = s.slice(s.indexOf(m[0]) + m[0].length).trim().replace(PLACE_GENERIC, '');
-        return after.length >= 3;
-      }),
-    PLACE_SLOTS
-  );
+  const instPlaces = (keywords.scene_place || [])
+    .map((s) => String(s || '').trim())
+    .filter((s) => {
+      const m = s.match(PLACE_INST);
+      if (!m) return false;
+      // ตัดคำขยาย generic หลังคำสถาบันออกก่อน — ต้องเหลือ "ชื่อเฉพาะจริง" ≥3 ตัวอักษร
+      const after = s.slice(s.indexOf(m[0]) + m[0].length).trim().replace(PLACE_GENERIC, '');
+      return after.length >= 3;
+    });
+  // ★ 8 ก.ค.: สถานที่แบบ "เขตปกครอง/พื้นที่" (หมู่บ้าน/ตำบล/อำเภอ — ไม่ใช่สถาบันชื่อเฉพาะ) ค้นเปล่าได้แต่วิว
+  //   → ผูกชื่อตัวหลักแล้วค่อยยิง (ภาพลงพื้นที่จริงของข่าวนี้) · ไม่มีชื่อคนให้ผูก = ไม่ยิงเลย
+  const geoPlaces = mainName
+    ? (keywords.scene_place || [])
+        .map((s) => String(s || '').trim())
+        .filter((s) => s && !PLACE_INST.test(s) && GEO_KW.test(s))
+        .map(bindName)
+    : [];
+  const places = dedupeTake([...instPlaces, ...geoPlaces], PLACE_SLOTS);
 
   // 🧾🎬🏛️ หลักฐาน + โมเมนต์/แอ็กชัน + สถานที่ = การันตียิงทุกช่อง (เพิ่มจากโควตา round-robin ต่อบุคคล — ไม่เบียดสมดุลคน)
   const guaranteed = dedupeTake([...evidence, ...momentScenes, ...places], EVIDENCE_SLOTS + MOMENT_SLOTS + PLACE_SLOTS);

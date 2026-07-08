@@ -17,7 +17,11 @@ import { searchYouTubeClips } from '@/lib/imageSearch';
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
-const FACE_MIN = parseInt(process.env.CLIP_RADAR_FACE_MIN || '10', 10);
+// ★ 8 ก.ค. (ผู้ใช้สั่ง): 10→40 — "12 ใบพอแล้ว" น้อยเกินใช้งานจริง ต้องหลายสิบ + เรดาร์ห้ามเป็นตัวจำกัดการหา
+const FACE_MIN = parseInt(process.env.CLIP_RADAR_FACE_MIN || '40', 10);
+// ★ 8 ก.ค.: เกณฑ์ใหม่ "อารมณ์ต้องหลากหลาย" — หน้าชัดเยอะแต่โทนเดียว (เช่น serious ล้วน) ก็ยังทำปกไม่ได้
+//   ต้องมีอารมณ์ต่างกันอย่างน้อย N แบบ (happy/warm/sad/shock/...) ไม่งั้นถือว่ายังขาด → ล่าคลิป/Lens ต่อ
+const EMO_MIN = parseInt(process.env.CLIP_RADAR_EMO_MIN || '3', 10);
 
 // สกัดชื่อเพจ/ช่องจากเนื้อข่าว (เช่น เพจ "ฅนจริงใจไม่ท้อ", เพจดังเพชรบุรี)
 function extractPageNames(text) {
@@ -50,7 +54,9 @@ export async function POST(req) {
     const imgs = await readImages(caseId);
     const faces = imgs.filter((i) => String(i?.triage?.category || '').startsWith('face'));
     const faceCount = faces.length;
-    const needMore = faceCount < FACE_MIN;
+    // ★ 8 ก.ค.: นับ "ความหลากหลายอารมณ์" ของหน้าชัดในคลัง (ไม่นับ none/ว่าง)
+    const emotions = [...new Set(faces.map((i) => i?.triage?.emotion).filter((e) => e && e !== 'none'))];
+    const needMore = faceCount < FACE_MIN || emotions.length < EMO_MIN;
 
     // หน้าชัดที่ใช้เป็นเมล็ด Lens ได้ (URL สาธารณะ)
     const canLens = faces.some((i) => /^https?:/.test(i.imageUrl || ''));
@@ -110,6 +116,9 @@ export async function POST(req) {
       caseId,
       faceCount,
       faceMin: FACE_MIN,
+      emotionCount: emotions.length, // ★ 8 ก.ค.: อารมณ์หน้าชัดที่มีในคลัง (กี่แบบ)
+      emotions,
+      emoMin: EMO_MIN,
       totalImages: imgs.length,
       needMore,
       canLens,
