@@ -49,6 +49,8 @@ function buildTriage(it, src) {
   return {
     // "เกี่ยวข่าว" แยกจาก "คุณภาพ" — ทิ้งเฉพาะที่ AI ตีว่าไม่เกี่ยวชัด (undefined = เก็บไว้ กัน false drop)
     relevant: it.relevant !== false,
+    // ★ 8 ก.ค. เฟส A: ป้าย "ภาพแฟ้ม" — false = คนในข่าวตัวจริงแต่มาจากงาน/บริบทอื่น (ไม่ระบุ/ข้อมูลเก่า = ถือเป็นภาพข่าว)
+    newsScene: it.newsScene !== false,
     clean: it.clean !== false, // พร้อมขึ้นปก (ไม่มีลายน้ำ/ตัวหนังสือ) — คนละเรื่องกับ relevant
     category: it.category || 'other',
     person: it.person || null,

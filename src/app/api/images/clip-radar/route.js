@@ -22,6 +22,11 @@ const FACE_MIN = parseInt(process.env.CLIP_RADAR_FACE_MIN || '40', 10);
 // ★ 8 ก.ค.: เกณฑ์ใหม่ "อารมณ์ต้องหลากหลาย" — หน้าชัดเยอะแต่โทนเดียว (เช่น serious ล้วน) ก็ยังทำปกไม่ได้
 //   ต้องมีอารมณ์ต่างกันอย่างน้อย N แบบ (happy/warm/sad/shock/...) ไม่งั้นถือว่ายังขาด → ล่าคลิป/Lens ต่อ
 const EMO_MIN = parseInt(process.env.CLIP_RADAR_EMO_MIN || '3', 10);
+// ★ 8 ก.ค. เฟส B (ผู้ใช้อนุมัติ): เกณฑ์ "รายคน" — ดาราหน้าเยอะท่วมโควตารวม ทำให้คนธรรมดาในข่าว
+//   (ตัวที่คนแชร์!) เหลือ 2-3 ใบแล้วเรดาร์เคยคิดว่าพอ → นับแยกต่อคน ใครขาดล่าคลิปของคนนั้นเจาะจง
+const PER_MIN = parseInt(process.env.CLIP_RADAR_FACE_MIN_PER || '10', 10);
+// subject ที่เป็น "วัตถุ/กลุ่มนิรนาม" ไม่ต้องนับรายคน (บ้าน/รถ/ถ้วยรางวัล · "หลานๆของ..." ตายืนยันหน้าไม่ได้)
+const NON_PERSON_RX = /บ้าน|รถ|โครงการ|ที่ดิน|ทรัพย์|เงิน|ถ้วย|รางวัล|เอกสาร|จดหมาย|เช็ค|ของ|และ|กลุ่ม|ทีม|ชาว|แฟนคลับ/;
 
 // สกัดชื่อเพจ/ช่องจากเนื้อข่าว (เช่น เพจ "ฅนจริงใจไม่ท้อ", เพจดังเพชรบุรี)
 function extractPageNames(text) {
@@ -56,7 +61,19 @@ export async function POST(req) {
     const faceCount = faces.length;
     // ★ 8 ก.ค.: นับ "ความหลากหลายอารมณ์" ของหน้าชัดในคลัง (ไม่นับ none/ว่าง)
     const emotions = [...new Set(faces.map((i) => i?.triage?.emotion).filter((e) => e && e !== 'none'))];
-    const needMore = faceCount < FACE_MIN || emotions.length < EMO_MIN;
+    // ★ 8 ก.ค. เฟส B: นับหน้าชัด "รายคน" (เฉพาะ subject ที่เป็นบุคคลยืนยันหน้าได้)
+    const personSubjects = (c.keywords?.subjects || [])
+      .map((s) => s.name)
+      .filter((n) => n && !NON_PERSON_RX.test(n));
+    const perPerson = personSubjects.map((name) => ({
+      name,
+      faces: faces.filter((i) => {
+        const t = i?.triage || {};
+        return t.person === name || (Array.isArray(t.persons) && t.persons.includes(name));
+      }).length,
+    }));
+    const missingPersons = perPerson.filter((p) => p.faces < PER_MIN).map((p) => p.name);
+    const needMore = faceCount < FACE_MIN || emotions.length < EMO_MIN || missingPersons.length > 0;
 
     // หน้าชัดที่ใช้เป็นเมล็ด Lens ได้ (URL สาธารณะ)
     const canLens = faces.some((i) => /^https?:/.test(i.imageUrl || ''));
@@ -70,11 +87,22 @@ export async function POST(req) {
     if (needMore) {
       const subjects = (c.keywords?.subjects || []).map((s) => s.name).filter(Boolean);
       const shows = c.keywords?.source_show || [];
-      const queries = [
-        subjects[0] && shows[0] ? `${subjects[0]} ${shows[0]}` : null,
-        subjects[0] || null,
-        subjects[1] ? `${subjects[1]} ${subjects[0] || ''}`.trim() : null,
-      ].filter(Boolean).slice(0, 2);
+      // ★ 8 ก.ค. เฟส B: ถ้ามี "คนที่หน้าขาด" → ล่าคลิปด้วยชื่อคนนั้นเจาะจงก่อนเสมอ
+      //   (คู่กับชื่อตัวหลัก/ชื่อรายการ — คลิปข่าวเรื่องนี้มักมีทั้งคู่ในเฟรม)
+      let queries;
+      if (missingPersons.length) {
+        const main = subjects[0] || '';
+        queries = missingPersons.slice(0, 2).flatMap((p) => [
+          shows[0] ? `${p} ${shows[0]}` : null,
+          main && main !== p ? `${p} ${main}` : p,
+        ]).filter(Boolean).slice(0, 3);
+      } else {
+        queries = [
+          subjects[0] && shows[0] ? `${subjects[0]} ${shows[0]}` : null,
+          subjects[0] || null,
+          subjects[1] ? `${subjects[1]} ${subjects[0] || ''}`.trim() : null,
+        ].filter(Boolean).slice(0, 2);
+      }
 
       const seen = new Set();
       for (const q of queries) {
@@ -91,7 +119,8 @@ export async function POST(req) {
       }
       // เรียง "ตรงประเด็น": ชื่อคนในไตเติล = สำคัญสุด (กันได้ตอนของคนอื่นในรายการเดียวกัน)
       const showTerms = shows.map((s) => String(s).toLowerCase());
-      const nameTerms = subjects.map((s) => String(s).toLowerCase());
+      // ★ 8 ก.ค. เฟส B: มีคนหน้าขาด → คัด/เรียงคลิปด้วยชื่อ "คนที่ขาด" ก่อน (ไม่ใช่ตัวหลักที่มีพอแล้ว)
+      const nameTerms = (missingPersons.length ? missingPersons : subjects).map((s) => String(s).toLowerCase());
       const rel = (v) => {
         const t = (v.title || '').toLowerCase();
         let sc = 0;
@@ -119,6 +148,9 @@ export async function POST(req) {
       emotionCount: emotions.length, // ★ 8 ก.ค.: อารมณ์หน้าชัดที่มีในคลัง (กี่แบบ)
       emotions,
       emoMin: EMO_MIN,
+      perPerson, // ★ 8 ก.ค. เฟส B: หน้าชัดรายคน [{name, faces}]
+      missingPersons, // คนที่หน้ายังขาด (< perMin) — เป้าล่าคลิป
+      perMin: PER_MIN,
       totalImages: imgs.length,
       needMore,
       canLens,

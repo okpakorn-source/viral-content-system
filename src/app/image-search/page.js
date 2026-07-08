@@ -830,9 +830,10 @@ function ResultView({ data }) {
             <div className="info-box" style={{ marginTop: 8 }}>
               <b>🎯 เรดาร์คลิป:</b> หน้าชัดในคลัง {radar.faceCount}/{radar.faceMin} ใบ
               {radar.emotionCount !== undefined ? ` · อารมณ์ ${radar.emotionCount}/${radar.emoMin} แบบ${radar.emotions?.length ? ` (${radar.emotions.join(', ')})` : ''}` : ''}
+              {(radar.perPerson || []).length > 0 && ` · รายคน: ${radar.perPerson.map((p) => `${p.name} ${p.faces}`).join(' / ')}`}
               {radar.needMore
-                ? ` — ยังไม่พอ ล่าต่อ: ${radar.canLens ? 'ยิงค้นย้อนกลับให้แล้ว · ' : ''}${radar.clips?.length ? 'ส่งแคปคลิปแรกเข้าคิวแล้ว · คลิปอื่นกดเพิ่มได้:' : 'ไม่เจอคลิปเพิ่ม — ลองวางลิงก์คลิปเอง'}`
-                : ' — ✅ ครบเกณฑ์ทั้งจำนวนและอารมณ์'}
+                ? ` — ยังไม่พอ${(radar.missingPersons || []).length ? ` (ขาด: ${radar.missingPersons.join(', ')})` : ''} ล่าต่อ: ${radar.canLens ? 'ยิงค้นย้อนกลับให้แล้ว · ' : ''}${radar.clips?.length ? 'ส่งแคปคลิปแรกเข้าคิวแล้ว · คลิปอื่นกดเพิ่มได้:' : 'ไม่เจอคลิปเพิ่ม — ลองวางลิงก์คลิปเอง'}`
+                : ' — ✅ ครบเกณฑ์ทั้งจำนวน อารมณ์ และรายคน'}
               {radar.needMore &&
                 (radar.clips || []).map((v, i) => (
                   <div key={i} style={{ marginTop: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -980,6 +981,7 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
   const [personFilter, setPersonFilter] = useState('all'); // 🧠 กรองตาม "คน" จาก triage
   const [catFilter, setCatFilter] = useState('all'); // 🧠 กรองตาม "หมวด" จาก triage
   const [hideJunk, setHideJunk] = useState(true); // 🧠 ซ่อนภาพขยะเป็นค่าเริ่มต้น (★ DEVIATION ผู้ใช้สั่ง 6 ก.ค. — ต้นฉบับ false)
+  const [sceneFilter, setSceneFilter] = useState('all'); // ★ 8 ก.ค. เฟส A: all | news (ภาพข่าวจริง) | file (ภาพแฟ้ม)
   const [lb, setLb] = useState(null); // index ในรายการที่กรองแล้ว
   const [selMode, setSelMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
@@ -998,10 +1000,12 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
   const byCat = {};
   let triagedCount = 0;
   let junkCount = 0;
+  let fileCount = 0; // ★ 8 ก.ค. เฟส A: จำนวนภาพแฟ้ม (คนถูกแต่มาจากงานอื่น)
   for (const im of images) {
     if (!im.triage) continue;
     triagedCount++;
     if (im.triage.relevant === false) junkCount++;
+    if (im.triage.newsScene === false && im.triage.relevant !== false) fileCount++;
     if (im.triage.person) byPerson[im.triage.person] = (byPerson[im.triage.person] || 0) + 1;
     if (im.triage.category) byCat[im.triage.category] = (byCat[im.triage.category] || 0) + 1;
   }
@@ -1016,19 +1020,24 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
         (emoFilter === 'all' || im.emotion === emoFilter) &&
         (personFilter === 'all' || im.triage?.person === personFilter) &&
         (catFilter === 'all' || im.triage?.category === catFilter) &&
+        (sceneFilter === 'all' || (sceneFilter === 'file' ? im.triage?.newsScene === false : im.triage?.newsScene !== false)) &&
         (!hideJunk || im.triage?.relevant !== false)
     )
     // ★ DEVIATION (ผู้ใช้สั่ง 6 ก.ค.): ภาพที่ตายืนยันว่าเกี่ยว+คุณภาพสูง ขึ้นก่อนเสมอ (ต้นฉบับเรียงตามลำดับเก็บ)
+    // ★ 8 ก.ค. เฟส A: ภาพข่าวจริง (newsScene) มาก่อนภาพแฟ้มเสมอ
     .sort((a, b) => {
       const ra = a.triage?.relevant === true ? 1 : 0;
       const rb = b.triage?.relevant === true ? 1 : 0;
       if (ra !== rb) return rb - ra;
+      const sa = a.triage?.newsScene === false ? 0 : 1;
+      const sb = b.triage?.newsScene === false ? 0 : 1;
+      if (sa !== sb) return sb - sa;
       return (b.triage?.quality || 0) - (a.triage?.quality || 0);
     });
 
   useEffect(() => {
     setLb(null); // เปลี่ยนตัวกรอง = ปิด lightbox
-  }, [filter, emoFilter, personFilter, catFilter, hideJunk]);
+  }, [filter, emoFilter, personFilter, catFilter, hideJunk, sceneFilter]);
 
   useEffect(() => {
     if (lb === null || selMode) return;
@@ -1164,6 +1173,17 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
               <button className={'fchip' + (hideJunk ? ' active' : '')} onClick={() => setHideJunk((v) => !v)} title="ซ่อนภาพที่ตาตีว่าไม่เกี่ยวข่าว/ขยะ">
                 {hideJunk ? '🙈 ซ่อนขยะแล้ว' : `🗑️ ซ่อนขยะ (${junkCount})`}
               </button>
+              {/* ★ 8 ก.ค. เฟส A: กรอง ภาพข่าวจริง / ภาพแฟ้ม (คนถูกแต่มาจากงานอื่น) */}
+              {fileCount > 0 && (
+                <>
+                  <button className={'fchip' + (sceneFilter === 'news' ? ' active' : '')} onClick={() => setSceneFilter((v) => (v === 'news' ? 'all' : 'news'))} title="เฉพาะภาพจากเหตุการณ์ข่าวนี้จริง">
+                    📰 ภาพข่าวจริง {triagedCount - junkCount - fileCount}
+                  </button>
+                  <button className={'fchip' + (sceneFilter === 'file' ? ' active' : '')} onClick={() => setSceneFilter((v) => (v === 'file' ? 'all' : 'file'))} title="ภาพแฟ้ม — คนในข่าวตัวจริงแต่ถ่ายจากงาน/บริบทอื่น">
+                    📁 แฟ้ม {fileCount}
+                  </button>
+                </>
+              )}
             </div>
           )}
         </>
@@ -1180,6 +1200,10 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
             <span className="thumb-plat">{PLATFORM_LABEL[im.platform] || im.platform}</span>
             {im.emotion && <span className="thumb-emo" title={EMOTION_LABEL[im.emotion]}>{(EMOTION_LABEL[im.emotion] || '').split(' ')[0]}</span>}
             {im.triage?.relevant === false && <span className="thumb-plat" style={{ top: 'auto', bottom: 4, left: 4, background: 'rgba(200,40,40,.85)' }}>🗑️ ขยะ</span>}
+            {/* ★ 8 ก.ค. เฟส A: ป้ายภาพแฟ้ม — คนถูกจริงแต่มาจากงาน/บริบทอื่น */}
+            {im.triage?.newsScene === false && im.triage?.relevant !== false && (
+              <span className="thumb-plat" style={{ top: 'auto', bottom: 4, left: 4, background: 'rgba(180,120,20,.85)' }}>📁 แฟ้ม</span>
+            )}
             {im.source && <span className="thumb-src">{im.source}</span>}
             {selMode && <span className="thumb-check">{selected.has(im.id) ? '✓' : ''}</span>}
           </button>
