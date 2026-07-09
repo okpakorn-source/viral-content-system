@@ -64,7 +64,7 @@ export async function runYouTubePipeline({ caseId, keywords, progress, clipUrls,
   for (const q of queries) {
     if (clips.length >= MAX_CLIPS * 3) break;
     try {
-      const found = await searchYouTubeClips(q);
+      const found = await searchYouTubeClips(q, { caseId });
       for (const c of found) {
         if (!c.link || seen.has(c.link)) continue;
         seen.add(c.link);

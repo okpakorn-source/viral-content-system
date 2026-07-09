@@ -15,10 +15,10 @@ import { getCase } from '@/lib/caseStore';
 import { reverseImage } from '@/lib/imageSearch';
 import { addImages, readImages } from '@/lib/imageStore';
 import { hostImagePublic } from '@/lib/publicHost';
-import { isOwnPageSource, isMismatchedFbMedia } from '@/lib/junkSources';
+import { isOwnPageSource, isMismatchedFbMedia, isCatalogSource } from '@/lib/junkSources';
 
 export const runtime = 'nodejs';
-export const maxDuration = 120;
+export const maxDuration = 240; // ★ 9 ก.ค.: 120→240 — seed 1 ใบ (Lens+vet ~25 ใบ) แตะ 2 นาทีได้ กันขาดกลาง vet
 
 const MAX_SEEDS = parseInt(process.env.REVERSE_MAX_SEEDS || '3', 10);
 const HARD_CAP = parseInt(process.env.REVERSE_HARD_CAP || '40', 10);
@@ -59,7 +59,13 @@ export async function POST(req) {
     } else {
       const imgs = await readImages(caseId);
       const uploads = imgs.filter((i) => i.platform === 'upload' && i.imageUrl).map((i) => i.imageUrl);
-      const publics = imgs.filter((i) => i.imageUrl && /^https?:/.test(i.imageUrl));
+      const allPublics = imgs.filter((i) => i.imageUrl && /^https?:/.test(i.imageUrl));
+      // ★ 9 ก.ค. (เคาะ 6 แหล่ง): seed อัตโนมัติต้อง "ผ่านตาคัดแล้ว" ก่อน — เกี่ยวจริง+สะอาด+หน้าเดี่ยว
+      //   (เดิมหยิบใบไหนก็ได้ในคลัง — seed ผิดคน/มีกราฟิก = Lens ขยายขยะ ~25 ใบ/seed)
+      //   ยังไม่มีใบที่ผ่านตาคัดเลย (เช่นเรียกก่อน triage) → ถอยใช้ทั้งคลังแบบเดิม ไม่บล็อกหน้าเว็บ
+      const verified = allPublics.filter((i) => i.triage && i.triage.relevant !== false
+        && i.triage.clean !== false && Number(i.triage.faceCount) === 1);
+      const publics = verified.length ? verified : allPublics;
 
       if (subjects.length > 1) {
         // สมดุลต่อบุคคล: seed จากรูปของแต่ละคน (ดูจาก query ที่ค้นมา) แบบ round-robin
@@ -107,10 +113,11 @@ export async function POST(req) {
     const collected = [];
     const seen = new Set();
     const errors = [];
+    let blockedCatalog = 0;
     for (const seed of seeds) {
       if (collected.length >= revCap) break;
       try {
-        const found = await reverseImage(seed);
+        const found = await reverseImage(seed, { caseId });
         for (const im of found) {
           if (collected.length >= revCap) break;
           if (!im.imageUrl || seen.has(im.imageUrl)) continue;
@@ -118,6 +125,8 @@ export async function POST(req) {
           if (isOwnPageSource(im)) continue;
           // 🚫 ★ 8 ก.ค. ดึก: กันภาพ FB ที่จับคู่ผิดโพสต์ (media_id ≠ เลขภาพในลิงก์)
           if (isMismatchedFbMedia(im)) continue;
+          // 🚫 ★ 9 ก.ค. (เคาะ): กันแคตตาล็อก/อสังหา/โฆษณา — ด่านเดียวกับ /api/images/search (เดิมท่อ Lens ไม่มี)
+          if (isCatalogSource(im)) { blockedCatalog++; continue; }
           seen.add(im.imageUrl);
           collected.push({ ...im, platform: 'reverse', query: 'reverse' });
         }
@@ -164,6 +173,7 @@ export async function POST(req) {
       caseId,
       platform: 'reverse',
       vetDropped,
+      blockedCatalog,
       seedsUsed: seeds.length,
       found: collected.length,
       added: saved.added,

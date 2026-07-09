@@ -107,7 +107,7 @@ export async function POST(req) {
       const seen = new Set();
       for (const q of queries) {
         try {
-          const found = await searchYouTubeClips(q);
+          const found = await searchYouTubeClips(q, { caseId });
           for (const v of found) {
             if (!v.link || seen.has(v.link)) continue;
             seen.add(v.link);

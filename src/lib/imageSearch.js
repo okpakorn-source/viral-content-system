@@ -121,7 +121,7 @@ function findArrayWith(obj, field, depth = 0) {
 // ค้นภาพ 1 คำค้น (router ตามแพลตฟอร์ม) → คืน array ภาพ normalize
 export async function searchImages(platform, query, { num = 30, gl = 'th', hl = 'th', caseId } = {}) {
   const co = { caseId }; // ผูกต้นทุน SerpApi กับเคส
-  if (platform === 'youtube') return searchYouTube(query, { num, gl, hl, key: getKey() });
+  if (platform === 'youtube') return searchYouTube(query, { num, gl, hl, key: getKey(), caseId });
 
   if (platform === 'google_news') {
     const d = await serpGet({ engine: 'google_news', q: query, gl, hl }, co);
@@ -139,8 +139,9 @@ export async function searchImages(platform, query, { num = 30, gl = 'th', hl = 
 }
 
 // ค้นภาพย้อนกลับ (Google Lens) จากภาพที่ยืนยัน 1 ใบ → เจอภาพคนคนนั้นจากทุกที่
-export async function reverseImage(imageUrl, { num = 25, hl = 'th' } = {}) {
-  const d = await serpGet({ engine: 'google_lens', url: imageUrl, type: 'visual_matches', hl, country: 'th' });
+// ★ 9 ก.ค.: รับ caseId ผูกต้นทุน — เดิมเครดิต Lens ถูก log แบบไม่รู้เคส (/cost มองไม่เห็น)
+export async function reverseImage(imageUrl, { num = 25, hl = 'th', caseId } = {}) {
+  const d = await serpGet({ engine: 'google_lens', url: imageUrl, type: 'visual_matches', hl, country: 'th' }, { caseId });
   if (d._empty) return [];
   return normList(d.visual_matches, num);
 }
@@ -179,13 +180,14 @@ export async function facebookProfile(profileId, { num = 40 } = {}) {
   return out.filter((x) => x.imageUrl && /^https?:/.test(x.imageUrl));
 }
 
-async function searchYouTube(query, { num, gl, hl, key }) {
+async function searchYouTube(query, { num, gl, hl, key, caseId }) {
   const url =
     'https://serpapi.com/search.json?engine=youtube' +
     `&search_query=${encodeURIComponent(query)}&gl=${gl}&hl=${hl}&api_key=${key}`;
 
   const res = await fetch(url);
   const data = await res.json().catch(() => ({}));
+  await recordSerp({ engine: 'youtube', step: 'ค้นภาพ', caseId }); // ★ 9 ก.ค.: เดิมยิงตรงไม่ log = เครดิตล่องหน
   if (!res.ok || data.error) {
     if (isNoResults(data.error)) return [];
     const e = new Error('SerpApi error: ' + (data.error || res.status));
@@ -210,7 +212,7 @@ async function searchYouTube(query, { num, gl, hl, key }) {
 }
 
 // ค้นคลิป YouTube (metadata เต็ม: link/length/channel/views) สำหรับ pipeline แคปเฟรม
-export async function searchYouTubeClips(query, { gl = 'th', hl = 'th' } = {}) {
+export async function searchYouTubeClips(query, { gl = 'th', hl = 'th', caseId } = {}) {
   const key = getKey();
   const url =
     'https://serpapi.com/search.json?engine=youtube' +
@@ -218,6 +220,7 @@ export async function searchYouTubeClips(query, { gl = 'th', hl = 'th' } = {}) {
 
   const res = await fetch(url);
   const data = await res.json().catch(() => ({}));
+  await recordSerp({ engine: 'youtube', step: 'ค้นคลิปแคปเฟรม', caseId }); // ★ 9 ก.ค.: เดิมยิงตรงไม่ log = เครดิตล่องหน
   if (!res.ok || data.error) {
     if (isNoResults(data.error)) return [];
     const e = new Error('SerpApi error: ' + (data.error || res.status));
