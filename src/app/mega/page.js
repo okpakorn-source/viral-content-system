@@ -120,6 +120,7 @@ export default function MegaPage() {
         <h1 style={{ fontSize: 22, margin: 0 }}>🏭 สายพานข่าวครบวงจร</h1>
         <span style={chipStyle('rgba(96,165,250,0.12)', '#60a5fa')}>เฟส 1+2: คัดข่าว → เนื้อ+ภาพครบชุด</span>
         {flags.paused && <span style={chipStyle('rgba(239,68,68,0.15)', '#f87171')}>⛔ พักสายพาน (ล้มติดกัน {flags.consecutiveFails})</span>}
+        <a href="/cover-techniques" style={{ ...chipStyle('rgba(246,51,154,0.12)', '#f6339a'), textDecoration: 'none' }}>📚 เทคนิคปก</a>
       </div>
       <div style={{ fontSize: 13, color: 'var(--text-muted, #8a8fa3)', marginBottom: 14 }}>
         ระบบทำงานแทนคน: คัดข่าวจากโต๊ะข่าว → เช็ควัตถุดิบ → สกัดเนื้อ → เข็มทิศเรื่อง → เจนข่าว (คิวเดิม) → บก.เลือกเวอร์ชันดีสุด → ค้นภาพ 4 แหล่ง+ตาคัด → ผู้กำกับจับคู่ 5 ช่องปก — ทุกสมองอ่าน/เขียน "แฟ้มงาน" เดียวกัน

@@ -121,7 +121,10 @@ export default function QuickCoverPage() {
         {/* header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div style={{ fontSize: 18, fontWeight: 900 }}>📱 เทสปกเร็ว</div>
-          <a href="/mega-covers" style={{ fontSize: 12, color: C.dim, textDecoration: 'none', border: `1px solid ${C.line}`, borderRadius: 999, padding: '5px 12px' }}>🗂️ คลังปก</a>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <a href="/mega-covers" style={{ fontSize: 12, color: C.dim, textDecoration: 'none', border: `1px solid ${C.line}`, borderRadius: 999, padding: '5px 12px' }}>🗂️ คลังปก</a>
+            <a href="/cover-techniques" style={{ fontSize: 12, color: C.dim, textDecoration: 'none', border: `1px solid ${C.line}`, borderRadius: 999, padding: '5px 12px' }}>📚 เทคนิค</a>
+          </div>
         </div>
 
         {/* stepper */}

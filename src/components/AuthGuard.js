@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 const AuthContext = createContext(null);
 
 // ★ หน้าสาธารณะ — เข้าได้โดยไม่ต้องล็อกอิน (กรอกชื่อในหน้าเอง) — ต้อง sync กับ PUBLIC_ROUTES ใน ClientLayout.js
-const PUBLIC_ROUTES = ['/login', '/cover-tester', '/image-search', '/news-filter', '/clip-transcript', '/photo-enhance', '/casting', '/casting/admin', '/news-desk', '/quick-cover']; // ★ 4 ก.ค.: /image-search คู่กับ /cover-tester · 9 ก.ค.: /quick-cover เทสปกบนมือถือ
+const PUBLIC_ROUTES = ['/login', '/cover-tester', '/image-search', '/news-filter', '/clip-transcript', '/photo-enhance', '/casting', '/casting/admin', '/news-desk', '/quick-cover', '/cover-techniques']; // ★ 4 ก.ค.: /image-search คู่กับ /cover-tester · 9 ก.ค.: /quick-cover เทสปกบนมือถือ · 10 ก.ค.: /cover-techniques คลังเทคนิคปกแสนไลค์
 
 export function useAuth() {
   return useContext(AuthContext) || {};

@@ -52,6 +52,7 @@ export default function Sidebar() {
     { label: 'เทสปกเทียบ ref', icon: '🎯', href: '/cover-ref-test' },
     { label: 'คลังปก reference + DNA', icon: '🧬', href: '/ref-covers' },
     { label: 'คลังงานปก MEGA', icon: '🗂️', href: '/mega-covers' },
+    { label: 'คลังเทคนิคปกแสนไลค์', icon: '📚', href: '/cover-techniques' },
 
     // ── 🛠️ เครื่องมือข่าว ──
     { type: 'divider', label: '🛠️ เครื่องมือข่าว' },
