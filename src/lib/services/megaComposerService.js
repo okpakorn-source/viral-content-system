@@ -10,6 +10,7 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
+import crypto from 'crypto'; // ★ เฟส 3.2 (10 ก.ค.): md5 คีย์ cache ผล photo-enhance ของ hero
 
 // ---------- โหลดภาพ 1 URL → Buffer (กฎที่พิสูจน์แล้ว CASE-366: 403/HTML-หลอก/ไฟล์ local/thumbnail สำรอง) ----------
 async function fetchOne(url, ms = 15000) {
@@ -194,6 +195,7 @@ function normalizeFaceBox(fd) {
     x1: +(largest.x / W).toFixed(3), y1: +(largest.y / H).toFixed(3),
     x2: +((largest.x + largest.width) / W).toFixed(3), y2: +((largest.y + largest.height) / H).toFixed(3),
     imgW: W, imgH: H, // 🔑 rev.4: สัดส่วนภาพจริง — fit aspect ต้องคิด "หน่วยพิกเซล" ให้ตรงกับ executor
+    pose: largest.pose || 'frontal', // ★ เฟส 6B.1: ท่าหน้าของหน้าหลัก (ใหญ่สุด) — hero score ใช้ 6B.2 · additive
     count: sig.length,
     allFaces: sig.map((f) => ({
       x1: +(f.x / W).toFixed(3), y1: +(f.y / H).toFixed(3),
@@ -201,6 +203,26 @@ function normalizeFaceBox(fd) {
     })),
     ...extras,
   };
+}
+
+// ---------- ★ เฟส 3 (10 ก.ค.): ธงคุณภาพจาก cropTrace ของปกใบสุดท้าย ----------
+//   blind_crop (ครอปตาบอด ไร้หน้า/subject) + upscaled/upscale_soft (ยืดจริงต่อช่อง จาก region px → slot px ที่ executor วัด)
+function traceQcFlags(cropTrace) {
+  const out = [];
+  for (const tt of cropTrace || []) {
+    if (/^noface-(top55|director-asis)$/.test(String(tt.branch || ''))) out.push(`blind_crop:${tt.slot}`);
+    const r = Number(tt.upscale);
+    if (r > 1.6) out.push(`upscaled:${tt.slot}:${r.toFixed(2)}`);
+    else if (r >= 1.2) out.push(`upscale_soft:${tt.slot}:${r.toFixed(2)}`);
+    // ★ เฟส 6B.3/6B.4 (10 ก.ค.): ธงครอปแน่นหน้าเด่น/บริบทไม่โล่ง (executor แนบ tt.tighten)
+    const tg = tt.tighten;
+    if (tg) {
+      if (tg.tightened && tg.kind === 'context') out.push(`context_tightened:${tt.slot}`);
+      else if (tg.tightened) out.push(`crop_tightened:${tt.slot}`);
+      if (tg.small) out.push(`face_small:${tt.slot}:${Number(tg.share).toFixed(2)}`);
+    }
+  }
+  return out;
 }
 
 // ---------- แกนประกอบ (ใช้ร่วม compose/verify) ----------
@@ -214,11 +236,17 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
   // ── ① โหลดภาพทั้งแผน (หลัก+สำรอง) — ลิงก์ตรงพัง → thumbnail ──
   // ★ เฟส 0.2 (โหมดเทสนิ่ง): stableOrder=true → เก็บผลตาม index ของ slotPlan แทน "ลำดับ fetch เสร็จ"
   //   (race เดิมทำให้ช่องรอง/วงกลมสุ่มผลข้ามรอบ เทียบก่อน-หลังจูนไม่ได้) · default ปิด = production เดิมเป๊ะ
+  // ★ เฟส 3.4 (10 ก.ค.): kill-switch COMPOSE_MIN_SRC_GATE — unset/'1' = เปิด hard floor 3.1+3.4, '0' = พฤติกรรมเก่า
+  const _minSrcGate = process.env.COMPOSE_MIN_SRC_GATE !== '0';
+  // ★ เฟส 6B (9 ก.ค. ดึก): kill-switch COMPOSE_FACE_PROMINENCE — unset/'1' = เปิด 6B.2 (hero โทษมุมข้าง)
+  //   + 6B.3/6B.4 (ครอปแน่นหน้าเด่น/บริบทไม่โล่ง ที่ executor) · '0' = พฤติกรรมเดิมเป๊ะ (pose ยังเก็บได้ ไม่ใช้)
+  const _faceProm = process.env.COMPOSE_FACE_PROMINENCE !== '0';
   const loaded = [];
   const _byIdx = new Array(slotPlan.length).fill(null);
   await Promise.all(slotPlan.map(async (p, _i) => {
     let buf = await fetchOne(p.url);
-    if (!buf && p.thumbnailUrl && p.thumbnailUrl !== p.url) buf = await fetchOne(p.thumbnailUrl);
+    // ★ เฟส 3.4: ช่อง hero (isHero) ห้าม fallback thumbnail (ยืดจนเบลอ) — โหลดตรงไม่ได้ = ปล่อยให้ตรรกะเลือก hero ไปใช้ใบอื่น
+    if (!buf && p.thumbnailUrl && p.thumbnailUrl !== p.url && !(_minSrcGate && p.isHero)) buf = await fetchOne(p.thumbnailUrl);
     if (buf && buf.length > 5000) {
       // ★ เฟส 4.1: ตัดกรอบสีทึบ/สีจัดที่ขอบ (กรอบเขียวเฟรมคลิป/letterbox) ก่อน detect/ครอป —
       //   ทำตรงนี้ = ทุกชั้นถัดไป (หน้า/aHash/คอลลาจ/ครอป) เห็นภาพสะอาดตรงกันหมด
@@ -228,8 +256,17 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
         qcFlags.push(`border_trimmed:${p.slot || 'backup'}`);
         buf = tr.buf;
       }
-      if (stableOrder) _byIdx[_i] = { ...p, buffer: buf };
-      else loaded.push({ ...p, buffer: buf });
+      // ★ เฟส 3.4: วัดพิกเซลจริงจากไฟล์ที่โหลดได้ (ไม่เชื่อ metadata ที่โกหก) — จิ๋ว shortSide<200 ทิ้ง (ห้ามเข้าพูล)
+      //   เก็บ _w/_h ติด object → hard floor 3.1 ใช้คำนวณ upscale ต่อได้เลย ไม่ต้องวัดซ้ำ
+      let _mw = 0, _mh = 0;
+      try { const _m = await (await import('sharp')).default(buf).metadata(); _mw = _m.width || 0; _mh = _m.height || 0; } catch { /* วัดไม่ได้ = ปล่อยผ่านด้วยเกณฑ์ไบต์เดิม */ }
+      if (_minSrcGate && _mw > 0 && _mh > 0 && Math.min(_mw, _mh) < 200) {
+        console.log(`[MegaComposer] 🚫 ทิ้งภาพจิ๋ว ${_mw}x${_mh} (<200px) — ...${String(p.url).slice(-36)}`);
+        return;
+      }
+      const _rec = { ...p, buffer: buf, ...(_mw > 0 ? { _w: _mw, _h: _mh } : {}) };
+      if (stableOrder) _byIdx[_i] = _rec;
+      else loaded.push(_rec);
     }
   }));
   if (stableOrder) {
@@ -339,6 +376,16 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
       .find((t) => t && t.slots.length <= loaded.length) || V3_TEMPLATES.vt_faces_circle;
   }
   console.log(`[MegaComposer] โครง: ${spec.id} (${spec.slots.length} ช่อง) · ${spec.canvasW}x${spec.canvasH}`);
+  if (spec?._featherCapped) qcFlags.push('feather_capped'); // ★ เฟส 3.5: DNA รายงาน featherPx เกิน 8 → ถูก cap
+  // ★ เฟส 6B.3 (10 ก.ค.): ส่ง "เป้าหน้าเด่น" (faceSizePct จาก ref DNA) ต่อช่องให้ executor —
+  //   executor ใช้เป็น "ขั้นต่ำที่ต้องบังคับ" (ไม่ใช่แค่ hint) โดยมี cap ความปลอดภัยของมันเอง กันซูมแน่นเกิน/หัวขาด
+  //   refSlotMeta เป็น 1:1 กับ spec.slots เสมอเมื่อไม่ null (map ในบล็อก ref ด้านบน) · _faceProm ปิด = ไม่ส่ง (พฤติกรรมเดิม)
+  if (_faceProm && refSlotMeta && refSlotMeta.length === spec.slots.length) {
+    spec.slots.forEach((sl, i) => {
+      const pct = Number(refSlotMeta[i]?.faceSizePct);
+      if (pct >= 15 && pct <= 95) sl._faceTargetShare = +(pct / 100).toFixed(3);
+    });
+  }
 
   // ── ③b 👁️‍🗨️ โซนมองเห็นต่อช่อง (9 ก.ค. ผู้ใช้: "โดนทับแล้วหน้าหาย ต้องย่อ/ขยับให้หน้าอยู่โซนที่เห็น") ──
   //   ช่องรองที่มี inset (z≥3)/วงกลมลอยทับ: หาแถบว่างใหญ่สุด (บน/ล่าง/ซ้าย/ขวาของส่วนทับ)
@@ -443,6 +490,16 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
       // พรีเมียม: หน้าใหญ่คมในไฟล์ใหญ่ (โคลสอัพคุณภาพ) — ให้ชนะภาพสะอาดแต่ห่วยได้ แม้ติดลายน้ำมุมเล็กน้อย
       const facePxW2 = (fb.x2 - fb.x1) * fb.imgW;
       if (facePxW2 >= 240 && shortSide >= 500 && !(fb.x1 < 0.02 || fb.x2 > 0.98 || fb.y1 < 0.02)) s += 14;
+    }
+    // — ★ เฟส 6B.2 (9 ก.ค. ดึก — ปก MCV-mrdloc991wr hero มุมข้าง "ดูไม่รู้ใคร"): โทษ "ท่าหน้า" —
+    //   hero ต้อง "หน้าเด่น รู้ทันทีว่าใคร" → มุมข้าง/หันหลังโดนหักหนัก "เมื่อมีหน้าตรง/เฉียงให้เลือก"
+    //   (หักเป็นตัวเปรียบเทียบ — ถ้าดีสุดยังเป็น profile จริงๆ ก็ยังคว้าได้ + ติดธง hero_profile_forced ท้ายท่อ)
+    if (_faceProm) {
+      const pose = String(fb.pose || 'frontal');
+      if (pose === 'back') s -= 80;              // หันหลัง = แทบตัดทิ้ง (ไม่รู้เลยว่าใคร)
+      else if (pose === 'profile') s -= 45;      // มุมข้าง = หักหนัก (ระดับเดียวกับโทษยืดสูงสุด)
+      else if (pose === 'three_quarter') s -= 5; // เฉียง 3/4 = ยังเห็นหน้า หักนิดเดียว
+      // frontal = ไม่หัก
     }
     // — ระยะช็อตตาม ref (โบนัสเบา ไม่ใช่ตัวตัดสิน) —
     const fh = fb.y2 - fb.y1;
@@ -666,6 +723,102 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
     }
   } catch { /* ด่านท้ายล้มไม่ให้กระทบการประกอบ */ }
 
+  // ★ เฟส 3 (10 ก.ค. — โรงประกอบไม่ทำลายความคม): พื้นต่ำสุดที่ภาพจะถูกยืดเมื่อขึ้นช่อง
+  //   (region ใหญ่สุดในภาพที่ aspect ตรงช่อง → ยืดน้อยสุด) — ใช้ทั้ง hard floor 3.1 และ enhance 3.2
+  const _imgWH = (im, fb) => {
+    if (im && im._w > 0 && im._h > 0) return [im._w, im._h];      // พิกเซลไฟล์จริง (เฟส 3.4)
+    if (fb && fb.imgW > 0 && fb.imgH > 0) return [fb.imgW, fb.imgH]; // สำรอง: ค่าที่ detector เห็น
+    return [0, 0];
+  };
+  const _slotUpEst = (im, fb, sl) => {
+    const [iw, ih] = _imgWH(im, fb);
+    if (!(iw > 0) || !(ih > 0) || !sl) return 1;
+    const sa = sl.w / sl.h, ia = iw / ih;
+    return ia >= sa ? sl.h / ih : sl.w / iw;
+  };
+
+  // ── ⑤a 🔎 hard floor 3.1: ช่องรอง/วงกลมที่ภาพจะถูกยืด >1.6 เท่า → สลับใบสำรองที่ยืดน้อยกว่า "เมื่อมีทางเลือก" ──
+  //   ไม่มีใบยืดน้อยกว่า = คงเดิม + ธง upscaled_src (compose ห้ามล้มเพราะเรื่องนี้) · hero มีด่าน heroScore/quality ของตัวเอง
+  //   kill-switch COMPOSE_MIN_SRC_GATE=0 = ปิด (พฤติกรรมเก่า)
+  if (_minSrcGate) {
+    try {
+      const _heroPs = String((mi >= 0 ? loaded[mi]?.person : '') || '');
+      for (const a of assignments) {
+        const sl = spec.slots.find((s) => s.id === a.slotId);
+        if (!sl || /main|hero/i.test(String(a.slotId))) continue;
+        const curUp = _slotUpEst(loaded[a.imageIndex], faceBoxes[a.imageIndex], sl);
+        if (!(curUp > 1.6)) continue;
+        const isCirc = sl.shape === 'circle';
+        const curP = String(loaded[a.imageIndex]?.person || '');
+        const curDiff = !!(_heroPs && curP && curP !== _heroPs); // "คนละคนกับ hero" — ห้ามสลับจนเสียคุณสมบัตินี้ (กติกา 2.3)
+        let bi = -1, bUp = curUp;
+        for (let i = 0; i < loaded.length; i++) {
+          if (used.has(i) || isCollage[i] || loaded[i].clean === false) continue;
+          const fb2 = faceBoxes[i];
+          if (isCirc && !(fb2 && fb2.x2 > fb2.x1)) continue; // วงกลมต้องมีหน้า
+          if ([...used].some((u) => u !== a.imageIndex && hamming(aHashes[i], aHashes[u]) <= 6)) continue; // ห้ามซ้ำเฟรม
+          if (curDiff) { const p2 = String(loaded[i]?.person || ''); if (!(p2 && p2 !== _heroPs)) continue; }
+          const up2 = _slotUpEst(loaded[i], fb2, sl);
+          if (up2 < bUp - 0.05) { bUp = up2; bi = i; }
+        }
+        if (bi >= 0 && bUp <= 1.6) {
+          used.delete(a.imageIndex); used.add(bi);
+          a.imageIndex = bi;
+          a.crop = { x: 0, y: 0, w: 1, h: 1 }; // ให้ executor คำนวณครอปใหม่ตามสูตรช่อง
+          a.why = 'สลับใบยืดน้อยกว่า (hard floor 3.1)';
+          console.log(`[MegaComposer] 🔎🔁 ${a.slotId}: ภาพยืด ${curUp.toFixed(2)}x → สลับ #${bi} (ยืด ${bUp.toFixed(2)}x)`);
+        } else {
+          console.log(`[MegaComposer] 🔎⚠️ ${a.slotId}: ภาพยืด ${curUp.toFixed(2)}x ไม่มีใบยืดน้อยกว่าให้สลับ — คงเดิม`);
+          qcFlags.push(`upscaled_src:${a.slotId}:${curUp.toFixed(2)}`);
+        }
+      }
+    } catch (e) { console.log('[MegaComposer] hard floor 3.1 ล้ม (ใช้แผนเดิม):', String(e?.message || '').slice(0, 50)); }
+  }
+
+  // ── ⑤b ✨ photo-enhance 3.2: เฉพาะ hero เมื่อภาพต้นทางเล็ก (จะถูกยืด 1.2-2.5 เท่า) ──
+  //   Real-ESRGAN upscale ล้วน (face_enhance=false ตายตัวใน service — 🔴 ห้าม AI แก้หน้า/เจนภาพ)
+  //   cache ผลลง data/enhance-cache กันเรียกซ้ำเปลืองเงิน · หมดเวลา 60s/ล้ม = ใช้ buffer เดิม (ห้ามล้มงาน)
+  //   kill-switch COMPOSE_ENHANCE_HERO=0 = ปิดสนิท (ไม่ยิง Replicate เลย)
+  if (process.env.COMPOSE_ENHANCE_HERO !== '0' && mainSlot && mi >= 0) {
+    try {
+      const fbH = faceBoxes[mi];
+      const [hiw] = _imgWH(loaded[mi], fbH);
+      const facePxW = fbH && hiw > 0 && fbH.x2 > fbH.x1 ? (fbH.x2 - fbH.x1) * hiw : 0;
+      const heroUp = facePxW > 0 ? (mainSlot.w * 0.88) / facePxW : _slotUpEst(loaded[mi], fbH, mainSlot); // ยืดตามสูตรครอป hero (faceFrac 0.88)
+      if (heroUp >= 1.2 && heroUp <= 2.5) {
+        const cacheDir = path.join(process.cwd(), 'data', 'enhance-cache');
+        const key = crypto.createHash('md5').update(String(loaded[mi].url || '') || loaded[mi].buffer.slice(0, 512)).digest('hex');
+        const cachePath = path.join(cacheDir, `${key}.jpg`);
+        let enhBuf = null;
+        try { enhBuf = await fs.readFile(cachePath); } catch { /* ไม่มี cache */ }
+        if (enhBuf) {
+          console.log(`[MegaComposer] ✨💾 hero enhance cache hit (${key.slice(0, 8)})`);
+        } else {
+          const { upscaleImage } = await import('@/lib/services/replicateEnhancer');
+          const srcB64 = loaded[mi].buffer.toString('base64');
+          const enh = await Promise.race([
+            upscaleImage(srcB64, 2), // ×2 (face_enhance=false ในตัว service)
+            new Promise((_, rej) => setTimeout(() => rej(new Error('enhance timeout 60s')), 60000)),
+          ]);
+          if (enh?.base64) {
+            enhBuf = Buffer.from(enh.base64, 'base64');
+            try { await fs.mkdir(cacheDir, { recursive: true }); await fs.writeFile(cachePath, enhBuf); } catch { /* cache เขียนไม่ได้ = ข้าม */ }
+          }
+        }
+        if (enhBuf && enhBuf.length > 5000) {
+          loaded[mi].buffer = enhBuf; // executor อ่านขนาดใหม่จาก meta → faceBox (normalized) ยังตรง region เดิม
+          qcFlags.push(`enhanced:hero:${heroUp.toFixed(2)}`);
+          console.log(`[MegaComposer] ✨ hero enhance สำเร็จ (ยืด ${heroUp.toFixed(2)}x → คมขึ้น)`);
+        } else {
+          qcFlags.push('enhance_failed:hero');
+        }
+      }
+    } catch (e) {
+      qcFlags.push('enhance_failed:hero');
+      console.log('[MegaComposer] ✨❌ hero enhance ล้ม (ใช้ภาพเดิม):', String(e?.message || '').slice(0, 60));
+    }
+  }
+
   const { executeCover } = await import('@/lib/services/coverExecutorService');
   const { detectFaces } = await import('@/lib/services/faceDetector');
   const mainSlotSpec = spec.slots.find((s) => /main|hero/i.test(String(s.id))) || null;
@@ -786,11 +939,21 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
     }
   } catch (e) { console.log('[MegaComposer] ด่านคนครบล้ม (ใช้ปกเดิม):', String(e?.message || '').slice(0, 60)); }
 
+  // ★ เฟส 6B.2 (observability): ท่าหน้า hero ตัวสุดท้าย (หลังด่านบังคับ/สลับใบ) — ธงเสมอ + ธง forced เมื่อจำใจใช้มุมข้าง
+  if (_faceProm && mainAssign) {
+    const _hp = String(faceBoxes[mainAssign.imageIndex]?.pose || 'frontal');
+    qcFlags.push(`hero_pose:${_hp}`);
+    if (_hp === 'profile' || _hp === 'back') {
+      qcFlags.push('hero_profile_forced'); // ไม่มีหน้าตรง/เฉียงให้เลือกจริงๆ → จำใจใช้ (ติดธงให้เห็น ไม่บล็อกงาน)
+      console.log(`[MegaComposer] ⚠️ hero เป็นท่า ${_hp} (คลังไม่มีหน้าตรง/เฉียงให้เลือก) → hero_profile_forced`);
+    }
+  }
+
   console.log(`[MegaComposer] ✅ ประกอบเสร็จ ${Math.round(buffer.length / 1024)}KB (${spec.id})`);
   // เฟส 0.1: เก็บ trace ครอปของรอบประกอบสุดท้าย (จาก traceSink ของงานนี้เอง) — ให้เครื่องเทส/การ์ด hero อ่านได้
   const cropTrace = [...traceSink];
-  // เฟส 4.3: ธงครอปตาบอด (ภาพไร้หน้า+ไร้ subject — เดาช่วงบน) จาก trace จริง
-  for (const tt of cropTrace) if (/^noface-(top55|director-asis)$/.test(String(tt.branch || ''))) qcFlags.push(`blind_crop:${tt.slot}`);
+  // เฟส 4.3 + 3.1: ธงครอปตาบอด (ไร้หน้า+ไร้ subject) + ยืดจริงต่อช่อง (upscaled/upscale_soft) จาก trace ปกใบสุดท้าย
+  qcFlags.push(...traceQcFlags(cropTrace));
   if (qcFlags.length) console.log(`[MegaComposer] 🚩 qcFlags: ${qcFlags.join(' · ')}`);
   return { buffer, spec, assignments, loaded, faceBoxes, used, refSlotMeta, cropTrace, qcFlags, traceSink };
 }
@@ -906,9 +1069,9 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
               const { executeCover } = await import('@/lib/services/coverExecutorService');
               buffer = await executeCover({ assignments: core.assignments, imageBuffers: core.loaded, templateSpec: core.spec, faceBoxes: core.faceBoxes, traceSink: core.traceSink });
               cropTrace = [...(core.traceSink || [])]; // audit: trace ของรอบสุดท้าย จาก sink ของงานนี้เอง
-              // audit: ธง blind_crop ต้องสะท้อนปกใบสุดท้าย (การสลับภาพของตาอาจทำให้เกิด/หาย)
-              core.qcFlags = (core.qcFlags || []).filter((f) => !/^blind_crop:/.test(String(f)));
-              for (const tt of cropTrace) if (/^noface-(top55|director-asis)$/.test(String(tt.branch || ''))) core.qcFlags.push(`blind_crop:${tt.slot}`);
+              // audit: ธง blind_crop + upscale ต้องสะท้อนปกใบสุดท้าย (การสลับภาพของตาอาจทำให้เกิด/หาย) — เฟส 3.1
+              core.qcFlags = (core.qcFlags || []).filter((f) => !/^(blind_crop|upscaled|upscale_soft):/.test(String(f)));
+              core.qcFlags.push(...traceQcFlags(cropTrace));
               console.log(`[MegaComposer] 👁️ แก้ตามตา ${fixedCount} จุด → ประกอบใหม่ (bounded 1 รอบจบ)`);
             }
           }

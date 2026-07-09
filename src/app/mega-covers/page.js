@@ -11,7 +11,7 @@ export default function MegaCoversPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
-  const [zoom, setZoom] = useState(null); // coverPath ที่กำลังเทียบ ref
+  const [zoom, setZoom] = useState(null); // item ที่กำลังเทียบ ref (ต้องรู้ refImagePath จริงของใบนั้น)
 
   const load = async () => {
     setLoading(true); setErr('');
@@ -51,7 +51,7 @@ export default function MegaCoversPage() {
             <img
               src={`/api/mega-covers/img?id=${encodeURIComponent(it.id)}`}
               alt={it.title}
-              onClick={() => setZoom(`/api/mega-covers/img?id=${encodeURIComponent(it.id)}`)}
+              onClick={() => setZoom(it)}
               onError={(e) => {
                 if (it.coverPath && e.currentTarget.dataset.fb !== '1') { e.currentTarget.dataset.fb = '1'; e.currentTarget.src = it.coverPath; }
                 else e.currentTarget.style.display = 'none';
@@ -82,11 +82,19 @@ export default function MegaCoversPage() {
         <div onClick={() => setZoom(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 20, zIndex: 50, cursor: 'zoom-out' }}>
           <div style={{ textAlign: 'center' }}>
             <div style={{ color: '#fff', fontSize: 13, marginBottom: 6 }}>ปกที่ระบบสร้าง</div>
-            <img src={zoom} alt="cover" style={{ maxHeight: '82vh', borderRadius: 10, border: '2px solid #2563eb' }} />
+            <img src={`/api/mega-covers/img?id=${encodeURIComponent(zoom.id)}`} alt="cover" style={{ maxHeight: '82vh', borderRadius: 10, border: '2px solid #2563eb' }} />
           </div>
+          {/* ★ 9 ก.ค.: โชว์ ref จริงของใบนั้น (จาก refId → คลัง) — เดิม hardcode reference_5x4.jpg ทุกใบ
+              ทำให้เทมเพลตที่ผู้ใช้สั่งลบไปแล้วดูเหมือนยังถูกใช้อยู่ · ref ถูกลบ/ไม่ได้ใช้ → บอกตรงๆ ไม่โชว์ภาพหลอก */}
           <div style={{ textAlign: 'center' }}>
-            <div style={{ color: '#fff', fontSize: 13, marginBottom: 6 }}>reference (เป้า)</div>
-            <img src="/_ref/reference_5x4.jpg" alt="ref" style={{ maxHeight: '82vh', borderRadius: 10, border: '2px solid #e2e8f0' }} />
+            <div style={{ color: '#fff', fontSize: 13, marginBottom: 6 }}>reference (เป้า){zoom.refStyleName ? ` — ${zoom.refStyleName}` : ''}</div>
+            {zoom.refImagePath ? (
+              <img src={zoom.refImagePath} alt="ref" style={{ maxHeight: '82vh', borderRadius: 10, border: '2px solid #e2e8f0' }} />
+            ) : (
+              <div style={{ width: 280, padding: '40px 16px', borderRadius: 10, border: '2px dashed #64748b', color: '#cbd5e1', fontSize: 13 }}>
+                {zoom.refDeleted ? `ref ที่ใช้ตอนสร้าง (${zoom.refId}) ถูกลบออกจากคลังแล้ว` : 'ปกใบนี้ไม่ได้สร้างจาก ref'}
+              </div>
+            )}
           </div>
         </div>
       )}

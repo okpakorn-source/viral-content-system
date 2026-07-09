@@ -320,11 +320,68 @@ const MAX_TRIAGE_ROUNDS = 8;
 // ★ 9 ก.ค. (เคาะ 6 แหล่ง): สวิตช์ชุดใหม่ — ปิดคืนได้ทีละตัวอิสระ
 const LENS_ON = process.env.MEGA_LENS !== '0'; // ขั้น s5_lens ค้นย้อนกลับ
 const LENS_SEEDS = parseInt(process.env.MEGA_LENS_SEEDS || '2', 10); // seed สูงสุดต่องาน
+// ★ 9 ก.ค. เฟส 4b ข้อ 4.4: เพดาน seed "ชุดที่สอง" (เชิงเรื่องราว/ความสัมพันธ์) — เพิ่มต้นทุนรวมไม่เกิน 2 call จากเดิม
+const STORY_SEED_MAX = 2;
 const YT_PARALLEL = process.env.MEGA_YT_PARALLEL !== '0'; // ยิงแคปเฟรมตั้งแต่เริ่มค้นเว็บ (ขนาน)
 const YT_WAIT_MIN = parseInt(process.env.MEGA_YT_WAIT_MIN || '10', 10); // เพดานรอเฟรมก่อน S6 (นาที)
 const S6_MIN_CLEAN = parseInt(process.env.MEGA_S6_MIN_CLEAN || '5', 10); // ด่านแข็ง S6: สะอาด≥N → ตัด clean=false ทิ้ง (0=ปิดด่าน)
+// ★ 9 ก.ค. เฟส 2.2 (แผนคุณภาพคลังรูป): hero ต้องเห็นขนาดจริงพอ (realShortSide≥700 ไม่ใช่ thumbnail-only)
+//   กันไฟล์จิ๋วที่ตาคัดให้คะแนนสูงหลอก (จากรูปย่อ) หลุดขึ้น hero แล้วยืดแตกตอนประกอบ · ปิดกลับพฤติกรรมเดิม: S6_REAL_SIZE_GATE=0
+const S6_REAL_SIZE_GATE = process.env.S6_REAL_SIZE_GATE !== '0';
+// ★ 10 ก.ค. เฟส 6A (Story-fit selector — ผู้ใช้: "บริบทรูปต้องสื่อสารกับเนื้อหาข่าวจริงๆ มันถึงแมส"):
+//   ให้ช่อง context/circle/action ชั่งน้ำหนัก "ภาพนี้เล่าเรื่องเดียวกับข่าวแค่ไหน" (จาก query หมวดเรื่องราว +
+//   หมวด/อารมณ์/note เทียบเข็มทิศ) ไม่ใช่แค่หน้าชัดสวย · hero คงกติกาเดิมเป๊ะ · ปิดกลับพฤติกรรมเดิม: S6_STORY_FIT=0
+const S6_STORY_FIT = process.env.S6_STORY_FIT !== '0';
 // ภาพ "ใช้ขึ้นปกได้จริง" = ตายืนยันแล้วว่าเกี่ยว + สะอาด (ปกคลิป/การ์ดกราฟิก = relevant แต่ clean=false)
 const isCleanRelevant = (x) => x?.triage && x.triage.relevant !== false && x.triage.clean !== false;
+// ★ 9 ก.ค. เฟส 5.1 (แผนคุณภาพคลังรูป): ด่านพูลสะอาด "ก่อนเข้า s6" — ต่างจาก S6_MIN_CLEAN ด้านบน (ที่ทำงานหลัง sort/gate ซ้อนอีกชั้น)
+//   คลังจริงพิสูจน์: clean แค่ 33.6% (AC-0058) → กันของสกปรกไม่ให้แม้แต่เข้าสมองเลือกภาพตั้งแต่ต้น · ปิดกลับพฤติกรรมเดิม: POOL_CLEAN_GATE=0
+const POOL_CLEAN_GATE = process.env.POOL_CLEAN_GATE !== '0';
+const POOL_MIN_FLOOR = 6; // พูลสะอาดบางกว่านี้ → อนุญาตเติม clean=false ที่ดีที่สุดกลับ (กันงานล่ม) พร้อมติดธง dirtyFallback
+
+// ★ 9 ก.ค. เฟส 4b ข้อ 4.3: auto profile mining — หา IG/FB username คนหลักอัตโนมัติ → ดึงภาพต้นฉบับคมสุดเข้าคลัง
+//   ปิดกลับพฤติกรรมเดิม (ปุ่มแมนนวลอย่างเดียว): IMG_AUTO_PROFILE=0
+const AUTO_PROFILE_ON = process.env.IMG_AUTO_PROFILE !== '0';
+const AUTO_PROFILE_MAX_PEOPLE = 2; // เพดานคนหลัก/เคส (ตามสเปค)
+const AUTO_PROFILE_MAX_IMAGES = 40; // เพดานภาพ/โปรไฟล์ (ตามสเปค)
+// ★ 9 ก.ค. เฟส 4b ข้อ 4.5: ค้นรอบสองอัจฉริยะ — วัดแกน hero-grade/ฉากตรงบริบท ขาด→ให้สมองสร้างคำค้นใหม่
+//   ปิดกลับพฤติกรรมเดิม (ค้นรอบสองแบบเดิม ไม่มีคำค้นใหม่): IMG_GAP_SEARCH=0
+const GAP_SEARCH_ON = process.env.IMG_GAP_SEARCH !== '0';
+const GAP_SEARCH_MAX_QUERIES = 5;
+const GAP_SEARCH_MIN_HERO_PER_PERSON = 2;
+const GAP_SEARCH_MIN_SCENE = 3;
+
+// หา IG username จากชื่อคน ด้วย Serper (เมื่อ entityResolver ไม่มีข้อมูลโซเชียลให้) — ล้ม/ไม่มีคีย์ = คืน null เงียบๆ
+async function _findInstagramUsername(name) {
+  const key = process.env.SERPER_API_KEY;
+  if (!key || !name) return null;
+  try {
+    const res = await fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: { 'X-API-KEY': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: `${name} instagram`, gl: 'th', hl: 'th', num: 5 }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const j = await res.json().catch(() => ({}));
+    for (const item of (j?.organic || [])) {
+      const m = /instagram\.com\/([a-zA-Z0-9._]+)\/?/i.exec(item.link || '');
+      const uname = m?.[1];
+      if (uname && !['p', 'reel', 'reels', 'explore', 'accounts', 'stories'].includes(uname.toLowerCase())) return uname;
+    }
+  } catch { /* ล้ม = ไม่มี username (เงียบ ไม่ถ่วงสายพาน) */ }
+  return null;
+}
+
+// เทียบชื่อระดับ "คำ" (จำลองแยกจาก namesMatch ใน s6_slots — ไม่แตะโค้ด s6 ที่พิสูจน์แล้ว/ถูกแก้บ่อยวันนี้)
+const _TITLE_WORDS = new Set(['นาย', 'นาง', 'นางสาว', 'คุณ', 'ดร.', 'หมอ', 'ผู้ก่อตั้ง', 'อดีต']);
+function _nameTokens(s) {
+  return String(s || '').replace(/[()"'“”]/g, ' ').split(/\s+/).filter((t) => t.length >= 2 && !_TITLE_WORDS.has(t));
+}
+function _namesMatchSimple(a, b) {
+  const ta = _nameTokens(a);
+  const tb = _nameTokens(b);
+  return ta.some((x) => tb.some((y) => x === y || (x.length >= 3 && y.includes(x)) || (y.length >= 3 && x.includes(y))));
+}
 
 // เนื้อเต็มสำหรับเปิดเคสภาพ — กฎเดิมของระบบปก: ห้ามใช้เนื้อย่อ
 function fullNewsText(job) {
@@ -364,13 +421,22 @@ export async function s5_keywords(job, { origin }) {
     return { status: 'failed', nextAction: 'retry', summary: 'สกัดคีย์เวิร์ดไม่สำเร็จ: ' + (r.error || r.httpStatus) };
   }
   const kw = r.keywords;
-  const nQueries = ['queries_th', 'queries_en', 'object_queries', 'moment_action', 'scene_place']
+  // ★ 9 ก.ค. เฟส 4a: นับหมวดเรื่องราว + emotion/source_show เข้ายอดคำค้นด้วย (ให้ log สะท้อนของที่จะยิงจริง)
+  const nQueries = [
+    'queries_th', 'queries_en', 'object_queries', 'moment_action', 'scene_place',
+    'relationship_archive', 'lifestyle_travel', 'family_album', 'landmark_context', 'emotion', 'source_show',
+  ].reduce((n, k) => n + (kw[k] || []).length, 0);
+  const nStory = ['relationship_archive', 'lifestyle_travel', 'family_album', 'landmark_context']
     .reduce((n, k) => n + (kw[k] || []).length, 0);
+  // ★ 9 ก.ค. เฟส 4b ข้อ 4.4/4.5: เก็บ "คำค้นจริง" ของหมวดเรื่องราว+scene_place ไว้ให้ Lens/ค้นรอบสองเทียบกับ
+  //   field query ของแต่ละภาพในคลัง (ภาพที่ query ตรงหมวดนี้ = ภาพเชิงบริบท/ความสัมพันธ์ ไม่ใช่แค่ฉากข่าวเดียว)
+  const storyQueries = ['relationship_archive', 'lifestyle_travel', 'family_album', 'landmark_context', 'scene_place']
+    .flatMap((k) => (kw[k] || []).map((q) => String(q || '').trim()).filter(Boolean));
   return {
     status: 'done',
     nextAction: 'continue',
-    summary: `สกัดคีย์ ${nQueries} คำค้น · บุคคล ${(kw.subjects || []).length} คน`,
-    dossierPatch: { images: { ...im, keywordsCount: nQueries, subjects: (kw.subjects || []).map((s) => s.name).slice(0, 8) } },
+    summary: `สกัดคีย์ ${nQueries} คำค้น (เชิงเรื่องราว ${nStory}) · บุคคล ${(kw.subjects || []).length} คน`,
+    dossierPatch: { images: { ...im, keywordsCount: nQueries, subjects: (kw.subjects || []).map((s) => s.name).slice(0, 8), storyQueries } },
   };
 }
 
@@ -466,6 +532,79 @@ export async function s5_search(job, { origin }) {
   };
 }
 
+// ---------- S5-Profile auto profile mining (เฟส 4b ข้อ 4.3 — 9 ก.ค.): หา IG/FB โปรไฟล์คนหลักอัตโนมัติ ----------
+// แหล่งภาพต้นฉบับคมสุด (IG/FB โปรไฟล์จริง) เดิมเป็นปุ่มแมนนวล 100% — ไม่มีใคร trigger ในท่อ MEGA เลย
+// ทำไมอยู่ "ก่อน" s5_triage: ภาพที่ดึงมาที่นี่ยังไม่มี triage ติดมา (ต่างจาก Lens/reverse ที่ vet เองในตัว)
+//   ต้องปล่อยให้ s5_triage (ขั้นถัดไป วนดูจนครบทุกใบที่ยังไม่ติดป้าย) ติดป้ายให้ — "ผ่าน vet เดิม" ตามสเปค
+//   ไม่งั้น s6 มองไม่เห็น (กรอง !triage ทิ้งเงียบๆ)
+// แหล่งเสริมโดยนิยาม: หา username ไม่เจอ/ดึงไม่ได้ต่อคน = ข้ามเงียบคนนั้น ไม่ล้มทั้งงาน · ปิดทั้งขั้น: IMG_AUTO_PROFILE=0
+export async function s5_profile(job) {
+  const im = job.dossier.images || {};
+  if (!AUTO_PROFILE_ON) return { status: 'done', nextAction: 'continue', summary: 'โปรไฟล์อัตโนมัติ: ปิดอยู่ (IMG_AUTO_PROFILE=0) — ข้าม' };
+  if (im.profileMiningDone) return { status: 'done', nextAction: 'continue', summary: 'โปรไฟล์อัตโนมัติ: ทำแล้ว — ข้าม' };
+  if (!im.caseId) return { status: 'done', nextAction: 'continue', summary: 'โปรไฟล์อัตโนมัติ: ไม่มีเคสภาพ — ข้าม' };
+
+  const mainChars = (job.dossier.compass?.mainCharacters || [])
+    .map((c) => c?.name).filter(Boolean).slice(0, AUTO_PROFILE_MAX_PEOPLE);
+  if (!mainChars.length) {
+    return {
+      status: 'done',
+      nextAction: 'continue',
+      summary: 'โปรไฟล์อัตโนมัติ: ไม่มีคนหลักจากเข็มทิศ — ข้าม',
+      dossierPatch: { images: { ...im, profileMiningDone: true } },
+    };
+  }
+
+  const notes = [];
+  let added = 0;
+  for (const name of mainChars) {
+    try {
+      let username = null;
+      let network = 'instagram';
+      // (ก) ถามข้อมูลโซเชียลจาก entityResolver ก่อน (มี URL Facebook อยู่แล้วไหม — ประหยัด Serper call ซ้ำ)
+      try {
+        const { resolveEntity } = await import('@/lib/services/entityResolverService');
+        const ent = await resolveEntity(name, job.dossier.desk?.title || '');
+        const fbUrl = ent?.sources?.facebook?.[0]?.url || '';
+        const m = /facebook\.com\/([^/?#]+)/i.exec(fbUrl);
+        const cand = m?.[1];
+        if (cand && !['profile.php', 'people', 'pages', 'groups'].includes(cand.toLowerCase())) {
+          username = decodeURIComponent(cand);
+          network = 'facebook';
+        }
+      } catch { /* entityResolver ล้ม → ไปข้อ (ข) */ }
+      // (ข) ไม่มี → หา IG username เอง ผ่าน Serper
+      if (!username) {
+        const ig = await _findInstagramUsername(name);
+        if (ig) { username = ig; network = 'instagram'; }
+      }
+      if (!username) { notes.push(`${name}: ไม่พบ username`); continue; }
+
+      // เรียก logic เดียวกับ /api/images/profile ตรง (import service — ไม่ยิง HTTP ตัวเอง)
+      const { instagramProfile, facebookProfile } = await import('@/lib/imageSearch');
+      const { addImages } = await import('@/lib/imageStore');
+      const found = network === 'instagram'
+        ? await instagramProfile(username, { num: AUTO_PROFILE_MAX_IMAGES })
+        : await facebookProfile(username, { num: AUTO_PROFILE_MAX_IMAGES });
+      const capped = (found || []).slice(0, AUTO_PROFILE_MAX_IMAGES);
+      if (!capped.length) { notes.push(`${name} (${network}:${username}): ไม่มีภาพ`); continue; }
+      const records = capped.map((x) => ({ ...x, platform: network, query: `auto-profile:${username}` }));
+      const saved = await addImages(im.caseId, records);
+      added += saved.added || 0;
+      notes.push(`${name} (${network}:${username}): +${saved.added || 0}`);
+    } catch (err) {
+      notes.push(`${name}: ล้ม (${String(err?.message || '').slice(0, 40)})`);
+    }
+  }
+
+  return {
+    status: 'done',
+    nextAction: 'continue',
+    summary: `โปรไฟล์อัตโนมัติ: ${notes.join(' · ')}`.slice(0, 220),
+    dossierPatch: { images: { ...im, profileMiningDone: true, profileMiningAdded: added } },
+  };
+}
+
 // ---------- S5d ตาคัดคลัง: ติดป้ายให้ครบทุกใบ (วนหลายรอบ) + เกณฑ์ขั้นต่ำ ----------
 export async function s5_triage(job, { origin }) {
   const im = job.dossier.images || {};
@@ -523,9 +662,11 @@ export async function s5_lens(job, { origin }) {
   if (im.lensDone) return { status: 'done', nextAction: 'continue', summary: 'Lens: ทำแล้ว — ข้าม' };
 
   let seeds = [];
+  let storySeedCount = 0;
   try {
     const lib = await jfetch(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
-    const cand = (lib?.images || [])
+    const libImgs = lib?.images || [];
+    const cand = libImgs
       .filter((x) => isCleanRelevant(x) && Number(x.triage?.faceCount) === 1
         && x.triage?.person && /^https?:/.test(String(x.imageUrl || '')))
       .sort((a, b) => (b.triage?.quality ?? 0) - (a.triage?.quality ?? 0));
@@ -535,7 +676,25 @@ export async function s5_lens(job, { origin }) {
       const p = String(x.triage.person).toLowerCase();
       if (!byPerson.has(p)) byPerson.set(p, x);
     }
-    seeds = [...new Set([...byPerson.values(), ...cand])].slice(0, LENS_SEEDS).map((x) => x.imageUrl);
+    const eventSeeds = [...new Set([...byPerson.values(), ...cand])].slice(0, LENS_SEEDS).map((x) => x.imageUrl);
+
+    // ★ 9 ก.ค. เฟส 4b ข้อ 4.4: seed "ชุดที่สอง" — ภาพเชิงเรื่องราว/ความสัมพันธ์ (ไม่ใช่แค่หน้าเดี่ยวอีเวนต์ปัจจุบัน)
+    //   เดิม seed ล็อกที่ cand ด้านบนเท่านั้น → Lens วนขยายภาพชุดเดิม ไม่มีทางแตกไปเจออัลบั้มครอบครัว
+    //   เกณฑ์: query ตรงหมวดเรื่องราว (เก็บไว้ตอน s5_keywords) หรือ faceCount≥2 หรือหมวดตาคัดสื่อความสัมพันธ์/ครอบครัว/กลุ่ม
+    const eventSeedSet = new Set(eventSeeds);
+    const storySet = new Set((im.storyQueries || []).map((s) => String(s).trim().toLowerCase()).filter(Boolean));
+    const storyCand = libImgs
+      .filter((x) => isCleanRelevant(x) && /^https?:/.test(String(x.imageUrl || '')) && !eventSeedSet.has(x.imageUrl)
+        && (
+          storySet.has(String(x.query || '').trim().toLowerCase())
+          || Number(x.triage?.faceCount) >= 2
+          || /family|relationship|group/i.test(String(x.triage?.category || ''))
+        ))
+      .sort((a, b) => (b.triage?.quality ?? 0) - (a.triage?.quality ?? 0));
+    const storySeeds = [...new Set(storyCand.map((x) => x.imageUrl))].slice(0, STORY_SEED_MAX);
+    storySeedCount = storySeeds.length;
+
+    seeds = [...new Set([...eventSeeds, ...storySeeds])];
   } catch { /* อ่านคลังไม่ได้ → ไม่มี seed → ข้ามด้านล่าง */ }
   if (!seeds.length) {
     return {
@@ -559,7 +718,7 @@ export async function s5_lens(job, { origin }) {
   return {
     status: 'done',
     nextAction: 'continue',
-    summary: `Lens: seed ${seeds.length} ใบ → เก็บเพิ่ม ${added} ใบ (ตากรองทิ้ง ${dropped})${errs.length ? ` · ล้ม ${errs.length} (${errs[0]})` : ''}`,
+    summary: `Lens: seed ${seeds.length} ใบ (เหตุการณ์ ${seeds.length - storySeedCount} + เรื่องราว ${storySeedCount}) → เก็บเพิ่ม ${added} ใบ (ตากรองทิ้ง ${dropped})${errs.length ? ` · ล้ม ${errs.length} (${errs[0]})` : ''}`,
     dossierPatch: { images: { ...im, lensDone: true, lensAdded: added } },
     quality: (!added && errs.length >= seeds.length) ? 'yellow' : undefined,
   };
@@ -654,6 +813,166 @@ export async function s5_clipframe(job, { origin }) {
   };
 }
 
+// ---------- S5-Gap ค้นรอบสองอัจฉริยะ (เฟส 4b ข้อ 4.5 — 9 ก.ค.): วัดแกนใหม่ + สร้างคำค้นชุดใหม่เมื่อขาด ----------
+// เดิม "ค้นรอบสอง" วัดแค่จำนวนหน้าชัด+อารมณ์+รายคน ไม่มีแกน hero-grade/ฉากตรงบริบท และไม่เคยสร้างคำค้นใหม่
+//   (ยิงชุดเดิมซ้ำทุกแหล่ง) — ขั้นนี้วัด 2 แกนเพิ่ม แล้วให้สมองแต่งคำค้นใหม่เฉพาะตอนขาดจริง
+// ทำไมอยู่ท้ายสุดก่อน s6: ให้ Lens(4.4)/เฟรมคลิปมีโอกาสเติมพูลก่อน — วัดผลจริงหลังทุกแหล่งเดินจบค่อยตัดสินว่ายังขาดไหม
+// จำกัด 1 รอบต่อเคส (gapSearchDone) · ล้ม/ไม่มีคีย์ AI/อ่านคลังไม่ได้ = ข้ามเงียบ ไม่ถ่วงสายพาน · ปิดทั้งขั้น: IMG_GAP_SEARCH=0
+export async function s5_gapsearch(job, { origin } = {}) {
+  const im = job.dossier.images || {};
+  if (!GAP_SEARCH_ON) return { status: 'done', nextAction: 'continue', summary: 'ค้นรอบสอง: ปิดอยู่ (IMG_GAP_SEARCH=0) — ข้าม' };
+  if (im.gapSearchDone) return { status: 'done', nextAction: 'continue', summary: 'ค้นรอบสอง: ทำแล้ว — ข้าม' };
+  if (!im.caseId) return { status: 'done', nextAction: 'continue', summary: 'ค้นรอบสอง: ไม่มีเคสภาพ — ข้าม' };
+
+  let libImages = [];
+  try {
+    const lib = await jfetch(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
+    libImages = lib?.images || [];
+  } catch {
+    return { status: 'done', nextAction: 'continue', summary: 'ค้นรอบสอง: อ่านคลังไม่ได้ — ข้าม', dossierPatch: { images: { ...im, gapSearchDone: true } } };
+  }
+
+  // แกน (ก) hero-grade จริงต่อคนหลัก: clean + faceCount==1 + ไม่ใช่ thumbnail-only + (realShortSide≥700 หรือวัดไม่ได้แต่ไม่ lowRes)
+  const heroGradeOf = (x) => {
+    if (x.triage?.relevant === false || x.triage?.clean === false) return false;
+    if (Number(x.triage?.faceCount) !== 1) return false;
+    if (x.rehostQuality === 'thumbnail') return false;
+    const rw = Number(x.realWidth), rh = Number(x.realHeight);
+    const rss = (rw > 0 && rh > 0) ? Math.min(rw, rh) : (Number(x.triage?.realShortSide) > 0 ? Number(x.triage.realShortSide) : null);
+    return rss != null ? rss >= 700 : x.lowRes !== true;
+  };
+  const mainChars = (job.dossier.compass?.mainCharacters || []).map((c) => c?.name).filter(Boolean).slice(0, AUTO_PROFILE_MAX_PEOPLE);
+  const heroGaps = [];
+  for (const name of mainChars) {
+    const n = libImages.filter((x) => {
+      if (!heroGradeOf(x)) return false;
+      const ps = [x.triage?.person, ...(x.triage?.persons || [])].filter(Boolean);
+      return ps.some((p) => _namesMatchSimple(p, name));
+    }).length;
+    if (n < GAP_SEARCH_MIN_HERO_PER_PERSON) heroGaps.push({ name, have: n });
+  }
+
+  // แกน (ข) ฉากตรงบริบท: relevant + query อยู่ในหมวดเรื่องราว/scene_place (เก็บคำค้นจริงไว้ตอน s5_keywords)
+  const storySet = new Set((im.storyQueries || []).map((s) => String(s).trim().toLowerCase()).filter(Boolean));
+  const sceneCount = storySet.size
+    ? libImages.filter((x) => x.triage?.relevant !== false && storySet.has(String(x.query || '').trim().toLowerCase())).length
+    : 0;
+  const sceneGap = sceneCount < GAP_SEARCH_MIN_SCENE;
+
+  if (!heroGaps.length && !sceneGap) {
+    return {
+      status: 'done',
+      nextAction: 'continue',
+      summary: `ค้นรอบสอง: ครบทั้ง 2 แกน (hero-grade≥${GAP_SEARCH_MIN_HERO_PER_PERSON}/คน · ฉาก ${sceneCount}/${GAP_SEARCH_MIN_SCENE}) — ไม่ต้องเสริม`,
+      dossierPatch: { images: { ...im, gapSearchDone: true } },
+    };
+  }
+
+  // ขาด → ให้สมองสร้างคำค้นใหม่ (ห้ามซ้ำของเดิม)
+  const gapDesc = [
+    ...heroGaps.map((g) => `hero-grade ของ "${g.name}" (มี ${g.have}/${GAP_SEARCH_MIN_HERO_PER_PERSON})`),
+    ...(sceneGap ? [`ภาพฉากตรงบริบท/ความสัมพันธ์ (มี ${sceneCount}/${GAP_SEARCH_MIN_SCENE})`] : []),
+  ].join(' · ');
+  const usedQueries = [...new Set(libImages.map((x) => String(x.query || '').trim()).filter(Boolean))].slice(0, 60);
+
+  let newQueries = [];
+  try {
+    const { callBrain } = await import('@/lib/aiClient');
+    const people = mainChars.join(', ') || (job.dossier.desk?.title || 'ข่าวนี้');
+    const r = await callBrain({
+      system: 'คุณเป็นผู้ช่วยสร้างคำค้นรูปภาพสำหรับนักข่าว ตอบเป็น JSON เท่านั้น รูปแบบ {"queries": ["คำค้น1", "คำค้น2", ...]} ห้ามมีข้อความอื่นนอก JSON',
+      user: `ข่าวนี้ยังขาดภาพ ${gapDesc} ของ ${people} — สร้างคำค้นภาพใหม่ ${GAP_SEARCH_MAX_QUERIES} คำ (ภาษาไทยหรืออังกฤษตามความเหมาะสม) ที่ยังไม่เคยใช้ ห้ามซ้ำกับคำค้นเดิมเหล่านี้: ${usedQueries.join(', ') || '(ไม่มี)'}`,
+      maxTokens: 400,
+      cost: { step: 'mega-gap-search', caseId: im.caseId },
+    });
+    // แกะ JSON แบบเดียวกับ megaBrains.js parseJson (กันสมองห่อ ```json ทั้งที่สั่งห้ามแล้ว)
+    const rawText = String(r.text || '').trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+    const jStart = rawText.indexOf('{');
+    const jEnd = rawText.lastIndexOf('}');
+    const parsed = (jStart >= 0 && jEnd > jStart) ? JSON.parse(rawText.slice(jStart, jEnd + 1)) : null;
+    const usedSet = new Set(usedQueries.map((q) => q.toLowerCase()));
+    newQueries = Array.isArray(parsed?.queries)
+      ? parsed.queries.map((q) => String(q || '').trim()).filter((q) => q.length >= 2 && !usedSet.has(q.toLowerCase())).slice(0, GAP_SEARCH_MAX_QUERIES)
+      : [];
+  } catch (err) {
+    return {
+      status: 'done',
+      nextAction: 'continue',
+      summary: `ค้นรอบสอง: ขาด ${gapDesc} แต่สมองสร้างคำค้นล้ม (${String(err?.message || '').slice(0, 50)}) — ข้าม`,
+      dossierPatch: { images: { ...im, gapSearchDone: true } },
+      quality: 'yellow',
+    };
+  }
+
+  if (!newQueries.length) {
+    return { status: 'done', nextAction: 'continue', summary: `ค้นรอบสอง: ขาด ${gapDesc} แต่สมองไม่ได้คำค้นใหม่ — ข้าม`, dossierPatch: { images: { ...im, gapSearchDone: true } } };
+  }
+
+  // ยิงคำใหม่กับ google + google_news เท่านั้น (ตามสเปค) — vet เองก่อนเก็บ (ตรรกะเดียวกับ /api/images/search)
+  let added = 0;
+  let vetDropped = 0;
+  const errs = [];
+  try {
+    const { searchImages } = await import('@/lib/imageSearch');
+    const { isCatalogSource, isOwnPageSource, isMismatchedFbMedia } = await import('@/lib/junkSources');
+    const { vetImages } = await import('@/lib/libraryTriage');
+    const { addImages } = await import('@/lib/imageStore');
+    const { getCase } = await import('@/lib/caseStore');
+
+    const collected = [];
+    const seen = new Set(libImages.map((x) => x.imageUrl));
+    for (const q of newQueries) {
+      for (const platform of ['google', 'google_news']) {
+        try {
+          const imgs = await searchImages(platform, q, { num: 15, caseId: im.caseId });
+          for (const x of imgs) {
+            if (!x.imageUrl || seen.has(x.imageUrl)) continue;
+            if (isCatalogSource(x) || isOwnPageSource(x) || isMismatchedFbMedia(x)) continue;
+            seen.add(x.imageUrl);
+            collected.push({ ...x, platform, query: q });
+          }
+        } catch (err) { errs.push(String(err?.message || '').slice(0, 40)); }
+      }
+    }
+
+    if (collected.length) {
+      const c = await getCase(im.caseId);
+      const chars = c?.analysis?.characters || [];
+      const genderOf = (name) => {
+        const n = (name || '').trim();
+        const hit = chars.find((ch) => ch.name === n || (ch.name && (n.includes(ch.name) || ch.name.includes(n))));
+        return hit?.gender || '';
+      };
+      const subjects = (c?.keywords?.subjects || []).map((s) => ({ ...s, gender: s.gender || genderOf(s.name) }));
+      const newsGist = (c?.analysis?.summary || c?.analysis?.content || c?.newsSnippet || '').slice(0, 600);
+      let toStore = collected;
+      try {
+        const { vetted } = await vetImages({ images: collected, subjects, newsGist, caseId: im.caseId });
+        const anyTag = vetted.some((x) => x.triage);
+        toStore = anyTag ? vetted.filter((x) => x.triage?.relevant !== false) : vetted;
+        vetDropped = collected.length - toStore.length;
+      } catch { /* ตาล้ม → เก็บดิบไปก่อน (กันได้ 0 ใบทั้งที่ค้นเจอ) */ }
+      const saved = await addImages(im.caseId, toStore);
+      added = saved.added || 0;
+    }
+  } catch (err) {
+    return {
+      status: 'done',
+      nextAction: 'continue',
+      summary: `ค้นรอบสอง: ขาด ${gapDesc} → ได้คำค้นใหม่ ${newQueries.length} คำ แต่ยิงล้ม (${String(err?.message || '').slice(0, 50)}) — ข้าม`,
+      dossierPatch: { images: { ...im, gapSearchDone: true, gapSearchQueries: newQueries } },
+      quality: 'yellow',
+    };
+  }
+
+  return {
+    status: 'done',
+    nextAction: 'continue',
+    summary: `ค้นรอบสอง: ขาด ${gapDesc} → คำค้นใหม่ ${newQueries.length} คำ → เก็บเพิ่ม ${added} ใบ (ตากรองทิ้ง ${vetDropped}${errs.length ? ` · ล้ม ${errs.length} แหล่งย่อย` : ''})`,
+    dossierPatch: { images: { ...im, gapSearchDone: true, gapSearchAdded: added, gapSearchQueries: newQueries } },
+  };
+}
+
 // ---------- S6 เลือกภาพลงช่อง: สมองจับคู่ + ด่านโค้ดกันซ้ำ/ผิดคน + fallback กฎเดียวกัน ----------
 const SLOT_ORDER = ['hero', 'reaction', 'action', 'context', 'circle'];
 // ★ เฟส 1.1 (9 ก.ค. — audit ยืนยัน): hint เดิมใช้หมวด action/moment/event/evidence ที่ตาคัด "ไม่เคยผลิต"
@@ -671,13 +990,56 @@ export async function s6_slots(job, { origin }) {
   const r = await jfetch(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
   if (!r.success) return { status: 'failed', nextAction: 'retry', summary: 'อ่านคลังรูปไม่ได้: ' + (r.error || r.httpStatus) };
 
-  const pool = (r.images || []).filter((x) => x.triage && x.triage.relevant !== false);
-  if (!pool.length) return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพที่ตายืนยันว่าเกี่ยวเลย — ทำปกไม่ได้', quality: 'red' };
+  const rawPool = (r.images || []).filter((x) => x.triage && x.triage.relevant !== false);
+  if (!rawPool.length) return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพที่ตายืนยันว่าเกี่ยวเลย — ทำปกไม่ได้', quality: 'red' };
+  // ★ 9 ก.ค. เฟส 5.1+5.2 (แผนคุณภาพคลังรูป): พูลเข้า s6 ต้องสะอาด default —
+  //   เดิมกรองแค่ relevant!==false → ภาพ clean=false เข้าพูลได้ พอของสะอาดขาดสมองเลือกภาพจำใจหยิบของสกปรก
+  //   ธง junkHidden (เฟส 5.3 AI junk scan ตั้งแทนลบถาวร — ย้อนกลับได้) ห้ามเข้าพูลเสมอ ไม่ผูกกับ kill-switch ด้านล่าง
+  const notHidden = (x) => x.triage?.junkHidden !== true;
+  const visiblePool = rawPool.filter(notHidden);
+  const dirtyFallbackIds = new Set();
+  let pool = visiblePool;
+  if (POOL_CLEAN_GATE) {
+    const cleanOnly = visiblePool.filter((x) => x.triage?.clean !== false);
+    if (cleanOnly.length < POOL_MIN_FLOOR && cleanOnly.length < visiblePool.length) {
+      const need = POOL_MIN_FLOOR - cleanOnly.length;
+      const dirtyBest = visiblePool
+        .filter((x) => x.triage?.clean === false)
+        .sort((a, b) => (Number(b.triage?.faceCount) || 0) - (Number(a.triage?.faceCount) || 0) || (Number(b.triage?.quality) || 0) - (Number(a.triage?.quality) || 0))
+        .slice(0, need);
+      dirtyBest.forEach((x) => dirtyFallbackIds.add(String(x.id)));
+      pool = [...cleanOnly, ...dirtyBest];
+      console.log(`[MEGA S6] 🧹 เฟส 5.1: พูลสะอาดบาง (${cleanOnly.length}/${POOL_MIN_FLOOR}) → เติม clean=false ที่ดีที่สุด ${dirtyBest.length} ใบ (dirtyFallback)`);
+    } else {
+      pool = cleanOnly;
+    }
+  }
+  // ★ เฟส 5.2: ข้อความ error แยกเคส "ไม่มีภาพเกี่ยวเลย" ออกจาก "มีแต่ถูกซ่อนหมด" — debug ง่ายกว่า (กฎ error ชัดเจน)
+  if (!pool.length) {
+    const hiddenAll = rawPool.length - visiblePool.length;
+    return { status: 'failed', nextAction: 'fail', summary: hiddenAll >= rawPool.length ? `ภาพที่เกี่ยวทั้งหมด ${rawPool.length} ใบ ถูกตั้งธงซ่อน (junkHidden) หมด — กู้คืนบางใบก่อนทำปก` : 'ไม่มีภาพที่ตายืนยันว่าเกี่ยวเลย — ทำปกไม่ได้', quality: 'red' };
+  }
 
   // metadata กะทัดรัด (สะอาดก่อน → คุณภาพสูงก่อน · เพดาน 80 ใบกัน prompt บวม)
   //   B (reject ลายน้ำ 7 ก.ค.): triage ติดป้าย clean=false เมื่อมีลายน้ำ/ตัวหนังสือ — ยกภาพสะอาดขึ้นหัวคิว
   //   ให้ทั้ง Director และ fallback หยิบสะอาดก่อนเสมอ (ยอมลายน้ำเฉพาะไม่มีตัวเลือกสะอาดจริงๆ)
   const isClean = (x) => x.triage?.clean !== false;
+  // ★ 9 ก.ค. เฟส 2.2: ขนาดจริง (record เฟส 1 ก่อน → triage.realShortSide เฟส 2.1 สำรอง) — ใช้กันไฟล์จิ๋วขึ้น hero
+  const realShortSideOf = (x) => {
+    const rw = Number(x.realWidth), rh = Number(x.realHeight);
+    if (rw > 0 && rh > 0) return Math.min(rw, rh);
+    const ts = Number(x.triage?.realShortSide);
+    return ts > 0 ? ts : null;
+  };
+  // hero candidate ต้อง: ไม่ใช่ thumbnail-only + (สั้นสุดจริง≥700 หรือวัดไม่ได้แต่ไม่ติดธง lowRes)
+  const heroSizeOk = (x) => {
+    if (!S6_REAL_SIZE_GATE) return true; // kill-switch ปิด = พฤติกรรมเดิม (ไม่กรองขนาด)
+    if (x.rehostQuality === 'thumbnail') return false;
+    const rss = realShortSideOf(x);
+    return rss != null ? rss >= 700 : x.lowRes !== true;
+  };
+  // ช่องรอง (ไม่ใช่ hero): โทษ thumbnail-only/lowRes ให้ท้ายคิวตอนคะแนนเท่ากัน (ไม่ตัดทิ้ง แค่เรียงหลัง)
+  const sizePenalty = (x) => (x.rehostQuality === 'thumbnail' ? 2 : 0) + (x.lowRes === true ? 1 : 0);
   // ★ 9 ก.ค. (เคาะ): ด่านแข็ง — ภาพสะอาดพอ 5 ช่องปก (MEGA_S6_MIN_CLEAN) → ตัด clean=false ออกจากลิสต์เลย
   //   เดิมแค่เรียงท้าย: ภาพสะอาดน้อยทีไร ปกคลิป/การ์ดกราฟิกหลุดขึ้นปก (ขยะที่ผู้ใช้แนบตัวอย่าง 9 ก.ค.)
   //   สะอาดไม่พอ → ถอยใช้ pool เต็มแบบเดิม (เรียงสะอาดก่อน) — ไม่มีวันทำปกไม่ได้เพราะด่านนี้ · ปิดด่าน: MEGA_S6_MIN_CLEAN=0
@@ -689,8 +1051,64 @@ export async function s6_slots(job, { origin }) {
   const sorted = gatedPool.slice().sort((a, b) => {
     const c = (isClean(b) ? 1 : 0) - (isClean(a) ? 1 : 0);
     if (c) return c;
-    return (b.triage?.quality ?? 0) - (a.triage?.quality ?? 0);
+    const q = (b.triage?.quality ?? 0) - (a.triage?.quality ?? 0);
+    if (q) return q;
+    // ★ 9 ก.ค. เฟส 2.2: คุณภาพเท่ากัน → เรียงโทษไฟล์เล็ก/thumbnail-only ไปท้ายคิว (ไม่ตัดทิ้ง แค่ให้ตัวเลือกจริงขึ้นก่อน)
+    return S6_REAL_SIZE_GATE ? sizePenalty(a) - sizePenalty(b) : 0;
   }).slice(0, 80);
+
+  // ★ 10 ก.ค. เฟส 6A (Story-fit selector): คะแนน "ภาพนี้เล่าเรื่องเดียวกับข่าวแค่ไหน" 0-10 — คำนวณครั้งเดียวต่อพูล ไม่ยิง LLM
+  //   สัญญาณ: query มาจากหมวดเรื่องราว (storyQueries เก็บไว้ตอน s5_keywords) = แรงสุด +4 · หมวดสื่อความสัมพันธ์/ครอบครัว/สถานที่ +2 ·
+  //   อารมณ์ตรงเข็มทิศ +1 · note ตรงช็อตในฝัน/มุมเล่า +1 · ฐานกลาง 3 (ภาพปกติไม่ถูกกดต่ำเกิน)
+  //   ภาพแฟ้ม (newsScene=false) ที่มาจากคำค้นเรื่องราว = "วัตถุดิบเล่าแก่นข่าว" ไม่หักแต้ม (เคสป้าเจี๊ยบ+หลาน+หอไอเฟล)
+  const _cmp = job.dossier.compass || {};
+  const storySet = new Set((im.storyQueries || []).map((s) => String(s).trim().toLowerCase()).filter(Boolean));
+  // 6.4 กันถอยหลัง: ปิดสวิตช์ หรือพูลไม่มีคำค้นเรื่องราวเลย → ปิดเงียบทั้งกลไก (meta/ลำดับ/log/slot เหมือนเดิมเป๊ะ ไม่มีคะแนนผี ไม่มี LLM เพิ่ม)
+  const STORY_SEL_ON = S6_STORY_FIT && storySet.size > 0;
+  const _lc = (s) => String(s || '').trim().toLowerCase();
+  const _cmpEmo = [_cmp.primaryEmotion, ...(_cmp.secondaryEmotions || [])].map(_lc).filter(Boolean);
+  const _dreamText = _lc([_cmp.angle, ...(_cmp.visualDreamShots || []).map((v) => `${v?.slot || ''} ${v?.description || ''}`)].join(' '));
+  const STORY_CAT_RE = /(relationship|family|group|lifestyle|travel|landmark|context|scene)/i;
+  const _sfCache = new Map();
+  const storyFitOf = (x) => {
+    if (!STORY_SEL_ON) return null;
+    const id = String(x?.id ?? '');
+    if (_sfCache.has(id)) return _sfCache.get(id);
+    const fromStory = storySet.has(_lc(x?.query));
+    const relCat = STORY_CAT_RE.test(String(x?.triage?.category || ''));
+    const emo = _lc(x?.triage?.emotion);
+    const emoMatch = !!emo && _cmpEmo.some((e) => e && (e.includes(emo) || emo.includes(e)));
+    const note = _lc(x?.triage?.note);
+    const dreamMatch = !!note && !!_dreamText && note.split(/\s+/).some((w) => w.length >= 3 && _dreamText.includes(w));
+    let s = 3;
+    if (fromStory) s += 4;
+    if (relCat) s += 2;
+    if (emoMatch) s += 1;
+    if (dreamMatch) s += 1;
+    s = Math.max(0, Math.min(10, s));
+    _sfCache.set(id, s);
+    return s;
+  };
+  // 6.3 ถ่วงน้ำหนักเรียง: story 40 / clean 30 / ขนาดจริง 30 — เฉพาะ context/action/circle (hero ไม่ใช้ — ถูกคน+หน้าชัดมาก่อน)
+  const STORY_SLOTS = new Set(['context', 'action', 'circle']);
+  const _combinedStory = (x) => 4 * ((storyFitOf(x) ?? 0) / 10) + 3 * (isClean(x) ? 1 : 0) + 3 * (1 - Math.min(sizePenalty(x), 2) / 2);
+  const storyRank = (a, b) => {
+    const d = _combinedStory(b) - _combinedStory(a);
+    if (Math.abs(d) > 1e-6) return d;
+    return (b.triage?.quality ?? 0) - (a.triage?.quality ?? 0);
+  };
+  // 6.2 กู้ช่องเล่าเรื่อง: ช่อง context/circle ที่ LLM ได้ภาพ story ต่ำ → สลับภาพ story สูงจริงถ้าพูลมี (รายละเอียดใต้ลูป)
+  const STORY_RESCUE_SLOTS = new Set(['context', 'circle']);
+  const STORY_HIGH = 8;          // ช่องได้ story-fit ≥ นี้ = เล่าเรื่องดีอยู่แล้ว ไม่ต้องกู้
+  const STORY_MIN_TO_WIN = 6;    // ตัวใหม่ต้อง "เล่าเรื่องจริง" (≥6) ถึงมีสิทธิ์ชนะช่อง
+  const STORY_SWAP_MARGIN = 3;   // และต้องดีกว่าของเดิมชัด ≥3 แต้ม (กันสลับเพราะต่างนิดเดียว)
+  const STORY_Q_TOL = 1;         // ยอมคุณภาพต่ำกว่าของเดิมได้ไม่เกิน 1 (คุณภาพต้อง "ไม่ห่างกันมาก")
+  let storyTag = '';
+  if (STORY_SEL_ON) {
+    const inv = sorted.map((x) => ({ id: x.id, sf: storyFitOf(x) })).filter((o) => o.sf >= 6).sort((a, b) => b.sf - a.sf).slice(0, 8);
+    console.log(`[MEGA S6] 📖 เฟส 6A story-fit: ภาพเล่าเรื่อง(≥6) ${inv.length}/${sorted.length} ใบ${inv.length ? ' — ' + inv.map((o) => `${o.id}:${o.sf}`).join(' ') : ''}`);
+  }
+
   const meta = sorted.map((x) => ({
     id: x.id,
     person: x.triage?.person || null,
@@ -709,6 +1127,9 @@ export async function s6_slots(job, { origin }) {
     orient: (Number(x.width) > 0 && Number(x.height) > 0)
       ? (x.width / x.height > 1.15 ? 'wide' : (x.width / x.height < 0.87 ? 'tall' : 'sq'))
       : undefined,
+    // ★ เฟส 6A: storyFit 0-10 = ภาพนี้เล่าเรื่องเดียวกับข่าวแค่ไหน — ให้ผู้กำกับ LLM เห็น provenance เชิงเรื่อง
+    //   (เพิ่ม field เมื่อเปิดเท่านั้น · พูลไม่มีคำค้นเรื่องราว/ปิดสวิตช์ → ไม่เพิ่ม = prompt เดิมเป๊ะ ไม่ regress)
+    ...(STORY_SEL_ON ? { storyFit: storyFitOf(x) } : {}),
   }));
 
   // ★ เฟส 3.1 (9 ก.ค.): จัดกลุ่ม "ฉาก" จาก note (ตัดวลีลายน้ำ/overlay ทิ้งก่อน) —
@@ -834,11 +1255,38 @@ export async function s6_slots(job, { origin }) {
       const solo = sorted.find((x) => !used.has(String(x.id)) && isHeroChar(x) && (x.triage?.faceCount ?? 0) === 1 && isClean(x));
       if (solo) { console.log(`[MEGA S6] 👤 hero ${img.id} มี ${img.triage.faceCount} หน้า → สลับหน้าเดี่ยว ${solo.id}`); img = solo; reason = 'hero หน้าเดี่ยว (โค้ดบังคับ — brain เลือกภาพหลายหน้า)'; }
     }
+    // ★ 9 ก.ค. เฟส 2.2 (S6_REAL_SIZE_GATE): hero ที่ brain เลือกมาเป็นไฟล์เล็ก/thumbnail-only จริง → สลับเป็นใบที่
+    //   เห็นขนาดจริงพอ (realShortSide≥700) ถ้ามีตัวเลือก — กัน "ไฟล์จิ๋วที่ตาคัดให้คะแนนหลอก" หลุดไปยืดแตกตอนประกอบ
+    if (img && slot === 'hero' && !heroSizeOk(img)) {
+      const bigger = sorted.find((x) => !used.has(String(x.id)) && isHeroChar(x) && (x.triage?.faceCount ?? 0) >= 1 && heroSizeOk(x) && isClean(x))
+        || sorted.find((x) => !used.has(String(x.id)) && isHeroChar(x) && (x.triage?.faceCount ?? 0) >= 1 && heroSizeOk(x));
+      if (bigger) {
+        console.log(`[MEGA S6] 📏 hero ${img.id} ขนาดจริงไม่พอ/thumbnail-only → สลับ ${bigger.id} (เห็นขนาดจริงชัดกว่า)`);
+        img = bigger;
+        reason = 'hero ขนาดจริงพอ (โค้ดบังคับ เฟส 2.2 — เดิมได้ไฟล์เล็ก/thumbnail)';
+      } else {
+        // ห้าม hard-fail: ไม่มีตัวเลือกอื่นผ่านเกณฑ์ขนาด → ถอยไปใช้ใบเดิม (ระบบเดิมต้องยังทำงานได้กับเคสที่ไม่มี field ใหม่)
+        console.log(`[MEGA S6] 📏 hero ${img.id} ขนาดจริงไม่พอ/thumbnail-only แต่ไม่มีตัวเลือกอื่นในพูล → คงไว้ (กัน hard-fail)`);
+      }
+    }
     if (!img) {
       // fallback กฎเดียวกับทางหลัก: hero=ตัวเอกหน้าชัดคุณภาพสูง / อื่นๆ=หมวดใกล้เคียง → คุณภาพสูงสุดที่เหลือ
-      const cands = sorted.filter((x) => !used.has(String(x.id)));
+      const cands0 = sorted.filter((x) => !used.has(String(x.id)));
+      // ★ 10 ก.ค. เฟส 6A (6.3): ช่อง context/action/circle เรียง candidate ด้วยแกน story-fit (story40/clean30/ขนาดจริง30)
+      //   ภาพ "สื่อเรื่อง" ชนะ "หน้าชัดเฉยๆ" เมื่อคุณภาพใกล้กัน · hero ไม่แตะ (ถูกคน+หน้าชัดมาก่อน) · ปิด/ไม่มีคำค้นเรื่องราว = ลำดับเดิมเป๊ะ
+      const cands = (STORY_SEL_ON && STORY_SLOTS.has(slot)) ? cands0.slice().sort(storyRank) : cands0;
       const hint = SLOT_CATEGORY_HINT[slot] || [];
+      // ★ 9 ก.ค. เฟส 2.2: hero fallback ลองแบบมีเกณฑ์ขนาดจริงก่อน (heroSizeOk) — ไม่เจอเลยค่อยถอยเกณฑ์เดิม (ไม่กรองขนาด)
+      const findHeroSized = (arr) => {
+        const heroBase = (x) => isHeroChar(x) && (x.triage?.faceCount ?? 0) >= 1;
+        const noBanner = (x) => !(Number(x.width) > 0 && Number(x.height) > 0 && x.width / x.height > 1.5);
+        const hit = arr.find((x) => heroBase(x) && heroSizeOk(x) && noBanner(x)) || arr.find((x) => heroBase(x) && heroSizeOk(x));
+        if (!hit && arr.some(heroBase)) console.log('[MEGA S6] 📏 เฟส 2.2: ไม่มี hero candidate ผ่านเกณฑ์ขนาดจริง (realShortSide≥700/ไม่ thumbnail-only) — ถอยเกณฑ์เดิม');
+        return hit || null;
+      };
       const pickFrom = (arr) =>
+        // ★ 9 ก.ค. เฟส 2.2: ลองตัวเลือกขนาดจริงพอก่อนเสมอ (hero เท่านั้น)
+        (slot === 'hero' ? findHeroSized(arr) : null) ||
         // ★ 10 ก.ค.: hero เลี่ยงภาพแนวนอนกว้าง (แบนเนอร์) ก่อน — ไม่มีตัวเลือกอื่นค่อยยอม (บรรทัดถัดไป)
         (slot === 'hero' ? arr.find((x) => isHeroChar(x) && (x.triage?.faceCount ?? 0) >= 1 && !(Number(x.width) > 0 && Number(x.height) > 0 && x.width / x.height > 1.5)) : null) ||
         (slot === 'hero' ? arr.find((x) => isHeroChar(x) && (x.triage?.faceCount ?? 0) >= 1) : null) ||
@@ -871,7 +1319,9 @@ export async function s6_slots(job, { origin }) {
         clean: isClean(img),                       // ★ 8 ก.ค.: พก clean/faces ไป slotPlan → v3 เชื่อป้ายตาคัด (แม่นกว่า detector)
         newsScene: img.triage?.newsScene !== false, // ★ 9 ก.ค.: ภาพแฟ้ม=false
         faces: Number(img.triage?.faceCount) || 0,
+        dirtyFallback: dirtyFallbackIds.has(String(img.id)), // ★ เฟส 5.1: ของเติมพูลบาง (clean=false) ไม่ใช่ตัวเลือกสะอาดปกติ
         reason,
+        ...(STORY_SEL_ON ? { storyFit: storyFitOf(img) } : {}), // ★ เฟส 6A: คะแนนเล่าเรื่องของภาพที่ลงช่องนี้ (ตรวจได้ใน slotPlan)
         // ★ 8 ก.ค. (CASE-360): backups เรียงสะอาดก่อน — v3 QC สลับภาพเสียแล้วต้องมี "ของสะอาด" ให้หยิบ
         backups: (want?.backups || [])
           .filter((b) => byId.has(String(b)) && !used.has(String(b)))
@@ -884,6 +1334,54 @@ export async function s6_slots(job, { origin }) {
   }
 
   if (sceneDupBlocked) console.log(`[MEGA S6] 🗺️ กันฉากซ้ำข้ามช่อง: ตัดตัวเลือกฉากซ้ำ ${sceneDupBlocked} ครั้ง (fallback หาฉากใหม่แทน)`);
+
+  // ★ 10 ก.ค. เฟส 6A (6.2/6.3 ให้ภาพ "เล่าเรื่อง" ชนะจริงในช่องบริบท/วงกลม):
+  //   ผู้กำกับ LLM มีกฎเลี่ยง newsScene=false (ภาพแฟ้ม) — แต่ภาพแฟ้มเชิงความสัมพันธ์/ทริปที่มาจากคำค้นเรื่องราว
+  //   คือ "วัตถุดิบเล่าแก่นข่าว" (เคสชมพู่: ป้าเจี๊ยบ+หลาน+หอไอเฟล สื่อ ตปท./ครอบครัว) → ถ้าช่อง context/circle
+  //   ได้ภาพ story ต่ำ แต่พูลมีภาพ story สูงจริง (≥6) ที่ดีกว่าชัด (≥margin) คุณภาพไม่ห่าง → สลับเป็นตัวหลัก (ของเดิมลง backup ย้อนได้)
+  //   hero ไม่แตะเด็ดขาด · กันสลับไปคนนอกข่าว/ฉากซ้ำ/คนซ้ำ hero(วงกลม) · ปิด S6_STORY_FIT=0 = ข้ามทั้งบล็อก
+  if (STORY_SEL_ON) {
+    try {
+      const heroPerson0 = _lc(slots.hero?.person || '');
+      for (const slot of activeSlots) {
+        if (slot === 'hero' || !STORY_RESCUE_SLOTS.has(slot)) continue;
+        const cur = slots[slot];
+        const curRec = cur ? byId.get(String(cur.id)) : null;
+        const curStory = curRec ? (storyFitOf(curRec) ?? 0) : 0;
+        if (curStory >= STORY_HIGH) continue; // ช่องนี้เล่าเรื่องดีอยู่แล้ว — ไม่ต้องกู้
+        const curQ = curRec ? (curRec.triage?.quality ?? 0) : 0;
+        const curScene = curRec ? sceneKeyOf(curRec) : '';
+        const best = sorted
+          .filter((x) => !used.has(String(x.id)) && isClean(x))
+          // circle = ต้องเป็นคนหลักจริง (ภาพวงกลม=บุคคล) · context รับภาพสถานที่/ทริปที่มาจากคำค้นเรื่องราวได้ (landmark ไม่มีคนในภาพ)
+          .filter((x) => isMainChar(x) || (slot === 'context' && storySet.has(_lc(x.query))))
+          .filter((x) => (storyFitOf(x) ?? 0) >= STORY_MIN_TO_WIN && (storyFitOf(x) ?? 0) >= curStory + STORY_SWAP_MARGIN)
+          .filter((x) => (x.triage?.quality ?? 0) >= curQ - STORY_Q_TOL)
+          .filter((x) => { const sk = sceneKeyOf(x); return !sk || sk === curScene || !chosenScenes.has(sk); })
+          .filter((x) => slot !== 'circle' || !heroPerson0 || _lc(x.triage?.person || '') !== heroPerson0)
+          .sort((a, b) => (storyFitOf(b) ?? 0) - (storyFitOf(a) ?? 0) || ((b.triage?.quality ?? 0) - (a.triage?.quality ?? 0)))[0];
+        if (!best) continue;
+        const oldBackups = cur ? [String(cur.id), ...((cur.backups || []).map(String))] : [];
+        used.add(String(best.id));
+        const bsk = sceneKeyOf(best); if (bsk) chosenScenes.add(bsk);
+        slots[slot] = {
+          id: best.id,
+          imageUrl: best.imageUrl,
+          person: best.triage?.person || null,
+          category: best.triage?.category || null,
+          emotion: best.triage?.emotion || null,
+          clean: isClean(best),
+          newsScene: best.triage?.newsScene !== false,
+          faces: Number(best.triage?.faceCount) || 0,
+          dirtyFallback: dirtyFallbackIds.has(String(best.id)),
+          reason: `story-fit rescue เฟส 6A (${curStory}→${storyFitOf(best)}) — ภาพเล่าแก่นข่าวชนะหน้าชัดเฉยๆ`,
+          storyFit: storyFitOf(best),
+          backups: oldBackups.filter((b) => byId.has(b)).slice(0, 3),
+        };
+        console.log(`[MEGA S6] 📖 เฟส 6A สลับช่อง ${slot}: ${cur?.id ?? '(ว่าง)'}(story ${curStory}) → ${best.id}(story ${storyFitOf(best)}, ${best.triage?.person || '-'})`);
+      }
+    } catch (e) { console.log('[MEGA S6] เฟส 6A story rescue ข้าม:', e.message?.slice(0, 50)); }
+  }
 
   // ★ เฟส 3.2 (คู่กับกติกา composer เฟส 2.3 "วงกลมคนละคนกับ hero"): การันตีว่าแผน (หลัก+สำรอง)
   //   มีภาพ "คนอื่นที่ไม่ใช่ hero" ≥1 ใบเสมอเมื่อพูลมีจริง — ไม่งั้นกติกาฝั่งโรงประกอบไม่มีของให้หยิบ
@@ -909,6 +1407,13 @@ export async function s6_slots(job, { origin }) {
     }
   } catch { /* การันตีล้มไม่ทำ S6 พัง */ }
 
+  // ★ เฟส 6A: สรุปคะแนนเล่าเรื่องต่อช่อง (ตรวจงานได้จาก log + summary) — เปิดเมื่อ STORY_SEL_ON เท่านั้น
+  if (STORY_SEL_ON) {
+    const sfLine = activeSlots.filter((s) => slots[s]).map((s) => `${s}:${storyFitOf(byId.get(String(slots[s].id))) ?? '-'}`).join(' ');
+    console.log(`[MEGA S6] 📖 story-fit ต่อช่อง (สรุป): ${sfLine}`);
+    storyTag = ` · story[${sfLine}]`;
+  }
+
   const filled = activeSlots.filter((s) => slots[s]).length;
   if (!slots.hero) {
     return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '' } } };
@@ -916,8 +1421,8 @@ export async function s6_slots(job, { origin }) {
   return {
     status: 'done',
     nextAction: 'continue',
-    summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'} — ${(brain.note || '').slice(0, 80)}`,
-    dossierPatch: { pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed }, ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}), ...(job.dossier.artBrief ? { artBrief: job.dossier.artBrief } : {}) },
+    summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'}${storyTag} — ${(brain.note || '').slice(0, 80)}`,
+    dossierPatch: { pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}) }, ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}), ...(job.dossier.artBrief ? { artBrief: job.dossier.artBrief } : {}) },
     quality: filled < activeSlots.length ? 'yellow' : undefined,
   };
 }
@@ -1003,6 +1508,7 @@ export async function s7_cover(job, { origin } = {}) {
       clean: primary ? (slots[primary].clean !== false) : (t.clean !== false),
       newsScene: primary ? (slots[primary].newsScene !== false) : (t.newsScene !== false),
       faces: primary ? (slots[primary].faces || 0) : (t.faces || 0),
+      dirtyFallback: primary ? !!slots[primary].dirtyFallback : false, // ★ เฟส 5.1: ติดธงถ้าเป็นของเติมพูลบาง (clean=false)
       isHero: u === heroUrl,
       // ★ 8 ก.ค. (CASE-366): thumbnail สำรอง (gstatic cache) — sourceLinks เป็น string เปล่า ไม่พก thumbnailUrl
       //   ส่งผ่าน slotPlan แทน ให้ v3 ใช้ตอนโหลดตรงพัง (Instagram/TikTok โดน anti-hotlink)
@@ -1138,10 +1644,14 @@ export const STAGE_FLOW = {
   s4_choose: { run: s4_choose, next: 's5_case', label: 'S4 เลือกเนื้อดีสุด' },
   s5_case: { run: s5_case, next: 's5_keywords', label: 'S5 เปิดเคสภาพ' },
   s5_keywords: { run: s5_keywords, next: 's5_search', label: 'S5 สกัดคีย์เวิร์ด' },
-  s5_search: { run: s5_search, next: 's5_triage', label: 'S5 ค้นภาพหลายแหล่ง' },
+  s5_search: { run: s5_search, next: 's5_profile', label: 'S5 ค้นภาพหลายแหล่ง' },
+  // ★ 9 ก.ค. เฟส 4b ข้อ 4.3: โปรไฟล์อัตโนมัติ — อยู่ก่อน s5_triage เสมอ (ภาพยังไม่มี triage ต้องให้ s5_triage ติดป้ายให้)
+  s5_profile: { run: s5_profile, next: 's5_triage', label: 'S5 โปรไฟล์อัตโนมัติ' },
   s5_triage: { run: s5_triage, next: 's5_lens', label: 'S5 ตาคัดคลัง' },
   s5_lens: { run: s5_lens, next: 's5_clipframe', label: 'S5 ค้นย้อนกลับ (Lens)' },
-  s5_clipframe: { run: s5_clipframe, next: 's6_slots', label: 'S5 เฟรมคลิป (รอ/เช็คเฟรม)' },
+  s5_clipframe: { run: s5_clipframe, next: 's5_gapsearch', label: 'S5 เฟรมคลิป (รอ/เช็คเฟรม)' },
+  // ★ 9 ก.ค. เฟส 4b ข้อ 4.5: ค้นรอบสองอัจฉริยะ — อยู่หลังทุกแหล่งเสริม (Lens/เฟรมคลิป) ก่อนตัดสินว่ายังขาดไหม
+  s5_gapsearch: { run: s5_gapsearch, next: 's6_slots', label: 'S5 ค้นรอบสองอัจฉริยะ' },
   s6_slots: { run: s6_slots, next: 's7_cover', label: 'S6 เลือกภาพลงช่อง' },
   s7_cover: { run: s7_cover, next: 's7_wait', label: 'S7 ส่งทำปก' },
   s7_wait: { run: s7_wait, next: 'cover_ready', label: 'S7 รอปกเสร็จ' },

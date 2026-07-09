@@ -103,7 +103,12 @@ export default function CoverRefTestPage() {
         {/* ── reference (จากคลัง — match ตามข่าว) ── */}
         <div>
           <label style={label}>📌 reference เป้าหมาย {result?.matchedRef ? `— จากคลัง: ${result.matchedRef.styleName || 'ref'}` : '(จากคลัง)'}</label>
-          <img src={result?.matchedRef?.imagePath || '/_ref/reference_5x4.jpg'} alt="reference" style={{ width: '100%', borderRadius: 10, border: '2px solid #e2e8f0' }} />
+          {/* ★ 9 ก.ค.: เลิก fallback /_ref/reference_5x4.jpg — เทมเพลตนั้นถูกผู้ใช้สั่งลบ (ห้ามโผล่ให้เข้าใจผิดว่ายังใช้) */}
+          {result?.matchedRef?.imagePath ? (
+            <img src={result.matchedRef.imagePath} alt="reference" style={{ width: '100%', borderRadius: 10, border: '2px solid #e2e8f0' }} />
+          ) : (
+            <div style={{ width: '100%', padding: '48px 16px', borderRadius: 10, border: '2px dashed #cbd5e1', color: '#94a3b8', fontSize: 13, textAlign: 'center', boxSizing: 'border-box' }}>ยังไม่ได้เลือก ref — ระบบจะ match จากคลังตอนกดสร้าง</div>
+          )}
           <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
             {result?.matchedRef
               ? `🎯 match: ${result.matchedRef.reason}${result.matchedRef.dna?.layoutType ? ' · โครง: ' + result.matchedRef.dna.layoutType : ''}`
@@ -145,7 +150,11 @@ export default function CoverRefTestPage() {
             </div>
             <div>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>reference (เป้า){result.matchedRef?.styleName ? ` — ${result.matchedRef.styleName}` : ''}</div>
-              <img src={result.matchedRef?.imagePath || '/_ref/reference_5x4.jpg'} alt="reference" style={{ width: '100%', borderRadius: 10, border: '2px solid #e2e8f0' }} />
+              {result.matchedRef?.imagePath ? (
+                <img src={result.matchedRef.imagePath} alt="reference" style={{ width: '100%', borderRadius: 10, border: '2px solid #e2e8f0' }} />
+              ) : (
+                <div style={{ width: '100%', padding: '48px 16px', borderRadius: 10, border: '2px dashed #cbd5e1', color: '#94a3b8', fontSize: 13, textAlign: 'center', boxSizing: 'border-box' }}>รอบนี้ไม่ได้ใช้ ref จากคลัง</div>
+              )}
             </div>
           </div>
         </div>

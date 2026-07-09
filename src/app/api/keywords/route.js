@@ -127,6 +127,11 @@ const LIST_KEYS = [
   'emotion',
   'source_show',
   'hashtags',
+  // ★ 9 ก.ค. เฟส 4a — หมวดภาพเชิงเรื่องราว (normalize + นับให้ครบ; consumer เดิมอ่านหมวดเดิมได้ไม่พัง)
+  'relationship_archive',
+  'lifestyle_travel',
+  'family_album',
+  'landmark_context',
 ];
 
 function normalizeKeywords(k) {

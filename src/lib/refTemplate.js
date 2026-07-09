@@ -182,8 +182,14 @@ export function dnaToTemplateSpec(dna) {
     const seen = new Set();
     for (const s of live) { const base = s.id; let n = 1; while (seen.has(s.id)) s.id = `${base}${n++}`; seen.add(s.id); }
 
-    const feather = Number(t.featherPx) || (t.seamStyle === 'feather' ? 26 : 0);
-    return { id: 'ref_dna', storyFit: `โครงตามปกเป้า: ${dna.layoutType || ''}`.slice(0, 120), canvasW: W, canvasH: H, feather, slots: live };
+    // ★ เฟส 3.5 (10 ก.ค.): feather เดิม fallback 26 = แถบเบลอ 52px คร่อมตะเข็บทุกช่อง (เบลอหน้า/ทำภาพนุ่มเกิน)
+    //   cap ที่ 8 (ยัง collage แต่ตะเข็บคมขึ้นชัด) · เกิน = ติดธง _featherCapped ให้ composer ส่ง qcFlags feather_capped
+    const FEATHER_CAP = 8;
+    const featherRaw = Number(t.featherPx) || (t.seamStyle === 'feather' ? 26 : 0);
+    const feather = Math.min(featherRaw, FEATHER_CAP);
+    const _featherCapped = featherRaw > FEATHER_CAP;
+    if (_featherCapped) console.log(`[refTemplate] 🩹 feather ${featherRaw}→${feather} (cap ${FEATHER_CAP}) — ตะเข็บคมขึ้น`);
+    return { id: 'ref_dna', storyFit: `โครงตามปกเป้า: ${dna.layoutType || ''}`.slice(0, 120), canvasW: W, canvasH: H, feather, ...(_featherCapped ? { _featherCapped: true } : {}), slots: live };
   } catch {
     return null;
   }

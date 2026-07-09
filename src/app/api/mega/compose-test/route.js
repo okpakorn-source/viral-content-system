@@ -52,7 +52,33 @@ export async function POST(req) {
     const c = await getCase(caseId);
     if (!c) return NextResponse.json({ success: false, error: 'ไม่พบเคส ' + caseId, errorType: 'CASE_NOT_FOUND' }, { status: 404 });
     const imgs = await readImages(caseId);
-    const pool = imgs.filter((x) => x.triage && x.triage.relevant !== false);
+    const relevantImgs = imgs.filter((x) => x.triage && x.triage.relevant !== false);
+    // ★ 9 ก.ค. เฟส 5.1+5.2 (แผนคุณภาพคลังรูป): พูลเข้าโรงประกอบต้องสะอาด default —
+    //   คลังจริงพิสูจน์: clean แค่ 33.6% (AC-0058, โลโก้/ลายน้ำ 126 + ตัวหนังสือทับ 101 จาก 375)
+    //   เดิมกรองแค่ relevant!==false → ภาพ clean=false เข้าพูลได้ พอของสะอาดขาดระบบจำใจหยิบของสกปรก
+    //   ธง junkHidden (เฟส 5.3 AI junk scan ตั้งแทนลบถาวร) ห้ามเข้าพูลเสมอ ไม่ผูกกับ kill-switch ด้านล่าง
+    //   kill-switch พูลสะอาด: POOL_CLEAN_GATE=0 = พฤติกรรมเดิม (เฉพาะ relevant!==false)
+    const POOL_CLEAN_GATE = process.env.POOL_CLEAN_GATE !== '0';
+    const POOL_MIN_FLOOR = 6; // พูลสะอาดบางกว่านี้ → อนุญาตเติม clean=false ที่ดีที่สุดกลับ (กันงานล่ม)
+    const notHidden = (x) => x.triage?.junkHidden !== true;
+    const visibleImgs = relevantImgs.filter(notHidden);
+    const dirtyFallbackIds = new Set();
+    let pool = visibleImgs;
+    if (POOL_CLEAN_GATE) {
+      const cleanOnly = visibleImgs.filter((x) => x.triage.clean !== false);
+      if (cleanOnly.length < POOL_MIN_FLOOR && cleanOnly.length < visibleImgs.length) {
+        const need = POOL_MIN_FLOOR - cleanOnly.length;
+        const dirtyBest = visibleImgs
+          .filter((x) => x.triage.clean === false)
+          .sort((a, b) => (Number(b.triage?.faceCount) || 0) - (Number(a.triage?.faceCount) || 0) || (Number(b.triage?.quality) || 0) - (Number(a.triage?.quality) || 0))
+          .slice(0, need);
+        dirtyBest.forEach((x) => dirtyFallbackIds.add(String(x.id)));
+        pool = [...cleanOnly, ...dirtyBest];
+        console.log(`[compose-test] 🧹 เฟส 5.1: พูลสะอาดบาง (${cleanOnly.length}/${POOL_MIN_FLOOR}) → เติม clean=false ที่ดีที่สุด ${dirtyBest.length} ใบ (dirtyFallback)`);
+      } else {
+        pool = cleanOnly;
+      }
+    }
     if (pool.length < 3) return NextResponse.json({ success: false, error: `พูลเคสนี้มีแค่ ${pool.length} ใบ (ต้อง ≥3) — ยังตาคัดไม่พอ`, errorType: 'POOL_TOO_THIN' }, { status: 422 });
 
     // ★ เฟส 0.2 (โหมดเทสนิ่ง): ส่ง slotPlan แช่แข็งมาเอง = ข้าม compass+S6 (LLM) ทั้งหมด
@@ -115,7 +141,12 @@ export async function POST(req) {
     const heroName = (body.heroPersonHint || '').trim();
     if (heroName) compass.mainCharacters = [{ name: heroName, role: 'hero' }, ...(compass.mainCharacters || []).filter((x) => !String(x.name || '').includes(heroName))];
 
-    const job = { dossier: { images: { caseId }, compass, desk: { title: compass.angle } } };
+    // ★ 10 ก.ค. เฟส 6A: แนบ storyQueries จาก keywords ที่เคสเก็บไว้ (เหมือน s5_keywords ทำในท่อ /mega)
+    //   — ไม่มี = story-fit ปิดเอง (พฤติกรรมเดิม) ทำให้เครื่องเทสนี้สะท้อน production ครบทุกเกต
+    const _kw = c.keywords || {};
+    const storyQueries = ['relationship_archive', 'lifestyle_travel', 'family_album', 'landmark_context', 'scene_place']
+      .flatMap((k) => (Array.isArray(_kw[k]) ? _kw[k] : [])).map((s) => String(s).trim()).filter(Boolean);
+    const job = { dossier: { images: { caseId, storyQueries }, compass, desk: { title: compass.angle } } };
     if (ref) job.dossier.refMatch = { dna: ref.dna, styleName: ref.styleName || ref.id, imagePath: ref.imagePath, reason: 'เลือกในหน้าเทส', typeMatched: true };
 
     const { s6_slots } = await import('@/lib/megaAdapters');
@@ -159,6 +190,7 @@ export async function POST(req) {
       return {
         url: u, thumbnailUrl: tt.thumbnailUrl || '', slot: primary || null,
         clean: tt.clean !== false, newsScene: tt.newsScene !== false, faces: tt.faces || 0, isHero: u === heroUrl,
+        dirtyFallback: !!(primary && slots[primary]?.dirtyFallback), // ★ เฟส 5.1: ติดธงถ้าเป็นของเติมพูลบาง (clean=false)
         person: tt.person || null, category: tt.category || null, emotion: tt.emotion || null,
         note: tt.note || null, faceBox: tt.faceBox || null, peopleBox: tt.peopleBox || null, // เฟส 1.3
       };
@@ -197,6 +229,7 @@ export async function POST(req) {
       refUsed: ref ? { id: ref.id, styleName: ref.styleName || ref.id, imagePath: ref.imagePath } : null,
       archivedId: archived?.id || null, // เข้าคลัง /mega-covers แล้ว (โหลดภาพ: /api/mega-covers/img?id=..&dl=1)
       poolSize: pool.length,
+      poolDirtyFallback: dirtyFallbackIds.size, // ★ เฟส 5.1: จำนวนใบ clean=false ที่เติมเข้าพูลเพราะสะอาดบางเกินไป (debug)
       slotPlanUsed: slotPlan, // เฟส 0.2: ให้เครื่องเทสเก็บไปแช่แข็ง (โหมด slotPlan ด้านบน)
       elapsed: `${((Date.now() - t0) / 1000).toFixed(1)}s`,
     }, { status: out.success ? 200 : 422 });

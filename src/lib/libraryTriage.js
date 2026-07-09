@@ -10,6 +10,7 @@
 import sharp from 'sharp';
 import { loadImageBuffer } from './imageBuffer.js';
 import { geminiClassifyFrames } from './gemini.js';
+import { applyRehost } from './imageStore.js';
 
 async function toB64(buf, size = 512) {
   const out = await sharp(buf, { failOn: 'none' })
@@ -19,9 +20,75 @@ async function toB64(buf, size = 512) {
   return out.toString('base64');
 }
 
-// โหลดรูป 1 ใบ → { im, base64, brightness, detail } (คืน null ถ้าโหลด/decode ไม่ได้)
+// ★ 9 ก.ค. เฟส 2.1: Laplacian variance (ประมาณความคม) — sharp ไม่มี built-in variance ตรงๆ
+//   greyscale → ย่อด้านยาว ≤600 (กันรูปใหญ่ช้า/รูปเล็กพอกัน) → convolve kernel Laplacian → raw → variance ของพิกเซล
+//   ยิ่งค่าสูง = ยิ่งคม (ขอบ/รายละเอียดเยอะ) · ยิ่งต่ำ = ภาพเบลอ/แบน
+async function computeSharpness(buf) {
+  try {
+    const { data } = await sharp(buf, { failOn: 'none' })
+      .greyscale()
+      .resize({ width: 600, height: 600, fit: 'inside', withoutEnlargement: true })
+      .convolve({ width: 3, height: 3, kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0] })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const n = data.length;
+    if (!n) return null;
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += data[i];
+    const mean = sum / n;
+    let sq = 0;
+    for (let i = 0; i < n; i++) { const d = data[i] - mean; sq += d * d; }
+    return Math.round((sq / n) * 100) / 100;
+  } catch {
+    return null; // วัดไม่ได้ = ปกติ (ไม่บล็อกตาคัด)
+  }
+}
+
+// ★ 9 ก.ค. เฟส 2.1: โหลด URL เดี่ยว (reuse loadImageBuffer เดิม — ส่งแค่ imageUrl ไม่มี fallback ในตัว)
+async function loadSingleUrl(url) {
+  if (!url) return null;
+  return loadImageBuffer({ imageUrl: url });
+}
+
+// ★ 9 ก.ค. เฟส 2.1: หา "ขนาดจริง" ก่อนส่งภาพให้ Gemini — กันตาคัดให้คะแนนจากรูปย่อ
+//   (ก) record มี realWidth/realHeight แล้ว (เฟส 1 วัดไว้ตอน rehost) → ใช้เลย ไม่ต้องโหลดซ้ำ
+//   (ข) ไม่มี → ตามลำดับ imageUrl → rehostThumbUrl → thumbnailUrl วัดจาก buffer ที่โหลดได้จริง
+//   คืน { realWidth, realHeight, measuredFrom: 'full'|'thumb', fresh: bool (ยังไม่เคยมีใน record) }
+async function resolveRealSize(im, fallbackBuf) {
+  const rw = Number(im.realWidth), rh = Number(im.realHeight);
+  if (rw > 0 && rh > 0) {
+    return { realWidth: rw, realHeight: rh, measuredFrom: im.rehostQuality === 'thumbnail' ? 'thumb' : 'full', fresh: false };
+  }
+  // record ไม่มีขนาดจริง — ลองวัดจาก buffer ที่โหลดไว้แล้วสำหรับตา (loadOne) ก่อน กันโหลดซ้ำ
+  //   knownThumbOnly เคสนี้จะไม่ผ่านมาถึงตรงนี้ (มี rw/rh อยู่แล้วเฉพาะ rehostQuality='full')
+  try {
+    if (fallbackBuf?.buf) {
+      const meta = await sharp(fallbackBuf.buf, { failOn: 'none' }).metadata();
+      if (meta.width > 0 && meta.height > 0) {
+        return { realWidth: meta.width, realHeight: meta.height, measuredFrom: fallbackBuf.from === 'imageUrl' && im.rehostQuality !== 'thumbnail' ? 'full' : 'thumb', fresh: true };
+      }
+    }
+  } catch { /* ตกไปลอง ladder เอง */ }
+  return null;
+}
+
+// โหลดรูป 1 ใบ → { im, base64, brightness, detail, realWidth, realHeight, measuredFrom, sharpness }
+//   (คืน null ถ้าโหลด/decode ไม่ได้)
+// ★ 9 ก.ค. เฟส 2.1 (มิชชัน "ตาคัดต้องเห็นไฟล์จริง"): เดิมโหลด thumbnailUrl ก่อนเสมอ (แม้ imageUrl จะเป็นไฟล์จริง) —
+//   สลับลำดับ: imageUrl (ของจริง) ก่อน แล้วค่อย rehostThumbUrl/thumbnailUrl · ยกเว้นรู้อยู่แล้วว่า rehost ได้แค่
+//   thumbnail (rehostQuality='thumbnail') → ข้าม imageUrl ไปเลย (Phase 1 ลองแล้วไม่ผ่าน กันยิงซ้ำ 403 ฟรี)
 async function loadOne(im) {
-  const buf = await loadImageBuffer({ imageUrl: im.thumbnailUrl || im.imageUrl, thumbnailUrl: im.imageUrl });
+  const knownThumbOnly = im.rehostQuality === 'thumbnail';
+  const ladder = knownThumbOnly
+    ? [{ url: im.rehostThumbUrl, from: 'rehostThumbUrl' }, { url: im.thumbnailUrl, from: 'thumbnailUrl' }, { url: im.imageUrl, from: 'imageUrl' }]
+    : [{ url: im.imageUrl, from: 'imageUrl' }, { url: im.rehostThumbUrl, from: 'rehostThumbUrl' }, { url: im.thumbnailUrl, from: 'thumbnailUrl' }];
+  let buf = null;
+  let loadedFrom = null;
+  for (const step of ladder) {
+    if (!step.url) continue;
+    buf = await loadSingleUrl(step.url);
+    if (buf) { loadedFrom = step.from; break; }
+  }
   if (!buf) return null;
   try {
     let brightness = 128;
@@ -36,33 +103,78 @@ async function loadOne(im) {
     } catch {
       /* วัดไม่ได้ = ปกติ */
     }
+    // ★ 9 ก.ค. เฟส 2.1: ขนาดจริง + ความคม — ใช้ buffer ที่เพิ่งโหลด (ตัวเดียวกับที่ตา Gemini จะเห็น)
+    let realWidth = null, realHeight = null, measuredFrom = null;
+    try {
+      const size = await resolveRealSize(im, { buf, from: loadedFrom });
+      if (size) {
+        realWidth = size.realWidth;
+        realHeight = size.realHeight;
+        measuredFrom = size.measuredFrom;
+        // เขียนกลับลง record เฉพาะตอน "วัดสด" ครั้งแรก (record เดิมไม่เคยมี) — กัน overwrite ค่าเฟส 1 ที่แม่นกว่า
+        //   im.id อาจยังไม่มี (vetImages คัดรูป "ดิบ" ตอนค้น ก่อนเข้าคลัง) → ข้ามเขียน record เก็บแค่ใน triage
+        if (size.fresh && im.id) {
+          applyRehost(im.id, { realWidth, realHeight, realBytes: buf.length }).catch(() => {}); // best-effort ไม่บล็อกตาคัด
+        }
+      }
+    } catch { /* วัดขนาดไม่ได้ = ปกติ ไม่บล็อกตาคัด */ }
+    const sharpness = await computeSharpness(buf);
     // ★ 8 ก.ค. (CASE-360): 512→1024 — ที่ 512px ตามองไม่เห็นลายน้ำ/ตัวหนังสือเล็ก → clean=true ผิด
     //   ปลายน้ำพังยกแผง (s6 ไม่ตัดภาพเสีย + s5e ไม่แคปเฟรม) · v3 detector ใช้ 1280px เห็นจริง — ตาคัดต้องเห็นใกล้เคียงกัน
-    return { im, base64: await toB64(buf, 1024), brightness, detail };
+    return { im, base64: await toB64(buf, 1024), brightness, detail, realWidth, realHeight, measuredFrom, sharpness };
   } catch {
     return null;
   }
 }
 
-// สร้างป้าย triage จากผล classify (it) + ค่าโหลด (src มี brightness/detail)
+// ★ 9 ก.ค. เฟส 2.3: whitelist หมวดจริงที่พรอมป์ Gemini กำหนด (gemini.js geminiClassifyFrames) — กันหมวดผี
+//   (เคสจริง: "face-happy" 2 ใบ โผล่เพราะไม่เคย validate) — นอกลิสต์ = 'other' เสมอ
+const CATEGORY_WHITELIST = new Set(['face-emotional', 'face-neutral', 'context', 'group', 'document', 'other']);
+// อารมณ์ "บวก" ที่พรอมป์เดิมเอียงไปนิยาม face-emotional แค่ฝั่งลบ (ร้องไห้/เศร้า/ตกใจ) — ดันหน้ายิ้ม/หัวเราะ
+// ไปหมวด face-neutral ผิด (เคสจริง: หน้านิ่ง 47 ใบ หน้าอารมณ์ 8 ใบ ทั้งที่ข่าวบันเทิงมีรูปยิ้มเยอะ)
+const POSITIVE_FACE_EMOTIONS = new Set(['happy', 'laugh', 'warm']);
+
+// สร้างป้าย triage จากผล classify (it) + ค่าโหลด (src มี brightness/detail/realWidth/realHeight/measuredFrom/sharpness)
 function buildTriage(it, src) {
+  const emotion = it.emotion || null;
+  // ★ 9 ก.ค. เฟส 2.3: validate enum + แก้พลาด face-neutral ทั้งที่อารมณ์บวกชัด (ดีกว่าพึ่งพรอมป์อย่างเดียว
+  //   เพราะ Gemini ตอบไม่ตรงนิยามได้เสมอ — ด่านโค้ดกันเหนียวอีกชั้น ไม่ต้องรอแก้ที่ไฟล์ gemini.js)
+  let category = CATEGORY_WHITELIST.has(it.category) ? it.category : 'other';
+  if (category === 'face-neutral' && POSITIVE_FACE_EMOTIONS.has(emotion)) category = 'face-emotional';
+
+  // ★ 9 ก.ค. เฟส 2.1: ขนาดจริง (เมื่อรู้) — ใช้คัด/เรียง hero ที่ s6 (megaAdapters.js)
+  const rw = Number(src?.realWidth), rh = Number(src?.realHeight);
+  const realShortSide = (rw > 0 && rh > 0) ? Math.min(rw, rh) : null;
+  const measuredFrom = src?.measuredFrom || null;
+
+  let quality = typeof it.quality === 'number' ? it.quality : 5;
+  // ★ 9 ก.ค. เฟส 2.1 (quality cap กันคะแนนหลอก): วัดจากไฟล์ย่อ/ไฟล์เล็กจริง (สั้นสุด<500px) → เพดาน 6
+  //   เคสจริง AC-0058: quality 9 ตกบนไฟล์ 298×372 — ถ้าปล่อยผ่านจะดัน s6 เลือกไฟล์จิ๋วเป็น hero แล้วยืดแตกตอนประกอบ
+  if ((measuredFrom === 'thumb' || (realShortSide != null && realShortSide < 500)) && quality > 6) {
+    quality = 6;
+  }
+
   return {
     // "เกี่ยวข่าว" แยกจาก "คุณภาพ" — ทิ้งเฉพาะที่ AI ตีว่าไม่เกี่ยวชัด (undefined = เก็บไว้ กัน false drop)
     relevant: it.relevant !== false,
     // ★ 8 ก.ค. เฟส A: ป้าย "ภาพแฟ้ม" — false = คนในข่าวตัวจริงแต่มาจากงาน/บริบทอื่น (ไม่ระบุ/ข้อมูลเก่า = ถือเป็นภาพข่าว)
     newsScene: it.newsScene !== false,
     clean: it.clean !== false, // พร้อมขึ้นปก (ไม่มีลายน้ำ/ตัวหนังสือ) — คนละเรื่องกับ relevant
-    category: it.category || 'other',
+    category,
     person: it.person || null,
     persons: Array.isArray(it.persons) ? it.persons.filter(Boolean) : it.person ? [it.person] : [],
-    emotion: it.emotion || null,
-    quality: typeof it.quality === 'number' ? it.quality : 5,
+    emotion,
+    quality,
     faceCount: typeof it.faceCount === 'number' ? it.faceCount : it.faceBox ? 1 : 0,
     faceBox: it.faceBox || null,
     peopleBox: it.peopleBox || null,
     brightness: Math.round(src?.brightness ?? 128),
     detail: Math.round(src?.detail ?? 60),
     note: it.note || '',
+    // ★ 9 ก.ค. เฟส 2.1: ฟิลด์ใหม่ — s6 (megaAdapters.js) ใช้คัด/เรียง hero ด้วยขนาดจริงแทนที่จะเชื่อ quality อย่างเดียว
+    realShortSide,
+    sharpness: typeof src?.sharpness === 'number' ? src.sharpness : null,
+    measuredFrom, // 'full' | 'thumb' | null (วัดไม่ได้)
   };
 }
 

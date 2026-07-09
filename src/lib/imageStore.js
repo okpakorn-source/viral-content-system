@@ -124,20 +124,46 @@ async function addImagesUnlocked(caseId, incoming) {
 
 // ★ DEVIATION 6 ก.ค. (ผู้ใช้สั่ง "ภาพพร้อมใช้"): ภาพที่ยังเป็นลิงก์เว็บนอก (hotlink หมดอายุได้/ครอปไม่ได้)
 //   → worker เครื่องทีมจะโหลดไฟล์ต้นฉบับเต็มมาเก็บ Supabase Storage แล้วสลับ imageUrl เป็นไฟล์ถาวร
+// ★ เฟส 1 (9 ก.ค.): คิว rehost 3 ชั้น (เรียงความสำคัญ A → B → C, กันซ้ำด้วย id, รวมไม่เกิน limit)
+//   (A) ลิงก์เว็บนอก (http, ไม่ใช่ supabase.co) — ของใหม่ยังไม่เซฟ + ใบ rehostQuality='thumbnail' แบบใหม่
+//       (หลังแก้ 1.1 imageUrl ยังชี้ต้นฉบับ) จึงวนกลับเข้า query นี้เอง = retry ต้นฉบับ (1.3)
+//   (B) เฟรม local (/case-frames/..) ที่คลาวด์เปิดไม่ได้ → worker เครื่องทีมอ่านดิสก์แล้วอัป Supabase (1.6)
+//   (C) กู้ record เก่าก่อนเฟส 1 ที่ "ถูกสลับแล้ว" — imageUrl ชี้สำเนา thumbnail บน supabase.co
+//       แต่ originUrl ยังเก็บต้นฉบับ → เข้าคิวให้ worker ลอง ladder จาก originUrl (~49% ของคลังเคสเดิม)
+//   worker คุมเพดานรอบด้วย rehostTries: ครบ MAX แล้วยังไม่ได้ต้นฉบับ → ตั้ง rehostFailed='thumbnail-max-retries' → หลุดคิว
 export async function listNeedingRehost(limit = 8) {
   const c = sb();
   if (!c) return [];
-  const { data, error } = await c
-    .from(TABLE)
-    .select('data')
-    .eq('store_name', STORE_NAME)
-    .ilike('data->>imageUrl', 'http%')
-    .not('data->>imageUrl', 'ilike', '%supabase.co%')
-    .is('data->rehostFailed', null)
-    .order('created_at', { ascending: false })
-    .limit(limit);
-  if (error) throw new Error('หารายการภาพรอเซฟไม่สำเร็จ: ' + error.message);
-  return (data || []).map((r) => r.data).filter(Boolean);
+  const runQuery = (apply) => {
+    let q = c.from(TABLE).select('data').eq('store_name', STORE_NAME).is('data->rehostFailed', null);
+    q = apply(q);
+    return q.order('created_at', { ascending: false }).limit(limit);
+  };
+  // (A) ลิงก์เว็บนอก (http) ที่ยังไม่ได้เซฟลง supabase — รวม thumbnail-only ที่รอ retry ต้นฉบับ (1.3)
+  const web = await runQuery((q) =>
+    q.ilike('data->>imageUrl', 'http%').not('data->>imageUrl', 'ilike', '%supabase.co%')
+  );
+  if (web.error) throw new Error('หารายการภาพรอเซฟไม่สำเร็จ: ' + web.error.message);
+  let items = (web.data || []).map((r) => r.data).filter(Boolean);
+  const pushUnique = (extra) => {
+    const have = new Set(items.map((i) => i.id));
+    for (const it of extra) { if (it && !have.has(it.id)) { have.add(it.id); items.push(it); } }
+  };
+  // (B) ★ 1.6: เฟรม local (imageUrl ขึ้นต้น '/') — worker อ่านไฟล์จากดิสก์แล้วอัป Supabase
+  if (items.length < limit) {
+    const local = await runQuery((q) => q.like('data->>imageUrl', '/%'));
+    if (!local.error) pushUnique((local.data || []).map((r) => r.data));
+  }
+  // (C) ★ กู้ของเก่าที่ถูกสลับเป็นสำเนา thumbnail — เฉพาะโหมดใหม่ (kill-switch REHOST_PRESERVE_ORIGINAL=0 → ไม่กู้)
+  if (items.length < limit && process.env.REHOST_PRESERVE_ORIGINAL !== '0') {
+    const legacy = await runQuery((q) =>
+      q.ilike('data->>imageUrl', '%supabase.co%')
+        .eq('data->>rehostQuality', 'thumbnail')
+        .ilike('data->>originUrl', 'http%')
+    );
+    if (!legacy.error) pushUnique((legacy.data || []).map((r) => r.data));
+  }
+  return items.slice(0, limit);
 }
 
 // อัปเดตภาพหลังเซฟไฟล์ถาวร (หรือ mark ว่าเซฟไม่ได้ จะได้ไม่วนซ้ำ)

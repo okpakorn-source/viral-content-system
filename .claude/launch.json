@@ -1,0 +1,46 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "viral-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "boomtopia",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "C:\\Users\\User\\ทดลองเกม",
+        "run",
+        "dev"
+      ],
+      "port": 3500
+    },
+    {
+      "name": "viral-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "next",
+        "start",
+        "-p",
+        "3987"
+      ],
+      "port": 3987
+    },
+    {
+      "name": "viral-verify",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set NEXT_DISTDIR=.next-verify&& npx next dev -p 3988"
+      ],
+      "port": 3988
+    }
+  ]
+}

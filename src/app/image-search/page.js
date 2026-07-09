@@ -951,6 +951,20 @@ const CAT_LABEL = {
   other: '❓ อื่นๆ',
 };
 
+// ★ 9 ก.ค. เฟส 2.4: badge ขนาดจริง — ให้คนเห็นก่อนเลือก ไม่ต้องรอปกแตกถึงรู้ว่าไฟล์จิ๋ว
+//   ลำดับ field: realWidth/realHeight (วัดจริงหลัง rehost/ตาคัด) ก่อน แล้วค่อย width/height (เมื่อไม่ null)
+//   ไม่มีทั้งคู่ = ไม่โชว์ badge (วัดไม่ได้ อย่าเดา) · เขียว≥800 / เหลือง 500-799 / แดง<500 หรือ thumbnail-only
+function sizeBadgeFor(im) {
+  const rw = Number(im.realWidth), rh = Number(im.realHeight);
+  const w = Number(im.width), h = Number(im.height);
+  const shortSide = (rw > 0 && rh > 0) ? Math.min(rw, rh) : ((w > 0 && h > 0) ? Math.min(w, h) : null);
+  if (shortSide == null) return null;
+  const thumbOnly = im.rehostQuality === 'thumbnail';
+  if (thumbOnly || shortSide < 500) return { label: `จิ๋ว ${shortSide}px`, bg: 'rgba(200,40,40,.85)' };
+  if (shortSide < 800) return { label: `${shortSide}px`, bg: 'rgba(180,140,20,.85)' };
+  return { label: `${shortSide}px`, bg: 'rgba(30,150,80,.85)' };
+}
+
 const PLATFORM_LABEL = {
   google: 'Google',
   google_news: 'Google News',
@@ -1189,7 +1203,9 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
         </>
       )}
       <div className="gallery">
-        {shown.map((im, i) => (
+        {shown.map((im, i) => {
+          const sb = sizeBadgeFor(im); // ★ 9 ก.ค. เฟส 2.4: badge ขนาดจริง (null = วัดไม่ได้ ไม่โชว์)
+          return (
           <button
             className={'thumb' + (selMode && selected.has(im.id) ? ' selected' : '')}
             key={im.id}
@@ -1198,6 +1214,10 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
           >
             <img src={im.thumbnailUrl || im.imageUrl} alt={im.title || ''} loading="lazy" style={im.triage?.relevant === false ? { opacity: 0.4 } : undefined} />
             <span className="thumb-plat">{PLATFORM_LABEL[im.platform] || im.platform}</span>
+            {/* ★ 9 ก.ค. เฟส 2.4: badge ขนาดจริง มุมขวาบน (ซ่อนตอนโหมดเลือก กันซ้อน thumb-check) */}
+            {!selMode && sb && (
+              <span className="thumb-plat" style={{ left: 'auto', right: 6, background: sb.bg }} title="ขนาดจริงของไฟล์">{sb.label}</span>
+            )}
             {im.emotion && <span className="thumb-emo" title={EMOTION_LABEL[im.emotion]}>{(EMOTION_LABEL[im.emotion] || '').split(' ')[0]}</span>}
             {im.triage?.relevant === false && <span className="thumb-plat" style={{ top: 'auto', bottom: 4, left: 4, background: 'rgba(200,40,40,.85)' }}>🗑️ ขยะ</span>}
             {/* ★ 8 ก.ค. เฟส A: ป้ายภาพแฟ้ม — คนถูกจริงแต่มาจากงาน/บริบทอื่น */}
@@ -1207,7 +1227,8 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
             {im.source && <span className="thumb-src">{im.source}</span>}
             {selMode && <span className="thumb-check">{selected.has(im.id) ? '✓' : ''}</span>}
           </button>
-        ))}
+          );
+        })}
       </div>
       {lb !== null && !selMode && shown[lb] && (
         <Lightbox

@@ -76,7 +76,7 @@ export const V3_TEMPLATES = {
     id: 'vt_ref_5x4',
     storyFit: '★★ โครงแสนไลค์ 4:5 (reference lock): ฮีโร่ close-up ซ้ายเต็มสูง + ขวาบนคู่/ปฏิกิริยา + ขวาล่าง close-up คนที่สอง + วงกลมโมเมนต์ล่างซ้าย',
     canvasW: 1080, canvasH: 1350,
-    feather: 26, // ★ B: เบลอรอยต่อระหว่างช่อง (ลบเส้นกริดคม) — สไตล์ collage ไวรัลตาม reference (เฉพาะเทมเพลตนี้)
+    feather: 8, // ★ เฟส 3.5 (10 ก.ค.): 26→8 — feather 26 = แถบเบลอ 52px คร่อมตะเข็บทุกช่อง (เบลอหน้า/นุ่มเกิน) · 8 ยัง collage แต่คมขึ้นชัด
     slots: [
       { id: 'main',         x: 0,   y: 0,   w: 616, h: 1350, zIndex: 0, note: '★ ฮีโร่ close-up เต็มสูง ~57% กว้าง — หน้าใหญ่ครึ่งบน (วงกลมทับช่วงตัวล่าง ไม่ทับหน้า)' },
       { id: 'right_top',    x: 616, y: 0,   w: 464, h: 540, zIndex: 0, note: 'ขวาบน 40% — คู่/ปฏิกิริยา/บริบท (เล็กกว่าตาม ref) ชนขอบฮีโร่' },
@@ -346,6 +346,102 @@ const STORY_CROP  = { faceFrac: 0.55, faceTopAt: 0.38, maxFaceHFrac: 0.52, minFa
 const STORY_SLOT_RE = /^(action|context|evidence|moment)/i;
 function isStorySlot(slot) { return String(slot?.id || '') !== 'main' && STORY_SLOT_RE.test(String(slot?.id || '')); }
 
+// ════════════════════════════════════════════════════════════════════════════
+// ★ 9 ก.ค. 2026 เฟส 6B.3/6B.4 — "หน้าเด่น + ครอปแน่น / บริบทไม่โล่ง"
+//   ผู้ใช้ชี้จากปก MCV-mrdloc991wr: ช่องครอปหลวม คนตัวเล็กจมฉาก "ดูไม่ออกว่าใคร/ทำอะไร"
+//   หลักการ: หลัง region ถูกคำนวณตามสูตรเดิมแล้ว → วัด "หน้า/คนกิน %เฟรม" เทียบเป้า →
+//            เล็กเกินเป้ามาก = ซูมเข้า (region เล็กลง) จนถึงเป้า *แต่เคารพเพดานยืด 1.6 ของเฟส 3*
+//   กันหน้าขาด: region ใหม่ต้องคลุม "กล่องหัว/กล่องคน" ครบเสมอ (floor) + ห้ามขยายเกิน region เดิม (ไม่ดึงฉากคืน)
+//   kill-switch: COMPOSE_FACE_PROMINENCE=0 → ปิดสนิท (พฤติกรรมเดิมเป๊ะ)
+// ════════════════════════════════════════════════════════════════════════════
+// เป้า = faceHeight/regionHeight (หน้าดิบ) ต่อชนิดช่อง · cap = เพดานความปลอดภัย (กันซูมแน่นจนหน้าล้น) · const ปรับได้
+const FACE_PROMINENCE = {
+  hero:      { target: 0.42, cap: 0.50, trigMul: 0.6 },  // hero เล็กกว่า 0.42×0.6=0.25 → ซูม
+  secondary: { target: 0.25, cap: 0.35, trigMul: 0.6 },  // ช่องรองมีหน้า (reaction/moment)
+  circle:    { target: 0.45, cap: 0.55, trigMul: 0.6 },  // วงกลม — หน้าเต็มวง
+  context:   { target: 0.50, cap: 0.60, trigAbs: 0.40 }, // 6B.4: peopleBox(หัว+ลำตัว) ต้องกิน ≥40% ไม่งั้นซูมเข้า ~50%
+};
+const FACE_PROM_CEILING = 1.6; // เพดานยืดเดียวกับ hard floor เฟส 3 — ห้ามซูมจน upscale เกินนี้
+function _faceProminenceOn() { return process.env.COMPOSE_FACE_PROMINENCE !== '0'; }
+function _promKind(slot) {
+  if (slot.shape === 'circle') return 'circle';
+  if (isStorySlot(slot)) return 'context';
+  const big = (slot.w * slot.h) >= (520 * 800);
+  return (slot.id === 'main' || big) ? 'hero' : 'secondary';
+}
+
+/** ★ เฟส 6B.3/6B.4: ซูมครอปแน่นให้หน้า/คนเด่นถึงเป้า (เคารพเพดานยืด 1.6 + ห้ามตัดหัว/คน + ห้ามขยายเกินกรอบเดิม)
+ *  คืน { region, meta } — meta.tightened=ซูมจริงไหม · meta.small=ถึงเพดานแล้วยังเล็ก · หรือ null ถ้าไม่เข้าเงื่อนไข */
+function _tightenForProminence(region, fb, slot, imgW, imgH) {
+  try {
+    if (!region || !fb || !(fb.x2 > fb.x1)) return null;
+    const kind = _promKind(slot);
+    const cfg = FACE_PROMINENCE[kind];
+    if (!cfg) return null;
+    const aspect = slot.w / Math.max(1, slot.h); // วงกลม = 1
+    const ceilingH = slot.h / FACE_PROM_CEILING;  // region เตี้ยสุดที่ยอม (ยืดไม่เกิน 1.6)
+
+    // กล่องเนื้อหา: face mode = หน้าใหญ่สุด(+เผื่อผม/คาง) · context = peopleBox รวมทุกคน(+ลำตัว)
+    const faces = (fb.allFaces && fb.allFaces.length) ? fb.allFaces
+      : [{ x1: fb.x1, y1: fb.y1, x2: fb.x2, y2: fb.y2 }];
+    let cTopN, cBotN, cLN, cRN, measureHN;
+    if (kind === 'context') {
+      const y1 = Math.min(...faces.map((f) => f.y1)), y2 = Math.max(...faces.map((f) => f.y2));
+      const x1 = Math.min(...faces.map((f) => f.x1)), x2 = Math.max(...faces.map((f) => f.x2));
+      const avgFh = Math.max(0.01, faces.reduce((s, f) => s + (f.y2 - f.y1), 0) / faces.length);
+      cTopN = y1 - avgFh * 0.40; cBotN = y2 + avgFh * 1.20; // หัว + ลำตัว (คนอ่านออกว่าใคร/ทำอะไร)
+      cLN = x1 - avgFh * 0.30;   cRN = x2 + avgFh * 0.30;
+      measureHN = cBotN - cTopN;                            // "คน" กินสูงเท่าไรของเฟรม
+    } else {
+      const lf = faces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), faces[0]);
+      const fw = lf.x2 - lf.x1, fh = lf.y2 - lf.y1;
+      cTopN = lf.y1 - fh * 0.50; cBotN = lf.y2 + fh * 0.32; // กล่องหัว (ผม+คาง) ห้ามตัด
+      cLN = lf.x1 - fw * 0.20;   cRN = lf.x2 + fw * 0.20;
+      measureHN = fh;                                       // faceHeight ดิบ (ตามสเปค faceHeight/cropHeight)
+    }
+    cTopN = Math.max(0, cTopN); cLN = Math.max(0, cLN);
+    cBotN = Math.min(1, cBotN); cRN = Math.min(1, cRN);
+    const cTop = cTopN * imgH, cBot = cBotN * imgH, cL = cLN * imgW, cR = cRN * imgW;
+    const measureHpx = measureHN * imgH;
+
+    const curShare = measureHpx / Math.max(1, region.height);
+    const target = kind === 'context'
+      ? cfg.target
+      : Math.min(cfg.cap, Math.max(cfg.target, Number(slot._faceTargetShare) || 0)); // ref = ขั้นต่ำ · cap กันแน่นเกิน
+    const trig = kind === 'context' ? cfg.trigAbs : target * cfg.trigMul;
+    if (curShare >= trig) return null; // เด่นพอแล้ว — ไม่ยุ่ง (กัน regression ครอปที่ดีอยู่แล้ว)
+
+    // region ที่ทำให้ share = target + floor กันตัดหัว/คน + เพดานยืด
+    const desiredH = measureHpx / target;
+    const floorH = Math.max(ceilingH, (cBot - cTop), (cR - cL) / aspect); // ต้องคลุมกล่องเนื้อหาครบทั้งสูง/กว้าง
+    let newH = Math.min(region.height, Math.max(desiredH, floorH));       // ซูมเข้าเท่านั้น
+    const resShare0 = measureHpx / newH;
+    if (newH >= region.height - 1) {
+      // ซูมไม่ได้ (ติด floor/เพดาน/หัวใหญ่) แต่ยังเล็ก → ติดธง face_small ให้เห็น (ไม่แก้เรขาคณิต)
+      return { region, meta: { slot: slot.id, kind, tightened: false, small: curShare < target - 0.02, share: +curShare.toFixed(2) } };
+    }
+    const scale = newH / region.height;
+    const nW = Math.max(8, Math.round(region.width * scale));
+    const nH = Math.max(8, Math.round(newH));
+    // ตำแหน่ง: กลางกล่องเนื้อหา (face mode เผื่อ headroom) · clamp ในกรอบเดิม (ห้ามดึงฉากนอก crop เดิมคืน) · คลุมเนื้อหาครบ
+    const rL = region.left, rT = region.top, rR = region.left + region.width, rB = region.top + region.height;
+    const ccx = (cL + cR) / 2;
+    let nl = Math.round(ccx - nW / 2);
+    let nt = Math.round(kind === 'context' ? ((cTop + cBot) / 2 - nH / 2) : (cTop - nH * 0.10));
+    nl = Math.min(Math.max(nl, rL), rR - nW);
+    nt = Math.min(Math.max(nt, rT), rB - nH);
+    if (cTop < nt) nt = Math.max(rT, Math.min(cTop, rB - nH));          // หัว/คนบนสุดต้องอยู่ในเฟรม
+    if (cBot > nt + nH) nt = Math.min(rB - nH, Math.max(rT, cBot - nH)); // คาง/ลำตัวล่างสุดต้องอยู่ในเฟรม
+    if (cL < nl) nl = Math.max(rL, Math.min(cL, rR - nW));
+    if (cR > nl + nW) nl = Math.min(rR - nW, Math.max(rL, cR - nW));
+    nl = Math.min(Math.max(nl, 0), imgW - nW);
+    nt = Math.min(Math.max(nt, 0), imgH - nH);
+    const newRegion = { left: nl, top: nt, width: nW, height: nH };
+    const resShare = measureHpx / nH;
+    return { region: newRegion, meta: { slot: slot.id, kind, tightened: true, small: resShare < target - 0.02, share: +resShare.toFixed(2) } };
+  } catch { return null; /* ล้ม = ใช้ region เดิม (ห้ามกระทบการประกอบ) */ }
+}
+
 /** พารามิเตอร์การจัดหน้าตามชนิด/ขนาดช่อง — ดึงจากค่าที่แยกต่อเลย์เอาต์ด้านบน (แก้ที่ const นั้นๆ) */
 function faceParamsForSlot(slot) {
   if (slot.shape === 'circle') return { ...CIRCLE_CROP };
@@ -547,8 +643,11 @@ function _cropTrace(slot, branch, fb, imgW, imgH, region, sink) {
     const faces = fb?.allFaces?.length ?? (fb && fb.x2 > fb.x1 ? 1 : 0);
     const wp = Math.round((region.width / imgW) * 100), hp = Math.round((region.height / imgH) * 100);
     console.log(`[CropTrace] slot=${slot.id} branch=${branch} faces=${faces} img=${imgW}x${imgH} region=${region.left},${region.top},${region.width}x${region.height} (w${wp}% h${hp}%)`);
-    if (Array.isArray(sink)) sink.push({ slot: slot.id, branch, faces, imgW, imgH, region: { ...region } });
-  } catch { /* trace ล้มห้ามกระทบการประกอบ */ }
+    // ★ เฟส 3.1 (10 ก.ค.): คืน entry ให้ผู้เรียกเติม upscale จริง (หลัง clamp) — ธง upscaled/upscale_soft อ่านจากตรงนี้
+    const entry = { slot: slot.id, branch, faces, imgW, imgH, region: { ...region } };
+    if (Array.isArray(sink)) sink.push(entry);
+    return entry;
+  } catch { return null; /* trace ล้มห้ามกระทบการประกอบ */ }
 }
 
 /** ★ 10 ก.ค. (บั๊ก AC-0036 "extract_area: bad extract area"): กรอบครอปเกินขอบภาพหลุดถึง sharp ได้
@@ -686,20 +785,33 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
     }
     region = fitCropToSlotAspect(_c, imgW, imgH, slot.w / slot.h);
   }
-  _cropTrace(slot, _br, fb, imgW, imgH, region, traceSink); // เฟส 0.1: log อย่างเดียว
+  // ★ เฟส 6B.3/6B.4: ซูมครอปแน่นหน้าเด่น/บริบทไม่โล่ง — ก่อน trace/upscale (skip เมื่อ _final = เชื่อ crop 100%)
+  let _tg6b = null;
+  if (_faceProminenceOn() && !(crop && crop._final)) {
+    const _tt = _tightenForProminence(region, fb, slot, imgW, imgH);
+    if (_tt) { if (_tt.meta.tightened) region = _tt.region; _tg6b = _tt.meta; }
+  }
+  const _tr = _cropTrace(slot, _br, fb, imgW, imgH, region, traceSink); // เฟส 0.1: log อย่างเดียว
+  if (_tr) _tr.tighten = _tg6b; // เฟส 6B: composer อ่าน tt.tighten → ธง crop_tightened/context_tightened/face_small
   if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ` ${slot.id}`); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
-  // rev.16: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — WB คุมโทนรวม + รีทัชเบา
-  //   (1) gray-world WB ดึงคาสต์สีเข้าโทนเดียว  (2) sat/contrast บางๆ  (3) คมขึ้นพอดี
   region = _clampRegion(region, imgW, imgH); // ★ 10 ก.ค.: การ์ดสุดท้ายก่อน extract — ห้ามเกินขอบภาพเด็ดขาด
-  const base = await sharp(src).extract(region).resize(slot.w, slot.h, { fit: 'fill' }).toBuffer();
+  // ★ เฟส 3.1+3.3 (10 ก.ค.): วัด upscale จริง (region px → slot px) — ติดธงยืด (composer อ่านจาก sink) + งด sharpen ตอนขยาย
+  const _upR = Math.max(slot.w / Math.max(1, region.width), slot.h / Math.max(1, region.height));
+  if (_tr) _tr.upscale = +_upR.toFixed(2);
+  if (_upR > 1.2) console.log(`[CoverV3] 🔎 ${slot.id} ยืด ${_upR.toFixed(2)}x (region ${region.width}x${region.height} → ${slot.w}x${slot.h})`);
+  const _doSharpen = _upR < 1; // sharpen เฉพาะเคสย่อ — ขยายแล้ว sharpen = ขยาย artifact (เฟส 3.3)
+  // rev.16: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — WB คุมโทนรวม + รีทัชเบา
+  //   (1) gray-world WB ดึงคาสต์สีเข้าโทนเดียว  (2) sat/contrast บางๆ  (3) คมขึ้นพอดี (เฉพาะย่อ)
+  //   ★ เฟส 3.3: png ระหว่างทาง (lossless) — encode jpeg รอบเดียวตอนผืนจบ (เดิม .toBuffer() = jpeg q80 ซ่อน)
+  const base = await sharp(src).extract(region).resize(slot.w, slot.h, { fit: 'fill' }).png().toBuffer();
   const wb = await grayWorldGains(base);
   let pipe = sharp(base);
   if (wb) pipe = pipe.linear(wb, [0, 0, 0]);           // คุม white-balance ให้เข้าโทนช่องอื่น
-  let tile = await pipe
+  pipe = pipe
     .modulate({ saturation: 1.05, brightness: 1.0 })   // สีสดขึ้นนิดเดียว ไม่ดันจนเพี้ยน
-    .linear(1.03, -3)                                  // คอนทราสต์บางๆ
-    .sharpen({ sigma: 0.8 })                           // คมขึ้นพอดี
-    .jpeg({ quality: 92 }).toBuffer();
+    .linear(1.03, -3);                                 // คอนทราสต์บางๆ
+  if (_doSharpen) pipe = pipe.sharpen({ sigma: 0.8 }); // เฟส 3.3: คมขึ้นพอดี เฉพาะเคสย่อ
+  let tile = await pipe.png().toBuffer();               // เฟส 3.3: lossless — ผืนสุดท้ายค่อย encode jpeg รอบเดียว
 
   if (slot.border && slot.borderWidth > 0) {
     const bw = slot.borderWidth;
@@ -707,7 +819,7 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
       create: { width: slot.w + bw * 2, height: slot.h + bw * 2, channels: 3, background: slot.border },
     })
       .composite([{ input: tile, left: bw, top: bw }])
-      .jpeg({ quality: 92 })
+      .png()                                            // เฟส 3.3: กรอบสี+ภาพ = lossless (เดิม jpeg q92 = encode ซ้อน)
       .toBuffer();
     return { input: tile, left: slot.x - bw, top: slot.y - bw };
   }
@@ -749,16 +861,28 @@ async function renderCircleTile(src, crop, slot, fb, traceSink = null) {
     _br = 'noface-square';
   }
 
-  _cropTrace(slot, _br, fb, imgW, imgH, region, traceSink); // เฟส 0.1: log อย่างเดียว
+  // ★ เฟส 6B.3: ซูมวงกลมให้หน้าเต็มวงถึงเป้า (เคารพเพดานยืด 1.6 + ไม่ตัดหัว) — skip เมื่อ _final
+  let _tg6bC = null;
+  if (_faceProminenceOn() && !(crop && crop._final)) {
+    const _ttC = _tightenForProminence(region, fb, slot, imgW, imgH);
+    if (_ttC) { if (_ttC.meta.tightened) region = _ttC.region; _tg6bC = _ttC.meta; }
+  }
+  const _tr = _cropTrace(slot, _br, fb, imgW, imgH, region, traceSink); // เฟส 0.1: log อย่างเดียว
+  if (_tr) _tr.tighten = _tg6bC; // เฟส 6B: ธง crop_tightened/face_small ของวงกลม
   if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ' circle'); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
   region = _clampRegion(region, imgW, imgH); // ★ 10 ก.ค.: การ์ดสุดท้ายก่อน extract (วงกลม)
-  const cbase = await sharp(src).extract(region).resize(d, d, { fit: 'fill' }).toBuffer();
+  // ★ เฟส 3.1+3.3 (10 ก.ค.): วัด upscale จริง + งด sharpen ตอนขยาย (วงกลม)
+  const _upR = Math.max(d / Math.max(1, region.width), d / Math.max(1, region.height));
+  if (_tr) _tr.upscale = +_upR.toFixed(2);
+  if (_upR > 1.2) console.log(`[CoverV3] 🔎 ${slot.id} (วง) ยืด ${_upR.toFixed(2)}x`);
+  const _doSharpen = _upR < 1; // เฟส 3.3: sharpen เฉพาะเคสย่อ
+  const cbase = await sharp(src).extract(region).resize(d, d, { fit: 'fill' }).png().toBuffer(); // เฟส 3.3: lossless ระหว่างทาง
   const cwb = await grayWorldGains(cbase);
   let cpipe = sharp(cbase);
   if (cwb) cpipe = cpipe.linear(cwb, [0, 0, 0]);        // rev.16: WB เข้าโทนเดียวกับช่องอื่น
-  const squared = await cpipe
-    .modulate({ saturation: 1.05, brightness: 1.0 }).linear(1.03, -3).sharpen({ sigma: 0.8 })
-    .png().toBuffer();
+  cpipe = cpipe.modulate({ saturation: 1.05, brightness: 1.0 }).linear(1.03, -3);
+  if (_doSharpen) cpipe = cpipe.sharpen({ sigma: 0.8 }); // เฟส 3.3: คมขึ้นพอดี เฉพาะเคสย่อ
+  const squared = await cpipe.png().toBuffer();
   const mask = Buffer.from(`<svg width="${d}" height="${d}"><circle cx="${d / 2}" cy="${d / 2}" r="${d / 2}" fill="#fff"/></svg>`);
   const circled = await sharp(squared).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
 
@@ -804,13 +928,14 @@ export async function executeCover({ assignments, imageBuffers, templateSpec, fa
   const bg = { create: { width: canvasW, height: canvasH, channels: 3, background: { r: 255, g: 255, b: 255 } } };
   const feather = Number(templateSpec.feather) || 0;
   // เส้นทางเดิม (ไม่มี feather): composite รวดเดียว — ไม่แตะพฤติกรรมเทมเพลตเก่าทุกตัว
+  // ★ เฟส 3.3 (10 ก.ค.): tiles เป็น png (lossless) — ผืนสุดท้าย encode jpeg q92 ครั้งเดียว (เดิม q90 หลัง encode ซ้อน 3-5 รอบ)
   if (!feather) {
-    return sharp(bg).composite([...rectComps, ...circleComps]).jpeg({ quality: 90 }).toBuffer();
+    return sharp(bg).composite([...rectComps, ...circleComps]).jpeg({ quality: 92 }).toBuffer();
   }
   // ★ B feather path (vt_ref_5x4): วางสี่เหลี่ยมก่อน → เบลอ "แถบรอยต่อ" ให้นุ่ม (ลบเส้นกริดคม) → วางวงกลมทับ (คงกรอบขาว)
   let canvas = await sharp(bg).composite(rectComps).png().toBuffer();
   canvas = await featherSeams(canvas, templateSpec, feather);
-  return sharp(canvas).composite(circleComps).jpeg({ quality: 90 }).toBuffer();
+  return sharp(canvas).composite(circleComps).jpeg({ quality: 92 }).toBuffer(); // เฟส 3.3: encode jpeg รอบเดียว q92
 }
 
 /** เบลอเฉพาะ "แถบรอยต่อ" ระหว่างช่องสี่เหลี่ยม (ขอบด้านในที่ติดช่องอื่น เท่านั้น) — รอยต่อนุ่มแบบ collage ไวรัล
@@ -832,7 +957,7 @@ async function featherSeams(canvasBuf, templateSpec, F) {
     const top = Math.max(0, Math.min(raw.top, H - 1));
     const width = Math.max(1, Math.min(raw.width, W - left));
     const height = Math.max(1, Math.min(raw.height, H - top));
-    const patch = await sharp(canvasBuf).extract({ left, top, width, height }).blur(Math.max(0.4, F / 2)).toBuffer();
+    const patch = await sharp(canvasBuf).extract({ left, top, width, height }).blur(Math.max(0.4, F / 2)).png().toBuffer(); // เฟส 3.3: lossless
     overlays.push({ input: patch, left, top });
   }
   if (!overlays.length) return canvasBuf;
