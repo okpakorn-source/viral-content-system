@@ -30,81 +30,93 @@ function badReq(error) {
   return NextResponse.json({ success: false, error, errorType: 'BAD_INPUT' }, { status: 400 });
 }
 
-// ── งานรันเบื้องหลัง: ยิง endpoint เดิมของแต่ละระบบ แล้วเก็บผลลง job ──
-async function runJob(job, origin) {
-  try {
-    await patchJob(job.id, { status: 'running', startedAt: new Date().toISOString(), progress: { step: 'กำลังรัน', pct: 5 } });
+// ── retry: วนทำซ้ำจน "ได้ผลจริง" (ระบบล่มชั่วคราว เช่น Gemini ล่ม → ห้ามปล่อยงานล้ม/คุณภาพต่ำ) ──
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const RETRY_MAX = Math.max(1, parseInt(process.env.QUICK_TEST_MAX_ATTEMPTS || '6', 10));
+const RETRY_BASE_MS = Math.max(3000, parseInt(process.env.QUICK_TEST_RETRY_MS || '20000', 10));
+// input ผิดจริง — วนไปก็ไม่หาย (หยุด) · ที่เหลือถือเป็น "ล่มชั่วคราว/พูลไม่พอรอบนี้" → วนซ้ำ
+const TERMINAL_ERRORS = new Set(['BAD_INPUT', 'NO_CONTENT', 'CASE_NOT_FOUND']);
 
-    if (job.kind === 'compose') {
-      const res = await fetch(`${origin}/api/mega/compose-test`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          caseId: job.input.caseId,
-          refId: job.input.refId || undefined,
-          heroPersonHint: job.input.heroPersonHint || undefined,
-        }),
-        signal: AbortSignal.timeout(5 * 60 * 1000),
-      });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok || !d.success) {
-        throw Object.assign(new Error(d.error || `HTTP ${res.status}`), { errorType: d.errorType });
-      }
-      await finishJob(job.id, {
-        status: 'done',
-        progress: { step: 'เสร็จ', pct: 100 },
-        result: {
-          template: d.template || null,
-          refSimilarity: d.refSimilarity ?? null,
-          refDiffs: d.refDiffs || [],
-          eyeFixed: d.eyeFixed || 0,
-          poolSize: d.poolSize ?? null,
-          elapsed: d.elapsed || null,
-          archivedId: d.archivedId || null,
-          coverImgUrl: d.archivedId ? `/api/mega-covers/img?id=${encodeURIComponent(d.archivedId)}` : null,
-          refImgUrl: d.refUsed?.imagePath || null,
-          refName: d.refUsed?.styleName || null,
-          caseId: d.caseId || job.input.caseId,
-        },
-      });
-      return;
-    }
-
-    // kind === 'ref' — เต็มท่อ MEGA
-    const res = await fetch(`${origin}/api/cover-ref-test`, {
+// รัน 1 รอบ — สำเร็จคืน result object, ล้ม throw (แนบ errorType/trace)
+async function callOnce(job, origin) {
+  if (job.kind === 'compose') {
+    const res = await fetch(`${origin}/api/mega/compose-test`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ newsTitle: job.input.newsTitle || '', content: job.input.content }),
-      signal: AbortSignal.timeout(25 * 60 * 1000),
+      body: JSON.stringify({ caseId: job.input.caseId, refId: job.input.refId || undefined, heroPersonHint: job.input.heroPersonHint || undefined }),
+      signal: AbortSignal.timeout(5 * 60 * 1000),
     });
     const d = await res.json().catch(() => ({}));
-    if (!res.ok || !d.success) {
-      throw Object.assign(new Error(d.error || `HTTP ${res.status}`), { errorType: d.errorType, trace: d.trace });
-    }
-    await finishJob(job.id, {
-      status: 'done',
-      progress: { step: 'เสร็จ', pct: 100 },
-      result: {
-        template: d.template || null,
-        score: d.score ?? null,
-        refSimilarity: d.refSimilarity ?? null,
-        elapsed: d.elapsedTotal || d.elapsed || null,
-        coverImgUrl: d.coverPath || null,
-        refImgUrl: d.matchedRef?.imagePath || null,
-        refName: d.matchedRef?.styleName || null,
-        imageCaseId: d.imageCaseId || null,
-        poolSize: d.poolSize ?? null,
-        trace: Array.isArray(d.trace) ? d.trace.map((t) => ({ stage: t.stage, status: t.status })) : [],
-      },
-    });
-  } catch (e) {
-    await finishJob(job.id, {
-      status: 'failed',
-      progress: { step: 'ล้มเหลว', pct: 100 },
-      error: (e?.message || 'ล้มเหลว').slice(0, 300),
-      result: Array.isArray(e?.trace) ? { trace: e.trace.map((t) => ({ stage: t.stage, status: t.status })) } : null,
-    }).catch(() => {});
+    if (!res.ok || !d.success) throw Object.assign(new Error(d.error || `HTTP ${res.status}`), { errorType: d.errorType });
+    return {
+      template: d.template || null,
+      refSimilarity: d.refSimilarity ?? null,
+      refDiffs: d.refDiffs || [],
+      eyeFixed: d.eyeFixed || 0,
+      poolSize: d.poolSize ?? null,
+      elapsed: d.elapsed || null,
+      archivedId: d.archivedId || null,
+      coverImgUrl: d.archivedId ? `/api/mega-covers/img?id=${encodeURIComponent(d.archivedId)}` : null,
+      refImgUrl: d.refUsed?.imagePath || null,
+      refName: d.refUsed?.styleName || null,
+      caseId: d.caseId || job.input.caseId,
+    };
   }
+  // kind === 'ref' — เต็มท่อ MEGA
+  const res = await fetch(`${origin}/api/cover-ref-test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ newsTitle: job.input.newsTitle || '', content: job.input.content }),
+    signal: AbortSignal.timeout(25 * 60 * 1000),
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok || !d.success) throw Object.assign(new Error(d.error || `HTTP ${res.status}`), { errorType: d.errorType, trace: d.trace });
+  return {
+    template: d.template || null,
+    score: d.score ?? null,
+    refSimilarity: d.refSimilarity ?? null,
+    elapsed: d.elapsedTotal || d.elapsed || null,
+    coverImgUrl: d.coverPath || null,
+    refImgUrl: d.matchedRef?.imagePath || null,
+    refName: d.matchedRef?.styleName || null,
+    imageCaseId: d.imageCaseId || null,
+    poolSize: d.poolSize ?? null,
+    trace: Array.isArray(d.trace) ? d.trace.map((t) => ({ stage: t.stage, status: t.status })) : [],
+  };
+}
+
+// ── งานรันเบื้องหลัง + วนซ้ำจนได้ผลจริง ──
+//   cloud (sync บน Vercel maxDuration 300) = ลองรอบเดียว → ล้มให้ POST fallback ส่งเครื่องทีม (วนซ้ำได้ไม่จำกัดเวลา)
+//   team/local (เครื่องทีมรันยาว) = วนซ้ำ RETRY_MAX รอบ + backoff เพิ่มขึ้น · refresh claimedAt กัน stale-reclaim ระหว่างวน
+async function runJob(job, origin) {
+  const maxAttempts = job.dispatch === 'cloud' ? 1 : RETRY_MAX;
+  const nowIso = () => new Date().toISOString();
+  await patchJob(job.id, { status: 'running', startedAt: nowIso(), claimedAt: nowIso(), progress: { step: 'กำลังรัน', pct: 5 } });
+  let lastErr = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      if (attempt > 1) await patchJob(job.id, { claimedAt: nowIso(), progress: { step: `ลองใหม่รอบ ${attempt}/${maxAttempts}`, pct: 5 } });
+      const result = await callOnce(job, origin);
+      await finishJob(job.id, { status: 'done', progress: { step: 'เสร็จ', pct: 100 }, result, attempts: attempt, error: null });
+      return;
+    } catch (e) {
+      lastErr = e;
+      if (TERMINAL_ERRORS.has(e?.errorType)) break; // input ผิด — วนไปก็ไม่หาย
+      if (attempt < maxAttempts) {
+        const waitMs = Math.min(RETRY_BASE_MS * attempt, 120000); // backoff เพิ่มขึ้น เพดาน 2 นาที
+        await patchJob(job.id, { claimedAt: nowIso(), progress: { step: `⚠️ ล่ม (${(e?.message || '').slice(0, 40)}) — รอ ${Math.round(waitMs / 1000)}วิ วนใหม่ ${attempt + 1}/${maxAttempts}`, pct: 5 } });
+        await sleep(waitMs);
+      }
+    }
+  }
+  await finishJob(job.id, {
+    status: 'failed',
+    progress: { step: `ล้มเหลว (ครบ ${maxAttempts} รอบ)`, pct: 100 },
+    error: (lastErr?.message || 'ล้มเหลว').slice(0, 300),
+    errorType: lastErr?.errorType || null,
+    attempts: maxAttempts,
+    result: Array.isArray(lastErr?.trace) ? { trace: lastErr.trace.map((t) => ({ stage: t.stage, status: t.status })) } : null,
+  }).catch(() => {});
 }
 
 export async function POST(req) {
