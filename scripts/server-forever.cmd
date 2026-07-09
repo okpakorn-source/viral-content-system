@@ -10,9 +10,11 @@ if not exist ".next\BUILD_ID" (
   call npm run build
 )
 :loop
-echo [server-forever] start npm start... %date% %time%
+echo [server-forever] start cover-server (heap 4GB)... %date% %time%
 rem ★ 27 มิ.ย.: เก็บ stdout ลง _prodserver.log (วินิจฉัยปก/คิว) — แต่ละรอบเขียนทับ (ดูรอบล่าสุดง่าย)
-call npm start > "%~dp0..\_prodserver.log" 2>&1
+rem ★ 10 ก.ค.: npm start (heap default ~2GB) OOM ตายกลางท่อปกใหม่ (PNG intermediates+enhance กินแรมขึ้น)
+rem   → ใช้ cover-server (--max-old-space-size=4096) ที่มีไว้เพื่องานปกอยู่แล้ว
+call npm run cover-server > "%~dp0..\_prodserver.log" 2>&1
 echo [server-forever] server exited - restart in 5s
 timeout /t 5 /nobreak >nul
 goto loop
