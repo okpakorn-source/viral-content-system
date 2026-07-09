@@ -132,6 +132,24 @@ for (;;) {
       } catch {
         /* เงียบ */
       }
+
+      // 📱 Quick-test (9 ก.ค.): งานเทสปกที่ผู้ใช้กดบนเว็บ Vercel แล้ว "คลาวทำไม่ได้" (ref เต็มท่อ)
+      //   ถูกส่งเข้าคิวเครื่องทีม → หยิบมารัน 1 งาน (server fire-and-forget รันต่อเอง ไม่บล็อก worker)
+      try {
+        const r = await fetch(`${BASE}/api/quick-test`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'run' }),
+          signal: AbortSignal.timeout(20000),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (d.success && d.claimed) {
+          log(`📱 quick-test รับงาน ${d.claimed} (${d.kind}) — เครื่องทีมรันเบื้องหลังต่อ`);
+          wait = 3000;
+        }
+      } catch {
+        /* เงียบ */
+      }
     }
   } catch (e) {
     log('⚠️ เช็กคิวไม่ได้ (เซิร์ฟเวอร์ :3000 ล่ม/รีสตาร์ท?):', e.message);
