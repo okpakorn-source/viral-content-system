@@ -15,7 +15,7 @@ import { listRefCovers } from '@/lib/refCoverLibrary';
 import { composeAndVerify } from '@/lib/services/megaComposerService';
 
 export const runtime = 'nodejs';
-export const maxDuration = 120;
+export const maxDuration = 300; // audit 9 ก.ค.: ท่อเต็มมี LLM ≥4 จุด เวลาจริง 60-90s — 120 ตึงเกิน (ชน timeout = เสียค่า LLM ฟรี)
 
 const SLOT_ORDER = ['hero', 'reaction', 'action', 'context', 'circle'];
 const isDirect = (u) => /\.(jpe?g|png|webp|gif)([?#]|$)/i.test(String(u || ''));
@@ -54,6 +54,28 @@ export async function POST(req) {
     const imgs = await readImages(caseId);
     const pool = imgs.filter((x) => x.triage && x.triage.relevant !== false);
     if (pool.length < 3) return NextResponse.json({ success: false, error: `พูลเคสนี้มีแค่ ${pool.length} ใบ (ต้อง ≥3) — ยังตาคัดไม่พอ`, errorType: 'POOL_TOO_THIN' }, { status: 422 });
+
+    // ★ เฟส 0.2 (โหมดเทสนิ่ง): ส่ง slotPlan แช่แข็งมาเอง = ข้าม compass+S6 (LLM) ทั้งหมด
+    //   ใช้วัดเฉพาะชั้นประกอบ/ครอปแบบ before-after ได้จริง (อินพุตเดิมเป๊ะทุกรอบ) + ไม่เสียค่า LLM เลือกภาพซ้ำ
+    if (Array.isArray(body.slotPlan) && body.slotPlan.length >= 3) {
+      const t0f = Date.now();
+      const refsF = (await listRefCovers(500)).filter((r) => r.dna && r.imagePath && r.dna._reproducible !== false);
+      const refF = body.refId ? refsF.find((r) => r.id === body.refId) : null;
+      if (!refF) return NextResponse.json({ success: false, error: 'โหมด slotPlan แช่แข็งต้องระบุ refId ที่มีจริง', errorType: 'BAD_INPUT' }, { status: 400 });
+      const outF = await composeAndVerify({
+        newsTitle: c.analysis?.headline || c.newsSnippet || caseId,
+        slotPlan: body.slotPlan,
+        refDNA: refF.dna,
+        refImagePath: refF.imagePath,
+        stableOrder: body.stableOrder === true,
+      });
+      if (outF.success && outF.refSimilarity != null) outF.score = `เหมือน ref ${outF.refSimilarity}%`;
+      return NextResponse.json({
+        ...outF, caseId, frozenPlan: true,
+        refUsed: { id: refF.id, styleName: refF.styleName || refF.id, imagePath: refF.imagePath },
+        elapsed: `${((Date.now() - t0f) / 1000).toFixed(1)}s`,
+      }, { status: outF.success ? 200 : 422 });
+    }
 
     // ── เลือก ref (ระบุเอง หรือ auto-match ตามอารมณ์ข่าว) — เฉพาะใบที่ทำตามได้จริง ──
     const refs = (await listRefCovers(500)).filter((r) => r.dna && r.imagePath && r.dna._reproducible !== false);
@@ -104,7 +126,14 @@ export async function POST(req) {
     const slots = job.dossier.pickImages?.slots || s6.dossierPatch?.pickImages?.slots || {};
 
     // สร้าง slotPlan จากผล S6 (หลัก + สำรอง + thumbnail) — เหมือน s7_cover เป๊ะ
-    const urlTriage = new Map(imgs.map((x) => [String(x.imageUrl), { clean: x.triage?.clean !== false, newsScene: x.triage?.newsScene !== false, faces: Number(x.triage?.faceCount) || 0, thumbnailUrl: x.thumbnailUrl || '' }]));
+    // ★ เฟส 1.3 (slotPlan v2): พกป้ายตาคัดครบ (กล่อง = hint เท่านั้น — audit 9 ก.ค.)
+    const urlTriage = new Map(imgs.map((x) => [String(x.imageUrl), {
+      clean: x.triage?.clean !== false, newsScene: x.triage?.newsScene !== false,
+      faces: Number(x.triage?.faceCount) || 0, thumbnailUrl: x.thumbnailUrl || '',
+      person: x.triage?.person || null, category: x.triage?.category || null, emotion: x.triage?.emotion || null,
+      note: String(x.triage?.note || '').replace(/\s+/g, ' ').trim().slice(0, 64) || null,
+      faceBox: x.triage?.faceBox || null, peopleBox: x.triage?.peopleBox || null,
+    }]));
     const byId = new Map(imgs.map((x) => [String(x.id), x.imageUrl]));
     const primaryLinks = SLOT_ORDER.map((s) => slots[s]?.imageUrl).filter(Boolean);
     const backupUrls = SLOT_ORDER.flatMap((s) => slots[s]?.backups || []).map((b) => byId.get(String(b))).filter(Boolean)
@@ -118,13 +147,19 @@ export async function POST(req) {
     const slotPlan = allLinks.map((u) => {
       const primary = SLOT_ORDER.find((s) => slots[s]?.imageUrl === u);
       const tt = urlTriage.get(String(u)) || {};
-      return { url: u, thumbnailUrl: tt.thumbnailUrl || '', slot: primary || null, clean: tt.clean !== false, newsScene: tt.newsScene !== false, faces: tt.faces || 0, isHero: u === heroUrl };
+      return {
+        url: u, thumbnailUrl: tt.thumbnailUrl || '', slot: primary || null,
+        clean: tt.clean !== false, newsScene: tt.newsScene !== false, faces: tt.faces || 0, isHero: u === heroUrl,
+        person: tt.person || null, category: tt.category || null, emotion: tt.emotion || null,
+        note: tt.note || null, faceBox: tt.faceBox || null, peopleBox: tt.peopleBox || null, // เฟส 1.3
+      };
     });
     const out = await composeAndVerify({
       newsTitle: c.analysis?.headline || c.newsSnippet || caseId,
       slotPlan,
       refDNA: ref?.dna || null,
       refImagePath: ref?.imagePath || null,
+      stableOrder: body.stableOrder === true, // เฟส 0.2: โหมดเทสนิ่ง (default ปิด = production เดิม)
     });
     if (out.success && out.refSimilarity != null) out.score = `เหมือน ref ${out.refSimilarity}%`;
 
@@ -142,6 +177,7 @@ export async function POST(req) {
           template: out.template || '',
           score: out.score || null,
           base64: out.base64,
+          qcFlags: out.qcFlags || [], // เฟส 4.3
         });
       } catch { /* คลังล้มไม่กระทบผลเทส */ }
     }
@@ -152,6 +188,7 @@ export async function POST(req) {
       refUsed: ref ? { id: ref.id, styleName: ref.styleName || ref.id, imagePath: ref.imagePath } : null,
       archivedId: archived?.id || null, // เข้าคลัง /mega-covers แล้ว (โหลดภาพ: /api/mega-covers/img?id=..&dl=1)
       poolSize: pool.length,
+      slotPlanUsed: slotPlan, // เฟส 0.2: ให้เครื่องเทสเก็บไปแช่แข็ง (โหมด slotPlan ด้านบน)
       elapsed: `${((Date.now() - t0) / 1000).toFixed(1)}s`,
     }, { status: out.success ? 200 : 422 });
   } catch (err) {

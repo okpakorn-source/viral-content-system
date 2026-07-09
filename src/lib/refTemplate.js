@@ -28,6 +28,21 @@ function clusterLines(vals, tol = 6) {
 }
 const nearest = (v, lines) => lines.reduce((b, l) => (Math.abs(l - v) < Math.abs(b - v) ? l : b), lines[0]);
 
+// ★ เฟส 4.1b (9 ก.ค. — ไขปริศนา "กรอบเขียวทุกใบ"): DNA บางใบวัดสีกรอบเพี้ยนเป็นนีออนจอ
+//   (REF-mrbq90fp ช่อง evidence = #00FF00 ทั้งที่ปกจริงกรอบขาว) → ปกทุกใบที่ใช้ ref นั้นโดนวาดกรอบเขียวสด
+//   สีนีออนสุดขั้ว (ช่องสีชนเพดาน+ช่องอื่นเกือบศูนย์) ไม่มีปกจริงใช้ = วัดพลาดแน่นอน → บังคับขาว + log
+function _safeBorderColor(c) {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(String(c || '').trim());
+  if (!m) return '#FFFFFF';
+  const v = parseInt(m[1], 16);
+  const r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255;
+  if (Math.max(r, g, b) - Math.min(r, g, b) >= 200 && Math.min(r, g, b) <= 40) {
+    console.log(`[refTemplate] 🎨 สีกรอบจาก DNA นีออนผิดปกติ (#${m[1]}) → บังคับขาว (วัดพลาด)`);
+    return '#FFFFFF';
+  }
+  return `#${m[1]}`;
+}
+
 export function dnaToTemplateSpec(dna) {
   try {
     const t = dna?.template;
@@ -83,7 +98,7 @@ export function dnaToTemplateSpec(dna) {
         x: Math.round((x / 100) * W), y: Math.round((y / 100) * H),
         w: Math.round((w / 100) * W), h: Math.round((h / 100) * H),
         zIndex: Number(s.zIndex) || (isC ? 4 : 0),
-        border: s.border ? ((s.borderColor && s.borderColor !== '-') ? s.borderColor : '#FFFFFF') : null,
+        border: s.border ? _safeBorderColor((s.borderColor && s.borderColor !== '-') ? s.borderColor : '') : null, // เฟส 4.1b: กันสีนีออนวัดพลาด
         borderWidth: s.border ? Math.max(8, Math.round(((Number(s.borderWidthPct) || 1.5) / 100) * W)) : 0,
         // ★ 8 ก.ค. (ผู้ใช้สั่ง "จัดวางรูปต้องตรง ref"): note = ข้อมูลจัดวางของ ref ต่อช่อง — Director เห็นใน prompt (line 64)
         note: `ตามปกเป้า: ${s.role || ''}${s.pos ? ` @${s.pos}` : ''}${s.subject ? ` = ${s.subject}` : ''}${s.shot ? ` (${s.shot}${s.emotion ? '·' + s.emotion : ''})` : ''} — เลือกภาพจากพูลที่ใกล้แบบนี้ที่สุด`,

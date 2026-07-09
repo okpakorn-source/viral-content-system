@@ -338,10 +338,20 @@ const CIRCLE_CROP = { faceFrac: 0.72, faceTopAt: 0.45, maxFaceHFrac: 0.72, minFa
 // ★ rev.K1 (CASE-321 ลายตา — เทียบปกแสนไลค์: "ทุกช่อง" หน้าคน ~40-70% ของช่อง ไม่ใช่แค่ hero):
 //   เพิ่ม minFaceHFrac ช่องรอง 0.30 + วงกลม 0.35 — เดิม 0 = ภาพ wide หน้าจิ๋วผ่านออกทั้งฉาก (จมโซฟา/ป้ายไฟ)
 const MOMENT_CROP = { faceFrac: 0.84, faceTopAt: 0.40, maxFaceHFrac: 0.80, minFaceHFrac: 0.30 };
+// ── STORY (ช่องเล่าเรื่อง: action/context/evidence/moment) — ★ เฟส 2.1 (9 ก.ค. ผู้ใช้เคาะ) ──
+//   ปัญหาเดิม: ช่องบริบทใช้สูตรซูมหน้าเดียวกับช่องคน → "ภาพบริจาคเหลือแต่หน้า อ่านเรื่องไม่ออก"
+//   สูตรนี้ = หน้าเล็กลง เห็นฉาก/สิ่งของ/การกระทำ (หน้า ~16-52% ของช่อง ยังเห็นว่าเป็นใครแต่ฉากรอด)
+//   ⛔ ใช้เฉพาะช่อง story เท่านั้น — hero(HERO_CROP)/reaction(MOMENT_CROP)/circle(CIRCLE_CROP) ค่าเดิมห้ามแตะ
+const STORY_CROP  = { faceFrac: 0.55, faceTopAt: 0.38, maxFaceHFrac: 0.52, minFaceHFrac: 0.16 };
+const STORY_SLOT_RE = /^(action|context|evidence|moment)/i;
+function isStorySlot(slot) { return String(slot?.id || '') !== 'main' && STORY_SLOT_RE.test(String(slot?.id || '')); }
 
 /** พารามิเตอร์การจัดหน้าตามชนิด/ขนาดช่อง — ดึงจากค่าที่แยกต่อเลย์เอาต์ด้านบน (แก้ที่ const นั้นๆ) */
 function faceParamsForSlot(slot) {
   if (slot.shape === 'circle') return { ...CIRCLE_CROP };
+  // ★ เฟส 2.1: ช่อง story ไม่นับเป็น "ช่องเด่น/ฮีโร่" แม้ใหญ่ — เดิมช่องบริบทใหญ่ (>520x800 เช่น context_1 ของ
+  //   ref_dna) โดนจับใส่ HERO_CROP ซูมหน้า 88% = ต้นเหตุ "บริบทหาย" ที่จับได้จาก CropTrace
+  if (isStorySlot(slot)) return { ...STORY_CROP };
   const big = (slot.w * slot.h) >= (520 * 800); // ช่องเด่น/ฮีโร่
   if (slot.id === 'main' || big) return { ...HERO_CROP };
   return { ...MOMENT_CROP };
@@ -386,6 +396,57 @@ function groupRegionForSlot(faces, imgW, imgH, slotAspect) {
   const left = Math.min(Math.max(cx - regionWpx / 2, 0), imgW - regionWpx);
   const top = Math.min(Math.max(cy - regionHpx / 2, 0), imgH - regionHpx);
   return { left: Math.round(left), top: Math.round(top), width: Math.max(8, Math.round(regionWpx)), height: Math.max(8, Math.round(regionHpx)) };
+}
+
+/**
+ * ★ เฟส 2.2 (9 ก.ค. ผู้ใช้เคาะ + หลักฐานใบ 14:24 "ฉากมอบเช็คกว้าง = ดี"): ครอปช่องเล่าเรื่อง
+ * "คลุมทุกคน + ของสำคัญ" — ใช้เฉพาะช่อง story (action/context/evidence/moment) เท่านั้น
+ *   bbox ทุกหน้า → เผื่อหัว 0.5·faceH / ลงลำตัว 1.5·faceH (เห็นมือ/ของที่ถือ/ป้าย) / ข้าง 0.45·faceH
+ *   ∪ กล่อง subject จาก detector (สิ่งของ/บริเวณหลักของภาพ) → ขยายให้ตรง aspect (ไม่หด) → การ์ดหัวครบหลัง clamp
+ */
+function storyGroupRegion(fb, imgW, imgH, slotAspect) {
+  const faces = (fb.allFaces && fb.allFaces.length) ? fb.allFaces : [{ x1: fb.x1, y1: fb.y1, x2: fb.x2, y2: fb.y2 }];
+  const avgFh = Math.max(4, (faces.reduce((s, f) => s + (f.y2 - f.y1), 0) / faces.length) * imgH);
+  let L = Math.min(...faces.map((f) => f.x1)) * imgW - avgFh * 0.45;
+  let R = Math.max(...faces.map((f) => f.x2)) * imgW + avgFh * 0.45;
+  let T = Math.min(...faces.map((f) => f.y1)) * imgH - avgFh * 0.5;
+  let B = Math.max(...faces.map((f) => f.y2)) * imgH + avgFh * 1.5;
+  const s = fb.subject;
+  if (s && s.x2 > s.x1 && s.y2 > s.y1) {
+    L = Math.min(L, s.x1 * imgW); R = Math.max(R, s.x2 * imgW);
+    T = Math.min(T, s.y1 * imgH); B = Math.max(B, s.y2 * imgH);
+  }
+  L = Math.max(0, L); T = Math.max(0, T); R = Math.min(imgW, R); B = Math.min(imgH, B);
+  let w = Math.max(8, R - L), h = Math.max(8, B - T);
+  const cx = (L + R) / 2;
+  if (w / h > slotAspect) h = w / slotAspect; else w = h * slotAspect; // ขยายด้านที่ขาด — ไม่หด (หด=ตัดของที่ตั้งใจเก็บ)
+  if (w > imgW) { w = imgW; h = w / slotAspect; }
+  if (h > imgH) { h = imgH; w = h * slotAspect; }
+  let left = Math.min(Math.max(cx - w / 2, 0), imgW - w);
+  let top = Math.min(Math.max(T - Math.max(0, (h - (B - T)) * 0.35), 0), imgH - h); // bias บน: ล่างตัดได้ หัวห้ามตัด
+  const headTop = Math.max(0, Math.min(...faces.map((f) => f.y1)) * imgH - avgFh * 0.35);
+  if (top > headTop) top = Math.max(0, Math.min(headTop, imgH - h)); // การ์ดหัวครบหลัง clamp (แบบเดียวกับ hero)
+  return { left: Math.round(left), top: Math.round(top), width: Math.max(8, Math.round(w)), height: Math.max(8, Math.round(h)) };
+}
+
+/** ★ เฟส 4.4 (เคสผู้ใช้ 9 ก.ค. — "คนภาพล่างถูกวงกลมทับ"): ช่อง story ที่โดนวง/inset ทับ (slot._vis)
+ *  เลื่อนกรอบครอป (ขนาดเดิม) ให้ "กลุ่มคนทั้งหมด" ไปอยู่กลางโซนมองเห็นจริง + การ์ดหัวหลังเลื่อน
+ *  — เดิมกลไก _vis มีเฉพาะเส้นหน้าเดี่ยว story-group ไม่รู้จักหลบวงเลย */
+function _shiftRegionForVis(region, fb, imgW, imgH, vis) {
+  try {
+    const faces = (fb.allFaces && fb.allFaces.length) ? fb.allFaces : [{ x1: fb.x1, y1: fb.y1, x2: fb.x2, y2: fb.y2 }];
+    if (!faces.some((f) => f.x2 > f.x1)) return region;
+    const cx = ((Math.min(...faces.map((f) => f.x1)) + Math.max(...faces.map((f) => f.x2))) / 2) * imgW;
+    const cy = ((Math.min(...faces.map((f) => f.y1)) + Math.max(...faces.map((f) => f.y2))) / 2) * imgH;
+    const avgFh = Math.max(4, (faces.reduce((s, f) => s + (f.y2 - f.y1), 0) / faces.length) * imgH);
+    let left = Math.round(cx - region.width * Math.max(0.2, Math.min(0.8, (vis.x0 + vis.x1) / 2)));
+    let top = Math.round(cy - region.height * Math.max(0.2, Math.min(0.8, (vis.y0 + vis.y1) / 2)));
+    left = Math.min(Math.max(left, 0), imgW - region.width);
+    top = Math.min(Math.max(top, 0), imgH - region.height);
+    const headTop = Math.max(0, Math.min(...faces.map((f) => f.y1)) * imgH - avgFh * 0.35);
+    if (top > headTop) top = Math.max(0, Math.min(headTop, imgH - region.height)); // หัวห้ามหลุดหลังเลื่อน
+    return { ...region, left, top };
+  } catch { return region; }
 }
 
 /**
@@ -477,14 +538,35 @@ function fitCropInsideAspect(crop, imgW, imgH, slotAspect) {
   return { left: Math.round(px), top: Math.round(py), width: Math.max(8, Math.round(pw)), height: Math.max(8, Math.round(ph)) };
 }
 
+// ★ เฟส 0.1 (9 ก.ค. — แผนแก้ความฉลาดประกอบปก): trace 1 บรรทัด/ช่อง บอกว่าครอปเข้าสาขาไหนจริง
+//   log อย่างเดียว ห้ามมีผลต่อการครอป — ใช้ไล่ว่า "คนขาด/บริบทไม่เต็ม" มาจากสาขาไหนก่อนจูนเฟส 2
+// ★ audit ก่อน push (9 ก.ค. ค่ำ): เลิกใช้ globalThis (2 งานประกอบขนานในโปรเซสเดียว trace ปนข้ามงาน
+//   → ธง blind_crop ติดผิดใบเข้าคลังถาวร) → ส่ง sink array ต่อรอบเรียกผ่านพารามิเตอร์แทน
+function _cropTrace(slot, branch, fb, imgW, imgH, region, sink) {
+  try {
+    const faces = fb?.allFaces?.length ?? (fb && fb.x2 > fb.x1 ? 1 : 0);
+    const wp = Math.round((region.width / imgW) * 100), hp = Math.round((region.height / imgH) * 100);
+    console.log(`[CropTrace] slot=${slot.id} branch=${branch} faces=${faces} img=${imgW}x${imgH} region=${region.left},${region.top},${region.width}x${region.height} (w${wp}% h${hp}%)`);
+    if (Array.isArray(sink)) sink.push({ slot: slot.id, branch, faces, imgW, imgH, region: { ...region } });
+  } catch { /* trace ล้มห้ามกระทบการประกอบ */ }
+}
+
 /** ครอป+ย่อภาพลงช่องสี่เหลี่ยม (+กรอบสีถ้ามี) */
-async function renderRectTile(src, crop, slot, fb) {
+async function renderRectTile(src, crop, slot, fb, traceSink = null) {
   const meta = await sharp(src).metadata();
   const imgW = meta.width || 1, imgH = meta.height || 1;
   let region;
+  let _br = ''; // เฟส 0.1: ชื่อสาขาครอปสำหรับ trace
   if (crop && crop._final) {
     // ★ rev.FINAL: Final Cropper เห็นภาพจริงแล้วตัดสิน — เชื่อ 100% ห้ามชั้นไหนคำนวณทับ
     region = fitCropInsideAspect(crop, imgW, imgH, slot.w / slot.h);
+    _br = 'final-cropper';
+  } else if (usableSingleFace(fb) && isStorySlot(slot) && fb.subject && fb.subject.y2 > fb.subject.y1) {
+    // ★ เฟส 2.2: ช่อง story หน้าเดี่ยว + detector ชี้บริเวณหลักของภาพ → ครอปคลุม "คน + ของ/ฉากหลัก"
+    //   (สูตร face-center แม้กว้างขึ้นก็ยังพลาดป้าย/ของที่อยู่นอกแกนหน้า)
+    region = storyGroupRegion(fb, imgW, imgH, slot.w / slot.h);
+    _br = 'story-single-subject';
+    if (slot._vis) { region = _shiftRegionForVis(region, fb, imgW, imgH, slot._vis); _br = 'story-single-subject-vis'; } // เฟส 4.4
   } else if (usableSingleFace(fb)) {
     let { faceFrac, faceTopAt, maxFaceHFrac, minFaceHFrac } = faceParamsForSlot(slot);
     let faceCxAt = 0.5;
@@ -499,6 +581,7 @@ async function renderRectTile(src, crop, slot, fb) {
       minFaceHFrac = Math.min(minFaceHFrac || 0, vh * 0.55);
     }
     region = faceRegionForSlot(fb, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac, minFaceHFrac || 0, faceCxAt);
+    _br = 'single-face-zoom';
   } else if (usableGroupFaces(fb)) {
     // ★ rev.15i (ผู้ใช้ติช่อง 3-4-5 พัง "ไม่จัดกึ่งกลาง ไม่เน้นคน มองไม่รู้เรื่อง"):
     //   ทุกช่องครอป "หน้าใหญ่สุด" จัดกึ่งกลาง+เด่นชัดเสมอ — เลิกครอปกลุ่มหลวมที่คนตัวเล็กจมฉาก
@@ -507,12 +590,15 @@ async function renderRectTile(src, crop, slot, fb) {
     const _second = _sortedF[1];
     const _aL = (largest.x2 - largest.x1) * (largest.y2 - largest.y1);
     const _aS = _second ? (_second.x2 - _second.x1) * (_second.y2 - _second.y1) : 0;
-    const isHeroSlot = slot.id === 'main' || (slot.w * slot.h) >= (520 * 800);
+    // ★ เฟส 2.1: ช่อง story ห้ามเข้าเส้น hero-largest แม้ช่องใหญ่ — เส้นนั้นครอปหน้าใหญ่สุดคนเดียว
+    //   ทิ้งคนอื่น+ฉากทั้งหมด (จับได้จาก CropTrace: context_1/moment_3 → group-hero-largest ทุกรัน)
+    const isHeroSlot = slot.id === 'main' || ((slot.w * slot.h) >= (520 * 800) && !isStorySlot(slot));
     const { faceFrac, faceTopAt, maxFaceHFrac, minFaceHFrac } = faceParamsForSlot(slot);
     if (slot.id === 'circle' && _second && _aS >= 0.40 * _aL) {
       // ★ 1 ก.ค. (CASE-246): วงกลม = ช่องสื่อ "คู่/ความสัมพันธ์" → 2 หน้าเด่นขนาดใกล้กัน เก็บทั้งคู่
       //   (กันตัดคนที่ 2 เช่น พ่อ-ลูกสาว/คู่รัก — เดิมครอปหน้าใหญ่สุดอย่างเดียว ทำคนที่ 2 หลุดเฟรม)
       region = groupRegionForSlot([largest, _second], imgW, imgH, slot.w / slot.h);
+      _br = 'circle-pair-group';
     } else if (isHeroSlot) {
       // hero = หน้าเดี่ยวใหญ่สุดเด่น + เลื่อนพ้นคนข้างเคียง (บทเรียน CASE-119)
       region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, Math.min(0.96, faceFrac + 0.12), faceTopAt, Math.min(0.90, maxFaceHFrac + 0.08), minFaceHFrac || 0);
@@ -528,6 +614,13 @@ async function renderRectTile(src, crop, slot, fb) {
       if (rr > rMax) { const sh = rr - rMax; rl -= sh; rr -= sh; }
       if (rl < rMin) { const sh = rMin - rl; rl += sh; rr += sh; }
       region.left = Math.round(Math.max(0, Math.min(rl, imgW - region.width)));
+      _br = 'group-hero-largest';
+    } else if (isStorySlot(slot)) {
+      // ★ เฟส 2.2: ช่อง story หลายคน → คลุมทุกคน+ของ เสมอ — เลิก spread-cut ที่ "ตัดคนทิ้งโดยตั้งใจ"
+      //   (หลักฐานใบ 14:24: ฉากมอบเช็คเก็บกว้างทั้งป้าย+สองคน = ใบที่ผู้ใช้ชี้ว่าดี)
+      region = storyGroupRegion(fb, imgW, imgH, slot.w / slot.h);
+      _br = 'story-group';
+      if (slot._vis) { region = _shiftRegionForVis(region, fb, imgW, imgH, slot._vis); _br = 'story-group-vis'; } // เฟส 4.4: หลบวง/inset ที่ทับ
     } else {
       // ★ เฟส 3 จุด3 (CASE-265/266): วัด "การกระจายตัว" หน้าทุกคน = bbox กว้างรวม / ความกว้างภาพ
       const _spread = Math.max(...fb.allFaces.map(f => f.x2)) - Math.min(...fb.allFaces.map(f => f.x1));
@@ -535,9 +628,11 @@ async function renderRectTile(src, crop, slot, fb) {
         // คนยืนห่างกัน → group-crop คลุมทุกคน = คนริมโดนขอบตัดสกปรก → ครอปหน้าใหญ่สุดคนเดียวเด่น
         console.log(`[CoverV3] 👥 spread-crop: bbox ${(_spread * 100).toFixed(1)}% > 55% → ครอปหน้าเดียว (largest)`);
         region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
+        _br = 'spread-cut-largest';
       } else {
         // คนชิดกัน (ครอบครัว/คู่ถ่ายใกล้กัน) → group-crop เก็บทุกคนพอดีเฟรม (คง CASE-104)
         region = groupRegionForSlot(fb.allFaces, imgW, imgH, slot.w / slot.h);
+        _br = 'group-all';
       }
     }
   } else if (fb && fb.subject && fb.subject.y2 > fb.subject.y1) {
@@ -550,6 +645,7 @@ async function renderRectTile(src, crop, slot, fb) {
     const sx1 = Math.max(0, Math.min(s.x1, 0.95));
     const _c = { x: sx1, y: cy1, w: Math.min(1 - sx1, Math.max(0.05, s.x2 - s.x1)), h: Math.max(0.05, cy2 - cy1) };
     region = fitCropToSlotAspect(_c, imgW, imgH, slot.w / slot.h);
+    _br = 'subject-box';
   } else {
     // ★ rev.23 (CASE-237 ผู้ใช้สั่ง — กฎ "ห้ามภาพช่วงลำตัวเยอะ/ภาพยืนเต็มตัว" ทุกช่อง):
     //   ช่องที่ "ตรวจไม่เจอหน้า" + ครอป Director สูง (>0.5 ของภาพ = เห็นลำตัว/เต็มตัว) → ซูมเข้า "ช่วงบน-กลาง"
@@ -559,9 +655,13 @@ async function renderRectTile(src, crop, slot, fb) {
       const nw = crop.w * 0.80;                                  // แคบเข้าหน่อย (กันเก็บฉากซ้าย-ขวา)
       const nx = Math.max(0, Math.min(crop.x + (crop.w - nw) / 2, 1 - nw));
       _c = { x: nx, y: crop.y, w: nw, h: crop.h * 0.55 };        // เก็บช่วงบน 55% (หัว-อก) ทิ้งช่วงล่าง(ขา/ลำตัว)
+      _br = 'noface-top55';
+    } else {
+      _br = 'noface-director-asis';
     }
     region = fitCropToSlotAspect(_c, imgW, imgH, slot.w / slot.h);
   }
+  _cropTrace(slot, _br, fb, imgW, imgH, region, traceSink); // เฟส 0.1: log อย่างเดียว
   if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ` ${slot.id}`); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
   // rev.16: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — WB คุมโทนรวม + รีทัชเบา
   //   (1) gray-world WB ดึงคาสต์สีเข้าโทนเดียว  (2) sat/contrast บางๆ  (3) คมขึ้นพอดี
@@ -589,7 +689,7 @@ async function renderRectTile(src, crop, slot, fb) {
 }
 
 /** ครอป+ย่อ+มาส์กวงกลม+วงแหวนขอบ */
-async function renderCircleTile(src, crop, slot, fb) {
+async function renderCircleTile(src, crop, slot, fb, traceSink = null) {
   const d = slot.w;
   const bw = slot.borderWidth || 6;
   const meta = await sharp(src).metadata();
@@ -597,14 +697,18 @@ async function renderCircleTile(src, crop, slot, fb) {
   // rev.14L: วงกลม = "หน้าเดี่ยวใหญ่สุดเสมอ" (ผู้ใช้ย้ำ CASE-089/092: วงกลมต้องเห็นหน้าชัด ไม่ใช่กลุ่มหน้าเล็ก)
   //   ถ้าภาพมีหลายหน้า → ครอปหน้าใหญ่สุดเดี่ยว (ชัดกว่าโชว์ทั้งกลุ่มในวงเล็ก)
   let region;
+  let _br = ''; // เฟส 0.1: ชื่อสาขาครอปสำหรับ trace
   if (crop && crop._final) {
     // ★ rev.FINAL: เชื่อ Final Cropper 100% — หดเป็นจัตุรัสภายในกรอบ (bias บนกันตัดหัว)
     region = fitCropInsideAspect(crop, imgW, imgH, 1);
+    _br = 'final-cropper';
   } else if (fb && fb.x2 > fb.x1 && (!fb.allFaces || fb.allFaces.length <= 1)) {
     region = faceRegionForSlot(fb, imgW, imgH, 1, 0.66, 0.47, 0.66, 0.35); // ★rev.K1 +minFace 0.35 · เฟส2.5: วงกลมเผื่อขอบโค้ง (faceFrac/maxFaceHFrac 0.80→0.66) ให้ตรง CIRCLE_CROP
+    _br = 'single-face-zoom';
   } else if (fb && Array.isArray(fb.allFaces) && fb.allFaces.length >= 1) {
     const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
     region = faceRegionForSlot(largest, imgW, imgH, 1, 0.66, 0.47, 0.66, 0.35); // ★rev.K1 +minFace 0.35 · เฟส2.5: วงกลมเผื่อขอบโค้ง (faceFrac/maxFaceHFrac 0.80→0.66) ให้ตรง CIRCLE_CROP
+    _br = 'multi-face-largest';
   } else {
     // ★ rev.S3 (CASE-299 วงกลมครึ่งตัว): ภาพไม่มีพิกัดหน้า (เอกสาร EVIDENCE / ตรวจหน้าไม่เจอ)
     //   เดิม fitCropToSlotAspect "ขยาย" ด้านสั้นให้เป็นจัตุรัส = เห็นตัว/ฉากเพิ่ม → เปลี่ยนเป็น "หด" ด้านยาวลง
@@ -616,8 +720,10 @@ async function renderCircleTile(src, crop, slot, fb) {
     px = Math.min(Math.max(px, 0), imgW - side);
     py = Math.min(Math.max(py, 0), imgH - side);
     region = { left: Math.round(px), top: Math.round(py), width: Math.round(side), height: Math.round(side) };
+    _br = 'noface-square';
   }
 
+  _cropTrace(slot, _br, fb, imgW, imgH, region, traceSink); // เฟส 0.1: log อย่างเดียว
   if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ' circle'); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
   const cbase = await sharp(src).extract(region).resize(d, d, { fit: 'fill' }).toBuffer();
   const cwb = await grayWorldGains(cbase);
@@ -645,8 +751,11 @@ async function renderCircleTile(src, crop, slot, fb) {
  * ประกอบปกตามคำสั่ง Director — เรียงตาม zIndex (ต่ำ→สูง) ให้โซนซ้อนเหลื่อมแบบปกไวรัลจริง
  * @returns {Promise<Buffer>} JPEG buffer
  */
-export async function executeCover({ assignments, imageBuffers, templateSpec, faceBoxes = [] }) {
+export async function executeCover({ assignments, imageBuffers, templateSpec, faceBoxes = [], traceSink = null }) {
   const { canvasW, canvasH } = templateSpec;
+  // เฟส 0.1 + audit: trace ต่อรอบเรียกผ่าน traceSink (array ของผู้เรียก) — ไม่มี state แชร์ข้ามงาน
+  const _sink = Array.isArray(traceSink) ? traceSink : null;
+  if (_sink) _sink.length = 0; // รอบประกอบใหม่ (เช่นรอบแก้ตามตา) เริ่ม trace ใหม่
 
   const ordered = [...assignments].sort((a, b) => {
     const za = templateSpec.slots.find(s => s.id === a.slotId)?.zIndex ?? 0;
@@ -661,8 +770,8 @@ export async function executeCover({ assignments, imageBuffers, templateSpec, fa
     const src = imageBuffers[a.imageIndex]?.buffer;
     if (!slot || !src) throw new Error(`EXECUTE_MISSING: slot=${a.slotId} image=#${a.imageIndex}`);
     const fb = faceBoxes?.[a.imageIndex] || null; // rev.14: ป้อนพิกัดหน้าให้ครอปหน้าเต็มช่อง
-    if (slot.shape === 'circle') circleComps.push(await renderCircleTile(src, a.crop, slot, fb));
-    else rectComps.push(await renderRectTile(src, a.crop, slot, fb));
+    if (slot.shape === 'circle') circleComps.push(await renderCircleTile(src, a.crop, slot, fb, _sink));
+    else rectComps.push(await renderRectTile(src, a.crop, slot, fb, _sink));
   }
 
   const bg = { create: { width: canvasW, height: canvasH, channels: 3, background: { r: 255, g: 255, b: 255 } } };

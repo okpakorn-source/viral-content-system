@@ -120,7 +120,9 @@ export async function vetImages({ images, subjects, newsGist, onProgress, onRetr
         for (const it of items) byIdx[it.index] = it;
         ok.forEach((x, k) => {
           const it = byIdx[k];
-          if (!it) { out.push({ ...x.im }); failed++; return; }
+          // ★ audit B-R4: Gemini degrade ตอบไม่ครบฟิลด์ (ไม่มี relevant) → ห้าม default ป้ายบวกฟรี
+          //   ข้ามไม่ติดป้าย (รอบหน้าตาคัดใหม่) — คงหลัก "กัน false drop" แต่ไม่ปล่อยขยะป้ายดีเข้าพูล
+          if (!it || typeof it.relevant === 'undefined') { out.push({ ...x.im }); failed++; return; }
           const triage = buildTriage(it, x.r);
           out.push({ ...x.im, triage });
           if (triage.relevant === false) dropped++; else kept++;
@@ -176,6 +178,7 @@ export async function triageLibrary({ images, subjects, newsGist, onProgress, on
     for (const it of items) {
       const src = loaded[it.index];
       if (!src) continue;
+      if (typeof it.relevant === 'undefined') continue; // ★ audit B-R4: ตอบครึ่งฟิลด์ = ไม่ติดป้าย รอรอบหน้า (กันป้ายบวกฟรี)
       const triage = buildTriage(it, src);
       map[src.im.id] = triage;
       tagged++;

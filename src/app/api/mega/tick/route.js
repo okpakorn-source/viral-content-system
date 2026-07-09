@@ -84,9 +84,11 @@ export async function POST(req) {
 
     if (job.status === 'pending') await updateJob(job.id, { status: 'running' });
 
-    // นับ attempt ของขั้นนี้
+    // นับ attempt ของขั้นนี้ — ★ audit B-R1 (9 ก.ค.): นับเฉพาะรอบที่ "พังจริง" (status='failed')
+    //   เดิมนับรวมรอบ waiting (s5_triage/s7_wait สะสมหลายรอบเป็นปกติ) → network blip เดียว (:3000 restart ~5s)
+    //   ทำ attempt เกินเพดานทันที job ตายทั้งงาน — ขัดดีไซน์ "รอทำซ้ำจนสำเร็จ"
     const runs = await listRuns(job.id);
-    const attempt = runs.filter((r) => r.stage === job.stage && r.idempotencyKey === idemKey).length + 1;
+    const attempt = runs.filter((r) => r.stage === job.stage && r.idempotencyKey === idemKey && r.status === 'failed').length + 1;
 
     let result;
     try {

@@ -110,7 +110,7 @@ ${JSON.stringify(slots, null, 0).slice(0, 1800)}`;
 
 // ---------- S6 ผู้กำกับจับคู่ช่อง: ป้าย triage (จ่ายเงินแล้วใน S5) + สูตรปกแสนไลค์ → ช่องละใบ+สำรอง ----------
 // ไม่ดูภาพซ้ำ (ประหยัด) — ตัดสินจาก metadata ที่ตาติดป้ายไว้: ใคร/หมวด/อารมณ์/คุณภาพ/จำนวนหน้า
-export async function slotDirectorBrain({ imagesMeta, compass, deskTitle, refDNA = null, artBrief = null }) {
+export async function slotDirectorBrain({ imagesMeta, compass, deskTitle, refDNA = null, artBrief = null, sceneInventory = '' }) {
   // 🎨 8 ก.ค. (ทีมกราฟฟิก): มีใบสั่งจากบก.ศิลป์ → ใช้ใบสั่งนำ (แปลงเป็นข่าวนี้แล้ว แม่นกว่า ref ดิบ)
   const briefBlock = artBrief?.orders?.length ? `
 === 🎨 ใบสั่งงานจากบก.ศิลป์ (แปลงปกต้นแบบเป็นข่าวนี้แล้ว — ทำตามใกล้ที่สุดเท่าที่พูลมีจริง) ===
@@ -135,13 +135,39 @@ ${artBrief.orders.map((o) => `- ช่อง ${o.role}${o.pos ? `@${o.pos}` : ''
 - context: บริบท สถานที่ สิ่งของ ที่เล่าเรื่อง
 - circle: โมเมนต์-หลักฐานเด็ด (ภาพวงกลมที่คนต้องซูมดู)
 กฎเหล็ก: (1) ถูกคน 100% เหนือทุกข้อ — hero ต้องเป็นตัวละครหลักตามเข็มทิศเท่านั้น (2) ทุกช่องคนละภาพ ห้ามซ้ำ และควรคนละฉาก (3) เลือกจาก id ในรายการเท่านั้น (4) quality ต่ำ (<4) ใช้เมื่อจำเป็นจริงๆ (5) ช่องไหนไม่มีภาพเข้าเกณฑ์จริงๆ ให้ id=null พร้อมเหตุผล — ห้ามฝืนยัดภาพผิดคน (6) ภาพ clean=false (มีลายน้ำ/ตัวหนังสือทับ) ห้ามขึ้นช่อง เลือกภาพ clean=true ก่อนเสมอ — ยอมใช้ clean=false เฉพาะเมื่อไม่มีภาพสะอาดที่ถูกคน/เข้าเกณฑ์จริงๆ (hero ยังยึด "ถูกคน 100%" เหนือข้อนี้) (7) ภาพ newsScene=false = ภาพแฟ้มจากงาน/บริบทอื่น (เช่น ชุดกาล่า/พรมแดง ทั้งที่ข่าวคือเรื่องครอบครัว) — เลี่ยงเสมอ ใช้เฉพาะไม่มีภาพเหตุการณ์จริงให้เลือก
+(8) ★ปกทั้งใบต้องเล่าเรื่องครบ: 5 ช่องรวมกันต้องเห็น "คน → กำลังทำอะไร → หลักฐาน/สถานที่" — ห้ามเป็นพอร์ตเทรตล้วนทุกช่อง ใช้ note แยก "โมเมนต์จริง" (กำลังมอบ/ทำ/ยก/ไหว้) จาก "ยืนโพสเฉยๆ"
+(9) ★ฉากห้ามซ้ำข้ามช่อง: สองช่องห้ามมาจากฉาก/โมเมนต์เดียวกัน (เทียบจาก note — เฟรมจากคลิปเดียวกัน/เวทีเดียวกันหลายรูป = ฉากเดียวกัน)
+(10) ★circle ควรเป็น "บุคคลที่สอง" ของเรื่อง (person คนละคนกับ hero) ถ้าพูลมีให้เลือก — วงกลมซ้ำหน้าคนเดียวกับ hero = ปกดูจน
 ตอบ JSON เท่านั้น:
 {"slots":{"hero":{"id":"...","reason":"สั้นๆ","backups":["id","id"]},"reaction":{...},"action":{...},"context":{...},"circle":{...}},"note":"ข้อสังเกตรวม 1 ประโยค"}`;
+  // ★ เฟส 1.2: meta มี note/orient เพิ่ม — งบ prompt แบบ "ตัดท้ายรายใบ" แทน slice กลางก้อน
+  //   (เดิม slice(0,9000) หั่นกลาง JSON — ใบท้ายคิวหายเงียบ+ก้อนพัง) · เรียงสะอาด+คุณภาพมาก่อนแล้ว ตัดท้าย=ตัดใบแย่สุด
+  const IMG_META_BUDGET = 18000;
+  const _lines = (imagesMeta || []).map((m) => JSON.stringify(m));
+  let _included = 0, _len = 0;
+  for (const ln of _lines) {
+    if (_len + ln.length + 2 > IMG_META_BUDGET) break;
+    _len += ln.length + 2;
+    _included++;
+  }
+  if (_included < _lines.length) console.log(`[MEGA S6] ✂️ meta เกินงบ prompt — ส่ง ${_included}/${_lines.length} ใบ (ใบท้ายคิว=คะแนนต่ำสุดถูกตัด)`);
+  // ★ เฟส 3.3: compass เป็นบล็อกโครงสร้าง — เดิม JSON.stringify(...).slice(0,1200) หั่นกลางก้อน
+  //   visualDreamShots/doNotUse อยู่ท้าย object โดนตัดหายเงียบ = ช็อตในฝัน/ข้อห้ามไม่เคยถึงสมองจริง
+  const _c = compass || {};
+  const _dnu = [].concat(_c.doNotUse || []).filter(Boolean);
+  const compassBlock = [
+    `มุมเล่า: ${String(_c.angle || '').slice(0, 220)}`,
+    `อารมณ์: ${[_c.primaryEmotion, ...(_c.secondaryEmotions || [])].filter(Boolean).join('/').slice(0, 80)}`,
+    `ตัวละคร: ${(_c.mainCharacters || []).map((m) => `${m?.name || ''}(${m?.role || ''})`).join(', ').slice(0, 220)}`,
+    (_c.visualDreamShots || []).length ? `ช็อตในฝันต่อช่อง: ${(_c.visualDreamShots || []).map((v) => `${v?.slot || '?'}=${String(v?.description || '').slice(0, 70)}`).join(' · ').slice(0, 600)}` : '',
+    _dnu.length ? `⛔ ห้ามใช้ภาพแนวนี้เด็ดขาด: ${_dnu.join(' / ').slice(0, 220)}` : '',
+  ].filter(Boolean).join('\n');
   const user = `ข่าว: ${String(deskTitle || '').slice(0, 120)}
-เข็มทิศเรื่อง: ${JSON.stringify(compass || {}, null, 0).slice(0, 1200)}
-${refBlock}
-คลังภาพที่ตายืนยันแล้วว่าเกี่ยวข้อง (metadata ต่อใบ):
-${JSON.stringify(imagesMeta, null, 0).slice(0, 9000)}`;
+เข็มทิศเรื่อง:
+${compassBlock}
+${sceneInventory ? `🗺️ ฉากที่มีในพูล (จาก note ตาคัด · ×N = จำนวนใบ): ${String(sceneInventory).slice(0, 700)}\n` : ''}${refBlock}
+คลังภาพที่ตายืนยันแล้วว่าเกี่ยวข้อง (metadata ต่อใบ — note=คำบรรยายฉากจากตาคัด ใช้แยกโมเมนต์จริงจากภาพโพส; ภาพจากคลิป (src=clip/youtube) note มัก generic ให้ดู persons/emotion/category แทน; orient=tall/wide/sq สัดส่วนภาพ):
+[${_lines.slice(0, _included).join(',\n')}]`;
   const out = await callBrain({ system, user, maxTokens: 1100, temperature: 0.1, cost: { step: 'MEGA S6 slot director' } });
   return parseJson(out.text || out);
 }

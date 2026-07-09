@@ -59,6 +59,7 @@ export async function addMegaCover(rec = {}) {
     template: rec.template || '',
     score: rec.score ?? null,
     throughMega: rec.throughMega !== false,
+    qcFlags: Array.isArray(rec.qcFlags) && rec.qcFlags.length ? rec.qcFlags : undefined, // เฟส 4.3: ธงคุณภาพต่อใบ
     hasCloudImage: false,
     trace: Array.isArray(rec.trace) ? rec.trace.map((t) => ({ stage: t.stage, status: t.status })) : undefined,
   };

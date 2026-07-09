@@ -115,7 +115,14 @@ export async function POST(req) {
     try {
       const backupIds = SLOT_ORDER.flatMap((s) => slots[s]?.backups || []);
       const lib = await fetch(`${origin}/api/images/${encodeURIComponent(job.dossier.images?.caseId || '')}`, { signal: AbortSignal.timeout(30000) }).then((x) => x.json()).catch(() => null);
-      urlTriage = new Map((lib?.images || []).map((x) => [String(x.imageUrl), { clean: x.triage?.clean !== false, faces: Number(x.triage?.faceCount) || 0, thumbnailUrl: x.thumbnailUrl || '' }]));
+      // ★ เฟส 1.3 (slotPlan v2): พกป้ายตาคัดครบ + newsScene ที่เส้นนี้ไม่เคยส่ง (กล่อง = hint เท่านั้น — audit 9 ก.ค.)
+      urlTriage = new Map((lib?.images || []).map((x) => [String(x.imageUrl), {
+        clean: x.triage?.clean !== false, newsScene: x.triage?.newsScene !== false,
+        faces: Number(x.triage?.faceCount) || 0, thumbnailUrl: x.thumbnailUrl || '',
+        person: x.triage?.person || null, category: x.triage?.category || null, emotion: x.triage?.emotion || null,
+        note: String(x.triage?.note || '').replace(/\s+/g, ' ').trim().slice(0, 64) || null,
+        faceBox: x.triage?.faceBox || null, peopleBox: x.triage?.peopleBox || null,
+      }]));
       if (backupIds.length) {
         const byId = new Map((lib?.images || []).map((x) => [String(x.id), x.imageUrl]));
         const isDirect = (u) => /\.(jpe?g|png|webp|gif)([?#]|$)/i.test(String(u || ''));
@@ -138,9 +145,14 @@ export async function POST(req) {
         url: u,
         slot: primary || null,
         clean: primary ? (slots[primary].clean !== false) : (t.clean !== false),
+        newsScene: primary ? (slots[primary].newsScene !== false) : (t.newsScene !== false), // เฟส 1.3: เส้นนี้เดิมไม่ส่ง
         faces: primary ? (slots[primary].faces || 0) : (t.faces || 0),
         isHero: u === heroUrl,
         thumbnailUrl: t.thumbnailUrl || '',
+        person: primary ? (slots[primary].person || t.person || null) : (t.person || null),
+        category: primary ? (slots[primary].category || t.category || null) : (t.category || null),
+        emotion: primary ? (slots[primary].emotion || t.emotion || null) : (t.emotion || null),
+        note: t.note || null, faceBox: t.faceBox || null, peopleBox: t.peopleBox || null, // เฟส 1.3
       };
     });
 
@@ -187,6 +199,7 @@ export async function POST(req) {
           imageCaseId: job.dossier.images?.caseId || null,
           coverCaseId: cover.caseId || null,
           coverPath, base64: cover.base64, template: cover.template, score: cover.score, throughMega: true, trace,
+          qcFlags: Array.isArray(cover.qcFlags) ? cover.qcFlags : [], // audit: ธงคุณภาพครบทุกทางเข้าคลัง
         });
         if (!coverPath && ent?.id) coverPath = `/api/mega-covers/img?id=${encodeURIComponent(ent.id)}`;
       }

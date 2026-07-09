@@ -118,10 +118,75 @@ function cropAllFaces(fb, slotAspect = null) {
   return { x: +cx1.toFixed(3), y: +cy1.toFixed(3), w: +(cx2 - cx1).toFixed(3), h: +(cy2 - cy1).toFixed(3), _fx: +((x1 + x2) / 2).toFixed(3), _fy: +((y1 + y2) / 2).toFixed(3) };
 }
 
+// ---------- ★ เฟส 4.1 (9 ก.ค. — กรอบเขียวเฟรมคลิปหลุดขึ้นปกทุกใบ): ตัดกรอบสีทึบที่ขอบภาพก่อนเข้าท่อ ----------
+//   เกณฑ์เข้มกันตัดภาพจริง: แถบขอบต้อง "เรียบสนิท" (std ต่อช่องสี ≤9 ทั้งเส้น) และเป็น สีจัด (chroma>90
+//   เช่นเขียวคีย์/แดง UI) หรือดำสนิท/ขาวสนิท (letterbox/การ์ดโพสต์) — สูงสุด 10%/ด้าน · ล้ม = คืนภาพเดิม
+async function trimVividBorder(buf) {
+  try {
+    const sharp = (await import('sharp')).default;
+    const meta = await sharp(buf).metadata();
+    const W = meta.width || 0, H = meta.height || 0;
+    if (W < 60 || H < 60) return { buf, trimmed: null };
+    const S = 100;
+    const raw = await sharp(buf).resize(S, S, { fit: 'fill' }).toColourspace('srgb').removeAlpha().raw().toBuffer(); // audit: บังคับ 3 ช่องสี (ภาพขาวดำ 1 ช่องเคยทำ index เพี้ยน trim เงียบ)
+    const px = (x, y) => { const o = (y * S + x) * 3; return [raw[o], raw[o + 1], raw[o + 2]]; };
+    const isArtifactLine = (getPx) => {
+      const sum = [0, 0, 0], sum2 = [0, 0, 0];
+      for (let i = 0; i < S; i++) { const c = getPx(i); for (let k = 0; k < 3; k++) { sum[k] += c[k]; sum2[k] += c[k] * c[k]; } }
+      const mean = sum.map((v) => v / S);
+      const std = sum2.map((v, k) => Math.sqrt(Math.max(0, v / S - mean[k] * mean[k])));
+      if (Math.max(...std) > 9) return false; // ไม่เรียบ = ภาพจริง (ฟ้า/ผนังมี noise เกินนี้)
+      const chroma = Math.max(...mean) - Math.min(...mean);
+      const lum = (mean[0] + mean[1] + mean[2]) / 3;
+      return chroma > 90 || lum < 14 || lum > 243;
+    };
+    const depth = (side) => {
+      let d = 0;
+      for (let j = 0; j < 10; j++) {
+        const ok = side === 't' ? isArtifactLine((i) => px(i, j))
+          : side === 'b' ? isArtifactLine((i) => px(i, S - 1 - j))
+            : side === 'l' ? isArtifactLine((i) => px(j, i))
+              : isArtifactLine((i) => px(S - 1 - j, i));
+        if (!ok) break;
+        d++;
+      }
+      return d;
+    };
+    const t = depth('t'), b = depth('b'), l = depth('l'), r = depth('r');
+    if (t + b + l + r === 0) return { buf, trimmed: null };
+    const left = Math.round((l / S) * W), top = Math.round((t / S) * H);
+    const width = Math.max(8, W - left - Math.round((r / S) * W));
+    const height = Math.max(8, H - top - Math.round((b / S) * H));
+    const out = await sharp(buf).extract({ left, top, width, height }).jpeg({ quality: 95 }).toBuffer();
+    return { buf: out, trimmed: `t${t} b${b} l${l} r${r} (%)` };
+  } catch { return { buf, trimmed: null }; }
+}
+
 // ---------- แปลงผล detectFaces (พิกเซล) → faceBox normalized แบบที่ executeCover ใช้ ----------
 function normalizeFaceBox(fd) {
-  if (!fd?.hasFaces || !fd.faces?.length) return null;
+  if (!fd) return null;
   const W = fd.imageWidth || 1, H = fd.imageHeight || 1;
+  // ★ เฟส 1.4 (9 ก.ค. — root cause #3): detector คืน mainSubject/textRegion/watermarkRegion/hasBigText มาอยู่แล้ว
+  //   แต่เดิมถูกทิ้งตรงนี้ทั้งหมด → สาขา fb.subject ใน executor เป็น dead code + หลบลายน้ำ/แคปชั่นเป็นอัมพาต
+  const subject = (fd.mainSubject && fd.mainSubject.width > 0 && fd.mainSubject.height > 0)
+    ? {
+        x1: +(fd.mainSubject.x / W).toFixed(3), y1: +(fd.mainSubject.y / H).toFixed(3),
+        x2: +((fd.mainSubject.x + fd.mainSubject.width) / W).toFixed(3),
+        y2: +((fd.mainSubject.y + fd.mainSubject.height) / H).toFixed(3),
+      }
+    : null;
+  const extras = {
+    subject,
+    textRegion: fd.textRegion || null,        // normalized x1y1x2y2 อยู่แล้ว
+    watermarkRegion: fd.watermarkRegion || null,
+    hasText: !!fd.hasBigText,
+  };
+  if (!fd.hasFaces || !fd.faces?.length) {
+    // เดิม return null ทั้งก้อน → ภาพไร้หน้าถูกครอปตาบอด (เดาช่วงบน) — คืนกล่องว่าง+extras ให้ executor ใช้ subject แทน
+    return (subject || extras.textRegion || extras.watermarkRegion)
+      ? { x1: 0, y1: 0, x2: 0, y2: 0, imgW: W, imgH: H, count: 0, allFaces: [], ...extras }
+      : null;
+  }
   const largest = fd.faces.reduce((b, f) => (f.width * f.height > b.width * b.height ? f : b), fd.faces[0]);
   const area = largest.width * largest.height;
   const sig = fd.faces.filter((f) => f.width * f.height >= 0.35 * area); // ตัดหน้าจิ๋วฉากหลัง
@@ -134,22 +199,43 @@ function normalizeFaceBox(fd) {
       x1: +(f.x / W).toFixed(3), y1: +(f.y / H).toFixed(3),
       x2: +((f.x + f.width) / W).toFixed(3), y2: +((f.y + f.height) / H).toFixed(3),
     })),
+    ...extras,
   };
 }
 
 // ---------- แกนประกอบ (ใช้ร่วม compose/verify) ----------
-async function composeCore({ slotPlan = [], refDNA = null }) {
+async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }) {
   if (!Array.isArray(slotPlan) || !slotPlan.length) {
     return { error: 'ไม่มี slotPlan — S6 ต้องเลือกภาพมาก่อน', errorType: 'NO_SLOT_PLAN' };
   }
+  // ★ เฟส 4.3: ธงคุณภาพ deterministic ต่อใบ (แนบ response+คลัง) — ใช้แทน ref% ที่พิสูจน์แล้วว่าสวนตาคนจริง
+  const qcFlags = [];
 
   // ── ① โหลดภาพทั้งแผน (หลัก+สำรอง) — ลิงก์ตรงพัง → thumbnail ──
+  // ★ เฟส 0.2 (โหมดเทสนิ่ง): stableOrder=true → เก็บผลตาม index ของ slotPlan แทน "ลำดับ fetch เสร็จ"
+  //   (race เดิมทำให้ช่องรอง/วงกลมสุ่มผลข้ามรอบ เทียบก่อน-หลังจูนไม่ได้) · default ปิด = production เดิมเป๊ะ
   const loaded = [];
-  await Promise.all(slotPlan.map(async (p) => {
+  const _byIdx = new Array(slotPlan.length).fill(null);
+  await Promise.all(slotPlan.map(async (p, _i) => {
     let buf = await fetchOne(p.url);
     if (!buf && p.thumbnailUrl && p.thumbnailUrl !== p.url) buf = await fetchOne(p.thumbnailUrl);
-    if (buf && buf.length > 5000) loaded.push({ ...p, buffer: buf });
+    if (buf && buf.length > 5000) {
+      // ★ เฟส 4.1: ตัดกรอบสีทึบ/สีจัดที่ขอบ (กรอบเขียวเฟรมคลิป/letterbox) ก่อน detect/ครอป —
+      //   ทำตรงนี้ = ทุกชั้นถัดไป (หน้า/aHash/คอลลาจ/ครอป) เห็นภาพสะอาดตรงกันหมด
+      const tr = await trimVividBorder(buf);
+      if (tr.trimmed) {
+        console.log(`[MegaComposer] ✂️🟩 ตัดกรอบสีขอบภาพ ${tr.trimmed} — ...${String(p.url).slice(-36)}`);
+        qcFlags.push(`border_trimmed:${p.slot || 'backup'}`);
+        buf = tr.buf;
+      }
+      if (stableOrder) _byIdx[_i] = { ...p, buffer: buf };
+      else loaded.push({ ...p, buffer: buf });
+    }
   }));
+  if (stableOrder) {
+    for (const it of _byIdx) if (it) loaded.push(it);
+    console.log('[MegaComposer] 🔒 stableOrder: เรียงภาพตามลำดับ slotPlan (โหมดเทสนิ่ง)');
+  }
   console.log(`[MegaComposer] โหลดภาพ ${loaded.length}/${slotPlan.length}`);
   if (loaded.length < 3) {
     return { error: `ภาพโหลดได้ ${loaded.length} ใบ (ต้อง ≥3) — ลิงก์พัง/ภาพข่าวนี้หายาก`, errorType: 'INSUFFICIENT_IMAGES' };
@@ -167,6 +253,13 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
     fdMap = await batchDetectFaces(loaded.map((im, i) => ({ id: `mc_${i}`, buffer: im.buffer })));
     faceBoxes = loaded.map((im, i) => normalizeFaceBox(fdMap?.get?.(`mc_${i}`)));
     console.log(`[MegaComposer] ตาหาหน้า (รอบ 2): เจอ ${faceBoxes.filter(Boolean).length}/${loaded.length} ใบ`);
+    // ★ audit B-R2 (คำถามผู้ใช้ "ล่มต้องรอทำซ้ำ ไม่ทำผลเพี้ยน"): retry แล้วยังศูนย์ทั้งชุด ทั้งที่ตาคัด
+    //   ยืนยันว่ามีหน้า (slotPlan.faces>0 หลายใบ) = OpenAI ล่มยาว → คืน error ให้คิว/quick-test วนใหม่
+    //   แทนปล่อย "ปกครอปตาบอดทุกช่อง" ออกไปเงียบๆ (เพี้ยนหนักสุดในโรงประกอบ)
+    const expectFaces = loaded.filter((im) => Number(im.faces) > 0).length;
+    if (faceBoxes.filter(Boolean).length === 0 && expectFaces >= 2) {
+      return { error: `ตาหาหน้าล่มทั้งชุด (ตาคัดยืนยันว่ามีหน้า ${expectFaces} ใบ) — กันปกครอปตาบอด รอระบบฟื้นแล้วลองใหม่`, errorType: 'FACE_EYE_DOWN' };
+    }
   }
 
   // ── ②b 🔢 aHash 8x8 ต่อภาพ (คณิตล้วน) — กันภาพซ้ำ/เฟรมติดกันจากคลิปลงหลายช่อง (ลายตา) ──
@@ -215,10 +308,25 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
     }
     // ★ 9 ก.ค. แก้บั๊กเงียบ (AC-0023): DNA slots จริงอยู่ที่ template.slots — เดิมชี้ refDNA.slots (ไม่มีจริง)
     //   → meta ว่างตลอด ข้อมูล subject/faceSizePct ต่อช่องจาก ref ที่ตาคนยืนยันไม่เคยถูกใช้
-    //   ใช้ได้เฉพาะเมื่อจำนวนช่องตรงกับ spec (ด่านกันชนอาจตัดช่อง → ลำดับเพี้ยน = ไม่ใช้ ปลอดภัยกว่า)
+    // ★ เฟส 1.5 (9 ก.ค. บ่าย — root cause #8): เลิก gate "จำนวนช่องต้องเท่ากันเป๊ะ" (โครงถูกซ่อม/ตัดช่องเมื่อไหร่
+    //   meta หายทั้งชุด) — id ของ spec ฝัง index ต้นทางอยู่แล้ว (`role_${i}` จาก refTemplate.js) → map รายช่อง:
+    //   main→ช่อง role hero · circle ลูกที่ n→วงกลมลูกที่ n ของ DNA · `xxx_${i}`→template.slots[i]
     if (spec) {
       const tSlots = refDNA.template?.slots || refDNA.slots || [];
-      refSlotMeta = tSlots.length === spec.slots.length ? tSlots : null;
+      if (tSlots.length) {
+        const isCirc = (s) => String(s?.shape || '').toLowerCase() === 'circle' || /circle|วงกลม/i.test(String(s?.role || ''));
+        const circIdx = tSlots.map((s, i) => (isCirc(s) ? i : -1)).filter((i) => i >= 0);
+        const heroT = tSlots.find((s) => !isCirc(s) && /hero/i.test(String(s?.role || ''))) || null;
+        let circleSeen = 0;
+        refSlotMeta = spec.slots.map((sl) => {
+          if (sl.shape === 'circle') { const ti = circIdx[circleSeen++]; return ti != null && tSlots[ti] ? tSlots[ti] : null; }
+          if (sl.id === 'main') return heroT;
+          const m = String(sl.id).match(/_(\d+)$/);
+          return m && tSlots[Number(m[1])] ? tSlots[Number(m[1])] : null;
+        });
+        if (refSlotMeta.every((x) => !x)) refSlotMeta = null;
+        else console.log(`[MegaComposer] 🎯 ref meta ต่อช่อง: ${refSlotMeta.map((x, i) => `${spec.slots[i].id}=${x ? (x.shot || x.subject || 'มี') : '-'}`).join(' · ')}`);
+      }
     }
     if (!spec) {
       const { pickTemplateForDNA } = await import('@/lib/refTemplatePicker');
@@ -320,12 +428,23 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
     console.log(`[MegaComposer] 🔒 hero #${mi} — ${bigFace(faceBoxes[mi]) ? 'หน้าเด่น' : '⚠️ พูลไม่มีหน้าเด่น ใช้เท่าที่มี'} · หน้ากิน ${hs.pct}% (${hs.pos})${loaded[mi].clean === false ? ' (ยอมภาพไม่สะอาด)' : ''}`);
     assignments.push({ slotId: mainSlot.id, imageIndex: mi, crop: faceBoxes[mi] ? cropFromFace(faceBoxes[mi], hs.pct, hs.pos, mainSlot.w / mainSlot.h) : { x: 0, y: 0, w: 1, h: 1 }, why: 'hero หน้าเด่น (locked)' });
   }
+  // ★ เฟส 2.3 (9 ก.ค. — หลักฐานใบ 14:24 ผู้ใช้ชี้ "วงกลม=ต๊อด คนละคนกับ hero คือใบที่ดี" vs 14:35 วงซ้ำนุ่น=พัง):
+  //   วงกลมพยายามเลือก "คนละคนกับ hero" ก่อนเสมอ — ใช้ป้าย person จากตาคัด (เพิ่งต่อท่อถึงที่นี่ในเฟส 1.3)
+  //   ป้ายว่าง/พูลไม่มีคนอื่นจริง → ถอยเข้า cascade เดิมทุกชั้น (ไม่บังคับจนวงว่าง)
+  const heroPerson = String((mi >= 0 ? loaded[mi]?.person : '') || '');
+  const diffPerson = (im) => { const p = String(im.person || ''); return !!(heroPerson && p && p !== heroPerson); };
   for (const cs of circleSlots) {
     // 👁️ goodCircleFace: วงกลมต้องหน้าเดี่ยวเด่นสะอาด (กันกราฟิก/ข่าว-overlay/หน้าจิ๋วลงวง)
     //   ★ 8 ก.ค. (ผู้ใช้: "วงกลมไกลเกิน ดูไม่รู้ใคร"): เพิ่ม tier "มีหน้า (แม้ไม่สะอาด)" ก่อนยอมภาพไร้หน้า
     //   + ภาพไร้หน้าห้าม full-frame → ครอปสี่เหลี่ยมกลาง-บน (ซูมขึ้น อย่างน้อยเห็นตัวเรื่องใกล้ๆ)
     const cNotDup = (i) => !isCollage[i] && ![...used].some((u) => hamming(aHashes[i], aHashes[u]) <= 6); // ★ 9 ก.ค.2-3: วงห้ามซ้ำเฟรมกับ hero + ห้ามคอลลาจ
-    let ci = pickIdx((im, fb, i) => im.slot === 'circle' && bigFace(fb) && fb.count === 1 && cNotDup(i) && im.clean !== false);
+    let ci = pickIdx((im, fb, i) => diffPerson(im) && bigFace(fb) && fb.count === 1 && cNotDup(i) && im.clean !== false); // เฟส 2.3: คนละคนกับ hero ก่อน
+    if (ci < 0) ci = pickIdx((im, fb, i) => diffPerson(im) && fb && fb.x2 > fb.x1 && fb.count === 1 && cNotDup(i) && im.clean !== false);
+    // ยอมภาพหลายหน้าที่ "คนหลัก (person=หน้าใหญ่สุด)" เป็นคนละคน — วงกลมครอปหน้าใหญ่สุดอยู่แล้ว = ได้หน้าคนนั้นจริง
+    if (ci < 0) ci = pickIdx((im, fb, i) => diffPerson(im) && bigFace(fb) && cNotDup(i) && im.clean !== false);
+    if (ci >= 0) console.log(`[MegaComposer] ⭕👥 วงกลมได้คนละคนกับ hero (${loaded[ci]?.person || '?'} ≠ ${heroPerson})`);
+    else if (heroPerson) console.log(`[MegaComposer] ⭕⚠️ แผนไม่มีภาพ "คนอื่นที่ไม่ใช่ ${heroPerson}" ให้วงกลมเลย — โจทย์ฝั่ง S6 (เฟส 3 story slate)`);
+    if (ci < 0) ci = pickIdx((im, fb, i) => im.slot === 'circle' && bigFace(fb) && fb.count === 1 && cNotDup(i) && im.clean !== false);
     if (ci < 0) ci = pickIdx((im, fb, i) => bigFace(fb) && fb.count === 1 && cNotDup(i) && im.clean !== false);
     if (ci < 0) ci = pickIdx((im, fb) => bigFace(fb) && im.clean !== false);
     if (ci < 0) ci = pickIdx((im, fb) => bigFace(fb));
@@ -458,14 +577,51 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
   // ── ⑤ 🧩 ประกอบพิกเซล + 🛡️ ด่านบังคับ hero (9 ก.ค. ผู้ใช้: "ถ้าภาพไม่ผ่านต้องเปลี่ยนจนผ่าน") ──
   //   ตรวจ "ผลจริงหลังประกอบ": ครอปช่อง main จากปกจริงแล้วส่องหน้า — หน้าต้องเด่น (สูง ≥20% ของช่อง)
   //   ไม่ผ่าน (เช่น ตาหาหน้าเคยตอบพิกัดมั่ว AC-0026 กองกระสอบ) → แบนใบนั้น เลื่อนใบคะแนนถัดไป ประกอบใหม่ ≤2 รอบ
+  // ★ เฟส 4.2 (ปิดรูจากเฟส 3 — ภาพคนอื่นเข้าแผนแล้วแต่ตกม้าตายตอนเลือก): ด่านท้ายก่อน render
+  //   วงกลมยังเป็นคนเดียวกับ hero ทั้งที่ยังมีภาพ "คนอื่น+มีหน้า" เหลือใน loaded → สลับให้เลย
+  try {
+    const _mainA = assignments.find((a) => /main|hero/i.test(String(a.slotId)));
+    const _heroP = _mainA ? String(loaded[_mainA.imageIndex]?.person || '') : '';
+    if (_heroP) {
+      for (const a of assignments) {
+        const sl = spec.slots.find((s) => s.id === a.slotId);
+        if (!sl || sl.shape !== 'circle') continue;
+        const curP = String(loaded[a.imageIndex]?.person || '');
+        if (curP && curP !== _heroP) continue; // วงกลมเป็นคนอื่นอยู่แล้ว
+        let si = -1;
+        for (let i = 0; i < loaded.length; i++) {
+          if (used.has(i) || isCollage[i]) continue;
+          const p = String(loaded[i]?.person || '');
+          if (!p || p === _heroP) continue;
+          const fb2 = faceBoxes[i];
+          if (!fb2 || !(fb2.x2 > fb2.x1)) continue;
+          if ([...used].some((u) => hamming(aHashes[i], aHashes[u]) <= 6)) continue;
+          if (si < 0) si = i;
+          if (loaded[i].clean !== false && (fb2.y2 - fb2.y1) >= 0.16) { si = i; break; } // สะอาด+หน้าใหญ่ = จบ
+        }
+        if (si >= 0) {
+          used.delete(a.imageIndex); used.add(si);
+          const csp2 = faceSpec(spec.slots.indexOf(sl), 'circle');
+          a.imageIndex = si;
+          a.crop = cropFromFace(faceBoxes[si], csp2.pct, csp2.pos, 1);
+          a.why = 'วงกลมสลับเป็นคนอื่น (ด่านท้าย 4.2)';
+          console.log(`[MegaComposer] ⭕🔁 ด่านท้าย: วงกลมซ้ำคนกับ hero → สลับเป็น #${si} (${loaded[si]?.person})`);
+        } else if (curP && curP === _heroP) {
+          qcFlags.push('circle_same_person_as_hero'); // ไม่มีตัวเลือกจริง — ติดธงให้เห็น ไม่บังคับ
+        }
+      }
+    }
+  } catch { /* ด่านท้ายล้มไม่ให้กระทบการประกอบ */ }
+
   const { executeCover } = await import('@/lib/services/coverExecutorService');
   const { detectFaces } = await import('@/lib/services/faceDetector');
   const mainSlotSpec = spec.slots.find((s) => /main|hero/i.test(String(s.id))) || null;
   const mainAssign = assignments.find((a) => /main|hero/i.test(String(a.slotId))) || null;
   let buffer;
+  const traceSink = []; // audit: trace ต่อรอบเรียก — ไม่ใช้ globalThis (กันปนข้ามงานขนาน)
   const heroBanned = new Set();
   for (let attempt = 0; ; attempt++) {
-    buffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: spec, faceBoxes });
+    buffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: spec, faceBoxes, traceSink });
     if (!mainSlotSpec || !mainAssign || attempt >= 2) break;
     let heroOk = true;
     try {
@@ -477,7 +633,19 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
       const tile = await sharp(buffer).extract(ex).jpeg({ quality: 85 }).toBuffer();
       const fd = await detectFaces(tile);
       const th = fd?.imageHeight || 1;
-      heroOk = (fd?.faces || []).some((f) => f.height / th >= 0.20);
+      const tw = fd?.imageWidth || 1;
+      const _big = (fd?.faces || []).filter((f) => f.height / th >= 0.20);
+      heroOk = _big.length > 0;
+      // ★ เฟส 4.5 (เคสผู้ใช้ 15:11 — hero หน้าหลุดขอบซ้าย): หน้าใหญ่สุดต้อง "ครบ ไม่โดนขอบตัด"
+      //   เกณฑ์: กล่องหน้าชนขอบ + จุดกลางหน้าเบี้ยวออกจากกลางเฟรมชัด = โดนตัดจริง
+      //   (hero ปกติหน้าเต็มเฟรมก็ชนขอบได้ แต่จะชนแบบ "กลางเฟรม" — ไม่เข้าเงื่อนไขนี้) · ไม่แตะสูตร HERO_CROP
+      if (heroOk) {
+        const f0 = _big.reduce((b, f) => (f.width * f.height > b.width * b.height ? f : b), _big[0]);
+        const cxF = (f0.x + f0.width / 2) / tw;
+        const cyF = (f0.y + f0.height / 2) / th;
+        const cut = (f0.x <= 2 && cxF < 0.30) || (f0.x + f0.width >= tw - 2 && cxF > 0.70) || (f0.y <= 2 && cyF < 0.22);
+        if (cut) { heroOk = false; console.log('[MegaComposer] 🛡️ hero หน้าโดนขอบตัด (ครอปเบี้ยวจากกล่องหน้าเพี้ยน) → ไม่ผ่านด่าน'); }
+      }
     } catch { heroOk = true; /* ด่านตรวจล้มเอง = ไม่บล็อกงาน */ }
     if (heroOk) { if (attempt > 0) console.log(`[MegaComposer] 🛡️ hero ผ่านด่านบังคับ (รอบ ${attempt + 1})`); break; }
     heroBanned.add(mainAssign.imageIndex);
@@ -496,7 +664,12 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
     mainAssign.crop = faceBoxes[ni] ? cropFromFace(faceBoxes[ni], hsw.pct, hsw.pos, mainSlotSpec.w / mainSlotSpec.h) : { x: 0, y: 0, w: 1, h: 1 };
   }
   console.log(`[MegaComposer] ✅ ประกอบเสร็จ ${Math.round(buffer.length / 1024)}KB (${spec.id})`);
-  return { buffer, spec, assignments, loaded, faceBoxes, used, refSlotMeta };
+  // เฟส 0.1: เก็บ trace ครอปของรอบประกอบสุดท้าย (จาก traceSink ของงานนี้เอง) — ให้เครื่องเทส/การ์ด hero อ่านได้
+  const cropTrace = [...traceSink];
+  // เฟส 4.3: ธงครอปตาบอด (ภาพไร้หน้า+ไร้ subject — เดาช่วงบน) จาก trace จริง
+  for (const tt of cropTrace) if (/^noface-(top55|director-asis)$/.test(String(tt.branch || ''))) qcFlags.push(`blind_crop:${tt.slot}`);
+  if (qcFlags.length) console.log(`[MegaComposer] 🚩 qcFlags: ${qcFlags.join(' · ')}`);
+  return { buffer, spec, assignments, loaded, faceBoxes, used, refSlotMeta, cropTrace, qcFlags, traceSink };
 }
 
 // ---------- 👁️ ตาเทียบ ref: เห็น "ภาพจริง" ทั้งคู่ — ครั้งแรกที่ระบบตรวจด้วยภาพชนภาพ ----------
@@ -548,8 +721,16 @@ function applyEyeFixes({ fixes, assignments, loaded, faceBoxes, used }) {
     else if (f.action === 'shift_up') { a.crop = { ...a.crop, y: Math.max(0, +(a.crop.y - 0.1).toFixed(3)) }; applied++; }
     else if (f.action === 'shift_down') { a.crop = { ...a.crop, y: Math.min(1 - a.crop.h, +(a.crop.y + 0.1).toFixed(3)) }; applied++; }
     else if (f.action === 'swap') {
+      // ★ เฟส 4.2: วงกลมห้ามถูกตาสลับกลับไปเป็น "คนเดียวกับ hero" (ตาเทียบไม่รู้จักคน — เคย undo กติกา 2.3)
+      const _mainA2 = assignments.find((x) => /main|hero/i.test(String(x.slotId)));
+      const _heroP2 = _mainA2 ? String(loaded[_mainA2.imageIndex]?.person || '') : '';
+      const _isCircle = /circle/i.test(String(a.slotId));
       let si = -1;
-      for (let i = 0; i < loaded.length; i++) { if (!used.has(i) && loaded[i].clean !== false && faceBoxes[i]) { si = i; break; } }
+      for (let i = 0; i < loaded.length; i++) {
+        if (used.has(i) || loaded[i].clean === false || !faceBoxes[i]) continue;
+        if (_isCircle && _heroP2 && String(loaded[i]?.person || '') === _heroP2) continue;
+        si = i; break;
+      }
       if (si >= 0) { used.add(si); a.imageIndex = si; a.crop = cropFromFace(faceBoxes[si], 55, 'upper'); applied++; }
     }
   }
@@ -579,11 +760,12 @@ export async function composeMegaCover({ newsTitle = '', slotPlan = [], refDNA =
  * ประกอบ + 👁️ ตาเทียบ ref จริง (ภาพชนภาพ) + แก้ bounded ≤1 รอบ — ท่อ MEGA ใช้ตัวนี้
  * @param {string} p.refImagePath - พาธภาพปกต้นแบบจากคลัง (เช่น /ref-covers/xxx.jpg) — ไม่มี = ประกอบเฉยๆ
  */
-export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA = null, refImagePath = null }) {
+export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA = null, refImagePath = null, stableOrder = false }) {
   try {
-    const core = await composeCore({ slotPlan, refDNA });
+    const core = await composeCore({ slotPlan, refDNA, stableOrder });
     if (core.error) return { success: false, error: core.error, errorType: core.errorType };
     let buffer = core.buffer;
+    let cropTrace = core.cropTrace || [];
     let eye = null;
     let fixedCount = 0;
     if (refImagePath) {
@@ -599,7 +781,11 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
             fixedCount = applyEyeFixes({ fixes: eye.fixes, assignments: core.assignments, loaded: core.loaded, faceBoxes: core.faceBoxes, used: core.used });
             if (fixedCount) {
               const { executeCover } = await import('@/lib/services/coverExecutorService');
-              buffer = await executeCover({ assignments: core.assignments, imageBuffers: core.loaded, templateSpec: core.spec, faceBoxes: core.faceBoxes });
+              buffer = await executeCover({ assignments: core.assignments, imageBuffers: core.loaded, templateSpec: core.spec, faceBoxes: core.faceBoxes, traceSink: core.traceSink });
+              cropTrace = [...(core.traceSink || [])]; // audit: trace ของรอบสุดท้าย จาก sink ของงานนี้เอง
+              // audit: ธง blind_crop ต้องสะท้อนปกใบสุดท้าย (การสลับภาพของตาอาจทำให้เกิด/หาย)
+              core.qcFlags = (core.qcFlags || []).filter((f) => !/^blind_crop:/.test(String(f)));
+              for (const tt of cropTrace) if (/^noface-(top55|director-asis)$/.test(String(tt.branch || ''))) core.qcFlags.push(`blind_crop:${tt.slot}`);
               console.log(`[MegaComposer] 👁️ แก้ตามตา ${fixedCount} จุด → ประกอบใหม่ (bounded 1 รอบจบ)`);
             }
           }
@@ -613,7 +799,14 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
       refSimilarity: eye?.similarity ?? null,
       refDiffs: eye?.diffs || [],
       eyeFixed: fixedCount,
+      qcFlags: core.qcFlags || [], // เฟส 4.3: ธงคุณภาพ deterministic (แทน ref% ที่เชื่อไม่ได้)
       placed: core.assignments.map((a) => ({ slot: a.slotId, role: core.loaded[a.imageIndex].slot })),
+      // เฟส 0.1+0.3: ครอปจริงต่อช่อง (สาขา+กรอบ) + url ภาพ — เครื่องเทสใช้ทำ baseline การ์ด hero
+      crops: core.assignments.map((a) => ({
+        slot: a.slotId,
+        url: core.loaded[a.imageIndex]?.url || '',
+        trace: cropTrace.find((t) => t.slot === a.slotId) || null,
+      })),
     };
   } catch (err) {
     console.log('[MegaComposer] ❌', err.message?.slice(0, 100));
