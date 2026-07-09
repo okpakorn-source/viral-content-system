@@ -35,10 +35,24 @@ async function persistFrame(buf, name) {
 }
 
 import { vetImages } from '@/lib/libraryTriage';
+import { logCapture, listCaptureLog } from '@/lib/ytCaptureLog';
 import { reporter, doneProgress, failProgress } from '@/lib/progress';
 
 export const runtime = 'nodejs';
 export const maxDuration = 600;
+
+// ★ 9 ก.ค. (เฟส 1): ดู capture-log ย้อนหลัง — GET ?caseId=AC-xxxx&limit=30 (ไม่ระบุ = ทุกเคสล่าสุด)
+export async function GET(req) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const caseId = searchParams.get('caseId') || null;
+    const limit = Math.min(parseInt(searchParams.get('limit') || '30', 10) || 30, 200);
+    const entries = await listCaptureLog({ caseId, limit });
+    return NextResponse.json({ success: true, count: entries.length, entries });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: err.message, errorType: 'UNEXPECTED' }, { status: 500 });
+  }
+}
 
 export async function POST(req) {
   const body = await req.json().catch(() => ({}));
@@ -106,6 +120,14 @@ export async function POST(req) {
       failProgress(jobId, err.message);
       // ★ 6 ก.ค.: route เป็นคนปิดงานในคิวเอง (worker อาจวางสายไปแล้วถ้างานยาว)
       if (body.ytJobId) await finishJob(body.ytJobId, { status: 'failed', error: `[${err.errorType || 'ERROR'}] ${err.message || ''}`.slice(0, 500) }).catch(() => {});
+      // ★ 9 ก.ค. (เฟส 1): บันทึก log แม้แคปล้ม — เคสสำคัญสุดที่ต้องย้อนสืบ (เช่น เพดานเวลาเขี่ยคลิปดีทิ้งหมด)
+      await logCapture({
+        caseId, mode: (body.clipUrl || '').trim() ? 'pinpoint' : 'search',
+        clipUrl: (body.clipUrl || '').trim() || null, ok: false,
+        errorType: err.errorType || 'PIPELINE_FAILED', error: (err.message || '').slice(0, 200),
+        found: err.stats?.found ?? null, droppedByDuration: err.stats?.droppedByDuration || [],
+        framesAdded: 0, log: err.log || [],
+      }).catch(() => {});
       const map = {
         NO_GEMINI_KEY: 400,
         NO_SERPAPI_KEY: 400,
@@ -125,28 +147,7 @@ export async function POST(req) {
 
     let frames = result.frames;
 
-    // ★ 6 ก.ค. (ผู้ใช้สั่ง): งานที่มาจากเว็บ (hostPublic) — อัปเฟรมขึ้นโฮสต์สาธารณะก่อนเก็บ
-    //   (เฟรมเป็นไฟล์ local /case-frames/... เว็บมองไม่เห็น) อัปพลาดใบไหนคงพาธ local ไว้ (ใช้บนเครื่องทีมได้)
-    if (body.hostPublic) {
-      P2('อัปเฟรมขึ้นโฮสต์สาธารณะ', `0/${frames.length}`);
-      let hosted = 0;
-      frames = await Promise.all(
-        frames.map(async (f) => {
-          try {
-            if (!f.imageUrl || !f.imageUrl.startsWith('/')) return f;
-            const buf = await fs.readFile(path.join(process.cwd(), 'public', f.imageUrl.replace(/^\//, '')));
-            const url = await persistFrame(buf, path.basename(f.imageUrl)).catch(() => hostImagePublic(buf, path.basename(f.imageUrl)));
-            hosted++;
-            P2('อัปเฟรมขึ้นโฮสต์สาธารณะ', `${hosted}/${frames.length}`);
-            return { ...f, imageUrl: url, thumbnailUrl: url };
-          } catch {
-            return f; // อัปพลาด → เก็บพาธ local (อย่างน้อยเครื่องทีมยังใช้ได้)
-          }
-        })
-      );
-    }
-
-    // ★ 6 ก.ค. รอบ 5: ติดป้ายตา (triage) ให้เฟรมทันทีตอนเข้าคลัง — เรดาร์คลิป/ชิปกรอง "หน้าชัด" นับได้เลย
+    // ★ 6 ก.ค. รอบ 5: ติดป้ายตา (triage) ให้เฟรมก่อน — ★ 9 ก.ค. ย้ายมาก่อนอัปโฮสต์: vet อ่านไฟล์ local (เร็ว)
     //   ใช้ตาแค่ "ติดป้าย" ไม่คัดทิ้ง (เฟรมผ่านตาคัดตอนแคปแล้ว + ห้ามลบเฟรมเติมขั้นต่ำของโหมดเจาะจง)
     try {
       P2('ติดป้ายตาให้เฟรม', `${frames.length} ใบ`);
@@ -157,6 +158,32 @@ export async function POST(req) {
       /* ตาล้ม → เก็บแบบไม่มีป้าย (กดคัดกรองคลังทีหลังได้) */
     }
 
+    // นับ "สะอาดจริงหลังตาคัด" — ใช้ทั้งใน log และ (เฟส 3) ตัดสินว่าแคปคุ้มไหม
+    const cleanCount = frames.filter((f) => f.triage && f.triage.clean !== false).length;
+    const junkCount = frames.filter((f) => f.triage && f.triage.clean === false).length;
+
+    // ★ 9 ก.ค. (เฟส 1): อัปเฟรมขึ้นโฮสต์สาธารณะ "ทุกครั้ง" (ไม่ใช่เฉพาะ hostPublic) — เฟรมเป็นไฟล์ local
+    //   /case-frames/... บน Vercel เปิดไม่เจอ (จอดำ · บั๊กเดียวกับ ref 404) → อัป Supabase Storage ให้เว็บเห็น
+    //   kill-switch: YT_FRAME_HOST_OFF=1 (กลับพฤติกรรมเดิม เก็บพาธ local อย่างเดียว)
+    let hostedCount = 0;
+    if (process.env.YT_FRAME_HOST_OFF !== '1') {
+      P2('อัปเฟรมขึ้นโฮสต์สาธารณะ', `0/${frames.length}`);
+      frames = await Promise.all(
+        frames.map(async (f) => {
+          try {
+            if (!f.imageUrl || !f.imageUrl.startsWith('/')) return f;
+            const buf = await fs.readFile(path.join(process.cwd(), 'public', f.imageUrl.replace(/^\//, '')));
+            const url = await persistFrame(buf, path.basename(f.imageUrl)).catch(() => hostImagePublic(buf, path.basename(f.imageUrl)));
+            hostedCount++;
+            P2('อัปเฟรมขึ้นโฮสต์สาธารณะ', `${hostedCount}/${frames.length}`);
+            return { ...f, imageUrl: url, thumbnailUrl: url };
+          } catch {
+            return f; // อัปพลาด → เก็บพาธ local (อย่างน้อยเครื่องทีมยังใช้ได้)
+          }
+        })
+      );
+    }
+
     // ★ 6 ก.ค. (ผู้ใช้สั่ง): เฟรมจาก "คลิปที่วางลิงก์เอง" แยกหมวดเป็น 'clip' — คลังมีชิปกรองแยกให้เลือกดู/ประเมินง่าย
     const framePlatform = (body.clipUrl || '').trim() ? 'clip' : 'youtube';
     const records = frames.map((f) => ({ ...f, platform: framePlatform, query: (body.clipUrl || '').trim() || 'youtube' }));
@@ -164,6 +191,14 @@ export async function POST(req) {
     doneProgress(jobId, { step: 'เสร็จ', detail: `ได้ ${result.frames.length} เฟรมเข้าคลัง` });
     // ★ 6 ก.ค.: route ปิดงานในคิวเอง = เว็บเห็น "เสร็จ" แน่นอนแม้ worker วางสายไปก่อน
     if (body.ytJobId) await finishJob(body.ytJobId, { status: 'done', added: saved.added }).catch(() => {});
+    // ★ 9 ก.ค. (เฟส 1): สรุปรอบนี้ลง capture-log — ย้อนดูได้ว่าคลิปไหนถูกใช้/สะอาดจริงกี่ใบ/โดนเพดานตัดกี่ตัว
+    await logCapture({
+      caseId, mode: framePlatform === 'clip' ? 'pinpoint' : 'search',
+      clipUrl: (body.clipUrl || '').trim() || null, ok: true,
+      found: result.stats?.found ?? null, droppedByDuration: result.stats?.droppedByDuration || [],
+      clipsUsed: result.clipsUsed || [], framesAdded: saved.added, framesTotal: result.frames.length,
+      cleanCount, junkCount, hosted: hostedCount, log: result.log || [],
+    }).catch(() => {});
 
     return NextResponse.json({
       success: true,

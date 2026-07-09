@@ -39,6 +39,8 @@ export async function runYouTubePipeline({ caseId, keywords, progress, clipUrls,
   const P = progress || (() => {});
   const subjects = keywords.subjects || [];
   const log = [];
+  // ★ 9 ก.ค. (เฟส 1): สถิติรายคลิปให้ย้อนสืบได้ — ค้นเจอกี่ตัว / เพดานเวลาตัดทิ้งกี่ตัว(ตัวไหน) / ใช้กี่ตัว
+  const stats = { found: 0, droppedByDuration: [], afterFilter: 0, used: [] };
   // โหมดเจาะจงคลิป = คุณภาพสูง (1080p) + แคปถี่ (เก็บโมเมนต์ครบ) — ผู้ใช้ชี้คลิปเองแปลว่าคลิปนี้สำคัญ
   const pinpoint = Array.isArray(clipUrls) && clipUrls.length > 0;
 
@@ -74,10 +76,20 @@ export async function runYouTubePipeline({ caseId, keywords, progress, clipUrls,
     }
   }
 
-  // กรองความยาวเหมาะสม
-  clips = clips.filter(
-    (c) => !c.lengthSeconds || (c.lengthSeconds <= MAX_CLIP_SECONDS && c.lengthSeconds >= MIN_CLIP_SECONDS)
-  );
+  stats.found = clips.length;
+  log.push(`ค้นเจอคลิป ${clips.length} ตัวจาก ${queries.length} คีย์เวิร์ด`);
+
+  // กรองความยาวเหมาะสม — ★ 9 ก.ค. (เฟส 1): บันทึกคลิปที่โดนเพดานเวลาตัดทิ้ง (สืบ "คลิปรายการจริงยาวเกินโดนเขี่ย")
+  clips = clips.filter((c) => {
+    if (!c.lengthSeconds) return true;
+    const ok = c.lengthSeconds <= MAX_CLIP_SECONDS && c.lengthSeconds >= MIN_CLIP_SECONDS;
+    if (!ok) stats.droppedByDuration.push({ title: (c.title || '').slice(0, 60), length: c.lengthText || `${c.lengthSeconds}s` });
+    return ok;
+  });
+  if (stats.droppedByDuration.length) {
+    log.push(`เพดานเวลา (${MIN_CLIP_SECONDS}-${MAX_CLIP_SECONDS} วิ) ตัดทิ้ง ${stats.droppedByDuration.length} คลิป: ${stats.droppedByDuration.map((d) => `"${d.title}" (${d.length})`).join(' · ').slice(0, 300)}`);
+  }
+  stats.afterFilter = clips.length;
 
   // เรียงตาม "ความตรงประเด็นข่าว" ก่อน แล้วค่อยยอดวิว
   // (คลิปที่ตรงรายการต้นทาง/ชื่อบุคคล ดีกว่าคลิปวิวเยอะแต่หลุดประเด็น)
@@ -168,6 +180,7 @@ export async function runYouTubePipeline({ caseId, keywords, progress, clipUrls,
         length: clip.lengthText,
         picked: frameNo,
       });
+      stats.used.push({ title: (clip.title || '').slice(0, 60), channel: clip.channel || '', picked: frameNo });
     } catch (e) {
       if (e.errorType === 'NO_GEMINI_KEY') throw e;
       log.push(`คลิป ${clipIdx} ล้มเหลว: ${e.message}`);
@@ -184,10 +197,11 @@ export async function runYouTubePipeline({ caseId, keywords, progress, clipUrls,
     const e = new Error('ดึงเฟรมที่ใช้ได้จากคลิปไม่สำเร็จ (ดูรายละเอียดใน log)');
     e.errorType = 'NO_FRAMES';
     e.log = log;
+    e.stats = stats;
     throw e;
   }
 
-  return { frames: collected, clipsUsed, log };
+  return { frames: collected, clipsUsed, log, stats };
 }
 
 // ---- yt-dlp: โหลดวิดีโอ ≤720p (เอาเฉพาะภาพ ไม่เอาเสียง เร็วกว่า) ----
