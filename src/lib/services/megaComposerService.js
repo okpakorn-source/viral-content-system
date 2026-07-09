@@ -348,7 +348,17 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
     for (const s of spec.slots) {
       if (s.shape === 'circle' || (Number(s.zIndex) || 0) >= 3 || /main|hero/i.test(String(s.id))) continue;
       let vis = { x0: 0, y0: 0, x1: 1, y1: 1 };
-      for (const o of overlays) {
+      // ★ 10 ก.ค. (ผู้ใช้วงจุด "ภาพซ้อนกันจนคนหัวขาดทั้งแถบ"): เดิมคิดแค่วงกลม/inset ลอย —
+      //   พาเนล rect ที่โครง ref ปิดผืนแล้ว "ซ้อนกันเอง" (ยอมรับ overlap เพื่อไม่ให้มีร่อง) ไม่ถูกคิด
+      //   → แถบทับตรงตะเข็บกินหัวคนพอดี · เพิ่ม: เพื่อนบ้านที่ render ทับข้างบน (z สูงกว่า / z เท่ากันแต่มาทีหลัง) นับเป็นส่วนบังด้วย
+      const _sZ = Number(s.zIndex) || 0;
+      const _sIdx = spec.slots.indexOf(s);
+      const covers = [...overlays, ...spec.slots.filter((o) => {
+        if (o === s || o.shape === 'circle' || (Number(o.zIndex) || 0) >= 3) return false;
+        const oZ = Number(o.zIndex) || 0;
+        return oZ > _sZ || (oZ === _sZ && spec.slots.indexOf(o) > _sIdx);
+      })];
+      for (const o of covers) {
         const ix0 = Math.max(0, (o.x - s.x) / s.w), iy0 = Math.max(0, (o.y - s.y) / s.h);
         const ix1 = Math.min(1, (o.x + o.w - s.x) / s.w), iy1 = Math.min(1, (o.y + o.h - s.y) / s.h);
         if (ix1 <= ix0 || iy1 <= iy0) continue;
@@ -418,7 +428,7 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
     if (im.clean !== false) s += 18;
     if (im.newsScene !== false) s += 6;
     if (fb.y1 < 0.02 || fb.y2 > 0.98) s -= 14;              // หน้าชิดขอบบน/ล่างในต้นฉบับ = ครอปเสี่ยงหัว/คางขาด
-    if (fb.x1 < 0.02 || fb.x2 > 0.98) s -= 8;
+    if (fb.x1 < 0.02 || fb.x2 > 0.98) s -= 22;              // ★ 10 ก.ค.2: -8→-22 หน้าชิดขอบข้าง (AC-0057 จอทีวีหน้าติดขอบชนะทั้งที่เรนเดอร์แล้วพังแน่)
     if (im.isHero) s += 10;                                  // เคารพ S6 เมื่อคะแนนสูสี
     // — เทอมคุณภาพต้นทาง (หักอย่างเดียว ไม่เพิ่ม — ภาพดีคะแนนเท่าเดิมเป๊ะ) —
     if (mainSlot && fb.imgW > 0 && fb.imgH > 0) {
@@ -426,7 +436,13 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
       const upscale = (mainSlot.w * 0.88) / facePxW;         // หน้าจะถูกยืดกี่เท่าเมื่อขึ้นช่อง (0.88 = HERO faceFrac)
       if (upscale > 1.5) s -= Math.min(45, (upscale - 1.5) * 22); // ยืดแรง = เบลอแน่ (เคสแบนเนอร์: ~5 เท่า → -45)
       const ar = fb.imgW / fb.imgH;
-      if (ar > 1.7) s -= 8;                                  // แบนเนอร์กว้างจัด — ช่อง hero สูง ครอปได้แต่เศษแถบ
+      if (ar > 1.7) s -= 20;                                 // ★ 10 ก.ค.: แบนเนอร์กว้างจัด -8→-20 — ตระกูลนี้หลอกตาทั้งคู่ได้ (AC-0045-153) ต้องกดแรงพอให้แพ้ภาพแนวตั้งปกติ
+      // ★ 10 ก.ค.2 (AC-0057 hero แม่น้องเมยถูกคนแต่เบลอ — เฟรมคลิปไฟล์เล็ก): พื้นความละเอียดต้นทาง
+      const shortSide = Math.min(fb.imgW, fb.imgH);
+      if (shortSide < 280) s -= 28; else if (shortSide < 420) s -= 12; // ไฟล์เล็ก = ยืดขึ้นช่อง hero แล้วเบลอแน่
+      // พรีเมียม: หน้าใหญ่คมในไฟล์ใหญ่ (โคลสอัพคุณภาพ) — ให้ชนะภาพสะอาดแต่ห่วยได้ แม้ติดลายน้ำมุมเล็กน้อย
+      const facePxW2 = (fb.x2 - fb.x1) * fb.imgW;
+      if (facePxW2 >= 240 && shortSide >= 500 && !(fb.x1 < 0.02 || fb.x2 > 0.98 || fb.y1 < 0.02)) s += 14;
     }
     // — ระยะช็อตตาม ref (โบนัสเบา ไม่ใช่ตัวตัดสิน) —
     const fh = fb.y2 - fb.y1;
@@ -522,8 +538,13 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
     //   + 🧩 ห้ามคอลลาจในชั้นเข้มงวด (ช่องดูแตกเป็นหลายช่องปลอม ไม่ตรง ref)
     const notDup = (i) => !isCollage[i] && ![...used].some((u) => hamming(aHashes[i], aHashes[u]) <= 6);
     let oi = -1;
+    // ★ 10 ก.ค. (ผู้ใช้วงจุด "ช่องคนได้ภาพคู่ ครอปแล้วเศษตัวแฟนค้างขอบ"): ช่องคน (needFace)
+    //   ลอง "รูปหน้าเดี่ยว" ก่อนเสมอ — มีจริงค่อยใช้ ไม่มีถอยลง tier เดิมทุกชั้น
+    if (needFace) {
+      for (const role of order) { oi = pickIdx((im, fb, i) => im.slot === role && fb && fb.x2 > fb.x1 && (fb.count || 1) === 1 && shotOk(fb) && notDup(i) && im.clean !== false && im.newsScene !== false); if (oi >= 0) break; }
+    }
     // ★ 9 ก.ค.: ภาพข่าวจริง (newsScene≠false) ก่อนภาพแฟ้มเสมอ — กันชุดกาล่า/พรมแดงหลุดเข้าปกข่าวครอบครัว
-    for (const role of order) { oi = pickIdx((im, fb, i) => im.slot === role && faceOk(fb) && shotOk(fb) && notDup(i) && im.clean !== false && im.newsScene !== false); if (oi >= 0) break; }
+    if (oi < 0) for (const role of order) { oi = pickIdx((im, fb, i) => im.slot === role && faceOk(fb) && shotOk(fb) && notDup(i) && im.clean !== false && im.newsScene !== false); if (oi >= 0) break; }
     if (oi < 0) { for (const role of order) { oi = pickIdx((im, fb, i) => im.slot === role && faceOk(fb) && notDup(i) && im.clean !== false && im.newsScene !== false); if (oi >= 0) break; } }
     if (oi < 0) oi = pickIdx((im, fb, i) => faceOk(fb) && shotOk(fb) && notDup(i) && im.clean !== false && im.newsScene !== false); // บทไม่ตรงแต่ช็อต+ไม่ซ้ำ ยังดีกว่าซ้ำหน้าเดิม
     if (oi < 0) { for (const role of order) { oi = pickIdx((im, fb, i) => im.slot === role && faceOk(fb) && notDup(i) && im.clean !== false); if (oi >= 0) break; } }
@@ -699,6 +720,72 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
     const hsw = faceSpec(spec.slots.indexOf(mainSlotSpec), 'hero');
     mainAssign.crop = faceBoxes[ni] ? cropFromFace(faceBoxes[ni], hsw.pct, hsw.pos, mainSlotSpec.w / mainSlotSpec.h) : { x: 0, y: 0, w: 1, h: 1 };
   }
+  // ★ 10 ก.ค. (ผู้ใช้สั่งกติกาเหล็ก "ทุกช่องห้ามมีคนถูกเฟรมตัด — ขาด=ไม่ผ่าน ทำใหม่จนได้"):
+  //   ด่านคนครบต่อช่องรอง+วงกลม (main มีด่านของตัวเองแล้ว) — ตรวจผลจริงหลังประกอบ:
+  //   ใบหน้าเด่น (≥12% ของช่อง) แตะขอบ+จุดกลางชิดขอบ = คนโดนตัด → ①เปลี่ยนรูป ②ครอปเนียนเหลือคนในเฟรม ③ติดธง
+  //   (หน้าจิ๋วฝูงชนตรงขอบ = ธรรมชาติของภาพฉากกว้าง ไม่นับ) · bounded ≤2 รอบ
+  try {
+    for (let _round = 0; _round < 2; _round++) {
+      const targets = assignments
+        .map((a) => ({ a, sl: spec.slots.find((s) => s.id === a.slotId) }))
+        .filter(({ a, sl }) => sl && !/main|hero/i.test(String(a.slotId)));
+      if (!targets.length) break;
+      const tiles = await Promise.all(targets.map(({ sl }) => {
+        const ex = { left: Math.max(0, sl.x), top: Math.max(0, sl.y), width: Math.min(spec.canvasW - Math.max(0, sl.x), sl.w), height: Math.min(spec.canvasH - Math.max(0, sl.y), sl.h) };
+        return sharp(buffer).extract(ex).jpeg({ quality: 80 }).toBuffer();
+      }));
+      const fdm2 = await batchDetectFaces(tiles.map((b, i) => ({ id: `pv_${i}`, buffer: b })));
+      let changed = 0;
+      for (let i = 0; i < targets.length; i++) {
+        const { a, sl } = targets[i];
+        const fd = fdm2?.get?.(`pv_${i}`);
+        const tw2 = fd?.imageWidth || sl.w, th2 = fd?.imageHeight || sl.h;
+        const cutFace = (fd?.faces || []).find((f) => {
+          if (f.height / th2 < 0.12) return false;
+          const cx = (f.x + f.width / 2) / tw2;
+          const cy = (f.y + f.height / 2) / th2;
+          return (f.x <= 2 && cx < 0.10) || (f.x + f.width >= tw2 - 2 && cx > 0.90) || (f.y <= 2 && cy < 0.08);
+        });
+        if (!cutFace) continue;
+        console.log(`[MegaComposer] ✂️🚫 ${a.slotId}: คนโดนเฟรมตัด (รอบ ${_round + 1}) → แก้ตามกติกาคนครบ`);
+        // ทาง 1 (ง่ายสุดตามผู้ใช้สั่ง): เปลี่ยนรูป — ใบสำรองที่มีหน้า สะอาด ไม่ซ้ำเฟรม
+        let ni2 = -1;
+        for (let k = 0; k < loaded.length; k++) {
+          if (used.has(k) || isCollage[k] || loaded[k].clean === false) continue;
+          const fb2 = faceBoxes[k];
+          if (!fb2 || !(fb2.x2 > fb2.x1)) continue;
+          if ([...used].some((u) => hamming(aHashes[k], aHashes[u]) <= 6)) continue;
+          ni2 = k; break;
+        }
+        if (ni2 >= 0) {
+          used.delete(a.imageIndex); used.add(ni2);
+          a.imageIndex = ni2;
+          a.crop = { x: 0, y: 0, w: 1, h: 1 }; // ให้ executor คำนวณครอปใหม่ตามสูตรช่อง
+          a.why = 'เปลี่ยนรูป — คนโดนเฟรมตัด (กติกาคนครบ)';
+          changed++;
+          console.log(`[MegaComposer] ✂️🔁 ${a.slotId}: เปลี่ยนรูปเป็น #${ni2}`);
+          continue;
+        }
+        // ทาง 2: รูปสำคัญไม่มีตัวสำรอง → ครอปเนียนเหลือ "คนที่อยู่ด้านในเฟรมจริง" คนเดียว (ห้ามใครโผล่ครึ่งตัว)
+        const srcFb = faceBoxes[a.imageIndex];
+        const interior = (srcFb?.allFaces || [])
+          .filter((f) => f.x1 >= 0.04 && f.x2 <= 0.96)
+          .sort((p, q) => ((q.x2 - q.x1) * (q.y2 - q.y1)) - ((p.x2 - p.x1) * (p.y2 - p.y1)))[0];
+        if (interior) {
+          const one = { ...srcFb, x1: interior.x1, y1: interior.y1, x2: interior.x2, y2: interior.y2, count: 1, allFaces: [interior] };
+          a.crop = { ...cropFromFace(one, 62, 'center', sl.w / Math.max(1, sl.h)), _final: true };
+          a.why = 'ครอปเนียนคนเดียว — คนอื่นโดนเฟรมตัด (กติกาคนครบ)';
+          changed++;
+          console.log(`[MegaComposer] ✂️✂️ ${a.slotId}: ครอปใหม่เหลือคนในเฟรม (_final)`);
+        } else {
+          qcFlags.push(`person_cut:${a.slotId}`); // แก้ไม่ได้จริง — ติดธงให้เห็น (ห้ามเงียบ)
+        }
+      }
+      if (!changed) break;
+      buffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: spec, faceBoxes, traceSink });
+    }
+  } catch (e) { console.log('[MegaComposer] ด่านคนครบล้ม (ใช้ปกเดิม):', String(e?.message || '').slice(0, 60)); }
+
   console.log(`[MegaComposer] ✅ ประกอบเสร็จ ${Math.round(buffer.length / 1024)}KB (${spec.id})`);
   // เฟส 0.1: เก็บ trace ครอปของรอบประกอบสุดท้าย (จาก traceSink ของงานนี้เอง) — ให้เครื่องเทส/การ์ด hero อ่านได้
   const cropTrace = [...traceSink];

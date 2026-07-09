@@ -551,6 +551,16 @@ function _cropTrace(slot, branch, fb, imgW, imgH, region, sink) {
   } catch { /* trace ล้มห้ามกระทบการประกอบ */ }
 }
 
+/** ★ 10 ก.ค. (บั๊ก AC-0036 "extract_area: bad extract area"): กรอบครอปเกินขอบภาพหลุดถึง sharp ได้
+ *  (เช่น crop _final จาก cropFromFace ที่หน้าใหญ่มาก w>1) → clamp กรอบก่อน extract ทุกจุด — กันทั้ง class */
+function _clampRegion(region, imgW, imgH) {
+  let w = Math.max(8, Math.min(Math.round(region.width), imgW));
+  let h = Math.max(8, Math.min(Math.round(region.height), imgH));
+  const left = Math.max(0, Math.min(Math.round(region.left), imgW - w));
+  const top = Math.max(0, Math.min(Math.round(region.top), imgH - h));
+  return { left, top, width: w, height: h };
+}
+
 /** ครอป+ย่อภาพลงช่องสี่เหลี่ยม (+กรอบสีถ้ามี) */
 async function renderRectTile(src, crop, slot, fb, traceSink = null) {
   const meta = await sharp(src).metadata();
@@ -628,6 +638,21 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
         // คนยืนห่างกัน → group-crop คลุมทุกคน = คนริมโดนขอบตัดสกปรก → ครอปหน้าใหญ่สุดคนเดียวเด่น
         console.log(`[CoverV3] 👥 spread-crop: bbox ${(_spread * 100).toFixed(1)}% > 55% → ครอปหน้าเดียว (largest)`);
         region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
+        // ★ 10 ก.ค. (ผู้ใช้วงจุด "เศษตัวแฟนค้างขอบ ไม่เนียน"): เลื่อนกรอบพ้นคนข้างเคียง — ตรรกะเดียวกับ hero
+        //   + เผื่อความกว้างลำตัว 0.35 เท่าของหน้า (ขอบหน้า ≠ ขอบตัว — ตัวคนข้างโผล่ได้แม้หน้าพ้นแล้ว)
+        const _lcx = ((largest.x1 + largest.x2) / 2) * imgW;
+        let _rMin = 0, _rMax = imgW;
+        for (const f of fb.allFaces) {
+          if (f === largest) continue;
+          const fw = (f.x2 - f.x1);
+          const fcx = ((f.x1 + f.x2) / 2) * imgW;
+          if (fcx < _lcx) _rMin = Math.max(_rMin, (f.x2 + fw * 0.35) * imgW);
+          else _rMax = Math.min(_rMax, (f.x1 - fw * 0.35) * imgW);
+        }
+        let _rl = region.left, _rr = region.left + region.width;
+        if (_rr > _rMax) { const sh = _rr - _rMax; _rl -= sh; _rr -= sh; }
+        if (_rl < _rMin) { const sh = _rMin - _rl; _rl += sh; _rr += sh; }
+        region.left = Math.round(Math.max(0, Math.min(_rl, imgW - region.width)));
         _br = 'spread-cut-largest';
       } else {
         // คนชิดกัน (ครอบครัว/คู่ถ่ายใกล้กัน) → group-crop เก็บทุกคนพอดีเฟรม (คง CASE-104)
@@ -665,6 +690,7 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
   if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ` ${slot.id}`); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
   // rev.16: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — WB คุมโทนรวม + รีทัชเบา
   //   (1) gray-world WB ดึงคาสต์สีเข้าโทนเดียว  (2) sat/contrast บางๆ  (3) คมขึ้นพอดี
+  region = _clampRegion(region, imgW, imgH); // ★ 10 ก.ค.: การ์ดสุดท้ายก่อน extract — ห้ามเกินขอบภาพเด็ดขาด
   const base = await sharp(src).extract(region).resize(slot.w, slot.h, { fit: 'fill' }).toBuffer();
   const wb = await grayWorldGains(base);
   let pipe = sharp(base);
@@ -725,6 +751,7 @@ async function renderCircleTile(src, crop, slot, fb, traceSink = null) {
 
   _cropTrace(slot, _br, fb, imgW, imgH, region, traceSink); // เฟส 0.1: log อย่างเดียว
   if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ' circle'); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
+  region = _clampRegion(region, imgW, imgH); // ★ 10 ก.ค.: การ์ดสุดท้ายก่อน extract (วงกลม)
   const cbase = await sharp(src).extract(region).resize(d, d, { fit: 'fill' }).toBuffer();
   const cwb = await grayWorldGains(cbase);
   let cpipe = sharp(cbase);

@@ -797,6 +797,19 @@ export async function s6_slots(job, { origin }) {
     const ps = [img.triage?.person, ...(img.triage?.persons || [])].filter(Boolean);
     return mainNames.length === 0 || ps.some((p) => mainNames.some((m) => namesMatch(p, m)));
   };
+  // ★ 10 ก.ค. (ผู้ใช้: "hero ได้ใครมาไม่รู้" — เคสแม่น้องเมย hero เป็นคนอื่นในข่าว): hero ต้องเป็น
+  //   "ตัวเอกอันดับหนึ่ง" (role=hero ในเข็มทิศ) เท่านั้น — เดิม isMainChar ยอมทุก mainCharacters
+  //   (แม่/พ่อ/กมธ. ผ่านหมด) · ไม่มี role=hero ระบุ → ใช้ตัวละครตัวแรกของเข็มทิศ
+  const heroNames = (() => {
+    const chars = job.dossier.compass?.mainCharacters || [];
+    const hs = chars.filter((c) => /hero/i.test(String(c?.role || ''))).map((c) => c?.name).filter(Boolean);
+    if (hs.length) return hs;
+    return chars.length && chars[0]?.name ? [chars[0].name] : [];
+  })();
+  const isHeroChar = (img) => {
+    const ps = [img.triage?.person, ...(img.triage?.persons || [])].filter(Boolean);
+    return heroNames.length === 0 ? isMainChar(img) : ps.some((p) => heroNames.some((m) => namesMatch(p, m)));
+  };
   const used = new Set();
   const slots = {};
   let fallbackUsed = 0;
@@ -808,7 +821,7 @@ export async function s6_slots(job, { origin }) {
     let img = want?.id != null ? byId.get(String(want.id)) : null;
     let reason = want?.reason || '';
     if (img && used.has(String(img.id))) img = null; // ซ้ำข้ามช่อง = ตัด
-    if (img && slot === 'hero' && !isMainChar(img)) { img = null; reason = ''; } // ผิดคน = ตัด
+    if (img && slot === 'hero' && !isHeroChar(img)) { img = null; reason = ''; } // ★ 10 ก.ค.: hero ต้องเป็นตัวเอก role=hero เท่านั้น
     // ★ เฟส 3.1: ฉากซ้ำกับช่องที่เลือกไปแล้ว (note เดียวกัน เช่น เฟรมคลิปชุดเดียว/เวทีเดิมหลายรูป) = ตัด
     //   ให้ fallback หาฉากใหม่ — ยกเว้น hero (กฎถูกคนสำคัญกว่า) · แก้ตรงอาการ "ฉากเวทีมอบทุนโผล่ซ้ำ 3 ช่อง"
     if (img && slot !== 'hero') {
@@ -818,7 +831,7 @@ export async function s6_slots(job, { origin }) {
     // 👤 8 ก.ค. (AC-0027 hero=ภาพกอดแม่ 2 หน้า): brain ฝ่ากฎ "hero หน้าเดี่ยว" ได้ — ด่านโค้ดบังคับ:
     //   hero หลายหน้า + พูลมี "หน้าเดี่ยวถูกคน สะอาด" → สลับเป็นหน้าเดี่ยว (ภาพกอด/คู่ไปช่อง reaction แทนได้)
     if (img && slot === 'hero' && (img.triage?.faceCount ?? 0) > 1) {
-      const solo = sorted.find((x) => !used.has(String(x.id)) && isMainChar(x) && (x.triage?.faceCount ?? 0) === 1 && isClean(x));
+      const solo = sorted.find((x) => !used.has(String(x.id)) && isHeroChar(x) && (x.triage?.faceCount ?? 0) === 1 && isClean(x));
       if (solo) { console.log(`[MEGA S6] 👤 hero ${img.id} มี ${img.triage.faceCount} หน้า → สลับหน้าเดี่ยว ${solo.id}`); img = solo; reason = 'hero หน้าเดี่ยว (โค้ดบังคับ — brain เลือกภาพหลายหน้า)'; }
     }
     if (!img) {
@@ -826,7 +839,9 @@ export async function s6_slots(job, { origin }) {
       const cands = sorted.filter((x) => !used.has(String(x.id)));
       const hint = SLOT_CATEGORY_HINT[slot] || [];
       const pickFrom = (arr) =>
-        (slot === 'hero' ? arr.find((x) => isMainChar(x) && (x.triage?.faceCount ?? 0) >= 1) : null) ||
+        // ★ 10 ก.ค.: hero เลี่ยงภาพแนวนอนกว้าง (แบนเนอร์) ก่อน — ไม่มีตัวเลือกอื่นค่อยยอม (บรรทัดถัดไป)
+        (slot === 'hero' ? arr.find((x) => isHeroChar(x) && (x.triage?.faceCount ?? 0) >= 1 && !(Number(x.width) > 0 && Number(x.height) > 0 && x.width / x.height > 1.5)) : null) ||
+        (slot === 'hero' ? arr.find((x) => isHeroChar(x) && (x.triage?.faceCount ?? 0) >= 1) : null) ||
         arr.find((x) => hint.includes(x.triage?.category)) ||
         (slot === 'reaction' ? arr.find((x) => (x.triage?.faceCount ?? 0) >= 1) : null) ||
         arr[0] ||
@@ -840,7 +855,7 @@ export async function s6_slots(job, { origin }) {
           || pickFrom(cands.filter((x) => x.triage?.clean !== false))
           || pickFrom(cands.filter(freshScene))
           || pickFrom(cands));
-      if (img && slot === 'hero' && !isMainChar(img)) img = null; // ไม่มีตัวเอกจริง → ปล่อยว่าง ห้ามฝืนผิดคน
+      if (img && slot === 'hero' && !isHeroChar(img)) img = null; // ไม่มีตัวเอกจริง → ปล่อยว่าง ห้ามฝืนผิดคน (role=hero เท่านั้น)
       if (img) { fallbackUsed++; reason = reason || 'fallback ตามสูตรแสนไลค์ (หมวด/คุณภาพ)'; }
     }
     if (img) {
