@@ -500,16 +500,27 @@ async function composeCore({ slotPlan = [], refDNA = null }) {
 }
 
 // ---------- 👁️ ตาเทียบ ref: เห็น "ภาพจริง" ทั้งคู่ — ครั้งแรกที่ระบบตรวจด้วยภาพชนภาพ ----------
+// ★ 9 ก.ค. (แก้ "เลข 20% หลอก"): เดิมตาให้เลขเดียว 0-100 → gpt-4o แอบเทียบเนื้อหา/คน/สี/พาดหัว
+//   (ref มีพาดหัวกราฟิก ปกเรายังไม่ใส่ = โดนหักฟรี) เลขเลยต่ำทั้งที่โครงตรง
+//   ใหม่: ตาตอบแค่ ผ่าน/ไม่ผ่าน รายข้อโครง 5 ข้อ — โค้ดรวมคะแนนเองตามน้ำหนักคงที่ (deterministic)
+const EYE_RUBRIC = [['grid', 40], ['inserts', 20], ['hero_shot', 15], ['sub_shots', 15], ['crops', 10]];
 async function refCompareEye({ coverBuffer, refImagePath, newsTitle }) {
   const refBuf = await fetchOne(refImagePath);
   if (!refBuf) return null;
   const { callAI } = await import('@/lib/ai/openai');
   const res = await callAI({
-    systemPrompt: `คุณคือตาตรวจปกของทีมกราฟฟิก เทียบ "ปกที่ทีมทำ (ภาพที่ 1)" กับ "ปกต้นแบบ (ภาพที่ 2)"
-ให้ประเมินเชิงโครง/การจัดวาง/ระยะช็อต/อารมณ์ (ไม่ใช่ว่าเป็นคนเดียวกันไหม — คนละข่าวกัน)
+    systemPrompt: `คุณคือตาตรวจ "โครงปก" ของทีมกราฟฟิก เทียบ "ปกที่ทีมทำ (ภาพที่ 1)" กับ "ปกต้นแบบ (ภาพที่ 2)"
+วัดเฉพาะโครงสร้าง — ห้ามสนว่าเป็นใคร/ข่าวอะไร/โทนสีไหน/อารมณ์ใด (คนละข่าวกันเสมอ เนื้อหาต่างกันแน่นอน)
+ต้นแบบมีพาดหัว/ตัวหนังสือกราฟิก แต่ปกที่ทีมทำยังไม่ใส่ข้อความ = ปกติ ห้ามใช้หักข้อใดทั้งสิ้น
+ตรวจผ่าน/ไม่ผ่านทีละข้อ:
+- grid: จำนวนช่องภาพ + ผังช่องใหญ่/เล็ก + ตำแหน่งช่องใหญ่ ตรงต้นแบบ
+- inserts: วงกลม/กรอบซ้อน — ต้นแบบมีตรงไหน ปกต้องมีตรงนั้น ตำแหน่ง+ขนาดใกล้เคียง (ต้นแบบไม่มี = ปกไม่มีด้วยจึงผ่าน)
+- hero_shot: ช่องใหญ่สุด ระยะช็อตตรงต้นแบบ (โคลสอัพ/ครึ่งตัว/เต็มตัว) และหัวคนไม่โดนเฉือน
+- sub_shots: ช่องรองส่วนใหญ่ ระยะช็อตใกล้เคียงช่องตำแหน่งเดียวกันของต้นแบบ
+- crops: ทุกช่อง จุดเด่น/หน้าคนอยู่ในกรอบ ไม่โดนขอบเฉือน ไม่โดนชั้นอื่นบัง
 สั่งแก้ได้เฉพาะ: ครอปช่องรอง (zoom_in/zoom_out/shift_up/shift_down) หรือ swap ช่องรองเป็นภาพสำรอง — ห้ามแตะช่องใหญ่ซ้าย(hero)/โครง
-ตอบ JSON เท่านั้น: {"similarity":0-100,"diffs":["จุดต่าง ≤3 ข้อ"],"fixes":[{"slot":"ชื่อช่อง เช่น right_top/context_1/circle","action":"zoom_in|zoom_out|shift_up|shift_down|swap"}]}`,
-    userPrompt: `ข่าว: ${String(newsTitle || '').slice(0, 100)} — เทียบและให้คะแนน`,
+ตอบ JSON เท่านั้น: {"grid":true|false,"inserts":true|false,"hero_shot":true|false,"sub_shots":true|false,"crops":true|false,"diffs":["จุดต่าง ≤3 ข้อ"],"fixes":[{"slot":"ชื่อช่อง เช่น right_top/context_1/circle","action":"zoom_in|zoom_out|shift_up|shift_down|swap"}]}`,
+    userPrompt: `ข่าว: ${String(newsTitle || '').slice(0, 100)} — ตรวจโครงรายข้อ`,
     imageContents: [
       { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${coverBuffer.toString('base64')}`, detail: 'low' } },
       { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${refBuf.toString('base64')}`, detail: 'low' } },
@@ -517,8 +528,12 @@ async function refCompareEye({ coverBuffer, refImagePath, newsTitle }) {
     model: 'gpt-4o', temperature: 0.1, maxTokens: 500,
   });
   const parsed = typeof res === 'object' && res !== null && !res.text ? res : JSON.parse(String(res?.text || res).match(/\{[\s\S]*\}/)?.[0] || 'null');
-  if (!parsed || !Number.isFinite(Number(parsed.similarity))) return null;
-  return { similarity: Number(parsed.similarity), diffs: parsed.diffs || [], fixes: (parsed.fixes || []).slice(0, 3) };
+  // ต้องมีคำตอบรายข้ออย่างน้อย 1 ข้อ ไม่งั้นถือว่าตาล้ม (กันตอบฟอร์แมตเก่า/ครึ่งใบแล้วได้ 100 ฟรี)
+  if (!parsed || !EYE_RUBRIC.some(([k]) => typeof parsed[k] === 'boolean')) return null;
+  let similarity = 0;
+  const checks = {};
+  for (const [k, w] of EYE_RUBRIC) { checks[k] = parsed[k] !== false; if (parsed[k] !== false) similarity += w; }
+  return { similarity, checks, diffs: parsed.diffs || [], fixes: (parsed.fixes || []).slice(0, 3) };
 }
 
 // ---------- ปรับตามคำสั่งตา (กฎล้วน — bounded ≤1 รอบ · ห้ามแตะ main) ----------
@@ -577,8 +592,10 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
         // ★ 9 ก.ค. (AC-0026 "เหมือน ref -%"): ตาเทียบล้มชั่วคราว (AI/parse) → ลองอีก 1 ครั้งก่อนยอมแพ้
         if (!eye) eye = await refCompareEye({ coverBuffer: buffer, refImagePath, newsTitle }).catch(() => null);
         if (eye) {
-          console.log(`[MegaComposer] 👁️ เหมือน ref ${eye.similarity}% — ${eye.diffs.join(' · ').slice(0, 120)}`);
-          if (eye.fixes?.length && eye.similarity < 85) {
+          const failed = Object.entries(eye.checks || {}).filter(([, v]) => !v).map(([k]) => k);
+          console.log(`[MegaComposer] 👁️ โครงตรง ref ${eye.similarity}%${failed.length ? ` (ตก: ${failed.join(',')})` : ''} — ${eye.diffs.join(' · ').slice(0, 120)}`);
+          // สเกลใหม่: ตกข้อใดข้อหนึ่ง (<100) + ตามีคำสั่งแก้ = ลงมือ (เดิม <85 จะข้ามเคสตกข้อเล็ก)
+          if (eye.fixes?.length && eye.similarity < 100) {
             fixedCount = applyEyeFixes({ fixes: eye.fixes, assignments: core.assignments, loaded: core.loaded, faceBoxes: core.faceBoxes, used: core.used });
             if (fixedCount) {
               const { executeCover } = await import('@/lib/services/coverExecutorService');
