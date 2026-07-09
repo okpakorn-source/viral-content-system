@@ -1,0 +1,201 @@
+{
+  "savedAt": "2026-07-09T10:11:08.852Z",
+  "caseId": "AC-0045",
+  "refId": "REF-mrbq90fp-r6l1",
+  "slotPlan": [
+    {
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-50_mrd4igqf.jpg",
+      "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTb3AbYMYzVBE2znxifMc2NEVIVmDpjCVjof6SUahUrJQ&s=10",
+      "slot": "hero",
+      "clean": true,
+      "newsScene": false,
+      "faces": 1,
+      "isHero": true
+    },
+    {
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-31_mrd4hx4g.jpg",
+      "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRDbhDcg7ykDJL8eOfwA5POjE4Se1yxwSJ4Y_sLbr3bQQ&s=10",
+      "slot": "reaction",
+      "clean": true,
+      "newsScene": true,
+      "faces": 2,
+      "isHero": false
+    },
+    {
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-93_mrd4e19k.jpg",
+      "thumbnailUrl": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-93_mrd4e19k.jpg",
+      "slot": "action",
+      "clean": true,
+      "newsScene": true,
+      "faces": 5,
+      "isHero": false
+    },
+    {
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-49_mrd4ifrk.webp",
+      "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT3bOPPtF6QdKYYVT4ZE3Y0wT3yWJMe9BcXUGafEDGzCg&s=10",
+      "slot": "context",
+      "clean": true,
+      "newsScene": true,
+      "faces": 3,
+      "isHero": false
+    },
+    {
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-78_mrd4r9ot.jpg",
+      "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRNzL7Z2SdQLePbixe6kQyJVF26Re1r4CCwc4gOUUH0BA&s=10",
+      "slot": "circle",
+      "clean": true,
+      "newsScene": false,
+      "faces": 1,
+      "isHero": false
+    },
+    {
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-55_mrd4injv.jpg",
+      "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSGgcSGApqW5ohg2zNQW9I3KSGKbEo5R0-tsdwmhwIAKw&s=10",
+      "slot": null,
+      "clean": true,
+      "newsScene": false,
+      "faces": 1,
+      "isHero": false
+    },
+    {
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-80_mrd4rblc.jpg",
+      "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQW_YSQ7eAvm9WMrNAcshj5ZFmmwq3SQDJR9dPLJ0c7Ag&s=10",
+      "slot": null,
+      "clean": true,
+      "newsScene": false,
+      "faces": 1,
+      "isHero": false
+    },
+    {
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-105_mrd4er65.jpg",
+      "thumbnailUrl": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-105_mrd4er65.jpg",
+      "slot": null,
+      "clean": true,
+      "newsScene": true,
+      "faces": 2,
+      "isHero": false
+    },
+    {
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-101_mrd4eno4.jpg",
+      "thumbnailUrl": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-101_mrd4eno4.jpg",
+      "slot": null,
+      "clean": true,
+      "newsScene": true,
+      "faces": 2,
+      "isHero": false
+    },
+    {
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-252_mrd4b8qn.jpg",
+      "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSpgJJqW4FD9aRGfPFi-S-pMOgJKIWsPI0Zkg5CKpwI5w&s=10",
+      "slot": null,
+      "clean": true,
+      "newsScene": true,
+      "faces": 4,
+      "isHero": false
+    }
+  ],
+  "heroBaseline": {
+    "slot": "main",
+    "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-80_mrd4rblc.jpg",
+    "trace": {
+      "slot": "main",
+      "branch": "single-face-zoom",
+      "faces": 1,
+      "imgW": 1080,
+      "imgH": 1350,
+      "region": {
+        "left": 137,
+        "top": 0,
+        "width": 806,
+        "height": 1350
+      }
+    }
+  },
+  "allCrops": [
+    {
+      "slot": "main",
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-80_mrd4rblc.jpg",
+      "trace": {
+        "slot": "main",
+        "branch": "single-face-zoom",
+        "faces": 1,
+        "imgW": 1080,
+        "imgH": 1350,
+        "region": {
+          "left": 137,
+          "top": 0,
+          "width": 806,
+          "height": 1350
+        }
+      }
+    },
+    {
+      "slot": "circle",
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-78_mrd4r9ot.jpg",
+      "trace": {
+        "slot": "circle",
+        "branch": "single-face-zoom",
+        "faces": 1,
+        "imgW": 800,
+        "imgH": 1064,
+        "region": {
+          "left": 0,
+          "top": 0,
+          "width": 800,
+          "height": 800
+        }
+      }
+    },
+    {
+      "slot": "context_1",
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-49_mrd4ifrk.webp",
+      "trace": {
+        "slot": "context_1",
+        "branch": "story-group-vis",
+        "faces": 2,
+        "imgW": 1200,
+        "imgH": 900,
+        "region": {
+          "left": 249,
+          "top": 33,
+          "width": 583,
+          "height": 867
+        }
+      }
+    },
+    {
+      "slot": "evidence_2",
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-31_mrd4hx4g.jpg",
+      "trace": {
+        "slot": "evidence_2",
+        "branch": "story-group",
+        "faces": 2,
+        "imgW": 600,
+        "imgH": 619,
+        "region": {
+          "left": 0,
+          "top": 108,
+          "width": 600,
+          "height": 383
+        }
+      }
+    },
+    {
+      "slot": "moment_3",
+      "url": "https://ajyhujuxvmdhypmnpfny.supabase.co/storage/v1/object/public/acs-frames/orig_AC-0045-93_mrd4e19k.jpg",
+      "trace": {
+        "slot": "moment_3",
+        "branch": "story-group-vis",
+        "faces": 4,
+        "imgW": 474,
+        "imgH": 315,
+        "region": {
+          "left": 0,
+          "top": 17,
+          "width": 474,
+          "height": 219
+        }
+      }
+    }
+  ]
+}

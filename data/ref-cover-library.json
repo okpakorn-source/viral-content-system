@@ -400,7 +400,8 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": true
+      "_reproducible": false,
+      "_disabledReason": "ผู้ใช้สั่งปิด 9 ก.ค. 2569: DNA วัดโครงผิด — ช่องล่างแนวนอนเต็มกว้าง (y60-100) แต่วงกลมวางทับ y58-88 = คนโดนวงทับเสมอ + inset border วัดเป็น #00FF00"
     },
     "dnaError": null
   },

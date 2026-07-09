@@ -962,10 +962,19 @@ export async function s7_cover(job, { origin } = {}) {
         .sort((a, b) => (isDirect(b) ? 1 : 0) - (isDirect(a) ? 1 : 0));
     }
   } catch { /* สำรองไม่ critical — ได้แค่ลิงก์หลักก็เดินต่อ */ }
+  // ★ 9 ก.ค. ค่ำ (อุดรอย "ภาพคนอื่นหล่น" — เหมือน compose-test): เรียง backups ให้ "คนละคนกับ hero"
+  //   มาก่อนไฟล์ตรง + การันตี 1 ใบรอดเพดาน 10 (ไม่งั้นกติกาวงกลมคนละคนไม่มีของให้หยิบ)
+  const _heroPersonPlan = String(slots.hero?.person || urlTriage.get(String(slots.hero?.imageUrl))?.person || '');
+  const _diffP = (u) => { const p = String(urlTriage.get(String(u))?.person || ''); return !!(_heroPersonPlan && p && p !== _heroPersonPlan); };
+  backupUrls = backupUrls.slice().sort((a, b) => (_diffP(b) ? 2 : 0) - (_diffP(a) ? 2 : 0)); // คงลำดับไฟล์ตรงเดิมภายในกลุ่ม (sort เดิมทำไว้แล้ว)
   const _seenL = new Set();
   const allLinks = [...links, ...backupUrls]
     .filter((u) => { const k = String(u); if (_seenL.has(k)) return false; _seenL.add(k); return true; })
     .slice(0, 10);
+  if (_heroPersonPlan && !allLinks.some(_diffP)) {
+    const cand = backupUrls.find((u) => _diffP(u) && !allLinks.includes(u));
+    if (cand && allLinks.length >= 4) { allLinks[allLinks.length - 1] = cand; console.log('[MEGA S7] 👥 การันตีภาพคนอื่นรอดเพดาน 10 ลิงก์'); }
+  }
   const backup = allLinks.length - links.length; // จำนวนสำรองที่ส่งจริง
   // ★ 8 ก.ค. (CASE-363/AC-0035 hero โดนดึงลง + ภาพ text หลุดเข้า main): ส่ง "แผนช่อง" ให้ v3
   //   หลักการ: S6 ตัดสิน · v3 แค่ประกอบ — v3 บังคับ main=hero ของแผน + เชื่อ clean ของตาคัด (แม่นกว่า detector 512→1024)

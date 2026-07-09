@@ -9,6 +9,10 @@ const nextConfig = {
   outputFileTracingIncludes: {
     '/api/auto-cover': ['./src/assets/fonts/**'],
     '/api/cover-tester': ['./src/assets/fonts/**'],
+    // ★ audit 9 ก.ค.: ตาเทียบ ref อ่าน public/ref-covers ผ่าน fs (fetchOne path ขึ้นต้น '/') + คลัง ref อ่านไฟล์ data
+    //   ไม่ trace = บน Vercel ตาเทียบเงียบหาย + listRefCovers ว่าง — ครอบ route ที่ประกอบปกบนคลาวด์ได้จริง
+    '/api/mega/compose-test': ['./public/ref-covers/**', './data/ref-cover-library.json'],
+    '/api/mega/compose': ['./public/ref-covers/**', './data/ref-cover-library.json'],
   },
 };
 

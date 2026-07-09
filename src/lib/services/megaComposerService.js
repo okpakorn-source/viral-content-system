@@ -407,6 +407,10 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
   // main: 🔒 LOCK หน้าเด่น — ★ 9 ก.ค. (ผู้ใช้: "hero ไม่นิ่ง บางปกไม่เด่น ดูไม่รู้ใคร — ตัวอย่างดี 0042/0043"):
   //   เปลี่ยนจาก tier-เจอใบแรก (ลำดับโหลดพาเพี้ยน) → "ให้คะแนนทุกใบแล้วเอาที่ดีสุด" = นิ่ง deterministic
   //   คะแนน: หน้าใหญ่ + เดี่ยว + สะอาด + ภาพข่าวจริง + ไม่ชิดขอบ (ครอปสวยได้) + โบนัสใบที่ S6 เลือก
+  // ★ 9 ก.ค. ค่ำ (ผู้ใช้เคาะ "hero ต้องเด่น ภาพไม่พัง" — เคส AC-0045 16:48 คว้าแบนเนอร์ข่าว 1200x628
+  //   หน้าเล็กมาซูม w21% = อัพสเกลจนเบลอ): เพิ่ม "เทอมคุณภาพต้นทาง" เป็นตัวหักเท่านั้น —
+  //   เทอมหน้าเด่น/หน้าเดี่ยว/สะอาด/ถูกคน + สูตรครอป + ด่านหลังประกอบ เดิม 100%
+  const _heroShotRef = String(refSlotMeta?.[mainSlot ? spec.slots.indexOf(mainSlot) : -1]?.shot || '').toLowerCase();
   const heroScore = (im, fb) => {
     if (!fb || !(fb.x2 > fb.x1)) return 0;
     let s = Math.min(fb.y2 - fb.y1, 0.55) * 100;            // หน้าใหญ่ = เด่น (cap 55% กันหน้าล้นเกิน)
@@ -416,10 +420,38 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
     if (fb.y1 < 0.02 || fb.y2 > 0.98) s -= 14;              // หน้าชิดขอบบน/ล่างในต้นฉบับ = ครอปเสี่ยงหัว/คางขาด
     if (fb.x1 < 0.02 || fb.x2 > 0.98) s -= 8;
     if (im.isHero) s += 10;                                  // เคารพ S6 เมื่อคะแนนสูสี
+    // — เทอมคุณภาพต้นทาง (หักอย่างเดียว ไม่เพิ่ม — ภาพดีคะแนนเท่าเดิมเป๊ะ) —
+    if (mainSlot && fb.imgW > 0 && fb.imgH > 0) {
+      const facePxW = Math.max(1, (fb.x2 - fb.x1) * fb.imgW);
+      const upscale = (mainSlot.w * 0.88) / facePxW;         // หน้าจะถูกยืดกี่เท่าเมื่อขึ้นช่อง (0.88 = HERO faceFrac)
+      if (upscale > 1.5) s -= Math.min(45, (upscale - 1.5) * 22); // ยืดแรง = เบลอแน่ (เคสแบนเนอร์: ~5 เท่า → -45)
+      const ar = fb.imgW / fb.imgH;
+      if (ar > 1.7) s -= 8;                                  // แบนเนอร์กว้างจัด — ช่อง hero สูง ครอปได้แต่เศษแถบ
+    }
+    // — ระยะช็อตตาม ref (โบนัสเบา ไม่ใช่ตัวตัดสิน) —
+    const fh = fb.y2 - fb.y1;
+    if (/close/.test(_heroShotRef) && fh >= 0.26) s += 8;
+    else if (/med/.test(_heroShotRef) && fh >= 0.10 && fh < 0.30) s += 6;
+    // — ★ สองตาไม่ตรงกัน = เสี่ยงครอปพลาด (เคส AC-0045-153: ตาคัดและตาหาหน้าให้กล่องคนละที่
+    //   บนภาพเดียวกัน → hero ออกมาเห็นแต่คอ) — กล่องจากตาคัด (slotPlan v2) เทียบกล่อง detector:
+    //   ทั้งคู่มีแต่แทบไม่ทับกัน → อย่างน้อยหนึ่งตาโกหก ห้ามเสี่ยงเป็น hero
+    if (im.faceBox && typeof im.faceBox.x === 'number' && typeof im.faceBox.w === 'number') {
+      const t = im.faceBox;
+      const ix = Math.max(0, Math.min(fb.x2, t.x + t.w) - Math.max(fb.x1, t.x));
+      const iy = Math.max(0, Math.min(fb.y2, t.y + t.h) - Math.max(fb.y1, t.y));
+      const inter = ix * iy;
+      const uni = (fb.x2 - fb.x1) * (fb.y2 - fb.y1) + t.w * t.h - inter;
+      if (uni > 0 && inter / uni < 0.15) s -= 35;
+    }
     return s;
   };
+  // ★ 9 ก.ค. ค่ำ (กันผลข้างเคียงเทอมคุณภาพต้นทาง): heroScore เลือกได้เฉพาะภาพของ "คนที่ S6 วางเป็น hero"
+  //   เท่านั้น — เทสจริงเจอภาพสามีคมกว่าแย่งช่อง hero จากนุ่น (ผิดกฎถูกคน 100%) · ไม่มีป้ายคน/ไม่มีตัวเอกที่ใช้ได้ค่อยถอยกว้าง
+  const _planHeroP = String(loaded.find((im) => im.isHero)?.person || '');
+  const _heroPersonOk = (im) => !_planHeroP || im.isHero || String(im.person || '') === _planHeroP;
   let mi = -1, miBest = 0;
-  loaded.forEach((im, i) => { const sc = isCollage[i] ? 0 : heroScore(im, faceBoxes[i]); if (sc > miBest) { miBest = sc; mi = i; } }); // 🧩 hero ห้ามคอลลาจเด็ดขาด
+  loaded.forEach((im, i) => { if (!_heroPersonOk(im)) return; const sc = isCollage[i] ? 0 : heroScore(im, faceBoxes[i]); if (sc > miBest) { miBest = sc; mi = i; } }); // 🧩 hero ห้ามคอลลาจ + ห้ามผิดคน
+  if (mi < 0) { loaded.forEach((im, i) => { const sc = isCollage[i] ? 0 : heroScore(im, faceBoxes[i]); if (sc > miBest) { miBest = sc; mi = i; } }); } // ตัวเอกไม่มีหน้าใช้ได้เลย → ถอยกว้าง (พฤติกรรมเดิม)
   if (mi < 0) { mi = loaded.findIndex((im) => im.isHero); if (mi < 0) mi = 0; } // ไร้หน้าทั้งชุด → ตามแผน S6/ใบแรก
   if (mainSlot && mi >= 0) {
     used.add(mi);
@@ -645,6 +677,9 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
         const cyF = (f0.y + f0.height / 2) / th;
         const cut = (f0.x <= 2 && cxF < 0.30) || (f0.x + f0.width >= tw - 2 && cxF > 0.70) || (f0.y <= 2 && cyF < 0.22);
         if (cut) { heroOk = false; console.log('[MegaComposer] 🛡️ hero หน้าโดนขอบตัด (ครอปเบี้ยวจากกล่องหน้าเพี้ยน) → ไม่ผ่านด่าน'); }
+        // ★ 9 ก.ค. ค่ำ (AC-0045-153 detector หลอนตำแหน่งเดิมซ้ำ ด่านเดิมโดนหลอก): สูตรครอปวางหน้าโซนบน
+        //   (faceTopAt 0.40 + การ์ดผม/หัว) เสมอ — ถ้าหน้าที่เจอจริงอยู่ล่างเฟรม (center y > 0.68) = ครอปเพี้ยนแน่นอน
+        if (heroOk && cyF > 0.68) { heroOk = false; console.log('[MegaComposer] 🛡️ hero หน้าอยู่ล่างเฟรมผิดสูตร (คาดโซนบน) → ไม่ผ่านด่าน'); }
       }
     } catch { heroOk = true; /* ด่านตรวจล้มเอง = ไม่บล็อกงาน */ }
     if (heroOk) { if (attempt > 0) console.log(`[MegaComposer] 🛡️ hero ผ่านด่านบังคับ (รอบ ${attempt + 1})`); break; }
@@ -652,6 +687,7 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
     let ni = -1, nBest = 0;
     loaded.forEach((im, i) => {
       if (heroBanned.has(i) || (i !== mainAssign.imageIndex && used.has(i)) || isCollage[i]) return;
+      if (!_heroPersonOk(im)) return; // ★ 9 ก.ค. ค่ำ: ตัวสำรอง hero ก็ห้ามผิดคนเช่นกัน
       const sc = heroScore(im, faceBoxes[i]);
       if (sc > nBest) { nBest = sc; ni = i; }
     });

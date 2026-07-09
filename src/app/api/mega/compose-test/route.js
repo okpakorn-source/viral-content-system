@@ -136,10 +136,19 @@ export async function POST(req) {
     }]));
     const byId = new Map(imgs.map((x) => [String(x.id), x.imageUrl]));
     const primaryLinks = SLOT_ORDER.map((s) => slots[s]?.imageUrl).filter(Boolean);
+    // ★ 9 ก.ค. ค่ำ (อุดรอย "ภาพคนอื่นหล่น"): backups วงกลมอยู่ท้าย flatMap → โดนเพดาน 10 ลิงก์ตัด
+    //   ทำให้กติกา "วงกลมคนละคนกับ hero" ไม่มีของให้หยิบ (log ⭕⚠️ ทั้งที่ S6 ดันเข้าแผนแล้ว)
+    //   → เรียง "คนละคนกับ hero" ขึ้นก่อน + การันตีอย่างน้อย 1 ใบรอดเข้า allLinks
+    const heroPersonPlan = String(slots.hero?.person || urlTriage.get(String(slots.hero?.imageUrl))?.person || '');
+    const _diffP = (u) => { const p = String(urlTriage.get(String(u))?.person || ''); return !!(heroPersonPlan && p && p !== heroPersonPlan); };
     const backupUrls = SLOT_ORDER.flatMap((s) => slots[s]?.backups || []).map((b) => byId.get(String(b))).filter(Boolean)
-      .sort((a, b) => (isDirect(b) ? 1 : 0) - (isDirect(a) ? 1 : 0));
+      .sort((a, b) => ((_diffP(b) ? 2 : 0) + (isDirect(b) ? 1 : 0)) - ((_diffP(a) ? 2 : 0) + (isDirect(a) ? 1 : 0)));
     const _seen = new Set();
     const allLinks = [...primaryLinks, ...backupUrls].filter((u) => { const k = String(u); if (_seen.has(k)) return false; _seen.add(k); return true; }).slice(0, 10);
+    if (heroPersonPlan && !allLinks.some(_diffP)) {
+      const cand = backupUrls.find((u) => _diffP(u) && !allLinks.includes(u));
+      if (cand && allLinks.length >= 4) { allLinks[allLinks.length - 1] = cand; console.log('[compose-test] 👥 การันตีภาพคนอื่นรอดเพดาน 10 ลิงก์ (แทนลิงก์ท้าย)'); }
+    }
     if (allLinks.length < 3) {
       return NextResponse.json({ success: false, error: `S6 คัดได้ ${allLinks.length} ภาพ (ต้อง ≥3)`, errorType: 'INSUFFICIENT_PICKED', elapsed: `${((Date.now() - t0) / 1000).toFixed(1)}s` }, { status: 422 });
     }
