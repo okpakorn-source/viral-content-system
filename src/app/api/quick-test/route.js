@@ -34,8 +34,12 @@ function badReq(error) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRY_MAX = Math.max(1, parseInt(process.env.QUICK_TEST_MAX_ATTEMPTS || '6', 10));
 const RETRY_BASE_MS = Math.max(3000, parseInt(process.env.QUICK_TEST_RETRY_MS || '20000', 10));
-// input ผิดจริง — วนไปก็ไม่หาย (หยุด) · ที่เหลือถือเป็น "ล่มชั่วคราว/พูลไม่พอรอบนี้" → วนซ้ำ
-const TERMINAL_ERRORS = new Set(['BAD_INPUT', 'NO_CONTENT', 'CASE_NOT_FOUND']);
+// หยุดวน (วนไปก็ไม่หาย): input ผิด + "ทำครบแล้วแต่วัตถุดิบไม่พอจริง" (พูล/ภาพไม่พอ — วนเนื้อเดิมก็ได้เท่าเดิม)
+//   ต่างจาก "ระบบล่มชั่วคราว" (Gemini/SerpApi/network/5xx/timeout ล่ม) ที่ *ต้อง* วนซ้ำจนได้ผลจริง
+const TERMINAL_ERRORS = new Set([
+  'BAD_INPUT', 'NO_CONTENT', 'CASE_NOT_FOUND',                     // input ผิด
+  'INSUFFICIENT_PICKED', 'POOL_TOO_THIN', 'NO_CLIPS', 'NO_FRAMES', // ทำครบแล้ววัตถุดิบไม่พอ (ไม่ใช่ระบบล่ม)
+]);
 
 // รัน 1 รอบ — สำเร็จคืน result object, ล้ม throw (แนบ errorType/trace)
 async function callOnce(job, origin) {
