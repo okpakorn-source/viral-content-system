@@ -14,7 +14,9 @@ if not exist ".next-3900\BUILD_ID" (
 )
 :loop
 echo [forever] starting acs-yt-server :3900 %date% %time% >> _acs_yt_server.log
-call npx next start -p 3900 >> _acs_yt_server.log 2>&1
+rem ★ 9 ก.ค.: --max-old-space-size=4096 (heap 4GB) — ท่อ ref โหลดภาพเป็นร้อยใบ+sharp = mem spike → :3900 OOM crash
+rem   (เดิม npx next start เปล่าๆ heap default ~2GB · เทสข่าวจริง 13:35 crash กลางท่อ) · ให้ heap เท่า :3000
+call node --max-old-space-size=4096 node_modules\next\dist\bin\next start -p 3900 >> _acs_yt_server.log 2>&1
 echo [forever] acs-yt-server exited - restart in 5s >> _acs_yt_server.log
 rem ★ 9 ก.ค.: ใช้ ping แทน timeout — timeout ต้องมี console stdin, เมื่อ redirect log มันเด้ง error ทันที
 rem   ทำให้ลูปหมุนเต็มสปีดกิน CPU (บั๊ก 7 ก.ค. 5:04 crash-loop รัวในวินาทีเดียว) · ping -n 6 = รอ ~5 วิ ไม่ง้อ stdin
