@@ -13,7 +13,7 @@
 // ============================================================
 
 import { NextResponse } from 'next/server';
-import { createJob, patchJob, finishJob, listJobs, getJob, claimTeamJob } from '@/lib/quickTestJobs';
+import { createJob, patchJob, finishJob, listJobs, getJob, claimTeamJob, removeJob } from '@/lib/quickTestJobs';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // คลาวรัน compose sync ได้ถึง ~5 นาที (ต้อง Vercel Pro) · เครื่องทีมคืนทันที
@@ -98,9 +98,12 @@ async function runJob(job, origin) {
   await patchJob(job.id, { status: 'running', startedAt: nowIso(), claimedAt: nowIso(), progress: { step: 'กำลังรัน', pct: 5 } });
   let lastErr = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // ★ 9 ก.ค.: ผู้ใช้กดลบระหว่างรัน → getJob เจอ null → หยุดทันที ไม่วนต่อ ไม่เขียนผลกลับ (ปุ่มลบใน UI)
+    if (!(await getJob(job.id))) return;
     try {
       if (attempt > 1) await patchJob(job.id, { claimedAt: nowIso(), progress: { step: `ลองใหม่รอบ ${attempt}/${maxAttempts}`, pct: 5 } });
       const result = await callOnce(job, origin);
+      if (!(await getJob(job.id))) return; // ถูกลบระหว่างรอบนี้ → ไม่เขียน done ทับ
       await finishJob(job.id, { status: 'done', progress: { step: 'เสร็จ', pct: 100 }, result, attempts: attempt, error: null });
       return;
     } catch (e) {
@@ -113,6 +116,7 @@ async function runJob(job, origin) {
       }
     }
   }
+  if (!(await getJob(job.id))) return; // ถูกลบระหว่างวน → ไม่เขียน failed ทับ
   await finishJob(job.id, {
     status: 'failed',
     progress: { step: `ล้มเหลว (ครบ ${maxAttempts} รอบ)`, pct: 100 },
@@ -130,6 +134,22 @@ export async function POST(req) {
 
     // ── action 'run': worker เครื่องทีมสั่งรันงาน dispatch='team' ที่ค้าง 1 งาน (fire-and-forget) ──
     //   เรียกจาก scripts/acs-yt-worker.mjs ตอนว่าง — รันบนเครื่องทีม (yt-dlp/ffmpeg/ท่อ MEGA ครบ)
+    // ── action 'delete': ผู้ใช้กดลบคิว (ทีละงาน jobId หรือ ล้างค้างทั้งหมด scope='active') ──
+    //   งานที่กำลังรัน: ลบแถวออก → runJob เจอ getJob=null แล้วหยุด+ไม่เขียนผลทับ (ไม่ต้องฆ่า process)
+    if (body.action === 'delete') {
+      if (body.jobId) {
+        await removeJob(String(body.jobId)).catch(() => {});
+        return NextResponse.json({ success: true, deleted: 1 });
+      }
+      if (body.scope === 'active' || body.scope === 'all') {
+        const jobs = await listJobs(200);
+        const targets = body.scope === 'all' ? jobs : jobs.filter((j) => j.status === 'pending' || j.status === 'running');
+        for (const j of targets) await removeJob(j.id).catch(() => {});
+        return NextResponse.json({ success: true, deleted: targets.length });
+      }
+      return badReq('ต้องระบุ jobId หรือ scope=active|all');
+    }
+
     if (body.action === 'run') {
       if (IS_CLOUD) return NextResponse.json({ success: false, error: 'action run ใช้บนเครื่องทีมเท่านั้น', errorType: 'CLOUD_CANNOT_RUN' }, { status: 400 });
       const claimed = await claimTeamJob();

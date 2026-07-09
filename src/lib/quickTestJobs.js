@@ -145,6 +145,19 @@ export async function patchJob(id, patch) {
   return updated;
 }
 
+// ★ 9 ก.ค.: ลบงานออกจากคิว (ผู้ใช้กดลบใน UI) — งานที่กำลังรัน runJob จะเช็ค getJob เจอ null แล้วหยุดเอง
+export async function removeJob(id) {
+  const c = sb();
+  if (!c) {
+    const jobs = await fsReadAll();
+    await fsWriteAll(jobs.filter((j) => j.id !== id));
+    return true;
+  }
+  const { error } = await c.from(TABLE).delete().eq('id', id).eq('store_name', STORE_NAME);
+  if (error) throw new Error('ลบงานไม่สำเร็จ: ' + error.message);
+  return true;
+}
+
 // ปิดงาน — done (มี result) หรือ failed (มี error)
 export async function finishJob(id, patch) {
   const job = await getJob(id);

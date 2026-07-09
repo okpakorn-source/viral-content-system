@@ -87,6 +87,23 @@ export default function QuickCoverPage() {
     finally { setSubmitting(false); }
   }
 
+  // ลบงาน 1 อัน (กำลังรันก็ลบได้ — runJob เจองานหาย แล้วหยุดเอง)
+  async function delJob(id) {
+    setJobs((prev) => prev.filter((j) => j.id !== id)); // เอาออกจากจอทันที
+    if (openId === id) setOpenId(null);
+    await fetch('/api/quick-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', jobId: id }) }).catch(() => {});
+    setTimeout(loadJobs, 500);
+  }
+  // ล้างคิวค้างทั้งหมด (รอคิว + กำลังรัน)
+  async function clearActive() {
+    const active = jobs.filter((j) => j.status === 'pending' || j.status === 'running');
+    if (!active.length) return;
+    if (typeof window !== 'undefined' && !window.confirm(`ลบงานที่ค้าง (รอคิว + กำลังรัน) ${active.length} งาน?`)) return;
+    setJobs((prev) => prev.filter((j) => j.status !== 'pending' && j.status !== 'running'));
+    await fetch('/api/quick-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', scope: 'active' }) }).catch(() => {});
+    setTimeout(loadJobs, 500);
+  }
+
   // ปัดซ้าย-ขวาเปลี่ยนสไลด์
   const onTouchStart = (e) => { touchX.current = e.touches[0].clientX; };
   const onTouchEnd = (e) => {
@@ -169,12 +186,17 @@ export default function QuickCoverPage() {
           {/* ── สไลด์ 2: งาน ── */}
           {slide === 2 && (
             <div style={{ animation: 'qcIn .22s ease' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 8 }}>
                 <div style={{ fontSize: 15, fontWeight: 800 }}>งานเทสปก</div>
-                <button onClick={loadJobs} style={{ fontSize: 12, color: C.dim, background: C.card, border: `1px solid ${C.line}`, borderRadius: 999, padding: '5px 12px', cursor: 'pointer' }}>↻ รีเฟรช</button>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {jobs.some((j) => j.status === 'pending' || j.status === 'running') && (
+                    <button onClick={clearActive} style={{ fontSize: 12, color: '#fca5a5', background: 'rgba(239,68,68,.12)', border: '1px solid rgba(239,68,68,.35)', borderRadius: 999, padding: '5px 12px', cursor: 'pointer', fontWeight: 700 }}>🗑️ ล้างคิวค้าง</button>
+                  )}
+                  <button onClick={loadJobs} style={{ fontSize: 12, color: C.dim, background: C.card, border: `1px solid ${C.line}`, borderRadius: 999, padding: '5px 12px', cursor: 'pointer' }}>↻ รีเฟรช</button>
+                </div>
               </div>
               {jobs.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: C.dim, fontSize: 13 }}>ยังไม่มีงาน — กดสร้างจากสไลด์แรก</div>}
-              {jobs.map((j) => <JobCard key={j.id} job={j} open={openId === j.id} onToggle={() => setOpenId(openId === j.id ? null : j.id)} now={now} />)}
+              {jobs.map((j) => <JobCard key={j.id} job={j} open={openId === j.id} onToggle={() => setOpenId(openId === j.id ? null : j.id)} onDelete={delJob} now={now} />)}
             </div>
           )}
         </div>
@@ -232,7 +254,7 @@ function fmtDur(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
-function JobCard({ job, open, onToggle, now }) {
+function JobCard({ job, open, onToggle, onDelete, now }) {
   const st = job.status;
   const color = st === 'done' ? C.green : st === 'failed' ? C.red : C.amber;
   const badge = st === 'done' ? '✅ เสร็จ' : st === 'failed' ? '❌ ล้ม' : st === 'running' ? '⏳ กำลังรัน' : '🕐 เข้าคิว';
@@ -243,7 +265,8 @@ function JobCard({ job, open, onToggle, now }) {
 
   return (
     <div style={{ background: C.card, border: `1px solid ${st === 'done' ? 'rgba(34,197,94,.4)' : st === 'failed' ? 'rgba(239,68,68,.4)' : C.line}`, borderRadius: 14, padding: 12, marginBottom: 10 }}>
-      <button onClick={onToggle} style={{ display: 'flex', width: '100%', gap: 10, alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: C.text, textAlign: 'left', padding: 0 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      <button onClick={onToggle} style={{ display: 'flex', flex: 1, minWidth: 0, gap: 10, alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: C.text, textAlign: 'left', padding: 0 }}>
         {r.coverImgUrl && st === 'done'
           ? <img src={r.coverImgUrl} alt="ปก" style={{ width: 54, height: 68, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: `1px solid ${C.line}` }} />
           : <div style={{ width: 54, height: 68, borderRadius: 8, flexShrink: 0, background: C.card2, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>{st === 'failed' ? '⚠️' : '🎬'}</div>}
@@ -260,6 +283,9 @@ function JobCard({ job, open, onToggle, now }) {
         </div>
         <span style={{ color: C.dim, fontSize: 12 }}>{open ? '▲' : '▼'}</span>
       </button>
+        <button onClick={() => onDelete && onDelete(job.id)} title="ลบงานนี้"
+          style={{ flexShrink: 0, width: 34, height: 34, borderRadius: 9, border: `1px solid ${C.line}`, background: C.card2, color: '#f87171', fontSize: 15, cursor: 'pointer', lineHeight: 1 }}>🗑️</button>
+      </div>
 
       {open && (
         <div style={{ marginTop: 12, borderTop: `1px solid ${C.line}`, paddingTop: 12 }}>
