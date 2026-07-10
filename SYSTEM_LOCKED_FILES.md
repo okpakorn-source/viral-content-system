@@ -35,3 +35,16 @@
 - ❌ ห้าม disable hook เพื่อเลี่ยงการถาม
 
 > 🔴 ระบบ "ปก / คลิป / คิว / โต๊ะข่าว" ไม่ได้ถูกล็อก — แก้ได้ตามปกติ (ล็อกเฉพาะ "การเขียนข่าว")
+
+
+## ➕ เสริมลิสต์ 10 ก.ค. 2569 (หลังปิดเคส #01641 — ไฟล์หัวใจที่เคยหลุดล็อก)
+- src/lib/ai/claudeClient.js — ตัวเขียนหลัก (Claude) กฎเหล็ก+Safety ของตัวเขียนอยู่ที่นี่
+- src/lib/ai/geminiClient.js — ตัวสกัดข่าว chain แรก
+- src/lib/ai/safetyFilter.js — ตัวกรองคำเสี่ยง sanitizeOutput
+- src/lib/correction/ (ทั้งโฟลเดอร์) — ด่านตรวจ/แก้หลังเขียน
+- src/lib/utils/withTimeout.js — เพดานเวลา + ป้าย failedStep
+- src/lib/services/queueService.js + src/app/api/queue/ — คิวงาน/worker/dedup
+- src/lib/persistStore.js — ชั้นเก็บข้อมูล + fallback ไฟล์
+- scripts/news-lock-guard.mjs — ตัวล็อกเอง (แก้ลิสต์ต้องยืนยัน)
+
+บทเรียนที่มาของการเสริม: เคส #01641 พิสูจน์ว่ากฎแบนคำ/ด่านตรวจกระจายอยู่หลายไฟล์นอกลิสต์เดิม — แก้ผิดตัวเดียวเนื้อหาเพี้ยนได้ทั้งระบบ

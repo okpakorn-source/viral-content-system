@@ -35,6 +35,16 @@ const PROTECTED = [
   /\/src\/app\/api\/research-search\//i,
   /\/src\/app\/content\/new\/page\.js$/i,
   /\/scripts\/validate-workflow\.mjs$/i,
+  // ★ เสริม 10 ก.ค. 69 (หลังปิดเคส #01641) — ไฟล์หัวใจที่เคยหลุดลิสต์:
+  /\/src\/lib\/ai\/claudeClient\.js$/i,        // ตัวเขียนหลัก (Claude) — กฎเหล็ก+Safety อยู่ที่นี่
+  /\/src\/lib\/ai\/geminiClient\.js$/i,        // ตัวสกัดข่าว chain แรก
+  /\/src\/lib\/ai\/safetyFilter\.js$/i,        // ตัวกรองคำเสี่ยง sanitizeOutput
+  /\/src\/lib\/correction\//i,                 // ด่านตรวจ/แก้ทั้งชุด (outputAudit, correctionPipeline)
+  /\/src\/lib\/utils\/withTimeout\.js$/i,      // เพดานเวลาทุกขั้น + ป้าย failedStep
+  /\/src\/lib\/services\/queueService\.js$/i,  // คิวงาน atomic claim/supersede
+  /\/src\/app\/api\/queue\//i,                 // worker + add (dedup/routing)
+  /\/src\/lib\/persistStore\.js$/i,            // ชั้นเก็บข้อมูล + fallback ไฟล์
+  /\/scripts\/news-lock-guard\.mjs$/i,         // ล็อกตัวล็อกเอง — แก้ลิสต์ต้องยืนยันเสมอ
 ];
 
 if (norm && PROTECTED.some((re) => re.test(norm))) {
