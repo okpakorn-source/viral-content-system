@@ -47,7 +47,8 @@ const FORBIDDEN_WORDS = [
   { pattern: /สิ้นใจ/g, type: 'forbidden_word', severity: 'medium', suggestion: 'จากไป' },
   { pattern: /สยอง/g, type: 'forbidden_word', severity: 'medium', suggestion: 'น่าตกใจ' },
   { pattern: /โหด(?!ร้อน)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'รุนแรง' },
-  { pattern: /เลือด(?!ดี|ข้น|ฝาด|จาง|ผสม)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ร่องรอยเหตุการณ์' },
+  // ★ 10 ก.ค. 69: เพิ่ม lookbehind (?<!เส้น) — "เส้นเลือด/เส้นเลือดในสมอง" คือศัพท์การแพทย์ ห้ามจับ (เคยถูกแทนเป็น "เส้นร่องรอยเหตุการณ์ในสมองแตก")
+  { pattern: /(?<!เส้น)เลือด(?!ดี|ข้น|ฝาด|จาง|ผสม|กำเดา)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ร่องรอยเหตุการณ์' },
   { pattern: /ทุบตี/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ใช้ความรุนแรง' },
   { pattern: /ทำร้าย(?!ตัวเอง)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ใช้ความรุนแรง' },
   { pattern: /เลือดสาด/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุรุนแรง' },

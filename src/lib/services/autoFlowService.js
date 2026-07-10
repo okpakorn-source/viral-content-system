@@ -288,7 +288,8 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   // ★ ปรับ 10 มิ.ย. 2026: default 3 มุม × 1 เวอร์ชัน = 3 ชิ้นที่ "ต่างกันจริง" (คนละมุม คนละ prompt คนละ research)
   //   เดิม 2 มุม × 2 → เวอร์ชันในมุมเดียวกันแทบซ้ำกัน (V2/V4 เคยได้พาดหัวเหมือนกันคำต่อคำ)
   //   ปรับได้ผ่าน .env: GEN_ANGLES (1-4) / GEN_PER_ANGLE (1-3)
-  const GEN_ANGLES = Math.max(1, Math.min(4, parseInt(process.env.GEN_ANGLES || '3', 10) || 3));
+  // ★ ปรับ 10 ก.ค. 69 (คำสั่งทีม หลังเคส #01641): default 2 มุม — ฝืนหามุมที่ 3 = พร้อมท์อันดับท้ายธีมผิดเรื่อง
+  const GEN_ANGLES = Math.max(1, Math.min(4, parseInt(process.env.GEN_ANGLES || '2', 10) || 2));
   const GEN_PER_ANGLE = Math.max(1, Math.min(3, parseInt(process.env.GEN_PER_ANGLE || '1', 10) || 1));
   // ★ REVERT 10 ก.ค. 69 (เคส #01635): ห้ามเรียงตามคะแนนไวรัล — มุมคะแนนสูงมักเป็นมุมพี่น้องเรื่องเดียวกัน
   //   → 3 เวอร์ชันเปิดเหมือนกันหมด + ชื่อมุมแคบจนจับคู่พร้อมท์คลังเพี้ยน (เจอพร้อมท์ไว้อาลัยกับข่าวมูฟออน)
@@ -340,6 +341,19 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
       addLog('PromptSelect', `📋 Angle "${angleObj.angle_name}" → ${topPrompt.promptName?.slice(0, 40)} (excluded: ${usedPromptIds.length - 1})${_cachedNewsAnalysis ? ' ♻️' : ''}`);
     }
     anglePrompts.push(topPrompt);
+  }
+
+  // ★ 10 ก.ค. 69 (เคส #01641 "แม่ยังอยู่"): มุมจริง-แมตช์จริงเท่านั้น — ห้ามฝืนเขียนด้วยพร้อมท์ธีมผิดเรื่อง
+  //   มุมที่ 2 เป็นต้นไป ถ้าจับคู่หลวม (_matchScore < 45 หรือหลุดไป Built-in Fallback ซึ่งไม่มี score)
+  //   → ตัดมุมทิ้ง ออกน้อยเวอร์ชันแต่ไม่บิดเบือน — มุมแรกเก็บเสมอ = การันตีมีผลลัพธ์อย่างน้อย 1 เวอร์ชัน
+  const MIN_ANGLE_MATCH = Math.max(0, parseInt(process.env.ANGLE_MIN_MATCH_SCORE || '45', 10) || 45);
+  for (let i = anglesToUse.length - 1; i >= 1; i--) {
+    const _score = Number(anglePrompts[i]?._matchScore ?? 0);
+    if (_score < MIN_ANGLE_MATCH) {
+      addLog('PromptSelect', `✂️ ตัดมุม "${anglesToUse[i].angle_name}" — พร้อมท์จับคู่หลวม (score ${_score} < ${MIN_ANGLE_MATCH}) เอาเฉพาะมุมที่แมตช์จริง`);
+      anglesToUse.splice(i, 1);
+      anglePrompts.splice(i, 1);
+    }
   }
 
   // ★ HOTFIX (10 มิ.ย.): สไตล์เปิดเรื่องหมุนเวียนต่อ angle — โหมด 1 เวอร์ชัน/call ไม่มีแรงบังคับ
