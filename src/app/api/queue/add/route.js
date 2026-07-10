@@ -121,7 +121,8 @@ export async function POST(req) {
     let _forceRegen = false;
     for (const _k of ['input', 'text']) {
       const _v = String(payload[_k] || '');
-      const _m = _v.match(/^\s*(?:ทำใหม่|!again)\s*[:：]?\s*/);
+      // ★ ทนเครื่องหมายคำพูด/วงเล็บที่คนก๊อบติดมา เช่น «"ทำใหม่ " เนื้อข่าว» (เคสจริง 10 ก.ค. ผู้ใช้ก๊อบจากข้อความ ⚠️)
+      const _m = _v.match(/^\s*["'“”‘’(\[]*\s*(?:ทำใหม่|!again)\s*["'“”‘’)\]]*\s*[:：]?\s*/);
       if (_m && _v.length > _m[0].length) {
         _forceRegen = true;
         payload[_k] = _v.slice(_m[0].length);
