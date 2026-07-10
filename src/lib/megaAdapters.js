@@ -7,6 +7,7 @@
 // ============================================================
 
 import { preflightBrain, compassBrain, judgeBrain, slotDirectorBrain, artBriefBrain } from '@/lib/megaBrains';
+import { evaluateCoverQc } from '@/lib/coverQcGate'; // ★ Wave2 A1: ด่าน QC แข็ง — ของเสียไม่เข้าคลัง
 
 const MEGA_USER = 'mega-bot';
 const MIN_EXTRACT_CHARS = parseInt(process.env.MEGA_MIN_EXTRACT_CHARS || '400', 10);
@@ -1609,7 +1610,13 @@ export async function s7_wait(job) {
     if (!m) {
       return { status: 'failed', nextAction: 'fail', summary: 'ปกเสร็จแต่ไม่พบรูปในผล (ไม่มี base64)', quality: 'red' };
     }
-    // เซฟเป็นไฟล์ให้ UI ใช้ได้เลย — แฟ้มเก็บแค่ path+สรุป (กติกา: dossier ห้ามเก็บก้อนใหญ่)
+    // ★ Wave2 A1: ด่าน QC แข็ง — ตัดสิน "ผ่าน/ไม่ผ่าน" จากธงคุณภาพ deterministic ก่อนตัดสินใจเข้าคลัง
+    //   (refSimilarity ส่งเข้าไปด้วยแต่ gate ใช้เป็น advisory เท่านั้น — พิสูจน์แล้วเชื่อไม่ได้ เคส AC-0066)
+    const qcVerdict = evaluateCoverQc({ qcFlags: r.qcFlags, refSimilarity: r.refSimilarity ?? null, manifest: r.manifest || null });
+    if (qcVerdict.pass) console.log(`[MEGA S7] ✅ QC gate ผ่าน (${job.id})${qcVerdict.reasons.length ? ' · เตือน: ' + qcVerdict.reasons.join(' / ') : ''}`);
+    else console.log(`[MEGA S7] ⛔ QC gate: ${qcVerdict.reasons.join(' / ')} → ${qcVerdict.suggestedStatus}`);
+
+    // เซฟเป็นไฟล์ให้ UI ใช้ได้เลย (ทั้งผ่าน/ไม่ผ่าน — คนต้องเปิดดูใบที่ถูก hold ได้)
     // ★ 9 ก.ค.: เขียนดิสก์ล้ม (Vercel/Railway อ่านอย่างเดียว) ห้ามพังงาน — คลังคลาวด์รับช่วงเสิร์ฟภาพแทน
     const { promises: fs } = await import('fs');
     const path = await import('path');
@@ -1620,6 +1627,35 @@ export async function s7_wait(job) {
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(path.join(dir, file), Buffer.from(m[2], 'base64'));
     } catch { coverPath = null; }
+
+    // แฟ้ม cover ที่เก็บครบทุกกรณี (ผ่าน/hold) — คนต้องเห็น coverPath/manifest/qcVerdict ได้เสมอ
+    const coverCore = {
+      ...cv,
+      coverPath,
+      template: r.template || '',
+      score: r.score ?? null,
+      coverCaseId: r.caseId || '',
+      directorReason: (r.directorReason || '').slice(0, 300),
+      manifest: r.manifest || null, // ★ Wave1 Batch E: ความจริงของรอบประกอบ (จาก composeAndVerify) — additive
+      qcVerdict, // ★ Wave2 A1: คำตัดสินด่าน (pass/reasons/suggestedStatus/advisory)
+      completedAt: new Date().toISOString(),
+    };
+
+    // ⛔ ไม่ผ่านด่าน → ของเสียไม่เข้าคลัง (ไม่เรียก addMegaCover) แต่เก็บ dossier ครบ + จบงานด้วยสถานะบอกความจริง
+    //   คืน status='quality_hold' + holdStatus → ให้ tick แปลงเป็นสถานะ terminal ใหม่ (แตะ state machine น้อยสุด)
+    if (!qcVerdict.pass) {
+      if (!coverPath) coverPath = ''; // ไม่มีคลังรับช่วงเสิร์ฟภาพ (ไม่ addMegaCover) → path ว่างได้ (base64 ยังอยู่ในคิว)
+      return {
+        status: 'quality_hold',
+        nextAction: 'hold',
+        holdStatus: qcVerdict.suggestedStatus, // 'needs_gap_search' | 'manual_review'
+        summary: `⛔ ปกไม่ผ่านด่าน QC → ${qcVerdict.suggestedStatus}: ${qcVerdict.reasons.join(' · ')}`.slice(0, 200),
+        quality: 'yellow',
+        dossierPatch: { cover: { ...coverCore, coverPath, archiveId: null } }, // ไม่เข้าคลัง = ไม่มี archiveId (ซื่อตรง)
+      };
+    }
+
+    // ✅ ผ่านด่าน → เข้าคลังตามปกติ
     // 🗂️ ส่งเข้าคลังงานปก MEGA อัตโนมัติ (ล้มไม่ critical ต่อสายพาน) — base64 ขึ้นคลาวด์ให้ Vercel เห็นด้วย
     // ★ 10 ก.ค.: id ที่ addMegaCover คืนกลับมาไม่ใช่ job.id ตรงๆ อีกแล้ว (เป็น archive id ต่อ revision
     //   MCV-<job.id>-rN กัน insert ชน PK เดิม) → เก็บ ent ไว้นอก try เพื่อฝัง archiveId ลง dossier ด้วย
@@ -1635,15 +1671,9 @@ export async function s7_wait(job) {
       summary: `ปกเสร็จ! template ${r.template || '-'} · คะแนน QC ${r.score ?? '-'} · เคสปก ${r.caseId || '-'}`,
       dossierPatch: {
         cover: {
-          ...cv,
-          coverPath,
+          ...coverCore,
+          coverPath, // อาจถูกอัปเป็น /api/mega-covers/img หลัง addMegaCover (เขียนดิสก์ล้ม)
           archiveId: ent?.id || cv.archiveId || null, // ★ 10 ก.ค.: revision id จริงในคลัง mega-cover-runs (ต่างจาก job.id)
-          template: r.template || '',
-          score: r.score ?? null,
-          coverCaseId: r.caseId || '',
-          directorReason: (r.directorReason || '').slice(0, 300),
-          manifest: r.manifest || null, // ★ Wave1 Batch E: ความจริงของรอบประกอบ (จาก composeAndVerify) — additive
-          completedAt: new Date().toISOString(),
         },
       },
     };

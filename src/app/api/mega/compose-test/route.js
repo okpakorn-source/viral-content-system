@@ -13,6 +13,7 @@ import { readImages } from '@/lib/imageStore';
 import { getCase, listRecent } from '@/lib/caseStore';
 import { listRefCovers } from '@/lib/refCoverLibrary';
 import { composeAndVerify } from '@/lib/services/megaComposerService';
+import { evaluateCoverQc } from '@/lib/coverQcGate'; // ★ W2-A2: advisory เท่านั้น — ไม่บล็อกเครื่องมือเทส แค่แนบผลด่าน QC ให้เห็น
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // audit 9 ก.ค.: ท่อเต็มมี LLM ≥4 จุด เวลาจริง 60-90s — 120 ตึงเกิน (ชน timeout = เสียค่า LLM ฟรี)
@@ -97,8 +98,10 @@ export async function POST(req) {
         stableOrder: typeof body.stableOrder === 'boolean' ? body.stableOrder : process.env.MEGA_STABLE_ORDER !== '0',
       });
       if (outF.success && outF.refSimilarity != null) outF.score = `เหมือน ref ${outF.refSimilarity}%`;
+      // ★ W2-A2: แนบผลด่าน QC (advisory) — ไม่แตะ success/สถานะใดๆ เครื่องมือเทสต้องเห็นผลเสมอ
+      const qcVerdictF = evaluateCoverQc({ qcFlags: outF.qcFlags, refSimilarity: outF.refSimilarity, manifest: outF.manifest });
       return NextResponse.json({
-        ...outF, caseId, frozenPlan: true,
+        ...outF, caseId, frozenPlan: true, qcVerdict: qcVerdictF,
         refUsed: { id: refF.id, styleName: refF.styleName || refF.id, imagePath: refF.imagePath },
         elapsed: `${((Date.now() - t0f) / 1000).toFixed(1)}s`,
       }, { status: outF.success ? 200 : 422 });
@@ -204,6 +207,8 @@ export async function POST(req) {
       stableOrder: typeof body.stableOrder === 'boolean' ? body.stableOrder : process.env.MEGA_STABLE_ORDER !== '0', // ★ 10 ก.ค. Wave1: default ตาม env เดียวกับ production (เดิมปิด)
     });
     if (out.success && out.refSimilarity != null) out.score = `เหมือน ref ${out.refSimilarity}%`;
+    // ★ W2-A2: แนบผลด่าน QC (advisory) — ไม่แตะ success/สถานะใดๆ เครื่องมือเทสต้องเห็นผลเสมอ
+    const qcVerdict = evaluateCoverQc({ qcFlags: out.qcFlags, refSimilarity: out.refSimilarity, manifest: out.manifest });
 
     // 🗂️ 9 ก.ค. (ผู้ใช้สั่ง "ทุกครั้งที่กดสร้างปกเข้าคลังออโต้"): ผลสำเร็จเด้งเข้าคลังงาน MEGA เสมอ
     let archived = null;
@@ -227,6 +232,7 @@ export async function POST(req) {
     return NextResponse.json({
       ...out,
       caseId,
+      qcVerdict,
       refUsed: ref ? { id: ref.id, styleName: ref.styleName || ref.id, imagePath: ref.imagePath } : null,
       archivedId: archived?.id || null, // เข้าคลัง /mega-covers แล้ว (โหลดภาพ: /api/mega-covers/img?id=..&dl=1)
       poolSize: pool.length,

@@ -11,6 +11,7 @@
 import { NextResponse } from 'next/server';
 import { compassBrain } from '@/lib/megaBrains';
 import { s5_case, s5_keywords, s5_search, s5_triage, s5_clipframe, s6_slots } from '@/lib/megaAdapters';
+import { evaluateCoverQc } from '@/lib/coverQcGate'; // ★ W2-A2: advisory เท่านั้น — ไม่บล็อกเครื่องมือเทส แค่แนบผลด่าน QC ให้เห็น
 
 export const runtime = 'nodejs';
 export const maxDuration = 1800; // ★ 7 ก.ค.: ท่อ MEGA เต็มใช้ ~12-18 นาที (search+cover) — 10 นาทีไม่พอ
@@ -180,6 +181,8 @@ export async function POST(req) {
       return NextResponse.json({ success: false, error: cover?.error || 'โรงประกอบล้ม', errorType: cover?.errorType || 'COVER_FAILED', trace, sourceLinks }, { status: 502 });
     }
     cover.score = cover.refSimilarity != null ? `เหมือน ref ${cover.refSimilarity}%` : '-'; // ให้หน้าเดิมโชว์ได้โดยไม่แก้ UI
+    // ★ W2-A2: แนบผลด่าน QC (advisory) — ไม่แตะ success/สถานะใดๆ เครื่องมือเทสต้องเห็นผลเสมอ
+    const qcVerdict = evaluateCoverQc({ qcFlags: cover.qcFlags, refSimilarity: cover.refSimilarity, manifest: cover.manifest });
 
     // ── เซฟไฟล์ปก + ส่งเข้าคลังงาน MEGA อัตโนมัติ (ล้มไม่ critical ต่อผลปก) ──
     let coverPath = null;
@@ -211,6 +214,7 @@ export async function POST(req) {
 
     return NextResponse.json({
       ...cover,          // base64, template, score, directorReason, assignments, caseId...
+      qcVerdict,          // ★ W2-A2: ผลด่าน QC gate (advisory เท่านั้น)
       coverPath,         // /mega-covers/xxx.jpg (เก็บเข้าคลังแล้ว)
       matchedRef: matchedRef?.ref ? { imagePath: matchedRef.ref.imagePath, styleName: matchedRef.ref.styleName, dna: matchedRef.ref.dna, score: matchedRef.score, reason: matchedRef.reason } : null, // 🎯 ปกเป้าจากคลัง
       throughMega: true, // ★ ยืนยันว่าผ่านท่อ MEGA (keyword system) จริง

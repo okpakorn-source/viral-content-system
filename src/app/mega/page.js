@@ -159,12 +159,14 @@ export default function MegaPage() {
 
       {jobs.map((job) => {
         const d = job.dossier || {};
+        // ★ W2-A2: needs_gap_search/manual_review = QC ไม่ผ่าน (terminal) — โทนเหลืองอำพันเหมือน waiting
         const statusChip =
           DONE_STATUSES.includes(job.status) ? chipStyle('rgba(34,197,94,0.15)', '#22c55e')
           : job.status === 'failed' ? chipStyle('rgba(239,68,68,0.15)', '#f87171')
-          : job.status === 'waiting' ? chipStyle('rgba(234,179,8,0.15)', '#eab308')
+          : (job.status === 'waiting' || job.status === 'needs_gap_search' || job.status === 'manual_review') ? chipStyle('rgba(234,179,8,0.15)', '#eab308')
           : chipStyle('rgba(96,165,250,0.12)', '#60a5fa');
-        const statusText = { pending: 'รอเริ่ม', running: 'กำลังทำ', waiting: 'รอขั้นถัดไป', content_ready: '📄 เนื้อพร้อม (จบเฟส 1)', assets_ready: '🧺 เนื้อ+ภาพครบชุด', cover_ready: '🏁 ปกเสร็จครบวงจร', failed: 'ล้มเหลว', skipped: 'ข้าม' }[job.status] || job.status;
+        // ★ W2-A2: 2 สถานะใหม่จาก QC gate (terminal — job หยุดรอคน/หาภาพเพิ่ม ไม่ใช่ error ของระบบ)
+        const statusText = { pending: 'รอเริ่ม', running: 'กำลังทำ', waiting: 'รอขั้นถัดไป', content_ready: '📄 เนื้อพร้อม (จบเฟส 1)', assets_ready: '🧺 เนื้อ+ภาพครบชุด', cover_ready: '🏁 ปกเสร็จครบวงจร', failed: 'ล้มเหลว', skipped: 'ข้าม', needs_gap_search: '🔍 QC ไม่ผ่าน — ต้องหาภาพเพิ่ม', manual_review: '👁️ QC ไม่ผ่าน — รอคนตรวจ' }[job.status] || job.status;
         const mins = Math.round((new Date(job.updatedAt) - new Date(job.createdAt)) / 60000);
         return (
           <div key={job.id} style={{ border: '1px solid var(--border, #333)', borderRadius: 14, padding: 16, marginBottom: 14, background: 'var(--bg-secondary, rgba(255,255,255,0.02))' }}>
@@ -245,6 +247,13 @@ export default function MegaPage() {
               </div>
             )}
 
+            {/* ★ W2-A2: ปกไม่ผ่าน QC gate — ปกยังโชว์ด้านบนให้คนดูได้ (เรนเดอร์แล้ว แค่ไม่เข้าคลัง) แสดงเหตุผลใต้ปก */}
+            {d.cover?.qcVerdict && !d.cover.qcVerdict.pass && (
+              <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 9, background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)', fontSize: 12.5, color: '#eab308', lineHeight: 1.6 }}>
+                ⛔ QC: {(d.cover.qcVerdict.reasons || []).join(' · ')}
+              </div>
+            )}
+
             {/* งานจบเฟส 1 ค้างเก่า → ปุ่มต่อเฟส 2 */}
             {job.status === 'content_ready' && (
               <button onClick={() => act('retry', { id: job.id, stage: 's5_case' })} disabled={!!busy}
@@ -257,6 +266,19 @@ export default function MegaPage() {
               <button onClick={() => act('retry', { id: job.id, stage: 's7_cover' })} disabled={!!busy}
                 style={{ marginTop: 10, padding: '9px 15px', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.08)', color: '#22c55e', fontFamily: 'inherit' }}>
                 🎬 ทำปกต่อ (เฟส 3: ประกอบปกจากภาพ 5 ช่อง)
+              </button>
+            )}
+            {/* ★ W2-A2: QC ไม่ผ่าน — needs_gap_search ต้องหาภาพเพิ่ม, manual_review ให้คนตรวจแล้วประกอบใหม่ */}
+            {job.status === 'needs_gap_search' && (
+              <button onClick={() => act('retry', { id: job.id, stage: 's5_gapsearch' })} disabled={!!busy}
+                style={{ marginTop: 8, padding: '8px 14px', borderRadius: 9, fontSize: 13, cursor: 'pointer', border: '1px solid rgba(234,179,8,0.4)', background: 'rgba(234,179,8,0.08)', color: '#eab308', fontFamily: 'inherit' }}>
+                🔍 หาภาพเพิ่มแล้วลองใหม่
+              </button>
+            )}
+            {job.status === 'manual_review' && (
+              <button onClick={() => act('retry', { id: job.id, stage: 's7_cover' })} disabled={!!busy}
+                style={{ marginTop: 8, padding: '8px 14px', borderRadius: 9, fontSize: 13, cursor: 'pointer', border: '1px solid rgba(234,179,8,0.4)', background: 'rgba(234,179,8,0.08)', color: '#eab308', fontFamily: 'inherit' }}>
+                🎬 ประกอบใหม่
               </button>
             )}
 

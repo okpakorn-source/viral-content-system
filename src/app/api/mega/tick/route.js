@@ -21,7 +21,9 @@ export const maxDuration = 600;
 
 const MAX_STAGE_ATTEMPTS = 2;
 // ป้ายปลายทางของแต่ละเฟส (ไม่ใช่ stage ที่รันได้ — เป็น status จบ)
-const TERMINALS = new Set(['content_ready', 'assets_ready', 'cover_ready']);
+// ★ Wave2 A1: needs_gap_search / manual_review = สถานะ terminal ใหม่จากด่าน QC (มาทาง nextAction:'hold'
+//   ไม่ใช่ stageDef.next) — งานหยุด ไม่ถูกเลือกซ้ำ (job picker เอาแค่ running/waiting/pending) ไม่วน retry
+const TERMINALS = new Set(['content_ready', 'assets_ready', 'cover_ready', 'needs_gap_search', 'manual_review']);
 
 // ★ Wave1-D (ค): แผนที่ "หลักฐาน output ในแฟ้ม" ต่อ stage — อิง dossierPatch จริงที่แต่ละ adapter คืน
 //   (s3_generate→generate.queueJobId · s5_case→images.caseId · s6_slots→pickImages.slots ·
@@ -144,6 +146,14 @@ export async function POST(req) {
       }
     } else if (act === 'wait') {
       await updateJob(job.id, { ...basePatch, status: 'waiting' });
+    } else if (act === 'hold') {
+      // ★ Wave2 A1: ด่าน QC ตีกลับ — จบงานด้วยสถานะ terminal ที่บอกความจริง (needs_gap_search/manual_review)
+      //   คงขั้นเดิม (s7_wait) ไว้ให้เห็นว่าหยุดตรงไหน · ไม่นับเป็น consecutiveFails (นี่คือการตัดสินใจถูก ไม่ใช่ระบบพัง)
+      //   รีเซ็ต consecutiveFails=0 เหมือนงานถึงปลายเฟส: ท่อทั้งสายทำงานครบ (extract→gen→หาภาพ→ประกอบ→เรนเดอร์)
+      //   = พิสูจน์ระบบไม่พัง จึงไม่ควรค้าง streak ล้มเดิมไว้ทริกเกอร์ circuit breaker
+      const holdStatus = ['needs_gap_search', 'manual_review'].includes(result.holdStatus) ? result.holdStatus : 'manual_review'; // กันค่าเพี้ยน → ให้คนดู
+      await updateJob(job.id, { ...basePatch, status: holdStatus });
+      await setFlags({ consecutiveFails: 0 });
     } else if (act.startsWith('goto:')) {
       await updateJob(job.id, { ...basePatch, stage: act.slice(5), status: 'running' });
     } else if (act === 'retry') {
