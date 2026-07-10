@@ -29,15 +29,19 @@ function clusterLines(vals, tol = 6) {
 const nearest = (v, lines) => lines.reduce((b, l) => (Math.abs(l - v) < Math.abs(b - v) ? l : b), lines[0]);
 
 // ★ เฟส 4.1b (9 ก.ค. — ไขปริศนา "กรอบเขียวทุกใบ"): DNA บางใบวัดสีกรอบเพี้ยนเป็นนีออนจอ
-//   (REF-mrbq90fp ช่อง evidence = #00FF00 ทั้งที่ปกจริงกรอบขาว) → ปกทุกใบที่ใช้ ref นั้นโดนวาดกรอบเขียวสด
-//   สีนีออนสุดขั้ว (ช่องสีชนเพดาน+ช่องอื่นเกือบศูนย์) ไม่มีปกจริงใช้ = วัดพลาดแน่นอน → บังคับขาว + log
+//   (REF-mrbq90fp ช่อง evidence = #00FF00 ทั้งที่ปกจริงกรอบขาว) → บังคับขาว + log
+// ★ 10 ก.ค. (ผู้ใช้สั่ง "ทำตาม ref"): เกณฑ์เดิมกว้างไป กิน ref จริงที่ใช้กรอบนีออนด้วย
+//   (REF-mrbq8odo evidence = #BFFF00 เขียวมะนาวของจริง) → แคบลงเหลือเฉพาะ "สีปฐมภูมิล้วน"
+//   (2 ช่องสี ≈0 + 1 ช่องชนเพดาน เช่น #00FF00/#FF0000) = ลายเซ็นการวัดพลาดจากจอ ไม่มีดีไซน์จริงใช้
 function _safeBorderColor(c) {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(String(c || '').trim());
   if (!m) return '#FFFFFF';
   const v = parseInt(m[1], 16);
   const r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255;
-  if (Math.max(r, g, b) - Math.min(r, g, b) >= 200 && Math.min(r, g, b) <= 40) {
-    console.log(`[refTemplate] 🎨 สีกรอบจาก DNA นีออนผิดปกติ (#${m[1]}) → บังคับขาว (วัดพลาด)`);
+  const lows = [r, g, b].filter((x) => x <= 10).length;
+  const highs = [r, g, b].filter((x) => x >= 245).length;
+  if (lows >= 2 && highs >= 1) {
+    console.log(`[refTemplate] 🎨 สีกรอบจาก DNA นีออนปฐมภูมิล้วน (#${m[1]}) → บังคับขาว (วัดพลาด)`);
     return '#FFFFFF';
   }
   return `#${m[1]}`;
@@ -79,11 +83,11 @@ export function dnaToTemplateSpec(dna) {
       }
       x = Math.max(0, Math.min(x, 95)); y = Math.max(0, Math.min(y, 95));
       w = Math.max(8, Math.min(w, 100 - x)); h = Math.max(8, Math.min(h, 100 - y));
-      // ⭕ 9 ก.ค. (ผู้ใช้: "วงต้องใหญ่เท่ากับ ref ห้ามใหญ่กว่า"): ใช้ขนาดจริงจาก DNA (=ref) clamp [24,36]
-      //   (เดิม cap 32 ทำวงเล็กกว่า ref · DNA วัดเกิน 36 = ผิดปกติค่อยหด — คงจุดศูนย์กลางเดิมเสมอ)
-      if (isC && (w > 36 || w < 30)) { // rev.2 (9 ก.ค. "วงยังเล็กไป"): floor 24→30 (วงปกไวรัลจริง 30-36)
+      // ⭕ 10 ก.ค. (ผู้ใช้ถอนคำสั่ง "วงใหญ่ 30-36" — ให้ตามขนาด ref จริง): clamp เหลือเฉพาะ
+      //   ค่าเพี้ยนสุดขั้ว [15,50] (DNA วัดพลาดชัดๆ) — ในช่วงนี้ใช้ค่า ref ตรงๆ คงจุดศูนย์กลางเดิม
+      if (isC && (w > 50 || w < 15)) {
         const cx0 = x + w / 2, cy0 = y + h / 2;
-        const d = Math.max(30, Math.min(36, w));
+        const d = Math.max(15, Math.min(50, w));
         w = d; h = d;
         x = Math.max(0, Math.min(cx0 - d / 2, 100 - d));
         y = Math.max(0, Math.min(cy0 - d / 2, 100 - d));
@@ -182,9 +186,9 @@ export function dnaToTemplateSpec(dna) {
     const seen = new Set();
     for (const s of live) { const base = s.id; let n = 1; while (seen.has(s.id)) s.id = `${base}${n++}`; seen.add(s.id); }
 
-    // ★ เฟส 3.5 (10 ก.ค.): feather เดิม fallback 26 = แถบเบลอ 52px คร่อมตะเข็บทุกช่อง (เบลอหน้า/ทำภาพนุ่มเกิน)
-    //   cap ที่ 8 (ยัง collage แต่ตะเข็บคมขึ้นชัด) · เกิน = ติดธง _featherCapped ให้ composer ส่ง qcFlags feather_capped
-    const FEATHER_CAP = 8;
+    // ★ 10 ก.ค. (ผู้ใช้ถอนคำสั่ง "ตะเข็บคม cap 8" — ให้ตาม feather ของ ref จริง เช่น 13/22):
+    //   เหลือ cap กันค่าเพี้ยนสุดขั้วที่ 40 (feather 40 = แถบ 80px ไม่มีปกจริงใช้) · เกิน = ธง feather_capped เหมือนเดิม
+    const FEATHER_CAP = 40;
     const featherRaw = Number(t.featherPx) || (t.seamStyle === 'feather' ? 26 : 0);
     const feather = Math.min(featherRaw, FEATHER_CAP);
     const _featherCapped = featherRaw > FEATHER_CAP;

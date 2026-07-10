@@ -48,6 +48,12 @@ URL/Text Input
 - ห้าม expose API key ใน log
 - ทุก API route ต้องมี try/catch + return error JSON
 - ก่อนแก้ให้ backup ไฟล์ (cp file file.bak) แต่ commit โดยไม่ include .bak
+- 🔴 **ห้าม AI เจน/สังเคราะห์/วาดพิกเซลภาพในท่ออัตโนมัติทุกท่อ (ปก/ข่าว/คลังรูป)** —
+  ห้ามเรียก generative model กับภาพ (Real-ESRGAN/GFPGAN/inpaint/outpaint/img2img ฯลฯ)
+  แม้อ้างว่า "upscale ล้วน" ก็ห้าม (GAN วาดรายละเอียดใหม่ = หน้าคนออกมาเหมือนภาพเจน)
+  ภาพบนปกต้องเป็นต้นฉบับ 100% — จัดการได้เฉพาะ crop/resize interpolation ธรรมดา (sharp)
+  ข้อยกเว้นเดียว: เครื่องมือ /photo-enhance ที่ผู้ใช้กดเองต่อภาพ (ห้ามต่อเข้าท่ออัตโนมัติ)
+  บทเรียน: 10 ก.ค. 69 hero ถูก Real-ESRGAN อัตโนมัติจนผู้ใช้เห็น "เหมือน AI เจนใหม่" (MCV-mrevr836xbl)
 
 ### 7. Error Convention
 ```js

@@ -623,12 +623,8 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
       else if (kind === 'circle') pct = 66;
       else pct = 52;
     }
-    // ★ 8 ก.ค. (ผู้ใช้สั่ง "ฮีโร่หน้าเด่นเต็มเฟรมเสมอ ลดลำตัว/พื้นที่ว่าง"): บังคับหน้าฮีโร่ใหญ่ขั้นต่ำ 78%
-    //   (เหนือค่า ref — ref เผื่อลำตัว 60% ทำหน้าเล็ก) · วงกลมขั้นต่ำ 70% (หน้าเต็มวง)
-    //   ★ rev.2 (ผู้ใช้: "ช่องรองมุมไกลไป ต้องเน้นหน้ากว่านี้"): ช่องรอง floor 62 (เดิม 52 = เห็นเต็มตัว)
-    if (kind === 'hero') pct = Math.max(pct, 78);
-    else if (kind === 'circle') pct = Math.max(pct, 72); // rev.2: วงหน้าเต็มวงขึ้น
-    else pct = Math.max(pct, 66);                        // rev.2 (ผู้ใช้: "เน้นหน้าเด่นกว่านี้"): ช่องรอง 62→66
+    // ★ 10 ก.ค. (ผู้ใช้ถอนคำสั่ง "หน้าเด่นขั้นต่ำ 78/72/66" เดิมของ 8-9 ก.ค.): ให้ค่า ref เป็นใหญ่
+    //   — ไม่มี floor รสนิยมทับ ref อีก ใช้ faceSizePct ของ ref ตรงๆ (ค่าเพี้ยนถูกกรองด้วยช่วง 15-95 ด้านบนแล้ว)
     const pos = kind === 'hero' ? 'upper' : (kind === 'circle' ? 'center' : 'upper'); // ฮีโร่: หน้าค่อนบน (หัว-อก ไม่เอาถึงเอว)
     return { pct, pos };
   };
@@ -956,49 +952,12 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
     } catch (e) { console.log('[MegaComposer] hard floor 3.1 ล้ม (ใช้แผนเดิม):', String(e?.message || '').slice(0, 50)); }
   }
 
-  // ── ⑤b ✨ photo-enhance 3.2: เฉพาะ hero เมื่อภาพต้นทางเล็ก (จะถูกยืด 1.2-2.5 เท่า) ──
-  //   Real-ESRGAN upscale ล้วน (face_enhance=false ตายตัวใน service — 🔴 ห้าม AI แก้หน้า/เจนภาพ)
-  //   cache ผลลง data/enhance-cache กันเรียกซ้ำเปลืองเงิน · หมดเวลา 60s/ล้ม = ใช้ buffer เดิม (ห้ามล้มงาน)
-  //   kill-switch COMPOSE_ENHANCE_HERO=0 = ปิดสนิท (ไม่ยิง Replicate เลย)
-  if (process.env.COMPOSE_ENHANCE_HERO !== '0' && mainSlot && mi >= 0) {
-    try {
-      const fbH = faceBoxes[mi];
-      const [hiw] = _imgWH(loaded[mi], fbH);
-      const facePxW = fbH && hiw > 0 && fbH.x2 > fbH.x1 ? (fbH.x2 - fbH.x1) * hiw : 0;
-      const heroUp = facePxW > 0 ? (mainSlot.w * 0.88) / facePxW : _slotUpEst(loaded[mi], fbH, mainSlot); // ยืดตามสูตรครอป hero (faceFrac 0.88)
-      if (heroUp >= 1.2 && heroUp <= 2.5) {
-        const cacheDir = path.join(process.cwd(), 'data', 'enhance-cache');
-        const key = crypto.createHash('md5').update(String(loaded[mi].url || '') || loaded[mi].buffer.slice(0, 512)).digest('hex');
-        const cachePath = path.join(cacheDir, `${key}.jpg`);
-        let enhBuf = null;
-        try { enhBuf = await fs.readFile(cachePath); } catch { /* ไม่มี cache */ }
-        if (enhBuf) {
-          console.log(`[MegaComposer] ✨💾 hero enhance cache hit (${key.slice(0, 8)})`);
-        } else {
-          const { upscaleImage } = await import('@/lib/services/replicateEnhancer');
-          const srcB64 = loaded[mi].buffer.toString('base64');
-          const enh = await Promise.race([
-            upscaleImage(srcB64, 2), // ×2 (face_enhance=false ในตัว service)
-            new Promise((_, rej) => setTimeout(() => rej(new Error('enhance timeout 60s')), 60000)),
-          ]);
-          if (enh?.base64) {
-            enhBuf = Buffer.from(enh.base64, 'base64');
-            try { await fs.mkdir(cacheDir, { recursive: true }); await fs.writeFile(cachePath, enhBuf); } catch { /* cache เขียนไม่ได้ = ข้าม */ }
-          }
-        }
-        if (enhBuf && enhBuf.length > 5000) {
-          loaded[mi].buffer = enhBuf; // executor อ่านขนาดใหม่จาก meta → faceBox (normalized) ยังตรง region เดิม
-          qcFlags.push(`enhanced:hero:${heroUp.toFixed(2)}`);
-          console.log(`[MegaComposer] ✨ hero enhance สำเร็จ (ยืด ${heroUp.toFixed(2)}x → คมขึ้น)`);
-        } else {
-          qcFlags.push('enhance_failed:hero');
-        }
-      }
-    } catch (e) {
-      qcFlags.push('enhance_failed:hero');
-      console.log('[MegaComposer] ✨❌ hero enhance ล้ม (ใช้ภาพเดิม):', String(e?.message || '').slice(0, 60));
-    }
-  }
+  // ── ⑤b (ถอดออก 10 ก.ค. — คำสั่งเจ้าของ) ──
+  // 🔴 ห้าม AI เจน/วาด/สังเคราะห์พิกเซลภาพในท่อปกอัตโนมัติทุกกรณี — เดิมจุดนี้ส่ง hero เข้า
+  //   Real-ESRGAN (Replicate) เมื่อภาพต้นทางเล็ก แม้ face_enhance=false ตัวโมเดลก็เป็น GAN
+  //   ที่ "วาดรายละเอียดใหม่" → หน้าออกมาดูเหมือน AI เจน (ผู้ใช้จับได้เคส MCV-mrevr836xbl)
+  //   กติกาถาวร: ใช้ภาพต้นฉบับเท่านั้น + จัดการได้เฉพาะ crop/resize แบบ interpolation ธรรมดา (sharp)
+  //   เครื่องมือ /photo-enhance แบบผู้ใช้กดเองยังใช้ได้ (คนละเรื่องกับท่ออัตโนมัติ) — ห้ามต่อกลับเข้าท่อนี้
 
   const { executeCover } = await import('@/lib/services/coverExecutorService');
   const { detectFaces } = await import('@/lib/services/faceDetector');
@@ -1244,6 +1203,64 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
         if (eye) {
           const failed = Object.entries(eye.checks || {}).filter(([, v]) => !v).map(([k]) => k);
           console.log(`[MegaComposer] 👁️ โครงตรง ref ${eye.similarity}%${failed.length ? ` (ตก: ${failed.join(',')})` : ''} — ${eye.diffs.join(' · ').slice(0, 120)}`);
+          // ★ 10 ก.ค. (AC-0066 ผู้ใช้ชี้ Hero ไม่เด่นตาม ref): detector ต้นฉบับอาจระบุกล่องหน้า
+          //   ผิด แล้วด่านหลัง render ใช้ detector ตระกูลเดิมจึงถูกหลอกซ้ำ แม้ตาเทียบ ref เห็นว่า
+          //   hero_shot ไม่ผ่าน — เดิม applyEyeFixes ห้ามแตะ main โดยตั้งใจ จึงไม่มีทางแก้ครอป Hero
+          //   ทางแก้ bounded/fail-safe: เฉพาะ ref ที่สั่ง close-up + ตาเห็น hero_shot=false ให้ Final Cropper
+          //   ที่เห็นภาพจริงครอป main ช่องเดียว → render+เทียบ ref ซ้ำอย่างละ 1 รอบ; รับเฉพาะเมื่อ hero_shot ผ่าน
+          //   ไม่ผ่าน/AI ล้ม = คืน crop เดิมทันที (ไม่แตะ selection/layout/ช่องรอง)
+          const mainA = core.assignments.find((a) => /main|hero/i.test(String(a.slotId))) || null;
+          const mainSlotIdx = mainA ? core.spec.slots.findIndex((s) => s.id === mainA.slotId) : -1;
+          const refHeroShot = String(mainSlotIdx >= 0 ? (core.refSlotMeta?.[mainSlotIdx]?.shot || '') : '').toLowerCase();
+          if (mainA && /close/.test(refHeroShot) && eye.checks?.hero_shot === false) {
+            const preCrop = mainA.crop ? { ...mainA.crop } : mainA.crop;
+            const preWhy = mainA.why;
+            try {
+              const { finalCrop } = await import('@/lib/services/coverDirectorService');
+              const recrop = await finalCrop({
+                assignments: core.assignments,
+                imageBuffers: core.loaded,
+                templateSpec: core.spec,
+                identity: { mainCharacter: core.loaded[mainA.imageIndex]?.person || '' },
+                newsTitle,
+                faceBoxes: core.faceBoxes,
+                slotIds: [mainA.slotId],
+              });
+              if (recrop?.applied > 0) {
+                const { executeCover } = await import('@/lib/services/coverExecutorService');
+                const candidateTrace = [];
+                const candidateBuffer = await executeCover({
+                  assignments: core.assignments,
+                  imageBuffers: core.loaded,
+                  templateSpec: core.spec,
+                  faceBoxes: core.faceBoxes,
+                  traceSink: candidateTrace,
+                });
+                const candidateEye = await refCompareEye({ coverBuffer: candidateBuffer, refImagePath, newsTitle }).catch(() => null);
+                if (candidateEye?.checks?.hero_shot === true) {
+                  buffer = candidateBuffer;
+                  cropTrace = [...candidateTrace];
+                  if (Array.isArray(core.traceSink)) {
+                    core.traceSink.length = 0;
+                    core.traceSink.push(...candidateTrace);
+                  }
+                  core.qcFlags = (core.qcFlags || []).filter((f) => !/^(blind_crop|upscaled|upscale_soft):/.test(String(f)));
+                  core.qcFlags.push(...traceQcFlags(cropTrace), 'hero_ref_recrop_kept');
+                  eye = candidateEye;
+                  console.log('[MegaComposer] 🦸✂️ Hero close-up ผ่าน ref หลัง Final Cropper — รับครอปใหม่');
+                } else {
+                  mainA.crop = preCrop;
+                  mainA.why = preWhy;
+                  core.qcFlags.push('hero_ref_recrop_reverted');
+                  console.log('[MegaComposer] 🦸↩️ Hero Final Cropper ยังไม่ผ่าน ref — คืนครอปเดิม');
+                }
+              }
+            } catch (e) {
+              mainA.crop = preCrop;
+              mainA.why = preWhy;
+              console.log('[MegaComposer] Hero Final Cropper ล้ม (คืนครอปเดิม):', e.message?.slice(0, 60));
+            }
+          }
           // สเกลใหม่: ตกข้อใดข้อหนึ่ง (<100) + ตามีคำสั่งแก้ = ลงมือ (เดิม <85 จะข้ามเคสตกข้อเล็ก)
           if (eye.fixes?.length && eye.similarity < 100) {
             fixedCount = applyEyeFixes({ fixes: eye.fixes, assignments: core.assignments, loaded: core.loaded, faceBoxes: core.faceBoxes, used: core.used });
@@ -1388,6 +1405,33 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
         outputHash: crypto.createHash('sha1').update(buffer).digest('hex'),
       };
     } catch (e) { console.log('[MegaComposer] manifest เก็บล้ม (ไม่กระทบผลปก):', e.message?.slice(0, 60)); }
+    // ★ Cover Ref Tester (shadow-only): หลัง buffer/assignment/crop/manifest สุดท้ายถูกล็อกแล้วเท่านั้น
+    //   เห็นปกจริง + ref + source ที่ใช้จริง เพื่อแยก selection/mapping/crop/geometry/render
+    //   ห้ามแก้ภาพ/QC งานหลัก · AI/IO/persist ล้ม = คืนปกเดิม 100%
+    //   ★ 10 ก.ค. ดึก (Codex สืบ :3900 ดับเงียบ — จุดกระตุ้น=เส้นนี้ยิง gpt-5.5): default ปิด — เปิดเอง MEGA_COVER_TESTER=1
+    let testerReport = null;
+    if (refImagePath && process.env.MEGA_COVER_TESTER === '1') {
+      try {
+        const { runCoverRefTester } = await import('@/lib/services/coverRefTesterService');
+        testerReport = await runCoverRefTester({
+          coverBuffer: buffer,
+          refImagePath,
+          refDNA,
+          manifest,
+          qcFlags: core.qcFlags || [],
+          eye,
+          assignments: core.assignments,
+          loaded: core.loaded,
+          cropTrace,
+          newsTitle,
+        });
+        if (manifest && testerReport) manifest.tester = testerReport;
+        const cause = testerReport?.primaryCause;
+        console.log(`[MegaTester] ${testerReport?.status || 'inconclusive'} · ${cause?.stage || '-'}:${cause?.code || '-'} · conf=${cause?.confidence ?? '-'}`);
+      } catch (e) {
+        console.log('[MegaTester] ล้ม (shadow-only ไม่กระทบปก):', e.message?.slice(0, 80));
+      }
+    }
     return {
       success: true,
       base64: `data:image/jpeg;base64,${buffer.toString('base64')}`,
@@ -1397,6 +1441,7 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
       eyeFixed: fixedCount,
       qcFlags: core.qcFlags || [], // เฟส 4.3: ธงคุณภาพ deterministic (แทน ref% ที่เชื่อไม่ได้)
       manifest, // ★ Wave1 Batch E: ความจริงของรอบประกอบ (debug/replay) — additive, null เมื่อเก็บล้ม
+      testerReport, // ★ Shadow QA: root cause เทียบ ref (ไม่เปลี่ยนภาพ/QC; null เมื่อไม่มี ref/ปิด/ล้ม)
       placed: core.assignments.map((a) => ({ slot: a.slotId, role: core.loaded[a.imageIndex].slot })),
       // เฟส 0.1+0.3: ครอปจริงต่อช่อง (สาขา+กรอบ) + url ภาพ — เครื่องเทสใช้ทำ baseline การ์ด hero
       crops: core.assignments.map((a) => ({
