@@ -1566,6 +1566,14 @@ export async function s6_slots(job, { origin }) {
   if (process.env.MEGA_SOLVER_SHADOW !== '0') {
     try {
       const { solveSlotAssignments } = await import('@/lib/slotSolver');
+      // ★ Wave3 ชุด2 (10 ก.ค.): getSourceScore ต่อผ่าน dynamic-import แบบ defensive (ตาม pattern เดิมของไฟล์นี้
+      //   ดูบรรทัดบน) — `export` ที่ multiAgentImageScraper.js เพิ่มแล้วในชุดเดียวกัน (เดิมเป็น module-private)
+      //   ถ้าโมดูล/ฟังก์ชันหายในอนาคต = fail-open ได้ null (solver ตีเป็นกลาง 0.5) ไม่ล้มทั้ง shadow
+      let _getSourceScore = null;
+      try {
+        const _scraperMod = await import('@/lib/services/multiAgentImageScraper');
+        if (typeof _scraperMod?.getSourceScore === 'function') _getSourceScore = _scraperMod.getSourceScore;
+      } catch { /* โมดูลโหลดไม่ได้ = ปล่อย null (เหมือนไม่มีค่า) */ }
       // characters จากเข็มทิศ + ธง isHero (heroNames = role=hero หรือตัวแรก — ตัวเดียวกับด่าน hero ด้านบน)
       const solverChars = (job.dossier.compass?.mainCharacters || [])
         .map((c) => c?.name).filter(Boolean)
@@ -1616,7 +1624,21 @@ export async function s6_slots(job, { origin }) {
           lowRes: x.lowRes === true,
           sceneKey: sceneKeyOf(x) || null,
           faceBoxHFrac: _faceHFrac(x.triage?.faceBox),
-          sourceScore: null, // ชุด 2 ค่อยต่อ getSourceScore จริง
+          // ★ Wave3 ชุด2: sourceScore จริง — ใช้ "หน้าเพจต้นทาง" (sourceLink/source) ไม่ใช่ imageUrl (CDN/rehost)
+          //   เพราะ getSourceScore เทียบโดเมน — CDN ทั่วไป (เช่น encrypted-tbn0.gstatic.com หรือ rehost ของเรา)
+          //   ไม่บอกความน่าเชื่อถือจริง (คอมเมนต์ต้นทางเตือนไว้ตรงนี้เอง ที่ multiAgentImageScraper.js บรรทัด ~1220)
+          //   scale ที่พบจริง: 0-10 (ตาราง SOURCE_RELIABILITY, ดีฟอลต์ไม่รู้จักโดเมน=4) → normalize หาร 10 ก่อนส่งเข้า solver (0-1)
+          //   ไม่มี field แหล่ง/เรียกฟังก์ชันไม่ได้/ค่าไม่ใช่ตัวเลข = null (solver ตีเป็นกลาง 0.5 เอง — fail-open)
+          sourceScore: (() => {
+            const srcArg = x.sourceLink || x.source || null;
+            if (!_getSourceScore || !srcArg) return null;
+            try {
+              const raw = Number(_getSourceScore(srcArg));
+              return Number.isFinite(raw) ? Math.max(0, Math.min(1, raw / 10)) : null; // 0-10 → 0-1 (inline clamp, ไม่เพิ่ม helper ใหม่ระดับโมดูล)
+            } catch { return null; }
+          })(),
+          // ★ Wave3 ชุด2: pHash64 จากตาคัด (libraryTriage.js) — null ถ้าวัดไม่ได้/ภาพเก่าก่อนมีฟีเจอร์นี้
+          pHash64: x.triage?.pHash64 || null,
         };
       });
       const solved = solveSlotAssignments({ slots: solverSlots, images: solverImages, characters: solverChars });

@@ -186,7 +186,9 @@ function registrableDomain(hostname) {
   return last2;
 }
 
-function getSourceScore(url) {
+// ★ Wave3 ชุด2 (10 ก.ค.): export ให้ slotSolver shadow ใช้ (_PLAN_MEGA_V2.md W3 ข้อ 2 "ต่อสาย getSourceScore import ตรง")
+//   — เดิมวัดแล้วใช้แค่ในไฟล์นี้ ไม่เชื่อม S6 · เติม export อย่างเดียว พฤติกรรมเดิมทุกอย่าง
+export function getSourceScore(url) {
   try {
     if (!url) return 4;
     // ★ rev.Q1: รองรับทั้ง full URL และ bare domain (Serper's source field เช่น "thairath.co.th")

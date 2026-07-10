@@ -46,6 +46,38 @@ async function computeSharpness(buf) {
   }
 }
 
+// ★ Wave3 ชุด2 (10 ก.ค.): pHash64 — dHash 64 บิตจาก buffer เดียวกับ sharpness (ห้ามโหลดภาพเพิ่ม)
+//   ลอกอัลกอริทึมเดิมเป๊ะจาก legacy (auto-cover/route.js computeImageHash + imageSearchService.js
+//   computeImageHash — โค้ดสองไฟล์เหมือนกัน 100%, คอมเมนต์ "Inlined เพราะ imageSearchService ไม่ export"):
+//   resize 9x8 fill → greyscale → raw → เทียบพิกเซลซ้าย>ขวาแถวละ 8 คู่ (8 แถว) = 64 บิต
+//   ต่างจาก legacy แค่รูปแบบเก็บผล: legacy เก็บเป็น BigInt (ใช้เทียบในไฟล์เดียวกัน), ที่นี่แปลงเป็น
+//   hex string 16 ตัวอักษร (field pHash64) เพื่อเก็บ/ส่งต่อข้าม module ได้ปลอดภัย (BigInt serialize JSON ไม่ได้)
+//   — บิตที่ตั้ง (y,x) เรียงจากซ้ายไปขวา บนลงล่าง เข้า nibble ตามลำดับสแกน (self-consistent พอสำหรับ hamming ภายในระบบนี้)
+//   วัดไม่ได้ (โหลดไม่ครบ/sharp ล้ม) = null (fail-open เหมือน sharpness — ห้ามบล็อกตาคัด)
+export async function computeDHash64(buf) {
+  try {
+    const raw = await sharp(buf, { failOn: 'none' })
+      .resize(9, 8, { fit: 'fill' })
+      .greyscale()
+      .raw()
+      .toBuffer();
+    if (!raw || raw.length < 72) return null; // 9×8 grayscale ต้องมี ≥72 ไบต์ — สั้นกว่านี้ = ข้อมูลไม่ครบ
+    let bits = '';
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x++) {
+        const left = raw[y * 9 + x];
+        const right = raw[y * 9 + x + 1];
+        bits += (left > right) ? '1' : '0';
+      }
+    }
+    let hex = '';
+    for (let i = 0; i < 64; i += 4) hex += parseInt(bits.slice(i, i + 4), 2).toString(16);
+    return hex; // 16 hex chars = 64 บิต
+  } catch {
+    return null;
+  }
+}
+
 // ★ 9 ก.ค. เฟส 2.1: โหลด URL เดี่ยว (reuse loadImageBuffer เดิม — ส่งแค่ imageUrl ไม่มี fallback ในตัว)
 async function loadSingleUrl(url) {
   if (!url) return null;
@@ -121,9 +153,11 @@ async function loadOne(im) {
       }
     } catch { /* วัดขนาดไม่ได้ = ปกติ ไม่บล็อกตาคัด */ }
     const sharpness = await computeSharpness(buf);
+    // ★ Wave3 ชุด2 (10 ก.ค.): pHash64 จาก buffer เดียวกัน (ไม่โหลดซ้ำ) — วัดไม่ได้ = null
+    const pHash64 = await computeDHash64(buf);
     // ★ 8 ก.ค. (CASE-360): 512→1024 — ที่ 512px ตามองไม่เห็นลายน้ำ/ตัวหนังสือเล็ก → clean=true ผิด
     //   ปลายน้ำพังยกแผง (s6 ไม่ตัดภาพเสีย + s5e ไม่แคปเฟรม) · v3 detector ใช้ 1280px เห็นจริง — ตาคัดต้องเห็นใกล้เคียงกัน
-    return { im, base64: await toB64(buf, 1024), brightness, detail, realWidth, realHeight, measuredFrom, sharpness };
+    return { im, base64: await toB64(buf, 1024), brightness, detail, realWidth, realHeight, measuredFrom, sharpness, pHash64 };
   } catch {
     return null;
   }
@@ -178,6 +212,9 @@ function buildTriage(it, src) {
     realShortSide,
     sharpness: typeof src?.sharpness === 'number' ? src.sharpness : null,
     measuredFrom, // 'full' | 'thumb' | null (วัดไม่ได้)
+    // ★ Wave3 ชุด2 (10 ก.ค.): pHash64 (dHash 16 hex) — s6/solver ใช้จับภาพเกือบซ้ำระดับพิกเซล (ต่างจาก sceneKey ที่จับด้วยข้อความ)
+    //   ภาพเก่าในคลังก่อนหน้านี้ไม่มีค่านี้ = null เสมอ (ไม่ backfill — ไปข้างหน้าเท่านั้น)
+    pHash64: (typeof src?.pHash64 === 'string' && src.pHash64) ? src.pHash64 : null,
   };
 }
 
