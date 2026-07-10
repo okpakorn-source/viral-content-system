@@ -338,6 +338,11 @@ const S6_STORY_FIT = process.env.S6_STORY_FIT !== '0';
 // ★ Wave3 Phase1 (10 ก.ค.): Fair Shadow Diagnostics V2 — เก็บ raw LLM/post-gate/solver rank + universe/coverage
 //   เท่านั้น ห้ามแตะผลปกจริง · ปิดกลับ dossier/log/solver call แบบเดิม: MEGA_SOLVER_DIAGNOSTICS_V2=0
 const SOLVER_DIAGNOSTICS_V2_ON = process.env.MEGA_SOLVER_DIAGNOSTICS_V2 !== '0';
+// Wave3 pre-activation diagnostics only: derive semantic slot ids from the matched ref and
+// compare solver on exactly the candidates visible to the LLM. Neither switch mutates `slots`.
+const REF_ROLE_CONTRACT_SHADOW_ON = process.env.MEGA_REF_ROLE_CONTRACT !== '0';
+const SOLVER_FAIR_UNIVERSE_ON = process.env.MEGA_SOLVER_FAIR_UNIVERSE !== '0';
+const SELECTION_TRACE_ON = process.env.MEGA_SELECTION_TRACE !== '0';
 // ภาพ "ใช้ขึ้นปกได้จริง" = ตายืนยันแล้วว่าเกี่ยว + สะอาด (ปกคลิป/การ์ดกราฟิก = relevant แต่ clean=false)
 const isCleanRelevant = (x) => x?.triage && x.triage.relevant !== false && x.triage.clean !== false;
 // ★ 9 ก.ค. เฟส 5.1 (แผนคุณภาพคลังรูป): ด่านพูลสะอาด "ก่อนเข้า s6" — ต่างจาก S6_MIN_CLEAN ด้านบน (ที่ทำงานหลัง sort/gate ซ้อนอีกชั้น)
@@ -1747,7 +1752,118 @@ export async function s6_slots(job, { origin }) {
             diagnostics: solved.diagnostics,
           },
         };
-        console.log(`[MEGA S6] 🔬 solver-diagnostics-v2: universe LLM ${llmIds.length}/solver ${solverIds.length} · common ${commonCount} · same=${identicalUniverse} · input=${solverShadowV2.inputHash}`);
+        // Pre-activation audit only. Re-run diagnostics with semantic ref roles and/or the exact
+        // LLM-visible universe, while preserving `solved` above as the legacy v1 shadow result.
+        if (REF_ROLE_CONTRACT_SHADOW_ON || SOLVER_FAIR_UNIVERSE_ON) {
+          try {
+            const contractApi = await import('@/lib/refSlotContract');
+            let diagnosticContract = null;
+            let diagnosticSlots = solverSlots;
+            let diagnosticRawLlm = rawLlmSlotIds;
+            let diagnosticPostGate = postGateSlotIds;
+            let diagnosticMode = 'legacy';
+
+            if (REF_ROLE_CONTRACT_SHADOW_ON && _refDNA) {
+              diagnosticContract = contractApi.buildRefSlotContract({
+                refDNA: _refDNA,
+                artBriefOrders: orders,
+                legacySlots: activeSlots,
+              });
+              if (diagnosticContract.slots.length) {
+                diagnosticSlots = diagnosticContract.slots.map((slot) => ({
+                  id: slot.id,
+                  role: slot.solverRole,
+                  wantPerson: slot.wantPerson,
+                  refShot: _normShot(slot.refShot),
+                }));
+                diagnosticRawLlm = contractApi.projectLegacySelections(rawLlmSlotIds, diagnosticContract);
+                diagnosticPostGate = contractApi.projectLegacySelections(postGateSlotIds, diagnosticContract);
+                diagnosticMode = 'ref_contract';
+              }
+            }
+
+            const diagnosticImages = SOLVER_FAIR_UNIVERSE_ON
+              ? contractApi.restrictCandidateUniverse(solverImages, solverDiagLlmVisibleIds || [])
+              : solverImages;
+            const diagnosticSolved = solveSlotAssignments({
+              slots: diagnosticSlots,
+              images: diagnosticImages,
+              characters: solverChars,
+              diagnostics: {
+                v: 2,
+                topK: 5,
+                compareBySlot: { rawLlm: diagnosticRawLlm, postGateLlm: diagnosticPostGate },
+              },
+            });
+            const fairSolverIds = diagnosticImages.map((x) => String(x.id));
+            const fairLlmIds = solverDiagLlmVisibleIds || [];
+            const fairLlmSet = new Set(fairLlmIds);
+            const fairCommonCount = fairSolverIds.filter((id) => fairLlmSet.has(id)).length;
+            const fairIdentical = fairLlmIds.length === fairSolverIds.length
+              && fairLlmIds.every((id, i) => id === fairSolverIds[i]);
+            const fairCoverage = (test) => {
+              const count = diagnosticImages.filter(test).length;
+              return { count, pct: diagnosticImages.length ? Math.round((count / diagnosticImages.length) * 1000) / 10 : 0 };
+            };
+            const contractSummary = diagnosticContract ? {
+              v: diagnosticContract.v,
+              source: diagnosticContract.source,
+              hash: _dnaHashFor(diagnosticContract),
+              mismatchCount: diagnosticContract.mismatches.length,
+              mismatches: diagnosticContract.mismatches,
+              slots: diagnosticContract.slots.map((slot) => ({
+                id: slot.id,
+                refRole: slot.refRole,
+                solverRole: slot.solverRole,
+                legacySlot: slot.legacySlot,
+                shape: slot.shape,
+                sourceIndex: slot.sourceIndex,
+                wantPerson: slot.wantPerson,
+                refShot: slot.refShot,
+              })),
+            } : null;
+            solverShadowV2 = {
+              v: 2,
+              mode: diagnosticMode,
+              inputHash: _dnaHashFor({ slots: diagnosticSlots, images: diagnosticImages, characters: solverChars }),
+              candidateUniverse: {
+                llmCount: fairLlmIds.length,
+                solverCount: fairSolverIds.length,
+                commonCount: fairCommonCount,
+                identical: fairIdentical,
+                llmHash: _dnaHashFor(fairLlmIds),
+                solverHash: _dnaHashFor(fairSolverIds),
+                llmMetaBudgetMirror: 18000,
+                fairLimited: SOLVER_FAIR_UNIVERSE_ON,
+              },
+              coverage: {
+                total: diagnosticImages.length,
+                persons: fairCoverage((x) => Array.isArray(x.persons) && x.persons.length > 0),
+                storyFit: fairCoverage((x) => x.storyFit != null),
+                note: fairCoverage((x) => !!x.note),
+                orientation: fairCoverage((x) => !!x.orientation),
+                shortSide: fairCoverage((x) => x.shortSide != null),
+                sharpness: fairCoverage((x) => x.sharpness != null),
+                faceBoxHFrac: fairCoverage((x) => x.faceBoxHFrac != null),
+                sourceScore: fairCoverage((x) => x.sourceScore != null),
+                pHash64: fairCoverage((x) => !!x.pHash64),
+              },
+              ...(contractSummary ? { refSlotContract: contractSummary } : {}),
+              rawLlm: { slots: diagnosticRawLlm },
+              postGateLlm: { slots: diagnosticPostGate },
+              legacySolver: {
+                slots: Object.fromEntries(solved.assignments.map((a) => [a.slotId, a.imageId != null ? String(a.imageId) : null])),
+              },
+              solver: {
+                slots: Object.fromEntries(diagnosticSolved.assignments.map((a) => [a.slotId, a.imageId != null ? String(a.imageId) : null])),
+                diagnostics: diagnosticSolved.diagnostics,
+              },
+            };
+          } catch (contractErr) {
+            console.log('[MEGA S6] ref-role/fair-universe diagnostics failed; keeping legacy v2:', contractErr?.message?.slice(0, 80));
+          }
+        }
+        console.log(`[MEGA S6] 🔬 solver-diagnostics-v2: universe LLM ${solverShadowV2.candidateUniverse.llmCount}/solver ${solverShadowV2.candidateUniverse.solverCount} · common ${solverShadowV2.candidateUniverse.commonCount} · same=${solverShadowV2.candidateUniverse.identical} · mode=${solverShadowV2.mode || 'legacy'} · input=${solverShadowV2.inputHash}`);
       }
     } catch (e) {
       console.log('[MEGA S6] 👥 solver-shadow ข้าม (ล้ม แต่งานเดินต่อ):', e?.message?.slice(0, 60));
@@ -1948,6 +2064,26 @@ export async function s7_wait(job) {
     } catch { coverPath = null; }
 
     // แฟ้ม cover ที่เก็บครบทุกกรณี (ผ่าน/hold) — คนต้องเห็น coverPath/manifest/qcVerdict ได้เสมอ
+    let finalAssignmentTrace = null;
+    if (SELECTION_TRACE_ON && Array.isArray(r.manifest?.slots)) {
+      try {
+        const traceApi = await import('@/lib/refSlotContract');
+        const refSlotContract = traceApi.buildRefSlotContract({
+          refDNA: job.dossier.refMatch?.dna || null,
+          artBriefOrders: job.dossier.artBrief?.orders || [],
+        });
+        finalAssignmentTrace = traceApi.buildFinalAssignmentTrace({
+          plannedSlots: job.dossier.pickImages?.slots || {},
+          manifestSlots: r.manifest.slots,
+          placed: r.placed || [],
+          refSlotContract,
+        });
+        console.log(`[MEGA S7] selection trace: kept ${finalAssignmentTrace.keptExpectedPrimary}/${finalAssignmentTrace.total} expected primaries · changed ${finalAssignmentTrace.changedExpectedPrimary}`);
+      } catch (traceErr) {
+        console.log('[MEGA S7] selection trace failed (cover result unchanged):', traceErr?.message?.slice(0, 80));
+      }
+    }
+
     const coverCore = {
       ...cv,
       coverPath,
@@ -1956,6 +2092,7 @@ export async function s7_wait(job) {
       coverCaseId: r.caseId || '',
       directorReason: (r.directorReason || '').slice(0, 300),
       manifest: r.manifest || null, // ★ Wave1 Batch E: ความจริงของรอบประกอบ (จาก composeAndVerify) — additive
+      ...(finalAssignmentTrace ? { finalAssignmentTrace } : {}),
       qcVerdict, // ★ Wave2 A1: คำตัดสินด่าน (pass/reasons/suggestedStatus/advisory)
       completedAt: new Date().toISOString(),
     };
