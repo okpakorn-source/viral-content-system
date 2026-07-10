@@ -163,10 +163,10 @@ export default function MegaPage() {
         const statusChip =
           DONE_STATUSES.includes(job.status) ? chipStyle('rgba(34,197,94,0.15)', '#22c55e')
           : job.status === 'failed' ? chipStyle('rgba(239,68,68,0.15)', '#f87171')
-          : (job.status === 'waiting' || job.status === 'needs_gap_search' || job.status === 'manual_review') ? chipStyle('rgba(234,179,8,0.15)', '#eab308')
+          : (job.status === 'waiting' || job.status === 'needs_gap_search' || job.status === 'manual_review' || job.status === 'insufficient_assets') ? chipStyle('rgba(234,179,8,0.15)', '#eab308')
           : chipStyle('rgba(96,165,250,0.12)', '#60a5fa');
         // ★ W2-A2: 2 สถานะใหม่จาก QC gate (terminal — job หยุดรอคน/หาภาพเพิ่ม ไม่ใช่ error ของระบบ)
-        const statusText = { pending: 'รอเริ่ม', running: 'กำลังทำ', waiting: 'รอขั้นถัดไป', content_ready: '📄 เนื้อพร้อม (จบเฟส 1)', assets_ready: '🧺 เนื้อ+ภาพครบชุด', cover_ready: '🏁 ปกเสร็จครบวงจร', failed: 'ล้มเหลว', skipped: 'ข้าม', needs_gap_search: '🔍 QC ไม่ผ่าน — ต้องหาภาพเพิ่ม', manual_review: '👁️ QC ไม่ผ่าน — รอคนตรวจ' }[job.status] || job.status;
+        const statusText = { pending: 'รอเริ่ม', running: 'กำลังทำ', waiting: 'รอขั้นถัดไป', content_ready: '📄 เนื้อพร้อม (จบเฟส 1)', assets_ready: '🧺 เนื้อ+ภาพครบชุด', cover_ready: '🏁 ปกเสร็จครบวงจร', failed: 'ล้มเหลว', skipped: 'ข้าม', needs_gap_search: '🔍 QC ไม่ผ่าน — ต้องหาภาพเพิ่ม', manual_review: '👁️ QC ไม่ผ่าน — รอคนตรวจ', insufficient_assets: '🪫 วัตถุดิบไม่พอ — hero คุณภาพไม่ถึงเกณฑ์' }[job.status] || job.status;
         const mins = Math.round((new Date(job.updatedAt) - new Date(job.createdAt)) / 60000);
         return (
           <div key={job.id} style={{ border: '1px solid var(--border, #333)', borderRadius: 14, padding: 16, marginBottom: 14, background: 'var(--bg-secondary, rgba(255,255,255,0.02))' }}>
@@ -273,6 +273,13 @@ export default function MegaPage() {
               <button onClick={() => act('retry', { id: job.id, stage: 's5_gapsearch' })} disabled={!!busy}
                 style={{ marginTop: 8, padding: '8px 14px', borderRadius: 9, fontSize: 13, cursor: 'pointer', border: '1px solid rgba(234,179,8,0.4)', background: 'rgba(234,179,8,0.08)', color: '#eab308', fontFamily: 'inherit' }}>
                 🔍 หาภาพเพิ่มแล้วลองใหม่
+              </button>
+            )}
+            {/* ★ W2-B1: วัตถุดิบไม่พอ — คนเติมภาพเอง/แหล่งใหม่แล้วค่อยลองอีกครั้ง */}
+            {job.status === 'insufficient_assets' && (
+              <button onClick={() => act('retry', { id: job.id, stage: 's5_gapsearch' })} disabled={!!busy}
+                style={{ marginTop: 8, padding: '8px 14px', borderRadius: 9, fontSize: 13, cursor: 'pointer', border: '1px solid rgba(234,179,8,0.4)', background: 'rgba(234,179,8,0.08)', color: '#eab308', fontFamily: 'inherit' }}>
+                🪫 ลองหาภาพอีกรอบ (hero ยังไม่ถึงเกณฑ์)
               </button>
             )}
             {job.status === 'manual_review' && (

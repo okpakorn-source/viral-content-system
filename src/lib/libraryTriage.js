@@ -11,6 +11,8 @@ import sharp from 'sharp';
 import { loadImageBuffer } from './imageBuffer.js';
 import { geminiClassifyFrames } from './gemini.js';
 import { applyRehost } from './imageStore.js';
+// ★ Wave2 Batch B1 (10 ก.ค.): เกณฑ์ตัวเลขย้ายไป imageQualityConfig.js (single source of truth) — ค่าเดิมเป๊ะ
+import { QUALITY_CAP_SHORT_SIDE, QUALITY_CAP_VALUE } from './imageQualityConfig.js';
 
 async function toB64(buf, size = 512) {
   const out = await sharp(buf, { failOn: 'none' })
@@ -150,8 +152,9 @@ function buildTriage(it, src) {
   let quality = typeof it.quality === 'number' ? it.quality : 5;
   // ★ 9 ก.ค. เฟส 2.1 (quality cap กันคะแนนหลอก): วัดจากไฟล์ย่อ/ไฟล์เล็กจริง (สั้นสุด<500px) → เพดาน 6
   //   เคสจริง AC-0058: quality 9 ตกบนไฟล์ 298×372 — ถ้าปล่อยผ่านจะดัน s6 เลือกไฟล์จิ๋วเป็น hero แล้วยืดแตกตอนประกอบ
-  if ((measuredFrom === 'thumb' || (realShortSide != null && realShortSide < 500)) && quality > 6) {
-    quality = 6;
+  //   ★ Wave2 B1: เลข 500/6 ย้ายมาจาก imageQualityConfig.js (single source of truth — ค่าเดิมเป๊ะ ไม่เปลี่ยน)
+  if ((measuredFrom === 'thumb' || (realShortSide != null && realShortSide < QUALITY_CAP_SHORT_SIDE)) && quality > QUALITY_CAP_VALUE) {
+    quality = QUALITY_CAP_VALUE;
   }
 
   return {
