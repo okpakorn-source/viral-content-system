@@ -146,7 +146,9 @@ export function buildFinalAssignmentTrace({ plannedSlots = {}, manifestSlots = [
   //   composerSlotId เท่านั้น · ช่องนอกสัญญา (composer เพิ่ม/เปลี่ยนชื่อเอง) = unmapped ห้ามถอย legacy
   //   (ไม่งั้น legacy positional อาจนับช่องเถื่อนเป็น kept ได้) · legacy ใช้เฉพาะเมื่อ "ไม่มี spec เลย"
   //   · composerSlotId ซ้ำใน spec = ambiguous ห้าม Map last-wins เงียบๆ — ช่องนั้นตกเป็น unmapped
-  const hasSpec = !!(selectionSpec && Array.isArray(selectionSpec.slots) && selectionSpec.slots.length);
+  // ★ Checkpoint A รอบ 2 (P0-A): spec "present" แม้ malformed ({}, slots:[], slots:'bad') = ห้ามถอย legacy
+  //   เด็ดขาด — v1 ใช้เฉพาะ absent/null/undefined จริงเท่านั้น · malformed → specSlots=[] → ทุก row = unmapped
+  const hasSpec = selectionSpec != null;
 
   // ★ รอบ 7 P0: ไม่มี SelectionSpec = เดิน algorithm + คืน shape v1 ของ HEAD เดิมทุก byte —
   //   slot ไม่มี field ใหม่ (refSlotId/resolvedBy) · status ใช้ 'no_expected_primary' แบบ HEAD ·
@@ -188,7 +190,7 @@ export function buildFinalAssignmentTrace({ plannedSlots = {}, manifestSlots = [
     };
   }
 
-  const specSlots = selectionSpec.slots;
+  const specSlots = Array.isArray(selectionSpec.slots) ? selectionSpec.slots : []; // malformed → [] (ทุก row unmapped)
   const specIdCount = new Map();
   for (const s of specSlots) {
     if (s?.composerSlotId) {
@@ -202,14 +204,32 @@ export function buildFinalAssignmentTrace({ plannedSlots = {}, manifestSlots = [
     if (cid && specIdCount.get(cid) === 1) specByComposerId.set(cid, s);
   }
 
+  const _processedFinals = new Set(); // ★ รอบ 2 (P1-D): manifest row ซ้ำช่องเดิม — ห้ามนับ kept ซ้ำ
   const slots = finals.map((item) => {
     const finalSlot = String(item?.slot || '');
     const finalImageUrl = String(item?.imageUrl || '');
     const sourceByUrl = finalImageUrl ? plans.find((plan) => plan.imageUrl && plan.imageUrl === finalImageUrl) || null : null;
     const placedRole = cleanRole(placedBySlot.get(finalSlot)?.role, '') || null;
     const specSlot = specByComposerId.get(finalSlot) || null;
+    if (specSlot && _processedFinals.has(finalSlot)) {
+      // row ซ้ำของช่องที่ประมวลผลแล้ว → unmapped พร้อมป้ายซ้ำชัด (row แรกเท่านั้นที่นับจริง)
+      return {
+        finalSlot,
+        refSlotId: specSlot.refSlotId || null,
+        refRole: specSlot.refRole || null,
+        expectedPlanRole: null,
+        expectedCandidateId: null,
+        sourcePlanRole: sourceByUrl?.role || placedRole || null,
+        sourceCandidateId: sourceByUrl?.id || null,
+        keptExpectedPrimary: false,
+        status: 'unmapped',
+        resolvedBy: 'selection_spec_duplicate_manifest',
+      };
+    }
+    if (specSlot) _processedFinals.add(finalSlot);
     if (!specSlot) {
       // มี spec แล้วห้ามถอย legacy — ช่องนอกสัญญา/id ซ้ำ = unmapped เสมอ (P0-1 รอบ 5 คงครบ)
+      // (completeness ของ "spec slot ที่หายจาก manifest" เติมหลังลูป — Checkpoint A)
       return {
         finalSlot,
         refSlotId: null,
@@ -245,6 +265,51 @@ export function buildFinalAssignmentTrace({ plannedSlots = {}, manifestSlots = [
     };
   });
 
+  // ★ รอบ 3 (P1-2): spec มีตัวตนแต่ไร้ช่อง ({}, slots:[], slots:'bad') + manifest ว่าง —
+  //   เดิมได้ trace v2 total0/partition ศูนย์ล้วน ซึ่งเครื่องอ่านภายนอกตีความว่า "ผ่าน" ได้
+  //   → เติม sentinel unmapped 1 row (total1/unmapped1) ให้ spec พังมองเห็นเสมอ
+  //   (spec ดี + manifest ว่าง ไม่เข้าเงื่อนไขนี้ — completeness ด้านล่างเติม missing ครบตามเดิม)
+  if (specSlots.length === 0 && slots.length === 0) {
+    slots.push({
+      finalSlot: null,
+      refSlotId: null,
+      refRole: null,
+      expectedPlanRole: null,
+      expectedCandidateId: null,
+      sourcePlanRole: null,
+      sourceCandidateId: null,
+      keptExpectedPrimary: false,
+      status: 'unmapped',
+      resolvedBy: 'selection_spec_invalid',
+    });
+  }
+
+  // ★ Strict Renderer Checkpoint A: completeness — spec slot ที่ "ควรมี" แต่ไม่มี row ใน manifest เลย
+  //   ต้องโผล่เป็น missing_expected (เดิม trace มองเฉพาะ row ที่ manifest มี = ช่องหายเงียบ)
+  //   เฉพาะเส้นมี spec (v2) — เส้น legacy v1 คืนก่อนถึงจุดนี้ ไม่ถูกแตะ
+  const _seenFinalSlots = new Set(finals.map((item) => String(item?.slot || '')));
+  for (const s of specSlots) {
+    const cid = s?.composerSlotId ? String(s.composerSlotId) : null;
+    // ★ รอบ 2 (P1-D): mapping พัง (blank/ซ้ำ) + ไม่มี row ใน manifest — ห้ามหายเงียบเป็น total=0
+    //   เติม missing พร้อม resolvedBy บอกสาเหตุ (validator ยัง reject spec แบบนี้อยู่แล้ว — นี่คือชั้น audit)
+    let resolvedBy = 'selection_spec_missing_manifest';
+    if (!cid) resolvedBy = 'selection_spec_invalid_mapping';
+    else if (specIdCount.get(cid) !== 1) resolvedBy = 'selection_spec_ambiguous_mapping';
+    if (cid && _seenFinalSlots.has(cid)) continue; // มี row จริงใน manifest แล้ว (รวมเคส ambiguous ที่ถูกฟ้องเป็น unmapped row)
+    slots.push({
+      finalSlot: cid,
+      refSlotId: (s && s.refSlotId) || null,
+      refRole: (s && s.refRole) || null,
+      expectedPlanRole: (s && s.legacySlot) || null,
+      expectedCandidateId: (s && s.primary && s.primary.candidateId) || null,
+      sourcePlanRole: null,
+      sourceCandidateId: null,
+      keptExpectedPrimary: false,
+      status: 'missing_expected',
+      resolvedBy,
+    });
+  }
+
   const kept = slots.filter((slot) => slot.status === 'kept_expected_primary').length;
   const changed = slots.filter((slot) => slot.status === 'reselected_other_primary' || slot.status === 'reselected_backup_or_unknown').length;
   const missingExpected = slots.filter((slot) => slot.status === 'missing_expected').length;
@@ -259,6 +324,196 @@ export function buildFinalAssignmentTrace({ plannedSlots = {}, manifestSlots = [
     unknownExpected: unmapped,       // ★ รอบ 4 P1: คืนความหมาย legacy เดิม = เฉพาะ "หาบทไม่ได้" ห้ามรวม missing
     slots,
   };
+}
+
+// ---------- 🛡️ Strict Renderer — Checkpoint A: pure activation validator (11 ก.ค. 69) ----------
+// ผู้ตัดสิน "เปิด strict render ได้ไหม" จาก SelectionSpec ล้วนๆ — pure 100%: ห้าม import/IO/env/time/random
+// สัญญา 3 ทาง (คำสั่ง Codex):
+//   · input ไม่มี own-property `selectionSpec` = งาน legacy แท้ → {decision:'legacy_absent', active:false, failClosed:false}
+//   · มี property แต่ค่า/โครง/ความพร้อมไม่ผ่าน → {decision:'reject_invalid', active:false, failClosed:true, reasons[...]}
+//     — ห้ามไหลลง legacy เงียบๆ เด็ดขาด (caller ต้อง hold/แจ้ง ไม่ใช่ประกอบต่อ)
+//   · ครบทุกข้อ → {decision:'strict_ready', active:true, failClosed:false, authority: สำเนา normalized}
+// kill switch อยู่ฝั่ง caller (บายพาสก่อนเรียก) — ฟังก์ชันนี้ห้ามอ่าน env เอง
+
+const _srNonblank = (v) => typeof v === 'string' && v.trim().length > 0;
+// ★ รอบ 2 (P1-C): plain object แท้เท่านั้น — prototype ต้องเป็น Object.prototype หรือ null
+//   (Date/Map/Set/class instance = ไม่ใช่สัญญา ห้ามหลุดผ่าน)
+const _srPlain = (v) => {
+  if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
+  const p = Object.getPrototypeOf(v);
+  return p === Object.prototype || p === null;
+};
+
+export function validateStrictRenderActivation(input = {}) {
+  // ★ รอบ 2 (P1-B): เช็ค own-property ก่อนชนิด — array/function ที่ "พก" selectionSpec ห้ามได้ legacy_absent
+  const hasOwnSpec = input != null && (typeof input === 'object' || typeof input === 'function')
+    && Object.prototype.hasOwnProperty.call(input, 'selectionSpec');
+  if (!hasOwnSpec) {
+    return { decision: 'legacy_absent', active: false, failClosed: false, reasons: [] };
+  }
+  if (!_srPlain(input)) {
+    return { decision: 'reject_invalid', active: false, failClosed: true, reasons: ['input_not_plain_object'] };
+  }
+  const spec = input.selectionSpec;
+  if (!_srPlain(spec)) {
+    return { decision: 'reject_invalid', active: false, failClosed: true, reasons: ['spec_not_plain_object'] };
+  }
+  const reasons = [];
+  if (spec.v !== 1) reasons.push('bad_version');
+  if (spec.mode !== 'ref_slot_exact') reasons.push('bad_mode');
+  if (spec.source !== 'template.slots') reasons.push('bad_source');
+  if (!_srNonblank(spec.refId)) reasons.push('missing_ref_id');
+  if (spec.authorityStale === true) reasons.push('authority_stale');
+  // ★ รอบ 2 (P1-C): ค่าครึ่งจริง ('true', 1, {}) = สัญญาเชื่อไม่ได้ — ยอมเฉพาะ true/false/undefined
+  else if (spec.authorityStale !== undefined && spec.authorityStale !== false) reasons.push('authority_stale_invalid');
+  if (spec.strictReady !== true) reasons.push('strict_ready_false');
+
+  const slots = Array.isArray(spec.slots) ? spec.slots : null;
+  if (!slots || slots.length < 3) {
+    reasons.push('too_few_slots');
+    return { decision: 'reject_invalid', active: false, failClosed: true, reasons };
+  }
+
+  // ── ราย slot: โหมด/ids/primary ครบและไม่ว่าง ──
+  for (let i = 0; i < slots.length; i++) {
+    const s = slots[i];
+    if (!_srPlain(s)) { reasons.push(`slot_not_object:${i}`); continue; }
+    if (s.mappingMode !== 'ref_slot_exact') reasons.push(`slot_mapping_mode:${i}`);
+    if (!_srNonblank(s.refSlotId)) reasons.push(`slot_ref_id_blank:${i}`);
+    if (!_srNonblank(s.composerSlotId)) reasons.push(`slot_composer_id_blank:${i}`);
+    const p = s.primary;
+    if (!_srPlain(p) || !_srNonblank(p.candidateId) || !_srNonblank(p.imageUrl)) reasons.push(`primary_invalid:${i}`);
+    // ★ รอบ 2 (P1-C) + รอบ 3 (P1-1): shape ต้องเป็น enum จริงของระบบ ('rect'|'circle' — ref library มีสองแบบเท่านั้น)
+    //   garbage/object/BigInt/cyclic = reject ไม่ throw · การเทียบกับ realized อยู่ท่อน realized ด้านล่าง
+    if (s.shape !== 'rect' && s.shape !== 'circle') reasons.push(`slot_shape_invalid:${i}`);
+  }
+
+  // ── uniqueness ──
+  const refIds = slots.map((s) => s?.refSlotId).filter(_srNonblank);
+  const compIds = slots.map((s) => s?.composerSlotId).filter(_srNonblank);
+  const primIds = slots.map((s) => s?.primary?.candidateId).filter(_srNonblank);
+  const primUrls = slots.map((s) => s?.primary?.imageUrl).filter(_srNonblank);
+  if (new Set(refIds).size !== refIds.length) reasons.push('dup_ref_slot_id');
+  if (new Set(compIds).size !== compIds.length) reasons.push('dup_composer_slot_id');
+  if (new Set(primIds).size !== primIds.length) reasons.push('dup_primary_candidate');
+  if (new Set(primUrls).size !== primUrls.length) reasons.push('dup_primary_url');
+
+  // ── counts ต้อง "คำนวณซ้ำแล้วตรง" — กัน counts ปลอมที่ไม่สะท้อน slots จริง ──
+  const c = _srPlain(spec.counts) ? spec.counts : {};
+  const expectCounts = {
+    total: slots.length,
+    mapped: slots.length,
+    unmapped: 0,
+    missingPrimary: 0,
+    duplicatePrimary: 0,
+    duplicatePrimaryUrl: 0,
+    semanticFallback: 0,
+  };
+  for (const k of Object.keys(expectCounts)) {
+    if (c[k] !== expectCounts[k]) reasons.push(`counts_mismatch:${k}`);
+  }
+
+  // ── diagnostics = ชั้น fail-closed ที่ hash "ไม่ได้ผูก" — ต้องมีตัวตน+shape ครบเสมอ ห้ามหาย
+  //   (★ P0 Codex reproduce: forge strictReady=true + delete diagnostics เคยหลุดเป็น strict_ready —
+  //    เดิม field หายถูกมองว่าสะอาด) · duplicateBackupsDropped = sanitation ยอม nonempty ได้
+  //   แต่ต้องเป็น array จริง และ backup ที่เหลือยังถูกตรวจเต็มด้านล่าง ──
+  const d = spec.diagnostics;
+  if (!_srPlain(d)) {
+    reasons.push('diagnostics_not_object');
+  } else {
+    for (const f of ['extraPlannedKeys', 'invalidPrimary', 'aliasPrimaryUrls', 'duplicateBackupsDropped']) {
+      if (!Array.isArray(d[f])) reasons.push(`diagnostics_malformed:${f}`);
+    }
+    if (Array.isArray(d.extraPlannedKeys) && d.extraPlannedKeys.length > 0) reasons.push('diagnostics_blocking:extraPlannedKeys');
+    if (Array.isArray(d.invalidPrimary) && d.invalidPrimary.length > 0) reasons.push('diagnostics_blocking:invalidPrimary');
+    if (Array.isArray(d.aliasPrimaryUrls) && d.aliasPrimaryUrls.length > 0) reasons.push('diagnostics_blocking:aliasPrimaryUrls');
+    if (d.missingRefId === true) reasons.push('diagnostics_blocking:missingRefId');
+    // ★ รอบ 3 (P1-3): ยอมเฉพาะ absent/false (ค่าจริงจาก builder) — ครึ่งจริง ('true',1,{},null) = เชื่อไม่ได้
+    else if (d.missingRefId !== undefined && d.missingRefId !== false) reasons.push('diagnostics_malformed:missingRefId');
+  }
+
+  // ── backups: ครบ/ไม่ว่าง + unique ข้าม owner + ห้ามชน primary ทั้ง id และ URL ──
+  const primIdSet = new Set(primIds);
+  const primUrlSet = new Set(primUrls);
+  const bkIds = new Set();
+  const bkUrls = new Set();
+  for (let i = 0; i < slots.length; i++) {
+    const bks = slots[i]?.backups;
+    // ★ รอบ 2 (P1-C): backups ต้องเป็น array จริงทุกช่อง — missing/null/ชนิดผิด = reject (builder ให้ [] เสมอ)
+    if (!Array.isArray(bks)) { reasons.push(`backups_not_array:${i}`); continue; }
+    for (const b of bks) {
+      if (!_srPlain(b) || !_srNonblank(b.candidateId) || !_srNonblank(b.imageUrl)) { reasons.push(`backup_invalid:${i}`); continue; }
+      if (primIdSet.has(b.candidateId) || primUrlSet.has(b.imageUrl)) { reasons.push(`backup_collides_primary:${i}`); continue; }
+      if (bkIds.has(b.candidateId) || bkUrls.has(b.imageUrl)) { reasons.push(`backup_dup_across_owners:${i}`); continue; }
+      bkIds.add(b.candidateId);
+      bkUrls.add(b.imageUrl);
+    }
+  }
+
+  // ── recompute hashes ด้วย algorithm เดิมของ exact branch — จับ tamper ราย candidate/URL/backup ──
+  // ★ รอบ 2 (P1-C): กัน throw จาก BigInt/cyclic — ค่าที่ไม่ใช่ string ถูกลดเป็น null ก่อน stringify
+  //   (spec จริงจาก builder เป็น string ล้วน → hash ตรงเดิม 100% · ค่าเพี้ยน → hash ไม่ตรง = reject ปกติ)
+  const _str = (v) => (typeof v === 'string' ? v : null);
+  const identity = slots.map((s) => [_str(s?.refSlotId), _str(s?.composerSlotId), _str(s?.primary?.candidateId)]);
+  const wantSpecHash = fnv1a32(JSON.stringify({ refId: _str(spec.refId), identity }));
+  const wantBackupPoolHash = fnv1a32(JSON.stringify(slots.map((s) => [_str(s?.refSlotId), (Array.isArray(s?.backups) ? s.backups : []).map((b) => _str(b?.candidateId))])));
+  const wantReplayHash = fnv1a32(JSON.stringify({
+    refId: _str(spec.refId),
+    identity,
+    urls: slots.map((s) => _str(s?.primary?.imageUrl)),
+    backups: slots.map((s) => [_str(s?.refSlotId), (Array.isArray(s?.backups) ? s.backups : []).map((b) => [_str(b?.candidateId), _str(b?.imageUrl)])]),
+  }));
+  if (spec.specHash !== wantSpecHash) reasons.push('spec_hash_mismatch');
+  if (spec.backupPoolHash !== wantBackupPoolHash) reasons.push('backup_pool_hash_mismatch');
+  if (spec.replayHash !== wantReplayHash) reasons.push('replay_hash_mismatch');
+
+  // ── realized template: ids ไม่ว่าง/unique และเป็นเซ็ตเดียวกันเป๊ะกับ composerSlotId — ขาด/เกิน/เปลี่ยนชื่อ = reject ──
+  const rt = input.realizedTemplate;
+  const rtSlots = _srPlain(rt) && Array.isArray(rt.slots) ? rt.slots : null;
+  if (!rtSlots) {
+    reasons.push('realized_missing');
+  } else {
+    const rtIds = rtSlots.map((s) => (s && s.id != null ? String(s.id) : ''));
+    if (!rtIds.every(_srNonblank)) reasons.push('realized_ids_invalid');
+    else if (new Set(rtIds).size !== rtIds.length) reasons.push('realized_ids_duplicate');
+    else {
+      const want = new Set(compIds);
+      const got = new Set(rtIds);
+      const sameAll = want.size === got.size && compIds.length === rtIds.length && [...want].every((id) => got.has(id));
+      if (!sameAll) reasons.push('realized_set_mismatch');
+      // ★ รอบ 3 (P1-1): hash ไม่ผูก shape — เปลี่ยน circle→rect เคยหลุด strict_ready ทั้งที่ authority แบกค่าปลอม
+      //   ต้องเทียบกับ realized ของจริงราย composerSlotId · canonical ฝั่ง realized:
+      //   dnaToTemplateSpec ใส่ shape เฉพาะ circle (rect ไม่มี property) → shape==='circle' ? 'circle' : 'rect'
+      const rtShapeById = new Map(rtSlots.map((r) => [String(r?.id ?? ''), r?.shape === 'circle' ? 'circle' : 'rect']));
+      for (let i = 0; i < slots.length; i++) {
+        const s = slots[i];
+        const cid = s?.composerSlotId;
+        // enum พัง/ id ว่าง = ฟ้องไปแล้วข้างบน — ไม่เทียบซ้ำ (กัน reason เบิ้ลต่อ defect เดียว)
+        if (!_srNonblank(cid) || (s?.shape !== 'rect' && s?.shape !== 'circle')) continue;
+        const wantShape = rtShapeById.get(cid);
+        if (wantShape !== undefined && s.shape !== wantShape) reasons.push(`shape_mismatch:${i}`);
+      }
+    }
+  }
+
+  if (reasons.length) {
+    return { decision: 'reject_invalid', active: false, failClosed: true, reasons };
+  }
+  // ผ่านครบ → authority normalized (สำเนาลึก — กัน caller mutate ย้อนเข้าสัญญา)
+  const authority = JSON.parse(JSON.stringify({
+    refId: spec.refId,
+    specHash: spec.specHash,
+    backupPoolHash: spec.backupPoolHash,
+    replayHash: spec.replayHash,
+    slots: slots.map((s) => ({
+      refSlotId: s.refSlotId,
+      composerSlotId: s.composerSlotId,
+      shape: s.shape ?? null,
+      primary: { candidateId: s.primary.candidateId, imageUrl: s.primary.imageUrl },
+      backups: (Array.isArray(s.backups) ? s.backups : []).map((b) => ({ candidateId: b.candidateId, imageUrl: b.imageUrl })),
+    })),
+  }));
+  return { decision: 'strict_ready', active: true, failClosed: false, reasons: [], authority };
 }
 
 // ---------- 📜 SelectionSpec v1 (Codex ตรวจรอบ 2 ข้อ 2-5 — 10 ก.ค. 69) ----------
