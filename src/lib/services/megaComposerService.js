@@ -1139,6 +1139,11 @@ async function refCompareEye({ coverBuffer, refImagePath, newsTitle }) {
 // ---------- ปรับตามคำสั่งตา (กฎล้วน — bounded ≤1 รอบ · ห้ามแตะ main) ----------
 function applyEyeFixes({ fixes, assignments, loaded, faceBoxes, used }) {
   let applied = 0;
+  // ★ HOTFIX รอบ 2 (Codex P0-A): ลำดับ candidate ต้องเท่า legacy เป๊ะ (OFF parity) — scan ใช้ snapshot
+  //   ของ used ณ ต้น call + ภาพใหม่ที่ swap จองเพิ่ม: index เก่าที่ถูกปล่อยยัง "reserved" ตลอด call
+  //   (กัน swap ถัดไปหยิบภาพเก่าของช่องก่อนหน้า = ผลเลือกเพี้ยนจาก HEAD) · ส่วน used จริง = ownership
+  //   สุดท้ายของ assignments: delete(old) + add(new)
+  const reservedDuringEye = new Set(used);
   for (const f of fixes) {
     const a = assignments.find((x) => x.slotId === f.slot && !/main|hero/i.test(x.slotId));
     if (!a) continue;
@@ -1154,14 +1159,159 @@ function applyEyeFixes({ fixes, assignments, loaded, faceBoxes, used }) {
       const _isCircle = /circle/i.test(String(a.slotId));
       let si = -1;
       for (let i = 0; i < loaded.length; i++) {
-        if (used.has(i) || loaded[i].clean === false || !faceBoxes[i]) continue;
+        if (reservedDuringEye.has(i) || loaded[i].clean === false || !faceBoxes[i]) continue;
         if (_isCircle && _heroP2 && String(loaded[i]?.person || '') === _heroP2) continue;
         si = i; break;
       }
-      if (si >= 0) { used.add(si); a.imageIndex = si; a.crop = cropFromFace(faceBoxes[si], 55, 'upper'); applied++; }
+      if (si >= 0) {
+        // ★ HOTFIX รอบ 2 (Codex P0-A): คำนวณ crop ทดแทนให้เสร็จ "ก่อน" แตะ state — throw กลางทาง = ไม่มี partial
+        const newCrop = cropFromFace(faceBoxes[si], 55, 'upper');
+        const oldIndex = a.imageIndex;
+        used.delete(oldIndex);      // ownership จริง: ภาพเก่าหลุดจากช่องนี้แล้ว (บั๊กเดิมค้างตลอดงาน)
+        used.add(si);
+        reservedDuringEye.add(si);  // จองใน call นี้ — old ยังค้างใน reserved ให้ลำดับเลือกตรง HEAD
+        a.imageIndex = si;
+        a.crop = newCrop;
+        applied++;
+      }
     }
   }
   return applied;
+}
+
+// ---------- 👁️⚛️ Eye advisory atomic transaction (11 ก.ค. — Codex hotfix รอบ 2) ----------
+// seam เดียวที่ export: _runEyeFixTransaction — production เรียกตัวนี้จริง harness ก็เรียกตัวนี้จริง
+// (ไม่ export helper ย่อย — เทสจะได้ไม่ต้องจำลอง orchestration เอง) · snapshot/restore เป็น private ล้วน
+
+// snapshot ครบชุด "ก่อน" applyEyeFixes — จำทั้ง "ค่า" (deep-clone รวม nested trace) และ "ตัวตน" (references)
+// เพื่อ restore แบบ reference-atomic: array/Set/object เดิมทุกตัว แค่เนื้อหากลับ baseline
+function _eyeTxSnapshot(core, buffer, cropTrace) {
+  return {
+    assignArrayRef: core.assignments,
+    assignEntries: (core.assignments || []).map((ref) => ({
+      ref, // object เดิมใน array — restore เขียนคืน field ลงตัวนี้ ไม่สร้างใหม่
+      fields: { ...ref, crop: ref.crop ? JSON.parse(JSON.stringify(ref.crop)) : ref.crop },
+    })),
+    usedRef: core.used,
+    usedItems: [...(core.used || [])],
+    qcFlagsRef: Array.isArray(core.qcFlags) ? core.qcFlags : null,
+    qcFlagsItems: [...(core.qcFlags || [])],
+    traceSinkRef: Array.isArray(core.traceSink) ? core.traceSink : null,
+    traceSinkItems: Array.isArray(core.traceSink) ? JSON.parse(JSON.stringify(core.traceSink)) : [],
+    cropTraceItems: JSON.parse(JSON.stringify(cropTrace || [])), // deep — กัน region/tighten ใน entry ถูกแชร์
+    buffer,
+  };
+}
+
+// touched = เทียบ "object ตัวเดิม" กับ field ที่จำไว้ตรงๆ (ไม่พึ่ง slotId map — กันชนกรณี id ซ้ำ)
+function _eyeTxTouched(snap) {
+  const out = [];
+  for (const { ref, fields } of snap.assignEntries) {
+    if (ref.imageIndex !== fields.imageIndex || JSON.stringify(ref.crop) !== JSON.stringify(fields.crop)) out.push(ref.slotId);
+  }
+  return out;
+}
+
+// ด่านกลไก re-QC (ตรรกะเดิมของ Wave2 Batch C ทุกบรรทัด): เทียบธงก่อน-หลังเฉพาะช่องที่ตาแตะ
+function _eyeRegressionOf({ touchedSlots, preQcFlags, postQcFlags }) {
+  const upOf = (flags, slot) => {
+    for (const f of flags) {
+      const m = /^(?:upscaled|upscale_soft):([^:]+):([\d.]+)$/.exec(String(f));
+      if (m && m[1] === slot) return Number(m[2]);
+    }
+    return null;
+  };
+  const blindOf = (flags, slot) => flags.includes(`blind_crop:${slot}`);
+  for (const slot of touchedSlots) {
+    if (blindOf(postQcFlags, slot) && !blindOf(preQcFlags, slot)) return `blind_crop_new:${slot}`;
+    const beforeUp = upOf(preQcFlags, slot);
+    const afterUp = upOf(postQcFlags, slot);
+    if (afterUp != null) {
+      if (beforeUp != null && afterUp > beforeUp * 1.1 + 0.001) return `upscale_worse:${slot}:${beforeUp.toFixed(2)}->${afterUp.toFixed(2)}`;
+      if (beforeUp == null && afterUp > 1.6) return `upscale_new:${slot}:${afterUp.toFixed(2)}`;
+    }
+  }
+  return null;
+}
+
+// restore reference-atomic — ห้ามสลับตัวตนใดๆ:
+//   · assignment object แต่ละตัว: ลบ key แปลกปลอมแล้วเขียน field เดิมคืน in-place (crop = clone ใหม่กัน baseline เน่า)
+//   · assignments array เดิม / used Set เดิม (clear+add) / traceSink array เดิม / qcFlags array เดิม — เนื้อหากลับ baseline
+//   · qcFlags หลัง revert = baseline + ป้าย eye_fix_reverted:<reason> หนึ่งใบเป๊ะ
+//   คืน { buffer: Buffer ใบ baseline ตัวเดิม, cropTrace: สำเนา deep ของ baseline, fixedCount: 0 }
+function _eyeTxRestore(snap, core, reason) {
+  for (const { ref, fields } of snap.assignEntries) {
+    for (const k of Object.keys(ref)) { if (!(k in fields)) delete ref[k]; }
+    Object.assign(ref, fields, { crop: fields.crop ? JSON.parse(JSON.stringify(fields.crop)) : fields.crop });
+  }
+  snap.assignArrayRef.length = 0;
+  snap.assignArrayRef.push(...snap.assignEntries.map((e) => e.ref));
+  core.assignments = snap.assignArrayRef;
+  if (snap.usedRef instanceof Set) {
+    snap.usedRef.clear();
+    for (const i of snap.usedItems) snap.usedRef.add(i);
+    core.used = snap.usedRef;
+  } else {
+    core.used = new Set(snap.usedItems);
+  }
+  if (snap.traceSinkRef) {
+    snap.traceSinkRef.length = 0; // render อาจ clear/เขียนครึ่งทางก่อน throw — คืนเนื้อหาเสมอ
+    snap.traceSinkRef.push(...JSON.parse(JSON.stringify(snap.traceSinkItems)));
+    core.traceSink = snap.traceSinkRef;
+  }
+  const flagsRef = snap.qcFlagsRef || [];
+  flagsRef.length = 0;
+  flagsRef.push(...snap.qcFlagsItems, `eye_fix_reverted:${reason}`);
+  core.qcFlags = flagsRef;
+  return { buffer: snap.buffer, cropTrace: JSON.parse(JSON.stringify(snap.cropTraceItems)), fixedCount: 0 };
+}
+
+// kill switch ด่านกลไก: MEGA_EYE_REQC=0 = ข้าม re-QC รับผลตาทันที (พฤติกรรมเดิมเป๊ะ) — private
+function _eyeReqcEnabled(env = process.env) {
+  return env.MEGA_EYE_REQC !== '0';
+}
+
+// ธุรกรรมเดียวครอบทั้งเส้น: snapshot → apply → render → re-QC → keep/revert/exception
+// · buffer/cropTrace = ค่า local ของ composeAndVerify "หลัง FinalCrop" (ไม่ใช่ core.buffer/core.cropTrace)
+// · renderCover: จุดฉีดของ harness เท่านั้น — production ห้ามส่ง (default = executeCover จริง)
+// · fixedCount=0 → ไม่ render (พฤติกรรมเดิม) · exception ที่จุดใดก็ตาม → restore atomic + reason 'exception'
+export async function _runEyeFixTransaction({ core, fixes, buffer, cropTrace, renderCover = null }) {
+  const snap = _eyeTxSnapshot(core, buffer, cropTrace);
+  try {
+    const fixedCount = applyEyeFixes({ fixes, assignments: core.assignments, loaded: core.loaded, faceBoxes: core.faceBoxes, used: core.used });
+    if (!fixedCount) return { buffer, cropTrace, fixedCount: 0 };
+    const render = renderCover || (async () => {
+      const { executeCover } = await import('@/lib/services/coverExecutorService');
+      return executeCover({ assignments: core.assignments, imageBuffers: core.loaded, templateSpec: core.spec, faceBoxes: core.faceBoxes, traceSink: core.traceSink });
+    });
+    buffer = await render();
+    cropTrace = [...(core.traceSink || [])]; // audit: trace ของรอบสุดท้าย จาก sink ของงานนี้เอง
+    // audit: ธง blind_crop + upscale ต้องสะท้อนปกใบสุดท้าย (การสลับภาพของตาอาจทำให้เกิด/หาย) — เฟส 3.1
+    core.qcFlags = (core.qcFlags || []).filter((f) => !/^(blind_crop|upscaled|upscale_soft):/.test(String(f)));
+    core.qcFlags.push(...traceQcFlags(cropTrace));
+    console.log(`[MegaComposer] 👁️ แก้ตามตา ${fixedCount} จุด → ประกอบใหม่ (bounded 1 รอบจบ)`);
+    // ── 🔬 re-QC กลไกล้วน (ไม่เรียก vision LLM เพิ่ม) — ตาแค่ "เสนอ" เครื่องตัดสินว่าจะรับจริงไหม ──
+    //   MEGA_EYE_REQC=0: ข้าม gate ทั้งก้อน = apply+render แล้วรับเลย ไม่มี marker kept/unverified/revert
+    if (_eyeReqcEnabled()) {
+      const touchedSlots = _eyeTxTouched(snap);
+      if (touchedSlots.length) {
+        const regression = _eyeRegressionOf({ touchedSlots, preQcFlags: snap.qcFlagsItems, postQcFlags: core.qcFlags });
+        if (regression) {
+          const r = _eyeTxRestore(snap, core, regression);
+          console.log(`[MegaComposer] 👁️↩️ revert eye fix (${regression}) — กลไกวัดว่าแย่ลงกว่า baseline`);
+          return r;
+        }
+        core.qcFlags.push('eye_fix_kept', 'person_cut_unverified');
+        console.log('[MegaComposer] 👁️✅ eye fix ผ่านด่านกลไก (blind_crop/upscale ไม่แย่ลง) — รับผล');
+      }
+    }
+    return { buffer, cropTrace, fixedCount };
+  } catch (e) {
+    // exception กลาง apply/render/re-QC — restore atomic เสมอ (รวมใต้ REQC=0: safety ที่ตั้งใจ)
+    const r = _eyeTxRestore(snap, core, 'exception');
+    console.log('[MegaComposer] 👁️↩️ eye fix ล้มกลางทาง — atomic revert กลับ baseline:', e.message?.slice(0, 60));
+    return r;
+  }
 }
 
 /**
@@ -1263,80 +1413,13 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
           }
           // สเกลใหม่: ตกข้อใดข้อหนึ่ง (<100) + ตามีคำสั่งแก้ = ลงมือ (เดิม <85 จะข้ามเคสตกข้อเล็ก)
           if (eye.fixes?.length && eye.similarity < 100) {
-            fixedCount = applyEyeFixes({ fixes: eye.fixes, assignments: core.assignments, loaded: core.loaded, faceBoxes: core.faceBoxes, used: core.used });
-            if (fixedCount) {
-              // ★ Wave2 Batch C (10 ก.ค. — AI Eye ต้องเป็น advisory จริง ไม่ใช่รับคำสั่งเงียบๆแล้วเชื่อทันที):
-              //   เก็บ "baseline ก่อนแก้" ครบชุด (assignments/used/buffer/trace/flags) ไว้ก่อนเรนเดอร์ทับ
-              //   เผื่อ re-QC ด้านล่างพบว่าแย่ลง → revert กลับจุดนี้เป๊ะ (ไม่ใช่แค่ buffer — assignments ต้องตรงด้วย)
-              const _preAssignments = core.assignments.map((a) => ({ ...a }));
-              const _preAssignSnap = new Map(_preAssignments.map((a) => [a.slotId, { imageIndex: a.imageIndex, crop: JSON.stringify(a.crop) }]));
-              const _preUsed = new Set(core.used);
-              const _preQcFlags = [...(core.qcFlags || [])];
-              const _preCropTrace = [...cropTrace];
-              const _preBuffer = buffer;
-
-              const { executeCover } = await import('@/lib/services/coverExecutorService');
-              buffer = await executeCover({ assignments: core.assignments, imageBuffers: core.loaded, templateSpec: core.spec, faceBoxes: core.faceBoxes, traceSink: core.traceSink });
-              cropTrace = [...(core.traceSink || [])]; // audit: trace ของรอบสุดท้าย จาก sink ของงานนี้เอง
-              // audit: ธง blind_crop + upscale ต้องสะท้อนปกใบสุดท้าย (การสลับภาพของตาอาจทำให้เกิด/หาย) — เฟส 3.1
-              core.qcFlags = (core.qcFlags || []).filter((f) => !/^(blind_crop|upscaled|upscale_soft):/.test(String(f)));
-              core.qcFlags.push(...traceQcFlags(cropTrace));
-              console.log(`[MegaComposer] 👁️ แก้ตามตา ${fixedCount} จุด → ประกอบใหม่ (bounded 1 รอบจบ)`);
-
-              // ── 🔬 re-QC กลไกล้วน (ไม่เรียก vision LLM เพิ่ม) — ตาแค่ "เสนอ" เครื่องตัดสินว่าจะรับจริงไหม ──
-              //   เทียบเฉพาะช่องที่ตาสั่งแก้ (touched: imageIndex หรือ crop เปลี่ยน) ก่อน-หลัง:
-              //   · blind_crop เกิดใหม่ (ไม่มีมาก่อน) = แย่ลงชัดเจน
-              //   · upscale มีเลขให้เทียบทั้งคู่ (ทั้งก่อน-หลังเคยติดธง) แล้วแย่ลง >10% = แย่ลงชัดเจน
-              //   · ก่อนไม่ติดธง (ยืด <1.2 เดิม) แต่หลังยืดทะลุเพดานจริงของช่องรอง (>1.6) = แย่ลงชัดเจน
-              //     (ไม่เดาเปอร์เซ็นต์จาก baseline ที่ไม่รู้ค่าเป๊ะ — ใช้เพดาน QC gate เป็นเส้นตัดสินแทน ซื่อสัตย์กว่า)
-              //   ⚠️ ข้อจำกัดที่รู้แล้วยอมรับ: person_cut วัดได้จาก detectFaces บน "ปกที่เรนเดอร์จริง" เท่านั้น
-              //     (vision LLM ผ่าน batchDetectFaces) — เรขาคณิตล้วนจาก faceBoxes+crop เดิมวัดแทนไม่ได้แม่น เพราะ
-              //     executor ปรับ crop จริงเองอีกชั้น (crop ที่ส่งเข้าไปเป็นแค่ hint ไม่ใช่ค่าจริงที่ render)
-              //     → ข้ามตัวนี้ในนี้ + ติดธง person_cut_unverified ให้เห็นข้อจำกัดชัดเจนแทนการเดาว่าผ่าน
-              //   kill switch: MEGA_EYE_REQC=0 → ปิดด่านนี้ทั้งหมด (พฤติกรรมเดิมเป๊ะ: แก้แล้วรับผลทันที)
-              if (process.env.MEGA_EYE_REQC !== '0') {
-                const touchedSlots = core.assignments
-                  .filter((a) => {
-                    const pre = _preAssignSnap.get(a.slotId);
-                    return !pre || pre.imageIndex !== a.imageIndex || pre.crop !== JSON.stringify(a.crop);
-                  })
-                  .map((a) => a.slotId);
-                if (touchedSlots.length) {
-                  const upOf = (flags, slot) => {
-                    for (const f of flags) {
-                      const m = /^(?:upscaled|upscale_soft):([^:]+):([\d.]+)$/.exec(String(f));
-                      if (m && m[1] === slot) return Number(m[2]);
-                    }
-                    return null;
-                  };
-                  const blindOf = (flags, slot) => flags.includes(`blind_crop:${slot}`);
-                  let regression = null;
-                  for (const slot of touchedSlots) {
-                    if (blindOf(core.qcFlags, slot) && !blindOf(_preQcFlags, slot)) { regression = `blind_crop_new:${slot}`; break; }
-                    const beforeUp = upOf(_preQcFlags, slot);
-                    const afterUp = upOf(core.qcFlags, slot);
-                    if (afterUp != null) {
-                      if (beforeUp != null && afterUp > beforeUp * 1.1 + 0.001) { regression = `upscale_worse:${slot}:${beforeUp.toFixed(2)}->${afterUp.toFixed(2)}`; break; }
-                      if (beforeUp == null && afterUp > 1.6) { regression = `upscale_new:${slot}:${afterUp.toFixed(2)}`; break; }
-                    }
-                  }
-                  if (regression) {
-                    // ↩️ revert ทั้งชุด — กลับไปจุดก่อนตาสั่งแก้เป๊ะ (assignments/used/buffer/trace/flags ตรงกันหมด)
-                    core.assignments.length = 0;
-                    core.assignments.push(..._preAssignments);
-                    core.used = _preUsed;
-                    buffer = _preBuffer;
-                    cropTrace = _preCropTrace;
-                    core.qcFlags = [..._preQcFlags, `eye_fix_reverted:${regression}`];
-                    fixedCount = 0; // สะท้อนความจริง: การแก้ของตาไม่ถูกใช้จริงในปกที่คืนออกไป
-                    console.log(`[MegaComposer] 👁️↩️ revert eye fix (${regression}) — กลไกวัดว่าแย่ลงกว่า baseline`);
-                  } else {
-                    core.qcFlags.push('eye_fix_kept', 'person_cut_unverified');
-                    console.log('[MegaComposer] 👁️✅ eye fix ผ่านด่านกลไก (blind_crop/upscale ไม่แย่ลง) — รับผล');
-                  }
-                }
-              }
-            }
+            // ★ HOTFIX 11 ก.ค. รอบ 2 (Codex eye-advisory-atomic): ธุรกรรมเดียวครอบ snapshot→apply→render→
+            //   re-QC→keep/revert/exception — ตรรกะทั้งหมดอยู่ใน _runEyeFixTransaction (seam เดียวที่ harness
+            //   เรียกตัวเดียวกันเป๊ะ) · ส่ง buffer/cropTrace "local หลัง FinalCrop" เป็น baseline · ห้ามส่ง renderCover
+            const _tx = await _runEyeFixTransaction({ core, fixes: eye.fixes, buffer, cropTrace });
+            buffer = _tx.buffer;
+            cropTrace = _tx.cropTrace;
+            fixedCount = _tx.fixedCount;
           }
         }
       } catch (e) { console.log('[MegaComposer] ตาเทียบ ref ล้ม (ใช้ปกเดิม):', e.message?.slice(0, 50)); }
