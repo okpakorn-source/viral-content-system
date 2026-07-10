@@ -110,7 +110,11 @@ ${JSON.stringify(slots, null, 0).slice(0, 1800)}`;
 
 // ---------- S6 ผู้กำกับจับคู่ช่อง: ป้าย triage (จ่ายเงินแล้วใน S5) + สูตรปกแสนไลค์ → ช่องละใบ+สำรอง ----------
 // ไม่ดูภาพซ้ำ (ประหยัด) — ตัดสินจาก metadata ที่ตาติดป้ายไว้: ใคร/หมวด/อารมณ์/คุณภาพ/จำนวนหน้า
-export async function slotDirectorBrain({ imagesMeta, compass, deskTitle, refDNA = null, artBrief = null, sceneInventory = '' }) {
+// ★ SEM-1 (Codex อนุมัติ design v2): slotContract = รายการช่อง instance จริงของ ref (จาก buildRefSlotContract)
+//   ส่งมาเมื่อ semantic-selection เปิด+เงื่อนไขครบที่ฝั่ง adapter เท่านั้น — ไม่ส่ง = prompt เดิม byte-parity
+//   _deps.callBrain = จุดฉีดสำหรับเทสเท่านั้น (default = callBrain จริง — production เดิมทุกอย่าง)
+export async function slotDirectorBrain({ imagesMeta, compass, deskTitle, refDNA = null, artBrief = null, sceneInventory = '', slotContract = null, _deps = {} }) {
+  const _cb = _deps.callBrain || callBrain;
   // 🎨 8 ก.ค. (ทีมกราฟฟิก): มีใบสั่งจากบก.ศิลป์ → ใช้ใบสั่งนำ (แปลงเป็นข่าวนี้แล้ว แม่นกว่า ref ดิบ)
   const briefBlock = artBrief?.orders?.length ? `
 === 🎨 ใบสั่งงานจากบก.ศิลป์ (แปลงปกต้นแบบเป็นข่าวนี้แล้ว — ทำตามใกล้ที่สุดเท่าที่พูลมีจริง) ===
@@ -169,6 +173,36 @@ ${compassBlock}
 ${sceneInventory ? `🗺️ ฉากที่มีในพูล (จาก note ตาคัด · ×N = จำนวนใบ): ${String(sceneInventory).slice(0, 700)}\n` : ''}${refBlock}
 คลังภาพที่ตายืนยันแล้วว่าเกี่ยวข้อง (metadata ต่อใบ — note=คำบรรยายฉากจากตาคัด ใช้แยกโมเมนต์จริงจากภาพโพส; ภาพจากคลิป (src=clip/youtube) note มัก generic ให้ดู persons/emotion/category แทน; orient=tall/wide/sq สัดส่วนภาพ):
 [${_lines.slice(0, _included).join(',\n')}]`;
-  const out = await callBrain({ system, user, maxTokens: 1100, temperature: 0.1, cost: { step: 'MEGA S6 slot director' } });
+  // ★ SEM-1: system เฉพาะโหมด semantic — สร้างจากช่อง instance จริงของ ref · answer schema key = refSlotId
+  //   literal `system` เดิมด้านบนไม่ถูกแตะแม้ตัวอักษรเดียว (byte-parity เมื่อไม่ส่ง slotContract)
+  const _semSlots = Array.isArray(slotContract) && slotContract.length >= 3 ? slotContract : null;
+  let systemSem = null;
+  if (_semSlots) {
+    const _heroInst = _semSlots.find((s) => (s.refRole === 'hero' || s.refRole === 'main') && s.shape !== 'circle')
+      || _semSlots.find((s) => s.shape !== 'circle')
+      || _semSlots[0];
+    // กฎ 11 (คนละคนกับ hero) ห้ามรวมช่อง hero เอง — กัน ref ประหลาดที่ hero เป็นวงกลม (ผู้ตรวจ P1)
+    const _circleIds = _semSlots.filter((s) => s.shape === 'circle' && s.id !== _heroInst.id).map((s) => s.id);
+    const roleLines = _semSlots.map((s) => {
+      const tags = [];
+      if (s.id === _heroInst.id) tags.push('ช่องตัวเอกหลัก');
+      if (s.shape === 'circle') tags.push('วงกลม');
+      const desc = [
+        s.subject ? `ปกเป้าใช้: ${String(s.subject).slice(0, 60)}` : '',
+        s.eventIntent ? `ต้องการ: ${String(s.eventIntent).slice(0, 70)}` : '',
+        s.wantPerson ? `คน: ${String(s.wantPerson).slice(0, 40)}` : '',
+        s.refShot ? `ช็อต: ${String(s.refShot).slice(0, 20)}` : '',
+      ].filter(Boolean).join(' · ');
+      return `- ${s.id}${tags.length ? ` (${tags.join('/')})` : ''}: บท ${s.refRole}${desc ? ` — ${desc}` : ''}`;
+    }).join('\n');
+    const schemaSem = `{"slots":{${_semSlots.map((s) => `"${s.id}":{"id":"...","reason":"สั้นๆ","backups":["id","id"]}`).join(',')}},"note":"ข้อสังเกตรวม 1 ประโยค"}`;
+    systemSem = `คุณคือผู้กำกับภาพปกข่าวไวรัลไทย จับคู่ "ภาพ → ช่องปก" ตามช่องจริงของปกเป้า (ref) ใบนี้ทีละช่อง:
+${roleLines}
+กฎเหล็ก: (1) ถูกคน 100% เหนือทุกข้อ — ${_heroInst.id} ต้องเป็น "ตัวเอกอันดับหนึ่ง" ของข่าวเท่านั้น และช่องที่ระบุ "คน:" ต้องได้ภาพของคนนั้นจริงตามป้าย person ห้ามคนอื่นเด็ดขาด (2) ทุกช่องคนละภาพ ห้ามซ้ำ และควรคนละฉาก (3) เลือกจาก id ในรายการเท่านั้น (4) quality ต่ำ (<4) ใช้เมื่อจำเป็นจริงๆ (5) ช่องไหนไม่มีภาพเข้าเกณฑ์จริงๆ ให้ id=null พร้อมเหตุผล — ห้ามฝืนยัดภาพผิดคน (6) ภาพ clean=false (มีลายน้ำ/ตัวหนังสือทับ) ห้ามขึ้นช่องถ้ามีตัวเลือกสะอาด (7) ภาพ newsScene=false = ภาพแฟ้มจากงาน/บริบทอื่น — เลี่ยงเสมอ ใช้เฉพาะไม่มีภาพเหตุการณ์จริง
+(8) ★ปกทั้งใบต้องเล่าเรื่องครบ: ทุกช่องรวมกันต้องเห็น "คน → กำลังทำอะไร → หลักฐาน/สถานที่" — ห้ามเป็นพอร์ตเทรตล้วนทุกช่อง (9) ★ฉากห้ามซ้ำข้ามช่อง (เทียบจาก note — เฟรมคลิปเดียวกัน/เวทีเดิม = ฉากเดียวกัน) (10) ★${_heroInst.id} เลือกภาพ "หน้าเดี่ยว" (faces=1) หน้าใหญ่คมชัด แนวตั้ง/จัตุรัส (orient=tall/sq) ก่อนเสมอ — ห้ามภาพแนวนอนกว้าง/แบนเนอร์ถ้ามีตัวเลือกอื่นของตัวเอก${_circleIds.length ? ` (11) ★ช่องวงกลม (${_circleIds.join('/')}) ควรเป็นคนละคนกับ ${_heroInst.id} เมื่อช่องนั้นไม่ได้ระบุ "คน:" ไว้` : ''} (12) ★ภาพคนหันหลัง/ก้มกราบ/เห็นแต่แผ่นหลัง ใช้ได้เฉพาะช่องฉากกว้างเท่านั้น
+ตอบ JSON เท่านั้น:
+${schemaSem}`;
+  }
+  const out = await _cb({ system: systemSem || system, user, maxTokens: 1100, temperature: 0.1, cost: { step: 'MEGA S6 slot director' } });
   return parseJson(out.text || out);
 }

@@ -1093,9 +1093,12 @@ export function classifyPoolImage(x) {
   return 'ok';
 }
 
-export async function s6_slots(job, { origin }) {
+export async function s6_slots(job, { origin, _deps } = {}) {
+  // ★ SEM-1: dependency injection เพื่อ testability เท่านั้น — default = ของจริง (production เดิม 100%)
+  const _brainFn = _deps?.slotDirectorBrain || slotDirectorBrain;
+  const _jf = _deps?.fetchJson || jfetch;
   const im = job.dossier.images || {};
-  const r = await jfetch(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
+  const r = await _jf(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
   if (!r.success) return { status: 'failed', nextAction: 'retry', summary: 'อ่านคลังรูปไม่ได้: ' + (r.error || r.httpStatus) };
 
   const rawPool = (r.images || []).filter((x) => x.triage && x.triage.relevant !== false);
@@ -1341,7 +1344,7 @@ export async function s6_slots(job, { origin }) {
   // ⚠️ root cause (Codex ตรวจรอบ 3 — จดไว้แก้ batch semantic-selection ภายใต้ kill switch ห้ามแตะรอบนี้):
   //   slice ตามตำแหน่งทำ ref 4 ช่องที่มี circle เสีย "บท circle" ไป (ได้ hero/reaction/action/context แทน)
   //   → แผน S6 ไม่มีภาพให้วงกลมเลย — SelectionSpec v1 เปิดโปงเป็น missingPrimary/strictReady=false แล้ว
-  const activeSlots = (_panelCount >= 3 && _panelCount <= SLOT_ORDER.length) ? SLOT_ORDER.slice(0, _panelCount) : SLOT_ORDER;
+  let activeSlots = (_panelCount >= 3 && _panelCount <= SLOT_ORDER.length) ? SLOT_ORDER.slice(0, _panelCount) : SLOT_ORDER;
   if (job.dossier.refMatch) {
     console.log(`[MEGA S6] 🎯 ปกเป้า: ${job.dossier.refMatch.styleName || '-'} (${job.dossier.refMatch.reason || ''}) — ${_refDNA ? 'ใช้ขับการเลือกภาพ + โครง' : 'แมตช์หลวม → ใช้เฉพาะโครง (เลือกภาพตามเข็มทิศข่าว)'}${activeSlots.length !== SLOT_ORDER.length ? ` · ตัดเหลือ ${activeSlots.length} ช่องตาม panelCount ref` : ''}`);
   }
@@ -1359,12 +1362,83 @@ export async function s6_slots(job, { origin }) {
     } catch (e) { console.log('[MEGA S6a] บก.ศิลป์ล้ม (เดินต่อไม่มีใบสั่ง):', e.message?.slice(0, 50)); }
   }
 
+  // ★ SEM-1 (Codex อนุมัติ design v2 — เลือกภาพตามบทช่องจริงของ ref): เงื่อนไขเปิดต้องครบ 4 (invariant I5)
+  //   ① MEGA_SEMANTIC_SELECTION=1 ② MEGA_SELECTION_SPEC=1 ③ ref แมตช์แน่น (_refDNA=typeMatched เท่านั้น)
+  //   ④ contract จาก template.slots จริง + realized template map ครบ (จำนวนช่องตรง) — ขาดข้อใด = legacy เดิมทั้งท่อ
+  //   OFF = ไม่มี field/log/prompt ใหม่แม้ byte เดียว · solver ยัง shadow · ยังไม่มี strict consumer/W3-3
+  let semContract = null;
+  if (process.env.MEGA_SEMANTIC_SELECTION === '1' && process.env.MEGA_SELECTION_SPEC === '1' && _refDNA) {
+    try {
+      const specApi = await import('@/lib/refSlotContract');
+      const { dnaToTemplateSpec } = await import('@/lib/refTemplate');
+      const c = specApi.buildRefSlotContract({ refDNA: _refDNA, artBriefOrders: job.dossier.artBrief?.orders || [] });
+      const realized = dnaToTemplateSpec(_refDNA);
+      const okSource = c?.source === 'template.slots' && Array.isArray(c.slots) && c.slots.length >= 3;
+      const okRealized = !!realized && Array.isArray(realized.slots) && realized.slots.length === c.slots.length;
+      if (okSource && okRealized) {
+        semContract = c;
+        activeSlots = c.slots.map((s) => s.id); // instance ids เรียงตาม sourceIndex — deterministic
+        console.log(`[MEGA S6] 🧬 semantic-selection ON: ${activeSlots.join(' · ')} (${c.slots.length} ช่องจากบท ref จริง)`);
+      } else {
+        console.log(`[MEGA S6] 🧬 semantic-selection ขอเปิดแต่เงื่อนไขไม่ครบ (source=${c?.source || '-'} · realizedMap=${okRealized}) → legacy`);
+      }
+    } catch (e) { console.log('[MEGA S6] 🧬 semantic-selection เปิดไม่ได้ (ล้ม) → legacy:', String(e?.message || '').slice(0, 60)); }
+  }
+  const semById = semContract ? new Map(semContract.slots.map((s) => [s.id, s])) : null;
+  // canonical hero = instance แรกที่บท hero "ที่ไม่ใช่วงกลม" (ผู้ตรวจ P1: canon ชนกับวงกลมทำกติกา
+  //   คนละคน/กฎ 11 ขัดแย้งตัวเอง) → ไม่มีบท hero = rect ตัวแรก → สุดท้ายค่อยยอมช่องแรก · legacy = 'hero' เดิมเป๊ะ
+  const _canonHeroId = semContract
+    ? (semContract.slots.find((s) => (s.refRole === 'hero' || s.refRole === 'main') && s.shape !== 'circle')
+      || semContract.slots.find((s) => s.shape !== 'circle')
+      || semContract.slots[0]).id
+    : 'hero';
+  const _circleKey = semContract ? (semContract.slots.find((s) => s.shape === 'circle')?.id || 'circle') : 'circle';
+  const _isHeroSlot = (slot) => slot === _canonHeroId;
+  const _isCircleSlot = (slot) => (semContract ? semById.get(slot)?.shape === 'circle' : slot === 'circle');
+  // แปลง instance → บท generic สำหรับตาราง hint/ชุด story เดิม (legacy: คืนชื่อเดิมตรงตัว = พฤติกรรมเดิม)
+  const _legacyKeyOf = (slot) => {
+    if (!semContract) return slot;
+    const cs = semById.get(slot);
+    if (!cs) return slot;
+    if (cs.shape === 'circle') return 'circle';
+    if (SLOT_ORDER.includes(cs.refRole)) return cs.refRole;
+    return (cs.solverRole === 'context' || cs.solverRole === 'evidence') ? 'context' : 'action';
+  };
+  // ★ SEM-1 correction (Codex P1-5): slotOrder = ลำดับ contract sourceIndex ตรงๆ ห้ามย้าย hero ขึ้นหน้า
+  //   (canonical hero = face/identity policy เท่านั้น ไม่ใช่ layout order — S7 หา hero ด้วย heroSlotId authority)
+  const _slotOrder = semContract ? [...activeSlots] : null;
+  // ★ SEM-1 fix (ผู้ตรวจ P1): ป้าย legacy ให้ composer — ห้ามใช้ contract.legacySlot (ตำแหน่งล้วน สลับบทได้
+  //   เช่น วงกลมได้ป้าย 'reaction' หรือ rect ได้ 'hero') → คำนวณเชิงความหมาย + unique ต่อป้าย:
+  //   canonical hero→'hero' · วงแรก→'circle' · refRole ตรงชื่อถ้ายังว่าง · ที่เหลือไล่ช่องว่าง reaction/action/context
+  //   ป้ายหมด = null (composer เห็นเป็นสำรอง — ปลอดภัยกว่าป้ายผิดบท)
+  const _projMap = (() => {
+    if (!semContract) return null;
+    const usedL = new Set();
+    const m = new Map();
+    for (const s of semContract.slots) {
+      let lbl = null;
+      if (s.id === _canonHeroId) lbl = 'hero';
+      else if (s.shape === 'circle') lbl = usedL.has('circle') ? null : 'circle';
+      else if (SLOT_ORDER.includes(s.refRole) && s.refRole !== 'hero' && s.refRole !== 'circle' && !usedL.has(s.refRole)) lbl = s.refRole;
+      else lbl = ['reaction', 'action', 'context'].find((r) => !usedL.has(r)) || null;
+      if (lbl) usedL.add(lbl);
+      m.set(s.id, lbl);
+    }
+    return m;
+  })();
+
   let brain = { slots: {}, note: '' };
   let brainOk = true;
   try {
-    brain = await slotDirectorBrain({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title, refDNA: _refDNA, artBrief: job.dossier.artBrief || null, sceneInventory }); // เฟส 3.1: สมองเห็นแผนที่ฉาก
+    brain = await _brainFn({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title, refDNA: _refDNA, artBrief: job.dossier.artBrief || null, sceneInventory, ...(semContract ? { slotContract: semContract.slots } : {}) }); // เฟส 3.1: สมองเห็นแผนที่ฉาก · SEM-1: ส่งสัญญาช่องเมื่อ semantic ON เท่านั้น (OFF = args เดิมเป๊ะ)
   } catch (err) {
     brainOk = false; // สมองล่ม → fallback ล้วน (กฎเดียวกับทางหลัก)
+  }
+  // ★ SEM-1 (ผู้ตรวจ note): schema สั่ง key เป็น instance id แต่ LLM อาจเผลอตอบศัพท์ legacy — ถ้า miss ยกแผง
+  //   ทุกช่องจะเงียบเข้า fallback โดยไม่มีใครรู้ → log เตือนชัด (ON เท่านั้น ไม่แตะ OFF)
+  if (semContract && brainOk && brain?.slots && Object.keys(brain.slots).length) {
+    const hit = activeSlots.filter((s) => brain.slots?.[s]?.id != null).length;
+    if (!hit) console.log(`[MEGA S6] 🧬⚠️ สมองตอบ key ไม่ตรง instance ids เลย (ได้: ${Object.keys(brain.slots).slice(0, 6).join(',')}) — ทุกช่องจะเข้า fallback`);
   }
   // ★ Wave3 Phase1: snapshot ผลสมอง "ดิบ" ก่อนด่านโค้ด/fallback/story rescue — diagnostics เท่านั้น
   const rawLlmSlotIds = SOLVER_DIAGNOSTICS_V2_ON
@@ -1404,6 +1478,24 @@ export async function s6_slots(job, { origin }) {
     const ps = [img.triage?.person, ...(img.triage?.persons || [])].filter(Boolean);
     return heroNames.length === 0 ? isMainChar(img) : ps.some((p) => heroNames.some((m) => namesMatch(p, m)));
   };
+  // ★ SEM-1 (design v2 ช่องโหว่ 2 — แยก layout role ออกจาก identity policy): identity ต่อช่องตามสัญญา ref
+  //   ช่องที่ ref ระบุ "คน" (wantPerson จากใบสั่งบก.ศิลป์) → คนนั้นคือ authority ของช่องนั้นเอง
+  //   canonical hero ไม่มี intent → ใช้ heroNames legacy เดิม · ช่องอื่นไม่มี intent → ไม่มี identity kill
+  //   ผล: hero_2/บทซ้ำไม่โดน first-hero lock เหมารวมอีก · legacy (semContract=null) = สูตรเดิม 100%
+  const _identityOk = (slot, img) => {
+    if (!semContract) return isHeroChar(img);
+    const want = String(semById.get(slot)?.wantPerson || '').trim();
+    if (want) {
+      const ps = [img.triage?.person, ...(img.triage?.persons || [])].filter(Boolean);
+      return ps.some((p) => namesMatch(p, want));
+    }
+    return _isHeroSlot(slot) ? isHeroChar(img) : true;
+  };
+  const _idGated = (slot) => (semContract
+    ? (_isHeroSlot(slot) || !!String(semById.get(slot)?.wantPerson || '').trim())
+    : slot === 'hero');
+  // ★ SEM-1 correction (Codex P0-2): ช่องที่ ref ระบุคนชัด — intent ของ ref ชนะกฎ global ทุกตัว (เช่น "วงกลมคนละคนกับ hero")
+  const _slotHasIntent = (slot) => !!(semContract && String(semById.get(slot)?.wantPerson || '').trim());
   const used = new Set();
   const slots = {};
   let fallbackUsed = 0;
@@ -1415,24 +1507,25 @@ export async function s6_slots(job, { origin }) {
     let img = want?.id != null ? byId.get(String(want.id)) : null;
     let reason = want?.reason || '';
     if (img && used.has(String(img.id))) img = null; // ซ้ำข้ามช่อง = ตัด
-    if (img && slot === 'hero' && !isHeroChar(img)) { img = null; reason = ''; } // ★ 10 ก.ค.: hero ต้องเป็นตัวเอก role=hero เท่านั้น
+    if (img && _idGated(slot) && !_identityOk(slot, img)) { img = null; reason = ''; } // ★ 10 ก.ค.: hero ต้องถูกคน · SEM-1: ช่องที่ ref ระบุคนก็ยึด intent ของช่องตัวเอง
     // ★ เฟส 3.1: ฉากซ้ำกับช่องที่เลือกไปแล้ว (note เดียวกัน เช่น เฟรมคลิปชุดเดียว/เวทีเดิมหลายรูป) = ตัด
     //   ให้ fallback หาฉากใหม่ — ยกเว้น hero (กฎถูกคนสำคัญกว่า) · แก้ตรงอาการ "ฉากเวทีมอบทุนโผล่ซ้ำ 3 ช่อง"
-    if (img && slot !== 'hero') {
+    if (img && !_isHeroSlot(slot)) {
       const sk = sceneKeyOf(img);
       if (sk && chosenScenes.has(sk)) { img = null; reason = ''; sceneDupBlocked++; }
     }
     // 👤 8 ก.ค. (AC-0027 hero=ภาพกอดแม่ 2 หน้า): brain ฝ่ากฎ "hero หน้าเดี่ยว" ได้ — ด่านโค้ดบังคับ:
     //   hero หลายหน้า + พูลมี "หน้าเดี่ยวถูกคน สะอาด" → สลับเป็นหน้าเดี่ยว (ภาพกอด/คู่ไปช่อง reaction แทนได้)
-    if (img && slot === 'hero' && (img.triage?.faceCount ?? 0) > 1) {
-      const solo = sorted.find((x) => !used.has(String(x.id)) && isHeroChar(x) && (x.triage?.faceCount ?? 0) === 1 && isClean(x));
+    // SEM-1: บังคับหน้าเดี่ยวเฉพาะ canonical hero — hero_2/บทซ้ำไม่โดนเหมารวม (design v2 ช่องโหว่ 2)
+    if (img && _isHeroSlot(slot) && (img.triage?.faceCount ?? 0) > 1) {
+      const solo = sorted.find((x) => !used.has(String(x.id)) && _identityOk(slot, x) && (x.triage?.faceCount ?? 0) === 1 && isClean(x));
       if (solo) { console.log(`[MEGA S6] 👤 hero ${img.id} มี ${img.triage.faceCount} หน้า → สลับหน้าเดี่ยว ${solo.id}`); img = solo; reason = 'hero หน้าเดี่ยว (โค้ดบังคับ — brain เลือกภาพหลายหน้า)'; }
     }
     // ★ 9 ก.ค. เฟส 2.2 (S6_REAL_SIZE_GATE): hero ที่ brain เลือกมาเป็นไฟล์เล็ก/thumbnail-only จริง → สลับเป็นใบที่
     //   เห็นขนาดจริงพอ (realShortSide≥700) ถ้ามีตัวเลือก — กัน "ไฟล์จิ๋วที่ตาคัดให้คะแนนหลอก" หลุดไปยืดแตกตอนประกอบ
-    if (img && slot === 'hero' && !heroSizeOk(img)) {
-      const bigger = sorted.find((x) => !used.has(String(x.id)) && isHeroChar(x) && (x.triage?.faceCount ?? 0) >= 1 && heroSizeOk(x) && isClean(x))
-        || sorted.find((x) => !used.has(String(x.id)) && isHeroChar(x) && (x.triage?.faceCount ?? 0) >= 1 && heroSizeOk(x));
+    if (img && _isHeroSlot(slot) && !heroSizeOk(img)) {
+      const bigger = sorted.find((x) => !used.has(String(x.id)) && _identityOk(slot, x) && (x.triage?.faceCount ?? 0) >= 1 && heroSizeOk(x) && isClean(x))
+        || sorted.find((x) => !used.has(String(x.id)) && _identityOk(slot, x) && (x.triage?.faceCount ?? 0) >= 1 && heroSizeOk(x));
       if (bigger) {
         console.log(`[MEGA S6] 📏 hero ${img.id} ขนาดจริงไม่พอ/thumbnail-only → สลับ ${bigger.id} (เห็นขนาดจริงชัดกว่า)`);
         img = bigger;
@@ -1447,36 +1540,39 @@ export async function s6_slots(job, { origin }) {
       const cands0 = sorted.filter((x) => !used.has(String(x.id)));
       // ★ 10 ก.ค. เฟส 6A (6.3): ช่อง context/action/circle เรียง candidate ด้วยแกน story-fit (story40/clean30/ขนาดจริง30)
       //   ภาพ "สื่อเรื่อง" ชนะ "หน้าชัดเฉยๆ" เมื่อคุณภาพใกล้กัน · hero ไม่แตะ (ถูกคน+หน้าชัดมาก่อน) · ปิด/ไม่มีคำค้นเรื่องราว = ลำดับเดิมเป๊ะ
-      const cands = (STORY_SEL_ON && STORY_SLOTS.has(slot)) ? cands0.slice().sort(storyRank) : cands0;
-      const hint = SLOT_CATEGORY_HINT[slot] || [];
+      const cands = (STORY_SEL_ON && STORY_SLOTS.has(_legacyKeyOf(slot))) ? cands0.slice().sort(storyRank) : cands0;
+      const hint = SLOT_CATEGORY_HINT[_legacyKeyOf(slot)] || [];
       // ★ 9 ก.ค. เฟส 2.2: hero fallback ลองแบบมีเกณฑ์ขนาดจริงก่อน (heroSizeOk) — ไม่เจอเลยค่อยถอยเกณฑ์เดิม (ไม่กรองขนาด)
       const findHeroSized = (arr) => {
-        const heroBase = (x) => isHeroChar(x) && (x.triage?.faceCount ?? 0) >= 1;
+        const heroBase = (x) => _identityOk(slot, x) && (x.triage?.faceCount ?? 0) >= 1;
         const noBanner = (x) => !(Number(x.width) > 0 && Number(x.height) > 0 && x.width / x.height > 1.5);
         const hit = arr.find((x) => heroBase(x) && heroSizeOk(x) && noBanner(x)) || arr.find((x) => heroBase(x) && heroSizeOk(x));
         if (!hit && arr.some(heroBase)) console.log('[MEGA S6] 📏 เฟส 2.2: ไม่มี hero candidate ผ่านเกณฑ์ขนาดจริง (realShortSide≥700/ไม่ thumbnail-only) — ถอยเกณฑ์เดิม');
         return hit || null;
       };
       const pickFrom = (arr) =>
-        // ★ 9 ก.ค. เฟส 2.2: ลองตัวเลือกขนาดจริงพอก่อนเสมอ (hero เท่านั้น)
-        (slot === 'hero' ? findHeroSized(arr) : null) ||
+        // ★ 9 ก.ค. เฟส 2.2: ลองตัวเลือกขนาดจริงพอก่อนเสมอ (hero เท่านั้น — SEM-1: canonical hero)
+        (_isHeroSlot(slot) ? findHeroSized(arr) : null) ||
         // ★ 10 ก.ค.: hero เลี่ยงภาพแนวนอนกว้าง (แบนเนอร์) ก่อน — ไม่มีตัวเลือกอื่นค่อยยอม (บรรทัดถัดไป)
-        (slot === 'hero' ? arr.find((x) => isHeroChar(x) && (x.triage?.faceCount ?? 0) >= 1 && !(Number(x.width) > 0 && Number(x.height) > 0 && x.width / x.height > 1.5)) : null) ||
-        (slot === 'hero' ? arr.find((x) => isHeroChar(x) && (x.triage?.faceCount ?? 0) >= 1) : null) ||
+        (_isHeroSlot(slot) ? arr.find((x) => _identityOk(slot, x) && (x.triage?.faceCount ?? 0) >= 1 && !(Number(x.width) > 0 && Number(x.height) > 0 && x.width / x.height > 1.5)) : null) ||
+        (_isHeroSlot(slot) ? arr.find((x) => _identityOk(slot, x) && (x.triage?.faceCount ?? 0) >= 1) : null) ||
         arr.find((x) => hint.includes(x.triage?.category)) ||
-        (slot === 'reaction' ? arr.find((x) => (x.triage?.faceCount ?? 0) >= 1) : null) ||
+        (_legacyKeyOf(slot) === 'reaction' ? arr.find((x) => (x.triage?.faceCount ?? 0) >= 1) : null) ||
         arr[0] ||
         null;
       // B (reject ลายน้ำ): ช่องทั่วไปหยิบภาพสะอาดก่อน ไม่มีค่อยยอมลายน้ำ · hero ยึด "ถูกคน 100%" เหนือทุกข้อ
       // ★ เฟส 3.1: ชั้นแรกหยิบ "ฉากที่ยังไม่ใช้" ก่อน (สะอาด+ฉากใหม่ → สะอาด → ฉากใหม่ → อะไรก็ได้)
       const freshScene = (x) => { const k = sceneKeyOf(x); return !k || !chosenScenes.has(k); };
-      img = slot === 'hero'
+      // ★ SEM-1: ช่องรองที่ ref ระบุ "คน" — fallback ต้องหาเฉพาะคนนั้น (identity เป็น authority ของช่อง)
+      //   legacy: _idGated เป็นจริงเฉพาะ hero ซึ่งไม่เข้า branch นี้ → candsG === cands = พฤติกรรมเดิมเป๊ะ
+      const candsG = (!_isHeroSlot(slot) && _idGated(slot)) ? cands.filter((x) => _identityOk(slot, x)) : cands;
+      img = _isHeroSlot(slot)
         ? pickFrom(cands)
-        : (pickFrom(cands.filter((x) => x.triage?.clean !== false && freshScene(x)))
-          || pickFrom(cands.filter((x) => x.triage?.clean !== false))
-          || pickFrom(cands.filter(freshScene))
-          || pickFrom(cands));
-      if (img && slot === 'hero' && !isHeroChar(img)) img = null; // ไม่มีตัวเอกจริง → ปล่อยว่าง ห้ามฝืนผิดคน (role=hero เท่านั้น)
+        : (pickFrom(candsG.filter((x) => x.triage?.clean !== false && freshScene(x)))
+          || pickFrom(candsG.filter((x) => x.triage?.clean !== false))
+          || pickFrom(candsG.filter(freshScene))
+          || pickFrom(candsG));
+      if (img && _idGated(slot) && !_identityOk(slot, img)) img = null; // ไม่มีคนตามสัญญาช่องจริง → ปล่อยว่าง ห้ามฝืนผิดคน
       if (img) { fallbackUsed++; reason = reason || 'fallback ตามสูตรแสนไลค์ (หมวด/คุณภาพ)'; }
     }
     if (img) {
@@ -1493,11 +1589,16 @@ export async function s6_slots(job, { origin }) {
         newsScene: img.triage?.newsScene !== false, // ★ 9 ก.ค.: ภาพแฟ้ม=false
         faces: Number(img.triage?.faceCount) || 0,
         dirtyFallback: dirtyFallbackIds.has(String(img.id)), // ★ เฟส 5.1: ของเติมพูลบาง (clean=false) ไม่ใช่ตัวเลือกสะอาดปกติ
+        // ★ SEM-1 (additive เฉพาะ ON): ตัวตน instance + บท legacy (projection เชิงความหมาย) สำหรับ composer ที่ S7
+        ...(semContract ? { refSlotId: slot, legacySlot: _projMap.get(slot) ?? null } : {}),
         reason,
         ...(STORY_SEL_ON ? { storyFit: storyFitOf(img) } : {}), // ★ เฟส 6A: คะแนนเล่าเรื่องของภาพที่ลงช่องนี้ (ตรวจได้ใน slotPlan)
         // ★ 8 ก.ค. (CASE-360): backups เรียงสะอาดก่อน — v3 QC สลับภาพเสียแล้วต้องมี "ของสะอาด" ให้หยิบ
         backups: (want?.backups || [])
-          .filter((b) => byId.has(String(b)) && !used.has(String(b)))
+          // ★ SEM-1 correction (Codex P0-3, scope เฉพาะ semantic): ช่องที่มี identity intent — backup ต้องถูกคนด้วย
+          //   (กัน composer/strict หยิบผิดคนทีหลัง) · legacy ห้ามกรอง — HEAD เดิมเก็บ backup คนละคนไว้ให้กฎ diffP ใช้
+          //   (เทส P2-B จับ parity break ตัวนี้ได้จริงตอนกรองรวม legacy)
+          .filter((b) => byId.has(String(b)) && !used.has(String(b)) && (!semContract || !_idGated(slot) || _identityOk(slot, byId.get(String(b)))))
           .sort((a, b) => (isClean(byId.get(String(b))) ? 1 : 0) - (isClean(byId.get(String(a))) ? 1 : 0))
           .slice(0, 2),
       };
@@ -1515,9 +1616,9 @@ export async function s6_slots(job, { origin }) {
   //   hero ไม่แตะเด็ดขาด · กันสลับไปคนนอกข่าว/ฉากซ้ำ/คนซ้ำ hero(วงกลม) · ปิด S6_STORY_FIT=0 = ข้ามทั้งบล็อก
   if (STORY_SEL_ON) {
     try {
-      const heroPerson0 = _lc(slots.hero?.person || '');
+      const heroPerson0 = _lc(slots[_canonHeroId]?.person || '');
       for (const slot of activeSlots) {
-        if (slot === 'hero' || !STORY_RESCUE_SLOTS.has(slot)) continue;
+        if (_isHeroSlot(slot) || !STORY_RESCUE_SLOTS.has(_legacyKeyOf(slot))) continue;
         const cur = slots[slot];
         const curRec = cur ? byId.get(String(cur.id)) : null;
         const curStory = curRec ? (storyFitOf(curRec) ?? 0) : 0;
@@ -1526,12 +1627,15 @@ export async function s6_slots(job, { origin }) {
         const curScene = curRec ? sceneKeyOf(curRec) : '';
         const best = sorted
           .filter((x) => !used.has(String(x.id)) && isClean(x))
+          // ★ SEM-1 correction (Codex P0-1): rescue ห้ามสลับ primary เป็นผิดคนหลังด่าน — identity ของช่องคุมเสมอ
+          .filter((x) => !_idGated(slot) || _identityOk(slot, x))
           // circle = ต้องเป็นคนหลักจริง (ภาพวงกลม=บุคคล) · context รับภาพสถานที่/ทริปที่มาจากคำค้นเรื่องราวได้ (landmark ไม่มีคนในภาพ)
-          .filter((x) => isMainChar(x) || (slot === 'context' && storySet.has(_lc(x.query))))
+          .filter((x) => isMainChar(x) || (_legacyKeyOf(slot) === 'context' && storySet.has(_lc(x.query))))
           .filter((x) => (storyFitOf(x) ?? 0) >= STORY_MIN_TO_WIN && (storyFitOf(x) ?? 0) >= curStory + STORY_SWAP_MARGIN)
           .filter((x) => (x.triage?.quality ?? 0) >= curQ - STORY_Q_TOL)
           .filter((x) => { const sk = sceneKeyOf(x); return !sk || sk === curScene || !chosenScenes.has(sk); })
-          .filter((x) => slot !== 'circle' || !heroPerson0 || _lc(x.triage?.person || '') !== heroPerson0)
+          // ★ SEM-1 correction (Codex P0-2): ช่องที่ ref ระบุคนชัด → intent ชนะกฎ "คนละคนกับ hero" (identity filter ด้านบนคุมแล้ว)
+          .filter((x) => _slotHasIntent(slot) ? true : (!_isCircleSlot(slot) || !heroPerson0 || _lc(x.triage?.person || '') !== heroPerson0))
           .sort((a, b) => (storyFitOf(b) ?? 0) - (storyFitOf(a) ?? 0) || ((b.triage?.quality ?? 0) - (a.triage?.quality ?? 0)))[0];
         if (!best) continue;
         const oldBackups = cur ? [String(cur.id), ...((cur.backups || []).map(String))] : [];
@@ -1547,9 +1651,13 @@ export async function s6_slots(job, { origin }) {
           newsScene: best.triage?.newsScene !== false,
           faces: Number(best.triage?.faceCount) || 0,
           dirtyFallback: dirtyFallbackIds.has(String(best.id)),
+          // ★ SEM-1 fix (ผู้ตรวจ P1): entry ที่ถูกกู้ต้องพก field instance เหมือนลูปแรก — ไม่งั้น S7 ป้าย slot=null
+          ...(semContract ? { refSlotId: slot, legacySlot: _projMap.get(slot) ?? null } : {}),
           reason: `story-fit rescue เฟส 6A (${curStory}→${storyFitOf(best)}) — ภาพเล่าแก่นข่าวชนะหน้าชัดเฉยๆ`,
           storyFit: storyFitOf(best),
-          backups: oldBackups.filter((b) => byId.has(b)).slice(0, 3),
+          // ★ SEM-1 correction (Codex P0-3, scope เฉพาะ semantic): backups หลัง rescue ต้องผ่าน identity ของช่อง
+          //   legacy = สูตรเดิมเป๊ะ (ไม่กรอง — byte-parity)
+          backups: oldBackups.filter((b) => byId.has(b) && (!semContract || !_idGated(slot) || _identityOk(slot, byId.get(b)))).slice(0, 3),
         };
         console.log(`[MEGA S6] 📖 เฟส 6A สลับช่อง ${slot}: ${cur?.id ?? '(ว่าง)'}(story ${curStory}) → ${best.id}(story ${storyFitOf(best)}, ${best.triage?.person || '-'})`);
       }
@@ -1559,9 +1667,11 @@ export async function s6_slots(job, { origin }) {
   // ★ เฟส 3.2 (คู่กับกติกา composer เฟส 2.3 "วงกลมคนละคนกับ hero"): การันตีว่าแผน (หลัก+สำรอง)
   //   มีภาพ "คนอื่นที่ไม่ใช่ hero" ≥1 ใบเสมอเมื่อพูลมีจริง — ไม่งั้นกติกาฝั่งโรงประกอบไม่มีของให้หยิบ
   //   (หลักฐานรันจริง: log "⭕⚠️ แผนไม่มีภาพคนอื่น" ทั้งที่พูล AC-0045 มีภาพต๊อดเดี่ยว 50 ใบ)
+  // ★ SEM-1 correction (Codex P0-4): กฎ global "ดันคนอื่นเข้าแผน" ห้าม override สัญญา ref — semantic mode ข้ามทั้งบล็อก
+  //   (ref ระบุคน/บทเองครบแล้ว intent ชนะเสมอ · legacy = พฤติกรรมเดิม 100%)
   try {
     const heroPersonS6 = String(slots.hero?.person || '');
-    if (heroPersonS6) {
+    if (!semContract && heroPersonS6) {
       const inPlanIds = new Set(activeSlots.flatMap((s) => slots[s] ? [String(slots[s].id), ...(slots[s].backups || []).map(String)] : []));
       const hasOther = [...inPlanIds].some((id) => { const p = String(byId.get(id)?.triage?.person || ''); return p && p !== heroPersonS6; });
       if (!hasOther) {
@@ -1571,7 +1681,7 @@ export async function s6_slots(job, { origin }) {
           || sorted.find((x) => wantOther(x) && isClean(x) && (x.triage?.faceCount ?? 0) === 1)
           || sorted.find((x) => wantOther(x) && isClean(x))
           || sorted.find(wantOther);
-        const targetSlot = slots.circle ? 'circle' : activeSlots.find((s) => slots[s]);
+        const targetSlot = slots.circle ? 'circle' : activeSlots.find((s) => slots[s]); // บล็อกนี้วิ่งเฉพาะ legacy (ดูเงื่อนไขบน)
         if (cand && targetSlot) {
           slots[targetSlot].backups = [String(cand.id), ...(slots[targetSlot].backups || []).map(String)].slice(0, 3);
           console.log(`[MEGA S6] 👥 ดันภาพ "คนอื่น" เข้าแผน: ${cand.id} (${cand.triage?.person}) → backups ช่อง ${targetSlot} (เดิมแผนมีแต่ ${heroPersonS6})`);
@@ -1880,15 +1990,15 @@ export async function s6_slots(job, { origin }) {
   //   ส่วน dossierPatch.images.quarantine ผูกกับสวิตช์ MEGA_QUARANTINE (เปลี่ยน schema ของแฟ้ม จึงต้องปิดกลับได้)
   const quarantineTotal = untriagedList.length + sizeUnknownList.length;
   const quarantineTag = quarantineTotal > 0 ? ` · 🧿กัก ${untriagedList.length}+${sizeUnknownList.length} ใบ(ข้อมูลไม่ครบ)` : '';
-  if (!slots.hero) {
-    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '', ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) } } };
+  if (!slots[_canonHeroId]) {
+    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '', ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _dnaHashFor(semContract) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) } } };
   }
   return {
     status: 'done',
     nextAction: 'continue',
     summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'}${storyTag}${quarantineTag} — ${(brain.note || '').slice(0, 80)}`,
     dossierPatch: {
-      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) },
+      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _dnaHashFor(semContract) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) },
       ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}),
       ...(job.dossier.artBrief ? { artBrief: job.dossier.artBrief } : {}),
       // ★ Wave2 Batch D1: merge-patch additive — สเปรด im เดิมกันทับ field อื่นใน images (caseId/storyQueries/heroGradeReport ฯลฯ)
@@ -1910,7 +2020,9 @@ function coverOrigin() {
 }
 
 // ---------- S7a ส่งงานปก: ภาพ 5 ช่องที่ S6 คัด → ช่อง "แหล่งรูป" ของ v3 (sourceOnly) ----------
-export async function s7_cover(job, { origin } = {}) {
+export async function s7_cover(job, { origin, _deps } = {}) {
+  // ★ SEM-1: dependency injection เพื่อ testability เท่านั้น — default = ของจริง (production เดิม 100%)
+  const _jf = _deps?.fetchJson || jfetch;
   // ★ audit A1 (9 ก.ค.): tick ที่เกิดบนคลาวด์ (คนกดหน้า /mega ที่เสิร์ฟบน Vercel/Railway) ไม่มี localhost:3000
   //   ให้ยิง → เดิมส่งงานปกล้มแล้ว job ตายทั้งงาน — คืน waiting ให้ tick รอบถัดไปจากเครื่องทีมมาทำขั้นนี้เอง
   if (process.platform !== 'win32' && !process.env.MEGA_COVER_ORIGIN) {
@@ -1918,10 +2030,24 @@ export async function s7_cover(job, { origin } = {}) {
   }
   const d = job.dossier;
   const slots = d.pickImages?.slots || {};
-  // ลำดับสำคัญ: hero มาก่อน (ตัวดึงภาพ boost ตามลำดับ) + เพดาน 10 ลิงก์ (extractFromUserSources slice(0,10))
-  const links = ['hero', 'reaction', 'action', 'context', 'circle']
+  // ★ SEM-1 (design v2 ช่องโหว่ 1 — ordered instance carrier): semantic ใช้ slotOrder ของ instance จริงจาก S6
+  //   (invariant I2: ทุก instance ต้องถูกส่งครบ รวม circle-shape ไม่ว่าชื่อบทอะไร) · legacy = ลิสต์ generic เดิมเป๊ะ
+  const _sem = d.pickImages?.semanticSelection === true && Array.isArray(d.pickImages?.slotOrder) && d.pickImages.slotOrder.length >= 3;
+  const _order = _sem ? d.pickImages.slotOrder : ['hero', 'reaction', 'action', 'context', 'circle'];
+  // ★ SEM-1 correction (Codex P1-5/6): hero หาโดย heroSlotId (authority จาก S6) — slotOrder คงลำดับ ref เดิม ไม่ย้าย hero ขึ้นหน้า
+  const _heroKey = _sem ? ((d.pickImages?.heroSlotId && slots[d.pickImages.heroSlotId]) ? d.pickImages.heroSlotId : _order[0]) : 'hero';
+  // ★ SEM-1 final (Codex P1-A): kill switch ต้องคุมถึง S7 — งานที่ S6 เลือกตอน ON แต่สวิตช์ถูกปิดก่อนขั้นนี้
+  //   ห้าม enqueue แบบ semantic และห้ามแปลงร่างเป็น legacy (key instance ไม่ตรงสัญญาเดิม = ภาพผิดช่อง)
+  //   → พักงาน (waiting) ก่อนแตะ network ใดๆ · เปิดสวิตช์กลับ = tick รอบถัดไปเดินต่อจากจุดเดิม
+  const _semEnvOn = process.env.MEGA_SEMANTIC_SELECTION === '1' && process.env.MEGA_SELECTION_SPEC === '1';
+  if (_sem && !_semEnvOn) {
+    return { status: 'waiting', nextAction: 'wait', summary: '🧬⏸️ แผนนี้เลือกภาพแบบ semantic แต่สวิตช์ปิดอยู่ — พักรอเปิด MEGA_SEMANTIC_SELECTION=1 + MEGA_SELECTION_SPEC=1 (ไม่แปลง legacy กันภาพผิดช่อง)' };
+  }
+  // ลำดับ: legacy = hero ก่อน (boost เดิม) · semantic = ตามลำดับช่องของ ref จริง + เพดาน 10 ลิงก์
+  const links = _order
     .map((s) => slots[s]?.imageUrl)
     .filter(Boolean);
+  if (_sem && links.length > 10) console.log(`[MEGA S7] 🧬⚠️ primary ${links.length} ใบ เกินเพดาน 10 ลิงก์ — ใบท้ายลำดับจะถูกตัด (ตรวจ ref/contract)`);
   if (links.length < 3) {
     return { status: 'failed', nextAction: 'fail', summary: `ภาพจาก S6 ไม่พอทำปก (${links.length} ใบ ต้อง ≥3)`, quality: 'red' };
   }
@@ -1929,11 +2055,12 @@ export async function s7_cover(job, { origin } = {}) {
   //   ลิงก์หน้าเว็บ/วิดีโอพัง 1-2 ใบ (403) = พูลต่ำกว่า 4 ล้มทั้งปก → แปลง id→URL จากคลังเคส ต่อท้าย (ไฟล์รูปตรงก่อน) เพดาน 10
   let backupUrls = [];
   let backupEntries = []; // ★ SelectionSpec v1: สำรองพร้อม candidateId (id จริงจากคลัง ไม่ใช่แค่ URL)
+  const backupMeta = new Map(); // ★ SEM-1 final (P1-B): url → {id, owner refSlotId} — owner คนแรกตาม slotOrder ชนะ (deterministic)
   let urlTriage = new Map(); // ★ 8 ก.ค.: url → {clean,faces} จากคลัง (ส่งเป็น slotPlan ให้ v3 เชื่อป้ายตาคัด)
   try {
     const backupIds = Object.values(slots).flatMap((s) => s?.backups || []);
     if (origin && d.images?.caseId) {
-      const lib = await jfetch(`${origin}/api/images/${encodeURIComponent(d.images.caseId)}`, {}, 30000);
+      const lib = await _jf(`${origin}/api/images/${encodeURIComponent(d.images.caseId)}`, {}, 30000);
       // ★ เฟส 1.3 (slotPlan v2): พกป้ายตาคัดครบ — person/category/emotion/note + กล่อง (faceBox/peopleBox = hint เท่านั้น
       //   ตาม audit 9 ก.ค.: peopleBox full-frame ~23% เป็นขยะ + พิกัดอิง thumbnail — ชั้นครอปต้องกรอง/เผื่อ margin เอง)
       urlTriage = new Map((lib?.images || []).map((x) => [String(x.imageUrl), {
@@ -1953,34 +2080,59 @@ export async function s7_cover(job, { origin } = {}) {
       backupUrls = backupIds.map((b) => byId.get(String(b))).filter(Boolean)
         .sort((a, b) => (isDirect(b) ? 1 : 0) - (isDirect(a) ? 1 : 0));
       const _seenBk = new Set(); // ★ Codex รอบ 3 ข้อ 4: dedupe deterministic — candidateId แรกชนะตามลำดับ backupIds
+      const _seenBkUrl = new Set(); // ★ SEM-1 P2 (Codex): URL alias — สอง candidateId ชี้ไฟล์เดียว ห้ามรายงานซ้ำใน spec (ตัวแรกชนะ)
       backupEntries = backupIds
         .map((b) => ({ candidateId: String(b), imageUrl: String(byId.get(String(b)) || '') }))
-        .filter((x) => { if (!x.imageUrl || _seenBk.has(x.candidateId)) return false; _seenBk.add(x.candidateId); return true; });
+        .filter((x) => {
+          if (!x.imageUrl || _seenBk.has(x.candidateId) || _seenBkUrl.has(x.imageUrl)) return false;
+          _seenBk.add(x.candidateId);
+          _seenBkUrl.add(x.imageUrl);
+          return true;
+        });
+      // ★ SEM-1 final (Codex P1-B): เจ้าของ backup ต่อช่อง — ไล่ตาม slotOrder, candidate ซ้ำ owner แรกชนะ
+      if (_sem) {
+        for (const s of _order) {
+          for (const b of (slots[s]?.backups || [])) {
+            const u = byId.get(String(b));
+            if (u && !backupMeta.has(String(u))) backupMeta.set(String(u), { id: String(b), owner: s });
+          }
+        }
+      }
     }
   } catch { /* สำรองไม่ critical — ได้แค่ลิงก์หลักก็เดินต่อ */ }
   // ★ 9 ก.ค. ค่ำ (อุดรอย "ภาพคนอื่นหล่น" — เหมือน compose-test): เรียง backups ให้ "คนละคนกับ hero"
   //   มาก่อนไฟล์ตรง + การันตี 1 ใบรอดเพดาน 10 (ไม่งั้นกติกาวงกลมคนละคนไม่มีของให้หยิบ)
-  const _heroPersonPlan = String(slots.hero?.person || urlTriage.get(String(slots.hero?.imageUrl))?.person || '');
+  const _heroPersonPlan = String(slots[_heroKey]?.person || urlTriage.get(String(slots[_heroKey]?.imageUrl))?.person || '');
   const _diffP = (u) => { const p = String(urlTriage.get(String(u))?.person || ''); return !!(_heroPersonPlan && p && p !== _heroPersonPlan); };
-  backupUrls = backupUrls.slice().sort((a, b) => (_diffP(b) ? 2 : 0) - (_diffP(a) ? 2 : 0)); // คงลำดับไฟล์ตรงเดิมภายในกลุ่ม (sort เดิมทำไว้แล้ว)
+  // ★ SEM-1 final (Codex P1-B): กติกา global "คนละคนกับ hero" ห้ามยุ่งกับแผน semantic — identity รายช่องคุมแล้วที่ S6
+  if (!_sem) backupUrls = backupUrls.slice().sort((a, b) => (_diffP(b) ? 2 : 0) - (_diffP(a) ? 2 : 0)); // คงลำดับไฟล์ตรงเดิมภายในกลุ่ม (sort เดิมทำไว้แล้ว)
   const _seenL = new Set();
   const allLinks = [...links, ...backupUrls]
     .filter((u) => { const k = String(u); if (_seenL.has(k)) return false; _seenL.add(k); return true; })
     .slice(0, 10);
-  if (_heroPersonPlan && !allLinks.some(_diffP)) {
+  if (!_sem && _heroPersonPlan && !allLinks.some(_diffP)) { // ★ SEM-1 final (P1-B): semantic ห้ามฉีดคนนอกสัญญาเข้าแผน
     const cand = backupUrls.find((u) => _diffP(u) && !allLinks.includes(u));
     if (cand && allLinks.length >= 4) { allLinks[allLinks.length - 1] = cand; console.log('[MEGA S7] 👥 การันตีภาพคนอื่นรอดเพดาน 10 ลิงก์'); }
   }
   const backup = allLinks.length - links.length; // จำนวนสำรองที่ส่งจริง
   // ★ 8 ก.ค. (CASE-363/AC-0035 hero โดนดึงลง + ภาพ text หลุดเข้า main): ส่ง "แผนช่อง" ให้ v3
   //   หลักการ: S6 ตัดสิน · v3 แค่ประกอบ — v3 บังคับ main=hero ของแผน + เชื่อ clean ของตาคัด (แม่นกว่า detector 512→1024)
-  const heroUrl = slots.hero?.imageUrl || null;
+  const heroUrl = slots[_heroKey]?.imageUrl || null;
   const slotPlan = allLinks.map((u) => {
-    const primary = SLOT_ORDER.find((s) => slots[s]?.imageUrl === u);
+    const primary = _order.find((s) => slots[s]?.imageUrl === u); // SEM-1: หาใน _order (legacy = SLOT_ORDER เดิมเป๊ะ)
     const t = urlTriage.get(String(u)) || {};
     return {
       url: u,
-      slot: primary || null, // hero/reaction/action/context/circle ถ้าเป็นภาพหลัก · null=สำรอง
+      // SEM-1: semantic → slot = บท legacy (composer compatibility เท่านั้น — ห้ามใช้เป็น key) + refSlotId = authority (primary only)
+      //   ★ P1-B: backup ได้ป้าย legacy ของ "เจ้าของช่อง" + backupForRefSlotId (ตรวจ composer แล้ว: primary มาก่อนใน loaded
+      //   ทุก tier จึงไม่โดน backup แย่ง — ป้ายนี้ทำให้ QC-swap หยิบสำรองถูกบท/ถูกคนของช่องตัวเอง)
+      slot: _sem
+        ? (primary
+          ? (slots[primary]?.legacySlot ?? null)
+          : (backupMeta.has(String(u)) ? (slots[backupMeta.get(String(u)).owner]?.legacySlot ?? null) : null))
+        : (primary || null), // hero/reaction/action/context/circle ถ้าเป็นภาพหลัก · null=สำรอง
+      ...(_sem && primary ? { refSlotId: primary } : {}),
+      ...(_sem && !primary && backupMeta.has(String(u)) ? { backupForRefSlotId: backupMeta.get(String(u)).owner } : {}),
       clean: primary ? (slots[primary].clean !== false) : (t.clean !== false),
       newsScene: primary ? (slots[primary].newsScene !== false) : (t.newsScene !== false),
       faces: primary ? (slots[primary].faces || 0) : (t.faces || 0),
@@ -2044,6 +2196,8 @@ export async function s7_cover(job, { origin } = {}) {
       selectionSpec = specApi.buildSelectionSpec({
         contract,
         realizedTemplate: selectionRefDNA ? dnaToTemplateSpec(selectionRefDNA) : null,
+        // ⚠️ SEM-1 interim: semantic ON ทำ slots key เป็น instance id — planKeyFor ฝั่ง spec ยัง join แบบ generic
+        //   จึงรายงาน missing ชั่วคราวจนกว่า SEM-2 (spec รับ plannedByRefSlot) — จดเป็นข้อจำกัดที่รู้แล้ว ห้ามแก้ข้าม batch
         plannedSlots: slots,
         backups: backupEntries.filter((b) => sentSet.has(b.imageUrl)), // เฉพาะสำรองที่รอดเพดาน 10 ลิงก์จริง
         // ★ Codex รอบ 3 ข้อ 3 + รอบ 4 P1: refId = ตัวตนจริง (bind refId → dnaHash แฟ้มเก่า → m.ref.id ตอน S7 pick เอง)
@@ -2061,7 +2215,7 @@ export async function s7_cover(job, { origin } = {}) {
     ...(refDNA ? { refDNA } : {}), // 🎯 โครงจริงจากปกเป้า
     ...(d.refMatch?.imagePath ? { refImagePath: d.refMatch.imagePath } : {}), // 👁️ ภาพ ref จริงให้ตาเทียบ
   };
-  const q = await jfetch(`${coverOrigin()}/api/queue/add`, { method: 'POST', body: JSON.stringify(payload) }, 60000);
+  const q = await _jf(`${coverOrigin()}/api/queue/add`, { method: 'POST', body: JSON.stringify(payload) }, 60000);
   if (!q.success || !q.jobId) {
     return { status: 'failed', nextAction: 'retry', summary: 'ส่งงานปกไม่สำเร็จ: ' + (q.error || q.httpStatus) };
   }
