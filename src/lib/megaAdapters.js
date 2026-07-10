@@ -362,6 +362,12 @@ const HERO_GRADE_HARD_ON = process.env.MEGA_HERO_GRADE_HARD !== '0';
 //   เข้า heroGradeOf — ภาพเบลอ (sharpness<SHARPNESS_MIN_HERO) ไม่นับเป็น hero-grade แม้ผ่านเกณฑ์อื่นครบ
 //   ภาพที่วัดค่าไม่ได้ (sharpness ไม่ใช่ number) = ไม่ตัด ให้ผ่าน · ปิดกลับพฤติกรรมเดิม: MEGA_SHARPNESS_GATE=0
 const SHARPNESS_GATE_ON = process.env.MEGA_SHARPNESS_GATE !== '0';
+// ★ Wave2 Batch D1 (10 ก.ค. — _PLAN_MEGA_V2.md Wave2 ข้อ 4): "กักกัน" ภาพข้อมูลไม่ครบ แยกออกจากภาพที่ตรวจครบแล้ว —
+//   เดิม 2 ช่องโหว่เงียบ: (1) ภาพไม่มีป้าย triage เลย หายไปเงียบๆ ในตัวกรอง rawPool ของ s6_slots ไม่มีใครนับ/รายงาน
+//   (2) heroSizeOk ยอมภาพที่วัดขนาดจริงไม่ได้ (rss==null) ผ่านเกณฑ์ hero ถ้าไม่ใช่ lowRes → แข่ง hero กับภาพที่วัดขนาดจริงผ่านแล้ว
+//   ตอนนี้: นับ+รายงานทั้งคู่เสมอ (log ไม่ผูกสวิตช์) และปิดช่องโหว่ (2) เมื่อพูลมีตัวเลือกวัดขนาดแล้วอย่างน้อย 1 ใบ
+//   ไม่แตะ _heroGradeOf (ด่าน gap search — calibrate แล้ว) · ปิดกลับพฤติกรรมเดิมทั้งหมด: MEGA_QUARANTINE=0
+const QUARANTINE_ON = process.env.MEGA_QUARANTINE !== '0';
 
 // หา IG username จากชื่อคน ด้วย Serper (เมื่อ entityResolver ไม่มีข้อมูลโซเชียลให้) — ล้ม/ไม่มีคีย์ = คืน null เงียบๆ
 async function _findInstagramUsername(name) {
@@ -1068,6 +1074,17 @@ function _dnaHashFor(dna) {
   } catch { return null; }
 }
 
+// ★ Wave2 Batch D1: จำแนกภาพเดี่ยว — 'untriaged' (ยังไม่มีป้ายตาคัดเลย) / 'size_unknown' (มีป้ายแต่หาขนาดจริงไม่ได้
+//   และไม่ใช่ thumbnail-only ที่รู้อยู่แล้วว่าเล็ก) / 'ok' (ที่เหลือ) — pure function ไม่แตะ state ไฟล์อื่น เทสตรงได้
+export function classifyPoolImage(x) {
+  if (!x || typeof x.triage !== 'object' || x.triage === null) return 'untriaged';
+  const rw = Number(x.realWidth), rh = Number(x.realHeight);
+  const hasRealDims = rw > 0 && rh > 0;
+  const hasTriageShortSide = Number(x.triage.realShortSide) > 0;
+  if (!hasRealDims && !hasTriageShortSide && x.rehostQuality !== 'thumbnail') return 'size_unknown';
+  return 'ok';
+}
+
 export async function s6_slots(job, { origin }) {
   const im = job.dossier.images || {};
   const r = await jfetch(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
@@ -1080,6 +1097,13 @@ export async function s6_slots(job, { origin }) {
   //   ธง junkHidden (เฟส 5.3 AI junk scan ตั้งแทนลบถาวร — ย้อนกลับได้) ห้ามเข้าพูลเสมอ ไม่ผูกกับ kill-switch ด้านล่าง
   const notHidden = (x) => x.triage?.junkHidden !== true;
   const visiblePool = rawPool.filter(notHidden);
+  // ★ Wave2 Batch D1: นับ+รายงาน "กักกัน" เสมอ (แม้ MEGA_QUARANTINE=0) — ความจริงต้องเห็น แม้ยังไม่เปลี่ยนพฤติกรรมกรอง
+  //   untriaged มาจาก r.images ทั้งก้อน (ก่อนกรอง rawPool) — เดิมภาพไม่มีป้าย triage หายเงียบตรงตัวกรอง rawPool ด้านบน
+  //   sizeUnknown นับใน visiblePool (พูลที่ยังไม่ถูกซ่อน junkHidden) ตามสเปก Wave2 ข้อ 4
+  const untriagedList = (r.images || []).filter((x) => classifyPoolImage(x) === 'untriaged');
+  const sizeUnknownList = visiblePool.filter((x) => classifyPoolImage(x) === 'size_unknown');
+  const quarantineSampleIds = [...untriagedList, ...sizeUnknownList].map((x) => x.id).filter((id) => id != null).slice(0, 5);
+  console.log(`[MEGA S6] 🧿 กักกัน: ไม่มีป้าย ${untriagedList.length} ใบ · วัดขนาดไม่ได้ ${sizeUnknownList.length} ใบ (พูลใช้จริง ${visiblePool.length})`);
   const dirtyFallbackIds = new Set();
   let pool = visiblePool;
   if (POOL_CLEAN_GATE) {
@@ -1116,11 +1140,20 @@ export async function s6_slots(job, { origin }) {
   };
   // hero candidate ต้อง: ไม่ใช่ thumbnail-only + (สั้นสุดจริง≥HERO_MIN_SHORT_SIDE หรือวัดไม่ได้แต่ไม่ติดธง lowRes)
   //   ★ Wave2 B1: เลข 700 ย้ายมาจาก imageQualityConfig.js (single source of truth — ค่าเดิมเป๊ะ ตัวเดียวกับ s5_gapsearch)
+  // ★ Wave2 Batch D1: ตัวติดตามว่าเคย "กักกัน" ภาพวัดขนาดไม่ได้ออกจาก hero หรือไม่ (ไว้รายงานใน dossierPatch ท้ายฟังก์ชัน)
+  //   hasMeasuredHeroCandidate คำนวณครั้งเดียวหลัง sorted พร้อม (ดูด้านล่าง) — ก่อนหน้านั้น heroSizeOk ยังไม่ถูกเรียกจริง
+  let heroDemotedFlag = false;
+  let hasMeasuredHeroCandidate = false;
   const heroSizeOk = (x) => {
     if (!S6_REAL_SIZE_GATE) return true; // kill-switch ปิด = พฤติกรรมเดิม (ไม่กรองขนาด)
     if (x.rehostQuality === 'thumbnail') return false;
     const rss = realShortSideOf(x);
-    return rss != null ? rss >= HERO_MIN_SHORT_SIDE : x.lowRes !== true;
+    if (rss != null) return rss >= HERO_MIN_SHORT_SIDE;
+    // ★ Wave2 Batch D1: วัดขนาดจริงไม่ได้ (rss==null) — เดิมผ่านเกณฑ์เสมอถ้าไม่ lowRes → ภาพข้อมูลไม่ครบแข่ง hero
+    //   ชนะภาพที่วัดขนาดจริงผ่านเกณฑ์แล้วได้ (ไม่ควร) → พูลมีตัวเลือกวัดแล้วอย่างน้อย 1 ใบ = ห้ามภาพวัดไม่ได้ชิง hero (กักกัน)
+    //   ไม่มีตัวเลือกวัดแล้วเลย = พฤติกรรมเดิมเป๊ะ (กันงานตายเพราะพูลไม่มีของวัดได้) · ปิดกลับพฤติกรรมเดิม: MEGA_QUARANTINE=0
+    if (QUARANTINE_ON && hasMeasuredHeroCandidate) { heroDemotedFlag = true; return false; }
+    return x.lowRes !== true;
   };
   // ช่องรอง (ไม่ใช่ hero): โทษ thumbnail-only/lowRes ให้ท้ายคิวตอนคะแนนเท่ากัน (ไม่ตัดทิ้ง แค่เรียงหลัง)
   const sizePenalty = (x) => (x.rehostQuality === 'thumbnail' ? 2 : 0) + (x.lowRes === true ? 1 : 0);
@@ -1140,6 +1173,13 @@ export async function s6_slots(job, { origin }) {
     // ★ 9 ก.ค. เฟส 2.2: คุณภาพเท่ากัน → เรียงโทษไฟล์เล็ก/thumbnail-only ไปท้ายคิว (ไม่ตัดทิ้ง แค่ให้ตัวเลือกจริงขึ้นก่อน)
     return S6_REAL_SIZE_GATE ? sizePenalty(a) - sizePenalty(b) : 0;
   }).slice(0, 80);
+
+  // ★ Wave2 Batch D1: คำนวณครั้งเดียวหลัง sorted พร้อม — พูลนี้มีภาพที่วัดขนาดจริงผ่านเกณฑ์ hero แล้วอย่างน้อย 1 ใบไหม
+  //   (heroSizeOk ด้านบนใช้ค่านี้ปิดช่องโหว่ภาพวัดขนาดไม่ได้แข่ง hero — ต้องคำนวณก่อน heroSizeOk ถูกเรียกจริงจุดแรกท้ายไฟล์)
+  if (QUARANTINE_ON) {
+    hasMeasuredHeroCandidate = sorted.some((x) => { const rss = realShortSideOf(x); return rss != null && rss >= HERO_MIN_SHORT_SIDE; });
+    if (!hasMeasuredHeroCandidate) console.log('[MEGA S6] 🧿 เกณฑ์ขนาด hero: ไม่มีตัวเลือกวัดขนาดแล้วในพูล — ยอมใช้ภาพวัดไม่ได้แบบเดิม (กันงานตาย)');
+  }
 
   // ★ 10 ก.ค. เฟส 6A (Story-fit selector): คะแนน "ภาพนี้เล่าเรื่องเดียวกับข่าวแค่ไหน" 0-10 — คำนวณครั้งเดียวต่อพูล ไม่ยิง LLM
   //   สัญญาณ: query มาจากหมวดเรื่องราว (storyQueries เก็บไว้ตอน s5_keywords) = แรงสุด +4 · หมวดสื่อความสัมพันธ์/ครอบครัว/สถานที่ +2 ·
@@ -1518,14 +1558,24 @@ export async function s6_slots(job, { origin }) {
   }
 
   const filled = activeSlots.filter((s) => slots[s]).length;
+  // ★ Wave2 Batch D1: สรุปกักกันครั้งเดียว — ต่อท้าย summary เสมอ (เห็นความจริงไม่ว่าสวิตช์เปิด/ปิด)
+  //   ส่วน dossierPatch.images.quarantine ผูกกับสวิตช์ MEGA_QUARANTINE (เปลี่ยน schema ของแฟ้ม จึงต้องปิดกลับได้)
+  const quarantineTotal = untriagedList.length + sizeUnknownList.length;
+  const quarantineTag = quarantineTotal > 0 ? ` · 🧿กัก ${untriagedList.length}+${sizeUnknownList.length} ใบ(ข้อมูลไม่ครบ)` : '';
   if (!slots.hero) {
     return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '' } } };
   }
   return {
     status: 'done',
     nextAction: 'continue',
-    summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'}${storyTag} — ${(brain.note || '').slice(0, 80)}`,
-    dossierPatch: { pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}) }, ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}), ...(job.dossier.artBrief ? { artBrief: job.dossier.artBrief } : {}) },
+    summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'}${storyTag}${quarantineTag} — ${(brain.note || '').slice(0, 80)}`,
+    dossierPatch: {
+      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}) },
+      ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}),
+      ...(job.dossier.artBrief ? { artBrief: job.dossier.artBrief } : {}),
+      // ★ Wave2 Batch D1: merge-patch additive — สเปรด im เดิมกันทับ field อื่นใน images (caseId/storyQueries/heroGradeReport ฯลฯ)
+      ...(QUARANTINE_ON ? { images: { ...im, quarantine: { untriaged: untriagedList.length, sizeUnknown: sizeUnknownList.length, heroDemoted: heroDemotedFlag, sample: quarantineSampleIds } } } : {}),
+    },
     quality: filled < activeSlots.length ? 'yellow' : undefined,
   };
 }
