@@ -194,7 +194,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     mode: 'breakdown',
     workflowId: _autoWorkflowId,
     user: _user,
-  }), 210000, 'breakdown'); // ★ 210s (was 90s) — GPT-5.5 measured 169s in production, need margin
+  }), 300000, 'breakdown'); // ★ 300s (10 ก.ค. 69) = inner gpt-5.5 200s + fallback gpt-4o 60s + เผื่อ 40s — ห้ามต่ำกว่าผลรวมชั้นใน ไม่งั้น job ตายทั้งงานทั้งที่ fallback กำลังจะรอด
 
   if (!breakRes.success || !breakRes.data) {
     throwStep('auto_breakdown', `แตกประเด็นไม่สำเร็จ: ${breakRes.error || ''}`);
@@ -259,7 +259,10 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // ★ ปรับ 10 มิ.ย. 2026: default 3 มุม × 1 เวอร์ชัน — ดู autoFlowService.js (กฎเดียวกัน)
   const GEN_ANGLES = Math.max(1, Math.min(4, parseInt(process.env.GEN_ANGLES || '3', 10) || 3));
   const GEN_PER_ANGLE = Math.max(1, Math.min(3, parseInt(process.env.GEN_PER_ANGLE || '1', 10) || 1));
-  const anglesToUse = breakdownData.possible_angles?.slice(0, GEN_ANGLES) || [];
+  // ★ เรียงตามคะแนนไวรัลก่อนหยิบ — gpt-5.5 คืน 12 มุมเรียงตามหมวด ไม่เรียงคะแนน
+  const anglesToUse = [...(breakdownData.possible_angles || [])]
+    .sort((a, b) => (b.facebook_viral_score || 0) - (a.facebook_viral_score || 0))
+    .slice(0, GEN_ANGLES);
   if (anglesToUse.length === 0) {
     anglesToUse.push({ angle_name: 'นำเสนอข่าวสารทั่วไป', description: 'เล่าเหตุการณ์ตามจริง' });
   }

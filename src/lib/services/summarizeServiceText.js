@@ -616,17 +616,25 @@ export async function performSummarize({
     console.log(`[Breakdown-Service] 📋 NEWS IN PROMPT: ${actualNewsBody.length}ch of actual news content`);
 
     try {
-      // ★ primary (inner timeout 90s — gpt-5.5 ช้า/overload ให้สลับ fallback เร็ว ไม่รอจนชน outer 210s)
+      // ★ B+ 10 ก.ค. 69: ให้ gpt-5.5 ทำจริงจนจบ — inner 200s (วัดจริง ~137-169s) + maxTokens 24000
+      //   (เพดาน 8000 เดิม: reasoning tokens กินหมดก่อนตอบ → content ว่างเปล่า+โดนบิลฟรี — เทสพิสูจน์แล้ว)
+      //   fallback gpt-4o มี timeout 60s ของตัวเอง — กันลากยาวจนชน outer แล้วตายทั้ง job
       let result;
+      let breakdownModelUsed = MODEL_NEWS_ANALYSIS;
       try {
         result = await withTimeout(
-          callAI({ prompt, model: MODEL_NEWS_ANALYSIS, temperature: 0.4, maxTokens: 8000 }),
-          90000,
+          callAI({ prompt, model: MODEL_NEWS_ANALYSIS, temperature: 0.4, maxTokens: 24000 }),
+          200000,
           'breakdown_primary_inner'
         );
       } catch (primaryErr) {
         console.warn(`[Breakdown-Service] ⚠️ ${MODEL_NEWS_ANALYSIS} failed/timeout: "${primaryErr.message}" — retrying with ${MODEL_HEAVY_FALLBACK} fallback...`);
-        result = await callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 8000 });
+        breakdownModelUsed = MODEL_HEAVY_FALLBACK;
+        result = await withTimeout(
+          callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 8000 }),
+          60000,
+          'breakdown_fallback'
+        );
       }
       console.log(`[Breakdown-Service] ✅ OK, keys: ${Object.keys(result || {}).join(', ')}`);
 
@@ -664,7 +672,7 @@ export async function performSummarize({
         await agent.saveMemoryToDB().catch(() => {});
       }
 
-      logPipeline({ workflowId, step: 'breakdown', status: 'success', model: MODEL_NEWS_ANALYSIS, duration: Date.now() - _pipelineStart, detail: (result.core_story || '').slice(0, 60) }).catch(() => {});
+      logPipeline({ workflowId, step: 'breakdown', status: 'success', model: result?._modelUsed || breakdownModelUsed, duration: Date.now() - _pipelineStart, detail: (result.core_story || '').slice(0, 60) }).catch(() => {});
       return {
         success: true,
         data: bdData,

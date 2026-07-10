@@ -54,7 +54,7 @@ export async function POST(request) {
         controller.enqueue(encoder.encode(JSON.stringify({
           type: 'error',
           error: error.message,
-          failedStep: error.failedStep || 'auto_scrape'
+          failedStep: error.failedStep || 'unknown_step'
         }) + '\n'));
         controller.close();
       }

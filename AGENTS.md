@@ -26,11 +26,11 @@ URL/Text Input
   → src/app/content/new/page.js (UI + WorkflowTracker)
 ```
 
-### 3. AI Provider Routing (src/lib/ai/aiRouter.js)
-- **extract**: Gemini Flash (fast + cheap)
-- **breakdown**: GPT-4o (structured JSON)
-- **write**: Claude Sonnet → fallback GPT-4o
-- **general**: GPT-4o
+### 3. AI Provider Routing
+- **ความจริงปัจจุบัน = `src/lib/ai/modelConfig.js`** (อัปเกรดชุดใหญ่ 8 มิ.ย. 69 — ข้อมูล GPT-4o/Claude/Gemini ที่เคยเขียนไว้ตรงนี้ตกรุ่นแล้ว)
+- งานหนัก (วิเคราะห์ข่าว/breakdown/เขียน/ตัดสินปก): **gpt-5.5** → fallback **gpt-4o**
+- งานเร็ว/ประหยัด (คีย์เวิร์ด/JSON/แคปชั่น): **gpt-5.4-mini**
+- breakdown จูน 10 ก.ค. 69: gpt-5.5 inner timeout 200s + maxTokens 24000 (reasoning model — เพดานต่ำ=ตอบว่างเปล่า) → fallback gpt-4o มี timeout 60s เอง, outer 300s ทั้งสาย text/URL
 
 ### 4. Prompt System
 - Built-in prompts: `src/lib/ai/promptStore.js`

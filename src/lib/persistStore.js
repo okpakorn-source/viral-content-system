@@ -94,6 +94,7 @@ async function _fileFallbackSave(name, items) {
     const dir = join(process.cwd(), 'data');
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, `${name}.json`), JSON.stringify(items, null, 2), 'utf-8');
+    _warnedWriteSkip.delete(name); // เขียนสำเร็จ = รีเซ็ตตัวกดเงียบ — ถ้าพังใหม่ภายหลังต้องเห็นใน log อีก
   } catch (e) {
     if (/EROFS|read-only|EPERM|EACCES/i.test(e.message || '')) {
       _diskReadOnly = true; // serverless จริง — เลิกพยายามทั้ง process กัน log spam
@@ -128,6 +129,7 @@ export function createStore(name) {
           //   เลนเล็ก: จบหน้าเดียว (เร็วเท่าเดิม) · cap 20000 กัน loop ค้าง
           let data = [];
           let error = null;
+          let partialError = null; // ★ หน้า 2+ พัง = ข้อมูลไม่ครบ — ห้ามนับเป็นสำเร็จเต็ม (กัน cache ถูกทับด้วยชุดตัดครึ่ง)
           for (let from = 0; from < 20000; from += 1000) {
             const page = await sb
               .from(TABLE)
@@ -135,7 +137,11 @@ export function createStore(name) {
               .eq('store_name', name)
               .order('created_at', { ascending: false })
               .range(from, from + 999);
-            if (page.error) { if (from === 0) error = page.error; break; }
+            if (page.error) {
+              if (from === 0) error = page.error;
+              else partialError = page.error;
+              break;
+            }
             if (!page.data || page.data.length === 0) break;
             data.push(...page.data);
             if (page.data.length < 1000) break;
@@ -158,6 +164,11 @@ export function createStore(name) {
             }
           }
           
+          if (partialError) {
+            // ได้มาบางส่วน: ใช้งานต่อได้ แต่ห้าม sync ทับไฟล์ fallback — ไฟล์เดิมอาจครบกว่า
+            console.warn(`[Store:${name}] ⚠️ Loaded ${items.length} items แต่หน้าถัดไปพัง (${partialError.message}) — ข้อมูลอาจไม่ครบ ไม่เขียนทับ local cache`);
+            return items;
+          }
           console.log(`[Store:${name}] ✅ Loaded ${items.length} items from Supabase`);
           // Sync to local file cache for offline use
           if (items.length > 0) {

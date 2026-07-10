@@ -22,7 +22,7 @@ export async function POST(request) {
     return NextResponse.json({
       success: false,
       error: error.message,
-      failedStep: error.failedStep || 'auto_scrape',
+      failedStep: error.failedStep || 'unknown_step',
       totalTimeSeconds: parseFloat(elapsed),
     }, { status: 500 });
   }

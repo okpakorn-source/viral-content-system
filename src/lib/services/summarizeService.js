@@ -620,18 +620,25 @@ export async function performSummarize({
     console.log(`[Breakdown-Service] 📋 PROMPT LENGTH: ${prompt.length}ch`);
     console.log(`[Breakdown-Service] 📋 NEWS IN PROMPT: ${actualNewsBody.length}ch of actual news content`);
 
-    // ★ gpt-5.5 มี inner timeout 60s → fail fast → fallback gpt-4o ทันที
-    // (outer withTimeout ใน autoFlowService คือ 210s — ต้องให้ fallback เสร็จก่อน)
+    // ★ B+ 10 ก.ค. 69: ให้ gpt-5.5 ทำจริงจนจบ — inner 200s (วัดจริง ~137-169s) + maxTokens 24000
+    //   (เพดาน 8000 เดิม: reasoning tokens กินหมดก่อนตอบ → content ว่างเปล่า+โดนบิลฟรี — เทสพิสูจน์แล้ว)
+    //   fallback gpt-4o มี timeout 60s ของตัวเอง (outer ใน autoFlowService = 300s — inner 200 + fallback 60 + เผื่อ 40)
     let result;
+    let breakdownModelUsed = MODEL_PRIMARY;
     try {
       result = await withTimeout(
-        callAI({ prompt, model: MODEL_PRIMARY, temperature: 0.4, maxTokens: 8000 }),
-        60000, // ★ 60s max สำหรับ gpt-5.5 — ถ้าช้ากว่านี้ = overloaded → fallback
+        callAI({ prompt, model: MODEL_PRIMARY, temperature: 0.4, maxTokens: 24000 }),
+        200000,
         'breakdown_gpt55_inner'
       );
     } catch (primaryErr) {
       console.warn(`[Breakdown-Service] ⚠️ ${MODEL_PRIMARY} failed/timeout: "${primaryErr.message}" — retrying with ${MODEL_HEAVY_FALLBACK} fallback...`);
-      result = await callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 8000 });
+      breakdownModelUsed = MODEL_HEAVY_FALLBACK;
+      result = await withTimeout(
+        callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 8000 }),
+        60000,
+        'breakdown_fallback'
+      );
     }
 
     try {
@@ -671,7 +678,7 @@ export async function performSummarize({
         await agent.saveMemoryToDB().catch(() => {});
       }
 
-      logPipeline({ workflowId, step: 'breakdown', status: 'success', model: MODEL_PRIMARY, duration: Date.now() - _pipelineStart, detail: (result.core_story || '').slice(0, 60) }).catch(() => {});
+      logPipeline({ workflowId, step: 'breakdown', status: 'success', model: result?._modelUsed || breakdownModelUsed, duration: Date.now() - _pipelineStart, detail: (result.core_story || '').slice(0, 60) }).catch(() => {});
       return {
         success: true,
         data: bdData,

@@ -17,7 +17,9 @@ export function withTimeout(promise, ms, stepName = 'unknown') {
   let timeoutId;
   const timeoutPromise = new Promise((_, reject) => {
     timeoutId = setTimeout(() => {
-      reject(new Error(`TIMEOUT: ${stepName} ใช้เวลาเกิน ${Math.round(ms / 1000)}s`));
+      const err = new Error(`TIMEOUT: ${stepName} ใช้เวลาเกิน ${Math.round(ms / 1000)}s`);
+      err.failedStep = stepName; // ป้ายชื่อ step จริง — กัน route ชั้นบน default เป็น step ผิดตัว
+      reject(err);
     }, ms);
   });
 

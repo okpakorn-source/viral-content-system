@@ -630,7 +630,7 @@ export async function POST(request) {
     return NextResponse.json({
       success: false,
       error:   err.message,
-      failedStep: err.failedStep || 'u_extract',
+      failedStep: err.failedStep || 'unknown_step',
       log,
       debug: { durationSeconds: parseFloat(totalTime) },
     }, { status: 500 });
