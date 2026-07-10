@@ -1557,20 +1557,102 @@ export async function s6_slots(job, { origin }) {
     storyTag = ` · story[${sfLine}]`;
   }
 
+  // ★ Wave3 ชุด1 (10 ก.ค.) — SHADOW MODE: solver deterministic คำนวณคู่ขนานหลังลูปจับคู่จบ (slots ครบ/พยายามครบ)
+  //   → log เทียบผล LLM/fallback + เก็บ dossier พิสูจน์บนเคสจริง ก่อนสลับให้ solver ตัดสินจริงชุดถัดไป.
+  //   shadow-first: **ห้ามเปลี่ยนผลปกจริงแม้แต่ byte** — ครอบ try/catch ทั้งก้อน (solver ล้ม = log อย่างเดียว
+  //   งานเดินต่อปกติ 100%) · ไม่ยิง LLM/IO เพิ่ม (ประกอบ input จากข้อมูลที่คำนวณแล้วในฟังก์ชันล้วน) ·
+  //   ปิดสนิท (พฤติกรรม byte-เดิม): MEGA_SOLVER_SHADOW=0
+  let solverShadow = null;
+  if (process.env.MEGA_SOLVER_SHADOW !== '0') {
+    try {
+      const { solveSlotAssignments } = await import('@/lib/slotSolver');
+      // characters จากเข็มทิศ + ธง isHero (heroNames = role=hero หรือตัวแรก — ตัวเดียวกับด่าน hero ด้านบน)
+      const solverChars = (job.dossier.compass?.mainCharacters || [])
+        .map((c) => c?.name).filter(Boolean)
+        .map((name) => ({ name, isHero: heroNames.includes(name) }));
+      // wantPerson/refShot ต่อช่องจากใบสั่งงานสมอง (artBrief.orders — จับคู่ตาม role ของช่อง ถ้ามี)
+      const orders = job.dossier.artBrief?.orders || [];
+      const _normShot = (s) => {
+        const t = String(s || '').toLowerCase();
+        if (/close|โคลส|ใบหน้า|หน้าเต็ม/.test(t)) return 'closeup';
+        if (/bust|อก|ครึ่งตัว|half/.test(t)) return 'bust';
+        if (/medium|กลาง|เอว|knee/.test(t)) return 'medium';
+        if (/wide|กว้าง|เต็มตัว|full|long/.test(t)) return 'wide';
+        return null;
+      };
+      const _slotRole = (name) => (name === 'hero' ? 'hero' : name === 'circle' ? 'circle' : name === 'context' ? 'context' : 'secondary');
+      const solverSlots = activeSlots.map((name) => {
+        const ord = orders.find((o) => String(o.role) === name) || null;
+        return { id: name, role: _slotRole(name), wantPerson: ord?.personHint || null, refShot: _normShot(ord?.shot) };
+      });
+      // faceBoxHFrac แบบ defensive: Gemini คืน {x,y,w,h} normalized 0-1 (h=สัดส่วนสูงหน้า) —
+      //   รับ {x1,y1,x2,y2} เผื่อ path อื่น · ค่า px (>1)/รูปแปลก = null (normalize เชื่อถือไม่ได้)
+      const _faceHFrac = (fb) => {
+        if (!fb || typeof fb !== 'object') return null;
+        const h = Number(fb.h);
+        if (Number.isFinite(h) && h > 0 && h <= 1.0001) return Math.min(1, h);
+        const y1 = Number(fb.y1), y2 = Number(fb.y2);
+        if (Number.isFinite(y1) && Number.isFinite(y2) && y2 > y1 && y2 <= 1.0001) return Math.min(1, y2 - y1);
+        return null;
+      };
+      const solverImages = sorted.map((x) => {
+        const persons = [x.triage?.person, ...(x.triage?.persons || [])].filter(Boolean);
+        const identityHits = {};
+        for (const c of solverChars) identityHits[c.name] = persons.some((p) => _namesMatchSimple(p, c.name));
+        return {
+          id: x.id,
+          persons,
+          identityHits, // ★ solver ไม่ match ชื่อเอง — คำนวณให้ที่นี่ด้วย _namesMatchSimple (module-level)
+          storyFit: storyFitOf(x), // null เมื่อปิด STORY_SEL → event แกนกลาง 0.5
+          newsScene: x.triage?.newsScene !== false,
+          category: x.triage?.category || 'other',
+          emotion: x.triage?.emotion || null,
+          quality: x.triage?.quality ?? null,
+          faces: Number(x.triage?.faceCount) || 0,
+          clean: isClean(x),
+          shortSide: realShortSideOf(x),
+          sharpness: (typeof x.triage?.sharpness === 'number') ? x.triage.sharpness : null,
+          thumbOnly: x.rehostQuality === 'thumbnail',
+          lowRes: x.lowRes === true,
+          sceneKey: sceneKeyOf(x) || null,
+          faceBoxHFrac: _faceHFrac(x.triage?.faceBox),
+          sourceScore: null, // ชุด 2 ค่อยต่อ getSourceScore จริง
+        };
+      });
+      const solved = solveSlotAssignments({ slots: solverSlots, images: solverImages, characters: solverChars });
+      const bySlotSolver = new Map(solved.assignments.map((a) => [a.slotId, a]));
+      let agree = 0;
+      const diffs = [];
+      const perSlot = [];
+      for (const name of activeSlots) {
+        const llm = slots[name] ? String(slots[name].id) : null;
+        const a = bySlotSolver.get(name) || null;
+        const solver = a && a.imageId != null ? String(a.imageId) : null;
+        const match = llm === solver;
+        if (match) agree++; else diffs.push(`${name}(LLM=${llm ?? '(ว่าง)'} vs SOLVER=${solver ?? '(ว่าง)'})`);
+        perSlot.push({ slot: name, llm, solver, match, top3: (a?.top3 || []).map((t) => t.id) });
+      }
+      console.log(`[MEGA S6] 👥 solver-shadow: ตรง ${agree}/${activeSlots.length} ช่อง${diffs.length ? ' — ต่าง: ' + diffs.join(' ') : ''}`);
+      solverShadow = { v: 1, agree, total: activeSlots.length, perSlot };
+    } catch (e) {
+      console.log('[MEGA S6] 👥 solver-shadow ข้าม (ล้ม แต่งานเดินต่อ):', e?.message?.slice(0, 60));
+    }
+  }
+
   const filled = activeSlots.filter((s) => slots[s]).length;
   // ★ Wave2 Batch D1: สรุปกักกันครั้งเดียว — ต่อท้าย summary เสมอ (เห็นความจริงไม่ว่าสวิตช์เปิด/ปิด)
   //   ส่วน dossierPatch.images.quarantine ผูกกับสวิตช์ MEGA_QUARANTINE (เปลี่ยน schema ของแฟ้ม จึงต้องปิดกลับได้)
   const quarantineTotal = untriagedList.length + sizeUnknownList.length;
   const quarantineTag = quarantineTotal > 0 ? ` · 🧿กัก ${untriagedList.length}+${sizeUnknownList.length} ใบ(ข้อมูลไม่ครบ)` : '';
   if (!slots.hero) {
-    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '' } } };
+    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '', ...(solverShadow ? { solverShadow } : {}) } } };
   }
   return {
     status: 'done',
     nextAction: 'continue',
     summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'}${storyTag}${quarantineTag} — ${(brain.note || '').slice(0, 80)}`,
     dossierPatch: {
-      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}) },
+      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(solverShadow ? { solverShadow } : {}) },
       ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}),
       ...(job.dossier.artBrief ? { artBrief: job.dossier.artBrief } : {}),
       // ★ Wave2 Batch D1: merge-patch additive — สเปรด im เดิมกันทับ field อื่นใน images (caseId/storyQueries/heroGradeReport ฯลฯ)
