@@ -5,12 +5,16 @@
 // - idempotent: ขั้นที่เคยสำเร็จด้วย input เดิม = ข้าม ไม่จ่ายซ้ำ
 // - circuit breaker: งานล้มติดกัน 3 → พักทั้งสาย (ปลดที่ /mega)
 // ผู้เรียก: worker เครื่องทีมตอนว่าง / ปุ่มบนหน้า /mega / cron
+// ★ 10 ก.ค. Wave1-D: (ก) lease มีเจ้าของ+read-after-write กัน tick ซ้อน · release เคลียร์เฉพาะของตัวเอง
+//   (ข) เขียน job state (updateJob) ก่อน ledger (addRun) — กันสำเร็จปลอมถ้า process ตายคากลาง
+//   (ค) skip-path เช็ค "หลักฐาน output ในแฟ้ม" ก่อนข้าม (ไม่มีหลักฐาน = รันซ้ำแทนข้าม)
 // ============================================================
 
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { listJobs, getJob, updateJob, addRun, findDoneRun, listRuns, getFlags, setFlags } from '@/lib/megaJobStore';
 import { STAGE_FLOW, unclaimCard } from '@/lib/megaAdapters';
+import { acquireTickLease, releaseTickLease } from '@/lib/megaTickLease';
 
 export const runtime = 'nodejs';
 export const maxDuration = 600;
@@ -18,6 +22,23 @@ export const maxDuration = 600;
 const MAX_STAGE_ATTEMPTS = 2;
 // ป้ายปลายทางของแต่ละเฟส (ไม่ใช่ stage ที่รันได้ — เป็น status จบ)
 const TERMINALS = new Set(['content_ready', 'assets_ready', 'cover_ready']);
+
+// ★ Wave1-D (ค): แผนที่ "หลักฐาน output ในแฟ้ม" ต่อ stage — อิง dossierPatch จริงที่แต่ละ adapter คืน
+//   (s3_generate→generate.queueJobId · s5_case→images.caseId · s6_slots→pickImages.slots ·
+//    s7_cover→cover.queueJobId · s7_wait→cover.coverPath) — ใช้ != null (แยก "อัปแฟ้มแล้ว" ออกจาก "ยังไม่อัป"
+//    ให้ค่าที่ falsy ได้เช่น '' ยังนับเป็นหลักฐาน) · stage ที่ไม่อยู่ในแผนที่ = ข้ามได้ตามพฤติกรรมเดิม
+const STAGE_EVIDENCE = {
+  s3_generate: (d) => d.generate?.queueJobId != null,
+  s5_case: (d) => d.images?.caseId != null,
+  s6_slots: (d) => d.pickImages?.slots != null,
+  s7_cover: (d) => d.cover?.queueJobId != null,
+  s7_wait: (d) => d.cover?.coverPath != null,
+};
+function hasStageEvidence(stage, dossier) {
+  const check = STAGE_EVIDENCE[stage];
+  if (!check) return true; // ไม่อยู่ในแผนที่ = ข้ามได้ตามเดิม
+  try { return !!check(dossier || {}); } catch { return true; }
+}
 
 function stageInputHash(job) {
   // input ประจำขั้น — เปลี่ยนเมื่อของที่ขั้นนี้ใช้เปลี่ยน (กันเอาผลเก่าปน input ใหม่)
@@ -43,17 +64,20 @@ function stageInputHash(job) {
 
 export async function POST(req) {
   let locked = false;
+  let leaseToken = null;
   try {
     const flags = await getFlags();
     if (flags.paused) {
       return NextResponse.json({ success: true, idle: true, paused: true, message: `⛔ สายพานถูกพัก (ล้มติดกัน ${flags.consecutiveFails}) — ปลดที่หน้า /mega` });
     }
-    // 🔒 ล็อกกัน tick ซ้อน (worker+UI พร้อมกัน = รันขั้นซ้ำจ่ายซ้ำ) — ล็อกเก่าเกิน 10 นาที = ถือว่าตาย
-    if (flags.tickLockAt && Date.now() - new Date(flags.tickLockAt).getTime() < 10 * 60 * 1000) {
+    // 🔒 ล็อกกัน tick ซ้อน (worker+UI พร้อมกัน = รันขั้นซ้ำจ่ายซ้ำ) — ★ Wave1-D (ก): lease มีเจ้าของ + read-after-write
+    //   เดิม อ่าน→เช็ค→เขียน คนละ round-trip = 2 tick อ่านพร้อมกันก่อนใครเขียน = ผ่านทั้งคู่ · ล็อกเก่าเกิน 10 นาที = ถือว่าตาย
+    const lease = await acquireTickLease({ getFlags, setFlags });
+    if (!lease.ok) {
       return NextResponse.json({ success: true, idle: true, busy: true, message: 'มี tick อื่นกำลังเดินอยู่' });
     }
-    await setFlags({ tickLockAt: new Date().toISOString() });
     locked = true;
+    leaseToken = lease.token;
 
     // เลือกงาน: running > waiting > pending (ทีละงาน)
     const jobs = await listJobs(50);
@@ -74,12 +98,17 @@ export async function POST(req) {
     const idemKey = `${job.id}:${job.stage}:${stageInputHash(job)}`;
 
     // idempotency: ขั้นนี้+input นี้เคยสำเร็จแล้ว → เลื่อนต่อเลย ไม่รันซ้ำ
+    //   ★ Wave1-D (ค): แต่ต้องมี "หลักฐาน output ในแฟ้ม" ของ stage นั้นจริง — กัน done-run ที่ dossierPatch หาย
+    //   (เช่น process ตายคากลางก่อนอัปแฟ้มในโค้ดรุ่นเก่า) หลุดข้าม stage ด้วย patch ที่ไม่มี dossier
     const prior = await findDoneRun(job.id, job.stage, idemKey);
-    if (prior) {
+    if (prior && hasStageEvidence(job.stage, job.dossier)) {
       const next = stageDef.next;
       const patch = TERMINALS.has(next) ? { status: next, stage: next } : { stage: next, status: 'running' };
       await updateJob(job.id, patch);
       return NextResponse.json({ success: true, jobId: job.id, stage: job.stage, skipped: 'เคยสำเร็จแล้ว (idempotent) → เลื่อนขั้นถัดไป' });
+    }
+    if (prior) {
+      console.warn(`[MEGA tick] ⚠️ skip-guard: ${job.id} ${job.stage} มี done-run แต่แฟ้มไม่มี output ของขั้นนี้ — รันซ้ำแทนการข้าม`);
     }
 
     if (job.status === 'pending') await updateJob(job.id, { status: 'running' });
@@ -96,14 +125,6 @@ export async function POST(req) {
     } catch (err) {
       result = { status: 'failed', nextAction: attempt >= MAX_STAGE_ATTEMPTS ? 'fail' : 'retry', summary: 'ขั้นพัง: ' + err.message };
     }
-
-    await addRun(job.id, job.stage, {
-      status: result.status,
-      attempt,
-      idempotencyKey: idemKey,
-      summary: result.summary || '',
-      error: result.status === 'failed' ? result.summary : undefined,
-    });
 
     // บันทึกผลลงแฟ้ม + ไทม์ไลน์
     const stagesDone = [...(job.stagesDone || [])];
@@ -142,6 +163,18 @@ export async function POST(req) {
       await setFlags({ consecutiveFails: (f.consecutiveFails || 0) + 1, paused: (f.consecutiveFails || 0) + 1 >= 3 });
     }
 
+    // ★ Wave1-D (ข): เขียน ledger "หลัง" job state เสร็จ — ให้ ledger เป็นบันทึกประวัติ ไม่ใช่ตัวตัดสิน
+    //   เดิม addRun ก่อน updateJob: process ตายคากลาง → รอบหน้า idempotency เห็น done แล้วข้าม stage
+    //   ด้วย patch ที่ไม่มี dossier (เคสร้ายสุด s7_wait→cover_ready = สำเร็จปลอมไม่มีปก)
+    //   ผลถ้า addRun ล้มหลัง updateJob สำเร็จ: stage เดินไปแล้ว re-run ขั้นเดิมไม่เกิด — แค่ประวัติหาย 1 แถว (ยอมรับได้)
+    await addRun(job.id, job.stage, {
+      status: result.status,
+      attempt,
+      idempotencyKey: idemKey,
+      summary: result.summary || '',
+      error: result.status === 'failed' ? result.summary : undefined,
+    });
+
     return NextResponse.json({
       success: true,
       jobId: job.id,
@@ -152,7 +185,8 @@ export async function POST(req) {
   } catch (err) {
     return NextResponse.json({ success: false, error: err.message, errorType: 'UNEXPECTED' }, { status: 500 });
   } finally {
-    // ปลดล็อกทุกทางออก (รวม idle/idempotent-return) — กันล็อกค้างขวางสายพาน
-    if (locked) await setFlags({ tickLockAt: null }).catch(() => {});
+    // ปลดล็อกทุกทางออก (รวม idle/idempotent-return) — ★ Wave1-D (ก): เคลียร์เฉพาะ lease ที่เราถือ (owner token ตรง)
+    //   เดิม setFlags(tickLockAt:null) ล้วน = tick เก่าค้าง >10 นาที กลับมาล้าง lease ของ tick ใหม่ได้
+    if (locked) await releaseTickLease({ getFlags, setFlags }, leaseToken).catch(() => {});
   }
 }

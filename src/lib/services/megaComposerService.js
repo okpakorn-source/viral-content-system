@@ -12,6 +12,10 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto'; // ★ เฟส 3.2 (10 ก.ค.): md5 คีย์ cache ผล photo-enhance ของ hero
 
+// ★ Wave1 Batch E (10 ก.ค. — manifest-lite): เวอร์ชัน composer ปัจจุบัน ประกาศตายตัวตรงนี้
+//   อัปเดตมือเมื่อแก้กติกา compose/crop/hero — ใช้ stamp ลง manifest ให้ debug/replay ย้อนดูได้ว่ารอบนี้วิ่งด้วยกติกาไหน
+const COMPOSER_VERSION = 'w1e-20260710';
+
 // ---------- โหลดภาพ 1 URL → Buffer (กฎที่พิสูจน์แล้ว CASE-366: 403/HTML-หลอก/ไฟล์ local/thumbnail สำรอง) ----------
 async function fetchOne(url, ms = 15000) {
   if (!url) return null;
@@ -203,6 +207,17 @@ function normalizeFaceBox(fd) {
     })),
     ...extras,
   };
+}
+
+// ---------- ★ Wave1 Batch E (manifest-lite): แปลงกล่องหน้า normalized (0-1) → พิกเซล int ให้ manifest ----------
+//   ใช้ค่าที่ normalizeFaceBox คำนวณไว้แล้วเท่านั้น (ห้ามยิงตาหาหน้าเพิ่ม) · จำกัด 5 กล่องแรกต่อภาพกันขนาดบวม
+function _manifestFaceBoxes(fb) {
+  if (!fb || !fb.imgW || !fb.imgH) return [];
+  const list = (fb.allFaces && fb.allFaces.length) ? fb.allFaces : ((fb.x2 > fb.x1) ? [{ x1: fb.x1, y1: fb.y1, x2: fb.x2, y2: fb.y2 }] : []);
+  return list.slice(0, 5).map((f) => ({
+    x: Math.round(f.x1 * fb.imgW), y: Math.round(f.y1 * fb.imgH),
+    w: Math.round((f.x2 - f.x1) * fb.imgW), h: Math.round((f.y2 - f.y1) * fb.imgH),
+  }));
 }
 
 // ---------- ★ เฟส 3 (10 ก.ค.): ธงคุณภาพจาก cropTrace ของปกใบสุดท้าย ----------
@@ -955,7 +970,8 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
   // เฟส 4.3 + 3.1: ธงครอปตาบอด (ไร้หน้า+ไร้ subject) + ยืดจริงต่อช่อง (upscaled/upscale_soft) จาก trace ปกใบสุดท้าย
   qcFlags.push(...traceQcFlags(cropTrace));
   if (qcFlags.length) console.log(`[MegaComposer] 🚩 qcFlags: ${qcFlags.join(' · ')}`);
-  return { buffer, spec, assignments, loaded, faceBoxes, used, refSlotMeta, cropTrace, qcFlags, traceSink };
+  // ★ Wave1 Batch E: ส่ง aHashes ออกไปด้วย (คำนวณแล้วที่ ②b — เดิมทิ้งหลังใช้กันภาพซ้ำ) ให้ manifest ใช้ต่อได้ ไม่ต้องคำนวณซ้ำ
+  return { buffer, spec, assignments, loaded, faceBoxes, used, refSlotMeta, cropTrace, qcFlags, traceSink, aHashes };
 }
 
 // ---------- 👁️ ตาเทียบ ref: เห็น "ภาพจริง" ทั้งคู่ — ครั้งแรกที่ระบบตรวจด้วยภาพชนภาพ ----------
@@ -1078,6 +1094,31 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
         }
       } catch (e) { console.log('[MegaComposer] ตาเทียบ ref ล้ม (ใช้ปกเดิม):', e.message?.slice(0, 50)); }
     }
+    // ★ Wave1 Batch E (manifest-lite): "ความจริงของรอบประกอบ" — เก็บจากค่าที่คำนวณอยู่แล้วล้วน (ห้าม LLM/IO เพิ่ม
+    //   ยกเว้น sha1 ของ buffer สุดท้าย) ให้ debug/replay ย้อนดูได้ทีหลังว่ารอบนี้ใช้ภาพ/หน้า/โมเดลอะไร
+    //   ล้มเองได้ = ไม่กระทบผลปก (additive ล้วน — ไม่มี = ผู้เรียกเดิมไม่พัง)
+    let manifest = null;
+    try {
+      manifest = {
+        composerVersion: COMPOSER_VERSION,
+        stableOrder: !!stableOrder,
+        models: { faceDetector: 'gpt-4o-mini (fallback: gemini-2.5-flash)', eye: 'gpt-4o' },
+        slots: core.assignments.map((a) => {
+          const im = core.loaded[a.imageIndex] || {};
+          const fb = core.faceBoxes[a.imageIndex] || null;
+          const ah = core.aHashes ? core.aHashes[a.imageIndex] : null;
+          return {
+            slot: a.slotId,
+            imageUrl: im.url || im.thumbnailUrl || '',
+            aHash: (ah != null) ? ah.toString(16) : null, // BigInt → hex string (JSON เก็บ BigInt ตรงๆ ไม่ได้)
+            faceCount: fb?.count ?? 0,
+            faceBoxes: _manifestFaceBoxes(fb),
+          };
+        }),
+        refImagePath: refImagePath || null,
+        outputHash: crypto.createHash('sha1').update(buffer).digest('hex'),
+      };
+    } catch (e) { console.log('[MegaComposer] manifest เก็บล้ม (ไม่กระทบผลปก):', e.message?.slice(0, 60)); }
     return {
       success: true,
       base64: `data:image/jpeg;base64,${buffer.toString('base64')}`,
@@ -1086,6 +1127,7 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
       refDiffs: eye?.diffs || [],
       eyeFixed: fixedCount,
       qcFlags: core.qcFlags || [], // เฟส 4.3: ธงคุณภาพ deterministic (แทน ref% ที่เชื่อไม่ได้)
+      manifest, // ★ Wave1 Batch E: ความจริงของรอบประกอบ (debug/replay) — additive, null เมื่อเก็บล้ม
       placed: core.assignments.map((a) => ({ slot: a.slotId, role: core.loaded[a.imageIndex].slot })),
       // เฟส 0.1+0.3: ครอปจริงต่อช่อง (สาขา+กรอบ) + url ภาพ — เครื่องเทสใช้ทำ baseline การ์ด hero
       crops: core.assignments.map((a) => ({

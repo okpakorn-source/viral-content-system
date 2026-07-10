@@ -24,12 +24,10 @@
     },
     {
       "name": "viral-preview",
-      "runtimeExecutable": "npx",
+      "runtimeExecutable": "cmd",
       "runtimeArgs": [
-        "next",
-        "start",
-        "-p",
-        "3987"
+        "/c",
+        "set NODE_OPTIONS=--max-old-space-size=4096&& npx next start -p 3987"
       ],
       "port": 3987
     },
@@ -38,7 +36,7 @@
       "runtimeExecutable": "cmd",
       "runtimeArgs": [
         "/c",
-        "set NEXT_DISTDIR=.next-verify&& npx next dev -p 3988"
+        "set NEXT_DISTDIR=.next-verify&& set NODE_OPTIONS=--max-old-space-size=4096&& npx next dev -p 3988"
       ],
       "port": 3988
     }

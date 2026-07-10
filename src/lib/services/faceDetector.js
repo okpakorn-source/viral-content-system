@@ -8,6 +8,9 @@
  * ห้ามแก้ไฟล์ core AI (openai.js, aiRouter.js)
  */
 import sharp from 'sharp';
+import crypto from 'crypto';
+import { readFile, writeFile, mkdir } from 'fs/promises';
+import { join } from 'path';
 // ★ 9 ก.ค. 2026: ตาหาหน้า 2 ชั้น — gpt-4o-mini (callAI) เป็นตัวแรกเสมอ → ถ้าล้ม (เช่น OpenAI 429 quota หมด)
 //   ตกไป Gemini vision fallback (REST v1beta) ท้ายไฟล์ · kill-switch: FACE_GEMINI_FALLBACK=0 = ปิด fallback
 
@@ -26,6 +29,155 @@ function normalizePose(v) {
   return 'frontal';
 }
 
+// ============================================================
+// ★ 10 ก.ค. 2026 (Wave 1 Batch C): Cache ผลตรวจหน้า — กัน hero/crop แกว่งข้ามรอบ
+// ------------------------------------------------------------
+//   ปัญหาเดิม: detectFaces เรียก vision LLM สดทุกภาพทุกรอบ แม้เป็นภาพเดิม (ถูกเรียกซ้ำจากหลายจุด/รีทราย)
+//   → LLM ไม่ deterministic 100% ผลตรวจขยับนิดหน่อยรอบต่อรอบ → hero/crop กระโดดข้าม batch
+//   แก้: cache 2 ชั้น — ชั้น 1 Map ในหน่วยความจำ (เร็ว, หายเมื่อ process restart)
+//                      ชั้น 2 ไฟล์ data/face-cache.json (ข้าม process/deploy ได้, โหลด lazy)
+//   คีย์ = sha1(imageBuffer) + maxDim + detail — 2 ตัวนี้เท่านั้นที่ detectFaces อ่านจาก opts จริง
+//     และมีผลต่อภาพที่ resize ก่อนส่งเข้าโมเดล (ดู resize/quality ด้านล่าง) จึงกระทบผลตรวจจริง
+//     ฟิลด์อื่นใน opts (ถ้ามีเพิ่มในอนาคต) ไม่ถูกอ่านในฟังก์ชันนี้เลย → ไม่ต้องเข้าคีย์
+//   cache เฉพาะผลตรวจ "สำเร็จจริง" (รวมเคส 0 หน้าที่ตรวจจบปกติ) — ห้าม cache เมื่อ GPT+Gemini ล้มทั้งคู่/exception
+//   kill switch: env FACE_CACHE='0' → ปิด cache ทั้งอ่านและเขียน (พฤติกรรมเดิมเป๊ะ ไม่แตะดิสก์เลย)
+// ============================================================
+
+const FACE_CACHE_FILE = join(process.cwd(), 'data', 'face-cache.json');
+const MEM_CACHE_CAP = 500;      // ชั้น 1: Map ในหน่วยความจำ
+const FILE_CACHE_CAP = 1000;    // ชั้น 2: ไฟล์ — ตัดตัวเก่าสุดตาม ts เมื่อเกิน
+const FILE_SAVE_DEBOUNCE_MS = 2000;
+
+function _faceCacheEnabled() {
+  return process.env.FACE_CACHE !== '0';
+}
+
+// key = sha1(buffer) + maxDim + detail — เทสได้ตรงๆ โดยไม่ต้องเรียก LLM/แตะไฟล์
+export function _faceCacheKey(buffer, opts = {}) {
+  const hash = crypto.createHash('sha1').update(buffer).digest('hex');
+  const maxDim = opts.maxDim || 800;
+  const detail = opts.detail || 'low';
+  return `${hash}_${maxDim}_${detail}`;
+}
+
+// ตัดตัวเก่าสุดออกจน Map เหลือไม่เกิน cap (FIFO ตาม insertion order ของ Map)
+// ผู้เรียก _memCacheGet ด้านล่าง bump key ที่ hit ไปท้ายสุดก่อนแล้ว จึงกลายเป็น LRU จริงในทางปฏิบัติ
+// แยกฟังก์ชันให้เทส cap/evict ได้ตรงๆ ด้วย mock Map โดยไม่ต้องพึ่ง LLM
+export function _evictOldest(map, cap) {
+  while (map.size > cap) {
+    const oldestKey = map.keys().next().value;
+    map.delete(oldestKey);
+  }
+  return map;
+}
+
+// ตัด entries ของไฟล์ cache (plain object) ให้เหลือไม่เกิน cap โดยตัดตัวเก่าสุดตาม ts ก่อน — เทสได้ตรงๆ เช่นกัน
+export function _capEntriesByTs(entries, cap) {
+  const keys = Object.keys(entries || {});
+  if (keys.length <= cap) return entries;
+  const sorted = keys.sort((a, b) => (entries[a]?.ts || 0) - (entries[b]?.ts || 0));
+  const removeCount = keys.length - cap;
+  for (let i = 0; i < removeCount; i++) delete entries[sorted[i]];
+  return entries;
+}
+
+const _memCache = new Map(); // key -> full detectFaces() result object
+
+let _fileCache = null;          // key -> { ts, provider, faces, result } (null = ยังไม่โหลด)
+let _fileCacheLoadPromise = null;
+let _fileSaveTimer = null;
+let _hitLogged = false; // log ครั้งแรกที่ cache hit ต่อ process เท่านั้น กัน log spam
+
+// โหลดไฟล์ cache แบบ lazy ครั้งแรกที่ต้องใช้ — พังยังไงก็ไม่ทำ detectFaces พัง (best-effort, คืน object ว่างเสมอ)
+async function _loadFileCache() {
+  if (_fileCache) return _fileCache;
+  if (_fileCacheLoadPromise) return _fileCacheLoadPromise;
+  _fileCacheLoadPromise = (async () => {
+    try {
+      const raw = await readFile(FACE_CACHE_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      _fileCache = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+    } catch {
+      _fileCache = {}; // ไฟล์ไม่มี/พัง/parse ไม่ได้ → เริ่มจากว่าง
+    }
+    return _fileCache;
+  })();
+  return _fileCacheLoadPromise;
+}
+
+// เขียนไฟล์ cache แบบ debounce ~2s (ยุบหลายการ set ให้เขียนดิสก์ครั้งเดียว) — best-effort ล้วน ห้ามพัง caller
+function _scheduleFileSave() {
+  if (_fileSaveTimer) clearTimeout(_fileSaveTimer);
+  _fileSaveTimer = setTimeout(async () => {
+    _fileSaveTimer = null;
+    if (!_fileCache) return;
+    try {
+      _capEntriesByTs(_fileCache, FILE_CACHE_CAP);
+      const dir = join(process.cwd(), 'data');
+      await mkdir(dir, { recursive: true });
+      await writeFile(FACE_CACHE_FILE, JSON.stringify(_fileCache), 'utf-8');
+    } catch (e) {
+      console.warn(`${LOG} ⚠️ เขียน face-cache.json ไม่สำเร็จ (ไม่กระทบผลตรวจ):`, e.message);
+    }
+  }, FILE_SAVE_DEBOUNCE_MS);
+}
+
+function _logCacheHitOnce() {
+  if (_hitLogged) return;
+  _hitLogged = true;
+  console.log(`${LOG} 💾 face-cache hit (จะไม่ log ซ้ำต่อ process นี้)`);
+}
+
+// อ่าน cache: ชั้น 1 Map ก่อน → ชั้น 2 ไฟล์ (แล้ว warm ชั้น 1 ไว้ด้วย) — คืน result object หรือ null ถ้าไม่มี
+async function _getCachedFaceResult(key) {
+  if (!key) return null;
+  if (_memCache.has(key)) {
+    const result = _memCache.get(key);
+    _memCache.delete(key); _memCache.set(key, result); // bump ไปท้ายสุด = ใหม่สุด (LRU)
+    _logCacheHitOnce();
+    return result;
+  }
+  try {
+    const fileCache = await _loadFileCache();
+    const entry = fileCache[key];
+    if (entry && entry.result) {
+      _memCache.set(key, entry.result); // warm ชั้น 1
+      _evictOldest(_memCache, MEM_CACHE_CAP);
+      _logCacheHitOnce();
+      return entry.result;
+    }
+  } catch (e) {
+    console.warn(`${LOG} ⚠️ อ่าน face-cache.json ไม่สำเร็จ (ไม่กระทบผลตรวจ):`, e.message);
+  }
+  return null;
+}
+
+// บันทึกผลตรวจ "สำเร็จจริง" ลง cache ทั้ง 2 ชั้น — เรียกเฉพาะจากจุด return ที่ตรวจสำเร็จใน detectFaces เท่านั้น
+function _setCachedFaceResult(key, result, provider) {
+  if (!key) return;
+  try {
+    _memCache.set(key, result);
+    _evictOldest(_memCache, MEM_CACHE_CAP);
+  } catch (e) {
+    console.warn(`${LOG} ⚠️ เขียน mem face-cache ไม่สำเร็จ:`, e.message);
+  }
+  // ชั้นไฟล์: ไม่บล็อก detectFaces — ทำงานเบื้องหลัง พังยังไงก็แค่ log เตือน
+  (async () => {
+    try {
+      const fileCache = await _loadFileCache();
+      fileCache[key] = {
+        ts: Date.now(),
+        provider,
+        faces: Array.isArray(result?.faces) ? result.faces.length : 0,
+        result,
+      };
+      _scheduleFileSave();
+    } catch (e) {
+      console.warn(`${LOG} ⚠️ เตรียมเขียน face-cache ไม่สำเร็จ:`, e.message);
+    }
+  })();
+}
+
 /**
  * ตรวจจับหน้าคนด้วย Gemini Vision API
  * @param {Buffer} imageBuffer - ภาพที่จะตรวจ
@@ -35,6 +187,19 @@ export async function detectFaces(imageBuffer, opts = {}) {
   // ★ 30 มิ.ย.: รับ maxDim/detail — เรียกซ้ำ "คมชัดสูง" ได้เมื่อรอบแรกตรวจหน้าไม่เจอ (หน้าเล็ก/เบลอจากเฟรมวิดีโอ)
   const maxDim = opts.maxDim || 800;
   const detail = opts.detail || 'low';
+
+  // ★ เช็ค cache ก่อนยิง LLM จริง — ปิดได้ด้วย FACE_CACHE=0 (ดูเหตุผลเลือกคีย์ด้านบนบล็อกคอมเมนต์)
+  let cacheKey = null;
+  if (_faceCacheEnabled()) {
+    try {
+      cacheKey = _faceCacheKey(imageBuffer, opts);
+      const cached = await _getCachedFaceResult(cacheKey);
+      if (cached) return cached;
+    } catch (e) {
+      console.warn(`${LOG} ⚠️ face-cache lookup ไม่สำเร็จ (ข้าม cache):`, e.message);
+      cacheKey = null;
+    }
+  }
 
   let metadata = { width: 0, height: 0 };
   try {
@@ -113,7 +278,7 @@ watermark_region: SEPARATE from has_big_text — if the photo has a press/agency
 
     console.log(`${LOG} ✅ gpt-4o-mini success: found ${faces.length} faces`);
 
-    return {
+    const gptResult = {
       faces,
       hasFaces: parsed.has_faces || false,
       faceCount: parsed.face_count || 0,
@@ -153,6 +318,9 @@ watermark_region: SEPARATE from has_big_text — if the photo has a press/agency
       imageWidth: metadata.width,
       imageHeight: metadata.height,
     };
+    // ★ ตรวจสำเร็จจริง (รวมเคส 0 หน้า) → cache ไว้ กัน hero/crop แกว่งข้ามรอบถ้าถูกเรียกซ้ำภาพเดิม
+    if (cacheKey) _setCachedFaceResult(cacheKey, gptResult, 'gpt');
+    return gptResult;
   } catch (gptErr) {
     console.warn(`${LOG} ⚠️ gpt-4o-mini ล้ม — ตกไป Gemini fallback:`, gptErr.message);
   }
@@ -165,6 +333,8 @@ watermark_region: SEPARATE from has_big_text — if the photo has a press/agency
       const gem = await detectFacesGemini(base64, metadata);
       if (gem) {
         console.log(`${LOG} ✅ Gemini fallback สำเร็จ: พบ ${gem.faces.length} หน้า`);
+        // ★ ตรวจสำเร็จจริงจาก fallback เช่นกัน → cache ไว้เหมือนกัน
+        if (cacheKey) _setCachedFaceResult(cacheKey, gem, 'gemini');
         return gem;
       }
       console.warn(`${LOG} ⚠️ Gemini fallback อ่านผลไม่ได้ (JSON ว่าง/พัง)`);

@@ -9,12 +9,26 @@ import { listRefCovers } from '@/lib/refCoverLibrary';
 
 const norm = (s) => String(s || '').toLowerCase().trim();
 
+// ★ 10 ก.ค. Wave1-A: FNV-1a 32-bit hash นิ่ง (string เดิม → เลขเดิมเสมอ) — ใช้แทน Math.random() ตอน tiebreak
+//   ให้เคส seedKey เดิม re-run กี่รอบก็ได้ ref ใบเดิม (deterministic) ไม่ใช่สุ่มจริงทุกครั้ง
+function _fnv1aHash(str) {
+  let h = 0x811c9dc5;
+  const s = String(str || '');
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = (h * 0x01000193) >>> 0;
+  }
+  return h >>> 0; // uint32
+}
+
 /**
  * @param {object} signals - { emotion, text, charCount }
  *   emotion: อารมณ์หลักข่าว · text: มุมเล่า+อารมณ์รอง+หมวด (ไว้จับคำ) · charCount: จำนวนตัวละครหลัก
+ * @param {object} opts - { seedKey } — คีย์นิ่งต่อเคส (เช่น caseId/job.id) ให้ tiebreak ได้ผลเดิมทุกรอบ retry
+ *   ไม่ส่ง → fallback signals.newsTitle → JSON.stringify(signals) (ยังนิ่งกว่า Math.random() เดิม)
  * @returns {Promise<{ref, score, reason}|null>}
  */
-export async function pickBestRef(signals = {}) {
+export async function pickBestRef(signals = {}, opts = {}) {
   const items = await listRefCovers(500);
   // ★ 9 ก.ค. (ผู้ใช้เคาะ "ใช้เฉพาะ ref ที่ทำตามได้จริง 100%"): ตัด ref ที่เครื่องวัดตะเข็บชี้ว่า
   //   ขอบภาพถูกกลืน/ตกแต่งจนวางช่องตามไม่ได้ (_reproducible=false จาก _ref_apply_reproducible.mjs)
@@ -76,7 +90,17 @@ export async function pickBestRef(signals = {}) {
   const MARGIN = 1; // เผื่อคะแนนห่างไม่เกิน 1 (เช่น matchNewsType hit เดียว = 3 แต้ม ยังชนะขาดเหนือ margin นี้)
   const candidates = scored.filter((s) => s.score >= bestScore - MARGIN && s.score > 0);
   const totalW = candidates.reduce((n, c) => n + c.score, 0);
-  let r = Math.random() * totalW;
+  // ★ 10 ก.ค. Wave1-A: เดิม Math.random() → เคสเดิม re-run ได้ ref คนละใบ (สุ่มจริงทุกครั้ง)
+  //   → เปลี่ยนเป็นเลขนิ่งจาก hash(seedKey) แทน (เคสเดิม→เลขเดิม→ใบเดิมเสมอ) คงเจตนาเดิม (ถ่วงน้ำหนัก กระจายใบ ไม่ใช่ argmax ตัวแรกชนะตลอด)
+  //   kill switch: MEGA_REF_SEEDED=0 → ใช้ Math.random() แบบเดิมเป๊ะ
+  const useSeeded = process.env.MEGA_REF_SEEDED !== '0';
+  let r;
+  if (useSeeded) {
+    const seedKey = opts.seedKey || signals.newsTitle || JSON.stringify(signals);
+    r = (_fnv1aHash(seedKey) / 0xffffffff) * totalW;
+  } else {
+    r = Math.random() * totalW;
+  }
   let chosen = candidates[candidates.length - 1];
   for (const c of candidates) { r -= c.score; if (r <= 0) { chosen = c; break; } }
 

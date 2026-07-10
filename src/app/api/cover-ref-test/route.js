@@ -57,12 +57,14 @@ export async function POST(req) {
     try {
       const { pickBestRef } = await import('@/lib/refCoverMatch');
       const c = job.dossier.compass || {};
+      // ★ Wave1 Batch E (10 ก.ค.): seedKey นิ่งต่อข่าว (Batch A เพิ่มให้ megaAdapters แล้ว เส้นนี้ยังไม่มี)
+      //   — ข่าวเดิมเทสซ้ำ (คนละ request) ก็ได้ ref ใบเดิม ไม่สุ่มใหม่ทุกครั้ง (deterministic tiebreak ใน pickBestRef)
       matchedRef = await pickBestRef({
         emotion: c.primaryEmotion || '',
         text: [c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '),
         charCount: (c.mainCharacters || []).length,
         dreamShots: (c.visualDreamShots || []).map((v) => v.slot || v.description || ''),
-      });
+      }, { seedKey: newsTitle || content.slice(0, 80) });
       if (matchedRef?.ref) {
         // 🎯 ref-first: เก็บลงแฟ้ม → s6_slots ใช้ DNA นี้ "เลือกภาพ" + s7 ใช้ตัวเดียวกัน (เป้าเดียวทั้งท่อ)
         // ★ 8 ก.ค. (CASE-360): แมตช์หลวม (แนวข่าวไม่ตรงจริง) → ตัด slot subject/storyFlow ใช้เฉพาะโครง (กฎเดียวกับ s6 ใน megaAdapters)
@@ -160,11 +162,13 @@ export async function POST(req) {
     // ── S7 🏭 โรงประกอบใหม่ (ทีมกราฟฟิก 8 ก.ค. — แทน auto-cover-v3 ที่ถอดทิ้ง) ──
     //   เรียกตรงใน process (ไม่ผ่าน HTTP = ไม่มีปัญหา timeout/undici อีก) · deterministic + 👁️ ตาเทียบ ref จริง
     const { composeAndVerify } = await import('@/lib/services/megaComposerService');
+    // ★ 10 ก.ค.: Wave1-A stableOrder default เปิด (race ลำดับโหลดภาพ) — ปิดคืน: MEGA_STABLE_ORDER=0
     const cover = await composeAndVerify({
       newsTitle,
       slotPlan, // แผนช่องจาก S6 (ภาพ→ช่อง/hero/clean/thumbnail) — โรงประกอบทำตามเป๊ะ
       refDNA: matchedRef?.ref?.dna || null,
       refImagePath: matchedRef?.ref?.imagePath || null, // 👁️ ภาพปกต้นแบบจริงจากคลัง → ตาเทียบภาพชนภาพ
+      stableOrder: process.env.MEGA_STABLE_ORDER !== '0',
     });
     trace.push({
       stage: 's7_compose',

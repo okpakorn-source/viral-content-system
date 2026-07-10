@@ -6,6 +6,10 @@
 //   ภาพ: 2 ชั้น — ① ไฟล์ public/mega-covers/ (เครื่องทีม เร็วสุด) ② แถว store_items
 //   'mega-cover-images' base64 รายใบ (⚠️ อ่านทีละแถวเท่านั้น ห้าม getAll คลังภาพ — egress บวม)
 //   → เครื่องทีมและ Vercel เห็นคลังเดียวกัน เสิร์ฟภาพผ่าน /api/mega-covers/img?id=
+// ★ 10 ก.ค. 2026 (แก้บั๊ก id ชน global PK): ท่อหลักส่ง rec.id = job.id (เช่น MG-0001) ซึ่งถูก
+//   megaJobStore จองไว้แล้วใน store_items (PK เดี่ยวข้ามทุก collection) → ห้ามใช้ rec.id ตรงๆ เป็น
+//   archive id อีกต่อไป ใช้ MCV-<jobId>-r<N> แทน (ดู nextArchiveId) ส่วนเส้น compose-test/cover-ref-test
+//   ที่ไม่ส่ง id ยังได้ MCV-random เดิม
 // ============================================================
 
 import { promises as fs } from 'fs';
@@ -28,10 +32,33 @@ export async function listMegaCovers(limit = 200) {
     .slice(0, limit);
 }
 
+/** ★ 10 ก.ค. (แก้บั๊ก id ชน global PK): คำนวณ archive id ต่อ revision จาก job id ท่อหลัก
+ *  store_items PK เป็น id เดี่ยวข้ามทุก collection — job 'MG-0001' ถูก megaJobStore จองไว้แล้ว
+ *  ถ้าใช้ rec.id ตรงๆ เป็น archive id จะชน insert ทุกครั้ง (เงียบ เพราะ catch กลืน error เดิม)
+ *  → ห่อเป็น MCV-<jobId>-r<N> (N ไล่จาก record เดิมในคลังที่ id ขึ้นต้นเดียวกัน +1)
+ *  ไม่มี jobId (เส้น compose-test / cover-ref-test) → พฤติกรรมเดิมเป๊ะ: MCV-random */
+export function nextArchiveId(jobId, existing = []) {
+  if (!jobId) return `MCV-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  const prefix = `MCV-${jobId}-r`;
+  let maxN = 0;
+  for (const rec of Array.isArray(existing) ? existing : []) {
+    const rid = rec && rec.id;
+    if (typeof rid !== 'string' || !rid.startsWith(prefix)) continue;
+    const n = parseInt(rid.slice(prefix.length), 10);
+    if (Number.isFinite(n) && n > maxN) maxN = n;
+  }
+  return `${prefix}${maxN + 1}`;
+}
+
 /** บันทึกปก 1 ใบเข้าคลัง (auto จากทุกจุดกดสร้างปก) — ล้มไม่ critical ต่อการทำปก
  *  rec.base64 (data URL) → เซฟไฟล์เครื่อง + แถวภาพคลาวด์ ให้ดู/โหลดได้ทั้งเครื่องทีมและ Vercel */
 export async function addMegaCover(rec = {}) {
-  const id = rec.id || `MCV-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  // ★ 10 ก.ค.: ต้องรู้คลังเดิมก่อนตั้งเลข revision (เฉพาะตอนมี jobId — เส้น auto MCV-random ไม่ต้องอ่านคลัง)
+  let existingForRevision = [];
+  if (rec.id) {
+    try { existingForRevision = await store.getAll(); } catch (e) { console.warn('[megaCoverArchive] อ่านคลังเดิมเพื่อคำนวณ revision ไม่สำเร็จ (เริ่ม r1):', e.message); }
+  }
+  const id = nextArchiveId(rec.id, existingForRevision);
   const m = /^data:image\/(\w+);base64,(.+)$/.exec(rec.base64 || '');
   let coverPath = rec.coverPath || null;
 
@@ -54,6 +81,7 @@ export async function addMegaCover(rec = {}) {
     imageCaseId: rec.imageCaseId || null, // AC-xxxx (ระบบ keyword)
     coverCaseId: rec.coverCaseId || null, // CASE-xxx (คลังปกทั่วไป)
     coverPath,                            // /mega-covers/xxx.jpg (มีเฉพาะเครื่องที่เขียนไฟล์ได้)
+    jobId: rec.id || null,                // ★ 10 ก.ค.: job ต้นทาง (MG-xxxx) แยกจาก id archive — query ย้อนได้ว่า revision ไหนของ job ไหน
     refId: rec.refId || null,
     refSimilarity: rec.refSimilarity ?? null,
     template: rec.template || '',
@@ -76,10 +104,11 @@ export async function addMegaCover(rec = {}) {
         updated_at: entry.at,
       });
       if (!error) entry.hasCloudImage = true;
-    } catch { /* ไม่มีคลาวด์ = ใช้ไฟล์เครื่องอย่างเดียว */ }
+      else console.warn('[megaCoverArchive] insert แถวภาพคลาวด์ล้ม:', error.message);
+    } catch (e) { console.warn('[megaCoverArchive] แถวภาพคลาวด์ล้ม (exception):', e.message); }
   }
 
-  try { await store.add(entry); } catch { /* คลังเมตาล้มไม่ให้กระทบทำปก */ }
+  try { await store.add(entry); } catch (e) { console.warn('[megaCoverArchive] บันทึกเมตาคลังล้ม:', e.message); }
   pruneOld().catch(() => {});
   return entry;
 }

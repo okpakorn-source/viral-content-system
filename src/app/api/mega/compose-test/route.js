@@ -93,7 +93,8 @@ export async function POST(req) {
         slotPlan: body.slotPlan,
         refDNA: refF.dna,
         refImagePath: refF.imagePath,
-        stableOrder: body.stableOrder === true,
+        // ★ 10 ก.ค. Wave1: default ตาม env เดียวกับ production (เดิม default ปิด — 3 ช่องทางพฤติกรรมไม่ตรงกัน) · body ส่ง boolean มา = override ได้
+        stableOrder: typeof body.stableOrder === 'boolean' ? body.stableOrder : process.env.MEGA_STABLE_ORDER !== '0',
       });
       if (outF.success && outF.refSimilarity != null) outF.score = `เหมือน ref ${outF.refSimilarity}%`;
       return NextResponse.json({
@@ -200,7 +201,7 @@ export async function POST(req) {
       slotPlan,
       refDNA: ref?.dna || null,
       refImagePath: ref?.imagePath || null,
-      stableOrder: body.stableOrder === true, // เฟส 0.2: โหมดเทสนิ่ง (default ปิด = production เดิม)
+      stableOrder: typeof body.stableOrder === 'boolean' ? body.stableOrder : process.env.MEGA_STABLE_ORDER !== '0', // ★ 10 ก.ค. Wave1: default ตาม env เดียวกับ production (เดิมปิด)
     });
     if (out.success && out.refSimilarity != null) out.score = `เหมือน ref ${out.refSimilarity}%`;
 

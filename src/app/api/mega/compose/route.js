@@ -15,11 +15,13 @@ export const maxDuration = 300;
 export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}));
+    // ★ 10 ก.ค.: Wave1-A stableOrder default เปิด (race ลำดับโหลดภาพ) — ปิดคืน: MEGA_STABLE_ORDER=0
     const out = await composeAndVerify({
       newsTitle: body.newsTitle || '',
       slotPlan: Array.isArray(body.slotPlan) ? body.slotPlan : [],
       refDNA: body.refDNA || null,
       refImagePath: body.refImagePath || null, // 👁️ มี = ตาเทียบ ref จริงหลังประกอบ
+      stableOrder: process.env.MEGA_STABLE_ORDER !== '0',
     });
     if (out.success && out.refSimilarity != null) out.score = `เหมือน ref ${out.refSimilarity}%`; // เข้ากับ s7_wait/คลังเดิม
     return NextResponse.json(out, { status: out.success ? 200 : 422 });

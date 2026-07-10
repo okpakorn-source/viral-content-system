@@ -18,8 +18,13 @@ const STATIONS = [
   { key: 's5_case', label: 'S5 เคสภาพ' },
   { key: 's5_keywords', label: 'S5 คีย์เวิร์ด' },
   { key: 's5_search', label: 'S5 ค้นภาพ' },
+  // ★ 10 ก.ค. Wave1-F: เติม 3 สถานีที่ backend มีจริง (s5_profile/s5_lens/s5_gapsearch — ลำดับตาม STAGE_FLOW ใน megaAdapters)
+  //   เดิมขาด → ตอน job อยู่สถานะพวกนี้ indexOf=-1 ไฟดับทุกดวงชั่วคราวรวมสถานีที่ผ่านแล้ว
+  { key: 's5_profile', label: 'S5 โปรไฟล์' },
   { key: 's5_triage', label: 'S5 ตาคัด' },
+  { key: 's5_lens', label: 'S5 เลนส์' },
   { key: 's5_clipframe', label: 'S5 เฟรมคลิป' },
+  { key: 's5_gapsearch', label: 'S5 ค้นเสริม' },
   { key: 's6_slots', label: 'S6 ภาพลงช่อง' },
   { key: 'assets_ready', label: '🧺 ครบชุด' },
   { key: 's7_cover', label: 'S7 ส่งทำปก' },
@@ -36,6 +41,8 @@ function lightColor(job, stationKey) {
   const cur = STAGE_ORDER.indexOf(job.stage === 'content_ready' ? 's5_case' : job.stage);
   const idx = STAGE_ORDER.indexOf(stationKey);
   if (job.status === 'assets_ready' && stationKey === 'assets_ready') return '#22c55e';
+  // ★ 10 ก.ค. Wave1-F: เดิมไฟ 🏁 ไม่มีทางเขียว (idx===cur แต่ status อยู่ใน DONE_STATUSES เลยหลุดทุกเงื่อนไข)
+  if (job.status === 'cover_ready' && stationKey === 'cover_ready') return '#22c55e';
   if (idx < cur) return '#22c55e'; // ผ่านแล้ว
   if (idx === cur && !DONE_STATUSES.includes(job.status)) {
     if (job.status === 'failed') return '#ef4444';
@@ -58,11 +65,14 @@ export default function MegaPage() {
   const [msg, setMsg] = useState('');
   const [expand, setExpand] = useState(null);
   const timer = useRef(null);
+  const loadSeq = useRef(0); // ★ 10 ก.ค. Wave1-F: กัน response เก่าที่มาช้าทับสถานะใหม่ (โพล+load ซ้อนกันหลายชุด)
 
   async function load() {
+    const seq = ++loadSeq.current;
     try {
       const r = await fetch('/api/mega');
       const j = await r.json();
+      if (seq !== loadSeq.current) return; // มี load ใหม่กว่ายิงไปแล้ว — ทิ้งผลชุดนี้
       if (j.success) {
         setJobs(j.jobs || []);
         setFlags(j.flags || {});

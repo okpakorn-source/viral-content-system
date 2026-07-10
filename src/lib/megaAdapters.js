@@ -985,6 +985,17 @@ const SLOT_CATEGORY_HINT = {
   circle: ['face-emotional', 'document'],
 };
 
+// ★ Wave1 Batch E (10 ก.ค. — manifest-lite): hash สั้นของ DNA ที่ผูกกับข่าวนี้ (debug ว่า refMatch เปลี่ยนไหมข้ามรอบ)
+//   FNV-1a 32-bit เดียวกับที่ refCoverMatch.js ใช้ (ไม่ได้ export จากที่นั่น → ก็อปตัวเล็กมาไว้ในไฟล์นี้แทน กัน import วุ่น)
+function _dnaHashFor(dna) {
+  try {
+    let h = 0x811c9dc5;
+    const s = JSON.stringify(dna || {});
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = (h * 0x01000193) >>> 0; }
+    return (h >>> 0).toString(16);
+  } catch { return null; }
+}
+
 export async function s6_slots(job, { origin }) {
   const im = job.dossier.images || {};
   const r = await jfetch(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
@@ -1148,24 +1159,43 @@ export async function s6_slots(job, { origin }) {
   // 🎯 7 ก.ค. (ผู้ใช้สั่ง ref-first): เลือก "ปกเป้า" จากคลัง reference ก่อนคัดภาพ — ให้ DNA ขับการเลือกภาพลงช่อง
   //   คำนวณครั้งเดียวเก็บใน dossier.refMatch (s7 ใช้ต่อ ไม่คำนวณซ้ำ) · คลังว่าง/ล้ม → ทำงานแบบเดิม
   if (!job.dossier.refMatch) {
-    try {
-      const { pickBestRef } = await import('@/lib/refCoverMatch');
-      const c = job.dossier.compass || {};
-      const m = await pickBestRef({
-        emotion: c.primaryEmotion || '',
-        text: [c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '),
-        charCount: (c.mainCharacters || []).length,
-        dreamShots: (c.visualDreamShots || []).map((v) => v.slot || v.description || ''),
-      });
-      if (m?.ref?.dna) {
-        // ★ 8 ก.ค. (CASE-360): แนวข่าวไม่ตรงจริง (แมตช์แค่อารมณ์/role generic) = "หลวม"
-        //   → ตัด slot subject/storyFlow ทิ้ง (กัน ref รับปริญญาพาเลือก "คนกอด/เด็กในวง" ที่ข่าวนี้ไม่มี)
-        //   คงไว้แค่ "โครง" (layoutFamily/template) ซึ่งพิสูจน์แล้วว่าตรง — vt_ref_5x4 จัดถูก
-        const weak = !m.typeMatched;
-        const dna = weak ? { ...m.ref.dna, slots: [], neededShots: [], storyFlow: '', compositionLogic: '' } : m.ref.dna;
-        job.dossier.refMatch = { dna, styleName: m.ref.styleName || m.ref.id, imagePath: m.ref.imagePath, reason: m.reason, typeMatched: !weak };
-      }
-    } catch { /* ไม่มีคลัง ref → เดินแบบเดิม */ }
+    // ★ 10 ก.ค. Wave1-A: job.dossier.refIdLock (string refId) → ข้ามสุ่ม/เลือกทั้งหมด ผูก ref ใบนั้นตรงๆ
+    //   หาไม่เจอในคลัง/ไม่มี dna → log แล้ว fallthrough ไป pickBestRef ตามปกติ (ห้าม fail งาน)
+    let lockedRef = null;
+    if (job.dossier.refIdLock) {
+      try {
+        const { listRefCovers } = await import('@/lib/refCoverLibrary');
+        const allRefs = await listRefCovers(500);
+        lockedRef = allRefs.find((x) => x.id === job.dossier.refIdLock && x.dna && x.imagePath) || null;
+        if (!lockedRef) console.log(`[MEGA S6] 🔒 refIdLock ${job.dossier.refIdLock} หาไม่เจอในคลัง/ไม่มี dna → fallback pickBestRef`);
+      } catch { /* คลังล้ม → fallback ปกติ */ }
+    }
+    if (lockedRef) {
+      // ★ Wave1 Batch E: dnaHash+refBoundAt — stamp ว่า DNA ก้อนไหน/เมื่อไหร่ถูกผูกกับข่าวนี้ (debug/replay)
+      job.dossier.refMatch = { dna: lockedRef.dna, styleName: lockedRef.styleName || lockedRef.id, imagePath: lockedRef.imagePath, reason: 'ล็อก refId', typeMatched: true, dnaHash: _dnaHashFor(lockedRef.dna), refBoundAt: new Date().toISOString() };
+      console.log(`[MEGA S6] 🔒 ใช้ ref ที่ล็อก: ${lockedRef.styleName || lockedRef.id}`);
+    } else {
+      try {
+        const { pickBestRef } = await import('@/lib/refCoverMatch');
+        const c = job.dossier.compass || {};
+        // ★ 10 ก.ค. Wave1-A: seedKey นิ่งต่อข่าว (หัวข่าวก่อน — ข่าวเดิมเทสซ้ำคนละ job/คนละ caseId ก็ได้ ref ใบเดิม) → caseId → job.id
+        const m = await pickBestRef({
+          emotion: c.primaryEmotion || '',
+          text: [c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '),
+          charCount: (c.mainCharacters || []).length,
+          dreamShots: (c.visualDreamShots || []).map((v) => v.slot || v.description || ''),
+        }, { seedKey: job.dossier.desk?.title || job.dossier.images?.caseId || job.id });
+        if (m?.ref?.dna) {
+          // ★ 8 ก.ค. (CASE-360): แนวข่าวไม่ตรงจริง (แมตช์แค่อารมณ์/role generic) = "หลวม"
+          //   → ตัด slot subject/storyFlow ทิ้ง (กัน ref รับปริญญาพาเลือก "คนกอด/เด็กในวง" ที่ข่าวนี้ไม่มี)
+          //   คงไว้แค่ "โครง" (layoutFamily/template) ซึ่งพิสูจน์แล้วว่าตรง — vt_ref_5x4 จัดถูก
+          const weak = !m.typeMatched;
+          const dna = weak ? { ...m.ref.dna, slots: [], neededShots: [], storyFlow: '', compositionLogic: '' } : m.ref.dna;
+          // ★ Wave1 Batch E: dnaHash+refBoundAt — stamp ว่า DNA ก้อนไหน/เมื่อไหร่ถูกผูกกับข่าวนี้ (debug/replay)
+          job.dossier.refMatch = { dna, styleName: m.ref.styleName || m.ref.id, imagePath: m.ref.imagePath, reason: m.reason, typeMatched: !weak, dnaHash: _dnaHashFor(dna), refBoundAt: new Date().toISOString() };
+        }
+      } catch { /* ไม่มีคลัง ref → เดินแบบเดิม */ }
+    }
   }
   // แมตช์หลวม → ไม่ส่ง DNA เข้าสมองเลือกภาพ (เลือกตามเข็มทิศข่าวล้วน) · โครงยังใช้ตอน s7
   const _refDNA = job.dossier.refMatch?.typeMatched ? job.dossier.refMatch.dna : null;
@@ -1591,9 +1621,12 @@ export async function s7_wait(job) {
       await fs.writeFile(path.join(dir, file), Buffer.from(m[2], 'base64'));
     } catch { coverPath = null; }
     // 🗂️ ส่งเข้าคลังงานปก MEGA อัตโนมัติ (ล้มไม่ critical ต่อสายพาน) — base64 ขึ้นคลาวด์ให้ Vercel เห็นด้วย
+    // ★ 10 ก.ค.: id ที่ addMegaCover คืนกลับมาไม่ใช่ job.id ตรงๆ อีกแล้ว (เป็น archive id ต่อ revision
+    //   MCV-<job.id>-rN กัน insert ชน PK เดิม) → เก็บ ent ไว้นอก try เพื่อฝัง archiveId ลง dossier ด้วย
+    let ent = null;
     try {
       const { addMegaCover } = await import('@/lib/megaCoverArchive');
-      const ent = await addMegaCover({ id: job.id, title: job.dossier.desk?.title || '', source: 'mega', imageCaseId: job.dossier.images?.caseId || null, coverCaseId: r.caseId || '', coverPath, base64, template: r.template || '', score: r.score ?? null, throughMega: true, qcFlags: Array.isArray(r.qcFlags) ? r.qcFlags : [] }); // audit: ธงคุณภาพต้องถึงคลังจากทางหลักด้วย
+      ent = await addMegaCover({ id: job.id, title: job.dossier.desk?.title || '', source: 'mega', imageCaseId: job.dossier.images?.caseId || null, coverCaseId: r.caseId || '', coverPath, base64, template: r.template || '', score: r.score ?? null, throughMega: true, qcFlags: Array.isArray(r.qcFlags) ? r.qcFlags : [] }); // audit: ธงคุณภาพต้องถึงคลังจากทางหลักด้วย
       if (!coverPath) coverPath = `/api/mega-covers/img?id=${encodeURIComponent(ent?.id || job.id)}`;
     } catch { if (!coverPath) coverPath = ''; /* คลังไม่ critical */ }
     return {
@@ -1604,10 +1637,12 @@ export async function s7_wait(job) {
         cover: {
           ...cv,
           coverPath,
+          archiveId: ent?.id || cv.archiveId || null, // ★ 10 ก.ค.: revision id จริงในคลัง mega-cover-runs (ต่างจาก job.id)
           template: r.template || '',
           score: r.score ?? null,
           coverCaseId: r.caseId || '',
           directorReason: (r.directorReason || '').slice(0, 300),
+          manifest: r.manifest || null, // ★ Wave1 Batch E: ความจริงของรอบประกอบ (จาก composeAndVerify) — additive
           completedAt: new Date().toISOString(),
         },
       },
