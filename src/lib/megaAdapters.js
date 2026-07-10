@@ -1407,6 +1407,11 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   // ★ SEM-1 correction (Codex P1-5): slotOrder = ลำดับ contract sourceIndex ตรงๆ ห้ามย้าย hero ขึ้นหน้า
   //   (canonical hero = face/identity policy เท่านั้น ไม่ใช่ layout order — S7 หา hero ด้วย heroSlotId authority)
   const _slotOrder = semContract ? [...activeSlots] : null;
+  // ★ P1-3 (probe): authority hash ต้องผูก ref identity — canonical object เดียวกับที่ S7 ใช้เทียบ
+  //   (precedence ตรง S7 resolvedRefId: refMatch.refId → refMatch.dnaHash → null) — เปลี่ยน refId อย่างเดียว = stale
+  const _semAuthorityHash = semContract
+    ? _dnaHashFor({ refId: job.dossier.refMatch?.refId || job.dossier.refMatch?.dnaHash || null, contract: semContract })
+    : null;
   // ★ SEM-1 fix (ผู้ตรวจ P1): ป้าย legacy ให้ composer — ห้ามใช้ contract.legacySlot (ตำแหน่งล้วน สลับบทได้
   //   เช่น วงกลมได้ป้าย 'reaction' หรือ rect ได้ 'hero') → คำนวณเชิงความหมาย + unique ต่อป้าย:
   //   canonical hero→'hero' · วงแรก→'circle' · refRole ตรงชื่อถ้ายังว่าง · ที่เหลือไล่ช่องว่าง reaction/action/context
@@ -1991,14 +1996,14 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   const quarantineTotal = untriagedList.length + sizeUnknownList.length;
   const quarantineTag = quarantineTotal > 0 ? ` · 🧿กัก ${untriagedList.length}+${sizeUnknownList.length} ใบ(ข้อมูลไม่ครบ)` : '';
   if (!slots[_canonHeroId]) {
-    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '', ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _dnaHashFor(semContract) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) } } };
+    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '', ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) } } };
   }
   return {
     status: 'done',
     nextAction: 'continue',
     summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'}${storyTag}${quarantineTag} — ${(brain.note || '').slice(0, 80)}`,
     dossierPatch: {
-      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _dnaHashFor(semContract) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) },
+      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) },
       ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}),
       ...(job.dossier.artBrief ? { artBrief: job.dossier.artBrief } : {}),
       // ★ Wave2 Batch D1: merge-patch additive — สเปรด im เดิมกันทับ field อื่นใน images (caseId/storyQueries/heroGradeReport ฯลฯ)
@@ -2032,8 +2037,33 @@ export async function s7_cover(job, { origin, _deps } = {}) {
   const slots = d.pickImages?.slots || {};
   // ★ SEM-1 (design v2 ช่องโหว่ 1 — ordered instance carrier): semantic ใช้ slotOrder ของ instance จริงจาก S6
   //   (invariant I2: ทุก instance ต้องถูกส่งครบ รวม circle-shape ไม่ว่าชื่อบทอะไร) · legacy = ลิสต์ generic เดิมเป๊ะ
-  const _sem = d.pickImages?.semanticSelection === true && Array.isArray(d.pickImages?.slotOrder) && d.pickImages.slotOrder.length >= 3;
-  const _order = _sem ? d.pickImages.slotOrder : ['hero', 'reaction', 'action', 'context', 'circle'];
+  // ★ SEM-2 audit C: แยก "สัญญาณ semantic" ออกจาก "carrier สมบูรณ์" — แฟ้ม semantic ที่เสีย/ครึ่งๆ
+  //   ห้ามไหลกลับ legacy เด็ดขาด (key instance บนลิสต์ generic = ภาพผิดช่อง) → fail-closed พักงานก่อนแตะ network
+  const _semSignal = d.pickImages?.semanticSelection === true
+    || !!d.pickImages?.slotContractHash
+    || !!d.pickImages?.heroSlotId
+    // ★ P1-1 (probe): แค่มี property slotOrder (แม้ค่า null/พัง) = ร่องรอย semantic — legacy จริงไม่มี key นี้
+    || (d.pickImages != null && Object.prototype.hasOwnProperty.call(d.pickImages, 'slotOrder'))
+    || Object.values(slots).some((s) => s && s.refSlotId);
+  const _semOrder0 = d.pickImages?.slotOrder;
+  const _heroId0 = d.pickImages?.heroSlotId;
+  const _semValid = d.pickImages?.semanticSelection === true
+    && Array.isArray(_semOrder0) && _semOrder0.length >= 3
+    // เสริม (probe): entries ต้องเป็น string ไม่ว่าง/unique — ห้าม coerce number/ของพังให้ valid
+    && _semOrder0.every((id) => typeof id === 'string' && id.trim().length > 0)
+    && new Set(_semOrder0).size === _semOrder0.length
+    && _semOrder0.every((id) => Object.prototype.hasOwnProperty.call(slots, id))
+    // ★ P1-2 (probe): hero ต้องมีตัวจริง — id string ไม่ว่าง + อยู่ใน order + entry มี candidate id/URL จริง
+    //   (และถ้า entry พก refSlotId ต้องตรงกับ heroSlotId) — กัน enqueue ปกไร้ hero
+    && typeof _heroId0 === 'string' && _heroId0.trim().length > 0
+    && _semOrder0.includes(_heroId0)
+    && !!(slots[_heroId0] && slots[_heroId0].id != null && slots[_heroId0].imageUrl)
+    && (slots[_heroId0].refSlotId == null || slots[_heroId0].refSlotId === _heroId0);
+  if (_semSignal && !_semValid) {
+    return { status: 'waiting', nextAction: 'wait', summary: '🧬⛔ แฟ้ม semantic ไม่สมบูรณ์ (marker/slotOrder/heroSlotId ขาดหรือไม่ตรง slots) — พักงานกันภาพผิดช่อง ห้ามแปลง legacy' };
+  }
+  const _sem = _semValid;
+  const _order = _sem ? _semOrder0 : ['hero', 'reaction', 'action', 'context', 'circle'];
   // ★ SEM-1 correction (Codex P1-5/6): hero หาโดย heroSlotId (authority จาก S6) — slotOrder คงลำดับ ref เดิม ไม่ย้าย hero ขึ้นหน้า
   const _heroKey = _sem ? ((d.pickImages?.heroSlotId && slots[d.pickImages.heroSlotId]) ? d.pickImages.heroSlotId : _order[0]) : 'hero';
   // ★ SEM-1 final (Codex P1-A): kill switch ต้องคุมถึง S7 — งานที่ S6 เลือกตอน ON แต่สวิตช์ถูกปิดก่อนขั้นนี้
@@ -2050,6 +2080,15 @@ export async function s7_cover(job, { origin, _deps } = {}) {
   if (_sem && links.length > 10) console.log(`[MEGA S7] 🧬⚠️ primary ${links.length} ใบ เกินเพดาน 10 ลิงก์ — ใบท้ายลำดับจะถูกตัด (ตรวจ ref/contract)`);
   if (links.length < 3) {
     return { status: 'failed', nextAction: 'fail', summary: `ภาพจาก S6 ไม่พอทำปก (${links.length} ใบ ต้อง ≥3)`, quality: 'red' };
+  }
+  // ★ P1-4 (probe): semantic — primary หลายช่องชี้ "ไฟล์เดียวกัน" (URL alias) ทำเลขด่านขั้นต่ำหลอกได้
+  //   นับ URL unique แบบ deterministic ก่อนแตะ network ใดๆ — ต่ำกว่า 3 = ภาพจริงไม่พอ fail-closed ห้าม fetch/enqueue
+  //   legacy ไม่แตะ (เงื่อนไขเดิม byte เดิมด้านบน)
+  if (_sem) {
+    const _uniqPrimary = new Set(links.map(String)).size;
+    if (_uniqPrimary < 3) {
+      return { status: 'failed', nextAction: 'fail', quality: 'red', summary: `🧬 ภาพ primary ซ้ำไฟล์กัน — URL unique ${_uniqPrimary}/${links.length} ช่อง (ต้อง ≥3) ภาพจริงไม่พอทำปก` };
+    }
   }
   // ★ 7 ก.ค. FIX "คลังแน่นแต่ปกล้มภาพไม่พอ": เดิม backups เป็น id ถูกทิ้ง (นับรายงานเฉยๆ) แล้วส่งแค่ 5 ลิงก์เป๊ะ —
   //   ลิงก์หน้าเว็บ/วิดีโอพัง 1-2 ใบ (403) = พูลต่ำกว่า 4 ล้มทั้งปก → แปลง id→URL จากคลังเคส ต่อท้าย (ไฟล์รูปตรงก่อน) เพดาน 10
@@ -2193,15 +2232,46 @@ export async function s7_cover(job, { origin, _deps } = {}) {
       //   ส่วน payload ด้านล่างใช้ refDNA legacy · template.slots สองก้อนเหมือนกัน realized geometry จึงตรง composer
       const contract = specApi.buildRefSlotContract({ refDNA: selectionRefDNA, artBriefOrders: d.artBrief?.orders || [] });
       const sentSet = new Set(allLinks.map(String));
+      // ★ SEM-2 (Codex): exact authority — สร้าง plannedByRefSlot จาก "slotPlan สุดท้ายที่รอด dedupe+เพดาน 10 จริง"
+      //   เท่านั้น (ห้ามสร้างจาก raw slots) · เฉพาะ _sem + สวิตช์ runtime ทั้งสอง ON · ยัง shadow ล้วน:
+      //   spec อยู่ dossier เท่านั้น ห้ามเข้า queue payload / composer ห้าม consume
+      let plannedByRefSlot;
+      let specAuthorityStale = false;
+      if (_sem && _semEnvOn) {
+        plannedByRefSlot = {};
+        for (const p of slotPlan) {
+          if (p.refSlotId) {
+            plannedByRefSlot[p.refSlotId] = {
+              candidateId: slots[p.refSlotId]?.id != null ? String(slots[p.refSlotId].id) : null,
+              imageUrl: p.url, // URL จาก row ที่ส่งจริง
+              legacySlot: p.slot ?? null, // display/compat เท่านั้น
+              backups: [],
+            };
+          }
+        }
+        for (const p of slotPlan) {
+          if (!p.refSlotId && p.backupForRefSlotId && plannedByRefSlot[p.backupForRefSlotId]) {
+            const bm = backupMeta.get(String(p.url));
+            plannedByRefSlot[p.backupForRefSlotId].backups.push({ candidateId: bm?.id ?? null, imageUrl: p.url });
+          }
+        }
+        // authority freshness: contract ที่ rebuild ตอน S7 ต้องตรง hash ที่ S6 ผูกไว้ — ไม่ตรง/หาย = fail-closed
+        //   (strictReady=false ใน spec, ไม่มี legacy fallback) แต่ท่อ shadow เดินต่อปกติ
+        const s6Hash = d.pickImages?.slotContractHash;
+        // ★ P1-3 (probe): เทียบด้วย hash ที่ "ผูก ref identity" ก้อนเดียวกับที่ S6 stamp — เปลี่ยน refId เฉยๆ ก็ stale
+        const s7AuthHash = _dnaHashFor({ refId: resolvedRefId, contract });
+        specAuthorityStale = !s6Hash || s6Hash !== s7AuthHash;
+        if (specAuthorityStale) console.log(`[MEGA S7] 🧬⚠️ contract authority ไม่ตรงกับตอน S6 (s6=${s6Hash || '-'} vs s7=${s7AuthHash}) — spec fail-closed`);
+      }
       selectionSpec = specApi.buildSelectionSpec({
         contract,
         realizedTemplate: selectionRefDNA ? dnaToTemplateSpec(selectionRefDNA) : null,
-        // ⚠️ SEM-1 interim: semantic ON ทำ slots key เป็น instance id — planKeyFor ฝั่ง spec ยัง join แบบ generic
-        //   จึงรายงาน missing ชั่วคราวจนกว่า SEM-2 (spec รับ plannedByRefSlot) — จดเป็นข้อจำกัดที่รู้แล้ว ห้ามแก้ข้าม batch
         plannedSlots: slots,
         backups: backupEntries.filter((b) => sentSet.has(b.imageUrl)), // เฉพาะสำรองที่รอดเพดาน 10 ลิงก์จริง
         // ★ Codex รอบ 3 ข้อ 3 + รอบ 4 P1: refId = ตัวตนจริง (bind refId → dnaHash แฟ้มเก่า → m.ref.id ตอน S7 pick เอง)
         refId: resolvedRefId,
+        // ★ SEM-2: มีเฉพาะ semantic ON — legacy/OFF ไม่ส่ง param = branch เดิม byte เดิม
+        ...(plannedByRefSlot ? { plannedByRefSlot, authorityStale: specAuthorityStale } : {}),
       });
       console.log(`[MEGA S7] 📜 SelectionSpec v1: ${selectionSpec.counts.total} ช่อง (map ${selectionSpec.counts.mapped} · ไร้ primary ${selectionSpec.counts.missingPrimary}) · strictReady=${selectionSpec.strictReady} · hash=${selectionSpec.specHash}`);
     } catch (e) { console.log('[MEGA S7] SelectionSpec ล้ม (shadow ไม่กระทบงาน):', String(e?.message || '').slice(0, 80)); }

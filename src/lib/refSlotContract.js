@@ -338,10 +338,130 @@ function planKeyFor(cs, usedKeys) {
  * + specHash = identity mapping ล้วน (refSlotId+composerSlotId+candidateId — ไม่ผูก URL ชั่วคราว)
  * + replayHash = identity + URL (ไว้เช็คว่าไฟล์จริงเปลี่ยนไหม — คนละหน้าที่กับ specHash)
  */
-export function buildSelectionSpec({ contract = null, realizedTemplate = null, plannedSlots = {}, backups = [], refId = null } = {}) {
+export function buildSelectionSpec({ contract = null, realizedTemplate = null, plannedSlots = {}, backups = [], refId = null, plannedByRefSlot = undefined, authorityStale = false } = {}) {
   const contractSlots = Array.isArray(contract?.slots) ? contract.slots : [];
   const plans = plannedSlots && typeof plannedSlots === 'object' ? plannedSlots : {};
   const composerIds = mapContractToRealized(contractSlots, realizedTemplate);
+
+  // ══════════ ★ SEM-2 (Codex): exact-authority branch — plannedByRefSlot ══════════
+  // param "ไม่มี" (undefined/ไม่ใช่ object) = legacy branch เดิมทั้งอัลกอริทึม/เอาต์พุตด้านล่าง byte เดิม
+  // param เป็น object (รวม {}) = exact เท่านั้น: lookup ด้วย cs.id ตรงตัว — ห้ามเรียก planKeyFor
+  // ห้าม fallback generic/positional ทุกกรณี · semanticFallback = 0 เสมอในโหมดนี้
+  if (plannedByRefSlot && typeof plannedByRefSlot === 'object' && !Array.isArray(plannedByRefSlot)) {
+    const diagnostics = { extraPlannedKeys: [], invalidPrimary: [], duplicateBackupsDropped: [] };
+    const idSet = new Set(contractSlots.map((s) => s.id));
+    for (const k of Object.keys(plannedByRefSlot)) {
+      if (!idSet.has(k)) diagnostics.extraPlannedKeys.push(k); // stale/extra authority keys — additive report
+    }
+    // ★ SEM-2 audit B: exact strict ต้องมี ref identity จริง — null/ว่าง/ช่องว่างล้วน = ไม่ ready (legacy ไม่แตะ)
+    const _refIdOk = refId != null && String(refId).trim().length > 0;
+    if (!_refIdOk) diagnostics.missingRefId = true;
+    // pass 1: primaries ก่อน (ต้องรู้ครบทั้งสัญญา เพื่อกัน backup ชน primary ข้ามช่อง — audit E)
+    const _prims = contractSlots.map((cs) => {
+      const e = plannedByRefSlot[cs.id];
+      if (e == null) return null;
+      const cid = e.candidateId == null ? null : String(e.candidateId);
+      const url = String(e.imageUrl || '');
+      if (cid && url) return { candidateId: cid, imageUrl: url };
+      diagnostics.invalidPrimary.push(cs.id); // มี entry แต่ id/URL ไม่ครบ = ใช้ไม่ได้ (นับ missing)
+      return null;
+    });
+    const _primIdSet = new Set(_prims.filter(Boolean).map((p) => p.candidateId));
+    const _primUrlSet = new Set(_prims.filter(Boolean).map((p) => p.imageUrl));
+    // pass 2: backups — drop deterministic สองเหตุ (ระบุ reason ชัด):
+    //   collides_primary = ชน primary ใดๆ ทั้งสัญญา (id หรือ URL) — ห้ามคง backup ที่ซ้ำ primary
+    //   duplicate_across_owners = ซ้ำ backup ช่องก่อนหน้า (contract order → owner แรกชนะ)
+    const _bkIds = new Set();
+    const _bkUrls = new Set();
+    const slots = contractSlots.map((cs, i) => {
+      const e = plannedByRefSlot[cs.id];
+      const primary = _prims[i];
+      const bks = [];
+      for (const b of (e?.backups || [])) {
+        const cid = b?.candidateId == null ? null : String(b.candidateId);
+        const url = String(b?.imageUrl || '');
+        if (!cid || !url) continue;
+        if (_primIdSet.has(cid) || _primUrlSet.has(url)) {
+          diagnostics.duplicateBackupsDropped.push({ candidateId: cid, imageUrl: url, droppedFromOwner: cs.id, reason: 'collides_primary' });
+          continue;
+        }
+        if (_bkIds.has(cid) || _bkUrls.has(url)) {
+          diagnostics.duplicateBackupsDropped.push({ candidateId: cid, imageUrl: url, droppedFromOwner: cs.id, reason: 'duplicate_across_owners' });
+          continue;
+        }
+        _bkIds.add(cid);
+        _bkUrls.add(url);
+        bks.push({ candidateId: cid, imageUrl: url });
+      }
+      return {
+        refSlotId: cs.id,
+        composerSlotId: composerIds[i],
+        sourceIndex: cs.sourceIndex,
+        refRole: cs.refRole,
+        legacySlot: e?.legacySlot ?? null, // display/compat เท่านั้น — ไม่ใช่ authority และไม่เข้า specHash
+        mappingMode: 'ref_slot_exact',
+        shape: cs.shape,
+        primary,
+        backups: bks, // ผูกช่องของตัวเองเท่านั้น (ไม่มีพูลกลาง)
+      };
+    });
+    const mapped = slots.filter((s) => s.composerSlotId).length;
+    const missingPrimary = slots.filter((s) => !s.primary).length;
+    const refIdsUnique = new Set(slots.map((s) => s.refSlotId)).size === slots.length;
+    const compIds = slots.map((s) => s.composerSlotId).filter(Boolean);
+    const compIdsUnique = new Set(compIds).size === compIds.length;
+    const primIds = slots.map((s) => s.primary?.candidateId).filter(Boolean);
+    const duplicatePrimary = primIds.length - new Set(primIds).size;
+    // ★ SEM-2 P2 (Codex): primary URL alias — คนละ candidateId แต่ไฟล์เดียวกันข้ามช่อง = ไม่ ready
+    //   นับเฉพาะ id "ต่างกัน" ที่ชน URL เดียว (คู่ที่ id ซ้ำอยู่แล้วถูกนับใน duplicatePrimary — ห้ามนับซ้ำ)
+    const _primUrlGroups = new Map();
+    for (const s of slots) {
+      const p = s.primary;
+      if (!p) continue;
+      if (!_primUrlGroups.has(p.imageUrl)) _primUrlGroups.set(p.imageUrl, new Set());
+      _primUrlGroups.get(p.imageUrl).add(p.candidateId);
+    }
+    let duplicatePrimaryUrl = 0;
+    const aliasPrimaryUrls = [];
+    for (const [url, ids] of _primUrlGroups) {
+      if (ids.size > 1) {
+        duplicatePrimaryUrl += ids.size - 1;
+        aliasPrimaryUrls.push({ imageUrl: url, candidateIds: [...ids] });
+      }
+    }
+    diagnostics.aliasPrimaryUrls = aliasPrimaryUrls;
+    // specHash = primary identity + composer mapping ตาม contract order เท่านั้น (backup/legacySlot/extras ห้ามขยับ hash
+    //   — invariant: readiness/diagnostics เป็นผู้ปิด fail-closed ไม่ใช่ hash)
+    const identity = slots.map((s) => [s.refSlotId, s.composerSlotId, s.primary?.candidateId || null]);
+    const specHash = fnv1a32(JSON.stringify({ refId: refId || null, identity }));
+    const backupPoolHash = fnv1a32(JSON.stringify(slots.map((s) => [s.refSlotId, s.backups.map((b) => b.candidateId)])));
+    const replayHash = fnv1a32(JSON.stringify({
+      refId: refId || null,
+      identity,
+      urls: slots.map((s) => s.primary?.imageUrl || null),
+      backups: slots.map((s) => [s.refSlotId, s.backups.map((b) => [b.candidateId, b.imageUrl])]),
+    }));
+    return {
+      v: 1,
+      refId: refId || null,
+      source: contract?.source || null,
+      mode: 'ref_slot_exact',
+      specHash,
+      backupPoolHash,
+      replayHash,
+      // fail-closed: ขาด/ซ้ำ (ทั้ง id และ URL alias)/ไม่ครบ/key เกินสัญญา/authority เก่า = strictReady=false
+      //   — ห้ามถอย legacy join เด็ดขาด (★ SEM-2 P1: extraPlannedKeys > 0 ก็ต้องไม่ ready)
+      strictReady: contractSlots.length > 0 && mapped === slots.length && refIdsUnique && compIdsUnique
+        && missingPrimary === 0 && duplicatePrimary === 0 && duplicatePrimaryUrl === 0
+        && diagnostics.invalidPrimary.length === 0 && diagnostics.extraPlannedKeys.length === 0
+        && _refIdOk && !authorityStale, // ★ audit B: ไร้ ref identity = ห้าม ready
+      counts: { total: slots.length, mapped, unmapped: slots.length - mapped, missingPrimary, duplicatePrimary, duplicatePrimaryUrl, semanticFallback: 0 },
+      diagnostics,
+      ...(authorityStale ? { authorityStale: true } : {}),
+      slots,
+    };
+  }
+  // ══════════ (จบ exact branch — ด้านล่าง = legacy เดิม byte-parity) ══════════
   // ★ รอบ 3 ข้อ 4: dedupe สำรองแบบ deterministic (candidateId แรกชนะ ตามลำดับที่ส่งเข้ามา)
   const _seenBk = new Set();
   const backupList = (Array.isArray(backups) ? backups : [])
