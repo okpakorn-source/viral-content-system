@@ -1306,7 +1306,8 @@ export async function s6_slots(job, { origin }) {
     }
     if (lockedRef) {
       // ★ Wave1 Batch E: dnaHash+refBoundAt — stamp ว่า DNA ก้อนไหน/เมื่อไหร่ถูกผูกกับข่าวนี้ (debug/replay)
-      job.dossier.refMatch = { dna: lockedRef.dna, styleName: lockedRef.styleName || lockedRef.id, imagePath: lockedRef.imagePath, reason: 'ล็อก refId', typeMatched: true, dnaHash: _dnaHashFor(lockedRef.dna), refBoundAt: new Date().toISOString() };
+      // ★ รอบ 6 P1: refId เพิ่มเฉพาะใต้สวิตช์ — ปิด = ไม่มี property เลย (object shape เท่า legacy 100%)
+      job.dossier.refMatch = { ...(process.env.MEGA_SELECTION_SPEC === '1' && lockedRef.id ? { refId: lockedRef.id } : {}), dna: lockedRef.dna, styleName: lockedRef.styleName || lockedRef.id, imagePath: lockedRef.imagePath, reason: 'ล็อก refId', typeMatched: true, dnaHash: _dnaHashFor(lockedRef.dna), refBoundAt: new Date().toISOString() };
       console.log(`[MEGA S6] 🔒 ใช้ ref ที่ล็อก: ${lockedRef.styleName || lockedRef.id}`);
     } else {
       try {
@@ -1326,7 +1327,8 @@ export async function s6_slots(job, { origin }) {
           const weak = !m.typeMatched;
           const dna = weak ? { ...m.ref.dna, slots: [], neededShots: [], storyFlow: '', compositionLogic: '' } : m.ref.dna;
           // ★ Wave1 Batch E: dnaHash+refBoundAt — stamp ว่า DNA ก้อนไหน/เมื่อไหร่ถูกผูกกับข่าวนี้ (debug/replay)
-          job.dossier.refMatch = { dna, styleName: m.ref.styleName || m.ref.id, imagePath: m.ref.imagePath, reason: m.reason, typeMatched: !weak, dnaHash: _dnaHashFor(dna), refBoundAt: new Date().toISOString() };
+          // ★ รอบ 6 P1: refId เพิ่มเฉพาะใต้สวิตช์ — ปิด = ไม่มี property เลย (object shape เท่า legacy 100%)
+          job.dossier.refMatch = { ...(process.env.MEGA_SELECTION_SPEC === '1' && m.ref.id ? { refId: m.ref.id } : {}), dna, styleName: m.ref.styleName || m.ref.id, imagePath: m.ref.imagePath, reason: m.reason, typeMatched: !weak, dnaHash: _dnaHashFor(dna), refBoundAt: new Date().toISOString() };
         }
       } catch { /* ไม่มีคลัง ref → เดินแบบเดิม */ }
     }
@@ -1336,6 +1338,9 @@ export async function s6_slots(job, { origin }) {
   // ★ 8 ก.ค. (CASE-361): เทมเพลตของ ref ตระกูลหลัก (vt_ref_5x4) มีแค่ 4 ช่องภาพ แต่เดิมเลือกครบ 5 บทบาทเสมอ
   //   → ช่องที่ 5 ไม่ได้ถูกใช้จริงตอนประกอบ (จำนวนภาพไม่ตรงกับที่ ref กำหนด) — ตัดให้เหลือเท่า panelCount ของ ref ที่แมตช์ (ไม่มี ref/เลขแปลก → คงเดิม 5 ปลอดภัย)
   const _panelCount = Number(job.dossier.refMatch?.dna?.panelCount);
+  // ⚠️ root cause (Codex ตรวจรอบ 3 — จดไว้แก้ batch semantic-selection ภายใต้ kill switch ห้ามแตะรอบนี้):
+  //   slice ตามตำแหน่งทำ ref 4 ช่องที่มี circle เสีย "บท circle" ไป (ได้ hero/reaction/action/context แทน)
+  //   → แผน S6 ไม่มีภาพให้วงกลมเลย — SelectionSpec v1 เปิดโปงเป็น missingPrimary/strictReady=false แล้ว
   const activeSlots = (_panelCount >= 3 && _panelCount <= SLOT_ORDER.length) ? SLOT_ORDER.slice(0, _panelCount) : SLOT_ORDER;
   if (job.dossier.refMatch) {
     console.log(`[MEGA S6] 🎯 ปกเป้า: ${job.dossier.refMatch.styleName || '-'} (${job.dossier.refMatch.reason || ''}) — ${_refDNA ? 'ใช้ขับการเลือกภาพ + โครง' : 'แมตช์หลวม → ใช้เฉพาะโครง (เลือกภาพตามเข็มทิศข่าว)'}${activeSlots.length !== SLOT_ORDER.length ? ` · ตัดเหลือ ${activeSlots.length} ช่องตาม panelCount ref` : ''}`);
@@ -1923,6 +1928,7 @@ export async function s7_cover(job, { origin } = {}) {
   // ★ 7 ก.ค. FIX "คลังแน่นแต่ปกล้มภาพไม่พอ": เดิม backups เป็น id ถูกทิ้ง (นับรายงานเฉยๆ) แล้วส่งแค่ 5 ลิงก์เป๊ะ —
   //   ลิงก์หน้าเว็บ/วิดีโอพัง 1-2 ใบ (403) = พูลต่ำกว่า 4 ล้มทั้งปก → แปลง id→URL จากคลังเคส ต่อท้าย (ไฟล์รูปตรงก่อน) เพดาน 10
   let backupUrls = [];
+  let backupEntries = []; // ★ SelectionSpec v1: สำรองพร้อม candidateId (id จริงจากคลัง ไม่ใช่แค่ URL)
   let urlTriage = new Map(); // ★ 8 ก.ค.: url → {clean,faces} จากคลัง (ส่งเป็น slotPlan ให้ v3 เชื่อป้ายตาคัด)
   try {
     const backupIds = Object.values(slots).flatMap((s) => s?.backups || []);
@@ -1946,6 +1952,10 @@ export async function s7_cover(job, { origin } = {}) {
       const isDirect = (u) => /\.(jpe?g|png|webp|gif)([?#]|$)/i.test(String(u || ''));
       backupUrls = backupIds.map((b) => byId.get(String(b))).filter(Boolean)
         .sort((a, b) => (isDirect(b) ? 1 : 0) - (isDirect(a) ? 1 : 0));
+      const _seenBk = new Set(); // ★ Codex รอบ 3 ข้อ 4: dedupe deterministic — candidateId แรกชนะตามลำดับ backupIds
+      backupEntries = backupIds
+        .map((b) => ({ candidateId: String(b), imageUrl: String(byId.get(String(b)) || '') }))
+        .filter((x) => { if (!x.imageUrl || _seenBk.has(x.candidateId)) return false; _seenBk.add(x.candidateId); return true; });
     }
   } catch { /* สำรองไม่ critical — ได้แค่ลิงก์หลักก็เดินต่อ */ }
   // ★ 9 ก.ค. ค่ำ (อุดรอย "ภาพคนอื่นหล่น" — เหมือน compose-test): เรียง backups ให้ "คนละคนกับ hero"
@@ -1993,6 +2003,12 @@ export async function s7_cover(job, { origin } = {}) {
   //   (fallback: ถ้าแฟ้มเก่าไม่มี refMatch เช่นงานค้างก่อนอัป → หาใหม่ตรงนี้)
   let refDNA = d.refMatch?.dna || null;
   let refInfo = refDNA ? ` · 🎯ref ${d.refMatch.styleName || ''} (${d.refMatch.reason || ''})`.slice(0, 90) : '';
+  // ★ รอบ 4 P1: refId ตัวตนจริงต้องตามทัน fallback ด้วย — d.refMatch ก่อน แล้วอัปเดตเมื่อ S7 pick เอง
+  let resolvedRefId = d.refMatch?.refId || d.refMatch?.dnaHash || null;
+  // ★ รอบ 5 P0-2: แยกสอง DNA เด็ดขาด — refDNA (payload/composer) ต้องเป็นพฤติกรรม HEAD เดิมทุก byte
+  //   ไม่ว่า kill switch เปิดหรือปิด · selectionRefDNA ใช้สร้าง SelectionSpec เท่านั้น (strip weak-match
+  //   ให้ตรงกับที่ S6 ใช้จริง) — สาย d.refMatch ไม่ต้อง strip เพราะ S6 เก็บ dna ที่ strip แล้วตอน bind
+  let selectionRefDNA = refDNA;
   if (!refDNA) {
     try {
       const { pickBestRef } = await import('@/lib/refCoverMatch');
@@ -2003,8 +2019,38 @@ export async function s7_cover(job, { origin } = {}) {
         charCount: (c.mainCharacters || []).length,
         dreamShots: (c.visualDreamShots || []).map((v) => v.slot || v.description || ''),
       });
-      if (m?.ref?.dna) { refDNA = m.ref.dna; refInfo = ` · 🎯ref ${m.ref.styleName || m.ref.id} (${m.reason})`.slice(0, 90); }
+      if (m?.ref?.dna) {
+        refDNA = m.ref.dna; // payload/composer: legacy เดิมเป๊ะ ห้าม strip (kill switch ต้องไม่เปลี่ยนผลปก)
+        // ★ ผู้ตรวจอิสระ (รอบ 4) + รอบ 5: strip เฉพาะสัญญา — weak match = S6 ใช้เฉพาะโครง
+        selectionRefDNA = m.typeMatched ? m.ref.dna : { ...m.ref.dna, slots: [], neededShots: [], storyFlow: '', compositionLogic: '' };
+        resolvedRefId = m.ref.id || _dnaHashFor(selectionRefDNA); // identity จริงเท่านั้น — ห้ามใช้ styleName
+        refInfo = ` · 🎯ref ${m.ref.styleName || m.ref.id} (${m.reason})`.slice(0, 90);
+      }
     } catch { /* คลัง ref ว่าง/ล้ม → ไม่มี ref (ใช้ template ปกติ) ไม่กระทบ */ }
+  }
+  // ★ 📜 SelectionSpec v1 (Codex ตรวจรอบ 2 ข้อ 2-5 — 10 ก.ค. ดึก): สัญญา S6→composer สร้าง "ก่อน" เรียกโรงประกอบ
+  //   shadow/additive ล้วน — ยังไม่มีผู้บริโภคฝั่งประกอบ = ไม่เปลี่ยนผลปกแม้ byte เดียว
+  //   ★ รอบ 4 P1: ระหว่างพัฒนา default OFF ตามกฎ — เปิดเอง MEGA_SELECTION_SPEC=1 เฉพาะ local :3900
+  //   ปิด = ไม่มี dossier field/ไม่มี log/พฤติกรรม legacy เดิม 100% · strict composer มาอ่านสัญญานี้หลังตรวจผ่าน
+  let selectionSpec = null;
+  if (process.env.MEGA_SELECTION_SPEC === '1') {
+    try {
+      const specApi = await import('@/lib/refSlotContract');
+      const { dnaToTemplateSpec } = await import('@/lib/refTemplate');
+      // ★ รอบ 5 P0-2: สัญญาสร้างจาก selectionRefDNA เท่านั้น (weak-match ถูก strip ตรง S6) —
+      //   ส่วน payload ด้านล่างใช้ refDNA legacy · template.slots สองก้อนเหมือนกัน realized geometry จึงตรง composer
+      const contract = specApi.buildRefSlotContract({ refDNA: selectionRefDNA, artBriefOrders: d.artBrief?.orders || [] });
+      const sentSet = new Set(allLinks.map(String));
+      selectionSpec = specApi.buildSelectionSpec({
+        contract,
+        realizedTemplate: selectionRefDNA ? dnaToTemplateSpec(selectionRefDNA) : null,
+        plannedSlots: slots,
+        backups: backupEntries.filter((b) => sentSet.has(b.imageUrl)), // เฉพาะสำรองที่รอดเพดาน 10 ลิงก์จริง
+        // ★ Codex รอบ 3 ข้อ 3 + รอบ 4 P1: refId = ตัวตนจริง (bind refId → dnaHash แฟ้มเก่า → m.ref.id ตอน S7 pick เอง)
+        refId: resolvedRefId,
+      });
+      console.log(`[MEGA S7] 📜 SelectionSpec v1: ${selectionSpec.counts.total} ช่อง (map ${selectionSpec.counts.mapped} · ไร้ primary ${selectionSpec.counts.missingPrimary}) · strictReady=${selectionSpec.strictReady} · hash=${selectionSpec.specHash}`);
+    } catch (e) { console.log('[MEGA S7] SelectionSpec ล้ม (shadow ไม่กระทบงาน):', String(e?.message || '').slice(0, 80)); }
   }
   const payload = {
     jobType: 'cover',
@@ -2023,7 +2069,7 @@ export async function s7_cover(job, { origin } = {}) {
     status: 'done',
     nextAction: 'continue',
     summary: `ส่งทำปกแล้ว job ${String(q.jobId).slice(0, 10)} (ภาพ ${links.length} ใบจาก 5 ช่อง · สำรอง ${backup})${refInfo}`,
-    dossierPatch: { cover: { queueJobId: q.jobId, enqueuedAt: new Date().toISOString(), sourceLinks: links, refStyle: refInfo || null } },
+    dossierPatch: { cover: { queueJobId: q.jobId, enqueuedAt: new Date().toISOString(), sourceLinks: links, refStyle: refInfo || null, ...(selectionSpec ? { selectionSpec } : {}) } },
   };
 }
 
@@ -2077,8 +2123,15 @@ export async function s7_wait(job) {
           manifestSlots: r.manifest.slots,
           placed: r.placed || [],
           refSlotContract,
+          // ★ รอบ 4 P0: สัญญาจริงจาก S7 มาก่อน positional เสมอ (ไม่มี = ถอย legacy เดิมทั้งก้อน)
+          selectionSpec: job.dossier.cover?.selectionSpec || null,
         });
-        console.log(`[MEGA S7] selection trace: kept ${finalAssignmentTrace.keptExpectedPrimary}/${finalAssignmentTrace.total} expected primaries · changed ${finalAssignmentTrace.changedExpectedPrimary}`);
+        // ★ รอบ 7 P0: แยก log ตามเวอร์ชัน — v1 (ไม่มี spec) ต้องเป็นข้อความ HEAD เดิมทุกตัวอักษร
+        if (finalAssignmentTrace.v === 2) {
+          console.log(`[MEGA S7] selection trace: kept ${finalAssignmentTrace.partition.kept}/${finalAssignmentTrace.total} · changed ${finalAssignmentTrace.partition.changed} · missing ${finalAssignmentTrace.partition.missingExpected} · unmapped ${finalAssignmentTrace.partition.unmapped}`);
+        } else {
+          console.log(`[MEGA S7] selection trace: kept ${finalAssignmentTrace.keptExpectedPrimary}/${finalAssignmentTrace.total} expected primaries · changed ${finalAssignmentTrace.changedExpectedPrimary}`);
+        }
       } catch (traceErr) {
         console.log('[MEGA S7] selection trace failed (cover result unchanged):', traceErr?.message?.slice(0, 80));
       }
