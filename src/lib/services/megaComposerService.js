@@ -1082,6 +1082,16 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
           if (eye.fixes?.length && eye.similarity < 100) {
             fixedCount = applyEyeFixes({ fixes: eye.fixes, assignments: core.assignments, loaded: core.loaded, faceBoxes: core.faceBoxes, used: core.used });
             if (fixedCount) {
+              // ★ Wave2 Batch C (10 ก.ค. — AI Eye ต้องเป็น advisory จริง ไม่ใช่รับคำสั่งเงียบๆแล้วเชื่อทันที):
+              //   เก็บ "baseline ก่อนแก้" ครบชุด (assignments/used/buffer/trace/flags) ไว้ก่อนเรนเดอร์ทับ
+              //   เผื่อ re-QC ด้านล่างพบว่าแย่ลง → revert กลับจุดนี้เป๊ะ (ไม่ใช่แค่ buffer — assignments ต้องตรงด้วย)
+              const _preAssignments = core.assignments.map((a) => ({ ...a }));
+              const _preAssignSnap = new Map(_preAssignments.map((a) => [a.slotId, { imageIndex: a.imageIndex, crop: JSON.stringify(a.crop) }]));
+              const _preUsed = new Set(core.used);
+              const _preQcFlags = [...(core.qcFlags || [])];
+              const _preCropTrace = [...cropTrace];
+              const _preBuffer = buffer;
+
               const { executeCover } = await import('@/lib/services/coverExecutorService');
               buffer = await executeCover({ assignments: core.assignments, imageBuffers: core.loaded, templateSpec: core.spec, faceBoxes: core.faceBoxes, traceSink: core.traceSink });
               cropTrace = [...(core.traceSink || [])]; // audit: trace ของรอบสุดท้าย จาก sink ของงานนี้เอง
@@ -1089,11 +1099,80 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
               core.qcFlags = (core.qcFlags || []).filter((f) => !/^(blind_crop|upscaled|upscale_soft):/.test(String(f)));
               core.qcFlags.push(...traceQcFlags(cropTrace));
               console.log(`[MegaComposer] 👁️ แก้ตามตา ${fixedCount} จุด → ประกอบใหม่ (bounded 1 รอบจบ)`);
+
+              // ── 🔬 re-QC กลไกล้วน (ไม่เรียก vision LLM เพิ่ม) — ตาแค่ "เสนอ" เครื่องตัดสินว่าจะรับจริงไหม ──
+              //   เทียบเฉพาะช่องที่ตาสั่งแก้ (touched: imageIndex หรือ crop เปลี่ยน) ก่อน-หลัง:
+              //   · blind_crop เกิดใหม่ (ไม่มีมาก่อน) = แย่ลงชัดเจน
+              //   · upscale มีเลขให้เทียบทั้งคู่ (ทั้งก่อน-หลังเคยติดธง) แล้วแย่ลง >10% = แย่ลงชัดเจน
+              //   · ก่อนไม่ติดธง (ยืด <1.2 เดิม) แต่หลังยืดทะลุเพดานจริงของช่องรอง (>1.6) = แย่ลงชัดเจน
+              //     (ไม่เดาเปอร์เซ็นต์จาก baseline ที่ไม่รู้ค่าเป๊ะ — ใช้เพดาน QC gate เป็นเส้นตัดสินแทน ซื่อสัตย์กว่า)
+              //   ⚠️ ข้อจำกัดที่รู้แล้วยอมรับ: person_cut วัดได้จาก detectFaces บน "ปกที่เรนเดอร์จริง" เท่านั้น
+              //     (vision LLM ผ่าน batchDetectFaces) — เรขาคณิตล้วนจาก faceBoxes+crop เดิมวัดแทนไม่ได้แม่น เพราะ
+              //     executor ปรับ crop จริงเองอีกชั้น (crop ที่ส่งเข้าไปเป็นแค่ hint ไม่ใช่ค่าจริงที่ render)
+              //     → ข้ามตัวนี้ในนี้ + ติดธง person_cut_unverified ให้เห็นข้อจำกัดชัดเจนแทนการเดาว่าผ่าน
+              //   kill switch: MEGA_EYE_REQC=0 → ปิดด่านนี้ทั้งหมด (พฤติกรรมเดิมเป๊ะ: แก้แล้วรับผลทันที)
+              if (process.env.MEGA_EYE_REQC !== '0') {
+                const touchedSlots = core.assignments
+                  .filter((a) => {
+                    const pre = _preAssignSnap.get(a.slotId);
+                    return !pre || pre.imageIndex !== a.imageIndex || pre.crop !== JSON.stringify(a.crop);
+                  })
+                  .map((a) => a.slotId);
+                if (touchedSlots.length) {
+                  const upOf = (flags, slot) => {
+                    for (const f of flags) {
+                      const m = /^(?:upscaled|upscale_soft):([^:]+):([\d.]+)$/.exec(String(f));
+                      if (m && m[1] === slot) return Number(m[2]);
+                    }
+                    return null;
+                  };
+                  const blindOf = (flags, slot) => flags.includes(`blind_crop:${slot}`);
+                  let regression = null;
+                  for (const slot of touchedSlots) {
+                    if (blindOf(core.qcFlags, slot) && !blindOf(_preQcFlags, slot)) { regression = `blind_crop_new:${slot}`; break; }
+                    const beforeUp = upOf(_preQcFlags, slot);
+                    const afterUp = upOf(core.qcFlags, slot);
+                    if (afterUp != null) {
+                      if (beforeUp != null && afterUp > beforeUp * 1.1 + 0.001) { regression = `upscale_worse:${slot}:${beforeUp.toFixed(2)}->${afterUp.toFixed(2)}`; break; }
+                      if (beforeUp == null && afterUp > 1.6) { regression = `upscale_new:${slot}:${afterUp.toFixed(2)}`; break; }
+                    }
+                  }
+                  if (regression) {
+                    // ↩️ revert ทั้งชุด — กลับไปจุดก่อนตาสั่งแก้เป๊ะ (assignments/used/buffer/trace/flags ตรงกันหมด)
+                    core.assignments.length = 0;
+                    core.assignments.push(..._preAssignments);
+                    core.used = _preUsed;
+                    buffer = _preBuffer;
+                    cropTrace = _preCropTrace;
+                    core.qcFlags = [..._preQcFlags, `eye_fix_reverted:${regression}`];
+                    fixedCount = 0; // สะท้อนความจริง: การแก้ของตาไม่ถูกใช้จริงในปกที่คืนออกไป
+                    console.log(`[MegaComposer] 👁️↩️ revert eye fix (${regression}) — กลไกวัดว่าแย่ลงกว่า baseline`);
+                  } else {
+                    core.qcFlags.push('eye_fix_kept', 'person_cut_unverified');
+                    console.log('[MegaComposer] 👁️✅ eye fix ผ่านด่านกลไก (blind_crop/upscale ไม่แย่ลง) — รับผล');
+                  }
+                }
+              }
             }
           }
         }
       } catch (e) { console.log('[MegaComposer] ตาเทียบ ref ล้ม (ใช้ปกเดิม):', e.message?.slice(0, 50)); }
     }
+    // ★ W2 (จากคลังจริง 10 ก.ค. — เจอ "วงกลมว่าง" 2 ใบ): จับภาพเปล่า/เกือบสีเดียวล้วนที่หลุดลงช่อง
+    //   aHash 64 บิตของภาพแบนๆ จะมีบิตเกือบเท่ากันหมด (popcount ≤6 หรือ ≥58) → ติดธงให้ด่าน QC ตัดสิน
+    //   ใช้ค่า aHash ที่คำนวณแล้ว ไม่มี IO เพิ่ม · ตรวจไม่ได้ = ไม่ติดธง (ห้ามเดา)
+    try {
+      const _pop = (h) => { let n = 0n, x = BigInt(h); while (x > 0n) { n += x & 1n; x >>= 1n; } return Number(n); };
+      for (const a of core.assignments) {
+        const ah = core.aHashes ? core.aHashes[a.imageIndex] : null;
+        if (ah == null) continue;
+        const bits = _pop(ah);
+        if (bits <= 6 || bits >= 58) {
+          core.qcFlags.push(`blank_image:${a.slotId}`);
+          console.log(`[MegaComposer] 🕳️ ภาพเกือบเปล่าลงช่อง ${a.slotId} (aHash popcount=${bits}) — ติดธง blank_image`);
+        }
+      }
+    } catch { /* ตรวจไม่ได้ = ไม่ติดธง */ }
     // ★ Wave1 Batch E (manifest-lite): "ความจริงของรอบประกอบ" — เก็บจากค่าที่คำนวณอยู่แล้วล้วน (ห้าม LLM/IO เพิ่ม
     //   ยกเว้น sha1 ของ buffer สุดท้าย) ให้ debug/replay ย้อนดูได้ทีหลังว่ารอบนี้ใช้ภาพ/หน้า/โมเดลอะไร
     //   ล้มเองได้ = ไม่กระทบผลปก (additive ล้วน — ไม่มี = ผู้เรียกเดิมไม่พัง)

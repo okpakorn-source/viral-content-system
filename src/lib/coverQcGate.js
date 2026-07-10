@@ -21,6 +21,7 @@
 //     · 'person_cut:<slot>'            คนโดนเฟรมตัด (ไม่มีตัวสำรอง/ครอปแก้ไม่ได้)
 //     · 'circle_same_person_as_hero'   วงกลมเป็นคนเดียวกับ hero (ไม่มีตัวเลือกจริง)
 //     · 'hero_profile_forced'          hero มุมข้าง/หลัง เพราะคลังไม่มีหน้าตรง/เฉียง
+//     · 'blank_image:<slot>'           ภาพเปล่า/เกือบสีเดียวล้วน (aHash บิตเกือบเท่ากันหมด — เคสวงกลมว่างในคลังจริง)
 //   BENIGN (ไม่นับ — ไม่กระทบ pass): feather_capped · enhanced:hero:* ·
 //     border_trimmed:* · hero_pose:* · enhance_failed:hero · upscale_soft:<ช่องอื่น> ≤1.6
 // ============================================================
@@ -88,6 +89,13 @@ export function evaluateCoverQc(input = {}, opts = {}) {
     if (f === 'hero_profile_forced') {
       reviewFail = true;
       reasons.push('hero เป็นมุมข้าง/หลัง (คลังไม่มีหน้าตรง/เฉียงให้เลือก) → คนต้องดู');
+      continue;
+    }
+    // ★ W2 (จากคลังจริง 10 ก.ค.): ภาพเปล่า/เกือบสีเดียวล้วนลงช่อง — เจอ "วงกลมว่าง" 2 ใบในคลัง
+    //   composer ติดธงจาก aHash เกือบทุกบิตเท่ากัน (blank_image:<slot>) → คนต้องดูเสมอ
+    if (/^blank_image(:|$)/.test(f)) {
+      reviewFail = true;
+      reasons.push(`ภาพเปล่า/เกือบสีเดียวล้วนลงช่อง [${f}] → คนต้องดู`);
       continue;
     }
     // ── ③ ที่เหลือ = benign (feather_capped/enhanced/border_trimmed/hero_pose/enhance_failed/upscale_soft ช่องอื่น≤1.6) — ไม่นับ ──
