@@ -13,6 +13,9 @@ import path from 'path';
 import crypto from 'crypto'; // ★ เฟส 3.2 (10 ก.ค.): md5 คีย์ cache ผล photo-enhance ของ hero
 // ★ Wave2 Batch D2 (10 ก.ค.): เกณฑ์ตัวเลข "กติกาวัดได้" จากคลังเทคนิคปก — single source of truth (sync, ใช้ใน measureTechRules)
 import { TECH_RULES } from '@/lib/imageQualityConfig';
+// ★ Checkpoint B (11 ก.ค. — Codex strict consumer): ผู้ตัดสิน "เปิด strict ได้ไหม" คือ validator ของ Checkpoint A
+//   เท่านั้น — consumer ใช้เฉพาะ decision.authority ที่ normalize แล้ว ห้ามอ่าน raw selectionSpec เอง
+import { validateStrictRenderActivation } from '@/lib/refSlotContract';
 
 // ★ Wave1 Batch E (10 ก.ค. — manifest-lite): เวอร์ชัน composer ปัจจุบัน ประกาศตายตัวตรงนี้
 //   อัปเดตมือเมื่อแก้กติกา compose/crop/hero — ใช้ stamp ลง manifest ให้ debug/replay ย้อนดูได้ว่ารอบนี้วิ่งด้วยกติกาไหน
@@ -407,7 +410,340 @@ export function measureTechRules({ assignments = [], spec = null, faceBoxes = []
 }
 
 // ---------- แกนประกอบ (ใช้ร่วม compose/verify) ----------
-async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }) {
+// ---------- 🔐 Checkpoint B (11 ก.ค. — Codex): DORMANT STRICT COMPOSER CONSUMER ----------
+// consumer พร้อมแต่ยังไม่มี producer ส่ง payload — ตื่นเมื่อ MEGA_STRICT_RENDER=1 + payload พก own-property
+// selectionSpec เท่านั้น · หลักการ: strict = "เส้นแยกทั้งเส้น" — legacy ใน composeCore ไม่ถูกแตะแม้บรรทัดเดียว
+
+// deep-freeze ทั้งต้นไม้ — โครง strict ต้องแตะไม่ได้จริงตั้งแต่ก่อน await แรก (P1 รอบ 2)
+function _deepFreeze(o) {
+  if (o && typeof o === 'object' && !Object.isFrozen(o)) {
+    Object.freeze(o);
+    for (const k of Object.keys(o)) _deepFreeze(o[k]);
+  }
+  return o;
+}
+
+// ① เตรียม strict context — pure 100% ห้ามมี IO: validator → โครง → ผูก primary → snapshot แช่แข็ง
+//   พังชั้นไหน = fail-closed ด้วย errorType เฉพาะชั้นนั้น "ก่อน" fetch/face/render เสมอ
+function _strictPrepare({ carrier, slotPlan }) {
+  // ชั้น 1 — ★ รอบ 2 (P0-1): ส่ง carrier ต้นฉบับเข้า validator ตรงๆ — กฎ own-property/plain-object
+  //   เป็นของ validator ผู้เดียว (array/function พก spec = input_not_plain_object · ห้ามไหลลง legacy)
+  //   อ่าน realizedTemplate ได้ "หลัง" validator ผ่านแล้วเท่านั้น
+  const decision = validateStrictRenderActivation(carrier);
+  if (decision.decision !== 'strict_ready') {
+    const reasons = decision.reasons && decision.reasons.length ? decision.reasons : [decision.decision];
+    return { error: `strict contract ไม่ผ่าน: ${reasons.join(',').slice(0, 180)}`, errorType: 'STRICT_RENDER_CONTRACT_INVALID', reasons };
+  }
+  const authority = decision.authority; // ใช้เฉพาะสำเนา normalized — ห้ามแตะ raw spec ต่อจากนี้
+  const realizedTemplate = carrier.realizedTemplate;
+  // ชั้น 2 — โครง: ตรวจจาก "ต้นฉบับ" ก่อน clone (NaN/Infinity ตายกลาง JSON round-trip → ถูกซ่อมเงียบ)
+  //   ★ รอบ 2 (P1): ห้าม Number() coerce — ต้องเป็น typeof number แท้ + finite + integer (realized จริง
+  //   เป็น pixel int จาก refTemplate เสมอ) · ขอบเขต exact ไม่มี tolerance · ห้าม recompute/family/default
+  const tReasons = [];
+  let spec = null;
+  try { spec = JSON.parse(JSON.stringify(realizedTemplate)); } catch { tReasons.push('template_not_serializable'); }
+  const _numOk = (v) => typeof v === 'number' && Number.isFinite(v);
+  const _pxOk = (v) => _numOk(v) && Number.isInteger(v);
+  const W = realizedTemplate?.canvasW, H = realizedTemplate?.canvasH;
+  // ★ รอบ 4 (P1-5): canvas ต้อง exact ตามสัญญา refTemplate (ผู้ใช้กำหนดตายตัว 7 ก.ค.: ปกทุกใบ 1080×1350)
+  //   — ไม่ใช่แค่ positive integer: 1×1 / 100000×100000 / string / NaN = STRICT_TEMPLATE_INVALID ก่อน IO
+  if (!(W === 1080 && H === 1350)) tReasons.push('canvas_invalid');
+  const tSlots = Array.isArray(realizedTemplate?.slots) ? realizedTemplate.slots : [];
+  if (!tSlots.length) tReasons.push('slots_empty');
+  const _ids = new Set();
+  for (let i = 0; i < tSlots.length; i++) {
+    const s = tSlots[i] || {};
+    const id = String(s.id ?? '');
+    if (!id.trim()) tReasons.push(`slot_id_blank:${i}`);
+    else if (_ids.has(id)) tReasons.push(`slot_id_duplicate:${id}`);
+    _ids.add(id);
+    const { x, y, w, h } = s;
+    if (![x, y, w, h].every(_numOk)) { tReasons.push(`slot_geometry_not_finite:${id || i}`); continue; }
+    if (![x, y, w, h].every(Number.isInteger)) tReasons.push(`slot_geometry_not_integer:${id || i}`);
+    if (!(w > 0 && h > 0)) tReasons.push(`slot_size_not_positive:${id || i}`);
+    if (x < 0 || y < 0 || (_pxOk(W) && x + w > W) || (_pxOk(H) && y + h > H)) tReasons.push(`slot_out_of_canvas:${id || i}`);
+    if (s.shape != null && s.shape !== 'circle' && s.shape !== 'rect') tReasons.push(`slot_shape_unknown:${id || i}`);
+  }
+  if (tReasons.length) return { error: `strict template พัง: ${tReasons.join(',').slice(0, 180)}`, errorType: 'STRICT_TEMPLATE_INVALID', reasons: tReasons };
+  _deepFreeze(spec); // โครงที่ render ใช้จริง — แช่แข็งทั้งต้นไม้ก่อน await แรก (executor mutate = throw)
+  // ชั้น 3 — ผูก primary → slotPlan: exact URL หนึ่งรายการเป๊ะ (0=หาย · >1=กำกวม) + ★ รอบ 2 (P0-2):
+  //   plan ที่ประกาศ refSlotId ต้องตรง authority ด้วย (identity สองชั้น) — พัง = STRICT_PRIMARY_UNAVAILABLE
+  //   บันทึกเป็น "สำเนาแช่แข็ง" ก่อน await ทุกตัว: mutate slotPlan ทีหลัง = ไร้ผล (กัน TOCTOU)
+  //   ห้ามเก็บ/spread raw plan object — คัดเฉพาะ metadata ที่จำเป็นแบบ copy ค่า
+  const bReasons = [];
+  const plan = Array.isArray(slotPlan) ? slotPlan : [];
+  const bind = authority.slots.map((s) => {
+    const matches = plan.filter((p) => String(p?.url || '') === s.primary.imageUrl);
+    if (matches.length === 0) { bReasons.push(`primary_missing:${s.composerSlotId}`); return null; }
+    if (matches.length > 1) { bReasons.push(`primary_duplicate_in_plan:${s.composerSlotId}`); return null; }
+    const m = matches[0];
+    // ★ รอบ 3 (FINAL P0): refSlotId เป็น "ภาคบังคับ" ทุก primary row — สัญญา exact ต้องครบสามชั้น
+    //   (composerSlotId จาก authority + refSlotId + primary URL) · หาย/null/ว่าง/ไม่ตรง = reject ก่อน IO
+    //   ห้าม optional check และห้ามเติมค่าจาก authority ให้ plan เงียบๆ (producer ต้องประกาศเองเต็มปาก)
+    const mRef = m.refSlotId == null ? '' : String(m.refSlotId).trim();
+    if (!mRef || mRef !== s.refSlotId) {
+      bReasons.push(`primary_ref_mismatch:${s.composerSlotId}`);
+      return null;
+    }
+    return Object.freeze({
+      composerSlotId: s.composerSlotId,
+      refSlotId: s.refSlotId,
+      candidateId: s.primary.candidateId,
+      imageUrl: s.primary.imageUrl, // fetch ใช้ค่านี้เท่านั้น
+      meta: Object.freeze({
+        slot: m.slot != null ? String(m.slot) : null,
+        person: m.person != null ? String(m.person) : null,
+        isHero: !!m.isHero,
+        faces: Number(m.faces) || 0,
+        clean: m.clean === false ? false : (m.clean === true ? true : null),
+        newsScene: m.newsScene === false ? false : (m.newsScene === true ? true : null),
+      }),
+    });
+  });
+  if (bReasons.length) return { error: `strict primary ใช้ไม่ได้: ${bReasons.join(',').slice(0, 180)}`, errorType: 'STRICT_PRIMARY_UNAVAILABLE', reasons: bReasons };
+  // ชั้น 4 — immutable snapshot ต่อช่อง (แช่แข็ง) = ความจริงที่ final invariant ใช้จับ drift
+  const snapshot = Object.freeze(authority.slots.map((s, i) => Object.freeze({
+    composerSlotId: s.composerSlotId,
+    refSlotId: s.refSlotId,
+    candidateId: s.primary.candidateId,
+    imageIndex: i, // ลำดับ authority = ลำดับ loaded เสมอ (deterministic)
+    imageUrl: s.primary.imageUrl,
+    shape: s.shape === 'circle' ? 'circle' : 'rect',
+  })));
+  // ★ รอบ 2 (P1): template drift snapshot = canonical deep ของ clone "ทั้งก้อน" (รวม zIndex/border/
+  //   borderWidth/feather/_vis ฯลฯ ทุก field ที่มีผล render) — ไม่ใช่แค่ x/y/w/h
+  const templateSnap = JSON.stringify(spec);
+  return { ctx: { authority, spec, bind: Object.freeze(bind), snapshot, templateSnap } };
+}
+
+// ② เส้นประกอบ strict — source ล็อกตาม authority 100%: โหลดตรง URL → ตาหาหน้า (เพื่อครอปเท่านั้น) →
+//   assignments ตายตัวครั้งเดียว → render ครั้งเดียว · ไม่มีด่านสลับภาพใดๆ (crop/why ปรับได้ · imageIndex ห้าม)
+//   หมายเหตุ: pixel-gate hero/person-cut ของ legacy เป็นด่านชนิด "เปลี่ยนรูป" ซึ่งขัดสัญญา strict — เส้นนี้
+//   จึงไม่รัน (คุณภาพยังถูกวัดด้วย upscaled_src/traceQcFlags/techRules และ hard QC ปลายทางปฏิเสธได้)
+async function composeCoreStrict(strictCtx) {
+  const qcFlags = [];
+  const spec = strictCtx.spec;
+  // โหลดจาก binding record แช่แข็งเท่านั้น (★ รอบ 2 P0-2 — ห้ามอ่าน slotPlan อีก กัน TOCTOU)
+  //   วางผลด้วย index (ลำดับ authority) = ไม่ขึ้นกับลำดับ fetch เสร็จ · loaded พก identity ครบทุกใบ
+  //   ★ รอบ 2 (P1): วัดไฟล์จริงด้วย sharp metadata — อ่านไม่ได้/มิติเพี้ยน = corrupt → fail-closed
+  const loaded = new Array(strictCtx.bind.length).fill(null);
+  const loadFail = [];
+  const trimFlags = new Array(strictCtx.bind.length).fill(null);
+  await Promise.all(strictCtx.bind.map(async (b, i) => {
+    let buf = await fetchOne(b.imageUrl);
+    if (!buf || buf.length <= 5000) { loadFail.push(`primary_unusable:${b.composerSlotId}`); return; }
+    // ★ รอบ 4 (P1-1): same-asset preprocessing เหมือน legacy — ตัดกรอบสีทึบ/letterbox "ก่อน"
+    //   sharp metadata/aHash/face/render ทุกชั้นเห็นภาพสะอาดตรงกัน · URL/identity/imageIndex ไม่ขยับ
+    //   (นี่คือ crop ต้นฉบับเดิม ไม่ใช่ source swap) · trim ล้ม = ใช้ buffer เดิม (fail-open ในตัวฟังก์ชัน)
+    try {
+      const tr = await trimVividBorder(buf);
+      if (tr.trimmed) {
+        trimFlags[i] = `border_trimmed:${b.composerSlotId}`;
+        console.log(`[MegaComposer] 🔐✂️🟩 ตัดกรอบสีขอบภาพ ${tr.trimmed} — ${b.composerSlotId}`);
+        buf = tr.buf;
+      }
+    } catch { /* trim ล้ม = buffer เดิม */ }
+    let mw = 0, mh = 0;
+    try {
+      const m = await (await import('sharp')).default(buf).metadata();
+      mw = m.width || 0; mh = m.height || 0;
+    } catch { /* จับรวมด้านล่าง */ }
+    if (!(mw > 0 && mh > 0)) { loadFail.push(`primary_unreadable:${b.composerSlotId}`); return; }
+    loaded[i] = {
+      slot: b.meta.slot, person: b.meta.person, isHero: b.meta.isHero, faces: b.meta.faces,
+      clean: b.meta.clean, newsScene: b.meta.newsScene,
+      composerSlotId: b.composerSlotId, refSlotId: b.refSlotId, candidateId: b.candidateId,
+      imageUrl: b.imageUrl, url: b.imageUrl, buffer: buf, _w: mw, _h: mh,
+    };
+  }));
+  if (loadFail.length) {
+    loadFail.sort(); // deterministic ไม่ขึ้นกับลำดับ fetch ล้ม
+    return { error: `strict primary โหลดไม่ได้: ${loadFail.join(',').slice(0, 180)}`, errorType: 'STRICT_PRIMARY_UNAVAILABLE', reasons: loadFail };
+  }
+  for (const f of trimFlags) if (f) qcFlags.push(f); // ★ ธง trim ตามลำดับ index (deterministic) ไม่ใช่ลำดับ fetch เสร็จ
+  // ★ รอบ 2 (P1 คุณภาพ): aHash จริงเหมือน legacy — ด่าน blank_image ปลายทางห้ามถูก bypass
+  //   (ธงได้ · เปลี่ยนภาพไม่ได้ — S6 authority คือผู้เลือก)
+  const _sharp = (await import('sharp')).default;
+  const aHashes = await Promise.all(loaded.map(async (im) => {
+    try {
+      const raw = await _sharp(im.buffer).greyscale().resize(8, 8, { fit: 'fill' }).raw().toBuffer();
+      const mean = raw.reduce((n, v) => n + v, 0) / 64;
+      let bits = 0n;
+      for (let i = 0; i < 64; i++) if (raw[i] >= mean) bits |= (1n << BigInt(i));
+      return bits;
+    } catch { return null; }
+  }));
+  // ตาหาหน้า = perception ให้สูตรครอปเท่านั้น — ห้ามมีผลต่อการเลือกภาพ (เลือกจบแล้วโดย authority)
+  //   ★ รอบ 2 (P1): ล้มทั้งชุด → ลองใหม่ 1 รอบเหมือน legacy (คุณภาพครอปต้องไม่แย่กว่า — source ไม่เกี่ยว)
+  const { batchDetectFaces } = await import('@/lib/services/faceDetector');
+  let fdMap = await batchDetectFaces(loaded.map((im, i) => ({ id: `mc_${i}`, buffer: im.buffer })));
+  let faceBoxes = loaded.map((im, i) => normalizeFaceBox(fdMap?.get?.(`mc_${i}`)));
+  // ★ รอบ 5 (P1 semantic trap — Codex): normalizeFaceBox คืน object truthy (count=0, กรอบ 0) เมื่อ
+  //   ไม่มีหน้าแต่มี mainSubject/textRegion/watermark → filter(Boolean) นับ "ไม่มีหน้า" เป็น "เจอหน้า"
+  //   = detector ล่มแต่เกท outage เป็นใบ้ · นับเฉพาะ "หน้าจริง": count>0 + กรอบมีพื้นที่จริง
+  //   (กล่อง subject-only ยังส่งต่อให้ crop fallback ใช้ได้ตามเดิม — แค่ห้ามนับเป็นใบหน้า)
+  const _realFace = (fb) => !!(fb && (fb.count || 0) > 0 && fb.x2 > fb.x1 && fb.y2 > fb.y1);
+  let actualFaceHits = faceBoxes.filter(_realFace).length;
+  if (actualFaceHits === 0 && loaded.length) {
+    console.log('[MegaComposer] 🔐⚠️ ตาหาหน้า (หน้าจริง) ศูนย์ทั้งชุด → ลองใหม่ 1 รอบ');
+    fdMap = await batchDetectFaces(loaded.map((im, i) => ({ id: `mc_${i}`, buffer: im.buffer })));
+    faceBoxes = loaded.map((im, i) => normalizeFaceBox(fdMap?.get?.(`mc_${i}`)));
+    actualFaceHits = faceBoxes.filter(_realFace).length;
+    // ★ รอบ 4 (P1-4): perception-outage gate เหมือน legacy — retry แล้วยังศูนย์ทั้งชุด ทั้งที่ metadata
+    //   จาก binding ยืนยันมีหน้า ≥2 ใบ = detector ล่มยาว → คืน error ให้คิววนใหม่ ห้ามปล่อยปกครอปตาบอด
+    //   (เกทนี้ตรวจ "ตาล่ม" เท่านั้น — ไม่ใช่ face lock/กติกาคน และไม่แตะ/ไม่สลับ asset ใดๆ)
+    const expectFaces = loaded.filter((im) => Number(im.faces) > 0).length;
+    if (actualFaceHits === 0 && expectFaces >= 2) {
+      return { error: `ตาหาหน้าล่มทั้งชุด (ตาคัดยืนยันว่ามีหน้า ${expectFaces} ใบ) — กันปกครอปตาบอด รอระบบฟื้นแล้วลองใหม่`, errorType: 'FACE_EYE_DOWN' };
+    }
+  }
+  console.log(`[MegaComposer] 🔐 strict: primary ${loaded.length} ใบตรง URL · หน้าจริง ${actualFaceHits}/${loaded.length}`);
+  // assignments ตรงจาก authority — สร้างครั้งเดียว · crop ใช้สูตรเดิมของโรง (same-image เท่านั้น)
+  const _bigFace = (fb) => fb && fb.x2 > fb.x1 && (fb.y2 - fb.y1) >= 0.16 && fb.y1 >= 0.01 && fb.y2 <= 0.99;
+  // ★ รอบ 6 (P1-B): "subject-only" = ไม่มีหน้าจริงแต่ detector เห็นตัวเรื่อง (fb.subject กรอบมีพื้นที่จริง)
+  //   → hint ครอบ subject "ไม่ตั้ง _final" — renderRectTile เช็ค crop._final ก่อน branch subject-box
+  //   (executor:669 vs 673) เดิม _final generic จึงบังทาง subject สนิท · วงกลม noface-square ก็ใช้ hint นี้
+  //   เผื่อเหนือหัว 12% / ใต้ 5% ของสูง subject · clamp 0..1 · deterministic ล้วน · ไม่แตะ source/index
+  // ★ รอบ 7 (P1-1): subject ต้อง "ใช้ได้จริง" — finite ครบสี่ค่า · พื้นที่บวก · มีส่วนทับจริงกับผืน [0,1]²
+  //   (กล่องหลุดนอกภาพทั้งกล่อง/ค่า NaN-Infinity = ค่าหลอนจาก detector → ถอย generic fallback เดิม)
+  const _subjectValid = (fb) => {
+    if (!fb || _realFace(fb) || !fb.subject) return false;
+    const s = fb.subject;
+    if (![s.x1, s.y1, s.x2, s.y2].every(Number.isFinite)) return false;
+    if (!(s.x2 > s.x1 && s.y2 > s.y1)) return false;
+    if (s.x2 <= 0 || s.x1 >= 1 || s.y2 <= 0 || s.y1 >= 1) return false; // off-canvas ทั้งกล่อง
+    return true;
+  };
+  const _subjectCrop = (fb) => {
+    const s = fb.subject;
+    // ใช้เฉพาะส่วนของ subject ที่อยู่ในภาพจริง (กล่องเลยขอบบางส่วน = intersect ก่อน)
+    const sx1 = Math.max(0, s.x1), sy1 = Math.max(0, s.y1);
+    const sx2 = Math.min(1, s.x2), sy2 = Math.min(1, s.y2);
+    const sh = sy2 - sy1;
+    let x = sx1;
+    let y = Math.max(0, sy1 - sh * 0.12); // เผื่อเหนือหัว 12%
+    let w = sx2 - x;
+    let h = Math.min(1, sy2 + sh * 0.05) - y; // เผื่อใต้ 5%
+    // ขั้นต่ำ 0.05: ขยายแล้ว "เลื่อน origin กลับเข้าภาพ" — ห้ามดัน x+w/y+h ทะลุ 1
+    if (w < 0.05) { w = 0.05; x = Math.min(x, 1 - w); }
+    if (h < 0.05) { h = 0.05; y = Math.min(y, 1 - h); }
+    x = Math.max(0, +x.toFixed(3));
+    y = Math.max(0, +y.toFixed(3));
+    w = +w.toFixed(3);
+    h = +h.toFixed(3);
+    // การปัด 3 ตำแหน่งห้ามทำเกินขอบ — บีบด้านที่เกินกลับพอดี 1
+    if (x + w > 1) w = +(1 - x).toFixed(3);
+    if (y + h > 1) h = +(1 - y).toFixed(3);
+    return { x, y, w, h };
+  };
+  const assignments = strictCtx.snapshot.map((snap, i) => {
+    const slot = spec.slots.find((x) => String(x.id) === snap.composerSlotId);
+    const fb = faceBoxes[i];
+    let crop;
+    if (/main|hero/i.test(snap.composerSlotId)) {
+      if (fb && fb.x2 > fb.x1) crop = cropFromFace(fb, 62, 'upper', slot.w / slot.h);
+      else if (_subjectValid(fb)) crop = _subjectCrop(fb);
+      else crop = { x: 0, y: 0, w: 1, h: 1 };
+    } else if (snap.shape === 'circle') {
+      if (fb && fb.x2 > fb.x1) crop = cropFromFace(fb, 66, 'center', 1);
+      else if (_subjectValid(fb)) crop = _subjectCrop(fb); // hint ครอบ subject — วงถูกย่อจากตำแหน่งจริง ไม่ใช่ generic กลางภาพ
+      else crop = { x: 0.2, y: 0.05, w: 0.6, h: 0.6, _final: true };
+    } else if (fb && (fb.count || 1) > 1) {
+      crop = cropAllFaces(fb, slot.w / slot.h);
+    } else if (_bigFace(fb)) {
+      crop = cropFromFace(fb, 52, 'upper', slot.w / slot.h);
+    } else if (fb && fb.x2 > fb.x1) {
+      crop = cropFromFace(fb, 40, 'center', slot.w / slot.h);
+    } else if (_subjectValid(fb)) {
+      crop = _subjectCrop(fb); // rect: ไม่มี _final = เปิดทาง executor เข้า subject-box
+    } else {
+      crop = { x: 0.02, y: 0, w: 0.96, h: 0.94, _final: true }; // ไม่มีทั้งหน้าจริงและ subject เท่านั้น
+    }
+    return { slotId: snap.composerSlotId, imageIndex: i, crop, why: 'strict: ref-slot authority' };
+  });
+  const used = new Set(assignments.map((a) => a.imageIndex));
+  // คุณภาพ (pure): วัดยืดต่อช่องรอง — ติดธงได้ ห้ามเลือกภาพอื่น (สัญญา strict)
+  const _wh = (im, fb) => (im && im._w > 0 && im._h > 0) ? [im._w, im._h] : (fb && fb.imgW > 0 && fb.imgH > 0 ? [fb.imgW, fb.imgH] : [0, 0]);
+  for (const a of assignments) {
+    const sl = spec.slots.find((x) => String(x.id) === a.slotId);
+    if (!sl || /main|hero/i.test(a.slotId)) continue;
+    const [iw, ih] = _wh(loaded[a.imageIndex], faceBoxes[a.imageIndex]);
+    if (!(iw > 0 && ih > 0)) continue;
+    const up = (iw / ih) >= (sl.w / sl.h) ? sl.h / ih : sl.w / iw;
+    if (up > 1.6) qcFlags.push(`upscaled_src:${a.slotId}:${up.toFixed(2)}`);
+  }
+  assignments.forEach((a) => {
+    console.log(`[MegaComposer] 🔐 ${a.slotId} ← #${a.imageIndex} (authority) ${a.crop._final ? 'crop' : 'hint'}(${a.crop.x},${a.crop.y},${a.crop.w},${a.crop.h})`);
+  });
+  // render ครั้งเดียว — ไม่มี retry-เปลี่ยนรูป
+  const { executeCover } = await import('@/lib/services/coverExecutorService');
+  const traceSink = [];
+  const buffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: spec, faceBoxes, traceSink });
+  console.log(`[MegaComposer] 🔐 strict ประกอบเสร็จ ${Math.round(buffer.length / 1024)}KB (${spec.id || 'realized'})`);
+  const cropTrace = [...traceSink];
+  qcFlags.push(...traceQcFlags(cropTrace));
+  if (qcFlags.length) console.log(`[MegaComposer] 🚩 qcFlags: ${qcFlags.join(' · ')}`);
+  // shape ผลลัพธ์ = เดียวกับ legacy core ทุก field + ป้าย _strictSourceLock ให้ชั้น Eye ล็อก source
+  // (aHashes = ค่าจริง — ด่าน blank_image ใน composeAndVerify ทำงานเต็ม ★ รอบ 2 P1)
+  return { buffer, spec, assignments, loaded, faceBoxes, used, refSlotMeta: null, cropTrace, qcFlags, traceSink, aHashes, _strictSourceLock: true };
+}
+
+// ③ final invariant — เรียกหลัง Eye จบ ก่อน techRules/manifest/success: จับ drift ทุกมิติเทียบ snapshot
+//   (นับช่อง · เซ็ต composer slot เป๊ะ · ไม่ซ้ำ/หาย/เกิน · URL ของ loaded ตรง primary · index ตรง · โครงไม่ drift)
+function _strictDriftCheck(core, strictCtx) {
+  const reasons = [];
+  const snap = strictCtx.snapshot;
+  const asg = Array.isArray(core.assignments) ? core.assignments : [];
+  if (asg.length !== snap.length) reasons.push(`assignment_count:${asg.length}!=${snap.length}`);
+  const bySlot = new Map();
+  for (const a of asg) {
+    const id = String(a?.slotId || '');
+    if (bySlot.has(id)) reasons.push(`assignment_duplicate:${id}`);
+    bySlot.set(id, a);
+  }
+  for (const s of snap) {
+    const a = bySlot.get(s.composerSlotId);
+    if (!a) { reasons.push(`assignment_missing:${s.composerSlotId}`); continue; }
+    bySlot.delete(s.composerSlotId);
+    if (a.imageIndex !== s.imageIndex) reasons.push(`image_index_drift:${s.composerSlotId}:${a.imageIndex}`);
+    const url = String(core.loaded?.[a.imageIndex]?.url || '');
+    if (url !== s.imageUrl) reasons.push(`image_url_drift:${s.composerSlotId}`);
+  }
+  for (const id of bySlot.keys()) reasons.push(`assignment_extra:${id}`);
+  // ★ รอบ 2 (P1): loaded ต้องครบ identity ทุกใบ — จำนวนเท่า authority · ไม่มี null/เกิน ·
+  //   url + composerSlotId + refSlotId + candidateId ตรง snapshot ราย index
+  const loaded = Array.isArray(core.loaded) ? core.loaded : [];
+  if (loaded.length !== snap.length) reasons.push(`loaded_count:${loaded.length}!=${snap.length}`);
+  for (let i = 0; i < snap.length; i++) {
+    const l = loaded[i];
+    const s = snap[i];
+    if (!l || !l.buffer) { reasons.push(`loaded_missing:${s.composerSlotId}`); continue; }
+    if (String(l.url || '') !== s.imageUrl) reasons.push(`loaded_url_drift:${s.composerSlotId}`);
+    if (String(l.composerSlotId || '') !== s.composerSlotId) reasons.push(`loaded_slot_identity_drift:${s.composerSlotId}`);
+    if (String(l.refSlotId || '') !== s.refSlotId) reasons.push(`loaded_ref_identity_drift:${s.composerSlotId}`);
+    if (String(l.candidateId || '') !== s.candidateId) reasons.push(`loaded_candidate_drift:${s.composerSlotId}`);
+  }
+  for (let i = snap.length; i < loaded.length; i++) reasons.push(`loaded_extra:${i}`);
+  // ★ รอบ 2 (P1): used Set ต้องเท่ากับเซ็ต imageIndex ของ assignments สุดท้ายเป๊ะ
+  if (!(core.used instanceof Set)) reasons.push('used_not_set');
+  else {
+    const uSorted = [...core.used].sort((a, b) => a - b).join(',');
+    const idxSet = new Set(asg.map((a) => a?.imageIndex));
+    const iSorted = [...idxSet].sort((a, b) => a - b).join(',');
+    if (uSorted !== iSorted || core.used.size !== idxSet.size) reasons.push(`used_set_mismatch:[${uSorted}]!=[${iSorted}]`);
+  }
+  // ★ รอบ 2 (P1): โครงเทียบ canonical deep snapshot "ทั้งก้อน" (spec เป็น object แช่แข็งตัวเดิม —
+  //   drift check คือกำแพงชั้นสองต่อจาก freeze)
+  let nowSnap = null;
+  try { nowSnap = JSON.stringify(core.spec); } catch { /* serialize ไม่ได้ = drift แน่นอน */ }
+  if (nowSnap !== strictCtx.templateSnap) reasons.push('template_drift');
+  return reasons.length ? reasons : null;
+}
+
+async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, strictCtx = null }) {
+  // ★ Checkpoint B รอบ 2: strict แยก path ตั้งแต่บรรทัดแรก — ก่อน guard legacy ทุกตัว (แผนหาย
+  //   ถูก _strictPrepare จับเป็น STRICT_PRIMARY_UNAVAILABLE ไปแล้ว) · strictCtx=null = legacy เดิมเป๊ะ
+  if (strictCtx) return composeCoreStrict(strictCtx);
   if (!Array.isArray(slotPlan) || !slotPlan.length) {
     return { error: 'ไม่มี slotPlan — S6 ต้องเลือกภาพมาก่อน', errorType: 'NO_SLOT_PLAN' };
   }
@@ -1137,8 +1473,12 @@ async function refCompareEye({ coverBuffer, refImagePath, newsTitle }) {
 }
 
 // ---------- ปรับตามคำสั่งตา (กฎล้วน — bounded ≤1 รอบ · ห้ามแตะ main) ----------
-function applyEyeFixes({ fixes, assignments, loaded, faceBoxes, used }) {
+function applyEyeFixes({ fixes, assignments, loaded, faceBoxes, used, allowSourceSwap = true, strictFaceZoom = false }) {
   let applied = 0;
+  // ★ รอบ 7 (P1-3): strict เท่านั้น — zoom_in/zoom_out ต้องมี "หน้าจริง" (count>0 + กรอบมีพื้นที่)
+  //   subject-only box (count=0, x1=x2=0) truthy หลอก cropFromFace จนวงยุบ 8x8 ได้ โดยเฉพาะ REQC=0
+  //   → strict: skip zoom เงียบ (ไม่นับ applied ไม่ render ใหม่) · legacy default = พฤติกรรมเดิม byte-เดิม
+  const _zoomFb = (fb) => !!fb && (!strictFaceZoom || ((fb.count || 0) > 0 && fb.x2 > fb.x1 && fb.y2 > fb.y1));
   // ★ HOTFIX รอบ 2 (Codex P0-A): ลำดับ candidate ต้องเท่า legacy เป๊ะ (OFF parity) — scan ใช้ snapshot
   //   ของ used ณ ต้น call + ภาพใหม่ที่ swap จองเพิ่ม: index เก่าที่ถูกปล่อยยัง "reserved" ตลอด call
   //   (กัน swap ถัดไปหยิบภาพเก่าของช่องก่อนหน้า = ผลเลือกเพี้ยนจาก HEAD) · ส่วน used จริง = ownership
@@ -1148,11 +1488,13 @@ function applyEyeFixes({ fixes, assignments, loaded, faceBoxes, used }) {
     const a = assignments.find((x) => x.slotId === f.slot && !/main|hero/i.test(x.slotId));
     if (!a) continue;
     const fb = faceBoxes[a.imageIndex];
-    if (f.action === 'zoom_in' && fb) { a.crop = cropFromFace(fb, 74, 'center'); applied++; }        // หน้าใหญ่ขึ้น (กิน 74%)
-    else if (f.action === 'zoom_out' && fb) { a.crop = cropFromFace(fb, 46, 'center'); applied++; }   // หน้าเล็กลง (กิน 46%)
+    if (f.action === 'zoom_in' && _zoomFb(fb)) { a.crop = cropFromFace(fb, 74, 'center'); applied++; }        // หน้าใหญ่ขึ้น (กิน 74%)
+    else if (f.action === 'zoom_out' && _zoomFb(fb)) { a.crop = cropFromFace(fb, 46, 'center'); applied++; }   // หน้าเล็กลง (กิน 46%)
     else if (f.action === 'shift_up') { a.crop = { ...a.crop, y: Math.max(0, +(a.crop.y - 0.1).toFixed(3)) }; applied++; }
     else if (f.action === 'shift_down') { a.crop = { ...a.crop, y: Math.min(1 - a.crop.h, +(a.crop.y + 0.1).toFixed(3)) }; applied++; }
     else if (f.action === 'swap') {
+      // ★ Checkpoint B: strict = source ล็อกตาม authority — ปฏิเสธ swap เงียบๆ (crop actions ด้านบนยังทำงาน)
+      if (!allowSourceSwap) { console.log(`[MegaComposer] 🔐 strict: ตาขอ swap ${f.slot} → ปฏิเสธ (source ล็อกตาม authority)`); continue; }
       // ★ เฟส 4.2: วงกลมห้ามถูกตาสลับกลับไปเป็น "คนเดียวกับ hero" (ตาเทียบไม่รู้จักคน — เคย undo กติกา 2.3)
       const _mainA2 = assignments.find((x) => /main|hero/i.test(String(x.slotId)));
       const _heroP2 = _mainA2 ? String(loaded[_mainA2.imageIndex]?.person || '') : '';
@@ -1278,7 +1620,10 @@ function _eyeReqcEnabled(env = process.env) {
 export async function _runEyeFixTransaction({ core, fixes, buffer, cropTrace, renderCover = null }) {
   const snap = _eyeTxSnapshot(core, buffer, cropTrace);
   try {
-    const fixedCount = applyEyeFixes({ fixes, assignments: core.assignments, loaded: core.loaded, faceBoxes: core.faceBoxes, used: core.used });
+    // ★ Checkpoint B: strict context = source ล็อกตาม authority — ตาสั่ง swap ได้แค่ถูกปฏิเสธ (crop ยังได้)
+    //   ★ รอบ 7 (P1-3): strict ยังบังคับ zoom ต้องมีหน้าจริง (subject-only ห้ามเข้า cropFromFace)
+    const allowSourceSwap = core._strictSourceLock !== true;
+    const fixedCount = applyEyeFixes({ fixes, assignments: core.assignments, loaded: core.loaded, faceBoxes: core.faceBoxes, used: core.used, allowSourceSwap, strictFaceZoom: core._strictSourceLock === true });
     if (!fixedCount) return { buffer, cropTrace, fixedCount: 0 };
     const render = renderCover || (async () => {
       const { executeCover } = await import('@/lib/services/coverExecutorService');
@@ -1337,10 +1682,30 @@ export async function composeMegaCover({ newsTitle = '', slotPlan = [], refDNA =
  * ประกอบ + 👁️ ตาเทียบ ref จริง (ภาพชนภาพ) + แก้ bounded ≤1 รอบ — ท่อ MEGA ใช้ตัวนี้
  * @param {string} p.refImagePath - พาธภาพปกต้นแบบจากคลัง (เช่น /ref-covers/xxx.jpg) — ไม่มี = ประกอบเฉยๆ
  */
-export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA = null, refImagePath = null, stableOrder = false }) {
+export async function composeAndVerify(args = {}) {
+  const { newsTitle = '', slotPlan = [], refDNA = null, refImagePath = null, stableOrder = false } = args || {};
   try {
-    const core = await composeCore({ slotPlan, refDNA, stableOrder });
-    if (core.error) return { success: false, error: core.error, errorType: core.errorType };
+    // ★ Checkpoint B (11 ก.ค. — Codex): strict consumer แบบ dormant — ตื่นเมื่อ MEGA_STRICT_RENDER=1 "และ"
+    //   payload พก own-property selectionSpec เท่านั้น · switch unset/0/ค่าอื่น = legacy เดิมทุกมิติแม้ payload มา
+    //   · switch ON + ไม่มี own-property = งาน legacy จริง เดิน legacy เดิม · present-แต่พัง = fail-closed ก่อน IO
+    let strictCtx = null;
+    if (process.env.MEGA_STRICT_RENDER === '1' && args != null
+        && (typeof args === 'object' || typeof args === 'function')
+        && Object.prototype.hasOwnProperty.call(args, 'selectionSpec')) {
+      // ★ รอบ 2 (P0-1): ส่ง "carrier ต้นฉบับ" เข้า validator ตรงๆ — ห้ามประกอบ {selectionSpec,...} ใหม่
+      //   กฎ own-property/plain-object เป็นของ validator ผู้เดียว: array/function ที่พก own selectionSpec
+      //   ต้องได้ input_not_plain_object (reject) ไม่ใช่หลุดเป็น legacy เงียบๆ
+      const gate = _strictPrepare({ carrier: args, slotPlan });
+      if (gate.error) {
+        console.log(`[MegaComposer] 🔐🚫 strict fail-closed: ${gate.errorType} — ${(gate.reasons || []).join(' · ').slice(0, 160)}`);
+        return { success: false, error: gate.error, errorType: gate.errorType, reasons: gate.reasons };
+      }
+      strictCtx = gate.ctx;
+      console.log(`[MegaComposer] 🔐 strict render ACTIVE: ref=${strictCtx.authority.refId} · ${strictCtx.snapshot.length} ช่อง · specHash=${strictCtx.authority.specHash}`);
+    }
+    const core = await composeCore({ slotPlan, refDNA, stableOrder, strictCtx });
+    // ★ Checkpoint B: strict core แนบ reasons ราย slot มาด้วย — ส่งต่อเมื่อมีเท่านั้น (legacy ไม่มี = shape เดิมเป๊ะ)
+    if (core.error) return { success: false, error: core.error, errorType: core.errorType, ...(core.reasons ? { reasons: core.reasons } : {}) };
     let buffer = core.buffer;
     let cropTrace = core.cropTrace || [];
     let eye = null;
@@ -1424,6 +1789,15 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
         }
       } catch (e) { console.log('[MegaComposer] ตาเทียบ ref ล้ม (ใช้ปกเดิม):', e.message?.slice(0, 50)); }
     }
+    // ★ Checkpoint B: FINAL INVARIANT — หลัง Eye จบ · ก่อน techRules/manifest/success ทุกชนิด
+    //   drift แม้จุดเดียว (นับช่อง/เซ็ต slot/URL/index/โครง) = ปิดงานทันที ห้ามปล่อย manifest success
+    if (strictCtx) {
+      const drift = _strictDriftCheck(core, strictCtx);
+      if (drift) {
+        console.log(`[MegaComposer] 🔐🚨 STRICT_ASSIGNMENT_DRIFT: ${drift.join(' · ').slice(0, 200)}`);
+        return { success: false, error: `strict drift: ${drift.join(',').slice(0, 180)}`, errorType: 'STRICT_ASSIGNMENT_DRIFT', reasons: drift };
+      }
+    }
     // ★ W2 (จากคลังจริง 10 ก.ค. — เจอ "วงกลมว่าง" 2 ใบ): จับภาพเปล่า/เกือบสีเดียวล้วนที่หลุดลงช่อง
     //   aHash 64 บิตของภาพแบนๆ จะมีบิตเกือบเท่ากันหมด (popcount ≤6 หรือ ≥58) → ติดธงให้ด่าน QC ตัดสิน
     //   ใช้ค่า aHash ที่คำนวณแล้ว ไม่มี IO เพิ่ม · ตรวจไม่ได้ = ไม่ติดธง (ห้ามเดา)
@@ -1487,6 +1861,24 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
         refImagePath: refImagePath || null,
         outputHash: crypto.createHash('sha1').update(buffer).digest('hex'),
       };
+      // ★ Checkpoint B: audit เฉพาะโหมด strict (ผ่าน invariant แล้วเท่านั้นถึงมาถึงตรงนี้) —
+      //   legacy manifest ไม่มี field นี้เป๊ะ (strictCtx=null = ไม่แตะ)
+      //   ★ รอบ 2 (P1): slots derive จาก verified snapshot + "loaded จริง" หลัง invariant
+      //   (invariant การันตีแล้วว่าตรงกัน — url อ่านจาก loaded เพื่อผูก audit กับของจริงที่ขึ้นปก)
+      if (strictCtx) {
+        manifest.strictRender = {
+          verified: true,
+          refId: strictCtx.authority.refId,
+          specHash: strictCtx.authority.specHash,
+          replayHash: strictCtx.authority.replayHash,
+          slots: strictCtx.snapshot.map((s) => ({
+            composerSlotId: s.composerSlotId,
+            refSlotId: s.refSlotId,
+            candidateId: s.candidateId,
+            imageUrl: String(core.loaded?.[s.imageIndex]?.url || ''),
+          })),
+        };
+      }
     } catch (e) { console.log('[MegaComposer] manifest เก็บล้ม (ไม่กระทบผลปก):', e.message?.slice(0, 60)); }
     // ★ Cover Ref Tester (shadow-only): หลัง buffer/assignment/crop/manifest สุดท้ายถูกล็อกแล้วเท่านั้น
     //   เห็นปกจริง + ref + source ที่ใช้จริง เพื่อแยก selection/mapping/crop/geometry/render
@@ -1514,6 +1906,13 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
       } catch (e) {
         console.log('[MegaTester] ล้ม (shadow-only ไม่กระทบปก):', e.message?.slice(0, 80));
       }
+    }
+    // ★ Checkpoint B รอบ 2 (P0-3): strict manifest ห้าม fail-open — legacy catch-and-continue คงเดิม
+    //   เฉพาะ legacy · strict: manifest หาย/สร้างล้ม/ไม่ verified = ห้าม success เด็ดขาด
+    //   (postcondition บังคับ ตรวจ "ทันทีก่อน success return" เสมอ)
+    if (strictCtx && manifest?.strictRender?.verified !== true) {
+      console.log('[MegaComposer] 🔐🚨 STRICT_MANIFEST_FAILED — manifest หาย/ไม่ verified ห้ามปล่อย success');
+      return { success: false, error: 'strict manifest ไม่ผ่าน postcondition (สร้างล้ม/ไม่ verified)', errorType: 'STRICT_MANIFEST_FAILED', reasons: ['manifest_unverified'] };
     }
     return {
       success: true,
