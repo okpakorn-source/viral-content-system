@@ -169,22 +169,30 @@ function orderSlots(slots) {
 
 /**
  * solveSlotAssignments — เลือกภาพลงช่องทั้งชุดแบบ greedy deterministic
- * @param {{slots:Array, images:Array, characters:Array, constraints?:Object}} input
+ * @param {{slots:Array, images:Array, characters:Array, constraints?:Object, diagnostics?:Object}} input
  *   slots: [{id, role:'hero'|'circle'|'context'|'evidence'|'secondary'|'unknown', wantPerson, refShot}]
  *   images: [{id, persons, identityHits, storyFit, newsScene, category, emotion, quality, faces,
  *             clean, shortSide, sharpness, thumbOnly, lowRes, sceneKey, faceBoxHFrac, sourceScore,
  *             pHash64}] // ★ Wave3 ชุด2: pHash64 = dHash hex 16 ตัวอักษร|null — จับภาพเกือบซ้ำระดับพิกเซล
  *   characters: [{name, role, isHero}]
  *   constraints: { sceneDupPenalty?, circleAltThreshold?, pixelDupPenalty? }
+ *   diagnostics: { v:2, topK?, compareBySlot?:{stageName:{slotId:imageId|null}} }
  * @returns {{assignments:Array<{slotId,imageId,total,breakdown,top3}>, holes:string[], notes:string[]}}
  *   assignments มีทุกช่อง (imageId=null สำหรับช่องที่ไม่มีภาพลง) — ช่องว่างซ้ำใน holes ด้วย
  */
-export function solveSlotAssignments({ slots, images, characters, constraints } = {}) {
+export function solveSlotAssignments({ slots, images, characters, constraints, diagnostics } = {}) {
   const notes = [];
   const S = Array.isArray(slots) ? slots.filter((s) => s && s.id != null) : [];
   const IMG = Array.isArray(images) ? images.filter((x) => x && x.id != null) : [];
   const CH = Array.isArray(characters) ? characters.filter((c) => c && c.name) : [];
   const cfg = constraints || {};
+  // ★ Wave3 Phase1 (10 ก.ค.): diagnostics เป็น opt-in ล้วน — ไม่ส่ง/ปิด v2 = return shape และผลเลือก v1 เดิมทุก byte
+  const diagCfg = diagnostics && diagnostics.v === 2 ? diagnostics : null;
+  const diagTopK = diagCfg ? Math.max(1, Math.min(10, Math.trunc(num(diagCfg.topK, 5)))) : 3;
+  const compareBySlot = diagCfg && diagCfg.compareBySlot && typeof diagCfg.compareBySlot === 'object'
+    ? diagCfg.compareBySlot
+    : {};
+  const diagPerSlot = [];
   const sceneDupPenalty = clamp01(num(cfg.sceneDupPenalty, SCENE_DUP_PENALTY));
   const circleAltThreshold = clamp01(num(cfg.circleAltThreshold, CIRCLE_ALT_THRESHOLD));
   // ★ Wave3 ชุด2: โทษ near-dup พิกเซล — ค่าคงที่ร่วมกับ sceneDupPenalty (คนละสัญญาณ แต่หนักเท่ากัน) เว้นแต่ override
@@ -201,14 +209,21 @@ export function solveSlotAssignments({ slots, images, characters, constraints } 
   for (const slot of order) {
     const isHero = slot.role === 'hero';
     const isCircle = slot.role === 'circle';
+    const exclusions = diagCfg ? { alreadyUsed: [], heroIdentityHardZero: [] } : null;
 
     // ให้คะแนนทุกภาพที่ยังไม่ถูกใช้
     const scored = [];
     for (const img of IMG) {
       const id = String(img.id);
-      if (used.has(id)) continue;
+      if (used.has(id)) {
+        if (exclusions) exclusions.alreadyUsed.push(id);
+        continue;
+      }
       const sc = scoreImageForSlot(img, slot, CH);
-      if (isHero && sc.hardZero) continue; // hero: ผิดคน = ตัดออกจากการแข่งเลย (ห้ามติด top)
+      if (isHero && sc.hardZero) {
+        if (exclusions) exclusions.heroIdentityHardZero.push(id);
+        continue; // hero: ผิดคน = ตัดออกจากการแข่งเลย (ห้ามติด top)
+      }
       const sk = img.sceneKey != null ? String(img.sceneKey) : null;
       const sceneDup = !!(sk && usedScenes.has(sk));
       // ★ Wave3 ชุด2: near-dup พิกเซล — เทียบ pHash64 ผู้ท้าชิงกับภาพที่เลือกไปแล้วทุกใบ (hamming ≤10/64 = เกือบซ้ำ)
@@ -224,6 +239,61 @@ export function solveSlotAssignments({ slots, images, characters, constraints } 
     // จัดอันดับ deterministic: rank มากก่อน · เสมอ → id เรียง string น้อยก่อน
     scored.sort((a, b) => (b.rank - a.rank) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const top3 = scored.slice(0, 3).map((s) => ({ id: s.id, total: round2(s.total) }));
+    if (diagCfg) {
+      const comparisons = {};
+      const stages = Object.keys(compareBySlot).sort();
+      for (const stage of stages) {
+        const bySlot = compareBySlot[stage];
+        const rawId = bySlot && typeof bySlot === 'object' ? bySlot[slot.id] : null;
+        const imageId = rawId == null ? null : String(rawId);
+        if (imageId == null) {
+          comparisons[stage] = { imageId: null, status: 'empty', rank: null };
+          continue;
+        }
+        const rankIndex = scored.findIndex((s) => s.id === imageId);
+        if (rankIndex >= 0) {
+          const hit = scored[rankIndex];
+          comparisons[stage] = {
+            imageId,
+            status: 'ranked',
+            rank: rankIndex + 1,
+            total: round2(hit.total),
+            rankScore: round2(hit.rank),
+            breakdown: hit.breakdown,
+            sceneDup: hit.sceneDup,
+            pixelDup: hit.pixelDup,
+          };
+          continue;
+        }
+        const exists = IMG.some((img) => String(img.id) === imageId);
+        let status = exists ? 'not_ranked' : 'not_in_solver_universe';
+        if (exists && used.has(imageId)) status = 'already_used_by_solver';
+        else if (exists && isHero) {
+          const img = IMG.find((x) => String(x.id) === imageId);
+          if (img && scoreImageForSlot(img, slot, CH).hardZero) status = 'hero_identity_hard_zero';
+        }
+        comparisons[stage] = { imageId, status, rank: null };
+      }
+      diagPerSlot.push({
+        slotId: slot.id,
+        topK: scored.slice(0, diagTopK).map((s, i) => ({
+          rank: i + 1,
+          id: s.id,
+          total: round2(s.total),
+          rankScore: round2(s.rank),
+          breakdown: s.breakdown,
+          sceneDup: s.sceneDup,
+          pixelDup: s.pixelDup,
+        })),
+        comparisons,
+        exclusions: {
+          alreadyUsedCount: exclusions.alreadyUsed.length,
+          alreadyUsedSample: exclusions.alreadyUsed.slice(0, 10),
+          heroIdentityHardZeroCount: exclusions.heroIdentityHardZero.length,
+          heroIdentityHardZeroSample: exclusions.heroIdentityHardZero.slice(0, 10),
+        },
+      });
+    }
 
     let chosen = scored.length ? scored[0] : null;
 
@@ -265,5 +335,7 @@ export function solveSlotAssignments({ slots, images, characters, constraints } 
     }
   }
 
-  return { assignments, holes, notes };
+  const result = { assignments, holes, notes };
+  if (diagCfg) result.diagnostics = { v: 2, topK: diagTopK, perSlot: diagPerSlot };
+  return result;
 }

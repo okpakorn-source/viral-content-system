@@ -335,6 +335,9 @@ const S6_REAL_SIZE_GATE = process.env.S6_REAL_SIZE_GATE !== '0';
 //   ให้ช่อง context/circle/action ชั่งน้ำหนัก "ภาพนี้เล่าเรื่องเดียวกับข่าวแค่ไหน" (จาก query หมวดเรื่องราว +
 //   หมวด/อารมณ์/note เทียบเข็มทิศ) ไม่ใช่แค่หน้าชัดสวย · hero คงกติกาเดิมเป๊ะ · ปิดกลับพฤติกรรมเดิม: S6_STORY_FIT=0
 const S6_STORY_FIT = process.env.S6_STORY_FIT !== '0';
+// ★ Wave3 Phase1 (10 ก.ค.): Fair Shadow Diagnostics V2 — เก็บ raw LLM/post-gate/solver rank + universe/coverage
+//   เท่านั้น ห้ามแตะผลปกจริง · ปิดกลับ dossier/log/solver call แบบเดิม: MEGA_SOLVER_DIAGNOSTICS_V2=0
+const SOLVER_DIAGNOSTICS_V2_ON = process.env.MEGA_SOLVER_DIAGNOSTICS_V2 !== '0';
 // ภาพ "ใช้ขึ้นปกได้จริง" = ตายืนยันแล้วว่าเกี่ยว + สะอาด (ปกคลิป/การ์ดกราฟิก = relevant แต่ clean=false)
 const isCleanRelevant = (x) => x?.triage && x.triage.relevant !== false && x.triage.clean !== false;
 // ★ 9 ก.ค. เฟส 5.1 (แผนคุณภาพคลังรูป): ด่านพูลสะอาด "ก่อนเข้า s6" — ต่างจาก S6_MIN_CLEAN ด้านบน (ที่ทำงานหลัง sort/gate ซ้อนอีกชั้น)
@@ -1255,6 +1258,19 @@ export async function s6_slots(job, { origin }) {
     //   (เพิ่ม field เมื่อเปิดเท่านั้น · พูลไม่มีคำค้นเรื่องราว/ปิดสวิตช์ → ไม่เพิ่ม = prompt เดิมเป๊ะ ไม่ regress)
     ...(STORY_SEL_ON ? { storyFit: storyFitOf(x) } : {}),
   }));
+  // ★ Wave3 Phase1: mirror เพดาน prompt ของ slotDirectorBrain (megaBrains.js IMG_META_BUDGET=18000)
+  //   เพื่อบันทึกความจริงว่า LLM เห็นกี่ id โดยไม่เปลี่ยน candidate/ลำดับ/ผลเลือกเดิม หากค่าต้นทางเปลี่ยนต้องแก้ mirror นี้พร้อมกัน
+  const solverDiagLlmVisibleIds = SOLVER_DIAGNOSTICS_V2_ON ? (() => {
+    const ids = [];
+    let len = 0;
+    for (const m of meta) {
+      const line = JSON.stringify(m);
+      if (len + line.length + 2 > 18000) break;
+      len += line.length + 2;
+      ids.push(String(m.id));
+    }
+    return ids;
+  })() : null;
 
   // ★ เฟส 3.1 (9 ก.ค.): จัดกลุ่ม "ฉาก" จาก note (ตัดวลีลายน้ำ/overlay ทิ้งก่อน) —
   //   ① สมองเห็น inventory ว่าพูลมีฉากอะไรกี่ใบ (วางเรื่องได้จริง)  ② ด่านโค้ดกันฉากซ้ำข้ามช่อง
@@ -1340,6 +1356,10 @@ export async function s6_slots(job, { origin }) {
   } catch (err) {
     brainOk = false; // สมองล่ม → fallback ล้วน (กฎเดียวกับทางหลัก)
   }
+  // ★ Wave3 Phase1: snapshot ผลสมอง "ดิบ" ก่อนด่านโค้ด/fallback/story rescue — diagnostics เท่านั้น
+  const rawLlmSlotIds = SOLVER_DIAGNOSTICS_V2_ON
+    ? Object.fromEntries(activeSlots.map((name) => [name, brain.slots?.[name]?.id != null ? String(brain.slots[name].id) : null]))
+    : null;
 
   // ด่านโค้ด: id ต้องมีจริง + ห้ามซ้ำข้ามช่อง + hero ต้องถูกคน (ถูกคน 100% เหนือทุกข้อ)
   const byId = new Map(sorted.map((x) => [String(x.id), x]));
@@ -1563,6 +1583,7 @@ export async function s6_slots(job, { origin }) {
   //   งานเดินต่อปกติ 100%) · ไม่ยิง LLM/IO เพิ่ม (ประกอบ input จากข้อมูลที่คำนวณแล้วในฟังก์ชันล้วน) ·
   //   ปิดสนิท (พฤติกรรม byte-เดิม): MEGA_SOLVER_SHADOW=0
   let solverShadow = null;
+  let solverShadowV2 = null;
   if (process.env.MEGA_SOLVER_SHADOW !== '0') {
     try {
       const { solveSlotAssignments } = await import('@/lib/slotSolver');
@@ -1615,6 +1636,12 @@ export async function s6_slots(job, { origin }) {
           newsScene: x.triage?.newsScene !== false,
           category: x.triage?.category || 'other',
           emotion: x.triage?.emotion || null,
+          ...(SOLVER_DIAGNOSTICS_V2_ON ? {
+            note: String(x.triage?.note || '').replace(/\s+/g, ' ').trim().slice(0, 64) || null,
+            orientation: (Number(x.width) > 0 && Number(x.height) > 0)
+              ? (x.width / x.height > 1.15 ? 'wide' : (x.width / x.height < 0.87 ? 'tall' : 'sq'))
+              : null,
+          } : {}),
           quality: x.triage?.quality ?? null,
           faces: Number(x.triage?.faceCount) || 0,
           clean: isClean(x),
@@ -1641,7 +1668,30 @@ export async function s6_slots(job, { origin }) {
           pHash64: x.triage?.pHash64 || null,
         };
       });
-      const solved = solveSlotAssignments({ slots: solverSlots, images: solverImages, characters: solverChars });
+      const postGateSlotIds = SOLVER_DIAGNOSTICS_V2_ON
+        ? Object.fromEntries(activeSlots.map((name) => [name, slots[name]?.id != null ? String(slots[name].id) : null]))
+        : null;
+      let solved;
+      if (SOLVER_DIAGNOSTICS_V2_ON) {
+        try {
+          solved = solveSlotAssignments({
+            slots: solverSlots,
+            images: solverImages,
+            characters: solverChars,
+            diagnostics: {
+              v: 2,
+              topK: 5,
+              compareBySlot: { rawLlm: rawLlmSlotIds, postGateLlm: postGateSlotIds },
+            },
+          });
+        } catch (diagErr) {
+          // Diagnostics ใหม่ล้มต้องไม่ทำ shadow v1/งานจริงหาย — ถอย Solver call เดิมทันที
+          console.log('[MEGA S6] 🔬 solver-diagnostics-v2 ล้ม → fallback v1:', diagErr?.message?.slice(0, 60));
+          solved = solveSlotAssignments({ slots: solverSlots, images: solverImages, characters: solverChars });
+        }
+      } else {
+        solved = solveSlotAssignments({ slots: solverSlots, images: solverImages, characters: solverChars });
+      }
       const bySlotSolver = new Map(solved.assignments.map((a) => [a.slotId, a]));
       let agree = 0;
       const diffs = [];
@@ -1656,6 +1706,49 @@ export async function s6_slots(job, { origin }) {
       }
       console.log(`[MEGA S6] 👥 solver-shadow: ตรง ${agree}/${activeSlots.length} ช่อง${diffs.length ? ' — ต่าง: ' + diffs.join(' ') : ''}`);
       solverShadow = { v: 1, agree, total: activeSlots.length, perSlot };
+      if (SOLVER_DIAGNOSTICS_V2_ON && solved.diagnostics?.v === 2) {
+        const solverIds = solverImages.map((x) => String(x.id));
+        const llmIds = solverDiagLlmVisibleIds || [];
+        const llmSet = new Set(llmIds);
+        const commonCount = solverIds.filter((id) => llmSet.has(id)).length;
+        const identicalUniverse = llmIds.length === solverIds.length && llmIds.every((id, i) => id === solverIds[i]);
+        const _coverage = (test) => {
+          const count = solverImages.filter(test).length;
+          return { count, pct: solverImages.length ? Math.round((count / solverImages.length) * 1000) / 10 : 0 };
+        };
+        solverShadowV2 = {
+          v: 2,
+          inputHash: _dnaHashFor({ slots: solverSlots, images: solverImages, characters: solverChars }),
+          candidateUniverse: {
+            llmCount: llmIds.length,
+            solverCount: solverIds.length,
+            commonCount,
+            identical: identicalUniverse,
+            llmHash: _dnaHashFor(llmIds),
+            solverHash: _dnaHashFor(solverIds),
+            llmMetaBudgetMirror: 18000,
+          },
+          coverage: {
+            total: solverImages.length,
+            persons: _coverage((x) => Array.isArray(x.persons) && x.persons.length > 0),
+            storyFit: _coverage((x) => x.storyFit != null),
+            note: _coverage((x) => !!x.note),
+            orientation: _coverage((x) => !!x.orientation),
+            shortSide: _coverage((x) => x.shortSide != null),
+            sharpness: _coverage((x) => x.sharpness != null),
+            faceBoxHFrac: _coverage((x) => x.faceBoxHFrac != null),
+            sourceScore: _coverage((x) => x.sourceScore != null),
+            pHash64: _coverage((x) => !!x.pHash64),
+          },
+          rawLlm: { slots: rawLlmSlotIds },
+          postGateLlm: { slots: postGateSlotIds },
+          solver: {
+            slots: Object.fromEntries(solved.assignments.map((a) => [a.slotId, a.imageId != null ? String(a.imageId) : null])),
+            diagnostics: solved.diagnostics,
+          },
+        };
+        console.log(`[MEGA S6] 🔬 solver-diagnostics-v2: universe LLM ${llmIds.length}/solver ${solverIds.length} · common ${commonCount} · same=${identicalUniverse} · input=${solverShadowV2.inputHash}`);
+      }
     } catch (e) {
       console.log('[MEGA S6] 👥 solver-shadow ข้าม (ล้ม แต่งานเดินต่อ):', e?.message?.slice(0, 60));
     }
@@ -1667,14 +1760,14 @@ export async function s6_slots(job, { origin }) {
   const quarantineTotal = untriagedList.length + sizeUnknownList.length;
   const quarantineTag = quarantineTotal > 0 ? ` · 🧿กัก ${untriagedList.length}+${sizeUnknownList.length} ใบ(ข้อมูลไม่ครบ)` : '';
   if (!slots.hero) {
-    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '', ...(solverShadow ? { solverShadow } : {}) } } };
+    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '', ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) } } };
   }
   return {
     status: 'done',
     nextAction: 'continue',
     summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'}${storyTag}${quarantineTag} — ${(brain.note || '').slice(0, 80)}`,
     dossierPatch: {
-      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(solverShadow ? { solverShadow } : {}) },
+      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) },
       ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}),
       ...(job.dossier.artBrief ? { artBrief: job.dossier.artBrief } : {}),
       // ★ Wave2 Batch D1: merge-patch additive — สเปรด im เดิมกันทับ field อื่นใน images (caseId/storyQueries/heroGradeReport ฯลฯ)
