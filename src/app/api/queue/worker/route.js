@@ -48,7 +48,16 @@ export async function POST(req) {
     
     logger.info(`[Queue Worker] 🔄 Processing ${jobs.length} job(s): ${jobs.map(j => j.id.slice(0, 8)).join(', ')}`);
     
-    const baseUrl = req.nextUrl.origin;
+    // ★ 10 ก.ค. 69: Vercel Cron เรียก worker ผ่าน "deployment URL" (มี Vercel Authentication ขวาง)
+    //   → self-fetch ไป /api/auto/process เจอหน้า SSO = 401 ทั้งที่โค้ดปกติ (เกิดจริง 3 งาน 14:02-14:08)
+    //   แก้: origin เป็น *.vercel.app (deployment URL) → สลับไปโดเมน production ที่เปิด public
+    //   ⚠️ ห้ามตัดสินจาก env VERCEL/VERCEL_URL — เครื่องทีมมีค่าค้างจาก `vercel env pull` (กับดักที่รู้กัน)
+    let baseUrl = req.nextUrl.origin;
+    const prodHost = process.env.QUEUE_SELF_BASE_URL || process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    if (prodHost && baseUrl.endsWith('.vercel.app') && !baseUrl.includes(prodHost.replace(/^https?:\/\//, ''))) {
+      baseUrl = prodHost.startsWith('http') ? prodHost : `https://${prodHost}`;
+      logger.info(`[Queue Worker] 🔀 origin เป็น deployment URL — สลับไป production: ${baseUrl}`);
+    }
     
     // 3. Process jobs ONE AT A TIME (sequential, not concurrent)
     for (const job of jobs) {
@@ -71,7 +80,9 @@ export async function POST(req) {
         const res = await fetch(processUrl, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            // ชั้นกันที่สอง: ถ้าตั้ง bypass secret ไว้ใน Vercel จะทะลุ Deployment Protection ได้เสมอ (ไม่ตั้ง = header ไม่ถูกส่ง)
+            ...(process.env.VERCEL_AUTOMATION_BYPASS_SECRET ? { 'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET } : {}),
           },
           body: JSON.stringify({ ...job.payload, _queueJobId: job.id }),
           signal: controller.signal,

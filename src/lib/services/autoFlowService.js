@@ -290,10 +290,10 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   //   ปรับได้ผ่าน .env: GEN_ANGLES (1-4) / GEN_PER_ANGLE (1-3)
   const GEN_ANGLES = Math.max(1, Math.min(4, parseInt(process.env.GEN_ANGLES || '3', 10) || 3));
   const GEN_PER_ANGLE = Math.max(1, Math.min(3, parseInt(process.env.GEN_PER_ANGLE || '1', 10) || 1));
-  // ★ เรียงตามคะแนนไวรัลก่อนหยิบ — gpt-5.5 คืน 12 มุมเรียงตามหมวด ไม่เรียงคะแนน
-  const anglesToUse = [...(breakdownData.possible_angles || [])]
-    .sort((a, b) => (b.facebook_viral_score || 0) - (a.facebook_viral_score || 0))
-    .slice(0, GEN_ANGLES);
+  // ★ REVERT 10 ก.ค. 69 (เคส #01635): ห้ามเรียงตามคะแนนไวรัล — มุมคะแนนสูงมักเป็นมุมพี่น้องเรื่องเดียวกัน
+  //   → 3 เวอร์ชันเปิดเหมือนกันหมด + ชื่อมุมแคบจนจับคู่พร้อมท์คลังเพี้ยน (เจอพร้อมท์ไว้อาลัยกับข่าวมูฟออน)
+  //   ใช้ลำดับเดิมของ template 12 หมวด = ความหลากหลายมาในตัว (หมวด 1,2,3 คนละแนวเสมอ)
+  const anglesToUse = breakdownData.possible_angles?.slice(0, GEN_ANGLES) || [];
   if (anglesToUse.length === 0) {
     anglesToUse.push({ angle_name: 'นำเสนอข่าวสารทั่วไป', description: 'เล่าเหตุการณ์ตามจริง' });
   }
