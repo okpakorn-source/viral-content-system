@@ -2025,6 +2025,46 @@ function coverOrigin() {
 }
 
 // ---------- S7a ส่งงานปก: ภาพ 5 ช่องที่ S6 คัด → ช่อง "แหล่งรูป" ของ v3 (sourceOnly) ----------
+// ---------- 🔐 Checkpoint C (FINAL P1 TOCTOU): ตรวจ "wire snapshot" ของ strict payload ----------
+// รับ wire = JSON.parse(payloadBody) — สิ่งที่จะขึ้นสายจริง byte-ต่อ-byte (stateful toJSON/getter ถูก
+// ทำให้เป็นค่านิ่งไปแล้วตอน stringify ครั้งเดียว) · validator + geometry + binding ตรวจบนก้อนนี้เท่านั้น
+// คืน null = ผ่าน · คืน result object = พัก/ปิดงานก่อน queue (reason คงที่) · pure — validator ฉีดจากผู้เรียก
+function _strictWireGate(wire, validateStrictRenderActivation) {
+  const decision = validateStrictRenderActivation({ selectionSpec: wire.selectionSpec, realizedTemplate: wire.realizedTemplate });
+  if (decision.decision !== 'strict_ready') {
+    const reasons = (decision.reasons && decision.reasons.length ? decision.reasons : [decision.decision]).join(',').slice(0, 140);
+    return { status: 'waiting', nextAction: 'wait', summary: `🔐⏸️ strict producer: สัญญายังไม่พร้อม (${reasons}) — พักงาน ห้าม enqueue/ห้ามถอย legacy` };
+  }
+  // ① โครง — validator ไม่ตรวจตัวเลข geometry ฝั่ง producer ต้องตรวจเองบน wire:
+  //   canvas exact 1080×1350 · slots ไม่ว่าง · x/y/w/h = number finite integer · w/h>0 · อยู่ในผืน · shape rect|circle
+  const rt = wire.realizedTemplate;
+  const _tErr = [];
+  if (!(rt && rt.canvasW === 1080 && rt.canvasH === 1350)) _tErr.push('canvas');
+  const _rSlots = Array.isArray(rt?.slots) ? rt.slots : [];
+  if (!_rSlots.length) _tErr.push('slots_empty');
+  for (let _i = 0; _i < _rSlots.length; _i++) {
+    const _s = _rSlots[_i] || {};
+    if (![_s.x, _s.y, _s.w, _s.h].every((v) => typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v))) { _tErr.push(`geom:${_i}`); continue; }
+    if (!(_s.w > 0 && _s.h > 0) || _s.x < 0 || _s.y < 0 || _s.x + _s.w > 1080 || _s.y + _s.h > 1350) _tErr.push(`bounds:${_i}`);
+    if (_s.shape != null && _s.shape !== 'rect' && _s.shape !== 'circle') _tErr.push(`shape:${_i}`);
+  }
+  if (_tErr.length) {
+    return { status: 'waiting', nextAction: 'wait', summary: `🔐⏸️ strict producer: strict_template_invalid (${_tErr.join(',').slice(0, 100)}) — พักงานก่อน queue` };
+  }
+  // ② binding — authority primary ทุกช่องต้องชี้ "wire slotPlan" (แผนที่ส่งจริง) แบบ URL exact หนึ่ง row + refSlotId ตรง
+  const _bErr = [];
+  const _wirePlan = Array.isArray(wire.slotPlan) ? wire.slotPlan : [];
+  for (const _as of decision.authority.slots) {
+    const _rows = _wirePlan.filter((row) => row.url === _as.primary.imageUrl);
+    if (_rows.length !== 1) { _bErr.push(`rows:${_as.composerSlotId}=${_rows.length}`); continue; }
+    if (_rows[0].refSlotId !== _as.refSlotId) _bErr.push(`ref:${_as.composerSlotId}`);
+  }
+  if (_bErr.length) {
+    return { status: 'waiting', nextAction: 'wait', summary: `🔐⏸️ strict producer: strict_binding_invalid (${_bErr.join(',').slice(0, 100)}) — พักงานก่อน queue` };
+  }
+  return null;
+}
+
 export async function s7_cover(job, { origin, _deps } = {}) {
   // ★ SEM-1: dependency injection เพื่อ testability เท่านั้น — default = ของจริง (production เดิม 100%)
   const _jf = _deps?.fetchJson || jfetch;
@@ -2220,21 +2260,38 @@ export async function s7_cover(job, { origin, _deps } = {}) {
     } catch { /* คลัง ref ว่าง/ล้ม → ไม่มี ref (ใช้ template ปกติ) ไม่กระทบ */ }
   }
   // ★ 📜 SelectionSpec v1 (Codex ตรวจรอบ 2 ข้อ 2-5 — 10 ก.ค. ดึก): สัญญา S6→composer สร้าง "ก่อน" เรียกโรงประกอบ
-  //   shadow/additive ล้วน — ยังไม่มีผู้บริโภคฝั่งประกอบ = ไม่เปลี่ยนผลปกแม้ byte เดียว
   //   ★ รอบ 4 P1: ระหว่างพัฒนา default OFF ตามกฎ — เปิดเอง MEGA_SELECTION_SPEC=1 เฉพาะ local :3900
   //   ปิด = ไม่มี dossier field/ไม่มี log/พฤติกรรม legacy เดิม 100% · strict composer มาอ่านสัญญานี้หลังตรวจผ่าน
   let selectionSpec = null;
+  // ★ Checkpoint C (11 ก.ค. — Codex strict producer): realized template คำนวณ "ครั้งเดียว" จาก selectionRefDNA
+  //   แล้วใช้ object ก้อนเดียวกันทั้ง buildSelectionSpec / validator / queue payload — ห้าม recompute จาก refDNA
+  let realizedTemplate = null;
+  // ★ Checkpoint C (FINAL AUDIT): switch matrix สองจังหวะ —
+  //   · strictProducerRequested = งาน semantic จริง + ฝั่งส่งเปิด (MEGA_STRICT_PRODUCER=1)
+  //   · strictWireOn = requested + ฝั่งโรงตรวจพร้อม (MEGA_STRICT_RENDER=1)
+  //   RENDER เปิดแต่ PRODUCER ปิด/0/junk = shadow เดิม (โรงพร้อมแต่ยังไม่ส่ง) · legacy _sem=false = legacy เสมอ
+  //   🧭 rollout ปลอดภัย: เปิด RENDER (โรง) ก่อน → ค่อยเปิด PRODUCER (ฝั่งส่ง) · rollback: ปิด PRODUCER ก่อน
+  //   → ค่อยปิด RENDER — จึงไม่มีจังหวะที่งาน strict หลุดไปโรงที่ไม่ตรวจ
+  const strictProducerRequested = _sem === true && _semEnvOn && process.env.MEGA_STRICT_PRODUCER === '1';
+  const strictWireOn = strictProducerRequested && process.env.MEGA_STRICT_RENDER === '1';
+  // PRODUCER เปิดแต่ RENDER ยังไม่ armed = ห้ามส่งงาน strict เข้าโรง legacy — พักงาน "ก่อน queue"
+  // (image-library fetch ของขั้นนี้เกิดไปก่อนหน้าแล้ว — จุดที่กันคือ enqueue เท่านั้น)
+  if (strictProducerRequested && !strictWireOn) {
+    return { status: 'waiting', nextAction: 'wait', summary: '🔐⏸️ strict producer: strict_render_not_armed — MEGA_STRICT_PRODUCER เปิดแต่ MEGA_STRICT_RENDER ยังไม่พร้อม พักงานก่อน queue (rollout: เปิด RENDER ก่อน PRODUCER)' };
+  }
   if (process.env.MEGA_SELECTION_SPEC === '1') {
     try {
       const specApi = await import('@/lib/refSlotContract');
-      const { dnaToTemplateSpec } = await import('@/lib/refTemplate');
+      // ★ Checkpoint C (C): template builder ฉีดได้เฉพาะเทสผ่าน _deps — production default = ของจริงเสมอ
+      const dnaToTemplateSpec = _deps?.dnaToTemplateSpec || (await import('@/lib/refTemplate')).dnaToTemplateSpec;
       // ★ รอบ 5 P0-2: สัญญาสร้างจาก selectionRefDNA เท่านั้น (weak-match ถูก strip ตรง S6) —
       //   ส่วน payload ด้านล่างใช้ refDNA legacy · template.slots สองก้อนเหมือนกัน realized geometry จึงตรง composer
       const contract = specApi.buildRefSlotContract({ refDNA: selectionRefDNA, artBriefOrders: d.artBrief?.orders || [] });
       const sentSet = new Set(allLinks.map(String));
       // ★ SEM-2 (Codex): exact authority — สร้าง plannedByRefSlot จาก "slotPlan สุดท้ายที่รอด dedupe+เพดาน 10 จริง"
-      //   เท่านั้น (ห้ามสร้างจาก raw slots) · เฉพาะ _sem + สวิตช์ runtime ทั้งสอง ON · ยัง shadow ล้วน:
-      //   spec อยู่ dossier เท่านั้น ห้ามเข้า queue payload / composer ห้าม consume
+      //   เท่านั้น (ห้ามสร้างจาก raw slots) · เฉพาะ _sem + สวิตช์ runtime ทั้งสอง ON
+      //   ★ Checkpoint C: spec เข้า queue payload ได้ "เฉพาะ strictWireOn" เท่านั้น (เดิม shadow ล้วนใน dossier
+      //   — ตอนนี้ dossier ยังได้ spec เสมอเมื่อ SPEC=1 · queue ได้คู่ spec+realized เมื่อกุญแจครบสี่)
       let plannedByRefSlot;
       let specAuthorityStale = false;
       if (_sem && _semEnvOn) {
@@ -2263,9 +2320,11 @@ export async function s7_cover(job, { origin, _deps } = {}) {
         specAuthorityStale = !s6Hash || s6Hash !== s7AuthHash;
         if (specAuthorityStale) console.log(`[MEGA S7] 🧬⚠️ contract authority ไม่ตรงกับตอน S6 (s6=${s6Hash || '-'} vs s7=${s7AuthHash}) — spec fail-closed`);
       }
+      // ★ Checkpoint C (B): คำนวณครั้งเดียว — ก้อนเดียวกันนี้ไหลไปทั้ง build/validate/payload
+      realizedTemplate = selectionRefDNA ? dnaToTemplateSpec(selectionRefDNA) : null;
       selectionSpec = specApi.buildSelectionSpec({
         contract,
-        realizedTemplate: selectionRefDNA ? dnaToTemplateSpec(selectionRefDNA) : null,
+        realizedTemplate,
         plannedSlots: slots,
         backups: backupEntries.filter((b) => sentSet.has(b.imageUrl)), // เฉพาะสำรองที่รอดเพดาน 10 ลิงก์จริง
         // ★ Codex รอบ 3 ข้อ 3 + รอบ 4 P1: refId = ตัวตนจริง (bind refId → dnaHash แฟ้มเก่า → m.ref.id ตอน S7 pick เอง)
@@ -2274,7 +2333,29 @@ export async function s7_cover(job, { origin, _deps } = {}) {
         ...(plannedByRefSlot ? { plannedByRefSlot, authorityStale: specAuthorityStale } : {}),
       });
       console.log(`[MEGA S7] 📜 SelectionSpec v1: ${selectionSpec.counts.total} ช่อง (map ${selectionSpec.counts.mapped} · ไร้ primary ${selectionSpec.counts.missingPrimary}) · strictReady=${selectionSpec.strictReady} · hash=${selectionSpec.specHash}`);
-    } catch (e) { console.log('[MEGA S7] SelectionSpec ล้ม (shadow ไม่กระทบงาน):', String(e?.message || '').slice(0, 80)); }
+      // ★ Checkpoint C (FINAL P1 TOCTOU): การตรวจ validator/geometry/binding ย้ายไปทำบน "wire snapshot"
+      //   (ก้อนที่ parse กลับจาก payloadBody ที่จะส่งจริง) หลังสร้าง payload — ที่นี่เหลือเช็คของที่รู้ก่อนได้
+      if (strictWireOn) {
+        // ⓪ โครง realized หาย = reason เฉพาะของ producer (คงที่) — wire gate ตรวจฉบับเต็มอีกชั้นก่อน queue
+        if (!realizedTemplate) {
+          return { status: 'waiting', nextAction: 'wait', summary: '🔐⏸️ strict producer: strict_realized_template_missing — สร้างโครง realized ไม่ได้ พักงานก่อน queue' };
+        }
+      }
+    } catch (e) {
+      // ★ Checkpoint C (D): strictWireOn ห้าม shadow-catch แล้ว enqueue แบบ legacy — build/import/template
+      //   พังจุดไหน = failed/retry ก่อนแตะ queue เสมอ · reason คงที่ (รายละเอียดอยู่ log เท่านั้น —
+      //   summary ห้ามพกข้อความ exception) · shadow (OFF) = กลืนเงียบตามพฤติกรรมเดิม
+      if (strictWireOn) {
+        console.log('[MEGA S7] 🔐 strict producer build ล้ม:', String(e?.message || '').slice(0, 120));
+        return { status: 'failed', nextAction: 'retry', summary: '🔐 strict producer: strict_carrier_build_failed — สร้างสัญญา/โครงล้ม ไม่ enqueue (รายละเอียดใน log)' };
+      }
+      console.log('[MEGA S7] SelectionSpec ล้ม (shadow ไม่กระทบงาน):', String(e?.message || '').slice(0, 80));
+    }
+  }
+  // ★ Checkpoint C (D): invariant both-or-neither — ถึงจุดนี้ under strict wire สัญญาต้องครบคู่เสมอ
+  //   (validator ผ่านแล้ว spec/realized ห้ามหาย) · หลุด = บั๊กจริง ปิดงานก่อน enqueue
+  if (strictWireOn && (!selectionSpec || !realizedTemplate)) {
+    return { status: 'failed', nextAction: 'retry', summary: '🔐 strict producer: spec/realized หายก่อน enqueue (invariant both-or-neither) — ไม่ส่งงาน' };
   }
   const payload = {
     jobType: 'cover',
@@ -2284,8 +2365,28 @@ export async function s7_cover(job, { origin, _deps } = {}) {
     userId: MEGA_USER,
     ...(refDNA ? { refDNA } : {}), // 🎯 โครงจริงจากปกเป้า
     ...(d.refMatch?.imagePath ? { refImagePath: d.refMatch.imagePath } : {}), // 👁️ ภาพ ref จริงให้ตาเทียบ
+    // ★ Checkpoint C (D): แนบคู่ strict "both-or-neither" เฉพาะ strictWireOn — OFF = payload เดิม byte-identical
+    //   (ไม่มี own key · key order เดิมทุกตัว) · consumer ฝั่ง compose ตรวจซ้ำด้วย validator เดียวกันก่อนประกอบ
+    ...(strictWireOn ? { selectionSpec, realizedTemplate } : {}),
   };
-  const q = await _jf(`${coverOrigin()}/api/queue/add`, { method: 'POST', body: JSON.stringify(payload) }, 60000);
+  // ★ Checkpoint C (FINAL P1 TOCTOU): strict = serialize exact payload "ครั้งเดียว" → ตรวจ wire snapshot →
+  //   ส่ง string ก้อนเดิมที่ตรวจแล้วเป๊ะ — ห้าม stringify ซ้ำ (stateful toJSON/getter อาจผ่านรอบแรกแล้ว
+  //   เปลี่ยนร่าง/โยนรอบสอง = throw หลุดหรือส่งของที่ไม่ได้ validate) · OFF = stringify ที่จุดส่งตามเดิม byte เดิม
+  let payloadBody = null;
+  if (strictWireOn) {
+    try {
+      const _specApiWire = await import('@/lib/refSlotContract');
+      payloadBody = JSON.stringify(payload); // ← ครั้งเดียวเท่านั้นทั้งชีวิต payload นี้
+      const wire = JSON.parse(payloadBody);  // snapshot ที่จะขึ้นสายจริง
+      const gate = _strictWireGate(wire, _specApiWire.validateStrictRenderActivation);
+      if (gate) return gate;
+      console.log(`[MEGA S7] 🔐 strict producer ARMED: ref=${wire.selectionSpec.refId} · wire snapshot ผ่านครบ — ส่ง body ก้อนที่ตรวจแล้ว`);
+    } catch (e) {
+      console.log('[MEGA S7] 🔐 strict wire snapshot ล้ม:', String(e?.message || '').slice(0, 120));
+      return { status: 'failed', nextAction: 'retry', summary: '🔐 strict producer: strict_payload_not_serializable — serialize/ตรวจ wire snapshot ล้ม ไม่ enqueue (รายละเอียดใน log)' };
+    }
+  }
+  const q = await _jf(`${coverOrigin()}/api/queue/add`, { method: 'POST', body: payloadBody ?? JSON.stringify(payload) }, 60000);
   if (!q.success || !q.jobId) {
     return { status: 'failed', nextAction: 'retry', summary: 'ส่งงานปกไม่สำเร็จ: ' + (q.error || q.httpStatus) };
   }
