@@ -11,6 +11,8 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto'; // ★ เฟส 3.2 (10 ก.ค.): md5 คีย์ cache ผล photo-enhance ของ hero
+// ★ Wave2 Batch D2 (10 ก.ค.): เกณฑ์ตัวเลข "กติกาวัดได้" จากคลังเทคนิคปก — single source of truth (sync, ใช้ใน measureTechRules)
+import { TECH_RULES } from '@/lib/imageQualityConfig';
 
 // ★ Wave1 Batch E (10 ก.ค. — manifest-lite): เวอร์ชัน composer ปัจจุบัน ประกาศตายตัวตรงนี้
 //   อัปเดตมือเมื่อแก้กติกา compose/crop/hero — ใช้ stamp ลง manifest ให้ debug/replay ย้อนดูได้ว่ารอบนี้วิ่งด้วยกติกาไหน
@@ -238,6 +240,170 @@ function traceQcFlags(cropTrace) {
     }
   }
   return out;
+}
+
+// ============================================================
+// ★ Wave2 Batch D2 (10 ก.ค.): เครื่องวัด "กติกาวัดได้" 23 ข้อจากคลังเทคนิคปก → ธง QC
+// ------------------------------------------------------------
+// pure ล้วน (ไม่มี IO/LLM/side-effect) — เทสได้โดด · วัดจากค่าที่ compose คำนวณไว้แล้วทั้งหมด:
+//   assignments (slotId↔imageIndex+crop) · spec.slots (ช่องบน canvas จริง) · faceBoxes (ตาหาหน้า normalized)
+//   · cropTrace (region พิกเซลจริงต่อช่องของรอบเรนเดอร์สุดท้าย — lockstep กับ buffer ตาม W2-C)
+// การ map พิกัด (ยืนยันกับโค้ดจริง): rect slot fill ช่องแบบสัดส่วนตรง (region aspect = slot aspect)
+//   → faceShare ช่อง = สูงหน้า(px ต้นทาง) / region.height × 100 · หน้าบน canvas = slotRect + สัดส่วนตำแหน่งใน region
+// 🔴 fail-open: วัดไม่ได้ (ไร้ faceBox/ไร้ trace/ไร้ region) = ข้ามเงียบ ไม่ติดธง (ห้ามเดา)
+// ธงทุกตัวอ้าง principle id ของคลัง (P-*) ในคอมเมนต์ — coverQcGate.js เป็นตัวตัดสินโหมด advisory/hard
+// ============================================================
+export function measureTechRules({ assignments = [], spec = null, faceBoxes = [], cropTrace = [] } = {}) {
+  const flags = [];
+  const bySlot = {}; // slotId → { role, faceSharePct?, headroomPct?, hasFace }
+  const slots = Array.isArray(spec?.slots) ? spec.slots : [];
+  const canvasW = Number(spec?.canvasW) || 0;
+
+  // index ช่วยค้น
+  const slotById = new Map();
+  for (const s of slots) slotById.set(String(s.id), s);
+  const traceBySlot = new Map();
+  for (const t of cropTrace || []) if (t && t.slot != null) traceBySlot.set(String(t.slot), t);
+
+  // จำแนกบทบาทช่องจาก id — mirror regex เดิมที่ composer/refTemplate ใช้ (main|hero, shape circle,
+  //   ช่อง DNA เกิดเป็น `${role}_${i}` เช่น context_2 / evidence_3 / reaction_1 / victim_5)
+  const roleOf = (slot) => {
+    const id = String(slot?.id || '');
+    if (/main|hero/i.test(id)) return 'hero';
+    if (slot?.shape === 'circle') return 'circle';
+    if (/^context/i.test(id)) return 'context';
+    if (/^evidence/i.test(id)) return 'evidence';
+    if (/^(reaction|action|moment|pair|victim)/i.test(id)) return 'secondary';
+    return 'unknown'; // ไม่รู้บทบาท → ไม่วัด faceShare (fail-open)
+  };
+
+  // หน้าใหญ่สุด "ในช่อง" + ประมาณหัวจริง (px ต้นทาง) จาก faceBox + region
+  //   หลายหน้า → เลือกใบใหญ่สุดที่ศูนย์กลางตกใน region (ไม่มีตกใน = ใช้ใหญ่สุดทั้งภาพ)
+  const faceMetrics = (fb, region) => {
+    if (!fb || !fb.imgH) return null;
+    const cand = (fb.allFaces && fb.allFaces.length)
+      ? fb.allFaces
+      : (fb.x2 > fb.x1 ? [{ x1: fb.x1, y1: fb.y1, x2: fb.x2, y2: fb.y2 }] : []);
+    if (!cand.length) return null;
+    const inR = [];
+    if (region) {
+      for (const f of cand) {
+        const cxPx = ((f.x1 + f.x2) / 2) * fb.imgW;
+        const cyPx = ((f.y1 + f.y2) / 2) * fb.imgH;
+        if (cxPx >= region.left && cxPx <= region.left + region.width
+          && cyPx >= region.top && cyPx <= region.top + region.height) inR.push(f);
+      }
+    }
+    const pool = inR.length ? inR : cand;
+    let best = pool[0];
+    for (const f of pool) if ((f.y2 - f.y1) > (best.y2 - best.y1)) best = f;
+    const faceHpx = (best.y2 - best.y1) * fb.imgH;
+    const headTopPx = best.y1 * fb.imgH - 0.30 * faceHpx; // ★ ประมาณ: ผมเหนือกล่องหน้า ~30% ของสูงหน้า
+    return { faceHpx, headTopPx };
+  };
+
+  // ── (A) faceShare + headroom ต่อช่อง (P-CROP-01, panelNorms รายช่อง) ──
+  const faceShareList = []; // สำหรับบันได P-ZOOM-01: { slot, pct } เฉพาะช่องที่มีหน้า
+  for (const a of assignments || []) {
+    const slot = slotById.get(String(a.slotId));
+    if (!slot) continue;
+    const role = roleOf(slot);
+    const region = traceBySlot.get(String(a.slotId))?.region || null;
+    const fb = faceBoxes[a.imageIndex] || null;
+    const rec = { role, hasFace: false };
+    bySlot[String(a.slotId)] = rec;
+    if (!region || !region.height) continue; // วัดไม่ได้ = ข้ามเงียบ
+    const fm = faceMetrics(fb, region);
+    if (!fm) continue; // ไม่มีหน้า = ข้ามเงียบ (context/evidence ไม่มีหน้าก็ไม่วัด band ที่นี่)
+    const faceSharePct = +((fm.faceHpx / region.height) * 100).toFixed(1);
+    const headroomPct = +(((fm.headTopPx - region.top) / region.height) * 100).toFixed(1);
+    rec.faceSharePct = faceSharePct;
+    rec.headroomPct = headroomPct;
+    rec.hasFace = true;
+    faceShareList.push({ slot: String(a.slotId), pct: faceSharePct });
+
+    // band faceShare รายบทบาท (คลัง panelNorms) → face_share_out:<slot>:<pct>
+    if (role === 'hero') {
+      // P-CROP-01: ขอบ "พบจริง 30-58" (ไม่ใช่ norm 44-58 — กัน false positive)
+      const [lo, hi] = TECH_RULES.HERO_FACE_SHARE;
+      if (faceSharePct < lo || faceSharePct > hi) flags.push(`face_share_out:${a.slotId}:${faceSharePct}`);
+      // headroom hero → headroom_out:<slot>:<pct>
+      const [hlo, hhi] = TECH_RULES.HERO_HEADROOM;
+      if (headroomPct < hlo || headroomPct > hhi) flags.push(`headroom_out:${a.slotId}:${headroomPct}`);
+    } else if (role === 'circle') {
+      const [lo, hi] = TECH_RULES.CIRCLE_FACE_SHARE; // มีหน้าเท่านั้นถึงวัด (ฉาก/ของ = ข้ามไปแล้ว)
+      if (faceSharePct < lo || faceSharePct > hi) flags.push(`face_share_out:${a.slotId}:${faceSharePct}`);
+    } else if (role === 'context') {
+      const [lo, hi] = TECH_RULES.CONTEXT_FACE_SHARE;
+      if (faceSharePct < lo || faceSharePct > hi) flags.push(`face_share_out:${a.slotId}:${faceSharePct}`);
+    } else if (role === 'evidence') {
+      if (faceSharePct > TECH_RULES.EVIDENCE_FACE_SHARE_MAX) flags.push(`face_share_out:${a.slotId}:${faceSharePct}`); // >33 เท่านั้น
+    } else if (role === 'secondary') {
+      const [lo, hi] = TECH_RULES.SECONDARY_FACE_SHARE;
+      if (faceSharePct < lo || faceSharePct > hi) flags.push(`face_share_out:${a.slotId}:${faceSharePct}`);
+    }
+    // role unknown → ไม่ flag faceShare
+  }
+
+  // ── (B) P-ZOOM-01 บันไดขนาดหน้า (advisory ตลอด — คู่ pair ถูกต้องก็ติด แยกไม่ได้) ──
+  if (faceShareList.length >= 2) {
+    const sorted = [...faceShareList].sort((a, b) => b.pct - a.pct);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const gap = +(sorted[i].pct - sorted[i + 1].pct).toFixed(1);
+      if (gap < TECH_RULES.LADDER_MIN_GAP) flags.push(`ladder_break:${sorted[i].slot}:${sorted[i + 1].slot}:${gap}`);
+    }
+  }
+
+  // ── (C) P-CIRCLE-01 วงกลมทับ/ใกล้หน้าในช่องใต้ (zIndex ต่ำกว่า) < 3% ของกว้าง canvas ──
+  const circles = slots
+    .filter((s) => s.shape === 'circle')
+    .map((s) => ({ id: s.id, cx: s.x + s.w / 2, cy: s.y + s.h / 2, r: s.w / 2, zIndex: Number(s.zIndex) || 0 }));
+  if (circles.length && canvasW) {
+    const gapThresh = canvasW * (TECH_RULES.CIRCLE_FACE_GAP_PCT / 100);
+    for (const a of assignments || []) {
+      const slot = slotById.get(String(a.slotId));
+      if (!slot || slot.shape === 'circle') continue;
+      const region = traceBySlot.get(String(a.slotId))?.region || null;
+      const fb = faceBoxes[a.imageIndex] || null;
+      if (!region || !region.width || !region.height || !fb || !fb.imgW) continue;
+      const cand = (fb.allFaces && fb.allFaces.length)
+        ? fb.allFaces
+        : (fb.x2 > fb.x1 ? [{ x1: fb.x1, y1: fb.y1, x2: fb.x2, y2: fb.y2 }] : []);
+      let hit = false;
+      for (const f of cand) {
+        const fL = f.x1 * fb.imgW, fR = f.x2 * fb.imgW, fT = f.y1 * fb.imgH, fB = f.y2 * fb.imgH;
+        const fcx = (fL + fR) / 2, fcy = (fT + fB) / 2;
+        // หน้าต้องถูกเรนเดอร์จริง = ศูนย์กลางตกใน region
+        if (fcx < region.left || fcx > region.left + region.width || fcy < region.top || fcy > region.top + region.height) continue;
+        // map กล่องหน้า (px ต้นทาง) → พิกัด canvas ผ่านช่อง rect
+        const toCx = (px) => slot.x + ((px - region.left) / region.width) * slot.w;
+        const toCy = (py) => slot.y + ((py - region.top) / region.height) * slot.h;
+        const cL = toCx(fL), cR = toCx(fR), cT = toCy(fT), cB = toCy(fB);
+        for (const ci of circles) {
+          if (ci.zIndex <= (Number(slot.zIndex) || 0)) continue; // วงต้องอยู่เหนือช่องถึงทับได้จริง
+          // ระยะจากศูนย์วง → จุดใกล้สุดของกล่องหน้า แล้วลบรัศมี = ช่องว่างขอบวงถึงหน้า
+          const nx = Math.max(cL, Math.min(ci.cx, cR));
+          const ny = Math.max(cT, Math.min(ci.cy, cB));
+          const gap = Math.hypot(ci.cx - nx, ci.cy - ny) - ci.r;
+          if (gap < gapThresh) { hit = true; break; }
+        }
+        if (hit) break;
+      }
+      if (hit) flags.push(`circle_face_overlap:${a.slotId}`);
+    }
+  }
+
+  // ── (D) P-LAYOUT-01 จำนวนช่องรวม > 6 ──
+  if (slots.length > TECH_RULES.PANEL_MAX) flags.push(`panel_count_out:${slots.length}`);
+
+  // ── (E) P-CIRCLE-01 ขอบขาววง 0/ไม่มี หรือ >16px (norm 4-10 แต่ฐานกว้าง ref ไม่รู้ — ขอบหลวม) ──
+  for (const s of slots) {
+    if (s.shape !== 'circle') continue;
+    const bw = Number(s.borderWidth) || 0;
+    if (bw === 0 || bw > TECH_RULES.CIRCLE_BORDER_MAX) flags.push(`circle_border_out:${bw}`);
+  }
+
+  return { flags, measured: { bySlot, panelCount: slots.length } };
 }
 
 // ---------- แกนประกอบ (ใช้ร่วม compose/verify) ----------
@@ -1173,6 +1339,25 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
         }
       }
     } catch { /* ตรวจไม่ได้ = ไม่ติดธง */ }
+    // ★ Wave2 Batch D2 (10 ก.ค.): วัด "กติกาวัดได้" 23 ข้อจากคลังเทคนิคปก — ที่เดียว/หลัง Eye advisory จบ
+    //   (รวมกรณี revert แล้ว) = lockstep กับ buffer/cropTrace/assignments สุดท้ายเป๊ะ เหมือน manifest (W2-C การันตี)
+    //   pure ล้วน (ไม่มี LLM/IO เพิ่ม) · ธงเข้า core.qcFlags → coverQcGate.js ตัดสินโหมด advisory(default)/hard
+    //   ล้มเองได้ = ไม่กระทบผลปก (fail-open)
+    let techMeasured = null;
+    const techMode = process.env.MEGA_TECH_RULES_MODE === 'hard' ? 'hard' : 'advisory';
+    try {
+      const tr = measureTechRules({
+        assignments: core.assignments,
+        spec: core.spec,
+        faceBoxes: core.faceBoxes,
+        cropTrace,
+      });
+      techMeasured = tr.measured;
+      if (tr.flags.length) {
+        core.qcFlags.push(...tr.flags);
+        console.log(`[MegaComposer] 📐 techRules(${techMode}): ${tr.flags.join(' · ')}`);
+      }
+    } catch (e) { console.log('[MegaComposer] techRules วัดล้ม (ไม่กระทบผลปก):', e.message?.slice(0, 60)); }
     // ★ Wave1 Batch E (manifest-lite): "ความจริงของรอบประกอบ" — เก็บจากค่าที่คำนวณอยู่แล้วล้วน (ห้าม LLM/IO เพิ่ม
     //   ยกเว้น sha1 ของ buffer สุดท้าย) ให้ debug/replay ย้อนดูได้ทีหลังว่ารอบนี้ใช้ภาพ/หน้า/โมเดลอะไร
     //   ล้มเองได้ = ไม่กระทบผลปก (additive ล้วน — ไม่มี = ผู้เรียกเดิมไม่พัง)
@@ -1186,14 +1371,19 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
           const im = core.loaded[a.imageIndex] || {};
           const fb = core.faceBoxes[a.imageIndex] || null;
           const ah = core.aHashes ? core.aHashes[a.imageIndex] : null;
+          // ★ Wave2 Batch D2: ค่าที่วัดได้ต่อช่อง (faceSharePct/headroomPct) — additive, ไม่มี = null (fail-open)
+          const mm = techMeasured?.bySlot?.[a.slotId] || null;
           return {
             slot: a.slotId,
             imageUrl: im.url || im.thumbnailUrl || '',
             aHash: (ah != null) ? ah.toString(16) : null, // BigInt → hex string (JSON เก็บ BigInt ตรงๆ ไม่ได้)
             faceCount: fb?.count ?? 0,
             faceBoxes: _manifestFaceBoxes(fb),
+            measured: (mm && mm.hasFace) ? { faceSharePct: mm.faceSharePct, headroomPct: mm.headroomPct } : null,
           };
         }),
+        // ★ Wave2 Batch D2: โหมด + ธงกติกาวัดได้ของรอบนี้ (debug/replay) — additive
+        techRules: { mode: techMode, flags: (core.qcFlags || []).filter((f) => /^(face_share_out|headroom_out|circle_face_overlap|ladder_break|panel_count_out|circle_border_out):/.test(String(f))) },
         refImagePath: refImagePath || null,
         outputHash: crypto.createHash('sha1').update(buffer).digest('hex'),
       };

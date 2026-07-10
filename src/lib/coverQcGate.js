@@ -24,6 +24,20 @@
 //     · 'blank_image:<slot>'           ภาพเปล่า/เกือบสีเดียวล้วน (aHash บิตเกือบเท่ากันหมด — เคสวงกลมว่างในคลังจริง)
 //   BENIGN (ไม่นับ — ไม่กระทบ pass): feather_capped · enhanced:hero:* ·
 //     border_trimmed:* · hero_pose:* · enhance_failed:hero · upscale_soft:<ช่องอื่น> ≤1.6
+//
+// ★ Wave2 Batch D2 (10 ก.ค.): ธง "กติกาวัดได้" 23 ข้อจากคลังเทคนิคปก (measureTechRules ใน megaComposerService.js)
+//   โหมดจาก env MEGA_TECH_RULES_MODE: 'advisory' (default) = ทุกธงใหม่ลง advisory[] ไม่กระทบ pass · 'hard' = บางธงตัด
+//   รูปแบบธงใหม่ (อ้าง P-id ในคลัง):
+//     · 'face_share_out:<slot>:<pct>'   หน้ากินช่องนอก band panelNorms (P-CROP-01/panelNorms รายช่อง)
+//     · 'headroom_out:<slot>:<pct>'     headroom hero นอก -2..15% (P-CROP-01)
+//     · 'circle_face_overlap:<slot>'    วงกลมทับ/ใกล้หน้าคนในช่องใต้ (P-CIRCLE-01)
+//     · 'ladder_break:<a>:<b>:<gap>'    บันไดขนาดหน้าคู่ติดกันห่าง <8pt (P-ZOOM-01)
+//     · 'panel_count_out:<n>'           จำนวนช่อง >6 (P-LAYOUT-01)
+//     · 'circle_border_out:<px>'        ขอบขาววง 0/ไม่มี หรือ >16px (P-CIRCLE-01)
+//   โหมด hard ตัดเฉพาะ: face_share_out/headroom_out "เฉพาะ hero" → needs_gap_search ·
+//     circle_face_overlap → manual_review · ที่เหลือ (ladder_break/panel_count_out/circle_border_out/
+//     face_share_out ช่องรอง) = advisory เสมอแม้ hard (เหตุผล: pair แยกไม่ได้ · ฐาน px วงไม่รู้)
+//   MEGA_HARD_QC=0 ยัง bypass ทั้งด่านเหมือนเดิม (ธงใหม่ก็ไม่ทำให้ fail)
 // ============================================================
 
 const DEFAULT_THRESHOLDS = { hero: 1.2, other: 1.6 };
@@ -52,6 +66,8 @@ export function evaluateCoverQc(input = {}, opts = {}) {
   const advisory = [];
   let gapFail = false; // → needs_gap_search
   let reviewFail = false; // → manual_review
+  // ★ Wave2 Batch D2: โหมดกติกาวัดได้ — 'advisory' (default) ไม่กระทบ pass · 'hard' = บางธงตัด
+  const techHard = process.env.MEGA_TECH_RULES_MODE === 'hard';
 
   for (const f of flags) {
     // ── ① ธงยืด (needs_gap_search) ──
@@ -98,7 +114,49 @@ export function evaluateCoverQc(input = {}, opts = {}) {
       reasons.push(`ภาพเปล่า/เกือบสีเดียวล้วนลงช่อง [${f}] → คนต้องดู`);
       continue;
     }
-    // ── ③ ที่เหลือ = benign (feather_capped/enhanced/border_trimmed/hero_pose/enhance_failed/upscale_soft ช่องอื่น≤1.6) — ไม่นับ ──
+
+    // ── ③ ★ Wave2 Batch D2: ธง "กติกาวัดได้" จากคลังเทคนิคปก (advisory default / hard บางตัว) ──
+    //   face_share_out/headroom_out เฉพาะ hero → needs_gap_search (hard) · ช่องรอง = advisory เสมอ
+    const mShare = /^(?:face_share_out|headroom_out):([^:]+):/.exec(f);
+    if (mShare) {
+      const slot = mShare[1];
+      const hero = isHeroSlot(slot);
+      const kind = f.startsWith('headroom') ? 'headroom' : 'หน้ากินช่อง';
+      if (techHard && hero) {
+        gapFail = true;
+        reasons.push(`${kind} hero นอกเกณฑ์คลังเทคนิค [${f}] → วัตถุดิบไม่พอดี ควรหาภาพเพิ่ม (hard)`);
+      } else {
+        advisory.push(`${kind} ${hero ? 'hero' : `ช่อง ${slot}`} นอกเกณฑ์คลังเทคนิค [${f}]${techHard && !hero ? ' — ช่องรอง = advisory แม้ hard' : ''}`);
+      }
+      continue;
+    }
+    // circle_face_overlap → manual_review (hard) — วงทับหน้าคนในช่องใต้ (P-CIRCLE-01)
+    if (/^circle_face_overlap(:|$)/.test(f)) {
+      if (techHard) {
+        reviewFail = true;
+        reasons.push(`วงกลมทับ/ใกล้หน้าคนในช่องใต้ [${f}] → คนต้องดู (hard)`);
+      } else {
+        advisory.push(`วงกลมทับ/ใกล้หน้าคนในช่องใต้ [${f}] — advisory`);
+      }
+      continue;
+    }
+    // ladder_break → advisory เสมอแม้ hard (P-ZOOM-01: คู่ข่าว pair ที่ถูกต้องก็ติดธงนี้ แยกไม่ได้)
+    if (/^ladder_break(:|$)/.test(f)) {
+      advisory.push(`บันไดขนาดหน้าคู่ช่องติดกันห่างไม่ถึง 8pt [${f}] — advisory เสมอ (คู่ข่าว pair ถูกต้องก็ติด แยก role ไม่ได้)`);
+      continue;
+    }
+    // panel_count_out → advisory เสมอ (P-LAYOUT-01)
+    if (/^panel_count_out(:|$)/.test(f)) {
+      advisory.push(`จำนวนช่องเกินผังมาตรฐาน (>6) [${f}] — advisory`);
+      continue;
+    }
+    // circle_border_out → advisory เสมอ (P-CIRCLE-01: ฐานกว้างตอนศึกษา ref ไม่รู้ → เชื่อเป็นเส้นตัดไม่ได้)
+    if (/^circle_border_out(:|$)/.test(f)) {
+      advisory.push(`ขอบขาววงกลมนอกเกณฑ์ 4-10px [${f}] — advisory (ฐานกว้าง ref ไม่รู้)`);
+      continue;
+    }
+
+    // ── ④ ที่เหลือ = benign (feather_capped/enhanced/border_trimmed/hero_pose/enhance_failed/upscale_soft ช่องอื่น≤1.6) — ไม่นับ ──
   }
 
   // ── refSimilarity: advisory เท่านั้น (ห้ามใช้ตัด — พิสูจน์แล้วสวนตาคนจริง) ──

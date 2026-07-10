@@ -51,3 +51,34 @@ export const SHARPNESS_MIN_HERO = 25;
 // coverQcGate.js เป๊ะเสมอ ถ้าจะแก้ต้องแก้พร้อมกันสองที่จนกว่า B2 จะรวมจริง
 export const HERO_STRETCH_MAX = 1.2;
 export const OTHER_STRETCH_MAX = 1.6;
+
+// ---------- (6) ★ Wave2 Batch D2 (10 ก.ค.): "กติกาวัดได้" จากคลังเทคนิคปก 23 ข้อ → ด่าน QC ----------
+// ที่มา: data/cover-technique-library.json → synthesis.principles (P-*) + synthesis.panelNorms
+//   (สังเคราะห์จากปกแสนไลค์ 19 ใบ) แปลงเป็นตัวเลขวัดได้ → measureTechRules() ใน megaComposerService.js
+// ทุกเกณฑ์เป็น "band หลวม" ตั้งใจ (กัน false positive) — วัดไม่ได้ = ข้ามเงียบ ห้ามเดา (fail-open)
+// ⚠️ band hero ใช้ขอบ "พบจริง 30-58" ไม่ใช่ norm แนะนำ 44-58 — คลังบอกค่ากลาง ~48-52 แต่ของจริง
+//    กระจายกว้างถึง 30-58 → ใช้ขอบพบจริงกัน false positive (44-58 จะจับปกที่ยอมรับได้เป็นของเสีย)
+export const TECH_RULES = {
+  // P-CROP-01 + panelNorms.hero: faceSharePct ของ hero — พบจริง 30-58 (norm แนะนำ 44-58 ตั้งใจไม่ใช้)
+  HERO_FACE_SHARE: [30, 58],
+  // P-CROP-01 + panelNorms.hero: headroom hero — norm 0-8%, ใช้ขอบหลวม -2..15
+  //   (ค่าหัวเป็น "ประมาณ": headTop = y1 - 0.30×faceH — กล่องหน้าไม่รวมผม จึงเผื่อ 30% ของสูงหน้า)
+  HERO_HEADROOM: [-2, 15],
+  // panelNorms.circle: faceShare หน้าคู่/identity ในวง 24-48 (เฉพาะเมื่อวงมีหน้า; ฉาก/ของ 0-12 = ไม่วัด)
+  CIRCLE_FACE_SHARE: [24, 48],
+  // P-CONTEXT-01 + panelNorms.context: wide/medium-wide faceShare 5-16
+  CONTEXT_FACE_SHARE: [5, 16],
+  // panelNorms.evidence: faceShare 0-22 (เพดาน 33 เมื่อเป็นโมเมนต์คน) → flag เฉพาะ >33 เท่านั้น
+  EVIDENCE_FACE_SHARE_MAX: 33,
+  // panelNorms.secondary: หน้ารอง/reaction/คู่ข่าว faceShare 38-68 ของช่องตัวเอง
+  SECONDARY_FACE_SHARE: [38, 68],
+  // P-ZOOM-01: บันไดขนาดหน้า — คู่ช่องติดกัน (เรียง faceShare) ต้องห่าง ≥8pt
+  //   ⚠️ advisory ตลอด: คู่ข่าว pair (P-ZOOM-02 ถูกต้องเมื่อต่าง ≤10pt) จะติดธงนี้ด้วย — ไม่มี role แยกให้กันได้
+  LADDER_MIN_GAP: 8,
+  // P-CIRCLE-01: วงห้ามทับ/ใกล้หน้า — ระยะขอบวงถึงกล่องหน้า < 3% ของกว้าง canvas = ทับ
+  CIRCLE_FACE_GAP_PCT: 3,
+  // P-LAYOUT-01: จำนวนช่องรวมทั้งใบ ≤6 (ผัง default = hero + คอลัมน์ขวา 2-3 + วง)
+  PANEL_MAX: 6,
+  // P-CIRCLE-01: ขอบขาววง norm 4-10px — ฐานกว้างตอนศึกษา ref ไม่รู้ → ใช้ขอบหลวม จับเฉพาะผิดชัด (0/ไม่มี หรือ >16)
+  CIRCLE_BORDER_MAX: 16,
+};
