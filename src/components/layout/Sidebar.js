@@ -58,9 +58,8 @@ export default function Sidebar() {
     { type: 'divider', label: '🛠️ เครื่องมือข่าว' },
     { label: 'กรองแก่นข่าว (สกัดเนื้อ)', icon: '🔬', href: '/news-filter' },
     { label: 'ถอดคลิปเป็นข้อความ', icon: '🎙️', href: '/clip-transcript' },
-    { label: 'เพิ่มความชัดภาพข่าว', icon: '🔍', href: '/photo-enhance' },
-    { label: 'สืบหาภาพข่าว (คลังเคส)', icon: '🕵️', href: '/image-hunt' }, // ★ 3 ก.ค.: ระบบสืบภาพจากเนื้อหาข่าว
-    { label: 'แคสติ้งทดสอบเซนส์ข่าว', icon: '🎯', href: '/casting/admin' },
+    // ⛔ 10 ก.ค. 2026: ลบระบบ photo-enhance / image-hunt / casting ทั้งระบบตามคำสั่งผู้ใช้ (ไม่มีระบบอื่นพึ่งพา — เช็คแล้ว)
+    //   กู้คืน: git log หา commit "remove unused tool systems" แล้ว revert (โค้ดทั้งหมดอยู่ใน git history)
     // ★ 22 มิ.ย.: ปิดเมนู "เรดาร์หากระแส" (เลิกใช้ ใช้โต๊ะข่าวกลางแทน — กันเปิดแล้วกินโทเคน) · เปิดคืน: ปลดคอมเมนต์ + ตั้ง env RADAR_ENABLED=1
     // { label: 'เรดาร์หากระแส', icon: '📡', href: '/radar' },
     { label: 'คลังข่าวเก่า', icon: '📦', href: '/news-archive' },
@@ -86,10 +85,7 @@ export default function Sidebar() {
     { label: 'คลังพรอมต์', icon: '🏛️', href: '/prompt-library' },
     { label: 'ตั้งค่าพรอมต์ AI', icon: '🤖', href: '/prompts' },
 
-    // ── 💬 ชุมชน ──
-    { type: 'divider', label: '💬 ชุมชน' },
-    { label: 'ห้องแชททีม', icon: '💬', href: '/chat' },
-
+    // ⛔ 10 ก.ค. 2026: ลบระบบห้องแชททีม (/chat) ทั้งระบบตามคำสั่งผู้ใช้ — กู้คืนจาก git history
     // ── ⚙️ ระบบ & จัดการ ──
     { type: 'divider', label: '⚙️ ระบบ & จัดการ' },
     { label: 'เช็คสุขภาพระบบ', icon: '🩺', href: '/system-health' },
