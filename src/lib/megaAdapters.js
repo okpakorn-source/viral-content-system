@@ -1206,6 +1206,10 @@ function _validatePersonSnapshot(getCompass, getArtBrief, refDNA) {
     const view = resolveRefSlotView(refDNA, { mode: 'template_v1' });
     const targets = (Array.isArray(view?.views) ? view.views : []).filter((v) => v.role === 'hero' || v.role === 'main' || v.role === 'reaction');
     const auth = templateV1PersonAuthority(compass);
+    // ★ D3-B4 P1-A (Codex): data-readiness gate — ถ้า authority กำกวม (hero/non-hero bridge) = waiting ก่อนรับ target row ใดๆ
+    //   (กัน hero กำกวมหลุดเข้า contract/slotDirector แม้ reaction จะมี candidate อิสระที่ resolve ได้) ·
+    //   compass ว่าง/ไม่มี hero โดยไม่มี bridge = authorityReady=true → คงพฤติกรรมเดิม (ไม่แปลง missing เป็น ambiguity)
+    if (auth.authorityReady === false) return FAIL;
     const idxOf = (o) => (Number.isInteger(o.i) ? o.i : null); // strict integer (snap plain — ห้าม coercion ''/null/false)
     const roleOf = (o) => String(o.role ?? '').trim().toLowerCase();
     // pass 1 (presence): ทุก expected target ต้องมี snap order คู่ index+role พอดี 1 + personHint ถูก authority
@@ -1217,9 +1221,16 @@ function _validatePersonSnapshot(getCompass, getArtBrief, refDNA) {
       const rawHint = o.personHint;
       const persisted = (rawHint == null || String(rawHint).trim() === '') ? null : String(rawHint).trim();
       const expected = auth.resolveHint(t.role, persisted);
-      if (persisted == null) { if (expected != null) return FAIL; continue; }
+      // ★ D3-B4 (Codex): reaction-only non-null rule (point 6) — reaction target ต้อง resolve non-null ก่อน
+      //   contract/slotDirector (null/unresolved = waiting, ไม่ถอย ref subject/legacy) · hero/main คงพฤติกรรมเดิม:
+      //   null valid เฉพาะเมื่อ expected==null (ไม่มีตัวตน hero) · มิฉะนั้น FAIL
+      if (persisted == null) {
+        if (t.role === 'reaction') return FAIL;
+        if (expected != null) return FAIL;
+        continue;
+      }
       const canon = auth.canonicalKnown(persisted); // unique canonical หรือ null (ambiguous/unknown)
-      if (canon == null || expected == null || !auth.nameMatch(canon, expected)) return FAIL;
+      if (expected == null || canon == null || !auth.nameMatch(canon, expected)) return FAIL;
     }
     // pass 2 (no-extra): snap order ที่ role เป็น target ต้องมี canonical row คู่ (index+role exact) — จับ i:99/นอก view
     for (const o of snap) {

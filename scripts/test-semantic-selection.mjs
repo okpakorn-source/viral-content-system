@@ -2155,9 +2155,11 @@ await test('D3B3-A (Codex) real artBriefBrain identity: reaction poison→canoni
   // #2 explicit reaction + LLM unknown / hero → override to canonical reaction
   assert.equal(hintOf((await briefWith([HERO_D, REACT_S], { reaction: 'คนแปลกหน้า' })).out, 'reaction'), 'สรพงศ์ ชาตรี', '#2 unknown → override');
   assert.equal(hintOf((await briefWith([HERO_D, REACT_S], { reaction: 'ดวงเดือน' })).out, 'reaction'), 'สรพงศ์ ชาตรี', '#2 hero → override');
-  // #3 no explicit reaction (secondary role=related) + intentional known hero → preserve same-hero
-  assert.equal(hintOf((await briefWith([HERO_D, REL_S], { reaction: 'ดวงเดือน' })).out, 'reaction'), 'ดวงเดือน', '#3 same-hero preserved');
-  // #4 only hero: known same-hero remains · unknown → null (never invent)
+  // #3 (D3-B4 case 2) no explicit reaction + exactly ONE distinct non-hero (related สรพงศ์) → reaction override to สรพงศ์
+  //   แม้ LLM ให้ hero hint (poison) — ตัวตน non-hero หนึ่งเดียวชนะ (เคส AC-0066)
+  assert.equal(hintOf((await briefWith([HERO_D, REL_S], { reaction: 'ดวงเดือน' })).out, 'reaction'), 'สรพงศ์ ชาตรี', '#3 one non-hero → reaction=สรพงศ์');
+  // #4 (D3-B4 case 3) only hero (zero non-hero): known same-hero remains · unknown → null (never invent)
+  assert.equal((templateV1PersonAuthority({ mainCharacters: [HERO_D] })).reaction, null, '#4 zero non-hero → reactionName null (no forced)');
   assert.equal(hintOf((await briefWith([HERO_D], { reaction: 'ดวงเดือน' })).out, 'reaction'), 'ดวงเดือน', '#4 only-hero known → remains');
   assert.equal(hintOf((await briefWith([HERO_D], { reaction: 'มนุษย์ต่างดาว' })).out, 'reaction'), null, '#4 only-hero unknown → null');
   // #5 alias/duplicate exclusion + collision (deterministic token match, no prefix-fuzzy)
@@ -2227,9 +2229,9 @@ await test('D3B3-B (Codex) defense-in-depth: S6 selects สรพงศ์ · fr
   assert.equal(r7.s6.status, 'waiting', 'no-explicit + unknown → HOLD');
   assert.equal(r7.captures.brainArgs.length, 0, 'unknown: slotDirector 0');
 
-  // no explicit reaction + persisted known hero → PASS (reaches slotDirector, not HELD)
-  const r8 = await runRefShotFlow({ s6Env: REFSHOT_S6, chars: CHARS_A, preMarkArtBrief: markedWithHints(CHARS_A, { reaction: 'ดวงเดือน' }) });
-  assert.ok(r8.captures.brainArgs.length >= 1, 'same-hero (no explicit) → ผ่าน validation ถึง slotDirector');
+  // zero non-hero (only hero, case 3) + persisted known hero → PASS same-hero (reaches slotDirector, not HELD)
+  const r8 = await runRefShotFlow({ s6Env: REFSHOT_S6, chars: [HERO_D], preMarkArtBrief: markedWithHints([HERO_D], { reaction: 'ดวงเดือน' }) });
+  assert.ok(r8.captures.brainArgs.length >= 1, 'same-hero (zero non-hero) → ผ่าน validation ถึง slotDirector');
 
   // two reaction orders, second tampered → HOLD (validate EVERY order, not first)
   const base2r = markedArtBrief(CH_REACT);
@@ -2465,6 +2467,196 @@ await test('D3B3-D (Codex) JSON-safe snapshot + whole-carrier: BigInt/NaN/Infini
   assert.equal(rF.captures.brainArgs[0].artBrief.orders.find((o) => o.role === 'reaction').personHint, 'สรพงศ์ ชาตรี', 'fresh _brainFn artBrief = snapshot');
   const cF = buildRefSlotContract({ refDNA: DNA_ALPO, artBriefOrders: rF.s6.dossierPatch.artBrief.orders, mode: 'template_v1' });
   assert.equal(cF.slots.find((s) => s.refRole === 'reaction').wantPerson, 'สรพงศ์ ชาตรี', 'fresh contract wantPerson = canonical');
+});
+
+await test('D3B4 (Codex) reaction authority matrix: case2 one-nonhero (AC-0066: related สรพงศ์ → reaction+asset P5+strict) · case1/3/4 gates · alias/bridge · determinism', async () => {
+  const A = (chars) => templateV1PersonAuthority({ mainCharacters: chars });
+  const MANOP = { name: 'มานพ ทองดี', role: 'context' };
+  const MULTI = [HERO_D, REL_S, MANOP]; // hero + 2 distinct non-hero (case 4)
+  // ── helper matrix (deterministic) ──
+  assert.equal(A([HERO_D, { name: 'สรพงศ์ ชาตรี', role: 'reaction' }, MANOP]).reaction, 'สรพงศ์ ชาตรี', 'case1 explicit reaction precedence (แม้มี non-hero อื่น)');
+  assert.equal(A([HERO_D, REL_S]).reaction, 'สรพงศ์ ชาตรี', 'case2 exactly-one non-hero (related) → reactionName');
+  assert.equal(A([HERO_D]).reaction, null, 'case3 zero non-hero → null');
+  assert.equal(A(MULTI).reaction, null, 'case4 >1 non-hero → null (no forced/array-first)');
+  const authM = A(MULTI);
+  assert.equal(authM.resolveHint('reaction', 'สรพงศ์'), 'สรพงศ์ ชาตรี', 'case4 unique non-hero (alias) → resolves full');
+  assert.equal(authM.resolveHint('reaction', 'มานพ'), 'มานพ ทองดี', 'case4 other unique non-hero → resolves');
+  assert.equal(authM.resolveHint('reaction', 'ดวงเดือน'), null, 'case4 hero hint → null (unresolved)');
+  assert.equal(authM.resolveHint('reaction', 'คนแปลก'), null, 'case4 unknown → null');
+  assert.equal(authM.resolveHint('reaction', null), null, 'case4 null → null');
+  // alias dedup: [related สรพงศ์, related สรพงศ์ ชาตรี] collapse → one identity (full spelling) → case2
+  assert.equal(A([HERO_D, { name: 'สรพงศ์', role: 'related' }, { name: 'สรพงศ์ ชาตรี', role: 'related' }]).reaction, 'สรพงศ์ ชาตรี', 'alias dup collapse → one non-hero (full spelling)');
+  // bridging short alias matches 2 distinct non-hero → ambiguous → null
+  const authBridge = A([HERO_D, { name: 'สมชาย ใจดี', role: 'related' }, { name: 'สมชาย ใจร้าย', role: 'related' }]);
+  assert.equal(authBridge.reaction, null, 'bridge: 2 non-hero → reactionName null');
+  assert.equal(authBridge.resolveHint('reaction', 'สมชาย'), null, 'bridge: short alias matches 2 → ambiguous null');
+  assert.equal(authBridge.resolveHint('reaction', 'สมชาย ใจดี'), 'สมชาย ใจดี', 'bridge: full name → unique resolves');
+  // parenthetical hero alias excluded from non-hero set
+  assert.equal(A([{ name: 'จุน วนวิทย์ (อากงจุน)', role: 'hero' }, { name: 'อากงจุน', role: 'related' }, { name: 'สมพร ใจดี', role: 'related' }]).reaction, 'สมพร ใจดี', 'parenthetical hero alias excluded → other non-hero');
+
+  // ── case 2 AC-0066 full flow (S6+S7): related สรพงศ์, LLM poison hero → reaction=สรพงศ์, wantPerson=สรพงศ์, asset P5, strict binding ──
+  const poisonCb = async (args) => {
+    const rows = JSON.parse(args.user.split('\n').pop());
+    return { text: JSON.stringify({ orders: rows.map((r) => ({ i: r.i, want: 'w', personHint: r.role === 'reaction' ? 'ดวงเดือน' : null })), storyNote: 'n' }) };
+  };
+  const mkSel = () => runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL, chars: [HERO_D, REL_S], deps: { artBriefBrain: async (a) => artBriefBrain({ ...a, _callBrain: poisonCb }) } });
+  const sel = await mkSel();
+  assert.equal(sel.s6.status, 'done', 'case2 S6 done');
+  assert.equal(sel.s7.status, 'done', 'case2 S7 done (strict wire)');
+  assert.equal(hintOf(sel.job.dossier.artBrief, 'reaction'), 'สรพงศ์ ชาตรี', 'case2 persisted reaction = สรพงศ์ (override hero poison)');
+  const cSel = buildRefSlotContract({ refDNA: DNA_ALPO, artBriefOrders: sel.job.dossier.artBrief.orders, mode: 'template_v1' });
+  assert.equal(cSel.slots.find((s) => s.refRole === 'reaction').wantPerson, 'สรพงศ์ ชาตรี', 'case2 contract wantPerson = สรพงศ์');
+  assert.equal(String(sel.s6.dossierPatch.pickImages.slots.reaction?.id), 'P5', 'case2 S6 reaction asset = P5 (secondary)');
+  // ── P1-4: exact URL chain S6 == unique slotPlan reaction row == SelectionSpec primary + strict consumer accepts ──
+  const spec = sel.captures.payload.selectionSpec;
+  const s6React = sel.s6.dossierPatch.pickImages.slots.reaction;
+  const specReact = spec.slots.find((s) => s.refSlotId === 'reaction');
+  const planReact = (sel.captures.payload.slotPlan || []).filter((p) => p.refSlotId === 'reaction');
+  assert.equal(planReact.length, 1, 'P1-4 unique reaction slotPlan row (refSlotId=reaction)');
+  assert.equal(String(s6React.id), 'P5', 'P1-4 S6 reaction candidate = P5 (secondary)');
+  assert.equal(String(specReact.primary.candidateId), String(s6React.id), 'P1-4 SelectionSpec candidateId == S6 reaction id');
+  assert.equal(specReact.primary.imageUrl, s6React.imageUrl, 'P1-4 SelectionSpec imageUrl == S6 reaction imageUrl');
+  assert.equal(planReact[0].url, s6React.imageUrl, 'P1-4 slotPlan reaction url == S6 reaction imageUrl');
+  const dec = validateStrictRenderActivation({ selectionSpec: spec, realizedTemplate: sel.captures.payload.realizedTemplate });
+  assert.equal(dec.decision, 'strict_ready', 'P1-4 strict consumer accepts spec (strict_ready, no legacy fallback)');
+  // NOTE: strict-manifest / no-later-change (Eye/QC) สงวนพิสูจน์ที่ isolated canary gate — unit นี้ไม่ compose (ไม่แตะ consumer/composer)
+  // ── P1-3: real fresh→resume — RUN2 ใช้ structuredClone ของ artBrief ที่ RUN1 persist ผ่าน resume path (S6 result เดิม) ──
+  const clonedAB = structuredClone(sel.job.dossier.artBrief);
+  const run2 = await runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL, chars: [HERO_D, REL_S], preMarkArtBrief: clonedAB });
+  assert.equal(run2.s6.status, 'done', 'P1-3 resume S6 done');
+  assert.deepStrictEqual(run2.job.dossier.artBrief, sel.job.dossier.artBrief, 'P1-3 persisted artBrief identical (fresh→resume)');
+  assert.deepStrictEqual(run2.s6.dossierPatch.pickImages, sel.s6.dossierPatch.pickImages, 'P1-3 pickImages identical');
+  assert.equal(run2.captures.rawBody, sel.captures.rawBody, 'P1-3 rawBody byte-identical');
+  const spec2 = run2.captures.payload.selectionSpec;
+  assert.equal(spec2.specHash, spec.specHash, 'P1-3 specHash identical');
+  assert.equal(spec2.replayHash, spec.replayHash, 'P1-3 replayHash identical');
+  assert.equal(run2.captures.brainArgs.length, sel.captures.brainArgs.length, 'P1-3 slotDirector call count identical');
+
+  // ── resume gates ──
+  const g4a = await runRefShotFlow({ s6Env: REFSHOT_S6, chars: MULTI, preMarkArtBrief: markedWithHints(MULTI, { reaction: 'ดวงเดือน' }) });
+  const g4b = await runRefShotFlow({ s6Env: REFSHOT_S6, chars: MULTI, preMarkArtBrief: markedWithHints(MULTI, { reaction: 'ดวงเดือน' }) });
+  assert.equal(g4a.s6.status, 'waiting', 'case4 hero hint → HOLD (point 6 unresolved)');
+  assert.equal(g4a.captures.brainArgs.length, 0, 'case4 hero: slotDirector 0');
+  assert.equal(g4a.queueCalls, 0, 'case4 hero: queue 0');
+  assert.equal(g4b.s6.summary, g4a.s6.summary, 'case4 deterministic summary');
+  const g4ok = await runRefShotFlow({ s6Env: REFSHOT_S6, chars: MULTI, preMarkArtBrief: markedWithHints(MULTI, { reaction: 'มานพ ทองดี' }) });
+  assert.ok(g4ok.captures.brainArgs.length >= 1, 'case4 unique non-hero hint → PASS');
+  const g3n = await runRefShotFlow({ s6Env: REFSHOT_S6, chars: [HERO_D], preMarkArtBrief: markedWithHints([HERO_D], { reaction: null }) });
+  assert.equal(g3n.s6.status, 'waiting', 'case3 null reaction → HOLD (point 6)');
+  assert.equal(g3n.captures.brainArgs.length, 0, 'case3 null: slotDirector 0');
+
+  // ── reaction-only non-null: hero/main null retains prior semantics; reaction null waits ──
+  // template ที่มี target = hero เท่านั้น (ไม่มี reaction) + compass ว่าง (ไม่มีตัวตน hero) → hero personHint null = valid (prior)
+  const DNA_HERO_ONLY = { template: { slots: [
+    { role: 'hero', shape: 'rect', xPct: 0, yPct: 0, wPct: 50, hPct: 50, shot: 'closeup' },
+    { role: 'context', shape: 'rect', xPct: 50, yPct: 0, wPct: 50, hPct: 50, shot: 'wide' },
+    { role: 'action', shape: 'rect', xPct: 0, yPct: 50, wPct: 50, hPct: 50, shot: 'medium' },
+  ] }, slots: [{ role: 'hero' }, { role: 'context' }, { role: 'action' }] };
+  const abHeroNull = artBriefFake({ refDNA: DNA_HERO_ONLY, compass: { mainCharacters: [] }, mode: 'template_v1' });
+  const rHeroNull = await runRefShotFlow({ s6Env: REFSHOT_S6, chars: [], dna: DNA_HERO_ONLY, preMarkArtBrief: abHeroNull });
+  assert.ok(!(rHeroNull.s6.status === 'waiting' && /ตัวตนข่าวปัจจุบัน/.test(String(rHeroNull.s6.summary))), 'hero null + no hero identity (expected null) → NOT person-HOLD (prior semantics retained)');
+  // PERSON_DNA มี reaction target + compass ว่าง → hero null ผ่าน (prior) แต่ reaction null = person-HOLD (reaction-only rule)
+  const abReactNull = artBriefFake({ refDNA: PERSON_DNA, compass: { mainCharacters: [] }, mode: 'template_v1' });
+  const rReactNull = await runRefShotFlow({ s6Env: REFSHOT_S6, chars: [], dna: PERSON_DNA, preMarkArtBrief: abReactNull });
+  assert.equal(rReactNull.s6.status, 'waiting', 'reaction null → HOLD');
+  assert.ok(/ตัวตนข่าวปัจจุบัน/.test(String(rReactNull.s6.summary)), 'reaction null → person-authority HOLD (reaction-only non-null)');
+  assert.equal(rReactNull.captures.brainArgs.length, 0, 'reaction null: slotDirector 0');
+});
+
+await test('D3B4-B (Codex) P1-1 order-independent grouping (non-transitive bridge) + P1-2 production prompt authority/candidates', async () => {
+  const A2 = (chars) => templateV1PersonAuthority({ mainCharacters: chars });
+  const H = { name: 'ดวงเดือน', role: 'hero' };
+  const A = { name: 'สมชาย ใจดี', role: 'related' };
+  const B = { name: 'สมชาย ใจดี ใจร้าย', role: 'related' };
+  const C = { name: 'สมชาย ใจร้าย', role: 'related' };
+  // sanity: A~B, B~C, A≁C (non-transitive)
+  assert.ok(A2([]).nameMatch(A.name, B.name) && A2([]).nameMatch(B.name, C.name) && !A2([]).nameMatch(A.name, C.name), 'P1-1 setup: A~B~C, A≁C');
+  // permutations of [H,A,B,C] must all resolve identically → ambiguous bridge, reaction null (order-independent)
+  for (const perm of [[H, A, B, C], [H, A, C, B], [H, B, A, C], [H, C, B, A], [H, B, C, A], [H, C, A, B]]) {
+    const au = A2(perm);
+    assert.equal(au.reaction, null, 'P1-1 A/B/C bridge → reaction null (any order)');
+    assert.equal(au.ambiguousNonHero, true, 'P1-1 A/B/C → ambiguousNonHero true');
+    assert.deepStrictEqual(au.distinctNonHero, [], 'P1-1 non-clique component → no valid non-hero identity');
+    assert.equal(au.resolveHint('reaction', 'สมชาย'), null, 'P1-1 bridge short hint → null');
+  }
+  // ambiguous short hero: hero name bridges two distinct non-heroes → heroAmbiguous, reaction not forced
+  const auAH = A2([{ name: 'สมชาย', role: 'hero' }, A, C]);
+  assert.equal(auAH.heroAmbiguous, true, 'P1-1 ambiguous short hero → heroAmbiguous');
+  assert.equal(auAH.reaction, null, 'P1-1 ambiguous hero → reaction null (not forced)');
+  // short explicit reaction + full alias elsewhere → one identity, full canonical spelling
+  assert.equal(A2([H, { name: 'สรพงศ์', role: 'reaction' }, { name: 'สรพงศ์ ชาตรี', role: 'related' }]).reaction, 'สรพงศ์ ชาตรี', 'P1-1 short explicit reaction + full alias → full canonical');
+
+  // ── P1-2: production-style mock reads prompt (currentPersonAuthority/candidates) — zero & multi cases ──
+  const callWith = async (chars) => {
+    const cap = {};
+    const cb = async (a) => {
+      const rows = JSON.parse(a.user.split('\n').pop());
+      cap.rows = rows;
+      return { text: JSON.stringify({ orders: rows.map((row) => {
+        let ph = null;
+        if (row.currentPersonAuthority != null) ph = row.currentPersonAuthority; // authority ไม่ว่าง → ใช้เป๊ะ
+        else if (row.role === 'reaction' && Array.isArray(row.currentPersonCandidates) && row.currentPersonCandidates.length) ph = row.currentPersonCandidates[0]; // เลือก candidate ตามบริบท
+        return { i: row.i, want: 'w', personHint: ph };
+      }), storyNote: 'n' }) };
+    };
+    const out = await artBriefBrain({ refDNA: PERSON_DNA, compass: { angle: 'a', mainCharacters: chars }, deskTitle: 'T', typeMatched: true, mode: 'template_v1', _callBrain: cb });
+    return { out, rows: cap.rows };
+  };
+  // zero non-hero (only hero): reaction prompt authority=hero → mock uses it → resolved non-null (same-hero)
+  const z = await callWith([H]);
+  const zR = z.rows.find((r) => r.role === 'reaction');
+  assert.equal(zR.currentPersonAuthority, 'ดวงเดือน', 'P1-2 zero: reaction prompt authority = hero (deterministic)');
+  assert.deepStrictEqual(zR.currentPersonCandidates, ['ดวงเดือน'], 'P1-2 zero: candidates = [hero]');
+  assert.equal(hintOf(z.out, 'reaction'), 'ดวงเดือน', 'P1-2 zero: mock follows authority → reaction resolved (not null)');
+  // multi non-hero: reaction authority null + explicit candidates → mock selects exactly one → resolved non-null, never hero
+  const m = await callWith([H, { name: 'สรพงศ์ ชาตรี', role: 'related' }, { name: 'มานพ ทองดี', role: 'context' }]);
+  const mR = m.rows.find((r) => r.role === 'reaction');
+  assert.equal(mR.currentPersonAuthority, null, 'P1-2 multi: reaction prompt authority = null');
+  assert.deepStrictEqual([...mR.currentPersonCandidates].sort(), ['มานพ ทองดี', 'สรพงศ์ ชาตรี'].sort(), 'P1-2 multi: candidates = valid non-heroes');
+  assert.ok(mR.currentPersonCandidates.includes(hintOf(m.out, 'reaction')), 'P1-2 multi: mock selects one candidate → reaction ∈ candidates');
+  assert.notEqual(hintOf(m.out, 'reaction'), 'ดวงเดือน', 'P1-2 multi: reaction never hero (never refSubject)');
+
+  // ── P1-A: authority ambiguity → HOLD even with an independent valid reaction candidate ──
+  const MANOP2 = { name: 'มานพ ทองดี', role: 'related' };
+  const mkAmb = (chars, hint) => runRefShotFlow({ s6Env: REFSHOT_S6, chars, preMarkArtBrief: markedWithHints(chars, { reaction: hint }) });
+  const HERO_BRIDGE = [{ name: 'สมชาย', role: 'hero' }, A, C, MANOP2]; // hero 'สมชาย' bridges A,C → ambiguous · มานพ independent valid
+  assert.equal(A2(HERO_BRIDGE).authorityReady, false, 'P1-A hero bridge → authorityReady false');
+  const pa1a = await mkAmb(HERO_BRIDGE, 'มานพ ทองดี');
+  const pa1b = await mkAmb(HERO_BRIDGE, 'มานพ ทองดี');
+  assert.equal(pa1a.s6.status, 'waiting', 'P1-A hero-ambiguous + valid candidate → HOLD');
+  assert.equal(pa1a.captures.brainArgs.length, 0, 'P1-A hero-amb: slotDirector 0');
+  assert.equal(pa1a.queueCalls, 0, 'P1-A hero-amb: queue 0');
+  assert.equal(pa1b.s6.summary, pa1a.s6.summary, 'P1-A hero-amb deterministic');
+  const NONHERO_BRIDGE = [H, A, B, C, MANOP2]; // A,B,C non-hero bridge (ambiguous) + independent valid มานพ
+  assert.equal(A2(NONHERO_BRIDGE).authorityReady, false, 'P1-A nonhero bridge → authorityReady false');
+  const pa2 = await mkAmb(NONHERO_BRIDGE, 'มานพ ทองดี');
+  assert.equal(pa2.s6.status, 'waiting', 'P1-A nonhero-ambiguous + valid candidate → HOLD');
+  assert.equal(pa2.captures.brainArgs.length, 0, 'P1-A nonhero-amb: slotDirector 0');
+  assert.equal(pa2.queueCalls, 0, 'P1-A nonhero-amb: queue 0');
+
+  // ── P1-B: candidate order canonical + permutation-invariant (candidates / prompt bytes / flow) ──
+  const permsMulti = [
+    [H, { name: 'สรพงศ์ ชาตรี', role: 'related' }, { name: 'มานพ ทองดี', role: 'context' }],
+    [{ name: 'มานพ ทองดี', role: 'context' }, H, { name: 'สรพงศ์ ชาตรี', role: 'related' }],
+    [{ name: 'สรพงศ์ ชาตรี', role: 'related' }, { name: 'มานพ ทองดี', role: 'context' }, H],
+  ];
+  const expectedCands = A2(permsMulti[0]).reactionCandidates;
+  assert.equal(expectedCands.length, 2, 'P1-B two candidates');
+  for (const p of permsMulti) {
+    assert.deepStrictEqual(A2(p).reactionCandidates, expectedCands, 'P1-B reactionCandidates canonical order (permutation-invariant)');
+    const pr = (await callWith(p)).rows.find((r) => r.role === 'reaction');
+    assert.deepStrictEqual(pr.currentPersonCandidates, expectedCands, 'P1-B prompt reaction candidates identical bytes (any order)');
+  }
+  // flow determinism (case-2 forced) across compass permutation → persisted/pickImages/rawBody/spec identical
+  const poison = async (args) => { const rows = JSON.parse(args.user.split('\n').pop()); return { text: JSON.stringify({ orders: rows.map((r) => ({ i: r.i, want: 'w', personHint: r.role === 'reaction' ? 'ดวงเดือน' : null })), storyNote: 'n' }) }; };
+  const runPerm = (chars) => runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL, chars, deps: { artBriefBrain: async (a) => artBriefBrain({ ...a, _callBrain: poison }) } });
+  const f1 = await runPerm([HERO_D, REL_S]);
+  const f2 = await runPerm([REL_S, HERO_D]);
+  assert.deepStrictEqual(f2.job.dossier.artBrief, f1.job.dossier.artBrief, 'P1-B flow: persisted artBrief permutation-identical');
+  assert.deepStrictEqual(f2.s6.dossierPatch.pickImages, f1.s6.dossierPatch.pickImages, 'P1-B flow: pickImages identical');
+  assert.equal(f2.captures.rawBody, f1.captures.rawBody, 'P1-B flow: rawBody identical');
+  assert.equal(f2.captures.payload.selectionSpec.specHash, f1.captures.payload.selectionSpec.specHash, 'P1-B flow: specHash identical');
+  assert.equal(f2.captures.payload.selectionSpec.replayHash, f1.captures.payload.selectionSpec.replayHash, 'P1-B flow: replayHash identical');
 });
 
 console.log(`1..${passed}`);

@@ -141,27 +141,77 @@ export function templateV1PersonAuthority(compass) {
     .map((c) => ({ name: String(c?.name ?? '').trim(), role: String(c?.role ?? '').trim().toLowerCase() }))
     .filter((c) => c.name); // ลำดับ input เสถียร (ไม่ sort)
   const hero = list.find((c) => c.role === 'hero') || list[0] || null;
-  const heroName = hero ? hero.name : null;
-  const reaction = list.find((c) => c.role === 'reaction' && (!heroName || !nameMatch(c.name, heroName))) || null;
-  const reactionName = reaction ? reaction.name : null;
-  // ★ D3-B3.2 (Codex): canonicalize hint → ชื่อ compass "แบบ unique" — hint ที่ match มากกว่า 1 คน (distinct spelling)
-  //   = ambiguous → null (ไม่ list.find เลือกคนแรก) · duplicate entries สะกด canonical เดียวกัน = รับได้ (distinct=1)
-  //   คืนชื่อสะกด canonical จาก compass เสมอ · ไม่รู้จัก/ไม่ระบุ = null (ไม่ประดิษฐ์คน)
-  const canonicalKnown = (hint) => {
+  const heroIdx = list.indexOf(hero);
+  const names = list.map((c) => c.name);
+  const n = list.length;
+  const tokenCount = (s) => String(s ?? '').trim().split(/\s+/).filter(Boolean).length;
+  const normLen = (s) => String(s ?? '').replace(/\s+/g, '').length;
+  // ★ D3-B4.1 (Codex): order-independent grouping — union-find components + complete-link (clique) check
+  //   nameMatch ไม่ transitive (A~B, B~C แต่ A≁C) → component เดียวแต่ "ไม่ใช่ clique" = ambiguous bridge (ห้ามยุบ/ห้ามบังคับ)
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (nameMatch(names[i], names[j])) parent[find(i)] = find(j);
+  const byRoot = new Map();
+  for (let i = 0; i < n; i++) { const r = find(i); if (!byRoot.has(r)) byRoot.set(r, []); byRoot.get(r).push(i); }
+  const isClique = (idxs) => {
+    for (let a = 0; a < idxs.length; a++) for (let b = a + 1; b < idxs.length; b++)
+      if (!nameMatch(names[idxs[a]], names[idxs[b]])) return false;
+    return true;
+  };
+  // ★ P1-B: comparator เดียวใช้ทั้ง canonical pick + candidate ordering — token count desc → normalized length desc → lexical asc
+  const cmp = (a, b) => (tokenCount(b) - tokenCount(a)) || (normLen(b) - normLen(a)) || (a < b ? -1 : a > b ? 1 : 0);
+  const canonicalOf = (idxs) => idxs.map((i) => names[i]).sort(cmp)[0];
+  const components = [...byRoot.values()].map((idxs) => ({
+    idxs, clique: isClique(idxs), canonical: canonicalOf(idxs), roles: new Set(idxs.map((i) => list[i].role)),
+  }));
+  const heroComp = heroIdx >= 0 ? components.find((comp) => comp.idxs.includes(heroIdx)) : null;
+  const heroAmbiguous = !!heroComp && !heroComp.clique; // hero name เป็น bridge → กลุ่มกำกวม
+  const heroName = heroComp ? (heroComp.clique ? heroComp.canonical : names[heroIdx]) : null;
+  // non-hero = ทุก component ที่ไม่ใช่ heroComp (ชื่อที่ match hero ถูก union เข้า heroComp แล้ว)
+  const nonHeroComps = components.filter((comp) => comp !== heroComp);
+  const validNonHero = nonHeroComps.filter((comp) => comp.clique).map((comp) => comp.canonical).sort(cmp); // ★ P1-B canonical order
+  const ambiguousNonHero = nonHeroComps.some((comp) => !comp.clique); // มี bridge non-hero = กำกวม
+  const explicitReactionValid = nonHeroComps.filter((comp) => comp.clique && comp.roles.has('reaction')).map((comp) => comp.canonical).sort(cmp);
+  // resolve hint → ตัวตน "clique เดียว" ที่มี component match พอดี 1 (0/หลาย component/non-clique = null)
+  const resolveIdentity = (hint) => {
     const h = String(hint ?? '').trim();
     if (!h) return null;
-    const distinct = [...new Set(list.filter((c) => nameMatch(c.name, h)).map((c) => c.name))];
-    return distinct.length === 1 ? distinct[0] : null;
+    const matched = components.filter((comp) => comp.idxs.some((i) => nameMatch(names[i], h)));
+    return (matched.length === 1 && matched[0].clique) ? matched[0].canonical : null;
   };
-  // personHint ที่ถูกต้องต่อ role: hero→canonical hero · reaction(มี secondary ชัด)→canonical reaction เสมอ ·
-  //   reaction(ไม่มี secondary)→เก็บเฉพาะ hint ที่ตรงคนที่รู้จัก (canonical) มิฉะนั้น null · role อื่น→คงเดิม
+  const canonicalKnown = (hint) => resolveIdentity(hint); // unique clique identity (adapter guard ใช้)
+  // ★ D3-B4 matrix (forced reaction identity) — เฉพาะเมื่อไม่กำกวมทั้ง hero และ non-hero:
+  //   1) explicit non-hero reaction unique · 2) non-hero ชัดตัวเดียว (role ใดก็ได้ — เคส AC-0066) · มิฉะนั้น null
+  let reactionName = null;
+  if (!heroAmbiguous && !ambiguousNonHero) {
+    if (explicitReactionValid.length === 1) reactionName = explicitReactionValid[0];
+    else if (explicitReactionValid.length === 0 && validNonHero.length === 1) reactionName = validNonHero[0];
+  }
+  // reaction same-hero (เคส 3): ไม่มี non-hero + ไม่กำกวม + มี hero ชัด → candidate = hero
+  const reactionSameHero = reactionName == null && !ambiguousNonHero && validNonHero.length === 0 && heroName != null && !heroAmbiguous;
+  const reactionCandidates = reactionName != null ? [reactionName] : (reactionSameHero ? [heroName] : [...validNonHero]);
   const resolveHint = (role, llmHint) => {
     const r = String(role ?? '').trim().toLowerCase();
-    if (r === 'hero' || r === 'main') return heroName != null ? heroName : canonicalKnown(llmHint);
-    if (r === 'reaction') return reactionName != null ? reactionName : canonicalKnown(llmHint);
-    return llmHint == null ? null : llmHint; // role อื่นคงเดิม (byte-exact กับ o.personHint || null)
+    if (r === 'hero' || r === 'main') return (heroName != null && !heroAmbiguous) ? heroName : resolveIdentity(llmHint);
+    if (r === 'reaction') {
+      if (reactionName != null) return reactionName;
+      const id = resolveIdentity(llmHint);
+      return (id != null && reactionCandidates.includes(id)) ? id : null; // รับเฉพาะ candidate ที่อนุญาต
+    }
+    return llmHint == null ? null : llmHint; // role อื่นคงเดิม (byte-exact)
   };
-  return { hero: heroName, reaction: reactionName, hasExplicitReaction: !!reaction, nameMatch, canonicalKnown, resolveHint };
+  // prompt fields ต่อ slot role — authority (ใช้เป๊ะเมื่อ non-null) + candidates (reaction: เลือกหนึ่งตามบริบทข่าว)
+  const slotPersonPrompt = (role) => {
+    const r = String(role ?? '').trim().toLowerCase();
+    const heroOk = heroName != null && !heroAmbiguous;
+    if (r === 'hero' || r === 'main') return { authority: heroOk ? heroName : null, candidates: heroOk ? [heroName] : [] };
+    if (r === 'reaction') return { authority: reactionName != null ? reactionName : (reactionSameHero ? heroName : null), candidates: [...reactionCandidates] };
+    return { authority: null, candidates: [] };
+  };
+  // ★ P1-A: data-readiness gate — ambiguity ใดๆ (hero bridge หรือ non-hero bridge) = authority ไม่พร้อม
+  //   (compass ว่าง/ไม่มี hero โดยไม่มี bridge = ไม่ถือว่ากำกวม → authorityReady=true คงพฤติกรรมเดิม)
+  const authorityReady = !heroAmbiguous && !ambiguousNonHero;
+  return { hero: heroName, reaction: reactionName, hasExplicitReaction: explicitReactionValid.length === 1, distinctNonHero: validNonHero, heroAmbiguous, ambiguousNonHero, authorityReady, reactionCandidates, nameMatch, canonicalKnown, resolveHint, slotPersonPrompt };
 }
 
 export async function artBriefBrain({ refDNA, compass, deskTitle, typeMatched = false, mode = 'legacy', _callBrain = callBrain }) {
@@ -174,13 +224,18 @@ export async function artBriefBrain({ refDNA, compass, deskTitle, typeMatched = 
   if (mode === 'template_v1') {
     _tplPrep = await _templateV1Prep(refDNA); // throw = adapter จับเป็น waiting
     _personAuth = templateV1PersonAuthority(compass);
-    slots = _tplPrep.view.views.map((v) => ({
-      i: v.index, role: v.role, pos: v.pos || '', shot: v.shot || '', emotion: v.emotion || '',
-      faceSizePct: v.faceSizePct || null,
-      ...(typeMatched ? { refSubject: v.subject || '' } : {}),
-      // ★ D3-B3: ทุกแถว template_v1 มี key นี้ (string=ตัวตนช่อง hero/reaction · null=บทอื่น) — LLM ห้ามลอก refSubject
-      currentPersonAuthority: _personAuth.resolveHint(v.role, null),
-    }));
+    slots = _tplPrep.view.views.map((v) => {
+      // ★ D3-B4.2 (Codex): ทุกแถวมี currentPersonAuthority (ใช้เป๊ะเมื่อ non-null) + currentPersonCandidates
+      //   (reaction: ถ้า authority ว่าง ให้เลือกหนึ่งใน candidates ตามบริบทข่าวปัจจุบัน · ห้ามลอก refSubject)
+      const _p = _personAuth.slotPersonPrompt(v.role);
+      return {
+        i: v.index, role: v.role, pos: v.pos || '', shot: v.shot || '', emotion: v.emotion || '',
+        faceSizePct: v.faceSizePct || null,
+        ...(typeMatched ? { refSubject: v.subject || '' } : {}),
+        currentPersonAuthority: _p.authority,
+        currentPersonCandidates: _p.candidates,
+      };
+    });
   } else {
     slots = (refDNA?.slots || []).map((s, i) => ({
       i, role: s.role, pos: s.pos || '', shot: s.shot || '', emotion: s.emotion || '',
@@ -191,9 +246,11 @@ export async function artBriefBrain({ refDNA, compass, deskTitle, typeMatched = 
   }
   // ★ D3-B3: note ท้าย system (template_v1 เท่านั้น) — legacy = '' → prompt/args/return เดิมทุก byte
   const _authNote = _tplPrep ? `
-★ ตัวตนของ "ข่าวนี้": เฉพาะช่อง hero/main/reaction ให้ใช้ "currentPersonAuthority" ของแถวนั้นเป็น personHint (hero=${_personAuth.hero || '-'} · reaction=${_personAuth.reaction || '-'})
-- ช่องบทอื่น (context/action/moment ฯลฯ) สั่ง personHint ตามปกติ — กติกา authority นี้บังคับเฉพาะ hero/main/reaction เท่านั้น
-- "refSubject" ของแต่ละช่อง = แรงบันดาลใจฉาก/ความหมายจากปกต้นแบบ ไม่ใช่ตัวตนคนในข่าวนี้ — ห้ามลอก refSubject เป็น personHint` : '';
+★ ตัวตนของ "ข่าวนี้" (เฉพาะช่อง hero/main/reaction):
+- ถ้าแถวมี "currentPersonAuthority" ไม่ว่าง → personHint = ค่านั้นเป๊ะ
+- ช่อง reaction ที่ currentPersonAuthority ว่าง → เลือก personHint = หนึ่งใน "currentPersonCandidates" ที่ตรงบริบทข่าวปัจจุบันที่สุด (ใช้ความหมายของข่าวนี้เท่านั้น) · ถ้าไม่มีตัวใดเหมาะ = null
+- ช่องบทอื่น (context/action/moment ฯลฯ) สั่ง personHint ตามปกติ
+- "refSubject" = แรงบันดาลใจฉาก/ความหมายจากปกต้นแบบ ไม่ใช่ตัวตนคนในข่าวนี้ — ห้ามลอก refSubject เป็น personHint` : '';
   const system = `คุณคือบรรณาธิการศิลป์ (Art Director) ของเพจข่าวไวรัลไทย งานเดียว: เขียน "ใบสั่งงาน" ให้มือคัดภาพ
 โจทย์: ปกต้นแบบ (ref) จัดช่องไว้แบบหนึ่ง — คุณต้องสั่งว่า "ข่าวนี้" แต่ละช่องควรใส่ภาพแบบไหน (ใคร/ช็อตอะไร/อารมณ์ไหน) ให้เล่าเรื่องแบบเดียวกับ ref แต่เป็นคนและเหตุการณ์ของข่าวนี้
 กฎเหล็ก: (1) hero = หน้าเดี่ยวตัวเอกของข่าวเสมอ ห้ามภาพหมู่ (2) สั่งเฉพาะภาพที่ข่าวนี้มีโอกาสมีจริง (3) ช่องไหน ref ใส่โมเมนต์/หลักฐาน ให้แปลงเป็นโมเมนต์/หลักฐานของข่าวนี้
