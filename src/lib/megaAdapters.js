@@ -2309,6 +2309,492 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   if (!slots[_canonHeroId]) {
     return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { ...(_jobTemplateV1 ? { artBrief: _templateArtBriefSnapshot } : {}), pickImages: { slots, note: brain.note || '', ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) } } };
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════
+  // R1 — SHADOW CANDIDATE LEDGER (kill switch: MEGA_CANDIDATE_LEDGER=1 · exact opt-in)
+  //   ⚠️ DIAGNOSTIC-ONLY. บันทึก "สิ่งที่ตัวเลือกเห็น" เพื่อสืบสวนคุณภาพเท่านั้น —
+  //   ❌ ห้ามย้าย/อ่านเข้าเส้น authority/payload ใดๆ: pickImages.slots · slotPlan · SelectionSpec ·
+  //      refSlotContract · manifest · queue rawBody · *Hash ทุกตัว. อ่านล้วน ไม่แตะการเลือก/QC/เลย์เอาต์.
+  //   ── LIFECYCLE (write-once) ──
+  //   • FRESH OFF (env !== '1') = inert เต็มตัว: ไม่แตะ property candidateLedger เลย ไม่ emit field ใหม่ → byte เท่า legacy.
+  //   • ON: ตรวจ own-enumerable DATA descriptor ของ candidateLedger บน local im เท่านั้น (ไม่เรียก accessor/inherited):
+  //       valid v1 bounded snapshot → คงไว้ verbatim (ไม่คิดใหม่) · invalid carrier → ไม่ normalize/ไม่คิดใหม่ (ปล่อยผ่าน merge) · ไม่มี → คิดใหม่ครั้งเดียว.
+  //   • snapshot ที่ persist แล้ว survive ผ่าน dossier merge ปกติ · S7 ไม่เคยเขียน images · ล้ม = field หาย (fail-safe).
+  //   Deterministic: ไม่มี Date/random/IO/LLM.
+  let _candidateLedger = null;
+  let _ledgerPresent = false;        // ★ มี ledger จะ emit (fresh/VALID/INVALID_SAFE) — track แยกเพราะ clone อาจเป็น primitive falsy (null/false)
+  let _ledgerImagesBase = null;      // ★ accessor-safe images base (สร้างเมื่อ ledger พร้อม) — ไม่ spread im ตรงๆ
+  let _ledgerInspectFailed = false;  // ★ ON-path descriptor/proxy inspection ล้ม → ห้าม fall-back legacy spread (im อาจ hostile)
+  if (process.env.MEGA_CANDIDATE_LEDGER === '1') {
+    try {
+      const _LDG_MAX_ROWS = 30, _LDG_MAX_BYTES = 8192, _LDG_MAX_STR = 256, _LDG_MAX_ARR = 200, _LDG_MAX_DEPTH = 8, _LDG_MAX_KEYS = 64, _LDG_MAX_NODES = 20000;
+      // URL-like: //cdn, data:/blob:/file:, http(s), scheme, image-ext
+      const _urlLike = (t) => /^\s*(?:\/\/|(?:https?|data|blob|file):)/i.test(t) || /https?:\/\/|www\.|:\/\/|\.(jpe?g|png|webp|gif|bmp|svg)(\?|#|$)/i.test(t);
+      const _REJECT = Symbol('reject');
+      // bounded recursive own-DATA CLONE — สร้าง object/array ใหม่จาก descriptor.value เท่านั้น (ไม่ get/toJSON/live read)
+      //   reject: accessor/function/symbol/bigint/undefined/cycle/nonfinite/exotic-proto/URL/overlong key+value/เกิน depth/array/keys/nodes
+      const _clone = (o, depth, seen, cnt) => {
+        if (depth > _LDG_MAX_DEPTH) return _REJECT;
+        if (++cnt.n > _LDG_MAX_NODES) return _REJECT;
+        if (o === null) return null;
+        const t = typeof o;
+        if (t === 'boolean') return o;
+        if (t === 'number') return Number.isFinite(o) ? o : _REJECT;
+        if (t === 'string') return (o.length <= _LDG_MAX_STR && !_urlLike(o)) ? o : _REJECT;
+        if (t !== 'object') return _REJECT; // function/symbol/bigint/undefined
+        if (seen.has(o)) return _REJECT;    // cycle
+        seen.add(o);
+        const proto = Object.getPrototypeOf(o);
+        const isArr = Array.isArray(o);
+        if (isArr ? proto !== Array.prototype : (proto !== Object.prototype && proto !== null)) { seen.delete(o); return _REJECT; }
+        let out;
+        if (isArr) {
+          const lenD = Object.getOwnPropertyDescriptor(o, 'length');
+          if (!lenD || lenD.get || lenD.set || typeof lenD.value !== 'number' || !Number.isInteger(lenD.value) || lenD.value > _LDG_MAX_ARR) { seen.delete(o); return _REJECT; }
+          const len = lenD.value;
+          out = [];
+          for (let i = 0; i < len; i++) {
+            const d = Object.getOwnPropertyDescriptor(o, String(i));
+            if (!d || d.get || d.set || !('value' in d)) { seen.delete(o); return _REJECT; }
+            const cv = _clone(d.value, depth + 1, seen, cnt);
+            if (cv === _REJECT) { seen.delete(o); return _REJECT; }
+            out.push(cv);
+          }
+          for (const k of Reflect.ownKeys(o)) { if (k === 'length') continue; if (typeof k === 'symbol') { seen.delete(o); return _REJECT; } const ki = Number(k); if (!(Number.isInteger(ki) && ki >= 0 && ki < len)) { seen.delete(o); return _REJECT; } }
+        } else {
+          const keys = Reflect.ownKeys(o);
+          if (keys.length > _LDG_MAX_KEYS) { seen.delete(o); return _REJECT; }
+          out = {}; // normal proto (deepStrictEqual-friendly) — กัน pollution ด้วย reject __proto__/prototype/constructor + defineProperty (ไม่ใช่ out[k]=)
+          for (const k of keys) { // preserve insertion order → JSON bytes เดิม
+            if (typeof k === 'symbol' || k.length > _LDG_MAX_KEYS || _urlLike(k)) { seen.delete(o); return _REJECT; }
+            if (k === '__proto__' || k === 'prototype' || k === 'constructor') { seen.delete(o); return _REJECT; } // prototype-pollution keys
+            const d = Object.getOwnPropertyDescriptor(o, k);
+            if (!d || d.get || d.set || d.enumerable !== true || !('value' in d)) { seen.delete(o); return _REJECT; }
+            const cv = _clone(d.value, depth + 1, seen, cnt);
+            if (cv === _REJECT) { seen.delete(o); return _REJECT; }
+            Object.defineProperty(out, k, { value: cv, enumerable: true, writable: true, configurable: true });
+          }
+        }
+        seen.delete(o);
+        return out;
+      };
+      // v1 schema/invariants — ตรวจบน CLONE (plain, own-data) เท่านั้น (import-free local) · ทุก schema field เป็น OWN (inherited ไม่นับ)
+      const _int0 = (v) => typeof v === 'number' && Number.isInteger(v) && v >= 0;
+      const _own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+      const _numOrNull = (v) => v === null || (typeof v === 'number' && Number.isFinite(v));
+      const _boolOrNull = (v) => v === null || typeof v === 'boolean';
+      const _strMax = (v, n) => typeof v === 'string' && v.length <= n && !_urlLike(v);
+      const _strMaxOrNull = (v, n) => v === null || _strMax(v, n);
+      const _onlyKeys = (o, set) => { for (const k of Object.keys(o)) if (!set.has(k)) return false; return true; };
+      const _REASONS = new Set(['SELECTED', 'ELIGIBLE', 'REJECT_IRRELEVANT', 'REJECT_DIRTY', 'REJECT_PERSON_MISS', 'REJECT_PERSON_AMBIGUOUS', 'REJECT_FACE_NONE', 'REJECT_MULTIFACE', 'REJECT_THUMBNAIL', 'REJECT_UNDERSIZE', 'REJECT_SHARPNESS', 'METADATA_INSUFFICIENT']);
+      const _MATCHKINDS = new Set(['exact', 'alias', 'token_fallback', 'ambiguous', 'miss', null]);
+      const _METAS = new Set(['OK', 'METADATA_INSUFFICIENT']);
+      const _ROLESET = new Set(['hero', 'reaction', 'action', 'context', 'circle']);
+      const _SOURCES = new Set([null, 'contract', 'order', 'compass_hero', 'compass_sole_nonhero']);
+      const _ORIENTS = new Set([null, 'wide', 'tall', 'sq']);
+      const _UNKF = new Set(['relevant', 'clean', 'faceCount', 'dims', 'faceFrac', 'sharpness', 'identity']);
+      const _TOPK = new Set(['v', 'poolSize', 'capped', 'droppedRows', 'roles']);
+      const _ROLEK = new Set(['role', 'slotId', 'targetPerson', 'targetSource', 'selectedId', 'totalRows', 'keptRows', 'droppedRows', 'reasonCounts', 'rows']);
+      const _ROWFIXED = ['id', 'person', 'matchKind', 'metadataState', 'faceFrac', 'dims', 'measuredFrom', 'orient', 'clean', 'largeText', 'watermark', 'newsScene', 'faceCount', 'quality', 'pHash', 'heroGrade', 'reason', 'selected', 'estimatedUpscale'];
+      const _ROWK = new Set([..._ROWFIXED, 'persons', 'matchedLabel', 'unknownFields']);
+      // dims: positive-finite W×H เป๊ะ (สองส่วนตัวเลข ไม่มี whitespace/extra) — reject malformed · คืน { short }
+      const _parseDims = (d) => {
+        if (typeof d !== 'string') return null;
+        const p = d.split('x');
+        if (p.length !== 2) return null;
+        const re = /^[0-9]+(\.[0-9]+)?$/;
+        if (!re.test(p[0]) || !re.test(p[1])) return null;
+        const w = Number(p[0]), h = Number(p[1]);
+        if (!(Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0)) return null;
+        return { short: Math.min(w, h) };
+      };
+      // priority prerequisites (จากลำดับ _reasonOf): IRRELEVANT<DIRTY<PERSON_MISS<PERSON_AMBIGUOUS<FACE_NONE<MULTIFACE<THUMBNAIL<UNDERSIZE<SHARPNESS<INSUFFICIENT<ELIGIBLE
+      const _AFTER_DIRTY = new Set(['REJECT_PERSON_MISS', 'REJECT_PERSON_AMBIGUOUS', 'REJECT_FACE_NONE', 'REJECT_MULTIFACE', 'REJECT_THUMBNAIL', 'REJECT_UNDERSIZE', 'REJECT_SHARPNESS', 'METADATA_INSUFFICIENT', 'ELIGIBLE']);
+      const _AFTER_PERSON = new Set(['REJECT_FACE_NONE', 'REJECT_MULTIFACE', 'REJECT_THUMBNAIL', 'REJECT_UNDERSIZE', 'REJECT_SHARPNESS', 'METADATA_INSUFFICIENT', 'ELIGIBLE']);
+      const _AFTER_FACE = new Set(['REJECT_THUMBNAIL', 'REJECT_UNDERSIZE', 'REJECT_SHARPNESS', 'METADATA_INSUFFICIENT', 'ELIGIBLE']);
+      const _validRow = (row, role, targetPerson) => {
+        if (!row || typeof row !== 'object' || Array.isArray(row) || !_onlyKeys(row, _ROWK)) return false;
+        for (const k of _ROWFIXED) if (!_own(row, k)) return false; // fixed ครบ (missing matchKind = invalid)
+        if (!_strMax(row.id, 64) || !_strMaxOrNull(row.person, 48)) return false;
+        if (!_MATCHKINDS.has(row.matchKind) || !_METAS.has(row.metadataState) || !_REASONS.has(row.reason)) return false;
+        if (!(row.faceFrac === null || (typeof row.faceFrac === 'number' && Number.isFinite(row.faceFrac) && row.faceFrac > 0 && row.faceFrac <= 1))) return false;
+        const _pd = row.dims === null ? null : _parseDims(row.dims);
+        if (!(row.dims === null || (typeof row.dims === 'string' && row.dims.length <= 24 && _pd !== null))) return false; // non-null dims ต้อง parse ได้
+        if (!_strMaxOrNull(row.measuredFrom, 24) || !_strMaxOrNull(row.pHash, 32)) return false;
+        if (!_ORIENTS.has(row.orient)) return false;
+        if (!_boolOrNull(row.clean) || !_boolOrNull(row.largeText) || !_boolOrNull(row.watermark) || !_boolOrNull(row.newsScene) || !_boolOrNull(row.heroGrade)) return false;
+        if (!_numOrNull(row.faceCount) || !_numOrNull(row.quality)) return false;
+        if (typeof row.selected !== 'boolean' || row.estimatedUpscale !== null) return false;
+        if (_own(row, 'persons')) { const p = row.persons; if (!Array.isArray(p) || p.length < 1 || p.length > 4) return false; for (const s of p) if (!_strMax(s, 48)) return false; }
+        if (_own(row, 'matchedLabel') && !_strMaxOrNull(row.matchedLabel, 48)) return false;
+        const uf = _own(row, 'unknownFields') ? row.unknownFields : null;
+        if (uf !== null) { if (!Array.isArray(uf) || uf.length < 1 || uf.length > 8) return false; const seen = new Set(); for (const f of uf) { if (!_UNKF.has(f) || seen.has(f)) return false; seen.add(f); } }
+        const has = (f) => uf !== null && uf.includes(f);
+        const portrait = role === 'hero' || role === 'circle';
+        // ── unknownFields observable truth (จาก _unknownFields production) — relevant ไม่ persist จึงไม่ cross-check ──
+        if ((row.clean === null) !== has('clean')) return false;                                     // clean null ⟺ uf 'clean'
+        if ((row.dims === null) !== has('dims')) return false;                                       // dims null ⟺ uf 'dims'
+        if (portrait) {
+          if ((row.faceCount === null) !== has('faceCount')) return false;
+          if ((row.faceFrac === null) !== has('faceFrac')) return false;
+        } else if (has('faceCount') || has('faceFrac')) return false;                                // non-portrait ห้ามมี face unknowns
+        if (has('sharpness') && role !== 'hero') return false;                                       // sharpness เฉพาะ hero
+        if (has('identity')) {
+          if (targetPerson === null || row.matchKind !== null) return false;                         // identity ต้องมี target + matchKind null
+          const usable = (row.person != null && String(row.person).trim() !== '') || (_own(row, 'persons') && Array.isArray(row.persons) && row.persons.some((s) => String(s).trim() !== '')) || (row.matchedLabel != null && String(row.matchedLabel).trim() !== '');
+          if (usable) return false;                                                                  // ต้องไม่มี label ใช้ได้ — persons นับ usable เฉพาะ .some(trim) (ยอมรับ ['','  '] จาก production)
+        }
+        // ── metadataState ↔ unknownFields ──
+        if (row.metadataState === 'METADATA_INSUFFICIENT' && uf === null) return false;              // INSUFFICIENT ต้องมี uf
+        if (row.metadataState === 'OK' && uf !== null) return false;                                 // OK ห้ามมี uf
+        // ── reason relationships (one-way จาก _reasonOf) ──
+        if ((row.selected === true) !== (row.reason === 'SELECTED')) return false;                   // selected ⟺ SELECTED
+        if (row.reason === 'ELIGIBLE' && row.metadataState !== 'OK') return false;
+        if (row.reason === 'METADATA_INSUFFICIENT' && row.metadataState !== 'METADATA_INSUFFICIENT') return false;
+        if (row.reason === 'REJECT_PERSON_MISS' && row.matchKind !== 'miss') return false;
+        if (row.reason === 'REJECT_PERSON_AMBIGUOUS' && row.matchKind !== 'ambiguous') return false;
+        if (row.reason === 'REJECT_DIRTY' && row.clean !== false) return false;
+        if (row.reason === 'REJECT_FACE_NONE' && !(portrait && row.faceCount === 0)) return false;
+        if (row.reason === 'REJECT_MULTIFACE' && !(portrait && typeof row.faceCount === 'number' && row.faceCount > 1)) return false;
+        if ((row.reason === 'REJECT_THUMBNAIL' || row.reason === 'REJECT_UNDERSIZE' || row.reason === 'REJECT_SHARPNESS') && role !== 'hero') return false;
+        // ── nonselected priority prerequisites (reason ทีหลัง gate ⟹ gate ก่อนหน้าไม่ trigger) ──
+        if (row.selected !== true) {
+          if (_AFTER_DIRTY.has(row.reason) && row.clean === false) return false;
+          if (_AFTER_PERSON.has(row.reason) && (row.matchKind === 'miss' || row.matchKind === 'ambiguous')) return false;
+          if (_AFTER_FACE.has(row.reason) && portrait && (row.faceCount === 0 || (typeof row.faceCount === 'number' && row.faceCount > 1))) return false;
+        }
+        // ── ELIGIBLE prerequisites (ผ่านทุก gate) ──
+        if (row.reason === 'ELIGIBLE') {
+          if (row.clean !== true || row.matchKind === 'miss' || row.matchKind === 'ambiguous') return false;
+          if (portrait && (row.faceCount === 0 || (typeof row.faceCount === 'number' && row.faceCount > 1))) return false;
+          if (role === 'hero') {
+            if (row.faceCount !== 1 || row.heroGrade !== true) return false;
+            if (_pd === null || _pd.short < HERO_MIN_SHORT_SIDE) return false;                        // hero ELIGIBLE มี dims non-null (metadata OK) → short >= 700
+          }
+        }
+        // ── heroGrade === true one-way consistency ──
+        if (row.heroGrade === true) {
+          if (row.clean !== true || row.faceCount !== 1) return false;
+          if (has('relevant') || has('clean') || has('faceCount') || has('sharpness')) return false;
+          if (row.dims !== null && (_pd === null || _pd.short < HERO_MIN_SHORT_SIDE)) return false;   // dims non-null → short >= 700 (dims null ยอมได้: realShortSide)
+        }
+        if (targetPerson === null && row.matchKind !== null) return false;                           // targetPerson null ⇒ matchKind null
+        return true;
+      };
+      const _validV1 = (c) => {
+        if (!c || typeof c !== 'object' || Array.isArray(c) || !_onlyKeys(c, _TOPK)) return false;
+        for (const k of _TOPK) if (!_own(c, k)) return false;
+        if (c.v !== 1 || !_int0(c.poolSize) || c.poolSize > 80 || typeof c.capped !== 'boolean' || !_int0(c.droppedRows)) return false;
+        if (!Array.isArray(c.roles) || c.roles.length < 1 || c.roles.length > 8) return false;
+        let globalDropped = 0, globalRows = 0;
+        for (const r of c.roles) {
+          if (!r || typeof r !== 'object' || Array.isArray(r) || !_onlyKeys(r, _ROLEK)) return false;
+          for (const k of _ROLEK) if (!_own(r, k)) return false;
+          if (!_ROLESET.has(r.role) || !_strMax(r.slotId, 64)) return false;
+          if (!_strMaxOrNull(r.targetPerson, 48) || !_strMaxOrNull(r.selectedId, 64) || !_SOURCES.has(r.targetSource)) return false;
+          // target/source relationships: source null ⟺ target null (ยกเว้น contract-null) · order/compass ต้องมี target · compass_hero=hero · compass_sole_nonhero=reaction/circle · null target + compass = invalid
+          { const tp = r.targetPerson, ts = r.targetSource;
+            if (ts === null) { if (tp !== null) return false; }
+            else if (ts === 'order') { if (tp === null) return false; }
+            else if (ts === 'compass_hero') { if (tp === null || r.role !== 'hero') return false; }
+            else if (ts === 'compass_sole_nonhero') { if (tp === null || !(r.role === 'reaction' || r.role === 'circle')) return false; } }
+          if (!_int0(r.totalRows) || !_int0(r.keptRows) || !_int0(r.droppedRows)) return false;
+          if (!Array.isArray(r.rows) || r.rows.length !== r.keptRows || r.rows.length > _LDG_MAX_ROWS) return false;
+          if (r.totalRows !== r.keptRows + r.droppedRows || r.totalRows !== c.poolSize) return false;
+          if (!r.reasonCounts || typeof r.reasonCounts !== 'object' || Array.isArray(r.reasonCounts) || !_onlyKeys(r.reasonCounts, _REASONS)) return false;
+          let rcSum = 0;
+          for (const k of Object.keys(r.reasonCounts)) { const v = r.reasonCounts[k]; if (!_int0(v)) return false; rcSum += v; }
+          if (rcSum !== r.totalRows) return false;
+          const retFreq = {}; let selCount = 0, selRowId = null;
+          for (const row of r.rows) {
+            if (!_validRow(row, r.role, r.targetPerson)) return false;
+            retFreq[row.reason] = (retFreq[row.reason] || 0) + 1;
+            if (row.selected === true) { selCount++; selRowId = row.id; }
+          }
+          for (const k of Object.keys(retFreq)) if (!_own(r.reasonCounts, k) || retFreq[k] > r.reasonCounts[k]) return false; // reasonCounts dominates retained
+          if (rcSum - r.rows.length !== r.droppedRows) return false;                                 // aggregate diff === droppedRows
+          if ((_own(r.reasonCounts, 'SELECTED') ? r.reasonCounts.SELECTED : 0) !== selCount) return false; // SELECTED never trimmed
+          if (r.selectedId === null) { if (selCount !== 0) return false; } else if (selCount !== 1 || selRowId !== r.selectedId) return false;
+          globalDropped += r.droppedRows; globalRows += r.rows.length;
+        }
+        if (globalRows > _LDG_MAX_ROWS * 8) return false;
+        if (c.droppedRows !== globalDropped || c.capped !== (c.droppedRows > 0)) return false;
+        return true;
+      };
+      // discriminated inspection: UNSAFE (exception/reject/over-cap) → omit · VALID/INVALID_SAFE → emit SAFE CLONE (deep value เดิม, reference ใหม่) — ไม่คืน carrier เดิม, ไม่ recompute/normalize/repair
+      const _inspectCarrier = (o) => {
+        let c;
+        try { c = _clone(o, 0, new Set(), { n: 0 }); } catch { return { state: 'UNSAFE' }; }   // descriptor/proxy exception
+        if (c === _REJECT) return { state: 'UNSAFE' };                                          // accessor/function/symbol/cycle/exotic/proto-key/URL/over-node
+        let bytes; try { bytes = Buffer.byteLength(JSON.stringify({ candidateLedger: c }), 'utf8'); } catch { return { state: 'UNSAFE' }; }
+        if (bytes > _LDG_MAX_BYTES) return { state: 'UNSAFE' };                                  // over byte cap
+        return { state: _validV1(c) ? 'VALID' : 'INVALID_SAFE', clone: c };
+      };
+      // ตรวจ carrier เดิมผ่าน OWN DATA descriptor เท่านั้น (local im — ไม่ touch job.dossier.images ซ้ำ, ไม่เรียก getter/inherited)
+      const _desc = Object.getOwnPropertyDescriptor(im, 'candidateLedger');
+      const _hasOwnData = !!_desc && !_desc.get && !_desc.set && _desc.enumerable === true && Object.prototype.hasOwnProperty.call(_desc, 'value');
+      if (_hasOwnData) {
+        const _r = _inspectCarrier(_desc.value);
+        if (_r.state === 'UNSAFE') { _ledgerInspectFailed = true; }                             // omit — carrier ไม่ปลอดภัย (proxy/accessor/proto/URL/over-cap)
+        else { _candidateLedger = _r.clone; _ledgerPresent = true; }                            // VALID + INVALID_SAFE → preserve write-once ด้วย safe clone (reference ใหม่)
+      } else {
+        const _sharpGate = process.env.MEGA_SHARPNESS_GATE !== '0'; // call-time (โปรดักชัน env นิ่ง = เท่า SHARPNESS_GATE_ON) — telemetry + เทส gate-off
+        const _eb = (v) => (v === true ? true : v === false ? false : null);
+        const _en = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+        const _pnum = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null); // ขนาดจริง: positive finite เท่านั้น
+        const _norm = (s) => String(s || '').replace(/[()"'“”]/g, ' ').replace(/\s+/g, ' ').trim();
+        const _base = (s) => _norm(String(s || '').replace(/\(.*?\)/g, ' ')); // ชื่อฐานนอกวงเล็บ
+        const _clip = (s, n) => { if (s == null) return null; const t = String(s); if (_urlLike(t)) return null; return t.length > n ? t.slice(0, n) : t; };
+        // id: URL-like/ยาวเกิน → token แฮชคงที่ (ไม่ persist ข้อความ URL/ยาวดิบ) · สั้นปกติ → คงเดิม
+        const _clipId = (s) => { const t = String(s ?? ''); return (_urlLike(t) || t.length > 64) ? ('id#' + String(_dnaHashFor({ i: t }) || '0')) : t; };
+        // faceFrac = พื้นที่กล่องหน้า (w×h) — ต้อง finite primitive ใน normalized bounds (0,1] มิฉะนั้น null (ไม่เดา)
+        const _ff = (x) => {
+          const b = x?.triage?.faceBox; if (!b || typeof b !== 'object') return null;
+          const w = b.w ?? b.width, h = b.h ?? b.height;
+          if (typeof w !== 'number' || typeof h !== 'number' || !Number.isFinite(w) || !Number.isFinite(h)) return null;
+          if (!(w > 0 && w <= 1 && h > 0 && h <= 1)) return null;
+          const v = Math.round(w * h * 1000) / 1000;
+          return v > 0 ? v : null; // ปัดแล้ว 0 (หน้าเล็กจิ๋ววัดไม่ได้) → null (คง invariant faceFrac >0)
+        };
+        const _dims = (x) => { const rw = _pnum(x?.realWidth), rh = _pnum(x?.realHeight); if (rw == null || rh == null) return null; const s = `${rw}x${rh}`; return s.length <= 24 ? s : null; };
+        const _rssExplicit = (x) => {
+          const rw = _pnum(x?.realWidth), rh = _pnum(x?.realHeight);
+          if (rw != null && rh != null) return Math.min(rw, rh);
+          return _pnum(x?.triage?.realShortSide);
+        };
+        const _orient = (x) => { const w = _pnum(x?.width), h = _pnum(x?.height); return (w != null && h != null) ? (w / h > 1.15 ? 'wide' : (w / h < 0.87 ? 'tall' : 'sq')) : null; };
+        const _portrait = (role) => role === 'hero' || role === 'circle';
+        // heroGrade: hard-fail ก่อน → required ไม่ครบ=null → ครบถึง true · relevant ต้อง explicit true · เคารพ sharpness gate
+        const _heroGradeObs = (x) => {
+          const relevant = _eb(x?.triage?.relevant), clean = _eb(x?.triage?.clean), fc = _en(x?.triage?.faceCount), rss = _rssExplicit(x), sharp = _en(x?.triage?.sharpness);
+          if (relevant === false) return false;
+          if (clean === false) return false;
+          if (fc != null && fc !== 1) return false;
+          if (x?.rehostQuality === 'thumbnail') return false;
+          if (rss != null && rss < HERO_MIN_SHORT_SIDE) return false;
+          if (_sharpGate && sharp != null && sharp < SHARPNESS_MIN_HERO) return false;
+          if (relevant !== true) return null;               // relevant ไม่รู้ → null (ต้อง explicit true ถึง true ได้)
+          if (clean == null || fc == null || rss == null) return null;
+          if (_sharpGate && sharp == null) return null;      // gate on + sharpness ไม่รู้ = หลักฐานไม่ครบ
+          return true;
+        };
+        // เจตนา "คนของบทบาท" — role-aware + conservative unique-alias clustering (identity ไม่ใช่ชื่อดิบ)
+        const _chars = (job.dossier.compass?.mainCharacters || []).map((c) => _norm(c?.name)).filter(Boolean);
+        const _uniqChars = [...new Set(_chars)];
+        const _tk = (s) => _nameTokens(s); // strip titles
+        // a เป็น proper-subset alias ของ b: สั้นกว่า, leading token เท่ากัน, ทุก token ของ a อยู่ใน b
+        const _subsetAlias = (a, b) => { const ta = _tk(a), tb = _tk(b); if (!ta.length || ta.length >= tb.length) return false; if (ta[0] !== tb[0]) return false; return ta.every((t) => tb.includes(t)); };
+        const _par = _uniqChars.map((_, i) => i);
+        const _find = (i) => { while (_par[i] !== i) { _par[i] = _par[_par[i]]; i = _par[i]; } return i; };
+        // collapse เฉพาะ alias สั้น↔ยาว "unique" (ชนหลายชื่อ = ไม่ collapse → คงกำกวม) · สมชาย-ใจดี/ใจร้าย ไม่ subset กัน = คนละคน
+        for (let i = 0; i < _uniqChars.length; i++) { const fulls = []; for (let j = 0; j < _uniqChars.length; j++) if (j !== i && _subsetAlias(_uniqChars[i], _uniqChars[j])) fulls.push(j); if (fulls.length === 1) { const a = _find(i), b = _find(fulls[0]); if (a !== b) _par[a] = b; } }
+        const _rootOfName = (nm) => { const i = _uniqChars.indexOf(_norm(nm)); return i < 0 ? -1 : _find(i); };
+        const _canonOfRoot = (root) => { let best = null; for (let i = 0; i < _uniqChars.length; i++) if (_find(i) === root) { const c = _uniqChars[i]; if (best == null || _tk(c).length > _tk(best).length || (_tk(c).length === _tk(best).length && (c.length > best.length || (c.length === best.length && c < best)))) best = c; } return best; };
+        const _heroNames = _heroRoleNamesOf(job).map(_norm).filter(Boolean);
+        const _heroRoots = new Set(_heroNames.map(_rootOfName).filter((r) => r >= 0));
+        const _nonHeroRoots = [...new Set(_uniqChars.map((_, i) => _find(i)))].filter((r) => !_heroRoots.has(r));
+        const _heroTarget = _heroRoots.size === 1 ? (_canonOfRoot([..._heroRoots][0]) || _heroNames[0]) : null; // >1 distinct hero identity → null (compass ambiguous)
+        const _reactTarget = _nonHeroRoots.length === 1 ? _canonOfRoot(_nonHeroRoots[0]) : null; // >1 identity = ambiguous → null
+        // frozen orders: template mode = snapshot (ไม่ใช่ live) · role ซ้ำ = ambiguous (ไม่จับ first)
+        const _ordersSrc = (_jobTemplateV1 ? _templateArtBriefSnapshot?.orders : job.dossier.artBrief?.orders) || [];
+        // person labels — ตัด blank/whitespace ทิ้ง (ถือว่า absent)
+        const _labelsOf = (x) => {
+          const out = [];
+          const _add = (v) => { if (v != null && _norm(v)) out.push(String(v)); };
+          _add(x?.triage?.person);
+          if (Array.isArray(x?.triage?.persons)) for (const p of x.triage.persons) _add(p);
+          return out;
+        };
+        // matchKind ต่อ label เดียว — exact (normalized ==) ก่อน ambiguity · distinctHits นับ identity group (alias นับครั้งเดียว)
+        const _matchKindOne = (lab, target) => {
+          const nc = _norm(lab); if (!nc) return 'miss';
+          const nt = _norm(target);
+          if (nc === nt) return 'exact';                    // ตรงเป๊ะ (normalized) = ไม่กำกวมเสมอ — ก่อนเช็ค token ชน (full สมชาย ใจดี = exact)
+          const hitRoots = new Set();
+          for (let i = 0; i < _uniqChars.length; i++) if (_namesMatchSimple(lab, _uniqChars[i])) hitRoots.add(_find(i));
+          if (hitRoots.size > 1) return 'ambiguous';        // ป้ายสั้นชน ≥2 identity (เช่น bare สมชาย)
+          if (_base(lab) && _base(lab) === _base(target)) return 'alias';
+          if (_namesMatchSimple(lab, target)) return 'token_fallback';
+          return 'miss';
+        };
+        // คืน { kind, label } — label = ป้ายที่ชนะจริง (deterministic) เพื่อ persist matchedLabel แม้ persons ถูก cap
+        const _matchKind = (labels, target) => {
+          if (!target) return { kind: null, label: null };
+          if (!labels.length) return { kind: null, label: null };  // มี target แต่ไม่มี label ใช้ได้ = unknown (ไม่ใช่ miss) → identity ใน unknownFields
+          const rank = { exact: 5, alias: 4, token_fallback: 3, ambiguous: 2, miss: 1 };
+          let best = 'miss', bestLabel = null, exactLabel = null, ambLabel = null, ambiguous = false;
+          for (const lab of labels) {
+            const mk = _matchKindOne(lab, target);
+            if (mk === 'ambiguous') { ambiguous = true; if (ambLabel == null) ambLabel = lab; continue; }
+            if (mk === 'exact' && exactLabel == null) exactLabel = lab;
+            if (rank[mk] > rank[best]) { best = mk; bestLabel = lab; }
+          }
+          if (exactLabel != null) return { kind: 'exact', label: exactLabel };
+          if (ambiguous) return { kind: 'ambiguous', label: ambLabel };
+          return { kind: best, label: best === 'miss' ? null : bestLabel };
+        };
+        // เจตนาต่อช่อง: semantic → contract slot = authority เดียว (wantPerson null/blank = null authoritative ไม่ยืม order/compass) · legacy → order (unique role) → compass
+        const _resolveTarget = (slot, role) => {
+          if (semContract) {
+            const cs = semById.get(slot);
+            if (cs) { const wp = cs.wantPerson != null ? String(cs.wantPerson).trim() : ''; return wp ? { target: _norm(wp), source: 'contract' } : { target: null, source: 'contract' }; }
+          }
+          const oList = _ordersSrc.filter((o) => o && o.role === role && o.personHint != null && String(o.personHint).trim());
+          if (oList.length === 1) return { target: _norm(oList[0].personHint), source: 'order' }; // ซ้ำ >1 = ข้าม (ไม่ยืมจากช่องบทบาทซ้ำ)
+          if (role === 'hero') return { target: _heroTarget, source: _heroTarget ? 'compass_hero' : null };
+          if (role === 'reaction' || role === 'circle') return { target: _reactTarget, source: _reactTarget ? 'compass_sole_nonhero' : null };
+          return { target: null, source: null };
+        };
+        // unknownFields role-critical (deterministic) — ไม่ครบ → metadataState=METADATA_INSUFFICIENT (แม้ dims มี)
+        //   faceCount/faceFrac เฉพาะ role ที่ใช้ face gate (portrait) · sharpness เฉพาะ hero เมื่อ gate on
+        const _unknownFields = (x, role, target, ff, dims) => {
+          const u = [];
+          if (_eb(x?.triage?.relevant) == null) u.push('relevant');
+          if (_eb(x?.triage?.clean) == null) u.push('clean');
+          if (_portrait(role) && _en(x?.triage?.faceCount) == null) u.push('faceCount');
+          if (dims == null) u.push('dims');
+          if (_portrait(role) && ff == null) u.push('faceFrac');
+          if (role === 'hero' && _sharpGate && _en(x?.triage?.sharpness) == null) u.push('sharpness');
+          if (target && _labelsOf(x).length === 0) u.push('identity');
+          return u;
+        };
+        const _reasonOf = (x, role, mk, metaState, selected) => {
+          if (selected) return 'SELECTED';
+          if (_eb(x?.triage?.relevant) === false) return 'REJECT_IRRELEVANT';
+          if (_eb(x?.triage?.clean) === false) return 'REJECT_DIRTY';
+          if (mk === 'miss') return 'REJECT_PERSON_MISS';
+          if (mk === 'ambiguous') return 'REJECT_PERSON_AMBIGUOUS';
+          const fc = _en(x?.triage?.faceCount);
+          if (_portrait(role) && fc === 0) return 'REJECT_FACE_NONE';        // แยก 0 หน้าออกจาก multiface
+          if (_portrait(role) && fc != null && fc > 1) return 'REJECT_MULTIFACE';
+          if (role === 'hero') {
+            if (x?.rehostQuality === 'thumbnail') return 'REJECT_THUMBNAIL';
+            const rss = _rssExplicit(x);
+            if (rss != null && rss < HERO_MIN_SHORT_SIDE) return 'REJECT_UNDERSIZE';
+            const sharp = _en(x?.triage?.sharpness);
+            if (_sharpGate && sharp != null && sharp < SHARPNESS_MIN_HERO) return 'REJECT_SHARPNESS';
+          }
+          if (metaState === 'METADATA_INSUFFICIENT') return 'METADATA_INSUFFICIENT';
+          return 'ELIGIBLE';
+        };
+        const _selById = {};
+        for (const slot of activeSlots) { const s = slots[slot]; if (s && s.id != null) _selById[slot] = String(s.id); }
+        // บทบาท canonical: hero ผ่าน _isHeroSlot (รองรับ refRole main), circle ผ่าน _isCircleSlot — ไม่เดาจาก _legacyKeyOf อย่างเดียว
+        const _roleOf = (slot) => (_isHeroSlot(slot) ? 'hero' : (_isCircleSlot(slot) ? 'circle' : _legacyKeyOf(slot)));
+        const _rowOf = (x, role, target, selected) => {
+          const ff = _ff(x), dims = _dims(x);
+          const _mm = _matchKind(_labelsOf(x), target);
+          const mk = _mm.kind;
+          const uf = _unknownFields(x, role, target, ff, dims);
+          const metaState = uf.length ? 'METADATA_INSUFFICIENT' : 'OK';
+          const personsArr = Array.isArray(x?.triage?.persons) ? x.triage.persons.filter((p) => p != null).map((p) => _clip(p, 48)).filter((p) => p != null).slice(0, 4) : [];
+          return {
+            id: _clipId(x.id),
+            person: _clip(x?.triage?.person, 48),
+            ...(personsArr.length ? { persons: personsArr } : {}),
+            matchKind: mk,
+            ...(_mm.label != null ? { matchedLabel: _clip(_mm.label, 48) } : {}), // ป้ายที่ชนะจริง (แม้อยู่นอก persons cap)
+            metadataState: metaState,        // ★ อิสระจาก reason — selected ยังเห็น METADATA_INSUFFICIENT ได้
+            ...(uf.length ? { unknownFields: uf } : {}),
+            faceFrac: ff,
+            dims,
+            measuredFrom: _clip(x?.triage?.measuredFrom, 24),
+            orient: _orient(x),
+            clean: _eb(x?.triage?.clean),        // explicit true/false เท่านั้น มิฉะนั้น null
+            largeText: _eb(x?.triage?.largeText ?? x?.triage?.hasText),
+            watermark: _eb(x?.triage?.watermark ?? x?.triage?.hasWatermark),
+            newsScene: _eb(x?.triage?.newsScene),
+            faceCount: _en(x?.triage?.faceCount),
+            quality: _en(x?.triage?.quality),
+            pHash: _clip(x?.triage?.pHash64, 32),
+            heroGrade: _heroGradeObs(x),
+            reason: _reasonOf(x, role, mk, metaState, selected),
+            selected,
+            estimatedUpscale: null,          // ต้องใช้เรขาคณิตช่องตอน compose → สงวน batch ถัดไป (ไม่เดา)
+          };
+        };
+      // เรียง: matchKind priority → พื้นที่หน้า desc → คุณภาพ desc → id asc (deterministic tie-break)
+      const _rank = (a, b) => {
+        const mr = { exact: 5, alias: 4, token_fallback: 3, ambiguous: 2, miss: 1 };
+        const ma = a.matchKind == null ? 0 : (mr[a.matchKind] || 0), mb = b.matchKind == null ? 0 : (mr[b.matchKind] || 0);
+        if (mb !== ma) return mb - ma;
+        const fa = a.faceFrac == null ? -1 : a.faceFrac, fb = b.faceFrac == null ? -1 : b.faceFrac;
+        if (fb !== fa) return fb - fa;
+        const qa = a.quality == null ? -1 : a.quality, qb = b.quality == null ? -1 : b.quality;
+        if (qb !== qa) return qb - qa;
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      };
+      const _orderedSlots = [...activeSlots].sort((s1, s2) => SLOT_ORDER.indexOf(_roleOf(s1)) - SLOT_ORDER.indexOf(_roleOf(s2)));
+      const _rolesOut = [];
+      for (const slot of _orderedSlots) {
+        const role = _roleOf(slot);
+        const { target, source } = _resolveTarget(slot, role);
+        const selId = _selById[slot] || null;
+        // จักรวาลเต็ม — ไม่ pre-filter person-miss (มิฉะนั้นซ่อน REJECT_PERSON_MISS) → นับ reasonCounts จริงก่อน cap
+        let rows = sorted.map((x) => _rowOf(x, role, target, String(x.id) === selId));
+        // ตรึงใบที่ถูกเลือกเสมอ — เช็คด้วย flag rr.selected (ตั้งจาก raw id) ไม่ใช่ clipped-id equality
+        //   (กัน id ที่แชร์ prefix 64 ตัว/แฮชชนกัน มากดใบ selected จริงหาย)
+        if (selId != null && !rows.some((rr) => rr.selected)) {
+          const sx = sorted.find((x) => String(x.id) === selId) || (slots[slot] && String(slots[slot].id) === selId ? slots[slot] : null);
+          if (sx) rows.push(_rowOf(sx, role, target, true));
+        }
+        rows.sort(_rank);
+        const totalRows = rows.length;
+        const reasonCounts = {};
+        for (const rr of rows) reasonCounts[rr.reason] = (reasonCounts[rr.reason] || 0) + 1;
+        let perDropped = 0;
+        if (rows.length > _LDG_MAX_ROWS) {
+          const sel = rows.filter((rr) => rr.selected);
+          const rest = rows.filter((rr) => !rr.selected).slice(0, Math.max(0, _LDG_MAX_ROWS - sel.length));
+          perDropped = totalRows - (sel.length + rest.length);
+          rows = [...sel, ...rest].sort(_rank);
+        }
+        _rolesOut.push({ role, slotId: _clipId(slot), targetPerson: target ? _clip(target, 48) : null, targetSource: source, selectedId: selId ? _clipId(selId) : null, totalRows, keptRows: rows.length, droppedRows: perDropped, reasonCounts, rows });
+      }
+      const ledger = { v: 1, poolSize: sorted.length, capped: false, droppedRows: 0, roles: _rolesOut };
+      for (const r of ledger.roles) { if (r.droppedRows > 0) { ledger.capped = true; ledger.droppedRows += r.droppedRows; } }
+      // hard cap ≤ 8 KiB (รวม wrapper): ตัดแถวไม่ถูกเลือกอันดับท้ายจากกลุ่มใหญ่สุดทีละแถว + อัปเดตตัวนับจริงทุกตัว
+      const _size = () => Buffer.byteLength(JSON.stringify({ candidateLedger: ledger }), 'utf8');
+      let _guard = 0;
+      while (_size() > _LDG_MAX_BYTES && _guard++ < 20000) {
+        let gi = -1, gm = 0;
+        for (let i = 0; i < ledger.roles.length; i++) { const n = ledger.roles[i].rows.filter((rr) => !rr.selected).length; if (n > gm) { gm = n; gi = i; } }
+        if (gi < 0) break;
+        const g = ledger.roles[gi];
+        for (let j = g.rows.length - 1; j >= 0; j--) { if (!g.rows[j].selected) { g.rows.splice(j, 1); g.droppedRows++; g.keptRows = g.rows.length; ledger.droppedRows++; ledger.capped = true; break; } }
+      }
+      if (_size() > _LDG_MAX_BYTES) throw new Error('candidateLedger over size cap after trim');
+        _candidateLedger = ledger; _ledgerPresent = true;
+      }
+      // ── accessor-safe images base: copy own ENUMERABLE DATA props ของ im (ไม่เรียก getter/accessor) ตัด candidateLedger ทิ้ง ──
+      //   proxy/descriptor ล้ม (throw ที่นี่) → catch → omit diagnostic + S6 เดินต่อ (ไม่ใช้ base ที่ไม่ปลอดภัย)
+      if (_ledgerPresent) {
+        const _b = {};
+        const _ds = Object.getOwnPropertyDescriptors(im);
+        for (const _k of Object.keys(_ds)) {
+          if (_k === 'candidateLedger' || _k === '__proto__' || _k === 'prototype' || _k === 'constructor') continue; // ตัด candidateLedger + prototype-pollution keys
+          const _d = _ds[_k];
+          if (_d && !_d.get && !_d.set && _d.enumerable === true && ('value' in _d)) Object.defineProperty(_b, _k, { value: _d.value, enumerable: true, writable: true, configurable: true });
+        }
+        _ledgerImagesBase = _b;
+      }
+    } catch (_e) {
+      // ★ total catch: ห้ามอ่าน _e.message/stringify object ที่โยนมา (poisoned getter อาจ throw ซ้ำ) — log คงที่ปลอดภัย
+      _candidateLedger = null; _ledgerImagesBase = null; _ledgerInspectFailed = true; // ON-path ล้ม → ห้าม legacy spread (im อาจ hostile proxy)
+      console.log('[MEGA S6] 🧾 candidateLedger ข้าม (diagnostic-only inspection ล้ม, งานเดินต่อ)');
+    }
+  }
+  // ★ R1 accessor-safe emit: LEDGER on สำเร็จ = safe base (ไม่ spread im) · ON-path ล้ม = omit (คง dossier เดิม) · LEDGER off = legacy quarantine เดิมทุก byte
+  const _quarField = QUARANTINE_ON ? { untriaged: untriagedList.length, sizeUnknown: sizeUnknownList.length, heroDemoted: heroDemotedFlag, sample: quarantineSampleIds } : null;
+  let _imagesPatch = null;
+  if (_ledgerPresent && _ledgerImagesBase) {
+    _imagesPatch = { ..._ledgerImagesBase, ...(_quarField ? { quarantine: _quarField } : {}), candidateLedger: _candidateLedger };
+  } else if (_ledgerInspectFailed) {
+    _imagesPatch = null; // ON-path descriptor/proxy inspection ล้ม → omit images ทั้งก้อน (ไม่ spread im ที่อาจ throw ซ้ำ) — คง dossier เดิมผ่าน merge
+  } else if (QUARANTINE_ON) {
+    _imagesPatch = { ...im, quarantine: _quarField };
+  }
+
   return {
     status: 'done',
     nextAction: 'continue',
@@ -2318,8 +2804,8 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}),
       // ★ D3-B3.3 (Codex): template path echo local plain snapshot (ไม่ใช่ raw carrier) → S7/retry เห็น plain · legacy = raw byte เดิม
       ...((_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) ? { artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) } : {}),
-      // ★ Wave2 Batch D1: merge-patch additive — สเปรด im เดิมกันทับ field อื่นใน images (caseId/storyQueries/heroGradeReport ฯลฯ)
-      ...(QUARANTINE_ON ? { images: { ...im, quarantine: { untriaged: untriagedList.length, sizeUnknown: sizeUnknownList.length, heroDemoted: heroDemotedFlag, sample: quarantineSampleIds } } } : {}),
+      // ★ Wave2 Batch D1 + R1: images = accessor-safe patch คำนวณก่อน return (ดู _imagesPatch) — OFF ทั้งคู่ = ไม่มี key images (byte เท่า legacy)
+      ...(_imagesPatch ? { images: _imagesPatch } : {}),
     },
     quality: filled < activeSlots.length ? 'yellow' : undefined,
   };

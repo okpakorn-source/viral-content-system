@@ -2659,4 +2659,746 @@ await test('D3B4-B (Codex) P1-1 order-independent grouping (non-transitive bridg
   assert.equal(f2.captures.payload.selectionSpec.replayHash, f1.captures.payload.selectionSpec.replayHash, 'P1-B flow: replayHash identical');
 });
 
+// ============================================================
+// 🧾 R1 — SHADOW CANDIDATE LEDGER (diagnostic-only) · kill switch MEGA_CANDIDATE_LEDGER=1
+//   ตรวจ: OFF parity · ON non-interference (pickImages/rawBody เท่าเดิม) · determinism · cap/size/redaction ·
+//   unknown-stays-unknown · reason enum · selected ตรึงนอก cap · fresh→resume byte เดิม + S7 ไม่เขียนทับ ·
+//   matchKind token_fallback (วงเล็บ) · collision → ambiguous (ห้ามฟันธง exact)
+// ============================================================
+const withLedger = async (on, fn) => {
+  if (on) process.env.MEGA_CANDIDATE_LEDGER = '1'; else delete process.env.MEGA_CANDIDATE_LEDGER;
+  try { return await fn(); } finally { delete process.env.MEGA_CANDIDATE_LEDGER; }
+};
+const withSharpGate = async (on, fn) => { // on=default(gate on) · off = MEGA_SHARPNESS_GATE=0 (ledger อ่าน call-time)
+  const prev = process.env.MEGA_SHARPNESS_GATE;
+  if (on) delete process.env.MEGA_SHARPNESS_GATE; else process.env.MEGA_SHARPNESS_GATE = '0';
+  try { return await fn(); } finally { if (prev === undefined) delete process.env.MEGA_SHARPNESS_GATE; else process.env.MEGA_SHARPNESS_GATE = prev; }
+};
+// faceArea → faceBox {w:area,h:1} (พื้นที่ = area) · dims = [realW,realH] (คุม orient/heroGrade)
+const LIMG = (id, person, faceArea, cat, dims, extra = {}) => IMG(
+  id,
+  { person, category: cat, faceCount: person ? 1 : 0, faceBox: faceArea ? { w: faceArea, h: 1 } : undefined, note: `${id} scene`, ...extra },
+  dims ? { realWidth: dims[0], realHeight: dims[1], width: dims[0], height: dims[1] } : {},
+);
+// AC-0066-shaped: hero ดวงเดือน หน้าเล็ก (−311) ถูกเลือก ทั้งที่ −29/−41 หน้าใหญ่กว่า
+const AC_POOL = [
+  LIMG('AC-311', 'ดวงเดือน', 0.014, 'context', [1224, 1712]),
+  LIMG('AC-29', 'ดวงเดือน', 0.084, 'context', [720, 960]),
+  LIMG('AC-41', 'ดวงเดือน', 0.068, 'face-emotional', [800, 1200]),
+  LIMG('AC-125', 'สรพงศ์ ชาตรี', 0.203, 'face-emotional', [1200, 735]),
+  LIMG('AC-45', 'สรพงศ์ ชาตรี', 0.03, 'context', [540, 720]),
+  LIMG('AC-57', null, 0, 'context', [5472, 3078]),
+  LIMG('AC-26', 'ดวงเดือน', 0.005, 'context', [800, 533]),
+];
+const AC_ANSWER = {
+  hero: { id: 'AC-311', reason: 'ตัวเอก', backups: ['AC-29'] },
+  reaction: { id: 'AC-125', reason: 'สรพงศ์', backups: [] },
+  action: { id: 'AC-26', reason: 'act', backups: [] },
+  context: { id: 'AC-57', reason: 'วิหาร', backups: [] },
+  circle: { id: 'AC-45', reason: 'วง', backups: [] },
+};
+const R1_CHARS = [{ name: 'ดวงเดือน', role: 'hero' }, { name: 'สรพงศ์ ชาตรี', role: 'related' }];
+const REASON_ENUM = new Set(['SELECTED', 'ELIGIBLE', 'REJECT_IRRELEVANT', 'REJECT_DIRTY', 'REJECT_PERSON_MISS', 'REJECT_PERSON_AMBIGUOUS', 'REJECT_FACE_NONE', 'REJECT_MULTIFACE', 'REJECT_THUMBNAIL', 'REJECT_UNDERSIZE', 'REJECT_SHARPNESS', 'METADATA_INSUFFICIENT']);
+const MATCHKIND_ENUM = new Set(['exact', 'alias', 'token_fallback', 'ambiguous', 'miss', null]);
+const META_ENUM = new Set(['OK', 'METADATA_INSUFFICIENT']);
+
+const runR1S6 = async (on, { chars, pool, answer }) => {
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const job = mkJob({ dna: DNA_ALPO, orders: [], chars });
+  const s6 = await withLedger(on, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool, brainAnswer: answer, captures }) }));
+  return { job, s6, captures };
+};
+const runR1Full = async (on, { chars, pool, answer }) => {
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const job = mkJob({ dna: DNA_ALPO, orders: [], chars });
+  const s6 = await withLedger(on, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool, brainAnswer: answer, captures }) }));
+  Object.assign(job.dossier, s6.dossierPatch);
+  const s7 = await withLedger(on, () => s7_cover(job, { origin: 'http://mock', _deps: mkDeps({ pool, brainAnswer: answer, captures }) }));
+  return { job, s6, s7, captures };
+};
+const ledgerOf = (s6) => s6.dossierPatch.images?.candidateLedger;
+
+const allRows = (L) => L.roles.flatMap((r) => r.rows);
+const findRow = (L, id, pred = () => true) => { for (const r of L.roles) for (const x of r.rows) if (x.id === id && pred(x, r)) return x; return null; };
+// ── shared full-row/role/carrier helpers matching production output (ทุก fixed field) — ใช้ทุก hand-authored v1 fixture ──
+// production-possible default: hero role · target ดวงเดือน · evidence complete → OK, no unknownFields · hero ELIGIBLE ⟹ heroGrade true + dims short>=700
+const fullRow = (over = {}) => ({ id: 'A', person: 'ดวงเดือน', matchKind: 'exact', metadataState: 'OK', faceFrac: 0.3, dims: '1000x1000', measuredFrom: null, orient: null, clean: true, largeText: null, watermark: null, newsScene: null, faceCount: 1, quality: null, pHash: null, heroGrade: true, reason: 'ELIGIBLE', selected: false, estimatedUpscale: null, ...over });
+const fullRole = (over = {}) => ({ role: 'hero', slotId: 'hero', targetPerson: 'ดวงเดือน', targetSource: 'compass_hero', selectedId: null, totalRows: 1, keptRows: 1, droppedRows: 0, reasonCounts: { ELIGIBLE: 1 }, rows: [fullRow()], ...over });
+const fullCarrier = (over = {}) => ({ v: 1, poolSize: 1, capped: false, droppedRows: 0, roles: [fullRole()], ...over });
+const cjson = (o) => JSON.parse(JSON.stringify(o)); // deep clone fixture
+
+await test('R1: FRESH OFF absent — ไม่มี candidateLedger field เลย (quarantine images มีได้ตามเดิม)', async () => {
+  const { s6 } = await runR1S6(false, { chars: R1_CHARS, pool: AC_POOL, answer: AC_ANSWER });
+  assert.equal(s6.status, 'done');
+  assert.equal(ledgerOf(s6), undefined, 'OFF: images.candidateLedger undefined');
+  assert.ok(!JSON.stringify(s6.dossierPatch).includes('candidateLedger'), 'OFF: ไม่มีคำว่า candidateLedger ที่ไหนเลย');
+});
+
+await test('R1: FRESH OFF inert — getter บน candidateLedger ไม่ถูกแตะเลยเมื่อ env off', async () => {
+  let touched = false;
+  const job = mkJob({ dna: DNA_ALPO, orders: [], chars: R1_CHARS });
+  // fresh: ไม่มี property candidateLedger อยู่จริง — ถ้าโค้ดพยายาม define/อ่าน = จับได้ (getter throw)
+  Object.defineProperty(job.dossier.images, 'candidateLedger', { configurable: true, enumerable: false, get() { touched = true; throw new Error('MUST NOT TOUCH WHEN OFF'); } });
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const s6 = await withLedger(false, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+  assert.equal(s6.status, 'done', 's6 ยังทำงานปกติ ไม่ crash');
+  assert.equal(touched, false, 'OFF: property candidateLedger ไม่ถูกอ่านเลย (env-first guard)');
+});
+
+await test('R1: ON accessor carrier — getOwnPropertyDescriptor ไม่ invoke getter → ถือว่าไม่ใช่ own-data → คิดใหม่', async () => {
+  const job = mkJob({ dna: DNA_ALPO, orders: [], chars: R1_CHARS });
+  Object.defineProperty(job.dossier.images, 'candidateLedger', { configurable: true, enumerable: true, get() { return { v: 1, roles: [], __sentinel: true }; } });
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const s6 = await withLedger(true, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+  const L = ledgerOf(s6);
+  assert.ok(L && L.roles.some((r) => r.rows.length > 0), 'accessor carrier ไม่ใช่ own-data → คิด ledger ใหม่จริง (มี rows)');
+  assert.ok(!('__sentinel' in L), 'ไม่รับค่าจาก accessor');
+});
+
+await test('R1: ON INVALID_SAFE plain v2 carrier → preserve ด้วย safe clone (deep เท่าเดิม, reference ใหม่, ไม่คิดใหม่)', async () => {
+  const carrier = { v: 2, roles: [], stale: true }; // safe plain, schema-invalid
+  const job = mkJob({ dna: DNA_ALPO, orders: [], chars: R1_CHARS });
+  job.dossier.images.candidateLedger = carrier;
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const s6 = await withLedger(true, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+  const L = ledgerOf(s6);
+  assert.deepStrictEqual(L, { v: 2, roles: [], stale: true }, 'INVALID_SAFE: deep/JSON เท่าเดิม (ไม่ normalize เป็น v1)');
+  assert.notEqual(L, carrier, 'ต้องเป็น safe clone (reference ใหม่) ไม่ใช่ carrier เดิม');
+  assert.doesNotThrow(() => JSON.stringify(s6.dossierPatch));
+});
+
+await test('R1: ON vs OFF legacy — pickImages/rawBody byte-identical (ต่าง = candidateLedger ล้วน)', async () => {
+  const off = await runR1Full(false, { chars: R1_CHARS, pool: AC_POOL, answer: AC_ANSWER });
+  const on = await runR1Full(true, { chars: R1_CHARS, pool: AC_POOL, answer: AC_ANSWER });
+  assert.deepStrictEqual(on.s6.dossierPatch.pickImages, off.s6.dossierPatch.pickImages, 'pickImages เท่ากันเป๊ะ');
+  assert.equal(on.captures.rawBody, off.captures.rawBody, 'rawBody byte-identical (ledger ไม่รั่วเข้า payload)');
+  assert.ok(!JSON.stringify(on.captures.payload).includes('candidateLedger'), 'payload ไม่มี ledger (ON)');
+  assert.equal(ledgerOf(off.s6), undefined, 'OFF: ไม่มี ledger');
+  assert.ok(ledgerOf(on.s6)?.v === 1, 'ON: มี ledger v:1');
+});
+
+await test('R1: ON vs OFF semantic strict — spec/specHash/replayHash/realizedTemplate/slotPlan/rawBody/queue identical', async () => {
+  const off = await withLedger(false, () => runStrictFlow({ s7Env: ALL_ON }));
+  const on = await withLedger(true, () => runStrictFlow({ s7Env: ALL_ON }));
+  assert.deepStrictEqual(on.s6.dossierPatch.pickImages, off.s6.dossierPatch.pickImages, 'pickImages identical');
+  assert.equal(on.captures.rawBody, off.captures.rawBody, 'rawBody byte-identical');
+  assert.equal(on.captures.payload.selectionSpec.specHash, off.captures.payload.selectionSpec.specHash, 'specHash identical');
+  assert.equal(on.captures.payload.selectionSpec.replayHash, off.captures.payload.selectionSpec.replayHash, 'replayHash identical');
+  assert.deepStrictEqual(on.captures.payload.realizedTemplate, off.captures.payload.realizedTemplate, 'realizedTemplate identical');
+  assert.deepStrictEqual(on.captures.payload.slotPlan, off.captures.payload.slotPlan, 'slotPlan identical');
+  assert.equal(on.queueCalls, off.queueCalls, 'queue count identical');
+  assert.equal(on.queueCalls, 1, 'queue once');
+  assert.equal(off.s6.dossierPatch.images?.candidateLedger, undefined, 'OFF no ledger');
+  const L = ledgerOf(on.s6);
+  assert.ok(L && L.v === 1, 'ON ledger v1');
+  assert.ok(!JSON.stringify(on.captures.payload).includes('candidateLedger'), 'payload ไม่มี ledger');
+  // semantic canonical hero (refRole main/hero ผ่าน _isHeroSlot) + target จาก frozen contract
+  const hero = L.roles.find((r) => r.role === 'hero');
+  assert.ok(hero, 'มี hero role (canonical ผ่าน _isHeroSlot ไม่ใช่ legacyKey)');
+  assert.ok(['contract', 'order', 'compass_hero'].includes(hero.targetSource), `targetSource authority: ${hero.targetSource}`);
+  assert.ok(hero.targetPerson, 'hero มี targetPerson');
+});
+
+await test('R1: write-once — persisted valid snapshot preserve ตอน replay (pool เปลี่ยน, env on→off)', async () => {
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const job = mkJob({ dna: DNA_ALPO, orders: [], chars: R1_CHARS });
+  const s6a = await withLedger(true, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+  const L0 = JSON.stringify(ledgerOf(s6a));
+  Object.assign(job.dossier, s6a.dossierPatch); // persist tick
+  assert.ok(job.dossier.images.candidateLedger, 'persisted ลง dossier.images');
+  // replay env ON + pool membership เปลี่ยน (เพิ่มใบ unique หน้าใหญ่ + poolSize ต่าง) → recompute จะต่างแน่ แต่ต้อง preserve เดิม byte
+  const CHANGED = [...AC_POOL, LIMG('AC-NEW', 'ดวงเดือน', 0.5, 'face-emotional', [1400, 1800], { sharpness: 50 })];
+  const s6b = await withLedger(true, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: CHANGED, brainAnswer: AC_ANSWER, captures }) }));
+  assert.equal(JSON.stringify(ledgerOf(s6b)), L0, 'replay ON (pool membership เปลี่ยน) → ledger byte เดิม (write-once ไม่คิดใหม่)');
+  assert.ok(!JSON.stringify(ledgerOf(s6b)).includes('AC-NEW'), 'ใบใหม่ AC-NEW ไม่โผล่ (ยืนยันไม่ recompute)');
+  Object.assign(job.dossier, s6b.dossierPatch);
+  // replay env OFF → ยัง preserve ผ่าน merge (...im)
+  const s6c = await withLedger(false, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+  Object.assign(job.dossier, s6c.dossierPatch);
+  assert.equal(JSON.stringify(job.dossier.images.candidateLedger), L0, 'replay OFF: ledger เดิมยังอยู่ครบ byte');
+  // S7 ไม่เขียน images
+  const s7 = await withLedger(true, () => s7_cover(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+  assert.equal(s7.dossierPatch.images, undefined, 'S7 ไม่เขียน dossierPatch.images');
+});
+
+await test('R1: AC-0066 evidence — hero −311 หน้าเล็กถูกเลือก ทั้งที่ −29/−41 ใหญ่กว่า · person-miss ไม่ถูกซ่อน', async () => {
+  const { s6 } = await runR1S6(true, { chars: R1_CHARS, pool: AC_POOL, answer: AC_ANSWER });
+  const L = ledgerOf(s6);
+  const hero = L.roles.find((r) => r.role === 'hero');
+  assert.equal(hero.selectedId, 'AC-311', 'hero ยังเลือก −311 (R1 ไม่แตะการเลือก)');
+  const sel = hero.rows.find((x) => x.id === 'AC-311');
+  const c29 = hero.rows.find((x) => x.id === 'AC-29');
+  const c41 = hero.rows.find((x) => x.id === 'AC-41');
+  assert.ok(sel && c29 && c41, '−311/−29/−41 อยู่ในตาราง hero');
+  assert.equal(sel.selected, true);
+  assert.equal(c29.selected, false);
+  assert.ok(sel.faceFrac < c29.faceFrac && sel.faceFrac < c41.faceFrac, `−311 ${sel.faceFrac} < −29 ${c29.faceFrac}/−41 ${c41.faceFrac}`);
+  assert.equal(sel.matchKind, 'exact');
+  // full-universe observability: สรพงศ์/ไร้คน ถูกจัด REJECT_PERSON_MISS ไม่ถูก pre-filter หาย
+  assert.ok((hero.reasonCounts.REJECT_PERSON_MISS || 0) >= 1, 'person-miss ปรากฏใน reasonCounts (ไม่ถูกซ่อน)');
+  assert.equal(hero.totalRows, Object.values(hero.reasonCounts).reduce((a, b) => a + b, 0), 'reasonCounts sum = totalRows');
+});
+
+await test('R1: determinism — สลับลำดับพูล → ledger bytes เท่าเดิมเป๊ะ', async () => {
+  const a = await runR1S6(true, { chars: R1_CHARS, pool: AC_POOL, answer: AC_ANSWER });
+  const b = await runR1S6(true, { chars: R1_CHARS, pool: [...AC_POOL].reverse(), answer: AC_ANSWER });
+  assert.equal(JSON.stringify(ledgerOf(a.s6)), JSON.stringify(ledgerOf(b.s6)), 'ledger permutation-invariant');
+});
+
+await test('R1: cap — 30-row + 8192-byte (รวม wrapper) + counters จริง + redaction', async () => {
+  const BIG_POOL = [
+    ...Array.from({ length: 40 }, (_, i) => LIMG('B' + String(i).padStart(2, '0'), 'ดวงเดือน', 0.05 + (i % 9) * 0.002, 'context', [900, 1200])),
+    LIMG('BS1', 'สรพงศ์ ชาตรี', 0.2, 'face-emotional', [1200, 900]),
+    LIMG('BC1', null, 0, 'context', [1600, 900]),
+  ];
+  const BIG_ANSWER = { hero: { id: 'B00' }, reaction: { id: 'BS1' }, action: { id: 'B01' }, context: { id: 'BC1' }, circle: { id: 'BS1' } };
+  const { s6 } = await runR1S6(true, { chars: R1_CHARS, pool: BIG_POOL, answer: BIG_ANSWER });
+  const L = ledgerOf(s6);
+  assert.ok(Buffer.byteLength(JSON.stringify({ candidateLedger: L }), 'utf8') <= 8192, 'wrapper ≤ 8192 bytes');
+  const hero = L.roles.find((r) => r.role === 'hero');
+  assert.ok(hero.totalRows > 30 && hero.rows.length <= 30, '30-row cap engaged (total>30, kept≤30)');
+  for (const r of L.roles) {
+    assert.ok(r.rows.length <= 30, `≤30 rows`);
+    assert.equal(r.keptRows, r.rows.length, 'keptRows = rows.length');
+    assert.equal(r.totalRows, r.keptRows + r.droppedRows, 'totalRows = kept + dropped (truthful)');
+    assert.equal(Object.values(r.reasonCounts).reduce((a, b) => a + b, 0), r.totalRows, 'reasonCounts sum = totalRows (นับก่อน cap)');
+  }
+  assert.equal(L.capped, true);
+  assert.equal(L.droppedRows, L.roles.reduce((a, r) => a + r.droppedRows, 0), 'global droppedRows = ผลรวม per-role');
+  const j = JSON.stringify(L);
+  for (const bad of ['imageUrl', 'thumbnailUrl', 'faceBox', 'peopleBox', 'cdn.test', 'enqueuedAt', 'refBoundAt']) assert.ok(!j.includes(bad), `redaction: ไม่มี "${bad}"`);
+});
+
+await test('R1: safe IDs — URL-like/ยาวเกิน id → hash token (ไม่ persist URL/ข้อความยาวดิบ)', async () => {
+  const badId = 'https://cdn.evil/secret/AC-9.jpg?token=abc';
+  const longId = 'Z'.repeat(80);
+  const POOL = [
+    LIMG('SAFE-HERO', 'ดวงเดือน', 0.09, 'face-emotional', [900, 1200], { sharpness: 40 }),
+    LIMG(badId, 'ดวงเดือน', 0.05, 'context', [900, 1200]),
+    LIMG(longId, 'ดวงเดือน', 0.04, 'context', [900, 1200]),
+  ];
+  const ANSWER = { hero: { id: 'SAFE-HERO' }, reaction: { id: 'SAFE-HERO' }, action: { id: badId }, context: { id: longId }, circle: { id: 'SAFE-HERO' } };
+  const { s6 } = await runR1S6(true, { chars: R1_CHARS, pool: POOL, answer: ANSWER });
+  const L = ledgerOf(s6);
+  const j = JSON.stringify(L);
+  assert.ok(!j.includes('cdn.evil') && !j.includes('token=abc'), 'ไม่มีข้อความ URL ดิบ');
+  assert.ok(!j.includes(longId), 'ไม่มี id ยาวดิบ');
+  assert.ok(allRows(L).some((x) => typeof x.id === 'string' && x.id.startsWith('id#')), 'มี id#hash token แทน URL/ยาว');
+});
+
+await test('R1: prefix-collision — selected retention ใช้ flag ไม่ใช่ clipped-id equality', async () => {
+  const idA = 'P'.repeat(64) + 'AAAA';
+  const idB = 'P'.repeat(64) + 'BBBB';
+  const POOL = [
+    LIMG('PC-OTHER', 'ดวงเดือน', 0.2, 'face-emotional', [900, 1200], { sharpness: 40 }),
+    LIMG(idA, 'ดวงเดือน', 0.15, 'context', [900, 1200]),
+    LIMG(idB, 'ดวงเดือน', 0, 'context', [900, 1200]), // selected hero, faceFrac null → อันดับท้าย
+  ];
+  const ANSWER = { hero: { id: idB }, reaction: { id: 'PC-OTHER' }, action: { id: idA }, context: { id: 'PC-OTHER' }, circle: { id: 'PC-OTHER' } };
+  const { s6 } = await runR1S6(true, { chars: R1_CHARS, pool: POOL, answer: ANSWER });
+  const hero = ledgerOf(s6).roles.find((r) => r.role === 'hero');
+  const selRows = hero.rows.filter((x) => x.selected);
+  assert.equal(selRows.length, 1, 'มี selected row เดียว (idB) ถูกตรึงด้วย flag');
+  assert.equal(selRows[0].faceFrac, null, 'selected = idB (faceFrac null) ไม่ถูก idA กด');
+});
+
+await test('R1: strict types — string/bool ไม่ถูก coerce เป็นเลข → null', async () => {
+  const POOL = [
+    LIMG('NC-HERO', 'ดวงเดือน', 0.09, 'face-emotional', [900, 1200], { sharpness: 40 }),
+    IMG('NC-STR', { person: 'ดวงเดือน', faceCount: '2', quality: '7', sharpness: '30', faceBox: { w: '0.2', h: '0.2' } }, { realWidth: '900', realHeight: '1200', width: '900', height: '1200' }),
+  ];
+  const ANSWER = { hero: { id: 'NC-HERO' }, reaction: { id: 'NC-HERO' }, action: { id: 'NC-STR' }, context: { id: 'NC-STR' }, circle: { id: 'NC-HERO' } };
+  const { s6 } = await runR1S6(true, { chars: R1_CHARS, pool: POOL, answer: ANSWER });
+  const row = findRow(ledgerOf(s6), 'NC-STR');
+  assert.ok(row, 'NC-STR อยู่ในตาราง');
+  assert.equal(row.faceCount, null, "faceCount '2' string → null");
+  assert.equal(row.quality, null, "quality '7' string → null");
+  assert.equal(row.faceFrac, null, 'faceBox string components → null');
+  assert.equal(row.dims, null, 'realWidth string → dims null');
+  assert.equal(row.orient, null, 'width string → orient null');
+});
+
+await test('R1: reason truth — face-none/multiface/thumbnail/undersize/sharpness (gate on) แยกชัด', async () => {
+  const POOL = [
+    IMG('RT-HERO', { person: 'ดวงเดือน', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1200, realHeight: 1500 }),
+    IMG('RT-ZERO', { person: 'ดวงเดือน', faceCount: 0, clean: true, sharpness: 40 }, { realWidth: 900, realHeight: 1200 }),
+    IMG('RT-MULTI', { person: 'ดวงเดือน', faceCount: 3, clean: true, sharpness: 40, faceBox: { w: 0.2, h: 0.4 } }, { realWidth: 900, realHeight: 1200 }),
+    IMG('RT-THUMB', { person: 'ดวงเดือน', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.2, h: 0.5 } }, { realWidth: 900, realHeight: 1200, rehostQuality: 'thumbnail' }),
+    IMG('RT-SMALL', { person: 'ดวงเดือน', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.2, h: 0.5 } }, { realWidth: 400, realHeight: 500 }),
+    IMG('RT-BLUR', { person: 'ดวงเดือน', faceCount: 1, clean: true, sharpness: 5, faceBox: { w: 0.2, h: 0.5 } }, { realWidth: 900, realHeight: 1200 }),
+  ];
+  const ANSWER = { hero: { id: 'RT-HERO' }, reaction: { id: 'RT-ZERO' }, action: { id: 'RT-MULTI' }, context: { id: 'RT-THUMB' }, circle: { id: 'RT-SMALL' } };
+  const { s6 } = await runR1S6(true, { chars: [{ name: 'ดวงเดือน', role: 'hero' }], pool: POOL, answer: ANSWER });
+  const hero = ledgerOf(s6).roles.find((r) => r.role === 'hero');
+  // นับผ่าน reasonCounts (จักรวาลเต็มก่อน cap) — พูลนี้ออกแบบให้แต่ละ reject มีต้นทางเดียว → count>=1 = แมปถูกตัว
+  const rc = hero.reasonCounts;
+  assert.ok((rc.REJECT_FACE_NONE || 0) >= 1, 'faceCount 0 → FACE_NONE (แยกจาก multiface)');
+  assert.ok((rc.REJECT_MULTIFACE || 0) >= 1, 'faceCount 3 → MULTIFACE');
+  assert.ok((rc.REJECT_THUMBNAIL || 0) >= 1, 'thumbnail → THUMBNAIL');
+  assert.ok((rc.REJECT_UNDERSIZE || 0) >= 1, 'rss 400 → UNDERSIZE');
+  assert.ok((rc.REJECT_SHARPNESS || 0) >= 1, 'sharpness 5 (gate on) → SHARPNESS');
+  // ยืนยันแถวที่รอด (top-rank) ถ้ายังอยู่ก็ต้องแมปถูก — RT-HERO selected
+  const heroRow = hero.rows.find((x) => x.id === 'RT-HERO');
+  assert.equal(heroRow.reason, 'SELECTED');
+});
+
+await test('R1: heroGrade truth — true(ครบ)/false(multiface)/null(sharp unknown gate-on)/null(dims unknown)', async () => {
+  const POOL = [
+    IMG('HG-TRUE', { person: 'ดวงเดือน', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.2, h: 0.5 } }, { realWidth: 1000, realHeight: 1300 }),
+    IMG('HG-FALSE', { person: 'ดวงเดือน', faceCount: 3, clean: true, sharpness: 40, faceBox: { w: 0.2, h: 0.5 } }, { realWidth: 1000, realHeight: 1300 }),
+    IMG('HG-NULLSHARP', { person: 'ดวงเดือน', faceCount: 1, clean: true, faceBox: { w: 0.2, h: 0.5 } }, { realWidth: 1000, realHeight: 1300 }),
+    IMG('HG-NULLDIM', { person: 'ดวงเดือน', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.2, h: 0.5 } }, { realWidth: 0, realHeight: 0 }),
+  ];
+  const ANSWER = { hero: { id: 'HG-TRUE' }, reaction: { id: 'HG-FALSE' }, action: { id: 'HG-NULLSHARP' }, context: { id: 'HG-NULLDIM' }, circle: { id: 'HG-TRUE' } };
+  const { s6 } = await runR1S6(true, { chars: [{ name: 'ดวงเดือน', role: 'hero' }], pool: POOL, answer: ANSWER });
+  const L = ledgerOf(s6);
+  // heroGrade เป็น role-independent → อ่านจาก occurrence ใดก็ได้ (แต่ละใบถูกเลือก = ตรึงในสล็อตของมัน กัน byte-trim)
+  assert.equal(findRow(L, 'HG-TRUE').heroGrade, true, 'หลักฐานครบ → true');
+  assert.equal(findRow(L, 'HG-FALSE').heroGrade, false, 'multiface → false');
+  assert.equal(findRow(L, 'HG-NULLSHARP').heroGrade, null, 'sharpness ไม่รู้ + gate on → null');
+  assert.equal(findRow(L, 'HG-NULLDIM').heroGrade, null, 'dims ไม่รู้ → null');
+});
+
+await test('R1: metadataState independent — selected+insufficient คง selected · non-selected unknown → reason METADATA_INSUFFICIENT', async () => {
+  const POOL = [
+    IMG('MI-HERO', { person: 'ดวงเดือน', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1000, realHeight: 1300 }),
+    IMG('MI-SEL', { person: 'ดวงเดือน', faceCount: 1, clean: true }, { realWidth: 0, realHeight: 0 }), // no dims → insufficient · selected in action
+    IMG('MI-UNK', { person: null, faceCount: 0, clean: true }, { realWidth: 0, realHeight: 0 }),
+  ];
+  const ANSWER = { hero: { id: 'MI-HERO' }, reaction: { id: 'MI-HERO' }, action: { id: 'MI-SEL' }, context: { id: 'MI-UNK' }, circle: { id: 'MI-HERO' } };
+  const { s6 } = await runR1S6(true, { chars: R1_CHARS, pool: POOL, answer: ANSWER });
+  const L = ledgerOf(s6);
+  const selRow = findRow(L, 'MI-SEL', (x) => x.selected);
+  assert.ok(selRow, 'MI-SEL selected row');
+  assert.equal(selRow.reason, 'SELECTED', 'reason ยัง SELECTED');
+  assert.equal(selRow.metadataState, 'METADATA_INSUFFICIENT', 'metadataState เห็น insufficiency อิสระจาก reason');
+  assert.ok(Array.isArray(selRow.unknownFields) && selRow.unknownFields.includes('dims'), 'unknownFields ระบุ dims');
+  // MI-UNK ในบทบาทไร้ target (action/context) ที่ไม่ถูกเลือก → reason METADATA_INSUFFICIENT
+  const unkInsufficient = allRows(L).some((x) => x.id === 'MI-UNK' && !x.selected && x.reason === 'METADATA_INSUFFICIENT');
+  assert.ok(unkInsufficient, 'non-selected unknown (ไร้ target) → reason METADATA_INSUFFICIENT');
+});
+
+await test('R1: role-permuted hero — สลับลำดับ compass (role tag เดิม) → hero target ไม่พลิก', async () => {
+  const a = await runR1S6(true, { chars: [{ name: 'ดวงเดือน', role: 'hero' }, { name: 'สรพงศ์ ชาตรี', role: 'related' }], pool: AC_POOL, answer: AC_ANSWER });
+  const b = await runR1S6(true, { chars: [{ name: 'สรพงศ์ ชาตรี', role: 'related' }, { name: 'ดวงเดือน', role: 'hero' }], pool: AC_POOL, answer: AC_ANSWER });
+  const ha = ledgerOf(a.s6).roles.find((r) => r.role === 'hero');
+  const hb = ledgerOf(b.s6).roles.find((r) => r.role === 'hero');
+  assert.equal(ha.targetPerson, 'ดวงเดือน');
+  assert.equal(hb.targetPerson, 'ดวงเดือน', 'hero target role-aware (ไม่ใช่ chars[0])');
+});
+
+await test('R1: alias-aware nonhero — alias ของ hero ถูกตัด · >1 distinct nonhero → target null', async () => {
+  const a = await runR1S6(true, { chars: [{ name: 'ดวงเดือน จันทร์', role: 'hero' }, { name: 'ดวงเดือน', role: 'related' }, { name: 'สรพงศ์ ชาตรี', role: 'related' }], pool: AC_POOL, answer: AC_ANSWER });
+  const reactA = ledgerOf(a.s6).roles.find((r) => r.role === 'reaction');
+  assert.equal(reactA.targetPerson, 'สรพงศ์ ชาตรี', 'alias ของ hero (ดวงเดือน) ถูกตัด → เหลือ nonhero เดียว');
+  const b = await runR1S6(true, { chars: [{ name: 'ดวงเดือน', role: 'hero' }, { name: 'สรพงศ์ ชาตรี', role: 'related' }, { name: 'มานพ ทองดี', role: 'related' }], pool: AC_POOL, answer: AC_ANSWER });
+  const reactB = ledgerOf(b.s6).roles.find((r) => r.role === 'reaction');
+  assert.equal(reactB.targetPerson, null, '>1 distinct nonhero → target null');
+  assert.equal(reactB.targetSource, null, 'source null เมื่อ ambiguous');
+});
+
+await test('R1: every persons label — person mismatch แต่ persons[] มี target → matchKind exact', async () => {
+  const POOL = [
+    IMG('PL-HERO', { person: 'ดวงเดือน', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1200, realHeight: 1500 }),
+    IMG('PL-MULTI', { person: 'คนอื่น', persons: ['คนอื่น', 'สรพงศ์ ชาตรี'], faceCount: 2, clean: true, faceBox: { w: 0.3, h: 0.5 } }, { realWidth: 1200, realHeight: 900 }),
+  ];
+  const ANSWER = { hero: { id: 'PL-HERO' }, reaction: { id: 'PL-MULTI' }, action: { id: 'PL-HERO' }, context: { id: 'PL-MULTI' }, circle: { id: 'PL-MULTI' } };
+  const { s6 } = await runR1S6(true, { chars: R1_CHARS, pool: POOL, answer: ANSWER });
+  const react = ledgerOf(s6).roles.find((r) => r.role === 'reaction');
+  const row = react.rows.find((x) => x.id === 'PL-MULTI');
+  assert.ok(row, 'PL-MULTI ในตาราง reaction');
+  assert.equal(row.matchKind, 'exact', 'ประเมิน persons[1]=สรพงศ์ → exact (ไม่ใช่แค่ person=คนอื่น=miss)');
+  assert.ok(Array.isArray(row.persons) && row.persons.includes('สรพงศ์ ชาตรี'), 'persons[] ถูกบันทึก');
+});
+
+await test('R1: matchKind — วงเล็บ "สรพงศ์ (พี่เอก)" vs "สรพงศ์ ชาตรี" = token_fallback (ไม่ใช่ exact)', async () => {
+  const PAREN_CHARS = [{ name: 'ดวงเดือน', role: 'hero' }, { name: 'สรพงศ์ (พี่เอก)', role: 'related' }];
+  const { s6 } = await runR1S6(true, { chars: PAREN_CHARS, pool: AC_POOL, answer: AC_ANSWER });
+  const react = ledgerOf(s6).roles.find((r) => r.role === 'reaction');
+  assert.equal(react.targetPerson, 'สรพงศ์ พี่เอก', 'targetPerson normalize วงเล็บ');
+  const row = react.rows.find((x) => x.id === 'AC-125');
+  assert.ok(row, 'AC-125 อยู่ในตาราง reaction (ไม่ pre-filter)');
+  assert.equal(row.matchKind, 'token_fallback', 'เปิดโปง token fallback — ไม่ฟันธง exact');
+});
+
+await test('R1: matchKind — full name == target → exact · bare shared first-name → ambiguous', async () => {
+  const COLLIDE_CHARS = [{ name: 'สมชาย ใจดี', role: 'hero' }, { name: 'สมชาย ใจร้าย', role: 'related' }];
+  const COLLIDE_POOL = [
+    LIMG('C1', 'สมชาย ใจดี', 0.2, 'face-emotional', [900, 1200], { sharpness: 40 }),            // full == hero target → exact
+    IMG('CBARE', { person: 'สมชาย', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1000, realHeight: 1300 }), // bare → ambiguous
+    LIMG('C3', null, 0, 'context', [1200, 800]),
+    LIMG('C4', null, 0, 'document', [1000, 800]),
+  ];
+  const COLLIDE_ANSWER = { hero: { id: 'C1' }, reaction: { id: 'CBARE' }, action: { id: 'C3' }, context: { id: 'C4' }, circle: { id: 'CBARE' } };
+  const { s6 } = await runR1S6(true, { chars: COLLIDE_CHARS, pool: COLLIDE_POOL, answer: COLLIDE_ANSWER });
+  const hero = ledgerOf(s6).roles.find((r) => r.role === 'hero');
+  const c1 = hero.rows.find((x) => x.id === 'C1');
+  const cbare = hero.rows.find((x) => x.id === 'CBARE');
+  assert.ok(c1 && cbare, 'C1/CBARE อยู่ในตาราง hero');
+  assert.equal(c1.matchKind, 'exact', 'full name == target → exact (ก่อน token ambiguity)');
+  assert.equal(cbare.matchKind, 'ambiguous', 'bare สมชาย ชน 2 identity → ambiguous');
+});
+
+await test('R1: accessor-safe emit — enumerable THROWING candidateLedger getter (ledger on) → getter 0, S6 ok, safe base', async () => {
+  let gets = 0;
+  const job = mkJob({ dna: DNA_ALPO, orders: [], chars: R1_CHARS });
+  job.dossier.images.caseId = 'SEM-TEST'; // ordinary data field ต้องคงอยู่ใน safe base
+  Object.defineProperty(job.dossier.images, 'candidateLedger', { configurable: true, enumerable: true, get() { gets++; throw new Error('GETTER MUST NOT RUN'); } });
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const s6 = await withLedger(true, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+  assert.equal(s6.status, 'done', 'S6 succeeds (getter ไม่ถูกเรียก)');
+  assert.equal(gets, 0, 'enumerable throwing getter ไม่ถูก invoke เลย (safe base ไม่ spread im)');
+  const L = ledgerOf(s6);
+  assert.ok(L && L.v === 1 && L.roles.some((r) => r.rows.length > 0), 'ledger ถูก emit จริง (คิดใหม่)');
+  assert.equal(s6.dossierPatch.images.caseId, 'SEM-TEST', 'ordinary data field คงอยู่ใน safe base');
+});
+
+await test('R1: _validSnap deep — hostile snapshot (toJSON/accessor/cycle) → S6 fail-safe · valid plain v1 preserved verbatim', async () => {
+  const runWith = async (carrier) => {
+    const job = mkJob({ dna: DNA_ALPO, orders: [], chars: R1_CHARS });
+    job.dossier.images.candidateLedger = carrier;
+    const captures = { brainArgs: [], fetches: [], payload: null };
+    return { s6: await withLedger(true, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) })), job };
+  };
+  assert.equal((await runWith({ v: 1, roles: [], toJSON() { return { v: 1, roles: [] }; } })).s6.status, 'done', 'toJSON snapshot → fail-safe');
+  const acc = { v: 1 }; Object.defineProperty(acc, 'roles', { enumerable: true, get() { return []; } });
+  assert.equal((await runWith(acc)).s6.status, 'done', 'accessor roles → fail-safe');
+  const cyc = { v: 1, roles: [] }; cyc.self = cyc;
+  assert.equal((await runWith(cyc)).s6.status, 'done', 'cyclic → fail-safe');
+  assert.equal((await runWith({ v: 1, roles: Array.from({ length: 20 }, () => ({ role: 'x', rows: [] })) })).s6.status, 'done', 'unbounded roles → fail-safe');
+  assert.equal((await runWith({ v: 1, roles: [{ role: 'hero', rows: [{ id: 'https://cdn.evil/x.jpg' }] }] })).s6.status, 'done', 'URL-bearing v1 → fail-safe');
+  // valid plain v1 → blessed → preserved verbatim (deepStrictEqual)
+  const good = { v: 1, poolSize: 0, capped: false, droppedRows: 0, roles: [{ role: 'hero', slotId: 'hero', targetPerson: null, targetSource: null, selectedId: null, totalRows: 0, keptRows: 0, droppedRows: 0, reasonCounts: {}, rows: [] }] };
+  const okRun = await runWith(good);
+  assert.deepStrictEqual(ledgerOf(okRun.s6), good, 'valid plain v1 → preserved verbatim');
+});
+
+await test('R1: URL detector — // data: blob: file: (แม้ id สั้น) → hash token, ไม่ persist ดิบ', async () => {
+  const ids = ['//cdn.host/a.jpg', 'data:image/png;base64,QQ==', 'blob:xyz', 'file:///c/x.jpg', '//x'];
+  const POOL = [
+    IMG('URL-HERO', { person: 'ดวงเดือน', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1000, realHeight: 1300 }),
+    ...ids.map((id) => IMG(id, { person: 'ดวงเดือน', faceCount: 1, clean: true, faceBox: { w: 0.1, h: 0.2 } }, { realWidth: 900, realHeight: 1200 })),
+  ];
+  const ANSWER = { hero: { id: 'URL-HERO' }, reaction: { id: ids[0] }, action: { id: ids[1] }, context: { id: ids[2] }, circle: { id: ids[3] } };
+  const { s6 } = await runR1S6(true, { chars: R1_CHARS, pool: POOL, answer: ANSWER });
+  const j = JSON.stringify(ledgerOf(s6));
+  for (const id of ids) assert.ok(!j.includes(id), `ไม่ persist id ดิบ: ${id}`);
+  assert.ok(allRows(ledgerOf(s6)).some((x) => String(x.id).startsWith('id#')), 'มี id#hash token');
+});
+
+await test('R1: sharpness gate-ON — unknown sharpness (hero) → unknownFields sharpness + metadata insufficient + reason≠eligible + heroGrade null', async () => {
+  const POOL = [
+    IMG('SG1-HERO', { person: 'ดวงเดือน', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1000, realHeight: 1300 }),
+    IMG('SG1-NOSHARP', { person: 'ดวงเดือน', faceCount: 1, clean: true, faceBox: { w: 0.2, h: 0.5 } }, { realWidth: 1000, realHeight: 1300 }),
+  ];
+  const ANSWER = { hero: { id: 'SG1-HERO' }, reaction: { id: 'SG1-HERO' }, action: { id: 'SG1-NOSHARP' }, context: { id: 'SG1-NOSHARP' }, circle: { id: 'SG1-HERO' } };
+  const { s6 } = await runR1S6(true, { chars: [{ name: 'ดวงเดือน', role: 'hero' }], pool: POOL, answer: ANSWER });
+  const row = ledgerOf(s6).roles.find((r) => r.role === 'hero').rows.find((x) => x.id === 'SG1-NOSHARP');
+  assert.ok(row, 'SG1-NOSHARP ในตาราง hero (non-selected)');
+  assert.ok((row.unknownFields || []).includes('sharpness'), 'gate on + sharpness unknown → unknownFields sharpness');
+  assert.equal(row.metadataState, 'METADATA_INSUFFICIENT');
+  assert.notEqual(row.reason, 'ELIGIBLE', 'reason ต้องไม่ใช่ ELIGIBLE');
+  assert.equal(row.heroGrade, null, 'gate on + sharpness unknown → heroGrade null');
+});
+
+await test('R1: sharpness gate-OFF — unknown sharpness ไม่เข้า unknownFields · heroGrade true ได้', async () => {
+  const POOL = [
+    IMG('SG2-HERO', { person: 'ดวงเดือน', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1000, realHeight: 1300 }),
+    IMG('SG2-NOSHARP', { person: 'ดวงเดือน', faceCount: 1, clean: true, faceBox: { w: 0.2, h: 0.5 } }, { realWidth: 1000, realHeight: 1300 }),
+  ];
+  const ANSWER = { hero: { id: 'SG2-HERO' }, reaction: { id: 'SG2-HERO' }, action: { id: 'SG2-NOSHARP' }, context: { id: 'SG2-NOSHARP' }, circle: { id: 'SG2-HERO' } };
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const job = mkJob({ dna: DNA_ALPO, orders: [], chars: [{ name: 'ดวงเดือน', role: 'hero' }] });
+  const s6 = await withLedger(true, () => withSharpGate(false, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: POOL, brainAnswer: ANSWER, captures }) })));
+  const row = ledgerOf(s6).roles.find((r) => r.role === 'hero').rows.find((x) => x.id === 'SG2-NOSHARP');
+  assert.ok(row, 'SG2-NOSHARP ในตาราง hero');
+  assert.ok(!(row.unknownFields || []).includes('sharpness'), 'gate off → ไม่ต้องรู้ sharpness');
+  assert.equal(row.heroGrade, true, 'gate off + หลักฐานอื่นครบ → heroGrade true');
+});
+
+await test('R1: identity clustering — สรพงศ์ + สรพงศ์ ชาตรี = 1 identity (react target ไม่กำกวม)', async () => {
+  const CH = [{ name: 'ดวงเดือน', role: 'hero' }, { name: 'สรพงศ์', role: 'related' }, { name: 'สรพงศ์ ชาตรี', role: 'related' }];
+  const { s6 } = await runR1S6(true, { chars: CH, pool: AC_POOL, answer: AC_ANSWER });
+  const react = ledgerOf(s6).roles.find((r) => r.role === 'reaction');
+  assert.equal(react.targetPerson, 'สรพงศ์ ชาตรี', 'alias สั้น↔ยาว unique collapse → identity เดียว (canonical ยาว)');
+  assert.equal(react.targetSource, 'compass_sole_nonhero');
+});
+
+await test('R1: identity clustering — สมชาย ใจดี/ใจร้าย = 2 คน · label "สมชาย" ambiguous (ไม่ silently exact/alias)', async () => {
+  const CH = [{ name: 'สมชาย ใจดี', role: 'hero' }, { name: 'สมชาย ใจร้าย', role: 'related' }];
+  const POOL = [
+    IMG('SM-1', { person: 'สมชาย ใจดี', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1000, realHeight: 1300 }),
+    IMG('SM-BARE', { person: 'สมชาย', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1000, realHeight: 1300 }),
+    LIMG('SM-CTX', null, 0, 'context', [1200, 800]),
+  ];
+  const ANSWER = { hero: { id: 'SM-1' }, reaction: { id: 'SM-BARE' }, action: { id: 'SM-CTX' }, context: { id: 'SM-CTX' }, circle: { id: 'SM-BARE' } };
+  const { s6 } = await runR1S6(true, { chars: CH, pool: POOL, answer: ANSWER });
+  const bare = ledgerOf(s6).roles.find((r) => r.role === 'hero').rows.find((x) => x.id === 'SM-BARE');
+  assert.ok(bare, 'SM-BARE ในตาราง hero');
+  assert.equal(bare.matchKind, 'ambiguous', 'label สมชาย ชน 2 identity → ambiguous (ไม่ exact/alias เงียบ)');
+});
+
+await test('R1: matchedLabel — winning label ที่ persons[4+] ยัง visible แม้ persons ถูก cap', async () => {
+  const POOL = [
+    IMG('ML-HERO', { person: 'ดวงเดือน', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1000, realHeight: 1300 }),
+    IMG('ML-MANY', { person: 'คนอื่น', persons: ['a', 'b', 'c', 'd', 'e', 'สรพงศ์ ชาตรี'], faceCount: 2, clean: true, faceBox: { w: 0.3, h: 0.5 } }, { realWidth: 1200, realHeight: 900 }),
+  ];
+  const ANSWER = { hero: { id: 'ML-HERO' }, reaction: { id: 'ML-MANY' }, action: { id: 'ML-HERO' }, context: { id: 'ML-MANY' }, circle: { id: 'ML-MANY' } };
+  const { s6 } = await runR1S6(true, { chars: R1_CHARS, pool: POOL, answer: ANSWER });
+  const row = ledgerOf(s6).roles.find((r) => r.role === 'reaction').rows.find((x) => x.id === 'ML-MANY');
+  assert.ok(row, 'ML-MANY ในตาราง reaction');
+  assert.equal(row.matchKind, 'exact', 'persons[5]=สรพงศ์ → exact');
+  assert.equal(row.matchedLabel, 'สรพงศ์ ชาตรี', 'matchedLabel เก็บป้ายที่ชนะ (อยู่นอก persons cap)');
+  assert.ok(!(row.persons || []).includes('สรพงศ์ ชาตรี'), 'persons ถูก cap ที่ 4 → ไม่มี winner');
+});
+
+await test('R1: P0 — im Proxy ownKeys/getOwnPropertyDescriptor trap throw (ledger on) → S6 done, omit, ไม่ fall-back spread', async () => {
+  const job = mkJob({ dna: DNA_ALPO, orders: [], chars: R1_CHARS });
+  const targetObj = { caseId: 'SEM-TEST' };
+  job.dossier.images = new Proxy(targetObj, { getOwnPropertyDescriptor() { throw new Error('DESC TRAP'); }, ownKeys() { throw new Error('OWNKEYS TRAP'); } });
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const s6 = await withLedger(true, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+  assert.equal(s6.status, 'done', 'S6 finishes แม้ proxy trap throw (omit ledger, ไม่ fall-back spread ที่จะ throw ซ้ำ)');
+  assert.equal(s6.dossierPatch.images, undefined, 'ON-path ล้ม → ไม่ emit images (ไม่ spread hostile im)');
+});
+
+await test('R1: P0 — stateful Proxy carrier (get/toJSON trap throw) → clone จาก descriptor, get 0, persisted = plain clone', async () => {
+  const good = fullCarrier({ roles: [fullRole({ targetPerson: 'ดวงเดือน', targetSource: 'compass_hero', selectedId: 'X', reasonCounts: { SELECTED: 1 }, rows: [fullRow({ id: 'X', person: 'ดวงเดือน', matchKind: 'exact', reason: 'SELECTED', selected: true })] })] });
+  let gets = 0;
+  const proxy = new Proxy(good, { get() { gets++; throw new Error('GET/toJSON TRAP'); }, getOwnPropertyDescriptor(t, k) { return Object.getOwnPropertyDescriptor(t, k); }, ownKeys(t) { return Reflect.ownKeys(t); } });
+  const job = mkJob({ dna: DNA_ALPO, orders: [], chars: R1_CHARS });
+  job.dossier.images.candidateLedger = proxy;
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const s6 = await withLedger(true, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+  assert.equal(s6.status, 'done');
+  assert.equal(gets, 0, 'get/toJSON trap ไม่ถูกเรียกเลย (clone อ่านจาก descriptor.value)');
+  const L = ledgerOf(s6);
+  assert.notEqual(L, proxy, 'persisted = plain clone (ไม่ใช่ proxy เดิม)');
+  assert.deepStrictEqual(L, good, 'clone = snapshot เดิมทุก field');
+});
+
+await test('R1: P0 — Proxy carrier + INVALID v1 + live get/toJSON throw → INVALID_SAFE safe clone (get 0, ≠proxy, deep preserved, JSON safe)', async () => {
+  const bad = { v: 2, roles: [], note: 'x' }; // safe plain, schema-invalid
+  let gets = 0;
+  const proxy = new Proxy(bad, { get() { gets++; throw new Error('GET/toJSON TRAP'); }, getOwnPropertyDescriptor(t, k) { return Object.getOwnPropertyDescriptor(t, k); }, ownKeys(t) { return Reflect.ownKeys(t); } });
+  const job = mkJob({ dna: DNA_ALPO, orders: [], chars: R1_CHARS });
+  job.dossier.images.candidateLedger = proxy;
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const s6 = await withLedger(true, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+  assert.equal(s6.status, 'done');
+  assert.equal(gets, 0, 'get/toJSON ไม่ถูกเรียก (clone อ่าน descriptor.value)');
+  const L = ledgerOf(s6);
+  assert.notEqual(L, proxy, 'INVALID_SAFE → safe clone (ไม่ใช่ proxy เดิม)');
+  assert.deepStrictEqual(L, { v: 2, roles: [], note: 'x' }, 'deep/JSON value preserved');
+  assert.doesNotThrow(() => JSON.stringify(s6.dossierPatch), 'later JSON.stringify safe');
+});
+
+await test('R1: P0 — rejected carrier Proxy (descriptor trap throw) → omit · original proxy absent · JSON.stringify safe', async () => {
+  const proxy = new Proxy({ v: 1, roles: [] }, { getOwnPropertyDescriptor() { throw new Error('TRAP'); }, ownKeys() { throw new Error('TRAP'); } });
+  const job = mkJob({ dna: DNA_ALPO, orders: [], chars: R1_CHARS });
+  job.dossier.images.candidateLedger = proxy;
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const s6 = await withLedger(true, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+  assert.equal(s6.status, 'done', 'carrier proxy trap → inspection-failed → S6 fail-safe');
+  assert.equal(s6.dossierPatch.images, undefined, 'omit — original proxy absent จาก dossierPatch.images');
+  assert.doesNotThrow(() => JSON.stringify(s6.dossierPatch), 'later persistence/JSON.stringify safe (ไม่มี proxy)');
+});
+
+await test('R1: total catch — thrown object with poisoned message getter → S6 still done (ไม่อ่าน e.message)', async () => {
+  const poison = { get message() { throw new Error('POISON MESSAGE'); } };
+  const job = mkJob({ dna: DNA_ALPO, orders: [], chars: R1_CHARS });
+  job.dossier.images = new Proxy({ caseId: 'SEM-TEST' }, { getOwnPropertyDescriptor() { throw poison; }, ownKeys() { throw poison; } });
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const s6 = await withLedger(true, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+  assert.equal(s6.status, 'done', 'catch ไม่อ่าน e.message → poisoned getter ไม่ throw ซ้ำ → S6 done');
+  assert.equal(s6.dossierPatch.images, undefined, 'omit (ON-path inspect fail)');
+});
+
+await test('R1: _clone — otherwise-valid v1 + own JSON __proto__ key → UNSAFE/omit (guard test) · JSON-safe', async () => {
+  // body เป็น v1 valid; invalidity มาจาก own __proto__ key เท่านั้น (ไม่ใช่ v!=1) → test fails ถ้าถอด proto-guard/defineProperty-safe clone
+  const carrier = JSON.parse('{"__proto__":{"x":1},' + JSON.stringify(fullCarrier()).slice(1));
+  assert.equal(carrier.v, 1, 'carrier body = v1 valid');
+  const job = mkJob({ dna: DNA_ALPO, orders: [], chars: R1_CHARS });
+  job.dossier.images.candidateLedger = carrier;
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const s6 = await withLedger(true, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+  assert.equal(s6.status, 'done');
+  assert.equal(s6.dossierPatch.images, undefined, 'own __proto__ key → UNSAFE → omit');
+  assert.doesNotThrow(() => JSON.stringify(s6.dossierPatch));
+});
+
+// SCHEMA-PRESERVATION / STATIC-AUDIT coverage — VALID และ INVALID_SAFE มี public behavior เดียวกัน (safe-clone + preserve);
+// เทสยืนยัน SAFE→clone(deep=,ref≠) และ UNSAFE→omit เท่านั้น · การแยกแยะ VALID vs INVALID_SAFE ตรวจโดย static audit ของ _validV1 (ไม่ export/ไม่พิสูจน์ internal ผ่าน public fixture)
+await test('R1: _validV1 — schema-preservation coverage · SAFE=clone(deep=,ref≠) · UNSAFE=omit', async () => {
+  const run = async (carrier) => {
+    const job = mkJob({ dna: DNA_ALPO, orders: [], chars: R1_CHARS });
+    job.dossier.images.candidateLedger = carrier;
+    const captures = { brainArgs: [], fetches: [], payload: null };
+    const s6 = await withLedger(true, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+    return { L: ledgerOf(s6), images: s6.dossierPatch.images, patch: s6.dossierPatch };
+  };
+  const bad = async (carrier, name) => { const r = await run(carrier); assert.deepStrictEqual(r.L, carrier, `${name}: deep เท่าเดิม`); assert.notEqual(r.L, carrier, `${name}: safe clone (ref ใหม่)`); assert.doesNotThrow(() => JSON.stringify(r.patch)); };
+  const omit = async (carrier, name) => { const r = await run(carrier); assert.equal(r.images, undefined, `${name}: UNSAFE omit (causal, observable)`); assert.doesNotThrow(() => JSON.stringify(r.patch)); };
+  // valid → safe clone: reference ต่างจาก carrier เดิมจริง (ไม่เทียบ fullCarrier() ใบใหม่)
+  const goodC = fullCarrier(); const rg = await run(goodC);
+  assert.notEqual(rg.L, goodC, 'valid → safe clone (reference ≠ carrier เดิม)'); assert.deepStrictEqual(rg.L, goodC, 'valid → deep เท่าเดิม');
+  // ── schema-preservation fixtures (SAFE→clone) — static audit ตรวจว่า _validV1 reject แต่ละ schema violation ──
+  await bad(fullCarrier({ roles: [] }), 'empty roles');
+  await bad({ v: 1, poolSize: 81, capped: true, droppedRows: 81, roles: [{ role: 'hero', slotId: 'hero', targetPerson: null, targetSource: null, selectedId: null, totalRows: 81, keptRows: 0, droppedRows: 81, reasonCounts: { ELIGIBLE: 81 }, rows: [] }] }, 'poolSize>80 (only)');
+  await bad(fullCarrier({ capped: true }), 'capped mismatch');
+  await bad(fullCarrier({ droppedRows: 1, capped: true }), 'global dropped mismatch (roles/capped consistent)');
+  await bad(fullCarrier({ roles: [fullRole({ role: 'nope', targetSource: 'contract' })] }), 'bad role enum');
+  await bad(fullCarrier({ roles: [fullRole({ targetSource: 'weird' })] }), 'bad targetSource enum');
+  await bad(fullCarrier({ roles: [fullRole({ selectedId: 'ZZZ' })] }), 'selectedId no selected row');
+  await bad(fullCarrier({ roles: [fullRole({ reasonCounts: { ELIGIBLE: 1, NOPE: 0 } })] }), 'reasonCounts bad key');
+  await bad(fullCarrier({ poolSize: 2, roles: [fullRole({ totalRows: 2, keptRows: 2, reasonCounts: { ELIGIBLE: 1, REJECT_DIRTY: 1 }, rows: [fullRow({ id: 'A' }), fullRow({ id: 'B' })] })] }), 'reasonCounts not dominating (sums/counters balance)');
+  await bad(fullCarrier({ extra: 1 }), 'unknown top key');
+  await bad(fullCarrier({ roles: [fullRole({ extra: 1 })] }), 'unknown role key');
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ extra: 1 })] })] }), 'unknown row key');
+  // ── target/source combos (schema-preservation) ──
+  await bad(fullCarrier({ roles: [fullRole({ targetPerson: null, targetSource: 'compass_hero', rows: [fullRow({ matchKind: null, person: null })] })] }), 'null target + compass source');
+  await bad(fullCarrier({ roles: [fullRole({ role: 'reaction', targetSource: 'compass_hero' })] }), 'compass_hero + reaction');
+  await bad(fullCarrier({ roles: [fullRole({ targetPerson: null, targetSource: 'order', rows: [fullRow({ matchKind: null, person: null })] })] }), 'order + null target');
+  await bad(fullCarrier({ roles: [fullRole({ targetPerson: null, targetSource: 'contract', rows: [fullRow({ matchKind: 'exact' })] })] }), 'targetPerson null + matchKind');
+  // ── selected/reason (schema-preservation) ──
+  await bad(fullCarrier({ roles: [fullRole({ selectedId: 'A', reasonCounts: { SELECTED: 1 }, rows: [fullRow({ id: 'A', reason: 'SELECTED', selected: false })] })] }), 'nonselected+SELECTED');
+  await bad(fullCarrier({ roles: [fullRole({ selectedId: 'A', reasonCounts: { ELIGIBLE: 1 }, rows: [fullRow({ id: 'A', reason: 'ELIGIBLE', selected: true })] })] }), 'selected+ELIGIBLE');
+  await bad(fullCarrier({ roles: [fullRole({ reasonCounts: { REJECT_PERSON_MISS: 1 }, rows: [fullRow({ reason: 'REJECT_PERSON_MISS', matchKind: 'exact' })] })] }), 'REJECT_PERSON_MISS ≠ miss');
+  await bad(fullCarrier({ roles: [fullRole({ reasonCounts: { REJECT_PERSON_AMBIGUOUS: 1 }, rows: [fullRow({ reason: 'REJECT_PERSON_AMBIGUOUS', matchKind: 'exact' })] })] }), 'REJECT_PERSON_AMBIGUOUS ≠ ambiguous');
+  await bad(fullCarrier({ roles: [fullRole({ reasonCounts: { REJECT_DIRTY: 1 }, rows: [fullRow({ reason: 'REJECT_DIRTY', clean: true })] })] }), 'REJECT_DIRTY needs clean false');
+  await bad(fullCarrier({ roles: [fullRole({ role: 'context', targetSource: 'contract', reasonCounts: { REJECT_THUMBNAIL: 1 }, rows: [fullRow({ reason: 'REJECT_THUMBNAIL' })] })] }), 'REJECT_THUMBNAIL hero-only');
+  // ── ELIGIBLE / heroGrade prerequisites (preservation) ──
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ clean: false })] })] }), 'clean false + ELIGIBLE');
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ matchKind: 'miss' })] })] }), 'miss + ELIGIBLE');
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ matchKind: 'ambiguous' })] })] }), 'ambiguous + ELIGIBLE');
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ heroGrade: false })] })] }), 'hero heroGrade false + ELIGIBLE');
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ heroGrade: null })] })] }), 'hero heroGrade null + ELIGIBLE');
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ dims: '500x500' })] })] }), 'hero dims<700 + heroGrade true + ELIGIBLE');
+  // ── metadataState/unknownFields truth (schema-preservation) ──
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ clean: null })] })] }), 'OK missing clean evidence');
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ dims: null })] })] }), 'OK missing dims evidence');
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ faceCount: null })] })] }), 'OK missing faceCount (portrait)');
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ faceFrac: null })] })] }), 'OK missing faceFrac (portrait)');
+  await bad(fullCarrier({ roles: [fullRole({ reasonCounts: { METADATA_INSUFFICIENT: 1 }, rows: [fullRow({ reason: 'METADATA_INSUFFICIENT', metadataState: 'METADATA_INSUFFICIENT', unknownFields: ['clean'] })] })] }), 'insufficient label contradicts present clean');
+  await bad(fullCarrier({ roles: [fullRole({ role: 'context', targetSource: 'contract', reasonCounts: { METADATA_INSUFFICIENT: 1 }, rows: [fullRow({ unknownFields: ['faceCount'], metadataState: 'METADATA_INSUFFICIENT', reason: 'METADATA_INSUFFICIENT' })] })] }), 'non-portrait face unknown');
+  await bad(fullCarrier({ roles: [fullRole({ role: 'context', targetSource: 'contract', reasonCounts: { METADATA_INSUFFICIENT: 1 }, rows: [fullRow({ unknownFields: ['sharpness'], metadataState: 'METADATA_INSUFFICIENT', reason: 'METADATA_INSUFFICIENT' })] })] }), 'sharpness unknown non-hero');
+  await bad(fullCarrier({ roles: [fullRole({ reasonCounts: { METADATA_INSUFFICIENT: 1 }, rows: [fullRow({ matchKind: null, person: 'ดวงเดือน', unknownFields: ['identity'], metadataState: 'METADATA_INSUFFICIENT', reason: 'METADATA_INSUFFICIENT' })] })] }), 'identity unknown but label present');
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ metadataState: 'OK', unknownFields: ['relevant'] })] })] }), 'OK with unknownFields');
+  await bad(fullCarrier({ roles: [fullRole({ reasonCounts: { METADATA_INSUFFICIENT: 1 }, rows: [fullRow({ reason: 'METADATA_INSUFFICIENT', metadataState: 'METADATA_INSUFFICIENT' })] })] }), 'INSUFFICIENT no unknownFields');
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ reason: 'ELIGIBLE', metadataState: 'METADATA_INSUFFICIENT', unknownFields: ['relevant'] })] })] }), 'ELIGIBLE+INSUFFICIENT state');
+  await bad(fullCarrier({ roles: [fullRole({ reasonCounts: { METADATA_INSUFFICIENT: 1 }, rows: [fullRow({ reason: 'METADATA_INSUFFICIENT', metadataState: 'OK' })] })] }), 'INSUFFICIENT reason+OK state');
+  // ── unknownFields enum/dup (evidence-known row) ──
+  await bad(fullCarrier({ roles: [fullRole({ reasonCounts: { METADATA_INSUFFICIENT: 1 }, rows: [fullRow({ reason: 'METADATA_INSUFFICIENT', metadataState: 'METADATA_INSUFFICIENT', unknownFields: ['NOPE'] })] })] }), 'unknownFields bad enum');
+  await bad(fullCarrier({ roles: [fullRole({ reasonCounts: { METADATA_INSUFFICIENT: 1 }, rows: [fullRow({ reason: 'METADATA_INSUFFICIENT', metadataState: 'METADATA_INSUFFICIENT', unknownFields: ['relevant', 'relevant'] })] })] }), 'unknownFields dup');
+  await bad(fullCarrier({ roles: [fullRole({ reasonCounts: { METADATA_INSUFFICIENT: 1 }, rows: [fullRow({ reason: 'METADATA_INSUFFICIENT', metadataState: 'METADATA_INSUFFICIENT', unknownFields: [] })] })] }), 'unknownFields empty');
+  // ── persons/matchedLabel (schema-preservation) ──
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ persons: {} })] })] }), 'persons wrong container');
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ persons: [5] })] })] }), 'persons wrong entry type');
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ matchedLabel: 5 })] })] }), 'matchedLabel wrong type');
+  await bad(fullCarrier({ roles: [fullRole({ rows: [fullRow({ matchedLabel: 'x'.repeat(49) })] })] }), 'matchedLabel over-cap');
+  // ── table-driven: field presence (delete) + type per fixed field → INVALID_SAFE ──
+  const FIXED = ['id', 'person', 'matchKind', 'metadataState', 'faceFrac', 'dims', 'measuredFrom', 'orient', 'clean', 'largeText', 'watermark', 'newsScene', 'faceCount', 'quality', 'pHash', 'heroGrade', 'reason', 'selected', 'estimatedUpscale'];
+  for (const f of FIXED) { const c = fullCarrier(); delete c.roles[0].rows[0][f]; await bad(c, 'delete ' + f); }
+  const WRONG = { id: 5, person: 5, matchKind: 'nope', metadataState: 'nope', faceFrac: 2, dims: 5, measuredFrom: 5, orient: 'diag', clean: 'yes', largeText: 1, watermark: 1, newsScene: 1, faceCount: 'x', quality: 'x', pHash: 5, heroGrade: 'x', selected: 'x', estimatedUpscale: 0 };
+  for (const [f, val] of Object.entries(WRONG)) { const c = fullCarrier(); c.roles[0].rows[0][f] = val; await bad(c, 'wrongtype ' + f); }
+  // ── UNSAFE → omit (URL/function/accessor/toJSON-fn/cycle/symbol/over-cap) ──
+  await omit(fullCarrier({ roles: [fullRole({ rows: [fullRow({ pHash: 'http://x/y.jpg' })] })] }), 'URL data');
+  await omit(fullCarrier({ roles: [fullRole({ rows: [fullRow({ quality: (() => 1) })] })] }), 'function value');
+  { const c = fullCarrier(); Object.defineProperty(c, 'poolSize', { enumerable: true, configurable: true, get() { return 1; } }); await omit(c, 'accessor field'); }
+  { const c = fullCarrier(); c.toJSON = () => ({}); await omit(c, 'toJSON function'); }
+  { const c = fullCarrier(); c.self = c; await omit(c, 'cycle'); }
+  { const c = fullCarrier(); c[Symbol('s')] = 1; await omit(c, 'symbol key'); }
+  await omit(fullCarrier({ poolSize: 45, roles: [fullRole({ totalRows: 45, keptRows: 45, droppedRows: 0, reasonCounts: { ELIGIBLE: 45 }, rows: Array.from({ length: 45 }, (_, i) => fullRow({ id: 'R' + i })) })] }), 'over byte cap');
+});
+
+await test('R1: fresh-gen — ELIGIBLE hero nonselected row มี heroGrade true + faceCount 1 + dims short>=700 (non-vacuous generated output)', async () => {
+  const POOL = [
+    IMG('HG1', { person: 'ดวงเดือน', relevant: true, faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1000, realHeight: 1300 }),
+    IMG('HG2', { person: 'ดวงเดือน', relevant: true, faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.28, h: 0.55 } }, { realWidth: 900, realHeight: 1200 }),
+  ];
+  const ANSWER = { hero: { id: 'HG1' }, reaction: { id: 'HG1' }, action: { id: 'HG2' }, context: { id: 'HG2' }, circle: { id: 'HG1' } };
+  const { s6 } = await runR1S6(true, { chars: [{ name: 'ดวงเดือน', role: 'hero' }], pool: POOL, answer: ANSWER });
+  const hero = ledgerOf(s6).roles.find((r) => r.role === 'hero');
+  const sel = hero.rows.find((x) => x.id === 'HG1');
+  const nonsel = hero.rows.find((x) => x.id === 'HG2');
+  assert.ok(sel && nonsel, 'HG1/HG2 ทั้งคู่ในตาราง hero');
+  assert.equal(sel.selected, true, 'HG1 selected');
+  assert.equal(nonsel.selected, false, 'HG2 retained nonselected');
+  assert.equal(nonsel.reason, 'ELIGIBLE', 'HG2 → ELIGIBLE (ผ่านทุก gate จริง)');
+  assert.equal(nonsel.heroGrade, true, 'ELIGIBLE hero → heroGrade true (generated)');
+  assert.equal(nonsel.faceCount, 1, 'faceCount 1 (generated)');
+  const m = /^([0-9]+(?:\.[0-9]+)?)x([0-9]+(?:\.[0-9]+)?)$/.exec(nonsel.dims);
+  assert.ok(m, 'dims parseable W×H (generated)');
+  assert.ok(Math.min(Number(m[1]), Number(m[2])) >= 700, 'dims short side >= 700 (generated)');
+});
+
+await test('R1: identity — blank/whitespace labels + target → matchKind null + reason METADATA_INSUFFICIENT (ไม่ใช่ PERSON_MISS)', async () => {
+  const POOL = [
+    IMG('BL-HERO', { person: 'ดวงเดือน', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1000, realHeight: 1300 }),
+    IMG('BL-BLANK', { person: '   ', persons: ['', '  '], faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1000, realHeight: 1300 }),
+  ];
+  const ANSWER = { hero: { id: 'BL-HERO' }, reaction: { id: 'BL-HERO' }, action: { id: 'BL-BLANK' }, context: { id: 'BL-BLANK' }, circle: { id: 'BL-HERO' } };
+  const { s6 } = await runR1S6(true, { chars: [{ name: 'ดวงเดือน', role: 'hero' }], pool: POOL, answer: ANSWER });
+  const row = ledgerOf(s6).roles.find((r) => r.role === 'hero').rows.find((x) => x.id === 'BL-BLANK');
+  assert.ok(row, 'BL-BLANK ในตาราง hero');
+  assert.equal(row.matchKind, null, 'blank labels + target → matchKind null (unknown ไม่ใช่ miss)');
+  assert.equal(row.reason, 'METADATA_INSUFFICIENT', 'reason METADATA_INSUFFICIENT (ไม่ใช่ REJECT_PERSON_MISS)');
+  assert.ok((row.unknownFields || []).includes('identity'), 'unknownFields identity');
+  // ★ production case: generated row เก็บเฉพาะ persons entry ที่ว่างล้วน + ยังมี unknownFields identity
+  //   (validator นับ persons usable เฉพาะ .some(trim) — static audit ยืนยัน predicate นี้ยอมรับ row นี้)
+  assert.ok(Array.isArray(row.persons) && row.persons.length > 0, 'row เก็บ persons จริง (blank entries)');
+  assert.ok(row.persons.every((s) => String(s).trim() === ''), 'persons ทุกตัวว่างล้วน (ไม่มี label ใช้ได้)');
+  assert.ok(row.person == null || String(row.person).trim() === '', 'person ว่าง/ไม่มี label ใช้ได้');
+});
+
+await test('R1: semantic — contract slot = authority เดียว (ทุก role targetSource=contract · wantPerson null → target null ไม่ยืม order)', async () => {
+  const { s6 } = await withLedger(true, () => runStrictFlow({ s7Env: ALL_ON }));
+  const L = ledgerOf(s6);
+  assert.ok(L.roles.length >= 1);
+  assert.ok(L.roles.every((r) => r.targetSource === 'contract'), 'ทุก role มาจาก contract (ไม่ยืม order/compass ในโหมด semantic)');
+  assert.ok(L.roles.some((r) => r.targetPerson === null && r.targetSource === 'contract'), 'slot wantPerson null = null authoritative (contract) ไม่ยืมจากช่องอื่น');
+});
+
+await test('R1: legacy — multiple distinct hero identities → hero target null (compass ambiguous)', async () => {
+  const CH = [{ name: 'สมชาย เอ', role: 'hero' }, { name: 'สมหญิง บี', role: 'hero' }];
+  const POOL = [
+    IMG('MH-1', { person: 'สมชาย เอ', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1000, realHeight: 1300 }),
+    IMG('MH-2', { person: 'สมหญิง บี', faceCount: 1, clean: true, sharpness: 40, faceBox: { w: 0.3, h: 0.6 } }, { realWidth: 1000, realHeight: 1300 }),
+    LIMG('MH-C', null, 0, 'context', [1200, 800]),
+  ];
+  const ANSWER = { hero: { id: 'MH-1' }, reaction: { id: 'MH-2' }, action: { id: 'MH-C' }, context: { id: 'MH-C' }, circle: { id: 'MH-2' } };
+  const { s6 } = await runR1S6(true, { chars: CH, pool: POOL, answer: ANSWER });
+  const hero = ledgerOf(s6).roles.find((r) => r.role === 'hero');
+  assert.equal(hero.targetPerson, null, '>1 distinct hero identity → target null');
+  assert.equal(hero.targetSource, null, 'source null เมื่อ compass hero ambiguous');
+});
+
+await test('R1: legacy — duplicate-role orders → ไม่ยืม single hint (fallback compass)', async () => {
+  const captures = { brainArgs: [], fetches: [], payload: null };
+  const job = mkJob({ dna: DNA_ALPO, orders: [{ role: 'reaction', personHint: 'คนเอ' }, { role: 'reaction', personHint: 'คนบี' }], chars: R1_CHARS });
+  const s6 = await withLedger(true, () => s6_slots(job, { origin: 'http://mock', _deps: mkDeps({ pool: AC_POOL, brainAnswer: AC_ANSWER, captures }) }));
+  const react = ledgerOf(s6).roles.find((r) => r.role === 'reaction');
+  assert.equal(react.targetPerson, 'สรพงศ์ ชาตรี', 'duplicate reaction orders → ข้าม → compass (สรพงศ์)');
+  assert.equal(react.targetSource, 'compass_sole_nonhero', 'ไม่ยืมจาก duplicate-role order');
+});
+
+await test('R1: full enum/schema — reason/matchKind/metadataState เสถียร + required fields ครบ', async () => {
+  const { s6 } = await runR1S6(true, { chars: R1_CHARS, pool: AC_POOL, answer: AC_ANSWER });
+  const L = ledgerOf(s6);
+  assert.equal(L.v, 1);
+  for (const r of L.roles) {
+    assert.ok(typeof r.role === 'string' && typeof r.slotId === 'string');
+    assert.ok('targetPerson' in r && 'targetSource' in r && 'totalRows' in r && 'keptRows' in r && 'droppedRows' in r && r.reasonCounts);
+    for (const x of r.rows) {
+      assert.ok(REASON_ENUM.has(x.reason), `reason enum: ${x.reason}`);
+      assert.ok(MATCHKIND_ENUM.has(x.matchKind), `matchKind enum: ${x.matchKind}`);
+      assert.ok(META_ENUM.has(x.metadataState), `metadataState enum: ${x.metadataState}`);
+      for (const k of ['faceFrac', 'dims', 'measuredFrom', 'orient', 'clean', 'largeText', 'watermark', 'newsScene', 'faceCount', 'quality', 'pHash', 'heroGrade', 'selected', 'estimatedUpscale']) {
+        assert.ok(k in x, `row มี field ${k}`);
+      }
+      assert.equal(x.estimatedUpscale, null, 'estimatedUpscale = null (ไม่เดา)');
+    }
+  }
+});
+
 console.log(`1..${passed}`);
