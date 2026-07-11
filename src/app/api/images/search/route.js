@@ -34,7 +34,35 @@ const QUERIES_PER_SOURCE = parseInt(process.env.IMG_QUERIES_PER_SOURCE || '12', 
 // kill-switch: IMG_STORY_QUERIES=0 = โควตา/พฤติกรรมคำค้นเดิม (ตัดหมวดเรื่องราว/emotion + regex สถานที่ไทยล้วน) · unset/'1' = เปิด
 const STORY_QUERIES_ON = process.env.IMG_STORY_QUERIES !== '0';
 
+// 🔎 Search Provenance V1 (shadow/diagnostic — โผล่ใน response เฉพาะ MEGA_SEARCH_PROVENANCE=1)
+//   สร้าง object นับล้วน bounded — safe non-negative integer หรือ null (vetKept ตอน vet ไม่รัน/ล้ม)
+//   ห้ามเก็บ URL/คำค้น/ข้อมูลส่วนตัว · นับไม่ได้/ไม่ปลอดภัย = ตัดฟิลด์ทิ้ง (ไม่เดา) · key order คงที่
+export function _searchProvenance(raw) {
+  try {
+    if (!raw || typeof raw !== 'object') return {}; // ไม่ destructure ก่อน validate — null/accessor/throwing proxy ต้องไม่ throw
+    const _int = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : null);
+    const out = {};
+    const put = (k, v) => { const n = _int(v); if (n !== null) out[k] = n; };
+    put('queriesFired', raw.queriesFired);
+    put('urlsReturned', raw.urlsReturned);
+    put('urlsVetted', raw.urlsVetted);
+    if (raw.vetKept === null) out.vetKept = null; else put('vetKept', raw.vetKept);
+    put('vetDropped', raw.vetDropped);
+    put('vetFailed', raw.vetFailed);
+    return out;
+  } catch { return {}; } // อ่าน property ใดๆ แล้ว throw (getter/proxy trap) → {} (ไม่ throw ออกไป)
+}
+
 export async function POST(req) {
+  // 🔎 Search Provenance V1 — snapshot สวิตช์ + ตัวนับ + _prov "นอก try" ให้ outer catch (UNEXPECTED หลัง attempt) แนบ sidecar ได้
+  const provenanceOn = process.env.MEGA_SEARCH_PROVENANCE === '1';
+  let provQueriesFired = 0; // ยิงคำค้นจริง (รวมที่ล้ม)
+  let provUrlsReturned = 0; // รูปดิบ provider คืน ก่อนกรอง/ตัดซ้ำ/เพดาน
+  let provUrlsVetted = 0;   // candidates ที่ส่งเข้า vet จริง
+  let provVetKept = null;   // vet classifier: kept (null = vet ไม่รัน/ล้มทั้งชุด — ไม่มี decision)
+  let provVetDropped = 0;   // vet classifier: dropped (relevant===false) — แยกจาก legacy vetDropped เด็ดขาด
+  let provVetFailed = 0;    // vet classifier: failed (โหลด/ติดป้ายไม่ได้) หรือทั้งชุด throw = N
+  const _prov = () => _searchProvenance({ queriesFired: provQueriesFired, urlsReturned: provUrlsReturned, urlsVetted: provUrlsVetted, vetKept: provVetKept, vetDropped: provVetDropped, vetFailed: provVetFailed });
   try {
     const body = await req.json().catch(() => ({}));
     const caseId = (body.caseId || '').trim();
@@ -116,6 +144,7 @@ export async function POST(req) {
     //   (ลำดับ collected/ตัดซ้ำ/เพดาน เหมือนยิงทีละคำทุกประการ — QUERY_CONC=1 คือชุดละ 1 = โค้ดเดิม)
     for (let w = 0; w < queries.length && collected.length < cap; w += QUERY_CONC) {
       const wave = queries.slice(w, w + QUERY_CONC);
+      provQueriesFired += wave.length; // 🔎 ยิงจริงทั้ง wave (Promise.all ยิงทุกคำ รวมที่ throw)
       const settled = await Promise.all(
         wave.map(async (q) => {
           try {
@@ -132,13 +161,14 @@ export async function POST(req) {
           // คีย์หาย = หยุดทันที (ทุกคำค้นจะล้มเหมือนกัน)
           if (err.errorType === 'NO_SERPAPI_KEY') {
             return NextResponse.json(
-              { success: false, error: err.message, errorType: 'NO_SERPAPI_KEY' },
+              { success: false, error: err.message, errorType: 'NO_SERPAPI_KEY', ...(provenanceOn ? { provenance: _prov() } : {}) },
               { status: 400 }
             );
           }
           errors.push({ query: q, error: err.message });
           continue;
         }
+        provUrlsReturned += imgs.length; // 🔎 ดิบก่อนกรอง/ตัดซ้ำ/เพดาน (เฉพาะคำค้นที่คืนสำเร็จ)
         for (const im of imgs) {
           if (collected.length >= cap) break;
           if (!im.imageUrl || seen.has(im.imageUrl)) continue;
@@ -165,6 +195,7 @@ export async function POST(req) {
           error: 'ค้นภาพไม่สำเร็จทุกคำค้น',
           errorType: 'SEARCH_FAILED',
           errors,
+          ...(provenanceOn ? { provenance: _prov() } : {}),
         },
         { status: 502 }
       );
@@ -193,6 +224,7 @@ export async function POST(req) {
     let vetDropped = 0;
     let vetOn = false;
     if (VET && candidates.length) {
+      provUrlsVetted = candidates.length; // 🔎 candidates ที่ "ส่งเข้า vet" จริง
       const chars = c.analysis?.characters || [];
       const genderOf = (name) => {
         const n = (name || '').trim();
@@ -202,7 +234,7 @@ export async function POST(req) {
       const subjects = (c.keywords?.subjects || []).map((s) => ({ ...s, gender: s.gender || genderOf(s.name) }));
       const newsGist = (c.analysis?.summary || c.analysis?.content || c.newsSnippet || '').slice(0, 600);
       try {
-        const { vetted } = await vetImages({ images: candidates, subjects, newsGist, caseId });
+        const { vetted, kept, dropped, failed } = await vetImages({ images: candidates, subjects, newsGist, caseId });
         // ★ DEVIATION โหมดตาเข้ม (ผู้ใช้สั่ง 6 ก.ค.): เก็บเฉพาะใบที่ตา "ยืนยันว่าเกี่ยว" เท่านั้น
         //   (ต้นฉบับเก็บใบที่ตาดูไม่ทัน/ไม่ติดป้ายด้วย → ขยะเล็ดได้) — ถ้าตาล้มทั้งชุดจนไม่มีป้ายเลย
         //   ค่อย fail-open เก็บแบบต้นฉบับ กัน "ค้นแล้วได้ศูนย์" ตอน Gemini ล่ม · ปิดกลับ: SEARCH_VET_STRICT=0
@@ -211,10 +243,13 @@ export async function POST(req) {
         toStore = strict && anyTag
           ? vetted.filter((x) => x.triage?.relevant === true)
           : vetted.filter((x) => x.triage?.relevant !== false);
-        vetDropped = candidates.length - toStore.length;
+        vetDropped = candidates.length - toStore.length; // legacy — คงความหมาย/ค่าเดิมเป๊ะ (compat, ห้ามเปลี่ยน)
         vetOn = true;
+        // 🔎 provenance ใช้ตัวนับ "classifier จริง" จาก vetImages (kept/dropped/failed) — ไม่ใช่ legacy subtraction
+        provVetKept = kept; provVetDropped = dropped; provVetFailed = failed;
       } catch {
-        toStore = candidates; // ตาล้ม/ไม่มีคีย์ → เก็บทั้งหมดไปก่อน
+        toStore = candidates; // ตาล้ม/ไม่มีคีย์ → เก็บทั้งหมดไปก่อน (fail-open legacy เดิม)
+        provVetFailed = candidates.length; // 🔎 ทั้งชุด throw = execution failure ทั้ง N (vetKept=null, provVetDropped=0)
       }
     }
 
@@ -237,10 +272,14 @@ export async function POST(req) {
       images: saved.images,
       queriesUsed: queries,
       errors,
+      // 🔎 Search Provenance V1 — ON เท่านั้น (OFF = ไม่มี key นี้เลย → response เดิม byte-for-byte)
+      //   provenance.vetDropped = classifier dropped (ไม่ใช่ legacy vetDropped ด้านบน) · vetKept/vetFailed = classifier จริง
+      ...(provenanceOn ? { provenance: _prov() } : {}),
     });
   } catch (err) {
+    // UNEXPECTED หลัง attempt วัดได้ (เช่น addImages throw หลัง search/vet) → แนบ sidecar (ON) · OFF = legacy shape/order เป๊ะ
     return NextResponse.json(
-      { success: false, error: err.message || 'เกิดข้อผิดพลาดไม่คาดคิด', errorType: 'UNEXPECTED' },
+      { success: false, error: err.message || 'เกิดข้อผิดพลาดไม่คาดคิด', errorType: 'UNEXPECTED', ...(provenanceOn ? { provenance: _prov() } : {}) },
       { status: 500 }
     );
   }

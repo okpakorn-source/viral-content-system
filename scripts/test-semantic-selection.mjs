@@ -11,10 +11,43 @@ import crypto from 'node:crypto';
 import { register } from 'node:module';
 
 const SRC_ROOT = new URL('../src/', import.meta.url).href;
-const AI_STUB = 'data:text/javascript,export function callBrain(){throw new Error("LLM_FORBIDDEN_IN_TEST")}';
+// callBrain: default = throw (การันตีไม่ยิง LLM ทุกเส้น) · delegate ให้ globalThis.__MEGA_AI ถ้าเทสฉีด fake deterministic
+const AI_STUB = 'data:text/javascript,' + encodeURIComponent(
+  'export function callBrain(a){ if (globalThis.__MEGA_AI) return globalThis.__MEGA_AI(a); throw new Error("LLM_FORBIDDEN_IN_TEST"); }'
+);
+// 🔎 PHASE 2B1 — stub 5 โมดูลค้น/คลัง + next/server (delegate ให้ globalThis.__MEGA_SP ที่เทสตั้งต่อเคส)
+//   blast radius = 0: โมดูล import ระดับบนของ s6/s7 (megaBrains/coverQcGate/imageQualityConfig/refSlotContract) ไม่แตะ 5 ตัวนี้
+//   (import จริงเป็น dynamic ใน s5_profile/s5_gapsearch เท่านั้น) · เทสเดิม 117 ตัวไม่โหลด 5 ตัวนี้ → พฤติกรรมเดิมทุก byte
+const _mod = (body) => 'data:text/javascript,' + encodeURIComponent(body);
+const STUB_IMAGESEARCH = _mod(`
+export const PLATFORMS = ['google','google_news','facebook','tiktok','youtube'];
+export function buildQueries(kw, maxQ){ const f = globalThis.__MEGA_SP; return f && f.buildQueries ? f.buildQueries(kw, maxQ) : ['q1','q2']; }
+export async function searchImages(platform, q, opts){ return globalThis.__MEGA_SP.searchImages(platform, q, opts); }
+export async function instagramProfile(){ return { images: [] }; }
+export async function facebookProfile(){ return { images: [] }; }
+`);
+const STUB_TRIAGE = _mod('export async function vetImages(a){ return globalThis.__MEGA_SP.vetImages(a); }');
+const STUB_STORE = _mod(`
+export async function addImages(caseId, imgs){ return globalThis.__MEGA_SP.addImages(caseId, imgs); }
+export async function readImages(caseId){ const f = globalThis.__MEGA_SP; return f && f.readImages ? f.readImages(caseId) : []; }
+`);
+const STUB_CASE = _mod('export async function getCase(id){ return globalThis.__MEGA_SP.getCase(id); }');
+const STUB_JUNK = _mod(`
+export function isCatalogSource(x){ const f = globalThis.__MEGA_SP; return f && f.isCatalogSource ? !!f.isCatalogSource(x) : false; }
+export function isOwnPageSource(x){ const f = globalThis.__MEGA_SP; return f && f.isOwnPageSource ? !!f.isOwnPageSource(x) : false; }
+export function isMismatchedFbMedia(x){ const f = globalThis.__MEGA_SP; return f && f.isMismatchedFbMedia ? !!f.isMismatchedFbMedia(x) : false; }
+`);
+// next/server stub — NextResponse.json คืน object อ่านง่าย (ไม่ผูก Next runtime) · ไม่มี lib ที่เทสโหลดใช้ next/server (verified)
+const STUB_NEXT = _mod('export const NextResponse = { json: (obj, init) => ({ _body: obj, _status: (init && init.status) || 200, status: (init && init.status) || 200, json: async () => obj }) };');
 const hook = `
 export async function resolve(specifier, context, nextResolve) {
   if (specifier === '@/lib/aiClient') return { url: ${JSON.stringify(AI_STUB)}, shortCircuit: true };
+  if (specifier === '@/lib/imageSearch') return { url: ${JSON.stringify(STUB_IMAGESEARCH)}, shortCircuit: true };
+  if (specifier === '@/lib/libraryTriage') return { url: ${JSON.stringify(STUB_TRIAGE)}, shortCircuit: true };
+  if (specifier === '@/lib/imageStore') return { url: ${JSON.stringify(STUB_STORE)}, shortCircuit: true };
+  if (specifier === '@/lib/caseStore') return { url: ${JSON.stringify(STUB_CASE)}, shortCircuit: true };
+  if (specifier === '@/lib/junkSources') return { url: ${JSON.stringify(STUB_JUNK)}, shortCircuit: true };
+  if (specifier === 'next/server') return { url: ${JSON.stringify(STUB_NEXT)}, shortCircuit: true };
   if (specifier.startsWith('@/')) {
     const mapped = new URL(specifier.slice(2) + (specifier.endsWith('.js') || specifier.endsWith('.mjs') ? '' : '.js'), ${JSON.stringify(SRC_ROOT)}).href;
     return nextResolve(mapped, context);
@@ -30,10 +63,26 @@ delete process.env.MEGA_SELECTION_SPEC;
 delete process.env.MEGA_STRICT_PRODUCER; // ★ Checkpoint C: เริ่มเทสด้วย strict switches สะอาดเสมอ
 delete process.env.MEGA_STRICT_RENDER;
 delete process.env.MEGA_REF_SHOT_AUTHORITY; // ★ D3-B2: เริ่มด้วยสวิตช์ ref-shot สะอาด
+// 🔎 PHASE 2B1 — pin ambient module-level/call-time switches ก่อน import (determinism · ไม่พึ่ง ambient env)
+process.env.IMG_GAP_SEARCH = '1';    // GAP_SEARCH_ON (module const megaAdapters)
+process.env.SEARCH_VET = '1';        // VET ON (call-time route.js)
+process.env.SEARCH_VET_STRICT = '1'; // strict vet ON (call-time)
+process.env.PRE_VET_DEDUP = '1';     // pre-vet dedup ON (call-time)
+process.env.IMG_QUERY_CONC = '4';    // QUERY_CONC (module const route.js) — wave size
+process.env.IMAGES_PER_QUERY = '20'; // PER_QUERY (module const route.js)
+process.env.IMAGES_HARD_CAP = '120'; // HARD_CAP (module const route.js)
+process.env.IMG_STORY_QUERIES = '1'; // STORY_QUERIES_ON (module const route.js)
+process.env.MEGA_SEARCH_INITIAL_BATCH = '4'; // SEARCH_INITIAL_BATCH (module const megaAdapters)
+process.env.MEGA_MIN_RELEVANT_IMAGES = '8';  // MIN_RELEVANT_IMAGES (module const megaAdapters)
+process.env.MEGA_YT_PARALLEL = '0';          // YT_PARALLEL off — กัน YT fire ใน s5_search (offline)
+process.env.MEGA_HERO_GRADE_HARD = '0';      // HERO_GRADE_HARD_ON off — gap คืน baseResult ตรงๆ (deterministic)
+delete process.env.MEGA_SEARCH_PROVENANCE; // เริ่มสะอาด — เทสตั้ง/คืนเองต่อเคส
 
-const { s6_slots, s7_cover } = await import('../src/lib/megaAdapters.js');
+const { s6_slots, s7_cover, s5_search, s5_gapsearch } = await import('../src/lib/megaAdapters.js');
 const { slotDirectorBrain, artBriefBrain, templateV1PersonAuthority } = await import('../src/lib/megaBrains.js');
 const { buildRefSlotContract, validateStrictRenderActivation, resolveRefSlotView } = await import('../src/lib/refSlotContract.js');
+// 🔎 PHASE 2B1 — route POST เป็น production wrapper (import stubs ผ่าน loader ข้างบน) + pure helper _searchProvenance
+const { POST: searchPOST, _searchProvenance } = await import('../src/app/api/images/search/route.js');
 
 let passed = 0;
 const test = async (name, fn) => {
@@ -1187,9 +1236,10 @@ const SEM_ON = { MEGA_SEMANTIC_SELECTION: '1', MEGA_SELECTION_SPEC: '1' };
 const ALL_ON = { ...SEM_ON, MEGA_STRICT_PRODUCER: '1', MEGA_STRICT_RENDER: '1' };
 const REF_ID_C = 'REF-mrbqalpo-h1r1';
 // flow มาตรฐาน: s6 ใต้ semantic ON → merge dossier → s7 ใต้ env ที่กำหนด — fresh job/deps ทุก call
-const runStrictFlow = async ({ s7Env = SEM_ON, deps = null, mutateAfterS6 = null } = {}) => {
+const runStrictFlow = async ({ s7Env = SEM_ON, deps = null, mutateAfterS6 = null, mutateBeforeS6 = null } = {}) => {
   const captures = { brainArgs: [], fetches: [], payload: null, rawBody: null };
   const job = mkJob({ dna: DNA_ALPO, orders: ORDERS_ALPO, chars: CHARS_A, refId: REF_ID_C });
+  if (mutateBeforeS6) mutateBeforeS6(job); // ★ test-only: seed dossier ก่อน S6 (default null = พฤติกรรมเดิมเป๊ะ)
   const mk = () => ({ ...mkDeps({ pool: POOL_A, brainAnswer: ANSWER_ALPO, captures }), ...(deps || {}) });
   const s6 = await withStrictEnv(SEM_ON, () => s6_slots(job, { origin: 'http://mock', _deps: mk() }));
   assert.equal(s6.status, 'done', `s6 ต้องผ่าน: ${s6.summary}`);
@@ -3399,6 +3449,480 @@ await test('R1: full enum/schema — reason/matchKind/metadataState เสถี
       assert.equal(x.estimatedUpscale, null, 'estimatedUpscale = null (ไม่เดา)');
     }
   }
+});
+
+// ============================================================
+// 🔎 PHASE 2B1 — Search Provenance V1 (shadow/diagnostic) — offline deterministic
+//   ทุกเทส: fake ผ่าน loader stubs + _deps · ไม่มี network/store/AI จริง · env MEGA_SEARCH_PROVENANCE snapshot/คืนค่าเสมอ
+// ============================================================
+const LEGACY_SEARCH_KEYS = ['success', 'caseId', 'platform', 'found', 'added', 'total', 'blockedCatalog', 'blockedOwnPage', 'blockedMismatch', 'skippedDup', 'vetOn', 'vetDropped', 'byPlatform', 'images', 'queriesUsed', 'errors'];
+const SP_SETENV = (v) => { if (v === null) delete process.env.MEGA_SEARCH_PROVENANCE; else process.env.MEGA_SEARCH_PROVENANCE = v; };
+const spRun = async (fn) => { const prev = process.env.MEGA_SEARCH_PROVENANCE ?? null; try { return await fn(); } finally { SP_SETENV(prev); delete globalThis.__MEGA_SP; delete globalThis.__MEGA_AI; } };
+
+// ── fake factory (route): buildQueries/searchImages/vetImages/addImages/readImages/getCase/junk predicates ──
+const mkSP = (o = {}) => ({
+  buildQueries: o.buildQueries || (() => (o.queries || ['q1', 'q2'])),
+  searchImages: o.searchImages || (async (p, q) => (o.hitsByQuery ? (o.hitsByQuery[q] || []) : [{ imageUrl: `${q}::${p}` }])),
+  vetImages: o.vetImages || (async ({ images }) => ({ vetted: images.map((x) => ({ ...x, triage: { relevant: true } })), kept: images.length, dropped: 0, failed: 0 })),
+  addImages: o.addImages || (async (id, imgs) => { globalThis.__SP_ADDED = imgs; return { added: imgs.length, total: imgs.length, byPlatform: {}, images: imgs }; }),
+  readImages: o.readImages || (async () => []),
+  getCase: o.getCase || (async () => (o.caseObj || { keywords: { subjects: [{ name: 'A' }] }, analysis: { characters: [] } })),
+  isCatalogSource: o.isCatalogSource, isOwnPageSource: o.isOwnPageSource, isMismatchedFbMedia: o.isMismatchedFbMedia,
+});
+const runPOST = async (body, sp, env) => { globalThis.__MEGA_SP = sp; SP_SETENV(env); const res = await searchPOST({ json: async () => body }); return res._body; };
+
+// ── (1) exact-'1' switch matrix — เฉพาะ '1' เป๊ะเท่านั้นถึง ON ──
+await test('2B1 route: exact-\'1\' switch matrix — เฉพาะ "1" เปิด (else = ไม่มี provenance)', async () => {
+  await spRun(async () => {
+    for (const v of [null, '0', '', ' 1', '1 ', 'true', 'on', '11']) {
+      const out = await runPOST({ caseId: 'C', platform: 'google' }, mkSP(), v);
+      assert.ok(!('provenance' in out), `env ${JSON.stringify(v)} ต้องไม่มี provenance`);
+    }
+    const on = await runPOST({ caseId: 'C', platform: 'google' }, mkSP(), '1');
+    assert.ok('provenance' in on, 'env "1" ต้องมี provenance');
+  });
+});
+
+// ── (2) OFF baseline — เทียบ COMPLETE literal f9c0db2 object + JSON.stringify key order (ไม่ใช่แค่ keys/3 ค่า) ──
+await test('2B1 route: OFF = f9c0db2 legacy contract เป๊ะ (full literal + JSON key order) + ไม่มี provenance', async () => {
+  await spRun(async () => {
+    const sp = mkSP({ queries: ['q1', 'q2'] });
+    const out = await runPOST({ caseId: 'C', platform: 'google' }, sp, null);
+    const img = (q) => ({ imageUrl: `${q}::google`, platform: 'google', query: q, triage: { relevant: true } });
+    const expected = {
+      success: true, caseId: 'C', platform: 'google', found: 2, added: 2, total: 2,
+      blockedCatalog: 0, blockedOwnPage: 0, blockedMismatch: 0, skippedDup: 0,
+      vetOn: true, vetDropped: 0, byPlatform: {}, images: [img('q1'), img('q2')],
+      queriesUsed: ['q1', 'q2'], errors: [],
+    };
+    assert.deepEqual(out, expected);
+    assert.equal(JSON.stringify(out), JSON.stringify(expected), 'byte/key-order = legacy literal เป๊ะ');
+    assert.deepEqual(Object.keys(out), LEGACY_SEARCH_KEYS);
+    assert.ok(!('provenance' in out));
+  });
+});
+
+// ── (2b) ON normal — legacy projection เป๊ะ + provenance ต่อท้าย + ค่าถูก ──
+await test('2B1 route: ON normal — legacy keys เป๊ะ + provenance ต่อท้าย + ตัวนับตรง', async () => {
+  await spRun(async () => {
+    const sp = mkSP({ queries: ['q1', 'q2'], hitsByQuery: { q1: [{ imageUrl: 'a' }, { imageUrl: 'b' }], q2: [{ imageUrl: 'c' }, { imageUrl: 'd' }] } });
+    const off = await runPOST({ caseId: 'C', platform: 'google' }, sp, null);
+    const on = await runPOST({ caseId: 'C', platform: 'google' }, sp, '1');
+    assert.deepEqual(Object.keys(on), [...LEGACY_SEARCH_KEYS, 'provenance']);
+    for (const k of LEGACY_SEARCH_KEYS) assert.deepEqual(on[k], off[k], `legacy key ${k} ต้องเท่า OFF`);
+    assert.deepEqual(on.provenance, { queriesFired: 2, urlsReturned: 4, urlsVetted: 4, vetKept: 4, vetDropped: 0, vetFailed: 0 });
+  });
+});
+
+// ── (3) partial query failure + zero-result — queriesFired นับทุก attempt, urlsReturned เฉพาะสำเร็จ ──
+await test('2B1 route: partial provider failure/zero — queriesFired=ทุกครั้งยิง, urlsReturned=เฉพาะสำเร็จ (ไม่เดา)', async () => {
+  await spRun(async () => {
+    const sp = mkSP({
+      queries: ['ok', 'boom', 'empty'],
+      searchImages: async (p, q) => { if (q === 'boom') throw new Error('provider 500'); if (q === 'empty') return []; return [{ imageUrl: 'x1' }, { imageUrl: 'x2' }]; },
+    });
+    const on = await runPOST({ caseId: 'C', platform: 'google' }, sp, '1');
+    assert.equal(on.provenance.queriesFired, 3, 'ยิงจริง 3 คำ (รวม boom ที่ throw)');
+    assert.equal(on.provenance.urlsReturned, 2, 'ดิบเฉพาะคำที่คืนสำเร็จ (ok=2, boom/empty=0)');
+    assert.equal(on.found, 2);
+  });
+});
+
+// ── (3b) out-of-order resolution — ลำดับ collected/counters นิ่งตามลำดับคำค้น (ไม่ใช่ลำดับ settle) ──
+await test('2B1 route: out-of-order provider resolution — collected/counters deterministic ตามลำดับคำค้น', async () => {
+  await spRun(async () => {
+    const sp = mkSP({
+      queries: ['q1', 'q2'],
+      searchImages: async (p, q) => { const t = q === 'q1' ? 3 : 0; for (let i = 0; i < t; i++) await Promise.resolve(); return [{ imageUrl: q + 'a' }]; },
+    });
+    const on = await runPOST({ caseId: 'C', platform: 'google' }, sp, '1');
+    assert.deepEqual(globalThis.__SP_ADDED.map((x) => x.imageUrl), ['q1a', 'q2a'], 'ลำดับตามคำค้น (q1 ก่อน q2) แม้ q2 settle ก่อน');
+    assert.equal(on.provenance.queriesFired, 2);
+    assert.equal(on.provenance.urlsReturned, 2);
+  });
+});
+
+// ── (4) vet disabled — urlsVetted=0, vetKept=null, dropped=0, failed=0 ──
+await test('2B1 route: vet disabled (body.vet=false) — urlsVetted=0/vetKept=null/dropped=0/failed=0', async () => {
+  await spRun(async () => {
+    const on = await runPOST({ caseId: 'C', platform: 'google', vet: false }, mkSP({ queries: ['q1'] }), '1');
+    assert.equal(on.vetOn, false);
+    assert.equal(on.provenance.urlsVetted, 0);
+    assert.equal(on.provenance.vetKept, null);
+    assert.equal(on.provenance.vetDropped, 0);
+    assert.equal(on.provenance.vetFailed, 0);
+  });
+});
+
+// ── (4b) vet throw (fail-open) — storage=legacy fail-open, urlsVetted=N, vetKept=null, dropped=0, failed=N ──
+await test('2B1 route: vet throw — fail-open เก็บครบ + vetKept=null/dropped=0/failed=N (execution failure)', async () => {
+  await spRun(async () => {
+    const sp = mkSP({ queries: ['q1', 'q2'], hitsByQuery: { q1: [{ imageUrl: 'a' }, { imageUrl: 'b' }], q2: [{ imageUrl: 'c' }] }, vetImages: async () => { throw new Error('gemini down'); } });
+    const on = await runPOST({ caseId: 'C', platform: 'google' }, sp, '1');
+    assert.equal(on.vetOn, false, 'vet throw → vetOn ยังเดิม false');
+    assert.equal(on.vetDropped, 0, 'legacy vetDropped ไม่แตะตอน throw');
+    assert.equal(on.added, 3, 'fail-open เก็บครบ 3 ใบ');
+    assert.equal(on.provenance.urlsVetted, 3);
+    assert.equal(on.provenance.vetKept, null);
+    assert.equal(on.provenance.vetDropped, 0);
+    assert.equal(on.provenance.vetFailed, 3);
+  });
+});
+
+// ── (4c) explicit reject — provenance ใช้ classifier จริง (kept/dropped/failed) แยกจาก legacy vetDropped ──
+await test('2B1 route: explicit reject — provenance.vetDropped=classifier(1) ≠ legacy vetDropped(2)', async () => {
+  await spRun(async () => {
+    const sp = mkSP({
+      queries: ['q1', 'q2'], hitsByQuery: { q1: [{ imageUrl: 'a' }, { imageUrl: 'b' }], q2: [{ imageUrl: 'c' }, { imageUrl: 'd' }] },
+      vetImages: async ({ images }) => ({
+        vetted: images.map((x, i) => i < 2 ? { ...x, triage: { relevant: true } } : i === 2 ? { ...x, triage: { relevant: false } } : { ...x }),
+        kept: 2, dropped: 1, failed: 1,
+      }),
+    });
+    const on = await runPOST({ caseId: 'C', platform: 'google' }, sp, '1');
+    assert.equal(on.vetDropped, 2, 'legacy = candidates(4) - toStore(2, strict relevant===true)');
+    assert.deepEqual(on.provenance, { queriesFired: 2, urlsReturned: 4, urlsVetted: 4, vetKept: 2, vetDropped: 1, vetFailed: 1 });
+    assert.notEqual(on.provenance.vetDropped, on.vetDropped, 'ห้าม publish legacy value เป็น provenance.vetDropped');
+  });
+});
+
+// ── (5) error-path provenance sidecar — SEARCH_FAILED หลัง attempt ยังมี provenance (P1-3) ──
+await test('2B1 route: SEARCH_FAILED (ทุกคำ throw) — error response แนบ provenance sidecar (attempts วัดได้)', async () => {
+  await spRun(async () => {
+    const sp = mkSP({ queries: ['a', 'b'], searchImages: async () => { throw new Error('down'); } });
+    const off = await runPOST({ caseId: 'C', platform: 'google' }, sp, null);
+    const expectedOff = { success: false, error: 'ค้นภาพไม่สำเร็จทุกคำค้น', errorType: 'SEARCH_FAILED', errors: [{ query: 'a', error: 'down' }, { query: 'b', error: 'down' }] };
+    assert.deepEqual(off, expectedOff, 'OFF SEARCH_FAILED = f9c0db2 legacy literal เป๊ะ (ไม่มี provenance)');
+    assert.equal(JSON.stringify(off), JSON.stringify(expectedOff), 'OFF SEARCH_FAILED key order เป๊ะ');
+    assert.ok(!('provenance' in off));
+    const on = await runPOST({ caseId: 'C', platform: 'google' }, sp, '1');
+    assert.equal(on.errorType, 'SEARCH_FAILED');
+    assert.equal(on.provenance.queriesFired, 2); assert.equal(on.provenance.urlsReturned, 0);
+  });
+});
+
+// ── (6) candidate/addImages bytes unchanged ON vs OFF ──
+await test('2B1 route: bytes ที่ส่งเข้า addImages เท่ากันเป๊ะ ON vs OFF (provenance ไม่แตะ candidate)', async () => {
+  await spRun(async () => {
+    const sp = mkSP({ queries: ['q1', 'q2'], hitsByQuery: { q1: [{ imageUrl: 'a' }], q2: [{ imageUrl: 'b' }] } });
+    await runPOST({ caseId: 'C', platform: 'google' }, sp, null); const offAdded = JSON.stringify(globalThis.__SP_ADDED);
+    await runPOST({ caseId: 'C', platform: 'google' }, sp, '1'); const onAdded = JSON.stringify(globalThis.__SP_ADDED);
+    assert.equal(onAdded, offAdded);
+  });
+});
+
+// ── (7) _searchProvenance pure — safe non-negative integer bounding + vetKept null + key order ──
+await test('2B1 pure _searchProvenance: safe-int bounding + vetKept null + key order คงที่', async () => {
+  assert.deepEqual(_searchProvenance({ queriesFired: 3, urlsReturned: 5, urlsVetted: 4, vetKept: 2, vetDropped: 1, vetFailed: 0 }),
+    { queriesFired: 3, urlsReturned: 5, urlsVetted: 4, vetKept: 2, vetDropped: 1, vetFailed: 0 });
+  assert.deepEqual(Object.keys(_searchProvenance({ queriesFired: 1, urlsReturned: 1, urlsVetted: 1, vetKept: 1, vetDropped: 1, vetFailed: 1 })),
+    ['queriesFired', 'urlsReturned', 'urlsVetted', 'vetKept', 'vetDropped', 'vetFailed']);
+  assert.deepEqual(_searchProvenance({ queriesFired: -1, urlsReturned: 1.5, urlsVetted: NaN, vetDropped: Infinity }), {}, 'ค่าไม่ใช่ safe-int ≥0 = ทิ้ง (ไม่เดา)');
+  assert.deepEqual(_searchProvenance({ vetKept: null }), { vetKept: null }, 'vetKept null = present null');
+  assert.deepEqual(_searchProvenance({ vetKept: 3 }), { vetKept: 3 });
+  // hostile inputs ต้องไม่ throw (ไม่ destructure ก่อน validate)
+  assert.deepEqual(_searchProvenance(null), {});
+  assert.deepEqual(_searchProvenance(undefined), {});
+  assert.deepEqual(_searchProvenance('x'), {});
+  assert.deepEqual(_searchProvenance(42), {});
+  const throwProxy = new Proxy({}, { get() { throw new Error('boom'); } });
+  assert.deepEqual(_searchProvenance(throwProxy), {}, 'throwing proxy → {} (ไม่ throw)');
+});
+
+// ── (8) malformed carrier matrix (ผ่าน s5_search stat) — hostile r.provenance ต้องไม่ตกลง stat ──
+const runS5Search = async (searchResp, env) => {
+  SP_SETENV(env);
+  const job = { dossier: { images: { caseId: 'S', searchedPlatforms: [], ytFired: 'pre', searchStats: [] } } };
+  const _deps = { fetchJson: async (url) => { if (String(url).includes('/api/images/search')) return searchResp; if (String(url).includes('/api/images/')) return { success: true, images: [] }; throw new Error('NO NETWORK: ' + url); } };
+  try { const out = await s5_search(job, { origin: 'http://mock', _deps }); return out.dossierPatch.images.searchStats.at(-1); } finally { SP_SETENV(null); }
+};
+await test('2B1 s5_search: malformed carrier matrix — whole-carrier fail-closed (mixed accessor/inherited/traps)', async () => {
+  const base = { success: true, found: 5, added: 3, vetDropped: 2, images: [] };
+  const evilGetter = {}; Object.defineProperty(evilGetter, 'queriesFired', { enumerable: true, get() { throw new Error('boom'); } });
+  const accessorOnly = {}; Object.defineProperty(accessorOnly, 'queriesFired', { enumerable: true, get() { return 3; } });
+  // mixed: valid DATA field + accessor field → ต้องทิ้ง "ทั้ง carrier" (ไม่คืน partial)
+  const mixedAccessor = { queriesFired: 1 }; Object.defineProperty(mixedAccessor, 'urlsReturned', { enumerable: true, get() { return 5; } });
+  const inherited = Object.create({ queriesFired: 3 }); // proto ≠ Object.prototype → ทิ้ง
+  class Prov { constructor() { this.queriesFired = 3; } }
+  const descThrow = new Proxy({ queriesFired: 3 }, { getOwnPropertyDescriptor() { throw new Error('desc trap'); } });
+  const ownKeysThrow = new Proxy({ queriesFired: 3 }, { ownKeys() { throw new Error('ownKeys trap'); } });
+  const protoThrow = new Proxy({ queriesFired: 3 }, { getPrototypeOf() { throw new Error('proto trap'); } });
+  const hostiles = [undefined, null, 'str', 42, true, [], [1, 2], {}, { foo: 1 }, { queriesFired: -1 }, { queriesFired: 1.5 }, new Prov(), evilGetter, accessorOnly, mixedAccessor, inherited, descThrow, ownKeysThrow, protoThrow];
+  for (const h of hostiles) {
+    const stat = await runS5Search({ ...base, provenance: h }, '1');
+    assert.deepEqual(stat, { platform: 'google', found: 5, added: 3, vetDropped: 2 }, `hostile ${Object.prototype.toString.call(h)} ต้องไม่ติด provenance (ทั้ง carrier)`);
+  }
+  // valid subset: unknown DATA key ถูกทิ้ง เหลือเฉพาะ field whitelist
+  const okStat = await runS5Search({ ...base, provenance: { queriesFired: 3, foo: 'x', urlsReturned: 4 } }, '1');
+  assert.deepEqual(okStat.provenance, { queriesFired: 3, urlsReturned: 4 });
+  // Object.create(null) (proto null) = plain own-data → ยอมรับ
+  const nullProto = Object.create(null); nullProto.queriesFired = 2;
+  const npStat = await runS5Search({ ...base, provenance: nullProto }, '1');
+  assert.deepEqual(npStat.provenance, { queriesFired: 2 });
+});
+// ── (8c) descriptor-snapshot only — Proxy get trap ต้องไม่ถูกเรียกเลย (อ่านจาก descriptor.value เท่านั้น) ──
+await test('2B1 s5_search: descriptor-only snapshot — Proxy get trap count=0 + ค่า=descriptor.value (ไม่ใช่ค่า get)', async () => {
+  const base = { success: true, found: 5, added: 3, vetDropped: 2, images: [] };
+  // plain-prototype Proxy: own data descriptor ค่าปลอดภัย แต่ get trap นับ+คืนค่าขัดแย้ง (999)
+  let getCount = 0;
+  const conflictProxy = new Proxy({ queriesFired: 3, urlsReturned: 5, vetKept: 2 }, { get() { getCount++; return 999; } });
+  const s1 = await runS5Search({ ...base, provenance: conflictProxy }, '1');
+  assert.equal(getCount, 0, 'get trap ต้องไม่ถูกเรียกเลย (descriptor-only)');
+  assert.deepEqual(s1.provenance, { queriesFired: 3, urlsReturned: 5, vetKept: 2 }, 'ค่า = descriptor.value ไม่ใช่ 999 จาก get');
+  // throwing-get variant: ถ้าเผลอเรียก get จะ throw — descriptor-only จึงต้องไม่ throw
+  let getCount2 = 0;
+  const throwGetProxy = new Proxy({ queriesFired: 7 }, { get() { getCount2++; throw new Error('get boom'); } });
+  const s2 = await runS5Search({ ...base, provenance: throwGetProxy }, '1');
+  assert.equal(getCount2, 0, 'throwing get trap ต้องไม่ถูกเรียก → ไม่ throw');
+  assert.deepEqual(s2.provenance, { queriesFired: 7 });
+});
+
+// ── (8b) s5_search success/error propagation + OFF parity ของ stat ──
+await test('2B1 s5_search: success/error stat propagation + OFF parity', async () => {
+  const base = { success: true, found: 5, added: 3, vetDropped: 2, images: [] };
+  const prov = { queriesFired: 2, urlsReturned: 4, urlsVetted: 4, vetKept: 4, vetDropped: 0, vetFailed: 0 };
+  const offStat = await runS5Search({ ...base, provenance: prov }, null);
+  assert.deepEqual(offStat, { platform: 'google', found: 5, added: 3, vetDropped: 2 }, 'OFF stat = legacy 4 keys เป๊ะ');
+  assert.equal(JSON.stringify(offStat), JSON.stringify({ platform: 'google', found: 5, added: 3, vetDropped: 2 }), 'OFF stat key order = legacy literal');
+  const onStat = await runS5Search({ ...base, provenance: prov }, '1');
+  assert.deepEqual(onStat.provenance, prov);
+  const errStat = await runS5Search({ success: false, error: 'x', httpStatus: 502, provenance: { queriesFired: 2, urlsReturned: 0 } }, '1');
+  assert.ok(errStat.error && errStat.provenance, 'error stat แนบ provenance (P1-3)');
+  assert.deepEqual(errStat.provenance, { queriesFired: 2, urlsReturned: 0 });
+});
+
+// ── (9) s5_gapsearch — sibling gapSearchProvenance (ไม่ยัด searchStats) + OFF ไม่มี key ──
+const GAP_JF = async (url) => { if (String(url).includes('/api/images/')) return { images: [] }; throw new Error('NO NETWORK: ' + url); };
+const gapSP = (o = {}) => ({
+  searchImages: o.searchImages || (async (p, q) => { globalThis.__GAP_N = (globalThis.__GAP_N || 0) + 1; return [{ imageUrl: `${q}::${p}` }]; }),
+  vetImages: o.vetImages || (async ({ images }) => ({ vetted: images.map((x) => ({ ...x, triage: { relevant: true } })), kept: images.length, dropped: 0, failed: 0 })),
+  addImages: async (id, imgs) => ({ added: imgs.length, total: imgs.length, byPlatform: {}, images: imgs }),
+  getCase: async () => ({ keywords: { subjects: [] }, analysis: { characters: [] } }),
+});
+const runGap = async (im, sp, env) => {
+  globalThis.__MEGA_SP = sp; globalThis.__MEGA_AI = async () => ({ text: '{"queries":["nq1","nq2"]}' }); globalThis.__GAP_N = 0;
+  SP_SETENV(env);
+  const job = { dossier: { images: im, compass: { mainCharacters: [{ name: 'A' }] }, desk: { title: 't' } } };
+  return await s5_gapsearch(job, { origin: 'http://mock', _deps: { fetchJson: GAP_JF } });
+};
+await test('2B1 s5_gapsearch: ON = sibling gapSearchProvenance (ไม่แตะ searchStats) · OFF = ไม่มี key', async () => {
+  await spRun(async () => {
+    const on = await runGap({ caseId: 'GAP', storyQueries: ['sq1'], searchStats: [{ platform: 'google', found: 1, added: 1, vetDropped: 0 }] }, gapSP(), '1');
+    const oi = on.dossierPatch.images;
+    const N = globalThis.__GAP_N;
+    assert.ok(N > 0, 'มี attempt จริง');
+    assert.deepEqual(oi.gapSearchProvenance, { queriesFired: N, urlsReturned: N, urlsVetted: N, vetKept: N, vetDropped: 0, vetFailed: 0 });
+    assert.deepEqual(oi.searchStats, [{ platform: 'google', found: 1, added: 1, vetDropped: 0 }], 'searchStats เดิมไม่ถูกแตะ (ไม่มี gap entry)');
+    assert.equal(oi.gapSearchDone, true);
+    await spRun(async () => {
+      const off = await runGap({ caseId: 'GAP', storyQueries: ['sq1'], searchStats: [{ platform: 'google', found: 1, added: 1, vetDropped: 0 }] }, gapSP(), null);
+      assert.ok(!('gapSearchProvenance' in off.dossierPatch.images), 'OFF ไม่มี sibling');
+      assert.deepEqual(off.dossierPatch.images.searchStats, [{ platform: 'google', found: 1, added: 1, vetDropped: 0 }]);
+    });
+  });
+});
+
+// ── (9b) gap partial failure + explicit reject ──
+await test('2B1 s5_gapsearch: partial provider failure + explicit reject — counters ตรง', async () => {
+  await spRun(async () => {
+    let n = 0;
+    const sp = gapSP({
+      searchImages: async (p, q) => { globalThis.__GAP_N = (globalThis.__GAP_N || 0) + 1; n++; if (n === 1) throw new Error('down'); return [{ imageUrl: `${q}::${p}::${n}` }]; },
+      vetImages: async ({ images }) => ({ vetted: images.map((x, i) => i === 0 ? { ...x, triage: { relevant: false } } : { ...x, triage: { relevant: true } }), kept: images.length - 1, dropped: 1, failed: 0 }),
+    });
+    const on = await runGap({ caseId: 'GAP', storyQueries: ['sq1'] }, sp, '1');
+    const gp = on.dossierPatch.images.gapSearchProvenance;
+    assert.equal(gp.queriesFired, globalThis.__GAP_N, 'queriesFired = ทุก attempt (รวมที่ throw)');
+    assert.ok(gp.urlsReturned < gp.queriesFired, 'urlsReturned < queriesFired (คำแรก throw)');
+    assert.equal(gp.vetDropped, 1, 'classifier dropped');
+    assert.equal(gp.vetFailed, 0);
+  });
+});
+
+// ── (9c) gap re-entry non-interference — gapSearchDone=true → status/summary เท่ากัน ON vs OFF ──
+await test('2B1 s5_gapsearch: re-entry (gapSearchDone) — ON/OFF status/summary เท่ากันเป๊ะ + ไม่มี provenance', async () => {
+  await spRun(async () => {
+    const off = await runGap({ caseId: 'GAP', gapSearchDone: true }, gapSP(), null);
+    const on = await runGap({ caseId: 'GAP', gapSearchDone: true }, gapSP(), '1');
+    assert.deepEqual(on, off, 're-entry ON=OFF ทุก byte');
+    assert.equal(on.status, 'done'); assert.ok(!('dossierPatch' in on) || !('gapSearchProvenance' in (on.dossierPatch?.images || {})));
+  });
+});
+
+// ── (10) strict-chain (ALL_ON): dossier carriers (searchStats[].provenance + gapSearchProvenance) inert ต่อ producer ──
+await test('2B1 strict-chain (ALL_ON): dossier carriers inert — slots/slotPlan/spec/specHash/replayHash/realizedTemplate/raw queue body เท่ากันเป๊ะ + ไม่รั่วเข้า body', async () => {
+  const seed = (withCarriers) => (job) => {
+    const im = job.dossier.images;
+    const baseStat = { platform: 'google', found: 1, added: 1, vetDropped: 0 };
+    im.searchStats = [withCarriers ? { ...baseStat, provenance: { queriesFired: 1, urlsReturned: 1, urlsVetted: 1, vetKept: 1, vetDropped: 0, vetFailed: 0 } } : { ...baseStat }];
+    if (withCarriers) im.gapSearchProvenance = { queriesFired: 4, urlsReturned: 4, urlsVetted: 4, vetKept: 4, vetDropped: 0, vetFailed: 0 };
+  };
+  // seed "ก่อน S6" — ทั้งสอง job มี legacy images fields เหมือนกันก่อน S6; ON เพิ่ม searchStats[].provenance + gapSearchProvenance
+  const A = await runStrictFlow({ s7Env: ALL_ON, mutateBeforeS6: seed(true) });   // มี carrier ก่อน S6
+  const B = await runStrictFlow({ s7Env: ALL_ON, mutateBeforeS6: seed(false) });  // legacy ไม่มี carrier
+  assert.equal(A.queueCalls, 1); assert.equal(B.queueCalls, 1);
+  // non-vacuous: carrier อยู่ก่อน S6 + คงอยู่ตลอด S6→S7 ในฝั่ง ON, ไม่มีในฝั่ง OFF · legacy stat เท่ากันเป๊ะ
+  assert.deepEqual(A.job.dossier.images.searchStats[0], { platform: 'google', found: 1, added: 1, vetDropped: 0, provenance: { queriesFired: 1, urlsReturned: 1, urlsVetted: 1, vetKept: 1, vetDropped: 0, vetFailed: 0 } }, 'ON: searchStats+provenance คงอยู่ผ่าน S6→S7');
+  assert.deepEqual(A.job.dossier.images.gapSearchProvenance, { queriesFired: 4, urlsReturned: 4, urlsVetted: 4, vetKept: 4, vetDropped: 0, vetFailed: 0 }, 'ON: gapSearchProvenance คงอยู่ผ่าน S6→S7');
+  assert.deepEqual(B.job.dossier.images.searchStats[0], { platform: 'google', found: 1, added: 1, vetDropped: 0 }, 'OFF: legacy stat เท่ากันก่อน carrier');
+  assert.ok(!('gapSearchProvenance' in B.job.dossier.images), 'OFF: ไม่มี gapSearchProvenance');
+  assert.ok(A.captures.rawBody && B.captures.rawBody, 'enqueue จริงทั้งคู่ (non-vacuous)');
+  const pa = A.captures.payload, pb = B.captures.payload;
+  assert.ok(pa.slotPlan && pa.selectionSpec && pa.realizedTemplate, 'payload มี slotPlan/selectionSpec/realizedTemplate');
+  assert.ok(pa.selectionSpec.specHash && pa.selectionSpec.replayHash, 'มี specHash + replayHash');
+  assert.deepEqual(pa.slotPlan, pb.slotPlan, 'slotPlan เท่ากัน');
+  assert.deepEqual(pa.selectionSpec, pb.selectionSpec, 'selectionSpec เท่ากัน (รวม specHash/replayHash)');
+  assert.equal(pa.selectionSpec.specHash, pb.selectionSpec.specHash);
+  assert.equal(pa.selectionSpec.replayHash, pb.selectionSpec.replayHash);
+  assert.deepEqual(pa.realizedTemplate, pb.realizedTemplate, 'realizedTemplate เท่ากัน');
+  assert.deepEqual(A.job.dossier.pickImages.slots, B.job.dossier.pickImages.slots, 'pickImages.slots เท่ากัน');
+  assert.equal(A.captures.rawBody, B.captures.rawBody, 'raw serialized queue body เท่ากันเป๊ะ');
+  assert.ok(!A.captures.rawBody.includes('provenance') && !A.captures.rawBody.includes('searchStats') && !A.captures.rawBody.includes('gapSearchProvenance'), 'queue body ไม่มี provenance/searchStats/gapSearchProvenance');
+});
+
+// ── (11) canonical 6-field/key-order ในทุก error/edge response ──
+const PROV_KEYS = ['queriesFired', 'urlsReturned', 'urlsVetted', 'vetKept', 'vetDropped', 'vetFailed'];
+await test('2B1 route: NO_SERPAPI_KEY หลัง attempt — sidecar canonical 6 fields/order + OFF = legacy literal', async () => {
+  await spRun(async () => {
+    const sp = mkSP({ queries: ['q1', 'q2'], searchImages: async () => { const e = new Error('no key'); e.errorType = 'NO_SERPAPI_KEY'; throw e; } });
+    const off = await runPOST({ caseId: 'C', platform: 'google' }, sp, null);
+    assert.deepEqual(off, { success: false, error: 'no key', errorType: 'NO_SERPAPI_KEY' });
+    assert.equal(JSON.stringify(off), JSON.stringify({ success: false, error: 'no key', errorType: 'NO_SERPAPI_KEY' }), 'OFF error = legacy literal เป๊ะ');
+    const on = await runPOST({ caseId: 'C', platform: 'google' }, sp, '1');
+    assert.deepEqual(Object.keys(on.provenance), PROV_KEYS, 'canonical 6 fields/order');
+    assert.deepEqual(on.provenance, { queriesFired: 2, urlsReturned: 0, urlsVetted: 0, vetKept: null, vetDropped: 0, vetFailed: 0 });
+  });
+});
+await test('2B1 route: all-provider-zero success — provenance canonical 6 fields (found=0/added=0)', async () => {
+  await spRun(async () => {
+    const sp = mkSP({ queries: ['q1', 'q2'], searchImages: async () => [] });
+    const on = await runPOST({ caseId: 'C', platform: 'google' }, sp, '1');
+    assert.equal(on.success, true); assert.equal(on.found, 0); assert.equal(on.added, 0);
+    assert.deepEqual(Object.keys(on.provenance), PROV_KEYS);
+    assert.deepEqual(on.provenance, { queriesFired: 2, urlsReturned: 0, urlsVetted: 0, vetKept: null, vetDropped: 0, vetFailed: 0 });
+  });
+});
+await test('2B1 route: SEARCH_FAILED — provenance เป็น object 6-field/order เป๊ะ', async () => {
+  await spRun(async () => {
+    const sp = mkSP({ queries: ['a', 'b'], searchImages: async () => { throw new Error('down'); } });
+    const on = await runPOST({ caseId: 'C', platform: 'google' }, sp, '1');
+    assert.equal(on.errorType, 'SEARCH_FAILED');
+    assert.deepEqual(on.provenance, { queriesFired: 2, urlsReturned: 0, urlsVetted: 0, vetKept: null, vetDropped: 0, vetFailed: 0 });
+    assert.deepEqual(Object.keys(on.provenance), PROV_KEYS);
+  });
+});
+
+// ── (12) UNEXPECTED (addImages throw หลัง search/vet) — outer catch แนบ sidecar (ON) · OFF legacy literal ──
+await test('2B1 route: UNEXPECTED addImages-throw — ON sidecar (attempts วัดได้) · OFF = legacy 3-field literal', async () => {
+  await spRun(async () => {
+    const sp = mkSP({ queries: ['q1', 'q2'], hitsByQuery: { q1: [{ imageUrl: 'a' }], q2: [{ imageUrl: 'b' }] }, addImages: async () => { throw new Error('store boom'); } });
+    const off = await runPOST({ caseId: 'C', platform: 'google' }, sp, null);
+    assert.deepEqual(off, { success: false, error: 'store boom', errorType: 'UNEXPECTED' });
+    assert.equal(JSON.stringify(off), JSON.stringify({ success: false, error: 'store boom', errorType: 'UNEXPECTED' }), 'OFF UNEXPECTED = legacy literal');
+    const on = await runPOST({ caseId: 'C', platform: 'google' }, sp, '1');
+    assert.equal(on.errorType, 'UNEXPECTED');
+    assert.deepEqual(Object.keys(on.provenance), PROV_KEYS);
+    assert.deepEqual(on.provenance, { queriesFired: 2, urlsReturned: 2, urlsVetted: 2, vetKept: 2, vetDropped: 0, vetFailed: 0 }, 'attempts วัดได้ก่อน addImages ล้ม');
+  });
+});
+
+// ── (13) gap success exact literals: 4/4/4/4/0/0 ──
+await test('2B1 s5_gapsearch: success exact literals — gapSearchProvenance = {4,4,4,4,0,0}', async () => {
+  await spRun(async () => {
+    const on = await runGap({ caseId: 'GAP', storyQueries: ['sq1'] }, gapSP(), '1');
+    assert.equal(globalThis.__GAP_N, 4, '2 คำใหม่ × 2 แหล่ง = 4 attempt');
+    assert.deepEqual(on.dossierPatch.images.gapSearchProvenance, { queriesFired: 4, urlsReturned: 4, urlsVetted: 4, vetKept: 4, vetDropped: 0, vetFailed: 0 });
+    assert.equal(on.dossierPatch.images.gapSearchAdded, 4);
+  });
+});
+// ── (13b) gap partial/reject exact: 4/3/3/2/1/0 + added=2 ──
+await test('2B1 s5_gapsearch: partial+reject exact — {4,3,3,2,1,0} added=2', async () => {
+  await spRun(async () => {
+    let n = 0;
+    const sp = gapSP({
+      searchImages: async (p, q) => { globalThis.__GAP_N = (globalThis.__GAP_N || 0) + 1; n++; if (n === 1) throw new Error('down'); return [{ imageUrl: `${q}::${p}::${n}` }]; },
+      vetImages: async ({ images }) => ({ vetted: images.map((x, i) => i === 0 ? { ...x, triage: { relevant: false } } : { ...x, triage: { relevant: true } }), kept: images.length - 1, dropped: 1, failed: 0 }),
+    });
+    const on = await runGap({ caseId: 'GAP', storyQueries: ['sq1'] }, sp, '1');
+    assert.deepEqual(on.dossierPatch.images.gapSearchProvenance, { queriesFired: 4, urlsReturned: 3, urlsVetted: 3, vetKept: 2, vetDropped: 1, vetFailed: 0 });
+    assert.equal(on.dossierPatch.images.gapSearchAdded, 2, 'toStore = collected(3) - reject(1) = 2');
+  });
+});
+// ── (13c) gap vet-throw exact: 4/4/4/null/0/4 + fail-open ทั้ง 4 ใบเข้า addImages ครบ ──
+await test('2B1 s5_gapsearch: vet-throw exact {4,4,4,null,0,4} + fail-open bytes ครบ 4 เข้า addImages', async () => {
+  await spRun(async () => {
+    globalThis.__GAP_ADDED = null;
+    const sp = gapSP({
+      searchImages: async (p, q) => { globalThis.__GAP_N = (globalThis.__GAP_N || 0) + 1; return [{ imageUrl: `${q}::${p}` }]; },
+      vetImages: async () => { throw new Error('gemini down'); },
+    });
+    sp.addImages = async (id, imgs) => { globalThis.__GAP_ADDED = imgs; return { added: imgs.length, total: imgs.length, byPlatform: {}, images: imgs }; };
+    const on = await runGap({ caseId: 'GAP', storyQueries: ['sq1'] }, sp, '1');
+    assert.deepEqual(on.dossierPatch.images.gapSearchProvenance, { queriesFired: 4, urlsReturned: 4, urlsVetted: 4, vetKept: null, vetDropped: 0, vetFailed: 4 });
+    assert.equal(globalThis.__GAP_ADDED.length, 4, 'fail-open: ทั้ง 4 candidate ถึง addImages');
+    assert.deepEqual(on.dossierPatch.images.gapSearchAdded, 4);
+  });
+});
+// ── (13d) gap addImages bytes เท่ากัน ON vs OFF (normal) ──
+await test('2B1 s5_gapsearch: addImages bytes เท่ากันเป๊ะ ON vs OFF (provenance ไม่แตะ candidate)', async () => {
+  await spRun(async () => {
+    const mk = () => { const sp = gapSP(); sp.addImages = async (id, imgs) => { globalThis.__GAP_ADDED = JSON.stringify(imgs); return { added: imgs.length, total: imgs.length, byPlatform: {}, images: imgs }; }; return sp; };
+    await runGap({ caseId: 'GAP', storyQueries: ['sq1'] }, mk(), null); const offB = globalThis.__GAP_ADDED;
+    await runGap({ caseId: 'GAP', storyQueries: ['sq1'] }, mk(), '1'); const onB = globalThis.__GAP_ADDED;
+    assert.equal(onB, offB);
+  });
+});
+// ── (13e) gap TRUE outer-failure (addImages throw) — sidecar ยังแนบ (ON) · status/summary เดิม ──
+await test('2B1 s5_gapsearch: outer-failure (addImages throw) — gapSearchProvenance sidecar ยังแนบ (ON)', async () => {
+  await spRun(async () => {
+    const sp = gapSP({ searchImages: async (p, q) => { globalThis.__GAP_N = (globalThis.__GAP_N || 0) + 1; return [{ imageUrl: `${q}::${p}` }]; } });
+    sp.addImages = async () => { throw new Error('store outer boom'); };
+    const on = await runGap({ caseId: 'GAP', storyQueries: ['sq1'] }, sp, '1');
+    const gp = on.dossierPatch.images.gapSearchProvenance;
+    assert.ok(gp, 'outer-failure ยังมี sidecar (attempts วัดได้)');
+    assert.equal(gp.queriesFired, 4); assert.equal(gp.urlsReturned, 4);
+    // outer-catch path: dossierPatch ไม่มี gapSearchAdded (ต่างจาก success) — แยก path ได้ชัด (summary ถูก hard-gate override)
+    assert.ok(!('gapSearchAdded' in on.dossierPatch.images), 'outer-failure path: ไม่มี gapSearchAdded');
+    assert.equal(on.dossierPatch.images.gapSearchDone, true);
+    // OFF: ไม่มี sidecar แม้ outer failure
+    await spRun(async () => {
+      const sp2 = gapSP({ searchImages: async (p, q) => [{ imageUrl: `${q}::${p}` }] }); sp2.addImages = async () => { throw new Error('boom'); };
+      const off = await runGap({ caseId: 'GAP', storyQueries: ['sq1'] }, sp2, null);
+      assert.ok(!('gapSearchProvenance' in off.dossierPatch.images), 'OFF outer-failure ไม่มี sidecar');
+    });
+  });
+});
+// ── (14) re-entry write-once + s5_search ON/OFF identical totals/status/summary/searchStats ──
+await test('2B1 re-entry write-once: persisted gapSearchProvenance untouched + s5_search ON/OFF identical', async () => {
+  await spRun(async () => {
+    // re-entry: gapSearchDone=true + persisted provenance → early return ไม่มี dossierPatch → ของเดิมไม่ถูกแตะ
+    const persisted = { queriesFired: 9, urlsReturned: 9, urlsVetted: 9, vetKept: 9, vetDropped: 0, vetFailed: 0 };
+    const im0 = { caseId: 'GAP', gapSearchDone: true, gapSearchProvenance: persisted, searchStats: [{ platform: 'google', found: 1, added: 1, vetDropped: 0 }] };
+    const onR = await runGap({ ...im0 }, gapSP(), '1');
+    const offR = await runGap({ ...im0 }, gapSP(), null);
+    assert.deepEqual(onR, offR, 're-entry ON=OFF ทุก byte');
+    assert.ok(!('dossierPatch' in onR), 'early return ไม่มี dossierPatch → persisted provenance write-once (ไม่ถูกแตะ)');
+    // s5_search ON vs OFF: totals/status/summary/legacy searchStats fields identical (provenance เป็น sub-key เท่านั้น)
+    const searchResp = { success: true, found: 5, added: 3, vetDropped: 2, images: [], provenance: { queriesFired: 2, urlsReturned: 4, urlsVetted: 4, vetKept: 4, vetDropped: 0, vetFailed: 0 } };
+    const s5 = async (env) => {
+      SP_SETENV(env);
+      // ป้อน persisted gapSearchProvenance เข้า BOTH job — พิสูจน์ว่า s5_search เพิกเฉย/คงไว้ (ignored/preserved)
+      const job = { dossier: { images: { caseId: 'S', searchedPlatforms: [], ytFired: 'pre', searchStats: [], gapSearchProvenance: persisted } } };
+      const _deps = { fetchJson: async (url) => { if (String(url).includes('/api/images/search')) return searchResp; if (String(url).includes('/api/images/')) return { success: true, images: [] }; throw new Error('NO NETWORK'); } };
+      try { const o = await s5_search(job, { origin: 'http://mock', _deps }); return o; } finally { SP_SETENV(null); }
+    };
+    const so = await s5(null); const sn = await s5('1');
+    assert.equal(sn.status, so.status); assert.equal(sn.summary, so.summary);
+    assert.equal(sn.dossierPatch.images.totalAdded ?? null, so.dossierPatch.images.totalAdded ?? null);
+    const strip = (st) => ({ platform: st.platform, found: st.found, added: st.added, vetDropped: st.vetDropped });
+    assert.deepEqual(strip(sn.dossierPatch.images.searchStats.at(-1)), strip(so.dossierPatch.images.searchStats.at(-1)), 'legacy stat fields identical');
+    assert.ok(sn.dossierPatch.images.searchStats.at(-1).provenance, 'ON มี provenance sub-key');
+    assert.ok(!('provenance' in so.dossierPatch.images.searchStats.at(-1)), 'OFF ไม่มี provenance');
+    // persisted gapSearchProvenance = ถูก s5_search คงไว้เท่ากันเป๊ะ ON vs OFF (ไม่ถูกแตะ/ลบ)
+    assert.deepEqual(sn.dossierPatch.images.gapSearchProvenance, persisted, 'ON: persisted sidecar preserved');
+    assert.deepEqual(so.dossierPatch.images.gapSearchProvenance, persisted, 'OFF: persisted sidecar preserved');
+    assert.deepEqual(sn.dossierPatch.images.gapSearchProvenance, so.dossierPatch.images.gapSearchProvenance, 'preserved sidecar identical ON vs OFF');
+  });
 });
 
 console.log(`1..${passed}`);

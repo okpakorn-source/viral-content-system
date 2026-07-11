@@ -529,9 +529,44 @@ export async function s5_keywords(job, { origin }) {
   };
 }
 
+// ★ Search Provenance V1 — sanitize ตัวนับ provenance (fail-closed แข็ง):
+//   รับเฉพาะ plain own-data object (prototype = Object.prototype/null) · class instance/exotic = null
+//   อ่านผ่าน own DATA descriptor เท่านั้น (accessor/inherited = ข้าม, ไม่เรียก getter) · throwing getter/Proxy trap = null
+//   copy เฉพาะ 6 ฟิลด์ safe non-negative integer (vetKept ยอม null = vet ไม่รัน/ล้ม) · ทิ้ง key แปลกปลอม
+//   ไม่มีฟิลด์ valid = null (ป้าย provenance ไม่ติด) · ไม่เก็บ URL/คำค้น/ข้อมูลส่วนตัว · key order คงที่
+function _sanitizeSearchProv(raw) {
+  try {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const proto = Object.getPrototypeOf(raw);
+    if (proto !== Object.prototype && proto !== null) return null; // เฉพาะ plain / null-proto (class instance/inherited = ทิ้ง)
+    // ตรวจ "ทั้งก้อน" + snapshot descriptor.value ตอนตรวจ (ไม่อ่าน raw[k] อีกเลยหลังจากนี้ = กัน get trap/side-effect)
+    //   เจอ accessor/descriptor แปลก/inspection throw = ทิ้งทั้ง carrier · ค่าที่ publish มาจาก descriptor.value เท่านั้น
+    const vals = new Map();
+    for (const k of Reflect.ownKeys(raw)) {
+      const d = Object.getOwnPropertyDescriptor(raw, k);
+      if (!d || !('value' in d)) return null; // accessor(get/set) หรือ descriptor ผิดปกติ = fail closed ทั้ง carrier
+      vals.set(k, d.value); // descriptor-only snapshot (ไม่เรียก getter)
+    }
+    // build 6 canonical fields จาก snapshot เท่านั้น — ห้ามแตะ raw อีก (unknown DATA key ปล่อยผ่าน)
+    const _int = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : null);
+    const out = {};
+    const put = (k) => { const n = _int(vals.get(k)); if (n !== null) out[k] = n; };
+    put('queriesFired');
+    put('urlsReturned');
+    put('urlsVetted');
+    const vk = vals.get('vetKept'); // undefined = ไม่มี own key vetKept
+    if (vk === null) out.vetKept = null; else { const n = _int(vk); if (n !== null) out.vetKept = n; }
+    put('vetDropped');
+    put('vetFailed');
+    return Object.keys(out).length ? out : null;
+  } catch { return null; } // ownKeys/descriptor/prototype trap throw → null (fail closed)
+}
+
 // ---------- S5c ค้นภาพ 4 แหล่ง — ทีละแหล่งต่อ 1 tick (กันชน timeout ของ tick) ----------
 // ห้ามคืน status:'done' ระหว่างยังไม่ครบทุกแหล่ง — done จะโดน idempotency นับ "เคยสำเร็จ" แล้วข้ามแหล่งที่เหลือ
-export async function s5_search(job, { origin }) {
+export async function s5_search(job, { origin, _deps }) {
+  const _jf = _deps?.fetchJson || jfetch; // ★ test seam (เหมือน s6/s7) — prod ไม่ส่ง _deps = jfetch เดิมทุก byte
+  const provenanceOn = process.env.MEGA_SEARCH_PROVENANCE === '1'; // 🔎 snapshot ครั้งเดียวก่อน await
   const im = job.dossier.images || {};
   const done = im.searchedPlatforms || [];
   const next = SEARCH_PLATFORMS.find((p) => !done.includes(p));
@@ -552,10 +587,13 @@ export async function s5_search(job, { origin }) {
         console.log('[MEGA S5c] 🎬 ยิงแคปเฟรม YouTube ขนาน (ผลไปรอเช็คที่ s5_clipframe)');
       } catch { /* ยิงไม่ได้ → s5_clipframe จะยิงเองแบบเดิม */ }
     }
-    const r = await jfetch(`${origin}/api/images/search`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, platform: next }) }, 480000); // ★ 7 ก.ค.: 5→8 นาที (search+EyeScreen ต่อแหล่งแตะ 5 นาทีได้ → เดิม abort พอดี)
+    const r = await _jf(`${origin}/api/images/search`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, platform: next }) }, 480000); // ★ 7 ก.ค.: 5→8 นาที (search+EyeScreen ต่อแหล่งแตะ 5 นาทีได้ → เดิม abort พอดี)
+    // 🔎 Search Provenance V1 (ON เท่านั้น + fail-closed) — แนบ 6 ตัวนับจาก response เข้า stat เดียวกัน
+    //   propagate ทั้ง success stat และ error stat (attempted failure ที่ route แนบ provenance มา — P1-3)
+    const _prov = provenanceOn ? _sanitizeSearchProv(r.provenance) : null;
     const stat = r.success
-      ? { platform: next, found: r.found || 0, added: r.added || 0, vetDropped: r.vetDropped || 0 }
-      : { platform: next, error: (r.error || String(r.httpStatus)).slice(0, 80) };
+      ? { platform: next, found: r.found || 0, added: r.added || 0, vetDropped: r.vetDropped || 0, ...(_prov ? { provenance: _prov } : {}) }
+      : { platform: next, error: (r.error || String(r.httpStatus)).slice(0, 80), ...(_prov ? { provenance: _prov } : {}) };
     const patch = {
       images: {
         ...im,
@@ -907,7 +945,9 @@ export async function s5_clipframe(job, { origin }) {
 //   (ยิงชุดเดิมซ้ำทุกแหล่ง) — ขั้นนี้วัด 2 แกนเพิ่ม แล้วให้สมองแต่งคำค้นใหม่เฉพาะตอนขาดจริง
 // ทำไมอยู่ท้ายสุดก่อน s6: ให้ Lens(4.4)/เฟรมคลิปมีโอกาสเติมพูลก่อน — วัดผลจริงหลังทุกแหล่งเดินจบค่อยตัดสินว่ายังขาดไหม
 // จำกัด 1 รอบต่อเคส (gapSearchDone) · ล้ม/ไม่มีคีย์ AI/อ่านคลังไม่ได้ = ข้ามเงียบ ไม่ถ่วงสายพาน · ปิดทั้งขั้น: IMG_GAP_SEARCH=0
-export async function s5_gapsearch(job, { origin } = {}) {
+export async function s5_gapsearch(job, { origin, _deps } = {}) {
+  const _jf = _deps?.fetchJson || jfetch; // ★ test seam — prod ไม่ส่ง _deps = jfetch เดิมทุก byte
+  const provenanceOn = process.env.MEGA_SEARCH_PROVENANCE === '1'; // 🔎 snapshot ครั้งเดียวก่อน await
   const im = job.dossier.images || {};
   if (!GAP_SEARCH_ON) return { status: 'done', nextAction: 'continue', summary: 'ค้นรอบสอง: ปิดอยู่ (IMG_GAP_SEARCH=0) — ข้าม' };
   if (im.gapSearchDone) return { status: 'done', nextAction: 'continue', summary: 'ค้นรอบสอง: ทำแล้ว — ข้าม' };
@@ -915,7 +955,7 @@ export async function s5_gapsearch(job, { origin } = {}) {
 
   let libImages = [];
   try {
-    const lib = await jfetch(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
+    const lib = await _jf(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
     libImages = lib?.images || [];
   } catch {
     return { status: 'done', nextAction: 'continue', summary: 'ค้นรอบสอง: อ่านคลังไม่ได้ — ข้าม', dossierPatch: { images: { ...im, gapSearchDone: true } } };
@@ -997,6 +1037,8 @@ export async function s5_gapsearch(job, { origin } = {}) {
   let vetDropped = 0;
   let toStore = []; // ★ Wave2 B1: hoist ออกมานอก try ให้ hard gate ท้ายฟังก์ชันอ่านภาพที่เพิ่งเพิ่มได้ด้วย
   const errs = [];
+  // 🔎 Search Provenance V1 (gap round) — hoist ให้ success/failure return อ่านได้ (collected อยู่ใน try)
+  let provQueriesFired = 0, provUrlsReturned = 0, provUrlsVetted = 0, provVetKept = null, provVetDropped = 0, provVetFailed = 0;
   try {
     const { searchImages } = await import('@/lib/imageSearch');
     const { isCatalogSource, isOwnPageSource, isMismatchedFbMedia } = await import('@/lib/junkSources');
@@ -1008,8 +1050,10 @@ export async function s5_gapsearch(job, { origin } = {}) {
     const seen = new Set(libImages.map((x) => x.imageUrl));
     for (const q of newQueries) {
       for (const platform of ['google', 'google_news']) {
+        provQueriesFired++; // 🔎 ยิงคำค้นจริง (รวมที่ล้ม)
         try {
           const imgs = await searchImages(platform, q, { num: 15, caseId: im.caseId });
+          provUrlsReturned += imgs.length; // 🔎 ดิบก่อนกรอง (เฉพาะคำค้นที่คืนสำเร็จ)
           for (const x of imgs) {
             if (!x.imageUrl || seen.has(x.imageUrl)) continue;
             if (isCatalogSource(x) || isOwnPageSource(x) || isMismatchedFbMedia(x)) continue;
@@ -1031,32 +1075,45 @@ export async function s5_gapsearch(job, { origin } = {}) {
       const subjects = (c?.keywords?.subjects || []).map((s) => ({ ...s, gender: s.gender || genderOf(s.name) }));
       const newsGist = (c?.analysis?.summary || c?.analysis?.content || c?.newsSnippet || '').slice(0, 600);
       toStore = collected;
+      provUrlsVetted = collected.length; // 🔎 ส่งเข้า vet จริง
       try {
-        const { vetted } = await vetImages({ images: collected, subjects, newsGist, caseId: im.caseId });
+        const { vetted, kept, dropped, failed } = await vetImages({ images: collected, subjects, newsGist, caseId: im.caseId });
         const anyTag = vetted.some((x) => x.triage);
         toStore = anyTag ? vetted.filter((x) => x.triage?.relevant !== false) : vetted;
-        vetDropped = collected.length - toStore.length;
-      } catch { /* ตาล้ม → เก็บดิบไปก่อน (กันได้ 0 ใบทั้งที่ค้นเจอ) */ }
+        vetDropped = collected.length - toStore.length; // legacy — คงเดิม (ใช้ใน summary)
+        provVetKept = kept; provVetDropped = dropped; provVetFailed = failed; // 🔎 classifier จริง จาก vetImages
+      } catch { provVetFailed = collected.length; /* ตาล้ม → เก็บดิบไปก่อน; execution failure ทั้ง N (kept=null, dropped=0) */ }
       const saved = await addImages(im.caseId, toStore);
       added = saved.added || 0;
     }
   } catch (err) {
     // ★ Wave2 B1: ยิงล้ม (แต่ toStore อาจมีบางส่วนที่เข้าคลังไปแล้วก่อนล้ม) → รวม libImages+toStore ให้ gate เห็นของจริงที่สุด
+    // 🔎 outer failure ที่มี attempt วัดได้ → เก็บ gap sidecar (ON) เท่าที่นับได้จริง ณ จุดล้ม (ไม่เปลี่ยน status/summary เดิม)
+    const _gapProvErr = provenanceOn
+      ? _sanitizeSearchProv({ queriesFired: provQueriesFired, urlsReturned: provUrlsReturned, urlsVetted: provUrlsVetted, vetKept: provVetKept, vetDropped: provVetDropped, vetFailed: provVetFailed })
+      : null;
     return _endGapSearch(job, [...libImages, ...toStore], {
       status: 'done',
       nextAction: 'continue',
       summary: `ค้นรอบสอง: ขาด ${gapDesc} → ได้คำค้นใหม่ ${newQueries.length} คำ แต่ยิงล้ม (${String(err?.message || '').slice(0, 50)}) — ข้าม`,
-      dossierPatch: { images: { ...im, gapSearchDone: true, gapSearchQueries: newQueries } },
+      dossierPatch: { images: { ...im, gapSearchDone: true, gapSearchQueries: newQueries, ...(_gapProvErr ? { gapSearchProvenance: _gapProvErr } : {}) } },
       quality: 'yellow',
     });
   }
 
   // ★ Wave2 B1: จบรอบค้นเสริมสำเร็จ — เช็ค hard gate ด้วยคลังล่าสุด (ของเดิม + ที่เพิ่งเก็บเพิ่มรอบนี้)
+  // 🔎 Search Provenance V1 (ON เท่านั้น + fail-closed) — sibling แยก images.gapSearchProvenance (ไม่ใช่ searchStats!)
+  //   ห้ามยัดเข้า searchStats: นั่นคือ control data ของ s5_search (totalAdded/anyOk/failedAll/status/summary/replay)
+  //   OFF = ไม่มี key นี้เลย · เขียนครั้งเดียวคู่ gapSearchDone · ไม่เข้า queue/spec/hash (payload S7 = curated subset)
+  //   vetDropped = classifier จริง (provVetDropped) ไม่ใช่ legacy subtraction
+  const _gapProv = provenanceOn
+    ? _sanitizeSearchProv({ queriesFired: provQueriesFired, urlsReturned: provUrlsReturned, urlsVetted: provUrlsVetted, vetKept: provVetKept, vetDropped: provVetDropped, vetFailed: provVetFailed })
+    : null;
   return _endGapSearch(job, [...libImages, ...toStore], {
     status: 'done',
     nextAction: 'continue',
     summary: `ค้นรอบสอง: ขาด ${gapDesc} → คำค้นใหม่ ${newQueries.length} คำ → เก็บเพิ่ม ${added} ใบ (ตากรองทิ้ง ${vetDropped}${errs.length ? ` · ล้ม ${errs.length} แหล่งย่อย` : ''})`,
-    dossierPatch: { images: { ...im, gapSearchDone: true, gapSearchAdded: added, gapSearchQueries: newQueries } },
+    dossierPatch: { images: { ...im, gapSearchDone: true, gapSearchAdded: added, gapSearchQueries: newQueries, ...(_gapProv ? { gapSearchProvenance: _gapProv } : {}) } },
   });
 }
 
