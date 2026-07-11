@@ -7,6 +7,7 @@
 // ============================================================
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { register } from 'node:module';
 
 const SRC_ROOT = new URL('../src/', import.meta.url).href;
@@ -28,10 +29,11 @@ delete process.env.MEGA_SEMANTIC_SELECTION;
 delete process.env.MEGA_SELECTION_SPEC;
 delete process.env.MEGA_STRICT_PRODUCER; // ★ Checkpoint C: เริ่มเทสด้วย strict switches สะอาดเสมอ
 delete process.env.MEGA_STRICT_RENDER;
+delete process.env.MEGA_REF_SHOT_AUTHORITY; // ★ D3-B2: เริ่มด้วยสวิตช์ ref-shot สะอาด
 
 const { s6_slots, s7_cover } = await import('../src/lib/megaAdapters.js');
-const { slotDirectorBrain } = await import('../src/lib/megaBrains.js');
-const { buildRefSlotContract, validateStrictRenderActivation } = await import('../src/lib/refSlotContract.js');
+const { slotDirectorBrain, artBriefBrain } = await import('../src/lib/megaBrains.js');
+const { buildRefSlotContract, validateStrictRenderActivation, resolveRefSlotView } = await import('../src/lib/refSlotContract.js');
 
 let passed = 0;
 const test = async (name, fn) => {
@@ -1169,7 +1171,7 @@ await test('SEM2-17 (P1-4): ด่านขั้นต่ำต้องนั�
 // กุญแจสองชั้น: _sem+_semEnvOn (semantic จริง) + MEGA_STRICT_PRODUCER=1 + MEGA_STRICT_RENDER=1
 // OFF ทุกรูปแบบ = payload เดิม byte-identical · ON = แนบคู่ selectionSpec+realizedTemplate หลัง validator ไฟเขียว
 
-const STRICT_KEYS = ['MEGA_SEMANTIC_SELECTION', 'MEGA_SELECTION_SPEC', 'MEGA_STRICT_PRODUCER', 'MEGA_STRICT_RENDER'];
+const STRICT_KEYS = ['MEGA_SEMANTIC_SELECTION', 'MEGA_SELECTION_SPEC', 'MEGA_STRICT_PRODUCER', 'MEGA_STRICT_RENDER', 'MEGA_REF_SHOT_AUTHORITY'];
 // snapshot/restore env แบบ exact prior value (undefined = ลบคืน) — finally เสมอ ห้ามรั่วข้ามเทส
 const withStrictEnv = async (states, fn) => {
   const prior = STRICT_KEYS.map((k) => [k, process.env[k]]);
@@ -1529,6 +1531,578 @@ await test('C11 worker forward โปร่งใส (static guard เสริ�
   const src = fs.readFileSync(new URL('../src/app/api/queue/worker/route.js', import.meta.url), 'utf8');
   assert.ok(src.includes('JSON.stringify({ ...job.payload, _queueJobId: job.id })'), 'worker ต้อง forward payload ทั้งก้อนแบบ spread');
   assert.ok(!src.includes('selectionSpec'), 'worker ไม่รู้จัก/ไม่แตะ strict fields = transparent จริง');
+});
+
+// ═══════════ 🎯 D3-B2 — RUNTIME WIRING ของ REF-SHOT AUTHORITY (11 ก.ค.) ═══════════
+// switch MEGA_REF_SHOT_AUTHORITY=1 + SEM/SPEC + strong ref = arm template_v1 · marker lifecycle + S7 gate
+const REFSHOT_S6 = { MEGA_SEMANTIC_SELECTION: '1', MEGA_SELECTION_SPEC: '1', MEGA_REF_SHOT_AUTHORITY: '1' };
+const REFSHOT_ALL = { ...REFSHOT_S6, MEGA_STRICT_PRODUCER: '1', MEGA_STRICT_RENDER: '1' };
+// fake artBriefBrain: mirror ของจริง — template_v1 → orders(view)+marker แท้ (คำนวณจาก pure resolver) · legacy → ไม่มี marker
+const artBriefFake = ({ refDNA, mode }) => {
+  if (mode === 'template_v1') {
+    const c = buildRefSlotContract({ refDNA, mode: 'template_v1' });
+    const view = resolveRefSlotView(refDNA, { mode: 'template_v1' });
+    return {
+      storyNote: 'v1',
+      orders: view.views.map((v) => ({ i: v.index, role: v.role, pos: v.pos || '', shot: v.shot || '', emotion: v.emotion || '', faceSizePct: v.faceSizePct || null, want: 'สั่ง', personHint: null })),
+      refShotAuthority: { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: c.authority.effectiveViewHash },
+    };
+  }
+  return { storyNote: 'legacy', orders: (refDNA?.slots || []).map((s, i) => ({ i, role: s.role, pos: s.pos || '', shot: s.shot || '', emotion: s.emotion || '', faceSizePct: Number(s.faceSizePct) || null, want: 'สั่ง', personHint: null })) };
+};
+const markedArtBrief = () => artBriefFake({ refDNA: DNA_ALPO, mode: 'template_v1' });
+// flow: s6 ใต้ s6Env → merge → s7 ใต้ s7Env · fresh (ลบ artBrief) หรือ preMark ได้ · inject artBriefFake
+const runRefShotFlow = async ({ s6Env, s7Env = null, deleteArtBrief = true, preMarkArtBrief = null, prePickImages = undefined, deps = {}, s7Deps = null, mutateAfterS6 = null, dna = DNA_ALPO }) => {
+  const captures = { brainArgs: [], fetches: [], payload: null, rawBody: null };
+  const job = mkJob({ dna, orders: ORDERS_ALPO, chars: CHARS_A, refId: REF_ID_C });
+  if (deleteArtBrief) delete job.dossier.artBrief;
+  if (preMarkArtBrief) job.dossier.artBrief = preMarkArtBrief;
+  if (prePickImages !== undefined) job.dossier.pickImages = prePickImages;
+  const mk = (extra) => ({ ...mkDeps({ pool: POOL_A, brainAnswer: ANSWER_ALPO, captures }), artBriefBrain: artBriefFake, ...extra });
+  const s6 = await withStrictEnv(s6Env, () => s6_slots(job, { origin: 'http://mock', _deps: mk(deps) }));
+  if (s6.status === 'done') Object.assign(job.dossier, s6.dossierPatch);
+  if (mutateAfterS6) mutateAfterS6(job);
+  const s7 = (s7Env && s6.status === 'done') ? await withStrictEnv(s7Env, () => s7_cover(job, { origin: 'http://mock', _deps: mk(s7Deps || deps) })) : null;
+  const queueCalls = captures.fetches.filter((u) => String(u).includes('/api/queue/add')).length;
+  return { job, s6, s7, captures, queueCalls };
+};
+
+await test('D3B2-A OFF parity: refshot unset/0/junk → artBrief/pickImages/S7 rawBody เท่า baseline · ไม่มี marker', async () => {
+  const base = await runRefShotFlow({ s6Env: SEM_ON, s7Env: SEM_ON });
+  assert.equal(base.s6.status, 'done', base.s6.summary);
+  assert.ok(!('refShotAuthority' in base.s6.dossierPatch.pickImages), 'baseline pickImages ห้ามมี marker');
+  assert.ok(base.s7.status === 'done' && base.captures.rawBody, 'baseline S7 ต้อง enqueue');
+  const basePick = JSON.stringify(base.s6.dossierPatch.pickImages);
+  const baseBrief = JSON.stringify(base.job.dossier.artBrief);
+  for (const rv of ['0', 'junk']) {
+    const r = await runRefShotFlow({ s6Env: { ...SEM_ON, MEGA_REF_SHOT_AUTHORITY: rv }, s7Env: { ...SEM_ON, MEGA_REF_SHOT_AUTHORITY: rv } });
+    assert.equal(r.s6.status, 'done', `refshot=${rv}`);
+    assert.ok(!('refShotAuthority' in r.s6.dossierPatch.pickImages), `refshot=${rv}: ห้ามมี marker`);
+    assert.equal(JSON.stringify(r.s6.dossierPatch.pickImages), basePick, `refshot=${rv}: pickImages เท่า baseline`);
+    assert.equal(JSON.stringify(r.job.dossier.artBrief), baseBrief, `refshot=${rv}: artBrief เท่า baseline`);
+    assert.equal(r.captures.rawBody, base.captures.rawBody, `refshot=${rv}: S7 rawBody byte เท่า baseline`);
+    assert.ok(!Object.prototype.hasOwnProperty.call(r.captures.payload, 'refShotAuthority'), 'ไม่มี key ใหม่ใน queue');
+  }
+});
+
+await test('D3B2-B ON fresh armed: marker แนบ artBrief+pickImages (deep equal) · hero template shot · S7 one queue ไม่มี key ใหม่', async () => {
+  const r = await runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL });
+  assert.equal(r.s6.status, 'done', r.s6.summary);
+  const m = r.s6.dossierPatch.pickImages.refShotAuthority;
+  assert.ok(m && m.v === 1 && m.mode === 'template_v1' && m.axis === 'template.slots' && /^[0-9a-f]{8}$/.test(m.effectiveViewHash), 'pickImages marker ถูก schema');
+  assert.deepStrictEqual(r.job.dossier.artBrief.refShotAuthority, m, 'artBrief marker == pickImages echo (deep)');
+  assert.ok(r.s6.dossierPatch.pickImages.slotContractHash, 'มี slotContractHash (whole-contract)');
+  // hero template shot ชนะ dna medium (REF-mrbqalpo-h1r1) — ยืนยันผ่าน contract template_v1 จริง
+  const heroContract = buildRefSlotContract({ refDNA: DNA_ALPO, mode: 'template_v1' });
+  assert.equal(heroContract.slots.find((s) => s.refRole === 'hero').refShot, 'closeup', 'hero=closeup (template ชนะ)');
+  assert.equal(heroContract.authority.effectiveViewHash, m.effectiveViewHash, 'marker hash == contract authority hash');
+  // S7 armed → enqueue เดียว · payload มี strict pair · ไม่มี refShotAuthority key ใน queue
+  assert.equal(r.s7.status, 'done', r.s7.summary);
+  assert.equal(r.queueCalls, 1);
+  assert.ok(Object.prototype.hasOwnProperty.call(r.captures.payload, 'selectionSpec'), 'strict spec ใน payload');
+  assert.ok(!Object.prototype.hasOwnProperty.call(r.captures.payload, 'refShotAuthority'), 'ห้ามมี refShotAuthority key ใน queue payload');
+  assert.ok(!r.captures.payload.slotPlan.some((p) => 'refShotAuthority' in p), 'slotPlan row ห้ามพก marker');
+});
+
+await test('D3B2-C existing unmarked artBrief + switch ON = legacy (ไม่ auto-upgrade, ไม่มี marker)', async () => {
+  const r = await runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: null, deleteArtBrief: false });
+  assert.equal(r.s6.status, 'done', r.s6.summary);
+  assert.ok(!('refShotAuthority' in r.s6.dossierPatch.pickImages), 'unmarked artBrief ห้ามถูก upgrade เป็น marker');
+  assert.ok(!r.job.dossier.artBrief.refShotAuthority, 'artBrief เดิม (unmarked) ต้องไม่ถูกเติม marker');
+});
+
+await test('D3B2-D ON→OFF: marked artBrief resume ใต้สวิตช์ปิด = HOLD · S7 marker+switch off = waiting queue0', async () => {
+  // S6 resume ใต้ switch off
+  const s6off = await runRefShotFlow({ s6Env: SEM_ON, preMarkArtBrief: markedArtBrief() });
+  assert.equal(s6off.s6.status, 'waiting', 'marked + switch off = HOLD');
+  assert.ok(s6off.s6.summary.includes('ref-shot authority'), s6off.s6.summary);
+  // S7: job ที่ marked (ผ่าน S6 armed) แล้วรัน S7 ใต้ switch off
+  const armed = await runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: SEM_ON });
+  assert.equal(armed.s6.status, 'done');
+  assert.equal(armed.s7.status, 'waiting', 'S7 marker + switch off = waiting');
+  assert.equal(armed.queueCalls, 0, 'ห้ามแตะ queue');
+});
+
+await test('D3B2-E corrupt/tampered marker → HOLD (v/mode/axis/hash พัง · artBrief↔pickImages mismatch)', async () => {
+  const corrupts = [
+    { v: 2, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: 'aaaaaaaa' },
+    { v: 1, mode: 'legacy', axis: 'template.slots', effectiveViewHash: 'aaaaaaaa' },
+    { v: 1, mode: 'template_v1', axis: 'wrong', effectiveViewHash: 'aaaaaaaa' },
+    { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: 'ZZZ' },
+  ];
+  for (const bad of corrupts) {
+    const ab = { ...markedArtBrief(), refShotAuthority: bad };
+    const r = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: ab });
+    assert.equal(r.s6.status, 'waiting', `corrupt=${JSON.stringify(bad)}`);
+  }
+  // artBrief valid marker แต่ pickImages echo ถูกแก้ให้ต่าง → S7 waiting
+  const armed = await runRefShotFlow({
+    s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL,
+    mutateAfterS6: (job) => { job.dossier.pickImages.refShotAuthority = { ...job.dossier.pickImages.refShotAuthority, effectiveViewHash: 'deadbeef' }; },
+  });
+  assert.equal(armed.s7.status, 'waiting', 'artBrief↔pickImages marker mismatch = S7 waiting');
+  assert.equal(armed.queueCalls, 0);
+});
+
+await test('D3B2-F HOLD ก่อน slotDirector/queue: partial SEM/SPEC · artBrief throw · S7 ไม่มี strict pair', async () => {
+  // armed (switch on + strong ref) แต่ SPEC หาย → fail-closed waiting ก่อน slotDirector
+  const partial = await runRefShotFlow({ s6Env: { MEGA_SEMANTIC_SELECTION: '1', MEGA_REF_SHOT_AUTHORITY: '1' } });
+  assert.equal(partial.s6.status, 'waiting', 'partial prereq = fail-closed');
+  assert.ok(partial.captures.brainArgs.length === 0, 'ต้องพักก่อนเรียก slotDirector');
+  // artBrief throw → waiting (ไม่ถอย legacy)
+  const thrown = await runRefShotFlow({ s6Env: REFSHOT_S6, deps: { artBriefBrain: () => { throw new Error('AUTH_BOOM'); } } });
+  assert.equal(thrown.s6.status, 'waiting', 'armed artBrief throw = HOLD');
+  assert.equal(thrown.captures.brainArgs.length, 0, 'ยังไม่ถึง slotDirector');
+  // S7 marked แต่ strict pair ไม่ครบ (RENDER off) → waiting queue0
+  const noStrict = await runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: { ...REFSHOT_S6, MEGA_STRICT_PRODUCER: '1' } });
+  assert.equal(noStrict.s7.status, 'waiting', 'template_v1 job ต้องมี strict pair ก่อน enqueue');
+  assert.equal(noStrict.queueCalls, 0);
+});
+
+await test('D3B2-G determinism: ON 2 รอบ → marker/slotContractHash/pickImages/scrubbed payload byte-identical', async () => {
+  const a = await runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL });
+  const b = await runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL });
+  assert.deepStrictEqual(a.s6.dossierPatch.pickImages.refShotAuthority, b.s6.dossierPatch.pickImages.refShotAuthority, 'marker เท่ากัน');
+  assert.equal(a.s6.dossierPatch.pickImages.slotContractHash, b.s6.dossierPatch.pickImages.slotContractHash, 'slotContractHash เท่ากัน');
+  assert.deepStrictEqual(a.s6.dossierPatch.pickImages, b.s6.dossierPatch.pickImages, 'pickImages เท่ากันเป๊ะ');
+  assert.equal(a.captures.rawBody, b.captures.rawBody, 'S7 rawBody byte-identical');
+});
+
+await test('D3B2-H mode guard: source ทั้ง 3 จุด (semContract/diagnostic/selectionSpec+trace) ผูก persisted mode · solver/W3-3 ไม่แตะ', async () => {
+  const src = fs.readFileSync(new URL('../src/lib/megaAdapters.js', import.meta.url), 'utf8');
+  // S6: semContract + diagnostic ใช้ _jobTemplateV1
+  assert.ok(/_jobTemplateV1 \? \{ mode: 'template_v1' \}/.test(src), 'semContract/diagnostic ผูก _jobTemplateV1 mode');
+  assert.equal((src.match(/_jobTemplateV1 \? \{ mode: 'template_v1' \} : \{\}/g) || []).length >= 2, true, 'อย่างน้อย 2 จุดใน S6 (semContract+diagnostic)');
+  // S7: selectionSpec ใช้ _s7TemplateV1 · s7_wait trace ใช้ _tracePairOk (derive จาก marker pair ไม่ใช่ env)
+  assert.ok(src.includes("_s7TemplateV1 ? { mode: 'template_v1' }"), 'S7 selectionSpec ผูก _s7TemplateV1');
+  assert.ok(src.includes("_tracePairOk ? { mode: 'template_v1' }"), 's7_wait trace ผูก _tracePairOk (คนละ scope, ไม่พึ่ง env)');
+  // TOCTOU: strict switches ใช้ snapshot _envStrictProducer/_envStrictRender (ไม่ re-read process.env หลัง await)
+  assert.ok(src.includes('_envStrictProducer') && src.includes('_envStrictRender') && src.includes('_envRefAuth'), 'S7 ใช้ snapshot env (TOCTOU-safe)');
+  assert.ok(/const strictProducerRequested = _sem === true && _semEnvOn && _envStrictProducer;/.test(src), 'strictProducerRequested ใช้ snapshot');
+  // env ใหม่ที่ D3-B2 เพิ่ม = MEGA_REF_SHOT_AUTHORITY เท่านั้น (W3-3 ไม่ถูก wire) — solver/W3-3 พฤติกรรมเดิม
+  //   (ยืนยันเชิงพฤติกรรมผ่าน solver/diagnostic tests ที่ผ่านครบ — ที่นี่แค่การันตีไม่มี W3-3 switch ใหม่)
+  assert.ok(!src.includes('MEGA_W3'), 'ไม่มี W3-3 switch');
+});
+
+await test('D3B2-I real artBriefBrain (injected callBrain): legacy prompt/return byte-exact · template_v1 marker แท้ + hero closeup + template axis', async () => {
+  const cap = {};
+  const cb = async ({ system, user }) => { cap.system = system; cap.user = user; return { text: '{"orders":[],"storyNote":"n"}' }; };
+  // legacy: prompt system เดิม · return ไม่มี marker · orders มาจาก dna.slots (hero shot=medium)
+  const legacy = await artBriefBrain({ refDNA: DNA_ALPO, compass: { angle: 'a', mainCharacters: [] }, deskTitle: 'T', typeMatched: true, _callBrain: cb });
+  assert.ok(!('refShotAuthority' in legacy), 'legacy return ห้ามมี marker');
+  assert.ok(cap.system.includes('บรรณาธิการศิลป์ (Art Director)'), 'legacy prompt system byte-exact เดิม');
+  assert.equal(legacy.orders.length, (DNA_ALPO.slots || []).length, 'legacy orders count = dna.slots');
+  assert.equal(legacy.orders.find((o) => o.role === 'hero').shot, 'medium', 'legacy hero shot = dna medium (byte เดิม)');
+  // template_v1: marker แท้ (= contract authority) · hero shot closeup (template ชนะ) · orders i = template axis
+  const v1 = await artBriefBrain({ refDNA: DNA_ALPO, compass: { angle: 'a', mainCharacters: [] }, deskTitle: 'T', typeMatched: true, mode: 'template_v1', _callBrain: cb });
+  const c = buildRefSlotContract({ refDNA: DNA_ALPO, mode: 'template_v1' });
+  assert.ok(v1.refShotAuthority && v1.refShotAuthority.mode === 'template_v1' && v1.refShotAuthority.v === 1, 'template_v1 ต้องมี marker');
+  assert.equal(v1.refShotAuthority.effectiveViewHash, c.authority.effectiveViewHash, 'marker hash = contract authority (แท้ ไม่ใช่ LLM แต่ง)');
+  assert.equal(v1.orders.find((o) => o.role === 'hero').shot, 'closeup', 'hero order shot = closeup (template ชนะ dna medium)');
+  assert.deepEqual(v1.orders.map((o) => o.i), c.slots.map((s) => s.sourceIndex), 'orders i = template axis order');
+});
+
+await test('D3B2-J whole-contract mutation หลัง S6 (แก้ order.want) → S7 slotContractHash ไม่ตรง = waiting queue0', async () => {
+  const r = await runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL, mutateAfterS6: (job) => { job.dossier.artBrief.orders[0].want = 'MUT_' + (job.dossier.artBrief.orders[0].want || ''); } });
+  assert.equal(r.s6.status, 'done');
+  assert.equal(r.s7.status, 'waiting', 'orders เปลี่ยน → whole-contract hash ไม่ตรง S6');
+  assert.equal(r.queueCalls, 0);
+});
+
+await test('D3B2-K corrupt marker ละเอียด: missing hash/own undefined/extra key/Date proto → HOLD · reordered keys ผ่าน · both wrong-hash → HOLD', async () => {
+  const good = markedArtBrief().refShotAuthority;
+  const bads = [
+    { v: 1, mode: 'template_v1', axis: 'template.slots' }, // missing hash
+    { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: undefined }, // own undefined
+    { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: good.effectiveViewHash, extra: 1 }, // extra key
+    Object.assign(new Date(), { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: good.effectiveViewHash }), // Date prototype
+  ];
+  for (const bad of bads) {
+    const r = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: { ...markedArtBrief(), refShotAuthority: bad } });
+    assert.equal(r.s6.status, 'waiting', `corrupt=${Object.getPrototypeOf(bad) === Object.prototype ? JSON.stringify(bad) : 'Date'}`);
+  }
+  // reordered keys (schema valid) → validator ไม่พึ่ง order → resume ได้
+  const reordered = { effectiveViewHash: good.effectiveViewHash, axis: 'template.slots', mode: 'template_v1', v: 1 };
+  const rR = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: { ...markedArtBrief(), refShotAuthority: reordered } });
+  assert.equal(rR.s6.status, 'done', 'reordered keys ต้อง resume ได้');
+  // both markers schema-valid แต่ hash ผิด → recompute reject (S6 semContract hash mismatch)
+  const wrong = { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: 'deadbeef' };
+  const rW = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: { ...markedArtBrief(), refShotAuthority: wrong } });
+  assert.equal(rW.s6.status, 'waiting', 'schema-valid แต่ hash ผิด → recompute reject = HOLD');
+});
+
+await test('D3B2-L geometry/axis HOLD: no template (axisReady false) + geometry out-of-bounds → HOLD ก่อน slotDirector', async () => {
+  // no template.slots → axisReady false → semContract okSource=false → HOLD
+  const noTpl = { slots: [{ role: 'hero', shot: 'closeup' }, { role: 'context' }, { role: 'moment' }] };
+  const rNo = await runRefShotFlow({ s6Env: REFSHOT_S6, dna: noTpl });
+  assert.equal(rNo.s6.status, 'waiting', 'no template axis = HOLD');
+  assert.equal(rNo.captures.brainArgs.length, 0, 'ก่อน slotDirector');
+  // geometry out-of-bounds (x+w>100) → _refShotContractGeomOk false → HOLD
+  const oob = { template: { slots: [
+    { role: 'hero', shape: 'rect', xPct: 60, yPct: 0, wPct: 60, hPct: 100, shot: 'closeup' }, // 60+60>100
+    { role: 'context', shape: 'rect', xPct: 0, yPct: 0, wPct: 40, hPct: 100 },
+    { role: 'moment', shape: 'circle', xPct: 5, yPct: 60, wPct: 20, hPct: 20 },
+  ] }, slots: [{ role: 'hero' }, { role: 'context' }, { role: 'moment' }] };
+  const rOob = await runRefShotFlow({ s6Env: REFSHOT_S6, dna: oob });
+  assert.equal(rOob.s6.status, 'waiting', 'geometry out-of-bounds = HOLD');
+  assert.equal(rOob.captures.brainArgs.length, 0, 'ก่อน slotDirector');
+});
+
+await test('D3B2-M existing-unmarked + switch ON → pickImages + raw S7 body เท่า legacy baseline (byte)', async () => {
+  const base = await runRefShotFlow({ s6Env: SEM_ON, s7Env: SEM_ON, deleteArtBrief: false });
+  const on = await runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: REFSHOT_S6, deleteArtBrief: false });
+  assert.equal(base.s6.status, 'done');
+  assert.deepStrictEqual(on.s6.dossierPatch.pickImages, base.s6.dossierPatch.pickImages, 'pickImages เท่า legacy baseline');
+  assert.equal(on.captures.rawBody, base.captures.rawBody, 'S7 raw body เท่า legacy baseline');
+});
+
+await test('D3B2-N P0-1 fresh armed แต่ brain คืน missing/malformed marker → waiting · ไม่ assign (retry ไม่กลาย unmarked legacy)', async () => {
+  const noMarker = await runRefShotFlow({ s6Env: REFSHOT_S6, deps: { artBriefBrain: () => ({ storyNote: 'x', orders: [] }) } });
+  assert.equal(noMarker.s6.status, 'waiting', 'armed + brain ไม่มี marker = HOLD');
+  assert.equal(noMarker.job.dossier.artBrief, undefined, 'ไม่ assign (fresh คงว่าง — retry ยัง fresh)');
+  const badMarker = await runRefShotFlow({ s6Env: REFSHOT_S6, deps: { artBriefBrain: () => ({ storyNote: 'x', orders: [], refShotAuthority: { v: 2, mode: 'x' } }) } });
+  assert.equal(badMarker.s6.status, 'waiting', 'armed + brain marker malformed = HOLD');
+  assert.equal(badMarker.job.dossier.artBrief, undefined, 'ไม่ assign malformed');
+});
+
+await test('D3B2-O (P1 TOCTOU) marker Proxy: descriptor-valid + get-trap-throw → normalize ครั้งเดียว (no raw-get) · persist/echo เป็น plain', async () => {
+  const hash = buildRefSlotContract({ refDNA: DNA_ALPO, mode: 'template_v1' }).authority.effectiveViewHash;
+  const target = { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: hash };
+  let getCalls = 0;
+  const proxy = new Proxy(target, {
+    get() { getCalls++; throw new Error('RAW_GET_FORBIDDEN'); }, // ถ้ามี raw get = ระเบิด
+    getOwnPropertyDescriptor(t, k) { return Object.getOwnPropertyDescriptor(t, k); },
+    ownKeys(t) { return Reflect.ownKeys(t); },
+  });
+  const ab = { storyNote: 'x', orders: markedArtBrief().orders, refShotAuthority: proxy };
+  const r = await runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL, preMarkArtBrief: ab });
+  assert.equal(r.s6.status, 'done', 'descriptor-valid Proxy ต้อง normalize สำเร็จ');
+  assert.equal(getCalls, 0, 'ห้ามมี raw get บน marker Proxy เลย (ใช้ descriptor เท่านั้น)');
+  const echoed = r.s6.dossierPatch.pickImages.refShotAuthority;
+  assert.equal(Object.getPrototypeOf(echoed), Object.prototype, 'echo marker เป็น plain object (ไม่ใช่ Proxy)');
+  assert.deepStrictEqual(echoed, { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: hash });
+  assert.equal(r.s7.status, 'done', 'S7 ใช้ canonical snapshot สำเร็จ (no raw-get)');
+  // ★ D3-B2.4 (Codex P1): persisted artBrief carrier (ตัว 'ab' ที่ผ่านเข้าไป) ต้องถูกแทนด้วย canonical plain clone —
+  //   ไม่ใช่ Proxy เดิม (กันหลุด serialize ก่อน patch) · ยังไม่มี raw get
+  const canonical = { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: hash };
+  assert.notStrictEqual(ab.refShotAuthority, proxy, 'persisted artBrief marker != proxy เดิม');
+  assert.equal(Object.getPrototypeOf(ab.refShotAuthority), Object.prototype, 'persisted artBrief marker เป็น plain object');
+  assert.deepStrictEqual(ab.refShotAuthority, canonical, 'persisted artBrief marker = canonical แท้');
+  assert.equal(getCalls, 0, 'แทน carrier แล้วยังไม่มี raw get');
+  // ★ D3-B2.4 (Codex P1): paired artBrief+pickImages ทั้งคู่เป็น Proxy (valid pair) →
+  //   ทั้งสอง persisted carrier + echo = canonical plain · raw get คง 0
+  let pairGet = 0;
+  const mkProxy = () => new Proxy({ v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: hash }, {
+    get() { pairGet++; throw new Error('RAW_GET_FORBIDDEN'); },
+    getOwnPropertyDescriptor(t, k) { return Object.getOwnPropertyDescriptor(t, k); },
+    ownKeys(t) { return Reflect.ownKeys(t); },
+  });
+  const abP = mkProxy();
+  const pickP = mkProxy();
+  const abCarrier = { storyNote: 'x', orders: markedArtBrief().orders, refShotAuthority: abP };
+  const pickCarrier = { slots: {}, semanticSelection: true, refShotAuthority: pickP };
+  const rp = await runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL, preMarkArtBrief: abCarrier, prePickImages: pickCarrier });
+  assert.equal(rp.s6.status, 'done', 'paired Proxy valid pair → normalize สำเร็จ');
+  assert.equal(pairGet, 0, 'paired: ไม่มี raw get บน Proxy ทั้งสอง (descriptor เท่านั้น)');
+  // persisted carriers (อ้างอิงเดิมที่ผ่านเข้าไป — S6 แทนในที่ก่อน patch/serialize)
+  assert.notStrictEqual(abCarrier.refShotAuthority, abP, 'paired: artBrief carrier แทน proxy แล้ว');
+  assert.equal(Object.getPrototypeOf(abCarrier.refShotAuthority), Object.prototype, 'paired: artBrief carrier เป็น plain');
+  assert.deepStrictEqual(abCarrier.refShotAuthority, canonical, 'paired: artBrief carrier = canonical');
+  assert.notStrictEqual(pickCarrier.refShotAuthority, pickP, 'paired: pickImages carrier แทน proxy แล้ว');
+  assert.equal(Object.getPrototypeOf(pickCarrier.refShotAuthority), Object.prototype, 'paired: pickImages carrier เป็น plain');
+  assert.deepStrictEqual(pickCarrier.refShotAuthority, canonical, 'paired: pickImages carrier = canonical');
+  // returned echo (patch) canonical plain
+  const echoP = rp.s6.dossierPatch.pickImages.refShotAuthority;
+  assert.equal(Object.getPrototypeOf(echoP), Object.prototype, 'paired: echo เป็น plain');
+  assert.deepStrictEqual(echoP, canonical, 'paired: echo = canonical');
+  assert.equal(rp.s7.status, 'done', 'paired: S7 ใช้ canonical snapshot สำเร็จ');
+  // getter descriptor (ไม่ใช่ data) → invalid → HOLD
+  const gt = {};
+  Object.defineProperty(gt, 'v', { get() { return 1; }, enumerable: true });
+  Object.defineProperty(gt, 'mode', { value: 'template_v1', enumerable: true });
+  Object.defineProperty(gt, 'axis', { value: 'template.slots', enumerable: true });
+  Object.defineProperty(gt, 'effectiveViewHash', { value: hash, enumerable: true });
+  const rG = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: { storyNote: 'x', orders: markedArtBrief().orders, refShotAuthority: gt } });
+  assert.equal(rG.s6.status, 'waiting', 'getter descriptor → invalid → HOLD');
+  // non-enumerable extra → Reflect.ownKeys length !=4 → HOLD
+  const ne = { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: hash };
+  Object.defineProperty(ne, 'hidden', { value: 1, enumerable: false });
+  const rNE = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: { storyNote: 'x', orders: markedArtBrief().orders, refShotAuthority: ne } });
+  assert.equal(rNE.s6.status, 'waiting', 'non-enumerable extra key → HOLD');
+  // symbol extra → HOLD
+  const sym = { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: hash, [Symbol('x')]: 1 };
+  const rS = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: { storyNote: 'x', orders: markedArtBrief().orders, refShotAuthority: sym } });
+  assert.equal(rS.s6.status, 'waiting', 'symbol extra key → HOLD');
+});
+
+await test('D3B2-P (P1-2) carrier edges: marked artBrief + pickImages(no marker) → HOLD · no artBrief + pickImages unmarked → legacy', async () => {
+  // marked artBrief + pickImages object without marker = inconsistent → HOLD
+  const r1 = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: markedArtBrief(), prePickImages: { slots: {} } });
+  assert.equal(r1.s6.status, 'waiting', 'marked artBrief + pickImages(no marker) = HOLD');
+  // no artBrief + existing unmarked pickImages (in-flight) → legacy, never upgrade
+  const r2 = await runRefShotFlow({ s6Env: REFSHOT_S6, deleteArtBrief: true, prePickImages: { slots: {}, semanticSelection: true } });
+  assert.equal(r2.s6.status, 'done', 'no artBrief + unmarked pickImages = legacy (เดินต่อ)');
+  assert.ok(!('refShotAuthority' in r2.s6.dossierPatch.pickImages), 'ห้าม auto-upgrade เป็น marker');
+});
+
+await test('D3B2-Q (P1-3) realized gate: S6 armed + bad realized → HOLD · S7 marked + bad realized (s7Deps) → HOLD queue0', async () => {
+  const realReal = dnaToTemplateSpec(DNA_ALPO);
+  const mkBad = (mut) => { const rr = structuredClone(realReal); mut(rr); return () => rr; };
+  const cases = [
+    ['wrong-canvas', mkBad((rr) => { rr.canvasW = 1000; })],
+    ['fractional', mkBad((rr) => { rr.slots[0].x = 10.5; })],
+    ['upper-OOB', mkBad((rr) => { rr.slots[0].w = (1080 - rr.slots[0].x) + 5; })],
+    ['dup-id', mkBad((rr) => { rr.slots[1].id = rr.slots[0].id; })],
+    ['blank-id', mkBad((rr) => { rr.slots[0].id = ''; })],
+  ];
+  for (const [name, badFn] of cases) {
+    const s6 = await runRefShotFlow({ s6Env: REFSHOT_S6, deps: { dnaToTemplateSpec: badFn } });
+    assert.equal(s6.s6.status, 'waiting', `S6 realized ${name} → HOLD`);
+    const s7 = await runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL, s7Deps: { dnaToTemplateSpec: badFn } });
+    assert.equal(s7.s7.status, 'waiting', `S7 realized ${name} → HOLD`);
+    assert.equal(s7.queueCalls, 0, `${name}: queue0`);
+  }
+});
+
+await test('D3B2-R (P1-5) real artBriefBrain: template reject ก่อน callBrain · full legacy deep-compare · LLM-spoof marker ถูกทับ', async () => {
+  // template invalid → reject ก่อนเรียก callBrain
+  let cbCalled = false;
+  const cbGuard = async () => { cbCalled = true; return { text: '{}' }; };
+  await assert.rejects(
+    artBriefBrain({ refDNA: { slots: [{ role: 'hero' }] }, compass: {}, deskTitle: 'T', mode: 'template_v1', _callBrain: cbGuard }),
+    /AUTHORITY/,
+    'template invalid ต้อง throw',
+  );
+  assert.equal(cbCalled, false, 'reject ก่อนเรียก callBrain (ไม่เปลือง LLM)');
+  // full legacy deep-compare: default vs 'legacy' vs 'junk' → call args + return object เท่ากันครบ
+  const runLegacy = async (mode) => {
+    const cap = {};
+    const cb = async (args) => { cap.args = args; return { text: '{"orders":[{"i":0,"want":"w","personHint":null,"refShotAuthority":{"v":9}}],"storyNote":"s","refShotAuthority":{"hacked":true}}' }; };
+    const out = await artBriefBrain({ refDNA: DNA_ALPO, compass: { angle: 'a', mainCharacters: [] }, deskTitle: 'T', typeMatched: true, ...(mode !== undefined ? { mode } : {}), _callBrain: cb });
+    return { args: cap.args, out };
+  };
+  const a = await runLegacy(undefined);
+  const b = await runLegacy('legacy');
+  const c = await runLegacy('junk');
+  assert.deepStrictEqual(a.args, b.args, 'default vs legacy: callBrain args ครบเท่ากัน');
+  assert.deepStrictEqual(a.args, c.args, 'default vs junk: callBrain args ครบเท่ากัน');
+  assert.deepStrictEqual(a.out, b.out, 'default vs legacy: return object ครบเท่ากัน');
+  assert.deepStrictEqual(a.out, c.out, 'default vs junk: return object ครบเท่ากัน');
+  assert.ok(!('refShotAuthority' in a.out), 'legacy return ไม่มี marker (LLM spoof ไม่รับ)');
+  assert.ok(!('refShotAuthority' in (a.out.orders[0] || {})), 'order ไม่พก marker ที่ LLM แอบใส่');
+  // template_v1: LLM spoof top-level/nested marker → ต้องถูกทับด้วย canonical แท้เท่านั้น
+  const capV = {};
+  const cbV = async (args) => { capV.args = args; return { text: '{"orders":[{"i":0,"want":"w","personHint":null}],"storyNote":"s","refShotAuthority":{"hacked":true}}' }; };
+  const v1 = await artBriefBrain({ refDNA: DNA_ALPO, compass: { angle: 'a', mainCharacters: [] }, deskTitle: 'T', typeMatched: true, mode: 'template_v1', _callBrain: cbV });
+  const contract = buildRefSlotContract({ refDNA: DNA_ALPO, mode: 'template_v1' });
+  assert.deepStrictEqual(v1.refShotAuthority, { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: contract.authority.effectiveViewHash }, 'marker = canonical แท้ (LLM spoof ถูกทับ)');
+  assert.equal(resolveRefSlotView(DNA_ALPO, { mode: 'template_v1' }).views[0].shotProvenance, 'template', 'hero shot provenance = template (AC-0066)');
+});
+
+await test('D3B2-S (P1-2) truly-reordered axis: REAL artBriefBrain — user prompt + orders ตาม template axis · subject/emotion จาก role+occurrence · template shot/provenance ชนะ · direct OOB/missing reject ก่อน callBrain', async () => {
+  // DNA slots order/roles ขัด template.slots order: template=[hero,context,reaction] · dna=[reaction,hero,context]
+  const REORDER_DNA = {
+    template: { slots: [
+      { role: 'hero', shape: 'rect', xPct: 0, yPct: 0, wPct: 50, hPct: 50, shot: 'closeup' },
+      { role: 'context', shape: 'rect', xPct: 50, yPct: 0, wPct: 50, hPct: 50, shot: 'wide' },
+      { role: 'reaction', shape: 'rect', xPct: 0, yPct: 50, wPct: 50, hPct: 50, shot: 'medium' },
+    ] },
+    slots: [
+      { role: 'reaction', shot: 'DNA_R', subject: 'Person R', emotion: 'shocked' },
+      { role: 'hero', shot: 'DNA_H', subject: 'Person H', emotion: 'crying' },
+      { role: 'context', shot: 'DNA_C', subject: 'Place C', emotion: 'calm' },
+    ],
+  };
+  const cap = {};
+  const cb = async (args) => { cap.args = args; return { text: '{"orders":[{"i":0,"want":"wH","personHint":null},{"i":1,"want":"wC","personHint":null},{"i":2,"want":"wR","personHint":null}],"storyNote":"n"}' }; };
+  const out = await artBriefBrain({ refDNA: REORDER_DNA, compass: { angle: 'a', mainCharacters: [] }, deskTitle: 'T', typeMatched: true, mode: 'template_v1', _callBrain: cb });
+  // captured full user-prompt role sequence = template axis order (ไม่ใช่ dna array order)
+  const promptSlots = JSON.parse(cap.args.user.split('\n').pop());
+  assert.deepEqual(promptSlots.map((s) => s.role), ['hero', 'context', 'reaction'], 'user prompt role sequence = template axis (dna order [reaction,hero,context] ไม่ชนะ)');
+  // subject/emotion จาก role+occurrence semantics (จับ DNA ตาม role ไม่ใช่ index)
+  assert.equal(promptSlots[0].refSubject, 'Person H', 'hero subject = DNA hero (role match)');
+  assert.equal(promptSlots[0].emotion, 'crying', 'hero emotion = DNA hero');
+  assert.equal(promptSlots[2].refSubject, 'Person R', 'reaction subject = DNA reaction');
+  assert.equal(promptSlots[2].emotion, 'shocked', 'reaction emotion = DNA reaction');
+  // template shot ชนะ dna shot ทุกช่อง
+  assert.deepEqual(promptSlots.map((s) => s.shot), ['closeup', 'wide', 'medium'], 'prompt shot = template (DNA_* ถูกทับ)');
+  // returned orders ตาม template axis/order + template shot ในผลด้วย
+  assert.deepEqual(out.orders.map((o) => o.i), [0, 1, 2], 'orders index = template axis');
+  assert.deepEqual(out.orders.map((o) => o.role), ['hero', 'context', 'reaction'], 'orders role = template axis');
+  assert.deepEqual(out.orders.map((o) => o.shot), ['closeup', 'wide', 'medium'], 'orders shot = template ชนะ');
+  // provenance ชนะ + marker canonical แท้
+  const rv = resolveRefSlotView(REORDER_DNA, { mode: 'template_v1' });
+  assert.equal(rv.views[0].shotProvenance, 'template', 'hero shot provenance = template');
+  const c = buildRefSlotContract({ refDNA: REORDER_DNA, mode: 'template_v1' });
+  assert.deepStrictEqual(out.refShotAuthority, { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: c.authority.effectiveViewHash }, 'marker = canonical แท้');
+
+  // ── direct reject ก่อน callBrain: missing template + x+w>100 + y+h>100 ──
+  const guarded = async (refDNA) => {
+    let called = false;
+    const g = async () => { called = true; return { text: '{}' }; };
+    let err = null;
+    try { await artBriefBrain({ refDNA, compass: {}, deskTitle: 'T', mode: 'template_v1', _callBrain: g }); }
+    catch (e) { err = e; }
+    return { called, err };
+  };
+  const missing = await guarded({ slots: [{ role: 'hero' }, { role: 'context' }, { role: 'reaction' }] });
+  assert.match(String(missing.err?.message), /AXIS_NOT_READY/, 'missing template → AXIS_NOT_READY');
+  assert.equal(missing.called, false, 'missing template: ไม่เรียก callBrain');
+  const oobX = await guarded({ template: { slots: [
+    { role: 'hero', xPct: 60, yPct: 0, wPct: 50, hPct: 50 }, // x+w=110>100
+    { role: 'context', xPct: 0, yPct: 0, wPct: 40, hPct: 50 },
+    { role: 'reaction', xPct: 0, yPct: 50, wPct: 40, hPct: 40 },
+  ] }, slots: [] });
+  assert.match(String(oobX.err?.message), /GEOMETRY_INVALID/, 'x+w>100 → GEOMETRY_INVALID');
+  assert.equal(oobX.called, false, 'x+w>100: ไม่เรียก callBrain');
+  const oobY = await guarded({ template: { slots: [
+    { role: 'hero', xPct: 0, yPct: 60, wPct: 50, hPct: 50 }, // y+h=110>100
+    { role: 'context', xPct: 0, yPct: 0, wPct: 40, hPct: 50 },
+    { role: 'reaction', xPct: 50, yPct: 0, wPct: 40, hPct: 40 },
+  ] }, slots: [] });
+  assert.match(String(oobY.err?.message), /GEOMETRY_INVALID/, 'y+h>100 → GEOMETRY_INVALID');
+  assert.equal(oobY.called, false, 'y+h>100: ไม่เรียก callBrain');
+});
+
+await test('D3B2-T (P1-3) legacy golden: default/legacy/junk → COMPLETE call args + return hash = hard-coded golden (HEAD 0dbd5a0 legacy branch)', async () => {
+  // ★ literal golden = sha256(JSON.stringify({args,out})) คำนวณ offline จาก legacy branch —
+  //   byte-identical กับ HEAD 0dbd5a0 (git diff พิสูจน์ legacy path เป็น additive-only; template_v1 ต่อยอดไม่แตะ) ·
+  //   ห้าม derive จาก output ปัจจุบัน (regression ที่แชร์ทุก mode จะหลุด self-compare แต่ไม่หลุด golden นี้)
+  const GOLD_DNA = { slots: [
+    { role: 'hero', pos: 'center', shot: 'closeup', emotion: 'crying', faceSizePct: 40, subject: 'Mother' },
+    { role: 'reaction', pos: 'left', shot: 'medium', emotion: 'shocked', faceSizePct: 25, subject: 'Son' },
+    { role: 'context', pos: 'right', shot: 'wide', emotion: 'calm', faceSizePct: 10, subject: 'House' },
+  ] };
+  const GOLD_COMPASS = { angle: 'มุมทอง', primaryEmotion: 'เศร้า', mainCharacters: [{ name: 'แม่', role: 'hero' }], visualDreamShots: [] };
+  const GOLD_DESK = 'ข่าวทองคำทดสอบ';
+  const GOLD_TEXT = '{"orders":[{"i":0,"want":"w0","personHint":"p0"},{"i":1,"want":"w1","personHint":null},{"i":2,"want":"w2","personHint":"p2"}],"storyNote":"sn"}';
+  const GOLDEN_SHA256 = '5a0066f07f821cd7cc9fcf6f4b45f8f71e2619bedbe9a97cf55e114919ffcab8';
+  const run = async (mode) => {
+    const cap = {};
+    const cb = async (args) => { cap.args = args; return { text: GOLD_TEXT }; };
+    const out = await artBriefBrain({ refDNA: GOLD_DNA, compass: GOLD_COMPASS, deskTitle: GOLD_DESK, typeMatched: true, ...(mode !== undefined ? { mode } : {}), _callBrain: cb });
+    return crypto.createHash('sha256').update(JSON.stringify({ args: cap.args, out })).digest('hex');
+  };
+  assert.equal(await run(undefined), GOLDEN_SHA256, 'default mode = golden (HEAD-anchored)');
+  assert.equal(await run('legacy'), GOLDEN_SHA256, 'explicit legacy = golden');
+  assert.equal(await run('junk'), GOLDEN_SHA256, 'junk mode → legacy = golden');
+});
+
+await test('D3B2-U (P1 fail-closed carrier descriptor) S6: refShotAuthority เป็น getter/non-enumerable/throwing-descriptor Proxy → HOLD · ไม่รัน getter · slotDirector 0', async () => {
+  const goodMarker = () => markedArtBrief().refShotAuthority;
+  // 1) carrier-level getter → ห้ามถูกรัน (อ่านผ่าน descriptor) → HOLD
+  let s6GetterRan = 0;
+  const abGetter = { storyNote: 'x', orders: markedArtBrief().orders };
+  Object.defineProperty(abGetter, 'refShotAuthority', { get() { s6GetterRan++; return goodMarker(); }, enumerable: true, configurable: true });
+  const rG = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: abGetter });
+  assert.equal(rG.s6.status, 'waiting', 'S6 carrier getter → HOLD (marker corrupt)');
+  assert.equal(s6GetterRan, 0, 'S6 carrier getter ห้ามถูก execute (descriptor-only read)');
+  assert.equal(rG.captures.brainArgs.length, 0, 'S6 carrier getter: ไม่ถึง slotDirector');
+  // 2) non-enumerable property: อ่านได้แต่จะหายตอน JSON persist → ต้อง HOLD (ไม่ใช่ผ่าน)
+  const abNonEnum = { storyNote: 'x', orders: markedArtBrief().orders };
+  Object.defineProperty(abNonEnum, 'refShotAuthority', { value: goodMarker(), enumerable: false, configurable: true });
+  assert.ok(!('refShotAuthority' in JSON.parse(JSON.stringify(abNonEnum))), 'ยืนยัน: non-enumerable หายตอน JSON round-trip');
+  const rNE = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: abNonEnum });
+  assert.equal(rNE.s6.status, 'waiting', 'S6 carrier non-enumerable → HOLD (กันหายเงียบตอน persist)');
+  assert.equal(rNE.captures.brainArgs.length, 0, 'S6 non-enum: ไม่ถึง slotDirector');
+  // 3) throwing getOwnPropertyDescriptor Proxy (เฉพาะ key refShotAuthority) → caught → HOLD (ไม่ระเบิด)
+  let s6Gopd = 0;
+  const abTarget = { storyNote: 'x', orders: markedArtBrief().orders, refShotAuthority: goodMarker() };
+  const abProxy = new Proxy(abTarget, {
+    getOwnPropertyDescriptor(t, k) { if (k === 'refShotAuthority') { s6Gopd++; throw new Error('GOPD_FORBIDDEN'); } return Object.getOwnPropertyDescriptor(t, k); },
+  });
+  const rTP = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: abProxy });
+  assert.equal(rTP.s6.status, 'waiting', 'S6 throwing-descriptor Proxy → HOLD (caught fail-closed)');
+  assert.ok(s6Gopd >= 1, 'S6 อ่านผ่าน getOwnPropertyDescriptor จริง (trap ถูกเรียก)');
+  assert.equal(rTP.captures.brainArgs.length, 0, 'S6 throwing-descriptor: ไม่ถึง slotDirector');
+});
+
+await test('D3B2-V (P1 fail-closed carrier descriptor) S7: pickImages.refShotAuthority getter/non-enumerable/throwing-descriptor Proxy หลัง S6 armed → HOLD · ไม่รัน getter · queue0', async () => {
+  // getter บน pickImages carrier หลัง S6 done → S7 HOLD · getter ไม่ถูกรัน · queue0
+  let s7GetterRan = 0;
+  const rG = await runRefShotFlow({
+    s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL,
+    mutateAfterS6: (job) => {
+      const pick = job.dossier.pickImages;
+      const cur = Object.getOwnPropertyDescriptor(pick, 'refShotAuthority').value;
+      delete pick.refShotAuthority;
+      Object.defineProperty(pick, 'refShotAuthority', { get() { s7GetterRan++; return cur; }, enumerable: true, configurable: true });
+    },
+  });
+  assert.equal(rG.s6.status, 'done', 'S6 armed done');
+  assert.equal(rG.s7.status, 'waiting', 'S7 carrier getter → HOLD');
+  assert.equal(s7GetterRan, 0, 'S7 carrier getter ห้ามถูก execute');
+  assert.equal(rG.queueCalls, 0, 'S7 getter: queue0');
+  // non-enumerable บน pickImages carrier → S7 HOLD · queue0
+  const rNE = await runRefShotFlow({
+    s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL,
+    mutateAfterS6: (job) => {
+      const pick = job.dossier.pickImages;
+      const cur = Object.getOwnPropertyDescriptor(pick, 'refShotAuthority').value;
+      delete pick.refShotAuthority;
+      Object.defineProperty(pick, 'refShotAuthority', { value: cur, enumerable: false, configurable: true });
+    },
+  });
+  assert.equal(rNE.s7.status, 'waiting', 'S7 carrier non-enumerable → HOLD');
+  assert.equal(rNE.queueCalls, 0, 'S7 non-enum: queue0');
+  // throwing getOwnPropertyDescriptor Proxy wrap pickImages (เฉพาะ key refShotAuthority) → S7 HOLD · queue0
+  let s7Gopd = 0;
+  const rTP = await runRefShotFlow({
+    s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL,
+    mutateAfterS6: (job) => {
+      const target = job.dossier.pickImages;
+      job.dossier.pickImages = new Proxy(target, {
+        getOwnPropertyDescriptor(t, k) { if (k === 'refShotAuthority') { s7Gopd++; throw new Error('GOPD_FORBIDDEN'); } return Object.getOwnPropertyDescriptor(t, k); },
+      });
+    },
+  });
+  assert.equal(rTP.s7.status, 'waiting', 'S7 throwing-descriptor Proxy → HOLD (caught)');
+  assert.ok(s7Gopd >= 1, 'S7 อ่านผ่าน getOwnPropertyDescriptor จริง (trap ถูกเรียก)');
+  assert.equal(rTP.queueCalls, 0, 'S7 throwing-descriptor: queue0');
+});
+
+await test('D3B2-W (P1 fail-closed write-back) S6 resume: frozen/non-writable carrier · Proxy throwing/swallowed set trap → HOLD (ไม่ throw) · slotDirector0 · queue0 · deterministic retry', async () => {
+  const M = () => markedArtBrief().refShotAuthority;
+  // 1) frozen artBrief carrier ทั้งก้อน (refShotAuthority non-writable) → write-back throw → caught → HOLD
+  const abFrozen = Object.freeze({ storyNote: 'x', orders: markedArtBrief().orders, refShotAuthority: M() });
+  const rF1 = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: abFrozen });
+  assert.equal(rF1.s6.status, 'waiting', 'frozen carrier → HOLD (ไม่ throw หลุด S6)');
+  assert.equal(rF1.captures.brainArgs.length, 0, 'frozen: slotDirector 0');
+  // deterministic: carrier เดิม รอบสอง → waiting เหมือนเดิม (frozen ไม่เปลี่ยน)
+  const rF2 = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: abFrozen });
+  assert.equal(rF2.s6.status, 'waiting', 'frozen carrier retry → waiting (deterministic)');
+  assert.equal(rF2.captures.brainArgs.length, 0, 'frozen retry: slotDirector 0');
+  // 2) non-writable property เดี่ยว (object ไม่ frozen ทั้งก้อน) → write-back throw → HOLD
+  const abNW = { storyNote: 'x', orders: markedArtBrief().orders };
+  Object.defineProperty(abNW, 'refShotAuthority', { value: M(), enumerable: true, writable: false, configurable: false });
+  const rNW = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: abNW });
+  assert.equal(rNW.s6.status, 'waiting', 'non-writable property → HOLD');
+  assert.equal(rNW.captures.brainArgs.length, 0, 'non-writable: slotDirector 0');
+  // 3) Proxy throwing set trap → write-back throw → caught → HOLD
+  let throwSet = 0;
+  const abThrow = new Proxy({ storyNote: 'x', orders: markedArtBrief().orders, refShotAuthority: M() }, {
+    set(t, k, v) { if (k === 'refShotAuthority') { throwSet++; throw new Error('SET_FORBIDDEN'); } t[k] = v; return true; },
+  });
+  const rT = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: abThrow });
+  assert.equal(rT.s6.status, 'waiting', 'throwing set trap → HOLD (caught)');
+  assert.ok(throwSet >= 1, 'write-back พยายามเขียนจริง (set trap ถูกเรียก)');
+  assert.equal(rT.captures.brainArgs.length, 0, 'throwing set: slotDirector 0');
+  // 4) Proxy swallowed/lying set trap (คืน true แต่ไม่เซ็ต) → readback identity ไม่ตรง → HOLD
+  let lyingSet = 0;
+  const abLie = new Proxy({ storyNote: 'x', orders: markedArtBrief().orders, refShotAuthority: M() }, {
+    set(t, k, v) { if (k === 'refShotAuthority') { lyingSet++; return true; } t[k] = v; return true; },
+  });
+  const rL = await runRefShotFlow({ s6Env: REFSHOT_S6, preMarkArtBrief: abLie });
+  assert.equal(rL.s6.status, 'waiting', 'lying set trap → HOLD (readback identity ไม่ตรง)');
+  assert.ok(lyingSet >= 1, 'lying set trap ถูกเรียกจริง');
+  assert.equal(rL.captures.brainArgs.length, 0, 'lying set: slotDirector 0');
+  // 5) paired: pickImages frozen → write-back pickImages ล้ม → HOLD · queue0 (artBrief เขียนผ่านก่อนก็ยัง HOLD)
+  const abPair = { storyNote: 'x', orders: markedArtBrief().orders, refShotAuthority: M() };
+  const pickFrozen = Object.freeze({ slots: {}, refShotAuthority: M() });
+  const rP = await runRefShotFlow({ s6Env: REFSHOT_S6, s7Env: REFSHOT_ALL, preMarkArtBrief: abPair, prePickImages: pickFrozen });
+  assert.equal(rP.s6.status, 'waiting', 'paired frozen pickImages → HOLD');
+  assert.equal(rP.captures.brainArgs.length, 0, 'paired frozen: slotDirector 0');
+  assert.equal(rP.queueCalls, 0, 'paired frozen: queue0');
 });
 
 console.log(`1..${passed}`);

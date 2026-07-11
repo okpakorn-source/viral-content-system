@@ -81,13 +81,49 @@ ${blinded.map((b) => `--- ฉบับ ${b.label} ---\n${b.text}`).join('\n\n')}
 // ---------- S6a 🎨 บก.ศิลป์ (ทีมกราฟฟิก 8 ก.ค.): ref DNA + เข็มทิศข่าว → "ใบสั่งงาน" ต่อช่อง ----------
 // AI ทำงาน "ความหมาย" อย่างเดียว: แปลงปกต้นแบบ (คนใน ref) → คำสั่งของข่าวนี้ (คนในข่าวนี้)
 // เรขาคณิต (พิกัด/ขนาด) ไม่ผ่าน AI — โครงจริงมาจาก dnaToTemplateSpec · faceSizePct ส่งตรงให้สูตรครอป
-export async function artBriefBrain({ refDNA, compass, deskTitle, typeMatched = false }) {
-  const slots = (refDNA?.slots || []).map((s, i) => ({
-    i, role: s.role, pos: s.pos || '', shot: s.shot || '', emotion: s.emotion || '',
-    faceSizePct: Number(s.faceSizePct) || null,
-    // แนวข่าวไม่ตรง ref จริง (แมตช์หลวม) → ไม่ให้เห็น subject ของ ref (กัน bias เลือกคนผิดแบบ CASE-356)
-    ...(typeMatched ? { refSubject: s.subject || '' } : {}),
-  }));
+// ★ D3-B2: template_v1 authority marker (canonical shape) — สร้างจาก pure resolver (ไม่มี LLM/env)
+//   ตรวจ axis พร้อม/source ถูก/slots>=3/geometry ครบ · พังชั้นไหน = throw error คงที่ (adapter จับ → waiting)
+async function _templateV1Prep(refDNA) {
+  const { resolveRefSlotView, buildRefSlotContract } = await import('@/lib/refSlotContract');
+  const contract = buildRefSlotContract({ refDNA, mode: 'template_v1' });
+  const auth = contract?.authority;
+  if (!auth || auth.mode !== 'template_v1' || auth.axis !== 'template.slots' || auth.axisReady !== true) {
+    throw new Error('ART_BRIEF_AUTHORITY_AXIS_NOT_READY');
+  }
+  if (contract.source !== 'template.slots' || !Array.isArray(contract.slots) || contract.slots.length < 3) {
+    throw new Error('ART_BRIEF_AUTHORITY_SLOTS_INVALID');
+  }
+  // ★ D3-B2.1 (Codex P0): geometry ทุกช่องต้อง finite/positive/in-bounds (%) — ไม่ใช่แค่ "มี geometry"
+  const _geomOk = (g) => !!g && [g.xPct, g.yPct, g.wPct, g.hPct].every((n) => typeof n === 'number' && Number.isFinite(n))
+    && g.xPct >= 0 && g.yPct >= 0 && g.wPct > 0 && g.hPct > 0 && g.xPct + g.wPct <= 100 && g.yPct + g.hPct <= 100;
+  if (contract.slots.some((s) => !_geomOk(s.geometry))) throw new Error('ART_BRIEF_AUTHORITY_GEOMETRY_INVALID');
+  const view = resolveRefSlotView(refDNA, { mode: 'template_v1' });
+  return {
+    view,
+    marker: { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: auth.effectiveViewHash },
+  };
+}
+
+export async function artBriefBrain({ refDNA, compass, deskTitle, typeMatched = false, mode = 'legacy', _callBrain = callBrain }) {
+  // ★ D3-B2: template_v1 = prompt rows จาก resolved view (template axis + template shot ชนะ) + แนบ marker หลัง parse
+  //   (LLM ห้ามเขียน marker เอง) · default 'legacy' = โค้ด/prompt/return-shape เดิมทุก byte (ไม่มี env read)
+  let _tplPrep = null;
+  let slots;
+  if (mode === 'template_v1') {
+    _tplPrep = await _templateV1Prep(refDNA); // throw = adapter จับเป็น waiting
+    slots = _tplPrep.view.views.map((v) => ({
+      i: v.index, role: v.role, pos: v.pos || '', shot: v.shot || '', emotion: v.emotion || '',
+      faceSizePct: v.faceSizePct || null,
+      ...(typeMatched ? { refSubject: v.subject || '' } : {}),
+    }));
+  } else {
+    slots = (refDNA?.slots || []).map((s, i) => ({
+      i, role: s.role, pos: s.pos || '', shot: s.shot || '', emotion: s.emotion || '',
+      faceSizePct: Number(s.faceSizePct) || null,
+      // แนวข่าวไม่ตรง ref จริง (แมตช์หลวม) → ไม่ให้เห็น subject ของ ref (กัน bias เลือกคนผิดแบบ CASE-356)
+      ...(typeMatched ? { refSubject: s.subject || '' } : {}),
+    }));
+  }
   const system = `คุณคือบรรณาธิการศิลป์ (Art Director) ของเพจข่าวไวรัลไทย งานเดียว: เขียน "ใบสั่งงาน" ให้มือคัดภาพ
 โจทย์: ปกต้นแบบ (ref) จัดช่องไว้แบบหนึ่ง — คุณต้องสั่งว่า "ข่าวนี้" แต่ละช่องควรใส่ภาพแบบไหน (ใคร/ช็อตอะไร/อารมณ์ไหน) ให้เล่าเรื่องแบบเดียวกับ ref แต่เป็นคนและเหตุการณ์ของข่าวนี้
 กฎเหล็ก: (1) hero = หน้าเดี่ยวตัวเอกของข่าวเสมอ ห้ามภาพหมู่ (2) สั่งเฉพาะภาพที่ข่าวนี้มีโอกาสมีจริง (3) ช่องไหน ref ใส่โมเมนต์/หลักฐาน ให้แปลงเป็นโมเมนต์/หลักฐานของข่าวนี้
@@ -96,7 +132,7 @@ export async function artBriefBrain({ refDNA, compass, deskTitle, typeMatched = 
 เข็มทิศข่าว: ${JSON.stringify({ angle: compass?.angle, primaryEmotion: compass?.primaryEmotion, mainCharacters: compass?.mainCharacters, visualDreamShots: compass?.visualDreamShots }, null, 0).slice(0, 1200)}
 ช่องของปกต้นแบบ (เรขาคณิตล็อกแล้ว — สั่งแค่เนื้อหา):
 ${JSON.stringify(slots, null, 0).slice(0, 1800)}`;
-  const out = await callBrain({ system, user, maxTokens: 700, temperature: 0.15, cost: { step: 'MEGA S6a art brief' } });
+  const out = await _callBrain({ system, user, maxTokens: 700, temperature: 0.15, cost: { step: 'MEGA S6a art brief' } });
   const brief = parseJson(out.text || out);
   // ผูกใบสั่งกลับเข้าช่อง (ตามดัชนี) + พก faceSizePct ไปให้สูตรครอป
   return {
@@ -105,6 +141,8 @@ ${JSON.stringify(slots, null, 0).slice(0, 1800)}`;
       const o = (brief.orders || []).find((x) => Number(x.i) === s.i) || {};
       return { i: s.i, role: s.role, pos: s.pos, shot: s.shot, emotion: s.emotion, faceSizePct: s.faceSizePct, want: o.want || '', personHint: o.personHint || null };
     }),
+    // ★ D3-B2: แนบ marker เชิงโปรแกรม "หลัง" parse — LLM ไม่มีสิทธิ์เขียน · legacy = ไม่มี field นี้เลย
+    ...(_tplPrep ? { refShotAuthority: _tplPrep.marker } : {}),
   };
 }
 

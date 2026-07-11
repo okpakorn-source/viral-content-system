@@ -1082,6 +1082,106 @@ function _dnaHashFor(dna) {
   } catch { return null; }
 }
 
+// ★ D3-B2.1 (Codex P0): ตัว validator/comparator/echo ของ refShotAuthority marker "ตัวเดียว" ใช้ทั้ง S6/S7/s7_wait
+//   plain object แท้ (proto = Object.prototype|null) · OWN keys เป๊ะ [axis,effectiveViewHash,mode,v] ไม่มีเกิน/สืบทอด ·
+//   own undefined = corrupt (value check ล้ม) · v/mode/axis เป๊ะ · hash = 8-lowerhex เท่านั้น
+const REFSHOT_MARKER_KEYS = ['axis', 'effectiveViewHash', 'mode', 'v'];
+// ★ D3-B2.2 (Codex P1): safe-normalizer เดียว — try/catch ครอบทั้งหมด (Reflect/Proxy throw = invalid)
+//   plain proto · Reflect.ownKeys = 4 string keys ที่คาดเป๊ะ (reject symbol/extra/non-enumerable) ·
+//   ทุก key = enumerable DATA descriptor (no get/set) · validate จาก descriptor.value เท่านั้น
+//   คืนค่า normalized {v,mode,axis,effectiveViewHash} เมื่อ valid · null เมื่อ invalid
+function normalizeRefShotMarker(m) {
+  try {
+    if (m == null || typeof m !== 'object') return null;
+    const proto = Object.getPrototypeOf(m);
+    if (proto !== Object.prototype && proto !== null) return null;
+    const ownKeys = Reflect.ownKeys(m); // รวม symbol + non-enumerable
+    if (ownKeys.length !== REFSHOT_MARKER_KEYS.length) return null;
+    for (const k of ownKeys) { if (typeof k !== 'string' || !REFSHOT_MARKER_KEYS.includes(k)) return null; }
+    const descs = Object.getOwnPropertyDescriptors(m);
+    const out = {};
+    for (const k of REFSHOT_MARKER_KEYS) {
+      const d = descs[k];
+      if (!d || !d.enumerable || typeof d.get === 'function' || typeof d.set === 'function' || !('value' in d)) return null;
+      out[k] = d.value;
+    }
+    if (out.v !== 1 || out.mode !== 'template_v1' || out.axis !== 'template.slots') return null;
+    if (typeof out.effectiveViewHash !== 'string' || !/^[0-9a-f]{8}$/.test(out.effectiveViewHash)) return null;
+    return { v: out.v, mode: out.mode, axis: out.axis, effectiveViewHash: out.effectiveViewHash };
+  } catch { return null; }
+}
+// ★ D3-B2.5 (Codex P1 fail-closed): อ่าน marker "ที่ระดับ property ของ carrier" ผ่าน descriptor ล้วน — ห้าม container[key]
+//   เหตุ: container[key] จะ "รัน" getter บน carrier / ปล่อย throwing-Proxy หลุด · และ property แบบ non-enumerable
+//   ผ่านตอนอ่าน แต่ "หาย" ตอน JSON persist → tick หน้าเห็นคู่ marker ไม่ตรง/หาย = ไหลลง legacy เงียบ
+//   กติกา (ทั้งก้อนใน try/catch): null/non-object/ไม่มี descriptor = absent (legacy จริง) ·
+//   descriptor/trap throw หรือ descriptor เป็น non-enumerable/accessor(get|set)/ไม่มี data value
+//   = present:true, marker:null (corrupt → HOLD ห้ามดู absent/legacy) · enumerable DATA descriptor เท่านั้น
+//   = normalize(descriptor.value) ครั้งเดียว (คืน canonical|null) · caller cache canonical เหมือนเดิม
+function readRefShotMarker(container, key) {
+  if (!container || typeof container !== 'object') return { present: false, marker: null };
+  try {
+    const d = Object.getOwnPropertyDescriptor(container, key); // ไม่แตะ [[Get]] — ไม่รัน getter บน carrier
+    if (!d) return { present: false, marker: null }; // ไม่มี property = absent (legacy/fresh)
+    // มี property แต่ไม่ใช่ enumerable data descriptor = corrupt (getter/setter/non-enum/no-value) → present + HOLD
+    if (!d.enumerable || typeof d.get === 'function' || typeof d.set === 'function' || !('value' in d)) {
+      return { present: true, marker: null };
+    }
+    return { present: true, marker: normalizeRefShotMarker(d.value) }; // normalize descriptor.value ครั้งเดียว
+  } catch {
+    return { present: true, marker: null }; // descriptor/trap throw = carrier พัง → HOLD (fail-closed, ห้ามดู absent)
+  }
+}
+// เทียบ "canonical snapshot" ที่ normalize มาแล้ว (ไม่อ่าน raw ซ้ำ)
+function canonicalMarkersEqual(a, b) {
+  return !!a && !!b && a.v === b.v && a.mode === b.mode && a.axis === b.axis && a.effectiveViewHash === b.effectiveViewHash;
+}
+// clone canonical (รับ canonical snapshot คืน plain clone — ไม่แตะ raw)
+function cloneRefShotMarker(n) {
+  return n ? { v: n.v, mode: n.mode, axis: n.axis, effectiveViewHash: n.effectiveViewHash } : null;
+}
+// ★ D3-B2.6 (Codex P1): เขียน canonical marker กลับ carrier แบบ "ยืนยันผลจริง" — carrier frozen/non-writable หรือ
+//   Proxy ที่ set trap throw/"โกหก" (คืน true แต่ไม่เซ็ต) ต้องไม่หลุด S6 · คืน boolean เสมอ ไม่ throw
+//   ยืนยัน: หลังเขียน ต้องอ่าน own descriptor กลับได้เป็น enumerable DATA property ที่ value === clone ที่เพิ่งเขียนเป๊ะ
+//   (swallow/lying write = value identity ไม่ตรง = false) → caller HOLD ก่อน slotDirector/queue ห้ามถอย legacy
+function _writeBackRefShotMarker(container, key, clone) {
+  try {
+    if (!container || typeof container !== 'object' || !clone) return false;
+    container[key] = clone; // strict mode: frozen/non-writable = throw · Proxy set-trap throw = throw (จับด้านล่าง)
+    const d = Object.getOwnPropertyDescriptor(container, key);
+    return !!d && d.enumerable === true && typeof d.get !== 'function' && typeof d.set !== 'function'
+      && 'value' in d && d.value === clone; // identity เป๊ะ — swallowed/lying write = value ไม่ตรง = false
+  } catch {
+    return false;
+  }
+}
+// ★ D3-B2.1 geometry (contract % และ realized pixel): finite/positive/in-bounds
+function _refShotGeomOk(g) {
+  if (!g) return false;
+  const { xPct, yPct, wPct, hPct } = g;
+  return [xPct, yPct, wPct, hPct].every((n) => typeof n === 'number' && Number.isFinite(n))
+    && xPct >= 0 && yPct >= 0 && wPct > 0 && hPct > 0 && xPct + wPct <= 100 && yPct + hPct <= 100;
+}
+function _refShotContractGeomOk(contract) {
+  return Array.isArray(contract?.slots) && contract.slots.length >= 3 && contract.slots.every((s) => _refShotGeomOk(s.geometry));
+}
+function _refShotRealizedOk(realized, contract) {
+  // ★ D3-B2.2 (Codex P1): ตรงกับ strict gate — canvas 1080×1350 · count=contract · id nonblank+unique ·
+  //   x/y/w/h finite integer · positive size · x/y>=0 · upper<=canvas · shape rect|circle (ถ้ามี)
+  if (!realized || !Array.isArray(realized.slots) || !Array.isArray(contract?.slots)) return false;
+  if (realized.canvasW !== 1080 || realized.canvasH !== 1350) return false;
+  if (realized.slots.length !== contract.slots.length) return false;
+  const ids = new Set();
+  for (const s of realized.slots) {
+    const id = s?.id;
+    if (typeof id !== 'string' || !id.trim() || ids.has(id)) return false;
+    ids.add(id);
+    if (![s.x, s.y, s.w, s.h].every((n) => typeof n === 'number' && Number.isFinite(n) && Number.isInteger(n))) return false;
+    if (!(s.w > 0 && s.h > 0) || s.x < 0 || s.y < 0 || s.x + s.w > 1080 || s.y + s.h > 1350) return false;
+    if (s.shape != null && s.shape !== 'rect' && s.shape !== 'circle') return false;
+  }
+  return true;
+}
+
 // ★ Wave2 Batch D1: จำแนกภาพเดี่ยว — 'untriaged' (ยังไม่มีป้ายตาคัดเลย) / 'size_unknown' (มีป้ายแต่หาขนาดจริงไม่ได้
 //   และไม่ใช่ thumbnail-only ที่รู้อยู่แล้วว่าเล็ก) / 'ok' (ที่เหลือ) — pure function ไม่แตะ state ไฟล์อื่น เทสตรงได้
 export function classifyPoolImage(x) {
@@ -1096,6 +1196,7 @@ export function classifyPoolImage(x) {
 export async function s6_slots(job, { origin, _deps } = {}) {
   // ★ SEM-1: dependency injection เพื่อ testability เท่านั้น — default = ของจริง (production เดิม 100%)
   const _brainFn = _deps?.slotDirectorBrain || slotDirectorBrain;
+  const _abFn = _deps?.artBriefBrain || artBriefBrain; // ★ D3-B2: DI seam (default = ของจริง — production เดิม)
   const _jf = _deps?.fetchJson || jfetch;
   const im = job.dossier.images || {};
   const r = await _jf(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
@@ -1349,40 +1450,130 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     console.log(`[MEGA S6] 🎯 ปกเป้า: ${job.dossier.refMatch.styleName || '-'} (${job.dossier.refMatch.reason || ''}) — ${_refDNA ? 'ใช้ขับการเลือกภาพ + โครง' : 'แมตช์หลวม → ใช้เฉพาะโครง (เลือกภาพตามเข็มทิศข่าว)'}${activeSlots.length !== SLOT_ORDER.length ? ` · ตัดเหลือ ${activeSlots.length} ช่องตาม panelCount ref` : ''}`);
   }
 
-  // 🎨 S6a บก.ศิลป์ (ทีมกราฟฟิก 8 ก.ค.): ref → "ใบสั่งงาน" ของข่าวนี้ (ครั้งเดียว เก็บแฟ้ม) — ล้ม = เดินต่อแบบไม่มีใบสั่ง
-  if (!job.dossier.artBrief && job.dossier.refMatch?.dna) {
+  // ★ D3-B2 (11 ก.ค. — Codex): snapshot สวิตช์ครั้งเดียวที่ต้นทาง S6a (env อ่านที่ adapter เท่านั้น)
+  const _refShotAuthOn = process.env.MEGA_REF_SHOT_AUTHORITY === '1';
+  const _semPrereqOn = process.env.MEGA_SEMANTIC_SELECTION === '1' && process.env.MEGA_SELECTION_SPEC === '1';
+  // ★ D3-B2.3 (Codex P1 TOCTOU): normalize marker ทั้งสอง carrier "ครั้งเดียว" ที่ต้นทาง — ใช้ canonical snapshot เท่านั้น
+  const _pickImagesExists = !!job.dossier.pickImages;
+  const _abRead = readRefShotMarker(job.dossier.artBrief, 'refShotAuthority');   // {present, marker: canonical|null}
+  const _pickRead = readRefShotMarker(job.dossier.pickImages, 'refShotAuthority');
+  let _jobRefShotMarker = null; // canonical snapshot ของงานนี้ (ตั้งเมื่อผ่าน lifecycle)
+
+  // 🎨 S6a บก.ศิลป์: ref → "ใบสั่งงาน" — ★ D3-B2.2/3 lifecycle: pick marker ต้องคู่ artBrief valid+equal ·
+  //   marked resume เฉพาะ pickImages หาย (pre-selection) · fresh arm ต้องไม่มี pickImages · unmarked = legacy
+  if (_pickRead.present) {
+    if (!_pickRead.marker || !_abRead.marker || !canonicalMarkersEqual(_pickRead.marker, _abRead.marker)) {
+      return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority: pickImages marker ไม่คู่กับ artBrief marker (valid+equal) — พักงาน ห้ามซ่อม' };
+    }
+    if (!_refShotAuthOn || !_semPrereqOn) {
+      return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority: แฟ้ม template_v1 (มี pick marker) แต่สวิตช์/prereq ปิด — พักรอ' };
+    }
+    _jobRefShotMarker = _abRead.marker; // canonical snapshot (resume template_v1)
+    // ★ D3-B2.4/2.6 (Codex P1): เขียน canonical plain clone ทับ raw marker ทั้งคู่ + ยืนยันผลจริง —
+    //   carrier frozen/non-writable/Proxy set-trap โกหก = HOLD ก่อน slotDirector/queue (ไม่หลุด/ไม่ถอย legacy)
+    if (!_writeBackRefShotMarker(job.dossier.artBrief, 'refShotAuthority', cloneRefShotMarker(_abRead.marker))
+      || !_writeBackRefShotMarker(job.dossier.pickImages, 'refShotAuthority', cloneRefShotMarker(_pickRead.marker))) {
+      return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority: เขียน canonical marker กลับ carrier ไม่สำเร็จ (frozen/non-writable/set-trap) — พักงาน ห้ามซ่อม/ถอย legacy' };
+    }
+  } else if (job.dossier.artBrief) {
+    if (_abRead.present) {
+      if (!_abRead.marker) {
+        return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority: marker ในใบสั่งเสีย/ถูกแก้ — พักงาน ห้ามซ่อม/ถอย legacy' };
+      }
+      if (_pickImagesExists) {
+        return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority: marked artBrief แต่ pickImages มีอยู่โดยไม่มี marker — พักงาน (ไม่ auto-upgrade)' };
+      }
+      if (!_refShotAuthOn || !_semPrereqOn) {
+        return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority: แฟ้ม template_v1 แต่สวิตช์/prereq ปิด — พักรอ (ไม่ downgrade legacy)' };
+      }
+      _jobRefShotMarker = _abRead.marker; // canonical snapshot (pre-selection resume)
+      // ★ D3-B2.4/2.6 (Codex P1): เขียน canonical plain clone + ยืนยันผลจริง —
+      //   artBrief frozen/non-writable/set-trap โกหก = HOLD ก่อน slotDirector/queue (ไม่ถอย legacy)
+      if (!_writeBackRefShotMarker(job.dossier.artBrief, 'refShotAuthority', cloneRefShotMarker(_abRead.marker))) {
+        return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority: เขียน canonical marker กลับ artBrief ไม่สำเร็จ (frozen/non-writable/set-trap) — พักงาน ห้ามซ่อม/ถอย legacy' };
+      }
+    }
+    // unmarked existing artBrief + no pick marker = legacy — ไม่ทำอะไร (byte เดิม)
+  } else if (job.dossier.refMatch?.dna) {
+    const _armTemplateV1 = _refShotAuthOn && !!_refDNA && !_pickImagesExists;
+    if (_armTemplateV1 && !_semPrereqOn) {
+      return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority: เปิดสวิตช์+ref แน่น แต่ SEM/SPEC ยังไม่ครบ — พักรอ (fail-closed ไม่ผสม legacy)' };
+    }
     try {
-      job.dossier.artBrief = await artBriefBrain({
+      const _generatedBrief = await _abFn({
         refDNA: job.dossier.refMatch.dna,
         compass: job.dossier.compass,
         deskTitle: job.dossier.desk?.title,
         typeMatched: !!job.dossier.refMatch.typeMatched,
+        ...(_armTemplateV1 && _semPrereqOn ? { mode: 'template_v1' } : {}), // legacy = ไม่ส่ง mode (arg เดิมเป๊ะ)
       });
-      console.log(`[MEGA S6a] 🎨 ใบสั่งงาน ${job.dossier.artBrief.orders?.length || 0} ช่อง — ${String(job.dossier.artBrief.storyNote || '').slice(0, 80)}`);
-    } catch (e) { console.log('[MEGA S6a] บก.ศิลป์ล้ม (เดินต่อไม่มีใบสั่ง):', e.message?.slice(0, 50)); }
+      if (_armTemplateV1 && _semPrereqOn) {
+        // ★ P0/P1: normalize marker ที่ generate มาครั้งเดียว — invalid = HOLD · valid = แทน raw ด้วย canonical plain clone
+        const _gRead = readRefShotMarker(_generatedBrief, 'refShotAuthority');
+        if (!_gRead.present || !_gRead.marker) {
+          return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority: ผล template_v1 ไม่มี/เสีย marker — ไม่ assign (กัน retry กลายเป็น unmarked legacy)' };
+        }
+        _jobRefShotMarker = _gRead.marker;
+        job.dossier.artBrief = { ..._generatedBrief, refShotAuthority: cloneRefShotMarker(_gRead.marker) }; // ★ persist canonical plain (ไม่เก็บ Proxy/getter)
+      } else {
+        job.dossier.artBrief = _generatedBrief; // legacy = assign ตรง (byte เดิม)
+      }
+      console.log(`[MEGA S6a] 🎨 ใบสั่งงาน ${job.dossier.artBrief.orders?.length || 0} ช่อง${_jobRefShotMarker ? ' · 🎯template_v1' : ''} — ${String(job.dossier.artBrief.storyNote || '').slice(0, 80)}`);
+    } catch (e) {
+      if (_armTemplateV1 && _semPrereqOn) {
+        return { status: 'waiting', nextAction: 'wait', summary: `🎯⏸️ ref-shot authority: สร้างใบสั่ง template_v1 ล้ม (${String(e?.message || '').slice(0, 50)}) — พักงานก่อน slotDirector (ไม่ถอย legacy)` };
+      }
+      console.log('[MEGA S6a] บก.ศิลป์ล้ม (เดินต่อไม่มีใบสั่ง):', e.message?.slice(0, 50)); // legacy เดิมเป๊ะ
+    }
   }
+  // ★ D3-B2.3: mode ของงานนี้ จาก canonical snapshot ที่ cache ไว้ (ไม่อ่าน raw ซ้ำ) + สวิตช์
+  const _jobTemplateV1 = !!_jobRefShotMarker && _refShotAuthOn && _semPrereqOn;
 
   // ★ SEM-1 (Codex อนุมัติ design v2 — เลือกภาพตามบทช่องจริงของ ref): เงื่อนไขเปิดต้องครบ 4 (invariant I5)
   //   ① MEGA_SEMANTIC_SELECTION=1 ② MEGA_SELECTION_SPEC=1 ③ ref แมตช์แน่น (_refDNA=typeMatched เท่านั้น)
   //   ④ contract จาก template.slots จริง + realized template map ครบ (จำนวนช่องตรง) — ขาดข้อใด = legacy เดิมทั้งท่อ
   //   OFF = ไม่มี field/log/prompt ใหม่แม้ byte เดียว · solver ยัง shadow · ยังไม่มี strict consumer/W3-3
   let semContract = null;
-  if (process.env.MEGA_SEMANTIC_SELECTION === '1' && process.env.MEGA_SELECTION_SPEC === '1' && _refDNA) {
+  if (_semPrereqOn && _refDNA) { // ★ D3-B2.3 (Codex P1): ใช้ snapshot _semPrereqOn — ไม่ reread SEM/SPEC หลัง artBrief await
+    let _semHold = null; // ★ D3-B2: marked template_v1 job ที่ contract ไม่พร้อม = HOLD (ห้ามถอย legacy)
     try {
       const specApi = await import('@/lib/refSlotContract');
-      const { dnaToTemplateSpec } = await import('@/lib/refTemplate');
-      const c = specApi.buildRefSlotContract({ refDNA: _refDNA, artBriefOrders: job.dossier.artBrief?.orders || [] });
+      // ★ D3-B2.3: DI seam ใช้เฉพาะงาน template_v1 (armed) — legacy/unmarked ใช้ของจริงเสมอ (ไม่กระทบ Checkpoint C)
+      const dnaToTemplateSpec = (_jobTemplateV1 && _deps?.dnaToTemplateSpec) || (await import('@/lib/refTemplate')).dnaToTemplateSpec;
+      // ★ D3-B2: ใช้ persisted mode ของงาน — marked → template_v1 (authority) · legacy = arg เดิมเป๊ะ
+      const c = specApi.buildRefSlotContract({ refDNA: _refDNA, artBriefOrders: job.dossier.artBrief?.orders || [], ...(_jobTemplateV1 ? { mode: 'template_v1' } : {}) });
       const realized = dnaToTemplateSpec(_refDNA);
       const okSource = c?.source === 'template.slots' && Array.isArray(c.slots) && c.slots.length >= 3;
       const okRealized = !!realized && Array.isArray(realized.slots) && realized.slots.length === c.slots.length;
-      if (okSource && okRealized) {
+      if (_jobTemplateV1) {
+        const auth = c?.authority;
+        const okAuth = !!auth && auth.mode === 'template_v1' && auth.axis === 'template.slots' && auth.axisReady === true
+          && auth.effectiveViewHash === _jobRefShotMarker.effectiveViewHash;
+        const okGeom = _refShotContractGeomOk(c); // finite/positive/in-bounds ทุกช่อง
+        const okRealizedGeom = _refShotRealizedOk(realized, c); // count/set/geometry realized ถูกต้อง
+        if (okSource && okRealized && okRealizedGeom && okAuth && okGeom) {
+          semContract = c;
+          activeSlots = c.slots.map((s) => s.id);
+          console.log(`[MEGA S6] 🎯 template_v1 authority ON: ${activeSlots.join(' · ')} (${c.slots.length} ช่อง · viewHash=${auth.effectiveViewHash})`);
+        } else {
+          _semHold = `🎯⏸️ ref-shot authority: contract template_v1 ไม่พร้อม (source=${c?.source || '-'} · axisReady=${c?.authority?.axisReady} · hashMatch=${c?.authority?.effectiveViewHash === _jobRefShotMarker.effectiveViewHash} · geom=${okGeom} · realizedGeom=${okRealizedGeom}) — พักงาน ห้ามถอย legacy`;
+        }
+      } else if (okSource && okRealized) {
         semContract = c;
         activeSlots = c.slots.map((s) => s.id); // instance ids เรียงตาม sourceIndex — deterministic
         console.log(`[MEGA S6] 🧬 semantic-selection ON: ${activeSlots.join(' · ')} (${c.slots.length} ช่องจากบท ref จริง)`);
       } else {
         console.log(`[MEGA S6] 🧬 semantic-selection ขอเปิดแต่เงื่อนไขไม่ครบ (source=${c?.source || '-'} · realizedMap=${okRealized}) → legacy`);
       }
-    } catch (e) { console.log('[MEGA S6] 🧬 semantic-selection เปิดไม่ได้ (ล้ม) → legacy:', String(e?.message || '').slice(0, 60)); }
+    } catch (e) {
+      if (_jobTemplateV1) _semHold = `🎯⏸️ ref-shot authority: build contract template_v1 ล้ม (${String(e?.message || '').slice(0, 50)}) — พักงาน`;
+      else console.log('[MEGA S6] 🧬 semantic-selection เปิดไม่ได้ (ล้ม) → legacy:', String(e?.message || '').slice(0, 60));
+    }
+    if (_semHold) return { status: 'waiting', nextAction: 'wait', summary: _semHold };
+  }
+  // ★ D3-B2: marked job แต่ contract ไม่ถูกสร้าง (เช่น ref อ่อนลง/prereq หายกลางทาง) = HOLD ก่อน slotDirector
+  if (_jobTemplateV1 && !semContract) {
+    return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority: งาน template_v1 แต่ contract ไม่ถูกสร้าง (ref/prereq เปลี่ยน?) — พักงาน' };
   }
   const semById = semContract ? new Map(semContract.slots.map((s) => [s.id, s])) : null;
   // canonical hero = instance แรกที่บท hero "ที่ไม่ใช่วงกลม" (ผู้ตรวจ P1: canon ชนกับวงกลมทำกติกา
@@ -1888,6 +2079,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
                 refDNA: _refDNA,
                 artBriefOrders: orders,
                 legacySlots: activeSlots,
+                ...(_jobTemplateV1 ? { mode: 'template_v1' } : {}), // ★ D3-B2: marked job = persisted mode ไม่ใช่ legacy
               });
               if (diagnosticContract.slots.length) {
                 diagnosticSlots = diagnosticContract.slots.map((slot) => ({
@@ -1996,14 +2188,14 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   const quarantineTotal = untriagedList.length + sizeUnknownList.length;
   const quarantineTag = quarantineTotal > 0 ? ` · 🧿กัก ${untriagedList.length}+${sizeUnknownList.length} ใบ(ข้อมูลไม่ครบ)` : '';
   if (!slots[_canonHeroId]) {
-    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '', ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) } } };
+    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '', ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) } } };
   }
   return {
     status: 'done',
     nextAction: 'continue',
     summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'}${storyTag}${quarantineTag} — ${(brain.note || '').slice(0, 80)}`,
     dossierPatch: {
-      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) },
+      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) },
       ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}),
       ...(job.dossier.artBrief ? { artBrief: job.dossier.artBrief } : {}),
       // ★ Wave2 Batch D1: merge-patch additive — สเปรด im เดิมกันทับ field อื่นใน images (caseId/storyQueries/heroGradeReport ฯลฯ)
@@ -2068,6 +2260,12 @@ function _strictWireGate(wire, validateStrictRenderActivation) {
 export async function s7_cover(job, { origin, _deps } = {}) {
   // ★ SEM-1: dependency injection เพื่อ testability เท่านั้น — default = ของจริง (production เดิม 100%)
   const _jf = _deps?.fetchJson || jfetch;
+  // ★ D3-B2.1 (Codex P0 TOCTOU): snapshot ทุกสวิตช์ครั้งเดียวที่ต้นทาง — reuse ตลอด (ห้าม re-read หลัง await)
+  const _envRefAuth = process.env.MEGA_REF_SHOT_AUTHORITY === '1';
+  const _envSem = process.env.MEGA_SEMANTIC_SELECTION === '1';
+  const _envSpec = process.env.MEGA_SELECTION_SPEC === '1';
+  const _envStrictProducer = process.env.MEGA_STRICT_PRODUCER === '1';
+  const _envStrictRender = process.env.MEGA_STRICT_RENDER === '1';
   // ★ audit A1 (9 ก.ค.): tick ที่เกิดบนคลาวด์ (คนกดหน้า /mega ที่เสิร์ฟบน Vercel/Railway) ไม่มี localhost:3000
   //   ให้ยิง → เดิมส่งงานปกล้มแล้ว job ตายทั้งงาน — คืน waiting ให้ tick รอบถัดไปจากเครื่องทีมมาทำขั้นนี้เอง
   if (process.platform !== 'win32' && !process.env.MEGA_COVER_ORIGIN) {
@@ -2109,7 +2307,7 @@ export async function s7_cover(job, { origin, _deps } = {}) {
   // ★ SEM-1 final (Codex P1-A): kill switch ต้องคุมถึง S7 — งานที่ S6 เลือกตอน ON แต่สวิตช์ถูกปิดก่อนขั้นนี้
   //   ห้าม enqueue แบบ semantic และห้ามแปลงร่างเป็น legacy (key instance ไม่ตรงสัญญาเดิม = ภาพผิดช่อง)
   //   → พักงาน (waiting) ก่อนแตะ network ใดๆ · เปิดสวิตช์กลับ = tick รอบถัดไปเดินต่อจากจุดเดิม
-  const _semEnvOn = process.env.MEGA_SEMANTIC_SELECTION === '1' && process.env.MEGA_SELECTION_SPEC === '1';
+  const _semEnvOn = _envSem && _envSpec; // ★ D3-B2.1: จาก snapshot (TOCTOU-safe)
   if (_sem && !_semEnvOn) {
     return { status: 'waiting', nextAction: 'wait', summary: '🧬⏸️ แผนนี้เลือกภาพแบบ semantic แต่สวิตช์ปิดอยู่ — พักรอเปิด MEGA_SEMANTIC_SELECTION=1 + MEGA_SELECTION_SPEC=1 (ไม่แปลง legacy กันภาพผิดช่อง)' };
   }
@@ -2259,6 +2457,48 @@ export async function s7_cover(job, { origin, _deps } = {}) {
       }
     } catch { /* คลัง ref ว่าง/ล้ม → ไม่มี ref (ใช้ template ปกติ) ไม่กระทบ */ }
   }
+  // ★ D3-B2 (11 ก.ค. — Codex): mode ของ S7 = persisted marker (artBrief + pickImages echo) ไม่ใช่ env ล้วน
+  //   marker-present ต้องผ่านทุกด่าน (switch ON · prereq · schema · deep-equal ab↔pi · rebuild effectiveViewHash
+  //   ตรง · slotContractHash ตรง · strict pair armed) มิฉะนั้น HOLD ก่อน queue (queueCalls=0) — กัน authority
+  //   หลุดเข้า composer legacy · OFF/ไม่มี marker = byte เดิมทุก field
+  // ★ D3-B2.3 (Codex P1 TOCTOU): normalize marker ทั้งสอง carrier ครั้งเดียว — ใช้ canonical snapshot เท่านั้น
+  const _abReadS7 = readRefShotMarker(d.artBrief, 'refShotAuthority');
+  const _piReadS7 = readRefShotMarker(d.pickImages, 'refShotAuthority');
+  const _markerPresent = _abReadS7.present || _piReadS7.present;
+  let _s7TemplateV1 = false;
+  if (_markerPresent) {
+    if (!_envRefAuth) {
+      return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority (S7): แฟ้ม marked แต่สวิตช์ปิด — พักรอ (ไม่ downgrade legacy composer)' };
+    }
+    if (!_semEnvOn) {
+      return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority (S7): prereq SEM/SPEC ปิด — พักงาน' };
+    }
+    // ★ D3-B2.3: ต้องมี marker "ครบคู่" valid + equal (เทียบ canonical snapshot ที่ normalize มาแล้ว) — เดี่ยว = ผิด
+    if (!_abReadS7.present || !_piReadS7.present || !_abReadS7.marker || !_piReadS7.marker || !canonicalMarkersEqual(_abReadS7.marker, _piReadS7.marker)) {
+      return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority (S7): marker artBrief/pickImages เสีย/ไม่ครบคู่/ไม่ตรงกัน — พักงาน ห้ามซ่อม' };
+    }
+    try {
+      const authApi = await import('@/lib/refSlotContract');
+      const rc = authApi.buildRefSlotContract({ refDNA: selectionRefDNA, artBriefOrders: d.artBrief?.orders || [], mode: 'template_v1' });
+      const dnaToTemplateSpecR = _deps?.dnaToTemplateSpec || (await import('@/lib/refTemplate')).dnaToTemplateSpec;
+      const realizedR = selectionRefDNA ? dnaToTemplateSpecR(selectionRefDNA) : null;
+      const okAuth = !!rc?.authority && rc.authority.mode === 'template_v1' && rc.authority.axis === 'template.slots'
+        && rc.authority.axisReady === true && rc.authority.effectiveViewHash === _abReadS7.marker.effectiveViewHash;
+      const okGeom = _refShotContractGeomOk(rc);
+      const okRealizedGeom = _refShotRealizedOk(realizedR, rc);
+      const s7ContractHash = _dnaHashFor({ refId: resolvedRefId, contract: rc });
+      const okContractHash = !!d.pickImages?.slotContractHash && d.pickImages.slotContractHash === s7ContractHash;
+      if (!okAuth || !okGeom || !okRealizedGeom || !okContractHash) {
+        return { status: 'waiting', nextAction: 'wait', summary: `🎯⏸️ ref-shot authority (S7): rebuild ไม่ตรง (viewHash=${okAuth} · geom=${okGeom} · realizedGeom=${okRealizedGeom} · slotContractHash=${okContractHash}) — พักงานก่อน queue` };
+      }
+    } catch (e) {
+      return { status: 'waiting', nextAction: 'wait', summary: `🎯⏸️ ref-shot authority (S7): rebuild contract ล้ม (${String(e?.message || '').slice(0, 50)}) — พักงาน` };
+    }
+    if (!(_envStrictProducer && _envStrictRender)) {
+      return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority (S7): งาน template_v1 ต้องมี strict pair (PRODUCER+RENDER) armed ก่อน enqueue — พักงาน' };
+    }
+    _s7TemplateV1 = true;
+  }
   // ★ 📜 SelectionSpec v1 (Codex ตรวจรอบ 2 ข้อ 2-5 — 10 ก.ค. ดึก): สัญญา S6→composer สร้าง "ก่อน" เรียกโรงประกอบ
   //   ★ รอบ 4 P1: ระหว่างพัฒนา default OFF ตามกฎ — เปิดเอง MEGA_SELECTION_SPEC=1 เฉพาะ local :3900
   //   ปิด = ไม่มี dossier field/ไม่มี log/พฤติกรรม legacy เดิม 100% · strict composer มาอ่านสัญญานี้หลังตรวจผ่าน
@@ -2272,21 +2512,21 @@ export async function s7_cover(job, { origin, _deps } = {}) {
   //   RENDER เปิดแต่ PRODUCER ปิด/0/junk = shadow เดิม (โรงพร้อมแต่ยังไม่ส่ง) · legacy _sem=false = legacy เสมอ
   //   🧭 rollout ปลอดภัย: เปิด RENDER (โรง) ก่อน → ค่อยเปิด PRODUCER (ฝั่งส่ง) · rollback: ปิด PRODUCER ก่อน
   //   → ค่อยปิด RENDER — จึงไม่มีจังหวะที่งาน strict หลุดไปโรงที่ไม่ตรวจ
-  const strictProducerRequested = _sem === true && _semEnvOn && process.env.MEGA_STRICT_PRODUCER === '1';
-  const strictWireOn = strictProducerRequested && process.env.MEGA_STRICT_RENDER === '1';
+  const strictProducerRequested = _sem === true && _semEnvOn && _envStrictProducer; // ★ D3-B2.1: snapshot
+  const strictWireOn = strictProducerRequested && _envStrictRender; // ★ D3-B2.1: snapshot
   // PRODUCER เปิดแต่ RENDER ยังไม่ armed = ห้ามส่งงาน strict เข้าโรง legacy — พักงาน "ก่อน queue"
   // (image-library fetch ของขั้นนี้เกิดไปก่อนหน้าแล้ว — จุดที่กันคือ enqueue เท่านั้น)
   if (strictProducerRequested && !strictWireOn) {
     return { status: 'waiting', nextAction: 'wait', summary: '🔐⏸️ strict producer: strict_render_not_armed — MEGA_STRICT_PRODUCER เปิดแต่ MEGA_STRICT_RENDER ยังไม่พร้อม พักงานก่อน queue (rollout: เปิด RENDER ก่อน PRODUCER)' };
   }
-  if (process.env.MEGA_SELECTION_SPEC === '1') {
+  if (_envSpec) { // ★ D3-B2.2 (Codex P1-4): ใช้ snapshot ไม่ re-read process.env หลัง await (TOCTOU)
     try {
       const specApi = await import('@/lib/refSlotContract');
       // ★ Checkpoint C (C): template builder ฉีดได้เฉพาะเทสผ่าน _deps — production default = ของจริงเสมอ
       const dnaToTemplateSpec = _deps?.dnaToTemplateSpec || (await import('@/lib/refTemplate')).dnaToTemplateSpec;
       // ★ รอบ 5 P0-2: สัญญาสร้างจาก selectionRefDNA เท่านั้น (weak-match ถูก strip ตรง S6) —
       //   ส่วน payload ด้านล่างใช้ refDNA legacy · template.slots สองก้อนเหมือนกัน realized geometry จึงตรง composer
-      const contract = specApi.buildRefSlotContract({ refDNA: selectionRefDNA, artBriefOrders: d.artBrief?.orders || [] });
+      const contract = specApi.buildRefSlotContract({ refDNA: selectionRefDNA, artBriefOrders: d.artBrief?.orders || [], ...(_s7TemplateV1 ? { mode: 'template_v1' } : {}) }); // ★ D3-B2: persisted mode
       const sentSet = new Set(allLinks.map(String));
       // ★ SEM-2 (Codex): exact authority — สร้าง plannedByRefSlot จาก "slotPlan สุดท้ายที่รอด dedupe+เพดาน 10 จริง"
       //   เท่านั้น (ห้ามสร้างจาก raw slots) · เฉพาะ _sem + สวิตช์ runtime ทั้งสอง ON
@@ -2438,23 +2678,35 @@ export async function s7_wait(job) {
     let finalAssignmentTrace = null;
     if (SELECTION_TRACE_ON && Array.isArray(r.manifest?.slots)) {
       try {
-        const traceApi = await import('@/lib/refSlotContract');
-        const refSlotContract = traceApi.buildRefSlotContract({
-          refDNA: job.dossier.refMatch?.dna || null,
-          artBriefOrders: job.dossier.artBrief?.orders || [],
-        });
-        finalAssignmentTrace = traceApi.buildFinalAssignmentTrace({
-          plannedSlots: job.dossier.pickImages?.slots || {},
-          manifestSlots: r.manifest.slots,
-          placed: r.placed || [],
-          refSlotContract,
-          // ★ รอบ 4 P0: สัญญาจริงจาก S7 มาก่อน positional เสมอ (ไม่มี = ถอย legacy เดิมทั้งก้อน)
-          selectionSpec: job.dossier.cover?.selectionSpec || null,
-        });
-        // ★ รอบ 7 P0: แยก log ตามเวอร์ชัน — v1 (ไม่มี spec) ต้องเป็นข้อความ HEAD เดิมทุกตัวอักษร
-        if (finalAssignmentTrace.v === 2) {
-          console.log(`[MEGA S7] selection trace: kept ${finalAssignmentTrace.partition.kept}/${finalAssignmentTrace.total} · changed ${finalAssignmentTrace.partition.changed} · missing ${finalAssignmentTrace.partition.missingExpected} · unmapped ${finalAssignmentTrace.partition.unmapped}`);
+        // ★ D3-B2.1 (Codex P0): s7_wait derive mode จาก persisted marker "คู่" (artBrief+pickImages) เท่านั้น —
+        //   ไม่อ่าน env (switch ปิดหลัง enqueue ก็ยัง template trace) · marker property มีแต่ pair ไม่ valid/equal
+        //   = diagnostic failure (ข้าม trace ไม่ rebuild) ห้าม legacy · ไม่มี marker = legacy rebuild เดิม
+        const _abT = readRefShotMarker(job.dossier.artBrief, 'refShotAuthority'); // normalize ครั้งเดียว
+        const _piT = readRefShotMarker(job.dossier.pickImages, 'refShotAuthority');
+        const _markerPresent = _abT.present || _piT.present;
+        const _tracePairOk = _abT.present && _piT.present && !!_abT.marker && !!_piT.marker && canonicalMarkersEqual(_abT.marker, _piT.marker);
+        if (_markerPresent && !_tracePairOk) {
+          console.log('[MEGA S7w] 🎯⚠️ trace: marker property มีแต่ pair ไม่ valid/equal → ข้าม (diagnostic failure ไม่ถอย legacy)');
         } else {
+          const traceApi = await import('@/lib/refSlotContract');
+          const refSlotContract = traceApi.buildRefSlotContract({
+            refDNA: job.dossier.refMatch?.dna || null,
+            artBriefOrders: job.dossier.artBrief?.orders || [],
+            ...(_tracePairOk ? { mode: 'template_v1' } : {}), // ★ D3-B2.1: pair valid = template mode (ไม่พึ่ง env)
+          });
+          finalAssignmentTrace = traceApi.buildFinalAssignmentTrace({
+            plannedSlots: job.dossier.pickImages?.slots || {},
+            manifestSlots: r.manifest.slots,
+            placed: r.placed || [],
+            refSlotContract,
+            // ★ รอบ 4 P0: สัญญาจริงจาก S7 มาก่อน positional เสมอ (ไม่มี = ถอย legacy เดิมทั้งก้อน)
+            selectionSpec: job.dossier.cover?.selectionSpec || null,
+          });
+        }
+        // ★ รอบ 7 P0: แยก log ตามเวอร์ชัน — v1 (ไม่มี spec) ต้องเป็นข้อความ HEAD เดิมทุกตัวอักษร
+        if (finalAssignmentTrace && finalAssignmentTrace.v === 2) {
+          console.log(`[MEGA S7] selection trace: kept ${finalAssignmentTrace.partition.kept}/${finalAssignmentTrace.total} · changed ${finalAssignmentTrace.partition.changed} · missing ${finalAssignmentTrace.partition.missingExpected} · unmapped ${finalAssignmentTrace.partition.unmapped}`);
+        } else if (finalAssignmentTrace) {
           console.log(`[MEGA S7] selection trace: kept ${finalAssignmentTrace.keptExpectedPrimary}/${finalAssignmentTrace.total} expected primaries · changed ${finalAssignmentTrace.changedExpectedPrimary}`);
         }
       } catch (traceErr) {
