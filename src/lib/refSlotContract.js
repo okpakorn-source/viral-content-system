@@ -36,23 +36,283 @@ function orderFor(orders, index, refRole) {
     || null;
 }
 
+function nonBlank(value) {
+  const s = String(value ?? '').trim();
+  return s.length ? s : null;
+}
+
+// ★ D3-B1.3 (Codex P1): normalize template slot role "จุดเดียว" ใช้ทั้ง matcher + emitted view + diagnostics —
+//   role ว่าง/whitespace → ถอยไป id ที่ nonblank → สุดท้าย slot_N (กันเคส {role:'', id:'hero'} matcher เห็น
+//   slot_1 แต่ view เห็น hero = เสีย semantic fallback/provenance)
+function templateSlotRole(slot, index) {
+  const fromRole = cleanRole(slot?.role, '');
+  if (fromRole) return fromRole;
+  const fromId = cleanRole(slot?.id, '');
+  if (fromId) return fromId;
+  return `slot_${index + 1}`;
+}
+
 function uniqueId(base, counts) {
   const next = (counts.get(base) || 0) + 1;
   counts.set(base, next);
   return next === 1 ? base : `${base}_${next}`;
 }
 
+// ★ D3-B1.1: main↔hero = family เดียวสำหรับ "alias fallback" (exact-first เสมอ)
+function heroFamily(role) {
+  return role === 'hero' || role === 'main';
+}
+
+// ★ D3-B1.1 (Codex P1-1/P1-2): จับคู่ DNA→template แบบ 2 pass, ห้าม reuse, exact ก่อน alias เสมอ
+//   pass1: exact normalized role, nth template-role ↔ nth DNA same-role (FIFO queue ต่อ role)
+//   pass2: เฉพาะ template ที่ยัง unmatched + role อยู่ family hero → หยิบ DNA family ที่เหลือ (index order)
+//   คืน match[templateIndex] = { semanticIndex, aliasUsed } | null · usedDna set (deterministic, no reuse)
+function resolveSemanticMatches(templateSlots, semanticSlots) {
+  const tRoles = templateSlots.map((t, i) => templateSlotRole(t, i)); // ★ D3-B1.3: role เดียวกับ emitted view เป๊ะ
+  const sRoles = semanticSlots.map((s, i) => cleanRole(s?.role, `slot_${i + 1}`));
+  const usedDna = new Set();
+  const match = new Array(templateSlots.length).fill(null);
+  // pass1 — exact role FIFO (nth-to-nth)
+  const exactQueue = new Map();
+  sRoles.forEach((r, i) => { if (!exactQueue.has(r)) exactQueue.set(r, []); exactQueue.get(r).push(i); });
+  tRoles.forEach((r, ti) => {
+    const q = exactQueue.get(r);
+    if (q && q.length) { const di = q.shift(); usedDna.add(di); match[ti] = { semanticIndex: di, aliasUsed: false }; }
+  });
+  // pass2 — hero-family alias เฉพาะ template ที่ยัง unmatched (ห้าม pool ก่อน exact)
+  const remainingHeroDna = sRoles.map((r, i) => ({ r, i })).filter((x) => !usedDna.has(x.i) && heroFamily(x.r)).map((x) => x.i);
+  let hp = 0;
+  tRoles.forEach((r, ti) => {
+    if (match[ti] || !heroFamily(r)) return;
+    if (hp < remainingHeroDna.length) { const di = remainingHeroDna[hp++]; usedDna.add(di); match[ti] = { semanticIndex: di, aliasUsed: true }; }
+  });
+  return { match, usedDna };
+}
+
+// ★ D3-B1.1/B1.2 (Codex P1-2): จับ order→template slot แบบ preassign no-reuse + provenance
+//   passA: exact index+role (exact_index) · passB: exact role FIFO (exact_role) · passC: hero-family (hero_alias)
+//   คืน entries[vi] = { order, orderIndex, orderRole, matchMode } | null + unusedOrderIndices (deterministic)
+function preassignOrders(views, orders) {
+  const list = Array.isArray(orders) ? orders : [];
+  const usedOrder = new Set();
+  const entries = new Array(views.length).fill(null);
+  const takeEntry = (vi, matchMode, predicate) => {
+    for (let i = 0; i < list.length; i++) {
+      if (usedOrder.has(i)) continue;
+      if (predicate(list[i])) {
+        usedOrder.add(i);
+        entries[vi] = { order: list[i], orderIndex: i, orderRole: cleanRole(list[i]?.role, '') || null, matchMode };
+        return;
+      }
+    }
+  };
+  views.forEach((v, vi) => takeEntry(vi, 'exact_index', (o) => Number(o?.i) === v.index && cleanRole(o?.role, '') === v.role));
+  views.forEach((v, vi) => { if (!entries[vi]) takeEntry(vi, 'exact_role', (o) => cleanRole(o?.role, '') === v.role); });
+  views.forEach((v, vi) => { if (!entries[vi] && heroFamily(v.role)) takeEntry(vi, 'hero_alias', (o) => heroFamily(cleanRole(o?.role, ''))); });
+  const unusedOrderIndices = list.map((o, i) => i).filter((i) => !usedOrder.has(i));
+  return { entries, unusedOrderIndices };
+}
+
+/**
+ * ★ D3-B1 PURE resolver — no imports/IO/time/random/env.
+ * template.slots = axis (order/count/role/shape/geometry/pos). DNA semantic merged by
+ * normalized role + occurrence (nth-to-nth) เท่านั้น + main↔hero alias เมื่อ exact ไม่พอ — ห้าม array index,
+ * ห้าม reuse DNA slot ซ้ำ · shot: template nonblank ชนะ · same-role DNA shot = fallback เมื่อ template ว่าง ·
+ * ไม่มีทั้งคู่ = null · subject: template ก่อน มิฉะนั้น same-role DNA · emotion/facing/desc: same-role DNA (ไม่ cross-role)
+ * · faceSizePct: template ก่อน DNA · DNA-only role = ไม่สร้าง slot · template-only role = อยู่+semantic null
+ * คืน provenance/aliasUsed/diagnostics deterministic.
+ * @param {'legacy'|'template_v1'} opts.mode
+ */
+export function resolveRefSlotView(refDNA = null, { mode = 'legacy' } = {}) {
+  const dna = refDNA && typeof refDNA === 'object' ? refDNA : {};
+  const templateSlots = Array.isArray(dna.template?.slots) ? dna.template.slots : [];
+  const semanticSlots = Array.isArray(dna.slots) ? dna.slots : [];
+
+  if (mode !== 'template_v1') {
+    // legacy view = สะท้อน cascade ของ buildRefSlotContract (สำหรับ diagnostics/parity เท่านั้น)
+    let source = 'legacy';
+    let rawSlots = [];
+    if (templateSlots.length) { source = 'template.slots'; rawSlots = templateSlots.map((slot, index) => ({ ...(semanticSlots[index] || {}), ...slot })); }
+    else if (semanticSlots.length) { source = 'slots'; rawSlots = semanticSlots.map((slot) => ({ ...slot })); }
+    const views = rawSlots.map((raw, index) => ({
+      index,
+      role: cleanRole(raw?.role || raw?.id, `slot_${index + 1}`),
+      shape: cleanRole(raw?.shape, cleanRole(raw?.role || raw?.id, `slot_${index + 1}`) === 'circle' ? 'circle' : 'rect'),
+      pos: nonBlank(raw?.pos),
+      geometry: geometryOf(raw),
+      faceSizePct: Number(raw?.faceSizePct) || null,
+      shot: nonBlank(raw?.shot),
+      shotProvenance: nonBlank(raw?.shot) ? 'raw' : 'none',
+      subject: nonBlank(raw?.subject),
+      subjectProvenance: nonBlank(raw?.subject) ? 'raw' : 'none',
+      emotion: nonBlank(raw?.emotion),
+      facing: nonBlank(raw?.facing),
+      desc: nonBlank(raw?.desc),
+      semanticMatched: null,
+      semanticIndex: null,
+      semanticRole: null,
+      aliasUsed: false,
+    }));
+    return { mode: 'legacy', source, views, diagnostics: { templateCount: templateSlots.length, dnaCount: semanticSlots.length, danglingDnaRoles: [] } };
+  }
+
+  // template_v1: template = axis · DNA matched by role+occurrence + main↔hero alias · ไม่ reuse
+  const { match, usedDna } = resolveSemanticMatches(templateSlots, semanticSlots);
+  const roleCounts = new Map();
+  const views = templateSlots.map((t, index) => {
+    const role = templateSlotRole(t, index); // ★ D3-B1.3: role เดียวกับ matcher เป๊ะ
+    const occurrence = roleCounts.get(role) || 0;
+    roleCounts.set(role, occurrence + 1);
+    const m = match[index];
+    const sem = m ? semanticSlots[m.semanticIndex] : null;
+    const semanticRole = sem ? cleanRole(sem?.role, `slot_${m.semanticIndex + 1}`) : null;
+    const shape = cleanRole(t?.shape, role === 'circle' ? 'circle' : 'rect');
+    const tShot = nonBlank(t?.shot);
+    const sShot = sem ? nonBlank(sem?.shot) : null;
+    const tSubject = nonBlank(t?.subject);
+    const sSubject = sem ? nonBlank(sem?.subject) : null;
+    return {
+      index,
+      role,
+      occurrence,
+      shape,
+      pos: nonBlank(t?.pos),
+      geometry: geometryOf(t),
+      faceSizePct: Number(t?.faceSizePct ?? (sem ? sem?.faceSizePct : undefined)) || null,
+      shot: tShot ?? sShot ?? null,
+      shotProvenance: tShot ? 'template' : (sShot ? 'dna' : 'none'),
+      subject: tSubject ?? sSubject ?? null,
+      subjectProvenance: tSubject ? 'template' : (sSubject ? 'dna' : 'none'),
+      emotion: sem ? nonBlank(sem?.emotion) : null,
+      facing: sem ? nonBlank(sem?.facing) : null,
+      desc: sem ? nonBlank(sem?.desc) : null,
+      semanticMatched: !!sem,
+      semanticIndex: m ? m.semanticIndex : null,
+      semanticRole,
+      aliasUsed: m ? m.aliasUsed : false,
+    };
+  });
+  const danglingDnaRoles = semanticSlots
+    .map((s, i) => ({ index: i, role: cleanRole(s?.role, `slot_${i + 1}`) }))
+    .filter((x) => !usedDna.has(x.index));
+  return { mode: 'template_v1', source: 'template.slots', views, diagnostics: { templateCount: templateSlots.length, dnaCount: semanticSlots.length, danglingDnaRoles } };
+}
+
+// ★ D3-B1.2: viewDiagnostics = ชั้น "semantic view" ล้วน (เข้า effectiveViewHash) — ไม่มีข้อมูล artBrief order
+//   สะท้อน DNA จริงแม้ไม่มี template (danglingDnaRoles = DNA ทุกตัว) เพื่อ D1 แยก DNA ต่างกันได้จาก hash
+function buildViewDiagnostics(view) {
+  return {
+    templateCount: view.diagnostics.templateCount,
+    dnaCount: view.diagnostics.dnaCount,
+    unmatchedTemplateRoles: view.views.filter((v) => !v.semanticMatched).map((v) => ({ index: v.index, role: v.role })),
+    missingShotSlots: view.views.filter((v) => v.shot === null).map((v) => ({ index: v.index, role: v.role })),
+    danglingDnaRoles: view.diagnostics.danglingDnaRoles,
+    aliasMatches: view.views.filter((v) => v.aliasUsed).map((v) => ({ index: v.index, role: v.role, fromRole: v.semanticRole, semanticRole: v.semanticRole, semanticIndex: v.semanticIndex })),
+  };
+}
+
+// ★ D3-B1.2: effectiveViewHash = hash ของ "resolved ref view + viewDiagnostics" เท่านั้น
+//   (ไม่รวม artBrief order/eventIntent/wantPerson — post-artBrief S6↔S7 คุมด้วย whole-contract hash ของ adapter ภายหลัง)
+//   mode อยู่ใน hash → template_v1 vs legacy แยกกันแม้ค่า slot เหมือน
+function effectiveViewHashOf(view, viewDiagnostics) {
+  return fnv1a32(JSON.stringify({
+    mode: 'template_v1',
+    axis: 'template.slots',
+    slots: view.views.map((v) => ({
+      index: v.index, role: v.role, occurrence: v.occurrence, shape: v.shape, pos: v.pos, geometry: v.geometry,
+      shot: v.shot, shotProvenance: v.shotProvenance, subject: v.subject, subjectProvenance: v.subjectProvenance,
+      emotion: v.emotion, facing: v.facing, desc: v.desc, faceSizePct: v.faceSizePct,
+      semanticIndex: v.semanticIndex, semanticRole: v.semanticRole, semanticMatched: v.semanticMatched, aliasUsed: v.aliasUsed,
+    })),
+    viewDiagnostics,
+  }));
+}
+
+// ★ D3-B1.2: orderDiagnostics = ชั้น artBrief order (แยกจาก view · ไม่เข้า effectiveViewHash)
+function buildOrderDiagnostics(views, preassign, orders) {
+  const list = Array.isArray(orders) ? orders : [];
+  const { entries, unusedOrderIndices } = preassign;
+  const orderAliasMatches = [];
+  entries.forEach((e, vi) => {
+    if (e && e.matchMode === 'hero_alias') orderAliasMatches.push({ index: views[vi].index, role: views[vi].role, orderIndex: e.orderIndex, orderRole: e.orderRole });
+  });
+  return {
+    orderAliasMatches,
+    unmatchedOrderIndices: unusedOrderIndices,
+    unmatchedOrderRoles: unusedOrderIndices.map((i) => cleanRole(list[i]?.role, '') || null),
+  };
+}
+
 /**
  * Build the immutable semantic contract used only by solver shadow diagnostics.
  * Geometry slots are canonical when available; semantic slots fill missing labels.
+ * ★ D3-B1.1: canonical input เดียว = mode:'template_v1' (explicit — ไม่มี env, ไม่มี alias boolean).
+ * default / 'legacy' / junk / ไม่ส่ง = legacy exact เดิมทุก byte · template_v1 มี top-level authority.
  */
-export function buildRefSlotContract({ refDNA = null, artBriefOrders = [], legacySlots = LEGACY_MEGA_SLOT_ORDER } = {}) {
+export function buildRefSlotContract({ refDNA = null, artBriefOrders = [], legacySlots = LEGACY_MEGA_SLOT_ORDER, mode = 'legacy' } = {}) {
   const dna = refDNA && typeof refDNA === 'object' ? refDNA : {};
   const templateSlots = Array.isArray(dna.template?.slots) ? dna.template.slots : [];
   const semanticSlots = Array.isArray(dna.slots) ? dna.slots : [];
   const legacyOrder = (Array.isArray(legacySlots) && legacySlots.length ? legacySlots : LEGACY_MEGA_SLOT_ORDER)
     .map((slot, index) => cleanRole(slot, `slot_${index + 1}`));
 
+  // ★ D3-B1.1/B1.2: template_v1 = explicit input เท่านั้น (ไม่มี dual API/alias boolean)
+  if (mode === 'template_v1') {
+    // resolve view เสมอ (แม้ไม่มี template → views=[] · danglingDnaRoles = DNA ทุกตัว) →
+    //   viewDiagnostics/effectiveViewHash สะท้อน DNA จริง (D1 แยก DNA ต่างกันได้แม้ slots=[])
+    const view = resolveRefSlotView(refDNA, { mode: 'template_v1' });
+    const viewDiagnostics = buildViewDiagnostics(view);
+    const effectiveViewHash = effectiveViewHashOf(view, viewDiagnostics);
+    // ★ P0-2 + B1.2 readiness boundary: axisReady = "มี template axis ให้ resolve" เท่านั้น
+    //   (ไม่ใช่ strict/pipeline ready — B2 ต้อง gate slots>=3 + geometry/realized/strict แยกเอง)
+    //   ไม่มี template → axisReady=false HOLD · มี template (แม้ missing shot/unmatched/geometry เพี้ยน) = true + diagnostics
+    const axisReady = templateSlots.length > 0;
+    const preassign = preassignOrders(view.views, artBriefOrders);
+    const orderDiagnostics = buildOrderDiagnostics(view.views, preassign, artBriefOrders);
+    const authority = { mode: 'template_v1', axis: 'template.slots', axisReady, effectiveViewHash, viewDiagnostics, orderDiagnostics };
+
+    if (!axisReady) {
+      return { v: 1, source: 'template.slots', legacyOrder, slots: [], mismatches: [], authority };
+    }
+    const counts = new Map();
+    const slots = view.views.map((v, vi) => {
+      const legacySlot = legacyOrder[v.index] || null;
+      const refRole = v.role;
+      const id = uniqueId(refRole, counts);
+      const e = preassign.entries[vi];
+      const order = e ? e.order : null;
+      return {
+        id,
+        refRole,
+        solverRole: solverRoleFor(refRole, v.shape),
+        legacySlot,
+        sourceIndex: v.index,
+        shape: v.shape,
+        subject: v.subject,
+        eventIntent: nonBlank(order?.want),
+        wantPerson: nonBlank(order?.personHint),
+        refShot: v.shot, // effective shot จาก resolver — order.shot ไม่ override เด็ดขาด
+        position: v.pos,
+        geometry: v.geometry,
+        // ★ P1-3 semantic per-slot metadata (template_v1 เท่านั้น — legacy ไม่มี field พวกนี้)
+        refShotProvenance: v.shotProvenance,
+        subjectProvenance: v.subjectProvenance,
+        semanticIndex: v.semanticIndex,
+        semanticMatched: v.semanticMatched,
+        aliasUsed: v.aliasUsed,
+        // ★ B1.2 order provenance per-slot
+        orderIndex: e ? e.orderIndex : null,
+        orderRole: e ? e.orderRole : null,
+        orderMatchMode: e ? e.matchMode : null,
+      };
+    });
+    const mismatches = slots
+      .filter((slot) => slot.legacySlot && slot.refRole !== slot.legacySlot)
+      .map((slot) => ({ id: slot.id, refRole: slot.refRole, legacySlot: slot.legacySlot, sourceIndex: slot.sourceIndex }));
+    return { v: 1, source: 'template.slots', legacyOrder, slots, mismatches, authority };
+  }
+
+  // ── LEGACY (default / อะไรที่ไม่ใช่ template_v1) — EXACT เดิมทุก byte ──
   let source = 'legacy';
   let rawSlots;
   if (templateSlots.length) {
