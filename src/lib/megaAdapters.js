@@ -6,10 +6,11 @@
 // 🔴 ไม่แตะโค้ดระบบข่าว: คิว/extract เรียกผ่าน HTTP same-origin แบบเดียวกับโต๊ะข่าว
 // ============================================================
 
-import { preflightBrain, compassBrain, judgeBrain, slotDirectorBrain, artBriefBrain } from '@/lib/megaBrains';
+import { preflightBrain, compassBrain, judgeBrain, slotDirectorBrain, artBriefBrain, templateV1PersonAuthority } from '@/lib/megaBrains';
 import { evaluateCoverQc } from '@/lib/coverQcGate'; // ★ Wave2 A1: ด่าน QC แข็ง — ของเสียไม่เข้าคลัง
 // ★ Wave2 Batch B1 (10 ก.ค.): เกณฑ์ตัวเลขคุณภาพภาพ/hero รวมเป็น single source of truth — ค่าเดิมเป๊ะ
 import { HERO_MIN_SHORT_SIDE, SHARPNESS_MIN_HERO, GAP_SEARCH_MIN_HERO_PER_PERSON as GAP_SEARCH_MIN_HERO_PER_PERSON_CFG } from '@/lib/imageQualityConfig';
+import { resolveRefSlotView } from '@/lib/refSlotContract'; // ★ D3-B3.2 (Codex): read-only — canonical template view สำหรับ derive authoritative target rows (ห้ามแก้ refSlotContract)
 
 const MEGA_USER = 'mega-bot';
 const MIN_EXTRACT_CHARS = parseInt(process.env.MEGA_MIN_EXTRACT_CHARS || '400', 10);
@@ -1154,6 +1155,84 @@ function _writeBackRefShotMarker(container, key, clone) {
     return false;
   }
 }
+// ★ D3-B3 (Codex): ตรวจ personHint ทุก order บท hero/main/reaction เทียบ current-person authority (helper เดียวกับ brain)
+//   valid ต่อ order: (persisted==null && expected==null) OR (ทั้งคู่ non-null && ชื่อตรง canonical) — อื่น = invalid
+//   (persisted!=null & expected==null = unknown/ประดิษฐ์ · persisted==null & expected!=null = ขาด canonical) ·
+//   ตรวจ "ทุก" order เป้าหมายที่มีจริง (ไม่ใช่ตัวแรก) · order ที่ไม่มี = ไม่บังคับ (contract คุม structure fail-closed เอง)
+// ★ D3-B3.3 (Codex TOCTOU): snapshot 1 order → plain scalar object ครั้งเดียว (อ่านค่าจาก descriptor รวดเดียว) ·
+//   reject: ไม่ใช่ plain object · symbol key · accessor (get/set) · ค่าไม่ใช่ scalar (nested object/function) →
+//   คืน null · downstream ได้ plain data ที่ getter/Proxy re-read ไม่ได้อีก (ไม่มี channel raw หลงเหลือ)
+function _plainScalarSnapshot(o) {
+  if (!o || typeof o !== 'object') return null;
+  const proto = Object.getPrototypeOf(o);
+  if (proto !== Object.prototype && proto !== null) return null; // non-plain (Date/class/etc)
+  const descs = Object.getOwnPropertyDescriptors(o); // single pass — Proxy trap ยิงครั้งเดียว, ค่าถูก capture ที่นี่
+  const out = {};
+  for (const k of Reflect.ownKeys(descs)) {
+    if (typeof k !== 'string') return null; // symbol key
+    const d = descs[k];
+    if (!d.enumerable) continue;
+    if (typeof d.get === 'function' || typeof d.set === 'function' || !('value' in d)) return null; // accessor
+    const v = d.value;
+    // ★ D3-B3.4 (Codex): JSON-safe scalar เท่านั้น — null | string | boolean | finite number
+    //   reject: undefined, bigint, symbol, NaN, ±Infinity, function, nested object (กัน serialize throw/drift null/หายเงียบ)
+    if (v === null || typeof v === 'string' || typeof v === 'boolean') out[k] = v;
+    else if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+    else return null;
+  }
+  return out;
+}
+// ★ D3-B3.3 (Codex): VALIDATE ONCE → PLAIN SNAPSHOT → คืน {ok, orders(snapshot), storyNote} · downstream ต้องใช้ snapshot นี้เท่านั้น
+//   อ่าน compass/brief/orders "ภายใน try" (throwing getter บน carrier/compass/orders = false ไม่หลุด s6) ·
+//   orders อ่านจาก descriptor (accessor orders = reject ไม่ยิง getter) · แต่ละ order snapshot เป็น plain scalar ครั้งเดียว ·
+//   expected target rows = hero/main/reaction จาก resolveRefSlotView(refDNA) (read-only) — ไม่เชื่อ role จาก order ปลอม ·
+//   presence exactly-one (index+role) + no-extra target-role + strict integer index + unique-canonical personHint = valid
+function _validatePersonSnapshot(getCompass, getArtBrief, refDNA) {
+  const FAIL = { ok: false, orders: null, storyNote: '' };
+  try {
+    const compass = getCompass();
+    const brief = getArtBrief();
+    if (!brief || typeof brief !== 'object') return FAIL;
+    const od = Object.getOwnPropertyDescriptor(brief, 'orders'); // descriptor: accessor = reject (ไม่ยิง getter)
+    if (!od || typeof od.get === 'function' || typeof od.set === 'function' || !('value' in od) || !Array.isArray(od.value)) return FAIL;
+    const snap = [];
+    for (const o of od.value) {
+      const p = _plainScalarSnapshot(o); // อ่าน field ดิบครั้งเดียว → plain
+      if (p == null) return FAIL;
+      snap.push(p);
+    }
+    const sd = Object.getOwnPropertyDescriptor(brief, 'storyNote');
+    const storyNote = (sd && typeof sd.get !== 'function' && 'value' in sd && typeof sd.value === 'string') ? sd.value : '';
+    const view = resolveRefSlotView(refDNA, { mode: 'template_v1' });
+    const targets = (Array.isArray(view?.views) ? view.views : []).filter((v) => v.role === 'hero' || v.role === 'main' || v.role === 'reaction');
+    const auth = templateV1PersonAuthority(compass);
+    const idxOf = (o) => (Number.isInteger(o.i) ? o.i : null); // strict integer (snap plain — ห้าม coercion ''/null/false)
+    const roleOf = (o) => String(o.role ?? '').trim().toLowerCase();
+    // pass 1 (presence): ทุก expected target ต้องมี snap order คู่ index+role พอดี 1 + personHint ถูก authority
+    for (const t of targets) {
+      const at = snap.filter((o) => idxOf(o) === t.index);
+      if (at.length !== 1) return FAIL; // missing / duplicate
+      const o = at[0];
+      if (roleOf(o) !== t.role) return FAIL; // relabel/malformed role
+      const rawHint = o.personHint;
+      const persisted = (rawHint == null || String(rawHint).trim() === '') ? null : String(rawHint).trim();
+      const expected = auth.resolveHint(t.role, persisted);
+      if (persisted == null) { if (expected != null) return FAIL; continue; }
+      const canon = auth.canonicalKnown(persisted); // unique canonical หรือ null (ambiguous/unknown)
+      if (canon == null || expected == null || !auth.nameMatch(canon, expected)) return FAIL;
+    }
+    // pass 2 (no-extra): snap order ที่ role เป็น target ต้องมี canonical row คู่ (index+role exact) — จับ i:99/นอก view
+    for (const o of snap) {
+      const r = roleOf(o);
+      if (r !== 'hero' && r !== 'main' && r !== 'reaction') continue;
+      const idx = idxOf(o);
+      if (idx == null || !targets.some((t) => t.index === idx && t.role === r)) return FAIL;
+    }
+    return { ok: true, orders: snap, storyNote };
+  } catch {
+    return FAIL; // อ่าน/แปลง/helper/view throw ใดๆ = fail-closed (deterministic HOLD ไม่หลุด s6_slots)
+  }
+}
 // ★ D3-B2.1 geometry (contract % และ realized pixel): finite/positive/in-bounds
 function _refShotGeomOk(g) {
   if (!g) return false;
@@ -1458,6 +1537,9 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   const _abRead = readRefShotMarker(job.dossier.artBrief, 'refShotAuthority');   // {present, marker: canonical|null}
   const _pickRead = readRefShotMarker(job.dossier.pickImages, 'refShotAuthority');
   let _jobRefShotMarker = null; // canonical snapshot ของงานนี้ (ตั้งเมื่อผ่าน lifecycle)
+  // ★ D3-B3.3 (Codex TOCTOU): whole plain snapshot ของ artBrief สำหรับ template_v1 — consumer ทุกจุดใน S6 template path
+  //   อ่านตัวนี้เท่านั้น (ไม่ reread raw carrier/Proxy) · null = legacy/unmarked (ใช้ raw byte เดิม)
+  let _templateArtBriefSnapshot = null;
 
   // 🎨 S6a บก.ศิลป์: ref → "ใบสั่งงาน" — ★ D3-B2.2/3 lifecycle: pick marker ต้องคู่ artBrief valid+equal ·
   //   marked resume เฉพาะ pickImages หาย (pre-selection) · fresh arm ต้องไม่มี pickImages · unmarked = legacy
@@ -1513,12 +1595,22 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         if (!_gRead.present || !_gRead.marker) {
           return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority: ผล template_v1 ไม่มี/เสีย marker — ไม่ assign (กัน retry กลายเป็น unmarked legacy)' };
         }
+        // ★ D3-B3.3 (Codex TOCTOU): validate raw generated brief "ครั้งเดียว" → PLAIN snapshot · bad = HOLD ไม่ persist
+        //   persist artBrief ที่ orders = snapshot plain เท่านั้น (ไม่เก็บ raw array/order refs/Proxy/getter) →
+        //   contract/slotDirector/dossierPatch/S7 อ่าน snapshot เดียวกัน ไม่ reread raw
+        const _valF = _validatePersonSnapshot(() => job.dossier.compass, () => _generatedBrief, _refDNA);
+        if (!_valF.ok) {
+          return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority: ใบสั่ง template_v1 ที่เพิ่งสร้าง personHint (hero/main/reaction) ไม่ตรงตัวตนข่าว — ไม่ persist (กัน retry เพี้ยน)' };
+        }
         _jobRefShotMarker = _gRead.marker;
-        job.dossier.artBrief = { ..._generatedBrief, refShotAuthority: cloneRefShotMarker(_gRead.marker) }; // ★ persist canonical plain (ไม่เก็บ Proxy/getter)
+        // ★ D3-B3.3: local plain snapshot ก้อนเดียว — fresh persist ลง job.dossier.artBrief (raw carrier = job.dossier plain) ได้
+        _templateArtBriefSnapshot = { storyNote: _valF.storyNote, orders: _valF.orders, refShotAuthority: cloneRefShotMarker(_gRead.marker) };
+        job.dossier.artBrief = _templateArtBriefSnapshot;
       } else {
         job.dossier.artBrief = _generatedBrief; // legacy = assign ตรง (byte เดิม)
       }
-      console.log(`[MEGA S6a] 🎨 ใบสั่งงาน ${job.dossier.artBrief.orders?.length || 0} ช่อง${_jobRefShotMarker ? ' · 🎯template_v1' : ''} — ${String(job.dossier.artBrief.storyNote || '').slice(0, 80)}`);
+      const _abLog = _templateArtBriefSnapshot || job.dossier.artBrief; // ★ D3-B3.3: template = local snapshot · legacy = raw (_generatedBrief) — ไม่มี raw read สำหรับ template
+      console.log(`[MEGA S6a] 🎨 ใบสั่งงาน ${_abLog.orders?.length || 0} ช่อง${_jobRefShotMarker ? ' · 🎯template_v1' : ''} — ${String(_abLog.storyNote || '').slice(0, 80)}`);
     } catch (e) {
       if (_armTemplateV1 && _semPrereqOn) {
         return { status: 'waiting', nextAction: 'wait', summary: `🎯⏸️ ref-shot authority: สร้างใบสั่ง template_v1 ล้ม (${String(e?.message || '').slice(0, 50)}) — พักงานก่อน slotDirector (ไม่ถอย legacy)` };
@@ -1528,6 +1620,22 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   }
   // ★ D3-B2.3: mode ของงานนี้ จาก canonical snapshot ที่ cache ไว้ (ไม่อ่าน raw ซ้ำ) + สวิตช์
   const _jobTemplateV1 = !!_jobRefShotMarker && _refShotAuthOn && _semPrereqOn;
+
+  // ★ D3-B3 (Codex): defense-in-depth (RESUME) — งาน template_v1 ที่ resume/persist มาแล้ว ต้องมี personHint
+  //   ทุกช่อง hero/main/reaction ตรง "ตัวตนข่าวปัจจุบัน" (current-person authority) ก่อน build contract/slotDirector ·
+  //   fail-closed strict: null/unknown/ผิดคน = waiting (ไม่ซ่อม paired เดิม · ไม่ถอย legacy) · unmarked/legacy ไม่แตะ
+  //   ★ D3-B3.3 (Codex): !_templateArtBriefSnapshot = validate-once — fresh สร้าง snapshot S1 แล้ว ข้ามการ revalidate ตรงนี้
+  //     (ใช้ S1 ก้อนเดิมถึง contract/brain/solver/dossierPatch) · resume เท่านั้นที่สร้าง snapshot ครั้งเดียวที่นี่
+  if (_jobTemplateV1 && !_templateArtBriefSnapshot) {
+    const _val = _validatePersonSnapshot(() => job.dossier.compass, () => job.dossier.artBrief, _refDNA);
+    if (!_val.ok) {
+      return { status: 'waiting', nextAction: 'wait', summary: '🎯⏸️ ref-shot authority: personHint (hero/main/reaction) ไม่ตรงตัวตนข่าวปัจจุบัน (current-person authority) — พักงาน ห้ามซ่อม/ถอย legacy' };
+    }
+    // ★ D3-B3.3 (Codex TOCTOU): สร้าง local plain snapshot ก้อนเดียว — ห้าม mutate raw carrier (Proxy set-trap โกหก/swap ได้)
+    //   consumer template path ทุกจุด (contract/brain/solver/diagnostics/dossierPatch/S7) อ่าน local นี้เท่านั้น
+    //   (representation canonicalization: person/index/role/selection เดิมทุกค่า · ไม่ซ่อม pickImages · marker canonical)
+    _templateArtBriefSnapshot = { storyNote: _val.storyNote, orders: _val.orders, refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) };
+  }
 
   // ★ SEM-1 (Codex อนุมัติ design v2 — เลือกภาพตามบทช่องจริงของ ref): เงื่อนไขเปิดต้องครบ 4 (invariant I5)
   //   ① MEGA_SEMANTIC_SELECTION=1 ② MEGA_SELECTION_SPEC=1 ③ ref แมตช์แน่น (_refDNA=typeMatched เท่านั้น)
@@ -1541,7 +1649,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       // ★ D3-B2.3: DI seam ใช้เฉพาะงาน template_v1 (armed) — legacy/unmarked ใช้ของจริงเสมอ (ไม่กระทบ Checkpoint C)
       const dnaToTemplateSpec = (_jobTemplateV1 && _deps?.dnaToTemplateSpec) || (await import('@/lib/refTemplate')).dnaToTemplateSpec;
       // ★ D3-B2: ใช้ persisted mode ของงาน — marked → template_v1 (authority) · legacy = arg เดิมเป๊ะ
-      const c = specApi.buildRefSlotContract({ refDNA: _refDNA, artBriefOrders: job.dossier.artBrief?.orders || [], ...(_jobTemplateV1 ? { mode: 'template_v1' } : {}) });
+      const c = specApi.buildRefSlotContract({ refDNA: _refDNA, artBriefOrders: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief)?.orders || [], ...(_jobTemplateV1 ? { mode: 'template_v1' } : {}) });
       const realized = dnaToTemplateSpec(_refDNA);
       const okSource = c?.source === 'template.slots' && Array.isArray(c.slots) && c.slots.length >= 3;
       const okRealized = !!realized && Array.isArray(realized.slots) && realized.slots.length === c.slots.length;
@@ -1626,7 +1734,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   let brain = { slots: {}, note: '' };
   let brainOk = true;
   try {
-    brain = await _brainFn({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title, refDNA: _refDNA, artBrief: job.dossier.artBrief || null, sceneInventory, ...(semContract ? { slotContract: semContract.slots } : {}) }); // เฟส 3.1: สมองเห็นแผนที่ฉาก · SEM-1: ส่งสัญญาช่องเมื่อ semantic ON เท่านั้น (OFF = args เดิมเป๊ะ)
+    brain = await _brainFn({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title, refDNA: _refDNA, artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) || null, sceneInventory, ...(semContract ? { slotContract: semContract.slots } : {}) }); // เฟส 3.1: สมองเห็นแผนที่ฉาก · SEM-1: ส่งสัญญาช่องเมื่อ semantic ON เท่านั้น (OFF = args เดิมเป๊ะ) · ★ D3-B3.3: template path ใช้ local snapshot
   } catch (err) {
     brainOk = false; // สมองล่ม → fallback ล้วน (กฎเดียวกับทางหลัก)
   }
@@ -1916,7 +2024,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         .map((c) => c?.name).filter(Boolean)
         .map((name) => ({ name, isHero: heroNames.includes(name) }));
       // wantPerson/refShot ต่อช่องจากใบสั่งงานสมอง (artBrief.orders — จับคู่ตาม role ของช่อง ถ้ามี)
-      const orders = job.dossier.artBrief?.orders || [];
+      const orders = (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief)?.orders || []; // ★ D3-B3.3: template path ใช้ local snapshot (solver/diagnostics)
       const _normShot = (s) => {
         const t = String(s || '').toLowerCase();
         if (/close|โคลส|ใบหน้า|หน้าเต็ม/.test(t)) return 'closeup';
@@ -2188,7 +2296,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   const quarantineTotal = untriagedList.length + sizeUnknownList.length;
   const quarantineTag = quarantineTotal > 0 ? ` · 🧿กัก ${untriagedList.length}+${sizeUnknownList.length} ใบ(ข้อมูลไม่ครบ)` : '';
   if (!slots[_canonHeroId]) {
-    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { pickImages: { slots, note: brain.note || '', ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) } } };
+    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { ...(_jobTemplateV1 ? { artBrief: _templateArtBriefSnapshot } : {}), pickImages: { slots, note: brain.note || '', ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) } } };
   }
   return {
     status: 'done',
@@ -2197,7 +2305,8 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     dossierPatch: {
       pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) },
       ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}),
-      ...(job.dossier.artBrief ? { artBrief: job.dossier.artBrief } : {}),
+      // ★ D3-B3.3 (Codex): template path echo local plain snapshot (ไม่ใช่ raw carrier) → S7/retry เห็น plain · legacy = raw byte เดิม
+      ...((_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) ? { artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) } : {}),
       // ★ Wave2 Batch D1: merge-patch additive — สเปรด im เดิมกันทับ field อื่นใน images (caseId/storyQueries/heroGradeReport ฯลฯ)
       ...(QUARANTINE_ON ? { images: { ...im, quarantine: { untriaged: untriagedList.length, sizeUnknown: sizeUnknownList.length, heroDemoted: heroDemotedFlag, sample: quarantineSampleIds } } } : {}),
     },
