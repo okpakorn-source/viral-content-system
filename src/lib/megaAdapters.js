@@ -668,12 +668,176 @@ function _buildSearchShadowV2FromSaved(saved, attr) {
   } catch { return null; }
 }
 
+// 🔎 Search V2 Outcome Shadow V1 (diagnostic-only, opt-in MEGA_SEARCH_OUTCOME_SHADOW_V1=1) — มิเรอร์ route.js
+//   aggregate counters ต่อ (queryIndex, provider) · bound 32 rows/16 KiB UTF-8 · pure · fail-closed descriptor-only sanitizer
+const _OS_MAX_ROWS = 32;
+const _OS_MAX_BYTES = 16 * 1024;
+const _OS_KEYSEP = String.fromCharCode(0); // ตัวคั่น tuple (NUL runtime) — source ไม่มี NUL literal · ชน provider/int ไม่ได้
+const _OS_COUNTERS = ['raw', 'sourceBlocked', 'inCallDuplicate', 'capSkipped', 'existingDuplicate', 'vetted', 'relevant', 'irrelevant', 'failed', 'freshPersisted', 'rank1_5', 'rank6_10', 'rank11_20'];
+function _osOwnVal(obj, key) { // own DATA descriptor เท่านั้น · accessor/exotic/throw = { bad:true } (ไม่เรียก getter)
+  try {
+    if (obj === null || (typeof obj !== 'object' && typeof obj !== 'function')) return { has: false };
+    const d = Object.getOwnPropertyDescriptor(obj, key);
+    if (!d) return { has: false };
+    if (!('value' in d)) return { bad: true };
+    return { has: true, value: d.value };
+  } catch { return { bad: true }; }
+}
+function _osUrlOf(obj, box) { const v = _osOwnVal(obj, 'imageUrl'); if (v.bad) { box.fail = true; return null; } return v.has && typeof v.value === 'string' && v.value ? v.value : null; }
+function _osRow(rows, qi, provider) {
+  const key = qi + _OS_KEYSEP + provider;
+  let r = rows.get(key);
+  if (!r) { r = { queryIndex: qi, provider }; for (const c of _OS_COUNTERS) r[c] = 0; rows.set(key, r); }
+  return r;
+}
+// เก็บ "ทุก occurrence" ของ url จัดกลุ่มตาม (queryIndex, provider) เก็บ best/min normalized rank ต่อกลุ่ม (ห้าม overwrite ข้ามคำค้น)
+function _osOcc(os, url, qi, provider, rank) {
+  let g = os.occ.get(url); if (!g) { g = new Map(); os.occ.set(url, g); }
+  const qk = qi + _OS_KEYSEP + provider;
+  const ex = g.get(qk);
+  if (!ex || rank < ex.providerRank) g.set(qk, { queryIndex: qi, provider, providerRank: rank });
+}
+// mirror route _osBlocked — occurrence ที่ยังไม่ผ่าน source-blocker ก่อน _osOcc (gap dup branch fire ก่อน blocker) → ตรวจ eligibility เองแบบ pure
+//   ห้าม record occ (=รับ verdict join) ให้ occurrence ที่ source-blocked โดย metadata ตัวเอง แม้ imageUrl ซ้ำกับใบสะอาด (source/title/link คนละใบ)
+//   descriptor-safe อ่าน own DATA เฉพาะ 4 field (imageUrl/source/sourceLink/title) · ยอมรับเฉพาะ string/null/undefined · อื่นๆ → os.fail (fail-closed) · plain object เรียก blocker (ไม่แตะ getter/proxy)
+function _osBlocked(im, os, B) {
+  if (!im || typeof im !== 'object') { os.fail = true; return true; }
+  let proto;
+  try { proto = Object.getPrototypeOf(im); } catch { os.fail = true; return true; } // Proxy getPrototypeOf trap throw → fail-closed (exception ไม่ escape เข้า business response)
+  if (proto !== Object.prototype && proto !== null) { os.fail = true; return true; } // custom/exotic prototype → fail-closed (blocker เห็น inherited field แต่ descriptor-read มองไม่เห็น)
+  const plain = {};
+  for (const f of ['imageUrl', 'source', 'sourceLink', 'title']) {
+    const d = _osOwnVal(im, f);
+    if (d.bad) { os.fail = true; return true; } // own accessor/exotic descriptor (descriptor-only, throw=bad)
+    if (d.has) { const v = d.value; if (typeof v === 'string') plain[f] = v; else if (v !== null && v !== undefined) { os.fail = true; return true; } }
+    else if (proto === Object.prototype) { let pd; try { pd = Object.getOwnPropertyDescriptor(Object.prototype, f); } catch { os.fail = true; return true; } if (pd) { os.fail = true; return true; } } // ไม่มี own → เช็ค Object.prototype pollution ตรงๆ (ไม่แตะ im เลย: ไม่มี in/get/has trap · proto=null = ไม่มี inherited)
+  }
+  try { return B.isCatalogSource(plain) || B.isOwnPageSource(plain) || B.isMismatchedFbMedia(plain); } catch { os.fail = true; return true; }
+}
+// fail-closed อ่าน verdict it.triage.relevant — mirror _osBlocked: plain/null proto ทั้ง it และ triage + Object.prototype pollution → os.fail · descriptor-only (ไม่เรียก getter/has/in)
+function _osTriageOf(it, os) {
+  if (it === null || it === undefined) return undefined;
+  if (typeof it === 'function') { os.fail = true; return undefined; } // function-valued vetted row → fail-closed (ก่อน proto check)
+  if (typeof it !== 'object') return undefined; // primitive → no verdict (benign)
+  let ip; try { ip = Object.getPrototypeOf(it); } catch { os.fail = true; return undefined; }
+  if (ip !== Object.prototype && ip !== null) { os.fail = true; return undefined; }
+  const td = _osOwnVal(it, 'triage');
+  if (td.bad) { os.fail = true; return undefined; }
+  if (!td.has) { if (ip === Object.prototype) { let pd; try { pd = Object.getOwnPropertyDescriptor(Object.prototype, 'triage'); } catch { os.fail = true; return undefined; } if (pd) { os.fail = true; return undefined; } } return undefined; }
+  const tri = td.value;
+  if (typeof tri === 'function') { os.fail = true; return undefined; } // function triage → fail-closed (ก่อน proto check)
+  if (!tri || typeof tri !== 'object') return undefined; // triage present แต่ไม่ใช่ object → no-verdict (failed)
+  let tp; try { tp = Object.getPrototypeOf(tri); } catch { os.fail = true; return undefined; }
+  if (tp !== Object.prototype && tp !== null) { os.fail = true; return undefined; }
+  const rd = _osOwnVal(tri, 'relevant');
+  if (rd.bad) { os.fail = true; return undefined; }
+  if (!rd.has) { if (tp === Object.prototype) { let pd; try { pd = Object.getOwnPropertyDescriptor(Object.prototype, 'relevant'); } catch { os.fail = true; return undefined; } if (pd) { os.fail = true; return undefined; } } return undefined; }
+  return rd.value;
+}
+function _osFreshUrls(saved, box) {
+  const imD = _osOwnVal(saved, 'images'); if (imD.bad || !imD.has) { box.fail = true; return null; }
+  const all = imD.value; if (!Array.isArray(all) || Object.getPrototypeOf(all) !== Array.prototype) { box.fail = true; return null; }
+  const lenD = _osOwnVal(all, 'length'); if (lenD.bad || !lenD.has || !Number.isSafeInteger(lenD.value) || lenD.value < 0) { box.fail = true; return null; }
+  const len = lenD.value;
+  const adD = _osOwnVal(saved, 'added'); if (adD.bad || !adD.has) { box.fail = true; return null; }
+  const addedN = adD.value; if (!Number.isSafeInteger(addedN) || addedN < 0 || addedN > len) { box.fail = true; return null; } // added>len ห้าม clamp เข้า historical
+  const urls = [];
+  for (let i = len - addedN; i < len; i++) {
+    const eD = _osOwnVal(all, i); if (eD.bad || !eD.has) { box.fail = true; return null; } // hole/accessor
+    const img = eD.value; if (!img || typeof img !== 'object' || Array.isArray(img)) { box.fail = true; return null; }
+    const uD = _osOwnVal(img, 'imageUrl'); if (uD.bad || !uD.has || typeof uD.value !== 'string') { box.fail = true; return null; }
+    urls.push(uD.value);
+  }
+  return { ok: true, urls };
+}
+function _sanitizeSearchOutcomeShadowV1(raw) {
+  try {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const proto = Object.getPrototypeOf(raw);
+    if (proto !== Object.prototype && proto !== null) return null;
+    const top = new Map();
+    for (const k of Reflect.ownKeys(raw)) { const d = Object.getOwnPropertyDescriptor(raw, k); if (!d || !('value' in d)) return null; top.set(k, d.value); }
+    const _int = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : null);
+    if (top.get('version') !== 1) return null;
+    const rowsTruncated = _int(top.get('rowsTruncated'));
+    const capped = top.get('capped');
+    if (rowsTruncated === null || typeof capped !== 'boolean') return null;
+    if (capped !== (rowsTruncated > 0)) return null; // cap metadata ต้องสอดคล้อง
+    const rowsRaw = top.get('rows');
+    if (!Array.isArray(rowsRaw) || Object.getPrototypeOf(rowsRaw) !== Array.prototype) return null;
+    const lenD = Object.getOwnPropertyDescriptor(rowsRaw, 'length');
+    if (!lenD || !('value' in lenD) || !Number.isSafeInteger(lenD.value) || lenD.value < 0) return null;
+    if (lenD.value > _OS_MAX_ROWS) return null; // bounded work: reject ก่อน iterate row ใดๆ
+    const out = [];
+    let prev = null;
+    for (let i = 0; i < lenD.value; i++) {
+      const ed = Object.getOwnPropertyDescriptor(rowsRaw, i);
+      if (!ed || !('value' in ed)) return null;
+      const el = ed.value;
+      if (!el || typeof el !== 'object' || Array.isArray(el)) return null;
+      const pe = Object.getPrototypeOf(el);
+      if (pe !== Object.prototype && pe !== null) return null;
+      const em = new Map();
+      for (const k of Reflect.ownKeys(el)) { const dd = Object.getOwnPropertyDescriptor(el, k); if (!dd || !('value' in dd)) return null; em.set(k, dd.value); }
+      const queryIndex = _int(em.get('queryIndex'));
+      const provider = em.get('provider');
+      if (queryIndex === null) return null;
+      if (typeof provider !== 'string' || !_V2_PROVIDERS.has(provider)) return null;
+      const row = { queryIndex, provider };
+      for (const c of _OS_COUNTERS) { const v = _int(em.get(c)); if (v === null) return null; row[c] = v; }
+      if (row.vetted !== row.relevant + row.irrelevant + row.failed) return null;
+      if (row.rank1_5 + row.rank6_10 + row.rank11_20 > row.relevant) return null;
+      if (row.sourceBlocked + row.inCallDuplicate + row.capSkipped > row.raw) return null;
+      if (row.vetted > row.raw) return null; // vetted (distinct URL join ต่อแถว) ≤ occurrences ดิบ
+      if (row.freshPersisted + row.existingDuplicate > row.raw) return null; // canonical persistence ต่อแถว ≤ raw
+      const cmp = prev === null ? 1 : ((row.queryIndex - prev.queryIndex) || (row.provider < prev.provider ? -1 : row.provider > prev.provider ? 1 : 0));
+      if (cmp <= 0) return null; // unique + canonical-sorted
+      prev = row;
+      out.push(row);
+    }
+    const carrier = { version: 1, rows: out, rowsTruncated, capped };
+    if (_v2bytes(JSON.stringify(carrier)) > _OS_MAX_BYTES) return null;
+    return carrier;
+  } catch { return null; }
+}
+function _buildSearchOutcomeShadowV1(rowsIn) {
+  try {
+    // descriptor-only normalize input ก่อน filter/sort/map (exported → hostile-safe: getter invocation 0, malformed → null)
+    if (!Array.isArray(rowsIn) || Object.getPrototypeOf(rowsIn) !== Array.prototype) return null;
+    const inLenD = Object.getOwnPropertyDescriptor(rowsIn, 'length');
+    if (!inLenD || !('value' in inLenD) || !Number.isSafeInteger(inLenD.value) || inLenD.value < 0) return null;
+    if (inLenD.value > 4096) return null; // bounded work ก่อน iterate (DoS guard — producer จริง ≪ นี้)
+    const norm = [];
+    for (let i = 0; i < inLenD.value; i++) {
+      const ed = Object.getOwnPropertyDescriptor(rowsIn, i);
+      if (!ed || !('value' in ed)) return null; // hole/accessor element
+      const el = ed.value;
+      if (!el || typeof el !== 'object' || Array.isArray(el)) return null;
+      const pe = Object.getPrototypeOf(el);
+      if (pe !== Object.prototype && pe !== null) return null;
+      const qd = Object.getOwnPropertyDescriptor(el, 'queryIndex'); if (!qd || !('value' in qd) || !Number.isSafeInteger(qd.value) || qd.value < 0) return null; // scalar-validate ก่อน sort (กัน valueOf/coerce)
+      const pd = Object.getOwnPropertyDescriptor(el, 'provider'); if (!pd || !('value' in pd) || typeof pd.value !== 'string' || !_V2_PROVIDERS.has(pd.value)) return null; // provider ต้อง string + allowlisted (non-allowlisted = reject ที่ extraction ไม่ filter เงียบ · กัน '<' coercion)
+      const row = { queryIndex: qd.value, provider: pd.value };
+      for (const c of _OS_COUNTERS) { const cd = Object.getOwnPropertyDescriptor(el, c); if (cd && (!('value' in cd) || !Number.isSafeInteger(cd.value) || cd.value < 0)) return null; row[c] = cd ? cd.value : 0; }
+      norm.push(row);
+    }
+    const list = norm; // provider ผ่าน allowlist ตั้งแต่ descriptor extraction แล้ว (reject ทั้ง carrier ถ้าไม่ allowlisted — ไม่ filter เงียบ)
+    list.sort((a, b) => (a.queryIndex - b.queryIndex) || (a.provider < b.provider ? -1 : a.provider > b.provider ? 1 : 0));
+    const total = list.length;
+    let rows = list.slice(0, _OS_MAX_ROWS);
+    const mk = (arr) => ({ version: 1, rows: arr.map((r) => { const o = { queryIndex: r.queryIndex, provider: r.provider }; for (const c of _OS_COUNTERS) o[c] = r[c] || 0; return o; }), rowsTruncated: total - arr.length, capped: total - arr.length > 0 });
+    while (rows.length > 0 && _v2bytes(JSON.stringify(mk(rows))) > _OS_MAX_BYTES) rows = rows.slice(0, rows.length - 1);
+    return _sanitizeSearchOutcomeShadowV1(mk(rows));
+  } catch { return null; }
+}
+
 // ---------- S5c ค้นภาพ 4 แหล่ง — ทีละแหล่งต่อ 1 tick (กันชน timeout ของ tick) ----------
 // ห้ามคืน status:'done' ระหว่างยังไม่ครบทุกแหล่ง — done จะโดน idempotency นับ "เคยสำเร็จ" แล้วข้ามแหล่งที่เหลือ
 export async function s5_search(job, { origin, _deps }) {
   const _jf = _deps?.fetchJson || jfetch; // ★ test seam (เหมือน s6/s7) — prod ไม่ส่ง _deps = jfetch เดิมทุก byte
   const provenanceOn = process.env.MEGA_SEARCH_PROVENANCE === '1'; // 🔎 snapshot ครั้งเดียวก่อน await
   const shadowV2On = process.env.MEGA_SEARCH_SHADOW_V2 === '1';    // 🔎 V2 snapshot อิสระ ก่อน await
+  const outcomeOn = process.env.MEGA_SEARCH_OUTCOME_SHADOW_V1 === '1'; // 🔎 OS snapshot อิสระ ก่อน await
   const im = job.dossier.images || {};
   const done = im.searchedPlatforms || [];
   const next = SEARCH_PLATFORMS.find((p) => !done.includes(p));
@@ -701,8 +865,11 @@ export async function s5_search(job, { origin, _deps }) {
     // 🔎 Search V2 shadow — อ่าน carrier ผ่าน own data descriptor เท่านั้น (กัน getter/proxy trap ของ r) · nest ใน stat เดิม · success only
     let _shadow = null;
     if (shadowV2On) { try { const _sd = Object.getOwnPropertyDescriptor(r, 'searchShadowV2'); if (_sd && 'value' in _sd) _shadow = _sanitizeSearchShadowV2(_sd.value); } catch { _shadow = null; } }
+    // 🔎 Outcome Shadow V1 — อ่านผ่าน own data descriptor เท่านั้น · nest ใน stat เดิม (ห้ามสร้าง row) · success only
+    let _outcome = null;
+    if (outcomeOn) { try { const _od = Object.getOwnPropertyDescriptor(r, 'searchOutcomeShadowV1'); if (_od && 'value' in _od) _outcome = _sanitizeSearchOutcomeShadowV1(_od.value); } catch { _outcome = null; } }
     const stat = r.success
-      ? { platform: next, found: r.found || 0, added: r.added || 0, vetDropped: r.vetDropped || 0, ...(_prov ? { provenance: _prov } : {}), ...(_shadow ? { searchShadowV2: _shadow } : {}) }
+      ? { platform: next, found: r.found || 0, added: r.added || 0, vetDropped: r.vetDropped || 0, ...(_prov ? { provenance: _prov } : {}), ...(_shadow ? { searchShadowV2: _shadow } : {}), ...(_outcome ? { searchOutcomeShadowV1: _outcome } : {}) }
       : { platform: next, error: (r.error || String(r.httpStatus)).slice(0, 80), ...(_prov ? { provenance: _prov } : {}) };
     const patch = {
       images: {
@@ -1060,6 +1227,9 @@ export async function s5_gapsearch(job, { origin, _deps } = {}) {
   const provenanceOn = process.env.MEGA_SEARCH_PROVENANCE === '1'; // 🔎 snapshot ครั้งเดียวก่อน await
   const shadowV2On = process.env.MEGA_SEARCH_SHADOW_V2 === '1';    // 🔎 V2 snapshot อิสระ ก่อน await
   const _v2attr = shadowV2On ? new Map() : null;                   // 🔎 V2 attribution: imageUrl→provider/queryIndex/providerRank
+  const outcomeOn = process.env.MEGA_SEARCH_OUTCOME_SHADOW_V1 === '1'; // 🔎 OS snapshot อิสระ ก่อน await
+  //   collector: rows + first (canonical collected occ → existingDuplicate/freshPersisted) + occ (ทุก occurrence จัดกลุ่ม (queryIndex,provider) best/min rank → URL-verdict join ทุกกลุ่ม) + lib/osSeen (gap dedup-parity)
+  const _os = outcomeOn ? { rows: new Map(), first: new Map(), occ: new Map(), lib: null, osSeen: new Set(), fail: false } : null;
   const im = job.dossier.images || {};
   if (!GAP_SEARCH_ON) return { status: 'done', nextAction: 'continue', summary: 'ค้นรอบสอง: ปิดอยู่ (IMG_GAP_SEARCH=0) — ข้าม' };
   if (im.gapSearchDone) return { status: 'done', nextAction: 'continue', summary: 'ค้นรอบสอง: ทำแล้ว — ข้าม' };
@@ -1152,15 +1322,18 @@ export async function s5_gapsearch(job, { origin, _deps } = {}) {
   // 🔎 Search Provenance V1 (gap round) — hoist ให้ success/failure return อ่านได้ (collected อยู่ใน try)
   let provQueriesFired = 0, provUrlsReturned = 0, provUrlsVetted = 0, provVetKept = null, provVetDropped = 0, provVetFailed = 0;
   let gapShadowV2 = null; // 🔎 V2 sidecar (ON+valid เท่านั้น) — build หลัง addImages, อ่านที่ success return
+  let gapOutcome = null;  // 🔎 OS sidecar (ON+valid เท่านั้น) — build หลัง collect+vet+persist
   try {
     const { searchImages } = await import('@/lib/imageSearch');
     const { isCatalogSource, isOwnPageSource, isMismatchedFbMedia } = await import('@/lib/junkSources');
+    const _osBlk = { isCatalogSource, isOwnPageSource, isMismatchedFbMedia }; // 🔎 OS: ส่งให้ _osBlocked (blockers import แบบ dynamic ในฟังก์ชัน ไม่ได้อยู่ module scope)
     const { vetImages } = await import('@/lib/libraryTriage');
     const { addImages } = await import('@/lib/imageStore');
     const { getCase } = await import('@/lib/caseStore');
 
     const collected = [];
     const seen = new Set(libImages.map((x) => x.imageUrl));
+    if (_os) _os.lib = new Set(seen); // 🔎 OS: snapshot lib URLs (gap seen รวม lib) → แยก existingDuplicate (first) จาก inCallDuplicate (later)
     for (let _v2qi = 0; _v2qi < newQueries.length; _v2qi++) {
       const q = newQueries[_v2qi];
       for (const platform of ['google', 'google_news']) {
@@ -1168,14 +1341,21 @@ export async function s5_gapsearch(job, { origin, _deps } = {}) {
         try {
           const imgs = await searchImages(platform, q, { num: 15, caseId: im.caseId });
           provUrlsReturned += imgs.length; // 🔎 ดิบก่อนกรอง (เฉพาะคำค้นที่คืนสำเร็จ)
+          if (_os && !_os.fail) _osRow(_os.rows, _v2qi, platform).raw += imgs.length; // 🔎 OS: raw (gap ไม่มี cap → capSkipped=0)
           let _v2rank = 0; // 🔎 V2: rank ดิบ 1-based ก่อน filter/dedup (ห้าม renumber)
           for (const x of imgs) {
             _v2rank++;
-            if (!x.imageUrl || seen.has(x.imageUrl)) continue;
-            if (isCatalogSource(x) || isOwnPageSource(x) || isMismatchedFbMedia(x)) continue;
+            let _osUrl = null;
+            if (_os && !_os.fail) _osUrl = _osUrlOf(x, _os); // 🔎 OS: descriptor-safe url (occ บันทึกเฉพาะ occurrence ที่ eligible ด้านล่าง — ไม่รวม source-blocked)
+            if (!x.imageUrl || seen.has(x.imageUrl)) {
+              if (_os && !_os.fail && _osUrl) { const blk = _osBlocked(x, _os, _osBlk); if (!_os.fail) { const r = _osRow(_os.rows, _v2qi, platform); if (!_os.osSeen.has(_osUrl)) { if (blk) { r.sourceBlocked++; /* ไม่ mark osSeen: blocked occ ที่ยังไม่ถูก collect สะอาด → sourceBlocked ซ้ำได้ (parity route ไม่ add blocked URL เข้า seen) */ } else { if (_os.lib.has(_osUrl)) r.existingDuplicate++; else r.inCallDuplicate++; _osOcc(_os, _osUrl, _v2qi, platform, _v2rank); _os.osSeen.add(_osUrl); } } else { r.inCallDuplicate++; if (!blk) _osOcc(_os, _osUrl, _v2qi, platform, _v2rank); } } } // 🔎 OS: osSeen(=collect สะอาดแล้ว) → inCallDuplicate เสมอ (parity route dup branch) · ยังไม่ osSeen: blocked=sourceBlocked(ไม่ add), clean stored=existingDuplicate first + occ
+              continue;
+            }
+            if (isCatalogSource(x) || isOwnPageSource(x) || isMismatchedFbMedia(x)) { if (_os && !_os.fail) _osRow(_os.rows, _v2qi, platform).sourceBlocked++; continue; } // source-blocked = ไม่ record occ (ไม่รับ vet verdict)
             seen.add(x.imageUrl);
             collected.push({ ...x, platform, query: q });
             if (_v2attr) _v2attr.set(x.imageUrl, { queryIndex: _v2qi, provider: platform, providerRank: _v2rank }); // first attribution
+            if (_os && !_os.fail && _osUrl) { _os.first.set(_osUrl, { queryIndex: _v2qi, provider: platform, providerRank: _v2rank }); _os.osSeen.add(_osUrl); _osOcc(_os, _osUrl, _v2qi, platform, _v2rank); } // 🔎 OS: canonical first/collected occ + mark osSeen + record occ
           }
         } catch (err) { errs.push(String(err?.message || '').slice(0, 40)); }
       }
@@ -1199,12 +1379,27 @@ export async function s5_gapsearch(job, { origin, _deps } = {}) {
         toStore = anyTag ? vetted.filter((x) => x.triage?.relevant !== false) : vetted;
         vetDropped = collected.length - toStore.length; // legacy — คงเดิม (ใช้ใน summary)
         provVetKept = kept; provVetDropped = dropped; provVetFailed = failed; // 🔎 classifier จริง จาก vetImages
-      } catch { provVetFailed = collected.length; /* ตาล้ม → เก็บดิบไปก่อน; execution failure ทั้ง N (kept=null, dropped=0) */ }
+        if (_os && !_os.fail) { try { for (const it of vetted) { const u = _osUrlOf(it, _os); if (_os.fail) break; if (!u) continue; const g = _os.occ.get(u); if (!g) continue; const rel = _osTriageOf(it, _os); if (_os.fail) break; for (const a of g.values()) { const r = _osRow(_os.rows, a.queryIndex, a.provider); r.vetted++; if (rel === true) { r.relevant++; const rk = a.providerRank; if (rk >= 1 && rk <= 5) r.rank1_5++; else if (rk <= 10) r.rank6_10++; else if (rk <= 20) r.rank11_20++; } else if (rel === false) r.irrelevant++; else r.failed++; } } } catch { _os.fail = true; } } // 🔎 OS: URL-verdict join — propagate ไปทุก (queryIndex,provider) occurrence (best/min rank ต่อกลุ่ม) · อาจซ้อน inCallDuplicate
+      } catch { provVetFailed = collected.length; /* ตาล้ม → เก็บดิบไปก่อน; execution failure ทั้ง N (kept=null, dropped=0) */
+        if (_os && !_os.fail) { try { for (const x of collected) { const u = _osUrlOf(x, _os); if (_os.fail) break; if (!u) continue; const g = _os.occ.get(u); if (!g) continue; for (const a of g.values()) { const r = _osRow(_os.rows, a.queryIndex, a.provider); r.vetted++; r.failed++; } } } catch { _os.fail = true; } } // 🔎 OS: vet throw = failed (join ทุก occurrence)
+      }
       const saved = await addImages(im.caseId, toStore);
       added = saved.added || 0;
       // 🔎 Search V2 shadow — join id ที่เพิ่ง persist (N ใบท้าย) → provider/queryIndex/providerRank (ON เท่านั้น · pure)
       if (shadowV2On) gapShadowV2 = _buildSearchShadowV2FromSaved(saved, _v2attr);
+      // 🔎 Outcome Shadow V1 — descriptor-safe fresh-suffix → freshPersisted (via canonical first) + late add-time dedup → existingDuplicate (via canonical first)
+      if (_os && !_os.fail) { try {
+        const _toUrls = [];
+        for (const it of toStore) { const u = _osUrlOf(it, _os); if (_os.fail) break; if (u) _toUrls.push(u); }
+        const _fr = _os.fail ? null : _osFreshUrls(saved, _os);
+        if (!_os.fail && _fr) {
+          const _freshSet = new Set(_fr.urls);
+          for (const url of _fr.urls) { const a = _os.first.get(url); if (a) _osRow(_os.rows, a.queryIndex, a.provider).freshPersisted++; else { _os.fail = true; break; } } // 🔎 OS: freshPersisted = canonical first/collected occ เท่านั้น
+          if (!_os.fail) for (const url of _toUrls) if (!_freshSet.has(url)) { const a = _os.first.get(url); if (a) _osRow(_os.rows, a.queryIndex, a.provider).existingDuplicate++; else { _os.fail = true; break; } }
+        }
+      } catch { _os.fail = true; } }
     }
+    if (_os && !_os.fail) gapOutcome = _buildSearchOutcomeShadowV1([..._os.rows.values()]); // 🔎 OS: build carrier หลัง collect+vet+persist (รวมเคส collected=0 ที่มีแต่ raw/blocked/dup)
   } catch (err) {
     // ★ Wave2 B1: ยิงล้ม (แต่ toStore อาจมีบางส่วนที่เข้าคลังไปแล้วก่อนล้ม) → รวม libImages+toStore ให้ gate เห็นของจริงที่สุด
     // 🔎 outer failure ที่มี attempt วัดได้ → เก็บ gap sidecar (ON) เท่าที่นับได้จริง ณ จุดล้ม (ไม่เปลี่ยน status/summary เดิม)
@@ -1232,7 +1427,7 @@ export async function s5_gapsearch(job, { origin, _deps } = {}) {
     status: 'done',
     nextAction: 'continue',
     summary: `ค้นรอบสอง: ขาด ${gapDesc} → คำค้นใหม่ ${newQueries.length} คำ → เก็บเพิ่ม ${added} ใบ (ตากรองทิ้ง ${vetDropped}${errs.length ? ` · ล้ม ${errs.length} แหล่งย่อย` : ''})`,
-    dossierPatch: { images: { ...im, gapSearchDone: true, gapSearchAdded: added, gapSearchQueries: newQueries, ...(_gapProv ? { gapSearchProvenance: _gapProv } : {}), ...(gapShadowV2 ? { gapSearchShadowV2: gapShadowV2 } : {}) } },
+    dossierPatch: { images: { ...im, gapSearchDone: true, gapSearchAdded: added, gapSearchQueries: newQueries, ...(_gapProv ? { gapSearchProvenance: _gapProv } : {}), ...(gapShadowV2 ? { gapSearchShadowV2: gapShadowV2 } : {}), ...(gapOutcome ? { gapSearchOutcomeShadowV1: gapOutcome } : {}) } },
   });
 }
 
@@ -1459,11 +1654,25 @@ export function classifyPoolImage(x) {
   return 'ok';
 }
 
+// ★ D-sidecar (12 ก.ค.): predicate สวิตช์หลักฐานการตัดสินใจ — pure แยกไว้เทส matrix ได้ตรงๆ
+//   เปิดเฉพาะค่า string '1' เป๊ะเท่านั้น (number 1 / '1 ' / 'true' / undefined = ปิดหมด)
+export const _finalDecisionEvidenceFlag = (v) => v === '1';
+
 export async function s6_slots(job, { origin, _deps } = {}) {
   // ★ SEM-1: dependency injection เพื่อ testability เท่านั้น — default = ของจริง (production เดิม 100%)
   const _brainFn = _deps?.slotDirectorBrain || slotDirectorBrain;
   const _abFn = _deps?.artBriefBrain || artBriefBrain; // ★ D3-B2: DI seam (default = ของจริง — production เดิม)
   const _jf = _deps?.fetchJson || jfetch;
+  // ═══ D-sidecar — FINAL-DECISION EVIDENCE v2 (kill switch MEGA_FINAL_DECISION_EVIDENCE_V2='1' เป๊ะ) ═══
+  //   latch "ครั้งเดียวก่อน await แรกของฟังก์ชัน" (TOCTOU-proof — flip env กลางทางไม่มีผล) ·
+  //   OFF = inert เต็มตัว: ไม่มี dynamic import โมดูล D / ไม่อ่าน carrier-วินิจฉัยใด / ไม่มี field-log ใหม่ —
+  //   ผลธุรกิจ byte-identical กับ legacy · ON แต่หลักฐานไม่ครบ/เพี้ยน = omit sidecar เงียบ (fail-closed)
+  const _dEvidenceOn = _finalDecisionEvidenceFlag(process.env.MEGA_FINAL_DECISION_EVIDENCE_V2);
+  //   id เอาเฉพาะ primitive (string/finite number) — ไม่เรียก toString ของ object แปลก (ห้ามมี side effect เพิ่มเมื่อ ON)
+  const _dIdOf = (v) => (typeof v === 'string' ? v : (typeof v === 'number' && Number.isFinite(v) ? String(v) : null));
+  const _dTrace = _dEvidenceOn ? new Map() : null; // trace คู่ขนานข้าง slots (ภายในเท่านั้น — id ดิบไม่ออก output ใดๆ)
+  let _dUniverse = null; // จักรวาล candidate "ก้อนเดียว" (ids ตามลำดับที่ส่งเข้าสมองจริง) — จับก่อนเรียกสมอง
+  let _dSidecar = null;  // หลักฐาน v2 ที่ผ่าน producer (decisionComplete=true เท่านั้น) — แนบ key decisionEvidence ตอน return
   const im = job.dossier.images || {};
   const r = await _jf(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
   if (!r.success) return { status: 'failed', nextAction: 'retry', summary: 'อ่านคลังรูปไม่ได้: ' + (r.error || r.httpStatus) };
@@ -1635,17 +1844,43 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   }));
   // ★ Wave3 Phase1: mirror เพดาน prompt ของ slotDirectorBrain (megaBrains.js IMG_META_BUDGET=18000)
   //   เพื่อบันทึกความจริงว่า LLM เห็นกี่ id โดยไม่เปลี่ยน candidate/ลำดับ/ผลเลือกเดิม หากค่าต้นทางเปลี่ยนต้องแก้ mirror นี้พร้อมกัน
-  const solverDiagLlmVisibleIds = SOLVER_DIAGNOSTICS_V2_ON ? (() => {
+  //   ★ Codex D P1 (candidate-universe honesty รอบ 2): แกน mirror จุดเดียว — ค่างบ + serialization ต่อใบ ใช้ร่วมทุกผู้บริโภค
+  //     ห้ามพิสูจน์จากสิ่งที่ brain fn (จริง/ฉีดเทส) รายงานเอง
+  const IMG_META_BUDGET_MIRROR = 18000; // ต้องเท่ากับ IMG_META_BUDGET ใน megaBrains.js เสมอ (แก้ที่โน่นต้องแก้ที่นี่คู่กัน)
+  const _promptLineOf = (m) => JSON.stringify(m); // canonical per-row serialization — single source (solver-diag + D-sidecar)
+  // FROZEN PROOF ของ D-sidecar: serialize "ทุกใบ" เหมือน production เป๊ะ (megaBrains .map ทุกใบก่อนคิดงบ — ไม่ break กลางคัน)
+  //   + บัญชี byte เต็ม (บรรทัดจริงทุกแถว · งบ len+2 สะสม) + id ต่อใบ (primitive-only ผ่าน _dIdOf) · deep-frozen กันแก้ทีหลัง
+  //   เรียกเฉพาะโซน ON ใต้ try/catch ของ D — แถวไหน serialize ไม่เป็น string = null ทั้งก้อน (ห้ามใช้ proof บางส่วน)
+  const _promptBudgetProof = () => {
+    const lines = meta.map((m) => _promptLineOf(m));
+    if (!lines.every((ln) => typeof ln === 'string')) return null; // ทุกแถวต้อง serialize สำเร็จ — ขาดแถวเดียว = พิสูจน์ไม่ได้
+    let included = 0, len = 0;
+    for (const ln of lines) {
+      if (len + ln.length + 2 > IMG_META_BUDGET_MIRROR) break;
+      len += ln.length + 2;
+      included++;
+    }
+    return Object.freeze({
+      lines: Object.freeze(lines),
+      ids: Object.freeze(meta.map((m) => _dIdOf(m?.id))),
+      includedCount: included,
+      budgetLen: len,
+      rowCount: lines.length,
+    });
+  };
+  // มุมมอง solver diagnostics — พฤติกรรม Wave3 เดิมทุก byte (early-break · ไม่ serialize แถวหลังจุดตัด)
+  const _promptBudgetVisibleIds = () => {
     const ids = [];
     let len = 0;
     for (const m of meta) {
-      const line = JSON.stringify(m);
-      if (len + line.length + 2 > 18000) break;
+      const line = _promptLineOf(m);
+      if (len + line.length + 2 > IMG_META_BUDGET_MIRROR) break;
       len += line.length + 2;
       ids.push(String(m.id));
     }
     return ids;
-  })() : null;
+  };
+  const solverDiagLlmVisibleIds = SOLVER_DIAGNOSTICS_V2_ON ? _promptBudgetVisibleIds() : null;
 
   // ★ เฟส 3.1 (9 ก.ค.): จัดกลุ่ม "ฉาก" จาก note (ตัดวลีลายน้ำ/overlay ทิ้งก่อน) —
   //   ① สมองเห็น inventory ว่าพูลมีฉากอะไรกี่ใบ (วางเรื่องได้จริง)  ② ด่านโค้ดกันฉากซ้ำข้ามช่อง
@@ -1918,6 +2153,75 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     return m;
   })();
 
+  // ★ D-sidecar: จับ "จักรวาล candidate" ก้อนเดียว = ลิสต์ meta ทั้งก้อนที่กำลังส่งเข้าสมอง (ก่อน arbitration ทุกขั้น) —
+  //   detached copy ของ id ล้วน · ห้าม infer จากที่อื่น (top3/solver/พูลท้าย) · id หาย/ไม่ใช่ primitive/ซ้ำ (กำกวม)
+  //   = จักรวาลใช้ไม่ได้ → sidecar ทั้งก้อนถูก omit ตอน finalize (ไม่แตะผลธุรกิจ)
+  //   ★ Codex D P1 รอบ 2 (serialization-stability honesty): สมองจริงตัด prompt ที่ IMG_META_BUDGET=18000 และ
+  //     stringify "อีกรอบทีหลัง" เอง — proof ต้องการันตีว่ารอบหลังได้ byte เดิมแน่ ไม่ใช่แค่ id ตรงกันสองรอบ:
+  //     ① เดินตรวจโครงสร้างแบบ descriptor-only ก่อนแตะ stringify ใดๆ (ห้าม invoke): ทุกค่าในกราฟเป็น primitive/
+  //        undefined/plain Object/plain dense Array เท่านั้น · ห้ามมี own 'toJSON' ทุกชั้น + เช็ค pollution บน
+  //        Object.prototype/Array.prototype · ห้าม accessor/symbol key/proto แปลก — ผ่านแล้ว JSON.stringify
+  //        จึงพิสูจน์ได้ว่าไม่เรียกโค้ดแปลกปลอมเลย และให้ byte เดิมทุกรอบ รวมถึงรอบของสมองจริงที่มาทีหลัง
+  //     ② FROZEN PROOF จาก mirror สองรอบ (_promptBudgetProof — serialize ทุกใบเหมือน megaBrains): เทียบ byte
+  //        ต่อบรรทัด + บัญชีงบตรงกัน + includedCount ต้อง === meta.length (เห็นครบทุกใบเท่านั้น)
+  //     ③ id own primitive ครบ/ไม่ว่าง/ไม่ซ้ำ · การันตีข้อเดียวไม่ได้ = omit ทั้ง sidecar (ห้าม prefix/ห้ามเดา)
+  //     ไม่ mutate meta/brain input แม้ byte เดียว (อ่านผ่าน descriptor เท่านั้น)
+  if (_dEvidenceOn) {
+    try {
+      const _protoNoToJSON = (P) => {
+        try { return Object.getOwnPropertyDescriptor(P, 'toJSON') === undefined; } catch { return false; }
+      };
+      const _stableJson = (v, depth) => {
+        if (v === null || v === undefined) return true; // undefined = stringify ข้าม key (object) / ใส่ null (array) เดิมทุกรอบ
+        const t = typeof v;
+        if (t === 'string' || t === 'number' || t === 'boolean') return true; // primitive ไม่ถูกถาม toJSON
+        if (t !== 'object' || depth <= 0) return false; // function/symbol/bigint/ลึกผิดปกติ = การันตีไม่ได้
+        let proto, keys;
+        try { proto = Object.getPrototypeOf(v); keys = Reflect.ownKeys(v); } catch { return false; }
+        if (Array.isArray(v)) {
+          if (proto !== Array.prototype) return false;
+          let lenD;
+          try { lenD = Object.getOwnPropertyDescriptor(v, 'length'); } catch { return false; }
+          if (!lenD || !('value' in lenD) || !Number.isSafeInteger(lenD.value) || lenD.value < 0) return false;
+          const n = lenD.value;
+          if (keys.length !== n + 1) return false; // dense เท่านั้น: index 0..n-1 + 'length' — มีรู/คีย์เกิน = ปฏิเสธ
+          for (let i = 0; i < n; i++) {
+            let d;
+            try { d = Object.getOwnPropertyDescriptor(v, String(i)); } catch { return false; }
+            if (!d || !('value' in d) || !d.enumerable) return false;
+            if (!_stableJson(d.value, depth - 1)) return false;
+          }
+          return true;
+        }
+        if (proto !== Object.prototype && proto !== null) return false;
+        for (const k of keys) {
+          if (typeof k !== 'string' || k === 'toJSON') return false;
+          let d;
+          try { d = Object.getOwnPropertyDescriptor(v, k); } catch { return false; }
+          if (!d || !('value' in d) || !d.enumerable) return false; // accessor = รอบหลังตอบต่างได้ → ปฏิเสธ (ไม่ invoke)
+          if (!_stableJson(d.value, depth - 1)) return false;
+        }
+        return true;
+      };
+      const _graphStable = _protoNoToJSON(Object.prototype) && _protoNoToJSON(Array.prototype)
+        && Array.isArray(meta) && meta.length >= 1 && meta.every((m) => _stableJson(m, 6));
+      const _proofA = _graphStable ? _promptBudgetProof() : null;
+      const _proofB = _graphStable ? _promptBudgetProof() : null;
+      const _proofOk = !!_proofA && !!_proofB
+        && _proofA.rowCount === meta.length && _proofB.rowCount === meta.length
+        && _proofA.includedCount === meta.length && _proofB.includedCount === meta.length // เห็นครบทุกใบเท่านั้น
+        && _proofA.budgetLen === _proofB.budgetLen
+        && _proofA.lines.length === _proofB.lines.length
+        && _proofA.lines.every((ln, i) => ln === _proofB.lines[i]) // byte-identical ต่อบรรทัด — ไม่ใช่แค่ id
+        && _proofA.ids.length === _proofB.ids.length
+        && _proofA.ids.every((v, i) => v === _proofB.ids[i]);
+      const _dIds = _proofOk ? _proofA.ids : null;
+      _dUniverse = (_dIds && _dIds.length >= 1 && _dIds.every((s) => typeof s === 'string' && s !== '') && new Set(_dIds).size === _dIds.length)
+        ? _dIds
+        : null;
+    } catch { _dUniverse = null; }
+  }
+
   let brain = { slots: {}, note: '' };
   let brainOk = true;
   try {
@@ -2005,6 +2309,10 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       const sk = sceneKeyOf(img);
       if (sk && chosenScenes.has(sk)) { img = null; reason = ''; sceneDupBlocked++; }
     }
+    // ★ D-sidecar: ผลสมองที่ "รอด" veto gates (ซ้ำ/ตัวตน/ฉาก) ถึงตรงนี้ = 'llm' — ถ้า swap ด้านล่างเปลี่ยนตัวจริง
+    //   จะทับเป็น 'policy_override' ที่ไซต์ mutation (ไม่เดาจาก reason string) · OFF = ตัวแปร local เฉยๆ ไม่มีผลใด
+    let _dStage = _dEvidenceOn && img ? 'llm' : null;
+    const _dPreSwap = _dEvidenceOn ? img : null;
     // 👤 8 ก.ค. (AC-0027 hero=ภาพกอดแม่ 2 หน้า): brain ฝ่ากฎ "hero หน้าเดี่ยว" ได้ — ด่านโค้ดบังคับ:
     //   hero หลายหน้า + พูลมี "หน้าเดี่ยวถูกคน สะอาด" → สลับเป็นหน้าเดี่ยว (ภาพกอด/คู่ไปช่อง reaction แทนได้)
     // SEM-1: บังคับหน้าเดี่ยวเฉพาะ canonical hero — hero_2/บทซ้ำไม่โดนเหมารวม (design v2 ช่องโหว่ 2)
@@ -2026,6 +2334,8 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         console.log(`[MEGA S6] 📏 hero ${img.id} ขนาดจริงไม่พอ/thumbnail-only แต่ไม่มีตัวเลือกอื่นในพูล → คงไว้ (กัน hard-fail)`);
       }
     }
+    // ★ D-sidecar: solo-face swap / hero-size swap เปลี่ยนตัวจริง (reference เปลี่ยน) = 'policy_override' — ตรวจที่ไซต์จริง
+    if (_dEvidenceOn && img && _dPreSwap && img !== _dPreSwap) _dStage = 'policy_override';
     if (!img) {
       // fallback กฎเดียวกับทางหลัก: hero=ตัวเอกหน้าชัดคุณภาพสูง / อื่นๆ=หมวดใกล้เคียง → คุณภาพสูงสุดที่เหลือ
       const cands0 = sorted.filter((x) => !used.has(String(x.id)));
@@ -2066,6 +2376,8 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       if (img && _idGated(slot) && !_identityOk(slot, img)) img = null; // ไม่มีคนตามสัญญาช่องจริง → ปล่อยว่าง ห้ามฝืนผิดคน
       if (img) { fallbackUsed++; reason = reason || 'fallback ตามสูตรแสนไลค์ (หมวด/คุณภาพ)'; }
     }
+    // ★ D-sidecar: ได้ตัวจริงจากบล็อก fallback (ไม่ใช่สมอง/swap) = 'fallback'
+    if (_dEvidenceOn && img && !_dStage) _dStage = 'fallback';
     if (img) {
       const _sk = sceneKeyOf(img);
       if (_sk) chosenScenes.add(_sk); // เฟส 3.1: จำฉากที่ใช้แล้ว
@@ -2095,6 +2407,11 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       };
     } else {
       slots[slot] = null;
+    }
+    // ★ D-sidecar: บันทึก trace ที่ไซต์ commit จริง (stage+id primitive) — id ไม่ใช่ primitive = null → finalize ตีตก
+    if (_dEvidenceOn) {
+      if (img && _dStage) _dTrace.set(slot, { stage: _dStage, id: _dIdOf(img.id) });
+      else _dTrace.delete(slot);
     }
   }
 
@@ -2150,6 +2467,8 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           //   legacy = สูตรเดิมเป๊ะ (ไม่กรอง — byte-parity)
           backups: oldBackups.filter((b) => byId.has(b) && (!semContract || !_idGated(slot) || _identityOk(slot, byId.get(b)))).slice(0, 3),
         };
+        // ★ D-sidecar: ไซต์ story-rescue จริง — ทับ stage เดิมของช่องนี้ (ตัวจริงเปลี่ยนเป็น best แล้ว)
+        if (_dEvidenceOn) _dTrace.set(slot, { stage: 'story_rescue', id: _dIdOf(best.id) });
         console.log(`[MEGA S6] 📖 เฟส 6A สลับช่อง ${slot}: ${cur?.id ?? '(ว่าง)'}(story ${curStory}) → ${best.id}(story ${storyFitOf(best)}, ${best.triage?.person || '-'})`);
       }
     } catch (e) { console.log('[MEGA S6] เฟส 6A story rescue ข้าม:', e.message?.slice(0, 50)); }
@@ -2186,6 +2505,42 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     const sfLine = activeSlots.filter((s) => slots[s]).map((s) => `${s}:${storyFitOf(byId.get(String(slots[s].id))) ?? '-'}`).join(' ');
     console.log(`[MEGA S6] 📖 story-fit ต่อช่อง (สรุป): ${sfLine}`);
     storyTag = ` · story[${sfLine}]`;
+  }
+
+  // ═══ D-sidecar FINALIZE — หลัง story-rescue + บล็อกเติม backup เสร็จ (แผนตัวจริงนิ่งแล้ว) · ก่อน solver-shadow เริ่ม ═══
+  //   candidateCount/chosenIndex มาจาก "จักรวาลก้อนเดียว" ที่จับไว้ก่อนสมองเท่านั้น · ทุกช่อง active ต้องมีตัวจริง +
+  //   trace ตรงตัวจริง + id อยู่ในจักรวาล — ขาดข้อเดียว/producer เพี้ยน/throw = omit ทั้ง sidecar (ผลธุรกิจเดิม 100%) ·
+  //   dynamic-import producer เฉพาะเมื่อ trace ครบจริงเท่านั้น · ไม่ serialize id ดิบ/trace ดิบออก output ใดๆ
+  if (_dEvidenceOn) {
+    try {
+      if (_dUniverse) {
+        const _dIndexOf = new Map(_dUniverse.map((id, i) => [id, i]));
+        const _dRows = [];
+        let _dComplete = activeSlots.length >= 1;
+        for (let i = 0; i < activeSlots.length; i++) {
+          const _dSlot = activeSlots[i];
+          const _dRec = _dTrace.get(_dSlot);
+          const _dFinalId = slots[_dSlot] ? _dIdOf(slots[_dSlot].id) : null;
+          if (_dFinalId == null || !_dRec || _dRec.id !== _dFinalId) { _dComplete = false; break; } // ช่องว่าง/trace ไม่ตรงตัวจริง
+          const _dIdx = _dIndexOf.get(_dFinalId);
+          if (_dIdx === undefined) { _dComplete = false; break; } // ตัวจริงอยู่นอกจักรวาลที่สมองเห็น → omit ทั้งก้อน
+          _dRows.push({
+            slotIndex: i, // dense ตามลำดับ activeSlots ต้นทาง
+            slot: _isHeroSlot(_dSlot) ? 'hero' : (_isCircleSlot(_dSlot) ? 'circle' : 'support'), // บทจาก slot/geometry ที่ validate แล้วเท่านั้น
+            stage: _dRec.stage,
+            candidateCount: _dUniverse.length,
+            chosenIndex: _dIdx,
+          });
+        }
+        if (_dComplete) {
+          const _dProduce = (typeof _deps?.produceFinalDecisionEvidence === 'function')
+            ? _deps.produceFinalDecisionEvidence
+            : (await import('./postSelectionDecisionProducer.js')).produceFinalDecisionEvidence;
+          const _dRes = _dProduce({ version: 2, slotCount: _dRows.length, slots: _dRows });
+          if (_dRes && _dRes.decisionComplete === true && _dRes.evidence && typeof _dRes.evidence === 'object') _dSidecar = _dRes.evidence;
+        }
+      }
+    } catch { _dSidecar = null; } // ทุกความล้มเหลว = omit เงียบ — ห้ามแตะผลธุรกิจ/asset/backup แม้ byte เดียว
   }
 
   // ★ Wave3 ชุด1 (10 ก.ค.) — SHADOW MODE: solver deterministic คำนวณคู่ขนานหลังลูปจับคู่จบ (slots ครบ/พยายามครบ)
@@ -2483,7 +2838,8 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   const quarantineTotal = untriagedList.length + sizeUnknownList.length;
   const quarantineTag = quarantineTotal > 0 ? ` · 🧿กัก ${untriagedList.length}+${sizeUnknownList.length} ใบ(ข้อมูลไม่ครบ)` : '';
   if (!slots[_canonHeroId]) {
-    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', dossierPatch: { ...(_jobTemplateV1 ? { artBrief: _templateArtBriefSnapshot } : {}), pickImages: { slots, note: brain.note || '', ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) } } };
+    // ★ D-sidecar: hero ว่าง = trace ปกติไม่ครบ → _dSidecar มักเป็น null (spread ด้านล่างจึง omit เอง) — ห้ามฝืนแนบของไม่ครบ
+    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', ...(_dSidecar ? { decisionEvidence: _dSidecar } : {}), dossierPatch: { ...(_jobTemplateV1 ? { artBrief: _templateArtBriefSnapshot } : {}), pickImages: { slots, note: brain.note || '', ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) } } };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -2984,6 +3340,8 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       ...(_imagesPatch ? { images: _imagesPatch } : {}),
     },
     quality: filled < activeSlots.length ? 'yellow' : undefined,
+    // ★ D-sidecar: additive spread เดียว — แนบเฉพาะเมื่อ producer ยืนยัน decisionComplete=true (ไม่มี wrapper ว่าง)
+    ...(_dSidecar ? { decisionEvidence: _dSidecar } : {}),
   };
 }
 

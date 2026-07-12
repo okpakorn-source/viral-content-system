@@ -11,6 +11,9 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
+// ★ Stage-A (candidate authority): NO static import ของ candidateFactAuthority ที่นี่ —
+//   default/legacy path ต้องไม่โหลด/ไม่ activate authority เลย · โหลดแบบ dynamic import
+//   เฉพาะใน opt-in branch ของ buildImagesRouteResponse เท่านั้น
 
 const DIR = path.join(process.cwd(), 'data', 'case-images');
 const STORE_NAME = 'acs-images';
@@ -340,4 +343,113 @@ export async function removeByIds(caseId, ids) {
     }
   }
   return { removed: removed.length, total: kept.length, byPlatform: countByPlatform(kept), images: kept };
+}
+
+// ============================================================
+// ★ Stage-A (candidate authority) — readImagesSnapshot + route glue
+// ------------------------------------------------------------
+// readImages() ด้านบน "ห้ามแตะ byte/semantic เดิม" — ทุกอย่างข้างล่างนี้เป็นของใหม่ล้วน
+// ============================================================
+
+const SNAPSHOT_SCOPE = 'case_image_store_snapshot_v1';
+const SNAPSHOT_MAX_ROWS = 2000;
+
+// อ่านคลังรูปแบบ "snapshot พิสูจน์ได้" — Supabase ใช้ RPC ตัวเดียว (count(*) + jsonb_agg ที่ bound ≤2000
+//   ใน SQL statement เดียว = MVCC snapshot เดียว) กัน TOCTOU (ห้าม count-then-page แยกคำสั่ง)
+//   Node ตรวจ count ซ้ำเทียบ rows.length + ทุกแถวต้องมี own caseId (string) ตรงคำขอ ถึงจะ complete
+//   Filesystem = "พิสูจน์ complete ไม่ได้" → complete:false เสมอ (reason FS_UNPROVEN) · [] จาก corruption
+//   ก็ยัง complete:false (ไม่มีวันเป็น complete-empty)
+//   ★ ไม่มี side-effect global ใด ๆ — เทสนับ call ด้วย dependency injection (client จำลอง) แทน
+export async function readImagesSnapshot(caseId, { client } = {}) {
+  const c = client || sb();
+
+  if (!c) {
+    let rows = [];
+    try {
+      const r = await fsRead(caseId);
+      rows = Array.isArray(r) ? r : [];
+    } catch {
+      rows = []; // corruption/ดิสก์พัง → [] แต่ยัง complete:false ด้านล่าง
+    }
+    return { scope: SNAPSHOT_SCOPE, caseId, complete: false, truncated: false, count: rows.length, rows, reason: 'FS_UNPROVEN' };
+  }
+
+  const { data, error } = await c.rpc('read_case_image_snapshot', { p_case_id: caseId });
+  if (error) throw new Error('อ่าน snapshot คลังรูปไม่สำเร็จ: ' + (error.message || 'RPC error'));
+
+  const rowsRaw = data && typeof data === 'object' ? data.rows : null;
+  const rows = Array.isArray(rowsRaw) ? rowsRaw : null;
+  const count = data && typeof data === 'object' ? Number(data.count) : NaN;
+
+  if (rows === null || !Number.isInteger(count) || count < 0) {
+    const safeRows = Array.isArray(rows) ? rows : [];
+    return { scope: SNAPSHOT_SCOPE, caseId, complete: false, truncated: false, count: safeRows.length, rows: safeRows, reason: 'RPC_MALFORMED' };
+  }
+  if (rows.length > SNAPSHOT_MAX_ROWS) {
+    return { scope: SNAPSHOT_SCOPE, caseId, complete: false, truncated: true, count, rows, reason: 'OVERSIZE' };
+  }
+  // ทุกแถวต้องพก own caseId (string) เท่ากับคำขอเป๊ะ — หาย/ไม่ใช่ string/ไม่ตรง = complete:false
+  for (const r of rows) {
+    const ok = r && typeof r === 'object'
+      && Object.prototype.hasOwnProperty.call(r, 'caseId')
+      && typeof r.caseId === 'string'
+      && r.caseId === caseId;
+    if (!ok) {
+      return { scope: SNAPSHOT_SCOPE, caseId, complete: false, truncated: false, count, rows, reason: 'CASE_MISMATCH' };
+    }
+  }
+
+  const complete = count === rows.length;
+  const truncated = count > rows.length;
+  let reason;
+  if (!complete) reason = truncated ? 'TRUNCATED' : 'COUNT_MISMATCH';
+  return { scope: SNAPSHOT_SCOPE, caseId, complete, truncated, count, rows, ...(reason ? { reason } : {}) };
+}
+
+// สร้าง payload ของ route GET /api/images/[id] — แยกออกมาให้เทสได้ offline (route.js เป็นแค่เปลือกบาง)
+//   candidateAuthorityRaw = ค่า query 'candidateAuthority' ดิบ · เปิด authority path เฉพาะ '1' เป๊ะ เท่านั้น
+//   • default (ไม่ใช่ '1') = legacy path เป๊ะ: อ่าน readImages ครั้งเดียว · ไม่แตะ snapshot/authority เลย
+//   • opt-in สำเร็จ = SINGLE READ: อ่าน snapshot ครั้งเดียว → images/total/byPlatform + authority มาจาก
+//     snapshot rows ชุดเดียวกัน (ไม่มี legacy read นำ, ไม่มี read ซ้ำ)
+//   • opt-in snapshot ล้ม/ไม่ complete = ค่อย fallback ไป readImages (legacy payload + marker incomplete, ไม่มี proof)
+//   deps (เทสเท่านั้น): { readImages, readImagesSnapshot, authority } ฉีดของจำลอง/ตัวนับ — prod ไม่ส่ง
+export async function buildImagesRouteResponse(caseId, candidateAuthorityRaw, deps = {}) {
+  const readLegacy = deps.readImages || readImages;
+  const legacyPayload = async () => {
+    const images = await readLegacy(caseId);
+    return { success: true, caseId, total: images.length, byPlatform: countByPlatform(images), images };
+  };
+
+  if (candidateAuthorityRaw !== '1') {
+    return { status: 200, body: await legacyPayload() };
+  }
+
+  // opt-in: อ่าน snapshot ครั้งเดียว (การอ่านเดียวของ path นี้)
+  const readSnap = deps.readImagesSnapshot || readImagesSnapshot;
+  let snap = null;
+  let readFailed = false;
+  try {
+    snap = await readSnap(caseId);
+  } catch {
+    readFailed = true;
+  }
+
+  if (!readFailed && snap && snap.complete === true) {
+    const mod = deps.authority || (await import('./candidateFactAuthority.js'));
+    const universe = mod.buildCandidateAuthoritySnapshotV1(snap);
+    // payload มาจาก snapshot rows ชุดเดียวกัน — ไม่มี legacy read
+    const images = Array.isArray(snap.rows) ? snap.rows : [];
+    const base = { success: true, caseId, total: images.length, byPlatform: countByPlatform(images), images };
+    return {
+      status: 200,
+      body: { ...base, candidateAuthority: { available: universe.universeComplete === true, ...universe } },
+    };
+  }
+
+  // snapshot ล้ม/ไม่ complete → fallback legacy read เท่านั้น (ห้ามกุ authority complete ปลอม)
+  const base = await legacyPayload();
+  return {
+    status: 200,
+    body: { ...base, candidateAuthority: { available: false, incomplete: true, reason: readFailed ? 'SNAPSHOT_READ_FAILED' : (snap && snap.reason) || 'SNAPSHOT_INCOMPLETE' } },
+  };
 }

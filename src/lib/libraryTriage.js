@@ -13,6 +13,8 @@ import { geminiClassifyFrames } from './gemini.js';
 import { applyRehost } from './imageStore.js';
 // ★ Wave2 Batch B1 (10 ก.ค.): เกณฑ์ตัวเลขย้ายไป imageQualityConfig.js (single source of truth) — ค่าเดิมเป๊ะ
 import { QUALITY_CAP_SHORT_SIDE, QUALITY_CAP_VALUE } from './imageQualityConfig.js';
+// ★ Stage-A: authority-normalized facts (เพิ่มฟิลด์ nested candidateFacts แบบ additive — ไม่แตะฟิลด์/การตัดสินเดิม)
+import { buildCandidateFactsV1 } from './candidateFactAuthority.js';
 
 async function toB64(buf, size = 512) {
   const out = await sharp(buf, { failOn: 'none' })
@@ -171,7 +173,8 @@ const CATEGORY_WHITELIST = new Set(['face-emotional', 'face-neutral', 'context',
 const POSITIVE_FACE_EMOTIONS = new Set(['happy', 'laugh', 'warm']);
 
 // สร้างป้าย triage จากผล classify (it) + ค่าโหลด (src มี brightness/detail/realWidth/realHeight/measuredFrom/sharpness)
-function buildTriage(it, src) {
+// ★ export เพื่อให้ Stage-A focused test เรียกตรงได้ (พฤติกรรม/ผลลัพธ์เดิมทุกฟิลด์)
+export function buildTriage(it, src) {
   const emotion = it.emotion || null;
   // ★ 9 ก.ค. เฟส 2.3: validate enum + แก้พลาด face-neutral ทั้งที่อารมณ์บวกชัด (ดีกว่าพึ่งพรอมป์อย่างเดียว
   //   เพราะ Gemini ตอบไม่ตรงนิยามได้เสมอ — ด่านโค้ดกันเหนียวอีกชั้น ไม่ต้องรอแก้ที่ไฟล์ gemini.js)
@@ -190,6 +193,19 @@ function buildTriage(it, src) {
   if ((measuredFrom === 'thumb' || (realShortSide != null && realShortSide < QUALITY_CAP_SHORT_SIDE)) && quality > QUALITY_CAP_VALUE) {
     quality = QUALITY_CAP_VALUE;
   }
+
+  // ★ Stage-A: descriptor สำหรับ candidate fact authority (additive — ไม่กระทบฟิลด์/การตัดสินใด ๆ ด้านล่าง)
+  //   • verdict: ส่ง raw it.* (literal boolean เท่านั้นถึงนับ "รู้") — ห้าม derive จาก "!== false" (ไม่มี default-positive)
+  //   • resolution: ไม่ส่ง → authority ตีเป็น 'unknown' · rw/rh อาจมาจาก record เก่า (reused metadata) +
+  //     measuredFrom เป็นค่าอนุมาน = ไม่ใช่หลักฐาน decoded-buffer → ปล่อย unknown ตามสัญญา
+  //   • hash: pHash64 วัดจาก buffer ที่ decode จริง (ค่า+algo เชื่อได้) แต่ full-vs-thumb อนุมานไม่ได้ → measuredFrom 'unknown'
+  const candidateFacts = buildCandidateFactsV1({
+    verdicts: { relevant: it.relevant, clean: it.clean, newsScene: it.newsScene },
+    faceBox: it.faceBox, // {x,y,w,h} normalized | null (ยืนยันไม่มี) | undefined (หาย → unknown)
+    ...(typeof src?.pHash64 === 'string' && src.pHash64
+      ? { hash: { value: src.pHash64, algo: 'dhash_9x8_v1', measuredFrom: 'unknown' } }
+      : {}),
+  });
 
   return {
     // "เกี่ยวข่าว" แยกจาก "คุณภาพ" — ทิ้งเฉพาะที่ AI ตีว่าไม่เกี่ยวชัด (undefined = เก็บไว้ กัน false drop)
@@ -215,6 +231,8 @@ function buildTriage(it, src) {
     // ★ Wave3 ชุด2 (10 ก.ค.): pHash64 (dHash 16 hex) — s6/solver ใช้จับภาพเกือบซ้ำระดับพิกเซล (ต่างจาก sceneKey ที่จับด้วยข้อความ)
     //   ภาพเก่าในคลังก่อนหน้านี้ไม่มีค่านี้ = null เสมอ (ไม่ backfill — ไปข้างหน้าเท่านั้น)
     pHash64: (typeof src?.pHash64 === 'string' && src.pHash64) ? src.pHash64 : null,
+    // ★ Stage-A: authority-normalized nested facts (frozen/detached) — additive, ไม่กระทบฟิลด์/การตัดสินเดิม
+    candidateFacts,
   };
 }
 
