@@ -77,12 +77,13 @@ process.env.MEGA_MIN_RELEVANT_IMAGES = '8';  // MIN_RELEVANT_IMAGES (module cons
 process.env.MEGA_YT_PARALLEL = '0';          // YT_PARALLEL off — กัน YT fire ใน s5_search (offline)
 process.env.MEGA_HERO_GRADE_HARD = '0';      // HERO_GRADE_HARD_ON off — gap คืน baseResult ตรงๆ (deterministic)
 delete process.env.MEGA_SEARCH_PROVENANCE; // เริ่มสะอาด — เทสตั้ง/คืนเองต่อเคส
+delete process.env.MEGA_SEARCH_SHADOW_V2;  // 🔎 V2 ambient cleanup ก่อน import (deterministic)
 
 const { s6_slots, s7_cover, s5_search, s5_gapsearch } = await import('../src/lib/megaAdapters.js');
 const { slotDirectorBrain, artBriefBrain, templateV1PersonAuthority } = await import('../src/lib/megaBrains.js');
 const { buildRefSlotContract, validateStrictRenderActivation, resolveRefSlotView } = await import('../src/lib/refSlotContract.js');
 // 🔎 PHASE 2B1 — route POST เป็น production wrapper (import stubs ผ่าน loader ข้างบน) + pure helper _searchProvenance
-const { POST: searchPOST, _searchProvenance } = await import('../src/app/api/images/search/route.js');
+const { POST: searchPOST, _searchProvenance, _sanitizeSearchShadowV2, _buildSearchShadowV2, _buildSearchShadowV2FromSaved } = await import('../src/app/api/images/search/route.js');
 
 let passed = 0;
 const test = async (name, fn) => {
@@ -3923,6 +3924,398 @@ await test('2B1 re-entry write-once: persisted gapSearchProvenance untouched + s
     assert.deepEqual(so.dossierPatch.images.gapSearchProvenance, persisted, 'OFF: persisted sidecar preserved');
     assert.deepEqual(sn.dossierPatch.images.gapSearchProvenance, so.dossierPatch.images.gapSearchProvenance, 'preserved sidecar identical ON vs OFF');
   });
+});
+
+// ============================================================
+// 🔎 SEARCH V2 SLICE 1 — joinable candidate provenance shadow (MEGA_SEARCH_SHADOW_V2=1) — offline deterministic
+// ============================================================
+const mkSPv2 = (o = {}) => {
+  const existing = o.existing || [];
+  return {
+    buildQueries: () => (o.queries || ['q0', 'q1']),
+    searchImages: o.searchImages,
+    vetImages: o.vetImages || (async ({ images }) => { globalThis.__V2_VET = JSON.stringify(images); return { vetted: images.map((x) => ({ ...x, triage: { relevant: true } })), kept: images.length, dropped: 0, failed: 0 }; }),
+    addImages: o.addImages || (async (caseId, imgs) => { globalThis.__V2_ADD = JSON.stringify(imgs); const fresh = imgs.map((im, i) => ({ ...im, id: `${caseId}-${existing.length + i + 1}` })); return { added: fresh.length, total: existing.length + fresh.length, byPlatform: {}, images: [...existing, ...fresh] }; }),
+    readImages: async () => (o.readImages ? o.readImages() : []),
+    getCase: async () => ({ keywords: { subjects: [{ name: 'A' }] }, analysis: { characters: [] } }),
+    isCatalogSource: o.isCatalogSource, isOwnPageSource: o.isOwnPageSource, isMismatchedFbMedia: o.isMismatchedFbMedia,
+  };
+};
+const runPOSTsw = async (body, sp, { v2 = null, v1 = null } = {}) => {
+  globalThis.__MEGA_SP = sp;
+  const p1 = process.env.MEGA_SEARCH_PROVENANCE ?? null, p2 = process.env.MEGA_SEARCH_SHADOW_V2 ?? null;
+  if (v1 === null) delete process.env.MEGA_SEARCH_PROVENANCE; else process.env.MEGA_SEARCH_PROVENANCE = v1;
+  if (v2 === null) delete process.env.MEGA_SEARCH_SHADOW_V2; else process.env.MEGA_SEARCH_SHADOW_V2 = v2;
+  try { const res = await searchPOST({ json: async () => body }); return res._body; }
+  finally {
+    if (p1 === null) delete process.env.MEGA_SEARCH_PROVENANCE; else process.env.MEGA_SEARCH_PROVENANCE = p1;
+    if (p2 === null) delete process.env.MEGA_SEARCH_SHADOW_V2; else process.env.MEGA_SEARCH_SHADOW_V2 = p2;
+    delete globalThis.__MEGA_SP;
+  }
+};
+const single = (byQ) => async (p, q) => (byQ[q] || []); // searchImages ตาม query map
+
+// ── (V2-1) switch matrix exact-'1' + independence จาก V1 + snapshot ──
+await test('V2 route: switch matrix exact-\'1\' + อิสระจาก V1', async () => {
+  const sp = () => mkSPv2({ queries: ['q0'], searchImages: single({ q0: [{ imageUrl: 'A' }] }) });
+  for (const v of [null, '0', '', ' 1', '1 ', 'true']) assert.ok(!('searchShadowV2' in await runPOSTsw({ caseId: 'C', platform: 'google' }, sp(), { v2: v })), `v2=${JSON.stringify(v)} OFF`);
+  const on = await runPOSTsw({ caseId: 'C', platform: 'google' }, sp(), { v2: '1' });
+  assert.ok('searchShadowV2' in on && on.searchShadowV2.version === 2);
+  const onlyV2 = await runPOSTsw({ caseId: 'C', platform: 'google' }, sp(), { v2: '1', v1: null });
+  assert.ok('searchShadowV2' in onlyV2 && !('provenance' in onlyV2), 'V2 ON, V1 OFF → เฉพาะ searchShadowV2');
+  const onlyV1 = await runPOSTsw({ caseId: 'C', platform: 'google' }, sp(), { v2: null, v1: '1' });
+  assert.ok('provenance' in onlyV1 && !('searchShadowV2' in onlyV1), 'V1 ON, V2 OFF → เฉพาะ provenance');
+});
+
+// ── (V2-2) build: queryIndex 0-based + providerRank 1-based ก่อน filter (ไม่ renumber) ──
+await test('V2 route: queryIndex 0-based + providerRank 1-based pre-filter (blocked ไม่ renumber)', async () => {
+  const sp = mkSPv2({ queries: ['q0', 'q1'], searchImages: single({ q0: [{ imageUrl: 'A' }, { imageUrl: 'B' }, { imageUrl: 'C' }], q1: [{ imageUrl: 'D' }] }), isCatalogSource: (x) => x.imageUrl === 'B' });
+  const r = await runPOSTsw({ caseId: 'C', platform: 'google' }, sp, { v2: '1' });
+  assert.deepEqual(r.searchShadowV2.candidates, [
+    { candidateId: 'C-1', provider: 'google', queryIndex: 0, providerRank: 1 },
+    { candidateId: 'C-2', provider: 'google', queryIndex: 0, providerRank: 3 }, // B(rank2) blocked → C ยัง rank3
+    { candidateId: 'C-3', provider: 'google', queryIndex: 1, providerRank: 1 },
+  ]);
+  assert.deepEqual([r.searchShadowV2.totalCandidates, r.searchShadowV2.emittedCandidates, r.searchShadowV2.truncatedCandidates, r.searchShadowV2.capped], [3, 3, 0, false]);
+});
+
+// ── (V2-3) reversed promise completion order → deterministic ตามลำดับคำค้น ──
+await test('V2 route: reversed promise resolution — deterministic queryIndex order', async () => {
+  const sp = mkSPv2({ queries: ['q0', 'q1'], searchImages: async (p, q) => { const t = q === 'q0' ? 3 : 0; for (let i = 0; i < t; i++) await Promise.resolve(); return [{ imageUrl: q + 'a' }]; } });
+  const r = await runPOSTsw({ caseId: 'C', platform: 'google' }, sp, { v2: '1' });
+  assert.deepEqual(r.searchShadowV2.candidates.map((c) => c.queryIndex), [0, 1], 'q0 ก่อน q1 แม้ q1 settle ก่อน');
+});
+
+// ── (V2-4) duplicate URL retains first attribution ──
+await test('V2 route: duplicate URL → first attribution (q0 rank2) คงเดิม', async () => {
+  const sp = mkSPv2({ queries: ['q0', 'q1'], searchImages: single({ q0: [{ imageUrl: 'X0' }, { imageUrl: 'DUP' }], q1: [{ imageUrl: 'DUP' }, { imageUrl: 'Y' }] }) });
+  const r = await runPOSTsw({ caseId: 'C', platform: 'google' }, sp, { v2: '1' });
+  const dup = r.searchShadowV2.candidates.find((c) => c.candidateId === 'C-2');
+  assert.deepEqual({ queryIndex: dup.queryIndex, providerRank: dup.providerRank }, { queryIndex: 0, providerRank: 2 });
+  assert.equal(r.searchShadowV2.totalCandidates, 3); // X0, DUP, Y (DUP นับครั้งเดียว)
+});
+
+// ── (V2-5) vet removal ไม่ renumber providerRank ──
+await test('V2 route: vet dropped B → C ยัง providerRank 3 (ไม่ renumber)', async () => {
+  const sp = mkSPv2({ queries: ['q0'], searchImages: single({ q0: [{ imageUrl: 'A' }, { imageUrl: 'B' }, { imageUrl: 'C' }] }), vetImages: async ({ images }) => ({ vetted: images.map((x) => ({ ...x, triage: { relevant: x.imageUrl !== 'B' } })), kept: 2, dropped: 1, failed: 0 }) });
+  const r = await runPOSTsw({ caseId: 'C', platform: 'google' }, sp, { v2: '1' });
+  assert.deepEqual(r.searchShadowV2.candidates, [
+    { candidateId: 'C-1', provider: 'google', queryIndex: 0, providerRank: 1 },
+    { candidateId: 'C-2', provider: 'google', queryIndex: 0, providerRank: 3 },
+  ]);
+});
+
+// ── (V2-6) pre-existing exclusion + joinable fresh-only counters ──
+await test('V2 route: exclude pre-existing (last saved.added เท่านั้น) → totalCandidates = fresh joinable', async () => {
+  const sp = mkSPv2({ queries: ['q0', 'q1'], searchImages: single({ q0: [{ imageUrl: 'A' }], q1: [{ imageUrl: 'B' }] }), existing: [{ imageUrl: 'OLD', id: 'C-0' }] });
+  const r = await runPOSTsw({ caseId: 'C', platform: 'google' }, sp, { v2: '1' });
+  const ids = r.searchShadowV2.candidates.map((c) => c.candidateId);
+  assert.ok(!ids.includes('C-0'), 'pre-existing OLD ถูกกัน');
+  assert.equal(r.searchShadowV2.totalCandidates, 2);
+  assert.equal(ids.length, 2);
+});
+
+// ── (V2-7) storage error → omit V2 (V1 คงเดิม) ──
+await test('V2 route: addImages throw → UNEXPECTED, ไม่มี searchShadowV2', async () => {
+  const sp = mkSPv2({ queries: ['q0'], searchImages: single({ q0: [{ imageUrl: 'A' }] }), addImages: async () => { throw new Error('store boom'); } });
+  const r = await runPOSTsw({ caseId: 'C', platform: 'google' }, sp, { v2: '1' });
+  assert.equal(r.errorType, 'UNEXPECTED');
+  assert.ok(!('searchShadowV2' in r));
+});
+
+// ── (V2-8) vet/add input bytes เท่ากันเป๊ะ ON vs OFF ──
+await test('V2 route: vet input + addImages input bytes เท่ากัน ON vs OFF', async () => {
+  const fx = () => mkSPv2({ queries: ['q0', 'q1'], searchImages: single({ q0: [{ imageUrl: 'A' }], q1: [{ imageUrl: 'B' }] }) });
+  await runPOSTsw({ caseId: 'C', platform: 'google' }, fx(), { v2: null }); const offVet = globalThis.__V2_VET, offAdd = globalThis.__V2_ADD;
+  await runPOSTsw({ caseId: 'C', platform: 'google' }, fx(), { v2: '1' }); const onVet = globalThis.__V2_VET, onAdd = globalThis.__V2_ADD;
+  assert.equal(onVet, offVet, 'vet input identical'); assert.equal(onAdd, offAdd, 'add input identical');
+});
+
+// ── (V2-9) bounds 160 + 32 KiB + truthful counters (ผ่าน _buildSearchShadowV2 ตรง) ──
+await test('V2 build: 160-item cap + truthful counters (tail-trim)', async () => {
+  const c = _buildSearchShadowV2(Array.from({ length: 200 }, (_, i) => ({ candidateId: 'c' + i, provider: 'google', queryIndex: 0, providerRank: i + 1 })));
+  assert.deepEqual([c.version, c.totalCandidates, c.emittedCandidates, c.truncatedCandidates, c.capped], [2, 200, 160, 40, true]);
+  assert.equal(c.candidates.length, 160);
+  assert.equal(c.candidates[159].candidateId, 'c159');
+  assert.ok(!c.candidates.some((x) => x.candidateId === 'c160'), 'tail-trim ตัดท้าย');
+});
+await test('V2 build: 32 KiB cap + truthful counters', async () => {
+  const big = 'x'.repeat(192);
+  const c = _buildSearchShadowV2(Array.from({ length: 160 }, (_, i) => ({ candidateId: big, provider: 'google', queryIndex: 0, providerRank: i + 1 })));
+  assert.ok(JSON.stringify(c).length <= 32 * 1024, 'serialized ≤ 32 KiB');
+  assert.ok(c.emittedCandidates < 160 && c.emittedCandidates > 100, 'ถูก trim จาก 32 KiB');
+  assert.equal(c.truncatedCandidates, 160 - c.emittedCandidates);
+  assert.equal(c.capped, true);
+});
+
+// ── (V2-10) sanitizer hostile matrix + zero getter invocation (descriptor-only) ──
+await test('V2 sanitizer: hostile matrix → null (fail-closed)', async () => {
+  const ok = { version: 2, totalCandidates: 1, emittedCandidates: 1, truncatedCandidates: 0, capped: false, candidates: [{ candidateId: 'c1', provider: 'google', queryIndex: 0, providerRank: 1 }] };
+  assert.deepEqual(_sanitizeSearchShadowV2(ok), ok);
+  const bad = [
+    null, undefined, 'x', 42, [], { ...ok, version: 1 }, { ...ok, version: '2' }, { ...ok, capped: 'no' },
+    { ...ok, candidates: {} }, { ...ok, totalCandidates: -1 }, { ...ok, emittedCandidates: 2 }, // counter mismatch
+    { ...ok, candidates: [{ candidateId: 'c', provider: 'youtube', queryIndex: 0, providerRank: 1 }] }, // provider ต้องห้าม
+    { ...ok, candidates: [{ candidateId: 'x'.repeat(193), provider: 'google', queryIndex: 0, providerRank: 1 }] }, // id ยาวเกิน
+    { ...ok, candidates: [{ candidateId: 'c', provider: 'google', queryIndex: -1, providerRank: 1 }] },
+    { ...ok, candidates: [{ candidateId: 'c', provider: 'google', queryIndex: 0, providerRank: 0 }] }, // rank ต้อง ≥1
+  ];
+  for (const b of bad) assert.equal(_sanitizeSearchShadowV2(b), null, `hostile ${JSON.stringify(b)?.slice(0, 40)}`);
+  // accessor บน top field → null
+  const acc = { ...ok }; Object.defineProperty(acc, 'totalCandidates', { enumerable: true, get() { return 1; } });
+  assert.equal(_sanitizeSearchShadowV2(acc), null);
+  // class instance proto → null
+  class C { } const inst = Object.assign(new C(), ok); assert.equal(_sanitizeSearchShadowV2(inst), null);
+});
+await test('V2 sanitizer: Proxy candidate get trap count=0 (descriptor-only)', async () => {
+  let getCount = 0;
+  const proxyCand = new Proxy({ candidateId: 'c1', provider: 'google', queryIndex: 0, providerRank: 1 }, { get() { getCount++; return 'HACKED'; } });
+  const carrier = { version: 2, totalCandidates: 1, emittedCandidates: 1, truncatedCandidates: 0, capped: false, candidates: [proxyCand] };
+  const out = _sanitizeSearchShadowV2(carrier);
+  assert.equal(getCount, 0, 'get trap ต้องไม่ถูกเรียก');
+  assert.deepEqual(out.candidates[0], { candidateId: 'c1', provider: 'google', queryIndex: 0, providerRank: 1 }, 'ค่า = descriptor ไม่ใช่ HACKED');
+});
+
+// ── (V2-11) s5_search placement — nest ใน stat เดิม (ไม่มี row ใหม่) ──
+const runS5SearchV2 = async (searchResp, v2env) => {
+  const prev = process.env.MEGA_SEARCH_SHADOW_V2 ?? null;
+  if (v2env === null) delete process.env.MEGA_SEARCH_SHADOW_V2; else process.env.MEGA_SEARCH_SHADOW_V2 = v2env;
+  const job = { dossier: { images: { caseId: 'S', searchedPlatforms: [], ytFired: 'pre', searchStats: [] } } };
+  const _deps = { fetchJson: async (url) => { if (String(url).includes('/api/images/search')) return searchResp; if (String(url).includes('/api/images/')) return { success: true, images: [] }; throw new Error('NO NETWORK'); } };
+  try { const out = await s5_search(job, { origin: 'http://mock', _deps }); return out.dossierPatch.images.searchStats; }
+  finally { if (prev === null) delete process.env.MEGA_SEARCH_SHADOW_V2; else process.env.MEGA_SEARCH_SHADOW_V2 = prev; }
+};
+await test('V2 s5_search: nest ใน searchStats entry เดิม (1 row) · OFF ไม่มี · malformed → omit', async () => {
+  const carrier = { version: 2, totalCandidates: 1, emittedCandidates: 1, truncatedCandidates: 0, capped: false, candidates: [{ candidateId: 'S-1', provider: 'google', queryIndex: 0, providerRank: 1 }] };
+  const base = { success: true, found: 1, added: 1, vetDropped: 0, images: [], searchShadowV2: carrier };
+  const onStats = await runS5SearchV2(base, '1');
+  assert.equal(onStats.length, 1, 'ไม่มี row ใหม่');
+  assert.deepEqual(onStats[0].searchShadowV2, carrier);
+  assert.equal(onStats[0].platform, 'google');
+  const offStats = await runS5SearchV2(base, null);
+  assert.ok(!('searchShadowV2' in offStats[0]));
+  const mal = await runS5SearchV2({ ...base, searchShadowV2: { version: 1 } }, '1');
+  assert.ok(!('searchShadowV2' in mal[0]), 'malformed carrier → omit');
+});
+
+// ── (V2-12) s5_gapsearch sibling gapSearchShadowV2 + re-entry ──
+const gapSPv2 = (o = {}) => ({
+  searchImages: o.searchImages || (async (p, q) => { globalThis.__GAP_N = (globalThis.__GAP_N || 0) + 1; return [{ imageUrl: `${q}::${p}` }]; }),
+  vetImages: o.vetImages || (async ({ images }) => ({ vetted: images.map((x) => ({ ...x, triage: { relevant: true } })), kept: images.length, dropped: 0, failed: 0 })),
+  addImages: async (caseId, imgs) => { const fresh = imgs.map((im, i) => ({ ...im, id: `${caseId}-${i + 1}` })); return { added: fresh.length, total: fresh.length, byPlatform: {}, images: fresh }; },
+  getCase: async () => ({ keywords: { subjects: [] }, analysis: { characters: [] } }),
+});
+const runGapV2 = async (im, sp, v2env) => {
+  globalThis.__MEGA_SP = sp; globalThis.__MEGA_AI = async () => ({ text: '{"queries":["nq0","nq1"]}' }); globalThis.__GAP_N = 0;
+  const prev = process.env.MEGA_SEARCH_SHADOW_V2 ?? null;
+  if (v2env === null) delete process.env.MEGA_SEARCH_SHADOW_V2; else process.env.MEGA_SEARCH_SHADOW_V2 = v2env;
+  const job = { dossier: { images: im, compass: { mainCharacters: [{ name: 'A' }] }, desk: { title: 't' } } };
+  try { return await s5_gapsearch(job, { origin: 'http://mock', _deps: { fetchJson: GAP_JF } }); }
+  finally { if (prev === null) delete process.env.MEGA_SEARCH_SHADOW_V2; else process.env.MEGA_SEARCH_SHADOW_V2 = prev; delete globalThis.__MEGA_SP; delete globalThis.__MEGA_AI; }
+};
+await test('V2 s5_gapsearch: sibling gapSearchShadowV2 (google/google_news) · OFF ไม่มี', async () => {
+  const on = await runGapV2({ caseId: 'GAP', storyQueries: ['sq'] }, gapSPv2(), '1');
+  assert.deepEqual(on.dossierPatch.images.gapSearchShadowV2.candidates, [
+    { candidateId: 'GAP-1', provider: 'google', queryIndex: 0, providerRank: 1 },
+    { candidateId: 'GAP-2', provider: 'google_news', queryIndex: 0, providerRank: 1 },
+    { candidateId: 'GAP-3', provider: 'google', queryIndex: 1, providerRank: 1 },
+    { candidateId: 'GAP-4', provider: 'google_news', queryIndex: 1, providerRank: 1 },
+  ]);
+  assert.ok(!('searchStats' in on.dossierPatch.images) || !on.dossierPatch.images.searchStats?.some((s) => s.platform === 'gap'), 'ไม่ยัด searchStats');
+  const off = await runGapV2({ caseId: 'GAP', storyQueries: ['sq'] }, gapSPv2(), null);
+  assert.ok(!('gapSearchShadowV2' in off.dossierPatch.images));
+});
+await test('V2 s5_gapsearch: re-entry (gapSearchDone) — ON=OFF, persisted sidecar untouched', async () => {
+  const persisted = { version: 2, totalCandidates: 1, emittedCandidates: 1, truncatedCandidates: 0, capped: false, candidates: [{ candidateId: 'GAP-9', provider: 'google', queryIndex: 0, providerRank: 1 }] };
+  const im = { caseId: 'GAP', gapSearchDone: true, gapSearchShadowV2: persisted };
+  const on = await runGapV2({ ...im }, gapSPv2(), '1');
+  const off = await runGapV2({ ...im }, gapSPv2(), null);
+  assert.deepEqual(on, off);
+  assert.ok(!('dossierPatch' in on), 're-entry ไม่มี dossierPatch → persisted คงเดิม');
+});
+
+// ── (V2-13) strict/queue no-leak — carrier ใน dossier.images ไม่รั่วเข้า queue body ──
+await test('V2 strict-chain (ALL_ON): searchShadowV2/gapSearchShadowV2 ไม่รั่วเข้า queue body/spec', async () => {
+  const carrier = { version: 2, totalCandidates: 1, emittedCandidates: 1, truncatedCandidates: 0, capped: false, candidates: [{ candidateId: 'C-1', provider: 'google', queryIndex: 0, providerRank: 1 }] };
+  const seed = (job) => { job.dossier.images.searchStats = [{ platform: 'google', found: 1, added: 1, vetDropped: 0, searchShadowV2: carrier }]; job.dossier.images.gapSearchShadowV2 = carrier; };
+  const A = await runStrictFlow({ s7Env: ALL_ON, mutateBeforeS6: seed });
+  const B = await runStrictFlow({ s7Env: ALL_ON });
+  assert.equal(A.queueCalls, 1);
+  assert.ok(A.captures.rawBody && !A.captures.rawBody.includes('searchShadowV2') && !A.captures.rawBody.includes('gapSearchShadowV2'), 'queue body ไม่มี V2 carrier');
+  assert.equal(A.captures.rawBody, B.captures.rawBody, 'queue body เท่ากันเป๊ะ (carrier inert)');
+});
+
+// ── (V2-14) route OFF byte-parity (V2 off, ค่าอื่นเท่าเดิม) + empty-carrier truthful ──
+await test('V2 route: OFF = ไม่มี key · ON เพิ่ม searchShadowV2 ท้าย legacy คงเดิม', async () => {
+  const fx = () => mkSPv2({ queries: ['q0'], searchImages: single({ q0: [{ imageUrl: 'A' }] }) });
+  const off = await runPOSTsw({ caseId: 'C', platform: 'google' }, fx(), { v2: null });
+  const on = await runPOSTsw({ caseId: 'C', platform: 'google' }, fx(), { v2: '1' });
+  assert.ok(!('searchShadowV2' in off));
+  for (const k of LEGACY_SEARCH_KEYS) assert.deepEqual(on[k], off[k], `legacy key ${k} เท่าเดิม`);
+  assert.deepEqual(Object.keys(on), [...LEGACY_SEARCH_KEYS, 'searchShadowV2']);
+  // empty-carrier: 0 fresh → truthful empty
+  const empty = await runPOSTsw({ caseId: 'C', platform: 'google' }, mkSPv2({ queries: ['q0'], searchImages: single({ q0: [] }) }), { v2: '1' });
+  assert.deepEqual(empty.searchShadowV2, { version: 2, totalCandidates: 0, emittedCandidates: 0, truncatedCandidates: 0, capped: false, candidates: [] });
+});
+
+// ── (V2-15/16/17) mid-await snapshot proof via REAL deferred latch (entered→release) — flip ระหว่าง production suspended จริง ──
+const mkLatch = () => { let e, g; const entered = new Promise((r) => { e = r; }); const gate = new Promise((r) => { g = r; }); return { entered, open: () => g(), hit: () => { e(); return gate; } }; };
+const SETV2 = (v) => { if (v === null) delete process.env.MEGA_SEARCH_SHADOW_V2; else process.env.MEGA_SEARCH_SHADOW_V2 = v; };
+// route: latch ที่ req.json() = awaited seam แรกสุดหลัง snapshot (ก่อน getCase/read/search) — ย้าย snapshot มาหลังนี่จะ fail
+await test('V2 latch (route): snapshot-at-entry ก่อน req.json await — ON→OFF และ OFF→ON', async () => {
+  const prev = process.env.MEGA_SEARCH_SHADOW_V2 ?? null;
+  try {
+    for (const [start, flip, wantV2] of [['1', null, true], [null, '1', false]]) {
+      const l = mkLatch();
+      globalThis.__MEGA_SP = mkSPv2({ queries: ['q0'], searchImages: single({ q0: [{ imageUrl: 'A' }] }) });
+      SETV2(start);
+      const p = searchPOST({ json: async () => { await l.hit(); return { caseId: 'C', platform: 'google' }; } });
+      await l.entered;   // POST suspended จริงที่ req.json() (ผ่าน snapshot ที่ entry แล้ว)
+      SETV2(flip);       // flip ตอน suspended
+      l.open();
+      const r = (await p)._body;
+      assert.equal('searchShadowV2' in r, wantV2, `start=${start} flip=${flip}`);
+    }
+  } finally { SETV2(prev); delete globalThis.__MEGA_SP; }
+});
+// s5_search: latch ที่ fetchJson (dependency await แรก)
+await test('V2 latch (s5_search): snapshot-at-entry ก่อน fetchJson await — ON→OFF และ OFF→ON', async () => {
+  const carrier = { version: 2, totalCandidates: 1, emittedCandidates: 1, truncatedCandidates: 0, capped: false, candidates: [{ candidateId: 'S-1', provider: 'google', queryIndex: 0, providerRank: 1 }] };
+  const prev = process.env.MEGA_SEARCH_SHADOW_V2 ?? null;
+  try {
+    for (const [start, flip, wantV2] of [['1', null, true], [null, '1', false]]) {
+      const l = mkLatch();
+      SETV2(start);
+      const job = { dossier: { images: { caseId: 'S', searchedPlatforms: [], ytFired: 'pre', searchStats: [] } } };
+      const _deps = { fetchJson: async (url) => { if (String(url).includes('/api/images/search')) { await l.hit(); return { success: true, found: 1, added: 1, vetDropped: 0, images: [], searchShadowV2: carrier }; } return { success: true, images: [] }; } };
+      const p = s5_search(job, { origin: 'http://mock', _deps });
+      await l.entered;
+      SETV2(flip);
+      l.open();
+      const stat = (await p).dossierPatch.images.searchStats[0];
+      assert.equal('searchShadowV2' in stat, wantV2, `start=${start} flip=${flip}`);
+    }
+  } finally { SETV2(prev); }
+});
+// gap: latch ที่ lib fetch (_jf) = awaited seam แรกสุดหลัง snapshot
+await test('V2 latch (s5_gapsearch): snapshot-at-entry ก่อน lib fetch await — ON→OFF และ OFF→ON', async () => {
+  const prev = process.env.MEGA_SEARCH_SHADOW_V2 ?? null;
+  try {
+    for (const [start, flip, wantV2] of [['1', null, true], [null, '1', false]]) {
+      const l = mkLatch();
+      globalThis.__MEGA_SP = gapSPv2(); globalThis.__MEGA_AI = async () => ({ text: '{"queries":["nq0","nq1"]}' }); globalThis.__GAP_N = 0;
+      SETV2(start);
+      const job = { dossier: { images: { caseId: 'GAP', storyQueries: ['sq'] }, compass: { mainCharacters: [{ name: 'A' }] }, desk: { title: 't' } } };
+      const jf = async (url) => { if (String(url).includes('/api/images/')) { await l.hit(); return { images: [] }; } throw new Error('NO NETWORK'); };
+      const p = s5_gapsearch(job, { origin: 'http://mock', _deps: { fetchJson: jf } });
+      await l.entered;
+      SETV2(flip);
+      l.open();
+      const img = (await p).dossierPatch.images;
+      assert.equal('gapSearchShadowV2' in img, wantV2, `start=${start} flip=${flip}`);
+    }
+  } finally { SETV2(prev); delete globalThis.__MEGA_SP; delete globalThis.__MEGA_AI; }
+});
+
+// ── (V2-18) fresh-suffix trust boundary (direct pure helper) — added>len / accessors / zero getter ──
+await test('V2 fresh-suffix: added>len / accessor images / accessor id → omit (zero getter invocation)', async () => {
+  const attr = new Map([['u1', { provider: 'google', queryIndex: 0, providerRank: 1 }]]);
+  assert.equal(_buildSearchShadowV2FromSaved({ images: [{ id: 'C-1', imageUrl: 'u1' }], added: 5 }, attr), null, 'added>len');
+  assert.equal(_buildSearchShadowV2FromSaved({ images: [], added: -1 }, attr), null, 'added<0');
+  assert.equal(_buildSearchShadowV2FromSaved({ images: {}, added: 0 }, attr), null, 'images ไม่ใช่ array');
+  let g1 = 0; const s1 = {}; Object.defineProperty(s1, 'images', { enumerable: true, get() { g1++; return []; } }); Object.defineProperty(s1, 'added', { value: 0 });
+  assert.equal(_buildSearchShadowV2FromSaved(s1, attr), null); assert.equal(g1, 0, 'images getter ไม่ถูกเรียก');
+  let g2 = 0; const row = { imageUrl: 'u1' }; Object.defineProperty(row, 'id', { enumerable: true, get() { g2++; return 'C-1'; } });
+  assert.equal(_buildSearchShadowV2FromSaved({ images: [row], added: 1 }, attr), null); assert.equal(g2, 0, 'id getter ไม่ถูกเรียก');
+  const ok = _buildSearchShadowV2FromSaved({ images: [{ id: 'OLD', imageUrl: 'old' }, { id: 'C-1', imageUrl: 'u1' }], added: 1 }, attr);
+  assert.deepEqual(ok.candidates, [{ candidateId: 'C-1', provider: 'google', queryIndex: 0, providerRank: 1 }], 'fresh suffix เท่านั้น');
+});
+
+// ── (V2-19) real UTF-8 32 KiB cap ──
+await test('V2 UTF-8 32 KiB: Unicode candidateId นับเป็น byte + over-byte carrier rejected', async () => {
+  const thai = 'ก'.repeat(64); // 64 ตัว × 3 bytes = 192 UTF-8 bytes (len=64 ≤ 192)
+  const c = _buildSearchShadowV2(Array.from({ length: 160 }, (_, i) => ({ candidateId: thai, provider: 'google', queryIndex: 0, providerRank: i + 1 })));
+  assert.ok(new TextEncoder().encode(JSON.stringify(c)).length <= 32 * 1024, 'serialized UTF-8 ≤ 32 KiB');
+  assert.ok(c.emittedCandidates < 160 && c.truncatedCandidates === 160 - c.emittedCandidates && c.capped === true, 'truthful counters');
+  const big = Array.from({ length: 160 }, () => ({ candidateId: 'x'.repeat(192), provider: 'google', queryIndex: 0, providerRank: 1 }));
+  assert.equal(_sanitizeSearchShadowV2({ version: 2, totalCandidates: 160, emittedCandidates: 160, truncatedCandidates: 0, capped: false, candidates: big }), null, 'over-byte carrier ถูกปฏิเสธ');
+});
+
+// ── (V2-20) bounded work — candidates.length > 160 reject ก่อน iterate ──
+await test('V2 bounded: candidates.length > 160 → reject ก่อนแตะ index descriptor', async () => {
+  let idxCount = 0;
+  const target = Array.from({ length: 200 }, () => ({ candidateId: 'c', provider: 'google', queryIndex: 0, providerRank: 1 }));
+  const proxyArr = new Proxy(target, { getOwnPropertyDescriptor(t, k) { if (typeof k === 'string' && String(Number(k)) === k) idxCount++; return Object.getOwnPropertyDescriptor(t, k); } });
+  assert.equal(_sanitizeSearchShadowV2({ version: 2, totalCandidates: 200, emittedCandidates: 200, truncatedCandidates: 0, capped: false, candidates: proxyArr }), null);
+  assert.equal(idxCount, 0, 'ไม่แตะ index descriptor ก่อน reject length>160');
+});
+
+// ── (V2-21) improved pre-existing coverage — incoming OLD URL exercised ──
+await test('V2 route: incoming OLD URL (pre-existing) exercised → excluded from fresh suffix', async () => {
+  const sp = mkSPv2({ queries: ['q0', 'q1'], searchImages: single({ q0: [{ imageUrl: 'OLD' }, { imageUrl: 'A' }], q1: [] }), existing: [{ imageUrl: 'OLD', id: 'C-0' }], readImages: () => [{ imageUrl: 'OLD' }] });
+  const r = await runPOSTsw({ caseId: 'C', platform: 'google' }, sp, { v2: '1' });
+  const ids = r.searchShadowV2.candidates.map((c) => c.candidateId);
+  assert.ok(!ids.includes('C-0'), 'OLD (pre-existing) ไม่อยู่ fresh');
+  assert.deepEqual(ids, ['C-2'], 'เฉพาะ A fresh (OLD ถูก pre-vet-dedup + ไม่อยู่ suffix)');
+  assert.equal(r.searchShadowV2.totalCandidates, 1);
+});
+
+// ── (V2-22) sanitizer throwing traps + candidate accessor/class + holey/accessor array ──
+await test('V2 sanitizer: throwing ownKeys/getPrototypeOf/getOwnPropertyDescriptor + accessor/class/holey → null', async () => {
+  const okEl = { candidateId: 'c1', provider: 'google', queryIndex: 0, providerRank: 1 };
+  const base = { version: 2, totalCandidates: 1, emittedCandidates: 1, truncatedCandidates: 0, capped: false, candidates: [okEl] };
+  assert.equal(_sanitizeSearchShadowV2(new Proxy(base, { ownKeys() { throw new Error('x'); } })), null);
+  assert.equal(_sanitizeSearchShadowV2(new Proxy(base, { getPrototypeOf() { throw new Error('x'); } })), null);
+  assert.equal(_sanitizeSearchShadowV2(new Proxy(base, { getOwnPropertyDescriptor() { throw new Error('x'); } })), null);
+  const accEl = { provider: 'google', queryIndex: 0, providerRank: 1 }; Object.defineProperty(accEl, 'candidateId', { enumerable: true, get() { return 'c'; } });
+  assert.equal(_sanitizeSearchShadowV2({ ...base, candidates: [accEl] }), null, 'candidate accessor');
+  class E { } assert.equal(_sanitizeSearchShadowV2({ ...base, candidates: [Object.assign(new E(), okEl)] }), null, 'candidate class instance');
+  const holey = [okEl]; holey[2] = okEl; // index 1 = hole
+  assert.equal(_sanitizeSearchShadowV2({ version: 2, totalCandidates: 3, emittedCandidates: 3, truncatedCandidates: 0, capped: false, candidates: holey }), null, 'holey array');
+  const accArr = [okEl]; Object.defineProperty(accArr, 0, { enumerable: true, configurable: true, get() { return okEl; } });
+  assert.equal(_sanitizeSearchShadowV2({ ...base, candidates: accArr }), null, 'accessor-index array');
+});
+
+// ── (V2-23) re-entry non-vacuous — deep-frozen persisted sidecar unchanged after call ──
+await test('V2 s5_gapsearch re-entry: deep-frozen persisted gapSearchShadowV2 unchanged (non-vacuous)', async () => {
+  const persisted = { version: 2, totalCandidates: 1, emittedCandidates: 1, truncatedCandidates: 0, capped: false, candidates: [{ candidateId: 'GAP-9', provider: 'google', queryIndex: 0, providerRank: 1 }] };
+  const snap = JSON.parse(JSON.stringify(persisted));
+  persisted.candidates.forEach((c) => Object.freeze(c)); Object.freeze(persisted.candidates); Object.freeze(persisted);
+  const im = { caseId: 'GAP', gapSearchDone: true, gapSearchShadowV2: persisted };
+  const on = await runGapV2(im, gapSPv2(), '1');
+  assert.ok(!('dossierPatch' in on), 're-entry ไม่มี dossierPatch');
+  assert.deepEqual(persisted, snap, 'persisted ไม่ถูกแตะ');
+  assert.deepEqual(im.gapSearchShadowV2, snap, 'im.gapSearchShadowV2 คงเดิม');
+});
+
+// ── (V2-24) s5_search accessor boundary — throwing searchShadowV2 getter on r → omit, getter count 0, legacy stat intact ──
+await test('V2 s5_search: throwing searchShadowV2 getter บน r → omit + getter count 0 + legacy stat เดิม', async () => {
+  let getCount = 0;
+  const r = { success: true, found: 5, added: 3, vetDropped: 2, images: [] };
+  Object.defineProperty(r, 'searchShadowV2', { enumerable: true, get() { getCount++; throw new Error('boom'); } });
+  const prev = process.env.MEGA_SEARCH_SHADOW_V2 ?? null; process.env.MEGA_SEARCH_SHADOW_V2 = '1';
+  const job = { dossier: { images: { caseId: 'S', searchedPlatforms: [], ytFired: 'pre', searchStats: [] } } };
+  const _deps = { fetchJson: async (url) => { if (String(url).includes('/api/images/search')) return r; if (String(url).includes('/api/images/')) return { success: true, images: [] }; throw new Error('NO NETWORK'); } };
+  try {
+    const out = await s5_search(job, { origin: 'http://mock', _deps });
+    assert.equal(getCount, 0, 'getter ไม่ถูกเรียก (own descriptor เท่านั้น)');
+    assert.deepEqual(out.dossierPatch.images.searchStats[0], { platform: 'google', found: 5, added: 3, vetDropped: 2 }, 'legacy stat intact, ไม่มี V2');
+  } finally { if (prev === null) delete process.env.MEGA_SEARCH_SHADOW_V2; else process.env.MEGA_SEARCH_SHADOW_V2 = prev; }
+});
+
+// ── (V2-25) sanitizer accessor rejections — prove ZERO getter invocation (top / candidate / array index) ──
+await test('V2 sanitizer: accessor rejections prove getter count = 0 (top-field/candidate-field/array-index)', async () => {
+  const okEl = () => ({ candidateId: 'c1', provider: 'google', queryIndex: 0, providerRank: 1 });
+  const base = () => ({ version: 2, totalCandidates: 1, emittedCandidates: 1, truncatedCandidates: 0, capped: false, candidates: [okEl()] });
+  // top-level field accessor (throwing body → ถ้าถูกเรียกจะทั้ง throw และนับ)
+  let gTop = 0; const cTop = base(); Object.defineProperty(cTop, 'totalCandidates', { enumerable: true, configurable: true, get() { gTop++; throw new Error('top'); } });
+  assert.equal(_sanitizeSearchShadowV2(cTop), null); assert.equal(gTop, 0, 'top-field getter 0');
+  // candidate field accessor
+  let gCand = 0; const el = { provider: 'google', queryIndex: 0, providerRank: 1 }; Object.defineProperty(el, 'candidateId', { enumerable: true, configurable: true, get() { gCand++; throw new Error('cand'); } });
+  assert.equal(_sanitizeSearchShadowV2({ ...base(), candidates: [el] }), null); assert.equal(gCand, 0, 'candidate-field getter 0');
+  // array index accessor
+  let gIdx = 0; const arr = [okEl()]; Object.defineProperty(arr, 0, { enumerable: true, configurable: true, get() { gIdx++; throw new Error('idx'); } });
+  assert.equal(_sanitizeSearchShadowV2({ ...base(), candidates: arr }), null); assert.equal(gIdx, 0, 'array-index getter 0');
 });
 
 console.log(`1..${passed}`);

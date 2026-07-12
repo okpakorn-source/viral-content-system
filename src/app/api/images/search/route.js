@@ -53,6 +53,113 @@ export function _searchProvenance(raw) {
   } catch { return {}; } // อ่าน property ใดๆ แล้ว throw (getter/proxy trap) → {} (ไม่ throw ออกไป)
 }
 
+// 🔎 Search V2 shadow — joinable candidate provenance (diagnostic-only, opt-in MEGA_SEARCH_SHADOW_V2=1)
+//   ให้หลักฐานภายหลัง join candidateId (id ที่ persist แล้ว) กลับไป provider/queryIndex/providerRank ได้
+//   pure · ไม่แตะ selection/vet/add · ห้าม URL/query/title/PII · fail-closed descriptor-only sanitizer
+const _V2_PROVIDERS = new Set(['google', 'google_news', 'yandex', 'facebook', 'tiktok']);
+const _V2_MAX_EMIT = 160;
+const _V2_MAX_BYTES = 32 * 1024;
+const _V2_ID_MAX = 192;
+const _V2_ENC = new TextEncoder(); // UTF-8 byte length (ไม่ใช่ UTF-16 code unit)
+const _v2bytes = (s) => _V2_ENC.encode(s).length;
+export function _sanitizeSearchShadowV2(raw) {
+  try {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const proto = Object.getPrototypeOf(raw);
+    if (proto !== Object.prototype && proto !== null) return null;
+    const top = new Map();
+    for (const k of Reflect.ownKeys(raw)) {
+      const d = Object.getOwnPropertyDescriptor(raw, k);
+      if (!d || !('value' in d)) return null; // accessor/แปลก = ทิ้งทั้ง carrier (descriptor-only)
+      top.set(k, d.value);
+    }
+    const _int = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : null);
+    if (top.get('version') !== 2) return null;
+    const totalCandidates = _int(top.get('totalCandidates'));
+    const emittedCandidates = _int(top.get('emittedCandidates'));
+    const truncatedCandidates = _int(top.get('truncatedCandidates'));
+    const capped = top.get('capped');
+    if (totalCandidates === null || emittedCandidates === null || truncatedCandidates === null || typeof capped !== 'boolean') return null;
+    const candRaw = top.get('candidates');
+    if (!Array.isArray(candRaw) || Object.getPrototypeOf(candRaw) !== Array.prototype) return null;
+    const lenD = Object.getOwnPropertyDescriptor(candRaw, 'length');
+    if (!lenD || !('value' in lenD) || !Number.isSafeInteger(lenD.value) || lenD.value < 0) return null;
+    if (lenD.value > _V2_MAX_EMIT) return null; // bounded work: reject ก่อน iterate row/descriptor ใดๆ
+    const out = [];
+    for (let i = 0; i < lenD.value; i++) {
+      const ed = Object.getOwnPropertyDescriptor(candRaw, i);
+      if (!ed || !('value' in ed)) return null; // hole/accessor = ทิ้ง
+      const el = ed.value;
+      if (!el || typeof el !== 'object' || Array.isArray(el)) return null;
+      const pe = Object.getPrototypeOf(el);
+      if (pe !== Object.prototype && pe !== null) return null;
+      const em = new Map();
+      for (const k of Reflect.ownKeys(el)) {
+        const dd = Object.getOwnPropertyDescriptor(el, k);
+        if (!dd || !('value' in dd)) return null;
+        em.set(k, dd.value);
+      }
+      const candidateId = em.get('candidateId');
+      const provider = em.get('provider');
+      const queryIndex = _int(em.get('queryIndex'));
+      const providerRank = em.get('providerRank');
+      if (typeof candidateId !== 'string' || candidateId.length === 0 || candidateId.length > _V2_ID_MAX) return null;
+      if (typeof provider !== 'string' || !_V2_PROVIDERS.has(provider)) return null;
+      if (queryIndex === null) return null;
+      if (!Number.isSafeInteger(providerRank) || providerRank < 1) return null;
+      out.push({ candidateId, provider, queryIndex, providerRank }); // canonical key order
+    }
+    if (emittedCandidates !== out.length) return null;
+    if (truncatedCandidates !== totalCandidates - emittedCandidates) return null;
+    if (capped !== (truncatedCandidates > 0)) return null;
+    if (emittedCandidates > _V2_MAX_EMIT) return null;
+    const carrier = { version: 2, totalCandidates, emittedCandidates, truncatedCandidates, capped, candidates: out };
+    if (_v2bytes(JSON.stringify(carrier)) > _V2_MAX_BYTES) return null; // UTF-8 bytes ≤ 32 KiB
+    return carrier;
+  } catch { return null; } // ownKeys/descriptor/prototype trap throw → null
+}
+export function _buildSearchShadowV2(cands) {
+  const list = Array.isArray(cands) ? cands : [];
+  const total = list.length;
+  let emitted = list.slice(0, Math.min(_V2_MAX_EMIT, total)); // cap 160 (tail-trim)
+  const mk = (arr) => ({ version: 2, totalCandidates: total, emittedCandidates: arr.length, truncatedCandidates: total - arr.length, capped: total - arr.length > 0, candidates: arr });
+  while (emitted.length > 0 && _v2bytes(JSON.stringify(mk(emitted))) > _V2_MAX_BYTES) emitted = emitted.slice(0, emitted.length - 1); // 32 KiB UTF-8 tail-trim
+  return _sanitizeSearchShadowV2(mk(emitted));
+}
+// fresh-suffix trust boundary — descriptor-snapshot saved.images/added + own-data-only rows (ไม่เรียก getter/proxy trap)
+export function _buildSearchShadowV2FromSaved(saved, attr) {
+  try {
+    if (!saved || typeof saved !== 'object' || !attr) return null;
+    const imD = Object.getOwnPropertyDescriptor(saved, 'images');
+    if (!imD || !('value' in imD)) return null; // accessor/หาย → omit
+    const all = imD.value;
+    if (!Array.isArray(all) || Object.getPrototypeOf(all) !== Array.prototype) return null;
+    const lenD = Object.getOwnPropertyDescriptor(all, 'length');
+    if (!lenD || !('value' in lenD) || !Number.isSafeInteger(lenD.value) || lenD.value < 0) return null;
+    const len = lenD.value;
+    const adD = Object.getOwnPropertyDescriptor(saved, 'added');
+    if (!adD || !('value' in adD)) return null;
+    const addedN = adD.value;
+    if (!Number.isSafeInteger(addedN) || addedN < 0 || addedN > len) return null; // inconsistent/added>len → omit (ห้ามนับ historical เป็น fresh)
+    const cands = [];
+    for (let i = len - addedN; i < len; i++) {
+      const ed = Object.getOwnPropertyDescriptor(all, i);
+      if (!ed || !('value' in ed)) return null; // hole/accessor index → omit V2
+      const img = ed.value;
+      if (!img || typeof img !== 'object' || Array.isArray(img)) return null; // malformed fresh row → omit V2
+      const idD = Object.getOwnPropertyDescriptor(img, 'id');
+      const urlD = Object.getOwnPropertyDescriptor(img, 'imageUrl');
+      if ((idD && !('value' in idD)) || (urlD && !('value' in urlD))) return null; // accessor id/imageUrl → omit V2 (never invoke getter)
+      const id = idD ? idD.value : undefined;
+      const url = urlD ? urlD.value : undefined;
+      const a = url === undefined ? undefined : attr.get(url);
+      if (!a || typeof id !== 'string' || id.length === 0 || id.length > _V2_ID_MAX) continue; // join ไม่ได้ = omit ใบนี้ (ไม่ publish imageUrl)
+      cands.push({ candidateId: id, provider: a.provider, queryIndex: a.queryIndex, providerRank: a.providerRank });
+    }
+    return _buildSearchShadowV2(cands);
+  } catch { return null; } // storage/join พัง = omit V2 (V1 คงเดิม)
+}
+
 export async function POST(req) {
   // 🔎 Search Provenance V1 — snapshot สวิตช์ + ตัวนับ + _prov "นอก try" ให้ outer catch (UNEXPECTED หลัง attempt) แนบ sidecar ได้
   const provenanceOn = process.env.MEGA_SEARCH_PROVENANCE === '1';
@@ -63,6 +170,9 @@ export async function POST(req) {
   let provVetDropped = 0;   // vet classifier: dropped (relevant===false) — แยกจาก legacy vetDropped เด็ดขาด
   let provVetFailed = 0;    // vet classifier: failed (โหลด/ติดป้ายไม่ได้) หรือทั้งชุด throw = N
   const _prov = () => _searchProvenance({ queriesFired: provQueriesFired, urlsReturned: provUrlsReturned, urlsVetted: provUrlsVetted, vetKept: provVetKept, vetDropped: provVetDropped, vetFailed: provVetFailed });
+  // 🔎 Search V2 shadow — snapshot สวิตช์ครั้งเดียวก่อน await (อิสระจาก V1) + แผนที่ attribution (imageUrl→provider/queryIndex/providerRank)
+  const shadowV2On = process.env.MEGA_SEARCH_SHADOW_V2 === '1';
+  const _v2attr = shadowV2On ? new Map() : null;
   try {
     const body = await req.json().catch(() => ({}));
     const caseId = (body.caseId || '').trim();
@@ -169,7 +279,9 @@ export async function POST(req) {
           continue;
         }
         provUrlsReturned += imgs.length; // 🔎 ดิบก่อนกรอง/ตัดซ้ำ/เพดาน (เฉพาะคำค้นที่คืนสำเร็จ)
+        let _v2rank = 0; // 🔎 V2: rank ดิบ 1-based ตามลำดับ provider response ก่อน filter/dedup (ห้าม renumber)
         for (const im of imgs) {
+          _v2rank++;
           if (collected.length >= cap) break;
           if (!im.imageUrl || seen.has(im.imageUrl)) continue;
           // 🚫 ต้นทาง: กันบ้าน/โครงการจากเว็บอสังหา/รับสร้างบ้าน/วัสดุก่อสร้าง ไม่ให้เข้าคลัง
@@ -184,6 +296,8 @@ export async function POST(req) {
           const sw = Number(im.width) || 0, sh = Number(im.height) || 0;
           const lowRes = sw > 0 && sh > 0 ? Math.min(sw, sh) < LOWRES_MIN_SHORT : undefined;
           collected.push({ ...im, platform, query: q, ...(lowRes !== undefined ? { lowRes } : {}) });
+          // 🔎 V2: บันทึก attribution ตอน URL เข้า collected ครั้งแรก (dup ถูก seen กันก่อน push → first attribution คงเดิม)
+          if (_v2attr) _v2attr.set(im.imageUrl, { queryIndex: w + k, provider: platform, providerRank: _v2rank });
         }
       }
     }
@@ -255,6 +369,9 @@ export async function POST(req) {
 
     const saved = await addImages(caseId, toStore);
 
+    // 🔎 Search V2 shadow — join id ที่เพิ่ง persist (N ใบท้ายของ saved.images) → provider/queryIndex/providerRank (ON เท่านั้น · pure)
+    const searchShadowV2 = shadowV2On ? _buildSearchShadowV2FromSaved(saved, _v2attr) : null;
+
     return NextResponse.json({
       success: true,
       caseId,
@@ -275,6 +392,8 @@ export async function POST(req) {
       // 🔎 Search Provenance V1 — ON เท่านั้น (OFF = ไม่มี key นี้เลย → response เดิม byte-for-byte)
       //   provenance.vetDropped = classifier dropped (ไม่ใช่ legacy vetDropped ด้านบน) · vetKept/vetFailed = classifier จริง
       ...(provenanceOn ? { provenance: _prov() } : {}),
+      // 🔎 Search V2 shadow — ON+valid เท่านั้น (OFF/omit = ไม่มี key นี้) · วางหลัง provenance
+      ...(searchShadowV2 ? { searchShadowV2 } : {}),
     });
   } catch (err) {
     // UNEXPECTED หลัง attempt วัดได้ (เช่น addImages throw หลัง search/vet) → แนบ sidecar (ON) · OFF = legacy shape/order เป๊ะ
