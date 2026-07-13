@@ -1445,7 +1445,8 @@ const SLOT_CATEGORY_HINT = {
 
 // ★ Wave1 Batch E (10 ก.ค. — manifest-lite): hash สั้นของ DNA ที่ผูกกับข่าวนี้ (debug ว่า refMatch เปลี่ยนไหมข้ามรอบ)
 //   FNV-1a 32-bit เดียวกับที่ refCoverMatch.js ใช้ (ไม่ได้ export จากที่นั่น → ก็อปตัวเล็กมาไว้ในไฟล์นี้แทน กัน import วุ่น)
-function _dnaHashFor(dna) {
+// ★ LANE-C (item 3): export ตรงๆ ของ hash fn เดิม (pure re-export, zero behavior change) — ให้ฝั่ง route ใช้ทำ refMatch parity เดียวกับ S6/S7
+export function _dnaHashFor(dna) {
   try {
     let h = 0x811c9dc5;
     const s = JSON.stringify(dna || {});
@@ -1673,6 +1674,11 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   const _dTrace = _dEvidenceOn ? new Map() : null; // trace คู่ขนานข้าง slots (ภายในเท่านั้น — id ดิบไม่ออก output ใดๆ)
   let _dUniverse = null; // จักรวาล candidate "ก้อนเดียว" (ids ตามลำดับที่ส่งเข้าสมองจริง) — จับก่อนเรียกสมอง
   let _dSidecar = null;  // หลักฐาน v2 ที่ผ่าน producer (decisionComplete=true เท่านั้น) — แนบ key decisionEvidence ตอน return
+  // ═══ LANE-C ROLE READINESS — latch MEGA_ROLE_READINESS='1' (fresh func-scoped snapshot ที่ ENTRY ก่อน await แรก · exact '1') ═══
+  //   TOCTOU-proof (flip env กลางทางไม่มีผล) · DEFAULT OFF = byte-identical legacy: ไม่มี read/import/log/field ใหม่บนเส้น OFF
+  //   ★ ห้าม reuse HERO_GRADE_HARD_ON (default-ON คนละ semantics) — นี่ latch ใหม่ default OFF ล้วน
+  const _roleReadyOn = process.env.MEGA_ROLE_READINESS === '1';
+  let _roleReadinessCounts = null; // (1d) verdict counts numbers-only — แนบเข้า D-sidecar เฉพาะ ON (ไม่แตะเส้น OFF)
   const im = job.dossier.images || {};
   const r = await _jf(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
   if (!r.success) return { status: 'failed', nextAction: 'retry', summary: 'อ่านคลังรูปไม่ได้: ' + (r.error || r.httpStatus) };
@@ -2507,6 +2513,116 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     storyTag = ` · story[${sfLine}]`;
   }
 
+  // ═══ LANE-C ROLE READINESS GATE (ON = _roleReadyOn) — fail-closed post-selection readiness ═══════════════════════════
+  //   ON เท่านั้น: hero ต้อง "พร้อมจริง" ด้วยหลักฐานบวกที่รู้จริง (relevant/clean/หน้าเดี่ยว/ขนาดวัดได้≥เกณฑ์/แหล่งตรง/ตัวตน)
+  //   + faceBox เด่น (mirror composer bigFace) + ครอปช่อง hero ได้จริง (มิเรอร์ crop-readiness math ในไฟล์ ตาม _slotUpEst).
+  //   unknown/ขาดหลักฐานใดๆ = INSUFFICIENT เสมอ (ไม่ปั้น eligible ปลอม) — จึง "ฆ่า" keep-anyway heroSize fail-open และ
+  //   identity-null→generic-fill ของช่อง _idGated โดยปิดงาน typed ก่อนถึง S7/คิว/โรงประกอบ · ทุกช่องผูกตัวตนต้องได้คนตามสัญญา.
+  //   ทุกอย่างใต้ try/catch · return HOLD ไม่มี dossierPatch = ZERO downstream side effect (ไม่ mutate dossier/คิว/composer).
+  //   OFF = ข้ามทั้งบล็อก byte-identical.
+  if (_roleReadyOn) {
+    const _rrPersons = (rec) => [rec?.triage?.person, ...((rec?.triage?.persons) || [])].filter(Boolean);
+    // หลักฐานบวก "รู้จริง" ต่อ hero — เสริม _heroGradeOf (base predicate 1a) ที่ fail-open บาง unknown (clean/relevant/size)
+    const _rrKnownHeroEvidence = (rec) => {
+      const t = rec?.triage || {};
+      if (t.relevant !== true) return false;                 // unknown/false relevant = insufficient
+      if (t.clean !== true) return false;                    // unknown/false clean = insufficient
+      if (Number(t.faceCount) !== 1) return false;           // unknown/≠1 single-face = insufficient
+      if (rec.rehostQuality === 'thumbnail') return false;   // thumbnail-only = insufficient
+      const rss = realShortSideOf(rec);
+      if (!(rss != null && rss >= HERO_MIN_SHORT_SIDE)) return false; // unknown/เล็กกว่าเกณฑ์ measured size = insufficient
+      if (!(rec.sourceLink || rec.source)) return false;     // unknown direct-source = insufficient
+      return _heroGradeOf(rec) === true;                     // base predicate (directive 1a)
+    };
+    // faceBox prominence (mirror composer bigFace: สูง ≥0.16 + ขอบบน/ล่าง 0.01/0.99) — box หาย/พัง/นอก bound = null → insufficient
+    const _rrFaceBox = (rec) => {
+      const fb = rec?.triage?.faceBox;
+      if (!fb || typeof fb !== 'object') return null;
+      let x1; let y1; let x2; let y2;
+      if ([fb.x1, fb.y1, fb.x2, fb.y2].every((v) => typeof v === 'number' && Number.isFinite(v))) {
+        x1 = fb.x1; y1 = fb.y1; x2 = fb.x2; y2 = fb.y2;
+      } else {
+        const x = Number(fb.x); const y = Number(fb.y); const w = Number(fb.w ?? fb.width); const h = Number(fb.h ?? fb.height);
+        if (![x, y, w, h].every((v) => Number.isFinite(v))) return null;
+        x1 = x; y1 = y; x2 = x + w; y2 = y + h;
+      }
+      if (!(x2 > x1 && y2 > y1 && x1 >= 0 && y1 >= 0 && x2 <= 1.0001 && y2 <= 1.0001)) return null;
+      return { x1, y1, x2: Math.min(1, x2), y2: Math.min(1, y2) };
+    };
+    const _rrBigFace = (b) => !!b && (b.y2 - b.y1) >= 0.16 && b.y1 >= 0.01 && b.y2 <= 0.99;
+    // hero slot geometry (realized template px integer ใน 1080×1350) — consume evidence, fail-closed ถ้าไม่มี ref/โครง
+    let _rrHeroGeo = null;
+    try {
+      if (_refDNA) {
+        const _rt = await import('@/lib/refTemplate');
+        const _dts = _rt.dnaToTemplateSpec || _rt.default?.dnaToTemplateSpec;
+        const _spec = typeof _dts === 'function' ? _dts(_refDNA) : null;
+        const _sl = Array.isArray(_spec?.slots) ? _spec.slots : [];
+        _rrHeroGeo = _sl.find((s) => s.id === 'main' && s.shape !== 'circle')
+          || _sl.filter((s) => s.shape !== 'circle').sort((a, b) => (b.w * b.h) - (a.w * a.h))[0] || null;
+      }
+    } catch { _rrHeroGeo = null; }
+    // crop feasibility — LOCAL MIRROR ของ crop-readiness math (mirror imageQualityConfig/_slotUpEst constants locally):
+    //   ★ invariant test บังคับให้โมดูล F/E (crop-readiness/search-quality) อยู่นอก runtime wiring ของไฟล์นี้ →
+    //   จึงคำนวณเองในไฟล์: cover-fit upscale + hero short-side floor + positional faceBox containment (RECT).
+    //   SAFE เท่านั้น = ครอปช่อง hero ได้จริง · หลักฐานหาย/ล้ม = false (insufficient).
+    const _HERO_STRETCH_MAX = 1.2; // imageQualityConfig HERO_STRETCH_MAX (hero crop > 1.2× = แตก)
+    const _rrCropSafeHero = (rec, geo, face) => {
+      try {
+        if (!geo || !face) return false;
+        const rw = Number(rec.realWidth); const rh = Number(rec.realHeight);
+        const sw = Number(geo.w); const sh = Number(geo.h);
+        if (!(rw > 0 && rh > 0 && sw > 0 && sh > 0)) return false;    // dims/geo ไม่ครบ = insufficient
+        const up = Math.max(sw / rw, sh / rh);                        // cover-fit upscale = max(slotW/fullW, slotH/fullH)
+        if (up > _HERO_STRETCH_MAX + 1e-9) return false;              // ยืดเกิน 1.2× = insufficient
+        if (Math.min(rw, rh) < HERO_MIN_SHORT_SIDE) return false;     // hero short-side floor (measured จริงเท่านั้น)
+        const slotAspect = sw / sh; const srcAspect = rw / rh;        // positional containment (cover-fit centre gravity)
+        let cropW; let cropH;
+        if (slotAspect >= srcAspect) { cropW = 1; cropH = srcAspect / slotAspect; }
+        else { cropH = 1; cropW = slotAspect / srcAspect; }
+        const cx0 = (1 - cropW) / 2; const cy0 = (1 - cropH) / 2;     // หน้าต่างครอป centre ในภาพต้นทาง (normalized)
+        const mx1 = (face.x1 - cx0) / cropW; const my1 = (face.y1 - cy0) / cropH; // map faceBox → crop-normalized
+        const mx2 = (face.x2 - cx0) / cropW; const my2 = (face.y2 - cy0) / cropH;
+        return mx1 >= 0 && my1 >= 0 && mx2 <= 1 && my2 <= 1 && mx2 > mx1 && my2 > my1; // RECT: box ต้องอยู่ในหน้าต่างเต็ม
+      } catch { return false; }
+    };
+    // ── hero readiness (ทุกสัญญาณต้องเป็นบวกที่รู้จริง — AND) ──
+    const _heroPick = slots[_canonHeroId];
+    const _heroRec = _heroPick ? byId.get(String(_heroPick.id)) : null;
+    const _heroFace = _heroRec ? _rrFaceBox(_heroRec) : null;
+    const _heroIdOk = !!_heroRec && _rrPersons(_heroRec).length > 0 && _identityOk(_canonHeroId, _heroRec) && (semContract ? true : heroNames.length > 0);
+    const _heroReady = !!_heroRec
+      && _rrKnownHeroEvidence(_heroRec)
+      && _rrBigFace(_heroFace)
+      && _heroIdOk
+      && _rrCropSafeHero(_heroRec, _rrHeroGeo, _heroFace);
+    if (!_heroReady) {
+      console.log('[MEGA S6] 🔒 role-readiness HOLD: INSUFFICIENT_HERO_GRADE (hero ไม่ผ่านหลักฐานพร้อมจริง — เกรด/หน้าเด่น/ตัวตน/ครอป)');
+      return { status: 'failed', nextAction: 'fail', reason: 'INSUFFICIENT_HERO_GRADE', quality: 'red', summary: '🔒 role-readiness: INSUFFICIENT_HERO_GRADE — ไม่มี hero ที่พร้อมจริง (เกรด/หน้าเด่น/ตัวตน/ครอปช่องได้) — พักงานก่อนดำเนินต่อ' };
+    }
+    // ── identity-bound slots (นอกเหนือ hero) ต้องได้คนตามสัญญาจริง (unknown/ไม่มีคน = INSUFFICIENT) ──
+    let _idBad = null;
+    for (const _s of activeSlots) {
+      if (_isHeroSlot(_s) || !_idGated(_s)) continue;
+      const _pick = slots[_s];
+      const _rec = _pick ? byId.get(String(_pick.id)) : null;
+      if (!_rec || _rrPersons(_rec).length === 0 || !_identityOk(_s, _rec)) { _idBad = _s; break; }
+    }
+    if (_idBad) {
+      console.log(`[MEGA S6] 🔒 role-readiness HOLD: INSUFFICIENT_SLOT_IDENTITY (ช่อง ${_idBad} ไม่มีคนตาม ref identity)`);
+      return { status: 'failed', nextAction: 'fail', reason: 'INSUFFICIENT_SLOT_IDENTITY', quality: 'red', summary: `🔒 role-readiness: INSUFFICIENT_SLOT_IDENTITY — ช่อง ${_idBad} ไม่มีคนตาม ref identity — พักงานก่อนดำเนินต่อ` };
+    }
+    // ── verdict counts (1d additive) — numbers only ──
+    let _idT = 0; let _idR = 0;
+    for (const _s of activeSlots) {
+      if (!_idGated(_s)) continue;
+      _idT++;
+      const _p = slots[_s]; const _r = _p ? byId.get(String(_p.id)) : null;
+      if (_r && _identityOk(_s, _r)) _idR++;
+    }
+    _roleReadinessCounts = { heroReady: 1, slotsTotal: activeSlots.length, slotsFilled: activeSlots.filter((s) => slots[s]).length, idGatedTotal: _idT, idGatedReady: _idR };
+  }
+
   // ═══ D-sidecar FINALIZE — หลัง story-rescue + บล็อกเติม backup เสร็จ (แผนตัวจริงนิ่งแล้ว) · ก่อน solver-shadow เริ่ม ═══
   //   candidateCount/chosenIndex มาจาก "จักรวาลก้อนเดียว" ที่จับไว้ก่อนสมองเท่านั้น · ทุกช่อง active ต้องมีตัวจริง +
   //   trace ตรงตัวจริง + id อยู่ในจักรวาล — ขาดข้อเดียว/producer เพี้ยน/throw = omit ทั้ง sidecar (ผลธุรกิจเดิม 100%) ·
@@ -2541,6 +2657,11 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         }
       }
     } catch { _dSidecar = null; } // ทุกความล้มเหลว = omit เงียบ — ห้ามแตะผลธุรกิจ/asset/backup แม้ byte เดียว
+  }
+  // ★ LANE-C (1d): แนบ readiness verdict counts เข้า D-sidecar เฉพาะเมื่อ readiness ON + D-sidecar มีจริง (numbers only) —
+  //   ไม่ mutate ก้อนเดิม (spread เป็น object ใหม่) · OFF ทั้งคู่ = ไม่แตะ _dSidecar เลย (byte-identical)
+  if (_roleReadyOn && _dEvidenceOn && _dSidecar && _roleReadinessCounts) {
+    try { _dSidecar = { ..._dSidecar, roleReadiness: _roleReadinessCounts }; } catch { /* ไม่กระทบผลธุรกิจ */ }
   }
 
   // ★ Wave3 ชุด1 (10 ก.ค.) — SHADOW MODE: solver deterministic คำนวณคู่ขนานหลังลูปจับคู่จบ (slots ครบ/พยายามครบ)
@@ -3406,9 +3527,15 @@ export async function s7_cover(job, { origin, _deps } = {}) {
   const _envSpec = process.env.MEGA_SELECTION_SPEC === '1';
   const _envStrictProducer = process.env.MEGA_STRICT_PRODUCER === '1';
   const _envStrictRender = process.env.MEGA_STRICT_RENDER === '1';
+  const _roleReadyOn = process.env.MEGA_ROLE_READINESS === '1'; // ★ LANE-C latch (fresh, default OFF, exact '1')
+  // ★ LANE-C (item 2) MINIMAL INTERNAL-ONLY TRANSPORT SEAM — คุมด้วย in-process `_deps` เท่านั้น (ห้าม env/request data):
+  //   Lane A เรียก s7_cover(job, { origin, _deps: { fetchJson, queueTransport: 'cover_ref_test_in_process' } }) ให้ยิงในโปรเซส
+  //   เอง (ไม่ผ่านเครื่องทีม/คลาวด์) · default callers ไม่ส่ง _deps.queueTransport = false = พฤติกรรมเดิมทุก byte
+  const _inProcTransport = _deps?.queueTransport === 'cover_ref_test_in_process' && typeof _deps?.fetchJson === 'function';
   // ★ audit A1 (9 ก.ค.): tick ที่เกิดบนคลาวด์ (คนกดหน้า /mega ที่เสิร์ฟบน Vercel/Railway) ไม่มี localhost:3000
   //   ให้ยิง → เดิมส่งงานปกล้มแล้ว job ตายทั้งงาน — คืน waiting ให้ tick รอบถัดไปจากเครื่องทีมมาทำขั้นนี้เอง
-  if (process.platform !== 'win32' && !process.env.MEGA_COVER_ORIGIN) {
+  //   ★ LANE-C: bypass เฉพาะเมื่อ in-process transport ถูกฉีดผ่าน _deps เท่านั้น (ไม่ broaden call path อื่น)
+  if (process.platform !== 'win32' && !process.env.MEGA_COVER_ORIGIN && !_inProcTransport) {
     return { status: 'waiting', nextAction: 'wait', summary: 'ขั้นปกต้องส่งเข้าเครื่องทีม — รอ tick จากเครื่องทีม (คลาวด์ไม่มี MEGA_COVER_ORIGIN)' };
   }
   const d = job.dossier;
@@ -3719,6 +3846,23 @@ export async function s7_cover(job, { origin, _deps } = {}) {
         // ⓪ โครง realized หาย = reason เฉพาะของ producer (คงที่) — wire gate ตรวจฉบับเต็มอีกชั้นก่อน queue
         if (!realizedTemplate) {
           return { status: 'waiting', nextAction: 'wait', summary: '🔐⏸️ strict producer: strict_realized_template_missing — สร้างโครง realized ไม่ได้ พักงานก่อน queue' };
+        }
+        // ★ LANE-C (1c) PRE-FREEZE TEMPLATE DEMAND — ON + strict-armed เท่านั้น · CONSUME ค่าที่ s7 คำนวณแล้ว (realizedTemplate.slots +
+        //   plannedByRefSlot) ไม่ recompute/approximate · ภาพที่ครอปได้จริง (primary ที่ผ่านด่านครอป/ขนาด S6 แล้ว) ต่างกัน (distinct)
+        //   ต้อง ≥ จำนวนช่องที่โครงต้องการ — ขาด = HOLD typed ก่อน payload/queue (ไม่มี side effect)
+        if (_roleReadyOn) {
+          const _demand = Array.isArray(realizedTemplate.slots) ? realizedTemplate.slots.length : 0;
+          const _distinct = new Set();
+          if (plannedByRefSlot && typeof plannedByRefSlot === 'object') {
+            for (const _k of Object.keys(plannedByRefSlot)) {
+              const _cid = plannedByRefSlot[_k] && plannedByRefSlot[_k].candidateId;
+              if (_cid != null && _cid !== '') _distinct.add(String(_cid));
+            }
+          }
+          if (_demand >= 1 && _distinct.size < _demand) {
+            console.log(`[MEGA S7] 🔒 role-readiness HOLD: INSUFFICIENT_POOL_FOR_TEMPLATE (ครอปได้ ${_distinct.size} < โครงต้องการ ${_demand})`);
+            return { status: 'waiting', nextAction: 'wait', reason: 'INSUFFICIENT_POOL_FOR_TEMPLATE', summary: `🔒⏸️ role-readiness: INSUFFICIENT_POOL_FOR_TEMPLATE — ภาพครอปได้ ${_distinct.size} ใบ < ช่องที่โครงต้องการ ${_demand} — พักงานก่อน queue` };
+          }
         }
       }
     } catch (e) {

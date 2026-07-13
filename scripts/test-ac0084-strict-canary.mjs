@@ -80,6 +80,11 @@
 // ============================================================
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+// Canonical strict-latch authority (AC-0099 LANE-B). The preflight consumes the SAME
+// resolver the real S7 wiring uses so the armed/not-armed decision can never drift, and so
+// a mis-set alias (e.g. MEGA_STRICT_RENDERER) surfaces as a named warning instead of silently
+// passing. Pure module (no env reads, no IO) — safe to import at top of this scaffold.
+import { resolveStrictLatches, STRICT_LATCH_KEYS } from '../src/lib/refSlotContract.js';
 
 // ------------------------------------------------------------
 // tiny plain-object / non-blank helpers (FAITHFUL ports of refSlotContract.js:598-605).
@@ -750,9 +755,18 @@ export function assertStrictPayloadContract(payload, env = (typeof process !== '
   }
 
   // strict pipeline must be armed, else the manifest lacks strictRender/specHash identity.
-  if ((env && env.MEGA_STRICT_RENDER) !== '1') reasons.push('MEGA_STRICT_RENDER_not_armed');
+  // Delegate the arm decision to the canonical resolver (single source of truth) — armedRenderer
+  // is MEGA_STRICT_RENDER === '1' EXACTLY, identical to the historical inline check, so the
+  // 'MEGA_STRICT_RENDER_not_armed' message/behavior is preserved byte-for-byte.
+  const latches = resolveStrictLatches(env);
+  if (!latches.armedRenderer) reasons.push('MEGA_STRICT_RENDER_not_armed');
 
-  return { ok: reasons.length === 0, reasons };
+  // Strict-like aliases (e.g. the typo'd MEGA_STRICT_RENDERER) never arm — surface them as a
+  // NAMED WARNING so a mis-set latch is loud. Warnings do NOT flip ok; a not-armed env still HOLDs.
+  const warnings = [];
+  for (const k of latches.unknownStrictLikeKeys) warnings.push(`strict_like_alias_ignored:${k}`);
+
+  return { ok: reasons.length === 0, reasons, warnings, unknownStrictLikeKeys: latches.unknownStrictLikeKeys };
 }
 
 // ------------------------------------------------------------

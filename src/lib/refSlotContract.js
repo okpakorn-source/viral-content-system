@@ -1042,3 +1042,109 @@ export function buildSelectionSpec({ contract = null, realizedTemplate = null, p
     slots,
   };
 }
+
+// ---------- 🔐 Strict latch resolution (AC-0099 LANE-B — canonical env-key authority) ----------
+// SINGLE SOURCE OF TRUTH for the strict pipeline's environment latches. Every consumer
+// (S7 producer wiring, the ac0084 canary preflight, the semantic-selection harness) MUST
+// derive its key list from STRICT_LATCH_KEYS so the lists can NEVER drift.
+//
+// PURE like the rest of this file: this function reads NO environment itself — the caller
+// passes an env-like object as a parameter (keeps the module's no-env-read contract intact).
+//
+// Arming rule (fail-closed): a latch is armed iff its value is EXACTLY the string '1'.
+//   No coercion, no trim — '1 ', the number 1, 'true', 'yes', '01' are all NOT armed.
+// MEGA_STRICT_RENDER is the SOLE canonical renderer latch; no alias (e.g. MEGA_STRICT_RENDERER)
+// may ever be treated as arming — aliases surface only as unknownStrictLikeKeys warnings.
+
+export const STRICT_LATCH_KEYS = Object.freeze([
+  'MEGA_SEMANTIC_SELECTION',
+  'MEGA_SELECTION_SPEC',
+  'MEGA_STRICT_PRODUCER',
+  'MEGA_STRICT_RENDER',
+  'MEGA_REF_SHOT_AUTHORITY',
+]);
+
+// The 4 core latches of the ORDINARY semantic-strict wire — this MIRRORS S7's arm matrix
+// exactly (megaAdapters.js:3655-3656: strictProducerRequested = _sem && _semEnvOn &&
+// MEGA_STRICT_PRODUCER; strictWireOn adds MEGA_STRICT_RENDER). _semEnvOn is the
+// SEMANTIC+SELECTION_SPEC pair. armedProducer here == a fully-armed ordinary-strict wire.
+//   ⚠️ MEGA_REF_SHOT_AUTHORITY is NOT part of ordinary strict — it gates ONLY the marked
+//   template_v1 / ref-shot path (megaAdapters.js:3638) and is exposed as a SEPARATE
+//   armedRefShotAuthority field. It must NEVER be folded into armedProducer.
+//   This resolver is REPORTING/PREFLIGHT only — it mirrors the switch matrix, never redefines it.
+const STRICT_PRODUCER_CORE_KEYS = Object.freeze([
+  'MEGA_SEMANTIC_SELECTION',
+  'MEGA_SELECTION_SPEC',
+  'MEGA_STRICT_PRODUCER',
+  'MEGA_STRICT_RENDER',
+]);
+
+// Matches strict-pipeline-shaped env keys. Own keys that match this but are NOT canonical
+// (e.g. the typo'd MEGA_STRICT_RENDERER) are reported as unknownStrictLikeKeys so a
+// mis-set latch is loud instead of silently doing nothing. Exact regex is contract.
+const _STRICT_LIKE_RE = /MEGA_.*(STRICT|RENDER)/;
+
+// Descriptor-safe own-value read — never throws on hostile getters / Proxy traps.
+function _latchRead(obj, key) {
+  try {
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) return undefined;
+    return obj[key];
+  } catch {
+    return undefined;
+  }
+}
+
+// armed iff EXACTLY the string '1' (no coercion, no trim).
+const _latchArmed = (v) => v === '1';
+
+/**
+ * Resolve the strict-pipeline latches from an env-like object.
+ * PURE + fail-closed: reads no environment of its own, and NEVER throws — a hostile
+ * env-like (null, primitive, Proxy with throwing traps, throwing getters) yields the
+ * safe "nothing armed" result rather than an exception.
+ *
+ * @param {object} envLike - env-like object (e.g. the process environment, or a plain fixture).
+ * @returns {{ armedProducer: boolean, armedRenderer: boolean, armedRefShotAuthority: boolean,
+ *             values: Record<string, string|undefined>, unknownStrictLikeKeys: string[] }}
+ *   - values: raw values of the 5 canonical keys (string in a real env, undefined if absent).
+ *   - armedRenderer: MEGA_STRICT_RENDER === '1' EXACTLY (the sole renderer/wire latch).
+ *   - armedProducer: all 4 ORDINARY-strict core latches === '1' EXACTLY (SEMANTIC, SPEC,
+ *     PRODUCER, RENDER — mirrors S7 strictWireOn). Does NOT include REF_SHOT_AUTHORITY.
+ *   - armedRefShotAuthority: MEGA_REF_SHOT_AUTHORITY === '1' EXACTLY — the SEPARATE ref-shot /
+ *     template_v1 path latch, reported on its own so it can never be folded into armedProducer.
+ *   - unknownStrictLikeKeys: own keys matching /MEGA_.*(STRICT|RENDER)/ that are NOT canonical
+ *     (catches aliases like MEGA_STRICT_RENDERER). Deterministic order = own-key order.
+ */
+export function resolveStrictLatches(envLike) {
+  const values = {};
+  const isObjLike = envLike != null && (typeof envLike === 'object' || typeof envLike === 'function');
+
+  // fail-closed default: nothing armed, all canonical values undefined.
+  if (!isObjLike) {
+    for (const k of STRICT_LATCH_KEYS) values[k] = undefined;
+    return { armedProducer: false, armedRenderer: false, armedRefShotAuthority: false, values, unknownStrictLikeKeys: [] };
+  }
+
+  for (const k of STRICT_LATCH_KEYS) values[k] = _latchRead(envLike, k);
+
+  const armedRenderer = _latchArmed(values.MEGA_STRICT_RENDER);
+  const armedProducer = STRICT_PRODUCER_CORE_KEYS.every((k) => _latchArmed(values[k]));
+  // SEPARATE ref-shot/template path latch — reported alone, never mixed into armedProducer.
+  const armedRefShotAuthority = _latchArmed(values.MEGA_REF_SHOT_AUTHORITY);
+
+  // Enumerate own keys to catch strict-like aliases — Proxy ownKeys trap may throw.
+  const unknownStrictLikeKeys = [];
+  let ownKeys = [];
+  try {
+    ownKeys = Object.keys(envLike);
+  } catch {
+    ownKeys = [];
+  }
+  const canonical = new Set(STRICT_LATCH_KEYS);
+  for (const k of ownKeys) {
+    if (typeof k !== 'string' || canonical.has(k)) continue;
+    if (_STRICT_LIKE_RE.test(k)) unknownStrictLikeKeys.push(k);
+  }
+
+  return { armedProducer, armedRenderer, armedRefShotAuthority, values, unknownStrictLikeKeys };
+}

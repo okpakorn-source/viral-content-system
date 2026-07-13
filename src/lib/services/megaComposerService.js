@@ -1304,6 +1304,7 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
   const heroBanned = new Set();
   for (let attempt = 0; ; attempt++) {
     buffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: spec, faceBoxes, traceSink });
+    if (mainSlotSpec && mainAssign && attempt >= 2) qcFlags.push('hero_unverified_kept'); // ⑤ retry ครบ 2 รอบ ออกโดยไม่ได้ verify ผลประกอบสุดท้าย
     if (!mainSlotSpec || !mainAssign || attempt >= 2) break;
     let heroOk = true;
     try {
@@ -1331,7 +1332,7 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
         //   (faceTopAt 0.40 + การ์ดผม/หัว) เสมอ — ถ้าหน้าที่เจอจริงอยู่ล่างเฟรม (center y > 0.68) = ครอปเพี้ยนแน่นอน
         if (heroOk && cyF > 0.68) { heroOk = false; console.log('[MegaComposer] 🛡️ hero หน้าอยู่ล่างเฟรมผิดสูตร (คาดโซนบน) → ไม่ผ่านด่าน'); }
       }
-    } catch { heroOk = true; /* ด่านตรวจล้มเอง = ไม่บล็อกงาน */ }
+    } catch { heroOk = true; qcFlags.push('hero_gate_error'); /* ด่านตรวจล้มเอง = ไม่บล็อกงาน (fail-open คงเดิม) แต่ติดธงให้ QC เห็น — ห้ามเงียบ */ }
     if (heroOk) { if (attempt > 0) console.log(`[MegaComposer] 🛡️ hero ผ่านด่านบังคับ (รอบ ${attempt + 1})`); break; }
     heroBanned.add(mainAssign.imageIndex);
     let ni = -1, nBest = 0;
@@ -1341,7 +1342,7 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
       const sc = heroScore(im, faceBoxes[i]);
       if (sc > nBest) { nBest = sc; ni = i; }
     });
-    if (ni < 0) { console.log('[MegaComposer] 🛡️ hero ไม่ผ่านด่านแต่ไม่มีตัวเลือกอื่น — ใช้ที่ดีสุดเท่าที่มี'); break; }
+    if (ni < 0) { console.log('[MegaComposer] 🛡️ hero ไม่ผ่านด่านแต่ไม่มีตัวเลือกอื่น — ใช้ที่ดีสุดเท่าที่มี'); qcFlags.push('hero_unverified_kept'); break; }
     console.log(`[MegaComposer] 🛡️ hero #${mainAssign.imageIndex} ไม่ผ่าน (หน้าไม่เด่นในผลจริง) → เปลี่ยนเป็น #${ni} ประกอบใหม่`);
     used.delete(mainAssign.imageIndex);
     used.add(ni);

@@ -72,6 +72,8 @@ import {
   loadOperatorGolden,
   main,
 } from '../scripts/test-ac0084-strict-canary.mjs';
+// AC-0099 LANE-B: the canonical strict-latch resolver under test (pure, from the contract).
+import { resolveStrictLatches, STRICT_LATCH_KEYS } from '../src/lib/refSlotContract.js';
 
 // ------------------------------------------------------------
 // Shared identity — one set of ids/urls used by the spec, the response, the golden
@@ -812,6 +814,122 @@ test('preflight HOLDs when strict pipeline is not armed (MEGA_STRICT_RENDER unse
   const res = assertStrictPayloadContract(REAL_PAYLOAD, { /* unset */ });
   assert.equal(res.ok, false);
   assert.ok(res.reasons.includes('MEGA_STRICT_RENDER_not_armed'), res.reasons.join(','));
+});
+
+// ============================================================
+// AC-0099 LANE-B — the typo latch. Setting the alias MEGA_STRICT_RENDERER='1' (an extra 'R')
+// with the canonical MEGA_STRICT_RENDER UNSET must NOT arm the renderer: the payload still
+// HOLDs not-armed, AND the alias is surfaced as unknownStrictLikeKeys so the mis-set is loud.
+// ============================================================
+test('preflight HOLDs on the MEGA_STRICT_RENDERER alias (canonical RENDER unset) + surfaces it as unknownStrictLikeKeys', () => {
+  const res = assertStrictPayloadContract(REAL_PAYLOAD, { MEGA_STRICT_RENDERER: '1' });
+  assert.equal(res.ok, false, 'alias must not arm the renderer');
+  assert.ok(res.reasons.includes('MEGA_STRICT_RENDER_not_armed'), res.reasons.join(','));
+  // the alias is reported, not silently swallowed
+  assert.ok(Array.isArray(res.unknownStrictLikeKeys), 'result must carry unknownStrictLikeKeys');
+  assert.ok(res.unknownStrictLikeKeys.includes('MEGA_STRICT_RENDERER'), res.unknownStrictLikeKeys.join(','));
+  // and it is echoed as a NAMED warning (warnings never flip ok)
+  assert.ok(res.warnings.includes('strict_like_alias_ignored:MEGA_STRICT_RENDERER'), (res.warnings || []).join(','));
+});
+
+// ============================================================
+// AC-0099 LANE-B — resolveStrictLatches direct unit tests (arm matrix, hostile env, aliases).
+// ============================================================
+test('resolveStrictLatches: canonical key list is the frozen expected set', () => {
+  assert.deepEqual(STRICT_LATCH_KEYS, [
+    'MEGA_SEMANTIC_SELECTION', 'MEGA_SELECTION_SPEC', 'MEGA_STRICT_PRODUCER', 'MEGA_STRICT_RENDER', 'MEGA_REF_SHOT_AUTHORITY',
+  ]);
+  assert.ok(Object.isFrozen(STRICT_LATCH_KEYS), 'STRICT_LATCH_KEYS must be frozen');
+});
+
+test('resolveStrictLatches: renderer arms on MEGA_STRICT_RENDER === "1" EXACTLY, nothing else', () => {
+  // exact '1' arms the renderer
+  assert.equal(resolveStrictLatches({ MEGA_STRICT_RENDER: '1' }).armedRenderer, true);
+  // every near-miss value must NOT arm
+  for (const v of ['1 ', ' 1', '01', 1, 'true', 'TRUE', 'yes', 'on', '', '0', null, undefined, {}, ['1']]) {
+    assert.equal(resolveStrictLatches({ MEGA_STRICT_RENDER: v }).armedRenderer, false, `value ${JSON.stringify(v)} must not arm`);
+  }
+});
+
+test('resolveStrictLatches: producer arms on the ORDINARY 4 core latches (SEMANTIC,SPEC,PRODUCER,RENDER) — mirrors S7 strictWireOn', () => {
+  // the ORDINARY semantic-strict wire — NO ref-shot authority involved
+  const core = { MEGA_SEMANTIC_SELECTION: '1', MEGA_SELECTION_SPEC: '1', MEGA_STRICT_PRODUCER: '1', MEGA_STRICT_RENDER: '1' };
+  const full = resolveStrictLatches(core);
+  assert.equal(full.armedProducer, true, '4 ordinary core armed WITHOUT REF_SHOT_AUTHORITY => producer armed');
+  assert.equal(full.armedRenderer, true, 'RENDER is part of the ordinary wire');
+  assert.equal(full.armedRefShotAuthority, false, 'REF_SHOT_AUTHORITY absent => its own flag false, producer still armed');
+  // dropping any single core latch disarms the producer
+  for (const k of Object.keys(core)) {
+    const partial = { ...core }; delete partial[k];
+    assert.equal(resolveStrictLatches(partial).armedProducer, false, `missing ${k} => producer NOT armed`);
+  }
+  // a near-miss value on a core latch also disarms
+  assert.equal(resolveStrictLatches({ ...core, MEGA_STRICT_PRODUCER: '1 ' }).armedProducer, false);
+});
+
+test('resolveStrictLatches: REF_SHOT_AUTHORITY is a SEPARATE latch — never folded into armedProducer', () => {
+  const core = { MEGA_SEMANTIC_SELECTION: '1', MEGA_SELECTION_SPEC: '1', MEGA_STRICT_PRODUCER: '1', MEGA_STRICT_RENDER: '1' };
+  // REF_SHOT_AUTHORITY alone must arm NOTHING (no ordinary core) — its own flag only
+  const alone = resolveStrictLatches({ MEGA_REF_SHOT_AUTHORITY: '1' });
+  assert.equal(alone.armedProducer, false, 'ref-shot alone must not arm the ordinary producer');
+  assert.equal(alone.armedRenderer, false);
+  assert.equal(alone.armedRefShotAuthority, true, 'its own dedicated flag reflects it');
+  // adding REF_SHOT_AUTHORITY to a fully-armed ordinary wire does NOT change armedProducer
+  const withRef = resolveStrictLatches({ ...core, MEGA_REF_SHOT_AUTHORITY: '1' });
+  assert.equal(withRef.armedProducer, true);
+  assert.equal(withRef.armedRefShotAuthority, true);
+  // removing REF_SHOT_AUTHORITY does not change armedProducer either
+  assert.equal(resolveStrictLatches(core).armedProducer, resolveStrictLatches({ ...core, MEGA_REF_SHOT_AUTHORITY: '1' }).armedProducer);
+  // and a near-miss ref value does not set its flag
+  assert.equal(resolveStrictLatches({ MEGA_REF_SHOT_AUTHORITY: '1 ' }).armedRefShotAuthority, false);
+});
+
+test('resolveStrictLatches: values echoes raw canonical values (undefined when absent)', () => {
+  const r = resolveStrictLatches({ MEGA_STRICT_RENDER: '1', MEGA_SELECTION_SPEC: 'x' });
+  assert.equal(r.values.MEGA_STRICT_RENDER, '1');
+  assert.equal(r.values.MEGA_SELECTION_SPEC, 'x');
+  assert.equal(r.values.MEGA_SEMANTIC_SELECTION, undefined);
+  assert.equal(r.values.MEGA_STRICT_PRODUCER, undefined);
+  assert.equal(r.values.MEGA_REF_SHOT_AUTHORITY, undefined);
+});
+
+test('resolveStrictLatches: alias detection — MEGA_STRICT_RENDERER (and other strict-like keys) NOT in canonical', () => {
+  const r = resolveStrictLatches({ MEGA_STRICT_RENDERER: '1', MEGA_STRICT_RENDER: '1', MEGA_RENDER_STRICT_X: '1', UNRELATED: '1', MEGA_SELECTION_SPEC: '1' });
+  assert.equal(r.armedRenderer, true, 'the CANONICAL render key arms');
+  assert.ok(r.unknownStrictLikeKeys.includes('MEGA_STRICT_RENDERER'), r.unknownStrictLikeKeys.join(','));
+  assert.ok(r.unknownStrictLikeKeys.includes('MEGA_RENDER_STRICT_X'), r.unknownStrictLikeKeys.join(','));
+  // canonical + non-strict-like keys are never reported as unknown
+  assert.ok(!r.unknownStrictLikeKeys.includes('MEGA_STRICT_RENDER'));
+  assert.ok(!r.unknownStrictLikeKeys.includes('MEGA_SELECTION_SPEC'));
+  assert.ok(!r.unknownStrictLikeKeys.includes('UNRELATED'));
+});
+
+test('resolveStrictLatches: fail-closed + never throws on hostile env-like inputs', () => {
+  // non-object inputs => nothing armed, empty aliases, canonical values undefined
+  for (const bad of [null, undefined, 42, 'MEGA_STRICT_RENDER=1', true, Symbol('x')]) {
+    const r = resolveStrictLatches(bad);
+    assert.equal(r.armedProducer, false);
+    assert.equal(r.armedRenderer, false);
+    assert.deepEqual(r.unknownStrictLikeKeys, []);
+    for (const k of STRICT_LATCH_KEYS) assert.equal(r.values[k], undefined);
+  }
+  // a throwing getter on the canonical key must be swallowed (read => undefined, not armed)
+  const throwyGetter = {};
+  Object.defineProperty(throwyGetter, 'MEGA_STRICT_RENDER', { enumerable: true, get() { throw new Error('boom'); } });
+  assert.doesNotThrow(() => resolveStrictLatches(throwyGetter));
+  assert.equal(resolveStrictLatches(throwyGetter).armedRenderer, false);
+  // a Proxy whose ownKeys/get traps throw must be swallowed (no alias enumeration, nothing armed)
+  const hostileProxy = new Proxy({}, {
+    ownKeys() { throw new Error('ownKeys boom'); },
+    get() { throw new Error('get boom'); },
+    getOwnPropertyDescriptor() { throw new Error('gopd boom'); },
+    has() { throw new Error('has boom'); },
+  });
+  assert.doesNotThrow(() => resolveStrictLatches(hostileProxy));
+  const rp = resolveStrictLatches(hostileProxy);
+  assert.equal(rp.armedRenderer, false);
+  assert.equal(rp.armedProducer, false);
+  assert.deepEqual(rp.unknownStrictLikeKeys, []);
 });
 
 test('validateSelectionSpecActivation returns strict_ready with a normalized authority for the real spec', () => {
