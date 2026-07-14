@@ -326,9 +326,6 @@ export default function RadarPage() {
                   router.push(`/content/new?url=${encodeURIComponent(bestUrl)}`);
                 }}
                 onSearchMore={() => handleSearch(cluster.title || cluster.keyword)}
-                onFindImage={() => {
-                  router.push(`/cover-maker?topic=${encodeURIComponent(cluster.title || '')}`);
-                }}
               />
             ))}
           </div>
@@ -731,7 +728,7 @@ function HotKeywordCard({ keyword, index, onClick }) {
 // ============================================================
 // ClusterCard — การ์ดผลลัพธ์ (Cluster / Article)
 // ============================================================
-function ClusterCard({ cluster, index, onViewDetail, onCreateContent, onSearchMore, onFindImage }) {
+function ClusterCard({ cluster, index, onViewDetail, onCreateContent, onSearchMore }) {
   const [hovered, setHovered] = useState(false);
   const score = cluster.heatScore || 50;
   const scoreColor = heatScoreColor(score);
@@ -919,18 +916,6 @@ function ClusterCard({ cluster, index, onViewDetail, onCreateContent, onSearchMo
               onMouseEnter={e => { e.currentTarget.style.color = '#e5e5e5'; }}
               onMouseLeave={e => { e.currentTarget.style.color = '#a3a3a3'; }}
             >🔎 หาเพิ่ม</button>
-
-            <button
-              id={`radar-cluster-${index}-image`}
-              onClick={onFindImage}
-              style={{
-                padding: '8px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700,
-                border: '1px solid rgba(255,255,255,0.08)', background: 'transparent',
-                color: '#a3a3a3', cursor: 'pointer', transition: 'all 0.15s',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.color = '#e5e5e5'; }}
-              onMouseLeave={e => { e.currentTarget.style.color = '#a3a3a3'; }}
-            >🖼️ หาภาพ</button>
           </div>
         </div>
       </div>
