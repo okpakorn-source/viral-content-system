@@ -1659,6 +1659,531 @@ export function classifyPoolImage(x) {
 //   เปิดเฉพาะค่า string '1' เป๊ะเท่านั้น (number 1 / '1 ' / 'true' / undefined = ปิดหมด)
 export const _finalDecisionEvidenceFlag = (v) => v === '1';
 
+// ============================================================
+// 🌊 WAVE1A — REF+CAST+HERO V2 flag-gated authority producer  (flag: MEGA_REF_HERO_V2 exact '1', default OFF)
+// ------------------------------------------------------------
+//   Additive + fail-closed. On the s6 happy path (flag ON only) it runs the four verified PURE
+//   foundations — storyReferenceAuthority / castManifest / heroShotContract / semanticGlobalAssignment —
+//   over the REAL S5→S6 universe, then assembles the FROZEN selectionAuthority via the refSlotContract
+//   Wave1C handshake (buildSelectionAuthorityV1 / validateSelectionAuthorityV1) + exact render bindings,
+//   and attaches ONE key: dossierPatch.pickImages.refHeroV2. Flag OFF/absent = zero bytes changed
+//   (legacy selection + S7 untouched; the seam block is skipped).
+//   INVARIANTS enforced here:
+//    • REFERENCE = STRUCTURE ONLY (slot id / shape / order) — subject/eventIntent/wantPerson are never
+//      read into current-news identity, candidate ranking, required cast, hero person, or Global input.
+//    • CURRENT-NEWS people come from compass (the news analysis) only; requiredness/priority is a
+//      deterministic policy over the genuine editorial role (principals hero|reaction = required).
+//    • GENUINE measured evidence ONLY — no identityConfidence/isGroupShot/faceShare/headroom/
+//      visibleBodyRegion/occlusion/edgeCut/resolution/cleanliness/scores/scene/readiness is ever
+//      manufactured; any missing mandatory field ⇒ typed fixed-code HOLD (no partial payload, no
+//      legacy fallback under ON). HOLD markers carry a fixed code only — never an attacker-supplied string.
+//    • Once returned, the authority + bindings are DEEP-FROZEN — zero post-S6 mutation.
+// ============================================================
+const REF_HERO_V2_LIMITS = Object.freeze({ maxPersonRepeats: 1, maxSceneRepeats: 1 }); // policy (not evidence)
+const REF_HERO_V2_PRINCIPAL_ROLES = Object.freeze(['hero', 'reaction']); // deterministic requiredness policy
+const REF_HERO_V2_MAX_SLOTS = 8;      // envelope + Global solver bound (SOLVER_MAX_SLOTS)
+const REF_HERO_V2_MAX_CANDIDATES = 64; // Global solver bound (SOLVER_MAX_CANDIDATES) — deterministic cap
+
+const _rhHold = (errorType) => Object.freeze({ v: 1, ok: false, hold: String(errorType) });
+const _rhNonBlank = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+const _rhStrictBool = (v) => v === true; // strict true only — never coerce/default to a passing value
+const _rhFiniteInt = (v) => (typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v) ? v : null);
+const _rhFiniteNum = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+function _rhDeepFreeze(o) {
+  // Always recurse into own object values (a shallow-frozen handshake envelope must still get its
+  // nested slots/hero frozen), then freeze this node. Guarantees ZERO post-S6 mutation defensively.
+  if (o && typeof o === 'object') {
+    for (const k of Object.keys(o)) _rhDeepFreeze(o[k]);
+    if (!Object.isFrozen(o)) Object.freeze(o);
+  }
+  return o;
+}
+
+// Current-news people from the news analysis (compass) — structured {name, role}. Order-stable, de-duped.
+// Reference subjects are deliberately NOT read here (compass only).
+function _rhCurrentNewsPeople(compass) {
+  const list = Array.isArray(compass?.mainCharacters) ? compass.mainCharacters : [];
+  const out = [];
+  const seen = new Set();
+  for (const c of list) {
+    const name = _rhNonBlank(c?.name);
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ name, role: _rhNonBlank(c?.role) ? String(c.role).trim().toLowerCase() : null });
+  }
+  return out;
+}
+
+// Story authority `story` input (identity truth only; reference is OMITTED → layout provenance 'derived').
+function _rhStoryInput(people) {
+  const heroName = (people.find((p) => p.role === 'hero') || null)?.name || null;
+  const isPrincipal = (p) => REF_HERO_V2_PRINCIPAL_ROLES.includes(p.role);
+  return {
+    identities: people.map((p) => p.name),
+    requiredCast: people.filter(isPrincipal).map((p) => p.name),
+    optionalCast: people.filter((p) => !isPrincipal(p)).map((p) => p.name),
+    editorialHero: heroName,
+    eventContext: null,
+    facts: [],
+    storySemantics: null,
+    eligibleAssetProvenance: [],
+  };
+}
+
+// Cast candidate from a pool record — genuine measured readiness only (strict true). null if no genuine
+// person label / sourceAssetId. candidateId doubles as the stable sourceAssetId (record.id is unique).
+function _rhCastCandidate(record) {
+  const sourceAssetId = _rhNonBlank(record?.id != null ? String(record.id) : null);
+  const name = _rhNonBlank(record?.triage?.person);
+  if (!sourceAssetId || !name) return null;
+  const t = record.triage || {};
+  return {
+    name,
+    candidateId: sourceAssetId,
+    sourceAssetId,
+    searched: _rhStrictBool(t.searched),
+    triaged: _rhStrictBool(t.triaged),
+    clean: _rhStrictBool(t.clean),
+    highResolution: _rhStrictBool(t.highResolution),
+    cropSafe: _rhStrictBool(t.cropSafe),
+    identityVerified: _rhStrictBool(t.identityVerified),
+  };
+}
+
+// Hero measured candidate (13 required fields) — genuine measured evidence ONLY. null if ANY mandatory
+// measured field is genuinely absent (never defaults to a passing value).
+function _rhHeroCandidate(record, personId, heroSlotId, boundContractHash) {
+  const rid = _rhNonBlank(record?.id != null ? String(record.id) : null);
+  if (!rid) return null;
+  const t = record?.triage || {};
+  const rw = _rhFiniteNum(record?.realWidth);
+  const rh = _rhFiniteNum(record?.realHeight);
+  if (!(rw > 0 && rh > 0)) return null;                        // resolution genuinely unknown
+  const faceCount = _rhFiniteNum(t.faceCount);
+  if (faceCount === undefined) return null;                    // isGroupShot source genuinely absent
+  const identityConfidence = _rhFiniteNum(t.identityConfidence);
+  const faceShare = _rhFiniteNum(t.faceShare);
+  const headroom = _rhFiniteNum(t.headroom);
+  const occlusion = _rhFiniteNum(t.occlusion);
+  const edgeCut = _rhFiniteNum(t.edgeCut);
+  const cleanliness = _rhFiniteNum(t.cleanliness);
+  const visibleBodyRegion = _rhNonBlank(t.visibleBodyRegion);
+  if ([identityConfidence, faceShare, headroom, occlusion, edgeCut, cleanliness].some((n) => n === undefined) || !visibleBodyRegion) return null;
+  return {
+    personId,
+    identityConfidence,
+    isGroupShot: faceCount > 1,
+    faceShare,
+    headroom,
+    visibleBodyRegion,
+    occlusion,
+    edgeCut,
+    resolution: { width: rw, height: rh },
+    cleanliness,
+    boundContractHash,
+    sourceAssetId: rid,
+    heroSlotId,
+  };
+}
+
+// Global candidate (8 required fields) — genuine measured scores + sceneKey ONLY. null if any absent.
+// candidateId/sourceAssetId come from the VERIFIED cast-manifest tuple (Fix #1), not re-derived from records.
+function _rhGlobalCandidate(record, personId, eligibleSlotIds, candidateId, sourceAssetId) {
+  const cid = _rhNonBlank(candidateId), said = _rhNonBlank(sourceAssetId);
+  if (!cid || !said) return null;
+  if (!Array.isArray(eligibleSlotIds) || !eligibleSlotIds.length) return null;
+  const t = record?.triage || {};
+  const semanticScore = _rhFiniteInt(t.semanticScore);
+  const qualityScore = _rhFiniteInt(t.qualityScore);
+  const slotFitScore = _rhFiniteInt(t.slotFitScore);
+  const sceneKey = _rhNonBlank(t.sceneKey);
+  if (semanticScore === null || qualityScore === null || slotFitScore === null || !sceneKey) return null;
+  if (semanticScore < 0 || qualityScore < 0 || slotFitScore < 0) return null;
+  return {
+    candidateId: cid,
+    sourceAssetId: said,
+    personId: personId || null,
+    eligibleSlotIds: [...eligibleSlotIds],
+    semanticScore,
+    qualityScore,
+    slotFitScore,
+    sceneKey,
+  };
+}
+
+// Map a structural ref slot to a Cast editorial role (hero|reaction|context) — genuine per-slot eligibility (Fix #3).
+function _rhMappedCastRole(s) {
+  const refRole = String(s?.refRole ?? '').trim().toLowerCase();
+  const shape = String(s?.shape ?? '').trim().toLowerCase();
+  if (refRole === 'hero' || refRole === 'main') return 'hero';
+  if (refRole === 'reaction' || shape === 'circle') return 'reaction';
+  return 'context';
+}
+// Normalize a slot shape to the SA/V2 enum (rect|circle|rounded).
+const _rhSaShape = (s) => { const v = String(s ?? '').trim().toLowerCase(); return v === 'circle' ? 'circle' : v === 'rounded' ? 'rounded' : 'rect'; };
+
+
+// Independently recompute a Global assignmentHash from its output via the foundation's canonicalStringify
+// (code-unit-sorted keys; integer numbers as String(n); arrays order-preserved) + SHA-256 — Fix #8 witness.
+function _rhAssignmentHashOf(output, createHash) {
+  const cstr = (v) => {
+    if (v === null) return 'null';
+    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    if (typeof v === 'number') { if (!Number.isInteger(v)) throw new Error('non-integer'); return String(v); }
+    if (typeof v === 'string') return JSON.stringify(v);
+    if (Array.isArray(v)) return '[' + v.map(cstr).join(',') + ']';
+    if (v && typeof v === 'object') { const ks = Object.keys(v).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)); return '{' + ks.map((k) => JSON.stringify(k) + ':' + cstr(v[k])).join(',') + '}'; }
+    throw new Error('unsupported');
+  };
+  const base = { decision: output.decision, reason: output.reason, path: output.path, message: output.message, assignments: output.assignments, diagnostics: output.diagnostics, version: output.version };
+  return createHash('sha256').update(cstr(base), 'utf8').digest('hex');
+}
+
+// Orchestrator: build/validate every authority in order; ANY upstream gate HOLD ⇒ typed fixed-code marker
+// (no assignments / no partial strict payload). Deterministic + permutation-invariant (foundations
+// canonicalize internally). Never throws — top-level try/catch fails closed to REF_HERO_V2_INTERNAL.
+async function _runRefHeroV2({ compass, semContract, canonHeroId, semAuthorityHash, refDNA, refId, gatedPool, deps }) {
+  try {
+    // ── structural slots (REF = STRUCTURE ONLY: id / order / role / shape) ──
+    const cSlots = Array.isArray(semContract?.slots) ? semContract.slots : [];
+    if (cSlots.length < 3 || cSlots.length > REF_HERO_V2_MAX_SLOTS) return _rhHold('REF_HERO_V2_STRUCTURAL_SLOTS_INVALID');
+    const heroSlotId = _rhNonBlank(canonHeroId);
+    if (!heroSlotId || !cSlots.some((s) => s.id === heroSlotId)) return _rhHold('REF_HERO_V2_HERO_SLOT_INVALID');
+    const slotIds = cSlots.map((s) => s.id);
+    if (new Set(slotIds).size !== slotIds.length) return _rhHold('REF_HERO_V2_STRUCTURAL_SLOTS_INVALID');
+
+    // ── reuse the PROVEN semantic witness (ref identity + exact frozen contract) — never a parallel hash (Fix #7) ──
+    const semWitness = _rhNonBlank(semAuthorityHash);
+    if (!semWitness || _dnaHashFor({ refId: _rhNonBlank(refId) || null, contract: semContract }) !== semWitness) return _rhHold('REF_HERO_V2_SEM_WITNESS_MISMATCH');
+
+    // ── current-news people (analysis/compass only) ──
+    const people = _rhCurrentNewsPeople(compass);
+    if (!people.length) return _rhHold('REF_HERO_V2_NO_CURRENT_NEWS_PEOPLE');
+    const heroName = (people.find((p) => p.role === 'hero') || null)?.name || null;
+    if (!heroName) return _rhHold('REF_HERO_V2_NO_EDITORIAL_HERO');
+
+    // ── load PURE foundations + frozen handshake (DI seams default to the real modules) ──
+    const storyApi = deps?.storyApi || await import('@/lib/storyReferenceAuthority');
+    const castApi = deps?.castApi || await import('@/lib/castManifest');
+    const heroApi = deps?.heroApi || await import('@/lib/heroShotContract');
+    const globalApi = deps?.globalApi || await import('@/lib/semanticGlobalAssignment');
+    const authApi = deps?.selectionAuthorityApi || await import('@/lib/refSlotContract');
+    if (['buildSelectionAuthorityV1', 'validateSelectionAuthorityV1', 'buildSelectionSpecV2', 'validateSelectionSpecV2Activation'].some((fn) => typeof authApi?.[fn] !== 'function')) {
+      return _rhHold('REF_HERO_V2_SELECTION_AUTHORITY_API_UNAVAILABLE');
+    }
+
+    // ── Story authority (identity truth) — build + capture hash + external validate ──
+    const storyBuilt = storyApi.buildStoryReferenceAuthorityContract({ story: _rhStoryInput(people) });
+    if (!storyBuilt || storyBuilt.ok !== true || !storyBuilt.contract) return _rhHold('REF_HERO_V2_STORY_BUILD_FAILED');
+    const storyAuthorityHash = storyApi.hashContract(storyBuilt.contract);
+    if (!_rhNonBlank(storyAuthorityHash)) return _rhHold('REF_HERO_V2_STORY_HASH_FAILED');
+    if (storyApi.validateContract(storyBuilt.contract, storyAuthorityHash).ok !== true) return _rhHold('REF_HERO_V2_STORY_VALIDATE_FAILED');
+
+    // ── candidate universe = the FULL pre-cap pool mapped by id (input-order-independent — Fix #5) ──
+    const recById = new Map();
+    for (const rec of (Array.isArray(gatedPool) ? gatedPool : [])) { const id = _rhNonBlank(rec?.id != null ? String(rec.id) : null); if (id && !recById.has(id)) recById.set(id, rec); }
+    if (!recById.size) return _rhHold('REF_HERO_V2_EMPTY_UNIVERSE');
+
+    // ── Cast manifest (current-news only; NO reference param). requiredCast = principals. ──
+    const principalNames = people.filter((p) => REF_HERO_V2_PRINCIPAL_ROLES.includes(p.role)).map((p) => p.name);
+    const castCandidates = [];
+    for (const rec of recById.values()) { const cc = _rhCastCandidate(rec); if (cc) castCandidates.push(cc); }
+    let manifest;
+    try {
+      manifest = castApi.buildCastManifest({
+        compass: { mainCharacters: people.map((p) => ({ name: p.name, role: p.role })), requiredCast: principalNames },
+        candidates: castCandidates,
+      });
+    } catch { return _rhHold('REF_HERO_V2_CAST_BUILD_FAILED'); }
+    const castManifestHash = _rhNonBlank(manifest?.hash);
+    if (!castManifestHash) return _rhHold('REF_HERO_V2_CAST_HASH_FAILED');
+    let verified;
+    try { verified = castApi.assertCastManifestIntegrity(manifest, castManifestHash); } catch { return _rhHold('REF_HERO_V2_CAST_INTEGRITY_FAILED'); }
+    let castHold;
+    try { castHold = castApi.evaluateCastAssetHolds(manifest, { expectedHash: castManifestHash }); } catch { return _rhHold('REF_HERO_V2_CAST_EVAL_FAILED'); }
+    if (castHold) return _rhHold('REF_HERO_V2_INSUFFICIENT_CAST_ASSETS');
+
+    // ── VERIFIED eligible cast set (Fix #1): iterate the integrity-checked manifest people; RECOMPUTE eligibility
+    //   from the six raw readiness booleans (NEVER trust cached candidate.eligible). Hero + Global candidates come
+    //   ONLY from here — never from raw scored records; unmatched/ref-only identities have no personId (Fix #2). ──
+    const eligibleTuples = [];
+    for (const p of (verified.people || [])) {
+      const pid = _rhNonBlank(p.personId);
+      if (!pid) continue;
+      const roles = Array.isArray(p.acceptableSlotRoles) ? p.acceptableSlotRoles.filter((r) => typeof r === 'string') : [];
+      for (const c of (Array.isArray(p.candidates) ? p.candidates : [])) {
+        if (castApi.computeCandidateEligibility(c) !== true) continue;
+        const cid = _rhNonBlank(c.candidateId), said = _rhNonBlank(c.sourceAssetId);
+        if (!cid || !said || !recById.has(said)) continue;
+        eligibleTuples.push({ personId: pid, candidateId: cid, sourceAssetId: said, roles });
+      }
+    }
+    if (!eligibleTuples.length) return _rhHold('REF_HERO_V2_NO_ELIGIBLE_CAST');
+
+    // ── hero personId (current-news hero, reconciled against the verified manifest) ──
+    const heroPersonId = _rhNonBlank(castApi.computePersonId(castApi.normalizeCastName(heroName)));
+    if (!heroPersonId) return _rhHold('REF_HERO_V2_HERO_PERSON_INVALID');
+    if (!(verified.people || []).some((p) => p.personId === heroPersonId)) return _rhHold('REF_HERO_V2_HERO_NOT_IN_MANIFEST');
+    const slotCastRole = new Map(cSlots.map((s) => [s.id, _rhMappedCastRole(s)])); // per-slot cast role (Fix #3)
+
+    // ── Hero contracts: ONLY over eligible hero-person assets — build (asset-bound) + evaluate genuine evidence ──
+    const heroContractHashByCid = new Map();
+    for (const t of eligibleTuples) {
+      if (t.personId !== heroPersonId) continue;
+      const rec = recById.get(t.sourceAssetId);
+      const contract = heroApi.buildHeroShotContract({ sourceAssetId: t.sourceAssetId, heroSlotId, story: { personId: heroPersonId } });
+      const contractHash = _rhNonBlank(contract?.contractHash);
+      if (!contract || !contractHash) continue;
+      const cand = _rhHeroCandidate(rec, heroPersonId, heroSlotId, contractHash);
+      if (!cand) continue;
+      const verdict = heroApi.evaluateHeroShotCandidate(contract, cand, { expectedContractHash: contractHash });
+      if (verdict && verdict.accepted === true) heroContractHashByCid.set(t.candidateId, contractHash);
+    }
+    if (!heroContractHashByCid.size) return _rhHold('REF_HERO_V2_HERO_NO_APPROVED_CANDIDATE');
+
+    // ── Global candidates from the eligible set with genuine per-slot (role) eligibility (Fix #1/#3) ──
+    let globalCandidates = [];
+    for (const t of eligibleTuples) {
+      const rec = recById.get(t.sourceAssetId);
+      const roleEligible = cSlots.map((s) => s.id).filter((id) => t.roles.includes(slotCastRole.get(id)));
+      const finalEligible = roleEligible.filter((id) => id !== heroSlotId || (t.personId === heroPersonId && heroContractHashByCid.has(t.candidateId)));
+      if (!finalEligible.length) continue;
+      const gc = _rhGlobalCandidate(rec, t.personId, finalEligible, t.candidateId, t.sourceAssetId);
+      if (gc) globalCandidates.push(gc);
+    }
+    if (!globalCandidates.length) return _rhHold('REF_HERO_V2_NO_GLOBAL_CANDIDATES');
+    // deterministic TOTAL order (Fix #5): score desc, candidateId code-unit asc tie-break — total & input-order-independent.
+    const _byScoreId = (a, b) => (b.semanticScore - a.semanticScore) || (b.qualityScore - a.qualityScore) || (b.slotFitScore - a.slotFitScore) || (a.candidateId < b.candidateId ? -1 : a.candidateId > b.candidateId ? 1 : 0);
+    globalCandidates.sort(_byScoreId);
+    // COVERAGE-PRESERVING cap to the solver bound (reviewer item 5): reserve, in score order, the best hero-APPROVED
+    //   candidate + the best candidate of EACH required current-news person FIRST, then deterministically fill the rest
+    //   by score — so a low-score required person is never dropped behind >64 high-score OPTIONAL candidates.
+    const _requiredPersonIds = new Set((verified.people || []).filter((p) => p.mustRepresent === true).map((p) => p.personId));
+    const _reserved = new Map();
+    for (const g of globalCandidates) { if (heroContractHashByCid.has(g.candidateId) && g.personId === heroPersonId && g.eligibleSlotIds.includes(heroSlotId)) { _reserved.set(g.candidateId, g); break; } } // best hero-approved
+    const _reqCovered = new Set();
+    for (const g of globalCandidates) { if (g.personId && _requiredPersonIds.has(g.personId) && !_reqCovered.has(g.personId)) { _reqCovered.add(g.personId); _reserved.set(g.candidateId, g); } }
+    if (_reserved.size > REF_HERO_V2_MAX_CANDIDATES) return _rhHold('REF_HERO_V2_REQUIRED_OVERFLOW'); // more hero+required than the solver bound
+    const _capped = [..._reserved.values()];
+    for (const g of globalCandidates) { if (_capped.length >= REF_HERO_V2_MAX_CANDIDATES) break; if (!_reserved.has(g.candidateId)) _capped.push(g); }
+    globalCandidates = _capped.sort(_byScoreId);
+    const approvedCandidateIds = globalCandidates.filter((g) => heroContractHashByCid.has(g.candidateId) && g.personId === heroPersonId && g.eligibleSlotIds.includes(heroSlotId)).map((g) => g.candidateId);
+    if (!approvedCandidateIds.length) return _rhHold('REF_HERO_V2_HERO_APPROVED_NOT_MEASURED');
+
+    // ── structural slots for Global (order 1..N; hero slot pinned to hero person) ──
+    const structSlots = cSlots.map((s, i) => ({ slotId: s.id, order: i + 1, role: _rhNonBlank(s.solverRole) || _rhNonBlank(s.refRole) || 'context', shape: _rhSaShape(s.shape), personId: s.id === heroSlotId ? heroPersonId : null }));
+    const requiredCast = (verified.people || []).map((p) => ({ personId: p.personId, required: p.mustRepresent === true, priority: _rhFiniteInt(p.priority) ?? 0 }));
+
+    // ── Global assignment — run EXACTLY once ──
+    let assignment;
+    try {
+      assignment = globalApi.buildSemanticGlobalAssignment({
+        slots: structSlots,
+        candidates: globalCandidates,
+        requiredCast,
+        heroAuthority: { heroSlotId, heroPersonId, approvedCandidateIds },
+        limits: REF_HERO_V2_LIMITS,
+      });
+    } catch { return _rhHold('REF_HERO_V2_ASSIGNMENT_ERROR'); }
+    if (!assignment || assignment.decision !== 'assigned' || !Array.isArray(assignment.assignments) || !assignment.assignments.length) {
+      return _rhHold('REF_HERO_V2_ASSIGNMENT_HOLD'); // Global HOLD ⇒ assignments [] ⇒ no bindings
+    }
+    const assignmentHash = _rhNonBlank(assignment.assignmentHash);
+    if (!assignmentHash) return _rhHold('REF_HERO_V2_ASSIGNMENT_HASH_FAILED');
+
+    // ── crypto for the two independent hash witnesses (assignmentHash recompute + selectionAuthorityHash) ──
+    let createHash;
+    try { ({ createHash } = await import('node:crypto')); } catch { return _rhHold('REF_HERO_V2_CRYPTO_UNAVAILABLE'); }
+    // Fix #8: INDEPENDENTLY recompute the Global assignmentHash via the foundation's canonicalStringify and verify
+    //   byte-for-byte — a tampered/forged hash HOLDs (not merely a regex/nonblank shape check).
+    let _recomputedAssignHash;
+    try { _recomputedAssignHash = _rhAssignmentHashOf(assignment, createHash); } catch { return _rhHold('REF_HERO_V2_ASSIGNMENT_HASH_RECOMPUTE_FAILED'); }
+    if (_recomputedAssignHash !== assignmentHash) return _rhHold('REF_HERO_V2_ASSIGNMENT_HASH_TAMPERED');
+
+    // ── hero tuple (exact) from the hero slot's assignment ──
+    const heroAssign = assignment.assignments.find((a) => a.slotId === heroSlotId);
+    if (!heroAssign || heroAssign.personId !== heroPersonId || !heroContractHashByCid.has(heroAssign.candidateId)) return _rhHold('REF_HERO_V2_HERO_ASSIGNMENT_INVALID');
+
+    // ── envelope hero tuple + slots (order ASCENDING + CONTIGUOUS 1..N; hero = exactly one slot) ──
+    //   Re-number order 1..N over the assigned slots (sorted by structural order) so the frozen builder's
+    //   contiguity invariant holds even if the solver bound a subset; refSlotId preserves identity.
+    const roleBySlotId = new Map(structSlots.map((s) => [s.slotId, s.role]));
+    const shapeBySlotId = new Map(structSlots.map((s) => [s.slotId, s.shape]));
+    const structOrderBySlotId = new Map(structSlots.map((s) => [s.slotId, s.order]));
+    const orderedAssign = assignment.assignments.slice().sort((a, b) => (structOrderBySlotId.get(a.slotId) ?? 1e9) - (structOrderBySlotId.get(b.slotId) ?? 1e9));
+    const envSlots = orderedAssign.map((a, i) => ({
+      refSlotId: a.slotId, order: i + 1, role: roleBySlotId.get(a.slotId) || 'context', shape: shapeBySlotId.get(a.slotId) || 'rect',
+      personId: a.personId ?? null, candidateId: a.candidateId, sourceAssetId: a.sourceAssetId,
+    }));
+    const envHero = { heroContractHash: heroContractHashByCid.get(heroAssign.candidateId), refSlotId: heroSlotId, personId: heroPersonId, candidateId: heroAssign.candidateId, sourceAssetId: heroAssign.sourceAssetId };
+
+    // ── independently capture expectedSelectionAuthorityHash via the DOCUMENTED canonical form
+    //   (recursively key-sorted JSON + SHA-256 over {v,storyAuthorityHash,castManifestHash,assignmentHash,hero,slots}).
+    //   This is the witness the frozen Wave1C builder self-verifies against — the two independent computations
+    //   must agree. It is NOT a re-implementation of the envelope schema: buildSelectionAuthorityV1 still owns
+    //   assembly/canonicalization/freezing; we only supply the required cross-check witness. ──
+    let expectedSelectionAuthorityHash;
+    try {
+      const _saSortDeep = (v) => (Array.isArray(v) ? v.map(_saSortDeep)
+        : (v && typeof v === 'object' ? Object.keys(v).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).reduce((o, k) => { o[k] = _saSortDeep(v[k]); return o; }, {}) : v));
+      const _saPreimage = { v: 1, storyAuthorityHash, castManifestHash, assignmentHash, hero: envHero, slots: envSlots };
+      expectedSelectionAuthorityHash = createHash('sha256').update(JSON.stringify(_saSortDeep(_saPreimage)), 'utf8').digest('hex');
+    } catch { return _rhHold('REF_HERO_V2_AUTHORITY_HASH_FAILED'); }
+
+    // ── FROZEN handshake (Wave1C): build + externally re-validate the selectionAuthority envelope ──
+    const _witnesses = {
+      expectedSelectionAuthorityHash,
+      expectedStoryAuthorityHash: storyAuthorityHash,
+      expectedCastManifestHash: castManifestHash,
+      expectedAssignmentHash: assignmentHash,
+      expectedHeroContractHash: envHero.heroContractHash,
+    };
+    let built;
+    try { built = authApi.buildSelectionAuthorityV1({ storyAuthorityHash, castManifestHash, assignmentHash, hero: envHero, slots: envSlots, ..._witnesses }); }
+    catch { return _rhHold('REF_HERO_V2_SELECTION_AUTHORITY_BUILD_ERROR'); }
+    const envelope = built && built.ok === true && built.selectionAuthority && built.selectionAuthority.selectionAuthorityHash === expectedSelectionAuthorityHash ? built.selectionAuthority : null;
+    if (!envelope) return _rhHold('REF_HERO_V2_SELECTION_AUTHORITY_BUILD_FAILED');
+    let validated;
+    try { validated = authApi.validateSelectionAuthorityV1({ selectionAuthority: envelope, ..._witnesses }); }
+    catch { return _rhHold('REF_HERO_V2_SELECTION_AUTHORITY_VALIDATE_ERROR'); }
+    if (!(validated && validated.ok === true)) return _rhHold('REF_HERO_V2_SELECTION_AUTHORITY_VALIDATE_FAILED');
+
+    // ── realized template + composer map from AUTHENTIC IMMUTABLE PROVENANCE. Authority = a module-private WeakMap in
+    //   refTemplate keyed by realized-slot OBJECT IDENTITY, storing a FROZEN content snapshot (sourceIndex+id+geometry+
+    //   shape) captured after all mutations. Defense is layered, all fail-closed: (a) locked non-enum data _sourceIndex
+    //   descriptor (accessor rejected WITHOUT invocation, TOCTOU-safe); (b) WeakMap identity authenticity — a restamp/
+    //   swap/strip is a NEW object ⇒ null ⇒ HOLD; (c) AUTHENTIC-CONTENT INTEGRITY — descriptor-snapshot the current
+    //   render fields once and compare to the frozen provenance; a post-return id/geometry/shape mutation on the
+    //   authentic object ⇒ HOLD (never blessed as GO). The producer then reads every render field ONLY from the
+    //   immutable snapshot. Join BY sourceIndex ONLY (order-invariant); require exact unique 1:1 vs the contract;
+    //   shape is a post-join integrity check, never a join key. ──
+    let realizedRaw; let realizedSlotProvenance;
+    try {
+      const _rtMod = await import('@/lib/refTemplate');
+      realizedSlotProvenance = _rtMod.realizedSlotProvenance;
+      const dts = deps?.dnaToTemplateSpec || _rtMod.dnaToTemplateSpec;
+      realizedRaw = dts(refDNA);
+    } catch { return _rhHold('REF_HERO_V2_REALIZED_BUILD_ERROR'); }
+    if (typeof realizedSlotProvenance !== 'function') return _rhHold('REF_HERO_V2_PROVENANCE_ACCESSOR_UNAVAILABLE');
+    if (realizedRaw === null || typeof realizedRaw !== 'object') return _rhHold('REF_HERO_V2_REALIZED_INVALID');
+    // (item 2) descriptor-read the realized `slots` CONTAINER exactly ONCE — a getter/accessor is rejected WITHOUT
+    //   invocation; the captured array reference is then the SOLE source we iterate (TOCTOU-safe: a post-capture swap
+    //   of realizedRaw.slots, or a getter returning alternating arrays, can never influence what we read).
+    const _slotsDesc = Object.getOwnPropertyDescriptor(realizedRaw, 'slots');
+    if (_slotsDesc && ('get' in _slotsDesc || 'set' in _slotsDesc)) return _rhHold('REF_HERO_V2_REALIZED_CONTAINER_ACCESSOR');
+    const _rawSlots = _slotsDesc && Array.isArray(_slotsDesc.value) ? _slotsDesc.value : null;
+    if (!_rawSlots || _rawSlots.length !== cSlots.length) return _rhHold('REF_HERO_V2_REALIZED_SLOT_COUNT');
+    // top-level realized fields — descriptor-first single read (reject accessors); NOT identity-bound so re-checked below.
+    const _topVal = (k) => { const d = Object.getOwnPropertyDescriptor(realizedRaw, k); if (!d) return undefined; if ('get' in d || 'set' in d) throw new Error('accessor'); return d.value; };
+    let _templateId, _canvasW, _canvasH, _feather;
+    try { _templateId = _rhNonBlank(_topVal('templateId')) || _rhNonBlank(_topVal('id')); _canvasW = _rhFiniteInt(_topVal('canvasW')); _canvasH = _rhFiniteInt(_topVal('canvasH')); _feather = _rhFiniteInt(_topVal('feather')); }
+    catch { return _rhHold('REF_HERO_V2_REALIZED_FIELD_ACCESSOR'); }
+    if (!_templateId || _canvasW === null || _canvasW < 1 || _canvasH === null || _canvasH < 1 || _feather === null || _feather < 0) return _rhHold('REF_HERO_V2_REALIZED_INVALID');
+    // contract provenance key set — bounded, unique, integer (from the structural contract, dna.template.slots order)
+    const _contractSrc = cSlots.map((s) => s.sourceIndex);
+    if (_contractSrc.some((n) => !Number.isInteger(n) || n < 0) || new Set(_contractSrc).size !== _contractSrc.length) return _rhHold('REF_HERO_V2_CONTRACT_PROVENANCE_INVALID');
+    const _contractSrcSet = new Set(_contractSrc);
+    const _realizedBySrc = new Map();       // sourceIndex -> { id, shape }  (join)
+    const _authSlots = [];                  // normalized V2 realized slots, from FROZEN snapshots (never live fields)
+    for (const rs of _rawSlots) {
+      if (rs === null || typeof rs !== 'object') return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_MISSING');
+      // (1) DESCRIPTOR DEFENSE (TOCTOU-safe): locked non-enum DATA _sourceIndex — accessor rejected WITHOUT invocation.
+      const _d = Object.getOwnPropertyDescriptor(rs, '_sourceIndex');
+      if (!_d) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_MISSING');
+      if ('get' in _d || 'set' in _d || _d.enumerable !== false || _d.writable !== false || _d.configurable !== false || !Number.isInteger(_d.value) || _d.value < 0) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_DESCRIPTOR_INVALID');
+      // (2) AUTHENTICITY: the FROZEN content snapshot bound to THIS object identity (a clone/restamp ⇒ null ⇒ HOLD).
+      const auth = realizedSlotProvenance(rs);
+      if (!auth || !Number.isInteger(auth.sourceIndex) || auth.sourceIndex < 0 || auth.sourceIndex !== _d.value) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_UNAUTHENTIC');
+      const _si = auth.sourceIndex;
+      if (!_contractSrcSet.has(_si)) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_OUT_OF_SET');
+      if (_realizedBySrc.has(_si)) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_DUPLICATE');
+      // (2b) AUTHENTIC-CONTENT INTEGRITY (item 1): this slot is WeakMap-authentic, but a caller may have mutated its
+      //   live id/geometry/shape AFTER capture (same identity ⇒ still authentic). Descriptor-snapshot EVERY current
+      //   authoritative render field exactly once — a getter/accessor on ANY field is rejected WITHOUT invocation —
+      //   then compare the CURRENT content field-by-field to the FROZEN provenance. ANY divergence = post-capture
+      //   tampering ⇒ HOLD. We NEVER bless attempted mutation by silently rendering the stale snapshot. (A reorder of
+      //   the ORIGINAL objects leaves content === provenance ⇒ still GO; the join below is order-invariant.)
+      let _cur;
+      try {
+        _cur = {};
+        for (const k of ['id', 'x', 'y', 'w', 'h', 'zIndex', 'border', 'borderWidth', 'shape']) {
+          const _fd = Object.getOwnPropertyDescriptor(rs, k);
+          if (_fd && ('get' in _fd || 'set' in _fd)) throw new Error('accessor');
+          _cur[k] = _fd ? _fd.value : undefined;
+        }
+      } catch { return _rhHold('REF_HERO_V2_REALIZED_CONTENT_ACCESSOR'); }
+      const _curShape = _cur.shape === 'circle' ? 'circle' : 'rect';
+      if (_cur.id !== auth.id || _cur.x !== auth.x || _cur.y !== auth.y || _cur.w !== auth.w || _cur.h !== auth.h ||
+          _cur.zIndex !== auth.zIndex || _cur.border !== auth.border || _cur.borderWidth !== auth.borderWidth ||
+          _curShape !== auth.shape) return _rhHold('REF_HERO_V2_REALIZED_CONTENT_TAMPERED');
+      // (3) build the normalized V2 realized slot from the IMMUTABLE snapshot ONLY (authentic id/geometry/shape).
+      const _rid = _rhNonBlank(auth.id);
+      const _rShape = auth.shape === 'circle' ? 'circle' : auth.shape === 'rounded' ? 'rounded' : 'rect';
+      const _x = _rhFiniteInt(auth.x), _y = _rhFiniteInt(auth.y), _w = _rhFiniteInt(auth.w), _h = _rhFiniteInt(auth.h);
+      const _z = _rhFiniteInt(auth.zIndex), _bw = _rhFiniteInt(auth.borderWidth);
+      if (!_rid || _x === null || _x < 0 || _y === null || _y < 0 || _w === null || _w < 1 || _h === null || _h < 1 || _z === null || _z < 0 || _bw === null || _bw < 0) return _rhHold('REF_HERO_V2_REALIZED_INVALID');
+      _realizedBySrc.set(_si, { id: _rid, shape: _rShape });
+      _authSlots.push({ id: _rid, x: _x, y: _y, w: _w, h: _h, zIndex: _z, border: auth.border != null && auth.border !== false, borderWidth: _bw, shape: _rShape });
+    }
+    if (_realizedBySrc.size !== cSlots.length) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_INCOMPLETE'); // exact 1:1
+    if (new Set(_authSlots.map((s) => s.id)).size !== _authSlots.length) return _rhHold('REF_HERO_V2_REALIZED_ID_DUPLICATE');
+    // JOIN BY KEY ONLY (sourceIndex); shape is a post-join integrity check (rect↔circle provenance corruption ⇒ HOLD).
+    const composerBySlotId = new Map();
+    for (const s of cSlots) {
+      const r = _realizedBySrc.get(s.sourceIndex);
+      if (!r) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_INCOMPLETE');
+      if (r.shape !== _rhSaShape(s.shape)) return _rhHold('REF_HERO_V2_REALIZED_SHAPE_INCONSISTENT');
+      composerBySlotId.set(s.id, r.id);
+    }
+    // EXACT V2 realizedTemplate schema, assembled ONLY from the authentic frozen snapshots (no live-field/getter reads)
+    const realizedTemplate = { templateId: _templateId, canvasW: _canvasW, canvasH: _canvasH, feather: _feather, slots: _authSlots };
+
+    // ── render bindings — EXACT V2 schema {refSlotId,composerSlotId,candidateId,sourceAssetId,imageUrl}; authority-bound.
+    //   imageUrl lives ONLY here (never in the pre-S6 selectionAuthority). candidate/sourceAsset come straight from the
+    //   authority slot (no substitution); composerSlotId is the validated realized id; unique composerId + url (Fix #4). ──
+    const urlByCid = new Map();
+    for (const t of eligibleTuples) { const u = _rhNonBlank(recById.get(t.sourceAssetId)?.imageUrl); if (u) urlByCid.set(t.candidateId, u); }
+    const renderBindings = [];
+    for (const s of envelope.slots) {
+      const composerSlotId = _rhNonBlank(composerBySlotId.get(s.refSlotId));
+      const imageUrl = urlByCid.get(s.candidateId);
+      if (!composerSlotId || !imageUrl) return _rhHold('REF_HERO_V2_BINDING_INCOMPLETE');
+      renderBindings.push({ refSlotId: s.refSlotId, composerSlotId, candidateId: s.candidateId, sourceAssetId: s.sourceAssetId, imageUrl });
+    }
+    if (new Set(renderBindings.map((b) => b.composerSlotId)).size !== renderBindings.length) return _rhHold('REF_HERO_V2_BINDING_COMPOSER_DUP');
+    if (new Set(renderBindings.map((b) => b.imageUrl)).size !== renderBindings.length) return _rhHold('REF_HERO_V2_BINDING_URL_DUP');
+
+    // ── SelectionSpec V2 producer (Fix #9): build the strict render spec, then round-trip it through the foundation
+    //   validator (specHash binds identity/geometry, replayHash binds exact URLs). The S7 CONSUMER is now wired behind
+    //   the default-OFF latch (s7_cover carries this spec → validator → queue; megaComposerService renders it). ──
+    let specBuilt;
+    try { specBuilt = authApi.buildSelectionSpecV2({ selectionAuthority: envelope, expectedSelectionAuthorityHash, renderBindings, realizedTemplate, refId: _rhNonBlank(refId) || realizedTemplate.templateId }); }
+    catch { return _rhHold('REF_HERO_V2_SELECTION_SPEC_BUILD_ERROR'); }
+    const builtSpec = specBuilt && specBuilt.ok === true && specBuilt.selectionSpec ? specBuilt.selectionSpec : null;
+    if (!builtSpec) return _rhHold('REF_HERO_V2_SELECTION_SPEC_BUILD_FAILED');
+    // Capture the TRUSTED pins at the S6 freeze boundary FROM THE TRUSTED BUILD (reviewer items 1-2). expectedSpecHash
+    //   binds identity/geometry; expectedReplayHash binds the exact render URLs. They are NEVER re-derived later from an
+    //   untrusted spec — a re-signed URL/refId/composer tamper (with recomputed self-hashes) recanonicalizes to a hash
+    //   that ≠ these frozen pins ⇒ v2_spec_hash_pin_mismatch / v2_replay_hash_pin_mismatch ⇒ HOLD.
+    const expectedSpecHash = _rhNonBlank(builtSpec.specHash);
+    const expectedReplayHash = _rhNonBlank(builtSpec.replayHash);
+    if (!expectedSpecHash || !expectedReplayHash) return _rhHold('REF_HERO_V2_SPEC_PIN_MISSING');
+    let specVal;
+    try { specVal = authApi.validateSelectionSpecV2Activation({ selectionSpec: builtSpec, selectionAuthority: envelope, expectedSelectionAuthorityHash, expectedSpecHash, expectedReplayHash, realizedTemplate }); }
+    catch { return _rhHold('REF_HERO_V2_SELECTION_SPEC_VALIDATE_ERROR'); }
+    const selectionSpec = specVal && specVal.ok === true && specVal.selectionSpec ? specVal.selectionSpec : null; // canonical validated spec
+    if (!selectionSpec) return _rhHold('REF_HERO_V2_SELECTION_SPEC_VALIDATE_FAILED');
+
+    // ── persist FROZEN authority + expected hash + exact render bindings + strict render spec + trusted pins
+    //   + realized template (zero later mutation). S7 consumes this spec under the default-OFF strict-render latch. ──
+    return _rhDeepFreeze({ v: 1, ok: true, selectionAuthority: envelope, expectedSelectionAuthorityHash, renderBindings, selectionSpec, expectedSpecHash, expectedReplayHash, realizedTemplate });
+  } catch {
+    return _rhHold('REF_HERO_V2_INTERNAL');
+  }
+}
+
 export async function s6_slots(job, { origin, _deps } = {}) {
   // ★ SEM-1: dependency injection เพื่อ testability เท่านั้น — default = ของจริง (production เดิม 100%)
   const _brainFn = _deps?.slotDirectorBrain || slotDirectorBrain;
@@ -1679,6 +2204,10 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   //   ★ ห้าม reuse HERO_GRADE_HARD_ON (default-ON คนละ semantics) — นี่ latch ใหม่ default OFF ล้วน
   const _roleReadyOn = process.env.MEGA_ROLE_READINESS === '1';
   let _roleReadinessCounts = null; // (1d) verdict counts numbers-only — แนบเข้า D-sidecar เฉพาะ ON (ไม่แตะเส้น OFF)
+  // ═══ WAVE1A — REF+CAST+HERO V2 latch MEGA_REF_HERO_V2='1' (exact '1', TOCTOU-proof snapshot at ENTRY) ═══
+  //   DEFAULT OFF = byte-identical legacy (no read/import/log/field on the OFF path — the seam block near
+  //   the happy-path return is skipped entirely). See the _runRefHeroV2 producer block above s6_slots.
+  const _refHeroV2On = process.env.MEGA_REF_HERO_V2 === '1';
   const im = job.dossier.images || {};
   const r = await _jf(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
   if (!r.success) return { status: 'failed', nextAction: 'retry', summary: 'อ่านคลังรูปไม่ได้: ' + (r.error || r.httpStatus) };
@@ -2068,7 +2597,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   // ★ SEM-1 (Codex อนุมัติ design v2 — เลือกภาพตามบทช่องจริงของ ref): เงื่อนไขเปิดต้องครบ 4 (invariant I5)
   //   ① MEGA_SEMANTIC_SELECTION=1 ② MEGA_SELECTION_SPEC=1 ③ ref แมตช์แน่น (_refDNA=typeMatched เท่านั้น)
   //   ④ contract จาก template.slots จริง + realized template map ครบ (จำนวนช่องตรง) — ขาดข้อใด = legacy เดิมทั้งท่อ
-  //   OFF = ไม่มี field/log/prompt ใหม่แม้ byte เดียว · solver ยัง shadow · ยังไม่มี strict consumer/W3-3
+  //   OFF = ไม่มี field/log/prompt ใหม่แม้ byte เดียว (byte-identical) · solver ยัง shadow · สาย semantic/template_v1 ถูกบริโภคโดยสาย strict/W3-3 ที่คุมด้วย flag default OFF
   let semContract = null;
   if (_semPrereqOn && _refDNA) { // ★ D3-B2.3 (Codex P1): ใช้ snapshot _semPrereqOn — ไม่ reread SEM/SPEC หลัง artBrief await
     let _semHold = null; // ★ D3-B2: marked template_v1 job ที่ contract ไม่พร้อม = HOLD (ห้ามถอย legacy)
@@ -2226,6 +2755,21 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         ? _dIds
         : null;
     } catch { _dUniverse = null; }
+  }
+
+  // ★ WAVE1A (MEGA_REF_HERO_V2): PRE-BRAIN authority GATE (Fix #6). Under ON the SelectionAuthority governs
+  //   S5→S6 BEFORE any brain/legacy slot selection: missing/invalid evidence ⇒ HOLD right here — the brain is
+  //   NEVER called and NO selection mutation happens (fail-closed before S6). On success the frozen
+  //   authority+bindings+spec is stashed and attached additively at the happy-path return. OFF/absent flag ⇒
+  //   this block is skipped entirely (byte-identical legacy — the `let` below stays null).
+  let _refHeroV2Patch = null;
+  if (_refHeroV2On) {
+    _refHeroV2Patch = semContract
+      ? await _runRefHeroV2({ compass: job.dossier.compass, semContract, canonHeroId: _canonHeroId, semAuthorityHash: _semAuthorityHash, refDNA: _refDNA, refId: job.dossier.refMatch?.refId || job.dossier.refMatch?.dnaHash || null, gatedPool, deps: _deps })
+      : _rhHold('REF_HERO_V2_NO_STRUCTURAL_SLOTS');
+    if (_refHeroV2Patch.ok !== true) {
+      return { status: 'waiting', nextAction: 'wait', quality: 'red', summary: `🔐⏸️ ref-hero-v2: ${_refHeroV2Patch.hold} — พักงานก่อนเลือกภาพ (S6 ยังไม่เริ่ม · flag ON, fail-closed)`, dossierPatch: { pickImages: { refHeroV2: _refHeroV2Patch } } };
+    }
   }
 
   let brain = { slots: {}, note: '' };
@@ -3448,12 +3992,15 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     _imagesPatch = { ...im, quarantine: _quarField };
   }
 
+  // ★ WAVE1A: _refHeroV2Patch was computed by the PRE-BRAIN gate above (Fix #6) and, on success, is attached
+  //   additively below. HOLD already returned before the brain, so here it is either null (OFF) or the frozen
+  //   success payload (ON). It never mutates slots/slotOrder/heroSlotId/slotContractHash or any legacy field.
   return {
     status: 'done',
     nextAction: 'continue',
     summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'}${storyTag}${quarantineTag} — ${(brain.note || '').slice(0, 80)}`,
     dossierPatch: {
-      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) },
+      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}), ...(_refHeroV2Patch ? { refHeroV2: _refHeroV2Patch } : {}) },
       ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}),
       // ★ D3-B3.3 (Codex): template path echo local plain snapshot (ไม่ใช่ raw carrier) → S7/retry เห็น plain · legacy = raw byte เดิม
       ...((_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) ? { artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) } : {}),
@@ -3518,6 +4065,58 @@ function _strictWireGate(wire, validateStrictRenderActivation) {
   return null;
 }
 
+// ★ WAVE1A S7 — canonical SelectionSpec-V2 carrier → validated wire (Lane A). Descriptor-safe own-DATA capture of the
+//   frozen carrier (accessors rejected without invocation); the SOLE judge is the version DISPATCHER
+//   (validateStrictRenderActivationVersioned → V2 when spec.v===2). slotPlan is derived SOLELY from the validator-
+//   returned canonical bindings (never legacy pickImages.slots): complete 1:1, mandatory candidateId/personId/
+//   sourceAssetId/refSlotId/composerSlotId, unique refSlotId+url, hero by explicit spec.hero.heroSlotId (never regex).
+//   Returns { ok:true, slotPlan, selectionSpec, realizedTemplate } or { ok:false, hold:<code> }. No IO, no mutation.
+function _s7V2Wire(carrier, dispatcher) {
+  const _own = (o, k) => { if (o === null || typeof o !== 'object') return undefined; const d = Object.getOwnPropertyDescriptor(o, k); return d && !('get' in d) && !('set' in d) ? d.value : undefined; };
+  if (carrier === null || typeof carrier !== 'object') return { ok: false, hold: 'ref_hero_v2_carrier_invalid' };
+  if (_own(carrier, 'ok') !== true || _own(carrier, 'v') !== 1) return { ok: false, hold: 'ref_hero_v2_carrier_not_ok' };
+  const selectionSpec = _own(carrier, 'selectionSpec');
+  const selectionAuthority = _own(carrier, 'selectionAuthority');
+  const expectedSelectionAuthorityHash = _own(carrier, 'expectedSelectionAuthorityHash');
+  const expectedSpecHash = _own(carrier, 'expectedSpecHash');
+  const expectedReplayHash = _own(carrier, 'expectedReplayHash');
+  const realizedTemplate = _own(carrier, 'realizedTemplate');
+  if (selectionSpec === null || typeof selectionSpec !== 'object' || selectionAuthority === null || typeof selectionAuthority !== 'object'
+    || realizedTemplate === null || typeof realizedTemplate !== 'object'
+    || typeof expectedSelectionAuthorityHash !== 'string' || typeof expectedSpecHash !== 'string' || typeof expectedReplayHash !== 'string') {
+    return { ok: false, hold: 'ref_hero_v2_carrier_partial' };
+  }
+  let decision;
+  try { decision = dispatcher({ selectionSpec, selectionAuthority, expectedSelectionAuthorityHash, expectedSpecHash, expectedReplayHash, realizedTemplate }); }
+  catch { return { ok: false, hold: 'ref_hero_v2_validate_error' }; }
+  if (!decision || decision.ok !== true || !decision.selectionSpec || decision.selectionSpec.v !== 2) return { ok: false, hold: 'ref_hero_v2_activation_invalid' };
+  const spec = decision.selectionSpec; // canonical, deep-frozen, trusted
+  const heroSlotId = _rhNonBlank(spec.hero?.heroSlotId);
+  if (!heroSlotId) return { ok: false, hold: 'ref_hero_v2_hero_slot_missing' };
+  const rows = Array.isArray(spec.slots) ? spec.slots : null;
+  if (!rows || !rows.length) return { ok: false, hold: 'ref_hero_v2_no_bindings' };
+  const slotPlan = []; const seenRef = new Set(); const seenUrl = new Set(); let heroRows = 0;
+  for (const sl of rows) {
+    const refSlotId = _rhNonBlank(sl?.refSlotId); const composerSlotId = _rhNonBlank(sl?.composerSlotId); const primary = sl?.primary;
+    if (!refSlotId || !composerSlotId || primary === null || typeof primary !== 'object') return { ok: false, hold: 'ref_hero_v2_binding_incomplete' };
+    const personId = _rhNonBlank(primary.personId); const candidateId = _rhNonBlank(primary.candidateId);
+    const sourceAssetId = _rhNonBlank(primary.sourceAssetId); const imageUrl = _rhNonBlank(primary.imageUrl);
+    if (!personId || !candidateId || !sourceAssetId || !imageUrl) return { ok: false, hold: 'ref_hero_v2_binding_incomplete' };
+    if (seenRef.has(refSlotId) || seenUrl.has(imageUrl)) return { ok: false, hold: 'ref_hero_v2_binding_duplicate' };
+    seenRef.add(refSlotId); seenUrl.add(imageUrl);
+    const isHero = refSlotId === heroSlotId; if (isHero) heroRows++;
+    // ★ EVIDENCE INTEGRITY (P1): `clean:true` is genuinely DERIVED — every tuple that reaches this bind cleared the
+    //   six-field cast readiness AND (computeCandidateEligibility), of which `clean` is one; dirty/ineligible assets
+    //   are never selected. `newsScene` is DELIBERATELY OMITTED: the canonical RH→Cast→Global chain never carries
+    //   triage.newsScene (eligibility does not gate on it, and _rhGlobalCandidate does not read/emit it), so asserting
+    //   it here — true OR false — would fabricate evidence. Omission reaches the consumer (_strictPrepareV2) as
+    //   unknown/null; it must never be inferred to a fabricated true.
+    slotPlan.push({ url: imageUrl, refSlotId, composerSlotId, candidateId, personId, sourceAssetId, isHero, clean: true });
+  }
+  if (heroRows !== 1) return { ok: false, hold: 'ref_hero_v2_hero_row_count' }; // exactly one hero row, by heroSlotId
+  return { ok: true, slotPlan, selectionSpec: spec, realizedTemplate };
+}
+
 export async function s7_cover(job, { origin, _deps } = {}) {
   // ★ SEM-1: dependency injection เพื่อ testability เท่านั้น — default = ของจริง (production เดิม 100%)
   const _jf = _deps?.fetchJson || jfetch;
@@ -3526,7 +4125,7 @@ export async function s7_cover(job, { origin, _deps } = {}) {
   const _envSem = process.env.MEGA_SEMANTIC_SELECTION === '1';
   const _envSpec = process.env.MEGA_SELECTION_SPEC === '1';
   const _envStrictProducer = process.env.MEGA_STRICT_PRODUCER === '1';
-  const _envStrictRender = process.env.MEGA_STRICT_RENDER === '1';
+  const _envStrictRender = process.env.MEGA_STRICT_RENDER === '1'; // ★ WAVE1A: the SOLE canonical renderer latch (no alias) — governs BOTH V1 and the V2 carrier; V1-vs-V2 chosen from the carrier version, never a separate env flag.
   const _roleReadyOn = process.env.MEGA_ROLE_READINESS === '1'; // ★ LANE-C latch (fresh, default OFF, exact '1')
   // ★ LANE-C (item 2) MINIMAL INTERNAL-ONLY TRANSPORT SEAM — คุมด้วย in-process `_deps` เท่านั้น (ห้าม env/request data):
   //   Lane A เรียก s7_cover(job, { origin, _deps: { fetchJson, queueTransport: 'cover_ref_test_in_process' } }) ให้ยิงในโปรเซส
@@ -3577,6 +4176,38 @@ export async function s7_cover(job, { origin, _deps } = {}) {
   const _semEnvOn = _envSem && _envSpec; // ★ D3-B2.1: จาก snapshot (TOCTOU-safe)
   if (_sem && !_semEnvOn) {
     return { status: 'waiting', nextAction: 'wait', summary: '🧬⏸️ แผนนี้เลือกภาพแบบ semantic แต่สวิตช์ปิดอยู่ — พักรอเปิด MEGA_SEMANTIC_SELECTION=1 + MEGA_SELECTION_SPEC=1 (ไม่แปลง legacy กันภาพผิดช่อง)' };
+  }
+  // ★ WAVE1A P0/P1: canonical SelectionSpec-V2 governance. If S6 persisted a refHeroV2 carrier, V2 renders under the
+  //   SOLE canonical latch MEGA_STRICT_RENDER (no alias); V1-vs-V2 is chosen from the carrier version by the dispatcher.
+  //   NO-DOWNGRADE: a present carrier while the latch is OFF, or a missing/partial/invalid carrier/version/pins under
+  //   the latch, HOLDs BEFORE any queue/network — never silently continues V1/legacy. slotPlan comes SOLELY from the
+  //   validator-returned canonical bindings. NO carrier ⇒ this block is skipped ⇒ legacy/V1 path byte-identical.
+  if (d.pickImages != null && Object.prototype.hasOwnProperty.call(d.pickImages, 'refHeroV2')) {
+    if (!_envStrictRender) {
+      return { status: 'waiting', nextAction: 'wait', summary: '🔐⏸️ ref-hero-v2: carrier ถูก persist แต่ MEGA_STRICT_RENDER (latch เดียว) ปิด — พักงาน ห้าม downgrade V1/legacy' };
+    }
+    let _verDispatch;
+    try { _verDispatch = (await import('@/lib/refSlotContract')).validateStrictRenderActivationVersioned; } catch { return { status: 'failed', nextAction: 'retry', summary: '🔐 ref-hero-v2: โหลด version dispatcher ล้ม — ไม่ enqueue' }; }
+    if (typeof _verDispatch !== 'function') return { status: 'waiting', nextAction: 'wait', summary: '🔐⏸️ ref-hero-v2: version dispatcher ไม่พร้อม — พักงาน' };
+    const _v2 = _s7V2Wire(d.pickImages.refHeroV2, _verDispatch);
+    if (!_v2.ok) {
+      return { status: 'waiting', nextAction: 'wait', summary: `🔐⏸️ ref-hero-v2: ${_v2.hold} — พักงานก่อน queue (fail-closed, ห้าม downgrade)` };
+    }
+    // serialize ONCE → re-validate the EXACT wire carrier + pins via the dispatcher → enqueue the same bytes (TOCTOU-proof)
+    const _v2Payload = {
+      jobType: 'cover', composer: 'mega',
+      newsTitle: d.generate?.newsData?.newsTitle || d.desk?.title || '',
+      slotPlan: _v2.slotPlan, userId: MEGA_USER,
+      ...(d.refMatch?.imagePath ? { refImagePath: d.refMatch.imagePath } : {}),
+      refHeroV2: d.pickImages.refHeroV2,
+    };
+    let _v2Body; let _wireOk = false;
+    try { _v2Body = JSON.stringify(_v2Payload); const _wire = JSON.parse(_v2Body); _wireOk = _s7V2Wire(_wire.refHeroV2, _verDispatch).ok === true; }
+    catch { return { status: 'failed', nextAction: 'retry', summary: '🔐 ref-hero-v2: serialize/ตรวจ wire snapshot ล้ม — ไม่ enqueue' }; }
+    if (!_wireOk) return { status: 'waiting', nextAction: 'wait', summary: '🔐⏸️ ref-hero-v2: wire carrier snapshot ไม่ผ่าน validator — พักงานก่อน queue' };
+    const _q = await _jf(`${coverOrigin()}/api/queue/add`, { method: 'POST', body: _v2Body }, 60000);
+    if (!_q.success || !_q.jobId) return { status: 'failed', nextAction: 'retry', summary: 'ส่งงานปก (V2) ไม่สำเร็จ: ' + (_q.error || _q.httpStatus) };
+    return { status: 'done', nextAction: 'continue', summary: `🔐 ref-hero-v2 ARMED (V2 canonical) → enqueued ${_v2.slotPlan.length} ช่อง`, dossierPatch: { cover: { queueJobId: _q.jobId, refStyle: d.refMatch?.styleName || null, selectionSpec: _v2.selectionSpec } } };
   }
   // ลำดับ: legacy = hero ก่อน (boost เดิม) · semantic = ตามลำดับช่องของ ref จริง + เพดาน 10 ลิงก์
   const links = _order

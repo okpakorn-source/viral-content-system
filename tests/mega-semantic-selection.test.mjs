@@ -616,4 +616,555 @@ await test('OS gap: function-valued vetted row / function triage → carrier omi
   assert.ok(!('gapSearchOutcomeShadowV1' in on2.dossierPatch.images), 'gap function triage → carrier omitted');
 });
 
+// ============================================================
+// 🌊 WAVE1A — REF+CAST+HERO V2 authority producer  (flag MEGA_REF_HERO_V2 exact '1', default OFF)
+//   Exercises the REAL PURE foundations (story/cast/hero/global) AND the REAL exported Wave1C handshake
+//   (buildSelectionAuthorityV1/validateSelectionAuthorityV1 + buildSelectionSpecV2/validateSelectionSpecV2Activation
+//   in refSlotContract.js) end-to-end through s6_slots. Fixtures inject genuine measured evidence — production
+//   pool records lack these fields today, so the ON path fail-closes to a typed HOLD in the wild. DI doubles are
+//   used ONLY to force specific rejection paths (builder HOLD, tampered Global assignmentHash).
+// ============================================================
+const { computePersonId: rhPid, normalizeCastName: rhNorm, computeCandidateEligibility: rhElig } = await import('../src/lib/castManifest.js');
+const { buildStoryReferenceAuthorityContract: rhStoryBuild, hashContract: rhStoryHash } = await import('../src/lib/storyReferenceAuthority.js');
+const { buildCastManifest: rhCastBuild } = await import('../src/lib/castManifest.js');
+const rhRealRefSlot = await import('../src/lib/refSlotContract.js');
+const { buildSelectionSpecV2: rhBuildSpecV2, validateSelectionSpecV2Activation: rhValidateSpecV2 } = rhRealRefSlot;
+const rhRealGlobal = await import('../src/lib/semanticGlobalAssignment.js');
+const PID = (name) => rhPid(rhNorm(name));
+
+const RH_ENV = ['MEGA_REF_HERO_V2', 'MEGA_SEMANTIC_SELECTION', 'MEGA_SELECTION_SPEC'];
+const withRhEnv = async (vals, fn) => {
+  const prev = RH_ENV.map((k) => process.env[k]);
+  for (const k of RH_ENV) { if (vals[k] === undefined) delete process.env[k]; else process.env[k] = vals[k]; }
+  try { return await fn(); } finally { RH_ENV.forEach((k, i) => { if (prev[i] === undefined) delete process.env[k]; else process.env[k] = prev[i]; }); }
+};
+const RH_ON = { MEGA_REF_HERO_V2: '1', MEGA_SEMANTIC_SELECTION: '1', MEGA_SELECTION_SPEC: '1' };
+const RH_OFF = { MEGA_SEMANTIC_SELECTION: '1', MEGA_SELECTION_SPEC: '1' }; // semantic ON but ref-hero-v2 OFF
+
+// genuine measured evidence (passes a DERIVED 'medium' hero contract) + readiness + Global scores
+const RH_EV = { identityConfidence: 0.9, faceShare: 0.15, headroom: 0.15, visibleBodyRegion: 'half_body', occlusion: 0.05, edgeCut: 0.02, cleanliness: 0.9 };
+const RH_RD = { searched: true, triaged: true, clean: true, highResolution: true, cropSafe: true, identityVerified: true };
+const RH_SC = { semanticScore: 700, qualityScore: 700, slotFitScore: 700 };
+const rhImg = (id, { person = null, sceneKey, triageOver = {}, over = {} } = {}) => ({
+  id, imageUrl: `https://cdn.test/${id}.jpg`, thumbnailUrl: '', width: 900, height: 1200, realWidth: 900, realHeight: 1200,
+  triage: { relevant: true, clean: true, faceCount: 1, person, persons: person ? [person] : [], category: 'face-emotional', emotion: 'warm', note: `${id} ${sceneKey}`, newsScene: true, quality: 8, ...RH_EV, ...RH_RD, ...RH_SC, sceneKey, ...triageOver },
+  ...over,
+});
+// 5-slot ready pool for DNA_ALPO (hero/context/action/moment/reaction): Lisa=hero, Nene=reaction, 3 context people.
+const RH_POOL = () => [
+  rhImg('L1', { person: 'Lisa', sceneKey: 'sceneL' }),
+  rhImg('N1', { person: 'Nene', sceneKey: 'sceneN' }),
+  rhImg('C1', { person: 'Ctx1', sceneKey: 'sceneC1' }),
+  rhImg('C2', { person: 'Ctx2', sceneKey: 'sceneC2' }),
+  rhImg('C3', { person: 'Ctx3', sceneKey: 'sceneC3' }),
+];
+const RH_CHARS = () => [{ name: 'Lisa', role: 'hero' }, { name: 'Nene', role: 'reaction' }, { name: 'Ctx1', role: 'context' }, { name: 'Ctx2', role: 'context' }, { name: 'Ctx3', role: 'context' }];
+const RH_PICKS = { hero: { id: 'L1', reason: 'x', backups: [] }, context: { id: 'C1', reason: 'x', backups: [] }, action: { id: 'C2', reason: 'x', backups: [] }, moment: { id: 'C3', reason: 'x', backups: [] }, reaction: { id: 'N1', reason: 'x', backups: [] } };
+const rhJob = ({ chars = RH_CHARS(), refId = 'REF-mrbqalpo-h1r1' } = {}) => ({ dossier: {
+  images: { caseId: 'RH-TEST' },
+  compass: { angle: 'a', primaryEmotion: 'warm', secondaryEmotions: [], mainCharacters: chars, visualDreamShots: [], doNotUse: [] },
+  desk: { title: 'ข่าวทดสอบ RH' },
+  refMatch: { dna: DNA_ALPO, styleName: 'ref', typeMatched: true, imagePath: '/x.jpg', refId },
+  artBrief: { storyNote: 's', orders: [] },
+} });
+// DI double: force a Wave1C SelectionAuthority builder HOLD (proves fail-closed handling of a handshake rejection).
+const rhHoldAuthApi = () => ({
+  buildSelectionAuthorityV1: () => ({ ok: false, decision: 'hold', reasons: ['sa_forced_hold'], selectionAuthority: null }),
+  validateSelectionAuthorityV1: () => ({ ok: false, decision: 'hold', reasons: ['sa_forced_hold'], selectionAuthority: null }),
+  buildSelectionSpecV2: () => ({ ok: false, decision: 'hold', reasons: ['v2_forced'], selectionSpec: null }),
+  validateSelectionSpecV2Activation: () => ({ ok: false, decision: 'hold', reasons: ['v2_forced'], selectionSpec: null }),
+});
+// DI double: wrap the REAL Global solver but corrupt the assignmentHash (proves Fix #8 independent recompute).
+const rhTamperGlobalApi = () => ({
+  buildSemanticGlobalAssignment: (input) => { const o = rhRealGlobal.buildSemanticGlobalAssignment(input); return o.decision === 'assigned' ? { ...o, assignmentHash: 'f'.repeat(64) } : o; },
+  validateSemanticGlobalAssignmentInput: rhRealGlobal.validateSemanticGlobalAssignmentInput,
+});
+const rhDeps = ({ pool, picks = RH_PICKS, extraDeps = {}, captures = { brainArgs: [] } }) => ({
+  slotDirectorBrain: async (args) => { captures.brainArgs.push(args); return { slots: picks, note: 'mock' }; },
+  fetchJson: async (url) => { if (String(url).includes('/api/images/')) return { success: true, images: pool }; throw new Error('unexpected fetch: ' + url); },
+  ...extraDeps,
+});
+const rhRun = async (env, { pool = RH_POOL(), picks = RH_PICKS, extraDeps = {}, job, captures } = {}) =>
+  withRhEnv(env, async () => s6_slots(job || rhJob(), { origin: 'http://mock', _deps: rhDeps({ pool, picks, extraDeps, ...(captures ? { captures } : {}) }) }));
+const rhPatch = (s6) => s6.dossierPatch?.pickImages?.refHeroV2;
+
+// ── (RH-1) flag OFF (ref-hero-v2 unset) = NO refHeroV2 key + byte-identical to semantic-only baseline ──
+await test('RH: flag OFF ⇒ no refHeroV2 key · byte-identical to semantic-only (additive-only)', async () => {
+  const off = await rhRun(RH_OFF);
+  assert.ok(!('refHeroV2' in off.dossierPatch.pickImages), 'OFF: pickImages has no refHeroV2 key');
+  const on = await rhRun(RH_ON);
+  assert.equal(on.status, 'done'); assert.ok('refHeroV2' in on.dossierPatch.pickImages, 'ON: refHeroV2 key present');
+  const strip = (r) => { const p = { ...r.dossierPatch.pickImages }; delete p.refHeroV2; return JSON.stringify({ ...r, dossierPatch: { ...r.dossierPatch, pickImages: p } }); };
+  assert.equal(strip(on), strip(off), 'legacy s6 output identical after stripping refHeroV2 (business untouched)');
+});
+
+// ── (RH-2) success: frozen selectionAuthority + exact hero tuple + render bindings (composerSlotId) + spec ──
+await test('RH: success ⇒ frozen selectionAuthority + hero tuple exact + renderBindings{refSlotId,composerSlotId,...} + SelectionSpec V2', async () => {
+  const p = rhPatch(await rhRun(RH_ON));
+  assert.ok(p && p.ok === true && p.v === 1, 'ok success marker');
+  const sa = p.selectionAuthority;
+  assert.equal(sa.v, 1);
+  assert.equal(p.expectedSelectionAuthorityHash, sa.selectionAuthorityHash);
+  assert.match(sa.selectionAuthorityHash, /^[0-9a-f]{64}$/);
+  // hero tuple exact
+  assert.deepEqual({ r: sa.hero.refSlotId, pid: sa.hero.personId, c: sa.hero.candidateId, s: sa.hero.sourceAssetId }, { r: 'hero', pid: PID('Lisa'), c: 'L1', s: 'L1' });
+  assert.match(sa.hero.heroContractHash, /^[0-9a-f]{8}$/, 'hero contract fnv1a32 (8 hex)');
+  assert.equal(sa.slots.filter((s) => s.refSlotId === sa.hero.refSlotId).length, 1, 'hero matches exactly one slot');
+  const orders = sa.slots.map((s) => s.order);
+  assert.deepEqual(orders, orders.map((_, i) => i + 1), 'slot order contiguous 1..N ascending');
+  assert.ok(sa.slots.every((s) => !('imageUrl' in s)) && !('imageUrl' in sa.hero), 'no URL/backups in pre-S6 authority');
+  // renderBindings: EXACT V2 schema
+  assert.equal(p.renderBindings.length, sa.slots.length);
+  for (const b of p.renderBindings) assert.deepEqual(Object.keys(b).sort(), ['candidateId', 'composerSlotId', 'imageUrl', 'refSlotId', 'sourceAssetId']);
+  assert.ok(p.renderBindings.every((b) => /^https:\/\/cdn\.test\//.test(b.imageUrl)));
+  assert.equal(new Set(p.renderBindings.map((b) => b.composerSlotId)).size, p.renderBindings.length, 'composerSlotId one-to-one');
+  const heroBind = p.renderBindings.find((b) => b.refSlotId === 'hero');
+  assert.deepEqual({ c: heroBind.composerSlotId, cid: heroBind.candidateId, u: heroBind.imageUrl }, { c: 'main', cid: 'L1', u: 'https://cdn.test/L1.jpg' });
+  // SelectionSpec V2 persisted + valid shape
+  assert.equal(p.selectionSpec.v, 2); assert.equal(p.selectionSpec.mode, 'semantic_global_exact'); assert.equal(p.selectionSpec.strictReady, true);
+  assert.match(p.selectionSpec.specHash, /^[0-9a-f]{64}$/); assert.match(p.selectionSpec.replayHash, /^[0-9a-f]{64}$/);
+  // trusted pins captured at the freeze boundary == the built spec's hashes (reviewer items 1-2)
+  assert.equal(p.expectedSpecHash, p.selectionSpec.specHash, 'persisted expectedSpecHash == built specHash');
+  assert.equal(p.expectedReplayHash, p.selectionSpec.replayHash, 'persisted expectedReplayHash == built replayHash');
+  assert.match(p.expectedSpecHash, /^[0-9a-f]{64}$/); assert.match(p.expectedReplayHash, /^[0-9a-f]{64}$/);
+});
+
+// ── (RH-3) current-news Lisa+Nene both required & covered (production-connected); ref subjects never cast ──
+await test('RH: current-news Lisa+Nene required & covered via s6 producer; ref subjects never identify cast', async () => {
+  const sa = rhPatch(await rhRun(RH_ON)).selectionAuthority;
+  const personIds = new Set(sa.slots.map((s) => s.personId).filter(Boolean));
+  assert.ok(personIds.has(PID('Lisa')) && personIds.has(PID('Nene')), 'Lisa+Nene covered (Nene omission fixed at authority layer)');
+  assert.ok(!personIds.has(PID('พระสงฆ์')) && !personIds.has(PID('ผู้หญิงยิ้ม')), 'ref DNA subjects never become cast identity');
+  // every bound person is a current-news person (no ref-only / invented identity)
+  const news = new Set(RH_CHARS().map((c) => PID(c.name)));
+  assert.ok([...personIds].every((pid) => news.has(pid)), 'all bound persons are current-news people');
+});
+
+// ── (RH-4) missing required current-news person (Nene cast-ineligible) ⇒ typed HOLD before the brain ──
+await test('RH: required current-news person with no eligible asset ⇒ INSUFFICIENT_CAST_ASSETS HOLD (pre-brain)', async () => {
+  const pool = RH_POOL(); pool[1].triage.cropSafe = false; // Nene not a genuinely-ready cast candidate
+  const captures = { brainArgs: [] };
+  const on = await rhRun(RH_ON, { pool, captures });
+  assert.equal(on.status, 'waiting');
+  assert.deepEqual(rhPatch(on), { v: 1, ok: false, hold: 'REF_HERO_V2_INSUFFICIENT_CAST_ASSETS' });
+  assert.equal(captures.brainArgs.length, 0, 'brain NOT called on HOLD (Fix #6 sentinel)');
+});
+
+// ── (RH-5) missing genuine hero evidence ⇒ typed HOLD (never manufactures a passing value) ──
+await test('RH: hero candidate missing measured evidence ⇒ HERO_NO_APPROVED_CANDIDATE HOLD', async () => {
+  const pool = RH_POOL(); delete pool[0].triage.identityConfidence;
+  assert.deepEqual(rhPatch(await rhRun(RH_ON, { pool })), { v: 1, ok: false, hold: 'REF_HERO_V2_HERO_NO_APPROVED_CANDIDATE' });
+});
+
+// ── (RH-6) missing genuine Global evidence for a required person ⇒ assignment HOLD ([], no bindings) ──
+await test('RH: required person missing measured Global score ⇒ ASSIGNMENT_HOLD (assignments [], no bindings)', async () => {
+  const pool = RH_POOL(); delete pool[1].triage.slotFitScore; // Nene has no genuine Global candidate ⇒ uncoverable
+  const p = rhPatch(await rhRun(RH_ON, { pool }));
+  assert.deepEqual(p, { v: 1, ok: false, hold: 'REF_HERO_V2_ASSIGNMENT_HOLD' });
+  assert.ok(!('renderBindings' in p) && !('selectionSpec' in p), 'no partial payload on HOLD');
+});
+
+// ── (RH-7) deterministic total-order before caps: >80 records + >64 eligible, reversed ⇒ identical hash/IDs ──
+await test('RH: total order before caps ⇒ >80 records & >64 eligible, reversed input ⇒ identical selectionAuthorityHash + selected IDs', async () => {
+  // 5 principals (high quality+score → survive legacy-80 & the Global score cap) + 80 eligible Lisa dupes that are
+  //   hero-INELIGIBLE (full_body) and low-score (capped out / required-coverage pruned). 85 records (>80) · 85 eligible (>64).
+  const principals = RH_POOL();
+  principals.forEach((r) => { r.triage.quality = 9; r.triage.semanticScore = 900; r.triage.qualityScore = 900; r.triage.slotFitScore = 900; });
+  const dupes = Array.from({ length: 80 }, (_, i) => rhImg(`D${String(i).padStart(2, '0')}`, { person: 'Lisa', sceneKey: `sD${i}`, triageOver: { quality: 7, visibleBodyRegion: 'full_body', semanticScore: 100, qualityScore: 100, slotFitScore: 100 } }));
+  const poolA = [...principals, ...dupes];
+  const poolB = [...dupes.slice().reverse(), ...principals.slice().reverse()];
+  const a = rhPatch(await rhRun(RH_ON, { pool: poolA }));
+  const b = rhPatch(await rhRun(RH_ON, { pool: poolB }));
+  assert.equal(a.ok, true, `poolA ok (got ${a.hold || 'ok'})`); assert.equal(b.ok, true, `poolB ok (got ${b.hold || 'ok'})`);
+  assert.equal(a.expectedSelectionAuthorityHash, b.expectedSelectionAuthorityHash, 'authority hash stable under input reordering + >80/>64 caps');
+  assert.deepEqual(a.selectionAuthority.slots.map((s) => s.candidateId), b.selectionAuthority.slots.map((s) => s.candidateId), 'selected IDs identical');
+  assert.equal(a.selectionAuthority.hero.candidateId, 'L1', 'eligible high-score hero survived caps');
+  assert.ok(a.selectionAuthority.slots.every((s) => !String(s.candidateId).startsWith('D')), 'low-score/ineligible dupes never selected');
+});
+
+// ── (RH-8) exact foundation hash binding: envelope binds the real foundation hashes verbatim ──
+await test('RH: envelope binds exact foundation hashes (story + cast recomputed == embedded; assignment sha256)', async () => {
+  const sa = rhPatch(await rhRun(RH_ON)).selectionAuthority;
+  const story = { identities: ['Ctx1', 'Ctx2', 'Ctx3', 'Lisa', 'Nene'], requiredCast: ['Lisa', 'Nene'], optionalCast: ['Ctx1', 'Ctx2', 'Ctx3'], editorialHero: 'Lisa', eventContext: null, facts: [], storySemantics: null, eligibleAssetProvenance: [] };
+  assert.equal(sa.storyAuthorityHash, rhStoryHash(rhStoryBuild({ story }).contract), 'storyAuthorityHash == real hashContract');
+  const cc = (id, name) => ({ name, candidateId: id, sourceAssetId: id, searched: true, triaged: true, clean: true, highResolution: true, cropSafe: true, identityVerified: true });
+  const manifest = rhCastBuild({ compass: { mainCharacters: RH_CHARS(), requiredCast: ['Lisa', 'Nene'] }, candidates: [cc('L1', 'Lisa'), cc('N1', 'Nene'), cc('C1', 'Ctx1'), cc('C2', 'Ctx2'), cc('C3', 'Ctx3')] });
+  assert.equal(sa.castManifestHash, manifest.hash, 'castManifestHash == real buildCastManifest hash');
+  assert.match(sa.assignmentHash, /^[0-9a-f]{64}$/, 'assignmentHash is the real sha256 global assignment hash');
+});
+
+// ── (RH-9) no attacker echo: hostile compass/candidate strings never appear in a HOLD marker ──
+await test('RH: HOLD marker carries a fixed code only — never echoes attacker-supplied strings', async () => {
+  const ATTACK = '<script>__PWNED__</script>';
+  const chars = [{ name: `Lisa ${ATTACK}`, role: 'hero' }, { name: 'Nene', role: 'reaction' }, { name: 'Ctx1', role: 'context' }, { name: 'Ctx2', role: 'context' }, { name: 'Ctx3', role: 'context' }];
+  const pool = RH_POOL().map((x) => { x.triage.note = ATTACK; return x; }); pool[1].triage.cropSafe = false; // Nene ineligible ⇒ HOLD
+  const on = await withRhEnv(RH_ON, async () => s6_slots(rhJob({ chars }), { origin: 'http://mock', _deps: rhDeps({ pool }) }));
+  const p = rhPatch(on);
+  assert.deepEqual(p, { v: 1, ok: false, hold: 'REF_HERO_V2_INSUFFICIENT_CAST_ASSETS' });
+  assert.ok(!JSON.stringify(p).includes('__PWNED__'), 'attacker string absent from marker');
+});
+
+// ── (RH-10) ZERO post-S6 mutation: persisted authority/bindings/spec/pins DEEP-frozen (nested) ──
+await test('RH: persisted refHeroV2 authority/bindings/spec DEEP-frozen incl nested rows (no post-S6 asset switch)', async () => {
+  const p = rhPatch(await rhRun(RH_ON));
+  const frozen = (o) => o && typeof o === 'object' ? Object.isFrozen(o) && Object.values(o).every(frozen) : true;
+  assert.ok(frozen(p), 'entire refHeroV2 payload is deep-frozen (recursively)');
+  assert.ok(Object.isFrozen(p.renderBindings[0]) && Object.isFrozen(p.selectionAuthority.slots[0]) && Object.isFrozen(p.selectionAuthority.hero) && Object.isFrozen(p.selectionSpec.slots) && Object.isFrozen(p.selectionSpec.slots[0]) && Object.isFrozen(p.selectionSpec.slots[0].primary));
+  assert.throws(() => { p.renderBindings[0].imageUrl = 'https://evil/x.jpg'; });
+  assert.throws(() => { p.selectionAuthority.hero.candidateId = 'X'; });
+  assert.throws(() => { p.selectionSpec.slots[0].primary.imageUrl = 'https://evil/y.jpg'; });
+  assert.throws(() => { p.selectionSpec.slots.push({}); });
+});
+
+// ── (RH-11) no ref semantic leakage: ref hero-subject absent from hero, EVERY slot row, AND renderBindings ──
+await test('RH: ref DNA hero subject never becomes hero/slot/binding identity (strengthened Fix #2)', async () => {
+  const pool = RH_POOL();
+  pool.push(rhImg('M1', { person: 'พระสงฆ์', sceneKey: 'sceneM', triageOver: { semanticScore: 1000, qualityScore: 1000, slotFitScore: 1000 } })); // ref subject, high score, NOT in compass
+  const p = rhPatch(await rhRun(RH_ON, { pool }));
+  const sa = p.selectionAuthority;
+  assert.equal(sa.hero.personId, PID('Lisa'), 'hero is compass hero, not ref subject');
+  assert.ok(sa.slots.every((s) => s.personId !== PID('พระสงฆ์')), 'ref subject absent from every slot row');
+  assert.ok(sa.slots.every((s) => s.candidateId !== 'M1') && p.renderBindings.every((b) => b.candidateId !== 'M1'), 'ref-subject asset never selected (unmatched ⇒ no personId ⇒ excluded)');
+});
+
+// ── (RH-12) handshake rejection (builder HOLD via DI) ⇒ producer fails closed, no partial payload ──
+await test('RH: Wave1C builder HOLD ⇒ SELECTION_AUTHORITY_BUILD_FAILED (fail-closed, no partial payload)', async () => {
+  const p = rhPatch(await rhRun(RH_ON, { extraDeps: { selectionAuthorityApi: rhHoldAuthApi() } }));
+  assert.deepEqual(p, { v: 1, ok: false, hold: 'REF_HERO_V2_SELECTION_AUTHORITY_BUILD_FAILED' });
+});
+
+// ── (RH-13) CAST-ELIGIBLE authority gate (Fix #1): a same-person INELIGIBLE asset that scores HIGHER is never picked ──
+await test('RH: cast-eligible gate ⇒ higher-scoring but ineligible same-person asset never selected by hero or global', async () => {
+  const pool = RH_POOL();
+  // add a SECOND Lisa asset L2 that is INELIGIBLE (cropSafe:false) yet scores maximally + full hero evidence
+  pool.push(rhImg('L2', { person: 'Lisa', sceneKey: 'sceneL2', triageOver: { cropSafe: false, semanticScore: 1000, qualityScore: 1000, slotFitScore: 1000 } }));
+  const p = rhPatch(await rhRun(RH_ON, { pool }));
+  assert.equal(p.ok, true);
+  assert.equal(p.selectionAuthority.hero.candidateId, 'L1', 'hero = eligible L1, NOT higher-scoring ineligible L2');
+  assert.ok(p.selectionAuthority.slots.every((s) => s.candidateId !== 'L2') && p.renderBindings.every((b) => b.candidateId !== 'L2'), 'ineligible L2 never in any slot/binding');
+  // sanity: L2 really is ineligible under the foundation's own recompute
+  assert.equal(rhElig({ searched: true, triaged: true, clean: true, highResolution: true, cropSafe: false, identityVerified: true }), false);
+});
+
+// ── (RH-14) genuine per-slot eligibility (Fix #3): a reaction-only person cannot fill context slots ⇒ HOLD ──
+await test('RH: per-slot eligibility ⇒ reaction-only people cannot satisfy context slots (no every-record-to-every-slot)', async () => {
+  // drop the 3 context people; Nene (reaction) is eligible ONLY for the reaction slot, so context/action/moment are unfillable
+  const pool = [rhImg('L1', { person: 'Lisa', sceneKey: 'sceneL' }), rhImg('N1', { person: 'Nene', sceneKey: 'sceneN' })];
+  const chars = [{ name: 'Lisa', role: 'hero' }, { name: 'Nene', role: 'reaction' }];
+  const p = rhPatch(await rhRun(RH_ON, { pool, job: rhJob({ chars }) }));
+  assert.equal(p.ok, false, 'context slots have no role-eligible candidate ⇒ HOLD');
+  assert.equal(p.hold, 'REF_HERO_V2_ASSIGNMENT_HOLD');
+});
+
+// ── (RH-15) renderBindings composer map is validated one-to-one: realized slot-count mismatch ⇒ HOLD (Fix #4) ──
+await test('RH: realized template that is not one-to-one with authority slots ⇒ REALIZED_SLOT_COUNT HOLD', async () => {
+  const rt = await import('../src/lib/refTemplate.js');
+  const badRealizedDeps = { dnaToTemplateSpec: (dna) => { const r = rt.dnaToTemplateSpec(dna); return { ...r, slots: r.slots.slice(0, r.slots.length - 1) }; } }; // drop one realized slot
+  const p = rhPatch(await rhRun(RH_ON, { extraDeps: badRealizedDeps }));
+  assert.deepEqual(p, { v: 1, ok: false, hold: 'REF_HERO_V2_REALIZED_SLOT_COUNT' });
+});
+
+// ── (RH-16) TRUE pre-S6 placement (Fix #6): on success the producer runs BEFORE the brain; OFF unchanged ──
+await test('RH: producer governs pre-S6 ⇒ brain runs AFTER a successful gate; OFF never invokes the gate', async () => {
+  const capOn = { brainArgs: [] };
+  const on = await rhRun(RH_ON, { captures: capOn });
+  assert.equal(on.status, 'done'); assert.equal(capOn.brainArgs.length, 1, 'brain called once after a successful pre-brain gate');
+  assert.ok('refHeroV2' in on.dossierPatch.pickImages);
+  const capOff = { brainArgs: [] };
+  const off = await rhRun(RH_OFF, { captures: capOff });
+  assert.equal(capOff.brainArgs.length, 1, 'OFF: legacy brain path unchanged');
+  assert.ok(!('refHeroV2' in off.dossierPatch.pickImages));
+});
+
+// ── (RH-17) story/reference structure authority (Fix #7): different refId ⇒ spec hash diverges; authority hash same ──
+await test('RH: different refId (same cast/news/geometry) ⇒ SelectionSpec specHash/replayHash diverge; selectionAuthorityHash unchanged', async () => {
+  const a = rhPatch(await rhRun(RH_ON, { job: rhJob({ refId: 'REF-A' }) }));
+  const b = rhPatch(await rhRun(RH_ON, { job: rhJob({ refId: 'REF-B' }) }));
+  assert.equal(a.ok, true); assert.equal(b.ok, true);
+  assert.notEqual(a.selectionSpec.specHash, b.selectionSpec.specHash, 'ref identity binds into the verifiable spec hash');
+  assert.notEqual(a.selectionSpec.replayHash, b.selectionSpec.replayHash);
+  assert.equal(a.selectionAuthority.selectionAuthorityHash, b.selectionAuthority.selectionAuthorityHash, 'identity/cast authority unchanged by refId (ref stays non-authoritative for cast)');
+  assert.equal(a.selectionSpec.refId, 'REF-A'); assert.equal(b.selectionSpec.refId, 'REF-B');
+});
+
+// ── (RH-18) Global hash integrity (Fix #8): a tampered assignmentHash ⇒ independent recompute HOLDs ──
+await test('RH: tampered Global assignmentHash ⇒ ASSIGNMENT_HASH_TAMPERED (independent recompute, not regex/nonblank)', async () => {
+  const p = rhPatch(await rhRun(RH_ON, { extraDeps: { globalApi: rhTamperGlobalApi() } }));
+  assert.deepEqual(p, { v: 1, ok: false, hold: 'REF_HERO_V2_ASSIGNMENT_HASH_TAMPERED' });
+});
+
+// ── (RH-19) SelectionSpec V2: six-key activation against the FROZEN pins — clean round-trip OK; a re-signed
+//    (self-consistent, recomputed self-hashes) URL/refId tamper still HOLDs vs the original pins with reason
+//    pin/drift, never v2_input_keys (reviewer items 1-3). ──
+await test('RH: SelectionSpec V2 activation pins ⇒ clean round-trip OK; re-signed URL/refId tamper HOLDs vs original pins (pin/drift, not v2_input_keys)', async () => {
+  const p = rhPatch(await rhRun(RH_ON));
+  const SIX = (spec) => ({ selectionSpec: JSON.parse(JSON.stringify(spec)), selectionAuthority: JSON.parse(JSON.stringify(p.selectionAuthority)), expectedSelectionAuthorityHash: p.expectedSelectionAuthorityHash, expectedSpecHash: p.expectedSpecHash, expectedReplayHash: p.expectedReplayHash, realizedTemplate: JSON.parse(JSON.stringify(p.realizedTemplate)) });
+  // clean JSON round-trip validates against the original pins
+  const clean = rhValidateSpecV2(SIX(p.selectionSpec));
+  assert.equal(clean.ok, true, 'valid spec survives JSON round-trip against original pins');
+  // RE-SIGN a tamper: rebuild a self-consistent spec with a swapped URL (recomputed embedded hashes) via the real builder
+  const tamperBindings = p.renderBindings.map((b, i) => (i === 0 ? { ...b, imageUrl: 'https://evil/hijack.jpg' } : { ...b }));
+  const reSigned = rhBuildSpecV2({ selectionAuthority: JSON.parse(JSON.stringify(p.selectionAuthority)), expectedSelectionAuthorityHash: p.expectedSelectionAuthorityHash, renderBindings: tamperBindings, realizedTemplate: JSON.parse(JSON.stringify(p.realizedTemplate)), refId: p.selectionSpec.refId });
+  assert.equal(reSigned.ok, true, 're-signed spec is self-consistent (its own specHash/replayHash recomputed)');
+  assert.notEqual(reSigned.selectionSpec.replayHash, p.expectedReplayHash, 're-signed replayHash differs from the trusted pin');
+  const badUrl = rhValidateSpecV2(SIX(reSigned.selectionSpec)); // validate the re-signed spec against the ORIGINAL pins
+  assert.equal(badUrl.ok, false, 're-signed URL tamper HOLDs vs original pins');
+  assert.ok(badUrl.reasons.some((r) => /replay_hash|pin|drift/.test(r)) && !badUrl.reasons.includes('v2_input_keys'), `reason is pin/drift not v2_input_keys: ${JSON.stringify(badUrl.reasons)}`);
+  // re-signed refId tamper likewise HOLDs vs original specHash pin
+  const reSignedRef = rhBuildSpecV2({ selectionAuthority: JSON.parse(JSON.stringify(p.selectionAuthority)), expectedSelectionAuthorityHash: p.expectedSelectionAuthorityHash, renderBindings: p.renderBindings.map((b) => ({ ...b })), realizedTemplate: JSON.parse(JSON.stringify(p.realizedTemplate)), refId: 'ATTACKER-REF' });
+  const badRef = rhValidateSpecV2(SIX(reSignedRef.selectionSpec));
+  assert.equal(badRef.ok, false, 're-signed refId tamper HOLDs vs original pins');
+  assert.ok(badRef.reasons.some((r) => /spec_hash|pin|drift/.test(r)) && !badRef.reasons.includes('v2_input_keys'));
+});
+
+// ── (RH-20) production-level injected V2 validator rejection ⇒ producer fails closed (Fix #9) ──
+await test('RH: injected SelectionSpec V2 validator HOLD ⇒ producer SELECTION_SPEC_VALIDATE_FAILED (no partial payload)', async () => {
+  const api = { ...rhRealRefSlot, validateSelectionSpecV2Activation: () => ({ ok: false, decision: 'hold', reasons: ['v2_forced_pin'], selectionSpec: null }) };
+  const p = rhPatch(await rhRun(RH_ON, { extraDeps: { selectionAuthorityApi: api } }));
+  assert.deepEqual(p, { v: 1, ok: false, hold: 'REF_HERO_V2_SELECTION_SPEC_VALIDATE_FAILED' });
+});
+
+// ── (RH-21) coverage-preserving cap (reviewer item 5): a LOW-score required person behind >64 HIGH-score optionals is covered ──
+await test('RH: coverage-preserving cap ⇒ low-score required Nene behind >64 high-score optional candidates is still covered', async () => {
+  // principals high-score EXCEPT Nene (required, reaction, very low score). 70 high-score hero-INELIGIBLE Lisa dupes
+  //   (reaction-eligible, pruned by required coverage) would push Nene out of a naive top-64 by score.
+  const principals = RH_POOL();
+  principals.forEach((r) => { r.triage.semanticScore = 900; r.triage.qualityScore = 900; r.triage.slotFitScore = 900; });
+  principals[1].triage.semanticScore = 5; principals[1].triage.qualityScore = 5; principals[1].triage.slotFitScore = 5; // Nene = lowest
+  const dupes = Array.from({ length: 70 }, (_, i) => rhImg(`D${String(i).padStart(2, '0')}`, { person: 'Lisa', sceneKey: `sD${i}`, triageOver: { visibleBodyRegion: 'full_body', semanticScore: 800, qualityScore: 800, slotFitScore: 800 } }));
+  const p = rhPatch(await rhRun(RH_ON, { pool: [...principals, ...dupes] }));
+  assert.equal(p.ok, true, `expected coverage-preserving success (got ${p.hold || 'ok'})`);
+  const pids = new Set(p.selectionAuthority.slots.map((s) => s.personId).filter(Boolean));
+  assert.ok(pids.has(PID('Nene')), 'low-score required Nene reserved past the 64-cap and covered');
+  assert.equal(p.selectionAuthority.hero.personId, PID('Lisa'));
+});
+
+// ── realized-provenance helpers: the AUTHORITY is a module-private WeakMap in refTemplate keyed by slot OBJECT IDENTITY
+//    (realizedSlotSourceIndex); the non-enum _sourceIndex descriptor is defense-in-depth. Any clone/restamp is a NEW
+//    object absent from that WeakMap ⇒ unauthentic. rhPerfect builds a byte-perfect LOCKED clone (still unauthentic). ──
+const rhRT = await import('../src/lib/refTemplate.js');
+const rhRealized = (dna) => rhRT.dnaToTemplateSpec(dna);
+const rhSrcOf = (slot) => Object.getOwnPropertyDescriptor(slot, '_sourceIndex')?.value;
+const rhPerfect = (src, si) => { const o = {}; for (const k of Object.keys(src)) o[k] = src[k]; Object.defineProperty(o, '_sourceIndex', { value: si, enumerable: false, writable: false, configurable: false }); return o; };
+
+// ── (RH-22) proof: provenance is AUTHENTIC — WeakMap accessor returns the index for the original object, null for any clone ──
+await test('RH: provenance authority = WeakMap by object identity (accessor returns index for original slot, null for a clone); descriptor locked + invisible to JSON/keys', async () => {
+  const r = rhRealized(DNA_ALPO);
+  assert.ok(r && Array.isArray(r.slots) && r.slots.length >= 3);
+  for (const s of r.slots) {
+    const d = Object.getOwnPropertyDescriptor(s, '_sourceIndex');
+    assert.ok(d && !('get' in d) && d.enumerable === false && d.writable === false && d.configurable === false && Number.isInteger(d.value) && d.value >= 0, 'locked non-enumerable data descriptor');
+    assert.equal(rhRT.realizedSlotSourceIndex(s), d.value, 'WeakMap binds THIS object to the same index');
+    assert.ok(!Object.keys(s).includes('_sourceIndex') && !('_sourceIndex' in JSON.parse(JSON.stringify(s))), 'invisible to Object.keys / JSON (zero legacy)');
+    assert.equal(rhRT.realizedSlotSourceIndex({ ...s }), null, 'a spread CLONE is NOT authentic ⇒ null');
+    assert.equal(rhRT.realizedSlotSourceIndex(rhPerfect(s, d.value)), null, 'a byte-perfect locked clone is STILL not authentic ⇒ null');
+  }
+  assert.equal(new Set(r.slots.map(rhRT.realizedSlotSourceIndex)).size, r.slots.length, 'unique authentic index per slot');
+});
+
+// ── (RH-23) REORDER realized WITH original objects ⇒ ORDER-INVARIANT correct mapping (join by authentic sourceIndex) ──
+await test('RH: reordered realized (ORIGINAL objects) ⇒ correct order-invariant mapping (hero→main, reaction→circle); no asset switch; brain still runs', async () => {
+  const reorderDeps = { dnaToTemplateSpec: (dna) => { const r = rhRealized(dna); return { ...r, slots: r.slots.slice().reverse() }; } }; // reversed, SAME objects ⇒ authentic
+  const captures = { brainArgs: [] };
+  const p = rhPatch(await rhRun(RH_ON, { extraDeps: reorderDeps, captures }));
+  assert.equal(p.ok, true, `order-invariant success (got ${p.hold || 'ok'})`);
+  const bind = (rs) => p.renderBindings.find((b) => b.refSlotId === rs);
+  assert.equal(bind('hero').composerSlotId, 'main', 'hero pins its OWN geometry regardless of realized array order');
+  assert.equal(bind('reaction').composerSlotId, 'circle', 'reaction pins the circle regardless of position');
+  assert.equal(p.selectionAuthority.hero.candidateId, 'L1'); // no asset substitution
+  assert.equal(captures.brainArgs.length, 1, 'brain runs after the successful pre-brain gate');
+});
+
+// ── (RH-24) stripped provenance (clone, no descriptor) ⇒ HOLD — never positional/shape fallback ──
+await test('RH: realized clones with provenance STRIPPED ⇒ REALIZED_PROVENANCE_MISSING HOLD', async () => {
+  const stripDeps = { dnaToTemplateSpec: (dna) => { const r = rhRealized(dna); return { ...r, slots: r.slots.map((x) => ({ ...x })) }; } }; // spread ⇒ no _sourceIndex, not in WeakMap
+  assert.deepEqual(rhPatch(await rhRun(RH_ON, { extraDeps: stripDeps })), { v: 1, ok: false, hold: 'REF_HERO_V2_REALIZED_PROVENANCE_MISSING' });
+});
+
+// ── (RH-25) AUTHENTICITY (the core fix): byte-perfect restamp AND same-shape rect↔rect restamp ⇒ UNAUTHENTIC HOLD ──
+await test('RH: byte-perfect restamp / same-shape rect↔rect restamp ⇒ UNAUTHENTIC HOLD (WeakMap identity, not descriptor/shape)', async () => {
+  // perfect LOCKED descriptor carrying the CORRECT index, but a NEW object ⇒ absent from the WeakMap ⇒ HOLD
+  const perfectDeps = { dnaToTemplateSpec: (dna) => { const r = rhRealized(dna); return { ...r, slots: r.slots.map((x) => rhPerfect(x, rhSrcOf(x))) }; } };
+  assert.deepEqual(rhPatch(await rhRun(RH_ON, { extraDeps: perfectDeps })), { v: 1, ok: false, hold: 'REF_HERO_V2_REALIZED_PROVENANCE_UNAUTHENTIC' });
+  // SAME-SHAPE rect↔rect swap on perfect clones (shapes identical, indices swapped) ⇒ still HOLD — the gap is closed
+  const swapDeps = { dnaToTemplateSpec: (dna) => {
+    const r = rhRealized(dna); const rects = r.slots.map((s, ix) => ({ s, ix })).filter((o) => o.s.shape !== 'circle');
+    const a = rects[0].ix, b = rects[1].ix;
+    const s = r.slots.map((x) => rhPerfect(x, rhSrcOf(x)));
+    s[a] = rhPerfect(r.slots[a], rhSrcOf(r.slots[b])); s[b] = rhPerfect(r.slots[b], rhSrcOf(r.slots[a])); // rect↔rect index swap
+    return { ...r, slots: s };
+  } };
+  assert.deepEqual(rhPatch(await rhRun(RH_ON, { extraDeps: swapDeps })), { v: 1, ok: false, hold: 'REF_HERO_V2_REALIZED_PROVENANCE_UNAUTHENTIC' });
+});
+
+// ── (RH-26) mutable descriptor ⇒ DESCRIPTOR_INVALID · accessor _sourceIndex ⇒ DESCRIPTOR_INVALID with getter invocation 0 (TOCTOU) ──
+await test('RH: mutable descriptor ⇒ DESCRIPTOR_INVALID · accessor _sourceIndex ⇒ DESCRIPTOR_INVALID, getter NEVER invoked (TOCTOU-safe)', async () => {
+  const mutDeps = { dnaToTemplateSpec: (dna) => { const r = rhRealized(dna); return { ...r, slots: r.slots.map((x) => { const o = { ...x }; Object.defineProperty(o, '_sourceIndex', { value: rhSrcOf(x), enumerable: false, writable: true, configurable: true }); return o; }) }; } };
+  assert.deepEqual(rhPatch(await rhRun(RH_ON, { extraDeps: mutDeps })), { v: 1, ok: false, hold: 'REF_HERO_V2_REALIZED_PROVENANCE_DESCRIPTOR_INVALID' });
+  let gets = 0;
+  const accDeps = { dnaToTemplateSpec: (dna) => { const r = rhRealized(dna); return { ...r, slots: r.slots.map((x) => { const o = { ...x }; const v = rhSrcOf(x); Object.defineProperty(o, '_sourceIndex', { enumerable: false, configurable: true, get() { gets++; return v; } }); return o; }) }; } };
+  assert.deepEqual(rhPatch(await rhRun(RH_ON, { extraDeps: accDeps })), { v: 1, ok: false, hold: 'REF_HERO_V2_REALIZED_PROVENANCE_DESCRIPTOR_INVALID' });
+  assert.equal(gets, 0, 'accessor getter NEVER invoked (descriptor-only read ⇒ no TOCTOU)');
+});
+
+// ── (RH-26b) AUTHENTIC-CONTENT INTEGRITY (item 1): a post-capture mutation/swap of an authentic slot's live id/geometry/
+//    shape is NEVER blessed as GO — the producer descriptor-snapshots the CURRENT render fields, compares to the frozen
+//    provenance, and HOLDs on ANY divergence. A field getter is rejected WITHOUT invocation. (Reorder-of-originals GO is
+//    proven positively by RH-23 above — authentic, unmutated ⇒ still GO.) ──
+await test('RH: authentic id mutation after return ⇒ CONTENT_TAMPERED HOLD (never the stale snapshot as GO)', async () => {
+  const idMutDeps = { dnaToTemplateSpec: (dna) => { const r = rhRealized(dna); r.slots[0].id = `HIJACK-${r.slots[0].id}`; return r; } }; // same identity, live id mutated
+  assert.deepEqual(rhPatch(await rhRun(RH_ON, { extraDeps: idMutDeps })), { v: 1, ok: false, hold: 'REF_HERO_V2_REALIZED_CONTENT_TAMPERED' });
+});
+await test('RH: authentic geometry mutation after return ⇒ CONTENT_TAMPERED HOLD (valid-range value still caught by the exact compare)', async () => {
+  const geoMutDeps = { dnaToTemplateSpec: (dna) => { const r = rhRealized(dna); r.slots[0].x = (Number(r.slots[0].x) || 0) + 7; return r; } }; // +7 is in-range: proves it's the tamper compare, not a bounds check
+  assert.deepEqual(rhPatch(await rhRun(RH_ON, { extraDeps: geoMutDeps })), { v: 1, ok: false, hold: 'REF_HERO_V2_REALIZED_CONTENT_TAMPERED' });
+});
+await test('RH: authentic rect↔rect id SWAP after return ⇒ CONTENT_TAMPERED HOLD (identities preserved, content diverges)', async () => {
+  const swapIdDeps = { dnaToTemplateSpec: (dna) => {
+    const r = rhRealized(dna); const rects = r.slots.filter((s) => s.shape !== 'circle');
+    assert.ok(rects.length >= 2, 'need two rects to swap');
+    const t = rects[0].id; rects[0].id = rects[1].id; rects[1].id = t; // swap authentic live ids (same objects)
+    return r;
+  } };
+  assert.deepEqual(rhPatch(await rhRun(RH_ON, { extraDeps: swapIdDeps })), { v: 1, ok: false, hold: 'REF_HERO_V2_REALIZED_CONTENT_TAMPERED' });
+});
+await test('RH: authentic shape flip (rect→circle) after return ⇒ CONTENT_TAMPERED HOLD', async () => {
+  const shapeFlipDeps = { dnaToTemplateSpec: (dna) => { const r = rhRealized(dna); const rect = r.slots.find((s) => s.shape !== 'circle'); rect.shape = 'circle'; return r; } };
+  assert.deepEqual(rhPatch(await rhRun(RH_ON, { extraDeps: shapeFlipDeps })), { v: 1, ok: false, hold: 'REF_HERO_V2_REALIZED_CONTENT_TAMPERED' });
+});
+await test('RH: authentic live-field GETTER (id) ⇒ CONTENT_ACCESSOR HOLD, getter NEVER invoked (descriptor-only read)', async () => {
+  let gets = 0;
+  const idGetDeps = { dnaToTemplateSpec: (dna) => {
+    const r = rhRealized(dna); const s = r.slots[0]; const orig = s.id;
+    delete s.id; Object.defineProperty(s, 'id', { enumerable: true, configurable: true, get() { gets++; return `HIJACK-${orig}`; } }); // live id → counting getter
+    return r;
+  } };
+  assert.deepEqual(rhPatch(await rhRun(RH_ON, { extraDeps: idGetDeps })), { v: 1, ok: false, hold: 'REF_HERO_V2_REALIZED_CONTENT_ACCESSOR' });
+  assert.equal(gets, 0, 'live-field id getter NEVER invoked (producer descriptor-reads only)');
+});
+
+// ── (RH-26c) CONTAINER integrity (item 2): the realized `slots` container is descriptor-read exactly ONCE — a getter/
+//    accessor (incl. a TOCTOU getter returning alternating arrays) is rejected WITHOUT invocation. ──
+await test('RH: realized slots CONTAINER accessor/TOCTOU ⇒ CONTAINER_ACCESSOR HOLD, getter NEVER invoked', async () => {
+  let gets = 0;
+  const containerGetDeps = { dnaToTemplateSpec: (dna) => {
+    const r = rhRealized(dna); const realSlots = r.slots; const o = { ...r }; delete o.slots;
+    let toggle = 0;
+    Object.defineProperty(o, 'slots', { enumerable: true, configurable: true, get() { gets++; return (toggle++ % 2) ? [] : realSlots; } }); // TOCTOU: alternating arrays
+    return o;
+  } };
+  assert.deepEqual(rhPatch(await rhRun(RH_ON, { extraDeps: containerGetDeps })), { v: 1, ok: false, hold: 'REF_HERO_V2_REALIZED_CONTAINER_ACCESSOR' });
+  assert.equal(gets, 0, 'container getter NEVER invoked (single descriptor read ⇒ no TOCTOU window)');
+});
+
+// ── (RH-27) MAIN S7 CANONICAL LATCH + NO-DOWNGRADE (P0-1/P0-2): sole latch MEGA_STRICT_RENDER; V1-vs-V2 by carrier
+//    version; carrier present + latch OFF ⇒ HOLD (no downgrade); invalid carrier under latch ⇒ HOLD; slotPlan from
+//    canonical bindings (hero by heroSlotId, mandatory identity fields). ──
+const withEnvKeys = async (obj, fn) => { const ks = Object.keys(obj); const prev = ks.map((k) => process.env[k]); for (const k of ks) process.env[k] = obj[k]; try { return await fn(); } finally { ks.forEach((k, i) => { if (prev[i] === undefined) delete process.env[k]; else process.env[k] = prev[i]; }); } };
+const rhMkDeps = () => { const cap = { rawBody: null, payload: null }; return { cap, deps: {
+  slotDirectorBrain: async () => ({ slots: RH_PICKS, note: 'mock' }),
+  fetchJson: async (url, opts) => {
+    if (String(url).includes('/api/images/')) return { success: true, images: RH_POOL() };
+    if (String(url).includes('/api/queue/add')) { cap.rawBody = opts.body; cap.payload = JSON.parse(opts.body); return { success: true, jobId: 'JOB-S7W' }; }
+    throw new Error('unexpected fetch: ' + url);
+  } } }; };
+const rhJobWithCarrier = async () => { const { deps } = rhMkDeps(); const job = rhJob();
+  const s6 = await withEnvKeys(RH_ON, async () => s6_slots(job, { origin: 'http://mock', _deps: deps }));
+  assert.equal(s6.status, 'done'); assert.equal(s6.dossierPatch.pickImages.refHeroV2.ok, true, 'producer emitted a valid carrier');
+  Object.assign(job.dossier, s6.dossierPatch); return job; };
+
+await test('RH: S7 latch=MEGA_STRICT_RENDER + valid carrier ⇒ V2 enqueue; slotPlan SOLELY from canonical bindings (hero by heroSlotId, mandatory ids)', async () => {
+  const job = await rhJobWithCarrier(); const { cap, deps } = rhMkDeps();
+  const s7 = await withEnvKeys({ ...RH_ON, MEGA_STRICT_RENDER: '1' }, async () => s7_cover(job, { origin: 'http://mock', _deps: deps }));
+  assert.equal(s7.status, 'done', `V2 enqueue (got ${s7.summary})`);
+  assert.ok(cap.rawBody.includes('"refHeroV2"'), 'carrier own-key on the wire');
+  assert.equal(cap.payload.refHeroV2.selectionSpec.v, 2);
+  const sp = cap.payload.slotPlan;
+  assert.ok(Array.isArray(sp) && sp.length >= 3, 'canonical slotPlan present');
+  assert.ok(sp.every((p) => p.candidateId && p.personId && p.sourceAssetId && p.refSlotId && p.composerSlotId && p.url), 'every row carries mandatory identity fields');
+  assert.equal(sp.filter((p) => p.isHero).length, 1, 'exactly one hero row');
+  const hero = sp.find((p) => p.isHero);
+  assert.deepEqual({ r: hero.refSlotId, c: hero.composerSlotId }, { r: 'hero', c: 'main' }, 'hero by heroSlotId→composerSlotId, never /main|hero/ regex');
+  // slotPlan URLs come from the canonical spec bindings, not raw pickImages.slots
+  const specUrls = new Set(job.dossier.pickImages.refHeroV2.selectionSpec.slots.map((s) => s.primary.imageUrl));
+  assert.ok(sp.every((p) => specUrls.has(p.url)), 'slotPlan URLs derive from canonical bindings');
+});
+
+await test('RH: S7 NO-DOWNGRADE — carrier persisted but MEGA_STRICT_RENDER OFF ⇒ HOLD before queue/network (never legacy)', async () => {
+  const job = await rhJobWithCarrier(); const { cap, deps } = rhMkDeps();
+  const s7 = await withEnvKeys({ ...RH_ON }, async () => s7_cover(job, { origin: 'http://mock', _deps: deps })); // NO MEGA_STRICT_RENDER
+  assert.equal(s7.status, 'waiting', 'carrier + latch off ⇒ HOLD (no V1/legacy downgrade)');
+  assert.equal(cap.rawBody, null, 'nothing enqueued — no queue/network before the HOLD');
+});
+
+await test('RH: S7 NO-DOWNGRADE — partial/invalid carrier UNDER the latch ⇒ HOLD (never legacy)', async () => {
+  const job = await rhJobWithCarrier(); const { cap, deps } = rhMkDeps();
+  const bad = { ...job.dossier.pickImages.refHeroV2 }; delete bad.expectedSpecHash; // strip a required pin
+  job.dossier.pickImages = { ...job.dossier.pickImages, refHeroV2: bad };
+  const s7 = await withEnvKeys({ ...RH_ON, MEGA_STRICT_RENDER: '1' }, async () => s7_cover(job, { origin: 'http://mock', _deps: deps }));
+  assert.equal(s7.status, 'waiting', 'partial carrier under latch ⇒ HOLD');
+  assert.equal(cap.rawBody, null, 'nothing enqueued');
+});
+
+await test('RH: S7 NO carrier ⇒ legacy/V1 path unchanged (no refHeroV2 key; no forbidden strict alias)', async () => {
+  // strip the carrier from the S6 dossier ⇒ s7 legacy path runs; assert byte-parity (no refHeroV2) + no forbidden alias
+  const { deps } = rhMkDeps(); const job = rhJob();
+  const s6 = await withEnvKeys(RH_ON, async () => s6_slots(job, { origin: 'http://mock', _deps: deps }));
+  const pick = { ...s6.dossierPatch.pickImages }; delete pick.refHeroV2; // simulate producer OFF (no carrier)
+  Object.assign(job.dossier, { ...s6.dossierPatch, pickImages: pick });
+  const { cap, deps: deps2 } = rhMkDeps();
+  const s7 = await withEnvKeys(RH_ON, async () => s7_cover(job, { origin: 'http://mock', _deps: deps2 }));
+  assert.ok(s7.status === 'done' || s7.status === 'waiting'); // legacy outcome (no carrier gate)
+  if (cap.rawBody) assert.ok(!cap.rawBody.includes('"refHeroV2"'), 'legacy payload has no refHeroV2 key (byte parity)');
+});
+
+// ── (RH-28) EVIDENCE INTEGRITY — the V2 slotPlan must never FABRICATE triage.newsScene. The canonical RH→Cast→Global
+//    chain never carries triage.newsScene: eligibility gates only on the six readiness booleans (of which `clean` is
+//    one — so `clean:true` is genuinely derived), and _rhGlobalCandidate neither reads nor emits newsScene. This test
+//    forces EVERY eligible pool row to triage.newsScene=false so selection is guaranteed to pick false-evidence assets,
+//    runs the REAL S6 producer → S7 V2 producer, and proves the queued V2 slotPlan rows do NOT own a newsScene property
+//    and never assert true — while `clean` stays true from the eligible evidence. Regression for the removed hardcode. ──
+const rhPoolNewsSceneFalse = () => [
+  rhImg('L1', { person: 'Lisa', sceneKey: 'sceneL', triageOver: { newsScene: false } }),
+  rhImg('N1', { person: 'Nene', sceneKey: 'sceneN', triageOver: { newsScene: false } }),
+  rhImg('C1', { person: 'Ctx1', sceneKey: 'sceneC1', triageOver: { newsScene: false } }),
+  rhImg('C2', { person: 'Ctx2', sceneKey: 'sceneC2', triageOver: { newsScene: false } }),
+  rhImg('C3', { person: 'Ctx3', sceneKey: 'sceneC3', triageOver: { newsScene: false } }),
+];
+const rhMkDepsPool = (pool) => { const cap = { rawBody: null, payload: null }; return { cap, deps: {
+  slotDirectorBrain: async () => ({ slots: RH_PICKS, note: 'mock' }),
+  fetchJson: async (url, opts) => {
+    if (String(url).includes('/api/images/')) return { success: true, images: pool };
+    if (String(url).includes('/api/queue/add')) { cap.rawBody = opts.body; cap.payload = JSON.parse(opts.body); return { success: true, jobId: 'JOB-S7NS' }; }
+    throw new Error('unexpected fetch: ' + url);
+  } } }; };
+
+await test('RH: EVIDENCE INTEGRITY — every eligible asset triage.newsScene=false ⇒ queued V2 slotPlan OMITS newsScene (never owns the key, never fabricates true); clean stays true', async () => {
+  const pool = rhPoolNewsSceneFalse();
+  // premise guard: every eligible pool row genuinely carries triage.newsScene=false yet stays cast-eligible
+  assert.ok(pool.every((im) => im.triage.newsScene === false && rhElig(im.triage) === true),
+    'premise: all pool rows are triage.newsScene=false AND cast-eligible (newsScene never gates eligibility)');
+  // REAL S6 producer → valid carrier built from newsScene=false evidence
+  const s6deps = rhMkDepsPool(pool); const job = rhJob();
+  const s6 = await withEnvKeys(RH_ON, async () => s6_slots(job, { origin: 'http://mock', _deps: s6deps.deps }));
+  assert.equal(s6.status, 'done');
+  assert.equal(s6.dossierPatch.pickImages.refHeroV2.ok, true, 'producer emitted a valid carrier from newsScene=false evidence');
+  Object.assign(job.dossier, s6.dossierPatch);
+  // REAL S7 V2 producer → enqueue; capture the exact wire
+  const { cap, deps } = rhMkDepsPool(pool);
+  const s7 = await withEnvKeys({ ...RH_ON, MEGA_STRICT_RENDER: '1' }, async () => s7_cover(job, { origin: 'http://mock', _deps: deps }));
+  assert.equal(s7.status, 'done', `V2 enqueue (got ${s7.summary})`);
+  const sp = cap.payload.slotPlan;
+  assert.ok(Array.isArray(sp) && sp.length >= 3, 'canonical slotPlan present');
+  // ★ integrity: no row OWNS a newsScene property (omitted, not fabricated) and none asserts true
+  assert.ok(sp.every((p) => !Object.prototype.hasOwnProperty.call(p, 'newsScene')),
+    'no V2 slotPlan row owns a newsScene property (omitted — reaches consumer as unknown/null)');
+  assert.ok(sp.every((p) => p.newsScene !== true), 'no V2 slotPlan row fabricates newsScene=true');
+  // ★ clean genuinely derived: every eligible tuple cleared the six-field readiness (incl. clean)
+  assert.ok(sp.every((p) => p.clean === true), 'clean stays true from eligible evidence');
+  // ★ the serialized wire bytes carry no newsScene key in any slotPlan row either
+  const wire = JSON.parse(cap.rawBody);
+  assert.ok(wire.slotPlan.every((p) => !Object.prototype.hasOwnProperty.call(p, 'newsScene')),
+    'serialized wire slotPlan rows carry no newsScene key');
+});
 console.log(`1..${passed}`);

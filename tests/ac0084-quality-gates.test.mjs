@@ -74,6 +74,26 @@ import {
 } from '../scripts/test-ac0084-strict-canary.mjs';
 // AC-0099 LANE-B: the canonical strict-latch resolver under test (pure, from the contract).
 import { resolveStrictLatches, STRICT_LATCH_KEYS } from '../src/lib/refSlotContract.js';
+// WAVE1C: SelectionAuthority v1 + SelectionSpec v2 — DIRECT imports of the REAL
+// contract functions (never a re-implemented copy). validateStrictRenderActivation
+// is imported too, to prove the versioned dispatcher delegates to it verbatim.
+import {
+  SELECTION_AUTHORITY_VERSION,
+  SELECTION_SPEC_V2_VERSION,
+  buildSelectionAuthorityV1,
+  validateSelectionAuthorityV1,
+  buildSelectionSpecV2,
+  validateSelectionSpecV2Activation,
+  validateStrictRenderActivationVersioned,
+  validateStrictRenderActivation,
+} from '../src/lib/refSlotContract.js';
+import { createHash as _wave1cCreateHash } from 'node:crypto';
+// WAVE1C #7 — READ-ONLY imports of the frozen foundation modules, used ONLY by the
+// cross-foundation handshake test to source REAL authority hashes (never edited here).
+import { buildHeroShotContract } from '../src/lib/heroShotContract.js';
+import { buildStoryReferenceAuthorityContract } from '../src/lib/storyReferenceAuthority.js';
+import { buildCastManifest, hashCastManifest, validateCastManifestStructure, assertCastManifestIntegrity } from '../src/lib/castManifest.js';
+import { buildSemanticGlobalAssignment } from '../src/lib/semanticGlobalAssignment.js';
 
 // ------------------------------------------------------------
 // Shared identity — one set of ids/urls used by the spec, the response, the golden
@@ -1088,5 +1108,849 @@ test('REQUIRED(P1): main() runs the outer 1:1 check in the LIVE path — malform
     for (const [k, v] of [['AC0084_PAYLOAD_JSON', saved.pj], ['AC0084_GOLDEN_JSON', saved.gj], ['AC0084_PAYLOAD_FILE', saved.pf], ['AC0084_GOLDEN_FILE', saved.gf], ['MEGA_STRICT_RENDER', saved.strict]]) {
       if (v === undefined) delete process.env[k]; else process.env[k] = v;
     }
+  }
+});
+
+// ============================================================
+// 🔐 WAVE1C — SelectionAuthority v1 + SelectionSpec v2 (corrective pass)
+// ------------------------------------------------------------
+// Direct-import suite over the REAL contract functions. Authority hashes on the
+// happy paths are derived by an INDEPENDENT canonicalizer here (_w1cSha, over
+// node:crypto — allowed in the test), so the impl's pure SHA-256 is cross-checked
+// against the standard, and V2 activation is externally PINNED.
+// ============================================================
+
+function _w1cSortDeep(v) {
+  if (Array.isArray(v)) return v.map(_w1cSortDeep);
+  if (v !== null && typeof v === 'object') {
+    const o = {};
+    for (const k of Object.keys(v).sort()) o[k] = _w1cSortDeep(v[k]);
+    return o;
+  }
+  return v;
+}
+const _w1cSha = (obj) => _wave1cCreateHash('sha256').update(JSON.stringify(_w1cSortDeep(obj)), 'utf8').digest('hex');
+const _w1cClone = (o) => JSON.parse(JSON.stringify(o));
+const _w1cNUL = String.fromCharCode(0);
+
+// Pure-SHA-256 evidence chain (see the 'W1C #2' tests below): (a) the node:crypto
+// oracle used here is pinned to the NIST SHA-256 known-answer vectors (KAT test);
+// (b) the impl's authority hash is proven byte-identical to that oracle across a
+// message-length/padding + multi-byte-UTF-8 sweep. Together these establish that the
+// impl computes genuine SHA-256 — with NO test-only production export.
+const W1C_STORY = 'a1'.repeat(32);  // 64 hex — SHA-256-shaped (story authority)
+const W1C_CAST = 'b2'.repeat(32);   // 64 hex (cast manifest)
+const W1C_ASSIGN = 'c3'.repeat(32); // 64 hex (global assignment)
+const W1C_HEROHASH = '1a2b3c4d';    // 8 hex — fnv1a32-shaped (hero contract)
+
+const W1C_SLOTS = Object.freeze([
+  { refSlotId: 'hero', order: 1, role: 'hero', shape: 'rect', personId: 'p1', candidateId: 'c1', sourceAssetId: 's1' },
+  { refSlotId: 'circle', order: 2, role: 'circle', shape: 'circle', personId: 'p2', candidateId: 'c2', sourceAssetId: 's2' },
+  { refSlotId: 'reaction', order: 3, role: 'reaction', shape: 'rect', personId: null, candidateId: 'c3', sourceAssetId: 's3' },
+  { refSlotId: 'context', order: 4, role: 'context', shape: 'rect', personId: 'p4', candidateId: 'c4', sourceAssetId: 's4' },
+]);
+const W1C_HERO = Object.freeze({ heroContractHash: W1C_HEROHASH, refSlotId: 'hero', personId: 'p1', candidateId: 'c1', sourceAssetId: 's1' });
+const W1C_EXPECTED_SEL = _w1cSha({ v: 1, storyAuthorityHash: W1C_STORY, castManifestHash: W1C_CAST, assignmentHash: W1C_ASSIGN, hero: W1C_HERO, slots: W1C_SLOTS });
+const W1C_SPEC_KEYS = ['v', 'mode', 'source', 'refId', 'strictReady', 'authority', 'hero', 'canvas', 'counts', 'diagnostics', 'specHash', 'replayHash', 'slots'];
+
+function w1cBuildInput(over = {}) {
+  return {
+    storyAuthorityHash: W1C_STORY, castManifestHash: W1C_CAST, assignmentHash: W1C_ASSIGN,
+    hero: _w1cClone(W1C_HERO), slots: _w1cClone(W1C_SLOTS),
+    expectedSelectionAuthorityHash: W1C_EXPECTED_SEL,
+    expectedStoryAuthorityHash: W1C_STORY, expectedCastManifestHash: W1C_CAST,
+    expectedAssignmentHash: W1C_ASSIGN, expectedHeroContractHash: W1C_HEROHASH,
+    ...over,
+  };
+}
+function w1cValidateInput(env, over = {}) {
+  return {
+    selectionAuthority: env, expectedSelectionAuthorityHash: W1C_EXPECTED_SEL,
+    expectedStoryAuthorityHash: W1C_STORY, expectedCastManifestHash: W1C_CAST,
+    expectedAssignmentHash: W1C_ASSIGN, expectedHeroContractHash: W1C_HEROHASH, ...over,
+  };
+}
+function w1cAuthority() {
+  const r = buildSelectionAuthorityV1(w1cBuildInput());
+  assert.equal(r.ok, true, `baseline authority must build: ${JSON.stringify(r.reasons)}`);
+  return r.selectionAuthority;
+}
+
+const W1C_REALIZED = Object.freeze({
+  templateId: 'ref_dna', canvasW: 1080, canvasH: 1350, feather: 22,
+  slots: [
+    { id: 'main', x: 0, y: 0, w: 1080, h: 700, zIndex: 0, border: false, borderWidth: 0, shape: 'rect' },
+    { id: 'circle', x: 60, y: 720, w: 300, h: 300, zIndex: 4, border: true, borderWidth: 16, shape: 'circle' },
+    { id: 'reaction_2', x: 400, y: 720, w: 620, h: 300, zIndex: 0, border: false, borderWidth: 0, shape: 'rect' },
+    { id: 'context_3', x: 0, y: 1040, w: 1080, h: 310, zIndex: 0, border: false, borderWidth: 0, shape: 'rect' },
+  ],
+});
+const W1C_BINDINGS = Object.freeze([
+  { refSlotId: 'hero', composerSlotId: 'main', candidateId: 'c1', sourceAssetId: 's1', imageUrl: 'https://cdn/h.jpg' },
+  { refSlotId: 'circle', composerSlotId: 'circle', candidateId: 'c2', sourceAssetId: 's2', imageUrl: 'https://cdn/c.jpg' },
+  { refSlotId: 'reaction', composerSlotId: 'reaction_2', candidateId: 'c3', sourceAssetId: 's3', imageUrl: 'https://cdn/r.jpg' },
+  { refSlotId: 'context', composerSlotId: 'context_3', candidateId: 'c4', sourceAssetId: 's4', imageUrl: 'https://cdn/x.jpg' },
+]);
+function w1cV2Input(over = {}) {
+  return {
+    selectionAuthority: w1cAuthority(), expectedSelectionAuthorityHash: W1C_EXPECTED_SEL,
+    renderBindings: _w1cClone(W1C_BINDINGS), realizedTemplate: _w1cClone(W1C_REALIZED), refId: 'AC-W1C', ...over,
+  };
+}
+function w1cSpec() {
+  const r = buildSelectionSpecV2(w1cV2Input());
+  assert.equal(r.ok, true, `baseline v2 spec must build: ${JSON.stringify(r.reasons)}`);
+  return r.selectionSpec;
+}
+// Clean external pins for activation, from a fresh deterministic build.
+function w1cCleanPins() { const s = w1cSpec(); return { expectedSpecHash: s.specHash, expectedReplayHash: s.replayHash }; }
+// Activate a (possibly tampered) spec against the CLEAN external pins by default.
+function w1cActivate(spec, over = {}) {
+  const pins = w1cCleanPins();
+  return validateSelectionSpecV2Activation({
+    selectionSpec: spec, selectionAuthority: w1cAuthority(), expectedSelectionAuthorityHash: W1C_EXPECTED_SEL,
+    expectedSpecHash: pins.expectedSpecHash, expectedReplayHash: pins.expectedReplayHash,
+    realizedTemplate: _w1cClone(W1C_REALIZED), ...over,
+  });
+}
+// Independent recompute of a spec's specHash/replayHash from the documented payload.
+function _w1cV2Hashes(s) {
+  const identity = s.slots.map((sl) => ({
+    refSlotId: sl.refSlotId, composerSlotId: sl.composerSlotId, order: sl.order, role: sl.role, shape: sl.shape,
+    render: { x: sl.render.x, y: sl.render.y, w: sl.render.w, h: sl.render.h, zIndex: sl.render.zIndex, border: sl.render.border, borderWidth: sl.render.borderWidth },
+    primary: { personId: sl.primary.personId, candidateId: sl.primary.candidateId, sourceAssetId: sl.primary.sourceAssetId },
+  }));
+  const sp = {
+    v: 2, refId: s.refId,
+    authority: { selectionAuthorityHash: s.authority.selectionAuthorityHash, storyAuthorityHash: s.authority.storyAuthorityHash, castManifestHash: s.authority.castManifestHash, assignmentHash: s.authority.assignmentHash, heroContractHash: s.authority.heroContractHash },
+    hero: { heroSlotId: s.hero.heroSlotId, personId: s.hero.personId, candidateId: s.hero.candidateId, sourceAssetId: s.hero.sourceAssetId },
+    canvas: { templateId: s.canvas.templateId, canvasW: s.canvas.canvasW, canvasH: s.canvas.canvasH, feather: s.canvas.feather },
+    slots: identity,
+  };
+  return { specHash: _w1cSha(sp), replayHash: _w1cSha({ ...sp, urls: s.slots.map((sl) => ({ refSlotId: sl.refSlotId, imageUrl: sl.primary.imageUrl })) }) };
+}
+// Re-sign a mutated spec so its embedded hashes match its (tampered) contents.
+function _w1cReSign(s) { const h = _w1cV2Hashes(s); s.specHash = h.specHash; s.replayHash = h.replayHash; return s; }
+
+function w1cAssertNoEcho(reasons, secret) {
+  assert.ok(Array.isArray(reasons) && reasons.length > 0, 'reasons must be a non-empty array');
+  for (const r of reasons) {
+    assert.equal(typeof r, 'string', `reason must be a string, got ${typeof r}`);
+    assert.ok(!r.includes(secret), `reason must not echo caller data: ${JSON.stringify(r)}`);
+  }
+}
+const w1cHas = (reasons, code) => reasons.some((r) => r === code || r.startsWith(`${code}:`));
+
+// ---- version constants + pure-SHA256 reference cross-check ----
+test('W1C: version constants are exactly 1 and 2', () => {
+  assert.equal(SELECTION_AUTHORITY_VERSION, 1);
+  assert.equal(SELECTION_SPEC_V2_VERSION, 2);
+});
+test('W1C: impl pure SHA-256 equals node:crypto (authority hash is byte-identical to the reference)', () => {
+  // If the pure implementation diverged from real SHA-256, the builder could not
+  // reproduce W1C_EXPECTED_SEL (computed via node:crypto) and would HOLD.
+  const r = buildSelectionAuthorityV1(w1cBuildInput());
+  assert.equal(r.ok, true);
+  assert.equal(r.selectionAuthority.selectionAuthorityHash, W1C_EXPECTED_SEL);
+  assert.match(r.selectionAuthority.selectionAuthorityHash, /^[0-9a-f]{64}$/);
+});
+test('W1C #2 KAT: the node:crypto oracle satisfies the NIST SHA-256 known-answer vectors', () => {
+  // Literal known-answer pin for the differential oracle: sha256("abc") and sha256("").
+  assert.equal(_wave1cCreateHash('sha256').update('abc', 'utf8').digest('hex'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  assert.equal(_wave1cCreateHash('sha256').update('', 'utf8').digest('hex'), 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+});
+
+// ---- SelectionAuthority v1 — happy path ----
+test('W1C SA-v1: happy path assigns; envelope exact-shaped; hero personId preserved', () => {
+  const r = buildSelectionAuthorityV1(w1cBuildInput());
+  assert.equal(r.ok, true);
+  assert.equal(r.decision, 'assigned');
+  const env = r.selectionAuthority;
+  assert.deepEqual(Object.keys(env).sort(), ['assignmentHash', 'castManifestHash', 'hero', 'selectionAuthorityHash', 'slots', 'storyAuthorityHash', 'v'].sort());
+  assert.equal(env.v, 1);
+  assert.equal(env.hero.personId, 'p1');
+  assert.equal(env.slots[2].personId, null); // non-hero slot may be null
+});
+test('W1C SA-v1: builder success shape (no reasons key); hold shape (reasons + null)', () => {
+  assert.deepEqual(Object.keys(buildSelectionAuthorityV1(w1cBuildInput())).sort(), ['decision', 'ok', 'selectionAuthority']);
+  const bad = buildSelectionAuthorityV1(w1cBuildInput({ slots: [] }));
+  assert.equal(bad.ok, false); assert.equal(bad.decision, 'hold'); assert.equal(bad.selectionAuthority, null);
+  assert.ok(Array.isArray(bad.reasons));
+});
+test('W1C SA-v1: deep-frozen envelope; caller cannot mutate it back into the contract', () => {
+  const env = w1cAuthority();
+  assert.throws(() => { env.slots.push({}); });
+  assert.throws(() => { env.hero.candidateId = 'x'; });
+  assert.ok(Object.isFrozen(env) && Object.isFrozen(env.slots) && Object.isFrozen(env.slots[0]) && Object.isFrozen(env.hero));
+});
+test('W1C SA-v1: mutating caller input after build never changes the frozen output', () => {
+  const input = w1cBuildInput();
+  const r = buildSelectionAuthorityV1(input);
+  const before = JSON.stringify(r.selectionAuthority);
+  input.slots[0].candidateId = 'HACKED'; input.hero.personId = 'HACKED'; input.storyAuthorityHash = 'deadbeef';
+  assert.equal(JSON.stringify(r.selectionAuthority), before);
+});
+test('W1C SA-v1: validator round-trips a freshly built envelope', () => {
+  const v = validateSelectionAuthorityV1(w1cValidateInput(w1cAuthority()));
+  assert.equal(v.ok, true); assert.equal(v.decision, 'assigned');
+  assert.equal(v.selectionAuthority.selectionAuthorityHash, W1C_EXPECTED_SEL);
+});
+
+// ---- #7 permutation honesty: OBJECT KEY order permutes; SLOT ARRAY order is canonical ----
+test('W1C SA-v1: deterministic under OBJECT-KEY permutation (slot array order is NOT permuted)', () => {
+  const permInput = {
+    expectedHeroContractHash: W1C_HEROHASH,
+    slots: W1C_SLOTS.map((s) => ({ sourceAssetId: s.sourceAssetId, candidateId: s.candidateId, personId: s.personId, shape: s.shape, role: s.role, order: s.order, refSlotId: s.refSlotId })),
+    hero: { sourceAssetId: W1C_HERO.sourceAssetId, candidateId: W1C_HERO.candidateId, personId: W1C_HERO.personId, refSlotId: W1C_HERO.refSlotId, heroContractHash: W1C_HERO.heroContractHash },
+    expectedAssignmentHash: W1C_ASSIGN, expectedCastManifestHash: W1C_CAST, expectedStoryAuthorityHash: W1C_STORY,
+    expectedSelectionAuthorityHash: W1C_EXPECTED_SEL, assignmentHash: W1C_ASSIGN, castManifestHash: W1C_CAST, storyAuthorityHash: W1C_STORY,
+  };
+  const a = buildSelectionAuthorityV1(w1cBuildInput());
+  const b = buildSelectionAuthorityV1(permInput);
+  assert.equal(b.ok, true);
+  assert.equal(JSON.stringify(a.selectionAuthority), JSON.stringify(b.selectionAuthority));
+});
+test('W1C SA-v1: reversed slot ARRAY (descending order) ⇒ HOLD (canonical ascending required)', () => {
+  const slots = _w1cClone(W1C_SLOTS).reverse(); // orders now 4,3,2,1
+  const r = buildSelectionAuthorityV1(w1cBuildInput({ slots }));
+  assert.equal(r.ok, false);
+  assert.ok(w1cHas(r.reasons, 'sa_order_not_ascending'));
+});
+
+// ---- #3 EXACT foundation hash grammars (builder + validator) ----
+const _W1C_BAD64 = { short: 'a'.repeat(63), long: 'a'.repeat(65), upper: 'A'.repeat(64), nonhex: 'g'.repeat(64) };
+const _W1C_BAD8 = { short: 'a'.repeat(7), long: 'a'.repeat(9), upper: 'AABBCCDD', nonhex: 'gggggggg' };
+for (const field of ['storyAuthorityHash', 'castManifestHash', 'assignmentHash']) {
+  for (const [kind, bad] of Object.entries(_W1C_BAD64)) {
+    test(`W1C #3 builder: ${field} ${kind} (not 64 lc hex) ⇒ HOLD`, () => {
+      assert.equal(buildSelectionAuthorityV1(w1cBuildInput({ [field]: bad, [`expected${field[0].toUpperCase()}${field.slice(1)}`]: bad })).ok, false);
+    });
+    test(`W1C #3 validator: envelope ${field} ${kind} ⇒ HOLD`, () => {
+      const env = _w1cClone(w1cAuthority()); env[field] = bad;
+      assert.equal(validateSelectionAuthorityV1(w1cValidateInput(env)).ok, false);
+    });
+  }
+}
+for (const [kind, bad] of Object.entries(_W1C_BAD8)) {
+  test(`W1C #3 builder: heroContractHash ${kind} (not 8 lc hex) ⇒ HOLD`, () => {
+    const hero = { ..._w1cClone(W1C_HERO), heroContractHash: bad };
+    assert.equal(buildSelectionAuthorityV1(w1cBuildInput({ hero, expectedHeroContractHash: bad })).ok, false);
+  });
+  test(`W1C #3 validator: envelope heroContractHash ${kind} ⇒ HOLD`, () => {
+    const env = _w1cClone(w1cAuthority()); env.hero.heroContractHash = bad;
+    assert.equal(validateSelectionAuthorityV1(w1cValidateInput(env, { expectedHeroContractHash: bad })).ok, false);
+  });
+}
+test('W1C #3: 64-hex hero hash rejected (must be 8), 8-hex story hash rejected (must be 64)', () => {
+  const hero64 = { ..._w1cClone(W1C_HERO), heroContractHash: 'a'.repeat(64) };
+  assert.equal(buildSelectionAuthorityV1(w1cBuildInput({ hero: hero64, expectedHeroContractHash: 'a'.repeat(64) })).ok, false);
+  assert.equal(buildSelectionAuthorityV1(w1cBuildInput({ storyAuthorityHash: '1a2b3c4d', expectedStoryAuthorityHash: '1a2b3c4d' })).ok, false);
+});
+test('W1C #3 validator: envelope selectionAuthorityHash wrong width ⇒ HOLD', () => {
+  const env = _w1cClone(w1cAuthority()); env.selectionAuthorityHash = 'a'.repeat(63);
+  assert.equal(validateSelectionAuthorityV1(w1cValidateInput(env)).ok, false);
+});
+
+// ---- #4 HERO identity nonnull ----
+test('W1C #4 builder: hero.personId null ⇒ HOLD (authoritative hero identity required)', () => {
+  const r = buildSelectionAuthorityV1(w1cBuildInput({ hero: { ..._w1cClone(W1C_HERO), personId: null } }));
+  assert.equal(r.ok, false);
+  assert.ok(w1cHas(r.reasons, 'sa_hero_personId_required'));
+});
+test('W1C #4 builder: hero.personId empty string ⇒ HOLD', () => {
+  assert.equal(buildSelectionAuthorityV1(w1cBuildInput({ hero: { ..._w1cClone(W1C_HERO), personId: '' } })).ok, false);
+});
+test('W1C #4 validator: envelope hero.personId null ⇒ HOLD', () => {
+  const env = _w1cClone(w1cAuthority()); env.hero.personId = null;
+  assert.equal(validateSelectionAuthorityV1(w1cValidateInput(env)).ok, false);
+});
+test('W1C #4: non-hero slot personId may be null (contract permits) — baseline reaction slot is null', () => {
+  assert.equal(w1cAuthority().slots[2].personId, null);
+});
+
+// ---- SA-v1 tamper (every hash + hero field) ----
+for (const field of ['storyAuthorityHash', 'castManifestHash', 'assignmentHash']) {
+  test(`W1C SA-v1 tamper: body ${field} != expected ⇒ HOLD`, () => {
+    const other = field === 'storyAuthorityHash' ? 'f'.repeat(64) : (field === 'castManifestHash' ? 'e'.repeat(64) : 'd'.repeat(64));
+    const r = buildSelectionAuthorityV1(w1cBuildInput({ [field]: other }));
+    assert.equal(r.ok, false); assert.equal(r.selectionAuthority, null);
+  });
+}
+test('W1C SA-v1 tamper: wrong expectedSelectionAuthorityHash ⇒ HOLD', () => {
+  const r = buildSelectionAuthorityV1(w1cBuildInput({ expectedSelectionAuthorityHash: '0'.repeat(64) }));
+  assert.equal(r.ok, false);
+  assert.ok(w1cHas(r.reasons, 'sa_selection_hash_expected_mismatch'));
+});
+test('W1C SA-v1 validator tamper: flipped embedded selectionAuthorityHash ⇒ self-mismatch HOLD', () => {
+  const env = _w1cClone(w1cAuthority()); env.selectionAuthorityHash = 'e'.repeat(64);
+  const v = validateSelectionAuthorityV1(w1cValidateInput(env));
+  assert.equal(v.ok, false); assert.ok(w1cHas(v.reasons, 'sa_selection_hash_self_mismatch'));
+});
+for (const hf of ['personId', 'candidateId', 'sourceAssetId', 'refSlotId']) {
+  test(`W1C SA-v1 validator tamper: hero.${hf} changed ⇒ HOLD`, () => {
+    const env = _w1cClone(w1cAuthority()); env.hero[hf] = 'TAMPER';
+    assert.equal(validateSelectionAuthorityV1(w1cValidateInput(env)).ok, false);
+  });
+}
+
+// ---- SA-v1 slot invariants ----
+test('W1C SA-v1: non-contiguous order [1,2,4] ⇒ HOLD', () => {
+  const slots = _w1cClone(W1C_SLOTS); slots[3].order = 5;
+  assert.ok(w1cHas(buildSelectionAuthorityV1(w1cBuildInput({ slots })).reasons, 'sa_order_not_contiguous'));
+});
+test('W1C SA-v1: non-ascending order ⇒ HOLD', () => {
+  const slots = _w1cClone(W1C_SLOTS); [slots[0].order, slots[1].order] = [2, 1];
+  assert.ok(w1cHas(buildSelectionAuthorityV1(w1cBuildInput({ slots })).reasons, 'sa_order_not_ascending'));
+});
+test('W1C SA-v1: duplicate refSlotId / candidateId / sourceAssetId ⇒ HOLD', () => {
+  const a = _w1cClone(W1C_SLOTS); a[1].refSlotId = 'hero';
+  assert.ok(w1cHas(buildSelectionAuthorityV1(w1cBuildInput({ slots: a })).reasons, 'sa_dup_refSlotId'));
+  const b = _w1cClone(W1C_SLOTS); b[1].candidateId = 'c1';
+  assert.ok(w1cHas(buildSelectionAuthorityV1(w1cBuildInput({ slots: b })).reasons, 'sa_dup_candidateId'));
+  const c = _w1cClone(W1C_SLOTS); c[1].sourceAssetId = 's1';
+  assert.ok(w1cHas(buildSelectionAuthorityV1(w1cBuildInput({ slots: c })).reasons, 'sa_dup_sourceAssetId'));
+});
+test('W1C SA-v1: empty slots ⇒ HOLD; bad shape ⇒ HOLD; empty slot personId string ⇒ HOLD', () => {
+  assert.ok(w1cHas(buildSelectionAuthorityV1(w1cBuildInput({ slots: [] })).reasons, 'sa_slots_empty'));
+  const s1 = _w1cClone(W1C_SLOTS); s1[1].shape = 'hexagon';
+  assert.ok(w1cHas(buildSelectionAuthorityV1(w1cBuildInput({ slots: s1 })).reasons, 'sa_slot_shape'));
+  const s2 = _w1cClone(W1C_SLOTS); s2[2].personId = '';
+  assert.ok(w1cHas(buildSelectionAuthorityV1(w1cBuildInput({ slots: s2 })).reasons, 'sa_slot_personId'));
+});
+test('W1C SA-v1: hero.refSlotId with no matching row ⇒ HOLD; hero tuple disagreement ⇒ HOLD', () => {
+  assert.ok(w1cHas(buildSelectionAuthorityV1(w1cBuildInput({ hero: { ..._w1cClone(W1C_HERO), refSlotId: 'ghost' } })).reasons, 'sa_hero_no_row_match'));
+  assert.ok(w1cHas(buildSelectionAuthorityV1(w1cBuildInput({ hero: { ..._w1cClone(W1C_HERO), candidateId: 'nope' }, expectedSelectionAuthorityHash: '0'.repeat(64) })).reasons, 'sa_hero_tuple_mismatch'));
+});
+
+// ---- #6 bounds + hostile inputs (no echo, no getter, no throw) ----
+test('W1C #6 SA-v1: 9 slots exceeds SA_MAX_SLOTS ⇒ HOLD sa_slots_too_many (bounded before iteration)', () => {
+  const many = [];
+  for (let i = 1; i <= 9; i++) many.push({ refSlotId: `r${i}`, order: i, role: 'reaction', shape: 'rect', personId: null, candidateId: `c${i}`, sourceAssetId: `s${i}` });
+  assert.ok(w1cHas(buildSelectionAuthorityV1(w1cBuildInput({ slots: many })).reasons, 'sa_slots_too_many'));
+});
+test('W1C SA-v1: Proxy input ⇒ HOLD, never throws, no echo', () => {
+  const SECRET = 'PROXY_SECRET_9f';
+  const r = buildSelectionAuthorityV1(new Proxy(w1cBuildInput({ storyAuthorityHash: SECRET }), {}));
+  assert.equal(r.ok, false); w1cAssertNoEcho(r.reasons, SECRET);
+});
+test('W1C SA-v1: accessor(getter) slot field ⇒ HOLD, getter never invoked, no echo', () => {
+  const SECRET = 'GETTER_SECRET_ab';
+  const input = w1cBuildInput();
+  let invoked = false;
+  Object.defineProperty(input.slots[0], 'candidateId', { get() { invoked = true; return SECRET; }, enumerable: true, configurable: true });
+  const r = buildSelectionAuthorityV1(input);
+  assert.equal(r.ok, false); assert.equal(invoked, false); w1cAssertNoEcho(r.reasons, SECRET);
+});
+test('W1C SA-v1: symbol key / sparse hole / control char / cycle ⇒ HOLD, no echo', () => {
+  const sym = w1cBuildInput(); sym[Symbol('x')] = 'SYMBOL_SECRET';
+  assert.equal(buildSelectionAuthorityV1(sym).ok, false);
+  const sp = _w1cClone(W1C_SLOTS); delete sp[2];
+  assert.equal(buildSelectionAuthorityV1(w1cBuildInput({ slots: sp })).ok, false);
+  const ctl = _w1cClone(W1C_SLOTS); ctl[0].candidateId = `c1${_w1cNUL}evil`;
+  const rc = buildSelectionAuthorityV1(w1cBuildInput({ slots: ctl }));
+  assert.equal(rc.ok, false); w1cAssertNoEcho(rc.reasons, `c1${_w1cNUL}evil`);
+  const cyc = {}; cyc.self = cyc; const cs = _w1cClone(W1C_SLOTS); cs[0] = cyc;
+  assert.equal(buildSelectionAuthorityV1(w1cBuildInput({ slots: cs })).ok, false);
+});
+test('W1C #6 SA-v1: exotic-prototype slot (class instance) ⇒ HOLD (prototype rejected)', () => {
+  class Row {}
+  const inst = Object.assign(new Row(), { refSlotId: 'hero', order: 1, role: 'hero', shape: 'rect', personId: 'p1', candidateId: 'c1', sourceAssetId: 's1' });
+  const slots = _w1cClone(W1C_SLOTS); slots[0] = inst;
+  assert.ok(w1cHas(buildSelectionAuthorityV1(w1cBuildInput({ slots })).reasons, 'sa_slot_keys'));
+});
+test('W1C #6 SA-v1: non-enumerable own data property on a slot ⇒ HOLD', () => {
+  const slots = _w1cClone(W1C_SLOTS);
+  Object.defineProperty(slots[0], 'hidden', { value: 1, enumerable: false, configurable: true });
+  assert.ok(w1cHas(buildSelectionAuthorityV1(w1cBuildInput({ slots })).reasons, 'sa_slot_keys'));
+});
+test('W1C #6 SA-v1: exotic-prototype top-level input ⇒ HOLD', () => {
+  class In {}
+  assert.equal(buildSelectionAuthorityV1(Object.assign(new In(), w1cBuildInput())).ok, false);
+});
+
+// ---- SelectionSpec v2 happy + independent hash oracle (#7) ----
+test('W1C SS-v2: happy path builds a fully-shaped, deep-frozen spec; specHash/replayHash match INDEPENDENT oracle', () => {
+  const s = w1cSpec();
+  assert.deepEqual(Object.keys(s).sort(), W1C_SPEC_KEYS.slice().sort());
+  assert.equal(s.v, 2); assert.equal(s.mode, 'semantic_global_exact'); assert.equal(s.source, 'selection_authority');
+  assert.equal(s.strictReady, true); assert.equal(s.refId, 'AC-W1C');
+  assert.equal(s.hero.heroSlotId, 'hero'); assert.equal(s.hero.personId, 'p1');
+  assert.equal(s.authority.selectionAuthorityHash, W1C_EXPECTED_SEL);
+  const exp = _w1cV2Hashes(s);
+  assert.equal(s.specHash, exp.specHash, 'specHash must equal independent documented-payload SHA-256');
+  assert.equal(s.replayHash, exp.replayHash, 'replayHash must equal independent documented-payload SHA-256');
+  assert.notEqual(s.specHash, s.replayHash);
+  assert.deepEqual(s.counts, { total: 4, mapped: 4, unmapped: 0, missingPrimary: 0, duplicateCandidate: 0, duplicateSourceAsset: 0, duplicatePrimaryUrl: 0, semanticFallback: 0 });
+  assert.deepEqual(s.diagnostics, { codes: [] });
+  for (const sl of s.slots) assert.deepEqual(sl.backups, []);
+  assert.deepEqual(s.slots[1].render, { x: 60, y: 720, w: 300, h: 300, zIndex: 4, border: true, borderWidth: 16 });
+  assert.throws(() => { s.slots.push({}); });
+});
+test('W1C SS-v2: deterministic under binding array + key permutation', () => {
+  const base = w1cSpec();
+  const permBindings = [W1C_BINDINGS[3], W1C_BINDINGS[0], W1C_BINDINGS[2], W1C_BINDINGS[1]]
+    .map((b) => ({ imageUrl: b.imageUrl, sourceAssetId: b.sourceAssetId, candidateId: b.candidateId, composerSlotId: b.composerSlotId, refSlotId: b.refSlotId }));
+  const r = buildSelectionSpecV2(w1cV2Input({ renderBindings: permBindings }));
+  assert.equal(r.ok, true);
+  assert.equal(JSON.stringify(r.selectionSpec), JSON.stringify(base));
+});
+test('W1C SS-v2: URL-only change moves replayHash but NOT specHash', () => {
+  const base = w1cSpec();
+  const bindings = _w1cClone(W1C_BINDINGS); bindings[0].imageUrl = 'https://cdn/h-DIFFERENT.jpg';
+  const r = buildSelectionSpecV2(w1cV2Input({ renderBindings: bindings }));
+  assert.equal(r.ok, true);
+  assert.equal(r.selectionSpec.specHash, base.specHash);
+  assert.notEqual(r.selectionSpec.replayHash, base.replayHash);
+});
+test('W1C SS-v2: geometry change moves specHash; identity change moves specHash', () => {
+  const base = w1cSpec();
+  const realized = _w1cClone(W1C_REALIZED); realized.slots[0].w = 1000; // on-canvas (0+1000<=1080), still moves geometry
+  assert.notEqual(buildSelectionSpecV2(w1cV2Input({ realizedTemplate: realized })).selectionSpec.specHash, base.specHash);
+  const slots = _w1cClone(W1C_SLOTS); slots[0].candidateId = 'c1x';
+  const hero = { ..._w1cClone(W1C_HERO), candidateId: 'c1x' };
+  const expSel = _w1cSha({ v: 1, storyAuthorityHash: W1C_STORY, castManifestHash: W1C_CAST, assignmentHash: W1C_ASSIGN, hero, slots });
+  const authRes = buildSelectionAuthorityV1(w1cBuildInput({ slots, hero, expectedSelectionAuthorityHash: expSel }));
+  const bindings = _w1cClone(W1C_BINDINGS); bindings[0].candidateId = 'c1x';
+  const r = buildSelectionSpecV2({ selectionAuthority: authRes.selectionAuthority, expectedSelectionAuthorityHash: expSel, renderBindings: bindings, realizedTemplate: _w1cClone(W1C_REALIZED), refId: 'AC-W1C' });
+  assert.notEqual(r.selectionSpec.specHash, base.specHash);
+});
+
+// ---- SS-v2 HOLD paths ----
+test('W1C SS-v2: authority↔expected hash mismatch ⇒ HOLD v2_authority_hash_mismatch', () => {
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ expectedSelectionAuthorityHash: '0'.repeat(64) })).reasons, 'v2_authority_hash_mismatch'));
+});
+test('W1C SS-v2: candidateId / sourceAssetId substitution ⇒ HOLD v2_asset_substitution', () => {
+  const b1 = _w1cClone(W1C_BINDINGS); b1[0].candidateId = 'EVIL';
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ renderBindings: b1 })).reasons, 'v2_asset_substitution'));
+  const b2 = _w1cClone(W1C_BINDINGS); b2[2].sourceAssetId = 'EVIL';
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ renderBindings: b2 })).reasons, 'v2_asset_substitution'));
+});
+test('W1C SS-v2: duplicate composerSlotId / primary URL ⇒ HOLD', () => {
+  const b1 = _w1cClone(W1C_BINDINGS); b1[2].composerSlotId = 'main';
+  const r1 = buildSelectionSpecV2(w1cV2Input({ renderBindings: b1 }));
+  assert.ok(w1cHas(r1.reasons, 'v2_dup_composer_id') || w1cHas(r1.reasons, 'v2_realized_set_mismatch'));
+  const b2 = _w1cClone(W1C_BINDINGS); b2[1].imageUrl = b2[0].imageUrl;
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ renderBindings: b2 })).reasons, 'v2_dup_primary_url'));
+});
+test('W1C SS-v2: unknown refSlot / missing binding / realized set mismatch / extra binding key ⇒ HOLD', () => {
+  const b1 = _w1cClone(W1C_BINDINGS); b1.push({ refSlotId: 'ghost', composerSlotId: 'x', candidateId: 'cz', sourceAssetId: 'sz', imageUrl: 'https://cdn/z.jpg' });
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ renderBindings: b1 })).reasons, 'v2_binding_unknown_refSlot'));
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ renderBindings: _w1cClone(W1C_BINDINGS).slice(0, 3) })).reasons, 'v2_binding_missing'));
+  const rz = _w1cClone(W1C_REALIZED); rz.slots.pop();
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ realizedTemplate: rz })).reasons, 'v2_realized_set_mismatch'));
+  const b2 = _w1cClone(W1C_BINDINGS); b2[0].backups = [{ candidateId: 'b', imageUrl: 'u' }];
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ renderBindings: b2 })).reasons, 'v2_binding_keys'));
+});
+test('W1C SS-v2: rounded needs realized rounded evidence (unsupported ⇒ HOLD; supported ⇒ builds); rect vs circle ⇒ HOLD', () => {
+  const slots = _w1cClone(W1C_SLOTS); slots[2].shape = 'rounded';
+  const hero = _w1cClone(W1C_HERO);
+  const expSel = _w1cSha({ v: 1, storyAuthorityHash: W1C_STORY, castManifestHash: W1C_CAST, assignmentHash: W1C_ASSIGN, hero, slots });
+  const env = buildSelectionAuthorityV1(w1cBuildInput({ slots, hero, expectedSelectionAuthorityHash: expSel })).selectionAuthority;
+  assert.ok(w1cHas(buildSelectionSpecV2({ selectionAuthority: env, expectedSelectionAuthorityHash: expSel, renderBindings: _w1cClone(W1C_BINDINGS), realizedTemplate: _w1cClone(W1C_REALIZED), refId: 'AC-W1C' }).reasons, 'v2_shape_unsupported'));
+  const rr = _w1cClone(W1C_REALIZED); rr.slots[2].shape = 'rounded';
+  const okR = buildSelectionSpecV2({ selectionAuthority: env, expectedSelectionAuthorityHash: expSel, renderBindings: _w1cClone(W1C_BINDINGS), realizedTemplate: rr, refId: 'AC-W1C' });
+  assert.equal(okR.ok, true); assert.equal(okR.selectionSpec.slots[2].shape, 'rounded');
+  const rc = _w1cClone(W1C_REALIZED); rc.slots[0].shape = 'circle';
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ realizedTemplate: rc })).reasons, 'v2_shape_mismatch'));
+});
+
+// ---- #6 V2 bounds ----
+test('W1C #6 SS-v2: 9 renderBindings ⇒ HOLD v2_bindings_too_many', () => {
+  const many = []; for (let i = 0; i < 9; i++) many.push({ refSlotId: `r${i}`, composerSlotId: `k${i}`, candidateId: `c${i}`, sourceAssetId: `s${i}`, imageUrl: `https://cdn/${i}.jpg` });
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ renderBindings: many })).reasons, 'v2_bindings_too_many'));
+});
+test('W1C #6 SS-v2: 9 realized slots ⇒ HOLD v2_realized_slots_too_many', () => {
+  const rz = _w1cClone(W1C_REALIZED);
+  for (let i = 0; i < 5; i++) rz.slots.push({ id: `extra_${i}`, x: 0, y: 0, w: 10, h: 10, zIndex: 0, border: false, borderWidth: 0, shape: 'rect' });
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ realizedTemplate: rz })).reasons, 'v2_realized_slots_too_many'));
+});
+test('W1C #6 SS-v2 validator: 33 diagnostics.codes ⇒ HOLD v2_spec_diag_codes_too_many', () => {
+  const spec = _w1cClone(w1cSpec());
+  spec.diagnostics.codes = Array.from({ length: 33 }, (_, i) => `code_${i}`);
+  assert.ok(w1cHas(w1cActivate(spec).reasons, 'v2_spec_diag_codes_too_many'));
+});
+
+// ---- #5 GEOMETRY safety ----
+test('W1C #5 SS-v2: off-canvas x+w>canvasW ⇒ HOLD v2_realized_offcanvas', () => {
+  const rz = _w1cClone(W1C_REALIZED); rz.slots[0].w = 2000;
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ realizedTemplate: rz })).reasons, 'v2_realized_offcanvas'));
+});
+test('W1C #5 SS-v2: off-canvas y+h>canvasH ⇒ HOLD', () => {
+  const rz = _w1cClone(W1C_REALIZED); rz.slots[3].h = 5000;
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ realizedTemplate: rz })).reasons, 'v2_realized_offcanvas'));
+});
+test('W1C #5 SS-v2: z-index over cap ⇒ HOLD; borderWidth over slot bound ⇒ HOLD; feather over canvas bound ⇒ HOLD', () => {
+  const z = _w1cClone(W1C_REALIZED); z.slots[0].zIndex = 100000;
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ realizedTemplate: z })).reasons, 'v2_realized_zindex'));
+  const bw = _w1cClone(W1C_REALIZED); bw.slots[1].borderWidth = 400; // > min(300,300)/2
+  assert.ok(w1cHas(buildSelectionSpecV2(w1cV2Input({ realizedTemplate: bw })).reasons, 'v2_realized_border_bounds'));
+  const f = _w1cClone(W1C_REALIZED); f.canvasW = 10; f.canvasH = 10; f.feather = 400;
+  // feather over the hard cap AND over canvas — either fails closed
+  assert.equal(buildSelectionSpecV2(w1cV2Input({ realizedTemplate: f })).ok, false);
+});
+
+// ---- #1 EXTERNALLY-PINNED activation ----
+test('W1C #1 SS-v2 activate: pins required — omitting expectedSpecHash/expectedReplayHash ⇒ HOLD', () => {
+  const spec = w1cSpec();
+  const r = validateSelectionSpecV2Activation({ selectionSpec: spec, selectionAuthority: w1cAuthority(), expectedSelectionAuthorityHash: W1C_EXPECTED_SEL, realizedTemplate: _w1cClone(W1C_REALIZED) });
+  assert.equal(r.ok, false);
+  assert.ok(!('active' in r));
+});
+test('W1C #1 SS-v2 activate: happy path with matching external pins ⇒ assigned', () => {
+  const spec = w1cSpec();
+  const r = w1cActivate(spec);
+  assert.equal(r.ok, true); assert.equal(r.decision, 'assigned');
+  assert.equal(r.selectionSpec.specHash, spec.specHash);
+});
+test('W1C #1 SS-v2 activate: attacker changes imageUrl and RE-SIGNS both hashes ⇒ HOLD (pin mismatch)', () => {
+  const spec = _w1cClone(w1cSpec());
+  spec.slots[0].primary.imageUrl = 'https://cdn/EVIL.jpg';
+  _w1cReSign(spec); // provided.specHash/replayHash now match the tampered contents
+  const r = w1cActivate(spec);
+  assert.equal(r.ok, false);
+  assert.ok(w1cHas(r.reasons, 'v2_replay_hash_pin_mismatch') || w1cHas(r.reasons, 'v2_replay_hash_mismatch'));
+});
+test('W1C #1 SS-v2 activate: attacker changes refId and RE-SIGNS ⇒ HOLD (pin mismatch)', () => {
+  const spec = _w1cClone(w1cSpec()); spec.refId = 'HACKED'; _w1cReSign(spec);
+  const r = w1cActivate(spec);
+  assert.equal(r.ok, false);
+  assert.ok(w1cHas(r.reasons, 'v2_spec_hash_pin_mismatch') || w1cHas(r.reasons, 'v2_spec_hash_mismatch'));
+});
+test('W1C #1 SS-v2 activate: attacker swaps composerSlotId between same-shape slots, adjusts geometry, RE-SIGNS ⇒ HOLD', () => {
+  const spec = _w1cClone(w1cSpec());
+  // reaction (idx2, rect) <-> context (idx3, rect): swap composerSlotId AND render geometry so the
+  // spec stays internally consistent with realized; then re-sign so provided hashes match.
+  const g2 = { ...spec.slots[2].render }, g3 = { ...spec.slots[3].render };
+  spec.slots[2].composerSlotId = 'context_3'; spec.slots[2].render = g3;
+  spec.slots[3].composerSlotId = 'reaction_2'; spec.slots[3].render = g2;
+  _w1cReSign(spec);
+  const r = w1cActivate(spec);
+  assert.equal(r.ok, false);
+  assert.ok(w1cHas(r.reasons, 'v2_spec_hash_pin_mismatch') || w1cHas(r.reasons, 'v2_spec_hash_mismatch'));
+});
+test('W1C #1 SS-v2 activate: realized geometry drift ⇒ HOLD', () => {
+  const spec = w1cSpec();
+  const rz = _w1cClone(W1C_REALIZED); rz.slots[2].w = 600; // reaction_2: 400+600=1000<=1080 (on-canvas), != spec's 620
+  const r = w1cActivate(spec, { realizedTemplate: rz });
+  assert.equal(r.ok, false);
+  assert.ok(w1cHas(r.reasons, 'v2_spec_drift') || w1cHas(r.reasons, 'v2_spec_hash_pin_mismatch') || w1cHas(r.reasons, 'v2_spec_hash_mismatch'));
+});
+test('W1C #1 SS-v2 activate: tampered embedded specHash ⇒ HOLD', () => {
+  const spec = _w1cClone(w1cSpec()); spec.specHash = 'd'.repeat(64);
+  assert.equal(w1cActivate(spec).ok, false);
+});
+test('W1C #1 SS-v2 activate: nonempty backups in the spec ⇒ HOLD v2_backup_nonempty', () => {
+  const spec = _w1cClone(w1cSpec()); spec.slots[0].backups = [{ candidateId: 'b1', imageUrl: 'https://cdn/b.jpg' }];
+  assert.ok(w1cHas(w1cActivate(spec).reasons, 'v2_backup_nonempty'));
+});
+test('W1C #4 SS-v2 activate: spec hero.personId null ⇒ HOLD (authoritative hero identity required)', () => {
+  const spec = _w1cClone(w1cSpec()); spec.hero.personId = null;
+  assert.ok(w1cHas(w1cActivate(spec).reasons, 'v2_spec_hero_person_required'));
+});
+
+// ---- #2/#6 fail-closed diagnostics.codes (never throws) ----
+function _w1cCodesOutcome(codesValue) {
+  const spec = _w1cClone(w1cSpec()); spec.diagnostics.codes = codesValue;
+  let threw = null, res = null;
+  try { res = w1cActivate(spec); } catch (e) { threw = e; }
+  return { threw, res };
+}
+test('W1C SS-v2 activate: cyclic / BigInt / accessor diagnostics.codes ⇒ HOLD, never throws', () => {
+  const cyc = []; cyc.push(cyc);
+  for (const codes of [cyc, [10n], [1]]) {
+    const { threw, res } = _w1cCodesOutcome(codes);
+    assert.equal(threw, null, `must not throw for ${typeof codes[0]}`);
+    assert.equal(res.ok, false);
+    assert.ok(w1cHas(res.reasons, 'v2_spec_diag_code_invalid'));
+  }
+  const el = {}; let invoked = false;
+  Object.defineProperty(el, 'boom', { get() { invoked = true; throw new Error('x'); }, enumerable: true, configurable: true });
+  const g = _w1cCodesOutcome([el]);
+  assert.equal(g.threw, null); assert.equal(invoked, false); assert.equal(g.res.ok, false);
+});
+test('W1C SS-v2 activate: Proxy spec ⇒ HOLD, no echo, never throws', () => {
+  const SECRET = 'V2_PROXY_SECRET';
+  const px = new Proxy({ ..._w1cClone(w1cSpec()), refId: SECRET }, {});
+  let threw = null, res = null;
+  try { res = w1cActivate(px); } catch (e) { threw = e; }
+  assert.equal(threw, null); assert.equal(res.ok, false); w1cAssertNoEcho(res.reasons, SECRET);
+});
+
+// ---- version dispatch ----
+test('W1C dispatch: v===2 routes to the v2 activation validator (with pins) ⇒ assigned', () => {
+  const spec = w1cSpec(); const pins = w1cCleanPins();
+  const d = validateStrictRenderActivationVersioned({ selectionSpec: spec, selectionAuthority: w1cAuthority(), expectedSelectionAuthorityHash: W1C_EXPECTED_SEL, expectedSpecHash: pins.expectedSpecHash, expectedReplayHash: pins.expectedReplayHash, realizedTemplate: _w1cClone(W1C_REALIZED) });
+  assert.equal(d.ok, true); assert.equal(d.decision, 'assigned');
+});
+test('W1C dispatch: v2-shaped input missing pins HOLDs in v2 (never downgrades to legacy)', () => {
+  const d = validateStrictRenderActivationVersioned({ selectionSpec: w1cSpec(), realizedTemplate: _w1cClone(W1C_REALIZED) });
+  assert.equal(d.ok, false); assert.equal(d.decision, 'hold'); assert.ok(!('active' in d));
+});
+test('W1C dispatch: non-v2 specs delegate to validateStrictRenderActivation byte-for-byte', () => {
+  const v1spec = {
+    v: 1, mode: 'ref_slot_exact', source: 'template.slots', refId: REF_ID, strictReady: true,
+    specHash: HASHES.specHash, backupPoolHash: HASHES.backupPoolHash, replayHash: HASHES.replayHash,
+    counts: { total: 4, mapped: 4, unmapped: 0, missingPrimary: 0, duplicatePrimary: 0, duplicatePrimaryUrl: 0, semanticFallback: 0 },
+    diagnostics: { extraPlannedKeys: [], invalidPrimary: [], aliasPrimaryUrls: [], duplicateBackupsDropped: [] },
+    slots: SPEC_SLOTS,
+  };
+  const cases = [
+    {}, { selectionSpec: v1spec, realizedTemplate: REALIZED_TEMPLATE },
+    { selectionSpec: { v: 1 } }, { selectionSpec: { v: 0 } }, { selectionSpec: { v: 3 } },
+    { selectionSpec: { version: 2 } }, { selectionSpec: { v: '2' } },
+  ];
+  for (const input of cases) {
+    assert.equal(JSON.stringify(validateStrictRenderActivationVersioned(input)), JSON.stringify(validateStrictRenderActivation(input)), `verbatim v1 parity failed for ${JSON.stringify(input).slice(0, 60)}`);
+  }
+});
+test('W1C dispatch: hostile Proxy input with v===2 ⇒ stable HOLD in v2, never throws (getter not triggered)', () => {
+  // A get-trap proxy: saPeekSpecVersion reads `v` via descriptor (never the get trap),
+  // sees 2, routes to v2, which fails closed on the input-key mismatch — no throw.
+  const px = new Proxy({ selectionSpec: { v: 2 } }, { get() { throw new Error('trap'); } });
+  let threw = null, res = null;
+  try { res = validateStrictRenderActivationVersioned(px); } catch (e) { threw = e; }
+  assert.equal(threw, null);
+  assert.equal(res.ok, false); assert.equal(res.decision, 'hold');
+});
+
+// ---- #7 GENUINE cross-foundation handshake — ONE coherent Story→Cast→Hero→Global→SA ----
+// The Cast manifest is the IDENTITY AUTHORITY: it is supplied genuine eligible-candidate
+// evidence for every required person, its integrity (hold===null + structure + hash) is
+// asserted BEFORE any downstream work, and every personId (person_<sha256>), candidateId and
+// sourceAssetId used downstream is DERIVED from castM.people[].candidates — never handwritten.
+// Hero + Global are built from those derived values; SA rows/hero are derived from
+// gaR.assignments + the real Hero binding; exact tuple equality is asserted at each boundary.
+const HANDSHAKE_REF = {
+  layoutTopology: 'tri-split',
+  slotGeometry: [{ shape: 'circle', id: 'circle', xPct: 60, yPct: 0, wPct: 40, hPct: 50 }, { shape: 'rect', id: 'hero', xPct: 0, yPct: 0, wPct: 60, hPct: 100 }],
+  prominence: [{ weight: 0.2, slotId: 'circle' }, { weight: 0.8, slotId: 'hero' }],
+  shotArchetype: 'tight_portrait_left_wide_right',
+  layerIntent: [{ zIndex: 1, slotId: 'circle' }, { zIndex: 0, slotId: 'hero' }],
+  ringBorderFeatherSeam: { seam: false, feather: true, border: false, ring: true },
+  negativeSpace: { right: 10, left: 0, bottom: 5, top: 5 }, hierarchyTargets: ['circle', 'hero'],
+};
+// Cast's documented candidate-evidence shape: the six readiness gates all true + a mandatory
+// sourceAssetId (defaulted from candidateId), exactly as castManifest requires for eligibility.
+const _w1cReadyCandidate = (name, candidateId, over = {}) => ({ name, candidateId, sourceAssetId: `asset-${candidateId}`, searched: true, triaged: true, clean: true, highResolution: true, cropSafe: true, identityVerified: true, ...over });
+const _w1cEligible = (c) => [c.searched, c.triaged, c.clean, c.highResolution, c.cropSafe, c.identityVerified].every(Boolean);
+// The Global input, parameterised so the negative test can tamper exactly one field.
+function _w1cGlobalInput({ lisaPersonId, rosaPersonId, lisaCand, rosaCand }) {
+  return {
+    slots: [{ slotId: 'hero', order: 0, role: 'role', shape: 'shape', personId: lisaPersonId }, { slotId: 'reaction', order: 1, role: 'role', shape: 'shape', personId: rosaPersonId }],
+    candidates: [
+      { candidateId: lisaCand.candidateId, sourceAssetId: lisaCand.sourceAssetId, personId: lisaPersonId, eligibleSlotIds: ['hero'], semanticScore: 9, qualityScore: 9, slotFitScore: 9, sceneKey: 'k-lisa' },
+      { candidateId: rosaCand.candidateId, sourceAssetId: rosaCand.sourceAssetId, personId: rosaPersonId, eligibleSlotIds: ['reaction'], semanticScore: 7, qualityScore: 7, slotFitScore: 7, sceneKey: 'k-rosa' },
+    ],
+    requiredCast: [{ personId: lisaPersonId, required: true, priority: 0 }, { personId: rosaPersonId, required: true, priority: 0 }],
+    heroAuthority: { heroSlotId: 'hero', heroPersonId: lisaPersonId, approvedCandidateIds: [lisaCand.candidateId] },
+    limits: { maxPersonRepeats: 3, maxSceneRepeats: 3 },
+  };
+}
+
+// Build all four real foundation outputs coherently; asserts Cast integrity up front.
+function w1cHandshakeFoundations() {
+  // CAST — supply genuine eligible-candidate evidence for BOTH required persons.
+  const castM = buildCastManifest({ article: { requiredCast: ['Lisa', 'Rosa'] }, candidates: [_w1cReadyCandidate('Lisa', 'c-lisa-1'), _w1cReadyCandidate('Rosa', 'c-rosa-1')] });
+  // Cast INTEGRITY GATE — must be a genuine success state before any downstream work.
+  assert.equal(castM.hold, null, `Cast must not HOLD: ${JSON.stringify(castM.hold)}`);
+  assert.equal(validateCastManifestStructure(castM), null, 'Cast manifest structure must be valid');
+  assert.doesNotThrow(() => assertCastManifestIntegrity(castM, castM.hash), 'Cast manifest integrity must verify against its own hash');
+
+  const lisa = castM.people.find((p) => p.canonicalName === 'Lisa');
+  const rosa = castM.people.find((p) => p.canonicalName === 'Rosa');
+  assert.ok(lisa && rosa, 'Cast must carry both required people');
+  assert.match(lisa.personId, /^person_[0-9a-f]{64}$/, 'Cast personId is person_<sha256> (never a handwritten name)');
+  const lisaCand = lisa.candidates.find(_w1cEligible);
+  const rosaCand = rosa.candidates.find(_w1cEligible);
+  assert.ok(lisaCand && rosaCand, 'Cast must expose an eligible candidate per required person');
+
+  // STORY about the same person (editorial hero Lisa); provenance uses Cast's real asset ids.
+  const storyC = buildStoryReferenceAuthorityContract({
+    story: { identities: ['Lisa', 'Rosa'], requiredCast: ['Lisa'], optionalCast: ['Rosa'], editorialHero: 'Lisa', eventContext: 'gallery opening night', facts: ['opening was in Seoul', 'Lisa unveiled the mural'], storySemantics: 'an artist unveiling a mural', eligibleAssetProvenance: [lisaCand.sourceAssetId, rosaCand.sourceAssetId] },
+    reference: HANDSHAKE_REF,
+  });
+  assert.ok(storyC.contract && /^[0-9a-f]{64}$/.test(storyC.contract.hash), 'Story contract must build with a 64-hex hash');
+  assert.deepEqual(storyC.contract.rejections, [], 'Story contract must have zero rejections');
+
+  // HERO contract for the Cast person Lisa — bound to Cast's asset + Cast's personId.
+  const heroC = buildHeroShotContract({ sourceAssetId: lisaCand.sourceAssetId, heroSlotId: 'hero', story: { personId: lisa.personId, identityConfidenceMin: 0.8 }, reference: { shotClass: 'closeup' } });
+
+  // GLOBAL assigns the Cast-derived candidates (real person_<sha256> ids, real candidate/asset ids).
+  const gaInput = _w1cGlobalInput({ lisaPersonId: lisa.personId, rosaPersonId: rosa.personId, lisaCand, rosaCand });
+  const gaR = buildSemanticGlobalAssignment(gaInput);
+  assert.equal(gaR.decision, 'assigned', `Global must assign: ${gaR.reason}`);
+
+  return {
+    castM, storyC, heroC, gaR, lisa, rosa, lisaCand, rosaCand, gaInput,
+    REAL_HERO: heroC.contractHash, REAL_STORY: storyC.contract.hash, REAL_CAST: hashCastManifest(castM), REAL_ASSIGN: gaR.assignmentHash,
+  };
+}
+// Derive canonical SA slots (ascending order) from the real Global assignments.
+function w1cSaSlotsFromAssignments(gaR, heroSlotId) {
+  const asn = gaR.assignments.slice().sort((a, b) => (a.slotId < b.slotId ? -1 : a.slotId > b.slotId ? 1 : 0));
+  return asn.map((a, i) => ({ refSlotId: a.slotId, order: i + 1, role: a.slotId === heroSlotId ? 'hero' : a.slotId, shape: 'rect', personId: a.personId, candidateId: a.candidateId, sourceAssetId: a.sourceAssetId }));
+}
+
+test('W1C #7 handshake: COHERENT Story→Cast→Hero→Global→SA — every identity DERIVED from real Cast output; exact cross-boundary equality', () => {
+  const F = w1cHandshakeFoundations();
+  assert.match(F.REAL_HERO, /^[0-9a-f]{8}$/, 'real heroContractHash is 8 hex (fnv1a32)');
+  assert.match(F.REAL_STORY, /^[0-9a-f]{64}$/);
+  assert.match(F.REAL_CAST, /^[0-9a-f]{64}$/);
+  assert.match(F.REAL_ASSIGN, /^[0-9a-f]{64}$/);
+
+  // Story→Cast: the Story's required person resolves to a real Cast person.
+  assert.ok(F.castM.people.some((p) => p.canonicalName === 'Lisa'), 'Cast carries the Story required person Lisa');
+
+  // Cast→Hero: hero identity + asset come from the Cast person Lisa (person_<sha256>, real asset).
+  assert.equal(F.heroC.story.personId, F.lisa.personId, 'Hero personId == Cast Lisa personId');
+  assert.equal(F.heroC.binding.sourceAssetId, F.lisaCand.sourceAssetId, 'Hero asset == Cast Lisa candidate asset');
+
+  // Cast→Global: every Global assignment tuple equals its Cast source exactly.
+  const heroAsn = F.gaR.assignments.find((a) => a.slotId === 'hero');
+  const reactAsn = F.gaR.assignments.find((a) => a.slotId === 'reaction');
+  assert.deepEqual({ personId: heroAsn.personId, candidateId: heroAsn.candidateId, sourceAssetId: heroAsn.sourceAssetId }, { personId: F.lisa.personId, candidateId: F.lisaCand.candidateId, sourceAssetId: F.lisaCand.sourceAssetId }, 'Global hero assignment == Cast Lisa tuple');
+  assert.deepEqual({ personId: reactAsn.personId, candidateId: reactAsn.candidateId, sourceAssetId: reactAsn.sourceAssetId }, { personId: F.rosa.personId, candidateId: F.rosaCand.candidateId, sourceAssetId: F.rosaCand.sourceAssetId }, 'Global reaction assignment == Cast Rosa tuple');
+
+  // Global→SA: derive SA rows + hero from gaR + the real Hero binding.
+  const heroSlotId = F.heroC.binding.heroSlotId;
+  const heroAsn2 = F.gaR.assignments.find((a) => a.slotId === heroSlotId);
+  const slots = w1cSaSlotsFromAssignments(F.gaR, heroSlotId);
+  const hero = { heroContractHash: F.REAL_HERO, refSlotId: heroSlotId, personId: heroAsn2.personId, candidateId: heroAsn2.candidateId, sourceAssetId: F.heroC.binding.sourceAssetId };
+  const expSel = _w1cSha({ v: 1, storyAuthorityHash: F.REAL_STORY, castManifestHash: F.REAL_CAST, assignmentHash: F.REAL_ASSIGN, hero, slots });
+  const sa = buildSelectionAuthorityV1({ storyAuthorityHash: F.REAL_STORY, castManifestHash: F.REAL_CAST, assignmentHash: F.REAL_ASSIGN, hero, slots, expectedSelectionAuthorityHash: expSel, expectedStoryAuthorityHash: F.REAL_STORY, expectedCastManifestHash: F.REAL_CAST, expectedAssignmentHash: F.REAL_ASSIGN, expectedHeroContractHash: F.REAL_HERO });
+  assert.equal(sa.ok, true, `SA build from real Cast-derived rows: ${JSON.stringify(sa.reasons)}`);
+
+  // SA hero ↔ Cast/Hero/Global (all identity fields, person_<sha256>).
+  assert.equal(sa.selectionAuthority.hero.refSlotId, F.heroC.binding.heroSlotId);
+  assert.equal(sa.selectionAuthority.hero.personId, F.lisa.personId);
+  assert.equal(sa.selectionAuthority.hero.candidateId, F.lisaCand.candidateId);
+  assert.equal(sa.selectionAuthority.hero.sourceAssetId, F.lisaCand.sourceAssetId);
+  assert.equal(sa.selectionAuthority.hero.sourceAssetId, F.heroC.binding.sourceAssetId);
+  // SA slot set == Global assignment set; every SA slot == its assignment on all 4 fields.
+  assert.deepEqual([...sa.selectionAuthority.slots.map((s) => s.refSlotId)].sort(), F.gaR.assignments.map((a) => a.slotId).sort(), 'SA slotIds == Global assignment slotIds');
+  for (const a of F.gaR.assignments) {
+    const s = sa.selectionAuthority.slots.find((x) => x.refSlotId === a.slotId);
+    assert.ok(s, `SA must carry a slot for Global slotId ${a.slotId}`);
+    assert.deepEqual({ slotId: s.refSlotId, personId: s.personId, candidateId: s.candidateId, sourceAssetId: s.sourceAssetId }, { slotId: a.slotId, personId: a.personId, candidateId: a.candidateId, sourceAssetId: a.sourceAssetId }, `SA slot ${a.slotId} == Global assignment`);
+  }
+
+  // SA→V2: carry the same identities through V2 + pinned activation.
+  const realized = { templateId: 'ref_dna', canvasW: 1080, canvasH: 1350, feather: 22, slots: slots.map((s, i) => ({ id: `comp_${s.refSlotId}`, x: 0, y: i * 600, w: 1080, h: 600, zIndex: 0, border: false, borderWidth: 0, shape: 'rect' })) };
+  const bind = slots.map((s) => ({ refSlotId: s.refSlotId, composerSlotId: `comp_${s.refSlotId}`, candidateId: s.candidateId, sourceAssetId: s.sourceAssetId, imageUrl: `https://cdn/${s.candidateId}.jpg` }));
+  const spec = buildSelectionSpecV2({ selectionAuthority: sa.selectionAuthority, expectedSelectionAuthorityHash: expSel, renderBindings: bind, realizedTemplate: realized, refId: 'HANDSHAKE' });
+  assert.equal(spec.ok, true, `V2 build from real Cast-derived rows: ${JSON.stringify(spec.reasons)}`);
+  assert.equal(spec.selectionSpec.authority.heroContractHash, F.REAL_HERO);
+  assert.equal(spec.selectionSpec.authority.storyAuthorityHash, F.REAL_STORY);
+  assert.equal(spec.selectionSpec.authority.castManifestHash, F.REAL_CAST);
+  assert.equal(spec.selectionSpec.authority.assignmentHash, F.REAL_ASSIGN);
+  assert.equal(spec.selectionSpec.hero.personId, F.lisa.personId);
+  assert.equal(spec.selectionSpec.hero.candidateId, F.lisaCand.candidateId);
+  assert.equal(spec.selectionSpec.hero.sourceAssetId, F.lisaCand.sourceAssetId);
+  assert.deepEqual([...spec.selectionSpec.slots.map((s) => s.refSlotId)].sort(), F.gaR.assignments.map((a) => a.slotId).sort(), 'V2 slotIds == Global assignment slotIds');
+  for (const a of F.gaR.assignments) {
+    const sl = spec.selectionSpec.slots.find((x) => x.refSlotId === a.slotId);
+    assert.ok(sl, `V2 must carry a slot for Global slotId ${a.slotId}`);
+    assert.deepEqual({ slotId: sl.refSlotId, personId: sl.primary.personId, candidateId: sl.primary.candidateId, sourceAssetId: sl.primary.sourceAssetId }, { slotId: a.slotId, personId: a.personId, candidateId: a.candidateId, sourceAssetId: a.sourceAssetId }, `V2 slot ${a.slotId} primary == Global assignment`);
+  }
+
+  const act = validateSelectionSpecV2Activation({ selectionSpec: spec.selectionSpec, selectionAuthority: sa.selectionAuthority, expectedSelectionAuthorityHash: expSel, expectedSpecHash: spec.selectionSpec.specHash, expectedReplayHash: spec.selectionSpec.replayHash, realizedTemplate: realized });
+  assert.equal(act.ok, true, `pinned activation from real Cast-derived rows: ${JSON.stringify(act.reasons)}`);
+});
+
+test('W1C #7 handshake NEGATIVE: Cast↔Global disagreement (Global records a DIFFERENT asset for Cast Lisa) ⇒ HOLD', () => {
+  const F = w1cHandshakeFoundations();
+  const heroSlotId = F.heroC.binding.heroSlotId;
+  // Tamper ONLY the Global's recorded sourceAssetId for Lisa's candidate — Cast/Hero authoritatively
+  // bind Lisa to F.lisaCand.sourceAssetId, but this Global attributes a contradicting asset.
+  const badInput = _w1cGlobalInput({ lisaPersonId: F.lisa.personId, rosaPersonId: F.rosa.personId, lisaCand: { candidateId: F.lisaCand.candidateId, sourceAssetId: 'asset-CONTRADICTS-CAST' }, rosaCand: F.rosaCand });
+  const badGa = buildSemanticGlobalAssignment(badInput);
+  assert.equal(badGa.decision, 'assigned', `tampered Global still assigns: ${badGa.reason}`);
+  const badHeroAsn = badGa.assignments.find((a) => a.slotId === heroSlotId);
+  assert.notEqual(badHeroAsn.sourceAssetId, F.heroC.binding.sourceAssetId, 'the tampered asset must differ from Cast/Hero');
+
+  const slots = w1cSaSlotsFromAssignments(badGa, heroSlotId); // hero row asset = 'asset-CONTRADICTS-CAST'
+  // Hero tuple uses the Cast/Hero-authoritative asset; the Global-derived row uses the contradicting one.
+  const hero = { heroContractHash: F.REAL_HERO, refSlotId: heroSlotId, personId: badHeroAsn.personId, candidateId: badHeroAsn.candidateId, sourceAssetId: F.heroC.binding.sourceAssetId };
+  const expSel = _w1cSha({ v: 1, storyAuthorityHash: F.REAL_STORY, castManifestHash: F.REAL_CAST, assignmentHash: badGa.assignmentHash, hero, slots });
+  const sa = buildSelectionAuthorityV1({ storyAuthorityHash: F.REAL_STORY, castManifestHash: F.REAL_CAST, assignmentHash: badGa.assignmentHash, hero, slots, expectedSelectionAuthorityHash: expSel, expectedStoryAuthorityHash: F.REAL_STORY, expectedCastManifestHash: F.REAL_CAST, expectedAssignmentHash: badGa.assignmentHash, expectedHeroContractHash: F.REAL_HERO });
+  assert.equal(sa.ok, false);
+  assert.ok(w1cHas(sa.reasons, 'sa_hero_tuple_mismatch'), `expected sa_hero_tuple_mismatch, got ${JSON.stringify(sa.reasons)}`);
+});
+
+// ---- corrective round 2: revoked / throwing-trap Proxies must FAIL CLOSED (never throw) ----
+// (Array.isArray throws on a revoked Proxy; the descriptor helpers must guard it.)
+function _w1cRevokedObj() { const { proxy, revoke } = Proxy.revocable({}, {}); revoke(); return proxy; }
+function _w1cRevokedArr() { const { proxy, revoke } = Proxy.revocable([], {}); revoke(); return proxy; }
+function _w1cThrowTrap() { return new Proxy({}, { getOwnPropertyDescriptor() { throw new Error('trap'); }, ownKeys() { throw new Error('trap'); }, getPrototypeOf() { throw new Error('trap'); } }); }
+function _w1cNoThrow(fn) { let threw = null, res = null; try { res = fn(); } catch (e) { threw = e; } return { threw, res }; }
+
+test('W1C #6 SA-v1: revoked object/array Proxy (top-level + nested) ⇒ stable HOLD, never throws', () => {
+  for (const bad of [_w1cRevokedObj(), _w1cRevokedArr()]) {
+    const o = _w1cNoThrow(() => buildSelectionAuthorityV1(bad));
+    assert.equal(o.threw, null, 'top-level revoked Proxy must not throw');
+    assert.equal(o.res.ok, false); assert.equal(o.res.decision, 'hold');
+  }
+  const n1 = _w1cNoThrow(() => buildSelectionAuthorityV1(w1cBuildInput({ slots: _w1cRevokedArr() })));
+  assert.equal(n1.threw, null); assert.equal(n1.res.ok, false);
+  const n2 = _w1cNoThrow(() => buildSelectionAuthorityV1(w1cBuildInput({ hero: _w1cRevokedObj() })));
+  assert.equal(n2.threw, null); assert.equal(n2.res.ok, false);
+  const slots = _w1cClone(W1C_SLOTS); slots[0] = _w1cRevokedObj();
+  const n3 = _w1cNoThrow(() => buildSelectionAuthorityV1(w1cBuildInput({ slots })));
+  assert.equal(n3.threw, null); assert.equal(n3.res.ok, false);
+  // validator path + determinism
+  const env = _w1cClone(w1cAuthority()); env.slots = _w1cRevokedArr();
+  assert.equal(_w1cNoThrow(() => validateSelectionAuthorityV1(w1cValidateInput(env))).threw, null);
+  assert.equal(JSON.stringify(buildSelectionAuthorityV1(_w1cRevokedObj())), JSON.stringify(buildSelectionAuthorityV1(_w1cRevokedObj())));
+});
+test('W1C #6 SA-v1: Proxy with THROWING descriptor/ownKeys/getPrototypeOf traps ⇒ stable HOLD, never throws', () => {
+  const o = _w1cNoThrow(() => buildSelectionAuthorityV1(_w1cThrowTrap()));
+  assert.equal(o.threw, null); assert.equal(o.res.ok, false); assert.equal(o.res.decision, 'hold');
+  const slots = _w1cClone(W1C_SLOTS); slots[0] = _w1cThrowTrap();
+  const n = _w1cNoThrow(() => buildSelectionAuthorityV1(w1cBuildInput({ slots })));
+  assert.equal(n.threw, null); assert.equal(n.res.ok, false);
+});
+test('W1C #6 SS-v2: revoked / throwing-trap Proxy in build + activation inputs ⇒ stable HOLD, never throws', () => {
+  assert.equal(_w1cNoThrow(() => buildSelectionSpecV2(w1cV2Input({ renderBindings: _w1cRevokedArr() }))).threw, null);
+  assert.equal(buildSelectionSpecV2(w1cV2Input({ renderBindings: _w1cRevokedArr() })).ok, false);
+  assert.equal(_w1cNoThrow(() => buildSelectionSpecV2(w1cV2Input({ realizedTemplate: _w1cRevokedObj() }))).threw, null);
+  const b = _w1cClone(W1C_BINDINGS); b[0] = _w1cThrowTrap();
+  assert.equal(_w1cNoThrow(() => buildSelectionSpecV2(w1cV2Input({ renderBindings: b }))).threw, null);
+  const pins = w1cCleanPins();
+  const actIn = (over) => ({ selectionSpec: w1cSpec(), selectionAuthority: w1cAuthority(), expectedSelectionAuthorityHash: W1C_EXPECTED_SEL, expectedSpecHash: pins.expectedSpecHash, expectedReplayHash: pins.expectedReplayHash, realizedTemplate: _w1cClone(W1C_REALIZED), ...over });
+  assert.equal(_w1cNoThrow(() => validateSelectionSpecV2Activation(actIn({ selectionSpec: _w1cRevokedObj() }))).threw, null);
+  assert.equal(_w1cNoThrow(() => validateSelectionSpecV2Activation(actIn({ realizedTemplate: _w1cRevokedArr() }))).threw, null);
+  const spec = _w1cClone(w1cSpec()); spec.slots[0] = _w1cRevokedObj();
+  const r = _w1cNoThrow(() => validateSelectionSpecV2Activation(actIn({ selectionSpec: spec })));
+  assert.equal(r.threw, null); assert.equal(r.res.ok, false);
+});
+
+// ---- corrective round 2: pure SHA-256 == node:crypto across padding & UTF-8 boundaries ----
+test('W1C #2: pure SHA-256 matches node:crypto across message-length/padding boundaries', () => {
+  // The builder assigns ONLY if its pure digest equals the node:crypto digest of the
+  // SAME canonical JSON. Sweeping a clean id's length walks the canonical byte length
+  // across every SHA-256 pad/block boundary (55/56/63/64/119/120...).
+  for (let n = 1; n <= 130; n++) {
+    const rid = 'x'.repeat(n);
+    const slots = [{ refSlotId: rid, order: 1, role: 'hero', shape: 'rect', personId: 'p1', candidateId: 'c1', sourceAssetId: 's1' }];
+    const hero = { heroContractHash: W1C_HEROHASH, refSlotId: rid, personId: 'p1', candidateId: 'c1', sourceAssetId: 's1' };
+    const expSel = _w1cSha({ v: 1, storyAuthorityHash: W1C_STORY, castManifestHash: W1C_CAST, assignmentHash: W1C_ASSIGN, hero, slots });
+    const r = buildSelectionAuthorityV1({ storyAuthorityHash: W1C_STORY, castManifestHash: W1C_CAST, assignmentHash: W1C_ASSIGN, hero, slots, expectedSelectionAuthorityHash: expSel, expectedStoryAuthorityHash: W1C_STORY, expectedCastManifestHash: W1C_CAST, expectedAssignmentHash: W1C_ASSIGN, expectedHeroContractHash: W1C_HEROHASH });
+    assert.equal(r.ok, true, `pure SHA-256 diverged from node:crypto at id length ${n}: ${JSON.stringify(r.reasons)}`);
+    assert.equal(r.selectionAuthority.selectionAuthorityHash, expSel);
+  }
+});
+test('W1C #2: pure SHA-256 matches node:crypto for multi-byte UTF-8 ids (2/3/4-byte + surrogate pair)', () => {
+  const NON_ASCII = [
+    'h' + String.fromCharCode(0xe9) + 'llo',      // é — 2-byte
+    String.fromCharCode(0x65e5, 0x672c) + 'go',   // 日本 — 3-byte
+    String.fromCodePoint(0x1f4a5) + 'x',          // 💥 — 4-byte surrogate pair
+    String.fromCharCode(0x7f - 1) + String.fromCharCode(0xa9), // boundary + ©
+  ];
+  for (const s of NON_ASCII) {
+    const slots = [{ refSlotId: s, order: 1, role: 'hero', shape: 'rect', personId: 'p1', candidateId: s + '-c', sourceAssetId: 's1' }];
+    const hero = { heroContractHash: W1C_HEROHASH, refSlotId: s, personId: 'p1', candidateId: s + '-c', sourceAssetId: 's1' };
+    const expSel = _w1cSha({ v: 1, storyAuthorityHash: W1C_STORY, castManifestHash: W1C_CAST, assignmentHash: W1C_ASSIGN, hero, slots });
+    const r = buildSelectionAuthorityV1({ storyAuthorityHash: W1C_STORY, castManifestHash: W1C_CAST, assignmentHash: W1C_ASSIGN, hero, slots, expectedSelectionAuthorityHash: expSel, expectedStoryAuthorityHash: W1C_STORY, expectedCastManifestHash: W1C_CAST, expectedAssignmentHash: W1C_ASSIGN, expectedHeroContractHash: W1C_HEROHASH });
+    assert.equal(r.ok, true, `pure SHA-256 diverged for UTF-8 id ${JSON.stringify(s)}: ${JSON.stringify(r.reasons)}`);
   }
 });

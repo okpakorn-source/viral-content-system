@@ -1,5 +1,11 @@
 // Ref-slot contract for MEGA shadow diagnostics.
 // Pure by design: no imports, IO, time, random, or environment reads.
+// (Enforced by scripts/test-ref-slot-contract.mjs: the source must contain no
+//  import or require call, no environment reads, no filesystem or network IO,
+//  and no time or randomness.) The WAVE1C SelectionAuthority + SelectionSpec-v2
+//  layer at the bottom computes REAL SHA-256 via a self-contained pure
+//  implementation, and hardens against hostile input with descriptor-first
+//  capture (no external Proxy-detection dependency).
 
 export const LEGACY_MEGA_SLOT_ORDER = Object.freeze(['hero', 'reaction', 'action', 'context', 'circle']);
 
@@ -778,7 +784,7 @@ export function validateStrictRenderActivation(input = {}) {
 
 // ---------- 📜 SelectionSpec v1 (Codex ตรวจรอบ 2 ข้อ 2-5 — 10 ก.ค. 69) ----------
 // สัญญา "S6 เลือกภาพไหน → ต้องลงช่องไหนของ realized template" สร้างที่ S7 ก่อนเรียก composer
-// shadow/additive ล้วน (ยังไม่มีผู้บริโภคฝั่งประกอบ) · pure เหมือนทั้งไฟล์: ห้าม import/IO/random
+// additive · ผู้บริโภคฝั่งประกอบ = สาย strict composer ที่คุมด้วย flag default OFF (megaComposerService, latch MEGA_STRICT_RENDER) · pure เหมือนทั้งไฟล์: ห้าม import/IO/random
 // realizedTemplate = ผลจริงจาก dnaToTemplateSpec(refDNA) — ผู้เรียกส่งเข้ามา (คงความ pure ของไฟล์นี้)
 
 function fnv1a32(str) {
@@ -1147,4 +1153,911 @@ export function resolveStrictLatches(envLike) {
   }
 
   return { armedProducer, armedRenderer, armedRefShotAuthority, values, unknownStrictLikeKeys };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🔐 WAVE1C — SelectionAuthority v1 + SelectionSpec v2 (pure SHA-256, fail-closed)
+// ---------------------------------------------------------------------------
+// FLAG-GATED contract layer: the WAVE1A ref-hero-v2 path wires these behind the
+// default-OFF env gate (S6 producer in megaAdapters + S7 carrier + the strict V2
+// consumer in megaComposerService); they stay inert only while that gate is unset.
+// Each builder and validator FAILS CLOSED — a structural defect yields a typed HOLD
+// carrying FIXED reason codes (bounded strings + numeric indices only; caller-supplied
+// ids/urls/messages are NEVER echoed), never a partial or coerced result, never
+// a thrown exception. All returned objects are deep-frozen.
+//
+// PURE by the module contract (enforced by scripts/test-ref-slot-contract.mjs):
+// no imports, no environment reads, no IO, no time, no randomness. The digests
+// are REAL SHA-256, implemented here in self-contained pure JS (proven in the owned
+// test to be byte-identical to node:crypto — which is itself pinned to the NIST
+// known-answer vectors), NOT the 32-bit fnv1a32 checksum the legacy layer still uses.
+//
+// Capture is DESCRIPTOR-FIRST: every untrusted object/array is read once into a
+// fully-owned snapshot via property descriptors (never via a getter, so an
+// accessor is rejected and a Proxy's get-trap is never triggered), with every
+// reflection call guarded so a throwing trap yields a stable HOLD rather than an
+// exception. Collections are length-bounded BEFORE iteration.
+//
+// Hash grammars are EXACT and per-source: story / cast / assignment authority
+// hashes are SHA-256 (64 lowercase hex); the hero contract hash is fnv1a32
+// (8 lowercase hex) in-tree; every hash this module computes is 64 lowercase hex.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const SELECTION_AUTHORITY_VERSION = 1;
+export const SELECTION_SPEC_V2_VERSION = 2;
+
+// ---- pure SHA-256 (no imports) ---------------------------------------------
+// UTF-8 encode a JS string to a byte array (lone surrogates → U+FFFD, matching
+// node:crypto's utf8 handling — cross-checked in the owned test).
+function saUtf8Bytes(str) {
+  const out = [];
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    if (c < 0x80) {
+      out.push(c);
+    } else if (c < 0x800) {
+      out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+    } else if (c >= 0xd800 && c <= 0xdbff) {
+      const c2 = str.charCodeAt(i + 1);
+      if (c2 >= 0xdc00 && c2 <= 0xdfff) {
+        const cp = 0x10000 + ((c - 0xd800) << 10) + (c2 - 0xdc00);
+        out.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+        i++;
+      } else {
+        out.push(0xef, 0xbf, 0xbd);
+      }
+    } else if (c >= 0xdc00 && c <= 0xdfff) {
+      out.push(0xef, 0xbf, 0xbd);
+    } else {
+      out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    }
+  }
+  return out;
+}
+
+const SA_SHA256_K = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+
+function saRotr32(x, n) { return ((x >>> n) | (x << (32 - n))) >>> 0; }
+
+function saSha256Hex(str) {
+  const bytes = saUtf8Bytes(str);
+  const bitLen = bytes.length * 8;
+  bytes.push(0x80);
+  while ((bytes.length % 64) !== 56) bytes.push(0);
+  const hi = Math.floor(bitLen / 0x100000000) >>> 0;
+  const lo = bitLen >>> 0;
+  bytes.push((hi >>> 24) & 0xff, (hi >>> 16) & 0xff, (hi >>> 8) & 0xff, hi & 0xff);
+  bytes.push((lo >>> 24) & 0xff, (lo >>> 16) & 0xff, (lo >>> 8) & 0xff, lo & 0xff);
+
+  let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a,
+    h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;
+  const w = new Array(64);
+  for (let off = 0; off < bytes.length; off += 64) {
+    for (let i = 0; i < 16; i++) {
+      w[i] = ((bytes[off + 4 * i] << 24) | (bytes[off + 4 * i + 1] << 16) | (bytes[off + 4 * i + 2] << 8) | bytes[off + 4 * i + 3]) >>> 0;
+    }
+    for (let i = 16; i < 64; i++) {
+      const s0 = (saRotr32(w[i - 15], 7) ^ saRotr32(w[i - 15], 18) ^ (w[i - 15] >>> 3)) >>> 0;
+      const s1 = (saRotr32(w[i - 2], 17) ^ saRotr32(w[i - 2], 19) ^ (w[i - 2] >>> 10)) >>> 0;
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+    }
+    let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+    for (let i = 0; i < 64; i++) {
+      const S1 = (saRotr32(e, 6) ^ saRotr32(e, 11) ^ saRotr32(e, 25)) >>> 0;
+      const ch = ((e & f) ^ ((~e >>> 0) & g)) >>> 0;
+      const t1 = (h + S1 + ch + SA_SHA256_K[i] + w[i]) >>> 0;
+      const S0 = (saRotr32(a, 2) ^ saRotr32(a, 13) ^ saRotr32(a, 22)) >>> 0;
+      const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
+      const t2 = (S0 + maj) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    h0 = (h0 + a) >>> 0; h1 = (h1 + b) >>> 0; h2 = (h2 + c) >>> 0; h3 = (h3 + d) >>> 0;
+    h4 = (h4 + e) >>> 0; h5 = (h5 + f) >>> 0; h6 = (h6 + g) >>> 0; h7 = (h7 + h) >>> 0;
+  }
+  const hx = (x) => ('00000000' + (x >>> 0).toString(16)).slice(-8);
+  return hx(h0) + hx(h1) + hx(h2) + hx(h3) + hx(h4) + hx(h5) + hx(h6) + hx(h7);
+}
+
+// ---- canonical JSON over an already-owned snapshot -------------------------
+function saCodeUnitCompare(a, b) {
+  const as = String(a), bs = String(b);
+  if (as < bs) return -1;
+  if (as > bs) return 1;
+  return 0;
+}
+function saSortDeep(v) {
+  if (Array.isArray(v)) return v.map(saSortDeep);
+  if (v !== null && typeof v === 'object') {
+    const out = {};
+    for (const k of Object.keys(v).sort(saCodeUnitCompare)) out[k] = saSortDeep(v[k]);
+    return out;
+  }
+  return v;
+}
+function saHashJson(canon) { return saSha256Hex(JSON.stringify(saSortDeep(canon))); }
+
+// ---- descriptor-first capture primitives (no node:util) --------------------
+// Plain-record capture: own enumerable DATA properties only (accessors rejected
+// by !('value' in d) — the getter is never invoked), prototype Object.prototype
+// or null, no symbol keys, EXACT required key set. Every reflection guarded so a
+// hostile Proxy trap yields null (→ HOLD), never a throw. Reads each value once
+// into a fully-owned record; callers never touch the original object again.
+function saCaptureRecord(v, requiredKeys) {
+  if (v === null || typeof v !== 'object') return null;
+  // Array.isArray THROWS on a revoked Proxy — guard it so a revoked object/array
+  // Proxy yields a stable HOLD (null), never an exception.
+  let isArr;
+  try { isArr = Array.isArray(v); } catch { return null; }
+  if (isArr) return null;
+  let proto, names;
+  try { proto = Object.getPrototypeOf(v); } catch { return null; }
+  if (proto !== Object.prototype && proto !== null) return null;
+  try { if (Object.getOwnPropertySymbols(v).length > 0) return null; } catch { return null; }
+  try { names = Object.getOwnPropertyNames(v); } catch { return null; }
+  if (names.length !== requiredKeys.length) return null;
+  const want = new Set(requiredKeys);
+  const out = {};
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    if (!want.has(name)) return null;
+    let d;
+    try { d = Object.getOwnPropertyDescriptor(v, name); } catch { return null; }
+    if (!d || d.enumerable !== true || !('value' in d)) return null;
+    out[name] = d.value;
+  }
+  return out;
+}
+
+// Bounded dense-array capture: maxLen is enforced BEFORE any element iteration
+// (oversize → null). Wrong prototype / holes / extra or symbol keys / accessor
+// length → null. All reflection guarded; no getter invoked.
+function saCaptureArrayBounded(v, maxLen) {
+  if (v === null || typeof v !== 'object') return null;
+  // Array.isArray THROWS on a revoked Proxy — guard it so a revoked Proxy yields
+  // a stable HOLD (null), never an exception.
+  let isArr;
+  try { isArr = Array.isArray(v); } catch { return null; }
+  if (!isArr) return null;
+  let proto, lenDesc, names;
+  try { proto = Object.getPrototypeOf(v); } catch { return null; }
+  if (proto !== Array.prototype) return null;
+  try { if (Object.getOwnPropertySymbols(v).length > 0) return null; } catch { return null; }
+  try { lenDesc = Object.getOwnPropertyDescriptor(v, 'length'); } catch { return null; }
+  if (!lenDesc || lenDesc.enumerable !== false || !('value' in lenDesc)) return null;
+  const length = lenDesc.value;
+  if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) return null;
+  if (length > maxLen) return null;
+  try { names = Object.getOwnPropertyNames(v); } catch { return null; }
+  if (names.length !== length + 1) return null;
+  const out = [];
+  for (let i = 0; i < length; i++) {
+    let d;
+    try { d = Object.getOwnPropertyDescriptor(v, String(i)); } catch { return null; }
+    if (!d || d.enumerable !== true || !('value' in d)) return null;
+    out.push(d.value);
+  }
+  return out;
+}
+
+// Cheap, safe "longer than maxLen" peek (reads only the length descriptor).
+function saArrayTooLong(v, maxLen) {
+  try {
+    if (!Array.isArray(v)) return false;
+    const d = Object.getOwnPropertyDescriptor(v, 'length');
+    return !!d && ('value' in d) && typeof d.value === 'number' && d.value > maxLen;
+  } catch { return false; }
+}
+
+// ---- scalar validators -----------------------------------------------------
+const SA_MAX_ID_LEN = 512;
+// Control-char detection WITHOUT a literal control byte or \u escape in source.
+function saHasControlChar(s) {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x20 || c === 0x7f) return true;
+  }
+  return false;
+}
+function saIsCleanString(v) {
+  return typeof v === 'string' && v.length > 0 && v.length <= SA_MAX_ID_LEN && !saHasControlChar(v);
+}
+function saIsCleanIdOrNull(v) { return v === null || saIsCleanString(v); }
+const _SA_HEX64_RE = /^[0-9a-f]{64}$/;
+const _SA_HEX8_RE = /^[0-9a-f]{8}$/;
+function saIs64Hex(v) { return typeof v === 'string' && _SA_HEX64_RE.test(v); }
+function saIs8Hex(v) { return typeof v === 'string' && _SA_HEX8_RE.test(v); }
+function saIsSafeUint(v) { return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0; }
+
+function saDeepFreeze(v) {
+  if (v !== null && typeof v === 'object') {
+    for (const k of Object.keys(v)) saDeepFreeze(v[k]);
+    Object.freeze(v);
+  }
+  return v;
+}
+
+function saHold(reasons, key) {
+  return { ok: false, decision: 'hold', reasons, [key]: null };
+}
+
+// ═══ SelectionAuthority v1 ═══════════════════════════════════════════════════
+const SA_SHAPES = Object.freeze(['rect', 'circle', 'rounded']);
+const SA_MAX_SLOTS = 8;
+const SA_SLOT_KEYS = Object.freeze(['refSlotId', 'order', 'role', 'shape', 'personId', 'candidateId', 'sourceAssetId']);
+const SA_HERO_KEYS = Object.freeze(['heroContractHash', 'refSlotId', 'personId', 'candidateId', 'sourceAssetId']);
+const SA_ENVELOPE_KEYS = Object.freeze(['v', 'storyAuthorityHash', 'castManifestHash', 'assignmentHash', 'hero', 'slots', 'selectionAuthorityHash']);
+const SA_BUILD_INPUT_KEYS = Object.freeze([
+  'storyAuthorityHash', 'castManifestHash', 'assignmentHash', 'hero', 'slots',
+  'expectedSelectionAuthorityHash', 'expectedStoryAuthorityHash', 'expectedCastManifestHash',
+  'expectedAssignmentHash', 'expectedHeroContractHash',
+]);
+const SA_VALIDATE_INPUT_KEYS = Object.freeze([
+  'selectionAuthority', 'expectedSelectionAuthorityHash', 'expectedStoryAuthorityHash',
+  'expectedCastManifestHash', 'expectedAssignmentHash', 'expectedHeroContractHash',
+]);
+
+// hero.personId is AUTHORITATIVE identity → must be a bounded clean NONBLANK
+// string; it may never be null. heroContractHash is fnv1a32 (exactly 8 hex).
+function saCaptureHeroRow(v, reasons) {
+  const raw = saCaptureRecord(v, SA_HERO_KEYS);
+  if (raw === null) { reasons.push('sa_hero_keys'); return null; }
+  let ok = true;
+  if (!saIs8Hex(raw.heroContractHash)) { reasons.push('sa_hero_contract_hash'); ok = false; }
+  if (!saIsCleanString(raw.refSlotId)) { reasons.push('sa_hero_refSlotId'); ok = false; }
+  if (!saIsCleanString(raw.personId)) { reasons.push('sa_hero_personId_required'); ok = false; }
+  if (!saIsCleanString(raw.candidateId)) { reasons.push('sa_hero_candidateId'); ok = false; }
+  if (!saIsCleanString(raw.sourceAssetId)) { reasons.push('sa_hero_sourceAssetId'); ok = false; }
+  if (!ok) return null;
+  return {
+    heroContractHash: raw.heroContractHash, refSlotId: raw.refSlotId,
+    personId: raw.personId, candidateId: raw.candidateId, sourceAssetId: raw.sourceAssetId,
+  };
+}
+
+// non-hero slots: personId nullable (contract permits null for non-hero rows).
+function saCaptureSlotRow(v, i, reasons) {
+  const raw = saCaptureRecord(v, SA_SLOT_KEYS);
+  if (raw === null) { reasons.push(`sa_slot_keys:${i}`); return null; }
+  let ok = true;
+  if (!saIsCleanString(raw.refSlotId)) { reasons.push(`sa_slot_refSlotId:${i}`); ok = false; }
+  if (!saIsSafeUint(raw.order) || raw.order < 1 || raw.order > SA_MAX_SLOTS) { reasons.push(`sa_slot_order:${i}`); ok = false; }
+  if (!saIsCleanString(raw.role)) { reasons.push(`sa_slot_role:${i}`); ok = false; }
+  if (!SA_SHAPES.includes(raw.shape)) { reasons.push(`sa_slot_shape:${i}`); ok = false; }
+  if (!saIsCleanIdOrNull(raw.personId)) { reasons.push(`sa_slot_personId:${i}`); ok = false; }
+  if (!saIsCleanString(raw.candidateId)) { reasons.push(`sa_slot_candidateId:${i}`); ok = false; }
+  if (!saIsCleanString(raw.sourceAssetId)) { reasons.push(`sa_slot_sourceAssetId:${i}`); ok = false; }
+  if (!ok) return null;
+  return {
+    refSlotId: raw.refSlotId, order: raw.order, role: raw.role, shape: raw.shape,
+    personId: raw.personId, candidateId: raw.candidateId, sourceAssetId: raw.sourceAssetId,
+  };
+}
+
+function saCaptureAuthorityBody(src, reasons) {
+  if (!saIs64Hex(src.storyAuthorityHash)) reasons.push('sa_story_hash');
+  if (!saIs64Hex(src.castManifestHash)) reasons.push('sa_cast_hash');
+  if (!saIs64Hex(src.assignmentHash)) reasons.push('sa_assignment_hash');
+  const hero = saCaptureHeroRow(src.hero, reasons);
+  let slots = null;
+  if (saArrayTooLong(src.slots, SA_MAX_SLOTS)) {
+    reasons.push('sa_slots_too_many');
+  } else {
+    const rawSlots = saCaptureArrayBounded(src.slots, SA_MAX_SLOTS);
+    if (rawSlots === null) reasons.push('sa_slots_not_array');
+    else if (rawSlots.length < 1) reasons.push('sa_slots_empty');
+    else {
+      slots = [];
+      for (let i = 0; i < rawSlots.length; i++) {
+        const s = saCaptureSlotRow(rawSlots[i], i, reasons);
+        if (s) slots.push(s);
+      }
+      if (slots.length !== rawSlots.length) slots = null;
+    }
+  }
+  if (reasons.length || !hero || !slots) return null;
+
+  let ascending = true;
+  for (let i = 1; i < slots.length; i++) if (slots[i].order <= slots[i - 1].order) { ascending = false; break; }
+  let contiguous = true;
+  const sortedOrders = slots.map((s) => s.order).sort((a, b) => a - b);
+  for (let i = 0; i < sortedOrders.length; i++) if (sortedOrders[i] !== i + 1) { contiguous = false; break; }
+  if (!ascending) reasons.push('sa_order_not_ascending');
+  if (!contiguous) reasons.push('sa_order_not_contiguous');
+
+  const refIds = slots.map((s) => s.refSlotId);
+  const candIds = slots.map((s) => s.candidateId);
+  const assetIds = slots.map((s) => s.sourceAssetId);
+  if (new Set(refIds).size !== refIds.length) reasons.push('sa_dup_refSlotId');
+  if (new Set(candIds).size !== candIds.length) reasons.push('sa_dup_candidateId');
+  if (new Set(assetIds).size !== assetIds.length) reasons.push('sa_dup_sourceAssetId');
+
+  const heroRows = slots.filter((s) => s.refSlotId === hero.refSlotId);
+  if (heroRows.length !== 1) reasons.push('sa_hero_no_row_match');
+  else {
+    const r = heroRows[0];
+    if (r.personId !== hero.personId || r.candidateId !== hero.candidateId || r.sourceAssetId !== hero.sourceAssetId) {
+      reasons.push('sa_hero_tuple_mismatch');
+    }
+  }
+  if (reasons.length) return null;
+  return {
+    storyAuthorityHash: src.storyAuthorityHash,
+    castManifestHash: src.castManifestHash,
+    assignmentHash: src.assignmentHash,
+    hero,
+    slots,
+  };
+}
+
+function saComputeAuthorityHash(body) {
+  return saHashJson({
+    v: SELECTION_AUTHORITY_VERSION,
+    storyAuthorityHash: body.storyAuthorityHash,
+    castManifestHash: body.castManifestHash,
+    assignmentHash: body.assignmentHash,
+    hero: {
+      heroContractHash: body.hero.heroContractHash, refSlotId: body.hero.refSlotId,
+      personId: body.hero.personId, candidateId: body.hero.candidateId, sourceAssetId: body.hero.sourceAssetId,
+    },
+    slots: body.slots.map((s) => ({
+      refSlotId: s.refSlotId, order: s.order, role: s.role, shape: s.shape,
+      personId: s.personId, candidateId: s.candidateId, sourceAssetId: s.sourceAssetId,
+    })),
+  });
+}
+
+function saBuildEnvelope(body, selectionAuthorityHash) {
+  return saDeepFreeze({
+    v: SELECTION_AUTHORITY_VERSION,
+    storyAuthorityHash: body.storyAuthorityHash,
+    castManifestHash: body.castManifestHash,
+    assignmentHash: body.assignmentHash,
+    hero: {
+      heroContractHash: body.hero.heroContractHash, refSlotId: body.hero.refSlotId,
+      personId: body.hero.personId, candidateId: body.hero.candidateId, sourceAssetId: body.hero.sourceAssetId,
+    },
+    slots: body.slots.map((s) => ({
+      refSlotId: s.refSlotId, order: s.order, role: s.role, shape: s.shape,
+      personId: s.personId, candidateId: s.candidateId, sourceAssetId: s.sourceAssetId,
+    })),
+    selectionAuthorityHash,
+  });
+}
+
+/**
+ * Assemble a SelectionAuthority v1 envelope from raw components and self-verify
+ * against the five separately-supplied expected witnesses. Fail-closed.
+ */
+export function buildSelectionAuthorityV1(input = {}) {
+  const top = saCaptureRecord(input, SA_BUILD_INPUT_KEYS);
+  if (top === null) return saHold(['sa_input_keys'], 'selectionAuthority');
+
+  const reasons = [];
+  const body = saCaptureAuthorityBody(top, reasons);
+  if (!body) return saHold(reasons, 'selectionAuthority');
+
+  if (!saIs64Hex(top.expectedSelectionAuthorityHash)) reasons.push('sa_expected_selection_hash');
+  if (!saIs64Hex(top.expectedStoryAuthorityHash)) reasons.push('sa_expected_story_hash');
+  if (!saIs64Hex(top.expectedCastManifestHash)) reasons.push('sa_expected_cast_hash');
+  if (!saIs64Hex(top.expectedAssignmentHash)) reasons.push('sa_expected_assignment_hash');
+  if (!saIs8Hex(top.expectedHeroContractHash)) reasons.push('sa_expected_hero_hash');
+  if (reasons.length) return saHold(reasons, 'selectionAuthority');
+
+  if (body.storyAuthorityHash !== top.expectedStoryAuthorityHash) reasons.push('sa_story_hash_expected_mismatch');
+  if (body.castManifestHash !== top.expectedCastManifestHash) reasons.push('sa_cast_hash_expected_mismatch');
+  if (body.assignmentHash !== top.expectedAssignmentHash) reasons.push('sa_assignment_hash_expected_mismatch');
+  if (body.hero.heroContractHash !== top.expectedHeroContractHash) reasons.push('sa_hero_hash_expected_mismatch');
+
+  const selectionAuthorityHash = saComputeAuthorityHash(body);
+  if (selectionAuthorityHash !== top.expectedSelectionAuthorityHash) reasons.push('sa_selection_hash_expected_mismatch');
+  if (reasons.length) return saHold(reasons, 'selectionAuthority');
+
+  return { ok: true, decision: 'assigned', selectionAuthority: saBuildEnvelope(body, selectionAuthorityHash) };
+}
+
+/**
+ * Re-validate an already-built SelectionAuthority v1 envelope against the five
+ * expected witnesses AND its own embedded selectionAuthorityHash. Fail-closed.
+ */
+export function validateSelectionAuthorityV1(input = {}) {
+  const top = saCaptureRecord(input, SA_VALIDATE_INPUT_KEYS);
+  if (top === null) return saHold(['sa_input_keys'], 'selectionAuthority');
+  const env = saCaptureRecord(top.selectionAuthority, SA_ENVELOPE_KEYS);
+  if (env === null) return saHold(['sa_envelope_keys'], 'selectionAuthority');
+
+  const reasons = [];
+  if (env.v !== SELECTION_AUTHORITY_VERSION) reasons.push('sa_envelope_version');
+  if (!saIs64Hex(env.selectionAuthorityHash)) reasons.push('sa_envelope_selection_hash_format');
+  const body = saCaptureAuthorityBody(env, reasons);
+  if (!body) return saHold(reasons, 'selectionAuthority');
+
+  if (!saIs64Hex(top.expectedSelectionAuthorityHash)) reasons.push('sa_expected_selection_hash');
+  if (!saIs64Hex(top.expectedStoryAuthorityHash)) reasons.push('sa_expected_story_hash');
+  if (!saIs64Hex(top.expectedCastManifestHash)) reasons.push('sa_expected_cast_hash');
+  if (!saIs64Hex(top.expectedAssignmentHash)) reasons.push('sa_expected_assignment_hash');
+  if (!saIs8Hex(top.expectedHeroContractHash)) reasons.push('sa_expected_hero_hash');
+  if (reasons.length) return saHold(reasons, 'selectionAuthority');
+
+  if (body.storyAuthorityHash !== top.expectedStoryAuthorityHash) reasons.push('sa_story_hash_expected_mismatch');
+  if (body.castManifestHash !== top.expectedCastManifestHash) reasons.push('sa_cast_hash_expected_mismatch');
+  if (body.assignmentHash !== top.expectedAssignmentHash) reasons.push('sa_assignment_hash_expected_mismatch');
+  if (body.hero.heroContractHash !== top.expectedHeroContractHash) reasons.push('sa_hero_hash_expected_mismatch');
+
+  const computed = saComputeAuthorityHash(body);
+  if (computed !== env.selectionAuthorityHash) reasons.push('sa_selection_hash_self_mismatch');
+  if (computed !== top.expectedSelectionAuthorityHash) reasons.push('sa_selection_hash_expected_mismatch');
+  if (reasons.length) return saHold(reasons, 'selectionAuthority');
+
+  return { ok: true, decision: 'assigned', selectionAuthority: saBuildEnvelope(body, computed) };
+}
+
+// ═══ SelectionSpec v2 ════════════════════════════════════════════════════════
+const V2_MAX_CANVAS = 100000;   // canvas dimension hard cap (documented)
+const V2_MAX_ZINDEX = 4096;     // z-index hard cap
+const V2_MAX_FEATHER = 512;     // feather hard cap
+const V2_MAX_DIAG_CODES = 32;   // diagnostics.codes length hard cap
+const V2_BUILD_INPUT_KEYS = Object.freeze(['selectionAuthority', 'expectedSelectionAuthorityHash', 'renderBindings', 'realizedTemplate', 'refId']);
+const V2_VALIDATE_INPUT_KEYS = Object.freeze(['selectionSpec', 'selectionAuthority', 'expectedSelectionAuthorityHash', 'expectedSpecHash', 'expectedReplayHash', 'realizedTemplate']);
+const V2_BINDING_KEYS = Object.freeze(['refSlotId', 'composerSlotId', 'candidateId', 'sourceAssetId', 'imageUrl']);
+const V2_REALIZED_KEYS = Object.freeze(['templateId', 'canvasW', 'canvasH', 'feather', 'slots']);
+const V2_REALIZED_SLOT_KEYS = Object.freeze(['id', 'x', 'y', 'w', 'h', 'zIndex', 'border', 'borderWidth', 'shape']);
+const V2_SPEC_KEYS = Object.freeze(['v', 'mode', 'source', 'refId', 'strictReady', 'authority', 'hero', 'canvas', 'counts', 'diagnostics', 'specHash', 'replayHash', 'slots']);
+const V2_AUTHORITY_KEYS = Object.freeze(['selectionAuthorityHash', 'storyAuthorityHash', 'castManifestHash', 'assignmentHash', 'heroContractHash']);
+const V2_HERO_KEYS = Object.freeze(['heroSlotId', 'personId', 'candidateId', 'sourceAssetId']);
+const V2_CANVAS_KEYS = Object.freeze(['templateId', 'canvasW', 'canvasH', 'feather']);
+const V2_COUNTS_KEYS = Object.freeze(['total', 'mapped', 'unmapped', 'missingPrimary', 'duplicateCandidate', 'duplicateSourceAsset', 'duplicatePrimaryUrl', 'semanticFallback']);
+const V2_DIAG_KEYS = Object.freeze(['codes']);
+const V2_SLOT_KEYS = Object.freeze(['refSlotId', 'composerSlotId', 'order', 'role', 'shape', 'render', 'primary', 'backups']);
+const V2_RENDER_KEYS = Object.freeze(['x', 'y', 'w', 'h', 'zIndex', 'border', 'borderWidth']);
+const V2_PRIMARY_KEYS = Object.freeze(['personId', 'candidateId', 'sourceAssetId', 'imageUrl']);
+
+// Re-validate a selectionAuthority envelope for V2 use. expectedSelectionAuthority-
+// Hash cryptographically pins every component hash, so no per-component expected is
+// needed here. Emits ONLY v2_* codes.
+function saValidateAuthorityForV2(envRaw, expectedSelectionAuthorityHash, reasons) {
+  const env = saCaptureRecord(envRaw, SA_ENVELOPE_KEYS);
+  if (env === null) { reasons.push('v2_authority_keys'); return null; }
+  if (env.v !== SELECTION_AUTHORITY_VERSION) reasons.push('v2_authority_version');
+  if (!saIs64Hex(env.selectionAuthorityHash)) reasons.push('v2_authority_hash_format');
+  const local = [];
+  const body = saCaptureAuthorityBody(env, local);
+  if (!body) { reasons.push('v2_authority_invalid'); return null; }
+  const computed = saComputeAuthorityHash(body);
+  if (computed !== env.selectionAuthorityHash) reasons.push('v2_authority_self_mismatch');
+  if (!saIs64Hex(expectedSelectionAuthorityHash) || computed !== expectedSelectionAuthorityHash) reasons.push('v2_authority_hash_mismatch');
+  if (reasons.length) return null;
+  return { body, selectionAuthorityHash: computed };
+}
+
+function saCaptureBinding(v, i, reasons) {
+  const raw = saCaptureRecord(v, V2_BINDING_KEYS);
+  if (raw === null) { reasons.push(`v2_binding_keys:${i}`); return null; }
+  let ok = true;
+  if (!saIsCleanString(raw.refSlotId)) { reasons.push(`v2_binding_refSlotId:${i}`); ok = false; }
+  if (!saIsCleanString(raw.composerSlotId)) { reasons.push(`v2_binding_composerSlotId:${i}`); ok = false; }
+  if (!saIsCleanString(raw.candidateId)) { reasons.push(`v2_binding_candidateId:${i}`); ok = false; }
+  if (!saIsCleanString(raw.sourceAssetId)) { reasons.push(`v2_binding_sourceAssetId:${i}`); ok = false; }
+  if (!saIsCleanString(raw.imageUrl)) { reasons.push(`v2_binding_imageUrl:${i}`); ok = false; }
+  if (!ok) return null;
+  return {
+    refSlotId: raw.refSlotId, composerSlotId: raw.composerSlotId,
+    candidateId: raw.candidateId, sourceAssetId: raw.sourceAssetId, imageUrl: raw.imageUrl,
+  };
+}
+
+function saCaptureRealizedSlot(v, i, reasons) {
+  const raw = saCaptureRecord(v, V2_REALIZED_SLOT_KEYS);
+  if (raw === null) { reasons.push(`v2_realized_slot_keys:${i}`); return null; }
+  let ok = true;
+  if (!saIsCleanString(raw.id)) { reasons.push(`v2_realized_slot_id:${i}`); ok = false; }
+  for (const k of ['x', 'y', 'zIndex', 'borderWidth']) {
+    if (!saIsSafeUint(raw[k])) { reasons.push(`v2_realized_slot_num:${i}`); ok = false; break; }
+  }
+  if (!saIsSafeUint(raw.w) || raw.w < 1 || !saIsSafeUint(raw.h) || raw.h < 1) { reasons.push(`v2_realized_slot_dim:${i}`); ok = false; }
+  if (typeof raw.border !== 'boolean') { reasons.push(`v2_realized_slot_border:${i}`); ok = false; }
+  if (!SA_SHAPES.includes(raw.shape)) { reasons.push(`v2_realized_slot_shape:${i}`); ok = false; }
+  if (!ok) return null;
+  return {
+    id: raw.id, x: raw.x, y: raw.y, w: raw.w, h: raw.h,
+    zIndex: raw.zIndex, border: raw.border, borderWidth: raw.borderWidth, shape: raw.shape,
+  };
+}
+
+function saCaptureRealized(v, reasons) {
+  const raw = saCaptureRecord(v, V2_REALIZED_KEYS);
+  if (raw === null) { reasons.push('v2_realized_keys'); return null; }
+  let ok = true;
+  if (!saIsCleanString(raw.templateId)) { reasons.push('v2_realized_templateId'); ok = false; }
+  if (!saIsSafeUint(raw.canvasW) || raw.canvasW < 1 || raw.canvasW > V2_MAX_CANVAS) { reasons.push('v2_realized_canvasW'); ok = false; }
+  if (!saIsSafeUint(raw.canvasH) || raw.canvasH < 1 || raw.canvasH > V2_MAX_CANVAS) { reasons.push('v2_realized_canvasH'); ok = false; }
+  if (!saIsSafeUint(raw.feather) || raw.feather > V2_MAX_FEATHER) { reasons.push('v2_realized_feather'); ok = false; }
+  let slots = null;
+  if (saArrayTooLong(raw.slots, SA_MAX_SLOTS)) { reasons.push('v2_realized_slots_too_many'); ok = false; }
+  else {
+    const rawSlots = saCaptureArrayBounded(raw.slots, SA_MAX_SLOTS);
+    if (rawSlots === null) { reasons.push('v2_realized_slots_not_array'); ok = false; }
+    else if (rawSlots.length < 1) { reasons.push('v2_realized_slots_empty'); ok = false; }
+    else {
+      slots = [];
+      for (let i = 0; i < rawSlots.length; i++) {
+        const s = saCaptureRealizedSlot(rawSlots[i], i, reasons);
+        if (s) slots.push(s);
+      }
+      if (slots.length !== rawSlots.length) { slots = null; ok = false; }
+    }
+  }
+  if (!ok || !slots) return null;
+  const ids = slots.map((s) => s.id);
+  if (new Set(ids).size !== ids.length) { reasons.push('v2_realized_duplicate_id'); return null; }
+
+  // geometry safety: canvas containment + practical caps (fail-closed HOLD).
+  if (2 * raw.feather > Math.min(raw.canvasW, raw.canvasH)) { reasons.push('v2_realized_feather_bounds'); ok = false; }
+  for (let i = 0; i < slots.length; i++) {
+    const r = slots[i];
+    if (r.x + r.w > raw.canvasW || r.y + r.h > raw.canvasH) { reasons.push(`v2_realized_offcanvas:${i}`); ok = false; }
+    if (r.zIndex > V2_MAX_ZINDEX) { reasons.push(`v2_realized_zindex:${i}`); ok = false; }
+    if (2 * r.borderWidth > Math.min(r.w, r.h)) { reasons.push(`v2_realized_border_bounds:${i}`); ok = false; }
+  }
+  if (!ok) return null;
+  return { templateId: raw.templateId, canvasW: raw.canvasW, canvasH: raw.canvasH, feather: raw.feather, slots };
+}
+
+// The canonical join: authority body ⋈ renderBindings ⋈ realized — ONLY by exact
+// refSlotId (bindings) and exact composerSlotId (realized). No role / index /
+// position / nearest-geometry fallback. Deterministic: output slots in authority
+// order. Returns the (unfrozen) v2 spec object or null (with typed reasons).
+function saAssembleSpecV2(body, selectionAuthorityHash, bindings, realized, refId, reasons) {
+  if (!saIsCleanString(refId)) reasons.push('v2_refId_invalid');
+
+  const authRefSet = new Set(body.slots.map((s) => s.refSlotId));
+  const bindByRef = new Map();
+  for (let i = 0; i < bindings.length; i++) {
+    const b = bindings[i];
+    if (!authRefSet.has(b.refSlotId)) { reasons.push(`v2_binding_unknown_refSlot:${i}`); continue; }
+    if (bindByRef.has(b.refSlotId)) { reasons.push('v2_binding_duplicate_refSlot'); continue; }
+    bindByRef.set(b.refSlotId, b);
+  }
+  for (let i = 0; i < body.slots.length; i++) {
+    if (!bindByRef.has(body.slots[i].refSlotId)) reasons.push(`v2_binding_missing:${i}`);
+  }
+  if (reasons.length) return null;
+
+  const usedBindings = body.slots.map((s) => bindByRef.get(s.refSlotId));
+  const composerIds = usedBindings.map((b) => b.composerSlotId);
+  const urls = usedBindings.map((b) => b.imageUrl);
+  if (new Set(composerIds).size !== composerIds.length) reasons.push('v2_dup_composer_id');
+  if (new Set(urls).size !== urls.length) reasons.push('v2_dup_primary_url');
+
+  const realizedById = new Map(realized.slots.map((r) => [r.id, r]));
+  const compSet = new Set(composerIds);
+  const oneToOne = realized.slots.length === body.slots.length
+    && compSet.size === realized.slots.length
+    && [...compSet].every((id) => realizedById.has(id));
+  if (!oneToOne) reasons.push('v2_realized_set_mismatch');
+  if (reasons.length) return null;
+
+  const slots = [];
+  for (let i = 0; i < body.slots.length; i++) {
+    const a = body.slots[i];
+    const b = bindByRef.get(a.refSlotId);
+    const r = realizedById.get(b.composerSlotId);
+    if (b.candidateId !== a.candidateId || b.sourceAssetId !== a.sourceAssetId) { reasons.push(`v2_asset_substitution:${i}`); continue; }
+    if (a.shape === 'rounded') {
+      if (r.shape !== 'rounded') { reasons.push(`v2_shape_unsupported:${i}`); continue; }
+    } else if (r.shape !== a.shape) {
+      reasons.push(`v2_shape_mismatch:${i}`); continue;
+    }
+    slots.push({
+      refSlotId: a.refSlotId, composerSlotId: b.composerSlotId, order: a.order, role: a.role, shape: a.shape,
+      render: { x: r.x, y: r.y, w: r.w, h: r.h, zIndex: r.zIndex, border: r.border, borderWidth: r.borderWidth },
+      primary: { personId: a.personId, candidateId: a.candidateId, sourceAssetId: a.sourceAssetId, imageUrl: b.imageUrl },
+      backups: [],
+    });
+  }
+  if (reasons.length) return null;
+
+  const heroSlotId = body.hero.refSlotId;
+  const heroRow = slots.find((s) => s.refSlotId === heroSlotId);
+  if (!heroRow
+    || heroRow.primary.personId !== body.hero.personId
+    || heroRow.primary.candidateId !== body.hero.candidateId
+    || heroRow.primary.sourceAssetId !== body.hero.sourceAssetId) {
+    reasons.push('v2_hero_mismatch');
+    return null;
+  }
+
+  const total = body.slots.length;
+  const counts = {
+    total, mapped: slots.length, unmapped: total - slots.length, missingPrimary: 0,
+    duplicateCandidate: 0, duplicateSourceAsset: 0, duplicatePrimaryUrl: 0, semanticFallback: 0,
+  };
+  const authority = {
+    selectionAuthorityHash, storyAuthorityHash: body.storyAuthorityHash,
+    castManifestHash: body.castManifestHash, assignmentHash: body.assignmentHash, heroContractHash: body.hero.heroContractHash,
+  };
+  const heroV2 = { heroSlotId, personId: body.hero.personId, candidateId: body.hero.candidateId, sourceAssetId: body.hero.sourceAssetId };
+  const canvas = { templateId: realized.templateId, canvasW: realized.canvasW, canvasH: realized.canvasH, feather: realized.feather };
+
+  const identity = slots.map((s) => ({
+    refSlotId: s.refSlotId, composerSlotId: s.composerSlotId, order: s.order, role: s.role, shape: s.shape,
+    render: { x: s.render.x, y: s.render.y, w: s.render.w, h: s.render.h, zIndex: s.render.zIndex, border: s.render.border, borderWidth: s.render.borderWidth },
+    primary: { personId: s.primary.personId, candidateId: s.primary.candidateId, sourceAssetId: s.primary.sourceAssetId },
+  }));
+  const specPayload = { v: SELECTION_SPEC_V2_VERSION, refId, authority, hero: heroV2, canvas, slots: identity };
+  const specHash = saHashJson(specPayload);
+  const replayHash = saHashJson({ ...specPayload, urls: slots.map((s) => ({ refSlotId: s.refSlotId, imageUrl: s.primary.imageUrl })) });
+
+  return {
+    v: SELECTION_SPEC_V2_VERSION, mode: 'semantic_global_exact', source: 'selection_authority',
+    refId, strictReady: true, authority, hero: heroV2, canvas, counts,
+    diagnostics: { codes: [] }, specHash, replayHash, slots,
+  };
+}
+
+/**
+ * Build a SelectionSpec v2 by joining a verified SelectionAuthority envelope,
+ * render bindings, and a realized template — exact refSlotId join only.
+ * Fail-closed: any defect yields a typed HOLD, never a partial spec.
+ */
+export function buildSelectionSpecV2(input = {}) {
+  const top = saCaptureRecord(input, V2_BUILD_INPUT_KEYS);
+  if (top === null) return saHold(['v2_input_keys'], 'selectionSpec');
+
+  const reasons = [];
+  const auth = saValidateAuthorityForV2(top.selectionAuthority, top.expectedSelectionAuthorityHash, reasons);
+  if (!auth) return saHold(reasons, 'selectionSpec');
+
+  let bindings = null;
+  if (saArrayTooLong(top.renderBindings, SA_MAX_SLOTS)) reasons.push('v2_bindings_too_many');
+  else {
+    const rawBind = saCaptureArrayBounded(top.renderBindings, SA_MAX_SLOTS);
+    if (rawBind === null) reasons.push('v2_bindings_not_array');
+    else if (rawBind.length < 1) reasons.push('v2_bindings_empty');
+    else {
+      bindings = [];
+      for (let i = 0; i < rawBind.length; i++) {
+        const b = saCaptureBinding(rawBind[i], i, reasons);
+        if (b) bindings.push(b);
+      }
+      if (bindings.length !== rawBind.length) bindings = null;
+    }
+  }
+  const realized = saCaptureRealized(top.realizedTemplate, reasons);
+  if (reasons.length || !bindings || !realized) return saHold(reasons, 'selectionSpec');
+
+  const spec = saAssembleSpecV2(auth.body, auth.selectionAuthorityHash, bindings, realized, top.refId, reasons);
+  if (!spec) return saHold(reasons, 'selectionSpec');
+  return { ok: true, decision: 'assigned', selectionSpec: saDeepFreeze(spec) };
+}
+
+// Structurally capture an already-built v2 spec into a fully-owned normalized
+// snapshot (identical field shape to saAssembleSpecV2 output). Enforces the exact
+// schema — including hero.personId NONBLANK, backups === [], and diagnostics.codes
+// bounded to clean strings (so a hostile codes element can never reach saHashJson).
+function saCaptureSpecV2(v, reasons) {
+  const raw = saCaptureRecord(v, V2_SPEC_KEYS);
+  if (raw === null) { reasons.push('v2_spec_keys'); return null; }
+  let ok = true;
+  if (raw.v !== SELECTION_SPEC_V2_VERSION) { reasons.push('v2_spec_version'); ok = false; }
+  if (raw.mode !== 'semantic_global_exact') { reasons.push('v2_spec_mode'); ok = false; }
+  if (raw.source !== 'selection_authority') { reasons.push('v2_spec_source'); ok = false; }
+  if (raw.strictReady !== true) { reasons.push('v2_spec_strictReady'); ok = false; }
+  if (!saIsCleanString(raw.refId)) { reasons.push('v2_spec_refId'); ok = false; }
+  if (!saIs64Hex(raw.specHash)) { reasons.push('v2_spec_specHash'); ok = false; }
+  if (!saIs64Hex(raw.replayHash)) { reasons.push('v2_spec_replayHash'); ok = false; }
+
+  const authority = saCaptureRecord(raw.authority, V2_AUTHORITY_KEYS);
+  if (authority === null) { reasons.push('v2_spec_authority'); ok = false; }
+  else {
+    if (!saIs64Hex(authority.selectionAuthorityHash)) { reasons.push('v2_spec_authority_hash'); ok = false; }
+    if (!saIs64Hex(authority.storyAuthorityHash)) { reasons.push('v2_spec_authority_story'); ok = false; }
+    if (!saIs64Hex(authority.castManifestHash)) { reasons.push('v2_spec_authority_cast'); ok = false; }
+    if (!saIs64Hex(authority.assignmentHash)) { reasons.push('v2_spec_authority_assignment'); ok = false; }
+    if (!saIs8Hex(authority.heroContractHash)) { reasons.push('v2_spec_authority_hero'); ok = false; }
+  }
+
+  const hero = saCaptureRecord(raw.hero, V2_HERO_KEYS);
+  if (hero === null) { reasons.push('v2_spec_hero'); ok = false; }
+  else {
+    if (!saIsCleanString(hero.heroSlotId)) { reasons.push('v2_spec_hero_slot'); ok = false; }
+    if (!saIsCleanString(hero.personId)) { reasons.push('v2_spec_hero_person_required'); ok = false; }
+    if (!saIsCleanString(hero.candidateId)) { reasons.push('v2_spec_hero_candidate'); ok = false; }
+    if (!saIsCleanString(hero.sourceAssetId)) { reasons.push('v2_spec_hero_asset'); ok = false; }
+  }
+
+  const canvas = saCaptureRecord(raw.canvas, V2_CANVAS_KEYS);
+  if (canvas === null) { reasons.push('v2_spec_canvas'); ok = false; }
+  else {
+    if (!saIsCleanString(canvas.templateId)) { reasons.push('v2_spec_canvas_templateId'); ok = false; }
+    if (!saIsSafeUint(canvas.canvasW) || canvas.canvasW < 1 || canvas.canvasW > V2_MAX_CANVAS) { reasons.push('v2_spec_canvas_w'); ok = false; }
+    if (!saIsSafeUint(canvas.canvasH) || canvas.canvasH < 1 || canvas.canvasH > V2_MAX_CANVAS) { reasons.push('v2_spec_canvas_h'); ok = false; }
+    if (!saIsSafeUint(canvas.feather) || canvas.feather > V2_MAX_FEATHER) { reasons.push('v2_spec_canvas_feather'); ok = false; }
+  }
+
+  const counts = saCaptureRecord(raw.counts, V2_COUNTS_KEYS);
+  if (counts === null) { reasons.push('v2_spec_counts'); ok = false; }
+  else {
+    for (const k of V2_COUNTS_KEYS) if (!saIsSafeUint(counts[k])) { reasons.push('v2_spec_counts_num'); ok = false; break; }
+  }
+
+  const diagnostics = saCaptureRecord(raw.diagnostics, V2_DIAG_KEYS);
+  let diagCodes = null;
+  if (diagnostics === null) { reasons.push('v2_spec_diagnostics'); ok = false; }
+  else if (saArrayTooLong(diagnostics.codes, V2_MAX_DIAG_CODES)) { reasons.push('v2_spec_diag_codes_too_many'); ok = false; }
+  else {
+    const codes = saCaptureArrayBounded(diagnostics.codes, V2_MAX_DIAG_CODES);
+    if (codes === null) { reasons.push('v2_spec_diag_codes'); ok = false; }
+    else {
+      diagCodes = [];
+      for (let ci = 0; ci < codes.length; ci++) {
+        if (!saIsCleanString(codes[ci])) { reasons.push('v2_spec_diag_code_invalid'); ok = false; break; }
+        diagCodes.push(codes[ci]);
+      }
+    }
+  }
+
+  let slots = null;
+  if (saArrayTooLong(raw.slots, SA_MAX_SLOTS)) { reasons.push('v2_spec_slots_too_many'); ok = false; }
+  else {
+    const rawSlots = saCaptureArrayBounded(raw.slots, SA_MAX_SLOTS);
+    if (rawSlots === null) { reasons.push('v2_spec_slots_not_array'); ok = false; }
+    else if (rawSlots.length < 1) { reasons.push('v2_spec_slots_empty'); ok = false; }
+    else {
+      slots = [];
+      for (let i = 0; i < rawSlots.length; i++) {
+        const s = saCaptureSpecSlotV2(rawSlots[i], i, reasons);
+        if (s) slots.push(s);
+      }
+      if (slots.length !== rawSlots.length) { slots = null; ok = false; }
+    }
+  }
+
+  if (!ok || !slots || !diagCodes) return null;
+  return {
+    v: SELECTION_SPEC_V2_VERSION, mode: raw.mode, source: raw.source, refId: raw.refId, strictReady: true,
+    authority: {
+      selectionAuthorityHash: authority.selectionAuthorityHash, storyAuthorityHash: authority.storyAuthorityHash,
+      castManifestHash: authority.castManifestHash, assignmentHash: authority.assignmentHash, heroContractHash: authority.heroContractHash,
+    },
+    hero: { heroSlotId: hero.heroSlotId, personId: hero.personId, candidateId: hero.candidateId, sourceAssetId: hero.sourceAssetId },
+    canvas: { templateId: canvas.templateId, canvasW: canvas.canvasW, canvasH: canvas.canvasH, feather: canvas.feather },
+    counts: {
+      total: counts.total, mapped: counts.mapped, unmapped: counts.unmapped, missingPrimary: counts.missingPrimary,
+      duplicateCandidate: counts.duplicateCandidate, duplicateSourceAsset: counts.duplicateSourceAsset,
+      duplicatePrimaryUrl: counts.duplicatePrimaryUrl, semanticFallback: counts.semanticFallback,
+    },
+    diagnostics: { codes: diagCodes.slice() },
+    specHash: raw.specHash, replayHash: raw.replayHash, slots,
+  };
+}
+
+function saCaptureSpecSlotV2(v, i, reasons) {
+  const raw = saCaptureRecord(v, V2_SLOT_KEYS);
+  if (raw === null) { reasons.push(`v2_spec_slot_keys:${i}`); return null; }
+  let ok = true;
+  if (!saIsCleanString(raw.refSlotId)) { reasons.push(`v2_spec_slot_refSlotId:${i}`); ok = false; }
+  if (!saIsCleanString(raw.composerSlotId)) { reasons.push(`v2_spec_slot_composerSlotId:${i}`); ok = false; }
+  if (!saIsSafeUint(raw.order) || raw.order < 1 || raw.order > SA_MAX_SLOTS) { reasons.push(`v2_spec_slot_order:${i}`); ok = false; }
+  if (!saIsCleanString(raw.role)) { reasons.push(`v2_spec_slot_role:${i}`); ok = false; }
+  if (!SA_SHAPES.includes(raw.shape)) { reasons.push(`v2_spec_slot_shape:${i}`); ok = false; }
+
+  const render = saCaptureRecord(raw.render, V2_RENDER_KEYS);
+  if (render === null) { reasons.push(`v2_spec_slot_render:${i}`); ok = false; }
+  else {
+    for (const k of ['x', 'y', 'zIndex', 'borderWidth']) if (!saIsSafeUint(render[k])) { reasons.push(`v2_spec_slot_render_num:${i}`); ok = false; break; }
+    if (!saIsSafeUint(render.w) || render.w < 1 || !saIsSafeUint(render.h) || render.h < 1) { reasons.push(`v2_spec_slot_render_dim:${i}`); ok = false; }
+    if (typeof render.border !== 'boolean') { reasons.push(`v2_spec_slot_render_border:${i}`); ok = false; }
+  }
+
+  const primary = saCaptureRecord(raw.primary, V2_PRIMARY_KEYS);
+  if (primary === null) { reasons.push(`v2_spec_slot_primary:${i}`); ok = false; }
+  else {
+    if (!saIsCleanIdOrNull(primary.personId)) { reasons.push(`v2_spec_slot_primary_person:${i}`); ok = false; }
+    if (!saIsCleanString(primary.candidateId)) { reasons.push(`v2_spec_slot_primary_candidate:${i}`); ok = false; }
+    if (!saIsCleanString(primary.sourceAssetId)) { reasons.push(`v2_spec_slot_primary_asset:${i}`); ok = false; }
+    if (!saIsCleanString(primary.imageUrl)) { reasons.push(`v2_spec_slot_primary_url:${i}`); ok = false; }
+  }
+
+  if (saArrayTooLong(raw.backups, 0)) { reasons.push(`v2_backup_nonempty:${i}`); ok = false; }
+  else {
+    const backups = saCaptureArrayBounded(raw.backups, 0);
+    if (backups === null) { reasons.push(`v2_spec_slot_backups_not_array:${i}`); ok = false; }
+    else if (backups.length !== 0) { reasons.push(`v2_backup_nonempty:${i}`); ok = false; }
+  }
+
+  if (!ok || render === null || primary === null) return null;
+  return {
+    refSlotId: raw.refSlotId, composerSlotId: raw.composerSlotId, order: raw.order, role: raw.role, shape: raw.shape,
+    render: { x: render.x, y: render.y, w: render.w, h: render.h, zIndex: render.zIndex, border: render.border, borderWidth: render.borderWidth },
+    primary: { personId: primary.personId, candidateId: primary.candidateId, sourceAssetId: primary.sourceAssetId, imageUrl: primary.imageUrl },
+    backups: [],
+  };
+}
+
+/**
+ * Validate that an already-built SelectionSpec v2 can activate strict render.
+ * EXTERNALLY PINNED: expectedSpecHash and expectedReplayHash are trusted witnesses
+ * supplied out-of-band (SelectionAuthority alone binds neither composerSlotId nor
+ * refId nor URL, so a re-signed provided spec cannot self-certify). The activator
+ * independently re-derives the canonical spec from the authority envelope + the
+ * realized template + the spec's own primary bindings, then requires: the provided
+ * spec equals that re-derivation (drift), AND both the re-derived and provided
+ * specHash/replayHash equal the external pins. Fail-closed → HOLD.
+ */
+export function validateSelectionSpecV2Activation(input = {}) {
+  const top = saCaptureRecord(input, V2_VALIDATE_INPUT_KEYS);
+  if (top === null) return saHold(['v2_input_keys'], 'selectionSpec');
+
+  const reasons = [];
+  if (!saIs64Hex(top.expectedSpecHash)) reasons.push('v2_expected_spec_hash');
+  if (!saIs64Hex(top.expectedReplayHash)) reasons.push('v2_expected_replay_hash');
+  if (reasons.length) return saHold(reasons, 'selectionSpec');
+
+  const provided = saCaptureSpecV2(top.selectionSpec, reasons);
+  if (!provided) return saHold(reasons, 'selectionSpec');
+
+  const auth = saValidateAuthorityForV2(top.selectionAuthority, top.expectedSelectionAuthorityHash, reasons);
+  if (!auth) return saHold(reasons, 'selectionSpec');
+
+  const realized = saCaptureRealized(top.realizedTemplate, reasons);
+  if (reasons.length || !realized) return saHold(reasons, 'selectionSpec');
+
+  const bindings = provided.slots.map((s) => ({
+    refSlotId: s.refSlotId, composerSlotId: s.composerSlotId,
+    candidateId: s.primary.candidateId, sourceAssetId: s.primary.sourceAssetId, imageUrl: s.primary.imageUrl,
+  }));
+  const canonical = saAssembleSpecV2(auth.body, auth.selectionAuthorityHash, bindings, realized, provided.refId, reasons);
+  if (!canonical) return saHold(reasons, 'selectionSpec');
+
+  // External pins bind everything the SelectionAuthority does not (composerSlotId,
+  // refId, geometry, URL). Re-derived AND provided must both match the trusted pins.
+  if (canonical.specHash !== top.expectedSpecHash) reasons.push('v2_spec_hash_pin_mismatch');
+  if (canonical.replayHash !== top.expectedReplayHash) reasons.push('v2_replay_hash_pin_mismatch');
+  if (provided.specHash !== top.expectedSpecHash) reasons.push('v2_spec_hash_mismatch');
+  if (provided.replayHash !== top.expectedReplayHash) reasons.push('v2_replay_hash_mismatch');
+  if (saHashJson(provided) !== saHashJson(canonical)) reasons.push('v2_spec_drift');
+  if (reasons.length) return saHold(reasons, 'selectionSpec');
+
+  return { ok: true, decision: 'assigned', selectionSpec: saDeepFreeze(canonical) };
+}
+
+// ═══ Version dispatch ════════════════════════════════════════════════════════
+// Safely read the own DATA property `v` of input.selectionSpec (descriptor-first,
+// no getter invocation, never throws). Returns the raw value or undefined.
+function saPeekSpecVersion(input) {
+  try {
+    if (input === null || (typeof input !== 'object' && typeof input !== 'function')) return undefined;
+    const specDesc = Object.getOwnPropertyDescriptor(input, 'selectionSpec');
+    if (!specDesc || !('value' in specDesc)) return undefined;
+    const spec = specDesc.value;
+    if (spec === null || typeof spec !== 'object') return undefined;
+    const vDesc = Object.getOwnPropertyDescriptor(spec, 'v');
+    if (!vDesc || !('value' in vDesc)) return undefined;
+    return vDesc.value;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Version-dispatching strict-render activation. Reads the spec's own data property
+ * `v`: iff it is EXACTLY the number 2, route to the v2 activation validator; for
+ * anything else (1, undefined, 0, 3, a `version` property, a string '2') delegate
+ * VERBATIM to validateStrictRenderActivation so current v1 behaviour is preserved
+ * byte-for-byte and never downgraded.
+ */
+export function validateStrictRenderActivationVersioned(input = {}) {
+  if (saPeekSpecVersion(input) === SELECTION_SPEC_V2_VERSION) {
+    return validateSelectionSpecV2Activation(input);
+  }
+  return validateStrictRenderActivation(input);
 }

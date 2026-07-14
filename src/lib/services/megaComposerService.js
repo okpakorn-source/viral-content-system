@@ -11,11 +11,14 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto'; // ★ เฟส 3.2 (10 ก.ค.): md5 คีย์ cache ผล photo-enhance ของ hero
+import { isProxy } from 'node:util/types'; // (P0) reject a raw outer args Proxy before ANY trap fires (unhideable invariant)
 // ★ Wave2 Batch D2 (10 ก.ค.): เกณฑ์ตัวเลข "กติกาวัดได้" จากคลังเทคนิคปก — single source of truth (sync, ใช้ใน measureTechRules)
 import { TECH_RULES } from '@/lib/imageQualityConfig';
 // ★ Checkpoint B (11 ก.ค. — Codex strict consumer): ผู้ตัดสิน "เปิด strict ได้ไหม" คือ validator ของ Checkpoint A
 //   เท่านั้น — consumer ใช้เฉพาะ decision.authority ที่ normalize แล้ว ห้ามอ่าน raw selectionSpec เอง
-import { validateStrictRenderActivation } from '@/lib/refSlotContract';
+// ★ Wave1A (LANE C — flag-gated, default OFF): V2 consumer ใช้ validateSelectionSpecV2Activation (canonical) เป็นผู้ตัดสินเดียว —
+//   ห้าม reimplement schema V2; S7 แค่ "บริโภค" spec ที่ผ่าน validator แล้วเท่านั้น (fail-closed HOLD ถ้าไม่ผ่าน)
+import { validateStrictRenderActivationVersioned } from '@/lib/refSlotContract';
 
 // ★ Wave1 Batch E (10 ก.ค. — manifest-lite): เวอร์ชัน composer ปัจจุบัน ประกาศตายตัวตรงนี้
 //   อัปเดตมือเมื่อแก้กติกา compose/crop/hero — ใช้ stamp ลง manifest ให้ debug/replay ย้อนดูได้ว่ารอบนี้วิ่งด้วยกติกาไหน
@@ -256,7 +259,7 @@ function traceQcFlags(cropTrace) {
 // 🔴 fail-open: วัดไม่ได้ (ไร้ faceBox/ไร้ trace/ไร้ region) = ข้ามเงียบ ไม่ติดธง (ห้ามเดา)
 // ธงทุกตัวอ้าง principle id ของคลัง (P-*) ในคอมเมนต์ — coverQcGate.js เป็นตัวตัดสินโหมด advisory/hard
 // ============================================================
-export function measureTechRules({ assignments = [], spec = null, faceBoxes = [], cropTrace = [] } = {}) {
+export function measureTechRules({ assignments = [], spec = null, faceBoxes = [], cropTrace = [], heroComposerSlotId = null } = {}) {
   const flags = [];
   const bySlot = {}; // slotId → { role, faceSharePct?, headroomPct?, hasFace }
   const slots = Array.isArray(spec?.slots) ? spec.slots : [];
@@ -272,7 +275,10 @@ export function measureTechRules({ assignments = [], spec = null, faceBoxes = []
   //   ช่อง DNA เกิดเป็น `${role}_${i}` เช่น context_2 / evidence_3 / reaction_1 / victim_5)
   const roleOf = (slot) => {
     const id = String(slot?.id || '');
-    if (/main|hero/i.test(id)) return 'hero';
+    // ★ (item 10) V2: hero = EXACT canonical heroComposerSlotId (face-share/headroom rules apply to arbitrary
+    //   canonical hero ids e.g. `panel_alpha`; a decoy `main` is NOT hero) · V1/legacy (null) = regex เดิม
+    if (heroComposerSlotId != null) { if (id === String(heroComposerSlotId)) return 'hero'; }
+    else if (/main|hero/i.test(id)) return 'hero';
     if (slot?.shape === 'circle') return 'circle';
     if (/^context/i.test(id)) return 'context';
     if (/^evidence/i.test(id)) return 'evidence';
@@ -410,9 +416,10 @@ export function measureTechRules({ assignments = [], spec = null, faceBoxes = []
 }
 
 // ---------- แกนประกอบ (ใช้ร่วม compose/verify) ----------
-// ---------- 🔐 Checkpoint B (11 ก.ค. — Codex): DORMANT STRICT COMPOSER CONSUMER ----------
-// consumer พร้อมแต่ยังไม่มี producer ส่ง payload — ตื่นเมื่อ MEGA_STRICT_RENDER=1 + payload พก own-property
-// selectionSpec เท่านั้น · หลักการ: strict = "เส้นแยกทั้งเส้น" — legacy ใน composeCore ไม่ถูกแตะแม้บรรทัดเดียว
+// ---------- 🔐 Checkpoint B (11 ก.ค. — Codex): FLAG-GATED STRICT COMPOSER CONSUMER ----------
+// producer จริงต่อแล้ว (megaAdapters S7 แนบ carrier เข้า queue payload) — ภายใต้ MEGA_STRICT_RENDER=1 shared seam
+// activate ให้ own carrier รูปแบบเดียวที่รองรับพอดี: V1 selectionSpec+realizedTemplate ครบคู่ หรือ V2 refHeroV2 · กำกวม/ครึ่งๆ = fail-closed · หลักการ: strict = "เส้นแยกทั้งเส้น" —
+// legacy ใน composeCore ไม่ถูกแตะแม้บรรทัดเดียว
 
 // deep-freeze ทั้งต้นไม้ — โครง strict ต้องแตะไม่ได้จริงตั้งแต่ก่อน await แรก (P1 รอบ 2)
 function _deepFreeze(o) {
@@ -423,17 +430,176 @@ function _deepFreeze(o) {
   return o;
 }
 
-// ① เตรียม strict context — pure 100% ห้ามมี IO: validator → โครง → ผูก primary → snapshot แช่แข็ง
-//   พังชั้นไหน = fail-closed ด้วย errorType เฉพาะชั้นนั้น "ก่อน" fetch/face/render เสมอ
-function _strictPrepare({ carrier, slotPlan }) {
-  // ชั้น 1 — ★ รอบ 2 (P0-1): ส่ง carrier ต้นฉบับเข้า validator ตรงๆ — กฎ own-property/plain-object
-  //   เป็นของ validator ผู้เดียว (array/function พก spec = input_not_plain_object · ห้ามไหลลง legacy)
-  //   อ่าน realizedTemplate ได้ "หลัง" validator ผ่านแล้วเท่านั้น
-  const decision = validateStrictRenderActivation(carrier);
-  if (decision.decision !== 'strict_ready') {
-    const reasons = decision.reasons && decision.reasons.length ? decision.reasons : [decision.decision];
-    return { error: `strict contract ไม่ผ่าน: ${reasons.join(',').slice(0, 180)}`, errorType: 'STRICT_RENDER_CONTRACT_INVALID', reasons };
+// (P1-R1 / P0-A / P0-B) PRIVATE, UNFORGEABLE capture — the SOLE observation of the outer carriers. Called ONCE by the
+//   exported seam; there is no caller-supplied snapshot path. Read the carrier DESCRIPTORS FIRST (before any
+//   getPrototypeOf / [[Get]] / has / ownKeys). Each record distinguishes absent / accessor / data / TRAP_ERROR (a
+//   throwing getOwnPropertyDescriptor is NEVER mapped to absence — that would let an unobservable carrier downgrade to
+//   legacy or hide V1+V2 ambiguity; it becomes trapError ⇒ typed HOLD). slotPlan is captured here too so the strict
+//   path never re-reads it. Records + snapshot are deep-frozen (the caller's objects are never frozen/mutated).
+function _captureCarrierSnapshot(args) {
+  const isObj = args != null && (typeof args === 'object' || typeof args === 'function');
+  const cap = (key) => {
+    if (!isObj) return Object.freeze({ present: false, accessor: false, trapError: false, value: undefined });
+    let d;
+    try { d = Object.getOwnPropertyDescriptor(args, key); }
+    catch { return Object.freeze({ present: false, accessor: false, trapError: true, value: undefined }); }
+    if (!d) return Object.freeze({ present: false, accessor: false, trapError: false, value: undefined });
+    if (!('value' in d)) return Object.freeze({ present: true, accessor: true, trapError: false, value: undefined }); // getter — NOT invoked
+    return Object.freeze({ present: true, accessor: false, trapError: false, value: d.value });
+  };
+  const refHeroV2 = cap('refHeroV2');
+  const selectionSpec = cap('selectionSpec');
+  const realizedTemplate = cap('realizedTemplate');
+  const slotPlan = cap('slotPlan');
+  // plain-prototype check ONLY AFTER the carriers are fixed — a getPrototypeOf trap/mutation cannot un-capture them.
+  let isPlain = false;
+  if (isObj) { try { const p = Object.getPrototypeOf(args); isPlain = (p === Object.prototype || p === null); } catch { isPlain = false; } }
+  return Object.freeze({ isObj, isPlain, refHeroV2, selectionSpec, realizedTemplate, slotPlan });
+}
+
+// (P1) Snapshot the INNER V2 carrier's own-data fields into a NEW FROZEN plain value (the caller's carrier object is
+//   never frozen/mutated). Reject any inner accessor OR descriptor-trap error; `ok` must be a literal true data field.
+function _captureV2Inner(c) {
+  const read = (k) => {
+    let d;
+    try { d = Object.getOwnPropertyDescriptor(c, k); } catch { return { trap: true }; }
+    if (!d) return { value: undefined };
+    if (!('value' in d)) return { accessor: true };
+    return { value: d.value };
+  };
+  const okR = read('ok');
+  if (okR.trap) return { trapError: true };
+  const okField = okR.accessor ? false : (okR.value === true);
+  const FIELDS = ['selectionSpec', 'selectionAuthority', 'expectedSelectionAuthorityHash', 'expectedSpecHash', 'expectedReplayHash', 'realizedTemplate'];
+  const input = {};
+  for (const f of FIELDS) {
+    const r = read(f);
+    if (r.trap || r.accessor) return { innerReject: true }; // inner accessor/trap ⇒ reject (never a silent undefined)
+    input[f] = r.value;
   }
+  return { okField, input: Object.freeze(input) };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔐 Wave1A (LANE C — P0/P1 CORRECTION): SINGLE STRICT ACTIVATION SEAM
+// ─────────────────────────────────────────────────────────────────────────────
+// ผู้ตัดสินเวอร์ชันเดียว = validateStrictRenderActivationVersioned (peek selectionSpec.v):
+//   v===2 → validateSelectionSpecV2Activation · อื่นๆ → validateStrictRenderActivation (V1)
+// การเลือก V1/V2 มาจาก "carrier" ล้วน — ไม่ใช่ env (canonical latch = MEGA_STRICT_RENDER เท่านั้น
+//   ตรวจที่ composeAndVerify ก่อนเรียกตัวนี้) · ตัวนี้ pure (ไม่อ่าน env) → เทสได้ตรง
+//   carrier V2 = args.refHeroV2 (own-property) → ประกอบ input 6 ช่องจาก own-data descriptor-safe
+//   carrier V1 = args เอง (own-property selectionSpec + realizedTemplate ครบคู่) → ส่ง args ตรงเข้า validator (กฎ plain-object เป็นของ validator)
+//   V2 + own V1 field ใดก็ตาม = ambiguous · V1 ครึ่งคู่ (มีข้างเดียว) = invalid — HOLD ก่อน latch/IO · HOLD ทุกกรณี partial/invalid ไม่มี downgrade เงียบ
+// The shared exported PURE seam. Accepts RAW args ONLY (+ an explicit canonical latch value) — there is NO
+//   caller-supplied snapshot path (P1: a fabricated snapshot has no effect and no API surface). This is the SOLE, FIRST
+//   observation of args: it privately captures the carriers (descriptors first) + slotPlan, owns the ambiguity + latch +
+//   version decisions, and returns { none } | { error,errorType,reasons } | { ctx } — each carrying the captured
+//   slotPlan so downstream never re-reads args.slotPlan. Returns for a caller with `latchArmed !== true`: a V2 carrier
+//   HOLDs (no downgrade), a V1-only carrier is legacy (none). `latchArmed` is passed by the caller (env stays out of
+//   this pure seam). Direct callers that want to exercise carrier validation pass latchArmed: true.
+export function _strictActivate({ args, latchArmed = true } = {}) {
+  // `latchArmed` defaults to true (i.e. "process this carrier") — the explicit latch value is only NEEDED to express
+  //   the OFF case, which composeAndVerify passes as `process.env.MEGA_STRICT_RENDER === '1'`. Direct consumers that
+  //   validate a carrier (capture-only always runs armed) may omit it. Any extra caller-supplied field (e.g. a legacy
+  //   `slotPlan` or a fabricated `snapshot`) is NOT destructured ⇒ has no effect and no API path.
+  // (P0) A raw outer args PROXY is rejected at the VERY START — before ANY trap can fire (getOwnPropertyDescriptor /
+  //   getPrototypeOf / get / has / ownKeys). A stateful cross-key trap could otherwise return the real V2 descriptor
+  //   while deleting selectionSpec as a side effect (hiding V1+V2 ambiguity), or self-delete / delete the sibling to
+  //   force a downgrade. isProxy() consults an internal slot and invokes NO trap. Plain data objects are unaffected.
+  //   Typed HOLD, stable reason, regardless of latch, before any observation/IO.
+  if (isProxy(args)) {
+    return { error: 'strict activation ไม่รองรับ Proxy เป็น args (unhideable-invariant guard)', errorType: 'STRICT_RENDER_CONTRACT_INVALID', reasons: ['input_proxy_unsupported'] };
+  }
+  const snap = _captureCarrierSnapshot(args); // ONE private capture — descriptors read before any prototype/[[Get]]
+  const slotPlan = snap.slotPlan.value;       // captured once — the strict path uses THIS, never re-reads args.slotPlan
+  // (P0-B) a carrier descriptor TRAP ⇒ typed HOLD BEFORE any legacy/latch decision (uncertainty is never absence).
+  //   realizedTemplate is a V1 carrier-defining field too (a lone one is a malformed half-pair), so ITS descriptor
+  //   uncertainty is included here — a trap on ANY of the three carrier slots is fail-closed, never read as absence.
+  if (snap.refHeroV2.trapError || snap.selectionSpec.trapError || snap.realizedTemplate.trapError) {
+    return { error: 'strict carrier descriptor อ่านไม่ได้ (trap threw)', errorType: 'STRICT_RENDER_CONTRACT_INVALID', reasons: ['carrier_descriptor_trap'], slotPlan };
+  }
+  const hasV2 = snap.refHeroV2.present;
+  // V1 presence mirrors carrier presence exactly as the ingress adapters see it: a V1 carrier is the selectionSpec +
+  //   realizedTemplate PAIR, and EITHER own field marks a V1 field present (cover-ref-test rejects V2 + either V1
+  //   field; /api/mega/compose forwards each field independently, so a lone realizedTemplate can reach here).
+  const hasSpec = snap.selectionSpec.present;
+  const hasRealized = snap.realizedTemplate.present;
+  const anyV1 = hasSpec || hasRealized;
+  // (ambiguity cannot be hidden) V2 + ANY own V1 field (selectionSpec and/or realizedTemplate) ⇒ HOLD regardless of
+  //   latch, before any IO — a V2 carrier may never co-exist with a V1 field on one args.
+  if (hasV2 && anyV1) {
+    return { error: 'strict carrier กำกวม: มีทั้ง refHeroV2 และ V1 field (selectionSpec/realizedTemplate)', errorType: 'STRICT_RENDER_CARRIER_AMBIGUOUS', reasons: ['carrier_ambiguous_v1_and_v2'], slotPlan };
+  }
+  // V1 half-pair (exactly one of selectionSpec/realizedTemplate, no V2) ⇒ typed HOLD before latch/IO — never a silent
+  //   legacy downgrade, never a validator round-trip with an undefined half. Stable fixed reason.
+  if (!hasV2 && hasSpec !== hasRealized) {
+    return { error: 'strict v1 carrier ครึ่งเดียว: ต้องแนบ selectionSpec + realizedTemplate ครบคู่', errorType: 'STRICT_RENDER_CONTRACT_INVALID', reasons: ['carrier_v1_half_pair'], slotPlan };
+  }
+  const hasV1 = hasSpec && hasRealized; // a V1 carrier = the COMPLETE pair only
+  if (!hasV2 && !hasV1) return { none: true, slotPlan }; // no carrier ⇒ legacy
+  const armed = latchArmed === true;
+  // (item 7) NO-DOWNGRADE for V2, but PRESERVE complete-V1 latch-OFF legacy parity.
+  if (hasV2 && !armed) {
+    return { error: 'refHeroV2 carrier แนบมาแต่ MEGA_STRICT_RENDER ไม่ถูก arm (!== "1") — ห้ามถอย legacy/V1 เงียบ', errorType: 'STRICT_RENDER_LATCH_OFF', reasons: ['strict_latch_off_v2_carrier_present'], slotPlan };
+  }
+  if (hasV1 && !armed) {
+    return { none: true, slotPlan }; // complete V1 carrier + latch OFF ⇒ legacy (carrier ignored) — byte parity
+  }
+  // armed + single carrier ⇒ pure activation.
+  let input;
+  let carrier = null;
+  if (hasV2) {
+    // (item 6) the OUTER carrier was descriptor-captured ONCE — an accessor/getter is rejected WITHOUT invocation.
+    if (snap.refHeroV2.accessor || snap.refHeroV2.value === undefined) {
+      return { error: 'strict v2 carrier อ่านไม่ได้ (accessor หรือ undefined) — descriptor-read เท่านั้น', errorType: 'STRICT_V2_CONTRACT_HOLD', reasons: ['carrier_accessor_or_undefined'], slotPlan };
+    }
+    const c = snap.refHeroV2.value;
+    if (c === null || (typeof c !== 'object' && typeof c !== 'function') || Array.isArray(c)) {
+      return { error: 'strict v2 carrier ไม่ใช่ออบเจ็กต์', errorType: 'STRICT_V2_CONTRACT_HOLD', reasons: ['carrier_not_object'], slotPlan };
+    }
+    // (P1) snapshot the inner 6 own-data fields into a NEW FROZEN plain value; reject inner accessor/trap errors.
+    const inner = _captureV2Inner(c);
+    if (inner.trapError) {
+      return { error: 'strict v2 carrier inner descriptor trap', errorType: 'STRICT_V2_CONTRACT_HOLD', reasons: ['carrier_inner_descriptor_trap'], slotPlan };
+    }
+    if (inner.innerReject) {
+      return { error: 'strict v2 carrier inner field accessor', errorType: 'STRICT_V2_CONTRACT_HOLD', reasons: ['carrier_inner_accessor'], slotPlan };
+    }
+    if (inner.okField !== true) {
+      return { error: 'strict v2 carrier ไม่พร้อม (ok!=true)', errorType: 'STRICT_V2_CONTRACT_HOLD', reasons: ['carrier_not_ok'], slotPlan };
+    }
+    input = inner.input; // frozen plain value — validator reads exactly these six own-data fields
+  } else {
+    // V1: reconstruct the validator input from the CAPTURED values (TOCTOU-safe — never re-read args). Preserve the
+    //   validator's plain-object shape guard: a non-plain carrier (array/function) ⇒ the same typed HOLD.
+    if (!snap.isPlain) {
+      return { error: 'strict v1 carrier ไม่ใช่ plain object', errorType: 'STRICT_RENDER_CONTRACT_INVALID', reasons: ['input_not_plain_object'], slotPlan };
+    }
+    input = { selectionSpec: snap.selectionSpec.value, realizedTemplate: snap.realizedTemplate.value };
+    carrier = input;
+  }
+  const decision = validateStrictRenderActivationVersioned(input);
+  // V2 canonical assigned
+  if (decision && decision.ok === true && decision.decision === 'assigned' && decision.selectionSpec) {
+    const prepared = _strictPrepareV2({ decision, slotPlan });
+    return prepared.ctx ? { ctx: prepared.ctx, slotPlan } : { ...prepared, slotPlan };
+  }
+  // V1 strict_ready
+  if (decision && decision.decision === 'strict_ready' && decision.active === true && decision.authority) {
+    const prepared = _strictPrepareV1({ decision, carrier, slotPlan });
+    return prepared.ctx ? { ctx: prepared.ctx, slotPlan } : { ...prepared, slotPlan };
+  }
+  // อื่นๆ = typed HOLD (ไม่มี downgrade) — errorType ตามชนิด carrier
+  const reasons = (decision && Array.isArray(decision.reasons) && decision.reasons.length)
+    ? decision.reasons : [(decision && decision.decision) || 'strict_activation_hold'];
+  const errorType = hasV2 ? 'STRICT_V2_CONTRACT_HOLD' : 'STRICT_RENDER_CONTRACT_INVALID';
+  return { error: `strict contract ไม่ผ่าน: ${reasons.join(',').slice(0, 180)}`, errorType, reasons, slotPlan };
+}
+
+// ① เตรียม strict context V1 — pure 100% ห้ามมี IO: (validator ทำที่ _strictActivate แล้ว) → โครง →
+//   ผูก primary → snapshot แช่แข็ง · พังชั้นไหน = fail-closed ด้วย errorType เฉพาะชั้นนั้น "ก่อน" IO เสมอ
+//   authority = decision.authority (normalized สำเนาลึกจาก validator — ห้ามแตะ raw spec)
+function _strictPrepareV1({ decision, carrier, slotPlan }) {
   const authority = decision.authority; // ใช้เฉพาะสำเนา normalized — ห้ามแตะ raw spec ต่อจากนี้
   const realizedTemplate = carrier.realizedTemplate;
   // ชั้น 2 — โครง: ตรวจจาก "ต้นฉบับ" ก่อน clone (NaN/Infinity ตายกลาง JSON round-trip → ถูกซ่อมเงียบ)
@@ -516,6 +682,123 @@ function _strictPrepare({ carrier, slotPlan }) {
   return { ctx: { authority, spec, bind: Object.freeze(bind), snapshot, templateSnap } };
 }
 
+// ---------- 🔐 Wave1A (LANE C — Codex): FLAG-GATED STRICT V2 CONSUMER (SelectionSpec V2 six-field carrier) ----------
+// เตรียม strict context จาก "carrier V2" (producer megaAdapters S7, flag MEGA_REF_HERO_V2 + latch MEGA_STRICT_RENDER, default OFF) โดย:
+//   ① ผู้ตัดสินเดียว = validateSelectionSpecV2Activation (canonical) พร้อม pin ครบ 6 ช่อง (expectedSpecHash/
+//      expectedReplayHash เป็นพยานภายนอกที่ผูก composerSlotId/refId/URL ที่ SelectionAuthority เดี่ยวๆ ผูกไม่ได้)
+//   ② partial/missing/tampered = typed HOLD เสมอ — ห้าม fallback เงียบที่ render ผิด
+//   ③ source lock: personId/sourceAssetId/candidateId/refSlotId + URL มาจาก spec canonical เท่านั้น (ไม่มี asset
+//      substitution) · slotPlan ใช้ "เสริม metadata ครอป" เท่านั้น — plan row ที่ประกาศ identity ขัด = HOLD
+//   ④ border color rule: render.border===true ⇒ '#FFFFFF' · render.border===false ⇒ null
+//   ctx ที่คืน = shape เดียวกับ V1 (spec/bind/snapshot/templateSnap + authority) → composeCoreStrict/_strictDriftCheck/
+//   manifest เดิมใช้ต่อได้ทั้งเส้น "โดยไม่แตะโค้ด V1" (V1 ยัง byte-identical เมื่อ flag V2 ปิด)
+// seam เดียวที่ export: production (composeAndVerify) เรียกตัวนี้จริง harness ก็เรียกตัวนี้จริง (ไม่จำลอง logic ซ้ำ)
+function _strictPrepareV2({ decision, slotPlan }) {
+  const spec2 = decision.selectionSpec; // canonical validated V2 spec (frozen) = ความจริงเดียว
+  // ── (P1) render plan มาจาก canonical bindings ล้วน — ต้องครบ 1:1 ทุกแถว: candidateId/personId/
+  //   sourceAssetId/refSlotId/composerSlotId ภาคบังคับ (หาย ⇒ HOLD) · ห้ามซ้ำ id (dup ⇒ HOLD) ──
+  //   personId ภาคบังคับ "มีค่า" แต่ "ซ้ำได้" (คนเดียวกันปรากฏหลายช่องเป็นเรื่องปกติ — ไม่ใช่ identity key)
+  {
+    const cReasons = [];
+    const _blank = (v) => typeof v !== 'string' || v.trim().length === 0;
+    const seen = { refSlotId: new Set(), composerSlotId: new Set(), candidateId: new Set(), sourceAssetId: new Set() };
+    for (const s of spec2.slots) {
+      const p = s.primary || {};
+      const tag = s.composerSlotId || s.refSlotId || '?';
+      const fields = { refSlotId: s.refSlotId, composerSlotId: s.composerSlotId, candidateId: p.candidateId, personId: p.personId, sourceAssetId: p.sourceAssetId };
+      for (const k of ['refSlotId', 'composerSlotId', 'candidateId', 'personId', 'sourceAssetId']) {
+        if (_blank(fields[k])) cReasons.push(`plan_row_missing_${k}:${tag}`);
+      }
+      for (const k of ['refSlotId', 'composerSlotId', 'candidateId', 'sourceAssetId']) {
+        const v = fields[k];
+        if (!_blank(v)) { if (seen[k].has(v)) cReasons.push(`plan_row_dup_${k}:${v}`); else seen[k].add(v); }
+      }
+    }
+    if (cReasons.length) return { error: `strict v2 canonical plan ไม่ครบ 1:1: ${cReasons.join(',').slice(0, 180)}`, errorType: 'STRICT_V2_PLAN_INCOMPLETE', reasons: cReasons };
+  }
+  // ── (P1) HERO crop authority = แมปผ่าน spec.hero.heroSlotId (refSlotId) → composerSlotId ของแถวนั้น
+  //   เท่านั้น — ห้ามใช้ regex /main|hero/ · หาแถวไม่เจอ ⇒ HOLD ──
+  const heroSlotId = spec2.hero.heroSlotId;
+  const heroRow = spec2.slots.find((s) => s.refSlotId === heroSlotId);
+  if (!heroRow) return { error: `strict v2 hero slot ไม่ถูกแมป: ${heroSlotId}`, errorType: 'STRICT_V2_HERO_UNMAPPED', reasons: [`hero_slot_unmapped:${heroSlotId}`] };
+  const heroComposerSlotId = heroRow.composerSlotId;
+  // ── source lock + metadata bind: URL/identity มาจาก spec canonical · plan ที่ขัด identity = substitution ⇒ HOLD ──
+  const plan = Array.isArray(slotPlan) ? slotPlan : [];
+  const bReasons = [];
+  const bind = spec2.slots.map((s) => {
+    const url = s.primary.imageUrl;
+    const matches = plan.filter((p) => String(p?.url || '') === url);
+    if (matches.length > 1) { bReasons.push(`primary_duplicate_in_plan:${s.composerSlotId}`); return null; }
+    const m = matches.length === 1 ? matches[0] : null;
+    if (m) {
+      // ★ (item 9) plan row ที่ประกาศ identity ขัดกับ canonical = substitution ⇒ HOLD — ตรวจ "ทุก" mandatory
+      //   identity field: refSlotId · composerSlotId · candidateId · sourceAssetId · personId (ไม่เว้น personId/composer)
+      const mRef = m.refSlotId == null ? null : String(m.refSlotId).trim();
+      if (mRef && mRef !== s.refSlotId) { bReasons.push(`primary_ref_mismatch:${s.composerSlotId}`); return null; }
+      const mComposer = m.composerSlotId == null ? null : String(m.composerSlotId).trim();
+      if (mComposer && mComposer !== s.composerSlotId) { bReasons.push(`primary_composer_mismatch:${s.composerSlotId}`); return null; }
+      const mCand = m.candidateId == null ? null : String(m.candidateId).trim();
+      if (mCand && mCand !== s.primary.candidateId) { bReasons.push(`primary_candidate_mismatch:${s.composerSlotId}`); return null; }
+      const mAssetRaw = m.sourceAssetId != null ? m.sourceAssetId : m.assetId;
+      const mAsset = mAssetRaw == null ? null : String(mAssetRaw).trim();
+      if (mAsset && mAsset !== s.primary.sourceAssetId) { bReasons.push(`primary_asset_mismatch:${s.composerSlotId}`); return null; }
+      const mPerson = m.personId == null ? null : String(m.personId).trim();
+      if (mPerson && mPerson !== s.primary.personId) { bReasons.push(`primary_person_mismatch:${s.composerSlotId}`); return null; }
+    }
+    return Object.freeze({
+      composerSlotId: s.composerSlotId,
+      refSlotId: s.refSlotId,
+      candidateId: s.primary.candidateId,
+      sourceAssetId: s.primary.sourceAssetId,
+      personId: s.primary.personId,
+      imageUrl: url, // fetch ใช้ค่านี้เท่านั้น (จาก authority — ไม่ใช่ plan)
+      borderColor: s.render.border === true ? '#FFFFFF' : null,
+      meta: Object.freeze({
+        slot: m && m.slot != null ? String(m.slot) : null,
+        person: s.primary.personId != null ? String(s.primary.personId) : (m && m.person != null ? String(m.person) : null),
+        isHero: s.refSlotId === heroSlotId ? true : !!(m && m.isHero),
+        faces: m ? (Number(m.faces) || 0) : 0,
+        clean: m ? (m.clean === false ? false : (m.clean === true ? true : null)) : null,
+        newsScene: m ? (m.newsScene === false ? false : (m.newsScene === true ? true : null)) : null,
+      }),
+    });
+  });
+  if (bReasons.length) return { error: `strict v2 primary source lock ขัดแย้ง: ${bReasons.join(',').slice(0, 180)}`, errorType: 'STRICT_V2_PRIMARY_UNAVAILABLE', reasons: bReasons };
+  // ── realized executor template จาก canonical canvas + slot render (border color rule ที่จุด render จริง) ──
+  const spec = _deepFreeze({
+    id: spec2.canvas.templateId,
+    canvasW: spec2.canvas.canvasW,
+    canvasH: spec2.canvas.canvasH,
+    feather: spec2.canvas.feather,
+    slots: spec2.slots.map((s) => {
+      const slot = {
+        id: s.composerSlotId,
+        x: s.render.x, y: s.render.y, w: s.render.w, h: s.render.h,
+        zIndex: s.render.zIndex,
+        border: s.render.border === true ? '#FFFFFF' : null, // ★ border color rule
+        borderWidth: s.render.borderWidth,
+      };
+      if (s.shape === 'circle') slot.shape = 'circle';
+      return slot;
+    }),
+  });
+  // ── immutable snapshot ราย slot (imageIndex = ลำดับ authority) — ความจริงที่ final invariant ใช้จับ drift ──
+  const snapshot = Object.freeze(spec2.slots.map((s, i) => Object.freeze({
+    composerSlotId: s.composerSlotId,
+    refSlotId: s.refSlotId,
+    candidateId: s.primary.candidateId,
+    sourceAssetId: s.primary.sourceAssetId,
+    personId: s.primary.personId,
+    imageIndex: i,
+    imageUrl: s.primary.imageUrl,
+    shape: s.shape === 'circle' ? 'circle' : 'rect',
+    borderColor: s.render.border === true ? '#FFFFFF' : null,
+  })));
+  const templateSnap = JSON.stringify(spec);
+  const authority = { refId: spec2.refId, specHash: spec2.specHash, replayHash: spec2.replayHash };
+  return { ctx: { v2: true, authority, spec, bind: Object.freeze(bind), snapshot, templateSnap, selectionSpecV2: spec2, heroComposerSlotId } };
+}
+
 // ② เส้นประกอบ strict — source ล็อกตาม authority 100%: โหลดตรง URL → ตาหาหน้า (เพื่อครอปเท่านั้น) →
 //   assignments ตายตัวครั้งเดียว → render ครั้งเดียว · ไม่มีด่านสลับภาพใดๆ (crop/why ปรับได้ · imageIndex ห้าม)
 //   หมายเหตุ: pixel-gate hero/person-cut ของ legacy เป็นด่านชนิด "เปลี่ยนรูป" ซึ่งขัดสัญญา strict — เส้นนี้
@@ -523,6 +806,11 @@ function _strictPrepare({ carrier, slotPlan }) {
 async function composeCoreStrict(strictCtx) {
   const qcFlags = [];
   const spec = strictCtx.spec;
+  // ★ (P1) hero crop authority: V2 = แมปตรงด้วย composerSlotId ที่ได้จาก spec.hero.heroSlotId เท่านั้น
+  //   (ห้าม regex) · V1/legacy = พฤติกรรมเดิม /main|hero/ (byte-identical)
+  const _isHeroSlot = (composerSlotId) => (strictCtx.v2 && strictCtx.heroComposerSlotId != null)
+    ? (String(composerSlotId) === strictCtx.heroComposerSlotId)
+    : /main|hero/i.test(String(composerSlotId));
   // โหลดจาก binding record แช่แข็งเท่านั้น (★ รอบ 2 P0-2 — ห้ามอ่าน slotPlan อีก กัน TOCTOU)
   //   วางผลด้วย index (ลำดับ authority) = ไม่ขึ้นกับลำดับ fetch เสร็จ · loaded พก identity ครบทุกใบ
   //   ★ รอบ 2 (P1): วัดไฟล์จริงด้วย sharp metadata — อ่านไม่ได้/มิติเพี้ยน = corrupt → fail-closed
@@ -553,6 +841,9 @@ async function composeCoreStrict(strictCtx) {
       slot: b.meta.slot, person: b.meta.person, isHero: b.meta.isHero, faces: b.meta.faces,
       clean: b.meta.clean, newsScene: b.meta.newsScene,
       composerSlotId: b.composerSlotId, refSlotId: b.refSlotId, candidateId: b.candidateId,
+      // ★ V2: identity เต็ม(sourceAssetId/personId) เข้า loaded เพื่อ drift-check + manifest · V1 ไม่มี = ไม่เพิ่ม key
+      ...(b.sourceAssetId !== undefined ? { sourceAssetId: b.sourceAssetId } : {}),
+      ...(b.personId !== undefined ? { personId: b.personId } : {}),
       imageUrl: b.imageUrl, url: b.imageUrl, buffer: buf, _w: mw, _h: mh,
     };
   }));
@@ -640,7 +931,7 @@ async function composeCoreStrict(strictCtx) {
     const slot = spec.slots.find((x) => String(x.id) === snap.composerSlotId);
     const fb = faceBoxes[i];
     let crop;
-    if (/main|hero/i.test(snap.composerSlotId)) {
+    if (_isHeroSlot(snap.composerSlotId)) {
       if (fb && fb.x2 > fb.x1) crop = cropFromFace(fb, 62, 'upper', slot.w / slot.h);
       else if (_subjectValid(fb)) crop = _subjectCrop(fb);
       else crop = { x: 0, y: 0, w: 1, h: 1 };
@@ -666,7 +957,7 @@ async function composeCoreStrict(strictCtx) {
   const _wh = (im, fb) => (im && im._w > 0 && im._h > 0) ? [im._w, im._h] : (fb && fb.imgW > 0 && fb.imgH > 0 ? [fb.imgW, fb.imgH] : [0, 0]);
   for (const a of assignments) {
     const sl = spec.slots.find((x) => String(x.id) === a.slotId);
-    if (!sl || /main|hero/i.test(a.slotId)) continue;
+    if (!sl || _isHeroSlot(a.slotId)) continue;
     const [iw, ih] = _wh(loaded[a.imageIndex], faceBoxes[a.imageIndex]);
     if (!(iw > 0 && ih > 0)) continue;
     const up = (iw / ih) >= (sl.w / sl.h) ? sl.h / ih : sl.w / iw;
@@ -685,7 +976,9 @@ async function composeCoreStrict(strictCtx) {
   if (qcFlags.length) console.log(`[MegaComposer] 🚩 qcFlags: ${qcFlags.join(' · ')}`);
   // shape ผลลัพธ์ = เดียวกับ legacy core ทุก field + ป้าย _strictSourceLock ให้ชั้น Eye ล็อก source
   // (aHashes = ค่าจริง — ด่าน blank_image ใน composeAndVerify ทำงานเต็ม ★ รอบ 2 P1)
-  return { buffer, spec, assignments, loaded, faceBoxes, used, refSlotMeta: null, cropTrace, qcFlags, traceSink, aHashes, _strictSourceLock: true };
+  // ★ (item 8) แนบ canonical heroComposerSlotId (V2 เท่านั้น) ลง core → Eye path/recrop/measurement กันช่อง hero
+  //   ตัวจริงด้วย exact id (ไม่พึ่ง regex /main|hero/) · V1/legacy = null ⇒ regex เดิม byte-identical
+  return { buffer, spec, assignments, loaded, faceBoxes, used, refSlotMeta: null, cropTrace, qcFlags, traceSink, aHashes, _strictSourceLock: true, heroComposerSlotId: (strictCtx.v2 && strictCtx.heroComposerSlotId != null) ? strictCtx.heroComposerSlotId : null };
 }
 
 // ③ final invariant — เรียกหลัง Eye จบ ก่อน techRules/manifest/success: จับ drift ทุกมิติเทียบ snapshot
@@ -722,6 +1015,9 @@ function _strictDriftCheck(core, strictCtx) {
     if (String(l.composerSlotId || '') !== s.composerSlotId) reasons.push(`loaded_slot_identity_drift:${s.composerSlotId}`);
     if (String(l.refSlotId || '') !== s.refSlotId) reasons.push(`loaded_ref_identity_drift:${s.composerSlotId}`);
     if (String(l.candidateId || '') !== s.candidateId) reasons.push(`loaded_candidate_drift:${s.composerSlotId}`);
+    // ★ V2: sourceAssetId/personId เป็น identity ภาคบังคับใน drift-check เช่นกัน (snapshot มีเฉพาะ V2 → V1 ข้าม)
+    if (s.sourceAssetId !== undefined && String(l.sourceAssetId || '') !== s.sourceAssetId) reasons.push(`loaded_asset_drift:${s.composerSlotId}`);
+    if (s.personId !== undefined && String(l.personId || '') !== s.personId) reasons.push(`loaded_person_drift:${s.composerSlotId}`);
   }
   for (let i = snap.length; i < loaded.length; i++) reasons.push(`loaded_extra:${i}`);
   // ★ รอบ 2 (P1): used Set ต้องเท่ากับเซ็ต imageIndex ของ assignments สุดท้ายเป๊ะ
@@ -1474,8 +1770,13 @@ async function refCompareEye({ coverBuffer, refImagePath, newsTitle }) {
 }
 
 // ---------- ปรับตามคำสั่งตา (กฎล้วน — bounded ≤1 รอบ · ห้ามแตะ main) ----------
-function applyEyeFixes({ fixes, assignments, loaded, faceBoxes, used, allowSourceSwap = true, strictFaceZoom = false }) {
+function applyEyeFixes({ fixes, assignments, loaded, faceBoxes, used, allowSourceSwap = true, strictFaceZoom = false, heroComposerSlotId = null }) {
   let applied = 0;
+  // ★ (item 8) HERO authority in the Eye path: V2 = EXACT canonical heroComposerSlotId (a slot named e.g.
+  //   `panel_alpha` is the hero; a decoy `main` is NOT) · V1/legacy (heroComposerSlotId == null) = regex เดิม
+  const _isHeroSlot = (id) => (heroComposerSlotId != null)
+    ? (String(id) === String(heroComposerSlotId))
+    : /main|hero/i.test(String(id));
   // ★ รอบ 7 (P1-3): strict เท่านั้น — zoom_in/zoom_out ต้องมี "หน้าจริง" (count>0 + กรอบมีพื้นที่)
   //   subject-only box (count=0, x1=x2=0) truthy หลอก cropFromFace จนวงยุบ 8x8 ได้ โดยเฉพาะ REQC=0
   //   → strict: skip zoom เงียบ (ไม่นับ applied ไม่ render ใหม่) · legacy default = พฤติกรรมเดิม byte-เดิม
@@ -1486,7 +1787,7 @@ function applyEyeFixes({ fixes, assignments, loaded, faceBoxes, used, allowSourc
   //   สุดท้ายของ assignments: delete(old) + add(new)
   const reservedDuringEye = new Set(used);
   for (const f of fixes) {
-    const a = assignments.find((x) => x.slotId === f.slot && !/main|hero/i.test(x.slotId));
+    const a = assignments.find((x) => x.slotId === f.slot && !_isHeroSlot(x.slotId));
     if (!a) continue;
     const fb = faceBoxes[a.imageIndex];
     if (f.action === 'zoom_in' && _zoomFb(fb)) { a.crop = cropFromFace(fb, 74, 'center'); applied++; }        // หน้าใหญ่ขึ้น (กิน 74%)
@@ -1497,7 +1798,7 @@ function applyEyeFixes({ fixes, assignments, loaded, faceBoxes, used, allowSourc
       // ★ Checkpoint B: strict = source ล็อกตาม authority — ปฏิเสธ swap เงียบๆ (crop actions ด้านบนยังทำงาน)
       if (!allowSourceSwap) { console.log(`[MegaComposer] 🔐 strict: ตาขอ swap ${f.slot} → ปฏิเสธ (source ล็อกตาม authority)`); continue; }
       // ★ เฟส 4.2: วงกลมห้ามถูกตาสลับกลับไปเป็น "คนเดียวกับ hero" (ตาเทียบไม่รู้จักคน — เคย undo กติกา 2.3)
-      const _mainA2 = assignments.find((x) => /main|hero/i.test(String(x.slotId)));
+      const _mainA2 = assignments.find((x) => _isHeroSlot(x.slotId));
       const _heroP2 = _mainA2 ? String(loaded[_mainA2.imageIndex]?.person || '') : '';
       const _isCircle = /circle/i.test(String(a.slotId));
       let si = -1;
@@ -1624,7 +1925,7 @@ export async function _runEyeFixTransaction({ core, fixes, buffer, cropTrace, re
     // ★ Checkpoint B: strict context = source ล็อกตาม authority — ตาสั่ง swap ได้แค่ถูกปฏิเสธ (crop ยังได้)
     //   ★ รอบ 7 (P1-3): strict ยังบังคับ zoom ต้องมีหน้าจริง (subject-only ห้ามเข้า cropFromFace)
     const allowSourceSwap = core._strictSourceLock !== true;
-    const fixedCount = applyEyeFixes({ fixes, assignments: core.assignments, loaded: core.loaded, faceBoxes: core.faceBoxes, used: core.used, allowSourceSwap, strictFaceZoom: core._strictSourceLock === true });
+    const fixedCount = applyEyeFixes({ fixes, assignments: core.assignments, loaded: core.loaded, faceBoxes: core.faceBoxes, used: core.used, allowSourceSwap, strictFaceZoom: core._strictSourceLock === true, heroComposerSlotId: core.heroComposerSlotId != null ? core.heroComposerSlotId : null });
     if (!fixedCount) return { buffer, cropTrace, fixedCount: 0 };
     const render = renderCover || (async () => {
       const { executeCover } = await import('@/lib/services/coverExecutorService');
@@ -1684,26 +1985,22 @@ export async function composeMegaCover({ newsTitle = '', slotPlan = [], refDNA =
  * @param {string} p.refImagePath - พาธภาพปกต้นแบบจากคลัง (เช่น /ref-covers/xxx.jpg) — ไม่มี = ประกอบเฉยๆ
  */
 export async function composeAndVerify(args = {}) {
-  const { newsTitle = '', slotPlan = [], refDNA = null, refImagePath = null, stableOrder = false } = args || {};
   try {
-    // ★ Checkpoint B (11 ก.ค. — Codex): strict consumer แบบ dormant — ตื่นเมื่อ MEGA_STRICT_RENDER=1 "และ"
-    //   payload พก own-property selectionSpec เท่านั้น · switch unset/0/ค่าอื่น = legacy เดิมทุกมิติแม้ payload มา
-    //   · switch ON + ไม่มี own-property = งาน legacy จริง เดิน legacy เดิม · present-แต่พัง = fail-closed ก่อน IO
-    let strictCtx = null;
-    if (process.env.MEGA_STRICT_RENDER === '1' && args != null
-        && (typeof args === 'object' || typeof args === 'function')
-        && Object.prototype.hasOwnProperty.call(args, 'selectionSpec')) {
-      // ★ รอบ 2 (P0-1): ส่ง "carrier ต้นฉบับ" เข้า validator ตรงๆ — ห้ามประกอบ {selectionSpec,...} ใหม่
-      //   กฎ own-property/plain-object เป็นของ validator ผู้เดียว: array/function ที่พก own selectionSpec
-      //   ต้องได้ input_not_plain_object (reject) ไม่ใช่หลุดเป็น legacy เงียบๆ
-      const gate = _strictPrepare({ carrier: args, slotPlan });
-      if (gate.error) {
-        console.log(`[MegaComposer] 🔐🚫 strict fail-closed: ${gate.errorType} — ${(gate.reasons || []).join(' · ').slice(0, 160)}`);
-        return { success: false, error: gate.error, errorType: gate.errorType, reasons: gate.reasons };
-      }
-      strictCtx = gate.ctx;
-      console.log(`[MegaComposer] 🔐 strict render ACTIVE: ref=${strictCtx.authority.refId} · ${strictCtx.snapshot.length} ช่อง · specHash=${strictCtx.authority.specHash}`);
+    // ★ Wave1A (LANE C — P0-A/P0-B/P1-R1): the FIRST observation of args is the shared pure seam — NO destructure /
+    //   [[Get]] / getPrototypeOf / has / ownKeys before it. The seam privately captures the carriers (descriptors
+    //   FIRST) + slotPlan, owns the ambiguity + latch + version decision, and returns { none } | { error } | { ctx }
+    //   (each carrying the captured slotPlan). Canonical latch = MEGA_STRICT_RENDER === '1' (no _V2 alias) — passed in
+    //   so the seam stays env-free/pure. NO-DOWNGRADE for V2, V1-only latch-OFF legacy parity, ambiguity/trap ⇒ HOLD.
+    const _act = _strictActivate({ args, latchArmed: process.env.MEGA_STRICT_RENDER === '1' });
+    if (_act.error) {
+      console.log(`[MegaComposer] 🔐🚫 strict fail-closed: ${_act.errorType} — ${(_act.reasons || []).join(' · ').slice(0, 160)}`);
+      return { success: false, error: _act.error, errorType: _act.errorType, reasons: _act.reasons };
     }
+    const strictCtx = _act.ctx || null;
+    const slotPlan = _act.slotPlan; // captured by the seam — the strict path uses THIS, never re-reads args.slotPlan
+    if (strictCtx) console.log(`[MegaComposer] 🔐 strict render ACTIVE (${strictCtx.v2 ? 'V2' : 'V1'}): ref=${strictCtx.authority.refId} · ${strictCtx.snapshot.length} ช่อง · specHash=${strictCtx.authority.specHash}`);
+    // ordinary business fields — read ONLY AFTER activation has returned (requirement 5); slotPlan already captured.
+    const { newsTitle = '', refDNA = null, refImagePath = null, stableOrder = false } = args || {};
     const core = await composeCore({ slotPlan, refDNA, stableOrder, strictCtx });
     // ★ Checkpoint B: strict core แนบ reasons ราย slot มาด้วย — ส่งต่อเมื่อมีเท่านั้น (legacy ไม่มี = shape เดิมเป๊ะ)
     if (core.error) return { success: false, error: core.error, errorType: core.errorType, ...(core.reasons ? { reasons: core.reasons } : {}) };
@@ -1725,7 +2022,10 @@ export async function composeAndVerify(args = {}) {
           //   ทางแก้ bounded/fail-safe: เฉพาะ ref ที่สั่ง close-up + ตาเห็น hero_shot=false ให้ Final Cropper
           //   ที่เห็นภาพจริงครอป main ช่องเดียว → render+เทียบ ref ซ้ำอย่างละ 1 รอบ; รับเฉพาะเมื่อ hero_shot ผ่าน
           //   ไม่ผ่าน/AI ล้ม = คืน crop เดิมทันที (ไม่แตะ selection/layout/ช่องรอง)
-          const mainA = core.assignments.find((a) => /main|hero/i.test(String(a.slotId))) || null;
+          // ★ (P1) V2: hero ระบุด้วย composerSlotId จาก spec.hero.heroSlotId เท่านั้น (ไม่ใช่ regex) · V1/legacy = เดิม
+          const mainA = core.assignments.find((a) => (strictCtx && strictCtx.v2 && strictCtx.heroComposerSlotId != null)
+            ? (String(a.slotId) === strictCtx.heroComposerSlotId)
+            : /main|hero/i.test(String(a.slotId))) || null;
           const mainSlotIdx = mainA ? core.spec.slots.findIndex((s) => s.id === mainA.slotId) : -1;
           const refHeroShot = String(mainSlotIdx >= 0 ? (core.refSlotMeta?.[mainSlotIdx]?.shot || '') : '').toLowerCase();
           if (mainA && /close/.test(refHeroShot) && eye.checks?.hero_shot === false) {
@@ -1826,6 +2126,9 @@ export async function composeAndVerify(args = {}) {
         spec: core.spec,
         faceBoxes: core.faceBoxes,
         cropTrace,
+        // ★ (item 10) V2: ส่ง canonical hero slot ให้ face-share/headroom วัดกับช่อง hero จริง (ไม่พึ่ง regex) ·
+        //   V1/legacy = null ⇒ regex เดิม byte-identical
+        heroComposerSlotId: (strictCtx && strictCtx.v2 && strictCtx.heroComposerSlotId != null) ? strictCtx.heroComposerSlotId : null,
       });
       techMeasured = tr.measured;
       if (tr.flags.length) {
@@ -1876,6 +2179,9 @@ export async function composeAndVerify(args = {}) {
             composerSlotId: s.composerSlotId,
             refSlotId: s.refSlotId,
             candidateId: s.candidateId,
+            // ★ V2: personId/sourceAssetId เข้า audit ด้วย (additive — V1 snapshot ไม่มี ⇒ ไม่เพิ่ม key)
+            ...(s.personId != null ? { personId: s.personId } : {}),
+            ...(s.sourceAssetId != null ? { sourceAssetId: s.sourceAssetId } : {}),
             imageUrl: String(core.loaded?.[s.imageIndex]?.url || ''),
           })),
         };

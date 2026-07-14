@@ -12,7 +12,7 @@
 //          → fetchJson = ด่าน "fail-closed whitelist" (อ่านคลังรูป in-process + ดัก queue POST 1 ครั้ง)
 //          → บริโภค payload จริง → ประกอบ in-process (composeAndVerify) → ตรวจ QC → ตัดสินผล
 //
-// กติกา strict (armed เมื่อ MEGA_STRICT_RENDER=1 + S7 แนบ selectionSpec+realizedTemplate ครบคู่จริง):
+// กติกา strict (armed เมื่อ MEGA_STRICT_RENDER=1 + S7 แนบ carrier รูปแบบใดรูปแบบหนึ่ง: V1 = selectionSpec+realizedTemplate ครบคู่ (own) หรือ V2 = refHeroV2 carrier (own, ไม่มี top-level pair)):
 //   S7 waiting/failed/HOLD · strict contract error · hero/readiness fail · QC fail ⇒ 422 (zero archive)
 //   สำเร็จเท่านั้นจึง archive ครั้งเดียว. ปิด strict จริง = พฤติกรรม legacy เดิม (effectiveMode:'legacy').
 //   canonical latch = MEGA_STRICT_RENDER เท่านั้น — MEGA_STRICT_RENDERER ไม่มีสิทธิ์ arm strict.
@@ -22,7 +22,12 @@ import { NextResponse } from 'next/server';
 import { compassBrain } from '@/lib/megaBrains';
 import { s5_case, s5_keywords, s5_search, s5_triage, s5_clipframe, s6_slots, s7_cover } from '@/lib/megaAdapters';
 import { evaluateCoverQc } from '@/lib/coverQcGate';        // ★ Lane D (frozen) — advisory ใน legacy, gate ใน strict
-import { composeAndVerify } from '@/lib/services/megaComposerService'; // ★ Lane D (frozen)
+import { composeAndVerify } from '@/lib/services/megaComposerService'; // ★ Lane D (frozen) — always-exported named binding
+// ★ link-compat: read the shared pure activation seam (_strictActivate) from the module NAMESPACE at RUNTIME, not as a
+//   link-time named import. An ordinary-route test double that stubs only composeAndVerify then still links (a missing
+//   name is `undefined`, not an ESM link error). Production binds the exact real _strictActivate; capture-only asserts
+//   its availability and fails closed (never a fallback/reimplementation) before using it.
+import * as _composerModule from '@/lib/services/megaComposerService';
 import { buildImagesRouteResponse } from '@/lib/imageStore'; // ★ อ่านคลังรูป in-process (โมดูลจริงที่ /api/images/[id] ใช้)
 
 export const runtime = 'nodejs';
@@ -67,7 +72,7 @@ function seamError(errorType, message, extra = {}) {
 }
 
 // ── Lane B interface: resolveStrictLatches / STRICT_LATCH_KEYS (canonical = MEGA_STRICT_RENDER) ──
-//   เขียนแบบ defensive: ถ้า Lane B ยังไม่ลงจริง (ยังไม่ integrate) → fallback อ่าน canonical latch เอง
+//   เขียนแบบ defensive: Lane B (resolveStrictLatches) integrate แล้ว — fallback อ่าน canonical latch เองเฉพาะเมื่อโมดูล/ฟังก์ชันไม่พร้อมหรือ dynamic import ล้มเท่านั้น
 //   (MEGA_STRICT_RENDERER ห้าม arm strict เด็ดขาด — ไม่ถูกอ่านทั้งใน Lane B และ fallback)
 async function resolveLatchReport(env) {
   try {
@@ -88,7 +93,7 @@ async function resolveLatchReport(env) {
         _source: 'refSlotContract.resolveStrictLatches',
       };
     }
-  } catch { /* Lane B ยังไม่ integrate — ตก fallback canonical */ }
+  } catch { /* dynamic import ล้ม/โมดูลไม่พร้อม — ตก fallback canonical (ไม่ได้แปลว่า Lane B ไม่มี) */ }
   return {
     canonicalLatch: 'MEGA_STRICT_RENDER',
     armed: env.MEGA_STRICT_RENDER === '1',
@@ -107,12 +112,16 @@ async function resolveLatchReport(env) {
 //   ห้ามใช้ค่า SLOT_ORDER ของ legacy เป็น semantic instance id — อ่านจาก pickImages.slotOrder จริงเท่านั้น
 function extractAuthorityLatches(payload, dossier) {
   const hasSpec = payload && Object.prototype.hasOwnProperty.call(payload, 'selectionSpec');
-  const spec = hasSpec ? payload.selectionSpec : null;
+  const hasV2 = payload && Object.prototype.hasOwnProperty.call(payload, 'refHeroV2');
+  // ★ (item 5) V2 carrier: the canonical selectionSpec lives INSIDE refHeroV2 — surface authority from there so a
+  //   V2 wire reports the same latch fields (refId/specHash/replayHash/refSlotIds/composerSlotIds) as a V1 wire.
+  const v2 = hasV2 && payload.refHeroV2 && typeof payload.refHeroV2 === 'object' && !Array.isArray(payload.refHeroV2) ? payload.refHeroV2 : null;
+  const spec = hasSpec ? payload.selectionSpec : (v2 ? v2.selectionSpec : null);
   const pick = (dossier && dossier.pickImages) || {};
   const slots = Array.isArray(spec?.slots) ? spec.slots : [];
   return {
     slotOrder: Array.isArray(pick.slotOrder) ? pick.slotOrder : null, // semantic instance ids (ของจริงจาก S6)
-    heroSlotId: pick.heroSlotId ?? null,
+    heroSlotId: pick.heroSlotId ?? (spec?.hero?.heroSlotId ?? null),
     slotContractHash: pick.slotContractHash ?? null,
     plannedByRefSlot: spec?.plannedByRefSlot ?? pick.plannedByRefSlot ?? null,
     specHash: spec?.specHash ?? null,
@@ -163,8 +172,14 @@ function makeStrictFetchJson({ job, origin, coverOrigin, readImageCase, captured
       // ★ both-or-neither own-property บน parsed payload — mixed = typed error
       const hasSpec = Object.prototype.hasOwnProperty.call(payload, 'selectionSpec');
       const hasRealized = Object.prototype.hasOwnProperty.call(payload, 'realizedTemplate');
+      const hasV2 = Object.prototype.hasOwnProperty.call(payload, 'refHeroV2');
       if (hasSpec !== hasRealized) {
         throw seamError('SEAM_STRICT_PAIR_MIXED', `selectionSpec=${hasSpec} realizedTemplate=${hasRealized} (ต้องครบคู่หรือไม่มีทั้งคู่)`);
+      }
+      // ★ (item 5) a V2 (refHeroV2) carrier must NOT ride the same wire as a V1 pair — mirror the composer's
+      //   STRICT_RENDER_CARRIER_AMBIGUOUS (never let both versions co-exist on one wire)
+      if (hasV2 && (hasSpec || hasRealized)) {
+        throw seamError('SEAM_STRICT_CARRIER_AMBIGUOUS', `refHeroV2 + selectionSpec/realizedTemplate อยู่บน wire เดียวกัน (กำกวม V1/V2)`);
       }
       captured.queuePayload = payload; // ★ parse ไว้ "สำหรับเรียก composer in-process" เท่านั้น
       return { ...INLINE_ACK }; // ★ ack ปลอมเดียวที่ S7 เห็น (composer/QC ท่อนี้เก็บไว้ตรวจเอง)
@@ -437,14 +452,40 @@ export async function runS7CaptureOnly(input = {}, deps = {}) {
   }
 
   const wirePayload = captured.queuePayload;
-  const hasSpec = Object.prototype.hasOwnProperty.call(wirePayload, 'selectionSpec');
-  const hasRealized = Object.prototype.hasOwnProperty.call(wirePayload, 'realizedTemplate');
-  if (!hasSpec || !hasRealized) {
-    return { status: 422, body: captureBody('CAPTURE_STRICT_PAIR_MISSING', 'strict armed แต่ wire ไม่มี selectionSpec+realizedTemplate ครบคู่', { holdReason: 'strict_wire_missing', trace }) };
+  // ★ (P1-R2) CONSUMER-EQUIVALENT: validate the wire's strict carrier through the SAME pure IO-free activation seam
+  //   the composer uses (_strictActivate). Capture-only may return success ONLY from canonical validated activation
+  //   data — every wire the consumer would reject (missing/partial/dual/invalid V1 or V2) HOLDs here too, BEFORE any
+  //   success, and the authoritative ref identity comes from the validated activation (never a shallow field peek).
+  //   Reconstruct the composer carrier args from the wire exactly as the full path does. This is pure — no fetch,
+  //   queue, compose, decode, network, or IO (composeCore is never reached from here).
+  const _hasSpec = Object.prototype.hasOwnProperty.call(wirePayload, 'selectionSpec');
+  const _hasRealized = Object.prototype.hasOwnProperty.call(wirePayload, 'realizedTemplate');
+  const _hasV2 = Object.prototype.hasOwnProperty.call(wirePayload, 'refHeroV2');
+  const _capArgs = {
+    slotPlan: wirePayload.slotPlan,
+    ...(_hasSpec ? { selectionSpec: wirePayload.selectionSpec } : {}),
+    ...(_hasRealized ? { realizedTemplate: wirePayload.realizedTemplate } : {}),
+    ...(_hasV2 ? { refHeroV2: wirePayload.refHeroV2 } : {}),
+  };
+  // capture-only REQUIRES the exact shared seam — resolve it from the composer namespace at runtime and fail closed
+  //   with a typed HOLD if it is unavailable (never reimplement/downgrade/silently succeed).
+  const _strictActivate = _composerModule._strictActivate;
+  if (typeof _strictActivate !== 'function') {
+    return { status: 422, body: captureBody('CAPTURE_STRICT_SEAM_UNAVAILABLE', 'shared strict activation seam (_strictActivate) ไม่พร้อม — capture-only ต้องใช้ seam จริงเท่านั้น (ห้าม reimplement/downgrade)', { holdReason: 'strict_seam_unavailable', trace }) };
   }
-
-  const specRefId = wirePayload.selectionSpec?.refId ?? null;
-  if (specRefId && boundRefId && String(specRefId) !== String(boundRefId)) {
+  const _capGate = _strictActivate({ args: _capArgs, slotPlan: _capArgs.slotPlan });
+  if (_capGate.none) {
+    return { status: 422, body: captureBody('CAPTURE_STRICT_PAIR_MISSING', 'strict armed แต่ wire ไม่มี strict carrier (V1 pair หรือ refHeroV2)', { holdReason: 'strict_wire_missing', trace }) };
+  }
+  if (_capGate.error) {
+    return { status: 422, body: captureBody('CAPTURE_STRICT_CONTRACT_REJECT', `consumer จะปฏิเสธ wire นี้: ${_capGate.errorType}`, { holdReason: _capGate.errorType, reasons: _capGate.reasons || null, trace }) };
+  }
+  // valid canonical activation — ref identity MUST come from the VALIDATED ctx.authority, be present, and match the bind
+  const specRefId = (_capGate.ctx && _capGate.ctx.authority) ? _capGate.ctx.authority.refId : null;
+  if (specRefId == null || String(specRefId) === '') {
+    return { status: 422, body: captureBody('CAPTURE_REF_IDENTITY_MISSING', 'validated activation ไม่มี ref identity', { holdReason: 'ref_identity_missing', trace }) };
+  }
+  if (boundRefId && String(specRefId) !== String(boundRefId)) {
     return { status: 422, body: captureBody('CAPTURE_REF_IDENTITY_STALE', 'ref identity ไม่ตรงกับที่ operator ผูกไว้ (stale)', { holdReason: 'ref_identity_stale', trace, specRefId, boundRefId }) };
   }
 
@@ -642,27 +683,38 @@ export async function runCoverRefTest(input = {}, deps = {}) {
     };
   }
 
-  // ── strict engaged? = payload พก selectionSpec (own) + RENDER=1 (composer จะตื่น strict เฉพาะกรณีนี้) ──
+  // ── strict engaged? = payload พก carrier (own) + RENDER=1 (composer จะตื่น strict เฉพาะกรณีนี้) ──
+  //   ★ (item 5) V1 = selectionSpec+realizedTemplate ครบคู่ · V2 = refHeroV2 carrier (ไม่ต้องมี top-level pair)
+  //   → V2 ต้องไม่ถูกป้าย 'legacy' · both = ambiguous ⇒ HOLD (mirror composer)
   const hasSpec = Object.prototype.hasOwnProperty.call(payload, 'selectionSpec');
   const hasRealized = Object.prototype.hasOwnProperty.call(payload, 'realizedTemplate');
-  const strictEngaged = hasSpec && hasRealized && _env.MEGA_STRICT_RENDER === '1';
+  const hasV2 = Object.prototype.hasOwnProperty.call(payload, 'refHeroV2');
+  const _renderArmed = _env.MEGA_STRICT_RENDER === '1';
+  const strictEngaged = _renderArmed && (hasV2 ? !(hasSpec || hasRealized) : (hasSpec && hasRealized));
   const effectiveMode = strictEngaged ? 'strict' : 'legacy';
   const authority = extractAuthorityLatches(payload, job.dossier);
 
-  // ── E15 fail-closed guard: latch armed ครบแต่ wire ไม่มี strict pair เลย = producer หลุดสัญญา — ห้ามแอบ compose legacy ──
-  //   (mixed pair มีการ์ดของตัวเองอยู่แล้ว — การ์ดนี้จับเฉพาะ "หายทั้งคู่ทั้งที่ armed")
-  if (latchReport?.armedProducer === true && !hasSpec && !hasRealized) {
-    return { status: 422, body: holdBody({ error: 'strict armed แต่ wire ไม่มี selectionSpec+realizedTemplate — ห้ามถอย legacy เงียบ', errorType: 'STRICT_HOLD', holdReason: 'strict_wire_missing', effectiveMode: 'strict', latchReport, authority, trace }) };
+  if (hasV2 && (hasSpec || hasRealized)) {
+    return { status: 422, body: holdBody({ error: 'wire มีทั้ง refHeroV2 และ selectionSpec/realizedTemplate (กำกวม V1/V2)', errorType: 'STRICT_CARRIER_AMBIGUOUS', holdReason: 'strict_carrier_ambiguous', effectiveMode: 'strict', latchReport, authority, trace }) };
+  }
+
+  // ── E15 fail-closed guard: latch armed ครบแต่ wire ไม่มี strict carrier เลย (ทั้ง V1 pair และ V2) = producer
+  //   หลุดสัญญา — ห้ามแอบ compose legacy · (mixed pair มีการ์ดของตัวเองอยู่แล้ว) ──
+  if (latchReport?.armedProducer === true && !hasSpec && !hasRealized && !hasV2) {
+    return { status: 422, body: holdBody({ error: 'strict armed แต่ wire ไม่มี strict carrier (V1 pair หรือ refHeroV2) — ห้ามถอย legacy เงียบ', errorType: 'STRICT_HOLD', holdReason: 'strict_wire_missing', effectiveMode: 'strict', latchReport, authority, trace }) };
   }
 
   // ── REF IDENTITY guard (strict): identity ต้องมีจริง + ตรงกับที่ S6 bind — หาย/เพี้ยน ⇒ 422 HOLD ──
+  //   ★ (item 5) ref มาจาก VALIDATED spec: V1 = payload.selectionSpec.refId · V2 = payload.refHeroV2.selectionSpec.refId
   if (strictEngaged) {
     const rm = job.dossier.refMatch || {};
     const boundId = rm.refId || rm.dnaHash || null;
     if (!boundId || !rm.refBoundAt) {
       return { status: 422, body: holdBody({ error: 'strict: ref identity ไม่ถูก bind ที่ S6', errorType: 'STRICT_HOLD', holdReason: 'ref_identity_missing', effectiveMode, latchReport, authority, trace }) };
     }
-    const specRefId = payload.selectionSpec?.refId ?? null;
+    const specRefId = hasV2
+      ? (payload.refHeroV2?.selectionSpec?.refId ?? null)
+      : (payload.selectionSpec?.refId ?? null);
     if (specRefId && boundId && String(specRefId) !== String(boundId)) {
       return { status: 422, body: holdBody({ error: 'strict: ref identity ไม่ตรงกับที่ S6 bind (stale)', errorType: 'STRICT_HOLD', holdReason: 'ref_identity_stale', effectiveMode, latchReport, authority, trace, extra: { specRefId, boundRefId: boundId } }) };
     }
@@ -680,6 +732,10 @@ export async function runCoverRefTest(input = {}, deps = {}) {
     refImagePath: Object.prototype.hasOwnProperty.call(payload, 'refImagePath') ? payload.refImagePath : null,
     stableOrder: _env.MEGA_STABLE_ORDER !== '0',
     ...(hasSpec && hasRealized ? { selectionSpec: payload.selectionSpec, realizedTemplate: payload.realizedTemplate } : {}),
+    // ★ Wave1A (LANE C — P0-1): ส่งผ่าน carrier V2 (refHeroV2) แบบ own-property "additive" เหมือน selectionSpec —
+    //   ไม่มี env alias ที่ route · canonical latch = MEGA_STRICT_RENDER อยู่ที่ consumer เท่านั้น
+    //   consumer เป็นผู้ตัดสิน/HOLD เอง (latch OFF + carrier = HOLD, ไม่ downgrade) · absent = composerArgs เดิมไม่เพิ่ม key
+    ...(Object.prototype.hasOwnProperty.call(payload, 'refHeroV2') ? { refHeroV2: payload.refHeroV2 } : {}),
   };
 
   let cover;
