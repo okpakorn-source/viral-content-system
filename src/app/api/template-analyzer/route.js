@@ -116,7 +116,7 @@ Each slot must have a "priority" field:
 CRITICAL: Return ONLY the JSON. No markdown. No explanation. No code blocks.`;
 
     // ═══════════════════════════════════════════════════════════════
-    // COVER FORMAT — Portrait 1200x1350 system prompt
+    // COVER FORMAT — Portrait 1080x1350 system prompt (★ 14 ก.ค.: ย่อจาก 1200 ตาม canvas หน้า /cover-tester)
     // ═══════════════════════════════════════════════════════════════
     const isCoverFormat = format === 'cover';
 
@@ -129,10 +129,10 @@ Most Thai news covers have 4-6 photo zones. If you find fewer than 4, look again
 Common pattern: 1 main hero + 1-2 backgrounds + 1 highlight box + 1-2 circles = 4-6 total.
 
 === CANVAS ===
-Canvas = 1200 x 1350 px (portrait, Facebook cover)
-- Left edge = x:0, Right edge = x:1200
+Canvas = 1080 x 1350 px (portrait, Facebook/IG 4:5)
+- Left edge = x:0, Right edge = x:1080
 - Top edge = y:0, Bottom edge = y:1350
-- Center = x:600, y:675
+- Center = x:540, y:675
 
 === STEP-BY-STEP ANALYSIS ===
 1. Find the LARGEST photo (hero/main face) — usually 50-65% of width, full height
@@ -157,8 +157,8 @@ Canvas = 1200 x 1350 px (portrait, Facebook cover)
 Hero left (60% width) + bg_top (upper right) + bg_bottom (lower right) + yellow highlight (center right) + circle (bottom left)
 
 === FADE EFFECTS (in pixels) ===
-- fadeRight: 250-350 = photo fades to transparent on right edge (for left-side images)
-- fadeLeft: 200-300  = fades on left edge (for right-side backgrounds)
+- fadeRight: 230-320 = photo fades to transparent on right edge (for left-side images)
+- fadeLeft: 180-270  = fades on left edge (for right-side backgrounds)
 - fadeTop: 140-200   = fades on top edge
 - fadeBottom: 140-200 = fades on bottom edge
 Background slots should overlap slightly with the main image area to prevent black gaps.
@@ -179,28 +179,28 @@ Match the EXACT border color you see:
     {
       "id": "bg_top",
       "label": "🖼 ฉากหลัง (บน-ขวา)",
-      "x": 460, "y": 0, "w": 740, "h": 600,
-      "fadeLeft": 220, "fadeBottom": 140,
+      "x": 414, "y": 0, "w": 666, "h": 600,
+      "fadeLeft": 198, "fadeBottom": 140,
       "zIndex": 0
     },
     {
       "id": "bg_bottom",
       "label": "🖼 ฉากหลัง (ล่าง-ขวา)",
-      "x": 460, "y": 700, "w": 740, "h": 650,
-      "fadeLeft": 220, "fadeTop": 140,
+      "x": 414, "y": 700, "w": 666, "h": 650,
+      "fadeLeft": 198, "fadeTop": 140,
       "zIndex": 0
     },
     {
       "id": "main",
       "label": "★ ภาพหลัก",
-      "x": 0, "y": 0, "w": 740, "h": 1350,
-      "fadeRight": 300,
+      "x": 0, "y": 0, "w": 666, "h": 1350,
+      "fadeRight": 270,
       "zIndex": 2
     },
     {
       "id": "highlight",
       "label": "⭐ ไฮไลท์ (กรอบเหลือง)",
-      "x": 540, "y": 380, "w": 580, "h": 420,
+      "x": 486, "y": 380, "w": 522, "h": 420,
       "border": "#FFD700", "borderWidth": 5,
       "zIndex": 3,
       "draggable": true
@@ -208,8 +208,8 @@ Match the EXACT border color you see:
     {
       "id": "circle",
       "label": "⭕ วงกลม",
-      "x": 60, "y": 880,
-      "shape": "circle", "diameter": 360,
+      "x": 54, "y": 880,
+      "shape": "circle", "diameter": 324,
       "border": "#FFFFFF", "borderWidth": 5,
       "zIndex": 4,
       "draggable": true
@@ -219,12 +219,12 @@ Match the EXACT border color you see:
     {
       "id": "line1",
       "label": "📝 บรรทัด 1",
-      "x": 600, "y": 1060,
+      "x": 540, "y": 1060,
       "fontSize": 52,
       "color": "#FFD700",
       "fontWeight": "bold",
       "align": "center",
-      "maxWidth": 1080,
+      "maxWidth": 972,
       "stroke": "#000000",
       "strokeWidth": 3,
       "bg": "#1a1a2e",
@@ -244,12 +244,12 @@ Match the EXACT border color you see:
 === TEXT SLOT PROPERTIES ===
 - id: "line1", "line2", "line3" (sequential)
 - label: "📝 บรรทัด 1", "📝 บรรทัด 2", etc
-- x, y: center position of the text on 1200x1350 canvas
+- x, y: center position of the text on 1080x1350 canvas
 - fontSize: estimated font size in pixels (30-60 typical)
 - color: text color (match the template)
 - fontWeight: "bold" or "normal"
 - align: "center", "left", or "right"
-- maxWidth: max text width before wrapping (usually 800-1100)
+- maxWidth: max text width before wrapping (usually 700-980)
 - stroke: stroke/outline color (usually "#000000" for readability)
 - strokeWidth: 2-5 pixels
 - bg: background strip color behind text (if visible). Use hex color or "rgba(0,0,0,0.7)"
@@ -270,7 +270,7 @@ Match the EXACT border color you see:
 
     const userMessage = isCoverFormat 
       ? `Analyze this news cover template image with extreme precision.
-Canvas = 1200x1350 pixels (portrait format).
+Canvas = 1080x1350 pixels (portrait format).
 Template name: "${templateName || 'custom_cover'}"
 
 IMPORTANT: Count every distinct photo zone carefully. Most covers have 4-6 zones.
@@ -439,13 +439,13 @@ Return ONLY the JSON object with all slot positions.`;
       const coverTextSlots = (templateData.textSlots || []).map((ts, i) => ({
         id: ts.id || ('line' + (i + 1)),
         label: ts.label || ('📝 บรรทัด ' + (i + 1)),
-        x: Math.round(ts.x ?? 600),
+        x: Math.round(ts.x ?? 540),
         y: Math.round(ts.y ?? (1060 + i * 100)),
         fontSize: ts.fontSize || 48,
         color: ts.color || '#FFFFFF',
         fontWeight: ts.fontWeight || 'bold',
         align: ts.align || 'center',
-        maxWidth: ts.maxWidth || 1080,
+        maxWidth: ts.maxWidth || 960,
         stroke: ts.stroke || '#000000',
         strokeWidth: ts.strokeWidth || 3,
         ...(ts.bg && { bg: ts.bg, bgPadX: ts.bgPadX || 18, bgPadY: ts.bgPadY || 14, bgEditable: true }),
@@ -457,6 +457,8 @@ Return ONLY the JSON object with all slot positions.`;
         id: templateId,
         name: templateData.templateName || templateName || 'Custom Cover',
         desc: templateData.desc || templateData.analysis || '',
+        canvasW: 1080,   // ★ 14 ก.ค.: แสตมป์สเปซพิกัด — ตัวโหลดฝั่ง UI ใช้แยกแทมเพลตเก่า 1200 / ใหม่ 1080
+        canvasH: 1350,
         textSlots: coverTextSlots,
         slots: coverSlots,
         source: 'ai_analyzed',

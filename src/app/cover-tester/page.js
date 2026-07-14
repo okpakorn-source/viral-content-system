@@ -3,7 +3,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import Header from '@/components/layout/Header';
 
 // ═══════════════════════════════════════════════════════════
-const W = 1200, H = 1350;
+const W = 1080, H = 1350;
 const HANDLE_SIZE = 36; // corner handle hit zone (px in canvas space)
 const EDGE_RING = 35;   // circle edge hit zone (px)
 
@@ -11,7 +11,7 @@ const EDGE_RING = 35;   // circle edge hit zone (px)
 // TEMPLATE DEFINITIONS
 // ═══════════════════════════════════════════════════════════
 // แทมเพลต builtin — วิเคราะห์จากตัวอย่างจริง (Layout: 4-quadrant)
-// Canvas = 1200 x 1350 px
+// Canvas = 1080 x 1350 px (★ 14 ก.ค.: เปลี่ยนจาก 1200 → 1080 ขนาดโพสต์ FB/IG 4:5 จริง)
 // แต่ละรูปครอบคลุม ~55-60% ของ canvas แล้ว fade เข้าหากัน ไม่มีจุดดำ
 const BUILTIN_TEMPLATES = [
   // ═══════════════════════════════════════════════════════════
@@ -22,15 +22,15 @@ const BUILTIN_TEMPLATES = [
     id: 'template_1', name: 'ข่าวดราม่า 5 ช่อง', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight + ภาพรอง', hint: 'ข่าวดราม่าทั่วไปที่มีภาพครบมือ (คนเด่น + สถานที่ + หลักฐานใส่กรอบเขียว)', textSlots: [],
     slots: [
       // Hero: ซ้ายเต็มสูง — ใบหน้า closeup ยาวจากบนลงล่าง, fade ขวาเพื่อ blend กับ scene
-      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 750, h: 1350, fadeRight: 320,                  zIndex: 2 },
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 675, h: 1350, fadeRight: 288,                  zIndex: 2 },
       // Scene: ขวาบน — สถานที่/เหตุการณ์, fade ซ้าย + ล่าง
-      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 380, y: 0,   w: 820, h: 720,  fadeLeft: 380, fadeBottom: 250,  zIndex: 0 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 342, y: 0,   w: 738, h: 720,  fadeLeft: 342, fadeBottom: 250,  zIndex: 0 },
       // Context: ขวาล่าง — ภาพบริบท/ความสัมพันธ์, fade ซ้าย + บน
-      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 350, y: 580, w: 850, h: 770,  fadeLeft: 320, fadeTop: 280,    zIndex: 1 },
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 315, y: 580, w: 765, h: 770,  fadeLeft: 288, fadeTop: 280,    zIndex: 1 },
       // Highlight: กลาง-ขวา กรอบเหลืองเขียว — ป้าย/หลักฐาน
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเขียว)',     x: 370, y: 280, w: 560, h: 400,  border: '#CCFF00', borderWidth: 5, zIndex: 3, draggable: true },
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเขียว)',     x: 333, y: 280, w: 504, h: 400,  border: '#CCFF00', borderWidth: 5, zIndex: 3, draggable: true },
       // Sub: ซ้ายล่าง กรอบขาว — ภาพกลุ่ม/บริบทเสริม
-      { id: 'sub_left',  label: '🖼 ภาพรอง (ซ้ายล่าง)',      x: 15,  y: 610, w: 520, h: 430,  border: '#FFFFFF', borderWidth: 4, zIndex: 4, draggable: true },
+      { id: 'sub_left',  label: '🖼 ภาพรอง (ซ้ายล่าง)',      x: 14,  y: 610, w: 468, h: 430,  border: '#FFFFFF', borderWidth: 4, zIndex: 4, draggable: true },
     ],
   },
   // ═══════════════════════════════════════════════════════════
@@ -42,13 +42,13 @@ const BUILTIN_TEMPLATES = [
     id: 'template_2', name: 'ข่าวสะอาด 4 ช่อง', desc: '4 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight กลาง', hint: 'ข่าวที่มีภาพน้อย (3-4 ใบ) / ข่าวสายบุญ-เรียบง่าย ไม่มีวงกลม', textSlots: [],
     slots: [
       // Hero: ซ้ายเต็มสูง — ใบหน้า closeup, fade ขวา blend กับวัด/สถานที่
-      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 720, h: 1350, fadeRight: 300,                  zIndex: 2 },
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 648, h: 1350, fadeRight: 270,                  zIndex: 2 },
       // Scene: ขวาบน — สถานที่ (วัด/อาคาร), fade ซ้าย + ล่าง
-      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 400, y: 0,   w: 800, h: 740,  fadeLeft: 360, fadeBottom: 260,  zIndex: 0 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 360, y: 0,   w: 720, h: 740,  fadeLeft: 324, fadeBottom: 260,  zIndex: 0 },
       // Context: ขวาล่าง — full body / กิจกรรม, fade ซ้าย + บน
-      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 380, y: 520, w: 820, h: 830,  fadeLeft: 340, fadeTop: 280,    zIndex: 1 },
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 342, y: 520, w: 738, h: 830,  fadeLeft: 306, fadeTop: 280,    zIndex: 1 },
       // Highlight: กลาง-ล่างซ้าย กรอบเข้ม — ป้ายชื่อ/หลักฐาน
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเข้ม)',      x: 120, y: 580, w: 560, h: 360,  border: '#333333', borderWidth: 5, zIndex: 3, draggable: true },
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเข้ม)',      x: 108, y: 580, w: 504, h: 360,  border: '#333333', borderWidth: 5, zIndex: 3, draggable: true },
     ],
   },
   // ═══════════════════════════════════════════════════════════
@@ -60,15 +60,15 @@ const BUILTIN_TEMPLATES = [
     id: 'template_3', name: 'ข่าวดราม่า + วงกลม', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Emotion ขวาล่าง + Highlight + Circle', hint: 'ดราม่าที่มีตัวละคร 2 คนขึ้นไป — วงกลมไว้ใส่ภาพคู่/อีกฝ่าย', textSlots: [],
     slots: [
       // Hero: ซ้ายเต็มสูง — ใบหน้า profile/closeup, fade ขวา
-      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 740, h: 1350, fadeRight: 310,                  zIndex: 2 },
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 666, h: 1350, fadeRight: 279,                  zIndex: 2 },
       // Scene: ขวาบน — สถานที่/เหตุการณ์, fade ซ้าย + ล่าง
-      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 400, y: 0,   w: 800, h: 720,  fadeLeft: 360, fadeBottom: 240,  zIndex: 0 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 360, y: 0,   w: 720, h: 720,  fadeLeft: 324, fadeBottom: 240,  zIndex: 0 },
       // Emotion: ขวาล่าง — อารมณ์ close-up, fade ซ้าย + บน
-      { id: 'bg_bottom', label: '🖼 อารมณ์ล่าง-ขวา',         x: 380, y: 580, w: 820, h: 770,  fadeLeft: 320, fadeTop: 260,    zIndex: 1 },
+      { id: 'bg_bottom', label: '🖼 อารมณ์ล่าง-ขวา',         x: 342, y: 580, w: 738, h: 770,  fadeLeft: 288, fadeTop: 260,    zIndex: 1 },
       // Highlight: กลาง-ขวา กรอบเหลืองเขียว — ภาพหลักฐาน/บริบท
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเขียว)',     x: 340, y: 280, w: 630, h: 440,  border: '#CCFF00', borderWidth: 5, zIndex: 3, draggable: true },
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเขียว)',     x: 306, y: 280, w: 567, h: 440,  border: '#CCFF00', borderWidth: 5, zIndex: 3, draggable: true },
       // Circle: ซ้ายล่าง กรอบขาว — ภาพคู่/ความสัมพันธ์
-      { id: 'circle',    label: '⭕ วงกลม (ซ้ายล่าง)',       x: 25,  y: 680, shape: 'circle', diameter: 440, border: '#FFFFFF', borderWidth: 6, zIndex: 4, draggable: true },
+      { id: 'circle',    label: '⭕ วงกลม (ซ้ายล่าง)',       x: 23,  y: 680, shape: 'circle', diameter: 396, border: '#FFFFFF', borderWidth: 6, zIndex: 4, draggable: true },
     ],
   },
   // ═══════════════════════════════════════════════════════════
@@ -79,20 +79,20 @@ const BUILTIN_TEMPLATES = [
   {
     id: 'template_4', name: 'ข่าวสังคม + 2 วงกลม', desc: '5 รูป + 2 ข้อความ — Hero + Scene + Context + Circle ใหญ่ + Circle เล็กแดง', hint: 'ข่าวสังคม/พลเมืองดี — วงใหญ่ใส่ของกลาง วงแดงเล็กชี้จุด + พิมพ์พาดหัวได้ 2 บรรทัด',
     textSlots: [
-      { id: 'line1', label: '📝 บรรทัด 1 (ขาว)', x: 730, y: 680, fontSize: 48, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 500, stroke: '#000', strokeWidth: 4, placeholder: 'พาดหัวหลัก...' },
-      { id: 'line2', label: '📝 บรรทัด 2 (เหลือง)', x: 730, y: 760, fontSize: 40, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 520, stroke: '#000', strokeWidth: 3, bg: 'rgba(0,0,0,0.65)', bgPadY: 12, bgFullWidth: false, bgEditable: true, placeholder: 'รายละเอียด...' },
+      { id: 'line1', label: '📝 บรรทัด 1 (ขาว)', x: 657, y: 680, fontSize: 48, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 450, stroke: '#000', strokeWidth: 4, placeholder: 'พาดหัวหลัก...' },
+      { id: 'line2', label: '📝 บรรทัด 2 (เหลือง)', x: 657, y: 760, fontSize: 40, color: '#FFD700', fontWeight: 'bold', align: 'center', maxWidth: 468, stroke: '#000', strokeWidth: 3, bg: 'rgba(0,0,0,0.65)', bgPadY: 12, bgFullWidth: false, bgEditable: true, placeholder: 'รายละเอียด...' },
     ],
     slots: [
       // Hero: ซ้ายเต็มสูง — ใบหน้า closeup, fade ขวา
-      { id: 'main',         label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 720, h: 1350, fadeRight: 300,                  zIndex: 2 },
+      { id: 'main',         label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 648, h: 1350, fadeRight: 270,                  zIndex: 2 },
       // Scene: ขวาบน — wide shot, fade ซ้าย + ล่าง
-      { id: 'bg_top',       label: '🖼 ฉากบน-ขวา',             x: 380, y: 0,   w: 820, h: 700,  fadeLeft: 350, fadeBottom: 240,  zIndex: 0 },
+      { id: 'bg_top',       label: '🖼 ฉากบน-ขวา',             x: 342, y: 0,   w: 738, h: 700,  fadeLeft: 315, fadeBottom: 240,  zIndex: 0 },
       // Context: ขวาล่าง — close-up, fade ซ้าย + บน
-      { id: 'bg_bottom',    label: '🖼 ฉากล่าง-ขวา',            x: 350, y: 550, w: 850, h: 800,  fadeLeft: 320, fadeTop: 260,    zIndex: 1 },
+      { id: 'bg_bottom',    label: '🖼 ฉากล่าง-ขวา',            x: 315, y: 550, w: 765, h: 800,  fadeLeft: 288, fadeTop: 260,    zIndex: 1 },
       // Circle: ซ้ายล่าง — ภาพหลักฐาน/detail
-      { id: 'circle',       label: '⭕ วงกลมใหญ่ (ซ้ายล่าง)',   x: 25,  y: 680, shape: 'circle', diameter: 400, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
+      { id: 'circle',       label: '⭕ วงกลมใหญ่ (ซ้ายล่าง)',   x: 23,  y: 680, shape: 'circle', diameter: 360, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
       // Circle Small: ขวาบน กรอบแดง — zoom detail
-      { id: 'circle_small', label: '⭕ วงกลมเล็ก (แดง ขวาบน)',  x: 890, y: 15,  shape: 'circle', diameter: 200, border: '#FF0000', borderWidth: 4, zIndex: 5, draggable: true },
+      { id: 'circle_small', label: '⭕ วงกลมเล็ก (แดง ขวาบน)',  x: 801, y: 15,  shape: 'circle', diameter: 180, border: '#FF0000', borderWidth: 4, zIndex: 5, draggable: true },
     ],
   },
   // ═══════════════════════════════════════════════════════════
@@ -104,15 +104,15 @@ const BUILTIN_TEMPLATES = [
     id: 'template_5', name: 'ข่าวเหตุการณ์ 5 ช่อง', desc: '5 รูป — Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight เหลือง + Circle ขาว', hint: 'ข่าวเหตุการณ์/กู้ภัย/ที่เกิดเหตุ — เน้นฉากสถานที่ + วงกลมโคลสอัพคน', textSlots: [],
     slots: [
       // Hero: ซ้ายเต็มสูง — ใบหน้า closeup, fade ขวา
-      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 730, h: 1350, fadeRight: 300,                  zIndex: 2 },
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 657, h: 1350, fadeRight: 270,                  zIndex: 2 },
       // Scene: ขวาบน — wide shot สถานที่, fade ซ้าย + ล่าง
-      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 400, y: 0,   w: 800, h: 700,  fadeLeft: 360, fadeBottom: 240,  zIndex: 0 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 360, y: 0,   w: 720, h: 700,  fadeLeft: 324, fadeBottom: 240,  zIndex: 0 },
       // Context: ขวาล่าง — บุคคล/บริบท, fade ซ้าย + บน
-      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 350, y: 560, w: 850, h: 790,  fadeLeft: 320, fadeTop: 260,    zIndex: 1 },
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 315, y: 560, w: 765, h: 790,  fadeLeft: 288, fadeTop: 260,    zIndex: 1 },
       // Highlight: กลาง-ขวา กรอบเหลือง — ภาพกลุ่ม/หลักฐาน
-      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 420, y: 310, w: 580, h: 410,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
+      { id: 'highlight', label: '⭐ ไฮไลท์ (กรอบเหลือง)',    x: 378, y: 310, w: 522, h: 410,  border: '#FFD700', borderWidth: 5, zIndex: 3, draggable: true },
       // Circle: ซ้ายล่าง กรอบขาว ใหญ่ — ภาพ closeup
-      { id: 'circle',    label: '⭕ วงกลม (ซ้ายล่าง)',       x: 15,  y: 630, shape: 'circle', diameter: 460, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
+      { id: 'circle',    label: '⭕ วงกลม (ซ้ายล่าง)',       x: 14,  y: 630, shape: 'circle', diameter: 414, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
     ],
   },
   // ═══════════════════════════════════════════════════════════
@@ -123,20 +123,20 @@ const BUILTIN_TEMPLATES = [
   {
     id: 'template_6', name: 'ข่าวสะเทือนใจ + ข้อความ', desc: '5 รูป + 2 ข้อความ — Hero + Scene + Context + Circle แดงกลาง + Circle ขาวล่าง', hint: 'ข่าวสะเทือนใจ/ทหาร-ตำรวจ — มีคำพูดเด่นกลางปก + วงแดงชี้รายละเอียด',
     textSlots: [
-      { id: 'line1', label: '📝 บรรทัด 1 (ขาว)', x: 620, y: 580, fontSize: 46, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 480, stroke: '#000', strokeWidth: 4, placeholder: 'พาดหัวหลัก...' },
-      { id: 'line2', label: '📝 บรรทัด 2 (ขาว)', x: 620, y: 660, fontSize: 40, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 500, stroke: '#000', strokeWidth: 3, placeholder: 'รายละเอียด...' },
+      { id: 'line1', label: '📝 บรรทัด 1 (ขาว)', x: 558, y: 580, fontSize: 46, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 432, stroke: '#000', strokeWidth: 4, placeholder: 'พาดหัวหลัก...' },
+      { id: 'line2', label: '📝 บรรทัด 2 (ขาว)', x: 558, y: 660, fontSize: 40, color: '#FFFFFF', fontWeight: 'bold', align: 'center', maxWidth: 450, stroke: '#000', strokeWidth: 3, placeholder: 'รายละเอียด...' },
     ],
     slots: [
       // Hero: ซ้ายเต็มสูง — ใบหน้า closeup, fade ขวา
-      { id: 'main',         label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 700, h: 1350, fadeRight: 280,                  zIndex: 2 },
+      { id: 'main',         label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 630, h: 1350, fadeRight: 252,                  zIndex: 2 },
       // Scene: ขวาบน — สถานการณ์/ปฏิบัติการ, fade ซ้าย + ล่าง
-      { id: 'bg_top',       label: '🖼 ฉากบน-ขวา',             x: 380, y: 0,   w: 820, h: 650,  fadeLeft: 350, fadeBottom: 220,  zIndex: 0 },
+      { id: 'bg_top',       label: '🖼 ฉากบน-ขวา',             x: 342, y: 0,   w: 738, h: 650,  fadeLeft: 315, fadeBottom: 220,  zIndex: 0 },
       // Context: ขวาล่าง — อารมณ์/ผู้เกี่ยวข้อง, fade ซ้าย + บน
-      { id: 'bg_bottom',    label: '🖼 ฉากล่าง-ขวา',            x: 340, y: 520, w: 860, h: 830,  fadeLeft: 320, fadeTop: 260,    zIndex: 1 },
+      { id: 'bg_bottom',    label: '🖼 ฉากล่าง-ขวา',            x: 306, y: 520, w: 774, h: 830,  fadeLeft: 288, fadeTop: 260,    zIndex: 1 },
       // Circle เล็ก: กลาง-บน กรอบแดง — zoom detail
-      { id: 'circle_small', label: '⭕ วงกลมเล็ก (แดง กลาง)',   x: 440, y: 180, shape: 'circle', diameter: 160, border: '#FF0000', borderWidth: 3, zIndex: 5, draggable: true },
+      { id: 'circle_small', label: '⭕ วงกลมเล็ก (แดง กลาง)',   x: 396, y: 180, shape: 'circle', diameter: 144, border: '#FF0000', borderWidth: 3, zIndex: 5, draggable: true },
       // Circle ใหญ่: ซ้ายล่าง กรอบขาว — portrait
-      { id: 'circle',       label: '⭕ วงกลมใหญ่ (ซ้ายล่าง)',   x: 50,  y: 680, shape: 'circle', diameter: 360, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
+      { id: 'circle',       label: '⭕ วงกลมใหญ่ (ซ้ายล่าง)',   x: 45,  y: 680, shape: 'circle', diameter: 324, border: '#FFFFFF', borderWidth: 5, zIndex: 4, draggable: true },
     ],
   },
   // ═══════════════════════════════════════════════════════════
@@ -147,16 +147,44 @@ const BUILTIN_TEMPLATES = [
     id: 'template_9', name: '3 ฉากแยกชัด + วงกลมกลาง', desc: '4 รูป — Hero ซ้าย 50% + ฉากขวาบน 50% + ฉากขวาล่าง 50% + วงกลมกลางซ้อนทับ', hint: 'เล่าเรื่อง 3 ฉากแยกชัดไม่เบลนด์กัน + คนเดี่ยวเด่นในวงกลมกลาง', textSlots: [],
     slots: [
       // Hero: ซ้าย 50% สูงเต็ม 1350 — fade ขวาเพื่อ blend
-      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 650, h: 1350, fadeRight: 100, zIndex: 1 },
+      { id: 'main',      label: '★ ภาพหลัก (ซ้ายเต็ม)',     x: 0,   y: 0,   w: 585, h: 1350, fadeRight: 90, zIndex: 1 },
       // ฉากขวาบน (Scene): สูง 675, กว้าง 600
-      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 600, y: 0,   w: 600, h: 680,  fadeLeft: 80, fadeBottom: 80, zIndex: 0 },
+      { id: 'bg_top',    label: '🖼 ฉากบน-ขวา',             x: 540, y: 0,   w: 540, h: 680,  fadeLeft: 72, fadeBottom: 80, zIndex: 0 },
       // ฉากขวาล่าง (Context): สูง 675, กว้าง 600
-      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 600, y: 670, w: 600, h: 680,  fadeLeft: 80, fadeTop: 80, zIndex: 0 },
+      { id: 'bg_bottom', label: '🖼 ฉากล่าง-ขวา',            x: 540, y: 670, w: 540, h: 680,  fadeLeft: 72, fadeTop: 80, zIndex: 0 },
       // Circle: กลาง ซ้อนทับ — วงกลมพอร์ตเทรตคนเดี่ยว
-      { id: 'circle',    label: '⭕ วงกลมกลาง (ซ้อนทับ)',    x: 380, y: 390, shape: 'circle', diameter: 460, border: '#FFFFFF', borderWidth: 10, zIndex: 3, draggable: true },
+      { id: 'circle',    label: '⭕ วงกลมกลาง (ซ้อนทับ)',    x: 342, y: 390, shape: 'circle', diameter: 414, border: '#FFFFFF', borderWidth: 10, zIndex: 3, draggable: true },
     ],
   },
 ];
+
+// ★ 14 ก.ค.: แปลงแทมเพลตเก่า (สเปซ 1200×1350 ก่อนย่อ canvas) → สเปซ W ปัจจุบัน ตอนโหลด
+//   แทมเพลตใน Supabase ที่ไม่มี canvasW = เซฟสมัย canvas 1200 — สเกลแกนนอน ×(W/1200) แกนตั้งคงเดิม
+//   ไม่เขียนกลับ DB — แปลงเฉพาะตอนโหลด (เว็บเวอร์ชันเก่าที่ยัง 1200 อ่านข้อมูลเดิมได้ไม่พัง)
+const LEGACY_CANVAS_W = 1200;
+function normalizeTemplateToCanvas(t) {
+  if (!t) return t;
+  const srcW = t.canvasW || LEGACY_CANVAS_W;
+  if (srcW === W) return t;
+  const k = W / srcW;
+  const sx = (v) => Math.round((v || 0) * k);
+  // ★ 14 ก.ค. รอบ 2: ความกว้างสเกลแบบยึดขอบขวา (round ที่ขอบ ไม่ round ความกว้างตรงๆ)
+  //   กันเคสเศษ .5 ปัดขึ้นทั้ง x และ w แล้วขอบขวาล้น canvas 1px (เจอจริง 3 แทมเพลตตอนเทส :3988)
+  const sw = (x, w) => sx((x || 0) + (w || 0)) - sx(x);
+  const slots = (t.slots || []).map(s => ({
+    ...s,
+    x: sx(s.x),
+    ...(s.shape === 'circle'
+      ? { diameter: sw(s.x, s.diameter || 300) }
+      : { w: sw(s.x, s.w ?? 300) }),
+    ...(s.fadeLeft ? { fadeLeft: sx(s.fadeLeft) } : {}),
+    ...(s.fadeRight ? { fadeRight: sx(s.fadeRight) } : {}),
+  }));
+  const textSlots = (t.textSlots || []).map(ts => ({
+    ...ts, x: sx(ts.x), ...(ts.maxWidth ? { maxWidth: sx(ts.maxWidth) } : {}),
+  }));
+  return { ...t, slots, textSlots, canvasW: W, canvasH: H };
+}
 
 // ═══════════════════════════════════════════════════════════
 // Styles
@@ -551,7 +579,7 @@ export default function CoverPage() {
   const [grayAll, setGrayAll] = useState(0);                // 0..1 ขาวดำทั้งใบ (โทนไว้อาลัย)
   const [markers, setMarkers] = useState([]);               // วง/กรอบแดงเน้นจุด [{id,type,x,y,w,h,color,width}]
   const [selectedMarkerId, setSelectedMarkerId] = useState(null);
-  const touchScaleRef = useRef(1);  // canvas จริง (1200) / ที่แสดงบนจอ — ใช้ขยาย hit zone ให้นิ้วจับถูกบนจอเล็ก
+  const touchScaleRef = useRef(1);  // canvas จริง (W) / ที่แสดงบนจอ — ใช้ขยาย hit zone ให้นิ้วจับถูกบนจอเล็ก
   const pinchRef = useRef(null);    // สถานะจีบ 2 นิ้ว (ซูมภาพในช่อง)
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
@@ -576,7 +604,7 @@ export default function CoverPage() {
         const data = await res.json();
         if (data.success && data.templates?.length > 0) {
           // Filter only cover-format templates (have slots array with x/y/w/h)
-          const coverTemplates = data.templates.filter(t => t.slots && t.slots.length > 0);
+          const coverTemplates = data.templates.filter(t => t.slots && t.slots.length > 0).map(normalizeTemplateToCanvas);
           setTemplates([...BUILTIN_TEMPLATES, ...coverTemplates]);
           if (coverTemplates.length > 0 && !BUILTIN_TEMPLATES.find(t => t.id === templateId)) {
             setTemplateId(coverTemplates[0].id);
@@ -621,7 +649,7 @@ export default function CoverPage() {
       const data = await res.json();
 
       if (data.success && data.template) {
-        setTemplates(prev => [...prev, data.template]);
+        setTemplates(prev => [...prev, normalizeTemplateToCanvas(data.template)]);
         setTemplateId(data.template.id);
         setUploadProgress('');
         // Clear slot images for new template
@@ -1319,7 +1347,7 @@ export default function CoverPage() {
 
   return (
     <>
-      <Header title="🖼️ ปกข่าว" subtitle="สร้างปกข่าว 1200×1350 — เลือกแทมเพลต อัปโหลดรูป ลากจัดตำแหน่ง ปรับขนาด" />
+      <Header title="🖼️ ปกข่าว" subtitle={`สร้างปกข่าว ${W}×${H} — เลือกแทมเพลต อัปโหลดรูป ลากจัดตำแหน่ง ปรับขนาด`} />
 
       {/* ===== HELP BUTTON + GUIDE ===== */}
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 16px' }}>
@@ -1366,7 +1394,7 @@ export default function CoverPage() {
                   { s: '3', t: 'ลากจัดตำแหน่งภาพ ⭐ และ ⭕ ได้อิสระ', i: '✋' },
                   { s: '4', t: 'ปรับขนาดภาพด้วย slider (50%–200%)', i: '🔍' },
                   { s: '5', t: 'พิมพ์ข้อความ (ถ้าแทมเพลตรองรับ)', i: '✏️' },
-                  { s: '6', t: 'กด 📥 Download — ได้ภาพ 1200×1350px', i: '💾' },
+                  { s: '6', t: `กด 📥 Download — ได้ภาพ ${W}×${H}px`, i: '💾' },
                 ].map(x => (
                   <div key={x.s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid rgba(148,163,184,0.08)' }}>
                     <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'rgba(148,163,184,0.15)', color: '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, flexShrink: 0 }}>{x.s}</div>
