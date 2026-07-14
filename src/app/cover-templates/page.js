@@ -438,10 +438,6 @@ export default function CoverTemplatesPage() {
               <option value="day">Sort: By Day</option>
               <option value="id">Sort: Template ID</option>
             </select>
-            <a href="/cover-gallery" style={{
-              padding: '8px 14px', borderRadius: '8px', textDecoration: 'none',
-              background: 'rgba(255,255,255,0.06)', color: '#94a3b8', fontSize: '12px',
-            }}>📦 Gallery</a>
           </div>
         </div>
       </div>

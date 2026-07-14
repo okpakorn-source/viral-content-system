@@ -71,9 +71,8 @@ export default function Sidebar() {
     // { label: 'สร้างปกอัตโนมัติ', icon: '🔥', href: '/cover-lab', highlight: true },
     { label: 'แม่แบบปก (14 แบบ)', icon: '🎨', href: '/cover-tester' },
     { label: 'ค้นภาพหลายแหล่ง (เลือกลงปก)', icon: '🔎', href: '/image-search' }, // ★ 4 ก.ค.: พอร์ตรีเสิร์ชภาพจากระบบทำปกออโต้
-    { label: 'สร้างปกเอง', icon: '🎭', href: '/cover-maker' },
-    { label: 'สร้างภาพด้วย AI', icon: '🖌️', href: '/image-maker' },
-    { label: 'คลังรูป', icon: '📸', href: '/cover-gallery' },
+    // ⛔ 14 ก.ค. 2026: ลบระบบ cover-maker / image-maker / cover-gallery ทั้งระบบตามคำสั่งผู้ใช้ (เช็คแล้วไม่มีท่ออัตโนมัติพึ่งพา)
+    //   กู้คืน: git history หรือโฟลเดอร์ _removed-systems-backup-20260714 · lib imageGallery ยังอยู่ (auto-cover ใช้เขียนคลัง)
     // ⛔ 2 ก.ค. 2026: ปิดชั่วคราวตามคำสั่งผู้ใช้ (รอรื้อสร้างใหม่)
     // { label: 'คลังปกที่ทำแล้ว', icon: '📁', href: '/cover-archive' },
 
