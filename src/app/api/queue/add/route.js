@@ -69,6 +69,24 @@ export async function POST(req) {
         }, { status: 400 });
       }
     }
+
+    // ★ 16 ก.ค. 69: TEXT-ONLY MODE — ปิดรับเจนข่าวจากลิงก์/รูปทุกชนิด (คำสั่งเจ้าของระบบ:
+    //   เวิร์กโฟลว์จริงสรุปเนื้อข่าวเป็นข้อความก่อนเสมอ · สาย URL/คลิป/รูปคุณภาพไม่ถึง จึงปิดสวิตช์ลดปัญหา)
+    //   ครอบเฉพาะงานเจนข่าว — งานปก (cover) และงานถอดคลิป (mineclip) ใช้คิวเดียวกันแต่ไม่ถูกบล็อก
+    //   เปิดคืนชั่วคราว: ตั้ง env TEXT_ONLY_MODE=0 · ห้ามลบโค้ดสาย URL (กฎห้ามลบ fallback)
+    const _textOnly = process.env.TEXT_ONLY_MODE !== '0';
+    const _isNewsGenJob = !isCoverJob && payload.jobType !== 'mineclip';
+    if (_textOnly && _isNewsGenJob) {
+      const _hasUrl = !!payload.url || /https?:\/\//i.test(_rawInput);
+      const _hasImages = Array.isArray(payload.images) && payload.images.length > 0;
+      if (_hasUrl || _hasImages) {
+        return NextResponse.json({
+          success: false,
+          error: 'โหมดข้อความเท่านั้น: ระบบปิดรับการเจนข่าวจากลิงก์/รูปชั่วคราว — กรุณาสรุปเนื้อข่าวเป็นข้อความล้วน (ไม่มีลิงก์) แล้วส่งใหม่',
+          errorType: 'TEXT_ONLY_MODE',
+        }, { status: 400 });
+      }
+    }
     
     // ★ 25 มิ.ย. (สืบบอทซ้ำ): บันทึก ping — ใคร (instance) ยิงข้อความไหน (msgId) เข้าคิว · เก็บ 30 ล่าสุด
     //   query store 'bot-pings' → instance ต่างกัน 2 ตัว = 2 บอท · msgId เดียวจาก 2 instance = 2 บอทจริง
