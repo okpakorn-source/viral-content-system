@@ -111,7 +111,32 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
       console.log(`  L4 FactCheck: preserved=${factCheck.preserved} drifts=${factCheck.drifts.length} action=${factCheck.action}`);
 
       // เลือก content ตาม fact check
-      const safeContent = factCheck.action === 'rollback' ? rollbackContent : correctedContent;
+      let safeContent = factCheck.action === 'rollback' ? rollbackContent : correctedContent;
+
+      // ★ 16 ก.ค. 69 (B3): rollback = ย้อนกลับไปใช้เนื้อ "ก่อนแก้" ที่ L2 บอกไว้แล้วว่ามีคำต้องห้ามฝังอยู่
+      //   เดิมส่งต่อทั้งดิบโดยไม่ล้างซ้ำ → คำเสี่ยง Facebook หลุดออกไปพร้อมป้าย "แก้แล้ว"
+      //   แก้: re-audit เนื้อ rollback แล้ว direct-replace เฉพาะ forbidden_word (คำต่อคำ ไม่ใช้ AI —
+      //   กัน fact เพี้ยนซ้ำซึ่งเป็นเหตุที่ทำให้ rollback ตั้งแต่แรก)
+      let _rollbackScrub = null;
+      if (factCheck.action === 'rollback') {
+        try {
+          const reAudit = await auditOutput({ ...version, content: safeContent });
+          // ★ guard (review จับได้): แทนเฉพาะ suggestion ที่เป็น "คำแทนจริง" สั้นๆ — บาง rule ใส่ประโยคแนะนำ
+          //   ("สำนวนเลี่ยงตามบริบท เช่น ...") ถ้า split/join ตรงๆ จะฉีดประโยคแนะนำเข้าเนื้อข่าวจริง
+          const _forbidden = (reAudit.issues || []).filter(x => x.type === 'forbidden_word' && x.text && x.suggestion
+            && x.suggestion.length <= 25 && !/เช่น|สำนวน|บริบท|\//.test(x.suggestion));
+          for (const iss of _forbidden) {
+            safeContent = safeContent.split(iss.text).join(iss.suggestion);
+          }
+          _rollbackScrub = { reAuditIssues: (reAudit.issues || []).length, forbiddenScrubbed: _forbidden.length };
+          if (_forbidden.length > 0) {
+            console.log(`  L4+ Rollback Scrub: ล้างคำต้องห้าม ${_forbidden.length} จุดจากเนื้อ rollback`);
+          }
+        } catch (scrubErr) {
+          console.warn(`  L4+ Rollback Scrub: SKIPPED (${scrubErr.message})`);
+          _rollbackScrub = { error: scrubErr.message };
+        }
+      }
 
       // === Layer 4.5: Hallucination Scrubbing ===
       // ★ ปรับ 12 มิ.ย. (ลูปคุณภาพจับได้): เดิมแทนทุกอย่างด้วย "ที่เกิดเหตุ" ทื่อๆ → ได้คำพิกล
@@ -177,6 +202,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
           factPreserved: factCheck.preserved,
           factDrifts: factCheck.drifts.length,
           rolledBack: factCheck.action === 'rollback',
+          rollbackScrub: _rollbackScrub,
           semanticCheck: semanticDebug,
           polishChanges: changes.length,
           path: factCheck.action === 'rollback' ? 'rollback' : 'corrected',

@@ -177,6 +177,15 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     throwStep('auto_extract', `เนื้อข่าวสั้นเกินไป (${newsData.newsBody.length} ตัวอักษร) — กรุณา copy เนื้อข่าวมาวางแทน`);
   }
 
+  // ★ 16 ก.ค. 69 (B3): AI สกัดล้มแล้วตกมาใช้ raw text — เดิมเงียบสนิท ไม่มีใครรู้ว่างานนี้ไม่ได้ผ่าน AI
+  //   นโยบายเจ้าของ (D2-ก): เตือนดังๆ + ประทับธงติดงาน แต่ให้เดินต่อ (เนื้อ text สรุปมาแล้วมักใช้ได้)
+  if (extractRes.extractFallback) {
+    addLog('Step2', `⚠️ EXTRACT-FALLBACK: AI สกัดไม่สำเร็จ (${(extractRes.extractError || '').slice(0, 80)}) — ใช้ข้อความดิบเดินท่อต่อ`);
+    newsData._extractFallback = true;
+    newsData._extractError = extractRes.extractError || '';
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'extract', status: 'fallback', detail: 'ใช้ raw text: ' + (extractRes.extractError || '').slice(0, 100) }).catch(() => {});
+  }
+
   rlog.inject('newsTitle', `"${(newsData.newsTitle||'').slice(0,50)}"`);
   rlog.inject('newsBody', `${newsData.newsBody.length}ch | category: ${newsData.newsCategory||'-'}`);
   addLog('Step2', `✅ "${newsData.newsTitle?.slice(0, 40)}..." (${newsData.newsBody.length} ตัวอักษร, ${((Date.now() - step2Start) / 1000).toFixed(1)}s)`);
@@ -227,7 +236,8 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     // Task 2: Smart Research
     withTimeout(
       smartResearch(newsData, breakdownData),
-      30000,
+      60000, // ★ 16 ก.ค. 69 (B4): 60s (was 30s) — sync สาย URL: SmartResearch มี 2 AI calls + 7 Serper HTTP calls
+             //   ค่า 30s พิสูจน์แล้วว่าไม่พอ → factPool เป็น null เงียบๆ ข่าวขาดข้อมูลเสริม
       'smart_research'
     ).catch(() => null),
   ]);
@@ -326,6 +336,17 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     }
   }
 
+  // ★ 16 ก.ค. 69 (B5 — ใต้สวิตช์ REF_WEIGHT_BY_MATCH=1): มุมแรกไม่เคยมีเกต (ลูปบนเริ่ม i>=1) —
+  //   winner คะแนนต่ำ/ผิดเรื่องก็ถูกยึดเป็นแกนเวอร์ชันหลัก → สลับเป็น Built-in V12 (โทนกลาง ไม่มีธีมเฉพาะ)
+  //   แทนการฝืนใช้พร้อมท์ผิดเรื่อง — ยังการันตีมีผลลัพธ์ ≥1 เวอร์ชันเหมือนเดิม
+  if (process.env.REF_WEIGHT_BY_MATCH === '1' && anglePrompts[0] && anglePrompts[0].id !== 'fallback_builtin') {
+    const _s0 = Number(anglePrompts[0]._matchScore ?? 0);
+    if (_s0 < MIN_ANGLE_MATCH) {
+      addLog('PromptSelect', `🔁 มุมแรกจับคู่หลวม (score ${_s0} < ${MIN_ANGLE_MATCH}) → ใช้ Built-in V12 แทนพร้อมท์ผิดเรื่อง (REF_WEIGHT_BY_MATCH)`);
+      anglePrompts[0] = getBuiltinFallbackPrompt();
+    }
+  }
+
   // ★ HOTFIX (10 มิ.ย.): สไตล์เปิดเรื่องหมุนเวียนต่อ angle — กันทุกเวอร์ชันเปิดเหมือนกัน (ดู autoFlowService.js)
   //   (12 มิ.ย. ทีมสั่งย้อนกลับสูตรนี้ — เวอร์ชันที่ทีมชอบ (#00189) เขียนด้วยสูตรนี้)
   const OPENING_STYLES = [
@@ -343,8 +364,10 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       // ★ DNA v3.3: พร้อมท์ที่จับคู่แน่น (score ≥60) มีเทคนิคเปิดจาก DNA จริง — ให้ชนะสูตรหมุนเวียนกลาง
       const _ap = anglePrompts[index];
       const _promptHook = (_ap && Number(_ap._matchScore) >= 60 && _ap.hookStyle) ? String(_ap.hookStyle) : null;
+      // ★ 16 ก.ค. 69 (B5): เพิ่ม guard "ห้ามฝืน" — hookStyle เช่น "ตัวเลขผูกประโยค" เคยกดดันโมเดล
+      //   ให้แต่งตัวเลข/นับสิ่งของเอง (เคสจริง: นับพระเป็น "หนึ่งชุด") แบบเดียวกับ guard ที่ exampleHooks มีอยู่แล้ว
       const _openingStyle = _promptHook
-        ? `${_promptHook} — ตามเทคนิคเปิดของพร้อมท์ที่จับคู่ ห้ามขึ้นต้นด้วยวันที่`
+        ? `${_promptHook} — ตามเทคนิคเปิดของพร้อมท์ที่จับคู่ ห้ามขึ้นต้นด้วยวันที่ (⚠️ถ้าข่าวไม่มีองค์ประกอบตามสไตล์นี้จริง เช่น ไม่มีตัวเลขเด่น — ห้ามฝืน ห้ามแต่งตัวเลขหรือนับสิ่งของเอง ให้เปิดด้วยภาพเหตุการณ์จริงแทน)`
         : OPENING_STYLES[index % OPENING_STYLES.length];
       const writeAngle = `${focusAngle}\nสไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${_openingStyle}`;
       
@@ -394,7 +417,10 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         _researchItems: researchItems,
         _topPrompt: topPrompt
       };
-    })(), 300000, `generate_A${index + 1}`); // ★ 300s per angle (เดิม 240s — Opus ช้ากว่า Sonnet ขยายกัน timeout)
+    })(), 420000, `generate_A${index + 1}`); // ★ 16 ก.ค. 69 (B4 review fix): 420s (เดิม 300s) — งบนี้ "แชร์" กัน
+    // ระหว่าง performResearch (ไม่มี inner cap, ~30-60s) + write_inner 180s + write_fallback 90s + STAGE 2.5/prep
+    // เดิม 300s: write ช้าชน inner 180s แล้ว fallback เหลือเวลาไม่พอ → มุมตายทั้งที่ fallback กำลังจะรอด
+    // (มุมทั้งหมดวิ่งขนาน — wall-clock รวมไม่เพิ่มในเคสปกติ; เพดานงานทั้งใบมี AbortController 900s ที่ worker ครอบอยู่)
   });
 
   const genResults = await Promise.allSettled(generationTasks);
@@ -449,7 +475,9 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   if (totalResearchItems.length) addLog('Summary', `🔍 Research: ${totalResearchItems.length} แหล่งข้อมูล`);
 
   const usedPreset = primaryResult.usedPreset || null;
-  const newsType = primaryResult.debug?.newsTypeDetected || '';
+  // ★ 16 ก.ค. 69 (B4): พอร์ต FIX จากสาย URL (autoFlowService.js:504) — breakdownData.primaryCategory มักมีค่าเสมอ
+  //   ส่วน debug.newsTypeDetected ว่างเมื่อใช้ presetPrompt (Stage 1 ถูกข้าม = flow ปกติของคิว) → newsType เคยว่างทุกงาน
+  const newsType = breakdownData?.primaryCategory || primaryResult.debug?.newsTypeDetected || '';
   if (newsType) addLog('Prompt', `🧠 AI วิเคราะห์: ข่าว${newsType}`);
   if (usedPreset?.source === 'library') {
     addLog('Prompt', `🏛️ ใช้ Library: "${usedPreset.name}" (Viral: ${usedPreset.viralScore || '-'})`);
@@ -497,6 +525,17 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         promptId: usedPreset?.promptId || anglePrompts[0]?.id || '',
         newsType: newsType || '',
         desk: deskMeta || null, // ★ ป้ายโต๊ะข่าว {newsId, lane, category, editor, editorIcon}
+        // ★ 16 ก.ค. 69 (B4): พอร์ตจากสาย URL — เดิม stepTimings มีเฉพาะใน return data ไม่เข้า Generation Log
+        //   ทำสถิติ latency รายขั้นเอียงไปทางสาย URL ทั้งที่ตัวแปรมีครบอยู่แล้ว
+        stepTimings: {
+          detect: ((step1Start - step0Start) / 1000).toFixed(1),
+          scrape: ((step2Start - step1Start) / 1000).toFixed(1),
+          extract: ((step3Start - step2Start) / 1000).toFixed(1),
+          breakdown: ((stepParallelStart - step3Start) / 1000).toFixed(1),
+          blueprint: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
+          research: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
+          generate: ((Date.now() - stepGenStart) / 1000).toFixed(1),
+        },
       },
       userId: _user.userId,
     });
@@ -531,6 +570,13 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         viralScore: usedPreset.viralScore || null,
         matchReason: primaryResult.debug?.promptMatchReason || '',
         newsType: newsType || '',
+        // ★ 16 ก.ค. 69 (B5): ฟิลด์ตรวจย้อน — ส่งคะแนนจับคู่จริงทะลุถึง job_queue (เดิมถูกตัดทิ้งเป็นทอดๆ)
+        promptName: usedPreset.promptName || '',
+        promptId: usedPreset.promptId || null,
+        promptSource: usedPreset.promptSource || usedPreset.source || '',
+        matchScore: (typeof usedPreset.matchScore === 'number') ? usedPreset.matchScore : null,
+        matchType: usedPreset.matchType || null,
+        isBorrowed: usedPreset.isBorrowed || false,
       } : null,
       stepTimings: {
         detect: ((step1Start - step0Start) / 1000).toFixed(1),

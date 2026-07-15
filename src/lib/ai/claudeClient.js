@@ -1,10 +1,11 @@
 /**
  * ========================================
- * CLAUDE CLIENT — Anthropic Claude Sonnet 4.6
+ * CLAUDE CLIENT — Anthropic (ตัวเขียนข่าวหลัก)
  * ========================================
- * ใช้สำหรับ: Content Writing (ภาษาไทยดีกว่า GPT-4o)
- * ราคา: $3/M input, $15/M output tokens
- * 
+ * ใช้สำหรับ: Content Writing (ภาษาไทยดีกว่าสาย GPT)
+ * โมเดลจริง = DEFAULT_WRITE_MODEL ด้านล่าง (default claude-opus-4-8, สลับผ่าน env CLAUDE_WRITE_MODEL)
+ * ราคา: ดู MODEL_COSTS ใน modelConfig.js (อย่าเชื่อ comment เก่า)
+ *
  * ตั้งค่า: ANTHROPIC_API_KEY ใน .env
  */
 import Anthropic from '@anthropic-ai/sdk';
@@ -18,9 +19,11 @@ let claudeClient = null;
 //   (สลับกลับได้: CLAUDE_WRITE_MODEL=claude-sonnet-4-6)
 const DEFAULT_WRITE_MODEL = process.env.CLAUDE_WRITE_MODEL || 'claude-opus-4-8';
 
-// Opus 4.7+ / Fable ไม่รับ sampling params (temperature/top_p/top_k → 400)
+// Opus 4.7+ / Fable / Sonnet 5 ไม่รับ sampling params (temperature/top_p/top_k → 400)
+// ★ 16 ก.ค. 69 (B6): + sonnet-5/opus-5 — พิสูจน์ด้วย API จริง: "`temperature` is deprecated for this model"
+//   (เดิม regex ไม่ครอบ → A/B ตัวเขียน Sonnet 5 ล้มเงียบแล้ว fallback ไป gpt-5.5 โดยไม่มีใครรู้)
 function modelRejectsSampling(model) {
-  return /^claude-(opus-4-[78]|fable)/.test(model);
+  return /^claude-(opus-4-[78]|fable|sonnet-5|opus-5)/.test(model);
 }
 
 function getClaudeClient() {
@@ -39,7 +42,7 @@ function getClaudeClient() {
  * เรียก Claude — ส่ง prompt เดียว + system prompt
  * Return: parsed JSON object
  */
-export async function callClaude({ prompt, systemPrompt, model = DEFAULT_WRITE_MODEL, temperature = 0.7, maxTokens = 8000 }) {
+export async function callClaude({ prompt, systemPrompt, model = DEFAULT_WRITE_MODEL, temperature = 0.7, maxTokens = 8000, signal }) {
   const client = getClaudeClient();
   if (!client) throw new Error('ANTHROPIC_API_KEY ไม่ได้ตั้งค่า — ไปตั้งค่าที่ Settings');
 
@@ -127,15 +130,17 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
     ],
   };
 
+  // ★ 16 ก.ค. 69 (B4): รับ AbortSignal จาก withTimeoutSignal — timeout แล้วยกเลิก HTTP จริง ตัดจ่ายซ้อน
+  const _reqOpts = signal ? { signal } : undefined;
   let response;
   try {
-    response = await client.messages.create(requestBody);
+    response = await client.messages.create(requestBody, _reqOpts);
   } catch (effortErr) {
     // Defensive: SDK/รุ่น model ไม่รองรับ output_config → ลองใหม่แบบไม่ส่ง (ไม่ให้ pipeline ตายเพราะ param เดียว)
     if (requestBody.output_config && /output_config|effort/i.test(effortErr.message || '')) {
       console.warn('[Claude] ⚠️ output_config not supported — retrying without effort param');
       delete requestBody.output_config;
-      response = await client.messages.create(requestBody);
+      response = await client.messages.create(requestBody, _reqOpts);
     } else {
       throw effortErr;
     }
@@ -168,14 +173,23 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
     if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
     if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
     jsonStr = jsonStr.trim();
-    return sanitizeOutput(JSON.parse(jsonStr));
+    // ★ 16 ก.ค. 69 (B1): แนบโมเดลจริงไปกับผล (non-enumerable — ไม่ปนใน JSON.stringify/spread เหมือน openai.js)
+    const _parsed = sanitizeOutput(JSON.parse(jsonStr));
+    if (_parsed && typeof _parsed === 'object') {
+      try { Object.defineProperty(_parsed, '_modelUsed', { value: model, enumerable: false }); } catch {}
+    }
+    return _parsed;
   } catch (e) {
     // ลอง parse ตรงๆ โดยหา { } ครอบ
     try {
       const startIdx = content.indexOf('{');
       const endIdx = content.lastIndexOf('}');
       if (startIdx !== -1 && endIdx !== -1) {
-        return sanitizeOutput(JSON.parse(content.slice(startIdx, endIdx + 1)));
+        const _parsed2 = sanitizeOutput(JSON.parse(content.slice(startIdx, endIdx + 1)));
+        if (_parsed2 && typeof _parsed2 === 'object') {
+          try { Object.defineProperty(_parsed2, '_modelUsed', { value: model, enumerable: false }); } catch {}
+        }
+        return _parsed2;
       }
     } catch (e2) {}
     console.error('[Claude] JSON parse failed:', content.slice(0, 500));
