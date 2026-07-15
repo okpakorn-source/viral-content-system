@@ -2250,6 +2250,43 @@ export async function _buildCropReadinessEvidenceV1({ factsById, refDNA, deps } 
   }
 }
 
+// ★ B4 SHADOW: identity-verifier authority — วัด "คนในภาพผู้สมัครใบนี้คือบุคคลเดียวกับหลักฐานอ้างอิงที่ยืนยันแล้วไหม"
+//   ต่อ candidate → { identityConfidence, identityVerified } ผ่านโมดูล candidateIdentityVerifier (vision วิเคราะห์ล้วน).
+//   detached · พังทุกจุด → null (ไม่ HOLD เพิ่ม) · ยังไม่มี consumer (cast/hero ยัง hardcode identityVerified:false/absent).
+//   หลักฐานอ้างอิงตัวตน "ต้องเป็น reference asset ที่ระบบยืนยันแล้วต่อ personId" ซึ่งวันนี้ "ไม่มี producer จริง" ในระบบ
+//   (เหมือน metrics/hero authority ที่ยังกักกัน) → resolver ไม่ถูกฉีด ⇒ null (dormant สนิท). mapping candidate→claimedPerson
+//   เป็นหน้าที่ของ resolver authority (แหล่งเชิงโครงสร้าง เช่น required cast) — bridge นี้ส่งเฉพาะ key เชิงโครงสร้าง (sourceAssetId
+//   + validated facts) เข้าไป ไม่เดา. vision จริงเฉพาะ MEGA_IDENTITY_VERIFIER=1 (ค่าเริ่ม OFF = cache-only ไม่มี network).
+export async function _buildIdentityEvidenceV1({ factsById, caseId, deps } = {}) {
+  try {
+    if (!(factsById instanceof Map) || factsById.size < 1) return null;
+    const resolve = deps?.identityReferenceResolver;
+    if (typeof resolve !== 'function') return null; // ไม่มีแหล่งหลักฐานอ้างอิงตัวตนที่ยืนยันแล้วในระบบวันนี้ → absent
+    const idvApi = deps?.identityVerifierApi || await import('@/lib/candidateIdentityVerifier');
+    if (typeof idvApi?.measureCandidateIdentity !== 'function') return null;
+    if (typeof idvApi._resetIdentityRound === 'function') idvApi._resetIdentityRound(); // รีเซ็ตเพดาน vision ต่อรอบ S6
+    const out = new Map();
+    for (const [assetId, facts] of factsById) {
+      // resolver = authority ที่รู้ mapping เชิงโครงสร้าง (candidate→claimedPerson) + หลักฐานอ้างอิงที่ยืนยันแล้ว
+      let triple = null;
+      try { triple = resolve({ sourceAssetId: assetId, facts, caseId }); } catch { triple = null; }
+      if (!triple || typeof triple !== 'object') continue;
+      const measured = await idvApi.measureCandidateIdentity({
+        candidate: triple.candidate,
+        claimedPerson: triple.claimedPerson,
+        referenceEvidence: triple.referenceEvidence,
+        deps,
+      });
+      if (measured && typeof measured === 'object' && Number.isFinite(measured.identityConfidence)) {
+        out.set(assetId, measured); // detached (โมดูลคืน frozen plain object)
+      }
+    }
+    return out.size ? out : null;
+  } catch {
+    return null; // พังทุกจุด → null เงียบ (detached · ไม่ HOLD เพิ่ม)
+  }
+}
+
 // Map a structural ref slot to a Cast editorial role (hero|reaction|context) — genuine per-slot eligibility (Fix #3).
 function _rhMappedCastRole(s) {
   const refRole = String(s?.refRole ?? '').trim().toLowerCase();
@@ -3364,14 +3401,25 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         deps: _deps,
       });
     } catch { _rhCropReadiness = null; }
+    // ★ B4 SHADOW: identityById "วัดจริงต่อ candidate" จาก candidateIdentityVerifier — detached · พังทุกจุด → null
+    //   (ไม่ HOLD เพิ่ม) · ยังไม่มี consumer (cast/hero ยัง hardcode identityVerified:false/absent) · resolver ไม่ถูกฉีด = null
+    let _rhIdentityById = null;
+    try {
+      _rhIdentityById = await _buildIdentityEvidenceV1({
+        factsById: _rhAuthority ? _rhAuthority.factsById : null,
+        caseId: _rhCaseIdReq,
+        deps: _deps,
+      });
+    } catch { _rhIdentityById = null; }
     const _rhAuthorityEvidence = {
       caseId: _rhCaseIdReq,
       factsById: _rhAuthority ? _rhAuthority.factsById : new Map(),
       searchedMeta: _rhSearchedEv.meta,
       metricsById: _rhMetricsById, // ★ B1 SHADOW — ยังไม่มี consumer อ่าน (cast/hero/global hardcode เดิม)
       cropReadiness: _rhCropReadiness, // ★ B3 SHADOW — cropSafe ต่อ slot วัดจริง · absent(null) ≠ false · ยังไม่มี consumer
+      identityById: _rhIdentityById, // ★ B4 SHADOW — identityConfidence/identityVerified ต่อ candidate · absent(null) ≠ verified · ยังไม่มี consumer
     };
-    console.log(`[MEGA S6] 🔐 V2 evidence bridge: authority=${_rhAuthority ? 'ok' : 'unavailable'} · facts ${_rhAuthorityEvidence.factsById.size} ใบ · searched(shadow∩universe) ${_rhAuthorityEvidence.searchedMeta.size} id · metrics(shadow) ${_rhMetricsById ? _rhMetricsById.size : 0} ใบ · cropReadiness(shadow) ${_rhCropReadiness && _rhCropReadiness.ok ? `ok/${_rhCropReadiness.summary?.cropCells ?? 0} cells` : (_rhCropReadiness ? 'rejected' : 'none')}`);
+    console.log(`[MEGA S6] 🔐 V2 evidence bridge: authority=${_rhAuthority ? 'ok' : 'unavailable'} · facts ${_rhAuthorityEvidence.factsById.size} ใบ · searched(shadow∩universe) ${_rhAuthorityEvidence.searchedMeta.size} id · metrics(shadow) ${_rhMetricsById ? _rhMetricsById.size : 0} ใบ · cropReadiness(shadow) ${_rhCropReadiness && _rhCropReadiness.ok ? `ok/${_rhCropReadiness.summary?.cropCells ?? 0} cells` : (_rhCropReadiness ? 'rejected' : 'none')} · identity(shadow) ${_rhIdentityById ? _rhIdentityById.size : 0} ใบ`);
     _refHeroV2Patch = semContract
       ? await _runRefHeroV2({ compass: job.dossier.compass, semContract, canonHeroId: _canonHeroId, semAuthorityHash: _semAuthorityHash, refDNA: _refDNA, refId: job.dossier.refMatch?.refId || job.dossier.refMatch?.dnaHash || null, gatedPool, authorityEvidence: _rhAuthorityEvidence, deps: _deps })
       : _rhHold('REF_HERO_V2_NO_STRUCTURAL_SLOTS');

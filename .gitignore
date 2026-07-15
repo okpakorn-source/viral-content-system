@@ -93,4 +93,5 @@ _removed-systems-backup-*/
 .next-*/
 data/job_queue.json
 data/face-cache.json
+data/identity-cache.json
 public/case-frames/
