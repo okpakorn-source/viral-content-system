@@ -2215,6 +2215,11 @@ async function _runRefHeroV2({ compass, semContract, canonHeroId, semAuthorityHa
     if (['buildSelectionAuthorityV1', 'validateSelectionAuthorityV1', 'buildSelectionSpecV2', 'validateSelectionSpecV2Activation'].some((fn) => typeof authApi?.[fn] !== 'function')) {
       return _rhHold('REF_HERO_V2_SELECTION_AUTHORITY_API_UNAVAILABLE');
     }
+    // ★ B1 SHADOW seam: candidate-metric authority DI (default = real module), symmetric with story/cast/hero/global.
+    //   NOT consumed this batch — _rhCastCandidate/_rhHeroCandidate/_rhGlobalCandidate ยังไม่อ่าน metrics (consume = แบตช์หลัง).
+    //   metricsById ถูกสร้างที่ evidence bridge แล้วส่งมาใน authorityEvidence · seam นี้เตรียมให้ consumer แบตช์หน้าเรียกผ่าน DI.
+    const metricAuthorityApi = deps?.metricAuthorityApi || await import('@/lib/candidateMetricAuthority');
+    void metricAuthorityApi;
 
     // ── Story authority (identity truth) — build + capture hash + external validate ──
     const storyBuilt = storyApi.buildStoryReferenceAuthorityContract({ story: _rhStoryInput(people) });
@@ -2627,6 +2632,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   let r;
   let _rhAuthority = null; // validated { imageIds, factsById } · null = สัญญาไม่ครบ (ไม่มี universe/ไม่มี facts)
   let _rhCaseIdReq = null; // requested caseId ที่ผูกกับ snapshot (ใช้ซ้ำตอนสร้าง evidence)
+  let _rhMetricsCarrier = null; // ★ B1 SHADOW: raw candidateMetrics snapshot จาก body (validate ที่ evidence bridge) · absent = null
   if (_refHeroV2On) {
     const _cidR = _rhOwnRead(im, 'caseId');
     _rhCaseIdReq = (_cidR.present && typeof _cidR.value === 'string' && _cidR.value.trim().length > 0) ? _cidR.value : null;
@@ -2666,6 +2672,8 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     }
     r = { success: true, images: _rowsSafe };
     _rhAuthority = _rhValidateAuthorityCarrier(_rhOwnRead(_b, 'candidateAuthority').value, _rowsSafe, _rhCaseIdReq);
+    // ★ B1 SHADOW: capture raw candidateMetrics carrier (descriptor-only) — validate/bind ที่ evidence bridge · absent = null (พฤติกรรมเดิมไม่เปลี่ยน)
+    _rhMetricsCarrier = _rhOwnRead(_b, 'candidateMetrics').value;
   } else {
     r = await _jf(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
   }
@@ -3228,12 +3236,34 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     //   descriptor-only) ผูก caseId ที่ validate แล้วทุก record · authority ไม่ผ่าน = universe ว่าง → searched
     //   ไม่มีทาง true · log เฉพาะตัวเลข (ไม่มี URL/query/id ดิบ)
     const _rhSearchedEv = _rhSearchedIds(im, _rhAuthority ? _rhAuthority.imageIds : new Set(), _rhCaseIdReq);
+    // ★ B1 SHADOW: สร้าง metricsById "ขนาน" กับ factsById — validate metrics carrier ผ่าน metric authority module +
+    //   same-snapshot binding (caseId ตรง requested + ทุก id ∈ universe ที่ validate แล้ว) · carrier ไม่มี/ไม่ valid = null
+    //   (ไม่ HOLD เพิ่ม ไม่เปลี่ยนพฤติกรรมเดิม) · production body ยังไม่มี candidateMetrics ⇒ null เสมอวันนี้
+    let _rhMetricsById = null;
+    try {
+      const _metricApi = _deps?.metricAuthorityApi || await import('@/lib/candidateMetricAuthority');
+      if (_rhMetricsCarrier != null && _rhAuthority && typeof _metricApi?.validateCandidateMetricsSnapshotV1 === 'function') {
+        const _mSnap = _metricApi.validateCandidateMetricsSnapshotV1(_rhMetricsCarrier);
+        if (_mSnap && _mSnap.ok === true && _mSnap.metricsById instanceof Map
+          && typeof _mSnap.caseId === 'string' && _mSnap.caseId === _rhCaseIdReq) {
+          const _uni = _rhAuthority.imageIds;
+          const _mm = new Map();
+          let _bindOk = true;
+          for (const [id, m] of _mSnap.metricsById) {
+            if (!(_uni instanceof Set) || !_uni.has(id)) { _bindOk = false; break; } // same-snapshot binding เป๊ะ
+            _mm.set(id, m);
+          }
+          if (_bindOk && _mm.size) _rhMetricsById = _mm;
+        }
+      }
+    } catch { _rhMetricsById = null; }
     const _rhAuthorityEvidence = {
       caseId: _rhCaseIdReq,
       factsById: _rhAuthority ? _rhAuthority.factsById : new Map(),
       searchedMeta: _rhSearchedEv.meta,
+      metricsById: _rhMetricsById, // ★ B1 SHADOW — ยังไม่มี consumer อ่าน (cast/hero/global hardcode เดิม)
     };
-    console.log(`[MEGA S6] 🔐 V2 evidence bridge: authority=${_rhAuthority ? 'ok' : 'unavailable'} · facts ${_rhAuthorityEvidence.factsById.size} ใบ · searched(shadow∩universe) ${_rhAuthorityEvidence.searchedMeta.size} id`);
+    console.log(`[MEGA S6] 🔐 V2 evidence bridge: authority=${_rhAuthority ? 'ok' : 'unavailable'} · facts ${_rhAuthorityEvidence.factsById.size} ใบ · searched(shadow∩universe) ${_rhAuthorityEvidence.searchedMeta.size} id · metrics(shadow) ${_rhMetricsById ? _rhMetricsById.size : 0} ใบ`);
     _refHeroV2Patch = semContract
       ? await _runRefHeroV2({ compass: job.dossier.compass, semContract, canonHeroId: _canonHeroId, semAuthorityHash: _semAuthorityHash, refDNA: _refDNA, refId: job.dossier.refMatch?.refId || job.dossier.refMatch?.dnaHash || null, gatedPool, authorityEvidence: _rhAuthorityEvidence, deps: _deps })
       : _rhHold('REF_HERO_V2_NO_STRUCTURAL_SLOTS');
