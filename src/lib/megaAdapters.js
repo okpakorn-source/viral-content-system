@@ -1928,11 +1928,126 @@ async function _runRefHeroV2({ compass, semContract, canonHeroId, semAuthorityHa
     if (!(verified.people || []).some((p) => p.personId === heroPersonId)) return _rhHold('REF_HERO_V2_HERO_NOT_IN_MANIFEST');
     const slotCastRole = new Map(cSlots.map((s) => [s.id, _rhMappedCastRole(s)])); // per-slot cast role (Fix #3)
 
+    // ── ★ AC-0107 P1-B: ONE authoritative DI-aware realized snapshot, built HERE (before crop eligibility) from
+    //   AUTHENTIC IMMUTABLE PROVENANCE and used for BOTH the crop-eligibility gate below AND the signed/hashed
+    //   selectionSpec. There is NO second/heuristic snapshot: the exact composerBySlotId + _authSlots geometry the crop
+    //   gate assesses is the geometry that is validated, hashed and signed. Authority = a module-private WeakMap in
+    //   refTemplate keyed by realized-slot OBJECT IDENTITY, storing a FROZEN content snapshot (sourceIndex+id+geometry+
+    //   shape) captured after all mutations. Defense is layered, all fail-closed: (a) locked non-enum data _sourceIndex
+    //   descriptor (accessor rejected WITHOUT invocation, TOCTOU-safe); (b) WeakMap identity authenticity — a restamp/
+    //   swap/strip is a NEW object ⇒ null ⇒ HOLD; (c) AUTHENTIC-CONTENT INTEGRITY — descriptor-snapshot the current
+    //   render fields once and compare to the frozen provenance; a post-return id/geometry/shape mutation on the
+    //   authentic object ⇒ HOLD (never blessed as GO). The producer then reads every render field ONLY from the
+    //   immutable snapshot. Join BY sourceIndex ONLY (order-invariant); require exact unique 1:1 vs the contract;
+    //   shape is a post-join integrity check, never a join key. ──
+    let realizedRaw; let realizedSlotProvenance;
+    try {
+      const _rtMod = await import('@/lib/refTemplate');
+      realizedSlotProvenance = _rtMod.realizedSlotProvenance;
+      const dts = deps?.dnaToTemplateSpec || _rtMod.dnaToTemplateSpec;
+      realizedRaw = dts(refDNA);
+    } catch { return _rhHold('REF_HERO_V2_REALIZED_BUILD_ERROR'); }
+    if (typeof realizedSlotProvenance !== 'function') return _rhHold('REF_HERO_V2_PROVENANCE_ACCESSOR_UNAVAILABLE');
+    if (realizedRaw === null || typeof realizedRaw !== 'object') return _rhHold('REF_HERO_V2_REALIZED_INVALID');
+    const _slotsDesc = Object.getOwnPropertyDescriptor(realizedRaw, 'slots');
+    if (_slotsDesc && ('get' in _slotsDesc || 'set' in _slotsDesc)) return _rhHold('REF_HERO_V2_REALIZED_CONTAINER_ACCESSOR');
+    const _rawSlots = _slotsDesc && Array.isArray(_slotsDesc.value) ? _slotsDesc.value : null;
+    if (!_rawSlots || _rawSlots.length !== cSlots.length) return _rhHold('REF_HERO_V2_REALIZED_SLOT_COUNT');
+    const _topVal = (k) => { const d = Object.getOwnPropertyDescriptor(realizedRaw, k); if (!d) return undefined; if ('get' in d || 'set' in d) throw new Error('accessor'); return d.value; };
+    let _templateId, _canvasW, _canvasH, _feather;
+    try { _templateId = _rhNonBlank(_topVal('templateId')) || _rhNonBlank(_topVal('id')); _canvasW = _rhFiniteInt(_topVal('canvasW')); _canvasH = _rhFiniteInt(_topVal('canvasH')); _feather = _rhFiniteInt(_topVal('feather')); }
+    catch { return _rhHold('REF_HERO_V2_REALIZED_FIELD_ACCESSOR'); }
+    if (!_templateId || _canvasW === null || _canvasW < 1 || _canvasH === null || _canvasH < 1 || _feather === null || _feather < 0) return _rhHold('REF_HERO_V2_REALIZED_INVALID');
+    const _contractSrc = cSlots.map((s) => s.sourceIndex);
+    if (_contractSrc.some((n) => !Number.isInteger(n) || n < 0) || new Set(_contractSrc).size !== _contractSrc.length) return _rhHold('REF_HERO_V2_CONTRACT_PROVENANCE_INVALID');
+    const _contractSrcSet = new Set(_contractSrc);
+    const _realizedBySrc = new Map();       // sourceIndex -> { id, shape }  (join)
+    const _authSlots = [];                  // normalized V2 realized slots, from FROZEN snapshots (never live fields)
+    for (const rs of _rawSlots) {
+      if (rs === null || typeof rs !== 'object') return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_MISSING');
+      const _d = Object.getOwnPropertyDescriptor(rs, '_sourceIndex');
+      if (!_d) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_MISSING');
+      if ('get' in _d || 'set' in _d || _d.enumerable !== false || _d.writable !== false || _d.configurable !== false || !Number.isInteger(_d.value) || _d.value < 0) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_DESCRIPTOR_INVALID');
+      const auth = realizedSlotProvenance(rs);
+      if (!auth || !Number.isInteger(auth.sourceIndex) || auth.sourceIndex < 0 || auth.sourceIndex !== _d.value) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_UNAUTHENTIC');
+      const _si = auth.sourceIndex;
+      if (!_contractSrcSet.has(_si)) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_OUT_OF_SET');
+      if (_realizedBySrc.has(_si)) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_DUPLICATE');
+      let _cur;
+      try {
+        _cur = {};
+        for (const k of ['id', 'x', 'y', 'w', 'h', 'zIndex', 'border', 'borderWidth', 'shape']) {
+          const _fd = Object.getOwnPropertyDescriptor(rs, k);
+          if (_fd && ('get' in _fd || 'set' in _fd)) throw new Error('accessor');
+          _cur[k] = _fd ? _fd.value : undefined;
+        }
+      } catch { return _rhHold('REF_HERO_V2_REALIZED_CONTENT_ACCESSOR'); }
+      const _curShape = _cur.shape === 'circle' ? 'circle' : 'rect';
+      if (_cur.id !== auth.id || _cur.x !== auth.x || _cur.y !== auth.y || _cur.w !== auth.w || _cur.h !== auth.h ||
+          _cur.zIndex !== auth.zIndex || _cur.border !== auth.border || _cur.borderWidth !== auth.borderWidth ||
+          _curShape !== auth.shape) return _rhHold('REF_HERO_V2_REALIZED_CONTENT_TAMPERED');
+      const _rid = _rhNonBlank(auth.id);
+      const _rShape = auth.shape === 'circle' ? 'circle' : auth.shape === 'rounded' ? 'rounded' : 'rect';
+      const _x = _rhFiniteInt(auth.x), _y = _rhFiniteInt(auth.y), _w = _rhFiniteInt(auth.w), _h = _rhFiniteInt(auth.h);
+      const _z = _rhFiniteInt(auth.zIndex), _bw = _rhFiniteInt(auth.borderWidth);
+      if (!_rid || _x === null || _x < 0 || _y === null || _y < 0 || _w === null || _w < 1 || _h === null || _h < 1 || _z === null || _z < 0 || _bw === null || _bw < 0) return _rhHold('REF_HERO_V2_REALIZED_INVALID');
+      _realizedBySrc.set(_si, { id: _rid, shape: _rShape });
+      _authSlots.push({ id: _rid, x: _x, y: _y, w: _w, h: _h, zIndex: _z, border: auth.border != null && auth.border !== false, borderWidth: _bw, shape: _rShape });
+    }
+    if (_realizedBySrc.size !== cSlots.length) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_INCOMPLETE'); // exact 1:1
+    if (new Set(_authSlots.map((s) => s.id)).size !== _authSlots.length) return _rhHold('REF_HERO_V2_REALIZED_ID_DUPLICATE');
+    const composerBySlotId = new Map();
+    for (const s of cSlots) {
+      const r = _realizedBySrc.get(s.sourceIndex);
+      if (!r) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_INCOMPLETE');
+      if (r.shape !== _rhSaShape(s.shape)) return _rhHold('REF_HERO_V2_REALIZED_SHAPE_INCONSISTENT');
+      composerBySlotId.set(s.id, r.id);
+    }
+    const realizedTemplate = { templateId: _templateId, canvasW: _canvasW, canvasH: _canvasH, feather: _feather, slots: _authSlots };
+
+    // ★ AC-0107 P1 (STRICT V2 PRE-CARRIER crop-safe HERO ELIGIBILITY — additive, fail-closed, a NECESSARY FILTER not the
+    //   safety proof). A hero-person asset is hero-eligible ONLY if its FACE-AWARE crop for the CANONICAL SIGNED hero
+    //   slot is ≤1.2× (else the renderer over-stretches it — the AC-0107 incident: hero 2.69× → hard QC after compose).
+    //   The hero-slot geometry is the EXACT SIGNED slot: composerBySlotId.get(heroSlotId) → _authSlots (the same map +
+    //   snapshot signed below), never an id-name/largest-area heuristic and never a second dnaToTemplateSpec call. The
+    //   estimator (heroCropGeometry) runs on the candidate's GENUINE normalized raw faceBox + that slot's W/H + real
+    //   source dims; missing helper/geometry/faceBox/dims OR a renderer SHRINK-transform risk (watermark/caption dodge;
+    //   clean!==true) ⇒ NOT crop-safe (fail-closed). Crop-UNSAFE hero candidates get NO hero eligibility ⇒ the solver
+    //   signs a crop-SAFE hero; NONE safe ⇒ REF_HERO_V2_HERO_NO_APPROVED_CANDIDATE. The AUTHORITATIVE ≤1.2× proof is the
+    //   runtime-bound check in composeAndVerify; the COMPLETE signed hero identity+geometry is PINNED after the spec is
+    //   built (REF_HERO_V2_HERO_GEOMETRY_DRIFT).
+    const _heroComposerId = _rhNonBlank(composerBySlotId.get(heroSlotId));
+    const _heroSlotBound = _heroComposerId ? (_authSlots.find((s) => s.id === _heroComposerId) || null) : null;
+    if (!_heroSlotBound) return _rhHold('REF_HERO_V2_HERO_SLOT_UNMAPPED');
+    const _heroSlotWpx = _rhFiniteInt(_heroSlotBound.w);
+    const _heroSlotHpx = _rhFiniteInt(_heroSlotBound.h);
+    let _heroCropUp = null;
+    try { const _hg = await import('@/lib/heroCropGeometry'); _heroCropUp = _hg.heroCropUpscale; } catch { _heroCropUp = null; }
+    const _rhNormFace = (fb) => {
+      if (!fb || typeof fb !== 'object') return null;
+      let x1; let y1; let x2; let y2;
+      if ([fb.x1, fb.y1, fb.x2, fb.y2].every((v) => typeof v === 'number' && Number.isFinite(v))) { x1 = fb.x1; y1 = fb.y1; x2 = fb.x2; y2 = fb.y2; }
+      else { const x = Number(fb.x); const y = Number(fb.y); const w = Number(fb.w ?? fb.width); const h = Number(fb.h ?? fb.height); if (![x, y, w, h].every((v) => Number.isFinite(v))) return null; x1 = x; y1 = y; x2 = x + w; y2 = y + h; }
+      if (!(x2 > x1 && y2 > y1 && x1 >= 0 && y1 >= 0 && x2 <= 1.0001 && y2 <= 1.0001)) return null;
+      return { x1, y1, x2: Math.min(1, x2), y2: Math.min(1, y2) };
+    };
+    const _rhHeroCropSafe = (rec) => {
+      if (typeof _heroCropUp !== 'function' || !(_heroSlotWpx > 0 && _heroSlotHpx > 0)) return false; // helper/geometry missing ⇒ fail-closed
+      const t = rec?.triage || {};
+      const face = _rhNormFace(t.faceBox);
+      const rw = _rhFiniteNum(rec?.realWidth); const rh = _rhFiniteNum(rec?.realHeight);
+      if (!face || !(rw > 0) || !(rh > 0)) return false; // no genuine raw faceBox / real dims ⇒ fail-closed (never fabricate)
+      const shrinkRisk = t.clean !== true || t.watermark === true || t.largeText === true || t.hasText === true; // dodge SHRINK risk
+      const up = _heroCropUp({ faceBox: face, imgW: rw, imgH: rh, slotW: _heroSlotWpx, slotH: _heroSlotHpx, hasShrinkTransformRisk: shrinkRisk });
+      return typeof up === 'number' && up <= 1.2 + 1e-9; // imageQualityConfig HERO_STRETCH_MAX
+    };
+
     // ── Hero contracts: ONLY over eligible hero-person assets — build (asset-bound) + evaluate genuine evidence ──
     const heroContractHashByCid = new Map();
     for (const t of eligibleTuples) {
       if (t.personId !== heroPersonId) continue;
       const rec = recById.get(t.sourceAssetId);
+      if (!_rhHeroCropSafe(rec)) continue; // ★ AC-0107: crop-unsafe hero candidate ⇒ not eligible as hero (solver signs a safe one)
       const contract = heroApi.buildHeroShotContract({ sourceAssetId: t.sourceAssetId, heroSlotId, story: { personId: heroPersonId } });
       const contractHash = _rhNonBlank(contract?.contractHash);
       if (!contract || !contractHash) continue;
@@ -2050,97 +2165,9 @@ async function _runRefHeroV2({ compass, semContract, canonHeroId, semAuthorityHa
     catch { return _rhHold('REF_HERO_V2_SELECTION_AUTHORITY_VALIDATE_ERROR'); }
     if (!(validated && validated.ok === true)) return _rhHold('REF_HERO_V2_SELECTION_AUTHORITY_VALIDATE_FAILED');
 
-    // ── realized template + composer map from AUTHENTIC IMMUTABLE PROVENANCE. Authority = a module-private WeakMap in
-    //   refTemplate keyed by realized-slot OBJECT IDENTITY, storing a FROZEN content snapshot (sourceIndex+id+geometry+
-    //   shape) captured after all mutations. Defense is layered, all fail-closed: (a) locked non-enum data _sourceIndex
-    //   descriptor (accessor rejected WITHOUT invocation, TOCTOU-safe); (b) WeakMap identity authenticity — a restamp/
-    //   swap/strip is a NEW object ⇒ null ⇒ HOLD; (c) AUTHENTIC-CONTENT INTEGRITY — descriptor-snapshot the current
-    //   render fields once and compare to the frozen provenance; a post-return id/geometry/shape mutation on the
-    //   authentic object ⇒ HOLD (never blessed as GO). The producer then reads every render field ONLY from the
-    //   immutable snapshot. Join BY sourceIndex ONLY (order-invariant); require exact unique 1:1 vs the contract;
-    //   shape is a post-join integrity check, never a join key. ──
-    let realizedRaw; let realizedSlotProvenance;
-    try {
-      const _rtMod = await import('@/lib/refTemplate');
-      realizedSlotProvenance = _rtMod.realizedSlotProvenance;
-      const dts = deps?.dnaToTemplateSpec || _rtMod.dnaToTemplateSpec;
-      realizedRaw = dts(refDNA);
-    } catch { return _rhHold('REF_HERO_V2_REALIZED_BUILD_ERROR'); }
-    if (typeof realizedSlotProvenance !== 'function') return _rhHold('REF_HERO_V2_PROVENANCE_ACCESSOR_UNAVAILABLE');
-    if (realizedRaw === null || typeof realizedRaw !== 'object') return _rhHold('REF_HERO_V2_REALIZED_INVALID');
-    // (item 2) descriptor-read the realized `slots` CONTAINER exactly ONCE — a getter/accessor is rejected WITHOUT
-    //   invocation; the captured array reference is then the SOLE source we iterate (TOCTOU-safe: a post-capture swap
-    //   of realizedRaw.slots, or a getter returning alternating arrays, can never influence what we read).
-    const _slotsDesc = Object.getOwnPropertyDescriptor(realizedRaw, 'slots');
-    if (_slotsDesc && ('get' in _slotsDesc || 'set' in _slotsDesc)) return _rhHold('REF_HERO_V2_REALIZED_CONTAINER_ACCESSOR');
-    const _rawSlots = _slotsDesc && Array.isArray(_slotsDesc.value) ? _slotsDesc.value : null;
-    if (!_rawSlots || _rawSlots.length !== cSlots.length) return _rhHold('REF_HERO_V2_REALIZED_SLOT_COUNT');
-    // top-level realized fields — descriptor-first single read (reject accessors); NOT identity-bound so re-checked below.
-    const _topVal = (k) => { const d = Object.getOwnPropertyDescriptor(realizedRaw, k); if (!d) return undefined; if ('get' in d || 'set' in d) throw new Error('accessor'); return d.value; };
-    let _templateId, _canvasW, _canvasH, _feather;
-    try { _templateId = _rhNonBlank(_topVal('templateId')) || _rhNonBlank(_topVal('id')); _canvasW = _rhFiniteInt(_topVal('canvasW')); _canvasH = _rhFiniteInt(_topVal('canvasH')); _feather = _rhFiniteInt(_topVal('feather')); }
-    catch { return _rhHold('REF_HERO_V2_REALIZED_FIELD_ACCESSOR'); }
-    if (!_templateId || _canvasW === null || _canvasW < 1 || _canvasH === null || _canvasH < 1 || _feather === null || _feather < 0) return _rhHold('REF_HERO_V2_REALIZED_INVALID');
-    // contract provenance key set — bounded, unique, integer (from the structural contract, dna.template.slots order)
-    const _contractSrc = cSlots.map((s) => s.sourceIndex);
-    if (_contractSrc.some((n) => !Number.isInteger(n) || n < 0) || new Set(_contractSrc).size !== _contractSrc.length) return _rhHold('REF_HERO_V2_CONTRACT_PROVENANCE_INVALID');
-    const _contractSrcSet = new Set(_contractSrc);
-    const _realizedBySrc = new Map();       // sourceIndex -> { id, shape }  (join)
-    const _authSlots = [];                  // normalized V2 realized slots, from FROZEN snapshots (never live fields)
-    for (const rs of _rawSlots) {
-      if (rs === null || typeof rs !== 'object') return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_MISSING');
-      // (1) DESCRIPTOR DEFENSE (TOCTOU-safe): locked non-enum DATA _sourceIndex — accessor rejected WITHOUT invocation.
-      const _d = Object.getOwnPropertyDescriptor(rs, '_sourceIndex');
-      if (!_d) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_MISSING');
-      if ('get' in _d || 'set' in _d || _d.enumerable !== false || _d.writable !== false || _d.configurable !== false || !Number.isInteger(_d.value) || _d.value < 0) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_DESCRIPTOR_INVALID');
-      // (2) AUTHENTICITY: the FROZEN content snapshot bound to THIS object identity (a clone/restamp ⇒ null ⇒ HOLD).
-      const auth = realizedSlotProvenance(rs);
-      if (!auth || !Number.isInteger(auth.sourceIndex) || auth.sourceIndex < 0 || auth.sourceIndex !== _d.value) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_UNAUTHENTIC');
-      const _si = auth.sourceIndex;
-      if (!_contractSrcSet.has(_si)) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_OUT_OF_SET');
-      if (_realizedBySrc.has(_si)) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_DUPLICATE');
-      // (2b) AUTHENTIC-CONTENT INTEGRITY (item 1): this slot is WeakMap-authentic, but a caller may have mutated its
-      //   live id/geometry/shape AFTER capture (same identity ⇒ still authentic). Descriptor-snapshot EVERY current
-      //   authoritative render field exactly once — a getter/accessor on ANY field is rejected WITHOUT invocation —
-      //   then compare the CURRENT content field-by-field to the FROZEN provenance. ANY divergence = post-capture
-      //   tampering ⇒ HOLD. We NEVER bless attempted mutation by silently rendering the stale snapshot. (A reorder of
-      //   the ORIGINAL objects leaves content === provenance ⇒ still GO; the join below is order-invariant.)
-      let _cur;
-      try {
-        _cur = {};
-        for (const k of ['id', 'x', 'y', 'w', 'h', 'zIndex', 'border', 'borderWidth', 'shape']) {
-          const _fd = Object.getOwnPropertyDescriptor(rs, k);
-          if (_fd && ('get' in _fd || 'set' in _fd)) throw new Error('accessor');
-          _cur[k] = _fd ? _fd.value : undefined;
-        }
-      } catch { return _rhHold('REF_HERO_V2_REALIZED_CONTENT_ACCESSOR'); }
-      const _curShape = _cur.shape === 'circle' ? 'circle' : 'rect';
-      if (_cur.id !== auth.id || _cur.x !== auth.x || _cur.y !== auth.y || _cur.w !== auth.w || _cur.h !== auth.h ||
-          _cur.zIndex !== auth.zIndex || _cur.border !== auth.border || _cur.borderWidth !== auth.borderWidth ||
-          _curShape !== auth.shape) return _rhHold('REF_HERO_V2_REALIZED_CONTENT_TAMPERED');
-      // (3) build the normalized V2 realized slot from the IMMUTABLE snapshot ONLY (authentic id/geometry/shape).
-      const _rid = _rhNonBlank(auth.id);
-      const _rShape = auth.shape === 'circle' ? 'circle' : auth.shape === 'rounded' ? 'rounded' : 'rect';
-      const _x = _rhFiniteInt(auth.x), _y = _rhFiniteInt(auth.y), _w = _rhFiniteInt(auth.w), _h = _rhFiniteInt(auth.h);
-      const _z = _rhFiniteInt(auth.zIndex), _bw = _rhFiniteInt(auth.borderWidth);
-      if (!_rid || _x === null || _x < 0 || _y === null || _y < 0 || _w === null || _w < 1 || _h === null || _h < 1 || _z === null || _z < 0 || _bw === null || _bw < 0) return _rhHold('REF_HERO_V2_REALIZED_INVALID');
-      _realizedBySrc.set(_si, { id: _rid, shape: _rShape });
-      _authSlots.push({ id: _rid, x: _x, y: _y, w: _w, h: _h, zIndex: _z, border: auth.border != null && auth.border !== false, borderWidth: _bw, shape: _rShape });
-    }
-    if (_realizedBySrc.size !== cSlots.length) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_INCOMPLETE'); // exact 1:1
-    if (new Set(_authSlots.map((s) => s.id)).size !== _authSlots.length) return _rhHold('REF_HERO_V2_REALIZED_ID_DUPLICATE');
-    // JOIN BY KEY ONLY (sourceIndex); shape is a post-join integrity check (rect↔circle provenance corruption ⇒ HOLD).
-    const composerBySlotId = new Map();
-    for (const s of cSlots) {
-      const r = _realizedBySrc.get(s.sourceIndex);
-      if (!r) return _rhHold('REF_HERO_V2_REALIZED_PROVENANCE_INCOMPLETE');
-      if (r.shape !== _rhSaShape(s.shape)) return _rhHold('REF_HERO_V2_REALIZED_SHAPE_INCONSISTENT');
-      composerBySlotId.set(s.id, r.id);
-    }
-    // EXACT V2 realizedTemplate schema, assembled ONLY from the authentic frozen snapshots (no live-field/getter reads)
-    const realizedTemplate = { templateId: _templateId, canvasW: _canvasW, canvasH: _canvasH, feather: _feather, slots: _authSlots };
-
     // ── render bindings — EXACT V2 schema {refSlotId,composerSlotId,candidateId,sourceAssetId,imageUrl}; authority-bound.
+    //   (realizedTemplate + composerBySlotId + _authSlots were built ONCE earlier — the single authoritative snapshot the
+    //   crop-eligibility gate assessed; the COMPLETE signed hero identity+geometry is pinned after the spec is built.)
     //   imageUrl lives ONLY here (never in the pre-S6 selectionAuthority). candidate/sourceAsset come straight from the
     //   authority slot (no substitution); composerSlotId is the validated realized id; unique composerId + url (Fix #4). ──
     const urlByCid = new Map();
@@ -2175,6 +2202,22 @@ async function _runRefHeroV2({ compass, semContract, canonHeroId, semAuthorityHa
     catch { return _rhHold('REF_HERO_V2_SELECTION_SPEC_VALIDATE_ERROR'); }
     const selectionSpec = specVal && specVal.ok === true && specVal.selectionSpec ? specVal.selectionSpec : null; // canonical validated spec
     if (!selectionSpec) return _rhHold('REF_HERO_V2_SELECTION_SPEC_VALIDATE_FAILED');
+
+    // ★ AC-0107 P1-B: COMPLETE hero-slot identity+geometry PIN against the SIGNED, HASH-VALIDATED spec. The exact
+    //   realized hero slot the crop gate assessed (_heroSlotBound, from the single authoritative snapshot) MUST be the
+    //   slot the spec signs for the hero refSlot: same composerSlotId (identity) AND x/y/w/h (geometry) — not merely W/H.
+    //   With one snapshot this holds by construction; the pin is the fail-closed guard that the geometry ASSESSED for
+    //   crop-safety is the geometry SIGNED/hashed (never assess A then sign B). Any divergence ⇒ HOLD.
+    {
+      const _hRow = selectionSpec.slots.find((s) => s.refSlotId === selectionSpec.hero?.heroSlotId) || null;
+      const _r = _hRow && _hRow.render ? _hRow.render : null;
+      if (!_hRow || !_r
+        || _hRow.composerSlotId !== _heroSlotBound.id
+        || _rhFiniteInt(_r.x) !== _heroSlotBound.x || _rhFiniteInt(_r.y) !== _heroSlotBound.y
+        || _rhFiniteInt(_r.w) !== _heroSlotBound.w || _rhFiniteInt(_r.h) !== _heroSlotBound.h) {
+        return _rhHold('REF_HERO_V2_HERO_GEOMETRY_DRIFT');
+      }
+    }
 
     // ── persist FROZEN authority + expected hash + exact render bindings + strict render spec + trusted pins
     //   + realized template (zero later mutation). S7 consumes this spec under the default-OFF strict-render latch. ──
@@ -3106,10 +3149,17 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           || _sl.filter((s) => s.shape !== 'circle').sort((a, b) => (b.w * b.h) - (a.w * a.h))[0] || null;
       }
     } catch { _rrHeroGeo = null; }
-    // crop feasibility — LOCAL MIRROR ของ crop-readiness math (mirror imageQualityConfig/_slotUpEst constants locally):
-    //   ★ invariant test บังคับให้โมดูล F/E (crop-readiness/search-quality) อยู่นอก runtime wiring ของไฟล์นี้ →
-    //   จึงคำนวณเองในไฟล์: cover-fit upscale + hero short-side floor + positional faceBox containment (RECT).
-    //   SAFE เท่านั้น = ครอปช่อง hero ได้จริง · หลักฐานหาย/ล้ม = false (insufficient).
+    // ★ AC-0107: hero crop-safety reads the pure heroCropGeometry helper. ONLY the hero CONSTANTS are shared with the
+    //   renderer (coverExecutorService imports them from here); the region math is NOT shared — the renderer has its own
+    //   faceRegionForSlot and this helper only REPLICATES it as a conservative estimator, so this is a readiness FILTER,
+    //   never the authoritative proof (that is the runtime-bound crop check in composeAndVerify, measured on the actual
+    //   render). (heroCropGeometry is a fresh pure geometry module, NOT one of the F/E modules the static invariant
+    //   forbids from runtime wiring here.) The estimate is a SOUND conservative upper bound on the executor's hero
+    //   upscale (replicates every size-shrinking step, omits only the size-enlarging re-centre).
+    let _heroCropUpscale = null;
+    try { _heroCropUpscale = (await import('@/lib/heroCropGeometry')).heroCropUpscale; } catch { _heroCropUpscale = null; }
+    // crop feasibility: cover-fit upscale (lower bound) + hero short-side floor + face-aware upscale (shared helper) +
+    //   positional faceBox containment (RECT). SAFE เท่านั้น = ครอปช่อง hero ได้จริง · หลักฐาน/helper หาย = false (insufficient).
     const _HERO_STRETCH_MAX = 1.2; // imageQualityConfig HERO_STRETCH_MAX (hero crop > 1.2× = แตก)
     const _rrCropSafeHero = (rec, geo, face) => {
       try {
@@ -3121,6 +3171,19 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         if (up > _HERO_STRETCH_MAX + 1e-9) return false;              // ยืดเกิน 1.2× = insufficient
         if (Math.min(rw, rh) < HERO_MIN_SHORT_SIDE) return false;     // hero short-side floor (measured จริงเท่านั้น)
         const slotAspect = sw / sh; const srcAspect = rw / rh;        // positional containment (cover-fit centre gravity)
+        // ★ AC-0107 FIX (root cause): cover-fit `up` above is only a LOWER bound on the REAL upscale — the executor
+        //   crops the hero FACE-AWARE (prominence), so the surviving region is far smaller than the whole image and the
+        //   true upscale is higher (a large image passes cover-fit yet a small/centred face needs e.g. 2.69× → hard QC
+        //   after a full compose). Use the heroCropGeometry helper (the renderer's hero CONSTANTS come from the same
+        //   module; the region math is a replicated estimator, not shared execution): a SOUND conservative upper bound on
+        //   the executor's hero upscale. Helper missing or upscale > 1.2× or unknown ⇒ insufficient (fail-closed).
+        if (typeof _heroCropUpscale !== 'function') return false;
+        // fail-closed for renderer SHRINK transforms the geometry estimator does NOT model (watermark/caption dodge +
+        //   Final-Cropper): any watermark/large-text/caption ⇒ the executor shrinks the crop ⇒ higher true upscale.
+        const _t = rec?.triage || {};
+        const _shrinkRisk = _t.clean !== true || _t.watermark === true || _t.largeText === true || _t.hasText === true;
+        const _faceUp = _heroCropUpscale({ faceBox: face, imgW: rw, imgH: rh, slotW: sw, slotH: sh, hasShrinkTransformRisk: _shrinkRisk });
+        if (!(typeof _faceUp === 'number' && _faceUp <= _HERO_STRETCH_MAX + 1e-9)) return false;
         let cropW; let cropH;
         if (slotAspect >= srcAspect) { cropW = 1; cropH = srcAspect / slotAspect; }
         else { cropH = 1; cropW = slotAspect / srcAspect; }
@@ -3130,16 +3193,49 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         return mx1 >= 0 && my1 >= 0 && mx2 <= 1 && my2 <= 1 && mx2 > mx1 && my2 > my1; // RECT: box ต้องอยู่ในหน้าต่างเต็ม
       } catch { return false; }
     };
-    // ── hero readiness (ทุกสัญญาณต้องเป็นบวกที่รู้จริง — AND) ──
+    // ── hero readiness predicate over ANY candidate record (evidence + big face + identity + crop-safe) — AND ──
+    const _isHeroReadyRec = (rec) => !!rec
+      && _rrKnownHeroEvidence(rec)
+      && _rrBigFace(_rrFaceBox(rec))
+      && _rrPersons(rec).length > 0
+      && _identityOk(_canonHeroId, rec)
+      && (semContract ? true : heroNames.length > 0)
+      && _rrCropSafeHero(rec, _rrHeroGeo, _rrFaceBox(rec));
+    // ★ AC-0107 P1-1: PRE-CARRIER deterministic SAFE-HERO RESELECTION. When the director's hero pick is not crop-safe/
+    //   ready, swap in the BEST (ranked) fully-ready + crop-SAFE SAME-IDENTITY candidate from the pool BEFORE any HOLD/
+    //   queue — so an available safe hero is never passed over for an unsafe one (the user's core complaint). Gated to
+    //   NO V2 carrier (_refHeroV2Patch===null) to preserve RefHeroV2 invariants; the semantic authority hash binds the
+    //   contract STRUCTURE + refId only (not the candidate), so a same-slot same-identity swap stays coherent. `sorted`
+    //   is a deterministic total order ⇒ the pick is stable. No safe eligible hero ⇒ the typed HOLD below stays correct.
+    {
+      const _hp0 = slots[_canonHeroId];
+      const _hr0 = _hp0 ? byId.get(String(_hp0.id)) : null;
+      if (!_refHeroV2Patch && _hp0 && !_isHeroReadyRec(_hr0)) {
+        const _otherIds = new Set(activeSlots.filter((s) => s !== _canonHeroId).map((s) => slots[s] && String(slots[s].id)).filter(Boolean));
+        const _hperson = String(_hr0?.triage?.person || _hp0.person || '');
+        const _alt = sorted.find((x) => x && String(x.id) !== String(_hp0.id) && !_otherIds.has(String(x.id))
+          && (!_hperson || _rrPersons(x).some((p) => String(p) === _hperson))
+          && _isHeroReadyRec(x));
+        if (_alt) {
+          slots[_canonHeroId] = {
+            id: _alt.id, imageUrl: _alt.imageUrl,
+            person: _alt.triage?.person || null, category: _alt.triage?.category || null, emotion: _alt.triage?.emotion || null,
+            clean: isClean(_alt), newsScene: _alt.triage?.newsScene !== false, faces: Number(_alt.triage?.faceCount) || 0,
+            dirtyFallback: dirtyFallbackIds.has(String(_alt.id)),
+            ...(semContract ? { refSlotId: _canonHeroId, legacySlot: _hp0.legacySlot ?? _projMap.get(_canonHeroId) ?? null } : {}),
+            reason: `AC-0107 crop-safe hero reselection (แทน ${_hp0.id} ที่ครอปช่อง hero >1.2×)`,
+            ...(STORY_SEL_ON ? { storyFit: storyFitOf(_alt) } : {}),
+            backups: Array.isArray(_hp0.backups) ? _hp0.backups : [],
+          };
+          used.add(String(_alt.id));
+          console.log(`[MEGA S6] 🛟 AC-0107: hero ${_hp0.id} ครอปช่อง hero ไม่ปลอดภัย → สลับเป็น ${_alt.id} (crop-safe คนเดียวกัน อันดับดีสุด) ก่อน queue`);
+        }
+      }
+    }
+    // ── hero readiness (recomputed AFTER any reselection) ──
     const _heroPick = slots[_canonHeroId];
     const _heroRec = _heroPick ? byId.get(String(_heroPick.id)) : null;
-    const _heroFace = _heroRec ? _rrFaceBox(_heroRec) : null;
-    const _heroIdOk = !!_heroRec && _rrPersons(_heroRec).length > 0 && _identityOk(_canonHeroId, _heroRec) && (semContract ? true : heroNames.length > 0);
-    const _heroReady = !!_heroRec
-      && _rrKnownHeroEvidence(_heroRec)
-      && _rrBigFace(_heroFace)
-      && _heroIdOk
-      && _rrCropSafeHero(_heroRec, _rrHeroGeo, _heroFace);
+    const _heroReady = _isHeroReadyRec(_heroRec);
     if (!_heroReady) {
       console.log('[MEGA S6] 🔒 role-readiness HOLD: INSUFFICIENT_HERO_GRADE (hero ไม่ผ่านหลักฐานพร้อมจริง — เกรด/หน้าเด่น/ตัวตน/ครอป)');
       return { status: 'failed', nextAction: 'fail', reason: 'INSUFFICIENT_HERO_GRADE', quality: 'red', summary: '🔒 role-readiness: INSUFFICIENT_HERO_GRADE — ไม่มี hero ที่พร้อมจริง (เกรด/หน้าเด่น/ตัวตน/ครอปช่องได้) — พักงานก่อนดำเนินต่อ' };

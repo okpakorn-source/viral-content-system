@@ -58,7 +58,7 @@ export async function executeCover({ assignments, imageBuffers, templateSpec, tr
   globalThis.__EXEC_SNAP = assignments.map((a)=>({ slot:a.slotId, idx:a.imageIndex, bytes: imageBuffers[a.imageIndex]?.buffer?.length || 0, crop: a.crop ? JSON.parse(JSON.stringify(a.crop)) : null }));
   globalThis.__EXEC_TEMPLATE = (templateSpec.slots||[]).map((s)=>({ id:s.id, border:(s.border===undefined?null:s.border), borderWidth:(s.borderWidth===undefined?null:s.borderWidth), shape:(s.shape||null), w:s.w, h:s.h }));
   if (globalThis.__EXEC_MODE === 'drift' && assignments[1]) assignments[1].imageIndex = 0; // จำลอง render layer สลับ source
-  if (Array.isArray(traceSink)) { traceSink.length = 0; traceSink.push(...assignments.map((a)=>({ slot:a.slotId, branch:'stub' }))); }
+  if (Array.isArray(traceSink)) { traceSink.length = 0; traceSink.push(...assignments.map((a)=>{ const e={ slot:a.slotId, branch:'stub' }; if (globalThis.__EXEC_NO_UPSCALE !== true){ const bs=globalThis.__UP_BY_SLOT||{}; const v=(a.slotId in bs)?bs[a.slotId]:(globalThis.__EXEC_UPSCALE ?? 1.0); e.upscaleRaw=v; if(typeof v==='number'&&Number.isFinite(v)) e.upscale=+v.toFixed(2); } return e; })); }
   return Buffer.alloc(9000, 7);
 }
 export const V3_TEMPLATES = {};`);

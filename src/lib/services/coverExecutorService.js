@@ -9,6 +9,12 @@
  */
 
 import sharp from 'sharp';
+// ★ AC-0107: only the hero-crop CONSTANTS live in ONE shared pure module (heroCropGeometry), imported by BOTH the
+//   renderer here and the pre-carrier crop-safety FILTER (megaAdapters S6), so the constants stay in lockstep. The
+//   region math is NOT shared — faceRegionForSlot below is the renderer's own; heroCropGeometry only REPLICATES it as a
+//   conservative estimator (a filter input, never authoritative). The authoritative ≤1.2× proof is the runtime-bound
+//   check in composeAndVerify, measured on THIS renderer's actual output.
+import { HERO_CROP, FACE_PROM_CEILING, HERO_PROMINENCE } from '@/lib/heroCropGeometry';
 
 // Template v3 — "viral-safe": ฐานตารางสะอาด (พิสูจน์จาก CASE-031/037) + องค์ประกอบไวรัล
 // (วงกลมขอบขาว + กรอบเหลือง) แบบทับเฉพาะมุมที่ควบคุมได้ — ไม่มีช่องลอยกลางผืนแบบ template_5
@@ -327,7 +333,7 @@ function faceRegionForSlot(fb, imgW, imgH, slotAspect, faceFrac, faceTopAt, maxF
 //   maxFaceHFrac 0.84→0.74 (เพดานหน้าใหญ่ลง ไม่บีบจนคางหลุด) · minFaceHFrac 0.72→0.60 (ซูมเบาลง ยังเด่น)
 //   faceTopAt 0.34→0.40 (ดันหน้าลงจากขอบบน กันตัดหัว) · faceFrac 0.94→0.88 (เผื่อหู/แก้มข้าง ไม่ชิดขอบ)
 //   ⚠️ ถ้าเทสแล้วหน้าเล็กไป (ติแบบ CASE-200/224) ปรับขึ้นทีละ 0.02-0.04
-const HERO_CROP   = { faceFrac: 0.88, faceTopAt: 0.40, maxFaceHFrac: 0.74, minFaceHFrac: 0.60 };
+// HERO_CROP is imported from heroCropGeometry (shared single source for the CONSTANTS — same values, one import).
 // ── CIRCLE (วงกลม) — ⛔ คงค่าเดิม ห้ามแก้เมื่อแก้เลย์เอาต์อื่น ──
 // ★ เฟส 2.5: วงกลมตัดมุมโค้ง → ต้องเผื่อมากกว่าสี่เหลี่ยม (กันตัดบนหัว+คางพร้อมกัน — Hermes CASE-254)
 //   faceFrac 0.80→0.66 (หน้ากินกว้างน้อยลง เผื่อขอบโค้งตัดข้าง) · maxFaceHFrac 0.80→0.66 (หน้าเล็กลงในวง กันตัดบน-ล่าง)
@@ -356,12 +362,12 @@ function isStorySlot(slot) { return String(slot?.id || '') !== 'main' && STORY_S
 // ════════════════════════════════════════════════════════════════════════════
 // เป้า = faceHeight/regionHeight (หน้าดิบ) ต่อชนิดช่อง · cap = เพดานความปลอดภัย (กันซูมแน่นจนหน้าล้น) · const ปรับได้
 const FACE_PROMINENCE = {
-  hero:      { target: 0.42, cap: 0.50, trigMul: 0.6 },  // hero เล็กกว่า 0.42×0.6=0.25 → ซูม
+  hero:      HERO_PROMINENCE,                             // ★ AC-0107: hero constants shared from heroCropGeometry (one source)
   secondary: { target: 0.25, cap: 0.35, trigMul: 0.6 },  // ช่องรองมีหน้า (reaction/moment)
   circle:    { target: 0.45, cap: 0.55, trigMul: 0.6 },  // วงกลม — หน้าเต็มวง
   context:   { target: 0.50, cap: 0.60, trigAbs: 0.40 }, // 6B.4: peopleBox(หัว+ลำตัว) ต้องกิน ≥40% ไม่งั้นซูมเข้า ~50%
 };
-const FACE_PROM_CEILING = 1.6; // เพดานยืดเดียวกับ hard floor เฟส 3 — ห้ามซูมจน upscale เกินนี้
+// FACE_PROM_CEILING is imported from heroCropGeometry (shared single source for the CONSTANT — same 1.6 value, one import).
 function _faceProminenceOn() { return process.env.COMPOSE_FACE_PROMINENCE !== '0'; }
 function _promKind(slot) {
   if (slot.shape === 'circle') return 'circle';
@@ -797,7 +803,10 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
   region = _clampRegion(region, imgW, imgH); // ★ 10 ก.ค.: การ์ดสุดท้ายก่อน extract — ห้ามเกินขอบภาพเด็ดขาด
   // ★ เฟส 3.1+3.3 (10 ก.ค.): วัด upscale จริง (region px → slot px) — ติดธงยืด (composer อ่านจาก sink) + งด sharpen ตอนขยาย
   const _upR = Math.max(slot.w / Math.max(1, region.width), slot.h / Math.max(1, region.height));
-  if (_tr) _tr.upscale = +_upR.toFixed(2);
+  // ★ AC-0107 P1-1: carry the EXACT finite raw upscale for the authoritative strict hero-crop gate — a hard ≤1.2×
+  //   decision must NEVER read the rounded display value (1.201–1.204 would round to 1.20 and wrongly pass). The
+  //   rounded `upscale` stays for advisory traceQcFlags/logs only.
+  if (_tr) { _tr.upscaleRaw = _upR; _tr.upscale = +_upR.toFixed(2); }
   if (_upR > 1.2) console.log(`[CoverV3] 🔎 ${slot.id} ยืด ${_upR.toFixed(2)}x (region ${region.width}x${region.height} → ${slot.w}x${slot.h})`);
   const _doSharpen = _upR < 1; // sharpen เฉพาะเคสย่อ — ขยายแล้ว sharpen = ขยาย artifact (เฟส 3.3)
   // rev.16: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — WB คุมโทนรวม + รีทัชเบา
@@ -873,7 +882,8 @@ async function renderCircleTile(src, crop, slot, fb, traceSink = null) {
   region = _clampRegion(region, imgW, imgH); // ★ 10 ก.ค.: การ์ดสุดท้ายก่อน extract (วงกลม)
   // ★ เฟส 3.1+3.3 (10 ก.ค.): วัด upscale จริง + งด sharpen ตอนขยาย (วงกลม)
   const _upR = Math.max(d / Math.max(1, region.width), d / Math.max(1, region.height));
-  if (_tr) _tr.upscale = +_upR.toFixed(2);
+  // ★ AC-0107 P1-1: exact raw upscale (see rect tile) — rounded `upscale` is advisory-only, never the hard decision.
+  if (_tr) { _tr.upscaleRaw = _upR; _tr.upscale = +_upR.toFixed(2); }
   if (_upR > 1.2) console.log(`[CoverV3] 🔎 ${slot.id} (วง) ยืด ${_upR.toFixed(2)}x`);
   const _doSharpen = _upR < 1; // เฟส 3.3: sharpen เฉพาะเคสย่อ
   const cbase = await sharp(src).extract(region).resize(d, d, { fit: 'fill' }).png().toBuffer(); // เฟส 3.3: lossless ระหว่างทาง

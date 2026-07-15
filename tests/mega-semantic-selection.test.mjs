@@ -647,7 +647,9 @@ const RH_RD = { searched: true, triaged: true, clean: true, highResolution: true
 const RH_SC = { semanticScore: 700, qualityScore: 700, slotFitScore: 700 };
 const rhImg = (id, { person = null, sceneKey, triageOver = {}, over = {} } = {}) => ({
   id, imageUrl: `https://cdn.test/${id}.jpg`, thumbnailUrl: '', width: 900, height: 1200, realWidth: 900, realHeight: 1200,
-  triage: { relevant: true, clean: true, faceCount: 1, person, persons: person ? [person] : [], category: 'face-emotional', emotion: 'warm', note: `${id} ${sceneKey}`, newsScene: true, quality: 8, ...RH_EV, ...RH_RD, ...RH_SC, sceneKey, ...triageOver },
+  // ★ AC-0107: genuine normalized raw faceBox (a big centred face ⇒ crop-SAFE for the realized hero slot). Additive —
+  //   independent of the shot-class evidence (RH_EV faceShare/headroom); a test may override via triageOver.faceBox.
+  triage: { relevant: true, clean: true, faceCount: 1, person, persons: person ? [person] : [], category: 'face-emotional', emotion: 'warm', note: `${id} ${sceneKey}`, newsScene: true, quality: 8, faceBox: { x1: 0.30, y1: 0.12, x2: 0.70, y2: 0.60 }, ...RH_EV, ...RH_RD, ...RH_SC, sceneKey, ...triageOver },
   ...over,
 });
 // 5-slot ready pool for DNA_ALPO (hero/context/action/moment/reaction): Lisa=hero, Nene=reaction, 3 context people.
@@ -1167,4 +1169,64 @@ await test('RH: EVIDENCE INTEGRITY — every eligible asset triage.newsScene=fal
   assert.ok(wire.slotPlan.every((p) => !Object.prototype.hasOwnProperty.call(p, 'newsScene')),
     'serialized wire slotPlan rows carry no newsScene key');
 });
+// ── (RH-29) AC-0107 STRICT V2 crop-safe HERO ELIGIBILITY (producer signs a crop-safe hero; unsafe never eligible) ──
+await test('RH: AC-0107 STRICT V2 crop-safe hero eligibility — (1) unsafe HIGHER-ranked + safe LOWER-ranked same-person ⇒ SAFE candidate is the signed hero across carrier + SelectionSpec + renderBindings + queue, unsafe never hero; (2) no crop-safe hero ⇒ typed HOLD before queue (zero archive); (3) equal safe candidates ⇒ deterministic', async () => {
+  const SAFE_FB = { x1: 0.30, y1: 0.12, x2: 0.70, y2: 0.60 };   // big centred face ⇒ crop-safe for the realized hero slot
+  const UNSAFE_FB = { x1: 0.45, y1: 0.45, x2: 0.55, y2: 0.55 }; // tiny face ⇒ hero crop >1.2× (the incident class)
+  const mkPool = (variant) => {
+    const lisa = variant === 'nosafe'
+      ? [rhImg('L-UNSAFE', { person: 'Lisa', sceneKey: 'sL1', triageOver: { faceBox: UNSAFE_FB } })]
+      : variant === 'tie'
+        ? [rhImg('L-SAFE-A', { person: 'Lisa', sceneKey: 'sLa', triageOver: { faceBox: SAFE_FB } }),
+          rhImg('L-SAFE-B', { person: 'Lisa', sceneKey: 'sLb', triageOver: { faceBox: SAFE_FB } })]
+        : [rhImg('L-UNSAFE', { person: 'Lisa', sceneKey: 'sL1', triageOver: { faceBox: UNSAFE_FB, semanticScore: 900, qualityScore: 900, slotFitScore: 900 } }), // crop-unsafe BUT top-ranked
+          rhImg('L-SAFE', { person: 'Lisa', sceneKey: 'sL2', triageOver: { faceBox: SAFE_FB } })]; // crop-safe, lower-ranked (default 700 scores)
+    return [...lisa, rhImg('N1', { person: 'Nene', sceneKey: 'sN' }), rhImg('C1', { person: 'Ctx1', sceneKey: 'sC1' }), rhImg('C2', { person: 'Ctx2', sceneKey: 'sC2' }), rhImg('C3', { person: 'Ctx3', sceneKey: 'sC3' })];
+  };
+  // (1) unsafe higher-ranked + safe lower-ranked ⇒ the SAFE candidate is signed hero (ranking does NOT override crop-safety)
+  const s6a = await rhRun(RH_ON, { pool: mkPool('safe') });
+  const p = rhPatch(s6a);
+  assert.ok(p && p.ok === true, `(1) carrier built (got hold=${p?.hold})`);
+  assert.equal(p.selectionAuthority.hero.candidateId, 'L-SAFE', '(1) signed hero authority = crop-SAFE candidate, not the higher-ranked unsafe');
+  assert.equal(p.renderBindings.find((b) => b.refSlotId === 'hero').candidateId, 'L-SAFE', '(1) hero renderBinding = safe candidate');
+  const specHeroRow = p.selectionSpec.slots.find((s) => s.refSlotId === p.selectionSpec.hero.heroSlotId);
+  assert.equal(specHeroRow.primary.candidateId, 'L-SAFE', '(1) SelectionSpec hero primary = safe candidate');
+  assert.ok(!p.renderBindings.some((b) => b.candidateId === 'L-UNSAFE' && b.refSlotId === 'hero'), '(1) the crop-unsafe candidate is NEVER the hero');
+  // (1) queue consistency: run the REAL S7 V2 producer on the carrier, capture the queued wire
+  {
+    const job = rhJob(); Object.assign(job.dossier, s6a.dossierPatch);
+    const cap = {};
+    const deps = { fetchJson: async (u, o) => { if (String(u).includes('/api/queue/add')) { cap.body = JSON.parse(o.body); return { success: true, jobId: 'J-AC0107' }; } if (String(u).includes('/api/images/')) return { success: true, images: mkPool('safe') }; throw new Error('unexpected fetch: ' + u); } };
+    const s7 = await withEnvKeys({ ...RH_ON, MEGA_STRICT_RENDER: '1' }, async () => s7_cover(job, { origin: 'http://mock', _deps: deps }));
+    assert.equal(s7.status, 'done', `(1) S7 V2 enqueued (${s7.summary})`);
+    const heroRow = cap.body.slotPlan.find((r) => r.isHero);
+    assert.equal(heroRow.candidateId, 'L-SAFE', '(1) queued slotPlan hero = safe candidate (consistent with carrier + SelectionSpec)');
+  }
+  // (2) no crop-safe hero ⇒ typed HOLD BEFORE queue; and prove the FULL route enqueues NOTHING (not only an S6 marker)
+  const s6b = await rhRun(RH_ON, { pool: mkPool('nosafe') });
+  assert.equal(s6b.status, 'waiting', '(2) no crop-safe hero ⇒ HOLD (waiting), never a carrier');
+  const pb = rhPatch(s6b);
+  assert.ok(pb && pb.ok === false && pb.hold === 'REF_HERO_V2_HERO_NO_APPROVED_CANDIDATE', `(2) typed HOLD before queue (got ${pb?.hold})`);
+  {
+    // run the REAL S7 on the held dossier: the V2 carrier is ok:false ⇒ S7 must NOT wire ⇒ zero queue/compose/archive
+    const job = rhJob(); Object.assign(job.dossier, s6b.dossierPatch);
+    let queued = 0;
+    const deps = { fetchJson: async (u, _o) => { if (String(u).includes('/api/queue/add')) { queued++; return { success: true, jobId: 'J-NOSAFE' }; } if (String(u).includes('/api/images/')) return { success: true, images: mkPool('nosafe') }; throw new Error('unexpected fetch: ' + u); } };
+    const s7 = await withEnvKeys({ ...RH_ON, MEGA_STRICT_RENDER: '1' }, async () => s7_cover(job, { origin: 'http://mock', _deps: deps }));
+    assert.notEqual(s7.status, 'done', `(2) S7 must NOT complete a queue on a held (no-safe) carrier (got ${s7.status} ${s7.summary})`);
+    assert.equal(queued, 0, '(2) zero queue attempts on the full route ⇒ nothing to compose/persist/archive');
+  }
+  // (3) equal safe candidates ⇒ deterministic REGARDLESS of input order (reversed/permuted pool ⇒ same signed hero)
+  const _perm = (arr, order) => order.map((i) => arr[i]);
+  const tieA = mkPool('tie');                 // [L-SAFE-A, L-SAFE-B, N1, C1, C2, C3]
+  const tieRev = [...mkPool('tie')].reverse(); // fully reversed input order
+  const tiePerm = _perm(mkPool('tie'), [3, 1, 5, 0, 4, 2]); // arbitrary permutation
+  const h1 = rhPatch(await rhRun(RH_ON, { pool: tieA })).selectionAuthority.hero.candidateId;
+  const h2 = rhPatch(await rhRun(RH_ON, { pool: tieRev })).selectionAuthority.hero.candidateId;
+  const h3 = rhPatch(await rhRun(RH_ON, { pool: tiePerm })).selectionAuthority.hero.candidateId;
+  assert.ok(['L-SAFE-A', 'L-SAFE-B'].includes(h1), `(3) hero is one of the equal safe candidates (got ${h1})`);
+  assert.equal(h1, h2, `(3) deterministic under REVERSED input order (${h1} === ${h2})`);
+  assert.equal(h1, h3, `(3) deterministic under PERMUTED input order (${h1} === ${h3})`);
+});
+
 console.log(`1..${passed}`);

@@ -667,19 +667,20 @@ await E('E15 strict-required cannot silently run legacy; both-or-neither + wire 
 });
 
 // ============================================================ E16 / E17
-await E('E16 exact raw-pool count; bad director exact HOLD; good director exact upstream Hero (no OR/permissive branch)', async () => {
+await E('E16 exact raw-pool count; bad director ⇒ AC-0107 crop-safe RESELECTION to HERO-OK (a safe alternative exists in-pool); good director exact upstream Hero (no OR/permissive branch)', async () => {
   // exact raw pool length actually present: 4 named rows (BLDG, PARTIAL, HERO-OK, CIRC) + 3 CTX + 16 JUNK = 23
   assert.strictEqual(POOL_FULL.length, 23, `raw synthetic pool length exact 23 (4 named + ${CTX.length} CTX + ${JUNK.length} JUNK) (got ${POOL_FULL.length})`);
 
-  // bad director (LLM hallucinates BLDG as hero) + readiness ON ⇒ exact typed HOLD, no dossierPatch, no downstream
-  const bad = await runPipeline({ pool: POOL_FULL, brainAnswer: ANSWER_BAD_BLDG, env: { ...SEM_ON, MEGA_ROLE_READINESS: '1' } });
-  assert.strictEqual(bad.s6.status, 'failed', `bad director: status exact failed (got ${bad.s6.status})`);
-  assert.strictEqual(bad.s6.nextAction, 'fail', `bad director: nextAction exact fail (got ${j(bad.s6.nextAction)})`);
-  assert.strictEqual(bad.s6.reason, 'INSUFFICIENT_HERO_GRADE', `bad director: reason exact (got ${j(bad.s6.reason)})`);
-  assert.strictEqual(bad.s6.quality, 'red', `bad director: quality exact red (got ${j(bad.s6.quality)})`);
-  assert.strictEqual(Object.hasOwn(bad.s6, 'dossierPatch'), false, 'bad director: no dossierPatch key on failed result');
-  assert.strictEqual(bad.captures.queueCalls, 0, 'bad director: queueCalls exact 0 (S6 failure blocks S7 from ever running)');
-  assert.strictEqual(bad.s7, null, 'bad director: s7 never invoked');
+  // bad director (LLM hallucinates BLDG — an unsafe non-hero of the SAME person) + readiness ON: the pool DOES contain
+  // a crop-safe same-identity hero (HERO-OK), so AC-0107 P1-1 pre-carrier reselection deterministically swaps it in
+  // BEFORE any HOLD ⇒ S6 done with hero exactly HERO-OK, and the hallucinated BLDG is never the hero. (No-safe-alt pools
+  // still HOLD — proved by E8/E9/E19.) runS7:false ⇒ upstream-eligibility proof only.
+  const bad = await runPipeline({ pool: POOL_FULL, brainAnswer: ANSWER_BAD_BLDG, env: { ...SEM_ON, MEGA_ROLE_READINESS: '1' }, runS7: false });
+  assert.strictEqual(bad.s6.status, 'done', `bad director + safe alt ⇒ reselection recovers (got ${bad.s6.status} ${j(bad.s6.summary).slice(0, 120)})`);
+  const badPi = bad.s6.dossierPatch.pickImages;
+  const badHero = badPi.slots[badPi.heroSlotId];
+  assert.strictEqual(badHero.id, 'HERO-OK', `bad director: hero reselected to the crop-safe HERO-OK (got ${badHero.id})`);
+  assert.notStrictEqual(badHero.id, 'BLDG', 'bad director: hallucinated BLDG is NEVER the hero');
 
   // good director (authorized HERO-OK) + same pool/readiness ⇒ exact S6 done, canonical Hero exactly HERO-OK, never BLDG/PARTIAL
   // runS7:false deliberately — this block proves upstream eligibility (S6 picks the right hero), not downstream queue/compose gating (that is E3-E5/E11/E18's job)
@@ -849,6 +850,82 @@ await E('E18 exact local strict route twins: qc→persist→archive order, cover
 
   assert.strictEqual(fetchBombCalls, fetchBombBefore, 'fetchBombCalls unchanged across both twins — zero real network');
   assert.strictEqual((globalThis.__E_ARCH_LEAK || 0), archLeakBefore, '__E_ARCH_LEAK unchanged across both twins — zero real fs/archive module use');
+});
+
+// ============================================================ E19 (AC-0107 hero crop-safety gap — production incident)
+// Real /cover-ref-test incident: a LARGE source image passes the coarse WHOLE-IMAGE cover-fit readiness check, but the
+// executor crops the hero FACE-AWARE (prominence) so the surviving region is far smaller than the whole image and the
+// TRUE upscale is >1.2 (2.69× in prod: QC_REJECTED 'upscaled:main:2.69') — caught by hard QC only AFTER a full compose.
+// The S6 readiness gate must now measure the FACE-AWARE hero crop and reject the unsafe hero BEFORE compose (zero archive).
+//   SMALLFACE shares HERO-OK's EXACT real dims (so whole-image cover-fit is identical) and a MORE-central face (so
+//   positional containment is at least as safe) and still clears the bigFace height floor — the ONLY discriminator is the
+//   face SIZE, i.e. the face-aware crop. The coarse gate would accept it; the face-aware gate must reject it.
+const R5_SMALLFACE = IMG('SMALLFACE', { person: HERO_NAME, category: 'face-emotional', faceBox: { x1: 0.41, y1: 0.41, x2: 0.59, y2: 0.59 }, realShortSide: 1200, note: 'ภาพใหญ่ หน้ากลางเฟรมแต่เล็ก (0.18×0.18 — เหนือ bigFace floor แต่ครอป hero ยืด >1.2×)' }, { realWidth: 1300, realHeight: 1200 });
+const POOL_SMALLFACE = [R5_SMALLFACE, R4_CIRC, ...CTX, ...JUNK]; // no crop-safe hero in the pool
+const ANSWER_SMALLFACE = { ...ANSWER_GOOD, hero: { id: 'SMALLFACE', reason: 'หน้ากลางเฟรม', backups: [] } };
+
+await E('E19 AC-0107: big image + small CENTERED face clears coarse cover-fit/positional/bigFace, but the FACE-AWARE hero crop needs >1.2× ⇒ readiness ON rejects INSUFFICIENT_HERO_GRADE BEFORE compose (s7 never runs, zero archive); HERO-OK (same dims, bigger face) still passes — discriminator is the face-aware crop, not cover-fit', async () => {
+  // the coarse gate could NOT have caught this: SMALLFACE shares HERO-OK's EXACT dims (whole-image cover-fit identical)
+  // and a strictly-more-central face (positional containment at least as safe); only the face size differs.
+  assert.strictEqual(R5_SMALLFACE.realWidth, R3_HERO.realWidth, 'SMALLFACE shares HERO-OK realWidth (cover-fit identical)');
+  assert.strictEqual(R5_SMALLFACE.realHeight, R3_HERO.realHeight, 'SMALLFACE shares HERO-OK realHeight (cover-fit identical)');
+  const fh = R5_SMALLFACE.triage.faceBox.y2 - R5_SMALLFACE.triage.faceBox.y1;
+  assert.ok(fh > 0.16, 'SMALLFACE face height comfortably clears the bigFace floor (>0.16) — NOT caught by the prominence pre-check, so the rejection is genuinely the face-aware crop');
+  assert.ok(fh < (R3_HERO.triage.faceBox.y2 - R3_HERO.triage.faceBox.y1), 'SMALLFACE face is SMALLER than HERO-OK (the only discriminator)');
+
+  const { s6, s7, captures } = await runPipeline({ pool: POOL_SMALLFACE, brainAnswer: ANSWER_SMALLFACE, env: { ...SEM_ON, MEGA_ROLE_READINESS: '1' } });
+  assert.strictEqual(s6.status, 'failed', `S6 fail-closed (got ${j(s6.status)})`);
+  assert.strictEqual(s6.reason, 'INSUFFICIENT_HERO_GRADE', `reason exact (got ${j(s6.reason)} summary=${j(s6.summary).slice(0, 160)})`);
+  assert.strictEqual(s7, null, 's7 never runs — unsafe hero rejected BEFORE compose (no wasted full-route compose)');
+  assert.strictEqual(captures.queueCalls, 0, 'zero queue/compose attempted (zero archive)');
+
+  // CONTROL: HERO-OK (same dims, BIGGER face) passes readiness ON ⇒ proves cover-fit is NOT the discriminator (the
+  // face-aware crop is). Without the AC-0107 fix, SMALLFACE would have passed exactly like HERO-OK and only failed at QC.
+  const good = await runPipeline({ pool: POOL_FULL, brainAnswer: ANSWER_GOOD, env: { ...SEM_ON, MEGA_ROLE_READINESS: '1' }, runS7: false });
+  assert.strictEqual(good.s6.status, 'done', `HERO-OK (bigger face, same dims) passes readiness (got ${j(good.s6.status)} ${j(good.s6.summary).slice(0, 120)})`);
+  assert.strictEqual(good.s6.dossierPatch.pickImages.slots.hero.id, 'HERO-OK', 'canonical hero = HERO-OK (safe)');
+});
+
+// ============================================================ E20 (AC-0107 full-route incident — the EXACT flag)
+await E('E20 AC-0107 full-route: a compose output carrying the EXACT incident flag upscaled:main:2.69 ⇒ /cover-ref-test HARD QC ⇒ 422 QC_REJECTED + zero persist + zero archive (real runCoverRefTest + real evaluateCoverQc, not merely the verdict in isolation)', async () => {
+  const INCIDENT = 'upscaled:main:2.69';
+  // the shared hard gate rejects the exact incident flag
+  const v = evaluateCoverQc({ qcFlags: [INCIDENT] });
+  assert.strictEqual(v.pass, false, 'shared QC gate rejects the 2.69× hero stretch');
+  assert.strictEqual(v.suggestedStatus, 'needs_gap_search', 'upscale fail ⇒ needs_gap_search (intended bounded recovery)');
+  // full route: real runCoverRefTest + real evaluateCoverQc (hard 422 gate), compose double renders the incident output
+  const { res, counters } = await runRoute(INPUT, { compose: async () => ({ ...COVER_OK, qcFlags: [INCIDENT] }) });
+  assert.strictEqual(res.status, 422, `route 422 (got ${res.status})`);
+  assert.strictEqual(res.body.errorType, 'QC_REJECTED', `errorType QC_REJECTED (got ${j(res.body.errorType)})`);
+  assert.strictEqual(res.body.qcVerdict.pass, false, 'attached qcVerdict.pass=false');
+  assert.ok(Array.isArray(res.body.qcVerdict.reasons) && res.body.qcVerdict.reasons.length > 0, 'QC reasons surfaced');
+  assert.strictEqual(counters.persistCalls, 0, 'zero persist (no cover file written)');
+  assert.strictEqual(counters.archiveCalls, 0, 'zero archive (Production zero-archive on QC fail)');
+});
+
+// ============================================================ E21 (AC-0107 P1-1 pre-carrier SAFE-HERO RESELECTION)
+const R6_HERO2 = IMG('HERO-OK2', { person: HERO_NAME, category: 'face-emotional', faceBox: { x1: 0.34, y1: 0.19, x2: 0.66, y2: 0.56 }, realShortSide: 1250, note: 'ตัวเอกหน้าชัดอีกใบ (crop-safe)' }, { realWidth: 1350, realHeight: 1250 });
+await E('E21 AC-0107 P1-1: (a) director picks a crop-UNSAFE hero (SMALLFACE) but a crop-SAFE same-identity alternative (HERO-OK) exists ⇒ pre-carrier reselection swaps it in (S6 done, hero=HERO-OK, never SMALLFACE, S7 enqueues ⇒ compose can proceed); (c) with TWO safe alternatives the pick is DETERMINISTIC across identical runs (tie/order stability)', async () => {
+  const ansUnsafe = { ...ANSWER_GOOD, hero: { id: 'SMALLFACE', reason: 'director picked crop-unsafe', backups: [] } };
+  // (a) safe alternative exists ⇒ reselected + compose proceeds
+  const poolA = [R5_SMALLFACE, R3_HERO, R4_CIRC, ...CTX, ...JUNK];
+  const a = await runPipeline({ pool: poolA, brainAnswer: ansUnsafe, env: { ...SEM_ON, MEGA_ROLE_READINESS: '1' } });
+  assert.strictEqual(a.s6.status, 'done', `(a) reselection recovers ⇒ S6 done (got ${a.s6.status} ${j(a.s6.summary).slice(0, 120)})`);
+  const aHero = a.s6.dossierPatch.pickImages.slots[a.s6.dossierPatch.pickImages.heroSlotId];
+  assert.strictEqual(aHero.id, 'HERO-OK', `(a) hero reselected to the crop-safe same-person HERO-OK (got ${aHero.id})`);
+  assert.notStrictEqual(aHero.id, 'SMALLFACE', '(a) the crop-unsafe SMALLFACE is NEVER the hero');
+  assert.strictEqual(a.captures.queueCalls, 1, '(a) compose can proceed — S7 enqueued exactly once with the safe hero');
+  assert.ok(a.s7 && a.s7.status !== 'failed', `(a) S7 did not fail on the reselected safe hero (got ${j(a.s7?.status)})`);
+
+  // (c) two crop-safe same-identity alternatives ⇒ deterministic pick across identical runs
+  const poolC = [R5_SMALLFACE, R3_HERO, R6_HERO2, R4_CIRC, ...CTX, ...JUNK];
+  const c1 = await runPipeline({ pool: poolC, brainAnswer: ansUnsafe, env: { ...SEM_ON, MEGA_ROLE_READINESS: '1' }, runS7: false });
+  const c2 = await runPipeline({ pool: poolC, brainAnswer: ansUnsafe, env: { ...SEM_ON, MEGA_ROLE_READINESS: '1' }, runS7: false });
+  assert.strictEqual(c1.s6.status, 'done'); assert.strictEqual(c2.s6.status, 'done');
+  const h1 = c1.s6.dossierPatch.pickImages.slots[c1.s6.dossierPatch.pickImages.heroSlotId].id;
+  const h2 = c2.s6.dossierPatch.pickImages.slots[c2.s6.dossierPatch.pickImages.heroSlotId].id;
+  assert.ok(['HERO-OK', 'HERO-OK2'].includes(h1), `(c) pick is one of the two crop-safe heroes (got ${h1})`);
+  assert.strictEqual(h1, h2, `(c) DETERMINISTIC — identical runs pick the same safe hero (${h1} === ${h2})`);
 });
 
 // ============================================================ E12 (สุดท้าย — สะสมทั้งไฟล์)
