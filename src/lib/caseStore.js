@@ -11,7 +11,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
-import { resilientFetch } from '@/lib/supabase';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const STORE_FILE = path.join(DATA_DIR, 'analysis-cases.json');
@@ -23,7 +22,7 @@ function sb() {
   if (_sb !== null) return _sb;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  _sb = url && key ? createClient(url, key, { global: { fetch: resilientFetch } }) : false;
+  _sb = url && key ? createClient(url, key) : false;
   return _sb;
 }
 

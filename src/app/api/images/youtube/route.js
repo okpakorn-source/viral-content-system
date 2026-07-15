@@ -15,7 +15,6 @@ import { addImages } from '@/lib/imageStore';
 import { enqueueJob, patchJob, queuePosition, finishJob } from '@/lib/ytJobStore';
 import { hostImagePublic } from '@/lib/publicHost';
 import { createClient } from '@supabase/supabase-js';
-import { resilientFetch } from '@/lib/supabase';
 
 // ★ 6 ก.ค.: เฟรมที่ต้องโชว์บนเว็บ ต้องอยู่ "ถาวร" — tmpfiles (publicHost) หมดอายุใน ~1 ชม.
 //   → เก็บลง Supabase Storage (bucket สาธารณะ acs-frames) · ล้มค่อย fallback tmpfiles ชั่วคราว
@@ -24,7 +23,7 @@ async function persistFrame(buf, name) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) throw new Error('ไม่มี Supabase env');
-  const c = createClient(url, key, { global: { fetch: resilientFetch } });
+  const c = createClient(url, key);
   const p = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}_${name}`;
   let { error } = await c.storage.from(FRAME_BUCKET).upload(p, buf, { contentType: 'image/jpeg' });
   if (error && /bucket|not found/i.test(error.message)) {
