@@ -123,7 +123,10 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
           const reAudit = await auditOutput({ ...version, content: safeContent });
           // ★ guard (review จับได้): แทนเฉพาะ suggestion ที่เป็น "คำแทนจริง" สั้นๆ — บาง rule ใส่ประโยคแนะนำ
           //   ("สำนวนเลี่ยงตามบริบท เช่น ...") ถ้า split/join ตรงๆ จะฉีดประโยคแนะนำเข้าเนื้อข่าวจริง
-          const _forbidden = (reAudit.issues || []).filter(x => x.type === 'forbidden_word' && x.text && x.suggestion
+          // ★ recheck fix: ใช้ typeof — suggestion ว่าง ('') = เจตนา "ลบคำทิ้ง" (ด่วน/แชร์ด่วน/ดูก่อนโดนลบ/xxx/AV)
+          //   ของเดิมเช็ค truthy ทำคำ clickbait/ผู้ใหญ่หลุดบนเส้น rollback
+          const _forbidden = (reAudit.issues || []).filter(x => x.type === 'forbidden_word' && x.text
+            && typeof x.suggestion === 'string'
             && x.suggestion.length <= 25 && !/เช่น|สำนวน|บริบท|\//.test(x.suggestion));
           for (const iss of _forbidden) {
             safeContent = safeContent.split(iss.text).join(iss.suggestion);
