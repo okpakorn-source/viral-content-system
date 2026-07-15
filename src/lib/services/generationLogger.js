@@ -9,7 +9,7 @@
  * Fallback: data/generation-logs.json
  */
 
-import { getSupabase, isSupabaseReady } from '@/lib/supabase';
+import { getSupabase, isSupabaseReady } from '../supabase.js';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 

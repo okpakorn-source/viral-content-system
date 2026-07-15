@@ -21,7 +21,7 @@ async function getFfmpeg() {
 import fs from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import path from 'path';
-import { getSupabase } from '@/lib/supabase';
+import { getSupabase } from '../supabase.js';
 import crypto from 'crypto';
 import { createLogger } from '@/lib/logger';
 import { execFile } from 'child_process';

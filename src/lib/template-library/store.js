@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { getSupabase, isSupabaseReady } from '@/lib/supabase';
+import { getSupabase, isSupabaseReady } from '../supabase.js';
 
 /**
  * Template Library Store

@@ -11,7 +11,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
-import { resilientFetch } from '@/lib/supabase';
+import { resilientFetch } from './supabase.js';
 // ★ Stage-A (candidate authority): NO static import ของ candidateFactAuthority ที่นี่ —
 //   default/legacy path ต้องไม่โหลด/ไม่ activate authority เลย · โหลดแบบ dynamic import
 //   เฉพาะใน opt-in branch ของ buildImagesRouteResponse เท่านั้น

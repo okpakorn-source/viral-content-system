@@ -8,7 +8,7 @@
  * เก็บใน Supabase ถาวร — ไม่หายตอน deploy
  */
 
-import { getSupabase, isSupabaseReady } from '@/lib/supabase';
+import { getSupabase, isSupabaseReady } from './supabase.js';
 import { v4 as uuidv4 } from 'uuid';
 
 // In-memory fallback for local dev

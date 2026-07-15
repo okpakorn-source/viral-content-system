@@ -11,7 +11,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
-import { resilientFetch } from '@/lib/supabase';
+import { resilientFetch } from './supabase.js';
 
 const STORE_NAME = 'acs-yt-capture-log';
 const TABLE = 'store_items';

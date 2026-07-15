@@ -11,7 +11,7 @@
  *
  * 🔴 เก็บแค่ URL — ตอน render จะ download ใหม่ทุกครั้ง (กัน buffer หมดอายุ) · ห้ามเจนภาพ
  */
-import { getSupabase } from '@/lib/supabase';
+import { getSupabase } from '../supabase.js';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';

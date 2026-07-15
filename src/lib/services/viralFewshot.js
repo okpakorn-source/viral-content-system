@@ -8,7 +8,7 @@
  * fail-safe: Supabase ล่ม → ได้ Style Pack อย่างเดียว (ไม่พัง pipeline)
  */
 
-import { getSupabase } from '@/lib/supabase';
+import { getSupabase } from '../supabase.js';
 
 // สูตรสกัดจากโพสต์ top engagement ของหอสมุด — always-on
 const VIRAL_STYLE_PACK =

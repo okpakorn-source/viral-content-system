@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import sharp from 'sharp';
 import { v4 as uuidv4 } from 'uuid';
-import { getSupabase, isSupabaseReady } from '@/lib/supabase';
+import { getSupabase, isSupabaseReady } from '../supabase.js';
 
 /**
  * ============================================

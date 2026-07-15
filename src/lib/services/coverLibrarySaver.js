@@ -7,7 +7,7 @@
  * ออกแบบให้ใช้แบบ fire-and-forget (ไม่ block response หลัก)
  * ถ้า save ล้มเหลว → log warning แต่ไม่ throw
  */
-import { getSupabase } from '@/lib/supabase';
+import { getSupabase } from '../supabase.js';
 import sharp from 'sharp';
 
 /**

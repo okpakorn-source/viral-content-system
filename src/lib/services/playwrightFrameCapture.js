@@ -25,7 +25,7 @@ import fs from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { getSupabase } from '@/lib/supabase';
+import { getSupabase } from '../supabase.js';
 import { createLogger } from '@/lib/logger';
 
 const plog = createLogger('PLAYWRIGHT-CAPTURE');

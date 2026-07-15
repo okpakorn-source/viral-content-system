@@ -15,7 +15,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createStore } from '@/lib/persistStore';
-import { getSupabase, isSupabaseReady } from '@/lib/supabase';
+import { getSupabase, isSupabaseReady } from './supabase.js';
 
 const store = createStore('mega-cover-runs');
 const IMG_STORE = 'mega-cover-images';

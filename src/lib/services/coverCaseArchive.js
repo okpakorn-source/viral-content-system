@@ -2,7 +2,7 @@
  * Cover Case Archive — บันทึกปกทุกครั้งที่สร้าง เป็น CASE-001, CASE-002, ...
  * Primary: Supabase | Fallback: Local JSON + files
  */
-import { getSupabase } from '@/lib/supabase';
+import { getSupabase } from '../supabase.js';
 import fs from 'fs';
 import path from 'path';
 
