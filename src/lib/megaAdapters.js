@@ -2155,6 +2155,101 @@ function _rhGlobalCandidate(facts, personId, eligibleSlotIds, candidateId, sourc
   };
 }
 
+// ★ B3 (SHADOW · เทสได้ตรง) — สะพานหลักฐาน cropReadiness "วัดจริงต่อ slot" จาก candidateCropReadiness
+//   (INDEPENDENT_READINESS_V1). ประกอบ request จาก "หลักฐานที่ validate แล้วเท่านั้น" แล้วเรียก producer PURE
+//   ตัวจริง (ไม่แตะ candidateCropReadiness เลย · ตัววัดเป็นของมัน) — คืนผล detached/frozen หรือ null (พังทุกจุด =
+//   null เงียบ ไม่ throw ไม่ HOLD เพิ่ม). ยังเป็น SHADOW ล้วน: จุดกักกัน _rhCastCandidate/_rhHeroCandidate
+//   ยัง hardcode cropSafe เดิม ไม่มีใครอ่านผลก้อนนี้ (เก็บที่ authorityEvidence.cropReadiness เท่านั้น).
+//
+//   ที่มาของแต่ละส่วนใน request (ห้าม infer/ปลอม):
+//   • slots      = realized template geometry ของงานนี้ (dnaToTemplateSpec(refDNA) — PURE, canvas 1080×1350) ·
+//                  role/shape เชิงโครงสร้างจาก id/shape จริง: shape==='circle' → circle · id==='main' → hero ·
+//                  ที่เหลือ → support (SHAPE_FOR_ROLE: hero/support=rect, circle=circle) · x/y/w/h ต้องเป็น integer
+//                  (ถ้าไม่ครบ = null เงียบ; candidateCropReadiness ก็ยัง fail-closed ซ้ำอีกชั้น)
+//   • candidate  = universe vetted (factsById จาก _rhAuthority ที่ผูก same-snapshot + relevant true) — measuredFrom/
+//                  fullWidth/fullHeight จาก facts.resolution (level 'full' เท่านั้นที่ downstream เชื่อ · thumb/unknown
+//                  → dims ไม่ trusted → UNEVALUATED ตามธรรมชาติ) · faceBox จาก facts.faceBox (null/'unknown' = ไม่มีกล่อง
+//                  → UNEVALUATED) · ไม่ส่ง subjectBox (facts ไม่มี — faceBox เป็น fallback ที่ producer รับเอง)
+//   • eligibility = 🔴 STRUCTURAL POOL-ROLE ENROLLMENT เท่านั้น: candidate ทุกใบของจักรวาล vetted ถูกลงทะเบียนเข้า
+//                  ทุก role ที่มี slot → eligibility[slotId]=true สำหรับทุก slot ของ role นั้น. เป็น "ผู้สมัครเชิง
+//                  โครงสร้างของ role" (มาจากจักรวาลที่ vetted แล้ว) — ไม่ใช่ identity match. ห้ามผูกกับ cast
+//                  6-boolean eligibility / identityVerified / cropSafe (กันวงจรตาย cropSafe⟲eligibility). ผลคือ
+//                  cropReadiness วัด "วางลง slot ได้ไหมเชิงเรขาคณิต/ความละเอียด" ล้วน — ไม่มี UNSAFE จาก identity
+//                  (เส้น eligible.value===false ไม่มีทางถูกเดินในสะพานนี้ · UNSAFE ทุกใบ = geometry ล้วน)
+//   • universe   = proof 'full_vetted_v1' แท้ จาก snapshot ที่ _rhAuthority พิสูจน์แล้วว่า universeComplete + vettedProof
+//                  (population literal_relevant_true_v1) · observedCount = Σ (role×|universe|) ที่ป้อนจริง (complete/
+//                  ไม่ truncate เพราะลงทุกใบครบ) — ไม่มี _rhAuthority = factsById ว่าง → คืน null (ไม่ bypass)
+export async function _buildCropReadinessEvidenceV1({ factsById, refDNA, deps } = {}) {
+  try {
+    if (!(factsById instanceof Map) || factsById.size < 1 || !refDNA) return null;
+    const crMod = deps?.cropReadinessApi || await import('@/lib/candidateCropReadiness');
+    const rtMod = deps?.refTemplateApi || await import('@/lib/refTemplate');
+    if (typeof crMod?.buildCandidateCropReadiness !== 'function' || typeof crMod?.UNIVERSE_SCOPE !== 'string') return null;
+    if (typeof rtMod?.dnaToTemplateSpec !== 'function') return null;
+
+    const realized = rtMod.dnaToTemplateSpec(refDNA);
+    if (!realized || !Array.isArray(realized.slots) || realized.canvasW !== 1080 || realized.canvasH !== 1350) return null;
+
+    // ── STRUCTURAL slot-role mapping (id/shape only — ไม่พึ่ง cropSafe/identity) ──
+    const slots = [];
+    const slotIdsByRole = { hero: [], circle: [], support: [] };
+    const seen = new Set();
+    for (const s of realized.slots) {
+      const sid = (typeof s?.id === 'string' && s.id.length > 0) ? s.id : null;
+      if (!sid || seen.has(sid)) return null; // id หาย/ซ้ำ = โครงกำกวม → null เงียบ
+      if (![s.x, s.y, s.w, s.h].every((n) => typeof n === 'number' && Number.isInteger(n))) return null;
+      const isCircle = s.shape === 'circle';
+      const role = isCircle ? 'circle' : (sid === 'main' ? 'hero' : 'support');
+      const shape = isCircle ? 'circle' : 'rect';
+      seen.add(sid);
+      slots.push({ slotId: sid, role, shape, x: s.x, y: s.y, w: s.w, h: s.h });
+      slotIdsByRole[role].push(sid);
+    }
+    if (!slots.length) return null;
+    const demandedRoles = ['hero', 'circle', 'support'].filter((r) => slotIdsByRole[r].length >= 1);
+    if (!demandedRoles.length) return null;
+
+    // ── candidate จาก validated facts (dims + faceBox) + eligibility เชิงโครงสร้าง (enrollment=true) ──
+    const mkCand = (facts, roleSlotIds) => {
+      const res = (facts && typeof facts.resolution === 'object' && facts.resolution) ? facts.resolution : null;
+      const elig = {};
+      for (const sid of roleSlotIds) elig[sid] = true; // STRUCTURAL enrollment — ไม่ใช่ identity
+      const c = { eligibility: elig };
+      if (res && typeof res.level === 'string') c.measuredFrom = res.level; // 'full' เท่านั้นที่ downstream trust
+      if (res && Number.isInteger(res.width) && res.width > 0) c.fullWidth = res.width;
+      if (res && Number.isInteger(res.height) && res.height > 0) c.fullHeight = res.height;
+      const fb = (facts && typeof facts.faceBox === 'object' && facts.faceBox) ? facts.faceBox : null;
+      if (fb && [fb.x1, fb.y1, fb.x2, fb.y2].every((n) => typeof n === 'number' && Number.isFinite(n))) {
+        c.faceBox = { x1: fb.x1, y1: fb.y1, x2: fb.x2, y2: fb.y2 }; // detached copy (ไม่ผูก reference facts)
+      }
+      return c;
+    };
+    const roles = {};
+    let observed = 0;
+    for (const r of demandedRoles) {
+      const cands = [];
+      for (const facts of factsById.values()) { cands.push(mkCand(facts, slotIdsByRole[r])); observed++; }
+      roles[r] = { candidates: cands };
+    }
+
+    const request = {
+      slots,
+      roles,
+      universe: {
+        scope: crMod.UNIVERSE_SCOPE, // 'full_vetted_v1' — proof แท้ (snapshot universeComplete + vetted แล้ว)
+        complete: true,
+        truncated: false,
+        expectedCount: observed,
+        observedCount: observed, // === Σ demanded-role candidate lengths ที่ป้อนจริง (producer ตรวจซ้ำ)
+      },
+    };
+    const result = crMod.buildCandidateCropReadiness(request);
+    return (result && typeof result === 'object') ? result : null;
+  } catch {
+    return null; // พังทุกจุด → null เงียบ (detached · ไม่ HOLD เพิ่ม)
+  }
+}
+
 // Map a structural ref slot to a Cast editorial role (hero|reaction|context) — genuine per-slot eligibility (Fix #3).
 function _rhMappedCastRole(s) {
   const refRole = String(s?.refRole ?? '').trim().toLowerCase();
@@ -3258,13 +3353,25 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         }
       }
     } catch { _rhMetricsById = null; }
+    // ★ B3 SHADOW: cropReadiness "วัดจริงต่อ slot" จาก candidateCropReadiness (INDEPENDENT_READINESS_V1) — ประกอบ
+    //   request จากหลักฐาน validate แล้ว (realized template geometry + factsById vetted + universe proof แท้) แล้วเรียก
+    //   producer PURE. detached · พังทุกจุด → null (ไม่ HOLD เพิ่ม) · ยังไม่มี consumer (cast/hero hardcode cropSafe เดิม).
+    let _rhCropReadiness = null;
+    try {
+      _rhCropReadiness = await _buildCropReadinessEvidenceV1({
+        factsById: _rhAuthority ? _rhAuthority.factsById : null,
+        refDNA: _refDNA,
+        deps: _deps,
+      });
+    } catch { _rhCropReadiness = null; }
     const _rhAuthorityEvidence = {
       caseId: _rhCaseIdReq,
       factsById: _rhAuthority ? _rhAuthority.factsById : new Map(),
       searchedMeta: _rhSearchedEv.meta,
       metricsById: _rhMetricsById, // ★ B1 SHADOW — ยังไม่มี consumer อ่าน (cast/hero/global hardcode เดิม)
+      cropReadiness: _rhCropReadiness, // ★ B3 SHADOW — cropSafe ต่อ slot วัดจริง · absent(null) ≠ false · ยังไม่มี consumer
     };
-    console.log(`[MEGA S6] 🔐 V2 evidence bridge: authority=${_rhAuthority ? 'ok' : 'unavailable'} · facts ${_rhAuthorityEvidence.factsById.size} ใบ · searched(shadow∩universe) ${_rhAuthorityEvidence.searchedMeta.size} id · metrics(shadow) ${_rhMetricsById ? _rhMetricsById.size : 0} ใบ`);
+    console.log(`[MEGA S6] 🔐 V2 evidence bridge: authority=${_rhAuthority ? 'ok' : 'unavailable'} · facts ${_rhAuthorityEvidence.factsById.size} ใบ · searched(shadow∩universe) ${_rhAuthorityEvidence.searchedMeta.size} id · metrics(shadow) ${_rhMetricsById ? _rhMetricsById.size : 0} ใบ · cropReadiness(shadow) ${_rhCropReadiness && _rhCropReadiness.ok ? `ok/${_rhCropReadiness.summary?.cropCells ?? 0} cells` : (_rhCropReadiness ? 'rejected' : 'none')}`);
     _refHeroV2Patch = semContract
       ? await _runRefHeroV2({ compass: job.dossier.compass, semContract, canonHeroId: _canonHeroId, semAuthorityHash: _semAuthorityHash, refDNA: _refDNA, refId: job.dossier.refMatch?.refId || job.dossier.refMatch?.dnaHash || null, gatedPool, authorityEvidence: _rhAuthorityEvidence, deps: _deps })
       : _rhHold('REF_HERO_V2_NO_STRUCTURAL_SLOTS');
