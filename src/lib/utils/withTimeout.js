@@ -29,6 +29,35 @@ export function withTimeout(promise, ms, stepName = 'unknown') {
 }
 
 /**
+ * ★ 16 ก.ค. 69 (B4): timeout แบบ "หยุดงานจริง" — ของเดิม Promise.race แค่เลิกรอ
+ * แต่ request AI ต้นทางยังวิ่งจนจบ = จ่ายเงิน 2 โมเดลซ้อนทุกครั้งที่ fallback ทำงาน
+ * ตัวนี้รับ factory(signal) แล้ว abort() HTTP request จริงเมื่อ timer ยิง
+ * ใต้สวิตช์ WITHTIMEOUT_ABORT=1 (default OFF = พฤติกรรมเดิมเป๊ะ) — เปิดเทสบน :3900 ก่อน
+ * @param {(signal: AbortSignal|undefined) => Promise} factory — ฟังก์ชันสร้าง promise รับ signal
+ * @param {number} ms
+ * @param {string} stepName
+ */
+export function withTimeoutSignal(factory, ms, stepName = 'unknown') {
+  const abortOn = process.env.WITHTIMEOUT_ABORT === '1' && typeof AbortController !== 'undefined';
+  if (!abortOn) {
+    return withTimeout(factory(undefined), ms, stepName);
+  }
+  const ctrl = new AbortController();
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const err = new Error(`TIMEOUT: ${stepName} ใช้เวลาเกิน ${Math.round(ms / 1000)}s (ยกเลิก request จริงแล้ว)`);
+      err.failedStep = stepName;
+      try { ctrl.abort(); } catch {}
+      reject(err);
+    }, ms);
+  });
+  return Promise.race([factory(ctrl.signal), timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+}
+
+/**
  * ครอบ Promise.allSettled ด้วย per-item timeout
  * @param {Array<{promise: Promise, name: string, timeoutMs: number}>} tasks
  * @returns {Promise<PromiseSettledResult[]>}

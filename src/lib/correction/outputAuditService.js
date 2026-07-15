@@ -30,8 +30,9 @@ const FORBIDDEN_WORDS = [
   { pattern: /ยิง(?!ประตู|จรวด|ดาว)/g, type: 'forbidden_word', severity: 'high', suggestion: 'ใช้อาวุธปืน' },
 
   // === คำเสี่ยงที่ขาดไป (เพิ่มใหม่) ===
-  // ★ เสียชีวิต/ตาย: ห้ามแทนคำตรงๆ (จะได้ "จากไป" ซ้ำจำเจทุกข่าว) — เข้าโหมด AI เกลาตามบริบทใน safeCorrect
-  { pattern: /เสียชีวิต/g, type: 'forbidden_word', severity: 'high', suggestion: 'สำนวนเลี่ยงตามบริบท เช่น จากไปอย่างสงบ/ไม่อยู่แล้ว/ลาลับ/ปิดตำนาน' },
+  // ★ 16 ก.ค. 69 (B2 completion — review จับได้): ถอดกฎแบน "เสียชีวิต" ออกจาก L2 —
+  //   system/user prompt อนุญาตคำนี้แล้ว (บทเรียนเคส #01641) แต่ L2 ยังจับ → L3B เกลาทิ้งทุกงาน
+  //   = ย้อนกลับการแก้เงียบๆ ทุกข่าวการสูญเสีย ("ตาย/ดับ/สิ้นใจ" คำห้วนยังคงกฎเดิมตามนโยบาย)
   { pattern: /บาดเจ็บสาหัส/g, type: 'forbidden_word', severity: 'high', suggestion: 'ได้รับบาดเจ็บหนัก' },
   { pattern: /สะเก็ดระเบิด/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุการณ์ไม่คาดฝัน' },
   { pattern: /ระเบิด(?!ความ|พลัง|แรง)/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุการณ์รุนแรง' },

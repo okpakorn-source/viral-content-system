@@ -21,7 +21,7 @@ import { MODEL_PRIMARY } from './modelConfig.js';
  * @param {object} options - { prompt, temperature, maxTokens, systemPrompt }
  */
 export async function callSmartAI(task, options) {
-  const { prompt, temperature, maxTokens, systemPrompt } = options;
+  const { prompt, temperature, maxTokens, systemPrompt, signal } = options;
   
   // กำหนด strategy ตาม task
   const strategy = getStrategy(task);
@@ -35,13 +35,16 @@ export async function callSmartAI(task, options) {
   for (let i = 0; i < strategy.chain.length; i++) {
     const modelName = strategy.chain[i];
     try {
-      const result = await callModel(modelName, { prompt, temperature: temp, maxTokens: maxT, systemPrompt });
+      const result = await callModel(modelName, { prompt, temperature: temp, maxTokens: maxT, systemPrompt, signal });
       if (i > 0) {
         console.log(`[SmartAI] ✅ Fallback ${modelName} succeeded`);
       } else {
         console.log(`[SmartAI] ✅ ${modelName} succeeded`);
       }
-      return { result, model: modelName };
+      // ★ 16 ก.ค. 69 (B1): คืน "โมเดลจริง" (_modelUsed จาก client) แทนป้าย chain —
+      //   ป้ายเดิม 'gpt4o' จริงๆ วิ่ง MODEL_PRIMARY(gpt-5.5) ทำ log/UI/cost เพี้ยนทั้งระบบ
+      //   (ไม่มีโค้ดไหน branch ตามค่านี้ — ใช้แสดงผล/logPipeline เท่านั้น, grep ยืนยัน 16 ก.ค.)
+      return { result, model: (result && result._modelUsed) || modelName };
     } catch (err) {
       console.warn(`[SmartAI] ⚠️ Model '${modelName}' failed: ${err.message}`);
       errors.push(`${modelName}: ${err.message}`);
@@ -98,15 +101,16 @@ function getStrategy(task) {
   return { chain, defaultTemp, defaultMaxTokens };
 }
 
-async function callModel(modelName, { prompt, temperature, maxTokens, systemPrompt }) {
+async function callModel(modelName, { prompt, temperature, maxTokens, systemPrompt, signal }) {
   switch (modelName) {
     case 'claude':
-      return callClaude({ prompt, temperature, maxTokens, systemPrompt });
+      return callClaude({ prompt, temperature, maxTokens, systemPrompt, signal });
     case 'gemini':
+      // callGemini มี timeout 15s ในตัว — ไม่ต้องส่ง signal
       return callGemini({ prompt, temperature, maxTokens });
     case 'gpt4o':
     default:
-      return callAI({ prompt, temperature, maxTokens, model: MODEL_PRIMARY });
+      return callAI({ prompt, temperature, maxTokens, model: MODEL_PRIMARY, signal });
   }
 }
 

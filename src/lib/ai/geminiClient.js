@@ -76,8 +76,10 @@ export async function callGemini({ prompt, model = 'gemini-3.5-flash', temperatu
 ใช้ข้อมูลจากเนื้อข่าวที่ให้มาเท่านั้น ห้ามแต่งเรื่องเพิ่ม
 
 === FACEBOOK SAFETY RULES ===
-ห้ามใช้คำเสี่ยง: ฆ่า, ศพ, สยอง, โหด, เลือด, ข่มขืน, ผูกคอ, ดับสลด, เสียชีวิต, บาดเจ็บสาหัส, สะเก็ดระเบิด, ระเบิด, สนามรบ, คลิปหลุด, อาวุธ, กระสุน, เลือดสาด, ฆ่าตัวตาย
+ห้ามใช้คำเสี่ยง: ฆ่า, ศพ, สยอง, โหด, เลือด, ข่มขืน, ผูกคอ, ดับสลด, บาดเจ็บสาหัส, สะเก็ดระเบิด, ระเบิด, สนามรบ, คลิปหลุด, อาวุธ, กระสุน, เลือดสาด, ฆ่าตัวตาย
 ใช้แทน: จากไป, ร่างผู้เสียหาย, น่าตกใจ, รุนแรง, ร่องรอยเหตุการณ์, ล่วงละเมิดทางเพศ, จากไปอย่างน่าเศร้า, ได้รับบาดเจ็บหนัก, เหตุการณ์ไม่คาดฝัน, พื้นที่ปฏิบัติหน้าที่
+⚠️ "เสียชีวิต" และ "จากไป" เป็นคำมาตรฐานที่ปลอดภัย ใช้ตรงๆ ได้เสมอ — สถานะเป็น/ตายของบุคคลต้องตรงต้นฉบับ 100% ห้ามเลี่ยงคำจนข้อเท็จจริงการตายหายไปจากผลสกัด
+(16 ก.ค. 69: ถอด "เสียชีวิต" ออกจากลิสต์ห้าม — บทเรียนเคส #01641 เดิมแบนแล้วตัวเขียนละข้อเท็จจริงการตายทั้งเรื่อง แก้ครบแล้วฝั่ง Claude/OpenAI แต่ตกค้างที่นี่)
 เปลี่ยน "ความแรง" → "อารมณ์" เน้น emotional storytelling
 === จบ SAFETY RULES ===`,
   });
@@ -102,14 +104,23 @@ export async function callGemini({ prompt, model = 'gemini-3.5-flash', temperatu
   if (!content) throw new Error('Gemini ไม่ส่งข้อมูลกลับ');
 
   try {
-    return sanitizeOutput(JSON.parse(content));
+    // ★ 16 ก.ค. 69 (B1): แนบโมเดลจริงไปกับผล (non-enumerable — ไม่ปนใน JSON.stringify/spread เหมือน openai.js)
+    const _parsed = sanitizeOutput(JSON.parse(content));
+    if (_parsed && typeof _parsed === 'object') {
+      try { Object.defineProperty(_parsed, '_modelUsed', { value: model, enumerable: false }); } catch {}
+    }
+    return _parsed;
   } catch (e) {
     // ลอง extract JSON
     try {
       const startIdx = content.indexOf('{');
       const endIdx = content.lastIndexOf('}');
       if (startIdx !== -1 && endIdx !== -1) {
-        return sanitizeOutput(JSON.parse(content.slice(startIdx, endIdx + 1)));
+        const _parsed2 = sanitizeOutput(JSON.parse(content.slice(startIdx, endIdx + 1)));
+        if (_parsed2 && typeof _parsed2 === 'object') {
+          try { Object.defineProperty(_parsed2, '_modelUsed', { value: model, enumerable: false }); } catch {}
+        }
+        return _parsed2;
       }
     } catch (e2) {}
     console.error('[Gemini] JSON parse failed:', content.slice(0, 500));

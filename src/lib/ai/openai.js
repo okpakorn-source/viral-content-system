@@ -21,7 +21,7 @@ export function getOpenAIClient() {
  * เรียก AI — Single prompt system
  * callAI({ prompt: "..." }) — prompt เดียวครบ
  */
-export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, model = MODEL_PRIMARY, temperature = 0.7, maxTokens = 4000 }) {
+export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, model = MODEL_PRIMARY, temperature = 0.7, maxTokens = 4000, signal }) {
   const client = getOpenAIClient();
 
   if (!client) {
@@ -41,6 +41,7 @@ export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, 
 [กฎที่ 2: ห้ามแต่งเรื่อง]
 - ใช้ข้อมูลจากเนื้อข่าวที่ให้มาเท่านั้น ห้ามเพิ่มข้อมูลจากความรู้ของตัวเอง
 - ชื่อคน สถานที่ ตัวเลข วันที่ → ต้องตรงกับข่าวต้นฉบับ 100% ห้ามเดา ห้ามแก้
+- สถานะบุคคล "ยังมีชีวิต/เสียชีวิตแล้ว" ต้องตรงต้นฉบับ 100% — ถ้าต้นฉบับมีผู้เสียชีวิต ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้ง ("เสียชีวิต"/"จากไป" คือคำมาตรฐานปลอดภัย ใช้ได้) ห้ามเล่าฉากอดีตแบบละคำบอกการจากไป จนคนอ่านเข้าใจว่ายังมีชีวิตอยู่
 - ถ้าข่าวไม่ได้ระบุข้อมูลบางอย่าง → ห้ามสร้างขึ้นมาเอง ให้ข้ามไป
 
 [กฎที่ 3: ติดขัดต้องแจ้ง ห้ามแก้เอง]
@@ -183,11 +184,12 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
         messages,
         // ★ gpt-5.x ไม่รับ temperature ≠ 1 → ไม่ส่ง (ใช้ default)
         ...(isNewModel ? {} : { temperature }),
-        ...(isNewModel 
+        ...(isNewModel
           ? { max_completion_tokens: maxTokens }
           : { max_tokens: maxTokens }),
         response_format: { type: 'json_object' },
-      });
+      // ★ 16 ก.ค. 69 (B4): รับ AbortSignal จาก withTimeoutSignal — timeout แล้วยกเลิก HTTP จริง ตัดจ่ายซ้อน
+      }, signal ? { signal } : undefined);
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
@@ -208,8 +210,6 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
       });
 
       const parsed = JSON.parse(content);
-      // ★ ติดป้ายโมเดลที่ตอบจริง (non-enumerable — ไม่ปนใน JSON.stringify/spread) ให้ชั้นบน log ตรงความจริง
-      try { Object.defineProperty(parsed, '_modelUsed', { value: currentModel, enumerable: false }); } catch {}
 
       // === กฎเหล็ก: ตรวจจับ _error/_warning จาก AI ===
       if (parsed._error) {
@@ -220,7 +220,11 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
       }
 
       // === POST-PROCESSING SAFETY FILTER ===
-      return sanitizeOutput(parsed);
+      // ★ 16 ก.ค. 69 (B1 + review fix): ติดป้ายโมเดลจริง "หลัง" sanitizeOutput — sanitize สร้าง object ใหม่
+      //   ป้าย non-enumerable ที่ติดไว้ก่อนหน้าหายระหว่างทาง (จับได้จากเทสจริง: usedModel โชว์ 'gpt4o' แทนโมเดลจริง)
+      const _safe = sanitizeOutput(parsed);
+      try { Object.defineProperty(_safe, '_modelUsed', { value: currentModel, enumerable: false }); } catch {}
+      return _safe;
     } catch (err) {
       console.warn(`[callAI] ⚠️ Model '${currentModel}' failed: ${err.message}`);
       lastError = err;

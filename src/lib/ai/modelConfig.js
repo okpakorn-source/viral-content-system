@@ -42,11 +42,20 @@ export const MODEL_VISION  = 'gpt-5.5';                // ★ อัปเกร
 export const MODEL_HEAVY_FALLBACK = 'gpt-4o';          // fallback เมื่อ MODEL_PRIMARY ล้มเหลว/timeout
 
 // ★ COST LOOKUP (per 1M tokens, USD)
+// ★ 16 ก.ค. 69 (B1 audit fix): แก้ราคาให้ตรงหน้าราคาจริง — ค่าเดิม gpt-5.5 3/12 ต่ำกว่าจริง
+//   ทำให้ /cost รายงานต่ำกว่าบิลทั้งระบบ (โมเดลที่ถูกเรียกหนักสุด)
 export const MODEL_COSTS = {
-  'gpt-5.5':       { input: 3.0, output: 12.0 },
-  'gpt-5.4-mini':  { input: 0.10, output: 0.40 },
+  'gpt-5.5':       { input: 5.0, output: 30.0 },
+  'gpt-5.4-mini':  { input: 0.75, output: 4.50 },
+  // GPT-5.6 (GA 9 ก.ค. 69) — เตรียมไว้สำหรับแผนอัปเกรด B6
+  'gpt-5.6-sol':   { input: 5.0, output: 30.0 },
+  'gpt-5.6-terra': { input: 2.5, output: 15.0 },
+  'gpt-5.6-luna':  { input: 1.0, output: 6.0 },
+  // Anthropic (ตัวเขียนจริง + ตัว A/B)
+  'claude-opus-4-8': { input: 5.0, output: 25.0 },
+  'claude-sonnet-5': { input: 2.0, output: 10.0 }, // โปรถึง 31 ส.ค. 69 → หลังนั้น 3/15
   // Legacy
-  'gpt-4o':        { input: 5.0, output: 15.0 },
+  'gpt-4o':        { input: 2.5, output: 10.0 },  // ราคา grandfathered ปัจจุบัน (เดิมใส่ 5/15 ตกรุ่น)
   'gpt-4o-mini':   { input: 0.15, output: 0.60 },
 };
 

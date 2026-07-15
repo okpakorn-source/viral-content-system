@@ -5,7 +5,7 @@ import { MODEL_COSTS } from './modelConfig.js';
 const PRICING = {
   ...MODEL_COSTS,
   // Legacy + other providers
-  'gpt-4o': { input: 5.0, output: 15.0 },
+  // ★ 16 ก.ค. 69 (B1): gpt-4o override เดิม 5/15 ตกรุ่น — ใช้ราคา grandfathered จริงจาก MODEL_COSTS แทน (ไม่ override ซ้ำ)
   'gpt-4o-mini': { input: 0.15, output: 0.60 },
   'claude-sonnet-4-6': { input: 3.0, output: 15.0 },
   'claude-sonnet-4-20250514': { input: 3.0, output: 15.0 },
@@ -25,7 +25,13 @@ export async function logApiUsage({ provider, model, inputTokens, outputTokens, 
     let costUsd = 0;
     
     // Find matching price, defaulting to 0 if not found
-    const price = PRICING[model] || Object.values(PRICING).find((_, key) => model.includes(key));
+    // ★ 16 ก.ค. 69 (B1 audit fix): ของเดิม Object.values(...).find((_, key) => ...) — พารามิเตอร์ตัวที่ 2
+    //   ของ .find บน array คือ "index ตัวเลข" ไม่ใช่ key → partial-match ไม่เคยทำงาน โมเดลชื่อไม่ตรงเป๊ะถูกบันทึก $0
+    //   แก้เป็นหา key จริง เรียงยาว→สั้น (กัน 'gpt-5.5' ไปจับ 'gpt-5' ผิดตัว) และใช้ startsWith ก่อน includes
+    const _priceKey = Object.keys(PRICING)
+      .sort((a, b) => b.length - a.length)
+      .find(k => model === k || model.startsWith(k) || model.includes(k));
+    const price = PRICING[model] || (_priceKey ? PRICING[_priceKey] : undefined);
     
     if (price) {
       costUsd = ((inputTokens / 1000000) * price.input) + ((outputTokens / 1000000) * price.output);
