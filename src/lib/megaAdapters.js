@@ -2287,6 +2287,43 @@ export async function _buildIdentityEvidenceV1({ factsById, caseId, deps } = {})
   }
 }
 
+// ★ B5 SHADOW — heroVisionById: วัด hero metrics 3 ตัวสุดท้าย (occlusion/cleanliness/visibleBodyRegion) ต่อ candidate
+//   ด้วย candidateHeroVision. ต่างจาก B4: ไม่ต้องมี reference บุคคล — วัด "ภาพผู้สมัครใบนั้นเอง" ล้วน (ต้องมีพิกเซล).
+//   detached · พังทุกจุด → null (ไม่ HOLD เพิ่ม) · ยังไม่มี consumer (_rhHeroCandidate ยัง hardcode absent 3 ค่านั้น).
+//   วันนี้ระบบ "ไม่มี producer ภาพต่อ assetId จริง" (facts มีแค่ descriptor/hash ไม่มีพิกเซล) → resolver ไม่ถูกฉีด ⇒
+//   null (dormant สนิท). resolver = authority ที่รู้ mapping (assetId→candidate image holder). bridge ส่งเฉพาะ key
+//   เชิงโครงสร้าง (sourceAssetId + validated facts) เข้า resolver ไม่เดา. vision จริงเฉพาะ MEGA_HERO_VISION=1
+//   (ค่าเริ่ม OFF = cache-only ไม่มี network).
+export async function _buildHeroVisionEvidenceV1({ factsById, caseId, deps } = {}) {
+  try {
+    if (!(factsById instanceof Map) || factsById.size < 1) return null;
+    const resolve = deps?.heroImageResolver;
+    if (typeof resolve !== 'function') return null; // ไม่มีแหล่งภาพต่อ assetId ในระบบวันนี้ → absent (dormant)
+    const hvApi = deps?.heroVisionApi || await import('@/lib/candidateHeroVision');
+    if (typeof hvApi?.measureHeroVision !== 'function') return null;
+    if (typeof hvApi._resetHeroVisionRound === 'function') hvApi._resetHeroVisionRound(); // รีเซ็ตเพดาน vision ต่อรอบ S6
+    const out = new Map();
+    for (const [assetId, facts] of factsById) {
+      // resolver = authority ที่รู้ mapping เชิงโครงสร้าง (assetId→candidate image holder) — bridge ไม่เดาพิกเซลเอง
+      let holder = null;
+      try { holder = resolve({ sourceAssetId: assetId, facts, caseId }); } catch { holder = null; }
+      if (!holder || typeof holder !== 'object') continue;
+      const measured = await hvApi.measureHeroVision({
+        candidate: holder.candidate,
+        deps,
+      });
+      if (measured && typeof measured === 'object'
+        && Number.isFinite(measured.occlusion) && Number.isFinite(measured.cleanliness)
+        && typeof measured.visibleBodyRegion === 'string') {
+        out.set(assetId, measured); // detached (โมดูลคืน frozen plain object)
+      }
+    }
+    return out.size ? out : null;
+  } catch {
+    return null; // พังทุกจุด → null เงียบ (detached · ไม่ HOLD เพิ่ม)
+  }
+}
+
 // Map a structural ref slot to a Cast editorial role (hero|reaction|context) — genuine per-slot eligibility (Fix #3).
 function _rhMappedCastRole(s) {
   const refRole = String(s?.refRole ?? '').trim().toLowerCase();
@@ -3411,6 +3448,17 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         deps: _deps,
       });
     } catch { _rhIdentityById = null; }
+    // ★ B5 SHADOW: heroVisionById "วัดจริงต่อ candidate" จาก candidateHeroVision — occlusion/cleanliness/
+    //   visibleBodyRegion (3 hero metrics สุดท้ายที่ heroShotContract ต้องการ) · detached · พังทุกจุด → null
+    //   (ไม่ HOLD เพิ่ม) · ยังไม่มี consumer (_rhHeroCandidate ยัง hardcode 3 ค่านั้น absent) · resolver ไม่ถูกฉีด = null
+    let _rhHeroVisionById = null;
+    try {
+      _rhHeroVisionById = await _buildHeroVisionEvidenceV1({
+        factsById: _rhAuthority ? _rhAuthority.factsById : null,
+        caseId: _rhCaseIdReq,
+        deps: _deps,
+      });
+    } catch { _rhHeroVisionById = null; }
     const _rhAuthorityEvidence = {
       caseId: _rhCaseIdReq,
       factsById: _rhAuthority ? _rhAuthority.factsById : new Map(),
@@ -3418,8 +3466,9 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       metricsById: _rhMetricsById, // ★ B1 SHADOW — ยังไม่มี consumer อ่าน (cast/hero/global hardcode เดิม)
       cropReadiness: _rhCropReadiness, // ★ B3 SHADOW — cropSafe ต่อ slot วัดจริง · absent(null) ≠ false · ยังไม่มี consumer
       identityById: _rhIdentityById, // ★ B4 SHADOW — identityConfidence/identityVerified ต่อ candidate · absent(null) ≠ verified · ยังไม่มี consumer
+      heroVisionById: _rhHeroVisionById, // ★ B5 SHADOW — occlusion/cleanliness/visibleBodyRegion ต่อ candidate · absent(null) ≠ ผ่าน · ยังไม่มี consumer
     };
-    console.log(`[MEGA S6] 🔐 V2 evidence bridge: authority=${_rhAuthority ? 'ok' : 'unavailable'} · facts ${_rhAuthorityEvidence.factsById.size} ใบ · searched(shadow∩universe) ${_rhAuthorityEvidence.searchedMeta.size} id · metrics(shadow) ${_rhMetricsById ? _rhMetricsById.size : 0} ใบ · cropReadiness(shadow) ${_rhCropReadiness && _rhCropReadiness.ok ? `ok/${_rhCropReadiness.summary?.cropCells ?? 0} cells` : (_rhCropReadiness ? 'rejected' : 'none')} · identity(shadow) ${_rhIdentityById ? _rhIdentityById.size : 0} ใบ`);
+    console.log(`[MEGA S6] 🔐 V2 evidence bridge: authority=${_rhAuthority ? 'ok' : 'unavailable'} · facts ${_rhAuthorityEvidence.factsById.size} ใบ · searched(shadow∩universe) ${_rhAuthorityEvidence.searchedMeta.size} id · metrics(shadow) ${_rhMetricsById ? _rhMetricsById.size : 0} ใบ · cropReadiness(shadow) ${_rhCropReadiness && _rhCropReadiness.ok ? `ok/${_rhCropReadiness.summary?.cropCells ?? 0} cells` : (_rhCropReadiness ? 'rejected' : 'none')} · identity(shadow) ${_rhIdentityById ? _rhIdentityById.size : 0} ใบ · heroVision(shadow) ${_rhHeroVisionById ? _rhHeroVisionById.size : 0} ใบ`);
     _refHeroV2Patch = semContract
       ? await _runRefHeroV2({ compass: job.dossier.compass, semContract, canonHeroId: _canonHeroId, semAuthorityHash: _semAuthorityHash, refDNA: _refDNA, refId: job.dossier.refMatch?.refId || job.dossier.refMatch?.dnaHash || null, gatedPool, authorityEvidence: _rhAuthorityEvidence, deps: _deps })
       : _rhHold('REF_HERO_V2_NO_STRUCTURAL_SLOTS');

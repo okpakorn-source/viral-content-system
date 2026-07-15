@@ -94,4 +94,5 @@ _removed-systems-backup-*/
 data/job_queue.json
 data/face-cache.json
 data/identity-cache.json
+data/hero-vision-cache.json
 public/case-frames/
