@@ -11,7 +11,7 @@
  * ถ้าไม่มี Supabase → fallback ไป file storage (local dev)
  */
 
-import { getSupabase, isSupabaseReady } from '@/lib/supabase';
+import { getSupabase, isSupabaseReady } from './supabase.js';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';

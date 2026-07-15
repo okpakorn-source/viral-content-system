@@ -1,7 +1,7 @@
 import { createStore } from '@/lib/persistStore';
 import { v4 as uuidv4 } from 'uuid';
 import { createHash } from 'crypto';
-import { getSupabase, isSupabaseReady } from '@/lib/supabase';
+import { getSupabase, isSupabaseReady } from '../supabase.js';
 
 const QUEUE_STORE = 'job_queue';
 
