@@ -176,6 +176,10 @@ globalThis.fetch = () => { fetchBombCalls++; throw new Error('NETWORK_BOMB: glob
 const { _createCaptureClaimGate, handleCoverRefTestPost, runCoverRefTest, runS7CaptureOnly, POST } = await import('../src/app/api/cover-ref-test/route.js');
 const { s6_slots, s7_cover, _dnaHashFor } = await import('../src/lib/megaAdapters.js');
 const { resolveRefSlotView, buildRefSlotContract, validateStrictRenderActivation } = await import('../src/lib/refSlotContract.js');
+// Batch 4B V2-hold fixture helpers — imported via the REAL relative path (NOT '@/lib/imageStore'), so they bypass the
+// leak-counted STUB the module hook installs for '@/lib/imageStore'; calling them never touches __CAP_LEAK (B18 stays 0).
+const { buildImagesRouteResponse: realBuildImagesRouteResponse } = await import('../src/lib/imageStore.js');
+const { buildCandidateFactsV1 } = await import('../src/lib/candidateFactAuthority.js');
 
 // ---- Date.now fixing (byte determinism) ----
 const REAL_NOW = ORIG_DATE_NOW;
@@ -1006,148 +1010,82 @@ const mkV2S6Deps = () => ({
   fetchJson: async (url) => { if (String(url).includes('/api/images/')) return { success: true, images: V2_POOL() }; throw new Error('v2 fixture: unexpected fetch ' + url); },
 });
 
-// (C-build-1) genuine post-S6 dossier carrying pickImages.refHeroV2 — REAL four-foundation producer, offline, ONCE.
-const V2_FIXTURE_BUILD = await withEnvMap(V2_ENV, () => withFixedNow(async () => {
-  const job = { id: 'V2-FIXTURE-JOB', dossier: {
-    images: { caseId: V2_CASE_ID },
+// ── Batch 4B quarantine: producer HOLD จนกว่ามี readiness producer จริง — เคาะ Option B 15 ก.ค. 69 ──
+//   Group C เดิมสร้าง carrier V2 จริง (s6 status 'done', refHeroV2.ok===true) แล้วพิสูจน์ว่า W3-3 route/capture-only
+//   ส่ง carrier ที่ถูกต้องต่อ composer — ดีไซน์เก่าก่อนกักกัน. ตอนนี้ท่อ V2 ON เดินสาย real four-foundation producer
+//   แล้ว fail-closed เป็น typed HOLD: identity/crop verifier ยังไม่มีในระบบ (Batch 4A/4B ⇒ _rhCastCandidate hardcode
+//   cropSafe/identityVerified=false) ⇒ cast ไม่มี asset ผ่าน ⇒ REF_HERO_V2_INSUFFICIENT_CAST_ASSETS ⇒ ไม่มี carrier ให้
+//   S7/composer. converge สไตล์ batch3/batch4: (ก) ON ⇒ waiting + typed HOLD ก่อน brain · (ข) OFF ⇒ ไม่มี refHeroV2 key.
+//   หมายเหตุ: authority ป้อนผ่าน _deps.readImagesAuthority (real builder, relative import) — producer ไม่แตะ imageStore
+//   stub เลย ⇒ B18 leak ledger ยังเป็น 0.
+const V2_HOLD_ENV = { ...V2_ENV, MEGA_HERO_GRADE_HARD: '0' };
+const v2FactsFor = () => buildCandidateFactsV1({
+  verdicts: { relevant: true, clean: true, newsScene: true },
+  resolution: { decodedBuffer: true, provenance: 'full', width: 1000, height: 1400 },
+  faceBox: { x: 0.30, y: 0.12, w: 0.40, h: 0.48 },
+});
+// snapshot rows carrying genuine validated candidateFacts (the real image-store authority the V2 producer consumes)
+const v2HoldRows = () => V2_CHARS.map(({ name }, i) => {
+  const id = ['V-L1', 'V-N1', 'V-C1', 'V-C2', 'V-C3'][i];
+  return {
+    id, caseId: V2_CASE_ID, platform: 'google', imageUrl: `https://cdn.test/${id}.jpg`, thumbnailUrl: '',
+    source: 'SynthNews Desk', sourceLink: `https://source.test/${id}`,
+    width: 1000, height: 1400, realWidth: 1000, realHeight: 1400,
+    triage: { relevant: true, clean: true, newsScene: true, person: name, persons: [name], faceCount: 1, faceBox: { x1: 0.30, y1: 0.12, x2: 0.70, y2: 0.60 }, candidateFacts: v2FactsFor() },
+  };
+});
+const v2Shadow = (ids) => ({ version: 2, totalCandidates: ids.length, emittedCandidates: ids.length, truncatedCandidates: 0, capped: false, candidates: ids.map((candidateId, index) => ({ candidateId, provider: 'google', queryIndex: 0, providerRank: index + 1 })) });
+async function v2AuthResponse(rows) {
+  const snapshot = { scope: 'case_image_store_snapshot_v1', caseId: V2_CASE_ID, complete: true, truncated: false, count: rows.length, rows };
+  const response = await realBuildImagesRouteResponse(V2_CASE_ID, '1', { readImagesSnapshot: async (cid) => { if (cid !== V2_CASE_ID) throw new Error('unexpected case'); return snapshot; } });
+  assert.strictEqual(response.status, 200, 'real image-store authority fixture builds a 200');
+  assert.strictEqual(response.body?.success, true, 'real image-store authority fixture is successful');
+  return response;
+}
+function v2HoldJob(rows) {
+  return { id: 'V2-HOLD-JOB', dossier: {
+    images: { caseId: V2_CASE_ID, searchStats: [{ platform: 'google', found: rows.length, added: rows.length, searchShadowV2: v2Shadow(rows.map((r) => r.id)) }] },
     compass: { angle: 'มุมทดสอบ v2', primaryEmotion: 'warm', secondaryEmotions: [], mainCharacters: V2_CHARS, visualDreamShots: [], doNotUse: [] },
     desk: { title: 'ข่าวทดสอบ ref-hero-v2 fixture' },
     refMatch: mkV2RefMatch(),
     artBrief: { storyNote: 'เรื่องทดสอบ v2 fixture', orders: [] },
   } };
-  const s6 = await s6_slots(job, { origin: 'http://mock', _deps: mkV2S6Deps() });
-  assert.strictEqual(s6.status, 'done', `v2 fixture-build: real s6_slots must complete done (got ${s6.status} ${s6.summary || ''})`);
-  Object.assign(job.dossier, s6.dossierPatch);
-  assert.strictEqual(job.dossier.pickImages?.refHeroV2?.ok, true, 'v2 fixture-build: real S6 four-foundation producer must emit a valid refHeroV2 carrier');
-  assert.strictEqual(job.dossier.pickImages.refHeroV2.selectionSpec.v, 2, 'v2 fixture-build: carrier selectionSpec is canonical V2');
-  return job;
-}));
-const V2_FIXTURE_JOB = Object.freeze(cloneJson(V2_FIXTURE_BUILD));
-// the exact real post-S6 patch replayed by the full-route s6 double (carrier is genuinely real; S7 re-validates live)
-const V2_S6_PATCH = Object.freeze(cloneJson({ images: V2_FIXTURE_BUILD.dossier.images, pickImages: V2_FIXTURE_BUILD.dossier.pickImages, refMatch: V2_FIXTURE_BUILD.dossier.refMatch }));
+}
+// ON path: the REAL four-foundation producer via the injected in-process image authority ⇒ typed HOLD before the brain.
+async function runV2Hold(rows = v2HoldRows()) {
+  const response = await v2AuthResponse(rows);
+  const captures = { brainArgs: [] };
+  const s6 = await withEnvMap(V2_HOLD_ENV, () => withFixedNow(() => s6_slots(v2HoldJob(rows), { origin: 'http://mock', _deps: {
+    readImagesAuthority: async (cid) => { if (cid !== V2_CASE_ID) throw new Error('unexpected authority case'); return response; },
+    slotDirectorBrain: async (a) => { captures.brainArgs.push(a); throw new Error('brain must not run on a typed V2 HOLD'); },
+  } })));
+  return { s6, captures };
+}
 
-// (C-build-2) genuine V2-ONLY wire — REAL s7_cover V2 producer from the real carrier (own refHeroV2, no V1 pair).
-const REAL_V2_WIRE_BODY = await withEnvMap({ ...V2_ENV, MEGA_STRICT_RENDER: '1', MEGA_COVER_ORIGIN: CAPTURE_HOST }, () => withFixedNow(async () => {
-  const job = cloneJson(V2_FIXTURE_JOB);
-  let body = null;
-  const fetchJson = async (url, opts) => {
-    if (String(url).includes('/api/queue/add')) { body = opts.body; return { success: true, jobId: 'V2-WIRE' }; }
-    if (String(url).includes('/api/images/')) return { httpStatus: 200, success: true, images: V2_POOL() };
-    throw new Error('v2 wire-build: unexpected fetch ' + url);
-  };
-  const s7 = await s7_cover(job, { origin: CAPTURE_HOST, _deps: { fetchJson, queueTransport: 'cover_ref_test_in_process' } });
-  assert.strictEqual(s7.status, 'done', `v2 wire-build: real s7_cover must complete done (got ${s7.status} ${s7.summary || ''})`);
-  assert.ok(typeof body === 'string' && body.length > 0, 'v2 wire-build: real S7 emitted a queue wire body');
-  const wp = JSON.parse(body);
-  assert.ok(Object.prototype.hasOwnProperty.call(wp, 'refHeroV2'), 'v2 wire-build: wire carries own refHeroV2');
-  assert.ok(!Object.prototype.hasOwnProperty.call(wp, 'selectionSpec') && !Object.prototype.hasOwnProperty.call(wp, 'realizedTemplate'), 'v2 wire-build: genuine V2-ONLY wire (no top-level V1 pair)');
-  assert.strictEqual(wp.refHeroV2.selectionSpec.refId, FIXTURE_REF_ID, 'v2 wire-build: wire carrier ref identity = bound refId');
-  return body;
-}));
-
-test('C1 (W3-3 V2 full-route) ordinary runCoverRefTest classifies a genuine real-S6→real-S7 V2-ONLY wire as STRICT and forwards the EXACT refHeroV2 carrier (no top-level V1 pair) to the composer; effectiveMode strict (never legacy); authority/refId from the validated V2 spec', async () => {
+test('C1 (Batch 4B) flag ON ⇒ the REAL four-foundation S6 producer fail-closes to a typed HOLD (waiting + REF_HERO_V2_INSUFFICIENT_CAST_ASSETS) before the brain — no carrier reaches S7/composer; no NEW forbidden-dependency leak', async () => {
   const leakBefore = JSON.stringify(globalThis.__CAP_LEAK || {});
   const fetchBombBefore = fetchBombCalls;
-  const composeCalls = [];
-  const env = { ...V2_ENV, MEGA_STRICT_RENDER: '1', MEGA_COVER_ORIGIN: CAPTURE_HOST, MEGA_STABLE_ORDER: '0' };
-  const noop = (n) => async () => ({ status: 'done', nextAction: 'continue', summary: n });
-  const out = await withEnvMap(env, () => withFixedNow(() => runCoverRefTest(
-    { content: 'เนื้อข่าวเต็มสำหรับทดสอบ ref-hero-v2 full-route seam '.padEnd(240, 'x'), newsTitle: 'ข่าวทดสอบ V2', origin: CAPTURE_HOST }, // ★ 15 ก.ค.: 160→240 ตาม gate เนื้อข่าว ≥200 (แบตช์ 1 — ให้ตรง s5_case)
-    {
-      compassBrain: async () => ({ angle: 'a', primaryEmotion: 'warm', secondaryEmotions: [], mainCharacters: V2_CHARS, visualDreamShots: [], doNotUse: [] }),
-      s5_case: noop('s5_case'), s5_keywords: noop('s5_keywords'), s5_search: noop('s5_search'), s5_triage: noop('s5_triage'), s5_clipframe: noop('s5_clipframe'),
-      // installs the EXACT real post-S6 carrier (built above by the real four-foundation producer); real S7 re-validates it live
-      s6_slots: async () => ({ status: 'done', nextAction: 'continue', dossierPatch: cloneJson(V2_S6_PATCH) }),
-      s7_cover, // REAL producer — re-validates the carrier and emits the V2-only wire, intercepted by the real in-process seam
-      composeAndVerify: async (args) => { composeCalls.push(args); return { success: true, base64: 'data:image/jpeg;base64,QUJD', template: 'v2-tmpl', refSimilarity: 88, qcFlags: [], manifest: { strictRender: true }, caseId: 'COVER-V2' }; },
-      evaluateCoverQc: () => ({ pass: true, reasons: [] }),
-      readImageCase: async () => ({ status: 200, body: { success: true, images: V2_POOL() } }),
-      loadArchive: async () => ({ addMegaCover: async () => ({ id: 'MEGA-V2-1' }) }),
-      persistCoverImage: async () => null,
-      env,
-    },
-  )));
-  assert.strictEqual(out.status, 200, `status (got ${out.status} ${JSON.stringify(out.body?.errorType)} ${JSON.stringify(out.body?.holdReason)})`);
-  assert.strictEqual(out.body.success, true);
-  assert.strictEqual(out.body.effectiveMode, 'strict', 'V2-only wire + RENDER=1 ⇒ strict — never downgraded to legacy');
-  assert.notStrictEqual(out.body.effectiveMode, 'legacy', 'a V2 wire must never be labeled legacy');
-  assert.strictEqual(out.body.holdReason, null, 'no HOLD on the genuine V2 wire');
-  // composer received the EXACT V2 carrier (own-property) and NO top-level V1 pair
-  assert.strictEqual(composeCalls.length, 1, 'composer invoked exactly once');
-  const cargs = composeCalls[0];
-  assert.ok(Object.prototype.hasOwnProperty.call(cargs, 'refHeroV2'), 'composerArgs carries own refHeroV2');
-  assert.ok(!Object.prototype.hasOwnProperty.call(cargs, 'selectionSpec'), 'composerArgs has NO top-level selectionSpec (V2-only, no V1 pair)');
-  assert.ok(!Object.prototype.hasOwnProperty.call(cargs, 'realizedTemplate'), 'composerArgs has NO top-level realizedTemplate (V2-only, no V1 pair)');
-  assert.strictEqual(cargs.refHeroV2.selectionSpec.v, 2, 'forwarded carrier is canonical V2');
-  assert.strictEqual(cargs.refHeroV2.selectionSpec.refId, FIXTURE_REF_ID, 'forwarded carrier ref identity = validated V2 spec refId');
-  assert.deepStrictEqual(cargs.refHeroV2, cloneJson(V2_S6_PATCH.pickImages.refHeroV2), 'composer received the EXACT refHeroV2 carrier S6 produced — unmutated, not re-derived');
-  // route authority surfaced from the validated V2 spec (extractAuthorityLatches reads refHeroV2.selectionSpec)
-  assert.strictEqual(out.body.authority.refId, FIXTURE_REF_ID, 'route authority.refId comes from the validated V2 spec');
-  assert.ok(Array.isArray(out.body.authority.refSlotIds) && out.body.authority.refSlotIds.length >= 3, 'authority.refSlotIds surfaced from the V2 spec slots');
-  assert.ok(Array.isArray(out.body.authority.composerSlotIds) && out.body.authority.composerSlotIds.length >= 3, 'authority.composerSlotIds surfaced from the V2 spec slots');
-  assert.strictEqual(fetchBombCalls, fetchBombBefore, 'no global.fetch touched (queue rode the in-process seam)');
-  assert.strictEqual(JSON.stringify(globalThis.__CAP_LEAK || {}), leakBefore, 'no NEW forbidden-dependency calls — composer/qc/archive/imageStore were injected doubles');
+  const { s6, captures } = await runV2Hold();
+  assert.strictEqual(s6.status, 'waiting', 'ON: producer fail-closes (no crop/identity verifier ⇒ cast HOLD)');
+  assert.deepStrictEqual(s6.dossierPatch?.pickImages?.refHeroV2, { v: 1, ok: false, hold: 'REF_HERO_V2_INSUFFICIENT_CAST_ASSETS' });
+  assert.strictEqual(captures.brainArgs.length, 0, 'brain NOT called on a typed HOLD (pre-brain sentinel)');
+  assert.strictEqual(fetchBombCalls, fetchBombBefore, 'no global.fetch touched (authority rode the injected in-process seam)');
+  assert.strictEqual(JSON.stringify(globalThis.__CAP_LEAK || {}), leakBefore, 'no NEW forbidden-dependency calls (imageStore/composer/qc/archive untouched — real authority builder is not the leak-counted stub)');
 });
 
-test('C2 (W3-3 V2 capture-only) a GENUINE V2-only wire flows through runS7CaptureOnly\'s retained _strictActivate seam to success — ref identity from the VALIDATED activation, capture-only NEVER composes', async () => {
-  const leakBefore = JSON.stringify(globalThis.__CAP_LEAK || {});
-  // inject an s7 that POSTs the genuine real V2 wire through the SAME in-process queue interceptor the ordinary path uses
-  const s7 = async (job, { _deps }) => { await _deps.fetchJson(`${CAPTURE_HOST}/api/queue/add`, { method: 'POST', body: REAL_V2_WIRE_BODY }); return { status: 'done', nextAction: 'continue', summary: 'v2 wire enqueued' }; };
-  const out = await runCapture(mkPayload(), { s7_cover: s7 });
-  assert.strictEqual(out.status, 200, `status (got ${out.status} ${JSON.stringify(out.body?.errorType)} ${JSON.stringify(out.body?.holdReason)})`);
-  assert.strictEqual(out.body.success, true);
-  assert.strictEqual(out.body.mode, 'capture_only');
-  assert.strictEqual(out.body.evidenceKind, 'replay_operator_supplied');
-  // the wire that reached success is genuinely V2-only
-  const wire = out.body.queuePayload;
-  assert.ok(Object.prototype.hasOwnProperty.call(wire, 'refHeroV2'), 'captured wire carries own refHeroV2');
-  assert.ok(!Object.prototype.hasOwnProperty.call(wire, 'selectionSpec') && !Object.prototype.hasOwnProperty.call(wire, 'realizedTemplate'), 'captured wire is V2-only (no top-level V1 pair)');
-  assert.strictEqual(wire.refHeroV2.selectionSpec.v, 2, 'captured wire carrier is canonical V2');
-  // ref identity surfaced only because the SHARED _strictActivate validated the carrier and its ctx.authority.refId
-  // matched the operator-bound refId (both = FIXTURE_REF_ID) — not a shallow field peek
-  assert.strictEqual(out.body.refId, FIXTURE_REF_ID, 'capture-only success refId = validated V2 activation refId (== bound refId)');
-  // capture-only "never composes" invariant holds: composeAndVerify (the throwing/leak-counted stub) was never called
-  const leakAfter = globalThis.__CAP_LEAK || {};
-  assert.strictEqual(leakAfter.composeAndVerify || 0, 0, 'capture-only NEVER composes (composeAndVerify stub untouched)');
-  assert.strictEqual(JSON.stringify(leakAfter), leakBefore, 'no NEW forbidden-dependency calls during the V2 capture path');
+test('C2 (Batch 4B) the typed HOLD is deterministic under input reordering (no positional/order dependence)', async () => {
+  const a = (await runV2Hold(v2HoldRows())).s6.dossierPatch?.pickImages?.refHeroV2;
+  const b = (await runV2Hold(v2HoldRows().reverse())).s6.dossierPatch?.pickImages?.refHeroV2;
+  assert.deepStrictEqual(a, b, 'row order cannot alter the typed hold');
+  assert.deepStrictEqual(a, { v: 1, ok: false, hold: 'REF_HERO_V2_INSUFFICIENT_CAST_ASSETS' });
 });
 
-test('C3 (W3-3 V2 negative) a genuine-V2-derived AMBIGUOUS V1+V2 wire is HELD at the shared in-process seam (SEAM_STRICT_CARRIER_AMBIGUOUS) BEFORE any success — and capture-only still never composes', async () => {
+test('C3 (Batch 4B) flag OFF ⇒ no refHeroV2 key (additive-only; the V2 producer adds nothing when unset) — legacy semantic-only path unchanged, no NEW leak', async () => {
   const leakBefore = JSON.stringify(globalThis.__CAP_LEAK || {});
-  // take the genuine V2 wire and ALSO bolt on a V1 pair — the exact shape the seam must reject (mirrors the composer's
-  // STRICT_RENDER_CARRIER_AMBIGUOUS: V1 and V2 carriers may never co-exist on one wire)
-  const ambiguousBody = JSON.stringify({ ...JSON.parse(REAL_V2_WIRE_BODY), selectionSpec: { refId: FIXTURE_REF_ID }, realizedTemplate: { id: 'x' } });
-  const s7 = async (job, { _deps }) => { await _deps.fetchJson(`${CAPTURE_HOST}/api/queue/add`, { method: 'POST', body: ambiguousBody }); return { status: 'done', nextAction: 'continue', summary: 'unreachable' }; };
-  const out = await runCapture(mkPayload(), { s7_cover: s7 });
-  assert.strictEqual(out.status, 422, `status (got ${out.status} ${JSON.stringify(out.body?.errorType)})`);
-  assert.strictEqual(out.body.errorType, 'SEAM_STRICT_CARRIER_AMBIGUOUS', 'a V1+V2 wire is rejected at the shared seam, before any success/compose');
-  assert.strictEqual(out.body.success, false);
-  assert.ok(!Object.prototype.hasOwnProperty.call(out.body, 'queueBody'), 'no queueBody leaked on the ambiguous HOLD');
-  const leakAfter = globalThis.__CAP_LEAK || {};
-  assert.strictEqual(leakAfter.composeAndVerify || 0, 0, 'ambiguous HOLD never composes');
-  assert.strictEqual(JSON.stringify(leakAfter), leakBefore, 'no NEW forbidden-dependency calls during the ambiguous-negative path');
-});
-
-test('C4 (W3-3 V2 regression) CAPTURE_REF_IDENTITY_STALE: a GENUINE valid V2 activation whose validated specRefId ≠ the operator-bound refId is HELD (422) with specRefId/boundRefId evidence — before success, never composes, no new leak (does not weaken B14)', async () => {
-  const leakBefore = JSON.stringify(globalThis.__CAP_LEAK || {});
-  const STALE_BOUND_ID = 'REF-OPERATOR-BOUND-DIFFERENT';
-  // Genuine real V2 wire (its validated selectionSpec.refId === FIXTURE_REF_ID) enqueued through the real seam; only
-  // the OPERATOR-bound job refId is mutated to a DIFFERENT fixed id — the carrier itself is untouched/valid (NOT a
-  // handcrafted/blessed invalid carrier). The stale HOLD therefore comes from the real ref-identity mismatch alone.
-  const s7 = async (job, { _deps }) => { await _deps.fetchJson(`${CAPTURE_HOST}/api/queue/add`, { method: 'POST', body: REAL_V2_WIRE_BODY }); return { status: 'done', nextAction: 'continue', summary: 'v2 wire enqueued' }; };
-  const out = await runCapture(mkPayload((job) => { job.dossier.refMatch.refId = STALE_BOUND_ID; }), { s7_cover: s7 });
-  assert.strictEqual(out.status, 422, `status (got ${out.status} ${JSON.stringify(out.body?.errorType)})`);
-  assert.strictEqual(out.body.errorType, 'CAPTURE_REF_IDENTITY_STALE');
-  assert.strictEqual(out.body.holdReason, 'ref_identity_stale');
-  // evidence: the VALIDATED activation refId vs the operator-bound refId (both surfaced; the mismatch IS the reason)
-  assert.strictEqual(out.body.specRefId, FIXTURE_REF_ID, 'specRefId = the genuine validated V2 activation refId');
-  assert.strictEqual(out.body.boundRefId, STALE_BOUND_ID, 'boundRefId = the mutated operator-bound refId');
-  assert.notStrictEqual(out.body.specRefId, out.body.boundRefId, 'stale = validated specRefId ≠ boundRefId');
-  assert.strictEqual(out.body.success, false, 'never success');
-  assert.ok(!Object.prototype.hasOwnProperty.call(out.body, 'queueBody'), 'no queueBody emitted on the stale HOLD');
-  const leakAfter = globalThis.__CAP_LEAK || {};
-  assert.strictEqual(leakAfter.composeAndVerify || 0, 0, 'stale HOLD never composes');
-  assert.strictEqual(JSON.stringify(leakAfter), leakBefore, 'no NEW forbidden-dependency calls during the stale-refId path');
+  const off = await withEnvMap({ MEGA_SEMANTIC_SELECTION: '1', MEGA_SELECTION_SPEC: '1' }, () => withFixedNow(() => s6_slots(v2HoldJob(v2HoldRows()), { origin: 'http://mock', _deps: mkV2S6Deps() })));
+  assert.strictEqual(off.status, 'done', 'OFF: semantic-only pipeline completes unchanged');
+  assert.ok(!('refHeroV2' in off.dossierPatch.pickImages), 'OFF: pickImages has no refHeroV2 key');
+  assert.strictEqual(JSON.stringify(globalThis.__CAP_LEAK || {}), leakBefore, 'no NEW forbidden-dependency calls on the legacy path');
 });
 
 test('B18 global.fetch bomb, real-fs-write bomb, and the complete forbidden-dependency leak ledger (aiClient.callBrain/coverQcGate/composer/imageStore/archive/fs) are all empty across the whole file', async () => {
