@@ -47,6 +47,26 @@ function _safeBorderColor(c) {
   return `#${m[1]}`;
 }
 
+// ★ WAVE1A provenance authenticity — module-private WeakMap binding each realized-slot OBJECT IDENTITY to a
+//   FROZEN authentic CONTENT snapshot { sourceIndex, id, x, y, w, h, zIndex, border, borderWidth, shape }, captured
+//   AFTER all internal geometry/id mutations. A restamp/swap/strip produces a DIFFERENT object absent from this map
+//   ⇒ realizedSlotProvenance() returns null ⇒ the producer HOLDs. Because the snapshot is frozen and stored by
+//   identity, the authentic id/geometry cannot be tampered post-return: a caller may mutate the live slot object,
+//   but the producer reads ONLY this immutable snapshot. The non-enumerable _sourceIndex descriptor is defense-in-depth.
+const _SLOT_PROVENANCE = new WeakMap();
+
+// Authentic provenance accessor: the FROZEN content snapshot bound to THIS exact realized-slot object, or null if
+// `slot` was not produced by this module (restamped/swapped/foreign). Pure, no side effects, no getter invocation.
+export function realizedSlotProvenance(slot) {
+  if (slot === null || typeof slot !== 'object') return null;
+  return _SLOT_PROVENANCE.has(slot) ? _SLOT_PROVENANCE.get(slot) : null;
+}
+// Back-compat: the authentic dna.template.slots index (from the frozen snapshot), or null.
+export function realizedSlotSourceIndex(slot) {
+  const p = realizedSlotProvenance(slot);
+  return p ? p.sourceIndex : null;
+}
+
 export function dnaToTemplateSpec(dna) {
   try {
     const t = dna?.template;
@@ -96,7 +116,7 @@ export function dnaToTemplateSpec(dna) {
       if (isC) id = 'circle';
       else if (!heroDone && /hero/i.test(String(s.role || ''))) { id = 'main'; heroDone = true; }
       else id = `${(String(s.role || 'p').toLowerCase().replace(/[^a-z]/g, '') || 'p')}_${i}`;
-      return {
+      const _slot = {
         id,
         ...(isC ? { shape: 'circle' } : {}),
         x: Math.round((x / 100) * W), y: Math.round((y / 100) * H),
@@ -107,6 +127,14 @@ export function dnaToTemplateSpec(dna) {
         // ★ 8 ก.ค. (ผู้ใช้สั่ง "จัดวางรูปต้องตรง ref"): note = ข้อมูลจัดวางของ ref ต่อช่อง — Director เห็นใน prompt (line 64)
         note: `ตามปกเป้า: ${s.role || ''}${s.pos ? ` @${s.pos}` : ''}${s.subject ? ` = ${s.subject}` : ''}${s.shot ? ` (${s.shot}${s.emotion ? '·' + s.emotion : ''})` : ''} — เลือกภาพจากพูลที่ใกล้แบบนี้ที่สุด`,
       };
+      // ★ WAVE1A immutable provenance: the ORIGINAL dna.template.slots index (i) this realized slot derives from —
+      //   the join key to the structural contract's sourceIndex (buildRefSlotContract indexes the SAME dna.template.slots).
+      //   (1) AUTHORITY = WeakMap keyed by object identity (unforgeable — a restamp is a new object, absent from it).
+      //   (2) DEFENSE-IN-DEPTH = non-enumerable + non-writable + non-configurable descriptor: invisible to
+      //       JSON.stringify / Object.keys / spread ⇒ ZERO byte change to every existing consumer; the producer also
+      //       verifies these exact descriptor attributes. Both survive the id-relabel/geometry-repair mutations below.
+      Object.defineProperty(_slot, '_sourceIndex', { value: i, enumerable: false, writable: false, configurable: false });
+      return _slot; // WeakMap content snapshot is bound at the END, after geometry/id mutations settle (see below).
     });
 
     // ②b ★ 9 ก.ค. (REF-mrbq6y74: DNA วัด 2 ช่องพิกัดทับกันเป๊ะ → ภาพโดนบังมิด "ไม่ทำตาม ref"):
@@ -185,6 +213,19 @@ export function dnaToTemplateSpec(dna) {
     // กัน id ซ้ำ (เช่น circle 2 วง)
     const seen = new Set();
     for (const s of live) { const base = s.id; let n = 1; while (seen.has(s.id)) s.id = `${base}${n++}`; seen.add(s.id); }
+
+    // ★ WAVE1A: bind the FROZEN authentic content snapshot NOW — all id/geometry mutations have settled. Keyed by
+    //   object identity; the producer reads render authority (composerSlotId=id, shape) + geometry ONLY from this
+    //   immutable snapshot, so a caller mutating the live slot afterwards cannot forge id/geometry (content-tamper proof).
+    for (const s of live) {
+      const _si = Object.getOwnPropertyDescriptor(s, '_sourceIndex');
+      _SLOT_PROVENANCE.set(s, Object.freeze({
+        sourceIndex: _si ? _si.value : null,
+        id: s.id, x: s.x, y: s.y, w: s.w, h: s.h,
+        zIndex: s.zIndex, border: s.border, borderWidth: s.borderWidth,
+        shape: s.shape === 'circle' ? 'circle' : 'rect',
+      }));
+    }
 
     // ★ 10 ก.ค. (ผู้ใช้ถอนคำสั่ง "ตะเข็บคม cap 8" — ให้ตาม feather ของ ref จริง เช่น 13/22):
     //   เหลือ cap กันค่าเพี้ยนสุดขั้วที่ 40 (feather 40 = แถบ 80px ไม่มีปกจริงใช้) · เกิน = ธง feather_capped เหมือนเดิม

@@ -11,8 +11,15 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto'; // ★ เฟส 3.2 (10 ก.ค.): md5 คีย์ cache ผล photo-enhance ของ hero
+import { isProxy } from 'node:util/types'; // (P0) reject a raw outer args Proxy before ANY trap fires (unhideable invariant)
 // ★ Wave2 Batch D2 (10 ก.ค.): เกณฑ์ตัวเลข "กติกาวัดได้" จากคลังเทคนิคปก — single source of truth (sync, ใช้ใน measureTechRules)
 import { TECH_RULES } from '@/lib/imageQualityConfig';
+import { HERO_STRETCH_MAX } from '@/lib/heroCropGeometry'; // ★ AC-0107: single source of the hard 1.2× hero limit (runtime-bound crop proof, strict V2)
+// ★ Checkpoint B (11 ก.ค. — Codex strict consumer): ผู้ตัดสิน "เปิด strict ได้ไหม" คือ validator ของ Checkpoint A
+//   เท่านั้น — consumer ใช้เฉพาะ decision.authority ที่ normalize แล้ว ห้ามอ่าน raw selectionSpec เอง
+// ★ Wave1A (LANE C — flag-gated, default OFF): V2 consumer ใช้ validateSelectionSpecV2Activation (canonical) เป็นผู้ตัดสินเดียว —
+//   ห้าม reimplement schema V2; S7 แค่ "บริโภค" spec ที่ผ่าน validator แล้วเท่านั้น (fail-closed HOLD ถ้าไม่ผ่าน)
+import { validateStrictRenderActivationVersioned } from '@/lib/refSlotContract';
 
 // ★ Wave1 Batch E (10 ก.ค. — manifest-lite): เวอร์ชัน composer ปัจจุบัน ประกาศตายตัวตรงนี้
 //   อัปเดตมือเมื่อแก้กติกา compose/crop/hero — ใช้ stamp ลง manifest ให้ debug/replay ย้อนดูได้ว่ารอบนี้วิ่งด้วยกติกาไหน
@@ -253,7 +260,7 @@ function traceQcFlags(cropTrace) {
 // 🔴 fail-open: วัดไม่ได้ (ไร้ faceBox/ไร้ trace/ไร้ region) = ข้ามเงียบ ไม่ติดธง (ห้ามเดา)
 // ธงทุกตัวอ้าง principle id ของคลัง (P-*) ในคอมเมนต์ — coverQcGate.js เป็นตัวตัดสินโหมด advisory/hard
 // ============================================================
-export function measureTechRules({ assignments = [], spec = null, faceBoxes = [], cropTrace = [] } = {}) {
+export function measureTechRules({ assignments = [], spec = null, faceBoxes = [], cropTrace = [], heroComposerSlotId = null } = {}) {
   const flags = [];
   const bySlot = {}; // slotId → { role, faceSharePct?, headroomPct?, hasFace }
   const slots = Array.isArray(spec?.slots) ? spec.slots : [];
@@ -269,7 +276,10 @@ export function measureTechRules({ assignments = [], spec = null, faceBoxes = []
   //   ช่อง DNA เกิดเป็น `${role}_${i}` เช่น context_2 / evidence_3 / reaction_1 / victim_5)
   const roleOf = (slot) => {
     const id = String(slot?.id || '');
-    if (/main|hero/i.test(id)) return 'hero';
+    // ★ (item 10) V2: hero = EXACT canonical heroComposerSlotId (face-share/headroom rules apply to arbitrary
+    //   canonical hero ids e.g. `panel_alpha`; a decoy `main` is NOT hero) · V1/legacy (null) = regex เดิม
+    if (heroComposerSlotId != null) { if (id === String(heroComposerSlotId)) return 'hero'; }
+    else if (/main|hero/i.test(id)) return 'hero';
     if (slot?.shape === 'circle') return 'circle';
     if (/^context/i.test(id)) return 'context';
     if (/^evidence/i.test(id)) return 'evidence';
@@ -407,7 +417,630 @@ export function measureTechRules({ assignments = [], spec = null, faceBoxes = []
 }
 
 // ---------- แกนประกอบ (ใช้ร่วม compose/verify) ----------
-async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }) {
+// ---------- 🔐 Checkpoint B (11 ก.ค. — Codex): FLAG-GATED STRICT COMPOSER CONSUMER ----------
+// producer จริงต่อแล้ว (megaAdapters S7 แนบ carrier เข้า queue payload) — ภายใต้ MEGA_STRICT_RENDER=1 shared seam
+// activate ให้ own carrier รูปแบบเดียวที่รองรับพอดี: V1 selectionSpec+realizedTemplate ครบคู่ หรือ V2 refHeroV2 · กำกวม/ครึ่งๆ = fail-closed · หลักการ: strict = "เส้นแยกทั้งเส้น" —
+// legacy ใน composeCore ไม่ถูกแตะแม้บรรทัดเดียว
+
+// deep-freeze ทั้งต้นไม้ — โครง strict ต้องแตะไม่ได้จริงตั้งแต่ก่อน await แรก (P1 รอบ 2)
+function _deepFreeze(o) {
+  if (o && typeof o === 'object' && !Object.isFrozen(o)) {
+    Object.freeze(o);
+    for (const k of Object.keys(o)) _deepFreeze(o[k]);
+  }
+  return o;
+}
+
+// (P1-R1 / P0-A / P0-B) PRIVATE, UNFORGEABLE capture — the SOLE observation of the outer carriers. Called ONCE by the
+//   exported seam; there is no caller-supplied snapshot path. Read the carrier DESCRIPTORS FIRST (before any
+//   getPrototypeOf / [[Get]] / has / ownKeys). Each record distinguishes absent / accessor / data / TRAP_ERROR (a
+//   throwing getOwnPropertyDescriptor is NEVER mapped to absence — that would let an unobservable carrier downgrade to
+//   legacy or hide V1+V2 ambiguity; it becomes trapError ⇒ typed HOLD). slotPlan is captured here too so the strict
+//   path never re-reads it. Records + snapshot are deep-frozen (the caller's objects are never frozen/mutated).
+function _captureCarrierSnapshot(args) {
+  const isObj = args != null && (typeof args === 'object' || typeof args === 'function');
+  const cap = (key) => {
+    if (!isObj) return Object.freeze({ present: false, accessor: false, trapError: false, value: undefined });
+    let d;
+    try { d = Object.getOwnPropertyDescriptor(args, key); }
+    catch { return Object.freeze({ present: false, accessor: false, trapError: true, value: undefined }); }
+    if (!d) return Object.freeze({ present: false, accessor: false, trapError: false, value: undefined });
+    if (!('value' in d)) return Object.freeze({ present: true, accessor: true, trapError: false, value: undefined }); // getter — NOT invoked
+    return Object.freeze({ present: true, accessor: false, trapError: false, value: d.value });
+  };
+  const refHeroV2 = cap('refHeroV2');
+  const selectionSpec = cap('selectionSpec');
+  const realizedTemplate = cap('realizedTemplate');
+  const slotPlan = cap('slotPlan');
+  // plain-prototype check ONLY AFTER the carriers are fixed — a getPrototypeOf trap/mutation cannot un-capture them.
+  let isPlain = false;
+  if (isObj) { try { const p = Object.getPrototypeOf(args); isPlain = (p === Object.prototype || p === null); } catch { isPlain = false; } }
+  return Object.freeze({ isObj, isPlain, refHeroV2, selectionSpec, realizedTemplate, slotPlan });
+}
+
+// (P1) Snapshot the INNER V2 carrier's own-data fields into a NEW FROZEN plain value (the caller's carrier object is
+//   never frozen/mutated). Reject any inner accessor OR descriptor-trap error; `ok` must be a literal true data field.
+function _captureV2Inner(c) {
+  const read = (k) => {
+    let d;
+    try { d = Object.getOwnPropertyDescriptor(c, k); } catch { return { trap: true }; }
+    if (!d) return { value: undefined };
+    if (!('value' in d)) return { accessor: true };
+    return { value: d.value };
+  };
+  const okR = read('ok');
+  if (okR.trap) return { trapError: true };
+  const okField = okR.accessor ? false : (okR.value === true);
+  const FIELDS = ['selectionSpec', 'selectionAuthority', 'expectedSelectionAuthorityHash', 'expectedSpecHash', 'expectedReplayHash', 'realizedTemplate'];
+  const input = {};
+  for (const f of FIELDS) {
+    const r = read(f);
+    if (r.trap || r.accessor) return { innerReject: true }; // inner accessor/trap ⇒ reject (never a silent undefined)
+    input[f] = r.value;
+  }
+  return { okField, input: Object.freeze(input) };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔐 Wave1A (LANE C — P0/P1 CORRECTION): SINGLE STRICT ACTIVATION SEAM
+// ─────────────────────────────────────────────────────────────────────────────
+// ผู้ตัดสินเวอร์ชันเดียว = validateStrictRenderActivationVersioned (peek selectionSpec.v):
+//   v===2 → validateSelectionSpecV2Activation · อื่นๆ → validateStrictRenderActivation (V1)
+// การเลือก V1/V2 มาจาก "carrier" ล้วน — ไม่ใช่ env (canonical latch = MEGA_STRICT_RENDER เท่านั้น
+//   ตรวจที่ composeAndVerify ก่อนเรียกตัวนี้) · ตัวนี้ pure (ไม่อ่าน env) → เทสได้ตรง
+//   carrier V2 = args.refHeroV2 (own-property) → ประกอบ input 6 ช่องจาก own-data descriptor-safe
+//   carrier V1 = args เอง (own-property selectionSpec + realizedTemplate ครบคู่) → ส่ง args ตรงเข้า validator (กฎ plain-object เป็นของ validator)
+//   V2 + own V1 field ใดก็ตาม = ambiguous · V1 ครึ่งคู่ (มีข้างเดียว) = invalid — HOLD ก่อน latch/IO · HOLD ทุกกรณี partial/invalid ไม่มี downgrade เงียบ
+// The shared exported PURE seam. Accepts RAW args ONLY (+ an explicit canonical latch value) — there is NO
+//   caller-supplied snapshot path (P1: a fabricated snapshot has no effect and no API surface). This is the SOLE, FIRST
+//   observation of args: it privately captures the carriers (descriptors first) + slotPlan, owns the ambiguity + latch +
+//   version decisions, and returns { none } | { error,errorType,reasons } | { ctx } — each carrying the captured
+//   slotPlan so downstream never re-reads args.slotPlan. Returns for a caller with `latchArmed !== true`: a V2 carrier
+//   HOLDs (no downgrade), a V1-only carrier is legacy (none). `latchArmed` is passed by the caller (env stays out of
+//   this pure seam). Direct callers that want to exercise carrier validation pass latchArmed: true.
+export function _strictActivate({ args, latchArmed = true } = {}) {
+  // `latchArmed` defaults to true (i.e. "process this carrier") — the explicit latch value is only NEEDED to express
+  //   the OFF case, which composeAndVerify passes as `process.env.MEGA_STRICT_RENDER === '1'`. Direct consumers that
+  //   validate a carrier (capture-only always runs armed) may omit it. Any extra caller-supplied field (e.g. a legacy
+  //   `slotPlan` or a fabricated `snapshot`) is NOT destructured ⇒ has no effect and no API path.
+  // (P0) A raw outer args PROXY is rejected at the VERY START — before ANY trap can fire (getOwnPropertyDescriptor /
+  //   getPrototypeOf / get / has / ownKeys). A stateful cross-key trap could otherwise return the real V2 descriptor
+  //   while deleting selectionSpec as a side effect (hiding V1+V2 ambiguity), or self-delete / delete the sibling to
+  //   force a downgrade. isProxy() consults an internal slot and invokes NO trap. Plain data objects are unaffected.
+  //   Typed HOLD, stable reason, regardless of latch, before any observation/IO.
+  if (isProxy(args)) {
+    return { error: 'strict activation ไม่รองรับ Proxy เป็น args (unhideable-invariant guard)', errorType: 'STRICT_RENDER_CONTRACT_INVALID', reasons: ['input_proxy_unsupported'] };
+  }
+  const snap = _captureCarrierSnapshot(args); // ONE private capture — descriptors read before any prototype/[[Get]]
+  const slotPlan = snap.slotPlan.value;       // captured once — the strict path uses THIS, never re-reads args.slotPlan
+  // (P0-B) a carrier descriptor TRAP ⇒ typed HOLD BEFORE any legacy/latch decision (uncertainty is never absence).
+  //   realizedTemplate is a V1 carrier-defining field too (a lone one is a malformed half-pair), so ITS descriptor
+  //   uncertainty is included here — a trap on ANY of the three carrier slots is fail-closed, never read as absence.
+  if (snap.refHeroV2.trapError || snap.selectionSpec.trapError || snap.realizedTemplate.trapError) {
+    return { error: 'strict carrier descriptor อ่านไม่ได้ (trap threw)', errorType: 'STRICT_RENDER_CONTRACT_INVALID', reasons: ['carrier_descriptor_trap'], slotPlan };
+  }
+  const hasV2 = snap.refHeroV2.present;
+  // V1 presence mirrors carrier presence exactly as the ingress adapters see it: a V1 carrier is the selectionSpec +
+  //   realizedTemplate PAIR, and EITHER own field marks a V1 field present (cover-ref-test rejects V2 + either V1
+  //   field; /api/mega/compose forwards each field independently, so a lone realizedTemplate can reach here).
+  const hasSpec = snap.selectionSpec.present;
+  const hasRealized = snap.realizedTemplate.present;
+  const anyV1 = hasSpec || hasRealized;
+  // (ambiguity cannot be hidden) V2 + ANY own V1 field (selectionSpec and/or realizedTemplate) ⇒ HOLD regardless of
+  //   latch, before any IO — a V2 carrier may never co-exist with a V1 field on one args.
+  if (hasV2 && anyV1) {
+    return { error: 'strict carrier กำกวม: มีทั้ง refHeroV2 และ V1 field (selectionSpec/realizedTemplate)', errorType: 'STRICT_RENDER_CARRIER_AMBIGUOUS', reasons: ['carrier_ambiguous_v1_and_v2'], slotPlan };
+  }
+  // V1 half-pair (exactly one of selectionSpec/realizedTemplate, no V2) ⇒ typed HOLD before latch/IO — never a silent
+  //   legacy downgrade, never a validator round-trip with an undefined half. Stable fixed reason.
+  if (!hasV2 && hasSpec !== hasRealized) {
+    return { error: 'strict v1 carrier ครึ่งเดียว: ต้องแนบ selectionSpec + realizedTemplate ครบคู่', errorType: 'STRICT_RENDER_CONTRACT_INVALID', reasons: ['carrier_v1_half_pair'], slotPlan };
+  }
+  const hasV1 = hasSpec && hasRealized; // a V1 carrier = the COMPLETE pair only
+  if (!hasV2 && !hasV1) return { none: true, slotPlan }; // no carrier ⇒ legacy
+  const armed = latchArmed === true;
+  // (item 7) NO-DOWNGRADE for V2, but PRESERVE complete-V1 latch-OFF legacy parity.
+  if (hasV2 && !armed) {
+    return { error: 'refHeroV2 carrier แนบมาแต่ MEGA_STRICT_RENDER ไม่ถูก arm (!== "1") — ห้ามถอย legacy/V1 เงียบ', errorType: 'STRICT_RENDER_LATCH_OFF', reasons: ['strict_latch_off_v2_carrier_present'], slotPlan };
+  }
+  if (hasV1 && !armed) {
+    return { none: true, slotPlan }; // complete V1 carrier + latch OFF ⇒ legacy (carrier ignored) — byte parity
+  }
+  // armed + single carrier ⇒ pure activation.
+  let input;
+  let carrier = null;
+  if (hasV2) {
+    // (item 6) the OUTER carrier was descriptor-captured ONCE — an accessor/getter is rejected WITHOUT invocation.
+    if (snap.refHeroV2.accessor || snap.refHeroV2.value === undefined) {
+      return { error: 'strict v2 carrier อ่านไม่ได้ (accessor หรือ undefined) — descriptor-read เท่านั้น', errorType: 'STRICT_V2_CONTRACT_HOLD', reasons: ['carrier_accessor_or_undefined'], slotPlan };
+    }
+    const c = snap.refHeroV2.value;
+    if (c === null || (typeof c !== 'object' && typeof c !== 'function') || Array.isArray(c)) {
+      return { error: 'strict v2 carrier ไม่ใช่ออบเจ็กต์', errorType: 'STRICT_V2_CONTRACT_HOLD', reasons: ['carrier_not_object'], slotPlan };
+    }
+    // (P1) snapshot the inner 6 own-data fields into a NEW FROZEN plain value; reject inner accessor/trap errors.
+    const inner = _captureV2Inner(c);
+    if (inner.trapError) {
+      return { error: 'strict v2 carrier inner descriptor trap', errorType: 'STRICT_V2_CONTRACT_HOLD', reasons: ['carrier_inner_descriptor_trap'], slotPlan };
+    }
+    if (inner.innerReject) {
+      return { error: 'strict v2 carrier inner field accessor', errorType: 'STRICT_V2_CONTRACT_HOLD', reasons: ['carrier_inner_accessor'], slotPlan };
+    }
+    if (inner.okField !== true) {
+      return { error: 'strict v2 carrier ไม่พร้อม (ok!=true)', errorType: 'STRICT_V2_CONTRACT_HOLD', reasons: ['carrier_not_ok'], slotPlan };
+    }
+    input = inner.input; // frozen plain value — validator reads exactly these six own-data fields
+  } else {
+    // V1: reconstruct the validator input from the CAPTURED values (TOCTOU-safe — never re-read args). Preserve the
+    //   validator's plain-object shape guard: a non-plain carrier (array/function) ⇒ the same typed HOLD.
+    if (!snap.isPlain) {
+      return { error: 'strict v1 carrier ไม่ใช่ plain object', errorType: 'STRICT_RENDER_CONTRACT_INVALID', reasons: ['input_not_plain_object'], slotPlan };
+    }
+    input = { selectionSpec: snap.selectionSpec.value, realizedTemplate: snap.realizedTemplate.value };
+    carrier = input;
+  }
+  const decision = validateStrictRenderActivationVersioned(input);
+  // V2 canonical assigned
+  if (decision && decision.ok === true && decision.decision === 'assigned' && decision.selectionSpec) {
+    const prepared = _strictPrepareV2({ decision, slotPlan });
+    return prepared.ctx ? { ctx: prepared.ctx, slotPlan } : { ...prepared, slotPlan };
+  }
+  // V1 strict_ready
+  if (decision && decision.decision === 'strict_ready' && decision.active === true && decision.authority) {
+    const prepared = _strictPrepareV1({ decision, carrier, slotPlan });
+    return prepared.ctx ? { ctx: prepared.ctx, slotPlan } : { ...prepared, slotPlan };
+  }
+  // อื่นๆ = typed HOLD (ไม่มี downgrade) — errorType ตามชนิด carrier
+  const reasons = (decision && Array.isArray(decision.reasons) && decision.reasons.length)
+    ? decision.reasons : [(decision && decision.decision) || 'strict_activation_hold'];
+  const errorType = hasV2 ? 'STRICT_V2_CONTRACT_HOLD' : 'STRICT_RENDER_CONTRACT_INVALID';
+  return { error: `strict contract ไม่ผ่าน: ${reasons.join(',').slice(0, 180)}`, errorType, reasons, slotPlan };
+}
+
+// ① เตรียม strict context V1 — pure 100% ห้ามมี IO: (validator ทำที่ _strictActivate แล้ว) → โครง →
+//   ผูก primary → snapshot แช่แข็ง · พังชั้นไหน = fail-closed ด้วย errorType เฉพาะชั้นนั้น "ก่อน" IO เสมอ
+//   authority = decision.authority (normalized สำเนาลึกจาก validator — ห้ามแตะ raw spec)
+function _strictPrepareV1({ decision, carrier, slotPlan }) {
+  const authority = decision.authority; // ใช้เฉพาะสำเนา normalized — ห้ามแตะ raw spec ต่อจากนี้
+  const realizedTemplate = carrier.realizedTemplate;
+  // ชั้น 2 — โครง: ตรวจจาก "ต้นฉบับ" ก่อน clone (NaN/Infinity ตายกลาง JSON round-trip → ถูกซ่อมเงียบ)
+  //   ★ รอบ 2 (P1): ห้าม Number() coerce — ต้องเป็น typeof number แท้ + finite + integer (realized จริง
+  //   เป็น pixel int จาก refTemplate เสมอ) · ขอบเขต exact ไม่มี tolerance · ห้าม recompute/family/default
+  const tReasons = [];
+  let spec = null;
+  try { spec = JSON.parse(JSON.stringify(realizedTemplate)); } catch { tReasons.push('template_not_serializable'); }
+  const _numOk = (v) => typeof v === 'number' && Number.isFinite(v);
+  const _pxOk = (v) => _numOk(v) && Number.isInteger(v);
+  const W = realizedTemplate?.canvasW, H = realizedTemplate?.canvasH;
+  // ★ รอบ 4 (P1-5): canvas ต้อง exact ตามสัญญา refTemplate (ผู้ใช้กำหนดตายตัว 7 ก.ค.: ปกทุกใบ 1080×1350)
+  //   — ไม่ใช่แค่ positive integer: 1×1 / 100000×100000 / string / NaN = STRICT_TEMPLATE_INVALID ก่อน IO
+  if (!(W === 1080 && H === 1350)) tReasons.push('canvas_invalid');
+  const tSlots = Array.isArray(realizedTemplate?.slots) ? realizedTemplate.slots : [];
+  if (!tSlots.length) tReasons.push('slots_empty');
+  const _ids = new Set();
+  for (let i = 0; i < tSlots.length; i++) {
+    const s = tSlots[i] || {};
+    const id = String(s.id ?? '');
+    if (!id.trim()) tReasons.push(`slot_id_blank:${i}`);
+    else if (_ids.has(id)) tReasons.push(`slot_id_duplicate:${id}`);
+    _ids.add(id);
+    const { x, y, w, h } = s;
+    if (![x, y, w, h].every(_numOk)) { tReasons.push(`slot_geometry_not_finite:${id || i}`); continue; }
+    if (![x, y, w, h].every(Number.isInteger)) tReasons.push(`slot_geometry_not_integer:${id || i}`);
+    if (!(w > 0 && h > 0)) tReasons.push(`slot_size_not_positive:${id || i}`);
+    if (x < 0 || y < 0 || (_pxOk(W) && x + w > W) || (_pxOk(H) && y + h > H)) tReasons.push(`slot_out_of_canvas:${id || i}`);
+    if (s.shape != null && s.shape !== 'circle' && s.shape !== 'rect') tReasons.push(`slot_shape_unknown:${id || i}`);
+  }
+  if (tReasons.length) return { error: `strict template พัง: ${tReasons.join(',').slice(0, 180)}`, errorType: 'STRICT_TEMPLATE_INVALID', reasons: tReasons };
+  _deepFreeze(spec); // โครงที่ render ใช้จริง — แช่แข็งทั้งต้นไม้ก่อน await แรก (executor mutate = throw)
+  // ชั้น 3 — ผูก primary → slotPlan: exact URL หนึ่งรายการเป๊ะ (0=หาย · >1=กำกวม) + ★ รอบ 2 (P0-2):
+  //   plan ที่ประกาศ refSlotId ต้องตรง authority ด้วย (identity สองชั้น) — พัง = STRICT_PRIMARY_UNAVAILABLE
+  //   บันทึกเป็น "สำเนาแช่แข็ง" ก่อน await ทุกตัว: mutate slotPlan ทีหลัง = ไร้ผล (กัน TOCTOU)
+  //   ห้ามเก็บ/spread raw plan object — คัดเฉพาะ metadata ที่จำเป็นแบบ copy ค่า
+  const bReasons = [];
+  const plan = Array.isArray(slotPlan) ? slotPlan : [];
+  const bind = authority.slots.map((s) => {
+    const matches = plan.filter((p) => String(p?.url || '') === s.primary.imageUrl);
+    if (matches.length === 0) { bReasons.push(`primary_missing:${s.composerSlotId}`); return null; }
+    if (matches.length > 1) { bReasons.push(`primary_duplicate_in_plan:${s.composerSlotId}`); return null; }
+    const m = matches[0];
+    // ★ รอบ 3 (FINAL P0): refSlotId เป็น "ภาคบังคับ" ทุก primary row — สัญญา exact ต้องครบสามชั้น
+    //   (composerSlotId จาก authority + refSlotId + primary URL) · หาย/null/ว่าง/ไม่ตรง = reject ก่อน IO
+    //   ห้าม optional check และห้ามเติมค่าจาก authority ให้ plan เงียบๆ (producer ต้องประกาศเองเต็มปาก)
+    const mRef = m.refSlotId == null ? '' : String(m.refSlotId).trim();
+    if (!mRef || mRef !== s.refSlotId) {
+      bReasons.push(`primary_ref_mismatch:${s.composerSlotId}`);
+      return null;
+    }
+    return Object.freeze({
+      composerSlotId: s.composerSlotId,
+      refSlotId: s.refSlotId,
+      candidateId: s.primary.candidateId,
+      imageUrl: s.primary.imageUrl, // fetch ใช้ค่านี้เท่านั้น
+      meta: Object.freeze({
+        slot: m.slot != null ? String(m.slot) : null,
+        person: m.person != null ? String(m.person) : null,
+        isHero: !!m.isHero,
+        faces: Number(m.faces) || 0,
+        clean: m.clean === false ? false : (m.clean === true ? true : null),
+        newsScene: m.newsScene === false ? false : (m.newsScene === true ? true : null),
+      }),
+    });
+  });
+  if (bReasons.length) return { error: `strict primary ใช้ไม่ได้: ${bReasons.join(',').slice(0, 180)}`, errorType: 'STRICT_PRIMARY_UNAVAILABLE', reasons: bReasons };
+  // ชั้น 4 — immutable snapshot ต่อช่อง (แช่แข็ง) = ความจริงที่ final invariant ใช้จับ drift
+  const snapshot = Object.freeze(authority.slots.map((s, i) => Object.freeze({
+    composerSlotId: s.composerSlotId,
+    refSlotId: s.refSlotId,
+    candidateId: s.primary.candidateId,
+    imageIndex: i, // ลำดับ authority = ลำดับ loaded เสมอ (deterministic)
+    imageUrl: s.primary.imageUrl,
+    shape: s.shape === 'circle' ? 'circle' : 'rect',
+  })));
+  // ★ รอบ 2 (P1): template drift snapshot = canonical deep ของ clone "ทั้งก้อน" (รวม zIndex/border/
+  //   borderWidth/feather/_vis ฯลฯ ทุก field ที่มีผล render) — ไม่ใช่แค่ x/y/w/h
+  const templateSnap = JSON.stringify(spec);
+  return { ctx: { authority, spec, bind: Object.freeze(bind), snapshot, templateSnap } };
+}
+
+// ---------- 🔐 Wave1A (LANE C — Codex): FLAG-GATED STRICT V2 CONSUMER (SelectionSpec V2 six-field carrier) ----------
+// เตรียม strict context จาก "carrier V2" (producer megaAdapters S7, flag MEGA_REF_HERO_V2 + latch MEGA_STRICT_RENDER, default OFF) โดย:
+//   ① ผู้ตัดสินเดียว = validateSelectionSpecV2Activation (canonical) พร้อม pin ครบ 6 ช่อง (expectedSpecHash/
+//      expectedReplayHash เป็นพยานภายนอกที่ผูก composerSlotId/refId/URL ที่ SelectionAuthority เดี่ยวๆ ผูกไม่ได้)
+//   ② partial/missing/tampered = typed HOLD เสมอ — ห้าม fallback เงียบที่ render ผิด
+//   ③ source lock: personId/sourceAssetId/candidateId/refSlotId + URL มาจาก spec canonical เท่านั้น (ไม่มี asset
+//      substitution) · slotPlan ใช้ "เสริม metadata ครอป" เท่านั้น — plan row ที่ประกาศ identity ขัด = HOLD
+//   ④ border color rule: render.border===true ⇒ '#FFFFFF' · render.border===false ⇒ null
+//   ctx ที่คืน = shape เดียวกับ V1 (spec/bind/snapshot/templateSnap + authority) → composeCoreStrict/_strictDriftCheck/
+//   manifest เดิมใช้ต่อได้ทั้งเส้น "โดยไม่แตะโค้ด V1" (V1 ยัง byte-identical เมื่อ flag V2 ปิด)
+// seam เดียวที่ export: production (composeAndVerify) เรียกตัวนี้จริง harness ก็เรียกตัวนี้จริง (ไม่จำลอง logic ซ้ำ)
+function _strictPrepareV2({ decision, slotPlan }) {
+  const spec2 = decision.selectionSpec; // canonical validated V2 spec (frozen) = ความจริงเดียว
+  // ── (P1) render plan มาจาก canonical bindings ล้วน — ต้องครบ 1:1 ทุกแถว: candidateId/personId/
+  //   sourceAssetId/refSlotId/composerSlotId ภาคบังคับ (หาย ⇒ HOLD) · ห้ามซ้ำ id (dup ⇒ HOLD) ──
+  //   personId ภาคบังคับ "มีค่า" แต่ "ซ้ำได้" (คนเดียวกันปรากฏหลายช่องเป็นเรื่องปกติ — ไม่ใช่ identity key)
+  {
+    const cReasons = [];
+    const _blank = (v) => typeof v !== 'string' || v.trim().length === 0;
+    const seen = { refSlotId: new Set(), composerSlotId: new Set(), candidateId: new Set(), sourceAssetId: new Set() };
+    for (const s of spec2.slots) {
+      const p = s.primary || {};
+      const tag = s.composerSlotId || s.refSlotId || '?';
+      const fields = { refSlotId: s.refSlotId, composerSlotId: s.composerSlotId, candidateId: p.candidateId, personId: p.personId, sourceAssetId: p.sourceAssetId };
+      for (const k of ['refSlotId', 'composerSlotId', 'candidateId', 'personId', 'sourceAssetId']) {
+        if (_blank(fields[k])) cReasons.push(`plan_row_missing_${k}:${tag}`);
+      }
+      for (const k of ['refSlotId', 'composerSlotId', 'candidateId', 'sourceAssetId']) {
+        const v = fields[k];
+        if (!_blank(v)) { if (seen[k].has(v)) cReasons.push(`plan_row_dup_${k}:${v}`); else seen[k].add(v); }
+      }
+    }
+    if (cReasons.length) return { error: `strict v2 canonical plan ไม่ครบ 1:1: ${cReasons.join(',').slice(0, 180)}`, errorType: 'STRICT_V2_PLAN_INCOMPLETE', reasons: cReasons };
+  }
+  // ── (P1) HERO crop authority = แมปผ่าน spec.hero.heroSlotId (refSlotId) → composerSlotId ของแถวนั้น
+  //   เท่านั้น — ห้ามใช้ regex /main|hero/ · หาแถวไม่เจอ ⇒ HOLD ──
+  const heroSlotId = spec2.hero.heroSlotId;
+  const heroRow = spec2.slots.find((s) => s.refSlotId === heroSlotId);
+  if (!heroRow) return { error: `strict v2 hero slot ไม่ถูกแมป: ${heroSlotId}`, errorType: 'STRICT_V2_HERO_UNMAPPED', reasons: [`hero_slot_unmapped:${heroSlotId}`] };
+  const heroComposerSlotId = heroRow.composerSlotId;
+  // ── source lock + metadata bind: URL/identity มาจาก spec canonical · plan ที่ขัด identity = substitution ⇒ HOLD ──
+  const plan = Array.isArray(slotPlan) ? slotPlan : [];
+  const bReasons = [];
+  const bind = spec2.slots.map((s) => {
+    const url = s.primary.imageUrl;
+    const matches = plan.filter((p) => String(p?.url || '') === url);
+    if (matches.length > 1) { bReasons.push(`primary_duplicate_in_plan:${s.composerSlotId}`); return null; }
+    const m = matches.length === 1 ? matches[0] : null;
+    if (m) {
+      // ★ (item 9) plan row ที่ประกาศ identity ขัดกับ canonical = substitution ⇒ HOLD — ตรวจ "ทุก" mandatory
+      //   identity field: refSlotId · composerSlotId · candidateId · sourceAssetId · personId (ไม่เว้น personId/composer)
+      const mRef = m.refSlotId == null ? null : String(m.refSlotId).trim();
+      if (mRef && mRef !== s.refSlotId) { bReasons.push(`primary_ref_mismatch:${s.composerSlotId}`); return null; }
+      const mComposer = m.composerSlotId == null ? null : String(m.composerSlotId).trim();
+      if (mComposer && mComposer !== s.composerSlotId) { bReasons.push(`primary_composer_mismatch:${s.composerSlotId}`); return null; }
+      const mCand = m.candidateId == null ? null : String(m.candidateId).trim();
+      if (mCand && mCand !== s.primary.candidateId) { bReasons.push(`primary_candidate_mismatch:${s.composerSlotId}`); return null; }
+      const mAssetRaw = m.sourceAssetId != null ? m.sourceAssetId : m.assetId;
+      const mAsset = mAssetRaw == null ? null : String(mAssetRaw).trim();
+      if (mAsset && mAsset !== s.primary.sourceAssetId) { bReasons.push(`primary_asset_mismatch:${s.composerSlotId}`); return null; }
+      const mPerson = m.personId == null ? null : String(m.personId).trim();
+      if (mPerson && mPerson !== s.primary.personId) { bReasons.push(`primary_person_mismatch:${s.composerSlotId}`); return null; }
+    }
+    return Object.freeze({
+      composerSlotId: s.composerSlotId,
+      refSlotId: s.refSlotId,
+      candidateId: s.primary.candidateId,
+      sourceAssetId: s.primary.sourceAssetId,
+      personId: s.primary.personId,
+      imageUrl: url, // fetch ใช้ค่านี้เท่านั้น (จาก authority — ไม่ใช่ plan)
+      borderColor: s.render.border === true ? '#FFFFFF' : null,
+      meta: Object.freeze({
+        slot: m && m.slot != null ? String(m.slot) : null,
+        person: s.primary.personId != null ? String(s.primary.personId) : (m && m.person != null ? String(m.person) : null),
+        isHero: s.refSlotId === heroSlotId ? true : !!(m && m.isHero),
+        faces: m ? (Number(m.faces) || 0) : 0,
+        clean: m ? (m.clean === false ? false : (m.clean === true ? true : null)) : null,
+        newsScene: m ? (m.newsScene === false ? false : (m.newsScene === true ? true : null)) : null,
+      }),
+    });
+  });
+  if (bReasons.length) return { error: `strict v2 primary source lock ขัดแย้ง: ${bReasons.join(',').slice(0, 180)}`, errorType: 'STRICT_V2_PRIMARY_UNAVAILABLE', reasons: bReasons };
+  // ── realized executor template จาก canonical canvas + slot render (border color rule ที่จุด render จริง) ──
+  const spec = _deepFreeze({
+    id: spec2.canvas.templateId,
+    canvasW: spec2.canvas.canvasW,
+    canvasH: spec2.canvas.canvasH,
+    feather: spec2.canvas.feather,
+    slots: spec2.slots.map((s) => {
+      const slot = {
+        id: s.composerSlotId,
+        x: s.render.x, y: s.render.y, w: s.render.w, h: s.render.h,
+        zIndex: s.render.zIndex,
+        border: s.render.border === true ? '#FFFFFF' : null, // ★ border color rule
+        borderWidth: s.render.borderWidth,
+      };
+      if (s.shape === 'circle') slot.shape = 'circle';
+      return slot;
+    }),
+  });
+  // ── immutable snapshot ราย slot (imageIndex = ลำดับ authority) — ความจริงที่ final invariant ใช้จับ drift ──
+  const snapshot = Object.freeze(spec2.slots.map((s, i) => Object.freeze({
+    composerSlotId: s.composerSlotId,
+    refSlotId: s.refSlotId,
+    candidateId: s.primary.candidateId,
+    sourceAssetId: s.primary.sourceAssetId,
+    personId: s.primary.personId,
+    imageIndex: i,
+    imageUrl: s.primary.imageUrl,
+    shape: s.shape === 'circle' ? 'circle' : 'rect',
+    borderColor: s.render.border === true ? '#FFFFFF' : null,
+  })));
+  const templateSnap = JSON.stringify(spec);
+  const authority = { refId: spec2.refId, specHash: spec2.specHash, replayHash: spec2.replayHash };
+  return { ctx: { v2: true, authority, spec, bind: Object.freeze(bind), snapshot, templateSnap, selectionSpecV2: spec2, heroComposerSlotId } };
+}
+
+// ② เส้นประกอบ strict — source ล็อกตาม authority 100%: โหลดตรง URL → ตาหาหน้า (เพื่อครอปเท่านั้น) →
+//   assignments ตายตัวครั้งเดียว → render ครั้งเดียว · ไม่มีด่านสลับภาพใดๆ (crop/why ปรับได้ · imageIndex ห้าม)
+//   หมายเหตุ: pixel-gate hero/person-cut ของ legacy เป็นด่านชนิด "เปลี่ยนรูป" ซึ่งขัดสัญญา strict — เส้นนี้
+//   จึงไม่รัน (คุณภาพยังถูกวัดด้วย upscaled_src/traceQcFlags/techRules และ hard QC ปลายทางปฏิเสธได้)
+async function composeCoreStrict(strictCtx) {
+  const qcFlags = [];
+  const spec = strictCtx.spec;
+  // ★ (P1) hero crop authority: V2 = แมปตรงด้วย composerSlotId ที่ได้จาก spec.hero.heroSlotId เท่านั้น
+  //   (ห้าม regex) · V1/legacy = พฤติกรรมเดิม /main|hero/ (byte-identical)
+  const _isHeroSlot = (composerSlotId) => (strictCtx.v2 && strictCtx.heroComposerSlotId != null)
+    ? (String(composerSlotId) === strictCtx.heroComposerSlotId)
+    : /main|hero/i.test(String(composerSlotId));
+  // โหลดจาก binding record แช่แข็งเท่านั้น (★ รอบ 2 P0-2 — ห้ามอ่าน slotPlan อีก กัน TOCTOU)
+  //   วางผลด้วย index (ลำดับ authority) = ไม่ขึ้นกับลำดับ fetch เสร็จ · loaded พก identity ครบทุกใบ
+  //   ★ รอบ 2 (P1): วัดไฟล์จริงด้วย sharp metadata — อ่านไม่ได้/มิติเพี้ยน = corrupt → fail-closed
+  const loaded = new Array(strictCtx.bind.length).fill(null);
+  const loadFail = [];
+  const trimFlags = new Array(strictCtx.bind.length).fill(null);
+  await Promise.all(strictCtx.bind.map(async (b, i) => {
+    let buf = await fetchOne(b.imageUrl);
+    if (!buf || buf.length <= 5000) { loadFail.push(`primary_unusable:${b.composerSlotId}`); return; }
+    // ★ รอบ 4 (P1-1): same-asset preprocessing เหมือน legacy — ตัดกรอบสีทึบ/letterbox "ก่อน"
+    //   sharp metadata/aHash/face/render ทุกชั้นเห็นภาพสะอาดตรงกัน · URL/identity/imageIndex ไม่ขยับ
+    //   (นี่คือ crop ต้นฉบับเดิม ไม่ใช่ source swap) · trim ล้ม = ใช้ buffer เดิม (fail-open ในตัวฟังก์ชัน)
+    try {
+      const tr = await trimVividBorder(buf);
+      if (tr.trimmed) {
+        trimFlags[i] = `border_trimmed:${b.composerSlotId}`;
+        console.log(`[MegaComposer] 🔐✂️🟩 ตัดกรอบสีขอบภาพ ${tr.trimmed} — ${b.composerSlotId}`);
+        buf = tr.buf;
+      }
+    } catch { /* trim ล้ม = buffer เดิม */ }
+    let mw = 0, mh = 0;
+    try {
+      const m = await (await import('sharp')).default(buf).metadata();
+      mw = m.width || 0; mh = m.height || 0;
+    } catch { /* จับรวมด้านล่าง */ }
+    if (!(mw > 0 && mh > 0)) { loadFail.push(`primary_unreadable:${b.composerSlotId}`); return; }
+    loaded[i] = {
+      slot: b.meta.slot, person: b.meta.person, isHero: b.meta.isHero, faces: b.meta.faces,
+      clean: b.meta.clean, newsScene: b.meta.newsScene,
+      composerSlotId: b.composerSlotId, refSlotId: b.refSlotId, candidateId: b.candidateId,
+      // ★ V2: identity เต็ม(sourceAssetId/personId) เข้า loaded เพื่อ drift-check + manifest · V1 ไม่มี = ไม่เพิ่ม key
+      ...(b.sourceAssetId !== undefined ? { sourceAssetId: b.sourceAssetId } : {}),
+      ...(b.personId !== undefined ? { personId: b.personId } : {}),
+      imageUrl: b.imageUrl, url: b.imageUrl, buffer: buf, _w: mw, _h: mh,
+    };
+  }));
+  if (loadFail.length) {
+    loadFail.sort(); // deterministic ไม่ขึ้นกับลำดับ fetch ล้ม
+    return { error: `strict primary โหลดไม่ได้: ${loadFail.join(',').slice(0, 180)}`, errorType: 'STRICT_PRIMARY_UNAVAILABLE', reasons: loadFail };
+  }
+  for (const f of trimFlags) if (f) qcFlags.push(f); // ★ ธง trim ตามลำดับ index (deterministic) ไม่ใช่ลำดับ fetch เสร็จ
+  // ★ รอบ 2 (P1 คุณภาพ): aHash จริงเหมือน legacy — ด่าน blank_image ปลายทางห้ามถูก bypass
+  //   (ธงได้ · เปลี่ยนภาพไม่ได้ — S6 authority คือผู้เลือก)
+  const _sharp = (await import('sharp')).default;
+  const aHashes = await Promise.all(loaded.map(async (im) => {
+    try {
+      const raw = await _sharp(im.buffer).greyscale().resize(8, 8, { fit: 'fill' }).raw().toBuffer();
+      const mean = raw.reduce((n, v) => n + v, 0) / 64;
+      let bits = 0n;
+      for (let i = 0; i < 64; i++) if (raw[i] >= mean) bits |= (1n << BigInt(i));
+      return bits;
+    } catch { return null; }
+  }));
+  // ตาหาหน้า = perception ให้สูตรครอปเท่านั้น — ห้ามมีผลต่อการเลือกภาพ (เลือกจบแล้วโดย authority)
+  //   ★ รอบ 2 (P1): ล้มทั้งชุด → ลองใหม่ 1 รอบเหมือน legacy (คุณภาพครอปต้องไม่แย่กว่า — source ไม่เกี่ยว)
+  const { batchDetectFaces } = await import('@/lib/services/faceDetector');
+  let fdMap = await batchDetectFaces(loaded.map((im, i) => ({ id: `mc_${i}`, buffer: im.buffer })));
+  let faceBoxes = loaded.map((im, i) => normalizeFaceBox(fdMap?.get?.(`mc_${i}`)));
+  // ★ รอบ 5 (P1 semantic trap — Codex): normalizeFaceBox คืน object truthy (count=0, กรอบ 0) เมื่อ
+  //   ไม่มีหน้าแต่มี mainSubject/textRegion/watermark → filter(Boolean) นับ "ไม่มีหน้า" เป็น "เจอหน้า"
+  //   = detector ล่มแต่เกท outage เป็นใบ้ · นับเฉพาะ "หน้าจริง": count>0 + กรอบมีพื้นที่จริง
+  //   (กล่อง subject-only ยังส่งต่อให้ crop fallback ใช้ได้ตามเดิม — แค่ห้ามนับเป็นใบหน้า)
+  const _realFace = (fb) => !!(fb && (fb.count || 0) > 0 && fb.x2 > fb.x1 && fb.y2 > fb.y1);
+  let actualFaceHits = faceBoxes.filter(_realFace).length;
+  if (actualFaceHits === 0 && loaded.length) {
+    console.log('[MegaComposer] 🔐⚠️ ตาหาหน้า (หน้าจริง) ศูนย์ทั้งชุด → ลองใหม่ 1 รอบ');
+    fdMap = await batchDetectFaces(loaded.map((im, i) => ({ id: `mc_${i}`, buffer: im.buffer })));
+    faceBoxes = loaded.map((im, i) => normalizeFaceBox(fdMap?.get?.(`mc_${i}`)));
+    actualFaceHits = faceBoxes.filter(_realFace).length;
+    // ★ รอบ 4 (P1-4): perception-outage gate เหมือน legacy — retry แล้วยังศูนย์ทั้งชุด ทั้งที่ metadata
+    //   จาก binding ยืนยันมีหน้า ≥2 ใบ = detector ล่มยาว → คืน error ให้คิววนใหม่ ห้ามปล่อยปกครอปตาบอด
+    //   (เกทนี้ตรวจ "ตาล่ม" เท่านั้น — ไม่ใช่ face lock/กติกาคน และไม่แตะ/ไม่สลับ asset ใดๆ)
+    const expectFaces = loaded.filter((im) => Number(im.faces) > 0).length;
+    if (actualFaceHits === 0 && expectFaces >= 2) {
+      return { error: `ตาหาหน้าล่มทั้งชุด (ตาคัดยืนยันว่ามีหน้า ${expectFaces} ใบ) — กันปกครอปตาบอด รอระบบฟื้นแล้วลองใหม่`, errorType: 'FACE_EYE_DOWN' };
+    }
+  }
+  console.log(`[MegaComposer] 🔐 strict: primary ${loaded.length} ใบตรง URL · หน้าจริง ${actualFaceHits}/${loaded.length}`);
+  // assignments ตรงจาก authority — สร้างครั้งเดียว · crop ใช้สูตรเดิมของโรง (same-image เท่านั้น)
+  const _bigFace = (fb) => fb && fb.x2 > fb.x1 && (fb.y2 - fb.y1) >= 0.16 && fb.y1 >= 0.01 && fb.y2 <= 0.99;
+  // ★ รอบ 6 (P1-B): "subject-only" = ไม่มีหน้าจริงแต่ detector เห็นตัวเรื่อง (fb.subject กรอบมีพื้นที่จริง)
+  //   → hint ครอบ subject "ไม่ตั้ง _final" — renderRectTile เช็ค crop._final ก่อน branch subject-box
+  //   (executor:669 vs 673) เดิม _final generic จึงบังทาง subject สนิท · วงกลม noface-square ก็ใช้ hint นี้
+  //   เผื่อเหนือหัว 12% / ใต้ 5% ของสูง subject · clamp 0..1 · deterministic ล้วน · ไม่แตะ source/index
+  // ★ รอบ 7 (P1-1): subject ต้อง "ใช้ได้จริง" — finite ครบสี่ค่า · พื้นที่บวก · มีส่วนทับจริงกับผืน [0,1]²
+  //   (กล่องหลุดนอกภาพทั้งกล่อง/ค่า NaN-Infinity = ค่าหลอนจาก detector → ถอย generic fallback เดิม)
+  const _subjectValid = (fb) => {
+    if (!fb || _realFace(fb) || !fb.subject) return false;
+    const s = fb.subject;
+    if (![s.x1, s.y1, s.x2, s.y2].every(Number.isFinite)) return false;
+    if (!(s.x2 > s.x1 && s.y2 > s.y1)) return false;
+    if (s.x2 <= 0 || s.x1 >= 1 || s.y2 <= 0 || s.y1 >= 1) return false; // off-canvas ทั้งกล่อง
+    return true;
+  };
+  const _subjectCrop = (fb) => {
+    const s = fb.subject;
+    // ใช้เฉพาะส่วนของ subject ที่อยู่ในภาพจริง (กล่องเลยขอบบางส่วน = intersect ก่อน)
+    const sx1 = Math.max(0, s.x1), sy1 = Math.max(0, s.y1);
+    const sx2 = Math.min(1, s.x2), sy2 = Math.min(1, s.y2);
+    const sh = sy2 - sy1;
+    let x = sx1;
+    let y = Math.max(0, sy1 - sh * 0.12); // เผื่อเหนือหัว 12%
+    let w = sx2 - x;
+    let h = Math.min(1, sy2 + sh * 0.05) - y; // เผื่อใต้ 5%
+    // ขั้นต่ำ 0.05: ขยายแล้ว "เลื่อน origin กลับเข้าภาพ" — ห้ามดัน x+w/y+h ทะลุ 1
+    if (w < 0.05) { w = 0.05; x = Math.min(x, 1 - w); }
+    if (h < 0.05) { h = 0.05; y = Math.min(y, 1 - h); }
+    x = Math.max(0, +x.toFixed(3));
+    y = Math.max(0, +y.toFixed(3));
+    w = +w.toFixed(3);
+    h = +h.toFixed(3);
+    // การปัด 3 ตำแหน่งห้ามทำเกินขอบ — บีบด้านที่เกินกลับพอดี 1
+    if (x + w > 1) w = +(1 - x).toFixed(3);
+    if (y + h > 1) h = +(1 - y).toFixed(3);
+    return { x, y, w, h };
+  };
+  const assignments = strictCtx.snapshot.map((snap, i) => {
+    const slot = spec.slots.find((x) => String(x.id) === snap.composerSlotId);
+    const fb = faceBoxes[i];
+    let crop;
+    if (_isHeroSlot(snap.composerSlotId)) {
+      if (fb && fb.x2 > fb.x1) crop = cropFromFace(fb, 62, 'upper', slot.w / slot.h);
+      else if (_subjectValid(fb)) crop = _subjectCrop(fb);
+      else crop = { x: 0, y: 0, w: 1, h: 1 };
+    } else if (snap.shape === 'circle') {
+      if (fb && fb.x2 > fb.x1) crop = cropFromFace(fb, 66, 'center', 1);
+      else if (_subjectValid(fb)) crop = _subjectCrop(fb); // hint ครอบ subject — วงถูกย่อจากตำแหน่งจริง ไม่ใช่ generic กลางภาพ
+      else crop = { x: 0.2, y: 0.05, w: 0.6, h: 0.6, _final: true };
+    } else if (fb && (fb.count || 1) > 1) {
+      crop = cropAllFaces(fb, slot.w / slot.h);
+    } else if (_bigFace(fb)) {
+      crop = cropFromFace(fb, 52, 'upper', slot.w / slot.h);
+    } else if (fb && fb.x2 > fb.x1) {
+      crop = cropFromFace(fb, 40, 'center', slot.w / slot.h);
+    } else if (_subjectValid(fb)) {
+      crop = _subjectCrop(fb); // rect: ไม่มี _final = เปิดทาง executor เข้า subject-box
+    } else {
+      crop = { x: 0.02, y: 0, w: 0.96, h: 0.94, _final: true }; // ไม่มีทั้งหน้าจริงและ subject เท่านั้น
+    }
+    return { slotId: snap.composerSlotId, imageIndex: i, crop, why: 'strict: ref-slot authority' };
+  });
+  const used = new Set(assignments.map((a) => a.imageIndex));
+  // คุณภาพ (pure): วัดยืดต่อช่องรอง — ติดธงได้ ห้ามเลือกภาพอื่น (สัญญา strict)
+  const _wh = (im, fb) => (im && im._w > 0 && im._h > 0) ? [im._w, im._h] : (fb && fb.imgW > 0 && fb.imgH > 0 ? [fb.imgW, fb.imgH] : [0, 0]);
+  for (const a of assignments) {
+    const sl = spec.slots.find((x) => String(x.id) === a.slotId);
+    if (!sl || _isHeroSlot(a.slotId)) continue;
+    const [iw, ih] = _wh(loaded[a.imageIndex], faceBoxes[a.imageIndex]);
+    if (!(iw > 0 && ih > 0)) continue;
+    const up = (iw / ih) >= (sl.w / sl.h) ? sl.h / ih : sl.w / iw;
+    if (up > 1.6) qcFlags.push(`upscaled_src:${a.slotId}:${up.toFixed(2)}`);
+  }
+  assignments.forEach((a) => {
+    console.log(`[MegaComposer] 🔐 ${a.slotId} ← #${a.imageIndex} (authority) ${a.crop._final ? 'crop' : 'hint'}(${a.crop.x},${a.crop.y},${a.crop.w},${a.crop.h})`);
+  });
+  // render ครั้งเดียว — ไม่มี retry-เปลี่ยนรูป
+  const { executeCover } = await import('@/lib/services/coverExecutorService');
+  const traceSink = [];
+  const buffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: spec, faceBoxes, traceSink });
+  console.log(`[MegaComposer] 🔐 strict ประกอบเสร็จ ${Math.round(buffer.length / 1024)}KB (${spec.id || 'realized'})`);
+  const cropTrace = [...traceSink];
+  qcFlags.push(...traceQcFlags(cropTrace));
+  if (qcFlags.length) console.log(`[MegaComposer] 🚩 qcFlags: ${qcFlags.join(' · ')}`);
+  // shape ผลลัพธ์ = เดียวกับ legacy core ทุก field + ป้าย _strictSourceLock ให้ชั้น Eye ล็อก source
+  // (aHashes = ค่าจริง — ด่าน blank_image ใน composeAndVerify ทำงานเต็ม ★ รอบ 2 P1)
+  // ★ (item 8) แนบ canonical heroComposerSlotId (V2 เท่านั้น) ลง core → Eye path/recrop/measurement กันช่อง hero
+  //   ตัวจริงด้วย exact id (ไม่พึ่ง regex /main|hero/) · V1/legacy = null ⇒ regex เดิม byte-identical
+  return { buffer, spec, assignments, loaded, faceBoxes, used, refSlotMeta: null, cropTrace, qcFlags, traceSink, aHashes, _strictSourceLock: true, heroComposerSlotId: (strictCtx.v2 && strictCtx.heroComposerSlotId != null) ? strictCtx.heroComposerSlotId : null };
+}
+
+// ③ final invariant — เรียกหลัง Eye จบ ก่อน techRules/manifest/success: จับ drift ทุกมิติเทียบ snapshot
+//   (นับช่อง · เซ็ต composer slot เป๊ะ · ไม่ซ้ำ/หาย/เกิน · URL ของ loaded ตรง primary · index ตรง · โครงไม่ drift)
+function _strictDriftCheck(core, strictCtx) {
+  const reasons = [];
+  const snap = strictCtx.snapshot;
+  const asg = Array.isArray(core.assignments) ? core.assignments : [];
+  if (asg.length !== snap.length) reasons.push(`assignment_count:${asg.length}!=${snap.length}`);
+  const bySlot = new Map();
+  for (const a of asg) {
+    const id = String(a?.slotId || '');
+    if (bySlot.has(id)) reasons.push(`assignment_duplicate:${id}`);
+    bySlot.set(id, a);
+  }
+  for (const s of snap) {
+    const a = bySlot.get(s.composerSlotId);
+    if (!a) { reasons.push(`assignment_missing:${s.composerSlotId}`); continue; }
+    bySlot.delete(s.composerSlotId);
+    if (a.imageIndex !== s.imageIndex) reasons.push(`image_index_drift:${s.composerSlotId}:${a.imageIndex}`);
+    const url = String(core.loaded?.[a.imageIndex]?.url || '');
+    if (url !== s.imageUrl) reasons.push(`image_url_drift:${s.composerSlotId}`);
+  }
+  for (const id of bySlot.keys()) reasons.push(`assignment_extra:${id}`);
+  // ★ รอบ 2 (P1): loaded ต้องครบ identity ทุกใบ — จำนวนเท่า authority · ไม่มี null/เกิน ·
+  //   url + composerSlotId + refSlotId + candidateId ตรง snapshot ราย index
+  const loaded = Array.isArray(core.loaded) ? core.loaded : [];
+  if (loaded.length !== snap.length) reasons.push(`loaded_count:${loaded.length}!=${snap.length}`);
+  for (let i = 0; i < snap.length; i++) {
+    const l = loaded[i];
+    const s = snap[i];
+    if (!l || !l.buffer) { reasons.push(`loaded_missing:${s.composerSlotId}`); continue; }
+    if (String(l.url || '') !== s.imageUrl) reasons.push(`loaded_url_drift:${s.composerSlotId}`);
+    if (String(l.composerSlotId || '') !== s.composerSlotId) reasons.push(`loaded_slot_identity_drift:${s.composerSlotId}`);
+    if (String(l.refSlotId || '') !== s.refSlotId) reasons.push(`loaded_ref_identity_drift:${s.composerSlotId}`);
+    if (String(l.candidateId || '') !== s.candidateId) reasons.push(`loaded_candidate_drift:${s.composerSlotId}`);
+    // ★ V2: sourceAssetId/personId เป็น identity ภาคบังคับใน drift-check เช่นกัน (snapshot มีเฉพาะ V2 → V1 ข้าม)
+    if (s.sourceAssetId !== undefined && String(l.sourceAssetId || '') !== s.sourceAssetId) reasons.push(`loaded_asset_drift:${s.composerSlotId}`);
+    if (s.personId !== undefined && String(l.personId || '') !== s.personId) reasons.push(`loaded_person_drift:${s.composerSlotId}`);
+  }
+  for (let i = snap.length; i < loaded.length; i++) reasons.push(`loaded_extra:${i}`);
+  // ★ รอบ 2 (P1): used Set ต้องเท่ากับเซ็ต imageIndex ของ assignments สุดท้ายเป๊ะ
+  if (!(core.used instanceof Set)) reasons.push('used_not_set');
+  else {
+    const uSorted = [...core.used].sort((a, b) => a - b).join(',');
+    const idxSet = new Set(asg.map((a) => a?.imageIndex));
+    const iSorted = [...idxSet].sort((a, b) => a - b).join(',');
+    if (uSorted !== iSorted || core.used.size !== idxSet.size) reasons.push(`used_set_mismatch:[${uSorted}]!=[${iSorted}]`);
+  }
+  // ★ รอบ 2 (P1): โครงเทียบ canonical deep snapshot "ทั้งก้อน" (spec เป็น object แช่แข็งตัวเดิม —
+  //   drift check คือกำแพงชั้นสองต่อจาก freeze)
+  let nowSnap = null;
+  try { nowSnap = JSON.stringify(core.spec); } catch { /* serialize ไม่ได้ = drift แน่นอน */ }
+  if (nowSnap !== strictCtx.templateSnap) reasons.push('template_drift');
+  return reasons.length ? reasons : null;
+}
+
+async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, strictCtx = null }) {
+  // ★ Checkpoint B รอบ 2: strict แยก path ตั้งแต่บรรทัดแรก — ก่อน guard legacy ทุกตัว (แผนหาย
+  //   ถูก _strictPrepare จับเป็น STRICT_PRIMARY_UNAVAILABLE ไปแล้ว) · strictCtx=null = legacy เดิมเป๊ะ
+  if (strictCtx) return composeCoreStrict(strictCtx);
   if (!Array.isArray(slotPlan) || !slotPlan.length) {
     return { error: 'ไม่มี slotPlan — S6 ต้องเลือกภาพมาก่อน', errorType: 'NO_SLOT_PLAN' };
   }
@@ -968,6 +1601,7 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
   const heroBanned = new Set();
   for (let attempt = 0; ; attempt++) {
     buffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: spec, faceBoxes, traceSink });
+    if (mainSlotSpec && mainAssign && attempt >= 2) qcFlags.push('hero_unverified_kept'); // ⑤ retry ครบ 2 รอบ ออกโดยไม่ได้ verify ผลประกอบสุดท้าย
     if (!mainSlotSpec || !mainAssign || attempt >= 2) break;
     let heroOk = true;
     try {
@@ -995,7 +1629,7 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
         //   (faceTopAt 0.40 + การ์ดผม/หัว) เสมอ — ถ้าหน้าที่เจอจริงอยู่ล่างเฟรม (center y > 0.68) = ครอปเพี้ยนแน่นอน
         if (heroOk && cyF > 0.68) { heroOk = false; console.log('[MegaComposer] 🛡️ hero หน้าอยู่ล่างเฟรมผิดสูตร (คาดโซนบน) → ไม่ผ่านด่าน'); }
       }
-    } catch { heroOk = true; /* ด่านตรวจล้มเอง = ไม่บล็อกงาน */ }
+    } catch { heroOk = true; qcFlags.push('hero_gate_error'); /* ด่านตรวจล้มเอง = ไม่บล็อกงาน (fail-open คงเดิม) แต่ติดธงให้ QC เห็น — ห้ามเงียบ */ }
     if (heroOk) { if (attempt > 0) console.log(`[MegaComposer] 🛡️ hero ผ่านด่านบังคับ (รอบ ${attempt + 1})`); break; }
     heroBanned.add(mainAssign.imageIndex);
     let ni = -1, nBest = 0;
@@ -1005,7 +1639,7 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false }
       const sc = heroScore(im, faceBoxes[i]);
       if (sc > nBest) { nBest = sc; ni = i; }
     });
-    if (ni < 0) { console.log('[MegaComposer] 🛡️ hero ไม่ผ่านด่านแต่ไม่มีตัวเลือกอื่น — ใช้ที่ดีสุดเท่าที่มี'); break; }
+    if (ni < 0) { console.log('[MegaComposer] 🛡️ hero ไม่ผ่านด่านแต่ไม่มีตัวเลือกอื่น — ใช้ที่ดีสุดเท่าที่มี'); qcFlags.push('hero_unverified_kept'); break; }
     console.log(`[MegaComposer] 🛡️ hero #${mainAssign.imageIndex} ไม่ผ่าน (หน้าไม่เด่นในผลจริง) → เปลี่ยนเป็น #${ni} ประกอบใหม่`);
     used.delete(mainAssign.imageIndex);
     used.add(ni);
@@ -1137,31 +1771,195 @@ async function refCompareEye({ coverBuffer, refImagePath, newsTitle }) {
 }
 
 // ---------- ปรับตามคำสั่งตา (กฎล้วน — bounded ≤1 รอบ · ห้ามแตะ main) ----------
-function applyEyeFixes({ fixes, assignments, loaded, faceBoxes, used }) {
+function applyEyeFixes({ fixes, assignments, loaded, faceBoxes, used, allowSourceSwap = true, strictFaceZoom = false, heroComposerSlotId = null }) {
   let applied = 0;
+  // ★ (item 8) HERO authority in the Eye path: V2 = EXACT canonical heroComposerSlotId (a slot named e.g.
+  //   `panel_alpha` is the hero; a decoy `main` is NOT) · V1/legacy (heroComposerSlotId == null) = regex เดิม
+  const _isHeroSlot = (id) => (heroComposerSlotId != null)
+    ? (String(id) === String(heroComposerSlotId))
+    : /main|hero/i.test(String(id));
+  // ★ รอบ 7 (P1-3): strict เท่านั้น — zoom_in/zoom_out ต้องมี "หน้าจริง" (count>0 + กรอบมีพื้นที่)
+  //   subject-only box (count=0, x1=x2=0) truthy หลอก cropFromFace จนวงยุบ 8x8 ได้ โดยเฉพาะ REQC=0
+  //   → strict: skip zoom เงียบ (ไม่นับ applied ไม่ render ใหม่) · legacy default = พฤติกรรมเดิม byte-เดิม
+  const _zoomFb = (fb) => !!fb && (!strictFaceZoom || ((fb.count || 0) > 0 && fb.x2 > fb.x1 && fb.y2 > fb.y1));
+  // ★ HOTFIX รอบ 2 (Codex P0-A): ลำดับ candidate ต้องเท่า legacy เป๊ะ (OFF parity) — scan ใช้ snapshot
+  //   ของ used ณ ต้น call + ภาพใหม่ที่ swap จองเพิ่ม: index เก่าที่ถูกปล่อยยัง "reserved" ตลอด call
+  //   (กัน swap ถัดไปหยิบภาพเก่าของช่องก่อนหน้า = ผลเลือกเพี้ยนจาก HEAD) · ส่วน used จริง = ownership
+  //   สุดท้ายของ assignments: delete(old) + add(new)
+  const reservedDuringEye = new Set(used);
   for (const f of fixes) {
-    const a = assignments.find((x) => x.slotId === f.slot && !/main|hero/i.test(x.slotId));
+    const a = assignments.find((x) => x.slotId === f.slot && !_isHeroSlot(x.slotId));
     if (!a) continue;
     const fb = faceBoxes[a.imageIndex];
-    if (f.action === 'zoom_in' && fb) { a.crop = cropFromFace(fb, 74, 'center'); applied++; }        // หน้าใหญ่ขึ้น (กิน 74%)
-    else if (f.action === 'zoom_out' && fb) { a.crop = cropFromFace(fb, 46, 'center'); applied++; }   // หน้าเล็กลง (กิน 46%)
+    if (f.action === 'zoom_in' && _zoomFb(fb)) { a.crop = cropFromFace(fb, 74, 'center'); applied++; }        // หน้าใหญ่ขึ้น (กิน 74%)
+    else if (f.action === 'zoom_out' && _zoomFb(fb)) { a.crop = cropFromFace(fb, 46, 'center'); applied++; }   // หน้าเล็กลง (กิน 46%)
     else if (f.action === 'shift_up') { a.crop = { ...a.crop, y: Math.max(0, +(a.crop.y - 0.1).toFixed(3)) }; applied++; }
     else if (f.action === 'shift_down') { a.crop = { ...a.crop, y: Math.min(1 - a.crop.h, +(a.crop.y + 0.1).toFixed(3)) }; applied++; }
     else if (f.action === 'swap') {
+      // ★ Checkpoint B: strict = source ล็อกตาม authority — ปฏิเสธ swap เงียบๆ (crop actions ด้านบนยังทำงาน)
+      if (!allowSourceSwap) { console.log(`[MegaComposer] 🔐 strict: ตาขอ swap ${f.slot} → ปฏิเสธ (source ล็อกตาม authority)`); continue; }
       // ★ เฟส 4.2: วงกลมห้ามถูกตาสลับกลับไปเป็น "คนเดียวกับ hero" (ตาเทียบไม่รู้จักคน — เคย undo กติกา 2.3)
-      const _mainA2 = assignments.find((x) => /main|hero/i.test(String(x.slotId)));
+      const _mainA2 = assignments.find((x) => _isHeroSlot(x.slotId));
       const _heroP2 = _mainA2 ? String(loaded[_mainA2.imageIndex]?.person || '') : '';
       const _isCircle = /circle/i.test(String(a.slotId));
       let si = -1;
       for (let i = 0; i < loaded.length; i++) {
-        if (used.has(i) || loaded[i].clean === false || !faceBoxes[i]) continue;
+        if (reservedDuringEye.has(i) || loaded[i].clean === false || !faceBoxes[i]) continue;
         if (_isCircle && _heroP2 && String(loaded[i]?.person || '') === _heroP2) continue;
         si = i; break;
       }
-      if (si >= 0) { used.add(si); a.imageIndex = si; a.crop = cropFromFace(faceBoxes[si], 55, 'upper'); applied++; }
+      if (si >= 0) {
+        // ★ HOTFIX รอบ 2 (Codex P0-A): คำนวณ crop ทดแทนให้เสร็จ "ก่อน" แตะ state — throw กลางทาง = ไม่มี partial
+        const newCrop = cropFromFace(faceBoxes[si], 55, 'upper');
+        const oldIndex = a.imageIndex;
+        used.delete(oldIndex);      // ownership จริง: ภาพเก่าหลุดจากช่องนี้แล้ว (บั๊กเดิมค้างตลอดงาน)
+        used.add(si);
+        reservedDuringEye.add(si);  // จองใน call นี้ — old ยังค้างใน reserved ให้ลำดับเลือกตรง HEAD
+        a.imageIndex = si;
+        a.crop = newCrop;
+        applied++;
+      }
     }
   }
   return applied;
+}
+
+// ---------- 👁️⚛️ Eye advisory atomic transaction (11 ก.ค. — Codex hotfix รอบ 2) ----------
+// seam เดียวที่ export: _runEyeFixTransaction — production เรียกตัวนี้จริง harness ก็เรียกตัวนี้จริง
+// (ไม่ export helper ย่อย — เทสจะได้ไม่ต้องจำลอง orchestration เอง) · snapshot/restore เป็น private ล้วน
+
+// snapshot ครบชุด "ก่อน" applyEyeFixes — จำทั้ง "ค่า" (deep-clone รวม nested trace) และ "ตัวตน" (references)
+// เพื่อ restore แบบ reference-atomic: array/Set/object เดิมทุกตัว แค่เนื้อหากลับ baseline
+function _eyeTxSnapshot(core, buffer, cropTrace) {
+  return {
+    assignArrayRef: core.assignments,
+    assignEntries: (core.assignments || []).map((ref) => ({
+      ref, // object เดิมใน array — restore เขียนคืน field ลงตัวนี้ ไม่สร้างใหม่
+      fields: { ...ref, crop: ref.crop ? JSON.parse(JSON.stringify(ref.crop)) : ref.crop },
+    })),
+    usedRef: core.used,
+    usedItems: [...(core.used || [])],
+    qcFlagsRef: Array.isArray(core.qcFlags) ? core.qcFlags : null,
+    qcFlagsItems: [...(core.qcFlags || [])],
+    traceSinkRef: Array.isArray(core.traceSink) ? core.traceSink : null,
+    traceSinkItems: Array.isArray(core.traceSink) ? JSON.parse(JSON.stringify(core.traceSink)) : [],
+    cropTraceItems: JSON.parse(JSON.stringify(cropTrace || [])), // deep — กัน region/tighten ใน entry ถูกแชร์
+    buffer,
+  };
+}
+
+// touched = เทียบ "object ตัวเดิม" กับ field ที่จำไว้ตรงๆ (ไม่พึ่ง slotId map — กันชนกรณี id ซ้ำ)
+function _eyeTxTouched(snap) {
+  const out = [];
+  for (const { ref, fields } of snap.assignEntries) {
+    if (ref.imageIndex !== fields.imageIndex || JSON.stringify(ref.crop) !== JSON.stringify(fields.crop)) out.push(ref.slotId);
+  }
+  return out;
+}
+
+// ด่านกลไก re-QC (ตรรกะเดิมของ Wave2 Batch C ทุกบรรทัด): เทียบธงก่อน-หลังเฉพาะช่องที่ตาแตะ
+function _eyeRegressionOf({ touchedSlots, preQcFlags, postQcFlags }) {
+  const upOf = (flags, slot) => {
+    for (const f of flags) {
+      const m = /^(?:upscaled|upscale_soft):([^:]+):([\d.]+)$/.exec(String(f));
+      if (m && m[1] === slot) return Number(m[2]);
+    }
+    return null;
+  };
+  const blindOf = (flags, slot) => flags.includes(`blind_crop:${slot}`);
+  for (const slot of touchedSlots) {
+    if (blindOf(postQcFlags, slot) && !blindOf(preQcFlags, slot)) return `blind_crop_new:${slot}`;
+    const beforeUp = upOf(preQcFlags, slot);
+    const afterUp = upOf(postQcFlags, slot);
+    if (afterUp != null) {
+      if (beforeUp != null && afterUp > beforeUp * 1.1 + 0.001) return `upscale_worse:${slot}:${beforeUp.toFixed(2)}->${afterUp.toFixed(2)}`;
+      if (beforeUp == null && afterUp > 1.6) return `upscale_new:${slot}:${afterUp.toFixed(2)}`;
+    }
+  }
+  return null;
+}
+
+// restore reference-atomic — ห้ามสลับตัวตนใดๆ:
+//   · assignment object แต่ละตัว: ลบ key แปลกปลอมแล้วเขียน field เดิมคืน in-place (crop = clone ใหม่กัน baseline เน่า)
+//   · assignments array เดิม / used Set เดิม (clear+add) / traceSink array เดิม / qcFlags array เดิม — เนื้อหากลับ baseline
+//   · qcFlags หลัง revert = baseline + ป้าย eye_fix_reverted:<reason> หนึ่งใบเป๊ะ
+//   คืน { buffer: Buffer ใบ baseline ตัวเดิม, cropTrace: สำเนา deep ของ baseline, fixedCount: 0 }
+function _eyeTxRestore(snap, core, reason) {
+  for (const { ref, fields } of snap.assignEntries) {
+    for (const k of Object.keys(ref)) { if (!(k in fields)) delete ref[k]; }
+    Object.assign(ref, fields, { crop: fields.crop ? JSON.parse(JSON.stringify(fields.crop)) : fields.crop });
+  }
+  snap.assignArrayRef.length = 0;
+  snap.assignArrayRef.push(...snap.assignEntries.map((e) => e.ref));
+  core.assignments = snap.assignArrayRef;
+  if (snap.usedRef instanceof Set) {
+    snap.usedRef.clear();
+    for (const i of snap.usedItems) snap.usedRef.add(i);
+    core.used = snap.usedRef;
+  } else {
+    core.used = new Set(snap.usedItems);
+  }
+  if (snap.traceSinkRef) {
+    snap.traceSinkRef.length = 0; // render อาจ clear/เขียนครึ่งทางก่อน throw — คืนเนื้อหาเสมอ
+    snap.traceSinkRef.push(...JSON.parse(JSON.stringify(snap.traceSinkItems)));
+    core.traceSink = snap.traceSinkRef;
+  }
+  const flagsRef = snap.qcFlagsRef || [];
+  flagsRef.length = 0;
+  flagsRef.push(...snap.qcFlagsItems, `eye_fix_reverted:${reason}`);
+  core.qcFlags = flagsRef;
+  return { buffer: snap.buffer, cropTrace: JSON.parse(JSON.stringify(snap.cropTraceItems)), fixedCount: 0 };
+}
+
+// kill switch ด่านกลไก: MEGA_EYE_REQC=0 = ข้าม re-QC รับผลตาทันที (พฤติกรรมเดิมเป๊ะ) — private
+function _eyeReqcEnabled(env = process.env) {
+  return env.MEGA_EYE_REQC !== '0';
+}
+
+// ธุรกรรมเดียวครอบทั้งเส้น: snapshot → apply → render → re-QC → keep/revert/exception
+// · buffer/cropTrace = ค่า local ของ composeAndVerify "หลัง FinalCrop" (ไม่ใช่ core.buffer/core.cropTrace)
+// · renderCover: จุดฉีดของ harness เท่านั้น — production ห้ามส่ง (default = executeCover จริง)
+// · fixedCount=0 → ไม่ render (พฤติกรรมเดิม) · exception ที่จุดใดก็ตาม → restore atomic + reason 'exception'
+export async function _runEyeFixTransaction({ core, fixes, buffer, cropTrace, renderCover = null }) {
+  const snap = _eyeTxSnapshot(core, buffer, cropTrace);
+  try {
+    // ★ Checkpoint B: strict context = source ล็อกตาม authority — ตาสั่ง swap ได้แค่ถูกปฏิเสธ (crop ยังได้)
+    //   ★ รอบ 7 (P1-3): strict ยังบังคับ zoom ต้องมีหน้าจริง (subject-only ห้ามเข้า cropFromFace)
+    const allowSourceSwap = core._strictSourceLock !== true;
+    const fixedCount = applyEyeFixes({ fixes, assignments: core.assignments, loaded: core.loaded, faceBoxes: core.faceBoxes, used: core.used, allowSourceSwap, strictFaceZoom: core._strictSourceLock === true, heroComposerSlotId: core.heroComposerSlotId != null ? core.heroComposerSlotId : null });
+    if (!fixedCount) return { buffer, cropTrace, fixedCount: 0 };
+    const render = renderCover || (async () => {
+      const { executeCover } = await import('@/lib/services/coverExecutorService');
+      return executeCover({ assignments: core.assignments, imageBuffers: core.loaded, templateSpec: core.spec, faceBoxes: core.faceBoxes, traceSink: core.traceSink });
+    });
+    buffer = await render();
+    cropTrace = [...(core.traceSink || [])]; // audit: trace ของรอบสุดท้าย จาก sink ของงานนี้เอง
+    // audit: ธง blind_crop + upscale ต้องสะท้อนปกใบสุดท้าย (การสลับภาพของตาอาจทำให้เกิด/หาย) — เฟส 3.1
+    core.qcFlags = (core.qcFlags || []).filter((f) => !/^(blind_crop|upscaled|upscale_soft):/.test(String(f)));
+    core.qcFlags.push(...traceQcFlags(cropTrace));
+    console.log(`[MegaComposer] 👁️ แก้ตามตา ${fixedCount} จุด → ประกอบใหม่ (bounded 1 รอบจบ)`);
+    // ── 🔬 re-QC กลไกล้วน (ไม่เรียก vision LLM เพิ่ม) — ตาแค่ "เสนอ" เครื่องตัดสินว่าจะรับจริงไหม ──
+    //   MEGA_EYE_REQC=0: ข้าม gate ทั้งก้อน = apply+render แล้วรับเลย ไม่มี marker kept/unverified/revert
+    if (_eyeReqcEnabled()) {
+      const touchedSlots = _eyeTxTouched(snap);
+      if (touchedSlots.length) {
+        const regression = _eyeRegressionOf({ touchedSlots, preQcFlags: snap.qcFlagsItems, postQcFlags: core.qcFlags });
+        if (regression) {
+          const r = _eyeTxRestore(snap, core, regression);
+          console.log(`[MegaComposer] 👁️↩️ revert eye fix (${regression}) — กลไกวัดว่าแย่ลงกว่า baseline`);
+          return r;
+        }
+        core.qcFlags.push('eye_fix_kept', 'person_cut_unverified');
+        console.log('[MegaComposer] 👁️✅ eye fix ผ่านด่านกลไก (blind_crop/upscale ไม่แย่ลง) — รับผล');
+      }
+    }
+    return { buffer, cropTrace, fixedCount };
+  } catch (e) {
+    // exception กลาง apply/render/re-QC — restore atomic เสมอ (รวมใต้ REQC=0: safety ที่ตั้งใจ)
+    const r = _eyeTxRestore(snap, core, 'exception');
+    console.log('[MegaComposer] 👁️↩️ eye fix ล้มกลางทาง — atomic revert กลับ baseline:', e.message?.slice(0, 60));
+    return r;
+  }
 }
 
 /**
@@ -1187,10 +1985,26 @@ export async function composeMegaCover({ newsTitle = '', slotPlan = [], refDNA =
  * ประกอบ + 👁️ ตาเทียบ ref จริง (ภาพชนภาพ) + แก้ bounded ≤1 รอบ — ท่อ MEGA ใช้ตัวนี้
  * @param {string} p.refImagePath - พาธภาพปกต้นแบบจากคลัง (เช่น /ref-covers/xxx.jpg) — ไม่มี = ประกอบเฉยๆ
  */
-export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA = null, refImagePath = null, stableOrder = false }) {
+export async function composeAndVerify(args = {}) {
   try {
-    const core = await composeCore({ slotPlan, refDNA, stableOrder });
-    if (core.error) return { success: false, error: core.error, errorType: core.errorType };
+    // ★ Wave1A (LANE C — P0-A/P0-B/P1-R1): the FIRST observation of args is the shared pure seam — NO destructure /
+    //   [[Get]] / getPrototypeOf / has / ownKeys before it. The seam privately captures the carriers (descriptors
+    //   FIRST) + slotPlan, owns the ambiguity + latch + version decision, and returns { none } | { error } | { ctx }
+    //   (each carrying the captured slotPlan). Canonical latch = MEGA_STRICT_RENDER === '1' (no _V2 alias) — passed in
+    //   so the seam stays env-free/pure. NO-DOWNGRADE for V2, V1-only latch-OFF legacy parity, ambiguity/trap ⇒ HOLD.
+    const _act = _strictActivate({ args, latchArmed: process.env.MEGA_STRICT_RENDER === '1' });
+    if (_act.error) {
+      console.log(`[MegaComposer] 🔐🚫 strict fail-closed: ${_act.errorType} — ${(_act.reasons || []).join(' · ').slice(0, 160)}`);
+      return { success: false, error: _act.error, errorType: _act.errorType, reasons: _act.reasons };
+    }
+    const strictCtx = _act.ctx || null;
+    const slotPlan = _act.slotPlan; // captured by the seam — the strict path uses THIS, never re-reads args.slotPlan
+    if (strictCtx) console.log(`[MegaComposer] 🔐 strict render ACTIVE (${strictCtx.v2 ? 'V2' : 'V1'}): ref=${strictCtx.authority.refId} · ${strictCtx.snapshot.length} ช่อง · specHash=${strictCtx.authority.specHash}`);
+    // ordinary business fields — read ONLY AFTER activation has returned (requirement 5); slotPlan already captured.
+    const { newsTitle = '', refDNA = null, refImagePath = null, stableOrder = false } = args || {};
+    const core = await composeCore({ slotPlan, refDNA, stableOrder, strictCtx });
+    // ★ Checkpoint B: strict core แนบ reasons ราย slot มาด้วย — ส่งต่อเมื่อมีเท่านั้น (legacy ไม่มี = shape เดิมเป๊ะ)
+    if (core.error) return { success: false, error: core.error, errorType: core.errorType, ...(core.reasons ? { reasons: core.reasons } : {}) };
     let buffer = core.buffer;
     let cropTrace = core.cropTrace || [];
     let eye = null;
@@ -1209,7 +2023,10 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
           //   ทางแก้ bounded/fail-safe: เฉพาะ ref ที่สั่ง close-up + ตาเห็น hero_shot=false ให้ Final Cropper
           //   ที่เห็นภาพจริงครอป main ช่องเดียว → render+เทียบ ref ซ้ำอย่างละ 1 รอบ; รับเฉพาะเมื่อ hero_shot ผ่าน
           //   ไม่ผ่าน/AI ล้ม = คืน crop เดิมทันที (ไม่แตะ selection/layout/ช่องรอง)
-          const mainA = core.assignments.find((a) => /main|hero/i.test(String(a.slotId))) || null;
+          // ★ (P1) V2: hero ระบุด้วย composerSlotId จาก spec.hero.heroSlotId เท่านั้น (ไม่ใช่ regex) · V1/legacy = เดิม
+          const mainA = core.assignments.find((a) => (strictCtx && strictCtx.v2 && strictCtx.heroComposerSlotId != null)
+            ? (String(a.slotId) === strictCtx.heroComposerSlotId)
+            : /main|hero/i.test(String(a.slotId))) || null;
           const mainSlotIdx = mainA ? core.spec.slots.findIndex((s) => s.id === mainA.slotId) : -1;
           const refHeroShot = String(mainSlotIdx >= 0 ? (core.refSlotMeta?.[mainSlotIdx]?.shot || '') : '').toLowerCase();
           if (mainA && /close/.test(refHeroShot) && eye.checks?.hero_shot === false) {
@@ -1263,83 +2080,64 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
           }
           // สเกลใหม่: ตกข้อใดข้อหนึ่ง (<100) + ตามีคำสั่งแก้ = ลงมือ (เดิม <85 จะข้ามเคสตกข้อเล็ก)
           if (eye.fixes?.length && eye.similarity < 100) {
-            fixedCount = applyEyeFixes({ fixes: eye.fixes, assignments: core.assignments, loaded: core.loaded, faceBoxes: core.faceBoxes, used: core.used });
-            if (fixedCount) {
-              // ★ Wave2 Batch C (10 ก.ค. — AI Eye ต้องเป็น advisory จริง ไม่ใช่รับคำสั่งเงียบๆแล้วเชื่อทันที):
-              //   เก็บ "baseline ก่อนแก้" ครบชุด (assignments/used/buffer/trace/flags) ไว้ก่อนเรนเดอร์ทับ
-              //   เผื่อ re-QC ด้านล่างพบว่าแย่ลง → revert กลับจุดนี้เป๊ะ (ไม่ใช่แค่ buffer — assignments ต้องตรงด้วย)
-              const _preAssignments = core.assignments.map((a) => ({ ...a }));
-              const _preAssignSnap = new Map(_preAssignments.map((a) => [a.slotId, { imageIndex: a.imageIndex, crop: JSON.stringify(a.crop) }]));
-              const _preUsed = new Set(core.used);
-              const _preQcFlags = [...(core.qcFlags || [])];
-              const _preCropTrace = [...cropTrace];
-              const _preBuffer = buffer;
-
-              const { executeCover } = await import('@/lib/services/coverExecutorService');
-              buffer = await executeCover({ assignments: core.assignments, imageBuffers: core.loaded, templateSpec: core.spec, faceBoxes: core.faceBoxes, traceSink: core.traceSink });
-              cropTrace = [...(core.traceSink || [])]; // audit: trace ของรอบสุดท้าย จาก sink ของงานนี้เอง
-              // audit: ธง blind_crop + upscale ต้องสะท้อนปกใบสุดท้าย (การสลับภาพของตาอาจทำให้เกิด/หาย) — เฟส 3.1
-              core.qcFlags = (core.qcFlags || []).filter((f) => !/^(blind_crop|upscaled|upscale_soft):/.test(String(f)));
-              core.qcFlags.push(...traceQcFlags(cropTrace));
-              console.log(`[MegaComposer] 👁️ แก้ตามตา ${fixedCount} จุด → ประกอบใหม่ (bounded 1 รอบจบ)`);
-
-              // ── 🔬 re-QC กลไกล้วน (ไม่เรียก vision LLM เพิ่ม) — ตาแค่ "เสนอ" เครื่องตัดสินว่าจะรับจริงไหม ──
-              //   เทียบเฉพาะช่องที่ตาสั่งแก้ (touched: imageIndex หรือ crop เปลี่ยน) ก่อน-หลัง:
-              //   · blind_crop เกิดใหม่ (ไม่มีมาก่อน) = แย่ลงชัดเจน
-              //   · upscale มีเลขให้เทียบทั้งคู่ (ทั้งก่อน-หลังเคยติดธง) แล้วแย่ลง >10% = แย่ลงชัดเจน
-              //   · ก่อนไม่ติดธง (ยืด <1.2 เดิม) แต่หลังยืดทะลุเพดานจริงของช่องรอง (>1.6) = แย่ลงชัดเจน
-              //     (ไม่เดาเปอร์เซ็นต์จาก baseline ที่ไม่รู้ค่าเป๊ะ — ใช้เพดาน QC gate เป็นเส้นตัดสินแทน ซื่อสัตย์กว่า)
-              //   ⚠️ ข้อจำกัดที่รู้แล้วยอมรับ: person_cut วัดได้จาก detectFaces บน "ปกที่เรนเดอร์จริง" เท่านั้น
-              //     (vision LLM ผ่าน batchDetectFaces) — เรขาคณิตล้วนจาก faceBoxes+crop เดิมวัดแทนไม่ได้แม่น เพราะ
-              //     executor ปรับ crop จริงเองอีกชั้น (crop ที่ส่งเข้าไปเป็นแค่ hint ไม่ใช่ค่าจริงที่ render)
-              //     → ข้ามตัวนี้ในนี้ + ติดธง person_cut_unverified ให้เห็นข้อจำกัดชัดเจนแทนการเดาว่าผ่าน
-              //   kill switch: MEGA_EYE_REQC=0 → ปิดด่านนี้ทั้งหมด (พฤติกรรมเดิมเป๊ะ: แก้แล้วรับผลทันที)
-              if (process.env.MEGA_EYE_REQC !== '0') {
-                const touchedSlots = core.assignments
-                  .filter((a) => {
-                    const pre = _preAssignSnap.get(a.slotId);
-                    return !pre || pre.imageIndex !== a.imageIndex || pre.crop !== JSON.stringify(a.crop);
-                  })
-                  .map((a) => a.slotId);
-                if (touchedSlots.length) {
-                  const upOf = (flags, slot) => {
-                    for (const f of flags) {
-                      const m = /^(?:upscaled|upscale_soft):([^:]+):([\d.]+)$/.exec(String(f));
-                      if (m && m[1] === slot) return Number(m[2]);
-                    }
-                    return null;
-                  };
-                  const blindOf = (flags, slot) => flags.includes(`blind_crop:${slot}`);
-                  let regression = null;
-                  for (const slot of touchedSlots) {
-                    if (blindOf(core.qcFlags, slot) && !blindOf(_preQcFlags, slot)) { regression = `blind_crop_new:${slot}`; break; }
-                    const beforeUp = upOf(_preQcFlags, slot);
-                    const afterUp = upOf(core.qcFlags, slot);
-                    if (afterUp != null) {
-                      if (beforeUp != null && afterUp > beforeUp * 1.1 + 0.001) { regression = `upscale_worse:${slot}:${beforeUp.toFixed(2)}->${afterUp.toFixed(2)}`; break; }
-                      if (beforeUp == null && afterUp > 1.6) { regression = `upscale_new:${slot}:${afterUp.toFixed(2)}`; break; }
-                    }
-                  }
-                  if (regression) {
-                    // ↩️ revert ทั้งชุด — กลับไปจุดก่อนตาสั่งแก้เป๊ะ (assignments/used/buffer/trace/flags ตรงกันหมด)
-                    core.assignments.length = 0;
-                    core.assignments.push(..._preAssignments);
-                    core.used = _preUsed;
-                    buffer = _preBuffer;
-                    cropTrace = _preCropTrace;
-                    core.qcFlags = [..._preQcFlags, `eye_fix_reverted:${regression}`];
-                    fixedCount = 0; // สะท้อนความจริง: การแก้ของตาไม่ถูกใช้จริงในปกที่คืนออกไป
-                    console.log(`[MegaComposer] 👁️↩️ revert eye fix (${regression}) — กลไกวัดว่าแย่ลงกว่า baseline`);
-                  } else {
-                    core.qcFlags.push('eye_fix_kept', 'person_cut_unverified');
-                    console.log('[MegaComposer] 👁️✅ eye fix ผ่านด่านกลไก (blind_crop/upscale ไม่แย่ลง) — รับผล');
-                  }
-                }
-              }
-            }
+            // ★ HOTFIX 11 ก.ค. รอบ 2 (Codex eye-advisory-atomic): ธุรกรรมเดียวครอบ snapshot→apply→render→
+            //   re-QC→keep/revert/exception — ตรรกะทั้งหมดอยู่ใน _runEyeFixTransaction (seam เดียวที่ harness
+            //   เรียกตัวเดียวกันเป๊ะ) · ส่ง buffer/cropTrace "local หลัง FinalCrop" เป็น baseline · ห้ามส่ง renderCover
+            const _tx = await _runEyeFixTransaction({ core, fixes: eye.fixes, buffer, cropTrace });
+            buffer = _tx.buffer;
+            cropTrace = _tx.cropTrace;
+            fixedCount = _tx.fixedCount;
           }
         }
       } catch (e) { console.log('[MegaComposer] ตาเทียบ ref ล้ม (ใช้ปกเดิม):', e.message?.slice(0, 50)); }
+    }
+    // ★ Checkpoint B: FINAL INVARIANT — หลัง Eye จบ · ก่อน techRules/manifest/success ทุกชนิด
+    //   drift แม้จุดเดียว (นับช่อง/เซ็ต slot/URL/index/โครง) = ปิดงานทันที ห้ามปล่อย manifest success
+    if (strictCtx) {
+      const drift = _strictDriftCheck(core, strictCtx);
+      if (drift) {
+        console.log(`[MegaComposer] 🔐🚨 STRICT_ASSIGNMENT_DRIFT: ${drift.join(' · ').slice(0, 200)}`);
+        return { success: false, error: `strict drift: ${drift.join(',').slice(0, 180)}`, errorType: 'STRICT_ASSIGNMENT_DRIFT', reasons: drift };
+      }
+    }
+    // ★ AC-0107 (RUNTIME-BOUND HERO CROP PROOF — strict V2 only, AFTER Eye/FinalCrop, BEFORE manifest/persist/archive):
+    //   the pre-carrier eligibility gate (megaAdapters _runRefHeroV2) filters candidates from STORED evidence and is
+    //   only NECESSARY, never sufficient — it cannot see the Final-Cropper / watermark-dodge / fresh-detector geometry
+    //   of the ACTUAL render (which can each SHRINK the hero region and push upscale past 1.2). The AUTHORITATIVE ≤1.2×
+    //   proof is HERE, bound to the exact rendered inputs: the executor's EXACT raw upscale (upscaleRaw — NOT the rounded
+    //   display `upscale`, which would let 1.201–1.204 pass) for the CANONICAL hero slot (heroComposerSlotId — NOT a regex
+    //   /main/), read from the FINAL cropTrace (post Eye recrop/transaction). If the hero crop exceeds the hard 1.2× limit
+    //   (exact, no epsilon) — or the trace is missing/duplicated/non-primitive/non-finite — fail TYPED and never emit
+    //   success (⇒ no manifest/persist/archive). Hard QC downstream stays as defense-in-depth; this makes the strict V2
+    //   path self-proving rather than QC-dependent. V1/legacy (v2!=true) unchanged — gate is skipped entirely.
+    if (strictCtx && strictCtx.v2 && strictCtx.heroComposerSlotId != null) {
+      const _hid = String(strictCtx.heroComposerSlotId);
+      const _fail = (reason, msg) => {
+        console.log(`[MegaComposer] 🔐🚨 STRICT_V2_HERO_CROP_UNSAFE — ${msg}`);
+        return { success: false, error: `strict v2 hero crop: ${msg}`, errorType: 'STRICT_V2_HERO_CROP_UNSAFE', reasons: [reason] };
+      };
+      // (P1-2) collect EXACTLY the canonical hero trace(s) WITHOUT invoking any getter/coercion: own-descriptor `slot`
+      //   read whose value must be a primitive string/number equal to the hero composerSlotId. A trace whose `slot` is
+      //   an accessor is never read as the hero (hostile getter not invoked) — if the genuine hero trace is thereby
+      //   absent, the count is 0 ⇒ fail-closed. Require EXACTLY ONE (zero = missing, >1 = ambiguous ⇒ reject).
+      const _heroTraces = [];
+      for (const t of (Array.isArray(cropTrace) ? cropTrace : [])) {
+        if (!t || typeof t !== 'object') continue;
+        const _sd = Object.getOwnPropertyDescriptor(t, 'slot');
+        if (!_sd || 'get' in _sd || 'set' in _sd) continue;
+        const _sv = _sd.value;
+        if ((typeof _sv === 'string' || typeof _sv === 'number') && String(_sv) === _hid) _heroTraces.push(t);
+      }
+      if (_heroTraces.length === 0) return _fail(`hero_crop_trace_missing:${_hid}`, `ไม่มี trace ครอป hero ${_hid} — พิสูจน์ ≤${HERO_STRETCH_MAX}× ไม่ได้`);
+      if (_heroTraces.length > 1) return _fail(`hero_crop_trace_duplicate:${_hid}:${_heroTraces.length}`, `พบ trace ครอป hero ${_hid} ${_heroTraces.length} รายการ (กำกวม — ปฏิเสธ)`);
+      // (P1-1/P1-2) the HARD decision reads the EXACT raw upscale only: own primitive (no getter/coercion), finite,
+      //   strictly positive. Never the rounded display `upscale` (1.201–1.204 rounds to 1.20 and would wrongly pass).
+      const _ud = Object.getOwnPropertyDescriptor(_heroTraces[0], 'upscaleRaw');
+      if (!_ud || 'get' in _ud || 'set' in _ud) return _fail(`hero_crop_raw_invalid:${_hid}`, `hero ${_hid} raw upscale หาย/เป็น accessor — พิสูจน์ ≤${HERO_STRETCH_MAX}× ไม่ได้`);
+      const _raw = _ud.value;
+      if (typeof _raw !== 'number' || !Number.isFinite(_raw) || _raw <= 0) return _fail(`hero_crop_raw_invalid:${_hid}`, `hero ${_hid} raw upscale ไม่ใช่จำนวนบวกจำกัด (${typeof _raw === 'number' ? String(_raw) : typeof _raw}) — fail-closed`);
+      // EXACT threshold: 1.2 passes; ANY value above 1.2 fails — NO epsilon tolerance (a hard contract must not be weakened).
+      if (_raw > HERO_STRETCH_MAX) return _fail(`hero_crop_upscaled:${_hid}:${_raw}`, `hero ${_hid} เรนเดอร์จริง ${_raw}× > ${HERO_STRETCH_MAX}× (Final-Cropper/dodge/detector หด region)`);
     }
     // ★ W2 (จากคลังจริง 10 ก.ค. — เจอ "วงกลมว่าง" 2 ใบ): จับภาพเปล่า/เกือบสีเดียวล้วนที่หลุดลงช่อง
     //   aHash 64 บิตของภาพแบนๆ จะมีบิตเกือบเท่ากันหมด (popcount ≤6 หรือ ≥58) → ติดธงให้ด่าน QC ตัดสิน
@@ -1368,6 +2166,9 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
         spec: core.spec,
         faceBoxes: core.faceBoxes,
         cropTrace,
+        // ★ (item 10) V2: ส่ง canonical hero slot ให้ face-share/headroom วัดกับช่อง hero จริง (ไม่พึ่ง regex) ·
+        //   V1/legacy = null ⇒ regex เดิม byte-identical
+        heroComposerSlotId: (strictCtx && strictCtx.v2 && strictCtx.heroComposerSlotId != null) ? strictCtx.heroComposerSlotId : null,
       });
       techMeasured = tr.measured;
       if (tr.flags.length) {
@@ -1404,6 +2205,27 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
         refImagePath: refImagePath || null,
         outputHash: crypto.createHash('sha1').update(buffer).digest('hex'),
       };
+      // ★ Checkpoint B: audit เฉพาะโหมด strict (ผ่าน invariant แล้วเท่านั้นถึงมาถึงตรงนี้) —
+      //   legacy manifest ไม่มี field นี้เป๊ะ (strictCtx=null = ไม่แตะ)
+      //   ★ รอบ 2 (P1): slots derive จาก verified snapshot + "loaded จริง" หลัง invariant
+      //   (invariant การันตีแล้วว่าตรงกัน — url อ่านจาก loaded เพื่อผูก audit กับของจริงที่ขึ้นปก)
+      if (strictCtx) {
+        manifest.strictRender = {
+          verified: true,
+          refId: strictCtx.authority.refId,
+          specHash: strictCtx.authority.specHash,
+          replayHash: strictCtx.authority.replayHash,
+          slots: strictCtx.snapshot.map((s) => ({
+            composerSlotId: s.composerSlotId,
+            refSlotId: s.refSlotId,
+            candidateId: s.candidateId,
+            // ★ V2: personId/sourceAssetId เข้า audit ด้วย (additive — V1 snapshot ไม่มี ⇒ ไม่เพิ่ม key)
+            ...(s.personId != null ? { personId: s.personId } : {}),
+            ...(s.sourceAssetId != null ? { sourceAssetId: s.sourceAssetId } : {}),
+            imageUrl: String(core.loaded?.[s.imageIndex]?.url || ''),
+          })),
+        };
+      }
     } catch (e) { console.log('[MegaComposer] manifest เก็บล้ม (ไม่กระทบผลปก):', e.message?.slice(0, 60)); }
     // ★ Cover Ref Tester (shadow-only): หลัง buffer/assignment/crop/manifest สุดท้ายถูกล็อกแล้วเท่านั้น
     //   เห็นปกจริง + ref + source ที่ใช้จริง เพื่อแยก selection/mapping/crop/geometry/render
@@ -1431,6 +2253,13 @@ export async function composeAndVerify({ newsTitle = '', slotPlan = [], refDNA =
       } catch (e) {
         console.log('[MegaTester] ล้ม (shadow-only ไม่กระทบปก):', e.message?.slice(0, 80));
       }
+    }
+    // ★ Checkpoint B รอบ 2 (P0-3): strict manifest ห้าม fail-open — legacy catch-and-continue คงเดิม
+    //   เฉพาะ legacy · strict: manifest หาย/สร้างล้ม/ไม่ verified = ห้าม success เด็ดขาด
+    //   (postcondition บังคับ ตรวจ "ทันทีก่อน success return" เสมอ)
+    if (strictCtx && manifest?.strictRender?.verified !== true) {
+      console.log('[MegaComposer] 🔐🚨 STRICT_MANIFEST_FAILED — manifest หาย/ไม่ verified ห้ามปล่อย success');
+      return { success: false, error: 'strict manifest ไม่ผ่าน postcondition (สร้างล้ม/ไม่ verified)', errorType: 'STRICT_MANIFEST_FAILED', reasons: ['manifest_unverified'] };
     }
     return {
       success: true,

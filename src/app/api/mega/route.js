@@ -46,6 +46,9 @@ export async function POST(req) {
       const job = await getJob(body.id);
       if (!job) return NextResponse.json({ success: false, error: 'ไม่พบงาน' }, { status: 404 });
       const patch = { status: 'running', quality: job.quality === 'red' ? 'yellow' : job.quality };
+      // ★ 15 ก.ค. (แบตช์ 2 sol R3): operator กด retry = เจตนาให้โอกาสใหม่ — รีเซ็ตตัวนับ V2 hold
+      //   ไม่งั้น hold ถัดไปนับต่อ 3→4 ตายทันทีแทนที่จะได้หน้าต่างใหม่ 3 รอบ (เฉพาะงานที่มี field — งานอื่น patch เดิมเป๊ะ)
+      if (job.refHeroV2HoldCount) patch.refHeroV2HoldCount = 0;
       // ย้อนขั้นได้ (เช่น กลับไปส่งเจนใหม่แบบสะอาด): {action:'retry', id, stage:'s3_generate'}
       if (body.stage) {
         patch.stage = body.stage;

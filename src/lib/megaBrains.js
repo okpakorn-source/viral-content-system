@@ -81,36 +81,206 @@ ${blinded.map((b) => `--- ฉบับ ${b.label} ---\n${b.text}`).join('\n\n')}
 // ---------- S6a 🎨 บก.ศิลป์ (ทีมกราฟฟิก 8 ก.ค.): ref DNA + เข็มทิศข่าว → "ใบสั่งงาน" ต่อช่อง ----------
 // AI ทำงาน "ความหมาย" อย่างเดียว: แปลงปกต้นแบบ (คนใน ref) → คำสั่งของข่าวนี้ (คนในข่าวนี้)
 // เรขาคณิต (พิกัด/ขนาด) ไม่ผ่าน AI — โครงจริงมาจาก dnaToTemplateSpec · faceSizePct ส่งตรงให้สูตรครอป
-export async function artBriefBrain({ refDNA, compass, deskTitle, typeMatched = false }) {
-  const slots = (refDNA?.slots || []).map((s, i) => ({
-    i, role: s.role, pos: s.pos || '', shot: s.shot || '', emotion: s.emotion || '',
-    faceSizePct: Number(s.faceSizePct) || null,
-    // แนวข่าวไม่ตรง ref จริง (แมตช์หลวม) → ไม่ให้เห็น subject ของ ref (กัน bias เลือกคนผิดแบบ CASE-356)
-    ...(typeMatched ? { refSubject: s.subject || '' } : {}),
+// ★ D3-B2: template_v1 authority marker (canonical shape) — สร้างจาก pure resolver (ไม่มี LLM/env)
+//   ตรวจ axis พร้อม/source ถูก/slots>=3/geometry ครบ · พังชั้นไหน = throw error คงที่ (adapter จับ → waiting)
+async function _templateV1Prep(refDNA) {
+  const { resolveRefSlotView, buildRefSlotContract } = await import('@/lib/refSlotContract');
+  const contract = buildRefSlotContract({ refDNA, mode: 'template_v1' });
+  const auth = contract?.authority;
+  if (!auth || auth.mode !== 'template_v1' || auth.axis !== 'template.slots' || auth.axisReady !== true) {
+    throw new Error('ART_BRIEF_AUTHORITY_AXIS_NOT_READY');
+  }
+  if (contract.source !== 'template.slots' || !Array.isArray(contract.slots) || contract.slots.length < 3) {
+    throw new Error('ART_BRIEF_AUTHORITY_SLOTS_INVALID');
+  }
+  // ★ D3-B2.1 (Codex P0): geometry ทุกช่องต้อง finite/positive/in-bounds (%) — ไม่ใช่แค่ "มี geometry"
+  const _geomOk = (g) => !!g && [g.xPct, g.yPct, g.wPct, g.hPct].every((n) => typeof n === 'number' && Number.isFinite(n))
+    && g.xPct >= 0 && g.yPct >= 0 && g.wPct > 0 && g.hPct > 0 && g.xPct + g.wPct <= 100 && g.yPct + g.hPct <= 100;
+  if (contract.slots.some((s) => !_geomOk(s.geometry))) throw new Error('ART_BRIEF_AUTHORITY_GEOMETRY_INVALID');
+  const view = resolveRefSlotView(refDNA, { mode: 'template_v1' });
+  return {
+    view,
+    marker: { v: 1, mode: 'template_v1', axis: 'template.slots', effectiveViewHash: auth.effectiveViewHash },
+  };
+}
+
+// ★ D3-B3 (Codex): PURE template-v1 "current-person authority" — no env/import/IO/time/random
+//   สร้างตัวตน hero/reaction ของ "ข่าวปัจจุบัน" จาก compass.mainCharacters เพื่อ override personHint ที่ LLM
+//   อาจลอกจาก refSubject (ref = แรงบันดาลใจฉาก/ความหมาย ไม่ใช่ตัวตนคนในข่าวนี้) · idempotent บน hint ที่แก้แล้ว
+//   hero = ตัวแรก role=hero มิฉะนั้นตัวแรกที่รู้จัก · reaction = ตัวแรก role=reaction ที่ชื่อไม่ตรง hero (ลำดับ input)
+export function templateV1PersonAuthority(compass) {
+  // ★ D3-B3.1 (Codex): deterministic name/alias matching รองรับสคีมา "ชื่อจริง (ชื่อเล่น)" — ห้าม fuzzy prefix
+  //   variants = แตกชื่อเป็นตัวแปร: ส่วนนอกวงเล็บ + ในแต่ละวงเล็บ (ชื่อเล่น) · match = มี variant คู่ใดตรงแบบ token
+  //   (เท่ากันเป๊ะ OR ทุก token ของชื่อสั้นอยู่ในชื่อยาว โดย token แรกตรงกัน) → alias/ชื่อเล่นแมตช์ · lookalike ที่ token
+  //   ต่างกัน (วนวิทย์ vs วนวิทยา) = ไม่แมตช์ · output คงสะกด canonical ของ compass เสมอ (ไม่คืน prefix มั่ว)
+  const variants = (s) => {
+    const raw = String(s ?? '').trim().toLowerCase();
+    const out = [];
+    const outside = raw.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+    if (outside) out.push(outside);
+    for (const p of raw.match(/\(([^)]*)\)/g) || []) {
+      const inner = p.slice(1, -1).replace(/\s+/g, ' ').trim();
+      if (inner) out.push(inner);
+    }
+    if (!out.length && raw) out.push(raw);
+    return out;
+  };
+  const tokMatch = (x, y) => {
+    if (x === y) return true;
+    const xt = x.split(' '), yt = y.split(' ');
+    const [short, long] = xt.length <= yt.length ? [xt, yt] : [yt, xt];
+    return short[0] === long[0] && short.every((t) => long.includes(t));
+  };
+  const nameMatch = (a, b) => {
+    const va = variants(a), vb = variants(b);
+    if (!va.length || !vb.length) return false;
+    for (const x of va) for (const y of vb) if (tokMatch(x, y)) return true;
+    return false;
+  };
+  const list = (Array.isArray(compass?.mainCharacters) ? compass.mainCharacters : [])
+    .map((c) => ({ name: String(c?.name ?? '').trim(), role: String(c?.role ?? '').trim().toLowerCase() }))
+    .filter((c) => c.name); // ลำดับ input เสถียร (ไม่ sort)
+  const hero = list.find((c) => c.role === 'hero') || list[0] || null;
+  const heroIdx = list.indexOf(hero);
+  const names = list.map((c) => c.name);
+  const n = list.length;
+  const tokenCount = (s) => String(s ?? '').trim().split(/\s+/).filter(Boolean).length;
+  const normLen = (s) => String(s ?? '').replace(/\s+/g, '').length;
+  // ★ D3-B4.1 (Codex): order-independent grouping — union-find components + complete-link (clique) check
+  //   nameMatch ไม่ transitive (A~B, B~C แต่ A≁C) → component เดียวแต่ "ไม่ใช่ clique" = ambiguous bridge (ห้ามยุบ/ห้ามบังคับ)
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (nameMatch(names[i], names[j])) parent[find(i)] = find(j);
+  const byRoot = new Map();
+  for (let i = 0; i < n; i++) { const r = find(i); if (!byRoot.has(r)) byRoot.set(r, []); byRoot.get(r).push(i); }
+  const isClique = (idxs) => {
+    for (let a = 0; a < idxs.length; a++) for (let b = a + 1; b < idxs.length; b++)
+      if (!nameMatch(names[idxs[a]], names[idxs[b]])) return false;
+    return true;
+  };
+  // ★ P1-B: comparator เดียวใช้ทั้ง canonical pick + candidate ordering — token count desc → normalized length desc → lexical asc
+  const cmp = (a, b) => (tokenCount(b) - tokenCount(a)) || (normLen(b) - normLen(a)) || (a < b ? -1 : a > b ? 1 : 0);
+  const canonicalOf = (idxs) => idxs.map((i) => names[i]).sort(cmp)[0];
+  const components = [...byRoot.values()].map((idxs) => ({
+    idxs, clique: isClique(idxs), canonical: canonicalOf(idxs), roles: new Set(idxs.map((i) => list[i].role)),
   }));
+  const heroComp = heroIdx >= 0 ? components.find((comp) => comp.idxs.includes(heroIdx)) : null;
+  const heroAmbiguous = !!heroComp && !heroComp.clique; // hero name เป็น bridge → กลุ่มกำกวม
+  const heroName = heroComp ? (heroComp.clique ? heroComp.canonical : names[heroIdx]) : null;
+  // non-hero = ทุก component ที่ไม่ใช่ heroComp (ชื่อที่ match hero ถูก union เข้า heroComp แล้ว)
+  const nonHeroComps = components.filter((comp) => comp !== heroComp);
+  const validNonHero = nonHeroComps.filter((comp) => comp.clique).map((comp) => comp.canonical).sort(cmp); // ★ P1-B canonical order
+  const ambiguousNonHero = nonHeroComps.some((comp) => !comp.clique); // มี bridge non-hero = กำกวม
+  const explicitReactionValid = nonHeroComps.filter((comp) => comp.clique && comp.roles.has('reaction')).map((comp) => comp.canonical).sort(cmp);
+  // resolve hint → ตัวตน "clique เดียว" ที่มี component match พอดี 1 (0/หลาย component/non-clique = null)
+  const resolveIdentity = (hint) => {
+    const h = String(hint ?? '').trim();
+    if (!h) return null;
+    const matched = components.filter((comp) => comp.idxs.some((i) => nameMatch(names[i], h)));
+    return (matched.length === 1 && matched[0].clique) ? matched[0].canonical : null;
+  };
+  const canonicalKnown = (hint) => resolveIdentity(hint); // unique clique identity (adapter guard ใช้)
+  // ★ D3-B4 matrix (forced reaction identity) — เฉพาะเมื่อไม่กำกวมทั้ง hero และ non-hero:
+  //   1) explicit non-hero reaction unique · 2) non-hero ชัดตัวเดียว (role ใดก็ได้ — เคส AC-0066) · มิฉะนั้น null
+  let reactionName = null;
+  if (!heroAmbiguous && !ambiguousNonHero) {
+    if (explicitReactionValid.length === 1) reactionName = explicitReactionValid[0];
+    else if (explicitReactionValid.length === 0 && validNonHero.length === 1) reactionName = validNonHero[0];
+  }
+  // reaction same-hero (เคส 3): ไม่มี non-hero + ไม่กำกวม + มี hero ชัด → candidate = hero
+  const reactionSameHero = reactionName == null && !ambiguousNonHero && validNonHero.length === 0 && heroName != null && !heroAmbiguous;
+  const reactionCandidates = reactionName != null ? [reactionName] : (reactionSameHero ? [heroName] : [...validNonHero]);
+  const resolveHint = (role, llmHint) => {
+    const r = String(role ?? '').trim().toLowerCase();
+    if (r === 'hero' || r === 'main') return (heroName != null && !heroAmbiguous) ? heroName : resolveIdentity(llmHint);
+    if (r === 'reaction') {
+      if (reactionName != null) return reactionName;
+      const id = resolveIdentity(llmHint);
+      return (id != null && reactionCandidates.includes(id)) ? id : null; // รับเฉพาะ candidate ที่อนุญาต
+    }
+    return llmHint == null ? null : llmHint; // role อื่นคงเดิม (byte-exact)
+  };
+  // prompt fields ต่อ slot role — authority (ใช้เป๊ะเมื่อ non-null) + candidates (reaction: เลือกหนึ่งตามบริบทข่าว)
+  const slotPersonPrompt = (role) => {
+    const r = String(role ?? '').trim().toLowerCase();
+    const heroOk = heroName != null && !heroAmbiguous;
+    if (r === 'hero' || r === 'main') return { authority: heroOk ? heroName : null, candidates: heroOk ? [heroName] : [] };
+    if (r === 'reaction') return { authority: reactionName != null ? reactionName : (reactionSameHero ? heroName : null), candidates: [...reactionCandidates] };
+    return { authority: null, candidates: [] };
+  };
+  // ★ P1-A: data-readiness gate — ambiguity ใดๆ (hero bridge หรือ non-hero bridge) = authority ไม่พร้อม
+  //   (compass ว่าง/ไม่มี hero โดยไม่มี bridge = ไม่ถือว่ากำกวม → authorityReady=true คงพฤติกรรมเดิม)
+  const authorityReady = !heroAmbiguous && !ambiguousNonHero;
+  return { hero: heroName, reaction: reactionName, hasExplicitReaction: explicitReactionValid.length === 1, distinctNonHero: validNonHero, heroAmbiguous, ambiguousNonHero, authorityReady, reactionCandidates, nameMatch, canonicalKnown, resolveHint, slotPersonPrompt };
+}
+
+export async function artBriefBrain({ refDNA, compass, deskTitle, typeMatched = false, mode = 'legacy', _callBrain = callBrain }) {
+  // ★ D3-B2: template_v1 = prompt rows จาก resolved view (template axis + template shot ชนะ) + แนบ marker หลัง parse
+  //   (LLM ห้ามเขียน marker เอง) · default 'legacy' = โค้ด/prompt/return-shape เดิมทุก byte (ไม่มี env read)
+  // ★ D3-B3: template_v1 override personHint ด้วย current-person authority (identity ข่าวนี้) — legacy ไม่แตะ
+  let _tplPrep = null;
+  let slots;
+  let _personAuth = null; // ★ D3-B3: null สำหรับ legacy (คงพฤติกรรม/byte เดิมทุกอย่าง)
+  if (mode === 'template_v1') {
+    _tplPrep = await _templateV1Prep(refDNA); // throw = adapter จับเป็น waiting
+    _personAuth = templateV1PersonAuthority(compass);
+    slots = _tplPrep.view.views.map((v) => {
+      // ★ D3-B4.2 (Codex): ทุกแถวมี currentPersonAuthority (ใช้เป๊ะเมื่อ non-null) + currentPersonCandidates
+      //   (reaction: ถ้า authority ว่าง ให้เลือกหนึ่งใน candidates ตามบริบทข่าวปัจจุบัน · ห้ามลอก refSubject)
+      const _p = _personAuth.slotPersonPrompt(v.role);
+      return {
+        i: v.index, role: v.role, pos: v.pos || '', shot: v.shot || '', emotion: v.emotion || '',
+        faceSizePct: v.faceSizePct || null,
+        ...(typeMatched ? { refSubject: v.subject || '' } : {}),
+        currentPersonAuthority: _p.authority,
+        currentPersonCandidates: _p.candidates,
+      };
+    });
+  } else {
+    slots = (refDNA?.slots || []).map((s, i) => ({
+      i, role: s.role, pos: s.pos || '', shot: s.shot || '', emotion: s.emotion || '',
+      faceSizePct: Number(s.faceSizePct) || null,
+      // แนวข่าวไม่ตรง ref จริง (แมตช์หลวม) → ไม่ให้เห็น subject ของ ref (กัน bias เลือกคนผิดแบบ CASE-356)
+      ...(typeMatched ? { refSubject: s.subject || '' } : {}),
+    }));
+  }
+  // ★ D3-B3: note ท้าย system (template_v1 เท่านั้น) — legacy = '' → prompt/args/return เดิมทุก byte
+  const _authNote = _tplPrep ? `
+★ ตัวตนของ "ข่าวนี้" (เฉพาะช่อง hero/main/reaction):
+- ถ้าแถวมี "currentPersonAuthority" ไม่ว่าง → personHint = ค่านั้นเป๊ะ
+- ช่อง reaction ที่ currentPersonAuthority ว่าง → เลือก personHint = หนึ่งใน "currentPersonCandidates" ที่ตรงบริบทข่าวปัจจุบันที่สุด (ใช้ความหมายของข่าวนี้เท่านั้น) · ถ้าไม่มีตัวใดเหมาะ = null
+- ช่องบทอื่น (context/action/moment ฯลฯ) สั่ง personHint ตามปกติ
+- "refSubject" = แรงบันดาลใจฉาก/ความหมายจากปกต้นแบบ ไม่ใช่ตัวตนคนในข่าวนี้ — ห้ามลอก refSubject เป็น personHint` : '';
   const system = `คุณคือบรรณาธิการศิลป์ (Art Director) ของเพจข่าวไวรัลไทย งานเดียว: เขียน "ใบสั่งงาน" ให้มือคัดภาพ
 โจทย์: ปกต้นแบบ (ref) จัดช่องไว้แบบหนึ่ง — คุณต้องสั่งว่า "ข่าวนี้" แต่ละช่องควรใส่ภาพแบบไหน (ใคร/ช็อตอะไร/อารมณ์ไหน) ให้เล่าเรื่องแบบเดียวกับ ref แต่เป็นคนและเหตุการณ์ของข่าวนี้
 กฎเหล็ก: (1) hero = หน้าเดี่ยวตัวเอกของข่าวเสมอ ห้ามภาพหมู่ (2) สั่งเฉพาะภาพที่ข่าวนี้มีโอกาสมีจริง (3) ช่องไหน ref ใส่โมเมนต์/หลักฐาน ให้แปลงเป็นโมเมนต์/หลักฐานของข่าวนี้
-ตอบ JSON เท่านั้น: {"orders":[{"i":<ดัชนีช่องตาม ref>,"want":"สั่ง 1 ประโยค: ใคร+ช็อต+อารมณ์","personHint":"ชื่อคนที่ควรอยู่ช่องนี้ หรือ null"}],"storyNote":"ปกนี้เล่าเรื่องยังไง 1 ประโยค"}`;
+ตอบ JSON เท่านั้น: {"orders":[{"i":<ดัชนีช่องตาม ref>,"want":"สั่ง 1 ประโยค: ใคร+ช็อต+อารมณ์","personHint":"ชื่อคนที่ควรอยู่ช่องนี้ หรือ null"}],"storyNote":"ปกนี้เล่าเรื่องยังไง 1 ประโยค"}${_authNote}`;
   const user = `ข่าว: ${String(deskTitle || '').slice(0, 120)}
 เข็มทิศข่าว: ${JSON.stringify({ angle: compass?.angle, primaryEmotion: compass?.primaryEmotion, mainCharacters: compass?.mainCharacters, visualDreamShots: compass?.visualDreamShots }, null, 0).slice(0, 1200)}
 ช่องของปกต้นแบบ (เรขาคณิตล็อกแล้ว — สั่งแค่เนื้อหา):
 ${JSON.stringify(slots, null, 0).slice(0, 1800)}`;
-  const out = await callBrain({ system, user, maxTokens: 700, temperature: 0.15, cost: { step: 'MEGA S6a art brief' } });
+  const out = await _callBrain({ system, user, maxTokens: 700, temperature: 0.15, cost: { step: 'MEGA S6a art brief' } });
   const brief = parseJson(out.text || out);
   // ผูกใบสั่งกลับเข้าช่อง (ตามดัชนี) + พก faceSizePct ไปให้สูตรครอป
   return {
     storyNote: brief.storyNote || '',
     orders: slots.map((s) => {
       const o = (brief.orders || []).find((x) => Number(x.i) === s.i) || {};
-      return { i: s.i, role: s.role, pos: s.pos, shot: s.shot, emotion: s.emotion, faceSizePct: s.faceSizePct, want: o.want || '', personHint: o.personHint || null };
+      // ★ D3-B3: template_v1 → override personHint ด้วย current-person authority · legacy = o.personHint || null (byte เดิม)
+      return { i: s.i, role: s.role, pos: s.pos, shot: s.shot, emotion: s.emotion, faceSizePct: s.faceSizePct, want: o.want || '', personHint: _personAuth ? _personAuth.resolveHint(s.role, o.personHint || null) : (o.personHint || null) };
     }),
+    // ★ D3-B2: แนบ marker เชิงโปรแกรม "หลัง" parse — LLM ไม่มีสิทธิ์เขียน · legacy = ไม่มี field นี้เลย
+    ...(_tplPrep ? { refShotAuthority: _tplPrep.marker } : {}),
   };
 }
 
 // ---------- S6 ผู้กำกับจับคู่ช่อง: ป้าย triage (จ่ายเงินแล้วใน S5) + สูตรปกแสนไลค์ → ช่องละใบ+สำรอง ----------
 // ไม่ดูภาพซ้ำ (ประหยัด) — ตัดสินจาก metadata ที่ตาติดป้ายไว้: ใคร/หมวด/อารมณ์/คุณภาพ/จำนวนหน้า
-export async function slotDirectorBrain({ imagesMeta, compass, deskTitle, refDNA = null, artBrief = null, sceneInventory = '' }) {
+// ★ SEM-1 (Codex อนุมัติ design v2): slotContract = รายการช่อง instance จริงของ ref (จาก buildRefSlotContract)
+//   ส่งมาเมื่อ semantic-selection เปิด+เงื่อนไขครบที่ฝั่ง adapter เท่านั้น — ไม่ส่ง = prompt เดิม byte-parity
+//   _deps.callBrain = จุดฉีดสำหรับเทสเท่านั้น (default = callBrain จริง — production เดิมทุกอย่าง)
+export async function slotDirectorBrain({ imagesMeta, compass, deskTitle, refDNA = null, artBrief = null, sceneInventory = '', slotContract = null, _deps = {} }) {
+  const _cb = _deps.callBrain || callBrain;
   // 🎨 8 ก.ค. (ทีมกราฟฟิก): มีใบสั่งจากบก.ศิลป์ → ใช้ใบสั่งนำ (แปลงเป็นข่าวนี้แล้ว แม่นกว่า ref ดิบ)
   const briefBlock = artBrief?.orders?.length ? `
 === 🎨 ใบสั่งงานจากบก.ศิลป์ (แปลงปกต้นแบบเป็นข่าวนี้แล้ว — ทำตามใกล้ที่สุดเท่าที่พูลมีจริง) ===
@@ -169,6 +339,36 @@ ${compassBlock}
 ${sceneInventory ? `🗺️ ฉากที่มีในพูล (จาก note ตาคัด · ×N = จำนวนใบ): ${String(sceneInventory).slice(0, 700)}\n` : ''}${refBlock}
 คลังภาพที่ตายืนยันแล้วว่าเกี่ยวข้อง (metadata ต่อใบ — note=คำบรรยายฉากจากตาคัด ใช้แยกโมเมนต์จริงจากภาพโพส; ภาพจากคลิป (src=clip/youtube) note มัก generic ให้ดู persons/emotion/category แทน; orient=tall/wide/sq สัดส่วนภาพ):
 [${_lines.slice(0, _included).join(',\n')}]`;
-  const out = await callBrain({ system, user, maxTokens: 1100, temperature: 0.1, cost: { step: 'MEGA S6 slot director' } });
+  // ★ SEM-1: system เฉพาะโหมด semantic — สร้างจากช่อง instance จริงของ ref · answer schema key = refSlotId
+  //   literal `system` เดิมด้านบนไม่ถูกแตะแม้ตัวอักษรเดียว (byte-parity เมื่อไม่ส่ง slotContract)
+  const _semSlots = Array.isArray(slotContract) && slotContract.length >= 3 ? slotContract : null;
+  let systemSem = null;
+  if (_semSlots) {
+    const _heroInst = _semSlots.find((s) => (s.refRole === 'hero' || s.refRole === 'main') && s.shape !== 'circle')
+      || _semSlots.find((s) => s.shape !== 'circle')
+      || _semSlots[0];
+    // กฎ 11 (คนละคนกับ hero) ห้ามรวมช่อง hero เอง — กัน ref ประหลาดที่ hero เป็นวงกลม (ผู้ตรวจ P1)
+    const _circleIds = _semSlots.filter((s) => s.shape === 'circle' && s.id !== _heroInst.id).map((s) => s.id);
+    const roleLines = _semSlots.map((s) => {
+      const tags = [];
+      if (s.id === _heroInst.id) tags.push('ช่องตัวเอกหลัก');
+      if (s.shape === 'circle') tags.push('วงกลม');
+      const desc = [
+        s.subject ? `ปกเป้าใช้: ${String(s.subject).slice(0, 60)}` : '',
+        s.eventIntent ? `ต้องการ: ${String(s.eventIntent).slice(0, 70)}` : '',
+        s.wantPerson ? `คน: ${String(s.wantPerson).slice(0, 40)}` : '',
+        s.refShot ? `ช็อต: ${String(s.refShot).slice(0, 20)}` : '',
+      ].filter(Boolean).join(' · ');
+      return `- ${s.id}${tags.length ? ` (${tags.join('/')})` : ''}: บท ${s.refRole}${desc ? ` — ${desc}` : ''}`;
+    }).join('\n');
+    const schemaSem = `{"slots":{${_semSlots.map((s) => `"${s.id}":{"id":"...","reason":"สั้นๆ","backups":["id","id"]}`).join(',')}},"note":"ข้อสังเกตรวม 1 ประโยค"}`;
+    systemSem = `คุณคือผู้กำกับภาพปกข่าวไวรัลไทย จับคู่ "ภาพ → ช่องปก" ตามช่องจริงของปกเป้า (ref) ใบนี้ทีละช่อง:
+${roleLines}
+กฎเหล็ก: (1) ถูกคน 100% เหนือทุกข้อ — ${_heroInst.id} ต้องเป็น "ตัวเอกอันดับหนึ่ง" ของข่าวเท่านั้น และช่องที่ระบุ "คน:" ต้องได้ภาพของคนนั้นจริงตามป้าย person ห้ามคนอื่นเด็ดขาด (2) ทุกช่องคนละภาพ ห้ามซ้ำ และควรคนละฉาก (3) เลือกจาก id ในรายการเท่านั้น (4) quality ต่ำ (<4) ใช้เมื่อจำเป็นจริงๆ (5) ช่องไหนไม่มีภาพเข้าเกณฑ์จริงๆ ให้ id=null พร้อมเหตุผล — ห้ามฝืนยัดภาพผิดคน (6) ภาพ clean=false (มีลายน้ำ/ตัวหนังสือทับ) ห้ามขึ้นช่องถ้ามีตัวเลือกสะอาด (7) ภาพ newsScene=false = ภาพแฟ้มจากงาน/บริบทอื่น — เลี่ยงเสมอ ใช้เฉพาะไม่มีภาพเหตุการณ์จริง
+(8) ★ปกทั้งใบต้องเล่าเรื่องครบ: ทุกช่องรวมกันต้องเห็น "คน → กำลังทำอะไร → หลักฐาน/สถานที่" — ห้ามเป็นพอร์ตเทรตล้วนทุกช่อง (9) ★ฉากห้ามซ้ำข้ามช่อง (เทียบจาก note — เฟรมคลิปเดียวกัน/เวทีเดิม = ฉากเดียวกัน) (10) ★${_heroInst.id} เลือกภาพ "หน้าเดี่ยว" (faces=1) หน้าใหญ่คมชัด แนวตั้ง/จัตุรัส (orient=tall/sq) ก่อนเสมอ — ห้ามภาพแนวนอนกว้าง/แบนเนอร์ถ้ามีตัวเลือกอื่นของตัวเอก${_circleIds.length ? ` (11) ★ช่องวงกลม (${_circleIds.join('/')}) ควรเป็นคนละคนกับ ${_heroInst.id} เมื่อช่องนั้นไม่ได้ระบุ "คน:" ไว้` : ''} (12) ★ภาพคนหันหลัง/ก้มกราบ/เห็นแต่แผ่นหลัง ใช้ได้เฉพาะช่องฉากกว้างเท่านั้น
+ตอบ JSON เท่านั้น:
+${schemaSem}`;
+  }
+  const out = await _cb({ system: systemSem || system, user, maxTokens: 1100, temperature: 0.1, cost: { step: 'MEGA S6 slot director' } });
   return parseJson(out.text || out);
 }

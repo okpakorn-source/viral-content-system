@@ -116,6 +116,7 @@ export default function MegaPage() {
       if (j.success && !j.idle) setMsg(`⚙️ ${j.jobId} · ${j.stageLabel || j.stage}: ${j.result?.summary || j.skipped || ''}`);
       else if (j.paused) setMsg(j.message);
       else if (j.idle) setMsg('ไม่มีงานให้เดิน — กด "ทำข่าวถัดไป" เพื่อเปิดงานใหม่');
+      else if (j.error) setMsg(`❌ ${j.errorType ? `[${j.errorType}] ` : ''}${j.error}`); // ★ sol R2: typed error จาก tick (เช่น STRICT_CONFIG_MISMATCH) ต้องโชว์ ไม่ใช่เงียบ
       await load();
     } catch (e) {
       setMsg('❌ ' + e.message);

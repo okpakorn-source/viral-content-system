@@ -67,9 +67,12 @@ async function callOnce(job, origin) {
     };
   }
   // kind === 'ref' — เต็มท่อ MEGA
+  // ★ 15 ก.ค. 69 แบตช์ 5: แนบคีย์ทีม (server-side env — ไม่รั่วสู่ client) ให้ผ่านด่านตรวจสิทธิ์ src/middleware.js เมื่อเรียกผ่านโฮสต์ (cloud)
+  const refHeaders = { 'Content-Type': 'application/json' };
+  if (process.env.COVER_TEST_KEY) refHeaders['x-cover-test-key'] = process.env.COVER_TEST_KEY;
   const res = await fetch(`${origin}/api/cover-ref-test`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: refHeaders,
     body: JSON.stringify({ newsTitle: job.input.newsTitle || '', content: job.input.content }),
     signal: AbortSignal.timeout(25 * 60 * 1000),
   });
@@ -171,8 +174,11 @@ export async function POST(req) {
       label = `⚡ ทางลัด · ${caseId}${heroPersonHint ? ' · ' + heroPersonHint : ''}`;
     } else {
       const content = String(body.content || '').trim();
-      if (content.length < 100) return badReq('เนื้อข่าวเต็มต้อง ≥100 ตัวอักษร (ห้ามเนื้อสั้นตัดทอน)');
       const newsTitle = String(body.newsTitle || '').trim();
+      // ★ 15 ก.ค. 69: gate สองชั้นแบบเดียวกับ /api/cover-ref-test — content ≥100 ตัว และ (newsTitle+content ตาม filter(Boolean)) รวม ≥200 ตัว
+      if (content.length < 100) return badReq(`เนื้อข่าวเต็มต้อง ≥100 ตัวอักษร (ตอนนี้มี ${content.length} ตัวอักษร — ห้ามเนื้อสั้นตัดทอน)`);
+      const combinedLen = [newsTitle, content].filter(Boolean).join('\n\n').length;
+      if (combinedLen < 200) return badReq(`เนื้อหารวม (หัวข่าว+เนื้อข่าว) ต้อง ≥200 ตัวอักษร (ตอนนี้มี ${combinedLen} ตัวอักษร — ห้ามเนื้อสั้นตัดทอน)`);
       input = { newsTitle, content };
       label = `🎯 เต็มท่อ · ${(newsTitle || content).slice(0, 40)}`;
     }

@@ -102,6 +102,11 @@ export async function POST(req) {
       const qcVerdictF = evaluateCoverQc({ qcFlags: outF.qcFlags, refSimilarity: outF.refSimilarity, manifest: outF.manifest });
       return NextResponse.json({
         ...outF, caseId, frozenPlan: true, qcVerdict: qcVerdictF,
+        // ★ AC-0107 truthful parity (advisory tool ≠ Production): QC here is ADVISORY — HTTP success follows out.success,
+        //   NOT qcVerdict.pass — so a QC-FAILED cover is still success:true here. productionQcPass mirrors the Production
+        //   HARD gate (/cover-ref-test): false = Production would 422 + ZERO-archive this exact output. Does not change the
+        //   advisory semantics (frozen diagnostic mode intact) — it only stops success:true from misleading callers.
+        productionQcPass: qcVerdictF?.pass !== false,
         refUsed: { id: refF.id, styleName: refF.styleName || refF.id, imagePath: refF.imagePath },
         elapsed: `${((Date.now() - t0f) / 1000).toFixed(1)}s`,
       }, { status: outF.success ? 200 : 422 });
@@ -210,9 +215,13 @@ export async function POST(req) {
     // ★ W2-A2: แนบผลด่าน QC (advisory) — ไม่แตะ success/สถานะใดๆ เครื่องมือเทสต้องเห็นผลเสมอ
     const qcVerdict = evaluateCoverQc({ qcFlags: out.qcFlags, refSimilarity: out.refSimilarity, manifest: out.manifest });
 
-    // 🗂️ 9 ก.ค. (ผู้ใช้สั่ง "ทุกครั้งที่กดสร้างปกเข้าคลังออโต้"): ผลสำเร็จเด้งเข้าคลังงาน MEGA เสมอ
+    // 🗂️ 9 ก.ค. (ผู้ใช้สั่ง "ทุกครั้งที่กดสร้างปกเข้าคลังออโต้"): ผลสำเร็จเด้งเข้าคลังงาน MEGA
+    // ★ AC-0107: BUT never auto-archive an output Production would ZERO-archive — a QC-FAILED cover (qcVerdict.pass===false)
+    //   must NOT pollute the cover library, even though this advisory tool still returns HTTP 200 for diagnostics.
+    //   (Frozen diagnostic mode above never archives at all; this guards the NORMAL path.)
+    const _productionQcPass = qcVerdict?.pass !== false;
     let archived = null;
-    if (out.success && out.base64) {
+    if (out.success && out.base64 && _productionQcPass) {
       try {
         const { addMegaCover } = await import('@/lib/megaCoverArchive');
         archived = await addMegaCover({
@@ -233,6 +242,11 @@ export async function POST(req) {
       ...out,
       caseId,
       qcVerdict,
+      // ★ AC-0107 truthful parity (advisory tool ≠ Production): HTTP success:true still follows out.success (advisory) —
+      //   so a QC-FAILED cover is still success:true here — BUT auto-archive above is now gated on qcVerdict.pass (a
+      //   QC-failed cover is NOT archived). productionQcPass mirrors the Production HARD gate (/cover-ref-test): false =
+      //   Production would 422 + ZERO-archive. Advisory/frozen HTTP semantics unchanged.
+      productionQcPass: qcVerdict?.pass !== false,
       refUsed: ref ? { id: ref.id, styleName: ref.styleName || ref.id, imagePath: ref.imagePath } : null,
       archivedId: archived?.id || null, // เข้าคลัง /mega-covers แล้ว (โหลดภาพ: /api/mega-covers/img?id=..&dl=1)
       poolSize: pool.length,

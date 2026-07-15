@@ -815,9 +815,13 @@ fix: "recrop" = ภาพใช้ได้แต่ครอปใหม่ · 
   return { ok: j?.ok !== false && issues.length === 0, issues };
 }
 
-export async function finalCrop({ assignments, imageBuffers, templateSpec, identity, newsTitle, faceBoxes = [], hints = {} }) {
+export async function finalCrop({ assignments, imageBuffers, templateSpec, identity, newsTitle, faceBoxes = [], hints = {}, slotIds = null }) {
+  // ★ HOTFIX 11 ก.ค. (Codex สั่ง): caller (megaComposer hero-recrop 5e3965b) ส่ง slotIds จำกัดช่อง
+  //   แต่เดิมฟังก์ชันไม่รับ → ครอป "ทุกช่อง" เกินคำสั่ง · null/undefined/[] = ประมวลผลทุกช่องแบบเดิมเป๊ะ
+  const allowedSlotIds = Array.isArray(slotIds) && slotIds.length ? new Set(slotIds.map(String)) : null;
   const items = [];
   for (const a of assignments || []) {
+    if (allowedSlotIds && !allowedSlotIds.has(String(a.slotId))) continue;
     const im = imageBuffers[a.imageIndex];
     if (!im?.buffer) continue;
     const slot = templateSpec.slots.find(s => s.id === a.slotId);

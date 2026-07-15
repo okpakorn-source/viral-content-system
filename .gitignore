@@ -88,3 +88,9 @@ viral-library-screen.json
 .next-verify/
 data/mega-cover-runs.json
 _removed-systems-backup-*/
+
+# ★ 15 ก.ค. 69 (แบตช์ 6 — Codex: git release สะอาด): build dir แยกทุกตัว + ไฟล์สถานะรันไทม์ ห้ามเข้า git
+.next-*/
+data/job_queue.json
+data/face-cache.json
+public/case-frames/

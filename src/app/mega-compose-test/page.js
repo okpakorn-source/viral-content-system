@@ -44,6 +44,10 @@ export default function MegaComposeTest() {
       <p style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>
         ใช้คลังเคสที่ตาคัดแล้ว → ประกอบปกตรงๆ ~20 วิ (ไม่ค้นภาพ/ตาคัดใหม่) · ไว้จูนครอป/โครง/ตาเทียบ ref ให้นิ่งเร็ว
       </p>
+      {/* ★ AC-0107: this is the ADVISORY (legacy) tuning tool — NOT Production parity. QC here is advisory only. */}
+      <div style={{ marginTop: 8, padding: '8px 12px', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, fontSize: 12.5, color: '#92400e' }}>
+        ⚠️ เครื่องมือ <b>advisory (legacy)</b> — <b>ไม่ใช่ Production parity</b>: ด่าน QC ที่นี่เป็นแค่คำแนะนำ (โชว์ผลเสมอ). ผล “ประกอบสำเร็จ” ที่นี่ <b>ไม่ได้แปลว่าผ่านด่านคุณภาพจริง</b> ของท่อ Production (/cover-ref-test) — ท่อจริงจะ <b>ปฏิเสธ (422) และไม่เข้าคลัง</b> ถ้า QC ไม่ผ่าน
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 16 }}>
         <label style={{ fontSize: 13 }}>เคส (มีภาพตาคัดแล้ว)
@@ -71,6 +75,13 @@ export default function MegaComposeTest() {
 
       {result && (
         <div style={{ marginTop: 18 }}>
+          {/* ★ AC-0107: prominent truthful warning when the output would FAIL Production's hard QC gate. */}
+          {result.productionQcPass === false && (
+            <div style={{ marginBottom: 10, padding: 12, background: '#fef2f2', border: '2px solid #ef4444', borderRadius: 8, fontSize: 13, color: '#991b1b', fontWeight: 700 }}>
+              🚫 QC ไม่ผ่าน — Production จะ <b>ปฏิเสธ (422) และไม่เข้าคลัง</b> ปกใบนี้. เครื่องมือนี้แสดงภาพให้ดูเพื่อวินิจฉัยเท่านั้น (ไม่ได้เข้าคลังออโต้)
+              {result.qcVerdict?.reasons?.length ? <div style={{ fontWeight: 400, marginTop: 4 }}>เหตุผล: {result.qcVerdict.reasons.join(' · ')}</div> : null}
+            </div>
+          )}
           <div style={{ fontSize: 13, color: '#334155', marginBottom: 8 }}>
             <b>โครง:</b> {result.template} · <b>เหมือน ref:</b> {result.refSimilarity ?? '-'}% · <b>ตาแก้:</b> {result.eyeFixed || 0} จุด · <b>พูล:</b> {result.poolSize} · <b>เวลา:</b> {result.elapsed}
             {result.refDiffs?.length ? <div style={{ color: '#b45309', marginTop: 4 }}>จุดต่าง: {result.refDiffs.join(' · ')}</div> : null}

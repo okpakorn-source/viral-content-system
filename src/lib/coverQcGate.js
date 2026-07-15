@@ -22,6 +22,8 @@
 //     · 'circle_same_person_as_hero'   วงกลมเป็นคนเดียวกับ hero (ไม่มีตัวเลือกจริง)
 //     · 'hero_profile_forced'          hero มุมข้าง/หลัง เพราะคลังไม่มีหน้าตรง/เฉียง
 //     · 'blank_image:<slot>'           ภาพเปล่า/เกือบสีเดียวล้วน (aHash บิตเกือบเท่ากันหมด — เคสวงกลมว่างในคลังจริง)
+//     · 'hero_gate_error'              ★ AC-0099 (LANE-D): ด่านตรวจ hero (legacy composeCore) โยน exception → fail-open ปล่อยผ่าน แต่ hero ไม่ถูกยืนยัน
+//     · 'hero_unverified_kept'         ★ AC-0099 (LANE-D): hero ไม่ผ่านด่านบังคับแต่ไม่มีตัวสำรอง → คงใบเดิมทั้งที่ยังไม่ยืนยัน
 //   BENIGN (ไม่นับ — ไม่กระทบ pass): feather_capped · enhanced:hero:* ·
 //     border_trimmed:* · hero_pose:* · enhance_failed:hero · upscale_soft:<ช่องอื่น> ≤1.6
 //
@@ -112,6 +114,18 @@ export function evaluateCoverQc(input = {}, opts = {}) {
     if (/^blank_image(:|$)/.test(f)) {
       reviewFail = true;
       reasons.push(`ภาพเปล่า/เกือบสีเดียวล้วนลงช่อง [${f}] → คนต้องดู`);
+      continue;
+    }
+    // ★ AC-0099 (LANE-D): ความล้มเหลวเงียบของ hero pixel-gate ใน legacy composeCore (เดิม fail-open เงียบ)
+    //   composer คง fail-open ปล่อยงานผ่านเหมือนเดิม แต่ติดธงให้ QC เห็น → คนต้องดู (ไม่วนหาภาพเพิ่มเปล่าๆ)
+    if (f === 'hero_gate_error') {
+      reviewFail = true;
+      reasons.push('ด่านตรวจ hero ล้ม (exception) → hero ไม่ถูกยืนยัน ปล่อยผ่านแบบ fail-open [hero_gate_error] → คนต้องดู');
+      continue;
+    }
+    if (f === 'hero_unverified_kept') {
+      reviewFail = true;
+      reasons.push('hero ไม่ผ่านด่านบังคับแต่ไม่มีตัวสำรอง → คงใบเดิมทั้งที่ยังไม่ยืนยัน [hero_unverified_kept] → คนต้องดู');
       continue;
     }
 

@@ -71,7 +71,13 @@ export default function QuickCoverPage() {
   async function submit() {
     setErr('');
     if (mode === 'compose' && !caseId) { setErr('เลือกเคสก่อน'); return; }
-    if (mode === 'ref' && content.trim().length < 100) { setErr('วางเนื้อข่าวเต็มก่อน (≥100 ตัวอักษร)'); return; }
+    // ★ 15 ก.ค. 69: gate สองชั้นเหมือนฝั่ง server — content ≥100 ตัว และ (title+content ตาม filter(Boolean)) รวม ≥200 ตัว
+    if (mode === 'ref') {
+      const c = content.trim();
+      if (c.length < 100) { setErr(`วางเนื้อข่าวเต็มก่อน (≥100 ตัวอักษร — ตอนนี้มี ${c.length} ตัวอักษร)`); return; }
+      const combinedLen = [title.trim(), c].filter(Boolean).join('\n\n').length;
+      if (combinedLen < 200) { setErr(`เนื้อหารวม (หัวข่าว+เนื้อข่าว) ต้อง ≥200 ตัวอักษร — ตอนนี้มี ${combinedLen} ตัวอักษร`); return; }
+    }
     const payload = mode === 'compose'
       ? { kind: 'compose', caseId, refId: refId || undefined, heroPersonHint: heroHint || undefined }
       : { kind: 'ref', newsTitle: title, content };
