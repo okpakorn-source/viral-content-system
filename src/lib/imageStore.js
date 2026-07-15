@@ -11,6 +11,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
+import { resilientFetch } from '@/lib/supabase';
 
 const DIR = path.join(process.cwd(), 'data', 'case-images');
 const STORE_NAME = 'acs-images';
@@ -21,7 +22,7 @@ function sb() {
   if (_sb !== null) return _sb;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  _sb = url && key ? createClient(url, key) : false;
+  _sb = url && key ? createClient(url, key, { global: { fetch: resilientFetch } }) : false;
   return _sb;
 }
 
