@@ -10,6 +10,20 @@
 
 import { useState, useRef, useEffect } from 'react';
 
+// ★ Preview MVP item 5 — client error formatter ที่ปลอดภัยกับค่าทุกชนิด (string/Error/plain-object/unknown)
+//   ไม่มีทาง [object Object] เด็ดขาด · ไม่ JSON.stringify ค่าดิบ (กันหลุด secret/provider body ยาว) · bounded length
+function formatClientError(value) {
+  if (typeof value === 'string') return value.slice(0, 500) || 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ';
+  if (value instanceof Error) return String(value.message || value.name || 'เกิดข้อผิดพลาด').slice(0, 500);
+  if (value && typeof value === 'object') {
+    if (typeof value.message === 'string' && value.message) return value.message.slice(0, 500);
+    if (typeof value.error === 'string' && value.error) return value.error.slice(0, 500);
+    return 'เกิดข้อผิดพลาด (รูปแบบไม่คาดคิด)';
+  }
+  if (value == null) return 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ';
+  return String(value).slice(0, 500);
+}
+
 export default function CoverRefTestPage() {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -88,7 +102,8 @@ export default function CoverRefTestPage() {
         if (res.status === 401 && j.errorType === 'COVER_TEST_KEY_REQUIRED') {
           setError('เรียกผ่านโฮสต์นี้ต้องมีคีย์ทีม — กรอกคีย์ทีมในช่อง "คีย์ทีม" ด้านล่างฟอร์มแล้วลองใหม่');
         } else {
-          setError(`สร้างปกไม่สำเร็จ: ${j.error || res.status} ${j.errorType ? `(${j.errorType})` : ''}`);
+          const errText = j.error ? formatClientError(j.error) : String(res.status);
+          setError(`สร้างปกไม่สำเร็จ: ${errText} ${j.errorType ? `(${j.errorType})` : ''}`);
         }
         setFailInfo(j);
       } else {
@@ -99,7 +114,7 @@ export default function CoverRefTestPage() {
         setCancelled(true);
         setError('ยกเลิกฝั่งหน้าจอแล้ว (งานฝั่งเซิร์ฟเวอร์จะวิ่งจนจบเอง)');
       } else {
-        setError('เรียก API ล้ม: ' + (e?.message || String(e)));
+        setError('เรียก API ล้ม: ' + formatClientError(e));
       }
     } finally {
       setLoading(false); stopTimer(); abortRef.current = null;
@@ -220,7 +235,24 @@ export default function CoverRefTestPage() {
             {/* ★ 15 ก.ค. 69 บัค #12: result.elapsed ไม่มีจริง — ใช้ elapsedTotal */}
             <span style={{ padding: '4px 10px', background: '#f1f5f9', borderRadius: 6 }}>เวลา: {result.elapsedTotal || '-'}</span>
             {result.caseId && <span style={{ padding: '4px 10px', background: '#f1f5f9', borderRadius: 6 }}>เคส: {result.caseId}</span>}
+            {/* ★ Preview MVP item 5: โหมดต้องเห็นชัดเสมอ — ไม่มี mode selector, เป็นแค่การแสดงผลความจริง */}
+            <span style={{ padding: '4px 10px', background: result.effectiveMode === 'strict' ? '#ede9fe' : '#fef9c3', borderRadius: 6 }}>
+              โหมด: <b>{result.effectiveMode === 'strict' ? 'Strict (Production parity)' : 'Preview / Advisory'}</b>
+            </span>
+            {result.outputId && <span style={{ padding: '4px 10px', background: '#f1f5f9', borderRadius: 6 }}>outputId: {result.outputId}</span>}
           </div>
+          {result.effectiveMode !== 'strict' && (
+            <div style={{ marginBottom: 10, padding: 10, background: '#fefce8', border: '1px solid #fde68a', borderRadius: 8, fontSize: 12, color: '#854d0e' }}>
+              ℹ️ โหมด Preview/Advisory — ผลนี้เป็นตัวอย่างให้ดูเท่านั้น ไม่ใช่ผลที่ผ่านมาตรฐาน Strict Production
+              (ปกจริงบน Production ต้องผ่าน strict carrier + identity + QC ครบทุกด่านเท่านั้นถึงจะออก)
+            </div>
+          )}
+          {result.productionQcPass === false && (
+            <div style={{ marginBottom: 10, padding: 10, background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 8, fontSize: 12, color: '#9a3412' }}>
+              ⚠️ QC ไม่ผ่าน (ผล advisory เท่านั้น) — Production จริงจะปฏิเสธปกนี้ (422 QC_REJECTED) และจะไม่บันทึกเข้าคลัง
+              ผลที่แสดงด้านล่างมีไว้ดูตัวอย่างเท่านั้น
+            </div>
+          )}
           {/* ★ 15 ก.ค. 69 บัค #11: โชว์ qcVerdict.reasons เต็มในเคสสำเร็จ */}
           {Array.isArray(result.qcVerdict?.reasons) && result.qcVerdict.reasons.length > 0 && (
             <div style={{ marginBottom: 10, padding: 10, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12, color: '#334155' }}>

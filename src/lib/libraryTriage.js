@@ -8,8 +8,12 @@
 // ============================================================
 
 import sharp from 'sharp';
+import { types as nodeUtilTypes } from 'node:util';
 import { loadImageBuffer } from './imageBuffer.js';
-import { geminiClassifyFrames } from './gemini.js';
+import {
+  geminiClassifyFrames, resolveGeminiClassifierPin,
+  sanitizeStrictClassifierItem, isValidClassifierEvidence,
+} from './gemini.js';
 import { applyRehost } from './imageStore.js';
 // ★ Wave2 Batch B1 (10 ก.ค.): เกณฑ์ตัวเลขย้ายไป imageQualityConfig.js (single source of truth) — ค่าเดิมเป๊ะ
 import { QUALITY_CAP_SHORT_SIDE, QUALITY_CAP_VALUE } from './imageQualityConfig.js';
@@ -157,9 +161,28 @@ async function loadOne(im) {
     const sharpness = await computeSharpness(buf);
     // ★ Wave3 ชุด2 (10 ก.ค.): pHash64 จาก buffer เดียวกัน (ไม่โหลดซ้ำ) — วัดไม่ได้ = null
     const pHash64 = await computeDHash64(buf);
+    // ★ 15 ก.ค. (Batch 2B authority resolution + 2C P1-A): หลักฐานขนาดจาก "บัฟเฟอร์ที่ decode จริงตอนนี้" เท่านั้น —
+    //   แยกขาดจาก realWidth/realHeight ด้านบน (ซึ่ง resolveRealSize อาจ reuse ค่าเก่าจาก record โดยไม่ decode) ·
+    //   decode header ล้ม/ค่าไม่ใช่จำนวนเต็มบวก = ไม่มีหลักฐาน (null ทั้งชุด) — ห้าม reuse ขนาด legacy จาก record ·
+    //   provenance ห้าม default-positive (P1-A): 'full' เฉพาะบัฟเฟอร์จาก imageUrl + marker ชัด rehostQuality==='full'
+    //   (rehostQuality หาย/ค่าอื่น ≠ หลักฐาน full) · 'thumb' เฉพาะแหล่ง thumbnail ชัดแจ้ง (rehostThumbUrl/thumbnailUrl)
+    //   · ระบุชั้นไม่ได้ = provenance null → buildTriage ไม่ส่ง resolution → facts ฝั่ง authority คง 'unknown'
+    let decodedWidth = null, decodedHeight = null, decodedProvenance = null;
+    try {
+      const _dm = await sharp(buf, { failOn: 'none' }).metadata();
+      if (Number.isInteger(_dm.width) && _dm.width > 0 && Number.isInteger(_dm.height) && _dm.height > 0) {
+        decodedWidth = _dm.width;
+        decodedHeight = _dm.height;
+        if (loadedFrom === 'imageUrl') {
+          decodedProvenance = im.rehostQuality === 'full' ? 'full' : null; // marker ชัดเท่านั้น — ไม่มี marker = ไม่ claim
+        } else if (loadedFrom === 'rehostThumbUrl' || loadedFrom === 'thumbnailUrl') {
+          decodedProvenance = 'thumb'; // แหล่ง thumbnail ชัดแจ้งโดยตัว URL ที่โหลดจริง
+        }
+      }
+    } catch { /* ไม่มีหลักฐาน decode = ปล่อย null (fail-closed) */ }
     // ★ 8 ก.ค. (CASE-360): 512→1024 — ที่ 512px ตามองไม่เห็นลายน้ำ/ตัวหนังสือเล็ก → clean=true ผิด
     //   ปลายน้ำพังยกแผง (s6 ไม่ตัดภาพเสีย + s5e ไม่แคปเฟรม) · v3 detector ใช้ 1280px เห็นจริง — ตาคัดต้องเห็นใกล้เคียงกัน
-    return { im, base64: await toB64(buf, 1024), brightness, detail, realWidth, realHeight, measuredFrom, sharpness, pHash64 };
+    return { im, base64: await toB64(buf, 1024), brightness, detail, realWidth, realHeight, measuredFrom, sharpness, pHash64, decodedWidth, decodedHeight, decodedProvenance };
   } catch {
     return null;
   }
@@ -174,7 +197,20 @@ const POSITIVE_FACE_EMOTIONS = new Set(['happy', 'laugh', 'warm']);
 
 // สร้างป้าย triage จากผล classify (it) + ค่าโหลด (src มี brightness/detail/realWidth/realHeight/measuredFrom/sharpness)
 // ★ export เพื่อให้ Stage-A focused test เรียกตรงได้ (พฤติกรรม/ผลลัพธ์เดิมทุกฟิลด์)
-export function buildTriage(it, src) {
+// ★ Batch 5B2: strictOpts === undefined (2-arg legacy call) = พฤติกรรมเดิมเป๊ะ byte-for-byte ทุกบรรทัดด้านล่างนี้
+//   ไม่แตะเลย — โหมด strict แยกไปเป็น buildTriageStrict() คนละฟังก์ชันทั้งก้อน (กัน legacy caller/test พัง)
+// ★ correction P1-6: ส่ง strictOpts มา (3-arg call ใดๆ) = ต้องเข้าทาง strict เสมอ แม้ strictOpts เองผิดรูปแบบ/
+//   Proxy — ห้าม fallback ไปทาง legacy เงียบๆ (นั่นคือ downgrade ความปลอดภัย จาก strict กลับไปเป็น lenient
+//   dot-access) ปฏิเสธตรงๆ (null, ศูนย์ triage/admission) แทน — ไม่เรียก getter/trap ใดๆ ก่อนปฏิเสธ
+export function buildTriage(it, src, strictOpts) {
+  if (strictOpts === undefined) return buildTriageLegacy(it, src);
+  if (strictOpts === null || nodeUtilTypes.isProxy(strictOpts) || typeof strictOpts !== 'object') return null;
+  const strictFlagR = ownReadStrictOpt(strictOpts, 'strict');
+  if (!strictFlagR.present || strictFlagR.value !== true) return null;
+  return buildTriageStrict(it, src, strictOpts);
+}
+
+function buildTriageLegacy(it, src) {
   const emotion = it.emotion || null;
   // ★ 9 ก.ค. เฟส 2.3: validate enum + แก้พลาด face-neutral ทั้งที่อารมณ์บวกชัด (ดีกว่าพึ่งพรอมป์อย่างเดียว
   //   เพราะ Gemini ตอบไม่ตรงนิยามได้เสมอ — ด่านโค้ดกันเหนียวอีกชั้น ไม่ต้องรอแก้ที่ไฟล์ gemini.js)
@@ -196,14 +232,20 @@ export function buildTriage(it, src) {
 
   // ★ Stage-A: descriptor สำหรับ candidate fact authority (additive — ไม่กระทบฟิลด์/การตัดสินใด ๆ ด้านล่าง)
   //   • verdict: ส่ง raw it.* (literal boolean เท่านั้นถึงนับ "รู้") — ห้าม derive จาก "!== false" (ไม่มี default-positive)
-  //   • resolution: ไม่ส่ง → authority ตีเป็น 'unknown' · rw/rh อาจมาจาก record เก่า (reused metadata) +
-  //     measuredFrom เป็นค่าอนุมาน = ไม่ใช่หลักฐาน decoded-buffer → ปล่อย unknown ตามสัญญา
+  //   • resolution (★ 15 ก.ค. Batch 2B): ส่งเฉพาะหลักฐาน "บัฟเฟอร์ decode จริงตอนนี้" (src.decodedWidth/Height/
+  //     Provenance จาก loadOne) — rw/rh reuse จาก record เก่า/measuredFrom อนุมาน ไม่มีวันกลายเป็น facts (คงอยู่
+  //     เฉพาะฟิลด์ legacy ด้านล่าง) · ไม่มีหลักฐาน decode = ไม่ส่ง key → authority ตีเป็น 'unknown' ตามสัญญา
   //   • hash: pHash64 วัดจาก buffer ที่ decode จริง (ค่า+algo เชื่อได้) แต่ full-vs-thumb อนุมานไม่ได้ → measuredFrom 'unknown'
   const candidateFacts = buildCandidateFactsV1({
     verdicts: { relevant: it.relevant, clean: it.clean, newsScene: it.newsScene },
     faceBox: it.faceBox, // {x,y,w,h} normalized | null (ยืนยันไม่มี) | undefined (หาย → unknown)
     ...(typeof src?.pHash64 === 'string' && src.pHash64
       ? { hash: { value: src.pHash64, algo: 'dhash_9x8_v1', measuredFrom: 'unknown' } }
+      : {}),
+    ...(Number.isInteger(src?.decodedWidth) && src.decodedWidth > 0
+      && Number.isInteger(src?.decodedHeight) && src.decodedHeight > 0
+      && (src?.decodedProvenance === 'full' || src?.decodedProvenance === 'thumb')
+      ? { resolution: { decodedBuffer: true, provenance: src.decodedProvenance, width: src.decodedWidth, height: src.decodedHeight } }
       : {}),
   });
 
@@ -236,6 +278,117 @@ export function buildTriage(it, src) {
   };
 }
 
+// descriptor-safe own-data reader สำหรับ strictOpts เท่านั้น (แยกจาก gemini.js — ไม่ import ข้ามไฟล์สำหรับ
+// primitive ระดับนี้) — accessor/non-enumerable-ไม่สำคัญ (ยอมเหมือน gemini.js ownRead ทั่วไป) แต่ปฏิเสธ getter
+function ownReadStrictOpt(obj, key) {
+  if (obj === null || typeof obj !== 'object') return { present: false, value: undefined };
+  let d;
+  try { d = Object.getOwnPropertyDescriptor(obj, key); } catch { return { present: false, value: undefined }; }
+  if (!d || !('value' in d)) return { present: false, value: undefined };
+  return { present: true, value: d.value };
+}
+// ★ correction P1-6: ตรวจ+สร้าง classifierEvidence ใหม่ (frozen, literal ล้วน) จาก strictOpts — ต้องผ่านสัญญา
+//   ครบทุกจุดก่อนถึงยอมแนบเข้า triage: evidence ตรง isValidClassifierEvidence (exact-key/type/value bound ทุก
+//   ฟิลด์ตามที่ gemini.js สร้างจริง) + caseId เป็น nonblank bounded string + batchIndex/resultIndex เป็นจำนวนเต็ม
+//   ไม่ติดลบ — ขาด/ผิดรูปแบบจุดใดจุดหนึ่ง = null (ไม่ใช่ default ด้วย ?? null แบบเดิมที่ปล่อยผ่านง่ายเกินไป)
+const MAX_CASE_ID_LEN = 200;
+function buildStrictProvenance(strictOpts) {
+  if (!strictOpts || nodeUtilTypes.isProxy(strictOpts) || typeof strictOpts !== 'object') return null;
+  const evidenceR = ownReadStrictOpt(strictOpts, 'evidence');
+  if (!evidenceR.present || !isValidClassifierEvidence(evidenceR.value)) return null;
+  const caseIdR = ownReadStrictOpt(strictOpts, 'caseId');
+  if (!caseIdR.present || typeof caseIdR.value !== 'string' || caseIdR.value.trim().length === 0 || caseIdR.value.length > MAX_CASE_ID_LEN) return null;
+  const batchIndexR = ownReadStrictOpt(strictOpts, 'batchIndex');
+  if (!batchIndexR.present || !Number.isInteger(batchIndexR.value) || batchIndexR.value < 0) return null;
+  const resultIndexR = ownReadStrictOpt(strictOpts, 'resultIndex');
+  if (!resultIndexR.present || !Number.isInteger(resultIndexR.value) || resultIndexR.value < 0) return null;
+  const e = evidenceR.value; // ผ่าน isValidClassifierEvidence แล้ว (guardExactObject ภายใน) — dot-access ปลอดภัย
+  return Object.freeze({
+    caseId: caseIdR.value,
+    batchIndex: batchIndexR.value,
+    resultIndex: resultIndexR.value,
+    requestedModel: e.requestedModel,
+    actualModel: e.actualModel,
+    actualModelVersion: e.actualModelVersion,
+    modelMatchMode: e.modelMatchMode,
+    provider: e.provider,
+    schemaVersion: e.schemaVersion,
+    attemptCount: e.attemptCount,
+    repairCount: e.repairCount,
+  });
+}
+
+// ============================================================
+// ★ Batch 5B2 (+ correction P1-1/P1-6) — strict classifier mode: ผลจาก geminiClassifyFrames strict path
+//   เท่านั้น — descriptor-first เต็มรูปแบบ: it ตรวจผ่าน gemini.js sanitizeStrictClassifierItem (reuse ตัวเดียว
+//   กับที่ตรวจผล Gemini จริง — กัน validate-logic สองชุด drift, ปฏิเสธ Proxy/accessor/custom-prototype/exotic
+//   input โดยไม่เรียก getter/trap ใดๆ ก่อนปฏิเสธ) · evidence ตรวจผ่าน buildStrictProvenance (exact contract +
+//   caseId/batchIndex/resultIndex bound) · พังจุดใดจุดหนึ่ง = null (ไม่ผลิต triage/candidateFacts เลย) · ผลลัพธ์
+//   detached/frozen ก่อน return เสมอ (caller mutation แก้ triage ที่เก็บไว้ไม่ได้)
+// ============================================================
+function buildTriageStrict(it, src, strictOpts) {
+  const classifierEvidence = buildStrictProvenance(strictOpts);
+  if (classifierEvidence === null) return null;
+
+  const fileTagOnR = ownReadStrictOpt(strictOpts, 'fileTagOn');
+  const fileTagOn = fileTagOnR.present && fileTagOnR.value === true;
+  const sanitized = sanitizeStrictClassifierItem(it, fileTagOn);
+  if (sanitized === null) return null;
+
+  const hasNewsScene = Object.prototype.hasOwnProperty.call(sanitized, 'newsScene'); // sanitized เป็นของเราเอง (frozen literal) — ปลอดภัย
+  const emotion = sanitized.emotion || null;
+  let category = sanitized.category;
+  if (category === 'face-neutral' && POSITIVE_FACE_EMOTIONS.has(emotion)) category = 'face-emotional';
+
+  const rw = Number(src?.realWidth), rh = Number(src?.realHeight);
+  const realShortSide = (rw > 0 && rh > 0) ? Math.min(rw, rh) : null;
+  const measuredFrom = src?.measuredFrom || null;
+
+  let quality = sanitized.quality; // ★ ห้าม default missing→5 — sanitizeStrictClassifierItem รับประกัน finite/1-10 มาแล้ว
+  if ((measuredFrom === 'thumb' || (realShortSide != null && realShortSide < QUALITY_CAP_SHORT_SIDE)) && quality > QUALITY_CAP_VALUE) {
+    quality = QUALITY_CAP_VALUE;
+  }
+
+  const candidateFacts = buildCandidateFactsV1({
+    verdicts: { relevant: sanitized.relevant, clean: sanitized.clean, newsScene: hasNewsScene ? sanitized.newsScene : undefined },
+    faceBox: sanitized.faceBox,
+    ...(typeof src?.pHash64 === 'string' && src.pHash64
+      ? { hash: { value: src.pHash64, algo: 'dhash_9x8_v1', measuredFrom: 'unknown' } }
+      : {}),
+    ...(Number.isInteger(src?.decodedWidth) && src.decodedWidth > 0
+      && Number.isInteger(src?.decodedHeight) && src.decodedHeight > 0
+      && (src?.decodedProvenance === 'full' || src?.decodedProvenance === 'thumb')
+      ? { resolution: { decodedBuffer: true, provenance: src.decodedProvenance, width: src.decodedWidth, height: src.decodedHeight } }
+      : {}),
+  });
+
+  return Object.freeze({
+    relevant: sanitized.relevant, // ★ literal ตรงๆ — ห้าม "!== false" (นั่นคือ default-positive สำหรับ undefined/missing)
+    // ★ correction P1-1: FILE_SHOT_TAG=0 (newsScene ไม่อยู่ใน schema โหมดนี้) = "ไม่รู้" จริงๆ ไม่ใช่ default
+    //   เป็น true — เก็บ null ตรงๆ (ทุก consumer จริงในโค้ดใช้ `!== false` อยู่แล้ว จึง null ยังนับเป็น "ไม่ปฏิเสธ"
+    //   เหมือนเดิมทุกจุด แต่ไม่ fabricate ว่า "รู้ว่าเป็นข่าวจริง" ทั้งที่ไม่มีหลักฐาน)
+    newsScene: hasNewsScene ? sanitized.newsScene : null,
+    clean: sanitized.clean,
+    category,
+    person: sanitized.person,
+    persons: sanitized.persons,
+    emotion,
+    quality,
+    faceCount: sanitized.faceCount,
+    faceBox: sanitized.faceBox,
+    peopleBox: sanitized.peopleBox,
+    brightness: Math.round(src?.brightness ?? 128),
+    detail: Math.round(src?.detail ?? 60),
+    note: sanitized.note,
+    realShortSide,
+    sharpness: typeof src?.sharpness === 'number' ? src.sharpness : null,
+    measuredFrom,
+    pHash64: (typeof src?.pHash64 === 'string' && src.pHash64) ? src.pHash64 : null,
+    candidateFacts,
+    classifierEvidence,
+  });
+}
+
 // ★ 8 ก.ค. (เร่งค้นภาพ แก้ 3): semaphore กลางจำกัดจำนวนเรียกตา Gemini พร้อมกันทั้งโปรเซส
 //   — ตอนค้นหลายแหล่งขนาน (3 request × 3 ชุด/request) ไม่ให้รุมยิง Gemini เกินลิมิตจนโดน 429 ยกแผง
 //   ปรับ: GEMINI_VET_CONC (ดีฟอลต์ 4)
@@ -255,7 +408,7 @@ function gemRelease() {
 //   caller filter `triage.relevant !== false` เพื่อเก็บเฉพาะที่เกี่ยว (ใบที่โหลด/ตาล้ม = คงไว้ไม่ติดป้าย กัน false drop)
 // ★ 8 ก.ค. แก้ 3: ประมวลชุดละ batchSize "ขนานกัน VET_CONC ชุด" (เดิมทีละชุด) — เกณฑ์ตา/ป้าย/
 //   fail-open ต่อชุด เท่าเดิมทุกอย่าง ผลคืนเรียงลำดับรูปเดิม · kill-switch: VET_CONC=1 = ทีละชุดแบบเดิม
-export async function vetImages({ images, subjects, newsGist, onProgress, onRetry, caseId, batchSize = 10 }) {
+export async function vetImages({ images, subjects, newsGist, onProgress, onRetry, caseId, batchSize = 10, signal }) {
   const conc = Math.max(1, parseInt(process.env.VET_CONC || '3', 10));
   const total = images.length;
   const batches = [];
@@ -263,6 +416,13 @@ export async function vetImages({ images, subjects, newsGist, onProgress, onRetr
   const results = new Array(batches.length);
   let kept = 0, dropped = 0, failed = 0, doneImgs = 0;
   let keyError = null; // ไม่มีคีย์ Gemini → เก็บไว้ throw หลังทุก worker หยุด (พฤติกรรมเดิมต่อ caller)
+  let abortError = null; // ★ correction P1-5: external signal cancel → หยุดทั้ง invocation (ไม่ใช่แค่แบตช์นี้)
+  // ★ Batch 5B2: pin ครั้งเดียวต่อ invocation นี้ — ส่งเดิมเป๊ะเข้าทุกแบตช์/ทุก retry ห้าม re-resolve จาก env
+  //   ระหว่างงาน (ถ้า env ตั้งโมเดลผิดรูปแบบ ให้ล้มทั้ง invocation ทันทีตรงนี้ ก่อนเริ่มแบตช์ไหนเลย)
+  const pin = resolveGeminiClassifierPin();
+  // ★ correction P1-6: อ่านค่าเดียวกับที่ gemini.js อ่านเองเป๊ะ (env ตัวเดียวกัน อ่านครั้งเดียวต่อ invocation
+  //   เหมือน pin) — ใช้เลือก required-key-set ที่ sanitizeStrictClassifierItem ต้องตรวจให้ตรง mode จริงของงานนี้
+  const FILE_TAG = process.env.FILE_SHOT_TAG !== '0';
 
   async function runOneBatch(bi) {
     const slice = batches[bi];
@@ -275,25 +435,34 @@ export async function vetImages({ images, subjects, newsGist, onProgress, onRetr
     failedLoads.forEach((x) => { out.push({ ...x.im }); failed++; }); // โหลดไม่ได้ → คงไว้ไม่ติดป้าย
     if (ok.length) {
       const frames = ok.map((x, k) => ({ index: k, base64: x.r.base64, source: x.im.source, title: x.im.title }));
-      let items = null;
+      let result = null;
       await gemAcquire();
       try {
-        items = await geminiClassifyFrames({ frames, subjects, newsGist, onRetry, caseId });
+        result = await geminiClassifyFrames({ frames, subjects, newsGist, onRetry, caseId, pin, signal });
       } catch (e) {
         if (e?.errorType === 'NO_GEMINI_KEY') { keyError = e; return; } // แจ้ง caller (จะได้ fallback ไม่กรอง)
-        ok.forEach((x) => { out.push({ ...x.im }); failed++; }); // ตาล้ม → คงไว้ไม่ติดป้าย
+        // ★ correction P1-5: external cancel ต้อง terminal ทั้ง invocation ทันที ห้ามกลืนเป็น "แบตช์นี้ล้ม
+        //   คงไว้ไม่ติดป้าย รอบหน้าลองใหม่" (raw/untagged continuation) — หยุดจ่ายแบตช์ใหม่ + rethrow terminal เดิม
+        if (e?.errorType === 'ABORTED') { abortError = e; return; }
+        ok.forEach((x) => { out.push({ ...x.im }); failed++; }); // ตาล้ม (รวมถึง identity/schema/deadline ใหม่) → คงไว้ไม่ติดป้าย
       } finally {
         gemRelease();
       }
-      if (items) {
+      if (result) {
+        const items = result.items;
+        const evidence = result.evidence;
         const byIdx = {};
         for (const it of items) byIdx[it.index] = it;
         ok.forEach((x, k) => {
           const it = byIdx[k];
           // ★ audit B-R4: Gemini degrade ตอบไม่ครบฟิลด์ (ไม่มี relevant) → ห้าม default ป้ายบวกฟรี
           //   ข้ามไม่ติดป้าย (รอบหน้าตาคัดใหม่) — คงหลัก "กัน false drop" แต่ไม่ปล่อยขยะป้ายดีเข้าพูล
+          //   (schema ที่ gemini.js บังคับ relevant ครบทุกใบอยู่แล้ว — เช็คนี้เป็น defense-in-depth)
           if (!it || typeof it.relevant === 'undefined') { out.push({ ...x.im }); failed++; return; }
-          const triage = buildTriage(it, x.r);
+          const triage = buildTriage(it, x.r, {
+            strict: true, evidence, caseId, batchIndex: bi, resultIndex: it.index, fileTagOn: FILE_TAG,
+          });
+          if (!triage) { out.push({ ...x.im }); failed++; return; } // malformed strict item → ศูนย์ triage/admission
           out.push({ ...x.im, triage });
           if (triage.relevant === false) dropped++; else kept++;
         });
@@ -304,26 +473,31 @@ export async function vetImages({ images, subjects, newsGist, onProgress, onRetr
 
   let nextBatch = 0;
   const workers = Array.from({ length: Math.min(conc, batches.length) }, async () => {
-    while (nextBatch < batches.length && !keyError) {
+    while (nextBatch < batches.length && !keyError && !abortError) {
       const bi = nextBatch++;
       await runOneBatch(bi);
     }
   });
   await Promise.all(workers);
   if (keyError) throw keyError;
+  if (abortError) throw abortError; // ★ correction P1-5: rethrow safe terminal abort — ไม่กลืนทิ้ง
 
   const vetted = results.flat().filter(Boolean);
   return { vetted, kept, dropped, failed };
 }
 
 // คัดกรองคลัง → คืน { map: {imageId: triage}, tagged, failed, byCategory, byPerson }
-export async function triageLibrary({ images, subjects, newsGist, onProgress, onRetry, caseId, batchSize = 10 }) {
+export async function triageLibrary({ images, subjects, newsGist, onProgress, onRetry, caseId, batchSize = 10, signal }) {
   const map = {};
   let tagged = 0;
   let failed = 0;
   const total = images.length;
   const byCategory = {};
   const byPerson = {};
+  // ★ Batch 5B2: pin ครั้งเดียวต่อ invocation นี้ — ส่งเดิมเป๊ะเข้าทุกแบตช์/ทุก retry ห้าม re-resolve จาก env
+  const pin = resolveGeminiClassifierPin();
+  // ★ correction P1-6: ค่าเดียวกับที่ gemini.js อ่านเองเป๊ะ — เลือก required-key-set ให้ตรง mode จริงของงานนี้
+  const FILE_TAG = process.env.FILE_SHOT_TAG !== '0';
 
   for (let i = 0; i < images.length; i += batchSize) {
     const slice = images.slice(i, i + batchSize);
@@ -338,18 +512,25 @@ export async function triageLibrary({ images, subjects, newsGist, onProgress, on
       continue;
     }
     const frames = loaded.map((b, k) => ({ index: k, base64: b.base64, source: b.im.source, title: b.im.title }));
-    let items = [];
+    let result = null;
     try {
-      items = await geminiClassifyFrames({ frames, subjects, newsGist, onRetry, caseId });
-    } catch {
-      failed += loaded.length; // ตาแบตช์นี้ล้ม → ปล่อยไว้ (ยังไม่ติดป้าย) รอบหน้าลองใหม่
+      result = await geminiClassifyFrames({ frames, subjects, newsGist, onRetry, caseId, pin, signal });
+    } catch (e) {
+      // ★ correction P1-5: external cancel ต้อง terminal ทั้ง invocation ทันที ห้ามกลืนเป็น "แบตช์นี้ล้ม
+      //   ปล่อยไว้ รอบหน้าลองใหม่" — หยุด loop + rethrow terminal เดิม
+      if (e?.errorType === 'ABORTED') throw e;
+      failed += loaded.length; // ตาแบตช์นี้ล้ม (รวมถึง identity/schema/deadline ใหม่) → ปล่อยไว้ รอบหน้าลองใหม่
       continue;
     }
-    for (const it of items) {
+    const batchIndex = Math.floor(i / batchSize);
+    for (const it of result.items) {
       const src = loaded[it.index];
       if (!src) continue;
       if (typeof it.relevant === 'undefined') continue; // ★ audit B-R4: ตอบครึ่งฟิลด์ = ไม่ติดป้าย รอรอบหน้า (กันป้ายบวกฟรี)
-      const triage = buildTriage(it, src);
+      const triage = buildTriage(it, src, {
+        strict: true, evidence: result.evidence, caseId, batchIndex, resultIndex: it.index, fileTagOn: FILE_TAG,
+      });
+      if (!triage) continue; // malformed strict item → ศูนย์ triage/admission
       map[src.im.id] = triage;
       tagged++;
       byCategory[triage.category] = (byCategory[triage.category] || 0) + 1;

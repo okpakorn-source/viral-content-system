@@ -13,8 +13,12 @@
 //          → บริโภค payload จริง → ประกอบ in-process (composeAndVerify) → ตรวจ QC → ตัดสินผล
 //
 // กติกา strict (armed เมื่อ MEGA_STRICT_RENDER=1 + S7 แนบ carrier รูปแบบใดรูปแบบหนึ่ง: V1 = selectionSpec+realizedTemplate ครบคู่ (own) หรือ V2 = refHeroV2 carrier (own, ไม่มี top-level pair)):
+//   S6 waiting ⇒ 422 STRICT_HOLD จบก่อนแตะ S7/queue/compose (เหตุ root = ค่าที่ S6 ผลิตเป๊ะ ไม่ถูก S7 ตีป้ายทับ)
 //   S7 waiting/failed/HOLD · strict contract error · hero/readiness fail · QC fail ⇒ 422 (zero archive)
-//   สำเร็จเท่านั้นจึง archive ครั้งเดียว. ปิด strict จริง = พฤติกรรม legacy เดิม (effectiveMode:'legacy').
+//   สำเร็จเท่านั้นจึง archive ครั้งเดียว. ปิด strict จริง = พฤติกรรม legacy เดิม (effectiveMode:'preview_advisory' —
+//   ★ Preview MVP: outward label เปลี่ยนจาก 'legacy' → 'preview_advisory' เพื่อสื่อสารตรง; ค่าความจริงภายใน
+//   (renderMode:'legacy') ไม่เปลี่ยน, gate/behavior ทุกจุดไม่แตะ; preview_advisory + QC fail = 200 advisory
+//   (mirror /mega-compose-test) ไม่ persist/archive — ดู buildCoverResponseBody/computeEffectiveMode ด้านล่าง).
 //   canonical latch = MEGA_STRICT_RENDER เท่านั้น — MEGA_STRICT_RENDERER ไม่มีสิทธิ์ arm strict.
 // ============================================================
 
@@ -201,6 +205,45 @@ function holdBody({ error, errorType, holdReason, effectiveMode, latchReport, au
     strictLatches: latchReport || null,   // canonical latch state (Lane B) — informational
     authority: authority || null,         // slotOrder/heroSlotId/refSlotId/composerSlotId/hashes/plannedByRefSlot
     ...(extra || {}),
+    trace,
+  };
+}
+
+// ★ Preview MVP — outward effectiveMode label: 'strict' เฉพาะ strict engaged จริงเท่านั้น (ไม่แตะ gate/behavior
+//   ใดๆ) · ไม่ engaged = 'preview_advisory' (เดิม 'legacy') — สื่อสารตรงว่าเป็นผล advisory/preview ไม่ใช่ strict
+//   Production parity · renderMode = ค่าความจริงภายในเดิม ('strict'|'legacy') แยกไว้สำหรับ debug/log เท่านั้น
+function computeEffectiveMode(isStrictEngaged) {
+  const renderMode = isStrictEngaged ? 'strict' : 'legacy';
+  const effectiveMode = isStrictEngaged ? 'strict' : 'preview_advisory';
+  return { effectiveMode, renderMode };
+}
+
+// ★ Preview MVP item 3 — fields ร่วมของ response 200 ทั้งสองเส้นทาง (QC-pass จริง + QC-fail preview_advisory
+//   แบบ mirror /mega-compose-test): ต่างกันแค่ productionQcPass/coverPath/archiveId (QC-fail preview_advisory =
+//   null ทั้งคู่ เพราะไม่ persist/archive เด็ดขาด) — outputId ผูก archive id จริงถ้ามี ไม่งั้นผูก REFTEST job id เดิม
+function buildCoverResponseBody({ cover, qcVerdict, productionQcPass, effectiveMode, renderMode, latchReport, authority, matchedRef, job, sourceLinks, trace, t0, coverPath, archiveId }) {
+  const outputId = archiveId || job.id;
+  return {
+    ...cover,               // base64, template, score, directorReason, assignments, caseId...
+    success: true,
+    qcVerdict,
+    productionQcPass,       // ★ item 3: mirror /mega-compose-test — Production hard gate จะ 422 เมื่อ false
+    effectiveMode,          // ★ 'strict' | 'preview_advisory' (genuine arming — ไม่มีทาง fabricate)
+    renderMode,             // ★ ค่าความจริงภายใน ('strict'|'legacy') — debug/log เท่านั้น
+    strictLatches: latchReport,
+    authority,
+    holdReason: null,
+    coverPath,
+    outputId,                                  // ★ item 3: nonempty เสมอ — ผูก archive id จริงหรือ REFTEST job id
+    ...(archiveId ? { archiveId } : {}),        // ★ item 3: โผล่เฉพาะเมื่อมี archive entry จริงเท่านั้น
+    matchedRef,
+    throughMega: true,
+    imageCaseId: job.dossier.images?.caseId || null,
+    keywordsCount: job.dossier.images?.keywordsCount ?? null,
+    poolSize: job.dossier.pickImages?.poolSize ?? null,
+    queueJobId: job.dossier.cover?.queueJobId || null, // 'REFTEST-INLINE' (in-process ack)
+    sourceLinks,
+    elapsedTotal: `${((Date.now() - t0) / 1000).toFixed(1)}s`,
     trace,
   };
 }
@@ -650,6 +693,32 @@ export async function runCoverRefTest(input = {}, deps = {}) {
   r = merge(step('s6_slots', await _s6_slots(job, { origin })));
   if (failed(r)) return { status: 502, body: { success: false, error: r.summary, errorType: 'S6_SLOTS_FAILED', trace, pickImages: job.dossier.pickImages } };
 
+  // ★ 15 ก.ค. (S6 hold short-circuit): S6 คืน waiting (hold ทุกรูปแบบของ S6) ต้องจบที่นี่ — ห้ามไหลเข้า
+  //   S7/queue/compose (เดิม waiting ไหลต่อ → carrier {ok:false} ถูก S7 ตีป้ายทับเป็น ref_hero_v2_carrier_not_ok
+  //   กลบเหตุจริง เช่น REF_HERO_V2_INSUFFICIENT_CAST_ASSETS) · เหตุ root = pass-through ค่าที่ S6 ผลิตเป๊ะ:
+  //   marker จาก dossierPatch.pickImages.refHeroV2.hold (วินัยเดียวกับ _v2HoldDecision ฝั่ง tick — สตริง
+  //   REF_HERO_V2* เท่านั้น) · ไม่มี marker → ใช้ summary ของ S6 เอง · ไม่แปล/ไม่ synthesize/ไม่ถอย fallback
+  //   สถานะอื่นนอกเหนือ waiting (นอก failed ที่จัดการแล้ว) = เส้นทางเดิม byte-identical
+  if (r?.status === 'waiting') {
+    const _rawHold = r?.dossierPatch?.pickImages?.refHeroV2?.hold;
+    const s6Hold = (typeof _rawHold === 'string' && _rawHold.startsWith('REF_HERO_V2')) ? _rawHold : null;
+    const { effectiveMode: _s6Mode, renderMode: _s6RenderMode } = computeEffectiveMode(_env.MEGA_STRICT_RENDER === '1');
+    trace.push({ stage: 'mode', status: _s6Mode, summary: `renderMode=${_s6RenderMode}` });
+    return {
+      status: 422,
+      body: holdBody({
+        error: r?.summary || 'S6 พักงาน (ยังไม่พร้อมเลือกภาพ)',
+        errorType: 'STRICT_HOLD',
+        holdReason: s6Hold || r?.summary || r?.status || null,
+        effectiveMode: _s6Mode,
+        latchReport,
+        authority: extractAuthorityLatches(null, job.dossier),
+        trace,
+        extra: { s6Status: r?.status ?? null, renderMode: _s6RenderMode, ...(s6Hold ? { refHeroV2Hold: s6Hold } : {}), pickImages: job.dossier.pickImages ?? null },
+      }),
+    };
+  }
+
   // ============================================================
   // S7 — เรียก "โปรดิวเซอร์จริง" ผ่าน in-process seam แล้วบริโภค payload ที่ S7 ส่งจริง
   // ============================================================
@@ -669,13 +738,15 @@ export async function runCoverRefTest(input = {}, deps = {}) {
     if (err && err.reftestSeam) {
       trace.push({ stage: 's7_cover', status: 'seam_reject', summary: `${err.errorType}: ${(err.message || '').slice(0, 120)}` });
       const authority = extractAuthorityLatches(captured.queuePayload, job.dossier);
+      const { effectiveMode: _seamMode, renderMode: _seamRenderMode } = computeEffectiveMode(_env.MEGA_STRICT_RENDER === '1');
+      trace.push({ stage: 'mode', status: _seamMode, summary: `renderMode=${_seamRenderMode}` });
       return {
         status: 422,
         body: holdBody({
           error: err.message || 'strict seam ปฏิเสธ', errorType: err.errorType || 'STRICT_SEAM_REJECT',
           holdReason: err.holdReason || err.errorType,
-          effectiveMode: (_env.MEGA_STRICT_RENDER === '1') ? 'strict' : 'legacy',
-          latchReport, authority, trace, extra: { queueCalls: captured.queueCount },
+          effectiveMode: _seamMode,
+          latchReport, authority, trace, extra: { queueCalls: captured.queueCount, renderMode: _seamRenderMode },
         }),
       };
     }
@@ -689,13 +760,15 @@ export async function runCoverRefTest(input = {}, deps = {}) {
     merge(s7); // เผื่อ dossierPatch ติดมาบางส่วน (ไม่กระทบ — archive ไม่เกิด)
     const authority = extractAuthorityLatches(captured.queuePayload, job.dossier);
     const isWaiting = s7?.status === 'waiting';
+    const { effectiveMode: _s7Mode, renderMode: _s7RenderMode } = computeEffectiveMode(_env.MEGA_STRICT_RENDER === '1');
+    trace.push({ stage: 'mode', status: _s7Mode, summary: `renderMode=${_s7RenderMode}` });
     return {
       status: 422,
       body: holdBody({
         error: s7?.summary || 'S7 ไม่พร้อมส่งปก', errorType: isWaiting ? 'STRICT_HOLD' : 'S7_FAILED',
         holdReason: s7?.summary || s7?.status || 'not_done',
-        effectiveMode: (_env.MEGA_STRICT_RENDER === '1') ? 'strict' : 'legacy',
-        latchReport, authority, trace, extra: { s7Status: s7?.status || null, queueCalls: captured.queueCount },
+        effectiveMode: _s7Mode,
+        latchReport, authority, trace, extra: { s7Status: s7?.status || null, queueCalls: captured.queueCount, renderMode: _s7RenderMode },
       }),
     };
   }
@@ -724,7 +797,8 @@ export async function runCoverRefTest(input = {}, deps = {}) {
   const hasV2 = Object.prototype.hasOwnProperty.call(payload, 'refHeroV2');
   const _renderArmed = _env.MEGA_STRICT_RENDER === '1';
   const strictEngaged = _renderArmed && (hasV2 ? !(hasSpec || hasRealized) : (hasSpec && hasRealized));
-  const effectiveMode = strictEngaged ? 'strict' : 'legacy';
+  const { effectiveMode, renderMode } = computeEffectiveMode(strictEngaged);
+  trace.push({ stage: 'mode', status: effectiveMode, summary: `renderMode=${renderMode}` });
   const authority = extractAuthorityLatches(payload, job.dossier);
 
   if (hasV2 && (hasSpec || hasRealized)) {
@@ -793,15 +867,35 @@ export async function runCoverRefTest(input = {}, deps = {}) {
   // ── ด่าน QC ──
   const qcVerdict = _qc({ qcFlags: cover.qcFlags, refSimilarity: cover.refSimilarity, manifest: cover.manifest });
   cover.score = cover.refSimilarity != null ? `เหมือน ref ${cover.refSimilarity}%` : '-';
+  // ★ item 3: productionQcPass เป็นค่าผกผันเป๊ะของเงื่อนไข "QC ไม่ผ่าน" เดิม (qcVerdict && qcVerdict.pass===false)
+  //   — qcVerdict หาย/null = ไม่ถือว่าถูกปฏิเสธ (เหมือนพฤติกรรมเดิมทุกประการ) mirror /mega-compose-test เป๊ะ
+  const productionQcPass = qcVerdict?.pass !== false;
+  const sourceLinks = (payload.slotPlan || []).map((p) => p.url).filter(Boolean);
+  const rm = job.dossier.refMatch || null;
+  const matchedRef = rm ? { imagePath: rm.imagePath || null, styleName: rm.styleName || null, dna: rm.dna || null, refId: rm.refId || null, dnaHash: rm.dnaHash || null, refBoundAt: rm.refBoundAt || null, reason: rm.reason || null } : null;
 
-  // QC pass===false ⇒ typed 422 เสมอ (ทุกโหมด) ก่อน archive — archiveCalls=0 (audit point 4)
-  if (qcVerdict && qcVerdict.pass === false) {
-    return { status: 422, body: holdBody({ error: 'QC ไม่ผ่าน: ' + (qcVerdict.reasons || []).join(' · ').slice(0, 160), errorType: 'QC_REJECTED', holdReason: 'qc_failed', effectiveMode, latchReport, authority, trace, extra: { qcVerdict, qcFlags: cover.qcFlags || [] } }) };
+  // QC pass===false:
+  //   strict (item 1 — ไม่แตะ) ⇒ typed 422 QC_REJECTED เสมอ ก่อน archive — archiveCalls=0 (byte-identical เดิม)
+  //   preview_advisory (item 3) ⇒ mirror /mega-compose-test advisory semantics เฉพาะจุดตัดสินนี้: HTTP 200
+  //     success:true + qcVerdict + productionQcPass:false — ห้าม persist/archive ผลนี้เด็ดขาด (return ก่อนถึง
+  //     บล็อก archive ด้านล่างเสมอ)
+  if (!productionQcPass) {
+    if (effectiveMode === 'strict') {
+      return { status: 422, body: holdBody({ error: 'QC ไม่ผ่าน: ' + (qcVerdict.reasons || []).join(' · ').slice(0, 160), errorType: 'QC_REJECTED', holdReason: 'qc_failed', effectiveMode, latchReport, authority, trace, extra: { qcVerdict, qcFlags: cover.qcFlags || [] } }) };
+    }
+    return {
+      status: 200,
+      body: buildCoverResponseBody({
+        cover, qcVerdict, productionQcPass, effectiveMode, renderMode, latchReport, authority,
+        matchedRef, job, sourceLinks, trace, t0, coverPath: null, archiveId: null,
+      }),
+    };
   }
 
-  // ── archive ครั้งเดียว (สำเร็จเท่านั้น) — ล้มไม่ critical ต่อผลปก ──
-  const sourceLinks = (payload.slotPlan || []).map((p) => p.url).filter(Boolean);
+  // ── archive ครั้งเดียว (สำเร็จ + QC ผ่านเท่านั้น — item 3: preserve the existing single persist/archive path) ──
+  //   ล้มไม่ critical ต่อผลปก
   let coverPath = null;
+  let archiveId = null;
   try {
     const m = /^data:image\/(\w+);base64,(.+)$/.exec(cover.base64 || '');
     if (m) {
@@ -819,35 +913,20 @@ export async function runCoverRefTest(input = {}, deps = {}) {
         refId: job.dossier.refMatch?.refId || job.dossier.refMatch?.dnaHash || null,
         refSimilarity: cover.refSimilarity ?? null,
       });
+      archiveId = ent?.id || null;
       if (!coverPath && ent?.id) coverPath = `/api/mega-covers/img?id=${encodeURIComponent(ent.id)}`;
     }
   } catch { /* คลังล้ม ไม่ให้กระทบผลปก */ }
 
-  const rm = job.dossier.refMatch || null;
   return {
     status: 200,
-    body: {
-      ...cover,               // base64, template, score, directorReason, assignments, caseId...
-      success: true,
-      qcVerdict,
-      effectiveMode,          // ★ 'strict' | 'legacy' (genuine arming)
-      strictLatches: latchReport,
-      authority,              // ★ slotOrder/heroSlotId/refSlotId/composerSlotId/hashes/plannedByRefSlot
-      holdReason: null,
-      coverPath,
-      matchedRef: rm ? { imagePath: rm.imagePath || null, styleName: rm.styleName || null, dna: rm.dna || null, refId: rm.refId || null, dnaHash: rm.dnaHash || null, refBoundAt: rm.refBoundAt || null, reason: rm.reason || null } : null,
-      throughMega: true,
-      imageCaseId: job.dossier.images?.caseId || null,
-      keywordsCount: job.dossier.images?.keywordsCount ?? null,
-      poolSize: job.dossier.pickImages?.poolSize ?? null,
-      queueJobId: job.dossier.cover?.queueJobId || null, // 'REFTEST-INLINE' (in-process ack)
-      sourceLinks,
-      elapsedTotal: `${((Date.now() - t0) / 1000).toFixed(1)}s`,
-      trace,
-      // R1.6: no residual capture-after-writes path — this function is now ALWAYS the ordinary full run.
-      //   Capture-only evidence, when authorized, comes exclusively from runS7CaptureOnly (see above), which
-      //   never reaches this function at all.
-    },
+    body: buildCoverResponseBody({
+      cover, qcVerdict, productionQcPass, effectiveMode, renderMode, latchReport, authority,
+      matchedRef, job, sourceLinks, trace, t0, coverPath, archiveId,
+    }),
+    // R1.6: no residual capture-after-writes path — this function is now ALWAYS the ordinary full run.
+    //   Capture-only evidence, when authorized, comes exclusively from runS7CaptureOnly (see above), which
+    //   never reaches this function at all.
   };
 }
 

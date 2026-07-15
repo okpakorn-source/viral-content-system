@@ -1671,8 +1671,10 @@ export const _finalDecisionEvidenceFlag = (v) => v === '1';
 //   INVARIANTS enforced here:
 //    • REFERENCE = STRUCTURE ONLY (slot id / shape / order) — subject/eventIntent/wantPerson are never
 //      read into current-news identity, candidate ranking, required cast, hero person, or Global input.
-//    • CURRENT-NEWS people come from compass (the news analysis) only; requiredness/priority is a
-//      deterministic policy over the genuine editorial role (principals hero|reaction = required).
+//    • CURRENT-NEWS people come from compass (the news analysis) only; the explicit editorial hero is the
+//      only role required by this module's local policy. Non-hero people become required ONLY through
+//      castManifest's own explicit/corroborated authority (an explicit requiredCast row OR cross-source
+//      compass+analyze corroboration) — a lone reaction/anonymized/detected label is NOT required.
 //    • GENUINE measured evidence ONLY — no identityConfidence/isGroupShot/faceShare/headroom/
 //      visibleBodyRegion/occlusion/edgeCut/resolution/cleanliness/scores/scene/readiness is ever
 //      manufactured; any missing mandatory field ⇒ typed fixed-code HOLD (no partial payload, no
@@ -1680,7 +1682,12 @@ export const _finalDecisionEvidenceFlag = (v) => v === '1';
 //    • Once returned, the authority + bindings are DEEP-FROZEN — zero post-S6 mutation.
 // ============================================================
 const REF_HERO_V2_LIMITS = Object.freeze({ maxPersonRepeats: 1, maxSceneRepeats: 1 }); // policy (not evidence)
-const REF_HERO_V2_PRINCIPAL_ROLES = Object.freeze(['hero', 'reaction']); // deterministic requiredness policy
+// ★ 15 ก.ค. (Batch 3B) — principal = explicit editorial hero ONLY. reaction/anonymized/detected labels are
+//   NOT automatically mandatory here: any non-hero required person must arise from castManifest's real
+//   authority (an explicit requiredCast row OR cross-source compass+analyze corroboration), never from this
+//   local constant. A lone single-source compass 'reaction' therefore stays optional (mustRepresent:false),
+//   matching castManifest.buildCastManifest's fail-closed contract exactly.
+const REF_HERO_V2_PRINCIPAL_ROLES = Object.freeze(['hero']); // deterministic requiredness policy (hero-only)
 const REF_HERO_V2_MAX_SLOTS = 8;      // envelope + Global solver bound (SOLVER_MAX_SLOTS)
 const REF_HERO_V2_MAX_CANDIDATES = 64; // Global solver bound (SOLVER_MAX_CANDIDATES) — deterministic cap
 
@@ -1701,17 +1708,29 @@ function _rhDeepFreeze(o) {
 
 // Current-news people from the news analysis (compass) — structured {name, role}. Order-stable, de-duped.
 // Reference subjects are deliberately NOT read here (compass only).
+// ★ 15 ก.ค. (Batch 3D · Path A) — descriptor-safe + WHOLE-SET fail-closed. compass and EVERY person entry must be
+//   bounded plain own-DATA objects: compass is guarded by _rhGuardObj (cap 64) and each entry by _rhGuardObj (cap
+//   16). ANY accessor/symbol key/exotic/non-plain/over-cap/non-data property anywhere on the compass surface or on
+//   a person entry is a STRUCTURAL rejection — the WHOLE people set becomes [] (no partial accept, no getter ever
+//   executed). mainCharacters is read via the _rhOwnRead/_rhArrRead descriptor family (accessor/hole/exotic/over-
+//   cap/unreadable ⇒ []). name/role are then own-DATA reads: name must be a primitive nonblank string; a
+//   missing/wrong-type own-data role normalizes to null (never String()-coerced, never hero). Order/de-dupe of
+//   valid plain-data entries is preserved. A returned [] routes upstream to REF_HERO_V2_NO_CURRENT_NEWS_PEOPLE.
 function _rhCurrentNewsPeople(compass) {
-  const list = Array.isArray(compass?.mainCharacters) ? compass.mainCharacters : [];
+  if (!_rhGuardObj(compass, 64)) return []; // compass surface: accessor/symbol/exotic/non-plain/over-cap ⇒ no people
+  const list = _rhArrRead(_rhOwnRead(compass, 'mainCharacters').value, _RH_AUTH_MAX_CANDIDATES);
+  if (list === null) return []; // mainCharacters not a dense plain bounded array
   const out = [];
   const seen = new Set();
   for (const c of list) {
-    const name = _rhNonBlank(c?.name);
+    if (!_rhGuardObj(c, 16)) return []; // ANY structurally-invalid entry rejects the WHOLE set (no partial accept)
+    const name = _rhNonBlank(_rhOwnRead(c, 'name').value); // own DATA descriptor + primitive nonblank string only
     if (!name) continue;
     const key = name.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ name, role: _rhNonBlank(c?.role) ? String(c.role).trim().toLowerCase() : null });
+    const roleVal = _rhNonBlank(_rhOwnRead(c, 'role').value); // own-data role; missing/wrong-type ⇒ null (no coerce)
+    out.push({ name, role: roleVal ? roleVal.toLowerCase() : null });
   }
   return out;
 }
@@ -1719,6 +1738,7 @@ function _rhCurrentNewsPeople(compass) {
 // Story authority `story` input (identity truth only; reference is OMITTED → layout provenance 'derived').
 function _rhStoryInput(people) {
   const heroName = (people.find((p) => p.role === 'hero') || null)?.name || null;
+  // ★ Batch 3B: hero-only requiredCast → reaction/other people fall into optionalCast (see REF_HERO_V2_PRINCIPAL_ROLES).
   const isPrincipal = (p) => REF_HERO_V2_PRINCIPAL_ROLES.includes(p.role);
   return {
     identities: people.map((p) => p.name),
@@ -1732,45 +1752,363 @@ function _rhStoryInput(people) {
   };
 }
 
-// Cast candidate from a pool record — genuine measured readiness only (strict true). null if no genuine
-// person label / sourceAssetId. candidateId doubles as the stable sourceAssetId (record.id is unique).
-function _rhCastCandidate(record) {
+// ★ 15 ก.ค. (Batch 2B) — consumer-side fail-closed validator ของ carrier candidateAuthority ที่มากับ
+//   buildImagesRouteResponse(caseId,'1') (สร้างโดย buildCandidateAuthoritySnapshotV1) — ผู้บริโภคตรวจซ้ำ
+//   แบบ literal เป๊ะทุกชั้น (scope/version/producer/proof/imageId/facts) ไม่เชื่อ presence/truthiness ·
+//   ผิดสัญญาจุดเดียว = null ทั้งก้อน (ไม่มี facts ให้ใคร) · ห้าม reconstruct facts จาก raw triage เด็ดขาด
+const _RH_AUTH_MAX_CANDIDATES = 2000; // สอดคล้อง MAX_ROWS ของ candidateFactAuthority
+const _RH_AUTH_MAX_DIM = 100000;      // สอดคล้อง MAX_DIMENSION ของ candidateFactAuthority
+// ★ P1-2 key caps ต่อพื้นผิว (key-flood + accessor guard ก่อนอ่านค่าใดๆ)
+const _RH_AUTH_KEYCAP_BODY = 32;      // route body: success/caseId/total/byPlatform/images/candidateAuthority
+const _RH_AUTH_KEYCAP_CARRIER = 16;   // carrier: available + universe 7 key
+const _RH_AUTH_KEYCAP_SUB = 8;        // storeProof/vettedProof/candidate row/verdicts/resolution
+const _RH_AUTH_KEYCAP_FACTS = 8;      // facts-v1 มี 7 key เป๊ะ
+const _RH_AUTH_KEYCAP_ROW = 256;      // image record จริง ~15-30 key (mirror KEY_CAP_ROW ของ authority)
+const _RH_SEARCH_STATS_CAP = 64;      // searchStats ต่อเคสจริง ≤ ~8 entries
+// ★ 2C P1-C: สัญญา candidate_facts_v1 ฉบับเต็ม (mirror candidateFactAuthority — key/enum/ช่วง canonical เดียวกันเป๊ะ)
+const _RH_FACTS_KEYS = new Set(['scope', 'version', 'producer', 'verdicts', 'resolution', 'faceBox', 'hash']);
+const _RH_VERDICT_KEYS = new Set(['relevant', 'clean', 'newsScene']);
+const _RH_RES_KEYS = new Set(['level', 'width', 'height']);
+const _RH_FACEBOX_KEYS = new Set(['x1', 'y1', 'x2', 'y2']);
+const _RH_HASH_KEYS = new Set(['value', 'algo', 'measuredFrom']);
+const _RH_HEX16_LOWER = /^[0-9a-f]{16}$/;
+const _RH_MEASURED_LEVELS = new Set(['full', 'thumb', 'unknown']);
+
+// ★ P1-2 descriptor-safe readers — ห้ามเรียก getter/proxy trap เด็ดขาด (accessor = present:false) · ไม่ throw
+const _rhOwnRead = (obj, key) => {
+  if (obj === null || (typeof obj !== 'object' && typeof obj !== 'function')) return { present: false, value: undefined };
+  let d; try { d = Object.getOwnPropertyDescriptor(obj, key); } catch { return { present: false, value: undefined }; }
+  if (!d || !('value' in d)) return { present: false, value: undefined };
+  return { present: true, value: d.value };
+};
+const _rhPlainObj = (v) => {
+  if (v === null || typeof v !== 'object') return false;
+  let p; try { p = Object.getPrototypeOf(v); } catch { return false; }
+  return p === Object.prototype || p === null;
+};
+// plain object + key ≤ cap + string key ล้วน + ทุก own prop เป็น data property (มี accessor ที่ไหน = ปฏิเสธทั้งก้อน)
+//   ★ 2C: allow (Set, optional) = allowlist key — key นอกลิสต์ = ปฏิเสธ (exact surface)
+function _rhGuardObj(obj, cap, allow) {
+  if (!_rhPlainObj(obj)) return false;
+  let ks; try { ks = Reflect.ownKeys(obj); } catch { return false; }
+  if (ks.length > cap) return false;
+  for (const k of ks) {
+    if (typeof k !== 'string') return false;
+    if (allow && !allow.has(k)) return false;
+  }
+  for (const k of ks) {
+    let d; try { d = Object.getOwnPropertyDescriptor(obj, k); } catch { return false; }
+    if (!d || !('value' in d)) return false;
+  }
+  return true;
+}
+// dense plain array อ่านผ่าน descriptor ล้วน (length + ทุก index) — hole/accessor/exotic/เกิน cap = null
+function _rhArrRead(arr, cap) {
+  let isArr; try { isArr = Array.isArray(arr); } catch { return null; }
+  if (!isArr) return null;
+  let proto; try { proto = Object.getPrototypeOf(arr); } catch { return null; }
+  if (proto !== Array.prototype) return null;
+  let lenD; try { lenD = Object.getOwnPropertyDescriptor(arr, 'length'); } catch { return null; }
+  if (!lenD || !('value' in lenD) || !Number.isSafeInteger(lenD.value) || lenD.value < 0 || lenD.value > cap) return null;
+  const out = [];
+  for (let i = 0; i < lenD.value; i++) {
+    let d; try { d = Object.getOwnPropertyDescriptor(arr, String(i)); } catch { return null; }
+    if (!d || !('value' in d)) return null; // hole/accessor = ปฏิเสธ
+    out.push(d.value);
+  }
+  return out;
+}
+
+// ★ 2C P1-E: ตรวจ "data-only ลึกทั้งกราฟ" ของ row ที่จะปล่อยเข้าพูล V2 — primitive/plain object/dense array
+//   ล้วนผ่าน descriptor เท่านั้น · accessor/exotic/proxy-trap/hole/function/เกิน budget ที่ชั้นไหนก็ตาม = false
+//   (กันโค้ดพูล legacy ปลายทางที่ dot-read ตรงๆ ไปเรียก getter ของ row ที่ validate ไม่ผ่าน)
+function _rhDeepDataOnly(v, state) {
+  if (v === null || typeof v !== 'object') return typeof v !== 'function';
+  if (--state.budget < 0) return false;
+  let isArr; try { isArr = Array.isArray(v); } catch { return false; }
+  if (isArr) {
+    let proto; try { proto = Object.getPrototypeOf(v); } catch { return false; }
+    if (proto !== Array.prototype) return false;
+    let lenD; try { lenD = Object.getOwnPropertyDescriptor(v, 'length'); } catch { return false; }
+    if (!lenD || !('value' in lenD) || !Number.isSafeInteger(lenD.value) || lenD.value < 0 || lenD.value > _RH_AUTH_MAX_CANDIDATES) return false;
+    let ks; try { ks = Reflect.ownKeys(v); } catch { return false; }
+    if (ks.length > lenD.value + 1) return false; // dense: index ครบ + length เท่านั้น (ห้าม key แถม)
+    for (let i = 0; i < lenD.value; i++) {
+      let d; try { d = Object.getOwnPropertyDescriptor(v, String(i)); } catch { return false; }
+      if (!d || !('value' in d)) return false;
+      if (!_rhDeepDataOnly(d.value, state)) return false;
+    }
+    return true;
+  }
+  if (!_rhPlainObj(v)) return false;
+  let ks; try { ks = Reflect.ownKeys(v); } catch { return false; }
+  if (ks.length > _RH_AUTH_KEYCAP_ROW) return false;
+  for (const k of ks) {
+    if (typeof k !== 'string') return false;
+    let d; try { d = Object.getOwnPropertyDescriptor(v, k); } catch { return false; }
+    if (!d || !('value' in d)) return false;
+    if (!_rhDeepDataOnly(d.value, state)) return false;
+  }
+  return true;
+}
+
+// ★ 15 ก.ค. (Batch 2B + P1-1/P1-2) — consumer-side fail-closed validator: ผูก carrier candidateAuthority
+//   เข้ากับ "ภาพชุดเดียวกันที่คืนมาจริง" + requested caseId แบบ exact ทุกชั้น (same-snapshot binding):
+//   • ทุกแถวภาพ: id เป็น string ไม่ว่าง unique + own literal caseId === requested caseId
+//   • storeProof.expectedCount === observedCount === images.length (นับตรงกับชุดที่คืนจริง)
+//   • ทุก imageId ใน carrier ต้องเป็นสมาชิกของชุด id ภาพที่คืนจริงเท่านั้น
+//   • facts เก็บเป็นสำเนา detached (กัน TOCTOU/getter หลัง validate) — ห้าม reconstruct จาก raw triage
+//   อ่านทุกอย่างผ่าน descriptor เท่านั้น · ผิดจุดเดียว = null ทั้งก้อน (ไม่มี facts/ไม่มี universe)
+function _rhValidateAuthorityCarrier(ca, images, caseId) {
+  try {
+    const cid = (typeof caseId === 'string' && caseId.trim().length > 0) ? caseId : null;
+    if (!cid) return null;
+    // ── returned images: dense bounded array · per-row own-data id/caseId ──
+    const rows = _rhArrRead(images, _RH_AUTH_MAX_CANDIDATES);
+    if (rows === null) return null;
+    const imageIds = new Set();
+    for (const row of rows) {
+      if (!_rhGuardObj(row, _RH_AUTH_KEYCAP_ROW)) return null;
+      const idR = _rhOwnRead(row, 'id');
+      const id = (idR.present && typeof idR.value === 'string' && idR.value.length > 0) ? idR.value : null;
+      if (!id || imageIds.has(id)) return null;
+      const rcR = _rhOwnRead(row, 'caseId');
+      if (!rcR.present || typeof rcR.value !== 'string' || rcR.value !== cid) return null;
+      imageIds.add(id);
+    }
+    // ── carrier + proofs ──
+    if (!_rhGuardObj(ca, _RH_AUTH_KEYCAP_CARRIER)) return null;
+    if (_rhOwnRead(ca, 'available').value !== true) return null;
+    if (_rhOwnRead(ca, 'universeComplete').value !== true) return null;
+    if (_rhOwnRead(ca, 'scope').value !== 'candidate_authority_snapshot_v1') return null;
+    if (_rhOwnRead(ca, 'version').value !== 1) return null;
+    if (_rhOwnRead(ca, 'producer').value !== 'CANDIDATE_AUTHORITY_SNAPSHOT_V1') return null;
+    const sp = _rhOwnRead(ca, 'storeProof').value;
+    const vp = _rhOwnRead(ca, 'vettedProof').value;
+    if (!_rhGuardObj(sp, _RH_AUTH_KEYCAP_SUB) || !_rhGuardObj(vp, _RH_AUTH_KEYCAP_SUB)) return null;
+    if (_rhOwnRead(sp, 'scope').value !== 'case_image_store_snapshot_v1') return null;
+    if (_rhOwnRead(sp, 'complete').value !== true || _rhOwnRead(sp, 'truncated').value !== false) return null;
+    const spExp = _rhOwnRead(sp, 'expectedCount').value;
+    const spObs = _rhOwnRead(sp, 'observedCount').value;
+    if (!Number.isInteger(spExp) || !Number.isInteger(spObs) || spExp !== spObs || spObs !== rows.length) return null;
+    if (_rhOwnRead(vp, 'scope').value !== 'case_image_store_full_vetted_v1') return null;
+    if (_rhOwnRead(vp, 'complete').value !== true || _rhOwnRead(vp, 'truncated').value !== false) return null;
+    if (_rhOwnRead(vp, 'population').value !== 'literal_relevant_true_v1') return null;
+    if (_rhOwnRead(vp, 'candidateFactsVersion').value !== 1) return null;
+    const cands = _rhArrRead(_rhOwnRead(ca, 'candidates').value, _RH_AUTH_MAX_CANDIDATES);
+    if (cands === null) return null;
+    const vpExp = _rhOwnRead(vp, 'expectedCount').value;
+    const vpObs = _rhOwnRead(vp, 'observedCount').value;
+    if (!Number.isInteger(vpExp) || vpExp !== vpObs || vpObs !== cands.length) return null;
+    // ── candidates: imageId ∈ ชุดภาพที่คืนจริง + facts-v1 เต็มสัญญา (P1-C) → detached copy ──
+    const factsById = new Map();
+    for (const c of cands) {
+      if (!_rhGuardObj(c, _RH_AUTH_KEYCAP_SUB)) return null;
+      const idR = _rhOwnRead(c, 'imageId');
+      const id = (idR.present && typeof idR.value === 'string' && idR.value.length > 0) ? idR.value : null;
+      if (!id || factsById.has(id)) return null;
+      if (!imageIds.has(id)) return null; // ★ P1-1: same-snapshot binding เป๊ะ
+      const det = _rhReadFactsDetached(_rhOwnRead(c, 'facts').value);
+      if (!det) return null; // facts บางส่วน/ปลอม/key เกิน-ขาด/accessor = ปฏิเสธทั้ง carrier
+      if (det.verdicts.relevant !== true) return null; // vetted population = literal relevant true เท่านั้น
+      factsById.set(id, det);
+    }
+    return { imageIds, factsById };
+  } catch { return null; }
+}
+
+// ★ 2C P1-C: validate stored candidate_facts_v1 "ทั้งใบ" ก่อนยอมรับ triaged/clean/highResolution —
+//   exact key allowlist ครบ 7 key (ขาด/เกิน/accessor = ปฏิเสธ) + marker exact + verdicts subset literal +
+//   resolution enum/ช่วง canonical + faceBox (null | 'unknown' | {x1,y1,x2,y2} in-bounds positive-area) +
+//   hash ('unknown' | {value 16-hex-lower, algo 'dhash_9x8_v1', measuredFrom enum}) — ช่วง/enum เดียวกับ
+//   candidateFactAuthority เป๊ะ · facts ปลอมที่มีแค่ marker+verdicts+resolution = ไม่ผ่าน ·
+//   ★ Batch 4B: คืน "สำเนา detached ของ canonical facts ทั้งใบ" — scope/version/producer exact + verdicts/resolution
+//   frozen + faceBox (null|'unknown'|frozen normalized box) + hash ('unknown'|frozen {value,algo,measuredFrom}) —
+//   ไม่มี raw reference/getter/shape ใหม่/การผ่อน schema (ไม่ export/ไม่ขยาย schema/ไม่ reconstruct)
+function _rhReadFactsDetached(f) {
+  if (!_rhGuardObj(f, _RH_AUTH_KEYCAP_FACTS, _RH_FACTS_KEYS)) return null;
+  for (const k of _RH_FACTS_KEYS) { if (!_rhOwnRead(f, k).present) return null; } // producer จริงตั้งครบ 7 key เสมอ
+  if (_rhOwnRead(f, 'scope').value !== 'candidate_facts_v1') return null;
+  if (_rhOwnRead(f, 'version').value !== 1) return null;
+  if (_rhOwnRead(f, 'producer').value !== 'LIBRARY_TRIAGE_CANDIDATE_FACTS_V1') return null;
+  const v = _rhOwnRead(f, 'verdicts').value;
+  if (!_rhGuardObj(v, _RH_AUTH_KEYCAP_SUB, _RH_VERDICT_KEYS)) return null;
+  const verdicts = {};
+  for (const k of ['relevant', 'clean', 'newsScene']) {
+    const kv = _rhOwnRead(v, k);
+    if (!kv.present) continue; // subset อนุญาต (unknown verdict = ไม่มี key)
+    if (kv.value !== true && kv.value !== false) return null;
+    verdicts[k] = kv.value;
+  }
+  const res = _rhOwnRead(f, 'resolution').value;
+  if (!_rhGuardObj(res, _RH_AUTH_KEYCAP_SUB, _RH_RES_KEYS)) return null;
+  const lvl = _rhOwnRead(res, 'level').value;
+  const rw = _rhOwnRead(res, 'width').value;
+  const rh = _rhOwnRead(res, 'height').value;
+  let resolution;
+  if (lvl === 'unknown') {
+    if (rw !== null || rh !== null) return null;
+    resolution = { level: 'unknown', width: null, height: null };
+  } else if (lvl === 'full' || lvl === 'thumb') {
+    if (!Number.isInteger(rw) || rw <= 0 || rw > _RH_AUTH_MAX_DIM) return null;
+    if (!Number.isInteger(rh) || rh <= 0 || rh > _RH_AUTH_MAX_DIM) return null;
+    resolution = { level: lvl, width: rw, height: rh };
+  } else return null;
+  const fb = _rhOwnRead(f, 'faceBox').value;
+  let faceBox; // null (ยืนยันไม่มีหน้า) | 'unknown' | detached frozen normalized box — สัญญาเดิมเป๊ะ ไม่มี shape ใหม่
+  if (fb === null) faceBox = null;
+  else if (fb === 'unknown') faceBox = 'unknown';
+  else {
+    if (!_rhGuardObj(fb, _RH_AUTH_KEYCAP_SUB, _RH_FACEBOX_KEYS)) return null;
+    const x1 = _rhOwnRead(fb, 'x1').value, y1 = _rhOwnRead(fb, 'y1').value;
+    const x2 = _rhOwnRead(fb, 'x2').value, y2 = _rhOwnRead(fb, 'y2').value;
+    const fin = (n) => typeof n === 'number' && Number.isFinite(n);
+    if (![x1, y1, x2, y2].every(fin)) return null;
+    if (x1 < 0 || y1 < 0 || x2 > 1 || y2 > 1) return null;
+    if (!(x2 > x1) || !(y2 > y1)) return null; // positive-area เท่านั้น
+    faceBox = Object.freeze({ x1, y1, x2, y2 }); // detached — ตัดขาดจาก object ต้นทาง
+  }
+  const h = _rhOwnRead(f, 'hash').value;
+  let hash; // 'unknown' | detached frozen {value, algo, measuredFrom}
+  if (h === 'unknown') hash = 'unknown';
+  else {
+    if (!_rhGuardObj(h, _RH_AUTH_KEYCAP_SUB, _RH_HASH_KEYS)) return null;
+    const hv = _rhOwnRead(h, 'value').value;
+    const ha = _rhOwnRead(h, 'algo').value;
+    const hm = _rhOwnRead(h, 'measuredFrom').value;
+    if (typeof hv !== 'string' || !_RH_HEX16_LOWER.test(hv)) return null;
+    if (ha !== 'dhash_9x8_v1') return null;
+    if (!_RH_MEASURED_LEVELS.has(hm)) return null;
+    hash = Object.freeze({ value: hv, algo: 'dhash_9x8_v1', measuredFrom: hm });
+  }
+  return Object.freeze({
+    scope: 'candidate_facts_v1',
+    version: 1,
+    producer: 'LIBRARY_TRIAGE_CANDIDATE_FACTS_V1',
+    verdicts: Object.freeze(verdicts),
+    resolution: Object.freeze(resolution),
+    faceBox,
+    hash,
+  });
+}
+
+// ★ 15 ก.ค. (Batch 2B + P1-2/P1-3) — "searched" evidence: เฉพาะ candidateId ที่ (1) อยู่ใน carrier
+//   searchShadowV2/gapSearchShadowV2 ของ dossier งานนี้ ที่ re-sanitize ผ่าน _sanitizeSearchShadowV2 และ
+//   (2) เป็นสมาชิกของ allowedIds = ชุด id จาก universe ที่ validate แล้ว (same-snapshot) เท่านั้น ·
+//   searchedPlatforms / platform string / addedAt / การเป็นสมาชิกคลัง = ไม่นับ · อ่าน searchStats/carrier
+//   ผ่าน descriptor ล้วน (ห้ามเรียก getter — ส่ง descriptor.value เข้า sanitizer เสมอ) · เก็บ metadata bounded
+//   ภายใน (version/provider/queryIndex/providerRank/แหล่ง carrier) — ไม่มี URL/query · พัง/trap = ไม่มีหลักฐาน
+function _rhSearchedIds(im, allowedIds, expectedCaseId) {
+  const meta = new Map(); // internal lineage เท่านั้น — ห้ามรั่วออก carrier/schema สาธารณะ
+  const allowed = allowedIds instanceof Set ? allowedIds : new Set();
+  // ★ 2C P1-D: ทุก metadata record ต้องพก caseId ที่ validate แล้ว — ไม่มี caseId ที่ผูกได้ = ไม่มีหลักฐานเลย
+  const cid = (typeof expectedCaseId === 'string' && expectedCaseId.trim().length > 0) ? expectedCaseId : null;
+  if (!cid) return { meta };
+  const take = (raw, src) => {
+    const c = _sanitizeSearchShadowV2(raw); // re-sanitize เป๊ะ — ไม่เชื่อ shape ที่ persist ไว้
+    if (!c) return;
+    for (const cand of c.candidates) {
+      if (!allowed.has(cand.candidateId)) continue; // ★ P1-3: เฉพาะ id ใน validated universe
+      if (!meta.has(cand.candidateId)) {
+        meta.set(cand.candidateId, { caseId: cid, v: c.version, provider: cand.provider, queryIndex: cand.queryIndex, providerRank: cand.providerRank, src });
+      }
+    }
+  };
+  try {
+    if (!_rhPlainObj(im)) return { meta };
+    const statsR = _rhOwnRead(im, 'searchStats');
+    const stats = statsR.present ? _rhArrRead(statsR.value, _RH_SEARCH_STATS_CAP) : null;
+    if (stats) {
+      for (const s of stats) {
+        // ★ 2C P1-D: entry ต้องเป็นพื้นผิว own-data bounded ก่อนรับ carrier — accessor/exotic = ไม่มีหลักฐานจาก entry นั้น
+        if (!_rhGuardObj(s, 16)) continue;
+        const sd = _rhOwnRead(s, 'searchShadowV2');
+        if (sd.present) take(sd.value, 'search');
+      }
+    }
+    const gd = _rhOwnRead(im, 'gapSearchShadowV2');
+    if (gd.present) take(gd.value, 'gapsearch');
+  } catch { /* หลักฐานอ่านไม่ได้ = ไม่มีหลักฐาน (fail-closed) */ }
+  return { meta };
+}
+
+// Cast candidate from a pool record — ★ 15 ก.ค. (Batch 2B): readiness มาจาก "สะพานหลักฐานจริง" เท่านั้น
+//   (validated authority facts + re-sanitized search shadow) — ไม่อ่าน 6 ฟิลด์ raw บน triage อีก (ไม่มี producer
+//   จริง และห้าม default-positive) · null if no genuine person label / sourceAssetId. candidateId doubles as
+//   the stable sourceAssetId (record.id is unique).
+//   • searched: มี "metadata record จริง" (per-candidate จาก shadow ∩ validated universe) และ caseId ใน record
+//     ต้องตรง expectedCaseId เป๊ะ (P1-3 + 2C P1-D) — ไม่ใช่ boolean/Set ลอยๆ
+//   • triaged: มี stored candidateFacts ที่ validate ครบสัญญา (พิสูจน์ว่าผ่าน library triage จริง)
+//   • clean: facts.verdicts.clean === true literal เท่านั้น
+//   • highResolution: facts.resolution level 'full' + จำนวนเต็มบวก + min(w,h) ≥ HERO_MIN_SHORT_SIDE (700 เดิม)
+//     — record.realWidth/realHeight/realShortSide/rehostQuality ไม่มีสิทธิ์สร้าง true
+//   • cropSafe: false คงที่ — เรียก buildCandidateCropReadiness แบบ exact ไม่ได้ในขอบเขตนี้ (ต้องมี realized
+//     geometry ที่ authenticate แล้ว + role pools + universe proof 'full_vetted_v1' ซึ่งเกิดหลังด่าน cast) — ห้าม bridge ฝืน
+//   • identityVerified: false คงที่ — ไม่มี identity-verifier authority ในระบบ (P0 boundary) · ห้าม derive จาก
+//     triage.person/faceCount/label/model ใดๆ (name ด้านล่างใช้จัดกลุ่ม manifest เท่านั้น ไม่ใช่ verification)
+//   หมายเหตุ: evidence.facts เป็น "สำเนา detached" ที่ validator สร้างเอง (frozen plain object) — อ่านตรงได้ ไม่มี trap
+function _rhCastCandidate(record, evidence) {
   const sourceAssetId = _rhNonBlank(record?.id != null ? String(record.id) : null);
   const name = _rhNonBlank(record?.triage?.person);
   if (!sourceAssetId || !name) return null;
-  const t = record.triage || {};
+  const f = (evidence && evidence.facts && typeof evidence.facts === 'object') ? evidence.facts : null;
+  const v = (f && f.verdicts && typeof f.verdicts === 'object') ? f.verdicts : null;
+  const res = (f && f.resolution && typeof f.resolution === 'object') ? f.resolution : null;
+  const sMeta = (evidence && evidence.searchedMeta && typeof evidence.searchedMeta === 'object') ? evidence.searchedMeta : null;
+  // ★ 2C P1-D: searched ต้องมี record จริง + caseId ใน record ตรง expectedCaseId เป๊ะ (nonblank ทั้งคู่)
+  const expectedCaseId = (evidence && typeof evidence.expectedCaseId === 'string' && evidence.expectedCaseId.trim().length > 0) ? evidence.expectedCaseId : null;
+  const searched = !!(sMeta && expectedCaseId
+    && typeof sMeta.caseId === 'string' && sMeta.caseId === expectedCaseId);
+  const highResolution = !!(res && res.level === 'full'
+    && Number.isInteger(res.width) && res.width > 0
+    && Number.isInteger(res.height) && res.height > 0
+    && Math.min(res.width, res.height) >= HERO_MIN_SHORT_SIDE);
   return {
     name,
     candidateId: sourceAssetId,
     sourceAssetId,
-    searched: _rhStrictBool(t.searched),
-    triaged: _rhStrictBool(t.triaged),
-    clean: _rhStrictBool(t.clean),
-    highResolution: _rhStrictBool(t.highResolution),
-    cropSafe: _rhStrictBool(t.cropSafe),
-    identityVerified: _rhStrictBool(t.identityVerified),
+    searched,
+    triaged: f !== null,
+    clean: v ? v.clean === true : false,
+    highResolution,
+    cropSafe: false,
+    identityVerified: false,
   };
 }
 
-// Hero measured candidate (13 required fields) — genuine measured evidence ONLY. null if ANY mandatory
-// measured field is genuinely absent (never defaults to a passing value).
-function _rhHeroCandidate(record, personId, heroSlotId, boundContractHash) {
-  const rid = _rhNonBlank(record?.id != null ? String(record.id) : null);
+// Hero measured candidate (13 required fields) — ★ 15 ก.ค. (Batch 4B QUARANTINE): บริโภคเฉพาะ "detached
+// validated facts" + binding args เท่านั้น — ห้ามอ่าน record.triage / record.realWidth/realHeight เด็ดขาด ·
+// ค่าที่ derive ได้อย่างแท้จริงจาก facts (deterministic · genuinely owned):
+//   • resolution: facts.resolution เฉพาะ level==='full' (thumb/unknown = ไม่มีหลักฐาน hero-grade)
+//   • faceShare = y2−y1 · headroom = y1 จาก facts.faceBox แบบกล่อง validated เท่านั้น (null/'unknown' = ไม่มี)
+// ส่วน identityConfidence / isGroupShot(faceCount) / visibleBodyRegion / occlusion / edgeCut / cleanliness-numeric
+// "ไม่มี producer ที่รับได้" ในระบบ (Batch 4A audit) — ห้าม invent/map จาก triage/label/caller ใดๆ ⇒ absent เสมอ
+// ในแบตช์นี้ และฟังก์ชันจึงคืน null เสมอ (fail-closed) จนกว่าจะมี authority ครบจริง · เก็บ derivation + เงื่อนไข
+// admission ไว้ชัดๆ ในที่เดียว เพื่อให้ regression พิสูจน์ได้ว่า "ค่าที่มีวันนี้ไม่พอ" สำหรับ admission ·
+// โครง return คงสัญญา 13 field เดิมไว้สำหรับเคสอนาคตที่ authority ใหม่ป้อนค่าที่ขาดครบ
+function _rhHeroCandidate(facts, personId, heroSlotId, boundContractHash, sourceAssetId) {
+  const rid = _rhNonBlank(sourceAssetId != null ? String(sourceAssetId) : null);
   if (!rid) return null;
-  const t = record?.triage || {};
-  const rw = _rhFiniteNum(record?.realWidth);
-  const rh = _rhFiniteNum(record?.realHeight);
-  if (!(rw > 0 && rh > 0)) return null;                        // resolution genuinely unknown
-  const faceCount = _rhFiniteNum(t.faceCount);
-  if (faceCount === undefined) return null;                    // isGroupShot source genuinely absent
-  const identityConfidence = _rhFiniteNum(t.identityConfidence);
-  const faceShare = _rhFiniteNum(t.faceShare);
-  const headroom = _rhFiniteNum(t.headroom);
-  const occlusion = _rhFiniteNum(t.occlusion);
-  const edgeCut = _rhFiniteNum(t.edgeCut);
-  const cleanliness = _rhFiniteNum(t.cleanliness);
-  const visibleBodyRegion = _rhNonBlank(t.visibleBodyRegion);
-  if ([identityConfidence, faceShare, headroom, occlusion, edgeCut, cleanliness].some((n) => n === undefined) || !visibleBodyRegion) return null;
+  const f = (facts && typeof facts === 'object') ? facts : null;
+  if (!f) return null; // ไม่มี validated facts = ไม่มีหลักฐาน (raw record ถูกกักกัน)
+  // ── derivable partials (genuine, deterministic) ──
+  const res = (f.resolution && f.resolution.level === 'full'
+    && Number.isInteger(f.resolution.width) && f.resolution.width > 0
+    && Number.isInteger(f.resolution.height) && f.resolution.height > 0)
+    ? { width: f.resolution.width, height: f.resolution.height } : null;
+  const fb = (f.faceBox && typeof f.faceBox === 'object') ? f.faceBox : null; // 'unknown'/null ⇒ ไม่มีกล่อง
+  const faceShare = fb ? (fb.y2 - fb.y1) : undefined;
+  const headroom = fb ? fb.y1 : undefined;
+  // ── fields with NO admissible producer (Batch 4B quarantine) — never derived, never defaulted ──
+  const identityConfidence = undefined; // ไม่มี identity authority (Batch 3 boundary)
+  const faceCount = undefined;          // isGroupShot source — ไม่มี authority
+  const visibleBodyRegion = null;       // ต้องมี body-region measurement จริง — ยังไม่มีในระบบ
+  const occlusion = undefined;
+  const edgeCut = undefined;
+  const cleanliness = undefined;        // numeric cleanliness ≠ facts.verdicts.clean (boolean) — ห้าม map
+  if (!res || faceShare === undefined || headroom === undefined
+    || identityConfidence === undefined || faceCount === undefined || !visibleBodyRegion
+    || occlusion === undefined || edgeCut === undefined || cleanliness === undefined) return null;
   return {
     personId,
     identityConfidence,
@@ -1780,7 +2118,7 @@ function _rhHeroCandidate(record, personId, heroSlotId, boundContractHash) {
     visibleBodyRegion,
     occlusion,
     edgeCut,
-    resolution: { width: rw, height: rh },
+    resolution: res,
     cleanliness,
     boundContractHash,
     sourceAssetId: rid,
@@ -1788,19 +2126,23 @@ function _rhHeroCandidate(record, personId, heroSlotId, boundContractHash) {
   };
 }
 
-// Global candidate (8 required fields) — genuine measured scores + sceneKey ONLY. null if any absent.
-// candidateId/sourceAssetId come from the VERIFIED cast-manifest tuple (Fix #1), not re-derived from records.
-function _rhGlobalCandidate(record, personId, eligibleSlotIds, candidateId, sourceAssetId) {
+// Global candidate (8 required fields) — ★ 15 ก.ค. (Batch 4B QUARANTINE): ห้ามอ่าน record.triage เด็ดขาด ·
+// semanticScore/qualityScore/slotFitScore/semantic sceneKey "ไม่มี producer ที่รับได้" ในระบบ (Batch 4A audit) —
+// ห้าม derive จาก relevant/newsScene/quality/note/pHash/slotSolver default และห้าม redefine sceneKey ⇒ ค่าเหล่านี้
+// absent เสมอในแบตช์นี้ และฟังก์ชันคืน null เสมอ (fail-closed) จนกว่าจะมี authority จริง · โครง return คงสัญญา
+// 8 field เดิมไว้สำหรับเคสอนาคต · candidateId/sourceAssetId come from the VERIFIED cast-manifest tuple (Fix #1).
+function _rhGlobalCandidate(facts, personId, eligibleSlotIds, candidateId, sourceAssetId) {
   const cid = _rhNonBlank(candidateId), said = _rhNonBlank(sourceAssetId);
   if (!cid || !said) return null;
   if (!Array.isArray(eligibleSlotIds) || !eligibleSlotIds.length) return null;
-  const t = record?.triage || {};
-  const semanticScore = _rhFiniteInt(t.semanticScore);
-  const qualityScore = _rhFiniteInt(t.qualityScore);
-  const slotFitScore = _rhFiniteInt(t.slotFitScore);
-  const sceneKey = _rhNonBlank(t.sceneKey);
+  const f = (facts && typeof facts === 'object') ? facts : null;
+  if (!f) return null; // ไม่มี validated facts = ไม่มีหลักฐาน (raw record ถูกกักกัน)
+  // ── fields with NO admissible producer (Batch 4B quarantine) — never derived, never defaulted ──
+  const semanticScore = null;
+  const qualityScore = null;
+  const slotFitScore = null;
+  const sceneKey = null;
   if (semanticScore === null || qualityScore === null || slotFitScore === null || !sceneKey) return null;
-  if (semanticScore < 0 || qualityScore < 0 || slotFitScore < 0) return null;
   return {
     candidateId: cid,
     sourceAssetId: said,
@@ -1844,7 +2186,7 @@ function _rhAssignmentHashOf(output, createHash) {
 // Orchestrator: build/validate every authority in order; ANY upstream gate HOLD ⇒ typed fixed-code marker
 // (no assignments / no partial strict payload). Deterministic + permutation-invariant (foundations
 // canonicalize internally). Never throws — top-level try/catch fails closed to REF_HERO_V2_INTERNAL.
-async function _runRefHeroV2({ compass, semContract, canonHeroId, semAuthorityHash, refDNA, refId, gatedPool, deps }) {
+async function _runRefHeroV2({ compass, semContract, canonHeroId, semAuthorityHash, refDNA, refId, gatedPool, authorityEvidence, deps }) {
   try {
     // ── structural slots (REF = STRUCTURE ONLY: id / order / role / shape) ──
     const cSlots = Array.isArray(semContract?.slots) ? semContract.slots : [];
@@ -1886,10 +2228,26 @@ async function _runRefHeroV2({ compass, semContract, canonHeroId, semAuthorityHa
     for (const rec of (Array.isArray(gatedPool) ? gatedPool : [])) { const id = _rhNonBlank(rec?.id != null ? String(rec.id) : null); if (id && !recById.has(id)) recById.set(id, rec); }
     if (!recById.size) return _rhHold('REF_HERO_V2_EMPTY_UNIVERSE');
 
-    // ── Cast manifest (current-news only; NO reference param). requiredCast = principals. ──
+    // ── Cast manifest (current-news only; NO reference param). ★ Batch 3B: requiredCast = hero-only principals;
+    //   mainCharacters still carry their genuine roles so castManifest applies its OWN authority (explicit hero
+    //   role → mustRepresent; lone single-source reaction → optional). No analyze/article/reference is fabricated. ──
     const principalNames = people.filter((p) => REF_HERO_V2_PRINCIPAL_ROLES.includes(p.role)).map((p) => p.name);
+    // ★ 15 ก.ค. (Batch 2B + P1-3): readiness ต่อใบมาจากสะพานหลักฐานจริงเท่านั้น — authority facts ผูกด้วย
+    //   imageId===record id (map key เดียวกับ recById) + searched จาก "metadata record จริง" ต่อใบ
+    //   (shadow ∩ validated universe — ไม่ใช่ boolean Set ลอยๆ) · ไม่มีหลักฐาน = false ทุกช่อง (fail-closed)
+    const _rhEvFacts = authorityEvidence?.factsById instanceof Map ? authorityEvidence.factsById : null;
+    const _rhEvSearched = authorityEvidence?.searchedMeta instanceof Map ? authorityEvidence.searchedMeta : null;
+    // ★ 2C P1-D: expectedCaseId เดินทางคู่หลักฐานเสมอ — record ที่ caseId ไม่ตรง = searched ไม่มีวัน true
+    const _rhEvCaseId = (typeof authorityEvidence?.caseId === 'string' && authorityEvidence.caseId.trim().length > 0) ? authorityEvidence.caseId : null;
     const castCandidates = [];
-    for (const rec of recById.values()) { const cc = _rhCastCandidate(rec); if (cc) castCandidates.push(cc); }
+    for (const [rid, rec] of recById) {
+      const cc = _rhCastCandidate(rec, {
+        facts: _rhEvFacts ? (_rhEvFacts.get(rid) || null) : null,
+        searchedMeta: _rhEvSearched ? (_rhEvSearched.get(rid) || null) : null,
+        expectedCaseId: _rhEvCaseId,
+      });
+      if (cc) castCandidates.push(cc);
+    }
     let manifest;
     try {
       manifest = castApi.buildCastManifest({
@@ -2006,16 +2364,18 @@ async function _runRefHeroV2({ compass, semContract, canonHeroId, semAuthorityHa
     const realizedTemplate = { templateId: _templateId, canvasW: _canvasW, canvasH: _canvasH, feather: _feather, slots: _authSlots };
 
     // ★ AC-0107 P1 (STRICT V2 PRE-CARRIER crop-safe HERO ELIGIBILITY — additive, fail-closed, a NECESSARY FILTER not the
-    //   safety proof). A hero-person asset is hero-eligible ONLY if its FACE-AWARE crop for the CANONICAL SIGNED hero
-    //   slot is ≤1.2× (else the renderer over-stretches it — the AC-0107 incident: hero 2.69× → hard QC after compose).
-    //   The hero-slot geometry is the EXACT SIGNED slot: composerBySlotId.get(heroSlotId) → _authSlots (the same map +
-    //   snapshot signed below), never an id-name/largest-area heuristic and never a second dnaToTemplateSpec call. The
-    //   estimator (heroCropGeometry) runs on the candidate's GENUINE normalized raw faceBox + that slot's W/H + real
-    //   source dims; missing helper/geometry/faceBox/dims OR a renderer SHRINK-transform risk (watermark/caption dodge;
-    //   clean!==true) ⇒ NOT crop-safe (fail-closed). Crop-UNSAFE hero candidates get NO hero eligibility ⇒ the solver
-    //   signs a crop-SAFE hero; NONE safe ⇒ REF_HERO_V2_HERO_NO_APPROVED_CANDIDATE. The AUTHORITATIVE ≤1.2× proof is the
-    //   runtime-bound check in composeAndVerify; the COMPLETE signed hero identity+geometry is PINNED after the spec is
-    //   built (REF_HERO_V2_HERO_GEOMETRY_DRIFT).
+    //   safety proof · ★ Batch 4B QUARANTINE: evidence = detached validated facts เท่านั้น). A hero-person asset is
+    //   hero-eligible ONLY if its FACE-AWARE crop for the CANONICAL SIGNED hero slot is ≤1.2× (else the renderer
+    //   over-stretches it — the AC-0107 incident: hero 2.69× → hard QC after compose). The hero-slot geometry is the
+    //   EXACT SIGNED slot: composerBySlotId.get(heroSlotId) → _authSlots (the same map + snapshot signed below), never
+    //   an id-name/largest-area heuristic and never a second dnaToTemplateSpec call. The estimator (heroCropGeometry —
+    //   independent readiness, NOT renderer parity) runs on the candidate's VALIDATED facts.faceBox + that slot's W/H +
+    //   facts.resolution (decoded FULL provenance) — raw record/triage/watermark/largeText/hasText are quarantined;
+    //   shrink-transform risk = facts.verdicts.clean !== true literal เท่านั้น · missing helper/geometry/facts/box/dims
+    //   ⇒ NOT crop-safe (fail-closed). ศูนย์ hero candidate ที่มี metric object ครบ ⇒ REF_HERO_V2_HERO_METRICS_UNAVAILABLE
+    //   (fixed) · REF_HERO_V2_HERO_NO_APPROVED_CANDIDATE สงวนไว้เคสอนาคต (มีใบครบ ≥1 แต่ evaluator ไม่รับสักใบ). The
+    //   AUTHORITATIVE ≤1.2× proof is the runtime-bound check in composeAndVerify; the COMPLETE signed hero
+    //   identity+geometry is PINNED after the spec is built (REF_HERO_V2_HERO_GEOMETRY_DRIFT).
     const _heroComposerId = _rhNonBlank(composerBySlotId.get(heroSlotId));
     const _heroSlotBound = _heroComposerId ? (_authSlots.find((s) => s.id === _heroComposerId) || null) : null;
     if (!_heroSlotBound) return _rhHold('REF_HERO_V2_HERO_SLOT_UNMAPPED');
@@ -2023,52 +2383,54 @@ async function _runRefHeroV2({ compass, semContract, canonHeroId, semAuthorityHa
     const _heroSlotHpx = _rhFiniteInt(_heroSlotBound.h);
     let _heroCropUp = null;
     try { const _hg = await import('@/lib/heroCropGeometry'); _heroCropUp = _hg.heroCropUpscale; } catch { _heroCropUp = null; }
-    const _rhNormFace = (fb) => {
-      if (!fb || typeof fb !== 'object') return null;
-      let x1; let y1; let x2; let y2;
-      if ([fb.x1, fb.y1, fb.x2, fb.y2].every((v) => typeof v === 'number' && Number.isFinite(v))) { x1 = fb.x1; y1 = fb.y1; x2 = fb.x2; y2 = fb.y2; }
-      else { const x = Number(fb.x); const y = Number(fb.y); const w = Number(fb.w ?? fb.width); const h = Number(fb.h ?? fb.height); if (![x, y, w, h].every((v) => Number.isFinite(v))) return null; x1 = x; y1 = y; x2 = x + w; y2 = y + h; }
-      if (!(x2 > x1 && y2 > y1 && x1 >= 0 && y1 >= 0 && x2 <= 1.0001 && y2 <= 1.0001)) return null;
-      return { x1, y1, x2: Math.min(1, x2), y2: Math.min(1, y2) };
-    };
-    const _rhHeroCropSafe = (rec) => {
+    const _rhHeroCropSafe = (facts) => {
       if (typeof _heroCropUp !== 'function' || !(_heroSlotWpx > 0 && _heroSlotHpx > 0)) return false; // helper/geometry missing ⇒ fail-closed
-      const t = rec?.triage || {};
-      const face = _rhNormFace(t.faceBox);
-      const rw = _rhFiniteNum(rec?.realWidth); const rh = _rhFiniteNum(rec?.realHeight);
-      if (!face || !(rw > 0) || !(rh > 0)) return false; // no genuine raw faceBox / real dims ⇒ fail-closed (never fabricate)
-      const shrinkRisk = t.clean !== true || t.watermark === true || t.largeText === true || t.hasText === true; // dodge SHRINK risk
-      const up = _heroCropUp({ faceBox: face, imgW: rw, imgH: rh, slotW: _heroSlotWpx, slotH: _heroSlotHpx, hasShrinkTransformRisk: shrinkRisk });
-      return typeof up === 'number' && up <= 1.2 + 1e-9; // imageQualityConfig HERO_STRETCH_MAX
+      const f = (facts && typeof facts === 'object') ? facts : null;
+      if (!f) return false; // ไม่มี detached validated facts = ไม่มีหลักฐาน (raw record/triage ถูกกักกัน — Batch 4B)
+      const face = (f.faceBox && typeof f.faceBox === 'object') ? f.faceBox : null; // validated normalized box เท่านั้น (null/'unknown' ⇒ ไม่มี)
+      const res = (f.resolution && f.resolution.level === 'full'
+        && Number.isInteger(f.resolution.width) && f.resolution.width > 0
+        && Number.isInteger(f.resolution.height) && f.resolution.height > 0) ? f.resolution : null; // decoded FULL provenance เท่านั้น
+      if (!face || !res) return false; // unknown/missing facts ⇒ false (never fabricate)
+      const shrinkRisk = f.verdicts.clean !== true; // literal facts verdict เท่านั้น — raw watermark/largeText/hasText ถูกกักกัน
+      const up = _heroCropUp({ faceBox: face, imgW: res.width, imgH: res.height, slotW: _heroSlotWpx, slotH: _heroSlotHpx, hasShrinkTransformRisk: shrinkRisk });
+      return typeof up === 'number' && up <= 1.2 + 1e-9; // imageQualityConfig HERO_STRETCH_MAX (independent readiness)
     };
 
-    // ── Hero contracts: ONLY over eligible hero-person assets — build (asset-bound) + evaluate genuine evidence ──
+    // ── Hero contracts: ONLY over eligible hero-person assets — ★ Batch 4B: evidence ต่อใบ = detached validated
+    //   facts จาก authorityEvidence.factsById (ผูก sourceAssetId) เท่านั้น · นับใบที่มี metric object ครบจริง ──
     const heroContractHashByCid = new Map();
+    let _heroMetricComplete = 0; // จำนวน hero candidate ที่มี authoritative metric object ครบ (ยังเป็น 0 เสมอ — ไม่มี producer)
     for (const t of eligibleTuples) {
       if (t.personId !== heroPersonId) continue;
-      const rec = recById.get(t.sourceAssetId);
-      if (!_rhHeroCropSafe(rec)) continue; // ★ AC-0107: crop-unsafe hero candidate ⇒ not eligible as hero (solver signs a safe one)
+      const _facts = _rhEvFacts ? (_rhEvFacts.get(t.sourceAssetId) || null) : null;
+      if (!_rhHeroCropSafe(_facts)) continue; // ★ AC-0107: crop-unsafe hero candidate ⇒ not eligible as hero (solver signs a safe one)
       const contract = heroApi.buildHeroShotContract({ sourceAssetId: t.sourceAssetId, heroSlotId, story: { personId: heroPersonId } });
       const contractHash = _rhNonBlank(contract?.contractHash);
       if (!contract || !contractHash) continue;
-      const cand = _rhHeroCandidate(rec, heroPersonId, heroSlotId, contractHash);
+      const cand = _rhHeroCandidate(_facts, heroPersonId, heroSlotId, contractHash, t.sourceAssetId);
       if (!cand) continue;
+      _heroMetricComplete++;
       const verdict = heroApi.evaluateHeroShotCandidate(contract, cand, { expectedContractHash: contractHash });
       if (verdict && verdict.accepted === true) heroContractHashByCid.set(t.candidateId, contractHash);
     }
+    // ★ Batch 4B: ศูนย์ใบที่ metric ครบ = หลักฐาน hero ไม่มีในระบบ (ไม่ใช่ "ประเมินแล้วไม่ผ่าน") — fixed HOLD แยกรหัส
+    if (!_heroMetricComplete) return _rhHold('REF_HERO_V2_HERO_METRICS_UNAVAILABLE');
     if (!heroContractHashByCid.size) return _rhHold('REF_HERO_V2_HERO_NO_APPROVED_CANDIDATE');
 
     // ── Global candidates from the eligible set with genuine per-slot (role) eligibility (Fix #1/#3) ──
+    //   ★ Batch 4B: evidence ต่อใบ = detached validated facts เท่านั้น (raw record ถูกกักกัน) · ศูนย์ใบที่ metric
+    //   ครบ ⇒ REF_HERO_V2_GLOBAL_METRICS_UNAVAILABLE (fixed) แทนการยอมรับค่า legacy — ห้ามอ่อนด่านใดๆ
     let globalCandidates = [];
     for (const t of eligibleTuples) {
-      const rec = recById.get(t.sourceAssetId);
+      const _facts = _rhEvFacts ? (_rhEvFacts.get(t.sourceAssetId) || null) : null;
       const roleEligible = cSlots.map((s) => s.id).filter((id) => t.roles.includes(slotCastRole.get(id)));
       const finalEligible = roleEligible.filter((id) => id !== heroSlotId || (t.personId === heroPersonId && heroContractHashByCid.has(t.candidateId)));
       if (!finalEligible.length) continue;
-      const gc = _rhGlobalCandidate(rec, t.personId, finalEligible, t.candidateId, t.sourceAssetId);
+      const gc = _rhGlobalCandidate(_facts, t.personId, finalEligible, t.candidateId, t.sourceAssetId);
       if (gc) globalCandidates.push(gc);
     }
-    if (!globalCandidates.length) return _rhHold('REF_HERO_V2_NO_GLOBAL_CANDIDATES');
+    if (!globalCandidates.length) return _rhHold('REF_HERO_V2_GLOBAL_METRICS_UNAVAILABLE');
     // deterministic TOTAL order (Fix #5): score desc, candidateId code-unit asc tie-break — total & input-order-independent.
     const _byScoreId = (a, b) => (b.semanticScore - a.semanticScore) || (b.qualityScore - a.qualityScore) || (b.slotFitScore - a.slotFitScore) || (a.candidateId < b.candidateId ? -1 : a.candidateId > b.candidateId ? 1 : 0);
     globalCandidates.sort(_byScoreId);
@@ -2252,7 +2614,61 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   //   the happy-path return is skipped entirely). See the _runRefHeroV2 producer block above s6_slots.
   const _refHeroV2On = process.env.MEGA_REF_HERO_V2 === '1';
   const im = job.dossier.images || {};
-  const r = await _jf(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
+  // ★ 15 ก.ค. (Batch 2B + P1 + 2C): V2 ON อ่าน "snapshot เดียว" ผ่าน authority path in-process
+  //   (buildImagesRouteResponse caseId,'1') — pool (body.images) และ candidateAuthority มาจาก rows ชุดเดียวกัน
+  //   ห้ามอ่าน legacy ซ้ำ/ห้าม join คนละ snapshot · ห้าม self-HTTP แบบมี query (seam ของ cover-ref-test ปฏิเสธ
+  //   query) · DI seam: _deps.readImagesAuthority (เทสฉีดได้ — ต้องคืน { status, body } shape เดียวกับของจริง) ·
+  //   2C P1-B: caseId ต้องเป็น own literal string ไม่ว่างเท่านั้น (ไม่ coerce เลข) · wrapper ต้องเป็น plain own-data
+  //   object พื้นผิว exact {status, body} ก่อนอ่านค่าใดๆ · body.caseId ต้อง === requested caseId แบบ literal ·
+  //   2C P1-E: แยกด่าน "ความปลอดภัยของ rows" ออกจาก "ความถูกต้องของ carrier" — rows ต้อง data-only ลึกทั้งกราฟ
+  //   ก่อนปล่อยเข้าพูล (กัน getter โดน dot-read ปลายทาง) · rows ปลอดภัยแต่ carrier ไม่ผ่าน = evidence ว่าง →
+  //   ไหลไปชน HOLD เดิม REF_HERO_V2_INSUFFICIENT_CAST_ASSETS (ไม่มี fallback/ไม่เปลี่ยน root hold) ·
+  //   V2 OFF = เส้น _jf legacy เดิม (พฤติกรรมเดิมทุกอย่าง)
+  let r;
+  let _rhAuthority = null; // validated { imageIds, factsById } · null = สัญญาไม่ครบ (ไม่มี universe/ไม่มี facts)
+  let _rhCaseIdReq = null; // requested caseId ที่ผูกกับ snapshot (ใช้ซ้ำตอนสร้าง evidence)
+  if (_refHeroV2On) {
+    const _cidR = _rhOwnRead(im, 'caseId');
+    _rhCaseIdReq = (_cidR.present && typeof _cidR.value === 'string' && _cidR.value.trim().length > 0) ? _cidR.value : null;
+    const _readAuth = _deps?.readImagesAuthority
+      || (async (cid) => { const { buildImagesRouteResponse } = await import('@/lib/imageStore'); return buildImagesRouteResponse(cid, '1'); });
+    let _auth = null;
+    if (_rhCaseIdReq) { try { _auth = await _readAuth(_rhCaseIdReq); } catch { _auth = null; } }
+    // ★ 2C P1-B: wrapper ต้องเป็น plain own-data object ที่มี "เฉพาะ" status+body (exact surface) ก่อนอ่าน
+    const _authOk = _rhGuardObj(_auth, 2)
+      && _rhOwnRead(_auth, 'status').present
+      && _rhOwnRead(_auth, 'body').present;
+    const _bR = _authOk ? _rhOwnRead(_auth, 'body') : { present: false, value: undefined };
+    const _b = (_bR.present && _rhGuardObj(_bR.value, _RH_AUTH_KEYCAP_BODY)) ? _bR.value : null;
+    const _imagesVal = _b ? _rhOwnRead(_b, 'images').value : null;
+    // ★ 2C P1-E: ด่านความปลอดภัย rows แยกจาก carrier — dense array + ทุก row data-only ลึกทั้งกราฟ
+    let _rowsSafe = null;
+    if (Array.isArray(_imagesVal)) {
+      const _cand = _rhArrRead(_imagesVal, _RH_AUTH_MAX_CANDIDATES);
+      if (_cand !== null) {
+        // try/catch ครอบทั้งสแกน — nesting ลึกผิดปกติ (RangeError) หรือ throw ใดๆ = rows ไม่ปลอดภัย
+        try {
+          const _st = { budget: 200000 };
+          let _ok = true;
+          for (const _row of _cand) { if (!_rhDeepDataOnly(_row, _st)) { _ok = false; break; } }
+          if (_ok) _rowsSafe = _cand;
+        } catch { _rowsSafe = null; }
+      }
+    }
+    if (!_rhCaseIdReq
+      || !_authOk
+      || _rhOwnRead(_auth, 'status').value !== 200
+      || !_b
+      || _rhOwnRead(_b, 'success').value !== true
+      || _rhOwnRead(_b, 'caseId').value !== _rhCaseIdReq
+      || _rowsSafe === null) {
+      return { status: 'failed', nextAction: 'retry', summary: 'อ่านคลังรูปไม่ได้ (authority in-process)' };
+    }
+    r = { success: true, images: _rowsSafe };
+    _rhAuthority = _rhValidateAuthorityCarrier(_rhOwnRead(_b, 'candidateAuthority').value, _rowsSafe, _rhCaseIdReq);
+  } else {
+    r = await _jf(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
+  }
   if (!r.success) return { status: 'failed', nextAction: 'retry', summary: 'อ่านคลังรูปไม่ได้: ' + (r.error || r.httpStatus) };
 
   const rawPool = (r.images || []).filter((x) => x.triage && x.triage.relevant !== false);
@@ -2807,8 +3223,19 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   //   this block is skipped entirely (byte-identical legacy — the `let` below stays null).
   let _refHeroV2Patch = null;
   if (_refHeroV2On) {
+    // ★ 15 ก.ค. (Batch 2B + P1-3 + 2C P1-D): สะพานหลักฐาน bounded — facts จาก carrier ที่ validate แล้ว
+    //   (snapshot เดียวกับ pool) + searched metadata ต่อใบจาก shadow carrier ∩ validated universe (re-sanitize +
+    //   descriptor-only) ผูก caseId ที่ validate แล้วทุก record · authority ไม่ผ่าน = universe ว่าง → searched
+    //   ไม่มีทาง true · log เฉพาะตัวเลข (ไม่มี URL/query/id ดิบ)
+    const _rhSearchedEv = _rhSearchedIds(im, _rhAuthority ? _rhAuthority.imageIds : new Set(), _rhCaseIdReq);
+    const _rhAuthorityEvidence = {
+      caseId: _rhCaseIdReq,
+      factsById: _rhAuthority ? _rhAuthority.factsById : new Map(),
+      searchedMeta: _rhSearchedEv.meta,
+    };
+    console.log(`[MEGA S6] 🔐 V2 evidence bridge: authority=${_rhAuthority ? 'ok' : 'unavailable'} · facts ${_rhAuthorityEvidence.factsById.size} ใบ · searched(shadow∩universe) ${_rhAuthorityEvidence.searchedMeta.size} id`);
     _refHeroV2Patch = semContract
-      ? await _runRefHeroV2({ compass: job.dossier.compass, semContract, canonHeroId: _canonHeroId, semAuthorityHash: _semAuthorityHash, refDNA: _refDNA, refId: job.dossier.refMatch?.refId || job.dossier.refMatch?.dnaHash || null, gatedPool, deps: _deps })
+      ? await _runRefHeroV2({ compass: job.dossier.compass, semContract, canonHeroId: _canonHeroId, semAuthorityHash: _semAuthorityHash, refDNA: _refDNA, refId: job.dossier.refMatch?.refId || job.dossier.refMatch?.dnaHash || null, gatedPool, authorityEvidence: _rhAuthorityEvidence, deps: _deps })
       : _rhHold('REF_HERO_V2_NO_STRUCTURAL_SLOTS');
     if (_refHeroV2Patch.ok !== true) {
       return { status: 'waiting', nextAction: 'wait', quality: 'red', summary: `🔐⏸️ ref-hero-v2: ${_refHeroV2Patch.hold} — พักงานก่อนเลือกภาพ (S6 ยังไม่เริ่ม · flag ON, fail-closed)`, dossierPatch: { pickImages: { refHeroV2: _refHeroV2Patch } } };

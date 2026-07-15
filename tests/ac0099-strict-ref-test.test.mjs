@@ -302,13 +302,12 @@ await E('E1 OFF byte parity (unset vs explicit OFF)', async () => {
 });
 
 // ============================================================ E2
-await E('E2 typed 422 + archive0 (S7 not-done / missing capture / consumer throw / compose fail / QC fail)', async () => {
+await E('E2 typed 422 + archive0 (S7 not-done / missing capture / consumer throw / compose fail)', async () => {
   const cases = [
     { s7: async () => ({ status: 'waiting', nextAction: 'wait', summary: 'strict_render_not_armed' }) },
     { s7: async () => ({ status: 'done', nextAction: 'continue', summary: 'no queue call' }) }, // missing capture
     { compose: async () => { throw new Error('consumer boom'); } },
     { compose: async () => ({ success: false, error: 'compose fail' }) },
-    { compose: async () => ({ ...COVER_OK, qcFlags: ['person_cut:slot2'] }) }, // QC fail (real evaluateCoverQc)
   ];
   for (const [i, c] of cases.entries()) {
     const { res, counters } = await runRoute(INPUT, { ...c });
@@ -319,6 +318,43 @@ await E('E2 typed 422 + archive0 (S7 not-done / missing capture / consumer throw
 });
 
 // ============================================================ E3 + E6 (real s6→s7, strict armed)
+await E('E2 legacy carrier + QC fail => preview advisory 200 with real output and zero persist/archive', async () => {
+  const { res, counters } = await runRoute(INPUT, { compose: async () => ({ ...COVER_OK, qcFlags: ['blank_image:x'] }) });
+  assert.strictEqual(res.status, 200, `legacy QC-fail status exact 200 (got ${res.status})`);
+  assert.strictEqual(res.body?.success, true, 'legacy QC-fail body.success exact true');
+  assert.match(res.body?.base64 || '', /^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/]+={0,2}$/i, 'legacy QC-fail returns real base64 image data');
+  assert.ok(Buffer.from(res.body.base64.split(',')[1], 'base64').length > 0, 'legacy QC-fail base64 decodes to nonempty bytes');
+  assert.strictEqual(res.body?.effectiveMode, 'preview_advisory', `legacy QC-fail effectiveMode exact preview_advisory (got ${j(res.body?.effectiveMode)})`);
+  assert.strictEqual(res.body?.renderMode, 'legacy', `legacy QC-fail renderMode exact legacy (got ${j(res.body?.renderMode)})`);
+  assert.strictEqual(res.body?.qcVerdict?.pass, false, 'legacy QC-fail qcVerdict.pass exact false');
+  assert.strictEqual(res.body?.productionQcPass, false, 'legacy QC-fail productionQcPass exact false');
+  assert.strictEqual(res.body?.outputId, `REFTEST-${FIXED_TS.toString(36)}`, 'legacy QC-fail outputId is the truthful route job id');
+  assert.strictEqual(counters.persistCalls, 0, 'legacy QC-fail persist exactly 0');
+  assert.strictEqual(counters.archiveCalls, 0, 'legacy QC-fail archive exactly 0');
+
+  const pageSource = fs.readFileSync(new URL('../src/app/cover-ref-test/page.js', import.meta.url), 'utf8');
+  const formatterStart = pageSource.indexOf('function formatClientError(value) {');
+  const formatterEnd = pageSource.indexOf('export default function CoverRefTestPage', formatterStart);
+  assert.ok(formatterStart >= 0 && formatterEnd > formatterStart && formatterEnd - formatterStart <= 1200, 'actual page formatter is present within the bounded source window');
+  const formatterSource = pageSource.slice(formatterStart, formatterEnd);
+  assert.match(formatterSource, /if \(value && typeof value === 'object'\)/, 'formatter handles object values');
+  assert.match(formatterSource, /typeof value\.message === 'string' && value\.message/, 'formatter reads object.message');
+  assert.match(formatterSource, /typeof value\.error === 'string' && value\.error/, 'formatter reads object.error');
+  assert.ok(formatterSource.indexOf("if (value && typeof value === 'object')") < formatterSource.indexOf('return String(value).slice'), 'object branch precedes primitive string fallback');
+  assert.doesNotMatch(formatterSource, /\[object Object\]/, 'formatter does not expose [object Object]');
+  const formatterFunctionSource = formatterSource.match(/function formatClientError\(value\) \{[\s\S]{0,1000}?\n\}/)?.[0];
+  assert.ok(formatterFunctionSource, 'formatter function extraction is bounded');
+  const formatClientError = new Function(`${formatterFunctionSource}; return formatClientError;`)();
+  const formatted = formatClientError({ message: 'provider object failure '.repeat(100) });
+  assert.strictEqual(typeof formatted, 'string', 'object-valued client error formats to text');
+  assert.ok(formatted.length > 0 && formatted.length <= 500, `formatted text is nonempty and bounded (length=${formatted.length})`);
+  assert.ok(formatted.includes('provider object failure'), 'formatted object error remains readable');
+  assert.strictEqual(formatted.includes('[object Object]'), false, 'formatted object error never exposes [object Object]');
+  const errorPathStart = pageSource.indexOf('if (!res.ok || !j.success) {');
+  assert.ok(errorPathStart >= 0, 'actual page response error path exists');
+  assert.match(pageSource.slice(errorPathStart, errorPathStart + 1000), /formatClientError\(j\.error\)/, 'response error path uses the formatter');
+});
+
 let STRICT_RUN_1 = null, STRICT_RUN_2 = null;
 await E('E3 raw queue body byte-identical across 2 identical fixed-time strict runs', async () => {
   STRICT_RUN_1 = await runPipeline({ brainAnswer: ANSWER_GOOD, env: STRICT_ON });
@@ -613,7 +649,7 @@ await E('E13 hero_unverified_kept + hero_gate_error ⇒ QC manual_review fail �
     const v = evaluateCoverQc({ qcFlags: [flag] });
     assert.strictEqual(v.pass, false, `${flag} pass=false`);
     assert.strictEqual(v.suggestedStatus, 'manual_review', `${flag} manual_review`);
-    const { res, counters } = await runRoute(INPUT, { compose: async () => ({ ...COVER_OK, qcFlags: [flag] }) });
+    const { res, counters } = await runRoute(INPUT, { env: STRICT_ON, s7: mkS7Stub({ wire: STRICT_RUN_1.captures.rawBodies[0] }), compose: async () => ({ ...COVER_OK, qcFlags: [flag] }) });
     assert.strictEqual(res.status, 422, `${flag} route 422`);
     assert.strictEqual(counters.archiveCalls, 0, `${flag} archive0`);
   }
@@ -636,7 +672,8 @@ await E('E14 MEGA_STRICT_RENDERER alone never arms (resolver + real route, exact
   const { res, counters } = await runRoute(INPUT, { env: { MEGA_STRICT_RENDERER: '1' } });
   assert.strictEqual(res.status, 200, `alias-only route status exact 200 (got ${res.status} ${j(res.body?.errorType)})`);
   assert.strictEqual(res.body?.success, true, 'alias-only route body.success exact true');
-  assert.strictEqual(res.body?.effectiveMode, 'legacy', `alias-only route effectiveMode exact legacy (got ${j(res.body?.effectiveMode)})`);
+  assert.strictEqual(res.body?.effectiveMode, 'preview_advisory', `alias-only route effectiveMode exact preview_advisory (got ${j(res.body?.effectiveMode)})`);
+  assert.strictEqual(res.body?.renderMode, 'legacy', `alias-only route renderMode exact legacy (got ${j(res.body?.renderMode)})`);
   assert.ok(res.body?.strictLatches?.unknownStrictLikeKeys?.includes('MEGA_STRICT_RENDERER'), `response latch report surfaces the alias (got ${j(res.body?.strictLatches?.unknownStrictLikeKeys)})`);
   assert.strictEqual(counters.composeCalls, 1, 'alias-only: compose exactly once');
   assert.strictEqual(counters.archiveCalls, 1, 'alias-only: archive exactly once');
@@ -840,6 +877,7 @@ await E('E18 exact local strict route twins: qc→persist→archive order, cover
     };
     const out = await withEnvMap(STRICT_ON, () => withFixedNow(() => runCoverRefTest(INPUT, deps)));
     assert.strictEqual(out.status, 422, `QC-fail twin status exact 422 (got ${out.status})`);
+    assert.strictEqual(out.body?.effectiveMode, 'strict', `QC-fail twin effectiveMode exact strict (got ${j(out.body?.effectiveMode)})`);
     assert.strictEqual(out.body?.errorType, 'QC_REJECTED', `QC-fail twin errorType exact (got ${j(out.body?.errorType)})`);
     assert.strictEqual(out.body?.holdReason, 'qc_failed', `QC-fail twin holdReason exact (got ${j(out.body?.holdReason)})`);
     assert.strictEqual(counters.composeCalls, 1, 'QC-fail twin: compose exactly once');
@@ -894,7 +932,7 @@ await E('E20 AC-0107 full-route: a compose output carrying the EXACT incident fl
   assert.strictEqual(v.pass, false, 'shared QC gate rejects the 2.69× hero stretch');
   assert.strictEqual(v.suggestedStatus, 'needs_gap_search', 'upscale fail ⇒ needs_gap_search (intended bounded recovery)');
   // full route: real runCoverRefTest + real evaluateCoverQc (hard 422 gate), compose double renders the incident output
-  const { res, counters } = await runRoute(INPUT, { compose: async () => ({ ...COVER_OK, qcFlags: [INCIDENT] }) });
+  const { res, counters } = await runRoute(INPUT, { env: STRICT_ON, s7: mkS7Stub({ wire: STRICT_RUN_1.captures.rawBodies[0] }), compose: async () => ({ ...COVER_OK, qcFlags: [INCIDENT] }) });
   assert.strictEqual(res.status, 422, `route 422 (got ${res.status})`);
   assert.strictEqual(res.body.errorType, 'QC_REJECTED', `errorType QC_REJECTED (got ${j(res.body.errorType)})`);
   assert.strictEqual(res.body.qcVerdict.pass, false, 'attached qcVerdict.pass=false');

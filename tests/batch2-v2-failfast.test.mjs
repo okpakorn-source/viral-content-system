@@ -239,6 +239,37 @@ test('5c s5_clipframe returns failed once → NOT a whole-job fail (proceeds to 
   assert.strictEqual(res.body.errorType, 'S6_SLOTS_FAILED');
 });
 
+// ============================================================ S6 waiting — route hold short-circuit
+test('S6 waiting with a V2 hold marker → 422 STRICT_HOLD, exact hold reason, and no S7', async () => {
+  const holdReason = 'REF_HERO_V2_INSUFFICIENT_CAST_ASSETS';
+  const { deps, calls } = harness({
+    env: { MEGA_REF_HERO_V2: '1', MEGA_STRICT_RENDER: '1' },
+    s6Impl: () => ({
+      status: 'waiting',
+      nextAction: 'wait',
+      summary: 'S6 waiting for sufficient cast assets',
+      dossierPatch: { pickImages: { refHeroV2: { v: 1, ok: false, hold: holdReason } } },
+    }),
+  });
+  const res = await runCoverRefTest(GOOD_INPUT, deps);
+  assert.strictEqual(res.status, 422);
+  assert.strictEqual(res.body.errorType, 'STRICT_HOLD');
+  assert.strictEqual(res.body.holdReason, holdReason);
+  assert.notStrictEqual(res.body.holdReason, 'ref_hero_v2_carrier_not_ok');
+  assert.strictEqual(calls.s7_cover, 0, 'S6 hold must short-circuit before S7');
+});
+
+test('S6 marker-less waiting → exact summary fallback and no S7', async () => {
+  const summary = 'S6 waiting for operator review';
+  const { deps, calls } = harness({
+    env: { MEGA_STRICT_RENDER: '1' },
+    s6Impl: () => ({ status: 'waiting', nextAction: 'wait', summary }),
+  });
+  const res = await runCoverRefTest(GOOD_INPUT, deps);
+  assert.strictEqual(res.body.holdReason, summary);
+  assert.strictEqual(calls.s7_cover, 0, 'marker-less S6 wait must also short-circuit before S7');
+});
+
 // ============================================================ 6 — boundary gate (Codex batch-1 note)
 test('6 boundary gate: content<100 → 400; combined<200 → 400; combined≥200 → passes (compass called)', async () => {
   // (a) content 99 chars → 400 NO_CONTENT, compass never reached
