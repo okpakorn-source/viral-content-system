@@ -1,5 +1,5 @@
 import { callAI } from '@/lib/ai/openai';
-import { MODEL_NEWS_ANALYSIS, MODEL_FAST_CHEAP, MODEL_HEAVY_FALLBACK } from '@/lib/ai/modelConfig';
+import { MODEL_NEWS_ANALYSIS, MODEL_BREAKDOWN, MODEL_FAST_CHEAP, MODEL_HEAVY_FALLBACK } from '@/lib/ai/modelConfig';
 import { withTimeout, withTimeoutSignal } from '@/lib/utils/withTimeout';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStoreText';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
@@ -637,17 +637,19 @@ export async function performSummarize({
       //   (เพดาน 8000 เดิม: reasoning tokens กินหมดก่อนตอบ → content ว่างเปล่า+โดนบิลฟรี — เทสพิสูจน์แล้ว)
       //   fallback gpt-4o มี timeout 60s ของตัวเอง — กันลากยาวจนชน outer แล้วตายทั้ง job
       let result;
-      let breakdownModelUsed = MODEL_NEWS_ANALYSIS;
+      // ★ 16 ก.ค. 69 (B6.2 — เจ้าของเคาะ): breakdown → MODEL_BREAKDOWN (gpt-5.6-terra) ตามผล A/B
+      //   terra เร็วกว่า 3 เท่า มุมข่าวเท่ากัน ราคาครึ่งเดียว — inner 200s คงเดิม (terra ใช้จริง ~42s เผื่อเหลือมาก)
+      let breakdownModelUsed = MODEL_BREAKDOWN;
       try {
         // ★ 16 ก.ค. 69 (B4): เปลี่ยนเป็น withTimeoutSignal — เมื่อเปิด WITHTIMEOUT_ABORT=1 จะยกเลิก request
         //   จริงตอน timeout (เดิม gpt-5.5 วิ่งต่อจนจบโดนบิลแล้วผลถูกทิ้ง = จ่าย 2 โมเดลซ้อน); สวิตช์ปิด = เดิมเป๊ะ
         result = await withTimeoutSignal(
-          (signal) => callAI({ prompt, model: MODEL_NEWS_ANALYSIS, temperature: 0.4, maxTokens: 24000, signal }),
+          (signal) => callAI({ prompt, model: MODEL_BREAKDOWN, temperature: 0.4, maxTokens: 24000, signal }),
           200000,
           'breakdown_primary_inner'
         );
       } catch (primaryErr) {
-        console.warn(`[Breakdown-Service] ⚠️ ${MODEL_NEWS_ANALYSIS} failed/timeout: "${primaryErr.message}" — retrying with ${MODEL_HEAVY_FALLBACK} fallback...`);
+        console.warn(`[Breakdown-Service] ⚠️ ${MODEL_BREAKDOWN} failed/timeout: "${primaryErr.message}" — retrying with ${MODEL_HEAVY_FALLBACK} fallback...`);
         breakdownModelUsed = MODEL_HEAVY_FALLBACK;
         result = await withTimeoutSignal(
           (signal) => callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 8000, signal }),
