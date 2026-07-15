@@ -13,6 +13,9 @@ const nextConfig = {
     //   ไม่ trace = บน Vercel ตาเทียบเงียบหาย + listRefCovers ว่าง — ครอบ route ที่ประกอบปกบนคลาวด์ได้จริง
     '/api/mega/compose-test': ['./public/ref-covers/**', './data/ref-cover-library.json'],
     '/api/mega/compose': ['./public/ref-covers/**', './data/ref-cover-library.json'],
+    // ★ 15 ก.ค. (แบตช์ 4 — บัค #10): /api/cover-ref-test ประกอบปก in-process (composeAndVerify) เหมือน compose-test
+    //   ต้องได้ ref-covers + คลัง ref + ฟอนต์ไทย — ไม่ trace = ตาเทียบ ref เงียบหาย + ข้อความปกเป็น □□□ บนโฮสต์
+    '/api/cover-ref-test': ['./public/ref-covers/**', './data/ref-cover-library.json', './src/assets/fonts/**'],
   },
 };
 

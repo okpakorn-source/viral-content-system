@@ -31,7 +31,7 @@ import * as _composerModule from '@/lib/services/megaComposerService';
 import { buildImagesRouteResponse } from '@/lib/imageStore'; // ★ อ่านคลังรูป in-process (โมดูลจริงที่ /api/images/[id] ใช้)
 
 export const runtime = 'nodejs';
-export const maxDuration = 1800; // ท่อ MEGA เต็มใช้ ~12-18 นาที (search+cover)
+export const maxDuration = 800; // ★ 15 ก.ค.: 1800 เกินเพดานโฮสต์ (โดนตัดเงียบกลางทาง) → 800 เท่าท่อหนักตัวอื่น (/api/auto/process, /api/queue/worker) · รันจริง 8-11 นาที (~660s) ยังมี buffer
 
 const QUEUE_ADD_PATH = '/api/queue/add';
 const IMAGE_CASE_RE = /^\/api\/images\/[^/]+$/;
@@ -548,6 +548,8 @@ export async function runCoverRefTest(input = {}, deps = {}) {
       await fsp.writeFile(pathMod.join(dir, fname), Buffer.from(base64, 'base64'));
       return `/mega-covers/${fname}`;
     },
+    // ★ audit แบตช์ 2 (code-auditor): จังหวะรอระหว่างรอบ clipframe — วนถี่ไร้ delay = อ่านคลังเปล่า 5 ครั้ง ไม่ได้ "รอ" จริง · เทสฉีด 0
+    clipframeWaitMs: _clipframeWaitMs = 5000,
     env: _env = process.env,
   } = deps;
 
@@ -559,8 +561,24 @@ export async function runCoverRefTest(input = {}, deps = {}) {
   if (content.length < 100) {
     return { status: 400, body: { success: false, error: 'ต้องมีเนื้อข่าวเต็ม (≥100 ตัวอักษร)', errorType: 'NO_CONTENT' } };
   }
+  // ★ 15 ก.ค. (แบตช์ 1 + Codex audit): fail-fast กระจกด่าน s5_case เป๊ะ — s5_case วัด "หัว+เนื้อ" ผ่าน fullNewsText
+  //   ([title, body].join('\n\n') ≥200, megaAdapters:476-490) ไม่ใช่ content เดี่ยว — เนื้อ 100-199 ที่หัวช่วยดันถึง 200
+  //   ต้องผ่านเหมือนเดิม ส่วนที่รวมแล้วไม่ถึงให้ตายที่นี่ก่อนจ่ายค่า compass (เดิมไปตายที่ s5_case หลังจ่ายแล้ว)
+  const gateText = [newsTitle, content].filter(Boolean).join('\n\n');
+  if (gateText.length < 200) {
+    return { status: 400, body: { success: false, error: `เนื้อไม่พอเปิดเคสภาพ (หัว+เนื้อรวม ${gateText.length} ตัว — ด่าน s5_case ต้อง ≥200)`, errorType: 'NO_CONTENT' } };
+  }
 
   const latchReport = await _latches(_env);
+
+  // ★ 15 ก.ค. (แบตช์ 2 — B2 pre-flight): V2 producer เปิดแต่ render latch ปิด = ตัดสินที่ t=0
+  //   MEGA_REF_HERO_V2=1 จะแนบ carrier ที่ consumer (composer) ตั้งใจ HOLD เมื่อ MEGA_STRICT_RENDER ปิด
+  //   → งานจะไปตายที่ S7 หลังเผาเวลา ~457s (compass/S5 4 แหล่ง/S6) อยู่ดี · fail เร็วขึ้นทางเดียว
+  //   happy path (V2+RENDER คู่กัน หรือ V2 OFF) = ไม่แตะ · ไม่ถอย legacy เงียบ (ยัง fail-closed)
+  if (_env.MEGA_REF_HERO_V2 === '1' && _env.MEGA_STRICT_RENDER !== '1') {
+    trace.push({ stage: 'preflight', status: 'hold', summary: 'MEGA_REF_HERO_V2=1 ต้องเปิด MEGA_STRICT_RENDER=1 คู่กัน' });
+    return { status: 422, body: holdBody({ error: 'MEGA_REF_HERO_V2=1 ต้องเปิด MEGA_STRICT_RENDER=1 คู่กัน (V2 producer จะแนบ carrier ที่ consumer ตั้งใจ HOLD เมื่อ render latch ปิด) — ตัดสินที่ t=0 แทนการเผา ~457s แล้วค่อย 422', errorType: 'STRICT_CONFIG_MISMATCH', holdReason: 'v2_producer_without_render_latch', effectiveMode: 'strict', latchReport, authority: null, trace }) };
+  }
 
   // ── in-memory dossier (จำลอง S4 จบแล้ว) — ขับ adapter จริงเหมือน conductor ──
   const job = {
@@ -579,12 +597,22 @@ export async function runCoverRefTest(input = {}, deps = {}) {
   const failed = (r) => (r?.status === 'failed');
 
   // ── S2.5 เข็มทิศ ──
+  let compassFailed = false;
   try {
     job.dossier.compass = await _compass({ card: { title: newsTitle, lane: '', category: '' }, extractText: content });
     trace.push({ stage: 's2.5_compass', status: 'done', summary: `${job.dossier.compass?.angle || ''} · ${job.dossier.compass?.primaryEmotion || ''}`.slice(0, 160) });
   } catch (e) {
+    compassFailed = true;
     job.dossier.compass = { mainCharacters: [], visualDreamShots: [] };
     trace.push({ stage: 's2.5_compass', status: 'failed', summary: 'compass ล้ม (ใช้ค่าว่าง): ' + (e.message || '').slice(0, 80) });
+  }
+
+  // ★ 15 ก.ค. (แบตช์ 2 — N1 compass fail-fast): โหมด V2 ต้องมีตัวละครหลักจากข่าวจริง
+  //   compass ล้ม/ไม่มี mainCharacters → S6 จะ HOLD ด้วย REF_HERO_V2_NO_CURRENT_NEWS_PEOPLE อยู่ดี
+  //   → ตายที่นี่ก่อนจ่ายค่าค้นภาพ 4 แหล่ง · ไม่ retry compass (นอกขอบเขต) · flag OFF: ไม่แตะพฤติกรรมเดิมเลย
+  if (_env.MEGA_REF_HERO_V2 === '1' && (compassFailed || !job.dossier.compass?.mainCharacters?.length)) {
+    trace.push({ stage: 'preflight_compass', status: 'hold', summary: 'V2 ต้องมีตัวละครหลักจากข่าวจริง' });
+    return { status: 422, body: holdBody({ error: 'compass ล้ม/ไม่มีตัวละครหลัก — โหมด V2 ต้องมีคนจากข่าวจริง (REF_HERO_V2_NO_CURRENT_NEWS_PEOPLE จะ HOLD ที่ S6 อยู่ดี) — ตายที่นี่ก่อนจ่ายค่าค้นภาพ 4 แหล่ง', errorType: 'COMPASS_REQUIRED_FOR_V2', holdReason: 'compass_empty_for_v2', effectiveMode: 'strict', latchReport, authority: null, trace }) };
   }
 
   // ★ REF IDENTITY: ไม่ pre-set refMatch — ปล่อยให้ S6 bind identity จริง (refId/dnaHash/refBoundAt)
@@ -610,8 +638,13 @@ export async function runCoverRefTest(input = {}, deps = {}) {
     if (failed(r)) return { status: 502, body: { success: false, error: r.summary, errorType: 'S5_TRIAGE_FAILED', trace } };
     if (r.nextAction !== 'wait') break;
   }
-  // ── S5e เฟรมคลิป (ล้ม ≠ ล้มทั้งงาน) ──
-  r = merge(step('s5_clipframe', await _s5_clipframe(job, { origin })));
+  // ── S5e เฟรมคลิป (staged: วนจน non-wait สูงสุด 6 รอบ ตามแพทเทิร์น s5_search) ──
+  //   ★ 15 ก.ค. (แบตช์ 2 — #8): คงหลักเดิม clipframe ล้ม ≠ ล้มทั้งงาน (ไม่มี failed(r) return) — วน wait ก็เดินต่อ S6
+  for (let i = 0; i < 6; i++) {
+    r = merge(step('s5_clipframe', await _s5_clipframe(job, { origin })));
+    if (r.nextAction !== 'wait') break;
+    if (i < 5 && _clipframeWaitMs > 0) await new Promise((res) => setTimeout(res, _clipframeWaitMs)); // เว้นจังหวะจริงให้เฟรมคลิปพื้นหลังมีเวลามาถึง
+  }
 
   // ── S6 เลือกภาพลงช่อง (slotDirectorBrain + ด่านโค้ด) — เป็นผู้ bind refMatch identity ──
   r = merge(step('s6_slots', await _s6_slots(job, { origin })));
@@ -781,6 +814,10 @@ export async function runCoverRefTest(input = {}, deps = {}) {
         coverCaseId: cover.caseId || null,
         coverPath, base64: cover.base64, template: cover.template, score: cover.score, throughMega: true, trace,
         qcFlags: Array.isArray(cover.qcFlags) ? cover.qcFlags : [],
+        // ★ 15 ก.ค. (แบตช์ 4 — บัค #6): archive รองรับสอง field นี้อยู่แล้ว (megaCoverArchive:85-86) แต่ route ไม่เคยส่ง
+        //   → ปกในคลังเสียลิงก์ ref ตลอด — ส่ง identity ที่ S6 bind จริง (แนว refId guard ที่ strict ใช้)
+        refId: job.dossier.refMatch?.refId || job.dossier.refMatch?.dnaHash || null,
+        refSimilarity: cover.refSimilarity ?? null,
       });
       if (!coverPath && ent?.id) coverPath = `/api/mega-covers/img?id=${encodeURIComponent(ent.id)}`;
     }

@@ -16,6 +16,7 @@ import { getCase, updateCase } from '@/lib/caseStore';
 import { reporter, doneProgress, failProgress } from '@/lib/progress';
 
 export const runtime = 'nodejs';
+export const maxDuration = 300; // ★ 15 ก.ค.: ไม่ตั้ง = default โฮสต์ตัดสั้น — ผู้เรียก (s5_keywords ใน megaAdapters) รอ 240s + aiClient ลองได้ถึง 5 ครั้ง (รวมครั้งแรก) จึงให้ 300 เท่า /api/analyze (Codex audit: 120 เสี่ยงตัดกลาง retry)
 
 export async function POST(req) {
   const body = await req.json().catch(() => ({}));

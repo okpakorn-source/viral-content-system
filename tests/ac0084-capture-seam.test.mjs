@@ -986,7 +986,9 @@ const RH_SC = { semanticScore: 700, qualityScore: 700, slotFitScore: 700 };
 const v2Img = (id, { person = null, sceneKey } = {}) => ({
   id, imageUrl: `https://cdn.test/${id}.jpg`, thumbnailUrl: '', source: 'SynthNews Desk', sourceLink: `https://source.test/${id}`,
   width: 900, height: 1200, realWidth: 900, realHeight: 1200,
-  triage: { relevant: true, clean: true, faceCount: 1, person, persons: person ? [person] : [], category: 'face-emotional', emotion: 'warm', note: `${id} ${sceneKey}`, newsScene: true, quality: 8, realShortSide: 900, sharpness: 80, ...RH_EV, ...RH_RD, ...RH_SC, sceneKey },
+  // ★ AC-0107: genuine normalized raw faceBox (big centred face ⇒ crop-SAFE for the realized hero slot) — additive,
+  //   independent of the shot-class evidence, so the V2 producer's new crop-safe hero eligibility approves this hero.
+  triage: { relevant: true, clean: true, faceCount: 1, person, persons: person ? [person] : [], category: 'face-emotional', emotion: 'warm', note: `${id} ${sceneKey}`, newsScene: true, quality: 8, realShortSide: 900, sharpness: 80, faceBox: { x1: 0.30, y1: 0.12, x2: 0.70, y2: 0.60 }, ...RH_EV, ...RH_RD, ...RH_SC, sceneKey },
 });
 const V2_POOL = () => [
   v2Img('V-L1', { person: 'Lisa', sceneKey: 'sceneL' }),
@@ -1050,7 +1052,7 @@ test('C1 (W3-3 V2 full-route) ordinary runCoverRefTest classifies a genuine real
   const env = { ...V2_ENV, MEGA_STRICT_RENDER: '1', MEGA_COVER_ORIGIN: CAPTURE_HOST, MEGA_STABLE_ORDER: '0' };
   const noop = (n) => async () => ({ status: 'done', nextAction: 'continue', summary: n });
   const out = await withEnvMap(env, () => withFixedNow(() => runCoverRefTest(
-    { content: 'เนื้อข่าวเต็มสำหรับทดสอบ ref-hero-v2 full-route seam '.padEnd(160, 'x'), newsTitle: 'ข่าวทดสอบ V2', origin: CAPTURE_HOST },
+    { content: 'เนื้อข่าวเต็มสำหรับทดสอบ ref-hero-v2 full-route seam '.padEnd(240, 'x'), newsTitle: 'ข่าวทดสอบ V2', origin: CAPTURE_HOST }, // ★ 15 ก.ค.: 160→240 ตาม gate เนื้อข่าว ≥200 (แบตช์ 1 — ให้ตรง s5_case)
     {
       compassBrain: async () => ({ angle: 'a', primaryEmotion: 'warm', secondaryEmotions: [], mainCharacters: V2_CHARS, visualDreamShots: [], doNotUse: [] }),
       s5_case: noop('s5_case'), s5_keywords: noop('s5_keywords'), s5_search: noop('s5_search'), s5_triage: noop('s5_triage'), s5_clipframe: noop('s5_clipframe'),

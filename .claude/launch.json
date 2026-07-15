@@ -39,6 +39,33 @@
         "set NEXT_DISTDIR=.next-verify&& set NODE_OPTIONS=--max-old-space-size=4096&& npx next dev -p 3988"
       ],
       "port": 3988
+    },
+    {
+      "name": "reftest-a-legacy",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set NEXT_DISTDIR=.next-fable-test&& set NODE_OPTIONS=--max-old-space-size=4096&& set COVER_TEST_LOCAL_OPEN=1&& npx next start -p 3901"
+      ],
+      "port": 3901
+    },
+    {
+      "name": "reftest-b-v2only",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set NEXT_DISTDIR=.next-fable-test&& set NODE_OPTIONS=--max-old-space-size=4096&& set COVER_TEST_LOCAL_OPEN=1&& set MEGA_REF_HERO_V2=1&& npx next start -p 3901"
+      ],
+      "port": 3901
+    },
+    {
+      "name": "reftest-c-v2strict",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set NEXT_DISTDIR=.next-fable-test&& set NODE_OPTIONS=--max-old-space-size=4096&& set COVER_TEST_LOCAL_OPEN=1&& set MEGA_REF_HERO_V2=1&& set MEGA_STRICT_RENDER=1&& npx next start -p 3901"
+      ],
+      "port": 3901
     }
   ]
 }

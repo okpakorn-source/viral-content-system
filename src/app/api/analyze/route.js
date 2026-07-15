@@ -16,6 +16,7 @@ import { addCase } from '@/lib/caseStore';
 import { reporter, doneProgress, failProgress } from '@/lib/progress';
 
 export const runtime = 'nodejs';
+export const maxDuration = 300; // ★ 15 ก.ค.: ไม่ตั้ง = default โฮสต์ตัดสั้น — ผู้เรียก (s5_case ใน megaAdapters) รอถึง 240s จึงให้ 300
 
 export async function POST(req) {
   const body = await req.json().catch(() => ({}));
