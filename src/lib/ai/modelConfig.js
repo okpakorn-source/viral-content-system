@@ -17,7 +17,11 @@
 //   ตรวจคุณภาพปก, Agent คุม, เหตุผลหลายชั้น
 // ═══════════════════════════════════════════
 export const MODEL_MAIN_REASONING  = 'gpt-5.5';  // สมองหลัก — reasoning หลายชั้น
-export const MODEL_NEWS_ANALYSIS   = 'gpt-5.5';  // วิเคราะห์ข่าว + แตกประเด็น
+export const MODEL_NEWS_ANALYSIS   = 'gpt-5.5';  // วิเคราะห์ข่าว (clip-insight/news-hunt/topic-hunt + ตัวสำรองขั้นเขียน ยังใช้ค่านี้)
+// ★ 16 ก.ค. 69 (B6.2 — เจ้าของเคาะ): breakdown สายข่าว text → terra ตามผล A/B
+//   (เคสจริง: terra 42.1s vs gpt-5.5 125.4s, มุมข่าว 12=12 คุณภาพเท่ากัน, ราคาครึ่งเดียว $2.5/$15)
+//   แยกค่าเฉพาะจุด — ไม่แตะ MODEL_NEWS_ANALYSIS กลาง กันระบบอื่นเปลี่ยนตามโดยไม่ตั้งใจ; ถอยกลับ = ค่าเดียวนี้
+export const MODEL_BREAKDOWN       = 'gpt-5.6-terra';
 export const MODEL_COVER_JUDGE     = 'gpt-5.5';  // ตัดสิน/ให้คะแนนปก (Curator + Judge)
 export const MODEL_FINAL_QA        = 'gpt-5.5';  // ตรวจคุณภาพขั้นสุดท้าย
 export const MODEL_CONTENT_WRITE   = 'gpt-5.5';  // เขียนเนื้อหาข่าว
