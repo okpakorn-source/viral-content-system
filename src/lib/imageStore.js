@@ -441,9 +441,22 @@ export async function buildImagesRouteResponse(caseId, candidateAuthorityRaw, de
     // payload มาจาก snapshot rows ชุดเดียวกัน — ไม่มี legacy read
     const images = Array.isArray(snap.rows) ? snap.rows : [];
     const base = { success: true, caseId, total: images.length, byPlatform: countByPlatform(images), images };
+    // ★ B2 SHADOW: มินต์ candidateMetrics คู่กับ candidateAuthority — วัดจาก validated facts (universe.candidates)
+    //   + face-cache (read-only). พังใด ๆ = ไม่ใส่ candidateMetrics (route ตอบเหมือนเดิมทุกไบต์) · consumer เดียว
+    //   ตอนนี้ = B1 shadow bridge (megaAdapters `_rhMetricsCarrier`) ที่อ่านเงาเท่านั้น — ไม่เปลี่ยน HOLD/pick ใด ๆ
+    let candidateMetrics;
+    try {
+      candidateMetrics = await buildCandidateMetricsCarrier({ caseId, universe, rows: images, deps });
+    } catch {
+      candidateMetrics = undefined;
+    }
     return {
       status: 200,
-      body: { ...base, candidateAuthority: { available: universe.universeComplete === true, ...universe } },
+      body: {
+        ...base,
+        candidateAuthority: { available: universe.universeComplete === true, ...universe },
+        ...(candidateMetrics ? { candidateMetrics } : {}),
+      },
     };
   }
 
@@ -453,4 +466,80 @@ export async function buildImagesRouteResponse(caseId, candidateAuthorityRaw, de
     status: 200,
     body: { ...base, candidateAuthority: { available: false, incomplete: true, reason: readFailed ? 'SNAPSHOT_READ_FAILED' : (snap && snap.reason) || 'SNAPSHOT_INCOMPLETE' } },
   };
+}
+
+// ============================================================
+// ★ B2 SHADOW — candidateMetrics minter (route glue)
+// ------------------------------------------------------------
+// อ่าน validated facts จาก universe.candidates (ผ่าน candidateFactAuthority แล้ว) → วัดผ่าน producer PURE
+//   (candidateMetricMeasurements) → แช่แข็ง/hash/bind ผ่าน candidateMetricAuthority → snapshot carrier เดียว
+//   ★ dynamic import ทั้ง 2 โมดูลในนี้เท่านั้น (legacy path ไม่โหลด) · face-cache อ่านแบบ read-only ล้วน
+//     (ไม่ยิง AI/HTTP) · ไม่มี key จับคู่ = faceCount absent · พังจุดใด = คืน null (route ไม่กระทบ)
+// ============================================================
+const FACE_CACHE_FILE = path.join(process.cwd(), 'data', 'face-cache.json');
+
+// อ่าน data/face-cache.json แบบ read-only best-effort — พัง/ไม่มีไฟล์ = {} (ห้าม throw, ห้ามยิง network)
+async function loadFaceCacheReadOnly() {
+  try {
+    const raw = await fs.readFile(FACE_CACHE_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+// resolver จาก imageId/row → faceCacheEntry (มี faces เป็น array) หรือ undefined
+//   face-cache keyed ด้วย buffer-hash (ไม่ใช่ imageId) — row จริงวันนี้ยังไม่พก key ⇒ undefined (faceCount absent)
+//   forward-compatible: row.faceCacheKey / row.triage.faceCacheKey ถ้ามี → คืน entry.result (faces เป็น array)
+function makeFaceCacheLookup(cache) {
+  return (_imageId, row) => {
+    if (row === null || typeof row !== 'object') return undefined;
+    let key = typeof row.faceCacheKey === 'string' ? row.faceCacheKey : null;
+    if (!key && row.triage && typeof row.triage === 'object' && typeof row.triage.faceCacheKey === 'string') {
+      key = row.triage.faceCacheKey;
+    }
+    if (!key) return undefined;
+    const entry = cache[key];
+    return entry && typeof entry === 'object' && entry.result && typeof entry.result === 'object' ? entry.result : undefined;
+  };
+}
+
+async function buildCandidateMetricsCarrier({ caseId, universe, rows, deps }) {
+  const candidates = universe && Array.isArray(universe.candidates) ? universe.candidates : null;
+  if (!candidates || !candidates.length) return null; // universe fail / ไม่มี candidate = ไม่มินต์
+
+  const metricMod = (deps && deps.metricAuthority) || (await import('./candidateMetricAuthority.js'));
+  const measureMod = (deps && deps.metricMeasurements) || (await import('./candidateMetricMeasurements.js'));
+  const buildV1 = metricMod.buildCandidateMetricsV1;
+  const buildSnap = metricMod.buildCandidateMetricsSnapshotV1;
+  const measure = measureMod.measureCandidateMetrics;
+  if (typeof buildV1 !== 'function' || typeof buildSnap !== 'function' || typeof measure !== 'function') return null;
+
+  const faceLookup = (deps && deps.faceCacheLookup) || makeFaceCacheLookup(await loadFaceCacheReadOnly());
+  const rowById = new Map();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (r && typeof r === 'object' && typeof r.id === 'string') rowById.set(r.id, r);
+  }
+
+  const imageIds = [];
+  const metricsById = {};
+  for (const cand of candidates) {
+    const imageId = cand && typeof cand === 'object' ? cand.imageId : null;
+    if (typeof imageId !== 'string' || !imageId || metricsById[imageId]) continue;
+    imageIds.push(imageId);
+    let faceCacheEntry;
+    try {
+      faceCacheEntry = faceLookup(imageId, rowById.get(imageId));
+    } catch {
+      faceCacheEntry = undefined;
+    }
+    const measurements = measure({ facts: cand.facts, faceCacheEntry });
+    metricsById[imageId] = buildV1({ sourceAssetId: imageId, caseId, measurements });
+  }
+  if (!imageIds.length) return null;
+
+  const snapshot = buildSnap({ caseId, imageIds, metricsById });
+  // แนบเฉพาะ snapshot ที่สำเร็จ (success ไม่มี key `ok`; fail มี ok:false) — carrier ที่ล้ม = ไม่แนบ
+  return snapshot && snapshot.ok !== false ? snapshot : null;
 }

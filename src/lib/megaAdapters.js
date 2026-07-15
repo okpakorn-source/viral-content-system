@@ -3238,7 +3238,8 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     const _rhSearchedEv = _rhSearchedIds(im, _rhAuthority ? _rhAuthority.imageIds : new Set(), _rhCaseIdReq);
     // ★ B1 SHADOW: สร้าง metricsById "ขนาน" กับ factsById — validate metrics carrier ผ่าน metric authority module +
     //   same-snapshot binding (caseId ตรง requested + ทุก id ∈ universe ที่ validate แล้ว) · carrier ไม่มี/ไม่ valid = null
-    //   (ไม่ HOLD เพิ่ม ไม่เปลี่ยนพฤติกรรมเดิม) · production body ยังไม่มี candidateMetrics ⇒ null เสมอวันนี้
+    //   (ไม่ HOLD เพิ่ม ไม่เปลี่ยนพฤติกรรมเดิม) · B2 มินต์ candidateMetrics เข้า production body แล้ว (คู่ authority) ⇒
+    //   carrier จริงถึง bridge นี้ได้ แต่ยังเป็น shadow ล้วน — อ่านเงาอย่างเดียว ไม่มี consumer เปลี่ยนผลจริง
     let _rhMetricsById = null;
     try {
       const _metricApi = _deps?.metricAuthorityApi || await import('@/lib/candidateMetricAuthority');

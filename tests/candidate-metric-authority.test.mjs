@@ -369,7 +369,10 @@ const rhMetricsCarrier = () => buildCandidateMetricsSnapshotV1({
 const rhOnHold = async ({ withMetrics = true, metricSpy } = {}) => {
   const rows = rhHoldRows();
   const response = await rhAuthResponse(rows);
+  // ★ B2: the route now auto-mints body.candidateMetrics from validated facts. Overwrite it with the
+  //   hand-crafted carrier for the ON path; strip it entirely to construct the true "absent carrier" case.
   if (withMetrics) response.body.candidateMetrics = rhMetricsCarrier();
+  else delete response.body.candidateMetrics;
   const captures = { brainArgs: [] };
   const extra = {};
   if (metricSpy) extra.metricAuthorityApi = metricSpy;
