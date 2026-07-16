@@ -534,7 +534,10 @@ export default function CoverRefTestPage() {
                               </span>
                             </td>
                             <td style={{ ...td, whiteSpace: 'nowrap', color: '#64748b' }}>{ageMin == null ? '-' : `${ageMin} นาที`}</td>
-                            <td style={{ ...td, maxWidth: 200, color: '#64748b' }}>{lastDone ? (lastDone.summary || lastDone.label || '') : ''}</td>
+                            {/* ★ Q3 hotfix: งานล้ม = โชว์สาเหตุจาก job.summary ก่อน (tick เขียนตอน fail) — งานตายต้องเห็นสาเหตุ */}
+                            <td style={{ ...td, maxWidth: 200, color: job.status === 'failed' ? '#b91c1c' : '#64748b' }}>
+                              {(job.status === 'failed' && job.summary) ? job.summary : (lastDone ? (lastDone.summary || lastDone.label || '') : '')}
+                            </td>
                             <td style={{ ...td, minWidth: 180 }}>
                               {coverPath && (
                                 <a href={coverPath} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginRight: 6, verticalAlign: 'middle' }} title="เปิดปกแท็บใหม่">
