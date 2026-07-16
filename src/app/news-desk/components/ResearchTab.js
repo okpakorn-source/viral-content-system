@@ -8,16 +8,30 @@
 // ไม่มี polling — โหลดเมื่อเปิดแท็บ/หลัง action เท่านั้น · ทุก fetch ผ่าน apiFetch เดิม
 // ============================================================
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { UI, Btn, Card, Chip, Spinner, fmtNum, fmtBaht } from './ui.js';
+import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
+import { UI, Btn, Card, Chip, Spinner, fmtNum, fmtBaht, fmtDuration } from './ui.js';
 import { apiFetch } from './ui.js';
 import HuntSetup, { CHANNELS } from './HuntSetup.js';
 import LeadCard from './LeadCard.js';
 
 const LIB = '/api/desk/dna/library';
 const LEADS = '/api/desk/research/leads';
+const TRACE = '/api/desk/research/trace'; // ★ trace 17 ก.ค. (อ้างแบบ trace-design) — สมุดบันทึกย้อนหลัง
 const JUDGE_MAX_PER_CLUSTER = 16; // เพดานใบที่ส่งตัดสินต่อคลัสเตอร์ (คุมต้นทุน AI)
 const KEEP_MIN_SCORE = 60;        // เก็บลีดอัตโนมัติเฉพาะ verdict='keep' && matchScore≥60
+
+// ★ trace: บันทึกสมุด/timeline แบบ fire-and-forget — apiFetch ไม่ throw เอง (ครอบ try เผื่อผิดคาด) ห้ามบล็อก/พัง UI หลัก
+function fireTrace(body) {
+  try {
+    apiFetch(TRACE, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    // เงียบ — trace ต้องไม่ทำให้โฟลว์หาข่าวหลักพัง
+  }
+}
 
 export default function ResearchTab({ onToast }) {
   // ── ส่วน 1: คลัสเตอร์ + ตัวเลือก ──
@@ -46,6 +60,13 @@ export default function ResearchTab({ onToast }) {
   const [fCluster, setFCluster] = useState('');
   const [fMinScore, setFMinScore] = useState('');
   const [fQ, setFQ] = useState('');
+
+  // ── ส่วน 4: 📓 ประวัติรอบล่า (trace) ──
+  const [traceOpen, setTraceOpen] = useState(false);
+  const [traceLoading, setTraceLoading] = useState(false);
+  const [traceRuns, setTraceRuns] = useState([]);
+  const [traceLoaded, setTraceLoaded] = useState(false);
+  const [expandedRunId, setExpandedRunId] = useState('');
 
   // ── busy/หมายเหตุ ต่อลีด ──
   const [busyLead, setBusyLead] = useState({ id: '', action: '' });
@@ -77,6 +98,24 @@ export default function ResearchTab({ onToast }) {
     const res = await apiFetch(`${LEADS}?view=stats`);
     if (res.success) setLibStats(res.stats || null);
   }, []);
+
+  // ── ส่วน 4: 📓 ประวัติรอบล่า — โหลดครั้งแรกตอนกดเปิดเท่านั้น (ไม่มี polling) ──
+  const loadTraceRuns = useCallback(async () => {
+    setTraceLoading(true);
+    const res = await apiFetch(`${TRACE}?limit=30`);
+    setTraceLoading(false);
+    setTraceLoaded(true);
+    if (res.success) setTraceRuns(res.runs || []);
+    else onToast?.(res.error || 'โหลดประวัติรอบล่าไม่สำเร็จ', 'err');
+  }, [onToast]);
+
+  function toggleTraceOpen() {
+    setTraceOpen((open) => {
+      const next = !open;
+      if (next && !traceLoaded) loadTraceRuns();
+      return next;
+    });
+  }
 
   const loadLibrary = useCallback(async () => {
     setLibLoading(true);
@@ -133,6 +172,7 @@ export default function ResearchTab({ onToast }) {
     if (chList.length === 0) { onToast?.('เลือกช่องทางอย่างน้อย 1 ช่อง', 'warn'); return; }
 
     const runId = 'rrun_' + Date.now().toString(36);
+    const t0Run = Date.now(); // ★ trace: tookMs ของทั้งรอบล่า (hunt+judge+save)
     runIdRef.current = runId;
     setHunting(true);
     setRanOnce(true);
@@ -165,6 +205,16 @@ export default function ResearchTab({ onToast }) {
     setHuntStats(hRes.stats || null);
     pushStep(`ค้นเสร็จ — เจอ ${fmtNum(candidates.length)} ใบ (ยิงจริง ${fmtNum(hRes.stats?.serperCalls || 0)} call ≈ ${fmtBaht(hRes.stats?.estCostTHB || 0)})`);
 
+    // ★ trace: นับ found ต่อ {คลัสเตอร์,คีย์,ช่อง} จากผลค้นดิบทั้งหมด (ไม่ใช่แค่ที่รอด judge) — ไว้โชว์ "คีย์ไหนเจอกี่ใบ"
+    const queriesUsedMap = new Map();
+    for (const c of candidates) {
+      const key = `${c.clusterId || ''}|${c.query || ''}|${c.channel || ''}`;
+      if (!queriesUsedMap.has(key)) {
+        queriesUsedMap.set(key, { clusterId: c.clusterId || '', archetype: c.clusterArchetype || '', query: c.query || '', channel: c.channel || '', found: 0 });
+      }
+      queriesUsedMap.get(key).found += 1;
+    }
+
     if (candidates.length === 0) {
       onToast?.('ไม่พบผลค้นเลย — ลองเพิ่มช่องทาง/คีย์ หรือเลือกคลัสเตอร์อื่น', 'warn');
       setHunting(false);
@@ -183,6 +233,11 @@ export default function ResearchTab({ onToast }) {
     let totalSaved = 0;
     let idx = 0;
     const clusterKeys = [...byCluster.keys()];
+    // ★ trace: สะสมข้ามคลัสเตอร์ไว้ประกอบสมุดบันทึกรอบล่า 1 ก้อนตอนจบ (ดูจุดต่อจากลูปนี้)
+    const allKeepers = [];
+    const runJudgeLogAgg = [];
+    const judgeSummaryAgg = { judged: 0, kept: 0, dropGate: 0, dropDedup: 0, dropSame: 0, lowScore: 0 };
+
     for (const clusterId of clusterKeys) {
       idx++;
       if (!clusterId) continue;
@@ -206,8 +261,29 @@ export default function ResearchTab({ onToast }) {
         continue;
       }
       const judged = jRes.judged || [];
+      const dropped = jRes.dropped || [];
       const keepers = judged.filter((j) => j.verdict === 'keep' && (Number(j.matchScore) || 0) >= KEEP_MIN_SCORE);
       pushStep(`คลัสเตอร์ ${idx}: ผ่าน ${fmtNum(judged.length)} · เข้าเกณฑ์เก็บ ${fmtNum(keepers.length)}`);
+
+      // ★ trace: สรุป + รายการที่ถูกตัด (gate/dedup/isSameStory มาจาก dropped · verdict='drop' หรือคะแนนต่ำมาจาก judged ที่ไม่ผ่าน)
+      judgeSummaryAgg.judged += judged.length;
+      judgeSummaryAgg.kept += keepers.length;
+      for (const d of dropped) {
+        const isSame = d.stage === 'judge' && /เหตุการณ์เดียวกับต้นแบบ/.test(d.reason || '');
+        if (d.stage === 'gate') judgeSummaryAgg.dropGate++;
+        else if (d.stage === 'dedup') judgeSummaryAgg.dropDedup++;
+        else if (isSame) judgeSummaryAgg.dropSame++;
+        else judgeSummaryAgg.lowScore++;
+        runJudgeLogAgg.push({ title: d.title || '', url: d.url || '', stage: d.stage || '', reason: d.reason || '' });
+      }
+      for (const j of judged) {
+        const isKeeper = j.verdict === 'keep' && (Number(j.matchScore) || 0) >= KEEP_MIN_SCORE;
+        if (!isKeeper) {
+          judgeSummaryAgg.lowScore++;
+          runJudgeLogAgg.push({ title: j.title || '', url: j.url || '', stage: 'lowScore', reason: j.reason || '', score: j.matchScore });
+        }
+      }
+      allKeepers.push(...keepers);
 
       if (keepers.length > 0) {
         // eslint-disable-next-line no-await-in-loop
@@ -229,6 +305,36 @@ export default function ResearchTab({ onToast }) {
     if (rRes.success) {
       const mine = (rRes.leads || []).filter((l) => l.runId === runId).sort((a, b) => (Number(b.matchScore) || 0) - (Number(a.matchScore) || 0));
       setRoundLeads(mine);
+
+      // ★ trace: สมุดบันทึกรอบล่า (จบทุกคลัสเตอร์แล้ว) — fire-and-forget ไม่ block UI
+      fireTrace({
+        action: 'logRun',
+        run: {
+          runId,
+          trigger: 'manual',
+          params: { clusterIds, channels: chList, queriesPerCluster, model },
+          queriesUsed: Array.from(queriesUsedMap.values()),
+          huntStats: hRes.stats || {},
+          judgeSummary: judgeSummaryAgg,
+          judgeLog: runJudgeLogAgg,
+          savedLeadIds: mine.map((l) => l.id),
+          costTHB: hRes.stats?.estCostTHB || 0,
+          tookMs: Date.now() - t0Run,
+        },
+      });
+
+      // ★ trace: timeline ต่อลีดที่เพิ่งเก็บ — found+judged ก้อนเดียวต่อใบ (จับคู่กับ candidate ที่ตรง url)
+      for (const lead of mine) {
+        const match = allKeepers.find((k) => k.url === lead.url);
+        fireTrace({
+          action: 'leadEvents',
+          leadId: lead.id,
+          events: [
+            { type: 'found', data: { runId, query: match?.query || '', channel: match?.channel || lead.channel || '' } },
+            { type: 'judged', data: { score: match?.matchScore ?? lead.matchScore ?? 0, reason: match?.reason || lead.reason || '', model } },
+          ],
+        });
+      }
     }
     await Promise.all([loadLibrary(), loadLibStats()]);
     setHunting(false);
@@ -505,6 +611,104 @@ export default function ResearchTab({ onToast }) {
           </>
         )}
       </Card>
+
+      {/* ── ส่วน 4: 📓 ประวัติรอบล่า (trace) — โหลดเมื่อกดเปิดเท่านั้น ไม่มี polling ── */}
+      <Card>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 15, fontWeight: 800, color: UI.text }}>📓 ประวัติรอบล่า</span>
+          <Btn variant="subtle" onClick={toggleTraceOpen} style={{ marginLeft: 'auto', minHeight: 38, padding: '6px 12px', fontSize: 12.5 }}>
+            {traceOpen ? '▲ ซ่อน' : '▼ เปิดดู'}
+          </Btn>
+          {traceOpen && (
+            <Btn variant="subtle" busy={traceLoading} onClick={loadTraceRuns} style={{ minHeight: 38, padding: '6px 12px', fontSize: 12.5 }}>↻ รีเฟรช</Btn>
+          )}
+        </div>
+
+        {traceOpen && (
+          traceLoading ? (
+            <div style={{ textAlign: 'center', padding: 26, color: UI.dim }}><Spinner size={18} /> กำลังโหลด…</div>
+          ) : traceRuns.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 26, color: UI.muted, fontSize: 13 }}>ยังไม่มีประวัติรอบล่า</div>
+          ) : (
+            <div style={{ overflowX: 'auto', marginTop: 12 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 640 }}>
+                <thead>
+                  <tr style={{ color: UI.muted, textAlign: 'left' }}>
+                    <th style={thStyle}>เวลา</th>
+                    <th style={thStyle}>คลัสเตอร์</th>
+                    <th style={thStyle}>คีย์</th>
+                    <th style={thStyle}>เจอ</th>
+                    <th style={thStyle}>เก็บ</th>
+                    <th style={thStyle}>ตัดทิ้ง</th>
+                    <th style={thStyle}>฿</th>
+                    <th style={thStyle}>วินาที</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {traceRuns.map((run) => {
+                    const found = (run.queriesUsed || []).reduce((sum, q) => sum + (Number(q.found) || 0), 0);
+                    const cut = (run.judgeLog || []).length;
+                    const isOpen = expandedRunId === run.runId;
+                    return (
+                      <Fragment key={run.runId}>
+                        <tr
+                          onClick={() => setExpandedRunId(isOpen ? '' : run.runId)}
+                          style={{ cursor: 'pointer', borderTop: `1px solid ${UI.line}`, background: isOpen ? UI.card2 : 'transparent' }}
+                        >
+                          <td style={tdStyle}>{run.at ? new Date(run.at).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '-'}</td>
+                          <td style={tdStyle}>{fmtNum(run.params?.clusterIds?.length || 0)}</td>
+                          <td style={tdStyle}>{fmtNum((run.queriesUsed || []).length)}</td>
+                          <td style={tdStyle}>{fmtNum(found)}</td>
+                          <td style={tdStyle}>{fmtNum(run.judgeSummary?.kept || 0)}</td>
+                          <td style={tdStyle}>{fmtNum(cut)}</td>
+                          <td style={tdStyle}>{fmtBaht(run.costTHB || 0)}</td>
+                          <td style={tdStyle}>{fmtDuration(run.tookMs || 0)}</td>
+                        </tr>
+                        {isOpen && (
+                          <tr>
+                            <td colSpan={8} style={{ padding: 0, border: 'none' }}>
+                              <div style={{ background: UI.card2, border: `1px solid ${UI.line}`, borderRadius: 10, padding: 12, margin: '4px 0 10px', display: 'grid', gap: 10 }}>
+                                <div>
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: UI.text, marginBottom: 6 }}>🔑 คีย์ที่ยิง — เจอกี่ใบ</div>
+                                  {(run.queriesUsed || []).length === 0 ? (
+                                    <div style={{ fontSize: 12, color: UI.muted }}>ไม่มีข้อมูล</div>
+                                  ) : (
+                                    <div style={{ display: 'grid', gap: 4 }}>
+                                      {run.queriesUsed.map((q, i) => (
+                                        <div key={i} style={{ fontSize: 12, color: UI.dim }}>
+                                          &ldquo;{q.query}&rdquo; · {q.channel}{q.archetype ? ` · (${q.archetype})` : ''} — เจอ {fmtNum(q.found)} ใบ
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: UI.text, marginBottom: 6 }}>🗑 ที่ตัดทิ้ง ({fmtNum(cut)})</div>
+                                  {(run.judgeLog || []).length === 0 ? (
+                                    <div style={{ fontSize: 12, color: UI.muted }}>ไม่มีรายการที่ตัดทิ้ง</div>
+                                  ) : (
+                                    <div style={{ display: 'grid', gap: 4, maxHeight: 240, overflowY: 'auto' }}>
+                                      {run.judgeLog.map((j, i) => (
+                                        <div key={i} style={{ fontSize: 12, color: UI.dim, lineHeight: 1.5 }}>
+                                          <span style={{ color: UI.muted }}>[{j.stage}{j.score != null ? ` ${j.score}%` : ''}]</span> {String(j.title || '(ไม่มีหัวข้อ)').slice(0, 80)} — {j.reason}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )
+        )}
+      </Card>
     </div>
   );
 }
@@ -514,3 +718,6 @@ const selStyle = {
   background: 'var(--bg-elevated)', color: 'var(--text-primary)',
   border: '1px solid var(--border-light)', fontSize: 13, fontFamily: 'inherit',
 };
+
+const thStyle = { padding: '6px 8px', fontWeight: 700, whiteSpace: 'nowrap' };
+const tdStyle = { padding: '6px 8px', color: 'var(--text-primary)', whiteSpace: 'nowrap' };

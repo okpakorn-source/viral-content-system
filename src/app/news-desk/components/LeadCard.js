@@ -8,7 +8,9 @@
 // fetchability, warnMaybeDone, reason, status) — การ์ดนี้ไม่เรียก API เอง
 // ============================================================
 
+import { useState } from 'react';
 import { UI, Btn, Chip } from './ui.js';
+import LeadTimeline from './LeadTimeline.js';
 
 // สีป้าย match% ตามเกณฑ์: ≥80 เขียว · ≥60 เหลือง · ต่ำกว่านั้นแดงจาง
 function scoreColor(score) {
@@ -34,6 +36,7 @@ const STATUS_META = {
 };
 
 export default function LeadCard({ lead, onKeep, onDismiss, onSend, onExtract, onSendText, busyAction, sendNote, extractNote }) {
+  const [showTimeline, setShowTimeline] = useState(false); // ★ trace 17 ก.ค.: กางแผงประวัติในที่ (การ์ดไม่เรียก API เอง — ให้ LeadTimeline จัดการ)
   if (!lead) return null;
   const score = Math.round(Number(lead.matchScore) || 0);
   const isFull = lead.fetchability === 'full';
@@ -149,7 +152,17 @@ export default function LeadCard({ lead, onKeep, onDismiss, onSend, onExtract, o
             title={sent ? 'ส่งเข้าคิวเขียนแล้ว' : 'ส่งเนื้อที่สกัดแล้วเข้าคิวเขียนข่าวแบบข้อความ'}
           >{sent ? '🚀 ส่งแล้ว' : '🚀 ส่งเขียน (แบบข้อความ)'}</Btn>
         )}
+
+        {/* ★ trace 17 ก.ค.: ปุ่มกางประวัติย้อนหลังของลีดใบนี้ */}
+        <Btn
+          variant="ghost"
+          onClick={() => setShowTimeline((v) => !v)}
+          style={{ minHeight: 40, padding: '8px 14px', fontSize: 13, flex: '1 1 auto' }}
+        >🧾 ประวัติ{showTimeline ? ' ▲' : ' ▼'}</Btn>
       </div>
+
+      {/* ★ trace 17 ก.ค.: แผงประวัติย้อนหลัง — กางในที่ */}
+      {showTimeline && <LeadTimeline lead={lead} />}
 
       {/* หมายเหตุการสกัดเนื้อ */}
       {extractNote && extractNote.kind === 'pending' && (
