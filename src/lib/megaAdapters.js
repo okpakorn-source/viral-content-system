@@ -3659,6 +3659,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   // ★ SEM-1 correction (Codex P0-2): ช่องที่ ref ระบุคนชัด — intent ของ ref ชนะกฎ global ทุกตัว (เช่น "วงกลมคนละคนกับ hero")
   const _slotHasIntent = (slot) => !!(semContract && String(semById.get(slot)?.wantPerson || '').trim());
   const used = new Set();
+  const usedPersons = new Map(); // ★ แบตช์ F (F2b): นับ person ที่ถูกใช้ต่อช่อง (soft diversity) — คนเดิมกินหลายช่องแล้วเลี่ยงเพิ่ม
   const slots = {};
   let fallbackUsed = 0;
   const chosenScenes = new Set(); // เฟส 3.1: กันฉากซ้ำข้ามช่อง
@@ -3743,12 +3744,38 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       if (img && _idGated(slot) && !_identityOk(slot, img)) img = null; // ไม่มีคนตามสัญญาช่องจริง → ปล่อยว่าง ห้ามฝืนผิดคน
       if (img) { fallbackUsed++; reason = reason || 'fallback ตามสูตรแสนไลค์ (หมวด/คุณภาพ)'; }
     }
+    // ★ แบตช์ F (F2b): soft person-diversity — ช่องรอง ถ้าคนที่เลือกถูกใช้แล้ว ≥2 ช่อง และมีตัวเลือกคนอื่น
+    //   ที่คะแนน (quality) ไม่ห่างเกิน 15% → สลับเป็นตัว diverse · soft: ไม่มีทางเลือก = ยอมซ้ำ (ห้าม fail งาน)
+    //   hero/ช่องที่ ref ระบุคน (intent) ไม่แตะ · kill-switch MEGA_PERSON_DIVERSITY='0' → ปิด (default ON) · OFF = ข้ามทั้งบล็อก byte-parity
+    if (process.env.MEGA_PERSON_DIVERSITY !== '0' && img && !_isHeroSlot(slot) && !_slotHasIntent(slot)) {
+      const _pcur = _lc(img.triage?.person || '');
+      if (_pcur && (usedPersons.get(_pcur) || 0) >= 2) {
+        const _scCur = img.triage?.quality ?? 5;
+        const _floor = _scCur * 0.85; // คะแนนไม่ห่างเกิน 15%
+        const _alt = sorted.find((x) => {
+          if (used.has(String(x.id)) || String(x.id) === String(img.id)) return false;
+          const p2 = _lc(x.triage?.person || '');
+          if (!p2 || p2 === _pcur) return false;             // ต้องเป็นคนอื่นที่ระบุตัวได้
+          if ((usedPersons.get(p2) || 0) >= 2) return false; // อย่าสลับไปหาคนที่ก็ซ้ำเยอะแล้ว
+          if (_idGated(slot) && !_identityOk(slot, x)) return false; // ช่องที่มี identity policy ต้องเคารพ
+          if (x.triage?.clean === false) return false;       // ไม่สลับไปของสกปรก
+          const sk = sceneKeyOf(x); if (sk && chosenScenes.has(sk)) return false; // ไม่สลับไปฉากซ้ำ
+          return (x.triage?.quality ?? 5) >= _floor;
+        });
+        if (_alt) {
+          console.log(`[MEGA S6] 👥 soft-diversity: ช่อง ${slot} คน "${img.triage?.person}" ซ้ำ ${usedPersons.get(_pcur)} ช่องแล้ว → สลับ ${_alt.id} (${_alt.triage?.person})`);
+          img = _alt;
+          reason = 'soft person-diversity (แบตช์ F: คนเดิมกินหลายช่อง เลี่ยงเพิ่ม)';
+        }
+      }
+    }
     // ★ D-sidecar: ได้ตัวจริงจากบล็อก fallback (ไม่ใช่สมอง/swap) = 'fallback'
     if (_dEvidenceOn && img && !_dStage) _dStage = 'fallback';
     if (img) {
       const _sk = sceneKeyOf(img);
       if (_sk) chosenScenes.add(_sk); // เฟส 3.1: จำฉากที่ใช้แล้ว
       used.add(String(img.id));
+      { const _pf2b = _lc(img.triage?.person || ''); if (_pf2b) usedPersons.set(_pf2b, (usedPersons.get(_pf2b) || 0) + 1); } // ★ F2b: นับคนที่ commit ต่อช่อง
       slots[slot] = {
         id: img.id,
         imageUrl: img.imageUrl, // rehost สลับเป็นไฟล์ถาวรให้เองในคลัง (ต้นทางอยู่ originUrl)
