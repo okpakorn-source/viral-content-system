@@ -40,7 +40,6 @@ export default function Sidebar() {
     // ── ⭐ ใช้งานหลัก (ใช้บ่อยสุด — มาร์คสีเด่น) ──
     { type: 'divider', label: '⭐ ใช้งานหลัก' },
     // ⛔ 16 ก.ค. 69: ถอดเมนูโต๊ะข่าวกลาง + คลังส่งเช้า (ยุบระบบโต๊ะข่าว — จะสร้างใหม่; กู้คืน: _removed-systems-backup-20260716)
-    { label: 'โต๊ะข่าว v2 — DNA Lab', icon: '🧬', href: '/news-desk', highlight: true },
     { label: 'สร้างคอนเทนต์ใหม่', icon: '✨', href: '/content/new', highlight: true },
     { label: 'ผลงานที่เขียนแล้ว', icon: '🧪', href: '/generation-logs' },
     { label: 'คอนเทนต์ทั้งหมด', icon: '📰', href: '/content' },
