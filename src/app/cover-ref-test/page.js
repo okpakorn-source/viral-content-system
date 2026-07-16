@@ -40,6 +40,19 @@ export default function CoverRefTestPage() {
   const timerRef = useRef(null);
   const abortRef = useRef(null);
 
+  // ── 📥 โหมดคิว (Q2) ──
+  const [queueOpen, setQueueOpen] = useState(false);
+  const [queueText, setQueueText] = useState('');
+  const [queueSubmitting, setQueueSubmitting] = useState(false);
+  const [queueSubmitResult, setQueueSubmitResult] = useState(null); // {jobs?, rejected?, errorType?}
+  const [queueError, setQueueError] = useState('');
+  const [queueJobs, setQueueJobs] = useState([]); // งาน mode==='reftest' จาก GET /api/mega
+  const [rowBusy, setRowBusy] = useState(''); // `${id}:${action}` ระหว่างสั่ง action ต่อแถว
+  const pollInflightRef = useRef(false); // กัน GET /api/mega ซ้อน
+  const tickInflightRef = useRef(false); // กัน POST /api/mega/tick ซ้อน
+  const queueJobsRef = useRef([]); // mirror ให้ tick driver อ่าน active โดยไม่ผูก closure เก่า
+  useEffect(() => { queueJobsRef.current = queueJobs; }, [queueJobs]);
+
   const startTimer = () => {
     setElapsed(0);
     const t0 = Date.now();
@@ -126,8 +139,111 @@ export default function CoverRefTestPage() {
     if (abortRef.current) abortRef.current.abort();
   }
 
+  // ── โหมดคิว: โหลดรายการงาน reftest จาก GET /api/mega (มี in-flight guard) ──
+  async function loadQueueJobs() {
+    if (pollInflightRef.current) return;
+    pollInflightRef.current = true;
+    try {
+      const r = await fetch('/api/mega');
+      const j = await r.json().catch(() => ({}));
+      if (j && j.success) setQueueJobs((j.jobs || []).filter((x) => x && x.mode === 'reftest'));
+    } catch { /* เงียบ — รอบโพลถัดไปลองใหม่ */ } finally {
+      pollInflightRef.current = false;
+    }
+  }
+
+  // ── โหมดคิว: poll GET /api/mega ทุก 5 วิ ระหว่างเปิดส่วนคิว (ล้าง interval ตอนปิด/unmount) ──
+  useEffect(() => {
+    if (!queueOpen) return undefined;
+    loadQueueJobs();
+    const id = setInterval(loadQueueJobs, 5000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueOpen]);
+
+  // ── โหมดคิว: tick driver — ระหว่างส่วนคิวเปิด + มีงาน active ≥1 → POST /api/mega/tick ทุก 6 วิ ──
+  //    (in-flight guard, อ่าน active จาก ref กัน closure เก่า, หยุดเมื่อไม่มี active/ปิดส่วน/unmount)
+  useEffect(() => {
+    if (!queueOpen) return undefined;
+    const drive = async () => {
+      if (tickInflightRef.current) return;
+      const hasActive = (queueJobsRef.current || []).some((j) => RT_ACTIVE_STATUSES.includes(j.status));
+      if (!hasActive) return; // ไม่มีงานเดินอยู่ = ไม่ต้องปลุก tick
+      tickInflightRef.current = true;
+      try { await fetch('/api/mega/tick', { method: 'POST' }); } catch { /* เงียบ */ } finally {
+        tickInflightRef.current = false;
+      }
+    };
+    const id = setInterval(drive, 6000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueOpen]);
+
+  // ── โหมดคิว: ส่งหลายข่าวเข้าคิว ──
+  async function submitQueue() {
+    const items = parseQueueItems(queueText);
+    if (items.length === 0) {
+      setQueueError('ยังไม่มีรายการ — วางเนื้อข่าว (คั่นแต่ละข่าวด้วยบรรทัดที่มีแค่ ---)');
+      return;
+    }
+    setQueueSubmitting(true); setQueueError(''); setQueueSubmitResult(null);
+    try {
+      const headers = { 'content-type': 'application/json' };
+      if (teamKey.trim()) headers['x-cover-test-key'] = teamKey.trim();
+      const res = await fetch('/api/cover-ref-test', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ mode: 'queue', items }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.status === 401 && j.errorType === 'COVER_TEST_KEY_REQUIRED') {
+        setQueueError('เรียกผ่านโฮสต์นี้ต้องมีคีย์ทีม — กรอกคีย์ทีมในช่อง "คีย์ทีม" ด้านบนฟอร์มแล้วลองใหม่');
+      } else {
+        setQueueSubmitResult(j);
+        // พังหมด = 400 NO_CONTENT (server ยังคืน rejected ต่อรายการ) — โชว์ผลได้ ไม่ต้องขึ้น error ซ้ำถ้ามี rejected
+        if (!res.ok && !(Array.isArray(j.rejected) && j.rejected.length > 0)) {
+          const errText = j.error ? formatClientError(j.error) : String(res.status);
+          setQueueError(`ส่งเข้าคิวไม่สำเร็จ: ${errText} ${j.errorType ? `(${j.errorType})` : ''}`);
+        }
+      }
+      loadQueueJobs(); // เห็นงานใหม่ในตารางทันที
+    } catch (e) {
+      setQueueError('เรียก API ล้ม: ' + formatClientError(e));
+    } finally {
+      setQueueSubmitting(false);
+    }
+  }
+
+  // ── โหมดคิว: action ต่อแถว (cancel/retry/duplicate) ผ่าน POST /api/mega → refresh ทันที ──
+  async function queueAction(action, id) {
+    setRowBusy(`${id}:${action}`);
+    setQueueError('');
+    try {
+      const res = await fetch('/api/mega', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action, id }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.success) {
+        setQueueError(`สั่ง "${action}" ไม่สำเร็จ: ${formatClientError(j.error || j)}${j.errorType ? ` (${j.errorType})` : ''}`);
+      }
+    } catch (e) {
+      setQueueError('เรียก API ล้ม: ' + formatClientError(e));
+    } finally {
+      setRowBusy('');
+      loadQueueJobs(); // refresh ทันทีทุกกรณี
+    }
+  }
+
   const label = { display: 'block', fontSize: 13, fontWeight: 700, margin: '10px 0 4px', color: '#334155' };
   const input = { width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 14, boxSizing: 'border-box' };
+
+  // preview รายการคิว (คำนวณสด จาก textarea) — นับ + ความยาว + เตือนสั้น
+  const parsedQueue = parseQueueItems(queueText);
+  const th = { textAlign: 'left', padding: '6px 8px', fontSize: 11.5, fontWeight: 800, color: '#475569', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap' };
+  const td = { padding: '6px 8px', fontSize: 12.5, borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' };
+  const rowBtn = (bg, color, brd) => ({ padding: '4px 8px', borderRadius: 7, border: `1px solid ${brd}`, background: bg, color, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', marginRight: 4, marginBottom: 4 });
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: 20, fontFamily: 'system-ui, sans-serif', color: '#0f172a' }}>
@@ -294,6 +410,242 @@ export default function CoverRefTestPage() {
           </div>
         </div>
       )}
+
+      {/* ═══════════════════════════════════════════════════════ */}
+      {/* 📥 โหมดคิว (Q2) — หลายข่าว, ปิดบราวเซอร์ได้ (collapsible, default ปิด) */}
+      {/* ═══════════════════════════════════════════════════════ */}
+      <div style={{ marginTop: 28, borderTop: '2px dashed #e2e8f0', paddingTop: 16 }}>
+        <button
+          type="button"
+          onClick={() => setQueueOpen((v) => !v)}
+          style={{ width: '100%', textAlign: 'left', padding: '12px 14px', borderRadius: 10, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', fontSize: 15, fontWeight: 800, cursor: 'pointer' }}
+        >
+          {queueOpen ? '▲' : '▼'} 📥 โหมดคิว (หลายข่าว — ปิดบราวเซอร์ได้)
+        </button>
+
+        {queueOpen && (
+          <div style={{ marginTop: 14 }}>
+            <p style={{ fontSize: 12.5, color: '#64748b', margin: '0 0 8px' }}>
+              วางหลายข่าวในกล่องเดียว คั่นแต่ละข่าวด้วยบรรทัดที่มีแค่ <b>---</b> · แต่ละข่าว: บรรทัดแรก = หัวข่าว, ที่เหลือ = เนื้อข่าวเต็ม ·
+              ส่งเข้าคิวแล้วปิดหน้าได้ — สายพานเดินเองจนได้ปก (เปิดหน้านี้ค้างไว้ = ช่วยเดินเครื่องให้ด้วย)
+            </p>
+            <textarea
+              style={{ ...input, minHeight: 200, resize: 'vertical', fontFamily: 'inherit' }}
+              value={queueText}
+              onChange={(e) => setQueueText(e.target.value)}
+              placeholder={'หัวข่าวที่ 1\nเนื้อข่าวเต็มของข่าวที่ 1...\n(หลายบรรทัดได้)\n---\nหัวข่าวที่ 2\nเนื้อข่าวเต็มของข่าวที่ 2...'}
+            />
+
+            {/* preview นับรายการ + ความยาว + เตือนสั้น */}
+            {parsedQueue.length > 0 && (
+              <div style={{ marginTop: 8, padding: 10, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12.5, color: '#334155' }}>
+                <b>พบ {parsedQueue.length} รายการ</b> (ส่งทุกรายการให้เซิร์ฟเวอร์ตัดสิน — server รายงานรายการที่ถูกปฏิเสธกลับมา):
+                <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                  {parsedQueue.map((it, i) => {
+                    const warn = queueItemWarning(it);
+                    return (
+                      <li key={i} style={{ marginBottom: 2 }}>
+                        <b>{i + 1}.</b> {it.newsTitle ? it.newsTitle.slice(0, 60) : <i style={{ color: '#94a3b8' }}>(ไม่มีหัวข่าว)</i>}
+                        <span style={{ color: '#94a3b8' }}> · เนื้อ {String(it.content || '').trim().length} ตัวอักษร</span>
+                        {warn && <span style={{ color: '#b91c1c', fontWeight: 700 }}> · ⚠️ {warn}</span>}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={submitQueue}
+              disabled={queueSubmitting || parsedQueue.length === 0}
+              style={{ marginTop: 12, padding: '11px 18px', borderRadius: 10, border: 'none', background: (queueSubmitting || parsedQueue.length === 0) ? '#94a3b8' : '#7c3aed', color: '#fff', fontSize: 14, fontWeight: 800, cursor: (queueSubmitting || parsedQueue.length === 0) ? 'not-allowed' : 'pointer' }}
+            >
+              {queueSubmitting ? '⏳ กำลังส่ง…' : `🚀 ส่งเข้าคิว (${parsedQueue.length} รายการ)`}
+            </button>
+
+            {queueError && (
+              <div style={{ marginTop: 10, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#b91c1c', fontSize: 13 }}>{queueError}</div>
+            )}
+
+            {/* ผลการส่งเข้าคิว: เข้าคิว (jobId+title) + ถูกปฏิเสธ (index+error) */}
+            {queueSubmitResult && (
+              <div style={{ marginTop: 10, padding: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, fontSize: 12.5, color: '#166534' }}>
+                {Array.isArray(queueSubmitResult.jobs) && queueSubmitResult.jobs.length > 0 && (
+                  <div>
+                    ✅ เข้าคิว {queueSubmitResult.jobs.length} งาน:
+                    <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                      {queueSubmitResult.jobs.map((jb, i) => <li key={i}><b>{jb.jobId}</b> — {jb.title || '(ไม่มีหัวข่าว)'}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {Array.isArray(queueSubmitResult.rejected) && queueSubmitResult.rejected.length > 0 && (
+                  <div style={{ marginTop: 6, color: '#9a3412' }}>
+                    ⚠️ ถูกปฏิเสธ {queueSubmitResult.rejected.length} รายการ:
+                    <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                      {queueSubmitResult.rejected.map((rj, i) => <li key={i}>รายการที่ {typeof rj.index === 'number' ? rj.index + 1 : '?'} — {formatClientError(rj.error)}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── ตารางสถานะคิว ── */}
+            <div style={{ marginTop: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <h3 style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>📋 สถานะคิว ({queueJobs.length})</h3>
+                <button type="button" onClick={loadQueueJobs} style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #cbd5e1', background: '#fff', color: '#475569', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>🔄 รีเฟรช</button>
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>อัปเดตอัตโนมัติทุก 5 วิ</span>
+              </div>
+              {queueJobs.length === 0 ? (
+                <div style={{ padding: 16, textAlign: 'center', color: '#94a3b8', fontSize: 13, border: '1px dashed #cbd5e1', borderRadius: 8 }}>ยังไม่มีงานในคิว — ส่งข่าวเข้าคิวด้านบน</div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+                    <thead>
+                      <tr>
+                        <th style={th}>id</th>
+                        <th style={th}>หัวข่าว</th>
+                        <th style={th}>ขั้น</th>
+                        <th style={th}>สถานะ</th>
+                        <th style={th}>อายุ</th>
+                        <th style={th}>ล่าสุด</th>
+                        <th style={th}>จัดการ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {queueJobs.map((job) => {
+                        const d = job.dossier || {};
+                        const st = rtStatusStyle(job.status);
+                        const stageLabel = RT_STAGE_LABELS[job.stage] || job.stage || '-';
+                        const ageMin = job.createdAt ? Math.max(0, Math.round((Date.now() - new Date(job.createdAt).getTime()) / 60000)) : null;
+                        const lastDone = Array.isArray(job.stagesDone) && job.stagesDone.length > 0 ? job.stagesDone[job.stagesDone.length - 1] : null;
+                        const coverPath = d.cover?.coverPath;
+                        const isActive = RT_ACTIVE_STATUSES.includes(job.status);
+                        const isTerminal = !isActive; // cover_ready / failed / cancelled ฯลฯ
+                        return (
+                          <tr key={job.id}>
+                            <td style={{ ...td, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{job.id}</td>
+                            <td style={{ ...td, maxWidth: 220 }}>{d.desk?.title || <i style={{ color: '#94a3b8' }}>-</i>}</td>
+                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{stageLabel}</td>
+                            <td style={td}>
+                              <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, background: st.bg, color: st.color, fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                {RT_STATUS_TEXT[job.status] || job.status}
+                              </span>
+                            </td>
+                            <td style={{ ...td, whiteSpace: 'nowrap', color: '#64748b' }}>{ageMin == null ? '-' : `${ageMin} นาที`}</td>
+                            <td style={{ ...td, maxWidth: 200, color: '#64748b' }}>{lastDone ? (lastDone.summary || lastDone.label || '') : ''}</td>
+                            <td style={{ ...td, minWidth: 180 }}>
+                              {coverPath && (
+                                <a href={coverPath} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginRight: 6, verticalAlign: 'middle' }} title="เปิดปกแท็บใหม่">
+                                  <img src={coverPath} alt="ปก" style={{ width: 34, height: 42, objectFit: 'cover', borderRadius: 5, border: '1px solid #86efac' }} />
+                                </a>
+                              )}
+                              {isActive && (
+                                <button type="button" disabled={!!rowBusy} onClick={() => queueAction('cancel', job.id)} style={rowBtn('#fef2f2', '#b91c1c', '#fecaca')}>
+                                  {rowBusy === `${job.id}:cancel` ? '…' : '✋ ยกเลิก'}
+                                </button>
+                              )}
+                              {job.status === 'failed' && (
+                                <button type="button" disabled={!!rowBusy} onClick={() => queueAction('retry', job.id)} style={rowBtn('#fffbeb', '#92400e', '#fde68a')}>
+                                  {rowBusy === `${job.id}:retry` ? '…' : '🔁 ลองใหม่'}
+                                </button>
+                              )}
+                              {isTerminal && (
+                                <button type="button" disabled={!!rowBusy} onClick={() => queueAction('duplicate', job.id)} style={rowBtn('#eff6ff', '#1d4ed8', '#bfdbfe')}>
+                                  {rowBusy === `${job.id}:duplicate` ? '…' : '🧬 ทำซ้ำ'}
+                                </button>
+                              )}
+                              {coverPath && (
+                                <a href={coverPath} target="_blank" rel="noreferrer" style={{ ...rowBtn('#f0fdf4', '#166534', '#bbf7d0'), display: 'inline-block', textDecoration: 'none' }}>🖼️ ดูปก</a>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
+}
+
+// ============================================================
+// 📥 โหมดคิว (Q2) — ตัวช่วยฝั่ง client (pure, ไม่ import megaAdapters เข้าหน้า)
+//   วางไว้ท้ายไฟล์ (นอกกรอบ formatClientError↔component ที่ ac0099 วัดขนาด) — ใช้ตอน render เท่านั้น
+// ============================================================
+
+// ★ Q3-3 ชุดเดียวกับ /mega — ป้ายไทยของขั้น rt_* (สาย reftest) · terminal cover_ready รวมไว้ด้วย
+const RT_STAGE_LABELS = {
+  rt_compass: 'เข็มทิศ',
+  rt_s5case: 'เปิดเคสภาพ',
+  rt_s5keywords: 'สกัดคีย์เวิร์ด',
+  rt_s5search: 'ค้นภาพหลายแหล่ง',
+  rt_s5triage: 'ตาคัดคลัง',
+  rt_s5clipframe: 'เฟรมคลิป',
+  rt_s6slots: 'เลือกภาพลงช่อง',
+  rt_s7compose: 'ประกอบปก + QC + คลัง',
+  cover_ready: '🏁 ปกเสร็จ',
+};
+
+// สถานะที่ยัง "เดินอยู่" (tick ต้องขับต่อ + ปุ่มยกเลิกใช้ได้)
+const RT_ACTIVE_STATUSES = ['pending', 'running', 'waiting'];
+
+// ชิปสีตามสถานะงานคิว (ตาม SPEC: pending เทา / running ฟ้า / waiting เหลือง / failed แดง / cancelled เทาเข้ม / cover_ready เขียว)
+function rtStatusStyle(status) {
+  const map = {
+    pending: { bg: '#e2e8f0', color: '#475569' },
+    running: { bg: '#dbeafe', color: '#1d4ed8' },
+    waiting: { bg: '#fef9c3', color: '#854d0e' },
+    failed: { bg: '#fee2e2', color: '#b91c1c' },
+    cancelled: { bg: '#475569', color: '#e2e8f0' },
+    cover_ready: { bg: '#dcfce7', color: '#166534' },
+  };
+  return map[status] || { bg: '#f1f5f9', color: '#475569' };
+}
+
+const RT_STATUS_TEXT = {
+  pending: 'รอเริ่ม',
+  running: 'กำลังทำ',
+  waiting: 'รอขั้นถัดไป',
+  failed: 'ล้มเหลว',
+  cancelled: 'ยกเลิกแล้ว',
+  cover_ready: '🏁 ปกเสร็จ',
+};
+
+// แยกข้อความหลายข่าว: คั่นแต่ละข่าวด้วยบรรทัดที่มีแค่ --- · บล็อกละ: บรรทัดแรก=หัวข่าว, ที่เหลือ=เนื้อข่าวเต็ม
+function parseQueueItems(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const groups = [];
+  let cur = [];
+  for (const line of lines) {
+    if (line.trim() === '---') { groups.push(cur); cur = []; }
+    else cur.push(line);
+  }
+  groups.push(cur);
+  const items = [];
+  for (const g of groups) {
+    const gl = g.slice();
+    while (gl.length && gl[0].trim() === '') gl.shift();            // ตัดบรรทัดว่างนำหน้า
+    while (gl.length && gl[gl.length - 1].trim() === '') gl.pop();  // ตัดบรรทัดว่างท้าย
+    if (gl.length === 0) continue;                                  // บล็อกว่างล้วน = ข้าม
+    const newsTitle = (gl[0] || '').trim();
+    const content = gl.slice(1).join('\n').trim();
+    items.push({ newsTitle, content });
+  }
+  return items;
+}
+
+// เตือนรายการที่สั้นกว่าเกณฑ์ (เหมือน gate ฝั่ง server: เนื้อ≥100 · หัว+เนื้อ≥200) — เตือนเฉยๆ ส่งทุกรายการให้ server ตัดสิน
+function queueItemWarning(it) {
+  const c = String(it.content || '').trim();
+  const combinedLen = [String(it.newsTitle || '').trim(), c].filter(Boolean).join('\n\n').length;
+  if (c.length < 100) return `เนื้อสั้น (${c.length}/100 ตัวอักษร)`;
+  if (combinedLen < 200) return `เนื้อหารวมสั้น (${combinedLen}/200 ตัวอักษร)`;
+  return '';
 }

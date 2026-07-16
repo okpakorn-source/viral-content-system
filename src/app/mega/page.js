@@ -35,6 +35,20 @@ const STATIONS = [
 const STAGE_ORDER = STATIONS.filter((s) => !s.future).map((s) => s.key);
 const DONE_STATUSES = ['content_ready', 'assets_ready', 'cover_ready'];
 
+// ★ Q3-3: ป้ายไทยของสาย reftest (cover-ref-test QUEUE) — งาน mode:'reftest' เดินคนละชุดขั้นกับ STATIONS s1-s7
+//   ประกาศตรงนี้ (client) ห้าม import megaAdapters เข้าฝั่งหน้า · ชุดเดียวกับหน้า /cover-ref-test
+const RT_STAGE_LABELS = {
+  rt_compass: 'เข็มทิศ',
+  rt_s5case: 'เปิดเคสภาพ',
+  rt_s5keywords: 'สกัดคีย์เวิร์ด',
+  rt_s5search: 'ค้นภาพหลายแหล่ง',
+  rt_s5triage: 'ตาคัดคลัง',
+  rt_s5clipframe: 'เฟรมคลิป',
+  rt_s6slots: 'เลือกภาพลงช่อง',
+  rt_s7compose: 'ประกอบปก + QC + คลัง',
+  cover_ready: '🏁 ปกเสร็จ',
+};
+
 function lightColor(job, stationKey) {
   if (STATIONS.find((s) => s.key === stationKey)?.future) return '#333';
   // งานเก่าที่จบเฟส 1 (content_ready) = ผ่านถึง S4 — ไฟ S5+ ยังไม่ถึง
@@ -164,16 +178,21 @@ export default function MegaPage() {
         const statusChip =
           DONE_STATUSES.includes(job.status) ? chipStyle('rgba(34,197,94,0.15)', '#22c55e')
           : job.status === 'failed' ? chipStyle('rgba(239,68,68,0.15)', '#f87171')
+          // ★ Q3-3: cancelled = ผู้ใช้ยกเลิกงานคิว (terminal) — เทาเข้ม แยกจาก failed
+          : job.status === 'cancelled' ? chipStyle('rgba(100,116,139,0.22)', '#94a3b8')
           : (job.status === 'waiting' || job.status === 'needs_gap_search' || job.status === 'manual_review' || job.status === 'insufficient_assets') ? chipStyle('rgba(234,179,8,0.15)', '#eab308')
           : chipStyle('rgba(96,165,250,0.12)', '#60a5fa');
-        // ★ W2-A2: 2 สถานะใหม่จาก QC gate (terminal — job หยุดรอคน/หาภาพเพิ่ม ไม่ใช่ error ของระบบ)
-        const statusText = { pending: 'รอเริ่ม', running: 'กำลังทำ', waiting: 'รอขั้นถัดไป', content_ready: '📄 เนื้อพร้อม (จบเฟส 1)', assets_ready: '🧺 เนื้อ+ภาพครบชุด', cover_ready: '🏁 ปกเสร็จครบวงจร', failed: 'ล้มเหลว', skipped: 'ข้าม', needs_gap_search: '🔍 QC ไม่ผ่าน — ต้องหาภาพเพิ่ม', manual_review: '👁️ QC ไม่ผ่าน — รอคนตรวจ', insufficient_assets: '🪫 วัตถุดิบไม่พอ — hero คุณภาพไม่ถึงเกณฑ์' }[job.status] || job.status;
+        // ★ W2-A2: 2 สถานะใหม่จาก QC gate (terminal — job หยุดรอคน/หาภาพเพิ่ม ไม่ใช่ error ของระบบ) · ★ Q3-3: cancelled
+        const statusText = { pending: 'รอเริ่ม', running: 'กำลังทำ', waiting: 'รอขั้นถัดไป', content_ready: '📄 เนื้อพร้อม (จบเฟส 1)', assets_ready: '🧺 เนื้อ+ภาพครบชุด', cover_ready: '🏁 ปกเสร็จครบวงจร', failed: 'ล้มเหลว', skipped: 'ข้าม', cancelled: '✋ ยกเลิกแล้ว', needs_gap_search: '🔍 QC ไม่ผ่าน — ต้องหาภาพเพิ่ม', manual_review: '👁️ QC ไม่ผ่าน — รอคนตรวจ', insufficient_assets: '🪫 วัตถุดิบไม่พอ — hero คุณภาพไม่ถึงเกณฑ์' }[job.status] || job.status;
+        // ★ Q3-3: งานสาย reftest (cover-ref-test QUEUE) — โชว์ป้ายขั้น rt_* ให้อ่านออก (STATIONS ครอบเฉพาะ s1-s7)
+        const rtStageLabel = RT_STAGE_LABELS[job.stage];
         const mins = Math.round((new Date(job.updatedAt) - new Date(job.createdAt)) / 60000);
         return (
           <div key={job.id} style={{ border: '1px solid var(--border, #333)', borderRadius: 14, padding: 16, marginBottom: 14, background: 'var(--bg-secondary, rgba(255,255,255,0.02))' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <b style={{ fontSize: 15 }}>{job.id}</b>
               <span style={statusChip}>{statusText}</span>
+              {rtStageLabel && <span style={chipStyle('rgba(168,85,247,0.14)', '#c084fc')}>🎯 RT · {rtStageLabel}</span>}
               <span style={{ fontSize: 12, color: job.quality === 'red' ? '#f87171' : job.quality === 'yellow' ? '#eab308' : '#22c55e' }}>
                 ● คุณภาพ{job.quality === 'green' ? 'ดี' : job.quality === 'yellow' ? 'กลาง' : 'แย่'}
               </span>

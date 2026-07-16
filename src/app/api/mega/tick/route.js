@@ -99,7 +99,9 @@ function stageInputHash(job) {
   return crypto.createHash('sha256').update(JSON.stringify(basis)).digest('hex').slice(0, 16);
 }
 
-export async function POST(req) {
+// ★ Q3-1: แยกแกนเดินสายพานออกจาก handler — GET (Vercel cron) กับ POST (worker/UI) เรียกตัวเดียวกัน
+//   ไม่พึ่ง req.json() (POST เดิมก็ไม่เคยอ่าน body — ใช้แค่ req.nextUrl.origin) → พฤติกรรม POST byte-identical
+async function _runTick(req) {
   let locked = false;
   let leaseToken = null;
   try {
@@ -286,4 +288,18 @@ export async function POST(req) {
     //   เดิม setFlags(tickLockAt:null) ล้วน = tick เก่าค้าง >10 นาที กลับมาล้าง lease ของ tick ใหม่ได้
     if (locked) await releaseTickLease({ getFlags, setFlags }, leaseToken).catch(() => {});
   }
+}
+
+// worker เครื่องทีม / ปุ่มบนหน้า /mega+/cover-ref-test → เดิน 1 จังหวะ (พฤติกรรมเดิมทุก byte)
+export async function POST(req) {
+  return _runTick(req);
+}
+
+// ★ Q3-1: Vercel cron ยิง GET เสมอ — ปิดไว้เป็น default (สวิตช์ตามวินัยโปรเจกต์)
+//   เปิดด้วย MEGA_CRON_TICK=1 (exact) เท่านั้น จึงเดินแกนเดียวกับ POST · ปิดอยู่ = 200 ไม่แตะงานใด
+export async function GET(req) {
+  if (process.env.MEGA_CRON_TICK !== '1') {
+    return NextResponse.json({ success: true, skipped: 'MEGA_CRON_TICK ปิดอยู่' });
+  }
+  return _runTick(req);
 }
