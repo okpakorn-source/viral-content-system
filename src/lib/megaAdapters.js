@@ -3133,7 +3133,14 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     if (lockedRef) {
       // ★ Wave1 Batch E: dnaHash+refBoundAt — stamp ว่า DNA ก้อนไหน/เมื่อไหร่ถูกผูกกับข่าวนี้ (debug/replay)
       // ★ รอบ 6 P1: refId เพิ่มเฉพาะใต้สวิตช์ — ปิด = ไม่มี property เลย (object shape เท่า legacy 100%)
-      job.dossier.refMatch = { ...(process.env.MEGA_SELECTION_SPEC === '1' && lockedRef.id ? { refId: lockedRef.id } : {}), dna: lockedRef.dna, styleName: lockedRef.styleName || lockedRef.id, imagePath: lockedRef.imagePath, reason: 'ล็อก refId', typeMatched: true, dnaHash: _dnaHashFor(lockedRef.dna), refBoundAt: new Date().toISOString() };
+      // ★ R4 (16 ก.ค.): ref ที่ล็อก = strong match เช่นกัน → MEGA_REF_LAYOUT_ONLY (default ON) sanitize เป็น layout-only
+      //   ด้วย (ตามคำสั่งเจ้าของ "ใช้กับทุก match") · ปิด (==='0') = lockedRef.dna ดิบ + dnaHash เดิมทุก byte
+      let _lockedDna = lockedRef.dna;
+      if (process.env.MEGA_REF_LAYOUT_ONLY !== '0') {
+        const { sanitizeRefDnaLayoutOnly } = await import('@/lib/refTemplate');
+        _lockedDna = sanitizeRefDnaLayoutOnly(lockedRef.dna);
+      }
+      job.dossier.refMatch = { ...(process.env.MEGA_SELECTION_SPEC === '1' && lockedRef.id ? { refId: lockedRef.id } : {}), dna: _lockedDna, styleName: lockedRef.styleName || lockedRef.id, imagePath: lockedRef.imagePath, reason: 'ล็อก refId', typeMatched: true, dnaHash: _dnaHashFor(_lockedDna), refBoundAt: new Date().toISOString() };
       console.log(`[MEGA S6] 🔒 ใช้ ref ที่ล็อก: ${lockedRef.styleName || lockedRef.id}`);
     } else {
       try {
@@ -3153,8 +3160,14 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           const weak = !m.typeMatched;
           // ★ B0 (16 ก.ค.): weak → strip เนื้อหา top-level เดิม + sanitize template.slots (geometry ล้วน) ด้วย
           //   (เดิม strip แค่ top-level slots — template.slots ยังพก subject/shot → note รั่วเข้าพรอมป์ Director)
-          const { sanitizeRefDnaForWeakMatch } = await import('@/lib/refTemplate');
-          const dna = weak ? sanitizeRefDnaForWeakMatch({ ...m.ref.dna, slots: [], neededShots: [], storyFlow: '', compositionLogic: '' }) : m.ref.dna;
+          // ★ R4 (16 ก.ค. — เจ้าของเคาะ "ref เอาแค่เทมเพลตกับรายละเอียดที่ดี ไม่ใช่บังคับช่องไหนต้องใส่ภาพอะไร"):
+          //   สวิตช์ MEGA_REF_LAYOUT_ONLY default ON (ปิดเมื่อ ==='0' เป๊ะ = ref-first เดิม) → strong match ก็ผ่าน
+          //   layout-only sanitize (โครง+role+style ล้วน) · weak ยังใช้ B0 (แรงกว่า) ไม่ว่าสวิตช์ไหน (บั๊กฟิกซ์)
+          const _layoutOnly = process.env.MEGA_REF_LAYOUT_ONLY !== '0';
+          const { sanitizeRefDnaForWeakMatch, sanitizeRefDnaLayoutOnly } = await import('@/lib/refTemplate');
+          const dna = weak
+            ? sanitizeRefDnaForWeakMatch({ ...m.ref.dna, slots: [], neededShots: [], storyFlow: '', compositionLogic: '' })
+            : (_layoutOnly ? sanitizeRefDnaLayoutOnly(m.ref.dna) : m.ref.dna);
           // ★ Wave1 Batch E: dnaHash+refBoundAt — stamp ว่า DNA ก้อนไหน/เมื่อไหร่ถูกผูกกับข่าวนี้ (debug/replay)
           // ★ รอบ 6 P1: refId เพิ่มเฉพาะใต้สวิตช์ — ปิด = ไม่มี property เลย (object shape เท่า legacy 100%)
           job.dossier.refMatch = { ...(process.env.MEGA_SELECTION_SPEC === '1' && m.ref.id ? { refId: m.ref.id } : {}), dna, styleName: m.ref.styleName || m.ref.id, imagePath: m.ref.imagePath, reason: m.reason, typeMatched: !weak, dnaHash: _dnaHashFor(dna), refBoundAt: new Date().toISOString() };
@@ -5158,12 +5171,21 @@ export async function s7_cover(job, { origin, _deps } = {}) {
         dreamShots: (c.visualDreamShots || []).map((v) => v.slot || v.description || ''),
       });
       if (m?.ref?.dna) {
-        refDNA = m.ref.dna; // payload/composer: legacy เดิมเป๊ะ ห้าม strip (kill switch ต้องไม่เปลี่ยนผลปก)
         // ★ ผู้ตรวจอิสระ (รอบ 4) + รอบ 5: strip เฉพาะสัญญา — weak match = S6 ใช้เฉพาะโครง
         // ★ B0 (16 ก.ค.): sanitize template.slots (geometry ล้วน) + ธง _contentSanitized ด้วย — กัน note รั่ว
         //   (fallback นี้เดินเฉพาะแฟ้มเก่าไม่มี refMatch · แฟ้มปกติ selectionRefDNA = d.refMatch.dna ที่ S6 sanitize แล้ว)
-        const { sanitizeRefDnaForWeakMatch } = await import('@/lib/refTemplate');
-        selectionRefDNA = m.typeMatched ? m.ref.dna : sanitizeRefDnaForWeakMatch({ ...m.ref.dna, slots: [], neededShots: [], storyFlow: '', compositionLogic: '' });
+        // ★ R4 (16 ก.ค. — เจ้าของเคาะ): MEGA_REF_LAYOUT_ONLY (default ON) → ปิด residual ที่ B0 ชี้ว่า S7 legacy
+        //   fallback ยัง raw · ON = ทั้ง refDNA (payload/composer) และ selectionRefDNA เป็น layout-only (strong) /
+        //   weak-sanitize (weak) เท่ากัน · OFF (==='0') = พฤติกรรม B0/HEAD เดิมเป๊ะ (refDNA raw · selection strip เฉพาะ weak)
+        const { sanitizeRefDnaForWeakMatch, sanitizeRefDnaLayoutOnly } = await import('@/lib/refTemplate');
+        const _weakSan = () => sanitizeRefDnaForWeakMatch({ ...m.ref.dna, slots: [], neededShots: [], storyFlow: '', compositionLogic: '' });
+        if (process.env.MEGA_REF_LAYOUT_ONLY !== '0') {
+          refDNA = m.typeMatched ? sanitizeRefDnaLayoutOnly(m.ref.dna) : _weakSan();
+          selectionRefDNA = refDNA;
+        } else {
+          refDNA = m.ref.dna; // payload/composer: legacy เดิมเป๊ะ ห้าม strip (kill switch ต้องไม่เปลี่ยนผลปก)
+          selectionRefDNA = m.typeMatched ? m.ref.dna : _weakSan();
+        }
         resolvedRefId = m.ref.id || _dnaHashFor(selectionRefDNA); // identity จริงเท่านั้น — ห้ามใช้ styleName
         refInfo = ` · 🎯ref ${m.ref.styleName || m.ref.id} (${m.reason})`.slice(0, 90);
       }

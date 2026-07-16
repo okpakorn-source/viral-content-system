@@ -100,6 +100,43 @@ export function sanitizeRefDnaForWeakMatch(dna) {
   return { ...dna, template, _contentSanitized: true };
 }
 
+// ★ R4 (16 ก.ค. — เจ้าของระบบเคาะ) layout-only ref sanitizer — ใช้กับ "ทุก match" (ไม่ใช่แค่ weak) ─────
+//   คำสั่งเจ้าของ: "ref เอาแค่เทมเพลตกับรายละเอียดที่ดี เช่นความสะอาดตา สื่อสารดี — ไม่ใช่บังคับช่องไหน
+//   ต้องใส่ภาพอะไร การเลือกภาพเป็นหน้าที่สมองเลือกรูปให้ตรงข่าว" → ref ให้ "โครงเลย์เอาต์ + สไตล์คุณภาพ"
+//   เท่านั้น · ไม่ให้ subject/shot/emotion บังคับการเลือกภาพ/พรอมป์ Director แม้ match แน่น (typeMatched=true)
+//   คืน DNA ก้อน "ใหม่" (ไม่ mutate ของเดิมในคลัง):
+//     • template.slots → เหลือ geometry (xPct/yPct/wPct/hPct/shape/zIndex/border/borderColor/borderWidthPct/pos)
+//                        + role (โครงเลย์เอาต์: ช่องไหน hero/บริบท/หลักฐาน — เจ้าของยืนยัน "ช่องอื่นเรียงตามบริบทข่าว")
+//                        ตัด subject/shot/emotion ทิ้ง (→ dnaToTemplateSpec งด note ด้วยธง _contentSanitized)
+//                        faceSizePct = เป้าครอปเฉพาะช่อง = "บังคับช่อง" → ตัดด้วย (ต่างจาก weak ที่คงไว้)
+//     • ระดับบน → ตัด slots(บรรยาย)/neededShots/storyFlow/compositionLogic (field ที่ไหลเข้าสมองเลือกภาพ)
+//                 เก็บที่เหลือด้วย spread: style (tone/palette/hasText/effects = คุณภาพ "สะอาดตา สื่อสารดี") ·
+//                 matchNewsType/emotion (ใช้ตอน match) · panelCount · layoutType · seamStyle/featherPx (template)
+//     + ธง _contentSanitized (enumerable — อยู่รอด JSON round-trip เหมือน B0) → ทุก consumer ได้ note-free
+//   ★ ต่างจาก sanitizeRefDnaForWeakMatch (B0): layout-only เก็บ style ระดับบน · ไม่เก็บ faceSizePct ในช่อง
+const _LAYOUT_ONLY_SLOT_KEYS = ['xPct', 'yPct', 'wPct', 'hPct', 'shape', 'zIndex', 'border', 'borderColor', 'borderWidthPct', 'pos', 'role'];
+export function sanitizeRefDnaLayoutOnly(dna) {
+  if (!dna || typeof dna !== 'object') return dna;
+  const t = dna.template;
+  let template = t;
+  if (t && typeof t === 'object' && Array.isArray(t.slots)) {
+    const slots = t.slots.map((s) => {
+      const g = {};
+      if (s && typeof s === 'object') {
+        for (const k of _LAYOUT_ONLY_SLOT_KEYS) if (s[k] !== undefined) g[k] = s[k];
+      }
+      return g;
+    });
+    template = { ...t, slots }; // เก็บ seamStyle/featherPx/panelCount ฯลฯ ที่ระดับ template (ถ้ามี) ด้วย spread
+  }
+  // ตัด field ระดับบนที่ไหลเข้า "การเลือกภาพ" — เก็บที่เหลือ (style/matchNewsType/emotion/panelCount/layoutType) ด้วย spread
+  // ★ R4 fix (16 ก.ค. — ผู้ตรวจเคาะ): 'subjectsRelation' = per-slot subject dictation ระดับบน (เช่น "วงกลม=คู่รัก")
+  //   semantically เท่ากับ slots[].subject ที่ตัดไปแล้ว → เป็น "บังคับช่องต้องใส่ภาพอะไร" ตรงข้ามคำสั่งเจ้าของ
+  //   (พบรั่วจริง 15/21 entry ใน ref-cover-library.json) → ต้องตัดทิ้งด้วย
+  const { slots: _dropSlots, neededShots: _dropNeeded, storyFlow: _dropFlow, compositionLogic: _dropComp, subjectsRelation: _dropSubjRel, ...rest } = dna;
+  return { ...rest, template, _contentSanitized: true };
+}
+
 export function dnaToTemplateSpec(dna) {
   try {
     const t = dna?.template;
