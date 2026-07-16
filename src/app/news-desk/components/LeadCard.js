@@ -37,6 +37,7 @@ const STATUS_META = {
 
 export default function LeadCard({ lead, onKeep, onDismiss, onSend, onExtract, onSendText, busyAction, sendNote, extractNote }) {
   const [showTimeline, setShowTimeline] = useState(false); // ★ trace 17 ก.ค.: กางแผงประวัติในที่ (การ์ดไม่เรียก API เอง — ให้ LeadTimeline จัดการ)
+  const [showContent, setShowContent] = useState(false); // 🆕 D1 17 ก.ค.: กางกล่อง "ดูเนื้อที่จะส่ง" ก่อนกด 🚀
   if (!lead) return null;
   const score = Math.round(Number(lead.matchScore) || 0);
   const isFull = lead.fetchability === 'full';
@@ -50,6 +51,11 @@ export default function LeadCard({ lead, onKeep, onDismiss, onSend, onExtract, o
   const insightLines = lead.extract?.insight
     ? [lead.extract.insight.headline, lead.extract.insight.overview, lead.extract.insight.category].filter(Boolean)
     : (Array.isArray(lead.insightTopics) ? lead.insightTopics.filter(Boolean) : []);
+  // ── 🆕 D1 17 ก.ค.: สถานะการกลั่นเนื้อ — undefined = ยังไม่รู้ (เช่น ยังไม่รีเฟรชลิสต์เต็มจากคลัง) ──
+  const distilled = lead.extract?.distilled; // true | false | undefined
+  const rawLen = lead.extract?.raw?.length ?? null;
+  const distillFacts = Array.isArray(lead.extract?.facts) ? lead.extract.facts.filter(Boolean) : [];
+  const distillQuotes = Array.isArray(lead.extract?.keyQuotes) ? lead.extract.keyQuotes.filter(Boolean) : [];
 
   return (
     <div style={{
@@ -92,13 +98,54 @@ export default function LeadCard({ lead, onKeep, onDismiss, onSend, onExtract, o
         <div style={{ fontSize: 12, color: UI.dim, lineHeight: 1.5 }}>💬 {lead.reason}</div>
       )}
 
-      {/* R6: เนื้อพร้อม + ประเด็นย่อ (≤3 บรรทัด) — โผล่เฉพาะหลังกด "สกัดเนื้อ" สำเร็จ */}
+      {/* R6 + 🆕 D1 (17 ก.ค.): เนื้อพร้อม/กลั่นแล้ว + ประเด็นย่อ + ปุ่มดูเนื้อก่อนส่ง — โผล่เฉพาะหลังกด "สกัดเนื้อ" สำเร็จ */}
       {contentReady && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <Chip color={UI.green}>📄 เนื้อพร้อม {extractLen.toLocaleString('th-TH')} ตัวอักษร</Chip>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            {distilled === true ? (
+              <Chip color={UI.green}>
+                📄 เนื้อกลั่นแล้ว {extractLen.toLocaleString('th-TH')} ตัวอักษร{rawLen ? ` (จากดิบ ${rawLen.toLocaleString('th-TH')})` : ''}
+              </Chip>
+            ) : (
+              <Chip color={UI.green}>📄 เนื้อพร้อม {extractLen.toLocaleString('th-TH')} ตัวอักษร</Chip>
+            )}
+            {distilled === false && <Chip color={UI.amber}>⚠️ กลั่นไม่สำเร็จ — จะส่งฉบับดิบ</Chip>}
+            <Btn
+              variant="ghost"
+              onClick={() => setShowContent((v) => !v)}
+              style={{ minHeight: 30, padding: '4px 10px', fontSize: 12 }}
+            >👁 ดูเนื้อที่จะส่ง{showContent ? ' ▲' : ' ▼'}</Btn>
+          </div>
           {insightLines.slice(0, 3).map((line, i) => (
             <div key={i} style={{ fontSize: 12, color: UI.dim, lineHeight: 1.5 }}>🔎 {String(line).slice(0, 160)}</div>
           ))}
+          {/* 🆕 D1: กล่องอ่านเนื้อที่จะส่งจริง (clean + facts + keyQuotes) — scroll ได้ ให้ผู้ใช้เห็นก่อนกด 🚀 เสมอ */}
+          {showContent && (
+            <div style={{
+              maxHeight: 300, overflowY: 'auto', background: UI.card, border: `1px solid ${UI.line}`,
+              borderRadius: 10, padding: 10, fontSize: 12.5, color: UI.text, lineHeight: 1.6, whiteSpace: 'pre-wrap',
+            }}>
+              {lead.extract?.text
+                ? <div>{lead.extract.text}</div>
+                : <div style={{ color: UI.dim }}>(ยังไม่มีเนื้อโหลดเต็ม — รีเฟรชหน้าถ้าไม่โผล่)</div>}
+              {distillFacts.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontWeight: 700, color: UI.dim, fontSize: 11 }}>ข้อเท็จจริงแกน</div>
+                  <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                    {distillFacts.map((f, i) => <li key={i}>{String(f)}</li>)}
+                  </ul>
+                </div>
+              )}
+              {distillQuotes.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontWeight: 700, color: UI.dim, fontSize: 11 }}>คำพูดสำคัญ</div>
+                  <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                    {distillQuotes.map((q, i) => <li key={i}>&ldquo;{String(q)}&rdquo;</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
