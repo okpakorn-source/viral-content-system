@@ -312,7 +312,27 @@ export async function POST(req) {
       }
     }
 
-    return NextResponse.json({ success: true, checked: items.length, hosted, failed, results });
+    // ★ 17 ก.ค. (Supabase เต็ม 1.2GB/12,223 ไฟล์ — ผู้ใช้สั่งล้าง+กันเต็มซ้ำ): ท่อระบายอายุผูกกับลูป rehost เดิม
+    //   ทุกครั้งที่ worker เรียก run → ลบเฟรมเก่ากว่า REHOST_RETENTION_DAYS (default 14 วัน) สูงสุด 100 ไฟล์/รอบ
+    //   เคสที่จบงานแล้วไม่ต้องใช้เฟรมต้นทางอีก (ปกประกอบเสร็จเก็บแยกในคลังปก) · ปิดได้ REHOST_AGE_PRUNE='0'
+    //   fail-open: prune ล้มไม่กระทบผล rehost (try/catch ครอบทั้งก้อน)
+    let pruned = 0;
+    if (process.env.REHOST_AGE_PRUNE !== '0') {
+      try {
+        const days = parseInt(process.env.REHOST_RETENTION_DAYS || '14', 10);
+        const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+        const { data: oldFiles } = await c.storage.from(BUCKET).list('', {
+          limit: 100, sortBy: { column: 'created_at', order: 'asc' },
+        });
+        const expired = (oldFiles || []).filter((f) => f.metadata && (f.created_at || '') < cutoff).map((f) => f.name);
+        if (expired.length) {
+          const { error: pe } = await c.storage.from(BUCKET).remove(expired);
+          if (!pe) pruned = expired.length;
+        }
+      } catch { /* ท่อระบายล้ม = ข้ามรอบนี้ */ }
+    }
+
+    return NextResponse.json({ success: true, checked: items.length, hosted, failed, pruned, results });
   } catch (err) {
     return NextResponse.json({ success: false, error: err.message, errorType: 'UNEXPECTED' }, { status: 500 });
   }
