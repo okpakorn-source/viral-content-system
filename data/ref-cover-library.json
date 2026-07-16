@@ -207,6 +207,14 @@
         "lowConfidenceBoundaries": 1,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "C",
+        "reasons": [
+          "_fidelity score 76 (70-84) → โซน B",
+          "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -420,6 +428,14 @@
         "lowConfidenceBoundaries": 3,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "B",
+        "reasons": [
+          "_fidelity score 85 ≥85 → โซน A",
+          "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -607,6 +623,13 @@
         "lowConfidenceBoundaries": 1,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "F",
+        "reasons": [
+          "_fidelity score 40 < 50 → F"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -792,6 +815,14 @@
         "lowConfidenceBoundaries": 1,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "C",
+        "reasons": [
+          "_fidelity score 73 (70-84) → โซน B",
+          "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -1003,6 +1034,14 @@
         "lowConfidenceBoundaries": 2,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "C",
+        "reasons": [
+          "_fidelity score 73 (70-84) → โซน B",
+          "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -1217,6 +1256,14 @@
         "lowConfidenceBoundaries": 0,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "F",
+        "reasons": [
+          "_fidelity score 56 (50-69) → โซน C",
+          "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -1433,6 +1480,13 @@
         "lowConfidenceBoundaries": 0,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "F",
+        "reasons": [
+          "ใบซ้ำของ REF-mrbq6y74-on6u (_duplicateOf)"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null,
@@ -1647,6 +1701,13 @@
         "lowConfidenceBoundaries": 0,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "F",
+        "reasons": [
+          "_fidelity score 48 < 50 → F"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -1858,6 +1919,14 @@
         "lowConfidenceBoundaries": 0,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "F",
+        "reasons": [
+          "_fidelity score 66 (50-69) → โซน C",
+          "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -2044,6 +2113,13 @@
         "lowConfidenceBoundaries": 1,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "A",
+        "reasons": [
+          "_fidelity score 89 ≥85 → โซน A"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -2226,6 +2302,13 @@
         "lowConfidenceBoundaries": 1,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "B",
+        "reasons": [
+          "_fidelity score 70 (70-84) → โซน B"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -2439,6 +2522,14 @@
         "lowConfidenceBoundaries": 2,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "F",
+        "reasons": [
+          "_fidelity score 65 (50-69) → โซน C",
+          "worstOffsetPx 32.8 > 30 → ลดหนึ่งขั้น"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -2662,6 +2753,13 @@
         "lowConfidenceBoundaries": 1,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "A",
+        "reasons": [
+          "_fidelity score 93 ≥85 → โซน A"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -2848,6 +2946,14 @@
         "lowConfidenceBoundaries": 2,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "F",
+        "reasons": [
+          "_fidelity score 50 (50-69) → โซน C",
+          "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -3060,6 +3166,14 @@
         "lowConfidenceBoundaries": 2,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "F",
+        "reasons": [
+          "_fidelity score 57 (50-69) → โซน C",
+          "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -3243,6 +3357,14 @@
         "lowConfidenceBoundaries": 1,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "C",
+        "reasons": [
+          "_fidelity score 78 (70-84) → โซน B",
+          "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -3451,6 +3573,13 @@
         "lowConfidenceBoundaries": 1,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "C",
+        "reasons": [
+          "_fidelity score 68 (50-69) → โซน C"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -3663,6 +3792,13 @@
         "lowConfidenceBoundaries": 3,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "C",
+        "reasons": [
+          "_fidelity score 57 (50-69) → โซน C"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -3875,6 +4011,13 @@
         "lowConfidenceBoundaries": 3,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "F",
+        "reasons": [
+          "ใบซ้ำของ REF-mrbqa9k2-obt0 (_duplicateOf)"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null,
@@ -4087,6 +4230,14 @@
         "lowConfidenceBoundaries": 0,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "F",
+        "reasons": [
+          "_fidelity score 55 (50-69) → โซน C",
+          "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null
@@ -4297,6 +4448,14 @@
         "lowConfidenceBoundaries": 2,
         "measuredAt": "2026-07-16T10:52:02.736Z",
         "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "F",
+        "reasons": [
+          "_fidelity score 62 (50-69) → โซน C",
+          "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
+        ],
+        "engineVersion": "ref-grade-r3-v1"
       }
     },
     "dnaError": null

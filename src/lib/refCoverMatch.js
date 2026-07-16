@@ -6,6 +6,7 @@
 // ============================================================
 
 import { listRefCovers } from '@/lib/refCoverLibrary';
+import { refPoolGateOpen } from '@/lib/refCoverGrade';
 
 const norm = (s) => String(s || '').toLowerCase().trim();
 
@@ -32,7 +33,9 @@ export async function pickBestRef(signals = {}, opts = {}) {
   const items = await listRefCovers(500);
   // ★ 9 ก.ค. (ผู้ใช้เคาะ "ใช้เฉพาะ ref ที่ทำตามได้จริง 100%"): ตัด ref ที่เครื่องวัดตะเข็บชี้ว่า
   //   ขอบภาพถูกกลืน/ตกแต่งจนวางช่องตามไม่ได้ (_reproducible=false จาก _ref_apply_reproducible.mjs)
-  const pool = items.filter((x) => x.dna && x.imagePath && x.dna._reproducible !== false);
+  // ★ R3 (16 ก.ค.): ตัวกรองพูลย้ายไป refPoolGateOpen (PURE) — OFF = พฤติกรรมเดิมเป๊ะ
+  //   (dna+imagePath+_reproducible!==false) · REF_TEMPLATE_GRADE_GATE='1' = รับเฉพาะเกรด A/B ไม่ซ้ำ
+  const pool = items.filter((x) => refPoolGateOpen(x));
   if (!pool.length) return null;
 
   const emo = norm(signals.emotion);

@@ -14,6 +14,7 @@ import { getCase, listRecent } from '@/lib/caseStore';
 import { listRefCovers } from '@/lib/refCoverLibrary';
 import { composeAndVerify } from '@/lib/services/megaComposerService';
 import { evaluateCoverQc } from '@/lib/coverQcGate'; // ★ W2-A2: advisory เท่านั้น — ไม่บล็อกเครื่องมือเทส แค่แนบผลด่าน QC ให้เห็น
+import { refPoolGateOpen } from '@/lib/refCoverGrade'; // ★ R3: ตัวกรอง ref ใต้สวิตช์ REF_TEMPLATE_GRADE_GATE (OFF = เดิมเป๊ะ)
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // audit 9 ก.ค.: ท่อเต็มมี LLM ≥4 จุด เวลาจริง 60-90s — 120 ตึงเกิน (ชน timeout = เสียค่า LLM ฟรี)
@@ -34,7 +35,8 @@ export async function GET(req) {
         return { id: c.id, headline: c.headline, tone: c.tone, total: imgs.length, relevant: rel.length, cleanFace: cleanFace.length };
       }));
       // ★ 9 ก.ค.: โชว์เฉพาะ ref ที่ทำตามได้จริง (_reproducible≠false — เครื่องวัดตะเข็บคัดแล้ว)
-      const refs = (await listRefCovers(500)).filter((r) => r.dna && r.imagePath && r.dna._reproducible !== false)
+      // ★ R3 (16 ก.ค.): ตัวกรองย้ายไป refPoolGateOpen — OFF = เงื่อนไขเดิมเป๊ะ · GATE='1' = เกรด A/B ไม่ซ้ำ
+      const refs = (await listRefCovers(500)).filter((r) => refPoolGateOpen(r))
         .map((r) => ({ id: r.id, styleName: r.styleName || r.id, layoutFamily: r.dna.layoutFamily, panelCount: r.dna.panelCount, imagePath: r.imagePath }));
       return NextResponse.json({ success: true, cases: withCounts.filter((c) => c.relevant >= 3), refs });
     }

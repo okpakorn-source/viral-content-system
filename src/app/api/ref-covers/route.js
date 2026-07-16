@@ -10,6 +10,7 @@
 import { NextResponse } from 'next/server';
 import { listRefCovers, addRefCover, deleteRefCover, updateRefCover, syncDnaSlotsToTemplate } from '@/lib/refCoverLibrary';
 import { extractCoverDNA } from '@/lib/refCoverBrain';
+import { computeTemplateGrade } from '@/lib/refCoverGrade';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -17,7 +18,14 @@ export const maxDuration = 120;
 export async function GET() {
   try {
     const items = await listRefCovers(500);
-    return NextResponse.json({ success: true, count: items.length, items });
+    // ★ R3 (16 ก.ค.): แนบเกรดเทมเพลตต่อใบ (passive — แสดงเสมอ ไม่ขึ้นสวิตช์) ให้หน้า /ref-covers ติดป้ายได้
+    //   คิดสด (computeTemplateGrade PURE) เมื่อยังไม่มี dna._templateGrade → ป้ายขึ้นทันทีแม้ยังไม่รันสคริปต์
+    //   _fidelity/_duplicateOf ส่งใน dna เต็มอยู่แล้ว ป้ายอ่านตรงได้
+    const withGrade = items.map((it) => ({
+      ...it,
+      _templateGrade: it?.dna?._templateGrade || computeTemplateGrade(it),
+    }));
+    return NextResponse.json({ success: true, count: withGrade.length, items: withGrade });
   } catch (err) {
     return NextResponse.json({ success: false, error: err.message, items: [] }, { status: 500 });
   }

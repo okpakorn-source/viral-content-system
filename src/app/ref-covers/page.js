@@ -150,7 +150,20 @@ export default function RefCoversPage() {
                 </div>
               )}
               <div style={{ padding: 10, fontSize: 12, color: '#334155', flex: 1 }}>
-                <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>{it.styleName || '(ไม่มีชื่อแนว)'}</div>
+                <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {/* ★ R3: ป้ายเกรดเทมเพลต (passive — แสดงเสมอ) คิดจากตัววัดจริง (_fidelity/_reproducible/_duplicateOf) ไม่ใช่ธง _humanVerified */}
+                  {it._templateGrade && (() => {
+                    const G = it._templateGrade;
+                    const c = { A: ['#166534', '#dcfce7'], B: ['#1e40af', '#dbeafe'], C: ['#92400e', '#fef3c7'], F: ['#b91c1c', '#fee2e2'] }[G.grade] || ['#475569', '#f1f5f9'];
+                    return (
+                      <span title={`เกรด ${G.grade} — ${(G.reasons || []).join(' · ')}`}
+                        style={{ color: c[0], background: c[1], borderRadius: 6, padding: '1px 7px', fontSize: 12, fontWeight: 900, flexShrink: 0 }}>
+                        {G.grade}
+                      </span>
+                    );
+                  })()}
+                  <span>{it.styleName || '(ไม่มีชื่อแนว)'}</span>
+                </div>
                 {it.dnaError && <div style={{ color: '#b91c1c', fontSize: 11 }}>⚠️ สกัด DNA ล้ม: {it.dnaError}</div>}
                 {d._geometryMismatch && <div style={{ color: '#b45309', background: '#fef3c7', borderRadius: 6, padding: '2px 8px', fontSize: 11, marginBottom: 4 }}>👁️ {d._geometryMismatch}</div>}
                 {d._humanVerified
