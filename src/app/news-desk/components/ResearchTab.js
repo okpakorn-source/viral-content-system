@@ -50,6 +50,7 @@ export default function ResearchTab({ onToast }) {
   // ── busy/หมายเหตุ ต่อลีด ──
   const [busyLead, setBusyLead] = useState({ id: '', action: '' });
   const [sendNotes, setSendNotes] = useState({}); // { [id]: {kind,msg} }
+  const [extractNotes, setExtractNotes] = useState({}); // R6: { [id]: {kind:'pending'|'error',msg} }
   const didInit = useRef(false);
 
   const selectedSet = new Set(selectedIds);
@@ -139,6 +140,7 @@ export default function ResearchTab({ onToast }) {
     setHuntStats(null);
     setRoundLeads([]);
     setSendNotes({});
+    setExtractNotes({});
     pushStep(`เริ่มล่า ${fmtNum(clusterIds.length)} คลัสเตอร์ · ${chList.length} ช่องทาง · ${queriesPerCluster} คีย์/คลัสเตอร์`);
 
     // ── (1) hunt ──
@@ -295,6 +297,66 @@ export default function ResearchTab({ onToast }) {
     }
   }
 
+  // ============================================================
+  //  R6: สกัดเนื้อ (🧲) + ส่งเขียนแบบข้อความ (🚀) — /api/desk/research/extract
+  // ============================================================
+  async function extractLead(lead) {
+    if (!lead?.id) return;
+    setBusyLead({ id: lead.id, action: 'extract' });
+    const res = await apiFetch('/api/desk/research/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'extract', leadId: lead.id }),
+    });
+    setBusyLead({ id: '', action: '' });
+
+    if (res.pending) {
+      setExtractNotes((m) => ({ ...m, [lead.id]: { kind: 'pending', msg: 'กำลังถอดคลิปอยู่ (เครื่องทีม) — กลับมากดสกัดเนื้อใหม่ภายหลัง' } }));
+      onToast?.('คลิปนี้ใช้เวลาถอดนาน — ระบบส่งเข้าคิวถอดแล้ว กลับมากดสกัดเนื้อใหม่ภายหลัง', 'warn');
+      return;
+    }
+    if (res.success) {
+      setExtractNotes((m) => { const n = { ...m }; delete n[lead.id]; return n; });
+      patchLead(lead.id, { contentReady: true, extractTextLength: res.textLength || 0, insightTopics: res.insightTopics || [] });
+      onToast?.(`สกัดเนื้อสำเร็จ (${res.textLength || 0} ตัวอักษร)`, 'ok');
+      await afterAction();
+    } else {
+      setExtractNotes((m) => ({ ...m, [lead.id]: { kind: 'error', msg: res.error || 'สกัดเนื้อไม่สำเร็จ' } }));
+      onToast?.(res.error || 'สกัดเนื้อไม่สำเร็จ', 'err');
+    }
+  }
+
+  async function sendLeadText(lead) {
+    if (!lead?.id) return;
+    setBusyLead({ id: lead.id, action: 'sendText' });
+    const res = await apiFetch('/api/desk/research/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'sendText', leadId: lead.id }),
+    });
+    setBusyLead({ id: '', action: '' });
+
+    if (res.needExtract) {
+      onToast?.('ยังไม่มีเนื้อที่สกัด (หรือสั้นเกินไป) — กด "สกัดเนื้อ" ก่อน', 'warn');
+      return;
+    }
+    if (res.alreadySent) {
+      setSendNotes((m) => ({ ...m, [lead.id]: { kind: 'sent', msg: 'ส่งเข้าคิวไปแล้วก่อนหน้านี้' } }));
+      patchLead(lead.id, { status: 'sent' });
+      await afterAction();
+      return;
+    }
+    if (res.success) {
+      setSendNotes((m) => ({ ...m, [lead.id]: { kind: 'sent', msg: `ส่งเข้าคิวเขียน (แบบข้อความ) แล้ว${res.jobId ? ` (job ${String(res.jobId).slice(0, 10)})` : ''}` } }));
+      patchLead(lead.id, { status: 'sent' });
+      onToast?.('ส่งเข้าคิวเขียน (แบบข้อความ) แล้ว', 'ok');
+      await afterAction();
+    } else {
+      setSendNotes((m) => ({ ...m, [lead.id]: { kind: 'error', msg: res.error || 'ส่งเข้าคิวไม่สำเร็จ' } }));
+      onToast?.(res.error || 'ส่งเข้าคิวไม่สำเร็จ', 'err');
+    }
+  }
+
   const busyFor = (id) => (busyLead.id === id ? busyLead.action : null);
   const s = libStats || {};
   const bs = s.byStatus || {};
@@ -311,9 +373,12 @@ export default function ResearchTab({ onToast }) {
           lead={lead}
           busyAction={busyFor(lead.id)}
           sendNote={sendNotes[lead.id]}
+          extractNote={extractNotes[lead.id]}
           onKeep={(l) => setStatus(l, 'kept')}
           onDismiss={(l) => setStatus(l, 'dismissed')}
           onSend={sendLead}
+          onExtract={extractLead}
+          onSendText={sendLeadText}
         />
       ))}
     </div>
