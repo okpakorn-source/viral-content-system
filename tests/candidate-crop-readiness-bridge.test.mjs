@@ -219,7 +219,7 @@ await test('3i: duplicate slot id → null', async () => {
 // ============================================================
 // 4) FLAG-OFF & QUARANTINE byte-parity (source guard)
 // ============================================================
-await test('4a: bridge call is gated by MEGA_REF_HERO_V2 & quarantine still hardcodes cropSafe:false', () => {
+await test('4a: bridge call is gated by MEGA_REF_HERO_V2 & cast cropSafe elevates only from a validated carrier (Batch 6)', () => {
   const src = fs.readFileSync(new URL('../src/lib/megaAdapters.js', import.meta.url), 'utf8');
   // exactly one CALL site (distinct from the exported definition)
   const calls = src.match(/await _buildCropReadinessEvidenceV1\(/g) || [];
@@ -228,13 +228,18 @@ await test('4a: bridge call is gated by MEGA_REF_HERO_V2 & quarantine still hard
   const lastGate = src.lastIndexOf('if (_refHeroV2On)');
   const callAt = src.indexOf('await _buildCropReadinessEvidenceV1(');
   assert.ok(lastGate !== -1 && callAt > lastGate, 'call is inside the flag-gated bridge block');
-  // authorityEvidence carries the new detached key
+  // authorityEvidence carries the detached key
   assert.ok(/cropReadiness: _rhCropReadiness/.test(src), 'authorityEvidence.cropReadiness wired');
-  // quarantine unchanged: _rhCastCandidate still returns cropSafe:false (byte-parity behavior)
+  // Batch 6 UNQUARANTINE: _rhCastCandidate no longer hardcodes cropSafe:false — it reads the caller-
+  //   resolved validated per-candidate crop authority (evidence.cropSafe). NOTE ON SOURCE: the structural
+  //   INDEPENDENT_READINESS_V1 blob (this bridge) enrols every vetted candidate and measures geometry
+  //   only, so it is NOT a per-candidate crop authority; the caller resolves evidence.cropSafe from the
+  //   validated metrics carrier (cropSafeBySlot). Absent carrier ⇒ false ⇒ the legacy HOLD stands.
   const castStart = src.indexOf('function _rhCastCandidate(');
   const castEnd = src.indexOf('function _rhHeroCandidate(');
   assert.ok(castStart !== -1 && castEnd > castStart);
-  assert.ok(/cropSafe: false/.test(src.slice(castStart, castEnd)), '_rhCastCandidate keeps cropSafe:false');
+  assert.ok(!/cropSafe: false/.test(src.slice(castStart, castEnd)), '_rhCastCandidate no longer hardcodes cropSafe:false');
+  assert.ok(/const cropSafe = evidence\?\.cropSafe === true;/.test(src.slice(castStart, castEnd)), 'cast cropSafe reads the validated evidence carrier');
 });
 
 console.log(`\n# ${passed}/${passed + failed} passed`);

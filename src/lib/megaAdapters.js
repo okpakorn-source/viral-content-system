@@ -2042,11 +2042,18 @@ function _rhSearchedIds(im, allowedIds, expectedCaseId) {
 //   • clean: facts.verdicts.clean === true literal เท่านั้น
 //   • highResolution: facts.resolution level 'full' + จำนวนเต็มบวก + min(w,h) ≥ HERO_MIN_SHORT_SIDE (700 เดิม)
 //     — record.realWidth/realHeight/realShortSide/rehostQuality ไม่มีสิทธิ์สร้าง true
-//   • cropSafe: false คงที่ — เรียก buildCandidateCropReadiness แบบ exact ไม่ได้ในขอบเขตนี้ (ต้องมี realized
-//     geometry ที่ authenticate แล้ว + role pools + universe proof 'full_vetted_v1' ซึ่งเกิดหลังด่าน cast) — ห้าม bridge ฝืน
-//   • identityVerified: false คงที่ — ไม่มี identity-verifier authority ในระบบ (P0 boundary) · ห้าม derive จาก
-//     triage.person/faceCount/label/model ใดๆ (name ด้านล่างใช้จัดกลุ่ม manifest เท่านั้น ไม่ใช่ verification)
-//   หมายเหตุ: evidence.facts เป็น "สำเนา detached" ที่ validator สร้างเอง (frozen plain object) — อ่านตรงได้ ไม่มี trap
+//   • cropSafe: ★ B6 UNQUARANTINE — ยกระดับจาก evidence.cropSafe (boolean) ที่ caller resolve มาจาก "หลักฐาน crop
+//     ต่อ candidate ที่ validate แล้ว" เท่านั้น (metricsById.measurements.cropSafeBySlot — SAFE ≥1 slot). absent/ไม่มี
+//     หลักฐาน ⇒ false เดิมเป๊ะ. ห้าม derive จาก record.triage.cropSafe/geometry ดิบ (raw ยกระดับไม่ได้ตลอดกาล).
+//     หมายเหตุขอบเขต: cropReadiness (INDEPENDENT_READINESS_V1) เป็น "structural blob ต่อทั้งจักรวาล" ไม่ keyed ต่อ
+//     assetId และวัด geometry ล้วน (enroll ทุกใบ) จึง SAFE แม้ candidate ที่ไม่มี metrics authority — ใช้เป็นแหล่ง
+//     cast cropSafe ตรง ๆ ไม่ได้ (จะยกระดับใบที่ไม่มีหลักฐานต่อใบ). แหล่งต่อ-candidate ที่ validate แล้ว = metrics carrier.
+//   • identityVerified: ★ B6 UNQUARANTINE — ยกระดับจาก evidence.identityVerified (boolean) ที่ caller resolve มาจาก
+//     identityById.get(assetId).identityVerified === true เท่านั้น (candidateIdentityVerifier · reference แท้ยืนยันแล้ว).
+//     absent/resolver ไม่ถูกฉีด ⇒ false เดิมเป๊ะ · ห้าม derive จาก triage.person/faceCount/label/model ใดๆ
+//     (name ด้านล่างใช้จัดกลุ่ม manifest เท่านั้น ไม่ใช่ verification)
+//   หมายเหตุ: evidence.facts เป็น "สำเนา detached" ที่ validator สร้างเอง (frozen plain object) — อ่านตรงได้ ไม่มี trap ·
+//   evidence.cropSafe/evidence.identityVerified เป็น boolean ที่ caller ตกผลึกจาก carrier lane ที่ validate แล้ว
 function _rhCastCandidate(record, evidence) {
   const sourceAssetId = _rhNonBlank(record?.id != null ? String(record.id) : null);
   const name = _rhNonBlank(record?.triage?.person);
@@ -2063,6 +2070,9 @@ function _rhCastCandidate(record, evidence) {
     && Number.isInteger(res.width) && res.width > 0
     && Number.isInteger(res.height) && res.height > 0
     && Math.min(res.width, res.height) >= HERO_MIN_SHORT_SIDE);
+  // ★ B6: อ่านผ่าน carrier boolean ที่ validate แล้ว (caller resolve) — absent = false (HOLD/quarantine เดิม)
+  const cropSafe = evidence?.cropSafe === true;
+  const identityVerified = evidence?.identityVerified === true;
   return {
     name,
     candidateId: sourceAssetId,
@@ -2071,22 +2081,25 @@ function _rhCastCandidate(record, evidence) {
     triaged: f !== null,
     clean: v ? v.clean === true : false,
     highResolution,
-    cropSafe: false,
-    identityVerified: false,
+    cropSafe,
+    identityVerified,
   };
 }
 
-// Hero measured candidate (13 required fields) — ★ 15 ก.ค. (Batch 4B QUARANTINE): บริโภคเฉพาะ "detached
-// validated facts" + binding args เท่านั้น — ห้ามอ่าน record.triage / record.realWidth/realHeight เด็ดขาด ·
-// ค่าที่ derive ได้อย่างแท้จริงจาก facts (deterministic · genuinely owned):
+// Hero measured candidate (13 required fields) — ★ B6 UNQUARANTINE: บริโภค "detached validated facts" + binding args
+// + "authority carrier ต่อ candidate ที่ validate แล้ว" (arg `metrics`) — ห้ามอ่าน record.triage / record.realWidth/
+// realHeight เด็ดขาด. `metrics` เป็น plain object ที่ caller ตกผลึกจาก lane B1-B5 (metricsById/identityById/
+// heroVisionById) ต่อ sourceAssetId เดียวกันนี้ · ทุกฟิลด์ absent = undefined/null → guard ด้านล่างคืน null → HOLD เดิมเป๊ะ.
 //   • resolution: facts.resolution เฉพาะ level==='full' (thumb/unknown = ไม่มีหลักฐาน hero-grade)
 //   • faceShare = y2−y1 · headroom = y1 จาก facts.faceBox แบบกล่อง validated เท่านั้น (null/'unknown' = ไม่มี)
-// ส่วน identityConfidence / isGroupShot(faceCount) / visibleBodyRegion / occlusion / edgeCut / cleanliness-numeric
-// "ไม่มี producer ที่รับได้" ในระบบ (Batch 4A audit) — ห้าม invent/map จาก triage/label/caller ใดๆ ⇒ absent เสมอ
-// ในแบตช์นี้ และฟังก์ชันจึงคืน null เสมอ (fail-closed) จนกว่าจะมี authority ครบจริง · เก็บ derivation + เงื่อนไข
-// admission ไว้ชัดๆ ในที่เดียว เพื่อให้ regression พิสูจน์ได้ว่า "ค่าที่มีวันนี้ไม่พอ" สำหรับ admission ·
-// โครง return คงสัญญา 13 field เดิมไว้สำหรับเคสอนาคตที่ authority ใหม่ป้อนค่าที่ขาดครบ
-function _rhHeroCandidate(facts, personId, heroSlotId, boundContractHash, sourceAssetId) {
+//   • identityConfidence: metrics.identityConfidence (finite) — จาก identityById (candidateIdentityVerifier)
+//   • faceCount → isGroupShot: metrics.faceCount (integer ≥0) — จาก metricsById (candidateMetricAuthority geometry, B2)
+//   • edgeCut: metrics.edgeCut (finite) — จาก metricsById (geometry)
+//   • occlusion / cleanliness / visibleBodyRegion: จาก heroVisionById (candidateHeroVision) — metrics.occlusion(finite)/
+//     metrics.cleanliness(finite)/metrics.visibleBodyRegion(nonblank string) · numeric cleanliness ≠ facts.verdicts.clean
+//   ห้าม invent/map/default ค่าใด — carrier ไม่มี = absent = null → HOLD (raw triage ยกระดับไม่ได้ตลอดกาล) ·
+//   โครง return คงสัญญา 13 field เดิม (heroShotContract.REQUIRED_CANDIDATE_FIELDS)
+function _rhHeroCandidate(facts, personId, heroSlotId, boundContractHash, sourceAssetId, metrics) {
   const rid = _rhNonBlank(sourceAssetId != null ? String(sourceAssetId) : null);
   if (!rid) return null;
   const f = (facts && typeof facts === 'object') ? facts : null;
@@ -2099,13 +2112,14 @@ function _rhHeroCandidate(facts, personId, heroSlotId, boundContractHash, source
   const fb = (f.faceBox && typeof f.faceBox === 'object') ? f.faceBox : null; // 'unknown'/null ⇒ ไม่มีกล่อง
   const faceShare = fb ? (fb.y2 - fb.y1) : undefined;
   const headroom = fb ? fb.y1 : undefined;
-  // ── fields with NO admissible producer (Batch 4B quarantine) — never derived, never defaulted ──
-  const identityConfidence = undefined; // ไม่มี identity authority (Batch 3 boundary)
-  const faceCount = undefined;          // isGroupShot source — ไม่มี authority
-  const visibleBodyRegion = null;       // ต้องมี body-region measurement จริง — ยังไม่มีในระบบ
-  const occlusion = undefined;
-  const edgeCut = undefined;
-  const cleanliness = undefined;        // numeric cleanliness ≠ facts.verdicts.clean (boolean) — ห้าม map
+  // ── fields sourced from validated authority carrier (B6) — never derived, never defaulted ──
+  const m = (metrics && typeof metrics === 'object') ? metrics : null;
+  const identityConfidence = (m && Number.isFinite(m.identityConfidence)) ? m.identityConfidence : undefined; // identityById
+  const faceCount = (m && Number.isInteger(m.faceCount) && m.faceCount >= 0) ? m.faceCount : undefined;       // metricsById (geometry)
+  const visibleBodyRegion = (m && typeof m.visibleBodyRegion === 'string' && m.visibleBodyRegion.length > 0) ? m.visibleBodyRegion : null; // heroVisionById
+  const occlusion = (m && Number.isFinite(m.occlusion)) ? m.occlusion : undefined;   // heroVisionById
+  const edgeCut = (m && Number.isFinite(m.edgeCut)) ? m.edgeCut : undefined;          // metricsById (geometry)
+  const cleanliness = (m && Number.isFinite(m.cleanliness)) ? m.cleanliness : undefined; // heroVisionById (numeric ≠ verdicts.clean)
   if (!res || faceShare === undefined || headroom === undefined
     || identityConfidence === undefined || faceCount === undefined || !visibleBodyRegion
     || occlusion === undefined || edgeCut === undefined || cleanliness === undefined) return null;
@@ -2413,12 +2427,47 @@ async function _runRefHeroV2({ compass, semContract, canonHeroId, semAuthorityHa
     const _rhEvSearched = authorityEvidence?.searchedMeta instanceof Map ? authorityEvidence.searchedMeta : null;
     // ★ 2C P1-D: expectedCaseId เดินทางคู่หลักฐานเสมอ — record ที่ caseId ไม่ตรง = searched ไม่มีวัน true
     const _rhEvCaseId = (typeof authorityEvidence?.caseId === 'string' && authorityEvidence.caseId.trim().length > 0) ? authorityEvidence.caseId : null;
+    // ★ B6 UNQUARANTINE: lane B1-B5 ต่อ candidate (validate ที่ evidence bridge แล้ว) — absent(ไม่ใช่ Map)=null → false/HOLD เดิม
+    const _rhEvMetrics = authorityEvidence?.metricsById instanceof Map ? authorityEvidence.metricsById : null;      // candidateMetricAuthority (faceCount/edgeCut/cropSafeBySlot)
+    const _rhEvIdentity = authorityEvidence?.identityById instanceof Map ? authorityEvidence.identityById : null;   // candidateIdentityVerifier (identityConfidence/identityVerified)
+    const _rhEvHeroVision = authorityEvidence?.heroVisionById instanceof Map ? authorityEvidence.heroVisionById : null; // candidateHeroVision (occlusion/cleanliness/visibleBodyRegion)
+    // cast cropSafe ต่อ candidate = มีผลวัด SAFE ≥1 slot ใน metrics.cropSafeBySlot (validated) · ไม่มี carrier = false
+    const _rhCastCropSafe = (said) => {
+      const mm = _rhEvMetrics ? _rhEvMetrics.get(said) : null;
+      const meas = (mm && mm.measurements && typeof mm.measurements === 'object') ? mm.measurements : null;
+      const csb = (meas && meas.cropSafeBySlot && typeof meas.cropSafeBySlot === 'object') ? meas.cropSafeBySlot : null;
+      if (!csb) return false;
+      for (const k of Object.keys(csb)) { if (csb[k] === true) return true; }
+      return false;
+    };
+    // cast identityVerified ต่อ candidate = identityById.verified === true เท่านั้น · ไม่มี carrier/resolver = false
+    const _rhCastIdentityVerified = (said) => {
+      const id = _rhEvIdentity ? _rhEvIdentity.get(said) : null;
+      return !!(id && id.identityVerified === true);
+    };
+    // hero metrics ต่อ candidate = ประกอบจาก 3 lane (identity/metrics/heroVision) — ค่าที่ absent ปล่อย undefined/null (HOLD)
+    const _rhHeroMetricsFor = (said) => {
+      const mm = _rhEvMetrics ? _rhEvMetrics.get(said) : null;
+      const meas = (mm && mm.measurements && typeof mm.measurements === 'object') ? mm.measurements : null;
+      const id = _rhEvIdentity ? _rhEvIdentity.get(said) : null;
+      const hv = _rhEvHeroVision ? _rhEvHeroVision.get(said) : null;
+      return {
+        identityConfidence: (id && Number.isFinite(id.identityConfidence)) ? id.identityConfidence : undefined,
+        faceCount: (meas && Number.isInteger(meas.faceCount) && meas.faceCount >= 0) ? meas.faceCount : undefined,
+        edgeCut: (meas && Number.isFinite(meas.edgeCut)) ? meas.edgeCut : undefined,
+        occlusion: (hv && Number.isFinite(hv.occlusion)) ? hv.occlusion : undefined,
+        cleanliness: (hv && Number.isFinite(hv.cleanliness)) ? hv.cleanliness : undefined,
+        visibleBodyRegion: (hv && typeof hv.visibleBodyRegion === 'string' && hv.visibleBodyRegion.length > 0) ? hv.visibleBodyRegion : null,
+      };
+    };
     const castCandidates = [];
     for (const [rid, rec] of recById) {
       const cc = _rhCastCandidate(rec, {
         facts: _rhEvFacts ? (_rhEvFacts.get(rid) || null) : null,
         searchedMeta: _rhEvSearched ? (_rhEvSearched.get(rid) || null) : null,
         expectedCaseId: _rhEvCaseId,
+        cropSafe: _rhCastCropSafe(rid),
+        identityVerified: _rhCastIdentityVerified(rid),
       });
       if (cc) castCandidates.push(cc);
     }
@@ -2582,7 +2631,8 @@ async function _runRefHeroV2({ compass, semContract, canonHeroId, semAuthorityHa
       const contract = heroApi.buildHeroShotContract({ sourceAssetId: t.sourceAssetId, heroSlotId, story: { personId: heroPersonId } });
       const contractHash = _rhNonBlank(contract?.contractHash);
       if (!contract || !contractHash) continue;
-      const cand = _rhHeroCandidate(_facts, heroPersonId, heroSlotId, contractHash, t.sourceAssetId);
+      // ★ B6: hero metrics ต่อใบจาก authority carrier (identity/metrics/heroVision) — absent = null → HOLD เดิม
+      const cand = _rhHeroCandidate(_facts, heroPersonId, heroSlotId, contractHash, t.sourceAssetId, _rhHeroMetricsFor(t.sourceAssetId));
       if (!cand) continue;
       _heroMetricComplete++;
       const verdict = heroApi.evaluateHeroShotCandidate(contract, cand, { expectedContractHash: contractHash });

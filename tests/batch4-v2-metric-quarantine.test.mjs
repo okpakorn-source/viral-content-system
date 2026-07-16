@@ -608,20 +608,28 @@ await test('raw Global scores and sceneKey are statically quarantined, while the
   const heroSource = source.slice(heroStart, heroEnd);
   ok(globalStart >= 0 && globalEnd > globalStart, 'static audit finds the Global candidate producer');
   ok(heroStart >= 0 && heroEnd > heroStart, 'static audit finds the hero candidate producer');
+  // Global stays QUARANTINED (Batch 6 leaves _rhGlobalCandidate untouched — semantic/quality/slotFit/
+  // sceneKey still have no producer): its four fields must remain hardcoded null.
   for (const field of ['semanticScore', 'qualityScore', 'slotFitScore', 'sceneKey']) {
-    ok(globalSource.includes('const ' + field + ' = null;'), field + ' has no admissible V2 producer');
+    ok(globalSource.includes('const ' + field + ' = null;'), field + ' has no admissible Global producer (still quarantined)');
   }
-  for (const field of [
-    'identityConfidence',
-    'faceCount',
-    'visibleBodyRegion',
-    'occlusion',
-    'edgeCut',
-    'cleanliness',
-  ]) {
-    ok(heroSource.includes('const ' + field + ' = '), field + ' is explicitly unavailable without a producer');
+  // Hero is UNQUARANTINED (Batch 6): the six previously-absent fields are now sourced from the
+  // validated per-candidate authority carrier `m` (identityById / metricsById / heroVisionById),
+  // never hardcoded to undefined, and never read from record.triage.
+  ok(heroSource.includes('const m = (metrics'), 'hero candidate reads a validated authority carrier `m`');
+  ok(!heroSource.includes('const identityConfidence = undefined;'), 'identityConfidence is no longer hardcoded undefined');
+  ok(!heroSource.includes('const faceCount = undefined;'), 'faceCount is no longer hardcoded undefined');
+  for (const field of ['identityConfidence', 'faceCount', 'visibleBodyRegion', 'occlusion', 'edgeCut', 'cleanliness']) {
+    ok(heroSource.includes('const ' + field + ' = ('),
+      field + ' is sourced from the authority carrier (absent ⇒ undefined/null ⇒ HOLD, never fabricated)');
   }
+  // The producer signature carries no `record`/pool param — measurements come only from `facts` + the
+  // validated carrier `m`, so raw triage measurements are structurally unreachable.
+  ok(/function _rhHeroCandidate\(facts, personId, heroSlotId, boundContractHash, sourceAssetId, metrics\)/.test(heroSource),
+    'hero candidate consumes only facts + binding + the validated metrics carrier (no record/triage param)');
 
+  // Behavioural proof unchanged: with NO metric/identity/hero-vision authority injected, the attractive
+  // RAW_EXTREME triage still elevates nothing and the fixed HERO_METRICS_UNAVAILABLE hold stands.
   const run = await runS6();
   assertHeroMetricsUnavailable(run);
   equal(run.probe.hero.state.contractBuilds, 1, 'the crop prefilter was reachable');

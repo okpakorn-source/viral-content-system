@@ -373,15 +373,19 @@ await test('e3: cache key isolates (image hash, personId, prompt version) — no
 // ============================================================
 // (f) SOURCE GUARD — quarantine byte-unchanged + bridge gated by MEGA_REF_HERO_V2
 // ============================================================
-await test('f1: _rhCastCandidate / _rhHeroCandidate quarantine unchanged; identity bridge is flag-gated', () => {
+await test('f1: _rhCastCandidate / _rhHeroCandidate consume identity authority (Batch 6 unquarantine); identity bridge flag-gated', () => {
   const src = fs.readFileSync(new URL('../src/lib/megaAdapters.js', import.meta.url), 'utf8');
-  // quarantine still hardcodes the absent-authority verdicts (behavior byte-parity)
+  // Batch 6 UNQUARANTINE: identity now elevates ONLY from the caller-resolved validated carrier —
+  // cast identityVerified from identityById.verified, hero identityConfidence from identityById.
+  // Absent carrier ⇒ false/undefined ⇒ the legacy HOLD stands (never derived from triage/label).
   const castStart = src.indexOf('function _rhCastCandidate(');
   const castEnd = src.indexOf('function _rhHeroCandidate(');
   const heroEnd = src.indexOf('function ', castEnd + 20);
-  assert.ok(castStart !== -1 && castEnd > castStart && heroEnd > castEnd, 'both quarantine fns present');
-  assert.ok(/identityVerified: false/.test(src.slice(castStart, castEnd)), '_rhCastCandidate keeps identityVerified:false');
-  assert.ok(/const identityConfidence = undefined;/.test(src.slice(castEnd, heroEnd)), '_rhHeroCandidate keeps identityConfidence=undefined');
+  assert.ok(castStart !== -1 && castEnd > castStart && heroEnd > castEnd, 'both consumer fns present');
+  assert.ok(/const identityVerified = evidence\?\.identityVerified === true;/.test(src.slice(castStart, castEnd)), '_rhCastCandidate identityVerified reads the validated evidence carrier');
+  assert.ok(!/identityVerified: false/.test(src.slice(castStart, castEnd)), '_rhCastCandidate no longer hardcodes identityVerified:false');
+  assert.ok(/const identityConfidence = \(m && Number.isFinite\(m.identityConfidence\)\)/.test(src.slice(castEnd, heroEnd)), '_rhHeroCandidate identityConfidence reads the validated metrics carrier');
+  assert.ok(!/const identityConfidence = undefined;/.test(src.slice(castEnd, heroEnd)), '_rhHeroCandidate no longer hardcodes identityConfidence=undefined');
   // exactly one bridge call site, sitting AFTER the last MEGA_REF_HERO_V2 gate ⇒ flag OFF skips it
   const calls = src.match(/await _buildIdentityEvidenceV1\(/g) || [];
   assert.equal(calls.length, 1, 'exactly one identity bridge call site');

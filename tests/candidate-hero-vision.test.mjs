@@ -397,34 +397,36 @@ await test('f1: HERO_VISION_BODY_REGIONS mirrors heroShotContract VISIBLE_BODY_R
   assert.deepEqual([...HERO_VISION_BODY_REGIONS], [...VISIBLE_BODY_REGIONS], 'enum tokens + order identical (no drift)');
 });
 
-await test('f2: _rhCastCandidate / _rhHeroCandidate quarantine byte-unchanged vs a0a3985; heroVision bridge flag-gated', () => {
+await test('f2: _rhCastCandidate / _rhHeroCandidate consume heroVision (Batch 6 unquarantine); heroVision bridge flag-gated', () => {
   // normalize EOL: core.autocrlf checks out CRLF on Windows but git blobs are LF —
   // line-ending is a checkout artifact, not a content change, so compare LF-normalized.
   const nlf = (s) => s.replace(/\r\n/g, '\n');
   const src = nlf(fs.readFileSync(new URL('../src/lib/megaAdapters.js', import.meta.url), 'utf8'));
 
-  // ---- extract the quarantine region [_rhCastCandidate .. _rhGlobalCandidate) ----
-  const sliceQuarantine = (text) => {
+  // ---- extract the (formerly quarantined) region [_rhCastCandidate .. _rhGlobalCandidate) ----
+  const sliceRegion = (text) => {
     const a = text.indexOf('function _rhCastCandidate(');
     const b = text.indexOf('function _rhGlobalCandidate(');
-    assert.ok(a !== -1 && b > a, 'quarantine boundaries found');
+    assert.ok(a !== -1 && b > a, 'consumer region boundaries found');
     return text.slice(a, b);
   };
-  const nowRegion = sliceQuarantine(src);
+  const nowRegion = sliceRegion(src);
 
-  // baseline from the frozen B4 commit — the quarantine must be byte-for-byte identical
-  const repoRoot = fileURLToPath(new URL('..', import.meta.url));
-  const base = execSync('git show a0a3985:src/lib/megaAdapters.js', {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  const baseRegion = sliceQuarantine(nlf(base));
-  assert.equal(nowRegion, baseRegion, '_rhCastCandidate/_rhHeroCandidate quarantine is byte-unchanged vs a0a3985');
-
-  // quarantine still hardcodes the absent-authority verdicts (defense-in-depth on top of byte check)
-  assert.ok(/identityVerified: false/.test(nowRegion), '_rhCastCandidate keeps identityVerified:false');
-  assert.ok(/const identityConfidence = undefined;/.test(nowRegion), '_rhHeroCandidate keeps identityConfidence=undefined');
+  // ---- Batch 6 UNQUARANTINE: the two consumers no longer hardcode absent-authority verdicts; they
+  //   elevate ONLY from the caller-resolved validated carriers (evidence.cropSafe/identityVerified and
+  //   the hero `metrics` object built from identityById/metricsById/heroVisionById). heroVision supplies
+  //   occlusion/cleanliness/visibleBodyRegion — three of the six hero metrics — so a hero candidate is
+  //   now producible once every lane is present. Absent lane ⇒ undefined/null ⇒ the legacy HOLD stands. ----
+  assert.ok(!/cropSafe: false,/.test(nowRegion), '_rhCastCandidate no longer hardcodes cropSafe:false');
+  assert.ok(!/identityVerified: false,/.test(nowRegion), '_rhCastCandidate no longer hardcodes identityVerified:false');
+  assert.ok(!/const identityConfidence = undefined;/.test(nowRegion), '_rhHeroCandidate no longer hardcodes identityConfidence=undefined');
+  assert.ok(/const cropSafe = evidence\?\.cropSafe === true;/.test(nowRegion), 'cast cropSafe reads the validated evidence carrier');
+  assert.ok(/const identityVerified = evidence\?\.identityVerified === true;/.test(nowRegion), 'cast identityVerified reads the validated evidence carrier');
+  assert.ok(/const m = \(metrics && typeof metrics === 'object'\)/.test(nowRegion), '_rhHeroCandidate reads a validated per-candidate metrics carrier');
+  // The heroVision-owned trio is sourced from that carrier (heroVisionById), never fabricated.
+  for (const field of ['occlusion', 'cleanliness', 'visibleBodyRegion']) {
+    assert.ok(new RegExp('const ' + field + ' = \\(m &&').test(nowRegion), field + ' is sourced from the metrics carrier');
+  }
 
   // exactly one heroVision bridge call site, sitting AFTER the last MEGA_REF_HERO_V2 gate ⇒ flag OFF skips it
   const calls = src.match(/await _buildHeroVisionEvidenceV1\(/g) || [];
