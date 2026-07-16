@@ -70,6 +70,45 @@ export async function POST(req) {
     const system = buildAnalysisSystemPrompt();
     const user = buildAnalysisUserPrompt(newsText);
 
+    // ★ 16 ก.ค. 69 (ปิดเคส S5_CASE_FAILED reproducible): โมเดลชอบเติม key เกิน (เช่น context.confidence_note)
+    //   ในข่าวที่ข้อมูลกำกวม → validator exact-key ปฏิเสธทั้งก้อนแม้เนื้อหาที่เหลือถูกครบ · แก้แบบไม่ลดความเข้ม:
+    //   prune เฉพาะ "key ที่ไม่อยู่ในสคีมา" ทิ้งก่อนส่งเข้า validateAnalysisV1Structure ตัวจริง (type/enum/
+    //   ครบทุก key ยังตรวจเต็มเหมือนเดิม; consumer ใช้ค่า rebuilt จาก validator อยู่แล้ว key เกินไม่มีทางถึงใคร)
+    //   ทำที่ชั้น route เท่านั้น — s5PinnedAi/validator ไม่ถูกแตะ (ดีไซน์ fail-closed เดิมคงทั้งใบ)
+    const ANALYSIS_PRUNE_TREE = {
+      headline: true, summary: true, confidence: true, missing_info: true,
+      characters: { name: true, role: true, gender: true, descriptors: true, evidence: true },
+      content: { what_happened: true, key_events: true, location: true, time: true, numbers_facts: true },
+      context: { background: true, why_notable: true, emotional_tone: true, tone_evidence: true, key_moment: true },
+    };
+    const pruneToSchema = (raw) => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+      const out = {};
+      for (const [k, spec] of Object.entries(ANALYSIS_PRUNE_TREE)) {
+        if (!Object.prototype.hasOwnProperty.call(raw, k)) continue;
+        const v = raw[k];
+        if (spec === true) { out[k] = v; continue; }
+        if (k === 'characters') {
+          out[k] = Array.isArray(v)
+            ? v.map((c) => {
+                if (!c || typeof c !== 'object' || Array.isArray(c)) return c;
+                const cc = {};
+                for (const ck of Object.keys(spec)) if (Object.prototype.hasOwnProperty.call(c, ck)) cc[ck] = c[ck];
+                return cc;
+              })
+            : v;
+          continue;
+        }
+        if (v && typeof v === 'object' && !Array.isArray(v)) {
+          const oo = {};
+          for (const ok of Object.keys(spec)) if (Object.prototype.hasOwnProperty.call(v, ok)) oo[ok] = v[ok];
+          out[k] = oo;
+        } else out[k] = v;
+      }
+      return out;
+    };
+    const validateAnalysisPruned = (raw) => validateAnalysisV1Structure(pruneToSchema(raw));
+
     P('วิเคราะห์ข่าว', 'เรียกสมอง AI อ่าน+ถอดตัวละคร/เนื้อ/บริบท', { pct: 30 });
     let result;
     try {
@@ -81,7 +120,7 @@ export async function POST(req) {
         pin,
         cost: { step: 'วิเคราะห์ข่าว' },
         onRetry: P.onRetry,
-        validate: validateAnalysisV1Structure,
+        validate: validateAnalysisPruned,
       });
     } catch (err) {
       failProgress(jobId, err.message);
