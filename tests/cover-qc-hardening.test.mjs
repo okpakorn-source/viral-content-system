@@ -18,6 +18,7 @@ const { evaluateCoverQc } = await import('../src/lib/coverQcGate.js');
 const F_ENV_KEYS = [
   'MEGA_HARD_QC', 'MEGA_TECH_RULES_MODE',
   'MEGA_FACE_OVERFLOW_HARD', 'MEGA_PERSON_DIVERSITY', 'MEGA_SCENE_DEDUP', 'MEGA_CIRCLE_STRICT_UPSCALE',
+  'MEGA_STRETCH_RELAX', // นโยบายยืดเต็มช่อง 17 ก.ค.
 ];
 function withEnv(overrides, fn) {
   const saved = {};
@@ -93,6 +94,37 @@ test('F3 kill-switch MEGA_SCENE_DEDUP=0 ⇒ advisory (pass:true)', () => {
     const v = evaluateCoverQc({ qcFlags: ['duplicate_scene:panel_2:circle'] });
     assert.strictEqual(v.pass, true);
     assert.ok(advHas(v, 'ฉากซ้ำ'));
+  });
+});
+
+// ============================================================ นโยบายยืดเต็มช่อง (เจ้าของสั่ง 17 ก.ค. — "อย่าให้ภาพเล็กเป็นตัวทำพัง")
+test('STRETCH_RELAX=1: hero ยืด 1.88x ⇒ pass:true + ธงลง advisory (ไม่ needs_gap_search)', () => {
+  withEnv({ MEGA_STRETCH_RELAX: '1' }, () => {
+    const v = evaluateCoverQc({ qcFlags: ['upscaled:main:1.88'] });
+    assert.strictEqual(v.pass, true);
+    assert.strictEqual(v.suggestedStatus, null);
+    assert.ok(v.advisory.some((a) => a.includes('1.88') && a.includes('MEGA_STRETCH_RELAX')));
+  });
+});
+
+test('STRETCH_RELAX=1: วงกลม/ช่องรองยืดเกิน ก็ advisory หมด — แต่ธง content (คนซ้ำ/หน้าเกินช่อง) ยังตัดเหมือนเดิม', () => {
+  withEnv({ MEGA_STRETCH_RELAX: '1' }, () => {
+    assert.strictEqual(evaluateCoverQc({ qcFlags: ['upscaled:circle:1.39'] }).pass, true);
+    assert.strictEqual(evaluateCoverQc({ qcFlags: ['upscale_soft:reaction_1:2.5'] }).pass, true);
+    const v = evaluateCoverQc({ qcFlags: ['upscaled:main:1.88', 'duplicate_person_panels:tuk:3'] });
+    assert.strictEqual(v.pass, false, 'relax ยืดเท่านั้น — คนซ้ำยังตัด');
+    assert.strictEqual(v.suggestedStatus, 'manual_review');
+    const v2 = evaluateCoverQc({ qcFlags: ['upscaled:main:1.88', 'face_overflow:evidence_2:107.5'] });
+    assert.strictEqual(v2.pass, false, 'relax ยืดเท่านั้น — หน้าเกินช่องยังตัด');
+  });
+});
+
+test('STRETCH_RELAX unset/0: พฤติกรรมเดิมเป๊ะ (ยืดเกินเพดาน = needs_gap_search)', () => {
+  withEnv({}, () => {
+    assert.strictEqual(evaluateCoverQc({ qcFlags: ['upscaled:main:1.88'] }).pass, false);
+  });
+  withEnv({ MEGA_STRETCH_RELAX: '0' }, () => {
+    assert.strictEqual(evaluateCoverQc({ qcFlags: ['upscaled:main:1.88'] }).pass, false);
   });
 });
 
