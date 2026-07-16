@@ -170,6 +170,18 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: detection.error || 'ไม่มี input' }, { status: 400 });
     }
 
+    // ★ 16 ก.ค. 69: TEXT-ONLY MODE — รับเฉพาะข้อความล้วน ปิดสาย URL/คลิป/รูปทั้งหมด
+    //   (ด่านหลักอยู่ /api/queue/add แล้ว — ด่านนี้กันการเรียกตรงข้ามคิว · เปิดคืน: TEXT_ONLY_MODE=0)
+    if (process.env.TEXT_ONLY_MODE !== '0' && (detection.hasUrls || detection.hasImage)) {
+      addLog('Route', `⛔ TEXT_ONLY_MODE: ปฏิเสธ input ประเภท ${detection.inputType}`);
+      return NextResponse.json({
+        success: false,
+        error: 'โหมดข้อความเท่านั้น: ระบบปิดรับการเจนข่าวจากลิงก์/รูปชั่วคราว — กรุณาสรุปเนื้อข่าวเป็นข้อความล้วน (ไม่มีลิงก์) แล้วส่งใหม่',
+        errorType: 'TEXT_ONLY_MODE',
+        failedStep: 'text_only_gate',
+      }, { status: 400 });
+    }
+
     // ─── PHASE 3: Delegate single URL to enhanced /api/auto ───────
     if (route.useEnhancedPipeline && (detection.primaryUrl || detection.hasText)) {
       let delegateRes;
