@@ -72,10 +72,18 @@ export async function POST(request) {
         saved.extract?.insight?.category,
       ].filter(Boolean);
 
+      // 🆕 D1 (17 ก.ค. 69): แจ้งผลกลั่นเนื้อกลับให้ UI โชว์ก่อนส่ง (โครงเดิมคงไว้ครบ — เพิ่ม field ใหม่เท่านั้น)
+      const distilled = !!saved.extract?.distilled;
+      const cleanLength = String(saved.extract?.text || '').length;
+      const rawLength = String(saved.extract?.raw ?? text).length;
+
       return NextResponse.json({
         success: true,
         route,
         textLength: text.length,
+        distilled,
+        cleanLength,
+        rawLength,
         insightTopics: insightTopics.length ? insightTopics : undefined,
         source: result.source || '',
       });
