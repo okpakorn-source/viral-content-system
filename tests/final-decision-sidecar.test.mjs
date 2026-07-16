@@ -493,10 +493,16 @@ test('proof-to-brain boundary: toJSON stable for two passes, different on the th
   assert.deepStrictEqual(on, off, 'business byte-parity on the same hostile pool');
 });
 
-// ── 11) static scan: F/E ต้องไม่ถูก import/เรียกใน megaAdapters.js เลย ──
-test('static: no candidateCropReadiness / searchQualityMeasurement / searchQualityMetrics in megaAdapters.js', () => {
+// ── 11) static scan: E ห้ามแตะ megaAdapters เด็ดขาด · F (cropReadiness) อนุญาตเฉพาะสะพาน B3 ที่เจ้าของอนุมัติ ──
+// ★ 16 ก.ค. 69: เดิม assert ว่า F/E ต้อง absent ทั้งหมด — เฟส 4 B3 (c77070a) wire candidateCropReadiness
+//   เข้า bridge อย่างถูกต้องตามแผนที่เคาะแล้ว จึงคุมแบบเจาะจงแทน: non-comment ต้องมีบรรทัดเดียว
+//   และต้องเป็น dynamic import ใต้ DI seam เท่านั้น (การ wiring เพิ่มใดๆ นอกเหนือนี้ = พังทันทีเหมือนเดิม)
+test('static: no searchQuality* in megaAdapters.js; candidateCropReadiness only via approved B3 bridge import', () => {
   const src = fs.readFileSync(ADAPTERS_PATH, 'utf8');
-  assert.ok(!/candidateCropReadiness|searchQualityMeasurement|searchQualityMetrics/.test(src), 'F/E modules must stay absent from runtime wiring');
+  assert.ok(!/searchQualityMeasurement|searchQualityMetrics/.test(src), 'E modules must stay absent from runtime wiring');
+  const hits = src.split('\n').filter((l) => l.includes('candidateCropReadiness') && !/^\s*(\/\/|\*)/.test(l));
+  assert.equal(hits.length, 1, 'candidateCropReadiness must appear in exactly ONE non-comment line (the B3 bridge import)');
+  assert.ok(/deps\?\.cropReadinessApi \|\| await import\('@\/lib\/candidateCropReadiness'\)/.test(hits[0]), 'the single reference must be the DI-guarded dynamic import inside _buildCropReadinessEvidenceV1');
 });
 
 // ── 12) static scope: โค้ด D ใหม่ไม่แตะระบบต้องห้าม + โครงตามสเปก ──
