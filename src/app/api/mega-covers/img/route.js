@@ -22,7 +22,10 @@ export async function GET(req) {
     }
     const headers = {
       'Content-Type': img.mime,
-      'Cache-Control': 'public, max-age=86400', // ปกในคลังไม่เปลี่ยน — cache ได้เต็มที่ ลด egress
+      // ★ 17 ก.ค. (alert CPU spike 6.44m): max-age เดี่ยว = เบราว์เซอร์ cache แต่ CDN Vercel ไม่ cache
+      //   → ทุกการเปิดหน้าคลัง = lambda 200 ดอก + Supabase 400 คิวรี · เพิ่ม s-maxage+immutable ให้ CDN
+      //   ดูดซับ (ปกในคลังผูก id ตายตัว ไม่เปลี่ยนเนื้อหา — immutable ถูกต้องโดยดีไซน์)
+      'Cache-Control': 'public, max-age=86400, s-maxage=31536000, immutable',
     };
     if (searchParams.get('dl')) {
       headers['Content-Disposition'] = `attachment; filename="${id}.${img.mime === 'image/png' ? 'png' : 'jpg'}"`;
