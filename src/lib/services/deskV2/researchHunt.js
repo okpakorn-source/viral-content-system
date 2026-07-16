@@ -19,7 +19,10 @@ import { listExemplars, clusterSummary } from './dnaLibrary.js';
 import { sanitizeText } from './dnaContract.js';
 
 const CALL_TIMEOUT_MS = 15_000; // ทุก call ต้อง abort ที่ 15s ตามโจทย์
-const KNOWN_CHANNELS = ['videos', 'facebook', 'tiktok', 'youtube'];
+const KNOWN_CHANNELS = ['videos', 'facebook', 'tiktok', 'youtube', 'google'];
+// ★ 16 ก.ค. 69 (ผู้ใช้สั่งเพิ่ม): 'google' = Serper /search เพียวไม่ใส่ site: filter → ลิงก์ข่าวจากสำนักต่างๆ
+//   (today.line.me/ไทยรัฐ/ข่าวสด ฯลฯ) — แหล่ง "ข่าวเก่าน้ำดีทำใหม่ได้" ที่ระบบเดิมพิสูจน์แล้วว่าทีมใช้มากสุดรองจาก FB
+//   และเป็น fetchability='full' (ดึงเนื้อเต็มได้) เหมาะกับท่อเขียนที่สุด
 const CONCURRENCY = 4; // ยิงต่อ "คีย์" (call task = 1 ช่อง×1 คำค้น) พร้อมกันสูงสุด 4 — อย่ารัวกว่านี้
 // ราคา Serper: ~$0.003/call (แพ็คเริ่มต้น) × อัตราแลกเปลี่ยนโดยประมาณ ~36.7 บาท/ดอลลาร์ ≈ 0.11 บาท/call
 const SERPER_COST_THB_PER_CALL = 0.11;
@@ -155,6 +158,7 @@ async function fetchChannel(channel, query, num, timeoutMs) {
   if (channel === 'facebook') return callSerperSearch(`${query} site:facebook.com`, num, timeoutMs);
   if (channel === 'tiktok') return callSerperSearch(`${query} site:tiktok.com`, num, timeoutMs);
   if (channel === 'youtube') return callYoutube(query, num, timeoutMs);
+  if (channel === 'google') return callSerperSearch(query, num, timeoutMs); // เพียว ไม่ site: → ลิงก์ข่าวสำนักต่างๆ
   return [];
 }
 
@@ -164,7 +168,7 @@ async function fetchChannel(channel, query, num, timeoutMs) {
  * @param {string[]} [args.clusterIds] - ระบุคลัสเตอร์ตรงๆ; ว่าง → ใช้ clusterSummary() เอา top N ตาม count
  * @param {number} [args.topClusters=10] - จำนวนคลัสเตอร์สูงสุด (route validate ≤30, ที่นี่ clamp ซ้ำเพื่อความปลอดภัย)
  * @param {number} [args.queriesPerCluster=4] - คำค้นต่อคลัสเตอร์ (cap 6)
- * @param {string[]} [args.channels] - subset ของ ['videos','facebook','tiktok','youtube']
+ * @param {string[]} [args.channels] - subset ของ ['videos','facebook','tiktok','youtube','google']
  * @param {number} [args.perQueryResults=10] - จำนวนผลต่อคำค้นต่อช่อง
  * @returns {Promise<{candidates:object[], stats:object}>}
  */
@@ -247,7 +251,7 @@ export async function huntClusters({
   // ── (3) ยิงจริง: pool ขนานสูงสุด 4 call task พร้อมกัน ──
   const candidates = [];
   const seenUrls = new Map(); // normalized url → true (เก็บตัวแรกไว้)
-  const byChannel = { videos: 0, facebook: 0, tiktok: 0, youtube: 0 };
+  const byChannel = { videos: 0, facebook: 0, tiktok: 0, youtube: 0, google: 0 };
   let serperCalls = 0;
   let youtubeCalls = 0;
   let dupCount = 0;

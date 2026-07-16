@@ -25,7 +25,7 @@ export default function ResearchTab({ onToast }) {
   const [clustersLoading, setClustersLoading] = useState(false);
   const [clusterQuery, setClusterQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
-  const [channels, setChannels] = useState({ videos: true, facebook: true, tiktok: true, youtube: true });
+  const [channels, setChannels] = useState({ videos: true, facebook: true, tiktok: true, youtube: true, google: true }); // ★ 16 ก.ค.: +google ลิงก์ข่าวสำนัก (ผู้ใช้สั่ง)
   const [queriesPerCluster, setQueriesPerCluster] = useState(3);
   const [model, setModel] = useState('fast');
 

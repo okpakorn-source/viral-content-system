@@ -12,7 +12,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-const KNOWN_CHANNELS = ['videos', 'facebook', 'tiktok', 'youtube'];
+const KNOWN_CHANNELS = ['videos', 'facebook', 'tiktok', 'youtube', 'google']; // ★ 16 ก.ค.: +google (ลิงก์ข่าวสำนักต่างๆ — ผู้ใช้สั่ง)
 
 export async function POST(request) {
   try {
