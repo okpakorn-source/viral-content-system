@@ -195,7 +195,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": false
+      "_reproducible": false,
+      "_fidelity": {
+        "score": 76,
+        "rawScore": 69,
+        "featherPx": 5,
+        "worstOffsetPx": 20.9,
+        "meanOffsetPx": 12.3,
+        "confidence": "ok",
+        "confidentBoundaries": 3,
+        "lowConfidenceBoundaries": 1,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -401,7 +413,19 @@
       "_geometryRefined": true,
       "_humanVerified": true,
       "_reproducible": false,
-      "_disabledReason": "ผู้ใช้สั่งปิด 9 ก.ค. 2569: DNA วัดโครงผิด — ช่องล่างแนวนอนเต็มกว้าง (y60-100) แต่วงกลมวางทับ y58-88 = คนโดนวงทับเสมอ + inset border วัดเป็น #00FF00"
+      "_disabledReason": "ผู้ใช้สั่งปิด 9 ก.ค. 2569: DNA วัดโครงผิด — ช่องล่างแนวนอนเต็มกว้าง (y60-100) แต่วงกลมวางทับ y58-88 = คนโดนวงทับเสมอ + inset border วัดเป็น #00FF00",
+      "_fidelity": {
+        "score": 85,
+        "rawScore": 62,
+        "featherPx": 26,
+        "worstOffsetPx": 25.3,
+        "meanOffsetPx": 15.2,
+        "confidence": "ok",
+        "confidentBoundaries": 2,
+        "lowConfidenceBoundaries": 3,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -576,7 +600,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": false
+      "_reproducible": false,
+      "_fidelity": {
+        "score": 40,
+        "rawScore": 34,
+        "featherPx": 5,
+        "worstOffsetPx": 38.2,
+        "meanOffsetPx": 26.5,
+        "confidence": "ok",
+        "confidentBoundaries": 2,
+        "lowConfidenceBoundaries": 1,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -745,7 +781,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": false
+      "_reproducible": false,
+      "_fidelity": {
+        "score": 73,
+        "rawScore": 67,
+        "featherPx": 5,
+        "worstOffsetPx": 19.3,
+        "meanOffsetPx": 13.3,
+        "confidence": "ok",
+        "confidentBoundaries": 2,
+        "lowConfidenceBoundaries": 1,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -944,7 +992,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": false
+      "_reproducible": false,
+      "_fidelity": {
+        "score": 73,
+        "rawScore": 61,
+        "featherPx": 10,
+        "worstOffsetPx": 15.8,
+        "meanOffsetPx": 15.8,
+        "confidence": "ok",
+        "confidentBoundaries": 1,
+        "lowConfidenceBoundaries": 2,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -1146,7 +1206,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": false
+      "_reproducible": false,
+      "_fidelity": {
+        "score": 56,
+        "rawScore": 50,
+        "featherPx": 5,
+        "worstOffsetPx": 36.1,
+        "meanOffsetPx": 20,
+        "confidence": "ok",
+        "confidentBoundaries": 5,
+        "lowConfidenceBoundaries": 0,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -1350,7 +1422,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": false
+      "_reproducible": false,
+      "_fidelity": {
+        "score": 56,
+        "rawScore": 50,
+        "featherPx": 5,
+        "worstOffsetPx": 36.1,
+        "meanOffsetPx": 20,
+        "confidence": "ok",
+        "confidentBoundaries": 5,
+        "lowConfidenceBoundaries": 0,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -1560,7 +1644,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": false
+      "_reproducible": false,
+      "_fidelity": {
+        "score": 48,
+        "rawScore": 42,
+        "featherPx": 5,
+        "worstOffsetPx": 36.1,
+        "meanOffsetPx": 23.2,
+        "confidence": "ok",
+        "confidentBoundaries": 4,
+        "lowConfidenceBoundaries": 0,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -1759,7 +1855,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": false
+      "_reproducible": false,
+      "_fidelity": {
+        "score": 66,
+        "rawScore": 60,
+        "featherPx": 5,
+        "worstOffsetPx": 27.6,
+        "meanOffsetPx": 16,
+        "confidence": "ok",
+        "confidentBoundaries": 5,
+        "lowConfidenceBoundaries": 0,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -1933,7 +2041,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": true
+      "_reproducible": true,
+      "_fidelity": {
+        "score": 89,
+        "rawScore": 72,
+        "featherPx": 14,
+        "worstOffsetPx": 15.7,
+        "meanOffsetPx": 11.1,
+        "confidence": "ok",
+        "confidentBoundaries": 2,
+        "lowConfidenceBoundaries": 1,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -2099,7 +2219,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": true
+      "_reproducible": true,
+      "_fidelity": {
+        "score": 70,
+        "rawScore": 53,
+        "featherPx": 14,
+        "worstOffsetPx": 20.5,
+        "meanOffsetPx": 18.9,
+        "confidence": "ok",
+        "confidentBoundaries": 2,
+        "lowConfidenceBoundaries": 1,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -2309,7 +2441,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": true
+      "_reproducible": true,
+      "_fidelity": {
+        "score": 65,
+        "rawScore": 38,
+        "featherPx": 22,
+        "worstOffsetPx": 32.8,
+        "meanOffsetPx": 24.9,
+        "confidence": "ok",
+        "confidentBoundaries": 2,
+        "lowConfidenceBoundaries": 2,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -2516,7 +2660,19 @@
       "_geometryRefined": true,
       "_humanVerified": true,
       "_reproducible": true,
-      "_geometryNote": "9 ก.ค. 69: ผู้ใช้ชี้ hero ต้องสูงเต็มซ้าย ไม่ใช่แถบนอนล่าง — แก้ตามวัดตะเข็บจริง (seam x47%, y37/65% ซีกขวา, ไม่มีตะเข็บนอนเต็มกว้าง)"
+      "_geometryNote": "9 ก.ค. 69: ผู้ใช้ชี้ hero ต้องสูงเต็มซ้าย ไม่ใช่แถบนอนล่าง — แก้ตามวัดตะเข็บจริง (seam x47%, y37/65% ซีกขวา, ไม่มีตะเข็บนอนเต็มกว้าง)",
+      "_fidelity": {
+        "score": 93,
+        "rawScore": 75,
+        "featherPx": 26,
+        "worstOffsetPx": 21.5,
+        "meanOffsetPx": 9.9,
+        "confidence": "ok",
+        "confidentBoundaries": 3,
+        "lowConfidenceBoundaries": 1,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -2690,7 +2846,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": false
+      "_reproducible": false,
+      "_fidelity": {
+        "score": 50,
+        "rawScore": 38,
+        "featherPx": 10,
+        "worstOffsetPx": 25,
+        "meanOffsetPx": 25,
+        "confidence": "ok",
+        "confidentBoundaries": 1,
+        "lowConfidenceBoundaries": 2,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -2890,7 +3058,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": false
+      "_reproducible": false,
+      "_fidelity": {
+        "score": 57,
+        "rawScore": 45,
+        "featherPx": 10,
+        "worstOffsetPx": 22.2,
+        "meanOffsetPx": 22.2,
+        "confidence": "ok",
+        "confidentBoundaries": 1,
+        "lowConfidenceBoundaries": 2,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -3066,7 +3246,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": false
+      "_reproducible": false,
+      "_fidelity": {
+        "score": 78,
+        "rawScore": 72,
+        "featherPx": 5,
+        "worstOffsetPx": 15.1,
+        "meanOffsetPx": 11.3,
+        "confidence": "ok",
+        "confidentBoundaries": 2,
+        "lowConfidenceBoundaries": 1,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -3267,7 +3459,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": true
+      "_reproducible": true,
+      "_fidelity": {
+        "score": 68,
+        "rawScore": 52,
+        "featherPx": 15,
+        "worstOffsetPx": 26.5,
+        "meanOffsetPx": 19,
+        "confidence": "ok",
+        "confidentBoundaries": 3,
+        "lowConfidenceBoundaries": 1,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -3467,7 +3671,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": true
+      "_reproducible": true,
+      "_fidelity": {
+        "score": 57,
+        "rawScore": 41,
+        "featherPx": 13,
+        "worstOffsetPx": 23.5,
+        "meanOffsetPx": 23.5,
+        "confidence": "ok",
+        "confidentBoundaries": 1,
+        "lowConfidenceBoundaries": 3,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -3667,7 +3883,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": true
+      "_reproducible": true,
+      "_fidelity": {
+        "score": 57,
+        "rawScore": 41,
+        "featherPx": 13,
+        "worstOffsetPx": 23.5,
+        "meanOffsetPx": 23.5,
+        "confidence": "ok",
+        "confidentBoundaries": 1,
+        "lowConfidenceBoundaries": 3,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -3866,7 +4094,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": false
+      "_reproducible": false,
+      "_fidelity": {
+        "score": 55,
+        "rawScore": 49,
+        "featherPx": 5,
+        "worstOffsetPx": 30.3,
+        "meanOffsetPx": 20.4,
+        "confidence": "ok",
+        "confidentBoundaries": 3,
+        "lowConfidenceBoundaries": 0,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   },
@@ -4064,7 +4304,19 @@
       ],
       "_geometryRefined": true,
       "_humanVerified": true,
-      "_reproducible": false
+      "_reproducible": false,
+      "_fidelity": {
+        "score": 62,
+        "rawScore": 56,
+        "featherPx": 5,
+        "worstOffsetPx": 17.6,
+        "meanOffsetPx": 17.6,
+        "confidence": "ok",
+        "confidentBoundaries": 1,
+        "lowConfidenceBoundaries": 2,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      }
     },
     "dnaError": null
   }
