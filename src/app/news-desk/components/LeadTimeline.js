@@ -17,6 +17,7 @@ const TYPE_META = {
   sent: { icon: '🚀', label: 'ส่งเข้าคิวเขียน' },
   written: { icon: '✍️', label: 'เขียนเสร็จ' },
   status: { icon: 'ℹ️', label: 'เปลี่ยนสถานะ' },
+  refound: { icon: '🔁', label: 'เจอซ้ำอีกรอบ' }, // 🆕 17 ก.ค. 69: ใบที่มีอยู่แล้วในคลังถูกเจอซ้ำในรอบล่าใหม่ (saveLeads)
 };
 
 function fmtTime(iso) {
@@ -44,6 +45,8 @@ function renderEventDetail(type, data) {
       return d.summary || d.title || '-';
     case 'status':
       return d.status || '-';
+    case 'refound':
+      return `รอบล่า ${d.runId || '-'}`;
     default:
       return '';
   }
@@ -53,9 +56,16 @@ export default function LeadTimeline({ lead }) {
   const [jobInfo, setJobInfo] = useState(null);
   const [jobLoading, setJobLoading] = useState(false);
   const [jobErr, setJobErr] = useState('');
+  // 🆕 17 ก.ค. 69: กล่องอ่านเนื้อของอีเวนต์ 'extracted' — { [eventIndex]: 'clean'|'raw' } ไม่มี key = กล่องปิด
+  //   ดึงจาก lead.extract.text/.raw ที่ติดมากับ record อยู่แล้ว ไม่ยิง API เพิ่ม
+  const [extractView, setExtractView] = useState({});
 
   const timeline = Array.isArray(lead?.timeline) ? lead.timeline : [];
   const canCheckJob = lead?.status === 'sent' && !!lead?.jobId;
+
+  function toggleExtractView(idx, mode) {
+    setExtractView((m) => ({ ...m, [idx]: m[idx] === mode ? null : mode }));
+  }
 
   async function checkJob() {
     setJobLoading(true);
@@ -74,11 +84,41 @@ export default function LeadTimeline({ lead }) {
         <div style={{ display: 'grid', gap: 6 }}>
           {timeline.map((ev, i) => {
             const meta = TYPE_META[ev?.type] || { icon: '•', label: ev?.type || '-' };
+            const isExtracted = ev?.type === 'extracted';
+            const openMode = extractView[i] || null; // 'clean' | 'raw' | null
+            const hasClean = isExtracted && !!lead?.extract?.text;
+            const hasRaw = isExtracted && !!lead?.extract?.raw;
             return (
-              <div key={i} style={{ fontSize: 12, color: UI.dim, lineHeight: 1.5, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <span>{meta.icon}</span>
-                <span style={{ color: UI.muted, whiteSpace: 'nowrap' }}>{fmtTime(ev?.at)}</span>
-                <span>{meta.label}: {renderEventDetail(ev?.type, ev?.data)}</span>
+              <div key={i} style={{ display: 'grid', gap: 4 }}>
+                <div style={{ fontSize: 12, color: UI.dim, lineHeight: 1.5, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span>{meta.icon}</span>
+                  <span style={{ color: UI.muted, whiteSpace: 'nowrap' }}>{fmtTime(ev?.at)}</span>
+                  <span>{meta.label}: {renderEventDetail(ev?.type, ev?.data)}</span>
+                  {/* 🆕 17 ก.ค. 69: ปุ่มเล็กดูเนื้อกลั่น/เนื้อดิบของอีเวนต์นี้ (ดึงจาก record ที่มีอยู่แล้ว ไม่ยิง API เพิ่ม) */}
+                  {hasClean && (
+                    <button
+                      type="button"
+                      onClick={() => toggleExtractView(i, 'clean')}
+                      style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, border: `1px solid ${UI.line}`, background: 'transparent', color: UI.accent, cursor: 'pointer' }}
+                    >{openMode === 'clean' ? 'ซ่อนเนื้อกลั่น ▲' : 'ดูเนื้อกลั่น ▾'}</button>
+                  )}
+                  {hasRaw && (
+                    <button
+                      type="button"
+                      onClick={() => toggleExtractView(i, 'raw')}
+                      style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, border: `1px solid ${UI.line}`, background: 'transparent', color: UI.muted, cursor: 'pointer' }}
+                    >{openMode === 'raw' ? 'ซ่อนเนื้อดิบ ▲' : 'ดูดิบ ▾'}</button>
+                  )}
+                </div>
+                {isExtracted && openMode && (
+                  <div style={{
+                    whiteSpace: 'pre-wrap', maxHeight: 260, overflowY: 'auto',
+                    background: UI.card, border: `1px solid ${UI.line}`, borderRadius: 8,
+                    padding: 8, fontSize: 12, color: UI.text, lineHeight: 1.6,
+                  }}>
+                    {openMode === 'clean' ? (lead?.extract?.text || '(ไม่มีเนื้อกลั่น)') : (lead?.extract?.raw || '(ไม่มีเนื้อดิบ)')}
+                  </div>
+                )}
               </div>
             );
           })}

@@ -239,7 +239,6 @@ export default function ResearchTab({ onToast }) {
     let idx = 0;
     const clusterKeys = [...byCluster.keys()];
     // ★ trace: สะสมข้ามคลัสเตอร์ไว้ประกอบสมุดบันทึกรอบล่า 1 ก้อนตอนจบ (ดูจุดต่อจากลูปนี้)
-    const allKeepers = [];
     const runJudgeLogAgg = [];
     const judgeSummaryAgg = { judged: 0, kept: 0, dropGate: 0, dropDedup: 0, dropSame: 0, lowScore: 0 };
 
@@ -288,7 +287,6 @@ export default function ResearchTab({ onToast }) {
           runJudgeLogAgg.push({ title: j.title || '', url: j.url || '', stage: 'lowScore', reason: j.reason || '', score: j.matchScore });
         }
       }
-      allKeepers.push(...keepers);
 
       if (keepers.length > 0) {
         // eslint-disable-next-line no-await-in-loop
@@ -328,18 +326,9 @@ export default function ResearchTab({ onToast }) {
         },
       });
 
-      // ★ trace: timeline ต่อลีดที่เพิ่งเก็บ — found+judged ก้อนเดียวต่อใบ (จับคู่กับ candidate ที่ตรง url)
-      for (const lead of mine) {
-        const match = allKeepers.find((k) => k.url === lead.url);
-        fireTrace({
-          action: 'leadEvents',
-          leadId: lead.id,
-          events: [
-            { type: 'found', data: { runId, query: match?.query || '', channel: match?.channel || lead.channel || '' } },
-            { type: 'judged', data: { score: match?.matchScore ?? lead.matchScore ?? 0, reason: match?.reason || lead.reason || '', model } },
-          ],
-        });
-      }
+      // 🔧 17 ก.ค. 69 (แก้บัค timeline ว่าง): เลิกยิง {action:'leadEvents'} ต่อใบทิ้งแล้ว — found+judged ถูก
+      //   seed เข้า record ตั้งแต่ saveBatch (researchLeads.js: saveLeads → pushEvent) เขียนจังหวะเดียวกับการสร้างลีด
+      //   ไม่ต้องยิง fire-and-forget แยกอีกชั้น (เดิมพังบน serverless เพราะ route ตอบเสร็จ runtime ถูกแช่แข็งก่อนเขียนจริง)
 
       // ── 🆕 A1 (17 ก.ค. 69): ออโต้หลังล่า (default ปิด) — จบ saveBatch+logRun ครบทุกคลัสเตอร์แล้ว ──
       //   คัดเฉพาะ fetchability='full' && matchScore≥minScore เรียงคะแนนมาก→น้อย ตัดที่ maxPerRound ใบ

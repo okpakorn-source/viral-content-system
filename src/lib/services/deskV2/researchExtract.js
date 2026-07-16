@@ -34,8 +34,7 @@
 
 import { createStore } from '../../persistStore.js';
 import { sanitizeText } from './dnaContract.js';
-import { STORE as LEADS_STORE } from './researchLeads.js';
-import { appendLeadEvents } from './researchTrace.js'; // ★ trace 17 ก.ค. (อ้างแบบ trace-design) — สมุดบันทึกย้อนหลังต่อลีด
+import { STORE as LEADS_STORE, pushEvent } from './researchLeads.js'; // 🔧 17 ก.ค. 69: pushEvent ร่วม (เขียน event พร้อม write หลักจังหวะเดียว — เลิกใช้ appendLeadEvents fire-and-forget)
 import { callAI } from '../../ai/openai.js'; // 🆕 D1: กลั่นเนื้อดิบ (ตามแพตเทิร์น dnaResearch.js — ห้ามแก้ openai.js)
 import { MODEL_FAST } from '../../ai/modelConfig.js'; // 🔴 ห้าม hardcode ชื่อโมเดล — งานเร็ว/ประหยัด
 
@@ -251,13 +250,17 @@ export async function extractClip(url, origin) {
 }
 
 // ── merge แล้ว persist ด้วยแพตเทิร์น remove-แล้ว-add เหมือน researchLeads.js (ห้ามใช้ store.update()) ──
-async function _mergeAndPersistLead(store, id, patch) {
+//   🔧 17 ก.ค. 69: event (ถ้าส่งมา) ถูก pushEvent เข้า record ก่อนเขียนจริง — "จังหวะเดียว" กับ patch เสมอ
+//   (แก้บัค lead.timeline ว่าง 0/66 ใบ — เดิมเรียก appendLeadEvents แยกทีหลังแบบ fire-and-forget
+//   ซึ่งบน Vercel serverless ถูกฆ่าก่อนเขียนจริงเสมอ พอ route ตอบเสร็จ)
+async function _mergeAndPersistLead(store, id, patch, event) {
   const all = await store.getAll();
   const existing = all.find((r) => r.id === id);
   if (!existing) {
     throw new Error(`ไม่พบลีด: ${id}`);
   }
-  const merged = { ...existing, ...patch };
+  let merged = { ...existing, ...patch };
+  if (event) merged = pushEvent(merged, event.type, event.data);
   await store.remove(id);
   await store.add(merged);
   return merged;
@@ -385,7 +388,7 @@ export async function getLead(leadId) {
  * @param {{text:string, insight?:object, source?:string}} extractResult
  */
 export async function attachExtract(leadId, extractResult, { auto = false } = {}) {
-  const _traceT0 = Date.now(); // ★ trace 17 ก.ค.: จับเวลาไว้ใส่ tookMs ของ event 'extracted' — ไม่กระทบผลลัพธ์ฟังก์ชัน
+  const _t0 = Date.now(); // จับเวลาไว้ใส่ tookMs ของ event 'extracted' — ไม่กระทบผลลัพธ์ฟังก์ชัน
   const store = createStore(LEADS_STORE);
 
   // ต้องรู้ title/sourceHost ของลีดก่อน merge เพื่อป้อน distillContent (โดยเฉพาะ isThread) — อ่านแยกจาก _mergeAndPersistLead
@@ -441,26 +444,27 @@ export async function attachExtract(leadId, extractResult, { auto = false } = {}
     },
     contentReady: true,
   };
-  const merged = await _mergeAndPersistLead(store, leadId, patch);
 
-  // ★ trace 17 ก.ค. (อ้างแบบ trace-design): บันทึก event 'extracted' — fire-and-forget ห้ามทำให้งานสกัดเนื้อพัง
-  const insightTopics = merged.extract?.insight
-    ? [merged.extract.insight.headline, merged.extract.insight.overview, merged.extract.insight.category].filter(Boolean).slice(0, 3)
+  // 🔧 17 ก.ค. 69 (แก้บัค timeline ว่าง): event 'extracted' เข้า merged record เดียวกับที่เขียน extract อยู่แล้ว
+  //   (pushEvent ก่อน remove+add ใน _mergeAndPersistLead) — เลิก appendLeadEvents แยกทีหลัง (serverless freeze ก่อนเขียนจริง)
+  //   route/insightTopics คำนวณจาก existingLead/extractResult ที่มีอยู่แล้วก่อน merge (ไม่ต้องพึ่ง merged)
+  const insightTopics = extractResult?.insight
+    ? [extractResult.insight.headline, extractResult.insight.overview, extractResult.insight.category].filter(Boolean).slice(0, 3)
     : [];
-  appendLeadEvents(leadId, [{
+  const merged = await _mergeAndPersistLead(store, leadId, patch, {
     type: 'extracted',
     data: {
-      route: classifyExtractRoute(merged),
+      route: classifyExtractRoute(existingLead),
       source: extractResult?.source || '',
       textLength: cleanText.length,
       distilled,                     // 🆕 D1
       rawLength: rawText.length,     // 🆕 D1
       cleanLength: cleanText.length, // 🆕 D1
       insightTopics,
-      tookMs: Date.now() - _traceT0,
+      tookMs: Date.now() - _t0,
       ...(auto ? { auto: true } : {}), // 🆕 A1 (17 ก.ค. 69): ติดป้ายเมื่อมาจากออโต้หลังล่า — ไม่ใส่ auto:false กันโครงสร้าง event เดิมเปลี่ยน
     },
-  }]).catch(() => {}); // เงียบ — trace ต้องไม่ทำให้งานสกัดเนื้อจริงพัง
+  });
 
   return merged;
 }
@@ -581,25 +585,23 @@ export async function sendLeadAsText(leadId, { origin, auto = false } = {}) {
   }
 
   try {
+    // 🔧 17 ก.ค. 69 (แก้บัค timeline ว่าง): event 'sent' เข้า record เดียวกับ write status→'sent' (ไม่ appendLeadEvents แยกทีหลัง)
     await _mergeAndPersistLead(store, leadId, {
       status: 'sent',
       statusAt: new Date().toISOString(),
       jobId: body.jobId || null,
+    }, {
+      type: 'sent',
+      data: {
+        jobId: body.jobId || '',
+        payloadLength: payload.input.length,
+        ...(auto ? { auto: true } : {}), // 🆕 A1 (17 ก.ค. 69): ติดป้ายเมื่อมาจากออโต้หลังล่า — ไม่ใส่ auto:false กันโครงสร้าง event เดิมเปลี่ยน
+      },
     });
   } catch (e) {
     // ยิงคิวสำเร็จแล้วแต่บันทึกสถานะไม่ได้ — แจ้งตามจริง (คิวไปแล้วจริง)
     return { success: true, jobId: body.jobId, position: body.position, statusSaveError: e.message };
   }
-
-  // ★ trace 17 ก.ค. (อ้างแบบ trace-design): บันทึก event 'sent' — fire-and-forget ห้ามทำให้การส่งคิวพัง
-  appendLeadEvents(leadId, [{
-    type: 'sent',
-    data: {
-      jobId: body.jobId || '',
-      payloadLength: payload.input.length,
-      ...(auto ? { auto: true } : {}), // 🆕 A1 (17 ก.ค. 69): ติดป้ายเมื่อมาจากออโต้หลังล่า — ไม่ใส่ auto:false กันโครงสร้าง event เดิมเปลี่ยน
-    },
-  }]).catch(() => {}); // เงียบ — trace ต้องไม่ทำให้งานส่งคิวจริงพัง
 
   return { success: true, jobId: body.jobId, position: body.position };
 }
