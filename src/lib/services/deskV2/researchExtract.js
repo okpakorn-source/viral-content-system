@@ -7,7 +7,10 @@
  *   ตัดเมนู/โฆษณา/ความเห็นทั่วไปทิ้ง — กลั่นล้ม = fail-open ใช้ raw ตรงแทน (ไม่บล็อกงาน)
  * → แนบเข้าลีด (remove-แล้ว-add) → กด "ส่งเขียน" = ประกอบข้อความล้วน (ไม่มี URL) ส่งเข้าคิวเขียนข่าว
  * ผ่านสาย "text" ของ /api/queue/add ที่ระบบเปิดไว้ (สาย URL ปิดอยู่ด้วย TEXT_ONLY_MODE — ห้ามพยายาม bypass)
+ * → 🆕 A1 (17 ก.ค. 69): โหมดออโต้ 2 ระดับ — extractAndSend() รวด extract→distill→ส่ง ในฟังก์ชันเดียว
+ *   ใช้เป็นปุ่มเดียวจบต่อใบ (⚡ กดเอง) และเป็นแกนของ "ออโต้หลังล่า" (ResearchTab วนเรียกทีละใบ, auto:true)
  *
+
  * 🔴 pure JS + relative import ล้วน (ให้ node เรียกเทสตรงได้ ไม่ง้อ alias @/)
  * 🔴 ห้ามใช้ persistStore.update() — ใช้แพตเทิร์น remove(id) แล้ว add(ฉบับใหม่) แทนเสมอ (ตาม researchLeads.js)
  * 🔴 ห้ามแก้ researchLeads.js / api/clip-transcript/** / api/queue/** / dnaContract.js — ไฟล์นี้ import/อ่านเท่านั้น
@@ -381,7 +384,7 @@ export async function getLead(leadId) {
  * @param {string} leadId
  * @param {{text:string, insight?:object, source?:string}} extractResult
  */
-export async function attachExtract(leadId, extractResult) {
+export async function attachExtract(leadId, extractResult, { auto = false } = {}) {
   const _traceT0 = Date.now(); // ★ trace 17 ก.ค.: จับเวลาไว้ใส่ tookMs ของ event 'extracted' — ไม่กระทบผลลัพธ์ฟังก์ชัน
   const store = createStore(LEADS_STORE);
 
@@ -455,6 +458,7 @@ export async function attachExtract(leadId, extractResult) {
       cleanLength: cleanText.length, // 🆕 D1
       insightTopics,
       tookMs: Date.now() - _traceT0,
+      ...(auto ? { auto: true } : {}), // 🆕 A1 (17 ก.ค. 69): ติดป้ายเมื่อมาจากออโต้หลังล่า — ไม่ใส่ auto:false กันโครงสร้าง event เดิมเปลี่ยน
     },
   }]).catch(() => {}); // เงียบ — trace ต้องไม่ทำให้งานสกัดเนื้อจริงพัง
 
@@ -514,7 +518,7 @@ export function buildTextJobPayload(lead) {
  *   (ง) โดนด่าน TEXT_ONLY (ไม่ควรเกิดถ้า strip URL ครบ — เช็คไว้กันหลุด) → คืน {success:false, blockedByTextOnly:true} ไม่เปลี่ยน status
  *   (จ) timeout 30s + try/catch ครอบทุกทาง → {success:false, error}
  */
-export async function sendLeadAsText(leadId, { origin } = {}) {
+export async function sendLeadAsText(leadId, { origin, auto = false } = {}) {
   const store = createStore(LEADS_STORE);
 
   let lead;
@@ -590,8 +594,114 @@ export async function sendLeadAsText(leadId, { origin } = {}) {
   // ★ trace 17 ก.ค. (อ้างแบบ trace-design): บันทึก event 'sent' — fire-and-forget ห้ามทำให้การส่งคิวพัง
   appendLeadEvents(leadId, [{
     type: 'sent',
-    data: { jobId: body.jobId || '', payloadLength: payload.input.length },
+    data: {
+      jobId: body.jobId || '',
+      payloadLength: payload.input.length,
+      ...(auto ? { auto: true } : {}), // 🆕 A1 (17 ก.ค. 69): ติดป้ายเมื่อมาจากออโต้หลังล่า — ไม่ใส่ auto:false กันโครงสร้าง event เดิมเปลี่ยน
+    },
   }]).catch(() => {}); // เงียบ — trace ต้องไม่ทำให้งานส่งคิวจริงพัง
 
   return { success: true, jobId: body.jobId, position: body.position };
+}
+
+/**
+ * =====================================================
+ * ⚡ A1 (17 ก.ค. 69) — โหมดออโต้ 2 ระดับ: ปุ่มเดียวจบต่อใบ + ออโต้หลังล่า
+ * =====================================================
+ * extractAndSend — รวด extract→distill(ในตัว attachExtract)→ส่งเขียนแบบข้อความ ในฟังก์ชันเดียว
+ *   ใช้ได้ทั้ง (ก) กดเองต่อใบ ("⚡ สกัด+ส่งเลย" ใน LeadCard, auto=false) และ
+ *   (ข) ออโต้หลังล่า (ResearchTab เรียกวนทีละใบหลังจบรอบล่า, auto=true — ติดป้าย auto:true ใน event trace)
+ *
+ * ลำดับ:
+ *   1) โหลดลีด — ถ้า contentReady อยู่แล้ว (มี extract.text พร้อม) ข้ามขั้นสกัด/กลั่น ไปส่งเลย (idempotent)
+ *   2) ยังไม่พร้อม → classify เส้นทางตาม classifyExtractRoute (ตรรกะเดิม ไม่แก้)
+ *      - 'article' → extractArticle → attachExtract (กลั่นในตัว fail-open อยู่แล้ว) → ต่อไปขั้นส่ง
+ *      - 'clip'    → extractClip → pending (คลิปยังถอดไม่เสร็จ) → คืนทันที ไม่ส่ง
+ *                    ถอดเสร็จในคอลนี้ → attachExtract → ต่อไปขั้นส่ง
+ *   3) ส่ง: sendLeadAsText (ตรรกะเดิม ไม่แก้ — จัดการ alreadySent/blockedByTextOnly/timeout ให้ครบ)
+ *
+ * ทุก step ที่ล้ม คืน {success:false, step, error} ทันที — ไม่ทำ step ถัดไป และไม่เปลี่ยน status ของลีด
+ * (attachExtract ตั้งได้แค่ contentReady:true ไม่แตะ status · status เปลี่ยนเป็น 'sent' เฉพาะตอน sendLeadAsText สำเร็จเท่านั้น)
+ *
+ * @param {string} leadId
+ * @param {{origin:string, auto?:boolean}} opts
+ * @returns {Promise<
+ *   {success:true, sent:true, jobId:string|null, cleanLength:number} |
+ *   {success:true, sent:false, pending:true, jobRef?:string|null} |
+ *   {success:false, step:'extract'|'distill'|'send', error:string}
+ * >}
+ */
+export async function extractAndSend(leadId, { origin, auto = false } = {}) {
+  let lead;
+  try {
+    lead = await getLead(leadId);
+  } catch (e) {
+    return { success: false, step: 'extract', error: `โหลดลีดไม่สำเร็จ: ${e.message}` };
+  }
+  if (!lead) {
+    return { success: false, step: 'extract', error: `ไม่พบลีด: ${leadId}` };
+  }
+
+  let cleanLength = String(lead.extract?.text || '').length;
+
+  // (1) เนื้อพร้อมอยู่แล้ว (contentReady) → ข้ามสกัด/กลั่น ไปส่งเลย (กันจ่ายค่ากลั่นซ้ำเมื่อเรียกซ้ำ/idempotent)
+  if (!lead.contentReady) {
+    const route = classifyExtractRoute(lead);
+
+    if (route === 'clip') {
+      let clipResult;
+      try {
+        clipResult = await extractClip(lead.url, origin);
+      } catch (e) {
+        return { success: false, step: 'extract', error: e?.message || String(e) };
+      }
+      if (clipResult?.pending) {
+        // คลิปยังถอดไม่เสร็จ (ส่งเข้าคิวเครื่องทีมแล้ว) — ไม่ใช่ error แต่ยังส่งเขียนไม่ได้
+        return { success: true, sent: false, pending: true, jobRef: clipResult.jobRef || null };
+      }
+      const rawText = String(clipResult?.text || '');
+      if (rawText.length < 50) {
+        return { success: false, step: 'extract', error: clipResult?.error || 'สกัดเนื้อคลิปไม่สำเร็จ (เนื้อสั้นผิดปกติ)' };
+      }
+      try {
+        const merged = await attachExtract(leadId, clipResult, { auto });
+        cleanLength = String(merged.extract?.text || '').length;
+      } catch (e) {
+        return { success: false, step: 'distill', error: e?.message || String(e) };
+      }
+    } else {
+      let articleResult;
+      try {
+        articleResult = await extractArticle(lead.url);
+      } catch (e) {
+        return { success: false, step: 'extract', error: e?.message || String(e) };
+      }
+      const rawText = String(articleResult?.text || '');
+      if (rawText.length < 50) {
+        return { success: false, step: 'extract', error: articleResult?.error || 'สกัดเนื้อไม่สำเร็จ (เนื้อสั้นผิดปกติ)' };
+      }
+      try {
+        const merged = await attachExtract(leadId, articleResult, { auto });
+        cleanLength = String(merged.extract?.text || '').length;
+      } catch (e) {
+        return { success: false, step: 'distill', error: e?.message || String(e) };
+      }
+    }
+  }
+
+  // (2) ส่งเขียน — sendLeadAsText จัดการ alreadySent/blockedByTextOnly/timeout ให้ครบอยู่แล้ว (ไม่แก้ตรรกะ)
+  let sendResult;
+  try {
+    sendResult = await sendLeadAsText(leadId, { origin, auto });
+  } catch (e) {
+    return { success: false, step: 'send', error: e?.message || String(e) };
+  }
+  if (sendResult?.alreadySent) {
+    return { success: true, sent: true, jobId: sendResult.jobId || null, cleanLength };
+  }
+  if (!sendResult?.success) {
+    return { success: false, step: 'send', error: sendResult?.error || 'ส่งเข้าคิวไม่สำเร็จ' };
+  }
+
+  return { success: true, sent: true, jobId: sendResult.jobId || null, cleanLength };
 }

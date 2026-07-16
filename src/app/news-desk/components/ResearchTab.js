@@ -11,7 +11,7 @@
 import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
 import { UI, Btn, Card, Chip, Spinner, fmtNum, fmtBaht, fmtDuration } from './ui.js';
 import { apiFetch } from './ui.js';
-import HuntSetup, { CHANNELS } from './HuntSetup.js';
+import HuntSetup, { CHANNELS, AUTO_CFG_DEFAULT } from './HuntSetup.js';
 import LeadCard from './LeadCard.js';
 
 const LIB = '/api/desk/dna/library';
@@ -42,6 +42,7 @@ export default function ResearchTab({ onToast }) {
   const [channels, setChannels] = useState({ videos: true, facebook: true, tiktok: true, youtube: true, google: true }); // ★ 16 ก.ค.: +google ลิงก์ข่าวสำนัก (ผู้ใช้สั่ง)
   const [queriesPerCluster, setQueriesPerCluster] = useState(3);
   const [model, setModel] = useState('fast');
+  const [autoCfg, setAutoCfg] = useState(AUTO_CFG_DEFAULT); // 🆕 A1 (17 ก.ค. 69): {enabled,minScore,maxPerRound} — default ปิด
 
   // ── ส่วน 2: การล่ารอบนี้ ──
   const [hunting, setHunting] = useState(false);
@@ -160,6 +161,10 @@ export default function ResearchTab({ onToast }) {
   }
   function toggleChannel(key) {
     setChannels((c) => ({ ...c, [key]: !c[key] }));
+  }
+  // 🆕 A1 (17 ก.ค. 69): แก้ทีละ field ของ autoCfg (patch merge) — HuntSetup ส่ง {enabled}/{minScore}/{maxPerRound} มาทีละอย่าง
+  function updateAutoCfg(patch) {
+    setAutoCfg((c) => ({ ...c, ...patch }));
   }
 
   // ============================================================
@@ -335,6 +340,38 @@ export default function ResearchTab({ onToast }) {
           ],
         });
       }
+
+      // ── 🆕 A1 (17 ก.ค. 69): ออโต้หลังล่า (default ปิด) — จบ saveBatch+logRun ครบทุกคลัสเตอร์แล้ว ──
+      //   คัดเฉพาะ fetchability='full' && matchScore≥minScore เรียงคะแนนมาก→น้อย ตัดที่ maxPerRound ใบ
+      //   ยิง extractAndSend ทีละใบ (sequential ตั้งใจ — คุมต้นทุน/โหลด AI ไม่ยิงขนาน) ระหว่างนี้ hunting ยังเป็น true
+      //   (ปุ่ม "เริ่มล่า" ยัง disabled ต่อ) จน setHunting(false) ท้ายฟังก์ชัน
+      if (autoCfg.enabled) {
+        const keeperPool = mine
+          .filter((l) => l.fetchability === 'full' && (Number(l.matchScore) || 0) >= autoCfg.minScore)
+          .sort((a, b) => (Number(b.matchScore) || 0) - (Number(a.matchScore) || 0))
+          .slice(0, autoCfg.maxPerRound);
+
+        if (keeperPool.length === 0) {
+          pushStep(`🤖 ออโต้หลังล่า: ไม่มีลีดเข้าเกณฑ์ (match ≥ ${autoCfg.minScore}% + พร้อมทำ 🟢) รอบนี้`);
+        } else {
+          pushStep(`🤖 ออโต้หลังล่า: เข้าเกณฑ์ ${fmtNum(keeperPool.length)} ใบ — กำลังสกัด+ส่งทีละใบ…`);
+          let autoSent = 0;
+          for (const lead of keeperPool) {
+            // eslint-disable-next-line no-await-in-loop -- ตั้งใจส่งทีละใบเรียงคิว (sequential ตามที่เจ้าของสั่ง) คุมต้นทุน/โหลด AI ไม่ยิงขนาน
+            const r = await extractAndSendLead(lead, { auto: true });
+            const shortTitle = String(lead.title || lead.id).slice(0, 40);
+            if (r?.success && r?.sent) {
+              autoSent++;
+              pushStep(`🤖 ✅ ${shortTitle} — ส่งแล้ว (${r.cleanLength || 0} ตัวอักษร)`);
+            } else if (r?.pending) {
+              pushStep(`🤖 ⏳ ${shortTitle} — คลิปกำลังถอด (เครื่องทีม) ยังไม่ส่งเอง`);
+            } else {
+              pushStep(`🤖 ⚠️ ${shortTitle} — ล้มเหลว (${r?.step || '?'}: ${r?.error || 'ไม่ทราบสาเหตุ'})`);
+            }
+          }
+          onToast?.(`ออโต้ส่ง ${autoSent}/${keeperPool.length} ใบ`, autoSent > 0 ? 'ok' : 'warn');
+        }
+      }
     }
     await Promise.all([loadLibrary(), loadLibStats()]);
     setHunting(false);
@@ -371,37 +408,9 @@ export default function ResearchTab({ onToast }) {
     }
   }
 
-  async function sendLead(lead) {
-    if (!lead?.id) return;
-    setBusyLead({ id: lead.id, action: 'send' });
-    const res = await apiFetch(LEADS, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'sendQueue', id: lead.id }),
-    });
-    setBusyLead({ id: '', action: '' });
-
-    if (res.blockedByTextOnly) {
-      setSendNotes((m) => ({ ...m, [lead.id]: { kind: 'blocked', msg: 'สายเขียนจาก URL ปิดอยู่ (โหมด TEXT-ONLY) — ลีดถูกเก็บไว้ กดส่งได้เมื่อเปิดสาย URL' } }));
-      onToast?.('สาย URL ปิดอยู่ (TEXT-ONLY) — ลีดยังเก็บไว้ ส่งได้เมื่อเปิดสาย', 'warn');
-      return;
-    }
-    if (res.alreadySent) {
-      setSendNotes((m) => ({ ...m, [lead.id]: { kind: 'sent', msg: 'ส่งเข้าคิวไปแล้วก่อนหน้านี้' } }));
-      patchLead(lead.id, { status: 'sent' });
-      await afterAction();
-      return;
-    }
-    if (res.success) {
-      setSendNotes((m) => ({ ...m, [lead.id]: { kind: 'sent', msg: `ส่งเข้าคิวเขียนแล้ว${res.jobId ? ` (job ${String(res.jobId).slice(0, 10)})` : ''}` } }));
-      patchLead(lead.id, { status: 'sent' });
-      onToast?.('ส่งเข้าคิวเขียนแล้ว', 'ok');
-      await afterAction();
-    } else {
-      setSendNotes((m) => ({ ...m, [lead.id]: { kind: 'error', msg: res.error || 'ส่งเข้าคิวไม่สำเร็จ' } }));
-      onToast?.(res.error || 'ส่งเข้าคิวไม่สำเร็จ', 'err');
-    }
-  }
+  // 🆕 A1 (17 ก.ค. 69): เดิมมีปุ่มส่งคิวสาย URL (sendLead/action:'sendQueue') ตรงนี้ — ถอดออกพร้อมปุ่ม
+  //   "🚀 ส่งเข้าคิวเขียน" ใน LeadCard.js แล้ว (เส้นทางเดียวที่เหลือ = แบบข้อความผ่าน extract/sendText/extractAndSend)
+  //   action:'sendQueue' ฝั่ง /api/desk/research/leads ยังอยู่ (ไม่แตะ backend) แค่ไม่มี UI เรียกจากหน้านี้แล้ว
 
   // ============================================================
   //  R6: สกัดเนื้อ (🧲) + ส่งเขียนแบบข้อความ (🚀) — /api/desk/research/extract
@@ -463,6 +472,47 @@ export default function ResearchTab({ onToast }) {
     }
   }
 
+  // ============================================================
+  //  🆕 A1 (17 ก.ค. 69): ปุ่มเดียวจบ (⚡) — extractAndSend รวด extract→distill→ส่ง
+  //   ใช้ร่วมกัน 2 ทาง: (ก) กดเองต่อใบจาก LeadCard (auto=false มี busy/toast ต่อใบ)
+  //                     (ข) ออโต้หลังล่า วนเรียกทีละใบใน startHunt (auto=true เงียบ busy/toast รายใบ — สรุปรวมทีเดียว)
+  // ============================================================
+  async function extractAndSendLead(lead, { auto = false } = {}) {
+    if (!lead?.id) return null;
+    if (!auto) setBusyLead({ id: lead.id, action: 'extractAndSend' });
+    const res = await apiFetch('/api/desk/research/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'extractAndSend', leadId: lead.id, auto }),
+    });
+    if (!auto) setBusyLead({ id: '', action: '' });
+
+    if (res.pending) {
+      setExtractNotes((m) => ({ ...m, [lead.id]: { kind: 'pending', msg: 'กำลังถอดคลิปอยู่ (เครื่องทีม) — กลับมากดใหม่ภายหลัง' } }));
+      if (!auto) onToast?.('คลิปนี้ใช้เวลาถอดนาน — ระบบส่งเข้าคิวถอดแล้ว กลับมากดใหม่ภายหลัง', 'warn');
+      return res;
+    }
+    if (res.success && res.sent) {
+      setExtractNotes((m) => { const n = { ...m }; delete n[lead.id]; return n; });
+      setSendNotes((m) => ({ ...m, [lead.id]: { kind: 'sent', msg: `สกัด+ส่งเข้าคิวเขียนแล้ว (${res.cleanLength || 0} ตัวอักษร)${res.jobId ? ` (job ${String(res.jobId).slice(0, 10)})` : ''}` } }));
+      patchLead(lead.id, { status: 'sent', contentReady: true });
+      if (!auto) onToast?.('สกัด+ส่งเข้าคิวเขียนแล้ว', 'ok');
+      await afterAction();
+      return res;
+    }
+
+    // ล้มเหลว — ระบุ step ที่พัง (extract/distill/send) ให้ผู้ใช้เห็นชัด
+    const stepLabel = { extract: 'สกัดเนื้อ', distill: 'กลั่นเนื้อ/บันทึก', send: 'ส่งเข้าคิว' }[res.step] || 'ไม่ทราบขั้น';
+    const msg = `${stepLabel}ล้มเหลว: ${res.error || 'ไม่ทราบสาเหตุ'}`;
+    if (res.step === 'send') {
+      setSendNotes((m) => ({ ...m, [lead.id]: { kind: 'error', msg: res.error || 'ส่งเข้าคิวไม่สำเร็จ' } }));
+    } else {
+      setExtractNotes((m) => ({ ...m, [lead.id]: { kind: 'error', msg } }));
+    }
+    if (!auto) onToast?.(msg, 'err');
+    return res;
+  }
+
   const busyFor = (id) => (busyLead.id === id ? busyLead.action : null);
   const s = libStats || {};
   const bs = s.byStatus || {};
@@ -482,8 +532,8 @@ export default function ResearchTab({ onToast }) {
           extractNote={extractNotes[lead.id]}
           onKeep={(l) => setStatus(l, 'kept')}
           onDismiss={(l) => setStatus(l, 'dismissed')}
-          onSend={sendLead}
           onExtract={extractLead}
+          onExtractAndSend={(l) => extractAndSendLead(l, { auto: false })}
           onSendText={sendLeadText}
         />
       ))}
@@ -501,6 +551,7 @@ export default function ResearchTab({ onToast }) {
         channels={channels} onToggleChannel={toggleChannel}
         queriesPerCluster={queriesPerCluster} onQueries={setQueriesPerCluster}
         model={model} onModel={setModel}
+        autoCfg={autoCfg} onAutoCfgChange={updateAutoCfg}
         onStart={startHunt} hunting={hunting}
       />
 
