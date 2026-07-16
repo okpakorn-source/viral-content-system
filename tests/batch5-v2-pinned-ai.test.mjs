@@ -78,7 +78,7 @@ export async function resolve(specifier, context, nextResolve) {
   if (specifier === 'next/server') return { url: ${JSON.stringify(STUB_NEXT)}, shortCircuit: true };
   if (specifier === '@/lib/caseStore') return { url: ${JSON.stringify(STUB_CASE_STORE)}, shortCircuit: true };
   if (specifier === '@/lib/progress') return { url: ${JSON.stringify(STUB_PROGRESS)}, shortCircuit: true };
-  if (specifier === '@/lib/ai/usageLogger') return { url: ${JSON.stringify(STUB_USAGE)}, shortCircuit: true };
+  if (specifier === '@/lib/ai/usageLogger' || specifier === './ai/usageLogger.js' || specifier.endsWith('/ai/usageLogger.js')) return { url: ${JSON.stringify(STUB_USAGE)}, shortCircuit: true };
   if (specifier === './costStore.js' && context.parentURL === ${JSON.stringify(AI_URL)}) {
     return { url: ${JSON.stringify(STUB_COST)}, shortCircuit: true };
   }
