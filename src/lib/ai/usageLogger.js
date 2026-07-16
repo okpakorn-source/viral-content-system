@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/db';
+import { prisma } from '../db.js';
 import { MODEL_COSTS } from './modelConfig.js';
 
 // Pricing per 1,000,000 tokens (USD)

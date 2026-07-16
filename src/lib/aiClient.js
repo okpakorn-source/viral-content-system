@@ -9,7 +9,7 @@
 
 import { withRetry } from './retry.js';
 import { recordLLM } from './costStore.js';
-import { logApiUsage } from '@/lib/ai/usageLogger'; // ★ 7 ก.ค. อุดรูรั่วต้นทุน → /cost เห็นยอดจริง
+import { logApiUsage } from './ai/usageLogger.js'; // ★ 7 ก.ค. อุดรูรั่วต้นทุน → /cost เห็นยอดจริง
 
 const DEFAULTS = {
   anthropic: 'claude-opus-4-8',
