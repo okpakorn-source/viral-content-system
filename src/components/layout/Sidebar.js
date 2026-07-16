@@ -39,9 +39,8 @@ export default function Sidebar() {
   const navItems = [
     // ── ⭐ ใช้งานหลัก (ใช้บ่อยสุด — มาร์คสีเด่น) ──
     { type: 'divider', label: '⭐ ใช้งานหลัก' },
-    { label: 'โต๊ะข่าวกลาง (หาข่าวไวรัล)', icon: '🗞️', href: '/news-desk', highlight: true },
+    // ⛔ 16 ก.ค. 69: ถอดเมนูโต๊ะข่าวกลาง + คลังส่งเช้า (ยุบระบบโต๊ะข่าว — จะสร้างใหม่; กู้คืน: _removed-systems-backup-20260716)
     { label: 'สร้างคอนเทนต์ใหม่', icon: '✨', href: '/content/new', highlight: true },
-    { label: 'คลังส่งเช้า (ข่าวที่เลือกไว้)', icon: '⭐', href: '/news-desk?tab=shortlist', highlight: true },
     { label: 'ผลงานที่เขียนแล้ว', icon: '🧪', href: '/generation-logs' },
     { label: 'คอนเทนต์ทั้งหมด', icon: '📰', href: '/content' },
     { label: 'หน้าแรก (แดชบอร์ด)', icon: '📊', href: '/' },
