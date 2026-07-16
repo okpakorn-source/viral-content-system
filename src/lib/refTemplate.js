@@ -67,9 +67,44 @@ export function realizedSlotSourceIndex(slot) {
   return p ? p.sourceIndex : null;
 }
 
+// ★ B0 (16 ก.ค. — เจ้าของเคาะ) weak-match content sanitizer ─────────────────
+//   เมื่อข่าว "ไม่ตรงแนว ref" (typeMatched=false) เรายืม ref มาเป็น "โครง/รูปทรง" เท่านั้น —
+//   ห้ามให้ subject/shot/emotion ของปกเป้าบังคับการเลือกภาพ/พรอมป์ Director
+//   helper นี้คืน DNA ก้อน "ใหม่" ที่ template.slots เหลือเฉพาะ geometry (ไม่ mutate ของเดิมในคลัง)
+//   + ธง _contentSanitized (enumerable — อยู่รอด JSON round-trip เข้า composer/queue) เพื่อให้
+//   dnaToTemplateSpec งดสร้าง note · ทุก consumer (composer refSlotMeta / buildRefSlotContract /
+//   realizedTemplate) จึงได้ template.slots ไร้เนื้อหาโดยอัตโนมัติ
+//   ★ ห้ามเรียกกับ strong match (typeMatched=true) → พฤติกรรมเดิมทุก byte
+//   ★ B0 fix (16 ก.ค. — ผู้ตรวจเคาะ): 'role' + 'faceSizePct' = layout-structural (ไม่ใช่การรั่ว subject/คน) →
+//     คงไว้ใน geometry:
+//       • role  — dnaToTemplateSpec ใช้ระบุช่อง hero ('main') · composer refSlotMeta map heroT ตาม role ·
+//                 ถ้า strip ทิ้ง → hero-not-largest ref (เช่น REF-mrbq6y74-on6u) จะเลือก main ผิดช่อง (ช่องใหญ่สุดแทน)
+//                 การรั่วเนื้อหาของ role อยู่ที่ note เท่านั้น ซึ่งถูกปิดด้วยธง _contentSanitized อยู่แล้ว
+//       • faceSizePct — เป็น "เป้าครอปหน้า" (crop geometry) ล้วน · composer อ่านเป็น _faceTargetShare (ขั้นต่ำครอป) ·
+//                 ไม่เข้าพรอมป์ Director/การเลือกภาพ · ถ้า strip ทิ้ง = weak match เสีย face-targeting เงียบๆ
+const _GEOMETRY_SLOT_KEYS = ['xPct', 'yPct', 'wPct', 'hPct', 'shape', 'zIndex', 'border', 'borderColor', 'borderWidthPct', 'pos', 'role', 'faceSizePct'];
+export function sanitizeRefDnaForWeakMatch(dna) {
+  if (!dna || typeof dna !== 'object') return dna;
+  const t = dna.template;
+  let template = t;
+  if (t && typeof t === 'object' && Array.isArray(t.slots)) {
+    const slots = t.slots.map((s) => {
+      const g = {};
+      if (s && typeof s === 'object') {
+        for (const k of _GEOMETRY_SLOT_KEYS) if (s[k] !== undefined) g[k] = s[k];
+      }
+      return g;
+    });
+    template = { ...t, slots };
+  }
+  return { ...dna, template, _contentSanitized: true };
+}
+
 export function dnaToTemplateSpec(dna) {
   try {
     const t = dna?.template;
+    // ★ B0: weak match ถูก sanitize มาแล้ว (template.slots geometry ล้วน + ธงนี้) → งดใส่ note บังคับเนื้อหา
+    const _contentSanitized = dna?._contentSanitized === true;
     const slots0 = Array.isArray(t?.slots) ? t.slots : [];
     const rects0 = slots0.filter((s) => s.shape !== 'circle');
     if (rects0.length < 2 || slots0.length < 3) return null; // คอลลาจต้อง ≥3 ช่อง (สี่เหลี่ยม ≥2)
@@ -125,7 +160,8 @@ export function dnaToTemplateSpec(dna) {
         border: s.border ? _safeBorderColor((s.borderColor && s.borderColor !== '-') ? s.borderColor : '') : null, // เฟส 4.1b: กันสีนีออนวัดพลาด
         borderWidth: s.border ? Math.max(8, Math.round(((Number(s.borderWidthPct) || 1.5) / 100) * W)) : 0,
         // ★ 8 ก.ค. (ผู้ใช้สั่ง "จัดวางรูปต้องตรง ref"): note = ข้อมูลจัดวางของ ref ต่อช่อง — Director เห็นใน prompt (line 64)
-        note: `ตามปกเป้า: ${s.role || ''}${s.pos ? ` @${s.pos}` : ''}${s.subject ? ` = ${s.subject}` : ''}${s.shot ? ` (${s.shot}${s.emotion ? '·' + s.emotion : ''})` : ''} — เลือกภาพจากพูลที่ใกล้แบบนี้ที่สุด`,
+        // ★ B0 (16 ก.ค.): weak match (_contentSanitized) → ไม่มี note เลย (note คือช่องรั่วสุดท้ายของ subject/shot/คน เข้าพรอมป์ Director)
+        ...(_contentSanitized ? {} : { note: `ตามปกเป้า: ${s.role || ''}${s.pos ? ` @${s.pos}` : ''}${s.subject ? ` = ${s.subject}` : ''}${s.shot ? ` (${s.shot}${s.emotion ? '·' + s.emotion : ''})` : ''} — เลือกภาพจากพูลที่ใกล้แบบนี้ที่สุด` }),
       };
       // ★ WAVE1A immutable provenance: the ORIGINAL dna.template.slots index (i) this realized slot derives from —
       //   the join key to the structural contract's sourceIndex (buildRefSlotContract indexes the SAME dna.template.slots).

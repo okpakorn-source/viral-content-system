@@ -3151,7 +3151,10 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           //   → ตัด slot subject/storyFlow ทิ้ง (กัน ref รับปริญญาพาเลือก "คนกอด/เด็กในวง" ที่ข่าวนี้ไม่มี)
           //   คงไว้แค่ "โครง" (layoutFamily/template) ซึ่งพิสูจน์แล้วว่าตรง — vt_ref_5x4 จัดถูก
           const weak = !m.typeMatched;
-          const dna = weak ? { ...m.ref.dna, slots: [], neededShots: [], storyFlow: '', compositionLogic: '' } : m.ref.dna;
+          // ★ B0 (16 ก.ค.): weak → strip เนื้อหา top-level เดิม + sanitize template.slots (geometry ล้วน) ด้วย
+          //   (เดิม strip แค่ top-level slots — template.slots ยังพก subject/shot → note รั่วเข้าพรอมป์ Director)
+          const { sanitizeRefDnaForWeakMatch } = await import('@/lib/refTemplate');
+          const dna = weak ? sanitizeRefDnaForWeakMatch({ ...m.ref.dna, slots: [], neededShots: [], storyFlow: '', compositionLogic: '' }) : m.ref.dna;
           // ★ Wave1 Batch E: dnaHash+refBoundAt — stamp ว่า DNA ก้อนไหน/เมื่อไหร่ถูกผูกกับข่าวนี้ (debug/replay)
           // ★ รอบ 6 P1: refId เพิ่มเฉพาะใต้สวิตช์ — ปิด = ไม่มี property เลย (object shape เท่า legacy 100%)
           job.dossier.refMatch = { ...(process.env.MEGA_SELECTION_SPEC === '1' && m.ref.id ? { refId: m.ref.id } : {}), dna, styleName: m.ref.styleName || m.ref.id, imagePath: m.ref.imagePath, reason: m.reason, typeMatched: !weak, dnaHash: _dnaHashFor(dna), refBoundAt: new Date().toISOString() };
@@ -5157,7 +5160,10 @@ export async function s7_cover(job, { origin, _deps } = {}) {
       if (m?.ref?.dna) {
         refDNA = m.ref.dna; // payload/composer: legacy เดิมเป๊ะ ห้าม strip (kill switch ต้องไม่เปลี่ยนผลปก)
         // ★ ผู้ตรวจอิสระ (รอบ 4) + รอบ 5: strip เฉพาะสัญญา — weak match = S6 ใช้เฉพาะโครง
-        selectionRefDNA = m.typeMatched ? m.ref.dna : { ...m.ref.dna, slots: [], neededShots: [], storyFlow: '', compositionLogic: '' };
+        // ★ B0 (16 ก.ค.): sanitize template.slots (geometry ล้วน) + ธง _contentSanitized ด้วย — กัน note รั่ว
+        //   (fallback นี้เดินเฉพาะแฟ้มเก่าไม่มี refMatch · แฟ้มปกติ selectionRefDNA = d.refMatch.dna ที่ S6 sanitize แล้ว)
+        const { sanitizeRefDnaForWeakMatch } = await import('@/lib/refTemplate');
+        selectionRefDNA = m.typeMatched ? m.ref.dna : sanitizeRefDnaForWeakMatch({ ...m.ref.dna, slots: [], neededShots: [], storyFlow: '', compositionLogic: '' });
         resolvedRefId = m.ref.id || _dnaHashFor(selectionRefDNA); // identity จริงเท่านั้น — ห้ามใช้ styleName
         refInfo = ` · 🎯ref ${m.ref.styleName || m.ref.id} (${m.reason})`.slice(0, 90);
       }
