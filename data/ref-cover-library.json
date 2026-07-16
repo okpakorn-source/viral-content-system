@@ -35,37 +35,49 @@
             "xPct": 46,
             "yPct": 0,
             "wPct": 54,
-            "hPct": 60,
+            "hPct": 59.044444444444444,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
             "subject": "คนสองคนนั่งพื้น",
-            "shot": "wide"
+            "shot": "wide",
+            "_geomBeforeRehab": {
+              "xPct": 46,
+              "yPct": 0,
+              "wPct": 54,
+              "hPct": 60
+            }
           },
           {
             "role": "evidence",
             "shape": "rect",
             "xPct": 44,
-            "yPct": 33,
+            "yPct": 33.229629629629635,
             "wPct": 53,
-            "hPct": 29,
+            "hPct": 27.814814814814817,
             "zIndex": 3,
             "border": true,
             "borderColor": "#00FF00",
             "borderWidthPct": 1.5,
             "pos": "inset ลอยทับ",
             "subject": "ภาพขาวดำสถานที่+วงแดง",
-            "shot": "wide"
+            "shot": "wide",
+            "_geomBeforeRehab": {
+              "xPct": 44,
+              "yPct": 33,
+              "wPct": 53,
+              "hPct": 29
+            }
           },
           {
             "role": "victim",
             "shape": "rect",
             "xPct": 46,
-            "yPct": 60,
+            "yPct": 59.044444444444444,
             "wPct": 54,
-            "hPct": 40,
+            "hPct": 40.955555555555556,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
@@ -73,22 +85,34 @@
             "pos": "ล่างขวา",
             "subject": "หญิงร้องไห้เช็ดน้ำตา",
             "shot": "closeup",
-            "emotion": "เศร้า"
+            "emotion": "เศร้า",
+            "_geomBeforeRehab": {
+              "xPct": 46,
+              "yPct": 60,
+              "wPct": 54,
+              "hPct": 40
+            }
           },
           {
             "role": "pair",
             "shape": "circle",
-            "xPct": 14,
-            "yPct": 57,
-            "wPct": 36,
-            "hPct": 29,
+            "xPct": 12.299867876343837,
+            "yPct": 54.668393011100655,
+            "wPct": 38.67721417971336,
+            "hPct": 30.941771343770686,
             "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
             "subject": "คู่รักยิ้ม",
             "shot": "closeup",
-            "emotion": "สุข"
+            "emotion": "สุข",
+            "_geomBeforeRehab": {
+              "xPct": 14,
+              "yPct": 57,
+              "wPct": 36,
+              "hPct": 29
+            }
           }
         ],
         "seamStyle": "feather",
@@ -197,24 +221,29 @@
       "_humanVerified": true,
       "_reproducible": false,
       "_fidelity": {
-        "score": 76,
-        "rawScore": 69,
+        "score": 87,
+        "rawScore": 82,
         "featherPx": 5,
-        "worstOffsetPx": 20.9,
-        "meanOffsetPx": 12.3,
+        "worstOffsetPx": 17.6,
+        "meanOffsetPx": 7.3,
         "confidence": "ok",
         "confidentBoundaries": 3,
         "lowConfidenceBoundaries": 1,
-        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "measuredAt": "2026-07-16T12:55:51.558Z",
         "engineVersion": "rtf-1.0.0"
       },
       "_templateGrade": {
-        "grade": "C",
+        "grade": "B",
         "reasons": [
-          "_fidelity score 76 (70-84) → โซน B",
+          "_fidelity score 87 ≥85 → โซน A",
           "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
         ],
         "engineVersion": "ref-grade-r3-v1"
+      },
+      "_rehabbed": {
+        "at": "2026-07-16T12:55:51.558Z",
+        "engineVersion": "ref-rehab-r5a-v1",
+        "movedBoundaries": 3
       }
     },
     "dnaError": null
@@ -476,22 +505,28 @@
             "xPct": 52,
             "yPct": 0,
             "wPct": 48,
-            "hPct": 42,
+            "hPct": 39.170370370370364,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
             "subject": "ตำรวจและเจ้าหน้าที่ที่โต๊ะ",
-            "shot": "medium"
+            "shot": "medium",
+            "_geomBeforeRehab": {
+              "xPct": 52,
+              "yPct": 0,
+              "wPct": 48,
+              "hPct": 42
+            }
           },
           {
             "role": "victim",
             "shape": "rect",
             "xPct": 52,
-            "yPct": 42,
+            "yPct": 39.170370370370364,
             "wPct": 48,
-            "hPct": 58,
+            "hPct": 60.829629629629636,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
@@ -499,21 +534,33 @@
             "pos": "ล่างขวา",
             "subject": "หญิงชรา",
             "shot": "closeup",
-            "emotion": "กังวล"
+            "emotion": "กังวล",
+            "_geomBeforeRehab": {
+              "xPct": 52,
+              "yPct": 42,
+              "wPct": 48,
+              "hPct": 58
+            }
           },
           {
             "role": "moment",
             "shape": "circle",
-            "xPct": 6,
-            "yPct": 59,
-            "wPct": 36,
-            "hPct": 29,
+            "xPct": 5.931594792821768,
+            "yPct": 59.57219203592984,
+            "wPct": 34.71453948395765,
+            "hPct": 27.771631587166123,
             "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
             "subject": "กลุ่มคนถือเอกสาร",
-            "shot": "medium"
+            "shot": "medium",
+            "_geomBeforeRehab": {
+              "xPct": 6,
+              "yPct": 59,
+              "wPct": 36,
+              "hPct": 29
+            }
           }
         ],
         "seamStyle": "feather",
@@ -613,23 +660,29 @@
       "_humanVerified": true,
       "_reproducible": false,
       "_fidelity": {
-        "score": 40,
-        "rawScore": 34,
+        "score": 77,
+        "rawScore": 71,
         "featherPx": 5,
-        "worstOffsetPx": 38.2,
-        "meanOffsetPx": 26.5,
+        "worstOffsetPx": 12.8,
+        "meanOffsetPx": 11.8,
         "confidence": "ok",
         "confidentBoundaries": 2,
         "lowConfidenceBoundaries": 1,
-        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "measuredAt": "2026-07-16T12:55:51.558Z",
         "engineVersion": "rtf-1.0.0"
       },
       "_templateGrade": {
-        "grade": "F",
+        "grade": "C",
         "reasons": [
-          "_fidelity score 40 < 50 → F"
+          "_fidelity score 77 (70-84) → โซน B",
+          "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
         ],
         "engineVersion": "ref-grade-r3-v1"
+      },
+      "_rehabbed": {
+        "at": "2026-07-16T12:55:51.558Z",
+        "engineVersion": "ref-rehab-r5a-v1",
+        "movedBoundaries": 2
       }
     },
     "dnaError": null
@@ -1065,8 +1118,8 @@
             "shape": "rect",
             "xPct": 0,
             "yPct": 0,
-            "wPct": 55,
-            "hPct": 62,
+            "wPct": 58.342592592592595,
+            "hPct": 60.266666666666666,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
@@ -1074,15 +1127,21 @@
             "pos": "ซ้ายบน",
             "subject": "ผู้หญิงผมยาวร้องไห้",
             "shot": "closeup",
-            "emotion": "เศร้า"
+            "emotion": "เศร้า",
+            "_geomBeforeRehab": {
+              "xPct": 0,
+              "yPct": 0,
+              "wPct": 55,
+              "hPct": 62
+            }
           },
           {
             "role": "context",
             "shape": "rect",
-            "xPct": 55,
+            "xPct": 58.342592592592595,
             "yPct": 0,
-            "wPct": 45,
-            "hPct": 62,
+            "wPct": 41.657407407407405,
+            "hPct": 60.266666666666666,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
@@ -1090,15 +1149,21 @@
             "pos": "บนขวา",
             "subject": "บ้าน",
             "shot": "wide",
-            "emotion": "-"
+            "emotion": "-",
+            "_geomBeforeRehab": {
+              "xPct": 55,
+              "yPct": 0,
+              "wPct": 45,
+              "hPct": 62
+            }
           },
           {
             "role": "action",
             "shape": "rect",
-            "xPct": 48,
-            "yPct": 33,
-            "wPct": 49,
-            "hPct": 25,
+            "xPct": 48.23148148148148,
+            "yPct": 33.98518518518519,
+            "wPct": 48.76851851851852,
+            "hPct": 22.28148148148148,
             "zIndex": 3,
             "border": true,
             "borderColor": "#00FF00",
@@ -1106,15 +1171,21 @@
             "pos": "inset กลางขวาลอยทับ",
             "subject": "กลุ่มคนกับรถ",
             "shot": "medium",
-            "emotion": "ยิ้ม"
+            "emotion": "ยิ้ม",
+            "_geomBeforeRehab": {
+              "xPct": 48,
+              "yPct": 33,
+              "wPct": 49,
+              "hPct": 25
+            }
           },
           {
             "role": "reaction",
             "shape": "rect",
             "xPct": 0,
-            "yPct": 62,
+            "yPct": 60.266666666666666,
             "wPct": 100,
-            "hPct": 38,
+            "hPct": 39.733333333333334,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
@@ -1122,15 +1193,21 @@
             "pos": "แถบล่างเต็มกว้าง",
             "subject": "ผู้ชาย",
             "shot": "medium",
-            "emotion": "พูด"
+            "emotion": "พูด",
+            "_geomBeforeRehab": {
+              "xPct": 0,
+              "yPct": 62,
+              "wPct": 100,
+              "hPct": 38
+            }
           },
           {
             "role": "moment",
             "shape": "circle",
-            "xPct": 12,
-            "yPct": 60,
-            "wPct": 36,
-            "hPct": 29,
+            "xPct": 12.397160007262453,
+            "yPct": 60.885808089789215,
+            "wPct": 35.72262308598651,
+            "hPct": 28.57809846878921,
             "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
@@ -1138,7 +1215,13 @@
             "pos": "วงกลมล่างซ้าย",
             "subject": "ผู้หญิงในชุดครุย",
             "shot": "closeup",
-            "emotion": "ยิ้ม"
+            "emotion": "ยิ้ม",
+            "_geomBeforeRehab": {
+              "xPct": 12,
+              "yPct": 60,
+              "wPct": 36,
+              "hPct": 29
+            }
           }
         ],
         "seamStyle": "feather",
@@ -1246,24 +1329,29 @@
       "_humanVerified": true,
       "_reproducible": false,
       "_fidelity": {
-        "score": 56,
-        "rawScore": 50,
+        "score": 87,
+        "rawScore": 83,
         "featherPx": 5,
-        "worstOffsetPx": 36.1,
-        "meanOffsetPx": 20,
+        "worstOffsetPx": 23.7,
+        "meanOffsetPx": 6.9,
         "confidence": "ok",
         "confidentBoundaries": 5,
         "lowConfidenceBoundaries": 0,
-        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "measuredAt": "2026-07-16T12:55:51.558Z",
         "engineVersion": "rtf-1.0.0"
       },
       "_templateGrade": {
-        "grade": "F",
+        "grade": "B",
         "reasons": [
-          "_fidelity score 56 (50-69) → โซน C",
+          "_fidelity score 87 ≥85 → โซน A",
           "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
         ],
         "engineVersion": "ref-grade-r3-v1"
+      },
+      "_rehabbed": {
+        "at": "2026-07-16T12:55:51.558Z",
+        "engineVersion": "ref-rehab-r5a-v1",
+        "movedBoundaries": 5
       }
     },
     "dnaError": null
@@ -1511,8 +1599,8 @@
             "shape": "rect",
             "xPct": 0,
             "yPct": 0,
-            "wPct": 52,
-            "hPct": 60,
+            "wPct": 50.53703703703704,
+            "hPct": 57.32592592592592,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
@@ -1520,45 +1608,63 @@
             "pos": "ซ้ายบน",
             "subject": "ชายยิ้ม",
             "shot": "closeup",
-            "emotion": "สุข"
+            "emotion": "สุข",
+            "_geomBeforeRehab": {
+              "xPct": 0,
+              "yPct": 0,
+              "wPct": 52,
+              "hPct": 60
+            }
           },
           {
             "role": "context",
             "shape": "rect",
-            "xPct": 52,
+            "xPct": 50.53703703703704,
             "yPct": 0,
-            "wPct": 48,
-            "hPct": 60,
+            "wPct": 49.46296296296296,
+            "hPct": 57.32592592592592,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนขวา",
             "subject": "ชายในวงล้อมคน (วงแดงชี้)",
-            "shot": "wide"
+            "shot": "wide",
+            "_geomBeforeRehab": {
+              "xPct": 52,
+              "yPct": 0,
+              "wPct": 48,
+              "hPct": 60
+            }
           },
           {
             "role": "evidence",
             "shape": "rect",
-            "xPct": 50,
-            "yPct": 31,
-            "wPct": 47,
-            "hPct": 26,
+            "xPct": 48.53703703703704,
+            "yPct": 32.14074074074074,
+            "wPct": 48.46296296296296,
+            "hPct": 22.185185185185187,
             "zIndex": 3,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 1.5,
             "pos": "inset ลอยทับ",
             "subject": "แผนผัง/ชาร์ตเขียว",
-            "shot": "graphic"
+            "shot": "graphic",
+            "_geomBeforeRehab": {
+              "xPct": 50,
+              "yPct": 31,
+              "wPct": 47,
+              "hPct": 26
+            }
           },
           {
             "role": "action",
             "shape": "rect",
             "xPct": 0,
-            "yPct": 60,
+            "yPct": 57.32592592592592,
             "wPct": 100,
-            "hPct": 40,
+            "hPct": 42.67407407407408,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
@@ -1566,21 +1672,33 @@
             "pos": "แถบล่างเต็มกว้าง",
             "subject": "ชายกอดกัน",
             "shot": "medium",
-            "emotion": "ซึ้งใจ"
+            "emotion": "ซึ้งใจ",
+            "_geomBeforeRehab": {
+              "xPct": 0,
+              "yPct": 60,
+              "wPct": 100,
+              "hPct": 40
+            }
           },
           {
             "role": "moment",
             "shape": "circle",
-            "xPct": 8,
-            "yPct": 61,
-            "wPct": 36,
-            "hPct": 29,
+            "xPct": 5.567229042581571,
+            "yPct": 61.39138095832555,
+            "wPct": 37.173079427534006,
+            "hPct": 29.738463542027205,
             "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
             "subject": "ชายใส่หมวกนิรภัย",
-            "shot": "closeup"
+            "shot": "closeup",
+            "_geomBeforeRehab": {
+              "xPct": 8,
+              "yPct": 61,
+              "wPct": 36,
+              "hPct": 29
+            }
           }
         ],
         "seamStyle": "feather",
@@ -1691,23 +1809,29 @@
       "_humanVerified": true,
       "_reproducible": false,
       "_fidelity": {
-        "score": 48,
-        "rawScore": 42,
+        "score": 87,
+        "rawScore": 81,
         "featherPx": 5,
-        "worstOffsetPx": 36.1,
-        "meanOffsetPx": 23.2,
+        "worstOffsetPx": 19.4,
+        "meanOffsetPx": 7.6,
         "confidence": "ok",
         "confidentBoundaries": 4,
         "lowConfidenceBoundaries": 0,
-        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "measuredAt": "2026-07-16T12:55:51.558Z",
         "engineVersion": "rtf-1.0.0"
       },
       "_templateGrade": {
-        "grade": "F",
+        "grade": "B",
         "reasons": [
-          "_fidelity score 48 < 50 → F"
+          "_fidelity score 87 ≥85 → โซน A",
+          "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
         ],
         "engineVersion": "ref-grade-r3-v1"
+      },
+      "_rehabbed": {
+        "at": "2026-07-16T12:55:51.558Z",
+        "engineVersion": "ref-rehab-r5a-v1",
+        "movedBoundaries": 4
       }
     },
     "dnaError": null
@@ -1731,7 +1855,7 @@
             "shape": "rect",
             "xPct": 0,
             "yPct": 0,
-            "wPct": 45,
+            "wPct": 46.083333333333336,
             "hPct": 100,
             "zIndex": 0,
             "border": false,
@@ -1739,15 +1863,21 @@
             "borderWidthPct": 0,
             "pos": "ซ้ายเต็มสูง",
             "subject": "ชายเสื้อน้ำเงิน",
-            "shot": "closeup"
+            "shot": "closeup",
+            "_geomBeforeRehab": {
+              "xPct": 0,
+              "yPct": 0,
+              "wPct": 45,
+              "hPct": 100
+            }
           },
           {
             "role": "pair",
             "shape": "rect",
-            "xPct": 45,
+            "xPct": 46.083333333333336,
             "yPct": 0,
-            "wPct": 55,
-            "hPct": 35,
+            "wPct": 53.916666666666664,
+            "hPct": 36.01481481481481,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
@@ -1755,51 +1885,75 @@
             "pos": "บนขวา",
             "subject": "ครอบครัวสามคน",
             "shot": "medium",
-            "emotion": "สุข"
+            "emotion": "สุข",
+            "_geomBeforeRehab": {
+              "xPct": 45,
+              "yPct": 0,
+              "wPct": 55,
+              "hPct": 35
+            }
           },
           {
             "role": "context",
             "shape": "rect",
-            "xPct": 42,
-            "yPct": 33,
-            "wPct": 51,
-            "hPct": 29,
+            "xPct": 43.083333333333336,
+            "yPct": 34.01481481481481,
+            "wPct": 47.36111111111111,
+            "hPct": 28.274074074074075,
             "zIndex": 3,
             "border": true,
             "borderColor": "#00FF00",
             "borderWidthPct": 1.5,
             "pos": "inset ลอยทับ",
             "subject": "บ้านหลังใหญ่",
-            "shot": "wide"
+            "shot": "wide",
+            "_geomBeforeRehab": {
+              "xPct": 42,
+              "yPct": 33,
+              "wPct": 51,
+              "hPct": 29
+            }
           },
           {
             "role": "reaction",
             "shape": "rect",
-            "xPct": 45,
-            "yPct": 35,
-            "wPct": 55,
-            "hPct": 65,
+            "xPct": 46.083333333333336,
+            "yPct": 36.01481481481481,
+            "wPct": 53.916666666666664,
+            "hPct": 63.98518518518519,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างขวา",
             "subject": "หญิงยิ้ม",
-            "shot": "closeup"
+            "shot": "closeup",
+            "_geomBeforeRehab": {
+              "xPct": 45,
+              "yPct": 35,
+              "wPct": 55,
+              "hPct": 65
+            }
           },
           {
             "role": "moment",
             "shape": "circle",
-            "xPct": 5,
-            "yPct": 66,
-            "wPct": 36,
-            "hPct": 29,
+            "xPct": 6.5169445989033665,
+            "yPct": 66.4475874864288,
+            "wPct": 34.30843875070382,
+            "hPct": 27.446751000563058,
             "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
             "subject": "คู่ชายหญิง",
-            "shot": "medium"
+            "shot": "medium",
+            "_geomBeforeRehab": {
+              "xPct": 5,
+              "yPct": 66,
+              "wPct": 36,
+              "hPct": 29
+            }
           }
         ],
         "seamStyle": "feather",
@@ -1909,24 +2063,29 @@
       "_humanVerified": true,
       "_reproducible": false,
       "_fidelity": {
-        "score": 66,
-        "rawScore": 60,
+        "score": 86,
+        "rawScore": 81,
         "featherPx": 5,
-        "worstOffsetPx": 27.6,
-        "meanOffsetPx": 16,
+        "worstOffsetPx": 24.3,
+        "meanOffsetPx": 7.4,
         "confidence": "ok",
         "confidentBoundaries": 5,
         "lowConfidenceBoundaries": 0,
-        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "measuredAt": "2026-07-16T12:55:51.558Z",
         "engineVersion": "rtf-1.0.0"
       },
       "_templateGrade": {
-        "grade": "F",
+        "grade": "B",
         "reasons": [
-          "_fidelity score 66 (50-69) → โซน C",
+          "_fidelity score 86 ≥85 → โซน A",
           "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
         ],
         "engineVersion": "ref-grade-r3-v1"
+      },
+      "_rehabbed": {
+        "at": "2026-07-16T12:55:51.558Z",
+        "engineVersion": "ref-rehab-r5a-v1",
+        "movedBoundaries": 5
       }
     },
     "dnaError": null
@@ -2349,7 +2508,7 @@
             "xPct": 52,
             "yPct": 0,
             "wPct": 48,
-            "hPct": 57,
+            "hPct": 58.25925925925926,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
@@ -2357,7 +2516,13 @@
             "pos": "บนขวา",
             "subject": "กลุ่มคนในร้าน",
             "shot": "medium",
-            "emotion": "ยิ้ม"
+            "emotion": "ยิ้ม",
+            "_geomBeforeRehab": {
+              "xPct": 52,
+              "yPct": 0,
+              "wPct": 48,
+              "hPct": 57
+            }
           },
           {
             "role": "evidence",
@@ -2365,7 +2530,7 @@
             "xPct": 46,
             "yPct": 33,
             "wPct": 51,
-            "hPct": 24,
+            "hPct": 25.25925925925926,
             "zIndex": 3,
             "border": true,
             "borderColor": "#BFFF00",
@@ -2373,15 +2538,21 @@
             "pos": "inset กลางขวาลอยทับ",
             "subject": "โทรศัพท์มือถือ",
             "shot": "closeup",
-            "emotion": "-"
+            "emotion": "-",
+            "_geomBeforeRehab": {
+              "xPct": 46,
+              "yPct": 33,
+              "wPct": 51,
+              "hPct": 24
+            }
           },
           {
             "role": "reaction",
             "shape": "rect",
             "xPct": 52,
-            "yPct": 57,
+            "yPct": 58.25925925925926,
             "wPct": 48,
-            "hPct": 43,
+            "hPct": 41.74074074074074,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
@@ -2389,15 +2560,21 @@
             "pos": "ล่างขวา",
             "subject": "ชายผมทอง",
             "shot": "closeup",
-            "emotion": "นิ่ง"
+            "emotion": "นิ่ง",
+            "_geomBeforeRehab": {
+              "xPct": 52,
+              "yPct": 57,
+              "wPct": 48,
+              "hPct": 43
+            }
           },
           {
             "role": "moment",
             "shape": "circle",
-            "xPct": 8,
-            "yPct": 60,
-            "wPct": 36,
-            "hPct": 28,
+            "xPct": 7.075732747249207,
+            "yPct": 57.99552207777048,
+            "wPct": 40.334916995393975,
+            "hPct": 32.26793359631518,
             "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
@@ -2405,7 +2582,13 @@
             "pos": "วงกลมล่างซ้าย",
             "subject": "หญิงสาวกับเด็ก",
             "shot": "closeup",
-            "emotion": "อบอุ่น"
+            "emotion": "อบอุ่น",
+            "_geomBeforeRehab": {
+              "xPct": 8,
+              "yPct": 60,
+              "wPct": 36,
+              "hPct": 28
+            }
           }
         ],
         "seamStyle": "feather",
@@ -2512,24 +2695,28 @@
       "_humanVerified": true,
       "_reproducible": true,
       "_fidelity": {
-        "score": 65,
-        "rawScore": 38,
+        "score": 73,
+        "rawScore": 45,
         "featherPx": 22,
-        "worstOffsetPx": 32.8,
-        "meanOffsetPx": 24.9,
+        "worstOffsetPx": 22,
+        "meanOffsetPx": 22,
         "confidence": "ok",
-        "confidentBoundaries": 2,
-        "lowConfidenceBoundaries": 2,
-        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "confidentBoundaries": 1,
+        "lowConfidenceBoundaries": 3,
+        "measuredAt": "2026-07-16T12:55:51.558Z",
         "engineVersion": "rtf-1.0.0"
       },
       "_templateGrade": {
-        "grade": "F",
+        "grade": "B",
         "reasons": [
-          "_fidelity score 65 (50-69) → โซน C",
-          "worstOffsetPx 32.8 > 30 → ลดหนึ่งขั้น"
+          "_fidelity score 73 (70-84) → โซน B"
         ],
         "engineVersion": "ref-grade-r3-v1"
+      },
+      "_rehabbed": {
+        "at": "2026-07-16T12:55:51.558Z",
+        "engineVersion": "ref-rehab-r5a-v1",
+        "movedBoundaries": 2
       }
     },
     "dnaError": null
@@ -2826,16 +3013,22 @@
           {
             "role": "moment",
             "shape": "circle",
-            "xPct": 12,
-            "yPct": 63,
-            "wPct": 36,
-            "hPct": 29,
+            "xPct": 11.149724481486071,
+            "yPct": 61.51303630425195,
+            "wPct": 34.60838648674621,
+            "hPct": 27.686709189396975,
             "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
             "subject": "ชายมองกล้อง",
-            "shot": "closeup"
+            "shot": "closeup",
+            "_geomBeforeRehab": {
+              "xPct": 12,
+              "yPct": 63,
+              "wPct": 36,
+              "hPct": 29
+            }
           }
         ],
         "seamStyle": "feather",
@@ -2936,24 +3129,29 @@
       "_humanVerified": true,
       "_reproducible": false,
       "_fidelity": {
-        "score": 50,
-        "rawScore": 38,
+        "score": 77,
+        "rawScore": 65,
         "featherPx": 10,
-        "worstOffsetPx": 25,
-        "meanOffsetPx": 25,
+        "worstOffsetPx": 14.1,
+        "meanOffsetPx": 14.1,
         "confidence": "ok",
         "confidentBoundaries": 1,
         "lowConfidenceBoundaries": 2,
-        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "measuredAt": "2026-07-16T12:55:51.558Z",
         "engineVersion": "rtf-1.0.0"
       },
       "_templateGrade": {
-        "grade": "F",
+        "grade": "C",
         "reasons": [
-          "_fidelity score 50 (50-69) → โซน C",
+          "_fidelity score 77 (70-84) → โซน B",
           "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
         ],
         "engineVersion": "ref-grade-r3-v1"
+      },
+      "_rehabbed": {
+        "at": "2026-07-16T12:55:51.558Z",
+        "engineVersion": "ref-rehab-r5a-v1",
+        "movedBoundaries": 1
       }
     },
     "dnaError": null
@@ -3037,16 +3235,22 @@
           {
             "role": "context",
             "shape": "circle",
-            "xPct": 33,
-            "yPct": 36,
-            "wPct": 34,
-            "hPct": 27,
+            "xPct": 31.18827894749991,
+            "yPct": 34.337254363210256,
+            "wPct": 37.523057246923536,
+            "hPct": 30.018445797538828,
             "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
             "subject": "ชายสูทพูด",
-            "shot": "closeup"
+            "shot": "closeup",
+            "_geomBeforeRehab": {
+              "xPct": 33,
+              "yPct": 36,
+              "wPct": 34,
+              "hPct": 27
+            }
           }
         ],
         "seamStyle": "feather",
@@ -3156,24 +3360,29 @@
       "_humanVerified": true,
       "_reproducible": false,
       "_fidelity": {
-        "score": 57,
-        "rawScore": 45,
+        "score": 83,
+        "rawScore": 71,
         "featherPx": 10,
-        "worstOffsetPx": 22.2,
-        "meanOffsetPx": 22.2,
+        "worstOffsetPx": 11.8,
+        "meanOffsetPx": 11.8,
         "confidence": "ok",
         "confidentBoundaries": 1,
         "lowConfidenceBoundaries": 2,
-        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "measuredAt": "2026-07-16T12:55:51.558Z",
         "engineVersion": "rtf-1.0.0"
       },
       "_templateGrade": {
-        "grade": "F",
+        "grade": "C",
         "reasons": [
-          "_fidelity score 57 (50-69) → โซน C",
+          "_fidelity score 83 (70-84) → โซน B",
           "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
         ],
         "engineVersion": "ref-grade-r3-v1"
+      },
+      "_rehabbed": {
+        "at": "2026-07-16T12:55:51.558Z",
+        "engineVersion": "ref-rehab-r5a-v1",
+        "movedBoundaries": 1
       }
     },
     "dnaError": null
@@ -3388,7 +3597,7 @@
             "shape": "rect",
             "xPct": 0,
             "yPct": 0,
-            "wPct": 50,
+            "wPct": 52.4537037037037,
             "hPct": 100,
             "zIndex": 0,
             "border": false,
@@ -3397,14 +3606,20 @@
             "pos": "ซ้ายเต็มสูง",
             "subject": "ชายหมวกแก๊ป+แว่น",
             "shot": "closeup",
-            "emotion": "สุข"
+            "emotion": "สุข",
+            "_geomBeforeRehab": {
+              "xPct": 0,
+              "yPct": 0,
+              "wPct": 50,
+              "hPct": 100
+            }
           },
           {
             "role": "context",
             "shape": "rect",
-            "xPct": 50,
+            "xPct": 52.4537037037037,
             "yPct": 0,
-            "wPct": 50,
+            "wPct": 47.5462962962963,
             "hPct": 58,
             "zIndex": 0,
             "border": false,
@@ -3412,29 +3627,41 @@
             "borderWidthPct": 0,
             "pos": "บนขวา",
             "subject": "บัณฑิตเดินกลางแจ้ง",
-            "shot": "wide"
+            "shot": "wide",
+            "_geomBeforeRehab": {
+              "xPct": 50,
+              "yPct": 0,
+              "wPct": 50,
+              "hPct": 58
+            }
           },
           {
             "role": "evidence",
             "shape": "rect",
-            "xPct": 44,
-            "yPct": 32,
-            "wPct": 53,
-            "hPct": 26,
+            "xPct": 46.4537037037037,
+            "yPct": 31.68888888888889,
+            "wPct": 50.5462962962963,
+            "hPct": 26.31111111111111,
             "zIndex": 3,
             "border": true,
             "borderColor": "#00FF00",
             "borderWidthPct": 1.5,
             "pos": "inset ลอยทับ",
             "subject": "ท้ายทอยเด็ก (วงแดงชี้หูฟัง)",
-            "shot": "closeup"
+            "shot": "closeup",
+            "_geomBeforeRehab": {
+              "xPct": 44,
+              "yPct": 32,
+              "wPct": 53,
+              "hPct": 26
+            }
           },
           {
             "role": "reaction",
             "shape": "rect",
-            "xPct": 50,
+            "xPct": 52.4537037037037,
             "yPct": 58,
-            "wPct": 50,
+            "wPct": 47.5462962962963,
             "hPct": 42,
             "zIndex": 0,
             "border": false,
@@ -3443,21 +3670,33 @@
             "pos": "ล่างขวา",
             "subject": "ชายกอดกัน",
             "shot": "closeup",
-            "emotion": "ซึ้งใจ"
+            "emotion": "ซึ้งใจ",
+            "_geomBeforeRehab": {
+              "xPct": 50,
+              "yPct": 58,
+              "wPct": 50,
+              "hPct": 42
+            }
           },
           {
             "role": "moment",
             "shape": "circle",
-            "xPct": 9,
-            "yPct": 63,
-            "wPct": 36,
-            "hPct": 29,
+            "xPct": 8.571648406050599,
+            "yPct": 62.21251270682786,
+            "wPct": 39.229441870531154,
+            "hPct": 31.38355349642492,
             "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
             "subject": "ชายอุ้มเด็ก",
-            "shot": "closeup"
+            "shot": "closeup",
+            "_geomBeforeRehab": {
+              "xPct": 9,
+              "yPct": 63,
+              "wPct": 36,
+              "hPct": 29
+            }
           }
         ],
         "seamStyle": "feather",
@@ -3563,23 +3802,28 @@
       "_humanVerified": true,
       "_reproducible": true,
       "_fidelity": {
-        "score": 68,
-        "rawScore": 52,
+        "score": 77,
+        "rawScore": 63,
         "featherPx": 15,
-        "worstOffsetPx": 26.5,
-        "meanOffsetPx": 19,
+        "worstOffsetPx": 25.6,
+        "meanOffsetPx": 15,
         "confidence": "ok",
-        "confidentBoundaries": 3,
-        "lowConfidenceBoundaries": 1,
-        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "confidentBoundaries": 2,
+        "lowConfidenceBoundaries": 2,
+        "measuredAt": "2026-07-16T12:55:51.558Z",
         "engineVersion": "rtf-1.0.0"
       },
       "_templateGrade": {
-        "grade": "C",
+        "grade": "B",
         "reasons": [
-          "_fidelity score 68 (50-69) → โซน C"
+          "_fidelity score 77 (70-84) → โซน B"
         ],
         "engineVersion": "ref-grade-r3-v1"
+      },
+      "_rehabbed": {
+        "at": "2026-07-16T12:55:51.558Z",
+        "engineVersion": "ref-rehab-r5a-v1",
+        "movedBoundaries": 3
       }
     },
     "dnaError": null
@@ -4042,23 +4286,29 @@
             "shape": "rect",
             "xPct": 0,
             "yPct": 0,
-            "wPct": 50,
-            "hPct": 47,
+            "wPct": 47.19444444444444,
+            "hPct": 46.266666666666666,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "บนซ้าย",
             "subject": "ชายหญิงกอดกันกับกระเป๋าเดินทาง",
-            "shot": "wide"
+            "shot": "wide",
+            "_geomBeforeRehab": {
+              "xPct": 0,
+              "yPct": 0,
+              "wPct": 50,
+              "hPct": 47
+            }
           },
           {
             "role": "pair",
             "shape": "rect",
-            "xPct": 50,
+            "xPct": 47.19444444444444,
             "yPct": 0,
-            "wPct": 50,
-            "hPct": 47,
+            "wPct": 52.80555555555556,
+            "hPct": 46.266666666666666,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
@@ -4066,52 +4316,76 @@
             "pos": "บนขวา",
             "subject": "คู่บ่าวสาว",
             "shot": "closeup",
-            "emotion": "สุข"
+            "emotion": "สุข",
+            "_geomBeforeRehab": {
+              "xPct": 50,
+              "yPct": 0,
+              "wPct": 50,
+              "hPct": 47
+            }
           },
           {
             "role": "hero",
             "shape": "rect",
             "xPct": 0,
-            "yPct": 47,
-            "wPct": 50,
-            "hPct": 53,
+            "yPct": 46.266666666666666,
+            "wPct": 47.19444444444444,
+            "hPct": 53.733333333333334,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างซ้าย",
             "subject": "หญิงสัมภาษณ์",
-            "shot": "closeup"
+            "shot": "closeup",
+            "_geomBeforeRehab": {
+              "xPct": 0,
+              "yPct": 47,
+              "wPct": 50,
+              "hPct": 53
+            }
           },
           {
             "role": "moment",
             "shape": "rect",
-            "xPct": 50,
-            "yPct": 47,
-            "wPct": 50,
-            "hPct": 53,
+            "xPct": 47.19444444444444,
+            "yPct": 46.266666666666666,
+            "wPct": 52.80555555555556,
+            "hPct": 53.733333333333334,
             "zIndex": 0,
             "border": false,
             "borderColor": "-",
             "borderWidthPct": 0,
             "pos": "ล่างขวา",
             "subject": "ชายดูแลผู้ป่วยติดเตียง",
-            "shot": "medium"
+            "shot": "medium",
+            "_geomBeforeRehab": {
+              "xPct": 50,
+              "yPct": 47,
+              "wPct": 50,
+              "hPct": 53
+            }
           },
           {
             "role": "evidence",
             "shape": "circle",
-            "xPct": 33,
-            "yPct": 31,
-            "wPct": 33,
-            "hPct": 26,
+            "xPct": 33.02099199431921,
+            "yPct": 28.374272949070534,
+            "wPct": 33.347121267084034,
+            "hPct": 26.677697013667228,
             "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
             "subject": "ชายร้องไห้กุมมือ",
             "shot": "closeup",
-            "emotion": "เศร้า"
+            "emotion": "เศร้า",
+            "_geomBeforeRehab": {
+              "xPct": 33,
+              "yPct": 31,
+              "wPct": 33,
+              "hPct": 26
+            }
           }
         ],
         "seamStyle": "feather",
@@ -4220,24 +4494,29 @@
       "_humanVerified": true,
       "_reproducible": false,
       "_fidelity": {
-        "score": 55,
-        "rawScore": 49,
+        "score": 98,
+        "rawScore": 92,
         "featherPx": 5,
-        "worstOffsetPx": 30.3,
-        "meanOffsetPx": 20.4,
+        "worstOffsetPx": 4.1,
+        "meanOffsetPx": 3.1,
         "confidence": "ok",
         "confidentBoundaries": 3,
         "lowConfidenceBoundaries": 0,
-        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "measuredAt": "2026-07-16T12:55:51.558Z",
         "engineVersion": "rtf-1.0.0"
       },
       "_templateGrade": {
-        "grade": "F",
+        "grade": "B",
         "reasons": [
-          "_fidelity score 55 (50-69) → โซน C",
+          "_fidelity score 98 ≥85 → โซน A",
           "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
         ],
         "engineVersion": "ref-grade-r3-v1"
+      },
+      "_rehabbed": {
+        "at": "2026-07-16T12:55:51.558Z",
+        "engineVersion": "ref-rehab-r5a-v1",
+        "movedBoundaries": 3
       }
     },
     "dnaError": null
@@ -4319,16 +4598,22 @@
           {
             "role": "evidence",
             "shape": "circle",
-            "xPct": 30,
-            "yPct": 39,
-            "wPct": 34,
-            "hPct": 27,
+            "xPct": 31.33490491543575,
+            "yPct": 38.86301784834123,
+            "wPct": 32.22144417855342,
+            "hPct": 25.77715534284274,
             "zIndex": 4,
             "border": true,
             "borderColor": "#FFFFFF",
             "borderWidthPct": 2,
             "subject": "รถยนต์ข้างถนน",
-            "shot": "wide"
+            "shot": "wide",
+            "_geomBeforeRehab": {
+              "xPct": 30,
+              "yPct": 39,
+              "wPct": 34,
+              "hPct": 27
+            }
           }
         ],
         "seamStyle": "feather",
@@ -4438,24 +4723,29 @@
       "_humanVerified": true,
       "_reproducible": false,
       "_fidelity": {
-        "score": 62,
-        "rawScore": 56,
+        "score": 71,
+        "rawScore": 65,
         "featherPx": 5,
-        "worstOffsetPx": 17.6,
-        "meanOffsetPx": 17.6,
+        "worstOffsetPx": 14.1,
+        "meanOffsetPx": 14.1,
         "confidence": "ok",
         "confidentBoundaries": 1,
         "lowConfidenceBoundaries": 2,
-        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "measuredAt": "2026-07-16T12:55:51.558Z",
         "engineVersion": "rtf-1.0.0"
       },
       "_templateGrade": {
-        "grade": "F",
+        "grade": "C",
         "reasons": [
-          "_fidelity score 62 (50-69) → โซน C",
+          "_fidelity score 71 (70-84) → โซน B",
           "_reproducible=false → ลดหนึ่งขั้น (เครื่องวัดตะเข็บเก่าไม่ผ่าน)"
         ],
         "engineVersion": "ref-grade-r3-v1"
+      },
+      "_rehabbed": {
+        "at": "2026-07-16T12:55:51.558Z",
+        "engineVersion": "ref-rehab-r5a-v1",
+        "movedBoundaries": 1
       }
     },
     "dnaError": null

@@ -155,17 +155,19 @@ function scanCircleRay(buf, W, H, ch, cx, cy, r, dx, dy, gap) {
     profile.push({ c: rr, v });
     if (v > peak) peak = v;
   }
-  if (peak <= 0) return { offsetPx: SEARCH_RADIUS, confidence: 0, prominence: 0 };
+  if (peak <= 0) return { offsetPx: SEARCH_RADIUS, confidence: 0, prominence: 0, foundR: null };
   // GATE ชั้น (ข) + กัน centroid-centering: โปรไฟล์รัศมีแบน (พื้นผิว) → ไม่เชื่อ centroid
   const { prominence } = profileProminence(profile.map((p) => p.v), peak);
   if (prominence < MIN_PROMINENCE) {
-    return { offsetPx: SEARCH_RADIUS, confidence: peak, prominence };
+    // foundR=null = "ไม่เจอขอบวงทิศนี้" → ผู้กู้ข้ามทิศนี้ (ไม่ปนจุดมั่วเข้า fit)
+    return { offsetPx: SEARCH_RADIUS, confidence: peak, prominence, foundR: null };
   }
   const thr = PLATEAU_FRAC * peak;
   let wsum = 0, num = 0;
   for (const p of profile) { if (p.v >= thr) { wsum += p.v; num += p.v * p.c; } }
   const foundR = wsum > 0 ? num / wsum : r;
-  return { offsetPx: Math.abs(foundR - r), confidence: peak, prominence };
+  // 🔴 R5a additive: foundR = "รัศมีจริงที่วัดเจอ" (canvas px) — ผู้กู้ (refTemplateRehab) ใช้ fit วงใหม่
+  return { offsetPx: Math.abs(foundR - r), confidence: peak, prominence, foundR };
 }
 
 // ดึงเส้นขอบภายในจาก slots (dedupe เส้นตำแหน่งเดียวกัน) + วงกลม
@@ -241,11 +243,12 @@ export async function measureTemplateFidelity({ imageBuffer, templateSpec }) {
 
   for (const v of verts) {
     const r = scanBoundary(data, W, H, ch, 0, Math.round(v.coord), v.a0, v.a1, gap);
-    boundaries.push({ slotIds: v.slotIds, type: 'v', coord: Math.round(v.coord), offsetPx: round1(r.offsetPx), confidence: round3(r.confidence), prominence: round3(r.prominence), lowConfidence: r.confidence < MIN_CONFIDENCE || r.prominence < MIN_PROMINENCE });
+    // 🔴 R5a additive: foundCoord = ตำแหน่งตะเข็บจริง (canvas px) — ผู้กู้เลื่อนขอบช่องไปหาค่านี้
+    boundaries.push({ slotIds: v.slotIds, type: 'v', coord: Math.round(v.coord), foundCoord: round1(r.foundCoord), offsetPx: round1(r.offsetPx), confidence: round3(r.confidence), prominence: round3(r.prominence), lowConfidence: r.confidence < MIN_CONFIDENCE || r.prominence < MIN_PROMINENCE });
   }
   for (const h of horis) {
     const r = scanBoundary(data, W, H, ch, 1, Math.round(h.coord), h.a0, h.a1, gap);
-    boundaries.push({ slotIds: h.slotIds, type: 'h', coord: Math.round(h.coord), offsetPx: round1(r.offsetPx), confidence: round3(r.confidence), prominence: round3(r.prominence), lowConfidence: r.confidence < MIN_CONFIDENCE || r.prominence < MIN_PROMINENCE });
+    boundaries.push({ slotIds: h.slotIds, type: 'h', coord: Math.round(h.coord), foundCoord: round1(r.foundCoord), offsetPx: round1(r.offsetPx), confidence: round3(r.confidence), prominence: round3(r.prominence), lowConfidence: r.confidence < MIN_CONFIDENCE || r.prominence < MIN_PROMINENCE });
   }
   for (const cir of circles) {
     const dirs = [];
@@ -253,7 +256,8 @@ export async function measureTemplateFidelity({ imageBuffer, templateSpec }) {
     for (let k = 0; k < CIRCLE_DIRS; k++) {
       const ang = (2 * Math.PI * k) / CIRCLE_DIRS;
       const rr = scanCircleRay(data, W, H, ch, cir.cx, cir.cy, cir.r, Math.cos(ang), Math.sin(ang), gap);
-      dirs.push({ angleDeg: Math.round((ang * 180) / Math.PI), offsetPx: round1(rr.offsetPx), confidence: round3(rr.confidence), prominence: round3(rr.prominence) });
+      // 🔴 R5a additive: foundR = รัศมีจริงทิศนี้ (null = หาขอบไม่เจอ) + unit dx/dy สำหรับ fit วงใหม่
+      dirs.push({ angleDeg: Math.round((ang * 180) / Math.PI), dx: round3(Math.cos(ang)), dy: round3(Math.sin(ang)), offsetPx: round1(rr.offsetPx), foundR: rr.foundR == null ? null : round1(rr.foundR), confidence: round3(rr.confidence), prominence: round3(rr.prominence) });
       pkSum += rr.confidence; promSum += rr.prominence; offSum += rr.offsetPx; if (rr.offsetPx > offMax) offMax = rr.offsetPx;
     }
     const meanPk = pkSum / CIRCLE_DIRS;

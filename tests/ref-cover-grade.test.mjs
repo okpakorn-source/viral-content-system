@@ -156,8 +156,8 @@ test('gate ON: รับเฉพาะเกรด A/B และไม่มี
     assert.ok(g === 'A' || g === 'B', `${rec.id} ผ่านประตูต้องเป็น A/B (ได้ ${g})`);
     assert.ok(!rec.dna._duplicateOf, `${rec.id} ผ่านประตูต้องไม่ใช่ใบซ้ำ`);
   }
-  // คลังจริงตอนนี้: A:2 B:2 = 4 ใบผ่าน
-  assert.equal(passed.length, 4, `คลังจริงต้องมี 4 ใบเกรด A/B (ได้ ${passed.length})`);
+  // คลังจริงหลังกู้ R5a (rehab-ref-library.mjs กู้พิกัด 11 ใบ): A:2 B:9 = 11 ใบผ่าน (เดิมก่อนกู้ 4)
+  assert.equal(passed.length, 11, `คลังจริงต้องมี 11 ใบเกรด A/B หลังกู้ R5a (ได้ ${passed.length})`);
 });
 test('gate ON: ใบซ้ำถูกตัดแม้เกรดฐานสูง', () => {
   const envOn = { REF_TEMPLATE_GRADE_GATE: '1' };
