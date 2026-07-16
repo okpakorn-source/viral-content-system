@@ -8,7 +8,7 @@
 // ============================================================
 
 import { NextResponse } from 'next/server';
-import { listRefCovers, addRefCover, deleteRefCover, updateRefCover } from '@/lib/refCoverLibrary';
+import { listRefCovers, addRefCover, deleteRefCover, updateRefCover, syncDnaSlotsToTemplate } from '@/lib/refCoverLibrary';
 import { extractCoverDNA } from '@/lib/refCoverBrain';
 
 export const runtime = 'nodejs';
@@ -92,7 +92,12 @@ export async function PATCH(req) {
             ...(s.emotion ? { emotion: String(s.emotion).slice(0, 20) } : {}),
           }));
         if (slots.length < 3) return NextResponse.json({ success: false, error: 'ต้องมี ≥3 ช่อง' }, { status: 400 });
+        // ★ R2 (16 ก.ค.): sync dna.slots (semantic) ให้ align กับ template.slots ใหม่ทันที —
+        //   ต้นตอบัคเดิม: อัป template.slots แต่ dna.slots ค้าง → dangling/unmatched ทั้งคลัง.
+        //   คง role เดิมที่ยัง match (เนื้อหาเดิม) · ตัด role ที่หาย · เพิ่ม role ใหม่แบบ minimal {role,pos} เท่านั้น.
+        const syncedSlots = syncDnaSlotsToTemplate(cur0.dna?.slots, slots);
         dna.template = { ...(dna.template || {}), slots, seamStyle: dna.template?.seamStyle || 'edge-to-edge' };
+        dna.slots = syncedSlots;
         dna.panelCount = slots.length;
         dna._humanVerified = true; // แก้มือ = ยืนยันในตัว
         delete dna._geometryMismatch;

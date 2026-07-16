@@ -368,13 +368,8 @@
           "desc": "วงกลมกลาง · medium · คนกอดกัน"
         },
         {
-          "role": "evidence",
-          "subject": "คนเล่นน้ำ",
-          "emotion": "สนุก",
-          "facing": "-",
-          "pos": "บนขวา",
-          "shot": "wide",
-          "desc": "บนขวา · wide · คนเล่นน้ำ"
+          "role": "reaction",
+          "pos": "ล่าง"
         }
       ],
       "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=บริบท, ขวาล่าง=การกระทำ, วงกลม=โมเมนต์ดีใจ",
@@ -744,6 +739,10 @@
           "pos": "วงกลมกลาง",
           "shot": "medium",
           "desc": "วงกลมกลาง · medium · ชายและหญิงกับถุงของขวัญ"
+        },
+        {
+          "role": "context",
+          "pos": "ล่างขวา"
         }
       ],
       "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=คู่คนละคน, วงกลม=โมเมนต์ตัวเอก+คนอื่น",
@@ -1436,7 +1435,8 @@
         "engineVersion": "rtf-1.0.0"
       }
     },
-    "dnaError": null
+    "dnaError": null,
+    "_duplicateOf": "REF-mrbq6y74-on6u"
   },
   {
     "id": "REF-mrbq7hs8-598m",
@@ -1598,15 +1598,6 @@
           "pos": "ล่างขวา",
           "shot": "medium",
           "desc": "ล่างขวา · medium · ชายกอดกัน"
-        },
-        {
-          "role": "reaction",
-          "subject": "ชายในวงกลม",
-          "emotion": "ตกใจ",
-          "facing": "ตรง",
-          "pos": "วงกลมบนขวา",
-          "shot": "closeup",
-          "desc": "วงกลมบนขวา · closeup · ชายในวงกลม"
         }
       ],
       "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=บริบท, วงกลม=โมเมนต์ตัวเอก",
@@ -2182,6 +2173,10 @@
           "pos": "ล่างขวา",
           "shot": "wide",
           "desc": "ล่างขวา · wide · กลุ่มคนกำลังทำกิจกรรมกลางแจ้ง"
+        },
+        {
+          "role": "circle",
+          "pos": "ล่างซ้าย"
         }
       ],
       "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=คู่คนละคน, วงกลม=โมเมนต์ตัวเอก+คนอื่น",
@@ -2399,15 +2394,6 @@
           "pos": "วงกลมกลาง",
           "shot": "medium",
           "desc": "วงกลมกลาง · medium · หญิงสาวกับเด็ก"
-        },
-        {
-          "role": "action",
-          "subject": "โทรศัพท์มือถือ",
-          "emotion": "-",
-          "facing": "-",
-          "pos": "กลางขวา",
-          "shot": "closeup",
-          "desc": "กลางขวา · closeup · โทรศัพท์มือถือ"
         }
       ],
       "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=กลุ่มคน, วงกลม=โมเมนต์แม่และลูก",
@@ -2623,6 +2609,10 @@
           "yPct": 37,
           "wPct": 51,
           "hPct": 28
+        },
+        {
+          "role": "reaction",
+          "pos": "ล่างซ้าย"
         }
       ],
       "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=บริบท, วงกลม=พระ",
@@ -3202,13 +3192,8 @@
           "desc": "ล่างขวา · closeup · ชายยิ้ม"
         },
         {
-          "role": "action",
-          "subject": "ชายบนเก้าอี้",
-          "emotion": "สงบ",
-          "facing": "ข้าง",
-          "pos": "วงกลมกลาง",
-          "shot": "medium",
-          "desc": "วงกลมกลาง · medium · ชายบนเก้าอี้"
+          "role": "reaction",
+          "pos": "ล่าง"
         }
       ],
       "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=บริบท, ขวาล่าง=การกระทำ, วงกลม=โมเมนต์ตัวเอก",
@@ -3415,13 +3400,8 @@
           "desc": "วงกลมกลาง · medium · ชายอุ้มเด็ก"
         },
         {
-          "role": "moment",
-          "subject": "ชายสองคนกอดกัน",
-          "emotion": "ยิ้ม",
-          "facing": "ข้าง",
-          "pos": "วงกลมกลาง",
-          "shot": "closeup",
-          "desc": "วงกลมกลาง · closeup · ชายสองคนกอดกัน"
+          "role": "reaction",
+          "pos": "ล่างขวา"
         }
       ],
       "subjectsRelation": "ฮีโร่=ตัวเอก, ขวาบน=บริบท, วงกลม=โมเมนต์ตัวเอก+คนอื่น",
@@ -3897,7 +3877,8 @@
         "engineVersion": "rtf-1.0.0"
       }
     },
-    "dnaError": null
+    "dnaError": null,
+    "_duplicateOf": "REF-mrbqa9k2-obt0"
   },
   {
     "id": "REF-mrbqb30x-uqaj",
