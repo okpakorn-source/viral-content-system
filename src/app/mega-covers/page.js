@@ -51,6 +51,8 @@ export default function MegaCoversPage() {
             <img
               src={`/api/mega-covers/img?id=${encodeURIComponent(it.id)}`}
               alt={it.title}
+              loading="lazy"
+              decoding="async"
               onClick={() => setZoom(it)}
               onError={(e) => {
                 if (it.coverPath && e.currentTarget.dataset.fb !== '1') { e.currentTarget.dataset.fb = '1'; e.currentTarget.src = it.coverPath; }
