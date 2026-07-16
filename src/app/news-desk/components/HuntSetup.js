@@ -18,6 +18,7 @@ export const CHANNELS = [
   { key: 'facebook', label: '📘 Facebook', hint: 'ค้นผ่าน Serper' },
   { key: 'tiktok', label: '🎵 TikTok', hint: 'ค้นผ่าน Serper' },
   { key: 'youtube', label: '▶️ YouTube', hint: 'YouTube API (ฟรี)' },
+  { key: 'google', label: '🌐 Google', hint: 'ลิงก์ข่าวสำนักต่างๆ — ข่าวเก่าน้ำดีทำใหม่ได้ (ดึงเนื้อเต็มได้)' }, // ★ 16 ก.ค.: ผู้ใช้สั่งเพิ่ม
 ];
 
 export default function HuntSetup({
