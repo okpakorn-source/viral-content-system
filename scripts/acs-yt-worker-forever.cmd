@@ -3,6 +3,9 @@ rem ACS YouTube frame worker keeper - restart auto on crash (6 Jul 2026)
 set PATH=C:\Program Files\nodejs;%PATH%
 rem ★ ชี้ไปเซิร์ฟเวอร์งานหนัก :3900 (แยกจากเซิร์ฟเวอร์ข่าว :3000 — บทเรียน crash 6 ก.ค.)
 set ACS_WORKER_BASE=http://localhost:3900
+rem ★ 17 ก.ค.: ปิด mega tick ชั่วคราว — .next-3900 เก่ากว่าคิว rt_* ทำ tick เก่าฆ่างานคิวใน Supabase ที่แชร์กับ cloud
+rem   เปิดคืน (ลบ 2 บรรทัดนี้) ได้ต่อเมื่อ rebuild .next-3900 จาก main ที่มี rt_* แล้วเท่านั้น
+set ACS_WORKER_MEGA_TICK=0
 cd /d "C:\Users\User\แบล็กอัพก่อนแก้2เวอร์ชัน27-5-12.16"
 :loop
 echo [forever] starting acs-yt-worker %date% %time% >> _acs_yt_worker.log

@@ -119,18 +119,25 @@ for (;;) {
       }
 
       // 🏭 MEGA (7 ก.ค.): เดินสายพานข่าวครบวงจร 1 จังหวะตอนว่าง — ไม่มีงาน = no-op เร็วมาก
-      try {
-        const r = await fetch(`${BASE}/api/mega/tick`, {
-          method: 'POST',
-          ...(longDispatcher ? { dispatcher: longDispatcher } : {}),
-        });
-        const d = await r.json().catch(() => ({}));
-        if (d.success && !d.idle) {
-          log(`🏭 MEGA ${d.jobId} · ${d.stageLabel || d.stage}: ${(d.result && d.result.summary) || d.skipped || ''}`);
-          wait = 3000; // สายพานยังเดินอยู่ → จังหวะถัดไปเร็วๆ
+      // ★ 17 ก.ค. (Q1 คิว rt_*): ปิดได้ด้วย ACS_WORKER_MEGA_TICK=0 — จำเป็นเมื่อ build ที่ BASE เก่ากว่าคิว rt_*
+      //   (STAGE_FLOW เก่าไม่รู้จัก rt_s5case → เขียน failed เปล่าลง Supabase ที่แชร์กับ cloud = ฆ่างานคิวเงียบๆ
+      //   ชนะ race กับ Vercel cron ตลอดเพราะลูปนี้ถี่กว่า) · เปิดคืน: ลบ env หรือ =1 หลัง rebuild :3900 รุ่นมี rt_*
+      if (process.env.ACS_WORKER_MEGA_TICK !== '0') {
+        try {
+          const r = await fetch(`${BASE}/api/mega/tick`, {
+            method: 'POST',
+            ...(longDispatcher ? { dispatcher: longDispatcher } : {}),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (d.success && !d.idle) {
+            log(`🏭 MEGA ${d.jobId} · ${d.stageLabel || d.stage}: ${(d.result && d.result.summary) || d.skipped || ''}`);
+            wait = 3000; // สายพานยังเดินอยู่ → จังหวะถัดไปเร็วๆ
+          } else if (d.success === false && d.error) {
+            log(`🏭 MEGA tick ตอบ error: ${String(d.error).slice(0, 120)}`); // ★ 17 ก.ค.: เลิกกลืนเงียบ — ให้เห็นใน log
+          }
+        } catch {
+          /* เงียบ */
         }
-      } catch {
-        /* เงียบ */
       }
 
       // 📱 Quick-test (9 ก.ค.): งานเทสปกที่ผู้ใช้กดบนเว็บ Vercel แล้ว "คลาวทำไม่ได้" (ref เต็มท่อ)
