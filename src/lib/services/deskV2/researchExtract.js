@@ -30,6 +30,7 @@
 import { createStore } from '../../persistStore.js';
 import { sanitizeText } from './dnaContract.js';
 import { STORE as LEADS_STORE } from './researchLeads.js';
+import { appendLeadEvents } from './researchTrace.js'; // ★ trace 17 ก.ค. (อ้างแบบ trace-design) — สมุดบันทึกย้อนหลังต่อลีด
 
 const MAX_EXTRACT_CHARS = 12_000;
 const MIN_TEXT_FOR_SEND = 300;
@@ -260,6 +261,7 @@ export async function getLead(leadId) {
  * @param {{text:string, insight?:object, source?:string}} extractResult
  */
 export async function attachExtract(leadId, extractResult) {
+  const _traceT0 = Date.now(); // ★ trace 17 ก.ค.: จับเวลาไว้ใส่ tookMs ของ event 'extracted' — ไม่กระทบผลลัพธ์ฟังก์ชัน
   const store = createStore(LEADS_STORE);
   const text = sanitizeText(extractResult?.text, MAX_EXTRACT_CHARS);
   const patch = {
@@ -271,7 +273,24 @@ export async function attachExtract(leadId, extractResult) {
     },
     contentReady: true,
   };
-  return _mergeAndPersistLead(store, leadId, patch);
+  const merged = await _mergeAndPersistLead(store, leadId, patch);
+
+  // ★ trace 17 ก.ค. (อ้างแบบ trace-design): บันทึก event 'extracted' — fire-and-forget ห้ามทำให้งานสกัดเนื้อพัง
+  const insightTopics = merged.extract?.insight
+    ? [merged.extract.insight.headline, merged.extract.insight.overview, merged.extract.insight.category].filter(Boolean).slice(0, 3)
+    : [];
+  appendLeadEvents(leadId, [{
+    type: 'extracted',
+    data: {
+      route: classifyExtractRoute(merged),
+      source: extractResult?.source || '',
+      textLength: text.length,
+      insightTopics,
+      tookMs: Date.now() - _traceT0,
+    },
+  }]).catch(() => {}); // เงียบ — trace ต้องไม่ทำให้งานสกัดเนื้อจริงพัง
+
+  return merged;
 }
 
 /**
@@ -390,6 +409,12 @@ export async function sendLeadAsText(leadId, { origin } = {}) {
     // ยิงคิวสำเร็จแล้วแต่บันทึกสถานะไม่ได้ — แจ้งตามจริง (คิวไปแล้วจริง)
     return { success: true, jobId: body.jobId, position: body.position, statusSaveError: e.message };
   }
+
+  // ★ trace 17 ก.ค. (อ้างแบบ trace-design): บันทึก event 'sent' — fire-and-forget ห้ามทำให้การส่งคิวพัง
+  appendLeadEvents(leadId, [{
+    type: 'sent',
+    data: { jobId: body.jobId || '', payloadLength: payload.input.length },
+  }]).catch(() => {}); // เงียบ — trace ต้องไม่ทำให้งานส่งคิวจริงพัง
 
   return { success: true, jobId: body.jobId, position: body.position };
 }
