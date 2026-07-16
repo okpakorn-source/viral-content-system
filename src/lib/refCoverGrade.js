@@ -27,6 +27,28 @@ export function computeTemplateGrade(record) {
   const dna = record?.dna;
   // imagePath อยู่ระดับบนของ record (คลังจริง) — เผื่อบางระเบียนเก็บใน dna ด้วย ก็รับทั้งสองที่
   const imagePath = record?.imagePath || dna?.imagePath;
+
+  // ── R5b: เส้น derived — variant ที่ "กลั่น" จากใบแม่ (refTemplateVariants) ────────────────────
+  //   variant ไม่เคยถูกวัด _fidelity กับภาพจริง (imagePath ชี้ภาพแม่เป็น provenance ล้วน) → ห้ามให้เกรด
+  //   เท่าใบที่วัดจริง. เกรด "จากแม่" (motherGrade ที่ฝังไว้ตอนกลั่น) โดยลดหนึ่งขั้นเสมอ:
+  //     แม่ A → variant B · แม่ B → variant C (ห้ามเกิน B — โครงลูกยังไม่พิสูจน์กับภาพจริง)
+  //   + geometry sane เป็นเงื่อนไข "บังคับ": dnaToTemplateSpec ต้องไม่ null (วางช่องตามโครง variant ได้จริง)
+  //     ไม่ sane = F ทันที (ไม่ว่า motherGrade จะดีแค่ไหน). PURE: ไม่ lookup คลัง — อ่าน motherGrade ที่ฝังมา.
+  //   ★ ใบปกติ (ไม่มี _derived) ไม่แตะเส้นนี้เลย → พฤติกรรมเดิม byte-unchanged (เทสเดิมผ่านครบ).
+  const derived = dna?._derived;
+  if (derived && typeof derived === 'object') {
+    let dspec = null;
+    try { dspec = dnaToTemplateSpec(dna); } catch { dspec = null; }
+    if (!dspec) {
+      return _result('F', [`variant กลั่นจาก ${derived.fromRefId || '?'} แต่ geometry ไม่ sane (dnaToTemplateSpec ไม่ผ่าน) → F`]);
+    }
+    const mg = String(derived.motherGrade || '');
+    const capped = mg === 'A' ? 'B' : mg === 'B' ? 'C' : 'F'; // ลดหนึ่งขั้น (แม่ต้อง A/B; อื่น = F เชิงป้องกัน)
+    return _result(capped, [
+      `variant (${derived.method || '?'}) กลั่นจาก ${derived.fromRefId || '?'} เกรดแม่ ${mg || '?'} → ลดหนึ่งขั้นเป็น ${capped}`,
+      'geometry sane (dnaToTemplateSpec ผ่าน) · ไม่ได้วัด _fidelity กับภาพจริง',
+    ]);
+  }
   // _duplicateOf: scripts/repair-ref-library.mjs เขียนที่ระดับบนของ record (rec._duplicateOf)
   //   ไม่ใช่ใน dna — อ่าน record ก่อน แล้ว fallback dna เผื่อระเบียนเก่าเก็บใน dna (กันพลาดทั้งสองทาง)
   const dupOf = record?._duplicateOf ?? dna?._duplicateOf;
@@ -107,9 +129,12 @@ export function refPoolGateOpen(record, env = process.env) {
   if (!dna || !record?.imagePath) return false;
   const gateOn = env?.REF_TEMPLATE_GRADE_GATE === '1';
   if (!gateOn) {
-    // OFF → พฤติกรรมเดิมเป๊ะ: + เครื่องวัดตะเข็บเก่า (_reproducible!==false)
-    //   รวมกับ core ด้านบน = `dna && imagePath && _reproducible!==false` (byte-identical กับตัวกรองเดิม)
-    return dna._reproducible !== false;
+    // OFF → พฤติกรรมเดิม "ก่อน R5b" เป๊ะ: pool ต้อง byte-identical กับคลัง 21 ใบก่อนกลั่นโครงลูก
+    //   ★ R5b fix: variant กลั่น (_derived) ไม่มี _reproducible → `_reproducible!==false` เป็น true = หลุดเข้าพูล OFF
+    //     ทั้งที่ตอน OFF ต้องไม่เห็น variant เลย (variant เกิดใหม่ใน R5b — pool เดิมไม่มี). กันด้วย !_derived:
+    //     variant มองเห็นได้ "เฉพาะเมื่อ gate ON" เท่านั้น → OFF pool กลับเป็น 7 (== backup) ทุก seed/signal.
+    //   รวมกับ core ด้านบน = `dna && imagePath && !_derived && _reproducible!==false`
+    return !dna._derived && dna._reproducible !== false;
   }
   // ON → คงเช็ค dna+imagePath (ด้านบน) · ไม่มี _duplicateOf · เกรด A/B เท่านั้น
   //   (_reproducible ไม่เช็คแยกอีกต่อไป — ถูกยุบเป็น modifier ในเกรดแล้ว จึงยอมใบ B ที่ repro=false ผ่านได้)
