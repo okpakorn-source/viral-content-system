@@ -139,7 +139,10 @@ async function _runTick(req) {
       return NextResponse.json({ success: false, error: `ไม่รู้จักขั้น ${job.stage}` });
     }
 
-    const origin = req.nextUrl.origin;
+    // ★ Q3 hotfix (17 ก.ค. — เทสจริง MG-0008): Vercel cron ยิงเข้า deployment URL ที่ติด SSO protection
+    //   → req.nextUrl.origin กลายเป็น origin ที่ fetch ภายใน (s5_case→/api/analyze ฯลฯ) โดน 401 HTML ตายทุกขั้น
+    //   override ด้วย env MEGA_TICK_ORIGIN (Vercel ตั้ง = public alias) · ไม่ตั้ง = พฤติกรรมเดิมเป๊ะ (เครื่องทีม/local)
+    const origin = (process.env.MEGA_TICK_ORIGIN || '').trim() || req.nextUrl.origin;
     const idemKey = `${job.id}:${job.stage}:${stageInputHash(job)}`;
 
     // idempotency: ขั้นนี้+input นี้เคยสำเร็จแล้ว → เลื่อนต่อเลย ไม่รันซ้ำ
@@ -247,7 +250,9 @@ async function _runTick(req) {
       await updateJob(job.id, { ...basePatch, stage: act.slice(5), status: 'running', ..._holdReset(job) });
     } else if (act === 'retry') {
       if (attempt >= MAX_STAGE_ATTEMPTS) {
-        await updateJob(job.id, { ...basePatch, status: 'failed', quality: 'red' });
+        // ★ Q3 hotfix: เก็บสาเหตุล้มลง job.summary (แพทเทิร์นเดียวกับ V2 hold ด้านบน) — เดิมสาเหตุอยู่แค่ใน
+        //   ledger ซึ่งเขียนหลังสุด/อาจหาย → UI เห็นแต่ "ล้มเหลว" เปล่าๆ ขัดเป้าหมาย "งานตายต้องเห็นสาเหตุ"
+        await updateJob(job.id, { ...basePatch, status: 'failed', quality: 'red', summary: (result.summary || '').slice(0, 300) });
         await unclaimCard(job, { origin }).catch(() => {});
         const f = await getFlags();
         await setFlags({ consecutiveFails: (f.consecutiveFails || 0) + 1, paused: (f.consecutiveFails || 0) + 1 >= 3 });
@@ -255,8 +260,8 @@ async function _runTick(req) {
         await updateJob(job.id, { ...basePatch, ..._holdReset(job) }); // คงขั้นเดิม รอ tick หน้า retry (+รีเซ็ตตัวนับ hold — retry คั่น = ไม่ "ติดกัน" แล้ว)
       }
     } else {
-      // fail
-      await updateJob(job.id, { ...basePatch, status: 'failed' });
+      // fail — ★ Q3 hotfix: เก็บสาเหตุลง job.summary เช่นเดียวกับ retry-exhausted (ดูเหตุผลด้านบน)
+      await updateJob(job.id, { ...basePatch, status: 'failed', summary: (result.summary || '').slice(0, 300) });
       await unclaimCard(job, { origin }).catch(() => {});
       const f = await getFlags();
       await setFlags({ consecutiveFails: (f.consecutiveFails || 0) + 1, paused: (f.consecutiveFails || 0) + 1 >= 3 });
