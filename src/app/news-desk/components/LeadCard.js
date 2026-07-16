@@ -33,7 +33,7 @@ const STATUS_META = {
   dismissed: { label: '🗑 ทิ้งแล้ว', color: UI.muted },
 };
 
-export default function LeadCard({ lead, onKeep, onDismiss, onSend, busyAction, sendNote }) {
+export default function LeadCard({ lead, onKeep, onDismiss, onSend, onExtract, onSendText, busyAction, sendNote, extractNote }) {
   if (!lead) return null;
   const score = Math.round(Number(lead.matchScore) || 0);
   const isFull = lead.fetchability === 'full';
@@ -41,6 +41,12 @@ export default function LeadCard({ lead, onKeep, onDismiss, onSend, busyAction, 
   const sm = STATUS_META[status];
   const dismissed = status === 'dismissed';
   const sent = status === 'sent' || sendNote?.kind === 'sent';
+  // ── R6: เนื้อสกัดแล้ว (🧲) — ใช้ full extract จากคลัง หรือ field เบา (extractTextLength/insightTopics) จากรอบนี้ ──
+  const contentReady = !!lead.contentReady;
+  const extractLen = lead.extract?.text?.length ?? lead.extractTextLength ?? 0;
+  const insightLines = lead.extract?.insight
+    ? [lead.extract.insight.headline, lead.extract.insight.overview, lead.extract.insight.category].filter(Boolean)
+    : (Array.isArray(lead.insightTopics) ? lead.insightTopics.filter(Boolean) : []);
 
   return (
     <div style={{
@@ -83,6 +89,16 @@ export default function LeadCard({ lead, onKeep, onDismiss, onSend, busyAction, 
         <div style={{ fontSize: 12, color: UI.dim, lineHeight: 1.5 }}>💬 {lead.reason}</div>
       )}
 
+      {/* R6: เนื้อพร้อม + ประเด็นย่อ (≤3 บรรทัด) — โผล่เฉพาะหลังกด "สกัดเนื้อ" สำเร็จ */}
+      {contentReady && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <Chip color={UI.green}>📄 เนื้อพร้อม {extractLen.toLocaleString('th-TH')} ตัวอักษร</Chip>
+          {insightLines.slice(0, 3).map((line, i) => (
+            <div key={i} style={{ fontSize: 12, color: UI.dim, lineHeight: 1.5 }}>🔎 {String(line).slice(0, 160)}</div>
+          ))}
+        </div>
+      )}
+
       {/* ปุ่มจัดการ */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
         <Btn
@@ -99,15 +115,49 @@ export default function LeadCard({ lead, onKeep, onDismiss, onSend, busyAction, 
           onClick={() => onDismiss?.(lead)}
           style={{ minHeight: 40, padding: '8px 14px', fontSize: 13, flex: '1 1 auto' }}
         >🗑 ทิ้ง</Btn>
-        <Btn
-          variant={sent ? 'green' : 'primary'}
-          busy={busyAction === 'send'}
-          disabled={!!busyAction || sent}
-          onClick={() => onSend?.(lead)}
-          style={{ minHeight: 40, padding: '8px 14px', fontSize: 13, flex: '1 1 auto' }}
-          title={sent ? 'ส่งเข้าคิวเขียนแล้ว' : 'ส่งลิงก์นี้เข้าคิวเขียนข่าว'}
-        >{sent ? '🚀 ส่งแล้ว' : '🚀 ส่งเข้าคิวเขียน'}</Btn>
+
+        {/* ยังไม่มีเนื้อ → ปุ่มสกัดเนื้อ (คู่กับปุ่มส่งคิว URL เดิม — เดิมโดน TEXT_ONLY บล็อกตามปกติ) */}
+        {!contentReady && (
+          <Btn
+            variant="subtle"
+            busy={busyAction === 'extract'}
+            disabled={!!busyAction}
+            onClick={() => onExtract?.(lead)}
+            style={{ minHeight: 40, padding: '8px 14px', fontSize: 13, flex: '1 1 auto' }}
+            title="ดึงเนื้อดิบเต็มจากแหล่งข่าว (บทความ/คลิป) มาแนบไว้ก่อนส่งเขียน"
+          >🧲 สกัดเนื้อ</Btn>
+        )}
+        {!contentReady && (
+          <Btn
+            variant={sent ? 'green' : 'primary'}
+            busy={busyAction === 'send'}
+            disabled={!!busyAction || sent}
+            onClick={() => onSend?.(lead)}
+            style={{ minHeight: 40, padding: '8px 14px', fontSize: 13, flex: '1 1 auto' }}
+            title={sent ? 'ส่งเข้าคิวเขียนแล้ว' : 'ส่งลิงก์นี้เข้าคิวเขียนข่าว (สาย URL — ปกติโดน TEXT_ONLY บล็อก)'}
+          >{sent ? '🚀 ส่งแล้ว' : '🚀 ส่งเข้าคิวเขียน'}</Btn>
+        )}
+
+        {/* มีเนื้อแล้ว → แทนที่ปุ่มส่งคิว URL เดิมด้วยปุ่มส่งแบบข้อความ (สายที่ระบบเปิดไว้) */}
+        {contentReady && (
+          <Btn
+            variant={sent ? 'green' : 'primary'}
+            busy={busyAction === 'sendText'}
+            disabled={!!busyAction || sent}
+            onClick={() => onSendText?.(lead)}
+            style={{ minHeight: 40, padding: '8px 14px', fontSize: 13, flex: '1 1 auto' }}
+            title={sent ? 'ส่งเข้าคิวเขียนแล้ว' : 'ส่งเนื้อที่สกัดแล้วเข้าคิวเขียนข่าวแบบข้อความ'}
+          >{sent ? '🚀 ส่งแล้ว' : '🚀 ส่งเขียน (แบบข้อความ)'}</Btn>
+        )}
       </div>
+
+      {/* หมายเหตุการสกัดเนื้อ */}
+      {extractNote && extractNote.kind === 'pending' && (
+        <Chip color={UI.amber}>⏳ กำลังถอดคลิป (เครื่องทีม)</Chip>
+      )}
+      {extractNote && extractNote.kind === 'error' && (
+        <div style={{ fontSize: 12, color: UI.red, lineHeight: 1.5 }}>⚠️ {extractNote.msg}</div>
+      )}
 
       {/* หมายเหตุการส่งคิว (โดยเฉพาะกรณีสาย URL ปิด — ไม่ใช่ error แดง) */}
       {sendNote && sendNote.kind === 'blocked' && (
