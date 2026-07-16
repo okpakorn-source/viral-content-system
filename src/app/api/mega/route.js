@@ -8,6 +8,7 @@
 
 import { NextResponse } from 'next/server';
 import { newJob, listJobs, getJob, updateJob, listRuns, getFlags, setFlags } from '@/lib/megaJobStore';
+import { cancelRefTestJob, duplicateRefTestJob } from '@/lib/refTestPipeline'; // ★ R2: จัดการงานคิว cover-ref-test
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -65,6 +66,18 @@ export async function POST(req) {
     if (action === 'runs') {
       const runs = await listRuns(body.id);
       return NextResponse.json({ success: true, runs });
+    }
+
+    // ★ R2: ยกเลิกงานคิว cover-ref-test — pending/waiting/running → cancelled (terminal · tick ไม่หยิบ)
+    if (action === 'cancel') {
+      const { status, body: out } = await cancelRefTestJob(body.id, { getJob, updateJob });
+      return NextResponse.json(out, { status });
+    }
+
+    // ★ R2: ทำซ้ำงานคิว cover-ref-test — clone seed dossier (desk/extract/generate/refIdLock) เป็น job ใหม่ pending
+    if (action === 'duplicate') {
+      const { status, body: out } = await duplicateRefTestJob(body.id, { getJob, newJob, updateJob });
+      return NextResponse.json(out, { status });
     }
 
     return NextResponse.json({ success: false, error: 'action ไม่รู้จัก: ' + action }, { status: 400 });

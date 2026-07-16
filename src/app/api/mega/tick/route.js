@@ -23,7 +23,7 @@ const MAX_STAGE_ATTEMPTS = 2;
 // ป้ายปลายทางของแต่ละเฟส (ไม่ใช่ stage ที่รันได้ — เป็น status จบ)
 // ★ Wave2 A1: needs_gap_search / manual_review = สถานะ terminal ใหม่จากด่าน QC (มาทาง nextAction:'hold'
 //   ไม่ใช่ stageDef.next) — งานหยุด ไม่ถูกเลือกซ้ำ (job picker เอาแค่ running/waiting/pending) ไม่วน retry
-const TERMINALS = new Set(['content_ready', 'assets_ready', 'cover_ready', 'needs_gap_search', 'manual_review', 'insufficient_assets']); // ★ W2-B1: insufficient_assets = hero-grade ไม่ถึงเกณฑ์หลัง gap search
+const TERMINALS = new Set(['content_ready', 'assets_ready', 'cover_ready', 'needs_gap_search', 'manual_review', 'insufficient_assets', 'cancelled']); // ★ W2-B1: insufficient_assets = hero-grade ไม่ถึงเกณฑ์หลัง gap search · ★ R2: cancelled = ผู้ใช้ยกเลิกงานคิว (terminal — picker ไม่หยิบ running/waiting/pending อยู่แล้ว)
 
 // ★ Wave1-D (ค): แผนที่ "หลักฐาน output ในแฟ้ม" ต่อ stage — อิง dossierPatch จริงที่แต่ละ adapter คืน
 //   (s3_generate→generate.queueJobId · s5_case→images.caseId · s6_slots→pickImages.slots ·
@@ -145,6 +145,12 @@ export async function POST(req) {
     //   (เช่น process ตายคากลางก่อนอัปแฟ้มในโค้ดรุ่นเก่า) หลุดข้าม stage ด้วย patch ที่ไม่มี dossier
     const prior = await findDoneRun(job.id, job.stage, idemKey);
     if (prior && hasStageEvidence(job.stage, job.dossier)) {
+      // ★ R2 (Q1 — พี่น้องของการ์ด F1 ด้านล่าง): re-check cancelled ก่อนเขียน advance — snapshot ตอนเลือกงาน
+      //   อาจเก่ากว่าปุ่มยกเลิกที่เพิ่งกด ถ้าเขียนตรงๆ จะชุบ cancelled กลับเป็น running/next
+      const freshSkip = await getJob(job.id);
+      if (freshSkip && freshSkip.status === 'cancelled') {
+        return NextResponse.json({ success: true, jobId: job.id, stage: job.stage, cancelled: true, skipped: 'งานถูกยกเลิกแล้ว — ไม่เลื่อนขั้น' });
+      }
       const next = stageDef.next;
       const patch = TERMINALS.has(next) ? { status: next, stage: next } : { stage: next, status: 'running' };
       await updateJob(job.id, patch);
@@ -174,6 +180,31 @@ export async function POST(req) {
     if (result.status === 'done') stagesDone.push({ stage: job.stage, label: stageDef.label, at: new Date().toISOString(), summary: result.summary });
     const worstQuality = result.quality === 'red' ? 'red' : result.quality === 'yellow' && job.quality !== 'red' ? 'yellow' : job.quality;
     const basePatch = { dossier: result.dossierPatch || {}, stagesDone, quality: worstQuality };
+
+    // ★ R2 (Q1 — F1 cancel-during-running): stageDef.run ใช้เวลานาน (หา/ประกอบภาพ) — ผู้ใช้อาจกด
+    //   ยกเลิกงานคิวระหว่างนั้น (action:'cancel' → status:'cancelled' ในคลัง) แต่ tick ถือ snapshot 'running'
+    //   จากตอนเลือกงาน ถ้าเขียน advance ตรงๆ (updateJob({status:'running'/next}) จะ "ทับ" cancelled กลับ
+    //   → งานเดินต่อจนจบ+archive = ปุ่มยกเลิกล้มแบบสุ่ม (fail 'tick ไม่หยิบต่อ')
+    //   แก้: อ่านสถานะล่าสุดจากคลัง "ก่อน" เขียน advance — ถ้าเป็น 'cancelled' (terminal) ห้าม advance/overwrite
+    //   คงสถานะ cancelled ไว้ + ยังบันทึก ledger run (ประวัติว่า stage นี้ทำงานไปแล้ว) แล้วจบ tick
+    const fresh = await getJob(job.id);
+    if (fresh && fresh.status === 'cancelled') {
+      await addRun(job.id, job.stage, {
+        status: result.status,
+        attempt,
+        idempotencyKey: idemKey,
+        summary: result.summary || '',
+        error: result.status === 'failed' ? result.summary : undefined,
+      });
+      return NextResponse.json({
+        success: true,
+        jobId: job.id,
+        stage: job.stage,
+        stageLabel: stageDef.label,
+        cancelled: true,
+        result: { status: result.status, nextAction: result.nextAction || 'continue', summary: result.summary },
+      });
+    }
 
     // เดินหน้า/หยุด ตาม nextAction
     const act = result.nextAction || 'continue';
