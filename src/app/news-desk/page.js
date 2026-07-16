@@ -19,6 +19,7 @@ import ReviewList from './components/ReviewList.js';
 import SynthesisReport from './components/SynthesisReport.js';
 import LibraryTab from './components/LibraryTab.js';
 import ResearchTab from './components/ResearchTab.js';
+import ContentLibraryTab from './components/ContentLibraryTab.js';
 
 const LIB = '/api/desk/dna/library';
 const LS_KEY = 'ndv2_dna_run';
@@ -413,7 +414,7 @@ export default function NewsDeskV2Page() {
           <span style={{ fontSize: 'clamp(18px,4.5vw,24px)', fontWeight: 900, color: UI.text }}>🗞️ โต๊ะข่าวกลาง v2</span>
           {/* แท็บโมดูล */}
           <div style={{ display: 'flex', gap: 6, marginLeft: 'auto', overflowX: 'auto' }}>
-            {[{ k: 'dna', l: '🧬 DNA Lab' }, { k: 'research', l: '🔎 หาข่าวตามรอย' }].map((m) => (
+            {[{ k: 'dna', l: '🧬 DNA Lab' }, { k: 'research', l: '🔎 หาข่าวตามรอย' }, { k: 'content', l: '📚 คลังเนื้อพร้อมใช้' }].map((m) => (
               <button key={m.k} type="button" onClick={() => setActiveModule(m.k)} style={{
                 minHeight: 40, padding: '6px 14px', borderRadius: 999, cursor: 'pointer', fontFamily: 'inherit',
                 fontSize: 13, fontWeight: activeModule === m.k ? 800 : 700, whiteSpace: 'nowrap',
@@ -428,6 +429,8 @@ export default function NewsDeskV2Page() {
 
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: 'clamp(14px,4vw,24px)' }}>
         {activeModule === 'research' && <ResearchTab onToast={pushToast} />}
+
+        {activeModule === 'content' && <ContentLibraryTab onToast={pushToast} />}
 
         {activeModule === 'dna' && (<>
         {/* แท็บย่อยของ DNA Lab */}
