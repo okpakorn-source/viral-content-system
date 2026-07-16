@@ -18,6 +18,7 @@ import RunPanel from './components/RunPanel.js';
 import ReviewList from './components/ReviewList.js';
 import SynthesisReport from './components/SynthesisReport.js';
 import LibraryTab from './components/LibraryTab.js';
+import ResearchTab from './components/ResearchTab.js';
 
 const LIB = '/api/desk/dna/library';
 const LS_KEY = 'ndv2_dna_run';
@@ -78,6 +79,7 @@ export default function NewsDeskV2Page() {
   }, []);
 
   // ── โครง ──
+  const [activeModule, setActiveModule] = useState('dna'); // 'dna' | 'research' (โมดูลระดับบน)
   const [dnaTab, setDnaTab] = useState('research'); // 'research' | 'library'
   const [stage, setStage] = useState('upload');     // upload|mapping|scan|run|done
 
@@ -411,19 +413,23 @@ export default function NewsDeskV2Page() {
           <span style={{ fontSize: 'clamp(18px,4.5vw,24px)', fontWeight: 900, color: UI.text }}>🗞️ โต๊ะข่าวกลาง v2</span>
           {/* แท็บโมดูล */}
           <div style={{ display: 'flex', gap: 6, marginLeft: 'auto', overflowX: 'auto' }}>
-            <span style={{
-              padding: '6px 14px', borderRadius: 999, fontSize: 13, fontWeight: 800,
-              background: `${UI.accent}22`, color: UI.accent, border: `1.5px solid ${UI.accent}`, whiteSpace: 'nowrap',
-            }}>🧬 DNA Lab</span>
-            <span style={{
-              padding: '6px 14px', borderRadius: 999, fontSize: 13, fontWeight: 700,
-              background: 'transparent', color: UI.muted, border: `1.5px dashed ${UI.line2}`, whiteSpace: 'nowrap',
-            }} title="โมดูลอนาคต">➕ เร็วๆ นี้</span>
+            {[{ k: 'dna', l: '🧬 DNA Lab' }, { k: 'research', l: '🔎 หาข่าวตามรอย' }].map((m) => (
+              <button key={m.k} type="button" onClick={() => setActiveModule(m.k)} style={{
+                minHeight: 40, padding: '6px 14px', borderRadius: 999, cursor: 'pointer', fontFamily: 'inherit',
+                fontSize: 13, fontWeight: activeModule === m.k ? 800 : 700, whiteSpace: 'nowrap',
+                background: activeModule === m.k ? `${UI.accent}22` : 'transparent',
+                color: activeModule === m.k ? UI.accent : UI.muted,
+                border: `1.5px solid ${activeModule === m.k ? UI.accent : UI.line2}`,
+              }}>{m.l}</button>
+            ))}
           </div>
         </div>
       </div>
 
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: 'clamp(14px,4vw,24px)' }}>
+        {activeModule === 'research' && <ResearchTab onToast={pushToast} />}
+
+        {activeModule === 'dna' && (<>
         {/* แท็บย่อยของ DNA Lab */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 18, overflowX: 'auto' }}>
           {[{ k: 'research', l: '🔬 วิจัยใหม่' }, { k: 'library', l: '📚 คลัง DNA' }].map((t) => (
@@ -529,6 +535,7 @@ export default function NewsDeskV2Page() {
             )}
           </div>
         )}
+        </>)}
       </div>
 
       {/* toast มุมล่าง */}
