@@ -153,8 +153,16 @@ async function loadOne(im) {
         measuredFrom = size.measuredFrom;
         // เขียนกลับลง record เฉพาะตอน "วัดสด" ครั้งแรก (record เดิมไม่เคยมี) — กัน overwrite ค่าเฟส 1 ที่แม่นกว่า
         //   im.id อาจยังไม่มี (vetImages คัดรูป "ดิบ" ตอนค้น ก่อนเข้าคลัง) → ข้ามเขียน record เก็บแค่ใน triage
+        // ★ 16 ก.ค. (P2 lane B): เติม realShortSide + measuredFrom พร้อมกันตรงจุด ingest จุดเดียว —
+        //   record ที่เข้าคลังผ่านตาคัดจะมี provenance ครบเหมือนที่ backfill-image-dims.mjs เติมย้อนหลัง
+        //   (measuredFrom ='full'|'thumb' จาก resolveRealSize — จริงกว่า 'backfill_probe' ของสคริปต์เติมย้อนหลัง)
         if (size.fresh && im.id) {
-          applyRehost(im.id, { realWidth, realHeight, realBytes: buf.length }).catch(() => {}); // best-effort ไม่บล็อกตาคัด
+          const rss = (realWidth > 0 && realHeight > 0) ? Math.min(realWidth, realHeight) : undefined;
+          applyRehost(im.id, {
+            realWidth, realHeight, realBytes: buf.length,
+            ...(rss ? { realShortSide: rss } : {}),
+            ...(measuredFrom ? { measuredFrom } : {}),
+          }).catch(() => {}); // best-effort ไม่บล็อกตาคัด
         }
       }
     } catch { /* วัดขนาดไม่ได้ = ปกติ ไม่บล็อกตาคัด */ }
