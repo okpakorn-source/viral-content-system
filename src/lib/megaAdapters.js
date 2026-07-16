@@ -3125,8 +3125,10 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     if (job.dossier.refIdLock) {
       try {
         const { listRefCovers } = await import('@/lib/refCoverLibrary');
+        // ★ R5b.1 (audit sweep): ล็อก id ของ variant (_derived) ได้เฉพาะประตูเกรดเปิด+เกรดถึง — ใบจริงล็อกได้เหมือนเดิมทุกกรณี
+        const { refPoolGateOpen } = await import('@/lib/refCoverGrade');
         const allRefs = await listRefCovers(500);
-        lockedRef = allRefs.find((x) => x.id === job.dossier.refIdLock && x.dna && x.imagePath) || null;
+        lockedRef = allRefs.find((x) => x.id === job.dossier.refIdLock && x.dna && x.imagePath && (!x.dna._derived || refPoolGateOpen(x))) || null;
         if (!lockedRef) console.log(`[MEGA S6] 🔒 refIdLock ${job.dossier.refIdLock} หาไม่เจอในคลัง/ไม่มี dna → fallback pickBestRef`);
       } catch { /* คลังล้ม → fallback ปกติ */ }
     }
