@@ -3545,6 +3545,42 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     }
   }
 
+  // ═══ P1/P3 CROP PRE-FILTER (เลน A · MEGA_CROP_PREFILTER default ON · ปิด==='0' = พฤติกรรมเดิม byte-identical) ═══
+  //   วัด "ความพอดีของการครอป" ต่อรูป×ช่อง ล่วงหน้า ตอน S6 ยังเลือกภาพอยู่ (แก้เคสจริง AC-0130: hero ยืด 1.60×
+  //   เกินเพดาน 1.2× + หน้าโดนตัดขอบ เพราะไม่มีด่านคุมตอนเลือก — QC มาฟ้องหลังประกอบ). computeCropGuard เป็น PURE.
+  //   (ก) pre-brain: แนบป้าย "ห้ามเป็น hero (ต้องยืดเกิน 1.2×)" ต่อรูปเข้า meta ที่ slotDirectorBrain เห็น
+  //       (brain serialize ทุก field ของ meta row เป็น JSON — ไม่แตะ megaBrains) → สมองเลี่ยงเลือกรูปครอปแตกเป็น hero
+  //   OFF (==='0') = ไม่มี guard/ไม่มี field/ไม่มี log ใหม่แม้ byte เดียว (เส้น OFF ข้ามทั้งบล็อก)
+  const _cropPrefilterOn = process.env.MEGA_CROP_PREFILTER !== '0';
+  let _cropGuard = null; // ผลด่านครอป (ใช้ต่อ post-brain hard check) · null = ปิด/ไม่มี ref template
+  if (_cropPrefilterOn && _refDNA) {
+    try {
+      const _cgDts = _deps?.dnaToTemplateSpec || (await import('@/lib/refTemplate')).dnaToTemplateSpec;
+      const _cgSpec = typeof _cgDts === 'function' ? _cgDts(_refDNA) : null;
+      if (_cgSpec) {
+        const { computeCropGuard, HERO_UPSCALE_MAX } = await import('@/lib/cropGuard');
+        _cropGuard = computeCropGuard({ pool: sorted, templateSpec: _cgSpec });
+        if (_cropGuard?.heroSlot) {
+          let _cgBlocked = 0;
+          for (const m of meta) {
+            const g = _cropGuard.byId.get(String(m.id));
+            if (g && g.heroEligible === false) {
+              // ป้ายที่สมองอ่านได้จาก JSON row — ระบุตัวเลขยืดจริงเพื่อให้ LLM เข้าใจเหตุผล
+              m.heroCropBlock = g.hasRealDims
+                ? `ห้ามเป็น hero: ครอปช่องหลักต้องยืด ${(g.heroUpscale || 0).toFixed(2)}× (เกินเพดาน ${HERO_UPSCALE_MAX}×)`
+                : 'ห้ามเป็น hero: วัดขนาดจริงไม่ได้ (เสี่ยงยืดแตก)';
+              _cgBlocked++;
+            }
+          }
+          if (_cgBlocked) console.log(`[MEGA S6] ✂️ crop pre-filter: ป้าย "ห้ามเป็น hero" ${_cgBlocked}/${meta.length} ใบ (ครอปช่องหลักเกิน ${HERO_UPSCALE_MAX}× / วัดขนาดไม่ได้)`);
+        }
+      }
+    } catch (e) {
+      _cropGuard = null; // guard ล้ม = เดินต่อแบบไม่มีด่าน (ห้ามทำ S6 พัง)
+      console.log('[MEGA S6] ✂️ crop pre-filter: คำนวณไม่สำเร็จ — ข้ามด่าน (เดินต่อแบบเดิม):', String(e?.message || '').slice(0, 50));
+    }
+  }
+
   let brain = { slots: {}, note: '' };
   let brainOk = true;
   try {
@@ -3828,6 +3864,118 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     const sfLine = activeSlots.filter((s) => slots[s]).map((s) => `${s}:${storyFitOf(byId.get(String(slots[s].id))) ?? '-'}`).join(' ');
     console.log(`[MEGA S6] 📖 story-fit ต่อช่อง (สรุป): ${sfLine}`);
     storyTag = ` · story[${sfLine}]`;
+  }
+
+  // ═══ P1/P3 CROP PRE-FILTER · POST-BRAIN HARD CHECK (เลน A · MEGA_CROP_PREFILTER default ON) ═══════════════════════════
+  //   ถ้า assignment ให้ "รูปที่ครอปช่อง hero ไม่ปลอดภัย" (heroEligible=false — ยืดเกิน 1.2× / วัดขนาดไม่ได้) เป็น hero
+  //   → พยายามสลับ (deterministic) ให้ได้ hero ที่ครอปปลอดภัย:
+  //     (a) สลับกับช่องอื่นใน assignment เดียวกันที่ถือรูป heroEligible + เป็นตัวตน hero (และรูป hero เดิมลงช่องนั้นได้)
+  //     (b) ถ้าไม่มี → ดึงรูป heroEligible + ตัวตน hero ที่ยังว่างในพูล อันดับดีสุด (รูปเดิมตกไป backups)
+  //     (c) สลับไม่ได้เลย → ปล่อยผ่านพร้อมธง cropGuardViolation (ไม่ fail งาน — ให้ QC เดิมตัดสิน) + log ชัด
+  //   จัดอันดับตัวเลือก: edgePenalty น้อยก่อน (หน้าไม่ชิดขอบ) → heroUpscale น้อยก่อน (ยืดน้อย) → ลำดับ sorted เดิม
+  //   ทุกอย่างใต้ try/catch — guard ห้ามทำ S6 พัง · OFF/ไม่มี ref template = ข้ามทั้งบล็อก (_cropGuard===null)
+  let _cropGuardPatch = null;
+  if (_cropPrefilterOn && _cropGuard && _cropGuard.heroSlot) {
+    try {
+      // สร้าง entry ต่อช่องแบบเดียวกับลูปหลัก (field parity) — ใช้ตอนดึงรูปจากพูล (b)
+      const _cgBuildEntry = (slotKey, rec, reason, backups) => ({
+        id: rec.id,
+        imageUrl: rec.imageUrl,
+        person: rec.triage?.person || null,
+        category: rec.triage?.category || null,
+        emotion: rec.triage?.emotion || null,
+        clean: isClean(rec),
+        newsScene: rec.triage?.newsScene !== false,
+        faces: Number(rec.triage?.faceCount) || 0,
+        dirtyFallback: dirtyFallbackIds.has(String(rec.id)),
+        ...(semContract ? { refSlotId: slotKey, legacySlot: _projMap.get(slotKey) ?? null } : {}),
+        reason,
+        ...(STORY_SEL_ON ? { storyFit: storyFitOf(rec) } : {}),
+        backups: (Array.isArray(backups) ? backups : []).map(String).slice(0, 3),
+      });
+      const _cgRank = (a, b) => (a.edgePenalty - b.edgePenalty) || (a.heroUpscale - b.heroUpscale);
+      const heroPick = slots[_canonHeroId];
+      const heroGuard = heroPick ? _cropGuard.byId.get(String(heroPick.id)) : null;
+      let _cgSwapNote = null;
+      let _cgViolation = false;
+      if (heroPick && heroGuard && heroGuard.heroEligible === false) {
+        const _oldHeroRec = byId.get(String(heroPick.id));
+        // (a) สลับกับช่องอื่นในแผน
+        let bestSlot = null; let bestG = null;
+        for (const s of activeSlots) {
+          if (s === _canonHeroId) continue;
+          const p = slots[s]; if (!p) continue;
+          const rec = byId.get(String(p.id)); if (!rec) continue;
+          const g = _cropGuard.byId.get(String(p.id));
+          if (!g || !g.heroEligible) continue;                 // ช่องนี้ต้องถือรูป hero-safe
+          if (!_identityOk(_canonHeroId, rec)) continue;       // และเป็นตัวตน hero จริง
+          // รูป hero เดิมต้องลงช่องเป้าหมายได้ (ถ้าช่องนั้นผูกตัวตนคนอื่น = สลับไม่ได้)
+          if (_idGated(s) && !_isHeroSlot(s) && _oldHeroRec && !_identityOk(s, _oldHeroRec)) continue;
+          if (!bestSlot || _cgRank(g, bestG) < 0) { bestSlot = s; bestG = g; }
+        }
+        if (bestSlot) {
+          const _heroEntry = slots[_canonHeroId];
+          const _tgtEntry = slots[bestSlot];
+          slots[_canonHeroId] = _tgtEntry;
+          slots[bestSlot] = _heroEntry;
+          if (semContract) {
+            slots[_canonHeroId].refSlotId = _canonHeroId; slots[_canonHeroId].legacySlot = _projMap.get(_canonHeroId) ?? null;
+            slots[bestSlot].refSlotId = bestSlot; slots[bestSlot].legacySlot = _projMap.get(bestSlot) ?? null;
+          }
+          _cgSwapNote = `swap-in-plan hero ${_heroEntry.id}→${_tgtEntry.id} (⇄ ช่อง ${bestSlot})`;
+          console.log(`[MEGA S6] ✂️ crop guard: hero ${_heroEntry.id} ครอปเกิน 1.2× → สลับกับช่อง ${bestSlot} (${_tgtEntry.id} crop-safe คนเดียวกัน) ก่อน queue`);
+        } else {
+          // (b) ดึงจากพูลที่ยังว่าง
+          const cand = sorted
+            .filter((x) => x && !used.has(String(x.id)) && String(x.id) !== String(heroPick.id) && _identityOk(_canonHeroId, x))
+            .map((x) => ({ x, g: _cropGuard.byId.get(String(x.id)) }))
+            .filter((o) => o.g && o.g.heroEligible)
+            .sort((A, B) => _cgRank(A.g, B.g))[0];
+          if (cand) {
+            const _old = slots[_canonHeroId];
+            used.add(String(cand.x.id));
+            slots[_canonHeroId] = _cgBuildEntry(
+              _canonHeroId, cand.x,
+              `crop guard hero reselection (แทน ${_old.id} ที่ครอปช่อง hero เกิน 1.2×)`,
+              [String(_old.id), ...((_old.backups || []).map(String))],
+            );
+            _cgSwapNote = `reselect-from-pool hero ${_old.id}→${cand.x.id}`;
+            console.log(`[MEGA S6] ✂️ crop guard: hero ${_old.id} ครอปเกิน 1.2× → เลือกใหม่จากพูล ${cand.x.id} (crop-safe อันดับดีสุด) ก่อน queue`);
+          } else {
+            // (c) ไม่มีทางเลือก crop-safe เลย → ปล่อยผ่านพร้อมธง (QC เดิมตัดสิน)
+            _cgViolation = true;
+            console.log(`[MEGA S6] ✂️⚠️ crop guard: hero ${heroPick.id} ครอปเกิน 1.2× แต่ไม่มีตัวเลือก crop-safe ในแผน/พูล → ปล่อยผ่านพร้อมธง cropGuardViolation (QC ตัดสิน)`);
+          }
+        }
+      }
+      // ธงรายช่อง + สรุป (recompute หลังสลับ) — เพื่อ UI/QC
+      const _finalHero = slots[_canonHeroId];
+      const _finalHeroG = _finalHero ? _cropGuard.byId.get(String(_finalHero.id)) : null;
+      const _perSlot = {};
+      for (const s of activeSlots) {
+        const p = slots[s]; if (!p) continue;
+        const g = _cropGuard.byId.get(String(p.id));
+        if (!g) continue;
+        _perSlot[s] = {
+          id: g.id,
+          heroEligible: g.heroEligible,
+          slotEligible: g.slotEligible,
+          heroUpscale: g.heroUpscale != null ? Number(g.heroUpscale.toFixed(3)) : null,
+          edgePenalty: Number(g.edgePenalty.toFixed(3)),
+        };
+      }
+      _cropGuardPatch = {
+        heroSlotId: _canonHeroId,
+        heroEligible: _finalHeroG ? _finalHeroG.heroEligible : null,
+        violation: _cgViolation,
+        swapped: !!_cgSwapNote,
+        ...(_cgSwapNote ? { swapNote: _cgSwapNote } : {}),
+        perSlot: _perSlot,
+      };
+    } catch (e) {
+      _cropGuardPatch = null; // guard ล้ม = ไม่แนบธง (ห้ามทำ S6 พัง)
+      console.log('[MEGA S6] ✂️ crop guard hard check ล้ม — ข้าม:', String(e?.message || '').slice(0, 50));
+    }
   }
 
   // ═══ LANE-C ROLE READINESS GATE (ON = _roleReadyOn) — fail-closed post-selection readiness ═══════════════════════════
@@ -4826,7 +4974,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     nextAction: 'continue',
     summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'}${storyTag}${quarantineTag} — ${(brain.note || '').slice(0, 80)}`,
     dossierPatch: {
-      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}), ...(_refHeroV2Patch ? { refHeroV2: _refHeroV2Patch } : {}) },
+      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}), ...(_refHeroV2Patch ? { refHeroV2: _refHeroV2Patch } : {}), ...(_cropGuardPatch ? { cropGuard: _cropGuardPatch } : {}) },
       ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}),
       // ★ D3-B3.3 (Codex): template path echo local plain snapshot (ไม่ใช่ raw carrier) → S7/retry เห็น plain · legacy = raw byte เดิม
       ...((_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) ? { artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) } : {}),
