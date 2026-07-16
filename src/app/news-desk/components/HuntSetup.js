@@ -21,6 +21,9 @@ export const CHANNELS = [
   { key: 'google', label: '🌐 Google', hint: 'ลิงก์ข่าวสำนักต่างๆ — ข่าวเก่าน้ำดีทำใหม่ได้ (ดึงเนื้อเต็มได้)' }, // ★ 16 ก.ค.: ผู้ใช้สั่งเพิ่ม
 ];
 
+// 🆕 A1 (17 ก.ค. 69): เกณฑ์ default ของ "ออโต้หลังล่า" (ผู้ใช้เคาะ) — default ปิดเสมอ
+export const AUTO_CFG_DEFAULT = { enabled: false, minScore: 85, maxPerRound: 3 };
+
 export default function HuntSetup({
   clusters, clustersLoading, onReloadClusters,
   clusterQuery, onClusterQuery,
@@ -28,6 +31,7 @@ export default function HuntSetup({
   channels, onToggleChannel,
   queriesPerCluster, onQueries,
   model, onModel,
+  autoCfg, onAutoCfgChange, // 🆕 A1: {enabled,minScore,maxPerRound} + setter (patch)
   onStart, hunting,
 }) {
   const clusterById = new Map((clusters || []).map((c) => [c.clusterId, c]));
@@ -201,6 +205,59 @@ export default function HuntSetup({
             })}
           </div>
         </div>
+      </div>
+
+      {/* 🆕 A1 (17 ก.ค. 69): ออโต้หลังล่า — toggle default ปิด + เกณฑ์ match ขั้นต่ำ + เพดานใบ/รอบ */}
+      <div style={{ marginBottom: 16, background: UI.card2, border: `1px solid ${UI.line}`, borderRadius: 12, padding: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => onAutoCfgChange?.({ enabled: !autoCfg.enabled })}
+            disabled={hunting}
+            style={{
+              minHeight: 40, padding: '8px 14px', borderRadius: 999, cursor: hunting ? 'not-allowed' : 'pointer',
+              fontSize: 13, fontWeight: 800, fontFamily: 'inherit',
+              background: autoCfg.enabled ? `${UI.accent}22` : UI.card,
+              color: autoCfg.enabled ? UI.accent : UI.dim,
+              border: `1.5px solid ${autoCfg.enabled ? UI.accent : UI.line}`,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <span>{autoCfg.enabled ? '☑' : '☐'}</span> 🤖 ออโต้หลังล่า
+          </button>
+          <span style={{ fontSize: 12.5, color: UI.dim }}>จบรอบล่า → สกัด+ส่งเขียนอัตโนมัติให้ลีดที่เข้าเกณฑ์ (ไม่ต้องกดทีละใบ)</span>
+        </div>
+
+        {autoCfg.enabled && (
+          <>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 12 }}>
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: UI.text, marginBottom: 6 }}>เกณฑ์ match ขั้นต่ำ (%)</div>
+                <input
+                  type="number" min={60} max={100}
+                  value={autoCfg.minScore}
+                  onChange={(e) => onAutoCfgChange?.({ minScore: Math.min(100, Math.max(60, Number(e.target.value) || 60)) })}
+                  disabled={hunting}
+                  style={{ width: 90, minHeight: 40, padding: '6px 12px', borderRadius: 10, background: UI.card, color: UI.text, border: `1px solid ${UI.line2}`, fontSize: 13, fontFamily: 'inherit' }}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: UI.text, marginBottom: 6 }}>เพดานใบ/รอบ</div>
+                <input
+                  type="number" min={1} max={10}
+                  value={autoCfg.maxPerRound}
+                  onChange={(e) => onAutoCfgChange?.({ maxPerRound: Math.min(10, Math.max(1, Number(e.target.value) || 1)) })}
+                  disabled={hunting}
+                  style={{ width: 90, minHeight: 40, padding: '6px 12px', borderRadius: 10, background: UI.card, color: UI.text, border: `1px solid ${UI.line2}`, fontSize: 13, fontFamily: 'inherit' }}
+                />
+              </div>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 11.5, color: UI.muted, lineHeight: 1.7 }}>
+              🎯 เฉพาะลีดลิงก์ข่าว (🟢 พร้อมทำ) — คลิปจะสั่งถอดให้แต่ไม่ส่งเอง (รอกดส่งเองหลังถอดเสร็จ)<br />
+              ⚠️ มีค่าเขียนตามระบบเดิมต่อใบ (ค่ากลั่นเนื้อ + ค่าเขียนข่าว) — เปิดไว้แล้วลืมปิดจะเจนงานเขียนอัตโนมัติทุกรอบล่า
+            </div>
+          </>
+        )}
       </div>
 
       {/* ประเมินราคา + เริ่ม */}

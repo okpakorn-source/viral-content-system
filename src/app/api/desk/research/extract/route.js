@@ -2,8 +2,9 @@
  * ============================================================
  * 🧲 /api/desk/research/extract — ท่อสกัดเนื้อก่อนเขียน (โต๊ะข่าวกลาง v2, R6 — 17 ก.ค. 69)
  * ============================================================
- * POST action:'extract'  — สกัดเนื้อดิบเต็มของลีด (บทความ/คลิป ตามประเภทแหล่ง) แล้วแนบเข้าลีด
- * POST action:'sendText' — ส่งลีดที่มีเนื้อสกัดแล้วเข้าคิวเขียนข่าวแบบ "text" (สายที่ระบบเปิดไว้)
+ * POST action:'extract'        — สกัดเนื้อดิบเต็มของลีด (บทความ/คลิป ตามประเภทแหล่ง) แล้วแนบเข้าลีด
+ * POST action:'sendText'       — ส่งลีดที่มีเนื้อสกัดแล้วเข้าคิวเขียนข่าวแบบ "text" (สายที่ระบบเปิดไว้)
+ * POST action:'extractAndSend' — 🆕 A1 (17 ก.ค. 69): รวด extract→distill→ส่ง ในคอลเดียว (ปุ่มเดียวจบ/ออโต้หลังล่า)
  * ห้ามแตะ contract ของ /api/clip-transcript/** และ /api/queue/** — ยิงผ่าน service เท่านั้น
  */
 import { NextResponse } from 'next/server';
@@ -13,6 +14,7 @@ import {
   extractClip,
   attachExtract,
   sendLeadAsText,
+  extractAndSend,
   getLead,
 } from '@/lib/services/deskV2/researchExtract.js';
 
@@ -92,6 +94,14 @@ export async function POST(request) {
     if (action === 'sendText') {
       const origin = request.nextUrl.origin;
       const result = await sendLeadAsText(leadId, { origin });
+      return NextResponse.json(result);
+    }
+
+    // 🆕 A1 (17 ก.ค. 69): ปุ่มเดียวจบ/ออโต้หลังล่า — extractAndSend รวด extract→distill→ส่ง
+    if (action === 'extractAndSend') {
+      const origin = request.nextUrl.origin;
+      const auto = !!body?.auto;
+      const result = await extractAndSend(leadId, { origin, auto });
       return NextResponse.json(result);
     }
 

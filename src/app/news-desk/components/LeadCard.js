@@ -35,16 +35,32 @@ const STATUS_META = {
   dismissed: { label: '🗑 ทิ้งแล้ว', color: UI.muted },
 };
 
-export default function LeadCard({ lead, onKeep, onDismiss, onSend, onExtract, onSendText, busyAction, sendNote, extractNote }) {
+// ── A1 (17 ก.ค. 69): ตรวจแบบเบาๆ ว่าลีดนี้เป็น "คลิป" หรือ "บทความ" — สะท้อน classifyExtractRoute ของ
+//    researchExtract.js (service ฝั่งเซิร์ฟเวอร์ ห้าม import ตรงเข้า client component เพราะพ่วง openai.js) ใช้เพื่อเลือก
+//    ป้าย/ปุ่มให้ตรงประเภทเท่านั้น — การตัดสินใจ route จริงยังทำที่ฝั่งเซิร์ฟเวอร์ใน extractAndSend เสมอ
+const CLIP_CHANNELS = new Set(['youtube', 'facebook', 'tiktok']);
+const CLIP_HOST_RE = /(youtube\.com|youtu\.be|facebook\.com|fb\.watch|fb\.com|m\.facebook\.com|tiktok\.com|vm\.tiktok\.com|instagram\.com|instagr\.am|threads\.net)/i;
+function isClipLead(l) {
+  const channel = String(l?.channel || '').toLowerCase();
+  if (CLIP_CHANNELS.has(channel)) return true;
+  const host = String(l?.sourceHost || '').toLowerCase();
+  const url = String(l?.url || '').toLowerCase();
+  return CLIP_HOST_RE.test(host) || CLIP_HOST_RE.test(url);
+}
+
+export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtractAndSend, onSendText, busyAction, sendNote, extractNote }) {
   const [showTimeline, setShowTimeline] = useState(false); // ★ trace 17 ก.ค.: กางแผงประวัติในที่ (การ์ดไม่เรียก API เอง — ให้ LeadTimeline จัดการ)
   const [showContent, setShowContent] = useState(false); // 🆕 D1 17 ก.ค.: กางกล่อง "ดูเนื้อที่จะส่ง" ก่อนกด 🚀
   if (!lead) return null;
   const score = Math.round(Number(lead.matchScore) || 0);
   const isFull = lead.fetchability === 'full';
+  const isClip = isClipLead(lead); // 🆕 A1: เลือกป้าย/ปุ่มสกัดให้ตรงประเภทแหล่ง
   const status = lead.status || 'new';
   const sm = STATUS_META[status];
   const dismissed = status === 'dismissed';
   const sent = status === 'sent' || sendNote?.kind === 'sent';
+  // 🆕 A1 (17 ก.ค. 69): ใบที่ส่งด้วยออโต้หลังล่า — ตรวจจาก timeline event 'sent' ที่มี data.auto === true
+  const sentViaAuto = Array.isArray(lead.timeline) && lead.timeline.some((e) => e?.type === 'sent' && e?.data?.auto === true);
   // ── R6: เนื้อสกัดแล้ว (🧲) — ใช้ full extract จากคลัง หรือ field เบา (extractTextLength/insightTopics) จากรอบนี้ ──
   const contentReady = !!lead.contentReady;
   const extractLen = lead.extract?.text?.length ?? lead.extractTextLength ?? 0;
@@ -72,6 +88,7 @@ export default function LeadCard({ lead, onKeep, onDismiss, onSend, onExtract, o
         <Chip color={UI.blue}>{CHANNEL_LABEL[lead.channel] || lead.channel || '—'}</Chip>
         {lead.sourceHost && <Chip color={UI.muted}>{lead.sourceHost}</Chip>}
         {sm && <Chip color={sm.color}>{sm.label}</Chip>}
+        {sentViaAuto && <Chip color={UI.accent}>⚡ ออโต้</Chip>}
       </div>
 
       {/* หัวข้อ (ลิงก์เปิดแท็บใหม่) */}
@@ -166,26 +183,27 @@ export default function LeadCard({ lead, onKeep, onDismiss, onSend, onExtract, o
           style={{ minHeight: 40, padding: '8px 14px', fontSize: 13, flex: '1 1 auto' }}
         >🗑 ทิ้ง</Btn>
 
-        {/* ยังไม่มีเนื้อ → ปุ่มสกัดเนื้อ (คู่กับปุ่มส่งคิว URL เดิม — เดิมโดน TEXT_ONLY บล็อกตามปกติ) */}
+        {/* 🆕 A1 (17 ก.ค. 69): ยังไม่มีเนื้อ + เป็นบทความ (ไม่ใช่คลิป) → ปุ่มหลัก "ปุ่มเดียวจบ" (extract→distill→ส่ง รวดเดียว) */}
+        {!contentReady && !isClip && (
+          <Btn
+            variant="primary"
+            busy={busyAction === 'extractAndSend'}
+            disabled={!!busyAction}
+            onClick={() => onExtractAndSend?.(lead)}
+            style={{ minHeight: 40, padding: '8px 14px', fontSize: 13, flex: '1 1 auto' }}
+            title="สกัดเนื้อ + กลั่น + ส่งเข้าคิวเขียนรวดเดียว (ไม่ต้องดูเนื้อก่อนก็ได้)"
+          >⚡ สกัด+ส่งเลย</Btn>
+        )}
+        {/* ยังไม่มีเนื้อ → ปุ่มสกัดเนื้อ (ดูก่อนส่งได้) — ใบคลิปใช้ปุ่มนี้เป็นปุ่มเดียว (ต้องรอถอดคลิปก่อนเสมอ) */}
         {!contentReady && (
           <Btn
-            variant="subtle"
+            variant={isClip ? 'primary' : 'subtle'}
             busy={busyAction === 'extract'}
             disabled={!!busyAction}
             onClick={() => onExtract?.(lead)}
             style={{ minHeight: 40, padding: '8px 14px', fontSize: 13, flex: '1 1 auto' }}
-            title="ดึงเนื้อดิบเต็มจากแหล่งข่าว (บทความ/คลิป) มาแนบไว้ก่อนส่งเขียน"
-          >🧲 สกัดเนื้อ</Btn>
-        )}
-        {!contentReady && (
-          <Btn
-            variant={sent ? 'green' : 'primary'}
-            busy={busyAction === 'send'}
-            disabled={!!busyAction || sent}
-            onClick={() => onSend?.(lead)}
-            style={{ minHeight: 40, padding: '8px 14px', fontSize: 13, flex: '1 1 auto' }}
-            title={sent ? 'ส่งเข้าคิวเขียนแล้ว' : 'ส่งลิงก์นี้เข้าคิวเขียนข่าว (สาย URL — ปกติโดน TEXT_ONLY บล็อก)'}
-          >{sent ? '🚀 ส่งแล้ว' : '🚀 ส่งเข้าคิวเขียน'}</Btn>
+            title={isClip ? 'ส่งลิงก์คลิปเข้าคิวถอดข้อความ (เครื่องทีม) แล้วค่อยกดส่งเขียนเอง' : 'ดึงเนื้อดิบเต็มจากแหล่งข่าวมาแนบไว้ก่อนส่งเขียน (ดูเนื้อก่อนกดส่งได้)'}
+          >{isClip ? '🧲 สกัด (ถอดคลิป)' : '🧲 สกัดเนื้อ (ดูก่อนส่ง)'}</Btn>
         )}
 
         {/* มีเนื้อแล้ว → แทนที่ปุ่มส่งคิว URL เดิมด้วยปุ่มส่งแบบข้อความ (สายที่ระบบเปิดไว้) */}
@@ -219,12 +237,7 @@ export default function LeadCard({ lead, onKeep, onDismiss, onSend, onExtract, o
         <div style={{ fontSize: 12, color: UI.red, lineHeight: 1.5 }}>⚠️ {extractNote.msg}</div>
       )}
 
-      {/* หมายเหตุการส่งคิว (โดยเฉพาะกรณีสาย URL ปิด — ไม่ใช่ error แดง) */}
-      {sendNote && sendNote.kind === 'blocked' && (
-        <div style={{ fontSize: 12, color: UI.amber, background: `${UI.amber}14`, border: `1px solid ${UI.amber}55`, borderRadius: 10, padding: '8px 10px', lineHeight: 1.5 }}>
-          🔒 {sendNote.msg}
-        </div>
-      )}
+      {/* หมายเหตุการส่งคิว */}
       {sendNote && sendNote.kind === 'error' && (
         <div style={{ fontSize: 12, color: UI.red, lineHeight: 1.5 }}>⚠️ {sendNote.msg}</div>
       )}
