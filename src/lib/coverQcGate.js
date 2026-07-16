@@ -83,8 +83,13 @@ export function evaluateCoverQc(input = {}, opts = {}) {
   // ★ Wave2 Batch D2: โหมดกติกาวัดได้ — 'advisory' (default) ไม่กระทบ pass · 'hard' = บางธงตัด
   const techHard = process.env.MEGA_TECH_RULES_MODE === 'hard';
 
+  // ★ นโยบายเจ้าของ 17 ก.ค. ("อย่าให้ภาพเล็กเป็นตัวทำพัง"): MEGA_STRETCH_RELAX='1' → ธงยืดทุกตระกูล
+  //   ไม่ตัดงานอีก (ลดเป็น advisory — ยืดเต็มช่องได้ แตกบ้างยอมรับ เพราะข่าวจริงเน้นสื่อสารบริบท+คนชัด
+  //   ภาพแคปจากคลิปชาวบ้านแตกๆ ก็แมสได้) · unset/'0' = พฤติกรรมเดิมเป๊ะ (ยืดเกินเพดาน = needs_gap_search)
+  const stretchRelax = process.env.MEGA_STRETCH_RELAX === '1';
+
   for (const f of flags) {
-    // ── ① ธงยืด (needs_gap_search) ──
+    // ── ① ธงยืด (needs_gap_search — หรือ advisory เมื่อ relax) ──
     const ms = STRETCH_RE.exec(f);
     if (ms) {
       const slot = ms[2];
@@ -95,10 +100,13 @@ export function evaluateCoverQc(input = {}, opts = {}) {
       const circleStrict = process.env.MEGA_CIRCLE_STRICT_UPSCALE !== '0' && !hero && isCircleSlot(slot);
       const limit = (hero || circleStrict) ? HERO_MAX : OTHER_MAX;
       if (Number.isFinite(ratio) && ratio > limit) {
-        gapFail = true;
-        reasons.push(
-          `${hero ? 'hero/main' : circleStrict ? `วงกลม ${slot}` : `ช่อง ${slot}`} ยืด ${ratio.toFixed(2)}x เกินเพดาน ${limit}x → วัตถุดิบไม่พอดี ควรหาภาพเพิ่ม [${f}]`
-        );
+        const msg = `${hero ? 'hero/main' : circleStrict ? `วงกลม ${slot}` : `ช่อง ${slot}`} ยืด ${ratio.toFixed(2)}x เกินเพดาน ${limit}x → วัตถุดิบไม่พอดี ควรหาภาพเพิ่ม [${f}]`;
+        if (stretchRelax) {
+          advisory.push(`${msg} — ปล่อยผ่านตามนโยบายยืดเต็มช่อง (MEGA_STRETCH_RELAX)`);
+        } else {
+          gapFail = true;
+          reasons.push(msg);
+        }
       }
       continue; // ธงยืดที่ไม่เกินเพดาน = ยอมรับได้ (benign)
     }
