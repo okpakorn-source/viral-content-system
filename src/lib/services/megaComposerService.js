@@ -322,15 +322,18 @@ export function measureTechRules({ assignments = [], spec = null, faceBoxes = []
     const fb = faceBoxes[a.imageIndex] || null;
     const rec = { role, hasFace: false };
     bySlot[String(a.slotId)] = rec;
-    if (!region || !region.height) continue; // วัดไม่ได้ = ข้ามเงียบ
+    if (!region || !region.height) { if (role === 'hero') flags.push('hero_face_unmeasured'); continue; } // ★ F5: hero วัดไม่ได้ = advisory ให้มองเห็น (ช่องอื่น = ข้ามเงียบเหมือนเดิม)
     const fm = faceMetrics(fb, region);
-    if (!fm) continue; // ไม่มีหน้า = ข้ามเงียบ (context/evidence ไม่มีหน้าก็ไม่วัด band ที่นี่)
+    if (!fm) { if (role === 'hero') flags.push('hero_face_unmeasured'); continue; } // ★ F5: hero faceMetrics null → ธง advisory (ไม่ gating) · ช่องอื่นไม่มีหน้า = ข้ามเงียบ
     const faceSharePct = +((fm.faceHpx / region.height) * 100).toFixed(1);
     const headroomPct = +(((fm.headTopPx - region.top) / region.height) * 100).toFixed(1);
     rec.faceSharePct = faceSharePct;
     rec.headroomPct = headroomPct;
     rec.hasFace = true;
     faceShareList.push({ slot: String(a.slotId), pct: faceSharePct });
+    // ★ แบตช์ F (F1): หน้ากินช่อง ≥100% = หน้าโอเวอร์โฟลว์ช่อง (ทุกบทบาทรวม hero) → ธง hard-tier ให้ coverQcGate ตัดสิน
+    //   emit เสมอ (ไม่มี kill-switch ฝั่ง emit — ≥100% ผิดแน่ ไม่มี false positive) · โหมด hard/advisory อยู่ที่ gate
+    if (faceSharePct >= TECH_RULES.FACE_OVERFLOW_MIN) flags.push(`face_overflow:${a.slotId}:${faceSharePct}`);
 
     // band faceShare รายบทบาท (คลัง panelNorms) → face_share_out:<slot>:<pct>
     if (role === 'hero') {
@@ -1533,6 +1536,30 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
     }
   } catch { /* ด่านท้ายล้มไม่ให้กระทบการประกอบ */ }
 
+  // ★ แบตช์ F (F2): duplicate_person_panels — คนเดียวกินหลายช่อง (≥3 จาก 5 ช่องที่มีหน้า) ที่กติกา
+  //   circle_same_person เดิมจับไม่เจอ (เดิมดูเฉพาะ circle↔hero) · นับ personId ต่อช่องที่ "มีหน้า" เท่านั้น
+  //   emit ธงให้ coverQcGate ตัดสิน (ไม่บังคับ/ไม่สลับที่นี่ — end-stage ก่อน render) · fail-open: ล้มไม่กระทบปก
+  //   kill-switch MEGA_PERSON_DIVERSITY='0' → ปิด (default ON) · ห้ามแตะกติกา circle_same_person เดิม
+  try {
+    if (process.env.MEGA_PERSON_DIVERSITY !== '0') {
+      const _normP = (p) => String(p || '').trim().replace(/\s+/g, ' ').toLowerCase();
+      const _hasFace = (fb) => !!(fb && ((fb.allFaces && fb.allFaces.length) || fb.x2 > fb.x1));
+      const _pcount = new Map(); // personId (normalize) → จำนวนช่องที่คนนั้นถือหน้า
+      for (const a of assignments) {
+        if (!_hasFace(faceBoxes[a.imageIndex])) continue; // นับเฉพาะช่องที่มีหน้า
+        const p = _normP(loaded[a.imageIndex]?.person);
+        if (!p) continue; // ระบุตัวไม่ได้ = ไม่นับ (ห้ามเดา)
+        _pcount.set(p, (_pcount.get(p) || 0) + 1);
+      }
+      for (const [p, n] of _pcount) {
+        if (n >= 3) {
+          qcFlags.push(`duplicate_person_panels:${p}:${n}`);
+          console.log(`[MegaComposer] 👥🚩 คนเดียวกินหลายช่อง: "${p}" ปรากฏ ${n} ช่อง (≥3) — ติดธง duplicate_person_panels`);
+        }
+      }
+    }
+  } catch { /* นับคนซ้ำล้มไม่กระทบการประกอบ */ }
+
   // ★ เฟส 3 (10 ก.ค. — โรงประกอบไม่ทำลายความคม): พื้นต่ำสุดที่ภาพจะถูกยืดเมื่อขึ้นช่อง
   //   (region ใหญ่สุดในภาพที่ aspect ตรงช่อง → ยืดน้อยสุด) — ใช้ทั้ง hard floor 3.1 และ enhance 3.2
   const _imgWH = (im, fb) => {
@@ -2154,6 +2181,31 @@ export async function composeAndVerify(args = {}) {
         }
       }
     } catch { /* ตรวจไม่ได้ = ไม่ติดธง */ }
+    // ★ แบตช์ F (F3): duplicate_scene — ฉากซ้ำระหว่างช่องที่ sceneKeyOf (prefix note) จับไม่เจอ (คนละคำบรรยาย)
+    //   เทียบ aHash/dHash hamming ≤10 · จำกัดเฉพาะคู่ที่ "ฝั่งใดฝั่งหนึ่งไร้หน้า" เพื่อกัน false positive
+    //   (สองช่องที่มีหน้าคนคนละคนอาจ aHash ใกล้กันได้จากองค์ประกอบภาพ — ไม่นับ) · ใช้ aHash ที่คำนวณแล้ว ไม่มี IO เพิ่ม
+    //   emit ธงให้ coverQcGate ตัดสิน · kill-switch MEGA_SCENE_DEDUP='0' → ปิด (default ON) · fail-open: ล้มไม่กระทบปก
+    try {
+      if (process.env.MEGA_SCENE_DEDUP !== '0' && core.aHashes) {
+        const _ham = (a, b) => { if (a == null || b == null) return 64; let x = BigInt(a) ^ BigInt(b), n = 0; while (x > 0n) { n += Number(x & 1n); x >>= 1n; } return n; };
+        const _faceOf = (fb) => !!(fb && ((fb.allFaces && fb.allFaces.length) || fb.x2 > fb.x1));
+        const asg = core.assignments;
+        for (let i = 0; i < asg.length; i++) {
+          for (let jj = i + 1; jj < asg.length; jj++) {
+            const ai = asg[i], aj = asg[jj];
+            const hi = core.aHashes[ai.imageIndex], hj = core.aHashes[aj.imageIndex];
+            if (hi == null || hj == null) continue;
+            const faceI = _faceOf(core.faceBoxes[ai.imageIndex]);
+            const faceJ = _faceOf(core.faceBoxes[aj.imageIndex]);
+            if (faceI && faceJ) continue; // ทั้งคู่มีหน้า = ไม่นับ (กัน false positive)
+            if (_ham(hi, hj) <= 10) {
+              core.qcFlags.push(`duplicate_scene:${ai.slotId}:${aj.slotId}`);
+              console.log(`[MegaComposer] 🗺️🚩 ฉากซ้ำระหว่างช่อง ${ai.slotId}↔${aj.slotId} (aHash hamming≤10, ฝั่งไร้หน้า) — ติดธง duplicate_scene`);
+            }
+          }
+        }
+      }
+    } catch { /* ตรวจฉากซ้ำไม่ได้ = ไม่ติดธง */ }
     // ★ Wave2 Batch D2 (10 ก.ค.): วัด "กติกาวัดได้" 23 ข้อจากคลังเทคนิคปก — ที่เดียว/หลัง Eye advisory จบ
     //   (รวมกรณี revert แล้ว) = lockstep กับ buffer/cropTrace/assignments สุดท้ายเป๊ะ เหมือน manifest (W2-C การันตี)
     //   pure ล้วน (ไม่มี LLM/IO เพิ่ม) · ธงเข้า core.qcFlags → coverQcGate.js ตัดสินโหมด advisory(default)/hard

@@ -40,6 +40,13 @@
 //     circle_face_overlap → manual_review · ที่เหลือ (ladder_break/panel_count_out/circle_border_out/
 //     face_share_out ช่องรอง) = advisory เสมอแม้ hard (เหตุผล: pair แยกไม่ได้ · ฐาน px วงไม่รู้)
 //   MEGA_HARD_QC=0 ยัง bypass ทั้งด่านเหมือนเดิม (ธงใหม่ก็ไม่ทำให้ fail)
+//
+// ★ แบตช์ F (17 ก.ค.): ธงคุณภาพชุดใหม่ — แต่ละตัวมี kill-switch env ของตัวเอง (default ON), ไม่ขึ้นกับ MEGA_TECH_RULES_MODE
+//   · 'face_overflow:<slot>:<pct>'         หน้ากินช่อง ≥100% → manual_review · MEGA_FACE_OVERFLOW_HARD='0' → advisory
+//   · 'duplicate_person_panels:<p>:<n>'    คนเดียว ≥3/5 ช่อง → manual_review · MEGA_PERSON_DIVERSITY='0' → advisory
+//   · 'duplicate_scene:<a>:<b>'            ฉากซ้ำ (ฝั่งไร้หน้า) → manual_review · MEGA_SCENE_DEDUP='0' → advisory
+//   · 'hero_face_unmeasured'               hero วัดหน้าไม่ได้ → advisory เสมอ (ไม่ gating — แค่มองเห็น)
+//   · ธงยืด 'upscaled/upscale_soft:<circle>' → เพดานเข้ม 1.2x เท่า hero · MEGA_CIRCLE_STRICT_UPSCALE='0' → 1.6x เดิม
 // ============================================================
 
 const DEFAULT_THRESHOLDS = { hero: 1.2, other: 1.6 };
@@ -50,6 +57,11 @@ const STRETCH_RE = /^(upscaled|upscale_soft|upscaled_src):(.+):(\d+(?:\.\d+)?)$/
 // slot ที่ถือเป็น hero/main (mirror /main|hero/i ที่ composer ใช้เลือกช่องหลัก)
 function isHeroSlot(slot) {
   return /main|hero/i.test(String(slot || ''));
+}
+
+// ★ แบตช์ F (F4): slot วงกลม (identity focus) — mirror shape 'circle' / id ที่ขึ้นต้น circle ใน composer
+function isCircleSlot(slot) {
+  return /circle/i.test(String(slot || ''));
 }
 
 /**
@@ -78,11 +90,14 @@ export function evaluateCoverQc(input = {}, opts = {}) {
       const slot = ms[2];
       const ratio = Number(ms[3]);
       const hero = isHeroSlot(slot);
-      const limit = hero ? HERO_MAX : OTHER_MAX;
+      // ★ แบตช์ F (F4): วงกลมคือจุดโฟกัส identity — เข้ากลุ่มเพดานเข้ม 1.2x เท่า hero (เดิม 1.6x ทำ 1.39x เงียบ)
+      //   kill-switch MEGA_CIRCLE_STRICT_UPSCALE='0' → วงกลมกลับไปเพดาน 1.6x เดิม (byte-parity)
+      const circleStrict = process.env.MEGA_CIRCLE_STRICT_UPSCALE !== '0' && !hero && isCircleSlot(slot);
+      const limit = (hero || circleStrict) ? HERO_MAX : OTHER_MAX;
       if (Number.isFinite(ratio) && ratio > limit) {
         gapFail = true;
         reasons.push(
-          `${hero ? 'hero/main' : `ช่อง ${slot}`} ยืด ${ratio.toFixed(2)}x เกินเพดาน ${limit}x → วัตถุดิบไม่พอดี ควรหาภาพเพิ่ม [${f}]`
+          `${hero ? 'hero/main' : circleStrict ? `วงกลม ${slot}` : `ช่อง ${slot}`} ยืด ${ratio.toFixed(2)}x เกินเพดาน ${limit}x → วัตถุดิบไม่พอดี ควรหาภาพเพิ่ม [${f}]`
         );
       }
       continue; // ธงยืดที่ไม่เกินเพดาน = ยอมรับได้ (benign)
@@ -126,6 +141,43 @@ export function evaluateCoverQc(input = {}, opts = {}) {
     if (f === 'hero_unverified_kept') {
       reviewFail = true;
       reasons.push('hero ไม่ผ่านด่านบังคับแต่ไม่มีตัวสำรอง → คงใบเดิมทั้งที่ยังไม่ยืนยัน [hero_unverified_kept] → คนต้องดู');
+      continue;
+    }
+    // ── ★ แบตช์ F: ธงคุณภาพชุดใหม่ (F1/F2/F3/F5) — แต่ละตัวมี kill-switch env เป็นของตัวเอง ──
+    // F1 face_overflow: หน้าใหญ่กว่าช่อง ≥100% → manual_review "ทุก mode" (ไม่ขึ้นกับ MEGA_TECH_RULES_MODE)
+    //   default hard (≥100% ผิดแน่ ไม่มี false positive) · MEGA_FACE_OVERFLOW_HARD='0' → advisory (ธงยังออก)
+    if (/^face_overflow(:|$)/.test(f)) {
+      if (process.env.MEGA_FACE_OVERFLOW_HARD !== '0') {
+        reviewFail = true;
+        reasons.push(`หน้าใหญ่กว่าช่อง (≥100%) [${f}] → เป็นไปไม่ได้ที่จะครอปถูก คนต้องดู (hard ทุก mode)`);
+      } else {
+        advisory.push(`หน้าใหญ่กว่าช่อง (≥100%) [${f}] — advisory (MEGA_FACE_OVERFLOW_HARD=0)`);
+      }
+      continue;
+    }
+    // F2 duplicate_person_panels: คนเดียวกินหลายช่อง (≥3/5) → manual_review · MEGA_PERSON_DIVERSITY='0' → advisory
+    if (/^duplicate_person_panels(:|$)/.test(f)) {
+      if (process.env.MEGA_PERSON_DIVERSITY !== '0') {
+        reviewFail = true;
+        reasons.push(`คนเดียวกินหลายช่อง (≥3 จาก 5) [${f}] → คนต้องดู`);
+      } else {
+        advisory.push(`คนเดียวกินหลายช่อง [${f}] — advisory (MEGA_PERSON_DIVERSITY=0)`);
+      }
+      continue;
+    }
+    // F3 duplicate_scene: ฉากซ้ำระหว่างช่อง (ฝั่งไร้หน้า, aHash ใกล้กัน) → manual_review · MEGA_SCENE_DEDUP='0' → advisory
+    if (/^duplicate_scene(:|$)/.test(f)) {
+      if (process.env.MEGA_SCENE_DEDUP !== '0') {
+        reviewFail = true;
+        reasons.push(`ฉากซ้ำระหว่างช่อง (aHash ใกล้กัน ฝั่งไร้หน้า) [${f}] → คนต้องดู`);
+      } else {
+        advisory.push(`ฉากซ้ำระหว่างช่อง [${f}] — advisory (MEGA_SCENE_DEDUP=0)`);
+      }
+      continue;
+    }
+    // F5 hero_face_unmeasured: hero วัดหน้าไม่ได้ (faceMetrics null) → advisory เสมอ (มองเห็น ไม่ gating)
+    if (f === 'hero_face_unmeasured') {
+      advisory.push('hero วัดหน้าไม่ได้ (faceMetrics null) — advisory (มองเห็น ไม่ตัด)');
       continue;
     }
 
