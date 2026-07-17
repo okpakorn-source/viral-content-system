@@ -534,6 +534,8 @@ export default function CoverRefTestPage() {
                         const coverPath = d.cover?.coverPath;
                         const isActive = RT_ACTIVE_STATUSES.includes(job.status);
                         const isTerminal = !isActive; // cover_ready / failed / cancelled ฯลฯ
+                        // ★ แบตช์ E (E2b): งานที่มีการเลือกภาพแล้ว (pickImages) → เปิดแก้เองในเอดิเตอร์ได้ทุกสถานะ (รวม failed)
+                        const hasPick = !!(d.pickImages && d.pickImages.slots && Object.keys(d.pickImages.slots).length > 0);
                         return (
                           <tr key={job.id}>
                             <td style={{ ...td, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{job.id}</td>
@@ -572,6 +574,12 @@ export default function CoverRefTestPage() {
                               )}
                               {coverPath && (
                                 <a href={coverPath} target="_blank" rel="noreferrer" style={{ ...rowBtn('#f0fdf4', '#166534', '#bbf7d0'), display: 'inline-block', textDecoration: 'none' }}>🖼️ ดูปก</a>
+                              )}
+                              {/* ★ แบตช์ E (E2b): แก้ต่อในเอดิเตอร์ — ทุกงานที่เลือกภาพแล้ว รวม failed */}
+                              {hasPick && (
+                                <a href={`/cover-tester?recipe=${encodeURIComponent(job.id)}`} target="_blank" rel="noreferrer"
+                                  title={job.status === 'failed' ? 'ระบบทำไม่ผ่าน — เปิดแก้เอง' : 'เปิดจัดภาพต่อในเอดิเตอร์'}
+                                  style={{ ...rowBtn('#faf5ff', '#7c3aed', '#e9d5ff'), display: 'inline-block', textDecoration: 'none' }}>🎨 แก้ต่อ</a>
                               )}
                             </td>
                           </tr>
