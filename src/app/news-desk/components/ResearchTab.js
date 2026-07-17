@@ -13,6 +13,7 @@ import { UI, Btn, Card, Chip, Spinner, fmtNum, fmtBaht, fmtDuration } from './ui
 import { apiFetch } from './ui.js';
 import HuntSetup, { CHANNELS, AUTO_CFG_DEFAULT } from './HuntSetup.js';
 import LeadCard from './LeadCard.js';
+import EditorPanel from './EditorPanel.js'; // 🆕 E2 (17 ก.ค. 69): แผง "บก. AI" — คู่ขนานกับ backend ของ E1 (contract ล็อกแล้ว)
 
 const LIB = '/api/desk/dna/library';
 const LEADS = '/api/desk/research/leads';
@@ -543,6 +544,9 @@ export default function ResearchTab({ onToast }) {
         autoCfg={autoCfg} onAutoCfgChange={updateAutoCfg}
         onStart={startHunt} hunting={hunting}
       />
+
+      {/* ── E2 (17 ก.ค. 69): แผง บก. AI — คัดลีดจากคลังสะสมให้อัตโนมัติ (หลัง HuntSetup ก่อนผลการล่า) ── */}
+      <EditorPanel onToast={onToast} onAfterAction={afterAction} />
 
       {/* ── ส่วน 2: ผลการล่ารอบนี้ ── */}
       {(hunting || ranOnce) && (
