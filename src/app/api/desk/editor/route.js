@@ -3,13 +3,16 @@
  * 🧠 /api/desk/editor — สมอง บก. AI (โต๊ะข่าวกลาง v2, เฟส 2 — E1, 17 ก.ค. 69)
  * ============================================================
  * GET  → สถานะ บก. (ศึกษาแล้วหรือยัง/ทิศทาง top5/เวลาคัดล่าสุด) + รอบคัดข่าวล่าสุดแบบเต็ม
+ *        🆕 P1 (17 ก.ค. 69): + "ห้องรอ" (outbox: รายการ waiting/sending/sent/error + outboxStats)
  * POST {action:'study', model?, maxExemplars?}                → บก. อ่านคลัง DNA + กลั่นเป็นธรรมนูญถาวร (งานยาว)
- * POST {action:'pick',  model?, limit?, autoSend?}             → คัดลีดข่าวตามธรรมนูญ + ด่านกันเชิงลบ + (ออปชัน) ส่งเจน
+ * POST {action:'pick',  model?, limit?, autoSend?, sendMode?}  → คัดลีดข่าวตามธรรมนูญ + ด่านกันเชิงลบ + (ออปชัน) ส่ง/เข้าห้องรอ
+ * POST {action:'cancelOutbox', id}                             → 🆕 P1: ยกเลิกรายการในห้องรอ (เฉพาะ waiting/error)
  * ห้ามแตะ contract ของ dnaContract.js/dnaSynthesis.js/dnaResearch.js/researchLeads.js/researchExtract.js —
- * ยิงผ่าน editorBrain.js เท่านั้น
+ * ยิงผ่าน editorBrain.js/editorOutbox.js เท่านั้น
  */
 import { NextResponse } from 'next/server';
 import { studyDna, editorPick, getBrainStatus, getLatestPickRun } from '@/lib/services/deskV2/editorBrain.js';
+import { listOutbox, outboxStats, cancelOutbox } from '@/lib/services/deskV2/editorOutbox.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,8 +20,13 @@ export const maxDuration = 600; // studyDna อ่านคลังทั้ง
 
 export async function GET() {
   try {
-    const [status, lastRun] = await Promise.all([getBrainStatus(), getLatestPickRun()]);
-    return NextResponse.json({ success: true, status, lastRun });
+    const [status, lastRun, outbox, outboxStatsResult] = await Promise.all([
+      getBrainStatus(),
+      getLatestPickRun(),
+      listOutbox(),
+      outboxStats(),
+    ]);
+    return NextResponse.json({ success: true, status, lastRun, outbox, outboxStats: outboxStatsResult });
   } catch (err) {
     return NextResponse.json({
       success: false,
@@ -48,9 +56,24 @@ export async function POST(request) {
     if (action === 'pick') {
       const limit = Math.max(1, Math.min(10, Number(body?.limit) || 5));
       const autoSend = !!body?.autoSend;
+      const sendMode = body?.sendMode === 'immediate' ? 'immediate' : 'polite'; // 🔴 รับแค่ 2 ค่านี้เท่านั้น
       const origin = request.nextUrl.origin;
 
-      const result = await editorPick({ limit, autoSend, origin, modelKey });
+      const result = await editorPick({ limit, autoSend, sendMode, origin, modelKey });
+      return NextResponse.json({ success: true, ...result });
+    }
+
+    // 🆕 P1 (17 ก.ค. 69): ยกเลิกรายการในห้องรอ (เฉพาะ status waiting/error — กำลังส่ง/ส่งแล้วยกเลิกไม่ได้)
+    if (action === 'cancelOutbox') {
+      const id = body?.id;
+      if (!id) {
+        return NextResponse.json({
+          success: false,
+          error: 'ต้องระบุ id',
+          errorType: 'EDITOR_ERROR',
+        }, { status: 400 });
+      }
+      const result = await cancelOutbox(id);
       return NextResponse.json({ success: true, ...result });
     }
 

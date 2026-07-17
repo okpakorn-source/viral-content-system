@@ -6,15 +6,22 @@
 // contract ล็อกกับ backend ของเพื่อนทีม (E1 สร้างขนาน — ห้าม import ไฟล์เขาตรงๆ):
 //   GET  /api/desk/editor
 //     → { success, studied, studiedAt, exemplarCount, topDirections:[ชื่อ ≤5], lastPickAt,
-//         lastPick?: { picks:[{id,title,score,reason,sentJobId?}], skipped:[{id,title,reason}], at, autoSend } }
+//         lastPick?: { picks:[{id,title,score,reason,sentJobId?}], skipped:[{id,title,reason}], at, autoSend },
+//         outbox:[{id,leadId,title,score,reason,addedAt,status,attempts,lastError?,sentJobId?}], outboxStats:{...} }
 //   POST /api/desk/editor { action:'study', model? }
 //     → { success, charter:{ topDirections:[{name,why}], ... }, exemplarCount, aiCalls, tookMs }   (งานยาว 1-3 นาที)
-//   POST /api/desk/editor { action:'pick', limit?, autoSend?, model? }
-//     → { success, picks:[...], skipped:[...], sent:[...], needStudy?:true, tookMs }
+//   POST /api/desk/editor { action:'pick', limit?, autoSend?, sendMode?, model? }
+//     → { success, picks:[...], skipped:[...], sent:[...], sendMode, outboxQueued, needStudy?:true, tookMs }
+//   POST /api/desk/editor { action:'cancelOutbox', id }
+//     → { success, cancelled:true } | { success, cancelled:false, reason }
+//
+// 🚪 P1 (17 ก.ค. 69) — มารยาทคิวของ บก.: sendMode:'polite' (default) = คัดแล้วเข้า "ห้องรอ" เท่านั้น
+//   ไม่ยิงเข้าคิวเขียนจริงทันที — คนเฝ้าประตู GET /api/desk/editor/dispatch (cron ทุก 1 นาที) จะทยอยปล่อย
+//   ทีละใบเฉพาะตอนคิวเขียนข่าวจริงว่างสนิท (หลีกทางงานพนักงาน/Discord) sendMode:'immediate' = พฤติกรรมเดิม
 //
 // route นี้อาจยังไม่ deploy ระหว่าง E1 ทำงานขนาน — apiFetch (ui.js) คืน {success:false} เองเมื่อ 404/เชื่อมต่อไม่ได้
 // เรา "รับสุภาพ": ตกกลับไปโชว์กล่อง "ยังไม่มีความจำ" เหมือนสถานะปกติ ไม่ toast รบกวนตอนโหลดครั้งแรก
-// ปุ่มส่งใบเดี่ยว ใช้ contract เดิมที่มีอยู่แล้ว: POST /api/desk/research/extract {action:'extractAndSend', leadId}
+// ปุ่มส่งใบเดี่ยว (โหมด "แค่เสนอ" เท่านั้น) ใช้ contract เดิมที่มีอยู่แล้ว: POST /api/desk/research/extract {action:'extractAndSend', leadId}
 // ============================================================
 
 import { useState, useEffect, useCallback } from 'react';
@@ -22,7 +29,17 @@ import { UI, Btn, Card, Chip, Spinner, apiFetch } from './ui.js';
 
 const EDITOR = '/api/desk/editor';
 const EXTRACT = '/api/desk/research/extract';
+const DISPATCH = '/api/desk/editor/dispatch';
 const STUDY_CONFIRM_TIMEOUT_MS = 5000; // ปุ่มสองจังหวะ — ไม่กดซ้ำใน 5 วิ ให้กลับสถานะเดิม กันกดพลาดเสียเงินซ้ำ
+
+// ป้ายสถานะ/สี รายการในห้องรอ
+const OUTBOX_STATUS_LABEL = { waiting: '⏳ รอคิว', sending: '📤 กำลังส่ง', sent: '✅ ส่งแล้ว', error: '❌ ล้มเหลว' };
+function outboxStatusColor(status) {
+  if (status === 'sent') return UI.green;
+  if (status === 'error') return UI.red;
+  if (status === 'sending') return UI.blue;
+  return UI.amber; // waiting
+}
 
 // รองรับทั้งรูปแบบ GET (topDirections = string[]) และ POST study (charter.topDirections = [{name,why}])
 function normalizeDirections(list) {
@@ -60,11 +77,17 @@ export default function EditorPanel({ onToast, onAfterAction }) {
 
   const [picking, setPicking] = useState(false);
   const [pickLimit, setPickLimit] = useState(5);
-  const [autoSend, setAutoSend] = useState(false);
+  // 🚪 P1 (17 ก.ค. 69): 'off' = แค่เสนอ (ผมกดส่งเอง) · 'polite' = คัด+เข้าห้องรอ (default ★แนะนำ) · 'immediate' = ส่งทันที
+  const [sendMode, setSendMode] = useState('polite');
   const [pickModel, setPickModel] = useState('primary'); // 'primary' = gpt-5.5 ★ · 'fast' = mini
 
   const [skippedOpen, setSkippedOpen] = useState(false);
   const [busySendId, setBusySendId] = useState('');
+
+  const [outbox, setOutbox] = useState([]);
+  const [outboxStatsState, setOutboxStatsState] = useState(null);
+  const [checkingNow, setCheckingNow] = useState(false);
+  const [cancellingId, setCancellingId] = useState('');
 
   const busy = studying || picking;
 
@@ -77,6 +100,8 @@ export default function EditorPanel({ onToast, onAfterAction }) {
       setStudied(false);
       setTopDirections([]);
       setLastPick(null);
+      setOutbox([]);
+      setOutboxStatsState(null);
       return;
     }
     // 🚑 17 ก.ค. 69 (Fable ตรวจรับ): E1 ตอบซ้อนใน res.status — อ่านได้ทั้งสองทรงกัน contract เพี้ยนอีก
@@ -86,6 +111,8 @@ export default function EditorPanel({ onToast, onAfterAction }) {
     setExemplarCount(Number(st.exemplarCount) || 0);
     setTopDirections(normalizeDirections(st.topDirections));
     setLastPick(res.lastPick || st.lastPick || null);
+    setOutbox(Array.isArray(res.outbox) ? res.outbox : []); // 🆕 P1 (17 ก.ค. 69): ห้องรอ
+    setOutboxStatsState(res.outboxStats || null);
   }, []);
 
   useEffect(() => {
@@ -123,11 +150,12 @@ export default function EditorPanel({ onToast, onAfterAction }) {
   }
 
   async function doPick() {
+    const autoSend = sendMode !== 'off';
     setPicking(true);
     const res = await apiFetch(EDITOR, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'pick', limit: pickLimit, autoSend, model: pickModel }),
+      body: JSON.stringify({ action: 'pick', limit: pickLimit, autoSend, sendMode, model: pickModel }),
     });
     setPicking(false);
     if (res.needStudy) {
@@ -137,12 +165,53 @@ export default function EditorPanel({ onToast, onAfterAction }) {
     }
     if (res.success) {
       const at = new Date().toISOString();
-      setLastPick({ picks: res.picks || [], skipped: res.skipped || [], at, autoSend });
+      const effectiveSendMode = res.sendMode || sendMode;
+      setLastPick({ picks: res.picks || [], skipped: res.skipped || [], at, autoSend, sendMode: effectiveSendMode });
       const sentCount = (res.sent || []).length;
-      onToast?.(`บก. คัดได้ ${(res.picks || []).length} เรื่อง${autoSend ? ` · ส่งแล้ว ${sentCount}` : ''}`, 'ok');
+      const outboxQueued = Number(res.outboxQueued) || 0;
+      let suffix = '';
+      if (effectiveSendMode === 'immediate') suffix = ` · ส่งแล้ว ${sentCount}`;
+      else if (autoSend) suffix = ` · เข้าห้องรอ ${outboxQueued} ใบ`;
+      onToast?.(`บก. คัดได้ ${(res.picks || []).length} เรื่อง${suffix}`, 'ok');
       await onAfterAction?.();
+      await load(); // รีเฟรชห้องรอ (เผื่อมีของใหม่เข้าห้องรอในโหมด polite)
     } else {
       onToast?.(res.error || 'สั่ง บก. คัดข่าวไม่สำเร็จ', 'err');
+    }
+  }
+
+  // ยกเลิกรายการในห้องรอ (เฉพาะ status waiting — ปุ่มโชว์เฉพาะสถานะนี้)
+  async function cancelOutboxItem(id) {
+    setCancellingId(id);
+    const res = await apiFetch(EDITOR, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'cancelOutbox', id }),
+    });
+    setCancellingId('');
+    if (res.cancelled) {
+      setOutbox((list) => list.filter((o) => o.id !== id));
+      setOutboxStatsState((s) => (s ? { ...s, total: Math.max(0, s.total - 1), waiting: Math.max(0, s.waiting - 1) } : s));
+      onToast?.('ยกเลิกรายการนี้จากห้องรอแล้ว', 'ok');
+    } else {
+      onToast?.(res.reason || res.error || 'ยกเลิกไม่สำเร็จ', 'err');
+    }
+  }
+
+  // ปุ่ม "↻ เช็คตอนนี้" — ยิง dispatch route ตรง 1 ครั้ง (เหมือน cron ทำ แต่ไม่ต้องรอรอบถัดไป)
+  async function checkDispatchNow() {
+    setCheckingNow(true);
+    const res = await apiFetch(DISPATCH);
+    setCheckingNow(false);
+    if (res.success) {
+      if (res.sent) onToast?.('ปล่อยเข้าคิวเขียนแล้ว 1 ใบ', 'ok');
+      else if (res.held) onToast?.(`คิวเขียนไม่ว่าง (รอ ${res.queueBusy?.pending || 0} · กำลังทำ ${res.queueBusy?.processing || 0}) — รอรอบหน้า`, 'warn');
+      else if (res.pending) onToast?.('คลิปยังถอดไม่เสร็จ — รอรอบหน้า', 'warn');
+      else if (res.error) onToast?.(`ปล่อยไม่สำเร็จ: ${res.error.message || 'ไม่ทราบสาเหตุ'}`, 'err');
+      else onToast?.('เช็คแล้ว — ห้องรอว่าง ไม่มีอะไรต้องปล่อย', 'ok');
+      await load();
+    } else {
+      onToast?.(res.error || 'เช็คตอนนี้ไม่สำเร็จ', 'err');
     }
   }
 
@@ -239,29 +308,39 @@ export default function EditorPanel({ onToast, onAfterAction }) {
             </div>
           </div>
 
-          <div style={{ flex: '1 1 220px' }}>
-            <div style={{ fontSize: 12.5, fontWeight: 800, color: UI.text, marginBottom: 6 }}>โหมด</div>
+          <div style={{ flex: '1 1 300px' }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: UI.text, marginBottom: 6 }}>โหมดส่ง</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button
-                type="button" onClick={() => setAutoSend(false)} disabled={busy}
+                type="button" onClick={() => setSendMode('off')} disabled={busy}
                 style={{
                   minHeight: 44, padding: '8px 14px', borderRadius: 12, cursor: busy ? 'not-allowed' : 'pointer',
                   fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
-                  background: !autoSend ? `${UI.blue}18` : UI.card,
-                  color: !autoSend ? UI.blue : UI.dim,
-                  border: `1.5px solid ${!autoSend ? UI.blue : UI.line}`,
+                  background: sendMode === 'off' ? `${UI.blue}18` : UI.card,
+                  color: sendMode === 'off' ? UI.blue : UI.dim,
+                  border: `1.5px solid ${sendMode === 'off' ? UI.blue : UI.line}`,
                 }}
-              >🗳️ แค่เสนอ (ผมกดส่งเอง)</button>
+              >🗳️ แค่เสนอ</button>
               <button
-                type="button" onClick={() => setAutoSend(true)} disabled={busy}
+                type="button" onClick={() => setSendMode('polite')} disabled={busy}
                 style={{
                   minHeight: 44, padding: '8px 14px', borderRadius: 12, cursor: busy ? 'not-allowed' : 'pointer',
                   fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
-                  background: autoSend ? `${UI.accent}18` : UI.card,
-                  color: autoSend ? UI.accent : UI.dim,
-                  border: `1.5px solid ${autoSend ? UI.accent : UI.line}`,
+                  background: sendMode === 'polite' ? `${UI.accent}18` : UI.card,
+                  color: sendMode === 'polite' ? UI.accent : UI.dim,
+                  border: `1.5px solid ${sendMode === 'polite' ? UI.accent : UI.line}`,
                 }}
-              >⚡ คัดแล้วส่งเจนเลย</button>
+              >🚪 คัด+เข้าห้องรอ (หลีกทางพนักงาน) ★แนะนำ</button>
+              <button
+                type="button" onClick={() => setSendMode('immediate')} disabled={busy}
+                style={{
+                  minHeight: 44, padding: '8px 14px', borderRadius: 12, cursor: busy ? 'not-allowed' : 'pointer',
+                  fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
+                  background: sendMode === 'immediate' ? `${UI.amber}18` : UI.card,
+                  color: sendMode === 'immediate' ? UI.amber : UI.dim,
+                  border: `1.5px solid ${sendMode === 'immediate' ? UI.amber : UI.line}`,
+                }}
+              >⚡ ส่งทันที</button>
             </div>
           </div>
 
@@ -351,6 +430,54 @@ export default function EditorPanel({ onToast, onAfterAction }) {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── ส่วน 4: ห้องรอของ บก. (P1, 17 ก.ค. 69) — โชว์เมื่อมีของ ── */}
+      {outboxStatsState && outboxStatsState.total > 0 && (
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${UI.line}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+            <span style={{ fontSize: 13.5, fontWeight: 800, color: UI.text }}>
+              🚪 ห้องรอของ บก. ({outboxStatsState.total})
+            </span>
+            <Btn variant="subtle" busy={checkingNow} disabled={checkingNow} onClick={checkDispatchNow} style={{ minHeight: 32, padding: '5px 10px', fontSize: 12 }}>
+              ↻ เช็คตอนนี้
+            </Btn>
+          </div>
+          <div style={{ fontSize: 12, color: UI.dim, marginBottom: 10, lineHeight: 1.6 }}>
+            รอคิวพนักงานว่าง — คนเฝ้าประตูเช็คทุก 1 นาที
+          </div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {outbox.map((o) => (
+              <div
+                key={o.id}
+                style={{
+                  background: UI.card2, border: `1px solid ${UI.line}`, borderRadius: 10, padding: 10,
+                  display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+                }}
+              >
+                <Chip color={outboxStatusColor(o.status)}>{OUTBOX_STATUS_LABEL[o.status] || o.status}</Chip>
+                <span style={{ fontSize: 13, color: UI.text, flex: '1 1 200px' }}>
+                  {String(o.title || '(ไม่มีหัวข้อ)').slice(0, 100)}
+                </span>
+                {o.status === 'error' && o.lastError && (
+                  <span style={{ fontSize: 11.5, color: UI.red }}>{String(o.lastError).slice(0, 90)}</span>
+                )}
+                {o.status === 'sent' && o.sentJobId && (
+                  <span style={{ fontSize: 11.5, color: UI.dim }}>job{String(o.sentJobId).slice(0, 8)}</span>
+                )}
+                {o.status === 'waiting' && (
+                  <Btn
+                    variant="ghost"
+                    busy={cancellingId === o.id}
+                    disabled={!!cancellingId}
+                    onClick={() => cancelOutboxItem(o.id)}
+                    style={{ minHeight: 32, padding: '4px 10px', fontSize: 11.5 }}
+                  >✕ ยกเลิก</Btn>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </Card>
