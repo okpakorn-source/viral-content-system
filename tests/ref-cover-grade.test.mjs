@@ -154,8 +154,11 @@ test('gate OFF: pool ที่ป้อน pickBestRef เท่าเดิม 
 //   เทสเดิมข้างบนเคย "ผ่าน" บัคนี้ เพราะนิยาม legacy ก็ปล่อย _derived ผ่านเหมือนกัน (สองฝั่งพลาดตรงกัน = ตรวจไม่เจอ)
 //   ด่านจริงที่ปิดช่องโหว่: พูล OFF เหนือคลัง 33 ใบ (มี _derived 12) ต้อง "เท่ากับ" พูล OFF เหนือ backup 21 ใบ
 //     (backup = คลังก่อน R5b ไม่มี _derived เลย) — ถ้ามี variant ใดหลุด OFF จำนวน/สมาชิกจะไม่ตรง = จับได้ทันที
-test('gate OFF: พูลคลัง 33 ใบ == พูล backup 21 ใบ (ไม่มี _derived หลุด OFF เข้ามาเลย)', () => {
+test('gate OFF: พูลคลัง 33 ใบ == พูล backup 21 ใบ (ไม่มี _derived หลุด OFF เข้ามาเลย)', (t) => {
   const BACKUP = path.join(__dirname, '..', 'backup', 'ref-library_2026-07-16-r5b', 'ref-cover-library.json');
+  // ★ 17 ก.ค.: backup เป็นไฟล์นอก git (เครื่องหลักเท่านั้น) — worktree/CI ไม่มี = skip ไม่ใช่ fail
+  //   (ด่านสำรองยังมี: เทสถัดไปพิสูจน์ variant _derived ทุกใบไม่ผ่าน OFF โดยไม่พึ่ง backup)
+  if (!fs.existsSync(BACKUP)) { t.skip('ไม่มีไฟล์ backup (เครื่องนี้ไม่ใช่เครื่องหลัก) — ข้าม'); return; }
   const backup = JSON.parse(fs.readFileSync(BACKUP, 'utf8'));
   assert.equal(backup.length, 21, 'backup ต้องเป็นคลังก่อน R5b 21 ใบ');
   assert.equal(backup.filter((r) => r?.dna?._derived).length, 0, 'backup ต้องไม่มี variant _derived');
