@@ -19,7 +19,10 @@ import { listExemplars, clusterSummary } from './dnaLibrary.js';
 import { sanitizeText } from './dnaContract.js';
 
 const CALL_TIMEOUT_MS = 15_000; // ทุก call ต้อง abort ที่ 15s ตามโจทย์
-const KNOWN_CHANNELS = ['videos', 'facebook', 'tiktok', 'youtube', 'google'];
+const KNOWN_CHANNELS = ['videos', 'facebook', 'reels', 'tiktok', 'youtube', 'google'];
+// ★ 17 ก.ค. 69 (ผู้ใช้สั่งเพิ่ม): 'reels' = เจาะคลิปสั้น Facebook Reels โดยเฉพาะ (site:facebook.com/reel) —
+//   ช่อง 'facebook' เดิม (site:facebook.com เพียว) Google ดันโพสต์เพจ/กลุ่มเป็นหลัก แทบไม่โผล่ /reel/ เลย
+//   แต่ข่าวปังจำนวนมากมาจาก reels (ไฮไลท์เด็ดเยอะ) — แยกช่องให้เห็นสถิติ/ปิดเปิดได้เอง
 // ★ 16 ก.ค. 69 (ผู้ใช้สั่งเพิ่ม): 'google' = Serper /search เพียวไม่ใส่ site: filter → ลิงก์ข่าวจากสำนักต่างๆ
 //   (today.line.me/ไทยรัฐ/ข่าวสด ฯลฯ) — แหล่ง "ข่าวเก่าน้ำดีทำใหม่ได้" ที่ระบบเดิมพิสูจน์แล้วว่าทีมใช้มากสุดรองจาก FB
 //   และเป็น fetchability='full' (ดึงเนื้อเต็มได้) เหมาะกับท่อเขียนที่สุด
@@ -156,6 +159,7 @@ async function callYoutube(query, maxResults, timeoutMs) {
 async function fetchChannel(channel, query, num, timeoutMs) {
   if (channel === 'videos') return callSerperVideos(query, num, timeoutMs);
   if (channel === 'facebook') return callSerperSearch(`${query} site:facebook.com`, num, timeoutMs);
+  if (channel === 'reels') return callSerperSearch(`${query} site:facebook.com/reel`, num, timeoutMs); // ★ 17 ก.ค.: เจาะ Reels ตรงๆ
   if (channel === 'tiktok') return callSerperSearch(`${query} site:tiktok.com`, num, timeoutMs);
   if (channel === 'youtube') return callYoutube(query, num, timeoutMs);
   if (channel === 'google') return callSerperSearch(query, num, timeoutMs); // เพียว ไม่ site: → ลิงก์ข่าวสำนักต่างๆ
@@ -251,7 +255,7 @@ export async function huntClusters({
   // ── (3) ยิงจริง: pool ขนานสูงสุด 4 call task พร้อมกัน ──
   const candidates = [];
   const seenUrls = new Map(); // normalized url → true (เก็บตัวแรกไว้)
-  const byChannel = { videos: 0, facebook: 0, tiktok: 0, youtube: 0, google: 0 };
+  const byChannel = { videos: 0, facebook: 0, reels: 0, tiktok: 0, youtube: 0, google: 0 };
   let serperCalls = 0;
   let youtubeCalls = 0;
   let dupCount = 0;

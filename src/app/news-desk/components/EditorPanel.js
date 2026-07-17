@@ -470,8 +470,8 @@ export default function EditorPanel({ onToast, onAfterAction }) {
                 {o.status === 'error' && o.lastError && (
                   <span style={{ fontSize: 11.5, color: UI.red }}>{String(o.lastError).slice(0, 90)}</span>
                 )}
-                {/* 🔧 17 ก.ค. 69: โน้ตเหตุผลที่ใบยังรอ (เช่น รอเครื่องทีมถอดคลิป) — ผู้ใช้เห็นว่าไม่ได้ค้างเฉยๆ */}
-                {o.status === 'waiting' && o.lastNote && (
+                {/* 🔧 17 ก.ค. 69: โน้ตเหตุผล/ความคืบหน้าของใบ (รอถอดคลิป · 🔁 ส่งใหม่ · ✅ เจนเสร็จ) — ผู้ใช้เห็นว่าไม่ได้ค้างเฉยๆ */}
+                {(o.status === 'waiting' || o.status === 'sent') && o.lastNote && (
                   <span style={{ fontSize: 11.5, color: UI.dim }}>{String(o.lastNote).slice(0, 90)}</span>
                 )}
                 {o.status === 'sent' && o.sentJobId && (

@@ -40,7 +40,7 @@ export default function ResearchTab({ onToast }) {
   const [clustersLoading, setClustersLoading] = useState(false);
   const [clusterQuery, setClusterQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
-  const [channels, setChannels] = useState({ videos: true, facebook: true, tiktok: true, youtube: true, google: true }); // ★ 16 ก.ค.: +google ลิงก์ข่าวสำนัก (ผู้ใช้สั่ง)
+  const [channels, setChannels] = useState({ videos: true, facebook: true, reels: true, tiktok: true, youtube: true, google: true }); // ★ 16 ก.ค.: +google ลิงก์ข่าวสำนัก · 17 ก.ค.: +reels คลิปสั้น FB (ผู้ใช้สั่ง)
   const [queriesPerCluster, setQueriesPerCluster] = useState(3);
   const [model, setModel] = useState('fast');
   const [autoCfg, setAutoCfg] = useState(AUTO_CFG_DEFAULT); // 🆕 A1 (17 ก.ค. 69): {enabled,minScore,maxPerRound} — default ปิด

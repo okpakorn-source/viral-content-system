@@ -11,17 +11,36 @@
  */
 import { NextResponse } from 'next/server';
 import { dispatchOne } from '@/lib/services/deskV2/editorOutbox.js';
+import { sweepDeadWork } from '@/lib/services/deskV2/deskWatchdog.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
+
+// 🩺 หมอเวร (17 ก.ค. 69): กันเวลาไว้ให้ sweep ท้ายรอบ — งบ = เวลาที่เหลือก่อนชน maxDuration (เผื่อ margin 20s)
+const SWEEP_MAX_BUDGET_MS = 45_000;
+const ROUTE_SAFE_MS = (300 - 20) * 1000;
 
 export async function GET(request) {
   const t0 = Date.now();
   try {
     const origin = request.nextUrl.origin;
     const result = await dispatchOne({ origin });
-    return NextResponse.json({ success: true, ...result, tookMs: Date.now() - t0 });
+
+    // 🩺 หมอเวรกู้งานตายกลางทาง — พ่วงท้ายทุกรอบ (ปิดได้ด้วย DESK_WATCHDOG=0) · พังห้ามล้มทั้ง route
+    let watchdog = null;
+    if (process.env.DESK_WATCHDOG !== '0') {
+      const budgetMs = Math.min(SWEEP_MAX_BUDGET_MS, ROUTE_SAFE_MS - (Date.now() - t0));
+      if (budgetMs > 10_000) {
+        try {
+          watchdog = await sweepDeadWork({ origin, budgetMs });
+        } catch (e) {
+          watchdog = { errors: [e?.message || String(e)] };
+        }
+      }
+    }
+
+    return NextResponse.json({ success: true, ...result, watchdog, tookMs: Date.now() - t0 });
   } catch (err) {
     return NextResponse.json({
       success: false,
