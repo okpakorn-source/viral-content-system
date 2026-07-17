@@ -127,6 +127,12 @@ export function refPoolGateOpen(record, env = process.env) {
   const dna = record?.dna;
   // core เดิมที่ต้องมีทุกโหมด: dna + imagePath (ประกอบปกจากใบนี้ได้)
   if (!dna || !record?.imagePath) return false;
+  // ★ 17 ก.ค. (เจ้าของสั่ง "เอาเทมเพลตเพี้ยนออก เหลือใบเดียวที่มั่นใจ 100% เทสทีละเทมเพลต"):
+  //   REF_POOL_PIN=<record.id> → พูลเหลือเฉพาะใบนั้นทุกทางเข้า (dropdown/auto-match/variant-lock)
+  //   เหตุ: บางเทมเพลตมีเฟด/ช่องซ้อนทำระบบอ่านช่องผิดจนภาพเพี้ยน (เช่น 732269634 ที่ repro=false)
+  //   ไม่ตั้ง env = พฤติกรรมเดิมเป๊ะทุก byte · pin ชี้ id ไม่มีจริง = พูลว่าง → เดินเส้น "คลังว่าง" เดิม (ปลอดภัย)
+  const pin = String(env?.REF_POOL_PIN || '').trim();
+  if (pin) return String(record?.id || '') === pin;
   const gateOn = env?.REF_TEMPLATE_GRADE_GATE === '1';
   if (!gateOn) {
     // OFF → พฤติกรรมเดิม "ก่อน R5b" เป๊ะ: pool ต้อง byte-identical กับคลัง 21 ใบก่อนกลั่นโครงลูก

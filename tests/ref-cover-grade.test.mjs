@@ -222,3 +222,21 @@ test('stored _templateGrade ในคลังจริงตรงกับ rec
     assert.equal(rec?.dna?._templateGrade?.grade, 'F', `${id} เป็น duplicate — stored grade ต้องเป็น F`);
   }
 });
+
+// ============================================================ REF_POOL_PIN (17 ก.ค. — เทสทีละเทมเพลต)
+test('PIN: ตั้ง REF_POOL_PIN = เหลือเฉพาะ id นั้น (ใบอื่นแม้เกรด A ก็ไม่ผ่าน)', () => {
+  const env = { REF_POOL_PIN: 'REF-PINNED', REF_TEMPLATE_GRADE_GATE: '1' };
+  const pinned = { id: 'REF-PINNED', imagePath: '/x.jpg', dna: mk({ score: 60 }) }; // เกรดต่ำก็ผ่านเมื่อถูกปัก
+  const gradeA = { id: 'REF-OTHER', imagePath: '/y.jpg', dna: mk({ score: 95 }) };
+  assert.equal(refPoolGateOpen(pinned, env), true);
+  assert.equal(refPoolGateOpen(gradeA, env), false);
+});
+
+test('PIN: core ยังบังคับ (ใบปักที่ไม่มี dna/imagePath = ไม่ผ่าน) + pin ว่าง/ช่องว่าง = พฤติกรรมเดิม', () => {
+  const env = { REF_POOL_PIN: 'REF-PINNED' };
+  assert.equal(refPoolGateOpen({ id: 'REF-PINNED', dna: mk({ score: 90 }) }, env), false, 'ไม่มี imagePath');
+  assert.equal(refPoolGateOpen({ id: 'REF-PINNED', imagePath: '/x.jpg' }, env), false, 'ไม่มี dna');
+  const noPin = { REF_POOL_PIN: '  ' };
+  const normal = { id: 'REF-N', imagePath: '/n.jpg', dna: mk({ score: 90 }) };
+  assert.equal(refPoolGateOpen(normal, noPin), refPoolGateOpen(normal, {}), 'pin ช่องว่าง = เหมือนไม่ตั้ง');
+});
