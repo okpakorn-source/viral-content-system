@@ -590,6 +590,9 @@ export async function sendLeadAsText(leadId, { origin, auto = false } = {}) {
       status: 'sent',
       statusAt: new Date().toISOString(),
       jobId: body.jobId || null,
+      // 🧾 Q1 17 ก.ค. 69 (ผู้ใช้สั่ง — หาต้นตอข่าวกาก): เก็บ "เนื้อที่ประกอบส่งเจนจริง" ทั้งก้อนไว้ตรวจย้อน
+      //   (ดิบ/กลั่นมีใน extract อยู่แล้ว — ตัวนี้คือชิ้นสุดท้ายของโซ่คุณภาพ: ดิบ→กลั่น→ที่ส่งจริง→ผลเจน)
+      sentPayload: String(payload.input || '').slice(0, 12000),
     }, {
       type: 'sent',
       data: {
