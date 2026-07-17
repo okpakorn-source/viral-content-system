@@ -27,7 +27,8 @@ import { callAI } from '../../ai/openai.js';
 import { MODEL_PRIMARY, MODEL_FAST, MODEL_COSTS } from '../../ai/modelConfig.js';
 import { sanitizeText, STORE_EXEMPLARS, STORE_RUNS } from './dnaContract.js';
 import { listLeads, pushEvent, STORE as LEADS_STORE } from './researchLeads.js';
-import { extractAndSend } from './researchExtract.js';
+import { extractAndSend, classifyExtractRoute, extractArticle, extractClip, attachExtract } from './researchExtract.js';
+import { enqueueOutbox } from './editorOutbox.js';
 
 // ── ชื่อ store ของไฟล์นี้ (persistStore: Supabase หลัก + JSON fallback) ──
 export const STORE_BRAIN = 'editor-brain';           // 1 record ถาวร (id 'brain_latest') + สำเนา history รายวัน
@@ -461,14 +462,23 @@ async function _pruneOldPickRuns(store, keep) {
 
 /**
  * editorPick — ใช้ธรรมนูญ บก. (brain_latest) คัดลีดข่าวที่ "น่าทำ" ที่สุด + ด่านกันเชิงลบ + (ออปชัน) ส่งเจนอัตโนมัติ
+ *
+ * 🚪 P1 (17 ก.ค. 69) — มารยาทคิวของ บก.: sendMode คุมว่า autoSend แปลว่า "ส่งจริงทันที" หรือ "เข้าห้องรอก่อน"
+ *   'polite'    (default) — เตรียมเนื้อ (best-effort ต่อใบ fetchability==='full') แล้วเข้า "ห้องรอ" (editorOutbox)
+ *                            เท่านั้น — ไม่ยิงเข้าคิวเขียนจริง ปล่อยให้คนเฝ้าประตู (dispatchOne, cron 1 นาที)
+ *                            ทยอยปล่อยทีละใบเฉพาะตอนคิวเขียนข่าวจริงว่างสนิท (หลีกทางงานพนักงาน/Discord)
+ *   'immediate' — พฤติกรรมเดิมทุกประการ (ยิง extractAndSend ตรงทุกใบทันที ไม่ผ่านห้องรอ)
+ *
  * @param {object} args
  * @param {number} [args.limit] - จำนวน pick สูงสุด (default 5, เพดาน 10)
- * @param {boolean} [args.autoSend] - true = ยิง extractAndSend ให้ทุกใบที่ pick ที่ fetchability==='full'
- * @param {string} [args.origin] - จำเป็นเมื่อ autoSend=true (ยิงเข้าคิวเขียนข่าวผ่าน origin นี้)
+ * @param {boolean} [args.autoSend] - true = เตรียม/ส่งให้ทุกใบที่ pick ที่ fetchability==='full' (ตาม sendMode)
+ * @param {'polite'|'immediate'} [args.sendMode] - default 'polite' — ดู doc ด้านบน
+ * @param {string} [args.origin] - จำเป็นเมื่อ autoSend=true (ยิง/เตรียมเนื้อผ่าน origin นี้)
  * @param {'primary'|'fast'} [args.modelKey]
- * @returns {Promise<{needStudy:boolean, picks:object[], skipped:object[], sent:object[], tookMs:number}>}
+ * @returns {Promise<{needStudy:boolean, picks:object[], skipped:object[], sent:object[], sendMode:string, outboxQueued:number, tookMs:number}>}
  */
-export async function editorPick({ limit = 5, autoSend = false, origin, modelKey = 'primary' } = {}) {
+export async function editorPick({ limit = 5, autoSend = false, sendMode = 'polite', origin, modelKey = 'primary' } = {}) {
+  const safeSendMode = sendMode === 'immediate' ? 'immediate' : 'polite'; // 🔴 รับแค่ 2 ค่านี้เท่านั้น (default polite)
   const t0 = Date.now();
   const model = modelKey === 'fast' ? MODEL_FAST : MODEL_PRIMARY; // 🔴 รับแค่ 2 ค่านี้เท่านั้น
   const safeLimit = Math.max(1, Math.min(MAX_PICK_LIMIT, Number(limit) || 5));
@@ -477,7 +487,7 @@ export async function editorPick({ limit = 5, autoSend = false, origin, modelKey
   const brainAll = await brainStore.getAll();
   const brain = brainAll.find((r) => r.id === 'brain_latest');
   if (!brain) {
-    return { needStudy: true, picks: [], skipped: [], sent: [], tookMs: Date.now() - t0 };
+    return { needStudy: true, picks: [], skipped: [], sent: [], sendMode: safeSendMode, outboxQueued: 0, tookMs: Date.now() - t0 };
   }
   const charter = brain.charter || {};
 
@@ -491,7 +501,7 @@ export async function editorPick({ limit = 5, autoSend = false, origin, modelKey
     .slice(0, MAX_PICK_CANDIDATES);
 
   if (!candidates.length) {
-    return { needStudy: false, picks: [], skipped: [], sent: [], tookMs: Date.now() - t0 };
+    return { needStudy: false, picks: [], skipped: [], sent: [], sendMode: safeSendMode, outboxQueued: 0, tookMs: Date.now() - t0 };
   }
 
   const leadBriefs = candidates.map((l) => ({
@@ -518,7 +528,7 @@ export async function editorPick({ limit = 5, autoSend = false, origin, modelKey
       timeoutMs: PICK_TIMEOUT_MS,
     });
   } catch (err) {
-    return { needStudy: false, picks: [], skipped: [], sent: [], error: err?.message || String(err), tookMs: Date.now() - t0 };
+    return { needStudy: false, picks: [], skipped: [], sent: [], error: err?.message || String(err), sendMode: safeSendMode, outboxQueued: 0, tookMs: Date.now() - t0 };
   }
 
   const byId = new Map(candidates.map((l) => [l.id, l]));
@@ -531,9 +541,11 @@ export async function editorPick({ limit = 5, autoSend = false, origin, modelKey
     await _writeEditorEvent(leadsStore, p.id, { score: p.opportunityScore, reason: p.reason, auto: !!autoSend });
   }
 
-  // autoSend: ยิง extractAndSend เฉพาะใบ pick ที่ fetchability==='full' ทีละใบ — ล้มใบไหนบันทึกผลใบนั้นแล้วไปต่อ
+  // autoSend: จัดการเฉพาะใบ pick ที่ fetchability==='full' ทีละใบ — แยกตาม sendMode (P1, 17 ก.ค. 69)
   const sent = [];
-  if (autoSend) {
+  let outboxQueued = 0;
+  if (autoSend && safeSendMode === 'immediate') {
+    // 'immediate' — พฤติกรรมเดิมทุกประการ (ยิง extractAndSend ตรงทันที ไม่ผ่านห้องรอ) — ห้ามแก้ logic เดิม
     for (const p of picks) {
       const lead = byId.get(p.id);
       if (!lead || lead.fetchability !== 'full') continue;
@@ -546,6 +558,28 @@ export async function editorPick({ limit = 5, autoSend = false, origin, modelKey
         sent.push({ id: p.id, title: lead.title, success: false, error: e?.message || String(e) });
       }
     }
+  } else if (autoSend) {
+    // 'polite' (default) — เตรียมเนื้อ best-effort (ถ้ายัง) แล้วเข้าห้องรอ — ไม่ยิงเข้าคิวเขียนจริง
+    // คนเฝ้าประตู (editorOutbox.dispatchOne, cron 1 นาที) จะทยอยปล่อยทีละใบเฉพาะตอนคิวเขียนข่าวจริงว่างสนิท
+    for (const p of picks) {
+      const lead = byId.get(p.id);
+      if (!lead || lead.fetchability !== 'full' || lead.contentReady) continue; // เนื้อพร้อมอยู่แล้ว/ไม่ใช่ full → ข้ามเตรียม
+      try {
+        const route = classifyExtractRoute(lead);
+        // eslint-disable-next-line no-await-in-loop -- เตรียมทีละใบตามลำดับ (เหมือน immediate) กันชนไฟล์ leads เดียวกัน
+        const extractResult = route === 'clip' ? await extractClip(lead.url, origin) : await extractArticle(lead.url);
+        if (!extractResult?.pending && String(extractResult?.text || '').length >= 50) {
+          // eslint-disable-next-line no-await-in-loop
+          await attachExtract(p.id, extractResult, { auto: true });
+        }
+        // extractResult.pending (คลิปยังถอดไม่เสร็จ) หรือเนื้อสั้นผิดปกติ → ไม่ throw ไม่บล็อกงานคัดข่าว
+        // ปล่อยให้ dispatchOne (needExtract fallback → extractAndSend เต็ม) จัดการตอนปล่อยจริงทีหลัง
+      } catch {
+        // เตรียมเนื้อพัง (network/AI) — ไม่บล็อกงานคัดข่าว ปล่อยให้ dispatchOne fallback ทีหลังเช่นกัน
+      }
+    }
+    const enqueueResult = await enqueueOutbox(picks);
+    outboxQueued = enqueueResult.queued;
   }
 
   // เก็บ run: store 'editor-pick-runs' (เก็บ 50 รอบล่าสุด — prune เก่ากว่านั้นทิ้ง)
@@ -557,13 +591,15 @@ export async function editorPick({ limit = 5, autoSend = false, origin, modelKey
     picks: picks.map((p) => ({ id: p.id, title: p.title, score: p.opportunityScore, reason: p.reason, sentJobId: p.sentJobId || null })),
     skipped: skipped.slice(0, 40).map((s) => ({ id: s.id, title: s.title, reason: s.reason })),
     autoSend: !!autoSend,
+    sendMode: safeSendMode, // 🆕 P1 (17 ก.ค. 69)
+    outboxQueued,           // 🆕 P1
     model,
     tookMs: Date.now() - t0,
   };
   await runsStore.add(runRecord);
   await _pruneOldPickRuns(runsStore, 50);
 
-  return { picks, skipped, sent, needStudy: false, tookMs: Date.now() - t0 };
+  return { picks, skipped, sent, needStudy: false, sendMode: safeSendMode, outboxQueued, tookMs: Date.now() - t0 };
 }
 
 /**
