@@ -96,6 +96,19 @@ export default function MegaComposeTest() {
                     style={{ padding: '3px 10px', borderRadius: 6, background: '#4f46e5', color: '#fff', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>⬇️ โหลดภาพ</a>
                 )}
                 {result.archivedId && <a href="/mega-covers" style={{ color: '#16a34a', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>🗂️ เข้าคลังแล้ว ({result.archivedId})</a>}
+                {/* ★ 17 ก.ค.: แก้ต่อในเอดิเตอร์ — ส่งสูตรผ่าน localStorage (ข้ามแท็บได้) แล้วเปิด /cover-tester */}
+                {result.editorRecipe && (
+                  <button type="button"
+                    onClick={() => {
+                      try {
+                        window.localStorage.setItem('crtRecipeHandoff', JSON.stringify({ at: Date.now(), recipe: result.editorRecipe }));
+                        window.open('/cover-tester?recipeLocal=1', '_blank');
+                      } catch { alert('ส่งสูตรไปเอดิเตอร์ไม่สำเร็จ (localStorage ไม่พร้อม)'); }
+                    }}
+                    style={{ padding: '3px 10px', borderRadius: 6, background: '#0d9488', color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+                    🎨 แก้ต่อในเอดิเตอร์
+                  </button>
+                )}
               </div>
               {result.base64 && <img src={result.base64} alt="cover" style={{ width: '100%', borderRadius: 10, border: '2px solid #4f46e5' }} />}
             </div>
