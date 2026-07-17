@@ -476,8 +476,19 @@ export default function CoverPage() {
   const [recipeStatus, setRecipeStatus] = useState('');  // ข้อความสถานะโหลด/ผิดพลาด
   const [savingCover, setSavingCover] = useState(false);
   const [saveToast, setSaveToast] = useState(null);      // { ok, msg, id }
+  // ★ E3 (E3a/E3b): พูลรูปรวม — ใช้ได้ทุกโหมด (recipe auto-load เดิม + ดึงจากเคส MEGA)
+  //   เก็บพูลเป็น state เดียว {id,url,thumb,person,note} ให้ทั้งแถบล่างโหมด recipe + modal เลือกรูปใช้ร่วมกัน
+  const [pool, setPool] = useState([]);                  // พูลรูปที่โหลดไว้ (จากเคส) — ว่าง = ใช้ recipe.pool
+  const [poolCaseName, setPoolCaseName] = useState('');  // ป้ายชื่อแหล่งพูลที่โหลด (โชว์บนแถบ E3a)
+  const [caseList, setCaseList] = useState(null);        // รายชื่อเคส (null=ยังไม่โหลด lazy)
+  const [caseListLoading, setCaseListLoading] = useState(false);
+  const [caseListErr, setCaseListErr] = useState('');
+  const [casePickerOpen, setCasePickerOpen] = useState(false); // เปิด dropdown เลือกเคส
+  const [poolLoading, setPoolLoading] = useState(false); // กำลังดึงคลังภาพเคส
+  const [pickerSlotId, setPickerSlotId] = useState(null); // ช่องที่เปิด modal เลือกรูปอยู่ (null=ปิด)
   const canvasRef = useRef(null);
   const fileRefs = useRef({});
+  const mountedRef = useRef(true);                       // กัน setState หลัง unmount (งาน async E3a)
 
   // ★ 4 ก.ค. (ผู้ใช้สั่ง "มือถือใช้ง่ายสุด เห็นทุกฟังก์ชัน"): จอเล็กเรียงคอลัมน์เดียว + เลือกช่องแล้วแต่งจากแผงรวมใต้ปก
   const [isMobile, setIsMobile] = useState(false);
@@ -595,6 +606,23 @@ export default function CoverPage() {
     window.addEventListener('resize', apply); // กันเคส matchMedia change ไม่ยิง (emulation/หมุนจอ/พับจอ)
     return () => { mq.removeEventListener('change', apply); window.removeEventListener('resize', apply); };
   }, []);
+
+  // ★ E3: ตั้งธง mounted — งาน async ของ E3a เช็คก่อน setState ทุกครั้ง (กัน setState หลัง unmount)
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // ★ E3b: ล็อกสกอลล์ตัวหน้าเมื่อเปิด modal เลือกรูป + ปิดด้วย Esc + คืนค่าตอนปิด/unmount
+  //   (hook เรียกทุกครั้งเสมอ เงื่อนไขอยู่ข้างใน — ไม่ผิดกติกา hooks)
+  useEffect(() => {
+    if (pickerSlotId == null) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => { if (e.key === 'Escape') setPickerSlotId(null); };
+    window.addEventListener('keydown', onKey);
+    return () => { document.body.style.overflow = prevOverflow; window.removeEventListener('keydown', onKey); };
+  }, [pickerSlotId]);
 
   // Dynamic template management
   const [templates, setTemplates] = useState([...BUILTIN_TEMPLATES]);
@@ -869,6 +897,12 @@ export default function CoverPage() {
           rc = data.recipe;
         }
         setRecipe(rc);
+        // ★ E3: ป้อนพูล recipe เข้า state รวม ให้ modal เลือกรูป (E3b) ใช้ได้ทันทีในโหมด recipe
+        //   (แถบพูลล่างของโหมด recipe ยังอ่าน recipe.pool เหมือนเดิม — ไม่ regress)
+        if (Array.isArray(rc.pool) && rc.pool.length) {
+          setPool(rc.pool);
+          setPoolCaseName(`คลังสูตร${rc.jobId ? ' ' + rc.jobId : ''} · ${rc.pool.length} ใบ`);
+        }
         // ฉีดแทมเพลต recipe เข้า list (append — templates-load effect คง recipe-* ไว้)
         const tpl = { ...rc.template };
         setTemplates(prev => (prev.some(t => t.id === tpl.id) ? prev.map(t => t.id === tpl.id ? tpl : t) : [...prev, tpl]));
@@ -895,8 +929,10 @@ export default function CoverPage() {
   }, []);
 
   // ★ แบตช์ E: คลิกภาพในพูล → วางลงช่องที่เลือกอยู่ (ไม่มี = ช่องว่างช่องแรก → main)
-  const assignPoolUrlToSlot = async (url) => {
-    const target = selectedSlotId
+  //   ★ E3b: รับ explicitSlotId ได้ (modal เลือกรูปส่งช่องเป้าหมายมาตรง) — ไม่ส่ง = พฤติกรรมเดิมเป๊ะ
+  const assignPoolUrlToSlot = async (url, explicitSlotId) => {
+    const target = explicitSlotId
+      || selectedSlotId
       || (template && template.slots.find(sl => !slotImages[sl.id])?.id)
       || (template && template.slots[0]?.id);
     if (!target || !url) return;
@@ -907,6 +943,54 @@ export default function CoverPage() {
       setSelectedSlotId(target);
     } catch {
       alert('โหลดรูปนี้ไม่สำเร็จ (ต้นทางอาจบล็อก CORS) — ลองภาพที่ rehost แล้ว (มีเครื่องหมายเขียว)');
+    }
+  };
+
+  // ★ E3a: พูลที่ modal/แถบใช้จริง — พูลจากเคสมาก่อน, ไม่มีก็ตกไป recipe.pool (ตามพฤติกรรมเดิม)
+  const poolItems = pool.length > 0 ? pool : (recipe?.pool || []);
+
+  // ★ E3a: โหลดรายชื่อเคสแบบ lazy (ครั้งแรกที่กดเปิด dropdown) จาก /api/mega/compose-test?list=1
+  const loadCaseList = async () => {
+    if (caseList || caseListLoading) return; // โหลดครั้งเดียวพอ
+    setCaseListLoading(true); setCaseListErr('');
+    try {
+      const res = await fetch('/api/mega/compose-test?list=1');
+      const data = await res.json().catch(() => ({}));
+      if (!mountedRef.current) return;
+      setCaseList(Array.isArray(data.cases) ? data.cases : []);
+    } catch {
+      if (!mountedRef.current) return;
+      setCaseListErr('โหลดรายชื่อเคสไม่สำเร็จ — ลองใหม่'); setCaseList([]);
+    } finally {
+      if (mountedRef.current) setCaseListLoading(false);
+    }
+  };
+  const openCasePicker = () => { setCasePickerOpen(true); loadCaseList(); };
+
+  // ★ E3a: ดึงคลังภาพของเคสที่เลือก → เก็บเป็น pool รวม (แปลงเป็นรูป {id,url,thumb,person,note})
+  const loadCasePool = async (cs) => {
+    if (!cs?.id) return;
+    setPoolLoading(true);
+    try {
+      const res = await fetch(`/api/images/${encodeURIComponent(cs.id)}`);
+      const data = await res.json().catch(() => ({}));
+      // รองรับทั้ง 2 ทรง response: images ระดับบนสุด (ของจริง buildImagesRouteResponse) หรือ case.images
+      const imgs = data?.case?.images || data?.images || [];
+      const mapped = imgs.map((im, i) => ({
+        id: im.id || `${cs.id}-${i}`,
+        url: im.imageUrl,
+        thumb: im.thumbnailUrl || im.imageUrl,
+        person: im.person || im.triage?.person || '',
+        note: im.note || im.source || '',
+      })).filter(p => p.url);
+      if (!mountedRef.current) return;
+      setPool(mapped);
+      setPoolCaseName(`${cs.headline || cs.id} · ${mapped.length} ใบ`);
+      setCasePickerOpen(false);
+    } catch {
+      if (mountedRef.current) alert('ดึงคลังภาพเคสนี้ไม่สำเร็จ — ลองเคสอื่น');
+    } finally {
+      if (mountedRef.current) setPoolLoading(false);
     }
   };
 
@@ -1733,6 +1817,50 @@ export default function CoverPage() {
             <div style={s.card}>
               <div style={s.head}>② อัปโหลดรูป <span style={{ fontSize:11, fontWeight:400, color:'var(--text-muted)', marginLeft:'auto' }}>{template ? `${Object.keys(slotImages).filter(k => template.slots.some(sl => sl.id===k)).length}/${template.slots.length}` : '0/0'}</span></div>
               <div style={s.body}>
+                {/* ★ E3a: ดึงคลังภาพจากเคส MEGA มาเป็นพูลเลือกรูปรายช่อง — ใช้ได้ทุกโหมด (เหนือโซนอัปโหลด) */}
+                <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 10, border: '1px dashed rgba(96,165,250,0.35)', background: 'rgba(96,165,250,0.04)' }}>
+                  {poolItems.length > 0 ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#60a5fa' }}>🗂️ คลังภาพพร้อมใช้: {poolItems.length} ใบ</span>
+                      {poolCaseName && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>· {poolCaseName}</span>}
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', flexBasis: '100%' }}>กดปุ่ม “เลือกรูป” ของแต่ละช่อง จะเปิดคลังนี้ให้เลือก</span>
+                      <button onClick={openCasePicker} disabled={poolLoading}
+                        style={{ marginLeft: 'auto', padding: '7px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: poolLoading ? 'wait' : 'pointer', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
+                        {poolLoading ? '⏳ กำลังดึง...' : '🔄 เปลี่ยนเคส'}
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={openCasePicker} disabled={poolLoading}
+                      style={{ width: '100%', padding: '9px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: poolLoading ? 'wait' : 'pointer', border: '1px solid rgba(96,165,250,0.35)', background: 'rgba(96,165,250,0.06)', color: '#60a5fa' }}>
+                      {poolLoading ? '⏳ กำลังดึงคลังภาพ...' : '🗂️ ดึงคลังภาพจากเคส'}
+                    </button>
+                  )}
+                  {casePickerOpen && (
+                    <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>เลือกเคสข่าว</span>
+                        <button onClick={() => setCasePickerOpen(false)}
+                          style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 8, fontSize: 11, border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'inherit' }}>✕ ปิด</button>
+                      </div>
+                      {caseListLoading && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>⏳ กำลังโหลดรายชื่อเคส...</div>}
+                      {caseListErr && <div style={{ fontSize: 12, color: '#f87171' }}>{caseListErr}</div>}
+                      {!caseListLoading && caseList && caseList.length === 0 && !caseListErr && (
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>ไม่พบเคส</div>
+                      )}
+                      {caseList && caseList.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
+                          {caseList.map((cs) => (
+                            <button key={cs.id} onClick={() => loadCasePool(cs)} disabled={poolLoading}
+                              style={{ textAlign: 'left', padding: '8px 10px', borderRadius: 8, fontSize: 12, fontFamily: 'inherit', cursor: poolLoading ? 'wait' : 'pointer', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
+                              <span style={{ fontWeight: 700 }}>{cs.id}</span>
+                              {cs.headline ? <span style={{ color: 'var(--text-muted)' }}> · {cs.headline}</span> : null}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {uiSlots.map(slot => (
                   <div key={slot.id} style={{ marginBottom: 16 }}>
                     <label style={s.label}>
@@ -1740,14 +1868,17 @@ export default function CoverPage() {
                       {slot.draggable && <span style={{ color:'#94a3b8', marginLeft:6, fontSize:11 }}>🔀 ลาก+ปรับขนาดได้</span>}
                     </label>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <label style={{
+                      {/* ★ E3b: มีพูล = เปิด modal เลือกรูป (preventDefault กันเปิด file dialog) · ไม่มีพูล = file input เดิมเป๊ะ */}
+                      <label
+                        onClick={(e) => { if (poolItems.length) { e.preventDefault(); setPickerSlotId(slot.id); } }}
+                        style={{
                         flex:1, padding:'10px 14px', borderRadius:10,
                         border: slotImages[slot.id] ? '1px solid rgba(96,165,250,0.3)':'1px dashed var(--border)',
                         background: slotImages[slot.id] ? 'rgba(96,165,250,0.06)':'var(--bg-primary)',
                         color: slotImages[slot.id] ? '#60a5fa':'var(--text-muted)',
                         fontSize:12, fontWeight:600, cursor:'pointer', textAlign:'center', transition:'all .15s',
                       }}>
-                        {slotImages[slot.id] ? `✅ ${slotImages[slot.id].naturalWidth}×${slotImages[slot.id].naturalHeight}` : '📷 เลือกรูป'}
+                        {slotImages[slot.id] ? `✅ ${slotImages[slot.id].naturalWidth}×${slotImages[slot.id].naturalHeight}` : (poolItems.length ? '🗂️ เลือกรูป' : '📷 เลือกรูป')}
                         <input type="file" accept="image/*" style={{display:'none'}}
                           ref={el => fileRefs.current[slot.id]=el}
                           onChange={e => handleFile(slot.id, e.target.files?.[0])} />
@@ -2142,8 +2273,11 @@ export default function CoverPage() {
                     return (
                       <div style={{ marginTop: 9, padding: 11, borderRadius: 11, background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.22)' }}>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                          <label style={{ padding: '10px 13px', borderRadius: 9, border: '1px solid rgba(96,165,250,0.35)', background: 'rgba(96,165,250,0.08)', color: '#60a5fa', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                            📷 {img ? 'เปลี่ยนรูป' : 'เลือกรูป'}
+                          {/* ★ E3b: มีพูล = เปิด modal เลือกรูป · ไม่มีพูล = file input เดิม */}
+                          <label
+                            onClick={(e) => { if (poolItems.length) { e.preventDefault(); setPickerSlotId(sl.id); } }}
+                            style={{ padding: '10px 13px', borderRadius: 9, border: '1px solid rgba(96,165,250,0.35)', background: 'rgba(96,165,250,0.08)', color: '#60a5fa', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                            {poolItems.length ? '🗂️ ' : '📷 '}{img ? 'เปลี่ยนรูป' : 'เลือกรูป'}
                             <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { handleFile(sl.id, e.target.files?.[0]); e.target.value = ''; }} />
                           </label>
                           {img && <>
@@ -2295,6 +2429,69 @@ export default function CoverPage() {
 
         </div>
       </div>
+
+      {/* ★ E3b: MODAL เลือกรูปจากคลัง (พูลเดียวกับแถบล่างโหมด recipe) — overlay เต็มจอ, คลิกรูป=วางลงช่องทันที */}
+      {pickerSlotId != null && (() => {
+        const pickSlot = template?.slots.find(sl => sl.id === pickerSlotId);
+        const isRehost = (u) => /supabase\.co\/storage/.test(u || '');
+        const hasExternal = poolItems.some(p => !isRehost(p.url));
+        const closePicker = () => setPickerSlotId(null);
+        return (
+          <div
+            onClick={closePicker}
+            style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: '100%', maxWidth: 720, maxHeight: '86vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', boxShadow: '0 12px 48px rgba(0,0,0,0.5)' }}>
+              {/* หัว modal */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>
+                  🗂️ เลือกรูปลงช่อง{pickSlot ? `: ${pickSlot.label}` : ''}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({poolItems.length} ใบ)</span>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {/* อัปโหลดจากเครื่องแทน = เส้น file input เดิม (กระตุ้น input ที่มี ref ของช่องนี้) */}
+                  <button
+                    onClick={() => { const sid = pickerSlotId; closePicker(); if (sid != null) fileRefs.current[sid]?.click(); }}
+                    style={{ padding: '8px 12px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
+                    📤 อัปโหลดจากเครื่องแทน
+                  </button>
+                  <button
+                    onClick={closePicker}
+                    aria-label="ปิด"
+                    style={{ width: 42, height: 42, borderRadius: 9, fontSize: 16, fontWeight: 800, fontFamily: 'inherit', cursor: 'pointer', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-muted)' }}>✕</button>
+                </div>
+              </div>
+              {/* คำเตือนรูปนอกที่ไม่ rehost (เซฟ canvas อาจไม่ได้) */}
+              {hasExternal && (
+                <div style={{ padding: '8px 14px', fontSize: 11, color: '#f4b740', background: 'rgba(244,183,64,0.08)', borderBottom: '1px solid var(--border)' }}>
+                  ⚠️ ใบที่ไม่มีจุดเขียว = รูปเว็บนอก (ยังไม่ rehost) อาจบันทึกปกลง canvas ไม่ได้ — แนะนำเลือกใบที่มีจุดเขียว
+                </div>
+              )}
+              {/* กริดรูป — สกอลล์ในนี้ ตัวหน้าไม่เลื่อน (body ถูกล็อกตอน modal เปิด) */}
+              <div style={{ padding: 12, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(84px, 1fr))', gap: 8 }}>
+                {poolItems.map((p, i) => (
+                  <button
+                    key={p.id || i}
+                    onClick={async () => { const sid = pickerSlotId; closePicker(); await assignPoolUrlToSlot(p.url, sid); }}
+                    title={`${p.person || ''}${p.note ? ' · ' + p.note : ''}${isRehost(p.url) ? ' · ✅ rehost แล้ว' : ' · ⚠️ เว็บนอก (บันทึกไม่ได้)'}`}
+                    style={{ position: 'relative', padding: 0, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: '#111', aspectRatio: '4 / 5', minHeight: 84 }}>
+                    <img src={p.thumb || p.url} alt={p.person || 'ภาพ'} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                    {isRehost(p.url) && (
+                      <span style={{ position: 'absolute', top: 3, right: 3, width: 11, height: 11, borderRadius: '50%', background: '#22c55e', border: '1px solid #fff' }} />
+                    )}
+                  </button>
+                ))}
+                {poolItems.length === 0 && (
+                  <div style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>
+                    ยังไม่มีรูปในคลัง — กด “📤 อัปโหลดจากเครื่องแทน” หรือปิดแล้วดึงคลังภาพจากเคส
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </>
   );
 }
