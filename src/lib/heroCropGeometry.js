@@ -132,4 +132,102 @@ export function isHeroCropSafe(input, limit = HERO_STRETCH_MAX) {
   return up !== null && up <= limit + 1e-9;
 }
 
-export default Object.freeze({ HERO_CROP, FACE_PROM_CEILING, HERO_PROMINENCE, HERO_STRETCH_MAX, heroCropRegion, heroCropUpscale, isHeroCropSafe });
+// ============================================================
+// HZ (17 ก.ค.) — ★ฟังก์ชันนี้ RENDERER เรียกจริง★ (ต่างจาก heroCropRegion ข้างบนที่เป็น estimator ผู้เรนไม่เรียก)
+// ------------------------------------------------------------
+// "แรงดันฝั่งตรงข้าม" ของ floor guard เดิม: floor guard กันหน้า "ใหญ่เกินช่อง" แต่ไม่มีอะไรดัน "หน้าเล็กเกิน→ซูมเข้า"
+//   (หลักฐานปกเก้า-วี: hero คนอยู่มุมล่าง หน้าเล็กไม่เด่น) — HZ อุดช่องนี้
+// ใช้ในสาขา hero ของ coverExecutorService ใต้สวิตช์ MEGA_HERO_ZOOM (default ON · '0'=ข้าม=byte-parity เดิมทุก byte)
+//   หลัง region หลักของ hero คำนวณเสร็จ (faceRegionForSlot + prominence-tighten):
+//     วัด rawFaceShare = สูงหน้า(ดิบ)/สูง region — ถ้า < bandMinFrac → หด region (คง aspect, face-anchored)
+//     จน faceShare = band-min หรือชน "เพดานซูม (floorH)" อันใดถึงก่อน
+//
+// เพดานซูม (floorH — region เตี้ยกว่านี้ไม่ได้) = MAX ของ:
+//   • headHpx / maxFaceHFrac  → floor guard เดิมของ hero (หน้าไม่ใหญ่เกิน maxFaceHFrac ของกล่องหัว = คงกติกาเดิม)
+//   • slotH / HERO_STRETCH_MAX → กันซูมจนยืดเกิน 1.2× (hero hard QC)
+// ผลลัพธ์สำคัญ (พิสูจน์ byte-parity ฝั่งเสี่ยง): ถ้า region เดิม "ยืด ≥1.2× อยู่แล้ว" (regionH ≤ slotH/1.2) ⇒ floorH ≥ regionH
+//   ⇒ newH = regionH ⇒ ไม่แตะเลย (HZ ไม่มีทางทำ upscale แย่ลง / ไม่แตะเคสที่เกิน 1.2 อยู่แล้ว)
+// ไม่ตัดหน้า/หัว: region ใหม่ต้องคลุมกล่องหัว (topPad/bottom/หู เดิม) ครบ — คลุมไม่ครบ = ไม่ซูม (คืน region เดิม)
+// ซูมเข้าเท่านั้น (newH ≤ region.height) — face-anchored กลางกล่องหัว + เผื่อ headroom เหนือหัวเล็กน้อย
+//
+// REQUIRED INPUTS (ขาด/ผิด = คืน region เดิม changed:false — ไม่ throw · ห้ามทำให้เรนเดอร์ล้ม):
+//   region {left,top,width,height} px · faceBox raw {x1,y1,x2,y2} 0..1 (หน้าที่ region ยึด) · imgW,imgH px
+//   slotAspect · slotH px · bandMinFrac (0..1 เช่น 0.30 = ขอบล่างของ TECH_RULES.HERO_FACE_SHARE) · maxFaceHFrac (เช่น 0.74)
+// @returns {{ region, changed, faceSharePct, reason }}
+export function zoomHeroRegionForFaceShare({
+  region, faceBox, imgW, imgH, slotAspect, slotH, bandMinFrac, maxFaceHFrac,
+  headPad = { top: 0.42, bottom: 0.32, x: 0.20 },
+} = {}) {
+  const iw = _num(imgW), ih = _num(imgH), sa = _num(slotAspect), sh = _num(slotH);
+  const bmf = _num(bandMinFrac), mfh = _num(maxFaceHFrac);
+  const R = region && typeof region === 'object' ? region : null;
+  const fb = faceBox && typeof faceBox === 'object' ? faceBox : null;
+  const _keep = (reason, share = null) => ({ region, changed: false, faceSharePct: share, reason });
+  if (!R || !fb) return _keep('bad-input');
+  const rL = _num(R.left), rT = _num(R.top), rW = _num(R.width), rH = _num(R.height);
+  if (rL === null || rT === null || !(rW > 0) || !(rH > 0)) return _keep('bad-region');
+  if (!(iw > 0 && ih > 0 && sa > 0 && sh > 0)) return _keep('bad-dims');
+  if (!(bmf > 0 && bmf < 1)) return _keep('bad-band');
+  if (!(mfh > 0 && mfh <= 1)) return _keep('bad-maxface');
+  const x1 = _num(fb.x1), y1 = _num(fb.y1), x2 = _num(fb.x2), y2 = _num(fb.y2);
+  if (x1 === null || y1 === null || x2 === null || y2 === null || !(x2 > x1 && y2 > y1)) return _keep('bad-face');
+
+  const rawFaceHpx = (y2 - y1) * ih;
+  if (!(rawFaceHpx > 0)) return _keep('no-face');
+  const curShare = rawFaceHpx / rH;
+  // เด่นพอแล้ว (≥ band-min) → ไม่แตะ (byte-parity)
+  if (curShare >= bmf - 1e-9) return _keep('already-prominent', +(curShare * 100).toFixed(1));
+
+  // กล่องหัว (รวมผม/คาง/หู) — ห้ามตัด (แพดเดียวกับ faceRegionForSlot สาขา hero)
+  const fwN = x2 - x1, fhN = y2 - y1;
+  const hMinX = (x1 - fwN * headPad.x) * iw, hMaxX = (x2 + fwN * headPad.x) * iw;
+  const hMinY = (y1 - fhN * headPad.top) * ih, hMaxY = (y2 + fhN * headPad.bottom) * ih;
+  const headWpx = hMaxX - hMinX, headHpx = hMaxY - hMinY;
+  if (!(headWpx > 0 && headHpx > 0)) return _keep('bad-head', +(curShare * 100).toFixed(1));
+
+  // เพดานซูม: floor guard เดิม ∪ เพดานยืด 1.2× (region เตี้ยกว่านี้ไม่ได้)
+  const floorH = Math.max(headHpx / mfh, sh / HERO_STRETCH_MAX);
+  const desiredH = rawFaceHpx / bmf;                 // region ที่ทำให้ faceShare = band-min พอดี
+  const newH = Math.min(rH, Math.max(desiredH, floorH)); // ซูมเข้าเท่านั้น + ไม่ต่ำกว่า floor
+  if (!(newH < rH - 0.5)) return _keep('at-floor', +(curShare * 100).toFixed(1)); // ชนเพดาน/ยืดเกินอยู่แล้ว = คงเดิม
+  const newW = newH * sa;
+  // region ต้องคลุมกล่องหัวครบทั้งกว้าง/สูง — เล็กกว่าหัว = ตัดหัว → ไม่ซูม (คืนเดิม)
+  if (newW < headWpx - 0.5 || newH < headHpx - 0.5) return _keep('head-would-cut', +(curShare * 100).toFixed(1));
+
+  // ตำแหน่ง: face-anchored กลางกล่องหัวแนวนอน + เผื่อ headroom เหนือหัว ~8%
+  const hcx = (hMinX + hMaxX) / 2;
+  let nl = hcx - newW / 2;
+  let nt = hMinY - newH * 0.08;
+  // คลุมกล่องหัวครบ (สำคัญกว่าจัดกึ่งกลาง — เลื่อนให้หัวอยู่ในกรอบ)
+  if (nl > hMinX) nl = hMinX;
+  if (nl + newW < hMaxX) nl = hMaxX - newW;
+  if (nt > hMinY) nt = hMinY;
+  if (nt + newH < hMaxY) nt = hMaxY - newH;
+  // ไม่หลุดขอบภาพ
+  nl = Math.min(Math.max(nl, 0), Math.max(0, iw - newW));
+  nt = Math.min(Math.max(nt, 0), Math.max(0, ih - newH));
+
+  // ปัดเศษเป็นพิกเซล + "พื้นชั้น (floor) บนค่าที่ปัดแล้ว" กันบั๊กปัดเศษดัน upscale เกิน 1.2:
+  //   floorH เดิมค้ำ newH ≥ slotH/1.2 (ทศนิยม) แต่ Math.round อาจปัด "ลง" ต่ำกว่าเพดาน
+  //   (เช่น 618.33→618 ⇒ 742/618 = 1.2007 · หรือแกนกว้าง 513.33→513 ⇒ 616/513 = 1.2008) → strict-V2 hero gate ตีตก
+  //   ⇒ บังคับ "ค่าที่ปัดแล้ว" ให้ ≥ ceil(slot/1.2) ทั้งสองแกน: ceil(sa*sh/1.2)=ceil(slotW/1.2) · ceil(sh/1.2)=ceil(slotH/1.2)
+  //   ⇒ slotW/out.width ≤ 1.2 และ slotH/out.height ≤ 1.2 เสมอ (ปัด "ขึ้น" = region ใหญ่ขึ้น → คลุมหัวปลอดภัยขึ้น + คง aspect ~เดิม)
+  const wFloorInt = Math.ceil((sa * sh) / HERO_STRETCH_MAX); // = ceil(slotW / 1.2)
+  const hFloorInt = Math.ceil(sh / HERO_STRETCH_MAX);        // = ceil(slotH / 1.2)
+  const outW = Math.max(8, Math.round(newW), wFloorInt);
+  const outH = Math.max(8, Math.round(newH), hFloorInt);
+  let outL = Math.round(nl), outT = Math.round(nt);
+  // ขยายเป็นจำนวนเต็มแล้วอาจล้นขอบภาพขวา/ล่าง → เลื่อนซ้าย/บนกลับเข้าใน (กรอบใหญ่ขึ้น = ยังคลุมหัวครบ)
+  if (outL + outW > iw) outL = Math.max(0, iw - outW);
+  if (outT + outH > ih) outT = Math.max(0, ih - outH);
+  const out = { left: outL, top: outT, width: outW, height: outH };
+  // re-verify หลังปัดเศษ (= ค่าที่เรนเดอร์จริง): กล่องหัวยังอยู่ในกรอบครบ ไม่ตัด — ไม่ครบ = ยกเลิก (คืนเดิม)
+  const headIn = hMinX >= out.left - 1 && hMaxX <= out.left + out.width + 1
+    && hMinY >= out.top - 1 && hMaxY <= out.top + out.height + 1;
+  if (!headIn) return _keep('head-out-after-round', +(curShare * 100).toFixed(1));
+  const changed = out.left !== R.left || out.top !== R.top || out.width !== R.width || out.height !== R.height;
+  const newShare = rawFaceHpx / out.height;
+  return { region: changed ? out : region, changed, faceSharePct: +(newShare * 100).toFixed(1), reason: changed ? 'zoomed' : 'unchanged' };
+}
+
+export default Object.freeze({ HERO_CROP, FACE_PROM_CEILING, HERO_PROMINENCE, HERO_STRETCH_MAX, heroCropRegion, heroCropUpscale, isHeroCropSafe, zoomHeroRegionForFaceShare });

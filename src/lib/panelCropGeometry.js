@@ -29,6 +29,31 @@ export function headBoxPx(faceBox, imgW, imgH, pad = { x: 0.20, top: 0.42, botto
   return { minX, maxX, minY, maxY, width: maxX - minX, height: maxY - minY };
 }
 
+/**
+ * C1c (17 ก.ค.) — กรอง "หน้าที่เกี่ยวข้องกับ region" ด้วยเกณฑ์ intersect (แทน center-in เดิม)
+ *   หน้าที่ "กล่องหน้า intersect region ≥ intersectMinFrac ของพื้นที่หน้า" (px ต้นทาง) = เข้าข่าย
+ *   ⇒ หน้าที่ "โผล่ครึ่งใบที่ขอบ" (center อยู่นอก region แต่ทับ ≥30%) ถูกดึงเข้า union ให้ refineRegionForFaces จัดเต็มใบ
+ *   ★ superset ของ center-in: หน้าคลุมทั้งใบ → inter = faceArea ≥ threshold เสมอ ⇒ ยังนับครบ (ไม่ตกหน้าเดิม)
+ * @param faces faceBox[] normalized 0..1
+ * @returns faceBox[] (คัดลอกเฉพาะ x1..y2) เรียงตามลำดับ input
+ */
+export function facesIntersectingRegion(faces, region, imgW, imgH, intersectMinFrac = 0.30) {
+  if (!Array.isArray(faces) || !region || !(region.width > 0) || !(region.height > 0)) return [];
+  const rL = region.left, rT = region.top, rR = region.left + region.width, rB = region.top + region.height;
+  const out = [];
+  for (const f of faces) {
+    if (!f || !(f.x2 > f.x1) || !(f.y2 > f.y1)) continue;
+    const fL = f.x1 * imgW, fR = f.x2 * imgW, fT = f.y1 * imgH, fB = f.y2 * imgH;
+    const faceArea = (fR - fL) * (fB - fT);
+    if (!(faceArea > 0)) continue;
+    const ixW = Math.min(fR, rR) - Math.max(fL, rL);
+    const ixH = Math.min(fB, rB) - Math.max(fT, rT);
+    const inter = (ixW > 0 && ixH > 0) ? ixW * ixH : 0;
+    if (inter >= intersectMinFrac * faceArea - 1e-6) out.push({ x1: f.x1, y1: f.y1, x2: f.x2, y2: f.y2 });
+  }
+  return out;
+}
+
 /** faceShare (%) ของหน้า raw ในกรอบสูง regionHeight (สูตร measureTechRules) */
 export function faceSharePctOf(faceBox, imgH, regionHeight) {
   if (!(regionHeight > 0)) return null;

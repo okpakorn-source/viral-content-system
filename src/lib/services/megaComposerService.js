@@ -272,6 +272,9 @@ function _heroFaceBand() {
   return TECH_RULES.HERO_FACE_SHARE;
 }
 
+// ★ BS (17 ก.ค.): kill-switch สลับภาพสำรองช่องรอง "จัดไม่ลง" (default ON · '0'=พฤติกรรมปัจจุบันเป๊ะ)
+function _panelBackupSwapOn() { return process.env.MEGA_PANEL_BACKUP_SWAP !== '0'; }
+
 export function measureTechRules({ assignments = [], spec = null, faceBoxes = [], cropTrace = [], heroComposerSlotId = null } = {}) {
   const flags = [];
   const bySlot = {}; // slotId → { role, faceSharePct?, headroomPct?, hasFace }
@@ -1785,6 +1788,68 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
       buffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: spec, faceBoxes, traceSink });
     }
   } catch (e) { console.log('[MegaComposer] ด่านคนครบล้ม (ใช้ปกเดิม):', String(e?.message || '').slice(0, 60)); }
+
+  // ★ BS (17 ก.ค.) — consumer แรกของสัญญาณ "จัดไม่ลง": ช่องรองที่ executor ติดธง circleAvoidNeedsBackup /
+  //   refineNeedsBackup (union หลายหน้าจัดไม่ลง) → ลองภาพสำรอง 1 ใบ/ช่อง แล้ว "เลือกผลที่ธงน้อยกว่า"
+  //   ⚠️ ท่อประกอบเรนเดอร์ทั้งใบใน executeCover เดียว (วงกลม zIndex สูงทับช่องรอง) — re-composite ทีละ tile
+  //      ทับ buffer เดิมจะกลบวงกลม/ช่องซ้อน ⇒ ไม่ปลอดภัย · จึง "สลับรูปช่องที่ธง → เรนเดอร์ซ้ำ 1 รอบ → เทียบธง"
+  //      (เพดาน 1 สำรอง/ช่อง กันวน · แย่กว่า/เท่าเดิม = คืน buffer+assignments เดิมทุก byte)
+  //   ใต้ MEGA_PANEL_BACKUP_SWAP (default ON · '0'=ข้ามทั้งบล็อก=พฤติกรรมปัจจุบัน) · legacy path เท่านั้น (strict แยกสาย)
+  if (_panelBackupSwapOn()) {
+    try {
+      const _preTrace = JSON.parse(JSON.stringify(traceSink)); // trace ของ buffer ปัจจุบัน
+      const _needSlots = [];
+      for (const tt of _preTrace) {
+        if (!tt || tt.slot == null) continue;
+        if (/main|hero/i.test(String(tt.slot))) continue; // ช่องรองเท่านั้น (hero มีด่านของตัวเอง)
+        if (tt.circleAvoidNeedsBackup === true || tt.refineNeedsBackup === true) _needSlots.push(String(tt.slot));
+      }
+      if (_needSlots.length) {
+        const _preBuffer = buffer;
+        const _preFlagN = traceQcFlags(_preTrace).length;
+        const _preAssign = assignments.map((a) => ({ slotId: a.slotId, imageIndex: a.imageIndex, crop: a.crop, why: a.why }));
+        const _preUsed = new Set(used);
+        let _swaps = 0;
+        for (const slotId of _needSlots) {
+          const a = assignments.find((x) => String(x.slotId) === slotId);
+          if (!a) continue;
+          // ภาพสำรอง = ใบใน slotPlan ที่ยังไม่ถูกใช้ (backup rows โหลดเข้า loaded แล้ว) + สะอาด + มีหน้า + ไม่คอลลาจ + ไม่ซ้ำเฟรม
+          let ni = -1;
+          for (let k = 0; k < loaded.length; k++) {
+            if (used.has(k) || isCollage[k] || loaded[k].clean === false) continue;
+            const fb2 = faceBoxes[k];
+            if (!fb2 || !(fb2.x2 > fb2.x1)) continue;
+            if ([...used].some((u) => hamming(aHashes[k], aHashes[u]) <= 6)) continue;
+            ni = k; break;
+          }
+          if (ni < 0) { qcFlags.push(`panel_backup_none:${slotId}`); continue; } // ไม่มีสำรอง → ติดธง (ห้ามเงียบ)
+          used.delete(a.imageIndex); used.add(ni);
+          a.imageIndex = ni;
+          a.crop = { x: 0, y: 0, w: 1, h: 1 }; // ให้ executor คำนวณครอปใหม่ตามสูตรช่อง
+          a.why = 'สลับภาพสำรอง — ช่องรองจัดไม่ลง (BS: circle/refine needsBackup)';
+          _swaps++;
+        }
+        if (_swaps > 0) {
+          const _newBuffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: spec, faceBoxes, traceSink });
+          const _newFlagN = traceQcFlags([...traceSink]).length;
+          if (_newFlagN < _preFlagN) {
+            buffer = _newBuffer;
+            console.log(`[MegaComposer] 🔁 BS สลับสำรอง ${_swaps} ช่อง — ธง ${_preFlagN}→${_newFlagN} (รับผล)`);
+          } else {
+            // เท่าเดิม/แย่กว่า → คืนสภาพเดิมทุกอย่าง (buffer + assignments + used + traceSink) เพื่อ byte-parity
+            buffer = _preBuffer;
+            for (const a of assignments) {
+              const p = _preAssign.find((x) => x.slotId === a.slotId);
+              if (p) { a.imageIndex = p.imageIndex; a.crop = p.crop; a.why = p.why; }
+            }
+            used.clear(); for (const u of _preUsed) used.add(u);
+            traceSink.length = 0; for (const t of _preTrace) traceSink.push(t);
+            console.log(`[MegaComposer] 🔁 BS สลับแล้วไม่ดีขึ้น (ธง ${_preFlagN}→${_newFlagN}) → คืนของเดิม`);
+          }
+        }
+      }
+    } catch (e) { console.log('[MegaComposer] BS สลับสำรองล้ม (ใช้ปกเดิม):', String(e?.message || '').slice(0, 60)); }
+  }
 
   // ★ เฟส 6B.2 (observability): ท่าหน้า hero ตัวสุดท้าย (หลังด่านบังคับ/สลับใบ) — ธงเสมอ + ธง forced เมื่อจำใจใช้มุมข้าง
   if (_faceProm && mainAssign) {
