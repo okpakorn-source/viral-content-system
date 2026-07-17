@@ -79,11 +79,13 @@ export default function EditorPanel({ onToast, onAfterAction }) {
       setLastPick(null);
       return;
     }
-    setStudied(!!res.studied);
-    setStudiedAt(res.studiedAt || null);
-    setExemplarCount(Number(res.exemplarCount) || 0);
-    setTopDirections(normalizeDirections(res.topDirections));
-    setLastPick(res.lastPick || null);
+    // 🚑 17 ก.ค. 69 (Fable ตรวจรับ): E1 ตอบซ้อนใน res.status — อ่านได้ทั้งสองทรงกัน contract เพี้ยนอีก
+    const st = res.status && typeof res.status === 'object' ? res.status : res;
+    setStudied(!!st.studied);
+    setStudiedAt(st.studiedAt || null);
+    setExemplarCount(Number(st.exemplarCount) || 0);
+    setTopDirections(normalizeDirections(st.topDirections));
+    setLastPick(res.lastPick || st.lastPick || null);
   }, []);
 
   useEffect(() => {
