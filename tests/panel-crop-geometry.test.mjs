@@ -14,7 +14,9 @@ import {
   biasRegionFromCircleZone,
   faceSharePctOf,
   headBoxPx,
+  facesIntersectingRegion,
 } from '../src/lib/panelCropGeometry.js';
+import { zoomHeroRegionForFaceShare } from '../src/lib/heroCropGeometry.js';
 
 const IMG_W = 1000, IMG_H = 1000;
 
@@ -256,4 +258,153 @@ test('C1b-ฉ 4 หน้าแผ่กว้าง: pure fn ปฏิเสธ
   const r = refineRegionForFaces({ region: region0, faces, imgW: IMG_W, imgH: IMG_H, slotAspect, band: [18, 33] });
   assert.strictEqual(r.ok, false, 'union กว้างเกิน → ปฏิเสธ');
   assert.deepStrictEqual(r.region, region0, 'region เดิมไม่เปลี่ยน (ไม่ฝืนตัดคน)');
+});
+
+// ============================================================
+// 🧪 HZ (17 ก.ค.) — zoomHeroRegionForFaceShare: hero ซูมเด่นให้ faceShare ถึง band-min
+//   เคส: (1) หน้าเล็กมุมช่อง→ซูมเข้าถึง band-min + ไม่ตัดหัว (2) เด่นพอแล้ว→เดิมเป๊ะ
+//        (3) ชนเพดาน floor guard (slotH/1.2)→ซูมแต่ไม่ถึง band-min + upscale ≤1.2 (4) ไร้หน้า/อินพุตพัง→เดิม
+//        (5) region ยืด ≥1.2× อยู่แล้ว→ไม่แตะ (ไม่ทำ upscale แย่ลง = byte-parity ฝั่งเสี่ยง)
+// ============================================================
+const HSLOT_A = 594 / 1350; // aspect hero ตัวแทน (main)
+const HSLOT_H = 1350;
+const BAND_MIN = 30, MAXFACE = 0.74;
+const _headBox = (fb, iw, ih) => ({
+  minX: (fb.x1 - (fb.x2 - fb.x1) * 0.20) * iw, maxX: (fb.x2 + (fb.x2 - fb.x1) * 0.20) * iw,
+  minY: (fb.y1 - (fb.y2 - fb.y1) * 0.42) * ih, maxY: (fb.y2 + (fb.y2 - fb.y1) * 0.32) * ih,
+});
+
+test('HZ-1 หน้าเล็ก faceShare < band-min: ซูมเข้าจน faceShare ≈ band-min + หัวอยู่ในกรอบครบ + region เล็กลง', () => {
+  const IW = 2000, IH = 2500;
+  const faceBox = { x1: 0.35, y1: 0.44, x2: 0.50, y2: 0.58 }; // สูง 0.14 = 350px
+  const region0 = { left: 250, top: 300, width: 594, height: 1350 }; // faceShare = 350/1350 = 25.9% < 30
+  const r = zoomHeroRegionForFaceShare({ region: region0, faceBox, imgW: IW, imgH: IH, slotAspect: HSLOT_A, slotH: HSLOT_H, bandMinFrac: BAND_MIN / 100, maxFaceHFrac: MAXFACE });
+  assert.strictEqual(r.changed, true, 'ต้องซูม (faceShare 25.9% ต่ำกว่า band-min 30)');
+  assert.ok(r.region.height < region0.height, 'region ต้องเตี้ยลง (ซูมเข้า)');
+  assert.ok(r.faceSharePct >= BAND_MIN - 0.6, `faceShare ${r.faceSharePct} ต้องถึง band-min ~30`);
+  // หัวต้องอยู่ในกรอบครบ (ไม่ตัดหน้า/คาง/ผม)
+  const hb = _headBox(faceBox, IW, IH);
+  assert.ok(hb.minX >= r.region.left - 1 && hb.maxX <= r.region.left + r.region.width + 1, 'หัวไม่ตัดแนวนอน');
+  assert.ok(hb.minY >= r.region.top - 1 && hb.maxY <= r.region.top + r.region.height + 1, 'หัวไม่ตัดแนวตั้ง');
+  // aspect คงเท่าช่อง
+  assert.ok(Math.abs(r.region.width / r.region.height - HSLOT_A) < 0.01, 'aspect ต้องเท่าช่อง');
+  // upscale ไม่เกิน 1.2 (เพดานยืด hero)
+  assert.ok(HSLOT_H / r.region.height <= 1.2 + 1e-6, 'upscale ต้อง ≤ 1.2');
+});
+
+test('HZ-2 หน้าใหญ่เด่นแล้ว (faceShare ≥ band-min): คืน region เดิมเป๊ะ (byte-parity)', () => {
+  const IW = 2000, IH = 2500;
+  const faceBox = { x1: 0.35, y1: 0.30, x2: 0.55, y2: 0.60 }; // สูง 0.30 = 750px
+  const region0 = { left: 300, top: 200, width: 594, height: 1350 }; // faceShare = 750/1350 = 55.6% ≥ 30
+  const r = zoomHeroRegionForFaceShare({ region: region0, faceBox, imgW: IW, imgH: IH, slotAspect: HSLOT_A, slotH: HSLOT_H, bandMinFrac: BAND_MIN / 100, maxFaceHFrac: MAXFACE });
+  assert.strictEqual(r.changed, false, 'เด่นพอแล้ว → ไม่ซูม');
+  assert.deepStrictEqual(r.region, region0, 'region เดิมเป๊ะ');
+  assert.strictEqual(r.reason, 'already-prominent');
+});
+
+test('HZ-3 หน้าเล็กมาก: ชนเพดาน floor guard (slotH/1.2) → ซูมได้แต่ไม่ถึง band-min + upscale = 1.2 พอดี', () => {
+  const IW = 2000, IH = 2500;
+  const faceBox = { x1: 0.40, y1: 0.45, x2: 0.50, y2: 0.55 }; // สูง 0.10 = 250px
+  const region0 = { left: 250, top: 300, width: 594, height: 1350 }; // faceShare = 250/1350 = 18.5%
+  const r = zoomHeroRegionForFaceShare({ region: region0, faceBox, imgW: IW, imgH: IH, slotAspect: HSLOT_A, slotH: HSLOT_H, bandMinFrac: BAND_MIN / 100, maxFaceHFrac: MAXFACE });
+  assert.strictEqual(r.changed, true, 'ต้องซูมเข้าเท่าที่เพดานให้');
+  assert.ok(r.region.height < region0.height, 'region เตี้ยลง');
+  // floor = max(headHpx/0.74, slotH/1.2) = 1350/1.2 = 1125 (เพดานยืด binds)
+  assert.strictEqual(r.region.height, 1125, 'region ต้องหยุดที่ floor = slotH/1.2 = 1125');
+  assert.ok(r.faceSharePct < BAND_MIN, 'ยังไม่ถึง band-min (ชนเพดาน) — ยอมรับได้ตามกติกา');
+  assert.ok(HSLOT_H / r.region.height <= 1.2 + 1e-6, 'upscale ต้องไม่เกิน 1.2 (floor guard เดิมคงอยู่)');
+});
+
+test('HZ-3b ช่อง 616×1350 (slotW/1.2 ไม่ลงตัว): floor bind → ค่าปัดต้องกันแกนกว้างไม่เกิน 1.2 (กันบั๊ก 616/513=1.2008)', () => {
+  const IW = 2000, IH = 2500;
+  const SLOT_W = 616, SLOT_H = 1350, SA = SLOT_W / SLOT_H; // slotW/1.2 = 513.33 (ไม่ลงตัว)
+  const faceBox = { x1: 0.40, y1: 0.45, x2: 0.50, y2: 0.55 }; // สูง 0.10 = 250px → หน้าเล็ก, floor (slotH/1.2) bind
+  const region0 = { left: 250, top: 300, width: SLOT_W, height: SLOT_H };
+  const r = zoomHeroRegionForFaceShare({ region: region0, faceBox, imgW: IW, imgH: IH, slotAspect: SA, slotH: SLOT_H, bandMinFrac: BAND_MIN / 100, maxFaceHFrac: MAXFACE });
+  assert.strictEqual(r.changed, true, 'ต้องซูมเข้า (หน้าเล็กกว่า band-min, region เดิมยังไม่ยืดเกิน)');
+  // ★ แกนสำคัญ: ค่าที่ปัดเศษแล้ว upscale ห้ามเกิน 1.2 ทั้งสองแกน (คือสิ่งที่ executor วัดจริง)
+  assert.ok(SLOT_W / r.region.width <= 1.2 + 1e-9, `แกนกว้าง ${SLOT_W}/${r.region.width}=${(SLOT_W / r.region.width).toFixed(5)} ต้อง ≤ 1.2`);
+  assert.ok(SLOT_H / r.region.height <= 1.2 + 1e-9, `แกนสูง ${SLOT_H}/${r.region.height}=${(SLOT_H / r.region.height).toFixed(5)} ต้อง ≤ 1.2`);
+  // หัวยังอยู่ในกรอบครบ
+  const hb = _headBox(faceBox, IW, IH);
+  assert.ok(hb.minX >= r.region.left - 1 && hb.maxX <= r.region.left + r.region.width + 1, 'หัวไม่ตัดแนวนอน');
+  assert.ok(hb.minY >= r.region.top - 1 && hb.maxY <= r.region.top + r.region.height + 1, 'หัวไม่ตัดแนวตั้ง');
+});
+
+test('HZ-3c ช่อง 744×742 (slotH/1.2 ไม่ลงตัว): floor bind → ค่าปัดต้องกันแกนสูงไม่เกิน 1.2 (กันบั๊ก 742/618=1.2007)', () => {
+  const IW = 1500, IH = 1500;
+  const SLOT_W = 744, SLOT_H = 742, SA = SLOT_W / SLOT_H; // slotH/1.2 = 618.33 (ไม่ลงตัว)
+  const faceBox = { x1: 0.42, y1: 0.46, x2: 0.50, y2: 0.54 }; // สูง 0.08 = 120px → หน้าเล็ก, floor (slotH/1.2) bind
+  const region0 = { left: 200, top: 200, width: 1002, height: 1000 };
+  const r = zoomHeroRegionForFaceShare({ region: region0, faceBox, imgW: IW, imgH: IH, slotAspect: SA, slotH: SLOT_H, bandMinFrac: BAND_MIN / 100, maxFaceHFrac: MAXFACE });
+  assert.strictEqual(r.changed, true, 'ต้องซูมเข้า');
+  // ★ แกนสำคัญ: ค่าที่ปัดเศษแล้ว upscale ห้ามเกิน 1.2 ทั้งสองแกน
+  assert.ok(SLOT_W / r.region.width <= 1.2 + 1e-9, `แกนกว้าง ${SLOT_W}/${r.region.width}=${(SLOT_W / r.region.width).toFixed(5)} ต้อง ≤ 1.2`);
+  assert.ok(SLOT_H / r.region.height <= 1.2 + 1e-9, `แกนสูง ${SLOT_H}/${r.region.height}=${(SLOT_H / r.region.height).toFixed(5)} ต้อง ≤ 1.2`);
+  // หัวยังอยู่ในกรอบครบ
+  const hb = _headBox(faceBox, IW, IH);
+  assert.ok(hb.minX >= r.region.left - 1 && hb.maxX <= r.region.left + r.region.width + 1, 'หัวไม่ตัดแนวนอน');
+  assert.ok(hb.minY >= r.region.top - 1 && hb.maxY <= r.region.top + r.region.height + 1, 'หัวไม่ตัดแนวตั้ง');
+});
+
+test('HZ-4 ไร้หน้า/อินพุตพัง: คืน region เดิม changed:false (ไม่ throw)', () => {
+  const region0 = { left: 10, top: 20, width: 264, height: 600 };
+  // faceBox พัง (x2 ≤ x1)
+  const bad = zoomHeroRegionForFaceShare({ region: region0, faceBox: { x1: 0.5, y1: 0.5, x2: 0.5, y2: 0.5 }, imgW: 2000, imgH: 2500, slotAspect: HSLOT_A, slotH: HSLOT_H, bandMinFrac: 0.30, maxFaceHFrac: MAXFACE });
+  assert.strictEqual(bad.changed, false, 'หน้าพัง = ไม่แตะ');
+  assert.deepStrictEqual(bad.region, region0, 'region เดิมเป๊ะ');
+  // ขาด slotH
+  const noSlot = zoomHeroRegionForFaceShare({ region: region0, faceBox: { x1: 0.4, y1: 0.4, x2: 0.5, y2: 0.5 }, imgW: 2000, imgH: 2500, slotAspect: HSLOT_A, bandMinFrac: 0.30, maxFaceHFrac: MAXFACE });
+  assert.strictEqual(noSlot.changed, false, 'ขาด slotH = ไม่แตะ');
+  assert.deepStrictEqual(noSlot.region, region0, 'region เดิมเป๊ะ');
+});
+
+test('HZ-5 region ยืด ≥1.2× อยู่แล้ว (regionH < slotH/1.2): ไม่แตะ (ไม่ทำ upscale แย่ลง = byte-parity ฝั่งเสี่ยง)', () => {
+  const IW = 2000, IH = 2500;
+  const faceBox = { x1: 0.40, y1: 0.45, x2: 0.50, y2: 0.55 }; // หน้าเล็ก faceShare < 30
+  const region0 = { left: 250, top: 300, width: 440, height: 1000 }; // 1000 < 1125 = slotH/1.2 (upscale 1.35 > 1.2)
+  const r = zoomHeroRegionForFaceShare({ region: region0, faceBox, imgW: IW, imgH: IH, slotAspect: HSLOT_A, slotH: HSLOT_H, bandMinFrac: BAND_MIN / 100, maxFaceHFrac: MAXFACE });
+  assert.strictEqual(r.changed, false, 'region ยืดเกิน 1.2 อยู่แล้ว → HZ ไม่แตะ (floorH ≥ regionH)');
+  assert.deepStrictEqual(r.region, region0, 'region เดิมเป๊ะ');
+  assert.strictEqual(r.reason, 'at-floor');
+});
+
+// ============================================================
+// 🧪 C1c (17 ก.ค.) — facesIntersectingRegion: นับหน้าที่ intersect region ≥30% (หน้าโผล่ขอบเข้า union)
+//   เคส: (1) หน้าคลุมทั้งใบ (center-in) ยังนับครบ = superset (2) หน้าโผล่ขอบ center นอก region + ทับ ≥30% → นับ
+//        (3) หน้าแตะขอบเล็กน้อย (<30%) → ไม่นับ (4) ผสม 3 ใบ: ในเต็ม+โผล่ขอบ+นอกสุด → ได้ 2 ใบ ลำดับคงเดิม
+// ============================================================
+const REG = { left: 200, top: 200, width: 400, height: 400 }; // px 200..600 ทั้งสองแกน
+
+test('C1c-1 หน้าคลุมทั้งใบ (center-in เดิม): ยังถูกนับครบ (superset ของ center-in)', () => {
+  const faceIn = { x1: 0.30, y1: 0.30, x2: 0.40, y2: 0.40 }; // px 300..400 อยู่ในเต็ม
+  const out = facesIntersectingRegion([faceIn], REG, IMG_W, IMG_H, 0.30);
+  assert.strictEqual(out.length, 1, 'หน้า center-in ต้องถูกนับ (parity)');
+  assert.deepStrictEqual(out[0], { x1: 0.30, y1: 0.30, x2: 0.40, y2: 0.40 });
+});
+
+test('C1c-2 หน้าโผล่ขอบซ้าย (center อยู่นอก region) แต่ทับ ≥30%: ถูกนับ (พฤติกรรมใหม่)', () => {
+  // face px x 80..280 (center 180 < 200 = นอก region) · ทับ x = 280-200 = 80 / 200 = 40% ≥ 30
+  const edge = { x1: 0.08, y1: 0.30, x2: 0.28, y2: 0.40 };
+  const cx = ((edge.x1 + edge.x2) / 2) * IMG_W;
+  assert.ok(cx < REG.left, 'ยืนยัน center อยู่นอก region (center-in เดิมจะตกหล่น)');
+  const out = facesIntersectingRegion([edge], REG, IMG_W, IMG_H, 0.30);
+  assert.strictEqual(out.length, 1, 'หน้าโผล่ขอบทับ ≥30% ต้องถูกดึงเข้า union');
+});
+
+test('C1c-3 หน้าแตะขอบเล็กน้อย (<30%): ไม่ถูกนับ', () => {
+  // face px x 20..220 · ทับ x = 220-200 = 20 / 200 = 10% < 30
+  const barely = { x1: 0.02, y1: 0.30, x2: 0.22, y2: 0.40 };
+  const out = facesIntersectingRegion([barely], REG, IMG_W, IMG_H, 0.30);
+  assert.strictEqual(out.length, 0, 'ทับน้อยกว่า 30% ต้องไม่ถูกนับ (กันดึงหน้าไกลเข้ามามั่ว)');
+});
+
+test('C1c-4 ผสม: ในเต็ม + โผล่ขอบ ≥30% + นอกสุดไม่ทับ → คืน 2 ใบ (ลำดับคงเดิม)', () => {
+  const faceA = { x1: 0.30, y1: 0.30, x2: 0.40, y2: 0.40 }; // ในเต็ม
+  const faceB = { x1: 0.08, y1: 0.30, x2: 0.28, y2: 0.40 }; // โผล่ขอบซ้าย ≥30%
+  const faceC = { x1: 0.70, y1: 0.30, x2: 0.80, y2: 0.40 }; // px 700..800 นอก region ไม่ทับเลย
+  const out = facesIntersectingRegion([faceA, faceB, faceC], REG, IMG_W, IMG_H, 0.30);
+  assert.strictEqual(out.length, 2, 'ต้องได้ 2 ใบ (A ในเต็ม + B โผล่ขอบ) · C นอกสุดถูกตัด');
+  assert.deepStrictEqual(out[0], faceA, 'ลำดับคงเดิม: A มาก่อน');
+  assert.deepStrictEqual(out[1], faceB, 'B ตามมา');
 });
