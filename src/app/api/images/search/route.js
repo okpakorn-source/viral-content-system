@@ -406,7 +406,24 @@ export async function POST(req) {
     const maxQ = STORY_QUERIES_ON
       ? Math.max(QUERIES_PER_SOURCE, nSubjects * PER_SUBJECT)
       : Math.min(MAX_QUERIES_CAP, Math.max(MAX_QUERIES, nSubjects * PER_SUBJECT));
-    const queries = buildQueries(keywords, maxQ);
+    // ★ G1 gap hunt: ถ้าผู้เรียกส่ง body.keywords (array of string) มา → ใช้เป็นคำค้นตรงๆ (ข้าม buildQueries)
+    //   ให้ค้นเติมช่องว่างแบบเจาะจงบุคคลได้ (rt_gaphunt) · trim/dedupe/cap ด้วย maxQ · ไม่ส่ง = พฤติกรรมเดิม byte-identical
+    let queries;
+    if (Array.isArray(body.keywords) && body.keywords.length) {
+      const seenQ = new Set();
+      queries = body.keywords
+        .map((s) => String(s || '').trim())
+        .filter((q) => { if (!q || seenQ.has(q)) return false; seenQ.add(q); return true; })
+        .slice(0, maxQ);
+    } else {
+      queries = buildQueries(keywords, maxQ);
+    }
+    // ★ G3 วินัยโควตา: เพดานคำค้นต่อรอบ (MEGA_SEARCH_QUERY_CAP int) — ตัดตามลำดับความสำคัญเดิม (buildQueries เรียงให้แล้ว)
+    //   ไม่ตั้ง/ตั้งไม่ถูก (NaN/≤0) = ไม่ตัด = พฤติกรรมเดิมเป๊ะ · ตั้งแล้ว = slice หัวรายการ
+    const _queryCap = parseInt(process.env.MEGA_SEARCH_QUERY_CAP || '', 10);
+    if (Number.isInteger(_queryCap) && _queryCap > 0 && queries.length > _queryCap) {
+      queries = queries.slice(0, _queryCap);
+    }
     if (queries.length === 0) {
       return NextResponse.json(
         { success: false, error: 'ไม่มีคำค้นในคีย์เวิร์ด', errorType: 'NO_QUERIES' },

@@ -95,6 +95,9 @@ function stageInputHash(job) {
     // เฟส 3: เลขงานปก + รอบแก้ตัวปก (กติกาเดียวกับ S3)
     coverJobId: d.cover?.queueJobId || null,
     coverRetried: !!d.cover?.retriedCover,
+    // ★ G1 gap-hunt: รอบค้นเติมช่องว่าง — พูลรูปเปลี่ยนทุกรอบ gap hunt → s5triage/s6/s7 ต้องได้ key ใหม่ (rerun จริง)
+    //   ไม่มี gapHunt (งานทั่วไป/รอบแรก) = 0 = key เดิมเป๊ะ (กติกาเดียวกับ retriedWithText/coverRetried)
+    gapHuntRound: d.gapHunt?.round || 0,
   };
   return crypto.createHash('sha256').update(JSON.stringify(basis)).digest('hex').slice(0, 16);
 }

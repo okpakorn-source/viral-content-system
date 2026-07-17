@@ -3589,6 +3589,27 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     }
   }
 
+  // ═══ G2 HERO SOURCE POLICY (เลน soft · MEGA_HERO_SOURCE_POLICY default ON · ปิด==='0' = ไม่มีป้าย/เดิม byte-identical) ═══
+  //   ป้าย soft "เลี่ยงเป็น hero: เฟรมคลิป" ต่อ meta row ที่มาจากเฟรมคลิป (platform youtube/clip หรือ url/source มี acs-frames)
+  //   สมองเห็นป้ายใน JSON row แล้วเลี่ยงเลือกเป็น hero เอง (แพทเทิร์นเดียวกับ heroCropBlock) — ★ ไม่ hard block:
+  //   พูลไม่มีทางเลือก press เลย ก็ยังใช้เฟรมคลิปเป็น hero ได้ตามเดิม (ป้ายเป็นแค่คำแนะนำให้สมอง)
+  const _heroSrcPolicyOn = process.env.MEGA_HERO_SOURCE_POLICY !== '0';
+  if (_heroSrcPolicyOn) {
+    // ★ audit G (optional fix): จับคู่ด้วย id แทน positional sorted[i]/meta[i] — กัน mislabel เงียบถ้าอนาคต meta ถูก reorder
+    const _cfById = new Map(sorted.filter(Boolean).map((x) => [String(x.id), x]));
+    let _cfLabeled = 0;
+    for (const m of meta) {
+      const x = _cfById.get(String(m.id));
+      const _isClipFrame = !!x && (x.platform === 'youtube' || x.platform === 'clip'
+        || /acs-frames/i.test(String(x.imageUrl || '')) || /acs-frames/i.test(String(x.source || '')));
+      if (_isClipFrame) {
+        m.heroSourceAvoid = 'เลี่ยงเป็น hero: เฟรมคลิป (คุณภาพต่ำ/เบลอ — ใช้ภาพข่าว press เป็น hero ถ้ามีทางเลือก)';
+        _cfLabeled++;
+      }
+    }
+    if (_cfLabeled) console.log(`[MEGA S6] 🎬 hero source policy: ป้าย "เลี่ยงเป็น hero: เฟรมคลิป" ${_cfLabeled}/${meta.length} ใบ`);
+  }
+
   let brain = { slots: {}, note: '' };
   let brainOk = true;
   try {
@@ -5755,4 +5776,8 @@ export const STAGE_FLOW = {
   rt_s5clipframe: { run: (job, opts) => _rtStage('rt_s5clipframe', job, opts), next: 'rt_s6slots', label: 'RT เฟรมคลิป' },
   rt_s6slots: { run: (job, opts) => _rtStage('rt_s6slots', job, opts), next: 'rt_s7compose', label: 'RT เลือกภาพลงช่อง' },
   rt_s7compose: { run: (job, opts) => _rtStage('rt_s7compose', job, opts), next: 'cover_ready', label: 'RT ประกอบปก + QC + คลัง' },
+  // ★ G1 gap-hunt: rt_s7compose คืน nextAction:'goto:rt_gaphunt' เมื่อ QC ตีตกและยังมี "รายการที่ขาด" (needs) —
+  //   stage นี้ค้นภาพเจาะจงเติมช่องว่าง (เฉพาะ google/news) แล้วไหลกลับ rt_s5triage → ...s6 → s7 ตามท่อเดิม
+  //   (ผูก gapHunt.round เข้า dossier ทำให้ stageInputHash ของ s6/s7 เปลี่ยน = rerun จริง ไม่โดน idempotent ข้าม)
+  rt_gaphunt: { run: (job, opts) => _rtStage('rt_gaphunt', job, opts), next: 'rt_s5triage', label: 'RT ค้นเติมช่องว่าง (gap hunt)' },
 };
