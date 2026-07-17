@@ -1011,6 +1011,108 @@ async function _defaultPersistCoverImage({ format, base64 }) {
   return `/mega-covers/${fname}`;
 }
 
+// ============================================================
+// 🕳️ G1 GAP HUNT — วนหาภาพเพิ่มแทนการตีตกทันที (หัวใจ: จบด้วยปก ไม่ใช่ QC ตีทิ้ง)
+// ------------------------------------------------------------
+// kill-switch: MEGA_GAP_HUNT (default ON, '0'=ปิด → พฤติกรรม fail เดิมเป๊ะ)
+// เพดาน 2 รอบ (GAP_HUNT_MAX_ROUNDS) — ครบแล้วยัง QC ไม่ผ่าน = fail จริง
+// ============================================================
+const GAP_HUNT_MAX_ROUNDS = 2;
+
+// จากธง QC (cover.qcFlags ดิบ) → "รายการที่ขาด" (needs) เพื่อค้นเพิ่มแบบเจาะจง
+//   duplicate_person_panels → ต้องการภาพ "คนอื่นของข่าว" (ดึงชื่อจาก compass.mainCharacters ที่ไม่ใช่คนซ้ำ)
+//   face_overflow/person_cut/blind_crop (ครอปพัง) → ภาพคนชัดเฟรมกว้าง
+//   hero ยืดเกินเพดาน / face_share/headroom hero (วัตถุดิบไม่พอ) → ภาพใหญ่ของคนหลัก
+//   คำค้น ≤2 วลีต่อ need (rt_gaphunt จะตัด ≤6 คำอีกชั้น) · need ที่ไม่มีคำค้น = ตัดทิ้ง (ค้นไม่ได้)
+export function _buildGapNeeds(qcFlags, dossier) {
+  const flags = Array.isArray(qcFlags) ? qcFlags.map((f) => String(f)) : [];
+  const mainChars = ((dossier?.compass?.mainCharacters) || []).map((c) => c?.name).filter(Boolean);
+  const needs = [];
+  const seen = new Set();
+  const addNeed = (type, person, queries) => {
+    const key = `${type}:${person || ''}`;
+    if (seen.has(key)) return;
+    const qs = (Array.isArray(queries) ? queries : []).map((q) => String(q || '').trim()).filter(Boolean).slice(0, 2);
+    if (!qs.length) return; // ไม่มีคำค้น = ค้นไม่ได้ ตัดทิ้ง
+    seen.add(key);
+    needs.push({ type, ...(person ? { person } : {}), queries: qs });
+  };
+  const has = (re) => flags.some((f) => re.test(f));
+  const heroStretch = flags.some((f) => { const m = /^(?:upscaled|upscale_soft|upscaled_src):([^:]+):/.exec(f); return m && /main|hero/i.test(m[1]); });
+
+  // ① คนซ้ำหลายช่อง → หาคน "อื่น" ของข่าว (ดึงชื่อคนซ้ำจากธง duplicate_person_panels:<p>:<n>)
+  if (has(/^duplicate_person_panels(:|$)/)) {
+    const dupNames = new Set(flags.map((f) => { const m = /^duplicate_person_panels:([^:]+):/.exec(f); return m ? m[1] : null; }).filter(Boolean));
+    const others = mainChars.filter((n) => !dupNames.has(n));
+    const targets = (others.length ? others : mainChars).slice(0, 3);
+    for (const name of targets) addNeed('person_distinct', name, [name, `${name} ให้สัมภาษณ์`]);
+  }
+  // ② หน้าเกินช่อง/คนโดนตัด/ครอปตาบอด → ภาพคนชัดเฟรมกว้าง
+  if (has(/^(?:face_overflow|person_cut|blind_crop)(:|$)/)) {
+    const name = mainChars[0];
+    if (name) addNeed('person_clear', name, [name, `${name} เต็มตัว`]);
+  }
+  // ③ hero ยืดเกิน / หน้ากิน hero นอกเกณฑ์ (วัตถุดิบไม่พอ) → ภาพใหญ่ของคนหลัก
+  if (heroStretch || has(/^(?:face_share_out|headroom_out):(?:main|hero)/i)) {
+    const name = mainChars[0];
+    if (name) addNeed('person_big', name, [name]);
+  }
+  return needs;
+}
+
+// default gap search — ยิง POST /api/images/search (google/news) พร้อม keywords เจาะจง (เทสฉีดแทนผ่าน _deps.gapSearchFn)
+async function _defaultGapSearch({ origin, caseId, platform, keywords }) {
+  const res = await fetch(`${origin}/api/images/search`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ caseId, platform, keywords, vet: true }),
+    signal: AbortSignal.timeout(600000),
+  });
+  const j = await res.json().catch(() => ({}));
+  return { added: Number(j?.added || 0), found: Number(j?.found || 0) };
+}
+
+// ★ G1 stage: ค้นภาพเจาะจงเติมช่องว่าง — ยิงเฉพาะ google/google_news (ห้ามครบ 4 แหล่ง = วินัยโควตา)
+//   ล้มเหลว/ได้ 0 ใบ = ไม่ fail งาน (บันทึก summary แล้วไหลต่อ rt_s5triage: ตาคัดของใหม่ → s6 → s7 ตามท่อเดิม)
+//   รอบ gap ถัดไปโดนเพดาน GAP_HUNT_MAX_ROUNDS ตัดที่ rt_s7compose เอง
+export async function rt_gaphunt(job, opts = {}) {
+  const { origin = '', _deps = {} } = opts;
+  const _search = _deps.gapSearchFn || _defaultGapSearch;
+  const d = job.dossier || {};
+  const caseId = d.images?.caseId || null;
+  const gap = d.gapHunt || {};
+  const round = gap.round || 0;
+  const needs = Array.isArray(gap.needs) ? gap.needs : [];
+
+  if (!caseId || !needs.length) {
+    return { status: 'done', nextAction: 'continue', summary: `GAP_HUNT รอบ ${round}: ไม่มี need/caseId — ข้าม ไหลต่อ triage`, dossierPatch: {} };
+  }
+
+  const PLATFORMS = ['google', 'google_news']; // ★ เฉพาะ 2 แหล่งภาพ press คุณภาพดี — ห้ามครบ 4 แหล่ง
+  let fired = 0;
+  let added = 0;
+  const errs = [];
+  for (const need of needs) {
+    const keywords = (Array.isArray(need.queries) ? need.queries : []).map((q) => String(q || '').trim()).filter(Boolean).slice(0, 6); // ≤6 คำต่อ need
+    if (!keywords.length) continue;
+    for (const platform of PLATFORMS) {
+      fired++;
+      try {
+        const r = await _search({ origin, caseId, platform, keywords });
+        added += Number(r?.added || 0);
+      } catch (e) {
+        errs.push(String(e?.message || '').slice(0, 40));
+      }
+    }
+  }
+  return {
+    status: 'done',
+    nextAction: 'continue',
+    summary: `GAP_HUNT รอบ ${round}: ยิง ${fired} ครั้ง (${PLATFORMS.join('/')}) เติม ${added} ใบ${errs.length ? ` · ล้ม ${errs.length}` : ''} — ไหลต่อตาคัด`,
+    dossierPatch: {},
+  };
+}
+
 export async function rt_s7compose(job, opts = {}) {
   const { origin = '', _deps = {}, env = process.env } = opts;
   const _s7_cover = _deps.s7_cover || s7_cover;
@@ -1103,7 +1205,25 @@ export async function rt_s7compose(job, opts = {}) {
   const productionQcPass = qcVerdict?.pass !== false;
   cover.score = cover.refSimilarity != null ? `เหมือน ref ${cover.refSimilarity}%` : '-';
   if (!productionQcPass) {
-    return { status: 'failed', nextAction: 'fail', summary: 'QC_REJECTED: ' + (qcVerdict?.reasons || []).join(' · ').slice(0, 160) };
+    // ★ G1 GAP HUNT (MEGA_GAP_HUNT default ON · '0'=ปิด → fail เดิมเป๊ะ): QC ตีตก → วิเคราะห์ธง →
+    //   สร้าง "รายการที่ขาด" (needs) → ถ้ามี needs และยังไม่ครบเพดาน 2 รอบ = กลับไปหาภาพเพิ่ม (goto:rt_gaphunt)
+    //   แทนตีทิ้งทันที · ครบ 2 รอบ / ไม่มี needs / สวิตช์ปิด = fail เดิม (zero archive คงเดิมทุกทาง)
+    const _gapHuntOn = env.MEGA_GAP_HUNT !== '0';
+    const _reasonStr = (qcVerdict?.reasons || []).join(' · ').slice(0, 160);
+    const _prevRound = d.gapHunt?.round || 0;
+    if (_gapHuntOn && _prevRound < GAP_HUNT_MAX_ROUNDS) {
+      const _needs = _buildGapNeeds(cover.qcFlags, d);
+      if (_needs.length) {
+        return {
+          status: 'done',
+          nextAction: 'goto:rt_gaphunt',
+          summary: `GAP_HUNT รอบ ${_prevRound + 1}: QC ตีตก (${_reasonStr}) → หาภาพเพิ่ม ${_needs.length} รายการ แทนตีทิ้ง`,
+          dossierPatch: { gapHunt: { round: _prevRound + 1, needs: _needs } },
+        };
+      }
+    }
+    const _huntedNote = (_gapHuntOn && _prevRound >= GAP_HUNT_MAX_ROUNDS) ? ` (หาภาพเพิ่มแล้ว ${_prevRound} รอบ ยังไม่ผ่าน)` : '';
+    return { status: 'failed', nextAction: 'fail', summary: 'QC_REJECTED: ' + _reasonStr + _huntedNote };
   }
 
   // ── archive ครั้งเดียว (สำเร็จ + QC ผ่านเท่านั้น) — ล้มไม่ critical ต่อผลปก ──

@@ -32,6 +32,7 @@ globalThis.fetch = () => { fetchBombCalls++; throw new Error('NETWORK_BOMB: glob
 
 const {
   rt_compass, rt_s5case, rt_s5keywords, rt_s5search, rt_s5triage, rt_s5clipframe, rt_s6slots, rt_s7compose,
+  rt_gaphunt, _buildGapNeeds,
   enqueueRefTest, cancelRefTestJob, duplicateRefTestJob, runCoverRefTest,
 } = await import('../src/lib/refTestPipeline.js');
 
@@ -65,7 +66,7 @@ const COVER_ORIGIN = 'http://localhost:3000';
 
 // ---------- stub adapters for the rt_* chain (no real AI/network) ----------
 function mkChainDeps(overrides = {}) {
-  const calls = { compass: 0, s5_case: 0, s5_keywords: 0, s5_search: 0, s5_triage: 0, s5_clipframe: 0, s6_slots: 0, s7_cover: 0, compose: 0, qc: 0, archive: 0, persist: 0 };
+  const calls = { compass: 0, s5_case: 0, s5_keywords: 0, s5_search: 0, s5_triage: 0, s5_clipframe: 0, s6_slots: 0, s7_cover: 0, compose: 0, qc: 0, archive: 0, persist: 0, gapSearch: 0 };
   const done = (patch) => ({ status: 'done', nextAction: 'continue', ...(patch ? { dossierPatch: patch } : {}) });
   const deps = {
     compassBrain: async () => { calls.compass++; return { angle: 'มุมทดสอบ', primaryEmotion: 'warm', mainCharacters: [{ name: 'ก', role: 'hero' }], visualDreamShots: [] }; },
@@ -85,11 +86,43 @@ function mkChainDeps(overrides = {}) {
     loadArchive: async () => ({ addMegaCover: async () => { calls.archive++; return { id: 'ARC-1' }; } }),
     persistCoverImage: async () => { calls.persist++; return null; },
     resolveLatchReport: async () => ({ armedProducer: false, armed: false }),
+    // ★ G1: gap search ฉีดแทน /api/images/search (ไม่ยิง network) — คืน added คงที่ + นับครั้ง
+    gapSearchFn: async () => { calls.gapSearch++; return { added: 2, found: 2 }; },
     clipframeWaitMs: 0,
     env: { MEGA_COVER_ORIGIN: COVER_ORIGIN },
     ...overrides,
   };
   return { deps, calls };
+}
+
+// ★ G1: ขับ flow แบบ tick จริง — ตาม STAGE_FLOW next + รองรับ nextAction 'goto:<stage>' (gap hunt วนกลับ)
+const RT_STAGES = {
+  rt_compass: { fn: rt_compass, next: 'rt_s5case' },
+  rt_s5case: { fn: rt_s5case, next: 'rt_s5keywords' },
+  rt_s5keywords: { fn: rt_s5keywords, next: 'rt_s5search' },
+  rt_s5search: { fn: rt_s5search, next: 'rt_s5triage' },
+  rt_s5triage: { fn: rt_s5triage, next: 'rt_s5clipframe' },
+  rt_s5clipframe: { fn: rt_s5clipframe, next: 'rt_s6slots' },
+  rt_s6slots: { fn: rt_s6slots, next: 'rt_s7compose' },
+  rt_s7compose: { fn: rt_s7compose, next: 'cover_ready' },
+  rt_gaphunt: { fn: rt_gaphunt, next: 'rt_s5triage' },
+};
+async function driveFlow(job, deps, env, { startStage = 'rt_compass', maxSteps = 40 } = {}) {
+  let stage = startStage;
+  const results = [];
+  for (let i = 0; i < maxSteps; i++) {
+    const def = RT_STAGES[stage];
+    if (!def) break;
+    const r = await def.fn(job, { origin: 'http://mock', _deps: deps, env });
+    results.push({ stage, r });
+    if (r?.dossierPatch) job.dossier = { ...job.dossier, ...r.dossierPatch };
+    const act = r?.nextAction || 'continue';
+    if (r?.status === 'failed' || act === 'fail') break;
+    if (typeof act === 'string' && act.startsWith('goto:')) { stage = act.slice(5); continue; }
+    stage = def.next;
+    if (stage === 'cover_ready') break;
+  }
+  return results;
 }
 
 // drive the rt_* chain like the real tick does: run one stage, merge its dossierPatch, advance
@@ -303,6 +336,99 @@ test('5 sync mode: runCoverRefTest response shape เดิม (throughMega/effe
   assert.ok(typeof b.outputId === 'string' && b.outputId, 'outputId present');
   assert.ok(Array.isArray(b.sourceLinks) && b.sourceLinks.length === 2, 'sourceLinks from slotPlan urls');
   assert.ok(Array.isArray(b.trace) && b.trace.length > 0, 'trace present');
+});
+
+// ============================================================ G1 — gap hunt loop
+const gapJob = (title = 'ข่าวทดสอบ gap', content = bodyOf(250), mainChars = [{ name: 'ก' }]) => {
+  const j = seedJob(title, content);
+  j.dossier.images = { caseId: 'RT-CASE' };
+  j.dossier.compass = { mainCharacters: mainChars };
+  return j;
+};
+
+test('G1-1 rt_s7compose: QC ตีตก duplicate_person → goto:rt_gaphunt + round=1 + needs (คนอื่นของข่าว)', async () => {
+  const { deps, calls } = mkChainDeps({
+    composeAndVerify: async () => ({ success: true, base64: 'data:image/jpeg;base64,QUJD', template: 'ref_dna', caseId: 'RT-CASE', qcFlags: ['duplicate_person_panels:สมชาย:3'], refSimilarity: 70 }),
+    evaluateCoverQc: () => ({ pass: false, reasons: ['คนเดียวกินหลายช่อง'] }),
+  });
+  const job = gapJob('ข่าว', bodyOf(250), [{ name: 'สมชาย' }, { name: 'สมหญิง' }]);
+  const r = await rt_s7compose(job, { origin: 'm', _deps: deps, env: deps.env });
+  assert.strictEqual(r.status, 'done', 'ไม่ fail — แตกสาย gap hunt แทน');
+  assert.strictEqual(r.nextAction, 'goto:rt_gaphunt');
+  assert.strictEqual(r.dossierPatch.gapHunt.round, 1, 'round นับเป็น 1');
+  assert.ok(Array.isArray(r.dossierPatch.gapHunt.needs) && r.dossierPatch.gapHunt.needs.length > 0, 'มี needs');
+  assert.ok(r.dossierPatch.gapHunt.needs.some((n) => n.type === 'person_distinct' && n.person === 'สมหญิง'), 'ขอภาพคนที่ไม่ใช่คนซ้ำ (สมหญิง)');
+  assert.strictEqual(calls.archive, 0, 'ไม่ archive ตอน QC ตีตก');
+});
+
+test('G1-2 chain: QC ตีตกทุกรอบ → gap hunt ครบ 2 รอบ → fail จริง (zero archive)', async () => {
+  const { deps, calls } = mkChainDeps({
+    composeAndVerify: async () => ({ success: true, base64: 'data:image/jpeg;base64,QUJD', template: 'ref_dna', caseId: 'RT-CASE', qcFlags: ['duplicate_person_panels:ก:3'], refSimilarity: 70 }),
+    evaluateCoverQc: () => ({ pass: false, reasons: ['dup'] }),
+  });
+  const job = seedJob();
+  const results = await driveFlow(job, deps, deps.env);
+  const last = results[results.length - 1];
+  assert.strictEqual(last.stage, 'rt_s7compose');
+  assert.strictEqual(last.r.status, 'failed');
+  assert.match(last.r.summary, /QC_REJECTED/);
+  assert.match(last.r.summary, /2 รอบ/, 'summary บอกว่าหาเพิ่มแล้ว 2 รอบ');
+  assert.strictEqual(results.filter((x) => x.stage === 'rt_s7compose').length, 3, 's7compose 3 ครั้ง (goto×2 + fail)');
+  assert.strictEqual(results.filter((x) => x.stage === 'rt_gaphunt').length, 2, 'gap hunt 2 รอบ');
+  assert.strictEqual(calls.gapSearch, 4, 'ยิงค้น 2 รอบ × 1 need × 2 แหล่ง');
+  assert.strictEqual(calls.archive, 0, 'zero archive');
+});
+
+test('G1-3 MEGA_GAP_HUNT=0 → fail เดิมเป๊ะ (ไม่ goto)', async () => {
+  const { deps, calls } = mkChainDeps({
+    composeAndVerify: async () => ({ success: true, base64: 'data:image/jpeg;base64,QUJD', template: 'ref_dna', caseId: 'RT-CASE', qcFlags: ['duplicate_person_panels:ก:3'], refSimilarity: 70 }),
+    evaluateCoverQc: () => ({ pass: false, reasons: ['dup'] }),
+    env: { MEGA_COVER_ORIGIN: COVER_ORIGIN, MEGA_GAP_HUNT: '0' },
+  });
+  const job = gapJob();
+  const r = await rt_s7compose(job, { origin: 'm', _deps: deps, env: deps.env });
+  assert.strictEqual(r.status, 'failed');
+  assert.strictEqual(r.nextAction, 'fail');
+  assert.match(r.summary, /QC_REJECTED/);
+  assert.doesNotMatch(r.summary, /รอบ/, 'ปิดสวิตช์ = ไม่มีข้อความ gap hunt');
+  assert.strictEqual(calls.gapSearch, 0, 'ไม่ยิงค้นเพิ่ม');
+});
+
+test('G1-4 rt_gaphunt ค้นล้ม/ได้ 0 ใบ → ไม่ fail งาน (done continue ไหลต่อ triage)', async () => {
+  const { deps } = mkChainDeps();
+  const job = gapJob();
+  job.dossier.gapHunt = { round: 1, needs: [{ type: 'person_distinct', person: 'ก', queries: ['ก'] }] };
+  const r = await rt_gaphunt(job, { origin: 'm', _deps: { ...deps, gapSearchFn: async () => { throw new Error('quota แห้ง'); } }, env: deps.env });
+  assert.strictEqual(r.status, 'done');
+  assert.strictEqual(r.nextAction, 'continue');
+  assert.match(r.summary, /GAP_HUNT/);
+});
+
+test('G1-5 chain: QC ตีตกรอบแรก → gap hunt → รอบสองผ่าน QC = done (archive ครั้งเดียว)', async () => {
+  let qcCalls = 0;
+  const { deps, calls } = mkChainDeps({
+    composeAndVerify: async () => ({ success: true, base64: 'data:image/jpeg;base64,QUJD', template: 'ref_dna', caseId: 'RT-CASE', qcFlags: qcCalls === 0 ? ['duplicate_person_panels:ก:3'] : [], refSimilarity: 88 }),
+    evaluateCoverQc: () => { const pass = qcCalls > 0; qcCalls++; return { pass, reasons: pass ? [] : ['dup'] }; },
+  });
+  const job = seedJob();
+  const results = await driveFlow(job, deps, deps.env);
+  const last = results[results.length - 1];
+  assert.strictEqual(last.stage, 'rt_s7compose');
+  assert.strictEqual(last.r.status, 'done');
+  assert.strictEqual(last.r.nextAction, 'continue');
+  assert.strictEqual(last.r.dossierPatch.cover.productionQcPass, true);
+  assert.ok(results.some((x) => x.stage === 'rt_gaphunt'), 'flow ผ่าน rt_gaphunt');
+  assert.strictEqual(calls.gapSearch, 2, 'gap hunt ยิง 2 ครั้ง (1 need × 2 แหล่ง)');
+  assert.strictEqual(calls.archive, 1, 'archive ครั้งเดียวตอนสำเร็จ');
+});
+
+test('G1-6 _buildGapNeeds: ครอปพัง/hero ยืด → person_clear + person_big', () => {
+  const dossier = { compass: { mainCharacters: [{ name: 'ก' }] } };
+  const needsCrop = _buildGapNeeds(['face_overflow:main:120'], dossier);
+  assert.ok(needsCrop.some((n) => n.type === 'person_clear' && n.person === 'ก'), 'face_overflow → person_clear');
+  const needsHero = _buildGapNeeds(['upscaled:main:1.9'], dossier);
+  assert.ok(needsHero.some((n) => n.type === 'person_big' && n.person === 'ก'), 'hero ยืด → person_big');
+  assert.strictEqual(_buildGapNeeds(['duplicate_person_panels:ก:3'], { compass: { mainCharacters: [] } }).length, 0, 'ไม่มีชื่อ = ไม่มี need (ค้นไม่ได้)');
 });
 
 test('z restore fetch descriptor', () => {
