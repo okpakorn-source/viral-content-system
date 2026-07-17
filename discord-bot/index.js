@@ -153,24 +153,7 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // 1.5 Handle !ปัง command for self-optimizing prompts
-  if (content.startsWith('!ปัง')) {
-    const args = content.split(' ');
-    if (args.length < 2) {
-      return message.reply('⚠️ กรุณาระบุรหัส Prompt เช่น `!ปัง prompt_12345`');
-    }
-    const promptId = args[1].trim();
-    try {
-      await axios.put(`${API_URL.replace('/api/auto/stream', '/api/prompt-library').replace('/api/auto/process', '/api/prompt-library')}`, {
-        id: promptId,
-        action: 'feedback',
-        feedback: { likes: 50, shares: 10, comments: 20 } // Simulated boost
-      });
-      return message.reply(`🎉 **ขอบคุณสำหรับฟีดแบ็ก!** ระบบได้เพิ่มคะแนนความปังให้ \`${promptId}\` แล้วครับ AI จะเรียนรู้และเก่งขึ้น! 🚀`);
-    } catch (e) {
-      return message.reply(`❌ ไม่สามารถอัปเดตคะแนนได้: ${e.message}`);
-    }
-  }
+  // 1.5 (ถอด 18 ก.ค. 69 — คำสั่งเจ้าของ: "!ปัง ไม่มีคนใช้ เอาออกเลย") — คำสั่ง !ปัง feedback ถูกลบทั้งชุด
 
   // 2. ถ้าไม่ใช่ข้อมูลที่จะเอาไปทำข่าว (ไม่มีลิงก์ และสั้นเกินไป)
   if (!hasUrl && textOnly.length <= 50) {
@@ -422,7 +405,7 @@ async function processNewsJob(job) {
         const embed = new EmbedBuilder()
           .setColor(isEnhanced ? '#10b981' : '#f91880')
           .setTitle(embedTitle)
-          .setDescription(`${(v.content || 'ไม่พบเนื้อหา').slice(0, 3800)}\n\n---\n*🔥 โพสต์แล้วปัง? พิมพ์ \`!ปัง ${promptId}\` เพื่อสอนให้ระบบเก่งขึ้น!*`)
+          .setDescription((v.content || 'ไม่พบเนื้อหา').slice(0, 3800)) // ★ 18 ก.ค. 69: ถอดบรรทัดชวน !ปัง (ฟีเจอร์ถูกลบ — ไม่มีคนใช้)
           .setFooter({ text: `Pipeline: ${data.data?.detection?.pipelineLabel || data.detection?.pipelineLabel || 'Universal'} | PromptID: ${promptId} | เวลา: ${jobTime}s` });
 
         return embed;
