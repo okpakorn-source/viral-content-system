@@ -281,6 +281,29 @@ export default function CoverRefTestPage() {
     }
   }
 
+  // ★ 18 ก.ค.: เคลียงานที่ตาย (failed/cancelled) ออกจากคิว — ลบถาวร (declutter) · ยืนยันก่อนลบ · ไม่แตะงานที่กำลังทำ/สำเร็จ
+  async function clearDeadJobs() {
+    const dead = queueJobs.filter((j) => j && (j.status === 'failed' || j.status === 'cancelled'));
+    if (dead.length === 0) return;
+    if (!window.confirm(`ลบงานที่ตาย (ล้มเหลว/ยกเลิก) ${dead.length} งานออกจากคิวถาวร?\n(ไม่แตะงานที่กำลังทำ และงานที่ได้ปกแล้ว)`)) return;
+    setRowBusy('clear'); setQueueError('');
+    try {
+      const res = await fetch('/api/mega', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'clearTerminal' }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.success) setQueueError(`เคลียงานไม่สำเร็จ: ${formatClientError(j.error || j)}${j.errorType ? ` (${j.errorType})` : ''}`);
+    } catch (e) {
+      setQueueError('เรียก API ล้ม: ' + formatClientError(e));
+    } finally {
+      setRowBusy('');
+      loadQueueJobs();
+    }
+  }
+  // จำนวนงานที่ตาย (failed/cancelled) — ขับปุ่มเคลีย
+  const deadJobCount = queueJobs.filter((j) => j && (j.status === 'failed' || j.status === 'cancelled')).length;
+
   const label = { display: 'block', fontSize: 13, fontWeight: 700, margin: '10px 0 4px', color: '#334155' };
   const input = { width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 14, boxSizing: 'border-box' };
 
@@ -565,6 +588,14 @@ export default function CoverRefTestPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <h3 style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>📋 สถานะคิว ({queueJobs.length})</h3>
                 <button type="button" onClick={loadQueueJobs} style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #cbd5e1', background: '#fff', color: '#475569', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>🔄 รีเฟรช</button>
+                {/* ★ 18 ก.ค.: เคลียงานที่ตาย (failed/cancelled) — โผล่เฉพาะเมื่อมีงานตาย */}
+                {deadJobCount > 0 && (
+                  <button type="button" onClick={clearDeadJobs} disabled={rowBusy === 'clear'}
+                    title="ลบงานที่ล้มเหลว/ยกเลิกออกจากคิวถาวร (ไม่แตะงานที่กำลังทำ/ได้ปกแล้ว)"
+                    style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #fecaca', background: rowBusy === 'clear' ? '#fca5a5' : '#fef2f2', color: '#b91c1c', fontSize: 12, fontWeight: 700, cursor: rowBusy === 'clear' ? 'wait' : 'pointer' }}>
+                    {rowBusy === 'clear' ? '⏳ กำลังเคลีย…' : `🧹 เคลียงานที่ตาย (${deadJobCount})`}
+                  </button>
+                )}
                 <span style={{ fontSize: 11, color: '#94a3b8' }}>อัปเดตอัตโนมัติทุก 5 วิ</span>
               </div>
               {queueJobs.length === 0 ? (

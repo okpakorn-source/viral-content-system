@@ -116,6 +116,28 @@ export async function updateJob(id, patch) {
   return merged;
 }
 
+// ลบงานหลายชิ้นตาม id (batch) — ใช้เคลียงานที่ตาย (failed/cancelled) ออกจากคิว
+//   คืนจำนวนที่ลบจริง · ไม่มี id = no-op (คืน 0) · Supabase: delete .in(id) ในสโตร์นี้เท่านั้น · fs: กรองออกแล้วเขียนทับ
+export async function deleteJobs(ids) {
+  const list = (Array.isArray(ids) ? ids : []).filter((x) => typeof x === 'string' && x);
+  if (!list.length) return 0;
+  const c = sb();
+  if (!c) {
+    const rows = await fsRead(JOBS);
+    const keep = rows.filter((r) => !list.includes(r.id));
+    const removed = rows.length - keep.length;
+    if (removed > 0) await fsWrite(JOBS, keep);
+    return removed;
+  }
+  const { error } = await c
+    .from(TABLE)
+    .delete()
+    .eq('store_name', JOBS)
+    .in('id', list);
+  if (error) throw new Error('ลบงานไม่สำเร็จ: ' + error.message);
+  return list.length;
+}
+
 // ---------- บัญชีรายขั้น (ledger) ----------
 export async function addRun(jobId, stage, data) {
   const run = {
