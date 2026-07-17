@@ -15,6 +15,7 @@ import { isProxy } from 'node:util/types'; // (P0) reject a raw outer args Proxy
 // ★ Wave2 Batch D2 (10 ก.ค.): เกณฑ์ตัวเลข "กติกาวัดได้" จากคลังเทคนิคปก — single source of truth (sync, ใช้ใน measureTechRules)
 import { TECH_RULES } from '@/lib/imageQualityConfig';
 import { HERO_STRETCH_MAX } from '@/lib/heroCropGeometry'; // ★ AC-0107: single source of the hard 1.2× hero limit (runtime-bound crop proof, strict V2)
+import { computePanelCircleZone } from '@/lib/panelCropGeometry'; // ★ แบตช์ C (C2): โซนวงกลม frac ต่อช่อง (PURE) → executor bias หน้าออกนอกวง
 // ★ Checkpoint B (11 ก.ค. — Codex strict consumer): ผู้ตัดสิน "เปิด strict ได้ไหม" คือ validator ของ Checkpoint A
 //   เท่านั้น — consumer ใช้เฉพาะ decision.authority ที่ normalize แล้ว ห้ามอ่าน raw selectionSpec เอง
 // ★ Wave1A (LANE C — flag-gated, default OFF): V2 consumer ใช้ validateSelectionSpecV2Activation (canonical) เป็นผู้ตัดสินเดียว —
@@ -260,6 +261,17 @@ function traceQcFlags(cropTrace) {
 // 🔴 fail-open: วัดไม่ได้ (ไร้ faceBox/ไร้ trace/ไร้ region) = ข้ามเงียบ ไม่ติดธง (ห้ามเดา)
 // ธงทุกตัวอ้าง principle id ของคลัง (P-*) ในคอมเมนต์ — coverQcGate.js เป็นตัวตัดสินโหมด advisory/hard
 // ============================================================
+// ★ แบตช์ C (C3): band วัด face_share ของ hero override ได้ผ่าน env MEGA_HERO_FACE_BAND="min,max"
+//   ไม่ตั้ง/พังรูปแบบ = คืน TECH_RULES.HERO_FACE_SHARE เดิมเป๊ะ (byte-parity)
+//   แก้เคสสไตล์เทมเพลตปักหน้าใหญ่ (เช่น 67%) โดนธง face_share_out ทั้งที่ตั้งใจ
+function _heroFaceBand() {
+  const raw = process.env.MEGA_HERO_FACE_BAND;
+  if (!raw) return TECH_RULES.HERO_FACE_SHARE;
+  const m = String(raw).split(',').map((x) => Number(x.trim()));
+  if (m.length === 2 && Number.isFinite(m[0]) && Number.isFinite(m[1]) && m[0] < m[1]) return [m[0], m[1]];
+  return TECH_RULES.HERO_FACE_SHARE;
+}
+
 export function measureTechRules({ assignments = [], spec = null, faceBoxes = [], cropTrace = [], heroComposerSlotId = null } = {}) {
   const flags = [];
   const bySlot = {}; // slotId → { role, faceSharePct?, headroomPct?, hasFace }
@@ -337,8 +349,8 @@ export function measureTechRules({ assignments = [], spec = null, faceBoxes = []
 
     // band faceShare รายบทบาท (คลัง panelNorms) → face_share_out:<slot>:<pct>
     if (role === 'hero') {
-      // P-CROP-01: ขอบ "พบจริง 30-58" (ไม่ใช่ norm 44-58 — กัน false positive)
-      const [lo, hi] = TECH_RULES.HERO_FACE_SHARE;
+      // P-CROP-01: ขอบ "พบจริง 30-58" (ไม่ใช่ norm 44-58 — กัน false positive) · C3: env override ได้
+      const [lo, hi] = _heroFaceBand();
       if (faceSharePct < lo || faceSharePct > hi) flags.push(`face_share_out:${a.slotId}:${faceSharePct}`);
       // headroom hero → headroom_out:<slot>:<pct>
       const [hlo, hhi] = TECH_RULES.HERO_HEADROOM;
@@ -1241,6 +1253,34 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
       }
     }
   } catch { /* คำนวณโซนล้ม → วางแบบเดิม */ }
+
+  // ── ③c ⭕ แบตช์ C (C2): แนบ slot._circleZone (frac ของช่อง) ให้ executor bias หน้าออกนอกวง ──
+  //   เฉพาะช่องรอง (ไม่ใช่ hero) ที่วง template ทับ · margin = CIRCLE_FACE_GAP_PCT ของกว้าง canvas (ตรง measureTechRules)
+  //   สวิตช์ปิด (MEGA_CIRCLE_AVOID=0) = ไม่แนบ → executor ไม่แตะ region (byte-parity)
+  if (process.env.MEGA_CIRCLE_AVOID !== '0') {
+    try {
+      const _cW = Number(spec?.canvasW) || 0;
+      const _circleSlots = spec.slots
+        .filter((s) => s.shape === 'circle' && s.w > 0)
+        .map((s) => ({ cx: s.x + s.w / 2, cy: s.y + s.h / 2, d: s.w }));
+      if (_circleSlots.length && _cW) {
+        const _mPx = _cW * (TECH_RULES.CIRCLE_FACE_GAP_PCT / 100);
+        for (const s of spec.slots) {
+          if (s.shape === 'circle' || /main|hero/i.test(String(s.id))) continue; // ห้ามแตะ hero
+          let zone = null;
+          for (const c of _circleSlots) {
+            const z = computePanelCircleZone({ circle: c, slot: s, marginPx: _mPx });
+            if (!z) continue;
+            zone = zone ? { x0: Math.min(zone.x0, z.x0), y0: Math.min(zone.y0, z.y0), x1: Math.max(zone.x1, z.x1), y1: Math.max(zone.y1, z.y1) } : z;
+          }
+          if (zone) {
+            s._circleZone = { x0: +zone.x0.toFixed(3), y0: +zone.y0.toFixed(3), x1: +zone.x1.toFixed(3), y1: +zone.y1.toFixed(3) };
+            console.log(`[MegaComposer] ⭕ ${s.id} วงทับ → โซนหลบ x${s._circleZone.x0}-${s._circleZone.x1} y${s._circleZone.y0}-${s._circleZone.y1}`);
+          }
+        }
+      }
+    } catch { /* คำนวณโซนวงล้ม → executor ครอปแบบเดิม */ }
+  }
 
   // ── ④ จับคู่ภาพ→ช่อง ตายตัว (เคารพ S6) + ✂️ ครอปด้วย faceSizePct ของ ref จริง ──
   const used = new Set();

@@ -15,6 +15,9 @@ import sharp from 'sharp';
 //   conservative estimator (a filter input, never authoritative). The authoritative ≤1.2× proof is the runtime-bound
 //   check in composeAndVerify, measured on THIS renderer's actual output.
 import { HERO_CROP, FACE_PROM_CEILING, HERO_PROMINENCE } from '@/lib/heroCropGeometry';
+// ★ แบตช์ C (17 ก.ค.): เรขาคณิตครอปช่องรอง (PURE) + band จาก config เดียว — เทสได้โดดที่ tests/panel-crop-geometry.test.mjs
+import { refineRegionForFace, biasRegionFromCircleZone } from '@/lib/panelCropGeometry';
+import { TECH_RULES } from '@/lib/imageQualityConfig';
 
 // Template v3 — "viral-safe": ฐานตารางสะอาด (พิสูจน์จาก CASE-031/037) + องค์ประกอบไวรัล
 // (วงกลมขอบขาว + กรอบเหลือง) แบบทับเฉพาะมุมที่ควบคุมได้ — ไม่มีช่องลอยกลางผืนแบบ template_5
@@ -374,6 +377,45 @@ function _promKind(slot) {
   if (isStorySlot(slot)) return 'context';
   const big = (slot.w * slot.h) >= (520 * 800);
   return (slot.id === 'main' || big) ? 'hero' : 'secondary';
+}
+
+// ★ แบตช์ C (17 ก.ค.): kill-switch + helper สำหรับครอปช่องรองเล็งหน้า (C1) / หลบโซนวง (C2)
+//   default ON ปิดด้วย '0' → byte-parity (region เดิมทุกจุด) · ห้ามแตะสาขา hero
+function _panelFaceCropOn() { return process.env.MEGA_PANEL_FACE_CROP !== '0'; }
+function _circleAvoidOn() { return process.env.MEGA_CIRCLE_AVOID !== '0'; }
+// band faceShare รายบทบาทช่อง (อ่านจาก imageQualityConfig — mirror measureTechRules.roleOf)
+function _panelBandForSlot(slot) {
+  const id = String(slot?.id || '');
+  if (slot?.shape === 'circle') return TECH_RULES.CIRCLE_FACE_SHARE;
+  if (/^context/i.test(id)) return TECH_RULES.CONTEXT_FACE_SHARE;
+  if (/^evidence/i.test(id)) return [18, TECH_RULES.EVIDENCE_FACE_SHARE_MAX];
+  if (/^(reaction|action|moment|pair|victim)/i.test(id)) return TECH_RULES.SECONDARY_FACE_SHARE;
+  return [18, 60]; // ช่องรองทั่วไป (top/bottom/mid/sub_left/emotion/highlight) — ย่านสมเหตุผลตามคำสั่ง
+}
+// จำนวนหน้าที่ "ศูนย์กลางตกใน region" (กติกาเดียวกับ measureTechRules) — ใช้กันไม่ให้แตะภาพกลุ่ม/คู่
+function _facesInRegionCount(fb, region, imgW, imgH) {
+  if (!fb || !region) return 0;
+  const cand = (fb.allFaces && fb.allFaces.length) ? fb.allFaces
+    : (fb.x2 > fb.x1 ? [{ x1: fb.x1, y1: fb.y1, x2: fb.x2, y2: fb.y2 }] : []);
+  let n = 0;
+  for (const f of cand) {
+    const cx = ((f.x1 + f.x2) / 2) * imgW, cy = ((f.y1 + f.y2) / 2) * imgH;
+    if (cx >= region.left && cx <= region.left + region.width && cy >= region.top && cy <= region.top + region.height) n++;
+  }
+  return n;
+}
+// หน้าเด่นสุด (พื้นที่มากสุด) ที่ศูนย์กลางตกใน region → คืน faceBox normalized หรือ null
+function _dominantFaceInRegion(fb, region, imgW, imgH) {
+  if (!fb) return null;
+  const cand = (fb.allFaces && fb.allFaces.length) ? fb.allFaces
+    : (fb.x2 > fb.x1 ? [{ x1: fb.x1, y1: fb.y1, x2: fb.x2, y2: fb.y2 }] : []);
+  let best = null;
+  for (const f of cand) {
+    const cx = ((f.x1 + f.x2) / 2) * imgW, cy = ((f.y1 + f.y2) / 2) * imgH;
+    if (cx < region.left || cx > region.left + region.width || cy < region.top || cy > region.top + region.height) continue;
+    if (!best || (f.x2 - f.x1) * (f.y2 - f.y1) > (best.x2 - best.x1) * (best.y2 - best.y1)) best = f;
+  }
+  return best ? { x1: best.x1, y1: best.y1, x2: best.x2, y2: best.y2 } : null;
 }
 
 /** ★ เฟส 6B.3/6B.4: ซูมครอปแน่นให้หน้า/คนเด่นถึงเป้า (เคารพเพดานยืด 1.6 + ห้ามตัดหัว/คน + ห้ามขยายเกินกรอบเดิม)
@@ -797,8 +839,33 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
     const _tt = _tightenForProminence(region, fb, slot, imgW, imgH);
     if (_tt) { if (_tt.meta.tightened) region = _tt.region; _tg6b = _tt.meta; }
   }
+  // ★ แบตช์ C (C1/C2): ครอปช่องรอง "เล็งหน้า" + หลบโซนวง — คำสั่งสุดท้ายก่อน trace (PURE geometry)
+  //   เงื่อนไข: ไม่ใช่ hero · ไม่ใช่ _final · มีหน้าเด่น "ใบเดียว" ตกใน region (กลุ่ม/คู่ = ไม่แตะ ให้ group-crop เดิมทำงาน)
+  //   region ที่ผ่าน band+คลุมหัวอยู่แล้ว = ไม่เปลี่ยน (byte-parity) · สวิตช์ปิด/ไร้หน้า = เดิมทุก byte
+  let _needCircleBackup = false;
+  if (!(crop && crop._final) && _promKind(slot) !== 'hero'
+    && _facesInRegionCount(fb, region, imgW, imgH) === 1) {
+    const _face = _dominantFaceInRegion(fb, region, imgW, imgH);
+    if (_face) {
+      if (_panelFaceCropOn()) {
+        const _rf = refineRegionForFace({ region, faceBox: _face, imgW, imgH, slotAspect: slot.w / slot.h, band: _panelBandForSlot(slot) });
+        if (_rf.changed) { region = _rf.region; _br += '+faceaim'; }
+      }
+      if (_circleAvoidOn() && slot._circleZone) {
+        const _bz = biasRegionFromCircleZone({ region, faceBox: _face, zone: slot._circleZone, imgW, imgH });
+        // ★ การ์ดกันหน้าตัด: ยอมรับ region ที่เลื่อนได้เฉพาะเมื่อหน้ายังอยู่ในกรอบครบทั้งใบ
+        //   (pure fn รับประกันแล้วหลังแก้ FIX#1 — ชั้นนี้ additive กันถดถอย · เผื่อ ±1px จากปัดเศษ)
+        const _fL = _face.x1 * imgW, _fR = _face.x2 * imgW, _fT = _face.y1 * imgH, _fB = _face.y2 * imgH;
+        const _faceIn = _bz.region && _fL >= _bz.region.left - 1 && _fR <= _bz.region.left + _bz.region.width + 1
+          && _fT >= _bz.region.top - 1 && _fB <= _bz.region.top + _bz.region.height + 1;
+        if (_bz.moved && _faceIn) { region = _bz.region; _br += '+circavoid'; }
+        else if (!_bz.avoided || (_bz.moved && !_faceIn)) _needCircleBackup = true; // เลี่ยงวงไม่ได้/เลี่ยงแล้วหน้าตัด → สัญญาณให้ composer ลองภาพสำรอง
+      }
+    }
+  }
   const _tr = _cropTrace(slot, _br, fb, imgW, imgH, region, traceSink); // เฟส 0.1: log อย่างเดียว
   if (_tr) _tr.tighten = _tg6b; // เฟส 6B: composer อ่าน tt.tighten → ธง crop_tightened/context_tightened/face_small
+  if (_tr && _needCircleBackup) _tr.circleAvoidNeedsBackup = true; // แบตช์ C: additive — composer อ่านเพื่อสลับภาพสำรอง
   if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ` ${slot.id}`); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
   region = _clampRegion(region, imgW, imgH); // ★ 10 ก.ค.: การ์ดสุดท้ายก่อน extract — ห้ามเกินขอบภาพเด็ดขาด
   // ★ เฟส 3.1+3.3 (10 ก.ค.): วัด upscale จริง (region px → slot px) — ติดธงยืด (composer อ่านจาก sink) + งด sharpen ตอนขยาย
