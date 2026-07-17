@@ -88,9 +88,12 @@ export default function LeadTimeline({ lead }) {
           {timeline.map((ev, i) => {
             const meta = TYPE_META[ev?.type] || { icon: '•', label: ev?.type || '-' };
             const isExtracted = ev?.type === 'extracted';
-            const openMode = extractView[i] || null; // 'clean' | 'raw' | null
+            const isSent = ev?.type === 'sent'; // 🧾 Q1 17 ก.ค. 69: ดู "เนื้อที่ส่งเจนจริง" ได้จาก event ส่ง
+            const openMode = extractView[i] || null; // 'clean' | 'raw' | 'insight' | 'payload' | null
             const hasClean = isExtracted && !!lead?.extract?.text;
             const hasRaw = isExtracted && !!lead?.extract?.raw;
+            const hasInsight = isExtracted && !!lead?.extract?.insight; // ประเด็นที่ถอดจากคลิป (ถ้าเป็นคลิป)
+            const hasPayload = isSent && !!lead?.sentPayload;
             return (
               <div key={i} style={{ display: 'grid', gap: 4 }}>
                 <div style={{ fontSize: 12, color: UI.dim, lineHeight: 1.5, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -112,14 +115,40 @@ export default function LeadTimeline({ lead }) {
                       style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, border: `1px solid ${UI.line}`, background: 'transparent', color: UI.muted, cursor: 'pointer' }}
                     >{openMode === 'raw' ? 'ซ่อนเนื้อดิบ ▲' : 'ดูดิบ ▾'}</button>
                   )}
+                  {/* 🧾 Q1 17 ก.ค. 69 (ผู้ใช้สั่ง — โซ่ตรวจคุณภาพครบ: ดิบ→กลั่น→ประเด็นถอด→เนื้อที่ส่งจริง) */}
+                  {hasInsight && (
+                    <button
+                      type="button"
+                      onClick={() => toggleExtractView(i, 'insight')}
+                      style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, border: `1px solid ${UI.line}`, background: 'transparent', color: UI.amber, cursor: 'pointer' }}
+                    >{openMode === 'insight' ? 'ซ่อนประเด็นถอด ▲' : '🧭 ประเด็นถอด ▾'}</button>
+                  )}
+                  {hasPayload && (
+                    <button
+                      type="button"
+                      onClick={() => toggleExtractView(i, 'payload')}
+                      style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, border: `1px solid ${UI.line}`, background: 'transparent', color: UI.accent, cursor: 'pointer' }}
+                    >{openMode === 'payload' ? 'ซ่อนเนื้อที่ส่งจริง ▲' : '📮 ดูเนื้อที่ส่งจริง ▾'}</button>
+                  )}
                 </div>
-                {isExtracted && openMode && (
+                {(isExtracted || isSent) && openMode && (
                   <div style={{
                     whiteSpace: 'pre-wrap', maxHeight: 260, overflowY: 'auto',
                     background: UI.card, border: `1px solid ${UI.line}`, borderRadius: 8,
                     padding: 8, fontSize: 12, color: UI.text, lineHeight: 1.6,
                   }}>
-                    {openMode === 'clean' ? (lead?.extract?.text || '(ไม่มีเนื้อกลั่น)') : (lead?.extract?.raw || '(ไม่มีเนื้อดิบ)')}
+                    {openMode === 'clean' && (lead?.extract?.text || '(ไม่มีเนื้อกลั่น)')}
+                    {openMode === 'raw' && (lead?.extract?.raw || '(ไม่มีเนื้อดิบ)')}
+                    {openMode === 'insight' && (() => {
+                      const ins = lead?.extract?.insight || {};
+                      return [
+                        ins.headline ? `หัวเรื่อง: ${ins.headline}` : '',
+                        ins.category ? `หมวด: ${ins.category}` : '',
+                        ins.overview ? `ภาพรวม: ${ins.overview}` : '',
+                        Array.isArray(ins.topics) && ins.topics.length ? `ประเด็น:\n- ${ins.topics.join('\n- ')}` : '',
+                      ].filter(Boolean).join('\n\n') || '(ไม่มีข้อมูลประเด็น)';
+                    })()}
+                    {openMode === 'payload' && (lead?.sentPayload || '(ใบนี้ส่งก่อนระบบเก็บเนื้อที่ส่งจริงจะเปิดใช้)')}
                   </div>
                 )}
               </div>
