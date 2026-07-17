@@ -835,22 +835,39 @@ export default function CoverPage() {
   //   ฉีดแทมเพลตชั่วคราว (custom ไม่เซฟ Supabase) + วางภาพลงช่องอัตโนมัติ · ไม่มี ?recipe = ข้ามทั้งก้อน (byte-parity)
   useEffect(() => {
     let jobId = '';
-    try { jobId = new URLSearchParams(window.location.search).get('recipe') || ''; } catch { jobId = ''; }
-    jobId = jobId.trim();
-    if (!jobId) return; // หน้าเดิมทุกพฤติกรรม
+    let useLocal = false;
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      jobId = (sp.get('recipe') || '').trim();
+      // ★ 17 ก.ค.: แหล่งสูตรที่สอง — ?recipeLocal=1 รับสูตรจาก localStorage (ส่งจาก /mega-compose-test ข้ามแท็บ)
+      useLocal = sp.get('recipeLocal') === '1';
+    } catch { jobId = ''; }
+    if (!jobId && !useLocal) return; // หน้าเดิมทุกพฤติกรรม
     let cancelled = false;
-    setRecipeMode(jobId);
+    setRecipeMode(jobId || 'ทางลัดประกอบ');
     setRecipeStatus('⏳ กำลังโหลดสูตรจากคิว...');
     (async () => {
       try {
-        const res = await fetch(`/api/mega/recipe?job=${encodeURIComponent(jobId)}`);
-        const data = await res.json().catch(() => ({}));
-        if (cancelled) return;
-        if (!res.ok || !data.success || !data.recipe) {
-          setRecipeStatus(`❌ เปิดสูตรไม่สำเร็จ: ${data.error || res.status}${data.errorType ? ` (${data.errorType})` : ''}`);
-          return;
+        let rc = null;
+        if (useLocal) {
+          // อ่านสูตรจาก localStorage — สดไม่เกิน 15 นาที (กันเปิดลิงก์ค้างข้ามวันแล้วได้สูตรเก่า)
+          try {
+            const raw = window.localStorage.getItem('crtRecipeHandoff');
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (parsed?.recipe && Date.now() - (parsed.at || 0) < 15 * 60 * 1000) rc = parsed.recipe;
+          } catch { rc = null; }
+          if (!rc) { setRecipeStatus('❌ ไม่พบสูตรที่ส่งมา (หมดอายุ/ถูกล้าง) — กลับไปกด "แก้ต่อในเอดิเตอร์" ใหม่'); return; }
+          if (rc.jobId) setRecipeMode(String(rc.jobId));
+        } else {
+          const res = await fetch(`/api/mega/recipe?job=${encodeURIComponent(jobId)}`);
+          const data = await res.json().catch(() => ({}));
+          if (cancelled) return;
+          if (!res.ok || !data.success || !data.recipe) {
+            setRecipeStatus(`❌ เปิดสูตรไม่สำเร็จ: ${data.error || res.status}${data.errorType ? ` (${data.errorType})` : ''}`);
+            return;
+          }
+          rc = data.recipe;
         }
-        const rc = data.recipe;
         setRecipe(rc);
         // ฉีดแทมเพลต recipe เข้า list (append — templates-load effect คง recipe-* ไว้)
         const tpl = { ...rc.template };

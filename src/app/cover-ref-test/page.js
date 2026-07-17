@@ -261,6 +261,7 @@ export default function CoverRefTestPage() {
       <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 2 }}>🎯 Cover Ref Test — เทียบภาพแสนไลค์</h1>
       <p style={{ color: '#64748b', fontSize: 13, marginTop: 0 }}>
         ผ่านท่อ MEGA เต็มทุกขั้น: analyze → keywords → search 4 แหล่ง → triage → เลือก 5 ช่อง → ปก · สร้าง AC-xxxx จริง (ช้ากว่าเดิม ~8-11 นาที)
+        {' · '}<a href="/mega-compose-test" style={{ color: '#4f46e5', fontWeight: 700 }}>⚡ ทางลัดประกอบจากเคสเดิม (~20 วิ)</a>
       </p>
 
       <div className="crtTwoCol" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>

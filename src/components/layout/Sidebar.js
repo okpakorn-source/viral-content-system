@@ -50,6 +50,7 @@ export default function Sidebar() {
     { type: 'divider', label: '🏭 MEGA สายพาน' },
     { label: 'MEGA คุมสายพาน', icon: '🏭', href: '/mega', highlight: true },
     { label: 'เทสปกเทียบ ref', icon: '🎯', href: '/cover-ref-test' },
+    { label: 'ทางลัดประกอบจากเคสเดิม', icon: '⚡', href: '/mega-compose-test' }, // ★ 17 ก.ค.: ทางเข้า UI (จูนครอป/โครงเร็ว ~20 วิ ไม่ค้นภาพใหม่)
     { label: 'คลังปก reference + DNA', icon: '🧬', href: '/ref-covers' },
     { label: 'คลังงานปก MEGA', icon: '🗂️', href: '/mega-covers' },
     { label: 'คลังเทคนิคปกแสนไลค์', icon: '📚', href: '/cover-techniques' },

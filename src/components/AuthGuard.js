@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 const AuthContext = createContext(null);
 
 // ★ หน้าสาธารณะ — เข้าได้โดยไม่ต้องล็อกอิน (กรอกชื่อในหน้าเอง) — ต้อง sync กับ PUBLIC_ROUTES ใน ClientLayout.js
-const PUBLIC_ROUTES = ['/login', '/cover-tester', '/image-search', '/news-filter', '/clip-transcript', '/quick-cover', '/cover-techniques', '/cover-ref-test']; // ★ 4 ก.ค.: /image-search คู่กับ /cover-tester · 9 ก.ค.: /quick-cover เทสปกบนมือถือ · 10 ก.ค.: /cover-techniques คลังเทคนิคปกแสนไลค์ · ⛔ 10 ก.ค.: ถอด /photo-enhance /casting (ลบระบบแล้ว) · ⛔ 16 ก.ค.: ถอด /news-desk (ยุบโต๊ะข่าวกลาง) · ★ 17 ก.ค.: /cover-ref-test เปิดสาธารณะใช้คิวบนมือถือ (ท่อหนักกั้นด้วยคีย์ทีมที่ middleware แล้ว)
+const PUBLIC_ROUTES = ['/login', '/cover-tester', '/image-search', '/news-filter', '/clip-transcript', '/quick-cover', '/cover-techniques', '/cover-ref-test', '/mega-compose-test']; // ★ 4 ก.ค.: /image-search คู่กับ /cover-tester · 9 ก.ค.: /quick-cover เทสปกบนมือถือ · 10 ก.ค.: /cover-techniques คลังเทคนิคปกแสนไลค์ · ⛔ 10 ก.ค.: ถอด /photo-enhance /casting (ลบระบบแล้ว) · ⛔ 16 ก.ค.: ถอด /news-desk (ยุบโต๊ะข่าวกลาง) · ★ 17 ก.ค.: /cover-ref-test เปิดสาธารณะใช้คิวบนมือถือ (ท่อหนักกั้นด้วยคีย์ทีมที่ middleware แล้ว)
 
 export function useAuth() {
   return useContext(AuthContext) || {};

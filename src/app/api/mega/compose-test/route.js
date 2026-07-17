@@ -242,10 +242,23 @@ export async function POST(req) {
       } catch { /* คลังล้มไม่กระทบผลเทส */ }
     }
 
+    // ★ 17 ก.ค. (ทางเข้า editor): แนบสูตรเอดิเตอร์ให้ผลทุกใบ (ผ่าน/ไม่ผ่าน QC) — เปิดแก้ต่อใน /cover-tester ได้ทันที
+    //   fail-open: สร้างสูตรไม่ได้ = null เฉยๆ ไม่กระทบผลประกอบ
+    let editorRecipe = null;
+    try {
+      const { buildEditorRecipe } = await import('@/lib/editorRecipe');
+      const _rcJob = {
+        id: `CT-${caseId}`,
+        dossier: { ...job.dossier, pickImages: { ...(job.dossier.pickImages || {}), slots }, cover: { qcVerdict } },
+      };
+      editorRecipe = buildEditorRecipe({ job: _rcJob, caseImages: imgs }) || null;
+    } catch { editorRecipe = null; }
+
     return NextResponse.json({
       ...out,
       caseId,
       qcVerdict,
+      editorRecipe, // ★ 17 ก.ค.: สูตรสำหรับปุ่ม "แก้ต่อในเอดิเตอร์" (null = สร้างไม่ได้)
       // ★ AC-0107 truthful parity (advisory tool ≠ Production): HTTP success:true still follows out.success (advisory) —
       //   so a QC-FAILED cover is still success:true here — BUT auto-archive above is now gated on qcVerdict.pass (a
       //   QC-failed cover is NOT archived). productionQcPass mirrors the Production HARD gate (/cover-ref-test): false =
