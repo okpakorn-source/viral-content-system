@@ -246,13 +246,24 @@ export default function CoverRefTestPage() {
   const rowBtn = (bg, color, brd) => ({ padding: '4px 8px', borderRadius: 7, border: `1px solid ${brd}`, background: bg, color, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', marginRight: 4, marginBottom: 4 });
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: 20, fontFamily: 'system-ui, sans-serif', color: '#0f172a' }}>
+    <div className="crtRoot" style={{ maxWidth: 1100, margin: '0 auto', padding: 20, fontFamily: 'system-ui, sans-serif', color: '#0f172a' }}>
+      {/* ★ 17 ก.ค. (มือถือ): media query ชุดเดียวครอบทั้งหน้า — จอแคบ: กริด 2 คอลัมน์พับเป็น 1 ·
+          input/textarea ≥16px กัน iOS ซูมเด้งตอนแตะ · ปุ่มในตารางคิวขยายเต็มนิ้ว (แถวละบรรทัด) */}
+      <style>{`
+        @media (max-width: 700px) {
+          .crtRoot { padding: 12px !important; }
+          .crtTwoCol { grid-template-columns: 1fr !important; gap: 14px !important; }
+          .crtRoot input, .crtRoot textarea { font-size: 16px !important; }
+          .crtQueueTable button { padding: 10px 14px !important; font-size: 13.5px !important; min-height: 42px; margin-bottom: 6px !important; display: inline-block; }
+          .crtQueueTable td, .crtQueueTable th { padding: 8px 8px !important; }
+        }
+      `}</style>
       <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 2 }}>🎯 Cover Ref Test — เทียบภาพแสนไลค์</h1>
       <p style={{ color: '#64748b', fontSize: 13, marginTop: 0 }}>
         ผ่านท่อ MEGA เต็มทุกขั้น: analyze → keywords → search 4 แหล่ง → triage → เลือก 5 ช่อง → ปก · สร้าง AC-xxxx จริง (ช้ากว่าเดิม ~8-11 นาที)
       </p>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+      <div className="crtTwoCol" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
         {/* ── ฟอร์ม ── */}
         <div>
           <label style={label}>หัวข่าว</label>
@@ -394,7 +405,7 @@ export default function CoverRefTestPage() {
             </div>
           )}
           {result.directorReason && <p style={{ fontSize: 13, color: '#475569', margin: '4px 0 12px' }}>🎬 {result.directorReason}</p>}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div className="crtTwoCol" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <div>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>ปกที่ระบบสร้าง</div>
               <img src={result.base64} alt="cover" style={{ width: '100%', borderRadius: 10, border: '2px solid #2563eb' }} />
@@ -500,7 +511,7 @@ export default function CoverRefTestPage() {
               {queueJobs.length === 0 ? (
                 <div style={{ padding: 16, textAlign: 'center', color: '#94a3b8', fontSize: 13, border: '1px dashed #cbd5e1', borderRadius: 8 }}>ยังไม่มีงานในคิว — ส่งข่าวเข้าคิวด้านบน</div>
               ) : (
-                <div style={{ overflowX: 'auto' }}>
+                <div className="crtQueueTable" style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
                     <thead>
                       <tr>
