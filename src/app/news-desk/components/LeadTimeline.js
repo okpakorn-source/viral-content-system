@@ -18,6 +18,7 @@ const TYPE_META = {
   written: { icon: '✍️', label: 'เขียนเสร็จ' },
   status: { icon: 'ℹ️', label: 'เปลี่ยนสถานะ' },
   refound: { icon: '🔁', label: 'เจอซ้ำอีกรอบ' }, // 🆕 17 ก.ค. 69: ใบที่มีอยู่แล้วในคลังถูกเจอซ้ำในรอบล่าใหม่ (saveLeads)
+  editor: { icon: '🎩', label: 'บก.คัด' }, // 🆕 E2 (17 ก.ค. 69): บก. AI คัดใบนี้จากคลังสะสม
 };
 
 function fmtTime(iso) {
@@ -47,6 +48,8 @@ function renderEventDetail(type, data) {
       return d.status || '-';
     case 'refound':
       return `รอบล่า ${d.runId || '-'}`;
+    case 'editor':
+      return `คะแนนโอกาส ${d.score}% · ${d.reason}`;
     default:
       return '';
   }
