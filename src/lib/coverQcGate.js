@@ -211,14 +211,21 @@ export function evaluateCoverQc(input = {}, opts = {}) {
       }
       continue;
     }
-    // circle_face_overlap → manual_review (hard) — วงทับหน้าคนในช่องใต้ (P-CIRCLE-01)
+    // circle_face_overlap → manual_review (hard) — วง "ทับกล่องหน้าจริง" (gap<0) ในช่องใต้ (P-CIRCLE-01)
+    //   ★ 17 ก.ค.: composer แยกระดับแล้ว — ทับจริงเท่านั้นที่มาธงนี้ · "แค่ใกล้" มาเป็น circle_face_near ด้านล่าง
     if (/^circle_face_overlap(:|$)/.test(f)) {
       if (techHard) {
         reviewFail = true;
-        reasons.push(`วงกลมทับ/ใกล้หน้าคนในช่องใต้ [${f}] → คนต้องดู (hard)`);
+        reasons.push(`วงกลมทับหน้าคนในช่องใต้จริง [${f}] → คนต้องดู (hard)`);
       } else {
-        advisory.push(`วงกลมทับ/ใกล้หน้าคนในช่องใต้ [${f}] — advisory`);
+        advisory.push(`วงกลมทับหน้าคนในช่องใต้ [${f}] — advisory`);
       }
+      continue;
+    }
+    // ★ 17 ก.ค.: circle_face_near — วง "แค่ใกล้หน้า" (0 ≤ gap < เกณฑ์) → advisory เสมอ (เตือนพอ ไม่ฆ่างาน)
+    //   เคสจริงปกตุ๊ก: วงทับตัวเสื้อใต้หน้า ระยะใกล้แต่ไม่ทับ — ตาเห็นสวยแต่โดน hard ฟรี
+    if (/^circle_face_near(:|$)/.test(f)) {
+      advisory.push(`วงกลมใกล้หน้าคนในช่องใต้ (ไม่ทับ) [${f}] — advisory เสมอ`);
       continue;
     }
     // ladder_break → advisory เสมอแม้ hard (P-ZOOM-01: คู่ข่าว pair ที่ถูกต้องก็ติดธงนี้ แยกไม่ได้)
