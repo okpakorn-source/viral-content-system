@@ -470,6 +470,12 @@ export default function CoverPage() {
   const [textBgColors, setTextBgColors] = useState({}); // override bg color per text slot
   const [textOverrides, setTextOverrides] = useState({}); // { lineId: { fontSize, color, dx, dy } }
   const [showGuide, setShowGuide] = useState(false);
+  // ★ แบตช์ E: โหมด recipe — เปิดงานคิวปก MEGA มาจัดต่อ (?recipe=MG-xxxx)
+  const [recipeMode, setRecipeMode] = useState(null);    // jobId หรือ null (หน้าเดิม)
+  const [recipe, setRecipe] = useState(null);            // ข้อมูลสูตรจาก /api/mega/recipe
+  const [recipeStatus, setRecipeStatus] = useState('');  // ข้อความสถานะโหลด/ผิดพลาด
+  const [savingCover, setSavingCover] = useState(false);
+  const [saveToast, setSaveToast] = useState(null);      // { ok, msg, id }
   const canvasRef = useRef(null);
   const fileRefs = useRef({});
 
@@ -605,8 +611,10 @@ export default function CoverPage() {
         if (data.success && data.templates?.length > 0) {
           // Filter only cover-format templates (have slots array with x/y/w/h)
           const coverTemplates = data.templates.filter(t => t.slots && t.slots.length > 0).map(normalizeTemplateToCanvas);
-          setTemplates([...BUILTIN_TEMPLATES, ...coverTemplates]);
-          if (coverTemplates.length > 0 && !BUILTIN_TEMPLATES.find(t => t.id === templateId)) {
+          // ★ แบตช์ E: คงแทมเพลต recipe-* ที่ hydrate ฉีดไว้ (กันโดน replace ทับหาย) — ไม่มี recipe = ผลเหมือนเดิมเป๊ะ
+          setTemplates(prev => [...BUILTIN_TEMPLATES, ...coverTemplates, ...prev.filter(t => String(t.id).startsWith('recipe-'))]);
+          // ★ แบตช์ E: อย่าสลับทับถ้าอยู่โหมด recipe (templateId ขึ้นต้น recipe-)
+          if (coverTemplates.length > 0 && !String(templateId).startsWith('recipe-') && !BUILTIN_TEMPLATES.find(t => t.id === templateId)) {
             setTemplateId(coverTemplates[0].id);
           }
         }
@@ -820,6 +828,68 @@ export default function CoverPage() {
     } catch {
       alert('โหลดรูปนี้ไม่สำเร็จ (ต้นทางอาจบล็อก) — ลองรูปอื่นในถาด');
       return false;
+    }
+  };
+
+  // ★ แบตช์ E (E1c): hydrate โหมด recipe — ?recipe=MG-xxxx → โหลดสูตรจาก /api/mega/recipe
+  //   ฉีดแทมเพลตชั่วคราว (custom ไม่เซฟ Supabase) + วางภาพลงช่องอัตโนมัติ · ไม่มี ?recipe = ข้ามทั้งก้อน (byte-parity)
+  useEffect(() => {
+    let jobId = '';
+    try { jobId = new URLSearchParams(window.location.search).get('recipe') || ''; } catch { jobId = ''; }
+    jobId = jobId.trim();
+    if (!jobId) return; // หน้าเดิมทุกพฤติกรรม
+    let cancelled = false;
+    setRecipeMode(jobId);
+    setRecipeStatus('⏳ กำลังโหลดสูตรจากคิว...');
+    (async () => {
+      try {
+        const res = await fetch(`/api/mega/recipe?job=${encodeURIComponent(jobId)}`);
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!res.ok || !data.success || !data.recipe) {
+          setRecipeStatus(`❌ เปิดสูตรไม่สำเร็จ: ${data.error || res.status}${data.errorType ? ` (${data.errorType})` : ''}`);
+          return;
+        }
+        const rc = data.recipe;
+        setRecipe(rc);
+        // ฉีดแทมเพลต recipe เข้า list (append — templates-load effect คง recipe-* ไว้)
+        const tpl = { ...rc.template };
+        setTemplates(prev => (prev.some(t => t.id === tpl.id) ? prev.map(t => t.id === tpl.id ? tpl : t) : [...prev, tpl]));
+        setTemplateId(tpl.id);
+        setSlotImages({}); setSlotOffsets({}); setSlotScales({}); setSlotCrops({});
+        // วางภาพลงช่องอัตโนมัติ (โหลดขนาน — ใบไหนล้มก็ข้าม ให้คนใส่เองจากพูล)
+        const entries = Object.entries(rc.imagesBySlot || {});
+        setRecipeStatus(`🖼️ กำลังวางภาพ ${entries.length} ช่อง...`);
+        const loaded = await Promise.all(entries.map(async ([slotId, url]) => {
+          try { return [slotId, await loadUrlImage(url)]; } catch { return [slotId, null]; }
+        }));
+        if (cancelled) return;
+        const map = {};
+        let okCount = 0;
+        for (const [slotId, img] of loaded) { if (img) { map[slotId] = img; okCount++; } }
+        setSlotImages(map);
+        setRecipeStatus(okCount === entries.length ? '' : `⚠️ วางภาพได้ ${okCount}/${entries.length} ช่อง (ที่เหลือใส่เองจากคลังภาพด้านล่าง)`);
+      } catch (e) {
+        if (!cancelled) setRecipeStatus('❌ เรียกสูตรล้ม: ' + (e?.message || 'ไม่ทราบสาเหตุ'));
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ★ แบตช์ E: คลิกภาพในพูล → วางลงช่องที่เลือกอยู่ (ไม่มี = ช่องว่างช่องแรก → main)
+  const assignPoolUrlToSlot = async (url) => {
+    const target = selectedSlotId
+      || (template && template.slots.find(sl => !slotImages[sl.id])?.id)
+      || (template && template.slots[0]?.id);
+    if (!target || !url) return;
+    try {
+      const img = await loadUrlImage(url);
+      setSlotImages(prev => ({ ...prev, [target]: img }));
+      setSlotCrops(p => ({ ...p, [target]: { zoom: 1, panX: 0, panY: 0 } }));
+      setSelectedSlotId(target);
+    } catch {
+      alert('โหลดรูปนี้ไม่สำเร็จ (ต้นทางอาจบล็อก CORS) — ลองภาพที่ rehost แล้ว (มีเครื่องหมายเขียว)');
     }
   };
 
@@ -1293,12 +1363,11 @@ export default function CoverPage() {
 
   useEffect(() => { render(); }, [render]);
 
-  // ── Download ──
-  const handleDownload = () => {
-    const canvas = canvasRef.current; if (!canvas || !template) return;
-    // Render clean (no handles)
+  // ── Render clean (no handles) ลง canvas — ใช้ร่วม download + บันทึกเข้าคลัง ──
+  const renderCleanCanvas = () => {
+    const canvas = canvasRef.current; if (!canvas || !template) return null;
     const ctx = canvas.getContext('2d');
-    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; // ★ คุณภาพสูงสุด (ไฟล์ดาวน์โหลด)
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; // ★ คุณภาพสูงสุด
     ctx.fillStyle = '#111119'; ctx.fillRect(0,0,W,H);
     drawBlurredBg(ctx, slotImages, template);
     const sorted = [...template.slots].sort((a,b) => (a.zIndex||0)-(b.zIndex||0));
@@ -1322,10 +1391,15 @@ export default function CoverPage() {
       if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, slotOffsets[slot.id], slotCrops[slot.id]);
       else drawRectSlot(ctx, img, eff, slotOffsets[slot.id], slotCrops[slot.id]);
     }
-
     // ★ 4 ก.ค. รอบ 2: โทนไว้อาลัยทั้งใบ + วง/กรอบแดง (ไม่มีเส้นประเลือก — ไฟล์จริงสะอาด)
     applyGlobalGray(ctx);
     drawMarkers(ctx, false);
+    return canvas;
+  };
+
+  // ── Download ──
+  const handleDownload = () => {
+    const canvas = renderCleanCanvas(); if (!canvas) return;
 
     canvas.toBlob((blob) => {
       const url = URL.createObjectURL(blob);
@@ -1336,6 +1410,40 @@ export default function CoverPage() {
     }, 'image/jpeg', 0.95);
     // Re-render with handles after short delay
     setTimeout(render, 100);
+  };
+
+  // ★ แบตช์ E (E2a): บันทึกปกที่แก้เองเข้าคลัง MEGA (โชว์เฉพาะโหมด recipe)
+  const saveCoverToArchive = async () => {
+    const canvas = renderCleanCanvas(); if (!canvas) return;
+    setSavingCover(true); setSaveToast(null);
+    let dataUrl;
+    try {
+      dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+    } catch {
+      // canvas taint: มีภาพจากเว็บนอก (ไม่ rehost) → export ไม่ได้
+      setSavingCover(false);
+      setSaveToast({ ok: false, msg: 'บันทึกไม่ได้: มีภาพบางช่องมาจากเว็บนอก (CORS) — สลับเป็นภาพที่ rehost แล้วในคลังภาพก่อน' });
+      setTimeout(render, 100);
+      return;
+    }
+    try {
+      const res = await fetch('/api/mega-covers/save', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ base64: dataUrl, title: recipe?.title || '', refJobId: recipeMode || '' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setSaveToast({ ok: true, msg: `บันทึกเข้าคลังแล้ว (${data.id})`, id: data.id });
+      } else {
+        setSaveToast({ ok: false, msg: `บันทึกไม่สำเร็จ: ${data.error || res.status}${data.errorType ? ` (${data.errorType})` : ''}` });
+      }
+    } catch (e) {
+      setSaveToast({ ok: false, msg: 'เรียก API บันทึกล้ม: ' + (e?.message || 'ไม่ทราบสาเหตุ') });
+    } finally {
+      setSavingCover(false);
+      setTimeout(render, 100);
+    }
   };
 
   const switchTemplate = (id) => { setTemplateId(id); setSlotOffsets({}); setSlotScales({}); };
@@ -1445,6 +1553,72 @@ export default function CoverPage() {
       </div>
 
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 16px 60px' }}>
+        {/* ★ แบตช์ E (E1c): แถบโหมด recipe — เปิดงานคิวปก MEGA มาจัดต่อ */}
+        {recipeMode && (
+          <div style={{ marginBottom: 16, padding: 16, borderRadius: 14, background: 'linear-gradient(135deg, rgba(96,165,250,0.08), rgba(124,58,237,0.06))', border: '1px solid rgba(96,165,250,0.25)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)' }}>🗂️ แก้ต่อจากคิว: {recipeMode}</span>
+              {recipe?.status && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'rgba(148,163,184,0.15)', color: '#94a3b8' }}>สถานะเดิม: {recipe.status}</span>}
+              {recipe?.refStyle && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>ref: {recipe.refStyle}</span>}
+              {recipe?.caseId && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>เคส: {recipe.caseId}</span>}
+            </div>
+            {recipe?.title && <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>{recipe.title}</div>}
+            {recipeStatus && <div style={{ fontSize: 12, color: '#facc15', marginTop: 6 }}>{recipeStatus}</div>}
+
+            {/* แผงเหตุผล QC (โชว์เมื่อระบบตัดสินไม่ผ่าน) */}
+            {recipe?.qc && recipe.qc.pass === false && (
+              <div style={{ marginTop: 12, padding: 12, borderRadius: 10, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.25)' }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#f87171', marginBottom: 6 }}>⚠️ ระบบ QC ไม่ผ่าน — เช็คลิสต์ที่ต้องแก้</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>{recipe.qc.summary}</div>
+                {recipe.qc.reasons?.length > 0 && (
+                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+                    {recipe.qc.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                  </ul>
+                )}
+              </div>
+            )}
+            {recipe?.qc && recipe.qc.pass === true && (
+              <div style={{ marginTop: 10, fontSize: 12, color: '#4ade80' }}>✅ ระบบ QC ผ่าน — ปรับแต่งเพิ่มได้ตามใจ แล้วบันทึกทับ/เพิ่ม revision ได้</div>
+            )}
+
+            {/* คลังภาพข่าวนี้ — คลิก = ใส่ลงช่องที่เลือกอยู่ */}
+            {recipe?.pool?.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                  🗂️ คลังภาพข่าวนี้ ({recipe.pool.length}) <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>— เลือกช่องบนปกก่อน แล้วคลิกภาพเพื่อวาง{selectedSlotId ? ` · ช่องที่เลือก: ${selectedSlotId}` : ' · (ยังไม่เลือกช่อง = ลงช่องว่างช่องแรก)'}</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', maxHeight: 200, overflowY: 'auto', padding: 4, background: 'rgba(0,0,0,0.15)', borderRadius: 8 }}>
+                  {recipe.pool.map((p, i) => (
+                    <button key={p.id || i} onClick={() => assignPoolUrlToSlot(p.url)}
+                      title={`${p.person || ''}${p.note ? ' · ' + p.note : ''}${/supabase\.co\/storage/.test(p.url) ? ' · ✅ rehost แล้ว' : ' · ⚠️ เว็บนอก (บันทึกไม่ได้)'}`}
+                      style={{ padding: 0, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', cursor: 'pointer', width: 62, height: 78, background: '#111', position: 'relative', flexShrink: 0 }}>
+                      <img src={p.thumb} alt={p.person || 'ภาพ'} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                      {/supabase\.co\/storage/.test(p.url) && (
+                        <span style={{ position: 'absolute', top: 2, right: 2, width: 10, height: 10, borderRadius: '50%', background: '#22c55e', border: '1px solid #fff' }} />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* บันทึกเข้าคลัง */}
+            <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button onClick={saveCoverToArchive} disabled={savingCover || !allSlotsFilled}
+                style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: (savingCover || !allSlotsFilled) ? 'var(--bg-elevated)' : '#7c3aed', color: (savingCover || !allSlotsFilled) ? 'var(--text-muted)' : '#fff', fontSize: 13, fontWeight: 800, cursor: (savingCover || !allSlotsFilled) ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+                {savingCover ? '⏳ กำลังบันทึก...' : '💾 บันทึกเข้าคลัง'}
+              </button>
+              {!allSlotsFilled && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>ใส่ภาพให้ครบทุกช่องก่อน</span>}
+              {saveToast && (
+                <span style={{ fontSize: 12, fontWeight: 700, color: saveToast.ok ? '#4ade80' : '#f87171' }}>
+                  {saveToast.ok ? '✅ ' : '❌ '}{saveToast.msg}
+                  {saveToast.ok && <a href="/mega-covers" style={{ marginLeft: 8, color: '#60a5fa' }}>เปิดคลัง →</a>}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ★ 4 ก.ค.: จอเล็ก = คอลัมน์เดียว "ปกขึ้นก่อน" (order สลับ) เครื่องมือทั้งหมดอยู่ใต้ปก */}
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '340px 1fr', gap: 16, alignItems: 'start' }}>
 
