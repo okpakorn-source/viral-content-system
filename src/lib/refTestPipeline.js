@@ -22,6 +22,7 @@ import { composeAndVerify } from '@/lib/services/megaComposerService'; // ★ La
 //   its availability and fails closed (never a fallback/reimplementation) before using it.
 import * as _composerModule from '@/lib/services/megaComposerService';
 import { buildImagesRouteResponse } from '@/lib/imageStore'; // ★ อ่านคลังรูป in-process (โมดูลจริงที่ /api/images/[id] ใช้)
+import { checkSearchQuota } from '@/lib/searchQuotaCircuit'; // ★ S2/S3 (17 ก.ค.): circuit เช็คโควตาค้นภาพก่อนเผา LLM
 
 const QUEUE_ADD_PATH = '/api/queue/add';
 const IMAGE_CASE_RE = /^\/api\/images\/[^/]+$/;
@@ -926,6 +927,16 @@ async function _rtLoopStage({ job, origin, runAdapter, maxIters, failOnFailed, w
 export async function rt_compass(job, opts = {}) {
   const { _deps = {}, env = process.env } = opts;
   const _compass = _deps.compassBrain || compassBrain;
+  // ★ S2 (17 ก.ค.): circuit เช็คโควตาค้นภาพ "ก่อน" เผา LLM (compass เป็นด่านแรกของสาย rt_*)
+  //   โควตาแห้ง → คืน waiting (งานฟื้นเองเมื่อโควตากลับ ไม่ fail ไม่นับ attempt) แทนการเผา compass/case/keywords
+  //   ทิ้งแล้วไปตายที่ค้นภาพ · default ON · MEGA_QUOTA_CIRCUIT=0 = ปิด (ไม่มี call ใหม่เลย byte-parity)
+  if (env.MEGA_QUOTA_CIRCUIT !== '0') {
+    const _checkQuota = _deps.checkSearchQuota || checkSearchQuota;
+    const q = await _checkQuota({ env });
+    if (!q.ok) {
+      return { status: 'waiting', nextAction: 'wait', summary: `SEARCH_QUOTA_EXHAUSTED: โควตาค้นภาพเหลือ ${q.left} — พักงานรอโควตากลับ` };
+    }
+  }
   const d = job.dossier || {};
   const content = String(d.extract?.text || '').trim();
   const newsTitle = String(d.desk?.title || '').trim();
@@ -961,9 +972,73 @@ export async function rt_s5keywords(job, opts = {}) {
   return { status: 'done', nextAction: 'continue', summary: r?.summary || '', dossierPatch: r?.dossierPatch || {} };
 }
 
+// ★ S3 self-heal (17 ก.ค.): กันบัค "retry ไร้ผลถาวร" หลังโควตาค้นภาพแห้ง
+// ------------------------------------------------------------
+// เหตุที่พิสูจน์แล้ว: รอบที่โควตา SerpApi หมด ทุกแหล่งค้นล้ม → dossier.images ค้างสถานะ "ค้นครบทุกแหล่งแล้ว"
+//   (searchedPlatforms ครบ + searchStats ล้วน error + totalAdded 0) · พอเติมโควตาแล้ว retry งานเดิม
+//   s5_search เห็น "next = undefined (ครบแหล่ง)" → ตอบ 'ค้นครบทุกแหล่งแต่ไม่ได้ภาพเลย' ทันที ไม่ค้นใหม่
+//   (ขณะที่ยิง POST /api/images/search ตรงๆ เคสเดียวกันได้ 47 ใบ) = retry ไร้ผลถาวร
+//
+// ทำไมเลือก "ทาง ก" (self-heal ใน rt_s5search) ไม่ใช่ "ทาง ข" (hook ใน retry action ที่ route.js):
+//   • sync mode (runCoverRefTest) วนค้นด้วย loop คนละชุด สร้าง dossier ใหม่ทุกครั้ง (ไม่มี state ค้าง) —
+//     แก้ที่ rt_s5search (โหมดคิวล้วน) จึง "ไม่แตะ sync mode เลย" ตามข้อกำหนด
+//   • retry action ที่ route.js เป็นทางเข้ากลางของทุกงาน MEGA (ไม่ใช่แค่ reftest) — hook ตรงนั้นเสี่ยง
+//     กระทบงานประเภทอื่น · self-heal ตรงจุดที่ใช้จริง + เงื่อนไขแคบ + once-per-job = ผลกระทบน้อยสุด
+//
+// เงื่อนไขปลดล็อก (ต้องครบทุกข้อ — พลาดข้อใด = ไม่แตะ พฤติกรรมเดิม):
+//   1) ยังไม่เคย self-heal งานนี้ (dossier.images.searchStateResetAt) — กันวนซ้ำ ทำได้ครั้งเดียว/งาน
+//   2) เคยค้นแล้ว (searchedPlatforms>0 และมี searchStats) — รอบแรกจริงไม่เข้าเงื่อนไข
+//   3) ค้นล้มทุกแหล่ง (searchStats ล้วน error) และเก็บได้ 0 ใบ — fingerprint ของ "โควตาแห้งทั้งรอบ"
+//   4) พูลภาพจริงของเคส = 0 ใบ (อ่านคลัง in-process) — อ่านไม่ได้ = ไม่ reset (fail-safe)
+//   5) โควตากลับมา ok แล้ว — ไม่งั้น reset ไปก็ค้นล้มซ้ำ
+export async function _maybeHealStaleSearchState({ job, env, checkQuota, readImageCase }) {
+  const im = job?.dossier?.images;
+  if (!im || typeof im !== 'object') return false;
+  if (im.searchStateResetAt) return false;                     // (1) reset ได้ครั้งเดียว/งาน
+  const done = Array.isArray(im.searchedPlatforms) ? im.searchedPlatforms : [];
+  const stats = Array.isArray(im.searchStats) ? im.searchStats : [];
+  if (!done.length || !stats.length) return false;             // (2) ยังไม่เคยค้น
+  const failedAll = stats.every((s) => s && s.error);          // (3) ค้นล้มทุกแหล่ง
+  const totalAdded = stats.reduce((n, s) => n + (Number(s?.added) || 0), 0);
+  if (!failedAll || totalAdded > 0) return false;
+  const caseId = im.caseId;
+  if (!caseId) return false;
+  // (4) พูลจริงต้อง 0 ใบ — อ่านคลังเคส in-process (buildImagesRouteResponse คืน { status, body:{ images, total } })
+  let poolSize = null;
+  try {
+    const res = await readImageCase(caseId);
+    const imgs = res?.body?.images ?? res?.images;
+    if (Array.isArray(imgs)) poolSize = imgs.length;
+    else { const t = Number(res?.body?.total ?? res?.total); poolSize = Number.isFinite(t) ? t : null; }
+  } catch { return false; }                                    // อ่านไม่ได้ = ไม่แน่ใจ → ไม่ reset
+  if (poolSize == null || poolSize > 0) return false;
+  // (5) โควตาต้องกลับมา ok — เช็คล้ม/ไม่มีคีย์ = fail-open ok:true (ยอมให้ reset ลองค้นใหม่)
+  const q = await checkQuota({ env });
+  if (!q.ok) return false;
+  return true;
+}
+
 export async function rt_s5search(job, opts = {}) {
-  const { origin = '', _deps = {} } = opts;
+  const { origin = '', _deps = {}, env = process.env } = opts;
   const _s5_search = _deps.s5_search || s5_search;
+  // ★ S3: ล้างสถานะแหล่งค้างจากรอบโควตาแห้ง (once/job) "ก่อน" วนค้น — ให้ loop ค้นใหม่ครบชุด 1 รอบเต็ม
+  //   (สวิตช์เดียวกับ circuit — MEGA_QUOTA_CIRCUIT=0 = ปิดทั้ง self-heal ไม่มี read/quota-call ใหม่เลย)
+  if (env.MEGA_QUOTA_CIRCUIT !== '0') {
+    const _checkQuota = _deps.checkSearchQuota || checkSearchQuota;
+    const _readImageCase = _deps.readImageCase || ((caseId) => buildImagesRouteResponse(caseId, null));
+    const heal = await _maybeHealStaleSearchState({ job, env, checkQuota: _checkQuota, readImageCase: _readImageCase }).catch(() => false);
+    if (heal) {
+      // ล้าง searchedPlatforms/searchStats/totalAdded ค้าง + ปักธง searchStateResetAt กันทำซ้ำ
+      //   เขียนลง job.dossier.images ตรงๆ (ให้ s5_search ในลูปเห็นสถานะว่าง = ค้นใหม่ตั้งแต่แหล่งแรก) ·
+      //   ธง searchStateResetAt จะถูก s5_search spread ต่อไปในทุก dossierPatch (im คือ ...ของเดิม) → persist ผ่าน tick เอง
+      const cleared = { ...(job.dossier.images || {}) };
+      delete cleared.searchedPlatforms;
+      delete cleared.searchStats;
+      delete cleared.totalAdded;
+      cleared.searchStateResetAt = new Date().toISOString();
+      job.dossier.images = cleared;
+    }
+  }
   const { failed, last, acc } = await _rtLoopStage({ job, origin, runAdapter: () => _s5_search(job, { origin }), maxIters: 8, failOnFailed: true, waitMs: 0 });
   if (failed) return { status: 'failed', nextAction: 'fail', summary: 'S5_SEARCH_FAILED: ' + (failed.summary || ''), dossierPatch: acc };
   return { status: 'done', nextAction: 'continue', summary: last?.summary || '', dossierPatch: acc };
@@ -1076,7 +1151,7 @@ async function _defaultGapSearch({ origin, caseId, platform, keywords }) {
 //   ล้มเหลว/ได้ 0 ใบ = ไม่ fail งาน (บันทึก summary แล้วไหลต่อ rt_s5triage: ตาคัดของใหม่ → s6 → s7 ตามท่อเดิม)
 //   รอบ gap ถัดไปโดนเพดาน GAP_HUNT_MAX_ROUNDS ตัดที่ rt_s7compose เอง
 export async function rt_gaphunt(job, opts = {}) {
-  const { origin = '', _deps = {} } = opts;
+  const { origin = '', _deps = {}, env = process.env } = opts;
   const _search = _deps.gapSearchFn || _defaultGapSearch;
   const d = job.dossier || {};
   const caseId = d.images?.caseId || null;
@@ -1086,6 +1161,17 @@ export async function rt_gaphunt(job, opts = {}) {
 
   if (!caseId || !needs.length) {
     return { status: 'done', nextAction: 'continue', summary: `GAP_HUNT รอบ ${round}: ไม่มี need/caseId — ข้าม ไหลต่อ triage`, dossierPatch: {} };
+  }
+
+  // ★ S2 (17 ก.ค.): โควตาค้นภาพแห้ง → "ข้าม" gap hunt แล้วไหลต่อตาคัด (ตามดีไซน์ G เดิม — hunt เป็นทางเลือก
+  //   ไม่ใช่ตัวฆ่างาน) · ต่างจาก rt_compass ที่พักงาน (waiting) เพราะ compass เป็นด่านบังคับต้นสาย
+  //   default ON · MEGA_QUOTA_CIRCUIT=0 = ปิด (ไม่มี call ใหม่เลย byte-parity)
+  if (env.MEGA_QUOTA_CIRCUIT !== '0') {
+    const _checkQuota = _deps.checkSearchQuota || checkSearchQuota;
+    const q = await _checkQuota({ env });
+    if (!q.ok) {
+      return { status: 'done', nextAction: 'continue', summary: `GAP_HUNT รอบ ${round}: โควตาค้นภาพเหลือ ${q.left} — ข้าม hunt ไหลต่อตาคัด`, dossierPatch: {} };
+    }
   }
 
   const PLATFORMS = ['google', 'google_news']; // ★ เฉพาะ 2 แหล่งภาพ press คุณภาพดี — ห้ามครบ 4 แหล่ง

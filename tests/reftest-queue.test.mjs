@@ -32,9 +32,12 @@ globalThis.fetch = () => { fetchBombCalls++; throw new Error('NETWORK_BOMB: glob
 
 const {
   rt_compass, rt_s5case, rt_s5keywords, rt_s5search, rt_s5triage, rt_s5clipframe, rt_s6slots, rt_s7compose,
-  rt_gaphunt, _buildGapNeeds,
+  rt_gaphunt, _buildGapNeeds, _maybeHealStaleSearchState,
   enqueueRefTest, cancelRefTestJob, duplicateRefTestJob, runCoverRefTest,
 } = await import('../src/lib/refTestPipeline.js');
+
+// ★ S1 (17 ก.ค.): circuit เช็คโควตาค้นภาพ SerpApi (PURE + inject fetch)
+const { checkSearchQuota, _resetQuotaCache } = await import('../src/lib/searchQuotaCircuit.js');
 
 // ---------- in-memory store stub (mirror megaJobStore newJob/updateJob/getJob) ----------
 function mkStore(initial = []) {
@@ -429,6 +432,260 @@ test('G1-6 _buildGapNeeds: ครอปพัง/hero ยืด → person_clear
   const needsHero = _buildGapNeeds(['upscaled:main:1.9'], dossier);
   assert.ok(needsHero.some((n) => n.type === 'person_big' && n.person === 'ก'), 'hero ยืด → person_big');
   assert.strictEqual(_buildGapNeeds(['duplicate_person_panels:ก:3'], { compass: { mainCharacters: [] } }).length, 0, 'ไม่มีชื่อ = ไม่มี need (ค้นไม่ได้)');
+});
+
+// ============================================================ S1 — searchQuotaCircuit (PURE)
+test('S1-1 checkSearchQuota: โควตาพอ (left>=min) → ok', async () => {
+  _resetQuotaCache();
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ total_searches_left: 500 }) });
+  const q = await checkSearchQuota({ fetchImpl, env: { SERPAPI_KEY: 'K1' }, now: 1000 });
+  assert.strictEqual(q.ok, true);
+  assert.strictEqual(q.left, 500);
+  assert.strictEqual(fetchBombCalls, 0, 'ใช้ fetchImpl ที่ฉีด ไม่แตะ global.fetch');
+});
+
+test('S1-2 checkSearchQuota: โควตาต่ำ (left<min) → ไม่ ok + reason SEARCH_QUOTA_EXHAUSTED', async () => {
+  _resetQuotaCache();
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ total_searches_left: 5 }) });
+  const q = await checkSearchQuota({ fetchImpl, env: { SERPAPI_KEY: 'K2', MEGA_QUOTA_MIN: '20' }, now: 1000 });
+  assert.strictEqual(q.ok, false);
+  assert.strictEqual(q.left, 5);
+  assert.match(q.reason, /SEARCH_QUOTA_EXHAUSTED/);
+});
+
+test('S1-3 checkSearchQuota: MEGA_QUOTA_MIN กำหนดเกณฑ์เอง (left=15, min=10 → ok)', async () => {
+  _resetQuotaCache();
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ total_searches_left: 15 }) });
+  const q = await checkSearchQuota({ fetchImpl, env: { SERPAPI_KEY: 'K2b', MEGA_QUOTA_MIN: '10' }, now: 1000 });
+  assert.strictEqual(q.ok, true);
+});
+
+test('S1-4 checkSearchQuota: ไม่มี key → fail-open ok:true (ไม่ยิง fetch)', async () => {
+  _resetQuotaCache();
+  let fetched = 0;
+  const fetchImpl = async () => { fetched++; return { ok: true, json: async () => ({}) }; };
+  const q = await checkSearchQuota({ fetchImpl, env: {}, now: 1000 });
+  assert.strictEqual(q.ok, true);
+  assert.strictEqual(q.left, null);
+  assert.strictEqual(fetched, 0, 'ไม่มีคีย์ = ไม่ยิง');
+});
+
+test('S1-5 checkSearchQuota: fetch throw → fail-open ok:true (เช็คพัง ห้าม block งาน)', async () => {
+  _resetQuotaCache();
+  const fetchImpl = async () => { throw new Error('network down'); };
+  const q = await checkSearchQuota({ fetchImpl, env: { SERPAPI_KEY: 'K3' }, now: 1000 });
+  assert.strictEqual(q.ok, true);
+  assert.strictEqual(q.left, null);
+  assert.match(q.reason, /ตรวจไม่ได้/);
+});
+
+test('S1-6 checkSearchQuota: HTTP error (res.ok=false) → fail-open ok:true (ไม่ cache)', async () => {
+  _resetQuotaCache();
+  let fetched = 0;
+  const fetchImpl = async () => { fetched++; return { ok: false, status: 429, json: async () => ({}) }; };
+  const q1 = await checkSearchQuota({ fetchImpl, env: { SERPAPI_KEY: 'K5' }, now: 1000 });
+  assert.strictEqual(q1.ok, true);
+  assert.strictEqual(q1.left, null);
+  // ไม่ cache ผล fail-open → ยิงใหม่รอบถัดไป
+  await checkSearchQuota({ fetchImpl, env: { SERPAPI_KEY: 'K5' }, now: 1100 });
+  assert.strictEqual(fetched, 2, 'fail-open ไม่ cache — ยิงใหม่ทุกครั้งจนอ่านได้');
+});
+
+test('S1-7 checkSearchQuota: cache ~5 นาที (memo ตาม now) — ยิงครั้งเดียวภายใน TTL, เกินแล้วยิงใหม่', async () => {
+  _resetQuotaCache();
+  let fetched = 0;
+  const fetchImpl = async () => { fetched++; return { ok: true, json: async () => ({ total_searches_left: 100 }) }; };
+  const env = { SERPAPI_KEY: 'K4' };
+  await checkSearchQuota({ fetchImpl, env, now: 0 });
+  await checkSearchQuota({ fetchImpl, env, now: 60_000 });    // +1 นาที < TTL → cache
+  assert.strictEqual(fetched, 1, 'ภายใน TTL ยิงครั้งเดียว');
+  const q = await checkSearchQuota({ fetchImpl, env, now: 6 * 60_000 }); // +6 นาที > TTL → ยิงใหม่
+  assert.strictEqual(fetched, 2, 'เกิน TTL ยิงใหม่');
+  assert.strictEqual(q.left, 100);
+});
+
+// ============================================================ S2 — circuit wired เข้า rt_*
+test('S2-1 rt_compass: โควตาแห้ง → waiting (ไม่เผา compass LLM)', async () => {
+  let compassCalls = 0;
+  const deps = {
+    checkSearchQuota: async () => ({ ok: false, left: 3 }),
+    compassBrain: async () => { compassCalls++; return { mainCharacters: [] }; },
+  };
+  const r = await rt_compass(seedJob(), { _deps: deps, env: {} });
+  assert.strictEqual(r.status, 'waiting');
+  assert.strictEqual(r.nextAction, 'wait');
+  assert.match(r.summary, /SEARCH_QUOTA_EXHAUSTED/);
+  assert.match(r.summary, /เหลือ 3/);
+  assert.strictEqual(compassCalls, 0, 'ไม่เรียก compass เมื่อโควตาแห้ง (กันเผา LLM)');
+});
+
+test('S2-2 rt_compass: โควตา ok → เดิน compass ปกติ', async () => {
+  let compassCalls = 0;
+  const deps = {
+    checkSearchQuota: async () => ({ ok: true, left: 9998 }),
+    compassBrain: async () => { compassCalls++; return { angle: 'a', primaryEmotion: 'w', mainCharacters: [{ name: 'ก' }] }; },
+  };
+  const r = await rt_compass(seedJob(), { _deps: deps, env: {} });
+  assert.strictEqual(r.status, 'done');
+  assert.strictEqual(compassCalls, 1);
+});
+
+test('S2-3 rt_compass: MEGA_QUOTA_CIRCUIT=0 → ปิด circuit (ไม่มี call เช็คโควตา, byte-parity)', async () => {
+  let quotaCalls = 0, compassCalls = 0;
+  const deps = {
+    checkSearchQuota: async () => { quotaCalls++; return { ok: false, left: 0 }; },
+    compassBrain: async () => { compassCalls++; return { angle: 'a', primaryEmotion: 'w', mainCharacters: [{ name: 'ก' }] }; },
+  };
+  const r = await rt_compass(seedJob(), { _deps: deps, env: { MEGA_QUOTA_CIRCUIT: '0' } });
+  assert.strictEqual(quotaCalls, 0, 'ปิดสวิตช์ = ไม่มี call เช็คโควตาเลย');
+  assert.strictEqual(compassCalls, 1, 'compass เดินปกติ');
+  assert.strictEqual(r.status, 'done');
+});
+
+test('S2-4 rt_gaphunt: โควตาแห้ง → ข้าม hunt (done continue ไม่ยิงค้น)', async () => {
+  let searched = 0;
+  const job = gapJob();
+  job.dossier.gapHunt = { round: 1, needs: [{ type: 'person_distinct', person: 'ก', queries: ['ก'] }] };
+  const deps = {
+    checkSearchQuota: async () => ({ ok: false, left: 2 }),
+    gapSearchFn: async () => { searched++; return { added: 5 }; },
+  };
+  const r = await rt_gaphunt(job, { origin: 'm', _deps: deps, env: {} });
+  assert.strictEqual(r.status, 'done');
+  assert.strictEqual(r.nextAction, 'continue');
+  assert.match(r.summary, /ข้าม hunt/);
+  assert.strictEqual(searched, 0, 'ไม่ยิงค้นเมื่อโควตาแห้ง (วินัยโควตา)');
+});
+
+test('S2-5 rt_gaphunt: MEGA_QUOTA_CIRCUIT=0 → ไม่เช็คโควตา, ยิง hunt ปกติ', async () => {
+  let quotaCalls = 0, searched = 0;
+  const job = gapJob();
+  job.dossier.gapHunt = { round: 1, needs: [{ type: 'person_distinct', person: 'ก', queries: ['ก'] }] };
+  const deps = {
+    checkSearchQuota: async () => { quotaCalls++; return { ok: false, left: 0 }; },
+    gapSearchFn: async () => { searched++; return { added: 5 }; },
+  };
+  const r = await rt_gaphunt(job, { origin: 'm', _deps: deps, env: { MEGA_QUOTA_CIRCUIT: '0' } });
+  assert.strictEqual(quotaCalls, 0, 'ปิดสวิตช์ = ไม่เช็คโควตา');
+  assert.ok(searched > 0, 'ยิง hunt ปกติ');
+  assert.strictEqual(r.status, 'done');
+});
+
+// ============================================================ S3 — self-heal retry-state (เคสจริง)
+const staleSearchImages = () => ({
+  caseId: 'RT-CASE',
+  searchedPlatforms: ['google', 'google_news', 'facebook', 'tiktok'],
+  searchStats: [
+    { platform: 'google', error: 'quota' },
+    { platform: 'google_news', error: 'quota' },
+    { platform: 'facebook', error: 'quota' },
+    { platform: 'tiktok', error: 'quota' },
+  ],
+});
+
+test('S3-1 rt_s5search self-heal (เคสจริง): สถานะครบทุกแหล่ง+พูล 0+quota ok → ล้างสถานะ ค้นใหม่ได้ภาพ ไหลต่อ', async () => {
+  const observed = [];
+  const job = seedJob();
+  job.dossier.images = staleSearchImages();
+  let searchCalls = 0;
+  const deps = {
+    checkSearchQuota: async () => ({ ok: true, left: 9998 }),
+    readImageCase: async () => ({ status: 200, body: { images: [], total: 0 } }), // พูล 0 ใบ
+    s5_search: async (j) => {
+      searchCalls++;
+      const im = j.dossier.images || {};
+      observed.push({ searchedPlatforms: im.searchedPlatforms, resetAt: im.searchStateResetAt });
+      // จำลอง adapter จริง: หลังล้างสถานะ ค้นใหม่ได้ภาพ 47 ใบ → done
+      return { status: 'done', nextAction: 'continue', summary: 'ค้นใหม่ เก็บ 47 ใบ', dossierPatch: { images: { ...im, searchedPlatforms: ['google'], searchStats: [{ platform: 'google', added: 47 }], totalAdded: 47 } } };
+    },
+  };
+  const r = await rt_s5search(job, { origin: 'm', _deps: deps, env: { MEGA_COVER_ORIGIN: COVER_ORIGIN } });
+  assert.strictEqual(searchCalls, 1, 's5_search ถูกเรียกค้นใหม่ (ไม่ตอบ "ครบแหล่งไม่ได้ภาพ" ทันที)');
+  assert.strictEqual(observed[0].searchedPlatforms, undefined, 'สถานะแหล่งถูกล้างก่อนค้นใหม่');
+  assert.ok(observed[0].resetAt, 'ปักธง searchStateResetAt ก่อนค้น');
+  assert.strictEqual(r.status, 'done');
+  assert.strictEqual(r.nextAction, 'continue', 'ไหลต่อ rt_s5triage');
+  assert.ok(r.dossierPatch.images.searchStateResetAt, 'ธง reset persist ผ่าน dossierPatch (กันวนซ้ำข้าม tick)');
+  assert.strictEqual(r.dossierPatch.images.totalAdded, 47, 'ค้นใหม่ได้ภาพ 47 ใบ');
+});
+
+test('S3-2 rt_s5search: พูล > 0 → ไม่ reset (สถานะเดิมคงอยู่ — เงื่อนไขแคบ)', async () => {
+  const observed = [];
+  const job = seedJob();
+  job.dossier.images = staleSearchImages();
+  const deps = {
+    checkSearchQuota: async () => ({ ok: true, left: 9998 }),
+    readImageCase: async () => ({ status: 200, body: { images: [{ id: 'x', imageUrl: 'u' }], total: 1 } }), // พูลมีภาพ
+    s5_search: async (j) => {
+      const im = j.dossier.images || {};
+      observed.push({ searchedPlatforms: im.searchedPlatforms, resetAt: im.searchStateResetAt });
+      // สถานะเดิม (ครบแหล่ง) → adapter จริงตอบ failed
+      return { status: 'failed', nextAction: 'fail', summary: 'ค้นครบทุกแหล่งแต่ไม่ได้ภาพเลย' };
+    },
+  };
+  const r = await rt_s5search(job, { origin: 'm', _deps: deps, env: { MEGA_COVER_ORIGIN: COVER_ORIGIN } });
+  assert.deepStrictEqual(observed[0].searchedPlatforms, ['google', 'google_news', 'facebook', 'tiktok'], 'สถานะแหล่งไม่ถูกล้าง (พูลมีภาพ)');
+  assert.strictEqual(observed[0].resetAt, undefined, 'ไม่ปักธง reset');
+  assert.strictEqual(r.status, 'failed');
+});
+
+test('S3-3 rt_s5search: MEGA_QUOTA_CIRCUIT=0 → ไม่ self-heal (parity, ไม่มี read/quota call)', async () => {
+  const job = seedJob();
+  job.dossier.images = staleSearchImages();
+  let quotaCalls = 0, readCalls = 0;
+  const deps = {
+    checkSearchQuota: async () => { quotaCalls++; return { ok: true, left: 9998 }; },
+    readImageCase: async () => { readCalls++; return { status: 200, body: { images: [], total: 0 } }; },
+    s5_search: async () => ({ status: 'failed', nextAction: 'fail', summary: 'ค้นครบทุกแหล่งแต่ไม่ได้ภาพเลย' }),
+  };
+  const r = await rt_s5search(job, { origin: 'm', _deps: deps, env: { MEGA_COVER_ORIGIN: COVER_ORIGIN, MEGA_QUOTA_CIRCUIT: '0' } });
+  assert.strictEqual(quotaCalls, 0, 'ปิดสวิตช์ = ไม่เช็คโควตา');
+  assert.strictEqual(readCalls, 0, 'ปิดสวิตช์ = ไม่อ่านพูล');
+  assert.strictEqual(r.status, 'failed', 'พฤติกรรมเดิมเป๊ะเมื่อปิด circuit');
+});
+
+test('S3-4 _maybeHealStaleSearchState: quota ยังแห้ง → ไม่ reset (กันค้นล้มซ้ำ)', async () => {
+  const job = seedJob();
+  job.dossier.images = staleSearchImages();
+  const heal = await _maybeHealStaleSearchState({
+    job, env: {},
+    checkQuota: async () => ({ ok: false, left: 0 }),
+    readImageCase: async () => ({ status: 200, body: { images: [], total: 0 } }),
+  });
+  assert.strictEqual(heal, false, 'โควตายังแห้ง = ไม่ reset');
+});
+
+test('S3-5 _maybeHealStaleSearchState: เคยค้นสำเร็จ (totalAdded>0) → ไม่ reset', async () => {
+  const job = seedJob();
+  job.dossier.images = { caseId: 'RT-CASE', searchedPlatforms: ['google'], searchStats: [{ platform: 'google', added: 10 }] };
+  const heal = await _maybeHealStaleSearchState({
+    job, env: {},
+    checkQuota: async () => ({ ok: true, left: 9998 }),
+    readImageCase: async () => ({ status: 200, body: { images: [], total: 0 } }),
+  });
+  assert.strictEqual(heal, false, 'มีภาพเคยเก็บ = สถานะไม่พัง');
+});
+
+test('S3-6 _maybeHealStaleSearchState: reset แล้ว (searchStateResetAt) → ไม่ reset ซ้ำ', async () => {
+  const job = seedJob();
+  job.dossier.images = { ...staleSearchImages(), searchStateResetAt: 'เมื่อกี้' };
+  const heal = await _maybeHealStaleSearchState({
+    job, env: {},
+    checkQuota: async () => ({ ok: true, left: 9998 }),
+    readImageCase: async () => ({ status: 200, body: { images: [], total: 0 } }),
+  });
+  assert.strictEqual(heal, false, 'once-per-job (กันวนซ้ำ)');
+});
+
+test('S3-7 _maybeHealStaleSearchState: อ่านพูลไม่ได้ (throw) → ไม่ reset (fail-safe)', async () => {
+  const job = seedJob();
+  job.dossier.images = staleSearchImages();
+  const heal = await _maybeHealStaleSearchState({
+    job, env: {},
+    checkQuota: async () => ({ ok: true, left: 9998 }),
+    readImageCase: async () => { throw new Error('store down'); },
+  });
+  assert.strictEqual(heal, false, 'ไม่แน่ใจพูล = ไม่ล้างสถานะ');
 });
 
 test('z restore fetch descriptor', () => {
