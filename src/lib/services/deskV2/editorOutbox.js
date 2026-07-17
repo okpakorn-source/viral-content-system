@@ -31,7 +31,8 @@ const QUEUE_STATUS_TIMEOUT_MS = 15_000;
 const CLIP_DISPATCH_POLL_MS = 15_000;            // งบรอถอดคลิปต่อใบใน 1 รอบ cron — เช็คสถานะพอ ไม่นั่งเฝ้า 6 นาที
 //   (เดิม extractClip poll 6 นาที > maxDuration 300s ของ route → Vercel ฆ่ากลางทาง → ใบค้าง 'sending' ถาวร)
 const PENDING_BACKOFF_MS = 4 * 60 * 1000;        // ใบที่รอคลิป/ล้มชั่วคราว พัก 4 นาทีค่อยลองใหม่ — เปิดทางใบที่พร้อม
-const DISPATCH_TIME_BUDGET_MS = 150_000;         // เพดานเวลาลองหลายใบใน 1 รอบ (กันชน maxDuration 300s ของ route)
+const DISPATCH_TIME_BUDGET_MS = 100_000;         // เพดานเวลาลองหลายใบใน 1 รอบ — 100s เพราะใบเดี่ยวแย่สุด (บทความ:
+//   Jina 30s + fallback + กลั่น 90s + ส่ง 30s ≈ ~190s) เริ่มที่วินาที 99 ก็ยังจบก่อน maxDuration 300s ของ route
 
 function clampScore(v) {
   const n = Number(v);
@@ -216,8 +217,25 @@ export async function dispatchOne({ origin } = {}) {
   const deferred = [];
   const failed = [];
 
+  let sentAnything = false;
   for (const cand of candidates) {
     if (Date.now() - t0 > DISPATCH_TIME_BUDGET_MS) break; // งบเวลารอบนี้หมด — ที่เหลือรอ cron รอบหน้า
+
+    // 🔧 มารยาทคิวแบบสด (ผู้ตรวจจับ): เช็คคิวว่างซ้ำก่อน "ทุกใบ" ไม่ใช่แค่ต้นรอบ — งานพนักงาน
+    //   อาจเข้ามาระหว่างที่เราไล่ใบก่อนหน้า (รอบหนึ่งกินได้เป็นนาที) → เจอคิวไม่ว่าง = หยุดทันที
+    if (sentAnything) break; // สุภาพ: ปล่อยได้แค่ 1 ใบ/รอบเสมอ (กันหลุดเชิงตรรกะในอนาคต)
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const qres = await _fetchWithTimeout(`${origin}/api/queue/status`, {}, QUEUE_STATUS_TIMEOUT_MS);
+      // eslint-disable-next-line no-await-in-loop
+      const qbody = await qres.json().catch(() => null);
+      if (!qres.ok || !qbody || qbody.success !== true) break; // เช็คคิวไม่ได้ = ไม่เสี่ยงปล่อย — รอบหน้าค่อยว่ากัน
+      if ((Number(qbody.pending) || 0) > 0 || (Number(qbody.processing) || 0) > 0) {
+        return { held: true, queueBusy: { pending: Number(qbody.pending) || 0, processing: Number(qbody.processing) || 0 }, deferred, failed };
+      }
+    } catch {
+      break; // เน็ตสะดุด = ไม่เสี่ยงปล่อย
+    }
 
     // อ่าน record สดก่อน claim — กัน cron รอบคาบเกี่ยวหยิบใบเดียวกันซ้ำ (snapshot ต้นรอบอาจตกรุ่นแล้ว)
     // eslint-disable-next-line no-await-in-loop
@@ -255,6 +273,8 @@ export async function dispatchOne({ origin } = {}) {
         status: 'waiting',
         nextEligibleAt: new Date(Date.now() + PENDING_BACKOFF_MS).toISOString(),
         lastNote: note,
+        // 🩺 หมอเวร (deskWatchdog): ประทับเวลาพักรอคลิป "ครั้งแรก" — ใช้ตัดสินใบที่รอนานเกิน 3 ชม.
+        firstDeferredAt: claimed.firstDeferredAt || new Date().toISOString(),
       });
       deferred.push({ leadId: fresh.leadId, jobRef });
       continue;
@@ -262,10 +282,12 @@ export async function dispatchOne({ origin } = {}) {
 
     if (sendResult?.success || sendResult?.alreadySent) {
       const jobId = sendResult.jobId || null;
+      sentAnything = true;
       // eslint-disable-next-line no-await-in-loop
       await store.remove(fresh.id);
+      // ล้างร่องรอยเฟสรอ (firstDeferredAt/nextEligibleAt) — กันหมอเวรรูล 3 ชม. อ่านค่าเก่าแล้วตัดสินผิดใบ
       // eslint-disable-next-line no-await-in-loop
-      await store.add({ ...claimed, status: 'sent', sentJobId: jobId, sentAt: new Date().toISOString(), lastNote: '' });
+      await store.add({ ...claimed, status: 'sent', sentJobId: jobId, sentAt: new Date().toISOString(), lastNote: '', firstDeferredAt: null, nextEligibleAt: null });
       return { sent: { leadId: fresh.leadId, jobId }, deferred, failed };
     }
 

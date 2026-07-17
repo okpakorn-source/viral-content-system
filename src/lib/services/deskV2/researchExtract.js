@@ -61,7 +61,7 @@ const CLIP_HOST_RE = /(youtube\.com|youtu\.be|facebook\.com|fb\.watch|fb\.com|m\
  */
 export function classifyExtractRoute(lead) {
   const channel = String(lead?.channel || '').toLowerCase();
-  if (channel === 'youtube' || channel === 'facebook' || channel === 'tiktok') return 'clip';
+  if (channel === 'youtube' || channel === 'facebook' || channel === 'reels' || channel === 'tiktok') return 'clip';
   const host = String(lead?.sourceHost || '').toLowerCase();
   const url = String(lead?.url || '').toLowerCase();
   if (CLIP_HOST_RE.test(host) || CLIP_HOST_RE.test(url)) return 'clip';

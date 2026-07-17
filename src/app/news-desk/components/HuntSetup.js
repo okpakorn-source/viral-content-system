@@ -15,7 +15,8 @@ const JUDGE_UNIT = { fast: 0.15, primary: 1 }; // ฿/ใบ
 
 export const CHANNELS = [
   { key: 'videos', label: '🎬 วิดีโอ', hint: 'Google Videos' },
-  { key: 'facebook', label: '📘 Facebook', hint: 'ค้นผ่าน Serper' },
+  { key: 'facebook', label: '📘 Facebook', hint: 'โพสต์เพจ/กลุ่ม — ค้นผ่าน Serper' },
+  { key: 'reels', label: '🎞️ FB Reels', hint: 'คลิปสั้น FB — ข่าวปัง/ไฮไลท์เด็ดเยอะ (เจาะ /reel ตรงๆ)' }, // ★ 17 ก.ค.: ผู้ใช้สั่งเพิ่ม
   { key: 'tiktok', label: '🎵 TikTok', hint: 'ค้นผ่าน Serper' },
   { key: 'youtube', label: '▶️ YouTube', hint: 'YouTube API (ฟรี)' },
   { key: 'google', label: '🌐 Google', hint: 'ลิงก์ข่าวสำนักต่างๆ — ข่าวเก่าน้ำดีทำใหม่ได้ (ดึงเนื้อเต็มได้)' }, // ★ 16 ก.ค.: ผู้ใช้สั่งเพิ่ม
