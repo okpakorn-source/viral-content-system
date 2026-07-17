@@ -123,8 +123,15 @@ export function evaluateCoverQc(input = {}, opts = {}) {
       continue;
     }
     if (f === 'circle_same_person_as_hero') {
-      reviewFail = true;
-      reasons.push('วงกลมเป็นคนเดียวกับ hero (ไม่มีตัวเลือกจริง) → คนต้องดู');
+      // ★ นโยบายเจ้าของ 17 ก.ค.: "คนซ้ำทำได้ไม่ผิด — หลายข่าวดาราควรเป็นแบบนั้น แต่ต้องภาพเกี่ยวและสะอาด"
+      //   MEGA_PERSON_DIVERSITY='0' = นโยบายคนซ้ำได้ → ธงนี้ลด advisory (ร่มเดียวกับ duplicate_person_panels)
+      //   unset/อื่น = hard เดิมเป๊ะ (เทส/parity ไม่ขยับ — ค่าจริงตั้งที่ env)
+      if (process.env.MEGA_PERSON_DIVERSITY === '0') {
+        advisory.push('วงกลมเป็นคนเดียวกับ hero — ยอมรับตามนโยบายคนซ้ำได้ (ข่าวดารา) [circle_same_person_as_hero]');
+      } else {
+        reviewFail = true;
+        reasons.push('วงกลมเป็นคนเดียวกับ hero (ไม่มีตัวเลือกจริง) → คนต้องดู');
+      }
       continue;
     }
     if (f === 'hero_profile_forced') {
