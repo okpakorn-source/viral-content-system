@@ -16,7 +16,7 @@ import sharp from 'sharp';
 //   check in composeAndVerify, measured on THIS renderer's actual output.
 import { HERO_CROP, FACE_PROM_CEILING, HERO_PROMINENCE } from '@/lib/heroCropGeometry';
 // ★ แบตช์ C (17 ก.ค.): เรขาคณิตครอปช่องรอง (PURE) + band จาก config เดียว — เทสได้โดดที่ tests/panel-crop-geometry.test.mjs
-import { refineRegionForFace, biasRegionFromCircleZone } from '@/lib/panelCropGeometry';
+import { refineRegionForFace, refineRegionForFaces, biasRegionFromCircleZone } from '@/lib/panelCropGeometry';
 import { TECH_RULES } from '@/lib/imageQualityConfig';
 
 // Template v3 — "viral-safe": ฐานตารางสะอาด (พิสูจน์จาก CASE-031/037) + องค์ประกอบไวรัล
@@ -416,6 +416,20 @@ function _dominantFaceInRegion(fb, region, imgW, imgH) {
     if (!best || (f.x2 - f.x1) * (f.y2 - f.y1) > (best.x2 - best.x1) * (best.y2 - best.y1)) best = f;
   }
   return best ? { x1: best.x1, y1: best.y1, x2: best.x2, y2: best.y2 } : null;
+}
+// ★ C1b (17 ก.ค.): ทุกหน้าที่ "ศูนย์กลางตกใน region" (กติกาเดียวกับ _facesInRegionCount) → คืน faceBox[] normalized
+function _facesInRegion(fb, region, imgW, imgH) {
+  if (!fb || !region) return [];
+  const cand = (fb.allFaces && fb.allFaces.length) ? fb.allFaces
+    : (fb.x2 > fb.x1 ? [{ x1: fb.x1, y1: fb.y1, x2: fb.x2, y2: fb.y2 }] : []);
+  const out = [];
+  for (const f of cand) {
+    const cx = ((f.x1 + f.x2) / 2) * imgW, cy = ((f.y1 + f.y2) / 2) * imgH;
+    if (cx >= region.left && cx <= region.left + region.width && cy >= region.top && cy <= region.top + region.height) {
+      out.push({ x1: f.x1, y1: f.y1, x2: f.x2, y2: f.y2 });
+    }
+  }
+  return out;
 }
 
 /** ★ เฟส 6B.3/6B.4: ซูมครอปแน่นให้หน้า/คนเด่นถึงเป้า (เคารพเพดานยืด 1.6 + ห้ามตัดหัว/คน + ห้ามขยายเกินกรอบเดิม)
@@ -839,27 +853,50 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
     const _tt = _tightenForProminence(region, fb, slot, imgW, imgH);
     if (_tt) { if (_tt.meta.tightened) region = _tt.region; _tg6b = _tt.meta; }
   }
-  // ★ แบตช์ C (C1/C2): ครอปช่องรอง "เล็งหน้า" + หลบโซนวง — คำสั่งสุดท้ายก่อน trace (PURE geometry)
-  //   เงื่อนไข: ไม่ใช่ hero · ไม่ใช่ _final · มีหน้าเด่น "ใบเดียว" ตกใน region (กลุ่ม/คู่ = ไม่แตะ ให้ group-crop เดิมทำงาน)
+  // ★ แบตช์ C (C1/C2) + C1b (17 ก.ค.): ครอปช่องรอง "เล็งหน้า" + หลบโซนวง — คำสั่งสุดท้ายก่อน trace (PURE geometry)
+  //   เงื่อนไข: ไม่ใช่ hero · ไม่ใช่ _final · มีหน้าเด่นตกใน region 1-3 ใบ (เกิน 3 = ภาพกลุ่มใหญ่ ไม่แตะ ให้ group-crop เดิมทำงาน)
+  //     1 ใบ = เส้น refineRegionForFace เดิมเป๊ะ (byte-parity) · 2-3 ใบ = refineRegionForFaces คลุม union หลายหน้า
   //   region ที่ผ่าน band+คลุมหัวอยู่แล้ว = ไม่เปลี่ยน (byte-parity) · สวิตช์ปิด/ไร้หน้า = เดิมทุก byte
   let _needCircleBackup = false;
-  if (!(crop && crop._final) && _promKind(slot) !== 'hero'
-    && _facesInRegionCount(fb, region, imgW, imgH) === 1) {
-    const _face = _dominantFaceInRegion(fb, region, imgW, imgH);
-    if (_face) {
-      if (_panelFaceCropOn()) {
-        const _rf = refineRegionForFace({ region, faceBox: _face, imgW, imgH, slotAspect: slot.w / slot.h, band: _panelBandForSlot(slot) });
-        if (_rf.changed) { region = _rf.region; _br += '+faceaim'; }
+  const _nFaces = _facesInRegionCount(fb, region, imgW, imgH);
+  if (!(crop && crop._final) && _promKind(slot) !== 'hero' && _nFaces >= 1 && _nFaces <= 3) {
+    if (_nFaces === 1) {
+      // ── 1 หน้า: เส้นเดิมเป๊ะ (ห้าม regress) ──
+      const _face = _dominantFaceInRegion(fb, region, imgW, imgH);
+      if (_face) {
+        if (_panelFaceCropOn()) {
+          const _rf = refineRegionForFace({ region, faceBox: _face, imgW, imgH, slotAspect: slot.w / slot.h, band: _panelBandForSlot(slot) });
+          if (_rf.changed) { region = _rf.region; _br += '+faceaim'; }
+        }
+        if (_circleAvoidOn() && slot._circleZone) {
+          const _bz = biasRegionFromCircleZone({ region, faceBox: _face, zone: slot._circleZone, imgW, imgH });
+          // ★ การ์ดกันหน้าตัด: ยอมรับ region ที่เลื่อนได้เฉพาะเมื่อหน้ายังอยู่ในกรอบครบทั้งใบ
+          //   (pure fn รับประกันแล้วหลังแก้ FIX#1 — ชั้นนี้ additive กันถดถอย · เผื่อ ±1px จากปัดเศษ)
+          const _fL = _face.x1 * imgW, _fR = _face.x2 * imgW, _fT = _face.y1 * imgH, _fB = _face.y2 * imgH;
+          const _faceIn = _bz.region && _fL >= _bz.region.left - 1 && _fR <= _bz.region.left + _bz.region.width + 1
+            && _fT >= _bz.region.top - 1 && _fB <= _bz.region.top + _bz.region.height + 1;
+          if (_bz.moved && _faceIn) { region = _bz.region; _br += '+circavoid'; }
+          else if (!_bz.avoided || (_bz.moved && !_faceIn)) _needCircleBackup = true; // เลี่ยงวงไม่ได้/เลี่ยงแล้วหน้าตัด → สัญญาณให้ composer ลองภาพสำรอง
+        }
       }
-      if (_circleAvoidOn() && slot._circleZone) {
-        const _bz = biasRegionFromCircleZone({ region, faceBox: _face, zone: slot._circleZone, imgW, imgH });
-        // ★ การ์ดกันหน้าตัด: ยอมรับ region ที่เลื่อนได้เฉพาะเมื่อหน้ายังอยู่ในกรอบครบทั้งใบ
-        //   (pure fn รับประกันแล้วหลังแก้ FIX#1 — ชั้นนี้ additive กันถดถอย · เผื่อ ±1px จากปัดเศษ)
-        const _fL = _face.x1 * imgW, _fR = _face.x2 * imgW, _fT = _face.y1 * imgH, _fB = _face.y2 * imgH;
-        const _faceIn = _bz.region && _fL >= _bz.region.left - 1 && _fR <= _bz.region.left + _bz.region.width + 1
-          && _fT >= _bz.region.top - 1 && _fB <= _bz.region.top + _bz.region.height + 1;
-        if (_bz.moved && _faceIn) { region = _bz.region; _br += '+circavoid'; }
-        else if (!_bz.avoided || (_bz.moved && !_faceIn)) _needCircleBackup = true; // เลี่ยงวงไม่ได้/เลี่ยงแล้วหน้าตัด → สัญญาณให้ composer ลองภาพสำรอง
+    } else {
+      // ── 2-3 หน้า (C1b): ครอปคลุม union หลายหน้า — union ใหญ่เกิน band → ok:false ไม่ฝืน (คงเดิม/ลองสำรอง) ──
+      const _facesIn = _facesInRegion(fb, region, imgW, imgH);
+      if (_facesIn.length >= 2) {
+        if (_panelFaceCropOn()) {
+          const _rf = refineRegionForFaces({ region, faces: _facesIn, imgW, imgH, slotAspect: slot.w / slot.h, band: _panelBandForSlot(slot) });
+          if (_rf.ok && _rf.changed) { region = _rf.region; _br += '+faceaim2'; }
+        }
+        if (_circleAvoidOn() && slot._circleZone) {
+          const _bz = biasRegionFromCircleZone({ region, faces: _facesIn, zone: slot._circleZone, imgW, imgH });
+          // ★ การ์ดกันหน้าตัด: ยอมรับเฉพาะเมื่อ "ทุกหน้า" ยังอยู่ในกรอบครบ (additive · เผื่อ ±1px จากปัดเศษ)
+          const _allIn = _bz.region && _facesIn.every((f) => (
+            f.x1 * imgW >= _bz.region.left - 1 && f.x2 * imgW <= _bz.region.left + _bz.region.width + 1
+            && f.y1 * imgH >= _bz.region.top - 1 && f.y2 * imgH <= _bz.region.top + _bz.region.height + 1
+          ));
+          if (_bz.moved && _allIn) { region = _bz.region; _br += '+circavoid2'; }
+          else if (!_bz.avoided || (_bz.moved && !_allIn)) _needCircleBackup = true; // เลี่ยงวงไม่ได้/เลี่ยงแล้วหน้าตัด → ลองภาพสำรอง
+        }
       }
     }
   }
