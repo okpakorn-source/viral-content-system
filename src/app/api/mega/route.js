@@ -7,7 +7,7 @@
 // ============================================================
 
 import { NextResponse } from 'next/server';
-import { newJob, listJobs, getJob, updateJob, listRuns, getFlags, setFlags } from '@/lib/megaJobStore';
+import { newJob, listJobs, getJob, updateJob, listRuns, getFlags, setFlags, deleteJobs } from '@/lib/megaJobStore';
 import { cancelRefTestJob, duplicateRefTestJob } from '@/lib/refTestPipeline'; // ★ R2: จัดการงานคิว cover-ref-test
 
 export const runtime = 'nodejs';
@@ -78,6 +78,21 @@ export async function POST(req) {
     if (action === 'duplicate') {
       const { status, body: out } = await duplicateRefTestJob(body.id, { getJob, newJob, updateJob });
       return NextResponse.json(out, { status });
+    }
+
+    // ★ 18 ก.ค.: เคลียงานที่ตาย — ลบงานคิว cover-ref-test สถานะ failed/cancelled ทิ้ง (declutter + กันเผลอกด retry ทีละงาน)
+    //   ความปลอดภัย: ลบเฉพาะ mode==='reftest' + สถานะตาย (failed/cancelled) เท่านั้น — ห้ามแตะ active (pending/running/waiting)
+    //   และเก็บ cover_ready (งานสำเร็จ ยังใช้ดูปกได้) · body.includeReady=true = ลบ cover_ready ด้วย (ผู้ใช้เลือกเอง)
+    if (action === 'clearTerminal') {
+      const DEAD = new Set(['failed', 'cancelled', ...(body.includeReady ? ['cover_ready'] : [])]);
+      const ACTIVE = new Set(['pending', 'running', 'waiting']); // guard: ห้ามลบเด็ดขาด
+      const jobs = await listJobs(1000);
+      const targets = jobs.filter((j) =>
+        j && j.mode === 'reftest' && DEAD.has(j.status) && !ACTIVE.has(j.status),
+      );
+      const ids = targets.map((j) => j.id);
+      const cleared = await deleteJobs(ids);
+      return NextResponse.json({ success: true, cleared, ids });
     }
 
     return NextResponse.json({ success: false, error: 'action ไม่รู้จัก: ' + action }, { status: 400 });
