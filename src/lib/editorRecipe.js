@@ -260,7 +260,27 @@ export function buildEditorRecipe({ job, caseImages } = {}) {
 
   const slots = slotsFromTemplate(templateSlots);
   const slotAssign = assignSlots(slots, pickSlots, slotOrder);
-  const imagesBySlot = buildImagesBySlot(slotAssign, pickSlots, caseImages);
+  let imagesBySlot = buildImagesBySlot(slotAssign, pickSlots, caseImages);
+
+  // ★ 17 ก.ค. (บั๊กจริงจากผู้ใช้: ปกที่ประกอบ ≠ ผังใน editor): composer มีสิทธิ์สลับ/ย้ายภาพตอนประกอบ
+  //   (ตาแก้/สลับสำรอง/จัดลำดับ) — ความจริงสุดท้ายอยู่ใน manifest.slots ({slot, imageUrl หลังทุกการสลับ})
+  //   ซึ่งใช้ id ระบบเดียวกับ editor template (dnaToTemplateSpec: main/circle/role_i)
+  //   → ถ้ามี manifest ให้ยึดก่อนเสมอ (เฉพาะ id ที่แมตช์ช่องจริง) · role-mapping เดิม = fallback งานที่ยังไม่เคยประกอบ
+  const mSlots = d.cover && d.cover.manifest && Array.isArray(d.cover.manifest.slots)
+    ? d.cover.manifest.slots : null;
+  if (mSlots && mSlots.length) {
+    const slotIds = new Set(slots.map((s) => s.id));
+    const byManifest = {};
+    for (const m of mSlots) {
+      if (m && typeof m.slot === 'string' && slotIds.has(m.slot) && typeof m.imageUrl === 'string' && m.imageUrl.trim()) {
+        // ยกระดับเป็น URL rehost ของ "ภาพเดียวกัน" ถ้าเจอในพูลเคส (เทียบ url ตรง) — ไม่เจอ = ใช้ url จริงจาก manifest
+        const hit = (Array.isArray(caseImages) ? caseImages : []).find((x) => x && (x.imageUrl === m.imageUrl || x.url === m.imageUrl));
+        byManifest[m.slot] = pickBestUrl([hit && (hit.imageUrl || hit.url), m.imageUrl]);
+      }
+    }
+    if (Object.keys(byManifest).length) imagesBySlot = byManifest;
+  }
+
   const pool = buildPool(caseImages);
   const qc = buildQc(job);
 

@@ -249,7 +249,8 @@ export async function POST(req) {
       const { buildEditorRecipe } = await import('@/lib/editorRecipe');
       const _rcJob = {
         id: `CT-${caseId}`,
-        dossier: { ...job.dossier, pickImages: { ...(job.dossier.pickImages || {}), slots }, cover: { qcVerdict } },
+        // ★ 17 ก.ค. (บั๊กปก≠ผัง editor): แนบ manifest ของผลประกอบจริง — editorRecipe ยึดผังสุดท้ายหลังทุกการสลับ
+        dossier: { ...job.dossier, pickImages: { ...(job.dossier.pickImages || {}), slots }, cover: { qcVerdict, manifest: out.manifest || null } },
       };
       editorRecipe = buildEditorRecipe({ job: _rcJob, caseImages: imgs }) || null;
     } catch { editorRecipe = null; }

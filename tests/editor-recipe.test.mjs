@@ -186,3 +186,35 @@ test('isRecipeReady: ต้องมีทั้ง pickImages.slots + refMatch.
   assert.equal(isRecipeReady({ id: 'x', dossier: { pickImages: { slots: { hero: {} } } } }), false);
   assert.equal(isRecipeReady(null), false);
 });
+
+// ============================================================ manifest = ความจริงสุดท้าย (17 ก.ค. — บั๊กปกจริง ≠ ผังใน editor)
+test('manifest.slots มี → imagesBySlot ยึดผังประกอบจริง (ทับ role-mapping) เฉพาะ id ที่แมตช์ช่อง', () => {
+  const job = legacyJob();
+  // composer สลับจริง: main ได้ภาพ 88 (ไม่ใช่ 17 ตามแผน S6) + มี id แปลกปลอมที่ไม่ใช่ช่องจริง
+  job.dossier.cover.manifest = {
+    slots: [
+      { slot: 'main', imageUrl: 'https://ext.example/final-main.jpg' },
+      { slot: 'circle', imageUrl: REHOST },
+      { slot: 'slot_ผี', imageUrl: 'https://ext.example/ghost.jpg' },
+    ],
+  };
+  const r = buildEditorRecipe({ job, caseImages: caseImages() });
+  assert.strictEqual(r.imagesBySlot.main, 'https://ext.example/final-main.jpg', 'ยึด manifest ไม่ใช่แผน S6');
+  assert.strictEqual(r.imagesBySlot.circle, REHOST);
+  assert.ok(!('slot_ผี' in r.imagesBySlot), 'id ที่ไม่ใช่ช่องจริงถูกทิ้ง');
+});
+
+test('manifest url ตรงกับภาพในพูล → ยกระดับเป็น URL rehost ของภาพเดียวกัน', () => {
+  const job = legacyJob();
+  const extUrl = caseImages()[1].imageUrl; // AC-9999-19 = EXT ในพูล
+  job.dossier.cover.manifest = { slots: [{ slot: 'main', imageUrl: extUrl }] };
+  const r = buildEditorRecipe({ job, caseImages: caseImages() });
+  assert.strictEqual(r.imagesBySlot.main, extUrl, 'พูลใบนี้ไม่มี rehost → คง url จริง');
+});
+
+test('ไม่มี manifest → role-mapping เดิมเป๊ะ (งานที่ยังไม่เคยประกอบ)', () => {
+  const job = legacyJob();
+  delete job.dossier.cover.manifest;
+  const r = buildEditorRecipe({ job, caseImages: caseImages() });
+  assert.ok(r.imagesBySlot.main, 'ยังมีภาพจาก role-mapping');
+});
