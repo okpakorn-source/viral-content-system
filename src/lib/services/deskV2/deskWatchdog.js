@@ -160,16 +160,17 @@ export async function sweepDeadWork({ origin, budgetMs = 45_000 } = {}) {
       continue;
     }
 
-    // ตายกลางทางแบบพิสูจน์ได้เท่านั้นถึง retry: failed ชัดๆ · หรือ processing ค้างเกิน 45 นาที
-    // (ฟังก์ชัน Vercel รันได้สูงสุด ~13 นาที — processing 45 นาที = ฟังก์ชันตายแน่ งานเก่าไม่มีวันเสร็จ ไม่เจนซ้ำซ้อน)
-    // pending ค้างนาน = ระบบคิวไม่หยิบงานทั้งระบบ — ส่งเพิ่มไม่ช่วย → ปิดแบบแจ้งเหตุ ให้มนุษย์ดูระบบคิว
-    const isDeadProven = jobStatus === 'failed' || (jobStatus === 'processing' && ageMs > GEN_STUCK_MS);
-    const isQueueStalled = jobStatus === 'pending' && ageMs > GEN_STUCK_MS;
+    // 🔴 retry อัตโนมัติเฉพาะ 'failed' ชัดๆ เท่านั้น (บทเรียนผู้ตรวจ + อ่าน queueService จริง):
+    //   คิวมีระบบ 2 สไตรค์ของตัวเอง — cleanupStaleJobs (ทุก ~60s) คืนงาน processing ค้าง >15 นาที
+    //   เป็น pending ให้ลองใหม่ 1 ครั้ง (งาน "ฟื้นแล้วเสร็จทีหลัง" ได้จริง!) ค้างซ้ำค่อยตีตาย 'failed' ถาวร
+    //   → 'failed' = จุดจบจริง retry ปลอดภัย 100% · ส่วน pending/processing ค้างเกิน 45 นาที =
+    //   ระบบคิวผิดปกติทั้งระบบ (กลไกฟื้นตัวเองไม่ทำงาน) — ส่งซ้ำเสี่ยงเจนซ้ำซ้อน → ปิดแบบแจ้งเหตุให้คนดู
+    const isQueueStalled = (jobStatus === 'pending' || jobStatus === 'processing') && ageMs > GEN_STUCK_MS;
 
     if (isQueueStalled) {
       try {
         // eslint-disable-next-line no-await-in-loop
-        const ok = await _writeSentItem(r, { status: 'error', genGaveUp: true, lastError: `งานค้าง pending เกิน ${Math.round(GEN_STUCK_MS / 60000)} นาที — ระบบคิวอาจไม่หยิบงาน (เช็คคิว/worker แล้วค่อยส่งใหม่เอง)` });
+        const ok = await _writeSentItem(r, { status: 'error', genGaveUp: true, lastError: `งานค้าง ${jobStatus} เกิน ${Math.round(GEN_STUCK_MS / 60000)} นาที — กลไกฟื้นตัวเองของคิวไม่ทำงาน (เช็คคิว/worker แล้วค่อยส่งใหม่เอง — ไม่ส่งซ้ำอัตโนมัติกันเจนซ้ำ)` });
         if (ok) summary.genGaveUp++;
       } catch (e) {
         summary.errors.push(`ปิดใบคิวค้าง ${r.id} ไม่สำเร็จ: ${e?.message || String(e)}`);
@@ -177,10 +178,9 @@ export async function sweepDeadWork({ origin, budgetMs = 45_000 } = {}) {
       continue;
     }
 
-    if (!isDeadProven) continue; // ยังวิ่งอยู่ตามปกติ / ยังเร็วไปที่จะสรุป / เช็คไม่ได้ชั่วคราว → รอบหน้าเช็คใหม่
+    if (jobStatus !== 'failed') continue; // ยังวิ่งอยู่ตามปกติ / ยังเร็วไปที่จะสรุป / เช็คไม่ได้ชั่วคราว → รอบหน้าเช็คใหม่
 
-    const deadWhy = jobStatus === 'failed' ? 'งานเขียนล้ม (failed)'
-      : `งานเขียนค้างเกิน ${Math.round(GEN_STUCK_MS / 60000)} นาที (${jobStatus})`;
+    const deadWhy = 'งานเขียนล้ม (failed — คิวลองซ้ำเองแล้ว 2 รอบ)';
 
     if (!r.genRetry) {
       // ส่งใหม่อัตโนมัติ 1 ครั้ง — ผ่านห้องรอ/คนเฝ้าประตูเดิมเท่านั้น (ไม่มีทางลัดเข้าคิว)
