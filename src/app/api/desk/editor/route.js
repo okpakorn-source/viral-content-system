@@ -56,7 +56,7 @@ export async function POST(request) {
     if (action === 'pick') {
       const limit = Math.max(1, Math.min(10, Number(body?.limit) || 5));
       const autoSend = !!body?.autoSend;
-      const sendMode = body?.sendMode === 'immediate' ? 'immediate' : 'polite'; // 🔴 รับแค่ 2 ค่านี้เท่านั้น
+      const sendMode = body?.sendMode === 'polite' ? 'polite' : 'immediate'; // 🔴 รับแค่ 2 ค่านี้เท่านั้น (default 'immediate' — 17 ก.ค. 69 ผู้ใช้สั่งถอดยาม ส่งตรงเข้าคิวปกติ)
       const origin = request.nextUrl.origin;
 
       const result = await editorPick({ limit, autoSend, sendMode, origin, modelKey });

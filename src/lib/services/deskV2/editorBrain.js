@@ -41,6 +41,10 @@ const CONSOLIDATE_TIMEOUT_MS = 200_000;
 const CONSOLIDATE_MAX_TOKENS = 8_000;
 const PICK_TIMEOUT_MS = 120_000;
 const PICK_MAX_TOKENS = 6_000;
+// 🔄 P2 (17 ก.ค. 69 ถอดยาม): งบรอถอดคลิปต่อใบในโหมดส่งตรง — ต้องสั้น กัน route โดน Vercel ฆ่ากลางทาง
+//   (บทเรียนบั๊กเดิม "ค้างกำลังส่ง": รอคลิปเต็ม 6 นาทีจนเกิน maxDuration) · ไม่ทันรอบนี้ = งานถอดเข้าเครื่องทีมแล้ว
+//   รอบคัดถัดไปเนื้อพร้อม (contentReady) จะส่งผ่านทันทีแบบ idempotent
+const IMMEDIATE_CLIP_POLL_MS = 20_000;
 
 const CHUNK_SIZE = 80;          // ~80 ใบ/call ตอน studyDna
 const MAX_PICK_CANDIDATES = 60; // เพดานลีดที่ส่งให้ บก. ให้คะแนนต่อรอบ (matchScore สูงสุดก่อน)
@@ -464,21 +468,23 @@ async function _pruneOldPickRuns(store, keep) {
  * editorPick — ใช้ธรรมนูญ บก. (brain_latest) คัดลีดข่าวที่ "น่าทำ" ที่สุด + ด่านกันเชิงลบ + (ออปชัน) ส่งเจนอัตโนมัติ
  *
  * 🚪 P1 (17 ก.ค. 69) — มารยาทคิวของ บก.: sendMode คุมว่า autoSend แปลว่า "ส่งจริงทันที" หรือ "เข้าห้องรอก่อน"
- *   'polite'    (default) — เตรียมเนื้อ (best-effort ต่อใบ fetchability==='full') แล้วเข้า "ห้องรอ" (editorOutbox)
- *                            เท่านั้น — ไม่ยิงเข้าคิวเขียนจริง ปล่อยให้คนเฝ้าประตู (dispatchOne, cron 1 นาที)
- *                            ทยอยปล่อยทีละใบเฉพาะตอนคิวเขียนข่าวจริงว่างสนิท (หลีกทางงานพนักงาน/Discord)
- *   'immediate' — พฤติกรรมเดิมทุกประการ (ยิง extractAndSend ตรงทุกใบทันที ไม่ผ่านห้องรอ)
+ * 🔄 P2 (17 ก.ค. 69 ผู้ใช้สั่งถอดยาม): default เปลี่ยนเป็น 'immediate' + cron คนเฝ้าประตูถูกถอดจาก vercel.json
+ *   'immediate' (default) — ยิง extractAndSend ตรงทุกใบทันทีเข้าคิวเขียนปกติ (เส้นเดียวกับงาน Discord — รัน 100% Vercel)
+ *                            ใบคลิปให้งบรอถอดสั้น IMMEDIATE_CLIP_POLL_MS ไม่ทันรอบนี้ = ไม่ส่ง (กันบั๊ก "ค้างกำลังส่ง")
+ *   'polite'    — เตรียมเนื้อ (best-effort ต่อใบ fetchability==='full') แล้วเข้า "ห้องรอ" (editorOutbox) เท่านั้น
+ *                 ห้องรอ/dispatchOne ยังใช้ได้ (โค้ดคงไว้ตามกติกาห้ามลบ fallback) แต่ไม่มี cron แล้ว —
+ *                 ต้องกดปุ่ม "↻ เช็คตอนนี้" (GET /api/desk/editor/dispatch) ปล่อยเอง
  *
  * @param {object} args
  * @param {number} [args.limit] - จำนวน pick สูงสุด (default 5, เพดาน 10)
  * @param {boolean} [args.autoSend] - true = เตรียม/ส่งให้ทุกใบที่ pick ที่ fetchability==='full' (ตาม sendMode)
- * @param {'polite'|'immediate'} [args.sendMode] - default 'polite' — ดู doc ด้านบน
+ * @param {'polite'|'immediate'} [args.sendMode] - default 'immediate' (P2 ถอดยาม) — ดู doc ด้านบน
  * @param {string} [args.origin] - จำเป็นเมื่อ autoSend=true (ยิง/เตรียมเนื้อผ่าน origin นี้)
  * @param {'primary'|'fast'} [args.modelKey]
  * @returns {Promise<{needStudy:boolean, picks:object[], skipped:object[], sent:object[], sendMode:string, outboxQueued:number, tookMs:number}>}
  */
-export async function editorPick({ limit = 5, autoSend = false, sendMode = 'polite', origin, modelKey = 'primary' } = {}) {
-  const safeSendMode = sendMode === 'immediate' ? 'immediate' : 'polite'; // 🔴 รับแค่ 2 ค่านี้เท่านั้น (default polite)
+export async function editorPick({ limit = 5, autoSend = false, sendMode = 'immediate', origin, modelKey = 'primary' } = {}) {
+  const safeSendMode = sendMode === 'polite' ? 'polite' : 'immediate'; // 🔴 รับแค่ 2 ค่านี้เท่านั้น (default immediate — P2 ถอดยาม)
   const t0 = Date.now();
   const model = modelKey === 'fast' ? MODEL_FAST : MODEL_PRIMARY; // 🔴 รับแค่ 2 ค่านี้เท่านั้น
   const safeLimit = Math.max(1, Math.min(MAX_PICK_LIMIT, Number(limit) || 5));
@@ -545,13 +551,15 @@ export async function editorPick({ limit = 5, autoSend = false, sendMode = 'poli
   const sent = [];
   let outboxQueued = 0;
   if (autoSend && safeSendMode === 'immediate') {
-    // 'immediate' — พฤติกรรมเดิมทุกประการ (ยิง extractAndSend ตรงทันที ไม่ผ่านห้องรอ) — ห้ามแก้ logic เดิม
+    // 'immediate' (default ตั้งแต่ P2 ถอดยาม) — ยิง extractAndSend ตรงทันทีเข้าคิวปกติ ไม่ผ่านห้องรอ
+    // clipPollBudgetMs สั้น: ใบคลิปถอดไม่ทันรอบนี้ = คืน pending ไม่ส่ง (งานถอดถูกส่งเข้าเครื่องทีมแล้ว
+    // รอบคัดถัดไปเนื้อพร้อมจะส่งเอง) — กันบั๊กเดิม "ค้างกำลังส่ง" (รอคลิปเต็ม 6 นาทีจน route โดนฆ่า)
     for (const p of picks) {
       const lead = byId.get(p.id);
       if (!lead || lead.fetchability !== 'full') continue;
       try {
         // eslint-disable-next-line no-await-in-loop -- ส่งทีละใบตามลำดับตามสเปก (ไม่ยิงขนาน กันชนคิว/ชนไฟล์ leads เดียวกัน)
-        const r = await extractAndSend(p.id, { origin, auto: true });
+        const r = await extractAndSend(p.id, { origin, auto: true, clipPollBudgetMs: IMMEDIATE_CLIP_POLL_MS });
         p.sentJobId = r?.jobId || null;
         sent.push({ id: p.id, title: lead.title, ...r });
       } catch (e) {
@@ -559,8 +567,8 @@ export async function editorPick({ limit = 5, autoSend = false, sendMode = 'poli
       }
     }
   } else if (autoSend) {
-    // 'polite' (default) — เตรียมเนื้อ best-effort (ถ้ายัง) แล้วเข้าห้องรอ — ไม่ยิงเข้าคิวเขียนจริง
-    // คนเฝ้าประตู (editorOutbox.dispatchOne, cron 1 นาที) จะทยอยปล่อยทีละใบเฉพาะตอนคิวเขียนข่าวจริงว่างสนิท
+    // 'polite' (สำรอง — P2 ถอด cron แล้ว) — เตรียมเนื้อ best-effort (ถ้ายัง) แล้วเข้าห้องรอ — ไม่ยิงเข้าคิวเขียนจริง
+    // การปล่อยจากห้องรอเหลือทางเดียว: กดปุ่ม "↻ เช็คตอนนี้" (GET /api/desk/editor/dispatch) เอง
     for (const p of picks) {
       const lead = byId.get(p.id);
       if (!lead || lead.fetchability !== 'full' || lead.contentReady) continue; // เนื้อพร้อมอยู่แล้ว/ไม่ใช่ full → ข้ามเตรียม

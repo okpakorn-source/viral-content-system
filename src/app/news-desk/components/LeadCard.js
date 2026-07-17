@@ -38,14 +38,12 @@ const STATUS_META = {
 // ── A1 (17 ก.ค. 69): ตรวจแบบเบาๆ ว่าลีดนี้เป็น "คลิป" หรือ "บทความ" — สะท้อน classifyExtractRoute ของ
 //    researchExtract.js (service ฝั่งเซิร์ฟเวอร์ ห้าม import ตรงเข้า client component เพราะพ่วง openai.js) ใช้เพื่อเลือก
 //    ป้าย/ปุ่มให้ตรงประเภทเท่านั้น — การตัดสินใจ route จริงยังทำที่ฝั่งเซิร์ฟเวอร์ใน extractAndSend เสมอ
-const CLIP_CHANNELS = new Set(['youtube', 'facebook', 'reels', 'tiktok']);
-const CLIP_HOST_RE = /(youtube\.com|youtu\.be|facebook\.com|fb\.watch|fb\.com|m\.facebook\.com|tiktok\.com|vm\.tiktok\.com|instagram\.com|instagr\.am|threads\.net)/i;
+// 🔒 P2.1 (17 ก.ค. 69): ต้องสะท้อน CLIP_URL_RE ใน researchExtract.js เป๊ะ — คลิป = ลิงก์วิดีโอจริงเท่านั้น
+//   (YouTube/TikTok/FB reel·watch·videos/IG reel·tv) โพสต์/กลุ่ม/รูปเป็น "บทความ" เสมอ
+const CLIP_URL_RE = /(youtu\.be\/|youtube\.com\/(watch|shorts\/|live\/)|tiktok\.com\/[^\s"']*\/video\/|(vm|vt)\.tiktok\.com\/|fb\.watch\/|facebook\.com\/(reel\/|reels\/|watch|share\/v\/|[^/?#]+\/videos\/)|instagram\.com\/(reel\/|reels\/|tv\/))/i;
 function isClipLead(l) {
-  const channel = String(l?.channel || '').toLowerCase();
-  if (CLIP_CHANNELS.has(channel)) return true;
-  const host = String(l?.sourceHost || '').toLowerCase();
   const url = String(l?.url || '').toLowerCase();
-  return CLIP_HOST_RE.test(host) || CLIP_HOST_RE.test(url);
+  return CLIP_URL_RE.test(url);
 }
 
 export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtractAndSend, onSendText, busyAction, sendNote, extractNote }) {

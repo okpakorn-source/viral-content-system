@@ -15,9 +15,9 @@
 //   POST /api/desk/editor { action:'cancelOutbox', id }
 //     → { success, cancelled:true } | { success, cancelled:false, reason }
 //
-// 🚪 P1 (17 ก.ค. 69) — มารยาทคิวของ บก.: sendMode:'polite' (default) = คัดแล้วเข้า "ห้องรอ" เท่านั้น
-//   ไม่ยิงเข้าคิวเขียนจริงทันที — คนเฝ้าประตู GET /api/desk/editor/dispatch (cron ทุก 1 นาที) จะทยอยปล่อย
-//   ทีละใบเฉพาะตอนคิวเขียนข่าวจริงว่างสนิท (หลีกทางงานพนักงาน/Discord) sendMode:'immediate' = พฤติกรรมเดิม
+// 🚪 P1 (17 ก.ค. 69) — มารยาทคิวของ บก.: sendMode คุมว่าคัดแล้ว "ส่งจริงทันที" หรือ "เข้าห้องรอก่อน"
+// 🔄 P2 (17 ก.ค. 69 ผู้ใช้สั่งถอดยาม): default = 'immediate' ส่งตรงเข้าคิวเขียนปกติ (เส้นเดียวกับงาน Discord)
+//   cron คนเฝ้าประตูถูกถอดจาก vercel.json แล้ว — โหมด 'polite'/ห้องรอยังใช้ได้ แต่ต้องกด "↻ เช็คตอนนี้" ปล่อยเอง
 //
 // route นี้อาจยังไม่ deploy ระหว่าง E1 ทำงานขนาน — apiFetch (ui.js) คืน {success:false} เองเมื่อ 404/เชื่อมต่อไม่ได้
 // เรา "รับสุภาพ": ตกกลับไปโชว์กล่อง "ยังไม่มีความจำ" เหมือนสถานะปกติ ไม่ toast รบกวนตอนโหลดครั้งแรก
@@ -77,8 +77,8 @@ export default function EditorPanel({ onToast, onAfterAction }) {
 
   const [picking, setPicking] = useState(false);
   const [pickLimit, setPickLimit] = useState(5);
-  // 🚪 P1 (17 ก.ค. 69): 'off' = แค่เสนอ (ผมกดส่งเอง) · 'polite' = คัด+เข้าห้องรอ (default ★แนะนำ) · 'immediate' = ส่งทันที
-  const [sendMode, setSendMode] = useState('polite');
+  // 🚪 P2 (17 ก.ค. 69 ถอดยาม): 'off' = แค่เสนอ (ผมกดส่งเอง) · 'immediate' = ส่งเข้าคิวปกติทันที (default ★) · 'polite' = เข้าห้องรอ (สำรอง — ไม่มี cron ต้องกดปล่อยเอง)
+  const [sendMode, setSendMode] = useState('immediate');
   const [pickModel, setPickModel] = useState('primary'); // 'primary' = gpt-5.5 ★ · 'fast' = mini
 
   const [skippedOpen, setSkippedOpen] = useState(false);
@@ -337,7 +337,7 @@ export default function EditorPanel({ onToast, onAfterAction }) {
                   color: sendMode === 'polite' ? UI.accent : UI.dim,
                   border: `1.5px solid ${sendMode === 'polite' ? UI.accent : UI.line}`,
                 }}
-              >🚪 คัด+เข้าห้องรอ (หลีกทางพนักงาน) ★แนะนำ</button>
+              >🚪 คัด+เข้าห้องรอ (สำรอง — กดปล่อยเอง)</button>
               <button
                 type="button" onClick={() => setSendMode('immediate')} disabled={busy}
                 style={{
@@ -347,7 +347,7 @@ export default function EditorPanel({ onToast, onAfterAction }) {
                   color: sendMode === 'immediate' ? UI.amber : UI.dim,
                   border: `1.5px solid ${sendMode === 'immediate' ? UI.amber : UI.line}`,
                 }}
-              >⚡ ส่งทันที</button>
+              >⚡ ส่งเข้าคิวทันที ★แนะนำ</button>
             </div>
           </div>
 
