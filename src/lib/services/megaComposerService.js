@@ -394,7 +394,11 @@ export function measureTechRules({ assignments = [], spec = null, faceBoxes = []
       const cand = (fb.allFaces && fb.allFaces.length)
         ? fb.allFaces
         : (fb.x2 > fb.x1 ? [{ x1: fb.x1, y1: fb.y1, x2: fb.x2, y2: fb.y2 }] : []);
-      let hit = false;
+      // ★ 17 ก.ค. (เคสจริงปกตุ๊ก C1b — วงทับแค่ตัวเสื้อแต่โดนธง hard): แยกความจริง 2 ระดับ
+      //   gap < 0 = วง "ทับกล่องหน้าจริง" → circle_face_overlap (hard เหมือนเดิมทุกประการ)
+      //   0 ≤ gap < gapThresh = วง "แค่ใกล้หน้า" → circle_face_near (advisory — เตือนพอ ไม่ฆ่างาน)
+      let hitOverlap = false;
+      let hitNear = false;
       for (const f of cand) {
         const fL = f.x1 * fb.imgW, fR = f.x2 * fb.imgW, fT = f.y1 * fb.imgH, fB = f.y2 * fb.imgH;
         const fcx = (fL + fR) / 2, fcy = (fT + fB) / 2;
@@ -410,11 +414,13 @@ export function measureTechRules({ assignments = [], spec = null, faceBoxes = []
           const nx = Math.max(cL, Math.min(ci.cx, cR));
           const ny = Math.max(cT, Math.min(ci.cy, cB));
           const gap = Math.hypot(ci.cx - nx, ci.cy - ny) - ci.r;
-          if (gap < gapThresh) { hit = true; break; }
+          if (gap < 0) { hitOverlap = true; break; }
+          if (gap < gapThresh) hitNear = true;
         }
-        if (hit) break;
+        if (hitOverlap) break;
       }
-      if (hit) flags.push(`circle_face_overlap:${a.slotId}`);
+      if (hitOverlap) flags.push(`circle_face_overlap:${a.slotId}`);
+      else if (hitNear) flags.push(`circle_face_near:${a.slotId}`);
     }
   }
 
