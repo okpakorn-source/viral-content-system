@@ -9,6 +9,9 @@
 // ============================================================
 
 import { useState, useRef, useEffect } from 'react';
+// ★ 18 ก.ค. 69: ปุ่ม "แก้ต่อในเอดิเตอร์" ฝั่ง sync — reuse ตัวสร้างสูตร PURE ชุดเดียวกับโหมดคิว/ทางลัด
+//   (สูตรยึด manifest ผังประกอบจริงหลังทุกการสลับ — หลักการเดียวกับ f500b59)
+import { buildEditorRecipe } from '@/lib/editorRecipe';
 
 // ★ Preview MVP item 5 — client error formatter ที่ปลอดภัยกับค่าทุกชนิด (string/Error/plain-object/unknown)
 //   ไม่มีทาง [object Object] เด็ดขาด · ไม่ JSON.stringify ค่าดิบ (กันหลุด secret/provider body ยาว) · bounded length
@@ -37,6 +40,8 @@ export default function CoverRefTestPage() {
   const [error, setError] = useState('');
   const [failInfo, setFailInfo] = useState(null);
   const [cancelled, setCancelled] = useState(false);
+  // ★ 18 ก.ค. 69: สถานะปุ่ม "แก้ต่อในเอดิเตอร์" ฝั่ง sync (กันกดซ้ำระหว่างดึงพูลภาพ)
+  const [editorBusy, setEditorBusy] = useState(false);
   const timerRef = useRef(null);
   const abortRef = useRef(null);
 
@@ -137,6 +142,46 @@ export default function CoverRefTestPage() {
   // ★ 15 ก.ค. 69 บัค #14: ปุ่มยกเลิก — abort fetch เท่านั้น (งานฝั่งเซิร์ฟเวอร์วิ่งต่อจนจบเอง)
   function cancelGenerate() {
     if (abortRef.current) abortRef.current.abort();
+  }
+
+  // ★ 18 ก.ค. 69: "แก้ต่อในเอดิเตอร์" ฝั่ง sync — สร้างสูตรจากผลตรงหน้า (manifest = ความจริงสุดท้ายหลังทุกการสลับ)
+  //   แล้วส่งข้ามแท็บผ่าน localStorage แบบเดียวกับ /mega-compose-test เป๊ะ (crtRecipeHandoff → ?recipeLocal=1)
+  //   ไม่แตะท่อ strict ฝั่ง server เลย — วัตถุดิบครบใน response เดิม: matchedRef.dna.template + manifest + qcVerdict + imageCaseId
+  async function openInEditor() {
+    if (!result || editorBusy) return;
+    setEditorBusy(true);
+    try {
+      // ดึงพูลภาพของเคส (AC-xxxx) ให้คนสลับภาพเองในเอดิเตอร์ได้ — ล้ม/ไม่มีเคส = เปิดต่อด้วยพูลว่าง
+      let caseImages = [];
+      if (result.imageCaseId) {
+        try {
+          const r = await fetch(`/api/images/${encodeURIComponent(result.imageCaseId)}`);
+          const j = await r.json().catch(() => ({}));
+          if (j && j.success && Array.isArray(j.images)) caseImages = j.images;
+        } catch { /* พูลว่าง — ภาพต่อช่องยังมาจาก manifest ได้ */ }
+      }
+      // ประกอบ job-shape ให้ตัวสร้างสูตร PURE ตัวเดียวกับโหมดคิว (/api/mega/recipe) — สูตรจึงหน้าตาเดียวกันทุกทาง
+      const recipe = buildEditorRecipe({
+        job: {
+          id: result.outputId || result.imageCaseId || 'REFTEST',
+          status: null,
+          dossier: {
+            desk: { title: title.trim() },
+            images: { caseId: result.imageCaseId || null },
+            refMatch: { dna: result.matchedRef?.dna || null, styleName: result.matchedRef?.styleName || null },
+            pickImages: { slots: {} }, // ว่างโดยตั้งใจ — ภาพต่อช่องยึด manifest (ผังจริง) เท่านั้น
+            cover: { manifest: result.manifest || null, qcVerdict: result.qcVerdict || null },
+          },
+        },
+        caseImages,
+      });
+      window.localStorage.setItem('crtRecipeHandoff', JSON.stringify({ at: Date.now(), recipe }));
+      window.open('/cover-tester?recipeLocal=1', '_blank');
+    } catch {
+      alert('ส่งสูตรไปเอดิเตอร์ไม่สำเร็จ (localStorage ไม่พร้อม)');
+    } finally {
+      setEditorBusy(false);
+    }
   }
 
   // ── โหมดคิว: โหลดรายการงาน reftest จาก GET /api/mega (มี in-flight guard) ──
@@ -241,6 +286,10 @@ export default function CoverRefTestPage() {
 
   // preview รายการคิว (คำนวณสด จาก textarea) — นับ + ความยาว + เตือนสั้น
   const parsedQueue = parseQueueItems(queueText);
+  // ★ 18 ก.ค. 69: เปิดเอดิเตอร์ได้เมื่อผลรอบนี้มีวัตถุดิบครบ (โครง ref แบบ % + ผังประกอบจริง) — ขาดอย่างใดอย่างหนึ่ง = ซ่อนปุ่ม
+  const canOpenEditor = !!(result
+    && Array.isArray(result.manifest?.slots) && result.manifest.slots.length > 0
+    && Array.isArray(result.matchedRef?.dna?.template?.slots) && result.matchedRef.dna.template.slots.length > 0);
   const th = { textAlign: 'left', padding: '6px 8px', fontSize: 11.5, fontWeight: 800, color: '#475569', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap' };
   const td = { padding: '6px 8px', fontSize: 12.5, borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' };
   const rowBtn = (bg, color, brd) => ({ padding: '4px 8px', borderRadius: 7, border: `1px solid ${brd}`, background: bg, color, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', marginRight: 4, marginBottom: 4 });
@@ -408,7 +457,16 @@ export default function CoverRefTestPage() {
           {result.directorReason && <p style={{ fontSize: 13, color: '#475569', margin: '4px 0 12px' }}>🎬 {result.directorReason}</p>}
           <div className="crtTwoCol" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>ปกที่ระบบสร้าง</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span>ปกที่ระบบสร้าง</span>
+                {/* ★ 18 ก.ค. 69: แก้ต่อในเอดิเตอร์ (sync) — สูตรจาก manifest ผังจริง ส่งข้ามแท็บเหมือนท่อทางลัด */}
+                {canOpenEditor && (
+                  <button type="button" onClick={openInEditor} disabled={editorBusy}
+                    style={{ padding: '3px 10px', borderRadius: 6, background: editorBusy ? '#94a3b8' : '#0d9488', color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', cursor: editorBusy ? 'wait' : 'pointer' }}>
+                    {editorBusy ? '⏳ กำลังเตรียมสูตร…' : '🎨 แก้ต่อในเอดิเตอร์'}
+                  </button>
+                )}
+              </div>
               <img src={result.base64} alt="cover" style={{ width: '100%', borderRadius: 10, border: '2px solid #2563eb' }} />
             </div>
             <div>
