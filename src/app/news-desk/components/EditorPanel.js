@@ -206,8 +206,15 @@ export default function EditorPanel({ onToast, onAfterAction }) {
     if (res.success) {
       if (res.sent) onToast?.('ปล่อยเข้าคิวเขียนแล้ว 1 ใบ', 'ok');
       else if (res.held) onToast?.(`คิวเขียนไม่ว่าง (รอ ${res.queueBusy?.pending || 0} · กำลังทำ ${res.queueBusy?.processing || 0}) — รอรอบหน้า`, 'warn');
+      // 🔧 17 ก.ค. 69: ทรงผลลัพธ์ใหม่ของ dispatchOne — ไล่หลายใบใน 1 รอบ ไม่ส่งได้เลยคืน released:false
+      else if (res.released === false) {
+        const d = (res.deferred || []).length;
+        const f = (res.failed || []).length;
+        onToast?.(`ยังส่งไม่ได้รอบนี้ — รอถอดคลิป ${d} ใบ${f ? ` · ล้ม ${f} ใบ` : ''} (เช็คใหม่อัตโนมัติ)`, 'warn');
+      }
       else if (res.pending) onToast?.('คลิปยังถอดไม่เสร็จ — รอรอบหน้า', 'warn');
       else if (res.error) onToast?.(`ปล่อยไม่สำเร็จ: ${res.error.message || 'ไม่ทราบสาเหตุ'}`, 'err');
+      else if (res.empty && res.backedOff) onToast?.(`ทุกใบพักรอเครื่องทีมถอดคลิป (${res.backedOff} ใบ) — เช็คใหม่อัตโนมัติ`, 'warn');
       else onToast?.('เช็คแล้ว — ห้องรอว่าง ไม่มีอะไรต้องปล่อย', 'ok');
       await load();
     } else {
@@ -462,6 +469,10 @@ export default function EditorPanel({ onToast, onAfterAction }) {
                 </span>
                 {o.status === 'error' && o.lastError && (
                   <span style={{ fontSize: 11.5, color: UI.red }}>{String(o.lastError).slice(0, 90)}</span>
+                )}
+                {/* 🔧 17 ก.ค. 69: โน้ตเหตุผลที่ใบยังรอ (เช่น รอเครื่องทีมถอดคลิป) — ผู้ใช้เห็นว่าไม่ได้ค้างเฉยๆ */}
+                {o.status === 'waiting' && o.lastNote && (
+                  <span style={{ fontSize: 11.5, color: UI.dim }}>{String(o.lastNote).slice(0, 90)}</span>
                 )}
                 {o.status === 'sent' && o.sentJobId && (
                   <span style={{ fontSize: 11.5, color: UI.dim }}>job{String(o.sentJobId).slice(0, 8)}</span>

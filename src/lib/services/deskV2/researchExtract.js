@@ -166,56 +166,95 @@ async function _getJson(url, timeoutMs) {
 }
 
 const CLIP_POLL_INTERVAL_MS = 10_000;
-const CLIP_POLL_MAX_MS = 6 * 60 * 1000; // 6 นาที (คลิป FB/IG รอเครื่องทีม อาจช้า)
+const CLIP_POLL_MAX_MS = 6 * 60 * 1000; // 6 นาที (เส้นทางกดเอง — route extract มี maxDuration 420s รองรับ)
 
 /**
- * extractClip — ส่งลิงก์คลิปเข้าคิว clip-jobs (/submit) → poll job-status ทุก 10s สูงสุด 6 นาที
+ * extractClip — ส่งลิงก์คลิปเข้าคิว clip-jobs (/submit) → poll job-status ทุก 10s ภายในงบเวลา
  *   เสร็จ (done) → ถ้าเนื้อดิบ (rawData) ยังบาง เรียก /insight เสริม (ปกติ dedup ผูก url เดียวกัน → ได้ผลจากคลังทันทีถ้าเครื่องทีมเคยถอดไว้)
  *   ไม่เสร็จภายในเวลา → คืน {pending:true, jobRef} ไม่ throw (ให้ UI บอกผู้ใช้กลับมาดูใหม่)
+ * 🔧 17 ก.ค. 69 (แก้ห้องรอ บก. ค้าง "กำลังส่ง"): เพิ่ม opts —
+ *   - pollBudgetMs: งบเวลารอ (default = 6 นาทีเท่าเดิม) — เส้นทาง cron dispatch (maxDuration 300s) ส่งงบสั้น
+ *     มาเอง กัน Vercel ฆ่า route กลางทางแล้วสถานะไม่ถูกเขียนกลับ (ต้นตูใบค้าง 'sending' ถาวร)
+ *   - existingJobRef: เลขงานคลิปจากรอบก่อน → เช็ค job-status ตรงๆ ก่อน ไม่ submit ซ้ำ
+ *     (สำคัญ: dedup ของ submit มองเฉพาะงาน active — ถ้างานเสร็จ "ระหว่างรอบ" แล้ว submit ใหม่
+ *     จะสร้างงานใหม่ถอดซ้ำทั้งคลิป ไม่มีวันจับผล done ของงานเก่าได้)
  * @returns {Promise<{pending:true, jobRef:string, source:'clip-transcript'} |
- *                    {text:string, insight:object, source:'clip-transcript', jobRef:string, error?:string}>}
+ *                    {text:string, insight:object, source:'clip-transcript', jobRef?:string, error?:string}>}
  */
-export async function extractClip(url, origin) {
+export async function extractClip(url, origin, opts = {}) {
   const cleanUrl = sanitizeText(url, 500);
   if (!cleanUrl) return { text: '', source: 'clip-transcript', insight: null, error: 'ไม่มี URL' };
   if (!origin) return { text: '', source: 'clip-transcript', insight: null, error: 'ขาด origin สำหรับยิง clip-transcript' };
 
-  // (1) submit
-  let sub;
-  try {
-    sub = await _postJson(`${origin}/api/clip-transcript/submit`, { url: cleanUrl, kind: 'insight', user: 'research-desk' }, 20_000);
-  } catch (e) {
-    return { text: '', source: 'clip-transcript', insight: null, error: `ส่งคลิปเข้าคิวไม่สำเร็จ: ${e.message}` };
-  }
-  if (!sub.ok || !sub.data || sub.data.success !== true || !sub.data.jobId) {
-    return { text: '', source: 'clip-transcript', insight: null, error: (sub.data && sub.data.error) || `ส่งคลิปเข้าคิวไม่สำเร็จ (สถานะ ${sub.status})` };
-  }
-  const jobId = sub.data.jobId;
+  const pollBudgetMs = Math.max(0, Number(opts.pollBudgetMs) || CLIP_POLL_MAX_MS);
+  const existingJobRef = sanitizeText(opts.existingJobRef, 80);
 
-  // (2) poll ทุก 10s สูงสุด 6 นาที
-  const deadline = Date.now() + CLIP_POLL_MAX_MS;
+  let jobId = null;
   let lastStatus = null;
-  while (Date.now() < deadline) {
-    // eslint-disable-next-line no-await-in-loop
-    await _sleep(CLIP_POLL_INTERVAL_MS);
-    let st;
+
+  // (0) มีเลขงานจากรอบก่อน → เช็คสถานะงานเดิมก่อน (ไม่ submit ซ้ำ)
+  if (existingJobRef) {
     try {
-      // eslint-disable-next-line no-await-in-loop
-      st = await _getJson(`${origin}/api/clip-transcript/job-status?id=${encodeURIComponent(jobId)}`, 15_000);
+      const st0 = await _getJson(`${origin}/api/clip-transcript/job-status?id=${encodeURIComponent(existingJobRef)}`, 15_000);
+      if (st0.ok && st0.data) {
+        const s = st0.data.status;
+        if (s === 'done') {
+          lastStatus = st0.data;
+          jobId = existingJobRef;
+        } else if (s === 'error') {
+          return { text: '', source: 'clip-transcript', insight: null, error: st0.data.error || 'ถอดคลิปล้มเหลว (เครื่องทีมลองครบแล้ว)', jobRef: existingJobRef };
+        } else if (s === 'pending' || s === 'processing' || s === 'retry_wait') {
+          jobId = existingJobRef; // งานเดิมยังวิ่งอยู่ — ข้าม submit ไป poll ต่อเลย
+        }
+        // สถานะอื่น/ไม่รู้จัก → ปล่อย jobId เป็น null → submit ใหม่ตามปกติ
+      }
+      // JOB_NOT_FOUND (คิวถูกล้าง) → submit ใหม่ตามปกติ
     } catch {
-      continue; // เน็ตสะดุดชั่วคราว — ลองรอบถัดไป ไม่ล้มทั้งก้อน
+      // เช็คงานเดิมไม่ได้ (เน็ตสะดุด) — submit ใหม่ได้ปลอดภัย (dedup ฝั่ง submit กันซ้ำให้ถ้างานยัง active)
     }
-    if (!st.ok || !st.data) continue;
-    lastStatus = st.data;
-    if (st.data.status === 'done') break;
-    if (st.data.status === 'error') {
-      return { text: '', source: 'clip-transcript', insight: null, error: st.data.error || 'ถอดคลิปล้มเหลว', jobRef: jobId };
+  }
+
+  // (1) submit (เฉพาะเมื่อไม่มีงานเดิมที่ยังใช้ได้)
+  if (!jobId) {
+    let sub;
+    try {
+      sub = await _postJson(`${origin}/api/clip-transcript/submit`, { url: cleanUrl, kind: 'insight', user: 'research-desk' }, 20_000);
+    } catch (e) {
+      return { text: '', source: 'clip-transcript', insight: null, error: `ส่งคลิปเข้าคิวไม่สำเร็จ: ${e.message}` };
     }
-    // pending / processing / retry_wait → วนต่อ
+    if (!sub.ok || !sub.data || sub.data.success !== true || !sub.data.jobId) {
+      return { text: '', source: 'clip-transcript', insight: null, error: (sub.data && sub.data.error) || `ส่งคลิปเข้าคิวไม่สำเร็จ (สถานะ ${sub.status})` };
+    }
+    jobId = sub.data.jobId;
+  }
+
+  // (2) poll ภายในงบเวลา — เช็คทันที 1 ครั้งก่อนแล้วค่อยวนหลับ (งบสั้นของ cron จะได้เช็คได้จริงอย่างน้อย 1 ครั้ง)
+  if (!lastStatus) {
+    const deadline = Date.now() + pollBudgetMs;
+    for (;;) {
+      let st = null;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        st = await _getJson(`${origin}/api/clip-transcript/job-status?id=${encodeURIComponent(jobId)}`, 15_000);
+      } catch {
+        // เน็ตสะดุดชั่วคราว — ลองรอบถัดไป ไม่ล้มทั้งก้อน
+      }
+      if (st && st.ok && st.data) {
+        lastStatus = st.data;
+        if (st.data.status === 'done') break;
+        if (st.data.status === 'error') {
+          return { text: '', source: 'clip-transcript', insight: null, error: st.data.error || 'ถอดคลิปล้มเหลว', jobRef: jobId };
+        }
+        // pending / processing / retry_wait → วนต่อ
+      }
+      if (Date.now() + CLIP_POLL_INTERVAL_MS > deadline) break;
+      // eslint-disable-next-line no-await-in-loop
+      await _sleep(CLIP_POLL_INTERVAL_MS);
+    }
   }
 
   if (!lastStatus || lastStatus.status !== 'done') {
-    // ยังไม่เสร็จภายใน 6 นาที (ปกติสำหรับ FB/IG ที่รอเครื่องทีม) — ไม่ throw
+    // ยังไม่เสร็จภายในงบเวลา (ปกติสำหรับ FB/IG ที่รอเครื่องทีม) — ไม่ throw
     return { pending: true, jobRef: jobId, source: 'clip-transcript' };
   }
 
@@ -629,14 +668,16 @@ export async function sendLeadAsText(leadId, { origin, auto = false } = {}) {
  * (attachExtract ตั้งได้แค่ contentReady:true ไม่แตะ status · status เปลี่ยนเป็น 'sent' เฉพาะตอน sendLeadAsText สำเร็จเท่านั้น)
  *
  * @param {string} leadId
- * @param {{origin:string, auto?:boolean}} opts
+ * @param {{origin:string, auto?:boolean, clipPollBudgetMs?:number}} opts
+ *   clipPollBudgetMs (🔧 17 ก.ค. 69): งบเวลารอถอดคลิปของคอลนี้ — เส้นทาง cron dispatch ส่งงบสั้น (~15s)
+ *   กัน route ถูก Vercel ฆ่ากลางทาง · ไม่ส่ง = ใช้เพดานเต็ม 6 นาทีเหมือนเดิม (เส้นทางกดเองผ่าน route 420s)
  * @returns {Promise<
  *   {success:true, sent:true, jobId:string|null, cleanLength:number} |
  *   {success:true, sent:false, pending:true, jobRef?:string|null} |
  *   {success:false, step:'extract'|'distill'|'send', error:string}
  * >}
  */
-export async function extractAndSend(leadId, { origin, auto = false } = {}) {
+export async function extractAndSend(leadId, { origin, auto = false, clipPollBudgetMs } = {}) {
   let lead;
   try {
     lead = await getLead(leadId);
@@ -656,13 +697,34 @@ export async function extractAndSend(leadId, { origin, auto = false } = {}) {
     if (route === 'clip') {
       let clipResult;
       try {
-        clipResult = await extractClip(lead.url, origin);
+        // 🔧 17 ก.ค. 69: ส่งเลขงานเดิม (lead.clipJobRef) ให้เช็คสถานะตรงๆ ก่อน ไม่ submit ซ้ำ —
+        //   จับผล done ของงานที่ "เสร็จระหว่างรอบ" ได้จริง (dedup ของ submit มองเฉพาะงาน active)
+        clipResult = await extractClip(lead.url, origin, {
+          pollBudgetMs: Number(clipPollBudgetMs) || undefined,
+          existingJobRef: lead.clipJobRef || null,
+        });
       } catch (e) {
         return { success: false, step: 'extract', error: e?.message || String(e) };
       }
       if (clipResult?.pending) {
         // คลิปยังถอดไม่เสร็จ (ส่งเข้าคิวเครื่องทีมแล้ว) — ไม่ใช่ error แต่ยังส่งเขียนไม่ได้
-        return { success: true, sent: false, pending: true, jobRef: clipResult.jobRef || null };
+        // จำเลขงานไว้กับลีด (ครั้งแรก/งานใหม่เท่านั้น — ไม่เขียนซ้ำทุกรอบ) เพื่อรอบหน้าเช็คงานเดิมตรงๆ
+        const jobRef = clipResult.jobRef || null;
+        if (jobRef && jobRef !== lead.clipJobRef) {
+          try {
+            const store = createStore(LEADS_STORE);
+            await _mergeAndPersistLead(store, leadId, {
+              clipJobRef: jobRef,
+              clipJobRefAt: new Date().toISOString(),
+            }, {
+              type: 'status',
+              data: { status: `รอเครื่องทีมถอดคลิป (งาน ${String(jobRef).slice(0, 8)})` },
+            });
+          } catch {
+            // จำเลขงานไม่ได้ก็ไม่บล็อกงาน — รอบหน้า submit ใหม่ dedup ฝั่งระบบคลิปกันซ้ำให้เอง (เฉพาะงาน active)
+          }
+        }
+        return { success: true, sent: false, pending: true, jobRef };
       }
       const rawText = String(clipResult?.text || '');
       if (rawText.length < 50) {
