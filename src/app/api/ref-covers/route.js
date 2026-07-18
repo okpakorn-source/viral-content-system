@@ -15,6 +15,10 @@ import { computeTemplateGrade } from '@/lib/refCoverGrade';
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
+// ★ 18 ก.ค. (คำสั่ง sol — precision): ปัดพิกัด slot เป็นทศนิยม 0.1% (ไม่ใช่จำนวนเต็ม) — เก็บความแม่นตะเข็บ
+//   ค่าไม่ใช่ตัวเลข → 0 (กัน NaN เข้าคลัง) · 0.1% ≈ 1px บน canvas 1080 = ระดับพิกเซลพอดี (compose ปัดพิกเซลตอนท้าย)
+const _round1 = (v) => (Number.isFinite(+v) ? Math.round(+v * 10) / 10 : 0);
+
 export async function GET() {
   try {
     const items = await listRefCovers(500);
@@ -84,10 +88,13 @@ export async function PATCH(req) {
           .map((s) => ({
             role: String(s.role || 'context').slice(0, 20),
             shape: s.shape === 'circle' ? 'circle' : 'rect',
-            xPct: Math.max(0, Math.min(100, Math.round(+s.xPct))),
-            yPct: Math.max(0, Math.min(100, Math.round(+s.yPct))),
-            wPct: Math.max(5, Math.min(100, Math.round(+s.wPct))),
-            hPct: Math.max(5, Math.min(100, Math.round(+s.hPct))),
+            // ★ 18 ก.ค. (คำสั่ง sol — precision): เดิม Math.round() ปัดพิกัดเป็นจำนวนเต็ม % → เพี้ยน ~3-5px
+            //   บน canvas 1080 (compose แปลง Math.round((x/100)*W) ตอนท้าย รักษาทศนิยมอยู่แล้ว).
+            //   เก็บทศนิยม 0.1% (≈1px) ให้ human-verified geometry ตรงตะเข็บจริง (worstOffsetPx ↓ = เกรดขึ้น).
+            xPct: Math.max(0, Math.min(100, _round1(+s.xPct))),
+            yPct: Math.max(0, Math.min(100, _round1(+s.yPct))),
+            wPct: Math.max(5, Math.min(100, _round1(+s.wPct))),
+            hPct: Math.max(5, Math.min(100, _round1(+s.hPct))),
             // ★ 9 ก.ค.: เก็บ zIndex ที่ส่งมา (inset ลอยทับต้อง z สูง) — เดิมบังคับ 0 ทำ inset จมใต้ช่องข้างเคียง
             zIndex: Number.isFinite(+s.zIndex) ? Math.max(0, Math.min(9, Math.round(+s.zIndex))) : (s.shape === 'circle' ? 1 : 0),
             border: !!s.border,
