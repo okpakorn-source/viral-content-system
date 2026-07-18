@@ -955,9 +955,13 @@ const CAT_LABEL = {
 //   ลำดับ field: realWidth/realHeight (วัดจริงหลัง rehost/ตาคัด) ก่อน แล้วค่อย width/height (เมื่อไม่ null)
 //   ไม่มีทั้งคู่ = ไม่โชว์ badge (วัดไม่ได้ อย่าเดา) · เขียว≥800 / เหลือง 500-799 / แดง<500 หรือ thumbnail-only
 function sizeBadgeFor(im) {
+  // ★ W2: ใช้ "ขนาดจริงที่ตาวัดจากไฟล์" (triage.realShortSide) ก่อนเสมอ — SerpApi width/height โกหกได้ (บิดเบือน ~72%)
+  const tss = Number(im.triage?.realShortSide);
   const rw = Number(im.realWidth), rh = Number(im.realHeight);
   const w = Number(im.width), h = Number(im.height);
-  const shortSide = (rw > 0 && rh > 0) ? Math.min(rw, rh) : ((w > 0 && h > 0) ? Math.min(w, h) : null);
+  const shortSide = tss > 0 ? tss
+    : (rw > 0 && rh > 0) ? Math.min(rw, rh)
+    : ((w > 0 && h > 0) ? Math.min(w, h) : null);
   if (shortSide == null) return null;
   const thumbOnly = im.rehostQuality === 'thumbnail';
   if (thumbOnly || shortSide < 500) return { label: `จิ๋ว ${shortSide}px`, bg: 'rgba(200,40,40,.85)' };
@@ -1018,8 +1022,8 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
   for (const im of images) {
     if (!im.triage) continue;
     triagedCount++;
-    if (im.triage.relevant === false) junkCount++;
-    if (im.triage.newsScene === false && im.triage.relevant !== false) fileCount++;
+    if (im.triage.relevant === false || im.triage.clean === false) junkCount++; // ★ W1: clean=false (ปกคลิป/ลายน้ำ/คอลลาจ) = ขยะด้วย
+    if (im.triage.newsScene === false && im.triage.relevant !== false && im.triage.clean !== false) fileCount++; // ★ W1: แฟ้ม/ขยะ แยกกัน (กันนับซ้ำ)
     if (im.triage.person) byPerson[im.triage.person] = (byPerson[im.triage.person] || 0) + 1;
     if (im.triage.category) byCat[im.triage.category] = (byCat[im.triage.category] || 0) + 1;
   }
@@ -1035,7 +1039,7 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
         (personFilter === 'all' || im.triage?.person === personFilter) &&
         (catFilter === 'all' || im.triage?.category === catFilter) &&
         (sceneFilter === 'all' || (sceneFilter === 'file' ? im.triage?.newsScene === false : im.triage?.newsScene !== false)) &&
-        (!hideJunk || im.triage?.relevant !== false)
+        (!hideJunk || (im.triage?.relevant !== false && im.triage?.clean !== false)) // ★ W1: ซ่อนขยะ = ซ่อนทั้ง "ไม่เกี่ยว" + "ไม่สะอาด" (ภาพไม่ติดป้าย/undefined ยังโชว์ — กัน false drop)
     )
     // ★ DEVIATION (ผู้ใช้สั่ง 6 ก.ค.): ภาพที่ตายืนยันว่าเกี่ยว+คุณภาพสูง ขึ้นก่อนเสมอ (ต้นฉบับเรียงตามลำดับเก็บ)
     // ★ 8 ก.ค. เฟส A: ภาพข่าวจริง (newsScene) มาก่อนภาพแฟ้มเสมอ
@@ -1184,7 +1188,7 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
               {cats.map((cat) => (
                 <button key={cat} className={'fchip' + (catFilter === cat ? ' active' : '')} onClick={() => setCatFilter(cat)}>{CAT_LABEL[cat] || cat} {byCat[cat]}</button>
               ))}
-              <button className={'fchip' + (hideJunk ? ' active' : '')} onClick={() => setHideJunk((v) => !v)} title="ซ่อนภาพที่ตาตีว่าไม่เกี่ยวข่าว/ขยะ">
+              <button className={'fchip' + (hideJunk ? ' active' : '')} onClick={() => setHideJunk((v) => !v)} title="ซ่อนภาพที่ทำปกไม่ได้ — ทั้งไม่เกี่ยวข่าว และไม่สะอาด (ปกคลิป/ลายน้ำ/คอลลาจ/ตัวหนังสือทับ)">
                 {hideJunk ? '🙈 ซ่อนขยะแล้ว' : `🗑️ ซ่อนขยะ (${junkCount})`}
               </button>
               {/* ★ 8 ก.ค. เฟส A: กรอง ภาพข่าวจริง / ภาพแฟ้ม (คนถูกแต่มาจากงานอื่น) */}
@@ -1212,7 +1216,7 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
             onClick={() => clickThumb(im, i)}
             title={im.title || im.source}
           >
-            <img src={im.thumbnailUrl || im.imageUrl} alt={im.title || ''} loading="lazy" style={im.triage?.relevant === false ? { opacity: 0.4 } : undefined} />
+            <img src={im.thumbnailUrl || im.imageUrl} alt={im.title || ''} loading="lazy" style={(im.triage?.relevant === false || im.triage?.clean === false) ? { opacity: 0.4 } : undefined} />
             <span className="thumb-plat">{PLATFORM_LABEL[im.platform] || im.platform}</span>
             {/* ★ 9 ก.ค. เฟส 2.4: badge ขนาดจริง มุมขวาบน (ซ่อนตอนโหมดเลือก กันซ้อน thumb-check) */}
             {!selMode && sb && (
@@ -1220,8 +1224,12 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
             )}
             {im.emotion && <span className="thumb-emo" title={EMOTION_LABEL[im.emotion]}>{(EMOTION_LABEL[im.emotion] || '').split(' ')[0]}</span>}
             {im.triage?.relevant === false && <span className="thumb-plat" style={{ top: 'auto', bottom: 4, left: 4, background: 'rgba(200,40,40,.85)' }}>🗑️ ขยะ</span>}
-            {/* ★ 8 ก.ค. เฟส A: ป้ายภาพแฟ้ม — คนถูกจริงแต่มาจากงาน/บริบทอื่น */}
-            {im.triage?.newsScene === false && im.triage?.relevant !== false && (
+            {/* ★ W1: ป้าย "ไม่สะอาด" — เกี่ยวข่าวแต่ทำปกไม่ได้ (ปกคลิป/ลายน้ำ/คอลลาจ/ตัวหนังสือทับ) */}
+            {im.triage?.clean === false && im.triage?.relevant !== false && (
+              <span className="thumb-plat" style={{ top: 'auto', bottom: 4, left: 4, background: 'rgba(150,40,120,.85)' }}>🚫 ไม่สะอาด</span>
+            )}
+            {/* ★ 8 ก.ค. เฟส A: ป้ายภาพแฟ้ม — คนถูกจริงแต่มาจากงาน/บริบทอื่น (แสดงเมื่อสะอาด กันซ้อนป้ายไม่สะอาด) */}
+            {im.triage?.newsScene === false && im.triage?.relevant !== false && im.triage?.clean !== false && (
               <span className="thumb-plat" style={{ top: 'auto', bottom: 4, left: 4, background: 'rgba(180,120,20,.85)' }}>📁 แฟ้ม</span>
             )}
             {im.source && <span className="thumb-src">{im.source}</span>}
