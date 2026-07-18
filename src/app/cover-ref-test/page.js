@@ -32,6 +32,7 @@ export default function CoverRefTestPage() {
   const [content, setContent] = useState('');
   // ★ 15 ก.ค. 69 บัค #5: ถอดช่องฟอร์มที่ไม่ได้ต่อสายจริงออกจากหน้า (เดิมเก็บค่าแต่ไม่เคยส่งเข้า body) — จะใส่กลับเมื่อ wire จริง
   const [refLock, setRefLock] = useState('');
+  const [clipLinks, setClipLinks] = useState(''); // ★ โหมดคลิปต้นทาง (18 ก.ค.): ลิงก์คลิปที่ข่าวมาจาก (บรรทัดละลิงก์ ≤3)
   // ★ 15 ก.ค. 69 แบตช์ 5: คีย์ทีมสำหรับด่านตรวจสิทธิ์ src/middleware.js (เรียกผ่านโฮสต์/cloud) — เก็บใน localStorage เครื่องผู้ใช้เอง ไม่ hardcode
   const [teamKey, setTeamKey] = useState('');
   const [loading, setLoading] = useState(false);
@@ -102,6 +103,8 @@ export default function CoverRefTestPage() {
         content: content.trim(),
       };
       if (refLock.trim()) body.forceTemplateId = refLock.trim();
+      // ★ โหมดคลิปต้นทาง: ส่งลิงก์คลิป (บรรทัด/เว้นวรรค/คอมมาคั่นได้) — ฝั่งท่อจะแคปเฟรมจากลิงก์เป็นแหล่งหลักก่อน
+      if (clipLinks.trim()) body.clipUrls = clipLinks.split(/[\n\s,]+/).map((s) => s.trim()).filter(Boolean).slice(0, 3);
 
       // ★ 15 ก.ค. 69 แบตช์ 5: แนบคีย์ทีมเมื่อกรอกไว้ (localhost/เครื่องทีมไม่ต้องมีก็ผ่านด่านได้)
       const headers = { 'content-type': 'application/json' };
@@ -345,6 +348,10 @@ export default function CoverRefTestPage() {
           <label style={label}>เนื้อข่าวเต็ม *</label>
           <textarea style={{ ...input, minHeight: 200, resize: 'vertical', fontFamily: 'inherit' }} value={content} onChange={e => setContent(e.target.value)} placeholder="วางเนื้อข่าวเต็ม (ห้ามเนื้อสั้นตัดทอน)" />
           <div style={{ fontSize: 11, color: '#94a3b8' }}>{content.trim().length} ตัวอักษร</div>
+
+          {/* ★ โหมดคลิปต้นทาง (18 ก.ค.): ข่าวจากคลิปมีต้นทางเสมอ — แคปเฟรมจากคลิปจริง = ภาพตรงข่าวที่สุด */}
+          <label style={label}>🎬 ลิงก์คลิปต้นทาง (ทางเลือก — TikTok / YouTube / Facebook, ≤3 ลิงก์)</label>
+          <textarea style={{ ...input, minHeight: 54, resize: 'vertical', fontFamily: 'inherit' }} value={clipLinks} onChange={e => setClipLinks(e.target.value)} placeholder={'วางลิงก์คลิปที่ข่าวมาจาก (บรรทัดละลิงก์) — ระบบจะแคปเฟรมจากคลิปเป็น "ภาพหลัก" ก่อน แล้วค่อยค้นเว็บเสริม\nไม่กรอกก็ได้: ถ้าเนื้อข่าวมีลิงก์คลิปแปะอยู่ ระบบดึงให้อัตโนมัติ'} />
 
           <label style={label}>ล็อก ref ID (ทางเลือก — ปล่อยว่าง = match อัตโนมัติ)</label>
           <input style={input} value={refLock} onChange={e => setRefLock(e.target.value)} placeholder="เช่น vt_ref_5x4 (ปล่อยว่างถ้าไม่ต้องล็อก)" />

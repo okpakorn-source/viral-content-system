@@ -590,16 +590,20 @@ export async function runCoverRefTest(input = {}, deps = {}) {
   }
 
   // ── in-memory dossier (จำลอง S4 จบแล้ว) — ขับ adapter จริงเหมือน conductor ──
+  // ★ โหมดคลิปต้นทาง: ช่องกรอก input.clipUrls (คนใส่) หรือ auto-detect จากเนื้อ → s5_search แคปเฟรมเป็นแหล่งหลัก
+  const sourceClips = extractSourceClips(input.clipUrls, content);
   const job = {
     id: `REFTEST-${Date.now().toString(36)}`,
     dossier: {
       desk: { title: newsTitle, lane: '', category: '' },
       extract: { text: content, chars: content.length },
       generate: { newsData: { newsTitle, newsBody: content } },
+      ...(sourceClips.length ? { sourceClips } : {}),
     },
   };
   // ★ ให้ผู้ใช้ล็อก ref ใบเจาะจงได้ — S6 เป็นผู้ bind identity เอง (ท่อนี้ไม่ synthesize refMatch)
   if (forceTemplateId) job.dossier.refIdLock = String(forceTemplateId);
+  if (sourceClips.length) trace.push({ stage: 'source_clips', status: 'done', summary: `🎬 คลิปต้นทาง ${sourceClips.length} ลิงก์ — จะแคปเฟรมเป็นแหล่งหลักก่อน ค้นเว็บเป็นตัวเสริม` });
 
   const merge = (r) => { if (r?.dossierPatch) Object.assign(job.dossier, r.dossierPatch); return r; };
   const step = (name, r) => { trace.push({ stage: name, status: r?.status, summary: (r?.summary || '').slice(0, 160) }); return r; };
@@ -1360,6 +1364,24 @@ export async function rt_s7compose(job, opts = {}) {
 // ============================================================
 
 // ตรวจ 1 รายการตามเกณฑ์เดิม (เนื้อ≥100 · หัว+เนื้อ≥200) — คืน { ok, error } หรือ prepared
+// ★ โหมดคลิปต้นทาง (18 ก.ค. — ผู้ใช้สั่ง): ลิงก์คลิปที่ข่าวมาจาก (TikTok/YouTube/FB) = แหล่งภาพ "หลัก"
+//   ท่อ S5 จะแคปเฟรมจากลิงก์พวกนี้ก่อน แล้วค่อยใช้ค้นเว็บ 4 แหล่งเป็นตัวเสริม (ภาพตรงข่าวขึ้นอีกสเตป)
+//   รับ 2 ทาง: (1) คนกรอกช่อง clipUrls ในฟอร์ม (2) auto-detect ลิงก์คลิปจาก "เนื้อข่าว" (AI/คนแปะลิงก์มากับเนื้อ)
+//   regex เอาเฉพาะ "ลิงก์ตัวคลิป" จริง (watch/shorts/reel/video/fb.watch/ลิงก์ย่อ TikTok) — ไม่เอาหน้าเพจ/โพสต์รูป
+const SOURCE_CLIP_RX = /https?:\/\/(?:www\.|m\.|web\.)?(?:youtube\.com\/(?:watch\?[^\s"'<>]*v=|shorts\/)[^\s"'<>]+|youtu\.be\/[^\s"'<>]+|(?:vt|vm)\.tiktok\.com\/[^\s"'<>]+|tiktok\.com\/@[^\s"'<>]+\/video\/[^\s"'<>]+|facebook\.com\/(?:reel\/|watch\/?\?[^\s"'<>]*v=|share\/[vr]\/|[^\s"'<>]+\/videos\/)[^\s"'<>]*|fb\.watch\/[^\s"'<>]+)/gi;
+export function extractSourceClips(explicit, content) {
+  const out = [];
+  const push = (u) => { const t = String(u || '').trim().replace(/[),.;]+$/, ''); if (t && !out.includes(t)) out.push(t); };
+  const exArr = Array.isArray(explicit) ? explicit : String(explicit || '').split(/[\n\s,]+/);
+  const exUrls = exArr.map((u) => String(u || '').trim()).filter((u) => /^https?:\/\//i.test(u));
+  // ช่องกรอก: เอาเฉพาะลิงก์ตัวคลิป — ถ้าผู้ใช้ใส่มาแต่ไม่เข้า pattern เลย ให้เชื่อผู้ใช้ (yt-dlp รองรับกว้างกว่า regex)
+  const exClips = exUrls.filter((u) => { SOURCE_CLIP_RX.lastIndex = 0; return SOURCE_CLIP_RX.test(u); });
+  (exClips.length ? exClips : exUrls).forEach(push);
+  // ไม่ได้กรอก → สแกนเนื้อข่าว (คอนเทนต์จากคลิปมักแปะลิงก์ต้นทางมาด้วย)
+  if (!out.length) (String(content || '').match(SOURCE_CLIP_RX) || []).forEach(push);
+  return out.slice(0, 3);
+}
+
 function _validateRefTestItem(item, idx) {
   const content = String(item?.content || '').trim();
   const newsTitle = String(item?.newsTitle || '').trim();
@@ -1370,16 +1392,19 @@ function _validateRefTestItem(item, idx) {
   if (gateText.length < 200) {
     return { ok: false, error: `รายการที่ ${idx + 1}: เนื้อไม่พอเปิดเคสภาพ (หัว+เนื้อรวม ${gateText.length} ตัว — ด่าน s5_case ต้อง ≥200)` };
   }
-  return { ok: true, content, newsTitle, forceTemplateId: item?.forceTemplateId ? String(item.forceTemplateId) : null };
+  // ★ คลิปต้นทาง: จากช่องกรอกของรายการ หรือ auto-detect จากเนื้อ (คิวหลายข่าว = ลิงก์อยู่ในเนื้อของใครของมัน)
+  const sourceClips = extractSourceClips(item?.clipUrls, content);
+  return { ok: true, content, newsTitle, forceTemplateId: item?.forceTemplateId ? String(item.forceTemplateId) : null, sourceClips };
 }
 
 // seed dossier มาตรฐานของงานคิว reftest (จำลอง S4 จบแล้ว — เหมือน sync job.dossier)
-function _seedRefTestDossier({ newsTitle, content, forceTemplateId }) {
+function _seedRefTestDossier({ newsTitle, content, forceTemplateId, sourceClips }) {
   return {
     desk: { title: newsTitle, lane: '', category: '' },
     extract: { text: content, chars: content.length },
     generate: { newsData: { newsTitle, newsBody: content } },
     ...(forceTemplateId ? { refIdLock: String(forceTemplateId) } : {}),
+    ...(Array.isArray(sourceClips) && sourceClips.length ? { sourceClips } : {}), // ★ คลิปต้นทาง → s5_search ใช้เป็นแหล่งหลัก
   };
 }
 

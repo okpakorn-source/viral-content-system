@@ -865,15 +865,26 @@ export async function s5_search(job, { origin, _deps }) {
     //   เดิมรอถึง S5e ค่อยยิงแบบ synchronous = บวก 3-5 นาทีท้ายสาย + บนคลาวด์เฟรมมาไม่ทัน S6
     let ytFired = im.ytFired || null;
     if (YT_PARALLEL && !ytFired && done.length === 0) {
-      const clipUrl = VIDEO_URL_RE.test(String(job.dossier.desk?.url || '')) ? job.dossier.desk.url : '';
+      // ★ โหมดคลิปต้นทาง (18 ก.ค. — ผู้ใช้สั่ง): job แนบลิงก์คลิปที่ข่าวมาจาก (dossier.sourceClips ≤3 —
+      //   คนกรอกฟอร์ม cover-ref-test / auto-detect จากเนื้อ / สาย auto ส่ง desk.url เดิม) = แหล่งภาพ "หลัก"
+      //   → ยิงแคปเฟรม pinpoint ทุกลิงก์ตั้งแต่ tick แรก · ค้นเว็บ 4 แหล่งกลายเป็นตัวเสริม
+      //   ไม่มีลิงก์ = พฤติกรรมเดิมทุกอย่าง (desk.url เดี่ยว / generic search) · คิวแคปเฟรมกันซ้ำต่อ (caseId+clipUrl) รับหลายลิงก์ได้
+      const srcClips = (Array.isArray(job.dossier.sourceClips) ? job.dossier.sourceClips : [])
+        .map((u) => String(u || '').trim()).filter((u) => VIDEO_URL_RE.test(u)).slice(0, 3);
+      const deskUrl = VIDEO_URL_RE.test(String(job.dossier.desk?.url || '')) ? job.dossier.desk.url : '';
+      const clipUrls = srcClips.length ? srcClips : (deskUrl ? [deskUrl] : ['']); // '' = generic search แบบเดิม
       try {
-        fetch(`${origin}/api/images/youtube`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ caseId: im.caseId, ...(clipUrl ? { clipUrl } : {}) }),
-        }).catch(() => {});
+        for (const cu of clipUrls) {
+          fetch(`${origin}/api/images/youtube`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ caseId: im.caseId, ...(cu ? { clipUrl: cu } : {}) }),
+          }).catch(() => {});
+        }
         ytFired = new Date().toISOString();
-        console.log('[MEGA S5c] 🎬 ยิงแคปเฟรม YouTube ขนาน (ผลไปรอเช็คที่ s5_clipframe)');
+        console.log(srcClips.length
+          ? `[MEGA S5c] 🎬 แคปเฟรมจาก "คลิปต้นทาง" ${srcClips.length} ลิงก์ (แหล่งหลัก — ค้นเว็บเป็นตัวเสริม)`
+          : '[MEGA S5c] 🎬 ยิงแคปเฟรม YouTube ขนาน (ผลไปรอเช็คที่ s5_clipframe)');
       } catch { /* ยิงไม่ได้ → s5_clipframe จะยิงเองแบบเดิม */ }
     }
     const r = await _jf(`${origin}/api/images/search`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, platform: next }) }, 480000); // ★ 7 ก.ค.: 5→8 นาที (search+EyeScreen ต่อแหล่งแตะ 5 นาทีได้ → เดิม abort พอดี)

@@ -81,6 +81,7 @@ export async function handleCoverRefTestPost({
       content: body.content,
       newsTitle: body.newsTitle,
       forceTemplateId: body.forceTemplateId,
+      clipUrls: body.clipUrls, // ★ โหมดคลิปต้นทาง (18 ก.ค.): ลิงก์คลิปที่ข่าวมาจาก → แคปเฟรมเป็นแหล่งหลัก
       origin,
     }, {});
     return jsonResponder(out, { status });
