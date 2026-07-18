@@ -133,6 +133,11 @@ export function refPoolGateOpen(record, env = process.env) {
   //   ไม่ตั้ง env = พฤติกรรมเดิมเป๊ะทุก byte · pin ชี้ id ไม่มีจริง = พูลว่าง → เดินเส้น "คลังว่าง" เดิม (ปลอดภัย)
   const pin = String(env?.REF_POOL_PIN || '').trim();
   if (pin) return String(record?.id || '') === pin;
+  // ★ 18 ก.ค. (ผู้ใช้สั่ง — audit เกรด): REF_POOL_ALLOWLIST = ชุด id "เทมเพลตที่แม่นจริง" (คั่นด้วย ,) — ขยายจาก
+  //   single-pin มาเป็น "หลายใบที่เชื่อได้" โดยไม่ต้องเปิดทั้งพูล (ยังคัด C/F ที่ DNA อ่านเพี้ยนออก)
+  //   ไม่ตั้ง = พฤติกรรมเดิมเป๊ะ (ไปเช็ค grade gate ด้านล่าง) · ชี้ id ไม่มีจริง = ใบนั้นไม่เข้า (พูลเหลือเฉพาะที่ตรง)
+  const allow = String(env?.REF_POOL_ALLOWLIST || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (allow.length) return allow.includes(String(record?.id || ''));
   const gateOn = env?.REF_TEMPLATE_GRADE_GATE === '1';
   if (!gateOn) {
     // OFF → พฤติกรรมเดิม "ก่อน R5b" เป๊ะ: pool ต้อง byte-identical กับคลัง 21 ใบก่อนกลั่นโครงลูก
