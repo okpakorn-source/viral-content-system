@@ -60,8 +60,12 @@ function isTransient(error = '', errorType = '') {
   if (/ดูคลิปไม่ได้|ส่วนตัว|private|age.?restrict|จำกัดอายุ|unsupported|ลิงก์ไม่รองรับ|missing_url|cant_watch|กดใหม่ไม่ช่วย|ดูไม่ได้/.test(s)) return false;
   // ★ 27 มิ.ย. (ผู้ใช้สั่ง): ลิงก์เสีย/ไม่พบคอนเทนต์ → ถาวร (เลิก retry วนซ้ำ 80 รอบ) แจ้งชัดว่าลิงก์เสีย
   if (/ไม่พบคอนเทนต์|ไม่พบเนื้อหา|ไม่พบคลิป|ไม่พบวิดีโอ|ไม่มีเนื้อหา|ไม่มีคอนเทนต์|ถูกลบ|โหลดคลิปไม่ได้|ดึงคอนเทนต์ไม่ได้|not\s?found|404|video\s?unavailable|deleted|removed|no\s?content|content\s?not\s?(available|found)|empty\s?(content|video)/.test(s)) return false;
-  // (ข) ชั่วคราว — Gemini แน่น/เน็ต/timeout → รอลองใหม่
-  if (/503|429|overload|unavailable|high demand|temporar|rate limit|แน่น|ใช้งานหนัก|timeout|deadline|fetch failed|econn|network|socket|parse|เดี๋ยวก็ผ่าน/.test(s)) return true;
+  // (ข) ชั่วคราว — Gemini แน่น/เน็ต/timeout → รอลองใหม่ (ตรวจ "ก่อน" ด่านดาวน์โหลดถาวรด้านล่าง —
+  //     'command failed: ... HTTP 503' ต้องนับเป็นชั่วคราวไว้ก่อน ไม่โดนเหมาว่าถาวร)
+  if (/503|429|overload|unavailable|high demand|temporar|rate limit|แน่น|ใช้งานหนัก|timeout|timed\s?out|deadline|fetch failed|econn|network|socket|parse|เดี๋ยวก็ผ่าน/.test(s)) return true;
+  // ★ Batch B (18 ก.ค.): yt-dlp ดาวน์โหลดล้ม/ไม่มีสตรีมวิดีโอ (โพสต์-รูป/อัลบั้ม/คุกกี้หมด) → ถาวร กดใหม่ไม่ช่วย
+  //   เดิมตกเป็น default retry 80 รอบ/~4 ชม. แล้วแจ้ง "Gemini แน่น" ผิดสาเหตุ (เคสจริง 17 ก.ค.: Command failed yt-dlp)
+  if (/command failed|โหลดวิดีโอ.*ไม่สำเร็จ|วิดีโอเล็กเกินไป|ไม่มีวิดีโอ|ไม่ใช่(คลิป|วิดีโอ)|no\s?video|not\s?a\s?video|no\s?(playable\s?)?(video\s?)?(format|stream)|requested format|unable to (download|extract)/.test(s)) return false;
   // ไม่ชัด → ถือเป็นชั่วคราว (ผู้ใช้อยากให้ "รอจนได้") · MAX_ATTEMPTS คุมไม่ให้วนฟรีตลอด
   return true;
 }

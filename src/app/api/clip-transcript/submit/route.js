@@ -29,11 +29,12 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'ลิงก์ไม่รองรับ — ใช้ได้เฉพาะ TikTok / YouTube / Facebook(IG)', errorType: 'UNSUPPORTED_URL' }, { status: 400 });
     }
     const store = createStore('clip-jobs');
-    // กันส่งซ้ำ: ลิงก์เดียวกันที่ยังทำงานอยู่ (pending/processing/retry_wait) → คืน job เดิม
-    //   ★ 26 มิ.ย.: รวม retry_wait (กำลังรอลองใหม่เพราะ Gemini แน่น) — กันสร้างงานซ้ำซ้อน · ขยายเป็น 3 ชม. (auto-retry อาจนาน)
+    // กันส่งซ้ำ: ลิงก์เดียวกันที่ยัง "active" (pending/processing/retry_wait) → คืน job เดิม
+    //   ★ Batch B (18 ก.ค.): dedup จากสถานะ active ล้วน ไม่ผูกกรอบเวลา — เดิม 3 ชม. สั้นกว่าช่วง retry จริง ~4 ชม.
+    //   (RETRY_DELAY_MS×MAX_ATTEMPTS ใน worker/route.js) ทำให้ชั่วโมงที่ 3-4 งานเดิมยัง active แต่หลุด dedup → สร้างซ้ำ
+    //   งาน active มีเพดานอายุ ~4 ชม.อยู่แล้ว (พ้นนั้นเป็น error/done จึงหลุด filter นี้เอง) — ไม่ต้องมีกรอบเวลาซ้อน
     const all = await store.getAll();
-    const recent = all.find(j => j.url === url && (j.status === 'pending' || j.status === 'processing' || j.status === 'retry_wait')
-      && Date.now() - new Date(j.createdAt || 0).getTime() < 3 * 60 * 60 * 1000);
+    const recent = all.find(j => j.url === url && (j.status === 'pending' || j.status === 'processing' || j.status === 'retry_wait'));
     if (recent) {
       return NextResponse.json({ success: true, jobId: recent.id, status: recent.status, dup: true, message: 'คลิปนี้อยู่ในคิวแล้ว (กำลังทำ/รอลองใหม่)' });
     }

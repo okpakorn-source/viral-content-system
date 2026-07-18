@@ -56,9 +56,12 @@ export async function POST(request) {
       await store.update(id, ex => {
         const attempts = (ex.attempts || 0) + 1;
         if (attempts >= MAX_ATTEMPTS) {
+          // ★ Batch B (18 ก.ค.): แจ้งสาเหตุจริงจาก lastError แทนเหมารวมว่า "Gemini แน่น" เสมอ
+          //   (ดาวน์โหลดล้มถูกจับเป็นถาวรก่อนถึงจุดนี้แล้วโดย isTransient — ที่มาถึง = ชั่วคราวจริงแต่ยาวเกิน)
+          const lastErr = String(ex.lastError || error || '').slice(0, 160);
           return {
             ...ex, status: 'error', attempts, startedAt: null, statusNote: '',
-            error: `Gemini แน่นต่อเนื่องนานมาก (ลองอัตโนมัติ ${attempts} ครั้ง ~${Math.round(attempts * RETRY_DELAY_MS / 60000)} นาที) — ลองส่งใหม่ภายหลัง`,
+            error: `ถอดคลิปไม่สำเร็จหลังลองอัตโนมัติ ${attempts} ครั้ง (~${Math.round(attempts * RETRY_DELAY_MS / 60000)} นาที)${lastErr ? ` — สาเหตุล่าสุด: ${lastErr}` : ' — ลองส่งใหม่ภายหลัง'}`,
             doneAt: new Date().toISOString(),
           };
         }

@@ -268,9 +268,12 @@ export async function extractClip(url, origin, opts = {}) {
   };
 
   // (3) เสริม: ถ้าเนื้อดิบยังบางไป ลองเรียก /api/clip-transcript/insight (sync, มี dedup cache ผูก url)
+  //   🔄 Batch A (18 ก.ค.): timeout ตามงบของ caller — โหมดส่งตรง (pollBudgetMs สั้น) จะได้ไม่ค้าง 90s ต่อใบจน route ชนเพดาน
+  //   งานกดเอง (pollBudgetMs = CLIP_POLL_MAX_MS ใหญ่) → คงเพดาน 90s เท่าเดิม
   if (text.length < MIN_TEXT_FOR_SEND) {
     try {
-      const ins = await _postJson(`${origin}/api/clip-transcript/insight`, { url: cleanUrl, user: 'research-desk' }, 90_000);
+      const insightTimeoutMs = Math.min(90_000, pollBudgetMs);
+      const ins = await _postJson(`${origin}/api/clip-transcript/insight`, { url: cleanUrl, user: 'research-desk' }, insightTimeoutMs);
       if (ins.ok && ins.data && ins.data.success && ins.data.data) {
         const d = ins.data.data;
         const richerText = sanitizeText(d.rawData || d.overview || '', MAX_EXTRACT_CHARS);

@@ -45,6 +45,11 @@ const PICK_MAX_TOKENS = 6_000;
 //   (บทเรียนบั๊กเดิม "ค้างกำลังส่ง": รอคลิปเต็ม 6 นาทีจนเกิน maxDuration) · ไม่ทันรอบนี้ = งานถอดเข้าเครื่องทีมแล้ว
 //   รอบคัดถัดไปเนื้อพร้อม (contentReady) จะส่งผ่านทันทีแบบ idempotent
 const IMMEDIATE_CLIP_POLL_MS = 20_000;
+// 🔄 Batch A (18 ก.ค.): กันลูปส่งตรงชน maxDuration=600s ของ route /api/desk/editor → Vercel ฆ่ากลางลูป
+//   ไม่เริ่มส่งใบใหม่ถ้าเวลาที่เหลือใต้เพดานไม่พอทำใบนั้นให้จบ (เผื่อ margin เขียน run-record + serialize response)
+const ROUTE_HARD_MS = 600_000;           // = maxDuration ของ /api/desk/editor (route.js)
+const ROUTE_SAFE_MARGIN_MS = 50_000;     // กันเวลาเขียน run-record + ตอบกลับ
+const PER_LEAD_SEND_BUDGET_MS = 190_000; // งบต่อใบ worst-case (extract+distill+send) หลังตัด insight ให้สั้นลง
 
 const CHUNK_SIZE = 80;          // ~80 ใบ/call ตอน studyDna
 const MAX_PICK_CANDIDATES = 60; // เพดานลีดที่ส่งให้ บก. ให้คะแนนต่อรอบ (matchScore สูงสุดก่อน)
@@ -550,6 +555,27 @@ export async function editorPick({ limit = 5, autoSend = false, sendMode = 'imme
   // autoSend: จัดการเฉพาะใบ pick ที่ fetchability==='full' ทีละใบ — แยกตาม sendMode (P1, 17 ก.ค. 69)
   const sent = [];
   let outboxQueued = 0;
+
+  // 🔄 Batch A (18 ก.ค.): เขียน run-record "ก่อน" เริ่มลูปส่ง — กัน Vercel ฆ่ากลางลูปแล้วบันทึกหายทั้งรอบ
+  //   (finding: runsStore.add เดิมเป็นบรรทัดสุดท้าย ถูกฆ่ากลางทาง = getLatestPickRun ไม่เห็นรอบนี้เลย)
+  //   phase 'sending' = ยังไม่จบ (อาจโดนฆ่า) · อัปเดตเป็น 'done' ตอนจบครบ พร้อมผลส่งจริง/สาเหตุพลาดต่อใบ
+  const runsStore = createStore(STORE_PICK_RUNS);
+  const runStartedAt = new Date();
+  const runId = 'ep_' + runStartedAt.getTime().toString(36) + Math.random().toString(36).slice(2, 6);
+  const _buildRunRecord = (phase) => ({
+    id: runId,
+    at: runStartedAt.toISOString(),
+    picks: picks.map((p) => ({ id: p.id, title: p.title, score: p.opportunityScore, reason: p.reason, sentJobId: p.sentJobId || null, sendError: p.sendError || null })),
+    skipped: skipped.slice(0, 40).map((s) => ({ id: s.id, title: s.title, reason: s.reason })),
+    autoSend: !!autoSend,
+    sendMode: safeSendMode,
+    outboxQueued,
+    model,
+    phase,
+    tookMs: Date.now() - t0,
+  });
+  await runsStore.add(_buildRunRecord('sending'));
+
   if (autoSend && safeSendMode === 'immediate') {
     // 'immediate' (default ตั้งแต่ P2 ถอดยาม) — ยิง extractAndSend ตรงทันทีเข้าคิวปกติ ไม่ผ่านห้องรอ
     // clipPollBudgetMs สั้น: ใบคลิปถอดไม่ทันรอบนี้ = คืน pending ไม่ส่ง (งานถอดถูกส่งเข้าเครื่องทีมแล้ว
@@ -557,13 +583,23 @@ export async function editorPick({ limit = 5, autoSend = false, sendMode = 'imme
     for (const p of picks) {
       const lead = byId.get(p.id);
       if (!lead || lead.fetchability !== 'full') continue;
+      // 🔄 Batch A: ไม่เริ่มส่งใบใหม่ถ้าเวลาที่เหลือใต้เพดาน route ไม่พอทำใบนี้ให้จบ — กันโดน Vercel ฆ่ากลางส่ง
+      //   ใบที่เหลือคง status new/kept (re-pickable รอบหน้า) + ติดธง deferred ให้ UI/audit เห็นว่าเพราะเวลาหมด
+      if ((Date.now() - t0) + PER_LEAD_SEND_BUDGET_MS > ROUTE_HARD_MS - ROUTE_SAFE_MARGIN_MS) {
+        p.sendError = 'งบเวลารอบนี้หมด — ยังไม่ได้ส่ง กดคัดข่าวใหม่อีกรอบได้';
+        sent.push({ id: p.id, title: lead.title, success: false, deferred: true, error: p.sendError });
+        continue;
+      }
       try {
         // eslint-disable-next-line no-await-in-loop -- ส่งทีละใบตามลำดับตามสเปก (ไม่ยิงขนาน กันชนคิว/ชนไฟล์ leads เดียวกัน)
         const r = await extractAndSend(p.id, { origin, auto: true, clipPollBudgetMs: IMMEDIATE_CLIP_POLL_MS });
         p.sentJobId = r?.jobId || null;
+        // 🔄 Batch A: จับสาเหตุพลาด/pending ต่อใบไว้ใน pick (เข้า run-record + ส่งกลับใน sent[] ให้ UI/audit เห็น)
+        if (!r?.success && !r?.alreadySent) p.sendError = r?.error || (r?.pending ? 'คลิปยังถอดไม่เสร็จ — รอบหน้าส่งเอง' : 'ส่งไม่สำเร็จ');
         sent.push({ id: p.id, title: lead.title, ...r });
       } catch (e) {
-        sent.push({ id: p.id, title: lead.title, success: false, error: e?.message || String(e) });
+        p.sendError = e?.message || String(e);
+        sent.push({ id: p.id, title: lead.title, success: false, error: p.sendError });
       }
     }
   } else if (autoSend) {
@@ -590,21 +626,10 @@ export async function editorPick({ limit = 5, autoSend = false, sendMode = 'imme
     outboxQueued = enqueueResult.queued;
   }
 
-  // เก็บ run: store 'editor-pick-runs' (เก็บ 50 รอบล่าสุด — prune เก่ากว่านั้นทิ้ง)
-  const runsStore = createStore(STORE_PICK_RUNS);
-  const now = new Date();
-  const runRecord = {
-    id: 'ep_' + now.getTime().toString(36) + Math.random().toString(36).slice(2, 6),
-    at: now.toISOString(),
-    picks: picks.map((p) => ({ id: p.id, title: p.title, score: p.opportunityScore, reason: p.reason, sentJobId: p.sentJobId || null })),
-    skipped: skipped.slice(0, 40).map((s) => ({ id: s.id, title: s.title, reason: s.reason })),
-    autoSend: !!autoSend,
-    sendMode: safeSendMode, // 🆕 P1 (17 ก.ค. 69)
-    outboxQueued,           // 🆕 P1
-    model,
-    tookMs: Date.now() - t0,
-  };
-  await runsStore.add(runRecord);
+  // 🔄 Batch A: อัปเดต run-record เป็น 'done' พร้อมผลส่งจริงต่อใบ — update ไม่ได้ (record หาย) ก็ add ใหม่กันหลุด
+  await runsStore.update(runId, () => _buildRunRecord('done')).catch(async () => {
+    await runsStore.add(_buildRunRecord('done')).catch(() => {});
+  });
   await _pruneOldPickRuns(runsStore, 50);
 
   return { picks, skipped, sent, needStudy: false, sendMode: safeSendMode, outboxQueued, tookMs: Date.now() - t0 };
