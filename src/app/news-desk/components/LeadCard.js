@@ -40,7 +40,7 @@ const STATUS_META = {
 //    ป้าย/ปุ่มให้ตรงประเภทเท่านั้น — การตัดสินใจ route จริงยังทำที่ฝั่งเซิร์ฟเวอร์ใน extractAndSend เสมอ
 // 🔒 P2.1 (17 ก.ค. 69): ต้องสะท้อน CLIP_URL_RE ใน researchExtract.js เป๊ะ — คลิป = ลิงก์วิดีโอจริงเท่านั้น
 //   (YouTube/TikTok/FB reel·watch·videos/IG reel·tv) โพสต์/กลุ่ม/รูปเป็น "บทความ" เสมอ
-const CLIP_URL_RE = /(youtu\.be\/|youtube\.com\/(watch|shorts\/|live\/)|tiktok\.com\/[^\s"']*\/video\/|(vm|vt)\.tiktok\.com\/|fb\.watch\/|facebook\.com\/(reel\/|reels\/|watch|share\/v\/|[^/?#]+\/videos\/)|instagram\.com\/(reel\/|reels\/|tv\/))/i;
+const CLIP_URL_RE = /(youtu\.be\/|youtube\.com\/(watch|shorts\/|live\/)|tiktok\.com\/[^\s"']*\/video\/|(vm|vt)\.tiktok\.com\/|fb\.watch\/|facebook\.com\/(reel\/|reels\/|watch|share\/v\/|video\.php|[^/?#]+\/videos\/)|instagram\.com\/(reel\/|reels\/|tv\/))/i; // +video.php (audit R2 — sync researchExtract.js)
 function isClipLead(l) {
   const url = String(l?.url || '').toLowerCase();
   return CLIP_URL_RE.test(url);

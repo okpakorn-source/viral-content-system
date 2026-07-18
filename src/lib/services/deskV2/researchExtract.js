@@ -56,7 +56,7 @@ const THREAD_HOST_RE = /(pantip\.com|facebook\.com|fb\.watch|fb\.com|m\.facebook
 //   TikTok (/video/ + ลิงก์ย่อ vm/vt), Facebook (reel/reels/watch/videos/share/v + fb.watch), Instagram (reel/reels/tv)
 //   ลิงก์โพสต์/กลุ่ม/รูปทุกชนิด (FB /groups/ /posts/ /photos/ · IG /p/) ไม่เข้า pattern = ท่อ article
 //   (จับแบบ substring ครอบ m./www. อัตโนมัติ) — บทเรียน: host-based เดิมพาโพสต์กลุ่ม/รูปเข้าคิวถอดจน retry วนไม่จบ
-const CLIP_URL_RE = /(youtu\.be\/|youtube\.com\/(watch|shorts\/|live\/)|tiktok\.com\/[^\s"']*\/video\/|(vm|vt)\.tiktok\.com\/|fb\.watch\/|facebook\.com\/(reel\/|reels\/|watch|share\/v\/|[^/?#]+\/videos\/)|instagram\.com\/(reel\/|reels\/|tv\/))/i;
+const CLIP_URL_RE = /(youtu\.be\/|youtube\.com\/(watch|shorts\/|live\/)|tiktok\.com\/[^\s"']*\/video\/|(vm|vt)\.tiktok\.com\/|fb\.watch\/|facebook\.com\/(reel\/|reels\/|watch|share\/v\/|video\.php|[^/?#]+\/videos\/)|instagram\.com\/(reel\/|reels\/|tv\/))/i; // +video.php (audit R2: ลิงก์วิดีโอ FB รุ่นเก่า)
 
 /**
  * classifyExtractRoute — เลือกท่อสกัดเนื้อจาก "รูปร่าง URL" เท่านั้น (P2.1, 17 ก.ค. 69 ผู้ใช้สั่ง)
@@ -167,7 +167,9 @@ async function _getJson(url, timeoutMs) {
 }
 
 const CLIP_POLL_INTERVAL_MS = 10_000;
-const CLIP_POLL_MAX_MS = 6 * 60 * 1000; // 6 นาที (เส้นทางกดเอง — route extract มี maxDuration 420s รองรับ)
+// 🔒 audit R2 (18 ก.ค.): ลด 6 นาที → 4.5 นาที — งบเต็มเส้นกดเอง = poll 270s + insight เสริม 90s + overhead submit/เช็คงานเดิม ~35s
+//   ≈ 395s < maxDuration 420s ของ route extract (เดิม 360+90+35=485s เกินเพดาน → Vercel ฆ่ากลางทางแบบไร้ร่องรอย)
+const CLIP_POLL_MAX_MS = 270_000;
 
 /**
  * extractClip — ส่งลิงก์คลิปเข้าคิว clip-jobs (/submit) → poll job-status ทุก 10s ภายในงบเวลา
@@ -485,7 +487,9 @@ export async function attachExtract(leadId, extractResult, { auto = false } = {}
       source: extractResult?.source || '',
       extractedAt: new Date().toISOString(),
     },
-    contentReady: true,
+    // 🔒 audit R2 (18 ก.ค.): เนื้อบางกว่าเกณฑ์ส่ง = ยังไม่ "พร้อม" — ตั้ง contentReady:true กับเนื้อบางจะติดกับดัก
+    //   shortcut (ข้ามสกัดรอบหน้า) แล้วโดน sendLeadAsText ปัดตก <300 วนถาวร; ปล่อย false ให้รอบหน้าสกัด/insight ใหม่ได้
+    contentReady: cleanText.length >= MIN_TEXT_FOR_SEND,
   };
 
   // 🔧 17 ก.ค. 69 (แก้บัค timeline ว่าง): event 'extracted' เข้า merged record เดียวกับที่เขียน extract อยู่แล้ว
@@ -695,7 +699,9 @@ export async function extractAndSend(leadId, { origin, auto = false, clipPollBud
   let cleanLength = String(lead.extract?.text || '').length;
 
   // (1) เนื้อพร้อมอยู่แล้ว (contentReady) → ข้ามสกัด/กลั่น ไปส่งเลย (กันจ่ายค่ากลั่นซ้ำเมื่อเรียกซ้ำ/idempotent)
-  if (!lead.contentReady) {
+  //   🔒 audit R2 (18 ก.ค.): เนื้อที่แนบไว้บางกว่าเกณฑ์ส่ง → ห้ามใช้ shortcut (ลีดเก่าที่ติดกับดัก contentReady+เนื้อบาง
+  //   จากโค้ดก่อนแก้ จะได้สกัด/insight ใหม่แทนที่จะโดนปัดตก <300 วนถาวรทุกรอบ — self-healing ของเดิมด้วย)
+  if (!lead.contentReady || cleanLength < MIN_TEXT_FOR_SEND) {
     const route = classifyExtractRoute(lead);
 
     if (route === 'clip') {

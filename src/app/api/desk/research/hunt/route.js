@@ -12,7 +12,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-const KNOWN_CHANNELS = ['videos', 'facebook', 'tiktok', 'youtube', 'google']; // ★ 16 ก.ค.: +google (ลิงก์ข่าวสำนักต่างๆ — ผู้ใช้สั่ง)
+// ★ 18 ก.ค.: +reels — allow-list นี้ตกหล่นตอนเพิ่มช่อง FB Reels (17 ก.ค.) ทำ route ปัดช่องนี้ทิ้งเงียบๆ ทั้งที่ researchHunt.js/UI มีครบ
+const KNOWN_CHANNELS = ['videos', 'facebook', 'tiktok', 'youtube', 'google', 'reels']; // ★ 16 ก.ค.: +google (ลิงก์ข่าวสำนักต่างๆ — ผู้ใช้สั่ง)
 
 export async function POST(request) {
   try {

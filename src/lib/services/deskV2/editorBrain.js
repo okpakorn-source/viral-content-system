@@ -574,7 +574,8 @@ export async function editorPick({ limit = 5, autoSend = false, sendMode = 'imme
     phase,
     tookMs: Date.now() - t0,
   });
-  await runsStore.add(_buildRunRecord('sending'));
+  // telemetry ล้มห้ามบล็อกงานส่งจริง (audit R2: add เปลือย → Supabase สะดุด = ทั้งรอบล่ม 0 ใบ ทั้งที่จ่ายค่า AI pick แล้ว)
+  await runsStore.add(_buildRunRecord('sending')).catch(() => {});
 
   if (autoSend && safeSendMode === 'immediate') {
     // 'immediate' (default ตั้งแต่ P2 ถอดยาม) — ยิง extractAndSend ตรงทันทีเข้าคิวปกติ ไม่ผ่านห้องรอ
