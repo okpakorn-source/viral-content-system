@@ -14,7 +14,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { UI, Btn, Card, Chip, Spinner, apiFetch, fmtNum } from './ui.js';
 import LeadTimeline from './LeadTimeline.js';
-import HistoryFeedRow, { flattenLeadEvents, HistoryRunRow } from './HistoryFeedRow.js';
+import HistoryFeedRow, { flattenLeadEvents, HistoryRunRow, PipelineDots, PIPELINE_STAGES, leadStageInfo, fmtRelative } from './HistoryFeedRow.js';
 
 const LEADS_API = '/api/desk/research/leads';
 const TRACE_API = '/api/desk/research/trace';
@@ -84,6 +84,7 @@ export default function HistoryTab({ onToast }) {
   const [leadStatusFilter, setLeadStatusFilter] = useState('');
   const [leadClusterFilter, setLeadClusterFilter] = useState('');
   const [leadQuery, setLeadQuery] = useState('');
+  const [leadSort, setLeadSort] = useState('recent'); // 'recent' | 'score' | 'stage'
   const [expandedLeadIds, setExpandedLeadIds] = useState(new Set());
   const [selectedLeadId, setSelectedLeadId] = useState('');
   const leadRefs = useRef({});
@@ -172,6 +173,13 @@ export default function HistoryTab({ onToast }) {
     new Map(leads.filter((l) => l.clusterId).map((l) => [l.clusterId, l.clusterArchetype || l.clusterId])).entries()
   ), [leads]);
 
+  // ── สรุปจำนวนลีดตามสถานะ (โชว์หัวมุมมองรายข่าว — เห็นภาพรวมทันที) ──
+  const statusCounts = useMemo(() => {
+    const c = { new: 0, kept: 0, sent: 0, dismissed: 0 };
+    for (const l of leads) { const s = l.status || 'new'; c[s] = (c[s] || 0) + 1; }
+    return c;
+  }, [leads]);
+
   // ── กรองฟีด: ประเภท + ช่วงเวลา + ค้นคำ (หัวข้อลีด) ──
   const filteredEvents = useMemo(() => {
     const rangeMs = dateRange === 'today' ? 86400_000 : dateRange === '7d' ? 86400_000 * 7 : Infinity;
@@ -195,13 +203,21 @@ export default function HistoryTab({ onToast }) {
   // ── กรอง "รายข่าว": สถานะ + คลัสเตอร์ + ค้นคำ → เรียงเหตุการณ์ล่าสุดก่อน ──
   const filteredLeads = useMemo(() => {
     const q = leadQuery.trim().toLowerCase();
-    return leads
+    const byRecent = (a, b) => new Date(lastEventAt(b) || b.savedAt || 0) - new Date(lastEventAt(a) || a.savedAt || 0);
+    const list = leads
       .filter((l) => (leadStatusFilter ? (l.status || 'new') === leadStatusFilter : true))
       .filter((l) => (leadClusterFilter ? l.clusterId === leadClusterFilter : true))
       .filter((l) => (q ? String(l.title || '').toLowerCase().includes(q) : true))
-      .slice()
-      .sort((a, b) => new Date(lastEventAt(b) || b.savedAt || 0) - new Date(lastEventAt(a) || a.savedAt || 0));
-  }, [leads, leadStatusFilter, leadClusterFilter, leadQuery]);
+      .slice();
+    if (leadSort === 'score') {
+      list.sort((a, b) => (Number(b.matchScore) || 0) - (Number(a.matchScore) || 0) || byRecent(a, b));
+    } else if (leadSort === 'stage') {
+      list.sort((a, b) => leadStageInfo(b).reachedCount - leadStageInfo(a).reachedCount || byRecent(a, b));
+    } else {
+      list.sort(byRecent); // 'recent' (default) — เหตุการณ์ล่าสุดก่อน
+    }
+    return list;
+  }, [leads, leadStatusFilter, leadClusterFilter, leadQuery, leadSort]);
 
   function toggleTypeFilter(k) {
     setTypeFilter((prev) => {
@@ -337,20 +353,39 @@ export default function HistoryTab({ onToast }) {
               placeholder="ค้นหัวข้อข่าว…"
               style={{ ...selStyle, flex: '1 1 200px', minWidth: 160 }}
             />
+            <select value={leadSort} onChange={(e) => setLeadSort(e.target.value)} style={selStyle} title="เรียงลำดับ">
+              <option value="recent">↕ ล่าสุด</option>
+              <option value="score">↕ คะแนนสูง</option>
+              <option value="stage">↕ คืบหน้ามาก</option>
+            </select>
+          </div>
+
+          {/* สรุปจำนวนลีดตามสถานะ — เห็นภาพรวมทันทีก่อนไล่ลิสต์ */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+            <Chip color={UI.blue}>ใหม่ {fmtNum(statusCounts.new)}</Chip>
+            <Chip color={UI.accent}>⭐ เก็บ {fmtNum(statusCounts.kept)}</Chip>
+            <Chip color={UI.green}>🚀 ส่งแล้ว {fmtNum(statusCounts.sent)}</Chip>
+            <Chip color={UI.muted}>🗑 ทิ้ง {fmtNum(statusCounts.dismissed)}</Chip>
           </div>
 
           {filteredLeads.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 30, color: UI.muted, fontSize: 13 }}>ไม่มีลีดตามตัวกรองนี้</div>
           ) : (
             <>
-              <div style={{ fontSize: 12.5, color: UI.dim, marginBottom: 10 }}>พบ {fmtNum(filteredLeads.length)} ลีด</div>
-              <div style={{ display: 'grid', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10, fontSize: 12, color: UI.dim }}>
+                <span style={{ fontWeight: 700 }}>พบ {fmtNum(filteredLeads.length)} ลีด</span>
+                <span style={{ color: UI.muted }}>· แถบสายงาน:</span>
+                {PIPELINE_STAGES.map((s) => <span key={s.k} style={{ color: UI.muted }}>{s.icon}{s.label}</span>)}
+              </div>
+              <div style={{ display: 'grid', gap: 6 }}>
                 {filteredLeads.map((lead) => {
                   const sm = STATUS_META[lead.status || 'new'];
                   const isOpen = expandedLeadIds.has(lead.id);
-                  const evCount = Array.isArray(lead.timeline) ? lead.timeline.length : 0;
                   const contentN = (contentByLeadId.get(lead.id) || []).length;
+                  const stage = leadStageInfo(lead, contentN);
                   const isSelected = selectedLeadId === lead.id;
+                  const retired = (Number(lead.sendAttempts) || 0) >= 3;
+                  const score = Math.round(Number(lead.matchScore) || 0);
                   return (
                     <div
                       key={lead.id}
@@ -358,26 +393,38 @@ export default function HistoryTab({ onToast }) {
                       style={{
                         background: isSelected ? `${UI.accent}11` : UI.card2,
                         border: `1px solid ${isSelected ? UI.accent : UI.line}`,
-                        borderRadius: 12, padding: 12, display: 'grid', gap: 8,
+                        borderRadius: 10, padding: '9px 11px', display: 'grid', gap: 6,
                       }}
                     >
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                      {/* บรรทัด 1 — กดทั้งแถวเพื่อกาง/ย่อ: คะแนน + แถบสายงาน + หัวข้อ (ตัดบรรทัดเดียว) + ลูกศร */}
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => toggleLeadExpand(lead.id)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleLeadExpand(lead.id); } }}
+                        style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}
+                        title="กดเพื่อกาง/ย่อประวัติเต็ม"
+                      >
                         <span style={{
-                          minWidth: 46, padding: '3px 8px', borderRadius: 999, fontSize: 12.5, fontWeight: 900, textAlign: 'center',
-                          background: `${UI.blue}22`, color: UI.blue, border: `1.5px solid ${UI.blue}`,
-                        }}>{Math.round(Number(lead.matchScore) || 0)}%</span>
-                        {lead.sourceHost && <Chip color={UI.muted}>{lead.sourceHost}</Chip>}
+                          flex: 'none', minWidth: 42, padding: '2px 7px', borderRadius: 999,
+                          fontSize: 12, fontWeight: 900, textAlign: 'center',
+                          background: `${UI.blue}22`, color: UI.blue, border: `1px solid ${UI.blue}`,
+                        }}>{score}%</span>
+                        <PipelineDots reached={stage.reached} />
+                        <span style={{
+                          flex: '1 1 auto', minWidth: 0, fontSize: 13, fontWeight: 700, color: UI.text,
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        }} title={lead.title || ''}>{String(lead.title || '(ไม่มีหัวข้อ)')}</span>
+                        <span style={{ flex: 'none', color: UI.muted, fontSize: 12 }}>{isOpen ? '▲' : '▼'}</span>
+                      </div>
+                      {/* บรรทัด 2 — meta: สถานะ · ป้ายปัญหา · แหล่ง · คลัสเตอร์ · เวลาล่าสุด · เวอร์ชัน */}
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 11.5, color: UI.muted }}>
                         {sm && <Chip color={sm.color}>{sm.label}</Chip>}
-                        <Chip color={UI.dim}>🧾 {fmtNum(evCount)} เหตุการณ์</Chip>
+                        {retired && <Chip color={UI.red}>⛔ พักอัตโนมัติ</Chip>}
+                        {lead.sourceHost && <span>{String(lead.sourceHost).slice(0, 30)}</span>}
+                        {lead.clusterArchetype && <span>· {String(lead.clusterArchetype).slice(0, 26)}</span>}
+                        <span>· ⏱ {fmtRelative(stage.lastAt)}</span>
                         {contentN > 0 && <Chip color={UI.green}>📚 {fmtNum(contentN)} เวอร์ชัน</Chip>}
-                      </div>
-                      <div style={{ fontSize: 13.5, fontWeight: 700, color: UI.text, lineHeight: 1.5, wordBreak: 'break-word' }}>
-                        {String(lead.title || '(ไม่มีหัวข้อ)').slice(0, 160)}
-                      </div>
-                      <div>
-                        <Btn variant="ghost" onClick={() => toggleLeadExpand(lead.id)} style={{ minHeight: 40, padding: '6px 14px', fontSize: 13 }}>
-                          🧾 กางประวัติ{isOpen ? ' ▲' : ' ▼'}
-                        </Btn>
                       </div>
                       {isOpen && <LeadTimeline lead={lead} />}
                     </div>

@@ -37,6 +37,69 @@ export function flattenLeadEvents(leads) {
   return out;
 }
 
+// ── สายงานข่าว 5 ขั้น: เจอ → ตัดสิน → สกัด → ส่ง → เขียนเสร็จ (โชว์ "ไปถึงไหนแล้ว" แบบจุดต่อแถว) ──
+export const PIPELINE_STAGES = [
+  { k: 'found', icon: '🔎', label: 'เจอ' },
+  { k: 'judged', icon: '⚖️', label: 'ตัดสิน' },
+  { k: 'extracted', icon: '🧲', label: 'สกัด' },
+  { k: 'sent', icon: '🚀', label: 'ส่ง' },
+  { k: 'written', icon: '✍️', label: 'เขียนเสร็จ' },
+];
+
+// ── คำนวณว่าลีดไปถึงขั้นไหนบ้าง + เวลาแรก/ล่าสุด จาก timeline (+ จำนวนเวอร์ชันที่ harvest แล้ว) ──
+export function leadStageInfo(lead, versionsCount = 0) {
+  const tl = Array.isArray(lead?.timeline) ? lead.timeline : [];
+  const types = new Set(tl.map((e) => e?.type));
+  const reached = {
+    found: types.has('found') || types.has('refound'),
+    judged: types.has('judged'),
+    extracted: types.has('extracted') || !!lead?.contentReady,
+    sent: types.has('sent') || lead?.status === 'sent',
+    written: types.has('written') || versionsCount > 0,
+  };
+  const reachedCount = PIPELINE_STAGES.filter((s) => reached[s.k]).length;
+  let firstAt = null;
+  let lastAt = null;
+  for (const e of tl) {
+    if (!e?.at) continue;
+    if (!firstAt || new Date(e.at) < new Date(firstAt)) firstAt = e.at;
+    if (!lastAt || new Date(e.at) > new Date(lastAt)) lastAt = e.at;
+  }
+  return {
+    reached,
+    reachedCount,
+    firstAt: firstAt || lead?.savedAt || null,
+    lastAt: lastAt || lead?.savedAt || null,
+  };
+}
+
+// ── แถบจุดความคืบหน้าสายงาน — ขั้นที่ถึงแล้วทึบ ขั้นที่ยังไม่ถึงจาง (เห็นทันทีว่าค้างตรงไหน) ──
+export function PipelineDots({ reached }) {
+  return (
+    <div
+      style={{ display: 'inline-flex', gap: 3, alignItems: 'center', flex: 'none' }}
+      title="สายงาน: เจอ → ตัดสิน → สกัด → ส่ง → เขียนเสร็จ (ทึบ = ถึงแล้ว)"
+    >
+      {PIPELINE_STAGES.map((s) => {
+        const on = !!reached[s.k];
+        return (
+          <span
+            key={s.k}
+            title={`${s.label}${on ? ' ✓' : ' — ยังไม่ถึง'}`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 21, height: 21, borderRadius: 999, fontSize: 10.5, lineHeight: 1,
+              background: on ? `${UI.accent}22` : 'transparent',
+              border: `1px solid ${on ? UI.accent : UI.line}`,
+              opacity: on ? 1 : 0.35, filter: on ? 'none' : 'grayscale(1)',
+            }}
+          >{s.icon}</span>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── เวลาแบบย่อ: เมื่อสักครู่/นาทีที่แล้ว/ชม.ที่แล้ว/วันที่แล้ว → เกิน 7 วันโชว์เต็ม toLocaleString('th-TH') ──
 export function fmtRelative(iso) {
   if (!iso) return '-';
