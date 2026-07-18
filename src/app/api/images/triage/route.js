@@ -42,7 +42,15 @@ export async function POST(req) {
       return hit?.gender || '';
     };
     const subjects = (c.keywords?.subjects || []).map((s) => ({ ...s, gender: s.gender || genderOf(s.name) }));
-    const newsGist = (c.analysis?.summary || c.analysis?.content || c.newsSnippet || '').slice(0, 600);
+    // ★ N1 (18 ก.ค. — จุดตกค้าง): ตาเห็นเนื้อข่าวเต็ม (c.newsText 1800 ตัว) เหมือน search route/megaAdapters
+    //   kill-switch เดียวกัน: VET_GIST_FULL=0 = พฤติกรรมเดิม (summary 600) · VET_GIST_CHARS ปรับเพดาน
+    const _gistFull = process.env.VET_GIST_FULL !== '0';
+    const _gistChars = Math.max(200, parseInt(process.env.VET_GIST_CHARS || (_gistFull ? '1800' : '600'), 10));
+    const newsGist = String(
+      _gistFull
+        ? (c.newsText || c.analysis?.content || c.analysis?.summary || c.newsSnippet || '')
+        : (c.analysis?.summary || c.analysis?.content || c.newsSnippet || '')
+    ).slice(0, _gistChars);
 
     const all = await readImages(caseId);
     if (all.length === 0) {

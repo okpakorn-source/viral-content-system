@@ -242,6 +242,41 @@ export async function searchYouTubeClips(query, { gl = 'th', hl = 'th', caseId }
     .filter((v) => v.link);
 }
 
+// ★ ข้อ3 (18 ก.ค. — ผู้ใช้สั่ง): ค้นคลิป "FB Reels / TikTok" ที่ตรงข่าว → ส่งลิงก์เข้าท่อแคปเฟรม (yt-dlp รองรับอยู่แล้ว)
+//   เหตุผล: ค้นภาพ FB (site:facebook.com ผ่าน google_images) ได้แต่ "ปกโพสต์/การ์ดแชร์" สกปรกโดยธรรมชาติ —
+//   ภาพสะอาดของข่าวชาวบ้านอยู่ "ในคลิป" → หา URL คลิปจริงด้วย Google organic (site:) แล้วแคปเฟรมแทน
+//   คืนรูปแบบเดียวกับ searchYouTubeClips ({link,title,channel,...}) — merge เข้าลิสต์คลิปของ clip-radar ได้ตรงๆ
+const SOCIAL_CLIP_LINK = /facebook\.com\/(?:reel|watch|[^/]+\/videos)|fb\.watch\/|tiktok\.com\/@[^/]+\/video\//i;
+export async function searchSocialClips(query, { caseId, num = 10 } = {}) {
+  const targets = [
+    { site: 'facebook.com/reel', label: 'Facebook Reels' },
+    { site: 'tiktok.com', label: 'TikTok' },
+  ];
+  const out = [];
+  for (const t of targets) {
+    try {
+      const d = await serpGet({ engine: 'google', q: `${query} site:${t.site}`, gl: 'th', hl: 'th', num: String(num) }, { caseId });
+      if (d._empty) continue;
+      for (const r of d.organic_results || []) {
+        const link = r.link || '';
+        if (!SOCIAL_CLIP_LINK.test(link)) continue; // เอาเฉพาะลิงก์ "ตัวคลิป" จริง (ไม่เอาหน้าเพจ/โพสต์รูป)
+        out.push({
+          link,
+          title: r.title || '',
+          channel: t.label,
+          lengthText: '',
+          lengthSeconds: null,
+          views: 0,
+          thumbnail: r.thumbnail || '',
+        });
+      }
+    } catch {
+      /* แหล่งล้ม → ข้าม (คลิป YouTube ยังทำงานตามเดิม) */
+    }
+  }
+  return out;
+}
+
 function parseLength(s) {
   if (!s) return null;
   const parts = String(s).split(':').map((n) => parseInt(n, 10));

@@ -12,7 +12,7 @@
 import { NextResponse } from 'next/server';
 import { getCase } from '@/lib/caseStore';
 import { readImages } from '@/lib/imageStore';
-import { searchYouTubeClips } from '@/lib/imageSearch';
+import { searchYouTubeClips, searchSocialClips } from '@/lib/imageSearch';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -115,6 +115,24 @@ export async function POST(req) {
           }
         } catch {
           /* แหล่งล้ม → ข้าม */
+        }
+      }
+      // ★ ข้อ3 (18 ก.ค. — ผู้ใช้สั่ง, บทเรียน AC-0151): ค้นคลิป FB Reels/TikTok ตรงข่าวด้วย —
+      //   ภาพ FB จาก image search = ปกโพสต์สกปรกโดยธรรมชาติ ภาพสะอาดจริงอยู่ "ในคลิป"
+      //   ท่อแคปเฟรม (yt-dlp บนเครื่องทีม) รองรับ URL FB/TikTok อยู่แล้ว — แค่หาลิงก์คลิปให้เจอ
+      //   kill-switch: CLIP_RADAR_SOCIAL=0 = ปิด (เหลือ YouTube อย่างเดียวแบบเดิม)
+      if (process.env.CLIP_RADAR_SOCIAL !== '0') {
+        for (const q of queries.slice(0, 2)) {
+          try {
+            const found = await searchSocialClips(q, { caseId });
+            for (const v of found) {
+              if (!v.link || seen.has(v.link)) continue;
+              seen.add(v.link);
+              clips.push(v);
+            }
+          } catch {
+            /* แหล่งล้ม → ข้าม (YouTube ยังอยู่) */
+          }
         }
       }
       // เรียง "ตรงประเด็น": ชื่อคนในไตเติล = สำคัญสุด (กันได้ตอนของคนอื่นในรายการเดียวกัน)

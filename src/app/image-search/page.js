@@ -195,6 +195,7 @@ function ResultView({ data }) {
   // ★ 6 ก.ค. รอบ 5 (ผู้ใช้สั่ง): 🎯 เรดาร์คลิป — ยาข่าวชาวบ้าน: หน้าชัดในคลังน้อย → หาคลิป/Lens/เพจต้นทางให้เอง
   const [radar, setRadar] = useState(null);
   const radarFired = useRef(false);
+  const autoTriageBusy = useRef(false); // ★ ข้อ2: กัน auto-triage ยิงซ้อน (หลายทริกเกอร์: ค้นชุดจบ/เฟรม YT มาถึง)
   async function runClipRadar(auto = true, freshImages = null) {
     try {
       const r = await fetch('/api/images/clip-radar', {
@@ -253,6 +254,7 @@ function ResultView({ data }) {
           if (ji.success) {
             setImages(ji.images || []);
             setImgStats({ total: ji.total, byPlatform: ji.byPlatform || {} });
+            autoTriageIfUntagged(ji.images || []); // 🧠 ★ ข้อ2: เฟรมมาทีหลัง triage รอบแรก → กวาดป้ายให้เอง (บทเรียน AC-0151: 20 เฟรมไม่ติดป้ายจมท้ายจอ)
           }
           setImgInfo(`✅ เครื่องทีมแคปเฟรม YouTube เสร็จแล้ว — เพิ่ม ${job.added ?? '?'} เฟรมเข้าคลัง (ดูในแกลเลอรีได้เลย)`);
         } else {
@@ -396,6 +398,7 @@ function ResultView({ data }) {
     setImgInfo(`✅ ค้นครบ ${list.length} แหล่ง — เพิ่มรูปใหม่รวม ${totalAdded} รูป${queuedMsgs.length ? `\n🕐 ${queuedMsgs.join(' · ')}` : ''}${fails.length ? ` · ล้มเหลว ${fails.length} แหล่ง` : ''}`);
     if (fails.length) setImgError('บางแหล่งล้มเหลว:\n• ' + fails.join('\n• '));
     runClipRadar(true, freshImgs); // 🎯 หน้าชัด/ภาพสะอาดพอไหม — ไม่พอจะหา Lens/คลิปให้เอง (N2)
+    autoTriageIfUntagged(freshImgs); // 🧠 ★ ข้อ2: มีใบไม่ติดป้ายค้าง (vet ล้มทั้งชุด) → กวาดป้ายตามหลังเอง (fire-and-forget)
   }
 
   async function clearPlatform(platform) {
@@ -513,6 +516,17 @@ function ResultView({ data }) {
       stopJob();
       setImgLoading('');
     }
+  }
+
+  // ★ ข้อ2 (18 ก.ค.): กวาดป้ายอัตโนมัติเมื่อพบภาพไม่ติดป้ายค้างในคลัง (บทเรียน AC-0151: FB 60 ใบ vet ล้มทั้งชุด
+  //   + เฟรม YT 20 ใบมาทีหลัง triage → untagged ค้าง ปกโพสต์สกปรกโชว์เต็มจอ) · busy-guard กันยิงซ้อน
+  //   runTriage วนติดป้ายเฉพาะใบที่ยังไม่มี + refresh คลังเองเมื่อจบ
+  async function autoTriageIfUntagged(list) {
+    const imgs = Array.isArray(list) ? list : [];
+    const untagged = imgs.filter((im) => !im.triage).length;
+    if (untagged < AUTO_TRIAGE_MIN || autoTriageBusy.current) return;
+    autoTriageBusy.current = true;
+    try { await runTriage(); } finally { autoTriageBusy.current = false; }
   }
 
   async function uploadToLibrary(fileList) {
@@ -994,6 +1008,9 @@ const PLATFORM_LABEL = {
 // แหล่งที่ค้นแบบ "หลายแหล่งพร้อมกัน" ได้ (จัดคิวทีละแหล่ง) — YouTube ช้า (แคปเฟรม) ติ๊กได้แต่กินเวลา
 // ★ N2 (18 ก.ค.): เกณฑ์ "ภาพสะอาดของคนในข่าว" ขั้นต่ำต่อเคส — ต่ำกว่านี้หลังค้นชุด = auto หา Lens/คลิปเพิ่ม (กันเคสได้แต่ปกคลิป)
 const AUTO_FIND_CLEAN_MIN = 6;
+// ★ ข้อ2 (18 ก.ค. — บทเรียน AC-0151): ภาพ "ไม่ติดป้าย" ค้างในคลัง (vet ล้มทั้งชุด/เฟรม YT มาทีหลัง) ≥ นี้
+//   → auto กวาดป้ายตามหลัง (เรียก runTriage — endpoint ตรวจเฉพาะใบที่ยังไม่มีป้ายอยู่แล้ว ถูก+เร็ว)
+const AUTO_TRIAGE_MIN = 5;
 // ★ N3 (18 ก.ค.): เรียงตาม "%ภาพสะอาดจริง" จากสถิติคลัง (google 46% > fb 39% > gnews 38% > tiktok 26% > yandex 18%)
 //   → runBatch ยิงแหล่งดีก่อน + ผู้ใช้เห็นลำดับความคุ้ม (tip โชว์ตอน hover) · yandex ไม่อยู่ใน default batchSel อยู่แล้ว (opt-in)
 const SEARCH_SOURCES = [
@@ -1059,6 +1076,12 @@ function ImageGallery({ images, stats, onRemove, onReverseFrom }) {
       const ra = a.triage?.relevant === true ? 1 : 0;
       const rb = b.triage?.relevant === true ? 1 : 0;
       if (ra !== rb) return rb - ra;
+      // ★ ข้อ4 (18 ก.ค. — บทเรียน AC-0151): "เฟรมแคปจริงจากคลิป" (clip/youtube) ที่ยังไม่ติดป้าย
+      //   ขึ้นก่อนภาพไม่ติดป้ายอื่น (ปกโพสต์ FB ฯลฯ) — เฟรมจากคลิปคือวัตถุดิบสะอาดที่สุดของเคสข่าวชาวบ้าน
+      //   (ใน /image-search platform youtube/clip = เฟรมแคปจากท่อ yt-dlp เสมอ ไม่ใช่ thumbnail)
+      const fA = !a.triage && (a.platform === 'clip' || a.platform === 'youtube') ? 1 : 0;
+      const fB = !b.triage && (b.platform === 'clip' || b.platform === 'youtube') ? 1 : 0;
+      if (fA !== fB) return fB - fA;
       const sa = a.triage?.newsScene === false ? 0 : 1;
       const sb = b.triage?.newsScene === false ? 0 : 1;
       if (sa !== sb) return sb - sa;
