@@ -529,6 +529,16 @@ export async function s5_keywords(job, { origin }) {
   //   field query ของแต่ละภาพในคลัง (ภาพที่ query ตรงหมวดนี้ = ภาพเชิงบริบท/ความสัมพันธ์ ไม่ใช่แค่ฉากข่าวเดียว)
   const storyQueries = ['relationship_archive', 'lifestyle_travel', 'family_album', 'landmark_context', 'scene_place']
     .flatMap((k) => (kw[k] || []).map((q) => String(q || '').trim()).filter(Boolean));
+  // ★ 18 ก.ค. 69 (เคส MG-0011 เนื้อหาถึง AI เป็น '?' ล้วน → ทุกหมวดว่าง): 0 คำค้น = ค้นภาพไม่ได้แน่นอน
+  //   เดิมคืน done → เปลือง 4 tick ไปตายที่ s5_search ด้วย error ชวนงง ("ไม่มีคำค้นในคีย์เวิร์ด" ทั้ง 4 แหล่ง)
+  //   → fail-fast ที่นี่พร้อมเหตุผลจริง (semantics เดียวกับเส้น fail ข้างบนเป๊ะ: status failed + nextAction retry)
+  if (nQueries === 0) {
+    return {
+      status: 'failed',
+      nextAction: 'retry',
+      summary: 'คีย์เวิร์ด 0 คำค้น (ทุกหมวดว่าง) — เนื้อข่าวอาจอ่านไม่ได้/encoding เพี้ยน/วิเคราะห์ไม่ขึ้น ตรวจเนื้อข่าวของงานนี้ก่อน retry',
+    };
+  }
   return {
     status: 'done',
     nextAction: 'continue',
