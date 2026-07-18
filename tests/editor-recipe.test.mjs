@@ -218,3 +218,15 @@ test('ไม่มี manifest → role-mapping เดิมเป๊ะ (งา
   const r = buildEditorRecipe({ job, caseImages: caseImages() });
   assert.ok(r.imagesBySlot.main, 'ยังมีภาพจาก role-mapping');
 });
+
+// ★ 18 ก.ค. 69 (บั๊ก AC-0147 ภาพหาย/สลับใน editor): manifest ชี้ URL ต้นทางดิบ (TikTok ฯลฯ ที่เบราว์เซอร์
+//   โหลดไม่ได้เพราะบล็อก hotlink) แต่ภาพเดียวกันมี thumbnailUrl ที่ rehost แล้ว → ต้องยกระดับเป็น rehost
+test('manifest url ดิบ + ภาพเดียวกันมี thumbnailUrl rehost → ยกระดับเป็น rehost (ไม่ปล่อย URL ที่เบราว์เซอร์โหลดไม่ได้)', () => {
+  const RAW = 'https://www.tiktok.com/api/img/?itemId=999&location=0';
+  const TH_REHOST = 'https://abc.supabase.co/storage/v1/object/public/acs-frames/x1.jpg';
+  const job = legacyJob();
+  job.dossier.cover.manifest = { slots: [{ slot: 'main', imageUrl: RAW }] };
+  const imgs = [{ id: 'X1', imageUrl: RAW, thumbnailUrl: TH_REHOST, note: '', person: '' }];
+  const r = buildEditorRecipe({ job, caseImages: imgs });
+  assert.strictEqual(r.imagesBySlot.main, TH_REHOST, 'ต้องเลือก thumbnailUrl ที่ rehost แทน URL ดิบ');
+});
