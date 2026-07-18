@@ -73,12 +73,25 @@ function normalizeTitleForDedup(s) {
     .replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
-/** normalizeUrl — ตัด query/hash/trailing slash + lowercase (เทียบ url ลีดเดิมแบบตรงตัว) */
+/** normalizeUrl — 🔒 audit R2 (18 ก.ค.): ตัด "เฉพาะ tracking params" ไม่ตัด query ทั้งก้อน
+ *  (บั๊กเดียวกับที่เคยแก้ใน researchHunt.js normalizeUrlKey — ตัดทั้งก้อนทำ youtube.com/watch?v=A กับ ?v=B
+ *  ถูกมองเป็น URL เดียวกัน → ลีดคนละคลิปโดน dedup ผิดตัว) — ต้อง sync logic กับ researchHunt.js เสมอ */
+const TRACKING_PARAM_RE = /^(utm_|fbclid$|gclid$|igshid$|si$|spm$|ref$|ref_src$|ref_url$|share_id$|is_copy_url$|is_from_webapp$|sender_device$|_rdr$|mibextid$)/i;
 function normalizeUrl(s) {
-  return sanitizeText(s, 500)
-    .replace(/[?#].*$/, '')
-    .replace(/\/+$/, '')
-    .toLowerCase();
+  const raw = sanitizeText(s, 500);
+  if (!raw) return '';
+  try {
+    const u = new URL(raw);
+    u.hash = '';
+    const kept = [...u.searchParams.entries()]
+      .filter(([k]) => !TRACKING_PARAM_RE.test(k))
+      .sort(([a], [b]) => a.localeCompare(b)); // เรียง key ให้เสถียร — query คนละลำดับต้องนับว่าซ้ำ
+    u.search = new URLSearchParams(kept).toString();
+    return u.toString().replace(/\/+$/, '').toLowerCase();
+  } catch {
+    // parse ไม่ได้ (URL แปลกๆ) → fallback เดิม (ตัดทั้งก้อน) ปลอดภัยกว่าเก็บของพัง
+    return raw.replace(/[?#].*$/, '').replace(/\/+$/, '').toLowerCase();
+  }
 }
 
 function isTitleContainDup(normA, normB) {

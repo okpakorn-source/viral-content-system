@@ -304,8 +304,9 @@ export default function ResearchTab({ onToast }) {
     pushStep(`✅ เสร็จสิ้น — เก็บลีดใหม่ ${fmtNum(totalSaved)} ใบ`);
     onToast?.(`เก็บลีดใหม่ ${fmtNum(totalSaved)} ใบ`, totalSaved > 0 ? 'ok' : 'warn');
 
-    // ── (3) ดึงลีดของรอบนี้ (filter runId ฝั่ง client) + รีเฟรชคลัง/สถิติ ──
-    const rRes = await apiFetch(`${LEADS}?limit=500`);
+    // ── (3) ดึงลีดของรอบนี้ — 🔒 audit R2: กรอง runId ฝั่ง server (เดิมดึง top-500 ทั้งคลังมากรอง client
+    //   ลีดรอบใหม่โดนลีดเก่าคะแนนสูงบังหายจากผล → ออโต้หลังล่ารายงาน "ไม่มีลีดเข้าเกณฑ์" หลอกๆ) ──
+    const rRes = await apiFetch(`${LEADS}?runId=${encodeURIComponent(runId)}&limit=500`);
     if (rRes.success) {
       const mine = (rRes.leads || []).filter((l) => l.runId === runId).sort((a, b) => (Number(b.matchScore) || 0) - (Number(a.matchScore) || 0));
       setRoundLeads(mine);

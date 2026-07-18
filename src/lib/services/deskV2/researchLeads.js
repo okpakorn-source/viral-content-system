@@ -218,12 +218,15 @@ export async function saveLeads(judgedCandidates, { runId } = {}) {
 /**
  * listLeads — ดึงรายการลีด พร้อมกรอง + เรียงตาม matchScore มาก→น้อย
  */
-export async function listLeads({ clusterId, status, channel, fetchability, minScore, q, limit = 100 } = {}) {
+export async function listLeads({ clusterId, status, channel, fetchability, minScore, q, runId, limit = 100 } = {}) {
   const store = createStore(STORE);
   let items = await store.getAll();
 
   if (clusterId) items = items.filter((r) => r.clusterId === clusterId);
   if (status) items = items.filter((r) => r.status === status);
+  // 🔒 audit R2 (18 ก.ค.): กรอง runId ฝั่ง server — เดิม UI ดึง top-500 คะแนนรวมทั้งคลังมากรองเอง
+  //   พอคลังโต ลีดรอบล่าใหม่คะแนนต่ำกว่า cutoff จะโดนลีดเก่าบังหาย → ออโต้ส่งหลังล่าเงียบทั้งที่มีลีดดี
+  if (runId) items = items.filter((r) => r.runId === runId);
   if (channel) items = items.filter((r) => r.channel === channel);
   if (fetchability) items = items.filter((r) => r.fetchability === fetchability);
   if (minScore != null && minScore !== '') {

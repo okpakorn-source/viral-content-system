@@ -166,13 +166,33 @@ export default function EditorPanel({ onToast, onAfterAction }) {
     if (res.success) {
       const at = new Date().toISOString();
       const effectiveSendMode = res.sendMode || sendMode;
-      setLastPick({ picks: res.picks || [], skipped: res.skipped || [], at, autoSend, sendMode: effectiveSendMode });
-      const sentCount = (res.sent || []).length;
+      // 🔒 Batch D (audit R1): ผูกผลส่งจริงต่อใบ (jobId/pending/error) เข้า picks — เดิมทิ้ง sent[] ทั้งก้อน
+      //   ใบส่งพลาดเลยหายเงียบจาก UI + toast นับใบพลาด/รอถอดรวมเป็น "ส่งแล้ว" หลอกๆ
+      const sentById = new Map((res.sent || []).map((s) => [s.id, s]));
+      const picksWithResult = (res.picks || []).map((p) => {
+        const s = sentById.get(p.id);
+        return {
+          ...p,
+          sentJobId: p.sentJobId || (s && s.jobId) || null,
+          sendPending: !!(s && s.pending),
+          sendError: p.sendError || (s && !s.success ? (s.error || 'ส่งไม่สำเร็จ') : null),
+        };
+      });
+      setLastPick({ picks: picksWithResult, skipped: res.skipped || [], at, autoSend, sendMode: effectiveSendMode });
+      const sentArr = res.sent || [];
+      const okCount = sentArr.filter((s) => s.success && s.sent).length;
+      const pendCount = sentArr.filter((s) => s.pending).length;
+      const deferredCount = sentArr.filter((s) => s.deferred).length; // งบเวลารอบหมด — เลื่อนรอบ ไม่ใช่พลาด (review r2fix)
+      const failCount = sentArr.filter((s) => !s.success && !s.deferred).length;
       const outboxQueued = Number(res.outboxQueued) || 0;
       let suffix = '';
-      if (effectiveSendMode === 'immediate') suffix = ` · ส่งแล้ว ${sentCount}`;
-      else if (autoSend) suffix = ` · เข้าห้องรอ ${outboxQueued} ใบ`;
-      onToast?.(`บก. คัดได้ ${(res.picks || []).length} เรื่อง${suffix}`, 'ok');
+      if (effectiveSendMode === 'immediate') {
+        suffix = ` · ส่งเข้าคิวจริง ${okCount}`;
+        if (pendCount) suffix += ` · ⏳ รอถอดคลิป ${pendCount}`;
+        if (deferredCount) suffix += ` · ⏸ เลื่อนรอบหน้า ${deferredCount}`;
+        if (failCount) suffix += ` · ⚠️ พลาด ${failCount}`;
+      } else if (autoSend) suffix = ` · เข้าห้องรอ ${outboxQueued} ใบ`;
+      onToast?.(`บก. คัดได้ ${(res.picks || []).length} เรื่อง${suffix}`, failCount ? 'warn' : 'ok');
       await onAfterAction?.();
       await load(); // รีเฟรชห้องรอ (เผื่อมีของใหม่เข้าห้องรอในโหมด polite)
     } else {
@@ -251,7 +271,6 @@ export default function EditorPanel({ onToast, onAfterAction }) {
 
   const picks = lastPick?.picks || [];
   const skipped = lastPick?.skipped || [];
-  const lastAutoSend = !!lastPick?.autoSend;
 
   return (
     <Card>
@@ -405,16 +424,19 @@ export default function EditorPanel({ onToast, onAfterAction }) {
                       {String(p.title || '(ไม่มีหัวข้อ)').slice(0, 120)}
                     </span>
                     {p.sentJobId && <Chip color={UI.green}>🚀 ส่งแล้ว job{String(p.sentJobId).slice(0, 8)}</Chip>}
+                    {!p.sentJobId && p.sendPending && <Chip color={UI.blue}>⏳ รอถอดคลิป — รอบคัดหน้าส่งเอง</Chip>}
+                    {!p.sentJobId && !p.sendPending && p.sendError && <Chip color={UI.red}>⚠️ {String(p.sendError).slice(0, 60)}</Chip>}
                   </div>
                   {p.reason && <div style={{ fontSize: 12, color: UI.dim, lineHeight: 1.5 }}>💬 {p.reason}</div>}
-                  {!p.sentJobId && !lastAutoSend && (
+                  {/* 🔒 Batch D: โชว์ปุ่มส่ง/ลองใหม่ทุกใบที่ยังไม่เข้าคิวและไม่ได้รอถอด — เดิมซ่อนเมื่อ autoSend ทำใบพลาดไร้ทางไปต่อ */}
+                  {!p.sentJobId && !p.sendPending && (
                     <Btn
                       variant="subtle"
                       busy={busySendId === p.id}
                       disabled={!!busySendId}
                       onClick={() => sendPick(p)}
                       style={{ minHeight: 38, padding: '6px 12px', fontSize: 12.5, alignSelf: 'flex-start' }}
-                    >🚀 ส่งใบนี้</Btn>
+                    >{p.sendError ? '🔁 ลองส่งใหม่ (งบเต็ม)' : '🚀 ส่งใบนี้'}</Btn>
                   )}
                 </div>
               ))}

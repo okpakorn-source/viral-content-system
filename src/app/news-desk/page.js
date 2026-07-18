@@ -99,7 +99,7 @@ export default function NewsDeskV2Page() {
   const [dupChecked, setDupChecked] = useState(false);
   const [dupCount, setDupCount] = useState(0);
   const [checking, setChecking] = useState(false);
-  const dupSetRef = useRef(new Set());
+  const dupSetRef = useRef({ idSet: new Set(), titleSet: new Set(), isDup: () => false }); // audit R2: 2 ชั้น postId+title
   const [model, setModel] = useState('primary');
   const [starting, setStarting] = useState(false);
 
@@ -161,7 +161,7 @@ export default function NewsDeskV2Page() {
     setMapping(autoMapColumns(h));
     setDupChecked(false);
     setDupCount(0);
-    dupSetRef.current = new Set();
+    dupSetRef.current = { idSet: new Set(), titleSet: new Set(), isDup: () => false };
     setStage('mapping');
   }
 
@@ -176,16 +176,20 @@ export default function NewsDeskV2Page() {
     setStage('scan');
   }
 
-  // ── เช็คซ้ำกับคลัง (GET limit 500 → Set ของ postId) ──
+  // ── เช็คซ้ำกับคลัง — 🔒 audit R2 (18 ก.ค.): เดิมเทียบ postId อย่างเดียวแต่คลังไม่เคยเก็บ field นี้ → ซ้ำ 0 เสมอ
+  //   ใหม่: เทียบ 2 ชั้น postId (record ใหม่ที่เริ่มเก็บแล้ว) + title normalize (ครอบคลุมคลังเก่าทั้งหมด) ──
+  const _normTitle = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 200);
   async function checkDup() {
     setChecking(true);
     const res = await apiFetch(`${LIB}?limit=500`);
     setChecking(false);
     if (!res.success) { pushToast(res.error || 'เช็คซ้ำไม่สำเร็จ', 'err'); return; }
-    const set = new Set((res.exemplars || []).map((e) => String(e.postId || '')).filter(Boolean));
-    dupSetRef.current = set;
-    // นับเฉพาะ S/A ที่ postId อยู่ในคลังแล้ว
-    const dups = posts.filter((p) => (p.tier === 'S' || p.tier === 'A') && p.title.length >= 10 && set.has(String(p.postId || ''))).length;
+    const idSet = new Set((res.exemplars || []).map((e) => String(e.postId || '')).filter(Boolean));
+    const titleSet = new Set((res.exemplars || []).map((e) => _normTitle(e.title)).filter((t) => t.length >= 10));
+    const isDup = (p) => idSet.has(String(p.postId || '')) || titleSet.has(_normTitle(p.title));
+    dupSetRef.current = { idSet, titleSet, isDup };
+    // นับเฉพาะ S/A ที่อยู่ในคลังแล้ว (ชั้นใดชั้นหนึ่งตรง)
+    const dups = posts.filter((p) => (p.tier === 'S' || p.tier === 'A') && p.title.length >= 10 && isDup(p)).length;
     setDupCount(dups);
     setDupChecked(true);
     pushToast(`เช็คซ้ำแล้ว — พบซ้ำ ${fmtNum(dups)} ใบ`, 'ok');
@@ -392,7 +396,7 @@ export default function NewsDeskV2Page() {
     setStage('upload');
     setHeader(null); setRows(null); setSources([]); setMapping({});
     setPosts([]); setSummary({ S: 0, A: 0, control: 0, bad: 0, total: 0, research: 0 });
-    setDupChecked(false); setDupCount(0); dupSetRef.current = new Set();
+    setDupChecked(false); setDupCount(0); dupSetRef.current = { idSet: new Set(), titleSet: new Set(), isDup: () => false };
     setProgress({ done: 0, total: 0 }); setCounters({ researched: 0, saved: 0, dup: 0, failed: 0 });
     setLog([]); setResults([]); setSynthesis(null); resultsRef.current = [];
     statsRef.current = { researched: 0, saved: 0, dup: 0, failed: 0 };

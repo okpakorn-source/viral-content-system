@@ -132,8 +132,10 @@ export async function harvestFromLeads({ origin, maxJobs = 10 } = {}) {
   const existingIds = new Set(existing.map((r) => r.id));
 
   const safeMaxJobs = Math.max(1, Math.min(50, Number(maxJobs) || 10));
+  // 🔒 audit R2 (18 ก.ค.): ตัดใบที่เลิกตามแล้ว (harvestGaveUpAt) — เดิมงาน failed/หายจากคิวถูก re-poll ทุกรอบ
+  //   ตลอดกาล กินโควตา maxJobs จนใบเสร็จจริงไม่ถูกเช็ค
   const candidates = leads
-    .filter((l) => l && l.jobId && !existingIds.has('rc_' + l.jobId))
+    .filter((l) => l && l.jobId && !l.harvestGaveUpAt && !existingIds.has('rc_' + l.jobId))
     .slice(0, safeMaxJobs);
 
   let waiting = 0;
@@ -141,6 +143,23 @@ export async function harvestFromLeads({ origin, maxJobs = 10 } = {}) {
   let checked = 0;
   const toAdd = [];
   const addedIds = new Set(); // กันลีดคนละใบชี้ jobId เดียวกันโผล่ซ้ำในชุดเดียวกัน (ไม่ควรเกิด แต่กันไว้)
+
+  // 🔒 audit R2 (18 ก.ค.): งานจบแบบไม่มีวันได้ผล (failed/หายจากคิว) → มาร์คลีด "เลิกตาม" ถาวร
+  //   (remove-แล้ว-add ตามกฎ 🔴 ห้าม update) — มาร์คไม่สำเร็จไม่บล็อกรอบเก็บเกี่ยว
+  const _markGaveUp = async (leadId, reason) => {
+    try {
+      const leadsStore = createStore('research-leads');
+      const allLeads = await leadsStore.getAll();
+      const existingLead = allLeads.find((r) => r.id === leadId);
+      if (!existingLead || existingLead.harvestGaveUpAt) return;
+      await leadsStore.remove(leadId);
+      await leadsStore.add({
+        ...existingLead,
+        harvestGaveUpAt: new Date().toISOString(),
+        harvestGaveUpReason: String(reason || '').slice(0, 120),
+      });
+    } catch { /* เงียบ — รอบหน้าลองมาร์คใหม่เอง */ }
+  };
 
   for (const lead of candidates) {
     checked++;
@@ -152,6 +171,10 @@ export async function harvestFromLeads({ origin, maxJobs = 10 } = {}) {
     const body = r.body;
     if (!body || body.success !== true) {
       failed++;
+      // งานหายจากคิวถาวร (คิว purge งานเก่า) → เลิกตาม — เน็ตสะดุด/อื่นๆ ยังลองรอบหน้าตามเดิม
+      if (body && /ไม่พบ|not\s?found/i.test(String(body.error || ''))) {
+        await _markGaveUp(lead.id, 'งานหายจากคิว (ถูก purge)');
+      }
       continue;
     }
 
@@ -168,8 +191,9 @@ export async function harvestFromLeads({ origin, maxJobs = 10 } = {}) {
     } else if (body.status === 'pending' || body.status === 'processing') {
       waiting++;
     } else {
-      // 'failed' หรือสถานะอื่นที่ไม่รู้จัก
+      // 'failed' หรือสถานะอื่นที่ไม่รู้จัก — จบถาวร ไม่มีวันกลายเป็น completed → เลิกตาม (audit R2)
       failed++;
+      await _markGaveUp(lead.id, `job จบสถานะ '${body.status}'`);
     }
   }
 

@@ -38,6 +38,7 @@ export async function GET(request) {
       fetchability: searchParams.get('fetchability') || undefined,
       minScore: minScoreRaw != null ? Number(minScoreRaw) : undefined,
       q: searchParams.get('q') || undefined,
+      runId: searchParams.get('runId') || undefined, // 🔒 audit R2: ดึงเฉพาะลีดของรอบล่า — กันลีดเก่าคะแนนสูงบัง
       limit: limitRaw != null ? Number(limitRaw) : undefined,
     });
 

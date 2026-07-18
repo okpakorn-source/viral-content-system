@@ -120,6 +120,9 @@ export function validateDnaRecord(raw = {}) {
     titleHash: buildTitleHash(title),
     // ── ตัวตน ──
     title,
+    // 🔒 audit R2 (18 ก.ค.): เก็บ postId ดิบด้วย — เดิมมีแต่ postKey (hash) ทำหน้าเช็คซ้ำของ UI เทียบ postId
+    //   กับคลังแล้วได้ 0 เสมอ (คลังไม่เคยเก็บ field นี้)
+    postId: sanitizeText(raw.postId, 80),
     contentExcerpt: sanitizeText(raw.contentExcerpt, 600),
     permalink: sanitizeText(raw.permalink, 300),
     postType: sanitizeText(raw.postType, 30) || 'unknown', // วิดีโอ/รูป/ลิงก์/รีล — ชี้เลนเฟส 2

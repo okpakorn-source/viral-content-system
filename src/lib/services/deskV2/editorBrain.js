@@ -50,6 +50,11 @@ const IMMEDIATE_CLIP_POLL_MS = 20_000;
 const ROUTE_HARD_MS = 600_000;           // = maxDuration ของ /api/desk/editor (route.js)
 const ROUTE_SAFE_MARGIN_MS = 50_000;     // กันเวลาเขียน run-record + ตอบกลับ
 const PER_LEAD_SEND_BUDGET_MS = 190_000; // งบต่อใบ worst-case (extract+distill+send) หลังตัด insight ให้สั้นลง
+// 🔒 Batch C (audit R1): เพดานส่งอัตโนมัติพลาดต่อลีด — เกินนี้ตัดออกจากรอบคัด (เดิมใบล้มถาวรวนเข้ารอบใหม่เผาค่า AI ไม่จำกัด)
+const MAX_LEAD_SEND_ATTEMPTS = 3;
+// 🔒 review r2fix: เพดานแยกของใบคลิปที่ "รอถอด" (pending ไม่ใช่ความล้มเหลว ไม่นับ sendAttempts) — คลิปที่ถอดไม่เสร็จ
+//   สักที (เครื่องทีมดับ/งานตาย) จะได้ไม่วนกินที่นั่งรอบคัดตลอดกาล · ถอดเสร็จเมื่อไหร่ contentReady ก็ส่งผ่านก่อนถึงเพดานเอง
+const MAX_CLIP_PENDING_ROUNDS = 8;
 
 const CHUNK_SIZE = 80;          // ~80 ใบ/call ตอน studyDna
 const MAX_PICK_CANDIDATES = 60; // เพดานลีดที่ส่งให้ บก. ให้คะแนนต่อรอบ (matchScore สูงสุดก่อน)
@@ -330,7 +335,8 @@ export async function studyDna({ modelKey = 'primary', maxExemplars } = {}) {
     costEstTHB: Math.round(usdSpent * THB_PER_USD * 100) / 100,
   };
 
-  // เก็บ brain_latest (remove-แล้ว-add ถ้ามีเดิม) + สำเนา history id brain_<ISO วันที่>
+  // เก็บ brain_latest (remove-แล้ว-add ถ้ามีเดิม — 🔴 ห้ามใช้ store.update() ตามกฎ repo: ไม่ sync ไฟล์ fallback)
+  //   ช่วงว่างระหว่าง remove↔add ปิดที่ฝั่งผู้อ่านแทน (_findBrainLatest ลองซ้ำ 1 ครั้ง — audit R2)
   const brainStore = createStore(STORE_BRAIN);
   const existingBrainRecords = await brainStore.getAll();
   if (existingBrainRecords.some((r) => r.id === 'brain_latest')) {
@@ -447,6 +453,32 @@ export function _processPickItems(rawItems, byId, limit) {
   return { picks, skipped: [...skipped, ...overflow] };
 }
 
+// ── 🔒 audit R2 (18 ก.ค.): อ่าน brain_latest แบบทนช่วงว่าง remove↔add ของ studyDna — เจอไม่ครบลองซ้ำ 1 ครั้ง
+//    (เดิมอ่านชนช่วงว่างมิลลิวินาทีนั้น = needStudy เท็จ ทั้งที่สมองมีจริง) ──
+async function _findBrainLatest(brainStore) {
+  const first = (await brainStore.getAll()).find((r) => r.id === 'brain_latest');
+  if (first) return first;
+  await new Promise((res) => { setTimeout(res, 600); });
+  return (await brainStore.getAll()).find((r) => r.id === 'brain_latest') || null;
+}
+
+// ── 🔒 Batch C (audit R1): บันทึกผลส่งอัตโนมัติพลาดลงลีด (นับ attempts + เหตุผล) — remove-แล้ว-add ตามกฎ ──
+async function _recordSendFailure(leadsStore, id, errMsg) {
+  try {
+    const all = await leadsStore.getAll();
+    const existing = all.find((r) => r.id === id);
+    if (!existing) return;
+    const attempts = (Number(existing.sendAttempts) || 0) + 1;
+    const merged = pushEvent(
+      { ...existing, sendAttempts: attempts, lastSendError: String(errMsg || '').slice(0, 200), lastSendAttemptAt: new Date().toISOString() },
+      'status',
+      { status: `ส่งอัตโนมัติพลาดครั้งที่ ${attempts}${attempts >= MAX_LEAD_SEND_ATTEMPTS ? ' (ครบเพดาน — พักจากรอบคัด)' : ''}: ${String(errMsg || '').slice(0, 80)}` },
+    );
+    await leadsStore.remove(id);
+    await leadsStore.add(merged);
+  } catch { /* บันทึกพลาดไม่บล็อกรอบคัด */ }
+}
+
 // ── เขียน event 'editor' เข้า lead ด้วยแพตเทิร์น pushEvent + remove-แล้ว-add (await เสมอ — ห้าม fire-and-forget) ──
 async function _writeEditorEvent(leadsStore, id, data) {
   const all = await leadsStore.getAll();
@@ -495,8 +527,7 @@ export async function editorPick({ limit = 5, autoSend = false, sendMode = 'imme
   const safeLimit = Math.max(1, Math.min(MAX_PICK_LIMIT, Number(limit) || 5));
 
   const brainStore = createStore(STORE_BRAIN);
-  const brainAll = await brainStore.getAll();
-  const brain = brainAll.find((r) => r.id === 'brain_latest');
+  const brain = await _findBrainLatest(brainStore); // audit R2: ทนช่วงว่าง remove↔add ของ studyDna
   if (!brain) {
     return { needStudy: true, picks: [], skipped: [], sent: [], sendMode: safeSendMode, outboxQueued: 0, tookMs: Date.now() - t0 };
   }
@@ -507,7 +538,17 @@ export async function editorPick({ limit = 5, autoSend = false, sendMode = 'imme
     listLeads({ status: 'new', limit: 500 }),
     listLeads({ status: 'kept', limit: 500 }),
   ]);
-  const candidates = [...newLeads, ...keptLeads]
+  let candidatePool = [...newLeads, ...keptLeads];
+  // 🔒 Batch C (audit R1): โหมดส่งตรง — เข้ารอบเฉพาะใบที่เดินอัตโนมัติได้จริง: full (ส่งเลย) หรือคลิปวิดีโอจริง
+  //   (โยนงานถอดเข้าเครื่องทีม — คำสั่งเจ้าของ 18 ก.ค. "งานคลิปให้ส่งเข้าระบบถอดได้เลย") + ตัดใบพลาดซ้ำเกินเพดาน
+  //   เดิม: ใบ non-full ถูกคัดแล้วข้ามเงียบ (ที่นั่งเปล่า) และใบล้มถาวรวนกลับเข้ารอบไม่จำกัด
+  if (autoSend && safeSendMode === 'immediate') {
+    candidatePool = candidatePool.filter((l) =>
+      (l.fetchability === 'full' || classifyExtractRoute(l) === 'clip')
+      && (Number(l.sendAttempts) || 0) < MAX_LEAD_SEND_ATTEMPTS
+      && (Number(l.clipPendingRounds) || 0) < MAX_CLIP_PENDING_ROUNDS); // review r2fix: คลิปค้างถอดนานเกิน — พักจากรอบคัด
+  }
+  const candidates = candidatePool
     .sort((a, b) => (Number(b.matchScore) || 0) - (Number(a.matchScore) || 0))
     .slice(0, MAX_PICK_CANDIDATES);
 
@@ -583,7 +624,9 @@ export async function editorPick({ limit = 5, autoSend = false, sendMode = 'imme
     // รอบคัดถัดไปเนื้อพร้อมจะส่งเอง) — กันบั๊กเดิม "ค้างกำลังส่ง" (รอคลิปเต็ม 6 นาทีจน route โดนฆ่า)
     for (const p of picks) {
       const lead = byId.get(p.id);
-      if (!lead || lead.fetchability !== 'full') continue;
+      if (!lead) continue;
+      // 🔒 Batch C: full = ส่งได้เลย · คลิปวิดีโอจริง = โยนงานถอด (extractAndSend คืน pending รอบหน้าส่งเอง) — อื่นๆ ข้าม
+      if (lead.fetchability !== 'full' && classifyExtractRoute(lead) !== 'clip') continue;
       // 🔄 Batch A: ไม่เริ่มส่งใบใหม่ถ้าเวลาที่เหลือใต้เพดาน route ไม่พอทำใบนี้ให้จบ — กันโดน Vercel ฆ่ากลางส่ง
       //   ใบที่เหลือคง status new/kept (re-pickable รอบหน้า) + ติดธง deferred ให้ UI/audit เห็นว่าเพราะเวลาหมด
       if ((Date.now() - t0) + PER_LEAD_SEND_BUDGET_MS > ROUTE_HARD_MS - ROUTE_SAFE_MARGIN_MS) {
@@ -596,10 +639,29 @@ export async function editorPick({ limit = 5, autoSend = false, sendMode = 'imme
         const r = await extractAndSend(p.id, { origin, auto: true, clipPollBudgetMs: IMMEDIATE_CLIP_POLL_MS });
         p.sentJobId = r?.jobId || null;
         // 🔄 Batch A: จับสาเหตุพลาด/pending ต่อใบไว้ใน pick (เข้า run-record + ส่งกลับใน sent[] ให้ UI/audit เห็น)
-        if (!r?.success && !r?.alreadySent) p.sendError = r?.error || (r?.pending ? 'คลิปยังถอดไม่เสร็จ — รอบหน้าส่งเอง' : 'ส่งไม่สำเร็จ');
+        if (r?.pending) {
+          p.sendError = 'รอเครื่องทีมถอดคลิป — รอบคัดถัดไปส่งเอง'; // ความคืบหน้า ไม่นับเป็นพลาด
+          // review r2fix: นับรอบ pending แยกจาก sendAttempts (เขียนเบาๆ ไม่ใส่ event กัน timeline บวม)
+          // eslint-disable-next-line no-await-in-loop
+          await (async () => {
+            try {
+              const allLeads = await leadsStore.getAll();
+              const ex = allLeads.find((x) => x.id === p.id);
+              if (!ex) return;
+              await leadsStore.remove(p.id);
+              await leadsStore.add({ ...ex, clipPendingRounds: (Number(ex.clipPendingRounds) || 0) + 1, lastClipPendingAt: new Date().toISOString() });
+            } catch { /* นับไม่ได้ไม่บล็อกงาน */ }
+          })();
+        } else if (!r?.success && !r?.alreadySent) {
+          p.sendError = r?.error || 'ส่งไม่สำเร็จ';
+          // eslint-disable-next-line no-await-in-loop -- 🔒 Batch C: นับ attempts เฉพาะล้มจริง (เขียนทีละใบ กันชนไฟล์ลีด)
+          await _recordSendFailure(leadsStore, p.id, p.sendError);
+        }
         sent.push({ id: p.id, title: lead.title, ...r });
       } catch (e) {
         p.sendError = e?.message || String(e);
+        // eslint-disable-next-line no-await-in-loop -- 🔒 Batch C: เช่นเดียวกับด้านบน
+        await _recordSendFailure(leadsStore, p.id, p.sendError);
         sent.push({ id: p.id, title: lead.title, success: false, error: p.sendError });
       }
     }
@@ -645,8 +707,7 @@ export async function editorPick({ limit = 5, autoSend = false, sendMode = 'imme
 /** getBrainStatus — สรุปว่า บก. เคยศึกษาแล้วหรือยัง + ทิศทาง 5 อันดับแรก + เวลาคัดข่าวล่าสุด */
 export async function getBrainStatus() {
   const brainStore = createStore(STORE_BRAIN);
-  const all = await brainStore.getAll();
-  const brain = all.find((r) => r.id === 'brain_latest');
+  const brain = await _findBrainLatest(brainStore); // audit R2: ทนช่วงว่าง remove↔add ของ studyDna
   if (!brain) {
     return { studied: false, studiedAt: null, exemplarCount: 0, topDirections: [], lastPickAt: null };
   }
