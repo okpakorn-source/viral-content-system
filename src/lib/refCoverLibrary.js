@@ -1,17 +1,22 @@
 // ============================================================
 // 🎯 Ref Cover Library — คลังปกตัวอย่าง (reference) + DNA การจัดวาง
 // ------------------------------------------------------------
-// เก็บปก ref ที่ผู้ใช้อัพโหลด + DNA ที่สกัดด้วย AI (แนว/ตรรกะการจัดวาง)
-// data/ref-cover-library.json (metadata+DNA) · ไฟล์ภาพจริง public/ref-covers/
+// เก็บ DNA/โครงเทมเพลตที่สกัดด้วย AI (แนว/ตรรกะการจัดวาง) — ไม่เก็บภาพต้นฉบับ
+// ★ redesign 18 ก.ค. (คำสั่ง sol): ref = โครงล้วน — เก็บผ่าน persistStore('ref-cover-library')
+//   (Supabase primary + local file fallback ในตัว) แทนไฟล์ data/ref-cover-library.json ตรงๆ
 // อนาคต (เฟส 2): ระบบ match แนวข่าว → หยิบปก ref ที่ DNA ตรงมาเป็นต้นแบบ
 // ============================================================
 
-import { promises as fs } from 'fs';
-import path from 'path';
 import { resolveRefSlotView } from './refSlotContract.js';
+import { createStore } from './persistStore.js';
 
-const FILE = path.join(process.cwd(), 'data', 'ref-cover-library.json');
-const MAX = 1000;
+// ★ redesign 18 ก.ค. (คำสั่ง sol): ref = โครงล้วน ไม่เก็บภาพตัวอย่าง — เลิกเก็บไฟล์ local (data/ref-cover-library.json)
+//   ย้ายเป็น Supabase-backed ผ่าน persistStore (Supabase primary + local file fallback ในตัว createStore)
+let _store = null;
+function getStore() {
+  if (!_store) _store = createStore('ref-cover-library');
+  return _store;
+}
 
 // ============================================================
 // 🔧 R2 sync helper — dna.slots (semantic) ↔ template.slots (geometry)
@@ -81,59 +86,52 @@ export function syncDnaSlotsToTemplate(currentDnaSlots, newTemplateSlots) {
   return [...kept, ...additions];
 }
 
-async function readAll() {
-  try {
-    const t = await fs.readFile(FILE, 'utf8');
-    const j = JSON.parse(t);
-    return Array.isArray(j) ? j : [];
-  } catch {
-    return [];
-  }
-}
-
-async function writeAll(arr) {
-  try {
-    await fs.mkdir(path.dirname(FILE), { recursive: true });
-    await fs.writeFile(FILE, JSON.stringify(arr.slice(-MAX), null, 2), 'utf8');
-  } catch { /* เขียนไม่ได้ก็ไม่ให้ล้ม */ }
-}
-
 /** รายการปก ref ทั้งหมด (ใหม่สุดก่อน) */
 export async function listRefCovers(limit = 500) {
-  const all = await readAll();
-  return all.slice(-limit).reverse();
+  const all = await getStore().getAll();
+  return all
+    .slice()
+    .sort((a, b) => String(b?.uploadedAt || '').localeCompare(String(a?.uploadedAt || '')))
+    .slice(0, limit);
 }
 
-/** เพิ่มปก ref 1 ใบ (พร้อม DNA ที่สกัดแล้ว) */
+/** เพิ่มปก ref 1 ใบ (พร้อม DNA ที่สกัดแล้ว) — structure-only: ห้ามมี imagePath */
 export async function addRefCover(rec = {}) {
-  const all = await readAll();
   const entry = {
     id: rec.id || `REF-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     uploadedAt: new Date().toISOString(),
     styleName: rec.styleName || '',
-    imagePath: rec.imagePath || null,   // /ref-covers/xxx.jpg
     dna: rec.dna || null,               // ผลสกัดจาก refCoverBrain
-    dnaError: rec.dnaError || null,     // ถ้าสกัด DNA ล้ม (ยังเก็บภาพไว้ re-analyze ได้)
+    dnaError: rec.dnaError || null,     // ถ้าสกัด DNA ล้ม
   };
-  all.push(entry);
-  await writeAll(all);
+  await getStore().add(entry);
   return entry;
 }
 
 /** ลบปก ref ตาม id (คืนจำนวนที่ลบ) */
 export async function deleteRefCover(id) {
-  const all = await readAll();
-  const next = all.filter((x) => x.id !== id);
-  await writeAll(next);
-  return all.length - next.length;
+  const all = await getStore().getAll();
+  const exists = all.some((x) => x.id === id);
+  if (exists) await getStore().remove(id);
+  return exists ? 1 : 0;
 }
 
 /** อัปเดตปก ref (เช่น ตั้งชื่อแนว / re-analyze DNA) */
 export async function updateRefCover(id, patch = {}) {
-  const all = await readAll();
-  const i = all.findIndex((x) => x.id === id);
-  if (i < 0) return null;
-  all[i] = { ...all[i], ...patch };
-  await writeAll(all);
-  return all[i];
+  // ★ ใช้ store.update (atomic UPDATE ตรง — merge {...existing,...patch}) แทน remove→add
+  //   กันข้อมูลหายถ้า add ล้มหลัง remove สำเร็จ · store.update throw เมื่อไม่พบ id → catch คืน null (คงสัญญาเดิม)
+  try {
+    return await getStore().update(id, patch);
+  } catch {
+    return null;
+  }
+}
+
+/** ล้างคลังปก ref ทั้งหมด (คืนจำนวนที่ลบ) */
+export async function clearAllRefCovers() {
+  // ★ ใช้ store.removeAll (ลบทีเดียว) แทน loop remove ทีละใบ (กันลบค้างครึ่งทาง) · นับก่อนลบเพื่อคืนจำนวน
+  const all = await getStore().getAll();
+  const n = all.length;
+  await getStore().removeAll();
+  return n;
 }

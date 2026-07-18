@@ -58,9 +58,10 @@ export function computeTemplateGrade(record) {
   if (dupOf) {
     return _result('F', [`ใบซ้ำของ ${dupOf} (_duplicateOf)`]);
   }
-  // 2) ไม่มี dna หรือ imagePath → ประกอบปกจากใบนี้ไม่ได้
-  if (!dna || !imagePath) {
-    return _result('F', ['ไม่มี dna หรือ imagePath']);
+  // 2) ★ redesign 18 ก.ค. (คำสั่ง sol): ref = โครงล้วน ไม่เก็บภาพ → เกรดมาจาก DNA + geometry + _fidelity เท่านั้น
+  //    เลิก require imagePath (เดิม 'ไม่มี dna หรือ imagePath' → F) · geometry sane เช็คด้วย dnaToTemplateSpec ด้านล่างแล้ว
+  if (!dna) {
+    return _result('F', ['ไม่มี dna']);
   }
   // 3) โครงแปลงเป็น templateSpec ไม่ผ่าน (dnaToTemplateSpec คืน null) → วางช่องตาม ref ไม่ได้จริง
   //    (dnaToTemplateSpec เป็น PURE + มี try/catch ในตัว คืน null เมื่อโครงใช้ไม่ได้ — ห่อ try อีกชั้นกันเหนียว)
@@ -125,8 +126,12 @@ function _result(grade, reasons) {
 // สวิตช์ default OFF (เหตุผล: pool ตอนนี้แคบ รอ R5a กู้ใบก่อนค่อยเปิด) — ต้องเป็น '1' เป๊ะเท่านั้นจึงเปิด
 export function refPoolGateOpen(record, env = process.env) {
   const dna = record?.dna;
-  // core เดิมที่ต้องมีทุกโหมด: dna + imagePath (ประกอบปกจากใบนี้ได้)
-  if (!dna || !record?.imagePath) return false;
+  // ★ redesign 18 ก.ค. (คำสั่ง sol — ref = โครงล้วน ไม่เก็บภาพตัวอย่าง): เลิก require imagePath
+  //   เปลี่ยนเป็น require "DNA ที่มีโครงจริง" (template.slots หรือ dna.slots ≥3 ช่อง) — ใช้ประกอบปกได้จากโครง ไม่ต้องมีภาพ
+  //   backward-compat: 33 ใบเดิมมี slots ครบอยู่แล้ว → พฤติกรรมไม่เปลี่ยน · imagePath จะไม่ถูก persist อีกต่อไป
+  if (!dna) return false;
+  const _slots = (dna.template && Array.isArray(dna.template.slots)) ? dna.template.slots : (Array.isArray(dna.slots) ? dna.slots : null);
+  if (!_slots || _slots.length < 3) return false;
   // ★ 17 ก.ค. (เจ้าของสั่ง "เอาเทมเพลตเพี้ยนออก เหลือใบเดียวที่มั่นใจ 100% เทสทีละเทมเพลต"):
   //   REF_POOL_PIN=<record.id> → พูลเหลือเฉพาะใบนั้นทุกทางเข้า (dropdown/auto-match/variant-lock)
   //   เหตุ: บางเทมเพลตมีเฟด/ช่องซ้อนทำระบบอ่านช่องผิดจนภาพเพี้ยน (เช่น 732269634 ที่ repro=false)

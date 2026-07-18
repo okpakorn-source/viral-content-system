@@ -1,9 +1,10 @@
 // ============================================================
 // 🎯 /api/ref-covers — คลังปก reference + สกัด DNA
-//   POST   : อัพโหลดปก 1 ใบ {image: dataUrl, styleName?} → เซฟ public/ref-covers/ → สกัด DNA → เก็บคลัง
+//   POST   : อัพโหลดปก 1 ใบ {image: dataUrl, styleName?} → สกัด DNA → dnaToTemplateSpec → วัด fidelity → คำนวณเกรด → เก็บคลัง
+//            ★ redesign 18 ก.ค.: structure-only — ไม่เซฟไฟล์ภาพ/ไม่เก็บ imagePath อีกต่อไป (ทุกด่านต้องผ่านจึงเก็บ record)
 //   GET    : รายการปก ref ทั้งหมด (+DNA)
 //   DELETE : ?id=... ลบปก ref
-//   PATCH  : {id, styleName?} หรือ {id, reanalyze:true} → อัปเดต/วิเคราะห์ DNA ใหม่
+//   PATCH  : {id, styleName?} หรือ {id, reanalyze:true} → อัปเดต/วิเคราะห์ DNA ใหม่ (reanalyze ใช้ได้เฉพาะ legacy record ที่มี imagePath)
 // ทั้งหมดแยกจากท่อทำข่าว/ปกอัตโนมัติ 100%
 // ============================================================
 
@@ -11,6 +12,8 @@ import { NextResponse } from 'next/server';
 import { listRefCovers, addRefCover, deleteRefCover, updateRefCover, syncDnaSlotsToTemplate } from '@/lib/refCoverLibrary';
 import { extractCoverDNA } from '@/lib/refCoverBrain';
 import { computeTemplateGrade } from '@/lib/refCoverGrade';
+import { measureTemplateFidelity } from '@/lib/refTemplateFidelity';
+import { dnaToTemplateSpec } from '@/lib/refTemplate';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -35,6 +38,9 @@ export async function GET() {
   }
 }
 
+// ★ redesign 18 ก.ค. (คำสั่ง sol — structure-only): เลิกเซฟไฟล์ภาพ/imagePath ทั้งหมด
+//   ปก ref = โครง (DNA + template geometry + fidelity + grade) ล้วน ไม่เก็บภาพต้นฉบับในคลัง
+//   ทุกด่านต้องผ่านจึงเก็บ record; ด่านไหนล้ม = ไม่เรียก addRefCover (กัน record ครึ่งสำเร็จ)
 export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -43,24 +49,55 @@ export async function POST(req) {
     if (!m) {
       return NextResponse.json({ success: false, error: 'ต้องส่งภาพเป็น data URL (base64)', errorType: 'NO_IMAGE' }, { status: 400 });
     }
-    // เซฟไฟล์ภาพ
-    const { promises: fs } = await import('fs');
-    const path = await import('path');
-    const dir = path.join(process.cwd(), 'public', 'ref-covers');
-    await fs.mkdir(dir, { recursive: true });
-    const fname = `ref-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.${m[1] === 'png' ? 'png' : 'jpg'}`;
-    await fs.writeFile(path.join(dir, fname), Buffer.from(m[2], 'base64'));
-    const imagePath = `/ref-covers/${fname}`;
 
-    // สกัด DNA (ล้มก็ยังเก็บภาพ + ธง error ให้ re-analyze ทีหลังได้)
-    let dna = null, dnaError = null;
+    let buffer;
+    try {
+      buffer = Buffer.from(m[2], 'base64');
+    } catch {
+      return NextResponse.json({ success: false, error: 'ถอดรหัสภาพ base64 ไม่ได้', errorType: 'INVALID_IMAGE_DATA' }, { status: 400 });
+    }
+    if (!buffer || buffer.length === 0) {
+      return NextResponse.json({ success: false, error: 'ถอดรหัสภาพ base64 ไม่ได้', errorType: 'INVALID_IMAGE_DATA' }, { status: 400 });
+    }
+
+    // ① สกัด DNA — ล้ม = ไม่เก็บ record
+    let dna;
     try {
       dna = await extractCoverDNA(image);
     } catch (e) {
-      dnaError = e.message?.slice(0, 200) || 'สกัด DNA ล้ม';
+      return NextResponse.json({ success: false, error: e?.message || 'สกัด DNA ล้ม', errorType: 'DNA_EXTRACTION_FAILED' }, { status: 422 });
+    }
+    if (!dna) {
+      return NextResponse.json({ success: false, error: 'สกัด DNA ล้ม', errorType: 'DNA_EXTRACTION_FAILED' }, { status: 422 });
     }
 
-    const entry = await addRefCover({ styleName: String(body.styleName || '').slice(0, 80), imagePath, dna, dnaError });
+    // ② แปลง DNA → templateSpec (โครงคอลลาจ) — ไม่ sane = ไม่เก็บ record
+    let spec = null;
+    try { spec = dnaToTemplateSpec(dna); } catch { spec = null; }
+    if (!spec) {
+      return NextResponse.json({ success: false, error: 'โครงคอลลาจจาก DNA ใช้ไม่ได้ (dnaToTemplateSpec ไม่ผ่าน)', errorType: 'INVALID_TEMPLATE_STRUCTURE' }, { status: 422 });
+    }
+
+    // ③ วัดความเที่ยงเชิงพิกเซล (template ตรงกับภาพจริงแค่ไหน) — ล้ม = ไม่เก็บ record
+    let fid;
+    try {
+      fid = await measureTemplateFidelity({ imageBuffer: buffer, templateSpec: spec });
+    } catch (e) {
+      return NextResponse.json({ success: false, error: e?.message || 'วัดความเที่ยงล้ม', errorType: 'FIDELITY_MEASUREMENT_FAILED' }, { status: 422 });
+    }
+
+    // ④ ประกบเกรด (deterministic) แล้วเก็บ record — ไม่มี imagePath
+    const dnaWithFid = { ...dna, _fidelity: fid };
+    const grade = computeTemplateGrade({ dna: dnaWithFid });
+    const finalDna = { ...dnaWithFid, _templateGrade: grade };
+
+    let entry;
+    try {
+      entry = await addRefCover({ styleName: String(body.styleName || '').slice(0, 80), dna: finalDna, dnaError: null });
+    } catch (e) {
+      return NextResponse.json({ success: false, error: e?.message || 'บันทึกคลังไม่สำเร็จ', errorType: 'REF_COVER_PERSIST_FAILED' }, { status: 500 });
+    }
+
     return NextResponse.json({ success: true, item: entry });
   } catch (err) {
     return NextResponse.json({ success: false, error: err.message || 'ผิดพลาดไม่คาดคิด', errorType: 'UNEXPECTED' }, { status: 500 });
@@ -121,9 +158,12 @@ export async function PATCH(req) {
       patch.dna = dna;
     }
     if (body.reanalyze) {
-      // re-analyze DNA จากไฟล์เดิม
+      // re-analyze DNA จากไฟล์เดิม — เฉพาะ legacy record ที่ยังมี imagePath (ref ใหม่หลัง redesign = โครงล้วน ไม่มีภาพให้ reanalyze)
       const items = await listRefCovers(1000);
       const cur = items.find((x) => x.id === id);
+      if (cur && !cur.imagePath) {
+        return NextResponse.json({ success: false, error: 'ปกนี้ไม่มีภาพต้นฉบับเก็บไว้ (โครงล้วน) — re-analyze ใหม่ไม่ได้', errorType: 'REANALYZE_IMAGE_UNAVAILABLE' }, { status: 422 });
+      }
       if (cur?.imagePath) {
         try {
           const { promises: fs } = await import('fs');
