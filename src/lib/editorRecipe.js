@@ -17,6 +17,10 @@
 //   ★ ห้ามแตะ refTemplate.dnaToTemplateSpec (ท่อจริง strict) — โมดูลนี้เป็นสายเอดิเตอร์คนละเส้น เบา/แก้มือได้
 // ============================================================
 
+// ★ 18 ก.ค. 69 (บั๊ก "ภาพสลับมั่วใน editor" — เคส AC-0147): ผัง+id ของ editor ต้องมาจาก dnaToTemplateSpec
+//   ตัวจริง (สูตรเดียวกับ composer) — import มา "เรียกใช้" อย่างเดียว ไม่แตะตัวฟังก์ชัน (กฎหัวไฟล์ยังคงเดิม)
+import { dnaToTemplateSpec } from './refTemplate.js';
+
 const CANVAS_W = 1080;
 const CANVAS_H = 1350;
 
@@ -106,6 +110,49 @@ export function slotsFromTemplate(templateSlots) {
     }
   });
   return out;
+}
+
+// ★ 18 ก.ค. 69: สร้าง editor slots จาก "ผังจริงของ composer" (dnaToTemplateSpec) — single source of truth
+//   ปิดบั๊กภาพสลับ: slotsFromTemplate เดิมเป็นก๊อปปี้ไม่ครบ (ขาด grid-snap/ปิดผืน/ด่านกันชนตัดช่อง/
+//   hero-fallback "ช่องใหญ่สุด→main"/dedup คนละสูตร) → id+ผัง ไม่ตรง manifest.slots → ภาพลงผิดช่อง
+//   ที่นี่: เรียก spec ตัวจริง (px 1080×1350 + id สุดท้ายหลังทุก relabel = id เดียวกับ manifest เป๊ะ)
+//   แล้วแปลงเป็นรูปช่องของ editor (label/role/diameter) · spec คืน null → ผู้เรียก fallback ก๊อปปี้เดิม
+export function slotsFromSpec(dna) {
+  let spec = null;
+  try { spec = dnaToTemplateSpec(dna); } catch { spec = null; }
+  const specSlots = spec && Array.isArray(spec.slots) ? spec.slots : null;
+  if (!specSlots || !specSlots.length) return null;
+  const orig = (dna && dna.template && Array.isArray(dna.template.slots)) ? dna.template.slots : [];
+  return specSlots.map((s, idx) => {
+    const isCircle = s.shape === 'circle';
+    // role จริงจาก dna.template.slots ผ่าน _sourceIndex (non-enumerable — อ่านได้ใน process เดียวกัน)
+    let si = null;
+    try { const d = Object.getOwnPropertyDescriptor(s, '_sourceIndex'); si = d ? d.value : null; } catch { si = null; }
+    const role = (si != null && orig[si] && orig[si].role)
+      ? orig[si].role
+      : (s.id === 'main' ? 'hero' : (String(s.id).replace(/[^a-z]/g, '') || 'p'));
+    if (isCircle) {
+      return {
+        id: s.id, label: labelFor(role, 'circle', idx), role: role || 'reaction',
+        shape: 'circle', x: s.x, y: s.y, diameter: Math.max(80, num(s.w)),
+        border: s.border || '#FFFFFF',
+        borderWidth: num(s.borderWidth) || 6,
+        zIndex: Number.isFinite(Number(s.zIndex)) ? Number(s.zIndex) : 4,
+        draggable: true,
+      };
+    }
+    const slot = {
+      id: s.id, label: labelFor(role, 'rect', idx), role: role || 'p',
+      x: s.x, y: s.y, w: Math.max(8, num(s.w)), h: Math.max(8, num(s.h)),
+      zIndex: Number.isFinite(Number(s.zIndex)) ? Number(s.zIndex) : 0,
+    };
+    if (s.border) {
+      slot.border = s.border;
+      slot.borderWidth = num(s.borderWidth) || 8;
+      slot.draggable = true; // ช่องมีกรอบ (inset/หลักฐาน) = ลากจัดเองได้ — เท่าพฤติกรรมเดิม
+    }
+    return slot;
+  });
 }
 
 // ตาราง alias (legacy): editor slot role → ลำดับ pickImages key ที่เติมช่องนี้ได้
@@ -258,7 +305,8 @@ export function buildEditorRecipe({ job, caseImages } = {}) {
     ? d.pickImages.slots : {};
   const slotOrder = Array.isArray(d.pickImages && d.pickImages.slotOrder) ? d.pickImages.slotOrder : null;
 
-  const slots = slotsFromTemplate(templateSlots);
+  // ★ 18 ก.ค. 69: ผังจริงจาก composer ก่อนเสมอ (id ตรง manifest 100%) — spec ใช้ไม่ได้ค่อย fallback ก๊อปปี้เดิม
+  const slots = slotsFromSpec(dna) || slotsFromTemplate(templateSlots);
   const slotAssign = assignSlots(slots, pickSlots, slotOrder);
   let imagesBySlot = buildImagesBySlot(slotAssign, pickSlots, caseImages);
 
@@ -273,9 +321,14 @@ export function buildEditorRecipe({ job, caseImages } = {}) {
     const byManifest = {};
     for (const m of mSlots) {
       if (m && typeof m.slot === 'string' && slotIds.has(m.slot) && typeof m.imageUrl === 'string' && m.imageUrl.trim()) {
-        // ยกระดับเป็น URL rehost ของ "ภาพเดียวกัน" ถ้าเจอในพูลเคส (เทียบ url ตรง) — ไม่เจอ = ใช้ url จริงจาก manifest
-        const hit = (Array.isArray(caseImages) ? caseImages : []).find((x) => x && (x.imageUrl === m.imageUrl || x.url === m.imageUrl));
-        byManifest[m.slot] = pickBestUrl([hit && (hit.imageUrl || hit.url), m.imageUrl]);
+        // ยกระดับเป็น URL rehost ของ "ภาพเดียวกัน" ถ้าเจอในพูลเคส — ไม่เจอ = ใช้ url จริงจาก manifest
+        // ★ 18 ก.ค. 69 (บั๊กภาพหาย/สลับใน editor — เคส AC-0147): เดิมเทียบ+เลือกเฉพาะ imageUrl ทำ URL
+        //   ต้นทางดิบ (เช่น TikTok CDN ที่บล็อก hotlink — เบราว์เซอร์โหลดไม่ได้) หลุดเข้า editor ทั้งที่ภาพ
+        //   เดียวกันมี thumbnailUrl ที่ rehost บน supabase อยู่แล้ว → ต้องเทียบ+พิจารณา thumbnailUrl ด้วย
+        //   (เท่ามาตรฐานเดียวกับเส้น role-mapping ใน buildImagesBySlot ที่ใช้ ci.thumbnailUrl มาตลอด)
+        const hit = (Array.isArray(caseImages) ? caseImages : []).find((x) => x
+          && (x.imageUrl === m.imageUrl || x.url === m.imageUrl || x.thumbnailUrl === m.imageUrl));
+        byManifest[m.slot] = pickBestUrl([hit && hit.imageUrl, hit && hit.url, hit && hit.thumbnailUrl, m.imageUrl]);
       }
     }
     if (Object.keys(byManifest).length) imagesBySlot = byManifest;
