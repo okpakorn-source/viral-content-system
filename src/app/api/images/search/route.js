@@ -542,7 +542,16 @@ export async function POST(req) {
         return hit?.gender || '';
       };
       const subjects = (c.keywords?.subjects || []).map((s) => ({ ...s, gender: s.gender || genderOf(s.name) }));
-      const newsGist = (c.analysis?.summary || c.analysis?.content || c.newsSnippet || '').slice(0, 600);
+      // ★ N1 (18 ก.ค.): ให้ "ตา" (vet) เห็นบริบทข่าว "เต็ม" ขึ้น — เดิมเห็นแค่ 600 ตัวจาก analysis.summary (บทสรุปสั้น)
+      //   → ตัดสิน relevant/story-fit จากสรุปย่อ ไม่เห็นรายละเอียดจริงในข่าว = ภาพเชิงบริบทถูกตีว่าไม่เกี่ยว/สื่อเรื่องไม่ตรง
+      //   แก้: ใช้เนื้อข่าว "เต็ม" (c.newsText) เป็นหลัก + เพดานยาวขึ้น (default 1800 ตัว ≈ +400 tokens/แบตช์ ส่งครั้งเดียวต่อ ~10 ใบ)
+      //   kill-switch: VET_GIST_FULL=0 = คืนพฤติกรรมเดิม (summary-first, 600) · VET_GIST_CHARS = ปรับเพดานเอง
+      const VET_GIST_FULL = process.env.VET_GIST_FULL !== '0';
+      const gistChars = Math.max(200, parseInt(process.env.VET_GIST_CHARS || (VET_GIST_FULL ? '1800' : '600'), 10));
+      const gistSrc = VET_GIST_FULL
+        ? (c.newsText || c.analysis?.content || c.analysis?.summary || c.newsSnippet || '')
+        : (c.analysis?.summary || c.analysis?.content || c.newsSnippet || '');
+      const newsGist = String(gistSrc).slice(0, gistChars);
       try {
         const { vetted, kept, dropped, failed } = await vetImages({ images: candidates, subjects, newsGist, caseId });
         // ★ DEVIATION โหมดตาเข้ม (ผู้ใช้สั่ง 6 ก.ค.): เก็บเฉพาะใบที่ตา "ยืนยันว่าเกี่ยว" เท่านั้น

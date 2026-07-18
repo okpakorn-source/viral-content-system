@@ -195,7 +195,7 @@ function ResultView({ data }) {
   // ★ 6 ก.ค. รอบ 5 (ผู้ใช้สั่ง): 🎯 เรดาร์คลิป — ยาข่าวชาวบ้าน: หน้าชัดในคลังน้อย → หาคลิป/Lens/เพจต้นทางให้เอง
   const [radar, setRadar] = useState(null);
   const radarFired = useRef(false);
-  async function runClipRadar(auto = true) {
+  async function runClipRadar(auto = true, freshImages = null) {
     try {
       const r = await fetch('/api/images/clip-radar', {
         method: 'POST',
@@ -205,7 +205,13 @@ function ResultView({ data }) {
       const j = await r.json();
       if (!j.success) return;
       setRadar(j);
-      if (auto && j.needMore && !radarFired.current) {
+      // ★ N2 (18 ก.ค.): "หาไม่พอ" ครอบ 2 กรณี — หน้าขาด (radar) หรือ "ภาพสะอาดของคนในข่าวยังน้อย"
+      //   เดิมยิง fallback เฉพาะตอนหน้าขาด → เคสหน้าครบแต่ภาพเป็นปกคลิป/ลายน้ำหมด (clean=false) ไม่มีอะไรชดเชย
+      //   freshImages ส่งมาจาก runBatch (กัน state `images` stale ตอนเพิ่งค้นเสร็จ)
+      const imgs = Array.isArray(freshImages) ? freshImages : images;
+      const cleanPersons = imgs.filter((im) => im.triage?.relevant !== false && im.triage?.clean !== false && im.triage?.person);
+      const cleanThin = cleanPersons.length < AUTO_FIND_CLEAN_MIN;
+      if (auto && (j.needMore || cleanThin) && !radarFired.current) {
         radarFired.current = true;
         // อัตโนมัติ: Lens จากหน้าที่ยืนยันแล้ว (เร็ว ได้คนเดิมเพิ่ม) → แล้วส่งแคปคลิปแรกเข้าคิวเครื่องทีม
         if (j.canLens) await searchPlatform('reverse');
@@ -374,11 +380,13 @@ function ResultView({ data }) {
     await Promise.all(workers);
     stopJob();
     // ★ ขนานเสร็จ: ดึงคลังรอบสุดท้าย — response ที่มาถึงช้าสุดอาจถือ snapshot เก่ากว่าของจริง
+    let freshImgs = null; // ★ N2: เก็บภาพรอบล่าสุดส่งให้ runClipRadar เช็ค clean-scarcity (กัน state `images` stale)
     try {
       const ri = await fetch(`/api/images/${data.id}`);
       const ji = await ri.json();
       if (ji.success) {
-        setImages(ji.images || []);
+        freshImgs = ji.images || [];
+        setImages(freshImgs);
         setImgStats({ total: ji.total, byPlatform: ji.byPlatform || {} });
       }
     } catch {
@@ -387,7 +395,7 @@ function ResultView({ data }) {
     setImgLoading('');
     setImgInfo(`✅ ค้นครบ ${list.length} แหล่ง — เพิ่มรูปใหม่รวม ${totalAdded} รูป${queuedMsgs.length ? `\n🕐 ${queuedMsgs.join(' · ')}` : ''}${fails.length ? ` · ล้มเหลว ${fails.length} แหล่ง` : ''}`);
     if (fails.length) setImgError('บางแหล่งล้มเหลว:\n• ' + fails.join('\n• '));
-    runClipRadar(true); // 🎯 หน้าชัดพอไหม — ไม่พอจะหาคลิป/Lens ให้เอง
+    runClipRadar(true, freshImgs); // 🎯 หน้าชัด/ภาพสะอาดพอไหม — ไม่พอจะหา Lens/คลิปให้เอง (N2)
   }
 
   async function clearPlatform(platform) {
@@ -747,7 +755,7 @@ function ResultView({ data }) {
             <span className="src-multi-title">🔍 ค้นหลายแหล่งพร้อมกัน (ติ๊กเลือก):</span>
             <div className="src-multi-chks">
               {SEARCH_SOURCES.map((s) => (
-                <label key={s.p} className={'src-chk' + (batchSel.has(s.p) ? ' on' : '')}>
+                <label key={s.p} className={'src-chk' + (batchSel.has(s.p) ? ' on' : '')} title={s.tip || ''}>
                   <input type="checkbox" checked={batchSel.has(s.p)} disabled={!!imgLoading} onChange={() => toggleBatch(s.p)} />
                   {s.label}
                 </label>
@@ -764,7 +772,7 @@ function ResultView({ data }) {
           <div className="src-bar-sep">— หรือค้นทีละแหล่ง —</div>
           <div className="src-bar">
             {SEARCH_SOURCES.filter((s) => s.p !== 'youtube').map((s) => (
-              <button key={s.p} className="btn-src" disabled={!!imgLoading} onClick={() => searchPlatform(s.p)}>
+              <button key={s.p} className="btn-src" disabled={!!imgLoading} onClick={() => searchPlatform(s.p)} title={s.tip || ''}>
                 {imgLoading === s.p ? (<><span className="spin" />กำลังค้น…</>) : s.label}
               </button>
             ))}
@@ -984,13 +992,17 @@ const PLATFORM_LABEL = {
 };
 
 // แหล่งที่ค้นแบบ "หลายแหล่งพร้อมกัน" ได้ (จัดคิวทีละแหล่ง) — YouTube ช้า (แคปเฟรม) ติ๊กได้แต่กินเวลา
+// ★ N2 (18 ก.ค.): เกณฑ์ "ภาพสะอาดของคนในข่าว" ขั้นต่ำต่อเคส — ต่ำกว่านี้หลังค้นชุด = auto หา Lens/คลิปเพิ่ม (กันเคสได้แต่ปกคลิป)
+const AUTO_FIND_CLEAN_MIN = 6;
+// ★ N3 (18 ก.ค.): เรียงตาม "%ภาพสะอาดจริง" จากสถิติคลัง (google 46% > fb 39% > gnews 38% > tiktok 26% > yandex 18%)
+//   → runBatch ยิงแหล่งดีก่อน + ผู้ใช้เห็นลำดับความคุ้ม (tip โชว์ตอน hover) · yandex ไม่อยู่ใน default batchSel อยู่แล้ว (opt-in)
 const SEARCH_SOURCES = [
-  { p: 'google', label: '🖼️ Google' },
-  { p: 'google_news', label: '📰 Google News' },
-  { p: 'yandex', label: '🌐 Yandex' },
-  { p: 'facebook', label: '📘 FB (เว็บ)' },
-  { p: 'tiktok', label: '🎵 TikTok' },
-  { p: 'youtube', label: '▶️ YouTube (ช้า)' },
+  { p: 'google', label: '🖼️ Google', tip: 'ภาพสะอาดสูงสุด ~46% — แหล่งหลัก' },
+  { p: 'facebook', label: '📘 FB (เว็บ)', tip: 'ภาพสะอาด ~39%' },
+  { p: 'google_news', label: '📰 Google News', tip: 'ภาพสะอาด ~38%' },
+  { p: 'tiktok', label: '🎵 TikTok', tip: 'ภาพสะอาด ~26% (ปกคลิปเยอะ ตาคัดหนัก)' },
+  { p: 'yandex', label: '🌐 Yandex', tip: 'อ่านไทยไม่ค่อยออก สะอาด ~18% — เลือกเมื่อแหล่งหลักได้ภาพน้อย' },
+  { p: 'youtube', label: '▶️ YouTube (ช้า)', tip: 'แคปเฟรมวิดีโอ — ช้า ใช้เมื่อหน้าขาด' },
 ];
 
 function ImageGallery({ images, stats, onRemove, onReverseFrom }) {

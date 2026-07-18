@@ -1388,7 +1388,15 @@ export async function s5_gapsearch(job, { origin, _deps } = {}) {
         return hit?.gender || '';
       };
       const subjects = (c?.keywords?.subjects || []).map((s) => ({ ...s, gender: s.gender || genderOf(s.name) }));
-      const newsGist = (c?.analysis?.summary || c?.analysis?.content || c?.newsSnippet || '').slice(0, 600);
+      // ★ N1 (18 ก.ค.): ตา (vet) เห็นเนื้อข่าวเต็มขึ้น — เดิม 600 ตัวจาก summary → story-fit เพี้ยน (บั๊กเดียวกับ search route)
+      //   MEGA เปิดเคสด้วย newsText เต็มอยู่แล้ว (s5_case) → ใช้ c.newsText เป็นหลัก · kill-switch VET_GIST_FULL=0 / VET_GIST_CHARS
+      const _vetGistFull = process.env.VET_GIST_FULL !== '0';
+      const _vetGistChars = Math.max(200, parseInt(process.env.VET_GIST_CHARS || (_vetGistFull ? '1800' : '600'), 10));
+      const newsGist = String(
+        _vetGistFull
+          ? (c?.newsText || c?.analysis?.content || c?.analysis?.summary || c?.newsSnippet || '')
+          : (c?.analysis?.summary || c?.analysis?.content || c?.newsSnippet || '')
+      ).slice(0, _vetGistChars);
       toStore = collected;
       provUrlsVetted = collected.length; // 🔎 ส่งเข้า vet จริง
       try {
