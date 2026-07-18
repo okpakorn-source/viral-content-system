@@ -199,7 +199,9 @@ export async function getClipWatch() {
     const all = [...newLeads, ...keptLeads];
     const waitingLeads = all.filter((l) =>
       l.clipJobRef && !l.contentReady && (Number(l.sendAttempts) || 0) < MAX_LEAD_SEND_ATTEMPTS);
-    const retired = all.filter((l) => (Number(l.sendAttempts) || 0) >= MAX_LEAD_SEND_ATTEMPTS).length;
+    // 🔧 รีเช็ค 18 ก.ค. 69: นับเฉพาะใบคลิป (มี clipJobRef) — แผงนี้เป็นเรื่องคลิป ใบบทความที่พักจากรอบคัด
+    //   มีป้าย ⛔ ของตัวเองใน LeadCard อยู่แล้ว ไม่ต้องมาโผล่รวมในแผงคลิป (กันเลขเกิน + แผงเด้งทั้งที่ไม่มีคลิป)
+    const retired = all.filter((l) => l.clipJobRef && (Number(l.sendAttempts) || 0) >= MAX_LEAD_SEND_ATTEMPTS).length;
     let oldestMin = 0;
     for (const l of waitingLeads) {
       const t = new Date(l.clipJobRefAt || l.lastClipPendingAt || 0).getTime();
