@@ -275,6 +275,28 @@ function _heroFaceBand() {
 // ★ BS (17 ก.ค.): kill-switch สลับภาพสำรองช่องรอง "จัดไม่ลง" (default ON · '0'=พฤติกรรมปัจจุบันเป๊ะ)
 function _panelBackupSwapOn() { return process.env.MEGA_PANEL_BACKUP_SWAP !== '0'; }
 
+// ★ P-CIRCLE-01 calib (18 ก.ค. — เคสจริง AC-0140/AC-0142): detector บางภาพคืน "กล่องหน้า" ที่กินถึงลำตัว/ชุด
+//   (h/w ≫ 1 เช่น 2.22) ทำให้ธง hard circle_face_overlap เป็น false-positive — วงทับชุด/ลำตัว ไม่ใช่หน้า
+//   helper PURE (ไม่มี side-effect): รับกล่อง normalized + imgW/imgH + ratio → ถ้าสูง(px) เกิน กว้าง(px)×ratio
+//   ให้ "หดขอบล่าง" เหลือสูง = กว้าง×ratio (ยึดขอบบน y1 เดิม — หัวคนอยู่บนสุดของกล่องเสมอ)
+//   ไม่เกิน / วัดไม่ได้ = คืนกล่องเดิมเป๊ะ (identity)
+function _calibFaceHeadBox(box, imgW, imgH, ratio) {
+  const wPx = (box.x2 - box.x1) * imgW;
+  const hPx = (box.y2 - box.y1) * imgH;
+  if (!(wPx > 0) || !(hPx > 0) || !(imgH > 0) || !(ratio > 0)) return box; // fail-open: วัดไม่ได้ = คืนเดิม
+  if (hPx > wPx * ratio) {
+    const newHpx = wPx * ratio; // สูงใหม่ = กว้าง×ratio (เหลือเฉพาะช่วงหัว)
+    return { x1: box.x1, y1: box.y1, x2: box.x2, y2: box.y1 + newHpx / imgH };
+  }
+  return box;
+}
+
+// ratio หัวคน: h/w ปกติ 1.0-1.4 → default 1.4 · parse ผิด/≤0 = 1.4
+function _circleFaceHeadRatio() {
+  const r = Number(process.env.MEGA_CIRCLE_FACE_HEAD_RATIO);
+  return Number.isFinite(r) && r > 0 ? r : 1.4;
+}
+
 export function measureTechRules({ assignments = [], spec = null, faceBoxes = [], cropTrace = [], heroComposerSlotId = null } = {}) {
   const flags = [];
   const bySlot = {}; // slotId → { role, faceSharePct?, headroomPct?, hasFace }
@@ -400,13 +422,19 @@ export function measureTechRules({ assignments = [], spec = null, faceBoxes = []
       // ★ 17 ก.ค. (เคสจริงปกตุ๊ก C1b — วงทับแค่ตัวเสื้อแต่โดนธง hard): แยกความจริง 2 ระดับ
       //   gap < 0 = วง "ทับกล่องหน้าจริง" → circle_face_overlap (hard เหมือนเดิมทุกประการ)
       //   0 ≤ gap < gapThresh = วง "แค่ใกล้หน้า" → circle_face_near (advisory — เตือนพอ ไม่ฆ่างาน)
+      // ★ 18 ก.ค. (calib กล่องหน้ากินลำตัว — AC-0140/AC-0142): default ON · MEGA_CIRCLE_FACE_CALIB='0' = byte-parity เดิม
+      const calibOn = process.env.MEGA_CIRCLE_FACE_CALIB !== '0';
+      const headRatio = _circleFaceHeadRatio();
       let hitOverlap = false;
       let hitNear = false;
       for (const f of cand) {
-        const fL = f.x1 * fb.imgW, fR = f.x2 * fb.imgW, fT = f.y1 * fb.imgH, fB = f.y2 * fb.imgH;
-        const fcx = (fL + fR) / 2, fcy = (fT + fB) / 2;
-        // หน้าต้องถูกเรนเดอร์จริง = ศูนย์กลางตกใน region
+        // ศูนย์กลาง fcx/fcy สำหรับเช็ค "หน้าถูกเรนเดอร์จริง" ใช้กล่องเดิมเสมอ (ไม่ calibrate —
+        //   คุมชุดหน้าที่ถูกพิจารณาให้เหมือนเดิมเป๊ะ เปลี่ยนแค่รูปทรงกล่องตอนวัด gap)
+        const fcx = (f.x1 * fb.imgW + f.x2 * fb.imgW) / 2, fcy = (f.y1 * fb.imgH + f.y2 * fb.imgH) / 2;
         if (fcx < region.left || fcx > region.left + region.width || fcy < region.top || fcy > region.top + region.height) continue;
+        // กล่องสำหรับวัด gap: ON = calibrate หดลำตัว / OFF = กล่องเดิม (byte-parity ทุกอินพุต)
+        const gf = calibOn ? _calibFaceHeadBox(f, fb.imgW, fb.imgH, headRatio) : f;
+        const fL = gf.x1 * fb.imgW, fR = gf.x2 * fb.imgW, fT = gf.y1 * fb.imgH, fB = gf.y2 * fb.imgH;
         // map กล่องหน้า (px ต้นทาง) → พิกัด canvas ผ่านช่อง rect
         const toCx = (px) => slot.x + ((px - region.left) / region.width) * slot.w;
         const toCy = (py) => slot.y + ((py - region.top) / region.height) * slot.h;
