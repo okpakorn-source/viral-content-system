@@ -623,12 +623,15 @@ export async function sendLeadAsText(leadId, { origin, auto = false } = {}) {
     return {
       success: false,
       blockedByTextOnly: true,
+      errorType: 'TEXT_ONLY_MODE', // 🔧 audit #6 (18 ก.ค. 69): ส่งชนิด error กลับ (additive) ให้ผู้เรียกแยกแยะได้
       error: 'ผิดปกติ: สาย text ก็ถูกด่าน TEXT_ONLY บล็อก (เช็คว่ามี URL หลงเหลือในข้อความหรือไม่) — ลีดยังไม่เปลี่ยนสถานะ',
     };
   }
 
   if (!res.ok || !body || body.success !== true) {
-    return { success: false, error: (body && body.error) || `ส่งเข้าคิวไม่สำเร็จ (status ${res.status})` };
+    // 🔧 audit #6 (18 ก.ค. 69): แนบ errorType จากคิว (เช่น NEAR_DUPLICATE/GARBLED_INPUT) — additive ไม่แตะ contract เดิม
+    //   ให้ editorBrain/clipFlush แยก "ชนด่านกันซ้ำชั่วคราว" ออกจากพลาดจริง ไม่นับ attempts มั่ว
+    return { success: false, errorType: (body && body.errorType) || undefined, error: (body && body.error) || `ส่งเข้าคิวไม่สำเร็จ (status ${res.status})` };
   }
 
   try {
@@ -777,7 +780,8 @@ export async function extractAndSend(leadId, { origin, auto = false, clipPollBud
     return { success: true, sent: true, jobId: sendResult.jobId || null, cleanLength };
   }
   if (!sendResult?.success) {
-    return { success: false, step: 'send', error: sendResult?.error || 'ส่งเข้าคิวไม่สำเร็จ' };
+    // 🔧 audit #6 (18 ก.ค. 69): ส่ง errorType ต่อขึ้นไป (additive) — ผู้เรียกใช้แยก NEAR_DUPLICATE ไม่นับพลาด
+    return { success: false, step: 'send', errorType: sendResult?.errorType, error: sendResult?.error || 'ส่งเข้าคิวไม่สำเร็จ' };
   }
 
   return { success: true, sent: true, jobId: sendResult.jobId || null, cleanLength };

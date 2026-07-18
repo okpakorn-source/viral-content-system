@@ -12,6 +12,10 @@
     {
       "path": "/api/mega/tick",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/desk/editor/flush-clips",
+      "schedule": "*/2 * * * *"
     }
   ]
 }

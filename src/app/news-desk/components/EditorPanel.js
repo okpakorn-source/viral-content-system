@@ -30,6 +30,7 @@ import { UI, Btn, Card, Chip, Spinner, apiFetch } from './ui.js';
 const EDITOR = '/api/desk/editor';
 const EXTRACT = '/api/desk/research/extract';
 const DISPATCH = '/api/desk/editor/dispatch';
+const FLUSH = '/api/desk/editor/flush-clips'; // 🎬 18 ก.ค. 69 (audit #2): ตัวปิดวงจรคลิป — cron ทุก 2 นาที + ปุ่มกดเอง
 const STUDY_CONFIRM_TIMEOUT_MS = 5000; // ปุ่มสองจังหวะ — ไม่กดซ้ำใน 5 วิ ให้กลับสถานะเดิม กันกดพลาดเสียเงินซ้ำ
 
 // ป้ายสถานะ/สี รายการในห้องรอ
@@ -88,6 +89,9 @@ export default function EditorPanel({ onToast, onAfterAction }) {
   const [outboxStatsState, setOutboxStatsState] = useState(null);
   const [checkingNow, setCheckingNow] = useState(false);
   const [cancellingId, setCancellingId] = useState('');
+  // 🎬 18 ก.ค. 69 (audit #2/#3): สถานะคลิปรอถอด {waiting, oldestMin, warnOffline, retired} จาก GET /api/desk/editor
+  const [clipWatch, setClipWatch] = useState(null);
+  const [flushingClips, setFlushingClips] = useState(false);
 
   const busy = studying || picking;
 
@@ -102,6 +106,7 @@ export default function EditorPanel({ onToast, onAfterAction }) {
       setLastPick(null);
       setOutbox([]);
       setOutboxStatsState(null);
+      setClipWatch(null);
       return;
     }
     // 🚑 17 ก.ค. 69 (Fable ตรวจรับ): E1 ตอบซ้อนใน res.status — อ่านได้ทั้งสองทรงกัน contract เพี้ยนอีก
@@ -113,6 +118,7 @@ export default function EditorPanel({ onToast, onAfterAction }) {
     setLastPick(res.lastPick || st.lastPick || null);
     setOutbox(Array.isArray(res.outbox) ? res.outbox : []); // 🆕 P1 (17 ก.ค. 69): ห้องรอ
     setOutboxStatsState(res.outboxStats || null);
+    setClipWatch(res.clipWatch || null); // 🎬 18 ก.ค. 69: สถานะคลิปรอถอด
   }, []);
 
   useEffect(() => {
@@ -240,6 +246,21 @@ export default function EditorPanel({ onToast, onAfterAction }) {
     } else {
       onToast?.(res.error || 'เช็คตอนนี้ไม่สำเร็จ', 'err');
     }
+  }
+
+  // 🎬 18 ก.ค. 69 (audit #2): ยิง flush-clips ตรง 1 ครั้ง — เหมือนที่ cron ทุก 2 นาทีทำ แต่ไม่ต้องรอรอบ
+  async function flushClipsNow() {
+    setFlushingClips(true);
+    const res = await apiFetch(FLUSH);
+    setFlushingClips(false);
+    if (!res.success) { onToast?.(res.error || 'เช็คคลิปไม่สำเร็จ', 'err'); return; }
+    if (res.disabled) { onToast?.('ระบบส่งคลิปอัตโนมัติถูกปิดไว้ (DESK_CLIP_FLUSH=0)', 'warn'); return; }
+    const n = Number(res.sentCount) || 0;
+    if (n > 0) onToast?.(`🎬 ส่งคลิปเข้าคิวเขียนแล้ว ${n} ใบ · ยังรอถอด ${res.waiting || 0} ใบ`, 'ok');
+    else if (res.failed) onToast?.(`คลิปมีปัญหา ${res.failed} ใบ — ดูป้าย ⛔ ในคลังลีด · ยังรอถอด ${res.waiting || 0} ใบ`, 'warn');
+    else onToast?.(`ยังไม่มีคลิปถอดเสร็จ — รอถอดอยู่ ${res.waiting || 0} ใบ (ระบบเช็คเองทุก 2 นาที)`, 'ok');
+    await onAfterAction?.();
+    await load();
   }
 
   // ส่งใบเดี่ยวจากผลคัด (โหมด "แค่เสนอ") — ใช้ contract extract/extractAndSend เดิม (มีอยู่แล้ว ไม่ใช่ของ E1)
@@ -462,6 +483,33 @@ export default function EditorPanel({ onToast, onAfterAction }) {
         </div>
       )}
 
+      {/* ── ส่วน 3.5: คลิปรอถอด (🎬 18 ก.ค. 69 audit #2/#3) — flush อัตโนมัติทุก 2 นาที + ปุ่มกดเอง ── */}
+      {clipWatch && (clipWatch.waiting > 0 || clipWatch.retired > 0) && (
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${UI.line}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+            <span style={{ fontSize: 13.5, fontWeight: 800, color: UI.text }}>
+              🎬 คลิปรอเครื่องทีมถอด ({clipWatch.waiting})
+            </span>
+            <Btn variant="subtle" busy={flushingClips} disabled={flushingClips} onClick={flushClipsNow} style={{ minHeight: 32, padding: '5px 10px', fontSize: 12 }}>
+              ↻ เช็ค+ส่งตอนนี้
+            </Btn>
+          </div>
+          <div style={{ fontSize: 12, color: UI.dim, lineHeight: 1.6 }}>
+            ถอดเสร็จระบบส่งเข้าคิวเขียนให้เอง (เช็คทุก 2 นาที){clipWatch.oldestMin > 0 ? ` · ใบเก่าสุดรอมา ${clipWatch.oldestMin} นาที` : ''}
+          </div>
+          {clipWatch.warnOffline && (
+            <div style={{ fontSize: 12.5, color: UI.red, marginTop: 6, lineHeight: 1.6 }}>
+              ⚠️ รอนานผิดปกติ (เกิน 2 ชม.) — เครื่องทีมถอดคลิปอาจออฟไลน์ เช็คเครื่องทีมก่อนโทษระบบ
+            </div>
+          )}
+          {clipWatch.retired > 0 && (
+            <div style={{ fontSize: 12, color: UI.amber, marginTop: 6, lineHeight: 1.6 }}>
+              ⛔ ใบพักอัตโนมัติ {clipWatch.retired} ใบ (พลาดครบเพดาน) — ดูป้ายในคลังลีด กด ⚡ ส่งเองได้
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── ส่วน 4: ห้องรอของ บก. (P1, 17 ก.ค. 69) — โชว์เมื่อมีของ ── */}
       {outboxStatsState && outboxStatsState.total > 0 && (
         <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${UI.line}` }}>
@@ -474,7 +522,7 @@ export default function EditorPanel({ onToast, onAfterAction }) {
             </Btn>
           </div>
           <div style={{ fontSize: 12, color: UI.dim, marginBottom: 10, lineHeight: 1.6 }}>
-            รอคิวพนักงานว่าง — คนเฝ้าประตูเช็คทุก 1 นาที
+            รอคิวพนักงานว่าง — ไม่มีตัวเช็คอัตโนมัติแล้ว (P2 ถอด cron) กด ↻ เช็คตอนนี้ เพื่อปล่อยเอง
           </div>
           <div style={{ display: 'grid', gap: 6 }}>
             {outbox.map((o) => (

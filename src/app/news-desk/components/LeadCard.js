@@ -106,7 +106,20 @@ export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtract
           {isFull ? '🟢 พร้อมทำ (ถอดเนื้อได้เต็ม)' : '🟡 ลีด — ต้องหาแหล่งข่าวต่อ'}
         </Chip>
         {lead.warnMaybeDone && <Chip color={UI.red}>⚠️ อาจเคยทำแล้ว</Chip>}
+        {/* ⛔ 18 ก.ค. 69 (audit #4): ใบที่ระบบพักจากรอบคัดอัตโนมัติ — เดิมหลุดจากรอบคัดเงียบๆ มองไม่เห็น
+            เพดานต้องตรง editorBrain.js: MAX_LEAD_SEND_ATTEMPTS=3 · MAX_CLIP_PENDING_ROUNDS=8 (sync มือ — UI import server module ไม่ได้) */}
+        {(Number(lead.sendAttempts) || 0) >= 3 && (
+          <Chip color={UI.red}>⛔ พักอัตโนมัติ — ส่งพลาดครบ 3 ครั้ง (กด ⚡/🚀 ส่งเองได้)</Chip>
+        )}
+        {(Number(lead.clipPendingRounds) || 0) >= 8 && (Number(lead.sendAttempts) || 0) < 3 && (
+          <Chip color={UI.red}>⛔ พักอัตโนมัติ — รอถอดคลิปนานครบ 8 รอบคัด (flush ยังเช็คให้ทุก 2 นาที)</Chip>
+        )}
       </div>
+
+      {/* ⛔ audit #4: เหตุผลพลาดล่าสุดของใบที่ถูกพัก — ให้เห็นว่าตายเพราะอะไร ไม่ใช่หายเงียบ */}
+      {(Number(lead.sendAttempts) || 0) >= 3 && lead.lastSendError && (
+        <div style={{ fontSize: 12, color: UI.red, lineHeight: 1.5 }}>⚠️ สาเหตุ: {String(lead.lastSendError).slice(0, 140)}</div>
+      )}
 
       {/* เหตุผล 1 บรรทัด */}
       {lead.reason && (

@@ -13,6 +13,7 @@
 import { NextResponse } from 'next/server';
 import { studyDna, editorPick, getBrainStatus, getLatestPickRun } from '@/lib/services/deskV2/editorBrain.js';
 import { listOutbox, outboxStats, cancelOutbox } from '@/lib/services/deskV2/editorOutbox.js';
+import { getClipWatch } from '@/lib/services/deskV2/clipFlush.js'; // 🎬 18 ก.ค. 69: สถานะคลิปรอถอด (audit #2/#3)
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,13 +21,14 @@ export const maxDuration = 600; // studyDna อ่านคลังทั้ง
 
 export async function GET() {
   try {
-    const [status, lastRun, outbox, outboxStatsResult] = await Promise.all([
+    const [status, lastRun, outbox, outboxStatsResult, clipWatch] = await Promise.all([
       getBrainStatus(),
       getLatestPickRun(),
       listOutbox(),
       outboxStats(),
+      getClipWatch(), // 🎬 18 ก.ค. 69: {waiting, oldestMin, warnOffline, retired} — fail-open คืนค่า 0 เสมอ
     ]);
-    return NextResponse.json({ success: true, status, lastRun, outbox, outboxStats: outboxStatsResult });
+    return NextResponse.json({ success: true, status, lastRun, outbox, outboxStats: outboxStatsResult, clipWatch });
   } catch (err) {
     return NextResponse.json({
       success: false,

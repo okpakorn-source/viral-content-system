@@ -51,10 +51,11 @@ const ROUTE_HARD_MS = 600_000;           // = maxDuration ของ /api/desk/ed
 const ROUTE_SAFE_MARGIN_MS = 50_000;     // กันเวลาเขียน run-record + ตอบกลับ
 const PER_LEAD_SEND_BUDGET_MS = 190_000; // งบต่อใบ worst-case (extract+distill+send) หลังตัด insight ให้สั้นลง
 // 🔒 Batch C (audit R1): เพดานส่งอัตโนมัติพลาดต่อลีด — เกินนี้ตัดออกจากรอบคัด (เดิมใบล้มถาวรวนเข้ารอบใหม่เผาค่า AI ไม่จำกัด)
-const MAX_LEAD_SEND_ATTEMPTS = 3;
+//   🎬 18 ก.ค. 69: export ให้ clipFlush.js ใช้เพดานเดียวกัน (ค่าเดียว ห้ามซ้ำสองที่) — UI (LeadCard) hardcode 3/8 ต้อง sync มือ
+export const MAX_LEAD_SEND_ATTEMPTS = 3;
 // 🔒 review r2fix: เพดานแยกของใบคลิปที่ "รอถอด" (pending ไม่ใช่ความล้มเหลว ไม่นับ sendAttempts) — คลิปที่ถอดไม่เสร็จ
 //   สักที (เครื่องทีมดับ/งานตาย) จะได้ไม่วนกินที่นั่งรอบคัดตลอดกาล · ถอดเสร็จเมื่อไหร่ contentReady ก็ส่งผ่านก่อนถึงเพดานเอง
-const MAX_CLIP_PENDING_ROUNDS = 8;
+export const MAX_CLIP_PENDING_ROUNDS = 8;
 
 const CHUNK_SIZE = 80;          // ~80 ใบ/call ตอน studyDna
 const MAX_PICK_CANDIDATES = 60; // เพดานลีดที่ส่งให้ บก. ให้คะแนนต่อรอบ (matchScore สูงสุดก่อน)
@@ -653,9 +654,15 @@ export async function editorPick({ limit = 5, autoSend = false, sendMode = 'imme
             } catch { /* นับไม่ได้ไม่บล็อกงาน */ }
           })();
         } else if (!r?.success && !r?.alreadySent) {
-          p.sendError = r?.error || 'ส่งไม่สำเร็จ';
-          // eslint-disable-next-line no-await-in-loop -- 🔒 Batch C: นับ attempts เฉพาะล้มจริง (เขียนทีละใบ กันชนไฟล์ลีด)
-          await _recordSendFailure(leadsStore, p.id, p.sendError);
+          if (r?.errorType === 'NEAR_DUPLICATE') {
+            // 🔧 audit #6 (18 ก.ค. 69): ชนด่านกันซ้ำ 45 นาทีของคิวเขียน — เรื่องชั่วคราวฝั่งคิว ไม่ใช่ความผิดใบนี้
+            //   ห้ามนับ sendAttempts (เดิมสะสมจนใบดีถูกตัดครบเพดาน) — พ้นกรอบ 45 นาทีแล้วส่งผ่านเอง
+            p.sendError = 'ชนด่านกันซ้ำ 45 นาที (มีงานคล้ายเพิ่งเข้าคิว) — ไม่นับเป็นพลาด รอบหน้าลองใหม่';
+          } else {
+            p.sendError = r?.error || 'ส่งไม่สำเร็จ';
+            // eslint-disable-next-line no-await-in-loop -- 🔒 Batch C: นับ attempts เฉพาะล้มจริง (เขียนทีละใบ กันชนไฟล์ลีด)
+            await _recordSendFailure(leadsStore, p.id, p.sendError);
+          }
         }
         sent.push({ id: p.id, title: lead.title, ...r });
       } catch (e) {
@@ -689,10 +696,15 @@ export async function editorPick({ limit = 5, autoSend = false, sendMode = 'imme
     outboxQueued = enqueueResult.queued;
   }
 
-  // 🔄 Batch A: อัปเดต run-record เป็น 'done' พร้อมผลส่งจริงต่อใบ — update ไม่ได้ (record หาย) ก็ add ใหม่กันหลุด
-  await runsStore.update(runId, () => _buildRunRecord('done')).catch(async () => {
-    await runsStore.add(_buildRunRecord('done')).catch(() => {});
-  });
+  // 🔄 Batch A: อัปเดต run-record เป็น 'done' พร้อมผลส่งจริงต่อใบ
+  //   🔧 audit #7 (18 ก.ค. 69): เลิกใช้ store.update() ตามกฎ repo (ไม่ sync ไฟล์ fallback) — remove-แล้ว-add แทน
+  //   telemetry ล้มห้ามบล็อกงานส่งจริง (เหตุผลเดิม audit R2)
+  try {
+    const doneRecord = _buildRunRecord('done');
+    const runsNow = await runsStore.getAll();
+    if (runsNow.some((r) => r.id === runId)) await runsStore.remove(runId);
+    await runsStore.add(doneRecord);
+  } catch { /* บันทึกสรุปรอบพลาดไม่บล็อกผลลัพธ์รอบคัด */ }
   await _pruneOldPickRuns(runsStore, 50);
 
   return { picks, skipped, sent, needStudy: false, sendMode: safeSendMode, outboxQueued, tookMs: Date.now() - t0 };
