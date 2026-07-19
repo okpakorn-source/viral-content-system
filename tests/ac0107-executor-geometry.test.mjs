@@ -69,21 +69,42 @@ const singleFace = (x1, y1, x2, y2) => ({ x1, y1, x2, y2, count: 1 });
 let passed = 0, failed = 0;
 const test = async (name, fn) => { try { await fn(); passed++; console.log(`ok ${passed + failed} - ${name}`); } catch (e) { failed++; console.log(`not ok ${passed + failed} - ${name}\n  ${String(e && e.stack || e).split('\n').slice(0, 5).join('\n  ')}`); } };
 
-await test('1) REAL small face in a large image ⇒ face-aware upscaleRaw >1.2 while whole-image cover-fit ≤1.2 (the exact AC-0107 coarse-gate blind spot, computed by the real executor)', async () => {
-  const t = await runExec({ metaW: 3000, metaH: 3000, fb: singleFace(0.45, 0.45, 0.55, 0.55) });
+// ★ HERO_CROP_GUARD (19 ก.ค.): these two tests used to prove the RENDERER itself produces an upscale >1.2 in
+//   exactly the AC-0107-class scenario (small face in a large image / a stored-vs-decoded size mismatch) — i.e. the
+//   strict-V2 gate's runtime-bound proof was the ONLY thing catching it, and non-strict (ref/grade-C) paths shipped it
+//   uncaught. HERO_CROP_GUARD closes that gap AT THE RENDERER: when upscale > HERO_STRETCH_MAX(1.2) it now expands the
+//   hero region toward the image edges (face-anchored, superset of the old region ⇒ the face can't fall out) and pulls
+//   upscale back down to ≤1.2 whenever the image affords the room — which both scenarios below do (3000x3000 is huge;
+//   the "trimmed" 900x1125 decode is tight but its whole-image cover-fit is exactly 1.2, so full-image extraction just
+//   reaches the cap). So under the default (guard ON) these are now SAFE. The kill-switch (MEGA_HERO_CROP_GUARD=0)
+//   must still reproduce the historical bug byte-for-byte — asserted below so the regression coverage isn't lost, only
+//   relocated to the OFF path (proving it's this guard, and nothing else, that fixed the ON path).
+await test('1) REAL small face in a large image: HERO_CROP_GUARD (default ON) expands the region toward the image edges and caps the real upscale at ≤1.2 (the image affords room); MEGA_HERO_CROP_GUARD=0 reproduces the historical AC-0107 bug byte-for-byte (upscaleRaw >1.2 while whole-image cover-fit ≤1.2)', async () => {
+  const fb = singleFace(0.45, 0.45, 0.55, 0.55);
+  const t = await runExec({ metaW: 3000, metaH: 3000, fb });
   assert.ok(t, 'hero trace produced');
   assert.strictEqual(typeof t.upscaleRaw, 'number', 'upscaleRaw is a number');
-  assert.ok(t.upscaleRaw > 1.2, `real face-aware upscale >1.2 (got ${t.upscaleRaw})`);
   assert.ok(coverFit(3000, 3000) <= 1.2, `whole-image cover-fit ≤1.2 (${coverFit(3000, 3000).toFixed(3)}) — coarse gate would have passed it`);
+  assert.ok(t.upscaleRaw <= 1.2 + 1e-6, `HERO_CROP_GUARD (default ON) caps the real face-aware upscale at ≤1.2 when the image affords room to expand (got ${t.upscaleRaw})`);
+
+  process.env.MEGA_HERO_CROP_GUARD = '0';
+  const tOff = await runExec({ metaW: 3000, metaH: 3000, fb });
+  delete process.env.MEGA_HERO_CROP_GUARD;
+  assert.ok(tOff.upscaleRaw > 1.2, `kill-switch OFF reproduces the historical AC-0107 bug byte-for-byte (got ${tOff.upscaleRaw}) — proves the guard (not some unrelated change) is what fixed the ON path above`);
 });
 
-await test('2) DECODED-dimension sensitivity + trimmed-mismatch: the SAME normalized face gives a LARGER real upscale on a SMALLER decoded image; a trimmed/smaller decoded image crosses >1.2 (executor keys on decoded dims, not stored)', async () => {
+await test('2) DECODED-dimension sensitivity: HERO_CROP_GUARD keeps the SAME face safe (≤1.2) at both a large and a trimmed/smaller decoded size by expanding toward the image edges when room allows; MEGA_HERO_CROP_GUARD=0 reproduces the historical dimension-sensitive crossing byte-for-byte (safe large ⇒ unsafe trimmed — executor keys on decoded dims, not stored)', async () => {
   const fb = singleFace(0.40, 0.38, 0.60, 0.62); // moderate centred face
   const big = await runExec({ metaW: 2600, metaH: 3250, fb });
   const trimmed = await runExec({ metaW: 900, metaH: 1125, fb });
   assert.ok(big.upscaleRaw > 0 && trimmed.upscaleRaw > 0, 'both measured');
-  assert.ok(trimmed.upscaleRaw > big.upscaleRaw, `smaller decoded ⇒ larger upscale (${trimmed.upscaleRaw} > ${big.upscaleRaw}) — proves decoded-dim sensitivity`);
-  assert.ok(big.upscaleRaw <= 1.2 && trimmed.upscaleRaw > 1.2, `the SAME face is safe at the large decoded dim (${big.upscaleRaw}) but UNSAFE once trimmed smaller (${trimmed.upscaleRaw}) — a stored-vs-decoded mismatch the runtime proof catches`);
+  assert.ok(big.upscaleRaw <= 1.2 + 1e-6, `large decoded dim stays safe (${big.upscaleRaw})`);
+  assert.ok(trimmed.upscaleRaw <= 1.2 + 1e-6, `HERO_CROP_GUARD expands the trimmed decode toward the image edges (up to the whole image, whose cover-fit is exactly 1.2 here) and reaches the ≤1.2 cap (got ${trimmed.upscaleRaw})`);
+
+  process.env.MEGA_HERO_CROP_GUARD = '0';
+  const trimmedOff = await runExec({ metaW: 900, metaH: 1125, fb });
+  delete process.env.MEGA_HERO_CROP_GUARD;
+  assert.ok(trimmedOff.upscaleRaw > 1.2, `kill-switch OFF reproduces the historical stored-vs-decoded mismatch byte-for-byte (got ${trimmedOff.upscaleRaw}) — proves the underlying AC-0107 sensitivity is unchanged, only pre-emptively fixed when the guard is ON`);
 });
 
 await test('3) TRANSFORM-driven: a watermark/text region overlapping the crop makes the real dodge SHRINK the region ⇒ upscaleRaw >= the no-dodge value (a clean-looking crop can be pushed up by a render transform)', async () => {

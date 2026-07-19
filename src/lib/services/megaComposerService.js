@@ -272,6 +272,10 @@ function _heroFaceBand() {
   return TECH_RULES.HERO_FACE_SHARE;
 }
 
+// ★ HERO_CROP_GUARD (19 ก.ค., AC-0160) — mirror ของ coverExecutorService.js _heroCropGuardOn(): env เดียวกัน
+//   MEGA_HERO_CROP_GUARD='0' → ปิดทั้งคู่พร้อมกัน (ยก pixel-verify threshold ด้านล่างคืนค่าเดิม 0.20 ด้วย)
+function _heroCropGuardOnComposer() { return process.env.MEGA_HERO_CROP_GUARD !== '0'; }
+
 // ★ BS (17 ก.ค.): kill-switch สลับภาพสำรองช่องรอง "จัดไม่ลง" (default ON · '0'=พฤติกรรมปัจจุบันเป๊ะ)
 function _panelBackupSwapOn() { return process.env.MEGA_PANEL_BACKUP_SWAP !== '0'; }
 
@@ -1420,7 +1424,14 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
     used.add(mi);
     const mIdx = spec.slots.indexOf(mainSlot);
     const hs = faceSpec(mIdx, 'hero');
-    console.log(`[MegaComposer] 🔒 hero #${mi} — ${bigFace(faceBoxes[mi]) ? 'หน้าเด่น' : '⚠️ พูลไม่มีหน้าเด่น ใช้เท่าที่มี'} · หน้ากิน ${hs.pct}% (${hs.pos})${loaded[mi].clean === false ? ' (ยอมภาพไม่สะอาด)' : ''}`);
+    // ★ ต่อสาย _heroFaceCrop (นโยบาย C, S6→slotPlan): S7 ตอนนี้พก field นี้มาถึง loaded[mi] แล้ว (ผ่าน slotPlan
+    //   row ตรง — ดู megaAdapters.js s7_cover) — ติดเข้า spec.slots[hero] object ตรงๆ (mutate เหมือน s._vis/
+    //   s._circleZone ด้านล่างในไฟล์นี้) ให้ renderRectTile (coverExecutorService.js) อ่าน slot._heroFaceCrop ได้จริง
+    //   ไม่มี field (S6 ไม่ได้แนบ/สวิตช์ MEGA_HERO_SINGLE ปิด) = ลบคีย์ทิ้งเสมอ (สำคัญ: spec มาจาก V3_TEMPLATES ที่
+    //   เป็นค่าคงที่ระดับโมดูล/reuse ข้ามงาน — ถ้าไม่ลบ ครอปของงานก่อนหน้าจะค้าง "รั่ว" ไปติดปกของงานถัดไปที่ไม่มีครอปนี้จริง)
+    if (loaded[mi]?._heroFaceCrop) mainSlot._heroFaceCrop = loaded[mi]._heroFaceCrop;
+    else delete mainSlot._heroFaceCrop;
+    console.log(`[MegaComposer] 🔒 hero #${mi} — ${bigFace(faceBoxes[mi]) ? 'หน้าเด่น' : '⚠️ พูลไม่มีหน้าเด่น ใช้เท่าที่มี'} · หน้ากิน ${hs.pct}% (${hs.pos})${loaded[mi].clean === false ? ' (ยอมภาพไม่สะอาด)' : ''}${mainSlot._heroFaceCrop ? ' · 👤✂️ ใช้ _heroFaceCrop จาก S6' : ''}`);
     assignments.push({ slotId: mainSlot.id, imageIndex: mi, crop: faceBoxes[mi] ? cropFromFace(faceBoxes[mi], hs.pct, hs.pos, mainSlot.w / mainSlot.h) : { x: 0, y: 0, w: 1, h: 1 }, why: 'hero หน้าเด่น (locked)' });
   }
   // ★ เฟส 2.3 (9 ก.ค. — หลักฐานใบ 14:24 ผู้ใช้ชี้ "วงกลม=ต๊อด คนละคนกับ hero คือใบที่ดี" vs 14:35 วงซ้ำนุ่น=พัง):
@@ -1718,7 +1729,12 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
       const fd = await detectFaces(tile);
       const th = fd?.imageHeight || 1;
       const tw = fd?.imageWidth || 1;
-      const _big = (fd?.faces || []).filter((f) => f.height / th >= 0.20);
+      // ★ 19 ก.ค. (AC-0160): เดิม 0.20 หลวมกว่า band-min จริง (HERO_FACE_SHARE[0]=30%) มาก — ปล่อยหน้าเด่น
+      //   20-29% ของช่องผ่านด่านเงียบๆ ทั้งที่หน้าเล็กเกิน band แล้ว (เคส hero ครอปแล้วหน้าเล็ก+backdrop ท่วม)
+      //   ยกเกณฑ์ขึ้นใกล้ band-min แต่ผ่อนไว้กัน over-reject (detector คนละตัวจาก fb ตอนครอปคลาดกันได้ ±2-4pt)
+      //   MEGA_HERO_CROP_GUARD='0' → threshold คืนเดิม 0.20 เป๊ะ (byte-parity)
+      const _heroVerifyMinFrac = _heroCropGuardOnComposer() ? Math.max(0.05, (_heroFaceBand()[0] / 100) - 0.04) : 0.20;
+      const _big = (fd?.faces || []).filter((f) => f.height / th >= _heroVerifyMinFrac);
       heroOk = _big.length > 0;
       // ★ เฟส 4.5 (เคสผู้ใช้ 15:11 — hero หน้าหลุดขอบซ้าย): หน้าใหญ่สุดต้อง "ครบ ไม่โดนขอบตัด"
       //   เกณฑ์: กล่องหน้าชนขอบ + จุดกลางหน้าเบี้ยวออกจากกลางเฟรมชัด = โดนตัดจริง
@@ -1734,6 +1750,17 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
         if (heroOk && cyF > 0.68) { heroOk = false; console.log('[MegaComposer] 🛡️ hero หน้าอยู่ล่างเฟรมผิดสูตร (คาดโซนบน) → ไม่ผ่านด่าน'); }
       }
     } catch { heroOk = true; qcFlags.push('hero_gate_error'); /* ด่านตรวจล้มเอง = ไม่บล็อกงาน (fail-open คงเดิม) แต่ติดธงให้ QC เห็น — ห้ามเงียบ */ }
+    // ★ ต่อสาย heroCropNeedsBackup (HERO_CROP_GUARD 3/3 — coverExecutorService.js: ยืดเกิน HERO_STRETCH_MAX แล้วขยาย
+    //   region เข้าหาขอบภาพไม่พอ เช่น ภาพเล็ก/หน้าชิดขอบ) — เดิม comment ที่ BS block ("hero มีด่านของตัวเองแล้ว")
+    //   เป็นเท็จ: ด่าน pixel-verify ด้านบนตรวจแค่ "มีหน้าเด่น/ไม่โดนตัดขอบ" ไม่รู้จักธงนี้เลย → ผูกเข้าด่านเดียวกัน
+    //   ที่นี่ ธงติด = ไม่ผ่านด่าน (ลองภาพสำรองด้วยกลไกเดิม/bounded ≤2 รอบ, ไม่มีตัวเลือกอื่น = hero_unverified_kept)
+    if (heroOk) {
+      const _htr = traceSink.find((t) => t && String(t.slot) === String(mainSlotSpec.id));
+      if (_htr && _htr.heroCropNeedsBackup === true) {
+        heroOk = false;
+        console.log('[MegaComposer] 🛡️ hero ครอปยืดเกินเพดานแก้ไม่ได้ (heroCropNeedsBackup) → ไม่ผ่านด่าน');
+      }
+    }
     if (heroOk) { if (attempt > 0) console.log(`[MegaComposer] 🛡️ hero ผ่านด่านบังคับ (รอบ ${attempt + 1})`); break; }
     heroBanned.add(mainAssign.imageIndex);
     let ni = -1, nBest = 0;
@@ -1748,6 +1775,10 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
     used.delete(mainAssign.imageIndex);
     used.add(ni);
     mainAssign.imageIndex = ni;
+    // ★ crop ของช่อง hero ผูกกับ "ใบที่ mi ตอนเลือกแรก" — สลับใบแล้วต้องเปลี่ยน/ล้าง _heroFaceCrop ตามใบใหม่ด้วย
+    //   (ไม่งั้น renderRectTile จะเอาพิกัดครอปของใบเก่าไปตัดใบใหม่ผิดตำแหน่งทันที)
+    if (loaded[ni]?._heroFaceCrop) mainSlotSpec._heroFaceCrop = loaded[ni]._heroFaceCrop;
+    else delete mainSlotSpec._heroFaceCrop;
     const hsw = faceSpec(spec.slots.indexOf(mainSlotSpec), 'hero');
     mainAssign.crop = faceBoxes[ni] ? cropFromFace(faceBoxes[ni], hsw.pct, hsw.pos, mainSlotSpec.w / mainSlotSpec.h) : { x: 0, y: 0, w: 1, h: 1 };
   }

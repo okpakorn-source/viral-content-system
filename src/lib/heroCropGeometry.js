@@ -230,4 +230,113 @@ export function zoomHeroRegionForFaceShare({
   return { region: changed ? out : region, changed, faceSharePct: +(newShare * 100).toFixed(1), reason: changed ? 'zoomed' : 'unchanged' };
 }
 
-export default Object.freeze({ HERO_CROP, FACE_PROM_CEILING, HERO_PROMINENCE, HERO_STRETCH_MAX, heroCropRegion, heroCropUpscale, isHeroCropSafe, zoomHeroRegionForFaceShare });
+// ============================================================
+// HERO_CROP_GUARD (19 ก.ค.) — ★ฟังก์ชันนี้ RENDERER เรียกจริง★ (เหมือน zoomHeroRegionForFaceShare ข้างบน)
+// ------------------------------------------------------------
+// safety net ชั้นเรนเดอร์ กันปก hero "ภาพคู่โผล่ + ยืดเกิน + แหว่ง" — สืบแล้วว่าเกิดจาก 3 จุดในสาขา
+// group-hero-largest ของ coverExecutorService (2 ฟังก์ชันด้านล่างนี้แก้จุดที่ 2 และ 3; จุดที่ 1 คือใช้
+// slot._heroFaceCrop ตรงๆ ถ้ามี — ไม่มีเรขาคณิตแยกเพราะแค่ fitCropToSlotAspect เดิม; จุดที่ 4 คือ ceilingH ของ
+// _tightenForProminence เปลี่ยน /1.6 → /1.2 เฉพาะ kind='hero' — เป็น one-liner ไม่แยกฟังก์ชัน)
+// ทั้งคู่ใต้ MEGA_HERO_CROP_GUARD (default ON · '0' = ไม่ถูกเรียกเลย = พฤติกรรมเดิมเป๊ะ) ที่ตัวเรียก (renderer)
+// ============================================================
+
+// ── (2) แก้ "shift-only หนีคนข้างไม่พ้น" ของสาขา group-hero-largest ──
+// เดิม: เจอหน้า 2 คนเดียว(ผู้ใหญ่สุด) → ครอปหน้าใหญ่สุดเดี่ยว แล้ว "เลื่อนแนวนอน" ให้พ้นคนข้าง (ไม่หด/ไม่ปฏิเสธ)
+// ปัญหา: คู่ยืนชิด → เลื่อนหักล้างกันเอง (rr>rMax ดันซ้าย, ผลลัพธ์ rl<rMin ดันขวากลับ) → clamp ท้ายที่สุด
+//   ดึงกลับไปที่เดิม = คนที่ 2 ยังค้างในกรอบ + ตัวเอกอาจชิดขอบ = แหว่ง
+// แก้: หลัง caller เลื่อน (shift) แล้ว — เรียกฟังก์ชันนี้ "ซ่อมต่อ" (ไม่คำนวณ region จากศูนย์):
+//   ถ้ากรอบ (rawScale, px) ยังคาบกล่องหน้าคนอื่นอยู่ → หดความกว้างให้ "จบก่อนหน้าคนข้าง" (เท่าที่ safe-zone
+//   [rMin,rMax] ให้ — rMin/rMax เป็นค่าเดียวกับที่ caller ใช้เลื่อน) แต่ไม่หดต่ำกว่ากล่องหัวตัวเอก (headW, ±20%
+//   ของกว้างหน้า — กันหดจนหน้าตัวเอกเองหลุด) → re-fit aspect ช่องด้วยการ "ตัดสูงจากล่าง" (top เดิม — หน้าที่จัด
+//   ไว้แล้วไม่ขยับ) → การ์ด: กล่องหัวตัวเอกต้องอยู่ในกรอบใหม่ครบ (headInFrame) ไม่งั้นไม่ใช้ผลหด (คง region เดิม)
+// needsBackup=true เมื่อ: (a) หดแล้วหน้าตัวเอกยังหลุดกรอบ (safe-zone แคบกว่ากล่องหัวตัวเอกเอง) หรือ
+//   (b) หดสำเร็จ(หน้าตัวเอกอยู่ครบ) แต่คนที่ 2 ยังไม่พ้นกรอบ 100% (safe-zone ไม่พอทั้งคู่) — สัญญาณให้ผู้เรียก
+//   (composer) ลองภาพสำรอง/HOLD แทนที่จะปล่อยภาพคู่ขึ้นปกเงียบๆ
+// PURE: รับพิกัดหน้า normalized (0..1) + region/slot ปัจจุบันเป็น px — ไม่ import/IO/env/Date/random
+// @param region  {left,top,width,height} px — region ปัจจุบัน (หลัง shift-only ของ caller)
+// @param largestFace  {x1,y1,x2,y2} normalized — หน้าตัวเอก (largest) ที่ region ยึดอยู่
+// @param otherFaces  [{x1,y1,x2,y2}] normalized — หน้าอื่นทั้งหมด (ไม่รวม largestFace)
+// @param slotW,slotH  px — ขนาดช่องจริง (คง aspect ตอน re-fit)
+// @param imgW,imgH  px — ขนาดภาพต้นฉบับที่ decode จริง
+// @param rMin,rMax  px — safe-zone แนวนอนที่ caller คำนวณไว้แล้ว (ระยะจากหน้าอื่นที่ไม่ทับ)
+// @returns {{ region, changed, needsBackup }} — changed=false ⇒ คืน region เดิมเป๊ะ (ไม่มีการหด)
+export function resolveHeroNeighborOverlap({ region, largestFace, otherFaces, slotW, slotH, imgW, imgH, rMin, rMax } = {}) {
+  const _keep = () => ({ region, changed: false, needsBackup: false });
+  try {
+    if (!region || !largestFace || !Array.isArray(otherFaces) || !(slotW > 0 && slotH > 0 && imgW > 0 && imgH > 0)) return _keep();
+    const stillOverlaps = otherFaces.some((f) => {
+      const fL = f.x1 * imgW, fR = f.x2 * imgW;
+      return fR > region.left && fL < region.left + region.width;
+    });
+    if (!stillOverlaps) return _keep();
+    const lcx = ((largestFace.x1 + largestFace.x2) / 2) * imgW;
+    const safeW = Math.max(0, (rMax ?? imgW) - (rMin ?? 0));
+    const lfw = largestFace.x2 - largestFace.x1;
+    const headL = (largestFace.x1 - lfw * 0.20) * imgW, headR = (largestFace.x2 + lfw * 0.20) * imgW;
+    const headW = Math.max(1, headR - headL);
+    const nW = Math.max(8, Math.round(Math.min(region.width, Math.max(safeW, headW))));
+    const nH = Math.max(8, Math.round(Math.min(imgH - region.top, nW / (slotW / slotH)))); // re-fit aspect: ตัดสูงจากล่าง (top เดิม)
+    const rMinN = rMin ?? 0, rMaxN = rMax ?? imgW;
+    let nl = Math.round(lcx - nW / 2);
+    nl = Math.min(Math.max(nl, rMinN), rMaxN - nW);
+    nl = Math.min(Math.max(nl, 0), imgW - nW);
+    const shrunk = { left: nl, top: region.top, width: nW, height: nH };
+    const headInFrame = headL >= shrunk.left - 1 && headR <= shrunk.left + shrunk.width + 1;
+    const neighborClear = otherFaces.every((f) => {
+      const fL = f.x1 * imgW, fR = f.x2 * imgW;
+      return !(fR > shrunk.left && fL < shrunk.left + shrunk.width);
+    });
+    if (headInFrame) return { region: shrunk, changed: true, needsBackup: !neighborClear };
+    return { region, changed: false, needsBackup: true }; // หดแล้วหน้าตัวเอกเองหลุดกรอบ — ยอมแพ้ ไม่ใช้ผลหด
+  } catch { return _keep(); /* ล้ม = ใช้ region เดิม (ห้ามกระทบการประกอบ) */ }
+}
+
+// ── (3) cap ยืด hero ≤ HERO_STRETCH_MAX หลังวัด upscale จริงที่ region จะให้ ──
+// เดิม: region เล็กเกิน → resize(fill) ยืดตามจริง ไม่มี clamp (แค่วัด+log) — ด่าน hard >1.2x มีแค่เส้น strict-V2
+//   เท่านั้น (เส้น ref/grade-C ข้ามด่าน ปล่อยยืดขึ้นปกจริง)
+// แก้: ขยาย region "เข้าหาขอบภาพ" (คง aspect ช่อง) จนกว่า upscale จะ ≤ cap — ขยายรอบ "center เดิม" ของ region
+//   (หน้าที่ caller จัดไว้แล้วอยู่ในกรอบเดิม ⇒ กรอบใหม่เป็น superset ของกรอบเดิมเสมอ = หน้าไม่มีทางหลุด) โดยแจก
+//   ส่วนขยายซ้าย/ขวา(บน/ล่าง) ตามพื้นที่ว่างจริงของภาพ (เกินฝั่งไหนไหว ดันไปอีกฝั่งชดเชย)
+//   ดึงได้ไม่ถึง cap (ภาพเล็ก/หน้าชิดขอบจนไม่มีที่ขยาย) → reached:false (caller ต้องตั้งธง needsBackup เอง — ไม่
+//   ปล่อยยืดเงียบๆ) — คืน region ที่ขยายเต็มที่เท่าที่ทำได้เสมอ (ไม่ใช่ปฏิเสธเฉยๆ)
+// PURE: ไม่ import/IO/env/Date/random
+// @param region {left,top,width,height} px | @param slotW,slotH px | @param imgW,imgH px | @param cap เพดานยืด (เช่น 1.2)
+// @returns {{ region, changed, reached, upscale }}
+export function expandHeroRegionForStretchCap({ region, slotW, slotH, imgW, imgH, cap = HERO_STRETCH_MAX } = {}) {
+  const _keep = () => ({ region, changed: false, reached: false });
+  try {
+    if (!region || !(slotW > 0 && slotH > 0 && imgW > 0 && imgH > 0 && cap > 0)) return _keep();
+    const slotAspect = slotW / slotH;
+    let nW = Math.min(imgW, Math.max(region.width, slotW / cap));
+    let nH = nW / slotAspect;
+    if (nH > imgH) { nH = imgH; nW = Math.min(imgW, nH * slotAspect); }
+    nW = Math.max(region.width, nW);
+    nH = Math.max(region.height, nH);
+    if (nW <= region.width + 0.5 && nH <= region.height + 0.5) return _keep();
+    const dW = nW - region.width, dH = nH - region.height;
+    const marginL = region.left, marginR = Math.max(0, imgW - (region.left + region.width));
+    const marginT = region.top, marginB = Math.max(0, imgH - (region.top + region.height));
+    // แจกส่วนขยายซ้าย/ขวา(บน/ล่าง) ตามพื้นที่ว่างจริง — เกินฝั่งไหนไหว ดันไปอีกฝั่ง (region เดิมยังอยู่ในใหม่เสมอ)
+    const rightGrow0 = Math.min(dW / 2, marginR);
+    const leftGrow = Math.min(dW - rightGrow0, marginL);
+    const rightGrow = Math.min(dW - leftGrow, marginR);
+    const botGrow0 = Math.min(dH / 2, marginB);
+    const topGrow = Math.min(dH - botGrow0, marginT);
+    const botGrow = Math.min(dH - topGrow, marginB);
+    const rW = Math.min(imgW, Math.round(region.width + leftGrow + rightGrow));
+    const rH = Math.min(imgH, Math.round(region.height + topGrow + botGrow));
+    const rL = Math.round(region.left - leftGrow);
+    const rT = Math.round(region.top - topGrow);
+    const clL = Math.min(Math.max(rL, 0), Math.max(0, imgW - rW));
+    const clT = Math.min(Math.max(rT, 0), Math.max(0, imgH - rH));
+    const newRegion = { left: clL, top: clT, width: rW, height: rH };
+    const newUp = Math.max(slotW / Math.max(1, newRegion.width), slotH / Math.max(1, newRegion.height));
+    return { region: newRegion, changed: true, reached: newUp <= cap + 1e-6, upscale: newUp };
+  } catch { return _keep(); /* ล้ม = ใช้ region เดิม (ห้ามกระทบการประกอบ) */ }
+}
+
+export default Object.freeze({
+  HERO_CROP, FACE_PROM_CEILING, HERO_PROMINENCE, HERO_STRETCH_MAX,
+  heroCropRegion, heroCropUpscale, isHeroCropSafe, zoomHeroRegionForFaceShare,
+  resolveHeroNeighborOverlap, expandHeroRegionForStretchCap,
+});

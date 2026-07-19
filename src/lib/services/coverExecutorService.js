@@ -14,10 +14,13 @@ import sharp from 'sharp';
 //   region math is NOT shared — faceRegionForSlot below is the renderer's own; heroCropGeometry only REPLICATES it as a
 //   conservative estimator (a filter input, never authoritative). The authoritative ≤1.2× proof is the runtime-bound
 //   check in composeAndVerify, measured on THIS renderer's actual output.
-import { HERO_CROP, FACE_PROM_CEILING, HERO_PROMINENCE, zoomHeroRegionForFaceShare } from '@/lib/heroCropGeometry';
+import {
+  HERO_CROP, FACE_PROM_CEILING, HERO_PROMINENCE, zoomHeroRegionForFaceShare,
+  resolveHeroNeighborOverlap, expandHeroRegionForStretchCap,
+} from '@/lib/heroCropGeometry';
 // ★ แบตช์ C (17 ก.ค.): เรขาคณิตครอปช่องรอง (PURE) + band จาก config เดียว — เทสได้โดดที่ tests/panel-crop-geometry.test.mjs
 import { refineRegionForFace, refineRegionForFaces, biasRegionFromCircleZone, facesIntersectingRegion } from '@/lib/panelCropGeometry';
-import { TECH_RULES } from '@/lib/imageQualityConfig';
+import { TECH_RULES, HERO_STRETCH_MAX } from '@/lib/imageQualityConfig';
 
 // Template v3 — "viral-safe": ฐานตารางสะอาด (พิสูจน์จาก CASE-031/037) + องค์ประกอบไวรัล
 // (วงกลมขอบขาว + กรอบเหลือง) แบบทับเฉพาะมุมที่ควบคุมได้ — ไม่มีช่องลอยกลางผืนแบบ template_5
@@ -395,6 +398,18 @@ function _heroFaceBandExec() {
   }
   return TECH_RULES.HERO_FACE_SHARE;
 }
+// ★ HERO_CROP_GUARD (19 ก.ค. — safety net ชั้นเรนเดอร์): กันปก hero "ภาพคู่โผล่ + ยืดเกิน + แหว่ง" 3 จุด
+//   (1) slot._heroFaceCrop ที่ producer แนบมา → ใช้ตรง ข้าม group-hero-largest (2) shift-only หนีคนข้างไม่พ้น
+//   → หด+การ์ด (3) cap ยืด hero ≤HERO_STRETCH_MAX หลังวัด upscale จริง — ดูจุดใช้งานแต่ละจุดสำหรับรายละเอียด
+//   default ON · env MEGA_HERO_CROP_GUARD='0' → พฤติกรรมเดิมเป๊ะทุก byte (kill-switch)
+function _heroCropGuardOn() { return process.env.MEGA_HERO_CROP_GUARD !== '0'; }
+// normalized {x,y,w,h} ที่ valid สำหรับใช้เป็นครอปตรงๆ (producer แนบมา) — พังรูปแบบ/นอกขอบ = ไม่ใช้ (fail-safe)
+function _validHeroFaceCropBox(b) {
+  return !!(b && typeof b === 'object'
+    && Number.isFinite(b.x) && Number.isFinite(b.y) && Number.isFinite(b.w) && Number.isFinite(b.h)
+    && b.w > 0.001 && b.h > 0.001
+    && b.x >= -0.001 && b.y >= -0.001 && (b.x + b.w) <= 1.001 && (b.y + b.h) <= 1.001);
+}
 // band faceShare รายบทบาทช่อง (อ่านจาก imageQualityConfig — mirror measureTechRules.roleOf)
 function _panelBandForSlot(slot) {
   const id = String(slot?.id || '');
@@ -442,15 +457,22 @@ function _facesInRegion(fb, region, imgW, imgH) {
 }
 
 /** ★ เฟส 6B.3/6B.4: ซูมครอปแน่นให้หน้า/คนเด่นถึงเป้า (เคารพเพดานยืด 1.6 + ห้ามตัดหัว/คน + ห้ามขยายเกินกรอบเดิม)
- *  คืน { region, meta } — meta.tightened=ซูมจริงไหม · meta.small=ถึงเพดานแล้วยังเล็ก · หรือ null ถ้าไม่เข้าเงื่อนไข */
-function _tightenForProminence(region, fb, slot, imgW, imgH) {
+ *  คืน { region, meta } — meta.tightened=ซูมจริงไหม · meta.small=ถึงเพดานแล้วยังเล็ก · หรือ null ถ้าไม่เข้าเงื่อนไข
+ *  ★ HERO_CROP_GUARD (19 ก.ค.): export เพิ่ม (แค่เปลี่ยน visibility ไม่แตะ logic/ชื่อ/พฤติกรรม) — ให้เทสยูนิตตรง
+ *  ceilingDivisor ของ kind='hero' ได้โดยไม่ต้องผ่านทั้ง pipeline (จุดที่ 3 ของ HERO_CROP_GUARD อาจกลบผลจุดที่ 4
+ *  ถ้าเทสผ่านแค่ executeCover เต็มสาย — ดู tests/hero-crop-guard.test.mjs) */
+export function _tightenForProminence(region, fb, slot, imgW, imgH) {
   try {
     if (!region || !fb || !(fb.x2 > fb.x1)) return null;
     const kind = _promKind(slot);
     const cfg = FACE_PROMINENCE[kind];
     if (!cfg) return null;
     const aspect = slot.w / Math.max(1, slot.h); // วงกลม = 1
-    const ceilingH = slot.h / FACE_PROM_CEILING;  // region เตี้ยสุดที่ยอม (ยืดไม่เกิน 1.6)
+    // ★ HERO_CROP_GUARD 4/4: hero เพดานยืดจริงคือ HERO_STRETCH_MAX (1.2 — QC hard gate) ไม่ใช่ 1.6 ของช่องอื่น
+    //   floor เดิม (/1.6) เคยยอมให้ tighten หด region จนยืดเกิน 1.2 ได้ (เฉพาะ hero) → ใช้ /1.2 กันหน้าเด่นแลกยืดแตก
+    //   ช่องอื่น (secondary/circle/context) ค่าเดิม /1.6 ไม่ถูกแตะ · '0' = พฤติกรรมเดิมเป๊ะทุก byte
+    const ceilingDivisor = (_heroCropGuardOn() && kind === 'hero') ? HERO_STRETCH_MAX : FACE_PROM_CEILING;
+    const ceilingH = slot.h / ceilingDivisor;  // region เตี้ยสุดที่ยอม (ยืดไม่เกินเพดานตามชนิดช่อง)
 
     // กล่องเนื้อหา: face mode = หน้าใหญ่สุด(+เผื่อผม/คาง) · context = peopleBox รวมทุกคน(+ลำตัว)
     const faces = (fb.allFaces && fb.allFaces.length) ? fb.allFaces
@@ -737,6 +759,7 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
   const imgW = meta.width || 1, imgH = meta.height || 1;
   let region;
   let _br = ''; // เฟส 0.1: ชื่อสาขาครอปสำหรับ trace
+  let _needHeroBackup = false; // ★ HERO_CROP_GUARD: ธงให้ composer สลับภาพสำรอง/HOLD (เลียน _needRefineBackup/_needCircleBackup)
   if (crop && crop._final) {
     // ★ rev.FINAL: Final Cropper เห็นภาพจริงแล้วตัดสิน — เชื่อ 100% ห้ามชั้นไหนคำนวณทับ
     region = fitCropInsideAspect(crop, imgW, imgH, slot.w / slot.h);
@@ -779,6 +802,11 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
       //   (กันตัดคนที่ 2 เช่น พ่อ-ลูกสาว/คู่รัก — เดิมครอปหน้าใหญ่สุดอย่างเดียว ทำคนที่ 2 หลุดเฟรม)
       region = groupRegionForSlot([largest, _second], imgW, imgH, slot.w / slot.h);
       _br = 'circle-pair-group';
+    } else if (isHeroSlot && _heroCropGuardOn() && _validHeroFaceCropBox(slot._heroFaceCrop)) {
+      // ★ HERO_CROP_GUARD 1/3: producer (megaAdapters) แนบกรอบครอบ "หน้า hero เดี่ยว" ที่คำนวณแล้ว
+      //   (normalized {x,y,w,h}) → ใช้ตรงๆ ข้ามสาขา group-hero-largest ทั้งหมด (ไม่ต้องหาใครใหญ่สุด/หนีคนข้างซ้ำ)
+      region = fitCropToSlotAspect(slot._heroFaceCrop, imgW, imgH, slot.w / slot.h);
+      _br = 'hero-face-crop-explicit';
     } else if (isHeroSlot) {
       // hero = หน้าเดี่ยวใหญ่สุดเด่น + เลื่อนพ้นคนข้างเคียง (บทเรียน CASE-119)
       region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, Math.min(0.96, faceFrac + 0.12), faceTopAt, Math.min(0.90, maxFaceHFrac + 0.08), minFaceHFrac || 0);
@@ -795,6 +823,16 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
       if (rl < rMin) { const sh = rMin - rl; rl += sh; rr += sh; }
       region.left = Math.round(Math.max(0, Math.min(rl, imgW - region.width)));
       _br = 'group-hero-largest';
+      // ★ HERO_CROP_GUARD 2/3: shift-only ข้างบน "หนีคนข้างไม่พ้น" เมื่อคู่ยืนชิด (เลื่อนหักล้างกัน → clamp กลับ
+      //   → คนที่ 2 ยังค้างในกรอบ + ตัวเอกอาจชิดขอบ = แหว่ง) — "ซ่อมต่อ" ด้วย pure geometry เดียวกับ HZ
+      //   (resolveHeroNeighborOverlap ใน heroCropGeometry.js): กรอบยังคาบหน้าคนที่ 2 → หดจบก่อนหน้าคนข้าง
+      //   (คงหน้าตัวเอกกลาง) + การ์ดหน้าตัวเอกอยู่ในกรอบครบ — หดแล้วยังมีคนที่ 2/ตัวเอกหลุด → _needHeroBackup
+      if (_heroCropGuardOn()) {
+        const _others = fb.allFaces.filter((f) => f !== largest);
+        const _res = resolveHeroNeighborOverlap({ region, largestFace: largest, otherFaces: _others, slotW: slot.w, slotH: slot.h, imgW, imgH, rMin, rMax });
+        if (_res.changed) { region = _res.region; _br = 'group-hero-largest+shrink'; }
+        if (_res.needsBackup) _needHeroBackup = true;
+      }
     } else if (isStorySlot(slot)) {
       // ★ เฟส 2.2: ช่อง story หลายคน → คลุมทุกคน+ของ เสมอ — เลิก spread-cut ที่ "ตัดคนทิ้งโดยตั้งใจ"
       //   (หลักฐานใบ 14:24: ฉากมอบเช็คเก็บกว้างทั้งป้าย+สองคน = ใบที่ผู้ใช้ชี้ว่าดี)
@@ -939,8 +977,34 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
   //   decision must NEVER read the rounded display value (1.201–1.204 would round to 1.20 and wrongly pass). The
   //   rounded `upscale` stays for advisory traceQcFlags/logs only.
   if (_tr) { _tr.upscaleRaw = _upR; _tr.upscale = +_upR.toFixed(2); }
-  if (_upR > 1.2) console.log(`[CoverV3] 🔎 ${slot.id} ยืด ${_upR.toFixed(2)}x (region ${region.width}x${region.height} → ${slot.w}x${slot.h})`);
-  const _doSharpen = _upR < 1; // sharpen เฉพาะเคสย่อ — ขยายแล้ว sharpen = ขยาย artifact (เฟส 3.3)
+  // ★ HERO_CROP_GUARD 3/3: hero เท่านั้น — ยืดเกิน HERO_STRETCH_MAX(1.2) → ขยาย region เข้าหาขอบภาพ (face-anchored,
+  //   คง aspect ช่อง) ดึง upscale ลง ≤1.2 เท่าที่ภาพต้นฉบับให้ · ดึงไม่ถึง (ภาพเล็ก/หน้าชิดขอบ) → _needHeroBackup
+  //   (ไม่ปล่อยยืดเงียบๆ — ให้ composer อ่านธงแล้วสลับภาพ/HOLD) · ไม่ใช่ _final (Final-Cropper เชื่อ 100% ห้ามแตะ)
+  let _upFinal = _upR;
+  if (_heroCropGuardOn() && !(crop && crop._final) && _promKind(slot) === 'hero' && _upR > HERO_STRETCH_MAX) {
+    const _ex = expandHeroRegionForStretchCap({ region, slotW: slot.w, slotH: slot.h, imgW, imgH, cap: HERO_STRETCH_MAX });
+    if (_ex.changed) {
+      region = _clampRegion(_ex.region, imgW, imgH);
+      _br += '+stretchcap';
+      _upFinal = Math.max(slot.w / Math.max(1, region.width), slot.h / Math.max(1, region.height));
+      if (_tr) { _tr.upscaleRaw = _upFinal; _tr.upscale = +_upFinal.toFixed(2); _tr.branch = _br; }
+      // ★ 19 ก.ค. (AC-0160): expand ซูมออกคุมยืด ≤1.2 อาจทำหน้าเด่นเหลือเศษเล็ก "แม้ reached=true" (ภาพใหญ่พอ
+      //   ขยายถึง cap สบายๆ แต่ region โตจนหน้ากลายเป็นจุดเล็ก/backdrop ท่วม) — เดิมตั้งธงแค่ !reached จุดเดียว
+      //   ไม่ครอบเคสนี้ วัด faceShare จริงหลัง expand (หน้าเด่นที่ region ยึดอยู่) ต่ำกว่า band-min
+      //   (HERO_FACE_SHARE[0]) → ตั้งธงเพิ่ม (additive กับเงื่อนไข !reached เดิม) ให้ composer สลับภาพสำรอง
+      //   แทนปล่อย backdrop ท่วมเงียบๆ · วัดไม่ได้ (ไม่มี fb/หาหน้าเด่นไม่เจอ) → ไม่ตั้งธง (fail-safe)
+      const _hfExp = _dominantFaceInRegion(fb, region, imgW, imgH);
+      if (_hfExp) {
+        const _hfShare = ((_hfExp.y2 - _hfExp.y1) * imgH) / Math.max(1, region.height);
+        const [_hbLoExp] = _heroFaceBandExec();
+        if (_hfShare < (_hbLoExp / 100) - 1e-9) _needHeroBackup = true;
+      }
+    }
+    if (!_ex.reached) _needHeroBackup = true;
+  }
+  if (_tr && _needHeroBackup) _tr.heroCropNeedsBackup = true; // ★ HERO_CROP_GUARD: additive — composer อ่านเพื่อสลับภาพสำรอง/HOLD
+  if (_upFinal > HERO_STRETCH_MAX) console.log(`[CoverV3] 🔎 ${slot.id} ยืด ${_upFinal.toFixed(2)}x (region ${region.width}x${region.height} → ${slot.w}x${slot.h})`);
+  const _doSharpen = _upFinal < 1; // sharpen เฉพาะเคสย่อ — ขยายแล้ว sharpen = ขยาย artifact (เฟส 3.3)
   // rev.16: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — WB คุมโทนรวม + รีทัชเบา
   //   (1) gray-world WB ดึงคาสต์สีเข้าโทนเดียว  (2) sat/contrast บางๆ  (3) คมขึ้นพอดี (เฉพาะย่อ)
   //   ★ เฟส 3.3: png ระหว่างทาง (lossless) — encode jpeg รอบเดียวตอนผืนจบ (เดิม .toBuffer() = jpeg q80 ซ่อน)

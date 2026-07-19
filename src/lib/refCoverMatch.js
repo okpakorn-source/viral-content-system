@@ -6,9 +6,34 @@
 // ============================================================
 
 import { listRefCovers } from '@/lib/refCoverLibrary';
-import { refPoolGateOpen } from '@/lib/refCoverGrade';
+import { refPoolGateOpen, computeTemplateGrade } from '@/lib/refCoverGrade';
 
 const norm = (s) => String(s || '').toLowerCase().trim();
+
+// ★ 19 ก.ค. (เคสเป็กกี้ REF-mrraukej-6ky5 grade C ถูกเลือก → ปกวงกลมล้น/hero ยืด — pickBestRef เดิม
+//   ไม่ถ่วงน้ำหนัก fidelity/geometry เลย): โบนัสคะแนนตาม "grade" ปัจจุบันของ ref (recompute ผ่าน
+//   computeTemplateGrade รวม R6 human-verified floor เสมอ — ไม่ใช้เกรดค้างที่ persist ไว้)
+//   A→+2 · B→+1 · C→+0 · F→-3 (กันเลือกใบพัง) · ไม่มี grade (คำนวณไม่ได้) → fallback _fidelity.score/100*2
+//   ตั้งใจให้ "น้อยกว่า" matchNewsType (+3 เสมอ) — แนวข่าวตรงยังชนะก่อนเสมอ ใบ fidelity สูงชนะแค่ใน
+//   กลุ่มคะแนนใกล้กัน (MARGIN) เท่านั้น. PURE ยกเว้นอ่าน env ตัวเดียวเพื่อ kill-switch (แพทเทิร์นเดียวกับ
+//   refPoolGateOpen/computeTemplateGrade — รับ env พารามิเตอร์ที่ 2 ให้เทสส่ง env สังเคราะห์แทนได้)
+//   kill-switch: MEGA_REF_FIDELITY_PREF==='0' → คืน 0 เสมอ (ปิดเทอมนี้ทั้งหมด = byte-parity เดิม)
+export function refFidelityBonus(record, env = process.env) {
+  if (env?.MEGA_REF_FIDELITY_PREF === '0') return 0;
+  let grade = null;
+  try {
+    grade = computeTemplateGrade(record, env)?.grade || null;
+  } catch {
+    grade = null;
+  }
+  if (grade === 'A') return 2;
+  if (grade === 'B') return 1;
+  if (grade === 'C') return 0;
+  if (grade === 'F') return -3;
+  const fs = Number(record?.dna?._fidelity?.score);
+  if (Number.isFinite(fs)) return (fs / 100) * 2;
+  return 0;
+}
 
 // ★ 10 ก.ค. Wave1-A: FNV-1a 32-bit hash นิ่ง (string เดิม → เลขเดิมเสมอ) — ใช้แทน Math.random() ตอน tiebreak
 //   ให้เคส seedKey เดิม re-run กี่รอบก็ได้ ref ใบเดิม (deterministic) ไม่ใช่สุ่มจริงทุกครั้ง
@@ -77,6 +102,9 @@ export async function pickBestRef(signals = {}, opts = {}) {
     // ⑤ 🛠 เฟส 2 (8 ก.ค.): ใบที่ "ตาคนยืนยันเทมเพลตแล้ว" เชื่อถือได้กว่า AI วัด → บวกแต้มให้ชนะ near-tie
     //   (1.5 > MARGIN 1 = ใบยืนยันชนะใบไม่ยืนยันที่คะแนนเนื้อหาเท่ากันเสมอ แต่ไม่ล้ม matchNewsType ที่ต่าง 3)
     if (d._humanVerified) score += 1.5;
+    // ⑥ ★ 19 ก.ค.: fidelity/grade — ใบ geometry แม่นกว่าชนะใบคะแนนใกล้กัน (ดู refFidelityBonus ด้านบน)
+    const fidBonus = refFidelityBonus(it);
+    if (fidBonus) { score += fidBonus; hits.push(`fidelity ${fidBonus > 0 ? '+' : ''}${fidBonus}`); }
 
     scored.push({ it, score, reason: hits.join(' · '), covered, typeHit });
     if (score > bestScore) bestScore = score;
