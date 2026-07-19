@@ -77,6 +77,7 @@ export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtract
   const isFull = lead.fetchability === 'full';
   const isClip = isClipLead(lead); // 🆕 A1: เลือกป้าย/ปุ่มสกัดให้ตรงประเภทแหล่ง
   const foundLabel = foundAgo(lead.savedAt); // 🎨 "พบเมื่อ" (savedAt) — คำนวณครั้งเดียว
+  const pubDate = String(lead.publishedHint || '').trim(); // 🗓️ วันที่ข่าวจริง (จากผลค้น) — คนละอันกับ "พบเมื่อ"
   const plat = platformOf(lead.channel);     // 🎨 ไอคอน+สีแพลตฟอร์ม (visual cue แทนรูป)
   const archetype = String(lead.clusterArchetype || '').trim(); // 🎨 แนว/หมวดข่าว (จากคลัสเตอร์ครู)
   const sourceCount = Number(lead.sourceCount) || 0;
@@ -138,6 +139,7 @@ export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtract
 
       {/* 🎨 แถวข้อมูล: เวลาที่พบ · แหล่ง · รวมกี่แหล่ง · ไฮไลต์ — เห็นครบในบรรทัดเดียว */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: UI.dim }}>
+        {pubDate && <span style={{ color: UI.amber, fontWeight: 700 }}>📅 {pubDate}</span>}
         {foundLabel && <span>🕐 พบเมื่อ {foundLabel}</span>}
         {lead.sourceHost && <span>🌐 {lead.sourceHost}</span>}
         {sourceCount > 1 && <span style={{ color: UI.blue }}>🔗 รวม {sourceCount} แหล่ง</span>}

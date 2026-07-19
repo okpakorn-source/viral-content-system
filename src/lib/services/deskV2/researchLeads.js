@@ -222,6 +222,7 @@ export async function saveLeads(judgedCandidates, { runId } = {}) {
       snippet: sanitizeText(raw.snippet, 500),
       channel,
       sourceHost,
+      publishedHint: sanitizeText(raw.publishedHint, 60), // 🗓️ วันที่ข่าว (จากผลค้น serper/yt: date/publishedAt) — โชว์บนการ์ด
       clusterId: sanitizeText(raw.clusterId, 40) || null,
       clusterArchetype: sanitizeText(raw.clusterArchetype, 80),
       matchScore,
