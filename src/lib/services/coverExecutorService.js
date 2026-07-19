@@ -771,7 +771,7 @@ function _clampRegion(region, imgW, imgH) {
 //   จาก triage) แทนครอปกลางภาพ + บังคับคนอยู่ในเฟรม + คนจิ๋ว/พื้นหลังท่วม → สั่งเปลี่ยนภาพ (peopleNeedsBackup)
 //   kill-switch เดียว **default OFF** — เปิดเมื่อ env MEGA_PEOPLE_CROP==='1' เท่านั้น · OFF → byte-parity 100%
 //   (ทุกจุดใช้กับ "สาย noface" เท่านั้น — สาย faceRegionForSlot ที่ "เจอหน้า" ไม่ถูกแตะ)
-function _peopleCropOn() { return process.env.MEGA_PEOPLE_CROP === '1'; }
+function _peopleCropOn() { return process.env.MEGA_PEOPLE_CROP !== '0'; }
 const PEOPLE_MIN_SHARE = 0.15; // peopleBox กินพื้นที่กรอบสุดท้าย < 15% = คนจิ๋ว พื้นหลังท่วม → สั่งเปลี่ยนภาพ
 // peopleBox = triage {x,y,w,h} normalized 0-1 (gemini.readClassifierBox การันตี 0-1 + x+w≤1 + y+h≤1) — ตรวจซ้ำ fail-safe
 function _validPeopleBox(pb) {

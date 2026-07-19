@@ -299,7 +299,7 @@ function _attachClutterMeta(faceBoxes, loaded) {
 }
 
 // ★ MEGA_PEOPLE_CROP (20 ก.ค. — mirror ของ coverExecutorService.js _peopleCropOn()): default OFF ('1'=เปิด)
-function _peopleCropOnComposer() { return process.env.MEGA_PEOPLE_CROP === '1'; }
+function _peopleCropOnComposer() { return process.env.MEGA_PEOPLE_CROP !== '0'; }
 // plumbing (จุดที่ 1): แนบ peopleBox → fb "ไม่มีเงื่อนไข clutter" (additive, ไม่แตะ normalizeFaceBox) — clutter guard
 //   ปิดแต่ people crop เปิด: _attachClutterMeta ข้าม fb.peopleBox จึงต้องแนบเองตรงนี้ · shape triage {x,y,w,h}
 //   loaded[i].peopleBox = null/undefined ได้ (executor ตรวจ _validPeopleBox เอง) · OFF → noop (byte-parity)

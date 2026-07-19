@@ -3,7 +3,7 @@
 // ------------------------------------------------------------
 // Runs the REAL exported executeCover (only `sharp` is stubbed — pixels only; every geometry / branch-selection
 // runs for real). Proves the renderer behaviours of the people-crop guard + the kill-switch:
-//   kill-switch: env MEGA_PEOPLE_CROP — **default OFF** (=== '1' to enable) · OFF ⇒ byte-parity 100%.
+//   kill-switch: env MEGA_PEOPLE_CROP — **default ON** (!== '0'; '0'=OFF=byte-parity 100%) — 20 ก.ค. flip เปิดใช้.
 //   (a) OFF ⇒ no face + peopleBox present ⇒ the peopleBox is IGNORED (same blind centre crop as with no peopleBox,
 //       and identical whether the env is unset or '0'); no peopleNeedsBackup flag.
 //   (b) ON  ⇒ no face + peopleBox present ⇒ branch flips to 'people-box' anchored on the person (region ≠ centre).
@@ -83,14 +83,14 @@ const test = async (name, fn) => { try { await fn(); passed++; console.log(`ok $
 const midPeople = () => ({ x: 0.25, y: 0.30, w: 0.50, h: 0.40 });
 
 // ── (a) OFF byte-parity: peopleBox is ignored when the guard is off ──
-await test('(a) OFF ⇒ no face + peopleBox is IGNORED — same blind centre crop as no-peopleBox, same for unset vs "0", no peopleNeedsBackup', async () => {
+await test('(a) OFF ("0") ⇒ no face + peopleBox IGNORED (blind centre crop, no flag); default (unset) = ON (region differs)', async () => {
   const offWithPB = await withPeople('0', () => run({ slot: SEC_SLOT, fb: noFaceFb({ peopleBox: midPeople() }) }));
   const offNoPB   = await withPeople('0', () => run({ slot: SEC_SLOT, fb: noFaceFb() }));
   const defWithPB = await withPeople(undefined, () => run({ slot: SEC_SLOT, fb: noFaceFb({ peopleBox: midPeople() }) }));
   assert.ok(offWithPB && offNoPB && defWithPB, 'all three traces produced');
   assert.ok(offWithPB.branch.startsWith('noface'), `OFF stays on the blind centre crop (got ${offWithPB.branch})`);
   assert.deepEqual(offWithPB.region, offNoPB.region, 'peopleBox has zero effect on the region when the guard is off');
-  assert.deepEqual(offWithPB.region, defWithPB.region, 'unset env behaves identically to "0" (default OFF)');
+  assert.notDeepEqual(offWithPB.region, defWithPB.region, 'default (unset) = ON: peopleBox region ต่างจาก OFF centre crop');
   assert.strictEqual(offWithPB.peopleNeedsBackup, undefined, 'no peopleNeedsBackup flag when the guard is off');
 });
 
