@@ -20,7 +20,9 @@ const lc = (x) => String(x == null ? '' : x).trim().toLowerCase();
 
 // แยกคำหยาบๆ (ไทย/อังกฤษ) จาก title สำหรับ fallback key — ตัด stopword + คำสั้น
 function tokenizeTitle(title) {
-  const t = lc(title).replace(/[^\p{L}\p{N}\s]/gu, ' ');
+  // 🔒 (พบโดยลูกน้องเฟส 9): ต้องเก็บ \p{M} (combining marks) — สระ/วรรณยุกต์ไทย (ั ี ่ ้ ์) เป็น Unicode Mn
+  //   ถ้าไม่เก็บ regex จะแทนที่ด้วยเว้นวรรค → คำไทยแตกกลางตัว (เช่น "เลี้ยงเดี่ยว" → "ยงเด"+"ยว") = storyKey fallback เพี้ยน
+  const t = lc(title).replace(/[^\p{L}\p{N}\p{M}\s]/gu, ' ');
   return t.split(/\s+/).filter((w) => w.length >= 2 && !STOPWORDS.has(w));
 }
 

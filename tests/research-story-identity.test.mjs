@@ -92,3 +92,11 @@ test('altSources cap ที่ 12', () => {
   const merged = mergeStorySources({ url: 'https://p.com/0' }, dups);
   assert.equal(merged.altSources.length, 12);
 });
+
+test('🔒 fallback title tokens ไทย: สระ/วรรณยุกต์ไม่ถูกตัด (คำไม่แตกกลางตัว)', () => {
+  // บั๊กที่ลูกน้องเฟส 9 จับได้: regex ขาด \p{M} → คำไทยแตก. ยืนยันคำเก็บครบหลังแก้
+  const id = buildStoryIdentity({ title: 'แม่เลี้ยงเดี่ยว สู้ชีวิต ขายของ', publishedAt: '2026-07-19' });
+  assert.equal(id.basis, 'title-tokens');
+  assert.ok(id.storyKey.includes('เลี้ยงเดี่ยว'), 'คำ "เลี้ยงเดี่ยว" (มีสระ/วรรณยุกต์) ต้องเก็บครบ');
+  assert.ok(id.storyKey.includes('สู้ชีวิต'), 'คำ "สู้ชีวิต" ต้องเก็บครบ');
+});
