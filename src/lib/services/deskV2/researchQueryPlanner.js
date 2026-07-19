@@ -31,9 +31,14 @@ export const BUCKET_WEIGHTS = Object.freeze({ dna: 35, angle: 30, people: 25, tr
 const BUCKET_KEYS = ['dna', 'angle', 'people', 'trend'];
 const MAX_QUERY_LEN = 70; // เท่ากับเพดาน newsQueries/clipQueries ใน dnaContract.cleanQueries
 
-// preset → หมวด THEME_ACTIONS ที่ต้องเอนก่อน (เฉพาะที่สเปกระบุชัด — ดูหมายเหตุหัวไฟล์)
+// preset → หมวด THEME_ACTIONS ที่ต้องเอนก่อน — ครบ 5 preset (เฟส 8, ตาม sol audit: ทำให้ทุกปุ่มมีผลจริง)
+//   แมปกับหมวด THEME_ACTIONS ที่มีอยู่แล้ว (ไม่เพิ่ม infra ใหม่ — เติมเจตนา DISCOVERY_PRESETS 5 อันให้สมบูรณ์)
+//   economy = ทดลอง ไม่มีหมวด THEME_ACTIONS ตรง → ไม่ bias (ตรงกับ config ที่ติดป้าย experimental)
 const PRESET_ANGLE_BIAS = {
+  interview: ['สัมภาษณ์/บทสนทนาดี', 'คนดัง/ดราม่าบันเทิง'],
   kindness: ['น้ำใจ/ช่วยเหลือ', 'กตัญญู/ครอบครัวอบอุ่น'],
+  society: ['สู้ชีวิต', 'คนดังทำดี/ติดดิน'],
+  lifestyle: ['บันเทิงกระแส', 'ความรัก/แต่งงาน'],
 };
 
 // ════════════════════════════════════════════════════
