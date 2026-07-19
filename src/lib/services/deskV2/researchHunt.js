@@ -17,6 +17,11 @@
 
 import { listExemplars, clusterSummary } from './dnaLibrary.js';
 import { sanitizeText } from './dnaContract.js';
+import { getDiscoveryConfig } from './researchDiscoveryConfig.js';
+import { resolveCandidateChannel, platformGroupOf } from './researchChannelMap.js';
+
+// ★ เฟส 1: re-export ให้ผู้เรียก import จาก researchHunt ได้ตามสัญญาแผน (ตัวจริงอยู่ researchChannelMap.js — pure เทสตรงได้)
+export { resolveCandidateChannel, platformGroupOf } from './researchChannelMap.js';
 
 const CALL_TIMEOUT_MS = 15_000; // ทุก call ต้อง abort ที่ 15s ตามโจทย์
 const KNOWN_CHANNELS = ['videos', 'facebook', 'reels', 'tiktok', 'youtube', 'google'];
@@ -185,6 +190,9 @@ export async function huntClusters({
 } = {}) {
   const t0 = Date.now();
 
+  // ★ เฟส 1: สวิตช์ระบุแพลตฟอร์มจริง (master && DESK_V2_REELS). ปิด = channel/สถิติ/ลำดับเดิมเป๊ะ
+  const reelsOn = getDiscoveryConfig().flags.reels;
+
   const safeTopClusters = Math.max(1, Math.min(30, Number(topClusters) || 10));
   const safeQueriesPerCluster = Math.max(1, Math.min(6, Number(queriesPerCluster) || 4));
   const safePerQueryResults = Math.max(1, Math.min(20, Number(perQueryResults) || 10));
@@ -256,6 +264,8 @@ export async function huntClusters({
   const candidates = [];
   const seenUrls = new Map(); // normalized url → true (เก็บตัวแรกไว้)
   const byChannel = { videos: 0, facebook: 0, reels: 0, tiktok: 0, youtube: 0, google: 0 };
+  const byDiscoveryChannel = { videos: 0, facebook: 0, reels: 0, tiktok: 0, youtube: 0, google: 0 }; // ★ เฟส 1 (ON): ช่องที่ยิงค้น
+  let reclassifiedCount = 0; // ★ เฟส 1 (ON): candidate ที่แพลตฟอร์มจริง ≠ ช่องที่ยิงค้น
   let serperCalls = 0;
   let youtubeCalls = 0;
   let dupCount = 0;
@@ -301,7 +311,7 @@ export async function huntClusters({
       }
       seenUrls.set(dedupKey, true);
 
-      candidates.push({
+      const cand = {
         url,
         title: sanitizeText(raw.title, 300),
         snippet: sanitizeText(raw.snippet, 300),
@@ -312,8 +322,22 @@ export async function huntClusters({
         clusterArchetype: sanitizeText(clusterArchetype, 80),
         publishedHint: sanitizeText(raw.publishedHint, 60),
         position: idx + 1,
-      });
-      if (byChannel[channel] != null) byChannel[channel]++;
+      };
+
+      if (reelsOn) {
+        // 🆕 เฟส 1: channel = แพลตฟอร์มจริงจาก URL, discoveredVia = ช่องที่ยิงค้น, +platformGroup (additive)
+        const resolved = resolveCandidateChannel(url, channel);
+        cand.channel = resolved;
+        cand.discoveredVia = channel;
+        cand.platformGroup = platformGroupOf(resolved);
+        if (resolved !== channel) reclassifiedCount++;
+        byChannel[resolved] = (byChannel[resolved] || 0) + 1; // นับแพลตฟอร์มจริง (อาจมีคีย์ใหม่ เช่น instagram)
+        byDiscoveryChannel[channel] = (byDiscoveryChannel[channel] || 0) + 1;
+      } else if (byChannel[channel] != null) {
+        byChannel[channel]++; // ── ปิด flag: พฤติกรรมเดิมเป๊ะ ──
+      }
+
+      candidates.push(cand);
     });
   });
 
@@ -333,6 +357,8 @@ export async function huntClusters({
       failedCalls,
       estCostTHB,
       tookMs: Date.now() - t0,
+      // ★ เฟส 1 (ON เท่านั้น): สถิติแยกช่องยิงค้น vs แพลตฟอร์มจริง — ปิด flag = ไม่มี field นี้ (snapshot เดิมเป๊ะ)
+      ...(reelsOn ? { byDiscoveryChannel, reclassifiedCount } : {}),
     },
   };
 }
