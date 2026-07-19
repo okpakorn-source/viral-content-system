@@ -410,6 +410,20 @@ function _validHeroFaceCropBox(b) {
     && b.w > 0.001 && b.h > 0.001
     && b.x >= -0.001 && b.y >= -0.001 && (b.x + b.w) <= 1.001 && (b.y + b.h) <= 1.001);
 }
+// ★ MEGA_CLUTTER_GUARD (มือ D, 19 ก.ค. — ช่องย่อยต้องสะอาด ไม่ลายตา): crowd-trigger + เล็งหน้าเด่นในฝูงชน
+//   + ธง cleanNeedsBackup (ครอปแล้วยังรก → ให้ composer สลับภาพสะอาดกว่า) · kill-switch เดียว **default OFF**
+//   เปิดเมื่อ env MEGA_CLUTTER_GUARD==='1' เท่านั้น · ไม่ตั้ง/ค่าอื่น → byte-parity 100% (ทุกจุด gate ด้วยตัวนี้)
+//   สัญญา busy = integer 0-2 จาก triage (Gemini) · undefined/null → neutral (ไม่ลงโทษ = พฤติกรรมเดิม)
+function _clutterGuardOn() { return process.env.MEGA_CLUTTER_GUARD === '1'; }
+// สัญญาณ "ลายตา" รวม (ต้องเปิด guard ก่อน): หน้าจริง ≥4 ใบ · eyeCategory==='group' · busy>=2
+//   busy undefined → Number.isFinite เป็นเท็จ → ไม่เข้าเงื่อนไข (neutral) · fb null/OFF → false
+function _isClutter(fb) {
+  return _clutterGuardOn() && !!fb && (
+    (Array.isArray(fb.allFaces) && fb.allFaces.length >= 4)
+    || fb.eyeCategory === 'group'
+    || (Number.isFinite(fb.busy) && fb.busy >= 2)
+  );
+}
 // band faceShare รายบทบาทช่อง (อ่านจาก imageQualityConfig — mirror measureTechRules.roleOf)
 function _panelBandForSlot(slot) {
   const id = String(slot?.id || '');
@@ -836,15 +850,24 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
     } else if (isStorySlot(slot)) {
       // ★ เฟส 2.2: ช่อง story หลายคน → คลุมทุกคน+ของ เสมอ — เลิก spread-cut ที่ "ตัดคนทิ้งโดยตั้งใจ"
       //   (หลักฐานใบ 14:24: ฉากมอบเช็คเก็บกว้างทั้งป้าย+สองคน = ใบที่ผู้ใช้ชี้ว่าดี)
-      region = storyGroupRegion(fb, imgW, imgH, slot.w / slot.h);
-      _br = 'story-group';
-      if (slot._vis) { region = _shiftRegionForVis(region, fb, imgW, imgH, slot._vis); _br = 'story-group-vis'; } // เฟส 4.4: หลบวง/inset ที่ทับ
+      // ★ CLUTTER (มือ D 4/7): ช่องบริบท "ภาพรก" (หน้า ≥4/eyeCategory=group/busy>=2) → เลิกเก็บกว้าง
+      //   ครอปหน้าเด่นเดี่ยว (largest) แทน storyGroupRegion · OFF/ไม่รก → พฤติกรรมเดิมทุก byte
+      if (_isClutter(fb)) {
+        region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac, minFaceHFrac || 0);
+        _br = 'story-clutter-largest';
+      } else {
+        region = storyGroupRegion(fb, imgW, imgH, slot.w / slot.h);
+        _br = 'story-group';
+      }
+      if (slot._vis) { region = _shiftRegionForVis(region, fb, imgW, imgH, slot._vis); _br += '-vis'; } // เฟส 4.4: หลบวง/inset ที่ทับ
     } else {
       // ★ เฟส 3 จุด3 (CASE-265/266): วัด "การกระจายตัว" หน้าทุกคน = bbox กว้างรวม / ความกว้างภาพ
       const _spread = Math.max(...fb.allFaces.map(f => f.x2)) - Math.min(...fb.allFaces.map(f => f.x1));
-      if (_spread > 0.55) {
-        // คนยืนห่างกัน → group-crop คลุมทุกคน = คนริมโดนขอบตัดสกปรก → ครอปหน้าใหญ่สุดคนเดียวเด่น
-        console.log(`[CoverV3] 👥 spread-crop: bbox ${(_spread * 100).toFixed(1)}% > 55% → ครอปหน้าเดียว (largest)`);
+      // ★ CLUTTER (มือ D 2/7): ขยายทริกเกอร์ spread-cut ให้รวม "ภาพรก" (หน้า ≥4/eyeCategory=group/busy>=2) —
+      //   ตลาดคนเยอะที่ยืนชิดกัน (spread ต่ำ) เดิมไป group-all ลายตา · OFF → _isClutter=false = พฤติกรรมเดิมทุก byte
+      if (_spread > 0.55 || _isClutter(fb)) {
+        // คนยืนห่างกัน/ภาพรก → group-crop คลุมทุกคน = คนริมโดนขอบตัดสกปรก → ครอปหน้าใหญ่สุดคนเดียวเด่น
+        console.log(`[CoverV3] 👥 spread-crop: bbox ${(_spread * 100).toFixed(1)}%${_isClutter(fb) ? ' + clutter' : ''} → ครอปหน้าเดียว (largest)`);
         region = faceRegionForSlot(largest, imgW, imgH, slot.w / slot.h, faceFrac, faceTopAt, maxFaceHFrac);
         // ★ 10 ก.ค. (ผู้ใช้วงจุด "เศษตัวแฟนค้างขอบ ไม่เนียน"): เลื่อนกรอบพ้นคนข้างเคียง — ตรรกะเดียวกับ hero
         //   + เผื่อความกว้างลำตัว 0.35 เท่าของหน้า (ขอบหน้า ≠ ขอบตัว — ตัวคนข้างโผล่ได้แม้หน้าพ้นแล้ว)
@@ -964,6 +987,14 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
         }
       }
     }
+  } else if (_clutterGuardOn() && !(crop && crop._final) && _promKind(slot) !== 'hero' && _nFaces > 3) {
+    // ★ CLUTTER (มือ D 3/7): ฝูงชน >3 หน้าตกในกรอบ — เดิมเพดาน _nFaces<=3 ทำให้ "ข้ามบล็อก" (ปล่อยกรอบกว้างลายตา)
+    //   → เลือกหน้าเด่น 1 ใบ (_dominantFaceInRegion) แล้วเล็ง refineRegionForFace แบบเส้น 1 หน้า ให้ช่องมีคนโฟกัสชัด
+    const _domC = _dominantFaceInRegion(fb, region, imgW, imgH);
+    if (_domC && _panelFaceCropOn()) {
+      const _rfC = refineRegionForFace({ region, faceBox: _domC, imgW, imgH, slotAspect: slot.w / slot.h, band: _panelBandForSlot(slot) });
+      if (_rfC.changed) { region = _rfC.region; _br += '+clutteraim'; }
+    }
   }
   const _tr = _cropTrace(slot, _br, fb, imgW, imgH, region, traceSink); // เฟส 0.1: log อย่างเดียว
   if (_tr) _tr.tighten = _tg6b; // เฟส 6B: composer อ่าน tt.tighten → ธง crop_tightened/context_tightened/face_small
@@ -1003,6 +1034,12 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
     if (!_ex.reached) _needHeroBackup = true;
   }
   if (_tr && _needHeroBackup) _tr.heroCropNeedsBackup = true; // ★ HERO_CROP_GUARD: additive — composer อ่านเพื่อสลับภาพสำรอง/HOLD
+  // ★ CLUTTER (มือ D 5/7): วัดซ้ำ "กรอบสุดท้าย" (หลังครอป/หลบลายน้ำ/clamp/stretchcap) — ยังลายตา → ธงให้ composer สลับภาพสะอาดกว่า
+  //   เกณฑ์: หน้าจริง ≥3 ใบตกในกรอบ · ตา Gemini ชี้ไม่สะอาด (eyeClean===false) · busy>=2 — เลียนแบบ _needRefineBackup (additive)
+  if (_clutterGuardOn() && !(crop && crop._final)
+    && (_facesInRegionCount(fb, region, imgW, imgH) >= 3 || (fb && fb.eyeClean === false) || (fb && Number.isFinite(fb.busy) && fb.busy >= 2))) {
+    if (_tr) _tr.cleanNeedsBackup = true;
+  }
   if (_upFinal > HERO_STRETCH_MAX) console.log(`[CoverV3] 🔎 ${slot.id} ยืด ${_upFinal.toFixed(2)}x (region ${region.width}x${region.height} → ${slot.w}x${slot.h})`);
   const _doSharpen = _upFinal < 1; // sharpen เฉพาะเคสย่อ — ขยายแล้ว sharpen = ขยาย artifact (เฟส 3.3)
   // rev.16: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — WB คุมโทนรวม + รีทัชเบา
@@ -1076,6 +1113,12 @@ async function renderCircleTile(src, crop, slot, fb, traceSink = null) {
   if (_tr) _tr.tighten = _tg6bC; // เฟส 6B: ธง crop_tightened/face_small ของวงกลม
   if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ' circle'); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
   region = _clampRegion(region, imgW, imgH); // ★ 10 ก.ค.: การ์ดสุดท้ายก่อน extract (วงกลม)
+  // ★ CLUTTER (มือ D 7/7): วงกลม = คนเดี่ยวสะอาดโฟกัสชัด — ไร้หน้า(noface-square)/≥2 หน้าในวง/eyeClean เท็จ/busy>=2
+  //   → ธงให้ composer สลับภาพสำรองสะอาดกว่า (circle อยู่ในขอบเขต BS swap — ไม่ใช่ main/hero) · OFF → ไม่ตั้งธง (byte-parity)
+  if (_clutterGuardOn() && !(crop && crop._final)
+    && (_br === 'noface-square' || _facesInRegionCount(fb, region, imgW, imgH) >= 2 || (fb && fb.eyeClean === false) || (fb && Number.isFinite(fb.busy) && fb.busy >= 2))) {
+    if (_tr) _tr.cleanNeedsBackup = true;
+  }
   // ★ เฟส 3.1+3.3 (10 ก.ค.): วัด upscale จริง + งด sharpen ตอนขยาย (วงกลม)
   const _upR = Math.max(d / Math.max(1, region.width), d / Math.max(1, region.height));
   // ★ AC-0107 P1-1: exact raw upscale (see rect tile) — rounded `upscale` is advisory-only, never the hard decision.
