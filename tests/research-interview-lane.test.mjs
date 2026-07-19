@@ -16,6 +16,7 @@ import {
   planInterviewQueries,
   confirmObservedName,
   classifyInterviewCandidate,
+  confirmTranscriptHighlights,
 } from '../src/lib/services/deskV2/researchInterview.js';
 
 const INTERVIEW_PATH = new URL('../src/lib/services/deskV2/researchInterview.js', import.meta.url);
@@ -287,4 +288,28 @@ test('F2: classifyInterviewCandidate ส่ง needsContext ต่อ → คน
   const c = classifyInterviewCandidate({ title: 'คิว เผยเรื่องราว' }, { expectedName: 'คิว', needsContext: true, id: 'people-0' });
   assert.equal(c.interview.nameStatus, 'expected');
   assert.equal(c.interview.observedName, null);
+});
+
+// ── เฟส 7: confirmTranscriptHighlights — quote ต้องเป็น substring จริง ไม่มีการสังเคราะห์ ──
+test('เฟส 7: เจอสัญญาณใน transcript → confirmed + quote เป็น substring จริง', () => {
+  const raw = 'วันนี้แพท ณปภา มาเปิดใจ เล่าถึงจุดเปลี่ยน ในชีวิตที่ผ่านมรสุมหนัก น้ำตาไหล';
+  const r = confirmTranscriptHighlights({ rawText: raw, signals: ['จุดเปลี่ยน', 'น้ำตา'], names: ['แพท ณปภา'] });
+  assert.equal(r.status, 'confirmed');
+  assert.ok(r.evidence.length > 0);
+  const normRaw = raw.replace(/\s+/g, ' ').trim();
+  for (const ev of r.evidence) {
+    assert.ok(normRaw.includes(ev.quote), `quote ต้องเป็น substring จริง: "${ev.quote}"`); // 🔴 ไม่สังเคราะห์
+    assert.equal(ev.source, 'transcript');
+  }
+});
+
+test('เฟส 7: transcript ไม่มีสัญญาณเลย → not_found (ไม่เดา)', () => {
+  const r = confirmTranscriptHighlights({ rawText: 'ข่าวทั่วไปเรื่องสภาพอากาศวันนี้', signals: ['น้ำตา'], names: ['แพท ณปภา'] });
+  assert.equal(r.status, 'not_found');
+  assert.equal(r.evidence.length, 0);
+});
+
+test('เฟส 7: ไม่มี transcript → unavailable (ยังไม่ถอด เช่น FB/IG)', () => {
+  assert.equal(confirmTranscriptHighlights({ rawText: '', signals: ['น้ำตา'], names: ['x'] }).status, 'unavailable');
+  assert.equal(confirmTranscriptHighlights({}).status, 'unavailable');
 });

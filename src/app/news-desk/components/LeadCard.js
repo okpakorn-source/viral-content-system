@@ -46,7 +46,7 @@ function isClipLead(l) {
   return CLIP_URL_RE.test(url);
 }
 
-export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtractAndSend, onSendText, busyAction, sendNote, extractNote }) {
+export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtractAndSend, onSendText, busyAction, sendNote, extractNote, highlightConfirmOn = false }) {
   const [showTimeline, setShowTimeline] = useState(false); // ★ trace 17 ก.ค.: กางแผงประวัติในที่ (การ์ดไม่เรียก API เอง — ให้ LeadTimeline จัดการ)
   const [showContent, setShowContent] = useState(false); // 🆕 D1 17 ก.ค.: กางกล่อง "ดูเนื้อที่จะส่ง" ก่อนกด 🚀
   if (!lead) return null;
@@ -87,6 +87,15 @@ export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtract
         {lead.sourceHost && <Chip color={UI.muted}>{lead.sourceHost}</Chip>}
         {sm && <Chip color={sm.color}>{sm.label}</Chip>}
         {sentViaAuto && <Chip color={UI.accent}>⚡ ออโต้</Chip>}
+        {/* 🆕 เฟส 7: ป้ายไฮไลต์จาก transcript จริง — 🔒 sol audit: โชว์เฉพาะเมื่อ flag เปิด (highlight ที่ persist ค้างตอนปิด flag ต้องไม่โผล่) */}
+        {highlightConfirmOn && lead.highlight && (
+          <Chip color={lead.highlight.status === 'confirmed' ? UI.accent : UI.muted}>
+            {lead.highlight.status === 'confirmed' ? '✅ ไฮไลต์จริง'
+              : lead.highlight.status === 'estimated' ? '🎬 คาดว่ามีไฮไลต์'
+                : lead.highlight.status === 'unavailable' ? '⏳ รอถอดคลิป'
+                  : '— ไม่พบไฮไลต์'}
+          </Chip>
+        )}
       </div>
 
       {/* หัวข้อ (ลิงก์เปิดแท็บใหม่) */}

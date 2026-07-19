@@ -37,6 +37,8 @@ import { sanitizeText } from './dnaContract.js';
 import { STORE as LEADS_STORE, pushEvent } from './researchLeads.js'; // 🔧 17 ก.ค. 69: pushEvent ร่วม (เขียน event พร้อม write หลักจังหวะเดียว — เลิกใช้ appendLeadEvents fire-and-forget)
 import { callAI } from '../../ai/openai.js'; // 🆕 D1: กลั่นเนื้อดิบ (ตามแพตเทิร์น dnaResearch.js — ห้ามแก้ openai.js)
 import { MODEL_FAST } from '../../ai/modelConfig.js'; // 🔴 ห้าม hardcode ชื่อโมเดล — งานเร็ว/ประหยัด
+import { getDiscoveryConfig } from './researchDiscoveryConfig.js'; // 🆕 เฟส 7: flag highlightConfirm
+import { confirmTranscriptHighlights } from './researchInterview.js'; // 🆕 เฟส 7: ยืนยันไฮไลต์จาก transcript จริง
 
 const MAX_EXTRACT_CHARS = 12_000;
 const MIN_TEXT_FOR_SEND = 300;
@@ -491,6 +493,18 @@ export async function attachExtract(leadId, extractResult, { auto = false } = {}
     //   shortcut (ข้ามสกัดรอบหน้า) แล้วโดน sendLeadAsText ปัดตก <300 วนถาวร; ปล่อย false ให้รอบหน้าสกัด/insight ใหม่ได้
     contentReady: cleanText.length >= MIN_TEXT_FOR_SEND,
   };
+
+  // 🆕 เฟส 7 (ON): ลีดเลนสัมภาษณ์ → ยืนยันไฮไลต์จาก transcript จริง (ใช้ extract.raw เท่านั้น, quote=substring จริง ไม่มี AI)
+  //   🔴 ปิด DESK_V2_HIGHLIGHT_CONFIRM หรือไม่ใช่เลนสัมภาษณ์ = ไม่มี field highlight (พฤติกรรมเดิมเป๊ะ)
+  if (getDiscoveryConfig().flags.highlightConfirm && existingLead.lane === 'interview') {
+    const iv = existingLead.interview || {};
+    const hl = confirmTranscriptHighlights({
+      rawText,
+      signals: [iv.opener, iv.angle].filter(Boolean),
+      names: [iv.observedName, iv.expectedName].filter(Boolean),
+    });
+    patch.highlight = { ...hl, checkedAt: new Date().toISOString() };
+  }
 
   // 🔧 17 ก.ค. 69 (แก้บัค timeline ว่าง): event 'extracted' เข้า merged record เดียวกับที่เขียน extract อยู่แล้ว
   //   (pushEvent ก่อน remove+add ใน _mergeAndPersistLead) — เลิก appendLeadEvents แยกทีหลัง (serverless freeze ก่อนเขียนจริง)

@@ -548,6 +548,7 @@ export default function ResearchTab({ onToast }) {
         <LeadCard
           key={lead.id}
           lead={lead}
+          highlightConfirmOn={!!discoveryFlags.highlightConfirm}
           busyAction={busyFor(lead.id)}
           sendNote={sendNotes[lead.id]}
           extractNote={extractNotes[lead.id]}

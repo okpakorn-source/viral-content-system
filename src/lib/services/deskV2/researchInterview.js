@@ -330,3 +330,41 @@ export function classifyInterviewCandidate(candidate, queryPlan) {
     },
   };
 }
+
+// ════════════════════════════════════════════════════
+// 4) confirmTranscriptHighlights (เฟส 7) — ยืนยันไฮไลต์จาก transcript จริง
+// ════════════════════════════════════════════════════
+/** รวบ whitespace หลายตัว → เว้นวรรคเดียว + trim (ให้ quote เทียบ substring ได้เสถียร) */
+function normalizeWs(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+/**
+ * 🔴 ไม่มี AI / ไม่ใช้ keyQuote สังเคราะห์ — quote ทุกอันต้องเป็น "substring ของ transcript หลัง normalize whitespace"
+ *   (สไลซ์จากข้อความจริงเท่านั้น). ก่อนมี transcript ผู้เรียกตั้ง status='estimated'; ไม่มี transcript = 'unavailable'
+ * @param {object} input
+ * @param {string} input.rawText  - transcript ดิบ (extract.raw)
+ * @param {string[]} [input.signals] - คำสัญญาณ (opener/angle จากเลนสัมภาษณ์)
+ * @param {string[]} [input.names]   - ชื่อที่คาด/ที่ยืนยันแล้ว
+ * @returns {{status:'confirmed'|'not_found'|'unavailable', signals:string[], evidence:Array<{quote,source:'transcript',matchedBy}>}}
+ */
+export function confirmTranscriptHighlights({ rawText, signals = [], names = [] } = {}) {
+  const text = normalizeWs(rawText);
+  if (!text) return { status: 'unavailable', signals: [], evidence: [] }; // ยังไม่มี transcript (FB/IG ยังไม่ถอด ฯลฯ)
+
+  const needles = [
+    ...(Array.isArray(names) ? names : []).map((n) => ({ v: normalizeWs(sanitizeText(n, 80)), by: 'name' })),
+    ...(Array.isArray(signals) ? signals : []).map((s) => ({ v: normalizeWs(sanitizeText(s, 40)), by: 'signal' })),
+  ].filter((x) => x.v);
+
+  const foundSignals = [];
+  const evidence = [];
+  const seen = new Set();
+  for (const n of needles) {
+    const idx = text.indexOf(n.v);
+    if (idx === -1) continue; // 🔴 ไม่พบ = ไม่ยืนยัน (ไม่เดา)
+    if (!seen.has(n.v)) { foundSignals.push(n.v); seen.add(n.v); }
+    const start = Math.max(0, idx - 40);
+    const end = Math.min(text.length, idx + n.v.length + 40);
+    evidence.push({ quote: text.slice(start, end), source: 'transcript', matchedBy: n.by }); // quote = substring จริง
+    if (evidence.length >= 8) break;
+  }
+  return { status: evidence.length ? 'confirmed' : 'not_found', signals: foundSignals.slice(0, 10), evidence };
+}

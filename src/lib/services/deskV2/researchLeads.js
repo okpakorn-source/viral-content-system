@@ -262,6 +262,10 @@ export async function saveLeads(judgedCandidates, { runId } = {}) {
         angle: sanitizeText(iv.angle, 40),
         queryId: sanitizeText(iv.queryId, 60),
       };
+      // 🆕 เฟส 7 (ON): ก่อนถอดคลิป = "คาดว่ามีไฮไลต์" (estimated) — attachExtract จะอัปเป็น confirmed/not_found หลังถอด
+      if (getDiscoveryConfig().flags.highlightConfirm) {
+        record.highlight = { status: 'estimated', signals: [], evidence: [], checkedAt: now };
+      }
     }
     // 🆕 seed timeline ตั้งแต่สร้าง record — เขียนจังหวะเดียวกับ addMany ด้านล่าง (ไม่มี append แยกทีหลัง)
     record = pushEvent(record, 'found', { runId: runIdClean, query: sanitizeText(raw.query, 100), channel });
