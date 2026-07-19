@@ -7,6 +7,10 @@
 // - โครงเพี้ยน/ช่องไม่พอ → คืน null (ผู้เรียก fallback โครงปกติ)
 // ============================================================
 
+// ★ GEO-CLAMP (19 ก.ค. 69): CIRCLE_BORDER_MAX single source of truth เดียวกับ QC
+// (megaComposerService.measureTechRules ใช้ตัวเดียวกัน — เลขต้องตรงกันเสมอ)
+import { TECH_RULES } from './imageQualityConfig.js';
+
 // ★ A2 (8 ก.ค. ผู้ใช้สั่ง "เทมเพลตต้อง copy ref 100% ไม่มีภาพแหว่ง"): ปิดผืนเต็ม
 // ① คลัสเตอร์เส้นขอบทุกช่องเข้า "เส้นกริดร่วม" (tolerance 6%) — ช่องข้างเคียงแชร์เส้นเดียวกันเสมอ ไม่มีร่อง
 // ② เส้นใกล้ขอบผืน (≤6%) บังคับชนขอบ 0/100
@@ -135,6 +139,82 @@ export function sanitizeRefDnaLayoutOnly(dna) {
   //   (พบรั่วจริง 15/21 entry ใน ref-cover-library.json) → ต้องตัดทิ้งด้วย
   const { slots: _dropSlots, neededShots: _dropNeeded, storyFlow: _dropFlow, compositionLogic: _dropComp, subjectsRelation: _dropSubjRel, ...rest } = dna;
   return { ...rest, template, _contentSanitized: true };
+}
+
+// ============================================================
+// ★ GEO-CLAMP (19 ก.ค. 69 — งานสั่งกัน template ปกเพี้ยน) — ด่านสุดท้ายก่อน return ของ
+//   dnaToTemplateSpec: แก้เฉพาะ geometry ที่ "เพี้ยนจริง" (เกินกรอบ/ล้นเฟรม) — ไม่แตะ logic
+//   แปลง DNA เดิมจุดใดเลย (pass เพิ่มท้ายสุด, map slots → clamp เท่านั้น)
+// ------------------------------------------------------------
+// บั๊กจริงที่แก้ (ref REF-mrraukej-6ky5 grade C, qcFlags): circle_border_out:22 (ขอบวงกลม
+//   หนา 22px เกิน TECH_RULES.CIRCLE_BORDER_MAX) + วงกลม/ช่องวางล้นเฟรม (พิกัดเลยขอบ canvas
+//   1080×1350) — measureTechRules() ใน megaComposerService.js (~461-466) ตรวจจับได้ แต่
+//   dnaToTemplateSpec ไม่เคยแก้ค่าเอง ปล่อยผ่านให้ QC ตัดสิน (advisory) → ปกยังออกมาเพี้ยนจริง
+// no-op เมื่อ geometry สะอาดอยู่แล้ว (ค่าอยู่ในกรอบ = ไม่แตะ) — kill-switch MEGA_GEO_CLAMP='0'
+//   → ข้าม pass นี้ทั้งหมด (byte-parity พฤติกรรมก่อนแก้เป๊ะ)
+// ============================================================
+const _GEO_CIRCLE_BORDER_MIN = 4;     // พื้นปลอดภัยต่ำสุดตาม spec [4, CIRCLE_BORDER_MAX]
+const _GEO_CIRCLE_BORDER_DEFAULT = 8; // ค่ากลางปลอดภัยเมื่อ borderWidth ออกมา 0/ไม่มี
+
+function _applyGeoClamp(live, canvasW, canvasH) {
+  if (process.env.MEGA_GEO_CLAMP === '0') return; // kill-switch: byte-parity เดิมเป๊ะ
+
+  for (const s of live) {
+    if (!s) continue;
+    const isCircle = s.shape === 'circle';
+
+    // (1) ขอบวงกลม → clamp เข้าช่วง [MIN, CIRCLE_BORDER_MAX] — แก้ circle_border_out
+    if (isCircle) {
+      const bw = Number(s.borderWidth) || 0;
+      const max = TECH_RULES.CIRCLE_BORDER_MAX;
+      if (bw === 0) s.borderWidth = _GEO_CIRCLE_BORDER_DEFAULT;
+      else if (bw > max) s.borderWidth = max;
+      else if (bw < _GEO_CIRCLE_BORDER_MIN) s.borderWidth = _GEO_CIRCLE_BORDER_MIN;
+      // อยู่ในช่วงอยู่แล้ว → ไม่แตะ (no-op)
+    }
+
+    // (2) ช่องต้องอยู่ในเฟรมเสมอ — วงกลมนับขอบที่ยื่นออกนอกวงด้วย (executor วาด border
+    //     ขยายพื้นที่ ±borderWidth รอบวง ดู coverExecutorService.js ~957-960)
+    if (isCircle) {
+      // (2a) วงกลมต้อง w===h — กันวงรีจาก DNA/clamp h เดี่ยว (เคสจริง REF-mrraukej: yPct80+hPct40=120%
+      //      → dnaToTemplateSpec clamp h เหลือ ellipse 432×270). diameter=min(w,h) = วงที่ "ฟิตในผืน" แน่นอน
+      //      (ด้านที่ถูกบีบ) แล้ว re-center รอบจุดกลางเดิม — bounds-clamp ด้านล่างดึงเข้าเฟรมต่อ
+      if (Number(s.w) > 0 && Number(s.h) > 0 && Math.abs(Number(s.w) - Number(s.h)) > 2) {
+        const _cx0 = s.x + s.w / 2, _cy0 = s.y + s.h / 2;
+        const _d = Math.min(Number(s.w), Number(s.h));
+        s.w = _d; s.h = _d; s.x = _cx0 - _d / 2; s.y = _cy0 - _d / 2;
+      }
+      const bw = Number(s.borderWidth) || 0;
+      let w = s.w, h = s.h;
+      const maxW = Math.max(1, canvasW - 2 * bw), maxH = Math.max(1, canvasH - 2 * bw);
+      if (w > maxW) w = maxW; // สุดขั้ว: วง+ขอบใหญ่กว่าผืนทั้งใบ (กันไว้)
+      if (h > maxH) h = maxH;
+      let cx = s.x + s.w / 2, cy = s.y + s.h / 2;
+      const halfW = w / 2 + bw, halfH = h / 2 + bw;
+      cx = Math.min(Math.max(cx, halfW), canvasW - halfW);
+      cy = Math.min(Math.max(cy, halfH), canvasH - halfH);
+      s.w = Math.round(w); s.h = Math.round(h);
+      s.x = Math.round(cx - w / 2); s.y = Math.round(cy - h / 2);
+    } else {
+      let { x, y, w, h } = s;
+      if (w > canvasW) w = canvasW; // สุดขั้ว: ช่องใหญ่กว่าผืนทั้งใบ (กันไว้)
+      if (h > canvasH) h = canvasH;
+      x = Math.min(Math.max(x, 0), canvasW - w);
+      y = Math.min(Math.max(y, 0), canvasH - h);
+      s.x = Math.round(x); s.y = Math.round(y); s.w = Math.round(w); s.h = Math.round(h);
+    }
+  }
+
+  // (3) ลำดับขนาด: hero ('main') ควรมีพื้นที่ ≥ ทุกช่องอื่น — DNA ผิด ladder = log เตือนเท่านั้น
+  //     (ไม่บังคับแก้ — เสี่ยงพังผังที่ตั้งใจให้ hero เล็ก เช่น เน้นวงกลม)
+  const main = live.find((s) => s && s.id === 'main');
+  if (main) {
+    const mainArea = main.w * main.h;
+    const bigger = live.find((s) => s && s !== main && s.w * s.h > mainArea);
+    if (bigger) {
+      console.warn(`[refTemplate] ⚠️ geo-clamp: hero(main) area ${mainArea} < ช่อง "${bigger.id}" area ${bigger.w * bigger.h} — ลำดับขนาดผิด (ไม่บังคับแก้)`);
+    }
+  }
 }
 
 export function dnaToTemplateSpec(dna) {
@@ -286,6 +366,10 @@ export function dnaToTemplateSpec(dna) {
     // กัน id ซ้ำ (เช่น circle 2 วง)
     const seen = new Set();
     for (const s of live) { const base = s.id; let n = 1; while (seen.has(s.id)) s.id = `${base}${n++}`; seen.add(s.id); }
+
+    // ★ GEO-CLAMP: แก้ geometry เพี้ยน (ขอบวงกลมเกิน/ช่องล้นเฟรม) ก่อน bind provenance ด้านล่าง
+    //   (ให้ snapshot ที่ downstream อ่านเป็นค่าที่ clamp แล้วเสมอ)
+    _applyGeoClamp(live, W, H);
 
     // ★ WAVE1A: bind the FROZEN authentic content snapshot NOW — all id/geometry mutations have settled. Keyed by
     //   object identity; the producer reads render authority (composerSlotId=id, shape) + geometry ONLY from this
