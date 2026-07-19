@@ -49,7 +49,7 @@ export default function ResearchTab({ onToast }) {
   const [discoveryMasterOn, setDiscoveryMasterOn] = useState(false); // 🆕 เฟส 0: MASTER เปิดไหม (อ่านจาก GET hunt) → เปิด=แนบ shadow sample เข้า logRun
   const [discoveryFlags, setDiscoveryFlags] = useState({}); // 🆕 เฟส 2+: flags ย่อย (diversity ฯลฯ) จาก config เดียวกัน
   const [discoveryPresets, setDiscoveryPresets] = useState([]); // 🆕 เฟส 8: 5 ปุ่ม preset จาก config (โชว์เมื่อ researchUiV2 เปิด)
-  const [activePreset, setActivePreset] = useState(''); // 🆕 เฟส 8: preset ที่เลือก (เอนคำค้น) — ส่งเข้า hunt เฉพาะเมื่อ uiV2 เปิด
+  const [activePreset, setActivePreset] = useState(''); // 🎨 preset ที่เลือก (เอนคำค้น) — ส่งเข้า hunt เมื่อเลือก (backend ใช้เมื่อ planner เปิด)
 
   // ── ส่วน 2: การล่ารอบนี้ ──
   const [hunting, setHunting] = useState(false);
@@ -68,6 +68,10 @@ export default function ResearchTab({ onToast }) {
   const [fCluster, setFCluster] = useState('');
   const [fMinScore, setFMinScore] = useState('');
   const [fQ, setFQ] = useState('');
+  // 🎨 รีดีไซน์: ลูกกรองด่วน (client-side lens บนลีดที่โหลดมา) + เรียง + พับตัวกรองเพิ่มเติม
+  const [quickFilter, setQuickFilter] = useState('all'); // all|ready|kept|sent|interview
+  const [sortBy, setSortBy] = useState('score');          // score|newest|oldest
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // ── ส่วน 4: 📓 ประวัติรอบล่า (trace) ──
   const [traceOpen, setTraceOpen] = useState(false);
@@ -155,10 +159,14 @@ export default function ResearchTab({ onToast }) {
   }, [fStatus, fChannel, fCluster, fMinScore, fQ, onToast]);
 
   useEffect(() => {
-    if (didInit.current) return undefined;
+    // 🔧 โหลดครั้งเดียวตอนเปิดแท็บ — เรียกตรงๆ (เลิกใช้ setTimeout+clearTimeout ที่ StrictMode dev
+    //    ยกเลิก timer ทำให้ config ไม่โหลด). didInit กัน double-fetch; แต่ละ loader fail-safe ในตัว
+    if (didInit.current) return;
     didInit.current = true;
-    const id = setTimeout(() => { loadClusters(); loadLibrary(); loadLibStats(); loadDiscoveryConfig(); }, 0);
-    return () => clearTimeout(id);
+    loadClusters();
+    loadLibrary();
+    loadLibStats();
+    loadDiscoveryConfig();
   }, [loadClusters, loadLibrary, loadLibStats, loadDiscoveryConfig]);
 
   // ── เลือกคลัสเตอร์ ──
@@ -220,8 +228,8 @@ export default function ResearchTab({ onToast }) {
         queriesPerCluster,
         channels: chList,
         perQueryResults: 10,
-        // 🆕 เฟส 8: เอนคำค้นตาม preset — ส่งเฉพาะเมื่อ researchUiV2 เปิด + เลือกไว้ (ปิด flag = ไม่ส่ง = พฤติกรรมเดิม)
-        ...(discoveryFlags.researchUiV2 && activePreset ? { preset: activePreset } : {}),
+        // 🆕 เฟส 8: เอนคำค้นตาม preset ที่เลือก (backend ใช้เมื่อ query planner เปิด — ไม่เปิดก็ไม่มีผล)
+        ...(activePreset ? { preset: activePreset } : {}),
       }),
     });
     if (!hRes.success) {
@@ -542,20 +550,15 @@ export default function ResearchTab({ onToast }) {
   }
 
   const busyFor = (id) => (busyLead.id === id ? busyLead.action : null);
-  const s = libStats || {};
-  const bs = s.byStatus || {};
-  const bf = s.byFetchability || {};
+  const s = libStats || {}; // 🎨 ใช้ s.total ในหัวข้อ (byStatus/byFetchability ย้ายไปนับใน quick-filter chips แทน)
   // ตัวเลือกคลัสเตอร์สำหรับตัวกรอง (derive จากลีดที่โหลดมา)
   const clusterFilterOpts = Array.from(new Map(libLeads.filter((l) => l.clusterId).map((l) => [l.clusterId, l.clusterArchetype || l.clusterId])).entries());
 
-  // 🆕 เฟส 8: uiV2 เปิด = preset + มุมมองจัดกลุ่มเรื่องเดียวกัน · ปิด = กริดแบน + การ์ดเดิมเป๊ะ
-  const uiV2 = !!discoveryFlags.researchUiV2;
-  // การ์ดลีด 1 ใบ (ใช้ซ้ำทั้งกริดแบนและมุมมองจัดกลุ่ม)
+  // 🎨 รีดีไซน์ default: การ์ดใหม่ + มุมมองจัดกลุ่มเรื่องเดียวกัน (เดิม gate uiV2 — ตอนนี้เป็น default)
   const renderLeadCard = (lead) => (
     <LeadCard
       key={lead.id}
       lead={lead}
-      uiV2={uiV2}
       highlightConfirmOn={!!discoveryFlags.highlightConfirm}
       busyAction={busyFor(lead.id)}
       sendNote={sendNotes[lead.id]}
@@ -567,14 +570,30 @@ export default function ResearchTab({ onToast }) {
       onSendText={sendLeadText}
     />
   );
-  // ตารางการ์ดลีด (ใช้ซ้ำทั้งส่วน 2 และ 3) — uiV2 เปิด → LeadGroupView (group storyKey||id) · ปิด → กริดแบนเดิม
-  const leadGrid = (list) => (uiV2
-    ? <LeadGroupView leads={list} renderLead={renderLeadCard} />
-    : (
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
-        {list.map(renderLeadCard)}
-      </div>
-    ));
+  // ตารางการ์ดลีด (ใช้ซ้ำทั้งส่วน 2 และ 3) — จัดกลุ่ม storyKey||id เสมอ (ไม่มี storyKey = การ์ดเดี่ยว)
+  const leadGrid = (list) => <LeadGroupView leads={list} renderLead={renderLeadCard} />;
+
+  // 🎨 ลูกกรองด่วน (client-side lens บน libLeads ที่โหลดมา — ไม่แตะ backend) + เรียง
+  const QUICK = [
+    { key: 'all', label: 'ทั้งหมด', match: () => true, color: UI.text },
+    { key: 'ready', label: '🟢 พร้อมทำ', match: (l) => l.fetchability === 'full', color: UI.green },
+    { key: 'kept', label: '⭐ เก็บ', match: (l) => l.status === 'kept', color: UI.accent },
+    { key: 'sent', label: '🚀 ส่งแล้ว', match: (l) => l.status === 'sent', color: UI.green },
+    { key: 'interview', label: '🎤 สัมภาษณ์', match: (l) => l.lane === 'interview', color: UI.accent },
+  ];
+  const quickCount = (key) => {
+    const q = QUICK.find((x) => x.key === key);
+    return q ? (libLeads || []).filter(q.match).length : 0;
+  };
+  const viewLeads = (list) => {
+    const q = QUICK.find((x) => x.key === quickFilter) || QUICK[0];
+    const arr = (list || []).filter(q.match);
+    return arr.sort((a, b) => {
+      if (sortBy === 'newest') return Date.parse(b.savedAt || '') - Date.parse(a.savedAt || '') || 0;
+      if (sortBy === 'oldest') return Date.parse(a.savedAt || '') - Date.parse(b.savedAt || '') || 0;
+      return (Number(b.matchScore) || 0) - (Number(a.matchScore) || 0);
+    });
+  };
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
@@ -588,7 +607,7 @@ export default function ResearchTab({ onToast }) {
         queriesPerCluster={queriesPerCluster} onQueries={setQueriesPerCluster}
         model={model} onModel={setModel}
         autoCfg={autoCfg} onAutoCfgChange={updateAutoCfg}
-        presets={uiV2 ? discoveryPresets : null} activePreset={activePreset} onPreset={setActivePreset}
+        presets={discoveryPresets} activePreset={activePreset} onPreset={setActivePreset}
         onStart={startHunt} hunting={hunting}
       />
 
@@ -640,21 +659,38 @@ export default function ResearchTab({ onToast }) {
       <Card>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
           <span style={{ fontSize: 15, fontWeight: 800, color: UI.text }}>🗃️ คลังลีดสะสม</span>
+          <Chip color={UI.accent}>{fmtNum(s.total || libLeads.length)} ข่าว</Chip>
           <Btn variant="subtle" busy={libLoading} onClick={() => { loadLibrary(); loadLibStats(); }} style={{ marginLeft: 'auto', minHeight: 38, padding: '6px 12px', fontSize: 12.5 }}>↻ รีเฟรช</Btn>
         </div>
 
-        {/* แถบสถิติ */}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-          <Chip color={UI.text}>ทั้งหมด {fmtNum(s.total || 0)}</Chip>
-          <Chip color={UI.blue}>ใหม่ {fmtNum(bs.new || 0)}</Chip>
-          <Chip color={UI.accent}>เก็บ {fmtNum(bs.kept || 0)}</Chip>
-          <Chip color={UI.green}>ส่งแล้ว {fmtNum(bs.sent || 0)}</Chip>
-          <Chip color={UI.muted}>ทิ้ง {fmtNum(bs.dismissed || 0)}</Chip>
-          <Chip color={UI.green}>🟢 พร้อมทำ {fmtNum(bf.full || 0)}</Chip>
-          <Chip color={UI.amber}>🟡 ลีด {fmtNum(bf.lead || 0)}</Chip>
+        {/* 🎨 ลูกกรองด่วน (แตะเดียวกรอง โชว์จำนวนในตัว) + เรียงลำดับ */}
+        <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+          {QUICK.map((q) => {
+            const on = quickFilter === q.key;
+            return (
+              <button
+                key={q.key}
+                type="button"
+                onClick={() => setQuickFilter(q.key)}
+                style={{
+                  minHeight: 34, padding: '6px 11px', borderRadius: 8, cursor: 'pointer',
+                  fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
+                  background: on ? `${q.color}22` : UI.card2, color: on ? q.color : UI.dim,
+                  border: `1.5px solid ${on ? q.color : UI.line}`,
+                }}
+              >{q.label} {fmtNum(quickCount(q.key))}</button>
+            );
+          })}
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ ...selStyle, marginLeft: 'auto' }}>
+            <option value="score">↕ คะแนนสูงสุด</option>
+            <option value="newest">↕ ล่าสุด</option>
+            <option value="oldest">↕ เก่าสุด</option>
+          </select>
         </div>
 
-        {/* ตัวกรอง */}
+        {/* ตัวกรองเพิ่มเติม (พับได้) — ยิงเซิร์ฟเวอร์: สถานะ/ช่องทาง/คลัสเตอร์/คะแนน/ค้นเนื้อ */}
+        <Btn variant="ghost" onClick={() => setShowAdvanced((v) => !v)} style={{ minHeight: 34, padding: '5px 10px', fontSize: 12.5, marginBottom: showAdvanced ? 10 : 12 }}>⚙ ตัวกรองเพิ่มเติม{showAdvanced ? ' ▲' : ' ▼'}</Btn>
+        {showAdvanced && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
           <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} style={selStyle}>
             <option value="">ทุกสถานะ</option>
@@ -688,6 +724,7 @@ export default function ResearchTab({ onToast }) {
             <Btn variant="subtle" busy={libLoading} onClick={loadLibrary} style={{ minHeight: 40 }}>🔎</Btn>
           </div>
         </div>
+        )}
 
         {libLoading ? (
           <div style={{ textAlign: 'center', padding: 26, color: UI.dim }}><Spinner size={18} /> กำลังโหลด…</div>
@@ -697,8 +734,8 @@ export default function ResearchTab({ onToast }) {
           </div>
         ) : (
           <>
-            <div style={{ fontSize: 12.5, color: UI.dim, marginBottom: 10 }}>แสดง {fmtNum(libLeads.length)} ลีด</div>
-            {leadGrid(libLeads)}
+            <div style={{ fontSize: 12.5, color: UI.dim, marginBottom: 10 }}>แสดง {fmtNum(viewLeads(libLeads).length)} จาก {fmtNum(libLeads.length)} ลีด{quickFilter !== 'all' ? ' (กรองด่วน)' : ''}</div>
+            {leadGrid(viewLeads(libLeads))}
           </>
         )}
       </Card>

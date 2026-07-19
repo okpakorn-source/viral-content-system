@@ -20,7 +20,7 @@ function scoreColor(score) {
   return UI.red;
 }
 
-// 🆕 เฟส 8 (uiV2): "พบเมื่อ" — เวลาที่ระบบเจอลีดใบนี้ (savedAt) แบบสัมพัทธ์
+// 🎨 "พบเมื่อ" — เวลาที่ระบบเจอลีดใบนี้ (savedAt) แบบสัมพัทธ์
 //   🔴 นี่คือ "เวลาที่พบ" ไม่ใช่ "อายุข่าว" (ห้ามอ้างว่าเป็นความสดของตัวข่าว) — savedAt เป็น ISO string
 function foundAgo(savedAt) {
   const t = Date.parse(savedAt || '');
@@ -36,13 +36,19 @@ function foundAgo(savedAt) {
   return `${Math.floor(day / 30)} เดือนก่อน`;
 }
 
-// ป้ายช่องทาง (ไอคอน + ชื่อไทยสั้น)
-const CHANNEL_LABEL = {
-  videos: '🎬 วิดีโอ',
-  facebook: '📘 Facebook',
-  tiktok: '🎵 TikTok',
-  youtube: '▶️ YouTube',
+// 🎨 รีดีไซน์: ป้ายแพลตฟอร์ม (ไอคอน + ชื่อสั้น + สี) — ใช้ทำ visual cue แทนรูปจริง
+const PLATFORM_META = {
+  youtube: { icon: '▶️', label: 'YouTube', color: UI.red },
+  tiktok: { icon: '🎵', label: 'TikTok', color: UI.accent2 },
+  facebook: { icon: '📘', label: 'Facebook', color: UI.blue },
+  reels: { icon: '🎞️', label: 'Reels', color: UI.accent },
+  videos: { icon: '🎬', label: 'วิดีโอ', color: UI.muted },
+  google: { icon: '🌐', label: 'ข่าว/เว็บ', color: UI.green },
+  instagram: { icon: '📸', label: 'IG', color: UI.accent2 },
 };
+function platformOf(channel) {
+  return PLATFORM_META[channel] || { icon: '🔗', label: String(channel || 'แหล่ง'), color: UI.muted };
+}
 
 // ป้ายสถานะลีด
 const STATUS_META = {
@@ -62,15 +68,18 @@ function isClipLead(l) {
   return CLIP_URL_RE.test(url);
 }
 
-export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtractAndSend, onSendText, busyAction, sendNote, extractNote, highlightConfirmOn = false, uiV2 = false }) {
+export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtractAndSend, onSendText, busyAction, sendNote, extractNote, highlightConfirmOn = false }) {
   const [showTimeline, setShowTimeline] = useState(false); // ★ trace 17 ก.ค.: กางแผงประวัติในที่ (การ์ดไม่เรียก API เอง — ให้ LeadTimeline จัดการ)
   const [showContent, setShowContent] = useState(false); // 🆕 D1 17 ก.ค.: กางกล่อง "ดูเนื้อที่จะส่ง" ก่อนกด 🚀
-  const [showAlt, setShowAlt] = useState(false); // 🆕 เฟส 8 (uiV2): กางรายชื่อแหล่งอื่นของเรื่องเดียวกัน (altSources)
+  const [showAlt, setShowAlt] = useState(false); // 🎨 กางรายชื่อแหล่งอื่นของเรื่องเดียวกัน (altSources)
   if (!lead) return null;
   const score = Math.round(Number(lead.matchScore) || 0);
   const isFull = lead.fetchability === 'full';
   const isClip = isClipLead(lead); // 🆕 A1: เลือกป้าย/ปุ่มสกัดให้ตรงประเภทแหล่ง
-  const foundLabel = uiV2 ? foundAgo(lead.savedAt) : ''; // 🆕 เฟส 8: คำนวณครั้งเดียว (nit Fable audit) — ปิด uiV2 = ไม่คำนวณ
+  const foundLabel = foundAgo(lead.savedAt); // 🎨 "พบเมื่อ" (savedAt) — คำนวณครั้งเดียว
+  const plat = platformOf(lead.channel);     // 🎨 ไอคอน+สีแพลตฟอร์ม (visual cue แทนรูป)
+  const archetype = String(lead.clusterArchetype || '').trim(); // 🎨 แนว/หมวดข่าว (จากคลัสเตอร์ครู)
+  const sourceCount = Number(lead.sourceCount) || 0;
   const status = lead.status || 'new';
   const sm = STATUS_META[status];
   const dismissed = status === 'dismissed';
@@ -91,45 +100,57 @@ export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtract
 
   return (
     <div style={{
-      background: UI.card2, border: `1px solid ${UI.line}`, borderRadius: 12, padding: 12,
-      opacity: dismissed ? 0.55 : 1, display: 'flex', flexDirection: 'column', gap: 8,
+      background: UI.card2, border: `1px solid ${UI.line}`, borderLeft: `4px solid ${scoreColor(score)}`,
+      borderRadius: 12, padding: 12, opacity: dismissed ? 0.55 : 1, display: 'flex', flexDirection: 'column', gap: 8,
     }}>
-      {/* แถวป้าย — เลื่อนแนวนอนได้บนจอแคบ */}
+      {/* 🎨 แถวหัว: แพลตฟอร์ม + แนวข่าว + เลน + สถานะ ··· คะแนน (ชิดขวา) */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          minWidth: 46, padding: '3px 8px', borderRadius: 999, fontSize: 13, fontWeight: 900,
+          display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 8,
+          fontSize: 12, fontWeight: 800, background: `${plat.color}22`, color: plat.color,
+        }}>{plat.icon} {plat.label}</span>
+        {archetype && (
+          <span
+            title={archetype}
+            style={{ padding: '3px 9px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: UI.card, color: UI.dim, border: `1px solid ${UI.line}`, maxWidth: 190, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          >{archetype}</span>
+        )}
+        {lead.lane === 'interview' && <Chip color={UI.accent}>🎤 สัมภาษณ์</Chip>}
+        {sentViaAuto && <Chip color={UI.accent}>⚡ ออโต้</Chip>}
+        {sm && <Chip color={sm.color}>{sm.label}</Chip>}
+        <span style={{
+          marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          minWidth: 50, padding: '3px 10px', borderRadius: 999, fontSize: 15, fontWeight: 900,
           background: `${scoreColor(score)}22`, color: scoreColor(score), border: `1.5px solid ${scoreColor(score)}`,
         }}>{score}%</span>
-        <Chip color={UI.blue}>{CHANNEL_LABEL[lead.channel] || lead.channel || '—'}</Chip>
-        {lead.sourceHost && <Chip color={UI.muted}>{lead.sourceHost}</Chip>}
-        {sm && <Chip color={sm.color}>{sm.label}</Chip>}
-        {sentViaAuto && <Chip color={UI.accent}>⚡ ออโต้</Chip>}
-        {/* 🆕 เฟส 7: ป้ายไฮไลต์จาก transcript จริง — 🔒 sol audit: โชว์เฉพาะเมื่อ flag เปิด (highlight ที่ persist ค้างตอนปิด flag ต้องไม่โผล่) */}
-        {highlightConfirmOn && lead.highlight && (
-          <Chip color={lead.highlight.status === 'confirmed' ? UI.accent : UI.muted}>
-            {lead.highlight.status === 'confirmed' ? '✅ ไฮไลต์จริง'
-              : lead.highlight.status === 'estimated' ? '🎬 คาดว่ามีไฮไลต์'
-                : lead.highlight.status === 'unavailable' ? '⏳ รอถอดคลิป'
-                  : '— ไม่พบไฮไลต์'}
-          </Chip>
-        )}
-        {/* 🆕 เฟส 8 (uiV2): ป้าย lane/แหล่ง/เวลาที่พบ — ปิด flag = ไม่มีป้ายกลุ่มนี้ (การ์ดเดิมเป๊ะ) */}
-        {uiV2 && lead.lane === 'interview' && <Chip color={UI.accent}>🎤 สัมภาษณ์</Chip>}
-        {uiV2 && (Number(lead.sourceCount) || 0) > 1 && <Chip color={UI.blue}>🔗 รวม {Number(lead.sourceCount)} แหล่ง</Chip>}
-        {foundLabel && <Chip color={UI.muted}>🕐 พบเมื่อ {foundLabel}</Chip>}
       </div>
 
-      {/* หัวข้อ (ลิงก์เปิดแท็บใหม่) */}
+      {/* หัวข้อ (ลิงก์เปิดแท็บใหม่) — เด่นขึ้น */}
       <a
         href={lead.url}
         target="_blank"
         rel="noopener noreferrer"
-        style={{ fontSize: 13.5, fontWeight: 700, color: UI.text, lineHeight: 1.5, textDecoration: 'none', wordBreak: 'break-word' }}
+        style={{ fontSize: 14.5, fontWeight: 700, color: UI.text, lineHeight: 1.5, textDecoration: 'none', wordBreak: 'break-word' }}
         title={lead.title}
       >
         {String(lead.title || '(ไม่มีหัวข้อ)').slice(0, 140)}{(lead.title || '').length > 140 ? '…' : ''} ↗
       </a>
+
+      {/* 🎨 แถวข้อมูล: เวลาที่พบ · แหล่ง · รวมกี่แหล่ง · ไฮไลต์ — เห็นครบในบรรทัดเดียว */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: UI.dim }}>
+        {foundLabel && <span>🕐 พบเมื่อ {foundLabel}</span>}
+        {lead.sourceHost && <span>🌐 {lead.sourceHost}</span>}
+        {sourceCount > 1 && <span style={{ color: UI.blue }}>🔗 รวม {sourceCount} แหล่ง</span>}
+        {/* 🆕 เฟส 7: ไฮไลต์จาก transcript — 🔒 gate ด้วย highlightConfirmOn (persist ค้างตอนปิด flag ต้องไม่โผล่) */}
+        {highlightConfirmOn && lead.highlight && (
+          <span style={{ color: lead.highlight.status === 'confirmed' ? UI.accent : UI.muted, fontWeight: 700 }}>
+            {lead.highlight.status === 'confirmed' ? '✅ ไฮไลต์จริง'
+              : lead.highlight.status === 'estimated' ? '🎬 คาดว่ามีไฮไลต์'
+                : lead.highlight.status === 'unavailable' ? '⏳ รอถอดคลิป'
+                  : '— ไม่พบไฮไลต์'}
+          </span>
+        )}
+      </div>
 
       {/* สถานะความพร้อม + ธงอาจเคยทำ */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -157,8 +178,8 @@ export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtract
         <div style={{ fontSize: 12, color: UI.dim, lineHeight: 1.5 }}>💬 {lead.reason}</div>
       )}
 
-      {/* 🆕 เฟส 8 (uiV2): แหล่งอื่นของเรื่องเดียวกัน (altSources จากเฟส 5) — กางดูลิงก์ได้ · ปิด flag = ไม่โผล่ */}
-      {uiV2 && Array.isArray(lead.altSources) && lead.altSources.length > 0 && (
+      {/* 🎨 แหล่งอื่นของเรื่องเดียวกัน (altSources จากเฟส 5) — กางดูลิงก์ได้ (โผล่เมื่อมีข้อมูล) */}
+      {Array.isArray(lead.altSources) && lead.altSources.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <Btn
             variant="ghost"
