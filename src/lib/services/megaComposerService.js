@@ -298,6 +298,21 @@ function _attachClutterMeta(faceBoxes, loaded) {
   return faceBoxes;
 }
 
+// ★ MEGA_PEOPLE_CROP (20 ก.ค. — mirror ของ coverExecutorService.js _peopleCropOn()): default OFF ('1'=เปิด)
+function _peopleCropOnComposer() { return process.env.MEGA_PEOPLE_CROP === '1'; }
+// plumbing (จุดที่ 1): แนบ peopleBox → fb "ไม่มีเงื่อนไข clutter" (additive, ไม่แตะ normalizeFaceBox) — clutter guard
+//   ปิดแต่ people crop เปิด: _attachClutterMeta ข้าม fb.peopleBox จึงต้องแนบเองตรงนี้ · shape triage {x,y,w,h}
+//   loaded[i].peopleBox = null/undefined ได้ (executor ตรวจ _validPeopleBox เอง) · OFF → noop (byte-parity)
+function _attachPeopleBox(faceBoxes, loaded) {
+  if (!_peopleCropOnComposer() || !Array.isArray(faceBoxes)) return faceBoxes;
+  for (let i = 0; i < faceBoxes.length; i++) {
+    const fb = faceBoxes[i], im = loaded[i];
+    if (!fb || !im) continue;
+    fb.peopleBox = im.peopleBox;
+  }
+  return faceBoxes;
+}
+
 // ★ P-CIRCLE-01 calib (18 ก.ค. — เคสจริง AC-0140/AC-0142): detector บางภาพคืน "กล่องหน้า" ที่กินถึงลำตัว/ชุด
 //   (h/w ≫ 1 เช่น 2.22) ทำให้ธง hard circle_face_overlap เป็น false-positive — วงทับชุด/ลำตัว ไม่ใช่หน้า
 //   helper PURE (ไม่มี side-effect): รับกล่อง normalized + imgW/imgH + ratio → ถ้าสูง(px) เกิน กว้าง(px)×ratio
@@ -965,6 +980,7 @@ async function composeCoreStrict(strictCtx) {
     }
   }
   _attachClutterMeta(faceBoxes, loaded); // ★ CLUTTER (มือ D 1/7): plumbing busy/eyeCategory/eyeClean/peopleBox → fb (gated, OFF=noop)
+  _attachPeopleBox(faceBoxes, loaded); // ★ MEGA_PEOPLE_CROP (จุดที่ 1): แนบ peopleBox → fb (gated แยก, OFF=noop) · strict loaded อาจไม่มี = noop
   console.log(`[MegaComposer] 🔐 strict: primary ${loaded.length} ใบตรง URL · หน้าจริง ${actualFaceHits}/${loaded.length}`);
   // assignments ตรงจาก authority — สร้างครั้งเดียว · crop ใช้สูตรเดิมของโรง (same-image เท่านั้น)
   const _bigFace = (fb) => fb && fb.x2 > fb.x1 && (fb.y2 - fb.y1) >= 0.16 && fb.y1 >= 0.01 && fb.y2 <= 0.99;
@@ -1189,6 +1205,7 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
     }
   }
   _attachClutterMeta(faceBoxes, loaded); // ★ CLUTTER (มือ D 1/7): plumbing busy/eyeCategory/eyeClean/peopleBox → fb (gated, OFF=noop)
+  _attachPeopleBox(faceBoxes, loaded); // ★ MEGA_PEOPLE_CROP (จุดที่ 1): แนบ peopleBox → fb (gated แยกจาก clutter, OFF=noop) · loaded legacy พก peopleBox จาก slotPlan
 
   // ── ②b 🔢 aHash 8x8 ต่อภาพ (คณิตล้วน) — กันภาพซ้ำ/เฟรมติดกันจากคลิปลงหลายช่อง (ลายตา) ──
   const sharp = (await import('sharp')).default;
@@ -1884,14 +1901,18 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
         if (/main|hero/i.test(String(tt.slot))) continue; // ช่องรองเท่านั้น (hero มีด่านของตัวเอง)
         // ★ CLUTTER (มือ D 6/7): ต่อสายธง cleanNeedsBackup (ครอปแล้วยังลายตา) เข้า BS → ลองสลับภาพสำรองสะอาดกว่า
         //   OFF → executor ไม่เคยตั้งธงนี้ = ไม่มีในสาย = byte-parity เดิม
-        if (tt.circleAvoidNeedsBackup === true || tt.refineNeedsBackup === true || tt.cleanNeedsBackup === true) _needSlots.push(String(tt.slot));
+        // ★ MEGA_PEOPLE_CROP (จุดที่ 4): ต่อสายธง peopleNeedsBackup (ครอปตาบอด/คนจิ๋วพื้นหลังท่วม) เข้า BS →
+        //   สลับหาใบที่มีคนชัดก่อน · OFF → executor ไม่เคยตั้งธงนี้ = ไม่มีในสาย = byte-parity เดิม
+        if (tt.circleAvoidNeedsBackup === true || tt.refineNeedsBackup === true || tt.cleanNeedsBackup === true || tt.peopleNeedsBackup === true) _needSlots.push(String(tt.slot));
       }
       if (_needSlots.length) {
         const _preBuffer = buffer;
         // ★ CLUTTER (มือ D 6/7): นับธง cleanNeedsBackup ร่วมเกณฑ์รับ/ปฏิเสธ (gated) — สลับแล้วสะอาดกว่า(ธงลด)=รับ
         //   traceQcFlags ไม่รู้จักธงนี้ → บวกเข้าแยก · OFF → +0 = byte-parity เดิม
         const _cleanN = (tr) => (_clutterGuardOnComposer() ? tr.filter((t) => t && t.cleanNeedsBackup === true).length : 0);
-        const _preFlagN = traceQcFlags(_preTrace).length + _cleanN(_preTrace);
+        // ★ MEGA_PEOPLE_CROP (จุดที่ 4): นับธง peopleNeedsBackup ร่วมเกณฑ์รับ/ปฏิเสธ (gated) — สลับแล้วคนชัดขึ้น(ธงลด)=รับ · OFF → +0 = byte-parity
+        const _peopleN = (tr) => (_peopleCropOnComposer() ? tr.filter((t) => t && t.peopleNeedsBackup === true).length : 0);
+        const _preFlagN = traceQcFlags(_preTrace).length + _cleanN(_preTrace) + _peopleN(_preTrace);
         const _preAssign = assignments.map((a) => ({ slotId: a.slotId, imageIndex: a.imageIndex, crop: a.crop, why: a.why }));
         const _preUsed = new Set(used);
         let _swaps = 0;
@@ -1917,7 +1938,7 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
         }
         if (_swaps > 0) {
           const _newBuffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: spec, faceBoxes, traceSink });
-          const _newFlagN = traceQcFlags([...traceSink]).length + _cleanN([...traceSink]);
+          const _newFlagN = traceQcFlags([...traceSink]).length + _cleanN([...traceSink]) + _peopleN([...traceSink]);
           if (_newFlagN < _preFlagN) {
             buffer = _newBuffer;
             console.log(`[MegaComposer] 🔁 BS สลับสำรอง ${_swaps} ช่อง — ธง ${_preFlagN}→${_newFlagN} (รับผล)`);

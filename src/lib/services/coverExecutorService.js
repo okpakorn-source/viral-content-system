@@ -767,6 +767,62 @@ function _clampRegion(region, imgW, imgH) {
   return { left, top, width: w, height: h };
 }
 
+// ★ MEGA_PEOPLE_CROP (20 ก.ค. — "คนมาก่อน ห้ามพื้นหลังกินเฟรม"): เมื่อ "ไม่เจอหน้า" ให้ยึด peopleBox (กล่องทั้งตัวคน
+//   จาก triage) แทนครอปกลางภาพ + บังคับคนอยู่ในเฟรม + คนจิ๋ว/พื้นหลังท่วม → สั่งเปลี่ยนภาพ (peopleNeedsBackup)
+//   kill-switch เดียว **default OFF** — เปิดเมื่อ env MEGA_PEOPLE_CROP==='1' เท่านั้น · OFF → byte-parity 100%
+//   (ทุกจุดใช้กับ "สาย noface" เท่านั้น — สาย faceRegionForSlot ที่ "เจอหน้า" ไม่ถูกแตะ)
+function _peopleCropOn() { return process.env.MEGA_PEOPLE_CROP === '1'; }
+const PEOPLE_MIN_SHARE = 0.15; // peopleBox กินพื้นที่กรอบสุดท้าย < 15% = คนจิ๋ว พื้นหลังท่วม → สั่งเปลี่ยนภาพ
+// peopleBox = triage {x,y,w,h} normalized 0-1 (gemini.readClassifierBox การันตี 0-1 + x+w≤1 + y+h≤1) — ตรวจซ้ำ fail-safe
+function _validPeopleBox(pb) {
+  return !!(pb && typeof pb === 'object'
+    && Number.isFinite(pb.x) && Number.isFinite(pb.y) && Number.isFinite(pb.w) && Number.isFinite(pb.h)
+    && pb.w > 0.02 && pb.h > 0.02
+    && pb.x >= -0.001 && pb.y >= -0.001 && (pb.x + pb.w) <= 1.001 && (pb.y + pb.h) <= 1.001);
+}
+// ครอปยึด peopleBox (ทั้งตัวคน) + เผื่อไหล่ข้าง/เหนือหัว padding (เลียน storyGroupRegion) → region สัดส่วนช่อง
+//   "ขยายด้านที่ขาด ไม่หด" (หด = ตัดคนทิ้ง) · clamp ในขอบภาพ · deterministic ล้วน
+function peopleBoxRegion(pb, imgW, imgH, slotAspect) {
+  const pwPx = pb.w * imgW, phPx = pb.h * imgH;
+  const padX = pwPx * 0.06, padTop = phPx * 0.08, padBot = phPx * 0.04; // เผื่อไหล่ข้าง + เหนือหัวเล็กน้อย
+  let L = Math.max(0, pb.x * imgW - padX);
+  let R = Math.min(imgW, (pb.x + pb.w) * imgW + padX);
+  let T = Math.max(0, pb.y * imgH - padTop);
+  let B = Math.min(imgH, (pb.y + pb.h) * imgH + padBot);
+  let w = Math.max(8, R - L), h = Math.max(8, B - T);
+  const cx = (L + R) / 2, cy = (T + B) / 2;
+  if (w / h > slotAspect) h = w / slotAspect; else w = h * slotAspect; // ขยายด้านที่ขาด — ไม่หด
+  if (w > imgW) { w = imgW; h = w / slotAspect; }
+  if (h > imgH) { h = imgH; w = h * slotAspect; }
+  const left = Math.min(Math.max(cx - w / 2, 0), imgW - w);
+  const top = Math.min(Math.max(cy - h / 2, 0), imgH - h);
+  return { left: Math.round(left), top: Math.round(top), width: Math.max(8, Math.round(w)), height: Math.max(8, Math.round(h)) };
+}
+// บังคับ peopleBox อยู่ในกรอบ region: โผล่พ้น → ขยาย+เลื่อนให้คลุมคนครบ (เลียน hero head-box guard)
+//   คลุมไม่ได้ (peopleBox ใหญ่กว่ากรอบสุด/aspect บีบ) → covered:false (ผู้เรียกตั้งธง peopleNeedsBackup)
+function _ensurePeopleInRegion(region, pb, imgW, imgH, slotAspect) {
+  const pL = pb.x * imgW, pT = pb.y * imgH, pR = (pb.x + pb.w) * imgW, pB = (pb.y + pb.h) * imgH;
+  const inside = (r) => pL >= r.left - 0.5 && pR <= r.left + r.width + 0.5 && pT >= r.top - 0.5 && pB <= r.top + r.height + 0.5;
+  if (inside(region)) return { region, changed: false, covered: true };
+  let nW = Math.max(region.width, pR - pL), nH = Math.max(region.height, pB - pT);
+  if (nW / nH > slotAspect) nH = nW / slotAspect; else nW = nH * slotAspect; // คง aspect ช่อง
+  nW = Math.min(nW, imgW); nH = Math.min(nH, imgH);
+  if (nW / nH > slotAspect) nW = nH * slotAspect; else nH = nW / slotAspect;
+  const pcx = (pL + pR) / 2, pcy = (pT + pB) / 2;
+  const left = Math.min(Math.max(pcx - nW / 2, 0), Math.max(0, imgW - nW));
+  const top = Math.min(Math.max(pcy - nH / 2, 0), Math.max(0, imgH - nH));
+  const nr = { left: Math.round(left), top: Math.round(top), width: Math.max(8, Math.round(nW)), height: Math.max(8, Math.round(nH)) };
+  return { region: nr, changed: true, covered: inside(nr) };
+}
+// สัดส่วนพื้นที่ที่ peopleBox กินในกรอบ region (0-1) — เกณฑ์ "คนจิ๋ว/พื้นหลังท่วม" (region→slot fill สัดส่วนตรง)
+function _peopleShareInRegion(region, pb, imgW, imgH) {
+  const pL = pb.x * imgW, pT = pb.y * imgH, pR = (pb.x + pb.w) * imgW, pB = (pb.y + pb.h) * imgH;
+  const ix1 = Math.max(region.left, pL), iy1 = Math.max(region.top, pT);
+  const ix2 = Math.min(region.left + region.width, pR), iy2 = Math.min(region.top + region.height, pB);
+  const iw = Math.max(0, ix2 - ix1), ih = Math.max(0, iy2 - iy1);
+  return (iw * ih) / Math.max(1, region.width * region.height);
+}
+
 /** ครอป+ย่อภาพลงช่องสี่เหลี่ยม (+กรอบสีถ้ามี) */
 async function renderRectTile(src, crop, slot, fb, traceSink = null) {
   const meta = await sharp(src).metadata();
@@ -774,6 +830,7 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
   let region;
   let _br = ''; // เฟส 0.1: ชื่อสาขาครอปสำหรับ trace
   let _needHeroBackup = false; // ★ HERO_CROP_GUARD: ธงให้ composer สลับภาพสำรอง/HOLD (เลียน _needRefineBackup/_needCircleBackup)
+  let _needPeopleBackup = false; // ★ MEGA_PEOPLE_CROP: ไม่มี peopleBox ให้ยึด (ครอปตาบอด) / คนจิ๋ว-พื้นหลังท่วม → สั่งเปลี่ยนภาพ
   if (crop && crop._final) {
     // ★ rev.FINAL: Final Cropper เห็นภาพจริงแล้วตัดสิน — เชื่อ 100% ห้ามชั้นไหนคำนวณทับ
     region = fitCropInsideAspect(crop, imgW, imgH, slot.w / slot.h);
@@ -902,6 +959,11 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
     const _c = { x: sx1, y: cy1, w: Math.min(1 - sx1, Math.max(0.05, s.x2 - s.x1)), h: Math.max(0.05, cy2 - cy1) };
     region = fitCropToSlotAspect(_c, imgW, imgH, slot.w / slot.h);
     _br = 'subject-box';
+  } else if (_peopleCropOn() && _validPeopleBox(fb && fb.peopleBox)) {
+    // ★ MEGA_PEOPLE_CROP: ไม่เจอหน้า + detector ไม่ชี้ subject แต่ triage ชี้ "กล่องคนทั้งตัว" (peopleBox) →
+    //   ครอปยึดคน (เผื่อหัว/ไหล่) แทนครอปกลางภาพตาบอด — "คนมาก่อน ห้ามพื้นหลังกินเฟรม"
+    region = peopleBoxRegion(fb.peopleBox, imgW, imgH, slot.w / slot.h);
+    _br = 'people-box';
   } else {
     // ★ rev.23 (CASE-237 ผู้ใช้สั่ง — กฎ "ห้ามภาพช่วงลำตัวเยอะ/ภาพยืนเต็มตัว" ทุกช่อง):
     //   ช่องที่ "ตรวจไม่เจอหน้า" + ครอป Director สูง (>0.5 ของภาพ = เห็นลำตัว/เต็มตัว) → ซูมเข้า "ช่วงบน-กลาง"
@@ -916,6 +978,19 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
       _br = 'noface-director-asis';
     }
     region = fitCropToSlotAspect(_c, imgW, imgH, slot.w / slot.h);
+  }
+  // ★ MEGA_PEOPLE_CROP (in-frame clamp): เฉพาะ "สาย noface" (subject/people/blind) — สาย face มีการ์ดของตัวเอง
+  //   peopleBox โผล่พ้นกรอบ → ขยาย+เลื่อนให้คลุมคนครบ · คลุมไม่ได้ → ธง peopleNeedsBackup (สั่งเปลี่ยนภาพ)
+  //   ครอปตาบอด (_br='noface-*' — ไม่มี peopleBox/subject ให้ยึด) → ธงเช่นกัน · OFF/สาย face → ข้าม (byte-parity)
+  if (_peopleCropOn() && !(crop && crop._final) && !usableSingleFace(fb) && !usableGroupFaces(fb)) {
+    const _pb = _validPeopleBox(fb && fb.peopleBox) ? fb.peopleBox : null;
+    if (_pb) {
+      const _pc = _ensurePeopleInRegion(region, _pb, imgW, imgH, slot.w / slot.h);
+      if (_pc.changed) { region = _pc.region; _br += '+peoplefit'; }
+      if (!_pc.covered) _needPeopleBackup = true;
+    } else if (String(_br).startsWith('noface-')) {
+      _needPeopleBackup = true; // ครอปกลางภาพตาบอด ไม่มีคนให้ยึด → ให้ composer หาใบที่มีคนชัดก่อน
+    }
   }
   // ★ เฟส 6B.3/6B.4: ซูมครอปแน่นหน้าเด่น/บริบทไม่โล่ง — ก่อน trace/upscale (skip เมื่อ _final = เชื่อ crop 100%)
   let _tg6b = null;
@@ -1040,6 +1115,13 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
     && (_facesInRegionCount(fb, region, imgW, imgH) >= 3 || (fb && fb.eyeClean === false) || (fb && Number.isFinite(fb.busy) && fb.busy >= 2))) {
     if (_tr) _tr.cleanNeedsBackup = true;
   }
+  // ★ MEGA_PEOPLE_CROP (point 4b — วัดกรอบสุดท้าย): peopleBox กินพื้นที่ < PEOPLE_MIN_SHARE (คนจิ๋ว พื้นหลังท่วม)
+  //   → ธงเพิ่ม (additive กับ point 3/blind) · เฉพาะสาย noface · OFF/สาย face → ไม่วัด (byte-parity)
+  if (_peopleCropOn() && !(crop && crop._final) && !usableSingleFace(fb) && !usableGroupFaces(fb)) {
+    const _pb2 = _validPeopleBox(fb && fb.peopleBox) ? fb.peopleBox : null;
+    if (_pb2 && _peopleShareInRegion(region, _pb2, imgW, imgH) < PEOPLE_MIN_SHARE) _needPeopleBackup = true;
+  }
+  if (_tr && _needPeopleBackup) _tr.peopleNeedsBackup = true; // ★ MEGA_PEOPLE_CROP: additive — composer อ่านเพื่อสลับภาพที่มีคนชัด
   if (_upFinal > HERO_STRETCH_MAX) console.log(`[CoverV3] 🔎 ${slot.id} ยืด ${_upFinal.toFixed(2)}x (region ${region.width}x${region.height} → ${slot.w}x${slot.h})`);
   const _doSharpen = _upFinal < 1; // sharpen เฉพาะเคสย่อ — ขยายแล้ว sharpen = ขยาย artifact (เฟส 3.3)
   // rev.16: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — WB คุมโทนรวม + รีทัชเบา
@@ -1078,6 +1160,7 @@ async function renderCircleTile(src, crop, slot, fb, traceSink = null) {
   //   ถ้าภาพมีหลายหน้า → ครอปหน้าใหญ่สุดเดี่ยว (ชัดกว่าโชว์ทั้งกลุ่มในวงเล็ก)
   let region;
   let _br = ''; // เฟส 0.1: ชื่อสาขาครอปสำหรับ trace
+  let _needPeopleBackup = false; // ★ MEGA_PEOPLE_CROP: ไม่มี peopleBox ให้ยึด / คนจิ๋วในวง → สั่งเปลี่ยนภาพ
   if (crop && crop._final) {
     // ★ rev.FINAL: เชื่อ Final Cropper 100% — หดเป็นจัตุรัสภายในกรอบ (bias บนกันตัดหัว)
     region = fitCropInsideAspect(crop, imgW, imgH, 1);
@@ -1089,6 +1172,10 @@ async function renderCircleTile(src, crop, slot, fb, traceSink = null) {
     const largest = fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0]);
     region = faceRegionForSlot(largest, imgW, imgH, 1, 0.66, 0.47, 0.66, 0.35); // ★rev.K1 +minFace 0.35 · เฟส2.5: วงกลมเผื่อขอบโค้ง (faceFrac/maxFaceHFrac 0.80→0.66) ให้ตรง CIRCLE_CROP
     _br = 'multi-face-largest';
+  } else if (_peopleCropOn() && _validPeopleBox(fb && fb.peopleBox)) {
+    // ★ MEGA_PEOPLE_CROP: วงกลมไม่เจอหน้า แต่ triage ชี้ "กล่องคนทั้งตัว" → ยึด peopleBox แทนครอปจัตุรัสตาบอด
+    region = peopleBoxRegion(fb.peopleBox, imgW, imgH, 1);
+    _br = 'people-box';
   } else {
     // ★ rev.S3 (CASE-299 วงกลมครึ่งตัว): ภาพไม่มีพิกัดหน้า (เอกสาร EVIDENCE / ตรวจหน้าไม่เจอ)
     //   เดิม fitCropToSlotAspect "ขยาย" ด้านสั้นให้เป็นจัตุรัส = เห็นตัว/ฉากเพิ่ม → เปลี่ยนเป็น "หด" ด้านยาวลง
@@ -1101,6 +1188,20 @@ async function renderCircleTile(src, crop, slot, fb, traceSink = null) {
     py = Math.min(Math.max(py, 0), imgH - side);
     region = { left: Math.round(px), top: Math.round(py), width: Math.round(side), height: Math.round(side) };
     _br = 'noface-square';
+  }
+
+  // ★ MEGA_PEOPLE_CROP (in-frame clamp — วงกลม): เฉพาะสาย noface (people-box/noface-square) · สาย face ไม่แตะ
+  //   peopleBox โผล่พ้นวง → ขยาย+เลื่อนคลุมคน · คลุมไม่ได้/ครอปตาบอด → ธง peopleNeedsBackup · OFF → ข้าม (byte-parity)
+  const _circleNoFace = !(fb && (fb.x2 > fb.x1 || (Array.isArray(fb.allFaces) && fb.allFaces.length >= 1)));
+  if (_peopleCropOn() && !(crop && crop._final) && _circleNoFace) {
+    const _pb = _validPeopleBox(fb && fb.peopleBox) ? fb.peopleBox : null;
+    if (_pb) {
+      const _pc = _ensurePeopleInRegion(region, _pb, imgW, imgH, 1);
+      if (_pc.changed) { region = _pc.region; _br += '+peoplefit'; }
+      if (!_pc.covered) _needPeopleBackup = true;
+    } else if (String(_br).startsWith('noface-')) {
+      _needPeopleBackup = true; // วงกลมครอปจัตุรัสตาบอด ไม่มีคนให้ยึด → ให้ composer หาใบที่มีคนชัดก่อน
+    }
   }
 
   // ★ เฟส 6B.3: ซูมวงกลมให้หน้าเต็มวงถึงเป้า (เคารพเพดานยืด 1.6 + ไม่ตัดหัว) — skip เมื่อ _final
@@ -1119,6 +1220,12 @@ async function renderCircleTile(src, crop, slot, fb, traceSink = null) {
     && (_br === 'noface-square' || _facesInRegionCount(fb, region, imgW, imgH) >= 2 || (fb && fb.eyeClean === false) || (fb && Number.isFinite(fb.busy) && fb.busy >= 2))) {
     if (_tr) _tr.cleanNeedsBackup = true;
   }
+  // ★ MEGA_PEOPLE_CROP (point 4b — วงกลม): peopleBox กินพื้นที่วง < PEOPLE_MIN_SHARE (คนจิ๋ว) → ธง (additive) · OFF → ข้าม
+  if (_peopleCropOn() && !(crop && crop._final) && _circleNoFace) {
+    const _pb2 = _validPeopleBox(fb && fb.peopleBox) ? fb.peopleBox : null;
+    if (_pb2 && _peopleShareInRegion(region, _pb2, imgW, imgH) < PEOPLE_MIN_SHARE) _needPeopleBackup = true;
+  }
+  if (_tr && _needPeopleBackup) _tr.peopleNeedsBackup = true; // ★ MEGA_PEOPLE_CROP: additive — composer อ่านเพื่อสลับภาพที่มีคนชัด
   // ★ เฟส 3.1+3.3 (10 ก.ค.): วัด upscale จริง + งด sharpen ตอนขยาย (วงกลม)
   const _upR = Math.max(d / Math.max(1, region.width), d / Math.max(1, region.height));
   // ★ AC-0107 P1-1: exact raw upscale (see rect tile) — rounded `upscale` is advisory-only, never the hard decision.
