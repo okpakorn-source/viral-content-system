@@ -46,6 +46,7 @@ export default function ResearchTab({ onToast }) {
   const [model, setModel] = useState('fast');
   const [autoCfg, setAutoCfg] = useState(AUTO_CFG_DEFAULT); // 🆕 A1 (17 ก.ค. 69): {enabled,minScore,maxPerRound} — default ปิด
   const [discoveryMasterOn, setDiscoveryMasterOn] = useState(false); // 🆕 เฟส 0: MASTER เปิดไหม (อ่านจาก GET hunt) → เปิด=แนบ shadow sample เข้า logRun
+  const [discoveryFlags, setDiscoveryFlags] = useState({}); // 🆕 เฟส 2+: flags ย่อย (diversity ฯลฯ) จาก config เดียวกัน
 
   // ── ส่วน 2: การล่ารอบนี้ ──
   const [hunting, setHunting] = useState(false);
@@ -107,9 +108,12 @@ export default function ResearchTab({ onToast }) {
   const loadDiscoveryConfig = useCallback(async () => {
     try {
       const res = await apiFetch(HUNT); // GET → { success, masterOn, flags, presets }
-      setDiscoveryMasterOn(!!(res && res.success && res.masterOn));
+      const ok = !!(res && res.success);
+      setDiscoveryMasterOn(ok && !!res.masterOn);
+      setDiscoveryFlags(ok && res.flags ? res.flags : {});
     } catch {
       setDiscoveryMasterOn(false); // อ่านไม่ได้ = ถือว่าปิด (โหมดวัดผลเงาไม่ทำงาน)
+      setDiscoveryFlags({});
     }
   }, []);
 
@@ -260,9 +264,12 @@ export default function ResearchTab({ onToast }) {
     for (const clusterId of clusterKeys) {
       idx++;
       if (!clusterId) continue;
+      // 🆕 เฟส 2: เปิด diversity → เรียง diversityRank (กระจายช่อง) ก่อนตัด 16 · ปิด → เรียง position เดิมเป๊ะ
       const batch = (byCluster.get(clusterId) || [])
         .slice()
-        .sort((a, b) => (Number(a.position) || 99) - (Number(b.position) || 99))
+        .sort((a, b) => (discoveryFlags.diversity
+          ? (Number(a.diversityRank) || 999) - (Number(b.diversityRank) || 999)
+          : (Number(a.position) || 99) - (Number(b.position) || 99)))
         .slice(0, JUDGE_MAX_PER_CLUSTER);
       if (batch.length === 0) continue;
 

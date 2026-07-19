@@ -19,6 +19,7 @@ import { listExemplars, clusterSummary } from './dnaLibrary.js';
 import { sanitizeText } from './dnaContract.js';
 import { getDiscoveryConfig } from './researchDiscoveryConfig.js';
 import { resolveCandidateChannel, platformGroupOf } from './researchChannelMap.js';
+import { mergeCandidateEvidence, rankDiverseCandidates } from './researchDiversify.js';
 
 // ★ เฟส 1: re-export ให้ผู้เรียก import จาก researchHunt ได้ตามสัญญาแผน (ตัวจริงอยู่ researchChannelMap.js — pure เทสตรงได้)
 export { resolveCandidateChannel, platformGroupOf } from './researchChannelMap.js';
@@ -190,8 +191,10 @@ export async function huntClusters({
 } = {}) {
   const t0 = Date.now();
 
-  // ★ เฟส 1: สวิตช์ระบุแพลตฟอร์มจริง (master && DESK_V2_REELS). ปิด = channel/สถิติ/ลำดับเดิมเป๊ะ
-  const reelsOn = getDiscoveryConfig().flags.reels;
+  // ★ เฟส 1-2: อ่าน discovery config ครั้งเดียว. ปิดทุก flag = channel/สถิติ/ลำดับ candidate เดิมเป๊ะ
+  const _discoveryCfg = getDiscoveryConfig();
+  const reelsOn = _discoveryCfg.flags.reels;         // เฟส 1: ระบุแพลตฟอร์มจริงจาก URL
+  const diversityOn = _discoveryCfg.flags.diversity; // เฟส 2: รวม URL ซ้ำ (เก็บหลักฐาน) + จัดอันดับกระจาย
 
   const safeTopClusters = Math.max(1, Math.min(30, Number(topClusters) || 10));
   const safeQueriesPerCluster = Math.max(1, Math.min(6, Number(queriesPerCluster) || 4));
@@ -262,6 +265,7 @@ export async function huntClusters({
 
   // ── (3) ยิงจริง: pool ขนานสูงสุด 4 call task พร้อมกัน ──
   const candidates = [];
+  const allHits = []; // ★ เฟส 2 (ON): เก็บทุก hit (รวม URL ซ้ำ) ไว้ merge+rank หลัง pool
   const seenUrls = new Map(); // normalized url → true (เก็บตัวแรกไว้)
   const byChannel = { videos: 0, facebook: 0, reels: 0, tiktok: 0, youtube: 0, google: 0 };
   const byDiscoveryChannel = { videos: 0, facebook: 0, reels: 0, tiktok: 0, youtube: 0, google: 0 }; // ★ เฟส 1 (ON): ช่องที่ยิงค้น
@@ -305,12 +309,8 @@ export async function huntClusters({
         selfHits++;
         return;
       }
-      if (seenUrls.has(dedupKey)) {
-        dupCount++;
-        return;
-      }
-      seenUrls.set(dedupKey, true);
 
+      // ประกอบ candidate พื้นฐาน (+ เฟส 1 resolve ถ้า reelsOn) — ยังไม่แตะสถิติ
       const cand = {
         url,
         title: sanitizeText(raw.title, 300),
@@ -323,23 +323,63 @@ export async function huntClusters({
         publishedHint: sanitizeText(raw.publishedHint, 60),
         position: idx + 1,
       };
-
+      let effChannel = channel;
       if (reelsOn) {
-        // 🆕 เฟส 1: channel = แพลตฟอร์มจริงจาก URL, discoveredVia = ช่องที่ยิงค้น, +platformGroup (additive)
-        const resolved = resolveCandidateChannel(url, channel);
-        cand.channel = resolved;
+        effChannel = resolveCandidateChannel(url, channel);
+        cand.channel = effChannel;
         cand.discoveredVia = channel;
-        cand.platformGroup = platformGroupOf(resolved);
-        if (resolved !== channel) reclassifiedCount++;
-        byChannel[resolved] = (byChannel[resolved] || 0) + 1; // นับแพลตฟอร์มจริง (อาจมีคีย์ใหม่ เช่น instagram)
+        cand.platformGroup = platformGroupOf(effChannel);
+      }
+
+      if (diversityOn) {
+        // 🆕 เฟส 2: ไม่ทิ้ง URL ซ้ำระหว่างเก็บ — เก็บทุก hit ไว้ merge + จัดอันดับหลัง pool
+        cand._urlKey = dedupKey;
+        if (!cand.platformGroup) cand.platformGroup = platformGroupOf(resolveCandidateChannel(url, channel));
+        allHits.push(cand);
+        return;
+      }
+
+      // ── path เดิม (diversity ปิด): dedup ระหว่างเก็บ + นับสถิติแบบเดิม ──
+      if (seenUrls.has(dedupKey)) {
+        dupCount++;
+        return;
+      }
+      seenUrls.set(dedupKey, true);
+      if (reelsOn) {
+        if (effChannel !== channel) reclassifiedCount++;
+        byChannel[effChannel] = (byChannel[effChannel] || 0) + 1; // นับแพลตฟอร์มจริง (อาจมีคีย์ใหม่ เช่น instagram)
         byDiscoveryChannel[channel] = (byDiscoveryChannel[channel] || 0) + 1;
       } else if (byChannel[channel] != null) {
         byChannel[channel]++; // ── ปิด flag: พฤติกรรมเดิมเป๊ะ ──
       }
-
       candidates.push(cand);
     });
   });
+
+  // ── (3.5) เฟส 2 (ON): รวม URL ซ้ำ (เก็บหลักฐาน) → จัดอันดับกระจายต่อคลัสเตอร์ (diversityRank) ──
+  if (diversityOn) {
+    const merged = mergeCandidateEvidence(allHits, { urlKeyFn: (c) => c._urlKey || normalizeUrlKey(c.url) });
+    dupCount = allHits.length - merged.length; // จำนวน hit ที่ยุบรวม (ยืนยันหลายทาง)
+    const pp = _discoveryCfg.targets.platformPct || {};
+    const weights = { meta: pp.meta || 45, tiktok: pp.tiktok || 29, youtube: pp.youtube || 26, web: 12, other: 4 };
+    const byClusterMerged = new Map();
+    for (const c of merged) {
+      const k = c.clusterId || '';
+      if (!byClusterMerged.has(k)) byClusterMerged.set(k, []);
+      byClusterMerged.get(k).push(c);
+    }
+    for (const arr of byClusterMerged.values()) {
+      for (const c of rankDiverseCandidates(arr, { weights })) {
+        delete c._urlKey; // ไม่ส่ง field ภายในออก
+        candidates.push(c);
+        byChannel[c.channel] = (byChannel[c.channel] || 0) + 1;
+        if (reelsOn) {
+          if (c.discoveredVia) byDiscoveryChannel[c.discoveredVia] = (byDiscoveryChannel[c.discoveredVia] || 0) + 1;
+          if (c.discoveredVia && c.channel !== c.discoveredVia) reclassifiedCount++;
+        }
+      }
+    }
+  }
 
   const estCostTHB = Math.round(serperCalls * SERPER_COST_THB_PER_CALL * 100) / 100;
 
@@ -359,6 +399,8 @@ export async function huntClusters({
       tookMs: Date.now() - t0,
       // ★ เฟส 1 (ON เท่านั้น): สถิติแยกช่องยิงค้น vs แพลตฟอร์มจริง — ปิด flag = ไม่มี field นี้ (snapshot เดิมเป๊ะ)
       ...(reelsOn ? { byDiscoveryChannel, reclassifiedCount } : {}),
+      // ★ เฟส 2 (ON เท่านั้น): ทำ merge+rank แล้ว (dupCount = hit ที่ยุบรวม)
+      ...(diversityOn ? { diversityApplied: true } : {}),
     },
   };
 }
