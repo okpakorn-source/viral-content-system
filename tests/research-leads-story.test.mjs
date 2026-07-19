@@ -34,7 +34,8 @@ function leads() { return globalThis.__STORES__.get('research-leads') || []; }
 async function withStory(on, fn) {
   const M = 'DESK_V2_DISCOVERY_V2'; const S = 'DESK_V2_STORY_GROUPING';
   const sm = process.env[M]; const ss = process.env[S];
-  if (on) { process.env[M] = '1'; process.env[S] = '1'; } else { delete process.env[M]; delete process.env[S]; }
+  // 🟢 canary: default=ON แล้ว → ปิดต้องตั้ง '0' ชัดเจน (kill-switch) ไม่ใช่ delete (empty=ON)
+  if (on) { process.env[M] = '1'; process.env[S] = '1'; } else { process.env[M] = '0'; process.env[S] = '0'; }
   try { return await fn(); } finally {
     if (sm === undefined) delete process.env[M]; else process.env[M] = sm;
     if (ss === undefined) delete process.env[S]; else process.env[S] = ss;

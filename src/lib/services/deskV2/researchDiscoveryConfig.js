@@ -27,9 +27,9 @@ function numOf(env, name, def, min, max) {
   const hi = max == null ? Infinity : max;
   return Math.min(hi, Math.max(lo, n));
 }
-// feature มีผลเมื่อ master + feature เปิดครบ
-function feat(env, name) {
-  return isOn(env, MASTER_FLAG) && isOn(env, name);
+// อ่านว่า env สั่ง "ปิด" ชัดเจนไหม ('0') — ใช้เป็น kill-switch ของ flag ที่ default=ON
+function isOff(env, name) {
+  return String(env && env[name] != null ? env[name] : '') === '0';
 }
 
 // 5 ปุ่ม preset สำหรับ UI (ใช้จริงเฟส 8) — ตรงกับหมวดที่พนักงานเลือกถอดจริง (production clip-insights)
@@ -47,8 +47,12 @@ export const DISCOVERY_PRESETS = [
  */
 export function getDiscoveryConfig(env = process.env) {
   const e = env || {};
-  const masterOn = isOn(e, MASTER_FLAG);
-  const sourceExpansionOn = feat(e, 'DESK_V2_SOURCE_EXPANSION');
+  // 🟢 canary 20 ก.ค. 69 (ผู้ใช้สั่งเปิดชุดปลอดภัย): master + ชุดปลอดภัย default=ON, ปิดได้ด้วย env=0 (kill-switch)
+  //   ยัง default=OFF (ต้อง env=1): interviewLane (รอแก้ F3-F5), sourceExpansion+sources (มีค่า Serper)
+  const masterOn = !isOff(e, MASTER_FLAG);                  // เปิด default, kill ด้วย DESK_V2_DISCOVERY_V2=0
+  const featOn = (name) => masterOn && !isOff(e, name);     // 🟢 canary: เปิด default (ปิดด้วย env=0)
+  const featStrict = (name) => masterOn && isOn(e, name);   // 🔴 ปิด default (เปิดด้วย env=1)
+  const sourceExpansionOn = featStrict('DESK_V2_SOURCE_EXPANSION');
   const source = (name) => sourceExpansionOn && isOn(e, name); // แหล่งเปิดได้ต่อเมื่อ expansion เปิดด้วย
 
   return {
@@ -56,15 +60,17 @@ export function getDiscoveryConfig(env = process.env) {
     baselineVersion: BASELINE_VERSION,
     masterOn,
     flags: {
-      reels: feat(e, 'DESK_V2_REELS'),
-      diversity: feat(e, 'DESK_V2_DIVERSITY'),
-      queryPlanner: feat(e, 'DESK_V2_QUERY_PLANNER'),
+      // 🟢 ชุดปลอดภัย — canary เปิด default (kill ด้วย env=0)
+      reels: featOn('DESK_V2_REELS'),
+      diversity: featOn('DESK_V2_DIVERSITY'),
+      queryPlanner: featOn('DESK_V2_QUERY_PLANNER'),
+      storyGrouping: featOn('DESK_V2_STORY_GROUPING'),
+      highlightConfirm: featOn('DESK_V2_HIGHLIGHT_CONFIRM'),
+      researchUiV2: featOn('DESK_V2_RESEARCH_UI_V2'),
+      virtualThemes: featOn('DESK_V2_VIRTUAL_THEMES'),
+      // 🔴 ยังปิด default — ต้อง env=1 (interviewLane รอ F3-F5 · sourceExpansion มีค่า Serper)
       sourceExpansion: sourceExpansionOn,
-      storyGrouping: feat(e, 'DESK_V2_STORY_GROUPING'),
-      interviewLane: feat(e, 'DESK_V2_INTERVIEW_LANE'),
-      highlightConfirm: feat(e, 'DESK_V2_HIGHLIGHT_CONFIRM'),
-      researchUiV2: feat(e, 'DESK_V2_RESEARCH_UI_V2'),
-      virtualThemes: feat(e, 'DESK_V2_VIRTUAL_THEMES'),
+      interviewLane: featStrict('DESK_V2_INTERVIEW_LANE'),
     },
     sources: {
       serperNews: source('DESK_V2_SOURCE_SERPER_NEWS'),

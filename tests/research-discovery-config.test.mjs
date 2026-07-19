@@ -6,7 +6,8 @@
 //   • getPublicDiscoveryConfig(env) — ชุดย่อยปลอดภัยสำหรับ UI
 //   • DISCOVERY_PRESETS             — 5 ปุ่ม preset
 //
-// 🔴 หัวใจที่ต้องพิสูจน์: ทุก flag default ปิด + MASTER ปิด = ทุกอย่างปิด (ระบบเดิมไม่สะเทือน)
+// 🟢 canary 20 ก.ค.: ชุดปลอดภัย default=ON (kill ด้วย env=0) · interviewLane+sources ยัง default=OFF (ต้อง env=1)
+//    🔴 kill-switch: MASTER (DESK_V2_DISCOVERY_V2)=0 → ปิดหมด = ระบบเดิมเป๊ะ
 // pure module ไม่มี external import → import ตรงได้ ไม่ต้อง stub
 // ============================================================
 import { test } from 'node:test';
@@ -18,31 +19,37 @@ import {
   MASTER_FLAG,
 } from '../src/lib/services/deskV2/researchDiscoveryConfig.js';
 
-test('env ว่าง → master ปิด + ทุก flag/source ปิด', () => {
+const SAFE_ON = ['reels', 'diversity', 'queryPlanner', 'storyGrouping', 'highlightConfirm', 'researchUiV2', 'virtualThemes'];
+
+test('canary: env ว่าง → master ON + ชุดปลอดภัย ON · interviewLane/sources OFF', () => {
   const c = getDiscoveryConfig({});
-  assert.equal(c.masterOn, false);
-  for (const [k, v] of Object.entries(c.flags)) {
-    assert.equal(v, false, `flag ${k} ต้องปิดตอน env ว่าง`);
-  }
-  for (const [k, v] of Object.entries(c.sources)) {
-    assert.equal(v, false, `source ${k} ต้องปิดตอน env ว่าง`);
-  }
+  assert.equal(c.masterOn, true);
+  for (const k of SAFE_ON) assert.equal(c.flags[k], true, `ชุดปลอดภัย ${k} ต้องเปิด default`);
+  assert.equal(c.flags.interviewLane, false); // รอ F3-F5
+  assert.equal(c.flags.sourceExpansion, false); // มีค่า Serper
+  for (const [k, v] of Object.entries(c.sources)) assert.equal(v, false, `source ${k} ต้องปิด default`);
   assert.equal(c.schemaVersion, 2);
 });
 
-test('MASTER ปิด แต่ feature เปิด → feature ยังปิด (safety)', () => {
-  const c = getDiscoveryConfig({ DESK_V2_REELS: '1', DESK_V2_INTERVIEW_LANE: '1' });
+test('kill-switch: MASTER=0 → ปิดหมดทุก flag/source (ระบบเดิมเป๊ะ)', () => {
+  const c = getDiscoveryConfig({ [MASTER_FLAG]: '0' });
   assert.equal(c.masterOn, false);
-  assert.equal(c.flags.reels, false);
-  assert.equal(c.flags.interviewLane, false);
+  for (const [k, v] of Object.entries(c.flags)) assert.equal(v, false, `flag ${k} ต้องปิดตอน MASTER=0`);
+  for (const [k, v] of Object.entries(c.sources)) assert.equal(v, false, `source ${k} ต้องปิดตอน MASTER=0`);
 });
 
-test('MASTER เปิด + feature เปิด → feature มีผล', () => {
-  const c = getDiscoveryConfig({ [MASTER_FLAG]: '1', DESK_V2_REELS: '1', DESK_V2_INTERVIEW_LANE: '1' });
+test('kill-switch รายตัว: DESK_V2_DIVERSITY=0 → diversity ปิด แต่ตัวอื่นยังเปิด', () => {
+  const c = getDiscoveryConfig({ DESK_V2_DIVERSITY: '0' });
   assert.equal(c.masterOn, true);
-  assert.equal(c.flags.reels, true);
-  assert.equal(c.flags.interviewLane, true);
-  assert.equal(c.flags.diversity, false); // ที่ไม่ได้เปิดต้องยังปิด
+  assert.equal(c.flags.diversity, false);
+  assert.equal(c.flags.queryPlanner, true);
+  assert.equal(c.flags.storyGrouping, true);
+});
+
+test('interviewLane ยัง opt-in: default OFF · env=1 → ON · MASTER=0 → OFF', () => {
+  assert.equal(getDiscoveryConfig({}).flags.interviewLane, false);
+  assert.equal(getDiscoveryConfig({ DESK_V2_INTERVIEW_LANE: '1' }).flags.interviewLane, true);
+  assert.equal(getDiscoveryConfig({ DESK_V2_INTERVIEW_LANE: '1', [MASTER_FLAG]: '0' }).flags.interviewLane, false);
 });
 
 test('แหล่งข่าวใหม่ต้องเปิดครบ 3 ชั้น (master + expansion + ตัวแหล่ง)', () => {

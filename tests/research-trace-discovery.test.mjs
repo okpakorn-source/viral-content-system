@@ -59,7 +59,7 @@ function storedRun(id) { return (globalThis.__STORES__.get(RUNS) || []).find((x)
 async function withMaster(on, fn) {
   const KEY = 'DESK_V2_DISCOVERY_V2';
   const saved = process.env[KEY];
-  if (on) process.env[KEY] = '1'; else delete process.env[KEY];
+  if (on) process.env[KEY] = '1'; else process.env[KEY] = '0'; // 🟢 canary: default=ON → ปิดต้องตั้ง '0' (empty=ON แล้ว)
   try { return await fn(); } finally {
     if (saved === undefined) delete process.env[KEY]; else process.env[KEY] = saved;
   }
