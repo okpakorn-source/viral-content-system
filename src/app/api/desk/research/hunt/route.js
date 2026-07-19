@@ -47,6 +47,11 @@ export async function POST(request) {
     const trendTerms = Array.isArray(body?.trendTerms)
       ? body.trendTerms.filter((x) => typeof x === 'string' && x).map((x) => x.slice(0, 70)).slice(0, 20)
       : [];
+    // ★ เฟส 4 (optional): allowlist กรองแหล่งข่าวใหม่ (มีผลเฉพาะเมื่อ DESK_V2_SOURCE_EXPANSION เปิด)
+    const KNOWN_SOURCES = ['serper-news', 'google-news-rss', 'direct-rss', 'youtube-watch', 'instagram'];
+    const sources = Array.isArray(body?.sources)
+      ? body.sources.filter((s) => KNOWN_SOURCES.includes(s))
+      : null;
 
     if (!Number.isFinite(topClusters) || topClusters < 1 || topClusters > 30) {
       return NextResponse.json({
@@ -71,7 +76,7 @@ export async function POST(request) {
       }, { status: 400 });
     }
 
-    const result = await huntClusters({ clusterIds, topClusters, queriesPerCluster, channels, perQueryResults, preset, trendTerms });
+    const result = await huntClusters({ clusterIds, topClusters, queriesPerCluster, channels, perQueryResults, preset, trendTerms, sources });
 
     return NextResponse.json({ success: true, ...result });
   } catch (error) {

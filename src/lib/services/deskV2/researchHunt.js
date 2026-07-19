@@ -22,6 +22,8 @@ import { getDiscoveryConfig } from './researchDiscoveryConfig.js';
 import { resolveCandidateChannel, platformGroupOf } from './researchChannelMap.js';
 import { mergeCandidateEvidence, rankDiverseCandidates } from './researchDiversify.js';
 import { planResearchQueries } from './researchQueryPlanner.js';
+import { searchSource } from './researchSources.js';
+import { fetchEntRss, fetchYouTubeChannels } from '../newsDesk/directFeeds.js';
 
 // ★ เฟส 1: re-export ให้ผู้เรียก import จาก researchHunt ได้ตามสัญญาแผน (ตัวจริงอยู่ researchChannelMap.js — pure เทสตรงได้)
 export { resolveCandidateChannel, platformGroupOf } from './researchChannelMap.js';
@@ -193,6 +195,7 @@ export async function huntClusters({
   preset = null,      // ★ เฟส 3: bias กอง angle (จาก preset UI — เฟส 8)
   trendTerms = [],    // ★ เฟส 3: seed กอง trend เสริม
   runSeed = '',       // ★ เฟส 3: หมุนกองคำค้น deterministic (ข้ามรอบ)
+  sources = null,     // ★ เฟส 4: allowlist ตัวกรองแหล่ง (null=ไม่กรอง ใช้ env ทั้งหมด); env flag ยังคุมชั้นหลัก
 } = {}) {
   const t0 = Date.now();
 
@@ -201,6 +204,7 @@ export async function huntClusters({
   const reelsOn = _discoveryCfg.flags.reels;             // เฟส 1: ระบุแพลตฟอร์มจริงจาก URL
   const diversityOn = _discoveryCfg.flags.diversity;     // เฟส 2: รวม URL ซ้ำ (เก็บหลักฐาน) + จัดอันดับกระจาย
   const plannerOn = _discoveryCfg.flags.queryPlanner;    // เฟส 3: วางแผนคำค้น 4 กอง (แทนคำค้น rep ใบเดียว)
+  const sourceExpansionOn = _discoveryCfg.flags.sourceExpansion; // เฟส 4: เพิ่มแหล่งข่าวใหม่ (RSS/News/YT-watch)
 
   const safeTopClusters = Math.max(1, Math.min(30, Number(topClusters) || 10));
   const safeQueriesPerCluster = Math.max(1, Math.min(6, Number(queriesPerCluster) || 4));
@@ -428,10 +432,42 @@ export async function huntClusters({
     }
   }
 
+  // ── (3.6) เฟส 4 (ON): ยิงแหล่งข่าวใหม่แยก (RSS/News/YT-watch/IG) → sourceCandidates + สถิติ ──
+  //   🔴 ปิด DESK_V2_SOURCE_EXPANSION = ไม่ยิงแหล่งใหม่เลย (จำนวน call + return เท่าระบบเดิมเป๊ะ)
+  //   แหล่งใหม่ไม่มี clusterId/exemplar → เก็บแยกเป็น sourceCandidates (ยังไม่ยัดผ่าน judge ต่อคลัสเตอร์ — รอเลน judge เฟส 6)
+  let sourceCandidates = [];
+  const bySource = {};
+  let sourceFailures = 0;
+  if (sourceExpansionOn) {
+    const srcNow = new Date();
+    const srcQueries = Array.from(new Set(callTasks.map((t) => t.query).filter(Boolean))).slice(0, 5); // คุมงบ serper-news
+    const en = _discoveryCfg.sources; // {serperNews, googleNewsRss, directRss, youtubeWatch, instagram} (เปิดครบ 3 ชั้นแล้ว)
+    const fd = _discoveryCfg.freshnessDays;
+    const deps = { fetchEntRss, fetchYouTubeChannels };
+    const allow = (name) => !Array.isArray(sources) || sources.includes(name); // เฟส 4: ตัวกรอง allowlist จาก request (ถ้ามี)
+    const jobs = [];
+    if (en.serperNews && allow('serper-news')) jobs.push(searchSource({ source: 'serper-news', queries: srcQueries, maxResults: safePerQueryResults, maxAgeDays: fd.serperNews, now: srcNow, fetchImpl: fetch }));
+    if (en.googleNewsRss && allow('google-news-rss')) jobs.push(searchSource({ source: 'google-news-rss', queries: srcQueries, maxResults: safePerQueryResults, maxAgeDays: fd.googleNewsRss, now: srcNow, fetchImpl: fetch }));
+    if (en.directRss && allow('direct-rss')) jobs.push(searchSource({ source: 'direct-rss', maxAgeDays: fd.directRss, now: srcNow, deps }));
+    if (en.youtubeWatch && allow('youtube-watch')) jobs.push(searchSource({ source: 'youtube-watch', maxAgeDays: fd.youtubeWatch, now: srcNow, deps }));
+    if (en.instagram && allow('instagram')) jobs.push(searchSource({ source: 'instagram', now: srcNow }));
+
+    const settled = await Promise.all(jobs.map((p) => p.catch((e) => ({ items: [], failed: true, sourceType: 'unknown', calls: 0, error: String(e?.message || e) }))));
+    for (const r of settled) {
+      if (!r) continue;
+      if (r.failed) sourceFailures++;
+      const st = r.sourceType || 'unknown';
+      bySource[st] = (bySource[st] || 0) + (Array.isArray(r.items) ? r.items.length : 0);
+      if (Array.isArray(r.items)) sourceCandidates.push(...r.items);
+      if (st === 'serper-news') serperCalls += Number(r.calls) || 0; // serper-news = จ่ายเงิน → รวมต้นทุน
+    }
+  }
+
   const estCostTHB = Math.round(serperCalls * SERPER_COST_THB_PER_CALL * 100) / 100;
 
   return {
     candidates,
+    ...(sourceExpansionOn ? { sourceCandidates } : {}),
     stats: {
       clusters: clustersWithQueries,
       queries: distinctQueries,
@@ -450,6 +486,8 @@ export async function huntClusters({
       ...(diversityOn ? { diversityApplied: true } : {}),
       // ★ เฟส 3 (ON เท่านั้น): ใช้ query planner 4 กอง + จำนวน staff hints ที่ป้อน
       ...(plannerOn ? { queryPlannerApplied: true, staffHintCount: staffHints.length } : {}),
+      // ★ เฟส 4 (ON เท่านั้น): ผลจากแหล่งข่าวใหม่ (RSS/News/YT-watch) แยกต่างหาก + แหล่งที่ล้ม
+      ...(sourceExpansionOn ? { bySource, sourceFailures, sourceCandidateCount: sourceCandidates.length } : {}),
     },
   };
 }
