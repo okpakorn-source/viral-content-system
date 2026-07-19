@@ -791,7 +791,7 @@ export async function geminiClassifyFrames({ frames, subjects, newsGist, onRetry
   // ★ 19 ก.ค. (ช่องย่อยลายตา — สเปกกลาง MEGA_CLUTTER_GUARD): kill-switch เดียว default OFF — ต้อง === '1'
   //   เป๊ะเท่านั้นถึงเปิด (ต่างจาก FILE_TAG/COVER_JUNK ที่ default ON) — OFF ต้อง byte-parity 100% (ไม่มี busy
   //   ในพรอมป์/สคีมาเลย) ตามสัญญาสเปกกลางข้อ 1
-  const CLUTTER_GUARD = process.env.MEGA_CLUTTER_GUARD === '1';
+  const CLUTTER_GUARD = process.env.MEGA_CLUTTER_GUARD !== '0';
 
   const promptText = `จำแนกภาพแต่ละรูป (กำกับด้วย "รูปที่ N:") เพื่อนำไปทำ "ปกข่าวคอลลาจ"
 บุคคล/สิ่งของหลักในข่าว:

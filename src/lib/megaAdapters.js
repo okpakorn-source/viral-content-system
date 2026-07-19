@@ -3179,7 +3179,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   //   เมื่อ busy=2 + ชั้นกรอง busy<=1 ก่อนใน fallback + ถ้าทุกใบเหลือ busy=2 เท่ากันหมด → เลือกคุณภาพแทนเรื่องเล่า
   //   busy ไม่มีสัญญาณ (undefined/null จากตาเก่ายังไม่ส่ง) = neutral (0) เสมอ ไม่ลงโทษ · ปิดสวิตช์ทั้งชุด (ไม่เพิ่ม
   //   meta/penalty/tier ใดๆ เลย = byte-parity): ต้อง MEGA_CLUTTER_GUARD==='1' ชัดเจนถึงเปิด (default OFF)
-  const CLUTTER_GUARD_ON = process.env.MEGA_CLUTTER_GUARD === '1';
+  const CLUTTER_GUARD_ON = process.env.MEGA_CLUTTER_GUARD !== '0';
   const _busyOf = (x) => {
     if (!CLUTTER_GUARD_ON) return 0;
     const v = Number(x?.triage?.busy);
