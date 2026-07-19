@@ -3123,7 +3123,27 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           // ★ SOLO_ONLY: รับเฉพาะภาพเดี่ยว (faceCount===1) — ห้ามยืมภาพคู่มาขึ้น hero · CROSS = รับทุกใบ (เดิมเป๊ะ, _accepted===borrowed)
           const _accepted = _soloOnlyBorrow ? borrowed.filter((b) => Number(b.triage?.faceCount) === 1) : borrowed;
           if (!_accepted.length) continue;
-          for (const bimg of _accepted) {
+          // ★ 20 ก.ค. (บั๊ก AC-0163: ภาพยืมเคสเก่า URL ตาย HTTP 400 → hero โหลดไม่ขึ้น = ทำปกไม่ได้):
+          //   เช็ค URL ยืม "ยังมีชีวิต" (res.ok) ก่อนใช้ — ตาย=ทิ้ง (ห้ามเอาภาพตายขึ้นปก) · เช็คขนาน+timeout สั้น กันถ่วง tick
+          //   เฉพาะ _soloOnlyBorrow (path ใหม่); CROSS legacy ไม่แตะ = byte-parity
+          let _aliveAccepted = _accepted;
+          if (_soloOnlyBorrow && _accepted.length) {
+            const _headTo = Number(process.env.MEGA_BORROW_HEAD_TIMEOUT_MS) > 0 ? Number(process.env.MEGA_BORROW_HEAD_TIMEOUT_MS) : 2500;
+            // ★ DI seam: เทสฉีด _deps.checkUrlAlive(url)->bool ได้ (production = fetch จริง)
+            const _urlAlive = _deps?.checkUrlAlive || (async (url) => {
+              try {
+                const _c = new AbortController(); const _t = setTimeout(() => _c.abort(), _headTo);
+                const _r = await fetch(url, { method: 'GET', signal: _c.signal });
+                clearTimeout(_t);
+                return !!_r.ok;
+              } catch { return false; }
+            });
+            const _checkAlive = async (b) => (b?.imageUrl && (await _urlAlive(b.imageUrl))) ? b : null;
+            _aliveAccepted = (await Promise.all(_accepted.map(_checkAlive))).filter(Boolean);
+            if (_aliveAccepted.length < _accepted.length) console.log(`[MEGA S6] 🔁 borrow liveness: ${_accepted.length - _aliveAccepted.length}/${_accepted.length} ใบ URL ยืมตาย → ทิ้ง (เหลือใช้ ${_aliveAccepted.length})`);
+            if (!_aliveAccepted.length) continue;
+          }
+          for (const bimg of _aliveAccepted) {
             r.images.push({
               ...bimg,
               borrowed: true,
@@ -3132,7 +3152,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
               triage: { ...(bimg.triage || {}), newsScene: false },
             });
           }
-          _borrowedCount += _accepted.length;
+          _borrowedCount += _aliveAccepted.length;
           _borrowedPersons.push(name);
           console.log(_soloOnlyBorrow
             ? `[MEGA S6] 👤🔁 SOLO_ONLY hero-borrow: "${name}" ไม่มีภาพเดี่ยวในเคส → ยืมภาพเดี่ยว ${_accepted.length} ใบจากเคสอื่น`
@@ -4134,12 +4154,9 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       if (solo) {
         console.log(`[MEGA S6] 👤 hero ${img.id} มี ${img.triage.faceCount} หน้า → สลับหน้าเดี่ยว ${solo.id}`);
         img = solo; reason = 'hero หน้าเดี่ยว (โค้ดบังคับ — brain เลือกภาพหลายหน้า)';
-      } else if (HERO_SOLO_ONLY) {
-        // ★ MEGA_HERO_SOLO_ONLY (20 ก.ค.): พูลไม่มีภาพเดี่ยวถูกคนของ hero → "ห้ามครอปภาพคู่" (ไม่แนบ _heroFaceCrop)
-        //   ถ้ายืมภาพเดี่ยว (hero-borrow ~3084) ได้ solo-swap ด้านบนจะหยิบไปก่อนถึงตรงนี้แล้ว — มาถึงนี่ = ยืมก็ไม่ได้
-        //   ปล่อยภาพคู่ไว้ชั่วคราว → ตกไปด่าน HOLD ปลายฟังก์ชัน (insufficient_assets) · ไม่ synth crop ภาพคู่เด็ดขาด
-        console.log(`[MEGA S6] 👤🚫 SOLO_ONLY: hero ${img.id} มี ${img.triage.faceCount} หน้า + พูลไม่มีภาพเดี่ยว → ไม่ครอปภาพคู่ (รอ borrow/HOLD)`);
-      } else if (HERO_SINGLE_ON && heroNames.length) {
+      } else if ((HERO_SINGLE_ON || HERO_SOLO_ONLY) && heroNames.length) {
+        // ★ MEGA_HERO_SOLO_ONLY (20 ก.ค. rev.2 — ผู้ใช้เลือก "ครอปคู่ในเคสเป็น fallback ให้ปกออกเสมอ"):
+        //   priority ยังเป็น solo(พูล) → ยืมเดี่ยวที่ URL ยังไม่ตาย (solo-swap หยิบก่อนถึงตรงนี้) → ถึงนี่=ไม่มีเดี่ยวเลย
         // ★ นโยบาย C (19 ก.ค.): พูลไม่มีภาพเดี่ยวถูกคนของ hero เลย — ห้ามปล่อยภาพคู่ขึ้น hero เงียบๆ (บั๊กเดิม)
         //   ลองครอปหน้า hero เดี่ยวจากภาพคู่นี้ก่อน — ไม่ return ที่นี่ (ปล่อย loop/post-processing เดินต่อปกติ) การตัดสิน
         //   HOLD จริงเช็คที่ปลายฟังก์ชันจากสถานะ slots[hero] สุดท้าย (กันกรณี crop-guard/story-rescue สลับ hero อีกที)
@@ -5494,9 +5511,9 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     const _finalHeroRec = _finalHeroEntry ? byId.get(String(_finalHeroEntry.id)) : null;
     const _finalFc = _finalHeroRec ? (Number(_finalHeroRec.triage?.faceCount) || 0) : 0;
     if (_finalHeroRec && _finalFc > 1 && !_finalHeroEntry._heroFaceCrop) {
-      // ★ MEGA_HERO_SOLO_ONLY (20 ก.ค.): SOLO_ONLY on = ห้ามครอปภาพคู่ → ข้าม synth (HOLD ตรงๆ) ·
-      //   SOLO_ONLY off = เรียก synth เพื่อรายงานเหตุ (byte-parity MEGA_HERO_SINGLE เดิม)
-      const _synthFinal = HERO_SOLO_ONLY ? { ok: false, reason: 'solo_only_no_couple_crop' } : _heroSyntheticCrop(_finalHeroRec);
+      // ★ MEGA_HERO_SOLO_ONLY (20 ก.ค. rev.2): ครอปภาพคู่ในเคสเป็น fallback (ผู้ใช้เลือก) → เรียก synth เสมอ
+      //   HOLD จริงยิงเฉพาะกรณี synth crop เองไม่ผ่านเกณฑ์ (faceBox พัง/เล็กเกิน) — last resort ปกออกไม่ได้จริงๆ
+      const _synthFinal = _heroSyntheticCrop(_finalHeroRec);
       const _holdInfo = { reason: _synthFinal.reason || 'multiface_no_crop', imageId: String(_finalHeroRec.id), shortSide: _synthFinal.shortSide ?? null, upscale: _synthFinal.upscale ?? null };
       console.log(`[MEGA S6] 👤⛔ hero ${_holdInfo.imageId} ยังเป็นภาพคู่ (${_finalFc} หน้า) หลัง loop จบ + ครอปไม่ผ่าน (${_holdInfo.reason}) → HOLD (ห้ามยัดภาพคู่ขึ้น hero)`);
       return {
