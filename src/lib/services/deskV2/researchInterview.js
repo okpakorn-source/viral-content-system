@@ -257,7 +257,7 @@ const MAX_TRANSCRIPT_LEN = 4000;
  * @param {string} [input.transcript]
  * @returns {{observedName:string|null, nameStatus:'matched'|'expected'|'unknown', nameEvidence:'title'|'snippet'|'speaker'|'transcript'|null}}
  */
-export function confirmObservedName({ expectedName, title, snippet, speakers, transcript } = {}) {
+export function confirmObservedName({ expectedName, title, snippet, speakers, transcript, needsContext = false } = {}) {
   const name = sanitizeText(expectedName, 80);
   if (!name) return { observedName: null, nameStatus: 'unknown', nameEvidence: null };
 
@@ -269,11 +269,13 @@ export function confirmObservedName({ expectedName, title, snippet, speakers, tr
     .filter(Boolean)
     .slice(0, MAX_SPEAKERS);
 
+  // 🔒 F2 (Fable audit): ชื่อกำกวม (needsContext=true เช่น 'คิว') — หัวข้อ/snippet ที่มีสตริงชื่อ "ยังไม่พอยืนยันตัวตน"
+  //   (คำสั้นโผล่ในหัวข้อของใครก็ได้) → ต้องมีหลักฐานแข็งกว่า (speaker ผู้พูด / transcript) จึงจะ matched; ไม่งั้นตกไป expected
   const inTitle = findExactPhrase(cleanTitle, name);
-  if (inTitle) return { observedName: inTitle, nameStatus: 'matched', nameEvidence: 'title' };
+  if (inTitle && !needsContext) return { observedName: inTitle, nameStatus: 'matched', nameEvidence: 'title' };
 
   const inSnippet = findExactPhrase(cleanSnippet, name);
-  if (inSnippet) return { observedName: inSnippet, nameStatus: 'matched', nameEvidence: 'snippet' };
+  if (inSnippet && !needsContext) return { observedName: inSnippet, nameStatus: 'matched', nameEvidence: 'snippet' };
 
   for (const sp of speakerList) {
     const hit = findExactPhrase(sp, name);
@@ -311,6 +313,7 @@ export function classifyInterviewCandidate(candidate, queryPlan) {
     snippet: base.snippet,
     speakers: base.speakers || (insight && insight.speakers),
     transcript: base.transcript || (insight && insight.transcript),
+    needsContext: !!q.needsContext, // 🔒 F2 (Fable audit): ชื่อกำกวม (คิว/พี่ช้าง/ป๋ากิ๊ก) ต้องมีหลักฐานแข็งกว่าหัวข้อ
   });
 
   return {

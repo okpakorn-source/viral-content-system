@@ -124,3 +124,12 @@ test('เฟส 6: candidate ปกติ (ไม่มี lane) → lead ไม
     assert.equal(leads()[0].lane, undefined);
   });
 });
+
+test('🔒 F1: lane=interview แต่ไม่มี interview field (เคสรั่วจาก planner เฟส 3) → ไม่ persist interview/lane', async () => {
+  reset();
+  await withStory(false, async () => {
+    await saveLeads([{ url: 'https://a.com/1', title: 't', channel: 'google', matchScore: 70, fingerprint: { names: ['x'], action: 'y' }, lane: 'interview' /* ไม่มี .interview */ }], { runId: 'rn2' });
+    assert.equal(leads()[0].interview, undefined);
+    assert.equal(leads()[0].lane, undefined); // ต้องไม่หลุดมา
+  });
+});

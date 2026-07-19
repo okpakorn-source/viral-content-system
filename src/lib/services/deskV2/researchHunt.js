@@ -324,6 +324,7 @@ export async function huntClusters({
       });
       const programs = seed.filter((e) => e.kind === 'program');
       interviewWatchlistIds = people.map((p) => p.id).filter(Boolean);
+      const needsContextByName = new Map(people.map((p) => [p.name, !!p.needsContext])); // 🔒 F2: ชื่อกำกวมต้องเข้มขึ้น
       const plan = planInterviewQueries({
         people,
         programs,
@@ -341,6 +342,7 @@ export async function huntClusters({
           lane: 'interview',
           queryId: qp.id,
           expectedName: qp.expectedName,
+          needsContext: needsContextByName.get(qp.expectedName) || false,
           program: qp.program || '',
           opener: qp.opener || '',
           angle: qp.angle || '',
@@ -427,10 +429,12 @@ export async function huntClusters({
         cand.lane = lane;
       }
       // 🆕 เฟส 6 (ON): candidate เลนสัมภาษณ์ → จำแนกชื่อ (confirmObservedName ห้ามเดา) + พก interview
-      if (lane === 'interview') {
+      //   🔒 F1 (Fable audit): ต้องเช็ค interviewLaneOn ด้วย — planner เฟส 3 ก็ติด lane='interview' ได้
+      //   ถ้าเช็คแค่ lane จะมี field interview หลุดตอน INTERVIEW_LANE ปิด (แต่ QUERY_PLANNER เปิด)
+      if (interviewLaneOn && lane === 'interview' && expectedName) {
         cand.lane = 'interview';
         cand.queryId = queryId;
-        const classified = classifyInterviewCandidate(cand, { expectedName, program, opener, angle, queryId });
+        const classified = classifyInterviewCandidate(cand, { expectedName, program, opener, angle, queryId, needsContext: task.needsContext });
         cand.interview = classified.interview;
       }
 

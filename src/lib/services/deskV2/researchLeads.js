@@ -247,8 +247,10 @@ export async function saveLeads(judgedCandidates, { runId } = {}) {
       }
     }
     // 🆕 เฟส 6 (ON): lead เลนสัมภาษณ์ → เก็บ lane + interview (จำแนกชื่อ, sanitized) — additive, มีเฉพาะ candidate เลนสัมภาษณ์
-    if (raw.lane === 'interview') {
-      const iv = raw.interview || {};
+    //   🔒 F1 (Fable audit): เช็ค raw.interview จริงด้วย — กัน candidate ที่ planner เฟส 3 ติด lane='interview'
+    //   (แต่ไม่มี interview classification) หลุดมา persist record.lane/interview ตอน INTERVIEW_LANE ปิด
+    if (raw.lane === 'interview' && raw.interview) {
+      const iv = raw.interview;
       record.lane = 'interview';
       record.interview = {
         expectedName: sanitizeText(iv.expectedName, 80),
