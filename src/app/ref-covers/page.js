@@ -18,7 +18,6 @@ export default function RefCoversPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState('');
-  const [zoom, setZoom] = useState(null);
   const fileRef = useRef(null);
 
   const load = async () => {
@@ -124,29 +123,26 @@ export default function RefCoversPage() {
           const d = it.dna || {};
           return (
             <div key={it.id} style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden', background: '#fff', display: 'flex', flexDirection: 'column' }}>
-              {it.imagePath && (
-                <div style={{ display: 'flex', background: '#0f172a' }}>
-                  <img src={it.imagePath} alt={it.styleName} onClick={() => setZoom(it.imagePath)} style={{ flex: 1, minWidth: 0, display: 'block', cursor: 'zoom-in', maxHeight: 260, objectFit: 'contain' }} />
-                  {/* ★ A3 (8 ก.ค.): wireframe "เทมเพลตเปล่า" จาก DNA — เห็นทันทีว่าถอดตรง ref ไหม (เพี้ยน = กด reanalyze) */}
-                  {Array.isArray(it.dna?.template?.slots) && it.dna.template.slots.length > 0 && (
-                    <svg viewBox="0 0 108 135" style={{ width: 84, height: 105, alignSelf: 'center', margin: '0 6px', background: '#1e293b', borderRadius: 4, flexShrink: 0 }}
-                      title={`เทมเพลตเปล่า${it.dna._geometryRefined ? ' (วัดละเอียดแล้ว)' : ''}`}>
-                      {it.dna.template.slots.filter((s) => s.shape !== 'circle').map((s, i) => (
-                        <rect key={i} x={(Number(s.xPct) || 0) * 1.08} y={(Number(s.yPct) || 0) * 1.35}
-                          width={(Number(s.wPct) || 0) * 1.08} height={(Number(s.hPct) || 0) * 1.35}
-                          fill={['#334155', '#475569', '#3b4f6b', '#52525b', '#44403c'][i % 5]}
-                          stroke={s.border ? (s.borderColor && s.borderColor !== '-' ? s.borderColor : '#fff') : '#0f172a'}
-                          strokeWidth={s.border ? 2 : 0.6} />
-                      ))}
-                      {it.dna.template.slots.filter((s) => s.shape === 'circle').map((s, i) => (
-                        <circle key={'c' + i}
-                          cx={((Number(s.xPct) || 0) + (Number(s.wPct) || 0) / 2) * 1.08}
-                          cy={((Number(s.yPct) || 0) + (Number(s.hPct) || 0) / 2) * 1.35}
-                          r={((Number(s.wPct) || 10) / 2) * 1.08}
-                          fill="#64748b" stroke="#fff" strokeWidth={2} />
-                      ))}
-                    </svg>
-                  )}
+              {/* ★ structure-only (19 ก.ค.): ไม่โชว์ภาพตัวอย่าง ref แล้ว (record ใหม่ไม่มี imagePath) — โชว์แค่ wireframe "เทมเพลตเปล่า" จาก DNA เท่านั้น */}
+              {Array.isArray(it.dna?.template?.slots) && it.dna.template.slots.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'center', background: '#0f172a', padding: '10px 0' }}>
+                  <svg viewBox="0 0 108 135" style={{ width: 140, height: 175, background: '#1e293b', borderRadius: 4, flexShrink: 0 }}
+                    title={`เทมเพลตเปล่า${it.dna._geometryRefined ? ' (วัดละเอียดแล้ว)' : ''}`}>
+                    {it.dna.template.slots.filter((s) => s.shape !== 'circle').map((s, i) => (
+                      <rect key={i} x={(Number(s.xPct) || 0) * 1.08} y={(Number(s.yPct) || 0) * 1.35}
+                        width={(Number(s.wPct) || 0) * 1.08} height={(Number(s.hPct) || 0) * 1.35}
+                        fill={['#334155', '#475569', '#3b4f6b', '#52525b', '#44403c'][i % 5]}
+                        stroke={s.border ? (s.borderColor && s.borderColor !== '-' ? s.borderColor : '#fff') : '#0f172a'}
+                        strokeWidth={s.border ? 2 : 0.6} />
+                    ))}
+                    {it.dna.template.slots.filter((s) => s.shape === 'circle').map((s, i) => (
+                      <circle key={'c' + i}
+                        cx={((Number(s.xPct) || 0) + (Number(s.wPct) || 0) / 2) * 1.08}
+                        cy={((Number(s.yPct) || 0) + (Number(s.hPct) || 0) / 2) * 1.35}
+                        r={((Number(s.wPct) || 10) / 2) * 1.08}
+                        fill="#64748b" stroke="#fff" strokeWidth={2} />
+                    ))}
+                  </svg>
                 </div>
               )}
               <div style={{ padding: 10, fontSize: 12, color: '#334155', flex: 1 }}>
@@ -203,7 +199,7 @@ export default function RefCoversPage() {
                 {d.compositionLogic && <div style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>🧬 {d.compositionLogic}</div>}
               </div>
               <div style={{ display: 'flex', gap: 6, padding: '6px 10px', borderTop: '1px solid #f1f5f9', flexWrap: 'wrap' }}>
-                <button onClick={() => reanalyze(it.id)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}>🔄 วิเคราะห์ใหม่</button>
+                {it.imagePath && <button onClick={() => reanalyze(it.id)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}>🔄 วิเคราะห์ใหม่</button>}
                 <button onClick={() => openEditor(it)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid #c7d2fe', background: '#eef2ff', color: '#4338ca', cursor: 'pointer', fontWeight: 700 }}>🛠 แก้เทมเพลต</button>
                 {!d._humanVerified
                   ? <button onClick={() => quickVerify(it.id, true)} title="wireframe ตรงกับปกจริงแล้ว — ยืนยันเลยไม่ต้องแก้" style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid #bbf7d0', background: '#f0fdf4', color: '#166534', cursor: 'pointer', fontWeight: 700 }}>✔ ยืนยันถูกต้อง</button>
@@ -266,12 +262,6 @@ export default function RefCoversPage() {
           );
         })}
       </div>
-
-      {zoom && (
-        <div onClick={() => setZoom(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 50, cursor: 'zoom-out' }}>
-          <img src={zoom} alt="ref" style={{ maxHeight: '90vh', maxWidth: '90vw', borderRadius: 10 }} />
-        </div>
-      )}
     </div>
   );
 }

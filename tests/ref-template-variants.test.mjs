@@ -209,10 +209,14 @@ test('derive: geometry ไม่ sane → variant นั้นถูกทิ้
 
 // ── ใบปกติเกรดเดิมไม่เปลี่ยน (เส้น derived ไม่กระทบ non-derived) ──
 test('ใบปกติในคลังจริง: เกรด stored == recompute (เส้น derived ไม่แตะ)', () => {
+  // ★ R6 (19 ก.ค. — grade floor สำหรับใบ human-verified ใน refCoverGrade.js): stored ในคลังจริงคำนวณ
+  //   จากเอนจินก่อนมี floor นี้ — ใบ human-verified ที่ยังไม่รัน scripts/grade-ref-library.mjs ซ้ำ
+  //   จะ recompute ได้ B (floor) ทั้งที่ stored ยังเป็น C/F เดิม → เทียบด้วย env='0' ให้ตรงกับตอนคำนวณ stored
+  //   (ด่านนี้ตรวจ "เส้น derived ไม่กระทบใบปกติ" ไม่ใช่ตรวจ floor feature)
   for (const rec of library) {
     if (rec?.dna?._derived) continue; // เฉพาะใบปกติ
     const stored = rec?.dna?._templateGrade?.grade;
-    if (stored) assert.equal(computeTemplateGrade(rec).grade, stored, `${rec.id} เกรดเดิมต้องไม่เปลี่ยน`);
+    if (stored) assert.equal(computeTemplateGrade(rec, { REF_HUMAN_VERIFIED_FLOOR: '0' }).grade, stored, `${rec.id} เกรดเดิมต้องไม่เปลี่ยน`);
   }
 });
 

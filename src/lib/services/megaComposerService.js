@@ -2372,9 +2372,21 @@ export async function composeAndVerify(args = {}) {
     //   ล้มเองได้ = ไม่กระทบผลปก (additive ล้วน — ไม่มี = ผู้เรียกเดิมไม่พัง)
     let manifest = null;
     try {
+      // ★ 19 ก.ค. 69: ผังจริงต่อช่อง (geometry) จาก core.spec — id เดียวกับ a.slotId (dnaToTemplateSpec/V3_TEMPLATES)
+      //   ใช้แนบ x/y/w/h/shape/zIndex ลง manifest.slots (additive) ให้สาย editor (/cover-tester) สร้างช่องได้
+      //   แม้รอบนั้น "ไม่มี ref" (dna ว่าง → editor เดิมสร้าง slot ไม่ได้ = จอดำ) — สายประกอบจริงไม่กระทบ
+      const _specSlotById = new Map(
+        (core.spec && Array.isArray(core.spec.slots) ? core.spec.slots : [])
+          .filter((s) => s && s.id != null)
+          .map((s) => [String(s.id), s]),
+      );
       manifest = {
         composerVersion: COMPOSER_VERSION,
         stableOrder: !!stableOrder,
+        // ★ 19 ก.ค. 69: ผืนผ้าใบจริงของรอบประกอบ (spec อาจไม่ใช่ 1080×1350 — fallback vt_ref_tri/vt_faces_circle = 1200×1350)
+        //   editor สเกลจากค่านี้ลงผืน 1080×1350 ของตัวเอง · additive (consumer เดิมไม่อ่าน = ไม่กระทบ)
+        canvasW: core.spec?.canvasW ?? null,
+        canvasH: core.spec?.canvasH ?? null,
         models: { faceDetector: 'gpt-4o-mini (fallback: gemini-2.5-flash)', eye: 'gpt-4o' },
         slots: core.assignments.map((a) => {
           const im = core.loaded[a.imageIndex] || {};
@@ -2382,6 +2394,18 @@ export async function composeAndVerify(args = {}) {
           const ah = core.aHashes ? core.aHashes[a.imageIndex] : null;
           // ★ Wave2 Batch D2: ค่าที่วัดได้ต่อช่อง (faceSharePct/headroomPct) — additive, ไม่มี = null (fail-open)
           const mm = techMeasured?.bySlot?.[a.slotId] || null;
+          // ★ 19 ก.ค. 69: geometry ต่อช่องจาก spec (px ในผืน canvasW×canvasH ด้านบน) — additive
+          //   หา spec slot ที่ id ตรง a.slotId ไม่เจอ = ไม่เพิ่ม geometry ช่องนั้น (ไม่ throw)
+          const gs = _specSlotById.get(String(a.slotId)) || null;
+          const geom = (gs && [gs.x, gs.y, gs.w, gs.h].every((v) => Number.isFinite(Number(v))))
+            ? {
+              x: Number(gs.x), y: Number(gs.y), w: Number(gs.w), h: Number(gs.h),
+              shape: gs.shape === 'circle' ? 'circle' : 'rect',
+              zIndex: Number.isFinite(Number(gs.zIndex)) ? Number(gs.zIndex) : 0,
+              ...(gs.border ? { border: gs.border } : {}),
+              ...(Number.isFinite(Number(gs.borderWidth)) ? { borderWidth: Number(gs.borderWidth) } : {}),
+            }
+            : null;
           return {
             slot: a.slotId,
             imageUrl: im.url || im.thumbnailUrl || '',
@@ -2389,6 +2413,7 @@ export async function composeAndVerify(args = {}) {
             faceCount: fb?.count ?? 0,
             faceBoxes: _manifestFaceBoxes(fb),
             measured: (mm && mm.hasFace) ? { faceSharePct: mm.faceSharePct, headroomPct: mm.headroomPct } : null,
+            ...(geom || {}), // ★ 19 ก.ค. 69: x/y/w/h/shape/zIndex(+border) — additive, ไม่มี spec slot = ไม่มีคีย์นี้
           };
         }),
         // ★ Wave2 Batch D2: โหมด + ธงกติกาวัดได้ของรอบนี้ (debug/replay) — additive

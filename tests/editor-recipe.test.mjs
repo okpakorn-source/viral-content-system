@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   buildEditorRecipe,
   slotsFromTemplate,
+  slotsFromManifest,
   assignSlots,
   isRecipeReady,
   isRehostedUrl,
@@ -229,4 +230,102 @@ test('manifest url ดิบ + ภาพเดียวกันมี thumbnail
   const imgs = [{ id: 'X1', imageUrl: RAW, thumbnailUrl: TH_REHOST, note: '', person: '' }];
   const r = buildEditorRecipe({ job, caseImages: imgs });
   assert.strictEqual(r.imagesBySlot.main, TH_REHOST, 'ต้องเลือก thumbnailUrl ที่ rehost แทน URL ดิบ');
+});
+
+// ============================================================ 19 ก.ค. 69: ด่านกันเหนียว — compose ไม่มี ref (dna ว่าง)
+// manifest.slots พก geometry ต่อช่อง (composer แนบ x/y/w/h/shape/zIndex) → editor สร้าง slot จาก manifest ได้ (ไม่จอดำ)
+test('slotsFromManifest: px 1080×1350 (ไม่มี canvas = ถือ 1080×1350) → map ตรง + circle→diameter + role/id คงคอนเวนชัน', () => {
+  const ms = [
+    { slot: 'main', imageUrl: 'u1', x: 0, y: 0, w: 616, h: 1350, shape: 'rect', zIndex: 0 },
+    { slot: 'right_bottom', imageUrl: 'u2', x: 616, y: 540, w: 464, h: 810, shape: 'rect', zIndex: 0, border: '#FFD700', borderWidth: 6 },
+    { slot: 'circle', imageUrl: 'u3', x: 34, y: 940, w: 380, h: 380, shape: 'circle', zIndex: 4, border: '#FFFFFF', borderWidth: 14 },
+  ];
+  const slots = slotsFromManifest(ms, null);
+  assert.equal(slots.length, 3);
+  const main = slots.find((s) => s.id === 'main');
+  assert.equal(main.role, 'hero'); // id 'main' → role hero (เท่า slotsFromSpec)
+  assert.equal(main.x, 0); assert.equal(main.y, 0); assert.equal(main.w, 616); assert.equal(main.h, 1350);
+  const rb = slots.find((s) => s.id === 'right_bottom');
+  assert.equal(rb.border, '#FFD700'); assert.equal(rb.borderWidth, 6); assert.equal(rb.draggable, true);
+  const circ = slots.find((s) => s.shape === 'circle');
+  assert.equal(circ.id, 'circle');
+  assert.equal(circ.diameter, 380); // w→diameter
+  assert.equal(circ.w, undefined); // วงกลมไม่มี w/h
+  assert.equal(circ.border, '#FFFFFF'); assert.equal(circ.zIndex, 4);
+});
+
+test('slotsFromManifest: canvas 1200×1350 → สเกลกว้างลง 1080 (x/w×0.9) · สูง 1:1 · ไม่ล้นขอบขวา', () => {
+  // vt_ref_tri จริง (fallback ไม่มี ref): main w660, right_top x666 — ต้นทาง 1200 กว้าง
+  const ms = [
+    { slot: 'main', imageUrl: 'u1', x: 0, y: 0, w: 660, h: 1350, shape: 'rect', zIndex: 0 },
+    { slot: 'right_top', imageUrl: 'u2', x: 666, y: 0, w: 534, h: 448, shape: 'rect', zIndex: 0 },
+  ];
+  const slots = slotsFromManifest(ms, { w: 1200, h: 1350 });
+  const main = slots.find((s) => s.id === 'main');
+  assert.equal(main.w, Math.round(660 * 1080 / 1200)); // 594
+  assert.equal(main.h, 1350); // สูง 1:1
+  const rt = slots.find((s) => s.id === 'right_top');
+  assert.equal(rt.x, Math.round(666 * 1080 / 1200)); // 599
+  // ขวาสุดของช่องขวา ต้องไม่เกิน 1080 (ไม่ล้นขอบ)
+  assert.ok(rt.x + rt.w <= 1080, 'ช่องขวาต้องอยู่ในผืน editor 1080');
+});
+
+test('slotsFromManifest: manifest slot ไม่มี geometry (มีแค่ slot/imageUrl) → ข้าม (ไม่มั่ว)', () => {
+  const ms = [
+    { slot: 'main', imageUrl: 'u1' }, // ไม่มี x/y/w/h
+    { slot: 'circle', imageUrl: 'u2', x: 34, y: 940, w: 380, h: 380, shape: 'circle', zIndex: 4 },
+  ];
+  const slots = slotsFromManifest(ms, null);
+  assert.equal(slots.length, 1, 'ช่องไม่มี geometry ถูกข้าม');
+  assert.equal(slots[0].id, 'circle');
+});
+
+test('buildEditorRecipe: ไม่มี dna + manifest มี geometry → สร้าง slot จาก manifest + ภาพ map ลงถูก (ไม่จอดำ)', () => {
+  const REHOST_A = 'https://abc.supabase.co/storage/v1/object/public/acs-frames/a.jpg';
+  const job = {
+    id: 'NOREF-1',
+    status: 'cover_ready',
+    dossier: {
+      desk: { title: 'ข่าวไม่มี ref จากคลัง' },
+      images: { caseId: 'AC-7777' },
+      refMatch: { dna: null, styleName: null }, // ★ ไม่มี ref → dna ว่าง (ตรงกับ cover-ref-test/page.js เมื่อ matchedRef ว่าง)
+      pickImages: { slots: {} }, // ว่าง — ภาพต่อช่องยึด manifest
+      cover: {
+        qcVerdict: { pass: null, reasons: [], advisory: [] },
+        manifest: {
+          canvasW: 1200, canvasH: 1350, // fallback vt_faces_circle
+          slots: [
+            { slot: 'main', imageUrl: 'https://ext.example/main.jpg', x: 0, y: 0, w: 648, h: 1350, shape: 'rect', zIndex: 0 },
+            { slot: 'top_right', imageUrl: REHOST_A, x: 648, y: 0, w: 552, h: 672, shape: 'rect', zIndex: 0 },
+            { slot: 'circle', imageUrl: 'https://ext.example/c.jpg', x: 40, y: 876, w: 446, h: 446, shape: 'circle', zIndex: 4, border: '#FFFFFF', borderWidth: 8 },
+          ],
+        },
+      },
+    },
+  };
+  const r = buildEditorRecipe({ job, caseImages: [] });
+  // slots สร้างจาก manifest (เดิม = ว่าง → จอดำ)
+  assert.equal(r.template.slots.length, 3, 'ต้องมี 3 ช่องจาก manifest');
+  assert.ok(r.template.slots.find((s) => s.id === 'main'), 'มีช่อง main');
+  assert.ok(r.template.slots.find((s) => s.shape === 'circle'), 'มีช่องวงกลม');
+  // ภาพ map ลงครบทุกช่อง (manifest override) — ไม่จอดำ
+  assert.equal(r.imagesBySlot.main, 'https://ext.example/main.jpg');
+  assert.equal(r.imagesBySlot.top_right, REHOST_A);
+  assert.equal(r.imagesBySlot.circle, 'https://ext.example/c.jpg');
+  // สเกล 1200→1080: main w648 → 583
+  const main = r.template.slots.find((s) => s.id === 'main');
+  assert.equal(main.w, Math.round(648 * 1080 / 1200));
+});
+
+test('buildEditorRecipe: มี dna (path เดิม) → ไม่แตะ slotsFromManifest (พฤติกรรมเดิม 100% แม้มี manifest geometry)', () => {
+  const job = legacyJob();
+  // ใส่ manifest ที่ "มี geometry" ด้วย — path มี dna ต้องยึด slotsFromSpec เดิม ไม่ตกไป slotsFromManifest
+  job.dossier.cover.manifest = {
+    canvasW: 1080, canvasH: 1350,
+    slots: [{ slot: 'main', imageUrl: 'https://ext.example/x.jpg', x: 999, y: 999, w: 111, h: 111, shape: 'rect', zIndex: 0 }],
+  };
+  const r = buildEditorRecipe({ job, caseImages: caseImages() });
+  assert.equal(r.template.slots.length, 5, 'ยังเป็น 5 ช่องจาก dna (ไม่ใช่ 1 ช่องจาก manifest)');
+  const main = r.template.slots.find((s) => s.id === 'main');
+  assert.notEqual(main.x, 999, 'geometry ต้องมาจาก dna/spec เดิม ไม่ใช่ manifest');
 });

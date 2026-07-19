@@ -806,7 +806,11 @@ export async function runCoverRefTest(input = {}, deps = {}) {
     newsTitle: payload.newsTitle || newsTitle,
     slotPlan: payload.slotPlan,
     refDNA: Object.prototype.hasOwnProperty.call(payload, 'refDNA') ? payload.refDNA : null,
-    refImagePath: Object.prototype.hasOwnProperty.call(payload, 'refImagePath') ? payload.refImagePath : null,
+    // 🔴 structure-only ref (AGENTS.md §6): ห้ามส่งภาพ ref จริงไปเทียบ/ประกอบปก — บังคับ null เสมอ
+    //   แม้ payload จะมี refImagePath หลุดมา (เช่น legacy refMatch.imagePath จาก megaAdapters) ก็ตัดทิ้งที่นี่
+    //   composeAndVerify() ฝั่ง megaComposerService destructure refImagePath = null อยู่แล้ว → null ปลอดภัย 100%
+    //   (ปิด refCompareEye + runCoverRefTester ที่เคยเอาภาพ ref จริงมาเทียบ)
+    refImagePath: null,
     stableOrder: _env.MEGA_STABLE_ORDER !== '0',
     ...(hasSpec && hasRealized ? { selectionSpec: payload.selectionSpec, realizedTemplate: payload.realizedTemplate } : {}),
     // ★ Wave1A (LANE C — P0-1): ส่งผ่าน carrier V2 (refHeroV2) แบบ own-property "additive" เหมือน selectionSpec —
@@ -1274,7 +1278,11 @@ export async function rt_s7compose(job, opts = {}) {
     newsTitle: payload.newsTitle || newsTitle,
     slotPlan: payload.slotPlan,
     refDNA: Object.prototype.hasOwnProperty.call(payload, 'refDNA') ? payload.refDNA : null,
-    refImagePath: Object.prototype.hasOwnProperty.call(payload, 'refImagePath') ? payload.refImagePath : null,
+    // 🔴 structure-only ref (AGENTS.md §6): ห้ามส่งภาพ ref จริงไปเทียบ/ประกอบปก — บังคับ null เสมอ
+    //   แม้ payload จะมี refImagePath หลุดมา (เช่น legacy refMatch.imagePath จาก megaAdapters) ก็ตัดทิ้งที่นี่
+    //   composeAndVerify() ฝั่ง megaComposerService destructure refImagePath = null อยู่แล้ว → null ปลอดภัย 100%
+    //   (ปิด refCompareEye + runCoverRefTester ที่เคยเอาภาพ ref จริงมาเทียบ)
+    refImagePath: null,
     stableOrder: env.MEGA_STABLE_ORDER !== '0',
     ...(hasSpec && hasRealized ? { selectionSpec: payload.selectionSpec, realizedTemplate: payload.realizedTemplate } : {}),
     ...(hasV2 ? { refHeroV2: payload.refHeroV2 } : {}),

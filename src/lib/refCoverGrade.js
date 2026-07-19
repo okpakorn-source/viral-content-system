@@ -7,6 +7,9 @@
 // เป้า: แทนธงลวง _humanVerified (ตาคนกดยืนยันได้แม้ template เพี้ยน) ด้วยเกรด deterministic
 //   ที่คำนวณจากตัววัดจริงล้วน — _humanVerified ไม่มีผลต่อเกรด (เป็นแค่ metadata รีวิว)
 // PURE: ไม่มี env / ไม่มี I/O / ไม่มี AI — record เดิม → เกรดเดิมเสมอ (idempotent)
+//   ★ ยกเว้น R6 (19 ก.ค.): grade floor สำหรับใบ human-verified อ่าน env ตัวเดียว (REF_HUMAN_VERIFIED_FLOOR)
+//     ผ่านพารามิเตอร์ที่ 2 (แพทเทิร์นเดียวกับ refPoolGateOpen ด้านล่าง) — default = process.env, ยังคง idempotent
+//     ต่อ (record, env) คู่เดิมเสมอ (ไม่สุ่ม/ไม่มี I/O) — ทดสอบส่ง env สังเคราะห์แทนได้โดยไม่แตะ process.env จริง
 // ============================================================
 
 import { dnaToTemplateSpec } from './refTemplate.js';
@@ -21,9 +24,10 @@ const RANK_TO_GRADE = ['F', 'C', 'B', 'A'];
 /**
  * คำนวณเกรดเทมเพลตของ ref cover 1 ใบ (deterministic ล้วน)
  * @param {object} record - ระเบียนในคลัง { id, imagePath, dna, ... } (dna มี _fidelity/_duplicateOf/_reproducible จาก R1/R2)
+ * @param {object} [env=process.env] - แหล่ง env สำหรับ kill-switch R6 (REF_HUMAN_VERIFIED_FLOOR) — ส่ง object สังเคราะห์ตอนเทสได้
  * @returns {{grade:'A'|'B'|'C'|'F', reasons:string[], engineVersion:string}}
  */
-export function computeTemplateGrade(record) {
+export function computeTemplateGrade(record, env = process.env) {
   const dna = record?.dna;
   // imagePath อยู่ระดับบนของ record (คลังจริง) — เผื่อบางระเบียนเก็บใน dna ด้วย ก็รับทั้งสองที่
   const imagePath = record?.imagePath || dna?.imagePath;
@@ -109,6 +113,17 @@ export function computeTemplateGrade(record) {
   if (Number.isFinite(worst) && worst > 30 && rank > 0) {
     rank -= 1;
     reasons.push(`worstOffsetPx ${worst} > 30 → ลดหนึ่งขั้น`);
+  }
+
+  // ── R6 (19 ก.ค.): grade floor สำหรับใบ human-verified — ตาคนยืนยัน geometry ของ template แล้ว
+  //   แต่ auto-fidelity score ยังต่ำ (วัดตะเข็บกับภาพตอนอัพเท่านั้น ไม่ได้บอกว่าโครงผิด) → ไม่ควรถูกกักที่ C/F
+  //   ทำงานเฉพาะจุดนี้ — "หลัง" ผ่านทุกประตู hard-fail ด้านบนมาแล้ว (ไม่ใช่ _duplicateOf/ไม่มี dna/
+  //   dnaToTemplateSpec พัง/ไม่มี _fidelity — พวกนั้น return ไปตั้งแต่ต้นฟังก์ชัน ไม่มีทางมาถึงบรรทัดนี้)
+  //   → floor เฉพาะ F/C ที่มาจาก "fidelity score ต่ำ" เท่านั้น · ไม่ลดขั้นใบที่ได้ A/B อยู่แล้ว (rank<2 เท่านั้น)
+  //   kill-switch: REF_HUMAN_VERIFIED_FLOOR==='0' → ปิด floor นี้ กลับเป็นพฤติกรรมเดิมทั้งหมด (default เปิด)
+  if (env?.REF_HUMAN_VERIFIED_FLOOR !== '0' && dna._humanVerified === true && rank < 2) {
+    rank = 2;
+    reasons.push('human-verified → floor เป็น B (ตาคนยืนยัน geometry แล้ว)');
   }
 
   return _result(RANK_TO_GRADE[rank], reasons);

@@ -2850,6 +2850,123 @@ async function _runRefHeroV2({ compass, semContract, canonHeroId, semAuthorityHa
   }
 }
 
+// ============================================================
+// ★ Phase 1 — Solver Live Canary (19 ก.ค. 69, สเปคผู้บัญชาการ sol.): แกนเดียวของการคำนวณแผน solver
+//   ใช้ร่วมทั้ง "shadow logging" (เดิมตั้งแต่ 10 ก.ค.) และ "live decision" (ใหม่ ใต้ MEGA_SLOT_SOLVER_LIVE)
+//   — ห้ามมี 2 ชุด logic ต่างกันคำนวณผลไม่ตรงกัน (เรียกครั้งเดียว ผลเดียวกันใช้ต่อ 2 ทาง)
+//   Exported เพื่อเทส unit ตรงๆ ได้ (ไม่ต้อง mock s6_slots ทั้งฟังก์ชันที่มี IO/HTTP เยอะ)
+//   pure ตามสัญญา slotSolver.js เกือบทั้งหมด ยกเว้น 2 dynamic import defensive (โมดูลจริง ไม่มี side-effect
+//   ที่แตะข้อมูลธุรกิจ) — โยน error ได้เสมอ (ผู้เรียกต้อง try/catch เอง เหมือนโค้ด shadow เดิม)
+// ============================================================
+export async function buildSolverPlan({ activeSlots, sorted, compass, orders, heroNames, storyFitOf, sceneKeyOf, isClean, realShortSideOf }) {
+  const { solveSlotAssignments } = await import('@/lib/slotSolver');
+  // ★ Wave3 ชุด2 (10 ก.ค.): getSourceScore ต่อผ่าน dynamic-import แบบ defensive (pattern เดิมของไฟล์นี้) —
+  //   ถ้าโมดูล/ฟังก์ชันหายในอนาคต = fail-open ได้ null (solver ตีเป็นกลาง 0.5) ไม่ล้มทั้งแผน
+  let _getSourceScore = null;
+  try {
+    const _scraperMod = await import('@/lib/services/multiAgentImageScraper');
+    if (typeof _scraperMod?.getSourceScore === 'function') _getSourceScore = _scraperMod.getSourceScore;
+  } catch { /* โมดูลโหลดไม่ได้ = ปล่อย null (เหมือนไม่มีค่า) */ }
+  // characters จากเข็มทิศ + ธง isHero (heroNames = role=hero หรือตัวแรก — ตัวเดียวกับด่าน hero ของ s6_slots)
+  const solverChars = (compass?.mainCharacters || [])
+    .map((c) => c?.name).filter(Boolean)
+    .map((name) => ({ name, isHero: heroNames.includes(name) }));
+  // wantPerson/refShot ต่อช่องจากใบสั่งงานสมอง (artBrief.orders — จับคู่ตาม role ของช่อง ถ้ามี)
+  const _normShot = (s) => {
+    const t = String(s || '').toLowerCase();
+    if (/close|โคลส|ใบหน้า|หน้าเต็ม/.test(t)) return 'closeup';
+    if (/bust|อก|ครึ่งตัว|half/.test(t)) return 'bust';
+    if (/medium|กลาง|เอว|knee/.test(t)) return 'medium';
+    if (/wide|กว้าง|เต็มตัว|full|long/.test(t)) return 'wide';
+    return null;
+  };
+  const _slotRole = (name) => (name === 'hero' ? 'hero' : name === 'circle' ? 'circle' : name === 'context' ? 'context' : 'secondary');
+  const solverSlots = activeSlots.map((name) => {
+    const ord = (orders || []).find((o) => String(o.role) === name) || null;
+    return { id: name, role: _slotRole(name), wantPerson: ord?.personHint || null, refShot: _normShot(ord?.shot) };
+  });
+  // faceBoxHFrac แบบ defensive: Gemini คืน {x,y,w,h} normalized 0-1 (h=สัดส่วนสูงหน้า) —
+  //   รับ {x1,y1,x2,y2} เผื่อ path อื่น · ค่า px (>1)/รูปแปลก = null (normalize เชื่อถือไม่ได้)
+  const _faceHFrac = (fb) => {
+    if (!fb || typeof fb !== 'object') return null;
+    const h = Number(fb.h);
+    if (Number.isFinite(h) && h > 0 && h <= 1.0001) return Math.min(1, h);
+    const y1 = Number(fb.y1), y2 = Number(fb.y2);
+    if (Number.isFinite(y1) && Number.isFinite(y2) && y2 > y1 && y2 <= 1.0001) return Math.min(1, y2 - y1);
+    return null;
+  };
+  const solverImages = sorted.map((x) => {
+    const persons = [x.triage?.person, ...(x.triage?.persons || [])].filter(Boolean);
+    const identityHits = {};
+    for (const c of solverChars) identityHits[c.name] = persons.some((p) => _namesMatchSimple(p, c.name));
+    return {
+      id: x.id,
+      persons,
+      identityHits, // ★ solver ไม่ match ชื่อเอง — คำนวณให้ที่นี่ด้วย _namesMatchSimple (module-level)
+      storyFit: storyFitOf(x), // null เมื่อปิด STORY_SEL → event แกนกลาง 0.5
+      newsScene: x.triage?.newsScene !== false,
+      category: x.triage?.category || 'other',
+      emotion: x.triage?.emotion || null,
+      ...(SOLVER_DIAGNOSTICS_V2_ON ? {
+        note: String(x.triage?.note || '').replace(/\s+/g, ' ').trim().slice(0, 64) || null,
+        orientation: (Number(x.width) > 0 && Number(x.height) > 0)
+          ? (x.width / x.height > 1.15 ? 'wide' : (x.width / x.height < 0.87 ? 'tall' : 'sq'))
+          : null,
+      } : {}),
+      quality: x.triage?.quality ?? null,
+      faces: Number(x.triage?.faceCount) || 0,
+      clean: isClean(x),
+      shortSide: realShortSideOf(x),
+      sharpness: (typeof x.triage?.sharpness === 'number') ? x.triage.sharpness : null,
+      thumbOnly: x.rehostQuality === 'thumbnail',
+      lowRes: x.lowRes === true,
+      sceneKey: sceneKeyOf(x) || null,
+      faceBoxHFrac: _faceHFrac(x.triage?.faceBox),
+      // ★ Wave3 ชุด2: sourceScore จริง — ใช้ "หน้าเพจต้นทาง" (sourceLink/source) ไม่ใช่ imageUrl (CDN/rehost)
+      sourceScore: (() => {
+        const srcArg = x.sourceLink || x.source || null;
+        if (!_getSourceScore || !srcArg) return null;
+        try {
+          const raw = Number(_getSourceScore(srcArg));
+          return Number.isFinite(raw) ? Math.max(0, Math.min(1, raw / 10)) : null;
+        } catch { return null; }
+      })(),
+      // ★ Wave3 ชุด2: pHash64 จากตาคัด (libraryTriage.js) — null ถ้าวัดไม่ได้/ภาพเก่าก่อนมีฟีเจอร์นี้
+      pHash64: x.triage?.pHash64 || null,
+    };
+  });
+  const solved = solveSlotAssignments({ slots: solverSlots, images: solverImages, characters: solverChars });
+  return { solverChars, solverSlots, solverImages, solved, normShot: _normShot };
+}
+
+// ★ Phase 1 — Atomic validator ของแผน solver (pure, ไม่มี IO/closure ภายนอก — เทสตรงได้ง่าย):
+//   แผน solver ต้อง "ทั้งชุด" หรือ "ไม่เอาเลย" — ทุกช่องใน activeSlots ต้องมี imageId จริง + อยู่ใน universe
+//   ที่ solver เห็นจริง (universeIds) + ไม่ซ้ำข้ามช่อง + hero (heroSlotId) ต้องอยู่ใน heroValidIds
+//   (ผู้เรียกคำนวณ heroValidIds จาก _identityOk ตัวเดียวกับด่านเดิมของ s6_slots — ไม่มีข้อยกเว้นพิเศษ)
+//   คืน { ok:true, bySlot:Map(slotId->{...assignment, imageId}) } หรือ { ok:false, reason, slot?, imageId? }
+export function validateSolverPlanAtomic({ solved, activeSlots, universeIds, heroSlotId, heroValidIds }) {
+  if (!solved || !Array.isArray(solved.assignments)) return { ok: false, reason: 'MALFORMED' };
+  const bySlot = new Map();
+  const seenIds = new Set();
+  for (const slotId of (activeSlots || [])) {
+    const a = solved.assignments.find((x) => x && x.slotId === slotId);
+    const imageId = (a && a.imageId != null) ? String(a.imageId) : null;
+    if (imageId == null) return { ok: false, reason: 'HOLE', slot: slotId };
+    if (!universeIds || !universeIds.has(imageId)) return { ok: false, reason: 'OUT_OF_UNIVERSE', slot: slotId, imageId };
+    if (seenIds.has(imageId)) return { ok: false, reason: 'DUPLICATE', slot: slotId, imageId };
+    seenIds.add(imageId);
+    bySlot.set(slotId, { ...a, imageId });
+  }
+  if (heroSlotId != null) {
+    const heroA = bySlot.get(heroSlotId);
+    const heroImageId = heroA ? heroA.imageId : null;
+    if (heroImageId == null || !heroValidIds || !heroValidIds.has(heroImageId)) {
+      return { ok: false, reason: 'HERO_IDENTITY_FAIL', slot: heroSlotId, imageId: heroImageId };
+    }
+  }
+  return { ok: true, bySlot };
+}
+
 export async function s6_slots(job, { origin, _deps } = {}) {
   // ★ SEM-1: dependency injection เพื่อ testability เท่านั้น — default = ของจริง (production เดิม 100%)
   const _brainFn = _deps?.slotDirectorBrain || slotDirectorBrain;
@@ -2874,6 +2991,13 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   //   DEFAULT OFF = byte-identical legacy (no read/import/log/field on the OFF path — the seam block near
   //   the happy-path return is skipped entirely). See the _runRefHeroV2 producer block above s6_slots.
   const _refHeroV2On = process.env.MEGA_REF_HERO_V2 === '1';
+  // ═══ PHASE 1 — SOLVER LIVE CANARY latch MEGA_SLOT_SOLVER_LIVE='1' (exact '1', TOCTOU-proof snapshot at ENTRY) ═══
+  //   DEFAULT OFF = byte-identical legacy: solver ยังคำนวณเป็น shadow เหมือนเดิมทุกอย่าง (ไม่แตะ want/slots/dossier)
+  //   ON + แผน solver ผ่าน atomic validation (ทุกช่อง required มี imageId จริง+unique+hero ผ่าน identity hard rule
+  //   เดิม) → แผน solver กลายเป็น "want" ต่อช่อง แทน brain.slots ก่อนเข้า gate เดิมทุกด่าน (identity/duplicate/
+  //   hero-size/clean/fallback) — reuse โค้ด gate เดิม 100% ไม่มีทางลัด · ไม่ผ่าน validation/solver throw =
+  //   ถอยไปใช้แผน LLM/legacy เดิมทั้งชุด (เหมือน SOLVER_LIVE=off เป๊ะ)
+  const SOLVER_LIVE = process.env.MEGA_SLOT_SOLVER_LIVE === '1';
   const im = job.dossier.images || {};
   // ★ 15 ก.ค. (Batch 2B + P1 + 2C): V2 ON อ่าน "snapshot เดียว" ผ่าน authority path in-process
   //   (buildImagesRouteResponse caseId,'1') — pool (body.images) และ candidateAuthority มาจาก rows ชุดเดียวกัน
@@ -3708,6 +3832,66 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     : slot === 'hero');
   // ★ SEM-1 correction (Codex P0-2): ช่องที่ ref ระบุคนชัด — intent ของ ref ชนะกฎ global ทุกตัว (เช่น "วงกลมคนละคนกับ hero")
   const _slotHasIntent = (slot) => !!(semContract && String(semById.get(slot)?.wantPerson || '').trim());
+
+  // ═══ PHASE 1 — SOLVER LIVE CANARY: คำนวณ + ตรวจแผน solver แบบ ATOMIC ก่อนลูป id-gate ═══════════════════
+  //   ต้องอยู่ "ก่อน" ลูปข้างล่าง (ใช้ผลนี้แทน brain.slots เป็น want ต่อช่อง) แต่ "หลัง" _identityOk/_canonHeroId
+  //   พร้อมใช้แล้ว (เช็ค hero identity hard rule เดิมได้) — SOLVER_LIVE=false ข้ามทั้งบล็อกนี้สนิท
+  //   (ไม่มี await/log/state ใหม่ใดๆ) = byte-identical กับพฤติกรรมเดิมทุกบรรทัด
+  let _solverPlan = null;      // { solverChars, solverSlots, solverImages, solved, normShot } — reuse ต่อใน shadow block ด้านล่าง (ห้ามคำนวณซ้ำ)
+  let _solverPlanOk = false;   // แผนผ่าน atomic validation แล้ว → solver เป็นผู้ตัดสิน want จริง
+  let _solverInvalidReason = null;
+  let _solverWantBySlot = null; // Map(slotId -> {id, reason, backups}) shape เดียวกับ brain.slots[slot]
+  if (SOLVER_LIVE) {
+    try {
+      _solverPlan = await buildSolverPlan({
+        activeSlots,
+        sorted,
+        compass: job.dossier.compass,
+        orders: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief)?.orders || [],
+        heroNames,
+        storyFitOf,
+        sceneKeyOf,
+        isClean,
+        realShortSideOf,
+      });
+    } catch (e) {
+      _solverPlan = null;
+      _solverInvalidReason = 'SOLVER_THREW';
+      console.log('[MEGA S6] 🧮 solver-live: buildSolverPlan ล้ม → ใช้แผน LLM/legacy เดิมทั้งชุด:', String(e?.message || '').slice(0, 60));
+    }
+    if (_solverPlan && _solverPlan.solved) {
+      const universeIds = new Set(_solverPlan.solverImages.map((x) => String(x.id)));
+      const heroValidIds = new Set(sorted.filter((x) => _identityOk(_canonHeroId, x)).map((x) => String(x.id)));
+      const _v = validateSolverPlanAtomic({
+        solved: _solverPlan.solved,
+        activeSlots,
+        universeIds,
+        heroSlotId: _canonHeroId,
+        heroValidIds,
+      });
+      if (_v.ok) {
+        _solverPlanOk = true;
+        _solverWantBySlot = new Map();
+        for (const [slotId, a] of _v.bySlot.entries()) {
+          _solverWantBySlot.set(slotId, {
+            id: a.imageId,
+            reason: `solver v1 (${Math.round(a.total || 0)}คะแนน — deterministic 6-แกน, LIVE)`,
+            backups: (a.top3 || []).map((t) => String(t.id)).filter((id) => id !== a.imageId),
+          });
+        }
+        console.log(`[MEGA S6] 🧮 solver-live: แผนผ่าน atomic validation ${activeSlots.length}/${activeSlots.length} ช่อง — solver เป็นผู้ตัดสิน`);
+      } else {
+        _solverInvalidReason = _v.reason;
+        console.log(`[MEGA S6] 🧮 solver-live: แผนไม่ผ่าน atomic validation (${_v.reason}${_v.slot ? ` @ ${_v.slot}` : ''}) → ใช้แผน LLM/legacy เดิมทั้งชุด`);
+      }
+    }
+  }
+  // ★ selectionAuthority: solver ตัดสินจริง | LLM (brain) เป็นผู้ตัดสิน (solver ปิด/ไม่ผ่าน) | heuristic ล้วน (brain ก็ล่ม)
+  //   คำนวณเฉพาะ SOLVER_LIVE=true (กัน field ใหม่รั่วเข้า dossier ตอน OFF) — ใช้ที่ dossierPatch ท้ายฟังก์ชัน
+  const _solverAuthorityLabel = SOLVER_LIVE
+    ? (_solverPlanOk ? 'slotSolver' : (brainOk ? 'llm_fallback' : 'legacy_fallback'))
+    : null;
+
   const used = new Set();
   const usedPersons = new Map(); // ★ แบตช์ F (F2b): นับ person ที่ถูกใช้ต่อช่อง (soft diversity) — คนเดิมกินหลายช่องแล้วเลี่ยงเพิ่ม
   const slots = {};
@@ -3716,7 +3900,10 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   let sceneDupBlocked = 0;
 
   for (const slot of activeSlots) {
-    const want = brainOk ? brain.slots?.[slot] : null;
+    // ★ Phase 1 Solver Live: แผน solver ที่ผ่าน atomic validation กลายเป็น "want" แทน brain.slots — ไหลผ่าน
+    //   gate เดิมทุกด่านข้างล่างเหมือนกันเป๊ะ (identity/duplicate/hero-size/clean/fallback) ไม่มีทางลัด/bypass
+    //   SOLVER_LIVE=false หรือแผนไม่ผ่าน validation = นิพจน์ขวาสุดเดิมเป๊ะ (brainOk ? brain.slots?.[slot] : null)
+    const want = _solverPlanOk ? (_solverWantBySlot.get(slot) || null) : (brainOk ? brain.slots?.[slot] : null);
     let img = want?.id != null ? byId.get(String(want.id)) : null;
     let reason = want?.reason || '';
     if (img && used.has(String(img.id))) img = null; // ซ้ำข้ามช่อง = ตัด
@@ -4277,91 +4464,23 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   if (process.env.MEGA_SOLVER_SHADOW !== '0') {
     try {
       const { solveSlotAssignments } = await import('@/lib/slotSolver');
-      // ★ Wave3 ชุด2 (10 ก.ค.): getSourceScore ต่อผ่าน dynamic-import แบบ defensive (ตาม pattern เดิมของไฟล์นี้
-      //   ดูบรรทัดบน) — `export` ที่ multiAgentImageScraper.js เพิ่มแล้วในชุดเดียวกัน (เดิมเป็น module-private)
-      //   ถ้าโมดูล/ฟังก์ชันหายในอนาคต = fail-open ได้ null (solver ตีเป็นกลาง 0.5) ไม่ล้มทั้ง shadow
-      let _getSourceScore = null;
-      try {
-        const _scraperMod = await import('@/lib/services/multiAgentImageScraper');
-        if (typeof _scraperMod?.getSourceScore === 'function') _getSourceScore = _scraperMod.getSourceScore;
-      } catch { /* โมดูลโหลดไม่ได้ = ปล่อย null (เหมือนไม่มีค่า) */ }
-      // characters จากเข็มทิศ + ธง isHero (heroNames = role=hero หรือตัวแรก — ตัวเดียวกับด่าน hero ด้านบน)
-      const solverChars = (job.dossier.compass?.mainCharacters || [])
-        .map((c) => c?.name).filter(Boolean)
-        .map((name) => ({ name, isHero: heroNames.includes(name) }));
-      // wantPerson/refShot ต่อช่องจากใบสั่งงานสมอง (artBrief.orders — จับคู่ตาม role ของช่อง ถ้ามี)
+      // wantPerson/refShot ต่อช่องจากใบสั่งงานสมอง (artBrief.orders — จับคู่ตาม role ของช่อง ถ้ามี) — ใช้ทั้ง
+      //   buildSolverPlan ด้านล่าง และ ref-role/fair-universe diagnostics rerun (ท้ายบล็อกนี้)
       const orders = (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief)?.orders || []; // ★ D3-B3.3: template path ใช้ local snapshot (solver/diagnostics)
-      const _normShot = (s) => {
-        const t = String(s || '').toLowerCase();
-        if (/close|โคลส|ใบหน้า|หน้าเต็ม/.test(t)) return 'closeup';
-        if (/bust|อก|ครึ่งตัว|half/.test(t)) return 'bust';
-        if (/medium|กลาง|เอว|knee/.test(t)) return 'medium';
-        if (/wide|กว้าง|เต็มตัว|full|long/.test(t)) return 'wide';
-        return null;
-      };
-      const _slotRole = (name) => (name === 'hero' ? 'hero' : name === 'circle' ? 'circle' : name === 'context' ? 'context' : 'secondary');
-      const solverSlots = activeSlots.map((name) => {
-        const ord = orders.find((o) => String(o.role) === name) || null;
-        return { id: name, role: _slotRole(name), wantPerson: ord?.personHint || null, refShot: _normShot(ord?.shot) };
-      });
-      // faceBoxHFrac แบบ defensive: Gemini คืน {x,y,w,h} normalized 0-1 (h=สัดส่วนสูงหน้า) —
-      //   รับ {x1,y1,x2,y2} เผื่อ path อื่น · ค่า px (>1)/รูปแปลก = null (normalize เชื่อถือไม่ได้)
-      const _faceHFrac = (fb) => {
-        if (!fb || typeof fb !== 'object') return null;
-        const h = Number(fb.h);
-        if (Number.isFinite(h) && h > 0 && h <= 1.0001) return Math.min(1, h);
-        const y1 = Number(fb.y1), y2 = Number(fb.y2);
-        if (Number.isFinite(y1) && Number.isFinite(y2) && y2 > y1 && y2 <= 1.0001) return Math.min(1, y2 - y1);
-        return null;
-      };
-      const solverImages = sorted.map((x) => {
-        const persons = [x.triage?.person, ...(x.triage?.persons || [])].filter(Boolean);
-        const identityHits = {};
-        for (const c of solverChars) identityHits[c.name] = persons.some((p) => _namesMatchSimple(p, c.name));
-        return {
-          id: x.id,
-          persons,
-          identityHits, // ★ solver ไม่ match ชื่อเอง — คำนวณให้ที่นี่ด้วย _namesMatchSimple (module-level)
-          storyFit: storyFitOf(x), // null เมื่อปิด STORY_SEL → event แกนกลาง 0.5
-          newsScene: x.triage?.newsScene !== false,
-          category: x.triage?.category || 'other',
-          emotion: x.triage?.emotion || null,
-          ...(SOLVER_DIAGNOSTICS_V2_ON ? {
-            note: String(x.triage?.note || '').replace(/\s+/g, ' ').trim().slice(0, 64) || null,
-            orientation: (Number(x.width) > 0 && Number(x.height) > 0)
-              ? (x.width / x.height > 1.15 ? 'wide' : (x.width / x.height < 0.87 ? 'tall' : 'sq'))
-              : null,
-          } : {}),
-          quality: x.triage?.quality ?? null,
-          faces: Number(x.triage?.faceCount) || 0,
-          clean: isClean(x),
-          shortSide: realShortSideOf(x),
-          sharpness: (typeof x.triage?.sharpness === 'number') ? x.triage.sharpness : null,
-          thumbOnly: x.rehostQuality === 'thumbnail',
-          lowRes: x.lowRes === true,
-          sceneKey: sceneKeyOf(x) || null,
-          faceBoxHFrac: _faceHFrac(x.triage?.faceBox),
-          // ★ Wave3 ชุด2: sourceScore จริง — ใช้ "หน้าเพจต้นทาง" (sourceLink/source) ไม่ใช่ imageUrl (CDN/rehost)
-          //   เพราะ getSourceScore เทียบโดเมน — CDN ทั่วไป (เช่น encrypted-tbn0.gstatic.com หรือ rehost ของเรา)
-          //   ไม่บอกความน่าเชื่อถือจริง (คอมเมนต์ต้นทางเตือนไว้ตรงนี้เอง ที่ multiAgentImageScraper.js บรรทัด ~1220)
-          //   scale ที่พบจริง: 0-10 (ตาราง SOURCE_RELIABILITY, ดีฟอลต์ไม่รู้จักโดเมน=4) → normalize หาร 10 ก่อนส่งเข้า solver (0-1)
-          //   ไม่มี field แหล่ง/เรียกฟังก์ชันไม่ได้/ค่าไม่ใช่ตัวเลข = null (solver ตีเป็นกลาง 0.5 เอง — fail-open)
-          sourceScore: (() => {
-            const srcArg = x.sourceLink || x.source || null;
-            if (!_getSourceScore || !srcArg) return null;
-            try {
-              const raw = Number(_getSourceScore(srcArg));
-              return Number.isFinite(raw) ? Math.max(0, Math.min(1, raw / 10)) : null; // 0-10 → 0-1 (inline clamp, ไม่เพิ่ม helper ใหม่ระดับโมดูล)
-            } catch { return null; }
-          })(),
-          // ★ Wave3 ชุด2: pHash64 จากตาคัด (libraryTriage.js) — null ถ้าวัดไม่ได้/ภาพเก่าก่อนมีฟีเจอร์นี้
-          pHash64: x.triage?.pHash64 || null,
-        };
-      });
+      // ★ Phase1 Solver Live Canary: ใช้ผลที่คำนวณไว้แล้วก่อนลูป id-gate ถ้ามี (SOLVER_LIVE เรียก buildSolverPlan
+      //   ไปแล้ว) — ห้ามคำนวณซ้ำเป็นอีกชุด logic (สเปค sol.: "ใช้ผลเดียวกันทั้ง shadow logging และ live")
+      //   ไม่มี (ปกติ SOLVER_LIVE=0) = คำนวณที่นี่ครั้งเดียวด้วย helper เดียวกัน — ผลลัพธ์/field order เดิมทุก byte
+      let solverChars, solverSlots, solverImages, solved, _normShot;
+      if (_solverPlan) {
+        ({ solverChars, solverSlots, solverImages, solved, normShot: _normShot } = _solverPlan);
+      } else {
+        const _built = await buildSolverPlan({ activeSlots, sorted, compass: job.dossier.compass, orders, heroNames, storyFitOf, sceneKeyOf, isClean, realShortSideOf });
+        ({ solverChars, solverSlots, solverImages, solved } = _built);
+        _normShot = _built.normShot;
+      }
       const postGateSlotIds = SOLVER_DIAGNOSTICS_V2_ON
         ? Object.fromEntries(activeSlots.map((name) => [name, slots[name]?.id != null ? String(slots[name].id) : null]))
         : null;
-      let solved;
       if (SOLVER_DIAGNOSTICS_V2_ON) {
         try {
           solved = solveSlotAssignments({
@@ -4375,12 +4494,10 @@ export async function s6_slots(job, { origin, _deps } = {}) {
             },
           });
         } catch (diagErr) {
-          // Diagnostics ใหม่ล้มต้องไม่ทำ shadow v1/งานจริงหาย — ถอย Solver call เดิมทันที
+          // Diagnostics ใหม่ล้มต้องไม่ทำ shadow v1/งานจริงหาย — ถอยใช้ solved ฐาน (ไม่มี diagnostics) ที่คำนวณไว้แล้วข้างบน
+          //   (ผลเดียวกันเป๊ะ — solveSlotAssignments deterministic บน input เดิม ไม่ต้องเรียกซ้ำ)
           console.log('[MEGA S6] 🔬 solver-diagnostics-v2 ล้ม → fallback v1:', diagErr?.message?.slice(0, 60));
-          solved = solveSlotAssignments({ slots: solverSlots, images: solverImages, characters: solverChars });
         }
-      } else {
-        solved = solveSlotAssignments({ slots: solverSlots, images: solverImages, characters: solverChars });
       }
       const bySlotSolver = new Map(solved.assignments.map((a) => [a.slotId, a]));
       let agree = 0;
@@ -4563,7 +4680,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   const quarantineTag = quarantineTotal > 0 ? ` · 🧿กัก ${untriagedList.length}+${sizeUnknownList.length} ใบ(ข้อมูลไม่ครบ)` : '';
   if (!slots[_canonHeroId]) {
     // ★ D-sidecar: hero ว่าง = trace ปกติไม่ครบ → _dSidecar มักเป็น null (spread ด้านล่างจึง omit เอง) — ห้ามฝืนแนบของไม่ครบ
-    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', ...(_dSidecar ? { decisionEvidence: _dSidecar } : {}), dossierPatch: { ...(_jobTemplateV1 ? { artBrief: _templateArtBriefSnapshot } : {}), pickImages: { slots, note: brain.note || '', ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}) } } };
+    return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพตัวเอกที่ถูกคนเลย — ห้ามฝืนทำปกผิดคน', quality: 'red', ...(_dSidecar ? { decisionEvidence: _dSidecar } : {}), dossierPatch: { ...(_jobTemplateV1 ? { artBrief: _templateArtBriefSnapshot } : {}), pickImages: { slots, note: brain.note || '', ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}), ...(SOLVER_LIVE ? { s6_authority: _solverAuthorityLabel, ...(_solverInvalidReason ? { solverInvalidReason: _solverInvalidReason } : {}) } : {}) } } };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -5059,7 +5176,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     nextAction: 'continue',
     summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'}${storyTag}${quarantineTag} — ${(brain.note || '').slice(0, 80)}`,
     dossierPatch: {
-      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}), ...(_refHeroV2Patch ? { refHeroV2: _refHeroV2Patch } : {}), ...(_cropGuardPatch ? { cropGuard: _cropGuardPatch } : {}) },
+      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}), ...(_refHeroV2Patch ? { refHeroV2: _refHeroV2Patch } : {}), ...(_cropGuardPatch ? { cropGuard: _cropGuardPatch } : {}), ...(SOLVER_LIVE ? { s6_authority: _solverAuthorityLabel, ...(_solverInvalidReason ? { solverInvalidReason: _solverInvalidReason } : {}) } : {}) },
       ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}),
       // ★ D3-B3.3 (Codex): template path echo local plain snapshot (ไม่ใช่ raw carrier) → S7/retry เห็น plain · legacy = raw byte เดิม
       ...((_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) ? { artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) } : {}),

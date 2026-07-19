@@ -155,6 +155,65 @@ export function slotsFromSpec(dna) {
   });
 }
 
+// ★ 19 ก.ค. 69 (ด่านกันเหนียว — editor จอดำเมื่อ compose รัน "ไม่มี ref"):
+//   ไม่มี ref → dna ว่าง → dnaToTemplateSpec คืน null + template.slots ว่าง → slotsFromSpec/slotsFromTemplate
+//   คืน slots ว่าง → ภาพจาก manifest ลงไม่ได้ (slotIds.has(m.slot) เป็น false เสมอ) → editor จอดำ
+//   ทางแก้ที่ถูกต้อง: composer แนบ "ผังจริงต่อช่อง" (geometry) ลง manifest.slots แล้ว (fix 19 ก.ค. megaComposerService)
+//   → ที่นี่แปลง manifest.slots (id=slot · px + shape/zIndex) เป็น editor slot รูปเดียวกับ slotsFromSpec
+//   geometry เป็น px ในผืน manifestCanvas (spec.canvasW×H ของรอบประกอบ — fallback vt_ref_tri/vt_faces_circle=1200×1350)
+//   → สเกลลงผืน 1080×1350 ของ editor (ไม่สเกล = ช่องล้นขอบขวาเมื่อ canvas ต้นทาง 1200) · ไม่มี canvas = ถือเป็น 1080×1350
+export function slotsFromManifest(manifestSlots, manifestCanvas) {
+  const list = Array.isArray(manifestSlots) ? manifestSlots : [];
+  const cw = num(manifestCanvas && manifestCanvas.w) || CANVAS_W;
+  const ch = num(manifestCanvas && manifestCanvas.h) || CANVAS_H;
+  const sx = cw > 0 ? CANVAS_W / cw : 1; // สเกลกว้าง (ต้นทาง 1200 → 0.9) · วงกลม/ช่องกว้าง ใช้ตัวนี้
+  const sy = ch > 0 ? CANVAS_H / ch : 1; // สเกลสูง (ต้นทางทุกเทมเพลต ×1350 = 1:1)
+  const out = [];
+  const seen = new Set();
+  list.forEach((m, i) => {
+    if (!m || typeof m !== 'object') return;
+    // ต้องมี geometry ครบ (x/y/w/h finite) — ขาด = ข้าม (ไม่มั่ว/ไม่เดา)
+    if (![m.x, m.y, m.w, m.h].every((v) => Number.isFinite(Number(v)))) return;
+    let id = (typeof m.slot === 'string' && m.slot.trim()) ? m.slot : `slot_${i}`;
+    while (seen.has(id)) id = `${id}_${i}`; // กัน id ซ้ำ (ปกติ manifest ไม่ซ้ำอยู่แล้ว)
+    seen.add(id);
+
+    const isCircle = m.shape === 'circle';
+    // role อนุมานจาก id (คงคอนเวนชันเดียวกับ slotsFromSpec: main→hero, วงกลม→reaction, อื่น→ตัวอักษรของ id)
+    const role = isCircle ? 'reaction'
+      : (id === 'main' ? 'hero' : (String(id).replace(/[^a-z]/g, '') || 'p'));
+    const x = Math.round(num(m.x) * sx);
+    const y = Math.round(num(m.y) * sy);
+    const bColor = safeBorderColor(m.border);
+
+    if (isCircle) {
+      out.push({
+        id, label: labelFor(role, 'circle', i), role,
+        shape: 'circle', x, y, diameter: Math.max(80, Math.round(num(m.w) * sx)),
+        border: bColor || '#FFFFFF',
+        borderWidth: num(m.borderWidth) || 6,
+        zIndex: Number.isFinite(Number(m.zIndex)) ? Number(m.zIndex) : 4,
+        draggable: true,
+      });
+    } else {
+      const slot = {
+        id, label: labelFor(role, 'rect', i), role,
+        x, y,
+        w: Math.max(8, Math.round(num(m.w) * sx)),
+        h: Math.max(8, Math.round(num(m.h) * sy)),
+        zIndex: Number.isFinite(Number(m.zIndex)) ? Number(m.zIndex) : 0,
+      };
+      if (bColor) {
+        slot.border = bColor;
+        slot.borderWidth = num(m.borderWidth) || 8;
+        slot.draggable = true; // ช่องมีกรอบ = ลากจัดเองได้ (เท่าพฤติกรรม slotsFromSpec/slotsFromTemplate)
+      }
+      out.push(slot);
+    }
+  });
+  return out;
+}
+
 // ตาราง alias (legacy): editor slot role → ลำดับ pickImages key ที่เติมช่องนี้ได้
 //   คำศัพท์ pickImages = hero/reaction/action/context/circle (SLOT_ORDER ท่อจริง)
 //   คำศัพท์ template   = hero/context/evidence/moment/reaction
@@ -306,7 +365,21 @@ export function buildEditorRecipe({ job, caseImages } = {}) {
   const slotOrder = Array.isArray(d.pickImages && d.pickImages.slotOrder) ? d.pickImages.slotOrder : null;
 
   // ★ 18 ก.ค. 69: ผังจริงจาก composer ก่อนเสมอ (id ตรง manifest 100%) — spec ใช้ไม่ได้ค่อย fallback ก๊อปปี้เดิม
-  const slots = slotsFromSpec(dna) || slotsFromTemplate(templateSlots);
+  let slots = slotsFromSpec(dna) || slotsFromTemplate(templateSlots);
+  // ★ 19 ก.ค. 69 (ด่านกันเหนียว — editor จอดำเมื่อ compose ไม่มี ref): มี dna = path เดิมทั้งหมด ไม่แตะ
+  //   ไม่มี dna → slots ว่าง (dna ว่าง = spec null + template.slots ว่าง) แต่ manifest.slots พก geometry ต่อช่อง
+  //   (composer แนบ x/y/w/h/shape/zIndex ให้แล้ว) → สร้าง editor slot จาก manifest แทน (ไม่งั้นภาพลงไม่ได้ = จอดำ)
+  if (!slots.length) {
+    const mSlotsGeom = (d.cover && d.cover.manifest && Array.isArray(d.cover.manifest.slots))
+      ? d.cover.manifest.slots : null;
+    const hasGeom = mSlotsGeom && mSlotsGeom.some((m) => m
+      && [m.x, m.y, m.w, m.h].every((v) => Number.isFinite(Number(v))));
+    if (hasGeom) {
+      const mCanvas = (Number.isFinite(Number(d.cover.manifest.canvasW)) && Number.isFinite(Number(d.cover.manifest.canvasH)))
+        ? { w: Number(d.cover.manifest.canvasW), h: Number(d.cover.manifest.canvasH) } : null;
+      slots = slotsFromManifest(mSlotsGeom, mCanvas);
+    }
+  }
   const slotAssign = assignSlots(slots, pickSlots, slotOrder);
   let imagesBySlot = buildImagesBySlot(slotAssign, pickSlots, caseImages);
 
