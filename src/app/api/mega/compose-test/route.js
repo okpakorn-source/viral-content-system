@@ -89,7 +89,7 @@ export async function POST(req) {
     if (Array.isArray(body.slotPlan) && body.slotPlan.length >= 3) {
       const t0f = Date.now();
       // ★ R5b.1 (audit sweep): variant (_derived) โผล่ในช่อง explicit-id ได้เฉพาะประตูเกรดเปิด+เกรดถึง — OFF = ใบจริงชุดเดิมเป๊ะ
-      const refsF = (await listRefCovers(500)).filter((r) => r.dna && r.imagePath && r.dna._reproducible !== false && (!r.dna._derived || refPoolGateOpen(r)));
+      const refsF = (await listRefCovers(500)).filter((r) => r.dna && r.dna._reproducible !== false && (!r.dna._derived || refPoolGateOpen(r)));
       const refF = body.refId ? refsF.find((r) => r.id === body.refId) : null;
       if (!refF) return NextResponse.json({ success: false, error: 'โหมด slotPlan แช่แข็งต้องระบุ refId ที่มีจริง', errorType: 'BAD_INPUT' }, { status: 400 });
       const outF = await composeAndVerify({
@@ -117,7 +117,7 @@ export async function POST(req) {
 
     // ── เลือก ref (ระบุเอง หรือ auto-match ตามอารมณ์ข่าว) — เฉพาะใบที่ทำตามได้จริง ──
     // ★ R5b.1 (audit sweep): กติกาเดียวกับ refsF — variant เข้าลิสต์เฉพาะประตูเปิด+เกรดถึง
-    const refs = (await listRefCovers(500)).filter((r) => r.dna && r.imagePath && r.dna._reproducible !== false && (!r.dna._derived || refPoolGateOpen(r)));
+    const refs = (await listRefCovers(500)).filter((r) => r.dna && r.dna._reproducible !== false && (!r.dna._derived || refPoolGateOpen(r)));
     let ref = body.refId ? refs.find((r) => r.id === body.refId) : null;
     if (!ref && refs.length) {
       const { pickBestRef } = await import('@/lib/refCoverMatch');
