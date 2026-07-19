@@ -42,6 +42,11 @@ export async function POST(request) {
     const queriesPerCluster = body?.queriesPerCluster != null ? Number(body.queriesPerCluster) : 4;
     const channels = Array.isArray(body?.channels) ? body.channels : KNOWN_CHANNELS.slice();
     const perQueryResults = body?.perQueryResults != null ? Number(body.perQueryResults) : 10;
+    // ★ เฟส 3 (optional — มีผลเฉพาะเมื่อ DESK_V2_QUERY_PLANNER เปิด): bias กอง angle + seed กอง trend
+    const preset = typeof body?.preset === 'string' ? body.preset.slice(0, 40) : null;
+    const trendTerms = Array.isArray(body?.trendTerms)
+      ? body.trendTerms.filter((x) => typeof x === 'string' && x).map((x) => x.slice(0, 70)).slice(0, 20)
+      : [];
 
     if (!Number.isFinite(topClusters) || topClusters < 1 || topClusters > 30) {
       return NextResponse.json({
@@ -66,7 +71,7 @@ export async function POST(request) {
       }, { status: 400 });
     }
 
-    const result = await huntClusters({ clusterIds, topClusters, queriesPerCluster, channels, perQueryResults });
+    const result = await huntClusters({ clusterIds, topClusters, queriesPerCluster, channels, perQueryResults, preset, trendTerms });
 
     return NextResponse.json({ success: true, ...result });
   } catch (error) {

@@ -17,9 +17,11 @@
 
 import { listExemplars, clusterSummary } from './dnaLibrary.js';
 import { sanitizeText } from './dnaContract.js';
+import { createStore } from '../../persistStore.js';
 import { getDiscoveryConfig } from './researchDiscoveryConfig.js';
 import { resolveCandidateChannel, platformGroupOf } from './researchChannelMap.js';
 import { mergeCandidateEvidence, rankDiverseCandidates } from './researchDiversify.js';
+import { planResearchQueries } from './researchQueryPlanner.js';
 
 // ★ เฟส 1: re-export ให้ผู้เรียก import จาก researchHunt ได้ตามสัญญาแผน (ตัวจริงอยู่ researchChannelMap.js — pure เทสตรงได้)
 export { resolveCandidateChannel, platformGroupOf } from './researchChannelMap.js';
@@ -188,13 +190,17 @@ export async function huntClusters({
   queriesPerCluster = 4,
   channels = KNOWN_CHANNELS,
   perQueryResults = 10,
+  preset = null,      // ★ เฟส 3: bias กอง angle (จาก preset UI — เฟส 8)
+  trendTerms = [],    // ★ เฟส 3: seed กอง trend เสริม
+  runSeed = '',       // ★ เฟส 3: หมุนกองคำค้น deterministic (ข้ามรอบ)
 } = {}) {
   const t0 = Date.now();
 
-  // ★ เฟส 1-2: อ่าน discovery config ครั้งเดียว. ปิดทุก flag = channel/สถิติ/ลำดับ candidate เดิมเป๊ะ
+  // ★ เฟส 1-3: อ่าน discovery config ครั้งเดียว. ปิดทุก flag = channel/สถิติ/ลำดับ/คำค้น candidate เดิมเป๊ะ
   const _discoveryCfg = getDiscoveryConfig();
-  const reelsOn = _discoveryCfg.flags.reels;         // เฟส 1: ระบุแพลตฟอร์มจริงจาก URL
-  const diversityOn = _discoveryCfg.flags.diversity; // เฟส 2: รวม URL ซ้ำ (เก็บหลักฐาน) + จัดอันดับกระจาย
+  const reelsOn = _discoveryCfg.flags.reels;             // เฟส 1: ระบุแพลตฟอร์มจริงจาก URL
+  const diversityOn = _discoveryCfg.flags.diversity;     // เฟส 2: รวม URL ซ้ำ (เก็บหลักฐาน) + จัดอันดับกระจาย
+  const plannerOn = _discoveryCfg.flags.queryPlanner;    // เฟส 3: วางแผนคำค้น 4 กอง (แทนคำค้น rep ใบเดียว)
 
   const safeTopClusters = Math.max(1, Math.min(30, Number(topClusters) || 10));
   const safeQueriesPerCluster = Math.max(1, Math.min(6, Number(queriesPerCluster) || 4));
@@ -211,8 +217,23 @@ export async function huntClusters({
     targetClusterIds = summary.slice(0, safeTopClusters).map((c) => c.clusterId).filter(Boolean);
   }
 
+  // ★ เฟส 3 (ON): staff hints = searchKeys จากคลัง user-topic-hunts (read-only, best-effort — พังไม่ล้มรอบ)
+  let staffHints = [];
+  if (plannerOn) {
+    try {
+      const rows = await createStore('user-topic-hunts').getAll();
+      const keys = [];
+      for (const r of Array.isArray(rows) ? rows : []) {
+        if (r && Array.isArray(r.searchKeys)) keys.push(...r.searchKeys);
+      }
+      staffHints = keys.slice(0, 200);
+    } catch {
+      staffHints = []; // อ่านคลังไม่ได้ → ไม่มี hint (planner ยังทำงานจาก DNA/THEME/trend เดิม)
+    }
+  }
+
   // ── (2) ต่อคลัสเตอร์: หาตัวแทน (reach สูงสุด) + รวมคำค้น unique + เก็บ permalink กันชนตัวเอง ──
-  const callTasks = []; // { clusterId, clusterArchetype, query, channel }
+  const callTasks = []; // { clusterId, clusterArchetype, query, channel, [queryId, queryBucket, lane] }
   const exemplarPermalinkSets = new Map(); // clusterId → Set(normalized permalink) ของทุกใบในคลัสเตอร์
   let clustersWithQueries = 0;
 
@@ -233,30 +254,50 @@ export async function huntClusters({
     }
     exemplarPermalinkSets.set(clusterId, permSet);
 
-    // ตัวแทน = ใบ reach สูงสุดในคลัสเตอร์
+    // ตัวแทน = ใบ reach สูงสุดในคลัสเตอร์ (ใช้ archetype ทั้ง 2 เส้นทาง)
     const rep = exemplars.slice().sort((a, b) => (Number(b.reach) || 0) - (Number(a.reach) || 0))[0];
     const archetype = sanitizeText(rep?.dna?.archetype, 80);
-    const newsQ = Array.isArray(rep?.dna?.newsQueries) ? rep.dna.newsQueries : [];
-    const clipQ = Array.isArray(rep?.dna?.clipQueries) ? rep.dna.clipQueries : [];
 
-    // รวม unique (case-insensitive) แล้วตัดตามเพดาน
-    const seenQ = new Set();
-    const combined = [];
-    for (const q of [...newsQ, ...clipQ]) {
-      const sq = sanitizeText(q, 70);
-      const lower = sq.toLowerCase();
-      if (sq && !seenQ.has(lower)) {
-        seenQ.add(lower);
-        combined.push(sq);
+    if (plannerOn) {
+      // 🆕 เฟส 3: วางแผนคำค้น 4 กอง (DNA/มุมเรื่อง/คน-รายการ/กระแส) แทนคำค้นจาก rep ใบเดียว
+      const plan = planResearchQueries({
+        exemplars,
+        clusterId,
+        clusterArchetype: archetype,
+        total: safeQueriesPerCluster,
+        runSeed: runSeed || clusterId, // deterministic ต่อคลัสเตอร์
+        preset,
+        trendTerms,
+        staffHints,
+      });
+      if (plan.length === 0) continue;
+      clustersWithQueries++;
+      for (const qp of plan) {
+        for (const channel of finalChannels) {
+          callTasks.push({ clusterId, clusterArchetype: archetype, query: qp.text, channel, queryId: qp.id, queryBucket: qp.bucket, lane: qp.lane });
+        }
       }
-    }
-    const queries = combined.slice(0, safeQueriesPerCluster);
-    if (queries.length === 0) continue;
-    clustersWithQueries++;
-
-    for (const query of queries) {
-      for (const channel of finalChannels) {
-        callTasks.push({ clusterId, clusterArchetype: archetype, query, channel });
+    } else {
+      // ── path เดิม (planner ปิด): reach-max exemplar + รวม newsQueries+clipQueries unique แล้วตัด N ──
+      const newsQ = Array.isArray(rep?.dna?.newsQueries) ? rep.dna.newsQueries : [];
+      const clipQ = Array.isArray(rep?.dna?.clipQueries) ? rep.dna.clipQueries : [];
+      const seenQ = new Set();
+      const combined = [];
+      for (const q of [...newsQ, ...clipQ]) {
+        const sq = sanitizeText(q, 70);
+        const lower = sq.toLowerCase();
+        if (sq && !seenQ.has(lower)) {
+          seenQ.add(lower);
+          combined.push(sq);
+        }
+      }
+      const queries = combined.slice(0, safeQueriesPerCluster);
+      if (queries.length === 0) continue;
+      clustersWithQueries++;
+      for (const query of queries) {
+        for (const channel of finalChannels) {
+          callTasks.push({ clusterId, clusterArchetype: archetype, query, channel });
+        }
       }
     }
   }
@@ -278,7 +319,7 @@ export async function huntClusters({
   let failedCalls = 0;
 
   await runPool(callTasks, CONCURRENCY, async (task) => {
-    const { clusterId, clusterArchetype, query, channel } = task;
+    const { clusterId, clusterArchetype, query, channel, queryId, queryBucket, lane } = task;
 
     if (!hasKeyFor(channel)) {
       skippedChannels++;
@@ -329,6 +370,12 @@ export async function huntClusters({
         cand.channel = effChannel;
         cand.discoveredVia = channel;
         cand.platformGroup = platformGroupOf(effChannel);
+      }
+      // 🆕 เฟส 3 (ON): พก bucket/lane/queryId จากแผนคำค้น (additive — planner ปิด = ไม่มี field นี้)
+      if (queryBucket) {
+        cand.queryId = queryId;
+        cand.queryBucket = queryBucket;
+        cand.lane = lane;
       }
 
       if (diversityOn) {
@@ -401,6 +448,8 @@ export async function huntClusters({
       ...(reelsOn ? { byDiscoveryChannel, reclassifiedCount } : {}),
       // ★ เฟส 2 (ON เท่านั้น): ทำ merge+rank แล้ว (dupCount = hit ที่ยุบรวม)
       ...(diversityOn ? { diversityApplied: true } : {}),
+      // ★ เฟส 3 (ON เท่านั้น): ใช้ query planner 4 กอง + จำนวน staff hints ที่ป้อน
+      ...(plannerOn ? { queryPlannerApplied: true, staffHintCount: staffHints.length } : {}),
     },
   };
 }
