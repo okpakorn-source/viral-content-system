@@ -27,6 +27,7 @@ import { fetchEntRss, fetchYouTubeChannels } from '../newsDesk/directFeeds.js';
 import { getWatchlistSeed, selectWatchlistForRound } from './researchWatchlist.js';
 import { planInterviewQueries, classifyInterviewCandidate } from './researchInterview.js';
 import { buildVirtualThemeIndex } from './researchThemeIndex.js';
+import { buildPresetQueries, presetCategories } from './researchPresetQueries.js';
 
 const INTERVIEW_CHANNELS = ['youtube', 'tiktok', 'facebook', 'reels']; // เลนสัมภาษณ์ยิงบนคลาวด์ได้ (IG ต้องเครื่องทีม — ข้ามในนี้)
 
@@ -212,6 +213,9 @@ export async function huntClusters({
   const sourceExpansionOn = _discoveryCfg.flags.sourceExpansion; // เฟส 4: เพิ่มแหล่งข่าวใหม่ (RSS/News/YT-watch)
   const interviewLaneOn = _discoveryCfg.flags.interviewLane; // เฟส 6: เลนสัมภาษณ์คนดัง (task แยกจาก DNA)
   const virtualThemesOn = _discoveryCfg.flags.virtualThemes; // เฟส 9: ติดป้ายกลุ่มเสมือน (virtualThemeId) บน candidate
+  // 🆕 Plan A (20 ก.ค.): preset ขับค้นเอง — เลือกแนวข่าว → ค้นคีย์กว้างต่อหมวด (ไม่ต้องติ๊กคลัสเตอร์ครูที่เจาะจงเกิน)
+  const cleanPreset = preset ? sanitizeText(preset, 40) : '';
+  const presetDrivenOn = _discoveryCfg.masterOn && !!cleanPreset && presetCategories(cleanPreset).length > 0;
   let interviewWatchlistIds = []; // เฟส 6: id คนดังที่ค้นรอบนี้ (ให้ trace เก็บ → เลือกคนค้นน้อยสุดรอบหน้า)
   const themeExemplars = []; // เฟส 9 (ON): สะสม exemplar ของคลัสเตอร์ที่ล่ารอบนี้ → สร้าง virtual theme index หลังลูป (ปิด flag = ไม่แตะ)
 
@@ -225,6 +229,9 @@ export async function huntClusters({
   let targetClusterIds;
   if (Array.isArray(clusterIds) && clusterIds.length > 0) {
     targetClusterIds = Array.from(new Set(clusterIds.filter((x) => typeof x === 'string' && x))).slice(0, safeTopClusters);
+  } else if (presetDrivenOn) {
+    // 🆕 Plan A: เลือกแนว (preset) แต่ไม่ติ๊กคลัสเตอร์ → ค้นด้วยคีย์กว้างของหมวดล้วน (ข้าม fallback top clusters)
+    targetClusterIds = [];
   } else {
     const summary = await clusterSummary(); // เรียง count มาก→น้อยอยู่แล้ว (dnaLibrary.js)
     targetClusterIds = summary.slice(0, safeTopClusters).map((c) => c.clusterId).filter(Boolean);
@@ -357,6 +364,26 @@ export async function huntClusters({
       }
     } catch (e) {
       console.error(`[ResearchHunt] interview lane ล้มเหลว: ${e?.message}`); // เลนสัมภาษณ์พังห้ามล้มการล่า DNA
+    }
+  }
+
+  // ── (2.6) 🆕 Plan A (ON เมื่อเลือก preset): คีย์กว้างต่อหมวด → callTasks (clusterId สังเคราะห์ 'preset:หมวด') ──
+  //   judge รับ clusterId ที่ไม่มี exemplar ได้อยู่แล้ว (ตกไปใช้ rubric "ประเมินความน่าสนใจทั่วไป") → ไม่ต้องแตะ judge
+  let presetTaskCount = 0;
+  if (presetDrivenOn) {
+    const presetCount = Math.max(6, Math.min(24, safeQueriesPerCluster * 4)); // ~12-24 คีย์กว้าง/รอบ (ตาม queriesPerCluster)
+    const presetQ = buildPresetQueries(cleanPreset, { count: presetCount, runSeed: runSeed || cleanPreset });
+    for (const { query, category } of presetQ) {
+      for (const channel of finalChannels) {
+        callTasks.push({
+          clusterId: `preset:${category}`,
+          clusterArchetype: category,
+          query,
+          channel,
+          queryBucket: 'preset',
+        });
+        presetTaskCount++;
+      }
     }
   }
 
@@ -564,6 +591,8 @@ export async function huntClusters({
       ...(interviewLaneOn ? { interviewLaneApplied: true, interviewWatchlistIds } : {}),
       // ★ เฟส 9 (ON เท่านั้น): กลุ่มเสมือนที่จับได้ + candidate ที่ติดป้าย virtualThemeId (ปิด flag = ไม่มี field นี้)
       ...(virtualThemesOn ? { virtualThemesApplied: true, virtualThemeCount: themeIndex ? themeIndex.themes.length : 0, taggedCandidates: candidates.filter((c) => c.virtualThemeId).length } : {}),
+      // ★ Plan A (เมื่อเลือก preset): ค้นด้วยคีย์กว้างต่อหมวด + จำนวน search task
+      ...(presetDrivenOn ? { presetDriven: cleanPreset, presetTasks: presetTaskCount } : {}),
     },
   };
 }

@@ -203,7 +203,8 @@ export default function ResearchTab({ onToast }) {
   async function startHunt() {
     const clusterIds = selectedIds.slice(0, 30);
     const chList = CHANNELS.filter((c) => channels[c.key]).map((c) => c.key);
-    if (clusterIds.length === 0) { onToast?.('เลือกคลัสเตอร์อย่างน้อย 1 อัน', 'warn'); return; }
+    // 🆕 Plan A: เริ่มล่าได้เมื่อ "เลือกแนว (preset)" หรือ "เลือกคลัสเตอร์" อย่างน้อยหนึ่งอย่าง
+    if (clusterIds.length === 0 && !activePreset) { onToast?.('เลือกแนวข่าว หรือคลัสเตอร์ครู อย่างน้อย 1 อย่าง', 'warn'); return; }
     if (chList.length === 0) { onToast?.('เลือกช่องทางอย่างน้อย 1 ช่อง', 'warn'); return; }
 
     const runId = 'rrun_' + Date.now().toString(36);

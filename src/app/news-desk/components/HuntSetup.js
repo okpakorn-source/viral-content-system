@@ -51,16 +51,21 @@ export default function HuntSetup({
   const nChannels = CHANNELS.filter((c) => channels[c.key]).length;
   const nNonYoutube = CHANNELS.filter((c) => channels[c.key] && c.key !== 'youtube').length;
   const nClusters = (selectedIds || []).length;
+  // 🆕 Plan A: เลือกแนว (preset) → ค้นด้วยคีย์กว้าง ~min(24, คีย์/คลัสเตอร์×4) คีย์ (~2 หมวด/preset)
+  const presetQueries = activePreset ? Math.max(6, Math.min(24, queriesPerCluster * 4)) : 0;
+  const presetClusters = activePreset ? 2 : 0;
 
-  // ── ประเมินราคา (upper bound) ──
-  const serperCalls = nClusters * queriesPerCluster * nNonYoutube;
+  // ── ประเมินราคา (upper bound) — รวมทั้งคลัสเตอร์ครู + คีย์กว้างจาก preset ──
+  const totalQueries = nClusters * queriesPerCluster + presetQueries;
+  const serperCalls = totalQueries * nNonYoutube;
   const serperCost = serperCalls * SERPER_COST_PER_CALL;
-  const youtubeCalls = nClusters * queriesPerCluster * (channels.youtube ? 1 : 0);
-  const judgeMax = nClusters * JUDGE_MAX_PER_CLUSTER;
+  const youtubeCalls = totalQueries * (channels.youtube ? 1 : 0);
+  const judgeMax = (nClusters + presetClusters) * JUDGE_MAX_PER_CLUSTER;
   const judgeCost = judgeMax * (JUDGE_UNIT[model] ?? JUDGE_UNIT.fast);
   const totalCost = serperCost + judgeCost;
 
-  const canStart = !hunting && nClusters >= 1 && nChannels >= 1;
+  // เริ่มล่าได้เมื่อเลือก "แนว (preset)" หรือ "คลัสเตอร์" อย่างน้อยหนึ่งอย่าง + มีช่องทาง
+  const canStart = !hunting && (nClusters >= 1 || !!activePreset) && nChannels >= 1;
 
   return (
     <Card>
@@ -298,8 +303,8 @@ export default function HuntSetup({
 
       {/* ประเมินราคา + เริ่ม */}
       <div style={{ background: `${UI.green}0d`, border: `1px solid ${UI.green}55`, borderRadius: 12, padding: 14 }}>
-        {nClusters === 0 ? (
-          <div style={{ fontSize: 13, color: UI.amber }}>⚠️ ยังไม่ได้เลือกคลัสเตอร์ — เลือกอย่างน้อย 1 อัน (กด &quot;ท็อป 5&quot; ได้เลย)</div>
+        {nClusters === 0 && !activePreset ? (
+          <div style={{ fontSize: 13, color: UI.amber }}>⚠️ เลือก &quot;แนวข่าว&quot; ด้านบน (กดปุ่มเดียวค้นได้เลย) หรือติ๊ก &quot;คลัสเตอร์ครู&quot;</div>
         ) : (
           <div style={{ fontSize: 13, color: UI.dim, lineHeight: 1.8 }}>
             จะยิงค้น <b style={{ color: UI.text }}>~{fmtNum(serperCalls)}</b> call ≈ <b style={{ color: UI.green }}>{fmtBaht(serperCost)}</b>
