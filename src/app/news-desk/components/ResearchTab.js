@@ -13,6 +13,7 @@ import { UI, Btn, Card, Chip, Spinner, fmtNum, fmtBaht, fmtDuration } from './ui
 import { apiFetch } from './ui.js';
 import HuntSetup, { CHANNELS, AUTO_CFG_DEFAULT } from './HuntSetup.js';
 import LeadCard from './LeadCard.js';
+import LeadGroupView from './LeadGroupView.js';
 import EditorPanel from './EditorPanel.js'; // 🆕 E2 (17 ก.ค. 69): แผง "บก. AI" — คู่ขนานกับ backend ของ E1 (contract ล็อกแล้ว)
 
 const LIB = '/api/desk/dna/library';
@@ -47,6 +48,8 @@ export default function ResearchTab({ onToast }) {
   const [autoCfg, setAutoCfg] = useState(AUTO_CFG_DEFAULT); // 🆕 A1 (17 ก.ค. 69): {enabled,minScore,maxPerRound} — default ปิด
   const [discoveryMasterOn, setDiscoveryMasterOn] = useState(false); // 🆕 เฟส 0: MASTER เปิดไหม (อ่านจาก GET hunt) → เปิด=แนบ shadow sample เข้า logRun
   const [discoveryFlags, setDiscoveryFlags] = useState({}); // 🆕 เฟส 2+: flags ย่อย (diversity ฯลฯ) จาก config เดียวกัน
+  const [discoveryPresets, setDiscoveryPresets] = useState([]); // 🆕 เฟส 8: 5 ปุ่ม preset จาก config (โชว์เมื่อ researchUiV2 เปิด)
+  const [activePreset, setActivePreset] = useState(''); // 🆕 เฟส 8: preset ที่เลือก (เอนคำค้น) — ส่งเข้า hunt เฉพาะเมื่อ uiV2 เปิด
 
   // ── ส่วน 2: การล่ารอบนี้ ──
   const [hunting, setHunting] = useState(false);
@@ -111,9 +114,11 @@ export default function ResearchTab({ onToast }) {
       const ok = !!(res && res.success);
       setDiscoveryMasterOn(ok && !!res.masterOn);
       setDiscoveryFlags(ok && res.flags ? res.flags : {});
+      setDiscoveryPresets(ok && Array.isArray(res.presets) ? res.presets : []); // 🆕 เฟส 8
     } catch {
       setDiscoveryMasterOn(false); // อ่านไม่ได้ = ถือว่าปิด (โหมดวัดผลเงาไม่ทำงาน)
       setDiscoveryFlags({});
+      setDiscoveryPresets([]);
     }
   }, []);
 
@@ -215,6 +220,8 @@ export default function ResearchTab({ onToast }) {
         queriesPerCluster,
         channels: chList,
         perQueryResults: 10,
+        // 🆕 เฟส 8: เอนคำค้นตาม preset — ส่งเฉพาะเมื่อ researchUiV2 เปิด + เลือกไว้ (ปิด flag = ไม่ส่ง = พฤติกรรมเดิม)
+        ...(discoveryFlags.researchUiV2 && activePreset ? { preset: activePreset } : {}),
       }),
     });
     if (!hRes.success) {
@@ -541,26 +548,33 @@ export default function ResearchTab({ onToast }) {
   // ตัวเลือกคลัสเตอร์สำหรับตัวกรอง (derive จากลีดที่โหลดมา)
   const clusterFilterOpts = Array.from(new Map(libLeads.filter((l) => l.clusterId).map((l) => [l.clusterId, l.clusterArchetype || l.clusterId])).entries());
 
-  // ตารางการ์ดลีด (ใช้ซ้ำทั้งส่วน 2 และ 3)
-  const leadGrid = (list) => (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
-      {list.map((lead) => (
-        <LeadCard
-          key={lead.id}
-          lead={lead}
-          highlightConfirmOn={!!discoveryFlags.highlightConfirm}
-          busyAction={busyFor(lead.id)}
-          sendNote={sendNotes[lead.id]}
-          extractNote={extractNotes[lead.id]}
-          onKeep={(l) => setStatus(l, 'kept')}
-          onDismiss={(l) => setStatus(l, 'dismissed')}
-          onExtract={extractLead}
-          onExtractAndSend={(l) => extractAndSendLead(l, { auto: false })}
-          onSendText={sendLeadText}
-        />
-      ))}
-    </div>
+  // 🆕 เฟส 8: uiV2 เปิด = preset + มุมมองจัดกลุ่มเรื่องเดียวกัน · ปิด = กริดแบน + การ์ดเดิมเป๊ะ
+  const uiV2 = !!discoveryFlags.researchUiV2;
+  // การ์ดลีด 1 ใบ (ใช้ซ้ำทั้งกริดแบนและมุมมองจัดกลุ่ม)
+  const renderLeadCard = (lead) => (
+    <LeadCard
+      key={lead.id}
+      lead={lead}
+      uiV2={uiV2}
+      highlightConfirmOn={!!discoveryFlags.highlightConfirm}
+      busyAction={busyFor(lead.id)}
+      sendNote={sendNotes[lead.id]}
+      extractNote={extractNotes[lead.id]}
+      onKeep={(l) => setStatus(l, 'kept')}
+      onDismiss={(l) => setStatus(l, 'dismissed')}
+      onExtract={extractLead}
+      onExtractAndSend={(l) => extractAndSendLead(l, { auto: false })}
+      onSendText={sendLeadText}
+    />
   );
+  // ตารางการ์ดลีด (ใช้ซ้ำทั้งส่วน 2 และ 3) — uiV2 เปิด → LeadGroupView (group storyKey||id) · ปิด → กริดแบนเดิม
+  const leadGrid = (list) => (uiV2
+    ? <LeadGroupView leads={list} renderLead={renderLeadCard} />
+    : (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
+        {list.map(renderLeadCard)}
+      </div>
+    ));
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
@@ -574,6 +588,7 @@ export default function ResearchTab({ onToast }) {
         queriesPerCluster={queriesPerCluster} onQueries={setQueriesPerCluster}
         model={model} onModel={setModel}
         autoCfg={autoCfg} onAutoCfgChange={updateAutoCfg}
+        presets={uiV2 ? discoveryPresets : null} activePreset={activePreset} onPreset={setActivePreset}
         onStart={startHunt} hunting={hunting}
       />
 

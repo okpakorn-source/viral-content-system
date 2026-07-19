@@ -33,6 +33,7 @@ export default function HuntSetup({
   queriesPerCluster, onQueries,
   model, onModel,
   autoCfg, onAutoCfgChange, // 🆕 A1: {enabled,minScore,maxPerRound} + setter (patch)
+  presets, activePreset, onPreset, // 🆕 เฟส 8: 5 ปุ่ม preset (null/ว่าง = ไม่โชว์ = พฤติกรรมเดิม)
   onStart, hunting,
 }) {
   const clusterById = new Map((clusters || []).map((c) => [c.clusterId, c]));
@@ -67,6 +68,40 @@ export default function HuntSetup({
       <div style={{ fontSize: 12.5, color: UI.dim, marginBottom: 14, lineHeight: 1.6 }}>
         เลือก &quot;คลัสเตอร์ครู&quot; (กลุ่มข่าวที่เคยปัง) เป็นเข็มทิศ แล้วระบบจะยิงค้นข่าวใหม่ที่ &quot;ตามรอย&quot; แนวเดียวกันจากหลายแพลตฟอร์ม
       </div>
+
+      {/* 🆕 เฟส 8: แนวข่าวที่อยากได้ (preset) — เอนคำค้นไปทางหมวดนั้น · โชว์เฉพาะเมื่อ researchUiV2 เปิด (presets ไม่ว่าง) */}
+      {Array.isArray(presets) && presets.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 800, color: UI.text, marginBottom: 8 }}>🎯 แนวข่าวที่อยากได้ <span style={{ fontSize: 11.5, fontWeight: 600, color: UI.muted }}>(เลือกก็ได้ไม่เลือกก็ได้ — เอนคำค้นไปทางนั้น)</span></div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {presets.map((p) => {
+              const on = activePreset === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => onPreset?.(on ? '' : p.id)}
+                  disabled={hunting}
+                  title={p.experimental ? 'ทดลอง — ยังไม่การันตีผล' : `เอนไปหมวด ${p.categoryKey || p.label}`}
+                  style={{
+                    minHeight: 44, padding: '8px 14px', borderRadius: 12, cursor: hunting ? 'not-allowed' : 'pointer',
+                    fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
+                    background: on ? `${UI.accent}22` : UI.card2,
+                    color: on ? UI.accent : UI.dim,
+                    border: `1.5px solid ${on ? UI.accent : UI.line}`,
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                  }}
+                >
+                  {on ? '✓ ' : ''}{p.label}{p.primary ? ' ⭐' : ''}{p.experimental ? ' 🧪' : ''}
+                </button>
+              );
+            })}
+            {activePreset && (
+              <Btn variant="ghost" onClick={() => onPreset?.('')} disabled={hunting} style={{ minHeight: 40, padding: '6px 12px', fontSize: 12.5 }}>ล้างแนว</Btn>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* เลือกคลัสเตอร์ */}
       <div style={{ marginBottom: 16 }}>

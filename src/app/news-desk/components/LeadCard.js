@@ -20,6 +20,22 @@ function scoreColor(score) {
   return UI.red;
 }
 
+// 🆕 เฟส 8 (uiV2): "พบเมื่อ" — เวลาที่ระบบเจอลีดใบนี้ (savedAt) แบบสัมพัทธ์
+//   🔴 นี่คือ "เวลาที่พบ" ไม่ใช่ "อายุข่าว" (ห้ามอ้างว่าเป็นความสดของตัวข่าว) — savedAt เป็น ISO string
+function foundAgo(savedAt) {
+  const t = Date.parse(savedAt || '');
+  if (!Number.isFinite(t)) return '';
+  const diffMin = Math.floor((Date.now() - t) / 60000);
+  if (diffMin < 0) return 'เมื่อครู่';
+  if (diffMin < 1) return 'เมื่อครู่';
+  if (diffMin < 60) return `${diffMin} นาทีก่อน`;
+  const hr = Math.floor(diffMin / 60);
+  if (hr < 24) return `${hr} ชม.ก่อน`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day} วันก่อน`;
+  return `${Math.floor(day / 30)} เดือนก่อน`;
+}
+
 // ป้ายช่องทาง (ไอคอน + ชื่อไทยสั้น)
 const CHANNEL_LABEL = {
   videos: '🎬 วิดีโอ',
@@ -46,9 +62,10 @@ function isClipLead(l) {
   return CLIP_URL_RE.test(url);
 }
 
-export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtractAndSend, onSendText, busyAction, sendNote, extractNote, highlightConfirmOn = false }) {
+export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtractAndSend, onSendText, busyAction, sendNote, extractNote, highlightConfirmOn = false, uiV2 = false }) {
   const [showTimeline, setShowTimeline] = useState(false); // ★ trace 17 ก.ค.: กางแผงประวัติในที่ (การ์ดไม่เรียก API เอง — ให้ LeadTimeline จัดการ)
   const [showContent, setShowContent] = useState(false); // 🆕 D1 17 ก.ค.: กางกล่อง "ดูเนื้อที่จะส่ง" ก่อนกด 🚀
+  const [showAlt, setShowAlt] = useState(false); // 🆕 เฟส 8 (uiV2): กางรายชื่อแหล่งอื่นของเรื่องเดียวกัน (altSources)
   if (!lead) return null;
   const score = Math.round(Number(lead.matchScore) || 0);
   const isFull = lead.fetchability === 'full';
@@ -96,6 +113,10 @@ export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtract
                   : '— ไม่พบไฮไลต์'}
           </Chip>
         )}
+        {/* 🆕 เฟส 8 (uiV2): ป้าย lane/แหล่ง/เวลาที่พบ — ปิด flag = ไม่มีป้ายกลุ่มนี้ (การ์ดเดิมเป๊ะ) */}
+        {uiV2 && lead.lane === 'interview' && <Chip color={UI.accent}>🎤 สัมภาษณ์</Chip>}
+        {uiV2 && (Number(lead.sourceCount) || 0) > 1 && <Chip color={UI.blue}>🔗 รวม {Number(lead.sourceCount)} แหล่ง</Chip>}
+        {uiV2 && foundAgo(lead.savedAt) && <Chip color={UI.muted}>🕐 พบเมื่อ {foundAgo(lead.savedAt)}</Chip>}
       </div>
 
       {/* หัวข้อ (ลิงก์เปิดแท็บใหม่) */}
@@ -133,6 +154,31 @@ export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtract
       {/* เหตุผล 1 บรรทัด */}
       {lead.reason && (
         <div style={{ fontSize: 12, color: UI.dim, lineHeight: 1.5 }}>💬 {lead.reason}</div>
+      )}
+
+      {/* 🆕 เฟส 8 (uiV2): แหล่งอื่นของเรื่องเดียวกัน (altSources จากเฟส 5) — กางดูลิงก์ได้ · ปิด flag = ไม่โผล่ */}
+      {uiV2 && Array.isArray(lead.altSources) && lead.altSources.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <Btn
+            variant="ghost"
+            onClick={() => setShowAlt((v) => !v)}
+            style={{ minHeight: 30, padding: '4px 10px', fontSize: 12, alignSelf: 'flex-start' }}
+          >🔗 แหล่งอื่นของเรื่องนี้ {lead.altSources.length} ลิงก์{showAlt ? ' ▲' : ' ▼'}</Btn>
+          {showAlt && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 8 }}>
+              {lead.altSources.map((a, i) => (
+                <a
+                  key={i}
+                  href={a.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ fontSize: 12, color: UI.dim, textDecoration: 'none', wordBreak: 'break-word', lineHeight: 1.5 }}
+                  title={a.title || a.url}
+                >↗ <b style={{ color: UI.muted }}>{a.sourceHost || a.channel || 'แหล่ง'}</b> — {String(a.title || a.url).slice(0, 80)}</a>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {/* R6 + 🆕 D1 (17 ก.ค.): เนื้อพร้อม/กลั่นแล้ว + ประเด็นย่อ + ปุ่มดูเนื้อก่อนส่ง — โผล่เฉพาะหลังกด "สกัดเนื้อ" สำเร็จ */}
