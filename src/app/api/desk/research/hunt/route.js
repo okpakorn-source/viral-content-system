@@ -7,10 +7,26 @@
  */
 import { NextResponse } from 'next/server';
 import { huntClusters } from '@/lib/services/deskV2/researchHunt.js';
+import { getPublicDiscoveryConfig } from '@/lib/services/deskV2/researchDiscoveryConfig.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
+
+// ★ เฟส 0 (Discovery V2): GET คืน config สาธารณะ (masterOn + flags + presets) ให้ UI อ่านว่าจะเปิดโหมดวัดผลเงาไหม
+//   ปลอดภัยส่งให้ client — getPublicDiscoveryConfig คัดเฉพาะ capability ไม่มี secret/งบภายใน
+//   ปิด flag = { masterOn:false, flags:ปิดหมด } → UI ไม่ส่ง shadow sample (พฤติกรรมเดิมเป๊ะ)
+export async function GET() {
+  try {
+    return NextResponse.json({ success: true, ...getPublicDiscoveryConfig() });
+  } catch (error) {
+    return NextResponse.json({
+      success: false,
+      error: error?.message || 'อ่านค่า config ไม่สำเร็จ',
+      errorType: 'RESEARCH_HUNT_ERROR',
+    }, { status: 500 });
+  }
+}
 
 // ★ 18 ก.ค.: +reels — allow-list นี้ตกหล่นตอนเพิ่มช่อง FB Reels (17 ก.ค.) ทำ route ปัดช่องนี้ทิ้งเงียบๆ ทั้งที่ researchHunt.js/UI มีครบ
 const KNOWN_CHANNELS = ['videos', 'facebook', 'tiktok', 'youtube', 'google', 'reels']; // ★ 16 ก.ค.: +google (ลิงก์ข่าวสำนักต่างๆ — ผู้ใช้สั่ง)
