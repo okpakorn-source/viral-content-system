@@ -3173,6 +3173,18 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   const HERO_PROMINENCE_ON = process.env.MEGA_HERO_PROMINENCE !== '0';
   const HERO_FACE_PROMINENCE_MIN = 0.30; // ขอบล่าง HERO_FACE_SHARE band (imageQualityConfig.js TECH_RULES=[30,58]) — หน้าต้องกิน ≥30% ของสูงเฟรม
   const CIRCLE_FACE_PRESENCE_MIN = 0.16; // เกณฑ์หลวมกว่า hero (วงยังโดนครอป/ซูมอีกชั้นตอนประกอบ) — กันแค่ "ไร้หน้าเลย" ขึ้นวง
+  // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD — ช่องย่อยลายตา): ตาคัด (Gemini) แนบ triage.busy 0-2 ต่อภาพ
+  //   (0=สะอาดโฟกัสชัด, 1=มีพื้นหลังกิจกรรมบ้างแต่ subject หลักยังชัด, 2=ลายตา/คนเยอะหาโฟกัสไม่ได้/มุมกว้างไม่มีจุดเด่น)
+  //   ให้สมองเลือกช่องย่อย (context/action/reaction/circle) เลี่ยงภาพลายตา — penalty คะแนน + ตัดบูสต์หมวด group/context
+  //   เมื่อ busy=2 + ชั้นกรอง busy<=1 ก่อนใน fallback + ถ้าทุกใบเหลือ busy=2 เท่ากันหมด → เลือกคุณภาพแทนเรื่องเล่า
+  //   busy ไม่มีสัญญาณ (undefined/null จากตาเก่ายังไม่ส่ง) = neutral (0) เสมอ ไม่ลงโทษ · ปิดสวิตช์ทั้งชุด (ไม่เพิ่ม
+  //   meta/penalty/tier ใดๆ เลย = byte-parity): ต้อง MEGA_CLUTTER_GUARD==='1' ชัดเจนถึงเปิด (default OFF)
+  const CLUTTER_GUARD_ON = process.env.MEGA_CLUTTER_GUARD === '1';
+  const _busyOf = (x) => {
+    if (!CLUTTER_GUARD_ON) return 0;
+    const v = Number(x?.triage?.busy);
+    return Number.isFinite(v) ? Math.max(0, Math.min(2, v)) : 0; // ไม่มีสัญญาณ = neutral 0
+  };
   // faceBox schema (ตาคัด Gemini): {x,y,w,h} normalized 0-1 (h=สัดส่วนสูงหน้าเทียบเฟรมเต็ม) — รับ {x1,y1,x2,y2} เผื่อ path อื่น
   //   ค่า px (>1)/รูปแปลก = null (normalize เชื่อถือไม่ได้ — ห้ามเดา) · null = ข้ามเกณฑ์นี้เงียบๆ ไม่ตัดทิ้งภาพ/ไม่ทำพูลว่าง
   //   (ตรรกะเดียวกับ _faceHFrac ใน buildSolverPlan() ด้านบน — คัดลอกมาไว้ในสโคปนี้แยกกันตั้งใจ ไม่แชร์ตัวแปรข้ามฟังก์ชัน)
@@ -3246,7 +3258,9 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     const dreamMatch = !!note && !!_dreamText && note.split(/\s+/).some((w) => w.length >= 3 && _dreamText.includes(w));
     let s = 3;
     if (fromStory) s += 4;
-    if (relCat) s += 2;
+    // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD): ภาพลายตา (busy=2) ไม่ควรชนะแค่เพราะหมวดเข้าเกณฑ์ group/context —
+    //   ตัดบูสต์ +2 นี้ทิ้งเมื่อ busy=2 (ปิดสวิตช์/busy neutral = บูสต์ปกติเป๊ะ)
+    if (relCat && !(CLUTTER_GUARD_ON && _busyOf(x) === 2)) s += 2;
     if (emoMatch) s += 1;
     if (dreamMatch) s += 1;
     s = Math.max(0, Math.min(10, s));
@@ -3255,7 +3269,9 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   };
   // 6.3 ถ่วงน้ำหนักเรียง: story 40 / clean 30 / ขนาดจริง 30 — เฉพาะ context/action/circle (hero ไม่ใช้ — ถูกคน+หน้าชัดมาก่อน)
   const STORY_SLOTS = new Set(['context', 'action', 'circle']);
-  const _combinedStory = (x) => 4 * ((storyFitOf(x) ?? 0) / 10) + 3 * (isClean(x) ? 1 : 0) + 3 * (1 - Math.min(sizePenalty(x), 2) / 2);
+  // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD): ลบ k*busy (k=0.15, busy 0-2 → โทษสูงสุด 0.3) จากคะแนนรวมของช่อง story
+  //   (context/action/circle) — ภาพลายตาแพ้ภาพสะอาดที่ story-fit ใกล้กัน · ปิดสวิตช์/busy neutral = คะแนนเดิมเป๊ะ
+  const _combinedStory = (x) => 4 * ((storyFitOf(x) ?? 0) / 10) + 3 * (isClean(x) ? 1 : 0) + 3 * (1 - Math.min(sizePenalty(x), 2) / 2) - (CLUTTER_GUARD_ON ? 0.15 * _busyOf(x) : 0);
   const storyRank = (a, b) => {
     const d = _combinedStory(b) - _combinedStory(a);
     if (Math.abs(d) > 1e-6) return d;
@@ -3298,6 +3314,9 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     //   (เดิมไม่มี field นี้เลย → เลือก hero ได้แต่ faceCount==1 ไม่รู้หน้าเล็ก/ใหญ่) · round 2 ตำแหน่ง กันโทเค็นบวม
     //   วัดไม่ได้ (faceBox หาย/แปลก) = ไม่ใส่ field (undefined ถูก JSON.stringify ตัดออกเงียบๆ) · ปิดสวิตช์ = ไม่เพิ่ม field เลย
     ...(HERO_PROMINENCE_ON ? { faceH: (() => { const v = _faceHFrac(x.triage?.faceBox); return v == null ? undefined : Math.round(v * 100) / 100; })() } : {}),
+    // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD): busy 0-2 จากตาคัด — ให้ผู้กำกับ LLM เห็น "ภาพนี้ลายตาแค่ไหน" เลี่ยงลงช่องย่อย
+    //   (ปิดสวิตช์/ตาไม่ส่ง busy มา = ไม่ใส่ field เลย → prompt เดิมเป๊ะ ไม่ regress)
+    ...(CLUTTER_GUARD_ON ? { busy: (() => { const v = Number(x.triage?.busy); return Number.isFinite(v) ? Math.max(0, Math.min(2, v)) : undefined; })() } : {}),
   }));
   // ★ Wave3 Phase1: mirror เพดาน prompt ของ slotDirectorBrain (megaBrains.js IMG_META_BUDGET=18000)
   //   เพื่อบันทึกความจริงว่า LLM เห็นกี่ id โดยไม่เปลี่ยน candidate/ลำดับ/ผลเลือกเดิม หากค่าต้นทางเปลี่ยนต้องแก้ mirror นี้พร้อมกัน
@@ -4176,7 +4195,8 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         //   มีหน้า(faceCount≥1)+เห็นหน้าพอวัดได้(faceH≥0.16)+คนละคนกับ hero ก่อน · ไม่เจอ = ถอยไป arr[0] เดิมเป๊ะ
         //   (ปิดสวิตช์ MEGA_HERO_PROMINENCE=0 = ข้ามชั้นนี้ พฤติกรรมเดิมเป๊ะ)
         (_isCircleSlot(slot) && HERO_PROMINENCE_ON
-          ? arr.find((x) => (x.triage?.faceCount ?? 0) >= 1 && (_heroFaceHOf(x) ?? -1) >= CIRCLE_FACE_PRESENCE_MIN && diffPerson(x))
+          // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD): วงกลม = คนเดี่ยวโฟกัสชัด — เพิ่ม busy<=1 เข้าเกณฑ์ (ปิดสวิตช์ = ไม่กรอง เดิมเป๊ะ)
+          ? arr.find((x) => (x.triage?.faceCount ?? 0) >= 1 && (_heroFaceHOf(x) ?? -1) >= CIRCLE_FACE_PRESENCE_MIN && diffPerson(x) && _busyOf(x) <= 1)
           : null) ||
         arr[0] ||
         null;
@@ -4185,10 +4205,24 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       const freshScene = (x) => { const k = sceneKeyOf(x); return !k || !chosenScenes.has(k); };
       // ★ SEM-1: ช่องรองที่ ref ระบุ "คน" — fallback ต้องหาเฉพาะคนนั้น (identity เป็น authority ของช่อง)
       //   legacy: _idGated เป็นจริงเฉพาะ hero ซึ่งไม่เข้า branch นี้ → candsG === cands = พฤติกรรมเดิมเป๊ะ
-      const candsG = (!_isHeroSlot(slot) && _idGated(slot)) ? cands.filter((x) => _identityOk(slot, x)) : cands;
+      let candsG = (!_isHeroSlot(slot) && _idGated(slot)) ? cands.filter((x) => _identityOk(slot, x)) : cands;
+      // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD): ช่องย่อยทั้งพูล(หลัง identity-gate)ลายตาเท่ากันหมด (busy=2 ทุกใบ) →
+      //   ไล่ตามคุณภาพแทน story-fit เดิม (ยอมสะอาดสุดที่มีจริง แทนภาพเล่าเรื่องดีแต่ลายตาพอกัน) — cascade ผลลง
+      //   ทั้ง fallback chain ด้านล่างและ circle tier ใน pickFrom (ใช้ candsG ตัวเดียวกัน) · ปิดสวิตช์/มีใบ busy<=1
+      //   อย่างน้อย 1 ใบ/เป็นช่อง hero = ไม่แตะลำดับเดิมเลย
+      if (CLUTTER_GUARD_ON && !_isHeroSlot(slot) && candsG.length > 0 && candsG.every((x) => _busyOf(x) === 2)) {
+        candsG = candsG.slice().sort((a, b) => (b.triage?.quality ?? 0) - (a.triage?.quality ?? 0));
+      }
       img = _isHeroSlot(slot)
         ? pickFrom(cands)
-        : (pickFrom(candsG.filter((x) => x.triage?.clean !== false && freshScene(x)))
+        // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD): ลองชั้น busy<=1 ก่อนชั้นเดิมเสมอ (ปิดสวิตช์ = ข้ามบล็อกนี้ทั้งชุด byte-parity)
+        : ((CLUTTER_GUARD_ON && (
+            pickFrom(candsG.filter((x) => x.triage?.clean !== false && freshScene(x) && _busyOf(x) <= 1))
+            || pickFrom(candsG.filter((x) => x.triage?.clean !== false && _busyOf(x) <= 1))
+            || pickFrom(candsG.filter((x) => freshScene(x) && _busyOf(x) <= 1))
+            || pickFrom(candsG.filter((x) => _busyOf(x) <= 1))
+          )) ||
+          pickFrom(candsG.filter((x) => x.triage?.clean !== false && freshScene(x)))
           || pickFrom(candsG.filter((x) => x.triage?.clean !== false))
           || pickFrom(candsG.filter(freshScene))
           || pickFrom(candsG));
@@ -4284,6 +4318,8 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         const curScene = curRec ? sceneKeyOf(curRec) : '';
         const best = sorted
           .filter((x) => !used.has(String(x.id)) && isClean(x))
+          // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD): กู้คืนภาพเล่าเรื่องดี แต่ห้ามลายตา (busy=2) — ปิดสวิตช์ = ไม่กรอง เดิมเป๊ะ
+          .filter((x) => _busyOf(x) <= 1)
           // ★ borrow face-slots-only: ห้ามยืมข้ามเคสลง context (circle=face-slot อนุญาต) — อุดรูรั่ว story-rescue
           .filter((x) => !(x.borrowed === true && _legacyKeyOf(slot) === 'context'))
           // ★ SEM-1 correction (Codex P0-1): rescue ห้ามสลับ primary เป็นผิดคนหลังด่าน — identity ของช่องคุมเสมอ
