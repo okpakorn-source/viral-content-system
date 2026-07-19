@@ -70,6 +70,7 @@ export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtract
   const score = Math.round(Number(lead.matchScore) || 0);
   const isFull = lead.fetchability === 'full';
   const isClip = isClipLead(lead); // 🆕 A1: เลือกป้าย/ปุ่มสกัดให้ตรงประเภทแหล่ง
+  const foundLabel = uiV2 ? foundAgo(lead.savedAt) : ''; // 🆕 เฟส 8: คำนวณครั้งเดียว (nit Fable audit) — ปิด uiV2 = ไม่คำนวณ
   const status = lead.status || 'new';
   const sm = STATUS_META[status];
   const dismissed = status === 'dismissed';
@@ -116,7 +117,7 @@ export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtract
         {/* 🆕 เฟส 8 (uiV2): ป้าย lane/แหล่ง/เวลาที่พบ — ปิด flag = ไม่มีป้ายกลุ่มนี้ (การ์ดเดิมเป๊ะ) */}
         {uiV2 && lead.lane === 'interview' && <Chip color={UI.accent}>🎤 สัมภาษณ์</Chip>}
         {uiV2 && (Number(lead.sourceCount) || 0) > 1 && <Chip color={UI.blue}>🔗 รวม {Number(lead.sourceCount)} แหล่ง</Chip>}
-        {uiV2 && foundAgo(lead.savedAt) && <Chip color={UI.muted}>🕐 พบเมื่อ {foundAgo(lead.savedAt)}</Chip>}
+        {foundLabel && <Chip color={UI.muted}>🕐 พบเมื่อ {foundLabel}</Chip>}
       </div>
 
       {/* หัวข้อ (ลิงก์เปิดแท็บใหม่) */}
