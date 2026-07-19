@@ -272,6 +272,10 @@ function _heroFaceBand() {
   return TECH_RULES.HERO_FACE_SHARE;
 }
 
+// ★ HERO_CROP_GUARD (19 ก.ค., AC-0160) — mirror ของ coverExecutorService.js _heroCropGuardOn(): env เดียวกัน
+//   MEGA_HERO_CROP_GUARD='0' → ปิดทั้งคู่พร้อมกัน (ยก pixel-verify threshold ด้านล่างคืนค่าเดิม 0.20 ด้วย)
+function _heroCropGuardOnComposer() { return process.env.MEGA_HERO_CROP_GUARD !== '0'; }
+
 // ★ BS (17 ก.ค.): kill-switch สลับภาพสำรองช่องรอง "จัดไม่ลง" (default ON · '0'=พฤติกรรมปัจจุบันเป๊ะ)
 function _panelBackupSwapOn() { return process.env.MEGA_PANEL_BACKUP_SWAP !== '0'; }
 
@@ -1725,7 +1729,12 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
       const fd = await detectFaces(tile);
       const th = fd?.imageHeight || 1;
       const tw = fd?.imageWidth || 1;
-      const _big = (fd?.faces || []).filter((f) => f.height / th >= 0.20);
+      // ★ 19 ก.ค. (AC-0160): เดิม 0.20 หลวมกว่า band-min จริง (HERO_FACE_SHARE[0]=30%) มาก — ปล่อยหน้าเด่น
+      //   20-29% ของช่องผ่านด่านเงียบๆ ทั้งที่หน้าเล็กเกิน band แล้ว (เคส hero ครอปแล้วหน้าเล็ก+backdrop ท่วม)
+      //   ยกเกณฑ์ขึ้นใกล้ band-min แต่ผ่อนไว้กัน over-reject (detector คนละตัวจาก fb ตอนครอปคลาดกันได้ ±2-4pt)
+      //   MEGA_HERO_CROP_GUARD='0' → threshold คืนเดิม 0.20 เป๊ะ (byte-parity)
+      const _heroVerifyMinFrac = _heroCropGuardOnComposer() ? Math.max(0.05, (_heroFaceBand()[0] / 100) - 0.04) : 0.20;
+      const _big = (fd?.faces || []).filter((f) => f.height / th >= _heroVerifyMinFrac);
       heroOk = _big.length > 0;
       // ★ เฟส 4.5 (เคสผู้ใช้ 15:11 — hero หน้าหลุดขอบซ้าย): หน้าใหญ่สุดต้อง "ครบ ไม่โดนขอบตัด"
       //   เกณฑ์: กล่องหน้าชนขอบ + จุดกลางหน้าเบี้ยวออกจากกลางเฟรมชัด = โดนตัดจริง

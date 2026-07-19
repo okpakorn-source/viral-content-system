@@ -988,6 +988,17 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
       _br += '+stretchcap';
       _upFinal = Math.max(slot.w / Math.max(1, region.width), slot.h / Math.max(1, region.height));
       if (_tr) { _tr.upscaleRaw = _upFinal; _tr.upscale = +_upFinal.toFixed(2); _tr.branch = _br; }
+      // ★ 19 ก.ค. (AC-0160): expand ซูมออกคุมยืด ≤1.2 อาจทำหน้าเด่นเหลือเศษเล็ก "แม้ reached=true" (ภาพใหญ่พอ
+      //   ขยายถึง cap สบายๆ แต่ region โตจนหน้ากลายเป็นจุดเล็ก/backdrop ท่วม) — เดิมตั้งธงแค่ !reached จุดเดียว
+      //   ไม่ครอบเคสนี้ วัด faceShare จริงหลัง expand (หน้าเด่นที่ region ยึดอยู่) ต่ำกว่า band-min
+      //   (HERO_FACE_SHARE[0]) → ตั้งธงเพิ่ม (additive กับเงื่อนไข !reached เดิม) ให้ composer สลับภาพสำรอง
+      //   แทนปล่อย backdrop ท่วมเงียบๆ · วัดไม่ได้ (ไม่มี fb/หาหน้าเด่นไม่เจอ) → ไม่ตั้งธง (fail-safe)
+      const _hfExp = _dominantFaceInRegion(fb, region, imgW, imgH);
+      if (_hfExp) {
+        const _hfShare = ((_hfExp.y2 - _hfExp.y1) * imgH) / Math.max(1, region.height);
+        const [_hbLoExp] = _heroFaceBandExec();
+        if (_hfShare < (_hbLoExp / 100) - 1e-9) _needHeroBackup = true;
+      }
     }
     if (!_ex.reached) _needHeroBackup = true;
   }

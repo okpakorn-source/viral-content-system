@@ -3166,6 +3166,24 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   //   hasMeasuredHeroCandidate คำนวณครั้งเดียวหลัง sorted พร้อม (ดูด้านล่าง) — ก่อนหน้านั้น heroSizeOk ยังไม่ถูกเรียกจริง
   let heroDemotedFlag = false;
   let hasMeasuredHeroCandidate = false;
+  // ★ 19 ก.ค. (MEGA_HERO_PROMINENCE — เคส AC-0160): heroSizeOk เดิมวัดแค่ "ไฟล์เล็ก/thumbnail" ไม่เคยวัด
+  //   "หน้ากิน %เฟรม" เลย → hero หลุดเป็นภาพหน้าเล็ก 16-20% + backdrop เยอะได้ทั้งที่ผ่านทุกด่านเดิม (ไฟล์ใหญ่/สะอาด/ถูกคน)
+  //   เพิ่มเกณฑ์ "หน้าเด่น/ใหญ่" แยกต่างหาก ไม่แตะ heroSizeOk/solver-live/borrow/HERO_SINGLE/HERO_CROP_GUARD เดิม
+  //   ปิดกลับพฤติกรรมเดิมทั้งชุด (ไม่เพิ่ม meta/tier/guard ใดๆ เลย = byte-parity): MEGA_HERO_PROMINENCE=0
+  const HERO_PROMINENCE_ON = process.env.MEGA_HERO_PROMINENCE !== '0';
+  const HERO_FACE_PROMINENCE_MIN = 0.30; // ขอบล่าง HERO_FACE_SHARE band (imageQualityConfig.js TECH_RULES=[30,58]) — หน้าต้องกิน ≥30% ของสูงเฟรม
+  const CIRCLE_FACE_PRESENCE_MIN = 0.16; // เกณฑ์หลวมกว่า hero (วงยังโดนครอป/ซูมอีกชั้นตอนประกอบ) — กันแค่ "ไร้หน้าเลย" ขึ้นวง
+  // faceBox schema (ตาคัด Gemini): {x,y,w,h} normalized 0-1 (h=สัดส่วนสูงหน้าเทียบเฟรมเต็ม) — รับ {x1,y1,x2,y2} เผื่อ path อื่น
+  //   ค่า px (>1)/รูปแปลก = null (normalize เชื่อถือไม่ได้ — ห้ามเดา) · null = ข้ามเกณฑ์นี้เงียบๆ ไม่ตัดทิ้งภาพ/ไม่ทำพูลว่าง
+  //   (ตรรกะเดียวกับ _faceHFrac ใน buildSolverPlan() ด้านบน — คัดลอกมาไว้ในสโคปนี้แยกกันตั้งใจ ไม่แชร์ตัวแปรข้ามฟังก์ชัน)
+  const _faceHFrac = (fb) => {
+    if (!fb || typeof fb !== 'object') return null;
+    const h = Number(fb.h);
+    if (Number.isFinite(h) && h > 0 && h <= 1.0001) return Math.min(1, h);
+    const y1 = Number(fb.y1), y2 = Number(fb.y2);
+    if (Number.isFinite(y1) && Number.isFinite(y2) && y2 > y1 && y2 <= 1.0001) return Math.min(1, y2 - y1);
+    return null;
+  };
   const heroSizeOk = (x) => {
     if (!S6_REAL_SIZE_GATE) return true; // kill-switch ปิด = พฤติกรรมเดิม (ไม่กรองขนาด)
     if (x.rehostQuality === 'thumbnail') return false;
@@ -3276,6 +3294,10 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     // ★ เฟส 6A: storyFit 0-10 = ภาพนี้เล่าเรื่องเดียวกับข่าวแค่ไหน — ให้ผู้กำกับ LLM เห็น provenance เชิงเรื่อง
     //   (เพิ่ม field เมื่อเปิดเท่านั้น · พูลไม่มีคำค้นเรื่องราว/ปิดสวิตช์ → ไม่เพิ่ม = prompt เดิมเป๊ะ ไม่ regress)
     ...(STORY_SEL_ON ? { storyFit: storyFitOf(x) } : {}),
+    // ★ 19 ก.ค. (MEGA_HERO_PROMINENCE): faceH 0-1 = สัดส่วนสูงหน้าเทียบเฟรม — ให้ผู้กำกับ LLM เห็น "หน้าเด่นแค่ไหน"
+    //   (เดิมไม่มี field นี้เลย → เลือก hero ได้แต่ faceCount==1 ไม่รู้หน้าเล็ก/ใหญ่) · round 2 ตำแหน่ง กันโทเค็นบวม
+    //   วัดไม่ได้ (faceBox หาย/แปลก) = ไม่ใส่ field (undefined ถูก JSON.stringify ตัดออกเงียบๆ) · ปิดสวิตช์ = ไม่เพิ่ม field เลย
+    ...(HERO_PROMINENCE_ON ? { faceH: (() => { const v = _faceHFrac(x.triage?.faceBox); return v == null ? undefined : Math.round(v * 100) / 100; })() } : {}),
   }));
   // ★ Wave3 Phase1: mirror เพดาน prompt ของ slotDirectorBrain (megaBrains.js IMG_META_BUDGET=18000)
   //   เพื่อบันทึกความจริงว่า LLM เห็นกี่ id โดยไม่เปลี่ยน candidate/ลำดับ/ผลเลือกเดิม หากค่าต้นทางเปลี่ยนต้องแก้ mirror นี้พร้อมกัน
@@ -4089,6 +4111,23 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         console.log(`[MEGA S6] 📏 hero ${img.id} ขนาดจริงไม่พอ/thumbnail-only แต่ไม่มีตัวเลือกอื่นในพูล → คงไว้ (กัน hard-fail)`);
       }
     }
+    // ★ 19 ก.ค. (MEGA_HERO_PROMINENCE — คู่กับ heroSizeOk-swap ด้านบน): hero ผ่านทุกด่านเดิมหมด (ไฟล์ใหญ่/สะอาด/ถูกคน)
+    //   แต่หน้าเล็กจริง (faceH<0.30) + พูลมีภาพ "คนเดียวกัน" หน้าใหญ่กว่า+ขนาดจริงพอ → สลับ (เคส AC-0160: hero ได้ภาพนอน
+    //   หน้าเล็ก ~16-20% เฟรม + backdrop 60%) · เฉพาะหน้าเดี่ยว (faceCount==1) กันไม่ให้ผลลัพธ์ solo-face gate ด้านบนเสีย
+    //   faceBox วัดไม่ได้ (null) ทั้งใบเดิม/ผู้สมัคร = ข้ามด่านนี้เงียบๆ (ไม่ตัดทิ้ง/ไม่สลับมั่ว) · ปิดสวิตช์ MEGA_HERO_PROMINENCE=0 = ข้ามทั้งด่าน
+    if (img && _isHeroSlot(slot) && HERO_PROMINENCE_ON) {
+      const curFaceH = _faceHFrac(img.triage?.faceBox);
+      if (curFaceH != null && curFaceH < HERO_FACE_PROMINENCE_MIN) {
+        const moreProminent = sorted.find((x) => !used.has(String(x.id)) && String(x.id) !== String(img.id)
+          && _identityOk(slot, x) && (x.triage?.faceCount ?? 0) === 1 && heroSizeOk(x)
+          && (() => { const v = _faceHFrac(x.triage?.faceBox); return v != null && v > curFaceH; })());
+        if (moreProminent) {
+          console.log(`[MEGA S6] 🔎 hero ${img.id} หน้าเล็ก (faceH≈${curFaceH.toFixed(2)}) → สลับ ${moreProminent.id} (หน้าใหญ่กว่า)`);
+          img = moreProminent;
+          reason = 'hero หน้าเด่น (โค้ดบังคับ MEGA_HERO_PROMINENCE — เดิมหน้าเล็ก/backdrop เยอะ)';
+        }
+      }
+    }
     // ★ D-sidecar: solo-face swap / hero-size swap เปลี่ยนตัวจริง (reference เปลี่ยน) = 'policy_override' — ตรวจที่ไซต์จริง
     if (_dEvidenceOn && img && _dPreSwap && img !== _dPreSwap) _dStage = 'policy_override';
     if (!img) {
@@ -4109,7 +4148,20 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         if (!hit && arr.some(heroBase)) console.log('[MEGA S6] 📏 เฟส 2.2: ไม่มี hero candidate ผ่านเกณฑ์ขนาดจริง (realShortSide≥700/ไม่ thumbnail-only) — ถอยเกณฑ์เดิม');
         return hit || null;
       };
+      // ★ 19 ก.ค. (MEGA_HERO_PROMINENCE): faceH ของผู้สมัคร — helper เดียวใช้ทั้ง hero tier ใหม่ + circle tier ใหม่
+      const _heroFaceHOf = (x) => _faceHFrac(x?.triage?.faceBox);
+      // ★ วงกลม: "คนละคนกับ hero" — อ่านสถานะ hero ณ ตอนนี้เท่านั้น (ยังไม่ถึงคิว hero ในลูป = ไม่บังคับ ตรงกับ
+      //   กฎเดียวกับ story-rescue ด้านล่าง `!heroPerson0 || person !== heroPerson0`) ไม่ทำให้พังถ้าลำดับช่องต่างไป
+      const diffPerson = (x) => { const hp = _lc(slots[_canonHeroId]?.person || ''); return !hp || _lc(x?.triage?.person || '') !== hp; };
       const pickFrom = (arr) =>
+        // ★ 19 ก.ค. (MEGA_HERO_PROMINENCE, เคส AC-0160 hero หน้าเล็ก 16-20%+backdrop เยอะ): หน้าเดี่ยว+ขนาดพอ+
+        //   หน้ากิน ≥30% เฟรม (ขอบล่าง HERO_FACE_SHARE band) ต้องชนะก่อนชั้นอื่นเสมอเมื่อมี — เรียงผู้สมัคร hero
+        //   ด้วย faceH มากสุดก่อน (สำเนาเรียงแยกต่างหาก ไม่แตะลำดับ arr/sorted เดิมที่เรียงคุณภาพ) · faceBox วัดไม่ได้
+        //   (null) = ไม่เข้าเกณฑ์นี้ ไม่ใช่ตัดทิ้ง (ลง tier ถัดไปตามปกติ) · ปิดสวิตช์ MEGA_HERO_PROMINENCE=0 = ข้ามชั้นนี้ พฤติกรรมเดิมเป๊ะ
+        (_isHeroSlot(slot) && HERO_PROMINENCE_ON
+          ? [...arr].sort((a, b) => (_heroFaceHOf(b) ?? -1) - (_heroFaceHOf(a) ?? -1))
+            .find((x) => _identityOk(slot, x) && (x.triage?.faceCount ?? 0) === 1 && heroSizeOk(x) && (_heroFaceHOf(x) ?? -1) >= HERO_FACE_PROMINENCE_MIN)
+          : null) ||
         // ★ นโยบาย C (19 ก.ค., MEGA_HERO_SINGLE): หน้าเดี่ยว+ขนาดพอ ต้องชนะภาพคู่เสมอเมื่อมี — เช็คก่อน
         //   findHeroSized (ซึ่งยอม faceCount>=1 รวมภาพคู่) ปิดสวิตช์ = ข้ามชั้นนี้ พฤติกรรมเดิมเป๊ะ
         (_isHeroSlot(slot) && HERO_SINGLE_ON ? arr.find((x) => _identityOk(slot, x) && (x.triage?.faceCount ?? 0) === 1 && heroSizeOk(x)) : null) ||
@@ -4120,6 +4172,12 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         (_isHeroSlot(slot) ? arr.find((x) => _identityOk(slot, x) && (x.triage?.faceCount ?? 0) >= 1) : null) ||
         arr.find((x) => hint.includes(x.triage?.category)) ||
         (_legacyKeyOf(slot) === 'reaction' ? arr.find((x) => (x.triage?.faceCount ?? 0) >= 1) : null) ||
+        // ★ 19 ก.ค. (MEGA_HERO_PROMINENCE): วงกลมกันได้ "ก้อนสี/ไร้หน้า" ขึ้นวง — ก่อนยอม arr[0] เดาสุ่ม ลองหาใบ
+        //   มีหน้า(faceCount≥1)+เห็นหน้าพอวัดได้(faceH≥0.16)+คนละคนกับ hero ก่อน · ไม่เจอ = ถอยไป arr[0] เดิมเป๊ะ
+        //   (ปิดสวิตช์ MEGA_HERO_PROMINENCE=0 = ข้ามชั้นนี้ พฤติกรรมเดิมเป๊ะ)
+        (_isCircleSlot(slot) && HERO_PROMINENCE_ON
+          ? arr.find((x) => (x.triage?.faceCount ?? 0) >= 1 && (_heroFaceHOf(x) ?? -1) >= CIRCLE_FACE_PRESENCE_MIN && diffPerson(x))
+          : null) ||
         arr[0] ||
         null;
       // B (reject ลายน้ำ): ช่องทั่วไปหยิบภาพสะอาดก่อน ไม่มีค่อยยอมลายน้ำ · hero ยึด "ถูกคน 100%" เหนือทุกข้อ
