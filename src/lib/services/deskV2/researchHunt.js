@@ -24,6 +24,10 @@ import { mergeCandidateEvidence, rankDiverseCandidates } from './researchDiversi
 import { planResearchQueries } from './researchQueryPlanner.js';
 import { searchSource } from './researchSources.js';
 import { fetchEntRss, fetchYouTubeChannels } from '../newsDesk/directFeeds.js';
+import { getWatchlistSeed, selectWatchlistForRound } from './researchWatchlist.js';
+import { planInterviewQueries, classifyInterviewCandidate } from './researchInterview.js';
+
+const INTERVIEW_CHANNELS = ['youtube', 'tiktok', 'facebook', 'reels']; // เลนสัมภาษณ์ยิงบนคลาวด์ได้ (IG ต้องเครื่องทีม — ข้ามในนี้)
 
 // ★ เฟส 1: re-export ให้ผู้เรียก import จาก researchHunt ได้ตามสัญญาแผน (ตัวจริงอยู่ researchChannelMap.js — pure เทสตรงได้)
 export { resolveCandidateChannel, platformGroupOf } from './researchChannelMap.js';
@@ -205,6 +209,8 @@ export async function huntClusters({
   const diversityOn = _discoveryCfg.flags.diversity;     // เฟส 2: รวม URL ซ้ำ (เก็บหลักฐาน) + จัดอันดับกระจาย
   const plannerOn = _discoveryCfg.flags.queryPlanner;    // เฟส 3: วางแผนคำค้น 4 กอง (แทนคำค้น rep ใบเดียว)
   const sourceExpansionOn = _discoveryCfg.flags.sourceExpansion; // เฟส 4: เพิ่มแหล่งข่าวใหม่ (RSS/News/YT-watch)
+  const interviewLaneOn = _discoveryCfg.flags.interviewLane; // เฟส 6: เลนสัมภาษณ์คนดัง (task แยกจาก DNA)
+  let interviewWatchlistIds = []; // เฟส 6: id คนดังที่ค้นรอบนี้ (ให้ trace เก็บ → เลือกคนค้นน้อยสุดรอบหน้า)
 
   const safeTopClusters = Math.max(1, Math.min(30, Number(topClusters) || 10));
   const safeQueriesPerCluster = Math.max(1, Math.min(6, Number(queriesPerCluster) || 4));
@@ -306,6 +312,45 @@ export async function huntClusters({
     }
   }
 
+  // ── (2.5) เฟส 6 (ON): เลนสัมภาษณ์คนดัง — สร้าง task แยกจาก DNA (clusterId='interview', lane='interview') ──
+  if (interviewLaneOn) {
+    try {
+      const iv = _discoveryCfg.interview; // {peoplePerRound, variantsPerPerson, maxCalls}
+      const seed = getWatchlistSeed();
+      const people = selectWatchlistForRound({
+        entries: seed.filter((e) => e.kind === 'person'),
+        recentRunIds: [], // (เฟส 6.2: ยังไม่ดึงประวัติจาก trace — เลือกตาม index; ต่อยอดได้)
+        limit: iv.peoplePerRound,
+      });
+      const programs = seed.filter((e) => e.kind === 'program');
+      interviewWatchlistIds = people.map((p) => p.id).filter(Boolean);
+      const plan = planInterviewQueries({
+        people,
+        programs,
+        channels: INTERVIEW_CHANNELS,
+        variantsPerPerson: iv.variantsPerPerson,
+        maxCalls: iv.maxCalls,
+        runSeed: runSeed || 'interview',
+      });
+      for (const qp of plan) {
+        callTasks.push({
+          clusterId: 'interview',
+          clusterArchetype: 'สัมภาษณ์คนดัง',
+          query: qp.text,
+          channel: qp.targetChannel,
+          lane: 'interview',
+          queryId: qp.id,
+          expectedName: qp.expectedName,
+          program: qp.program || '',
+          opener: qp.opener || '',
+          angle: qp.angle || '',
+        });
+      }
+    } catch (e) {
+      console.error(`[ResearchHunt] interview lane ล้มเหลว: ${e?.message}`); // เลนสัมภาษณ์พังห้ามล้มการล่า DNA
+    }
+  }
+
   const distinctQueries = new Set(callTasks.map((t) => `${t.clusterId}::${t.query}`)).size;
 
   // ── (3) ยิงจริง: pool ขนานสูงสุด 4 call task พร้อมกัน ──
@@ -323,7 +368,7 @@ export async function huntClusters({
   let failedCalls = 0;
 
   await runPool(callTasks, CONCURRENCY, async (task) => {
-    const { clusterId, clusterArchetype, query, channel, queryId, queryBucket, lane } = task;
+    const { clusterId, clusterArchetype, query, channel, queryId, queryBucket, lane, expectedName, program, opener, angle } = task;
 
     if (!hasKeyFor(channel)) {
       skippedChannels++;
@@ -380,6 +425,13 @@ export async function huntClusters({
         cand.queryId = queryId;
         cand.queryBucket = queryBucket;
         cand.lane = lane;
+      }
+      // 🆕 เฟส 6 (ON): candidate เลนสัมภาษณ์ → จำแนกชื่อ (confirmObservedName ห้ามเดา) + พก interview
+      if (lane === 'interview') {
+        cand.lane = 'interview';
+        cand.queryId = queryId;
+        const classified = classifyInterviewCandidate(cand, { expectedName, program, opener, angle, queryId });
+        cand.interview = classified.interview;
       }
 
       if (diversityOn) {
@@ -488,6 +540,8 @@ export async function huntClusters({
       ...(plannerOn ? { queryPlannerApplied: true, staffHintCount: staffHints.length } : {}),
       // ★ เฟส 4 (ON เท่านั้น): ผลจากแหล่งข่าวใหม่ (RSS/News/YT-watch) แยกต่างหาก + แหล่งที่ล้ม
       ...(sourceExpansionOn ? { bySource, sourceFailures, sourceCandidateCount: sourceCandidates.length } : {}),
+      // ★ เฟส 6 (ON เท่านั้น): เลนสัมภาษณ์ + id คนดังที่ค้นรอบนี้ (trace เก็บไปเลือกคนค้นน้อยสุดรอบหน้า)
+      ...(interviewLaneOn ? { interviewLaneApplied: true, interviewWatchlistIds } : {}),
     },
   };
 }

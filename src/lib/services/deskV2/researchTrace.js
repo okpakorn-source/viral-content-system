@@ -167,6 +167,10 @@ export async function logRun(record) {
     tookMs: Math.max(0, Number(r.tookMs) || 0),
   };
 
+  // 🆕 เฟส 6: watchlist IDs ที่ค้นรอบนี้ (มีเฉพาะเมื่อเลนสัมภาษณ์เปิด) — ให้รอบหน้าเลือกคนค้นน้อยสุด
+  const watchlistIds = (Array.isArray(r.watchlistIds) ? r.watchlistIds : []).map((x) => sanitizeText(x, 40)).filter(Boolean).slice(0, 30);
+  if (watchlistIds.length) clean.watchlistIds = watchlistIds;
+
   // 🆕 เฟส 0 (Discovery V2) — โหมด shadow: ถ้า UI ส่ง measurementSample มา + MASTER เปิด → คำนวณเมตริกเก็บใน discoveryV2
   //   🔴 ปิด flag หรือไม่ส่ง sample = ไม่มี field นี้ → record เหมือนเดิมเป๊ะ (พฤติกรรมเดิมไม่เปลี่ยน)
   //   คำนวณล้มเหลวห้ามทำให้บันทึกรอบล่าพัง (โฟลว์หลักต้องรอด) — ครอบ try เงียบ

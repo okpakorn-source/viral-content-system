@@ -97,3 +97,30 @@ test('flag ON → previouslyCovered tag เก็บในลีด', async () =
     assert.equal(L[0].storyRelation, 'archive');
   });
 });
+
+// ── เฟส 6.2: lead เลนสัมภาษณ์ (gated ด้วย lane==='interview' ตรงๆ ไม่ต้องเปิด flag) ──
+test('เฟส 6: candidate เลนสัมภาษณ์ → lead เก็บ lane + interview (sanitized, ไม่เดาชื่อ)', async () => {
+  reset();
+  await withStory(false, async () => {
+    await saveLeads([{
+      url: 'https://yt.com/iv1', title: 'คลิปสัมภาษณ์', channel: 'youtube', sourceHost: 'yt.com', matchScore: 72,
+      fingerprint: { names: ['แพท ณปภา'], action: 'เปิดใจ', timeHint: '', numbers: [] },
+      lane: 'interview',
+      interview: { expectedName: 'แพท ณปภา', observedName: null, nameStatus: 'expected', nameEvidence: null, program: 'แฉ', opener: 'เผย', angle: 'น้ำตา', queryId: 'people-0' },
+    }], { runId: 'riv' });
+    const L = leads();
+    assert.equal(L[0].lane, 'interview');
+    assert.equal(L[0].interview.expectedName, 'แพท ณปภา');
+    assert.equal(L[0].interview.nameStatus, 'expected');
+    assert.equal(L[0].interview.observedName, null); // 🔴 ไม่เดาว่าเป็นใคร
+  });
+});
+
+test('เฟส 6: candidate ปกติ (ไม่มี lane) → lead ไม่มี field interview (เดิมเป๊ะ)', async () => {
+  reset();
+  await withStory(false, async () => {
+    await saveLeads([cand('https://a.com/1', ['x'], 'y')], { runId: 'rn' });
+    assert.equal(leads()[0].interview, undefined);
+    assert.equal(leads()[0].lane, undefined);
+  });
+});

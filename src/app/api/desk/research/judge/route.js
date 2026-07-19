@@ -36,8 +36,9 @@ export async function POST(request) {
     }
 
     const modelKey = body?.model === 'primary' ? 'primary' : 'fast'; // 🔴 รับแค่ 2 ค่านี้เท่านั้น กันชื่อโมเดลดิบ
+    const lane = body?.lane === 'interview' ? 'interview' : 'dna'; // 🆕 เฟส 6: เลนสัมภาษณ์ใช้ rubric แยก
 
-    const result = await judgeCandidates({ candidates, clusterId, modelKey });
+    const result = await judgeCandidates({ candidates, clusterId, modelKey, lane });
 
     return NextResponse.json({
       success: true,

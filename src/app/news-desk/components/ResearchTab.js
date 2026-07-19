@@ -280,7 +280,8 @@ export default function ResearchTab({ onToast }) {
       const jRes = await apiFetch('/api/desk/research/judge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidates: batch, clusterId, model }),
+        // 🆕 เฟส 6: กลุ่ม 'interview' ส่ง lane='interview' → judge ใช้ rubric สัมภาษณ์ (ไม่บังคับ exemplar)
+        body: JSON.stringify({ candidates: batch, clusterId, model, lane: clusterId === 'interview' ? 'interview' : 'dna' }),
       });
       if (!jRes.success) {
         pushStep(`⚠️ คลัสเตอร์ ${idx}: ตัดสินล้มเหลว (${jRes.error || 'ไม่ทราบ'}) — ข้าม`);
@@ -350,6 +351,8 @@ export default function ResearchTab({ onToast }) {
           savedLeadIds: mine.map((l) => l.id),
           costTHB: hRes.stats?.estCostTHB || 0,
           tookMs: Date.now() - t0Run,
+          // 🆕 เฟส 6: id คนดังที่ค้นรอบนี้ → trace เก็บไว้ให้รอบหน้าเลือกคนที่ค้นน้อยสุด
+          ...(hRes.stats?.interviewWatchlistIds ? { watchlistIds: hRes.stats.interviewWatchlistIds } : {}),
           // 🆕 เฟส 0 (shadow): แนบตัวอย่างวัดผลเฉพาะเมื่อ MASTER เปิด — ปิด = ไม่ส่ง field นี้ (logRun เก็บ record เหมือนเดิมเป๊ะ)
           ...(discoveryMasterOn && measurementSampleAgg.length ? { measurementSample: measurementSampleAgg.slice(0, 400) } : {}),
         },

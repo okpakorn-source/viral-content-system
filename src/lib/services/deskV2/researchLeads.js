@@ -246,6 +246,21 @@ export async function saveLeads(judgedCandidates, { runId } = {}) {
         record.storyRelation = sanitizeText(raw.storyRelation, 20) || 'archive';
       }
     }
+    // 🆕 เฟส 6 (ON): lead เลนสัมภาษณ์ → เก็บ lane + interview (จำแนกชื่อ, sanitized) — additive, มีเฉพาะ candidate เลนสัมภาษณ์
+    if (raw.lane === 'interview') {
+      const iv = raw.interview || {};
+      record.lane = 'interview';
+      record.interview = {
+        expectedName: sanitizeText(iv.expectedName, 80),
+        observedName: iv.observedName ? sanitizeText(iv.observedName, 80) : null,
+        nameStatus: sanitizeText(iv.nameStatus, 20) || 'unknown',
+        nameEvidence: iv.nameEvidence ? sanitizeText(iv.nameEvidence, 20) : null,
+        program: sanitizeText(iv.program, 60),
+        opener: sanitizeText(iv.opener, 40),
+        angle: sanitizeText(iv.angle, 40),
+        queryId: sanitizeText(iv.queryId, 60),
+      };
+    }
     // 🆕 seed timeline ตั้งแต่สร้าง record — เขียนจังหวะเดียวกับ addMany ด้านล่าง (ไม่มี append แยกทีหลัง)
     record = pushEvent(record, 'found', { runId: runIdClean, query: sanitizeText(raw.query, 100), channel });
     record = pushEvent(record, 'judged', { score: matchScore, reason: sanitizeText(raw.reason, 120), model: 'judge' });
