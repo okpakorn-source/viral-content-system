@@ -3112,7 +3112,13 @@ export async function s6_slots(job, { origin, _deps } = {}) {
             const hasHeroGrade = r.images.some((x) => _heroGradeOf(x) && _namesMatchSimple(x.triage?.person, name));
             if (hasHeroGrade) continue; // มีภาพหน้าดีของคนนี้อยู่แล้วในเคส — ไม่ต้องยืม
           }
-          const borrowed = await _findByPerson({ personName: name, excludeCaseId: im.caseId, minShortSide: HERO_MIN_SHORT_SIDE, limit: 6 });
+          // ★ 20 ก.ค. (504 hardening): borrow = network call เดียวใน hot path — bound เวลา ไม่ให้ค้าง tick จน gateway timeout
+          //   (Vercel cloud Supabase 15s ไม่มี circuit breaker) · ช้าเกิน _BORROW_TIMEOUT_MS → ถือว่ายืมไม่ได้ → ตกไป HOLD (graceful)
+          const _BORROW_TIMEOUT_MS = Number(process.env.MEGA_BORROW_TIMEOUT_MS) > 0 ? Number(process.env.MEGA_BORROW_TIMEOUT_MS) : 4000;
+          const borrowed = await Promise.race([
+            _findByPerson({ personName: name, excludeCaseId: im.caseId, minShortSide: HERO_MIN_SHORT_SIDE, limit: 6 }),
+            new Promise((resolve) => setTimeout(() => resolve(null), _BORROW_TIMEOUT_MS)),
+          ]);
           if (!borrowed || !borrowed.length) continue;
           // ★ SOLO_ONLY: รับเฉพาะภาพเดี่ยว (faceCount===1) — ห้ามยืมภาพคู่มาขึ้น hero · CROSS = รับทุกใบ (เดิมเป๊ะ, _accepted===borrowed)
           const _accepted = _soloOnlyBorrow ? borrowed.filter((b) => Number(b.triage?.faceCount) === 1) : borrowed;
