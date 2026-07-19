@@ -20,6 +20,7 @@
 import { createStore } from '../../persistStore.js';
 import { sanitizeText } from './dnaContract.js';
 import { listExemplars } from './dnaLibrary.js';
+import { getDiscoveryConfig } from './researchDiscoveryConfig.js';
 import { callAI } from '../../ai/openai.js';
 import { MODEL_PRIMARY, MODEL_FAST } from '../../ai/modelConfig.js';
 
@@ -221,6 +222,7 @@ function sanitizeJudgeItem(item) {
 export async function judgeCandidates({ candidates, clusterId, modelKey = 'fast' } = {}) {
   const t0 = Date.now();
   const model = modelKey === 'fast' ? MODEL_FAST : MODEL_PRIMARY; // 🔴 รับแค่ 2 ค่านี้เท่านั้น กันชื่อโมเดลดิบ
+  const storyGroupingOn = getDiscoveryConfig().flags.storyGrouping; // เฟส 5: archive match → ติดป้าย ไม่ทิ้ง
   const safeCandidates = (Array.isArray(candidates) ? candidates : []).slice(0, MAX_CANDIDATES);
 
   const dropped = [];
@@ -264,7 +266,12 @@ export async function judgeCandidates({ candidates, clusterId, modelKey = 'fast'
 
     const dupArchive = archiveTitlesNormAll.some((t) => isTitleContainDup(titleNorm, t));
     if (dupArchive) {
-      dropped.push({ title, url, stage: 'dedup', reason: 'เพจเคยทำแล้ว' });
+      if (storyGroupingOn) {
+        // 🆕 เฟส 5: ข่าวเก่าเล่าใหม่ — ไม่ทิ้ง แต่ติดป้ายให้คนตัดสิน (อาจมีมุมใหม่)
+        afterDedup.push({ ...c, previouslyCovered: true, storyRelation: 'archive' });
+      } else {
+        dropped.push({ title, url, stage: 'dedup', reason: 'เพจเคยทำแล้ว' });
+      }
       continue;
     }
     const urlNorm = normalizeUrl(c?.url);

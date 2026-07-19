@@ -19,6 +19,28 @@
 import crypto from 'crypto';
 import { createStore } from '../../persistStore.js';
 import { sanitizeText } from './dnaContract.js';
+import { getDiscoveryConfig } from './researchDiscoveryConfig.js';
+import { buildStoryIdentity } from './researchStoryIdentity.js';
+
+// 🆕 เฟส 5: ต่อแหล่งรอง (URL อื่นของเรื่องเดียวกัน) เข้าลีดหลัก — mutate primary ใน toAdd ก่อน persist
+const MAX_ALT_SOURCES_LEAD = 12;
+function _appendAltSource(primary, raw) {
+  if (!Array.isArray(primary.altSources)) primary.altSources = [];
+  const url = sanitizeText(raw.url, 500);
+  if (!url || url === primary.url || primary.altSources.some((a) => a.url === url)) return;
+  if (primary.altSources.length < MAX_ALT_SOURCES_LEAD) {
+    primary.altSources.push({
+      url,
+      sourceHost: sanitizeText(raw.sourceHost, 100),
+      channel: sanitizeText(raw.channel, 20),
+      sourceType: sanitizeText(raw.sourceType, 20),
+      title: sanitizeText(raw.title, 300),
+    });
+  }
+  primary.sourceCount = 1 + primary.altSources.length;
+  const ch = sanitizeText(raw.channel, 20);
+  if (ch && Array.isArray(primary.channels) && !primary.channels.includes(ch) && primary.channels.length < 10) primary.channels.push(ch);
+}
 
 export const STORE = 'research-leads';
 
@@ -151,11 +173,15 @@ export async function saveLeads(judgedCandidates, { runId } = {}) {
   const existingMap = new Map(existing.map((r) => [r.id, r]));
   const seenInBatch = new Set(); // กันลีดเดียวกันโผล่ซ้ำสองครั้งในชุดที่ส่งมาชุดเดียวกัน (ไม่ต่อ refound ซ้ำ)
 
+  const storyGroupingOn = getDiscoveryConfig().flags.storyGrouping; // 🆕 เฟส 5: รวมเรื่องเดียวหลาย URL + เก็บ storyKey
+  const storyIndex = new Map(); // storyKey → record หลักใน toAdd (รวมแหล่งรองในแบตช์เดียว)
+
   const now = new Date().toISOString();
   const runIdClean = sanitizeText(runId, 40);
   const toAdd = [];
   const toReplace = []; // ใบซ้ำที่มีอยู่แล้ว — สืบทอด timeline เดิม + ต่อ refound
   let skipped = 0;
+  let mergedIntoStory = 0; // 🆕 เฟส 5: จำนวน URL ที่รวมเข้าเรื่องเดิม (ไม่สร้างลีดใหม่)
 
   for (const raw of Array.isArray(judgedCandidates) ? judgedCandidates : []) {
     if (!raw || !raw.url) continue;
@@ -172,6 +198,17 @@ export async function saveLeads(judgedCandidates, { runId } = {}) {
       toReplace.push(pushEvent(prevRecord, 'refound', { runId: runIdClean }));
       skipped++;
       continue;
+    }
+
+    // 🆕 เฟส 5 (ON): เรื่องเดียวกันหลาย URL ในแบตช์เดียว → รวมเป็นการ์ดเดียว (URL รองเข้า altSources ของลีดหลัก)
+    let identity = null;
+    if (storyGroupingOn) {
+      identity = buildStoryIdentity(raw);
+      if (identity.storyKey && identity.storyKeyConfidence >= 0.5 && storyIndex.has(identity.storyKey)) {
+        _appendAltSource(storyIndex.get(identity.storyKey), raw);
+        mergedIntoStory++;
+        continue; // ไม่สร้างลีดใหม่ — รวมเข้าเรื่องเดิม (canonical id ของลีดหลักไม่เปลี่ยน)
+      }
     }
 
     const sourceHost = sanitizeText(raw.sourceHost, 100);
@@ -196,9 +233,26 @@ export async function saveLeads(judgedCandidates, { runId } = {}) {
       runId: runIdClean,
       savedAt: now,
     };
+    // 🆕 เฟส 5 (ON): เก็บ storyKey + โครงแหล่งรอง (additive — ปิด flag = record เดิมเป๊ะ)
+    if (storyGroupingOn && identity) {
+      record.storyKey = identity.storyKey;
+      record.storyKeyConfidence = identity.storyKeyConfidence;
+      record.sourceCount = 1;
+      record.channels = [channel].filter(Boolean);
+      record.altSources = [];
+      if (raw.evidence && Array.isArray(raw.evidence.queryHits)) record.queryHits = raw.evidence.queryHits.slice(0, 20);
+      if (raw.previouslyCovered) {
+        record.previouslyCovered = true;
+        record.storyRelation = sanitizeText(raw.storyRelation, 20) || 'archive';
+      }
+    }
     // 🆕 seed timeline ตั้งแต่สร้าง record — เขียนจังหวะเดียวกับ addMany ด้านล่าง (ไม่มี append แยกทีหลัง)
     record = pushEvent(record, 'found', { runId: runIdClean, query: sanitizeText(raw.query, 100), channel });
     record = pushEvent(record, 'judged', { score: matchScore, reason: sanitizeText(raw.reason, 120), model: 'judge' });
+    // 🆕 เฟส 5: ลงทะเบียน storyKey หลัง pushEvent — ชี้ record "ตัวสุดท้ายที่ push จริง" (altSource ต้องต่อเข้าตัวนี้ ไม่ใช่ตัวก่อน pushEvent)
+    if (storyGroupingOn && identity && identity.storyKey && identity.storyKeyConfidence >= 0.5) {
+      storyIndex.set(identity.storyKey, record);
+    }
     toAdd.push(record);
   }
 
@@ -212,7 +266,7 @@ export async function saveLeads(judgedCandidates, { runId } = {}) {
     await store.add(rep);
   }
 
-  return { saved: toAdd.length, skipped };
+  return { saved: toAdd.length, skipped, ...(storyGroupingOn ? { mergedIntoStory } : {}) };
 }
 
 /**
