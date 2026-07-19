@@ -101,6 +101,9 @@ for (const k of [
   'MEGA_REF_HERO_V2', 'MEGA_ROLE_READINESS', 'MEGA_FINAL_DECISION_EVIDENCE_V2', 'MEGA_CROSS_CASE_BORROW',
   'MEGA_STRICT_RENDER', 'MEGA_STRICT_PRODUCER',
 ]) delete process.env[k];
+// ★ 20 ก.ค.: pin MEGA_HERO_SOLO_ONLY=0 — ฟีเจอร์ SOLO_ONLY (default ON) "ห้ามครอปภาพคู่→หน้าเดี่ยว" มาแทนที่ synth-crop
+//   ของ MEGA_HERO_SINGLE โดยเจตนา (borrow-or-HOLD) เทสนี้พิสูจน์การต่อสาย _heroFaceCrop ของ synth-crop เดิม จึงต้องปักสวิตช์ปิด
+process.env.MEGA_HERO_SOLO_ONLY = '0';
 
 const withEnv = async (name, v, fn) => {
   const prev = process.env[name];

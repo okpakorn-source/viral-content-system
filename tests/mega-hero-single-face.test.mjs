@@ -34,6 +34,9 @@ for (const k of [
 // เทส s5_search gate ต้องกด staged-search ให้หยุดเช็คตั้งแต่แหล่งที่ 2 (ปกติต้องค้นครบ 4 แหล่งถึงจะเช็ค)
 process.env.MEGA_SEARCH_INITIAL_BATCH = '2';
 process.env.MEGA_MIN_RELEVANT_IMAGES = '1';
+// ★ 20 ก.ค.: pin MEGA_HERO_SOLO_ONLY=0 — ไฟล์นี้พิสูจน์ synth-crop ของ MEGA_HERO_SINGLE (นโยบาย C) ซึ่งฟีเจอร์ใหม่
+//   SOLO_ONLY (default ON) มาแทนที่โดยเจตนา (borrow-or-HOLD ห้ามครอปภาพคู่) — ปักปิดเพื่อคง synth-crop path ให้เทสเดิมพิสูจน์ได้
+process.env.MEGA_HERO_SOLO_ONLY = '0';
 
 const { s6_slots, s5_search } = await import('@/lib/megaAdapters');
 
