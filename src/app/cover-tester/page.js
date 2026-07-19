@@ -1014,6 +1014,29 @@ export default function CoverPage() {
   const MOVE_BORDER = 25; // px border zone for move (smaller = more crop area)
   // ★ 4 ก.ค.: โซนจับขยายตามจอ — จอมือถือ canvas ถูกย่อ ~3 เท่า โซน 36px เหลือ ~11px จริง นิ้วจับไม่ถูก
   const _zoneScale = () => Math.min(2.4, Math.max(1, touchScaleRef.current / 1.7));
+
+  // ★ 19 ก.ค.: ปุ่มย้ายทั้งช่อง/วง (✥) — จุดจับที่ "มองเห็นชัด" แก้ปัญหาเดิม "หาจุดเลื่อนวงไม่เจอ"
+  // (โซนวงแบบเดิมเป็นแหวนบางๆ วงเล็ก/จอมือถือแทบจับไม่ได้เลย) — วางที่ขอบบนกึ่งกลางของช่อง
+  const MOVE_GRIP_VR = 32; // รัศมีปุ่ม (canvas px)
+  const getMoveHandle = (slot) => {
+    const off = slotOffsets[slot.id] || { dx: 0, dy: 0 };
+    const eff = getEffSlot(slot, slotScales[slot.id]);
+    const sx = eff.x + off.dx, sy = eff.y + off.dy;
+    const cx = slot.shape === 'circle' ? sx + eff.diameter / 2 : sx + eff.w / 2;
+    // ติดขอบบนช่องเสมอ + clamp ไม่ให้หลุดผืนภาพ
+    const hx = Math.max(MOVE_GRIP_VR + 2, Math.min(W - MOVE_GRIP_VR - 2, cx));
+    const hy = Math.max(MOVE_GRIP_VR + 2, Math.min(H - MOVE_GRIP_VR - 2, sy));
+    return { hx, hy, vr: MOVE_GRIP_VR };
+  };
+  // แตะโดนปุ่มย้ายของช่องที่เลือกอยู่ไหม (ตรวจก่อนทุกอย่าง — จับปุ่มได้แม้วางทับช่องอื่น)
+  const hitMoveGrip = (mx, my) => {
+    if (!selectedSlotId) return null;
+    const sel = draggableSlots.find(sl => sl.id === selectedSlotId && slotImages[sl.id]);
+    if (!sel) return null;
+    const { hx, hy, vr } = getMoveHandle(sel);
+    return Math.hypot(mx - hx, my - hy) <= vr * _zoneScale() ? sel : null;
+  };
+
   const hitTest = (mx, my) => {
     const _zs = _zoneScale();
     const HS = HANDLE_SIZE * _zs, ER = EDGE_RING * _zs, MB = MOVE_BORDER * _zs;
@@ -1099,6 +1122,14 @@ export default function CoverPage() {
       setDragState({ markerId: mHit.marker.id, mode: mHit.mode === 'move' ? 'marker-move' : 'marker-resize', startX: mx, startY: my, orig: { ...mHit.marker } });
       return;
     }
+    // ★ 19 ก.ค.: จับปุ่มย้าย (✥) ของช่องที่เลือกอยู่ → ย้ายทั้งช่อง/วง (เช็คก่อนเลือกช่องใหม่ กันสลับช่อง)
+    const gripSlot = hitMoveGrip(mx, my);
+    if (gripSlot) {
+      const off = slotOffsets[gripSlot.id] || { dx: 0, dy: 0 };
+      const sc = slotScales[gripSlot.id] || 1;
+      setDragState({ slotId: gripSlot.id, mode: 'move', startX: mx, startY: my, origDx: off.dx, origDy: off.dy, origScale: sc, startDist: 0 });
+      return;
+    }
     if (selectedMarkerId) setSelectedMarkerId(null); // แตะที่อื่น = วางมือจากวงแดง
     // ★ 4 ก.ค.: แตะช่องไหน = เลือกช่องนั้น (แผงเครื่องมือใต้ปกสลับตาม + วาดกรอบไฮไลต์)
     const _selHit = hitTestAll(mx, my);
@@ -1144,6 +1175,8 @@ export default function CoverPage() {
     const {mx,my} = getCoords(cx,cy);
 
     if (!dragState) {
+      // ★ 19 ก.ค.: ชี้โดนปุ่มย้าย (✥) = เคอร์เซอร์มือจับ
+      if (hitMoveGrip(mx, my)) { setHoverCursor('grab'); return; }
       // Hover cursor — check text first
       const textHover = hitTestText(mx, my);
       if (textHover) {
@@ -1456,6 +1489,27 @@ export default function CoverPage() {
         ctx.strokeStyle = 'rgba(96,165,250,0.95)'; ctx.lineWidth = 5; ctx.setLineDash([14, 9]);
         if (slot.shape === 'circle') { const r = eff.diameter / 2; ctx.beginPath(); ctx.arc(sx + r, sy + r, r + 7, 0, Math.PI * 2); ctx.stroke(); }
         else ctx.strokeRect(sx - 4, sy - 4, eff.w + 8, eff.h + 8);
+        ctx.restore();
+      }
+    }
+
+    // ★ 19 ก.ค.: ปุ่มย้าย (✥) บนช่องที่เลือก (เฉพาะช่องที่ลากได้) — จุดจับมองเห็นชัด แก้ "หาจุดเลื่อนวงไม่เจอ"
+    if (selectedSlotId) {
+      const sel = draggableSlots.find(sl => sl.id === selectedSlotId && slotImages[sl.id]);
+      if (sel) {
+        const { hx, hy, vr } = getMoveHandle(sel);
+        const active = dragState?.slotId === sel.id && dragState?.mode === 'move';
+        ctx.save();
+        ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 8;
+        ctx.beginPath(); ctx.arc(hx, hy, vr, 0, Math.PI * 2);
+        ctx.fillStyle = active ? 'rgba(37,99,235,0.96)' : 'rgba(255,255,255,0.95)';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.lineWidth = 3.5; ctx.strokeStyle = active ? '#ffffff' : '#2563eb'; ctx.stroke();
+        ctx.fillStyle = active ? '#ffffff' : '#2563eb';
+        ctx.font = `bold ${Math.round(vr * 1.2)}px sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('✥', hx, hy + 1);
         ctx.restore();
       }
     }
@@ -2131,7 +2185,7 @@ export default function CoverPage() {
             {/* ── Drag/Resize hint ── */}
             {hasDraggables && (
               <div style={{ padding:'10px 14px', borderRadius:10, marginBottom:12, background:'rgba(148,163,184,0.06)', border:'1px solid rgba(148,163,184,0.2)', fontSize:12, color:'#94a3b8', lineHeight:1.7 }}>
-                🔀 <strong>ลาก</strong>ตรงกลาง = ขยับ &nbsp;|&nbsp; ลาก<strong>ขอบ/มุม</strong> = ปรับขนาด
+                🔀 เลือกช่องก่อน แล้ว<strong>ลากปุ่ม ✥</strong> = ย้ายทั้งช่อง/วง &nbsp;|&nbsp; ลาก<strong>กลางภาพ</strong> = เลื่อนรูปในช่อง &nbsp;|&nbsp; ลาก<strong>ขอบ/มุม</strong> = ปรับขนาด
                 {(hasOffsets || hasScaleChanges) && (
                   <button onClick={resetAll} style={{ display:'block', marginTop:6, padding:'4px 12px', borderRadius:6, border:'1px solid rgba(148,163,184,0.3)', background:'rgba(148,163,184,0.1)', color:'#94a3b8', fontSize:11, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>🔄 รีเซ็ตตำแหน่ง+ขนาดทั้งหมด</button>
                 )}
@@ -2154,7 +2208,7 @@ export default function CoverPage() {
               💡 <strong style={{ color:'var(--text-secondary)' }}>วิธีใช้:</strong><br/>
               1. เลือกแทมเพลต (แบบ 1-{templates.length})<br/>
               2. อัปโหลดรูปแต่ละช่อง<br/>
-              3. ลากตรงกลาง = ขยับ / ลากมุม = ปรับขนาด<br/>
+              3. เลือกช่อง → ลากปุ่ม ✥ = ย้ายทั้งวง · ลากกลาง = เลื่อนรูปในช่อง · ลากมุม = ปรับขนาด<br/>
               4. ใช้ปุ่ม +/− ปรับขนาดละเอียด<br/>
               5. กดดาวน์โหลด JPEG คุณภาพสูง
             </div>
@@ -2256,7 +2310,7 @@ export default function CoverPage() {
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 7, lineHeight: 1.6 }}>
                     {(() => {
                       const sl = template.slots.find(x => x.id === selectedSlotId);
-                      if (!sl) return '👆 แตะช่องบนปก หรือกดชิปข้างบน เพื่อเลือกช่องที่จะแต่ง · ลาก 1 นิ้ว=เลื่อนภาพ · จีบ 2 นิ้ว/สกอลล์=ซูม';
+                      if (!sl) return '👆 แตะช่องบนปก/กดชิป เพื่อเลือกช่อง · แล้วลากปุ่ม ✥=ย้ายทั้งวง · ลาก 1 นิ้วกลางภาพ=เลื่อนรูปในช่อง · จีบ 2 นิ้ว/สกอลล์=ซูม';
                       const crop = slotCrops[sl.id] || {};
                       const modeTxt = dragState ? (dragState.mode === 'crop' ? ' · 🖐️ กำลังเลื่อนภาพ' : dragState.mode === 'move' ? ' · ✋ กำลังย้ายช่อง' : dragState.mode === 'resize' ? ' · ↔️ กำลังปรับขนาด' : '') : '';
                       return <span style={{ color: '#60a5fa', fontWeight: 700 }}>✏️ กำลังแต่ง: {sl.label} · ซูม {(crop.zoom || 1).toFixed(1)}x{modeTxt}</span>;
@@ -2268,6 +2322,8 @@ export default function CoverPage() {
                     const img = slotImages[sl.id];
                     const crop = slotCrops[sl.id] || { zoom: 1, panX: 0, panY: 0 };
                     const bump = (axis, d) => setSlotCrops(prev => { const old = prev[sl.id] || { zoom: 1, panX: 0, panY: 0 }; return { ...prev, [sl.id]: { ...old, [axis]: (old[axis] || 0) + d } }; });
+                    // ★ 19 ก.ค.: ขยับตำแหน่ง "ทั้งช่อง/วง" (คนละอันกับเลื่อนรูปในช่อง) — ปุ่มกดชัด ไม่ต้องเล็งลากขอบวง
+                    const nudgeSlot = (axis, d) => setSlotOffsets(prev => { const old = prev[sl.id] || { dx: 0, dy: 0 }; return { ...prev, [sl.id]: { ...old, [axis]: (old[axis] || 0) + d } }; });
                     const zoomBy = (d) => setSlotCrops(prev => { const old = prev[sl.id] || { zoom: 1, panX: 0, panY: 0 }; return { ...prev, [sl.id]: { ...old, zoom: Math.max(1, Math.min(5, +(old.zoom + d).toFixed(1))) } }; });
                     const bigBtn = { ...s.scaleBtn, width: 40, height: 40, fontSize: 18, borderRadius: 9 };
                     return (
@@ -2297,12 +2353,21 @@ export default function CoverPage() {
                               <button onClick={() => zoomBy(0.2)} style={bigBtn}>＋</button>
                             </div>
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <span style={{ fontSize: 12, color: '#60a5fa', fontWeight: 700 }}>🖐️ เลื่อนภาพ</span>
+                              <span style={{ fontSize: 12, color: '#60a5fa', fontWeight: 700 }}>🖐️ เลื่อนรูปในช่อง</span>
                               <button onClick={() => bump('panX', -40)} style={bigBtn}>◀</button>
                               <button onClick={() => bump('panY', -40)} style={bigBtn}>▲</button>
                               <button onClick={() => bump('panY', 40)} style={bigBtn}>▼</button>
                               <button onClick={() => bump('panX', 40)} style={bigBtn}>▶</button>
                             </div>
+                            {sl.draggable && (
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                <span style={{ fontSize: 12, color: '#a78bfa', fontWeight: 700 }}>✥ ย้ายทั้งช่อง</span>
+                                <button onClick={() => nudgeSlot('dx', -30)} style={bigBtn}>◀</button>
+                                <button onClick={() => nudgeSlot('dy', -30)} style={bigBtn}>▲</button>
+                                <button onClick={() => nudgeSlot('dy', 30)} style={bigBtn}>▼</button>
+                                <button onClick={() => nudgeSlot('dx', 30)} style={bigBtn}>▶</button>
+                              </div>
+                            )}
                             {sl.draggable && (
                               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                                 <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>📐 ขนาดช่อง</span>
