@@ -281,7 +281,7 @@ function _panelBackupSwapOn() { return process.env.MEGA_PANEL_BACKUP_SWAP !== '0
 
 // ★ MEGA_CLUTTER_GUARD (มือ D, 19 ก.ค.) — kill-switch เดียว **default OFF** (=1 เปิด) · OFF → byte-parity 100%
 //   ต้องตรง _clutterGuardOn() ใน coverExecutorService.js เป๊ะ (เปิด/ปิดพร้อมกัน)
-function _clutterGuardOnComposer() { return process.env.MEGA_CLUTTER_GUARD === '1'; }
+function _clutterGuardOnComposer() { return process.env.MEGA_CLUTTER_GUARD !== '0'; }
 // plumbing (จุดที่ 1/7): แนบสัญญาณ "ลายตา/สะอาด" จาก triage (loaded[i]) ลง faceBox — additive ไม่แตะ normalizeFaceBox
 //   busy undefined บน loaded → คงค่า undefined บน fb (executor treats as neutral) · fb null (ไร้หน้า)/OFF → ข้าม
 function _attachClutterMeta(faceBoxes, loaded) {

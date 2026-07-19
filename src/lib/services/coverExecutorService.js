@@ -414,7 +414,7 @@ function _validHeroFaceCropBox(b) {
 //   + ธง cleanNeedsBackup (ครอปแล้วยังรก → ให้ composer สลับภาพสะอาดกว่า) · kill-switch เดียว **default OFF**
 //   เปิดเมื่อ env MEGA_CLUTTER_GUARD==='1' เท่านั้น · ไม่ตั้ง/ค่าอื่น → byte-parity 100% (ทุกจุด gate ด้วยตัวนี้)
 //   สัญญา busy = integer 0-2 จาก triage (Gemini) · undefined/null → neutral (ไม่ลงโทษ = พฤติกรรมเดิม)
-function _clutterGuardOn() { return process.env.MEGA_CLUTTER_GUARD === '1'; }
+function _clutterGuardOn() { return process.env.MEGA_CLUTTER_GUARD !== '0'; }
 // สัญญาณ "ลายตา" รวม (ต้องเปิด guard ก่อน): หน้าจริง ≥4 ใบ · eyeCategory==='group' · busy>=2
 //   busy undefined → Number.isFinite เป็นเท็จ → ไม่เข้าเงื่อนไข (neutral) · fb null/OFF → false
 function _isClutter(fb) {
