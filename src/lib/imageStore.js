@@ -65,6 +65,95 @@ export async function readImages(caseId) {
   return (data || []).map((r) => r.data).filter(Boolean).sort((a, b) => (a.ord || 0) - (b.ord || 0));
 }
 
+// ============================================================
+// ★ ยืมรูปข้ามเคส (cross-case image borrow) — kill-switch MEGA_CROSS_CASE_BORROW='1' ที่ฝั่งผู้เรียก (megaAdapters.js)
+// ------------------------------------------------------------
+// readImages/addImages เดิมด้านบน "ห้ามแตะ byte/semantic เดิม" — ฟังก์ชันนี้เป็นของใหม่ล้วน แยก path เต็ม
+// หาภาพของ "คนคนเดียวกัน" จากเคสข่าวอื่นในคลัง acs-images (ข้าม caseId ปัจจุบัน) — ใช้ตอนเคสนี้ขาดภาพหน้าดี
+// ของตัวละครหลัก ห้าม throw เด็ดขาด (ยืมพัง = คืน [] เงียบ ให้ผู้เรียกเดินต่อได้เสมอ)
+// ============================================================
+// dep injection: client (เทสเท่านั้น — production ไม่ส่ง ใช้ sb() ของจริงเสมอ)
+export async function findImagesByPerson({ personName, excludeCaseId, minShortSide = 0, limit = 12, client } = {}) {
+  const name = typeof personName === 'string' ? personName.trim() : '';
+  if (name.length < 2) return []; // กันชื่อว่าง/สั้นเกินไป match มั่ว
+
+  const nameLc = name.toLowerCase();
+  const shortSideOf = (im) => {
+    const rw = Number(im?.realWidth), rh = Number(im?.realHeight);
+    if (rw > 0 && rh > 0) return Math.min(rw, rh);
+    const ts = Number(im?.triage?.realShortSide);
+    return ts > 0 ? ts : null;
+  };
+  // ★ เทียบชื่อระดับ "คำ" — parity กับ _namesMatchSimple ใน s6 (megaAdapters) กัน over-match ชื่อสั้น
+  //   (raw-substring เดิมจับ "แอน" ปนกับ "แอนนา" ข้ามขอบคำได้ → token-based ตัด title + เทียบทีละคำ)
+  const _TITLE_WORDS = new Set(['นาย', 'นาง', 'นางสาว', 'คุณ', 'ดร.', 'หมอ', 'ผู้ก่อตั้ง', 'อดีต']);
+  const _nameTokens = (s) => String(s || '').toLowerCase().replace(/[()"'“”]/g, ' ').split(/\s+/).filter((t) => t.length >= 2 && !_TITLE_WORDS.has(t));
+  const _queryToks = _nameTokens(nameLc);
+  const matchesPerson = (im) => {
+    const p = im?.triage?.person;
+    if (typeof p !== 'string' || !p) return false;
+    const pt = _nameTokens(p);
+    return _queryToks.some((x) => pt.some((y) => x === y || (x.length >= 3 && y.includes(x)) || (y.length >= 3 && x.includes(y))));
+  };
+  const isEligible = (im) => {
+    if (!im || typeof im !== 'object') return false;
+    if (im.triage?.clean === false) return false;
+    if (im.triage?.relevant === false) return false;
+    if (excludeCaseId != null && im.caseId === excludeCaseId) return false;
+    if (!matchesPerson(im)) return false;
+    if (minShortSide > 0) {
+      const rss = shortSideOf(im);
+      if (rss != null && rss < minShortSide) return false; // วัดได้แล้วเล็กกว่าเกณฑ์ = ตัด (วัดไม่ได้ = ยอมผ่าน)
+    }
+    return true;
+  };
+  const sortBySizeDesc = (a, b) => {
+    const sa = shortSideOf(a), sb = shortSideOf(b);
+    if (sa == null && sb == null) return 0;
+    if (sa == null) return 1; // วัดไม่ได้ไปท้าย
+    if (sb == null) return -1;
+    return sb - sa;
+  };
+
+  try {
+    const c = client || sb();
+    if (c) {
+      const { data, error } = await c
+        .from(TABLE)
+        .select('data')
+        .eq('store_name', STORE_NAME)
+        .ilike('data->triage->>person', `%${name}%`);
+      if (error) return [];
+      const rows = (data || []).map((r) => r.data).filter(Boolean).filter(isEligible);
+      return rows.sort(sortBySizeDesc).slice(0, limit);
+    }
+    // Supabase ไม่มี → fallback: อ่านทุกไฟล์ data/case-images/*.json ยกเว้น excludeCaseId
+    let files;
+    try {
+      await ensureDir();
+      files = await fs.readdir(DIR);
+    } catch {
+      return [];
+    }
+    const out = [];
+    for (const f of files) {
+      if (!f.endsWith('.json')) continue;
+      const cid = f.slice(0, -5);
+      if (excludeCaseId != null && cid === excludeCaseId) continue;
+      try {
+        const raw = await fs.readFile(path.join(DIR, f), 'utf8');
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          for (const im of arr) if (isEligible(im)) out.push(im);
+        }
+      } catch { /* ไฟล์เดี่ยวพัง/อ่านไม่ได้ = ข้าม ไม่ล้มทั้งชุด */ }
+    }
+    return out.sort(sortBySizeDesc).slice(0, limit);
+  } catch {
+    return []; // ห้าม throw — ยืมพังต้องไม่กระทบผู้เรียก
+  }
+}
+
 export function countByPlatform(images) {
   const m = {};
   for (const im of images) {

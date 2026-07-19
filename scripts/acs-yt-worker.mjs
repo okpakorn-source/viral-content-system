@@ -6,13 +6,20 @@
  *        localhost API (yt-dlp+ffmpeg บนเครื่องนี้) พร้อม hostPublic:true
  *        (อัปเฟรมขึ้นโฮสต์สาธารณะ ให้เว็บเห็นรูป) → รายงานผลกลับคิว
  *
- * วิธีใช้: เซิร์ฟเวอร์ :3000 ต้องรันอยู่ แล้วรัน:
+ * วิธีใช้: ต้องเปิด "2 เซิร์ฟเวอร์" พร้อมกันแล้วรัน:
  *        node scripts/acs-yt-worker.mjs
+ *   - :3900 (ACS_FRAME_BASE) — งานแคปเฟรมจริงทั้งหมด: poll/claim/report คิว
+ *     (/api/images/youtube-jobs) + แคปเฟรม yt-dlp/ffmpeg (/api/images/youtube)
+ *     ★ 19 ก.ค.: ย้ายมา :3900 (เซิร์ฟเวอร์งานหนัก) กันชนกับพอร์ตถอดคลิปข่าว :3000
+ *   - :3000 (ACS_WORKER_BASE) — งานอื่นเดิม: rehost ภาพ / mega tick / quick-test
  *   ถาวร: scripts\acs-yt-worker-forever.cmd (รีสตาร์ทเองเมื่อล้ม)
  *
  * 🔴 แตะเฉพาะคิวแคปเฟรม (acs-yt-jobs) — ไม่เกี่ยวระบบทำข่าวอัตโนมัติ/คิวข่าวเลย
  */
 const BASE = process.env.ACS_WORKER_BASE || 'http://localhost:3000';
+// ★ 19 ก.ค.: แยก base เฉพาะงานแคปเฟรม (คิว youtube-jobs + แคปเฟรมจริง) ไปวิ่งบน :3900
+//   (เซิร์ฟเวอร์งานหนัก) กันชนพอร์ตถอดคลิปข่าว :3000 — งานอื่น (rehost/mega/quick-test) ยังใช้ BASE เดิม
+const FRAME_BASE = process.env.ACS_FRAME_BASE || 'http://localhost:3900';
 const IDLE_MS = Number(process.env.ACS_WORKER_IDLE_MS) || 20000; // ว่าง → เช็กใหม่ทุก 20 วิ
 const ERR_MS = 30000;
 
@@ -30,7 +37,7 @@ try {
 const log = (...a) => console.log(`[acs-yt-worker ${new Date().toLocaleTimeString('th-TH')}]`, ...a);
 
 async function claim() {
-  const r = await fetch(`${BASE}/api/images/youtube-jobs`, {
+  const r = await fetch(`${FRAME_BASE}/api/images/youtube-jobs`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ action: 'claim' }),
@@ -42,7 +49,7 @@ async function claim() {
 
 async function report(id, ok, extra = {}) {
   try {
-    await fetch(`${BASE}/api/images/youtube-jobs`, {
+    await fetch(`${FRAME_BASE}/api/images/youtube-jobs`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action: ok ? 'done' : 'fail', id, ...extra }),
@@ -56,7 +63,7 @@ async function report(id, ok, extra = {}) {
 // สถานะจริงจากคิว — route ปิดงานเองได้ ดังนั้นก่อน worker จะรายงาน ให้เช็คก่อนว่างานยังค้างไหม
 async function jobStatus(id) {
   try {
-    const r = await fetch(`${BASE}/api/images/youtube-jobs`, { signal: AbortSignal.timeout(15000) });
+    const r = await fetch(`${FRAME_BASE}/api/images/youtube-jobs`, { signal: AbortSignal.timeout(15000) });
     const d = await r.json().catch(() => ({}));
     const j = (d?.jobs || []).find((x) => x.id === id);
     return j?.status || 'gone';
@@ -67,7 +74,7 @@ async function jobStatus(id) {
 
 async function processJob(job) {
   log(`▶️ เริ่มงาน ${job.id} เคส ${job.caseId}`);
-  const r = await fetch(`${BASE}/api/images/youtube`, {
+  const r = await fetch(`${FRAME_BASE}/api/images/youtube`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ caseId: job.caseId, hostPublic: true, ytJobId: job.id, clipUrl: job.clipUrl || undefined }),
@@ -85,7 +92,7 @@ async function processJob(job) {
   }
 }
 
-log(`🚀 เริ่ม worker — base ${BASE} · เช็กคิวทุก ${IDLE_MS / 1000} วิ`);
+log(`🚀 เริ่ม worker — แคปเฟรม ${FRAME_BASE} · งานอื่น ${BASE} · เช็กคิวทุก ${IDLE_MS / 1000} วิ`);
 for (;;) {
   let wait = IDLE_MS;
   try {
@@ -159,7 +166,8 @@ for (;;) {
       }
     }
   } catch (e) {
-    log('⚠️ เช็กคิวไม่ได้ (เซิร์ฟเวอร์ :3000 ล่ม/รีสตาร์ท?):', e.message);
+    // claim() ยิงไป FRAME_BASE (:3900 งานหนัก) — ถ้าพังตรงนี้แปลว่าเซิร์ฟเวอร์แคปเฟรมล่ม/รีสตาร์ท ไม่ใช่ :3000
+    log(`⚠️ เช็กคิวไม่ได้ (เซิร์ฟเวอร์แคปเฟรม ${FRAME_BASE} ล่ม/รีสตาร์ท?):`, e.message);
     wait = ERR_MS;
   }
   await new Promise((res) => setTimeout(res, wait));

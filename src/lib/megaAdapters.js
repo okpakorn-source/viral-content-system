@@ -2998,6 +2998,11 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   //   hero-size/clean/fallback) — reuse โค้ด gate เดิม 100% ไม่มีทางลัด · ไม่ผ่าน validation/solver throw =
   //   ถอยไปใช้แผน LLM/legacy เดิมทั้งชุด (เหมือน SOLVER_LIVE=off เป๊ะ)
   const SOLVER_LIVE = process.env.MEGA_SLOT_SOLVER_LIVE === '1';
+  // ═══ CROSS-CASE IMAGE BORROW latch MEGA_CROSS_CASE_BORROW='1' (exact '1', TOCTOU-proof snapshot at ENTRY) ═══
+  //   DEFAULT OFF = byte-identical legacy: ไม่ยืม/ไม่มี field ใหม่ใน dossier · แยก path เต็ม ไม่แตะ solver-live
+  //   ON + ตัวละครหลักไม่มีภาพหน้าดีในเคสนี้เลย → ยืมภาพคนเดียวกัน "สะอาด+เกี่ยวข้อง" จากเคสอื่นในคลัง มาติดป้าย
+  //   borrowed=true ดันเข้า pool ก่อนกรอง rawPool — ยืมได้เฉพาะ hero/reaction/circle เท่านั้น (บังคับที่ fallback ด้านล่าง)
+  const CROSS_CASE_BORROW = process.env.MEGA_CROSS_CASE_BORROW === '1';
   const im = job.dossier.images || {};
   // ★ 15 ก.ค. (Batch 2B + P1 + 2C): V2 ON อ่าน "snapshot เดียว" ผ่าน authority path in-process
   //   (buildImagesRouteResponse caseId,'1') — pool (body.images) และ candidateAuthority มาจาก rows ชุดเดียวกัน
@@ -3058,6 +3063,43 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     r = await _jf(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
   }
   if (!r.success) return { status: 'failed', nextAction: 'retry', summary: 'อ่านคลังรูปไม่ได้: ' + (r.error || r.httpStatus) };
+
+  // ★ Cross-case image borrow (kill-switch CROSS_CASE_BORROW, default OFF — งดเว้นแล้วเส้นล่างนี้ไม่ทำงานเลย):
+  //   ตัวละครหลักตัวไหน "0 ใบหน้าดี" ในเคสนี้ (ผ่านเกณฑ์เดียวกับ hero-grade: สะอาด+เป็นคนนั้น+ขนาดจริงพอ) →
+  //   ยืมจากเคสอื่นในคลัง acs-images มาแปะป้าย borrowed=true (newsScene:false) แล้วดันเข้า r.images ก่อนกรอง rawPool
+  //   ล้ม/error ใดๆ = log แล้วเดินต่อ (ห้ามล้ม s6) — isolated ทั้งบล็อก ไม่แตะ solver-live/dossier s6_authority
+  let _borrowedCount = 0;
+  const _borrowedPersons = [];
+  if (CROSS_CASE_BORROW) {
+    try {
+      const mainChars = (job.dossier.compass?.mainCharacters || []).map((c) => c?.name).filter(Boolean);
+      if (mainChars.length && Array.isArray(r.images)) {
+        // ★ SEM-1 style DI seam: เทสฉีด _deps.findImagesByPerson ได้ (เหมือน _deps.readImagesAuthority ด้านบน) — production ไม่ส่ง = dynamic import ของจริงเสมอ
+        const _findByPerson = _deps?.findImagesByPerson
+          || (async (args) => { const { findImagesByPerson } = await import('@/lib/imageStore'); return findImagesByPerson(args); });
+        for (const name of mainChars) {
+          const hasHeroGrade = r.images.some((x) => _heroGradeOf(x) && _namesMatchSimple(x.triage?.person, name));
+          if (hasHeroGrade) continue; // มีภาพหน้าดีของคนนี้อยู่แล้วในเคส — ไม่ต้องยืม
+          const borrowed = await _findByPerson({ personName: name, excludeCaseId: im.caseId, minShortSide: HERO_MIN_SHORT_SIDE, limit: 6 });
+          if (!borrowed || !borrowed.length) continue;
+          for (const bimg of borrowed) {
+            r.images.push({
+              ...bimg,
+              borrowed: true,
+              borrowedFromCaseId: bimg.caseId,
+              caseId: im.caseId,
+              triage: { ...(bimg.triage || {}), newsScene: false },
+            });
+          }
+          _borrowedCount += borrowed.length;
+          _borrowedPersons.push(name);
+          console.log(`[MEGA S6] 🔁 cross-case borrow: "${name}" ไม่มีภาพหน้าดีในเคส → ยืม ${borrowed.length} ใบจากเคสอื่น`);
+        }
+      }
+    } catch (e) {
+      console.log('[MEGA S6] 🔁 cross-case borrow ล้ม (ไม่กระทบ s6):', String(e?.message || e).slice(0, 120));
+    }
+  }
 
   const rawPool = (r.images || []).filter((x) => x.triage && x.triage.relevant !== false);
   if (!rawPool.length) return { status: 'failed', nextAction: 'fail', summary: 'ไม่มีภาพที่ตายืนยันว่าเกี่ยวเลย — ทำปกไม่ได้', quality: 'red' };
@@ -3908,6 +3950,9 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     let reason = want?.reason || '';
     if (img && used.has(String(img.id))) img = null; // ซ้ำข้ามช่อง = ตัด
     if (img && _idGated(slot) && !_identityOk(slot, img)) { img = null; reason = ''; } // ★ 10 ก.ค.: hero ต้องถูกคน · SEM-1: ช่องที่ ref ระบุคนก็ยึด intent ของช่องตัวเอง
+    // ★ cross-case borrow face-slots-only (ผู้ใช้สั่ง): ภาพยืมข้ามเคสลงได้เฉพาะ hero/reaction/circle — ห้ามลง context/action
+    //   CROSS_CASE_BORROW=off ไม่มีภาพใด borrowed=true อยู่แล้ว → เงื่อนไขนี้ไม่มีผล (byte-parity legacy)
+    if (img && img.borrowed === true && (_legacyKeyOf(slot) === 'context' || _legacyKeyOf(slot) === 'action')) { img = null; reason = ''; }
     // ★ เฟส 3.1: ฉากซ้ำกับช่องที่เลือกไปแล้ว (note เดียวกัน เช่น เฟรมคลิปชุดเดียว/เวทีเดิมหลายรูป) = ตัด
     //   ให้ fallback หาฉากใหม่ — ยกเว้น hero (กฎถูกคนสำคัญกว่า) · แก้ตรงอาการ "ฉากเวทีมอบทุนโผล่ซ้ำ 3 ช่อง"
     if (img && !_isHeroSlot(slot)) {
@@ -3943,7 +3988,10 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     if (_dEvidenceOn && img && _dPreSwap && img !== _dPreSwap) _dStage = 'policy_override';
     if (!img) {
       // fallback กฎเดียวกับทางหลัก: hero=ตัวเอกหน้าชัดคุณภาพสูง / อื่นๆ=หมวดใกล้เคียง → คุณภาพสูงสุดที่เหลือ
-      const cands0 = sorted.filter((x) => !used.has(String(x.id)));
+      // ★ cross-case borrow face-slots-only: ช่อง context/action ตัดภาพ borrowed=true ออกจากผู้สมัคร fallback เสมอ
+      //   (hero/reaction/circle ไม่กรอง — ใช้ borrowed ได้) · CROSS_CASE_BORROW=off ไม่มี borrowed เลย = ไม่มีผล
+      const _fbLegacyKey = _legacyKeyOf(slot);
+      const cands0 = sorted.filter((x) => !used.has(String(x.id)) && !(x.borrowed === true && (_fbLegacyKey === 'context' || _fbLegacyKey === 'action')));
       // ★ 10 ก.ค. เฟส 6A (6.3): ช่อง context/action/circle เรียง candidate ด้วยแกน story-fit (story40/clean30/ขนาดจริง30)
       //   ภาพ "สื่อเรื่อง" ชนะ "หน้าชัดเฉยๆ" เมื่อคุณภาพใกล้กัน · hero ไม่แตะ (ถูกคน+หน้าชัดมาก่อน) · ปิด/ไม่มีคำค้นเรื่องราว = ลำดับเดิมเป๊ะ
       const cands = (STORY_SEL_ON && STORY_SLOTS.has(_legacyKeyOf(slot))) ? cands0.slice().sort(storyRank) : cands0;
@@ -3991,6 +4039,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         const _floor = _scCur * 0.85; // คะแนนไม่ห่างเกิน 15%
         const _alt = sorted.find((x) => {
           if (used.has(String(x.id)) || String(x.id) === String(img.id)) return false;
+          if (x.borrowed === true && (_legacyKeyOf(slot) === 'context' || _legacyKeyOf(slot) === 'action')) return false; // ★ borrow face-slots-only: ห้ามยืมข้ามเคสลง context/action (อุดรูรั่ว diversity-swap)
           const p2 = _lc(x.triage?.person || '');
           if (!p2 || p2 === _pcur) return false;             // ต้องเป็นคนอื่นที่ระบุตัวได้
           if ((usedPersons.get(p2) || 0) >= 2) return false; // อย่าสลับไปหาคนที่ก็ซ้ำเยอะแล้ว
@@ -4066,6 +4115,8 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         const curScene = curRec ? sceneKeyOf(curRec) : '';
         const best = sorted
           .filter((x) => !used.has(String(x.id)) && isClean(x))
+          // ★ borrow face-slots-only: ห้ามยืมข้ามเคสลง context (circle=face-slot อนุญาต) — อุดรูรั่ว story-rescue
+          .filter((x) => !(x.borrowed === true && _legacyKeyOf(slot) === 'context'))
           // ★ SEM-1 correction (Codex P0-1): rescue ห้ามสลับ primary เป็นผิดคนหลังด่าน — identity ของช่องคุมเสมอ
           .filter((x) => !_idGated(slot) || _identityOk(slot, x))
           // circle = ต้องเป็นคนหลักจริง (ภาพวงกลม=บุคคล) · context รับภาพสถานที่/ทริปที่มาจากคำค้นเรื่องราวได้ (landmark ไม่มีคนในภาพ)
@@ -4247,6 +4298,26 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     } catch (e) {
       _cropGuardPatch = null; // guard ล้ม = ไม่แนบธง (ห้ามทำ S6 พัง)
       console.log('[MEGA S6] ✂️ crop guard hard check ล้ม — ข้าม:', String(e?.message || '').slice(0, 50));
+    }
+  }
+
+  // ★ cross-case borrow face-slots-only — AUTHORITATIVE sweep (วาง "หลัง" crop-guard + phase-3.2 = จุด mutate context/action สุดท้ายจริง)
+  //   borrowed ลงได้เฉพาะ hero/reaction/circle · ช่อง context/action: primary borrowed → ตัดทิ้ง (null); backups borrowed → กรองออก
+  //   (composer โปรโมต backup ขึ้น primary ได้ จึงต้องกวาด backups ด้วย — อุด Finding 1 crop-guard-swap + Finding 2 phase-3.2)
+  //   CROSS_CASE_BORROW=off ไม่มีภาพ borrowed → ทั้งบล็อกเป็น no-op (byte-parity legacy)
+  if (CROSS_CASE_BORROW) {
+    for (const slot of activeSlots) {
+      const _bk = _legacyKeyOf(slot);
+      if ((_bk !== 'context' && _bk !== 'action') || !slots[slot]) continue;
+      if (byId.get(String(slots[slot].id))?.borrowed === true) {
+        console.log(`[MEGA S6] 🔁 borrow sweep: ตัดภาพยืม ${slots[slot].id} ออกจากช่อง ${slot} (${_bk}) — face-slots-only`);
+        used.delete(String(slots[slot].id));
+        slots[slot] = null;
+        continue;
+      }
+      if (Array.isArray(slots[slot].backups) && slots[slot].backups.some((b) => byId.get(String(b))?.borrowed === true)) {
+        slots[slot].backups = slots[slot].backups.filter((b) => byId.get(String(b))?.borrowed !== true);
+      }
     }
   }
 
@@ -5176,7 +5247,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     nextAction: 'continue',
     summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'}${storyTag}${quarantineTag} — ${(brain.note || '').slice(0, 80)}`,
     dossierPatch: {
-      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}), ...(_refHeroV2Patch ? { refHeroV2: _refHeroV2Patch } : {}), ...(_cropGuardPatch ? { cropGuard: _cropGuardPatch } : {}), ...(SOLVER_LIVE ? { s6_authority: _solverAuthorityLabel, ...(_solverInvalidReason ? { solverInvalidReason: _solverInvalidReason } : {}) } : {}) },
+      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}), ...(_refHeroV2Patch ? { refHeroV2: _refHeroV2Patch } : {}), ...(_cropGuardPatch ? { cropGuard: _cropGuardPatch } : {}), ...(SOLVER_LIVE ? { s6_authority: _solverAuthorityLabel, ...(_solverInvalidReason ? { solverInvalidReason: _solverInvalidReason } : {}) } : {}), ...(CROSS_CASE_BORROW ? { crossCaseBorrow: { borrowedCount: _borrowedCount, borrowedPersons: _borrowedPersons } } : {}) },
       ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}),
       // ★ D3-B3.3 (Codex): template path echo local plain snapshot (ไม่ใช่ raw carrier) → S7/retry เห็น plain · legacy = raw byte เดิม
       ...((_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) ? { artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) } : {}),
