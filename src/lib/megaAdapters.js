@@ -329,6 +329,16 @@ const SEARCH_PLATFORMS = ['google', 'google_news', 'facebook', 'tiktok'];
 //   (เดิมหยุดที่ 2 แหล่ง = วัตถุดิบผอม ปกคลิปเลยหลุดขึ้นปก) — อยากได้พฤติกรรมเก่า: MEGA_SEARCH_INITIAL_BATCH=2
 const SEARCH_INITIAL_BATCH = parseInt(process.env.MEGA_SEARCH_INITIAL_BATCH || '4', 10);
 const MAX_TRIAGE_ROUNDS = 8;
+// ★ 21 ก.ค. (เคส AC-0164 Vercel S5_TRIAGE_FAILED — function ตายกลางทาง error ว่าง+500): ตาคัด 60 ใบ/รอบ
+//   = โหลดภาพ+Gemini 6 ชุดต่อเนื่องใน call เดียว เสี่ยงชนเพดานเวลา/แรมของ cloud function → cloud ลดเหลือ 40/รอบ
+//   (223 ใบ = 6 รอบ ยังไม่ชนเพดาน MAX_TRIAGE_ROUNDS 8) · เครื่องทีม (win32) = 60 เดิมเป๊ะ ไม่กระทบท่อทีม
+//   (แยกด้วย platform ไม่ใช่ env VERCEL — เครื่องทีมมี VERCEL=1 ค้าง, บทเรียน vercel-env-on-team-machine)
+//   override ได้ทั้งสองฝั่ง: MEGA_TRIAGE_LIMIT=60 = พฤติกรรมเดิมทุกเครื่อง (kill-switch)
+const TRIAGE_LIMIT_PER_CALL = (() => {
+  const v = parseInt(process.env.MEGA_TRIAGE_LIMIT || '', 10);
+  if (Number.isFinite(v) && v >= 1) return v;
+  return process.platform === 'win32' ? 60 : 40;
+})();
 // ★ 9 ก.ค. (เคาะ 6 แหล่ง): สวิตช์ชุดใหม่ — ปิดคืนได้ทีละตัวอิสระ
 const LENS_ON = process.env.MEGA_LENS !== '0'; // ขั้น s5_lens ค้นย้อนกลับ
 const LENS_SEEDS = parseInt(process.env.MEGA_LENS_SEEDS || '2', 10); // seed สูงสุดต่องาน
@@ -1053,7 +1063,7 @@ export async function s5_profile(job) {
 export async function s5_triage(job, { origin }) {
   const im = job.dossier.images || {};
   const rounds = im.triageRounds || 0;
-  const r = await jfetch(`${origin}/api/images/triage`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, limit: 60 }) }, 420000);
+  const r = await jfetch(`${origin}/api/images/triage`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, limit: TRIAGE_LIMIT_PER_CALL }) }, 420000);
   if (!r.success) {
     // ตาล้มชั่วคราว (Gemini แกว่ง) → รออีกรอบ สูงสุด 2 ครั้ง — ไม่ใช้ระบบ attempt (โดน waiting นับปนจนเพี้ยน)
     const errs = (im.triageErrors || 0) + 1;
