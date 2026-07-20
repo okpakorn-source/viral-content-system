@@ -3225,6 +3225,13 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   const HERO_PROMINENCE_ON = process.env.MEGA_HERO_PROMINENCE !== '0';
   const HERO_FACE_PROMINENCE_MIN = 0.30; // ขอบล่าง HERO_FACE_SHARE band (imageQualityConfig.js TECH_RULES=[30,58]) — หน้าต้องกิน ≥30% ของสูงเฟรม
   const CIRCLE_FACE_PRESENCE_MIN = 0.16; // เกณฑ์หลวมกว่า hero (วงยังโดนครอป/ซูมอีกชั้นตอนประกอบ) — กันแค่ "ไร้หน้าเลย" ขึ้นวง
+  // ★ 20 ก.ค. (MEGA_HERO_FACE_VISIBLE — บั๊ก "hero หลังหัว", เคส /mega-compose-test): ด่านเดิมเช็คแค่ faceCount===1
+  //   (นับ "จำนวนคน" ไม่ใช่ "หน้าที่มองเห็น") → ภาพหันหลัง/บังหน้าคนเดียว = faceCount 1 ผ่านทุกด่าน ขึ้น hero เงียบๆ
+  //   gemini.js schema สั่งชัด "ไม่มีใบหน้าให้ faceBox=null" → faceBox วัดไม่ได้ = "ไม่เห็นหน้า" (หลังหัว/ไร้หน้า)
+  //   เกณฑ์ = "เห็นหน้าจริง" (faceBox วัดได้) ไม่ใช่ "หน้าใหญ่" (prominence จัดการแล้ว) → default MIN=0 = ตัดเฉพาะ null
+  //   polarity ตรงข้าม hero guards เดิม (เปิด='1' เท่านั้น) — default OFF = byte-parity สนิท (ไม่แตะ swap/HOLD ใดเลย)
+  const HERO_FACE_VISIBLE_ON = process.env.MEGA_HERO_FACE_VISIBLE === '1';
+  const HERO_FACE_VISIBLE_MIN = (() => { const v = Number(process.env.MEGA_HERO_FACE_VISIBLE_MIN); return Number.isFinite(v) && v > 0 && v <= 1 ? v : 0; })();
   // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD — ช่องย่อยลายตา): ตาคัด (Gemini) แนบ triage.busy 0-2 ต่อภาพ
   //   (0=สะอาดโฟกัสชัด, 1=มีพื้นหลังกิจกรรมบ้างแต่ subject หลักยังชัด, 2=ลายตา/คนเยอะหาโฟกัสไม่ได้/มุมกว้างไม่มีจุดเด่น)
   //   ให้สมองเลือกช่องย่อย (context/action/reaction/circle) เลี่ยงภาพลายตา — penalty คะแนน + ตัดบูสต์หมวด group/context
@@ -4198,6 +4205,24 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           console.log(`[MEGA S6] 🔎 hero ${img.id} หน้าเล็ก (faceH≈${curFaceH.toFixed(2)}) → สลับ ${moreProminent.id} (หน้าใหญ่กว่า)`);
           img = moreProminent;
           reason = 'hero หน้าเด่น (โค้ดบังคับ MEGA_HERO_PROMINENCE — เดิมหน้าเล็ก/backdrop เยอะ)';
+        }
+      }
+    }
+    // ★ 20 ก.ค. (MEGA_HERO_FACE_VISIBLE): hero ต้อง "เห็นหน้าจริง" — ภาพหันหลัง/บังหน้า Gemini คืน faceBox=null
+    //   (schema gemini.js "ไม่มีใบหน้าให้ null") แต่ faceCount ยังนับ "จำนวนคน" → ภาพหลังหัวคนเดียว = faceCount 1 ผ่านทุกด่านข้างบน
+    //   ด่านนี้: hero faceBox วัดไม่ได้ (_faceHFrac==null) / จิ๋วกว่า MIN → หาสำรอง "คนเดียวกัน เห็นหน้า เดี่ยว ขนาดพอ สะอาด" สลับ
+    //   ไม่เจอ = คงภาพไว้ ให้ด่าน HOLD ท้ายฟังก์ชันตัดสิน (ไม่ปล่อย 'done' ทั้งที่หลังหัว) · ต่างจาก prominence ที่ยอมข้าม null
+    //   (เป้าคนละอย่าง: prominence=หน้าใหญ่ ≥30%, ตัวนี้=แค่เห็นหน้า) · ปิดสวิตช์ = ข้ามทั้ง block พฤติกรรมเดิมเป๊ะ
+    if (img && _isHeroSlot(slot) && HERO_FACE_VISIBLE_ON) {
+      const _curFaceH = _faceHFrac(img.triage?.faceBox);
+      if (_curFaceH == null || _curFaceH < HERO_FACE_VISIBLE_MIN) {
+        const faced = sorted.find((x) => !used.has(String(x.id)) && String(x.id) !== String(img.id)
+          && _identityOk(slot, x) && (x.triage?.faceCount ?? 0) === 1 && heroSizeOk(x) && isClean(x)
+          && (() => { const v = _faceHFrac(x.triage?.faceBox); return v != null && v >= HERO_FACE_VISIBLE_MIN; })());
+        if (faced) {
+          console.log(`[MEGA S6] 🙈 hero ${img.id} ไม่เห็นหน้า (faceBox ${_curFaceH == null ? 'null=หลังหัว/ไร้หน้า' : 'จิ๋ว ' + _curFaceH.toFixed(2)}) → สลับ ${faced.id} (เห็นหน้าชัด)`);
+          img = faced;
+          reason = 'hero เห็นหน้าจริง (โค้ดบังคับ MEGA_HERO_FACE_VISIBLE — เดิมภาพหลังหัว/ไร้หน้า)';
         }
       }
     }
@@ -5527,6 +5552,32 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           ...(_imagesPatch ? { images: _imagesPatch } : {}),
         },
       };
+    }
+  }
+
+  // ★ 20 ก.ค. (MEGA_HERO_FACE_VISIBLE): เช็ค hero สุดท้ายจริง (หลัง loop + post-processing/story-rescue/crop-guard/borrow sweep
+  //   จบหมด — เหตุผลเดียวกับ HERO_SINGLE HOLD ด้านบน) ยัง "ไม่เห็นหน้า" (faceBox วัดไม่ได้/จิ๋ว) + ไม่ใช่ครอปหน้าเดี่ยว
+  //   (_heroFaceCrop = ครอปหน้าจากภาพคู่แล้ว = เห็นหน้าโดยนิยาม → ข้าม) → HOLD ห้ามปล่อยภาพหลังหัวขึ้นปก
+  //   (พักไว้/หารูปเพิ่ม ดีกว่าปกหลังหัว — pattern HOLD เดียวกับ block ด้านบน ไม่ประดิษฐ์ terminal ใหม่) · ปิดสวิตช์ = ข้ามด่านนี้ byte-parity
+  if (HERO_FACE_VISIBLE_ON && heroNames.length && _canonHeroId) {
+    const _hvEntry = slots[_canonHeroId];
+    const _hvRec = _hvEntry ? byId.get(String(_hvEntry.id)) : null;
+    if (_hvRec && !_hvEntry._heroFaceCrop) {
+      const _hvFaceH = _faceHFrac(_hvRec.triage?.faceBox);
+      if (_hvFaceH == null || _hvFaceH < HERO_FACE_VISIBLE_MIN) {
+        console.log(`[MEGA S6] 🙈⛔ hero ${_hvRec.id} ไม่เห็นหน้า (faceBox ${_hvFaceH == null ? 'null=หลังหัว/ไร้หน้า' : 'จิ๋ว ' + _hvFaceH.toFixed(2)}) หลัง loop จบ → HOLD (ห้ามยัดภาพหลังหัวขึ้น hero)`);
+        return {
+          status: 'quality_hold',
+          nextAction: 'hold',
+          holdStatus: 'insufficient_assets',
+          summary: `⛔ hero ต้องเห็นหน้าจริง — พูลไม่มีภาพเห็นหน้าของ ${heroNames.join('/')} (ภาพที่เลือกหันหลัง/บังหน้า faceBox วัดไม่ได้)`.slice(0, 200),
+          quality: 'yellow',
+          dossierPatch: {
+            pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, heroFaceVisibleHold: { imageId: String(_hvRec.id), faceH: _hvFaceH } },
+            ...(_imagesPatch ? { images: _imagesPatch } : {}),
+          },
+        };
+      }
     }
   }
 
