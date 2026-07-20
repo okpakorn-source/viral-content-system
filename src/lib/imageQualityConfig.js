@@ -68,6 +68,11 @@ export const TECH_RULES = {
   CIRCLE_FACE_SHARE: [24, 48],
   // P-CONTEXT-01 + panelNorms.context: wide/medium-wide faceShare 5-16
   CONTEXT_FACE_SHARE: [5, 16],
+  // ★ 21 ก.ค. (MEGA_FACE_FORWARD — แผนครอประยะ 0): band context เมื่อสวิตช์หน้าใหญ่เปิด ('1')
+  //   เดิมเลข [22,45] ฮาร์ดโค้ดใน coverExecutorService._panelBandForSlot ตัวเดียว → QC (megaComposerService)
+  //   ไม่รู้จักสวิตช์ วัดด้วย [5,16] สวนทาง = เปิดสวิตช์แล้วปกที่ดีขึ้นโดนธง face_share_out เปื้อน
+  //   ย้ายเลขมาไว้ที่เดียว — executor (คนครอป) + QC (คนวัด) อ้างค่าตัวเดียวกัน กันเลขแตกกันภายหลัง
+  CONTEXT_FACE_SHARE_FORWARD: [22, 45],
   // panelNorms.evidence: faceShare 0-22 (เพดาน 33 เมื่อเป็นโมเมนต์คน) → flag เฉพาะ >33 เท่านั้น
   EVIDENCE_FACE_SHARE_MAX: 33,
   // panelNorms.secondary: หน้ารอง/reaction/คู่ข่าว faceShare 38-68 ของช่องตัวเอง

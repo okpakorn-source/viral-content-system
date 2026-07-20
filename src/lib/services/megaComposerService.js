@@ -422,7 +422,10 @@ export function measureTechRules({ assignments = [], spec = null, faceBoxes = []
       const [lo, hi] = TECH_RULES.CIRCLE_FACE_SHARE; // มีหน้าเท่านั้นถึงวัด (ฉาก/ของ = ข้ามไปแล้ว)
       if (faceSharePct < lo || faceSharePct > hi) flags.push(`face_share_out:${a.slotId}:${faceSharePct}`);
     } else if (role === 'context') {
-      const [lo, hi] = TECH_RULES.CONTEXT_FACE_SHARE;
+      // ★ 21 ก.ค. (แผนครอประยะ 0 — mirror QC): band ต้องตรงกับที่ executor ครอปจริง (_panelBandForSlot)
+      //   เดิม QC วัด [5,16] ตายตัว ไม่รู้จักสวิตช์ MEGA_FACE_FORWARD → เปิดสวิตช์แล้วปกหน้าใหญ่ (22-45)
+      //   โดนธง face_share_out ทั้งที่ครอปถูกตามสั่ง — สวิตช์ปิด (default) = [5,16] เดิมเป๊ะ byte-parity
+      const [lo, hi] = process.env.MEGA_FACE_FORWARD === '1' ? TECH_RULES.CONTEXT_FACE_SHARE_FORWARD : TECH_RULES.CONTEXT_FACE_SHARE;
       if (faceSharePct < lo || faceSharePct > hi) flags.push(`face_share_out:${a.slotId}:${faceSharePct}`);
     } else if (role === 'evidence') {
       if (faceSharePct > TECH_RULES.EVIDENCE_FACE_SHARE_MAX) flags.push(`face_share_out:${a.slotId}:${faceSharePct}`); // >33 เท่านั้น

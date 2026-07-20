@@ -435,7 +435,7 @@ function _panelBandForSlot(slot) {
   const id = String(slot?.id || '');
   if (slot?.shape === 'circle') return TECH_RULES.CIRCLE_FACE_SHARE;
   // ★ 20 ก.ค. (MEGA_FACE_FORWARD): context เดิม band [5,16] = หน้าจิ๋ว พื้นหลังกินเฟรม → FORWARD [22,45] หน้าใหญ่ขึ้น (คนเด่น ยึด faceBox)
-  if (/^context/i.test(id)) return _faceForwardOn() ? [22, 45] : TECH_RULES.CONTEXT_FACE_SHARE;
+  if (/^context/i.test(id)) return _faceForwardOn() ? TECH_RULES.CONTEXT_FACE_SHARE_FORWARD : TECH_RULES.CONTEXT_FACE_SHARE;
   if (/^evidence/i.test(id)) return [18, TECH_RULES.EVIDENCE_FACE_SHARE_MAX];
   if (/^(reaction|action|moment|pair|victim)/i.test(id)) return TECH_RULES.SECONDARY_FACE_SHARE;
   return [18, 60]; // ช่องรองทั่วไป (top/bottom/mid/sub_left/emotion/highlight) — ย่านสมเหตุผลตามคำสั่ง
