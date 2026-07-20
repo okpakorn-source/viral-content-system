@@ -355,6 +355,12 @@ const MOMENT_CROP = { faceFrac: 0.84, faceTopAt: 0.40, maxFaceHFrac: 0.80, minFa
 //   สูตรนี้ = หน้าเล็กลง เห็นฉาก/สิ่งของ/การกระทำ (หน้า ~16-52% ของช่อง ยังเห็นว่าเป็นใครแต่ฉากรอด)
 //   ⛔ ใช้เฉพาะช่อง story เท่านั้น — hero(HERO_CROP)/reaction(MOMENT_CROP)/circle(CIRCLE_CROP) ค่าเดิมห้ามแตะ
 const STORY_CROP  = { faceFrac: 0.55, faceTopAt: 0.38, maxFaceHFrac: 0.52, minFaceHFrac: 0.16 };
+// ★ 20 ก.ค. (MEGA_FACE_FORWARD — "คนต้องเด่น หน้าใหญ่" ถอดจากปกตัวอย่างมืออาชีพ): ช่อง context/story หน้าใหญ่ขึ้น
+//   เดิม STORY_CROP หน้าจิ๋วได้ (minFaceHFrac 0.16) → บ้าน/พื้นหลังกินเฟรม คนตัวเล็ก · FORWARD = หน้า 30-60% (คนเด่น เหลือบริบทบ้าง)
+//   🔴 ยึด faceBox เท่านั้น (หน้าที่ตรวจเจอจริง = เชื่อได้) ไม่พึ่ง peopleBox ที่ 23% มั่ว (บทเรียน batch 1 people-crop ที่พัง)
+//   kill-switch MEGA_FACE_FORWARD='1' (default OFF = STORY_CROP เดิมเป๊ะ byte-parity); ใช้เฉพาะช่อง story/context — hero/reaction/circle ไม่แตะ
+const STORY_CROP_FORWARD = { faceFrac: 0.70, faceTopAt: 0.40, maxFaceHFrac: 0.60, minFaceHFrac: 0.30 };
+function _faceForwardOn() { return process.env.MEGA_FACE_FORWARD === '1'; }
 const STORY_SLOT_RE = /^(action|context|evidence|moment)/i;
 function isStorySlot(slot) { return String(slot?.id || '') !== 'main' && STORY_SLOT_RE.test(String(slot?.id || '')); }
 
@@ -428,7 +434,8 @@ function _isClutter(fb) {
 function _panelBandForSlot(slot) {
   const id = String(slot?.id || '');
   if (slot?.shape === 'circle') return TECH_RULES.CIRCLE_FACE_SHARE;
-  if (/^context/i.test(id)) return TECH_RULES.CONTEXT_FACE_SHARE;
+  // ★ 20 ก.ค. (MEGA_FACE_FORWARD): context เดิม band [5,16] = หน้าจิ๋ว พื้นหลังกินเฟรม → FORWARD [22,45] หน้าใหญ่ขึ้น (คนเด่น ยึด faceBox)
+  if (/^context/i.test(id)) return _faceForwardOn() ? [22, 45] : TECH_RULES.CONTEXT_FACE_SHARE;
   if (/^evidence/i.test(id)) return [18, TECH_RULES.EVIDENCE_FACE_SHARE_MAX];
   if (/^(reaction|action|moment|pair|victim)/i.test(id)) return TECH_RULES.SECONDARY_FACE_SHARE;
   return [18, 60]; // ช่องรองทั่วไป (top/bottom/mid/sub_left/emotion/highlight) — ย่านสมเหตุผลตามคำสั่ง
@@ -554,7 +561,7 @@ function faceParamsForSlot(slot) {
   if (slot.shape === 'circle') return { ...CIRCLE_CROP };
   // ★ เฟส 2.1: ช่อง story ไม่นับเป็น "ช่องเด่น/ฮีโร่" แม้ใหญ่ — เดิมช่องบริบทใหญ่ (>520x800 เช่น context_1 ของ
   //   ref_dna) โดนจับใส่ HERO_CROP ซูมหน้า 88% = ต้นเหตุ "บริบทหาย" ที่จับได้จาก CropTrace
-  if (isStorySlot(slot)) return { ...STORY_CROP };
+  if (isStorySlot(slot)) return { ...(_faceForwardOn() ? STORY_CROP_FORWARD : STORY_CROP) };
   const big = (slot.w * slot.h) >= (520 * 800); // ช่องเด่น/ฮีโร่
   if (slot.id === 'main' || big) return { ...HERO_CROP };
   return { ...MOMENT_CROP };
