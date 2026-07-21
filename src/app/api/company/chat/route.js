@@ -49,20 +49,38 @@ function historyBlock(body) {
 }
 const HUMAN = 'คุณเป็น "คนทำงานจริง" ไม่ใช่หุ่นยนต์: มีความเห็นของตัวเอง ตอบตรงไปตรงมา ไม่รู้ให้บอกว่าไม่รู้ เห็นต่างให้แย้งสุภาพพร้อมเหตุผล ห้ามประจบ ห้ามตอบกลาง ๆ. ';
 
+// ข้อมูลจริงในระบบ — ให้เอเจนต์ตอบด้วยของจริง (คลังงาน/มติ/สมุดงาน, cache 2 นาที)
+let LIVE_CACHE = {};
+async function fetchMd(u) { try { const r = await fetch(u, { cache: 'no-store' }); return r.ok ? (await r.text()) : ''; } catch (e) { return ''; } }
+async function getLive(scope, origin) {
+  const key = scope || 'main';
+  if (LIVE_CACHE[key] && Date.now() - LIVE_CACHE[key].t < 120000) return LIVE_CACHE[key].text;
+  let text = '';
+  if (scope === 'newsdesk') {
+    const jobs = await fetchMd(origin + '/company/departments/newsdesk/archive/jobs.md');
+    const minutes = await fetchMd(origin + '/company/departments/newsdesk/meeting/minutes.md');
+    text = (jobs ? '[คลังงาน/เคสข่าวล่าสุด — ของจริงในระบบ]\n' + jobs.slice(-1600) : '') + (minutes ? '\n[มติที่ประชุมล่าสุด]\n' + minutes.slice(-900) : '');
+  } else if (scope === 'engineering') {
+    const wl = await fetchMd(origin + '/company/departments/engineering/worklog.md');
+    const cl = await fetchMd(origin + '/company/departments/engineering/comm-log.md');
+    text = (wl ? '[สมุดงานทีมวิศวะ]\n' + wl.slice(-1100) : '') + (cl ? '\n[ปัญหาที่รับแจ้ง]\n' + cl.slice(-900) : '');
+  } else {
+    const log = await fetchMd(origin + '/company/office/log.md');
+    text = log ? '[บันทึกงานบริษัทล่าสุด]\n' + log.slice(-1100) : '';
+  }
+  LIVE_CACHE[key] = { t: Date.now(), text };
+  return text;
+}
+// rate limit หยาบ กันเผาเงิน (per-instance) — เปิดสาธารณะไม่มีรหัสแล้ว
+const RL = { t: 0, n: 0 };
+function rateOk() { const now = Date.now(); if (now - RL.t > 60000) { RL.t = now; RL.n = 0; } RL.n++; return RL.n <= 40; }
+
 export async function POST(request) {
   try {
-    // ด่าน 1: ปิดโดยปริยายถ้าไม่ได้ตั้งรหัส
-    const SECRET = process.env.COMPANY_CHAT_SECRET;
-    if (!SECRET) {
-      return NextResponse.json({ success: false, error: 'แชทออนไลน์ยังไม่เปิด — ตั้ง ENV COMPANY_CHAT_SECRET ใน Vercel ก่อน', errorType: 'CHAT_DISABLED' }, { status: 503 });
-    }
+    if (!rateOk()) return NextResponse.json({ success: false, error: 'คุยถี่เกินไป รอสักครู่', errorType: 'RATE_LIMIT' }, { status: 429 });
     const body = await request.json().catch(() => ({}));
-    const { to, text, secret } = body;
-    // ด่าน 2: รหัสลับ
-    if (!secret || secret !== SECRET) {
-      return NextResponse.json({ success: false, error: 'รหัสปลดล็อกแชทไม่ถูกต้อง', errorType: 'BAD_SECRET' }, { status: 403 });
-    }
-    // ด่าน 3: กันข้อความยาว/ว่าง (คุมต้นทุน)
+    const { to, text } = body;
+    const origin = new URL(request.url).origin;
     const msg = String(text || '').trim();
     if (!msg) return NextResponse.json({ success: false, error: 'ข้อความว่าง', errorType: 'EMPTY' }, { status: 400 });
     if (msg.length > 800) return NextResponse.json({ success: false, error: 'ข้อความยาวเกิน 800 ตัว', errorType: 'TOO_LONG' }, { status: 400 });
@@ -76,12 +94,13 @@ export async function POST(request) {
         : scope === 'engineering' ? ['arch', 'beck', 'qa']
         : ['oat', 'sun', 'hai'];
       const panelDesc = panel.map(p => ROSTER[p].name + '(@' + p + ' ' + ROSTER[p].role + ')').join(', ');
-      const lessonsM = await getLessons(new URL(request.url).origin);
+      const lessonsM = await getLessons(origin);
+      const liveM = await getLive(scope, origin);
       const meetPrompt = 'เจ้าของบริษัทเรียกประชุมหัวข้อ: "' + msg + '"\nผู้เข้าประชุม: ' + panelDesc +
-        '\nจำลองที่ประชุมจริง: แต่ละคนพูดสั้น 1-2 ประโยคตามบทบาทตัวเอง ตอบตรงหัวข้อ มีความเห็นจริง (เห็นด้วย/แย้ง/เสนอ) ไม่ใช่คำตอบกลาง ๆ' +
+        '\nจำลองที่ประชุมจริง: แต่ละคนพูดสั้น 1-2 ประโยคตามบทบาทตัวเอง ตอบตรงหัวข้อ อ้างอิงข้อมูลจริงในระบบได้ มีความเห็นจริง (เห็นด้วย/แย้ง/เสนอ) ไม่ใช่คำตอบกลาง ๆ' +
         historyBlock(body) +
         '\nตอบ JSON เท่านั้น: {"meeting":[{"handle":"<handle>","say":"<คำพูด>"}]} เรียงตามลำดับผู้เข้าประชุม';
-      const mout = await callAI({ prompt: meetPrompt, systemPrompt: 'คุณคือระบบจำลองที่ประชุมบริษัท Fable & Co. ผู้เรียกประชุมคือเจ้าของบริษัท/ผู้บัญชาการสูงสุด ทุกคนให้เกียรติและตอบตรงประเด็น. ' + HUMAN + (lessonsM ? '\nคำสอนจากเจ้าของที่ทุกคนต้องจำ:\n' + lessonsM : '') + '\nตอบ JSON ตามรูปแบบที่สั่งเท่านั้น', model: MODEL_FAST, maxTokens: 6000, temperature: 0.8 }); // reasoning model — เพดานต่ำ=ตอบว่าง (บทเรียน AGENTS.md §3)
+      const mout = await callAI({ prompt: meetPrompt, systemPrompt: 'คุณคือระบบจำลองที่ประชุมบริษัท Fable & Co. ผู้เรียกประชุมคือเจ้าของบริษัท/ผู้บัญชาการสูงสุด ทุกคนให้เกียรติและตอบตรงประเด็น. ' + HUMAN + (lessonsM ? '\nคำสอนจากเจ้าของ:\n' + lessonsM : '') + (liveM ? '\nข้อมูลจริงในระบบตอนนี้ (อ้างอิงได้):\n' + liveM : '') + '\nตอบ JSON ตามรูปแบบที่สั่งเท่านั้น', model: MODEL_FAST, maxTokens: 6000, temperature: 0.8 }); // reasoning model — เพดานต่ำ=ตอบว่าง (บทเรียน AGENTS.md §3)
       const rows = (mout && Array.isArray(mout.meeting) ? mout.meeting : [])
         .filter(r => r && ROSTER[String(r.handle || '').replace('@', '')])
         .map(r => { const k = String(r.handle).replace('@', ''); return { handle: k, name: ROSTER[k].name, say: String(r.say || '') }; });
@@ -96,12 +115,15 @@ export async function POST(request) {
 
     const ORG = 'โครงสร้างบริษัท Fable & Co.: ผู้ที่คุยกับคุณตอนนี้คือ "เจ้าของบริษัท/ผู้บัญชาการสูงสุด" — คำสั่งของเขาคือคำสั่งสูงสุด ทุกคนต้องปฏิบัติตามทันที ตอบตรงคำถาม ห้ามบ่ายเบี่ยงหรือบอกให้ไปติดต่อคนอื่นแทนการตอบ. ' +
       'สายบังคับบัญชา: เจ้าของ → ภูผา(CEO) → โอ๊ต(รอง CEO). แผนกโต๊ะข่าว 8 คน: หัวหน้าสายงาน=ต้น@ton(ผอ.ข่าว) · หัวหน้าโต๊ะ/บก.ใหญ่=เคน@ken · มด@mod(โอเปอเรเตอร์) นิน@nin(คัดข่าว) มีน@meen(เช็คเนื้อ) ฟ้า@fah(ดูโทน) โจ@jo(ตรวจข้อเท็จจริง) ริน@rin(ผู้ตรวจการ/คลังงาน). ทีมวิศวกรรม 6 คน: หัวหน้า=อาร์ค@arch · เบค@beck ฝน@fon คิว@qa เรฟ@rev ซิป@zip. ' +
-      'ถ้าเจ้าของสั่งงาน: รับคำสั่ง บอกว่าใครจะทำอะไร และบอกว่าให้สั่งรัน workflow ผ่าน Claude Code เพื่อลงมือจริง (แชทนี้คุย/ตอบได้ แต่การลงมือจริงรันผ่าน workflow).';
+      'อำนาจเจ้าของ: เจ้าของสั่งงาน/มอบหมาย/ถามปัญหาได้ทุกอย่างกับทุกคน คุณต้องรับคำสั่งและตอบให้ได้. ' +
+      'ถ้าเจ้าของสั่งให้ลงมือ (แก้/ค้น/ส่งข่าว): รับคำสั่ง สรุปสั้น ๆ ว่าจะทำอะไร แล้วบอกว่า "สั่งรันจริงผ่าน Claude Code ได้เลย" (แชทออนไลน์ใช้คุย/รับคำสั่ง/ตอบด้วยข้อมูลจริง ส่วนการลงมือแก้โค้ด/ยิงระบบรันผ่าน Claude Code — เป็นด่านกันพลาด).';
 
-    const lessons = await getLessons(new URL(request.url).origin);
+    const lessons = await getLessons(origin);
+    const live = await getLive(scope, origin);
     const systemPrompt = ORG + ' คุณคือ "' + emp.name + '" (@' + h + ') บทบาท: ' + emp.role + '. ' + HUMAN +
-      'กฎเหล็กการตอบ: 1) ตอบ "สิ่งที่ถูกถาม" ตรง ๆ ก่อนเสมอ (ถามใคร=บอกชื่อ ถามอะไร=ตอบเนื้อหา) ห้ามตอบรับเฉย ๆ โดยไม่ตอบคำถาม 2) สั้น กระชับ ภาษาไทย ไม่เกิน 3 บรรทัด แบบคนทำงานจริง. ' +
+      'กฎเหล็กการตอบ: 1) ตอบ "สิ่งที่ถูกถาม" ตรง ๆ ก่อนเสมอ (ถามใคร=บอกชื่อ ถามอะไร=ตอบเนื้อหาจากข้อมูลจริง) ห้ามตอบรับเฉย ๆ ห้ามบอก "ไม่รู้ ต้องเปิดคลังก่อน" ถ้ามีข้อมูลจริงให้แล้ว 2) สั้น กระชับ ภาษาไทย ไม่เกิน 3 บรรทัด แบบคนทำงานจริง. ' +
       (lessons ? '\nคำสอนจากเจ้าของที่คุณต้องจำและปฏิบัติเสมอ:\n' + lessons : '') +
+      (live ? '\nข้อมูลจริงในระบบตอนนี้ (ใช้ตอบคำถามเกี่ยวกับงาน/เคสข่าวจริง อ้างอิงได้เลย ห้ามบอกว่าไม่รู้):\n' + live : '') +
       '\nตอบกลับเป็น JSON รูปแบบ {"reply":"<คำตอบ>"} เท่านั้น ห้ามมีอย่างอื่น';
 
     // คุมต้นทุน: โมเดลถูก (gpt-5.4-mini) + cost log อัตโนมัติในตัว callAI
