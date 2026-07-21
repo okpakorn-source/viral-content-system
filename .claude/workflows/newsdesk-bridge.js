@@ -11,14 +11,53 @@ export const meta = {
 }
 
 const A = typeof args === 'string' ? JSON.parse(args) : args
-const BASE = (A && A.base) || 'https://viral-content-system.vercel.app'
+
+// Validate BASE URL
+const validateBase = (base) => {
+  try {
+    const url = new URL(base)
+    return url.protocol === 'https:' ? base : null
+  } catch {
+    return null
+  }
+}
+
+// Validate SEND_ID format
+const validateSendId = (id) => {
+  return /^[A-Za-z0-9_-]+$/.test(id)
+}
+
+const DEFAULT_BASE = 'https://viral-content-system.vercel.app'
+const baseFromArgs = (A && A.base) || DEFAULT_BASE
+const BASE = validateBase(baseFromArgs) || (() => {
+  if (baseFromArgs !== DEFAULT_BASE) {
+    log(`⚠️ BASE URL ไม่ถูกรูป (ต้องเป็น https://...): ${baseFromArgs} — ใช้ค่าดีฟอลต์: ${DEFAULT_BASE}`)
+  }
+  return DEFAULT_BASE
+})()
+
 const RUN = String((A && A.runId) || 'live')
 const LIMIT = Math.min(Math.max((A && A.limit) || 8, 1), 20)
 const MINSCORE = (A && A.minScore) || 0
-const SEND_IDS = (A && Array.isArray(A.sendIds)) ? A.sendIds : null   // ← มีเมื่ออนุมัติแล้วเท่านั้น
+
+// Validate and filter SEND_IDS
+const rawSendIds = (A && Array.isArray(A.sendIds)) ? A.sendIds : null
+const SEND_IDS = rawSendIds ? rawSendIds.filter(id => {
+  if (!validateSendId(id)) {
+    log(`⚠️ ข้าม id ไม่ถูกรูป: ${id}`)
+    return false
+  }
+  return true
+}) : null
+
 const DIR = 'public/company/departments/newsdesk'
 
 // ================= โหมดส่งจริง (gated) =================
+if (rawSendIds && rawSendIds.length && (!SEND_IDS || !SEND_IDS.length)) {
+  log('❌ ไม่สามารถเข้าโหมดส่งจริง — id ที่ส่งมาไม่ถูกรูป ทั้งหมด (' + rawSendIds.length + ' ใบ). ต้องเป็น /^[A-Za-z0-9_-]+$/')
+  return { mode: 'error', error: 'INVALID_SEND_IDS', filtered: 0, total: rawSendIds.length }
+}
+
 if (SEND_IDS && SEND_IDS.length) {
   phase('สรุป/ส่ง')
   log('🚀 โหมดส่งจริง ' + SEND_IDS.length + ' ใบ (อนุมัติแล้ว)')

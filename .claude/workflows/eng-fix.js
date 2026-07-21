@@ -18,9 +18,29 @@ if (!A || !A.problem) throw new Error('ต้องส่ง {problem, target?, 
 const PROBLEM = String(A.problem)
 const TARGET = A.target === 'newsdesk-prod' ? 'newsdesk-prod' : 'company'
 const APPLY = A.apply === true                 // prod: ต้อง apply:true (เจ้าของอนุมัติแผนแล้ว) ถึงจะแก้จริง
-const RUN = String(A.runId || 'fix')
+function sanitizeRunId(r) { return String(r || 'fix').replace(/\.\./g, '').replace(/[^a-zA-Z0-9_\-]/g, '_') || 'fix' }
+const RUN = sanitizeRunId(A.runId)
 const EDIR = 'public/company/departments/engineering'
 const CODEX = 'C:/Users/User/AppData/Local/OpenAI/Codex/bin/5dee10576ec7a5b8/codex.exe'
+const PLAN_PATH = EDIR + '/fixes/' + RUN + '.plan.json'
+
+// P0-04(a): กันงานแตะไฟล์หัวใจ/นอกเขตที่ระดับโค้ด (ไม่พึ่งวินัย prompt อย่างเดียว)
+const ALLOWED_PREFIXES = ['src/', 'public/company/', '.claude/workflows/']
+function guardPlan(plan) {
+  const kept = []
+  for (const p of (plan || [])) {
+    const files = p.files || []
+    const bad = files.filter(f => {
+      const norm = String(f).replace(/\\/g, '/')
+      const hitsCritical = CRITICAL.split(', ').some(c => norm.includes(c))
+      const outOfZone = !ALLOWED_PREFIXES.some(pre => norm.startsWith(pre))
+      return hitsCritical || outOfZone
+    })
+    if (bad.length) { log('⛔ ตัดงาน ' + p.handle + ' — แตะไฟล์หัวใจ/นอกเขต: ' + bad.join(', ')); continue }
+    kept.push(p)
+  }
+  return kept
+}
 
 // ไฟล์หัวใจห้ามแตะเด็ดขาด (ทุกโซน) — แก้ต้องเจ้าของสั่งตรงเป็นเคสพิเศษเท่านั้น
 const CRITICAL = 'src/lib/ai/openai.js, src/lib/ai/aiRouter.js, src/lib/ai/claudeClient.js, prisma/schema.prisma, scripts/validate-workflow.mjs'
@@ -50,6 +70,14 @@ const diag = await agent(
 if (!diag) return { runId: RUN, note: 'วินิจฉัยล้มเหลว' }
 log('ราก: ' + String(diag.rootCause).slice(0, 70) + ' | inScope=' + diag.inScope + ' risk=' + diag.risk)
 
+// P0-04(a): กรองแผนที่ระดับโค้ดก่อนใช้งานต่อ (ไม่ไว้ใจ prompt อย่างเดียว)
+const rawPlanCount = (diag.plan || []).length
+diag.plan = guardPlan(diag.plan)
+if (rawPlanCount && !diag.plan.length) {
+  await writeReport('บล็อก — งานทั้งหมดแตะไฟล์หัวใจ/นอกเขต', 'guard ตัดงานทุกจุดออกหลังกรอง (ดู log ⛔ ด้านบน) — ไม่แก้')
+  return { runId: RUN, target: TARGET, mode: 'blocked', rootCause: diag.rootCause, note: '⛔ ทุกจุดในแผนแตะไฟล์หัวใจ/นอกเขต — guard ตัดออกหมด ไม่แก้ ดูรายงาน' }
+}
+
 // เขียนใบวินิจฉัย/แผนเสมอ (บันทึกทุกอย่าง)
 async function writeReport(status, extra) {
   await agent('คุณคือ "อาร์ค". เขียนบันทึกเคสลง ' + EDIR + '/fixes/' + RUN + '.md (UTF-8 สร้าง/ต่อท้าย):\n' +
@@ -62,12 +90,28 @@ async function writeReport(status, extra) {
 if (TARGET === 'newsdesk-prod' && !APPLY) {
   phase('ลงมือ')
   log('🔒 โหมดเสนอแผน (ยังไม่แตะ production) — รอเจ้าของอนุมัติ')
-  await writeReport('เสนอแผน รออนุมัติ', 'หมายเหตุ: production — ยังไม่แก้ รอเจ้าของสั่ง apply')
+  // P0-04(b): เขียนแผนลงไฟล์ (หลักฐานอนุมัติ) ให้รอบ apply:true มาอ่านยืนยัน
+  await agent('เขียนไฟล์ ' + PLAN_PATH + ' (UTF-8, สร้างโฟลเดอร์ถ้าไม่มี, เขียนทับได้) ด้วยเนื้อหา JSON ต่อไปนี้เป๊ะ ๆ ห้ามแก้/ห้ามเพิ่ม:\n' +
+    JSON.stringify(diag) + '\nห้ามแตะไฟล์อื่น ตอบสั้น: เขียนสำเร็จหรือไม่',
+    { label: 'บันทึกแผน:arch', phase: 'ลงมือ', model: 'haiku', effort: 'low' })
+  await writeReport('เสนอแผน รออนุมัติ', 'หมายเหตุ: production — ยังไม่แก้ รอเจ้าของสั่ง apply · แผนบันทึกที่ ' + PLAN_PATH)
   return {
     runId: RUN, target: TARGET, mode: 'proposal', inScope: diag.inScope,
     rootCause: diag.rootCause, risk: diag.risk, impact: diag.impact,
-    plan: diag.plan, reportPath: EDIR + '/fixes/' + RUN + '.md',
-    note: '🔒 ยังไม่แตะ /news-desk — ตรวจแผน+ผลกระทบ แล้วสั่ง apply (รัน eng-fix ซ้ำด้วย {target:"newsdesk-prod", apply:true}) เพื่อลงมือจริง',
+    plan: diag.plan, reportPath: EDIR + '/fixes/' + RUN + '.md', planPath: PLAN_PATH,
+    note: '🔒 ยังไม่แตะ /news-desk — ตรวจแผน+ผลกระทบ แล้วสั่ง apply (รัน eng-fix ซ้ำด้วย {target:"newsdesk-prod", apply:true, runId:"' + RUN + '"}) เพื่อลงมือจริง',
+  }
+}
+// P0-04(c): apply:true บน prod ต้องมีไฟล์แผนที่อนุมัติไว้แล้วเท่านั้น — ไม่มีไฟล์ = ปฏิเสธ
+if (TARGET === 'newsdesk-prod' && APPLY) {
+  phase('ลงมือ')
+  const planCheck = await agent('อ่านไฟล์ ' + PLAN_PATH + ' ถ้ามีอยู่จริง คืน found=true พร้อม content=เนื้อหาไฟล์ทั้งหมด (raw string). ถ้าไม่มีไฟล์ คืน found=false เฉย ๆ ห้ามสร้างไฟล์ใหม่ ห้ามเดา.',
+    { label: 'ตรวจแผนอนุมัติ:arch', phase: 'ลงมือ', model: 'haiku', effort: 'low',
+      schema: { type: 'object', properties: { found: { type: 'boolean' }, content: { type: 'string' } }, required: ['found'] } })
+  if (!planCheck || !planCheck.found) {
+    log('⛔ ไม่พบไฟล์แผนอนุมัติที่ ' + PLAN_PATH + ' — ปฏิเสธ ไม่แก้ production')
+    await writeReport('บล็อก — ไม่พบไฟล์แผนอนุมัติ', 'apply:true แต่ไม่มี ' + PLAN_PATH + ' (ต้องรันโหมดเสนอแผนก่อนเพื่อสร้างไฟล์นี้) — ไม่แก้')
+    return { runId: RUN, target: TARGET, mode: 'blocked', note: '⛔ ไม่พบไฟล์แผนอนุมัติ ' + PLAN_PATH + ' — ต้องรันโหมดเสนอแผน (apply ไม่ระบุ/false) ก่อน เพื่อสร้างหลักฐานแผน แล้วค่อย apply:true' }
   }
 }
 if (!diag.inScope || !diag.plan.length) {
@@ -84,8 +128,12 @@ function doFix(p) {
   const files = (p.files || []).join(', ')
   const rules = ZONE + ' 🔴ห้ามแตะไฟล์หัวใจ: ' + CRITICAL + '. แก้เฉพาะไฟล์ที่ระบุ · incremental (Edit) ห้าม rewrite ทั้งไฟล์ · รักษา backward-compat.'
   if (e.codex) {
-    return agent('คุณคือ runner. สั่ง Codex (ซิป) แก้. Bash timeout=480000:\n' +
-      '"' + CODEX + '" exec -m ' + e.codex + ' -c model_reasoning_effort=low -c approval_policy=never -s workspace-write --skip-git-repo-check --ephemeral -C . "แก้: ' + String(p.task).replace(/"/g, "'") + ' เฉพาะไฟล์: ' + files + '. ' + rules.replace(/"/g, "'") + ' ยืนยันด้วยการอ่านซ้ำ" < /dev/null\nตอบสั้น: แก้ไฟล์ไหน',
+    const taskFile = EDIR + '/fixes/_task-' + RUN + '-' + p.handle + '.txt'
+    const taskBody = 'แก้: ' + p.task + '\nเฉพาะไฟล์: ' + files + '\n' + rules + '\nยืนยันด้วยการอ่านซ้ำ'
+    return agent('เขียนไฟล์ ' + taskFile + ' (UTF-8, สร้างโฟลเดอร์ถ้าไม่มี) ด้วยเนื้อหาเป๊ะ ๆ ต่อไปนี้:\n---\n' + taskBody + '\n---\n' +
+      'จากนั้นสั่ง Codex (ซิป) แก้ตามใบสั่งในไฟล์นั้น. Bash timeout=480000:\n' +
+      '"' + CODEX + '" exec -m ' + e.codex + ' -c model_reasoning_effort=low -c approval_policy=never -s workspace-write --skip-git-repo-check --ephemeral -C . "$(cat ' + taskFile + ')" < /dev/null\n' +
+      'ห้ามแก้ prompt ก่อนส่ง (ต้องอ่านจากไฟล์ที่เขียนเป๊ะ ๆ) ตอบสั้น: แก้ไฟล์ไหน',
       { label: 'แก้:' + p.handle, phase: 'ลงมือ', model: 'haiku', effort: 'low' })
   }
   return agent('คุณคือ "' + e.name + '" วิศวกร ทีมวิศวกรรม Fable & Co. แก้ตรงจุด สะอาด.\n' +
@@ -100,9 +148,15 @@ const allFiles = diag.plan.reduce((a, p) => a.concat(p.files || []), []).join(',
 const [test, review] = await parallel([
   () => agent('คุณคือ "คิว" QA ทีมวิศวกรรม. เทสว่าการแก้ไม่พัง: node --check ถ้าเป็น .js/.mjs, ถ้า .html เช็ค token ต้องห้าม (?. ?? replaceAll), grep error ชัด ๆ. ไฟล์: ' + allFiles + '\nรัน Bash เท่าที่จำเป็น. ตอบ: PASS/FAIL + หลักฐานสั้น',
     { label: 'เทส:qa', phase: 'เทส/รีวิว', model: 'haiku', effort: 'low' }),
-  () => agent('คุณคือ runner. สั่ง Codex (เรฟ ผู้ตรวจอิสระ) รีวิว. Bash timeout=480000:\n' +
-    '"' + CODEX + '" exec -m gpt-5.6-sol -c model_reasoning_effort=high -c approval_policy=never -s workspace-write --skip-git-repo-check --ephemeral -C . "รีวิว git diff ไฟล์ ' + allFiles.replace(/"/g, "'") + '. หา regression/scope-creep/แตะไฟล์หัวใจ/แตะของนอกเขต/breaking change. ตอบสั้น: ผ่าน/ติง + ประเด็น" < /dev/null\nตอบ: คำตัดสินเรฟ',
-    { label: 'รีวิว:rev', phase: 'เทส/รีวิว', model: 'haiku', effort: 'low' }),
+  () => {
+    const reviewFile = EDIR + '/fixes/_review-' + RUN + '.txt'
+    const reviewBody = 'รีวิว git diff ไฟล์ ' + allFiles + '\nหา regression/scope-creep/แตะไฟล์หัวใจ/แตะของนอกเขต/breaking change. ตอบสั้น: ผ่าน/ติง + ประเด็น'
+    return agent('เขียนไฟล์ ' + reviewFile + ' (UTF-8, สร้างโฟลเดอร์ถ้าไม่มี) ด้วยเนื้อหาเป๊ะ ๆ ต่อไปนี้:\n---\n' + reviewBody + '\n---\n' +
+      'จากนั้นสั่ง Codex (เรฟ ผู้ตรวจอิสระ) รีวิวตามใบสั่งในไฟล์นั้น. Bash timeout=480000:\n' +
+      '"' + CODEX + '" exec -m gpt-5.6-sol -c model_reasoning_effort=high -c approval_policy=never -s workspace-write --skip-git-repo-check --ephemeral -C . "$(cat ' + reviewFile + ')" < /dev/null\n' +
+      'ห้ามแก้ prompt ก่อนส่ง (ต้องอ่านจากไฟล์ที่เขียนเป๊ะ ๆ) ตอบ: คำตัดสินเรฟ',
+      { label: 'รีวิว:rev', phase: 'เทส/รีวิว', model: 'haiku', effort: 'low' })
+  },
 ])
 
 // ---- เฟส 4: รายงาน ----

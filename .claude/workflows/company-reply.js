@@ -36,19 +36,22 @@ const R = SCOPE === 'newsdesk' ? {
 const HEAD = SCOPE === 'newsdesk' ? 'ken' : 'oat'
 const MEMBERS = Object.keys(R)
 
-// ---- เฟส 1: รับเรื่อง (อ่านคิว + ล้างคิว) ----
+// ---- เฟส 1: รับเรื่อง (ย้ายคิวแบบ atomic กันข้อความหาย) ----
 phase('รับเรื่อง')
+const RUN = String((A && A.runId) || Date.now()).replace(/[^a-zA-Z0-9_-]/g, '')
+const PROCESSING = BASE + '/_processing-' + RUN + '.jsonl'
 const intake = await agent(
-  'อ่านไฟล์ ' + PEND + ' (JSONL บรรทัดละ 1 รายการ; ถ้าไม่มีไฟล์/ว่าง = ไม่มีคิว). ' +
-  'สรุปเป็น items[] ตามสคีมา (type say/meeting, to, text, topic). ' +
-  'จากนั้น**ล้างคิว**: ใช้ Write เขียนทับ ' + PEND + ' ให้เป็นไฟล์ว่าง (สตริงว่าง). ห้ามแตะไฟล์อื่น.',
+  '1. เช็คว่าไฟล์ ' + PEND + ' มีอยู่จริงหรือไม่ (ถ้าไม่มี/ว่าง = ไม่มีคิว ตอบ items: [], found: false).\n' +
+  '2. ถ้ามี ใช้ Bash tool สั่ง mv (atomic move) ย้าย ' + PEND + ' ไปเป็น ' + PROCESSING + ' — ห้ามใช้ Write เขียนทับ ' + PEND + '.\n' +
+  '3. อ่านไฟล์ ' + PROCESSING + ' (JSONL บรรทัดละ 1 รายการ) แล้วสรุปเป็น items[] ตามสคีมา (type say/meeting, to, text, topic). ห้ามแตะไฟล์อื่น. คืน found: true เมื่อสำเร็จ.',
   { label: 'รับเรื่อง', phase: 'รับเรื่อง', model: 'haiku', effort: 'low',
     schema: { type: 'object', properties: { items: { type: 'array', items: { type: 'object', properties: {
-      type: { type: 'string', enum: ['say', 'meeting'] }, to: { type: 'string' }, text: { type: 'string' }, topic: { type: 'string' } } } } }, required: ['items'] } })
+      type: { type: 'string', enum: ['say', 'meeting'] }, to: { type: 'string' }, text: { type: 'string' }, topic: { type: 'string' } } } }, found: { type: 'boolean' } }, required: ['items', 'found'] } })
 
 const items = (intake && intake.items || []).slice(0, 8)
-if (!items.length) { log('ไม่มีข้อความในคิว'); return { scope: SCOPE, replied: 0, note: 'คิวว่าง' } }
-log('มี ' + items.length + ' เรื่องในคิว')
+const intakeFound = intake && intake.found
+if (!intakeFound || !items.length) { log('ไม่มีข้อความในคิว'); return { scope: SCOPE, replied: 0, note: 'คิวว่าง' } }
+log('มี ' + items.length + ' เรื่องในคิว (atomic: ' + intakeFound + ')')
 
 // ---- เฟส 2: ตอบ (ฝ่ายที่ถูกถาม) ----
 phase('ตอบ')
@@ -65,10 +68,15 @@ function replyOne(handle, question, ctx) {
       { label: 'ตอบ:' + handle, phase: 'ตอบ', model: e.model, effort: 'low' }
     ).then(t => ({ handle: handle, name: e.name, text: String(t || '').trim() }))
   }
-  // codex → haiku runner
+  // codex → haiku runner (prompt-file pattern กัน question หลุดเข้าคำสั่ง shell)
+  const askFile = BASE + '/_ask-' + handle + '.txt'
   return agent(
-    'คุณคือ runner. รัน Bash (timeout=480000) ให้ Codex ตอบแทนพนักงาน "' + e.name + '":\n' +
-    '"' + CODEX + '" exec -m ' + e.slug + ' -c model_reasoning_effort=low -c approval_policy=never -s workspace-write --skip-git-repo-check --ephemeral -C . "คุณคือ ' + e.name + ' (' + e.role + ') พนักงาน Fable & Co. ผู้ใช้ถาม: ' + String(question).replace(/"/g, "'") + ' — ตอบสั้น ≤2 บรรทัด ภาษาไทย พิมพ์คำตอบออกมาอย่างเดียว" < /dev/null\n' +
+    'คุณคือ runner. หน้าที่: สั่งงานพนักงานข้ามค่าย "' + e.name + '" (@' + handle + ') ผ่าน Codex CLI\n' +
+    '1. ใช้ Write tool เขียนไฟล์ใบสั่งงาน ' + askFile + ' เนื้อหา:\n' +
+    '"""คุณคือ ' + e.name + ' (' + e.role + ') พนักงาน Fable & Co. ผู้ใช้ถาม: ' + question + '\nตอบสั้น ≤2 บรรทัด ภาษาไทย พิมพ์คำตอบออกมาอย่างเดียว"""\n' +
+    '2. รันด้วย Bash tool โดยตั้ง timeout parameter = 480000 (บังคับ):\n' +
+    '"' + CODEX + '" exec -m ' + e.slug + ' -c model_reasoning_effort=low -c approval_policy=never -s workspace-write --skip-git-repo-check --ephemeral -C . "อ่านไฟล์ ' + askFile + ' แล้วทำตามคำสั่งในนั้นทั้งหมด" < /dev/null\n' +
+    '3. ลบไฟล์ ' + askFile + ' ทิ้งเมื่อจบ (ใบสั่งชั่วคราว)\n' +
     'คำตอบสุดท้ายของคุณ = ข้อความที่ Codex ตอบ (คัดมาเฉพาะเนื้อคำตอบ)',
     { label: 'ตอบ:' + handle + '(codex)', phase: 'ตอบ', model: 'haiku', effort: 'low' }
   ).then(t => ({ handle: handle, name: e.name, text: String(t || '').trim() }))
@@ -93,5 +101,13 @@ await agent(
   'ใช้ Write/Edit ต่อท้ายไฟล์ ' + CHAT + ' (append ห้ามลบเดิม UTF-8) ด้วยบล็อกคำตอบพนักงานนี้ แต่ละบรรทัดขึ้นด้วย "↳ " :\n' + block +
   '\nห้ามแตะไฟล์อื่น ตอบสั้น ๆ ว่าเขียนกี่บรรทัด',
   { label: 'ลงแชท', phase: 'ลงแชท', model: 'haiku', effort: 'low' })
+
+// ลงแชทสำเร็จแล้ว → ลบไฟล์คิวที่กำลังประมวลผลทิ้ง (เฉพาะเมื่อ intake found = atomic ย้ายสำเร็จแล้ว)
+// ถ้าล้มก่อนหน้านี้ไฟล์จะยังอยู่ให้กู้ (recovery)
+if (intakeFound) {
+  await agent(
+    'ใช้ Bash tool ลบไฟล์ ' + PROCESSING + ' ทิ้ง. ห้ามแตะไฟล์อื่น',
+    { label: 'เคลียร์คิว', phase: 'ลงแชท', model: 'haiku', effort: 'low' })
+}
 
 return { scope: SCOPE, replied: replies.length, chat: CHAT, note: 'ตอบแล้ว ' + replies.length + ' ข้อความ — ดูใน chat.md' }
