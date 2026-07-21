@@ -50,6 +50,23 @@ export async function POST(request) {
 
     let h = String(to || '').replace('@', '').trim();
     const scope = String(body.scope || '').trim();
+
+    // ---- โหมดประชุมออนไลน์: ทั้งวงออกความเห็นใน call เดียว (คุมต้นทุน) ----
+    if (body.action === 'meeting') {
+      const panel = scope === 'newsdesk' ? ['ton', 'ken', 'nin', 'meen', 'fah']
+        : scope === 'engineering' ? ['arch', 'beck', 'qa']
+        : ['oat', 'sun', 'hai'];
+      const panelDesc = panel.map(p => ROSTER[p].name + '(@' + p + ' ' + ROSTER[p].role + ')').join(', ');
+      const meetPrompt = 'เจ้าของบริษัทเรียกประชุมหัวข้อ: "' + msg + '"\nผู้เข้าประชุม: ' + panelDesc +
+        '\nจำลองที่ประชุมจริง: แต่ละคนพูดสั้น 1-2 ประโยคตามบทบาทตัวเอง ตอบตรงหัวข้อ มีความเห็นจริง (เห็นด้วย/แย้ง/เสนอ) ไม่ใช่คำตอบกลาง ๆ' +
+        '\nตอบ JSON เท่านั้น: {"meeting":[{"handle":"<handle>","say":"<คำพูด>"}]} เรียงตามลำดับผู้เข้าประชุม';
+      const mout = await callAI({ prompt: meetPrompt, systemPrompt: 'คุณคือระบบจำลองที่ประชุมบริษัท Fable & Co. ' + 'ผู้เรียกประชุมคือเจ้าของบริษัท/ผู้บัญชาการสูงสุด ทุกคนให้เกียรติและตอบตรงประเด็น ตอบ JSON ตามรูปแบบที่สั่งเท่านั้น', model: MODEL_FAST, maxTokens: 6000, temperature: 0.8 }); // reasoning model — เพดานต่ำ=ตอบว่าง (บทเรียน AGENTS.md §3)
+      const rows = (mout && Array.isArray(mout.meeting) ? mout.meeting : [])
+        .filter(r => r && ROSTER[String(r.handle || '').replace('@', '')])
+        .map(r => { const k = String(r.handle).replace('@', ''); return { handle: k, name: ROSTER[k].name, say: String(r.say || '') }; });
+      if (!rows.length) return NextResponse.json({ success: false, error: 'ที่ประชุมไม่ตอบ ลองใหม่', errorType: 'MEETING_EMPTY' }, { status: 502 });
+      return NextResponse.json({ success: true, meeting: rows, topic: msg });
+    }
     // @all → หัวหน้าตัวจริงของสายนั้นตอบแทนทีม (ห้ามตอบเป็น "ทีมงาน" นิรนาม)
     if (!h || h === 'all') {
       h = scope === 'newsdesk' ? 'ken' : scope === 'engineering' ? 'arch' : 'oat';
@@ -65,7 +82,7 @@ export async function POST(request) {
       'ตอบกลับเป็น JSON รูปแบบ {"reply":"<คำตอบ>"} เท่านั้น ห้ามมีอย่างอื่น';
 
     // คุมต้นทุน: โมเดลถูก (gpt-5.4-mini) + maxTokens ต่ำ; cost log อัตโนมัติในตัว callAI
-    const out = await callAI({ prompt: msg, systemPrompt, model: MODEL_FAST, maxTokens: 700, temperature: 0.7 });
+    const out = await callAI({ prompt: 'คำถาม/คำสั่งจากเจ้าของบริษัท: "' + msg + '"', systemPrompt, model: MODEL_FAST, maxTokens: 4000, temperature: 0.7 }); // reasoning model ต้องเผื่อเพดานคิด
     const reply = (out && (out.reply || out.text || out.message)) || (typeof out === 'string' ? out : 'ขอโทษ ตอบไม่ได้ตอนนี้');
 
     return NextResponse.json({ success: true, from: h, name: emp.name, reply: String(reply) });
