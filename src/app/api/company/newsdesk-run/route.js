@@ -55,6 +55,7 @@ export async function POST(request) {
       .filter((x) => typeof x === 'string' && x && x !== 'ไม่มีคลัสเตอร์')
       .slice(0, topClusters);
     if (clusterIds.length === 0) {
+      try { await writeFeed({ scope: 'newsdesk', kind: 'result', agent: 'mod', text: '⚠️ รอบหาข่าวติดปัญหา: คลังคลัสเตอร์ว่าง (ยังไม่มี DNA ให้ตามรอย)' }); } catch (_e) {}
       return NextResponse.json({
         success: false,
         error: 'คลังคลัสเตอร์ว่าง — ยังไม่มี DNA ให้ตามรอย (ไปเติมที่ DNA Lab ก่อน)',
@@ -62,6 +63,8 @@ export async function POST(request) {
       }, { status: 409 });
     }
     steps.push('เลือก ' + clusterIds.length + ' คลัสเตอร์');
+    // 📡 แจ้ง "เริ่มงาน" ลงคลังสด → จอทุกเครื่องเห็นว่ากำลังหาข่าว
+    try { await writeFeed({ scope: 'newsdesk', kind: 'status', agent: 'mod', text: '🔄 เริ่มรอบหาข่าวจริง ' + clusterIds.length + ' คลัสเตอร์ · กำลังค้น…' }); } catch (_e) {}
 
     // ── (1) hunt ──
     const hRes = await jFetch('/api/desk/research/hunt', {
@@ -70,6 +73,7 @@ export async function POST(request) {
       body: JSON.stringify({ clusterIds, topClusters: clusterIds.length, queriesPerCluster, channels, perQueryResults: 10 }),
     });
     if (!hRes.success) {
+      try { await writeFeed({ scope: 'newsdesk', kind: 'result', agent: 'mod', text: '⚠️ รอบหาข่าวติดปัญหา (ค้นล้มเหลว): ' + (hRes.error || 'ไม่ทราบสาเหตุ') }); } catch (_e) {}
       return NextResponse.json({ success: false, error: hRes.error || 'ยิงค้นข่าวล้มเหลว', errorType: 'HUNT_FAILED', runId }, { status: 502 });
     }
     const candidates = hRes.candidates || [];
@@ -180,8 +184,10 @@ export async function POST(request) {
 
     // 📡 บันทึกผลรอบลงคลังกิจกรรมสด → จอโต๊ะข่าวเห็นผลเรียลไทม์
     try {
-      await writeFeed({ scope: 'newsdesk', kind: 'result', agent: 'mod',
-        text: '🔫 รันรอบหาข่าวจริง: เจอ ' + candidates.length + ' · เก็บ ' + totalSaved + ' ลีด · ฿' + (Number(huntStats.estCostTHB) || 0).toFixed(2) + ' · ' + Math.round(tookMs / 1000) + ' วิ',
+      const doneMsg = totalSaved > 0
+        ? ('✅ จบรอบหาข่าว: เจอ ' + candidates.length + ' · เก็บ ' + totalSaved + ' ลีด · ฿' + (Number(huntStats.estCostTHB) || 0).toFixed(2) + ' · ' + Math.round(tookMs / 1000) + ' วิ')
+        : ('☑️ จบรอบหาข่าว: เจอ ' + candidates.length + ' แต่ไม่มีลีดเข้าเกณฑ์รอบนี้ · ฿' + (Number(huntStats.estCostTHB) || 0).toFixed(2));
+      await writeFeed({ scope: 'newsdesk', kind: 'result', agent: 'mod', text: doneMsg,
         meta: { runId, found: candidates.length, kept: totalSaved, costTHB: Number(huntStats.estCostTHB) || 0 } });
     } catch (_e) { /* fire-and-forget */ }
 
@@ -201,6 +207,7 @@ export async function POST(request) {
     });
   } catch (error) {
     console.error('[company/newsdesk-run POST]', error?.message);
+    try { await writeFeed({ scope: 'newsdesk', kind: 'result', agent: 'mod', text: '⚠️ รอบหาข่าวติดปัญหา: ' + (error?.message || 'ระบบขัดข้อง') }); } catch (_e) {}
     return NextResponse.json({
       success: false,
       error: error?.message || 'รันรอบหาข่าวล้มเหลว',

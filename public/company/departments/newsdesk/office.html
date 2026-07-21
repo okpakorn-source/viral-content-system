@@ -233,9 +233,30 @@
   .lr-row .lr-trig{ font-size:.68rem; color:var(--muted); border:1px solid rgba(255,255,255,.12); border-radius:6px; padding:1px 6px; }
   .lr-empty{ font-size:.76rem; color:var(--muted); padding:6px 2px; }
 
+  /* 🎯 ป้ายสถานะงานตอนนี้ */
+  .work-status{ display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:14px; margin-bottom:12px;
+    font-size:.9rem; font-weight:800; border:1px solid rgba(255,255,255,.06); }
+  .work-status .ws-dot{ width:11px; height:11px; border-radius:50%; flex:none; }
+  .work-status .ws-text{ flex:1; line-height:1.4; }
+  .work-status .ws-time{ font-size:.72rem; font-weight:600; color:var(--muted); }
+  .work-status.ws-idle{ background:rgba(79,208,138,.1); color:#8ff0b8; }
+  .work-status.ws-idle .ws-dot{ background:#4fd08a; box-shadow:0 0 8px #4fd08a; }
+  .work-status.ws-running{ background:rgba(110,168,255,.14); color:#bcd6ff; }
+  .work-status.ws-running .ws-dot{ background:#6ea8ff; box-shadow:0 0 8px #6ea8ff; animation:runpulse 1s ease-in-out infinite; }
+  .work-status.ws-done{ background:rgba(79,208,138,.14); color:#9ff0c0; }
+  .work-status.ws-done .ws-dot{ background:#4fd08a; box-shadow:0 0 10px #4fd08a; }
+  .work-status.ws-problem{ background:rgba(255,138,138,.14); color:#ffc2c2; }
+  .work-status.ws-problem .ws-dot{ background:#ff7a7a; box-shadow:0 0 10px #ff7a7a; animation:runpulse 1.2s ease-in-out infinite; }
+
   /* 🔴 แผงกิจกรรมสด (feed) — เหนือประวัติ .md */
   .feed-live{ display:flex; flex-direction:column; gap:7px; margin-bottom:8px; }
   .feed-hist-label{ font-size:.68rem; color:var(--muted); text-align:center; margin:6px 0; opacity:.6; }
+  /* ยุบประวัติเก่า (declutter) + ปุ่มกดดู + ข้อความว่าง */
+  .md-collapsed{ display:none !important; }
+  .hist-toggle{ background:none; border:0; color:var(--muted); cursor:pointer; font-size:.72rem; font-weight:700; padding:7px 2px; margin-top:2px; }
+  .hist-toggle:hover{ color:#cfd8e6; }
+  .feed-empty{ font-size:.78rem; color:var(--muted); padding:10px 2px; opacity:.72; line-height:1.5; }
+  .feed-live:not(:empty) + .feed-empty{ display:none; }
   .fi{ padding:8px 11px; border-radius:11px; background:var(--panel-2); border-left:3px solid var(--line); animation:fiIn .35s ease; }
   @keyframes fiIn{ from{ opacity:0; transform:translateY(-4px);} to{ opacity:1; transform:none;} }
   .fi-top{ display:flex; align-items:center; gap:7px; margin-bottom:2px; }
@@ -832,7 +853,15 @@
 
     <!-- ================= สรุปงานแผนก (แผงเด่นบนสุด) ================= -->
     <section class="panel sec-summary">
-      <h2>📊 สรุปงานแผนก <span class="badge-live">LIVE</span></h2>
+      <h2>📊 งานแผนกตอนนี้ <span class="badge-live">LIVE</span></h2>
+
+      <!-- 🎯 สถานะงานตอนนี้ (เป็นรูปธรรม) — เริ่ม/กำลังทำ/จบรอบ/ติดปัญหา จาก feed สด -->
+      <div id="workStatus" class="work-status ws-idle">
+        <span class="ws-dot"></span>
+        <span class="ws-text">🟢 ว่าง — พร้อมรับงาน</span>
+        <span class="ws-time" id="workStatusTime"></span>
+      </div>
+
       <div class="stat-row">
         <div class="stat-box stat-go"><div class="stat-num" id="statSend">1</div><div class="stat-label">ส่ง</div></div>
         <div class="stat-box stat-warn"><div class="stat-num" id="statFix">0</div><div class="stat-label">แก้ก่อน</div></div>
@@ -954,50 +983,36 @@
       </div>
     </section>
 
-    <!-- ================= กระดานลงมติล่าสุด ================= -->
+    <!-- ================= มติ & การเคาะข่าว ================= -->
     <section class="panel sec-board">
-      <h2>🗳️ กระดานลงมติล่าสุด <span class="badge-live">LIVE</span></h2>
+      <h2>🗳️ มติ & การเคาะข่าว <span class="badge-live">สด</span></h2>
       <div id="boardLive" class="feed-live"></div>
-      <div class="feed-hist-label" id="boardHistLabel" style="display:none">— ประวัติเก่า —</div>
-      <div id="boardBody" class="board-body">
-        <p class="board-head">ตัวอย่าง — รอไฟล์จริง</p>
-        <p class="mark-go">[@ken] ข่าว#1: ✅ เนื้อแน่น มุมน่าสนใจ ส่งได้</p>
-        <p class="mark-warn">[@meen] ข่าว#2: ⚠️ เนื้อน้อยไปหน่อย ต้องคุย</p>
-        <p class="muted">อ่านจาก <code>./meeting/board.md</code></p>
-      </div>
+      <div id="boardEmpty" class="feed-empty">ยังไม่มีมติใหม่ — เมื่อทีมประชุม/เคาะข่าว จะขึ้นที่นี่ทันที</div>
+      <button class="hist-toggle" type="button" onclick="toggleHist('boardBody', this)">▸ ดูประวัติเก่า</button>
+      <div id="boardBody" class="board-body md-collapsed"></div>
     </section>
 
-    <!-- ================= มติที่ประชุม ================= -->
-    <section class="panel sec-minutes">
-      <h2>📋 มติที่ประชุม <span class="badge-live">LIVE</span></h2>
-      <div id="minutesBody" class="minutes-body">
-        <p class="board-head">ตัวอย่าง — รอไฟล์จริง</p>
-        <p class="mark-go">ข่าว#1 → ส่ง — เนื้อแน่น โทนสมดุล ทุกคนเห็นตรงกัน</p>
-        <p class="muted">อ่านจาก <code>./meeting/minutes.md</code></p>
-      </div>
+    <!-- มติที่ประชุม (เดิม) รวมเข้ากับ "มติ & การเคาะข่าว" แล้ว — ซ่อนกันซ้ำซ้อน -->
+    <section class="panel sec-minutes" style="display:none">
+      <div id="minutesBody" class="minutes-body"></div>
     </section>
 
-    <!-- ================= สื่อสารข้ามคน ================= -->
+    <!-- ================= ทีมคุยกัน & แจ้งข้ามแผนก ================= -->
     <section class="panel sec-comm">
-      <h2>💬 สื่อสารข้ามคน <span class="badge-live">LIVE</span></h2>
+      <h2>💬 ทีมคุยกัน & แจ้งข้ามแผนก <span class="badge-live">สด</span></h2>
       <div id="commLive" class="feed-live"></div>
-      <div class="feed-hist-label" id="commHistLabel" style="display:none">— ประวัติเก่า —</div>
-      <div id="commFeed">
-        <div class="chat-item" style="border-left-color:var(--c-ken)">
-          <div class="chat-meta">เคน <span class="handle">@ken</span> → <span class="chat-to">@all</span> <span class="chat-n">#1</span></div>
-          <div class="chat-text">ตัวอย่าง — สวัสดีทีมโต๊ะข่าว วันนี้เริ่มประชุมคัดข่าวรอบแรก (อ่านจาก ./comm-log.md)</div>
-        </div>
-      </div>
+      <div id="commEmpty" class="feed-empty">ยังไม่มีข้อความ — พิมพ์คุยกับทีม (ปุ่ม 💬 มุมขวาล่าง) แล้วจะโผล่ที่นี่ทุกเครื่อง</div>
+      <button class="hist-toggle" type="button" onclick="toggleHist('commFeed', this)">▸ ดูประวัติเก่า</button>
+      <div id="commFeed" class="md-collapsed"></div>
     </section>
 
-    <!-- ================= สมุดงาน ================= -->
+    <!-- ================= บันทึกงาน & ผลรอบ ================= -->
     <section class="panel sec-worklog">
-      <h2>📓 สมุดงาน <span class="badge-live">LIVE</span></h2>
+      <h2>📓 บันทึกงาน & ผลรอบ <span class="badge-live">สด</span></h2>
       <div id="worklogLive" class="feed-live"></div>
-      <div class="feed-hist-label" id="worklogHistLabel" style="display:none">— ประวัติเก่า —</div>
-      <ul id="worklogList">
-        <li><span class="log-meta">[ตัวอย่าง #1]</span> เปิดห้องข่าว — รอไฟล์ ./worklog.md จริง</li>
-      </ul>
+      <div id="worklogEmpty" class="feed-empty">ยังไม่มีบันทึกงาน — เมื่อทีมลงมือ/จบรอบ จะขึ้นที่นี่</div>
+      <button class="hist-toggle" type="button" onclick="toggleHist('worklogList', this)">▸ ดูประวัติเก่า</button>
+      <ul id="worklogList" class="md-collapsed"></ul>
     </section>
 
     <!-- ================= คลังประวัติงาน ================= -->
@@ -1403,22 +1418,55 @@
     return out;
   }
 
-  /* รวม chat.md (ไฟล์) + onlineLog (แชทออนไลน์เรียลไทม์) เป็นรายการเดียว เรียงเวลาไล่ตามลำดับที่เกิด */
-  function buildCombinedItems(){
-    var items = parseChatLines(lastChatMdText);
-    for (var i = 0; i < onlineLog.length; i++){
-      var e = onlineLog[i];
-      if (e.kind === 'meeting'){
-        items.push({ kind:'meeting', time:e.time, topic:e.topic, rows:e.rows || [], online:true });
+  /* 🔴 แชทประวัติดึงจาก feed (Supabase) = ทุกเครื่อง(มือถือ+PC)เห็นตรงกัน — แทน localStorage เดิม */
+  var feedChatItems = [];
+  function tsToHHMM(ts){
+    var d = new Date(Number(ts) || 0);
+    if (isNaN(d.getTime())){ return ''; }
+    var h = d.getHours(), m = d.getMinutes();
+    return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+  }
+  function nameOfHandle(handle){
+    if (handle === 'owner'){ return 'คุณ'; }
+    var p = findRosterPerson(handle);
+    return p ? p.nameTh : (handle ? ('@' + handle) : 'ระบบ');
+  }
+  function mapFeedToChatItems(events){
+    var evs = (events || []).slice().sort(function(a, b){ return (Number(a.ts) || 0) - (Number(b.ts) || 0); });
+    var items = [];
+    for (var i = 0; i < evs.length; i++){
+      var e = evs[i];
+      var t = tsToHHMM(e.ts);
+      if (e.kind === 'decision'){
+        var rows = (e.meta && e.meta.votes) || [];
+        items.push({ kind:'meeting', time:t, topic:(e.text || 'มติที่ประชุม'),
+          rows: rows.map(function(v){ return { handle:v.handle, name:nameOfHandle(v.handle), say:v.say }; }), online:true });
+      } else if (e.agent === 'owner'){
+        items.push({ kind:'user', time:t, to:(e.meta && e.meta.to) || '', text:e.text, online:true });
       } else {
-        items.push({ kind:'user', time:e.time, to:e.to, text:e.text, online:true });
-        if (e.reply){
-          items.push({ kind:'staff', time:e.time, who:e.who, handle:bareHandle(e.to), text:e.reply, online:true });
-        }
+        items.push({ kind:'staff', time:t, who:nameOfHandle(e.agent), handle:e.agent, text:e.text, online:true });
       }
     }
     return items;
   }
+  /* รวม chat.md (ประวัติเก่า) + feedChatItems (สดจาก Supabase) */
+  function buildCombinedItems(){
+    var items = parseChatLines(lastChatMdText);
+    for (var i = 0; i < feedChatItems.length; i++){ items.push(feedChatItems[i]); }
+    return items;
+  }
+  function pollChatFromFeed(){
+    return fetch('/api/company/feed?scope=' + CHAT_SCOPE + '&limit=80', { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.success){ return; }
+        var chat = (d.events || []).filter(function(e){ return e.kind === 'chat' || e.kind === 'comm' || e.kind === 'decision'; });
+        feedChatItems = mapFeedToChatItems(chat);
+        renderMainFeed();
+      })
+      .catch(function(){ /* เงียบ */ });
+  }
+  window.pollChatFromFeed = pollChatFromFeed;
 
   function findRosterPerson(handle){
     for (var i = 0; i < ROSTER.length; i++){ if (ROSTER[i].handle === handle){ return ROSTER[i]; } }
@@ -1669,6 +1717,45 @@
   }
   window.pollLiveRounds = pollLiveRounds;
 
+  /* ---------------- 🎯 สถานะงานตอนนี้ (เริ่ม/กำลังทำ/จบรอบ/ติดปัญหา) จาก feed ---------------- */
+  function setWorkStatus(cls, text, ts){
+    var el = document.getElementById('workStatus');
+    var tEl = document.getElementById('workStatusTime');
+    if (!el){ return; }
+    el.className = 'work-status ' + cls;
+    var txtEl = el.querySelector('.ws-text');
+    if (txtEl){ txtEl.textContent = text; }
+    if (tEl){ tEl.textContent = ts ? ('· ' + timeAgo(ts)) : ''; }
+  }
+  function pollWorkStatus(){
+    return fetch('/api/company/feed?scope=newsdesk&limit=20', { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.success){ return; }
+        var ev = (d.events || []).filter(function(e){ return e.kind === 'status' || e.kind === 'result'; });
+        if (!ev.length){ setWorkStatus('ws-idle', '🟢 ว่าง — พร้อมรับงาน', 0); return; }
+        var e = ev[0]; // ใหม่สุด (feed เรียงใหม่→เก่าแล้ว)
+        var txt = e.text || '';
+        var cls = 'ws-done';
+        if (txt.indexOf('🔄') === 0 || txt.indexOf('เริ่ม') > -1 || txt.indexOf('กำลัง') > -1){ cls = 'ws-running'; }
+        else if (txt.indexOf('⚠️') === 0 || txt.indexOf('ติดปัญหา') > -1){ cls = 'ws-problem'; }
+        else if (txt.indexOf('🟢') === 0 || txt.indexOf('พร้อม') > -1){ cls = 'ws-idle'; }
+        setWorkStatus(cls, txt, e.ts);
+      })
+      .catch(function(){ /* เงียบ */ });
+  }
+  window.pollWorkStatus = pollWorkStatus;
+
+  /* ---------------- ยุบ/กางประวัติเก่า (declutter) ---------------- */
+  function toggleHist(id, btn){
+    var el = document.getElementById(id);
+    if (!el){ return; }
+    el.classList.toggle('md-collapsed');
+    var collapsed = el.classList.contains('md-collapsed');
+    if (btn){ btn.textContent = collapsed ? '▸ ดูประวัติเก่า' : '▾ ซ่อนประวัติเก่า'; }
+  }
+  window.toggleHist = toggleHist;
+
   /* ---------------- 🔴 คลังกิจกรรมสด (feed) — บทสนทนา/มติ/สมุดงาน เรียลไทม์ทุกเครื่อง ---------------- */
   var FEED_SCOPE = 'newsdesk';
   var FEED_NAMES = {
@@ -1815,18 +1902,11 @@
   }
 
   function appendRealtimeExchange(to, text, data){
-    if (data && data.roundtable && data.roundtable.length){
-      var rows = data.roundtable.map(function(x){ return { handle:x.handle, name:x.name, say:x.reply }; });
-      pushOnlineLog({ kind:'meeting', topic:'💬 ' + text, rows: rows, time: nowHHMM() });
-      renderMainFeed();
-      return;
-    }
-    pushOnlineLog({ kind:'say', to:to, text:text, reply:(data && data.reply) || '', who:(data && data.name) || to, time: nowHHMM() });
-    renderMainFeed();
+    // ดึงจาก feed (Supabase) ทันที = ข้อความ+คำตอบ sync ทุกเครื่อง (server เขียน feed ระหว่าง POST แล้ว)
+    pollChatFromFeed();
   }
   function appendRealtimeMeeting(topic, rows){
-    pushOnlineLog({ kind:'meeting', topic:topic, rows: rows || [], time: nowHHMM() });
-    renderMainFeed();
+    pollChatFromFeed();
   }
 
   /* ---------------- สถานะกำลังส่ง: กันกดซ้ำ + โชว์ ⏳ ระหว่างรอ ---------------- */
@@ -1971,6 +2051,7 @@
     var panel = document.getElementById('chatPanel');
     if (panel){ panel.classList.add('open'); panel.setAttribute('aria-hidden', 'false'); }
     loadChatFeed();
+    pollChatFromFeed(); // 🔴 ดึงประวัติแชทสดจาก Supabase = ตรงกันทุกเครื่อง
   }
   function closeChatPanel(){
     var panel = document.getElementById('chatPanel');
@@ -2001,6 +2082,8 @@
     var jobs = [];
 
     loadChatFeed();
+    pollChatFromFeed(); // 🔴 แชทสดจาก Supabase — ทุกเครื่องตรงกัน (แก้มือถือค้าง)
+    pollWorkStatus();   // 🎯 สถานะงานตอนนี้ (เริ่ม/จบ/ติดปัญหา)
     pollLiveRounds(); // 📡 รอบจริงจาก Supabase — ทุกเครื่องเห็นตรงกันเรียลไทม์
     /* 🔴 แผงกิจกรรมสด (comm/worklog/มติ) จัดการโดยโมดูลกลาง liveFeed.js (initLiveFeed) — อ่านง่าย+คลิกดูรายละเอียด */
 
