@@ -166,12 +166,26 @@ export async function POST(request) {
       const r = (o && (o.reply || o.text || o.message)) || (typeof o === 'string' ? o : '');
       return { handle: hd, name: (ROSTER[hd] || {}).name || hd, reply: String(r || 'ตอบไม่ได้ตอนนี้') };
     }
-    // @all → ทุกคนในสายตอบเอง สมองคนละตัว (roundtable)
+    // @all → เราเตอร์เลือกเฉพาะคนที่เกี่ยวข้องจริง (กันทุกคนตอบจนรก/เปลือง)
     if (!h || h === 'all') {
-      const roster = scope === 'newsdesk' ? ['ton', 'ken', 'mod', 'nin', 'meen', 'fah', 'jo', 'rin']
+      const rosterAll = scope === 'newsdesk' ? ['ton', 'ken', 'mod', 'nin', 'meen', 'fah', 'jo', 'rin']
         : scope === 'engineering' ? ['arch', 'beck', 'fon', 'qa', 'rev', 'zip']
         : ['oat', 'sun', 'hai'];
-      const results = await Promise.all(roster.map(replyAs));
+      const head = scope === 'newsdesk' ? 'ken' : scope === 'engineering' ? 'arch' : 'oat';
+      const desc = rosterAll.map(function (hd) { return '@' + hd + '=' + ((ROSTER[hd] || {}).role || ''); }).join(' | ');
+      let picked = [head];
+      const rr = await callClaude({
+        prompt: 'คำถาม/คำสั่งจากเจ้าของ: "' + msg + '"\nทีมในห้องนี้: ' + desc +
+          '\nเลือกเฉพาะคนที่ "เกี่ยวข้องกับคำถามนี้โดยตรง" มาตอบ (1-4 คน พอ ไม่ต้องทุกคน). ' +
+          'ถ้าคำถามพูดถึงทีม/เรื่องที่ไม่มีในห้องนี้ (เช่นถามทีมอื่น) เลือกแค่หัวหน้า @' + head + ' คนเดียวเพื่อชี้ทาง. ' +
+          'ตอบ JSON {"handles":["<handle ที่ควรตอบ>"]} เท่านั้น',
+        systemPrompt: 'คุณคือตัวจัดสรรว่าใครควรตอบในห้องแชทบริษัท เลือกให้น้อยและตรงประเด็นที่สุด ตอบ JSON ตามรูปแบบเท่านั้น',
+        model: CLAUDE_MODEL.haiku, maxTokens: 200, temperature: 0.2
+      }).catch(function () { return null; });
+      const hs = (rr && Array.isArray(rr.handles)) ? rr.handles : [];
+      const filtered = hs.map(function (x) { return String(x).replace('@', '').trim(); }).filter(function (hd) { return rosterAll.indexOf(hd) > -1; });
+      if (filtered.length) picked = filtered.slice(0, 4);
+      const results = await Promise.all(picked.map(replyAs));
       return NextResponse.json({ success: true, roundtable: results.filter(x => x && x.reply) });
     }
     // เจาะจงคน → คนนั้นตอบด้วยสมองตัวเอง
