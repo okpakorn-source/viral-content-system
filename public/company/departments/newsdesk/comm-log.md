@@ -8,3 +8,4 @@
 [bridge-demo-live] @nin: #lead_e1db4f815e0a942f ตัวเลข "หมื่นล้าน" กับสีลิฟต์ต้องแก้ให้ตรงข้อเท็จจริงก่อนส่ง
 [bridge-demo-live] @ton: รอบ bridge-demo-live ส่ง 2 / แก้ 2 / ตก 1
 [bridge-demo-live] @phupha: ขออนุมัติส่ง #lead_7bbbc16dd536b0ed และ #lead_1d6275af403ab5a8 เข้าคิว
+[audit-1] @ton: รายงานปัญหา 1 งานให้ทีมวิศวะแล้ว → engineering/comm-log.md
