@@ -340,7 +340,12 @@ function buildTriageStrict(it, src, strictOpts) {
 
   const fileTagOnR = ownReadStrictOpt(strictOpts, 'fileTagOn');
   const fileTagOn = fileTagOnR.present && fileTagOnR.value === true;
-  const sanitized = sanitizeStrictClassifierItem(it, fileTagOn);
+  // ★ 21 ก.ค. (บั๊ก tagged 0/failed 0 ทั้งระบบ): busyOn ต้องตามชุดคีย์จริงของ item (ชั้นแรก validate ด้วย
+  //   busyOn ตาม MEGA_CLUTTER_GUARD → item มี busy/peopleCount) — เดิมไม่ส่ง = sanitize ใช้ชุดคีย์ไม่มี busy
+  //   → guardExactObject เจอ key เกิน → null เงียบทุกใบ · pattern เดียวกับ fileTagOn เป๊ะ (absent = false เดิม)
+  const busyOnR = ownReadStrictOpt(strictOpts, 'busyOn');
+  const busyOn = busyOnR.present && busyOnR.value === true;
+  const sanitized = sanitizeStrictClassifierItem(it, fileTagOn, busyOn);
   if (sanitized === null) return null;
 
   const hasNewsScene = Object.prototype.hasOwnProperty.call(sanitized, 'newsScene'); // sanitized เป็นของเราเอง (frozen literal) — ปลอดภัย
@@ -385,6 +390,11 @@ function buildTriageStrict(it, src, strictOpts) {
     faceCount: sanitized.faceCount,
     faceBox: sanitized.faceBox,
     peopleBox: sanitized.peopleBox,
+    // ★ 21 ก.ค. (บั๊กซ้อนชั้น 2 ของเคส busyOn): ตา (CLUTTER ON) ตอบ busy/peopleCount มาแล้ว แต่ return นี้
+    //   ไม่เคยเก็บ → consumer (megaAdapters _busyOf/meta :3254,:3388 อ่าน triage.busy) ไม่เห็นค่าเลย = clutter
+    //   guard ฝั่งเลือกภาพไม่ทำงานจริงบนเส้น strict — แนบ additive เฉพาะเมื่อ sanitized มี (busyOn เท่านั้น)
+    //   pattern เดียวกับ newsScene (sanitized เป็น frozen literal ของเราเอง — hasOwnProperty ปลอดภัย)
+    ...(Object.prototype.hasOwnProperty.call(sanitized, 'busy') ? { busy: sanitized.busy, peopleCount: sanitized.peopleCount } : {}),
     brightness: Math.round(src?.brightness ?? 128),
     detail: Math.round(src?.detail ?? 60),
     note: sanitized.note,
@@ -431,6 +441,10 @@ export async function vetImages({ images, subjects, newsGist, onProgress, onRetr
   // ★ correction P1-6: อ่านค่าเดียวกับที่ gemini.js อ่านเองเป๊ะ (env ตัวเดียวกัน อ่านครั้งเดียวต่อ invocation
   //   เหมือน pin) — ใช้เลือก required-key-set ที่ sanitizeStrictClassifierItem ต้องตรวจให้ตรง mode จริงของงานนี้
   const FILE_TAG = process.env.FILE_SHOT_TAG !== '0';
+  // ★ 21 ก.ค. (บั๊กตาคัดทิ้งเงียบทุกใบหลัง flip MEGA_CLUTTER_GUARD=ON 20 ก.ค.): ชั้นแรก (geminiClassifyFrames)
+  //   validate ด้วย busyOn ตาม env → item มี busy/peopleCount แต่ buildTriage ไม่ส่ง busyOn → sanitize เจอ key เกิน
+  //   → null เงียบทุกใบ (tagged 0, failed 0) — resolve ค่าเดียวกับ gemini.js เป๊ะ แล้วส่งเข้า strictOpts ให้สองชั้นตรงกันเสมอ
+  const BUSY_TAG = process.env.MEGA_CLUTTER_GUARD !== '0';
 
   async function runOneBatch(bi) {
     const slice = batches[bi];
@@ -468,7 +482,7 @@ export async function vetImages({ images, subjects, newsGist, onProgress, onRetr
           //   (schema ที่ gemini.js บังคับ relevant ครบทุกใบอยู่แล้ว — เช็คนี้เป็น defense-in-depth)
           if (!it || typeof it.relevant === 'undefined') { out.push({ ...x.im }); failed++; return; }
           const triage = buildTriage(it, x.r, {
-            strict: true, evidence, caseId, batchIndex: bi, resultIndex: it.index, fileTagOn: FILE_TAG,
+            strict: true, evidence, caseId, batchIndex: bi, resultIndex: it.index, fileTagOn: FILE_TAG, busyOn: BUSY_TAG,
           });
           if (!triage) { out.push({ ...x.im }); failed++; return; } // malformed strict item → ศูนย์ triage/admission
           out.push({ ...x.im, triage });
@@ -506,6 +520,10 @@ export async function triageLibrary({ images, subjects, newsGist, onProgress, on
   const pin = resolveGeminiClassifierPin();
   // ★ correction P1-6: ค่าเดียวกับที่ gemini.js อ่านเองเป๊ะ — เลือก required-key-set ให้ตรง mode จริงของงานนี้
   const FILE_TAG = process.env.FILE_SHOT_TAG !== '0';
+  // ★ 21 ก.ค. (บั๊กตาคัดทิ้งเงียบทุกใบหลัง flip MEGA_CLUTTER_GUARD=ON 20 ก.ค.): ชั้นแรก (geminiClassifyFrames)
+  //   validate ด้วย busyOn ตาม env → item มี busy/peopleCount แต่ buildTriage ไม่ส่ง busyOn → sanitize เจอ key เกิน
+  //   → null เงียบทุกใบ (tagged 0, failed 0) — resolve ค่าเดียวกับ gemini.js เป๊ะ แล้วส่งเข้า strictOpts ให้สองชั้นตรงกันเสมอ
+  const BUSY_TAG = process.env.MEGA_CLUTTER_GUARD !== '0';
 
   for (let i = 0; i < images.length; i += batchSize) {
     const slice = images.slice(i, i + batchSize);
@@ -536,7 +554,7 @@ export async function triageLibrary({ images, subjects, newsGist, onProgress, on
       if (!src) continue;
       if (typeof it.relevant === 'undefined') continue; // ★ audit B-R4: ตอบครึ่งฟิลด์ = ไม่ติดป้าย รอรอบหน้า (กันป้ายบวกฟรี)
       const triage = buildTriage(it, src, {
-        strict: true, evidence: result.evidence, caseId, batchIndex, resultIndex: it.index, fileTagOn: FILE_TAG,
+        strict: true, evidence: result.evidence, caseId, batchIndex, resultIndex: it.index, fileTagOn: FILE_TAG, busyOn: BUSY_TAG,
       });
       if (!triage) continue; // malformed strict item → ศูนย์ triage/admission
       map[src.im.id] = triage;
