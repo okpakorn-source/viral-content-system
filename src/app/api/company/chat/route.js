@@ -5,6 +5,7 @@ export const maxDuration = 60;
 import { NextResponse } from 'next/server';
 import { callClaude } from '@/lib/ai/claudeClient';
 import { getSupabase } from '@/lib/supabase';
+import { writeFeed } from '@/lib/company/companyFeed';
 
 // persona พนักงาน (3 กลุ่ม) — ตอบตามบทบาท
 const ROSTER = {
@@ -139,6 +140,8 @@ export async function POST(request) {
         .filter(r => r && ROSTER[String(r.handle || '').replace('@', '')])
         .map(r => { const k = String(r.handle).replace('@', ''); return { handle: k, name: ROSTER[k].name, say: String(r.say || '') }; });
       if (!rows.length) return NextResponse.json({ success: false, error: 'ที่ประชุมไม่ตอบ ลองใหม่', errorType: 'MEETING_EMPTY' }, { status: 502 });
+      // 📡 บันทึกมติที่ประชุมลงคลังกิจกรรมสด → กระดานมติทุกจออัปเดตเรียลไทม์
+      await writeFeed({ scope: scope || 'main', kind: 'decision', agent: rows[0].handle, text: '🗳️ ประชุม: ' + msg, meta: { topic: msg, votes: rows.map(function (x) { return { handle: x.handle, say: x.say }; }) } });
       return NextResponse.json({ success: true, meeting: rows, topic: msg });
     }
     // ---- โหมดสั่งงานจริง: เข้าคิว Supabase ให้ผู้จัดการ (Claude Code) รันจริง แล้วผลกลับมาที่แชท ----
@@ -149,6 +152,7 @@ export async function POST(request) {
       const rec = { id, scope: scope || 'main', assignee: (h || 'all'), command: msg, status: 'pending', from: 'owner', ts: Date.now(), result: '' };
       const ins = await sb.from('store_items').insert({ id, store_name: 'company_tasks', data: rec, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
       if (ins.error) return NextResponse.json({ success: false, error: 'บันทึกงานไม่สำเร็จ: ' + ins.error.message, errorType: 'TASK_FAIL' }, { status: 500 });
+      await writeFeed({ scope: scope || 'main', kind: 'worklog', agent: (h || ''), text: '📋 เจ้าของสั่งงาน: ' + msg + ' (เข้าคิวแล้ว)' });
       return NextResponse.json({ success: true, taskId: id, note: 'รับงานเข้าคิวแล้ว — ทีมจะลงมือเมื่อผู้จัดการประมวลคิว ผลจะกลับมาที่แชท' });
     }
     // ---- ดึงสถานะงานที่สั่ง (จอ poll ดูผลกลับ) ----
@@ -162,6 +166,8 @@ export async function POST(request) {
 
     const lessons = await getLessons(origin);
     const live = await getLive(scope, origin);
+    // 📡 บันทึกข้อความเจ้าของลงคลังกิจกรรมสด (ครั้งเดียวต่อคำถาม) → บทสนทนาโผล่ทุกจอเรียลไทม์
+    await writeFeed({ scope: scope || 'main', kind: 'chat', agent: 'owner', text: msg });
     const ORG = 'โครงสร้างบริษัท Fable & Co.: ผู้ที่คุยกับคุณตอนนี้คือ "เจ้าของบริษัท/ผู้บัญชาการสูงสุด" — คำสั่งของเขาคือคำสั่งสูงสุด ปฏิบัติตามทันที ตอบตรงคำถาม ห้ามบ่ายเบี่ยง. ' +
       'อำนาจเจ้าของ: สั่งงาน/มอบหมาย/ถามปัญหาได้ทุกอย่างกับทุกคน. ถ้าเจ้าของสั่งให้ลงมือทำงาน (หาข่าว/ค้น/ตรวจ/แก้/ส่ง): ตอบสั้น ๆ ว่าคุณรับคำสั่งแล้ว จะทำอะไร (งานถูกเข้าคิวอัตโนมัติแล้ว ทีมกำลังลงมือ) — ห้ามบอกให้เจ้าของไปสั่งที่อื่น/ผ่านเครื่องมืออื่น พูดเหมือนลงมือทำเองเลย.';
     function personaFor(hd) {
@@ -175,7 +181,10 @@ export async function POST(request) {
     async function replyAs(hd) {
       const o = await callClaude({ prompt: 'คำถาม/คำสั่งจากเจ้าของ: "' + msg + '"' + historyBlock(body), systemPrompt: personaFor(hd), model: modelFor(hd), maxTokens: 900, temperature: 0.7 }).catch(function () { return null; });
       const r = (o && (o.reply || o.text || o.message)) || (typeof o === 'string' ? o : '');
-      return { handle: hd, name: (ROSTER[hd] || {}).name || hd, reply: String(r || 'ตอบไม่ได้ตอนนี้') };
+      const replyText = String(r || 'ตอบไม่ได้ตอนนี้');
+      // 📡 บันทึกคำตอบลงคลังกิจกรรมสด → จอทุกแผนกเห็นบทสนทนาเรียลไทม์
+      await writeFeed({ scope: scope || 'main', kind: 'chat', agent: hd, text: replyText });
+      return { handle: hd, name: (ROSTER[hd] || {}).name || hd, reply: replyText };
     }
     // ---- แจ้งบั๊กข้ามแผนก: @arch (ทีมวิศวะ) รับเรื่อง + เข้าคิวงานวิศวะให้แก้ ----
     if (body.action === 'bug') {
@@ -188,6 +197,9 @@ export async function POST(request) {
         try { bi = await sbb.from('store_items').insert({ id: bid, store_name: 'company_tasks', data: brec, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }); } catch (e) { bi = { error: e }; }
         if (bi && !bi.error) bugTaskId = bid;
       }
+      // 📡 บั๊กข้ามแผนก → ขึ้นทั้งห้องต้นทางและห้องวิศวะเรียลไทม์
+      await writeFeed({ scope: scope || 'main', kind: 'comm', agent: '', text: '🐛 ส่งบั๊กให้ทีมวิศวะแล้ว: ' + msg });
+      await writeFeed({ scope: 'engineering', kind: 'comm', agent: 'arch', text: '🐛 [จากห้อง ' + (scope || 'main') + '] ' + msg });
       const archAck = await replyAs('arch');
       return NextResponse.json({ success: true, from: 'arch', name: 'อาร์ค', reply: archAck.reply, bugTaskId: bugTaskId, note: 'ส่งบั๊กให้ทีมวิศวะแล้ว — เข้าคิวงานวิศวะ ผู้จัดการจะให้ทีมแก้' });
     }
@@ -222,6 +234,7 @@ export async function POST(request) {
           try { await sbq.from('store_items').insert({ id: tid, store_name: 'company_tasks', data: trec, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }); queued = true; } catch (e) { /* ต่อคิวไม่ได้ = แค่ตอบ */ }
         }
       }
+      if (queued) { await writeFeed({ scope: scope || 'main', kind: 'worklog', agent: (picked[0] || ''), text: '⚡ รับคำสั่งเข้าคิว: ' + msg }); }
       const results = await Promise.all(picked.map(replyAs));
       return NextResponse.json({ success: true, roundtable: results.filter(x => x && x.reply), queued: queued, queuedNote: queued ? 'รับคำสั่งเข้าคิวแล้ว ✅ ผู้จัดการกำลังรันงานให้ — ดูผลที่ ＋ → 📋 งานที่สั่ง' : '' });
     }
