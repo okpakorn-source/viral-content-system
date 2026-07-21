@@ -26,6 +26,7 @@
     --c-meen:#2fbf8f;
     --c-fah:#ef6f9e;
     --c-jo:#9b6bf0;
+    --c-rin:#c9973f;
   }
   *,*::before,*::after{ box-sizing:border-box; }
   html,body{ margin:0; padding:0; }
@@ -106,7 +107,8 @@
       "comm"
       "worklog"
       "compose"
-      "livechat";
+      "livechat"
+      "archive";
     gap:16px;
   }
   .grid-header{ grid-area:header; }
@@ -118,6 +120,7 @@
   .sec-worklog{ grid-area:worklog; }
   .sec-compose{ grid-area:compose; }
   .sec-livechat{ grid-area:livechat; }
+  .sec-archive{ grid-area:archive; }
 
   @media (min-width:641px){
     .newsroom-grid{
@@ -129,7 +132,8 @@
         "board   minutes"
         "comm    worklog"
         "compose compose"
-        "livechat livechat";
+        "livechat livechat"
+        "archive archive";
     }
   }
   @media (min-width:1400px){
@@ -141,7 +145,8 @@
         "roster  roster  roster  roster"
         "board   minutes comm    worklog"
         "compose compose compose compose"
-        "livechat livechat livechat livechat";
+        "livechat livechat livechat livechat"
+        "archive archive archive archive";
     }
   }
   @media (max-width:479px){
@@ -394,6 +399,27 @@
   .livechat-note{ background:transparent; padding:2px 4px; }
   .livechat-note .lc-text{ color:var(--muted); font-size:.76rem; }
 
+  /* ---------- คลังประวัติงาน (archive) — การ์ดรายการ อ่านง่ายบนมือถือ ---------- */
+  .archive-body{ display:flex; flex-direction:column; gap:10px; }
+  .archive-item{
+    border-radius:10px; padding:10px 12px;
+    border:1px solid var(--line); background:rgba(255,255,255,.02);
+    border-left-width:4px; border-left-style:solid;
+  }
+  .archive-top{ display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap; }
+  .archive-date{ font-size:.7rem; color:var(--muted); font-weight:700; }
+  .archive-status{ font-size:.8rem; font-weight:800; }
+  .archive-job{ font-size:.85rem; font-weight:700; color:#f2f5ff; margin-bottom:4px; }
+  .archive-detail{ font-size:.78rem; color:#dbe2f0; margin-bottom:4px; }
+  .archive-ref{ font-size:.7rem; color:var(--muted); }
+  .archive-item.archive-ok{ border-left-color:var(--live); }
+  .archive-item.archive-ok .archive-status{ color:var(--live); }
+  .archive-item.archive-fail{ border-left-color:var(--offline); }
+  .archive-item.archive-fail .archive-status{ color:var(--offline); }
+  .archive-item.archive-pending{ border-left-color:var(--gold); }
+  .archive-item.archive-pending .archive-status{ color:var(--gold); }
+  .archive-item.archive-neutral{ border-left-color:var(--line); }
+
   footer.site-footer{
     text-align:center; font-size:.72rem; color:var(--muted); margin-top:20px;
   }
@@ -538,6 +564,17 @@
       fill="none" stroke="#9b6bf0" stroke-width="4"/>
     <path d="M38 44 L47 53 L64 32" fill="none" stroke="#9b6bf0" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
   </symbol>
+
+  <!-- ริน: แฟ้มเอกสาร + สมุดจด (ผู้ตรวจการ/เก็บคลัง) -->
+  <symbol id="nf-acc-rin" viewBox="0 0 100 100">
+    <path d="M16 30 h24 l6 8 h38 v34 a3 3 0 0 1 -3 3 h-62 a3 3 0 0 1 -3 -3 v-39 a3 3 0 0 1 3 -3 Z" fill="#e8c07a" stroke="#9c7326" stroke-width="2.4"/>
+    <g transform="translate(58,46) rotate(-6)">
+      <rect x="-14" y="-18" width="28" height="36" rx="2" fill="#fdf6e3" stroke="#9c7326" stroke-width="2"/>
+      <line x1="-9" y1="-10" x2="9" y2="-10" stroke="#9c7326" stroke-width="2"/>
+      <line x1="-9" y1="-2" x2="9" y2="-2" stroke="#9c7326" stroke-width="2"/>
+      <line x1="-9" y1="6" x2="4" y2="6" stroke="#9c7326" stroke-width="2"/>
+    </g>
+  </symbol>
 </defs>
 </svg>
 
@@ -571,9 +608,9 @@
       <div class="summary-latest" id="summaryLatest">ล่าสุด: <strong>[รอบ demo-1] เคาะ 3 ข่าว: ส่ง 1 / แก้ 0 / ตก 2</strong></div>
     </section>
 
-    <!-- ================= ทำเนียบ 7 คน ================= -->
+    <!-- ================= ทำเนียบ 8 คน ================= -->
     <section class="sec-roster">
-      <div class="room-label">🖥️ โต๊ะข่าว — ทำเนียบ 7 คน</div>
+      <div class="room-label">🖥️ โต๊ะข่าว — ทำเนียบ 8 คน</div>
       <div class="card-row">
 
         <div class="card card-lead" data-handle="ton" tabindex="0" role="button" style="--card-accent:var(--c-ton)">
@@ -657,6 +694,17 @@
           <span class="remote-tag">📡 REMOTE · ข้ามค่าย</span>
         </div>
 
+        <div class="card" data-handle="rin" tabindex="0" role="button" style="--card-accent:var(--c-rin)">
+          <svg class="avatar" viewBox="0 0 100 100" aria-hidden="true" style="color:var(--c-rin)">
+            <use href="#nf-face" xlink:href="#nf-face"/>
+            <use href="#nf-acc-rin" xlink:href="#nf-acc-rin"/>
+          </svg>
+          <div class="card-name">ริน</div>
+          <span class="card-handle">@rin</span>
+          <span class="card-model">Haiku 4.5</span>
+          <div class="card-role">ผู้ตรวจการ/เก็บคลัง — ตามผลงานจริง ลงคลัง รายงานวิศวะ</div>
+        </div>
+
       </div>
     </section>
 
@@ -719,6 +767,7 @@
           <option value="@meen">@meen</option>
           <option value="@fah">@fah</option>
           <option value="@jo">@jo</option>
+          <option value="@rin">@rin</option>
         </select>
         <input id="chatText" type="text" placeholder="พิมพ์ข้อความ…" maxlength="500">
         <button id="chatSendBtn" type="button">ส่ง</button>
@@ -731,6 +780,26 @@
       <h2>💬 แชท <span class="badge-live">LIVE</span></h2>
       <div id="liveChatFeed">
         <p class="muted">ตัวอย่าง — ยังไม่มีข้อความ (อ่านจาก ./chat.md)</p>
+      </div>
+    </section>
+
+    <!-- ================= คลังประวัติงาน ================= -->
+    <section class="panel sec-archive">
+      <h2>📚 คลังประวัติงาน <span class="badge-live">LIVE</span></h2>
+      <div id="archiveBody" class="archive-body">
+        <div class="archive-item archive-ok">
+          <div class="archive-top"><span class="archive-date">2026-07-21</span><span class="archive-status">✅ สำเร็จ</span></div>
+          <div class="archive-job">ตัวอย่าง — ส่งข่าว "…lead_7bbb…"</div>
+          <div class="archive-detail">เข้าคิวเขียนจริง jobId q_e74519…</div>
+          <div class="archive-ref">อ้างอิง: รอบ send-live</div>
+        </div>
+        <div class="archive-item archive-fail">
+          <div class="archive-top"><span class="archive-date">2026-07-21</span><span class="archive-status">❌ ล้มเหลว</span></div>
+          <div class="archive-job">ตัวอย่าง — ส่งข่าว "…lead_1d62…"</div>
+          <div class="archive-detail">extract 404 — ดึงเนื้อจากแหล่งต้นทางไม่ได้</div>
+          <div class="archive-ref">อ้างอิง: รอบ send-live → รายงาน @arch แล้ว</div>
+        </div>
+        <p class="muted">อ่านจาก <code>./archive/jobs.md</code></p>
       </div>
     </section>
 
@@ -762,6 +831,7 @@
   var MINUTES_URL = './meeting/minutes.md';
   var COMM_URL = './comm-log.md';
   var WORKLOG_URL = './worklog.md';
+  var ARCHIVE_URL = './archive/jobs.md';
 
   /* ---------------- แชทโต้ตอบ (POST /api/say, /api/meeting) ---------------- */
   var CHAT_SCOPE = 'newsdesk';
@@ -848,7 +918,8 @@
     nin:{ nameTh:'นิน', color:'var(--c-nin)' },
     meen:{ nameTh:'มีน', color:'var(--c-meen)' },
     fah:{ nameTh:'ฟ้า', color:'var(--c-fah)' },
-    jo:{ nameTh:'โจ', color:'var(--c-jo)' }
+    jo:{ nameTh:'โจ', color:'var(--c-jo)' },
+    rin:{ nameTh:'ริน', color:'var(--c-rin)' }
   };
 
   function renderCommFeed(msgs){
@@ -921,6 +992,58 @@
     var last = items[items.length - 1];
     var el = document.getElementById('summaryLatest');
     if (el){ el.innerHTML = 'ล่าสุด: <strong>[' + escapeHtml(last.tag) + '] ' + escapeHtml(last.text) + '</strong>'; }
+  }
+
+  /* ---------------- คลังประวัติงาน: อ่านตาราง markdown | วันที่ | งาน | ผล | รายละเอียด | อ้างอิง | ---------------- */
+  function parseMdTableRows(text){
+    var lines = text.split('\n');
+    var rows = [];
+    for (var i = 0; i < lines.length; i++){
+      var t = lines[i].replace(/^\s+|\s+$/g, '');
+      if (t.charAt(0) !== '|'){ continue; }
+      var inner = t;
+      if (inner.charAt(0) === '|'){ inner = inner.slice(1); }
+      if (inner.charAt(inner.length - 1) === '|'){ inner = inner.slice(0, inner.length - 1); }
+      var cells = inner.split('|');
+      var j;
+      for (j = 0; j < cells.length; j++){ cells[j] = cells[j].replace(/^\s+|\s+$/g, ''); }
+      var isSep = true;
+      for (j = 0; j < cells.length; j++){
+        if (!/^:?-+:?$/.test(cells[j])){ isSep = false; break; }
+      }
+      if (isSep){ continue; }
+      rows.push(cells);
+    }
+    return rows;
+  }
+
+  function archiveStatusClass(result){
+    if (result.indexOf('✅') !== -1){ return 'archive-ok'; }
+    if (result.indexOf('❌') !== -1){ return 'archive-fail'; }
+    if (result.indexOf('⏳') !== -1){ return 'archive-pending'; }
+    return 'archive-neutral';
+  }
+
+  function renderArchiveHtml(text){
+    var rows = parseMdTableRows(text);
+    if (rows.length < 2){ return ''; }
+    var data = rows.slice(1);
+    var html = '';
+    for (var i = data.length - 1; i >= 0; i--){
+      var r = data[i];
+      var date = r[0] || '';
+      var job = r[1] || '';
+      var result = r[2] || '';
+      var detail = r[3] || '';
+      var ref = r[4] || '';
+      html += '<div class="archive-item ' + archiveStatusClass(result) + '">' +
+        '<div class="archive-top"><span class="archive-date">' + escapeHtml(date) + '</span><span class="archive-status">' + escapeHtml(result) + '</span></div>' +
+        '<div class="archive-job">' + escapeHtml(job) + '</div>' +
+        (detail ? '<div class="archive-detail">' + escapeHtml(detail) + '</div>' : '') +
+        (ref ? '<div class="archive-ref">อ้างอิง: ' + escapeHtml(ref) + '</div>' : '') +
+        '</div>';
+    }
+    return html;
   }
 
   /* ---------------- แชทสด: อ่าน chat.md (server เขียนบรรทัด [HH:MM] 🧑/📣/↳ ...) ---------------- */
@@ -1189,6 +1312,15 @@
       }).catch(function(){})
     );
 
+    jobs.push(
+      fetchText(ARCHIVE_URL).then(function(text){
+        okCount++;
+        var el = document.getElementById('archiveBody');
+        var html = renderArchiveHtml(text);
+        if (el && html){ el.innerHTML = html; }
+      }).catch(function(){})
+    );
+
     Promise.all(jobs).then(function(){
       setLive(okCount > 0);
     });
@@ -1202,7 +1334,8 @@
     { handle:'nin',  nameTh:'นิน',  color:'var(--c-nin)',  deskUrl:'./desk/nin.md' },
     { handle:'meen', nameTh:'มีน',  color:'var(--c-meen)', deskUrl:'./desk/meen.md' },
     { handle:'fah',  nameTh:'ฟ้า',  color:'var(--c-fah)',  deskUrl:'./desk/fah.md' },
-    { handle:'jo',   nameTh:'โจ',   color:'var(--c-jo)',   deskUrl:'./desk/jo.md' }
+    { handle:'jo',   nameTh:'โจ',   color:'var(--c-jo)',   deskUrl:'./desk/jo.md' },
+    { handle:'rin',  nameTh:'ริน',  color:'var(--c-rin)',  deskUrl:'./desk/rin.md' }
   ];
 
   /* ข้อความตัวอย่างฝังในตัว ใช้เมื่อ fetch โต๊ะไม่สำเร็จ (file:// หรือไฟล์หาย) กันจอว่าง */
@@ -1213,7 +1346,8 @@
     nin:'[1] @all: นินช่วยดมข่าวไวรัล ชอบหารายละเอียด',
     meen:'[1] @all: มีนเช็คเนื้อแน่นทั้งหมด ข่าวเกร็งผ่านหมด',
     fah:'[1] @all: ฟ้ามองสมดุลโทน ดันมุมบวกให้มั่น',
-    jo:'[1] @all: โจยืนยันหลักฐาน ก่อนเคาะให้เชื่อ'
+    jo:'[1] @all: โจยืนยันหลักฐาน ก่อนเคาะให้เชื่อ',
+    rin:'[1] @all: รินค่ะ งานทุกชิ้นที่ทีมทำ รินตามเก็บเข้าคลังหมด สำเร็จหรือพลาดต้องรู้สาเหตุ ตรวจย้อนได้เสมอ'
   };
 
   var deskCache = {};

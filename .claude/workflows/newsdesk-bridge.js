@@ -27,7 +27,8 @@ if (SEND_IDS && SEND_IDS.length) {
     'ใช้ Bash (timeout 120000) ยิง:\n' +
     'curl -sS -m 90 -X POST "' + BASE + '/api/desk/research/extract" -H "Content-Type: application/json" -d \'{"action":"extractAndSend","leadId":"' + id + '"}\'\n' +
     'อ่าน response: success/sent/jobId หรือ pending/error. ' +
-    'บันทึกผล: append 1 บรรทัดลง ' + DIR + '/worklog.md "- [ส่งจริง ' + RUN + '] ' + id + ' → <ผล>". ' +
+    'บันทึกผล (กติกา: ทุกการกระทำต้องลงคลัง): append 1 บรรทัดลง ' + DIR + '/worklog.md "- [ส่งจริง ' + RUN + '] ' + id + ' → <ผล>" ' +
+    'และ append 1 แถวลงตาราง ' + DIR + '/archive/jobs.md "| <วันที่วันนี้> | ส่งข่าว ' + id + ' | ✅/❌/⏳ | <jobId หรือสาเหตุ> | รอบ ' + RUN + ' |". ' +
     'ห้ามแตะไฟล์อื่น. ตอบ structured.',
     { label: 'ส่ง:' + id, phase: 'สรุป/ส่ง', model: 'haiku', effort: 'low',
       schema: { type: 'object', properties: { leadId: { type: 'string' }, ok: { type: 'boolean' }, detail: { type: 'string' } }, required: ['leadId', 'ok', 'detail'] } })))
