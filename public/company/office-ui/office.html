@@ -35,6 +35,7 @@
     --c-sol:#8e6bcf;
     --c-terra:#c1622c;
     --c-luna:#5b6fd8;
+    --alert:#e5484d;
   }
   *,*::before,*::after{ box-sizing:border-box; }
   html,body{ margin:0; padding:0; }
@@ -96,7 +97,9 @@
       "coffee"
       "prod"
       "log"
-      "chat";
+      "chat"
+      "compose"
+      "livechat";
     gap:16px;
   }
   .grid-header{ grid-area:header; }
@@ -108,6 +111,8 @@
   .panel-prod{ grid-area:prod; }
   .panel-log{ grid-area:log; }
   .panel-chat{ grid-area:chat; }
+  .panel-compose{ grid-area:compose; }
+  .panel-livechat{ grid-area:livechat; }
 
   @media (min-width:641px){
     .office-grid{
@@ -119,7 +124,9 @@
         "meeting remote"
         "coffee  coffee"
         "prod    log"
-        "chat    chat";
+        "chat    chat"
+        "compose compose"
+        "livechat livechat";
     }
   }
   @media (min-width:1400px){
@@ -130,7 +137,9 @@
         "ceo     meeting remote"
         "eng     meeting remote"
         "eng     coffee  remote"
-        "prod    log     chat";
+        "prod    log     chat"
+        "compose compose compose"
+        "livechat livechat livechat";
     }
   }
 
@@ -324,6 +333,42 @@
   .chat-meta .chat-to{ color:var(--wood-dark); }
   .chat-meta .chat-n{ color:var(--muted); font-weight:400; }
   .chat-text{ color:var(--ink); }
+
+  /* ---------- คุยกับพนักงาน (compose) ---------- */
+  .readonly-badge{
+    display:none;
+    background:rgba(229,72,77,.12); color:var(--alert); border:1px solid var(--alert);
+    border-radius:10px; padding:6px 10px; font-size:.78rem; font-weight:700;
+    margin-bottom:10px;
+  }
+  .readonly-badge.show{ display:block; }
+  .compose-row{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+  .compose-row select, .compose-row input[type="text"]{
+    font-family:inherit; font-size:.84rem; padding:8px 10px;
+    border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink);
+  }
+  .compose-row select{ flex:0 0 auto; min-width:100px; }
+  .compose-row input[type="text"]{ flex:1 1 160px; min-width:0; }
+  .compose-row button, .meeting-btn{
+    font-family:inherit; font-size:.84rem; font-weight:700; cursor:pointer;
+    border:none; border-radius:10px; padding:8px 16px; color:#fff8ec;
+    background:linear-gradient(135deg,var(--wood),var(--wood-dark));
+    box-shadow:var(--shadow);
+  }
+  .meeting-btn{ background:linear-gradient(135deg,var(--busy),var(--alert)); width:100%; }
+  .compose-row button:hover, .meeting-btn:hover{ filter:brightness(1.06); }
+
+  /* ---------- แชทสด (livechat) ---------- */
+  #liveChatFeed{ max-height:360px; overflow-y:auto; }
+  .livechat-item{ border-radius:8px; padding:8px 10px; margin-bottom:8px; font-size:.8rem; }
+  .livechat-item .lc-meta{ font-weight:700; margin-bottom:2px; display:flex; gap:6px; align-items:baseline; }
+  .livechat-item .lc-time{ font-weight:400; color:var(--muted); font-size:.7rem; }
+  .livechat-item .lc-text{ color:var(--ink); }
+  .livechat-user{ background:#fdf0e3; border-left:4px solid var(--wood); }
+  .livechat-staff{ background:#eef3ef; border-left:4px solid #4caf7d; }
+  .livechat-meeting{ background:#fdeaea; border-left:4px solid var(--alert); }
+  .livechat-note{ background:transparent; padding:2px 4px; }
+  .livechat-note .lc-text{ color:var(--muted); font-size:.76rem; }
 
   /* ---------- Desk overlay / panel (side panel + bottom sheet) ---------- */
   .desk-overlay{
@@ -622,6 +667,35 @@
       </div>
     </section>
 
+    <!-- ================= คุยกับพนักงาน ================= -->
+    <section class="panel panel-compose">
+      <h2>💬 คุยกับพนักงาน</h2>
+      <div id="readonlyBadge" class="readonly-badge">โหมดอ่านอย่างเดียว (เปิดผ่านเซิร์ฟเวอร์ในบ้านเพื่อแชท)</div>
+      <div class="compose-row">
+        <select id="chatTo">
+          <option value="@all">@all</option>
+          <option value="@phupha">@phupha</option>
+          <option value="@oat">@oat</option>
+          <option value="@sun">@sun</option>
+          <option value="@hai">@hai</option>
+          <option value="@sol">@sol</option>
+          <option value="@terra">@terra</option>
+          <option value="@luna">@luna</option>
+        </select>
+        <input id="chatText" type="text" placeholder="พิมพ์ข้อความ…" maxlength="500">
+        <button id="chatSendBtn" type="button">ส่ง</button>
+      </div>
+      <button id="meetingBtn" type="button" class="meeting-btn">📣 เรียกประชุม</button>
+    </section>
+
+    <!-- ================= แชทสด ================= -->
+    <section class="panel panel-livechat">
+      <h2>💬 แชท <span class="badge-live" style="margin-left:auto;font-size:.62rem;font-weight:800;color:var(--busy);border:1px solid var(--busy);border-radius:999px;padding:1px 7px;">LIVE</span></h2>
+      <div id="liveChatFeed">
+        <p class="muted">ตัวอย่าง — ยังไม่มีข้อความ (อ่านจาก ../office/chat.md)</p>
+      </div>
+    </section>
+
   </div>
 
   <footer class="site-footer">Fable &amp; Co. Office Monitor · ข้อมูลอ่านจากไฟล์ .md ในโฟลเดอร์ office/ และ projects/</footer>
@@ -667,6 +741,12 @@
 
   var BOARD_URL = '../office/board.md';
   var LOG_URL = '../office/log.md';
+
+  /* ---------------- แชทโต้ตอบ (POST /api/say, /api/meeting) ---------------- */
+  var CHAT_SCOPE = 'main';
+  var CHAT_URL = '../office/chat.md';
+  var SAY_URL = '/api/say';
+  var MEETING_URL = '/api/meeting';
 
   /* ข้อมูลฝังในตัว ใช้เมื่อ fetch ไม่สำเร็จ (เช่นเปิดไฟล์แบบ file://) เพื่อไม่ให้หน้าว่างเปล่า */
   var FALLBACK = {
@@ -757,6 +837,107 @@
       html += '<li><span class="log-meta">[' + escapeHtml(items[j][1]) + ']</span> ' + escapeHtml(items[j][2]) + '</li>';
     }
     return html;
+  }
+
+  /* ---------------- แชทสด: อ่าน chat.md (server เขียนบรรทัด [HH:MM] 🧑/📣/↳ ...) ---------------- */
+  function stripBold(s){ return s.split('**').join(''); }
+
+  function parseChatLines(text){
+    var lines = text.split('\n');
+    var items = [];
+    for (var i = 0; i < lines.length; i++){
+      var t = lines[i].replace(/^\s+|\s+$/g, '');
+      if (t === ''){ continue; }
+      if (t.charAt(0) === '#' || t.charAt(0) === '>'){ continue; }
+      var tm = /^\[(\d{1,2}:\d{2})\]\s*(.*)$/.exec(t);
+      var time = tm ? tm[1] : '';
+      var rest = tm ? tm[2] : t;
+      if (rest.indexOf('🧑') !== -1){
+        var um = /→\s*(\S+):\s*(.*)$/.exec(rest);
+        items.push({ kind:'user', time:time, to: um ? um[1] : '', text: stripBold(um ? um[2] : rest) });
+      } else if (rest.indexOf('📣') !== -1){
+        var mm = /:\s*(.*)$/.exec(rest);
+        items.push({ kind:'meeting', time:time, text: stripBold(mm ? mm[1] : rest) });
+      } else if (rest.indexOf('↳') !== -1){
+        var sm = /↳\s*\[?([^\]:]+)\]?:?\s*(.*)$/.exec(rest);
+        items.push({ kind:'staff', time:time, who: stripBold(sm ? sm[1].replace(/^\s+|\s+$/g, '') : ''), text: stripBold(sm ? sm[2] : rest) });
+      } else {
+        items.push({ kind:'note', time:time, text: stripBold(rest) });
+      }
+    }
+    return items;
+  }
+
+  function renderChatFeedHtml(items){
+    if (items.length === 0){ return '<p class="muted">ยังไม่มีข้อความ</p>'; }
+    var html = '';
+    for (var i = 0; i < items.length; i++){
+      var it = items[i];
+      if (it.kind === 'user'){
+        html += '<div class="livechat-item livechat-user"><div class="lc-meta">🧑 ผู้ใช้ → ' + escapeHtml(it.to) + ' <span class="lc-time">' + escapeHtml(it.time) + '</span></div><div class="lc-text">' + escapeHtml(it.text) + '</div></div>';
+      } else if (it.kind === 'meeting'){
+        html += '<div class="livechat-item livechat-meeting"><div class="lc-meta">📣 เรียกประชุม <span class="lc-time">' + escapeHtml(it.time) + '</span></div><div class="lc-text">' + escapeHtml(it.text) + '</div></div>';
+      } else if (it.kind === 'staff'){
+        html += '<div class="livechat-item livechat-staff"><div class="lc-meta">↳ [' + escapeHtml(it.who) + '] <span class="lc-time">' + escapeHtml(it.time) + '</span></div><div class="lc-text">' + escapeHtml(it.text) + '</div></div>';
+      } else {
+        html += '<div class="livechat-item livechat-note"><div class="lc-text">' + escapeHtml(it.text) + '</div></div>';
+      }
+    }
+    return html;
+  }
+
+  function loadChatFeed(){
+    fetchText(CHAT_URL).then(function(text){
+      var el = document.getElementById('liveChatFeed');
+      if (el){
+        el.innerHTML = renderChatFeedHtml(parseChatLines(text));
+        el.scrollTop = el.scrollHeight;
+      }
+    }).catch(function(){});
+  }
+
+  function showReadonlyBadge(){
+    var el = document.getElementById('readonlyBadge');
+    if (el){ el.classList.add('show'); }
+  }
+  function hideReadonlyBadge(){
+    var el = document.getElementById('readonlyBadge');
+    if (el){ el.classList.remove('show'); }
+  }
+
+  function postJson(url, payload){
+    return fetch(url, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json; charset=utf-8' },
+      body: JSON.stringify(payload)
+    }).then(function(r){
+      if (!r.ok){ throw new Error('http ' + r.status); }
+      return r.json();
+    });
+  }
+
+  function sendSay(){
+    var toSel = document.getElementById('chatTo');
+    var textInput = document.getElementById('chatText');
+    if (!toSel || !textInput){ return; }
+    var text = textInput.value.replace(/^\s+|\s+$/g, '');
+    if (text === ''){ return; }
+    postJson(SAY_URL, { scope:CHAT_SCOPE, to:toSel.value, text:text }).then(function(){
+      textInput.value = '';
+      hideReadonlyBadge();
+      loadChatFeed();
+    }).catch(function(){ showReadonlyBadge(); });
+  }
+
+  function callMeeting(){
+    var topic = window.prompt('หัวข้อประชุม:', '');
+    if (topic === null){ return; }
+    topic = topic.replace(/^\s+|\s+$/g, '');
+    if (topic === ''){ return; }
+    postJson(MEETING_URL, { scope:CHAT_SCOPE, topic:topic }).then(function(){
+      hideReadonlyBadge();
+      loadChatFeed();
+    }).catch(function(){ showReadonlyBadge(); });
   }
 
   function statusLabel(msgs){
@@ -859,6 +1040,8 @@
     var okCount = 0;
     var jobs = [];
 
+    loadChatFeed();
+
     ROSTER.forEach(function(p){
       jobs.push(
         fetchText(p.deskUrl).then(function(text){
@@ -944,9 +1127,22 @@
     })(cards[ci]);
   }
 
+  /* ---------------- คุยกับพนักงาน: ผูกปุ่ม ---------------- */
+  var chatSendBtn = document.getElementById('chatSendBtn');
+  var chatTextInput = document.getElementById('chatText');
+  var meetingBtn = document.getElementById('meetingBtn');
+  if (chatSendBtn){ chatSendBtn.addEventListener('click', sendSay); }
+  if (chatTextInput){
+    chatTextInput.addEventListener('keydown', function(ev){
+      if (ev.key === 'Enter'){ ev.preventDefault(); sendSay(); }
+    });
+  }
+  if (meetingBtn){ meetingBtn.addEventListener('click', callMeeting); }
+
   /* ---------------- boot ---------------- */
   renderProjects();
   refreshAll();
+  loadChatFeed();
   setInterval(refreshAll, REFRESH_MS);
   setInterval(function(){ if (!IS_FILE){ /* keep clock fresh even between fetches */ } }, 1000);
 

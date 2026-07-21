@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>📰 Fable &amp; Co. — ห้องข่าว แผนกโต๊ะข่าว</title>
+<style>
+  :root{
+    --bg:#0a0d14;
+    --bg-2:#0f1420;
+    --panel:#141a28;
+    --panel-2:#182036;
+    --ink:#e7ecf6;
+    --muted:#8b96ae;
+    --line:#232c42;
+    --shadow:0 6px 20px rgba(0,0,0,.35);
+    --shadow-lg:0 16px 38px rgba(0,0,0,.5);
+    --live:#33d17e;
+    --offline:#e2574c;
+    --rec:#ff4757;
+    --gold:#f2c14e;
+    --c-ton:#e2543f;
+    --c-mod:#3fa7c9;
+    --c-ken:#f2994a;
+    --c-nin:#4a90e2;
+    --c-meen:#2fbf8f;
+    --c-fah:#ef6f9e;
+    --c-jo:#9b6bf0;
+  }
+  *,*::before,*::after{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:
+      radial-gradient(circle at 20% 0%, rgba(74,144,226,.10), transparent 45%),
+      radial-gradient(circle at 85% 15%, rgba(242,153,74,.08), transparent 40%),
+      var(--bg);
+    color:var(--ink);
+    font-family:'Leelawadee UI','Sarabun','Tahoma','Segoe UI',system-ui,sans-serif;
+    line-height:1.5;
+    overflow-x:hidden;
+  }
+  a{ color:inherit; }
+  h1,h2,h3,p,ul,li{ margin:0; }
+  ul{ padding:0; list-style:none; }
+  button{ font-family:inherit; }
+
+  .wrap{ max-width:1500px; margin:0 auto; padding:14px 14px 40px; }
+
+  /* ---------- Header ---------- */
+  .site-header{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    flex-wrap:wrap;
+    background:linear-gradient(135deg,#1c2540,#0e1322);
+    border:1px solid var(--line);
+    color:#f2f5ff;
+    border-radius:16px;
+    padding:14px 18px;
+    box-shadow:var(--shadow);
+    margin-bottom:16px;
+    position:relative;
+    overflow:hidden;
+  }
+  .site-header::before{
+    content:"";
+    position:absolute; left:0; top:0; width:5px; height:100%;
+    background:linear-gradient(180deg,var(--rec),var(--gold));
+  }
+  .header-left h1{ font-size:1.15rem; font-weight:800; letter-spacing:.2px; }
+  .header-left .sub{ font-size:.78rem; color:var(--muted); margin-top:2px; }
+  .back-link{
+    display:inline-flex; align-items:center; gap:4px;
+    font-size:.74rem; color:var(--muted);
+    text-decoration:none;
+    margin-top:6px;
+  }
+  .back-link:hover{ color:var(--ink); }
+  .live-box{
+    display:flex; align-items:center; gap:8px;
+    background:rgba(0,0,0,.32);
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:6px 12px;
+    font-size:.8rem;
+    white-space:nowrap;
+  }
+  .live-dot{ width:9px; height:9px; border-radius:50%; background:var(--muted); flex:none; }
+  .live-dot.live{ background:var(--live); box-shadow:0 0 0 0 rgba(51,209,126,.6); animation:pulse 1.6s infinite; }
+  .live-dot.offline{ background:var(--offline); }
+  @keyframes pulse{
+    0%{ box-shadow:0 0 0 0 rgba(51,209,126,.55); }
+    70%{ box-shadow:0 0 0 7px rgba(51,209,126,0); }
+    100%{ box-shadow:0 0 0 0 rgba(51,209,126,0); }
+  }
+  #lastUpdated{ opacity:.75; }
+
+  /* ---------- Grid layout (mobile-first) ---------- */
+  .newsroom-grid{
+    display:grid;
+    grid-template-columns:1fr;
+    grid-template-areas:
+      "header"
+      "summary"
+      "roster"
+      "board"
+      "minutes"
+      "comm"
+      "worklog"
+      "compose"
+      "livechat";
+    gap:16px;
+  }
+  .grid-header{ grid-area:header; }
+  .sec-summary{ grid-area:summary; }
+  .sec-roster{ grid-area:roster; }
+  .sec-board{ grid-area:board; }
+  .sec-minutes{ grid-area:minutes; }
+  .sec-comm{ grid-area:comm; }
+  .sec-worklog{ grid-area:worklog; }
+  .sec-compose{ grid-area:compose; }
+  .sec-livechat{ grid-area:livechat; }
+
+  @media (min-width:641px){
+    .newsroom-grid{
+      grid-template-columns:1fr 1fr;
+      grid-template-areas:
+        "header  header"
+        "summary summary"
+        "roster  roster"
+        "board   minutes"
+        "comm    worklog"
+        "compose compose"
+        "livechat livechat";
+    }
+  }
+  @media (min-width:1400px){
+    .newsroom-grid{
+      grid-template-columns:1fr 1fr 1fr 1fr;
+      grid-template-areas:
+        "header  header  header  header"
+        "summary summary summary summary"
+        "roster  roster  roster  roster"
+        "board   minutes comm    worklog"
+        "compose compose compose compose"
+        "livechat livechat livechat livechat";
+    }
+  }
+  @media (max-width:479px){
+    .wrap{ padding:10px 8px 32px; }
+    .site-header{ padding:12px 14px; }
+    .card{ width:128px; }
+  }
+
+  /* ---------- Panels (generic newsroom card) ---------- */
+  .panel{
+    background:linear-gradient(160deg,var(--panel),var(--panel-2));
+    border:1px solid var(--line);
+    border-radius:18px;
+    padding:16px;
+    box-shadow:var(--shadow);
+    min-width:0;
+  }
+  .panel h2{
+    font-size:.95rem; font-weight:800; margin-bottom:10px;
+    display:flex; align-items:center; gap:6px;
+    color:#f2f5ff;
+  }
+  .panel h2 .badge-live{
+    font-size:.62rem; font-weight:800; letter-spacing:.05em;
+    color:var(--rec); border:1px solid var(--rec); border-radius:999px;
+    padding:1px 7px; margin-left:auto;
+  }
+  .muted{ color:var(--muted); font-size:.82rem; }
+
+  /* ---------- สรุปงานแผนก (แผงเด่นบนสุด) ---------- */
+  .sec-summary{
+    background:linear-gradient(135deg,#20263f,#131a2c);
+    border:1px solid var(--gold);
+    border-radius:18px;
+    padding:16px 18px;
+    box-shadow:var(--shadow-lg);
+  }
+  .sec-summary h2{ color:var(--gold); }
+  .stat-row{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:8px; }
+  .stat-box{
+    flex:1 1 100px; min-width:100px;
+    background:rgba(0,0,0,.22);
+    border-radius:12px;
+    padding:10px 8px;
+    text-align:center;
+    border:1px solid var(--line);
+  }
+  .stat-num{ font-size:1.5rem; font-weight:800; line-height:1.1; }
+  .stat-label{ font-size:.7rem; color:var(--muted); margin-top:2px; }
+  .stat-box.stat-go .stat-num{ color:var(--live); }
+  .stat-box.stat-warn .stat-num{ color:var(--c-ken); }
+  .stat-box.stat-no .stat-num{ color:var(--offline); }
+  .summary-latest{ font-size:.78rem; color:var(--muted); }
+  .summary-latest strong{ color:#dbe2f0; font-weight:700; }
+
+  /* ---------- Roster section ---------- */
+  .sec-roster{
+    background:linear-gradient(160deg,#131a2c,#0c111d);
+    border:1px solid var(--line);
+    border-radius:18px;
+    padding:16px;
+    box-shadow:var(--shadow);
+  }
+  .sec-roster .room-label{
+    display:inline-flex; align-items:center; gap:6px;
+    font-weight:800; font-size:.92rem;
+    padding:4px 12px;
+    border-radius:999px;
+    background:rgba(255,255,255,.06);
+    color:#f2f5ff;
+    margin-bottom:12px;
+  }
+  .card-row{ display:flex; flex-wrap:wrap; gap:12px; }
+
+  /* ---------- Employee card (monitor style) ---------- */
+  .card{
+    background:#0e1424;
+    border-radius:14px;
+    padding:12px;
+    width:150px;
+    flex:1 1 150px;
+    max-width:210px;
+    box-shadow:var(--shadow);
+    border:2px solid #232c42;
+    text-align:center;
+    position:relative;
+    cursor:pointer;
+    transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+  }
+  .card::before{
+    content:"";
+    position:absolute; inset:0;
+    border-radius:14px;
+    background:linear-gradient(180deg, rgba(255,255,255,.04), transparent 40%);
+    pointer-events:none;
+  }
+  .card:hover, .card:focus-visible{
+    transform:translateY(-3px);
+    box-shadow:var(--shadow-lg);
+    border-color:var(--card-accent, var(--gold));
+    outline:none;
+  }
+
+  /* ---------- Lead card (ต้น ผอ.ข่าว — เด่นสุด) ---------- */
+  .card-lead{
+    border-color:var(--gold);
+    box-shadow:var(--shadow-lg), 0 0 0 2px rgba(242,193,78,.28);
+  }
+  .card-lead .lead-badge{
+    display:inline-block; font-size:.6rem; font-weight:800; letter-spacing:.05em;
+    color:#1c1508; background:var(--gold); border-radius:999px; padding:1px 8px; margin-bottom:4px;
+  }
+  .avatar{ width:64px; height:64px; display:block; margin:0 auto 6px; }
+  .card-name{ font-weight:800; font-size:.95rem; color:#f2f5ff; }
+  .card-handle{ color:var(--muted); font-size:.74rem; display:block; }
+  .card-model{
+    display:inline-block; margin-top:4px;
+    font-size:.68rem; font-weight:700;
+    color:var(--card-accent, var(--gold));
+    background:rgba(255,255,255,.06);
+    border-radius:999px; padding:2px 8px;
+  }
+  .card-role{
+    margin-top:6px; font-size:.72rem; color:var(--muted);
+    line-height:1.35;
+  }
+
+  /* ---------- Remote frame (โจ — ข้ามค่าย) ---------- */
+  .card-remote{
+    background:#080b14;
+    border:2px solid #2a2140;
+    box-shadow:var(--shadow-lg), inset 0 0 0 4px #05070c;
+    position:relative;
+  }
+  .card-remote .card-name,
+  .card-remote .card-role{ color:#e9e9f5; }
+  .card-remote .camdot{
+    position:absolute; top:5px; left:50%; transform:translateX(-50%);
+    width:6px; height:6px; border-radius:50%; background:#3a3a52;
+  }
+  .card-remote .rec-badge{
+    position:absolute; top:8px; right:8px;
+    display:flex; align-items:center; gap:3px;
+    font-size:.6rem; font-weight:800; letter-spacing:.05em;
+    color:#ffb3b6;
+  }
+  .card-remote .rec-dot{
+    width:6px; height:6px; border-radius:50%; background:var(--rec);
+    animation:recblink 1.1s infinite;
+  }
+  @keyframes recblink{ 0%,100%{ opacity:1; } 50%{ opacity:.25; } }
+  .card-remote .remote-tag{
+    display:block; margin-top:4px; font-size:.62rem; color:#9b9bd0;
+    letter-spacing:.05em;
+  }
+
+  /* ---------- Board / minutes text ---------- */
+  .board-body p, .minutes-body p{ font-size:.85rem; margin-bottom:6px; color:#dbe2f0; }
+  .board-body p.board-head, .minutes-body p.board-head{
+    font-weight:800; font-size:.9rem; margin-top:10px; color:var(--gold);
+  }
+  .board-body p:first-child, .minutes-body p:first-child{ margin-top:0; }
+  .board-body p.mark-go, .minutes-body p.mark-go{ color:var(--live); }
+  .board-body p.mark-warn, .minutes-body p.mark-warn{ color:var(--c-ken); }
+  .board-body p.mark-no, .minutes-body p.mark-no{ color:var(--offline); }
+  .md-table{ overflow-x:auto; margin-bottom:8px; border:1px solid var(--line); border-radius:8px; background:rgba(0,0,0,.2); }
+  .md-table pre{
+    margin:0; padding:8px 10px; white-space:pre; font-family:'Consolas','Sarabun',monospace;
+    font-size:.72rem; color:#dbe2f0; line-height:1.6;
+  }
+
+  /* ---------- comm-log feed ---------- */
+  .chat-item{
+    border-left:4px solid var(--gold);
+    background:rgba(255,255,255,.03);
+    border-radius:8px;
+    padding:8px 10px;
+    margin-bottom:8px;
+    font-size:.8rem;
+  }
+  .chat-meta{ font-weight:700; margin-bottom:2px; color:#f2f5ff; }
+  .chat-meta .chat-to{ color:var(--gold); }
+  .chat-meta .chat-n{ color:var(--muted); font-weight:400; }
+  .chat-text{ color:#dbe2f0; }
+
+  /* ---------- worklog list ---------- */
+  #worklogList li{
+    font-size:.8rem; padding:6px 0; border-bottom:1px dashed var(--line);
+    color:#dbe2f0;
+  }
+  #worklogList li:last-child{ border-bottom:none; }
+  .log-meta{ font-weight:700; color:var(--gold); margin-right:4px; }
+
+  /* ---------- คุยกับพนักงาน (compose) ---------- */
+  .readonly-badge{
+    display:none;
+    background:rgba(255,71,87,.12); color:var(--rec); border:1px solid var(--rec);
+    border-radius:10px; padding:6px 10px; font-size:.78rem; font-weight:700;
+    margin-bottom:10px;
+  }
+  .readonly-badge.show{ display:block; }
+  .compose-row{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+  .compose-row select, .compose-row input[type="text"]{
+    font-family:inherit; font-size:.84rem; padding:8px 10px;
+    border:1px solid var(--line); border-radius:10px;
+    background:#0e1424; color:var(--ink);
+  }
+  .compose-row select{ flex:0 0 auto; min-width:100px; }
+  .compose-row input[type="text"]{ flex:1 1 160px; min-width:0; }
+  .compose-row button, .meeting-btn{
+    font-family:inherit; font-size:.84rem; font-weight:700; cursor:pointer;
+    border:none; border-radius:10px; padding:8px 16px; color:#0d1420;
+    background:var(--gold);
+    box-shadow:var(--shadow);
+  }
+  .meeting-btn{ background:linear-gradient(135deg,var(--rec),#c2273a); color:#fff8ec; width:100%; }
+  .compose-row button:hover, .meeting-btn:hover{ filter:brightness(1.08); }
+
+  /* ---------- แชทสด (livechat) ---------- */
+  #liveChatFeed{ max-height:360px; overflow-y:auto; }
+  .livechat-item{ border-radius:8px; padding:8px 10px; margin-bottom:8px; font-size:.8rem; }
+  .livechat-item .lc-meta{ font-weight:700; margin-bottom:2px; display:flex; gap:6px; align-items:baseline; color:#f2f5ff; }
+  .livechat-item .lc-time{ font-weight:400; color:var(--muted); font-size:.7rem; }
+  .livechat-item .lc-text{ color:#dbe2f0; }
+  .livechat-user{ background:rgba(242,193,78,.08); border-left:4px solid var(--gold); }
+  .livechat-staff{ background:rgba(51,209,126,.08); border-left:4px solid var(--live); }
+  .livechat-meeting{ background:rgba(255,71,87,.1); border-left:4px solid var(--rec); }
+  .livechat-note{ background:transparent; padding:2px 4px; }
+  .livechat-note .lc-text{ color:var(--muted); font-size:.76rem; }
+
+  footer.site-footer{
+    text-align:center; font-size:.72rem; color:var(--muted); margin-top:20px;
+  }
+
+  /* ---------- Desk overlay / panel (side panel + bottom sheet) ---------- */
+  .desk-overlay{
+    position:fixed; inset:0; background:rgba(4,6,12,.55);
+    z-index:40; opacity:0; pointer-events:none; transition:opacity .2s ease;
+  }
+  .desk-overlay.open{ opacity:1; pointer-events:auto; }
+  .desk-panel{
+    position:fixed; top:0; right:0; height:100vh; width:380px; max-width:92vw;
+    background:var(--panel);
+    border-left:1px solid var(--line);
+    box-shadow:-10px 0 28px rgba(0,0,0,.5);
+    transform:translateX(105%);
+    transition:transform .28s ease;
+    z-index:50;
+    display:flex; flex-direction:column;
+  }
+  .desk-panel.open{ transform:translateX(0); }
+  .desk-panel-head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 16px; border-bottom:1px solid var(--line);
+    background:linear-gradient(135deg,#1c2540,#0e1322); color:#f2f5ff;
+  }
+  .desk-panel-title{ font-weight:800; font-size:.95rem; }
+  .desk-panel-close{
+    background:rgba(255,255,255,.12); border:none; color:#fff;
+    width:30px; height:30px; border-radius:50%; cursor:pointer; font-size:1rem;
+    line-height:1;
+  }
+  .desk-panel-body{ padding:14px 16px; overflow-y:auto; flex:1; }
+  .desk-msg{
+    border-left:4px solid var(--gold);
+    background:rgba(255,255,255,.03); border-radius:8px; padding:8px 10px; margin-bottom:8px; font-size:.82rem;
+    color:#dbe2f0;
+  }
+  .desk-msg .chat-meta{ color:#f2f5ff; }
+
+  @media (max-width:767px){
+    .desk-panel{
+      top:auto; bottom:0; left:0; right:0; width:auto; max-width:none;
+      height:auto; max-height:78vh;
+      border-radius:20px 20px 0 0;
+      border-left:none;
+      transform:translateY(105%);
+      box-shadow:0 -10px 28px rgba(0,0,0,.5);
+    }
+    .desk-panel.open{ transform:translateY(0); }
+    .desk-panel-head{ border-radius:20px 20px 0 0; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ SVG avatar sprite (static, self-contained) ============ -->
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+<defs>
+  <symbol id="nf-face" viewBox="0 0 100 100">
+    <circle cx="50" cy="52" r="40" fill="currentColor"/>
+    <circle cx="28" cy="60" r="6" fill="#ff8c7a" opacity="0.35"/>
+    <circle cx="72" cy="60" r="6" fill="#ff8c7a" opacity="0.35"/>
+    <circle cx="37" cy="50" r="4.5" fill="#12141c"/>
+    <circle cx="63" cy="50" r="4.5" fill="#12141c"/>
+    <path d="M38 66 Q50 76 62 66" stroke="#12141c" stroke-width="4" fill="none" stroke-linecap="round"/>
+  </symbol>
+
+  <!-- ต้น: คลิปบอร์ดผังธีม + ลูกศรทิศทาง (ผอ.ข่าว — หัวสายงาน) -->
+  <symbol id="nf-acc-ton" viewBox="0 0 100 100">
+    <rect x="18" y="18" width="34" height="46" rx="3" fill="#fdf6e3" stroke="#a9761f" stroke-width="2.4"/>
+    <rect x="28" y="12" width="14" height="8" rx="2" fill="#a9761f"/>
+    <line x1="24" y1="32" x2="46" y2="32" stroke="#a9761f" stroke-width="2.4"/>
+    <line x1="24" y1="40" x2="46" y2="40" stroke="#a9761f" stroke-width="2.4"/>
+    <line x1="24" y1="48" x2="38" y2="48" stroke="#a9761f" stroke-width="2.4"/>
+    <path d="M60 34 L84 34 M84 34 L75 25 M84 34 L75 43" stroke="#e2543f" stroke-width="4.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+
+  <!-- มด: ปุ่มรีเฟรช + เกียร์ (โอเปอเรเตอร์) -->
+  <symbol id="nf-acc-mod" viewBox="0 0 100 100">
+    <path d="M62 20 a18 18 0 1 0 14 29" fill="none" stroke="#3fa7c9" stroke-width="4.6" stroke-linecap="round"/>
+    <path d="M62 20 l-8 -2 l4 9 Z" fill="#3fa7c9"/>
+    <g fill="none" stroke="#2f7a90" stroke-width="3">
+      <circle cx="30" cy="70" r="9"/>
+      <line x1="30" y1="57" x2="30" y2="61"/>
+      <line x1="30" y1="79" x2="30" y2="83"/>
+      <line x1="17" y1="70" x2="21" y2="70"/>
+      <line x1="39" y1="70" x2="43" y2="70"/>
+      <line x1="20" y1="60" x2="23" y2="63"/>
+      <line x1="37" y1="77" x2="40" y2="80"/>
+      <line x1="40" y1="60" x2="37" y2="63"/>
+      <line x1="23" y1="77" x2="20" y2="80"/>
+    </g>
+  </symbol>
+
+  <!-- เคน: ไมค์ + มงกุฎเล็ก (หัวหน้าโต๊ะ) -->
+  <symbol id="nf-acc-ken" viewBox="0 0 100 100">
+    <polygon points="34,14 40,4 50,12 60,4 66,14" fill="#f6d675" stroke="#a97e1f" stroke-width="2" stroke-linejoin="round"/>
+    <g transform="translate(76,64) rotate(18)">
+      <rect x="-7" y="-16" width="14" height="20" rx="7" fill="#2c2420"/>
+      <path d="M-11 0 a11 11 0 0 0 22 0" fill="none" stroke="#2c2420" stroke-width="3"/>
+      <line x1="0" y1="11" x2="0" y2="20" stroke="#2c2420" stroke-width="3"/>
+      <line x1="-6" y1="20" x2="6" y2="20" stroke="#2c2420" stroke-width="3"/>
+    </g>
+  </symbol>
+
+  <!-- นิน: แว่นขยาย + หนังสือพิมพ์ -->
+  <symbol id="nf-acc-nin" viewBox="0 0 100 100">
+    <circle cx="70" cy="36" r="11" fill="none" stroke="#2f6fb0" stroke-width="4.4"/>
+    <line x1="78" y1="45" x2="88" y2="55" stroke="#2f6fb0" stroke-width="5" stroke-linecap="round"/>
+    <g transform="translate(14,64) rotate(-8)">
+      <rect x="0" y="0" width="26" height="20" rx="1.4" fill="#e9e3d2" stroke="#8a7a5c" stroke-width="1.6"/>
+      <line x1="4" y1="5" x2="22" y2="5" stroke="#8a7a5c" stroke-width="1.6"/>
+      <line x1="4" y1="10" x2="22" y2="10" stroke="#8a7a5c" stroke-width="1.6"/>
+      <line x1="4" y1="15" x2="16" y2="15" stroke="#8a7a5c" stroke-width="1.6"/>
+    </g>
+  </symbol>
+
+  <!-- มีน: ตราชั่งเนื้อหา + ไม้บรรทัด -->
+  <symbol id="nf-acc-meen" viewBox="0 0 100 100">
+    <line x1="50" y1="12" x2="50" y2="30" stroke="#1f7a5c" stroke-width="3.4"/>
+    <line x1="30" y1="18" x2="70" y2="18" stroke="#1f7a5c" stroke-width="3.4"/>
+    <path d="M30 18 L22 34 a10 8 0 0 0 16 0 Z" fill="none" stroke="#1f7a5c" stroke-width="2.6"/>
+    <path d="M70 18 L62 34 a10 8 0 0 0 16 0 Z" fill="none" stroke="#1f7a5c" stroke-width="2.6"/>
+    <g transform="translate(64,66) rotate(18)">
+      <rect x="-16" y="-6" width="32" height="12" rx="1.4" fill="#eafaf3" stroke="#1f7a5c" stroke-width="1.6"/>
+      <line x1="-10" y1="-6" x2="-10" y2="0" stroke="#1f7a5c" stroke-width="1.4"/>
+      <line x1="-2" y1="-6" x2="-2" y2="2" stroke="#1f7a5c" stroke-width="1.4"/>
+      <line x1="6" y1="-6" x2="6" y2="0" stroke="#1f7a5c" stroke-width="1.4"/>
+    </g>
+  </symbol>
+
+  <!-- ฟ้า: หัวใจ + รอยยิ้ม -->
+  <symbol id="nf-acc-fah" viewBox="0 0 100 100">
+    <path d="M74 30 C74 22 66 18 60 24 C54 30 60 38 74 48 C88 38 94 30 88 24 C82 18 74 22 74 30 Z"
+      fill="#ef6f9e" stroke="#c94b78" stroke-width="1.6"/>
+  </symbol>
+
+  <!-- โจ: เครื่องหมายถูก + โล่ -->
+  <symbol id="nf-acc-jo" viewBox="0 0 100 100">
+    <path d="M50 10 L74 20 L74 42 C74 60 62 72 50 78 C38 72 26 60 26 42 L26 20 Z"
+      fill="none" stroke="#9b6bf0" stroke-width="4"/>
+    <path d="M38 44 L47 53 L64 32" fill="none" stroke="#9b6bf0" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+</defs>
+</svg>
+
+<div class="wrap">
+
+  <header class="site-header grid-header">
+    <div class="header-left">
+      <h1>📰 ห้องข่าว — แผนกโต๊ะข่าว</h1>
+      <div class="sub">โต๊ะข่าวกลาง v2 · คัด/เช็ค/เคาะข่าว ก่อนส่ง @phupha อนุมัติ</div>
+      <a class="back-link" href="../../office-ui/office.html">← กลับออฟฟิศใหญ่</a>
+    </div>
+    <div class="live-box">
+      <span id="liveDot" class="live-dot"></span>
+      <span id="liveText">กำลังเชื่อมต่อ…</span>
+      <span id="lastUpdated"></span>
+    </div>
+  </header>
+
+  <div class="newsroom-grid">
+
+    <div class="grid-header" style="display:none"></div>
+
+    <!-- ================= สรุปงานแผนก (แผงเด่นบนสุด) ================= -->
+    <section class="panel sec-summary">
+      <h2>📊 สรุปงานแผนก <span class="badge-live">LIVE</span></h2>
+      <div class="stat-row">
+        <div class="stat-box stat-go"><div class="stat-num" id="statSend">1</div><div class="stat-label">ส่ง</div></div>
+        <div class="stat-box stat-warn"><div class="stat-num" id="statFix">0</div><div class="stat-label">แก้ก่อน</div></div>
+        <div class="stat-box stat-no"><div class="stat-num" id="statDrop">2</div><div class="stat-label">ตก</div></div>
+      </div>
+      <div class="summary-latest" id="summaryLatest">ล่าสุด: <strong>[รอบ demo-1] เคาะ 3 ข่าว: ส่ง 1 / แก้ 0 / ตก 2</strong></div>
+    </section>
+
+    <!-- ================= ทำเนียบ 7 คน ================= -->
+    <section class="sec-roster">
+      <div class="room-label">🖥️ โต๊ะข่าว — ทำเนียบ 7 คน</div>
+      <div class="card-row">
+
+        <div class="card card-lead" data-handle="ton" tabindex="0" role="button" style="--card-accent:var(--c-ton)">
+          <span class="lead-badge">ผอ.ข่าว</span>
+          <svg class="avatar" viewBox="0 0 100 100" aria-hidden="true" style="color:var(--c-ton)">
+            <use href="#nf-face" xlink:href="#nf-face"/>
+            <use href="#nf-acc-ton" xlink:href="#nf-acc-ton"/>
+          </svg>
+          <div class="card-name">ต้น</div>
+          <span class="card-handle">@ton</span>
+          <span class="card-model">Sonnet 5</span>
+          <div class="card-role">ผอ.ข่าว — วางธีมล่าข่าว หัวสายงานทั้งแผนก</div>
+        </div>
+
+        <div class="card" data-handle="mod" tabindex="0" role="button" style="--card-accent:var(--c-mod)">
+          <svg class="avatar" viewBox="0 0 100 100" aria-hidden="true" style="color:var(--c-mod)">
+            <use href="#nf-face" xlink:href="#nf-face"/>
+            <use href="#nf-acc-mod" xlink:href="#nf-acc-mod"/>
+          </svg>
+          <div class="card-name">มด</div>
+          <span class="card-handle">@mod</span>
+          <span class="card-model">Haiku 4.5</span>
+          <div class="card-role">โอเปอเรเตอร์ — ยิงค้น/รีเฟรชรอบล่าตามธีม</div>
+        </div>
+
+        <div class="card" data-handle="ken" tabindex="0" role="button" style="--card-accent:var(--c-ken)">
+          <svg class="avatar" viewBox="0 0 100 100" aria-hidden="true" style="color:var(--c-ken)">
+            <use href="#nf-face" xlink:href="#nf-face"/>
+            <use href="#nf-acc-ken" xlink:href="#nf-acc-ken"/>
+          </svg>
+          <div class="card-name">เคน</div>
+          <span class="card-handle">@ken</span>
+          <span class="card-model">Sonnet 5</span>
+          <div class="card-role">หัวหน้าโต๊ะ/บก.ใหญ่ — เปิดประชุม เคาะสุดท้าย</div>
+        </div>
+
+        <div class="card" data-handle="nin" tabindex="0" role="button" style="--card-accent:var(--c-nin)">
+          <svg class="avatar" viewBox="0 0 100 100" aria-hidden="true" style="color:var(--c-nin)">
+            <use href="#nf-face" xlink:href="#nf-face"/>
+            <use href="#nf-acc-nin" xlink:href="#nf-acc-nin"/>
+          </svg>
+          <div class="card-name">นิน</div>
+          <span class="card-handle">@nin</span>
+          <span class="card-model">Sonnet 5</span>
+          <div class="card-role">นักคัดข่าว — ดูข่าวไหนน่าส่ง/น่าไวรัล</div>
+        </div>
+
+        <div class="card" data-handle="meen" tabindex="0" role="button" style="--card-accent:var(--c-meen)">
+          <svg class="avatar" viewBox="0 0 100 100" aria-hidden="true" style="color:var(--c-meen)">
+            <use href="#nf-face" xlink:href="#nf-face"/>
+            <use href="#nf-acc-meen" xlink:href="#nf-acc-meen"/>
+          </svg>
+          <div class="card-name">มีน</div>
+          <span class="card-handle">@meen</span>
+          <span class="card-model">Haiku 4.5</span>
+          <div class="card-role">เช็คเนื้อ — จับข่าวเนื้อน้อย/ผอม</div>
+        </div>
+
+        <div class="card" data-handle="fah" tabindex="0" role="button" style="--card-accent:var(--c-fah)">
+          <svg class="avatar" viewBox="0 0 100 100" aria-hidden="true" style="color:var(--c-fah)">
+            <use href="#nf-face" xlink:href="#nf-face"/>
+            <use href="#nf-acc-fah" xlink:href="#nf-acc-fah"/>
+          </svg>
+          <div class="card-name">ฟ้า</div>
+          <span class="card-handle">@fah</span>
+          <span class="card-model">Haiku 4.5</span>
+          <div class="card-role">ดูโทน — จับแง่ลบเกิน ดันมุมบวก</div>
+        </div>
+
+        <div class="card card-remote" data-handle="jo" tabindex="0" role="button" style="--card-accent:var(--c-jo)">
+          <span class="camdot"></span>
+          <div class="rec-badge"><span class="rec-dot"></span>REC</div>
+          <svg class="avatar" viewBox="0 0 100 100" aria-hidden="true" style="color:var(--c-jo)">
+            <use href="#nf-face" xlink:href="#nf-face"/>
+            <use href="#nf-acc-jo" xlink:href="#nf-acc-jo"/>
+          </svg>
+          <div class="card-name">โจ</div>
+          <span class="card-handle">@jo</span>
+          <span class="card-model">Sol-Codex</span>
+          <div class="card-role">ตรวจข้อเท็จจริงอิสระ — cross-check ก่อนเคาะ</div>
+          <span class="remote-tag">📡 REMOTE · ข้ามค่าย</span>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ================= กระดานลงมติล่าสุด ================= -->
+    <section class="panel sec-board">
+      <h2>🗳️ กระดานลงมติล่าสุด <span class="badge-live">LIVE</span></h2>
+      <div id="boardBody" class="board-body">
+        <p class="board-head">ตัวอย่าง — รอไฟล์จริง</p>
+        <p class="mark-go">[@ken] ข่าว#1: ✅ เนื้อแน่น มุมน่าสนใจ ส่งได้</p>
+        <p class="mark-warn">[@meen] ข่าว#2: ⚠️ เนื้อน้อยไปหน่อย ต้องคุย</p>
+        <p class="muted">อ่านจาก <code>./meeting/board.md</code></p>
+      </div>
+    </section>
+
+    <!-- ================= มติที่ประชุม ================= -->
+    <section class="panel sec-minutes">
+      <h2>📋 มติที่ประชุม <span class="badge-live">LIVE</span></h2>
+      <div id="minutesBody" class="minutes-body">
+        <p class="board-head">ตัวอย่าง — รอไฟล์จริง</p>
+        <p class="mark-go">ข่าว#1 → ส่ง — เนื้อแน่น โทนสมดุล ทุกคนเห็นตรงกัน</p>
+        <p class="muted">อ่านจาก <code>./meeting/minutes.md</code></p>
+      </div>
+    </section>
+
+    <!-- ================= สื่อสารข้ามคน ================= -->
+    <section class="panel sec-comm">
+      <h2>💬 สื่อสารข้ามคน <span class="badge-live">LIVE</span></h2>
+      <div id="commFeed">
+        <div class="chat-item" style="border-left-color:var(--c-ken)">
+          <div class="chat-meta">เคน <span class="handle">@ken</span> → <span class="chat-to">@all</span> <span class="chat-n">#1</span></div>
+          <div class="chat-text">ตัวอย่าง — สวัสดีทีมโต๊ะข่าว วันนี้เริ่มประชุมคัดข่าวรอบแรก (อ่านจาก ./comm-log.md)</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= สมุดงาน ================= -->
+    <section class="panel sec-worklog">
+      <h2>📓 สมุดงาน <span class="badge-live">LIVE</span></h2>
+      <ul id="worklogList">
+        <li><span class="log-meta">[ตัวอย่าง #1]</span> เปิดห้องข่าว — รอไฟล์ ./worklog.md จริง</li>
+      </ul>
+    </section>
+
+    <!-- ================= คุยกับพนักงาน ================= -->
+    <section class="panel sec-compose">
+      <h2>💬 คุยกับพนักงาน</h2>
+      <div id="readonlyBadge" class="readonly-badge">โหมดอ่านอย่างเดียว (เปิดผ่านเซิร์ฟเวอร์ในบ้านเพื่อแชท)</div>
+      <div class="compose-row">
+        <select id="chatTo">
+          <option value="@all">@all</option>
+          <option value="@ton">@ton</option>
+          <option value="@mod">@mod</option>
+          <option value="@ken">@ken</option>
+          <option value="@nin">@nin</option>
+          <option value="@meen">@meen</option>
+          <option value="@fah">@fah</option>
+          <option value="@jo">@jo</option>
+        </select>
+        <input id="chatText" type="text" placeholder="พิมพ์ข้อความ…" maxlength="500">
+        <button id="chatSendBtn" type="button">ส่ง</button>
+      </div>
+      <button id="meetingBtn" type="button" class="meeting-btn">📣 เรียกประชุม</button>
+    </section>
+
+    <!-- ================= แชทสด ================= -->
+    <section class="panel sec-livechat">
+      <h2>💬 แชท <span class="badge-live">LIVE</span></h2>
+      <div id="liveChatFeed">
+        <p class="muted">ตัวอย่าง — ยังไม่มีข้อความ (อ่านจาก ./chat.md)</p>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="site-footer">Fable &amp; Co. — ห้องข่าวแผนกโต๊ะข่าว · ข้อมูลอ่านจาก meeting/board.md · meeting/minutes.md · comm-log.md · worklog.md</footer>
+</div>
+
+<!-- ================= Desk panel (side panel / bottom sheet) ================= -->
+<div id="deskOverlay" class="desk-overlay"></div>
+<aside id="deskPanel" class="desk-panel" aria-hidden="true">
+  <div class="desk-panel-head">
+    <div id="deskPanelTitle" class="desk-panel-title">เลือกพนักงาน</div>
+    <button id="deskPanelClose" class="desk-panel-close" type="button" aria-label="ปิด">✕</button>
+  </div>
+  <div id="deskPanelBody" class="desk-panel-body">
+    <p class="muted">คลิกที่การ์ดพนักงานเพื่อดูโต๊ะทำงาน</p>
+  </div>
+</aside>
+
+<script>
+(function(){
+  'use strict';
+
+  var IS_FILE = (location.protocol === 'file:');
+  var REFRESH_MS = 8000;
+
+  var BOARD_URL = './meeting/board.md';
+  var MINUTES_URL = './meeting/minutes.md';
+  var COMM_URL = './comm-log.md';
+  var WORKLOG_URL = './worklog.md';
+
+  /* ---------------- แชทโต้ตอบ (POST /api/say, /api/meeting) ---------------- */
+  var CHAT_SCOPE = 'newsdesk';
+  var CHAT_URL = './chat.md';
+  var SAY_URL = '/api/say';
+  var MEETING_URL = '/api/meeting';
+
+  function escapeHtml(s){
+    return String(s)
+      .split('&').join('&amp;')
+      .split('<').join('&lt;')
+      .split('>').join('&gt;')
+      .split('"').join('&quot;');
+  }
+
+  function fetchText(url){
+    return fetch(url, { cache:'no-store' }).then(function(r){
+      if (!r.ok) { throw new Error('http ' + r.status); }
+      return r.text();
+    });
+  }
+
+  function inlineMd(escapedText){
+    return escapedText.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  }
+
+  function markClass(line){
+    if (line.indexOf('✅') !== -1) { return ' mark-go'; }
+    if (line.indexOf('⚠️') !== -1) { return ' mark-warn'; }
+    if (line.indexOf('❌') !== -1) { return ' mark-no'; }
+    return '';
+  }
+
+  /* markdown แบบง่าย: บรรทัด # เป็นหัวข้อ, บรรทัด |...| เป็นตาราง (โชว์ตัวเรียงตัวอักษรเท่ากัน),
+     บรรทัดว่างข้าม, สีตาม ✅/⚠️/❌ */
+  function renderMdHtml(text){
+    var lines = text.split('\n');
+    var html = '';
+    var tableBuf = [];
+
+    function flushTable(){
+      if (tableBuf.length === 0){ return; }
+      html += '<div class="md-table"><pre>' + escapeHtml(tableBuf.join('\n')) + '</pre></div>';
+      tableBuf = [];
+    }
+
+    for (var i = 0; i < lines.length; i++){
+      var t = lines[i].replace(/^\s+|\s+$/g, '');
+      if (t === ''){ flushTable(); continue; }
+      if (t.charAt(0) === '|'){ tableBuf.push(t); continue; }
+      flushTable();
+      var head = /^#{1,6}\s+(.*)$/.exec(t);
+      if (head){
+        html += '<p class="board-head">' + inlineMd(escapeHtml(head[1])) + '</p>';
+      } else {
+        html += '<p class="' + markClass(t) + '">' + inlineMd(escapeHtml(t)) + '</p>';
+      }
+    }
+    flushTable();
+    return html;
+  }
+
+  /* รูปแบบหลัก (สเปก DEPT.md): [n] @ผู้รับ: ...
+     รองรับของจริงบนดิสก์ด้วย: [รอบ/รันไอดี] @handle: ... (แท็กไม่ใช่ตัวเลขล้วนก็ได้) */
+  var MSG_RE = /^\[([^\]]+)\]\s*@(\S+):\s*(.*)$/;
+
+  function parseMessages(text){
+    var lines = text.split('\n');
+    var msgs = [];
+    for (var i = 0; i < lines.length; i++){
+      var t = lines[i].replace(/^\s+|\s+$/g, '');
+      var m = MSG_RE.exec(t);
+      if (m){ msgs.push({ n:m[1], to:m[2], text:m[3] }); }
+    }
+    return msgs;
+  }
+
+  var NAME_BY_HANDLE = {
+    ton:{ nameTh:'ต้น', color:'var(--c-ton)' },
+    mod:{ nameTh:'มด', color:'var(--c-mod)' },
+    ken:{ nameTh:'เคน', color:'var(--c-ken)' },
+    nin:{ nameTh:'นิน', color:'var(--c-nin)' },
+    meen:{ nameTh:'มีน', color:'var(--c-meen)' },
+    fah:{ nameTh:'ฟ้า', color:'var(--c-fah)' },
+    jo:{ nameTh:'โจ', color:'var(--c-jo)' }
+  };
+
+  function renderCommFeed(msgs){
+    var out = '';
+    for (var i = 0; i < msgs.length; i++){
+      var m = msgs[i];
+      var who = NAME_BY_HANDLE[m.to] || { nameTh:'', color:'var(--gold)' };
+      out += '<div class="chat-item" style="border-left-color:' + who.color + '">' +
+        '<div class="chat-meta">' + escapeHtml(who.nameTh) + ' <span class="chat-to">@' + escapeHtml(m.to) + '</span> <span class="chat-n">[' + escapeHtml(m.n) + ']</span></div>' +
+        '<div class="chat-text">' + escapeHtml(m.text) + '</div>' +
+        '</div>';
+    }
+    return out;
+  }
+
+  var WORKLOG_RE = /^-\s*\[([^\]]+)\]\s*(.*)$/;
+
+  function parseWorklogItems(text){
+    var lines = text.split('\n');
+    var items = [];
+    for (var i = 0; i < lines.length; i++){
+      var t = lines[i].replace(/^\s+|\s+$/g, '');
+      var m = WORKLOG_RE.exec(t);
+      if (m){ items.push({ tag:m[1], text:m[2] }); }
+    }
+    return items;
+  }
+
+  function renderWorklogHtml(items){
+    if (items.length === 0){ return ''; }
+    var html = '';
+    for (var j = items.length - 1; j >= 0; j--){
+      html += '<li><span class="log-meta">[' + escapeHtml(items[j].tag) + ']</span> ' + escapeHtml(items[j].text) + '</li>';
+    }
+    return html;
+  }
+
+  /* นับมติรอบล่าสุดใน minutes.md: หาหัวข้อ "## " ตัวสุดท้าย แล้วนับ ✅/⚠️/❌ ของบรรทัดหลังจากนั้น */
+  function parseMinutesSummary(text){
+    var lines = text.split('\n');
+    var lastHeadIdx = -1;
+    var i;
+    for (i = 0; i < lines.length; i++){
+      var t = lines[i].replace(/^\s+|\s+$/g, '');
+      if (/^##\s+/.test(t)){ lastHeadIdx = i; }
+    }
+    var start = lastHeadIdx >= 0 ? lastHeadIdx + 1 : 0;
+    var send = 0, fix = 0, drop = 0;
+    for (i = start; i < lines.length; i++){
+      var t2 = lines[i].replace(/^\s+|\s+$/g, '');
+      if (t2 === ''){ continue; }
+      if (t2.indexOf('✅') !== -1){ send++; }
+      else if (t2.indexOf('❌') !== -1){ drop++; }
+      else if (t2.indexOf('⚠️') !== -1){ fix++; }
+    }
+    return { send:send, fix:fix, drop:drop };
+  }
+
+  function applySummaryStats(stats){
+    var sendEl = document.getElementById('statSend');
+    var fixEl = document.getElementById('statFix');
+    var dropEl = document.getElementById('statDrop');
+    if (sendEl){ sendEl.textContent = stats.send; }
+    if (fixEl){ fixEl.textContent = stats.fix; }
+    if (dropEl){ dropEl.textContent = stats.drop; }
+  }
+
+  function applySummaryLatest(items){
+    if (items.length === 0){ return; }
+    var last = items[items.length - 1];
+    var el = document.getElementById('summaryLatest');
+    if (el){ el.innerHTML = 'ล่าสุด: <strong>[' + escapeHtml(last.tag) + '] ' + escapeHtml(last.text) + '</strong>'; }
+  }
+
+  /* ---------------- แชทสด: อ่าน chat.md (server เขียนบรรทัด [HH:MM] 🧑/📣/↳ ...) ---------------- */
+  function stripBold(s){ return s.split('**').join(''); }
+
+  function parseChatLines(text){
+    var lines = text.split('\n');
+    var items = [];
+    for (var i = 0; i < lines.length; i++){
+      var t = lines[i].replace(/^\s+|\s+$/g, '');
+      if (t === ''){ continue; }
+      if (t.charAt(0) === '#' || t.charAt(0) === '>'){ continue; }
+      var tm = /^\[(\d{1,2}:\d{2})\]\s*(.*)$/.exec(t);
+      var time = tm ? tm[1] : '';
+      var rest = tm ? tm[2] : t;
+      if (rest.indexOf('🧑') !== -1){
+        var um = /→\s*(\S+):\s*(.*)$/.exec(rest);
+        items.push({ kind:'user', time:time, to: um ? um[1] : '', text: stripBold(um ? um[2] : rest) });
+      } else if (rest.indexOf('📣') !== -1){
+        var mm = /:\s*(.*)$/.exec(rest);
+        items.push({ kind:'meeting', time:time, text: stripBold(mm ? mm[1] : rest) });
+      } else if (rest.indexOf('↳') !== -1){
+        var sm = /↳\s*\[?([^\]:]+)\]?:?\s*(.*)$/.exec(rest);
+        items.push({ kind:'staff', time:time, who: stripBold(sm ? sm[1].replace(/^\s+|\s+$/g, '') : ''), text: stripBold(sm ? sm[2] : rest) });
+      } else {
+        items.push({ kind:'note', time:time, text: stripBold(rest) });
+      }
+    }
+    return items;
+  }
+
+  function renderChatFeedHtml(items){
+    if (items.length === 0){ return '<p class="muted">ยังไม่มีข้อความ</p>'; }
+    var html = '';
+    for (var i = 0; i < items.length; i++){
+      var it = items[i];
+      if (it.kind === 'user'){
+        html += '<div class="livechat-item livechat-user"><div class="lc-meta">🧑 ผู้ใช้ → ' + escapeHtml(it.to) + ' <span class="lc-time">' + escapeHtml(it.time) + '</span></div><div class="lc-text">' + escapeHtml(it.text) + '</div></div>';
+      } else if (it.kind === 'meeting'){
+        html += '<div class="livechat-item livechat-meeting"><div class="lc-meta">📣 เรียกประชุม <span class="lc-time">' + escapeHtml(it.time) + '</span></div><div class="lc-text">' + escapeHtml(it.text) + '</div></div>';
+      } else if (it.kind === 'staff'){
+        html += '<div class="livechat-item livechat-staff"><div class="lc-meta">↳ [' + escapeHtml(it.who) + '] <span class="lc-time">' + escapeHtml(it.time) + '</span></div><div class="lc-text">' + escapeHtml(it.text) + '</div></div>';
+      } else {
+        html += '<div class="livechat-item livechat-note"><div class="lc-text">' + escapeHtml(it.text) + '</div></div>';
+      }
+    }
+    return html;
+  }
+
+  function loadChatFeed(){
+    fetchText(CHAT_URL).then(function(text){
+      var el = document.getElementById('liveChatFeed');
+      if (el){
+        el.innerHTML = renderChatFeedHtml(parseChatLines(text));
+        el.scrollTop = el.scrollHeight;
+      }
+    }).catch(function(){});
+  }
+
+  function showReadonlyBadge(){
+    var el = document.getElementById('readonlyBadge');
+    if (el){ el.classList.add('show'); }
+  }
+  function hideReadonlyBadge(){
+    var el = document.getElementById('readonlyBadge');
+    if (el){ el.classList.remove('show'); }
+  }
+
+  function postJson(url, payload){
+    return fetch(url, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json; charset=utf-8' },
+      body: JSON.stringify(payload)
+    }).then(function(r){
+      if (!r.ok){ throw new Error('http ' + r.status); }
+      return r.json();
+    });
+  }
+
+  function sendSay(){
+    var toSel = document.getElementById('chatTo');
+    var textInput = document.getElementById('chatText');
+    if (!toSel || !textInput){ return; }
+    var text = textInput.value.replace(/^\s+|\s+$/g, '');
+    if (text === ''){ return; }
+    postJson(SAY_URL, { scope:CHAT_SCOPE, to:toSel.value, text:text }).then(function(){
+      textInput.value = '';
+      hideReadonlyBadge();
+      loadChatFeed();
+    }).catch(function(){ showReadonlyBadge(); });
+  }
+
+  function callMeeting(){
+    var topic = window.prompt('หัวข้อประชุม:', '');
+    if (topic === null){ return; }
+    topic = topic.replace(/^\s+|\s+$/g, '');
+    if (topic === ''){ return; }
+    postJson(MEETING_URL, { scope:CHAT_SCOPE, topic:topic }).then(function(){
+      hideReadonlyBadge();
+      loadChatFeed();
+    }).catch(function(){ showReadonlyBadge(); });
+  }
+
+  function setLive(ok){
+    var dot = document.getElementById('liveDot');
+    var txt = document.getElementById('liveText');
+    var upd = document.getElementById('lastUpdated');
+    if (dot){ dot.classList.toggle('live', ok); dot.classList.toggle('offline', !ok); }
+    if (txt){ txt.textContent = ok ? 'LIVE' : 'OFFLINE (ใช้ข้อมูลตัวอย่าง)'; }
+    if (upd){
+      var now = new Date();
+      var hh = ('0' + now.getHours()).slice(-2);
+      var mm = ('0' + now.getMinutes()).slice(-2);
+      var ss = ('0' + now.getSeconds()).slice(-2);
+      upd.textContent = ' · ' + hh + ':' + mm + ':' + ss;
+    }
+  }
+
+  function refreshAll(){
+    if (IS_FILE){
+      setLive(false);
+      return;
+    }
+    var okCount = 0;
+    var jobs = [];
+
+    loadChatFeed();
+
+    jobs.push(
+      fetchText(BOARD_URL).then(function(text){
+        okCount++;
+        var el = document.getElementById('boardBody');
+        var html = renderMdHtml(text);
+        if (el && html){ el.innerHTML = html; }
+      }).catch(function(){})
+    );
+
+    jobs.push(
+      fetchText(MINUTES_URL).then(function(text){
+        okCount++;
+        var el = document.getElementById('minutesBody');
+        var html = renderMdHtml(text);
+        if (el && html){ el.innerHTML = html; }
+        applySummaryStats(parseMinutesSummary(text));
+      }).catch(function(){})
+    );
+
+    jobs.push(
+      fetchText(COMM_URL).then(function(text){
+        okCount++;
+        var msgs = parseMessages(text);
+        var el = document.getElementById('commFeed');
+        var html = renderCommFeed(msgs);
+        if (el && html){ el.innerHTML = html; }
+      }).catch(function(){})
+    );
+
+    jobs.push(
+      fetchText(WORKLOG_URL).then(function(text){
+        okCount++;
+        var items = parseWorklogItems(text);
+        var el = document.getElementById('worklogList');
+        var html = renderWorklogHtml(items);
+        if (el && html){ el.innerHTML = html; }
+        applySummaryLatest(items);
+      }).catch(function(){})
+    );
+
+    Promise.all(jobs).then(function(){
+      setLive(okCount > 0);
+    });
+  }
+
+  /* ---------------- desk panel (side panel / bottom sheet) ---------------- */
+  var ROSTER = [
+    { handle:'ton',  nameTh:'ต้น',  color:'var(--c-ton)',  deskUrl:'./desk/ton.md' },
+    { handle:'mod',  nameTh:'มด',   color:'var(--c-mod)',  deskUrl:'./desk/mod.md' },
+    { handle:'ken',  nameTh:'เคน',  color:'var(--c-ken)',  deskUrl:'./desk/ken.md' },
+    { handle:'nin',  nameTh:'นิน',  color:'var(--c-nin)',  deskUrl:'./desk/nin.md' },
+    { handle:'meen', nameTh:'มีน',  color:'var(--c-meen)', deskUrl:'./desk/meen.md' },
+    { handle:'fah',  nameTh:'ฟ้า',  color:'var(--c-fah)',  deskUrl:'./desk/fah.md' },
+    { handle:'jo',   nameTh:'โจ',   color:'var(--c-jo)',   deskUrl:'./desk/jo.md' }
+  ];
+
+  /* ข้อความตัวอย่างฝังในตัว ใช้เมื่อ fetch โต๊ะไม่สำเร็จ (file:// หรือไฟล์หาย) กันจอว่าง */
+  var FALLBACK_DESK = {
+    ton:'[1] @all: ผมต้น ผอ.ข่าว วางธีมล่าแต่ละวันแล้วส่งให้มดออกไปหา — ทีมโฟกัสให้ตรงธีม เดี๋ยวข่าวดีไหลเข้าเอง',
+    mod:'[1] @all: มดครับ! รับธีมจากพี่ต้นมาปุ๊บ ยิงค้น/รีเฟรชรอบล่าให้ทันที ได้ข่าวเข้าโต๊ะจะรีบส่งให้พี่เคน\n[2] @ton: พี่ต้นสั่งได้เลย ธีมไหนช่องทางไหน มดจัดให้',
+    ken:'[1] @all: เคนต้อนรับทุก ฟังเสร็จก่อนตัดสิน',
+    nin:'[1] @all: นินช่วยดมข่าวไวรัล ชอบหารายละเอียด',
+    meen:'[1] @all: มีนเช็คเนื้อแน่นทั้งหมด ข่าวเกร็งผ่านหมด',
+    fah:'[1] @all: ฟ้ามองสมดุลโทน ดันมุมบวกให้มั่น',
+    jo:'[1] @all: โจยืนยันหลักฐาน ก่อนเคาะให้เชื่อ'
+  };
+
+  var deskCache = {};
+
+  var deskOverlay = document.getElementById('deskOverlay');
+  var deskPanel = document.getElementById('deskPanel');
+  var deskPanelTitle = document.getElementById('deskPanelTitle');
+  var deskPanelBody = document.getElementById('deskPanelBody');
+
+  function renderDeskBody(person, msgs){
+    if (msgs.length === 0){
+      deskPanelBody.innerHTML = '<p class="muted">ยังไม่มีข้อความบนโต๊ะนี้</p>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < msgs.length; i++){
+      var m = msgs[i];
+      html += '<div class="desk-msg" style="border-left-color:' + person.color + '">' +
+        '<div class="chat-meta">[' + escapeHtml(m.n) + '] → <span class="chat-to">@' + escapeHtml(m.to) + '</span></div>' +
+        '<div class="chat-text">' + escapeHtml(m.text) + '</div></div>';
+    }
+    deskPanelBody.innerHTML = html;
+  }
+
+  function findPerson(handle){
+    for (var i = 0; i < ROSTER.length; i++){ if (ROSTER[i].handle === handle){ return ROSTER[i]; } }
+    return null;
+  }
+
+  function openDesk(handle){
+    var person = findPerson(handle);
+    if (!person){ return; }
+    deskPanelTitle.textContent = person.nameTh + ' (@' + person.handle + ') — โต๊ะทำงาน';
+    deskPanel.classList.add('open');
+    deskOverlay.classList.add('open');
+    deskPanel.setAttribute('aria-hidden', 'false');
+
+    if (deskCache[handle]){
+      renderDeskBody(person, deskCache[handle]);
+      return;
+    }
+    if (IS_FILE){
+      deskCache[handle] = parseMessages(FALLBACK_DESK[handle] || '');
+      renderDeskBody(person, deskCache[handle]);
+      return;
+    }
+    deskPanelBody.innerHTML = '<p class="muted">กำลังโหลด…</p>';
+    fetchText(person.deskUrl).then(function(text){
+      deskCache[handle] = parseMessages(text);
+      renderDeskBody(person, deskCache[handle]);
+    }).catch(function(){
+      deskCache[handle] = parseMessages(FALLBACK_DESK[handle] || '');
+      renderDeskBody(person, deskCache[handle]);
+    });
+  }
+
+  function closeDesk(){
+    deskPanel.classList.remove('open');
+    deskOverlay.classList.remove('open');
+    deskPanel.setAttribute('aria-hidden', 'true');
+  }
+
+  var deskPanelClose = document.getElementById('deskPanelClose');
+  if (deskPanelClose){ deskPanelClose.addEventListener('click', closeDesk); }
+  if (deskOverlay){ deskOverlay.addEventListener('click', closeDesk); }
+
+  var cards = document.querySelectorAll('.card[data-handle]');
+  for (var ci = 0; ci < cards.length; ci++){
+    (function(card){
+      var handle = card.getAttribute('data-handle');
+      card.addEventListener('click', function(){ openDesk(handle); });
+      card.addEventListener('keydown', function(ev){
+        if (ev.key === 'Enter' || ev.key === ' '){
+          ev.preventDefault();
+          openDesk(handle);
+        }
+      });
+    })(cards[ci]);
+  }
+
+  /* ---------------- คุยกับพนักงาน: ผูกปุ่ม ---------------- */
+  var chatSendBtn = document.getElementById('chatSendBtn');
+  var chatTextInput = document.getElementById('chatText');
+  var meetingBtn = document.getElementById('meetingBtn');
+  if (chatSendBtn){ chatSendBtn.addEventListener('click', sendSay); }
+  if (chatTextInput){
+    chatTextInput.addEventListener('keydown', function(ev){
+      if (ev.key === 'Enter'){ ev.preventDefault(); sendSay(); }
+    });
+  }
+  if (meetingBtn){ meetingBtn.addEventListener('click', callMeeting); }
+
+  /* ---------------- boot ---------------- */
+  refreshAll();
+  loadChatFeed();
+  setInterval(refreshAll, REFRESH_MS);
+
+})();
+</script>
+
+</body>
+</html>
