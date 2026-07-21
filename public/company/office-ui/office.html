@@ -915,14 +915,31 @@
     return html;
   }
 
+  /* แชทออนไลน์เก็บใน memory (ไม่ได้อยู่ใน chat.md) — ต่อท้าย feed ทุกครั้งที่ poll กันโดนลบทับ */
+  var onlineLog = [];
+  function renderOnlineLogHtml(){
+    var html = '';
+    for (var i = 0; i < onlineLog.length; i++){
+      var e = onlineLog[i];
+      html += '<div class="livechat-item livechat-user"><div class="lc-meta">🧑 ผู้ใช้ → ' + escapeHtml(e.to) + ' <span class="lc-time">' + escapeHtml(e.time) + '</span></div><div class="lc-text">' + escapeHtml(e.text) + '</div></div>';
+      if (e.reply){
+        html += '<div class="livechat-item livechat-staff"><div class="lc-meta">↳ [' + escapeHtml(e.who) + '] 🌐 <span class="lc-time">' + escapeHtml(e.time) + '</span></div><div class="lc-text">' + escapeHtml(e.reply) + '</div></div>';
+      }
+    }
+    return html;
+  }
+
   function loadChatFeed(){
     fetchText(CHAT_URL).then(function(text){
       var el = document.getElementById('liveChatFeed');
       if (el){
-        el.innerHTML = renderChatFeedHtml(parseChatLines(text));
+        el.innerHTML = renderChatFeedHtml(parseChatLines(text)) + renderOnlineLogHtml();
         el.scrollTop = el.scrollHeight;
       }
-    }).catch(function(){});
+    }).catch(function(){
+      var el2 = document.getElementById('liveChatFeed');
+      if (el2 && onlineLog.length){ el2.innerHTML = renderOnlineLogHtml(); el2.scrollTop = el2.scrollHeight; }
+    });
   }
 
   function showStatus(msg){
@@ -979,17 +996,10 @@
   }
 
   function appendRealtimeExchange(to, text, data){
-    var el = document.getElementById('liveChatFeed');
-    if (!el){ return; }
     var now = new Date();
     var time = ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2);
-    var html = '<div class="livechat-item livechat-user"><div class="lc-meta">🧑 ผู้ใช้ → ' + escapeHtml(to) + ' <span class="lc-time">' + time + '</span></div><div class="lc-text">' + escapeHtml(text) + '</div></div>';
-    if (data && data.reply){
-      var who = data.name || to;
-      html += '<div class="livechat-item livechat-staff"><div class="lc-meta">↳ [' + escapeHtml(who) + '] <span class="lc-time">' + time + '</span></div><div class="lc-text">' + escapeHtml(data.reply) + '</div></div>';
-    }
-    el.innerHTML = el.innerHTML + html;
-    el.scrollTop = el.scrollHeight;
+    onlineLog.push({ to:to, text:text, reply:(data && data.reply) || '', who:(data && data.name) || to, time:time });
+    loadChatFeed();
   }
 
   function sendSayHome(to, text, textInput){
@@ -1056,7 +1066,7 @@
     postJson(MEETING_URL, { scope:CHAT_SCOPE, topic:topic }).then(function(){
       hideStatusBadge();
       loadChatFeed();
-    }).catch(function(){ showStatus('โหมดอ่านอย่างเดียว (เปิดผ่านเซิร์ฟเวอร์ในบ้านเพื่อแชท)'); });
+    }).catch(function(){ showStatus('เรียกประชุมทำได้เฉพาะเปิดผ่านเซิร์ฟเวอร์ในบ้าน (บนออนไลน์ให้พิมพ์คุยกับพนักงานแทน)'); });
   }
 
   function statusLabel(msgs){
