@@ -2,6 +2,20 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "office",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8787",
+        "--directory",
+        "public/company",
+        "--bind",
+        "0.0.0.0"
+      ],
+      "port": 8787
+    },
+    {
       "name": "viral-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
@@ -30,6 +44,15 @@
         "set NODE_OPTIONS=--max-old-space-size=4096&& npx next start -p 3987"
       ],
       "port": 3987
+    },
+    {
+      "name": "desk-dna-run",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set NEXT_DISTDIR=.next-3900&& set NODE_OPTIONS=--max-old-space-size=4096&& npx next start -p 3902"
+      ],
+      "port": 3902
     },
     {
       "name": "viral-verify",
