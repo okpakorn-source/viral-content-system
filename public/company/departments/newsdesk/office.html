@@ -598,6 +598,56 @@
     .desk-panel.open{ transform:translateY(0); }
     .desk-panel-head{ border-radius:20px 20px 0 0; }
   }
+
+  /* ---------- Mobile touch targets + readability (<=767px) ---------- */
+  @media (max-width:767px){
+    .more-toggle-btn,
+    .task-send-btn,
+    .bug-report-btn,
+    .meeting-send-btn,
+    .tasks-open-btn,
+    .chat-input-row button{
+      min-height:44px;
+      display:inline-flex; align-items:center; justify-content:center;
+    }
+    .chat-recipient-row select{
+      min-height:44px; padding:11px 10px;
+    }
+    .chat-input-row input[type="text"]{
+      min-height:44px; font-size:16px;
+    }
+    .chat-panel-close,
+    .desk-panel-close,
+    .mini-popup-close{ width:44px; height:44px; }
+    .chat-fab{ min-height:48px; }
+    .chat-feed{ -webkit-overflow-scrolling:touch; }
+    .chat-main-panel{ padding-bottom:calc(14px + env(safe-area-inset-bottom)); }
+
+    /* การ์ดพนักงาน: 1 คอลัมน์เต็มกว้าง */
+    .card{ flex:1 1 100%; max-width:none; width:auto; }
+
+    /* หัวข้อ >=16px */
+    .panel h2, .sec-roster .room-label, .card-name,
+    .board-body p.board-head, .minutes-body p.board-head{ font-size:1rem; }
+
+    /* เนื้อหา >=14px */
+    .muted, .chat-text, .board-body p, .minutes-body p,
+    .msg-bubble, .task-cmd, .card-role, #worklogList li,
+    .desk-msg, .chat-item, .summary-latest, .archive-detail,
+    .archive-job{ font-size:.875rem; }
+
+    /* chip/ป้าย >=12px */
+    .card-model, .card-handle, .task-badge, .panel h2 .badge-live,
+    .card-lead .lead-badge, .stat-label, .archive-date,
+    .archive-ref{ font-size:.75rem; }
+
+    /* บับเบิลแชท: อ่านง่ายขึ้น */
+    .msg-bubble{ padding:10px 14px; line-height:1.5; }
+    .msg-bubble-wrap{ max-width:85%; }
+
+    /* กันปุ่มลอย 💬 ทับเนื้อหาท้ายหน้า */
+    .wrap{ padding-bottom:84px; }
+  }
 </style>
 </head>
 <body>
