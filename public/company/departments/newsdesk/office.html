@@ -194,6 +194,45 @@
   .summary-latest{ font-size:.78rem; color:var(--muted); }
   .summary-latest strong{ color:#dbe2f0; font-weight:700; }
 
+  /* ▶ ปุ่มรันรอบหาข่าวจริง */
+  .run-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  .run-real-btn{
+    appearance:none; border:0; cursor:pointer;
+    padding:11px 18px; min-height:44px; border-radius:12px;
+    font-size:.95rem; font-weight:800; color:#1b1205;
+    background:linear-gradient(135deg,#ffd76a,#f4b942);
+    box-shadow:0 4px 14px rgba(244,185,66,.35);
+    transition:transform .12s ease, box-shadow .12s ease, opacity .12s;
+  }
+  .run-real-btn:hover{ transform:translateY(-1px); box-shadow:0 6px 18px rgba(244,185,66,.5); }
+  .run-real-btn:active{ transform:translateY(0); }
+  .run-real-btn:disabled{ cursor:progress; opacity:.65; }
+  .run-real-btn.running{ animation:runpulse 1s ease-in-out infinite; }
+  @keyframes runpulse{ 0%,100%{ box-shadow:0 4px 14px rgba(244,185,66,.35);} 50%{ box-shadow:0 4px 22px rgba(244,185,66,.75);} }
+  .run-hint{ font-size:.72rem; color:var(--muted); flex:1; min-width:140px; }
+  .run-result{
+    margin-top:12px; padding:12px 14px; border-radius:12px;
+    background:var(--panel-2); border:1px solid rgba(255,255,255,.06);
+    font-size:.82rem; line-height:1.55; color:#dbe2f0;
+  }
+  .run-result .rr-head{ font-weight:800; margin-bottom:6px; }
+  .run-result.ok .rr-head{ color:var(--live); }
+  .run-result.err .rr-head{ color:var(--offline); }
+  .run-result a{ color:var(--gold); font-weight:700; text-decoration:none; }
+  .run-result ul{ margin:8px 0 0; padding-left:18px; }
+  .run-result li{ margin:3px 0; }
+
+  /* 📡 รอบจริงล่าสุด (สด) */
+  .live-rounds-head{ margin-top:14px; font-size:.8rem; font-weight:800; color:#cfe3ff; display:flex; align-items:center; gap:7px; }
+  .lr-dot{ width:8px; height:8px; border-radius:50%; background:var(--live); box-shadow:0 0 8px var(--live); animation:runpulse 1.4s ease-in-out infinite; }
+  .live-rounds{ margin-top:8px; display:flex; flex-direction:column; gap:6px; }
+  .lr-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:8px 10px; border-radius:10px; background:var(--panel-2); font-size:.78rem; }
+  .lr-row .lr-time{ color:var(--muted); min-width:64px; }
+  .lr-row .lr-badge{ font-weight:800; color:var(--live); }
+  .lr-row .lr-cost{ color:var(--gold); margin-left:auto; font-weight:700; }
+  .lr-row .lr-trig{ font-size:.68rem; color:var(--muted); border:1px solid rgba(255,255,255,.12); border-radius:6px; padding:1px 6px; }
+  .lr-empty{ font-size:.76rem; color:var(--muted); padding:6px 2px; }
+
   /* ---------- Roster section ---------- */
   .sec-roster{
     background:linear-gradient(160deg,#131a2c,#0c111d);
@@ -761,6 +800,7 @@
       <h1>📰 ห้องข่าว — แผนกโต๊ะข่าว</h1>
       <div class="sub">โต๊ะข่าวกลาง v2 · คัด/เช็ค/เคาะข่าว ก่อนส่ง @phupha อนุมัติ</div>
       <a class="back-link" href="../../office-ui/office.html">← กลับออฟฟิศใหญ่</a>
+      <a class="back-link" href="../../live.html" style="margin-left:10px">📺 จอมีชีวิต</a>
     </div>
     <div class="live-box">
       <span id="liveDot" class="live-dot"></span>
@@ -782,6 +822,19 @@
         <div class="stat-box stat-no"><div class="stat-num" id="statDrop">2</div><div class="stat-label">ตก</div></div>
       </div>
       <div class="summary-latest" id="summaryLatest">ล่าสุด: <strong>[รอบ demo-1] เคาะ 3 ข่าว: ส่ง 1 / แก้ 0 / ตก 2</strong></div>
+
+      <!-- ▶ สั่งแผนก "รันรอบหาข่าวจริง" — ยิงเข้าระบบ /news-desk จริง (hunt→คัด→เก็บลีด) -->
+      <div class="run-row">
+        <button id="runRealBtn" class="run-real-btn" type="button" onclick="runRealRound()">
+          🔫 รันรอบหาข่าวจริง
+        </button>
+        <span class="run-hint">ยิงเข้าระบบโต๊ะข่าวจริง · ~1–2 นาที · เห็นผลใน “รอบล่า” ของ /news-desk</span>
+      </div>
+      <div id="runResult" class="run-result" style="display:none"></div>
+
+      <!-- 📡 รอบจริงล่าสุดจากระบบ /news-desk — ดึงสดจาก Supabase (ทุกเครื่อง/มือถือ+PC เห็นตรงกัน) -->
+      <div class="live-rounds-head">📡 รอบจริงล่าสุด (สด — ตรงกันทุกเครื่อง) <span id="liveRoundsDot" class="lr-dot"></span></div>
+      <div id="liveRounds" class="live-rounds"><div class="lr-empty">กำลังดึงข้อมูลสด…</div></div>
     </section>
 
     <!-- ================= ทำเนียบ 8 คน ================= -->
@@ -1498,6 +1551,100 @@
     toastTimer = setTimeout(function(){ el.classList.remove('show'); }, 2600);
   }
 
+  /* ---------------- 🔫 รันรอบหาข่าว "จริง" เข้าระบบ /news-desk ---------------- */
+  var isRunningRound = false;
+  function escapeHtml(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function runRealRound(){
+    if (isRunningRound){ return; }
+    if (!window.confirm('รันรอบหาข่าวจริงเข้าระบบโต๊ะข่าว?\n(ค้นหลายแพลตฟอร์ม + AI คัด · มีค่าค้นเล็กน้อย ~฿1–3 · ใช้ ~1–2 นาที)')){ return; }
+    isRunningRound = true;
+    var btn = document.getElementById('runRealBtn');
+    var box = document.getElementById('runResult');
+    if (btn){ btn.disabled = true; btn.classList.add('running'); btn.textContent = '🔄 กำลังรันรอบ… (อย่าปิดหน้านี้)'; }
+    if (box){
+      box.style.display = 'block';
+      box.className = 'run-result';
+      box.innerHTML = '<div class="rr-head">🔄 กำลังรันรอบหาข่าวจริง…</div><div>ค้น → AI คัด → เก็บลีด กำลังทำงาน อาจใช้ 1–2 นาที</div>';
+    }
+    var t0 = Date.now();
+    fetch('/api/company/newsdesk-run', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json; charset=utf-8' },
+      body: JSON.stringify({ topClusters:2, queriesPerCluster:3 })
+    }).then(function(r){
+      return r.json().catch(function(){ return { success:false, error:'ตอบไม่ใช่ JSON ('+r.status+')' }; });
+    }).then(function(d){
+      if (d && d.success){
+        var secs = Math.round((Number(d.tookMs)||(Date.now()-t0))/1000);
+        var cost = (Number(d.costTHB)||0).toFixed(2);
+        var head = '✅ รอบ '+escapeHtml(d.runId||'')+' เสร็จ';
+        var line = 'เจอ <b>'+(d.found||0)+'</b> · AI คัด <b>'+(d.judged||0)+'</b> · เข้าเกณฑ์เก็บ <b>'+(d.kept||0)+'</b> · เก็บลีดใหม่ <b>'+(d.saved||0)+'</b> ใบ · ฿'+cost+' · '+secs+' วิ';
+        var leadsHtml = '';
+        if (d.leads && d.leads.length){
+          leadsHtml = '<ul>' + d.leads.slice(0,8).map(function(l){
+            return '<li>'+escapeHtml(l.title||'(ไม่มีหัวข้อ)')+' <b>'+(Number(l.matchScore)||0)+'%</b></li>';
+          }).join('') + '</ul>';
+        } else {
+          leadsHtml = '<div style="margin-top:6px;color:var(--muted)">รอบนี้ไม่มีลีดเข้าเกณฑ์ (ลองรันซ้ำ/เพิ่มคลัสเตอร์)</div>';
+        }
+        var link = d.newsDeskUrl ? '<div style="margin-top:8px">👉 <a href="'+escapeHtml(d.newsDeskUrl)+'" target="_blank" rel="noopener">เปิด /news-desk ดู “รอบล่า”</a></div>' : '';
+        if (box){ box.className = 'run-result ok'; box.innerHTML = '<div class="rr-head">'+head+'</div><div>'+line+'</div>'+leadsHtml+link; }
+        showToast('รันรอบจริงเสร็จ — เก็บ '+(d.saved||0)+' ลีด', false);
+        if (typeof refreshAll === 'function'){ try { refreshAll(); } catch(e){} }
+      } else {
+        var msg = (d && d.error) || 'รันรอบล้มเหลว';
+        if (box){ box.className = 'run-result err'; box.innerHTML = '<div class="rr-head">❌ รันไม่สำเร็จ</div><div>'+escapeHtml(msg)+'</div>'; }
+        showToast(msg, true);
+      }
+    }).catch(function(err){
+      if (box){ box.className = 'run-result err'; box.innerHTML = '<div class="rr-head">❌ เชื่อมต่อล้มเหลว</div><div>'+escapeHtml(err && err.message || String(err))+'</div>'; }
+      showToast('เชื่อมต่อล้มเหลว', true);
+    }).then(function(){
+      isRunningRound = false;
+      if (btn){ btn.disabled = false; btn.classList.remove('running'); btn.textContent = '🔫 รันรอบหาข่าวจริง'; }
+    });
+  }
+  window.runRealRound = runRealRound;
+
+  /* ---------------- 📡 รอบจริงล่าสุด (สด จาก Supabase — ตรงกันทุกเครื่อง) ---------------- */
+  function timeAgo(iso){
+    var t = new Date(iso).getTime();
+    if (!t || isNaN(t)){ return '—'; }
+    var s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60){ return s + ' วิที่แล้ว'; }
+    var m = Math.round(s / 60);
+    if (m < 60){ return m + ' นาที'; }
+    var h = Math.round(m / 60);
+    if (h < 24){ return h + ' ชม.'; }
+    return Math.round(h / 24) + ' วัน';
+  }
+  function pollLiveRounds(){
+    var box = document.getElementById('liveRounds');
+    if (!box){ return Promise.resolve(); }
+    return fetch('/api/desk/research/trace?limit=5', { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var runs = (d && d.runs) || [];
+        if (!runs.length){ box.innerHTML = '<div class="lr-empty">ยังไม่มีรอบหาข่าว — กด “🔫 รันรอบหาข่าวจริง” ด้านบน</div>'; return; }
+        box.innerHTML = runs.map(function(run){
+          var kept = (run.savedLeadIds && run.savedLeadIds.length) || (run.judgeSummary && run.judgeSummary.kept) || 0;
+          var cost = (Number(run.costTHB) || 0).toFixed(2);
+          var trig = run.trigger === 'company' ? 'บริษัท' : (run.trigger === 'manual' ? 'หน้าเว็บ' : (run.trigger || ''));
+          return '<div class="lr-row">'
+            + '<span class="lr-time">' + timeAgo(run.at) + '</span>'
+            + '<span class="lr-badge">เก็บ ' + kept + ' ลีด</span>'
+            + (trig ? '<span class="lr-trig">' + escapeHtml(trig) + '</span>' : '')
+            + '<span class="lr-cost">฿' + cost + '</span>'
+            + '</div>';
+        }).join('');
+      })
+      .catch(function(){ /* เงียบ ไม่รบกวน refresh หลัก */ });
+  }
+  window.pollLiveRounds = pollLiveRounds;
+
   /* ---------------- งานที่สั่ง (แท็บที่ 4): ส่งงานจริงเข้าคิว + poll สถานะ ---------------- */
   var TASK_POLL_MS = 10000;
   var isSendingTask = false;
@@ -1786,6 +1933,7 @@
     var jobs = [];
 
     loadChatFeed();
+    pollLiveRounds(); // 📡 รอบจริงจาก Supabase — ทุกเครื่องเห็นตรงกันเรียลไทม์
 
     jobs.push(
       fetchText(BOARD_URL).then(function(text){
