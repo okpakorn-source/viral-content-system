@@ -166,6 +166,20 @@ export async function POST(request) {
       const r = (o && (o.reply || o.text || o.message)) || (typeof o === 'string' ? o : '');
       return { handle: hd, name: (ROSTER[hd] || {}).name || hd, reply: String(r || 'ตอบไม่ได้ตอนนี้') };
     }
+    // ---- แจ้งบั๊กข้ามแผนก: @arch (ทีมวิศวะ) รับเรื่อง + เข้าคิวงานวิศวะให้แก้ ----
+    if (body.action === 'bug') {
+      const sbb = getSupabase();
+      let bugTaskId = '';
+      if (sbb) {
+        const bid = 'task_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const brec = { id: bid, scope: 'engineering', assignee: 'arch', command: '[🐛 บั๊กจากห้อง ' + (scope || 'main') + '] ' + msg, status: 'pending', from: 'owner', ts: Date.now(), result: '', type: 'bug' };
+        const bi = await sbb.from('store_items').insert({ id: bid, store_name: 'company_tasks', data: brec, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }).catch(function () { return { error: true }; });
+        if (!bi || !bi.error) bugTaskId = bid;
+      }
+      const archAck = await replyAs('arch');
+      return NextResponse.json({ success: true, from: 'arch', name: 'อาร์ค', reply: archAck.reply, bugTaskId: bugTaskId, note: 'ส่งบั๊กให้ทีมวิศวะแล้ว — เข้าคิวงานวิศวะ ผู้จัดการจะให้ทีมแก้' });
+    }
+
     // @all → เราเตอร์เลือกเฉพาะคนที่เกี่ยวข้องจริง (กันทุกคนตอบจนรก/เปลือง)
     if (!h || h === 'all') {
       const rosterAll = scope === 'newsdesk' ? ['ton', 'ken', 'mod', 'nin', 'meen', 'fah', 'jo', 'rin']

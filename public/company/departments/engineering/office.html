@@ -311,6 +311,7 @@
       right:0; left:0; bottom:0; top:0; width:auto; max-width:none;
       height:auto; max-height:none; border-radius:0;
     }
+    .mini-popup{ border-radius:0; }
   }
   .chat-panel-head{
     display:flex; align-items:center; justify-content:space-between; gap:10px;
@@ -335,15 +336,15 @@
   }
   .readonly-badge.show{ display:block; }
 
-  .chat-tabs{ display:flex; gap:6px; padding:10px 14px 10px; flex:none; }
-  .chat-tab{
-    flex:1 1 0; font-family:inherit; font-size:.74rem; font-weight:700; cursor:pointer;
-    border:1px solid var(--line); background:var(--panel); color:var(--muted);
-    border-radius:999px; padding:6px 6px;
+  .chat-recipient-row{
+    display:flex; align-items:center; gap:8px; padding:10px 14px 10px; flex:none; font-size:.8rem;
   }
-  .chat-tab.active{ background:var(--accent); color:#08101c; border-color:var(--accent); }
-  .chat-tab-panel{ display:none; flex:1; min-height:0; flex-direction:column; padding:0 14px 14px; overflow:hidden; }
-  .chat-tab-panel.active{ display:flex; }
+  .chat-recipient-row label{ color:var(--muted); font-weight:700; white-space:nowrap; }
+  .chat-recipient-row select{
+    flex:1; min-width:0; font-family:inherit; font-size:.82rem; padding:7px 9px;
+    border:1px solid var(--line); border-radius:10px; background:#0d1320; color:var(--ink);
+  }
+  .chat-main-panel{ position:relative; flex:1; min-height:0; display:flex; flex-direction:column; padding:0 14px 14px; overflow:hidden; }
   .chat-tab-note{ font-size:.7rem; color:var(--muted); margin-bottom:6px; flex:none; }
   .chat-feed{ flex:1; min-height:0; overflow-y:auto; }
   .chat-input-row{ display:flex; gap:8px; margin-top:8px; flex:none; flex-wrap:wrap; }
@@ -358,6 +359,14 @@
   }
   .chat-input-row button:disabled{ opacity:.6; cursor:not-allowed; }
 
+  .more-row{ margin-top:8px; flex:none; }
+  .more-toggle-btn{
+    font-family:inherit; font-size:.76rem; font-weight:700; cursor:pointer;
+    border:1px dashed var(--line); background:transparent; color:var(--muted);
+    border-radius:10px; padding:6px 12px;
+  }
+  .more-menu{ display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+
   .task-send-btn{
     font-family:inherit; font-size:.82rem; font-weight:700; cursor:pointer; white-space:nowrap;
     border:none; border-radius:10px; padding:8px 14px; color:#08101c;
@@ -365,7 +374,27 @@
   }
   .task-send-btn:disabled{ opacity:.6; cursor:not-allowed; }
 
-  /* งานที่สั่ง (แท็บที่ 4) */
+  .bug-report-btn{
+    font-family:inherit; font-size:.82rem; font-weight:700; cursor:pointer; white-space:nowrap;
+    border:none; border-radius:10px; padding:8px 14px; color:#08101c;
+    background:linear-gradient(135deg,var(--rec),#f2994a);
+  }
+  .bug-report-btn:disabled{ opacity:.6; cursor:not-allowed; }
+
+  .meeting-send-btn{
+    font-family:inherit; font-size:.82rem; font-weight:700; cursor:pointer; white-space:nowrap;
+    border:none; border-radius:10px; padding:8px 14px; color:#fff8ec;
+    background:linear-gradient(135deg,var(--rec),#c2273a);
+  }
+  .meeting-send-btn:disabled{ opacity:.6; cursor:not-allowed; }
+
+  .tasks-open-btn{
+    font-family:inherit; font-size:.82rem; font-weight:700; cursor:pointer; white-space:nowrap;
+    border:1px solid var(--line); border-radius:10px; padding:8px 14px; color:var(--ink);
+    background:var(--panel-2);
+  }
+
+  /* งานที่สั่ง (popup เล็ก) */
   .task-card{
     border-radius:12px; background:#121a2c; border:1px solid var(--line);
     padding:10px 12px; margin-bottom:10px; font-size:.8rem;
@@ -380,6 +409,18 @@
   .task-badge.st-failed{ background:rgba(255,71,87,.16); color:var(--rec); }
   .task-result{ margin-top:6px; padding-top:6px; border-top:1px dashed var(--line); color:var(--ink); white-space:pre-wrap; }
 
+  /* popup เล็กลอยเต็มแผงแชท (งานที่สั่ง) */
+  .mini-popup{
+    position:absolute; inset:0; z-index:5; background:var(--panel);
+    display:flex; flex-direction:column; padding:14px 16px; overflow:hidden;
+    border-radius:20px;
+  }
+  .mini-popup-head{ display:flex; align-items:center; justify-content:space-between; font-weight:800; font-size:.92rem; margin-bottom:8px; flex:none; color:#f2f5ff; }
+  .mini-popup-close{
+    background:rgba(255,255,255,.08); border:none; color:var(--ink);
+    width:26px; height:26px; border-radius:50%; cursor:pointer; font-size:.9rem; flex:none;
+  }
+
   /* toast ลอย แจ้งผลสั่งงาน */
   .fco-toast{
     position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(16px);
@@ -391,24 +432,6 @@
   .fco-toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
   .fco-toast.err{ background:rgba(255,71,87,.2); border-color:var(--rec); color:#ffd9dc; }
 
-  /* คุยรายคน */
-  .people-list{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:6px; }
-  .people-item{
-    display:flex; align-items:center; gap:8px; padding:8px; border-radius:10px; cursor:pointer;
-    border:1px solid transparent;
-  }
-  .people-item:hover, .people-item:focus-visible{ background:rgba(255,255,255,.05); border-color:var(--line); outline:none; }
-  .people-avatar{ width:34px; height:34px; flex:none; }
-  .people-name{ font-weight:700; font-size:.84rem; color:#f2f5ff; }
-  .people-handle{ color:var(--muted); font-size:.7rem; }
-  .people-role{ color:var(--muted); font-size:.7rem; margin-left:auto; text-align:right; white-space:nowrap; }
-  .dm-view{ display:none; flex-direction:column; flex:1; min-height:0; }
-  .dm-back{
-    align-self:flex-start; font-family:inherit; font-size:.76rem; font-weight:700; color:var(--accent);
-    background:none; border:none; cursor:pointer; margin-bottom:4px; padding:2px 0; flex:none;
-  }
-  .dm-title{ font-weight:800; font-size:.82rem; margin-bottom:6px; flex:none; color:#f2f5ff; }
-
   /* บับเบิลสไตล์ messenger */
   .msg-row{ display:flex; margin-bottom:10px; }
   .msg-row.msg-user{ justify-content:flex-end; }
@@ -416,7 +439,8 @@
   .msg-row.msg-meeting-banner, .msg-row.msg-note{ justify-content:center; }
   .msg-bubble-wrap{ max-width:80%; display:flex; flex-direction:column; }
   .msg-row.msg-user .msg-bubble-wrap{ align-items:flex-end; }
-  .msg-avatar-name{ font-size:.68rem; font-weight:700; color:var(--muted); margin-bottom:2px; }
+  .msg-avatar-name{ display:flex; align-items:center; gap:4px; font-size:.68rem; font-weight:700; color:var(--muted); margin-bottom:2px; }
+  .msg-avatar-icon{ width:18px; height:18px; flex:none; border-radius:50%; }
   .msg-bubble{ border-radius:14px; padding:8px 12px; font-size:.82rem; line-height:1.4; word-break:break-word; }
   .msg-row.msg-user .msg-bubble{ background:var(--accent); color:#08101c; border-bottom-right-radius:4px; }
   .msg-row.msg-staff .msg-bubble{ background:#161e30; color:var(--ink); border:1px solid var(--line); border-bottom-left-radius:4px; }
@@ -426,27 +450,6 @@
     background:rgba(74,144,226,.14); border-radius:999px; padding:4px 12px;
   }
   .msg-note-text{ font-size:.72rem; color:var(--muted); }
-
-  /* เรียกประชุม */
-  .meeting-box{ display:flex; gap:8px; margin-bottom:10px; flex:none; }
-  .meeting-box input[type="text"]{
-    flex:1; min-width:0; font-family:inherit; font-size:.84rem; padding:8px 10px;
-    border:1px solid var(--line); border-radius:10px; background:#0d1320; color:var(--ink);
-  }
-  .meeting-start-btn{
-    font-family:inherit; font-size:.8rem; font-weight:700; cursor:pointer; white-space:nowrap;
-    border:none; border-radius:10px; padding:8px 14px; color:#fff8ec;
-    background:linear-gradient(135deg,var(--rec),#c2273a);
-  }
-  .meeting-start-btn:disabled{ opacity:.6; cursor:not-allowed; }
-  .meeting-thread-item{
-    margin-bottom:12px; padding:10px; border-radius:12px; background:#121a2c; border:1px solid var(--line);
-  }
-  .meeting-topic{ font-weight:800; font-size:.84rem; margin-bottom:6px; color:#f2f5ff; }
-  .meeting-chips{ display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px; }
-  .meeting-chip{ font-size:.66rem; font-weight:700; border-radius:999px; padding:2px 8px; color:#fff; }
-  .meeting-say{ font-size:.78rem; margin-bottom:4px; color:#dbe2f0; }
-  .meeting-say b{ font-weight:700; color:#f2f5ff; }
 
   footer.site-footer{
     text-align:center; font-size:.72rem; color:var(--muted); margin-top:20px;
@@ -735,48 +738,32 @@
 
   <div id="readonlyBadge" class="readonly-badge"></div>
 
-  <div class="chat-tabs">
-    <button id="tabRoomBtn" type="button" class="chat-tab active" data-tab="room">ห้องรวม</button>
-    <button id="tabPeopleBtn" type="button" class="chat-tab" data-tab="people">คุยรายคน</button>
-    <button id="tabMeetingBtn" type="button" class="chat-tab" data-tab="meeting">เรียกประชุม</button>
-    <button id="tabTaskBtn" type="button" class="chat-tab" data-tab="task">📋 งานที่สั่ง</button>
+  <div class="chat-recipient-row">
+    <label for="chatRecipientSelect">คุยกับ:</label>
+    <select id="chatRecipientSelect"></select>
   </div>
 
-  <div id="tabRoom" class="chat-tab-panel active">
-    <p class="chat-tab-note">ข้อความส่งถึงหัวหน้าทีม เลือกคนตอบให้เหมาะ</p>
-    <div id="roomFeed" class="chat-feed"><p class="muted">ยังไม่มีข้อความ</p></div>
+  <div class="chat-main-panel">
+    <div id="mainFeed" class="chat-feed"><p class="muted">ยังไม่มีข้อความ</p></div>
     <div class="chat-input-row">
-      <input id="roomTextInput" type="text" placeholder="พิมพ์ถึง @all… (Enter = ส่ง)" maxlength="500">
-      <button id="roomSendBtn" type="button">ส่ง</button>
-      <button id="roomTaskBtn" type="button" class="task-send-btn">📌 สั่งงานจริง</button>
+      <input id="mainTextInput" type="text" placeholder="พิมพ์ข้อความ… (Enter = ส่ง)" maxlength="500">
+      <button id="mainSendBtn" type="button">➤ ส่ง</button>
     </div>
-  </div>
-
-  <div id="tabPeople" class="chat-tab-panel">
-    <div id="peopleList" class="people-list"></div>
-    <div id="dmView" class="dm-view" style="display:none">
-      <button id="dmBackBtn" type="button" class="dm-back">← กลับรายชื่อ</button>
-      <div id="dmTitle" class="dm-title"></div>
-      <div id="dmFeed" class="chat-feed"></div>
-      <div class="chat-input-row">
-        <input id="dmTextInput" type="text" placeholder="พิมพ์… (Enter = ส่ง)" maxlength="500">
-        <button id="dmSendBtn" type="button">ส่ง</button>
-        <button id="dmTaskBtn" type="button" class="task-send-btn">📌 สั่งงานจริง</button>
+    <div class="more-row">
+      <button id="moreToggleBtn" type="button" class="more-toggle-btn">＋ เพิ่มเติม</button>
+      <div id="moreMenu" class="more-menu" style="display:none">
+        <button id="moreTaskBtn" type="button" class="task-send-btn">📌 สั่งงานจริง</button>
+        <button id="moreBugBtn" type="button" class="bug-report-btn">🐛 แจ้งบั๊กวิศวะ</button>
+        <button id="moreMeetingBtn" type="button" class="meeting-send-btn">👥 เรียกประชุม</button>
+        <button id="moreTasksBtn" type="button" class="tasks-open-btn">📋 งานที่สั่ง</button>
       </div>
     </div>
-  </div>
 
-  <div id="tabMeeting" class="chat-tab-panel">
-    <div class="meeting-box">
-      <input id="meetingTopicInput" type="text" placeholder="หัวข้อประชุม… (Enter = เริ่ม)" maxlength="300">
-      <button id="meetingStartBtn" type="button" class="meeting-start-btn">📣 เริ่มประชุม</button>
+    <div id="tasksPopup" class="mini-popup" style="display:none">
+      <div class="mini-popup-head"><span>📋 งานที่สั่ง</span><button id="tasksPopupClose" type="button" class="mini-popup-close">✕</button></div>
+      <p class="chat-tab-note">งานที่สั่งเข้าคิวจริง — อัปเดตสถานะทุก ~10 วิ</p>
+      <div id="taskFeed" class="chat-feed"><p class="muted">ยังไม่มีงานสั่ง</p></div>
     </div>
-    <div id="meetingThread" class="chat-feed"><p class="muted">ยังไม่มีการประชุม</p></div>
-  </div>
-
-  <div id="tabTask" class="chat-tab-panel">
-    <p class="chat-tab-note">งานที่สั่งเข้าคิวจริง — อัปเดตสถานะทุก ~10 วิ</p>
-    <div id="taskFeed" class="chat-feed"><p class="muted">ยังไม่มีงานสั่ง</p></div>
   </div>
 </aside>
 
@@ -985,6 +972,14 @@
   }
 
   /* บับเบิลสไตล์ messenger: ผู้ใช้ขวา (เข้ม) / พนักงานซ้าย (ชื่อ+เวลา) */
+  function tinyAvatarSvg(handle){
+    var h = handle || '';
+    return '<svg class="msg-avatar-icon" viewBox="0 0 100 100" aria-hidden="true" style="color:' + colorForHandle(h) + '">' +
+      '<use href="#' + AVATAR_SYM_PREFIX + '-face" xlink:href="#' + AVATAR_SYM_PREFIX + '-face"/>' +
+      '<use href="#' + AVATAR_SYM_PREFIX + '-acc-' + h + '" xlink:href="#' + AVATAR_SYM_PREFIX + '-acc-' + h + '"/>' +
+      '</svg>';
+  }
+
   function renderMessengerItems(items){
     var html = '';
     for (var i = 0; i < items.length; i++){
@@ -996,12 +991,20 @@
           '</div></div>';
       } else if (it.kind === 'staff'){
         html += '<div class="msg-row msg-staff"><div class="msg-bubble-wrap">' +
-          '<div class="msg-avatar-name">' + escapeHtml(it.who || '') + (it.online ? ' 🌐' : '') + '</div>' +
+          '<div class="msg-avatar-name">' + tinyAvatarSvg(it.handle) + '<span>' + escapeHtml(it.who || '') + (it.online ? ' 🌐' : '') + '</span></div>' +
           '<div class="msg-bubble">' + escapeHtml(it.text) + '</div>' +
           (it.time ? ('<div class="msg-time">' + escapeHtml(it.time) + '</div>') : '') +
           '</div></div>';
       } else if (it.kind === 'meeting'){
         html += '<div class="msg-row msg-meeting-banner"><div class="meeting-banner">📣 ' + escapeHtml(it.topic || '') + (it.time ? (' · ' + escapeHtml(it.time)) : '') + '</div></div>';
+        var rows = it.rows || [];
+        for (var ri = 0; ri < rows.length; ri++){
+          var row = rows[ri] || {};
+          html += '<div class="msg-row msg-staff"><div class="msg-bubble-wrap">' +
+            '<div class="msg-avatar-name">' + tinyAvatarSvg(row.handle) + '<span>' + escapeHtml(row.name || row.handle || '') + '</span></div>' +
+            '<div class="msg-bubble">' + escapeHtml(row.say || '') + '</div>' +
+            '</div></div>';
+        }
       } else if (it.text) {
         html += '<div class="msg-row msg-note"><div class="msg-note-text">' + escapeHtml(it.text) + '</div></div>';
       }
@@ -1014,8 +1017,8 @@
     return (el.scrollHeight - el.clientHeight - el.scrollTop) < 40;
   }
 
-  function renderRoomFeed(){
-    var el = document.getElementById('roomFeed');
+  function renderMainFeed(){
+    var el = document.getElementById('mainFeed');
     if (!el){ return; }
     var wasAtBottom = isFeedAtBottom(el);
     var html = renderMessengerItems(buildCombinedItems());
@@ -1023,135 +1026,30 @@
     if (wasAtBottom){ el.scrollTop = el.scrollHeight; }
   }
 
-  var activeDmHandle = null;
-
-  function renderDmFeed(handle){
-    var el = document.getElementById('dmFeed');
+  /* ---------------- เลือกผู้รับ: dropdown เดียวแทนแท็บ "คุยรายคน" เดิม ---------------- */
+  function renderRecipientOptions(){
+    var el = document.getElementById('chatRecipientSelect');
     if (!el){ return; }
-    var wasAtBottom = isFeedAtBottom(el);
-    var items = buildCombinedItems();
-    var filtered = [];
-    for (var i = 0; i < items.length; i++){
-      var it = items[i];
-      if (it.kind === 'user' && bareHandle(it.to) === handle){ filtered.push(it); }
-      else if (it.kind === 'staff' && it.handle === handle){ filtered.push(it); }
-    }
-    var html = renderMessengerItems(filtered);
-    el.innerHTML = html || '<p class="muted">ยังไม่มีข้อความกับคนนี้</p>';
-    if (wasAtBottom){ el.scrollTop = el.scrollHeight; }
-  }
-
-  function renderMeetingThread(){
-    var el = document.getElementById('meetingThread');
-    if (!el){ return; }
-    var items = buildCombinedItems();
-    var meetings = [];
-    for (var i = 0; i < items.length; i++){ if (items[i].kind === 'meeting'){ meetings.push(items[i]); } }
-    if (meetings.length === 0){ el.innerHTML = '<p class="muted">ยังไม่มีการประชุม</p>'; return; }
-    var html = '';
-    for (var j = 0; j < meetings.length; j++){
-      var m = meetings[j];
-      html += '<div class="meeting-thread-item">';
-      html += '<div class="meeting-topic">📣 ' + escapeHtml(m.topic || '') + (m.time ? (' <span class="msg-time">· ' + escapeHtml(m.time) + '</span>') : '') + '</div>';
-      if (m.rows && m.rows.length){
-        html += '<div class="meeting-chips">';
-        for (var k = 0; k < m.rows.length; k++){
-          var row = m.rows[k] || {};
-          html += '<span class="meeting-chip" style="background:' + colorForHandle(row.handle) + '">@' + escapeHtml(row.handle || '') + '</span>';
-        }
-        html += '</div>';
-        for (var k2 = 0; k2 < m.rows.length; k2++){
-          var row2 = m.rows[k2] || {};
-          html += '<div class="meeting-say"><b>' + escapeHtml(row2.name || row2.handle || '') + ':</b> ' + escapeHtml(row2.say || '') + '</div>';
-        }
-      } else {
-        html += '<div class="meeting-say muted">ประชุมผ่านโหมดในบ้าน (ไม่มีรายละเอียดผู้เข้าร่วม)</div>';
-      }
-      html += '</div>';
-    }
-    el.innerHTML = html;
-  }
-
-  function renderPeopleList(){
-    var el = document.getElementById('peopleList');
-    if (!el){ return; }
-    var html = '';
+    var html = '<option value="all">👥 ทั้งทีม</option>';
     for (var i = 0; i < ROSTER.length; i++){
       var p = ROSTER[i];
-      html += '<div class="people-item" data-handle="' + p.handle + '" tabindex="0" role="button">' +
-        '<svg class="people-avatar" viewBox="0 0 100 100" aria-hidden="true" style="color:' + p.color + '">' +
-        '<use href="#' + AVATAR_SYM_PREFIX + '-face" xlink:href="#' + AVATAR_SYM_PREFIX + '-face"/>' +
-        '<use href="#' + AVATAR_SYM_PREFIX + '-acc-' + p.handle + '" xlink:href="#' + AVATAR_SYM_PREFIX + '-acc-' + p.handle + '"/>' +
-        '</svg>' +
-        '<div><div class="people-name">' + escapeHtml(p.nameTh) + ' <span class="people-handle">@' + escapeHtml(p.handle) + '</span></div></div>' +
-        '<div class="people-role">' + escapeHtml(p.role || '') + '</div>' +
-        '</div>';
+      html += '<option value="' + p.handle + '">' + escapeHtml(p.nameTh) + ' · @' + escapeHtml(p.handle) + (p.role ? (' · ' + escapeHtml(p.role)) : '') + '</option>';
     }
     el.innerHTML = html;
-    var rows = el.querySelectorAll('.people-item');
-    for (var ri = 0; ri < rows.length; ri++){
-      (function(row){
-        var h = row.getAttribute('data-handle');
-        row.addEventListener('click', function(){ openDmView(h); });
-        row.addEventListener('keydown', function(ev){
-          if (ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); openDmView(h); }
-        });
-      })(rows[ri]);
-    }
   }
-
-  function openDmView(handle){
-    activeDmHandle = handle;
-    var person = findRosterPerson(handle);
-    var peopleListEl = document.getElementById('peopleList');
-    var dmViewEl = document.getElementById('dmView');
-    var dmTitleEl = document.getElementById('dmTitle');
-    if (peopleListEl){ peopleListEl.style.display = 'none'; }
-    if (dmViewEl){ dmViewEl.style.display = 'flex'; }
-    if (dmTitleEl){ dmTitleEl.textContent = person ? (person.nameTh + ' (@' + person.handle + ')') : ('@' + handle); }
-    renderDmFeed(handle);
-  }
-  function closeDmView(){
-    activeDmHandle = null;
-    var peopleListEl = document.getElementById('peopleList');
-    var dmViewEl = document.getElementById('dmView');
-    if (dmViewEl){ dmViewEl.style.display = 'none'; }
-    if (peopleListEl){ peopleListEl.style.display = 'flex'; }
-  }
-
-  var activeTab = 'room';
-  function renderActiveTab(){
-    if (activeTab === 'room'){ renderRoomFeed(); }
-    else if (activeTab === 'people'){ if (activeDmHandle){ renderDmFeed(activeDmHandle); } }
-    else if (activeTab === 'meeting'){ renderMeetingThread(); }
-    else if (activeTab === 'task'){ renderTaskFeed(); }
-  }
-  function setActiveTab(tab){
-    activeTab = tab;
-    var pairs = [
-      ['tabRoomBtn', 'tabRoom', 'room'],
-      ['tabPeopleBtn', 'tabPeople', 'people'],
-      ['tabMeetingBtn', 'tabMeeting', 'meeting'],
-      ['tabTaskBtn', 'tabTask', 'task']
-    ];
-    for (var i = 0; i < pairs.length; i++){
-      var btnEl = document.getElementById(pairs[i][0]);
-      var panelEl = document.getElementById(pairs[i][1]);
-      var isActive = (pairs[i][2] === tab);
-      if (btnEl){ btnEl.classList.toggle('active', isActive); }
-      if (panelEl){ panelEl.classList.toggle('active', isActive); }
-    }
-    if (tab === 'task'){ loadTasks(); return; }
-    renderActiveTab();
+  function selectedRecipient(){
+    var el = document.getElementById('chatRecipientSelect');
+    var v = el ? el.value : 'all';
+    return (!v || v === 'all') ? '@all' : ('@' + v);
   }
 
   var lastChatMdText = '';
   function loadChatFeed(){
     fetchText(CHAT_URL).then(function(text){
       lastChatMdText = text;
-      renderActiveTab();
+      renderMainFeed();
     }).catch(function(){
-      renderActiveTab();
+      renderMainFeed();
     });
   }
 
@@ -1279,19 +1177,51 @@
     });
   }
 
+  /* ---------------- แจ้งบั๊กวิศวะ: ส่งตรงเข้าคิว @arch (แยก busy-state จากปุ่มอื่น) ---------------- */
+  var isSendingBug = false;
+
+  function submitBug(textInputEl, bugBtnEl){
+    if (isSendingBug){ return; }
+    if (!textInputEl){ return; }
+    var text = textInputEl.value.replace(/^\s+|\s+$/g, '');
+    if (text === ''){ return; }
+
+    isSendingBug = true;
+    setBusyBtn(bugBtnEl, true, '⏳ กำลังส่ง…', '🐛 แจ้งบั๊กวิศวะ');
+    function done(){
+      isSendingBug = false;
+      setBusyBtn(bugBtnEl, false, '⏳ กำลังส่ง…', '🐛 แจ้งบั๊กวิศวะ');
+    }
+
+    postOnlineChat({ action:'bug', text:text, scope:CHAT_SCOPE }).then(function(res){
+      if (!res.ok || !res.data || res.data.success === false){
+        showToast((res.data && res.data.error) || 'แจ้งบั๊กไม่สำเร็จ ลองใหม่อีกครั้ง', true);
+        done();
+        return;
+      }
+      textInputEl.value = '';
+      appendRealtimeExchange('@arch', '🐛 แจ้งบั๊ก: ' + text, res.data);
+      showToast('ส่งบั๊กให้ทีมวิศวะแล้ว 🛠️', false);
+      done();
+    }).catch(function(){
+      showToast('แจ้งบั๊กไม่สำเร็จ ลองใหม่อีกครั้ง', true);
+      done();
+    });
+  }
+
   function appendRealtimeExchange(to, text, data){
     if (data && data.roundtable && data.roundtable.length){
       var rows = data.roundtable.map(function(x){ return { handle:x.handle, name:x.name, say:x.reply }; });
       pushOnlineLog({ kind:'meeting', topic:'💬 ' + text, rows: rows, time: nowHHMM() });
-      renderActiveTab();
+      renderMainFeed();
       return;
     }
     pushOnlineLog({ kind:'say', to:to, text:text, reply:(data && data.reply) || '', who:(data && data.name) || to, time: nowHHMM() });
-    renderActiveTab();
+    renderMainFeed();
   }
   function appendRealtimeMeeting(topic, rows){
     pushOnlineLog({ kind:'meeting', topic:topic, rows: rows || [], time: nowHHMM() });
-    renderActiveTab();
+    renderMainFeed();
   }
 
   /* ---------------- สถานะกำลังส่ง: กันกดซ้ำ + โชว์ ⏳ ระหว่างรอ ---------------- */
@@ -1367,24 +1297,24 @@
   }
 
   /* ---------------- ประชุม: ช่องหัวข้อ + เริ่มประชุม อยู่ในแท็บถาวร ---------------- */
-  function submitMeeting(){
+  /* ---------------- ประชุม: ใช้ข้อความในช่องพิมพ์เดียวกันเป็นหัวข้อ (เมนู "+ เพิ่มเติม") ---------------- */
+  function submitMeeting(textInputEl, startBtnEl){
     if (isSendingMeeting){ return; }
-    var topicInput = document.getElementById('meetingTopicInput');
-    var startBtn = document.getElementById('meetingStartBtn');
-    var topic = topicInput ? topicInput.value.replace(/^\s+|\s+$/g, '') : '';
+    if (!textInputEl){ return; }
+    var topic = textInputEl.value.replace(/^\s+|\s+$/g, '');
     if (topic === ''){ return; }
 
     isSendingMeeting = true;
-    setBusyBtn(startBtn, true, '⏳ กำลังส่ง…', '📣 เริ่มประชุม');
+    setBusyBtn(startBtnEl, true, '⏳ กำลังส่ง…', '👥 เรียกประชุม');
     function done(){
       isSendingMeeting = false;
-      setBusyBtn(startBtn, false, '⏳ กำลังส่ง…', '📣 เริ่มประชุม');
+      setBusyBtn(startBtnEl, false, '⏳ กำลังส่ง…', '👥 เรียกประชุม');
     }
 
     function meetingHome(){
       postJson(MEETING_URL, { scope:CHAT_SCOPE, topic:topic }).then(function(){
         hideStatusBadge();
-        if (topicInput){ topicInput.value = ''; }
+        textInputEl.value = '';
         loadChatFeed();
         done();
       }).catch(function(){
@@ -1423,7 +1353,7 @@
       hideStatusBadge();
       updateModeUi('online');
       appendRealtimeMeeting(res.data.topic || topic, res.data.meeting || []);
-      if (topicInput){ topicInput.value = ''; }
+      textInputEl.value = '';
       done();
     }).catch(function(){
       meetingHome();
@@ -1601,58 +1531,54 @@
   }
   if (chatPanelClose){ chatPanelClose.addEventListener('click', closeChatPanel); }
 
-  var tabRoomBtn = document.getElementById('tabRoomBtn');
-  var tabPeopleBtn = document.getElementById('tabPeopleBtn');
-  var tabMeetingBtn = document.getElementById('tabMeetingBtn');
-  var tabTaskBtn = document.getElementById('tabTaskBtn');
-  if (tabRoomBtn){ tabRoomBtn.addEventListener('click', function(){ setActiveTab('room'); }); }
-  if (tabPeopleBtn){ tabPeopleBtn.addEventListener('click', function(){ setActiveTab('people'); }); }
-  if (tabMeetingBtn){ tabMeetingBtn.addEventListener('click', function(){ setActiveTab('meeting'); }); }
-  if (tabTaskBtn){ tabTaskBtn.addEventListener('click', function(){ setActiveTab('task'); }); }
+  var chatRecipientSelect = document.getElementById('chatRecipientSelect');
 
-  var roomSendBtn = document.getElementById('roomSendBtn');
-  var roomTextInput = document.getElementById('roomTextInput');
-  if (roomSendBtn){ roomSendBtn.addEventListener('click', function(){ submitChatMessage('@all', roomTextInput, roomSendBtn); }); }
-  if (roomTextInput){
-    roomTextInput.addEventListener('keydown', function(ev){
-      if (ev.key === 'Enter'){ ev.preventDefault(); submitChatMessage('@all', roomTextInput, roomSendBtn); }
+  var mainSendBtn = document.getElementById('mainSendBtn');
+  var mainTextInput = document.getElementById('mainTextInput');
+  if (mainSendBtn){ mainSendBtn.addEventListener('click', function(){ submitChatMessage(selectedRecipient(), mainTextInput, mainSendBtn); }); }
+  if (mainTextInput){
+    mainTextInput.addEventListener('keydown', function(ev){
+      if (ev.key === 'Enter'){ ev.preventDefault(); submitChatMessage(selectedRecipient(), mainTextInput, mainSendBtn); }
     });
   }
-  var roomTaskBtn = document.getElementById('roomTaskBtn');
-  if (roomTaskBtn){ roomTaskBtn.addEventListener('click', function(){ submitTask('@all', roomTextInput, roomTaskBtn); }); }
 
-  var dmSendBtn = document.getElementById('dmSendBtn');
-  var dmTextInput = document.getElementById('dmTextInput');
-  var dmBackBtn = document.getElementById('dmBackBtn');
-  if (dmSendBtn){
-    dmSendBtn.addEventListener('click', function(){
-      if (activeDmHandle){ submitChatMessage('@' + activeDmHandle, dmTextInput, dmSendBtn); }
+  /* ---------------- เมนู "+ เพิ่มเติม": ซ่อน/โชว์ ทางลัดขั้นสูง (สั่งงานจริง/แจ้งบั๊ก/เรียกประชุม/งานที่สั่ง) ---------------- */
+  var moreToggleBtn = document.getElementById('moreToggleBtn');
+  var moreMenu = document.getElementById('moreMenu');
+  if (moreToggleBtn){
+    moreToggleBtn.addEventListener('click', function(){
+      var isOpen = !!(moreMenu && moreMenu.style.display !== 'none');
+      if (moreMenu){ moreMenu.style.display = isOpen ? 'none' : 'flex'; }
     });
   }
-  if (dmTextInput){
-    dmTextInput.addEventListener('keydown', function(ev){
-      if (ev.key === 'Enter' && activeDmHandle){ ev.preventDefault(); submitChatMessage('@' + activeDmHandle, dmTextInput, dmSendBtn); }
-    });
-  }
-  var dmTaskBtn = document.getElementById('dmTaskBtn');
-  if (dmTaskBtn){
-    dmTaskBtn.addEventListener('click', function(){
-      if (activeDmHandle){ submitTask('@' + activeDmHandle, dmTextInput, dmTaskBtn); }
-    });
-  }
-  if (dmBackBtn){ dmBackBtn.addEventListener('click', closeDmView); }
 
-  var meetingStartBtnEl = document.getElementById('meetingStartBtn');
-  var meetingTopicInputEl = document.getElementById('meetingTopicInput');
-  if (meetingStartBtnEl){ meetingStartBtnEl.addEventListener('click', submitMeeting); }
-  if (meetingTopicInputEl){
-    meetingTopicInputEl.addEventListener('keydown', function(ev){
-      if (ev.key === 'Enter'){ ev.preventDefault(); submitMeeting(); }
+  var moreTaskBtn = document.getElementById('moreTaskBtn');
+  if (moreTaskBtn){ moreTaskBtn.addEventListener('click', function(){ submitTask(selectedRecipient(), mainTextInput, moreTaskBtn); }); }
+
+  var moreBugBtn = document.getElementById('moreBugBtn');
+  if (moreBugBtn){ moreBugBtn.addEventListener('click', function(){ submitBug(mainTextInput, moreBugBtn); }); }
+
+  var moreMeetingBtn = document.getElementById('moreMeetingBtn');
+  if (moreMeetingBtn){ moreMeetingBtn.addEventListener('click', function(){ submitMeeting(mainTextInput, moreMeetingBtn); }); }
+
+  /* ---------------- popup เล็ก: งานที่สั่ง ---------------- */
+  var moreTasksBtn = document.getElementById('moreTasksBtn');
+  var tasksPopup = document.getElementById('tasksPopup');
+  var tasksPopupClose = document.getElementById('tasksPopupClose');
+  if (moreTasksBtn){
+    moreTasksBtn.addEventListener('click', function(){
+      if (tasksPopup){ tasksPopup.style.display = 'flex'; }
+      loadTasks();
+    });
+  }
+  if (tasksPopupClose){
+    tasksPopupClose.addEventListener('click', function(){
+      if (tasksPopup){ tasksPopup.style.display = 'none'; }
     });
   }
 
   updateModeUi(defaultMode());
-  renderPeopleList();
+  renderRecipientOptions();
 
   /* ---------------- boot ---------------- */
   refreshAll();
