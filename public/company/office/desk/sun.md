@@ -6,3 +6,4 @@
 [4] @phupha: ห้องข่าวแผนกโต๊ะข่าวเสร็จ → public/company/departments/newsdesk/office.html
 [5] @phupha: เติม ต้น+มด ครบ 7 คน
 [6] @phupha: เพิ่มแชทโต้ตอบ+เรียกประชุมครบ 2 หน้า (office-ui + newsdesk) ต่อ /api/say, /api/meeting จริงแล้ว
+[7] @phupha: เพิ่มแชทออนไลน์ 🔑 ต่อ /api/company/chat ครบ 2 หน้า (ปลดล็อกรหัส→เรียลไทม์ ไม่มีรหัส/404→fallback บ้าน, 503/403 แจ้งชัดเจน) เทสจริงครบ 5 เคสแล้ว
