@@ -9,3 +9,8 @@
 [bridge-demo-live] @ton: รอบ bridge-demo-live ส่ง 2 / แก้ 2 / ตก 1
 [bridge-demo-live] @phupha: ขออนุมัติส่ง #lead_7bbbc16dd536b0ed และ #lead_1d6275af403ab5a8 เข้าคิว
 [audit-1] @ton: รายงานปัญหา 1 งานให้ทีมวิศวะแล้ว → engineering/comm-log.md
+
+[bridge-cmd-live] @nin: #lead_7f4a1ac30158e474 fact-check หาไม่เจอแหล่งยืนยันชื่อ/วุฒิผู้จบ แถมเนื้อบางแนวธรรมดา พักไว้ก่อนนะ
+[bridge-cmd-live] @nin: #lead_68261629f07cb0c4 คล้าย #lead_3a9e5dc6560c0ff8 มากไป แถม fact-check ยังไม่ยืนยันตัวบุคคล/30ปี พักไว้ก่อน
+[bridge-cmd-live] @ton: รอบ bridge-cmd-live ส่ง 2 / แก้ 2 / ตก 2
+[bridge-cmd-live] @phupha: ขออนุมัติส่ง #lead_1d6275af403ab5a8 และ #lead_3a9e5dc6560c0ff8 เข้าคิว
