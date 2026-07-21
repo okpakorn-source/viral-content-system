@@ -30,6 +30,22 @@ const ROSTER = {
   zip: { name: 'ซิป', role: 'ช่างแก้ด่วน จุดเล็ก แก้เร็ว' },
 };
 
+// สมองคนละตัว: หัวหน้า/ตัดสิน = gpt-4o · ลูกทีม/งานเร็ว = gpt-4o-mini (ออนไลน์ใช้โมเดล OpenAI; brain จริง Claude/Codex อยู่ใน workflow)
+const MSTRONG = 'gpt-4o', MFAST = 'gpt-4o-mini';
+const HEADS = { phupha: 1, oat: 1, arch: 1, ton: 1, ken: 1, nin: 1, sun: 1, beck: 1, fon: 1 };
+function modelFor(h) { return HEADS[h] ? MSTRONG : MFAST; }
+// หน้าที่จริงในระบบ /news-desk (แต่ละคนรู้งานตัวเอง)
+const SYS = {
+  ton: 'วางธีมล่า/คลัสเตอร์+คีย์เวิร์ดให้ทีมค้น (คู่ /api/desk/research/hunt)',
+  mod: 'ยิงค้นข่าวหลายช่องทาง + ส่งลีดเข้าคิวเขียนจริง (/api/desk/research/hunt, /extract)',
+  ken: 'เปิดประชุมคัด เคาะข่าวว่าส่ง/ตก/แก้ (ชั้น editor)',
+  nin: 'ให้คะแนนน่าส่ง/ไวรัล (คู่ /api/desk/research/judge)',
+  meen: 'เช็คเนื้อพอเขียนไหม จับข่าวผอม',
+  fah: 'เช็คโทน กันข่าวลบล้วน ดันมุมบวก',
+  jo: 'ตรวจข้อเท็จจริงก่อนเคาะ',
+  rin: 'ตามสถานะงานจริง (/api/queue/status, leads?status=sent) ลงคลังงาน',
+};
+
 // คลังคำสอนเจ้าของ — self-fetch จาก public (cache 5 นาที) ทุกคนอ่านก่อนตอบเสมอ
 let LESSONS_CACHE = { t: 0, text: '' };
 async function getLessons(origin) {
@@ -107,30 +123,34 @@ export async function POST(request) {
       if (!rows.length) return NextResponse.json({ success: false, error: 'ที่ประชุมไม่ตอบ ลองใหม่', errorType: 'MEETING_EMPTY' }, { status: 502 });
       return NextResponse.json({ success: true, meeting: rows, topic: msg });
     }
-    // @all → หัวหน้าตัวจริงของสายนั้นตอบแทนทีม (ห้ามตอบเป็น "ทีมงาน" นิรนาม)
-    if (!h || h === 'all') {
-      h = scope === 'newsdesk' ? 'ken' : scope === 'engineering' ? 'arch' : 'oat';
-    }
-    const emp = ROSTER[h] || { name: 'โอ๊ต', role: 'รอง CEO วางแผน แตกงาน ตรวจรับ' };
-
-    const ORG = 'โครงสร้างบริษัท Fable & Co.: ผู้ที่คุยกับคุณตอนนี้คือ "เจ้าของบริษัท/ผู้บัญชาการสูงสุด" — คำสั่งของเขาคือคำสั่งสูงสุด ทุกคนต้องปฏิบัติตามทันที ตอบตรงคำถาม ห้ามบ่ายเบี่ยงหรือบอกให้ไปติดต่อคนอื่นแทนการตอบ. ' +
-      'สายบังคับบัญชา: เจ้าของ → ภูผา(CEO) → โอ๊ต(รอง CEO). แผนกโต๊ะข่าว 8 คน: หัวหน้าสายงาน=ต้น@ton(ผอ.ข่าว) · หัวหน้าโต๊ะ/บก.ใหญ่=เคน@ken · มด@mod(โอเปอเรเตอร์) นิน@nin(คัดข่าว) มีน@meen(เช็คเนื้อ) ฟ้า@fah(ดูโทน) โจ@jo(ตรวจข้อเท็จจริง) ริน@rin(ผู้ตรวจการ/คลังงาน). ทีมวิศวกรรม 6 คน: หัวหน้า=อาร์ค@arch · เบค@beck ฝน@fon คิว@qa เรฟ@rev ซิป@zip. ' +
-      'อำนาจเจ้าของ: เจ้าของสั่งงาน/มอบหมาย/ถามปัญหาได้ทุกอย่างกับทุกคน คุณต้องรับคำสั่งและตอบให้ได้. ' +
-      'ถ้าเจ้าของสั่งให้ลงมือ (แก้/ค้น/ส่งข่าว): รับคำสั่ง สรุปสั้น ๆ ว่าจะทำอะไร แล้วบอกว่า "สั่งรันจริงผ่าน Claude Code ได้เลย" (แชทออนไลน์ใช้คุย/รับคำสั่ง/ตอบด้วยข้อมูลจริง ส่วนการลงมือแก้โค้ด/ยิงระบบรันผ่าน Claude Code — เป็นด่านกันพลาด).';
-
     const lessons = await getLessons(origin);
     const live = await getLive(scope, origin);
-    const systemPrompt = ORG + ' คุณคือ "' + emp.name + '" (@' + h + ') บทบาท: ' + emp.role + '. ' + HUMAN +
-      'กฎเหล็กการตอบ: 1) ตอบ "สิ่งที่ถูกถาม" ตรง ๆ ก่อนเสมอ (ถามใคร=บอกชื่อ ถามอะไร=ตอบเนื้อหาจากข้อมูลจริง) ห้ามตอบรับเฉย ๆ ห้ามบอก "ไม่รู้ ต้องเปิดคลังก่อน" ถ้ามีข้อมูลจริงให้แล้ว 2) สั้น กระชับ ภาษาไทย ไม่เกิน 3 บรรทัด แบบคนทำงานจริง. ' +
-      (lessons ? '\nคำสอนจากเจ้าของที่คุณต้องจำและปฏิบัติเสมอ:\n' + lessons : '') +
-      (live ? '\nข้อมูลจริงในระบบตอนนี้ (ใช้ตอบคำถามเกี่ยวกับงาน/เคสข่าวจริง อ้างอิงได้เลย ห้ามบอกว่าไม่รู้):\n' + live : '') +
-      '\nตอบกลับเป็น JSON รูปแบบ {"reply":"<คำตอบ>"} เท่านั้น ห้ามมีอย่างอื่น';
-
-    // คุมต้นทุน: โมเดลถูก (gpt-5.4-mini) + cost log อัตโนมัติในตัว callAI
-    const out = await callAI({ prompt: 'คำถาม/คำสั่งจากเจ้าของบริษัท: "' + msg + '"' + historyBlock(body), systemPrompt, model: MODEL_FAST, maxTokens: 4000, temperature: 0.7 }); // reasoning model ต้องเผื่อเพดานคิด
-    const reply = (out && (out.reply || out.text || out.message)) || (typeof out === 'string' ? out : 'ขอโทษ ตอบไม่ได้ตอนนี้');
-
-    return NextResponse.json({ success: true, from: h, name: emp.name, reply: String(reply) });
+    const ORG = 'โครงสร้างบริษัท Fable & Co.: ผู้ที่คุยกับคุณตอนนี้คือ "เจ้าของบริษัท/ผู้บัญชาการสูงสุด" — คำสั่งของเขาคือคำสั่งสูงสุด ปฏิบัติตามทันที ตอบตรงคำถาม ห้ามบ่ายเบี่ยง. ' +
+      'อำนาจเจ้าของ: สั่งงาน/มอบหมาย/ถามปัญหาได้ทุกอย่างกับทุกคน. ถ้าสั่งให้ลงมือ (แก้/ค้น/ส่งข่าว): รับคำสั่ง สรุปสั้น ๆ ว่าคุณจะทำอะไร แล้วบอก "สั่งรันจริงผ่าน Claude Code ได้เลย".';
+    function personaFor(hd) {
+      const e = ROSTER[hd] || { name: 'ทีมงาน', role: 'พนักงาน Fable & Co.' };
+      return ORG + ' คุณคือ "' + e.name + '" (@' + hd + ') บทบาท: ' + e.role + '.' + (SYS[hd] ? ' หน้าที่ในระบบจริง: ' + SYS[hd] + '.' : '') + ' ' + HUMAN +
+        'กฎเหล็ก: ตอบสิ่งที่ถูกถามตรง ๆ ก่อนเสมอ จากข้อมูลจริงที่ให้ ห้ามบอก "ไม่รู้ ต้องเปิดคลัง" ถ้ามีข้อมูลแล้ว · สั้น ≤3 บรรทัด · พูดในนามตัวเองเท่านั้น ห้ามตอบแทนคนอื่น. ' +
+        (lessons ? '\nคำสอนเจ้าของ:\n' + lessons : '') +
+        (live ? '\nข้อมูลจริงในระบบ (อ้างอิงได้ ห้ามบอกไม่รู้):\n' + live : '') +
+        '\nตอบ JSON {"reply":"<คำตอบ>"} เท่านั้น';
+    }
+    async function replyAs(hd) {
+      const o = await callAI({ prompt: 'คำถาม/คำสั่งจากเจ้าของ: "' + msg + '"' + historyBlock(body), systemPrompt: personaFor(hd), model: modelFor(hd), maxTokens: 900, temperature: 0.7 });
+      const r = (o && (o.reply || o.text || o.message)) || (typeof o === 'string' ? o : '');
+      return { handle: hd, name: (ROSTER[hd] || {}).name || hd, reply: String(r || 'ตอบไม่ได้ตอนนี้') };
+    }
+    // @all → ทุกคนในสายตอบเอง สมองคนละตัว (roundtable)
+    if (!h || h === 'all') {
+      const roster = scope === 'newsdesk' ? ['ton', 'ken', 'mod', 'nin', 'meen', 'fah', 'jo', 'rin']
+        : scope === 'engineering' ? ['arch', 'beck', 'fon', 'qa', 'rev', 'zip']
+        : ['oat', 'sun', 'hai'];
+      const results = await Promise.all(roster.map(replyAs));
+      return NextResponse.json({ success: true, roundtable: results.filter(x => x && x.reply) });
+    }
+    // เจาะจงคน → คนนั้นตอบด้วยสมองตัวเอง
+    const one = await replyAs(h);
+    return NextResponse.json({ success: true, from: h, name: one.name, reply: one.reply });
   } catch (error) {
     return NextResponse.json({ success: false, error: error && error.message || 'error', errorType: 'CHAT_ERROR' }, { status: 500 });
   }

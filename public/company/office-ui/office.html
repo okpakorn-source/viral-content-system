@@ -1312,6 +1312,12 @@
   }
 
   function appendRealtimeExchange(to, text, data){
+    if (data && data.roundtable && data.roundtable.length){
+      var rows = data.roundtable.map(function(x){ return { handle:x.handle, name:x.name, say:x.reply }; });
+      pushOnlineLog({ kind:'meeting', topic:'💬 ' + text, rows: rows, time: nowHHMM() });
+      renderActiveTab();
+      return;
+    }
     pushOnlineLog({ kind:'say', to:to, text:text, reply:(data && data.reply) || '', who:(data && data.name) || to, time: nowHHMM() });
     renderActiveTab();
   }
