@@ -38,9 +38,11 @@ export default function Sidebar() {
   //   จัดกลุ่มหัวข้อ + ไฮไลต์เฉพาะเมนูสำคัญให้เด่น · เปลี่ยนแค่ชื่อแสดงผล/ลำดับ/สี ไม่แตะ route/เวิร์กโฟลว์
   const navItems = [
     // ── ⭐ ใช้งานหลัก (ใช้บ่อยสุด — มาร์คสีเด่น) ──
+    { type: 'divider', label: '🏢 บริษัท AI' },
+    { label: 'ออฟฟิศ Fable & Co.', icon: '🏢', href: '/company/', external: true, highlight: true },
     { type: 'divider', label: '⭐ ใช้งานหลัก' },
     // ⛔ 16 ก.ค. 69: ถอดเมนูโต๊ะข่าวกลาง + คลังส่งเช้า (ยุบระบบโต๊ะข่าว — จะสร้างใหม่; กู้คืน: _removed-systems-backup-20260716)
-    { label: 'โต๊ะข่าว v2 — DNA Lab', icon: '🧬', href: '/news-desk', highlight: true }, // ★ 16 ก.ค. 69: กู้คืนหลัง merge e2a7600 ทำหล่น (conflict เขตข่าว)
+    { label: 'โต๊ะข่าว v2 — DNA Lab', icon: '🧬', href: '/news-desk', highlight: true },
     { label: 'สร้างคอนเทนต์ใหม่', icon: '✨', href: '/content/new', highlight: true },
     { label: 'ผลงานที่เขียนแล้ว', icon: '🧪', href: '/generation-logs' },
     { label: 'คอนเทนต์ทั้งหมด', icon: '📰', href: '/content' },
@@ -132,6 +134,15 @@ export default function Sidebar() {
               return <div key={i} className="sidebar-divider">{item.label}</div>;
             }
             const isActive = pathname === item.href;
+            if (item.external) {
+              return (
+                <a key={i} href={item.href}
+                  className={`sidebar-link ${item.highlight ? 'highlight' : ''}`}>
+                  <span className="sidebar-icon">{item.icon}</span>
+                  <span className="sidebar-label">{item.label}</span>
+                </a>
+              );
+            }
             return (
               <Link key={i} href={item.href}
                 className={`sidebar-link ${isActive ? 'active' : ''} ${item.highlight ? 'highlight' : ''}`}>

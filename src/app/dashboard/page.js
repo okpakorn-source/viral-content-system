@@ -85,6 +85,9 @@ export default function DashboardPage() {
   return (
     <>
       <Header title="แดชบอร์ด" subtitle="ภาพรวมระบบผลิตคอนเทนต์ AI (ข้อมูลจริง)">
+        <a href="/company/" className="btn btn-ghost btn-sm" style={{ textDecoration: 'none' }}>
+          🏢 บริษัท AI
+        </a>
         <Link href="/content/new" className="btn btn-viral btn-sm">
           ✨ สร้างคอนเทนต์ใหม่
         </Link>
