@@ -44,7 +44,7 @@ const server = http.createServer(async (req, res) => {
     }
     // ---- GET: static ----
     let p = decodeURIComponent(u.pathname);
-    if (p === '/' ) p = '/office-ui/office.html';
+    if (p === '/' ) p = '/index.html';
     const full = path.join(ROOT, path.normalize(p).replace(/^([/\\])+/, ''));
     if (!full.startsWith(ROOT)) { res.writeHead(403); res.end('forbidden'); return; }
     fs.readFile(full, (err, data) => {

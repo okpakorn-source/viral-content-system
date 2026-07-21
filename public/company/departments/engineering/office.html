@@ -340,7 +340,7 @@
   .chat-tab-panel.active{ display:flex; }
   .chat-tab-note{ font-size:.7rem; color:var(--muted); margin-bottom:6px; flex:none; }
   .chat-feed{ flex:1; min-height:0; overflow-y:auto; }
-  .chat-input-row{ display:flex; gap:8px; margin-top:8px; flex:none; }
+  .chat-input-row{ display:flex; gap:8px; margin-top:8px; flex:none; flex-wrap:wrap; }
   .chat-input-row input[type="text"]{
     flex:1; min-width:0; font-family:inherit; font-size:.84rem; padding:8px 10px;
     border:1px solid var(--line); border-radius:10px; background:#0d1320; color:var(--ink);
@@ -351,6 +351,39 @@
     background:var(--accent);
   }
   .chat-input-row button:disabled{ opacity:.6; cursor:not-allowed; }
+
+  .task-send-btn{
+    font-family:inherit; font-size:.82rem; font-weight:700; cursor:pointer; white-space:nowrap;
+    border:none; border-radius:10px; padding:8px 14px; color:#08101c;
+    background:linear-gradient(135deg,#f2994a,#c2731f);
+  }
+  .task-send-btn:disabled{ opacity:.6; cursor:not-allowed; }
+
+  /* งานที่สั่ง (แท็บที่ 4) */
+  .task-card{
+    border-radius:12px; background:#121a2c; border:1px solid var(--line);
+    padding:10px 12px; margin-bottom:10px; font-size:.8rem;
+  }
+  .task-cmd{ font-weight:700; margin-bottom:4px; word-break:break-word; color:#f2f5ff; }
+  .task-meta{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .task-assignee{ font-weight:700; color:var(--accent); font-size:.74rem; }
+  .task-badge{ display:inline-flex; align-items:center; gap:4px; font-weight:700; border-radius:999px; padding:2px 9px; font-size:.7rem; }
+  .task-badge.st-pending{ background:rgba(242,153,74,.16); color:#f2994a; }
+  .task-badge.st-running{ background:rgba(74,144,226,.16); color:var(--accent); }
+  .task-badge.st-done{ background:rgba(51,209,126,.16); color:var(--live); }
+  .task-badge.st-failed{ background:rgba(255,71,87,.16); color:var(--rec); }
+  .task-result{ margin-top:6px; padding-top:6px; border-top:1px dashed var(--line); color:var(--ink); white-space:pre-wrap; }
+
+  /* toast ลอย แจ้งผลสั่งงาน */
+  .fco-toast{
+    position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(16px);
+    z-index:90; max-width:88vw; text-align:center;
+    background:#161e30; color:#f2f5ff; font-size:.82rem; font-weight:700;
+    padding:10px 18px; border-radius:999px; box-shadow:var(--shadow-lg); border:1px solid var(--line);
+    opacity:0; pointer-events:none; transition:opacity .2s ease, transform .2s ease;
+  }
+  .fco-toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .fco-toast.err{ background:rgba(255,71,87,.2); border-color:var(--rec); color:#ffd9dc; }
 
   /* คุยรายคน */
   .people-list{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:6px; }
@@ -700,6 +733,7 @@
     <button id="tabRoomBtn" type="button" class="chat-tab active" data-tab="room">ห้องรวม</button>
     <button id="tabPeopleBtn" type="button" class="chat-tab" data-tab="people">คุยรายคน</button>
     <button id="tabMeetingBtn" type="button" class="chat-tab" data-tab="meeting">เรียกประชุม</button>
+    <button id="tabTaskBtn" type="button" class="chat-tab" data-tab="task">📋 งานที่สั่ง</button>
   </div>
 
   <div id="tabRoom" class="chat-tab-panel active">
@@ -708,6 +742,7 @@
     <div class="chat-input-row">
       <input id="roomTextInput" type="text" placeholder="พิมพ์ถึง @all… (Enter = ส่ง)" maxlength="500">
       <button id="roomSendBtn" type="button">ส่ง</button>
+      <button id="roomTaskBtn" type="button" class="task-send-btn">📌 สั่งงานจริง</button>
     </div>
   </div>
 
@@ -720,6 +755,7 @@
       <div class="chat-input-row">
         <input id="dmTextInput" type="text" placeholder="พิมพ์… (Enter = ส่ง)" maxlength="500">
         <button id="dmSendBtn" type="button">ส่ง</button>
+        <button id="dmTaskBtn" type="button" class="task-send-btn">📌 สั่งงานจริง</button>
       </div>
     </div>
   </div>
@@ -731,7 +767,14 @@
     </div>
     <div id="meetingThread" class="chat-feed"><p class="muted">ยังไม่มีการประชุม</p></div>
   </div>
+
+  <div id="tabTask" class="chat-tab-panel">
+    <p class="chat-tab-note">งานที่สั่งเข้าคิวจริง — อัปเดตสถานะทุก ~10 วิ</p>
+    <div id="taskFeed" class="chat-feed"><p class="muted">ยังไม่มีงานสั่ง</p></div>
+  </div>
 </aside>
+
+<div id="fcoToast" class="fco-toast"></div>
 
 <script>
 (function(){
@@ -1075,13 +1118,15 @@
     if (activeTab === 'room'){ renderRoomFeed(); }
     else if (activeTab === 'people'){ if (activeDmHandle){ renderDmFeed(activeDmHandle); } }
     else if (activeTab === 'meeting'){ renderMeetingThread(); }
+    else if (activeTab === 'task'){ renderTaskFeed(); }
   }
   function setActiveTab(tab){
     activeTab = tab;
     var pairs = [
       ['tabRoomBtn', 'tabRoom', 'room'],
       ['tabPeopleBtn', 'tabPeople', 'people'],
-      ['tabMeetingBtn', 'tabMeeting', 'meeting']
+      ['tabMeetingBtn', 'tabMeeting', 'meeting'],
+      ['tabTaskBtn', 'tabTask', 'task']
     ];
     for (var i = 0; i < pairs.length; i++){
       var btnEl = document.getElementById(pairs[i][0]);
@@ -1090,6 +1135,7 @@
       if (btnEl){ btnEl.classList.toggle('active', isActive); }
       if (panelEl){ panelEl.classList.toggle('active', isActive); }
     }
+    if (tab === 'task'){ loadTasks(); return; }
     renderActiveTab();
   }
 
@@ -1143,6 +1189,87 @@
       return r.json().catch(function(){ return {}; }).then(function(data){
         return { status:r.status, ok:r.ok, data:data };
       });
+    });
+  }
+
+  /* ---------------- toast ลอย แจ้งผลสั่งงาน ---------------- */
+  var toastTimer = null;
+  function showToast(msg, isErr){
+    var el = document.getElementById('fcoToast');
+    if (!el){ return; }
+    el.textContent = msg;
+    el.classList.toggle('err', !!isErr);
+    el.classList.add('show');
+    if (toastTimer){ clearTimeout(toastTimer); }
+    toastTimer = setTimeout(function(){ el.classList.remove('show'); }, 2600);
+  }
+
+  /* ---------------- งานที่สั่ง (แท็บที่ 4): ส่งงานจริงเข้าคิว + poll สถานะ ---------------- */
+  var TASK_POLL_MS = 10000;
+  var isSendingTask = false;
+  var lastTasks = [];
+
+  function taskStatusMeta(status){
+    if (status === 'running'){ return { icon:'🔄', label:'กำลังทำ', cls:'st-running' }; }
+    if (status === 'done'){ return { icon:'✅', label:'เสร็จ', cls:'st-done' }; }
+    if (status === 'failed'){ return { icon:'❌', label:'ล้ม', cls:'st-failed' }; }
+    return { icon:'⏳', label:'รอ', cls:'st-pending' };
+  }
+
+  function renderTaskFeed(){
+    var el = document.getElementById('taskFeed');
+    if (!el){ return; }
+    if (!lastTasks || lastTasks.length === 0){ el.innerHTML = '<p class="muted">ยังไม่มีงานสั่ง</p>'; return; }
+    var html = '';
+    for (var i = 0; i < lastTasks.length; i++){
+      var t = lastTasks[i] || {};
+      var meta = taskStatusMeta(t.status);
+      html += '<div class="task-card">' +
+        '<div class="task-cmd">' + escapeHtml(t.command || '') + '</div>' +
+        '<div class="task-meta"><span class="task-assignee">@' + escapeHtml(t.assignee || 'all') + '</span>' +
+        '<span class="task-badge ' + meta.cls + '">' + meta.icon + ' ' + meta.label + '</span></div>' +
+        (t.result ? ('<div class="task-result">' + escapeHtml(t.result) + '</div>') : '') +
+        '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function loadTasks(){
+    postOnlineChat({ action:'tasks', scope:CHAT_SCOPE }).then(function(res){
+      lastTasks = (res.ok && res.data && res.data.success !== false && Array.isArray(res.data.tasks)) ? res.data.tasks : [];
+      renderTaskFeed();
+    }).catch(function(){
+      lastTasks = [];
+      renderTaskFeed();
+    });
+  }
+
+  function submitTask(to, textInputEl, taskBtnEl){
+    if (isSendingTask){ return; }
+    if (!textInputEl){ return; }
+    var text = textInputEl.value.replace(/^\s+|\s+$/g, '');
+    if (text === ''){ return; }
+
+    isSendingTask = true;
+    setBusyBtn(taskBtnEl, true, '⏳ กำลังส่ง…', '📌 สั่งงานจริง');
+    function done(){
+      isSendingTask = false;
+      setBusyBtn(taskBtnEl, false, '⏳ กำลังส่ง…', '📌 สั่งงานจริง');
+    }
+
+    postOnlineChat({ action:'task', to:to, text:text, scope:CHAT_SCOPE }).then(function(res){
+      if (!res.ok || !res.data || res.data.success === false){
+        showToast((res.data && res.data.error) || 'สั่งงานไม่สำเร็จ ลองใหม่อีกครั้ง', true);
+        done();
+        return;
+      }
+      textInputEl.value = '';
+      showToast('รับงานเข้าคิวแล้ว 📌 ทีมจะลงมือแล้วผลกลับมาที่นี่', false);
+      loadTasks();
+      done();
+    }).catch(function(){
+      showToast('ต่อคิวงานไม่ได้ ลองใหม่อีกครั้ง', true);
+      done();
     });
   }
 
@@ -1471,9 +1598,11 @@
   var tabRoomBtn = document.getElementById('tabRoomBtn');
   var tabPeopleBtn = document.getElementById('tabPeopleBtn');
   var tabMeetingBtn = document.getElementById('tabMeetingBtn');
+  var tabTaskBtn = document.getElementById('tabTaskBtn');
   if (tabRoomBtn){ tabRoomBtn.addEventListener('click', function(){ setActiveTab('room'); }); }
   if (tabPeopleBtn){ tabPeopleBtn.addEventListener('click', function(){ setActiveTab('people'); }); }
   if (tabMeetingBtn){ tabMeetingBtn.addEventListener('click', function(){ setActiveTab('meeting'); }); }
+  if (tabTaskBtn){ tabTaskBtn.addEventListener('click', function(){ setActiveTab('task'); }); }
 
   var roomSendBtn = document.getElementById('roomSendBtn');
   var roomTextInput = document.getElementById('roomTextInput');
@@ -1483,6 +1612,8 @@
       if (ev.key === 'Enter'){ ev.preventDefault(); submitChatMessage('@all', roomTextInput, roomSendBtn); }
     });
   }
+  var roomTaskBtn = document.getElementById('roomTaskBtn');
+  if (roomTaskBtn){ roomTaskBtn.addEventListener('click', function(){ submitTask('@all', roomTextInput, roomTaskBtn); }); }
 
   var dmSendBtn = document.getElementById('dmSendBtn');
   var dmTextInput = document.getElementById('dmTextInput');
@@ -1495,6 +1626,12 @@
   if (dmTextInput){
     dmTextInput.addEventListener('keydown', function(ev){
       if (ev.key === 'Enter' && activeDmHandle){ ev.preventDefault(); submitChatMessage('@' + activeDmHandle, dmTextInput, dmSendBtn); }
+    });
+  }
+  var dmTaskBtn = document.getElementById('dmTaskBtn');
+  if (dmTaskBtn){
+    dmTaskBtn.addEventListener('click', function(){
+      if (activeDmHandle){ submitTask('@' + activeDmHandle, dmTextInput, dmTaskBtn); }
     });
   }
   if (dmBackBtn){ dmBackBtn.addEventListener('click', closeDmView); }
@@ -1514,7 +1651,9 @@
   /* ---------------- boot ---------------- */
   refreshAll();
   loadChatFeed();
+  loadTasks();
   setInterval(refreshAll, REFRESH_MS);
+  setInterval(loadTasks, TASK_POLL_MS);
 
 })();
 </script>
