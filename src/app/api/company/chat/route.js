@@ -3,8 +3,7 @@
 // ห้ามแก้ไฟล์ AI ล็อก — import เรียกเท่านั้น (ตามแบบ route อื่น)
 export const maxDuration = 60;
 import { NextResponse } from 'next/server';
-import { callAI } from '@/lib/ai/openai';
-import { MODEL_FAST } from '@/lib/ai/modelConfig';
+import { callClaude } from '@/lib/ai/claudeClient';
 
 // persona พนักงาน (3 กลุ่ม) — ตอบตามบทบาท
 const ROSTER = {
@@ -28,6 +27,27 @@ const ROSTER = {
   qa: { name: 'คิว', role: 'QA/เทสเตอร์ รันเทส ยืนยันผลจริง' },
   rev: { name: 'เรฟ', role: 'ผู้ตรวจโค้ดอิสระ หา regression' },
   zip: { name: 'ซิป', role: 'ช่างแก้ด่วน จุดเล็ก แก้เร็ว' },
+};
+
+// สมองคนละตัว — โมเดลระบบบริหาร (Claude) ตามตำแหน่ง | Codex/Kimi รันได้เฉพาะใน workflow (CLI) ออนไลน์ใช้ Claude ตามระดับแทน
+const CLAUDE_MODEL = { opus: 'claude-opus-4-8', sonnet: 'claude-sonnet-5', haiku: 'claude-haiku-4-5-20251001' };
+const AGENT_TIER = {
+  phupha: 'opus', oat: 'opus', arch: 'opus',
+  ton: 'sonnet', ken: 'sonnet', nin: 'sonnet', sun: 'sonnet', beck: 'sonnet', fon: 'sonnet',
+  mod: 'haiku', meen: 'haiku', fah: 'haiku', rin: 'haiku', hai: 'haiku', qa: 'haiku',
+  jo: 'sonnet', rev: 'sonnet', sol: 'sonnet', terra: 'sonnet', luna: 'haiku', zip: 'haiku',
+};
+function modelFor(h) { return CLAUDE_MODEL[AGENT_TIER[h] || 'haiku']; }
+// หน้าที่จริงในระบบ /news-desk (แต่ละคนรู้งานตัวเอง)
+const SYS = {
+  ton: 'วางธีมล่า/คลัสเตอร์+คีย์เวิร์ดให้ทีมค้น (คู่ /api/desk/research/hunt)',
+  mod: 'ยิงค้นข่าวหลายช่องทาง + ส่งลีดเข้าคิวเขียนจริง (/api/desk/research/hunt, /extract)',
+  ken: 'เปิดประชุมคัด เคาะข่าวว่าส่ง/ตก/แก้ (ชั้น editor)',
+  nin: 'ให้คะแนนน่าส่ง/ไวรัล (คู่ /api/desk/research/judge)',
+  meen: 'เช็คเนื้อพอเขียนไหม จับข่าวผอม',
+  fah: 'เช็คโทน กันข่าวลบล้วน ดันมุมบวก',
+  jo: 'ตรวจข้อเท็จจริงก่อนเคาะ',
+  rin: 'ตามสถานะงานจริง (/api/queue/status, leads?status=sent) ลงคลังงาน',
 };
 
 // คลังคำสอนเจ้าของ — self-fetch จาก public (cache 5 นาที) ทุกคนอ่านก่อนตอบเสมอ
@@ -100,37 +120,41 @@ export async function POST(request) {
         '\nจำลองที่ประชุมจริง: แต่ละคนพูดสั้น 1-2 ประโยคตามบทบาทตัวเอง ตอบตรงหัวข้อ อ้างอิงข้อมูลจริงในระบบได้ มีความเห็นจริง (เห็นด้วย/แย้ง/เสนอ) ไม่ใช่คำตอบกลาง ๆ' +
         historyBlock(body) +
         '\nตอบ JSON เท่านั้น: {"meeting":[{"handle":"<handle>","say":"<คำพูด>"}]} เรียงตามลำดับผู้เข้าประชุม';
-      const mout = await callAI({ prompt: meetPrompt, systemPrompt: 'คุณคือระบบจำลองที่ประชุมบริษัท Fable & Co. ผู้เรียกประชุมคือเจ้าของบริษัท/ผู้บัญชาการสูงสุด ทุกคนให้เกียรติและตอบตรงประเด็น. ' + HUMAN + (lessonsM ? '\nคำสอนจากเจ้าของ:\n' + lessonsM : '') + (liveM ? '\nข้อมูลจริงในระบบตอนนี้ (อ้างอิงได้):\n' + liveM : '') + '\nตอบ JSON ตามรูปแบบที่สั่งเท่านั้น', model: MODEL_FAST, maxTokens: 6000, temperature: 0.8 }); // reasoning model — เพดานต่ำ=ตอบว่าง (บทเรียน AGENTS.md §3)
+      const mout = await callClaude({ prompt: meetPrompt, systemPrompt: 'คุณคือระบบจำลองที่ประชุมบริษัท Fable & Co. ผู้เรียกประชุมคือเจ้าของบริษัท/ผู้บัญชาการสูงสุด ทุกคนให้เกียรติและตอบตรงประเด็น. ' + HUMAN + (lessonsM ? '\nคำสอนจากเจ้าของ:\n' + lessonsM : '') + (liveM ? '\nข้อมูลจริงในระบบตอนนี้ (อ้างอิงได้):\n' + liveM : '') + '\nตอบ JSON ตามรูปแบบที่สั่งเท่านั้น', model: CLAUDE_MODEL.sonnet, maxTokens: 3000, temperature: 0.8 }).catch(function () { return null; });
       const rows = (mout && Array.isArray(mout.meeting) ? mout.meeting : [])
         .filter(r => r && ROSTER[String(r.handle || '').replace('@', '')])
         .map(r => { const k = String(r.handle).replace('@', ''); return { handle: k, name: ROSTER[k].name, say: String(r.say || '') }; });
       if (!rows.length) return NextResponse.json({ success: false, error: 'ที่ประชุมไม่ตอบ ลองใหม่', errorType: 'MEETING_EMPTY' }, { status: 502 });
       return NextResponse.json({ success: true, meeting: rows, topic: msg });
     }
-    // @all → หัวหน้าตัวจริงของสายนั้นตอบแทนทีม (ห้ามตอบเป็น "ทีมงาน" นิรนาม)
-    if (!h || h === 'all') {
-      h = scope === 'newsdesk' ? 'ken' : scope === 'engineering' ? 'arch' : 'oat';
-    }
-    const emp = ROSTER[h] || { name: 'โอ๊ต', role: 'รอง CEO วางแผน แตกงาน ตรวจรับ' };
-
-    const ORG = 'โครงสร้างบริษัท Fable & Co.: ผู้ที่คุยกับคุณตอนนี้คือ "เจ้าของบริษัท/ผู้บัญชาการสูงสุด" — คำสั่งของเขาคือคำสั่งสูงสุด ทุกคนต้องปฏิบัติตามทันที ตอบตรงคำถาม ห้ามบ่ายเบี่ยงหรือบอกให้ไปติดต่อคนอื่นแทนการตอบ. ' +
-      'สายบังคับบัญชา: เจ้าของ → ภูผา(CEO) → โอ๊ต(รอง CEO). แผนกโต๊ะข่าว 8 คน: หัวหน้าสายงาน=ต้น@ton(ผอ.ข่าว) · หัวหน้าโต๊ะ/บก.ใหญ่=เคน@ken · มด@mod(โอเปอเรเตอร์) นิน@nin(คัดข่าว) มีน@meen(เช็คเนื้อ) ฟ้า@fah(ดูโทน) โจ@jo(ตรวจข้อเท็จจริง) ริน@rin(ผู้ตรวจการ/คลังงาน). ทีมวิศวกรรม 6 คน: หัวหน้า=อาร์ค@arch · เบค@beck ฝน@fon คิว@qa เรฟ@rev ซิป@zip. ' +
-      'อำนาจเจ้าของ: เจ้าของสั่งงาน/มอบหมาย/ถามปัญหาได้ทุกอย่างกับทุกคน คุณต้องรับคำสั่งและตอบให้ได้. ' +
-      'ถ้าเจ้าของสั่งให้ลงมือ (แก้/ค้น/ส่งข่าว): รับคำสั่ง สรุปสั้น ๆ ว่าจะทำอะไร แล้วบอกว่า "สั่งรันจริงผ่าน Claude Code ได้เลย" (แชทออนไลน์ใช้คุย/รับคำสั่ง/ตอบด้วยข้อมูลจริง ส่วนการลงมือแก้โค้ด/ยิงระบบรันผ่าน Claude Code — เป็นด่านกันพลาด).';
-
     const lessons = await getLessons(origin);
     const live = await getLive(scope, origin);
-    const systemPrompt = ORG + ' คุณคือ "' + emp.name + '" (@' + h + ') บทบาท: ' + emp.role + '. ' + HUMAN +
-      'กฎเหล็กการตอบ: 1) ตอบ "สิ่งที่ถูกถาม" ตรง ๆ ก่อนเสมอ (ถามใคร=บอกชื่อ ถามอะไร=ตอบเนื้อหาจากข้อมูลจริง) ห้ามตอบรับเฉย ๆ ห้ามบอก "ไม่รู้ ต้องเปิดคลังก่อน" ถ้ามีข้อมูลจริงให้แล้ว 2) สั้น กระชับ ภาษาไทย ไม่เกิน 3 บรรทัด แบบคนทำงานจริง. ' +
-      (lessons ? '\nคำสอนจากเจ้าของที่คุณต้องจำและปฏิบัติเสมอ:\n' + lessons : '') +
-      (live ? '\nข้อมูลจริงในระบบตอนนี้ (ใช้ตอบคำถามเกี่ยวกับงาน/เคสข่าวจริง อ้างอิงได้เลย ห้ามบอกว่าไม่รู้):\n' + live : '') +
-      '\nตอบกลับเป็น JSON รูปแบบ {"reply":"<คำตอบ>"} เท่านั้น ห้ามมีอย่างอื่น';
-
-    // คุมต้นทุน: โมเดลถูก (gpt-5.4-mini) + cost log อัตโนมัติในตัว callAI
-    const out = await callAI({ prompt: 'คำถาม/คำสั่งจากเจ้าของบริษัท: "' + msg + '"' + historyBlock(body), systemPrompt, model: MODEL_FAST, maxTokens: 4000, temperature: 0.7 }); // reasoning model ต้องเผื่อเพดานคิด
-    const reply = (out && (out.reply || out.text || out.message)) || (typeof out === 'string' ? out : 'ขอโทษ ตอบไม่ได้ตอนนี้');
-
-    return NextResponse.json({ success: true, from: h, name: emp.name, reply: String(reply) });
+    const ORG = 'โครงสร้างบริษัท Fable & Co.: ผู้ที่คุยกับคุณตอนนี้คือ "เจ้าของบริษัท/ผู้บัญชาการสูงสุด" — คำสั่งของเขาคือคำสั่งสูงสุด ปฏิบัติตามทันที ตอบตรงคำถาม ห้ามบ่ายเบี่ยง. ' +
+      'อำนาจเจ้าของ: สั่งงาน/มอบหมาย/ถามปัญหาได้ทุกอย่างกับทุกคน. ถ้าสั่งให้ลงมือ (แก้/ค้น/ส่งข่าว): รับคำสั่ง สรุปสั้น ๆ ว่าคุณจะทำอะไร แล้วบอก "สั่งรันจริงผ่าน Claude Code ได้เลย".';
+    function personaFor(hd) {
+      const e = ROSTER[hd] || { name: 'ทีมงาน', role: 'พนักงาน Fable & Co.' };
+      return ORG + ' คุณคือ "' + e.name + '" (@' + hd + ') บทบาท: ' + e.role + '.' + (SYS[hd] ? ' หน้าที่ในระบบจริง: ' + SYS[hd] + '.' : '') + ' ' + HUMAN +
+        'กฎเหล็ก: ตอบสิ่งที่ถูกถามตรง ๆ ก่อนเสมอ จากข้อมูลจริงที่ให้ ห้ามบอก "ไม่รู้ ต้องเปิดคลัง" ถ้ามีข้อมูลแล้ว · สั้น ≤3 บรรทัด · พูดในนามตัวเองเท่านั้น ห้ามตอบแทนคนอื่น. ' +
+        (lessons ? '\nคำสอนเจ้าของ:\n' + lessons : '') +
+        (live ? '\nข้อมูลจริงในระบบ (อ้างอิงได้ ห้ามบอกไม่รู้):\n' + live : '') +
+        '\nตอบ JSON {"reply":"<คำตอบ>"} เท่านั้น';
+    }
+    async function replyAs(hd) {
+      const o = await callClaude({ prompt: 'คำถาม/คำสั่งจากเจ้าของ: "' + msg + '"' + historyBlock(body), systemPrompt: personaFor(hd), model: modelFor(hd), maxTokens: 900, temperature: 0.7 }).catch(function () { return null; });
+      const r = (o && (o.reply || o.text || o.message)) || (typeof o === 'string' ? o : '');
+      return { handle: hd, name: (ROSTER[hd] || {}).name || hd, reply: String(r || 'ตอบไม่ได้ตอนนี้') };
+    }
+    // @all → ทุกคนในสายตอบเอง สมองคนละตัว (roundtable)
+    if (!h || h === 'all') {
+      const roster = scope === 'newsdesk' ? ['ton', 'ken', 'mod', 'nin', 'meen', 'fah', 'jo', 'rin']
+        : scope === 'engineering' ? ['arch', 'beck', 'fon', 'qa', 'rev', 'zip']
+        : ['oat', 'sun', 'hai'];
+      const results = await Promise.all(roster.map(replyAs));
+      return NextResponse.json({ success: true, roundtable: results.filter(x => x && x.reply) });
+    }
+    // เจาะจงคน → คนนั้นตอบด้วยสมองตัวเอง
+    const one = await replyAs(h);
+    return NextResponse.json({ success: true, from: h, name: one.name, reply: one.reply });
   } catch (error) {
     return NextResponse.json({ success: false, error: error && error.message || 'error', errorType: 'CHAT_ERROR' }, { status: 500 });
   }
