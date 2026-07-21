@@ -3,8 +3,7 @@
 // ห้ามแก้ไฟล์ AI ล็อก — import เรียกเท่านั้น (ตามแบบ route อื่น)
 export const maxDuration = 60;
 import { NextResponse } from 'next/server';
-import { callAI } from '@/lib/ai/openai';
-import { MODEL_FAST } from '@/lib/ai/modelConfig';
+import { callClaude } from '@/lib/ai/claudeClient';
 
 // persona พนักงาน (3 กลุ่ม) — ตอบตามบทบาท
 const ROSTER = {
@@ -30,10 +29,15 @@ const ROSTER = {
   zip: { name: 'ซิป', role: 'ช่างแก้ด่วน จุดเล็ก แก้เร็ว' },
 };
 
-// สมองคนละตัว: หัวหน้า/ตัดสิน = gpt-4o · ลูกทีม/งานเร็ว = gpt-4o-mini (ออนไลน์ใช้โมเดล OpenAI; brain จริง Claude/Codex อยู่ใน workflow)
-const MSTRONG = 'gpt-4o', MFAST = 'gpt-4o-mini';
-const HEADS = { phupha: 1, oat: 1, arch: 1, ton: 1, ken: 1, nin: 1, sun: 1, beck: 1, fon: 1 };
-function modelFor(h) { return HEADS[h] ? MSTRONG : MFAST; }
+// สมองคนละตัว — โมเดลระบบบริหาร (Claude) ตามตำแหน่ง | Codex/Kimi รันได้เฉพาะใน workflow (CLI) ออนไลน์ใช้ Claude ตามระดับแทน
+const CLAUDE_MODEL = { opus: 'claude-opus-4-8', sonnet: 'claude-sonnet-5', haiku: 'claude-haiku-4-5-20251001' };
+const AGENT_TIER = {
+  phupha: 'opus', oat: 'opus', arch: 'opus',
+  ton: 'sonnet', ken: 'sonnet', nin: 'sonnet', sun: 'sonnet', beck: 'sonnet', fon: 'sonnet',
+  mod: 'haiku', meen: 'haiku', fah: 'haiku', rin: 'haiku', hai: 'haiku', qa: 'haiku',
+  jo: 'sonnet', rev: 'sonnet', sol: 'sonnet', terra: 'sonnet', luna: 'haiku', zip: 'haiku',
+};
+function modelFor(h) { return CLAUDE_MODEL[AGENT_TIER[h] || 'haiku']; }
 // หน้าที่จริงในระบบ /news-desk (แต่ละคนรู้งานตัวเอง)
 const SYS = {
   ton: 'วางธีมล่า/คลัสเตอร์+คีย์เวิร์ดให้ทีมค้น (คู่ /api/desk/research/hunt)',
@@ -116,7 +120,7 @@ export async function POST(request) {
         '\nจำลองที่ประชุมจริง: แต่ละคนพูดสั้น 1-2 ประโยคตามบทบาทตัวเอง ตอบตรงหัวข้อ อ้างอิงข้อมูลจริงในระบบได้ มีความเห็นจริง (เห็นด้วย/แย้ง/เสนอ) ไม่ใช่คำตอบกลาง ๆ' +
         historyBlock(body) +
         '\nตอบ JSON เท่านั้น: {"meeting":[{"handle":"<handle>","say":"<คำพูด>"}]} เรียงตามลำดับผู้เข้าประชุม';
-      const mout = await callAI({ prompt: meetPrompt, systemPrompt: 'คุณคือระบบจำลองที่ประชุมบริษัท Fable & Co. ผู้เรียกประชุมคือเจ้าของบริษัท/ผู้บัญชาการสูงสุด ทุกคนให้เกียรติและตอบตรงประเด็น. ' + HUMAN + (lessonsM ? '\nคำสอนจากเจ้าของ:\n' + lessonsM : '') + (liveM ? '\nข้อมูลจริงในระบบตอนนี้ (อ้างอิงได้):\n' + liveM : '') + '\nตอบ JSON ตามรูปแบบที่สั่งเท่านั้น', model: MODEL_FAST, maxTokens: 6000, temperature: 0.8 }); // reasoning model — เพดานต่ำ=ตอบว่าง (บทเรียน AGENTS.md §3)
+      const mout = await callClaude({ prompt: meetPrompt, systemPrompt: 'คุณคือระบบจำลองที่ประชุมบริษัท Fable & Co. ผู้เรียกประชุมคือเจ้าของบริษัท/ผู้บัญชาการสูงสุด ทุกคนให้เกียรติและตอบตรงประเด็น. ' + HUMAN + (lessonsM ? '\nคำสอนจากเจ้าของ:\n' + lessonsM : '') + (liveM ? '\nข้อมูลจริงในระบบตอนนี้ (อ้างอิงได้):\n' + liveM : '') + '\nตอบ JSON ตามรูปแบบที่สั่งเท่านั้น', model: CLAUDE_MODEL.sonnet, maxTokens: 3000, temperature: 0.8 }).catch(function () { return null; });
       const rows = (mout && Array.isArray(mout.meeting) ? mout.meeting : [])
         .filter(r => r && ROSTER[String(r.handle || '').replace('@', '')])
         .map(r => { const k = String(r.handle).replace('@', ''); return { handle: k, name: ROSTER[k].name, say: String(r.say || '') }; });
@@ -136,7 +140,7 @@ export async function POST(request) {
         '\nตอบ JSON {"reply":"<คำตอบ>"} เท่านั้น';
     }
     async function replyAs(hd) {
-      const o = await callAI({ prompt: 'คำถาม/คำสั่งจากเจ้าของ: "' + msg + '"' + historyBlock(body), systemPrompt: personaFor(hd), model: modelFor(hd), maxTokens: 900, temperature: 0.7 });
+      const o = await callClaude({ prompt: 'คำถาม/คำสั่งจากเจ้าของ: "' + msg + '"' + historyBlock(body), systemPrompt: personaFor(hd), model: modelFor(hd), maxTokens: 900, temperature: 0.7 }).catch(function () { return null; });
       const r = (o && (o.reply || o.text || o.message)) || (typeof o === 'string' ? o : '');
       return { handle: hd, name: (ROSTER[hd] || {}).name || hd, reply: String(r || 'ตอบไม่ได้ตอนนี้') };
     }
