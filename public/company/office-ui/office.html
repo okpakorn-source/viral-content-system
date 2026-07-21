@@ -1317,7 +1317,7 @@
     if (isSendingTask){ return; }
     if (!textInputEl){ return; }
     var text = textInputEl.value.replace(/^\s+|\s+$/g, '');
-    if (text === ''){ return; }
+    if (text === ''){ showToast('⚠️ พิมพ์ข้อความในช่องก่อน แล้วค่อยกดปุ่มนี้', true); if (textInputEl && textInputEl.focus) textInputEl.focus(); return; }
 
     isSendingTask = true;
     setBusyBtn(taskBtnEl, true, '⏳ กำลังส่ง…', '📌 สั่งงานจริง');
@@ -1349,7 +1349,7 @@
     if (isSendingBug){ return; }
     if (!textInputEl){ return; }
     var text = textInputEl.value.replace(/^\s+|\s+$/g, '');
-    if (text === ''){ return; }
+    if (text === ''){ showToast('⚠️ พิมพ์ข้อความในช่องก่อน แล้วค่อยกดปุ่มนี้', true); if (textInputEl && textInputEl.focus) textInputEl.focus(); return; }
 
     isSendingBug = true;
     setBusyBtn(bugBtnEl, true, '⏳ กำลังส่ง…', '🐛 แจ้งบั๊กวิศวะ');
@@ -1404,7 +1404,7 @@
     if (isSendingMessage){ return; }
     if (!textInputEl){ return; }
     var text = textInputEl.value.replace(/^\s+|\s+$/g, '');
-    if (text === ''){ return; }
+    if (text === ''){ showToast('⚠️ พิมพ์ข้อความในช่องก่อน แล้วค่อยกดปุ่มนี้', true); if (textInputEl && textInputEl.focus) textInputEl.focus(); return; }
     var secret = getSecret();
 
     isSendingMessage = true;
@@ -1467,7 +1467,7 @@
     if (isSendingMeeting){ return; }
     if (!textInputEl){ return; }
     var topic = textInputEl.value.replace(/^\s+|\s+$/g, '');
-    if (topic === ''){ return; }
+    if (topic === ''){ showToast('⚠️ พิมพ์หัวข้อประชุมในช่องก่อน แล้วค่อยกดเรียกประชุม', true); if (textInputEl && textInputEl.focus) textInputEl.focus(); return; }
     var secret = getSecret();
 
     isSendingMeeting = true;
