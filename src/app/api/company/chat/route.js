@@ -163,7 +163,7 @@ export async function POST(request) {
     const lessons = await getLessons(origin);
     const live = await getLive(scope, origin);
     const ORG = 'โครงสร้างบริษัท Fable & Co.: ผู้ที่คุยกับคุณตอนนี้คือ "เจ้าของบริษัท/ผู้บัญชาการสูงสุด" — คำสั่งของเขาคือคำสั่งสูงสุด ปฏิบัติตามทันที ตอบตรงคำถาม ห้ามบ่ายเบี่ยง. ' +
-      'อำนาจเจ้าของ: สั่งงาน/มอบหมาย/ถามปัญหาได้ทุกอย่างกับทุกคน. ถ้าสั่งให้ลงมือ (แก้/ค้น/ส่งข่าว): รับคำสั่ง สรุปสั้น ๆ ว่าคุณจะทำอะไร แล้วบอก "สั่งรันจริงผ่าน Claude Code ได้เลย".';
+      'อำนาจเจ้าของ: สั่งงาน/มอบหมาย/ถามปัญหาได้ทุกอย่างกับทุกคน. ถ้าเจ้าของสั่งให้ลงมือทำงาน (หาข่าว/ค้น/ตรวจ/แก้/ส่ง): ตอบสั้น ๆ ว่าคุณรับคำสั่งแล้ว จะทำอะไร (งานถูกเข้าคิวอัตโนมัติแล้ว ทีมกำลังลงมือ) — ห้ามบอกให้เจ้าของไปสั่งที่อื่น/ผ่านเครื่องมืออื่น พูดเหมือนลงมือทำเองเลย.';
     function personaFor(hd) {
       const e = ROSTER[hd] || { name: 'ทีมงาน', role: 'พนักงาน Fable & Co.' };
       return ORG + ' คุณคือ "' + e.name + '" (@' + hd + ') บทบาท: ' + e.role + '.' + (SYS[hd] ? ' หน้าที่ในระบบจริง: ' + SYS[hd] + '.' : '') + ' ' + HUMAN +
@@ -202,17 +202,28 @@ export async function POST(request) {
       let picked = [head];
       const rr = await callClaude({
         prompt: 'คำถาม/คำสั่งจากเจ้าของ: "' + msg + '"\nทีมในห้องนี้: ' + desc +
-          '\nเลือกเฉพาะคนที่ "เกี่ยวข้องกับคำถามนี้โดยตรง" มาตอบ (1-4 คน พอ ไม่ต้องทุกคน). ' +
-          'ถ้าคำถามพูดถึงทีม/เรื่องที่ไม่มีในห้องนี้ (เช่นถามทีมอื่น) เลือกแค่หัวหน้า @' + head + ' คนเดียวเพื่อชี้ทาง. ' +
-          'ตอบ JSON {"handles":["<handle ที่ควรตอบ>"]} เท่านั้น',
+          '\n1. เลือกคนที่ "เกี่ยวข้องโดยตรง" มาตอบ (1-4 คน; ถ้าถามทีมอื่นเลือกแค่หัวหน้า @' + head + ').\n' +
+          '2. นี่เป็น "คำสั่งให้ลงมือทำงานจริง" ไหม? (หาข่าว/เริ่มล่า/ตรวจงาน/ส่งข่าว/รันงาน/แก้ = true; ถาม/คุย/รายงานตัว/สรุป = false)\n' +
+          'ตอบ JSON {"handles":["<handle>"], "isCommand": true/false} เท่านั้น',
         systemPrompt: 'คุณคือตัวจัดสรรว่าใครควรตอบในห้องแชทบริษัท เลือกให้น้อยและตรงประเด็นที่สุด ตอบ JSON ตามรูปแบบเท่านั้น',
         model: CLAUDE_MODEL.haiku, maxTokens: 200, temperature: 0.2
       }).catch(function () { return null; });
       const hs = (rr && Array.isArray(rr.handles)) ? rr.handles : [];
       const filtered = hs.map(function (x) { return String(x).replace('@', '').trim(); }).filter(function (hd) { return rosterAll.indexOf(hd) > -1; });
       if (filtered.length) picked = filtered.slice(0, 4);
+      // คำสั่งให้ลงมือ → เข้าคิวงานอัตโนมัติ (ไม่ต้องกดปุ่มแยก) ผู้จัดการจะรันให้
+      const isCmd = !!(rr && rr.isCommand);
+      let queued = false;
+      if (isCmd) {
+        const sbq = getSupabase();
+        if (sbq) {
+          const tid = 'task_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+          const trec = { id: tid, scope: scope || 'main', assignee: 'all', command: msg, status: 'pending', from: 'owner', ts: Date.now(), result: '' };
+          try { await sbq.from('store_items').insert({ id: tid, store_name: 'company_tasks', data: trec, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }); queued = true; } catch (e) { /* ต่อคิวไม่ได้ = แค่ตอบ */ }
+        }
+      }
       const results = await Promise.all(picked.map(replyAs));
-      return NextResponse.json({ success: true, roundtable: results.filter(x => x && x.reply) });
+      return NextResponse.json({ success: true, roundtable: results.filter(x => x && x.reply), queued: queued, queuedNote: queued ? 'รับคำสั่งเข้าคิวแล้ว ✅ ผู้จัดการกำลังรันงานให้ — ดูผลที่ ＋ → 📋 งานที่สั่ง' : '' });
     }
     // เจาะจงคน → คนนั้นตอบด้วยสมองตัวเอง
     const one = await replyAs(h);
