@@ -614,6 +614,23 @@
     /* กันปุ่มลอย 💬 ทับเนื้อหาท้ายหน้า */
     .wrap{ padding-bottom:84px; }
   }
+
+  /* 🔴 แผงกิจกรรมสด (feed) — เหนือประวัติ .md (ดึงสดจาก /api/company/feed) */
+  .feed-live{ display:flex; flex-direction:column; gap:7px; margin-bottom:8px; }
+  .feed-hist-label{ font-size:.68rem; color:var(--muted); text-align:center; margin:6px 0; opacity:.6; }
+  .fi{ padding:8px 11px; border-radius:11px; background:var(--card-bg); border-left:3px solid var(--line); animation:fiIn .35s ease; }
+  @keyframes fiIn{ from{ opacity:0; transform:translateY(-4px);} to{ opacity:1; transform:none;} }
+  .fi-top{ display:flex; align-items:center; gap:7px; margin-bottom:2px; }
+  .fi-name{ font-weight:800; font-size:.78rem; color:var(--ink); }
+  .fi-handle{ font-size:.68rem; color:var(--muted); }
+  .fi-time{ margin-left:auto; font-size:.66rem; color:var(--muted); }
+  .fi-text{ font-size:.8rem; line-height:1.5; color:var(--ink); word-break:break-word; }
+  .fi.k-chat{ border-left-color:#caa14b; }
+  .fi.k-comm{ border-left-color:#6ea8ff; }
+  .fi.k-worklog{ border-left-color:var(--ok); }
+  .fi.k-result{ border-left-color:#b98cff; }
+  .fi.k-decision{ border-left-color:#f0b64a; }
+  .fi.k-owner{ border-left-color:#ff8fb0; background:rgba(255,143,176,.08); }
 </style>
 </head>
 <body>
@@ -772,6 +789,8 @@
     <!-- ================= ห้องประชุม ================= -->
     <section class="room room-meeting">
       <div class="room-label">📋 ห้องประชุม</div>
+      <div id="boardLive" class="feed-live"></div>
+      <div class="feed-hist-label" id="boardHistLabel" style="display:none">— ประวัติเก่า —</div>
       <div id="boardBody" class="board-body">
         <p class="board-head">🎉 ประกาศก่อตั้งบริษัท</p>
         <p>วันนี้ Fable &amp; Co. เปิดทำการอย่างเป็นทางการในโปรเจกต์ Viral Content System</p>
@@ -846,6 +865,8 @@
     <!-- ================= สมุดบันทึก ================= -->
     <section class="panel panel-log">
       <h2>📓 สมุดบันทึก</h2>
+      <div id="worklogLive" class="feed-live"></div>
+      <div class="feed-hist-label" id="worklogHistLabel" style="display:none">— ประวัติเก่า —</div>
       <ul id="logList">
         <li><span class="log-meta">[2026-07-21 #1]</span> 🏗️ เริ่มก่อตั้งบริษัท — CEO เขียนธรรมนูญ COMPANY.md + โครงออฟฟิศครบ</li>
       </ul>
@@ -854,6 +875,8 @@
     <!-- ================= ฟีดแชทรวม ================= -->
     <section class="panel panel-chat">
       <h2>💬 ฟีดแชทรวม</h2>
+      <div id="commLive" class="feed-live"></div>
+      <div class="feed-hist-label" id="commHistLabel" style="display:none">— ประวัติเก่า —</div>
       <div id="chatFeed">
         <div class="chat-item" style="border-left-color:var(--c-phupha)">
           <div class="chat-meta">ภูผา <span class="handle">@phupha</span> → <span class="chat-to">@all</span> <span class="chat-n">#1</span></div>
@@ -933,6 +956,7 @@
 
 <div id="fcoToast" class="fco-toast"></div>
 
+<script src="/company/shared/liveFeed.js"></script>
 <script>
 (function(){
   'use strict';
@@ -1673,12 +1697,68 @@
     }
   }
 
+  /* ---------------- 🔴 คลังกิจกรรมสด (feed) — บทสนทนา/มติ/สมุดงาน เรียลไทม์ทุกเครื่อง ---------------- */
+  function timeAgo(iso){
+    var t = new Date(iso).getTime();
+    if (!t || isNaN(t)){ return '—'; }
+    var s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60){ return s + ' วิที่แล้ว'; }
+    var m = Math.round(s / 60);
+    if (m < 60){ return m + ' นาที'; }
+    var h = Math.round(m / 60);
+    if (h < 24){ return h + ' ชม.'; }
+    return Math.round(h / 24) + ' วัน';
+  }
+  var FEED_SCOPE = 'main';
+  var FEED_NAMES = {
+    owner:'เจ้าของ', ton:'ต้น', mod:'มด', ken:'เคน', nin:'นิน', meen:'มีน', fah:'ฟ้า', jo:'โจ', rin:'ริน',
+    phupha:'ภูผา', oat:'โอ๊ต', sun:'ซัน', hai:'ฮาย', sol:'โซล', terra:'เทอร่า', luna:'ลูน่า',
+    arch:'อาร์ค', beck:'เบค', fon:'ฝน', qa:'คิว', rev:'เรฟ', zip:'ซิป'
+  };
+  function feedRow(e){
+    var kind = e.kind || 'comm';
+    var agent = e.agent || '';
+    var cls = (agent === 'owner') ? 'k-owner' : ('k-' + kind);
+    var name = FEED_NAMES[agent] || (agent ? '@'+agent : 'ระบบ');
+    var handle = agent ? ('@'+agent) : '';
+    return '<div class="fi ' + cls + '">'
+      + '<div class="fi-top"><span class="fi-name">' + escapeHtml(name) + '</span>'
+      + (handle ? '<span class="fi-handle">' + escapeHtml(handle) + '</span>' : '')
+      + '<span class="fi-time">' + timeAgo(e.ts) + '</span></div>'
+      + '<div class="fi-text">' + escapeHtml(e.text || '') + '</div></div>';
+  }
+  function fillFeed(elId, labelId, events){
+    var el = document.getElementById(elId);
+    if (!el){ return; }
+    var lbl = labelId ? document.getElementById(labelId) : null;
+    if (!events.length){ el.innerHTML = ''; if (lbl){ lbl.style.display = 'none'; } return; }
+    el.innerHTML = events.map(feedRow).join('');
+    if (lbl){ lbl.style.display = 'block'; }
+  }
+  function pollFeed(){
+    return fetch('/api/company/feed?scope=' + FEED_SCOPE + '&limit=60', { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.success){ return; }
+        var ev = d.events || [];
+        var comm = ev.filter(function(e){ return e.kind === 'chat' || e.kind === 'comm'; }).slice(0, 30);
+        var work = ev.filter(function(e){ return e.kind === 'worklog' || e.kind === 'result'; }).slice(0, 20);
+        var deci = ev.filter(function(e){ return e.kind === 'decision'; }).slice(0, 10);
+        fillFeed('commLive', 'commHistLabel', comm);
+        fillFeed('worklogLive', 'worklogHistLabel', work);
+        fillFeed('boardLive', 'boardHistLabel', deci);
+      })
+      .catch(function(){ /* เงียบ ไม่รบกวน refresh หลัก */ });
+  }
+  window.pollFeed = pollFeed;
+
   function refreshAll(){
     if (IS_FILE){
       setLive(false);
       renderChatFeed(liveState);
       return;
     }
+    /* 🔴 แผงกิจกรรมสด จัดการโดยโมดูลกลาง liveFeed.js (initLiveFeed) — อ่านง่าย+คลิกดูรายละเอียด */
     var okCount = 0;
     var jobs = [];
 
@@ -1873,6 +1953,7 @@
   /* ---------------- boot ---------------- */
   renderProjects();
   refreshAll();
+  if (typeof initLiveFeed === 'function'){ initLiveFeed({ scope:'main', theme:'light', mounts:{ comm:'commLive', commLabel:'commHistLabel', worklog:'worklogLive', worklogLabel:'worklogHistLabel', board:'boardLive', boardLabel:'boardHistLabel' } }); }
   loadChatFeed();
   loadTasks();
   setInterval(refreshAll, REFRESH_MS);

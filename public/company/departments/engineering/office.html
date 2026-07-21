@@ -279,6 +279,23 @@
   #worklogList li:last-child{ border-bottom:none; }
   .log-meta{ font-weight:700; color:var(--accent); margin-right:4px; }
 
+  /* 🔴 แผงกิจกรรมสด (feed) — เหนือประวัติ .md */
+  .feed-live{ display:flex; flex-direction:column; gap:7px; margin-bottom:8px; }
+  .feed-hist-label{ font-size:.68rem; color:var(--muted); text-align:center; margin:6px 0; opacity:.6; }
+  .fi{ padding:8px 11px; border-radius:11px; background:var(--panel-2); border-left:3px solid var(--line); animation:fiIn .35s ease; }
+  @keyframes fiIn{ from{ opacity:0; transform:translateY(-4px);} to{ opacity:1; transform:none;} }
+  .fi-top{ display:flex; align-items:center; gap:7px; margin-bottom:2px; }
+  .fi-name{ font-weight:800; font-size:.78rem; color:#dbe2f0; }
+  .fi-handle{ font-size:.68rem; color:var(--muted); }
+  .fi-time{ margin-left:auto; font-size:.66rem; color:var(--muted); }
+  .fi-text{ font-size:.8rem; line-height:1.5; color:#c7d2e3; word-break:break-word; }
+  .fi.k-chat{ border-left-color:#f2c14e; }
+  .fi.k-comm{ border-left-color:#6ea8ff; }
+  .fi.k-worklog{ border-left-color:var(--live); }
+  .fi.k-result{ border-left-color:#b98cff; }
+  .fi.k-decision{ border-left-color:#f0b64a; }
+  .fi.k-owner{ border-left-color:#ff8fb0; background:rgba(255,143,176,.08); }
+
   /* ---------- คลังบันทึกการแก้ (fixes/ — ลิงก์คงที่) ---------- */
   .sec-fixes p{ font-size:.82rem; color:#dbe2f0; line-height:1.5; }
   .sec-fixes a{ color:var(--accent); font-weight:700; text-decoration:underline; }
@@ -730,6 +747,8 @@
     <!-- ================= ปัญหา/งานแก้ที่รับแจ้ง ================= -->
     <section class="panel sec-comm">
       <h2>🔧 ปัญหา/งานแก้ที่รับแจ้ง <span class="badge-live">LIVE</span></h2>
+      <div id="commLive" class="feed-live"></div>
+      <div class="feed-hist-label" id="commHistLabel" style="display:none">— ประวัติเก่า —</div>
       <div id="commFeed">
         <div class="chat-item" style="border-left-color:var(--c-arch)">
           <div class="chat-meta">อาร์ค <span class="handle">@arch</span> <span class="chat-n">[audit-1]</span></div>
@@ -742,6 +761,8 @@
     <!-- ================= สมุดงาน ================= -->
     <section class="panel sec-worklog">
       <h2>📓 สมุดงาน <span class="badge-live">LIVE</span></h2>
+      <div id="worklogLive" class="feed-live"></div>
+      <div class="feed-hist-label" id="worklogHistLabel" style="display:none">— ประวัติเก่า —</div>
       <ul id="worklogList">
         <li class="muted">ยังไม่มีบันทึกในสมุดงาน (รอทีมลงมือ) — อ่านจาก <code>./worklog.md</code></li>
       </ul>
@@ -815,6 +836,7 @@
 
 <div id="fcoToast" class="fco-toast"></div>
 
+<script src="/company/shared/liveFeed.js"></script>
 <script>
 (function(){
   'use strict';
@@ -1431,6 +1453,59 @@
     }
   }
 
+  /* ---------------- 🔴 คลังกิจกรรมสด (feed) — บทสนทนา/สมุดงาน เรียลไทม์ทุกเครื่อง ---------------- */
+  function timeAgo(iso){
+    var t = new Date(iso).getTime();
+    if (!t || isNaN(t)){ return '—'; }
+    var s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60){ return s + ' วิที่แล้ว'; }
+    var m = Math.round(s / 60);
+    if (m < 60){ return m + ' นาที'; }
+    var h = Math.round(m / 60);
+    if (h < 24){ return h + ' ชม.'; }
+    return Math.round(h / 24) + ' วัน';
+  }
+  var FEED_SCOPE = 'engineering';
+  var FEED_NAMES = {
+    owner:'เจ้าของ', ton:'ต้น', mod:'มด', ken:'เคน', nin:'นิน', meen:'มีน', fah:'ฟ้า', jo:'โจ', rin:'ริน',
+    phupha:'ภูผา', oat:'โอ๊ต', sun:'ซัน', hai:'ฮาย', sol:'โซล', terra:'เทอร่า', luna:'ลูน่า',
+    arch:'อาร์ค', beck:'เบค', fon:'ฝน', qa:'คิว', rev:'เรฟ', zip:'ซิป'
+  };
+  function feedRow(e){
+    var kind = e.kind || 'comm';
+    var agent = e.agent || '';
+    var cls = (agent === 'owner') ? 'k-owner' : ('k-' + kind);
+    var name = FEED_NAMES[agent] || (agent ? '@'+agent : 'ระบบ');
+    var handle = agent ? ('@'+agent) : '';
+    return '<div class="fi ' + cls + '">'
+      + '<div class="fi-top"><span class="fi-name">' + escapeHtml(name) + '</span>'
+      + (handle ? '<span class="fi-handle">' + escapeHtml(handle) + '</span>' : '')
+      + '<span class="fi-time">' + timeAgo(e.ts) + '</span></div>'
+      + '<div class="fi-text">' + escapeHtml(e.text || '') + '</div></div>';
+  }
+  function fillFeed(elId, labelId, events){
+    var el = document.getElementById(elId);
+    if (!el){ return; }
+    var lbl = labelId ? document.getElementById(labelId) : null;
+    if (!events.length){ el.innerHTML = ''; if (lbl){ lbl.style.display = 'none'; } return; }
+    el.innerHTML = events.map(feedRow).join('');
+    if (lbl){ lbl.style.display = 'block'; }
+  }
+  function pollFeed(){
+    return fetch('/api/company/feed?scope=' + FEED_SCOPE + '&limit=60', { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.success){ return; }
+        var ev = d.events || [];
+        var comm = ev.filter(function(e){ return e.kind === 'chat' || e.kind === 'comm'; }).slice(0, 30);
+        var work = ev.filter(function(e){ return e.kind === 'worklog' || e.kind === 'result'; }).slice(0, 20);
+        fillFeed('commLive', 'commHistLabel', comm);
+        fillFeed('worklogLive', 'worklogHistLabel', work);
+      })
+      .catch(function(){ /* เงียบ ไม่รบกวน refresh หลัก */ });
+  }
+  window.pollFeed = pollFeed;
+
   function refreshAll(){
     if (IS_FILE){
       setLive(false);
@@ -1440,6 +1515,7 @@
     var jobs = [];
 
     loadChatFeed();
+    /* 🔴 แผงกิจกรรมสด จัดการโดยโมดูลกลาง liveFeed.js (initLiveFeed) — อ่านง่าย+คลิกดูรายละเอียด */
 
     jobs.push(
       fetchText(COMM_URL).then(function(text){
@@ -1628,6 +1704,7 @@
 
   /* ---------------- boot ---------------- */
   refreshAll();
+  if (typeof initLiveFeed === 'function'){ initLiveFeed({ scope:'engineering', mounts:{ comm:'commLive', commLabel:'commHistLabel', worklog:'worklogLive', worklogLabel:'worklogHistLabel' } }); }
   loadChatFeed();
   loadTasks();
   setInterval(refreshAll, REFRESH_MS);

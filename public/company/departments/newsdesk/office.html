@@ -233,6 +233,23 @@
   .lr-row .lr-trig{ font-size:.68rem; color:var(--muted); border:1px solid rgba(255,255,255,.12); border-radius:6px; padding:1px 6px; }
   .lr-empty{ font-size:.76rem; color:var(--muted); padding:6px 2px; }
 
+  /* 🔴 แผงกิจกรรมสด (feed) — เหนือประวัติ .md */
+  .feed-live{ display:flex; flex-direction:column; gap:7px; margin-bottom:8px; }
+  .feed-hist-label{ font-size:.68rem; color:var(--muted); text-align:center; margin:6px 0; opacity:.6; }
+  .fi{ padding:8px 11px; border-radius:11px; background:var(--panel-2); border-left:3px solid var(--line); animation:fiIn .35s ease; }
+  @keyframes fiIn{ from{ opacity:0; transform:translateY(-4px);} to{ opacity:1; transform:none;} }
+  .fi-top{ display:flex; align-items:center; gap:7px; margin-bottom:2px; }
+  .fi-name{ font-weight:800; font-size:.78rem; color:#dbe2f0; }
+  .fi-handle{ font-size:.68rem; color:var(--muted); }
+  .fi-time{ margin-left:auto; font-size:.66rem; color:var(--muted); }
+  .fi-text{ font-size:.8rem; line-height:1.5; color:#c7d2e3; word-break:break-word; }
+  .fi.k-chat{ border-left-color:var(--gold); }
+  .fi.k-comm{ border-left-color:#6ea8ff; }
+  .fi.k-worklog{ border-left-color:var(--live); }
+  .fi.k-result{ border-left-color:#b98cff; }
+  .fi.k-decision{ border-left-color:var(--c-ken); }
+  .fi.k-owner{ border-left-color:#ff8fb0; background:rgba(255,143,176,.08); }
+
   /* ---------- Roster section ---------- */
   .sec-roster{
     background:linear-gradient(160deg,#131a2c,#0c111d);
@@ -940,6 +957,8 @@
     <!-- ================= กระดานลงมติล่าสุด ================= -->
     <section class="panel sec-board">
       <h2>🗳️ กระดานลงมติล่าสุด <span class="badge-live">LIVE</span></h2>
+      <div id="boardLive" class="feed-live"></div>
+      <div class="feed-hist-label" id="boardHistLabel" style="display:none">— ประวัติเก่า —</div>
       <div id="boardBody" class="board-body">
         <p class="board-head">ตัวอย่าง — รอไฟล์จริง</p>
         <p class="mark-go">[@ken] ข่าว#1: ✅ เนื้อแน่น มุมน่าสนใจ ส่งได้</p>
@@ -961,6 +980,8 @@
     <!-- ================= สื่อสารข้ามคน ================= -->
     <section class="panel sec-comm">
       <h2>💬 สื่อสารข้ามคน <span class="badge-live">LIVE</span></h2>
+      <div id="commLive" class="feed-live"></div>
+      <div class="feed-hist-label" id="commHistLabel" style="display:none">— ประวัติเก่า —</div>
       <div id="commFeed">
         <div class="chat-item" style="border-left-color:var(--c-ken)">
           <div class="chat-meta">เคน <span class="handle">@ken</span> → <span class="chat-to">@all</span> <span class="chat-n">#1</span></div>
@@ -972,6 +993,8 @@
     <!-- ================= สมุดงาน ================= -->
     <section class="panel sec-worklog">
       <h2>📓 สมุดงาน <span class="badge-live">LIVE</span></h2>
+      <div id="worklogLive" class="feed-live"></div>
+      <div class="feed-hist-label" id="worklogHistLabel" style="display:none">— ประวัติเก่า —</div>
       <ul id="worklogList">
         <li><span class="log-meta">[ตัวอย่าง #1]</span> เปิดห้องข่าว — รอไฟล์ ./worklog.md จริง</li>
       </ul>
@@ -1068,6 +1091,7 @@
 
 <div id="fcoToast" class="fco-toast"></div>
 
+<script src="/company/shared/liveFeed.js"></script>
 <script>
 (function(){
   'use strict';
@@ -1645,6 +1669,50 @@
   }
   window.pollLiveRounds = pollLiveRounds;
 
+  /* ---------------- 🔴 คลังกิจกรรมสด (feed) — บทสนทนา/มติ/สมุดงาน เรียลไทม์ทุกเครื่อง ---------------- */
+  var FEED_SCOPE = 'newsdesk';
+  var FEED_NAMES = {
+    owner:'เจ้าของ', ton:'ต้น', mod:'มด', ken:'เคน', nin:'นิน', meen:'มีน', fah:'ฟ้า', jo:'โจ', rin:'ริน',
+    phupha:'ภูผา', oat:'โอ๊ต', sun:'ซัน', hai:'ฮาย', sol:'โซล', terra:'เทอร่า', luna:'ลูน่า',
+    arch:'อาร์ค', beck:'เบค', fon:'ฝน', qa:'คิว', rev:'เรฟ', zip:'ซิป'
+  };
+  function feedRow(e){
+    var kind = e.kind || 'comm';
+    var agent = e.agent || '';
+    var cls = (agent === 'owner') ? 'k-owner' : ('k-' + kind);
+    var name = FEED_NAMES[agent] || (agent ? '@'+agent : 'ระบบ');
+    var handle = agent ? ('@'+agent) : '';
+    return '<div class="fi ' + cls + '">'
+      + '<div class="fi-top"><span class="fi-name">' + escapeHtml(name) + '</span>'
+      + (handle ? '<span class="fi-handle">' + escapeHtml(handle) + '</span>' : '')
+      + '<span class="fi-time">' + timeAgo(e.ts) + '</span></div>'
+      + '<div class="fi-text">' + escapeHtml(e.text || '') + '</div></div>';
+  }
+  function fillFeed(elId, labelId, events){
+    var el = document.getElementById(elId);
+    if (!el){ return; }
+    var lbl = labelId ? document.getElementById(labelId) : null;
+    if (!events.length){ el.innerHTML = ''; if (lbl){ lbl.style.display = 'none'; } return; }
+    el.innerHTML = events.map(feedRow).join('');
+    if (lbl){ lbl.style.display = 'block'; }
+  }
+  function pollFeed(){
+    return fetch('/api/company/feed?scope=' + FEED_SCOPE + '&limit=60', { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.success){ return; }
+        var ev = d.events || [];
+        var comm = ev.filter(function(e){ return e.kind === 'chat' || e.kind === 'comm'; }).slice(0, 30);
+        var work = ev.filter(function(e){ return e.kind === 'worklog' || e.kind === 'result'; }).slice(0, 20);
+        var deci = ev.filter(function(e){ return e.kind === 'decision'; }).slice(0, 10);
+        fillFeed('commLive', 'commHistLabel', comm);
+        fillFeed('worklogLive', 'worklogHistLabel', work);
+        fillFeed('boardLive', 'boardHistLabel', deci);
+      })
+      .catch(function(){ /* เงียบ ไม่รบกวน refresh หลัก */ });
+  }
+  window.pollFeed = pollFeed;
+
   /* ---------------- งานที่สั่ง (แท็บที่ 4): ส่งงานจริงเข้าคิว + poll สถานะ ---------------- */
   var TASK_POLL_MS = 10000;
   var isSendingTask = false;
@@ -1934,6 +2002,7 @@
 
     loadChatFeed();
     pollLiveRounds(); // 📡 รอบจริงจาก Supabase — ทุกเครื่องเห็นตรงกันเรียลไทม์
+    /* 🔴 แผงกิจกรรมสด (comm/worklog/มติ) จัดการโดยโมดูลกลาง liveFeed.js (initLiveFeed) — อ่านง่าย+คลิกดูรายละเอียด */
 
     jobs.push(
       fetchText(BOARD_URL).then(function(text){
@@ -2195,6 +2264,7 @@
 
   /* ---------------- boot ---------------- */
   refreshAll();
+  if (typeof initLiveFeed === 'function'){ initLiveFeed({ scope:'newsdesk', mounts:{ comm:'commLive', commLabel:'commHistLabel', worklog:'worklogLive', worklogLabel:'worklogHistLabel', board:'boardLive', boardLabel:'boardHistLabel' } }); }
   loadChatFeed();
   loadTasks();
   setInterval(refreshAll, REFRESH_MS);

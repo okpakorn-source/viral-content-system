@@ -16,6 +16,7 @@
  * 🔴 ขอบเขต: รอบนี้ "หา+คัด+เก็บลีด" เท่านั้น — การ "ส่งเข้าคิวเขียน/เผยแพร่" ยังต้องผู้ใช้อนุมัติแยก (ไม่ auto)
  */
 import { NextResponse } from 'next/server';
+import { writeFeed } from '@/lib/company/companyFeed';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -175,6 +176,13 @@ export async function POST(request) {
           },
         }),
       });
+    } catch (_e) { /* fire-and-forget */ }
+
+    // 📡 บันทึกผลรอบลงคลังกิจกรรมสด → จอโต๊ะข่าวเห็นผลเรียลไทม์
+    try {
+      await writeFeed({ scope: 'newsdesk', kind: 'result', agent: 'mod',
+        text: '🔫 รันรอบหาข่าวจริง: เจอ ' + candidates.length + ' · เก็บ ' + totalSaved + ' ลีด · ฿' + (Number(huntStats.estCostTHB) || 0).toFixed(2) + ' · ' + Math.round(tookMs / 1000) + ' วิ',
+        meta: { runId, found: candidates.length, kept: totalSaved, costTHB: Number(huntStats.estCostTHB) || 0 } });
     } catch (_e) { /* fire-and-forget */ }
 
     return NextResponse.json({
