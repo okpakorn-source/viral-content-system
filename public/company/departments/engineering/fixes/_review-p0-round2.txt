@@ -1,0 +1,2 @@
+รีวิว git diff ไฟล์ .claude/workflows/newsdesk-meeting.js, .claude/workflows/newsdesk-audit.js, .claude/workflows/project-intake.js, .claude/workflows/eng-fix.js, .claude/workflows/newsdesk-bridge.js
+หา regression/scope-creep/แตะไฟล์หัวใจ/แตะของนอกเขต/breaking change. ตอบสั้น: ผ่าน/ติง + ประเด็น

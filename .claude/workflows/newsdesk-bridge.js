@@ -17,7 +17,7 @@ const validateBase = (base) => {
   try {
     const url = new URL(base)
     return url.protocol === 'https:' ? base : null
-  } catch {
+  } catch (_e) {
     return null
   }
 }
@@ -38,7 +38,8 @@ const BASE = validateBase(baseFromArgs) || (() => {
 
 const RUN = String((A && A.runId) || 'live')
 const LIMIT = Math.min(Math.max((A && A.limit) || 8, 1), 20)
-const MINSCORE = (A && A.minScore) || 0
+const minScoreNumber = Number(A && A.minScore)
+const MINSCORE = Number.isFinite(minScoreNumber) ? Math.min(Math.max(minScoreNumber, 0), 100) : 0
 
 // Validate and filter SEND_IDS
 const rawSendIds = (A && Array.isArray(A.sendIds)) ? A.sendIds : null

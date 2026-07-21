@@ -9,7 +9,22 @@ export const meta = {
 }
 
 const A = typeof args === 'string' ? JSON.parse(args) : args
-const BASE = (A && A.base) || 'https://viral-content-system.vercel.app'
+const DEFAULT_BASE = 'https://viral-content-system.vercel.app'
+const validateBase = (base) => {
+  try {
+    const url = new URL(base)
+    return url.protocol === 'https:' ? base : null
+  } catch (_e) {
+    return null
+  }
+}
+const baseFromArgs = (A && A.base) || DEFAULT_BASE
+const BASE = validateBase(baseFromArgs) || (() => {
+  if (baseFromArgs !== DEFAULT_BASE) {
+    log(`⚠️ BASE URL ไม่ถูกรูป (ต้องเป็น https://...): ${baseFromArgs} — ใช้ค่าดีฟอลต์: ${DEFAULT_BASE}`)
+  }
+  return DEFAULT_BASE
+})()
 const RUN = String((A && A.runId) || 'audit')
 const DIR = 'public/company/departments/newsdesk'
 const ENG = 'public/company/departments/engineering'

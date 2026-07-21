@@ -113,6 +113,16 @@ if (TARGET === 'newsdesk-prod' && APPLY) {
     await writeReport('บล็อก — ไม่พบไฟล์แผนอนุมัติ', 'apply:true แต่ไม่มี ' + PLAN_PATH + ' (ต้องรันโหมดเสนอแผนก่อนเพื่อสร้างไฟล์นี้) — ไม่แก้')
     return { runId: RUN, target: TARGET, mode: 'blocked', note: '⛔ ไม่พบไฟล์แผนอนุมัติ ' + PLAN_PATH + ' — ต้องรันโหมดเสนอแผน (apply ไม่ระบุ/false) ก่อน เพื่อสร้างหลักฐานแผน แล้วค่อย apply:true' }
   }
+  // P0-04(4ข): ผูก apply กับ "เนื้อแผนที่อนุมัติ" ไม่ใช่แค่ไฟล์มีอยู่ — เทียบ rootCause รอบนี้กับแผนเดิม แบบ normalize (กัน false-reject จาก LLM เรียบเรียงต่าง)
+  const normalize = (s) => String(s || '').toLowerCase().replace(/\s+/g, '')
+  const normRoot = normalize(diag.rootCause)
+  const normContent = normalize(planCheck.content)
+  const rootCauseMatches = normRoot.length > 0 && (normContent.indexOf(normRoot) !== -1 || normRoot.indexOf(normContent) !== -1)
+  if (!rootCauseMatches) {
+    log('⛔ rootCause รอบนี้ไม่ตรงแผนอนุมัติที่ ' + PLAN_PATH + ' — ปฏิเสธ ไม่แก้ production')
+    await writeReport('บล็อก — rootCause ไม่ตรงแผนอนุมัติ', 'apply:true แต่ rootCause ที่เจนใหม่รอบนี้ ("' + String(diag.rootCause).slice(0, 120) + '") ไม่ปรากฏในเนื้อแผนที่อนุมัติไว้ที่ ' + PLAN_PATH + ' — ต้องเสนอแผนใหม่ให้ตรงก่อน apply — ไม่แก้')
+    return { runId: RUN, target: TARGET, mode: 'blocked', rootCause: diag.rootCause, note: '⛔ rootCause ไม่ตรงแผนอนุมัติ ' + PLAN_PATH + ' — เสนอแผนใหม่ (apply ไม่ระบุ/false) ให้ตรงก่อน แล้วค่อย apply:true' }
+  }
 }
 if (!diag.inScope || !diag.plan.length) {
   await writeReport('นอกขอบเขต/ไม่มีแผน', 'รากปัญหาอยู่นอกเขตที่แก้ได้ (อาจเป็นไฟล์หัวใจ) — ไม่แก้')
