@@ -3241,6 +3241,11 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   //   เกณฑ์ = "เห็นหน้าจริง" (faceBox วัดได้) ไม่ใช่ "หน้าใหญ่" (prominence จัดการแล้ว) → default MIN=0 = ตัดเฉพาะ null
   //   polarity ตรงข้าม hero guards เดิม (เปิด='1' เท่านั้น) — default OFF = byte-parity สนิท (ไม่แตะ swap/HOLD ใดเลย)
   const HERO_FACE_VISIBLE_ON = process.env.MEGA_HERO_FACE_VISIBLE === '1';
+  // ★ 21 ก.ค. (MEGA_HERO_FRONTAL — เคส AC-0166 hero ภาพมุมข้าง/ก้มหน้า ทั้งที่ทุกเกณฑ์เดิมผ่านหมด):
+  //   ตาคัดแนบ triage.faceFront 0-2 (0=หลัง/บัง · 1=มุมข้าง/ก้ม · 2=เต็มหน้า) เมื่อสวิตช์เปิด — hero เอา 2 เท่านั้น
+  //   ภาพเก่าไม่มี field (undefined) = ข้ามด่านเงียบ (fail-open ตาม pattern faceH) ไม่ตัดทิ้ง/ไม่ HOLD มั่ว
+  const HERO_FRONTAL_ON = process.env.MEGA_HERO_FRONTAL === '1';
+  const _faceFrontOf = (x) => { const v = Number(x?.triage?.faceFront); return Number.isInteger(v) && v >= 0 && v <= 2 ? v : null; };
   const HERO_FACE_VISIBLE_MIN = (() => { const v = Number(process.env.MEGA_HERO_FACE_VISIBLE_MIN); return Number.isFinite(v) && v > 0 && v <= 1 ? v : 0; })();
   // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD — ช่องย่อยลายตา): ตาคัด (Gemini) แนบ triage.busy 0-2 ต่อภาพ
   //   (0=สะอาดโฟกัสชัด, 1=มีพื้นหลังกิจกรรมบ้างแต่ subject หลักยังชัด, 2=ลายตา/คนเยอะหาโฟกัสไม่ได้/มุมกว้างไม่มีจุดเด่น)
@@ -3383,6 +3388,8 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     //   (เดิมไม่มี field นี้เลย → เลือก hero ได้แต่ faceCount==1 ไม่รู้หน้าเล็ก/ใหญ่) · round 2 ตำแหน่ง กันโทเค็นบวม
     //   วัดไม่ได้ (faceBox หาย/แปลก) = ไม่ใส่ field (undefined ถูก JSON.stringify ตัดออกเงียบๆ) · ปิดสวิตช์ = ไม่เพิ่ม field เลย
     ...(HERO_PROMINENCE_ON ? { faceH: (() => { const v = _faceHFrac(x.triage?.faceBox); return v == null ? undefined : Math.round(v * 100) / 100; })() } : {}),
+    // ★ 21 ก.ค. (MEGA_HERO_FRONTAL): มุมการเห็นหน้า 0-2 ให้ผู้กำกับเห็น — วัดไม่ได้/สวิตช์ปิด = ไม่ใส่ field
+    ...(HERO_FRONTAL_ON ? { faceFront: _faceFrontOf(x) ?? undefined } : {}),
     // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD): busy 0-2 จากตาคัด — ให้ผู้กำกับ LLM เห็น "ภาพนี้ลายตาแค่ไหน" เลี่ยงลงช่องย่อย
     //   (ปิดสวิตช์/ตาไม่ส่ง busy มา = ไม่ใส่ field เลย → prompt เดิมเป๊ะ ไม่ regress)
     ...(CLUTTER_GUARD_ON ? { busy: (() => { const v = Number(x.triage?.busy); return Number.isFinite(v) ? Math.max(0, Math.min(2, v)) : undefined; })() } : {}),
@@ -4236,6 +4243,23 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         }
       }
     }
+    // ★ 21 ก.ค. (MEGA_HERO_FRONTAL): hero ต้อง "เห็นเต็มหน้า" (faceFront=2) เท่านั้น — เคส AC-0166 ภาพมุมข้าง/
+    //   ก้มหน้าผ่านทุกเกณฑ์เดิม (หน้าเดี่ยว/ใหญ่/สะอาด/อารมณ์ตรง) เพราะไม่มีสัญญาณมุมหน้าเลย · ด่านนี้: hero
+    //   faceFront มีค่าและ <2 → หาสำรอง "คนเดียวกัน เดี่ยว เต็มหน้า ขนาดพอ สะอาด" สลับ — ไม่เจอ = คงไว้ให้
+    //   ด่าน HOLD ท้ายฟังก์ชันตัดสิน · field ไม่มี (ภาพเก่า/ตายังไม่ตอบ) = ข้ามเงียบ (fail-open) · ปิดสวิตช์ = ข้ามทั้ง block
+    if (img && _isHeroSlot(slot) && HERO_FRONTAL_ON) {
+      const _curFront = _faceFrontOf(img);
+      if (_curFront != null && _curFront < 2) {
+        const frontal = sorted.find((x) => !used.has(String(x.id)) && String(x.id) !== String(img.id)
+          && _identityOk(slot, x) && (x.triage?.faceCount ?? 0) === 1 && heroSizeOk(x) && isClean(x)
+          && _faceFrontOf(x) === 2);
+        if (frontal) {
+          console.log(`[MEGA S6] 🫥 hero ${img.id} ไม่เต็มหน้า (faceFront=${_curFront}${_curFront === 0 ? '=หลัง/บัง' : '=มุมข้าง/ก้ม'}) → สลับ ${frontal.id} (เห็นเต็มหน้า)`);
+          img = frontal;
+          reason = 'hero เต็มหน้า (โค้ดบังคับ MEGA_HERO_FRONTAL — เดิมภาพมุมข้าง/ก้มหน้า)';
+        }
+      }
+    }
     // ★ D-sidecar: solo-face swap / hero-size swap เปลี่ยนตัวจริง (reference เปลี่ยน) = 'policy_override' — ตรวจที่ไซต์จริง
     if (_dEvidenceOn && img && _dPreSwap && img !== _dPreSwap) _dStage = 'policy_override';
     if (!img) {
@@ -4262,6 +4286,11 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       //   กฎเดียวกับ story-rescue ด้านล่าง `!heroPerson0 || person !== heroPerson0`) ไม่ทำให้พังถ้าลำดับช่องต่างไป
       const diffPerson = (x) => { const hp = _lc(slots[_canonHeroId]?.person || ''); return !hp || _lc(x?.triage?.person || '') !== hp; };
       const pickFrom = (arr) =>
+        // ★ 21 ก.ค. (MEGA_HERO_FRONTAL): เต็มหน้า (faceFront=2) + เดี่ยว + ขนาดพอ ชนะทุกชั้นเมื่อมี — ภาพมุมข้าง/
+        //   ก้มหน้าตกไป tier ล่างตามปกติ (ไม่ตัดทิ้ง) · field ไม่มี = ไม่เข้าเกณฑ์ชั้นนี้ · ปิดสวิตช์ = ข้ามชั้นนี้เดิมเป๊ะ
+        (_isHeroSlot(slot) && HERO_FRONTAL_ON
+          ? arr.find((x) => _identityOk(slot, x) && (x.triage?.faceCount ?? 0) === 1 && heroSizeOk(x) && _faceFrontOf(x) === 2)
+          : null) ||
         // ★ 19 ก.ค. (MEGA_HERO_PROMINENCE, เคส AC-0160 hero หน้าเล็ก 16-20%+backdrop เยอะ): หน้าเดี่ยว+ขนาดพอ+
         //   หน้ากิน ≥30% เฟรม (ขอบล่าง HERO_FACE_SHARE band) ต้องชนะก่อนชั้นอื่นเสมอเมื่อมี — เรียงผู้สมัคร hero
         //   ด้วย faceH มากสุดก่อน (สำเนาเรียงแยกต่างหาก ไม่แตะลำดับ arr/sorted เดิมที่เรียงคุณภาพ) · faceBox วัดไม่ได้
@@ -5584,6 +5613,31 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           quality: 'yellow',
           dossierPatch: {
             pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, heroFaceVisibleHold: { imageId: String(_hvRec.id), faceH: _hvFaceH } },
+            ...(_imagesPatch ? { images: _imagesPatch } : {}),
+          },
+        };
+      }
+    }
+  }
+
+  // ★ 21 ก.ค. (MEGA_HERO_FRONTAL): เช็ค hero สุดท้ายจริงหลัง post-processing ทั้งหมด (เหตุผลเดียวกับ HOLD
+  //   ด้านบน) — faceFront มีค่าและ <2 + ไม่ใช่ครอปหน้าเดี่ยว → HOLD ห้ามปล่อยภาพมุมข้าง/ก้มหน้า/หลังหัวขึ้นปก
+  //   (ผู้ใช้สั่ง 21 ก.ค.: "หน้าเด่น หน้าเดี่ยว เห็นเต็มหน้าเท่านั้น") · field ไม่มี = ไม่ตัดสิน (fail-open) · ปิดสวิตช์ = ข้าม
+  if (HERO_FRONTAL_ON && heroNames.length && _canonHeroId) {
+    const _ffEntry = slots[_canonHeroId];
+    const _ffRec = _ffEntry ? byId.get(String(_ffEntry.id)) : null;
+    if (_ffRec && !_ffEntry._heroFaceCrop) {
+      const _ffVal = _faceFrontOf(_ffRec);
+      if (_ffVal != null && _ffVal < 2) {
+        console.log(`[MEGA S6] 🫥⛔ hero ${_ffRec.id} ไม่เต็มหน้า (faceFront=${_ffVal}) หลัง loop จบ + พูลไม่มีภาพเต็มหน้าแทน → HOLD`);
+        return {
+          status: 'quality_hold',
+          nextAction: 'hold',
+          holdStatus: 'insufficient_assets',
+          summary: `⛔ hero ต้องเห็นเต็มหน้า — พูลไม่มีภาพเต็มหน้าเดี่ยวของ ${heroNames.join('/')} (ภาพที่เลือกเป็นมุมข้าง/ก้มหน้า/ถูกบัง faceFront=${_ffVal})`.slice(0, 200),
+          quality: 'yellow',
+          dossierPatch: {
+            pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, heroFrontalHold: { imageId: String(_ffRec.id), faceFront: _ffVal } },
             ...(_imagesPatch ? { images: _imagesPatch } : {}),
           },
         };
