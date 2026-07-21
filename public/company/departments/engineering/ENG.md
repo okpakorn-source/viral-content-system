@@ -2,7 +2,11 @@
 
 > ทีมประจำบริษัทที่คอย **ปรับปรุง/แก้ไขระบบให้แผนกโต๊ะข่าว** (และแผนกอื่นในอนาคต)
 > เมื่อแผนกเจอปัญหา → เรียกทีมวิศวะ → วินิจฉัย → แก้ → เทส → รีวิว → รายงาน
-> 🔴 ขอบเขตแก้: โค้ดของบริษัท/แผนกเท่านั้น (`public/company/**` + `.claude/workflows/newsdesk-*`, `company-*`) — **ห้ามแตะระบบข่าวจริง/ท่อผลิต (ล็อก)** เว้นได้รับอนุมัติ + ทำเป็นเฟส
+> ขอบเขตแก้ (ปลดล็อก /news-desk แล้ว 21 ก.ค. 69 — แต่มีเบรกทุกจุด):
+> - **โซน company** (`public/company/**` + workflows): แก้ได้เลย, deploy รออนุมัติ
+> - **โซน newsdesk-prod** (`src/app/**`, `src/lib/services/**`, `src/app/api/desk/**`): แตะได้แล้ว แต่ **propose-only** จนเจ้าของสั่ง `apply:true` → ทุกการแก้ production ผ่าน: วินิจฉัย→เสนอแผน+ผลกระทบ→เจ้าของอนุมัติ→แก้+เทส→รีวิว→เจ้าของอนุมัติ deploy
+> - 🔴 **ไฟล์หัวใจห้ามแตะเด็ดขาดทุกโซน**: `openai.js`, `aiRouter.js`, `claudeClient.js`, `prisma/schema.prisma`, `validate-workflow.mjs` — เจอรากปัญหาที่นี่ = รายงานเฉย ๆ
+> - ยึด SYSTEM_SAFETY_RULES: แก้น้อยสุด · isolated · รักษา backward-compat · ทุก flow มี fallback · ห้าม refactor แถม
 
 ## ทำเนียบ 6 คน (ครบทุกโมเดล ทุกหน้าที่)
 
