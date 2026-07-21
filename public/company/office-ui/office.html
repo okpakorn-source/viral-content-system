@@ -335,6 +335,28 @@
   .chat-text{ color:var(--ink); }
 
   /* ---------- คุยกับพนักงาน (compose) ---------- */
+  .mode-badge{
+    display:inline-flex; align-items:center; font-size:.66rem; font-weight:800;
+    border-radius:999px; padding:2px 9px; margin-left:auto; letter-spacing:.02em;
+  }
+  .mode-badge.mode-online{ background:rgba(76,175,125,.14); color:var(--ok); border:1px solid var(--ok); }
+  .mode-badge.mode-home{ background:rgba(139,90,55,.12); color:var(--wood-dark); border:1px solid var(--wood-dark); }
+  .mode-badge.mode-readonly{ background:rgba(229,72,77,.12); color:var(--alert); border:1px solid var(--alert); }
+  .secret-row{
+    display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+    font-size:.76rem; color:var(--muted); margin-bottom:10px;
+    background:rgba(0,0,0,.03); border-radius:10px; padding:8px 10px;
+  }
+  .secret-row input[type="password"]{
+    font-family:inherit; font-size:.8rem; padding:6px 9px;
+    border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink);
+    flex:1 1 120px; min-width:0;
+  }
+  .secret-row button{
+    font-family:inherit; font-size:.76rem; font-weight:700; cursor:pointer;
+    border:none; border-radius:8px; padding:6px 12px; color:#fff8ec;
+    background:var(--wood-dark);
+  }
   .readonly-badge{
     display:none;
     background:rgba(229,72,77,.12); color:var(--alert); border:1px solid var(--alert);
@@ -669,7 +691,12 @@
 
     <!-- ================= คุยกับพนักงาน ================= -->
     <section class="panel panel-compose">
-      <h2>💬 คุยกับพนักงาน</h2>
+      <h2>💬 คุยกับพนักงาน <span id="chatModeBadge" class="mode-badge mode-home">🏠 ในบ้าน</span></h2>
+      <div class="secret-row">
+        <span>🔑 ปลดล็อกแชทออนไลน์</span>
+        <input id="chatSecretInput" type="password" placeholder="รหัสผ่าน…" maxlength="200">
+        <button id="chatSecretSaveBtn" type="button">บันทึก</button>
+      </div>
       <div id="readonlyBadge" class="readonly-badge">โหมดอ่านอย่างเดียว (เปิดผ่านเซิร์ฟเวอร์ในบ้านเพื่อแชท)</div>
       <div class="compose-row">
         <select id="chatTo">
@@ -742,11 +769,13 @@
   var BOARD_URL = '../office/board.md';
   var LOG_URL = '../office/log.md';
 
-  /* ---------------- แชทโต้ตอบ (POST /api/say, /api/meeting) ---------------- */
+  /* ---------------- แชทโต้ตอบ (POST /api/say, /api/meeting, /api/company/chat) ---------------- */
   var CHAT_SCOPE = 'main';
   var CHAT_URL = '../office/chat.md';
   var SAY_URL = '/api/say';
   var MEETING_URL = '/api/meeting';
+  var ONLINE_URL = '/api/company/chat';
+  var SECRET_KEY = 'fco_chat_secret';
 
   /* ข้อมูลฝังในตัว ใช้เมื่อ fetch ไม่สำเร็จ (เช่นเปิดไฟล์แบบ file://) เพื่อไม่ให้หน้าว่างเปล่า */
   var FALLBACK = {
@@ -896,14 +925,34 @@
     }).catch(function(){});
   }
 
-  function showReadonlyBadge(){
+  function showStatus(msg){
     var el = document.getElementById('readonlyBadge');
-    if (el){ el.classList.add('show'); }
+    if (el){ el.textContent = msg; el.classList.add('show'); }
   }
-  function hideReadonlyBadge(){
+  function hideStatusBadge(){
     var el = document.getElementById('readonlyBadge');
     if (el){ el.classList.remove('show'); }
   }
+
+  /* ---------------- โหมดแชท: 🌐 ออนไลน์ (มีรหัส) / 🏠 ในบ้าน / 📖 อ่านอย่างเดียว ---------------- */
+  function getSecret(){
+    try { return sessionStorage.getItem(SECRET_KEY) || ''; } catch (e){ return ''; }
+  }
+  function setSecret(v){
+    try {
+      if (v){ sessionStorage.setItem(SECRET_KEY, v); }
+      else { sessionStorage.removeItem(SECRET_KEY); }
+    } catch (e){ /* sessionStorage ปิดใช้งาน (private mode) — ข้ามเงียบ ๆ */ }
+  }
+  function updateModeBadge(mode){
+    var el = document.getElementById('chatModeBadge');
+    if (!el){ return; }
+    el.classList.remove('mode-online', 'mode-home', 'mode-readonly');
+    if (mode === 'online'){ el.classList.add('mode-online'); el.textContent = '🌐 ออนไลน์'; }
+    else if (mode === 'readonly'){ el.classList.add('mode-readonly'); el.textContent = '📖 อ่านอย่างเดียว'; }
+    else { el.classList.add('mode-home'); el.textContent = '🏠 ในบ้าน'; }
+  }
+  function defaultMode(){ return getSecret() ? 'online' : 'home'; }
 
   function postJson(url, payload){
     return fetch(url, {
@@ -916,17 +965,87 @@
     });
   }
 
+  /* เรียก endpoint ออนไลน์ แล้วคืนสถานะ+ข้อมูลดิบเสมอ (ไม่ throw) เพื่อแยกแยะ 403/503/404 เอง */
+  function postOnlineChat(payload){
+    return fetch(ONLINE_URL, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json; charset=utf-8' },
+      body: JSON.stringify(payload)
+    }).then(function(r){
+      return r.json().catch(function(){ return {}; }).then(function(data){
+        return { status:r.status, ok:r.ok, data:data };
+      });
+    });
+  }
+
+  function appendRealtimeExchange(to, text, data){
+    var el = document.getElementById('liveChatFeed');
+    if (!el){ return; }
+    var now = new Date();
+    var time = ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2);
+    var html = '<div class="livechat-item livechat-user"><div class="lc-meta">🧑 ผู้ใช้ → ' + escapeHtml(to) + ' <span class="lc-time">' + time + '</span></div><div class="lc-text">' + escapeHtml(text) + '</div></div>';
+    if (data && data.reply){
+      var who = data.name || to;
+      html += '<div class="livechat-item livechat-staff"><div class="lc-meta">↳ [' + escapeHtml(who) + '] <span class="lc-time">' + time + '</span></div><div class="lc-text">' + escapeHtml(data.reply) + '</div></div>';
+    }
+    el.innerHTML = el.innerHTML + html;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function sendSayHome(to, text, textInput){
+    postJson(SAY_URL, { scope:CHAT_SCOPE, to:to, text:text }).then(function(){
+      if (textInput){ textInput.value = ''; }
+      hideStatusBadge();
+      updateModeBadge('home');
+      loadChatFeed();
+    }).catch(function(){
+      showStatus('โหมดอ่านอย่างเดียว (เปิดผ่านเซิร์ฟเวอร์ในบ้านเพื่อแชท)');
+      updateModeBadge('readonly');
+    });
+  }
+
   function sendSay(){
     var toSel = document.getElementById('chatTo');
     var textInput = document.getElementById('chatText');
     if (!toSel || !textInput){ return; }
     var text = textInput.value.replace(/^\s+|\s+$/g, '');
     if (text === ''){ return; }
-    postJson(SAY_URL, { scope:CHAT_SCOPE, to:toSel.value, text:text }).then(function(){
+    var to = toSel.value;
+    var secret = getSecret();
+
+    if (!secret){
+      sendSayHome(to, text, textInput);
+      return;
+    }
+
+    postOnlineChat({ to:to, text:text, secret:secret }).then(function(res){
+      if (res.status === 404){
+        /* เปิดผ่าน Node server ในบ้านที่ไม่มี route นี้ → fallback โหมดในบ้าน */
+        sendSayHome(to, text, textInput);
+        return;
+      }
+      if (res.status === 503){
+        showStatus('แชทออนไลน์ยังไม่เปิด (เจ้าของต้องตั้งรหัสใน Vercel)');
+        updateModeBadge('readonly');
+        return;
+      }
+      if (res.status === 403){
+        showStatus('รหัสไม่ถูก');
+        updateModeBadge('readonly');
+        return;
+      }
+      if (!res.ok || !res.data || res.data.success === false){
+        showStatus('ส่งไม่สำเร็จ ลองใหม่อีกครั้ง');
+        return;
+      }
       textInput.value = '';
-      hideReadonlyBadge();
-      loadChatFeed();
-    }).catch(function(){ showReadonlyBadge(); });
+      hideStatusBadge();
+      updateModeBadge('online');
+      appendRealtimeExchange(to, text, res.data);
+    }).catch(function(){
+      /* ต่อ endpoint ออนไลน์ไม่ได้เลย (ออฟไลน์/CORS) → ลองโหมดในบ้านแทน */
+      sendSayHome(to, text, textInput);
+    });
   }
 
   function callMeeting(){
@@ -935,9 +1054,9 @@
     topic = topic.replace(/^\s+|\s+$/g, '');
     if (topic === ''){ return; }
     postJson(MEETING_URL, { scope:CHAT_SCOPE, topic:topic }).then(function(){
-      hideReadonlyBadge();
+      hideStatusBadge();
       loadChatFeed();
-    }).catch(function(){ showReadonlyBadge(); });
+    }).catch(function(){ showStatus('โหมดอ่านอย่างเดียว (เปิดผ่านเซิร์ฟเวอร์ในบ้านเพื่อแชท)'); });
   }
 
   function statusLabel(msgs){
@@ -1138,6 +1257,24 @@
     });
   }
   if (meetingBtn){ meetingBtn.addEventListener('click', callMeeting); }
+
+  var chatSecretInput = document.getElementById('chatSecretInput');
+  var chatSecretSaveBtn = document.getElementById('chatSecretSaveBtn');
+  if (chatSecretSaveBtn){
+    chatSecretSaveBtn.addEventListener('click', function(){
+      var v = chatSecretInput ? chatSecretInput.value.replace(/^\s+|\s+$/g, '') : '';
+      setSecret(v);
+      if (chatSecretInput){ chatSecretInput.value = ''; }
+      hideStatusBadge();
+      updateModeBadge(defaultMode());
+    });
+  }
+  if (chatSecretInput){
+    chatSecretInput.addEventListener('keydown', function(ev){
+      if (ev.key === 'Enter' && chatSecretSaveBtn){ ev.preventDefault(); chatSecretSaveBtn.click(); }
+    });
+  }
+  updateModeBadge(defaultMode());
 
   /* ---------------- boot ---------------- */
   renderProjects();
