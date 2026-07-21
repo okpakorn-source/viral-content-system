@@ -13,6 +13,10 @@ export const meta = {
 const A = typeof args === 'string' ? JSON.parse(args) : args
 if (!A || !A.projectDir) throw new Error('project-intake: ต้องส่ง args {projectDir} — ได้: ' + JSON.stringify(A))
 const DIR = String(A.projectDir).replace(/\\/g, '/').replace(/\/+$/, '')
+// ความปลอดภัย: projectDir ต้องเป็น company/projects/<slug> เท่านั้น (กัน .., path ซ้อน, shell metachar → command injection/scope escape)
+if (!/^company\/projects\/[A-Za-z0-9_-]+$/.test(DIR)) {
+  throw new Error('project-intake: projectDir ไม่ถูกรูป ต้องเป็น "company/projects/<slug>" (a-z0-9_- เท่านั้น) — ได้: ' + DIR)
+}
 
 // ---- ทำเนียบพนักงาน ----
 const CODEX_EXE = 'C:\\Users\\User\\AppData\\Local\\OpenAI\\Codex\\bin\\5dee10576ec7a5b8\\codex.exe'

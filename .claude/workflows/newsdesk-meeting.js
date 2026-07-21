@@ -28,7 +28,12 @@ const [meen, fah, nin, joOk] = await parallel([
     { label: 'vote:fah', phase: 'ลงมติ', model: 'haiku', effort: 'low', schema: VSCHEMA }),
   () => agent('คุณคือ "นิน" นักคัดข่าว แผนกโต๊ะข่าว จมูกไวเรื่องไวรัล. ตัดสิน "น่าส่งไหม": ✅น่าส่งมีมุมเด่น ⚠️ก้ำกึ่ง ❌ไม่น่าสน. reason ≤12 คำไทย.\n' + LIST,
     { label: 'vote:nin', phase: 'ลงมติ', model: 'sonnet', effort: 'low', schema: VSCHEMA }),
-  () => agent('คุณคือ runner. สั่ง Codex ตรวจข้อเท็จจริงข่าว. ใช้ Bash tool timeout=480000:\n"' + CODEX + '" exec -m gpt-5.6-sol -c model_reasoning_effort=medium -c approval_policy=never -s workspace-write --skip-git-repo-check --ephemeral -C . "คุณคือโจ ผู้ตรวจข้อเท็จจริง แผนกโต๊ะข่าว. ดูข่าวต่อไปนี้ เขียนไฟล์ ' + DIR + '/runs/_factcheck-' + RUN + '.md (UTF-8) บรรทัดละข่าว: <id>: <ok/ข้อสงสัย ≤15 คำ>. ห้ามแตะไฟล์อื่น\n' + LIST.replace(/"/g, "'") + '" < /dev/null\nตรวจว่าไฟล์ ' + DIR + '/runs/_factcheck-' + RUN + '.md เกิดจริง ถ้าไม่เกิดให้ Write เองระบุ "โจ: ตรวจไม่ทัน". คำตอบ: ok/fail',
+  () => agent('คุณคือ runner. สั่งโจ (Codex) ตรวจข้อเท็จจริงข่าว ผ่าน prompt-file (กันหัวข้อข่าวหลุดเข้า shell — ห้ามต่อ LIST เข้าคำสั่ง Bash เด็ดขาด)\n' +
+    '1. ใช้ Write tool เขียนไฟล์ ' + DIR + '/runs/_factcheck-task-' + RUN + '.txt เนื้อหาตามนี้เป๊ะ ๆ:\n' +
+    '"""คุณคือโจ ผู้ตรวจข้อเท็จจริง แผนกโต๊ะข่าว. ดูรายการข่าวด้านล่าง เขียนไฟล์ ' + DIR + '/runs/_factcheck-' + RUN + '.md (UTF-8) บรรทัดละข่าว: <id>: <ok/ข้อสงสัย ≤15 คำ>. ห้ามแตะไฟล์อื่น\n\n===รายการข่าว===\n' + LIST + '"""\n' +
+    '2. รัน Bash (timeout=480000) โดยคำสั่งคงที่ ไม่มีเนื้อข่าวในสตริง shell:\n' +
+    '"' + CODEX + '" exec -m gpt-5.6-sol -c model_reasoning_effort=medium -c approval_policy=never -s workspace-write --skip-git-repo-check --ephemeral -C . "อ่านไฟล์ ' + DIR + '/runs/_factcheck-task-' + RUN + '.txt แล้วทำตามคำสั่งในนั้นทั้งหมด" < /dev/null\n' +
+    '3. ตรวจว่าไฟล์ ' + DIR + '/runs/_factcheck-' + RUN + '.md เกิดจริง ถ้าไม่เกิดให้ Write เองระบุ "โจ: ตรวจไม่ทัน". ลบไฟล์ task ทิ้ง. คำตอบ: ok/fail',
     { label: 'vote:jo(codex)', phase: 'ลงมติ', model: 'haiku', effort: 'low' }),
 ])
 const votes = { meen: meen && meen.verdicts || [], fah: fah && fah.verdicts || [], nin: nin && nin.verdicts || [] }
