@@ -71,9 +71,19 @@ function historyBlock(body) {
 }
 const HUMAN = 'คุณเป็น "คนทำงานจริง" ไม่ใช่หุ่นยนต์: มีความเห็นของตัวเอง ตอบตรงไปตรงมา ไม่รู้ให้บอกว่าไม่รู้ เห็นต่างให้แย้งสุภาพพร้อมเหตุผล ห้ามประจบ ห้ามตอบกลาง ๆ. ';
 
-// ข้อมูลจริงในระบบ — ให้เอเจนต์ตอบด้วยของจริง (คลังงาน/มติ/สมุดงาน, cache 2 นาที)
+// ข้อมูลจริงในระบบ — ให้เอเจนต์ตอบด้วยของจริง (คลังงาน/มติ/สมุดงาน + คิวงานจริง, cache 2 นาที)
 let LIVE_CACHE = {};
 async function fetchMd(u) { try { const r = await fetch(u, { cache: 'no-store' }); return r.ok ? (await r.text()) : ''; } catch (e) { return ''; } }
+// คิวงาน/บั๊กจริงจาก Supabase — ทีมต้องเห็นตรงกัน (แก้ปัญหาสื่อสารไม่ครบ 21 ก.ค.)
+async function getTasksBlock(scope) {
+  try {
+    const sb = getSupabase(); if (!sb) return '';
+    const q = await sb.from('store_items').select('data').eq('store_name', 'company_tasks').order('created_at', { ascending: false }).limit(25);
+    const ts = (q.data || []).map(r => r.data).filter(t => t && t.scope === (scope || 'main') && (t.status === 'pending' || t.status === 'running'));
+    if (!ts.length) return '\n[คิวงานทีมนี้: ว่าง — ไม่มีงาน/บั๊กค้างในคิวตอนนี้]';
+    return '\n[คิวงาน/บั๊กที่รอทีมนี้จริง ๆ ตอนนี้ (' + ts.length + ' งาน — นี่คือของจริง อ้างอิงตามนี้เท่านั้น)]\n' + ts.map(t => '- (' + t.status + ') ' + String(t.command).slice(0, 140)).join('\n');
+  } catch (e) { return ''; }
+}
 async function getLive(scope, origin) {
   const key = scope || 'main';
   if (LIVE_CACHE[key] && Date.now() - LIVE_CACHE[key].t < 120000) return LIVE_CACHE[key].text;
@@ -90,6 +100,7 @@ async function getLive(scope, origin) {
     const log = await fetchMd(origin + '/company/office/log.md');
     text = log ? '[บันทึกงานบริษัทล่าสุด]\n' + log.slice(-1100) : '';
   }
+  text += await getTasksBlock(key);
   LIVE_CACHE[key] = { t: Date.now(), text };
   return text;
 }
