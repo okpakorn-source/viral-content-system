@@ -568,6 +568,52 @@
   footer.site-footer{
     text-align:center; font-size:.72rem; color:var(--muted); margin-top:20px;
   }
+
+  /* ---------- Mobile touch targets + readability (<=767px) ---------- */
+  @media (max-width:767px){
+    .more-toggle-btn,
+    .task-send-btn,
+    .bug-report-btn,
+    .meeting-send-btn,
+    .tasks-open-btn,
+    .chat-input-row button{
+      min-height:44px;
+      display:inline-flex; align-items:center; justify-content:center;
+    }
+    .chat-recipient-row select{
+      min-height:44px; padding:11px 10px;
+    }
+    .chat-input-row input[type="text"]{
+      min-height:44px; font-size:16px;
+    }
+    .chat-panel-close,
+    .desk-panel-close,
+    .mini-popup-close{ width:44px; height:44px; }
+    .chat-fab{ min-height:48px; }
+    .chat-feed{ -webkit-overflow-scrolling:touch; }
+    .chat-main-panel{ padding-bottom:calc(14px + env(safe-area-inset-bottom)); }
+
+    /* การ์ดพนักงาน: 1 คอลัมน์เต็มกว้าง */
+    .card{ flex:1 1 100%; max-width:none; width:auto; }
+
+    /* หัวข้อ >=16px */
+    .panel h2, .room-label, .card-name{ font-size:1rem; }
+
+    /* เนื้อหา >=14px */
+    .muted, .chat-text, .board-body p, .msg-bubble,
+    .task-cmd, .card-status, #logList li, .desk-msg,
+    .chat-item, .project-name{ font-size:.875rem; }
+
+    /* chip/ป้าย >=12px */
+    .card-model, .card-handle, .task-badge, .step{ font-size:.75rem; }
+
+    /* บับเบิลแชท: อ่านง่ายขึ้น */
+    .msg-bubble{ padding:10px 14px; line-height:1.5; }
+    .msg-bubble-wrap{ max-width:85%; }
+
+    /* กันปุ่มลอย 💬 ทับเนื้อหาท้ายหน้า */
+    .wrap{ padding-bottom:84px; }
+  }
 </style>
 </head>
 <body>
