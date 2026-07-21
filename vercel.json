@@ -6,6 +6,10 @@
   },
   "crons": [
     {
+      "path": "/api/company/worker",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/queue/worker",
       "schedule": "* * * * *"
     },
