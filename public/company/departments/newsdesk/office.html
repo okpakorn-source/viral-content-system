@@ -1206,7 +1206,7 @@
       return;
     }
 
-    postOnlineChat({ to:to, text:text, secret:secret }).then(function(res){
+    postOnlineChat({ to:to, text:text, secret:secret, scope:CHAT_SCOPE }).then(function(res){
       if (res.status === 404){
         /* เปิดผ่าน Node server ในบ้านที่ไม่มี route นี้ → fallback โหมดในบ้าน */
         sendSayHome(to, text, textInput);
