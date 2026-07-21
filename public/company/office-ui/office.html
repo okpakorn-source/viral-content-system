@@ -97,9 +97,7 @@
       "coffee"
       "prod"
       "log"
-      "chat"
-      "compose"
-      "livechat";
+      "chat";
     gap:16px;
   }
   .grid-header{ grid-area:header; }
@@ -111,8 +109,6 @@
   .panel-prod{ grid-area:prod; }
   .panel-log{ grid-area:log; }
   .panel-chat{ grid-area:chat; }
-  .panel-compose{ grid-area:compose; }
-  .panel-livechat{ grid-area:livechat; }
 
   @media (min-width:641px){
     .office-grid{
@@ -124,9 +120,7 @@
         "meeting remote"
         "coffee  coffee"
         "prod    log"
-        "chat    chat"
-        "compose compose"
-        "livechat livechat";
+        "chat    chat";
     }
   }
   @media (min-width:1400px){
@@ -137,9 +131,7 @@
         "ceo     meeting remote"
         "eng     meeting remote"
         "eng     coffee  remote"
-        "prod    log     chat"
-        "compose compose compose"
-        "livechat livechat livechat";
+        "prod    log     chat";
     }
   }
 
@@ -334,14 +326,44 @@
   .chat-meta .chat-n{ color:var(--muted); font-weight:400; }
   .chat-text{ color:var(--ink); }
 
-  /* ---------- คุยกับพนักงาน (compose) ---------- */
-  .mode-badge{
-    display:inline-flex; align-items:center; font-size:.66rem; font-weight:800;
-    border-radius:999px; padding:2px 9px; margin-left:auto; letter-spacing:.02em;
+  /* ---------- Floating chat widget ---------- */
+  .chat-fab{
+    position:fixed; right:20px; bottom:20px; z-index:60;
+    width:56px; height:56px; border-radius:50%; border:none; cursor:pointer;
+    font-size:1.5rem; color:#fff8ec; line-height:1;
+    background:linear-gradient(135deg,var(--wood),var(--wood-dark));
+    box-shadow:var(--shadow-lg);
   }
-  .mode-badge.mode-online{ background:rgba(76,175,125,.14); color:var(--ok); border:1px solid var(--ok); }
-  .mode-badge.mode-home{ background:rgba(139,90,55,.12); color:var(--wood-dark); border:1px solid var(--wood-dark); }
-  .mode-badge.mode-readonly{ background:rgba(229,72,77,.12); color:var(--alert); border:1px solid var(--alert); }
+  .chat-panel{
+    position:fixed; right:20px; bottom:90px; z-index:70;
+    width:380px; max-width:92vw; height:70vh; max-height:640px;
+    background:var(--card-bg); border-radius:20px;
+    box-shadow:var(--shadow-lg);
+    display:none; flex-direction:column; overflow:hidden;
+  }
+  .chat-panel.open{ display:flex; }
+  @media (max-width:767px){
+    .chat-panel{
+      right:0; left:0; bottom:0; top:0; width:auto; max-width:none;
+      height:auto; max-height:none; border-radius:0;
+    }
+  }
+  .chat-panel-head{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:14px 16px; flex:none;
+    background:linear-gradient(135deg,var(--wood),var(--wood-dark)); color:#fff8ec;
+  }
+  .chat-panel-title{ font-weight:800; font-size:.95rem; }
+  .chat-status-line{ display:flex; align-items:center; gap:6px; font-size:.72rem; opacity:.92; margin-top:2px; }
+  .chat-status-dot{ width:8px; height:8px; border-radius:50%; flex:none; }
+  .chat-status-dot.dot-online{ background:var(--ok); }
+  .chat-status-dot.dot-home{ background:var(--busy); }
+  .chat-status-dot.dot-readonly{ background:var(--alert); }
+  .chat-panel-close{
+    background:rgba(255,255,255,.18); border:none; color:#fff; flex:none;
+    width:30px; height:30px; border-radius:50%; cursor:pointer; font-size:1rem;
+  }
+  .chat-secret-area{ padding:10px 14px 0; flex:none; }
   .secret-row{
     display:flex; flex-wrap:wrap; gap:8px; align-items:center;
     font-size:.76rem; color:var(--muted); margin-bottom:10px;
@@ -357,6 +379,16 @@
     border:none; border-radius:8px; padding:6px 12px; color:#fff8ec;
     background:var(--wood-dark);
   }
+  .secret-pill{
+    display:inline-flex; align-items:center; gap:6px;
+    font-family:inherit; font-size:.78rem; font-weight:700; cursor:pointer;
+    border:1px solid var(--ok); color:var(--ok); background:rgba(76,175,125,.10);
+    border-radius:999px; padding:6px 12px; margin-bottom:10px;
+  }
+  .secret-toast{
+    display:inline-block; font-size:.74rem; font-weight:700; color:var(--ok);
+    margin-left:8px; margin-bottom:10px;
+  }
   .readonly-badge{
     display:none;
     background:rgba(229,72,77,.12); color:var(--alert); border:1px solid var(--alert);
@@ -364,33 +396,86 @@
     margin-bottom:10px;
   }
   .readonly-badge.show{ display:block; }
-  .compose-row{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
-  .compose-row select, .compose-row input[type="text"]{
-    font-family:inherit; font-size:.84rem; padding:8px 10px;
+
+  .chat-tabs{ display:flex; gap:6px; padding:0 14px 10px; flex:none; }
+  .chat-tab{
+    flex:1 1 0; font-family:inherit; font-size:.74rem; font-weight:700; cursor:pointer;
+    border:1px solid var(--line); background:var(--card-bg); color:var(--muted);
+    border-radius:999px; padding:6px 6px;
+  }
+  .chat-tab.active{ background:var(--wood); color:#fff8ec; border-color:var(--wood); }
+  .chat-tab-panel{ display:none; flex:1; min-height:0; flex-direction:column; padding:0 14px 14px; overflow:hidden; }
+  .chat-tab-panel.active{ display:flex; }
+  .chat-tab-note{ font-size:.7rem; color:var(--muted); margin-bottom:6px; flex:none; }
+  .chat-feed{ flex:1; min-height:0; overflow-y:auto; }
+  .chat-input-row{ display:flex; gap:8px; margin-top:8px; flex:none; }
+  .chat-input-row input[type="text"]{
+    flex:1; min-width:0; font-family:inherit; font-size:.84rem; padding:8px 10px;
     border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink);
   }
-  .compose-row select{ flex:0 0 auto; min-width:100px; }
-  .compose-row input[type="text"]{ flex:1 1 160px; min-width:0; }
-  .compose-row button, .meeting-btn{
+  .chat-input-row button{
     font-family:inherit; font-size:.84rem; font-weight:700; cursor:pointer;
     border:none; border-radius:10px; padding:8px 16px; color:#fff8ec;
     background:linear-gradient(135deg,var(--wood),var(--wood-dark));
-    box-shadow:var(--shadow);
   }
-  .meeting-btn{ background:linear-gradient(135deg,var(--busy),var(--alert)); width:100%; }
-  .compose-row button:hover, .meeting-btn:hover{ filter:brightness(1.06); }
+  .chat-input-row button:disabled{ opacity:.6; cursor:not-allowed; }
 
-  /* ---------- แชทสด (livechat) ---------- */
-  #liveChatFeed{ max-height:360px; overflow-y:auto; }
-  .livechat-item{ border-radius:8px; padding:8px 10px; margin-bottom:8px; font-size:.8rem; }
-  .livechat-item .lc-meta{ font-weight:700; margin-bottom:2px; display:flex; gap:6px; align-items:baseline; }
-  .livechat-item .lc-time{ font-weight:400; color:var(--muted); font-size:.7rem; }
-  .livechat-item .lc-text{ color:var(--ink); }
-  .livechat-user{ background:#fdf0e3; border-left:4px solid var(--wood); }
-  .livechat-staff{ background:#eef3ef; border-left:4px solid #4caf7d; }
-  .livechat-meeting{ background:#fdeaea; border-left:4px solid var(--alert); }
-  .livechat-note{ background:transparent; padding:2px 4px; }
-  .livechat-note .lc-text{ color:var(--muted); font-size:.76rem; }
+  /* คุยรายคน */
+  .people-list{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:6px; }
+  .people-item{
+    display:flex; align-items:center; gap:8px; padding:8px; border-radius:10px; cursor:pointer;
+    border:1px solid transparent;
+  }
+  .people-item:hover, .people-item:focus-visible{ background:rgba(0,0,0,.04); border-color:var(--line); outline:none; }
+  .people-avatar{ width:34px; height:34px; flex:none; }
+  .people-name{ font-weight:700; font-size:.84rem; }
+  .people-handle{ color:var(--muted); font-size:.7rem; }
+  .people-role{ color:var(--muted); font-size:.7rem; margin-left:auto; text-align:right; white-space:nowrap; }
+  .dm-view{ display:none; flex-direction:column; flex:1; min-height:0; }
+  .dm-back{
+    align-self:flex-start; font-family:inherit; font-size:.76rem; font-weight:700; color:var(--wood-dark);
+    background:none; border:none; cursor:pointer; margin-bottom:4px; padding:2px 0; flex:none;
+  }
+  .dm-title{ font-weight:800; font-size:.82rem; margin-bottom:6px; flex:none; }
+
+  /* บับเบิลสไตล์ messenger */
+  .msg-row{ display:flex; margin-bottom:10px; }
+  .msg-row.msg-user{ justify-content:flex-end; }
+  .msg-row.msg-staff{ justify-content:flex-start; }
+  .msg-row.msg-meeting-banner, .msg-row.msg-note{ justify-content:center; }
+  .msg-bubble-wrap{ max-width:80%; display:flex; flex-direction:column; }
+  .msg-row.msg-user .msg-bubble-wrap{ align-items:flex-end; }
+  .msg-avatar-name{ font-size:.68rem; font-weight:700; color:var(--muted); margin-bottom:2px; }
+  .msg-bubble{ border-radius:14px; padding:8px 12px; font-size:.82rem; line-height:1.4; word-break:break-word; }
+  .msg-row.msg-user .msg-bubble{ background:var(--wood); color:#fff8ec; border-bottom-right-radius:4px; }
+  .msg-row.msg-staff .msg-bubble{ background:#f1e7d8; color:var(--ink); border-bottom-left-radius:4px; }
+  .msg-time{ font-size:.62rem; color:var(--muted); margin-top:2px; }
+  .meeting-banner{
+    font-size:.72rem; font-weight:700; color:var(--wood-dark);
+    background:#fdeecb; border-radius:999px; padding:4px 12px;
+  }
+  .msg-note-text{ font-size:.72rem; color:var(--muted); }
+
+  /* เรียกประชุม */
+  .meeting-box{ display:flex; gap:8px; margin-bottom:10px; flex:none; }
+  .meeting-box input[type="text"]{
+    flex:1; min-width:0; font-family:inherit; font-size:.84rem; padding:8px 10px;
+    border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink);
+  }
+  .meeting-start-btn{
+    font-family:inherit; font-size:.8rem; font-weight:700; cursor:pointer; white-space:nowrap;
+    border:none; border-radius:10px; padding:8px 14px; color:#fff8ec;
+    background:linear-gradient(135deg,var(--busy),var(--alert));
+  }
+  .meeting-start-btn:disabled{ opacity:.6; cursor:not-allowed; }
+  .meeting-thread-item{
+    margin-bottom:12px; padding:10px; border-radius:12px; background:#fbf6ee; border:1px solid var(--line);
+  }
+  .meeting-topic{ font-weight:800; font-size:.84rem; margin-bottom:6px; }
+  .meeting-chips{ display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px; }
+  .meeting-chip{ font-size:.66rem; font-weight:700; border-radius:999px; padding:2px 8px; color:#fff; }
+  .meeting-say{ font-size:.78rem; margin-bottom:4px; }
+  .meeting-say b{ font-weight:700; }
 
   /* ---------- Desk overlay / panel (side panel + bottom sheet) ---------- */
   .desk-overlay{
@@ -689,40 +774,6 @@
       </div>
     </section>
 
-    <!-- ================= คุยกับพนักงาน ================= -->
-    <section class="panel panel-compose">
-      <h2>💬 คุยกับพนักงาน <span id="chatModeBadge" class="mode-badge mode-home">🏠 ในบ้าน</span></h2>
-      <div class="secret-row">
-        <span>🔑 ปลดล็อกแชทออนไลน์</span>
-        <input id="chatSecretInput" type="password" placeholder="รหัสผ่าน…" maxlength="200">
-        <button id="chatSecretSaveBtn" type="button">บันทึก</button>
-      </div>
-      <div id="readonlyBadge" class="readonly-badge">โหมดอ่านอย่างเดียว (เปิดผ่านเซิร์ฟเวอร์ในบ้านเพื่อแชท)</div>
-      <div class="compose-row">
-        <select id="chatTo">
-          <option value="@all">@all</option>
-          <option value="@phupha">@phupha</option>
-          <option value="@oat">@oat</option>
-          <option value="@sun">@sun</option>
-          <option value="@hai">@hai</option>
-          <option value="@sol">@sol</option>
-          <option value="@terra">@terra</option>
-          <option value="@luna">@luna</option>
-        </select>
-        <input id="chatText" type="text" placeholder="พิมพ์ข้อความ…" maxlength="500">
-        <button id="chatSendBtn" type="button">ส่ง</button>
-      </div>
-      <button id="meetingBtn" type="button" class="meeting-btn">📣 เรียกประชุม</button>
-    </section>
-
-    <!-- ================= แชทสด ================= -->
-    <section class="panel panel-livechat">
-      <h2>💬 แชท <span class="badge-live" style="margin-left:auto;font-size:.62rem;font-weight:800;color:var(--busy);border:1px solid var(--busy);border-radius:999px;padding:1px 7px;">LIVE</span></h2>
-      <div id="liveChatFeed">
-        <p class="muted">ตัวอย่าง — ยังไม่มีข้อความ (อ่านจาก ../office/chat.md)</p>
-      </div>
-    </section>
-
   </div>
 
   <footer class="site-footer">Fable &amp; Co. Office Monitor · ข้อมูลอ่านจากไฟล์ .md ในโฟลเดอร์ office/ และ projects/</footer>
@@ -737,6 +788,66 @@
   </div>
   <div id="deskPanelBody" class="desk-panel-body">
     <p class="muted">คลิกที่การ์ดพนักงานเพื่อดูข้อความจากโต๊ะ</p>
+  </div>
+</aside>
+
+<!-- ================= Floating chat widget ================= -->
+<button id="chatFabBtn" type="button" class="chat-fab" aria-label="เปิดแชท">💬</button>
+
+<aside id="chatPanel" class="chat-panel" aria-hidden="true">
+  <div class="chat-panel-head">
+    <div>
+      <div class="chat-panel-title">💬 คุยกับทีม Fable &amp; Co.</div>
+      <div class="chat-status-line"><span id="chatStatusDot" class="chat-status-dot dot-home"></span><span id="chatStatusText">🏠 ในบ้าน</span></div>
+    </div>
+    <button id="chatPanelClose" class="chat-panel-close" type="button" aria-label="ปิด">✕</button>
+  </div>
+
+  <div class="chat-secret-area" style="display:none">
+    <div id="secretRow" class="secret-row">
+      <span>🔑 ปลดล็อกแชทออนไลน์</span>
+      <input id="chatSecretInput" type="password" placeholder="รหัสผ่าน…" maxlength="200">
+      <button id="chatSecretSaveBtn" type="button">บันทึก</button>
+    </div>
+    <button id="secretPill" type="button" class="secret-pill" style="display:none">🔓 ออนไลน์พร้อม · เปลี่ยนรหัส</button>
+    <span id="secretToast" class="secret-toast" style="display:none">บันทึกแล้ว</span>
+    <div id="readonlyBadge" class="readonly-badge">โหมดอ่านอย่างเดียว (เปิดผ่านเซิร์ฟเวอร์ในบ้านเพื่อแชท)</div>
+  </div>
+
+  <div class="chat-tabs">
+    <button id="tabRoomBtn" type="button" class="chat-tab active" data-tab="room">ห้องรวม</button>
+    <button id="tabPeopleBtn" type="button" class="chat-tab" data-tab="people">คุยรายคน</button>
+    <button id="tabMeetingBtn" type="button" class="chat-tab" data-tab="meeting">เรียกประชุม</button>
+  </div>
+
+  <div id="tabRoom" class="chat-tab-panel active">
+    <p class="chat-tab-note">ข้อความส่งถึงหัวหน้าทีม เลือกคนตอบให้เหมาะ</p>
+    <div id="roomFeed" class="chat-feed"><p class="muted">ยังไม่มีข้อความ</p></div>
+    <div class="chat-input-row">
+      <input id="roomTextInput" type="text" placeholder="พิมพ์ถึง @all… (Enter = ส่ง)" maxlength="500">
+      <button id="roomSendBtn" type="button">ส่ง</button>
+    </div>
+  </div>
+
+  <div id="tabPeople" class="chat-tab-panel">
+    <div id="peopleList" class="people-list"></div>
+    <div id="dmView" class="dm-view" style="display:none">
+      <button id="dmBackBtn" type="button" class="dm-back">← กลับรายชื่อ</button>
+      <div id="dmTitle" class="dm-title"></div>
+      <div id="dmFeed" class="chat-feed"></div>
+      <div class="chat-input-row">
+        <input id="dmTextInput" type="text" placeholder="พิมพ์… (Enter = ส่ง)" maxlength="500">
+        <button id="dmSendBtn" type="button">ส่ง</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="tabMeeting" class="chat-tab-panel">
+    <div class="meeting-box">
+      <input id="meetingTopicInput" type="text" placeholder="หัวข้อประชุม… (Enter = เริ่ม)" maxlength="300">
+      <button id="meetingStartBtn" type="button" class="meeting-start-btn">📣 เริ่มประชุม</button>
+    </div>
+    <div id="meetingThread" class="chat-feed"><p class="muted">ยังไม่มีการประชุม</p></div>
   </div>
 </aside>
 
@@ -757,14 +868,15 @@
   var PROJECTS = [];
 
   var ROSTER = [
-    { handle:'phupha', nameTh:'ภูผา',  color:'var(--c-phupha)', deskUrl:'../office/desk/phupha.md' },
-    { handle:'oat',    nameTh:'โอ๊ต',  color:'var(--c-oat)',    deskUrl:'../office/desk/oat.md' },
-    { handle:'sun',    nameTh:'ซัน',   color:'var(--c-sun)',    deskUrl:'../office/desk/sun.md' },
-    { handle:'hai',    nameTh:'ฮาย',   color:'var(--c-hai)',    deskUrl:'../office/desk/hai.md' },
-    { handle:'sol',    nameTh:'โซล',   color:'var(--c-sol)',    deskUrl:'../office/desk/sol.md' },
-    { handle:'terra',  nameTh:'เทอร่า', color:'var(--c-terra)', deskUrl:'../office/desk/terra.md' },
-    { handle:'luna',   nameTh:'ลูน่า', color:'var(--c-luna)',   deskUrl:'../office/desk/luna.md' }
+    { handle:'phupha', nameTh:'ภูผา',  color:'var(--c-phupha)', role:'CEO',              deskUrl:'../office/desk/phupha.md' },
+    { handle:'oat',    nameTh:'โอ๊ต',  color:'var(--c-oat)',    role:'รอง CEO',           deskUrl:'../office/desk/oat.md' },
+    { handle:'sun',    nameTh:'ซัน',   color:'var(--c-sun)',    role:'วิศวกรหลัก',        deskUrl:'../office/desk/sun.md' },
+    { handle:'hai',    nameTh:'ฮาย',   color:'var(--c-hai)',    role:'ผู้ช่วย',            deskUrl:'../office/desk/hai.md' },
+    { handle:'sol',    nameTh:'โซล',   color:'var(--c-sol)',    role:'ผู้ตรวจ · remote',   deskUrl:'../office/desk/sol.md' },
+    { handle:'terra',  nameTh:'เทอร่า', color:'var(--c-terra)', role:'ช่างเหมา · remote',  deskUrl:'../office/desk/terra.md' },
+    { handle:'luna',   nameTh:'ลูน่า', color:'var(--c-luna)',   role:'งานด่วน · remote',   deskUrl:'../office/desk/luna.md' }
   ];
+  var AVATAR_SYM_PREFIX = 'af';
 
   var BOARD_URL = '../office/board.md';
   var LOG_URL = '../office/log.md';
@@ -886,10 +998,12 @@
         items.push({ kind:'user', time:time, to: um ? um[1] : '', text: stripBold(um ? um[2] : rest) });
       } else if (rest.indexOf('📣') !== -1){
         var mm = /:\s*(.*)$/.exec(rest);
-        items.push({ kind:'meeting', time:time, text: stripBold(mm ? mm[1] : rest) });
+        items.push({ kind:'meeting', time:time, topic: stripBold(mm ? mm[1] : rest), rows:[] });
       } else if (rest.indexOf('↳') !== -1){
         var sm = /↳\s*\[?([^\]:]+)\]?:?\s*(.*)$/.exec(rest);
-        items.push({ kind:'staff', time:time, who: stripBold(sm ? sm[1].replace(/^\s+|\s+$/g, '') : ''), text: stripBold(sm ? sm[2] : rest) });
+        var whoRaw = sm ? sm[1].replace(/^\s+|\s+$/g, '') : '';
+        var handleMatch = /@(\S+)/.exec(whoRaw);
+        items.push({ kind:'staff', time:time, who: stripBold(whoRaw), handle: handleMatch ? handleMatch[1] : '', text: stripBold(sm ? sm[2] : rest) });
       } else {
         items.push({ kind:'note', time:time, text: stripBold(rest) });
       }
@@ -897,48 +1011,251 @@
     return items;
   }
 
-  function renderChatFeedHtml(items){
-    if (items.length === 0){ return '<p class="muted">ยังไม่มีข้อความ</p>'; }
+  function bareHandle(s){ return (s && s.charAt(0) === '@') ? s.slice(1) : (s || ''); }
+  function nowHHMM(){
+    var now = new Date();
+    return ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2);
+  }
+
+  /* ---------------- แชทออนไลน์: เก็บถาวรใน localStorage (คีย์ต่อ scope) กัน private mode ---------------- */
+  var LOG_STORAGE_KEY = 'fco_chat_log_' + CHAT_SCOPE;
+  var ONLINE_LOG_MAX = 100;
+
+  function loadOnlineLog(){
+    try {
+      var raw = localStorage.getItem(LOG_STORAGE_KEY);
+      if (raw){
+        var parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)){ return parsed; }
+      }
+    } catch (e){ /* localStorage ปิดใช้งาน (private mode) — ข้ามเงียบ ๆ */ }
+    return [];
+  }
+  function saveOnlineLog(){
+    try { localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(onlineLog)); } catch (e){ /* ข้ามเงียบ ๆ */ }
+  }
+
+  /* entry แบบ say: {kind:'say', to, text, reply, who, time}
+     entry แบบ meeting: {kind:'meeting', topic, rows:[{handle,name,say}], time} */
+  var onlineLog = loadOnlineLog();
+
+  function pushOnlineLog(entry){
+    onlineLog.push(entry);
+    if (onlineLog.length > ONLINE_LOG_MAX){ onlineLog.splice(0, onlineLog.length - ONLINE_LOG_MAX); }
+    saveOnlineLog();
+  }
+
+  /* ประวัติ 8 เทิร์นล่าสุด ส่งแนบให้พนักงานจำบทสนทนาต่อเนื่อง (ตัดข้อความ ≤250 ตัว) */
+  function buildHistoryPayload(){
+    var out = [];
+    for (var i = 0; i < onlineLog.length; i++){
+      var e = onlineLog[i];
+      if (e.kind === 'meeting'){
+        out.push({ who:'ผู้ใช้', text: ('📣 เรียกประชุม: ' + (e.topic || '')).slice(0, 250) });
+        for (var j = 0; j < (e.rows || []).length; j++){
+          var row = e.rows[j] || {};
+          out.push({ who: row.name || row.handle || '', text: (row.say || '').slice(0, 250) });
+        }
+      } else {
+        out.push({ who:'ผู้ใช้', text: (e.text || '').slice(0, 250) });
+        if (e.reply){ out.push({ who: e.who || '', text: e.reply.slice(0, 250) }); }
+      }
+    }
+    if (out.length > 8){ out = out.slice(out.length - 8); }
+    return out;
+  }
+
+  /* รวม chat.md (ไฟล์) + onlineLog (แชทออนไลน์เรียลไทม์) เป็นรายการเดียว เรียงเวลาไล่ตามลำดับที่เกิด */
+  function buildCombinedItems(){
+    var items = parseChatLines(lastChatMdText);
+    for (var i = 0; i < onlineLog.length; i++){
+      var e = onlineLog[i];
+      if (e.kind === 'meeting'){
+        items.push({ kind:'meeting', time:e.time, topic:e.topic, rows:e.rows || [], online:true });
+      } else {
+        items.push({ kind:'user', time:e.time, to:e.to, text:e.text, online:true });
+        if (e.reply){
+          items.push({ kind:'staff', time:e.time, who:e.who, handle:bareHandle(e.to), text:e.reply, online:true });
+        }
+      }
+    }
+    return items;
+  }
+
+  function findRosterPerson(handle){
+    for (var i = 0; i < ROSTER.length; i++){ if (ROSTER[i].handle === handle){ return ROSTER[i]; } }
+    return null;
+  }
+  function colorForHandle(handle){
+    var p = findRosterPerson(handle);
+    return p ? p.color : 'var(--wood-dark)';
+  }
+
+  /* บับเบิลสไตล์ messenger: ผู้ใช้ขวา (เข้ม) / พนักงานซ้าย (ชื่อ+เวลา) */
+  function renderMessengerItems(items){
     var html = '';
     for (var i = 0; i < items.length; i++){
       var it = items[i];
       if (it.kind === 'user'){
-        html += '<div class="livechat-item livechat-user"><div class="lc-meta">🧑 ผู้ใช้ → ' + escapeHtml(it.to) + ' <span class="lc-time">' + escapeHtml(it.time) + '</span></div><div class="lc-text">' + escapeHtml(it.text) + '</div></div>';
-      } else if (it.kind === 'meeting'){
-        html += '<div class="livechat-item livechat-meeting"><div class="lc-meta">📣 เรียกประชุม <span class="lc-time">' + escapeHtml(it.time) + '</span></div><div class="lc-text">' + escapeHtml(it.text) + '</div></div>';
+        html += '<div class="msg-row msg-user"><div class="msg-bubble-wrap">' +
+          '<div class="msg-bubble">' + escapeHtml(it.text) + '</div>' +
+          '<div class="msg-time">→ ' + escapeHtml(it.to || '') + (it.time ? (' · ' + escapeHtml(it.time)) : '') + '</div>' +
+          '</div></div>';
       } else if (it.kind === 'staff'){
-        html += '<div class="livechat-item livechat-staff"><div class="lc-meta">↳ [' + escapeHtml(it.who) + '] <span class="lc-time">' + escapeHtml(it.time) + '</span></div><div class="lc-text">' + escapeHtml(it.text) + '</div></div>';
-      } else {
-        html += '<div class="livechat-item livechat-note"><div class="lc-text">' + escapeHtml(it.text) + '</div></div>';
+        html += '<div class="msg-row msg-staff"><div class="msg-bubble-wrap">' +
+          '<div class="msg-avatar-name">' + escapeHtml(it.who || '') + (it.online ? ' 🌐' : '') + '</div>' +
+          '<div class="msg-bubble">' + escapeHtml(it.text) + '</div>' +
+          (it.time ? ('<div class="msg-time">' + escapeHtml(it.time) + '</div>') : '') +
+          '</div></div>';
+      } else if (it.kind === 'meeting'){
+        html += '<div class="msg-row msg-meeting-banner"><div class="meeting-banner">📣 ' + escapeHtml(it.topic || '') + (it.time ? (' · ' + escapeHtml(it.time)) : '') + '</div></div>';
+      } else if (it.text) {
+        html += '<div class="msg-row msg-note"><div class="msg-note-text">' + escapeHtml(it.text) + '</div></div>';
       }
     }
     return html;
   }
 
-  /* แชทออนไลน์เก็บใน memory (ไม่ได้อยู่ใน chat.md) — ต่อท้าย feed ทุกครั้งที่ poll กันโดนลบทับ */
-  var onlineLog = [];
-  function renderOnlineLogHtml(){
+  /* autoscroll เฉพาะตอนผู้ใช้อยู่ล่างสุดอยู่แล้ว — เลื่อนขึ้นอ่านย้อนอยู่ ห้ามกระตุกลง */
+  function isFeedAtBottom(el){
+    return (el.scrollHeight - el.clientHeight - el.scrollTop) < 40;
+  }
+
+  function renderRoomFeed(){
+    var el = document.getElementById('roomFeed');
+    if (!el){ return; }
+    var wasAtBottom = isFeedAtBottom(el);
+    var html = renderMessengerItems(buildCombinedItems());
+    el.innerHTML = html || '<p class="muted">ยังไม่มีข้อความ</p>';
+    if (wasAtBottom){ el.scrollTop = el.scrollHeight; }
+  }
+
+  var activeDmHandle = null;
+
+  function renderDmFeed(handle){
+    var el = document.getElementById('dmFeed');
+    if (!el){ return; }
+    var wasAtBottom = isFeedAtBottom(el);
+    var items = buildCombinedItems();
+    var filtered = [];
+    for (var i = 0; i < items.length; i++){
+      var it = items[i];
+      if (it.kind === 'user' && bareHandle(it.to) === handle){ filtered.push(it); }
+      else if (it.kind === 'staff' && it.handle === handle){ filtered.push(it); }
+    }
+    var html = renderMessengerItems(filtered);
+    el.innerHTML = html || '<p class="muted">ยังไม่มีข้อความกับคนนี้</p>';
+    if (wasAtBottom){ el.scrollTop = el.scrollHeight; }
+  }
+
+  function renderMeetingThread(){
+    var el = document.getElementById('meetingThread');
+    if (!el){ return; }
+    var items = buildCombinedItems();
+    var meetings = [];
+    for (var i = 0; i < items.length; i++){ if (items[i].kind === 'meeting'){ meetings.push(items[i]); } }
+    if (meetings.length === 0){ el.innerHTML = '<p class="muted">ยังไม่มีการประชุม</p>'; return; }
     var html = '';
-    for (var i = 0; i < onlineLog.length; i++){
-      var e = onlineLog[i];
-      html += '<div class="livechat-item livechat-user"><div class="lc-meta">🧑 ผู้ใช้ → ' + escapeHtml(e.to) + ' <span class="lc-time">' + escapeHtml(e.time) + '</span></div><div class="lc-text">' + escapeHtml(e.text) + '</div></div>';
-      if (e.reply){
-        html += '<div class="livechat-item livechat-staff"><div class="lc-meta">↳ [' + escapeHtml(e.who) + '] 🌐 <span class="lc-time">' + escapeHtml(e.time) + '</span></div><div class="lc-text">' + escapeHtml(e.reply) + '</div></div>';
+    for (var j = 0; j < meetings.length; j++){
+      var m = meetings[j];
+      html += '<div class="meeting-thread-item">';
+      html += '<div class="meeting-topic">📣 ' + escapeHtml(m.topic || '') + (m.time ? (' <span class="msg-time">· ' + escapeHtml(m.time) + '</span>') : '') + '</div>';
+      if (m.rows && m.rows.length){
+        html += '<div class="meeting-chips">';
+        for (var k = 0; k < m.rows.length; k++){
+          var row = m.rows[k] || {};
+          html += '<span class="meeting-chip" style="background:' + colorForHandle(row.handle) + '">@' + escapeHtml(row.handle || '') + '</span>';
+        }
+        html += '</div>';
+        for (var k2 = 0; k2 < m.rows.length; k2++){
+          var row2 = m.rows[k2] || {};
+          html += '<div class="meeting-say"><b>' + escapeHtml(row2.name || row2.handle || '') + ':</b> ' + escapeHtml(row2.say || '') + '</div>';
+        }
+      } else {
+        html += '<div class="meeting-say muted">ประชุมผ่านโหมดในบ้าน (ไม่มีรายละเอียดผู้เข้าร่วม)</div>';
       }
+      html += '</div>';
     }
-    return html;
+    el.innerHTML = html;
   }
 
+  function renderPeopleList(){
+    var el = document.getElementById('peopleList');
+    if (!el){ return; }
+    var html = '';
+    for (var i = 0; i < ROSTER.length; i++){
+      var p = ROSTER[i];
+      html += '<div class="people-item" data-handle="' + p.handle + '" tabindex="0" role="button">' +
+        '<svg class="people-avatar" viewBox="0 0 100 100" aria-hidden="true" style="color:' + p.color + '">' +
+        '<use href="#' + AVATAR_SYM_PREFIX + '-face" xlink:href="#' + AVATAR_SYM_PREFIX + '-face"/>' +
+        '<use href="#' + AVATAR_SYM_PREFIX + '-acc-' + p.handle + '" xlink:href="#' + AVATAR_SYM_PREFIX + '-acc-' + p.handle + '"/>' +
+        '</svg>' +
+        '<div><div class="people-name">' + escapeHtml(p.nameTh) + ' <span class="people-handle">@' + escapeHtml(p.handle) + '</span></div></div>' +
+        '<div class="people-role">' + escapeHtml(p.role || '') + '</div>' +
+        '</div>';
+    }
+    el.innerHTML = html;
+    var rows = el.querySelectorAll('.people-item');
+    for (var ri = 0; ri < rows.length; ri++){
+      (function(row){
+        var h = row.getAttribute('data-handle');
+        row.addEventListener('click', function(){ openDmView(h); });
+        row.addEventListener('keydown', function(ev){
+          if (ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); openDmView(h); }
+        });
+      })(rows[ri]);
+    }
+  }
+
+  function openDmView(handle){
+    activeDmHandle = handle;
+    var person = findRosterPerson(handle);
+    var peopleListEl = document.getElementById('peopleList');
+    var dmViewEl = document.getElementById('dmView');
+    var dmTitleEl = document.getElementById('dmTitle');
+    if (peopleListEl){ peopleListEl.style.display = 'none'; }
+    if (dmViewEl){ dmViewEl.style.display = 'flex'; }
+    if (dmTitleEl){ dmTitleEl.textContent = person ? (person.nameTh + ' (@' + person.handle + ')') : ('@' + handle); }
+    renderDmFeed(handle);
+  }
+  function closeDmView(){
+    activeDmHandle = null;
+    var peopleListEl = document.getElementById('peopleList');
+    var dmViewEl = document.getElementById('dmView');
+    if (dmViewEl){ dmViewEl.style.display = 'none'; }
+    if (peopleListEl){ peopleListEl.style.display = 'flex'; }
+  }
+
+  var activeTab = 'room';
+  function renderActiveTab(){
+    if (activeTab === 'room'){ renderRoomFeed(); }
+    else if (activeTab === 'people'){ if (activeDmHandle){ renderDmFeed(activeDmHandle); } }
+    else if (activeTab === 'meeting'){ renderMeetingThread(); }
+  }
+  function setActiveTab(tab){
+    activeTab = tab;
+    var pairs = [
+      ['tabRoomBtn', 'tabRoom', 'room'],
+      ['tabPeopleBtn', 'tabPeople', 'people'],
+      ['tabMeetingBtn', 'tabMeeting', 'meeting']
+    ];
+    for (var i = 0; i < pairs.length; i++){
+      var btnEl = document.getElementById(pairs[i][0]);
+      var panelEl = document.getElementById(pairs[i][1]);
+      var isActive = (pairs[i][2] === tab);
+      if (btnEl){ btnEl.classList.toggle('active', isActive); }
+      if (panelEl){ panelEl.classList.toggle('active', isActive); }
+    }
+    renderActiveTab();
+  }
+
+  var lastChatMdText = '';
   function loadChatFeed(){
     fetchText(CHAT_URL).then(function(text){
-      var el = document.getElementById('liveChatFeed');
-      if (el){
-        el.innerHTML = renderChatFeedHtml(parseChatLines(text)) + renderOnlineLogHtml();
-        el.scrollTop = el.scrollHeight;
-      }
+      lastChatMdText = text;
+      renderActiveTab();
     }).catch(function(){
-      var el2 = document.getElementById('liveChatFeed');
-      if (el2 && onlineLog.length){ el2.innerHTML = renderOnlineLogHtml(); el2.scrollTop = el2.scrollHeight; }
+      renderActiveTab();
     });
   }
 
@@ -961,15 +1278,14 @@
       else { sessionStorage.removeItem(SECRET_KEY); }
     } catch (e){ /* sessionStorage ปิดใช้งาน (private mode) — ข้ามเงียบ ๆ */ }
   }
-  function updateModeBadge(mode){
-    var el = document.getElementById('chatModeBadge');
-    if (!el){ return; }
-    el.classList.remove('mode-online', 'mode-home', 'mode-readonly');
-    if (mode === 'online'){ el.classList.add('mode-online'); el.textContent = '🌐 ออนไลน์'; }
-    else if (mode === 'readonly'){ el.classList.add('mode-readonly'); el.textContent = '📖 อ่านอย่างเดียว'; }
-    else { el.classList.add('mode-home'); el.textContent = '🏠 ในบ้าน'; }
+  function updateModeUi(mode){
+    var dot = document.getElementById('chatStatusDot');
+    var txt = document.getElementById('chatStatusText');
+    var cls = (mode === 'online') ? 'dot-online' : (mode === 'readonly') ? 'dot-readonly' : 'dot-home';
+    if (dot){ dot.classList.remove('dot-online', 'dot-home', 'dot-readonly'); dot.classList.add(cls); }
+    if (txt){ txt.textContent = (mode === 'online') ? '🌐 ทีมออนไลน์' : (mode === 'readonly') ? '📖 อ่านอย่างเดียว' : '🏠 ในบ้าน'; }
   }
-  function defaultMode(){ return getSecret() ? 'online' : 'home'; }
+  function defaultMode(){ return 'online'; }
 
   function postJson(url, payload){
     return fetch(url, {
@@ -982,7 +1298,7 @@
     });
   }
 
-  /* เรียก endpoint ออนไลน์ แล้วคืนสถานะ+ข้อมูลดิบเสมอ (ไม่ throw) เพื่อแยกแยะ 403/503/404 เอง */
+  /* เรียก endpoint ออนไลน์ แล้วคืนสถานะ+ข้อมูลดิบเสมอ (ไม่ throw) เพื่อแยกแยะ 403/502/503/404 เอง */
   function postOnlineChat(payload){
     return fetch(ONLINE_URL, {
       method:'POST',
@@ -996,77 +1312,160 @@
   }
 
   function appendRealtimeExchange(to, text, data){
-    var now = new Date();
-    var time = ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2);
-    onlineLog.push({ to:to, text:text, reply:(data && data.reply) || '', who:(data && data.name) || to, time:time });
-    loadChatFeed();
+    pushOnlineLog({ kind:'say', to:to, text:text, reply:(data && data.reply) || '', who:(data && data.name) || to, time: nowHHMM() });
+    renderActiveTab();
+  }
+  function appendRealtimeMeeting(topic, rows){
+    pushOnlineLog({ kind:'meeting', topic:topic, rows: rows || [], time: nowHHMM() });
+    renderActiveTab();
   }
 
-  function sendSayHome(to, text, textInput){
-    postJson(SAY_URL, { scope:CHAT_SCOPE, to:to, text:text }).then(function(){
-      if (textInput){ textInput.value = ''; }
-      hideStatusBadge();
-      updateModeBadge('home');
-      loadChatFeed();
-    }).catch(function(){
-      showStatus('โหมดอ่านอย่างเดียว (เปิดผ่านเซิร์ฟเวอร์ในบ้านเพื่อแชท)');
-      updateModeBadge('readonly');
-    });
+  /* ---------------- สถานะกำลังส่ง: กันกดซ้ำ + โชว์ ⏳ ระหว่างรอ ---------------- */
+  var isSendingMessage = false;
+  var isSendingMeeting = false;
+
+  function setBusyBtn(btn, busy, busyLabel, normalLabel){
+    if (!btn){ return; }
+    btn.disabled = busy;
+    btn.textContent = busy ? busyLabel : normalLabel;
   }
 
-  function sendSay(){
-    var toSel = document.getElementById('chatTo');
-    var textInput = document.getElementById('chatText');
-    if (!toSel || !textInput){ return; }
-    var text = textInput.value.replace(/^\s+|\s+$/g, '');
+  /* ส่งข้อความ (ห้องรวม หรือ คุยรายคน ใช้ฟังก์ชันเดียวกัน ต่างกันที่ to/ช่อง/ปุ่ม) */
+  function submitChatMessage(to, textInputEl, sendBtnEl){
+    if (isSendingMessage){ return; }
+    if (!textInputEl){ return; }
+    var text = textInputEl.value.replace(/^\s+|\s+$/g, '');
     if (text === ''){ return; }
-    var to = toSel.value;
     var secret = getSecret();
 
-    if (!secret){
-      sendSayHome(to, text, textInput);
-      return;
+    isSendingMessage = true;
+    setBusyBtn(sendBtnEl, true, '⏳ กำลังส่ง…', 'ส่ง');
+    function done(){
+      isSendingMessage = false;
+      setBusyBtn(sendBtnEl, false, '⏳ กำลังส่ง…', 'ส่ง');
     }
 
-    postOnlineChat({ to:to, text:text, secret:secret, scope:CHAT_SCOPE }).then(function(res){
+    function sendHome(){
+      postJson(SAY_URL, { scope:CHAT_SCOPE, to:to, text:text }).then(function(){
+        textInputEl.value = '';
+        hideStatusBadge();
+        updateModeUi('home');
+        loadChatFeed();
+        done();
+      }).catch(function(){
+        showStatus('โหมดอ่านอย่างเดียว (เปิดผ่านเซิร์ฟเวอร์ในบ้านเพื่อแชท)');
+        updateModeUi('readonly');
+        done();
+      });
+    }
+
+    postOnlineChat({ to:to, text:text, secret:secret, scope:CHAT_SCOPE, history: buildHistoryPayload() }).then(function(res){
       if (res.status === 404){
         /* เปิดผ่าน Node server ในบ้านที่ไม่มี route นี้ → fallback โหมดในบ้าน */
-        sendSayHome(to, text, textInput);
+        sendHome();
         return;
       }
       if (res.status === 503){
         showStatus('แชทออนไลน์ยังไม่เปิด (เจ้าของต้องตั้งรหัสใน Vercel)');
-        updateModeBadge('readonly');
+        updateModeUi('readonly');
+        done();
         return;
       }
       if (res.status === 403){
         showStatus('รหัสไม่ถูก');
-        updateModeBadge('readonly');
+        updateModeUi('readonly');
+        done();
         return;
       }
       if (!res.ok || !res.data || res.data.success === false){
         showStatus('ส่งไม่สำเร็จ ลองใหม่อีกครั้ง');
+        done();
         return;
       }
-      textInput.value = '';
+      textInputEl.value = '';
       hideStatusBadge();
-      updateModeBadge('online');
+      updateModeUi('online');
       appendRealtimeExchange(to, text, res.data);
+      done();
     }).catch(function(){
       /* ต่อ endpoint ออนไลน์ไม่ได้เลย (ออฟไลน์/CORS) → ลองโหมดในบ้านแทน */
-      sendSayHome(to, text, textInput);
+      sendHome();
     });
   }
 
-  function callMeeting(){
-    var topic = window.prompt('หัวข้อประชุม:', '');
-    if (topic === null){ return; }
-    topic = topic.replace(/^\s+|\s+$/g, '');
+  /* ---------------- ประชุม: ช่องหัวข้อ + เริ่มประชุม อยู่ในแท็บถาวร ---------------- */
+  function submitMeeting(){
+    if (isSendingMeeting){ return; }
+    var topicInput = document.getElementById('meetingTopicInput');
+    var startBtn = document.getElementById('meetingStartBtn');
+    var topic = topicInput ? topicInput.value.replace(/^\s+|\s+$/g, '') : '';
     if (topic === ''){ return; }
-    postJson(MEETING_URL, { scope:CHAT_SCOPE, topic:topic }).then(function(){
+    var secret = getSecret();
+
+    isSendingMeeting = true;
+    setBusyBtn(startBtn, true, '⏳ กำลังส่ง…', '📣 เริ่มประชุม');
+    function done(){
+      isSendingMeeting = false;
+      setBusyBtn(startBtn, false, '⏳ กำลังส่ง…', '📣 เริ่มประชุม');
+    }
+
+    function meetingHome(){
+      postJson(MEETING_URL, { scope:CHAT_SCOPE, topic:topic }).then(function(){
+        hideStatusBadge();
+        if (topicInput){ topicInput.value = ''; }
+        loadChatFeed();
+        done();
+      }).catch(function(){
+        showStatus('เรียกประชุมทำได้เฉพาะเปิดผ่านเซิร์ฟเวอร์ในบ้าน (บนออนไลน์ให้พิมพ์คุยกับพนักงานแทน)');
+        done();
+      });
+    }
+
+    postOnlineChat({ action:'meeting', text:topic, secret:secret, scope:CHAT_SCOPE, history: buildHistoryPayload() }).then(function(res){
+      if (res.status === 404){
+        meetingHome();
+        return;
+      }
+      if (res.status === 502){
+        showStatus('ที่ประชุมไม่ตอบ ลองใหม่');
+        done();
+        return;
+      }
+      if (res.status === 503){
+        showStatus('แชทออนไลน์ยังไม่เปิด (เจ้าของต้องตั้งรหัสใน Vercel)');
+        updateModeUi('readonly');
+        done();
+        return;
+      }
+      if (res.status === 403){
+        showStatus('รหัสไม่ถูก');
+        updateModeUi('readonly');
+        done();
+        return;
+      }
+      if (!res.ok || !res.data || res.data.success === false){
+        showStatus('เรียกประชุมไม่สำเร็จ ลองใหม่อีกครั้ง');
+        done();
+        return;
+      }
       hideStatusBadge();
-      loadChatFeed();
-    }).catch(function(){ showStatus('เรียกประชุมทำได้เฉพาะเปิดผ่านเซิร์ฟเวอร์ในบ้าน (บนออนไลน์ให้พิมพ์คุยกับพนักงานแทน)'); });
+      updateModeUi('online');
+      appendRealtimeMeeting(res.data.topic || topic, res.data.meeting || []);
+      if (topicInput){ topicInput.value = ''; }
+      done();
+    }).catch(function(){
+      meetingHome();
+    });
+  }
+
+  function openChatPanel(){
+    var panel = document.getElementById('chatPanel');
+    if (panel){ panel.classList.add('open'); panel.setAttribute('aria-hidden', 'false'); }
+    loadChatFeed();
+  }
+  function closeChatPanel(){
+    var panel = document.getElementById('chatPanel');
+    if (panel){ panel.classList.remove('open'); panel.setAttribute('aria-hidden', 'true'); }
   }
 
   function statusLabel(msgs){
@@ -1256,27 +1655,90 @@
     })(cards[ci]);
   }
 
-  /* ---------------- คุยกับพนักงาน: ผูกปุ่ม ---------------- */
-  var chatSendBtn = document.getElementById('chatSendBtn');
-  var chatTextInput = document.getElementById('chatText');
-  var meetingBtn = document.getElementById('meetingBtn');
-  if (chatSendBtn){ chatSendBtn.addEventListener('click', sendSay); }
-  if (chatTextInput){
-    chatTextInput.addEventListener('keydown', function(ev){
-      if (ev.key === 'Enter'){ ev.preventDefault(); sendSay(); }
+  /* ---------------- แชทลอย: ผูกปุ่ม ---------------- */
+  var chatFabBtn = document.getElementById('chatFabBtn');
+  var chatPanelClose = document.getElementById('chatPanelClose');
+  if (chatFabBtn){
+    chatFabBtn.addEventListener('click', function(){
+      var panel = document.getElementById('chatPanel');
+      if (panel && panel.classList.contains('open')){ closeChatPanel(); }
+      else { openChatPanel(); }
     });
   }
-  if (meetingBtn){ meetingBtn.addEventListener('click', callMeeting); }
+  if (chatPanelClose){ chatPanelClose.addEventListener('click', closeChatPanel); }
 
+  var tabRoomBtn = document.getElementById('tabRoomBtn');
+  var tabPeopleBtn = document.getElementById('tabPeopleBtn');
+  var tabMeetingBtn = document.getElementById('tabMeetingBtn');
+  if (tabRoomBtn){ tabRoomBtn.addEventListener('click', function(){ setActiveTab('room'); }); }
+  if (tabPeopleBtn){ tabPeopleBtn.addEventListener('click', function(){ setActiveTab('people'); }); }
+  if (tabMeetingBtn){ tabMeetingBtn.addEventListener('click', function(){ setActiveTab('meeting'); }); }
+
+  var roomSendBtn = document.getElementById('roomSendBtn');
+  var roomTextInput = document.getElementById('roomTextInput');
+  if (roomSendBtn){ roomSendBtn.addEventListener('click', function(){ submitChatMessage('@all', roomTextInput, roomSendBtn); }); }
+  if (roomTextInput){
+    roomTextInput.addEventListener('keydown', function(ev){
+      if (ev.key === 'Enter'){ ev.preventDefault(); submitChatMessage('@all', roomTextInput, roomSendBtn); }
+    });
+  }
+
+  var dmSendBtn = document.getElementById('dmSendBtn');
+  var dmTextInput = document.getElementById('dmTextInput');
+  var dmBackBtn = document.getElementById('dmBackBtn');
+  if (dmSendBtn){
+    dmSendBtn.addEventListener('click', function(){
+      if (activeDmHandle){ submitChatMessage('@' + activeDmHandle, dmTextInput, dmSendBtn); }
+    });
+  }
+  if (dmTextInput){
+    dmTextInput.addEventListener('keydown', function(ev){
+      if (ev.key === 'Enter' && activeDmHandle){ ev.preventDefault(); submitChatMessage('@' + activeDmHandle, dmTextInput, dmSendBtn); }
+    });
+  }
+  if (dmBackBtn){ dmBackBtn.addEventListener('click', closeDmView); }
+
+  var meetingStartBtnEl = document.getElementById('meetingStartBtn');
+  var meetingTopicInputEl = document.getElementById('meetingTopicInput');
+  if (meetingStartBtnEl){ meetingStartBtnEl.addEventListener('click', submitMeeting); }
+  if (meetingTopicInputEl){
+    meetingTopicInputEl.addEventListener('keydown', function(ev){
+      if (ev.key === 'Enter'){ ev.preventDefault(); submitMeeting(); }
+    });
+  }
+
+  var secretRow = document.getElementById('secretRow');
+  var secretPill = document.getElementById('secretPill');
+  var secretToast = document.getElementById('secretToast');
   var chatSecretInput = document.getElementById('chatSecretInput');
   var chatSecretSaveBtn = document.getElementById('chatSecretSaveBtn');
+
+  function refreshSecretUi(){
+    var has = !!getSecret();
+    if (secretRow){ secretRow.style.display = has ? 'none' : 'flex'; }
+    if (secretPill){ secretPill.style.display = has ? 'inline-flex' : 'none'; }
+  }
+  function showSecretToast(msg){
+    if (!secretToast){ return; }
+    secretToast.textContent = msg;
+    secretToast.style.display = 'inline-block';
+    setTimeout(function(){ secretToast.style.display = 'none'; }, 1800);
+  }
+  if (secretPill){
+    secretPill.addEventListener('click', function(){
+      if (secretRow){ secretRow.style.display = 'flex'; }
+      secretPill.style.display = 'none';
+    });
+  }
   if (chatSecretSaveBtn){
     chatSecretSaveBtn.addEventListener('click', function(){
       var v = chatSecretInput ? chatSecretInput.value.replace(/^\s+|\s+$/g, '') : '';
       setSecret(v);
       if (chatSecretInput){ chatSecretInput.value = ''; }
       hideStatusBadge();
-      updateModeBadge(defaultMode());
+      updateModeUi(defaultMode());
+      if (v){ showSecretToast('บันทึกแล้ว'); }
+      refreshSecretUi();
     });
   }
   if (chatSecretInput){
@@ -1284,7 +1746,9 @@
       if (ev.key === 'Enter' && chatSecretSaveBtn){ ev.preventDefault(); chatSecretSaveBtn.click(); }
     });
   }
-  updateModeBadge(defaultMode());
+  updateModeUi(defaultMode());
+  refreshSecretUi();
+  renderPeopleList();
 
   /* ---------------- boot ---------------- */
   renderProjects();
