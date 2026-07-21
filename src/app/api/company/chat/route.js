@@ -4,6 +4,7 @@
 export const maxDuration = 60;
 import { NextResponse } from 'next/server';
 import { callClaude } from '@/lib/ai/claudeClient';
+import { getSupabase } from '@/lib/supabase';
 
 // persona พนักงาน (3 กลุ่ม) — ตอบตามบทบาท
 const ROSTER = {
@@ -128,6 +129,25 @@ export async function POST(request) {
       if (!rows.length) return NextResponse.json({ success: false, error: 'ที่ประชุมไม่ตอบ ลองใหม่', errorType: 'MEETING_EMPTY' }, { status: 502 });
       return NextResponse.json({ success: true, meeting: rows, topic: msg });
     }
+    // ---- โหมดสั่งงานจริง: เข้าคิว Supabase ให้ผู้จัดการ (Claude Code) รันจริง แล้วผลกลับมาที่แชท ----
+    if (body.action === 'task') {
+      const sb = getSupabase();
+      if (!sb) return NextResponse.json({ success: false, error: 'คิวงานยังไม่พร้อม (Supabase)', errorType: 'NO_DB' }, { status: 503 });
+      const id = 'task_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      const rec = { id, scope: scope || 'main', assignee: (h || 'all'), command: msg, status: 'pending', from: 'owner', ts: Date.now(), result: '' };
+      const ins = await sb.from('store_items').insert({ id, store_name: 'company_tasks', data: rec, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+      if (ins.error) return NextResponse.json({ success: false, error: 'บันทึกงานไม่สำเร็จ: ' + ins.error.message, errorType: 'TASK_FAIL' }, { status: 500 });
+      return NextResponse.json({ success: true, taskId: id, note: 'รับงานเข้าคิวแล้ว — ทีมจะลงมือเมื่อผู้จัดการประมวลคิว ผลจะกลับมาที่แชท' });
+    }
+    // ---- ดึงสถานะงานที่สั่ง (จอ poll ดูผลกลับ) ----
+    if (body.action === 'tasks') {
+      const sb = getSupabase();
+      if (!sb) return NextResponse.json({ success: true, tasks: [] });
+      const q = await sb.from('store_items').select('data').eq('store_name', 'company_tasks').order('created_at', { ascending: false }).limit(15);
+      const tasks = (q.data || []).map(r => r.data).filter(t => t && (scope ? t.scope === scope : true));
+      return NextResponse.json({ success: true, tasks });
+    }
+
     const lessons = await getLessons(origin);
     const live = await getLive(scope, origin);
     const ORG = 'โครงสร้างบริษัท Fable & Co.: ผู้ที่คุยกับคุณตอนนี้คือ "เจ้าของบริษัท/ผู้บัญชาการสูงสุด" — คำสั่งของเขาคือคำสั่งสูงสุด ปฏิบัติตามทันที ตอบตรงคำถาม ห้ามบ่ายเบี่ยง. ' +
