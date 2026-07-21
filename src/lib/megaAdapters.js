@@ -4119,6 +4119,11 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   const _heroSyntheticCrop = (img) => {
     const person = img?.triage?.person;
     if (!person || !heroNames.some((h) => namesMatch(person, h))) return { ok: false, reason: 'no_identity_mapped_box' };
+    // ★ 21 ก.ค. (ปิดรู cross-flag — auditor MED + ผู้ใช้สั่ง "เต็มหน้าเท่านั้น เคลียร์คำสั่งทับซ้อน"): FRONTAL ON
+    //   → ครอปหน้าจากภาพคู่ได้เฉพาะเมื่อ "คนหลักในภาพคู่เห็นเต็มหน้า" (faceFront=2 — faceBox ที่จะครอปคือคนหลัก
+    //   ตัวเดียวกับที่ faceFront วัด) — มุมข้าง/ก้ม (<2) = ครอปมาก็ไม่ผ่านสัญญา hero → ไม่ครอป ปล่อยไป HOLD
+    //   field ไม่มี (null/ภาพเก่า) = fail-open ยอมครอปแบบเดิม (pattern เดียวกับด่านอื่น) · FRONTAL OFF = ไม่แตะ
+    if (HERO_FRONTAL_ON) { const _sff = _faceFrontOf(img); if (_sff !== null && _sff < 2) return { ok: false, reason: 'not_frontal' }; }
     const fb = _hfcReadBox(img?.triage?.faceBox);
     if (!fb) return { ok: false, reason: 'invalid_face_box' };
     const rw = Number(img.realWidth), rh = Number(img.realHeight);

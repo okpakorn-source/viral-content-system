@@ -144,3 +144,37 @@ test('(g) ON + field ไม่มี (ภาพเก่า) → ไม่แต
     assert.equal(r.dossierPatch.pickImages.slots.hero?.id, 'LEGACY-1');
   });
 });
+
+// ── cross-flag: FRONTAL × ครอปหน้าจากภาพคู่ (HERO_SINGLE/SOLO_ONLY default ON) — รูที่ auditor ชี้ ──
+const OTHER = 'คิว';
+const coupleOf = (id, faceFront) => ({
+  id, imageUrl: `https://cdn.test/${id}.jpg`, realWidth: 2400, realHeight: 1500,
+  triage: {
+    relevant: true, clean: true, faceCount: 2, person: HERO, persons: [HERO, OTHER],
+    category: 'group', emotion: 'sad', note: '', newsScene: true, quality: 8,
+    faceBox: { x: 0.1, y: 0.15, w: 0.25, h: 0.35 },
+    peopleBox: { x: 0.05, y: 0.1, w: 0.6, h: 0.6 },
+    ...(faceFront != null ? { faceFront } : {}),
+  },
+});
+
+test('(h) cross-flag: คู่ faceFront=1 (มุมข้าง) + ไม่มีเดี่ยว → ห้ามครอป (not_frontal) → HOLD', async () => {
+  await withFrontal(true, async () => {
+    const couple = coupleOf('COUPLE-SIDE-1', 1);
+    const r = await s6_slots(mkJob(), { origin: 'http://mock', _deps: deps([couple], couple) });
+    assert.equal(r.status, 'quality_hold', 'ครอปจากคู่มุมข้าง = หลุดสัญญาเต็มหน้า ต้อง HOLD');
+    assert.equal(r.holdStatus, 'insufficient_assets');
+    assert.equal(r.dossierPatch.pickImages.heroSingleFaceHold?.reason, 'not_frontal', 'เหตุ HOLD ต้องบอกชัดว่าไม่เต็มหน้า');
+  });
+});
+
+test('(i) cross-flag: คู่ faceFront=2 (เต็มหน้า) + ไม่มีเดี่ยว → ครอปหน้าได้ (_heroFaceCrop)', async () => {
+  await withFrontal(true, async () => {
+    const couple = coupleOf('COUPLE-FRONT-1', 2);
+    const r = await s6_slots(mkJob(), { origin: 'http://mock', _deps: deps([couple], couple) });
+    assert.equal(r.status, 'done');
+    const hero = r.dossierPatch.pickImages.slots.hero;
+    assert.equal(hero?.id, 'COUPLE-FRONT-1');
+    assert.ok(hero?._heroFaceCrop, 'คู่เต็มหน้า → ครอปหน้าเดี่ยวได้ตามเดิม');
+  });
+});
