@@ -173,8 +173,9 @@ export async function POST(request) {
       if (sbb) {
         const bid = 'task_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
         const brec = { id: bid, scope: 'engineering', assignee: 'arch', command: '[🐛 บั๊กจากห้อง ' + (scope || 'main') + '] ' + msg, status: 'pending', from: 'owner', ts: Date.now(), result: '', type: 'bug' };
-        const bi = await sbb.from('store_items').insert({ id: bid, store_name: 'company_tasks', data: brec, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }).catch(function () { return { error: true }; });
-        if (!bi || !bi.error) bugTaskId = bid;
+        let bi = null;
+        try { bi = await sbb.from('store_items').insert({ id: bid, store_name: 'company_tasks', data: brec, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }); } catch (e) { bi = { error: e }; }
+        if (bi && !bi.error) bugTaskId = bid;
       }
       const archAck = await replyAs('arch');
       return NextResponse.json({ success: true, from: 'arch', name: 'อาร์ค', reply: archAck.reply, bugTaskId: bugTaskId, note: 'ส่งบั๊กให้ทีมวิศวะแล้ว — เข้าคิวงานวิศวะ ผู้จัดการจะให้ทีมแก้' });
