@@ -104,7 +104,8 @@ export async function POST(request) {
     const { to, text } = body;
     const origin = new URL(request.url).origin;
     const msg = String(text || '').trim();
-    if (!msg) return NextResponse.json({ success: false, error: 'ข้อความว่าง', errorType: 'EMPTY' }, { status: 400 });
+    // action=tasks (ดึงสถานะงาน) ไม่ต้องมี text — ยกเว้นด่านนี้
+    if (!msg && body.action !== 'tasks') return NextResponse.json({ success: false, error: 'ข้อความว่าง', errorType: 'EMPTY' }, { status: 400 });
     if (msg.length > 800) return NextResponse.json({ success: false, error: 'ข้อความยาวเกิน 800 ตัว', errorType: 'TOO_LONG' }, { status: 400 });
 
     let h = String(to || '').replace('@', '').trim();
