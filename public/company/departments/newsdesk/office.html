@@ -2353,6 +2353,11 @@
   setInterval(refreshAll, REFRESH_MS);
   setInterval(loadTasks, TASK_POLL_MS);
 
+  /* 🤖 ปลุกผู้ช่วยอัตโนมัติ (ดึงคำสั่งหาข่าวในคิวมารันเอง) — เร็วกว่ารอ cron ทุกนาที */
+  function pokeWorker(){ fetch('/api/company/worker', { method:'POST' }).catch(function(){}); }
+  pokeWorker();
+  setInterval(pokeWorker, 25000);
+
 })();
 </script>
 

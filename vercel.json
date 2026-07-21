@@ -6,6 +6,10 @@
   },
   "crons": [
     {
+      "path": "/api/company/worker",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/queue/worker",
       "schedule": "* * * * *"
     },
@@ -14,8 +18,8 @@
       "schedule": "* * * * *"
     },
     {
-      "path": "/api/desk/editor/flush-clips",
-      "schedule": "*/2 * * * *"
+      "path": "/api/desk/editor/dispatch",
+      "schedule": "* * * * *"
     }
   ]
 }
