@@ -6,12 +6,14 @@ import { getClipVideoQueue } from '@/lib/services/clipQueue';
 import { randomUUID } from 'crypto';
 
 // โหลดไฟล์วิดีโอ TikTok (tikwm) — ใช้บนคลาวด์ได้
+// ★ 22 ก.ค. 69: ใส่ timeout ทั้ง 2 จังหวะ — วันที่ tikwm ค้าง (เจอจริง: แขวนเกิน 7 นาที) งานเคยค้างจนโดนตัด 16 นาที/รอบแล้ววนใหม่
+//   fail เร็ว → เข้าคิว retry ปกติ (ทุก ~3 นาที) แทนการแขวนคิวยาว
 async function downloadTiktokBuffer(url) {
-  const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`);
+  const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`, { signal: AbortSignal.timeout(30_000) });
   const data = await res.json();
   const playUrl = data?.data?.hdplay || data?.data?.play;
   if (!playUrl) throw new Error('tikwm: ไม่พบลิงก์วิดีโอ');
-  const vres = await fetch(playUrl);
+  const vres = await fetch(playUrl, { signal: AbortSignal.timeout(120_000) });
   const buf = Buffer.from(await vres.arrayBuffer());
   if (buf.length < 10000) throw new Error('วิดีโอเล็กเกินไป');
   if (buf.length > 150 * 1e6) throw new Error('วิดีโอใหญ่เกิน 150MB');

@@ -43,10 +43,14 @@ function getGeminiVideoClient() {
   return geminiVideoClient;
 }
 
-// ★ 26 มิ.ย. (ผู้ใช้สั่งกลับ): ปิด fallback — ใช้ gemini-3.5-flash ตัวเดียวเท่านั้น (แม่นสุด)
+// ★ 26 มิ.ย. (ผู้ใช้สั่งกลับ): ปิด fallback — ใช้โมเดลวิดีโอตัวเดียวเท่านั้น (แม่นสุด)
 //   เหตุผล: 2.5-pro "มั่ว/แต่งเรื่อง" (เคสจริง: คลิป อั้ม อมรินทร์ แต่แต่งเป็น อั้ม อธิชาติ+เสก โลโซ ที่ไม่มีในคลิป)
 //   ยอมรอ/503 บ้าง ดีกว่าได้ข้อมูลผิด · เปิดคืนเมื่อมั่นใจคุณภาพ: ใส่โมเดลในอาเรย์นี้
 const VIDEO_FALLBACK_MODELS = [];
+// ★ 22 ก.ค. 69 (ผู้ใช้สั่ง): โมเดลดูคลิป gemini-3.5-flash → gemini-3.6-flash
+//   เทสจริงผ่าน: ดูคลิป YouTube ยาว (input 208k tokens) จบใน 20.5 วิ ภาพ+เสียงถูกต้อง ขณะที่ 3.5-flash วันนั้นแน่น/timeout
+//   ถอยกลับได้ทันทีด้วย env GEMINI_VIDEO_MODEL=gemini-3.5-flash (ไม่ต้องแก้โค้ด) · ใช้เฉพาะสายวิดีโอ ไม่แตะ callGemini(text) ของระบบข่าว
+const VIDEO_MODEL = process.env.GEMINI_VIDEO_MODEL || 'gemini-3.6-flash';
 // อาการ "แน่น/ชั่วคราว" (ควรสลับโมเดล/ลองใหม่) — แยกจาก "ดูคลิปไม่ได้/parse พัง" (ไม่สลับ)
 const _isOverload = (e) => {
   const status = Number(e?.status) || 0;
@@ -140,7 +144,7 @@ export function isGeminiAvailable() {
  *   ส่งลิงก์ YouTube สาธารณะผ่าน fileData.fileUri ให้ Gemini ดูเอง ไม่ต้องโหลด/ถอดเสียงก่อน
  *   timeout ยาว (3 นาที) เพราะดูคลิปทั้งเรื่อง | ใช้กับเครื่องมือ clip-insight เท่านั้น (แยกจากเวิร์กโฟลว์ข่าว)
  */
-export async function callGeminiVideo({ prompt, youtubeUrl, model = 'gemini-3.5-flash', temperature = 0.2, maxTokens = 8000 }) {
+export async function callGeminiVideo({ prompt, youtubeUrl, model = VIDEO_MODEL, temperature = 0.2, maxTokens = 8000 }) {
   const client = getGeminiVideoClient(); // ★ คีย์แยกสำหรับถอดคลิป
   if (!client) throw new Error('คีย์ Gemini สำหรับวิดีโอไม่ได้ตั้งค่า');
 
@@ -250,7 +254,7 @@ function _repairTruncatedJson(raw) {
  *   ใช้กับคลิปที่ Gemini ดูจากลิงก์ตรงไม่ได้ (ไม่ใช่ YouTube) — อัปโหลดไฟล์ → รอประมวลผล → ให้ดู
  *   videoBuffer = Buffer ของวิดีโอ (mp4) | ลบไฟล์บน Gemini ทิ้งหลังใช้เสร็จ
  */
-export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'video/mp4', model = 'gemini-3.5-flash', temperature = 0.2, maxTokens = 8000 }) {
+export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'video/mp4', model = VIDEO_MODEL, temperature = 0.2, maxTokens = 8000 }) {
   const apiKey = videoApiKey(); // ★ คีย์แยกสำหรับถอดคลิป (Files API ก็ใช้คีย์เดียวกัน)
   if (!apiKey) throw new Error('คีย์ Gemini สำหรับวิดีโอไม่ได้ตั้งค่า');
   if (!videoBuffer || videoBuffer.length < 10000) throw new Error('ไฟล์วิดีโอเล็ก/ว่างเกินไป');

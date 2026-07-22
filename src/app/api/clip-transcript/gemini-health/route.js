@@ -42,7 +42,8 @@ export async function GET() {
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({
-        model: 'gemini-3.5-flash',
+        // ★ 22 ก.ค. 69: probe โมเดลเดียวกับที่ถอดคลิปใช้จริง (VIDEO_MODEL ใน geminiClient) — อัปเกรดเป็น 3.6-flash
+        model: process.env.GEMINI_VIDEO_MODEL || 'gemini-3.6-flash',
         generationConfig: { maxOutputTokens: 5, temperature: 0 },
       });
       const t0 = Date.now();
