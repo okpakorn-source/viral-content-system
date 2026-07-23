@@ -283,24 +283,35 @@ export async function POST(request) {
     }
 
     // ★ 23 ก.ค. (ผู้ใช้สั่ง) — รอบ 2 "เนื้อดิบมีมิติ": Gemini ถอดคำพูดจริง (ไม่เอาเพลง) → ถักทอเข้าประเด็น (enrichedRaw)
-    //   🔴 อิสระจาก insight เดิม 100%: ล้ม/แน่น = ข้าม ใช้ผลเดิมต่อได้ · ใช้ buffer/URL ซ้ำจาก ctx (ไม่โหลดใหม่)
-    //   time-guard: เวลาเหลือน้อย (>8 นาที) = ข้าม กัน route โดน maxDuration ฆ่าก่อนคืน insight (insight ต้องได้เสมอ)
-    if (ctx.mode && Date.now() - startedAt < 480_000) {
+    //   🔴 อิสระจาก insight เดิม 100%: ล้ม/แน่น/หมดเวลา = ข้าม ใช้ผลเดิมต่อได้ · ใช้ buffer/URL ซ้ำจาก ctx (ไม่โหลดใหม่)
+    //   🔴 24 ก.ค. แก้บัค (auditor #1): คุมเวลาแบบอิง budget จริง (maxDuration − elapsed − เผื่อเซฟ) + Promise.race ตัดจบเอง
+    //      กัน route โดน Vercel ฆ่ากลางรอบ enriched แล้ว insight หายทั้งก้อน (store.add/return อยู่หลังบล็อกนี้ → insight ต้องเซฟ+คืนเสมอ)
+    //   🔴 แก้บัค (auditor #4): ข้าม enriched ถ้า buffer ใหญ่เกิน ~200MB (กันแรมพุ่ง/OOM อัปซ้ำ) — insight เดิมยังทำงานปกติ
+    const ENRICH_MAXDUR_MS = 800_000;   // = maxDuration ของ route (Vercel ฆ่าที่นี่)
+    const ENRICH_SAVE_MARGIN_MS = 90_000; // เผื่อเวลาให้เซฟ+คืน insight ทัน
+    const enrichBudgetMs = ENRICH_MAXDUR_MS - (Date.now() - startedAt) - ENRICH_SAVE_MARGIN_MS;
+    const bufTooBig = ctx.mode === 'buffer' && ctx.buffer && ctx.buffer.length > 200 * 1e6;
+    if (ctx.mode && !bufTooBig && enrichBudgetMs > 60_000) {
       try {
         const { extractTranscriptQuotes, extractTranscriptQuotesFromVideoBuffer } = await import('@/lib/services/clipInsightService');
-        const tq = await getClipVideoQueue().run(
-          () => (ctx.mode === 'buffer'
-            ? extractTranscriptQuotesFromVideoBuffer(ctx.buffer, ctx.mimeType)
-            : extractTranscriptQuotes({ url: ctx.url })),
-          { label: `enrich:${type}` }
-        );
+        const tq = await Promise.race([
+          getClipVideoQueue().run(
+            () => (ctx.mode === 'buffer'
+              ? extractTranscriptQuotesFromVideoBuffer(ctx.buffer, ctx.mimeType)
+              : extractTranscriptQuotes({ url: ctx.url })),
+            { label: `enrich:${type}` }
+          ),
+          new Promise((_, rej) => setTimeout(() => rej(new Error(`enriched budget timeout ${Math.round(enrichBudgetMs / 1000)}s`)), enrichBudgetMs)),
+        ]);
         if (tq && (String(tq.enrichedRaw || '').trim() || String(tq.transcript || '').trim() || tq.punchyQuotes?.length)) {
           insight = { ...insight, transcriptQuotes: tq };
           console.log(`[ClipInsight] ✅ เนื้อดิบมีมิติ: enrichedRaw ${tq.enrichedRaw?.length || 0} ตัวอักษร · ประโยคเด็ด ${tq.punchyQuotes?.length || 0} · เพลง=${tq.hasSong ? 'มี' : 'ไม่มี'}`);
         }
       } catch (e) {
-        console.warn('[ClipInsight] รอบเนื้อดิบมีมิติล้ม (ข้าม ใช้ผลเดิม):', e.message?.slice(0, 60));
+        console.warn('[ClipInsight] รอบเนื้อดิบมีมิติล้ม/หมดเวลา (ข้าม ใช้ผลเดิม):', e.message?.slice(0, 70));
       }
+    } else if (bufTooBig) {
+      console.log(`[ClipInsight] ⏭️ ข้ามเนื้อดิบมีมิติ: คลิปใหญ่ ${Math.round(ctx.buffer.length / 1e6)}MB (กันแรมพุ่ง) — insight เดิมทำงานปกติ`);
     }
 
     // เก็บเข้าคลังประเด็น (fire-and-forget) — ★ 8 ก.ค.: ขยาย 60→400 เคส (เดิมคลังหมุนทิ้งทุก ~2 วัน
