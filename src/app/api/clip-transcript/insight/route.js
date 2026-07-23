@@ -282,16 +282,31 @@ export async function POST(request) {
       console.warn(`[ClipInsight] ⚠️ เก็บแบบติดธง lowQuality: ${qualityNote}`);
     }
 
+    // ★ 24 ก.ค. แก้บัค (auditor C1) — เซฟ insight ลงคลัง "ก่อน" ยิงรอบ enriched:
+    //   ต่อให้ route โดน Vercel ฆ่ากลางรอบ enriched (หรือ maxDuration จริง < 800s) insight ก็อยู่ในคลังแล้ว
+    //   → dedup คืนได้ทันทีเมื่อกด/รีเฟรช · ไม่ต้องพึ่งว่าแพลตฟอร์มตัดที่กี่วินาที (แข็งกว่าเดาเวลา)
+    const caseId = randomUUID();
+    const store = createStore('clip-insights');
+    const baseRecord = {
+      id: caseId, url, platform: type,
+      title: (insight.headline || insight.overview || url).slice(0, 80),
+      insight,
+      category: insight.category || '', clipDurationSec: insight.clipDurationSec || 0,
+      user: String(user || '').slice(0, 40), elapsedMs: Date.now() - startedAt, attempts,
+      ...(lowQuality ? { lowQuality: true, qualityNote } : {}),
+      createdAt: new Date().toISOString(),
+    };
+    try { await store.add(baseRecord); } catch (e) { console.warn('[ClipInsight] เซฟคลัง (ก่อน enriched) ล้ม:', e.message?.slice(0, 50)); }
+
     // ★ 23 ก.ค. (ผู้ใช้สั่ง) — รอบ 2 "เนื้อดิบมีมิติ": Gemini ถอดคำพูดจริง (ไม่เอาเพลง) → ถักทอเข้าประเด็น (enrichedRaw)
-    //   🔴 อิสระจาก insight เดิม 100%: ล้ม/แน่น/หมดเวลา = ข้าม ใช้ผลเดิมต่อได้ · ใช้ buffer/URL ซ้ำจาก ctx (ไม่โหลดใหม่)
-    //   🔴 24 ก.ค. แก้บัค (auditor #1): คุมเวลาแบบอิง budget จริง (maxDuration − elapsed − เผื่อเซฟ) + Promise.race ตัดจบเอง
-    //      กัน route โดน Vercel ฆ่ากลางรอบ enriched แล้ว insight หายทั้งก้อน (store.add/return อยู่หลังบล็อกนี้ → insight ต้องเซฟ+คืนเสมอ)
-    //   🔴 แก้บัค (auditor #4): ข้าม enriched ถ้า buffer ใหญ่เกิน ~200MB (กันแรมพุ่ง/OOM อัปซ้ำ) — insight เดิมยังทำงานปกติ
-    const ENRICH_MAXDUR_MS = 800_000;   // = maxDuration ของ route (Vercel ฆ่าที่นี่)
-    const ENRICH_SAVE_MARGIN_MS = 90_000; // เผื่อเวลาให้เซฟ+คืน insight ทัน
+    //   🔴 อิสระจาก insight เดิม 100%: ล้ม/แน่น/หมดเวลา = ข้าม (insight เซฟไปแล้วข้างบน = ปลอดภัย) · ใช้ buffer/URL ซ้ำจาก ctx
+    //   budget-aware (auditor #1) + clearTimeout (auditor C2) + ข้าม buffer >200MB (auditor #4)
+    const ENRICH_MAXDUR_MS = 800_000;   // = maxDuration ของ route (เผื่อกรณี Vercel ตัดสั้นกว่า → มี C1 save-first กันไว้แล้ว)
+    const ENRICH_SAVE_MARGIN_MS = 90_000;
     const enrichBudgetMs = ENRICH_MAXDUR_MS - (Date.now() - startedAt) - ENRICH_SAVE_MARGIN_MS;
     const bufTooBig = ctx.mode === 'buffer' && ctx.buffer && ctx.buffer.length > 200 * 1e6;
     if (ctx.mode && !bufTooBig && enrichBudgetMs > 60_000) {
+      let enrichTimer;
       try {
         const { extractTranscriptQuotes, extractTranscriptQuotesFromVideoBuffer } = await import('@/lib/services/clipInsightService');
         const tq = await Promise.race([
@@ -301,48 +316,34 @@ export async function POST(request) {
               : extractTranscriptQuotes({ url: ctx.url })),
             { label: `enrich:${type}` }
           ),
-          new Promise((_, rej) => setTimeout(() => rej(new Error(`enriched budget timeout ${Math.round(enrichBudgetMs / 1000)}s`)), enrichBudgetMs)),
+          new Promise((_, rej) => { enrichTimer = setTimeout(() => rej(new Error(`enriched budget timeout ${Math.round(enrichBudgetMs / 1000)}s`)), enrichBudgetMs); }),
         ]);
         if (tq && (String(tq.enrichedRaw || '').trim() || String(tq.transcript || '').trim() || tq.punchyQuotes?.length)) {
           insight = { ...insight, transcriptQuotes: tq };
+          // อัปเดต record ในคลังให้มี enriched (fire-and-forget — ถ้าล้ม insight ฐานที่เซฟไว้ก่อนก็ยังอยู่)
+          store.update(caseId, (r) => ({ ...r, insight, title: (insight.headline || insight.overview || url).slice(0, 80) })).catch(() => {});
           console.log(`[ClipInsight] ✅ เนื้อดิบมีมิติ: enrichedRaw ${tq.enrichedRaw?.length || 0} ตัวอักษร · ประโยคเด็ด ${tq.punchyQuotes?.length || 0} · เพลง=${tq.hasSong ? 'มี' : 'ไม่มี'}`);
         }
       } catch (e) {
         console.warn('[ClipInsight] รอบเนื้อดิบมีมิติล้ม/หมดเวลา (ข้าม ใช้ผลเดิม):', e.message?.slice(0, 70));
-      }
+      } finally { clearTimeout(enrichTimer); } // ★ C2: เคลียร์ timer กันค้าง (ทั้งกรณีสำเร็จและล้ม)
     } else if (bufTooBig) {
       console.log(`[ClipInsight] ⏭️ ข้ามเนื้อดิบมีมิติ: คลิปใหญ่ ${Math.round(ctx.buffer.length / 1e6)}MB (กันแรมพุ่ง) — insight เดิมทำงานปกติ`);
     }
 
-    // เก็บเข้าคลังประเด็น (fire-and-forget) — ★ 8 ก.ค.: ขยาย 60→400 เคส (เดิมคลังหมุนทิ้งทุก ~2 วัน
-    //   ประวัติเคสข่าวปังหายหมด) + เก็บ metadata (หมวด/ความยาวคลิป/ผู้ส่ง/เวลาถอด) + สำเนาถาวร NDJSON
-    const caseId = randomUUID();
-    const elapsedMs = Date.now() - startedAt;
-    const record = {
-      id: caseId, url, platform: type,
-      title: (insight.headline || insight.overview || url).slice(0, 80),
-      insight,
-      category: insight.category || '', clipDurationSec: insight.clipDurationSec || 0,
-      user: String(user || '').slice(0, 40), elapsedMs, attempts,
-      ...(lowQuality ? { lowQuality: true, qualityNote } : {}),
-      createdAt: new Date().toISOString(),
-    };
+    // retention + สำเนาถาวร (fire-and-forget) — ★ 8 ก.ค.: retention 400 เคส + NDJSON ถาวร (ใช้ insight สุดท้ายที่มี enriched)
     (async () => {
       try {
-        const store = createStore('clip-insights');
-        await store.add(record);
         const all = await store.getAll();
         if (all.length > 400) {
           const old = all.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).slice(0, all.length - 400);
           for (const o of old) await store.remove(o.id).catch(() => {});
         }
-      } catch (e) { console.warn('[ClipInsight] เก็บคลังล้ม:', e.message?.slice(0, 50)); }
-      // ★ สำเนาถาวร append-only (ไม่ถูกลบตาม retention — ไว้วิเคราะห์ย้อนหลัง/ลูปเรียนรู้ในอนาคต)
-      //   เขียนได้เฉพาะเครื่องที่มีดิสก์จริง (เครื่องทีม ~82% ของงาน) — บน Vercel จะเงียบๆ ข้ามไป ไม่กระทบงานหลัก
+      } catch (e) { console.warn('[ClipInsight] retention ล้ม:', e.message?.slice(0, 50)); }
       try {
         const { appendFile } = await import('fs/promises');
         const { join } = await import('path');
-        await appendFile(join(process.cwd(), 'data', 'clip-insights-archive.ndjson'), JSON.stringify(record) + '\n', 'utf8');
+        await appendFile(join(process.cwd(), 'data', 'clip-insights-archive.ndjson'), JSON.stringify({ ...baseRecord, insight }) + '\n', 'utf8');
       } catch { /* Vercel filesystem อ่านอย่างเดียว — ข้าม */ }
     })();
 
