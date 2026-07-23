@@ -16,10 +16,20 @@ export async function GET() {
     const all = await store.getAll();
     const now = Date.now();
     // ★ กู้งานค้าง: processing ค้างเกิน 8 นาที → คืนเป็น pending (เครื่องทีมหลุด/รีสตาร์ท)
+    //   🔴 24 ก.ค. แก้บัค (auditor #5): นับ reclaims — งานที่ถูกกู้ซ้ำเกิน 5 ครั้ง (worker พัง/หมดแรงทุกครั้งที่หยิบ
+    //      เช่นคลิปใหญ่ OOM) → มาร์ค error แทนวนไม่จบ (เดิม reset โดยไม่นับ = งานพิษวนไม่มีวันชน MAX_ATTEMPTS)
     const stuckCut = now - 8 * 60 * 1000;
+    const MAX_RECLAIMS = 5;
     for (const j of all) {
       if (j.status === 'processing' && new Date(j.startedAt || 0).getTime() < stuckCut) {
-        await store.update(j.id, ex => ({ ...ex, status: 'pending', startedAt: null })).catch(() => {});
+        const reclaims = (j.reclaims || 0) + 1;
+        if (reclaims >= MAX_RECLAIMS) {
+          await store.update(j.id, ex => ({ ...ex, status: 'error', startedAt: null, reclaims,
+            error: `งานค้างซ้ำ ${reclaims} ครั้ง — worker น่าจะพัง/หมดแรงทุกครั้งที่หยิบงานนี้ (เช่น คลิปใหญ่เกิน/OOM) จึงข้ามถาวร · ลองส่งใหม่หรือตรวจลิงก์`,
+            doneAt: new Date().toISOString() })).catch(() => {});
+        } else {
+          await store.update(j.id, ex => ({ ...ex, status: 'pending', startedAt: null, reclaims })).catch(() => {});
+        }
       }
     }
     // ★ 26 มิ.ย.: หยิบงาน pending + งาน retry_wait ที่ถึงเวลาลองใหม่แล้ว (Gemini แน่น → รอครบเวลา → ลองอีก)

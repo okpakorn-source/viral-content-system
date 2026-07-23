@@ -455,7 +455,7 @@ export default function ClipTranscriptPage() {
               })()}
               {queueJob.status === 'done' && <>✅ <b>ถอดเสร็จแล้ว</b> — ผลอยู่ด้านล่าง + เก็บเข้าคลังประเด็นข่าวให้แล้ว</>}
               {queueJob.status === 'error' && <>❌ <b>ถอดไม่สำเร็จ</b> — {queueJob.error || 'ลองส่งใหม่อีกครั้ง'}</>}
-              {queueJob._pollEnded && queueJob.status !== 'done' && queueJob.status !== 'error' && <><br /><span style={{ fontSize: 11.5, opacity: 0.85 }}>⏱️ หยุดอัปเดตสดแล้ว แต่ <b>งานยังทำต่อเบื้องหลัง</b> — กลับมาดูผลที่ "คลังบทถอด" ด้านล่างได้เลย</span></>}
+              {queueJob._pollEnded && queueJob.status !== 'done' && queueJob.status !== 'error' && <><br /><span style={{ fontSize: 11.5, opacity: 0.85 }}>⏱️ หยุดอัปเดตสดแล้ว แต่ <b>งานยังทำต่อเบื้องหลัง</b> — กลับมาดูผลที่ "คลังถอดประเด็นข่าว" ด้านล่างได้เลย</span></>}
             </div>
           )}
           {/* ★ 26 มิ.ย.: แผงคิวรวม — เห็นทุกคลิปที่ส่งเข้าคิว (รออยู่/รอ Gemini หาย/ถอดอยู่/เสร็จล่าสุด) */}
