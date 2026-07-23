@@ -397,35 +397,20 @@ export default function ClipTranscriptPage() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary, #0d0d1a)', color: 'var(--text-primary, #e8e8f0)', fontFamily: 'inherit' }}>
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '28px 20px' }}>
-        <h1 style={{ fontSize: 24, fontWeight: 900, margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>🎙️ ถอดบทสัมภาษณ์จากคลิป</h1>
+        <h1 style={{ fontSize: 24, fontWeight: 900, margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>🎯 ถอดประเด็นข่าวจากคลิป</h1>
         <p style={{ fontSize: 13, color: 'var(--text-muted, #888)', margin: '6px 0 22px' }}>
-          วางลิงก์ TikTok / YouTube / Facebook → ถอดบทพูด-บทสัมภาษณ์เป็นข้อความ → เก็บเข้าคลัง หยิบไปเรียบเรียงเป็นข่าวเอง (แยกจากระบบทำข่าว)
+          วางลิงก์ TikTok / YouTube / Facebook → Gemini ดูคลิปจริง ถอดประเด็น + คำพูดจริง เป็นเนื้อดิบมีมิติ พร้อมหยิบไปเขียนข่าว (แยกจากระบบทำข่าว)
         </p>
 
         {/* Input */}
         <div className="card" style={{ background: 'var(--bg-card, #1a1a2e)', border: '1px solid var(--border, #2a2a3e)', borderRadius: 14, padding: 18, marginBottom: 18 }}>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <input value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && !loading && extract()}
-              placeholder="วางลิงก์คลิป (TikTok/YouTube/FB) หรือลิงก์ข่าวเว็บ (เช่น TrueID) แล้วเลือกปุ่มด้านขวา"
+            <input value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && !insightLoading && extractInsight()}
+              placeholder="วางลิงก์คลิป (TikTok / YouTube / Facebook)"
               style={{ flex: 1, minWidth: 280, padding: '12px 14px', borderRadius: 10, border: '1px solid var(--border, #2a2a3e)', background: 'rgba(0,0,0,0.2)', color: 'inherit', fontSize: 14, fontFamily: 'inherit' }} />
-            <button onClick={extract} disabled={loading || insightLoading}
-              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: loading ? '#4b5563' : 'linear-gradient(135deg,#f91880,#7c3aed)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: loading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
-              {loading ? '⏳ กำลังถอด...' : '🎙️ ถอดบทสัมภาษณ์'}
-            </button>
-            <button onClick={() => extractInsight()} disabled={loading || insightLoading || hunting}
+            <button onClick={() => extractInsight()} disabled={insightLoading}
               style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: insightLoading ? '#4b5563' : 'linear-gradient(135deg,#2563eb,#0891b2)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: insightLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
               {insightLoading ? '⏳ Gemini กำลังดูคลิป...' : '🎯 ถอดประเด็นข่าว (ข้อมูลดิบ)'}
-            </button>
-            {/* ★ 8 ก.ค.: สองปุ่ม "หาข่าวเสริม" อยู่ติดกัน — คลิป (🧭) / ลิงก์ข่าวเว็บ (📰) · คลังเดียวกัน ผลแยกป้าย */}
-            <button onClick={extractHunt} disabled={loading || insightLoading || hunting}
-              title="สำหรับลิงก์คลิป (YouTube/TikTok/FB/IG) — ถอดเนื้อดิบแล้วหาข่าว/คลิปคล้าย"
-              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: hunting ? '#4b5563' : 'linear-gradient(135deg,#059669,#0d9488)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: hunting ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
-              {hunting ? '⏳ กำลังทำ...' : '🧭 คลิป → ค้นข่าวคล้าย'}
-            </button>
-            <button onClick={extractNewsHunt} disabled={loading || insightLoading || hunting}
-              title="สำหรับลิงก์ข่าวเว็บ (เช่น TrueID, ข่าวสด) — วิจัยเชิงลึกแล้วหาข่าวเสริม"
-              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: hunting ? '#4b5563' : 'linear-gradient(135deg,#2563eb,#1d4ed8)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: hunting ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
-              {hunting ? '⏳ กำลังทำ...' : '📰 ลิงก์ข่าว → วิจัย+หาเสริม'}
             </button>
             <button onClick={submitToQueue} disabled={loading || insightLoading || submitting || (queueJob && !queueJob._pollEnded && queueJob.status !== 'done' && queueJob.status !== 'error')}
               title="ส่งลิงก์ให้เครื่องทีมถอดให้ — เหมาะกับ Facebook/IG หรือเมื่อทำในเว็บไม่ได้"
@@ -518,12 +503,8 @@ export default function ClipTranscriptPage() {
             </div>
           )}
           <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted, #888)', lineHeight: 1.6 }}>
-            🎙️ <b>ถอดบทสัมภาษณ์</b> = ได้บทพูดเต็ม + บอกประเภทคลิป (สัมภาษณ์/พูดเดี่ยว/อ่านข่าว) · 🎯 <b>ถอดประเด็นข่าว</b> = Gemini ดูคลิปจริง (YouTube/TikTok/Reels — เห็นภาพ+ตัวหนังสือบนจอ) → ข้อมูลดิบ (ประเด็น+คำพูด+ช่วงเวลา) · FB/IG ทำได้บนเครื่องทีม
+            🎯 <b>ถอดประเด็นข่าว</b> = Gemini ดูคลิปจริง (เห็นภาพ+ฟังเสียง+ตัวหนังสือบนจอ) → ข้อมูลดิบ (ประเด็น + คำพูดจริง + เนื้อดิบมีมิติ) · 📥 <b>ส่งเข้าคิว (เครื่องทีม)</b> = ให้เครื่องทีมถอดให้ เหมาะกับ Facebook/IG หรือเมื่อทำในเว็บไม่ได้
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 13, color: 'var(--text-muted, #888)', cursor: 'pointer' }}>
-            <input type="checkbox" checked={tidy} onChange={e => setTidy(e.target.checked)} />
-            ✨ เรียบเรียงให้อ่านลื่น (จัดลำดับ ตัดคำซ้ำ/เสียงเอ้อ — ไม่สรุป ไม่ตัดเนื้อหา) — ปิดถ้าอยากได้บทดิบเป๊ะ
-          </label>
           {err && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.12)', color: '#ef4444', fontSize: 13 }}>❌ {err}</div>}
         </div>
 
@@ -755,40 +736,7 @@ export default function ClipTranscriptPage() {
           </div>
         )}
 
-        {/* คลัง */}
-        <button onClick={() => setCasesOpen(!casesOpen)} style={{ padding: '10px 18px', borderRadius: 10, border: '1px solid var(--border, #2a2a3e)', background: casesOpen ? 'rgba(99,102,241,0.12)' : 'var(--bg-card, #1a1a2e)', color: casesOpen ? '#818cf8' : 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-          📦 คลังบทถอด ({cases.length}) {casesOpen ? '▲' : '▼'}
-        </button>
-        {casesOpen && (
-          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {cases.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: 13 }}>ยังไม่มีบทถอด — ถอดคลิปสักครั้งแล้วจะเก็บที่นี่อัตโนมัติ</div>}
-            {cases.map((c) => (
-              <div key={c.id} style={{ border: '1px solid var(--border, #2a2a3e)', borderRadius: 10, overflow: 'hidden' }}>
-                <div onClick={() => setExpanded(expanded === c.id ? null : c.id)} style={{ padding: '11px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: 'var(--bg-card, #1a1a2e)' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3, flexWrap: 'wrap' }}>
-                      {(c.category || c.classify?.category) && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(245,158,11,0.16)', color: '#f59e0b', fontWeight: 800 }}>📂 {c.category || c.classify?.category}</span>}
-                      {(c.clipTypeLabel || c.classify?.clipTypeLabel) && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>{c.classify?.emoji || '🎬'} {c.clipTypeLabel || c.classify?.clipTypeLabel}</span>}
-                    </div>
-                    <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platformIcon(c.platform)} {c.title || c.url}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{c.platform} · {c.wordCount} ตัวอักษร · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
-                  </div>
-                  <button onClick={(e) => { e.stopPropagation(); deleteCase(c.id); }} style={{ marginLeft: 10, padding: '4px 10px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>ลบ</button>
-                </div>
-                {expanded === c.id && (
-                  <div style={{ padding: 14, borderTop: '1px solid var(--border, #2a2a3e)' }}>
-                    <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                      <a href={c.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#3b82f6' }}>🔗 เปิดคลิป</a>
-                      {c.tidyText && <button onClick={() => copy(c.tidyText, 'c-tidy-' + c.id)} style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'c-tidy-' + c.id ? '✅' : '📋 คัดลอกที่เรียบเรียง'}</button>}
-                      <button onClick={() => copy(c.rawText, 'c-raw-' + c.id)} style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: 'rgba(59,130,246,0.15)', color: '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'c-raw-' + c.id ? '✅' : '📋 คัดลอกบทดิบ'}</button>
-                    </div>
-                    <div style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 12 }}>{c.tidyText || c.rawText}</div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {/* คลังบทถอด (ของปุ่ม "ถอดบทสัมภาษณ์") ถอดออก 23 ก.ค. — เหลือเฉพาะถอดประเด็นข่าว */}
 
         {/* ★ 22 มิ.ย.: คลังถอดประเด็นข่าว (ข้อมูลดิบ) — เก็บทุกครั้งที่ถอดสำเร็จ */}
         <button onClick={() => setInsightCasesOpen(!insightCasesOpen)} style={{ marginTop: 16, padding: '10px 18px', borderRadius: 10, border: '1px solid rgba(37,99,235,0.3)', background: insightCasesOpen ? 'rgba(37,99,235,0.12)' : 'var(--bg-card, #1a1a2e)', color: insightCasesOpen ? '#60a5fa' : 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
@@ -880,6 +828,40 @@ export default function ClipTranscriptPage() {
                           </div>
                         </div>
                       )}
+                      {/* ★ 24 ก.ค. แก้บัค #2: คลังต้องโชว์ "เนื้อดิบมีมิติ" เท่าผลสด (เดิมโค้ดคลังไม่ render transcriptQuotes) */}
+                      {ins.transcriptQuotes && (
+                        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px dashed rgba(124,58,237,0.35)' }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 800, color: '#c4b5fd', marginBottom: 8 }}>🎙️ เนื้อดิบมีมิติ — ประเด็น + คำพูดจริง (ไม่รวมเพลง){ins.transcriptQuotes.note ? ` · ${ins.transcriptQuotes.note}` : ''}</div>
+                          {ins.transcriptQuotes.enrichedRaw && (
+                            <div style={{ marginBottom: 10 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                                <div style={{ fontSize: 11.5, fontWeight: 800, color: '#a78bfa' }}>📝 วัตถุดิบข่าว + คำพูด (พร้อมเขียน)</div>
+                                <button onClick={() => copy(ins.transcriptQuotes.enrichedRaw, 'ic-enr-' + c.id)} style={{ padding: '3px 9px', borderRadius: 7, border: '1px solid rgba(124,58,237,0.4)', background: 'transparent', color: '#a78bfa', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'ic-enr-' + c.id ? '✅' : '📋'}</button>
+                              </div>
+                              <div style={{ fontSize: 12.5, lineHeight: 1.8, whiteSpace: 'pre-wrap', background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.18)', borderRadius: 8, padding: 11, maxHeight: 320, overflowY: 'auto' }}>{ins.transcriptQuotes.enrichedRaw}</div>
+                            </div>
+                          )}
+                          {ins.transcriptQuotes.punchyQuotes?.length > 0 && (
+                            <div style={{ marginBottom: 10 }}>
+                              <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 5 }}>🔥 ประโยคเด็ด ({ins.transcriptQuotes.punchyQuotes.length})</div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                                {ins.transcriptQuotes.punchyQuotes.map((q, i) => (
+                                  <div key={i} style={{ padding: '6px 10px', borderRadius: 7, background: 'rgba(34,197,94,0.06)', borderLeft: '2px solid #22c55e' }}>
+                                    <div style={{ fontSize: 12, lineHeight: 1.55 }}>&ldquo;{q.quote}&rdquo;</div>
+                                    {(q.speaker || q.why) && <div style={{ fontSize: 10.5, color: 'var(--text-muted,#888)', marginTop: 2 }}>{q.speaker ? `— ${q.speaker}` : ''}{q.why ? `${q.speaker ? ' · ' : ''}${q.why}` : ''}</div>}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {ins.transcriptQuotes.transcript && (
+                            <details>
+                              <summary style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted,#888)', cursor: 'pointer' }}>💬 บทพูดในคลิป (ไม่รวมเพลง) — กดกาง{ins.transcriptQuotes.hasSong ? ' · มีเพลง (ข้ามเนื้อเพลง)' : ''}</summary>
+                              <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 10, maxHeight: 260, overflowY: 'auto', marginTop: 6 }}>{ins.transcriptQuotes.transcript}</div>
+                            </details>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -888,54 +870,7 @@ export default function ClipTranscriptPage() {
           </div>
         )}
 
-        {/* ★ 8 ก.ค.: คลังค้นประเด็นยูสเซอร์ — คลังเดียว เก็บทั้งคลิป+ลิงก์ข่าว (ผลแยกด้วยป้าย+ตัวกรอง) */}
-        <button onClick={() => setHuntCasesOpen(!huntCasesOpen)} style={{ marginTop: 16, padding: '10px 18px', borderRadius: 10, border: '1px solid rgba(13,148,136,0.4)', background: huntCasesOpen ? 'rgba(13,148,136,0.12)' : 'var(--bg-card, #1a1a2e)', color: huntCasesOpen ? '#2dd4bf' : 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-          🗂️ คลังค้นประเด็นยูสเซอร์ ({huntCases.length}) {huntCasesOpen ? '▲' : '▼'}
-        </button>
-        {huntCasesOpen && (() => {
-          const clipN = huntCases.filter(c => c.sourceType !== 'article').length;
-          const artN = huntCases.filter(c => c.sourceType === 'article').length;
-          const shownCases = huntCases.filter(c => huntFilter === 'all' || (huntFilter === 'article' ? c.sourceType === 'article' : c.sourceType !== 'article'));
-          const chip = (key, label) => (
-            <button onClick={() => setHuntFilter(key)} style={{ padding: '5px 13px', borderRadius: 999, cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'inherit', border: '1px solid ' + (huntFilter === key ? 'rgba(13,148,136,0.6)' : 'var(--border,#2a2a3e)'), background: huntFilter === key ? 'rgba(13,148,136,0.18)' : 'transparent', color: huntFilter === key ? '#2dd4bf' : 'var(--text-muted,#999)' }}>{label}</button>
-          );
-          return (
-          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {/* ตัวกรองที่มา */}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
-              {chip('all', `ทั้งหมด (${huntCases.length})`)}
-              {chip('clip', `🎬 จากคลิป (${clipN})`)}
-              {chip('article', `📰 จากลิงก์ข่าว (${artN})`)}
-            </div>
-            {huntCases.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: 13 }}>ยังไม่มีเคส — กด &ldquo;🧭 คลิป → ค้นข่าวคล้าย&rdquo; หรือ &ldquo;📰 ลิงก์ข่าว → วิจัย+หาเสริม&rdquo; สักครั้งแล้วจะเก็บที่นี่ถาวร</div>}
-            {huntCases.length > 0 && shownCases.length === 0 && <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: 12.5 }}>ยังไม่มีเคสในหมวดนี้</div>}
-            {shownCases.map((c) => {
-              const isArticle = c.sourceType === 'article';
-              return (
-              <div key={c.id} style={{ border: '1px solid ' + (isArticle ? 'rgba(37,99,235,0.3)' : 'rgba(124,58,237,0.3)'), borderRadius: 10, overflow: 'hidden' }}>
-                <div onClick={() => setHuntExpanded(huntExpanded === c.id ? null : c.id)} style={{ padding: '11px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: 'var(--bg-card, #1a1a2e)' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, fontWeight: 800, background: isArticle ? 'rgba(37,99,235,0.18)' : 'rgba(124,58,237,0.18)', color: isArticle ? '#60a5fa' : '#a78bfa' }}>{isArticle ? '📰 ลิงก์ข่าว' : '🎬 คลิป'}</span>
-                      {c.styleProfile?.theme && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>🧬 {c.styleProfile.theme}</span>}
-                      <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontWeight: 800 }}>เจอ {(c.results || []).length} เรื่อง</span>
-                    </div>
-                    <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isArticle ? '📰' : platformIcon(c.platform)} {c.title || c.sourceUrl}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{isArticle ? 'ลิงก์ข่าว' : c.platform}{c.user ? ` · 👤 ${c.user}` : ''} · {new Date(c.updatedAt || c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
-                  </div>
-                  <button onClick={(e) => { e.stopPropagation(); if (confirm('ลบเคสนี้ออกจากคลัง?')) fetch('/api/clip-transcript/cases?kind=hunt&id=' + c.id, { method: 'DELETE' }).then(loadHuntCases); }} style={{ marginLeft: 10, padding: '4px 10px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>ลบ</button>
-                </div>
-                {huntExpanded === c.id && (
-                  <div style={{ padding: 14, borderTop: '1px solid rgba(13,148,136,0.25)' }}>
-                    {renderHuntCase(c, 'hc-' + c.id)}
-                  </div>
-                )}
-              </div>
-              );
-            })}
-          </div>
-          );
-        })()}
+        {/* คลังค้นประเด็น (ของปุ่ม "ค้นข่าวคล้าย"/"วิจัย") ถอดออก 23 ก.ค. — เหลือเฉพาะถอดประเด็นข่าว */}
       </div>
     </div>
   );
