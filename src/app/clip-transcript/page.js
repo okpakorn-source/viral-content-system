@@ -272,6 +272,13 @@ export default function ClipTranscriptPage() {
     if (ins.subStories?.length) {
       ins.subStories.forEach((s, i) => parts.push(`— เนื้อดิบประเด็น ${s.no || i + 1}: ${s.topic}${s.timeRange ? ` (${s.timeRange})` : ''} —\n${s.rawData}${s.quotes?.length ? '\n\nคำพูด:\n' + s.quotes.map(q => `“${q}”`).join('\n') : ''}`));
     }
+    // ★ 23 ก.ค.: เนื้อดิบมีมิติ (ประเด็น+คำพูดจริงถักทอ) + ประโยคเด็ด + บทพูด
+    const tq = ins.transcriptQuotes;
+    if (tq) {
+      if (tq.enrichedRaw) parts.push('— เนื้อดิบมีมิติ (ประเด็น+คำพูดจริง พร้อมเขียนข่าว) —\n' + tq.enrichedRaw);
+      if (tq.punchyQuotes?.length) parts.push('— ประโยคเด็ด —\n' + tq.punchyQuotes.map(q => `“${q.quote}”${q.speaker ? ' — ' + q.speaker : ''}${q.why ? ' (' + q.why + ')' : ''}`).join('\n'));
+      if (tq.transcript) parts.push('— บทพูดในคลิป (ไม่รวมเพลง) —\n' + tq.transcript);
+    }
     return parts.join('\n\n');
   };
 
@@ -679,6 +686,44 @@ export default function ClipTranscriptPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+            {/* ★ 23 ก.ค. (ผู้ใช้สั่ง): เนื้อดิบมีมิติ — ประเด็น+คำพูดจริงถักทอ (รอบ 2 อิสระ · ไม่มี = ไม่โชว์ ของเดิมอยู่ครบด้านบน) */}
+            {insight.transcriptQuotes && (
+              <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px dashed rgba(124,58,237,0.35)' }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#c4b5fd', marginBottom: 4 }}>🎙️ เนื้อดิบมีมิติ — ประเด็น + คำพูดจริง (ไม่รวมเพลง)</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted,#888)', marginBottom: 12 }}>Gemini ถอดคำพูดจริงมาถักทอกับประเด็นข่าว · AI ถอด—โปรดตรวจชื่อ/คำเฉพาะ{insight.transcriptQuotes.note ? ` · ${insight.transcriptQuotes.note}` : ''}</div>
+
+                {insight.transcriptQuotes.enrichedRaw && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: '#a78bfa' }}>📝 วัตถุดิบข่าว + คำพูด (พร้อมเขียนต่อ)</div>
+                      <button onClick={() => navigator.clipboard?.writeText(insight.transcriptQuotes.enrichedRaw)} style={{ padding: '3px 10px', borderRadius: 7, border: '1px solid rgba(124,58,237,0.4)', background: 'transparent', color: '#a78bfa', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>📋 คัดลอก</button>
+                    </div>
+                    <div style={{ fontSize: 13.5, lineHeight: 1.85, whiteSpace: 'pre-wrap', background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.18)', borderRadius: 10, padding: 14, maxHeight: 400, overflowY: 'auto' }}>{insight.transcriptQuotes.enrichedRaw}</div>
+                  </div>
+                )}
+
+                {insight.transcriptQuotes.punchyQuotes?.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 6 }}>🔥 ประโยคเด็ด — ตัวพลิกเกมไวรัล ({insight.transcriptQuotes.punchyQuotes.length})</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                      {insight.transcriptQuotes.punchyQuotes.map((q, i) => (
+                        <div key={i} style={{ padding: '8px 11px', borderRadius: 8, background: 'rgba(34,197,94,0.06)', borderLeft: '3px solid #22c55e' }}>
+                          <div style={{ fontSize: 13, lineHeight: 1.6 }}>&ldquo;{q.quote}&rdquo;</div>
+                          {(q.speaker || q.why) && <div style={{ fontSize: 11, color: 'var(--text-muted,#888)', marginTop: 3 }}>{q.speaker ? `— ${q.speaker}` : ''}{q.why ? `${q.speaker ? ' · ' : ''}${q.why}` : ''}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {insight.transcriptQuotes.transcript && (
+                  <details>
+                    <summary style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', cursor: 'pointer' }}>💬 บทพูดในคลิป (คำพูดจริง ไม่รวมเพลง) — กดกาง{insight.transcriptQuotes.hasSong ? ' · คลิปนี้มีเพลง (ข้ามเนื้อเพลงแล้ว)' : ''}</summary>
+                    <div style={{ fontSize: 12.5, lineHeight: 1.75, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 12, maxHeight: 300, overflowY: 'auto', marginTop: 7 }}>{insight.transcriptQuotes.transcript}</div>
+                  </details>
+                )}
               </div>
             )}
             </>)}

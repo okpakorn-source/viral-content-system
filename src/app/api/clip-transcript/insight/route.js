@@ -153,7 +153,8 @@ function _raceTimeout(promise, ms, label) {
 //     ถ้าฝั่งโหลด YouTube ฟื้น: ครบ 20 นาทีจะลอง URL เอง · ถ้าอยากกลับไปลอง URL ก่อนเสมอ ตั้งเป็น 0
 let _ytUrlBrokenUntil = Date.now() + 20 * 60 * 1000;
 
-async function buildInsight({ url, type }) {
+async function buildInsight({ url, type }, ctx = null) {
+  // ★ 23 ก.ค.: ctx (optional) — เก็บ buffer/URL ที่ใช้จริง ให้รอบ "เนื้อดิบมีมิติ" หยิบไปใช้ซ้ำ ไม่โหลด/ไม่แตะ insight เดิม
   // ★ 25 มิ.ย.: ใช้ insight เดียว (enhanced) เสมอ — Gemini "ตัดสินเอง" (content-aware) ว่าคลิปมีหลายประเด็นไหม
   //   มีหลายประเด็น → ใส่ subStories (เนื้อดิบแยกประเด็น) เพิ่มจาก rawData รวม · เรื่องเดียว → subStories ว่าง
   //   เลิกพึ่ง getClipDurationSec (ยึด yt-dlp = พังบนคลาวด์ → เคยได้ single เสมอ) — ตอนนี้ทำงานทั้ง cloud+โลคัล
@@ -169,6 +170,7 @@ async function buildInsight({ url, type }) {
     const YT_FMT = 'best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best';
     const downloadAndExtract = async () => {
       const buf = await downloadMetaBuffer(url, YT_FMT);
+      if (ctx) { ctx.mode = 'buffer'; ctx.buffer = buf; ctx.mimeType = 'video/mp4'; } // ★ 23 ก.ค.: เก็บ buffer ให้รอบเนื้อดิบมีมิติใช้ซ้ำ
       return await extractInsightFromVideoBuffer(buf, 'video/mp4');
     };
     if (process.platform === 'win32') {
@@ -177,17 +179,21 @@ async function buildInsight({ url, type }) {
         return await downloadAndExtract();
       }
       try {
-        return await _raceTimeout(extractClipInsight({ url, platform: 'youtube' }), 170_000, 'YouTube URL passthrough');
+        const _r = await _raceTimeout(extractClipInsight({ url, platform: 'youtube' }), 170_000, 'YouTube URL passthrough');
+        if (ctx) { ctx.mode = 'youtube-url'; ctx.url = url; } // ★ 23 ก.ค.: รอบเนื้อดิบมีมิติใช้ URL passthrough เช่นกัน
+        return _r;
       } catch (e) {
         _ytUrlBrokenUntil = Date.now() + 20 * 60 * 1000; // จำว่า URL ค้าง → ข้าม 20 นาที
         console.log(`[ClipInsight] 🔄 YouTube URL ค้าง → โหลดเอง + ข้าม URL 20 นาที: ${String(e.message).slice(0, 60)}`);
         return await downloadAndExtract();
       }
     }
+    if (ctx) { ctx.mode = 'youtube-url'; ctx.url = url; }
     return await extractClipInsight({ url, platform: 'youtube' }); // cloud: URL passthrough เท่านั้น
   }
   // TikTok/FB/IG → โหลดไฟล์ให้ Gemini "ดูจริง" (เห็นภาพ+ตัวหนังสือบนจอ) — ไม่มี fallback ถอดเสียง
   const buf = type === 'tiktok' ? await downloadTiktokBuffer(url) : await downloadMetaBuffer(url);
+  if (ctx) { ctx.mode = 'buffer'; ctx.buffer = buf; ctx.mimeType = 'video/mp4'; } // ★ 23 ก.ค.: เก็บ buffer ให้รอบเนื้อดิบมีมิติใช้ซ้ำ
   return await extractInsightFromVideoBuffer(buf, 'video/mp4');
 }
 
@@ -245,10 +251,11 @@ export async function POST(request) {
 
     // ★ 22 มิ.ย.: ผ่าน "คิวงานหนัก" — กันยิง Gemini/Whisper ซ้อนกัน + เว้นช่วงอัตโนมัติเมื่อ API แน่น
     const startedAt = Date.now();
+    const ctx = {}; // ★ 23 ก.ค.: buildInsight เก็บ buffer/URL ที่ใช้จริงไว้ที่นี่ → รอบเนื้อดิบมีมิติหยิบไปใช้ซ้ำ
     let insight;
     let attempts = 1;
     try {
-      insight = await getClipVideoQueue().run(() => buildInsight({ url, type }), { label: `insight:${type}` });
+      insight = await getClipVideoQueue().run(() => buildInsight({ url, type }, ctx), { label: `insight:${type}` });
     } catch (e) {
       const code = e.code || 'INSIGHT_FAILED';
       return NextResponse.json({ success: false, error: humanizeErr(e.message), errorType: code }, { status: 422 });
@@ -273,6 +280,27 @@ export async function POST(request) {
       lowQuality = true;
       qualityNote = `ผลอาจไม่สมบูรณ์: ${issues.join(' · ')} — แนะนำกดถอดใหม่`;
       console.warn(`[ClipInsight] ⚠️ เก็บแบบติดธง lowQuality: ${qualityNote}`);
+    }
+
+    // ★ 23 ก.ค. (ผู้ใช้สั่ง) — รอบ 2 "เนื้อดิบมีมิติ": Gemini ถอดคำพูดจริง (ไม่เอาเพลง) → ถักทอเข้าประเด็น (enrichedRaw)
+    //   🔴 อิสระจาก insight เดิม 100%: ล้ม/แน่น = ข้าม ใช้ผลเดิมต่อได้ · ใช้ buffer/URL ซ้ำจาก ctx (ไม่โหลดใหม่)
+    //   time-guard: เวลาเหลือน้อย (>8 นาที) = ข้าม กัน route โดน maxDuration ฆ่าก่อนคืน insight (insight ต้องได้เสมอ)
+    if (ctx.mode && Date.now() - startedAt < 480_000) {
+      try {
+        const { extractTranscriptQuotes, extractTranscriptQuotesFromVideoBuffer } = await import('@/lib/services/clipInsightService');
+        const tq = await getClipVideoQueue().run(
+          () => (ctx.mode === 'buffer'
+            ? extractTranscriptQuotesFromVideoBuffer(ctx.buffer, ctx.mimeType)
+            : extractTranscriptQuotes({ url: ctx.url })),
+          { label: `enrich:${type}` }
+        );
+        if (tq && (String(tq.enrichedRaw || '').trim() || String(tq.transcript || '').trim() || tq.punchyQuotes?.length)) {
+          insight = { ...insight, transcriptQuotes: tq };
+          console.log(`[ClipInsight] ✅ เนื้อดิบมีมิติ: enrichedRaw ${tq.enrichedRaw?.length || 0} ตัวอักษร · ประโยคเด็ด ${tq.punchyQuotes?.length || 0} · เพลง=${tq.hasSong ? 'มี' : 'ไม่มี'}`);
+        }
+      } catch (e) {
+        console.warn('[ClipInsight] รอบเนื้อดิบมีมิติล้ม (ข้าม ใช้ผลเดิม):', e.message?.slice(0, 60));
+      }
     }
 
     // เก็บเข้าคลังประเด็น (fire-and-forget) — ★ 8 ก.ค.: ขยาย 60→400 เคส (เดิมคลังหมุนทิ้งทุก ~2 วัน
