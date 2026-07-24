@@ -309,20 +309,28 @@ export async function POST(request) {
       let enrichTimer;
       try {
         const { extractTranscriptQuotes, extractTranscriptQuotesFromVideoBuffer } = await import('@/lib/services/clipInsightService');
+        // ★ 24 ก.ค. (ผู้ใช้สั่ง): ส่ง "โครงประเด็น" จากรอบแรก (subStories/topics) ให้รอบ 2 แยกประเด็นตรงกัน
+        //   ส่งเฉพาะหัวข้อ+ช่วงเวลา (โครงสร้าง) ไม่ส่งเนื้อความ — กันสำนวนรอบแรกไหลมาปน
+        const topicHints = (insight?.subStories?.length ? insight.subStories : (insight?.topics || []))
+          .map(t => ({
+            topic: t?.topic || t?.title || '',
+            timeRange: t?.timeRange || (t?.timeStart ? `${t.timeStart}–${t.timeEnd || ''}` : ''),
+          }))
+          .filter(t => t.topic);
         const tq = await Promise.race([
           getClipVideoQueue().run(
             () => (ctx.mode === 'buffer'
-              ? extractTranscriptQuotesFromVideoBuffer(ctx.buffer, ctx.mimeType)
-              : extractTranscriptQuotes({ url: ctx.url })),
+              ? extractTranscriptQuotesFromVideoBuffer(ctx.buffer, ctx.mimeType, topicHints)
+              : extractTranscriptQuotes({ url: ctx.url, topicHints })),
             { label: `enrich:${type}` }
           ),
           new Promise((_, rej) => { enrichTimer = setTimeout(() => rej(new Error(`enriched budget timeout ${Math.round(enrichBudgetMs / 1000)}s`)), enrichBudgetMs); }),
         ]);
-        if (tq && (String(tq.enrichedRaw || '').trim() || String(tq.transcript || '').trim() || tq.punchyQuotes?.length)) {
+        if (tq && (String(tq.enrichedRaw || '').trim() || String(tq.transcript || '').trim() || tq.punchyQuotes?.length || tq.enrichedTopics?.length)) {
           insight = { ...insight, transcriptQuotes: tq };
           // อัปเดต record ในคลังให้มี enriched (fire-and-forget — ถ้าล้ม insight ฐานที่เซฟไว้ก่อนก็ยังอยู่)
           store.update(caseId, (r) => ({ ...r, insight, title: (insight.headline || insight.overview || url).slice(0, 80) })).catch(() => {});
-          console.log(`[ClipInsight] ✅ เนื้อดิบมีมิติ: enrichedRaw ${tq.enrichedRaw?.length || 0} ตัวอักษร · ประโยคเด็ด ${tq.punchyQuotes?.length || 0} · เพลง=${tq.hasSong ? 'มี' : 'ไม่มี'}`);
+          console.log(`[ClipInsight] ✅ เนื้อดิบมีมิติ: enrichedRaw ${tq.enrichedRaw?.length || 0} ตัวอักษร · แยกประเด็น ${tq.enrichedTopics?.length || 0} · ประโยคเด็ด ${tq.punchyQuotes?.length || 0} · เพลง=${tq.hasSong ? 'มี' : 'ไม่มี'}`);
         }
       } catch (e) {
         console.warn('[ClipInsight] รอบเนื้อดิบมีมิติล้ม/หมดเวลา (ข้าม ใช้ผลเดิม):', e.message?.slice(0, 70));

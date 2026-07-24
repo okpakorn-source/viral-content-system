@@ -276,6 +276,9 @@ export default function ClipTranscriptPage() {
     const tq = ins.transcriptQuotes;
     if (tq) {
       if (tq.enrichedRaw) parts.push('— เนื้อดิบมีมิติ (ประเด็น+คำพูดจริง พร้อมเขียนข่าว) —\n' + tq.enrichedRaw);
+      if (tq.enrichedTopics?.length) {
+        tq.enrichedTopics.forEach((t, i) => parts.push(`— เนื้อดิบมีมิติ ประเด็น ${t.no || i + 1}: ${t.topic}${t.timeRange ? ` (${t.timeRange})` : ''} —\n${t.enrichedRaw}`));
+      }
       if (tq.punchyQuotes?.length) parts.push('— ประโยคเด็ด —\n' + tq.punchyQuotes.map(q => `“${q.quote}”${q.speaker ? ' — ' + q.speaker : ''}${q.why ? ' (' + q.why + ')' : ''}`).join('\n'));
       if (tq.transcript) parts.push('— บทพูดในคลิป (ไม่รวมเพลง) —\n' + tq.transcript);
     }
@@ -685,6 +688,28 @@ export default function ClipTranscriptPage() {
                   </div>
                 )}
 
+                {/* ★ 24 ก.ค. (ผู้ใช้สั่ง): เนื้อดิบมีมิติ "แยกรายประเด็น" — เทียบเท่า subStories เดิม แต่มีคำพูดจริงถักในเนื้อ */}
+                {insight.transcriptQuotes.enrichedTopics?.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: '#fbbf24', marginBottom: 9 }}>🧩 เนื้อดิบมีมิติ · แยกประเด็น ({insight.transcriptQuotes.enrichedTopics.length}) — แต่ละอันมีคำพูดจริง พร้อมเขียนเป็นข่าวเดี่ยว</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {insight.transcriptQuotes.enrichedTopics.map((t, i) => (
+                        <div key={i} style={{ border: '1px solid rgba(245,158,11,0.3)', borderRadius: 10, padding: 12, background: 'rgba(245,158,11,0.04)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 7 }}>
+                            <div style={{ fontSize: 13.5, fontWeight: 800 }}>
+                              <span style={{ color: '#fbbf24' }}>ประเด็น {t.no || i + 1}:</span> {t.topic}
+                              {t.timeRange && <span style={{ fontSize: 11, color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600, marginLeft: 6 }}>⏱️ {t.timeRange}</span>}
+                            </div>
+                            <button onClick={() => copy(`${t.topic}${t.timeRange ? ` (${t.timeRange})` : ''}\n\n${t.enrichedRaw}`, 'et-' + i)}
+                              style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid rgba(245,158,11,0.4)', background: 'transparent', color: '#fbbf24', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{copied === 'et-' + i ? '✅' : '📋 คัดลอก'}</button>
+                          </div>
+                          <div style={{ fontSize: 13, lineHeight: 1.8, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 11 }}>{t.enrichedRaw}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {insight.transcriptQuotes.punchyQuotes?.length > 0 && (
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 6 }}>🔥 ประโยคเด็ด — ตัวพลิกเกมไวรัล ({insight.transcriptQuotes.punchyQuotes.length})</div>
@@ -841,6 +866,23 @@ export default function ClipTranscriptPage() {
                               <div style={{ fontSize: 12.5, lineHeight: 1.8, whiteSpace: 'pre-wrap', background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.18)', borderRadius: 8, padding: 11, maxHeight: 320, overflowY: 'auto' }}>{ins.transcriptQuotes.enrichedRaw}</div>
                             </div>
                           )}
+                          {ins.transcriptQuotes.enrichedTopics?.length > 0 && (
+                            <div style={{ marginBottom: 10 }}>
+                              <div style={{ fontSize: 12, fontWeight: 800, color: '#fbbf24', marginBottom: 7 }}>🧩 เนื้อดิบมีมิติ · แยกประเด็น ({ins.transcriptQuotes.enrichedTopics.length})</div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                {ins.transcriptQuotes.enrichedTopics.map((t, i) => (
+                                  <div key={i} style={{ border: '1px solid rgba(245,158,11,0.3)', borderRadius: 9, padding: 11, background: 'rgba(245,158,11,0.04)' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                                      <div style={{ fontSize: 13, fontWeight: 800 }}><span style={{ color: '#fbbf24' }}>ประเด็น {t.no || i + 1}:</span> {t.topic}{t.timeRange && <span style={{ fontSize: 10.5, color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600, marginLeft: 6 }}>⏱️ {t.timeRange}</span>}</div>
+                                      <button onClick={() => copy(`${t.topic}${t.timeRange ? ` (${t.timeRange})` : ''}\n\n${t.enrichedRaw}`, 'ic-et-' + c.id + '-' + i)} style={{ padding: '3px 9px', borderRadius: 7, border: '1px solid rgba(245,158,11,0.4)', background: 'transparent', color: '#fbbf24', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{copied === 'ic-et-' + c.id + '-' + i ? '✅' : '📋'}</button>
+                                    </div>
+                                    <div style={{ fontSize: 12.5, lineHeight: 1.75, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 10 }}>{t.enrichedRaw}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
                           {ins.transcriptQuotes.punchyQuotes?.length > 0 && (
                             <div style={{ marginBottom: 10 }}>
                               <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 5 }}>🔥 ประโยคเด็ด ({ins.transcriptQuotes.punchyQuotes.length})</div>
