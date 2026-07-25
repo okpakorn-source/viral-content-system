@@ -51,27 +51,23 @@ function getQueueStatus() {
 const recentUrls = new Map(); // url → timestamp
 const DEDUP_WINDOW_MS = 5 * 60 * 1000; // 5 นาที
 
-// ★ 25 ก.ค. 69: แยก "เช็ค" กับ "จำ" ออกจากกัน
-//   บั๊กเดิม: เช็คแล้วจำทันที → ถ้างานล้มกลางทาง ผู้ใช้ส่งซ้ำไม่ได้อีก 5 นาที ทั้งที่ยังไม่เคยได้ข่าวเลย
-//   ตอนนี้จำเฉพาะตอนเข้าคิวสำเร็จจริง (ดู processNewsJob)
-function _dedupKey(content) {
-  const urlMatch = content.match(/https?:\/\/\S+/);
-  return urlMatch ? urlMatch[0].split('?')[0] : null;
-}
-
 function isDuplicate(content) {
-  const url = _dedupKey(content);
-  if (!url) return false;
+  const urlMatch = content.match(/https?:\/\/\S+/);
+  if (!urlMatch) return false;
+
+  const url = urlMatch[0].split('?')[0]; // ตัด query params
   const now = Date.now();
+
+  // ลบ entries เก่า
   for (const [key, ts] of recentUrls) {
     if (now - ts > DEDUP_WINDOW_MS) recentUrls.delete(key);
   }
-  return recentUrls.has(url);
-}
 
-function markProcessed(content) {
-  const url = _dedupKey(content);
-  if (url) recentUrls.set(url, Date.now());
+  if (recentUrls.has(url)) {
+    return true;
+  }
+  recentUrls.set(url, now);
+  return false;
 }
 
 // ═══════════════════════════════════════════
@@ -108,16 +104,14 @@ client.on('messageCreate', async (message) => {
   const textOnly = content.replace(/https?:\/\/\S+/g, '').trim();
 
   // ข้อความมาตรฐานที่ผู้ใช้ต้องการ
-  // ★ 25 ก.ค. 69: ข้อความเดิมชวนให้ส่งลิงก์ แต่ระบบปิดรับลิงก์มาตั้งแต่ 16 ก.ค. (TEXT_ONLY_MODE)
-  //   → ผู้ใช้ส่งลิงก์ตามที่บอทบอก แล้วได้ error กลับทุกครั้ง
-  const standardReply =
+  const standardReply = 
     "สวัสดีครับ ผมเป็น 'ผู้ช่วยรวมไอจีดารา'\n" +
-    "หน้าที่ของผมคือปั้นข่าวไวรัลให้คุณครับ\n\n" +
-    "📌 **ตอนนี้รับเฉพาะ \"ข้อความล้วน\" เท่านั้น** (ยังไม่รับลิงก์และรูป)\n" +
-    "รบกวนสรุปเนื้อข่าวเป็นข้อความ แล้ววางมาได้เลยครับ — ยิ่งเนื้อครบ ข่าวยิ่งดี\n" +
-    "• ความยาวขั้นต่ำ ~50 ตัวอักษร\n" +
-    "• ห้ามมีลิงก์ปนมาในข้อความ (ระบบจะปฏิเสธทันที)\n\n" +
-    "ส่งแล้วผมจะคืนข่าวให้ 2 เวอร์ชัน ให้เลือกตัวที่ชอบไปใช้ได้เลยครับ";
+    "เป้าหมายหลักของผมคือการสร้างข่าวไวรัล ช่วยคุณครับ\n\n" +
+    "รบกวนส่งข้อมูลที่จะให้ผมทำข่าวมาตามรูปแบบนี้นะครับ:\n" +
+    "- ลิงก์ข่าว / เว็บไซต์\n" +
+    "- ลิงก์ YouTube / TikTok / Facebook(ยังใช้งานไม่ได้)\n" +
+    "- พิมพ์ข้อความข่าวแบบเต็มๆ (ขอความยาวสักหน่อยนะครับ)\n\n" +
+    "หลังจากผมส่งให้คุณจะได้รับข่าว 5 เวอร์ชั่น 5 แบบให้เลือกแบบที่ดีที่สุดไปใช้งานได้เลย";
 
   // 1. ตรวจสอบคำทักทาย หรือ คำสั่งเรียกดูวิธีใช้
   const greetings = ['สวัสดี', 'ดีครับ', 'ดีค่ะ', 'hello', 'hi', 'รบกวนหน่อย', 'ช่วยทำให้หน่อย', '!help'];
@@ -166,17 +160,8 @@ client.on('messageCreate', async (message) => {
     return message.reply(standardReply);
   }
 
-  // ★ 25 ก.ค. 69: ด่านลิงก์ — บอกผู้ใช้ตรงนี้เลย ไม่ต้องยิงเข้าคิวให้เสียเวลาแล้วเด้ง error กลับ
-  //   (ระบบฝั่งเซิร์ฟเวอร์ปฏิเสธทุกข้อความที่มีลิงก์ปน — TEXT_ONLY_MODE ตั้งแต่ 16 ก.ค.)
-  if (hasUrl) {
-    return message.reply(
-      '⚠️ ตอนนี้ระบบรับ **เฉพาะข้อความล้วน** ครับ (ยังไม่รับลิงก์)\n' +
-      'รบกวนสรุปเนื้อข่าวเป็นข้อความ ไม่ต้องมีลิงก์ปนมา แล้วส่งใหม่อีกครั้งนะครับ 🙏'
-    );
-  }
-
-  // 3. เงื่อนไขในการเริ่มประมวลผล: ข้อความยาวกว่า 50 ตัวอักษร
-  if (textOnly.length > 50) {
+  // 3. เงื่อนไขในการเริ่มประมวลผล: มีลิงก์ หรือ ข้อความยาวกว่า 50 ตัวอักษร
+  if (hasUrl || textOnly.length > 50) {
 
     // === DUPLICATE CHECK ===
     if (isDuplicate(content)) {
@@ -243,10 +228,7 @@ async function processNewsJob(job) {
     }
 
     // 1. Add to server queue
-    // ★ 25 ก.ค. 69: 15s สั้นเกินจริง — Vercel cold start + จองคิวบน Supabase ใช้เกิน 15 วินาทีได้
-    //   เคสจริง 14:57: บอทขึ้น "timeout of 15000ms exceeded" แต่ข่าวถูกสร้างจริงตอน 15:00
-    //   ผู้ใช้เห็นว่าล้มเลยส่งใหม่ → ได้ข่าวซ้ำ 2 ใบ (เห็นในสมุดเคส 07:39 กับ 07:42 UTC)
-    const addRes = await axios.post(queueUrl, payload, { headers, timeout: Number(process.env.QUEUE_ADD_TIMEOUT_MS) || 45000 });
+    const addRes = await axios.post(queueUrl, payload, { headers, timeout: 15000 });
     const addData = addRes.data;
 
     if (!addData.success) {
@@ -267,10 +249,6 @@ async function processNewsJob(job) {
     const initialPosition = addData.position;
     const queuesAhead = addData.queuesAhead || 0;
 
-    // ★ 25 ก.ค. 69: จำว่า "เข้าคิวสำเร็จแล้ว" ตรงนี้ — ไม่ใช่ตอนเช็ค (งานที่ล้มจะได้ส่งซ้ำได้ทันที)
-    markProcessed(content);
-    job._queuedOk = true; // ★ ผ่านด่านเข้าคิวแล้ว — error หลังจากนี้ไม่ใช่ "ส่งเข้าคิวไม่ทัน"
-
     // ★ ชนะเคลม → "เพิ่งโพสต์ ack ครั้งแรกตรงนี้" (มีแค่ instance เดียวที่มาถึงจุดนี้ต่อ 1 ข้อความ)
     const ackText = queuesAhead > 0
       ? `📋 รับทราบครับ! คิวลำดับที่ **${initialPosition}** — มี ${queuesAhead} คิวก่อนหน้า\nประมาณ ${queuesAhead * 3} นาที ⏳`
@@ -281,16 +259,13 @@ async function processNewsJob(job) {
     // 2. Poll for result
     const statusUrl = queueUrl.replace('/api/queue/add', '/api/queue/status');
     const workerUrl = queueUrl.replace('/api/queue/add', '/api/queue/worker');
-    // ★ 25 ก.ค. 69: 15 → 20 นาที — งานเดียวใช้ได้ถึง ~13 นาทีตามงบเวลาของ worker
-    //   ถ้ามีคิวรอข้างหน้าแค่ 1 งาน บอทเดิมหมดเวลารอก่อนงานจริงเสร็จ (ผู้ใช้เห็น "หมดเวลา" ทั้งที่ข่าวเสร็จแล้ว)
-    const maxPollTime = 20 * 60 * 1000;
+    const maxPollTime = 15 * 60 * 1000; // 15 minutes (pipeline ~8min + queue wait)
     const pollStartTime = Date.now();
     let lastStatus = '';
     let data = null;
     let workerRetriggerCount = 0;
 
     let notFoundCount = 0; // ★ Track consecutive 'job not found'
-    let transientErrCount = 0; // ★ 25 ก.ค. 69: นับ error ชั่วคราวระหว่าง poll (ไม่ทำให้งานล้ม)
 
     while (Date.now() - pollStartTime < maxPollTime) {
       await new Promise(r => setTimeout(r, 3000)); // poll every 3s
@@ -324,17 +299,14 @@ async function processNewsJob(job) {
           const elapsed = Math.round((Date.now() - pollStartTime) / 1000);
 
           // Pipeline steps with real model/API info and accurate timing
-          // ★ 25 ก.ค. 69: ปรับให้ตรงท่อจริง + โมเดลจริงหลังยกชุด (เดิมโชว์ Claude Sonnet 4 ซึ่งเลิกใช้แล้ว)
-          //   เวลาอ้างอิงจากเคสจริง: สกัด ~6s · แตกประเด็น ~40-120s · เขียน ~37s/เวอร์ชัน
           const PIPELINE_STEPS = [
-            { at: 0,   done: 4,   icon: '📥', label: 'รับงานเข้าคิว',                    detail: 'ตรวจข้อความ + กันส่งซ้ำ + จองคิว' },
-            { at: 4,   done: 16,  icon: '📰', label: 'สกัดเนื้อข่าว',                    detail: 'หัวข้อ + เนื้อ + แหล่ง + หมวด', model: 'gemini-3.6-flash' },
-            { at: 16,  done: 90,  icon: '🧩', label: 'แตกประเด็น + หามุมเล่า',           detail: 'DNA 7 มิติ + ข้อเท็จจริง + มุมข่าว', model: 'gpt-5.6-terra' },
-            { at: 90,  done: 150, icon: '🧬', label: 'วางอารมณ์ + ขุดประวัติคนในข่าว',   detail: 'พิมพ์เขียวอารมณ์ + Serper/Wikipedia/Tavily (ขนาน)', model: 'gpt-5.6-luna' },
-            { at: 150, done: 210, icon: '🏛️', label: 'เลือกพร้อมท์จากคลัง',              detail: 'จับคู่เทคนิคการเขียนให้เข้ากับข่าว', model: 'gpt-5.6-luna' },
-            { at: 210, done: 330, icon: '✍️', label: 'ค้นข้อมูลจริง + เขียนข่าว',        detail: 'หาข้อมูลประกอบต่อมุม แล้วเขียนตามเทคนิคในการ์ด', model: 'claude-opus-5' },
-            { at: 330, done: 400, icon: '🧽', label: 'เกลาสำนวน + ตรวจข้อเท็จจริง',      detail: 'เช็คชื่อ/ตัวเลข/ประโยคเพี้ยน', model: 'gpt-5.6-luna' },
-            { at: 400, done: 999, icon: '🚀', label: 'บันทึก + เก็บเข้าคลังข่าว',        detail: 'ลงสมุดเคส + จัดหมวด + ส่งผลกลับ' },
+            { at: 0,   done: 2,   icon: '🔍', label: 'ตรวจจับแหล่งข้อมูล',                     detail: 'ตรวจสอบประเภท URL และพลัตฟอร์ม',                                  model: null },
+            { at: 2,   done: 12,  icon: '📡', label: 'ดึงเนื้อหาจากเว็บ',                      detail: 'Firecrawl → Jina → Direct fetch',                                  model: null },
+            { at: 12,  done: 26,  icon: '📰', label: 'สกัดเนื้อข่าว (AI)',                     detail: 'สกัด newsTitle + newsBody + category',                             model: 'Gemini 2.0 Flash' },
+            { at: 26,  done: 68,  icon: '🔍', label: 'วิเคราะห์มุมข่าว (AI)',                  detail: 'core story + key points + possible angles',                       model: 'GPT-5.5' },
+            { at: 68,  done: 160, icon: '🧬', label: 'วาง Blueprint + ค้นหาข้อมูล Google (Parallel)', detail: 'Emotional Blueprint + Smart Research × 6 agents (Serper+Wikipedia)', model: 'GPT-5.5' },
+            { at: 160, done: 320, icon: '⚡', label: 'Classic + Enhanced (Parallel)',           detail: '2 Angles รันพร้อมกัน — Claude Sonnet 4 × 2',                      model: 'Claude Sonnet 4' },
+            { at: 320, done: 999, icon: '🚀', label: 'สรุปผลและบันทึก',                        detail: 'รวมผลลัพธ์ + บันทึกลงคลัง',                                        model: null },
           ];
 
           const stepLines = PIPELINE_STEPS.map(s => {
@@ -353,10 +325,10 @@ async function processNewsJob(job) {
 
           // หา step ปัจจุบัน
           const currentStep = PIPELINE_STEPS.slice().reverse().find(s => elapsed >= s.at);
-          const progressBar = buildProgressBar(elapsed, 480); // ★ 25 ก.ค. 69: 480s ตรงกับงบเวลาจริงของ worker (เดิม 600s)
+          const progressBar = buildProgressBar(elapsed, 600); // 600s = real pipeline max (~10 min)
 
           const progressMsg = [
-            `⚡ **ระบบทำข่าวอัตโนมัติ** กำลังประมวลผล... (\`${elapsed}s\`)`,
+            `⚡ **Auto Pipeline V2** กำลังประมวลผล... (\`${elapsed}s\`)`,
             progressBar,
             '',
             stepLines,
@@ -374,40 +346,16 @@ async function processNewsJob(job) {
           data = st.result;
           break;
         } else if (st.status === 'failed') {
-          // ★ 25 ก.ค. 69: ติดธงว่า "มาจากงานจริง" เพื่อไม่ให้ตัวกรอง error ด้านล่างกลืนทิ้ง
-          const _jobErr = new Error(st.error || 'Queue job failed');
-          _jobErr._fromJob = true;
-          throw _jobErr;
+          throw new Error(st.error || 'Queue job failed');
         }
       } catch (pollErr) {
-        // ★ 25 ก.ค. 69: เดิม axios โยน 404 ออกมาก่อนถึงตัวนับ notFoundCount → นับไม่ขึ้นสักครั้ง
-        //   งานที่ผลหายจริงเลยไม่มีใครแจ้ง ผู้ใช้ต้องนั่งรอจนครบเวลาเต็ม
-        if (pollErr.response?.status === 404) {
-          notFoundCount++;
-          console.warn(`[Discord Bot] Job ${jobId.slice(0, 8)} คืน 404 (${notFoundCount}/5) — สถานะล่าสุด: ${lastStatus}`);
-          if (notFoundCount >= 5 || (notFoundCount >= 3 && lastStatus === 'processing')) {
-            throw new Error('ประมวลผลเสร็จแล้วแต่ผลลัพธ์หายไป — รบกวนส่งเนื้อข่าวใหม่อีกครั้งครับ');
-          }
-          continue;
-        }
-        // 🔴 ★ 25 ก.ค. 69 (รอบแก้ที่ 2): เดิมกรองด้วยคำว่า "failed" ลอยๆ
-        //    แต่ axios เขียน error ของเซิร์ฟเวอร์สะดุดว่า "Request failed with status code 500"
-        //    → มีคำว่า failed → เด้งออกประกาศ "ล้ม" ทันที ทั้งที่ข่าวยังเขียนอยู่และเสร็จจริง
-        //    ระหว่างรอผล 135-174 วิ บอทถามสถานะ 45-58 รอบ พลาดรอบเดียวก็จบ = รากของเคส 14:57
-        //    ตอนนี้เด้งเฉพาะ error ที่มาจาก "งานจริง" (_fromJob) หรือผลหายถาวรเท่านั้น
-        //    เซิร์ฟเวอร์สะดุดชั่วคราว = รอรอบหน้า (ทนได้ถึง 8 รอบติด ~24 วินาที)
-        if (pollErr._fromJob || pollErr.message?.includes('ผลลัพธ์หายไป')) throw pollErr;
-        transientErrCount++;
-        if (transientErrCount >= 8) {
-          console.warn(`[Discord Bot] เซิร์ฟเวอร์ตอบผิดพลาดติดกัน ${transientErrCount} รอบ — ยังรอต่อจนครบเวลา`);
-          transientErrCount = 0;
-        }
-        console.warn(`[Discord Bot] Poll error (ข้าม รอรอบหน้า): ${pollErr.message}`);
+        if (pollErr.message?.includes('Queue job failed') || pollErr.message?.includes('failed') || pollErr.message?.includes('หายไป')) throw pollErr;
+        console.warn('[Discord Bot] Poll error:', pollErr.message);
       }
     }
 
     if (!data) {
-      throw new Error('หมดเวลารอคิว (20 นาที) กรุณาลองใหม่');
+      throw new Error('หมดเวลารอคิว (15 นาที) กรุณาลองใหม่');
     }
 
     if (!data.success) {
@@ -428,14 +376,7 @@ async function processNewsJob(job) {
     }
 
     const jobTime = ((Date.now() - jobStartTime) / 1000).toFixed(1);
-    // ★ 25 ก.ค. 69: แจ้งเมื่อ "เขียนเสร็จแต่เก็บเข้าคลังไม่สำเร็จ" — เดิมประกาศสำเร็จเสมอ
-    //   ผู้ใช้จึงไม่รู้ว่าข่าวชิ้นนี้ไม่ได้ถูกบันทึกไว้ในสมุดเคส
-    const _archiveSaved = data.data?.archiveSaved ?? data.archiveSaved;
-    const _archiveNote = data.data?.archiveNote || data.archiveNote || '';
-    const _archiveWarn = _archiveSaved === false
-      ? `\n⚠️ เขียนข่าวเสร็จแล้ว แต่ **บันทึกเข้าคลังไม่สำเร็จ**${_archiveNote ? ` (${String(_archiveNote).slice(0, 80)})` : ''} — กรุณาก๊อปเนื้อข่าวเก็บไว้ก่อนครับ`
-      : '';
-    await processingMsg.edit({ content: `✅ **สร้างข่าวสำเร็จ!** ${versionsToShow.length} เวอร์ชัน | ใช้เวลา ${jobTime}s\n📰 **${newsTitle.slice(0, 80)}**${logLink}${_archiveWarn}` });
+    await processingMsg.edit({ content: `✅ **สร้างข่าวสำเร็จ!** ${versionsToShow.length} เวอร์ชัน | ใช้เวลา ${jobTime}s\n📰 **${newsTitle.slice(0, 80)}**${logLink}` });
 
     // ดึง Research items — ลอง path ทั้งหมดที่เป็นไปได้
     const researchItems = data.data?.researchItems 
@@ -460,15 +401,12 @@ async function processNewsJob(job) {
         const isEnhanced = v._source === 'enhanced';
         const promptId = v.promptId || (data.data?.usedPromptInfo?.name ? 'Dynamic' : 'Unknown');
         
-        // ★ 25 ก.ค. 69: เดิมเอาชื่อ "แนวการเล่า" มาครอบวงเล็บไว้หน้าพาดหัวข่าว
-        //   → ผู้ใช้เห็น "[ดราม่าชีวิต: ลืมยาพ่นในวันที่อาการกำเริบ] เภสัชกรใจดี..." แล้วนึกว่าพาดหัวเพี้ยน
-        //   ย้ายป้ายแนวลงไปอยู่บรรทัดล่าง เหลือพาดหัวข่าวจริงล้วนๆ ด้านบน
-        const embedTitle = String(newsTitle).slice(0, 250);
+        const embedTitle = `[${versionLabel}] ${newsTitle}`.slice(0, 250);
         const embed = new EmbedBuilder()
           .setColor(isEnhanced ? '#10b981' : '#f91880')
           .setTitle(embedTitle)
           .setDescription((v.content || 'ไม่พบเนื้อหา').slice(0, 3800)) // ★ 18 ก.ค. 69: ถอดบรรทัดชวน !ปัง (ฟีเจอร์ถูกลบ — ไม่มีคนใช้)
-          .setFooter({ text: `แนวการเล่า: ${String(versionLabel).slice(0, 60)} | Pipeline: ${data.data?.detection?.pipelineLabel || data.detection?.pipelineLabel || 'Universal'} | PromptID: ${promptId} | เวลา: ${jobTime}s` });
+          .setFooter({ text: `Pipeline: ${data.data?.detection?.pipelineLabel || data.detection?.pipelineLabel || 'Universal'} | PromptID: ${promptId} | เวลา: ${jobTime}s` });
 
         return embed;
       });
@@ -525,22 +463,6 @@ async function processNewsJob(job) {
     if (_isDup) {
       console.log('[Bot] ⏭️ งานซ้ำ (409) — instance นี้เงียบสนิท (ไม่โพสต์ ack)');
       if (processingMsg) await processingMsg.delete().catch(() => {});
-      return;
-    }
-    // ★ 25 ก.ค. 69: ตอบช้าจนหมดเวลารอ ≠ งานล้ม — คำขออาจถึงเซิร์ฟเวอร์และเข้าคิวไปแล้ว
-    //   เดิมโชว์ "timeout of 15000ms exceeded" ดิบๆ ผู้ใช้นึกว่าล้มเลยส่งซ้ำ → ได้ข่าวซ้ำ 2 ใบ
-    //   ตอนนี้บอกตรงๆ ว่าอาจเข้าคิวแล้ว และห้ามส่งซ้ำทันที
-    //   ★ รอบแก้ที่ 2: จำกัดเฉพาะ "ยังไม่ผ่านด่านเข้าคิว" เท่านั้น
-    //     เดิมครอบกว้างเกิน — ถ้าเน็ตสะดุดตอนแก้ข้อความ Discord หลังข่าวเสร็จ จะแจ้งผิดว่า "งานอาจเข้าคิวแล้ว"
-    const _isTimeoutish = !job._queuedOk
-      && (error.code === 'ECONNABORTED' || /timeout of \d+ms|ETIMEDOUT|ECONNRESET|socket hang up/i.test(_eMsg));
-    if (_isTimeoutish) {
-      const waitText =
-        '⏳ เซิร์ฟเวอร์ตอบช้ากว่าปกติ — **งานอาจเข้าคิวไปแล้ว**\n' +
-        'รบกวนรอสัก 3-5 นาทีก่อนครับ ถ้าไม่มีข่าวส่งกลับมาค่อยส่งใหม่\n' +
-        '🔴 อย่าเพิ่งส่งซ้ำทันที ไม่งั้นจะได้ข่าวซ้ำ 2 ใบ';
-      if (processingMsg) await processingMsg.edit(waitText).catch(() => {});
-      else await message.reply(waitText).catch(() => {});
       return;
     }
     // error จริง — โพสต์เฉพาะถ้าเคยโพสต์ ack แล้ว (ชนะเคลม) · ตัวที่แพ้เคลมไม่ควรโผล่ error

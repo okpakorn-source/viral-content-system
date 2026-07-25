@@ -70,8 +70,8 @@ export default function ScanSummary({
         <div style={{ fontSize: 14.5, fontWeight: 800, color: UI.text, marginBottom: 10 }}>🧠 เลือกสมองวิจัย</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
           {[
-            { key: 'primary', name: 'gpt-5.6-terra', tag: '★ แนะนำ', desc: 'คุณภาพสูงสุด วิเคราะห์ลึก', color: UI.accent, price: '฿0.6/ใบ' },
-            { key: 'fast', name: 'gpt-5.6-luna', tag: 'ประหยัด', desc: 'เร็ว-ถูก คุณภาพลดลงบ้าง', color: UI.blue, price: '฿0.2/ใบ' },
+            { key: 'primary', name: 'gpt-5.5', tag: '★ แนะนำ', desc: 'คุณภาพสูงสุด วิเคราะห์ลึก', color: UI.accent, price: '฿1.1/ใบ' },
+            { key: 'fast', name: 'gpt-5.4-mini', tag: 'ประหยัด', desc: 'เร็ว-ถูก คุณภาพลดลงบ้าง', color: UI.blue, price: '฿0.12/ใบ' },
           ].map((m) => {
             const sel = model === m.key;
             return (

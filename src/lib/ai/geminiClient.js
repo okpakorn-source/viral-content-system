@@ -51,10 +51,6 @@ const VIDEO_FALLBACK_MODELS = [];
 //   เทสจริงผ่าน: ดูคลิป YouTube ยาว (input 208k tokens) จบใน 20.5 วิ ภาพ+เสียงถูกต้อง ขณะที่ 3.5-flash วันนั้นแน่น/timeout
 //   ถอยกลับได้ทันทีด้วย env GEMINI_VIDEO_MODEL=gemini-3.5-flash (ไม่ต้องแก้โค้ด) · ใช้เฉพาะสายวิดีโอ ไม่แตะ callGemini(text) ของระบบข่าว
 const VIDEO_MODEL = process.env.GEMINI_VIDEO_MODEL || 'gemini-3.6-flash';
-// ★ 25 ก.ค. 69 (เจ้าของสั่ง): สายข้อความ/ภาพของระบบข่าว gemini-3.5-flash → gemini-3.6-flash
-//   เทสจริงวันนั้น (สกัดข่าวชุดเดียวกัน): 3.6-flash 5.7 วิ · 3.5-flash 45.5 วิ = เร็วกว่า ~8 เท่า ผลถูกต้องเหมือนกัน
-//   ถอยกลับได้ทันทีด้วย env GEMINI_TEXT_MODEL=gemini-3.5-flash (ไม่ต้องแก้โค้ด)
-const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash';
 // อาการ "แน่น/ชั่วคราว" (ควรสลับโมเดล/ลองใหม่) — แยกจาก "ดูคลิปไม่ได้/parse พัง" (ไม่สลับ)
 const _isOverload = (e) => {
   const status = Number(e?.status) || 0;
@@ -66,7 +62,7 @@ const _isOverload = (e) => {
  * เรียก Gemini — ส่ง prompt + response เป็น JSON
  * เหมาะสำหรับ: extraction, summarization, fast tasks
  */
-export async function callGemini({ prompt, model = GEMINI_TEXT_MODEL, temperature = 0.3, maxTokens = 4000 }) {
+export async function callGemini({ prompt, model = 'gemini-3.5-flash', temperature = 0.3, maxTokens = 4000 }) {
   const client = getGeminiClient();
   if (!client) throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า — ไปตั้งค่าที่ Settings');
 
@@ -84,15 +80,15 @@ export async function callGemini({ prompt, model = GEMINI_TEXT_MODEL, temperatur
 ใช้ข้อมูลจากเนื้อข่าวที่ให้มาเท่านั้น ห้ามแต่งเรื่องเพิ่ม
 
 === FACEBOOK SAFETY RULES ===
-🔴 ถอดกฎแทนคำ/แบนคำออกแล้ว (25 ก.ค. 69 — เจ้าของสั่ง) เขียนตามข้อเท็จจริงตรงๆ ไม่ต้องเลี่ยงคำ
-คงไว้ข้อเดียว: สถานะเป็น/ตายของบุคคลต้องตรงต้นฉบับ 100% และห้ามใส่ข้อมูลที่ไม่มีในข่าว
+ห้ามใช้คำเสี่ยง: ฆ่า, ศพ, สยอง, โหด, เลือด, ข่มขืน, ผูกคอ, ดับสลด, บาดเจ็บสาหัส, สะเก็ดระเบิด, ระเบิด, สนามรบ, คลิปหลุด, อาวุธ, กระสุน, เลือดสาด, ฆ่าตัวตาย
+ใช้แทน: จากไป, ร่างผู้เสียหาย, น่าตกใจ, รุนแรง, ร่องรอยเหตุการณ์, ล่วงละเมิดทางเพศ, จากไปอย่างน่าเศร้า, ได้รับบาดเจ็บหนัก, เหตุการณ์ไม่คาดฝัน, พื้นที่ปฏิบัติหน้าที่
+⚠️ "เสียชีวิต" และ "จากไป" เป็นคำมาตรฐานที่ปลอดภัย ใช้ตรงๆ ได้เสมอ — สถานะเป็น/ตายของบุคคลต้องตรงต้นฉบับ 100% ห้ามเลี่ยงคำจนข้อเท็จจริงการตายหายไปจากผลสกัด
+(16 ก.ค. 69: ถอด "เสียชีวิต" ออกจากลิสต์ห้าม — บทเรียนเคส #01641 เดิมแบนแล้วตัวเขียนละข้อเท็จจริงการตายทั้งเรื่อง แก้ครบแล้วฝั่ง Claude/OpenAI แต่ตกค้างที่นี่)
+เปลี่ยน "ความแรง" → "อารมณ์" เน้น emotional storytelling
 === จบ SAFETY RULES ===`,
   });
 
-  // ★ 25 ก.ค. 69 (บั๊กจริง): SDK รับ requestOptions เป็น "อาร์กิวเมนต์ที่สอง" ตรงๆ (generateContent(request, {timeout}))
-  //   ของเดิมห่อซ้ำเป็น { requestOptions: { timeout } } → SDK มองไม่เห็น = ไม่มีนาฬิกาเลย
-  //   ผลคือ Gemini ค้างเมื่อไหร่ ระบบรอไม่จบและไม่เคยสลับไป GPT สำรองตามแผน
-  const result = await genModel.generateContent(prompt, { timeout: 15000 });
+  const result = await genModel.generateContent(prompt, { requestOptions: { timeout: 15000 } });
   const content = result.response?.text();
   const usageMetadata = result.response?.usageMetadata;
   const inputTokens = usageMetadata?.promptTokenCount || 0;
@@ -167,7 +163,7 @@ export async function callGeminiVideo({ prompt, youtubeUrl, model = VIDEO_MODEL,
       return await _withGeminiRetry(async () => {
         const result = await genModel.generateContent({
           contents: [{ role: 'user', parts: [{ fileData: { fileUri: youtubeUrl } }, { text: prompt }] }],
-        }, { timeout: 280000 }); // ★ 25 ก.ค. 69: แก้รูปแบบให้ SDK เห็นจริง (เดิมห่อ requestOptions ซ้ำ = ไม่มี timeout)
+        }, { requestOptions: { timeout: 280000 } });
         const content = result.response?.text();
         const um = result.response?.usageMetadata;
         console.log(`[GeminiVideo] OK (${m}): tokens input=${um?.promptTokenCount || 0}, output=${um?.candidatesTokenCount || 0}`);
@@ -305,7 +301,7 @@ export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'vid
               { fileData: { fileUri: file.uri, mimeType: file.mimeType } },
               { text: prompt },
             ] }],
-          }, { timeout: 280000 }); // ★ 25 ก.ค. 69: แก้รูปแบบให้ SDK เห็นจริง (เดิมห่อ requestOptions ซ้ำ = ไม่มี timeout)
+          }, { requestOptions: { timeout: 280000 } });
           const content = result.response?.text();
           const um = result.response?.usageMetadata;
           console.log(`[GeminiVideoFile] OK (${m}): tokens input=${um?.promptTokenCount || 0}, output=${um?.candidatesTokenCount || 0}`);
@@ -341,7 +337,7 @@ export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'vid
  * เรียก Gemini Vision — ส่งภาพ (Base64) เข้าไปวิเคราะห์
  * images: [{ data: "base64...", mimeType: "image/jpeg" }, ...]
  */
-export async function callGeminiVision({ prompt, images, model = GEMINI_TEXT_MODEL, temperature = 0.2, maxTokens = 4000 }) {
+export async function callGeminiVision({ prompt, images, model = 'gemini-3.5-flash', temperature = 0.2, maxTokens = 4000 }) {
   const client = getGeminiClient();
   if (!client) throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า');
 
@@ -366,7 +362,7 @@ export async function callGeminiVision({ prompt, images, model = GEMINI_TEXT_MOD
     }))
   ];
 
-  const result = await genModel.generateContent(promptParts, { timeout: 25000 }); // ★ 25 ก.ค. 69: แก้รูปแบบให้ SDK เห็นจริง
+  const result = await genModel.generateContent(promptParts, { requestOptions: { timeout: 25000 } });
   const content = result.response?.text();
   const usageMetadata = result.response?.usageMetadata;
   const inputTokens = usageMetadata?.promptTokenCount || 0;

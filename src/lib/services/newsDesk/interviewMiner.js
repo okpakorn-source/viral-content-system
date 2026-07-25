@@ -76,7 +76,7 @@ ${caption ? `แคปชัน/ชื่อคลิป: ${caption.slice(0, 300
 "goldenMoments":[{"quote":"คำพูด/ประเด็นเด่น","why":"ทำไมแชร์ได้"}],
 "captionSkeleton":"เปิด: ... → กลาง: ... → จบ: ...",
 "angles":["มุมเล่า 1","มุมเล่า 2"]}`,
-    model: 'gpt-5.6-terra',
+    model: 'gpt-5.5',
     temperature: 0.2,
     maxTokens: 8000,
   });

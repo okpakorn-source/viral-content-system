@@ -6,7 +6,6 @@
  *  ★ ไม่แตะ openai.js/safetyFilter.js — แค่เรียก client ที่ export ไว้ (getOpenAIClient) แล้วไม่ run sanitize
  */
 import { getOpenAIClient } from '@/lib/ai/openai';
-import { MODEL_FALLBACKS, MODEL_HEAVY_FALLBACK, clampMaxTokens } from '@/lib/ai/modelConfig';
 
 const SYS = `คุณเป็นบรรณาธิการข่าวไทยมืออาชีพ ตอบเป็น JSON ที่ถูกต้องเท่านั้น ตาม schema ที่ระบุใน prompt
 กฎเหล็ก: ใช้เฉพาะข้อเท็จจริงจากข้อมูลที่ให้มา ห้ามแต่งเติม/บิดเบือน · ชื่อคน ตัวเลข สถานที่ คำพูด ต้องตรงต้นฉบับ 100% ห้ามเปลี่ยน/ย่อ/ตัด/แทนคำในชื่อเฉพาะ`;
@@ -15,9 +14,11 @@ export async function callRawJSON({ prompt, model, temperature = 0.5, maxTokens 
   const client = getOpenAIClient();
   if (!client) throw new Error('OPENAI_API_KEY ไม่ได้ตั้งค่า');
 
-  // ★ 25 ก.ค. 69: ไม้สองอ่านจากแผนที่กลาง (modelConfig) เหมือน callAI — เดิม hardcode gpt-4o ที่ตกรุ่นแล้ว
-  const tryModels = [model, ...(MODEL_FALLBACKS[model] || [MODEL_HEAVY_FALLBACK])]
-    .filter((m, i, a) => m && a.indexOf(m) === i);
+  // fallback model เหมือน callAI: gpt-5.5→gpt-4o, gpt-5.4-mini→gpt-4o-mini
+  const tryModels = [model];
+  if (model === 'gpt-5.5') tryModels.push('gpt-4o');
+  else if (model === 'gpt-5.4-mini') tryModels.push('gpt-4o-mini');
+  else if (model !== 'gpt-4o') tryModels.push('gpt-4o');
 
   let lastErr = null;
   for (const m of tryModels) {
@@ -27,7 +28,7 @@ export async function callRawJSON({ prompt, model, temperature = 0.5, maxTokens 
         model: m,
         messages: [{ role: 'system', content: SYS }, { role: 'user', content: prompt }],
         ...(isNew ? {} : { temperature }),          // gpt-5.x ไม่รับ temperature ≠ 1
-        ...(isNew ? { max_completion_tokens: clampMaxTokens(m, maxTokens) } : { max_tokens: clampMaxTokens(m, maxTokens) }),
+        ...(isNew ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
         response_format: { type: 'json_object' },
       });
       const content = resp.choices[0]?.message?.content;

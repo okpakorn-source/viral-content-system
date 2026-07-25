@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createStore } from '@/lib/persistStore';
 import { createLogger } from '@/lib/logger';
-import { checkApiAuth } from '@/lib/apiAuth';
 
 const logger = createLogger('QUEUE_CLEAR');
 
@@ -23,14 +22,6 @@ export async function POST(req) {
       const body = await req.json();
       mode = body.mode || 'stale';
     } catch { /* no body = default 'stale' */ }
-
-    // ★ 25 ก.ค. 69: เดิมประตูนี้ไม่มีด่านตรวจสิทธิ์เลย — ใครยิงมาก็ลบงานทั้งกระดานได้ (รวมงานที่กำลังเขียนอยู่)
-    //   โหมด 'all' = ล้างทุกอย่าง → บังคับต้องมีกุญแจจริงเท่านั้น (หน้าเว็บอย่างเดียวไม่พอ)
-    const auth = checkApiAuth(req, { requireKey: mode === 'all' });
-    if (!auth.ok) {
-      logger.warn(`[Queue Clear] ⛔ ปฏิเสธคำขอ (${auth.reason}, mode=${mode})`);
-      return NextResponse.json({ success: false, error: 'Unauthorized', errorType: 'UNAUTHORIZED' }, { status: 401 });
-    }
 
     const store = createStore('job_queue');
     const allJobs = await store.getAll();

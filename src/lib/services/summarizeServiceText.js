@@ -1,5 +1,5 @@
 import { callAI } from '@/lib/ai/openai';
-import { MODEL_NEWS_ANALYSIS, MODEL_BREAKDOWN, MODEL_FAST_CHEAP, MODEL_HEAVY_FALLBACK, MODEL_FINAL_QA } from '@/lib/ai/modelConfig';
+import { MODEL_NEWS_ANALYSIS, MODEL_BREAKDOWN, MODEL_FAST_CHEAP, MODEL_HEAVY_FALLBACK } from '@/lib/ai/modelConfig';
 import { withTimeoutSignal } from '@/lib/utils/withTimeout'; // ★ 16 ก.ค. 69: withTimeout เดิมไม่ถูกใช้ในไฟล์นี้แล้ว (ทุกจุดย้ายไป withTimeoutSignal)
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStoreText';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
@@ -14,7 +14,7 @@ import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT
 
 // ★ 16 ก.ค. 69 (B4): sync กับสาย URL (summarizeService.js:15) — เดิม hardcode 'gemini-2.5-pro' ตกรุ่น 2 เวอร์ชัน
 //   ที่ทีมเลิกใช้เอง (มั่ว/แต่งเรื่อง) ทำ STAGE 2.5 (AI re-rank พร้อมท์) ของสายข้อความตายเงียบ
-const MODEL_GEMINI_PRO = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash'; // ★ 25 ก.ค. 69: 3.5 → 3.6 (เร็วกว่า ~8 เท่าจากเทสจริง)
+const MODEL_GEMINI_PRO = 'gemini-3.5-flash';
 
 // ═══════════════════════════════════════════════════════════
 // 🔍 POST-PROCESSING QUALITY FILTERS
@@ -30,88 +30,6 @@ const MODEL_GEMINI_PRO = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash'; //
  * - Auto-Score: ให้คะแนนแต่ละเวอร์ชัน
  * - Diversity Check: เวอร์ชันต้องไม่ซ้ำกันเกินไป
  */
-/**
- * ★ 25 ก.ค. 69 — บังคับให้เนื้อข่าวเป็น N ย่อหน้าเป๊ะ (ค่าเริ่มต้น 3)
- * เจ้าของสั่ง: "ขอเป็น 3 ย่อหน้า ไม่กระจายบรรทัดเยอะหรือมั่ว"
- * วิธี: เก็บย่อหน้าเปิดกับย่อหน้าปิดไว้ แล้วรวบย่อหน้าตรงกลางทั้งหมดเป็นก้อนเดียว
- *       (ไม่ตัดเนื้อทิ้งแม้แต่คำเดียว — แค่เปลี่ยนที่ขึ้นย่อหน้า)
- */
-function enforceParagraphs(content, target = 3, vIndex = 0) {
-  if (process.env.PARAGRAPH_ENFORCE === 'off') return content;
-  if (!content || target < 2) return content;
-
-  // เก็บกวาดบรรทัดก่อน: ตัดช่องว่างท้ายบรรทัด · บรรทัดว่างซ้อนหลายชั้น → เหลือชั้นเดียว
-  let text = String(content)
-    .replace(/\r\n/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-
-  // ★ 25 ก.ค. 69 (รอบแก้ที่ 2): ห้ามรวบเนื้อที่ตั้งใจแยกบรรทัด (รายการ bullet / เลขข้อ / บทสนทนา)
-  //   ผลตรวจชี้ว่าถ้ารวบ จะเอาหัวข้อย่อยมาต่อกันเป็นพรืดจนอ่านไม่รู้เรื่อง
-  //   (ความเสี่ยงสูงขึ้นตั้งแต่เริ่มส่ง "โพสต์ครู" ที่ขึ้นบรรทัดถี่ให้ตัวเขียนดู)
-  const _lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  const _listish = _lines.filter(l => /^([-•▪–]|\d+[.)]|[►▶✦])\s/.test(l)).length;
-  if (_listish >= 2) {
-    console.log(`[Paragraph] ⏭️ ข้ามการรวบ — เนื้อมีรายการแยกบรรทัด ${_listish} บรรทัด (รวบแล้วจะอ่านไม่รู้เรื่อง)`);
-    return text;
-  }
-
-  let paras = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-
-  // บรรทัดเดี่ยวๆ ที่ไม่ได้เว้นย่อหน้า (AI บางรอบขึ้นบรรทัดเดียว) → นับเป็นย่อหน้าด้วย
-  if (paras.length < target) {
-    const bySingle = text.split(/\n+/).map(p => p.trim()).filter(Boolean);
-    if (bySingle.length > paras.length) paras = bySingle;
-  }
-
-  if (paras.length === target) return paras.join('\n\n');
-  if (paras.length < target) return paras.join('\n\n'); // สั้นกว่าเป้า = ปล่อยไว้ ดีกว่าหั่นกลางความ
-
-  // 🔴 ★ 25 ก.ค. 69 (รอบแก้ที่ 2 — เจ้าของแจ้ง "ความลื่นของเนื้อหาหายไป"):
-  //    วิธีเดิม = เปิด 1 + รวบ "ทุกย่อหน้ากลาง" เป็นก้อนเดียว + ปิด 1
-  //    ผลจริงที่วัดได้: ย่อหน้ากลางบวมเป็น 906-932 ตัวอักษร ขณะที่หัว/ท้ายเหลือ 81-206
-  //    (เทียบข่าวเช้าก่อนแก้: 76/300/283/346/189/41 = อ่านลื่นกว่ามาก) → กำแพงตัวอักษรกลางเรื่อง
-  //    วิธีใหม่: แบ่งเป็น N กลุ่มที่ "ขนาดใกล้เคียงกัน" โดยไม่ตัดกลางย่อหน้าเดิม
-  const total = paras.reduce((s, p) => s + p.length, 0);
-  const idealSize = total / target;
-  const groups = [];
-  let bucket = [];
-  let bucketLen = 0;
-  for (let i = 0; i < paras.length; i++) {
-    const p = paras[i];
-    const slotsLeft = target - groups.length;
-    const parasLeft = paras.length - i;
-    // เหลือย่อหน้าพอดีกับช่องที่เหลือ → ปิดกลุ่มทันที ไม่งั้นช่องท้ายจะว่าง
-    if (bucket.length && parasLeft <= slotsLeft - 1) {
-      groups.push(bucket.join(' '));
-      bucket = [];
-      bucketLen = 0;
-    }
-    const wouldBe = bucketLen + (bucketLen ? 1 : 0) + p.length;
-    // ถ้าเติมแล้วห่างจากขนาดในอุดมคติมากกว่าเดิม และยังมีช่องเหลือ → ปิดกลุ่มก่อน
-    if (bucket.length && groups.length < target - 1 && Math.abs(wouldBe - idealSize) > Math.abs(bucketLen - idealSize)) {
-      groups.push(bucket.join(' '));
-      bucket = [p];
-      bucketLen = p.length;
-    } else {
-      bucket.push(p);
-      bucketLen = wouldBe;
-    }
-  }
-  if (bucket.length) groups.push(bucket.join(' '));
-
-  // เผื่อกรณีจับกลุ่มได้เกินเป้า (ไม่ควรเกิด) — รวบส่วนเกินเข้ากลุ่มสุดท้าย
-  while (groups.length > target) {
-    const last = groups.pop();
-    groups[groups.length - 1] = `${groups[groups.length - 1]} ${last}`;
-  }
-
-  const sizes = groups.map(g => g.length);
-  console.log(`[Paragraph] 📐 V${vIndex}: ${paras.length} ย่อหน้า → จัดใหม่เป็น ${groups.length} ย่อหน้าขนาดใกล้เคียงกัน (${sizes.join('/')}) — ไม่ตัดเนื้อ`);
-  return groups.join('\n\n');
-}
-
 function postProcessVersions(versions, sourceText, newsTitle, lenCfg = null) {
   if (!versions || !Array.isArray(versions) || versions.length === 0) return versions;
 
@@ -140,12 +58,6 @@ function postProcessVersions(versions, sourceText, newsTitle, lenCfg = null) {
       .replace(/\s+(แต่|และ|หรือ|เพราะ|ซึ่ง|โดยที่|โดย|จึง|ทั้งที่|เพื่อที่|เพื่อ|แล้วก็|ก่อนที่)\s*(\n\n)/g, '$2')
       .replace(/\s+(แต่|และ|หรือ|เพราะ|ซึ่ง|โดยที่|โดย|จึง|ทั้งที่|เพื่อที่|เพื่อ|แล้วก็|ก่อนที่)\s*$/g, '');
 
-    // 2.7 🔴 ★ 25 ก.ค. 69 (เจ้าของสั่ง): ผลลัพธ์ต้องเป็น 3 ย่อหน้าเสมอ ไม่กระจายบรรทัดมั่ว
-    //     คำสั่งใน prompt อย่างเดียวเอาไม่อยู่ (เทสจริง: การ์ดสั่ง 3 แต่ออกมา 5 ย่อหน้า)
-    //     → บังคับด้วยโค้ดเป็นด่านสุดท้าย: ย่อหน้าแรก = เปิด · ตรงกลางรวบเป็นก้อนเดียว · ย่อหน้าท้าย = ปิด
-    //     ปรับจำนวน: env NEWS_PARAGRAPHS · ปิดคืน: env PARAGRAPH_ENFORCE=off
-    content = enforceParagraphs(content, Number(process.env.NEWS_PARAGRAPHS) || 3, idx + 1);
-
     // 3. Spell Check — ชื่อเฉพาะต้องตรงต้นฉบับ
     content = fixProperNouns(content, sourceNames);
 
@@ -156,38 +68,6 @@ function postProcessVersions(versions, sourceText, newsTitle, lenCfg = null) {
     const missingNums = keyNumbers.filter(k => !content.includes(k.num));
     if (missingNums.length > 0) {
       console.log(`[Quality] ⚠️ V${idx + 1} ตัวเลขหัวใจของข่าวหายจากเนื้อหา: ${missingNums.map(k => k.num + ' ' + k.unit).join(', ')}`);
-    }
-
-    // 4.55 ★ 25 ก.ค. 69: ด่านตรวจ "เลขงอก" — ตัวเลขที่โผล่ในเนื้อแต่ไม่มีในข่าวต้นฉบับ
-    //      เดิมมีแต่ด่านตรวจ "เลขหาย" ไม่มีด่านตรวจเลขงอก → เคส 02480 เขียน "วัย 44 ปี" / "ทายาทรุ่น 3"
-    //      ทั้งที่ต้นฉบับไม่มี · ไม่ลบให้อัตโนมัติ (บางตัวมาจากผลค้นข้อมูลซึ่งอาจถูก) แต่ต้องติดธงให้คนเห็น
-    const addedNums = (() => {
-      if (!sourceText) return [];
-      const src = String(sourceText);
-      const out = [];
-      const re = /(\d[\d,]*(?:\.\d+)?)\s*(ปี|บาท|คน|ครั้ง|รุ่น|ชั้น|เดือน|วัน|กิโล|เมตร|ล้าน|แสน|หมื่น|พัน)/g;
-      let m;
-      while ((m = re.exec(content)) !== null) {
-        const raw = m[1];
-        const plain = raw.replace(/,/g, '');
-        if (src.includes(raw) || src.includes(plain)) continue;
-        const tag = `${raw} ${m[2]}`;
-        if (!out.includes(tag)) out.push(tag);
-      }
-      return out;
-    })();
-    if (addedNums.length > 0) {
-      console.log(`[Quality] 🚨 V${idx + 1} พบตัวเลขที่ "ไม่มีในข่าวต้นฉบับ": ${addedNums.join(', ')} — ต้องตรวจก่อนโพสต์`);
-    }
-
-    // 4.55 ★ 25 ก.ค. 69: อัญประกาศว่างเปล่า = คำพูดของแหล่งข่าวหายทั้งประโยค
-    //      เจอจริงในเคส 02481 (1 ใน 10 เวอร์ชัน) — เดิมไม่มีด่านไหนจับเลย ถ้าคนรีบกดเลือกก็หลุดขึ้นเพจ
-    //      ทำความสะอาดให้: ลบคู่อัญประกาศที่ไม่มีข้อความข้างใน + ติดธงไว้ให้คนตรวจเห็น
-    const _emptyQuote = /[“"']\s*[”"']/g;
-    const _emptyQuoteCount = (content.match(_emptyQuote) || []).length;
-    if (_emptyQuoteCount > 0) {
-      content = content.replace(_emptyQuote, '').replace(/\s{2,}/g, ' ').replace(/\s+([,.!?])/g, '$1');
-      console.log(`[Quality] ⚠️ V${idx + 1} พบอัญประกาศว่างเปล่า ${_emptyQuoteCount} จุด (คำพูดหาย) — ลบออกแล้วและติดธงไว้`);
     }
 
     // 4.6 ★ จับเปิดด้วยคำต้องห้ามที่หลุด prompt (GEN-181 "ลองนึกถึงพิซซ่า...")
@@ -204,8 +84,6 @@ function postProcessVersions(versions, sourceText, newsTitle, lenCfg = null) {
       _qualityScore: qualityScore,
       _autoScore: calculateAutoScore(content, sourceText, lenCfg),
       ...(missingNums.length > 0 ? { _missingKeyFacts: missingNums.map(k => k.num + ' ' + k.unit) } : {}),
-      ...(_emptyQuoteCount > 0 ? { _emptyQuotesFixed: _emptyQuoteCount } : {}),
-      ...(addedNums.length > 0 ? { _unverifiedNumbers: addedNums } : {}),
     };
   });
 
@@ -432,19 +310,13 @@ function calculateAutoScore(content, sourceText, lenCfg = null) {
   else if (len < minCh * 0.5 || len > maxCh * 1.5) score -= 10;
   
   // คะแนนโครงสร้าง (มีย่อหน้า)
-  // ★ 25 ก.ค. 69: เพดานเดิมตายตัวที่ 5 ย่อหน้า — โหมด long สั่งให้เขียน 6-8 ย่อหน้า
-  //   ข่าวที่ทำตามคำสั่งเป๊ะจึงโดนหักคะแนนโครงสร้าง 10 คะแนนฟรีๆ ตอนนี้ผูกกับช่วงที่สั่งจริง
   const paragraphs = content.split('\n\n').filter(p => p.trim()).length;
-  const _paraRange = String(lenCfg?.paragraphs || '').match(/(\d)(?:\s*-\s*(\d))?/);
-  const _paraMin = _paraRange ? Number(_paraRange[1]) : 2;
-  const _paraMax = _paraRange ? Number(_paraRange[2] || _paraRange[1]) : 5;
-  if (paragraphs >= Math.max(2, _paraMin - 1) && paragraphs <= _paraMax + 1) score += 10;
+  if (paragraphs >= 2 && paragraphs <= 5) score += 10;
   
   // คะแนน Hook (เปิดเรื่องแรง)
   const firstLine = content.split('\n')[0] || '';
   if (firstLine.length >= 20 && firstLine.length <= 100) score += 5;
-  // ★ 25 ก.ค. 69 (ข้อ 2/5): ถอดโบนัส +5 "เปิดด้วย quote" — ตัวให้คะแนนเคยดันให้เปิดด้วยคำพูด
-  //   แล้วประโยคถัดไปตกร่อง "นี่คือคำพูดของ..." (วัดจริง 4/19 เวอร์ชัน) · วิธีเปิดให้การ์ดกำหนดเอง
+  if (/["\u201C\u201D]/.test(firstLine)) score += 5; // เปิดด้วย quote
   if (/[?ฟ]/.test(firstLine)) score += 3; // เปิดด้วยคำถาม
   
   // คะแนนรักษาข้อเท็จจริง (ตัวเลขจากต้นฉบับปรากฏในเนื้อหา)
@@ -862,13 +734,8 @@ export async function performSummarize({
     console.log(`[Analyze-Service] newsTitle: "${(actualNewsTitle || '').slice(0,80)}", textLen: ${actualNewsBody?.length}`);
 
     let smartPrompt = presetPrompt || null;
-    // ★ 25 ก.ค. 69 (แก้ป้ายโกหก): เดิมพร้อมท์สำรอง Built-in V12 ถูกติดป้ายว่า "library" ทั้งที่ไม่ได้มาจากคลัง
-    //   → ตรวจย้อนหลังไม่มีทางรู้ว่างานไหนใช้ของจริงจากคลัง งานไหนตกไปใช้ตัวสำรอง
-    const _isBuiltinFallback = !!(presetPrompt && (presetPrompt._isFallback || presetPrompt.id === 'fallback_builtin'));
-    let promptSource = presetPrompt ? (_isBuiltinFallback ? 'builtin-fallback' : 'library') : 'preset';
-    let promptMatchReason = presetPrompt
-      ? (_isBuiltinFallback ? '📦 ใช้พร้อมท์สำรอง Built-in V12 (ไม่มีตัวที่ match ในคลัง)' : `🏛️ Pre-selected: "${presetPrompt.promptName || 'Library Prompt'}"`)
-      : '';
+    let promptSource = presetPrompt ? 'library' : 'preset';
+    let promptMatchReason = presetPrompt ? `🏛️ Pre-selected: "${presetPrompt.promptName || 'Library Prompt'}"` : '';
     let newsTypeDetected = '';
     let newsAnalysis = null;
     let top10PromptScores = [];
@@ -879,10 +746,6 @@ export async function performSummarize({
     if (presetPrompt) {
       if (typeof presetPrompt._matchScore === 'number') selectedPromptScore = presetPrompt._matchScore;
       matchType = presetPrompt._matchType || 'PRE_SELECTED';
-      // ★ 25 ก.ค. 69: ผลจากด่านอ่านเนื้อจริงติดมากับการ์ดแล้ว — เขียนลงเหตุผลให้เห็นในสมุดเคส
-      if (typeof presetPrompt._semanticFit === 'number') {
-        promptMatchReason += ` | 🤖 เข้ากันจริง ${presetPrompt._semanticFit}/100${presetPrompt._semanticReason ? ` — ${presetPrompt._semanticReason}` : ''}`;
-      }
     }
     let matchedDimensions = [];
     let whyFallbackUsed = '';
@@ -1017,13 +880,8 @@ export async function performSummarize({
           
           try {
             // ★ DNA v3.3: สูตรให้คะแนนย้ายไปสมองกลาง promptMatcher.js + ขยายแท็กอารมณ์เป็นมุมบวกอัตโนมัติ
-            const { scoreLibraryPrompts, applyDiversityPenalty, pickAmongTies } = await import('@/lib/services/promptMatcher');
-            // ★ 25 ก.ค. 69: หลังให้คะแนนแล้ว หักคะแนนใบที่ผูกขาดงาน/เพิ่งใช้ ก่อนตัดสิน
-            //   (เดิมเรียงคะแนนดิบล้วน → ใบป้ายกว้างชนะทุกข่าว ใช้ไป 411 ครั้ง ส่วนอีก 6 ใบไม่เคยออกงาน)
-            const scoredPrompts = applyDiversityPenalty(
-              scoreLibraryPrompts(newsAnalysis, validPrompts),
-              validPrompts
-            );
+            const { scoreLibraryPrompts } = await import('@/lib/services/promptMatcher');
+            const scoredPrompts = scoreLibraryPrompts(newsAnalysis, validPrompts);
 
             top10PromptScores = scoredPrompts.slice(0, 10).map(s => {
               const pr = validPrompts[s.index];
@@ -1037,23 +895,15 @@ export async function performSummarize({
                 reason: `Cluster Score: ${s.score.toFixed(1)}`,
                 // ★ 16 ก.ค. 69 (B5): แนบโทน+เนื้อย่อจริง — ให้ STAGE 2.5 ตัดสินจากเนื้อ ไม่ใช่แค่ชื่อ
                 tone: pr.tone || (pr.emotionalTags || []).join(',') || '',
-                // ★ 25 ก.ค. 69: 180 → 700 ตัวอักษร — 180 ตัวเห็นแค่ประโยคเกริ่น ตัดสินไม่ได้ว่าการ์ดสั่งเล่าฉากแบบไหน
-                excerpt: String(pr.promptText || '').replace(/\s+/g, ' ').slice(0, 700),
+                excerpt: String(pr.promptText || '').replace(/\s+/g, ' ').slice(0, 180),
               };
             });
 
-            // ★ 25 ก.ค. 69: คะแนนใกล้กัน (ห่างไม่เกิน 6) = สุ่มถ่วงน้ำหนักใน 3 อันดับแรก
-            //   เดิม scoredPrompts[0] ตายตัว → ข่าวแนวเดียวกันได้การ์ดใบเดิมซ้ำทุกครั้ง
-            const winner = pickAmongTies(scoredPrompts);
-            if (winner && scoredPrompts[0] && winner.index !== scoredPrompts[0].index) {
-              console.log(`[🎲 TIE-BREAK] คะแนนใกล้กัน → สุ่มได้ "${validPrompts[winner.index]?.promptName}" (${winner.score.toFixed(1)}) แทนอันดับ 1 "${validPrompts[scoredPrompts[0].index]?.promptName}" (${scoredPrompts[0].score.toFixed(1)})`);
-            }
-
+            const winner = scoredPrompts[0];
+            
             if (winner) {
               const selectedIndex = winner.index;
-              // ★ 25 ก.ค. 69: ตัดเกรดด้วย "คะแนนดิบ" เสมอ — คะแนนที่ถูกหักเพื่อกันหยิบซ้ำ
-              //   ไม่ใช่สัญญาณว่าจับคู่แย่ลง ถ้าใช้คะแนนหลังหักจะกลายเป็น BORROWED ผิดๆ
-              selectedPromptScore = (typeof winner.rawScore === 'number') ? winner.rawScore : winner.score;
+              selectedPromptScore = winner.score;
               matchedDimensions = winner.dims;
               const coreDims = matchedDimensions.filter(d => !d.startsWith('boost'));
               
@@ -1099,126 +949,79 @@ export async function performSummarize({
             promptMatchReason = `Engine match error: ${scorerErr.message}`;
           }
 
-          // --- STAGE 3: SEMANTIC VERIFY — อ่านเนื้อข่าวจริง แล้วตัดสินว่าการ์ดเข้ากันจริงไหม ---
-          // 🔴 ★ 25 ก.ค. 69 (เจ้าของสั่ง): เดิมชื่อ STAGE 2.5 และทำงาน "เฉพาะตอน BORROWED (คะแนน<40)"
-          //    → ยิ่งจับคู่ผิดแบบมั่นใจ (คะแนนสูง) ยิ่งไม่มีใครตรวจ
-          //    เคสจริง 25 ก.ค.: ข่าวเภสัชกรช่วยคุณลุงหอบหืด ได้การ์ด "ทีมอาสาลงพื้นที่ช่วยคนในวิกฤต"
-          //    คะแนน EXACT แต่คนละสถานการณ์ → เนื้อออกมาแปลก (ศัพท์ทีมอาสา/หน้างานเสี่ยง ในร้านขายยา)
-          //    ตอนนี้: ตรวจ "ทุกเคส" + ป้อนเนื้อข่าวจริงเต็ม (2500 ตัวอักษร) + เนื้อการ์ดเต็ม (700)
-          //    ปิดคืน: env PROMPT_SEMANTIC_VERIFY=off
-          const _semanticVerifyOn = process.env.PROMPT_SEMANTIC_VERIFY !== 'off';
-          if (_semanticVerifyOn && smartPrompt && top10PromptScores.length > 0) {
-            console.log(`[Analyze-Service] 🤖 STAGE 3: Semantic Verify (ตรวจทุกเคส) — อันดับ 1 จากคะแนน = "${smartPrompt.promptName}" (${selectedPromptScore.toFixed(1)}, ${matchType})`);
+          // --- STAGE 2.5: AI SEMANTIC FALLBACK (Gemini Flash) ---
+          // Only triggers when Stage 2 result is BORROWED (score < 40)
+          if (matchType === 'BORROWED' && smartPrompt && top10PromptScores.length > 0) {
+            console.log(`[Analyze-Service] 🤖 STAGE 2.5: AI Semantic Fallback triggered (matchType=BORROWED, score=${selectedPromptScore.toFixed(1)})`);
             try {
               const top5Candidates = top10PromptScores.slice(0, 5);
-              // ป้อน "เนื้อการ์ดจริง" ไม่ใช่แค่ชื่อ — AI ต้องเห็นว่าการ์ดสั่งให้เล่าสถานการณ์แบบไหน
+              // ★ 16 ก.ค. 69 (B5): ป้อนโทน+เนื้อพร้อมท์ย่อ+เนื้อข่าวย่อ — เดิม AI เห็นแค่ "ชื่อ+ป้ายมิติ"
+              //   เลือกจากชื่อ ตัดสินความเข้ากันของโทนจริงไม่ได้ (เคสพร้อมท์ไว้อาลัย vs ข่าวมูฟออน)
               const candidateList = top5Candidates.map((c, i) =>
-                `${i + 1}. "${c.name}" (id: ${c.id}) — คะแนนป้าย: ${c.score.toFixed(1)} | มิติที่ตรง: ${c.matchedDimensions.join(', ')}\n   โทน: ${c.tone || '-'}\n   คำสั่งในการ์ด: ${c.excerpt || '-'}`
-              ).join('\n\n');
+                `${i + 1}. "${c.name}" (id: ${c.id}) — Score: ${c.score.toFixed(1)}, Dimensions: ${c.matchedDimensions.join(', ')}\n   โทน: ${c.tone || '-'} | เนื้อพร้อมท์ (ย่อ): ${c.excerpt || '-'}`
+              ).join('\n');
 
-              const aiFallbackPrompt = `คุณเป็นบรรณาธิการที่เลือก "การ์ดเทคนิคการเขียน" ให้เข้ากับข่าวแต่ละชิ้น
+              const aiFallbackPrompt = `คุณเป็นผู้เชี่ยวชาญการเลือก prompt สำหรับเขียนข่าวไวรัล
 
-=== ข่าวจริง (อ่านให้ครบก่อนตัดสิน) ===
+=== ข่าว ===
 หัวข้อ: ${actualNewsTitle || 'ไม่มีหัวข้อ'}
-หมวดหมู่ที่ระบบเดา: ${newsTypeDetected}
+หมวดหมู่: ${newsTypeDetected}
 อารมณ์: ${(newsAnalysis?.emotionalTags || newsAnalysis?.emotionalThemes || []).join(', ')}
 ความขัดแย้ง: ${(newsAnalysis?.conflictTags || newsAnalysis?.conflictTypes || []).join(', ')}
 Archetype: ${newsAnalysis?.narrativeArchetype || '-'}
-
-เนื้อข่าวเต็ม:
-${(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 2500)}
+เนื้อข่าว (ย่อ): ${(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 400)}
 === จบข่าว ===
 
-=== การ์ดที่คะแนนป้ายสูงสุด 5 ใบ ===
+=== ตัวเลือก Prompt (Top 5) ===
 ${candidateList}
 === จบตัวเลือก ===
 
-งานของคุณ 2 อย่าง:
-[1] เลือกการ์ดที่ "สถานการณ์ + โทน + คำศัพท์" ใช้กับข่าวนี้ได้จริงที่สุด
-[2] ให้คะแนนความเข้ากันจริง (fitScore 0-100) ของใบที่เลือก
+จาก prompt ทั้ง 5 ตัวเลือกด้านบน เลือก 1 ตัวที่เหมาะสมที่สุดสำหรับข่าวนี้
+เกณฑ์สำคัญ: "โทนและสถานการณ์ของพร้อมท์ต้องเข้ากับเหตุการณ์จริงในข่าว" สำคัญกว่าคะแนน — เช่น ข่าวเลิกรา/มูฟออน ห้ามเลือกพร้อมท์โทนไว้อาลัย/การจากไป แม้คะแนนจะสูงกว่า
+ตอบเป็น JSON: { "selectedIndex": <1-5>, "reason": "..." }`;
 
-🔴 กฎการตัดสิน (สำคัญกว่าคะแนนป้าย):
-- คะแนนป้ายสูงไม่ได้แปลว่าเข้ากัน — ป้ายหมวด/อารมณ์กว้างมาก ข่าวคนละเรื่องก็ได้ป้ายเดียวกัน
-- ดูว่า "คำศัพท์และฉากในการ์ด" ใช้กับข่าวนี้ได้ไหม เช่น การ์ดที่พูดถึง "ทีมอาสาลุยเข้าพื้นที่ หน้างานเสี่ยง"
-  ใช้กับข่าวคนช่วยกันในร้านขายยาไม่ได้ — ต้องหักคะแนนหนัก
-- โทนต้องตรงเหตุการณ์จริง เช่น ข่าวเลิกรา/มูฟออน ห้ามเลือกการ์ดโทนไว้อาลัย/การจากไป
-- ถ้าทั้ง 5 ใบไม่มีใบไหนเข้ากันจริง ให้ fitScore ต่ำตามจริง (ต่ำกว่า 40) อย่าฝืนให้คะแนนสูง
-
-ตอบเป็น JSON เท่านั้น:
-{ "selectedIndex": <1-5>, "fitScore": <0-100>, "reason": "เหตุผลสั้นๆ", "mismatch": "สิ่งที่การ์ดไม่เข้ากับข่าว (ถ้ามี)" }`;
-
-              // ★ 25 ก.ค. 69: ด่านนี้เป็น "ผู้ตัดสินคุณภาพ" แล้ว → ใช้โมเดลตัดสิน (sol) ไม่ใช่ตัวเร็วสุด
-              //   ล้ม/หมดเวลา → ถอยไป luna → gemini (ไม่ให้ด่านนี้ล้มทั้งงาน)
+              const { callGemini, isGeminiAvailable } = await import('@/lib/ai/geminiClient');
               let aiSelection = null;
-              try {
-                aiSelection = await withTimeoutSignal(
-                  (signal) => callAI({ prompt: aiFallbackPrompt, model: MODEL_FINAL_QA, temperature: 0.1, maxTokens: 700, signal }),
-                  Number(process.env.SEMANTIC_VERIFY_TIMEOUT_MS) || 45_000,
-                  'stage3_semantic_verify'
-                );
-              } catch (primaryVerifyErr) {
-                console.warn(`[🤖 STAGE 3] ${MODEL_FINAL_QA} ล้ม/หมดเวลา (${primaryVerifyErr.message}) → ถอยไป ${MODEL_FAST_CHEAP}`);
-                try {
-                  aiSelection = await withTimeoutSignal(
-                    (signal) => callAI({ prompt: aiFallbackPrompt, model: MODEL_FAST_CHEAP, temperature: 0.1, maxTokens: 700, signal }),
-                    30_000,
-                    'stage3_semantic_verify_fallback'
-                  );
-                } catch (secondVerifyErr) {
-                  const { callGemini, isGeminiAvailable } = await import('@/lib/ai/geminiClient');
-                  if (isGeminiAvailable()) {
-                    aiSelection = await callGemini({ prompt: aiFallbackPrompt, model: MODEL_GEMINI_PRO, temperature: 0.1, maxTokens: 700 });
-                  } else {
-                    throw secondVerifyErr;
-                  }
-                }
+              if (isGeminiAvailable()) {
+                aiSelection = await callGemini({
+                  prompt: aiFallbackPrompt,
+                  model: MODEL_GEMINI_PRO, // ★ 16 ก.ค. 69 (B4): เดิม 'gemini-2.5-pro' hardcode ตกรุ่น
+                  temperature: 0.1,
+                  maxTokens: 300,
+                });
+              } else {
+                // Fallback to callAI if Gemini not available
+                aiSelection = await callAI({
+                  prompt: aiFallbackPrompt,
+                  model: MODEL_FAST_CHEAP,
+                  temperature: 0.1,
+                  maxTokens: 300,
+                });
               }
 
               if (aiSelection && aiSelection.selectedIndex >= 1 && aiSelection.selectedIndex <= 5) {
                 const aiPickIdx = aiSelection.selectedIndex - 1;
                 const aiPickedCandidate = top5Candidates[aiPickIdx];
                 const aiPickedPrompt = validPrompts.find(vp => vp.id === aiPickedCandidate.id);
-                const fitScore = Number(aiSelection.fitScore);
-                const fit = Number.isFinite(fitScore) ? Math.max(0, Math.min(100, fitScore)) : null;
-                const LOW_FIT = Number(process.env.SEMANTIC_MIN_FIT) || 40;
 
                 if (aiPickedPrompt && aiPickedPrompt.id !== smartPrompt.id) {
-                  console.log(`[🤖 STAGE 3] เปลี่ยนการ์ด: "${aiPickedCandidate.name}" (เดิม "${smartPrompt.promptName}") | fit=${fit ?? '-'} | เหตุผล: ${aiSelection.reason || '-'}`);
+                  console.log(`[🤖 STAGE 2.5] AI picked different prompt: "${aiPickedCandidate.name}" (was: "${smartPrompt.promptName}") — Reason: ${aiSelection.reason || '-'}`);
                   smartPrompt = aiPickedPrompt;
-                  promptSource = 'library(semantic)';
-                  smartPrompt._matchScore = aiPickedCandidate.score;
-                  smartPrompt._matchedDimensions = aiPickedCandidate.matchedDimensions;
-                  selectedPromptScore = aiPickedCandidate.score;
-                  matchedDimensions = aiPickedCandidate.matchedDimensions;
-                  promptMatchReason = `🤖 ด่านอ่านเนื้อจริงเลือกใหม่: "${smartPrompt.promptName}" (fit ${fit ?? '-'}/100 — ${aiSelection.reason || '-'})`;
-                } else {
-                  console.log(`[🤖 STAGE 3] ยืนยันใบเดิม: "${smartPrompt.promptName}" | fit=${fit ?? '-'}`);
-                  promptMatchReason = `${promptMatchReason} | ✅ ด่านอ่านเนื้อจริงยืนยัน (fit ${fit ?? '-'}/100)`;
-                }
-
-                // บันทึกผลจริงไว้ใช้ตอนประกอบคำสั่งเขียน + โชว์ในสมุดเคส
-                smartPrompt._semanticFit = fit;
-                smartPrompt._semanticReason = aiSelection.reason || '';
-                smartPrompt._semanticMismatch = String(aiSelection.mismatch || '').trim();
-
-                // 🔴 ตรงนี้คือหัวใจ: ไม่มีใบไหนเข้ากันจริง → บอกตัวเขียนตรงๆ ห้ามยัดฉากของการ์ดลงข่าว
-                //    (เดิมไม่มีด่านนี้ ตัวเขียนจึงลากศัพท์ "ทีมอาสา/หน้างานเสี่ยง" มาใส่ข่าวร้านขายยา)
-                if (fit !== null && fit < LOW_FIT) {
+                  promptSource = 'library(ai-fallback)';
                   smartPrompt._isBorrowed = true;
-                  smartPrompt._matchType = 'BORROWED(SEMANTIC)';
-                  matchType = 'BORROWED';
-                  console.log(`[🤖 STAGE 3] ⚠️ ไม่มีการ์ดใบไหนเข้ากับข่าวนี้จริง (fit ${fit} < ${LOW_FIT}) → ใช้เฉพาะจังหวะ/ภาษา ไม่ยึดสถานการณ์ของการ์ด`);
-                  console.log(`[📋 COVERAGE] ควรป้อนตัวอย่างข่าวแนว "${newsTypeDetected}" เพิ่มในหอสมุดไวรัล`);
-                } else if (fit !== null) {
-                  smartPrompt._isBorrowed = false;
-                  smartPrompt._matchType = fit >= 70 ? 'EXACT(SEMANTIC)' : 'CLOSE(SEMANTIC)';
-                  matchType = fit >= 70 ? 'EXACT' : 'CLOSE';
+                  smartPrompt._borrowReason = `AI Fallback: ${aiSelection.reason || 'Gemini selected'}`;
+                  smartPrompt._matchScore = aiPickedCandidate.score;
+                  smartPrompt._matchType = 'BORROWED(AI)';
+                  smartPrompt._matchedDimensions = aiPickedCandidate.matchedDimensions;
+                  promptMatchReason = `🤖 AI Fallback: "${smartPrompt.promptName}" (AI Reason: ${aiSelection.reason || '-'}, Original Score: ${selectedPromptScore.toFixed(1)})`;
+                } else {
+                  console.log(`[🤖 STAGE 2.5] AI confirmed original pick: "${smartPrompt.promptName}"`);
                 }
               } else {
-                console.log(`[🤖 STAGE 3] AI ตอบไม่ตรงรูปแบบ — คงผลจากคะแนนป้ายไว้`);
+                console.log(`[🤖 STAGE 2.5] AI returned invalid selection, keeping original pick`);
               }
             } catch (aiFallbackErr) {
-              console.warn('[Analyze-Service] STAGE 3 Semantic Verify ล้ม (คงผล STAGE 2 ไว้):', aiFallbackErr.message);
+              console.warn('[Analyze-Service] STAGE 2.5 AI Fallback failed (keeping Stage 2 result):', aiFallbackErr.message);
             }
           }
         } else {
@@ -1274,10 +1077,7 @@ ${candidateList}
     }
 
     // [B] Tone Filter — ถ้า prompt มี toneClass: 'negative' ให้ข้ามและหา fallback
-    // 🔴 ★ 25 ก.ค. 69 (เจ้าของสั่ง): ปิดโดยปริยาย — คนคัดข่าวมาก่อนแล้ว และการ์ดเป็นคนคุมโทน
-    //    เดิมด่านนี้สลับการ์ดที่ด่านอ่านเนื้อจริงเพิ่งเลือกมาทิ้ง แล้วหยิบใบแรกในไฟล์แทน (ไม่ดูข่าวเลย)
-    //    เปิดคืน: env TONE_FILTER=on
-    if (process.env.TONE_FILTER === 'on' && smartPrompt && smartPrompt.toneClass === 'negative') {
+    if (smartPrompt && smartPrompt.toneClass === 'negative') {
       console.log(`[ToneFilter] ⚠️ Negative prompt detected (id=${smartPrompt.id}) — searching for neutral/positive fallback`);
       try {
         let _allPrompts = [];
@@ -1302,10 +1102,6 @@ ${candidateList}
     }
 
     // [A] Tone Override Block — กฎการนำเสนอเชิงบวก (บังคับทุกเวอร์ชัน — สอดคล้องอัลกอริทึม Facebook)
-    // 🔴 ★ 25 ก.ค. 69 (เจ้าของสั่ง): ปิดกฎเล่ามุมบวกโดยปริยาย — 'คนคัดข่าวมาก่อนแล้ว'
-    //    ให้การ์ดในคลังพร้อมท์เป็นคนคุมโทน ไม่ต้องมีกฎกลางมาดึงกลับเป็นบวกทุกงาน
-    //    เปิดคืน: env TONE_OVERRIDE=on
-    const _toneOverrideOn = process.env.TONE_OVERRIDE === 'on';
     const TONE_OVERRIDE_BLOCK = `
 
 ★★★ POSITIVE REFRAMING RULE — กฎการนำเสนอเชิงบวก (บังคับทุกเวอร์ชัน ห้ามละเมิดไม่ว่า prompt ด้านบนจะสั่งอย่างไร) ★★★
@@ -1343,70 +1139,25 @@ ${candidateList}
       console.log(`[Analyze-Service] ⚠️ Fact sufficiency is ${narrativePayload.factSufficiency}. Overriding length config to short to prevent AI filler.`);
     }
 
-    // 🔴 ★ 25 ก.ค. 69: การ์ดในคลังชนะเรื่องจำนวนย่อหน้า (เจ้าของสั่ง "ให้คลังพร้อมท์ทำงานได้เต็มที่")
-    //   บั๊กจริง: การ์ดสั่ง "เขียน 3 ย่อหน้าเท่านั้น" แต่ระบบสั่งซ้อนอีกทีว่า 4-5 หรือ 6-8 ย่อหน้า
-    //   → ตัวเขียนได้คำสั่งขัดกัน 2 ชุด ผลออกมา 5-6 ย่อหน้า (ไม่ตรงทั้งคู่) เห็นชัดในเคส 25 ก.ค.
-    //   ปิดคืน: env CARD_CONTROLS_LENGTH=off
-    //   ★ รอบแก้ที่ 2 (25 ก.ค. เย็น): บล็อกนี้เคยถูกบล็อกล็อก 3 ย่อหน้าข้างล่างทับทันที = โค้ดตายไม่มีผล
-    //   ตอนนี้ทำงานเฉพาะตอนปิดการล็อก (PARAGRAPH_ENFORCE=off) เท่านั้น — ให้อ่านโค้ดแล้วไม่เข้าใจผิด
-    if (process.env.PARAGRAPH_ENFORCE === 'off' && process.env.CARD_CONTROLS_LENGTH !== 'off' && smartPrompt?.promptText) {
-      const _m = String(smartPrompt.promptText).match(/(?:เขียน|แบ่ง|ให้มี)\s*(\d)\s*(?:-\s*(\d)\s*)?ย่อหน้า/);
-      if (_m) {
-        const _lo = Number(_m[1]);
-        const _hi = _m[2] ? Number(_m[2]) : _lo;
-        if (_lo >= 2 && _hi <= 9 && _hi >= _lo) {
-          const _para = _lo === _hi ? String(_lo) : `${_lo}-${_hi}`;
-          lenCfg = { ...lenCfg, paragraphs: _para, paraDesc: `${_para} ย่อหน้า` };
-          console.log(`[Analyze-Service] 📐 การ์ด "${smartPrompt.promptName}" สั่ง ${_para} ย่อหน้า → ใช้ตามการ์ด (ทับค่าระบบ ${contentLength})`);
-        }
-      }
-    }
-
-    // 🔴 ★ 25 ก.ค. 69 (เจ้าของสั่ง): ผลลัพธ์ต้องเป็น 3 ย่อหน้า — สั่งให้ตรงกันตั้งแต่ต้นทาง
-    //    ไม่งั้นตัวเขียนได้คำสั่ง "6-8 ย่อหน้า" แล้วโดนโค้ดรวบเหลือ 3 ทีหลัง = ย่อหน้ากลางบวมผิดรูป
-    if (process.env.PARAGRAPH_ENFORCE !== 'off') {
-      const _target = String(Number(process.env.NEWS_PARAGRAPHS) || 3);
-      if (lenCfg.paragraphs !== _target) {
-        console.log(`[Analyze-Service] 📐 ล็อกจำนวนย่อหน้าที่ ${_target} (เดิมสั่ง ${lenCfg.paragraphs})`);
-        lenCfg = { ...lenCfg, paragraphs: _target, paraDesc: `${_target} ย่อหน้า` };
-      }
-    }
-
     let prompt = '';
     // ★ 16 ก.ค. 69 (B5 — สวิตช์ REF_WEIGHT_BY_MATCH=1 · default OFF = พฤติกรรมเดิมเป๊ะ):
     //   ลดน้ำหนักการยึด ref ตามคุณภาพจับคู่ — เดิม BORROWED (ผิดเรื่อง/คะแนนต่ำ) ถูกยึด promptText+โครง+โทน
     //   เต็มรูปแบบเท่า EXACT → รากเคสจริง "ข่าวมูฟออนถูกเขียนด้วยโครงไว้อาลัย" (10 ก.ค. 69)
     const _refWeightOn = process.env.REF_WEIGHT_BY_MATCH === '1';
-    // ★ 25 ก.ค. 69 (รอบแก้ที่ 2): ตัดวงเล็บท้ายป้ายก่อนเทียบ
-    //   บั๊กของงานเช้านี้: ด่านใหม่เขียนป้ายเป็น BORROWED(SEMANTIC)/CLOSE(SEMANTIC)
-    //   แต่เกราะข้างล่างเทียบตรงๆ กับ 'BORROWED'/'CLOSE' → ไม่มีวันตรงกัน เกราะตายเงียบ
-    //   (ตอนนี้สวิตช์ REF_WEIGHT_BY_MATCH ปิดอยู่จึงยังไม่ระเบิด แต่ถ้าเปิดจะนึกว่าเกราะทำงาน)
-    const _refMatchTypeRaw = smartPrompt?._matchType || (smartPrompt?._isBorrowed ? 'BORROWED' : null);
-    const _refMatchType = _refMatchTypeRaw ? String(_refMatchTypeRaw).replace(/\(.*\)$/, '').trim() : null;
+    const _refMatchType = smartPrompt?._matchType || (smartPrompt?._isBorrowed ? 'BORROWED' : null);
     if (_refWeightOn && smartPrompt && smartPrompt.promptText && _refMatchType === 'BORROWED') {
       // BORROWED: ใช้เฉพาะแนวเล่าเรื่องมนุษย์กลางๆ — ไม่ฝัง promptText/DNA/โครง/โทนของพร้อมท์ผิดเรื่อง
       prompt = '=== 🏛️ แนวเขียนอ้างอิง (พร้อมท์ยืม — จับคู่หลวม ใช้เป็นแรงบันดาลใจเท่านั้น) ===\n' +
         `หมวดพร้อมท์: ${smartPrompt.category || '-'} ⚠️ ไม่ตรงแนวข่าวนี้ — ห้ามยึดโครงเรื่อง/โทน/สไตล์เปิด/CTA ของพร้อมท์นี้\n` +
         'ให้เขียนแบบมนุษย์เล่าเรื่องตามกฎระบบด้านล่าง โดยยึดข้อเท็จจริงและอารมณ์จริงจากข่าวต้นฉบับเป็นแกนเดียว\n' +
         '=== จบแนวเขียนอ้างอิง ===\n\n';
-      if (_toneOverrideOn) prompt += TONE_OVERRIDE_BLOCK;
+      prompt += TONE_OVERRIDE_BLOCK;
       console.log(`[RefWeight] ⚠️ BORROWED → ลดน้ำหนัก ref: ไม่ฝัง promptText/DNA ของ "${smartPrompt.promptName || smartPrompt.category}" (REF_WEIGHT_BY_MATCH=1)`);
     } else if (smartPrompt && smartPrompt.promptText) {
-      prompt = '=== 🏛️ คำสั่งเขียนจากคลังพร้อมท์ (การ์ดที่ถอด DNA จากโพสต์ไวรัลจริง) ===\n' +
+      prompt = '=== 🏛️ คำสั่งเขียนจากหอสมุดไวรัล ===\n' +
         `ประเภท: ${smartPrompt.category || '-'} | อารมณ์: ${smartPrompt.emotionalType || smartPrompt.emotionalTags?.[0] || '-'} | Viral Score: ${smartPrompt.viralScore || '-'}\n` +
         `สไตล์ Hook: ${smartPrompt.hookStyle || '-'} | โทน: ${smartPrompt.tone || '-'}\n` +
         `โครงสร้าง: ${smartPrompt.structure || '-'}\n\n`;
-
-      // ★ 25 ก.ค. 69: ผลจากด่านอ่านเนื้อจริง (STAGE 3) — บอกตัวเขียนตรงๆ ว่าการ์ดตรงแค่ไหน
-      //   รากปัญหาเคส 25 ก.ค.: การ์ด "ทีมอาสาลงพื้นที่" ถูกใช้กับข่าวร้านขายยา แล้วตัวเขียนลากศัพท์ผิดฉากมาทั้งชุด
-      if (smartPrompt._semanticMismatch) {
-        prompt += `⚠️ จุดที่การ์ดนี้ไม่ตรงกับข่าว: ${smartPrompt._semanticMismatch}\n` +
-          '>> ห้ามยัดฉาก/อาชีพ/สถานที่/ศัพท์เฉพาะของการ์ดลงในข่าวนี้ ให้ใช้เฉพาะ "จังหวะการเล่า + ระดับภาษา + วิธีวางอารมณ์" <<\n\n';
-      }
-      if (typeof smartPrompt._semanticFit === 'number' && smartPrompt._semanticFit < (Number(process.env.SEMANTIC_MIN_FIT) || 40)) {
-        prompt += `🚨 ระดับความเข้ากันของการ์ดกับข่าวนี้ต่ำ (${smartPrompt._semanticFit}/100)\n` +
-          '>> ยึดข้อเท็จจริงและฉากจริงจากข่าวเป็นแกนเดียว การ์ดใช้เป็นแค่แนวจังหวะภาษาเท่านั้น <<\n\n';
-      }
 
       // ★ 16 ก.ค. 69 (B5): CLOSE = ยึดโครง/จังหวะได้ แต่ข้อเท็จจริงข่าวชนะโทนพร้อมท์เสมอ
       if (_refWeightOn && _refMatchType === 'CLOSE') {
@@ -1443,37 +1194,20 @@ ${candidateList}
         '>> คุณ **ต้องห้ามคัดลอก** ข้อมูลเฉพาะเหล่านี้มาใส่ในเนื้อหาเด็ดขาด! ให้ยึด "ตัวละคร สถานที่ วันที่ และข้อเท็จจริง" จาก "ข่าวต้นฉบับ" เท่านั้น! <<\n' +
         smartPrompt.promptText + '\n\n';
 
-      // ★ 25 ก.ค. 69 (เจ้าของสั่ง: ใช้ศักยภาพคลังพร้อมท์ให้สูงสุด):
-      //   ส่ง "โพสต์ครู" ที่การ์ดใบนี้ถอด DNA มา ให้ตัวเขียนได้เห็นของจริง
-      //   เดิมส่งแค่คำสั่ง (บรรยายสไตล์) — ตัวเขียนไม่เคยเห็นตัวอย่างจริงเลย จับสไตล์ได้ไม่ครบ
-      //   ปิดคืน: env SEND_TEACHER_EXAMPLE=off
-      const _teacher = String(smartPrompt.exampleContent || '').trim();
-      if (_teacher && process.env.SEND_TEACHER_EXAMPLE !== 'off') {
-        prompt += '--- 📖 โพสต์ครู (ของจริงที่ไวรัล — การ์ดใบนี้ถอดเทคนิคมาจากโพสต์นี้) ---\n' +
-          '🔴 อ่านเพื่อจับ "จังหวะ ลีลา ระดับภาษา วิธีวางอารมณ์ วิธีเปิด-ปิดเรื่อง" เท่านั้น\n' +
-          '🔴 ห้ามลอกประโยค ห้ามหยิบชื่อคน สถานที่ ตัวเลข หรือเหตุการณ์ใดๆ จากโพสต์นี้มาใส่ข่าวเด็ดขาด — ข้อเท็จจริงต้องมาจากข่าวต้นฉบับ 100%\n' +
-          '"""\n' + _teacher.replace(/\s+\n/g, '\n').slice(0, 1200) + '\n"""\n\n';
-      }
-
       if (smartPrompt.doNot && Array.isArray(smartPrompt.doNot) && smartPrompt.doNot.length > 0) {
         prompt += '--- 🚨 ข้อห้ามทำเด็ดขาด (DO NOT VIOLATE) ---\n' +
           'หากคุณละเมิดกฎเหล่านี้ โพสต์จะถูกปฏิเสธ:\n' +
           smartPrompt.doNot.map(dn => `- ${dn}`).join('\n') + '\n\n';
       }
 
-      prompt += '=== จบคำสั่งจากคลังพร้อมท์ ===\n\n';
+      prompt += '=== จบคำสั่งหอสมุด ===\n\n';
 
       // [A] Append Tone Override Block — บังคับทุกกรณี (เดิมข้ามเมื่อ toneClass=positive ทำให้ข่าวลบที่จับคู่ prompt บวกหลุดกฎ)
-      if (_toneOverrideOn) prompt += TONE_OVERRIDE_BLOCK;
+      prompt += TONE_OVERRIDE_BLOCK;
       console.log(`[ToneOverride] ✅ TONE_OVERRIDE_BLOCK appended (always-on, prompt toneClass=${smartPrompt?.toneClass || 'neutral'})`);
     }
 
     // Inject Positive Archetype
-    // 🔴 ★ 25 ก.ค. 69 (เจ้าของสั่ง "ให้คลังพร้อมท์ทำงานได้เต็มที่"):
-    //    บล็อกนี้สั่งบทบาทการเล่า (The Witness / The Insider / ...) ทับคำสั่งบทบาทในการ์ดทุกครั้ง
-    //    → การ์ดสั่ง "แอดมินเพจเล่าให้แฟนเพจฟัง" แต่ถูกสวมทับเป็น "ผู้เห็นเหตุการณ์จริง" ทุกงาน
-    //    ตอนนี้ใส่เฉพาะตอนไม่มีการ์ดจากคลัง (fallback) — เปิดคืนทุกกรณี: env ARCHETYPE_ALWAYS=on
-    const _archetypeOn = process.env.ARCHETYPE_ALWAYS === 'on' || !smartPrompt?.promptText || promptSource === 'builtin-fallback' || promptSource === 'fallback';
     let archetypePrompt = '=== 👤 POSITIVE WRITING ARCHETYPE ===\n';
     const cat = (smartPrompt?.category || newsTypeDetected || '').toLowerCase();
     if (['อุบัติเหตุ', 'อาชญากรรม', 'สลดใจ', 'ภัยพิบัติ', 'ดราม่าชีวิต', 'อบอุ่น', 'ความรัก', 'สะเทือนใจ', 'ชีวิต'].some(k => cat.includes(k))) {
@@ -1493,8 +1227,7 @@ ${candidateList}
         '- ใช้ความเงียบและข้อเท็จจริงเป็นเครื่องนำทางอารมณ์อย่างทรงพลัง\n';
     }
     archetypePrompt += '=== จบ ARCHETYPE ===\n\n';
-    if (_archetypeOn) prompt += archetypePrompt;
-    else console.log(`[Archetype] ⏭️ ข้ามบทบาทกลาง — ให้การ์ด "${smartPrompt.promptName}" คุมบทบาทการเล่าเอง`);
+    prompt += archetypePrompt;
 
     // Append Narrative Payload exactly ONCE
     prompt += formatNarrativePayload(narrativePayload);
@@ -1566,19 +1299,12 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
     prompt += quoteSafetyRule;
 
     // ★ VIRAL FEW-SHOT (11 มิ.ย. — ผู้ใช้เลือก: เรียนจากหอสมุดไวรัล 170 โพสต์ + สำนวนเพจไวรัลเต็มตัว)
-    // ★ 25 ก.ค. 69 (เจ้าของเคาะ 5 ข้อ — "1 เรื่อง 1 เจ้าของ"): มีการ์ดจากคลัง = การ์ดคุมสไตล์เต็มตัว
-    //   ตัวอย่างสไตล์เหลือชุดเดียวคือ "โพสต์ครูของการ์ด" — ตัด STYLE PACK/โพสต์ไวรัล 2 โพสต์/ลายมือ 5 ประโยค
-    //   (เดิม 4 แหล่ง ~4,200 ตัวอักษรแข่งกัน ตัวเขียนเฉลี่ยเสียงจนการ์ดจาง + เกิดแพตเทิร์นเปิด "นี่คือ...")
-    //   ตอน fallback ไม่มีการ์ด → ชุดช่วยเดิมกลับมาครบ · ปิดคืน: env STYLE_SINGLE_SOURCE=off
-    const _hasLibCard = !!(smartPrompt && smartPrompt.promptText && smartPrompt.id !== 'fallback_builtin' && !smartPrompt._isFallback);
-    const _singleStyle = _hasLibCard && process.env.STYLE_SINGLE_SOURCE !== 'off';
-    if (_singleStyle) console.log(`[StyleSource] 📖 โพสต์ครูของการ์ดเป็นตัวอย่างชุดเดียว — ข้าม STYLE PACK/ตัวอย่างไวรัล/ลายมือ 5 ประโยค (การ์ด: ${smartPrompt.promptName || '-'})`);
     let viralFewshotBlock = '';
     try {
       const { getViralFewshotBlock } = await import('@/lib/services/viralFewshot');
       // flow คิว/auto ส่ง presetPrompt มา → บล็อก Stage 1 ถูกข้าม newsAnalysis เป็น null
       // ต้อง fallback ไป breakdown (มี primaryCategory เสมอ) แล้วค่อย category ของ prompt ที่เลือก
-      if (!_singleStyle) viralFewshotBlock = await getViralFewshotBlock({
+      viralFewshotBlock = await getViralFewshotBlock({
         category: newsAnalysis?.primaryCategory || actualBreakdown?.primaryCategory || smartPrompt?.category || '',
         emotionalTags: newsAnalysis?.emotionalTags || newsAnalysis?.emotionalThemes || actualBreakdown?.emotionalTags || [],
         archetype: newsAnalysis?.narrativeArchetype || actualBreakdown?.narrativeArchetype || '',
@@ -1604,20 +1330,14 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         : 'คุณต้องสร้างเนื้อหาหลายเวอร์ชันจากข่าวนี้ โดยแต่ละเวอร์ชันใช้มุมเขียนต่างกัน\n') +
       `แต่ละเวอร์ชัน:\n` +
       `- ความยาวบังคับ ${lenCfg.min}-${lenCfg.max} คำ ทุกประโยคต้องให้ข้อมูลใหม่ แบ่ง ${lenCfg.paraDesc} สำหรับ Facebook\n` +
-      `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้า 1] เปิดแรง hook ดึงอารมณ์ [ย่อหน้าตรงกลาง] เล่ารายละเอียด storytelling [ย่อหน้าสุดท้าย] ${_hasLibCard ? 'ปิดตามวิธีที่การ์ดกำหนด — จบที่ใจความ หรืออวยพรสั้นที่มีใจความ ห้ามเทศนา ห้ามสั่งสอนคนอ่าน' : 'ปิดท้ายด้วยประโยคบรรยายเรียบๆ ที่บอกเล่าความจริงโดยไม่ตีความหมายเพิ่มเติม'}\n` +
+      `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้า 1] เปิดแรง hook ดึงอารมณ์ [ย่อหน้าตรงกลาง] เล่ารายละเอียด storytelling [ย่อหน้าสุดท้าย] ปิดท้ายด้วยประโยคบรรยายเรียบๆ ที่บอกเล่าความจริงโดยไม่ตีความหมายเพิ่มเติม\n` +
       `- แต่ละย่อหน้าต้องมีอย่างน้อย ${lenCfg.sentences} ประโยค คั่นด้วย \\n\\n\n` +
-      // 🔴 ★ 25 ก.ค. 69 (เจ้าของแจ้ง "ความลื่นหายไป"): กันย่อหน้ากลางบวมเป็นกำแพงตัวอักษร
-      //   วัดจริงจากงานบ่ายนี้: ย่อหน้ากลาง 906-932 ตัวอักษร ขณะที่หัว/ท้ายแค่ 81-206 → อ่านสะดุด
-      '- 🔴 ย่อหน้าทุกย่อหน้าต้องยาวใกล้เคียงกัน ห้ามให้ย่อหน้าใดยาวกว่าย่อหน้าที่สั้นที่สุดเกิน 2 เท่า\n' +
-      '- เล่าเป็นจังหวะ: ประโยคสั้นสลับยาว มีจังหวะหยุดให้คนอ่านหายใจ ห้ามอัดข้อมูลติดกันเป็นพรืด\n' +
       '- ต้องอ้างอิงข้อมูลจริงจากข่าว ห้ามแต่งเรื่องที่ไม่มีในข่าว — ★ FACT-LOCK: ห้ามเพิ่มบุคคล/ความสัมพันธ์/อาชีพ/รายละเอียดชีวิตที่ต้นฉบับไม่มี (เคยพลาด: เติม "กับภรรยา" ทั้งที่ข่าวไม่มีภรรยา) และห้ามบรรยายฉาก สีหน้า อิริยาบถ เหมือนไปเห็นเหตุการณ์มาเอง — ต้นฉบับไม่ได้บรรยายภาพไหน ให้เล่าจากข้อเท็จจริง หรือใช้ภาษาที่บอกชัดว่าเป็นการนึกตาม ("ภาพแบบนั้นใครเห็นก็...") เท่านั้น\n' +
       '- ⚠️ ห้ามตั้งคำถามปิดท้ายเด็ดขาด ห้ามจบด้วย "คุณคิดยังไง?", "เห็นด้วยไหม?" หรือคำถามใดๆ\n\n' +
       formalModeRule +
       '=== 🔍 QUALITY + WRITING STYLE (MANDATORY) ===\n' +
       '1. ห้ามเปิดเรื่องซ้ำกัน — แต่ละเวอร์ชันต้องเปิดด้วยประโยคแรกที่ต่างกัน\n' +
-      (_hasLibCard
-        ? '2. ย่อหน้าสุดท้ายกระชับ ไม่เกิน 2 ประโยค — วิธีปิดยึดตามการ์ด ห้ามเทศนา ห้ามสรุปข้อคิดแบบบทความสอนใจ\n'
-        : '2. ย่อหน้าสุดท้ายกระชับ — ปิดท้ายไม่เกิน 2 ประโยค ไม่สรุปข้อคิดชีวิต\n') +
+      '2. ย่อหน้าสุดท้ายกระชับ — ปิดท้ายไม่เกิน 2 ประโยค ไม่สรุปข้อคิดชีวิต\n' +
       '3. ชื่อเฉพาะต้องสะกดตรงกับต้นฉบับ 100%\n' +
       '4. ห้ามเดาเพศ — ถ้าต้นฉบับไม่ระบุเพศ ใช้ชื่อจริงหรือ "เจ้าตัว" แทน เธอ/เขา\n' +
       '5. ห้ามใช้ "แม้จะ...แต่ก็..." เป็น connector — เขียนตรงๆ แทนการเปรียบ\n' +
@@ -1631,25 +1351,47 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       '11. ★ ตัวเลข/ข้อมูลหัวใจของข่าว (จำนวนเงิน อายุ ระยะเวลา วันสำคัญ) ต้องอยู่ใน "เนื้อหา" ของทุกเวอร์ชัน ไม่ใช่อยู่แค่หัวข้อ — ประกาศ/กำหนดการ (วันเวลา การเปิด-งดเข้า) ห้ามตัดส่วนสำคัญทิ้ง\n' +
       '12. ต้นฉบับเขียนผิด/วลีเพี้ยน ให้เกลาเป็นไทยที่ถูกต้อง (❌ ลอก "นานกว่าหลายสิบปี" ตามต้นฉบับ → ✅ "นานหลายสิบปี") ยกเว้นชื่อเฉพาะห้ามแก้ — และหัวข้อแต่ละเวอร์ชันต้องต่างมุมเล่าจริง ไม่ใช่สลับคำกัน\n\n' +
       '[ FORBIDDEN PATTERNS — คำห้าม 10 คำ ]\n' +
-      '❌ ห้ามใช้: ท่ามกลาง, สร้างความฮือฮา, กล่าวได้ว่า, เป็นที่ทราบกันดีว่า, ไม่ว่าจะ...ก็ตาม, แม้จะ...แต่ก็\n' /* ★ 25 ก.ค. 69 (ข้อ 5/5): ตัด ซึ่ง/ดังกล่าว/อย่างไรก็ตาม — การ์ด 61-70/73 ใบห้ามเองแล้ว · เก็บคำที่การ์ดไม่ได้ห้าม (กล่าวได้ว่า การ์ดห้ามแค่ 29/73 จึงเก็บ) */ +
+      '❌ ห้ามใช้: ซึ่ง, ดังกล่าว, ท่ามกลาง, สร้างความฮือฮา, อย่างไรก็ตาม, กล่าวได้ว่า, เป็นที่ทราบกันดีว่า, ไม่ว่าจะ...ก็ตาม, แม้จะ...แต่ก็\n' +
       '❌ ห้ามขึ้นต้นด้วย "ลองนึก/ลองคิด/ลองจินตนาการ" ทุกรูปแบบ (ลองนึกภาพว่า, ลองนึกถึง, ลองคิดดู, ลองจินตนาการ), Angle:, มุมมอง:, Focus:\n' +
       '❌ ห้ามบอกอารมณ์แทนคนอ่าน: สะเทือนใจชาวเน็ต, ทำให้คนดูน้ำตาไหล, สร้างความตื่นเต้น\n\n' +
       viralFewshotBlock +
-      // ★ 25 ก.ค. 69 (ข้อ 4/5): ถอด PROSE CRAFT — ซ้ำกับ HUMAN DNA ในคำสั่งระบบ (จังหวะ/ตัดคำลอย/ห้ามเปิดซ้ำ)
-      //   และซ้ำ QUALITY ข้อ 6 (รายละเอียดจับต้องได้) — สั่งเรื่องเดียวกัน 2 รอบทำเสียงการ์ดจาง
-      (_singleStyle ? '' : '=== ตัวอย่าง "ประโยคที่มีลายมือ" (เลียนแบบจังหวะและวิธีเล่า ห้ามลอกเนื้อหา) ===\n' +
+      '=== ✒️ PROSE CRAFT — ลายมือการเขียน (บังคับทุกย่อหน้า) ===\n' +
+      '- จังหวะ: สลับประโยคสั้น-ยาว และทุกย่อหน้าต้องมี "ประโยคทุบ" สั้นๆ ที่มีน้ำหนัก อย่างน้อย 1 ประโยค\n' +
+      '- ภาพ: ทุกย่อหน้าต้องมีรายละเอียดที่มองเห็น/จับต้องได้อย่างน้อย 1 จุด (สิ่งของ ท่าทาง เสียง ความเงียบ)\n' +
+      '- คำ: ตัดคำลอย/คำฟุ่มเฟือยทิ้งหมด ทุกคำต้องทำงาน — อ่านออกเสียงแล้วต้องลื่นเหมือนคนเล่าเรื่องเก่ง\n' +
+      '- ย่อหน้า: ประโยคแรกของแต่ละย่อหน้าห้ามขึ้นรูปแบบเดียวกัน\n' +
+      '=== จบ PROSE CRAFT ===\n\n' +
+      '=== ตัวอย่าง "ประโยคที่มีลายมือ" (เลียนแบบจังหวะและวิธีเล่า ห้ามลอกเนื้อหา) ===\n' +
       '1. "มือข้างที่จับชอล์กมา 35 ปี วันนี้วางลงแล้ว — แต่กระดานในห้อง ป.6 ยังมีลายมือของครูอยู่"\n' +
       '2. "รถก๋วยเตี๋ยวคันเก่าจอดที่เดิมทุกเช้า ราคาเดิมตั้งแต่ปี 2528 ลูกค้าบางคนกินมาตั้งแต่ยังใส่ชุดนักเรียน วันนี้พวกเขากลับมา พร้อมเตาใหม่หนึ่งเครื่อง"\n' +
       '3. "น้ำขึ้นถึงเข่าแล้ว เขายังไม่ยอมขึ้นเรือ — ในมือมีแมวหนึ่งตัว กับรูปถ่ายพ่ออีกหนึ่งใบ"\n' +
       '4. "เงิน 37 บาทในกระเป๋า กับระยะทาง 80 กิโล เด็กชายคนนั้นเลือกเดิน"\n' +
-      '5. "ทั้งซอยเงียบไปครึ่งนาที ก่อนเสียงปรบมือจะดังขึ้นพร้อมกัน"\n\n') +
+      '5. "ทั้งซอยเงียบไปครึ่งนาที ก่อนเสียงปรบมือจะดังขึ้นพร้อมกัน"\n\n' +
       (targetCount === 1
         ? `สร้าง 1 เวอร์ชัน: เทพลังทั้งหมดไปที่เวอร์ชันเดียว — เปิดเรื่องด้วย hook ตามสไตล์เปิดเรื่องที่กำหนดใน FOCUS ANGLE ห้ามเปิดด้วยวันที่\n\n`
         : `สร้างอย่างน้อย ${targetCount || 2} เวอร์ชัน:\n` +
           'เขียนในมุมมองที่ต่างกันตามจำนวนที่ขอ (ตัวอย่างมุมมอง: ไทม์ไลน์เหตุการณ์, ขยี้จังหวะอารมณ์, เปิดเรื่องแรงๆ, มุมมองคนในเหตุการณ์, หรือเจาะลึกความจริง)\n\n') +
-      '=== กฎเหล็ก FACEBOOK SAFETY — ถอดออกแล้ว (25 ก.ค. 69 เจ้าของสั่ง) ===\n' +
-      'ไม่มีกฎแทนคำ/แบนคำอีกต่อไป เขียนตามข้อเท็จจริงในข่าวตรงๆ ไม่ต้องเลี่ยงคำ\n' +
-      'คงไว้ข้อเดียว: ถ้าต้นฉบับมีผู้เสียชีวิต ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้ง ห้ามเลี่ยงจนคนอ่านไม่รู้\n' +
+      '=== กฎเหล็ก FACEBOOK SAFETY — บังคับทุกเวอร์ชัน ===\n' +
+      'ห้ามใช้คำเสี่ยงต่อไปนี้ในเนื้อหาที่เขียน ให้ rewrite เป็นคำปลอดภัยเสมอ:\n\n' +
+      '"ฆ่า" → "ก่อเหตุ" หรือ "ก่อเหตุร้ายแรง"\n' +
+      '"ฆาตกรรม" → "เหตุสูญเสีย" หรือ "คดีร้ายแรง"\n' +
+      '"ศพ" → "ร่างของผู้จากไป"\n' +
+      '"ตาย/ดับ/สิ้นใจ" → เลี่ยงคำห้วนเหล่านี้ แต่ ⚠️"เสียชีวิต" และ "จากไป" คือคำมาตรฐานที่ปลอดภัย ใช้ตรงๆ ได้เสมอ (16 ก.ค. 69: เลิกแบน "เสียชีวิต" — บทเรียนเคส #01641 การบังคับเลี่ยงทุกคำทำตัวเขียนละข้อเท็จจริงการตายทั้งเรื่อง) สำนวนสุภาพอื่นใช้สลับได้ เช่น "จากไปอย่างสงบ" "ลาลับ" — ห้ามใช้สำนวนเดียวซ้ำทุกจุด/ทุกเวอร์ชัน ⚠️ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้งเสมอ ห้ามเลี่ยงจนคนอ่านไม่รู้ว่าเสียชีวิตแล้ว (ห้ามเล่าฉากก่อนเสียชีวิตค้างไว้โดยไม่เฉลย)\n' +
+      '"สยอง/โหด/สลด" → "สะเทือนใจ" หรือ "น่าตกใจ"\n' +
+      '"เลือด" → "ร่องรอยเหตุการณ์" (⚠️ยกเว้นศัพท์การแพทย์/อวัยวะ เช่น "เส้นเลือด" "เส้นเลือดในสมอง" — ห้ามแทนที่ ให้คงคำเดิม)\n' +
+      '"แทง" → "ใช้ของมีคม"\n' +
+      '"ยิง" → "ใช้อาวุธปืน"\n' +
+      '"ข่มขืน" → "ล่วงละเมิดทางเพศ"\n' +
+      '"ผูกคอ/จบชีวิต" → "จากไปอย่างน่าเศร้า"\n' +
+      '"การพนัน/บ่อน/แทงบอล/เว็บพนัน" → "เกมเสี่ยงโชคผิดกฎหมาย" (เลี่ยงให้มากที่สุด)\n' +
+      '"ยาบ้า/ยาไอซ์/เสพยา" → "สิ่งผิดกฎหมาย" หรือ "ของมึนเมาผิดกฎหมาย"\n' +
+      '"เมาแล้วขับ/ตั้งวงเหล้า" → เกลาคำให้นุ่มลง เช่น "ขับขี่ในสภาพไม่พร้อม" "ร่วมวงสังสรรค์" (สลาก/ลอตเตอรี่รัฐบาลใช้ได้ปกติ)\n' +
+      '"ชำแหละ/หมกศพ" → "เหตุรุนแรงอย่างยิ่ง"\n' +
+      '"ทุบตี/ทำร้าย" → "ใช้ความรุนแรง"\n' +
+      '"จัดฉาก" → "สร้างสถานการณ์"\n\n' +
+      'หลักการ: เปลี่ยน "ความแรง" → "อารมณ์" เน้น emotional storytelling ไม่ใช่ shock/gore\n' +
+      'ห้าม clickbait: "คุณจะไม่เชื่อ", "แชร์ด่วน", "ดูก่อนโดนลบ"\n' +
+      'ห้าม engagement bait: "พิมพ์ 1", "เมนต์ 99", "ใครเห็นด้วยกดไลก์"\n' +
       '=== จบกฎ FACEBOOK SAFETY ===\n\n' +
       `✨✨✨ คำสั่งเด็ดขาด: ต้องสร้างผลลัพธ์ให้ครบจำนวน ${targetCount || 2} เวอร์ชัน ห้ามขาดหาย เนื้อหาแต่ละเวอร์ชันต้องมีความยาวตามที่กำหนด ✨✨✨\n\n` +
       'ตอบเป็น JSON:\n' +
@@ -1770,10 +1512,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
           const agent = new MasterAgent(workflowId);
           await agent.loadFromDB().catch(() => {});
           agent.onAnalysisComplete({ versions, news_reference: result.news_reference });
-          // ★ 25 ก.ค. 69: เดิมฮาร์ดโค้ด factCheckPassed:true = ช่องนี้บอกว่า "ผ่าน" เสมอ ไม่ใช่ผลตรวจจริง
-          //   ตอนนี้ผูกกับด่านตรวจจริง: ตัวเลขหัวใจหาย หรือ มีตัวเลขที่ไม่มีในต้นฉบับ = ไม่ผ่าน
-          const _factIssues = versions.flatMap(v => [...(v._missingKeyFacts || []), ...(v._unverifiedNumbers || [])]);
-          agent.onValidationComplete({ safetyPassed: validation.valid, issues: [...(validation.issues || []), ..._factIssues.map(x => `ตัวเลขต้องตรวจ: ${x}`)], factCheckPassed: _factIssues.length === 0, riskyWordsFound: [], riskyWordsReplaced: [] });
+          agent.onValidationComplete({ safetyPassed: validation.valid, issues: validation.issues, factCheckPassed: true, riskyWordsFound: [], riskyWordsReplaced: [] });
           await agent.saveMemoryToDB().catch(() => {});
         }
 
@@ -1817,15 +1556,8 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
                   promptSource: promptSource || 'library',
                   matchScore: (typeof smartPrompt._matchScore === 'number') ? Math.round(smartPrompt._matchScore) : null,
                   matchType: smartPrompt._matchType || (smartPrompt._isBorrowed ? 'BORROWED' : 'MATCHED'),
-                  // ★ 25 ก.ค. 69: คะแนน "เข้ากันจริง" จากด่านอ่านเนื้อข่าว (STAGE 3) — ต่างจาก matchScore ที่วัดแค่ป้าย
-                  semanticFit: (typeof smartPrompt._semanticFit === 'number') ? smartPrompt._semanticFit : null,
-                  semanticReason: smartPrompt._semanticReason || null,
-                  semanticMismatch: smartPrompt._semanticMismatch || null,
                 }
-              // ★ 25 ก.ค. 69: แยกป้าย "ตัวสำรอง Built-in V12" ออกจาก "คลังพร้อมท์" ให้ชัด (เดิมเหมาว่า library หมด)
-              : (promptSource === 'builtin-fallback'
-                  ? { id: 'fallback_builtin', name: '📦 Built-in Fallback V12', source: 'builtin-fallback', promptSource: 'builtin-fallback', promptName: 'Built-in Fallback V12', matchType: 'FALLBACK', matchScore: null }
-                  : { id: 'library', name: '📦 Library', source: promptSource || 'library', promptSource: promptSource || 'library' }),
+              : { id: 'library', name: '📦 Library', source: 'library' },
             usedModel: usedModel || MODEL_NEWS_ANALYSIS,
             versions,
             news_reference: result.news_reference || '',
@@ -1930,15 +1662,11 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
   "forbidden": ["ห้ามเขียนว่า...", "ห้าม ending แบบ..."]
 }`;
 
-      // 🔴 ★ 25 ก.ค. 69: เพดาน 1200 ต่ำเกินสำหรับโมเดลตระกูล 5.6 (reasoning) — เพดานต่ำ = ตอบว่างเปล่า
-      //    เจอจริงจากเทสรัน 25 ก.ค.: "[Blueprint-Service] ERROR: AI returned empty content" ทุกโมเดล
-      //    → ขั้นวางอารมณ์ตายเงียบมาตลอด (ล็อกขึ้นแค่ "Blueprint: ❌" แล้วไปต่อ)
-      //    เป็นอาการเดียวกับ breakdown ที่เคยเจอ (AGENTS.md §3) · ปรับได้: env BLUEPRINT_MAX_TOKENS
       const blueprintResult = await callAI({
         model: MODEL_FAST_CHEAP,
         prompt: blueprintPrompt,
         temperature: 0.3,
-        maxTokens: Number(process.env.BLUEPRINT_MAX_TOKENS) || 8000,
+        maxTokens: 1200,
       });
 
       if (!blueprintResult?.core_emotion) {
@@ -2127,7 +1855,7 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
             const bestPrompt = matched[0] || promptLib.sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0))[0];
 
             if (bestPrompt && bestPrompt.promptText) {
-              smartPromptCtx = '\n\n=== 🏛️ พร้อมท์จากคลังพร้อมท์ (Smart Match) ===\n' +
+              smartPromptCtx = '\n\n=== 🏛️ Prompt จากหอสมุดไวรัล (Smart Match) ===\n' +
                 `ประเภท: ${bestPrompt.category || '-'} | อารมณ์: ${bestPrompt.emotionalType || bestPrompt.emotionalTags?.[0] || '-'} | Viral Score: ${bestPrompt.viralScore || '-'}\n` +
                 `สไตล์ Hook: ${bestPrompt.hookStyle || '-'} | โทน: ${bestPrompt.tone || '-'}\n` +
                 `โครงสร้าง: ${bestPrompt.structure || '-'}\n\n` +
@@ -2168,8 +1896,8 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
         '- ⚠️ ห้ามตั้งคำถามปิดท้าย ห้ามจบด้วยคำถามใดๆ\n' +
         '- ใช้ข้อมูลจากข่าวจริงเท่านั้น ห้ามแต่งเรื่องเพิ่ม\n' +
         '- ระบุว่าผสมจากมุมไหนบ้าง (ใน mixed_from)\n\n' +
-        '=== กฎเหล็ก FACEBOOK SAFETY — ถอดออกแล้ว (25 ก.ค. 69 เจ้าของสั่ง) ===\n' +
-        'ไม่มีกฎแทนคำ/แบนคำ เขียนตามข้อเท็จจริงตรงๆ · คงไว้ข้อเดียว: ต้องบอกการจากไปให้ชัด ≥1 ครั้งถ้ามีผู้เสียชีวิต\n' +
+        '=== กฎเหล็ก FACEBOOK SAFETY ===\n' +
+        'ห้ามใช้คำเสี่ยง: ฆ่า→ก่อเหตุ, ศพ→ร่างของผู้จากไป, ตาย/ดับ→เลี่ยงคำห้วน (⚠️"เสียชีวิต"/"จากไป" เป็นคำมาตรฐานปลอดภัย ใช้ตรงๆ ได้ — ต้องบอกการจากไปชัด ≥1 ครั้ง ห้ามเลี่ยงจนคนอ่านไม่รู้ว่าเสียชีวิตแล้ว), สยอง→สะเทือนใจ, เลือด→ร่องรอยเหตุการณ์, พนัน/ยาเสพติด/วงเหล้า→เลี่ยงหรือเกลาให้นุ่ม\n' +
         '=== จบ SAFETY ===\n\n' +
         'ตอบเป็น JSON:\n' +
         '{\n' +
@@ -2212,10 +1940,7 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
           const agent = new MasterAgent(workflowId);
           await agent.loadFromDB().catch(() => {});
           agent.onAnalysisComplete({ versions, news_reference: result.news_reference });
-          // ★ 25 ก.ค. 69: เดิมฮาร์ดโค้ด factCheckPassed:true = ช่องนี้บอกว่า "ผ่าน" เสมอ ไม่ใช่ผลตรวจจริง
-          //   ตอนนี้ผูกกับด่านตรวจจริง: ตัวเลขหัวใจหาย หรือ มีตัวเลขที่ไม่มีในต้นฉบับ = ไม่ผ่าน
-          const _factIssues = versions.flatMap(v => [...(v._missingKeyFacts || []), ...(v._unverifiedNumbers || [])]);
-          agent.onValidationComplete({ safetyPassed: validation.valid, issues: [...(validation.issues || []), ..._factIssues.map(x => `ตัวเลขต้องตรวจ: ${x}`)], factCheckPassed: _factIssues.length === 0, riskyWordsFound: [], riskyWordsReplaced: [] });
+          agent.onValidationComplete({ safetyPassed: validation.valid, issues: validation.issues, factCheckPassed: true, riskyWordsFound: [], riskyWordsReplaced: [] });
           await agent.saveMemoryToDB().catch(() => {});
         }
 
@@ -2460,123 +2185,27 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
   }
 
   // ★ DNA v3.3: ใช้สมองจับคู่กลาง promptMatcher.js (คง mismatchPenalty -50 ตามพฤติกรรมเดิม)
-  const { scoreLibraryPrompts, applyDiversityPenalty, pickAmongTies } = await import('@/lib/services/promptMatcher');
-  // 🔴 ★ 25 ก.ค. 69: นี่คือเส้นทางที่ "ท่อข่าวจริง" ใช้เลือกการ์ด (ไม่ใช่ STAGE 2 ด้านบน)
-  //    เดิมคอมเมนต์เขียนว่าตั้งใจไม่พอร์ตด่าน AI มาที่นี่ → คิวข่าวจึงไม่เคยมีใครตรวจว่าการ์ดเข้ากับข่าวจริงไหม
-  //    ตอนนี้พอร์ตมาครบ: หักคะแนนใบผูกขาด + ให้ AI อ่านเนื้อข่าวจริงตัดสิน
-  let scoredPrompts = applyDiversityPenalty(
-    scoreLibraryPrompts(newsAnalysis, validPrompts, { mismatchPenalty: true }),
-    validPrompts
-  );
+  const { scoreLibraryPrompts } = await import('@/lib/services/promptMatcher');
+  const scoredPrompts = scoreLibraryPrompts(newsAnalysis, validPrompts, { mismatchPenalty: true });
 
   // ★ 16 ก.ค. 69 (recheck fix): แนบ _matchType/_isBorrowed จริงด้วย — เดิมแนบแค่ _matchScore
   //   ทำให้ usedPreset.matchType ตกไป default 'MATCHED' หลอกทุกงาน (ไม่ใช่สัญญาณคุณภาพจริง)
   //   เกรดใช้สูตรเดียวกับ STAGE 2 ในไฟล์นี้: ≥60+มิติหลัก≥2 = EXACT / ≥40 = CLOSE / ต่ำกว่า = BORROWED
   //   หมายเหตุ: ด่าน AI re-rank (STAGE 2.5) ตั้งใจ "ไม่พอร์ต" มาที่นี่ — เส้นคิวถูกคุ้มกันด้วยเกต
   //   ANGLE_MIN_MATCH_SCORE (ตัดมุม 2+) และ first-angle→V12 (ใต้ REF_WEIGHT_BY_MATCH) อยู่แล้ว
-  // ★ 25 ก.ค. 69 (รอบแก้ที่ 2): ต่อสาย pickAmongTies เข้าเส้นคิวข่าวจริง
-  //   บั๊กของงานเช้านี้: เขียนตัวสุ่มแก้เสมอไว้แล้วแต่เรียกใช้เฉพาะเส้น STAGE 2 ที่คิวข่าวไม่เคยวิ่งผ่าน
-  //   (ผลตรวจ Fable + sol ตรงกัน) → การ์ด 4 ใบยังกิน 10 จาก 20 เคส
-  const _tieWinner = pickAmongTies(scoredPrompts);
-  if (_tieWinner && scoredPrompts[0] && _tieWinner.index !== scoredPrompts[0].index) {
-    console.log(`[🎲 TIE-BREAK] คะแนนใกล้กัน → ดัน "${validPrompts[_tieWinner.index]?.promptName}" (${_tieWinner.score.toFixed(1)}) ขึ้นเป็นตัวเลือกแรกแทน "${validPrompts[scoredPrompts[0].index]?.promptName}" (${scoredPrompts[0].score.toFixed(1)})`);
-    const _rest = scoredPrompts.filter(s => s.index !== _tieWinner.index);
-    scoredPrompts = [_tieWinner, ..._rest];
-  }
-
-  // เอามา 5 ใบให้ด่านอ่านเนื้อจริงตัดสิน แล้วค่อยเหลือ 3 ใบส่งต่อ
-  let topPrompts = scoredPrompts.slice(0, 5).map(s => {
+  const topPrompts = scoredPrompts.slice(0, 3).map(s => {
     const pr = validPrompts[s.index];
     const _coreDims = (s.dims || []).filter(d => !String(d).startsWith('boost'));
-    // ★ 25 ก.ค. 69: ตัดเกรดด้วยคะแนนดิบ — คะแนนที่ถูกหักเพื่อกันหยิบซ้ำไม่ใช่สัญญาณว่าจับคู่แย่ลง
-    const _raw = (typeof s.rawScore === 'number') ? s.rawScore : s.score;
-    const _mt = (_raw >= 60 && _coreDims.length >= 2) ? 'EXACT' : _raw >= 40 ? 'CLOSE' : 'BORROWED';
+    const _mt = (s.score >= 60 && _coreDims.length >= 2) ? 'EXACT' : s.score >= 40 ? 'CLOSE' : 'BORROWED';
     return {
       ...pr,
-      _matchScore: _raw,
+      _matchScore: s.score,
       _matchedDimensions: s.dims,
       _matchType: _mt,
       _isBorrowed: _mt === 'BORROWED',
     };
   });
 
-  // 🔴 ★ 25 ก.ค. 69 — ด่านอ่านเนื้อข่าวจริง (พอร์ตมาจาก STAGE 3 ให้เส้นคิวข่าวใช้ด้วย)
-  //    เดิมเส้นนี้ตัดสินจาก "ป้าย" ล้วน → เคสจริง: ข่าวเภสัชกรช่วยคุณลุงในร้านขายยา
-  //    ได้การ์ด "ทีมกู้ภัยใช้ความชำนาญช่วยคนติดพื้นที่ยาก" คะแนน 98 EXACT (คนละสถานการณ์)
-  //    ปิดคืน: env PROMPT_SEMANTIC_VERIFY=off
-  if (process.env.PROMPT_SEMANTIC_VERIFY !== 'off' && topPrompts.length > 1 && (actualNewsBody || '').length > 100) {
-    try {
-      const _cands = topPrompts.map((p, i) =>
-        `${i + 1}. "${p.promptName}" — คะแนนป้าย ${Math.round(p._matchScore)}\n   โทน: ${p.tone || '-'}\n   คำสั่งในการ์ด: ${String(p.promptText || '').replace(/\s+/g, ' ').slice(0, 700)}`
-      ).join('\n\n');
-
-      const _verifyPrompt = `คุณเป็นบรรณาธิการที่เลือก "การ์ดเทคนิคการเขียน" ให้เข้ากับข่าวแต่ละชิ้น
-
-=== ข่าวจริง ===
-หัวข้อ: ${actualNewsTitle || '-'}
-${focusAngle ? 'มุมที่จะเล่า: ' + focusAngle + '\n' : ''}เนื้อข่าว:
-${String(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 2500)}
-=== จบข่าว ===
-
-=== การ์ดตัวเลือก ===
-${_cands}
-=== จบตัวเลือก ===
-
-เลือกการ์ดที่ "สถานการณ์ + โทน + คำศัพท์" ใช้กับข่าวนี้ได้จริงที่สุด แล้วให้คะแนนความเข้ากันจริง (fitScore 0-100)
-
-🔴 กฎ: คะแนนป้ายสูงไม่ได้แปลว่าเข้ากัน — ป้ายหมวด/อารมณ์กว้างมาก ข่าวคนละเรื่องก็ได้ป้ายเดียวกัน
-ให้ดูว่า "ฉากและคำศัพท์ในการ์ด" ใช้กับข่าวนี้ได้ไหม เช่น การ์ดที่พูดถึง "ทีมกู้ภัยลุยเข้าพื้นที่ หน้างานเสี่ยง"
-ใช้กับข่าวคนช่วยกันในร้านขายยาไม่ได้ ต้องหักคะแนนหนัก · ถ้าไม่มีใบไหนเข้ากันจริง ให้ fitScore ต่ำกว่า 40 ตามจริง
-
-ตอบเป็น JSON เท่านั้น: { "selectedIndex": <1-${topPrompts.length}>, "fitScore": <0-100>, "reason": "สั้นๆ", "mismatch": "สิ่งที่การ์ดไม่เข้ากับข่าว (ถ้ามี)" }`;
-
-      let _sel = null;
-      try {
-        _sel = await withTimeoutSignal(
-          (signal) => callAI({ prompt: _verifyPrompt, model: MODEL_FINAL_QA, temperature: 0.1, maxTokens: 700, signal }),
-          // ★ 25 ก.ค. 69: ด่านนี้อยู่ใต้เพดาน auto_prompt_select (90s) — ตั้งให้พอดีกับงบ
-          //   30s + ถอย 20s + วิเคราะห์ข่าวรอบแรก ~20s = 70s ยังไม่ชนเพดาน
-          //   (วัดจริง: ด่านนี้ใช้แค่ ~5s/มุม) ถ้าตั้งยาวกว่านี้แล้วโมเดลค้าง จะเสียการ์ดจากคลังทั้งใบ
-          Number(process.env.SEMANTIC_VERIFY_TIMEOUT_MS) || 30_000,
-          'toprompts_semantic_verify'
-        );
-      } catch (e1) {
-        console.warn(`[🤖 SEMANTIC] ${MODEL_FINAL_QA} ล้ม (${e1.message}) → ถอยไป ${MODEL_FAST_CHEAP}`);
-        _sel = await withTimeoutSignal(
-          (signal) => callAI({ prompt: _verifyPrompt, model: MODEL_FAST_CHEAP, temperature: 0.1, maxTokens: 700, signal }),
-          20_000,
-          'toprompts_semantic_verify_fallback'
-        );
-      }
-
-      const _idx = Number(_sel?.selectedIndex);
-      if (_idx >= 1 && _idx <= topPrompts.length) {
-        const _fit = Number.isFinite(Number(_sel.fitScore)) ? Math.max(0, Math.min(100, Number(_sel.fitScore))) : null;
-        const _picked = topPrompts[_idx - 1];
-        _picked._semanticFit = _fit;
-        _picked._semanticReason = _sel.reason || '';
-        _picked._semanticMismatch = String(_sel.mismatch || '').trim();
-        const _LOW = Number(process.env.SEMANTIC_MIN_FIT) || 40;
-        if (_fit !== null) {
-          _picked._isBorrowed = _fit < _LOW;
-          _picked._matchType = _fit < _LOW ? 'BORROWED(SEMANTIC)' : (_fit >= 70 ? 'EXACT(SEMANTIC)' : 'CLOSE(SEMANTIC)');
-        }
-        if (_idx !== 1) {
-          console.log(`[🤖 SEMANTIC] เปลี่ยนการ์ด: "${_picked.promptName}" (เดิม "${topPrompts[0].promptName}") | fit=${_fit ?? '-'} | ${_sel.reason || '-'}`);
-          topPrompts = [_picked, ...topPrompts.filter((_, i) => i !== _idx - 1)];
-        } else {
-          console.log(`[🤖 SEMANTIC] ยืนยันใบเดิม: "${_picked.promptName}" | fit=${_fit ?? '-'}`);
-        }
-        if (_fit !== null && _fit < _LOW) {
-          console.log(`[🤖 SEMANTIC] ⚠️ ไม่มีการ์ดใบไหนเข้ากับข่าวนี้จริง (fit ${_fit}) → ตัวเขียนจะได้คำสั่งห้ามยัดฉากของการ์ด`);
-        }
-      }
-    } catch (verifyErr) {
-      console.warn('[🤖 SEMANTIC] ด่านอ่านเนื้อจริงล้ม (ใช้ผลจากคะแนนป้าย):', verifyErr.message);
-    }
-  }
-
-  topPrompts = topPrompts.slice(0, 3);
   console.log(`[Analyze-Service] 🧠 getTopPrompts: Selected Top ${topPrompts.length} Prompts`);
   
   return { prompts: topPrompts, newsAnalysis, _promptLib: validPrompts.length > 0 ? validPrompts.map(p => ({...p})) : [] };

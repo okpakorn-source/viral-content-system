@@ -30,11 +30,8 @@ import { types as nodeUtilTypes } from 'node:util';
 import { resolveProvider, resolveModel, callBrain } from './aiClient.js';
 import { isRetryable } from './retry.js';
 
-// ★ 25 ก.ค. 69: ยกเพดานเวลา + เปิดให้ปรับผ่าน env (เดิมฝังตายที่ 45 วิ)
-//   อาการที่เจอ: ปุ่มวิเคราะห์เปิดเคสภาพบน :3900 ล้ม 504 ทุกครั้ง เพราะโมเดลใช้ ~51 วิ แต่ถูกตัดที่ 45 วิ
-//   และสายนี้ยิงครั้งเดียวไม่มีตัวสำรอง → ล้มแล้วจบเลย
-const WRAPPER_DEADLINE_MS = Number(process.env.S5_WRAPPER_DEADLINE_MS || 180000); // เพดานรวมทั้งกระบวนการ (generation + repair)
-const ATTEMPT_TIMEOUT_MS = Number(process.env.S5_ATTEMPT_TIMEOUT_MS || 90000);    // เพดานต่อ 1 ครั้งที่ยิง provider จริง
+const WRAPPER_DEADLINE_MS = 120000; // เพดานรวมทั้งกระบวนการ (generation + repair) — ผูก AbortController จริง
+const ATTEMPT_TIMEOUT_MS = 45000;   // เพดานต่อ 1 ครั้งที่ยิง provider จริง — ผูก AbortController จริงเช่นกัน
 const GEN_MAX_ATTEMPTS = 2;         // initial + retry ตามกติกา retryable เดิม (retry.js:isRetryable)
 const GEN_RETRY_GAP_MS = 300;       // หน่วงสั้นๆ ก่อนยิงซ้ำรอบ 2 (courtesy — ไม่ใช่ backoff เต็มรูปแบบ) · abort-aware
 const MAX_PIN_MODEL_LEN = 256;

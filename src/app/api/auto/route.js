@@ -33,8 +33,6 @@ export async function POST(request) {
     return NextResponse.json({
       success: false,
       error: error.message,
-      // ★ 25 ก.ค. 69: เติม errorType ตามกติกาโปรเจกต์ — เดิมไม่มี ทำให้แยกไม่ออกว่าหมดเวลาหรือโมเดลล้ม
-      errorType: /TIMEOUT/i.test(error.message || '') ? 'TIMEOUT' : (error.errorType || 'AUTO_PIPELINE_FAILED'),
       failedStep: error.failedStep || 'unknown_step',
       totalTimeSeconds: parseFloat(elapsed),
     }, { status: 500 });

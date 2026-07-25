@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getNextPendingJobs, updateJobStatus, cleanupStaleJobs } from '@/lib/services/queueService';
 import { createLogger } from '@/lib/logger';
-import { checkApiAuth, internalAuthHeaders } from '@/lib/apiAuth';
 
 const logger = createLogger('QUEUE_WORKER');
 
@@ -16,14 +15,22 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
-  const workerStartedAt = Date.now(); // ★ 25 ก.ค. 69: ใช้คำนวณงบเวลาที่เหลือจริงของ worker
   try {
-    // 1. ตรวจสิทธิ์ — ★ 25 ก.ค. 69: เดิมไม่ส่ง header = ผ่าน (แถม GET เปิดอยู่ = ยิงจากช่อง URL เบราว์เซอร์ได้)
-    const auth = checkApiAuth(req);
-    if (!auth.ok) {
-      logger.warn(`[Queue Worker] ⛔ ปฏิเสธคำขอ (${auth.reason})`);
-      return NextResponse.json({ success: false, error: 'Unauthorized', errorType: 'UNAUTHORIZED' }, { status: 401 });
+    // 1. Verify API Key — allow same-origin web triggers without auth
+    const apiKeyHeader = req.headers.get('x-api-key') || '';
+    const expectedKey = process.env.API_SECRET_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'test-key';
+    const discordKey = process.env.DISCORD_API_SECRET;
+    
+    if (apiKeyHeader) {
+      const isAuthorized = 
+        apiKeyHeader === expectedKey || 
+        (discordKey && apiKeyHeader === discordKey);
+      
+      if (!isAuthorized) {
+        return NextResponse.json({ success: false, error: 'Unauthorized', errorType: 'UNAUTHORIZED' }, { status: 401 });
+      }
     }
+    // No auth header = same-origin trigger (web client or server self-call) = allowed
     
     // 1.5. Cleanup stale jobs first (stuck > 6 minutes)
     const cleaned = await cleanupStaleJobs(15).catch(() => 0);
@@ -65,23 +72,15 @@ export async function POST(req) {
           : `${baseUrl}/api/auto/process`;
         logger.info(`[Queue Worker] ▶️ Starting ${isCoverJob ? 'cover ' : ''}job ${job.id.slice(0, 8)}`);
 
-        // ★ 25 ก.ค. 69 (แก้ตัวจับเวลาที่ไม่เคยได้ทำงาน):
-        //   เดิมตั้ง abort 900 วิ แต่ตัว worker เองมีอายุแค่ 800 วิ (maxDuration) → แพลตฟอร์มฆ่าก่อนเสมอ
-        //   ผลคืองานถูกตัดกลางคันโดยไม่มีใครตีตรา failed แล้วถูกหยิบมาเจนใหม่ = จ่ายเบิ้ล + ข่าวซ้ำ
-        //   ตอนนี้ตั้งให้ "ต่ำกว่า" อายุตัวเอง (เหลือ 40 วิให้ตีตรา+ปลุกงานถัดไป) และหักเวลาที่ใช้ไปแล้วออก
-        const WORKER_BUDGET_MS = 800_000;
-        const RESERVE_MS = 40_000;
-        const spent = Date.now() - workerStartedAt;
-        const remain = Math.max(60_000, WORKER_BUDGET_MS - RESERVE_MS - spent);
+        // AbortController: pipeline ใช้เวลา >12min — timeout ต้องมากกว่านั้น
+        // maxDuration=800 → ใช้ 900s (15 min) เป็น safety margin
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), remain);
-        logger.info(`[Queue Worker] ⏱️ ให้เวลางานนี้ ${Math.round(remain / 1000)} วิ (เหลือจากงบ ${WORKER_BUDGET_MS / 1000} วิ)`);
+        const timeout = setTimeout(() => controller.abort(), 900_000); // 900s = 15 min
 
         const res = await fetch(processUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...internalAuthHeaders(), // ★ 25 ก.ค. 69: เรียกภายในต้องพกกุญแจ (หลังปิดช่อง auth ที่ /api/auto/process)
             // ชั้นกันที่สอง: ถ้าตั้ง bypass secret ไว้ใน Vercel จะทะลุ Deployment Protection ได้เสมอ (ไม่ตั้ง = header ไม่ถูกส่ง)
             ...(process.env.VERCEL_AUTOMATION_BYPASS_SECRET ? { 'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET } : {}),
           },

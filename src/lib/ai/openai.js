@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { logApiUsage } from './usageLogger';
 import { sanitizeOutput } from './safetyFilter';
-import { MODEL_PRIMARY, MODEL_FALLBACKS, MODEL_HEAVY_FALLBACK, clampMaxTokens } from './modelConfig.js';
+import { MODEL_PRIMARY } from './modelConfig.js';
 
 let openaiClient = null;
 
@@ -12,16 +12,7 @@ export function getOpenAIClient() {
       console.warn('⚠️ OPENAI_API_KEY not set');
       return null;
     }
-    // 🔴 ★ 25 ก.ค. 69 (ผลตรวจ Fable+sol ตรงกัน): เดิมสร้างแบบเปล่าๆ = ใช้ค่าโรงงาน
-    //    รอได้ถึง 10 นาที + ลองซ้ำเอง 2 รอบ → 1 การเรียก = สูงสุด 3 คำขอ × 2 โมเดล (มี fallback) = 6
-    //    วันที่ผู้ให้บริการอืด งานบวมทะลุเพดานทุกชั้นและจ่ายเงินซ้ำโดยไม่ได้อะไร
-    //    ตั้ง 240s = สูงกว่าเพดานชั้นในที่ยาวสุด (breakdown 200s / write 180s) แต่ต่ำกว่าเพดานนอก 300s
-    //    ปรับได้: env OPENAI_TIMEOUT_MS / OPENAI_MAX_RETRIES
-    openaiClient = new OpenAI({
-      apiKey,
-      timeout: Number(process.env.OPENAI_TIMEOUT_MS) || 240_000,
-      maxRetries: Number.isFinite(Number(process.env.OPENAI_MAX_RETRIES)) ? Number(process.env.OPENAI_MAX_RETRIES) : 1,
-    });
+    openaiClient = new OpenAI({ apiKey });
   }
   return openaiClient;
 }
@@ -38,37 +29,7 @@ export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, 
   }
 
   // System message — บังคับ AI + กฎเหล็ก DNA + Facebook Safety ถาวร
-  // ★ 25 ก.ค. 69 (เจ้าของสั่ง): กฎกลางถอยไปคุมแค่ความจริง+ความปลอดภัย — สไตล์ให้การ์ดในคลังพร้อมท์คุม
-  //   ถอยกลับชุดเดิมทั้งก้อน: env HOUSE_RULES=legacy
-  const HOUSE_CARD_FIRST = `คุณเป็น AI assistant ที่ต้องปฏิบัติตามคำสั่งใน user message อย่างเคร่งครัด
-
-=== กฎกลาง (เหลือเฉพาะความจริง + ความปลอดภัย — 25 ก.ค. 69) ===
-🔴 สไตล์การเขียน โครงเรื่อง จังหวะ สำนวน วิธีเปิด-ปิด ทั้งหมด "ให้ยึดคำสั่งจากคลังพร้อมท์ที่แนบมาในข้อความ"
-   กฎกลางนี้ไม่กำหนดสไตล์ใดๆ และห้ามขัดกับคำสั่งของพร้อมท์
-
-[1] ทำเฉพาะสิ่งที่คำสั่งสั่ง — ห้ามข้ามขั้น ห้ามเพิ่มขั้นเอง
-
-[2] ห้ามแต่งเรื่อง
-- ใช้ข้อมูลจากเนื้อข่าวที่ให้มาเท่านั้น ห้ามเพิ่มจากความรู้ของตัวเอง
-- ชื่อคน สถานที่ ตัวเลข วันที่ ต้องตรงต้นฉบับ 100% ห้ามเดา ห้ามแก้
-- 🔴 สถานะบุคคล "ยังมีชีวิต/เสียชีวิตแล้ว" ต้องตรงต้นฉบับ 100% — ถ้าต้นฉบับมีผู้เสียชีวิต ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้ง ("เสียชีวิต"/"จากไป" ใช้ได้ตรงๆ)
-- ห้ามคาดเดาเพศจากชื่อ — ข่าวไม่ระบุเพศ ให้เรียกด้วยชื่อหรือ "เจ้าตัว"
-- ลักษณนามถูกประเภท: พระสงฆ์ = "รูป", คนทั่วไป = "คน"
-- ข่าวไม่ได้ระบุอะไร ห้ามสร้างขึ้นเอง ให้ข้ามไป
-
-[3] ติดขัดต้องแจ้ง ห้ามแก้เอง
-- ข้อมูลไม่พอ → ใส่ "_error": "ข้อมูลไม่เพียงพอ: [รายละเอียด]"
-- เนื้อข่าวไม่ชัด → ใส่ "_warning": "เนื้อข่าวคลุมเครือ: [จุดที่ไม่ชัด]"
-
-[4] ตอบเป็น JSON เท่านั้น ใช้ key names ตามที่ระบุใน prompt
-- ถ้ามีเนื้อข่าวอยู่ระหว่าง === เนื้อข่าว === ให้ใช้ข้อมูลจากส่วนนั้นเท่านั้น
-=== จบกฎกลาง ===
-
-=== FACEBOOK SAFETY RULES ===
-🔴 ถอดกฎแทนคำ/แบนคำออกทั้งหมดแล้ว (25 ก.ค. 69 — เจ้าของสั่ง)
-เขียนตามข้อเท็จจริงในข่าวตรงๆ ไม่ต้องเลี่ยงคำ ไม่ต้องแทนคำใดๆ
-=== จบ FACEBOOK SAFETY RULES ===`;
-  const HOUSE_LEGACY = `คุณเป็น AI assistant ที่ต้องปฏิบัติตามคำสั่งใน user message อย่างเคร่งครัด
+  const systemMsg = `คุณเป็น AI assistant ที่ต้องปฏิบัติตามคำสั่งใน user message อย่างเคร่งครัด
 
 === กฎเหล็ก DNA ระบบ (IRON RULES — บังคับทุกคำสั่ง ทุกโหมด ห้ามฝ่าฝืน) ===
 
@@ -146,38 +107,38 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
 
 === จบ HUMAN WRITING DNA V2 ===
 
-=== FACEBOOK SAFETY RULES ===
-🔴 ถอดกฎแทนคำ/แบนคำออกทั้งหมดแล้ว (25 ก.ค. 69 — เจ้าของสั่ง: พนักงานเกลาเนื้อก่อนใส่เจนอยู่แล้ว)
-ให้เขียนตามข้อเท็จจริงในข่าวตรงๆ ไม่ต้องเลี่ยงคำ ไม่ต้องแทนคำใดๆ
-ข้อเดียวที่ยังบังคับ: ห้ามใส่ข้อมูลที่ไม่มีในข่าว และสถานะเป็น/ตายของบุคคลต้องตรงต้นฉบับ 100%
+=== FACEBOOK SAFETY RULES (บังคับทุกคำตอบ) ===
+ก่อนสร้างเนื้อหาทุกครั้ง ต้องตรวจสอบและ rewrite คำเสี่ยงทั้งหมด:
+
+[ความรุนแรง] ห้ามใช้: ฆ่า, ยิงหัว, ปาดคอ, หั่นศพ, เลือดสาด, ศพ, สยอง, โหด, คว้านท้อง, ไลฟ์ตาย, ดับสลด
+→ ใช้แทน: ทำร้ายจนเสียชีวิต, เหตุรุนแรง, ร่างผู้เสียชีวิต, เหตุสะเทือนใจ, เหตุไม่คาดคิด
+
+[Self-harm] ห้ามใช้: ผูกคอ, ยิงตัวตาย, กระโดดตึก, อยากตาย, จบชีวิต, ลาก่อนโลกนี้
+→ ใช้แทน: เสียชีวิต, จากไป, เหตุเศร้า, ภาวะเครียดสะสม
+
+[Sexual/18+] ห้ามใช้: หลุด, AV, xxx, เย็ด, เสียว, คอลเสียว, เด็กเอ็น, OnlyFans
+→ ใช้แทน: คลิปปริศนา, คอนเทนต์ส่วนตัว, ภาพไม่เหมาะสม, ประเด็นบนโซเชียล
+
+[การพนัน] ห้ามใช้: สล็อต, บาคาร่า, แทงบอล, ฝากถอน, เว็บตรง, แตกหนัก, ยิงปลา
+→ ใช้แทน: เว็บไซต์ผิดกฎหมาย, สูญเงินจำนวนมาก
+
+[ยาเสพติด] ห้ามใช้: ดูด, พอต, vape, THC, ยาไอซ์, โคเคน, สายเขียว
+→ ใช้แทน: อุปกรณ์สูบ, สารเสพติด, อุปกรณ์ดังกล่าว
+
+[Hate Speech] ห้ามใช้: ไอ้ดำ, ไอ้ลาว, อีกะเทย, พวกเกย์มัน..., พวกมุสลิม
+→ ใช้แทน: บุคคลดังกล่าว, กลุ่มคนบางส่วน, เกิดประเด็นถกเถียง
+
+[Fake News] ห้ามใช้: รักษาหาย 100%, หมอไม่อยากให้รู้, กินแล้วหาย, รัฐบาลแจกจริง, ด่วนที่สุด
+→ ใช้แทน: มีการแชร์ข้อมูลว่า..., ผู้ใช้บางรายอ้างว่า..., ควรตรวจสอบเพิ่มเติม
+
+[Clickbait] ห้ามใช้: คุณจะไม่เชื่อ, รีบดูด่วน, แชร์ด่วน, ดูก่อนโดนลบ, อึ้งทั้งประเทศ
+→ ใช้แทน: หลายคนพูดถึง, กลายเป็นประเด็น, คนบนโซเชียลวิจารณ์
+
+[Engagement Bait] ห้ามใช้: พิมพ์ 1, เมนต์ 99, แชร์วนไป, ใครเห็นด้วยกดไลก์
+→ ใช้แทน: คุณคิดเห็นยังไง, ถ้าเป็นคุณจะ..., มองเรื่องนี้ยังไง
+
+หลักการ: เปลี่ยนจาก "ความแรง" → "อารมณ์" เน้น emotional storytelling, human emotion, social conflict แทน shock/gore/rage bait
 === จบ FACEBOOK SAFETY RULES ===`;
-  // 🔴 ★ 25 ก.ค. 69 (เจ้าของสั่ง: "เอากลับมา HUMAN WRITING DNA") — ดูคำอธิบายเต็มใน claudeClient.js
-  //    เอากลับเฉพาะส่วนสำนวน+จังหวะ · ไม่เอากฎที่ชนกับการ์ด · ปิดคืน: env HUMAN_DNA=off
-  const HUMAN_DNA_BLOCK = `=== HUMAN WRITING DNA V2 (ความเป็นมนุษย์ในการเล่า) ===
-คุณไม่ใช่ AI เขียนข่าว — คุณคือ "มนุษย์ที่เล่าเรื่องเก่งมาก"
-🔴 บล็อกนี้คุมแค่ "สำนวนและจังหวะ" ไม่ได้กำหนดโครงเรื่อง โทน หรือวิธีเปิด-ปิด
-   เรื่องพวกนั้นให้ยึดคำสั่งจากคลังพร้อมท์เสมอ ถ้าขัดกัน การ์ดชนะ
-
-[ ต้องทำ ]
-- เขียนเหมือนเล่าให้เพื่อนฟัง ไม่ใช่รายงานข่าว
-- ใช้สำนวนคนจริงได้เต็มที่: ใจหาย, ขนลุก, เจ็บแทน, น้ำตาจะไหล, อึ้งไปเลย
-- สลับประโยคสั้น-ยาว สร้างจังหวะหายใจ ห้ามอัดข้อมูลติดกันเป็นพรืด
-- ห้ามซ้ำคำเดียวกันเกิน 2 ครั้งในข่าวเดียว
-- ห้ามเปิดทุกย่อหน้าด้วยรูปแบบเดิม
-- ทุกคำต้องมีน้ำหนัก ตัดคำลอยออกหมด
-
-[ อ่านทวนก่อนส่ง 5 รอบ ]
-รอบ 1: ลบคำฟุ่มเฟือย
-รอบ 2: เปลี่ยนภาษาทางการเป็นภาษามนุษย์
-รอบ 3: ตรวจคำซ้ำ — ซ้ำเกิน 2 ครั้งให้เปลี่ยนสำนวน
-รอบ 4: ตรวจกลิ่น AI — ประโยคไหนอ่านแล้วเหมือนเครื่องเขียน ให้เขียนใหม่
-รอบ 5: อ่านทวนเหมือนคนอ่านจริง — สะดุดตรงไหน เขียนตรงนั้นใหม่
-=== จบ HUMAN WRITING DNA V2 ===`;
-
-  const _houseRules = process.env.HOUSE_RULES === 'legacy'
-    ? HOUSE_LEGACY
-    : (process.env.HUMAN_DNA === 'off' ? HOUSE_CARD_FIRST : `${HOUSE_CARD_FIRST}\n\n${HUMAN_DNA_BLOCK}`);
-  const systemMsg = _houseRules;
 
   // Build user message content — support vision (imageContents)
   let userContent;
@@ -202,31 +163,30 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
   console.log(`[callAI] model=${model}, temp=${temperature}, maxTokens=${maxTokens}`);
   console.log(`[callAI] prompt preview (first 500ch): ${(prompt || userPrompt || '').slice(0, 500)}`);
 
-  // ★ 25 ก.ค. 69: ไม้สองอ่านจากแผนที่กลาง (modelConfig.MODEL_FALLBACKS) แทน hardcode gpt-4o
-  //   บั๊กเดิม: ไม้สองเป็น gpt-4o เสมอ + ส่ง maxTokens เดิม (เช่น 24000) ซึ่งเกินเพดาน gpt-4o (16384)
-  //   → ไม้สองถูก API ปฏิเสธทันทีทุกครั้ง = มีไว้แต่ไม่เคยช่วยอะไร แถม log ขึ้นบรรทัดล้มหลอกตา
-  const modelsToTry = [model, ...(MODEL_FALLBACKS[model] || [MODEL_HEAVY_FALLBACK])]
-    .filter((m, i, a) => m && a.indexOf(m) === i);
+  // ★ gpt-5.5 / gpt-5.4-mini: ใช้ max_completion_tokens + ไม่รับ temperature (ใช้ default=1 เท่านั้น)
+  const modelsToTry = [model];
+  if (model === 'gpt-5.5') {
+    modelsToTry.push('gpt-4o');
+  } else if (model === 'gpt-5.4-mini') {
+    modelsToTry.push('gpt-4o-mini');
+  } else if (model !== 'gpt-4o') {
+    modelsToTry.push('gpt-4o');
+  }
 
   let lastError = null;
   for (const currentModel of modelsToTry) {
     try {
       console.log(`[callAI] Trying model=${currentModel}`);
       const isNewModel = currentModel.startsWith('gpt-5') || currentModel.startsWith('o1') || currentModel.startsWith('o3');
-      // ★ 25 ก.ค. 69: ตัดเพดาน token ให้พอดีกับโมเดลที่กำลังยิงจริง — กันขอเกินแล้วโดนปฏิเสธทั้งคำขอ
-      const capped = clampMaxTokens(currentModel, maxTokens);
-      if (capped !== maxTokens) {
-        console.warn(`[callAI] ⚠️ ลด maxTokens ${maxTokens} → ${capped} ให้พอดีเพดานของ ${currentModel}`);
-      }
-
+      
       const response = await client.chat.completions.create({
         model: currentModel,
         messages,
         // ★ gpt-5.x ไม่รับ temperature ≠ 1 → ไม่ส่ง (ใช้ default)
         ...(isNewModel ? {} : { temperature }),
         ...(isNewModel
-          ? { max_completion_tokens: capped }
-          : { max_tokens: capped }),
+          ? { max_completion_tokens: maxTokens }
+          : { max_tokens: maxTokens }),
         response_format: { type: 'json_object' },
       // ★ 16 ก.ค. 69 (B4): รับ AbortSignal จาก withTimeoutSignal — timeout แล้วยกเลิก HTTP จริง ตัดจ่ายซ้อน
       }, signal ? { signal } : undefined);

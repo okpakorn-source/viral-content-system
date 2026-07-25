@@ -15,7 +15,7 @@ import { createStore } from '@/lib/persistStore';
 
 const STORE = 'desk-dna';
 
-async function openaiJSON({ model = 'gpt-5.6-terra', messages, maxTokens = 3000, temperature = 0.3 }) {
+async function openaiJSON({ model = 'gpt-4o', messages, maxTokens = 3000, temperature = 0.3 }) {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
@@ -84,7 +84,7 @@ export async function extractDna(rawCsv, { topN = 250, batch = 25, onLog = () =>
   const runChunk = async (chunk, ci) => {
     const list = chunk.map(p => `[${p.react}] ${p.t.slice(0, 130)}`).join('\n');
     try {
-      const r = await openaiJSON({ model: 'gpt-5.6-terra', temperature: 0.3, maxTokens: 3500, messages: [{ role: 'user', content: `${DNA_PROMPT}\n\nโพสต์ (รูปแบบ: [รีแอกชัน] พาดหัว):\n${list}` }] });
+      const r = await openaiJSON({ model: 'gpt-4o', temperature: 0.3, maxTokens: 3500, messages: [{ role: 'user', content: `${DNA_PROMPT}\n\nโพสต์ (รูปแบบ: [รีแอกชัน] พาดหัว):\n${list}` }] });
       for (const th of (r.themes || [])) if (th.name) rawThemes.push(th);
     } catch (e) { onLog(`ก้อน ${ci} ล่ม: ${e.message.slice(0, 40)}`); }
   };
@@ -95,7 +95,7 @@ export async function extractDna(rawCsv, { topN = 250, batch = 25, onLog = () =>
   let themes = rawThemes;
   try {
     const merged = await openaiJSON({
-      model: 'gpt-5.6-terra', temperature: 0.2, maxTokens: 4000,
+      model: 'gpt-4o', temperature: 0.2, maxTokens: 4000,
       messages: [{ role: 'user', content: `รวบ "แนวข่าว" ที่ซ้ำกันเป๊ะเท่านั้น — เหลือ 18-25 แนว (อย่ารวบจนกว้าง! เก็บความเจาะจงไว้)
 ★ คำค้นต้องเจาะจงตามจุดหักมุม (เช่น "เด็กยากจนสอบติดหมอ" ไม่ใช่ "สู้ชีวิต") — ตัดคำค้นกว้างลอยๆ ทิ้ง
 แนวดิบ: ${JSON.stringify(rawThemes.map(t => ({ n: t.name, c: t.category, nq: t.newsQueries, cq: t.clipQueries, r: t.exampleReact }))).slice(0, 13000)}

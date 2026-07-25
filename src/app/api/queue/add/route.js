@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { enqueueJob } from '@/lib/services/queueService';
 import { createStore } from '@/lib/persistStore';
 import { createLogger } from '@/lib/logger';
-import { checkApiAuth, internalAuthHeaders } from '@/lib/apiAuth';
 
 const logger = createLogger('QUEUE_ADD');
 
@@ -12,13 +11,24 @@ export const maxDuration = 300;
 
 export async function POST(req) {
   try {
-    // 1. ตรวจสิทธิ์ — ★ 25 ก.ค. 69: เดิม "ไม่ส่ง header = ผ่านฉลุย" → คนนอกยิงสั่งเจนข่าวเผาเงินได้
-    //    ตอนนี้ต้องเป็นกุญแจถูก / Vercel Cron / หน้าเว็บของเราเอง / เครื่องตัวเอง เท่านั้น
-    const auth = checkApiAuth(req);
-    if (!auth.ok) {
-      logger.warn(`[Queue Add] ⛔ ปฏิเสธคำขอ (${auth.reason})`);
-      return NextResponse.json({ success: false, error: 'Unauthorized', errorType: 'UNAUTHORIZED' }, { status: 401 });
+    // 1. Verify API Key
+    const authHeader = req.headers.get('authorization') || '';
+    const apiKeyHeader = req.headers.get('x-api-key') || '';
+    const expectedKey = process.env.API_SECRET_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'test-key';
+    const discordKey = process.env.DISCORD_API_SECRET;
+    
+    // Auth: allow same-origin web requests (no auth header needed)
+    // Only enforce auth for external callers (Discord, etc)
+    if (authHeader || apiKeyHeader) {
+      const isAuthorized = 
+        (authHeader === `Bearer ${expectedKey}` || apiKeyHeader === expectedKey) ||
+        (discordKey && apiKeyHeader === discordKey);
+        
+      if (!isAuthorized) {
+        return NextResponse.json({ success: false, error: 'Unauthorized', errorType: 'UNAUTHORIZED' }, { status: 401 });
+      }
     }
+    // No auth header = same-origin web request = allowed
     
     // 2. Parse payload
     let payload;
@@ -188,7 +198,7 @@ export async function POST(req) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...internalAuthHeaders(), // ★ 25 ก.ค. 69: พกกุญแจจริง (เดิมส่ง expectedKey ที่ตกไปเป็นค่า public/'test-key')
+        'x-api-key': expectedKey
       },
       body: JSON.stringify({ trigger: 'new_job' })
     }).then(() => {

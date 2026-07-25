@@ -72,7 +72,7 @@ export async function addFromTitle(title, from = 'sent') {
 ตอบ JSON เท่านั้น: {"names":["ชื่อ/ฉายา"]}
 - เอาเฉพาะชื่อคนจริง (เช่น "พี่หนุ่ม กรรชัย", "ต่าย อรทัย", "ป้าขยัน") — ไม่เอาชื่อสถานที่/รายการ/บริษัท/หน่วยงาน
 - ชื่อยาว 3-30 ตัวอักษร · ไม่มีชื่อคนเลย = {"names":[]}`,
-      model: 'gpt-5.6-luna', temperature: 0.1, maxTokens: 200,
+      model: 'gpt-4o-mini', temperature: 0.1, maxTokens: 200,
     });
     const parsed = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
     names = (parsed?.names || []).map(n => String(n).trim()).filter(n => n.length >= 3 && n.length <= 30).slice(0, 4);

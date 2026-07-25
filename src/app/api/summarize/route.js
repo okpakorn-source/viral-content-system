@@ -10,7 +10,7 @@ export async function POST(request) {
   } catch (error) {
     console.error('[Summarize API Endpoint] Error:', error);
     return NextResponse.json(
-      { success: false, error: error.message || 'เกิดข้อผิดพลาดในการประมวลผล', errorType: /TIMEOUT/i.test(error.message || '') ? 'TIMEOUT' : (error.errorType || 'SUMMARIZE_FAILED'), failedStep: error.failedStep || undefined },
+      { success: false, error: error.message || 'เกิดข้อผิดพลาดในการประมวลผล' },
       { status: 500 }
     );
   }

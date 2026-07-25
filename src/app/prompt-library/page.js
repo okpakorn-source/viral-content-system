@@ -71,21 +71,18 @@ export default function PromptLibraryPage() {
 
   return (
     <>
-      <Header title="🏛️ หอสมุด Prompt" subtitle={`${stats.total || 0} ใบ — ระบบทำข่าวหยิบไปใช้เขียนจริง · อัปเดตมาตรฐาน 25 ก.ค. 69`} />
+      <Header title="🏛️ หอสมุด Prompt" subtitle={`DNA v3 — ${stats.total || 0} รายการ ทุกตัวผ่านด่านคัด 6 เกณฑ์ก่อนเข้าคลัง`} />
       <div className="page-content">
 
-        {/* ★ 25 ก.ค. 69: อัปเดตป้ายให้ตรงระบบจริง (ของเดิมเขียนไว้ 12 มิ.ย. และบางข้อไม่ตรง runtime) */}
+        {/* DNA v3 Upgrade Banner (12 มิ.ย. 69) */}
         <div className="card" style={{ marginBottom: 16, border: '1px solid rgba(34,197,94,0.3)', background: 'linear-gradient(135deg, rgba(34,197,94,0.06), rgba(6,182,212,0.06))' }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: '#22c55e', marginBottom: 8 }}>
-            🧬 มาตรฐานพร้อมท์ปัจจุบัน (อัปเดต 25 ก.ค. 69)
+            🧬 อัพเกรด DNA v3 — มาตรฐานพร้อมท์ใหม่ (12 มิ.ย.)
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8, fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.7 }}>
-            <div>📐 <b style={{ color: 'var(--text-primary)' }}>โครงตายตัว</b> — แอดมินเพจเล่าให้แฟนเพจฟัง / 3 ย่อหน้า / เข้าเรื่องตั้งแต่ประโยคแรก / ปิดสั้น</div>
-            <div>👑 <b style={{ color: 'var(--text-primary)' }}>การ์ดคุมสไตล์เต็มตัว</b> — 25 ก.ค. ถอดกฎกลางที่เคยทับออกหมด (บังคับ 250 คำ · บังคับสำนวน · ลิสต์ห้ามใช้คำ · กฎเล่ามุมบวก)</div>
-            <div>🚫 <b style={{ color: 'var(--text-primary)' }}>ไม่มีตัวกรองคำอัตโนมัติแล้ว</b> — 25 ก.ค. ถอดระบบแทนคำทั้งหมด เนื้อผ่านดิบ 100%</div>
-            <div>🛡️ <b style={{ color: 'var(--text-primary)' }}>ด่านคัดตอนเข้าคลัง</b> — ตรวจ 6 เกณฑ์โทน แต่ตกแล้ว{'ยัง'}รับเข้าพร้อมติดธง (บล็อกจริงเฉพาะเนื้อหาโจมตี/ประจาน)</div>
-            <div>🤖 <b style={{ color: 'var(--text-primary)' }}>โมเดลที่ใช้</b> — วิเคราะห์/สร้างพร้อมท์: gpt-5.6-terra · จับคู่: gpt-5.6-luna · ตัวเขียนข่าว: claude-opus-5</div>
-            <div>⚠️ <b style={{ color: 'var(--text-primary)' }}>ค้างอยู่</b> — ช่อง &quot;สำเร็จ&quot; ยังไม่มีใครเขียนกลับ (0 ทุกใบ) · การจับคู่ยังหยิบอันดับ 1 เสมอ → อยู่ในแผนยกเครื่อง</div>
+            <div>📐 <b style={{ color: 'var(--text-primary)' }}>โครงตายตัว</b> — แอดมินเพจเล่าให้แฟนเพจฟัง / 3 ย่อหน้า / เข้าเรื่องตั้งแต่ประโยคแรก / จบที่ใจความไม่อวยยืด</div>
+            <div>🚫 <b style={{ color: 'var(--text-primary)' }}>ข้อห้ามบังคับทุกตัว</b> — ห้ามชี้นำคนอ่าน ห้ามเหน็บสถานะ ห้ามกระชากอารมณ์ ห้ามเกริ่นยาว ห้ามบังคับเศร้า/ลุ้นเกิน</div>
+            <div>🛡️ <b style={{ color: 'var(--text-primary)' }}>คัดอัตโนมัติก่อนบันทึก</b> — พร้อมท์ที่ AI สร้างต้องผ่านเกณฑ์ 6 ข้อเดียวกับหอสมุดไวรัล ของเก่ายุคปั่นเอนเกจถูกล้างหมดแล้ว</div>
           </div>
         </div>
 

@@ -12,7 +12,7 @@ import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT
 import { MODEL_PRIMARY, MODEL_FAST, MODEL_HEAVY_FALLBACK } from '@/lib/ai/modelConfig';
 import { withTimeout } from '@/lib/utils/withTimeout';
 
-const MODEL_GEMINI_PRO = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash'; // ★ 25 ก.ค. 69: 3.5 → 3.6 (เร็วกว่า ~8 เท่าจากเทสจริง)
+const MODEL_GEMINI_PRO = 'gemini-3.5-flash'; // ★ อัปเกรด 10 มิ.ย. 2026 (เดิม gemini-2.5-pro เก่า 2 รุ่น)
 
 // ═══════════════════════════════════════════════════════════
 // 🔍 POST-PROCESSING QUALITY FILTERS
@@ -317,8 +317,7 @@ function calculateAutoScore(content, sourceText, lenCfg = null) {
   // คะแนน Hook (เปิดเรื่องแรง)
   const firstLine = content.split('\n')[0] || '';
   if (firstLine.length >= 20 && firstLine.length <= 100) score += 5;
-  // ★ 25 ก.ค. 69 (ข้อ 2/5): ถอดโบนัส +5 "เปิดด้วย quote" — ตัวให้คะแนนเคยดันให้เปิดด้วยคำพูด
-  //   แล้วประโยคถัดไปตกร่อง "นี่คือคำพูดของ..." (วัดจริง 4/19 เวอร์ชัน) · วิธีเปิดให้การ์ดกำหนดเอง
+  if (/["\u201C\u201D]/.test(firstLine)) score += 5; // เปิดด้วย quote
   if (/[?ฟ]/.test(firstLine)) score += 3; // เปิดด้วยคำถาม
   
   // คะแนนรักษาข้อเท็จจริง (ตัวเลขจากต้นฉบับปรากฏในเนื้อหา)
@@ -471,7 +470,6 @@ export async function performSummarize({
 
   // ===== MODE: extract — สกัดเนื้อข่าวอย่างเดียว =====
   if (mode === 'extract') {
-    let _extractFailReasonUrl = ''; // ★ 25 ก.ค. 69: เก็บเหตุที่ AI สกัดล้ม ไว้ติดธงตอน fallback (เดิมล้มเงียบ)
     // === PATH A: TikTok/YouTube — ถอดเสียง → จัดรูปแบบ (รักษาคำพูดเดิม) ===
     if (sourceType === 'tiktok' || sourceType === 'youtube') {
       try {
@@ -582,17 +580,11 @@ export async function performSummarize({
       }
     } catch (err) {
       console.error('[Extract-URL] ERROR:', err.message);
-      _extractFailReasonUrl = err.message;
     }
 
     // Fallback
-    // ★ 25 ก.ค. 69: ติดธงให้เหมือนสายคิว — เดิมคืน success:true เฉยๆ = AI สกัดล้มแบบเงียบสนิท
-    //   (ผู้ใช้เห็นข่าวออกมาเป็นข้อความดิบโดยไม่รู้ว่าขั้นสกัดพัง)
-    console.warn(`[Extract-URL] ⚠️ FALLBACK raw text — เหตุ: ${_extractFailReasonUrl || 'AI ตอบไม่ผ่านเกณฑ์'}`);
     return {
       success: true,
-      extractFallback: true,
-      extractError: _extractFailReasonUrl || 'AI ตอบไม่ผ่านเกณฑ์',
       data: {
         newsTitle: text.slice(0, 80).replace(/\n/g, ' ').trim(),
         newsBody: text.slice(0, 5000),
@@ -1087,10 +1079,6 @@ ${candidateList}
     }
 
     // [A] Tone Override Block — กฎการนำเสนอเชิงบวก (บังคับทุกเวอร์ชัน — สอดคล้องอัลกอริทึม Facebook)
-    // 🔴 ★ 25 ก.ค. 69 (เจ้าของสั่ง): ปิดกฎเล่ามุมบวกโดยปริยาย — 'คนคัดข่าวมาก่อนแล้ว'
-    //    ให้การ์ดในคลังพร้อมท์เป็นคนคุมโทน ไม่ต้องมีกฎกลางมาดึงกลับเป็นบวกทุกงาน
-    //    เปิดคืน: env TONE_OVERRIDE=on
-    const _toneOverrideOn = process.env.TONE_OVERRIDE === 'on';
     const TONE_OVERRIDE_BLOCK = `
 
 ★★★ POSITIVE REFRAMING RULE — กฎการนำเสนอเชิงบวก (บังคับทุกเวอร์ชัน ห้ามละเมิดไม่ว่า prompt ด้านบนจะสั่งอย่างไร) ★★★
@@ -1132,7 +1120,7 @@ ${candidateList}
 
     let prompt = '';
     if (smartPrompt && smartPrompt.promptText) {
-      prompt = '=== 🏛️ คำสั่งเขียนจากคลังพร้อมท์ (การ์ดที่ถอด DNA จากโพสต์ไวรัลจริง) ===\n' +
+      prompt = '=== 🏛️ คำสั่งเขียนจากหอสมุดไวรัล ===\n' +
         `ประเภท: ${smartPrompt.category || '-'} | อารมณ์: ${smartPrompt.emotionalType || smartPrompt.emotionalTags?.[0] || '-'} | Viral Score: ${smartPrompt.viralScore || '-'}\n` +
         `สไตล์ Hook: ${smartPrompt.hookStyle || '-'} | โทน: ${smartPrompt.tone || '-'}\n` +
         `โครงสร้าง: ${smartPrompt.structure || '-'}\n\n`;
@@ -1174,10 +1162,10 @@ ${candidateList}
           smartPrompt.doNot.map(dn => `- ${dn}`).join('\n') + '\n\n';
       }
 
-      prompt += '=== จบคำสั่งจากคลังพร้อมท์ ===\n\n';
+      prompt += '=== จบคำสั่งหอสมุด ===\n\n';
 
       // [A] Append Tone Override Block — บังคับทุกกรณี (เดิมข้ามเมื่อ toneClass=positive ทำให้ข่าวลบที่จับคู่ prompt บวกหลุดกฎ)
-      if (_toneOverrideOn) prompt += TONE_OVERRIDE_BLOCK;
+      prompt += TONE_OVERRIDE_BLOCK;
       console.log(`[ToneOverride] ✅ TONE_OVERRIDE_BLOCK appended (always-on, prompt toneClass=${smartPrompt?.toneClass || 'neutral'})`);
     }
 
@@ -1273,19 +1261,12 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
     prompt += quoteSafetyRule;
 
     // ★ VIRAL FEW-SHOT (11 มิ.ย. — ผู้ใช้เลือก: เรียนจากหอสมุดไวรัล 170 โพสต์ + สำนวนเพจไวรัลเต็มตัว)
-    // ★ 25 ก.ค. 69 (เจ้าของเคาะ 5 ข้อ — "1 เรื่อง 1 เจ้าของ"): มีการ์ดจากคลัง = การ์ดคุมสไตล์เต็มตัว
-    //   ตัวอย่างสไตล์เหลือชุดเดียวคือ "โพสต์ครูของการ์ด" — ตัด STYLE PACK/โพสต์ไวรัล 2 โพสต์/ลายมือ 5 ประโยค
-    //   (เดิม 4 แหล่ง ~4,200 ตัวอักษรแข่งกัน ตัวเขียนเฉลี่ยเสียงจนการ์ดจาง + เกิดแพตเทิร์นเปิด "นี่คือ...")
-    //   ตอน fallback ไม่มีการ์ด → ชุดช่วยเดิมกลับมาครบ · ปิดคืน: env STYLE_SINGLE_SOURCE=off
-    const _hasLibCard = !!(smartPrompt && smartPrompt.promptText && smartPrompt.id !== 'fallback_builtin' && !smartPrompt._isFallback);
-    const _singleStyle = _hasLibCard && process.env.STYLE_SINGLE_SOURCE !== 'off';
-    if (_singleStyle) console.log(`[StyleSource] 📖 โพสต์ครูของการ์ดเป็นตัวอย่างชุดเดียว — ข้าม STYLE PACK/ตัวอย่างไวรัล/ลายมือ 5 ประโยค (การ์ด: ${smartPrompt.promptName || '-'})`);
     let viralFewshotBlock = '';
     try {
       const { getViralFewshotBlock } = await import('@/lib/services/viralFewshot');
       // flow คิว/auto ส่ง presetPrompt มา → บล็อก Stage 1 ถูกข้าม newsAnalysis เป็น null
       // ต้อง fallback ไป breakdown (มี primaryCategory เสมอ) แล้วค่อย category ของ prompt ที่เลือก
-      if (!_singleStyle) viralFewshotBlock = await getViralFewshotBlock({
+      viralFewshotBlock = await getViralFewshotBlock({
         category: newsAnalysis?.primaryCategory || actualBreakdown?.primaryCategory || smartPrompt?.category || '',
         emotionalTags: newsAnalysis?.emotionalTags || newsAnalysis?.emotionalThemes || actualBreakdown?.emotionalTags || [],
         archetype: newsAnalysis?.narrativeArchetype || actualBreakdown?.narrativeArchetype || '',
@@ -1311,16 +1292,14 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         : 'คุณต้องสร้างเนื้อหาหลายเวอร์ชันจากข่าวนี้ โดยแต่ละเวอร์ชันใช้มุมเขียนต่างกัน\n') +
       `แต่ละเวอร์ชัน:\n` +
       `- ความยาวบังคับ ${lenCfg.min}-${lenCfg.max} คำ ทุกประโยคต้องให้ข้อมูลใหม่ แบ่ง ${lenCfg.paraDesc} สำหรับ Facebook\n` +
-      `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้า 1] เปิดแรง hook ดึงอารมณ์ [ย่อหน้าตรงกลาง] เล่ารายละเอียด storytelling [ย่อหน้าสุดท้าย] ${_hasLibCard ? 'ปิดตามวิธีที่การ์ดกำหนด — จบที่ใจความ หรืออวยพรสั้นที่มีใจความ ห้ามเทศนา ห้ามสั่งสอนคนอ่าน' : 'ปิดท้ายด้วยประโยคบรรยายเรียบๆ ที่บอกเล่าความจริงโดยไม่ตีความหมายเพิ่มเติม'}\n` +
+      `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้า 1] เปิดแรง hook ดึงอารมณ์ [ย่อหน้าตรงกลาง] เล่ารายละเอียด storytelling [ย่อหน้าสุดท้าย] ปิดท้ายด้วยประโยคบรรยายเรียบๆ ที่บอกเล่าความจริงโดยไม่ตีความหมายเพิ่มเติม\n` +
       `- แต่ละย่อหน้าต้องมีอย่างน้อย ${lenCfg.sentences} ประโยค คั่นด้วย \\n\\n\n` +
       '- ต้องอ้างอิงข้อมูลจริงจากข่าว ห้ามแต่งเรื่องที่ไม่มีในข่าว — ★ FACT-LOCK: ห้ามเพิ่มบุคคล/ความสัมพันธ์/อาชีพ/รายละเอียดชีวิตที่ต้นฉบับไม่มี (เคยพลาด: เติม "กับภรรยา" ทั้งที่ข่าวไม่มีภรรยา) และห้ามบรรยายฉาก สีหน้า อิริยาบถ เหมือนไปเห็นเหตุการณ์มาเอง — ต้นฉบับไม่ได้บรรยายภาพไหน ให้เล่าจากข้อเท็จจริง หรือใช้ภาษาที่บอกชัดว่าเป็นการนึกตาม ("ภาพแบบนั้นใครเห็นก็...") เท่านั้น\n' +
       '- ⚠️ ห้ามตั้งคำถามปิดท้ายเด็ดขาด ห้ามจบด้วย "คุณคิดยังไง?", "เห็นด้วยไหม?" หรือคำถามใดๆ\n\n' +
       formalModeRule +
       '=== 🔍 QUALITY + WRITING STYLE (MANDATORY) ===\n' +
       '1. ห้ามเปิดเรื่องซ้ำกัน — แต่ละเวอร์ชันต้องเปิดด้วยประโยคแรกที่ต่างกัน\n' +
-      (_hasLibCard
-        ? '2. ย่อหน้าสุดท้ายกระชับ ไม่เกิน 2 ประโยค — วิธีปิดยึดตามการ์ด ห้ามเทศนา ห้ามสรุปข้อคิดแบบบทความสอนใจ\n'
-        : '2. ย่อหน้าสุดท้ายกระชับ — ปิดท้ายไม่เกิน 2 ประโยค ไม่สรุปข้อคิดชีวิต\n') +
+      '2. ย่อหน้าสุดท้ายกระชับ — ปิดท้ายไม่เกิน 2 ประโยค ไม่สรุปข้อคิดชีวิต\n' +
       '3. ชื่อเฉพาะต้องสะกดตรงกับต้นฉบับ 100%\n' +
       '4. ห้ามเดาเพศ — ถ้าต้นฉบับไม่ระบุเพศ ใช้ชื่อจริงหรือ "เจ้าตัว" แทน เธอ/เขา\n' +
       '5. ห้ามใช้ "แม้จะ...แต่ก็..." เป็น connector — เขียนตรงๆ แทนการเปรียบ\n' +
@@ -1334,25 +1313,47 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       '11. ★ ตัวเลข/ข้อมูลหัวใจของข่าว (จำนวนเงิน อายุ ระยะเวลา วันสำคัญ) ต้องอยู่ใน "เนื้อหา" ของทุกเวอร์ชัน ไม่ใช่อยู่แค่หัวข้อ — ประกาศ/กำหนดการ (วันเวลา การเปิด-งดเข้า) ห้ามตัดส่วนสำคัญทิ้ง\n' +
       '12. ต้นฉบับเขียนผิด/วลีเพี้ยน ให้เกลาเป็นไทยที่ถูกต้อง (❌ ลอก "นานกว่าหลายสิบปี" ตามต้นฉบับ → ✅ "นานหลายสิบปี") ยกเว้นชื่อเฉพาะห้ามแก้ — และหัวข้อแต่ละเวอร์ชันต้องต่างมุมเล่าจริง ไม่ใช่สลับคำกัน\n\n' +
       '[ FORBIDDEN PATTERNS — คำห้าม 10 คำ ]\n' +
-      '❌ ห้ามใช้: ท่ามกลาง, สร้างความฮือฮา, กล่าวได้ว่า, เป็นที่ทราบกันดีว่า, ไม่ว่าจะ...ก็ตาม, แม้จะ...แต่ก็\n' /* ★ 25 ก.ค. 69 (ข้อ 5/5): ตัด ซึ่ง/ดังกล่าว/อย่างไรก็ตาม — การ์ด 61-70/73 ใบห้ามเองแล้ว · เก็บคำที่การ์ดไม่ได้ห้าม (กล่าวได้ว่า การ์ดห้ามแค่ 29/73 จึงเก็บ) */ +
+      '❌ ห้ามใช้: ซึ่ง, ดังกล่าว, ท่ามกลาง, สร้างความฮือฮา, อย่างไรก็ตาม, กล่าวได้ว่า, เป็นที่ทราบกันดีว่า, ไม่ว่าจะ...ก็ตาม, แม้จะ...แต่ก็\n' +
       '❌ ห้ามขึ้นต้นด้วย "ลองนึก/ลองคิด/ลองจินตนาการ" ทุกรูปแบบ (ลองนึกภาพว่า, ลองนึกถึง, ลองคิดดู, ลองจินตนาการ), Angle:, มุมมอง:, Focus:\n' +
       '❌ ห้ามบอกอารมณ์แทนคนอ่าน: สะเทือนใจชาวเน็ต, ทำให้คนดูน้ำตาไหล, สร้างความตื่นเต้น\n\n' +
       viralFewshotBlock +
-      // ★ 25 ก.ค. 69 (ข้อ 4/5): ถอด PROSE CRAFT — ซ้ำกับ HUMAN DNA ในคำสั่งระบบ (จังหวะ/ตัดคำลอย/ห้ามเปิดซ้ำ)
-      //   และซ้ำ QUALITY ข้อ 6 (รายละเอียดจับต้องได้) — สั่งเรื่องเดียวกัน 2 รอบทำเสียงการ์ดจาง
-      (_singleStyle ? '' : '=== ตัวอย่าง "ประโยคที่มีลายมือ" (เลียนแบบจังหวะและวิธีเล่า ห้ามลอกเนื้อหา) ===\n' +
+      '=== ✒️ PROSE CRAFT — ลายมือการเขียน (บังคับทุกย่อหน้า) ===\n' +
+      '- จังหวะ: สลับประโยคสั้น-ยาว และทุกย่อหน้าต้องมี "ประโยคทุบ" สั้นๆ ที่มีน้ำหนัก อย่างน้อย 1 ประโยค\n' +
+      '- ภาพ: ทุกย่อหน้าต้องมีรายละเอียดที่มองเห็น/จับต้องได้อย่างน้อย 1 จุด (สิ่งของ ท่าทาง เสียง ความเงียบ)\n' +
+      '- คำ: ตัดคำลอย/คำฟุ่มเฟือยทิ้งหมด ทุกคำต้องทำงาน — อ่านออกเสียงแล้วต้องลื่นเหมือนคนเล่าเรื่องเก่ง\n' +
+      '- ย่อหน้า: ประโยคแรกของแต่ละย่อหน้าห้ามขึ้นรูปแบบเดียวกัน\n' +
+      '=== จบ PROSE CRAFT ===\n\n' +
+      '=== ตัวอย่าง "ประโยคที่มีลายมือ" (เลียนแบบจังหวะและวิธีเล่า ห้ามลอกเนื้อหา) ===\n' +
       '1. "มือข้างที่จับชอล์กมา 35 ปี วันนี้วางลงแล้ว — แต่กระดานในห้อง ป.6 ยังมีลายมือของครูอยู่"\n' +
       '2. "รถก๋วยเตี๋ยวคันเก่าจอดที่เดิมทุกเช้า ราคาเดิมตั้งแต่ปี 2528 ลูกค้าบางคนกินมาตั้งแต่ยังใส่ชุดนักเรียน วันนี้พวกเขากลับมา พร้อมเตาใหม่หนึ่งเครื่อง"\n' +
       '3. "น้ำขึ้นถึงเข่าแล้ว เขายังไม่ยอมขึ้นเรือ — ในมือมีแมวหนึ่งตัว กับรูปถ่ายพ่ออีกหนึ่งใบ"\n' +
       '4. "เงิน 37 บาทในกระเป๋า กับระยะทาง 80 กิโล เด็กชายคนนั้นเลือกเดิน"\n' +
-      '5. "ทั้งซอยเงียบไปครึ่งนาที ก่อนเสียงปรบมือจะดังขึ้นพร้อมกัน"\n\n') +
+      '5. "ทั้งซอยเงียบไปครึ่งนาที ก่อนเสียงปรบมือจะดังขึ้นพร้อมกัน"\n\n' +
       (targetCount === 1
         ? `สร้าง 1 เวอร์ชัน: เทพลังทั้งหมดไปที่เวอร์ชันเดียว — เปิดเรื่องด้วย hook ตามสไตล์เปิดเรื่องที่กำหนดใน FOCUS ANGLE ห้ามเปิดด้วยวันที่\n\n`
         : `สร้างอย่างน้อย ${targetCount || 5} เวอร์ชัน:\n` +
           'เขียนในมุมมองที่ต่างกันตามจำนวนที่ขอ (ตัวอย่างมุมมอง: ไทม์ไลน์เหตุการณ์, ขยี้จังหวะอารมณ์, เปิดเรื่องแรงๆ, มุมมองคนในเหตุการณ์, หรือเจาะลึกความจริง)\n\n') +
-      '=== กฎเหล็ก FACEBOOK SAFETY — ถอดออกแล้ว (25 ก.ค. 69 เจ้าของสั่ง) ===\n' +
-      'ไม่มีกฎแทนคำ/แบนคำอีกต่อไป เขียนตามข้อเท็จจริงในข่าวตรงๆ ไม่ต้องเลี่ยงคำ\n' +
-      'คงไว้ข้อเดียว: ถ้าต้นฉบับมีผู้เสียชีวิต ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้ง ห้ามเลี่ยงจนคนอ่านไม่รู้\n' +
+      '=== กฎเหล็ก FACEBOOK SAFETY — บังคับทุกเวอร์ชัน ===\n' +
+      'ห้ามใช้คำเสี่ยงต่อไปนี้ในเนื้อหาที่เขียน ให้ rewrite เป็นคำปลอดภัยเสมอ:\n\n' +
+      '"ฆ่า" → "ก่อเหตุ" หรือ "ก่อเหตุร้ายแรง"\n' +
+      '"ฆาตกรรม" → "เหตุสูญเสีย" หรือ "คดีร้ายแรง"\n' +
+      '"ศพ" → "ร่างของผู้จากไป"\n' +
+      '"ตาย/ดับ/สิ้นใจ/เสียชีวิต" → ห้ามใช้ตรงๆ ทุกคำ ให้ใช้สำนวนเลี่ยงที่สุภาพ สวย และเข้ากับบริบทของเรื่อง เช่น "จากไปอย่างสงบ" "ไม่อยู่แล้ว" "ลาลับ" "สิ้นลมอย่างสงบ" "ปิดตำนาน" "หลับไม่ตื่นอีกเลย" — เลือกให้เหมาะกับโทนข่าวนั้นๆ ห้ามใช้สำนวนเดียวซ้ำทุกจุด/ทุกเวอร์ชัน ⚠️แต่ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้งเสมอ ห้ามเลี่ยงจนคนอ่านไม่รู้ว่าเสียชีวิตแล้ว (ห้ามเล่าฉากก่อนเสียชีวิตค้างไว้โดยไม่เฉลย)\n' +
+      '"สยอง/โหด/สลด" → "สะเทือนใจ" หรือ "น่าตกใจ"\n' +
+      '"เลือด" → "ร่องรอยเหตุการณ์" (⚠️ยกเว้นศัพท์การแพทย์/อวัยวะ เช่น "เส้นเลือด" "เส้นเลือดในสมอง" — ห้ามแทนที่ ให้คงคำเดิม)\n' +
+      '"แทง" → "ใช้ของมีคม"\n' +
+      '"ยิง" → "ใช้อาวุธปืน"\n' +
+      '"ข่มขืน" → "ล่วงละเมิดทางเพศ"\n' +
+      '"ผูกคอ/จบชีวิต" → "จากไปอย่างน่าเศร้า"\n' +
+      '"การพนัน/บ่อน/แทงบอล/เว็บพนัน" → "เกมเสี่ยงโชคผิดกฎหมาย" (เลี่ยงให้มากที่สุด)\n' +
+      '"ยาบ้า/ยาไอซ์/เสพยา" → "สิ่งผิดกฎหมาย" หรือ "ของมึนเมาผิดกฎหมาย"\n' +
+      '"เมาแล้วขับ/ตั้งวงเหล้า" → เกลาคำให้นุ่มลง เช่น "ขับขี่ในสภาพไม่พร้อม" "ร่วมวงสังสรรค์" (สลาก/ลอตเตอรี่รัฐบาลใช้ได้ปกติ)\n' +
+      '"ชำแหละ/หมกศพ" → "เหตุรุนแรงอย่างยิ่ง"\n' +
+      '"ทุบตี/ทำร้าย" → "ใช้ความรุนแรง"\n' +
+      '"จัดฉาก" → "สร้างสถานการณ์"\n\n' +
+      'หลักการ: เปลี่ยน "ความแรง" → "อารมณ์" เน้น emotional storytelling ไม่ใช่ shock/gore\n' +
+      'ห้าม clickbait: "คุณจะไม่เชื่อ", "แชร์ด่วน", "ดูก่อนโดนลบ"\n' +
+      'ห้าม engagement bait: "พิมพ์ 1", "เมนต์ 99", "ใครเห็นด้วยกดไลก์"\n' +
       '=== จบกฎ FACEBOOK SAFETY ===\n\n' +
       `⚠️⚠️⚠️ คำสั่งเด็ดขาด: ต้องสร้างผลลัพธ์ให้ครบจำนวน ${targetCount || 5} เวอร์ชัน ห้ามขาดหาย เนื้อหาแต่ละเวอร์ชันต้องมีความยาวตามที่กำหนด ⚠️⚠️⚠️\n\n` +
       'ตอบเป็น JSON:\n' +
@@ -1377,13 +1378,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
 
     try {
       console.log(`[🤖 AI CALL] mode=write | calling SmartAI (Claude > GPT-4o)...`);
-      // ★ 25 ก.ค. 69: ใส่เพดานเวลาชั้นใน (เดิมไม่มีเลย — SDK รอได้ ~10 นาที เกินเพดาน route 300 วิ
-      //   ทำให้ตัวสำรองที่มีอยู่ไม่ได้ทำงานตอน "ช้า" ทำงานเฉพาะตอน "พัง" → ผู้ใช้ได้ error เปล่าๆ)
-      const { result, model: usedModel } = await withTimeout(
-        callSmartAI('write', { prompt: multiPrompt, temperature: 0.7, maxTokens: 6000 }), // ★ 6000 — perf: 2 versions × ~500-600w
-        Number(process.env.WRITE_TIMEOUT_MS || 180_000),
-        'analyze_write'
-      );
+      const { result, model: usedModel } = await callSmartAI('write', { prompt: multiPrompt, temperature: 0.7, maxTokens: 6000 }); // ★ 6000 (was 10000) — perf: 2 versions × ~500-600w = ~3000t + buffer
       console.log(`[🤖 AI RESULT] model used: ${usedModel}`);
       console.log(`[🤖 AI RESULT] versions: ${result?.versions?.length || 0}`);
 
@@ -1611,13 +1606,11 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
   "forbidden": ["ห้ามเขียนว่า...", "ห้าม ending แบบ..."]
 }`;
 
-      // 🔴 ★ 25 ก.ค. 69: เพดาน 1200 ต่ำเกินสำหรับโมเดล 5.6 (reasoning) — เพดานต่ำ = ตอบว่างเปล่า
-      //    ดูคำอธิบายเต็มในไฟล์แฝด summarizeServiceText.js · ปรับได้: env BLUEPRINT_MAX_TOKENS
       const blueprintResult = await callAI({
         model: MODEL_FAST,
         prompt: blueprintPrompt,
         temperature: 0.3,
-        maxTokens: Number(process.env.BLUEPRINT_MAX_TOKENS) || 8000,
+        maxTokens: 1200,
       });
 
       if (!blueprintResult?.core_emotion) {
@@ -1799,7 +1792,7 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
             const bestPrompt = matched[0] || promptLib.sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0))[0];
 
             if (bestPrompt && bestPrompt.promptText) {
-              smartPromptCtx = '\n\n=== 🏛️ พร้อมท์จากคลังพร้อมท์ (Smart Match) ===\n' +
+              smartPromptCtx = '\n\n=== 🏛️ Prompt จากหอสมุดไวรัล (Smart Match) ===\n' +
                 `ประเภท: ${bestPrompt.category || '-'} | อารมณ์: ${bestPrompt.emotionalType || bestPrompt.emotionalTags?.[0] || '-'} | Viral Score: ${bestPrompt.viralScore || '-'}\n` +
                 `สไตล์ Hook: ${bestPrompt.hookStyle || '-'} | โทน: ${bestPrompt.tone || '-'}\n` +
                 `โครงสร้าง: ${bestPrompt.structure || '-'}\n\n` +
@@ -1843,8 +1836,8 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
         '- ระบุว่าผสมจากมุมไหนบ้าง (ใน mixed_from)\n' +
         '- ❌ ห้ามพิมพ์ชื่อมุมมอง (ห้ามพิมพ์ Angle: ลงในเนื้อหา)\n' +
         '- ❌ ห้ามใช้คำขึ้นต้นซ้ำซาก: ลองนึกภาพว่า, ลองจินตนาการว่า, ถ้าคุณต้อง\n\n' +
-        '=== กฎเหล็ก FACEBOOK SAFETY — ถอดออกแล้ว (25 ก.ค. 69 เจ้าของสั่ง) ===\n' +
-        'ไม่มีกฎแทนคำ/แบนคำ เขียนตามข้อเท็จจริงตรงๆ · คงไว้ข้อเดียว: ต้องบอกการจากไปให้ชัด ≥1 ครั้งถ้ามีผู้เสียชีวิต\n' +
+        '=== กฎเหล็ก FACEBOOK SAFETY ===\n' +
+        'ห้ามใช้คำเสี่ยง: ฆ่า→ก่อเหตุ, ศพ→ร่างของผู้จากไป, ตาย/เสียชีวิต→สำนวนเลี่ยงสวยๆ ตามบริบท (จากไปอย่างสงบ/ลาลับ/ปิดตำนาน — ห้ามซ้ำจำเจ), สยอง→สะเทือนใจ, เลือด→ร่องรอยเหตุการณ์, พนัน/ยาเสพติด/วงเหล้า→เลี่ยงหรือเกลาให้นุ่ม\n' +
         '=== จบ SAFETY ===\n\n' +
         'ตอบเป็น JSON:\n' +
         '{\n' +
@@ -1858,21 +1851,12 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
 
       let result, usedModel;
       try {
-        // ★ 25 ก.ค. 69: ใส่เพดานเวลาชั้นใน — หมดเวลาแล้วตกไปใช้ตัวสำรองทันที (เดิมรอยาวจน route ถูกตัดทั้งคำขอ)
-        const smartResult = await withTimeout(
-          callSmartAI('write', { prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 }),
-          Number(process.env.WRITE_TIMEOUT_MS || 180_000),
-          'mix_write'
-        );
+        const smartResult = await callSmartAI('write', { prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 });
         result = smartResult.result;
         usedModel = smartResult.model;
       } catch (err) {
-        console.warn(`[Mix-Service] SmartAI failed (${err.message}), falling back to ${MODEL_PRIMARY}`);
-        result = await withTimeout(
-          callAI({ prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 }),
-          Number(process.env.WRITE_FALLBACK_TIMEOUT_MS || 90_000),
-          'mix_write_fallback'
-        );
+        console.warn(`[Mix-Service] SmartAI failed (${err.message}), falling back to GPT-4o`);
+        result = await callAI({ prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 });
         usedModel = MODEL_PRIMARY;
       }
 

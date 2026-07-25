@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getJobStatus, getQueueOverview, cleanupStaleJobs } from '@/lib/services/queueService';
 import { createLogger } from '@/lib/logger';
-import { internalAuthHeaders } from '@/lib/apiAuth';
 
 const logger = createLogger('QUEUE_STATUS');
 
@@ -34,7 +33,7 @@ export async function GET(req) {
       getQueueOverview().then((ov) => {
         if (ov.pending > 0 && ov.processing === 0) {
           logger.info(`[Queue Status] 🚑 Self-heal: ${ov.pending} pending แต่ไม่มี worker วิ่ง — ปลุก worker`);
-          fetch(`${req.nextUrl.origin}/api/queue/worker`, { method: 'POST', headers: internalAuthHeaders() }).catch(() => {});
+          fetch(`${req.nextUrl.origin}/api/queue/worker`, { method: 'POST' }).catch(() => {});
         }
       }).catch(() => {});
     }

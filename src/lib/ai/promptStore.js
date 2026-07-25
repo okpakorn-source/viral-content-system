@@ -88,11 +88,20 @@ const DEFAULT_ANALYSIS_PRESETS = [
       '- ปลอดภัยที่สุด',
       '',
       '==================================================',
-      'STEP 4 — (ถอดออกแล้ว 25 ก.ค. 69 — เจ้าของสั่ง: ไม่ต้องกรอง/แทนคำ)',
+      'STEP 4 — ตรวจความเสี่ยง Facebook',
       '==================================================',
       '',
-      'เขียนตามข้อเท็จจริงในข่าวตรงๆ ไม่ต้องเลี่ยงคำ ไม่ต้องแทนคำใดๆ (พนักงานเกลาเนื้อก่อนใส่เจนอยู่แล้ว)',
-      'คงไว้ข้อเดียว: ถ้าต้นฉบับมีผู้เสียชีวิต ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้ง ห้ามเลี่ยงจนคนอ่านไม่รู้',
+      'ตรวจว่าเนื้อหามี: ความรุนแรง/เลือด/ศพ/self-harm/sexual/การพนัน/ยาเสพติด/hate speech/fake news/clickbait/engagement bait หรือไม่',
+      '',
+      'ถ้ามี ให้ rewrite ด้วยภาษานุ่มลง:',
+      '- ฆ่าตัวตาย → จากไปอย่างเงียบๆ',
+      '- เลือดสาด → เหตุรุนแรง',
+      '- แทง → ถูกทำร้าย',
+      '- คลิปหลุด → คลิปปริศนา',
+      '- ⚠️ "เสียชีวิต" และ "จากไป" คือคำมาตรฐานที่ปลอดภัยอยู่แล้ว — ใช้บอกการตายได้ตรงๆ ห้ามเลี่ยงคำจนข้อเท็จจริงการตายหายไปจากเรื่อง (10 ก.ค. 69: เดิมแบนคำนี้ ทำให้เขียนข้ามการตายจนคนอ่านเข้าใจว่ายังมีชีวิต)',
+      '- บาดเจ็บสาหัส → ได้รับบาดเจ็บหนัก',
+      '',
+      'ห้ามใช้คำเสี่ยง: ด่วน, ดูก่อนโดนลบ, หลุดเต็ม, ศพ, สยอง, โหด, xxx, AV, แชร์ด่วน, พิมพ์ 1, เมนต์ 99, บาดเจ็บสาหัส, สะเก็ดระเบิด, ระเบิด, สนามรบ, คลิปหลุด, อาวุธ, กระสุน, เลือดสาด, ฆ่าตัวตาย',
       '',
       '==================================================',
       'STEP 5 — วิธีเขียนโพสต์ (HUMAN WRITING DNA V2)',
@@ -553,25 +562,11 @@ STEP 5 — วิเคราะห์ "ลูกเล่นภาษา"
 };
 
 // ===== Store =====
-// ★ 25 ก.ค. 69: เดิมเก็บแค่ในหน่วยความจำ → แก้พร้อมท์แล้วหายทุกครั้งที่รีสตาร์ท
-//   ตอนนี้อ่าน/เขียนไฟล์ data/prompt-overrides.json ด้วย (เขียนไม่ได้ก็ไม่พัง แค่เตือน)
-import { loadPromptOverrides, savePromptOverrides } from './promptOverrides';
-
-const OVERRIDE_FILE = 'prompt-overrides.json';
 let _savedPrompts = null;
 let _savedAnalysisPresets = null;
 
 export function getPrompts() {
-  if (!_savedPrompts) {
-    _savedPrompts = JSON.parse(JSON.stringify(DEFAULT_PROMPTS));
-    const saved = loadPromptOverrides(OVERRIDE_FILE);
-    if (saved) {
-      for (const [k, v] of Object.entries(saved)) {
-        if (v && typeof v.prompt === 'string' && v.prompt.trim()) _savedPrompts[k] = { prompt: v.prompt };
-      }
-      console.log(`[promptStore] ♻️ โหลดพร้อมท์ที่แก้ไว้ ${Object.keys(saved).length} รายการจากไฟล์`);
-    }
-  }
+  if (!_savedPrompts) _savedPrompts = JSON.parse(JSON.stringify(DEFAULT_PROMPTS));
   return _savedPrompts;
 }
 
@@ -579,26 +574,18 @@ export function getPrompt(key) {
   return getPrompts()[key] || DEFAULT_PROMPTS[key] || null;
 }
 
-/** @returns {{ ok: boolean, persisted: boolean, error?: string }} */
 export function savePrompt(key, prompt) {
-  // ★ 25 ก.ค. 69: กัน "พร้อมท์ว่าง" ที่เคยบันทึกได้ แล้วบัง built-in จนระบบวิ่งด้วยคำสั่งเปล่า
-  const text = typeof prompt === 'string' ? prompt : (prompt && typeof prompt.prompt === 'string' ? prompt.prompt : '');
-  if (!text.trim()) return { ok: false, persisted: false, error: 'พร้อมท์ว่าง — ไม่บันทึก' };
-  getPrompts()[key] = { prompt: text };
-  const persisted = savePromptOverrides(OVERRIDE_FILE, _savedPrompts);
-  return { ok: true, persisted };
+  getPrompts()[key] = { prompt };
 }
 
 export function resetPrompt(key) {
   if (key && DEFAULT_PROMPTS[key]) {
     getPrompts()[key] = JSON.parse(JSON.stringify(DEFAULT_PROMPTS[key]));
-    savePromptOverrides(OVERRIDE_FILE, _savedPrompts);
   }
 }
 
 export function resetAllPrompts() {
   _savedPrompts = JSON.parse(JSON.stringify(DEFAULT_PROMPTS));
-  savePromptOverrides(OVERRIDE_FILE, _savedPrompts);
   return _savedPrompts;
 }
 

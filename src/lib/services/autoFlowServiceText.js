@@ -292,22 +292,15 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   
   for (const angleObj of anglesToUse) {
     const focusAngle = `${angleObj.angle_name}: ${angleObj.description}`;
-    // ★ 25 ก.ค. 69: ใส่นาฬิกาให้ขั้น "เลือกพร้อมท์" (เดิมไม่มีเพดานเวลาสักชั้น —
-    //   API ค้างเมื่อไหร่ งานทั้งใบแขวนที่ขั้นนี้จนโดนเพดานเซิร์ฟเวอร์ฟันทิ้ง ไม่ได้ข่าวสักเวอร์ชัน)
-    //   ล้ม/หมดเวลา = null → ตกไปใช้ Built-in Fallback V12 ตามเดิม งานไม่ตาย
-    const promptsRes = await withTimeout(
-      getTopPrompts({
-        newsTitle: newsData.newsTitle,
-        text: newsData.newsBody,
-        focusAngle,
-        workflowId: _autoWorkflowId,
-        excludePromptIds: [...usedPromptIds],
-        _cachedNewsAnalysis,
-        _cachedPromptLib,
-      }),
-      Number(process.env.PROMPT_SELECT_TIMEOUT_MS || 90_000),
-      'auto_prompt_select'
-    ).catch((e) => { addLog('PromptSelect', `⚠️ เลือกพร้อมท์ไม่สำเร็จ (${String(e?.message || e).slice(0, 80)}) → ใช้ตัวสำรอง`); return null; });
+    const promptsRes = await getTopPrompts({
+      newsTitle: newsData.newsTitle,
+      text: newsData.newsBody,
+      focusAngle,
+      workflowId: _autoWorkflowId,
+      excludePromptIds: [...usedPromptIds],
+      _cachedNewsAnalysis,
+      _cachedPromptLib,
+    }).catch(() => null);
     
     // Cache จากผลลัพธ์ครั้งแรก → ใช้ซ้ำครั้งถัดไป
     if (!_cachedNewsAnalysis && promptsRes?.newsAnalysis) {
@@ -334,21 +327,10 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   //   → ตัดมุมทิ้ง ออกน้อยเวอร์ชันแต่ไม่บิดเบือน (พร้อมท์อันดับท้ายเคยพาตัวเขียนละข้อเท็จจริง "แม่เสียชีวิต")
   //   มุมแรกเก็บเสมอ = การันตีมีผลลัพธ์อย่างน้อย 1 เวอร์ชัน
   const MIN_ANGLE_MATCH = Math.max(0, parseInt(process.env.ANGLE_MIN_MATCH_SCORE || '45', 10) || 45);
-  // ★ 25 ก.ค. 69 (รอบแก้ที่ 2): ให้คะแนน "เข้ากันจริง" (semanticFit จากด่านอ่านเนื้อข่าว) มีอำนาจตัดมุมด้วย
-  //   บั๊กของงานเช้านี้: ด่านใหม่ตัดสินแล้วว่าการ์ดไม่เข้ากับข่าว (fit < 40) แต่ด่านคัดมุมยังดูแต่คะแนนป้าย
-  //   → การ์ดที่ AI บอกเองว่าไม่เข้ากัน ยังผ่านไปเขียนได้ (เกิดจริง 2 ใน 20 เคส)
-  //   ปรับเกณฑ์: env SEMANTIC_MIN_FIT (ค่าเริ่มต้น 40) · ปิดอำนาจนี้: env ANGLE_GATE_USE_FIT=off
-  const MIN_FIT = Number(process.env.SEMANTIC_MIN_FIT) || 40;
-  const _fitGateOn = process.env.ANGLE_GATE_USE_FIT !== 'off';
   for (let i = anglesToUse.length - 1; i >= 1; i--) {
     const _score = Number(anglePrompts[i]?._matchScore ?? 0);
-    const _fit = anglePrompts[i]?._semanticFit;
-    const _fitTooLow = _fitGateOn && typeof _fit === 'number' && _fit < MIN_FIT;
-    if (_score < MIN_ANGLE_MATCH || _fitTooLow) {
-      const _why = _fitTooLow
-        ? `ด่านอ่านเนื้อข่าวให้ ${_fit}/100 (ต่ำกว่า ${MIN_FIT}) = การ์ดไม่เข้ากับข่าวนี้จริง`
-        : `พร้อมท์จับคู่หลวม (score ${_score} < ${MIN_ANGLE_MATCH})`;
-      addLog('PromptSelect', `✂️ ตัดมุม "${anglesToUse[i].angle_name}" — ${_why} เอาเฉพาะมุมที่แมตช์จริง`);
+    if (_score < MIN_ANGLE_MATCH) {
+      addLog('PromptSelect', `✂️ ตัดมุม "${anglesToUse[i].angle_name}" — พร้อมท์จับคู่หลวม (score ${_score} < ${MIN_ANGLE_MATCH}) เอาเฉพาะมุมที่แมตช์จริง`);
       anglesToUse.splice(i, 1);
       anglePrompts.splice(i, 1);
     }
@@ -511,13 +493,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // === POST-GENERATION CORRECTION PIPELINE ===
   let finalVersions = allVersions;
   try {
-    // ★ 25 ก.ค. 69: ใส่นาฬิกาให้ท่อแก้สำนวนทั้งท่อ (เดิมไม่มีเพดานสักชั้น — เรียก AI 1-3 ครั้ง/เวอร์ชัน)
-    //   หมดเวลา = ใช้เนื้อเดิมที่เขียนเสร็จแล้ว (ข่าวไม่หาย) แทนที่จะแขวนจนโดนเพดานเซิร์ฟเวอร์ฟันทั้งงาน
-    finalVersions = await withTimeout(
-      runCorrectionPipeline(allVersions, newsData, breakdownData),
-      Number(process.env.CORRECTION_TIMEOUT_MS || 150_000),
-      'auto_correction'
-    );
+    finalVersions = await runCorrectionPipeline(allVersions, newsData, breakdownData);
     addLog('Correction', `🔧 Correction Pipeline: ${finalVersions.filter(v => v._correctionApplied).length}/${finalVersions.length} corrected`);
   } catch (corrErr) {
     console.error('[AutoFlow] Correction pipeline failed, using original:', corrErr.message);
@@ -543,9 +519,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         contentLength: selectedLength,
         // ★ 30 มิ.ย.: บันทึกพร้อมท์ที่ใช้จริง (ปิดจุดบอด — ท่อ text เดิมไม่บันทึก promptName)
         promptName: usedPreset?.promptName || usedPreset?.name || anglePrompts[0]?.promptName || '',
-        // ★ 25 ก.ค. 69: ถ้าตกไปใช้พร้อมท์สำรอง Built-in V12 ต้องบันทึกตามจริง (เดิมเหมาว่า 'library')
-        promptSource: usedPreset?.promptSource || usedPreset?.source
-          || (anglePrompts[0] ? (anglePrompts[0]._isFallback ? 'builtin-fallback' : 'library') : ''),
+        promptSource: usedPreset?.promptSource || usedPreset?.source || (anglePrompts[0] ? 'library' : ''),
         promptScore: usedPreset?.matchScore ?? usedPreset?.viralScore ?? anglePrompts[0]?.viralScore ?? 0,
         promptMatchType: usedPreset?.matchType || (usedPreset?.isBorrowed ? 'BORROWED' : (anglePrompts[0] ? 'MATCHED' : '')),
         promptId: usedPreset?.promptId || anglePrompts[0]?.id || '',
@@ -603,10 +577,6 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         matchScore: (typeof usedPreset.matchScore === 'number') ? usedPreset.matchScore : null,
         matchType: usedPreset.matchType || null,
         isBorrowed: usedPreset.isBorrowed || false,
-        // ★ 25 ก.ค. 69: คะแนน "เข้ากันจริง" จากด่านอ่านเนื้อข่าว — ต่างจาก matchScore ที่วัดแค่ป้าย
-        semanticFit: (typeof usedPreset.semanticFit === 'number') ? usedPreset.semanticFit : null,
-        semanticReason: usedPreset.semanticReason || null,
-        semanticMismatch: usedPreset.semanticMismatch || null,
       } : null,
       stepTimings: {
         detect: ((step1Start - step0Start) / 1000).toFixed(1),
