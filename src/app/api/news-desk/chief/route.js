@@ -109,7 +109,7 @@ ${instruction ? `★★★ คำสั่งพิเศษจากหัว�
 "warnings":["ข้อควรระวัง 0-2 ข้อ เช่น 'ข่าวเจนนี่ เขียนโทนอบอุ่น ห้ามโจมตีครอบครัว'"],
 "pushNow":["ชื่อข่าวสั้นๆ ที่ควรดันตอนนี้ 0-4 เรื่อง"],
 "extraQueries":[{"q":"คำค้น","lane":"trend|good|evergreen","timeRange":"qdr:d|qdr:w|qdr:y"}]}`,
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       temperature: 0.3,
       maxTokens: 8000,
     });

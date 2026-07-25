@@ -977,12 +977,19 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
 // AUTO-PILOT — บก.เลือกเอง ส่งเจนเอง
 // ════════════════════════════════════════════════════
 async function getAutopilotConfig() {
-  const defaults = { enabled: true, minScore: 8, perEditorPerRound: 2, dailyCap: 20 };
+  // ★ 25 ก.ค. 69: ค่าตั้งต้น enabled = false (เดิมเป็น true)
+  //   เดิมถ้าแถวตั้งค่าหาย/ยังไม่เคยตั้ง ระบบจะถือว่า "เปิด" แล้วส่งข่าวเจนเองได้ถึง 20 งาน/วัน
+  //   ทั้งที่เจ้าของสั่งปิด Auto-Pilot ไว้ → ต้องมีแถวที่ระบุ enabled:true ชัดเจนเท่านั้นถึงจะทำงาน
+  const defaults = { enabled: false, minScore: 8, perEditorPerRound: 2, dailyCap: 20 };
   try {
     const settings = createStore('desk-settings');
     const all = await settings.getAll();
     const cfg = all.find(s => s.id === 'autopilot');
-    return cfg ? { ...defaults, ...cfg } : defaults;
+    if (!cfg) {
+      console.warn('[AutoPilot] ⚠️ ไม่พบแถวตั้งค่า autopilot — ถือว่าปิด (ต้องตั้ง enabled:true เองเท่านั้น)');
+      return defaults;
+    }
+    return { ...defaults, ...cfg, enabled: cfg.enabled === true };
   } catch {
     // ★ fail-closed (คำสั่งทีม 12 มิ.ย. ค่ำ): อ่านสวิตช์ไม่ได้ = ถือว่าปิด
     //   เดิม fail-open เป็น enabled:true → DB สะดุดชั่วคราวทีไร Auto-Pilot "เปิดเอง" ทั้งที่ทีมสั่งปิด

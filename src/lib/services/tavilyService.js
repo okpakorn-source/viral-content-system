@@ -34,6 +34,7 @@ export async function tavilySearch(query, options = {}) {
   try {
     console.log(`[Tavily] 🔍 Searching: "${query}" (depth: ${searchDepth})`);
 
+    // ★ 25 ก.ค. 69: ใส่เพดานเวลา (เดิมไม่มีเลย — Tavily ค้างเมื่อไหร่ ลากขั้นค้นข้อมูลค้างตามไปด้วย)
     const res = await fetch(`${TAVILY_API_URL}/search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -46,6 +47,7 @@ export async function tavilySearch(query, options = {}) {
         include_images: includeImages,
         topic,
       }),
+      signal: AbortSignal.timeout(Number(process.env.TAVILY_TIMEOUT_MS || 12_000)),
     });
 
     if (!res.ok) {
@@ -100,6 +102,7 @@ export async function tavilyImageSearch(query) {
         include_images: true,
         topic: 'general',
       }),
+      signal: AbortSignal.timeout(Number(process.env.TAVILY_TIMEOUT_MS || 12_000)), // ★ 25 ก.ค. 69: เพดานเวลา
     });
 
     if (!res.ok) return [];

@@ -108,7 +108,11 @@ export async function auditOutput(version) {
     // === FAST CHECKS (regex/string — ไม่เรียก AI) ===
 
     // 1. Forbidden words
-    for (const rule of FORBIDDEN_WORDS) {
+    // 🔴 ★ 25 ก.ค. 69 (เจ้าของสั่ง): ปิดการตรวจ "คำเสี่ยง" ทั้งชุด — พนักงานเกลาเนื้อก่อนใส่เจนอยู่แล้ว
+    //    ผลพลอยได้: ชั้นแก้คำ (L3/L3B) จะไม่มีอะไรให้แก้ = เลิกเกลาคำอัตโนมัติจนเนื้อเพี้ยน และเลิกจ่ายค่า AI จุดนี้
+    //    การตรวจอื่นๆ (กลิ่น AI, ข้อเท็จจริง, ตัวเลข, ความยาว) ยังทำงานปกติ
+    //    เปิดคืน: env WORD_FILTER=on
+    for (const rule of (process.env.WORD_FILTER === 'on' ? FORBIDDEN_WORDS : [])) {
       const matches = content.match(rule.pattern);
       if (matches) {
         matches.forEach(m => {

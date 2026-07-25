@@ -3,7 +3,7 @@
  * CLAUDE CLIENT — Anthropic (ตัวเขียนข่าวหลัก)
  * ========================================
  * ใช้สำหรับ: Content Writing (ภาษาไทยดีกว่าสาย GPT)
- * โมเดลจริง = DEFAULT_WRITE_MODEL ด้านล่าง (default claude-opus-4-8, สลับผ่าน env CLAUDE_WRITE_MODEL)
+ * โมเดลจริง = DEFAULT_WRITE_MODEL ด้านล่าง (default claude-opus-5, สลับผ่าน env CLAUDE_WRITE_MODEL)
  * ราคา: ดู MODEL_COSTS ใน modelConfig.js (อย่าเชื่อ comment เก่า)
  *
  * ตั้งค่า: ANTHROPIC_API_KEY ใน .env
@@ -15,9 +15,12 @@ import { sanitizeOutput } from './safetyFilter';
 let claudeClient = null;
 
 // ★ A/B switch: เปลี่ยน model เขียนได้จาก .env โดยไม่ต้องแก้โค้ด
-//   ★ 10 มิ.ย. 2026: default → claude-opus-4-8 — สำนวน prose เหนือกว่า Sonnet ชัดเจนจากผล A/B
-//   (สลับกลับได้: CLAUDE_WRITE_MODEL=claude-sonnet-4-6)
-const DEFAULT_WRITE_MODEL = process.env.CLAUDE_WRITE_MODEL || 'claude-opus-4-8';
+//   ★ 25 ก.ค. 69 (เจ้าของสั่ง): default → claude-opus-5 — ราคาเท่า opus-4-8 เป๊ะ ($5/$25) แต่เขียนดีกว่า
+//     เทสจริงวันนั้น: เขียนข่าว 250 คำ 37 วิ (effort low/medium เท่ากัน) — อยู่ในเพดาน 180 วิ ของขั้นเขียนสบาย
+//     หมายเหตุ opus-5: "คิดก่อนตอบ" เปิดอยู่โดยปริยาย และปิดได้เฉพาะตอน effort ≤ high
+//     (เราไม่ส่ง thinking เลย = ใช้ค่าปริยาย ปลอดภัยสุดสำหรับงานที่ต้องได้ JSON)
+//   (ถอยกลับได้ทันที: CLAUDE_WRITE_MODEL=claude-opus-4-8)
+const DEFAULT_WRITE_MODEL = process.env.CLAUDE_WRITE_MODEL || 'claude-opus-5';
 
 // Opus 4.7+ / Fable / Sonnet 5 ไม่รับ sampling params (temperature/top_p/top_k → 400)
 // ★ 16 ก.ค. 69 (B6): + sonnet-5/opus-5 — พิสูจน์ด้วย API จริง: "`temperature` is deprecated for this model"
@@ -105,10 +108,8 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
 === จบ HUMAN WRITING DNA V2 ===
 
 === FACEBOOK SAFETY RULES ===
-ห้ามใช้คำเสี่ยง: ฆ่า, ศพ, สยอง, โหด, เลือด, ข่มขืน, ผูกคอ, ดับสลด, บาดเจ็บสาหัส, สะเก็ดระเบิด, ระเบิด, สนามรบ, คลิปหลุด, อาวุธ, กระสุน, เลือดสาด, ฆ่าตัวตาย
-ใช้แทน: จากไป, ร่างผู้เสียหาย, น่าตกใจ, รุนแรง, ร่องรอยเหตุการณ์, ล่วงละเมิดทางเพศ, จากไปอย่างน่าเศร้า, ได้รับบาดเจ็บหนัก, เหตุการณ์ไม่คาดฝัน, พื้นที่ปฏิบัติหน้าที่
-⚠️ "เสียชีวิต" และ "จากไป" คือคำมาตรฐานที่ปลอดภัย — ใช้บอกการตายได้ตรงๆ เสมอ (10 ก.ค. 69: เดิมแบน "เสียชีวิต" ทำตัวเขียนเลี่ยงคำจนละข้อเท็จจริงการตายทั้งเรื่อง — เคส #01641 แม่เสียชีวิตแล้วแต่เขียนเหมือนยังอยู่)
-เปลี่ยน "ความแรง" → "อารมณ์" เน้น emotional storytelling — แต่ห้ามเลี่ยงคำจนข้อเท็จจริงสำคัญหายไปจากเรื่อง
+🔴 ถอดกฎแทนคำ/แบนคำออกแล้ว (25 ก.ค. 69 — เจ้าของสั่ง) เขียนตามข้อเท็จจริงตรงๆ ไม่ต้องเลี่ยงคำ
+คงไว้ข้อเดียว: สถานะเป็น/ตายของบุคคลต้องตรงต้นฉบับ 100% และห้ามใส่ข้อมูลที่ไม่มีในข่าว
 === จบ SAFETY RULES ===`;
 
   const stripSampling = modelRejectsSampling(model);

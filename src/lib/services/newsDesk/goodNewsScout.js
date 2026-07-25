@@ -818,7 +818,7 @@ ${genres.map((g, i) => `${i + 1}. [${g.name}] ${g.brief}\n   แนวตัว�
 
   let genreQs = [];
   try {
-    const res = await callAI({ model: 'gpt-4o-mini', temperature: 0.8, maxTokens: 600, prompt });
+    const res = await callAI({ model: 'gpt-5.6-luna', temperature: 0.8, maxTokens: 600, prompt });
     const parsed = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
     genreQs = (parsed.queries || [])
       .map(x => ({ q: String(x.q || '').trim(), genre: String(x.genre || '') }))

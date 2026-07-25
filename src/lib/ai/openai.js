@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { logApiUsage } from './usageLogger';
 import { sanitizeOutput } from './safetyFilter';
-import { MODEL_PRIMARY } from './modelConfig.js';
+import { MODEL_PRIMARY, MODEL_FALLBACKS, MODEL_HEAVY_FALLBACK, clampMaxTokens } from './modelConfig.js';
 
 let openaiClient = null;
 
@@ -107,37 +107,10 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
 
 === จบ HUMAN WRITING DNA V2 ===
 
-=== FACEBOOK SAFETY RULES (บังคับทุกคำตอบ) ===
-ก่อนสร้างเนื้อหาทุกครั้ง ต้องตรวจสอบและ rewrite คำเสี่ยงทั้งหมด:
-
-[ความรุนแรง] ห้ามใช้: ฆ่า, ยิงหัว, ปาดคอ, หั่นศพ, เลือดสาด, ศพ, สยอง, โหด, คว้านท้อง, ไลฟ์ตาย, ดับสลด
-→ ใช้แทน: ทำร้ายจนเสียชีวิต, เหตุรุนแรง, ร่างผู้เสียชีวิต, เหตุสะเทือนใจ, เหตุไม่คาดคิด
-
-[Self-harm] ห้ามใช้: ผูกคอ, ยิงตัวตาย, กระโดดตึก, อยากตาย, จบชีวิต, ลาก่อนโลกนี้
-→ ใช้แทน: เสียชีวิต, จากไป, เหตุเศร้า, ภาวะเครียดสะสม
-
-[Sexual/18+] ห้ามใช้: หลุด, AV, xxx, เย็ด, เสียว, คอลเสียว, เด็กเอ็น, OnlyFans
-→ ใช้แทน: คลิปปริศนา, คอนเทนต์ส่วนตัว, ภาพไม่เหมาะสม, ประเด็นบนโซเชียล
-
-[การพนัน] ห้ามใช้: สล็อต, บาคาร่า, แทงบอล, ฝากถอน, เว็บตรง, แตกหนัก, ยิงปลา
-→ ใช้แทน: เว็บไซต์ผิดกฎหมาย, สูญเงินจำนวนมาก
-
-[ยาเสพติด] ห้ามใช้: ดูด, พอต, vape, THC, ยาไอซ์, โคเคน, สายเขียว
-→ ใช้แทน: อุปกรณ์สูบ, สารเสพติด, อุปกรณ์ดังกล่าว
-
-[Hate Speech] ห้ามใช้: ไอ้ดำ, ไอ้ลาว, อีกะเทย, พวกเกย์มัน..., พวกมุสลิม
-→ ใช้แทน: บุคคลดังกล่าว, กลุ่มคนบางส่วน, เกิดประเด็นถกเถียง
-
-[Fake News] ห้ามใช้: รักษาหาย 100%, หมอไม่อยากให้รู้, กินแล้วหาย, รัฐบาลแจกจริง, ด่วนที่สุด
-→ ใช้แทน: มีการแชร์ข้อมูลว่า..., ผู้ใช้บางรายอ้างว่า..., ควรตรวจสอบเพิ่มเติม
-
-[Clickbait] ห้ามใช้: คุณจะไม่เชื่อ, รีบดูด่วน, แชร์ด่วน, ดูก่อนโดนลบ, อึ้งทั้งประเทศ
-→ ใช้แทน: หลายคนพูดถึง, กลายเป็นประเด็น, คนบนโซเชียลวิจารณ์
-
-[Engagement Bait] ห้ามใช้: พิมพ์ 1, เมนต์ 99, แชร์วนไป, ใครเห็นด้วยกดไลก์
-→ ใช้แทน: คุณคิดเห็นยังไง, ถ้าเป็นคุณจะ..., มองเรื่องนี้ยังไง
-
-หลักการ: เปลี่ยนจาก "ความแรง" → "อารมณ์" เน้น emotional storytelling, human emotion, social conflict แทน shock/gore/rage bait
+=== FACEBOOK SAFETY RULES ===
+🔴 ถอดกฎแทนคำ/แบนคำออกทั้งหมดแล้ว (25 ก.ค. 69 — เจ้าของสั่ง: พนักงานเกลาเนื้อก่อนใส่เจนอยู่แล้ว)
+ให้เขียนตามข้อเท็จจริงในข่าวตรงๆ ไม่ต้องเลี่ยงคำ ไม่ต้องแทนคำใดๆ
+ข้อเดียวที่ยังบังคับ: ห้ามใส่ข้อมูลที่ไม่มีในข่าว และสถานะเป็น/ตายของบุคคลต้องตรงต้นฉบับ 100%
 === จบ FACEBOOK SAFETY RULES ===`;
 
   // Build user message content — support vision (imageContents)
@@ -163,30 +136,31 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
   console.log(`[callAI] model=${model}, temp=${temperature}, maxTokens=${maxTokens}`);
   console.log(`[callAI] prompt preview (first 500ch): ${(prompt || userPrompt || '').slice(0, 500)}`);
 
-  // ★ gpt-5.5 / gpt-5.4-mini: ใช้ max_completion_tokens + ไม่รับ temperature (ใช้ default=1 เท่านั้น)
-  const modelsToTry = [model];
-  if (model === 'gpt-5.5') {
-    modelsToTry.push('gpt-4o');
-  } else if (model === 'gpt-5.4-mini') {
-    modelsToTry.push('gpt-4o-mini');
-  } else if (model !== 'gpt-4o') {
-    modelsToTry.push('gpt-4o');
-  }
+  // ★ 25 ก.ค. 69: ไม้สองอ่านจากแผนที่กลาง (modelConfig.MODEL_FALLBACKS) แทน hardcode gpt-4o
+  //   บั๊กเดิม: ไม้สองเป็น gpt-4o เสมอ + ส่ง maxTokens เดิม (เช่น 24000) ซึ่งเกินเพดาน gpt-4o (16384)
+  //   → ไม้สองถูก API ปฏิเสธทันทีทุกครั้ง = มีไว้แต่ไม่เคยช่วยอะไร แถม log ขึ้นบรรทัดล้มหลอกตา
+  const modelsToTry = [model, ...(MODEL_FALLBACKS[model] || [MODEL_HEAVY_FALLBACK])]
+    .filter((m, i, a) => m && a.indexOf(m) === i);
 
   let lastError = null;
   for (const currentModel of modelsToTry) {
     try {
       console.log(`[callAI] Trying model=${currentModel}`);
       const isNewModel = currentModel.startsWith('gpt-5') || currentModel.startsWith('o1') || currentModel.startsWith('o3');
-      
+      // ★ 25 ก.ค. 69: ตัดเพดาน token ให้พอดีกับโมเดลที่กำลังยิงจริง — กันขอเกินแล้วโดนปฏิเสธทั้งคำขอ
+      const capped = clampMaxTokens(currentModel, maxTokens);
+      if (capped !== maxTokens) {
+        console.warn(`[callAI] ⚠️ ลด maxTokens ${maxTokens} → ${capped} ให้พอดีเพดานของ ${currentModel}`);
+      }
+
       const response = await client.chat.completions.create({
         model: currentModel,
         messages,
         // ★ gpt-5.x ไม่รับ temperature ≠ 1 → ไม่ส่ง (ใช้ default)
         ...(isNewModel ? {} : { temperature }),
         ...(isNewModel
-          ? { max_completion_tokens: maxTokens }
-          : { max_tokens: maxTokens }),
+          ? { max_completion_tokens: capped }
+          : { max_tokens: capped }),
         response_format: { type: 'json_object' },
       // ★ 16 ก.ค. 69 (B4): รับ AbortSignal จาก withTimeoutSignal — timeout แล้วยกเลิก HTTP จริง ตัดจ่ายซ้อน
       }, signal ? { signal } : undefined);

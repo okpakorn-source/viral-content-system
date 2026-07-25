@@ -11,6 +11,25 @@ import { callAI } from '@/lib/ai/openai';
 import { MODEL_FAST } from '@/lib/ai/modelConfig';
 
 /**
+ * ★ 25 ก.ค. 69 (แก้บั๊กที่ทำให้ฟีเจอร์นี้ "จ่ายเงินฟรี" มาตลอด):
+ *   callAI บังคับโหมด JSON เสมอ → คืน "ก้อนข้อมูล" ไม่ใช่ "ข้อความ"
+ *   โค้ดเดิมเช็ค typeof result === 'string' ซึ่งเป็นเท็จทุกครั้ง → ผลที่ AI เกลามาถูกทิ้ง 100%
+ *   ตัวช่วยนี้ดึงข้อความออกมาจากรูปแบบที่เป็นไปได้ทั้งหมด (และยังรองรับ string เผื่ออนาคต)
+ */
+function pickText(result) {
+  if (typeof result === 'string') return result;
+  if (result && typeof result === 'object') {
+    for (const k of ['rewritten', 'content', 'text', 'result', 'output', 'sentence', 'fixed']) {
+      if (typeof result[k] === 'string' && result[k].trim()) return result[k];
+    }
+    // เผื่อ AI ตอบ object ที่มีคีย์เดียวชื่ออื่น
+    const vals = Object.values(result).filter(v => typeof v === 'string' && v.trim());
+    if (vals.length === 1) return vals[0];
+  }
+  return null;
+}
+
+/**
  * แก้ content ตาม issues ที่ audit พบ
  * @param {string} content - เนื้อหาต้นฉบับ
  * @param {Array} issues - จาก auditOutput()
@@ -135,11 +154,12 @@ ${riskyWords}
 ${correctedContent}
 === จบ ===
 
-ตอบเฉพาะเนื้อหาที่แก้แล้ว ไม่ต้องอธิบาย ไม่ต้องใส่ prefix`,
+ตอบเป็น JSON เท่านั้น รูปแบบ {"rewritten": "<เนื้อหาที่แก้แล้วทั้งก้อน>"} ไม่ต้องอธิบาย ไม่ต้องใส่ prefix`,
         });
 
-        if (typeof result === 'string' && result.length > correctedContent.length * 0.7 && result.length < correctedContent.length * 1.3) {
-          correctedContent = result.trim();
+        const rewritten = pickText(result); // ★ 25 ก.ค. 69: เดิมเช็ค typeof string → เป็นเท็จเสมอ ผล AI ถูกทิ้งทุกครั้ง
+        if (rewritten && rewritten.length > correctedContent.length * 0.7 && rewritten.length < correctedContent.length * 1.3) {
+          correctedContent = rewritten.trim();
           corrections.push({
             type: 'ai_context_rewrite',
             original: aiRewriteIssues.map(i => i.text).join(', '),
@@ -223,11 +243,12 @@ async function fixSentenceWithAI(sentence, issue) {
 ประโยคเดิม: ${sentence}
 ปัญหา: พบคำที่ฟังเหมือน AI "${issue.text}"
 
-ตอบเฉพาะประโยคที่แก้แล้ว ไม่ต้องอธิบาย ไม่ต้องใส่เครื่องหมายคำพูด`,
+ตอบเป็น JSON เท่านั้น รูปแบบ {"sentence": "<ประโยคที่แก้แล้ว>"} ไม่ต้องอธิบาย`,
     });
 
-    if (typeof result === 'string' && result.length > 10 && result.length < sentence.length * 1.5) {
-      return result.trim();
+    const fixed = pickText(result); // ★ 25 ก.ค. 69: เดิมเช็ค typeof string → คืน null ทุกครั้ง (จุดแก้ประโยคกลิ่น AI ไม่เคยทำงาน)
+    if (fixed && fixed.length > 10 && fixed.length < sentence.length * 1.5) {
+      return fixed.trim();
     }
     return null;
   } catch {

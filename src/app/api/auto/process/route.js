@@ -25,6 +25,7 @@ import { getYouTubeData }  from '@/lib/providers/youtubeProvider';
 import { logPipeline }     from '@/lib/pipelineLogger';
 import { logGeneration }   from '@/lib/services/generationLogger';
 import { createLogger }    from '@/lib/logger';
+import { checkApiAuth }    from '@/lib/apiAuth';
 
 // Direct Service Imports
 import { processAutoFlow } from '@/lib/services/autoFlowService';
@@ -45,7 +46,7 @@ const rlog = createLogger('AUTO-PROCESS');
  */
 async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, sourceUrl, workflowId, archivedBy, coverImage }) {
   try {
-    if (!newsData?.newsTitle && !newsData?.newsBody) return;
+    if (!newsData?.newsTitle && !newsData?.newsBody) return { saved: false, reason: 'ไม่มีเนื้อข่าว' };
 
     // ★ Dedup guard: title เดียวกันภายใน 10 นาที → ไม่บันทึกซ้ำ
     try {
@@ -58,7 +59,7 @@ async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, so
       );
       if (dupe) {
         console.log(`[Archive-Server] ⏭️ Duplicate within 10min — skip: "${newsData.newsTitle.slice(0, 50)}"`);
-        return;
+        return { saved: false, reason: 'หัวข้อซ้ำภายใน 10 นาที' };
       }
     } catch (dedupErr) {
       console.warn('[Archive-Server] Dedup check failed (continuing):', dedupErr.message);
@@ -117,8 +118,11 @@ async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, so
     const store = createStore('news-archive');
     await store.add(item);
     console.log(`[Archive-Server] ✅ Saved: "${item.title.slice(0, 50)}" [${category}]`);
+    return { saved: true, id };
   } catch (err) {
     console.warn('[Archive-Server] Save failed (non-critical):', err.message);
+    // ★ 25 ก.ค. 69: คืนผลจริงแทนการกลืนเงียบ — เดิม response ตอบ archiveSaved:true ไปแล้วทั้งที่ยังไม่รู้ผล
+    return { saved: false, reason: String(err?.message || err).slice(0, 120) };
   }
 }
 
@@ -134,12 +138,12 @@ export async function POST(request) {
   };
 
   try {
-    // ─── API Key Verification (For Discord Bot & External Apps) ───
-    const apiKey = request.headers.get('x-api-key');
-    if (apiKey) {
-      if (!process.env.DISCORD_API_SECRET || apiKey !== process.env.DISCORD_API_SECRET) {
-        return NextResponse.json({ success: false, error: 'Unauthorized: Invalid API Key' }, { status: 401 });
-      }
+    // ─── ตรวจสิทธิ์ ───
+    // ★ 25 ก.ค. 69: เดิม "ไม่ส่ง x-api-key = ผ่าน" → คนนอกยิงตรงเข้าท่อผลิตข่าวได้ (ข้ามคิว)
+    //   ตอนนี้ต้องเป็นกุญแจถูก / Vercel Cron / หน้าเว็บของเราเอง / เครื่องตัวเอง เท่านั้น
+    const _auth = checkApiAuth(request);
+    if (!_auth.ok) {
+      return NextResponse.json({ success: false, error: 'Unauthorized', errorType: 'UNAUTHORIZED' }, { status: 401 });
     }
 
     const body = await request.json();
@@ -227,8 +231,11 @@ export async function POST(request) {
         addLog('Route', `✅ Enhanced pipeline: ${versions.length} versions in ${legacyData.totalTimeSeconds}s`);
 
         // 🗄️ Auto-save to news archive — server-side ที่เดียว (web/Discord ผ่าน queue ทั้งคู่)
+        // ★ 25 ก.ค. 69: เดิมยิงแบบไม่รอผล + กลืน error แต่ตอบ archiveSaved:true → ข่าวหายจากคลังโดยไม่มีใครรู้
+        //   ตอนนี้รอผลจริง (มีเพดาน 25 วิ ไม่ให้ถ่วงงาน) แล้วรายงานค่าที่เกิดขึ้นจริง
+        let _archiveSaved = false, _archiveNote = '';
         if (isFromQueue) {
-          saveToArchiveServerSide({
+          const _ar = await withTimeout(saveToArchiveServerSide({
             newsData: legacyData.newsData,
             breakdownData: legacyData.breakdownData,
             sourceType: detection.inputType,
@@ -236,12 +243,16 @@ export async function POST(request) {
             workflowId: _wfId,
             archivedBy: body.userId || 'auto-server',
             coverImage: delegateRes.autoCoverResult?.success ? delegateRes.autoCoverResult.base64 : null,
-          }).catch(() => {});
+          }), 25_000, 'archive_save').catch((e) => ({ saved: false, reason: String(e?.message || e).slice(0, 120) }));
+          _archiveSaved = !!_ar?.saved;
+          _archiveNote = _ar?.reason || '';
+          addLog('Archive', _archiveSaved ? '🗄️ เก็บเข้าคลังข่าวแล้ว' : `⚠️ ไม่ได้เก็บเข้าคลัง: ${_archiveNote}`);
         }
 
         return NextResponse.json({
           success:       true,
-          archiveSaved:  isFromQueue, // ★ client เห็น flag นี้แล้วไม่ต้อง save ซ้ำ
+          archiveSaved:  _archiveSaved, // ★ ค่าจริงจากการบันทึก (เดิมตอบ isFromQueue ไปก่อนเสมอ)
+          archiveNote:   _archiveNote || undefined,
           data:          { ...legacyData, versions, analysisResult },
           newsData:      legacyData.newsData,
           breakdownData: legacyData.breakdownData,
@@ -463,7 +474,7 @@ export async function POST(request) {
       mode:       'extract',
       workflowId: _wfId,
       user:       body.user || null,
-    }), 45000, 'extract');
+    }), Number(process.env.LOCAL_EXTRACT_TIMEOUT_MS || 120000), 'extract'); // ★ 25 ก.ค. 69: 45→120 วิ (ของจริงใช้เกิน 45 วิ จนสาขานี้ล้มทุกครั้งถ้าเปิดใช้)
     if (!extractRes.success || !extractRes.data?.newsBody) {
       return NextResponse.json({
         success:    false,
@@ -486,7 +497,7 @@ export async function POST(request) {
         newsTitle:  newsData.newsTitle,
         workflowId: _wfId,
         user:       body.user || null,
-      }), 45000, 'breakdown');
+      }), Number(process.env.LOCAL_BREAKDOWN_TIMEOUT_MS || 300000), 'breakdown'); // ★ 25 ก.ค. 69: 45→300 วิ (แตกประเด็นจริงใช้ 137-169 วิ)
       breakdownData = breakRes.success ? breakRes.data : null;
       if (breakdownData) addLog('Breakdown', `✅ ${breakdownData.possible_angles?.length || 0} angles`);
     } catch (bdErr) {
@@ -503,7 +514,7 @@ export async function POST(request) {
         breakdownData: breakdownData,
         workflowId: _wfId,
         user: body.user || null,
-      }), 45000, 'blueprint');
+      }), Number(process.env.LOCAL_BLUEPRINT_TIMEOUT_MS || 120000), 'blueprint'); // ★ 25 ก.ค. 69: 45→120 วิ
       if (bpRes?.success) blueprintData = bpRes.data?.blueprint || null;
       addLog('Blueprint', blueprintData ? blueprintData.core_emotion : 'skipped');
     } catch (bpErr) {
@@ -557,8 +568,10 @@ export async function POST(request) {
     await logPipeline({ workflowId: _wfId, step: 'unified-auto', status: 'success', duration: Date.now() - startTime, detail: newsData.newsTitle?.slice(0, 60) }).catch(() => {});
 
     // 🗄️ Auto-save to news archive — server-side ที่เดียว (เดิม pipeline ท้องถิ่นไม่ archive เลย → ข่าวจาก Discord รูป/text หายจากคลัง)
+    let _archiveSaved2 = false, _archiveNote2 = '';
     if (isFromQueue) {
-      saveToArchiveServerSide({
+      // ★ 25 ก.ค. 69: รอผลจริง + รายงานตามจริง (เดิมยิงทิ้งแล้วตอบว่าเซฟแล้วเสมอ)
+      const _ar2 = await withTimeout(saveToArchiveServerSide({
         newsData,
         breakdownData,
         sourceType: detection.inputType,
@@ -566,7 +579,10 @@ export async function POST(request) {
         workflowId: _wfId,
         archivedBy: body.userId || 'auto-server',
         coverImage: null,
-      }).catch(() => {});
+      }), 25_000, 'archive_save').catch((e) => ({ saved: false, reason: String(e?.message || e).slice(0, 120) }));
+      _archiveSaved2 = !!_ar2?.saved;
+      _archiveNote2 = _ar2?.reason || '';
+      addLog('Archive', _archiveSaved2 ? '🗄️ เก็บเข้าคลังข่าวแล้ว' : `⚠️ ไม่ได้เก็บเข้าคลัง: ${_archiveNote2}`);
     }
 
     // === GENERATION LOG: บันทึกเคสเข้าระบบ ===
@@ -601,7 +617,8 @@ export async function POST(request) {
 
     return NextResponse.json({
       success:        true,
-      archiveSaved:   isFromQueue, // ★ client เห็น flag นี้แล้วไม่ต้อง save ซ้ำ
+      archiveSaved:   _archiveSaved2, // ★ 25 ก.ค. 69: ค่าจริงจากการบันทึก (เดิมตอบ isFromQueue ไปก่อนเสมอ)
+      archiveNote:    _archiveNote2 || undefined,
       data:           { ...genData, versions, analysisResult },
       newsData,
       breakdownData,

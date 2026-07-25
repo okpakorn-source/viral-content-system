@@ -12,7 +12,7 @@
 
 import { callAI } from '@/lib/ai/openai';
 
-const MODEL_FIX = 'gpt-4o'; // ภาษาไทยลื่นพอ + เร็ว/ถูกกว่า write-tier
+const MODEL_FIX = 'gpt-5.6-terra'; // ภาษาไทยลื่นพอ + เร็ว/ถูกกว่า write-tier
 
 // ── ตรวจ: เลขเด่นพร้อมหน่วยจากต้นฉบับ (ตรรกะเดียวกับ extractKeyNumbers ฝั่ง summarize) ──
 function keyNumbersOf(sourceText) {
@@ -84,7 +84,7 @@ async function detectSameAngleOpenings(versions) {
   const opens = versions.map((v, i) => `${i + 1}: ${String(v.content || '').split('\n')[0].slice(0, 150)}`).join('\n');
   try {
     const raw = await callAI({
-      model: 'gpt-4o-mini', temperature: 0.1, maxTokens: 800,
+      model: 'gpt-5.6-luna', temperature: 0.1, maxTokens: 800,
       prompt: `ประโยคเปิดของแต่ละเวอร์ชัน (ข่าวเดียวกัน เขียนคนละมุม):
 ${opens}
 

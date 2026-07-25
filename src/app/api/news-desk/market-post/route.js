@@ -57,7 +57,7 @@ export async function POST(request) {
 ${note ? 'หมายเหตุจากทีม: ' + note + '\n' : ''}เนื้อหา: ${material.slice(0, 2500)}
 
 {"topic":"เรื่องอะไรใน 1 ประโยค","category":"หมวด","whyViral":"ทำไมแรง (hook/อารมณ์/ตัวเลข/จังหวะ)","rewritable":true/false,"rewriteAngle":"ถ้าเพจเราจะเล่นเรื่องนี้/แนวนี้ ควรเล่นมุมไหน"}`,
-        model: 'gpt-4o-mini',
+        model: 'gpt-5.6-luna',
         temperature: 0.2,
         maxTokens: 500,
       });

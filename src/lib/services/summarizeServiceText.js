@@ -14,7 +14,7 @@ import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT
 
 // ★ 16 ก.ค. 69 (B4): sync กับสาย URL (summarizeService.js:15) — เดิม hardcode 'gemini-2.5-pro' ตกรุ่น 2 เวอร์ชัน
 //   ที่ทีมเลิกใช้เอง (มั่ว/แต่งเรื่อง) ทำ STAGE 2.5 (AI re-rank พร้อมท์) ของสายข้อความตายเงียบ
-const MODEL_GEMINI_PRO = 'gemini-3.5-flash';
+const MODEL_GEMINI_PRO = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash'; // ★ 25 ก.ค. 69: 3.5 → 3.6 (เร็วกว่า ~8 เท่าจากเทสจริง)
 
 // ═══════════════════════════════════════════════════════════
 // 🔍 POST-PROCESSING QUALITY FILTERS
@@ -734,8 +734,13 @@ export async function performSummarize({
     console.log(`[Analyze-Service] newsTitle: "${(actualNewsTitle || '').slice(0,80)}", textLen: ${actualNewsBody?.length}`);
 
     let smartPrompt = presetPrompt || null;
-    let promptSource = presetPrompt ? 'library' : 'preset';
-    let promptMatchReason = presetPrompt ? `🏛️ Pre-selected: "${presetPrompt.promptName || 'Library Prompt'}"` : '';
+    // ★ 25 ก.ค. 69 (แก้ป้ายโกหก): เดิมพร้อมท์สำรอง Built-in V12 ถูกติดป้ายว่า "library" ทั้งที่ไม่ได้มาจากคลัง
+    //   → ตรวจย้อนหลังไม่มีทางรู้ว่างานไหนใช้ของจริงจากคลัง งานไหนตกไปใช้ตัวสำรอง
+    const _isBuiltinFallback = !!(presetPrompt && (presetPrompt._isFallback || presetPrompt.id === 'fallback_builtin'));
+    let promptSource = presetPrompt ? (_isBuiltinFallback ? 'builtin-fallback' : 'library') : 'preset';
+    let promptMatchReason = presetPrompt
+      ? (_isBuiltinFallback ? '📦 ใช้พร้อมท์สำรอง Built-in V12 (ไม่มีตัวที่ match ในคลัง)' : `🏛️ Pre-selected: "${presetPrompt.promptName || 'Library Prompt'}"`)
+      : '';
     let newsTypeDetected = '';
     let newsAnalysis = null;
     let top10PromptScores = [];
@@ -1371,27 +1376,9 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         ? `สร้าง 1 เวอร์ชัน: เทพลังทั้งหมดไปที่เวอร์ชันเดียว — เปิดเรื่องด้วย hook ตามสไตล์เปิดเรื่องที่กำหนดใน FOCUS ANGLE ห้ามเปิดด้วยวันที่\n\n`
         : `สร้างอย่างน้อย ${targetCount || 2} เวอร์ชัน:\n` +
           'เขียนในมุมมองที่ต่างกันตามจำนวนที่ขอ (ตัวอย่างมุมมอง: ไทม์ไลน์เหตุการณ์, ขยี้จังหวะอารมณ์, เปิดเรื่องแรงๆ, มุมมองคนในเหตุการณ์, หรือเจาะลึกความจริง)\n\n') +
-      '=== กฎเหล็ก FACEBOOK SAFETY — บังคับทุกเวอร์ชัน ===\n' +
-      'ห้ามใช้คำเสี่ยงต่อไปนี้ในเนื้อหาที่เขียน ให้ rewrite เป็นคำปลอดภัยเสมอ:\n\n' +
-      '"ฆ่า" → "ก่อเหตุ" หรือ "ก่อเหตุร้ายแรง"\n' +
-      '"ฆาตกรรม" → "เหตุสูญเสีย" หรือ "คดีร้ายแรง"\n' +
-      '"ศพ" → "ร่างของผู้จากไป"\n' +
-      '"ตาย/ดับ/สิ้นใจ" → เลี่ยงคำห้วนเหล่านี้ แต่ ⚠️"เสียชีวิต" และ "จากไป" คือคำมาตรฐานที่ปลอดภัย ใช้ตรงๆ ได้เสมอ (16 ก.ค. 69: เลิกแบน "เสียชีวิต" — บทเรียนเคส #01641 การบังคับเลี่ยงทุกคำทำตัวเขียนละข้อเท็จจริงการตายทั้งเรื่อง) สำนวนสุภาพอื่นใช้สลับได้ เช่น "จากไปอย่างสงบ" "ลาลับ" — ห้ามใช้สำนวนเดียวซ้ำทุกจุด/ทุกเวอร์ชัน ⚠️ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้งเสมอ ห้ามเลี่ยงจนคนอ่านไม่รู้ว่าเสียชีวิตแล้ว (ห้ามเล่าฉากก่อนเสียชีวิตค้างไว้โดยไม่เฉลย)\n' +
-      '"สยอง/โหด/สลด" → "สะเทือนใจ" หรือ "น่าตกใจ"\n' +
-      '"เลือด" → "ร่องรอยเหตุการณ์" (⚠️ยกเว้นศัพท์การแพทย์/อวัยวะ เช่น "เส้นเลือด" "เส้นเลือดในสมอง" — ห้ามแทนที่ ให้คงคำเดิม)\n' +
-      '"แทง" → "ใช้ของมีคม"\n' +
-      '"ยิง" → "ใช้อาวุธปืน"\n' +
-      '"ข่มขืน" → "ล่วงละเมิดทางเพศ"\n' +
-      '"ผูกคอ/จบชีวิต" → "จากไปอย่างน่าเศร้า"\n' +
-      '"การพนัน/บ่อน/แทงบอล/เว็บพนัน" → "เกมเสี่ยงโชคผิดกฎหมาย" (เลี่ยงให้มากที่สุด)\n' +
-      '"ยาบ้า/ยาไอซ์/เสพยา" → "สิ่งผิดกฎหมาย" หรือ "ของมึนเมาผิดกฎหมาย"\n' +
-      '"เมาแล้วขับ/ตั้งวงเหล้า" → เกลาคำให้นุ่มลง เช่น "ขับขี่ในสภาพไม่พร้อม" "ร่วมวงสังสรรค์" (สลาก/ลอตเตอรี่รัฐบาลใช้ได้ปกติ)\n' +
-      '"ชำแหละ/หมกศพ" → "เหตุรุนแรงอย่างยิ่ง"\n' +
-      '"ทุบตี/ทำร้าย" → "ใช้ความรุนแรง"\n' +
-      '"จัดฉาก" → "สร้างสถานการณ์"\n\n' +
-      'หลักการ: เปลี่ยน "ความแรง" → "อารมณ์" เน้น emotional storytelling ไม่ใช่ shock/gore\n' +
-      'ห้าม clickbait: "คุณจะไม่เชื่อ", "แชร์ด่วน", "ดูก่อนโดนลบ"\n' +
-      'ห้าม engagement bait: "พิมพ์ 1", "เมนต์ 99", "ใครเห็นด้วยกดไลก์"\n' +
+      '=== กฎเหล็ก FACEBOOK SAFETY — ถอดออกแล้ว (25 ก.ค. 69 เจ้าของสั่ง) ===\n' +
+      'ไม่มีกฎแทนคำ/แบนคำอีกต่อไป เขียนตามข้อเท็จจริงในข่าวตรงๆ ไม่ต้องเลี่ยงคำ\n' +
+      'คงไว้ข้อเดียว: ถ้าต้นฉบับมีผู้เสียชีวิต ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้ง ห้ามเลี่ยงจนคนอ่านไม่รู้\n' +
       '=== จบกฎ FACEBOOK SAFETY ===\n\n' +
       `✨✨✨ คำสั่งเด็ดขาด: ต้องสร้างผลลัพธ์ให้ครบจำนวน ${targetCount || 2} เวอร์ชัน ห้ามขาดหาย เนื้อหาแต่ละเวอร์ชันต้องมีความยาวตามที่กำหนด ✨✨✨\n\n` +
       'ตอบเป็น JSON:\n' +
@@ -1557,7 +1544,10 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
                   matchScore: (typeof smartPrompt._matchScore === 'number') ? Math.round(smartPrompt._matchScore) : null,
                   matchType: smartPrompt._matchType || (smartPrompt._isBorrowed ? 'BORROWED' : 'MATCHED'),
                 }
-              : { id: 'library', name: '📦 Library', source: 'library' },
+              // ★ 25 ก.ค. 69: แยกป้าย "ตัวสำรอง Built-in V12" ออกจาก "คลังพร้อมท์" ให้ชัด (เดิมเหมาว่า library หมด)
+              : (promptSource === 'builtin-fallback'
+                  ? { id: 'fallback_builtin', name: '📦 Built-in Fallback V12', source: 'builtin-fallback', promptSource: 'builtin-fallback', promptName: 'Built-in Fallback V12', matchType: 'FALLBACK', matchScore: null }
+                  : { id: 'library', name: '📦 Library', source: promptSource || 'library', promptSource: promptSource || 'library' }),
             usedModel: usedModel || MODEL_NEWS_ANALYSIS,
             versions,
             news_reference: result.news_reference || '',
@@ -1896,8 +1886,8 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
         '- ⚠️ ห้ามตั้งคำถามปิดท้าย ห้ามจบด้วยคำถามใดๆ\n' +
         '- ใช้ข้อมูลจากข่าวจริงเท่านั้น ห้ามแต่งเรื่องเพิ่ม\n' +
         '- ระบุว่าผสมจากมุมไหนบ้าง (ใน mixed_from)\n\n' +
-        '=== กฎเหล็ก FACEBOOK SAFETY ===\n' +
-        'ห้ามใช้คำเสี่ยง: ฆ่า→ก่อเหตุ, ศพ→ร่างของผู้จากไป, ตาย/ดับ→เลี่ยงคำห้วน (⚠️"เสียชีวิต"/"จากไป" เป็นคำมาตรฐานปลอดภัย ใช้ตรงๆ ได้ — ต้องบอกการจากไปชัด ≥1 ครั้ง ห้ามเลี่ยงจนคนอ่านไม่รู้ว่าเสียชีวิตแล้ว), สยอง→สะเทือนใจ, เลือด→ร่องรอยเหตุการณ์, พนัน/ยาเสพติด/วงเหล้า→เลี่ยงหรือเกลาให้นุ่ม\n' +
+        '=== กฎเหล็ก FACEBOOK SAFETY — ถอดออกแล้ว (25 ก.ค. 69 เจ้าของสั่ง) ===\n' +
+        'ไม่มีกฎแทนคำ/แบนคำ เขียนตามข้อเท็จจริงตรงๆ · คงไว้ข้อเดียว: ต้องบอกการจากไปให้ชัด ≥1 ครั้งถ้ามีผู้เสียชีวิต\n' +
         '=== จบ SAFETY ===\n\n' +
         'ตอบเป็น JSON:\n' +
         '{\n' +

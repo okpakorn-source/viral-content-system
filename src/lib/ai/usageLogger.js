@@ -11,7 +11,13 @@ const PRICING = {
   'claude-sonnet-4-20250514': { input: 3.0, output: 15.0 },
   'claude-3-5-sonnet-20240620': { input: 3.0, output: 15.0 },
   'claude-3-5-sonnet-20241022': { input: 3.0, output: 15.0 },
+  'gemini-3.6-flash': { input: 1.50, output: 9.00 }, // ★ 25 ก.ค. 69: ตัวใหม่ของสายข้อความ (ราคาอิงรุ่น 3.5 — ยังไม่มีหน้าราคาทางการ)
   'gemini-3.5-flash': { input: 1.50, output: 9.00 },
+  // ★ 25 ก.ค. 69: ตระกูล GPT-5.6 (ยกชุดทั้งระบบ) + claude-opus-5
+  'gpt-5.6-sol': { input: 5.0, output: 30.0 },
+  'gpt-5.6-terra': { input: 2.5, output: 15.0 },
+  'gpt-5.6-luna': { input: 1.0, output: 6.0 },
+  'claude-opus-5': { input: 5.0, output: 25.0 },
   'gemini-3.1-pro': { input: 2.0, output: 12.0 },
   'claude-opus-4-8': { input: 5.0, output: 25.0 },
   'gemini-2.5-flash': { input: 0.15, output: 0.60 },

@@ -292,15 +292,22 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   
   for (const angleObj of anglesToUse) {
     const focusAngle = `${angleObj.angle_name}: ${angleObj.description}`;
-    const promptsRes = await getTopPrompts({
-      newsTitle: newsData.newsTitle,
-      text: newsData.newsBody,
-      focusAngle,
-      workflowId: _autoWorkflowId,
-      excludePromptIds: [...usedPromptIds],
-      _cachedNewsAnalysis,
-      _cachedPromptLib,
-    }).catch(() => null);
+    // ★ 25 ก.ค. 69: ใส่นาฬิกาให้ขั้น "เลือกพร้อมท์" (เดิมไม่มีเพดานเวลาสักชั้น —
+    //   API ค้างเมื่อไหร่ งานทั้งใบแขวนที่ขั้นนี้จนโดนเพดานเซิร์ฟเวอร์ฟันทิ้ง ไม่ได้ข่าวสักเวอร์ชัน)
+    //   ล้ม/หมดเวลา = null → ตกไปใช้ Built-in Fallback V12 ตามเดิม งานไม่ตาย
+    const promptsRes = await withTimeout(
+      getTopPrompts({
+        newsTitle: newsData.newsTitle,
+        text: newsData.newsBody,
+        focusAngle,
+        workflowId: _autoWorkflowId,
+        excludePromptIds: [...usedPromptIds],
+        _cachedNewsAnalysis,
+        _cachedPromptLib,
+      }),
+      Number(process.env.PROMPT_SELECT_TIMEOUT_MS || 90_000),
+      'auto_prompt_select'
+    ).catch((e) => { addLog('PromptSelect', `⚠️ เลือกพร้อมท์ไม่สำเร็จ (${String(e?.message || e).slice(0, 80)}) → ใช้ตัวสำรอง`); return null; });
     
     // Cache จากผลลัพธ์ครั้งแรก → ใช้ซ้ำครั้งถัดไป
     if (!_cachedNewsAnalysis && promptsRes?.newsAnalysis) {
@@ -493,7 +500,13 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // === POST-GENERATION CORRECTION PIPELINE ===
   let finalVersions = allVersions;
   try {
-    finalVersions = await runCorrectionPipeline(allVersions, newsData, breakdownData);
+    // ★ 25 ก.ค. 69: ใส่นาฬิกาให้ท่อแก้สำนวนทั้งท่อ (เดิมไม่มีเพดานสักชั้น — เรียก AI 1-3 ครั้ง/เวอร์ชัน)
+    //   หมดเวลา = ใช้เนื้อเดิมที่เขียนเสร็จแล้ว (ข่าวไม่หาย) แทนที่จะแขวนจนโดนเพดานเซิร์ฟเวอร์ฟันทั้งงาน
+    finalVersions = await withTimeout(
+      runCorrectionPipeline(allVersions, newsData, breakdownData),
+      Number(process.env.CORRECTION_TIMEOUT_MS || 150_000),
+      'auto_correction'
+    );
     addLog('Correction', `🔧 Correction Pipeline: ${finalVersions.filter(v => v._correctionApplied).length}/${finalVersions.length} corrected`);
   } catch (corrErr) {
     console.error('[AutoFlow] Correction pipeline failed, using original:', corrErr.message);
@@ -519,7 +532,9 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         contentLength: selectedLength,
         // ★ 30 มิ.ย.: บันทึกพร้อมท์ที่ใช้จริง (ปิดจุดบอด — ท่อ text เดิมไม่บันทึก promptName)
         promptName: usedPreset?.promptName || usedPreset?.name || anglePrompts[0]?.promptName || '',
-        promptSource: usedPreset?.promptSource || usedPreset?.source || (anglePrompts[0] ? 'library' : ''),
+        // ★ 25 ก.ค. 69: ถ้าตกไปใช้พร้อมท์สำรอง Built-in V12 ต้องบันทึกตามจริง (เดิมเหมาว่า 'library')
+        promptSource: usedPreset?.promptSource || usedPreset?.source
+          || (anglePrompts[0] ? (anglePrompts[0]._isFallback ? 'builtin-fallback' : 'library') : ''),
         promptScore: usedPreset?.matchScore ?? usedPreset?.viralScore ?? anglePrompts[0]?.viralScore ?? 0,
         promptMatchType: usedPreset?.matchType || (usedPreset?.isBorrowed ? 'BORROWED' : (anglePrompts[0] ? 'MATCHED' : '')),
         promptId: usedPreset?.promptId || anglePrompts[0]?.id || '',

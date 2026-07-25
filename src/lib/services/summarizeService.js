@@ -12,7 +12,7 @@ import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT
 import { MODEL_PRIMARY, MODEL_FAST, MODEL_HEAVY_FALLBACK } from '@/lib/ai/modelConfig';
 import { withTimeout } from '@/lib/utils/withTimeout';
 
-const MODEL_GEMINI_PRO = 'gemini-3.5-flash'; // ★ อัปเกรด 10 มิ.ย. 2026 (เดิม gemini-2.5-pro เก่า 2 รุ่น)
+const MODEL_GEMINI_PRO = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash'; // ★ 25 ก.ค. 69: 3.5 → 3.6 (เร็วกว่า ~8 เท่าจากเทสจริง)
 
 // ═══════════════════════════════════════════════════════════
 // 🔍 POST-PROCESSING QUALITY FILTERS
@@ -470,6 +470,7 @@ export async function performSummarize({
 
   // ===== MODE: extract — สกัดเนื้อข่าวอย่างเดียว =====
   if (mode === 'extract') {
+    let _extractFailReasonUrl = ''; // ★ 25 ก.ค. 69: เก็บเหตุที่ AI สกัดล้ม ไว้ติดธงตอน fallback (เดิมล้มเงียบ)
     // === PATH A: TikTok/YouTube — ถอดเสียง → จัดรูปแบบ (รักษาคำพูดเดิม) ===
     if (sourceType === 'tiktok' || sourceType === 'youtube') {
       try {
@@ -580,11 +581,17 @@ export async function performSummarize({
       }
     } catch (err) {
       console.error('[Extract-URL] ERROR:', err.message);
+      _extractFailReasonUrl = err.message;
     }
 
     // Fallback
+    // ★ 25 ก.ค. 69: ติดธงให้เหมือนสายคิว — เดิมคืน success:true เฉยๆ = AI สกัดล้มแบบเงียบสนิท
+    //   (ผู้ใช้เห็นข่าวออกมาเป็นข้อความดิบโดยไม่รู้ว่าขั้นสกัดพัง)
+    console.warn(`[Extract-URL] ⚠️ FALLBACK raw text — เหตุ: ${_extractFailReasonUrl || 'AI ตอบไม่ผ่านเกณฑ์'}`);
     return {
       success: true,
+      extractFallback: true,
+      extractError: _extractFailReasonUrl || 'AI ตอบไม่ผ่านเกณฑ์',
       data: {
         newsTitle: text.slice(0, 80).replace(/\n/g, ' ').trim(),
         newsBody: text.slice(0, 5000),
@@ -1333,27 +1340,9 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         ? `สร้าง 1 เวอร์ชัน: เทพลังทั้งหมดไปที่เวอร์ชันเดียว — เปิดเรื่องด้วย hook ตามสไตล์เปิดเรื่องที่กำหนดใน FOCUS ANGLE ห้ามเปิดด้วยวันที่\n\n`
         : `สร้างอย่างน้อย ${targetCount || 5} เวอร์ชัน:\n` +
           'เขียนในมุมมองที่ต่างกันตามจำนวนที่ขอ (ตัวอย่างมุมมอง: ไทม์ไลน์เหตุการณ์, ขยี้จังหวะอารมณ์, เปิดเรื่องแรงๆ, มุมมองคนในเหตุการณ์, หรือเจาะลึกความจริง)\n\n') +
-      '=== กฎเหล็ก FACEBOOK SAFETY — บังคับทุกเวอร์ชัน ===\n' +
-      'ห้ามใช้คำเสี่ยงต่อไปนี้ในเนื้อหาที่เขียน ให้ rewrite เป็นคำปลอดภัยเสมอ:\n\n' +
-      '"ฆ่า" → "ก่อเหตุ" หรือ "ก่อเหตุร้ายแรง"\n' +
-      '"ฆาตกรรม" → "เหตุสูญเสีย" หรือ "คดีร้ายแรง"\n' +
-      '"ศพ" → "ร่างของผู้จากไป"\n' +
-      '"ตาย/ดับ/สิ้นใจ/เสียชีวิต" → ห้ามใช้ตรงๆ ทุกคำ ให้ใช้สำนวนเลี่ยงที่สุภาพ สวย และเข้ากับบริบทของเรื่อง เช่น "จากไปอย่างสงบ" "ไม่อยู่แล้ว" "ลาลับ" "สิ้นลมอย่างสงบ" "ปิดตำนาน" "หลับไม่ตื่นอีกเลย" — เลือกให้เหมาะกับโทนข่าวนั้นๆ ห้ามใช้สำนวนเดียวซ้ำทุกจุด/ทุกเวอร์ชัน ⚠️แต่ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้งเสมอ ห้ามเลี่ยงจนคนอ่านไม่รู้ว่าเสียชีวิตแล้ว (ห้ามเล่าฉากก่อนเสียชีวิตค้างไว้โดยไม่เฉลย)\n' +
-      '"สยอง/โหด/สลด" → "สะเทือนใจ" หรือ "น่าตกใจ"\n' +
-      '"เลือด" → "ร่องรอยเหตุการณ์" (⚠️ยกเว้นศัพท์การแพทย์/อวัยวะ เช่น "เส้นเลือด" "เส้นเลือดในสมอง" — ห้ามแทนที่ ให้คงคำเดิม)\n' +
-      '"แทง" → "ใช้ของมีคม"\n' +
-      '"ยิง" → "ใช้อาวุธปืน"\n' +
-      '"ข่มขืน" → "ล่วงละเมิดทางเพศ"\n' +
-      '"ผูกคอ/จบชีวิต" → "จากไปอย่างน่าเศร้า"\n' +
-      '"การพนัน/บ่อน/แทงบอล/เว็บพนัน" → "เกมเสี่ยงโชคผิดกฎหมาย" (เลี่ยงให้มากที่สุด)\n' +
-      '"ยาบ้า/ยาไอซ์/เสพยา" → "สิ่งผิดกฎหมาย" หรือ "ของมึนเมาผิดกฎหมาย"\n' +
-      '"เมาแล้วขับ/ตั้งวงเหล้า" → เกลาคำให้นุ่มลง เช่น "ขับขี่ในสภาพไม่พร้อม" "ร่วมวงสังสรรค์" (สลาก/ลอตเตอรี่รัฐบาลใช้ได้ปกติ)\n' +
-      '"ชำแหละ/หมกศพ" → "เหตุรุนแรงอย่างยิ่ง"\n' +
-      '"ทุบตี/ทำร้าย" → "ใช้ความรุนแรง"\n' +
-      '"จัดฉาก" → "สร้างสถานการณ์"\n\n' +
-      'หลักการ: เปลี่ยน "ความแรง" → "อารมณ์" เน้น emotional storytelling ไม่ใช่ shock/gore\n' +
-      'ห้าม clickbait: "คุณจะไม่เชื่อ", "แชร์ด่วน", "ดูก่อนโดนลบ"\n' +
-      'ห้าม engagement bait: "พิมพ์ 1", "เมนต์ 99", "ใครเห็นด้วยกดไลก์"\n' +
+      '=== กฎเหล็ก FACEBOOK SAFETY — ถอดออกแล้ว (25 ก.ค. 69 เจ้าของสั่ง) ===\n' +
+      'ไม่มีกฎแทนคำ/แบนคำอีกต่อไป เขียนตามข้อเท็จจริงในข่าวตรงๆ ไม่ต้องเลี่ยงคำ\n' +
+      'คงไว้ข้อเดียว: ถ้าต้นฉบับมีผู้เสียชีวิต ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้ง ห้ามเลี่ยงจนคนอ่านไม่รู้\n' +
       '=== จบกฎ FACEBOOK SAFETY ===\n\n' +
       `⚠️⚠️⚠️ คำสั่งเด็ดขาด: ต้องสร้างผลลัพธ์ให้ครบจำนวน ${targetCount || 5} เวอร์ชัน ห้ามขาดหาย เนื้อหาแต่ละเวอร์ชันต้องมีความยาวตามที่กำหนด ⚠️⚠️⚠️\n\n` +
       'ตอบเป็น JSON:\n' +
@@ -1378,7 +1367,13 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
 
     try {
       console.log(`[🤖 AI CALL] mode=write | calling SmartAI (Claude > GPT-4o)...`);
-      const { result, model: usedModel } = await callSmartAI('write', { prompt: multiPrompt, temperature: 0.7, maxTokens: 6000 }); // ★ 6000 (was 10000) — perf: 2 versions × ~500-600w = ~3000t + buffer
+      // ★ 25 ก.ค. 69: ใส่เพดานเวลาชั้นใน (เดิมไม่มีเลย — SDK รอได้ ~10 นาที เกินเพดาน route 300 วิ
+      //   ทำให้ตัวสำรองที่มีอยู่ไม่ได้ทำงานตอน "ช้า" ทำงานเฉพาะตอน "พัง" → ผู้ใช้ได้ error เปล่าๆ)
+      const { result, model: usedModel } = await withTimeout(
+        callSmartAI('write', { prompt: multiPrompt, temperature: 0.7, maxTokens: 6000 }), // ★ 6000 — perf: 2 versions × ~500-600w
+        Number(process.env.WRITE_TIMEOUT_MS || 180_000),
+        'analyze_write'
+      );
       console.log(`[🤖 AI RESULT] model used: ${usedModel}`);
       console.log(`[🤖 AI RESULT] versions: ${result?.versions?.length || 0}`);
 
@@ -1836,8 +1831,8 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
         '- ระบุว่าผสมจากมุมไหนบ้าง (ใน mixed_from)\n' +
         '- ❌ ห้ามพิมพ์ชื่อมุมมอง (ห้ามพิมพ์ Angle: ลงในเนื้อหา)\n' +
         '- ❌ ห้ามใช้คำขึ้นต้นซ้ำซาก: ลองนึกภาพว่า, ลองจินตนาการว่า, ถ้าคุณต้อง\n\n' +
-        '=== กฎเหล็ก FACEBOOK SAFETY ===\n' +
-        'ห้ามใช้คำเสี่ยง: ฆ่า→ก่อเหตุ, ศพ→ร่างของผู้จากไป, ตาย/เสียชีวิต→สำนวนเลี่ยงสวยๆ ตามบริบท (จากไปอย่างสงบ/ลาลับ/ปิดตำนาน — ห้ามซ้ำจำเจ), สยอง→สะเทือนใจ, เลือด→ร่องรอยเหตุการณ์, พนัน/ยาเสพติด/วงเหล้า→เลี่ยงหรือเกลาให้นุ่ม\n' +
+        '=== กฎเหล็ก FACEBOOK SAFETY — ถอดออกแล้ว (25 ก.ค. 69 เจ้าของสั่ง) ===\n' +
+        'ไม่มีกฎแทนคำ/แบนคำ เขียนตามข้อเท็จจริงตรงๆ · คงไว้ข้อเดียว: ต้องบอกการจากไปให้ชัด ≥1 ครั้งถ้ามีผู้เสียชีวิต\n' +
         '=== จบ SAFETY ===\n\n' +
         'ตอบเป็น JSON:\n' +
         '{\n' +
@@ -1851,12 +1846,21 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
 
       let result, usedModel;
       try {
-        const smartResult = await callSmartAI('write', { prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 });
+        // ★ 25 ก.ค. 69: ใส่เพดานเวลาชั้นใน — หมดเวลาแล้วตกไปใช้ตัวสำรองทันที (เดิมรอยาวจน route ถูกตัดทั้งคำขอ)
+        const smartResult = await withTimeout(
+          callSmartAI('write', { prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 }),
+          Number(process.env.WRITE_TIMEOUT_MS || 180_000),
+          'mix_write'
+        );
         result = smartResult.result;
         usedModel = smartResult.model;
       } catch (err) {
-        console.warn(`[Mix-Service] SmartAI failed (${err.message}), falling back to GPT-4o`);
-        result = await callAI({ prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 });
+        console.warn(`[Mix-Service] SmartAI failed (${err.message}), falling back to ${MODEL_PRIMARY}`);
+        result = await withTimeout(
+          callAI({ prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 }),
+          Number(process.env.WRITE_FALLBACK_TIMEOUT_MS || 90_000),
+          'mix_write_fallback'
+        );
         usedModel = MODEL_PRIMARY;
       }
 

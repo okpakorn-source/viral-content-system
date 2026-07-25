@@ -4,6 +4,15 @@ import { createLogger } from '@/lib/logger';
 import { MODEL_PRIMARY, MODEL_FAST } from '@/lib/ai/modelConfig';
 import { tavilySearch, isTavilyAvailable } from '@/lib/services/tavilyService';
 import { verifyResearchItems } from '@/lib/services/researchVerifier';
+import { withTimeout } from '@/lib/utils/withTimeout';
+
+// ★ 25 ก.ค. 69: ขั้นค้นข้อมูลเดิม "ไม่มีนาฬิกาของตัวเองสักจุด" — AI ข้างในค้างได้ยาว (SDK รอ ~10 นาที)
+//   แล้วไปกินงบเวลาของขั้นเขียนจนมุมข่าวตายทั้งที่มีตัวสำรองครบ · ทุกจุดล้ม = มีทางรอดอยู่แล้ว (กติกา/ข้าม/ว่าง)
+const AI_TIMEOUT = {
+  identity: Number(process.env.RESEARCH_IDENTITY_TIMEOUT_MS || 45_000),
+  keyword: Number(process.env.RESEARCH_KEYWORD_TIMEOUT_MS || 60_000),
+  fact: Number(process.env.RESEARCH_FACT_TIMEOUT_MS || 90_000),
+};
 
 const rlog = createLogger('RESEARCH-SERVICE');
 
@@ -222,7 +231,10 @@ ${snippetBlock}
 ตอบ JSON เท่านั้น:
 {"resolved": true/false, "fullName": "ชื่อเต็มที่ยืนยันได้", "aliases": ["ชื่อเล่น","ฉายาอื่น"], "extraAnchors": ["..."], "evidence": "สรุปหลักฐานสั้นๆ"}`;
 
-    const res = await callAI({ prompt, model: MODEL_FAST, temperature: 0, maxTokens: 500 });
+    const res = await withTimeout(
+      callAI({ prompt, model: MODEL_FAST, temperature: 0, maxTokens: 500 }),
+      AI_TIMEOUT.identity, 'research_identity'
+    );
     const parsed = typeof res === 'object' ? res : JSON.parse(String(res?.content || res || '{}').match(/\{[\s\S]*\}/)?.[0] || '{}');
 
     if (parsed?.resolved && parsed?.fullName && String(parsed.fullName).trim().length >= 4) {
@@ -309,12 +321,10 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
 
       console.log(`[Research-Service] → Calling AI keyword extractor (${MODEL_FAST})...`);
       const aiStart = Date.now();
-      const keywordResult = await callAI({
-        model: MODEL_FAST,
-        prompt: keywordPrompt,
-        temperature: 0.2,
-        maxTokens: 1500,
-      });
+      const keywordResult = await withTimeout(
+        callAI({ model: MODEL_FAST, prompt: keywordPrompt, temperature: 0.2, maxTokens: 1500 }),
+        AI_TIMEOUT.keyword, 'research_keyword'
+      );
       const aiDuration = Date.now() - aiStart;
 
       if (!keywordResult) {
@@ -514,12 +524,15 @@ ${searchCatalog}
 ตอบเป็น JSON:
 {"items":[{"keyword":"keyword ที่ค้นหา","type":"person|place|event|statistic|context","title":"หัวข้อ ≤60 ตัวอักษร","content":"ข้อเท็จจริง 2-3 ประโยค","sourceUrl":"URL จริง","sourceName":"ชื่อเว็บ","relevance":"เกี่ยวข้องอย่างไร"}],"notFound":["keywords ที่หาไม่เจอ"]}`;
 
-    const factResult = await callAI({
-      model: MODEL_FAST, // ★ MODEL_FAST (was MODEL_PRIMARY) — perf: fact JSON extraction doesn't need primary model
-      prompt: factPrompt,
-      temperature: 0.1,
-      maxTokens: 4000,
-    });
+    const factResult = await withTimeout(
+      callAI({
+        model: MODEL_FAST, // ★ MODEL_FAST (was MODEL_PRIMARY) — perf: fact JSON extraction doesn't need primary model
+        prompt: factPrompt,
+        temperature: 0.1,
+        maxTokens: 4000,
+      }),
+      AI_TIMEOUT.fact, 'research_fact'
+    ).catch((e) => { console.warn(`[Research-Service] ⚠️ สกัดข้อเท็จจริงหมดเวลา/ล้ม: ${String(e?.message || e).slice(0, 80)}`); return null; });
 
     let finalItems = factResult?.items || [];
     if (!factResult?.items?.length) {
