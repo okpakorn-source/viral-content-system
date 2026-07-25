@@ -243,7 +243,10 @@ async function processNewsJob(job) {
     }
 
     // 1. Add to server queue
-    const addRes = await axios.post(queueUrl, payload, { headers, timeout: 15000 });
+    // ★ 25 ก.ค. 69: 15s สั้นเกินจริง — Vercel cold start + จองคิวบน Supabase ใช้เกิน 15 วินาทีได้
+    //   เคสจริง 14:57: บอทขึ้น "timeout of 15000ms exceeded" แต่ข่าวถูกสร้างจริงตอน 15:00
+    //   ผู้ใช้เห็นว่าล้มเลยส่งใหม่ → ได้ข่าวซ้ำ 2 ใบ (เห็นในสมุดเคส 07:39 กับ 07:42 UTC)
+    const addRes = await axios.post(queueUrl, payload, { headers, timeout: Number(process.env.QUEUE_ADD_TIMEOUT_MS) || 45000 });
     const addData = addRes.data;
 
     if (!addData.success) {
@@ -511,6 +514,19 @@ async function processNewsJob(job) {
     if (_isDup) {
       console.log('[Bot] ⏭️ งานซ้ำ (409) — instance นี้เงียบสนิท (ไม่โพสต์ ack)');
       if (processingMsg) await processingMsg.delete().catch(() => {});
+      return;
+    }
+    // ★ 25 ก.ค. 69: ตอบช้าจนหมดเวลารอ ≠ งานล้ม — คำขออาจถึงเซิร์ฟเวอร์และเข้าคิวไปแล้ว
+    //   เดิมโชว์ "timeout of 15000ms exceeded" ดิบๆ ผู้ใช้นึกว่าล้มเลยส่งซ้ำ → ได้ข่าวซ้ำ 2 ใบ
+    //   ตอนนี้บอกตรงๆ ว่าอาจเข้าคิวแล้ว และห้ามส่งซ้ำทันที
+    const _isTimeoutish = error.code === 'ECONNABORTED' || /timeout of \d+ms|ETIMEDOUT|ECONNRESET|socket hang up/i.test(_eMsg);
+    if (_isTimeoutish) {
+      const waitText =
+        '⏳ เซิร์ฟเวอร์ตอบช้ากว่าปกติ — **งานอาจเข้าคิวไปแล้ว**\n' +
+        'รบกวนรอสัก 3-5 นาทีก่อนครับ ถ้าไม่มีข่าวส่งกลับมาค่อยส่งใหม่\n' +
+        '🔴 อย่าเพิ่งส่งซ้ำทันที ไม่งั้นจะได้ข่าวซ้ำ 2 ใบ';
+      if (processingMsg) await processingMsg.edit(waitText).catch(() => {});
+      else await message.reply(waitText).catch(() => {});
       return;
     }
     // error จริง — โพสต์เฉพาะถ้าเคยโพสต์ ack แล้ว (ชนะเคลม) · ตัวที่แพ้เคลมไม่ควรโผล่ error
