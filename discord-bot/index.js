@@ -51,23 +51,27 @@ function getQueueStatus() {
 const recentUrls = new Map(); // url → timestamp
 const DEDUP_WINDOW_MS = 5 * 60 * 1000; // 5 นาที
 
-function isDuplicate(content) {
+// ★ 25 ก.ค. 69: แยก "เช็ค" กับ "จำ" ออกจากกัน
+//   บั๊กเดิม: เช็คแล้วจำทันที → ถ้างานล้มกลางทาง ผู้ใช้ส่งซ้ำไม่ได้อีก 5 นาที ทั้งที่ยังไม่เคยได้ข่าวเลย
+//   ตอนนี้จำเฉพาะตอนเข้าคิวสำเร็จจริง (ดู processNewsJob)
+function _dedupKey(content) {
   const urlMatch = content.match(/https?:\/\/\S+/);
-  if (!urlMatch) return false;
+  return urlMatch ? urlMatch[0].split('?')[0] : null;
+}
 
-  const url = urlMatch[0].split('?')[0]; // ตัด query params
+function isDuplicate(content) {
+  const url = _dedupKey(content);
+  if (!url) return false;
   const now = Date.now();
-
-  // ลบ entries เก่า
   for (const [key, ts] of recentUrls) {
     if (now - ts > DEDUP_WINDOW_MS) recentUrls.delete(key);
   }
+  return recentUrls.has(url);
+}
 
-  if (recentUrls.has(url)) {
-    return true;
-  }
-  recentUrls.set(url, now);
-  return false;
+function markProcessed(content) {
+  const url = _dedupKey(content);
+  if (url) recentUrls.set(url, Date.now());
 }
 
 // ═══════════════════════════════════════════
@@ -104,14 +108,16 @@ client.on('messageCreate', async (message) => {
   const textOnly = content.replace(/https?:\/\/\S+/g, '').trim();
 
   // ข้อความมาตรฐานที่ผู้ใช้ต้องการ
-  const standardReply = 
+  // ★ 25 ก.ค. 69: ข้อความเดิมชวนให้ส่งลิงก์ แต่ระบบปิดรับลิงก์มาตั้งแต่ 16 ก.ค. (TEXT_ONLY_MODE)
+  //   → ผู้ใช้ส่งลิงก์ตามที่บอทบอก แล้วได้ error กลับทุกครั้ง
+  const standardReply =
     "สวัสดีครับ ผมเป็น 'ผู้ช่วยรวมไอจีดารา'\n" +
-    "เป้าหมายหลักของผมคือการสร้างข่าวไวรัล ช่วยคุณครับ\n\n" +
-    "รบกวนส่งข้อมูลที่จะให้ผมทำข่าวมาตามรูปแบบนี้นะครับ:\n" +
-    "- ลิงก์ข่าว / เว็บไซต์\n" +
-    "- ลิงก์ YouTube / TikTok / Facebook(ยังใช้งานไม่ได้)\n" +
-    "- พิมพ์ข้อความข่าวแบบเต็มๆ (ขอความยาวสักหน่อยนะครับ)\n\n" +
-    "หลังจากผมส่งให้คุณจะได้รับข่าว 5 เวอร์ชั่น 5 แบบให้เลือกแบบที่ดีที่สุดไปใช้งานได้เลย";
+    "หน้าที่ของผมคือปั้นข่าวไวรัลให้คุณครับ\n\n" +
+    "📌 **ตอนนี้รับเฉพาะ \"ข้อความล้วน\" เท่านั้น** (ยังไม่รับลิงก์และรูป)\n" +
+    "รบกวนสรุปเนื้อข่าวเป็นข้อความ แล้ววางมาได้เลยครับ — ยิ่งเนื้อครบ ข่าวยิ่งดี\n" +
+    "• ความยาวขั้นต่ำ ~50 ตัวอักษร\n" +
+    "• ห้ามมีลิงก์ปนมาในข้อความ (ระบบจะปฏิเสธทันที)\n\n" +
+    "ส่งแล้วผมจะคืนข่าวให้ 2 เวอร์ชัน ให้เลือกตัวที่ชอบไปใช้ได้เลยครับ";
 
   // 1. ตรวจสอบคำทักทาย หรือ คำสั่งเรียกดูวิธีใช้
   const greetings = ['สวัสดี', 'ดีครับ', 'ดีค่ะ', 'hello', 'hi', 'รบกวนหน่อย', 'ช่วยทำให้หน่อย', '!help'];
@@ -160,8 +166,17 @@ client.on('messageCreate', async (message) => {
     return message.reply(standardReply);
   }
 
-  // 3. เงื่อนไขในการเริ่มประมวลผล: มีลิงก์ หรือ ข้อความยาวกว่า 50 ตัวอักษร
-  if (hasUrl || textOnly.length > 50) {
+  // ★ 25 ก.ค. 69: ด่านลิงก์ — บอกผู้ใช้ตรงนี้เลย ไม่ต้องยิงเข้าคิวให้เสียเวลาแล้วเด้ง error กลับ
+  //   (ระบบฝั่งเซิร์ฟเวอร์ปฏิเสธทุกข้อความที่มีลิงก์ปน — TEXT_ONLY_MODE ตั้งแต่ 16 ก.ค.)
+  if (hasUrl) {
+    return message.reply(
+      '⚠️ ตอนนี้ระบบรับ **เฉพาะข้อความล้วน** ครับ (ยังไม่รับลิงก์)\n' +
+      'รบกวนสรุปเนื้อข่าวเป็นข้อความ ไม่ต้องมีลิงก์ปนมา แล้วส่งใหม่อีกครั้งนะครับ 🙏'
+    );
+  }
+
+  // 3. เงื่อนไขในการเริ่มประมวลผล: ข้อความยาวกว่า 50 ตัวอักษร
+  if (textOnly.length > 50) {
 
     // === DUPLICATE CHECK ===
     if (isDuplicate(content)) {
@@ -249,6 +264,9 @@ async function processNewsJob(job) {
     const initialPosition = addData.position;
     const queuesAhead = addData.queuesAhead || 0;
 
+    // ★ 25 ก.ค. 69: จำว่า "เข้าคิวสำเร็จแล้ว" ตรงนี้ — ไม่ใช่ตอนเช็ค (งานที่ล้มจะได้ส่งซ้ำได้ทันที)
+    markProcessed(content);
+
     // ★ ชนะเคลม → "เพิ่งโพสต์ ack ครั้งแรกตรงนี้" (มีแค่ instance เดียวที่มาถึงจุดนี้ต่อ 1 ข้อความ)
     const ackText = queuesAhead > 0
       ? `📋 รับทราบครับ! คิวลำดับที่ **${initialPosition}** — มี ${queuesAhead} คิวก่อนหน้า\nประมาณ ${queuesAhead * 3} นาที ⏳`
@@ -259,7 +277,9 @@ async function processNewsJob(job) {
     // 2. Poll for result
     const statusUrl = queueUrl.replace('/api/queue/add', '/api/queue/status');
     const workerUrl = queueUrl.replace('/api/queue/add', '/api/queue/worker');
-    const maxPollTime = 15 * 60 * 1000; // 15 minutes (pipeline ~8min + queue wait)
+    // ★ 25 ก.ค. 69: 15 → 20 นาที — งานเดียวใช้ได้ถึง ~13 นาทีตามงบเวลาของ worker
+    //   ถ้ามีคิวรอข้างหน้าแค่ 1 งาน บอทเดิมหมดเวลารอก่อนงานจริงเสร็จ (ผู้ใช้เห็น "หมดเวลา" ทั้งที่ข่าวเสร็จแล้ว)
+    const maxPollTime = 20 * 60 * 1000;
     const pollStartTime = Date.now();
     let lastStatus = '';
     let data = null;
@@ -349,16 +369,31 @@ async function processNewsJob(job) {
           data = st.result;
           break;
         } else if (st.status === 'failed') {
-          throw new Error(st.error || 'Queue job failed');
+          // ★ 25 ก.ค. 69: ติดธงว่า "มาจากงานจริง" เพื่อไม่ให้ตัวกรอง error ด้านล่างกลืนทิ้ง
+          const _jobErr = new Error(st.error || 'Queue job failed');
+          _jobErr._fromJob = true;
+          throw _jobErr;
         }
       } catch (pollErr) {
-        if (pollErr.message?.includes('Queue job failed') || pollErr.message?.includes('failed') || pollErr.message?.includes('หายไป')) throw pollErr;
+        // ★ 25 ก.ค. 69: เดิม axios โยน 404 ออกมาก่อนถึงตัวนับ notFoundCount → นับไม่ขึ้นสักครั้ง
+        //   งานที่ผลหายจริงเลยไม่มีใครแจ้ง ผู้ใช้ต้องนั่งรอจนครบเวลาเต็ม
+        if (pollErr.response?.status === 404) {
+          notFoundCount++;
+          console.warn(`[Discord Bot] Job ${jobId.slice(0, 8)} คืน 404 (${notFoundCount}/5) — สถานะล่าสุด: ${lastStatus}`);
+          if (notFoundCount >= 5 || (notFoundCount >= 3 && lastStatus === 'processing')) {
+            throw new Error('ประมวลผลเสร็จแล้วแต่ผลลัพธ์หายไป — รบกวนส่งเนื้อข่าวใหม่อีกครั้งครับ');
+          }
+          continue;
+        }
+        // ★ error จากงาน (ไม่ว่าข้อความจะเขียนว่าอะไร) ต้องเด้งออกไปแจ้งผู้ใช้ทันที
+        //   เดิมกรองด้วยคำว่า failed/หายไป เท่านั้น → error ภาษาไทยอื่นๆ ถูกกลืนหมด
+        if (pollErr._fromJob || pollErr.message?.includes('Queue job failed') || pollErr.message?.includes('failed') || pollErr.message?.includes('หายไป')) throw pollErr;
         console.warn('[Discord Bot] Poll error:', pollErr.message);
       }
     }
 
     if (!data) {
-      throw new Error('หมดเวลารอคิว (15 นาที) กรุณาลองใหม่');
+      throw new Error('หมดเวลารอคิว (20 นาที) กรุณาลองใหม่');
     }
 
     if (!data.success) {
@@ -379,7 +414,14 @@ async function processNewsJob(job) {
     }
 
     const jobTime = ((Date.now() - jobStartTime) / 1000).toFixed(1);
-    await processingMsg.edit({ content: `✅ **สร้างข่าวสำเร็จ!** ${versionsToShow.length} เวอร์ชัน | ใช้เวลา ${jobTime}s\n📰 **${newsTitle.slice(0, 80)}**${logLink}` });
+    // ★ 25 ก.ค. 69: แจ้งเมื่อ "เขียนเสร็จแต่เก็บเข้าคลังไม่สำเร็จ" — เดิมประกาศสำเร็จเสมอ
+    //   ผู้ใช้จึงไม่รู้ว่าข่าวชิ้นนี้ไม่ได้ถูกบันทึกไว้ในสมุดเคส
+    const _archiveSaved = data.data?.archiveSaved ?? data.archiveSaved;
+    const _archiveNote = data.data?.archiveNote || data.archiveNote || '';
+    const _archiveWarn = _archiveSaved === false
+      ? `\n⚠️ เขียนข่าวเสร็จแล้ว แต่ **บันทึกเข้าคลังไม่สำเร็จ**${_archiveNote ? ` (${String(_archiveNote).slice(0, 80)})` : ''} — กรุณาก๊อปเนื้อข่าวเก็บไว้ก่อนครับ`
+      : '';
+    await processingMsg.edit({ content: `✅ **สร้างข่าวสำเร็จ!** ${versionsToShow.length} เวอร์ชัน | ใช้เวลา ${jobTime}s\n📰 **${newsTitle.slice(0, 80)}**${logLink}${_archiveWarn}` });
 
     // ดึง Research items — ลอง path ทั้งหมดที่เป็นไปได้
     const researchItems = data.data?.researchItems 
@@ -404,12 +446,15 @@ async function processNewsJob(job) {
         const isEnhanced = v._source === 'enhanced';
         const promptId = v.promptId || (data.data?.usedPromptInfo?.name ? 'Dynamic' : 'Unknown');
         
-        const embedTitle = `[${versionLabel}] ${newsTitle}`.slice(0, 250);
+        // ★ 25 ก.ค. 69: เดิมเอาชื่อ "แนวการเล่า" มาครอบวงเล็บไว้หน้าพาดหัวข่าว
+        //   → ผู้ใช้เห็น "[ดราม่าชีวิต: ลืมยาพ่นในวันที่อาการกำเริบ] เภสัชกรใจดี..." แล้วนึกว่าพาดหัวเพี้ยน
+        //   ย้ายป้ายแนวลงไปอยู่บรรทัดล่าง เหลือพาดหัวข่าวจริงล้วนๆ ด้านบน
+        const embedTitle = String(newsTitle).slice(0, 250);
         const embed = new EmbedBuilder()
           .setColor(isEnhanced ? '#10b981' : '#f91880')
           .setTitle(embedTitle)
           .setDescription((v.content || 'ไม่พบเนื้อหา').slice(0, 3800)) // ★ 18 ก.ค. 69: ถอดบรรทัดชวน !ปัง (ฟีเจอร์ถูกลบ — ไม่มีคนใช้)
-          .setFooter({ text: `Pipeline: ${data.data?.detection?.pipelineLabel || data.detection?.pipelineLabel || 'Universal'} | PromptID: ${promptId} | เวลา: ${jobTime}s` });
+          .setFooter({ text: `แนวการเล่า: ${String(versionLabel).slice(0, 60)} | Pipeline: ${data.data?.detection?.pipelineLabel || data.detection?.pipelineLabel || 'Universal'} | PromptID: ${promptId} | เวลา: ${jobTime}s` });
 
         return embed;
       });

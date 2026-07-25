@@ -592,6 +592,10 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         matchScore: (typeof usedPreset.matchScore === 'number') ? usedPreset.matchScore : null,
         matchType: usedPreset.matchType || null,
         isBorrowed: usedPreset.isBorrowed || false,
+        // ★ 25 ก.ค. 69: คะแนน "เข้ากันจริง" จากด่านอ่านเนื้อข่าว — ต่างจาก matchScore ที่วัดแค่ป้าย
+        semanticFit: (typeof usedPreset.semanticFit === 'number') ? usedPreset.semanticFit : null,
+        semanticReason: usedPreset.semanticReason || null,
+        semanticMismatch: usedPreset.semanticMismatch || null,
       } : null,
       stepTimings: {
         detect: ((step1Start - step0Start) / 1000).toFixed(1),
