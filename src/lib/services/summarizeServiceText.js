@@ -1391,7 +1391,7 @@ ${candidateList}
       if (_toneOverrideOn) prompt += TONE_OVERRIDE_BLOCK;
       console.log(`[RefWeight] ⚠️ BORROWED → ลดน้ำหนัก ref: ไม่ฝัง promptText/DNA ของ "${smartPrompt.promptName || smartPrompt.category}" (REF_WEIGHT_BY_MATCH=1)`);
     } else if (smartPrompt && smartPrompt.promptText) {
-      prompt = '=== 🏛️ คำสั่งเขียนจากหอสมุดไวรัล ===\n' +
+      prompt = '=== 🏛️ คำสั่งเขียนจากคลังพร้อมท์ (การ์ดที่ถอด DNA จากโพสต์ไวรัลจริง) ===\n' +
         `ประเภท: ${smartPrompt.category || '-'} | อารมณ์: ${smartPrompt.emotionalType || smartPrompt.emotionalTags?.[0] || '-'} | Viral Score: ${smartPrompt.viralScore || '-'}\n` +
         `สไตล์ Hook: ${smartPrompt.hookStyle || '-'} | โทน: ${smartPrompt.tone || '-'}\n` +
         `โครงสร้าง: ${smartPrompt.structure || '-'}\n\n`;
@@ -1460,7 +1460,7 @@ ${candidateList}
           smartPrompt.doNot.map(dn => `- ${dn}`).join('\n') + '\n\n';
       }
 
-      prompt += '=== จบคำสั่งหอสมุด ===\n\n';
+      prompt += '=== จบคำสั่งจากคลังพร้อมท์ ===\n\n';
 
       // [A] Append Tone Override Block — บังคับทุกกรณี (เดิมข้ามเมื่อ toneClass=positive ทำให้ข่าวลบที่จับคู่ prompt บวกหลุดกฎ)
       if (_toneOverrideOn) prompt += TONE_OVERRIDE_BLOCK;
@@ -2121,7 +2121,7 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
             const bestPrompt = matched[0] || promptLib.sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0))[0];
 
             if (bestPrompt && bestPrompt.promptText) {
-              smartPromptCtx = '\n\n=== 🏛️ Prompt จากหอสมุดไวรัล (Smart Match) ===\n' +
+              smartPromptCtx = '\n\n=== 🏛️ พร้อมท์จากคลังพร้อมท์ (Smart Match) ===\n' +
                 `ประเภท: ${bestPrompt.category || '-'} | อารมณ์: ${bestPrompt.emotionalType || bestPrompt.emotionalTags?.[0] || '-'} | Viral Score: ${bestPrompt.viralScore || '-'}\n` +
                 `สไตล์ Hook: ${bestPrompt.hookStyle || '-'} | โทน: ${bestPrompt.tone || '-'}\n` +
                 `โครงสร้าง: ${bestPrompt.structure || '-'}\n\n` +
