@@ -18,11 +18,23 @@
  *   บังคับเข้มได้ด้วย env API_REQUIRE_KEY=1 → ต้องมีกุญแจเท่านั้น (ตัดข้อ 3 ทิ้ง)
  */
 
-/** กุญแจที่ถือว่า "ของจริง" — ตัดค่า public/placeholder ที่ไม่ใช่ความลับออก */
+/**
+ * กุญแจที่ถือว่า "ของจริง" — ตัดค่า public/placeholder ที่ไม่ใช่ความลับออก
+ * ★ 25 ก.ค. 69 (แก้ด่วน): เพิ่ม API_KEY + BOT_API_KEY เข้ารายชื่อด้วย
+ *   เพราะบอทดิสคอร์ดใช้ชื่อตัวแปร API_KEY (discord-bot/index.js:16) แล้วส่งมาเป็น x-api-key
+ *   ถ้าไม่รับชื่อนี้ บอทจะโดนปฏิเสธทุกข้อความ (เหตุการณ์จริง: "Unauthorized" บนดิสคอร์ด)
+ *   EXTRA_API_KEYS = ใส่หลายกุญแจคั่นด้วย , ได้ (เผื่อมีผู้เรียกหลายตัว)
+ */
 function realKeys() {
-  const keys = [process.env.API_SECRET_KEY, process.env.DISCORD_API_SECRET, process.env.CRON_SECRET]
-    .filter(k => typeof k === 'string' && k.length >= 8 && k !== 'test-key');
-  return keys;
+  const raw = [
+    process.env.API_SECRET_KEY,
+    process.env.DISCORD_API_SECRET,
+    process.env.CRON_SECRET,
+    process.env.API_KEY,
+    process.env.BOT_API_KEY,
+    ...String(process.env.EXTRA_API_KEYS || '').split(',').map(s => s.trim()),
+  ];
+  return raw.filter(k => typeof k === 'string' && k.length >= 8 && k !== 'test-key');
 }
 
 function hostOf(url) {
@@ -44,8 +56,22 @@ export function checkApiAuth(req, { requireKey = false } = {}) {
   const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
   const keys = realKeys();
 
+  // ★ 25 ก.ค. 69: สวิตช์ปิดด่านฉุกเฉิน — ตั้ง API_AUTH_OFF=1 แล้วกลับไปพฤติกรรมเดิมทันที
+  //   (มีไว้กู้สถานการณ์เวลาผู้เรียกภายนอกยังตั้งกุญแจไม่ทัน เช่น บอทดิสคอร์ดบน Railway)
+  if (process.env.API_AUTH_OFF === '1') return { ok: true, via: 'auth-off' };
+
+  // ★ 25 ก.ค. 69 (แก้บั๊กลำดับ): ถ้าเซิร์ฟเวอร์ยังไม่ได้ตั้งกุญแจไว้เลย = ตรวจอะไรไม่ได้
+  //   ต้องผ่อนผัน "ก่อน" การปฏิเสธกุญแจผิด ไม่งั้นผู้เรียกที่ส่งกุญแจมาจะโดนปฏิเสธทั้งที่เราไม่มีอะไรไปเทียบ
+  if (!keys.length) {
+    if (!global.__apiAuthWarned) {
+      global.__apiAuthWarned = true;
+      console.warn('[apiAuth] ⚠️ ยังไม่ได้ตั้งกุญแจ (API_SECRET_KEY/DISCORD_API_SECRET/API_KEY) — ด่านตรวจสิทธิ์ทำงานแบบผ่อนผัน');
+    }
+    return { ok: true, via: 'no-key-configured' };
+  }
+
   // 1) กุญแจถูกต้อง
-  if (keys.length && (keys.includes(apiKeyHeader) || keys.includes(bearer))) {
+  if (keys.includes(apiKeyHeader) || keys.includes(bearer)) {
     return { ok: true, via: 'api-key' };
   }
   // ส่งกุญแจมาแต่ผิด = ปฏิเสธทันที (ไม่ตกไปเช็ค origin)
@@ -58,16 +84,6 @@ export function checkApiAuth(req, { requireKey = false } = {}) {
 
   const strict = requireKey || process.env.API_REQUIRE_KEY === '1';
   if (strict) return { ok: false, reason: 'key-required' };
-
-  // ★ โหมดผ่อนผัน: ถ้ายังไม่ได้ตั้งกุญแจจริงไว้เลย ระบบภายในจะเรียกกันเองไม่ได้ (worker → process ไม่มี origin)
-  //   จึงยอมให้ผ่านไปก่อนพร้อมเตือนดังๆ ใน log — ตั้ง API_SECRET_KEY เมื่อไหร่ ด่านจะแน่นทันทีโดยไม่ต้องแก้โค้ด
-  if (!keys.length) {
-    if (!global.__apiAuthWarned) {
-      global.__apiAuthWarned = true;
-      console.warn('[apiAuth] ⚠️ ยังไม่ได้ตั้ง API_SECRET_KEY — ด่านตรวจสิทธิ์ทำงานแบบผ่อนผัน (ตั้งค่าแล้วจะบังคับทันที)');
-    }
-    return { ok: true, via: 'no-key-configured' };
-  }
 
   // 3) คำขอจากหน้าเว็บของเราเอง
   const selfHost = (h('host') || '').toLowerCase();
