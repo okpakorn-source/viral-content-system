@@ -12,7 +12,16 @@ export function getOpenAIClient() {
       console.warn('⚠️ OPENAI_API_KEY not set');
       return null;
     }
-    openaiClient = new OpenAI({ apiKey });
+    // 🔴 ★ 25 ก.ค. 69 (ผลตรวจ Fable+sol ตรงกัน): เดิมสร้างแบบเปล่าๆ = ใช้ค่าโรงงาน
+    //    รอได้ถึง 10 นาที + ลองซ้ำเอง 2 รอบ → 1 การเรียก = สูงสุด 3 คำขอ × 2 โมเดล (มี fallback) = 6
+    //    วันที่ผู้ให้บริการอืด งานบวมทะลุเพดานทุกชั้นและจ่ายเงินซ้ำโดยไม่ได้อะไร
+    //    ตั้ง 240s = สูงกว่าเพดานชั้นในที่ยาวสุด (breakdown 200s / write 180s) แต่ต่ำกว่าเพดานนอก 300s
+    //    ปรับได้: env OPENAI_TIMEOUT_MS / OPENAI_MAX_RETRIES
+    openaiClient = new OpenAI({
+      apiKey,
+      timeout: Number(process.env.OPENAI_TIMEOUT_MS) || 240_000,
+      maxRetries: Number.isFinite(Number(process.env.OPENAI_MAX_RETRIES)) ? Number(process.env.OPENAI_MAX_RETRIES) : 1,
+    });
   }
   return openaiClient;
 }

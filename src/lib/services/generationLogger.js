@@ -136,6 +136,11 @@ export async function logGeneration({
         promptScore: pipelineInfo.promptScore || 0,
         promptMatchType: pipelineInfo.promptMatchType || '', // ★ 30 มิ.ย.: MATCHED/BORROWED/EXACT/CLOSE — ตรงหรือยืมพร้อมท์ใกล้สุด
         promptId: pipelineInfo.promptId || '',               // ★ 30 มิ.ย.: id พร้อมท์จริง ไว้ตรวจย้อนหลัง
+        // ★ 25 ก.ค. 69: คะแนน "เข้ากันจริง" จากด่านอ่านเนื้อข่าว — เดิมมีในผลลัพธ์แต่ไม่ถูกบันทึก
+        //   ทำให้ตรวจย้อนหลังไม่ได้ว่าการ์ดเข้ากับข่าวแค่ไหน และตัวเขียนได้คำเตือนอะไร
+        semanticFit: (typeof pipelineInfo.semanticFit === 'number') ? pipelineInfo.semanticFit : null,
+        semanticReason: pipelineInfo.semanticReason || '',
+        semanticMismatch: pipelineInfo.semanticMismatch || '',
         newsType: pipelineInfo.newsType || '',
         stepTimings: pipelineInfo.stepTimings || {},
         desk: pipelineInfo.desk || null, // ★ ป้ายโต๊ะข่าว {newsId, lane, category, editor, editorIcon}

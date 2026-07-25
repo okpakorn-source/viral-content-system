@@ -334,10 +334,21 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   //   → ตัดมุมทิ้ง ออกน้อยเวอร์ชันแต่ไม่บิดเบือน (พร้อมท์อันดับท้ายเคยพาตัวเขียนละข้อเท็จจริง "แม่เสียชีวิต")
   //   มุมแรกเก็บเสมอ = การันตีมีผลลัพธ์อย่างน้อย 1 เวอร์ชัน
   const MIN_ANGLE_MATCH = Math.max(0, parseInt(process.env.ANGLE_MIN_MATCH_SCORE || '45', 10) || 45);
+  // ★ 25 ก.ค. 69 (รอบแก้ที่ 2): ให้คะแนน "เข้ากันจริง" (semanticFit จากด่านอ่านเนื้อข่าว) มีอำนาจตัดมุมด้วย
+  //   บั๊กของงานเช้านี้: ด่านใหม่ตัดสินแล้วว่าการ์ดไม่เข้ากับข่าว (fit < 40) แต่ด่านคัดมุมยังดูแต่คะแนนป้าย
+  //   → การ์ดที่ AI บอกเองว่าไม่เข้ากัน ยังผ่านไปเขียนได้ (เกิดจริง 2 ใน 20 เคส)
+  //   ปรับเกณฑ์: env SEMANTIC_MIN_FIT (ค่าเริ่มต้น 40) · ปิดอำนาจนี้: env ANGLE_GATE_USE_FIT=off
+  const MIN_FIT = Number(process.env.SEMANTIC_MIN_FIT) || 40;
+  const _fitGateOn = process.env.ANGLE_GATE_USE_FIT !== 'off';
   for (let i = anglesToUse.length - 1; i >= 1; i--) {
     const _score = Number(anglePrompts[i]?._matchScore ?? 0);
-    if (_score < MIN_ANGLE_MATCH) {
-      addLog('PromptSelect', `✂️ ตัดมุม "${anglesToUse[i].angle_name}" — พร้อมท์จับคู่หลวม (score ${_score} < ${MIN_ANGLE_MATCH}) เอาเฉพาะมุมที่แมตช์จริง`);
+    const _fit = anglePrompts[i]?._semanticFit;
+    const _fitTooLow = _fitGateOn && typeof _fit === 'number' && _fit < MIN_FIT;
+    if (_score < MIN_ANGLE_MATCH || _fitTooLow) {
+      const _why = _fitTooLow
+        ? `ด่านอ่านเนื้อข่าวให้ ${_fit}/100 (ต่ำกว่า ${MIN_FIT}) = การ์ดไม่เข้ากับข่าวนี้จริง`
+        : `พร้อมท์จับคู่หลวม (score ${_score} < ${MIN_ANGLE_MATCH})`;
+      addLog('PromptSelect', `✂️ ตัดมุม "${anglesToUse[i].angle_name}" — ${_why} เอาเฉพาะมุมที่แมตช์จริง`);
       anglesToUse.splice(i, 1);
       anglePrompts.splice(i, 1);
     }

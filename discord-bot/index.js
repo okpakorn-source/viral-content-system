@@ -269,6 +269,7 @@ async function processNewsJob(job) {
 
     // ★ 25 ก.ค. 69: จำว่า "เข้าคิวสำเร็จแล้ว" ตรงนี้ — ไม่ใช่ตอนเช็ค (งานที่ล้มจะได้ส่งซ้ำได้ทันที)
     markProcessed(content);
+    job._queuedOk = true; // ★ ผ่านด่านเข้าคิวแล้ว — error หลังจากนี้ไม่ใช่ "ส่งเข้าคิวไม่ทัน"
 
     // ★ ชนะเคลม → "เพิ่งโพสต์ ack ครั้งแรกตรงนี้" (มีแค่ instance เดียวที่มาถึงจุดนี้ต่อ 1 ข้อความ)
     const ackText = queuesAhead > 0
@@ -289,6 +290,7 @@ async function processNewsJob(job) {
     let workerRetriggerCount = 0;
 
     let notFoundCount = 0; // ★ Track consecutive 'job not found'
+    let transientErrCount = 0; // ★ 25 ก.ค. 69: นับ error ชั่วคราวระหว่าง poll (ไม่ทำให้งานล้ม)
 
     while (Date.now() - pollStartTime < maxPollTime) {
       await new Promise(r => setTimeout(r, 3000)); // poll every 3s
@@ -388,10 +390,19 @@ async function processNewsJob(job) {
           }
           continue;
         }
-        // ★ error จากงาน (ไม่ว่าข้อความจะเขียนว่าอะไร) ต้องเด้งออกไปแจ้งผู้ใช้ทันที
-        //   เดิมกรองด้วยคำว่า failed/หายไป เท่านั้น → error ภาษาไทยอื่นๆ ถูกกลืนหมด
-        if (pollErr._fromJob || pollErr.message?.includes('Queue job failed') || pollErr.message?.includes('failed') || pollErr.message?.includes('หายไป')) throw pollErr;
-        console.warn('[Discord Bot] Poll error:', pollErr.message);
+        // 🔴 ★ 25 ก.ค. 69 (รอบแก้ที่ 2): เดิมกรองด้วยคำว่า "failed" ลอยๆ
+        //    แต่ axios เขียน error ของเซิร์ฟเวอร์สะดุดว่า "Request failed with status code 500"
+        //    → มีคำว่า failed → เด้งออกประกาศ "ล้ม" ทันที ทั้งที่ข่าวยังเขียนอยู่และเสร็จจริง
+        //    ระหว่างรอผล 135-174 วิ บอทถามสถานะ 45-58 รอบ พลาดรอบเดียวก็จบ = รากของเคส 14:57
+        //    ตอนนี้เด้งเฉพาะ error ที่มาจาก "งานจริง" (_fromJob) หรือผลหายถาวรเท่านั้น
+        //    เซิร์ฟเวอร์สะดุดชั่วคราว = รอรอบหน้า (ทนได้ถึง 8 รอบติด ~24 วินาที)
+        if (pollErr._fromJob || pollErr.message?.includes('ผลลัพธ์หายไป')) throw pollErr;
+        transientErrCount++;
+        if (transientErrCount >= 8) {
+          console.warn(`[Discord Bot] เซิร์ฟเวอร์ตอบผิดพลาดติดกัน ${transientErrCount} รอบ — ยังรอต่อจนครบเวลา`);
+          transientErrCount = 0;
+        }
+        console.warn(`[Discord Bot] Poll error (ข้าม รอรอบหน้า): ${pollErr.message}`);
       }
     }
 
@@ -519,7 +530,10 @@ async function processNewsJob(job) {
     // ★ 25 ก.ค. 69: ตอบช้าจนหมดเวลารอ ≠ งานล้ม — คำขออาจถึงเซิร์ฟเวอร์และเข้าคิวไปแล้ว
     //   เดิมโชว์ "timeout of 15000ms exceeded" ดิบๆ ผู้ใช้นึกว่าล้มเลยส่งซ้ำ → ได้ข่าวซ้ำ 2 ใบ
     //   ตอนนี้บอกตรงๆ ว่าอาจเข้าคิวแล้ว และห้ามส่งซ้ำทันที
-    const _isTimeoutish = error.code === 'ECONNABORTED' || /timeout of \d+ms|ETIMEDOUT|ECONNRESET|socket hang up/i.test(_eMsg);
+    //   ★ รอบแก้ที่ 2: จำกัดเฉพาะ "ยังไม่ผ่านด่านเข้าคิว" เท่านั้น
+    //     เดิมครอบกว้างเกิน — ถ้าเน็ตสะดุดตอนแก้ข้อความ Discord หลังข่าวเสร็จ จะแจ้งผิดว่า "งานอาจเข้าคิวแล้ว"
+    const _isTimeoutish = !job._queuedOk
+      && (error.code === 'ECONNABORTED' || /timeout of \d+ms|ETIMEDOUT|ECONNRESET|socket hang up/i.test(_eMsg));
     if (_isTimeoutish) {
       const waitText =
         '⏳ เซิร์ฟเวอร์ตอบช้ากว่าปกติ — **งานอาจเข้าคิวไปแล้ว**\n' +

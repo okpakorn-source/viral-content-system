@@ -47,6 +47,16 @@ function enforceParagraphs(content, target = 3, vIndex = 0) {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
+  // ★ 25 ก.ค. 69 (รอบแก้ที่ 2): ห้ามรวบเนื้อที่ตั้งใจแยกบรรทัด (รายการ bullet / เลขข้อ / บทสนทนา)
+  //   ผลตรวจชี้ว่าถ้ารวบ จะเอาหัวข้อย่อยมาต่อกันเป็นพรืดจนอ่านไม่รู้เรื่อง
+  //   (ความเสี่ยงสูงขึ้นตั้งแต่เริ่มส่ง "โพสต์ครู" ที่ขึ้นบรรทัดถี่ให้ตัวเขียนดู)
+  const _lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const _listish = _lines.filter(l => /^([-•▪–]|\d+[.)]|[►▶✦])\s/.test(l)).length;
+  if (_listish >= 2) {
+    console.log(`[Paragraph] ⏭️ ข้ามการรวบ — เนื้อมีรายการแยกบรรทัด ${_listish} บรรทัด (รวบแล้วจะอ่านไม่รู้เรื่อง)`);
+    return text;
+  }
+
   let paras = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
 
   // บรรทัดเดี่ยวๆ ที่ไม่ได้เว้นย่อหน้า (AI บางรอบขึ้นบรรทัดเดียว) → นับเป็นย่อหน้าด้วย
@@ -58,18 +68,48 @@ function enforceParagraphs(content, target = 3, vIndex = 0) {
   if (paras.length === target) return paras.join('\n\n');
   if (paras.length < target) return paras.join('\n\n'); // สั้นกว่าเป้า = ปล่อยไว้ ดีกว่าหั่นกลางความ
 
-  // ยาวเกิน → เปิด 1 + รวบกลางเป็น 1 + ปิด 1 (ทั่วไป: เปิด 1 + กลาง (target-2) + ปิด 1)
-  const head = paras.slice(0, 1);
-  const tail = paras.slice(-1);
-  const middle = paras.slice(1, -1);
-  const midSlots = Math.max(1, target - 2);
-  const per = Math.ceil(middle.length / midSlots);
-  const merged = [];
-  for (let i = 0; i < middle.length; i += per) merged.push(middle.slice(i, i + per).join(' '));
+  // 🔴 ★ 25 ก.ค. 69 (รอบแก้ที่ 2 — เจ้าของแจ้ง "ความลื่นของเนื้อหาหายไป"):
+  //    วิธีเดิม = เปิด 1 + รวบ "ทุกย่อหน้ากลาง" เป็นก้อนเดียว + ปิด 1
+  //    ผลจริงที่วัดได้: ย่อหน้ากลางบวมเป็น 906-932 ตัวอักษร ขณะที่หัว/ท้ายเหลือ 81-206
+  //    (เทียบข่าวเช้าก่อนแก้: 76/300/283/346/189/41 = อ่านลื่นกว่ามาก) → กำแพงตัวอักษรกลางเรื่อง
+  //    วิธีใหม่: แบ่งเป็น N กลุ่มที่ "ขนาดใกล้เคียงกัน" โดยไม่ตัดกลางย่อหน้าเดิม
+  const total = paras.reduce((s, p) => s + p.length, 0);
+  const idealSize = total / target;
+  const groups = [];
+  let bucket = [];
+  let bucketLen = 0;
+  for (let i = 0; i < paras.length; i++) {
+    const p = paras[i];
+    const slotsLeft = target - groups.length;
+    const parasLeft = paras.length - i;
+    // เหลือย่อหน้าพอดีกับช่องที่เหลือ → ปิดกลุ่มทันที ไม่งั้นช่องท้ายจะว่าง
+    if (bucket.length && parasLeft <= slotsLeft - 1) {
+      groups.push(bucket.join(' '));
+      bucket = [];
+      bucketLen = 0;
+    }
+    const wouldBe = bucketLen + (bucketLen ? 1 : 0) + p.length;
+    // ถ้าเติมแล้วห่างจากขนาดในอุดมคติมากกว่าเดิม และยังมีช่องเหลือ → ปิดกลุ่มก่อน
+    if (bucket.length && groups.length < target - 1 && Math.abs(wouldBe - idealSize) > Math.abs(bucketLen - idealSize)) {
+      groups.push(bucket.join(' '));
+      bucket = [p];
+      bucketLen = p.length;
+    } else {
+      bucket.push(p);
+      bucketLen = wouldBe;
+    }
+  }
+  if (bucket.length) groups.push(bucket.join(' '));
 
-  const out = [...head, ...merged.slice(0, midSlots), ...tail].join('\n\n');
-  console.log(`[Paragraph] 📐 V${vIndex}: ${paras.length} ย่อหน้า → รวบเหลือ ${target} ย่อหน้า (ไม่ตัดเนื้อ)`);
-  return out;
+  // เผื่อกรณีจับกลุ่มได้เกินเป้า (ไม่ควรเกิด) — รวบส่วนเกินเข้ากลุ่มสุดท้าย
+  while (groups.length > target) {
+    const last = groups.pop();
+    groups[groups.length - 1] = `${groups[groups.length - 1]} ${last}`;
+  }
+
+  const sizes = groups.map(g => g.length);
+  console.log(`[Paragraph] 📐 V${vIndex}: ${paras.length} ย่อหน้า → จัดใหม่เป็น ${groups.length} ย่อหน้าขนาดใกล้เคียงกัน (${sizes.join('/')}) — ไม่ตัดเนื้อ`);
+  return groups.join('\n\n');
 }
 
 function postProcessVersions(versions, sourceText, newsTitle, lenCfg = null) {
@@ -118,6 +158,38 @@ function postProcessVersions(versions, sourceText, newsTitle, lenCfg = null) {
       console.log(`[Quality] ⚠️ V${idx + 1} ตัวเลขหัวใจของข่าวหายจากเนื้อหา: ${missingNums.map(k => k.num + ' ' + k.unit).join(', ')}`);
     }
 
+    // 4.55 ★ 25 ก.ค. 69: ด่านตรวจ "เลขงอก" — ตัวเลขที่โผล่ในเนื้อแต่ไม่มีในข่าวต้นฉบับ
+    //      เดิมมีแต่ด่านตรวจ "เลขหาย" ไม่มีด่านตรวจเลขงอก → เคส 02480 เขียน "วัย 44 ปี" / "ทายาทรุ่น 3"
+    //      ทั้งที่ต้นฉบับไม่มี · ไม่ลบให้อัตโนมัติ (บางตัวมาจากผลค้นข้อมูลซึ่งอาจถูก) แต่ต้องติดธงให้คนเห็น
+    const addedNums = (() => {
+      if (!sourceText) return [];
+      const src = String(sourceText);
+      const out = [];
+      const re = /(\d[\d,]*(?:\.\d+)?)\s*(ปี|บาท|คน|ครั้ง|รุ่น|ชั้น|เดือน|วัน|กิโล|เมตร|ล้าน|แสน|หมื่น|พัน)/g;
+      let m;
+      while ((m = re.exec(content)) !== null) {
+        const raw = m[1];
+        const plain = raw.replace(/,/g, '');
+        if (src.includes(raw) || src.includes(plain)) continue;
+        const tag = `${raw} ${m[2]}`;
+        if (!out.includes(tag)) out.push(tag);
+      }
+      return out;
+    })();
+    if (addedNums.length > 0) {
+      console.log(`[Quality] 🚨 V${idx + 1} พบตัวเลขที่ "ไม่มีในข่าวต้นฉบับ": ${addedNums.join(', ')} — ต้องตรวจก่อนโพสต์`);
+    }
+
+    // 4.55 ★ 25 ก.ค. 69: อัญประกาศว่างเปล่า = คำพูดของแหล่งข่าวหายทั้งประโยค
+    //      เจอจริงในเคส 02481 (1 ใน 10 เวอร์ชัน) — เดิมไม่มีด่านไหนจับเลย ถ้าคนรีบกดเลือกก็หลุดขึ้นเพจ
+    //      ทำความสะอาดให้: ลบคู่อัญประกาศที่ไม่มีข้อความข้างใน + ติดธงไว้ให้คนตรวจเห็น
+    const _emptyQuote = /[“"']\s*[”"']/g;
+    const _emptyQuoteCount = (content.match(_emptyQuote) || []).length;
+    if (_emptyQuoteCount > 0) {
+      content = content.replace(_emptyQuote, '').replace(/\s{2,}/g, ' ').replace(/\s+([,.!?])/g, '$1');
+      console.log(`[Quality] ⚠️ V${idx + 1} พบอัญประกาศว่างเปล่า ${_emptyQuoteCount} จุด (คำพูดหาย) — ลบออกแล้วและติดธงไว้`);
+    }
+
     // 4.6 ★ จับเปิดด้วยคำต้องห้ามที่หลุด prompt (GEN-181 "ลองนึกถึงพิซซ่า...")
     if (/^(ลองนึก|ลองคิด|ลองจินตนาการ)/.test(content.trim())) {
       console.log(`[Quality] ⚠️ V${idx + 1} เปิดเรื่องด้วยคำต้องห้ามตระกูล "ลองนึก/ลองคิด"`);
@@ -132,6 +204,8 @@ function postProcessVersions(versions, sourceText, newsTitle, lenCfg = null) {
       _qualityScore: qualityScore,
       _autoScore: calculateAutoScore(content, sourceText, lenCfg),
       ...(missingNums.length > 0 ? { _missingKeyFacts: missingNums.map(k => k.num + ' ' + k.unit) } : {}),
+      ...(_emptyQuoteCount > 0 ? { _emptyQuotesFixed: _emptyQuoteCount } : {}),
+      ...(addedNums.length > 0 ? { _unverifiedNumbers: addedNums } : {}),
     };
   });
 
@@ -1272,7 +1346,9 @@ ${candidateList}
     //   บั๊กจริง: การ์ดสั่ง "เขียน 3 ย่อหน้าเท่านั้น" แต่ระบบสั่งซ้อนอีกทีว่า 4-5 หรือ 6-8 ย่อหน้า
     //   → ตัวเขียนได้คำสั่งขัดกัน 2 ชุด ผลออกมา 5-6 ย่อหน้า (ไม่ตรงทั้งคู่) เห็นชัดในเคส 25 ก.ค.
     //   ปิดคืน: env CARD_CONTROLS_LENGTH=off
-    if (process.env.CARD_CONTROLS_LENGTH !== 'off' && smartPrompt?.promptText) {
+    //   ★ รอบแก้ที่ 2 (25 ก.ค. เย็น): บล็อกนี้เคยถูกบล็อกล็อก 3 ย่อหน้าข้างล่างทับทันที = โค้ดตายไม่มีผล
+    //   ตอนนี้ทำงานเฉพาะตอนปิดการล็อก (PARAGRAPH_ENFORCE=off) เท่านั้น — ให้อ่านโค้ดแล้วไม่เข้าใจผิด
+    if (process.env.PARAGRAPH_ENFORCE === 'off' && process.env.CARD_CONTROLS_LENGTH !== 'off' && smartPrompt?.promptText) {
       const _m = String(smartPrompt.promptText).match(/(?:เขียน|แบ่ง|ให้มี)\s*(\d)\s*(?:-\s*(\d)\s*)?ย่อหน้า/);
       if (_m) {
         const _lo = Number(_m[1]);
@@ -1300,7 +1376,12 @@ ${candidateList}
     //   ลดน้ำหนักการยึด ref ตามคุณภาพจับคู่ — เดิม BORROWED (ผิดเรื่อง/คะแนนต่ำ) ถูกยึด promptText+โครง+โทน
     //   เต็มรูปแบบเท่า EXACT → รากเคสจริง "ข่าวมูฟออนถูกเขียนด้วยโครงไว้อาลัย" (10 ก.ค. 69)
     const _refWeightOn = process.env.REF_WEIGHT_BY_MATCH === '1';
-    const _refMatchType = smartPrompt?._matchType || (smartPrompt?._isBorrowed ? 'BORROWED' : null);
+    // ★ 25 ก.ค. 69 (รอบแก้ที่ 2): ตัดวงเล็บท้ายป้ายก่อนเทียบ
+    //   บั๊กของงานเช้านี้: ด่านใหม่เขียนป้ายเป็น BORROWED(SEMANTIC)/CLOSE(SEMANTIC)
+    //   แต่เกราะข้างล่างเทียบตรงๆ กับ 'BORROWED'/'CLOSE' → ไม่มีวันตรงกัน เกราะตายเงียบ
+    //   (ตอนนี้สวิตช์ REF_WEIGHT_BY_MATCH ปิดอยู่จึงยังไม่ระเบิด แต่ถ้าเปิดจะนึกว่าเกราะทำงาน)
+    const _refMatchTypeRaw = smartPrompt?._matchType || (smartPrompt?._isBorrowed ? 'BORROWED' : null);
+    const _refMatchType = _refMatchTypeRaw ? String(_refMatchTypeRaw).replace(/\(.*\)$/, '').trim() : null;
     if (_refWeightOn && smartPrompt && smartPrompt.promptText && _refMatchType === 'BORROWED') {
       // BORROWED: ใช้เฉพาะแนวเล่าเรื่องมนุษย์กลางๆ — ไม่ฝัง promptText/DNA/โครง/โทนของพร้อมท์ผิดเรื่อง
       prompt = '=== 🏛️ แนวเขียนอ้างอิง (พร้อมท์ยืม — จับคู่หลวม ใช้เป็นแรงบันดาลใจเท่านั้น) ===\n' +
@@ -1517,6 +1598,10 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       `- ความยาวบังคับ ${lenCfg.min}-${lenCfg.max} คำ ทุกประโยคต้องให้ข้อมูลใหม่ แบ่ง ${lenCfg.paraDesc} สำหรับ Facebook\n` +
       `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้า 1] เปิดแรง hook ดึงอารมณ์ [ย่อหน้าตรงกลาง] เล่ารายละเอียด storytelling [ย่อหน้าสุดท้าย] ปิดท้ายด้วยประโยคบรรยายเรียบๆ ที่บอกเล่าความจริงโดยไม่ตีความหมายเพิ่มเติม\n` +
       `- แต่ละย่อหน้าต้องมีอย่างน้อย ${lenCfg.sentences} ประโยค คั่นด้วย \\n\\n\n` +
+      // 🔴 ★ 25 ก.ค. 69 (เจ้าของแจ้ง "ความลื่นหายไป"): กันย่อหน้ากลางบวมเป็นกำแพงตัวอักษร
+      //   วัดจริงจากงานบ่ายนี้: ย่อหน้ากลาง 906-932 ตัวอักษร ขณะที่หัว/ท้ายแค่ 81-206 → อ่านสะดุด
+      '- 🔴 ย่อหน้าทุกย่อหน้าต้องยาวใกล้เคียงกัน ห้ามให้ย่อหน้าใดยาวกว่าย่อหน้าที่สั้นที่สุดเกิน 2 เท่า\n' +
+      '- เล่าเป็นจังหวะ: ประโยคสั้นสลับยาว มีจังหวะหยุดให้คนอ่านหายใจ ห้ามอัดข้อมูลติดกันเป็นพรืด\n' +
       '- ต้องอ้างอิงข้อมูลจริงจากข่าว ห้ามแต่งเรื่องที่ไม่มีในข่าว — ★ FACT-LOCK: ห้ามเพิ่มบุคคล/ความสัมพันธ์/อาชีพ/รายละเอียดชีวิตที่ต้นฉบับไม่มี (เคยพลาด: เติม "กับภรรยา" ทั้งที่ข่าวไม่มีภรรยา) และห้ามบรรยายฉาก สีหน้า อิริยาบถ เหมือนไปเห็นเหตุการณ์มาเอง — ต้นฉบับไม่ได้บรรยายภาพไหน ให้เล่าจากข้อเท็จจริง หรือใช้ภาษาที่บอกชัดว่าเป็นการนึกตาม ("ภาพแบบนั้นใครเห็นก็...") เท่านั้น\n' +
       '- ⚠️ ห้ามตั้งคำถามปิดท้ายเด็ดขาด ห้ามจบด้วย "คุณคิดยังไง?", "เห็นด้วยไหม?" หรือคำถามใดๆ\n\n' +
       formalModeRule +
@@ -1679,7 +1764,10 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
           const agent = new MasterAgent(workflowId);
           await agent.loadFromDB().catch(() => {});
           agent.onAnalysisComplete({ versions, news_reference: result.news_reference });
-          agent.onValidationComplete({ safetyPassed: validation.valid, issues: validation.issues, factCheckPassed: true, riskyWordsFound: [], riskyWordsReplaced: [] });
+          // ★ 25 ก.ค. 69: เดิมฮาร์ดโค้ด factCheckPassed:true = ช่องนี้บอกว่า "ผ่าน" เสมอ ไม่ใช่ผลตรวจจริง
+          //   ตอนนี้ผูกกับด่านตรวจจริง: ตัวเลขหัวใจหาย หรือ มีตัวเลขที่ไม่มีในต้นฉบับ = ไม่ผ่าน
+          const _factIssues = versions.flatMap(v => [...(v._missingKeyFacts || []), ...(v._unverifiedNumbers || [])]);
+          agent.onValidationComplete({ safetyPassed: validation.valid, issues: [...(validation.issues || []), ..._factIssues.map(x => `ตัวเลขต้องตรวจ: ${x}`)], factCheckPassed: _factIssues.length === 0, riskyWordsFound: [], riskyWordsReplaced: [] });
           await agent.saveMemoryToDB().catch(() => {});
         }
 
@@ -2114,7 +2202,10 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
           const agent = new MasterAgent(workflowId);
           await agent.loadFromDB().catch(() => {});
           agent.onAnalysisComplete({ versions, news_reference: result.news_reference });
-          agent.onValidationComplete({ safetyPassed: validation.valid, issues: validation.issues, factCheckPassed: true, riskyWordsFound: [], riskyWordsReplaced: [] });
+          // ★ 25 ก.ค. 69: เดิมฮาร์ดโค้ด factCheckPassed:true = ช่องนี้บอกว่า "ผ่าน" เสมอ ไม่ใช่ผลตรวจจริง
+          //   ตอนนี้ผูกกับด่านตรวจจริง: ตัวเลขหัวใจหาย หรือ มีตัวเลขที่ไม่มีในต้นฉบับ = ไม่ผ่าน
+          const _factIssues = versions.flatMap(v => [...(v._missingKeyFacts || []), ...(v._unverifiedNumbers || [])]);
+          agent.onValidationComplete({ safetyPassed: validation.valid, issues: [...(validation.issues || []), ..._factIssues.map(x => `ตัวเลขต้องตรวจ: ${x}`)], factCheckPassed: _factIssues.length === 0, riskyWordsFound: [], riskyWordsReplaced: [] });
           await agent.saveMemoryToDB().catch(() => {});
         }
 
@@ -2359,11 +2450,11 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
   }
 
   // ★ DNA v3.3: ใช้สมองจับคู่กลาง promptMatcher.js (คง mismatchPenalty -50 ตามพฤติกรรมเดิม)
-  const { scoreLibraryPrompts, applyDiversityPenalty } = await import('@/lib/services/promptMatcher');
+  const { scoreLibraryPrompts, applyDiversityPenalty, pickAmongTies } = await import('@/lib/services/promptMatcher');
   // 🔴 ★ 25 ก.ค. 69: นี่คือเส้นทางที่ "ท่อข่าวจริง" ใช้เลือกการ์ด (ไม่ใช่ STAGE 2 ด้านบน)
   //    เดิมคอมเมนต์เขียนว่าตั้งใจไม่พอร์ตด่าน AI มาที่นี่ → คิวข่าวจึงไม่เคยมีใครตรวจว่าการ์ดเข้ากับข่าวจริงไหม
   //    ตอนนี้พอร์ตมาครบ: หักคะแนนใบผูกขาด + ให้ AI อ่านเนื้อข่าวจริงตัดสิน
-  const scoredPrompts = applyDiversityPenalty(
+  let scoredPrompts = applyDiversityPenalty(
     scoreLibraryPrompts(newsAnalysis, validPrompts, { mismatchPenalty: true }),
     validPrompts
   );
@@ -2373,6 +2464,16 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
   //   เกรดใช้สูตรเดียวกับ STAGE 2 ในไฟล์นี้: ≥60+มิติหลัก≥2 = EXACT / ≥40 = CLOSE / ต่ำกว่า = BORROWED
   //   หมายเหตุ: ด่าน AI re-rank (STAGE 2.5) ตั้งใจ "ไม่พอร์ต" มาที่นี่ — เส้นคิวถูกคุ้มกันด้วยเกต
   //   ANGLE_MIN_MATCH_SCORE (ตัดมุม 2+) และ first-angle→V12 (ใต้ REF_WEIGHT_BY_MATCH) อยู่แล้ว
+  // ★ 25 ก.ค. 69 (รอบแก้ที่ 2): ต่อสาย pickAmongTies เข้าเส้นคิวข่าวจริง
+  //   บั๊กของงานเช้านี้: เขียนตัวสุ่มแก้เสมอไว้แล้วแต่เรียกใช้เฉพาะเส้น STAGE 2 ที่คิวข่าวไม่เคยวิ่งผ่าน
+  //   (ผลตรวจ Fable + sol ตรงกัน) → การ์ด 4 ใบยังกิน 10 จาก 20 เคส
+  const _tieWinner = pickAmongTies(scoredPrompts);
+  if (_tieWinner && scoredPrompts[0] && _tieWinner.index !== scoredPrompts[0].index) {
+    console.log(`[🎲 TIE-BREAK] คะแนนใกล้กัน → ดัน "${validPrompts[_tieWinner.index]?.promptName}" (${_tieWinner.score.toFixed(1)}) ขึ้นเป็นตัวเลือกแรกแทน "${validPrompts[scoredPrompts[0].index]?.promptName}" (${scoredPrompts[0].score.toFixed(1)})`);
+    const _rest = scoredPrompts.filter(s => s.index !== _tieWinner.index);
+    scoredPrompts = [_tieWinner, ..._rest];
+  }
+
   // เอามา 5 ใบให้ด่านอ่านเนื้อจริงตัดสิน แล้วค่อยเหลือ 3 ใบส่งต่อ
   let topPrompts = scoredPrompts.slice(0, 5).map(s => {
     const pr = validPrompts[s.index];
