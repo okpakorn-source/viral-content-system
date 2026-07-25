@@ -2423,14 +2423,17 @@ ${_cands}
       try {
         _sel = await withTimeoutSignal(
           (signal) => callAI({ prompt: _verifyPrompt, model: MODEL_FINAL_QA, temperature: 0.1, maxTokens: 700, signal }),
-          Number(process.env.SEMANTIC_VERIFY_TIMEOUT_MS) || 45_000,
+          // ★ 25 ก.ค. 69: ด่านนี้อยู่ใต้เพดาน auto_prompt_select (90s) — ตั้งให้พอดีกับงบ
+          //   30s + ถอย 20s + วิเคราะห์ข่าวรอบแรก ~20s = 70s ยังไม่ชนเพดาน
+          //   (วัดจริง: ด่านนี้ใช้แค่ ~5s/มุม) ถ้าตั้งยาวกว่านี้แล้วโมเดลค้าง จะเสียการ์ดจากคลังทั้งใบ
+          Number(process.env.SEMANTIC_VERIFY_TIMEOUT_MS) || 30_000,
           'toprompts_semantic_verify'
         );
       } catch (e1) {
         console.warn(`[🤖 SEMANTIC] ${MODEL_FINAL_QA} ล้ม (${e1.message}) → ถอยไป ${MODEL_FAST_CHEAP}`);
         _sel = await withTimeoutSignal(
           (signal) => callAI({ prompt: _verifyPrompt, model: MODEL_FAST_CHEAP, temperature: 0.1, maxTokens: 700, signal }),
-          30_000,
+          20_000,
           'toprompts_semantic_verify_fallback'
         );
       }
