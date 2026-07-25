@@ -1605,11 +1605,13 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
   "forbidden": ["ห้ามเขียนว่า...", "ห้าม ending แบบ..."]
 }`;
 
+      // 🔴 ★ 25 ก.ค. 69: เพดาน 1200 ต่ำเกินสำหรับโมเดล 5.6 (reasoning) — เพดานต่ำ = ตอบว่างเปล่า
+      //    ดูคำอธิบายเต็มในไฟล์แฝด summarizeServiceText.js · ปรับได้: env BLUEPRINT_MAX_TOKENS
       const blueprintResult = await callAI({
         model: MODEL_FAST,
         prompt: blueprintPrompt,
         temperature: 0.3,
-        maxTokens: 1200,
+        maxTokens: Number(process.env.BLUEPRINT_MAX_TOKENS) || 8000,
       });
 
       if (!blueprintResult?.core_emotion) {

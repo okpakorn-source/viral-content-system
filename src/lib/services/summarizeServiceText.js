@@ -1924,11 +1924,15 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
   "forbidden": ["ห้ามเขียนว่า...", "ห้าม ending แบบ..."]
 }`;
 
+      // 🔴 ★ 25 ก.ค. 69: เพดาน 1200 ต่ำเกินสำหรับโมเดลตระกูล 5.6 (reasoning) — เพดานต่ำ = ตอบว่างเปล่า
+      //    เจอจริงจากเทสรัน 25 ก.ค.: "[Blueprint-Service] ERROR: AI returned empty content" ทุกโมเดล
+      //    → ขั้นวางอารมณ์ตายเงียบมาตลอด (ล็อกขึ้นแค่ "Blueprint: ❌" แล้วไปต่อ)
+      //    เป็นอาการเดียวกับ breakdown ที่เคยเจอ (AGENTS.md §3) · ปรับได้: env BLUEPRINT_MAX_TOKENS
       const blueprintResult = await callAI({
         model: MODEL_FAST_CHEAP,
         prompt: blueprintPrompt,
         temperature: 0.3,
-        maxTokens: 1200,
+        maxTokens: Number(process.env.BLUEPRINT_MAX_TOKENS) || 8000,
       });
 
       if (!blueprintResult?.core_emotion) {
