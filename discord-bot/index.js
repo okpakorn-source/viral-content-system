@@ -299,14 +299,17 @@ async function processNewsJob(job) {
           const elapsed = Math.round((Date.now() - pollStartTime) / 1000);
 
           // Pipeline steps with real model/API info and accurate timing
+          // ★ 25 ก.ค. 69: ปรับให้ตรงท่อจริง + โมเดลจริงหลังยกชุด (เดิมโชว์ Claude Sonnet 4 ซึ่งเลิกใช้แล้ว)
+          //   เวลาอ้างอิงจากเคสจริง: สกัด ~6s · แตกประเด็น ~40-120s · เขียน ~37s/เวอร์ชัน
           const PIPELINE_STEPS = [
-            { at: 0,   done: 2,   icon: '🔍', label: 'ตรวจจับแหล่งข้อมูล',                     detail: 'ตรวจสอบประเภท URL และพลัตฟอร์ม',                                  model: null },
-            { at: 2,   done: 12,  icon: '📡', label: 'ดึงเนื้อหาจากเว็บ',                      detail: 'Firecrawl → Jina → Direct fetch',                                  model: null },
-            { at: 12,  done: 26,  icon: '📰', label: 'สกัดเนื้อข่าว (AI)',                     detail: 'สกัด newsTitle + newsBody + category',                             model: 'Gemini 2.0 Flash' },
-            { at: 26,  done: 68,  icon: '🔍', label: 'วิเคราะห์มุมข่าว (AI)',                  detail: 'core story + key points + possible angles',                       model: 'GPT-5.5' },
-            { at: 68,  done: 160, icon: '🧬', label: 'วาง Blueprint + ค้นหาข้อมูล Google (Parallel)', detail: 'Emotional Blueprint + Smart Research × 6 agents (Serper+Wikipedia)', model: 'GPT-5.5' },
-            { at: 160, done: 320, icon: '⚡', label: 'Classic + Enhanced (Parallel)',           detail: '2 Angles รันพร้อมกัน — Claude Sonnet 4 × 2',                      model: 'Claude Sonnet 4' },
-            { at: 320, done: 999, icon: '🚀', label: 'สรุปผลและบันทึก',                        detail: 'รวมผลลัพธ์ + บันทึกลงคลัง',                                        model: null },
+            { at: 0,   done: 4,   icon: '📥', label: 'รับงานเข้าคิว',                    detail: 'ตรวจข้อความ + กันส่งซ้ำ + จองคิว' },
+            { at: 4,   done: 16,  icon: '📰', label: 'สกัดเนื้อข่าว',                    detail: 'หัวข้อ + เนื้อ + แหล่ง + หมวด', model: 'gemini-3.6-flash' },
+            { at: 16,  done: 90,  icon: '🧩', label: 'แตกประเด็น + หามุมเล่า',           detail: 'DNA 7 มิติ + ข้อเท็จจริง + มุมข่าว', model: 'gpt-5.6-terra' },
+            { at: 90,  done: 150, icon: '🧬', label: 'วางอารมณ์ + ขุดประวัติคนในข่าว',   detail: 'พิมพ์เขียวอารมณ์ + Serper/Wikipedia/Tavily (ขนาน)', model: 'gpt-5.6-luna' },
+            { at: 150, done: 210, icon: '🏛️', label: 'เลือกพร้อมท์จากคลัง',              detail: 'จับคู่เทคนิคการเขียนให้เข้ากับข่าว', model: 'gpt-5.6-luna' },
+            { at: 210, done: 330, icon: '✍️', label: 'ค้นข้อมูลจริง + เขียนข่าว',        detail: 'หาข้อมูลประกอบต่อมุม แล้วเขียนตามเทคนิคในการ์ด', model: 'claude-opus-5' },
+            { at: 330, done: 400, icon: '🧽', label: 'เกลาสำนวน + ตรวจข้อเท็จจริง',      detail: 'เช็คชื่อ/ตัวเลข/ประโยคเพี้ยน', model: 'gpt-5.6-luna' },
+            { at: 400, done: 999, icon: '🚀', label: 'บันทึก + เก็บเข้าคลังข่าว',        detail: 'ลงสมุดเคส + จัดหมวด + ส่งผลกลับ' },
           ];
 
           const stepLines = PIPELINE_STEPS.map(s => {
@@ -325,10 +328,10 @@ async function processNewsJob(job) {
 
           // หา step ปัจจุบัน
           const currentStep = PIPELINE_STEPS.slice().reverse().find(s => elapsed >= s.at);
-          const progressBar = buildProgressBar(elapsed, 600); // 600s = real pipeline max (~10 min)
+          const progressBar = buildProgressBar(elapsed, 480); // ★ 25 ก.ค. 69: 480s ตรงกับงบเวลาจริงของ worker (เดิม 600s)
 
           const progressMsg = [
-            `⚡ **Auto Pipeline V2** กำลังประมวลผล... (\`${elapsed}s\`)`,
+            `⚡ **ระบบทำข่าวอัตโนมัติ** กำลังประมวลผล... (\`${elapsed}s\`)`,
             progressBar,
             '',
             stepLines,
