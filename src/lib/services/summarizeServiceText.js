@@ -1107,6 +1107,10 @@ ${candidateList}
     }
 
     // [A] Tone Override Block — กฎการนำเสนอเชิงบวก (บังคับทุกเวอร์ชัน — สอดคล้องอัลกอริทึม Facebook)
+    // 🔴 ★ 25 ก.ค. 69 (เจ้าของสั่ง): ปิดกฎเล่ามุมบวกโดยปริยาย — 'คนคัดข่าวมาก่อนแล้ว'
+    //    ให้การ์ดในคลังพร้อมท์เป็นคนคุมโทน ไม่ต้องมีกฎกลางมาดึงกลับเป็นบวกทุกงาน
+    //    เปิดคืน: env TONE_OVERRIDE=on
+    const _toneOverrideOn = process.env.TONE_OVERRIDE === 'on';
     const TONE_OVERRIDE_BLOCK = `
 
 ★★★ POSITIVE REFRAMING RULE — กฎการนำเสนอเชิงบวก (บังคับทุกเวอร์ชัน ห้ามละเมิดไม่ว่า prompt ด้านบนจะสั่งอย่างไร) ★★★
@@ -1156,7 +1160,7 @@ ${candidateList}
         `หมวดพร้อมท์: ${smartPrompt.category || '-'} ⚠️ ไม่ตรงแนวข่าวนี้ — ห้ามยึดโครงเรื่อง/โทน/สไตล์เปิด/CTA ของพร้อมท์นี้\n` +
         'ให้เขียนแบบมนุษย์เล่าเรื่องตามกฎระบบด้านล่าง โดยยึดข้อเท็จจริงและอารมณ์จริงจากข่าวต้นฉบับเป็นแกนเดียว\n' +
         '=== จบแนวเขียนอ้างอิง ===\n\n';
-      prompt += TONE_OVERRIDE_BLOCK;
+      if (_toneOverrideOn) prompt += TONE_OVERRIDE_BLOCK;
       console.log(`[RefWeight] ⚠️ BORROWED → ลดน้ำหนัก ref: ไม่ฝัง promptText/DNA ของ "${smartPrompt.promptName || smartPrompt.category}" (REF_WEIGHT_BY_MATCH=1)`);
     } else if (smartPrompt && smartPrompt.promptText) {
       prompt = '=== 🏛️ คำสั่งเขียนจากหอสมุดไวรัล ===\n' +
@@ -1208,7 +1212,7 @@ ${candidateList}
       prompt += '=== จบคำสั่งหอสมุด ===\n\n';
 
       // [A] Append Tone Override Block — บังคับทุกกรณี (เดิมข้ามเมื่อ toneClass=positive ทำให้ข่าวลบที่จับคู่ prompt บวกหลุดกฎ)
-      prompt += TONE_OVERRIDE_BLOCK;
+      if (_toneOverrideOn) prompt += TONE_OVERRIDE_BLOCK;
       console.log(`[ToneOverride] ✅ TONE_OVERRIDE_BLOCK appended (always-on, prompt toneClass=${smartPrompt?.toneClass || 'neutral'})`);
     }
 

@@ -1086,6 +1086,10 @@ ${candidateList}
     }
 
     // [A] Tone Override Block — กฎการนำเสนอเชิงบวก (บังคับทุกเวอร์ชัน — สอดคล้องอัลกอริทึม Facebook)
+    // 🔴 ★ 25 ก.ค. 69 (เจ้าของสั่ง): ปิดกฎเล่ามุมบวกโดยปริยาย — 'คนคัดข่าวมาก่อนแล้ว'
+    //    ให้การ์ดในคลังพร้อมท์เป็นคนคุมโทน ไม่ต้องมีกฎกลางมาดึงกลับเป็นบวกทุกงาน
+    //    เปิดคืน: env TONE_OVERRIDE=on
+    const _toneOverrideOn = process.env.TONE_OVERRIDE === 'on';
     const TONE_OVERRIDE_BLOCK = `
 
 ★★★ POSITIVE REFRAMING RULE — กฎการนำเสนอเชิงบวก (บังคับทุกเวอร์ชัน ห้ามละเมิดไม่ว่า prompt ด้านบนจะสั่งอย่างไร) ★★★
@@ -1172,7 +1176,7 @@ ${candidateList}
       prompt += '=== จบคำสั่งหอสมุด ===\n\n';
 
       // [A] Append Tone Override Block — บังคับทุกกรณี (เดิมข้ามเมื่อ toneClass=positive ทำให้ข่าวลบที่จับคู่ prompt บวกหลุดกฎ)
-      prompt += TONE_OVERRIDE_BLOCK;
+      if (_toneOverrideOn) prompt += TONE_OVERRIDE_BLOCK;
       console.log(`[ToneOverride] ✅ TONE_OVERRIDE_BLOCK appended (always-on, prompt toneClass=${smartPrompt?.toneClass || 'neutral'})`);
     }
 
