@@ -82,6 +82,7 @@ export async function handleCoverRefTestPost({
       newsTitle: body.newsTitle,
       forceTemplateId: body.forceTemplateId,
       clipUrls: body.clipUrls, // ★ โหมดคลิปต้นทาง (18 ก.ค.): ลิงก์คลิปที่ข่าวมาจาก → แคปเฟรมเป็นแหล่งหลัก
+      sourceOnly: body.sourceOnly === true, // ★ ชุด① 26 ก.ค. 69: สวิตช์ไม่ค้นเพิ่ม — ใช้เฟรมจากคลิปเป็นแหล่งเดียว (บังคับจริงที่ s5_search)
       origin,
     }, {});
     return jsonResponder(out, { status });

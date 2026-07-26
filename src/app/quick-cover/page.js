@@ -17,6 +17,16 @@ const C = {
   green: '#22c55e', amber: '#f59e0b', red: '#ef4444',
 };
 
+// ★ ชุด① sol-review 26 ก.ค. 69: ตรวจลิงก์คลิปเข้มขึ้นก่อนส่ง (เกณฑ์เดียวกับฝั่ง server) — parse ผ่าน URL จริง + http(s) + hostname ไม่ว่าง + ยาว ≤500
+function isValidClipUrl(u) {
+  const s = String(u || '').trim();
+  if (!s || s.length > 500) return false;
+  try {
+    const p = new URL(s);
+    return (p.protocol === 'http:' || p.protocol === 'https:') && !!p.hostname;
+  } catch { return false; }
+}
+
 export default function QuickCoverPage() {
   const [slide, setSlide] = useState(0); // 0 เลือก · 1 กรอก · 2 งาน
   const [mode, setMode] = useState(null); // 'compose' | 'ref'
@@ -30,6 +40,10 @@ export default function QuickCoverPage() {
   // ref inputs
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [refClips, setRefClips] = useState(['', '', '']); // ★ ชุด① 26 ก.ค. 69: ลิงก์คลิปต้นทาง 1-3
+  const [refSrcOnly, setRefSrcOnly] = useState(false);     // สวิตช์ไม่ค้นเพิ่ม — ใช้เฟรมจากคลิปเป็นแหล่งเดียว
+  // ★ sol-review: ลิงก์ถูกลบจนไม่เหลือลิงก์ที่ผ่าน validation → รีเซ็ตสวิตช์เอง (กันปุ่มค้าง on แต่กดปิดไม่ได้เพราะ disabled)
+  useEffect(() => { if (refSrcOnly && !refClips.some(isValidClipUrl)) setRefSrcOnly(false); }, [refClips, refSrcOnly]);
 
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState('');
@@ -78,9 +92,12 @@ export default function QuickCoverPage() {
       const combinedLen = [title.trim(), c].filter(Boolean).join('\n\n').length;
       if (combinedLen < 200) { setErr(`เนื้อหารวม (หัวข่าว+เนื้อข่าว) ต้อง ≥200 ตัวอักษร — ตอนนี้มี ${combinedLen} ตัวอักษร`); return; }
     }
+    // ★ ชุด① 26 ก.ค. 69: ลิงก์คลิปต้นทาง 1-3 + สวิตช์ไม่ค้นเพิ่ม
+    //   sol-review: คงรูป payload เดิมเมื่อไม่ใช้ฟีเจอร์ — แนบ field เฉพาะมีค่าจริง (ไม่งั้น omit ไปเลย ห้าม [] / false)
+    const clipUrls = refClips.map((u) => u.trim()).filter(isValidClipUrl).slice(0, 3);
     const payload = mode === 'compose'
       ? { kind: 'compose', caseId, refId: refId || undefined, heroPersonHint: heroHint || undefined }
-      : { kind: 'ref', newsTitle: title, content };
+      : { kind: 'ref', newsTitle: title, content, ...(clipUrls.length ? { clipUrls } : {}), ...((refSrcOnly && clipUrls.length > 0) ? { sourceOnly: true } : {}) };
     setSubmitting(true);
     setSlide(2); // ไปหน้างานทันที — งานโผล่จากการโพล (คลาวรัน compose sync ~80 วิ ก็ไม่บล็อกจอ)
     setTimeout(loadJobs, 500); setTimeout(loadJobs, 2500);
@@ -189,6 +206,23 @@ export default function QuickCoverPage() {
                 <textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="วางเนื้อข่าวเต็ม (ห้ามเนื้อสั้นตัดทอน)"
                   style={{ ...inpStyle, minHeight: 200, resize: 'vertical' }} />
               </Field>
+              {/* ★ ชุด① 26 ก.ค. 69: ลิงก์คลิปต้นทาง 1-3 + สวิตช์ไม่ค้นเพิ่ม (sourceOnly) */}
+              <Field label="ลิงก์คลิปต้นทาง (ไม่บังคับ — สูงสุด 3 ลิงก์)">
+                {[0, 1, 2].map((i) => (
+                  <input key={i} value={refClips[i]} inputMode="url"
+                    onChange={(e) => setRefClips((p) => p.map((v, idx) => (idx === i ? e.target.value : v)))}
+                    placeholder={`ลิงก์คลิป ${i + 1} (ไม่บังคับ)…`}
+                    style={{ ...inpStyle, marginBottom: 8 }} />
+                ))}
+              </Field>
+              <button type="button" disabled={!refClips.some(isValidClipUrl)}
+                onClick={() => setRefSrcOnly((v) => !v)}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 12, border: `1.5px solid ${refSrcOnly ? C.accent2 : C.line}`,
+                  background: refSrcOnly ? C.accent2 : C.card, color: refSrcOnly ? '#fff' : C.dim, fontSize: 12.5, fontWeight: 800,
+                  cursor: refClips.some(isValidClipUrl) ? 'pointer' : 'not-allowed', opacity: refClips.some(isValidClipUrl) ? 1 : 0.5, marginBottom: 6 }}>
+                🎬 เน้นแคปเฟรมจากคลิป (ไม่ค้นเว็บเพิ่ม)
+              </button>
+              {!refClips.some(isValidClipUrl) && <p style={{ fontSize: 11.5, color: C.dim, marginTop: 0, marginBottom: 14 }}>ใส่ลิงก์คลิปอย่างน้อย 1 ช่องก่อน ถึงจะเปิดสวิตช์นี้ได้</p>}
             </div>
           )}
 

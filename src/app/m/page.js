@@ -101,6 +101,15 @@ const IC = {
 };
 
 const fmtTime = (iso) => { try { const d = new Date(iso); return d.toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+// ★ ชุด① sol-review 26 ก.ค. 69: ตรวจลิงก์คลิปเข้มขึ้นก่อนส่ง (เกณฑ์เดียวกับฝั่ง server) — parse ผ่าน URL จริง + http(s) + hostname ไม่ว่าง + ยาว ≤500
+function isValidClipUrl(u) {
+  const s = String(u || '').trim();
+  if (!s || s.length > 500) return false;
+  try {
+    const p = new URL(s);
+    return (p.protocol === 'http:' || p.protocol === 'https:') && !!p.hostname;
+  } catch { return false; }
+}
 const EV_LABEL = {
   app_open: '🔑 เปิดแอพ', submit_news: '📨 ส่งข่าวเข้าคิว', job_done: '✅ ข่าวเสร็จ', job_failed: '❌ งานล้ม',
   clip_submit: '🎬 ส่งคลิปเข้าคิวถอด', clip_done: '🎬 ถอดคลิปเสร็จ', filter_run: '🧃 สกัดเนื้อ', split_run: '🔀 แยกประเด็น',
@@ -176,6 +185,10 @@ export default function MobileApp() {
   const [cvBusy, setCvBusy] = useState(false);
   const [cvOpen, setCvOpen] = useState(null);
   const [cvMode, setCvMode] = useState('manual'); // manual = แต่งเอง (default ตามเจ้าของสั่ง) · auto = AI หาภาพ · quick = ⚡ ทางลัดประกอบจากคลังเคสเดิม
+  const [cvClips, setCvClips] = useState(['', '', '']); // ★ ชุด① 26 ก.ค. 69: ลิงก์คลิปต้นทาง 1-3 (โหมด 🤖 ให้ AI หา)
+  const [cvSrcOnly, setCvSrcOnly] = useState(false);     // สวิตช์ไม่ค้นเพิ่ม — ใช้เฟรมจากคลิปเป็นแหล่งเดียว
+  // ★ sol-review: ลิงก์ถูกลบจนไม่เหลือลิงก์ที่ผ่าน validation → รีเซ็ตสวิตช์เอง (กันปุ่มค้าง on แต่กดปิดไม่ได้เพราะ disabled)
+  useEffect(() => { if (cvSrcOnly && !cvClips.some(isValidClipUrl)) setCvSrcOnly(false); }, [cvClips, cvSrcOnly]);
   const cvMineRef = useRef(new Set()); // job ที่เราส่งเอง — ไว้ log ตอนเสร็จครั้งเดียว
   // ⚡ ทางลัดประกอบ (kind='compose' — ประกอบจากคลังเคสเดิม ไม่ค้นรูปใหม่ ~20-80 วิ)
   const [qcCases, setQcCases] = useState([]);
@@ -405,10 +418,13 @@ export default function MobileApp() {
     const c = cvContent.trim();
     if (c.length < 100) { setCvErr(`วางเนื้อข่าวเต็มก่อน (≥100 ตัวอักษร — ตอนนี้ ${c.length})`); return; }
     setCvErr(''); setCvBusy(true);
+    // ★ ชุด① 26 ก.ค. 69: ลิงก์คลิปต้นทาง 1-3 + สวิตช์ไม่ค้นเพิ่ม
+    //   sol-review: คงรูป payload เดิมเมื่อไม่ใช้ฟีเจอร์ — แนบ field เฉพาะมีค่าจริง (ไม่งั้น omit ไปเลย ห้าม [] / false)
+    const clipUrls = cvClips.map(u => u.trim()).filter(isValidClipUrl).slice(0, 3);
     try {
       const d = await (await fetch('/api/m/cover', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newsTitle: cvTitle.trim(), content: c }),
+        body: JSON.stringify({ newsTitle: cvTitle.trim(), content: c, ...(clipUrls.length ? { clipUrls } : {}), ...((cvSrcOnly && clipUrls.length > 0) ? { sourceOnly: true } : {}) }),
       })).json();
       if (!d.success) throw new Error(d.error || 'ส่งงานปกไม่สำเร็จ');
       if (d.jobId) { cvMineRef.current.add(d.jobId); setCvOpen(d.jobId); }
@@ -670,6 +686,20 @@ export default function MobileApp() {
         <div className="compose">
           <textarea className="ta" value={cvContent} onChange={e => setCvContent(e.target.value)} placeholder={`วางเนื้อข่าวเต็ม ≥100 ตัวอักษร… (ตอนนี้ ${cvContent.trim().length})`} />
         </div>
+        {/* ★ ชุด① 26 ก.ค. 69: ลิงก์คลิปต้นทาง 1-3 + สวิตช์ไม่ค้นเพิ่ม (sourceOnly) */}
+        {[0, 1, 2].map(i => (
+          <input key={i} className="in" style={{ marginBottom: 8 }} inputMode="url"
+            value={cvClips[i]}
+            onChange={e => setCvClips(p => p.map((v, idx) => idx === i ? e.target.value : v))}
+            placeholder={`ลิงก์คลิป ${i + 1} (ไม่บังคับ)…`} />
+        ))}
+        <div className="seg" style={{ marginBottom: 6 }}>
+          <button className={cvSrcOnly ? 'on' : ''} disabled={!cvClips.some(isValidClipUrl)}
+            onClick={() => setCvSrcOnly(v => !v)}>
+            🎬 เน้นแคปเฟรมจากคลิป (ไม่ค้นเว็บเพิ่ม)
+          </button>
+        </div>
+        {!cvClips.some(isValidClipUrl) && <p className="sub" style={{ marginTop: 0 }}>ใส่ลิงก์คลิปอย่างน้อย 1 ช่องก่อน ถึงจะเปิดสวิตช์นี้ได้</p>}
         {cvErr && <div className="err">{cvErr}</div>}
         <button className="cta" disabled={cvBusy} onClick={submitCover}>{cvBusy ? 'กำลังส่ง…' : 'ทำปก — เข้าคิวจริง รันเบื้องหลัง'}</button>
 

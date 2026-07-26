@@ -869,12 +869,23 @@ export async function s5_search(job, { origin, _deps }) {
   const im = job.dossier.images || {};
   const done = im.searchedPlatforms || [];
   const next = SEARCH_PLATFORMS.find((p) => !done.includes(p));
+  // ★ ชุด① 26 ก.ค. 69 — โหมด "ไม่ค้นเพิ่ม" (dossier.sourceOnly): ผู้ใช้ล็อกให้ใช้เฟรมจากคลิปต้นทางเป็นแหล่งเดียว
+  //   เงื่อนไข: sourceOnly===true AND มี sourceClips ที่เป็นลิงก์คลิปจริง ≥1 (เปิดสวิตช์ไว้เฉยๆ ไม่ใส่ลิงก์ = ทำงานปกติ กันผู้ใช้ลืมใส่)
+  //   แตะเฉพาะ s5_search — ยังยิงแคปเฟรม YouTube เหมือนเดิม (โค้ด ytFired ด้านล่างไม่ถูกแตะ) แค่ข้ามลูปค้นเว็บ 4 แหล่ง
+  const _sourceOnlyClips = (Array.isArray(job.dossier?.sourceClips) ? job.dossier.sourceClips : [])
+    .map((u) => String(u || '').trim()).filter((u) => VIDEO_URL_RE.test(u));
+  const sourceOnlyMode = job.dossier?.sourceOnly === true && _sourceOnlyClips.length > 0;
   if (next) {
     // ★ 9 ก.ค. (เคาะ 6 แหล่ง): ยิงแคปเฟรม YouTube ตั้งแต่ tick แรก — วิ่งขนานกับค้นเว็บ 4 แหล่ง
     //   fire-and-forget ไม่ await: ล้ม/ช้าไม่บล็อกสายพาน (จุดรอเฟรมอยู่ s5_clipframe เพดาน YT_WAIT_MIN นาที)
     //   เดิมรอถึง S5e ค่อยยิงแบบ synchronous = บวก 3-5 นาทีท้ายสาย + บนคลาวด์เฟรมมาไม่ทัน S6
     let ytFired = im.ytFired || null;
-    if (YT_PARALLEL && !ytFired && done.length === 0) {
+    // ★ sol-review round2 (26 ก.ค. 69): sourceOnlyMode ต้องยิงแคป sourceClips เสมอ ไม่สน MEGA_YT_PARALLEL —
+    //   โหมดนี้ "เฟรมคือชีวิต" (ข้ามค้นเว็บ 4 แหล่งทั้งหมดด้านล่าง) เดิมถ้า YT_PARALLEL=0 จะไม่ยิงแคปเลย แล้ว
+    //   sourceOnlyMode ก็คืน done ทันที = ไม่มีทั้งเฟรมไม่มีทั้งค้นเว็บ แถม s5_clipframe fallback ทีหลังไม่รู้จัก
+    //   sourceClips (เช็คแค่ desk.url) จะไปค้น YouTube ทั่วไปผิดความหมาย — เฉพาะ branch นี้เท่านั้นที่ข้าม gate
+    //   YT_PARALLEL ปกติของโหมดค้นเว็บทั่วไป (ไม่ sourceOnly) ยังคุมด้วย YT_PARALLEL เหมือนเดิมทุกอย่าง
+    if ((YT_PARALLEL || sourceOnlyMode) && !ytFired && done.length === 0) {
       // ★ โหมดคลิปต้นทาง (18 ก.ค. — ผู้ใช้สั่ง): job แนบลิงก์คลิปที่ข่าวมาจาก (dossier.sourceClips ≤3 —
       //   คนกรอกฟอร์ม cover-ref-test / auto-detect จากเนื้อ / สาย auto ส่ง desk.url เดิม) = แหล่งภาพ "หลัก"
       //   → ยิงแคปเฟรม pinpoint ทุกลิงก์ตั้งแต่ tick แรก · ค้นเว็บ 4 แหล่งกลายเป็นตัวเสริม
@@ -896,6 +907,16 @@ export async function s5_search(job, { origin, _deps }) {
           ? `[MEGA S5c] 🎬 แคปเฟรมจาก "คลิปต้นทาง" ${srcClips.length} ลิงก์ (แหล่งหลัก — ค้นเว็บเป็นตัวเสริม)`
           : '[MEGA S5c] 🎬 ยิงแคปเฟรม YouTube ขนาน (ผลไปรอเช็คที่ s5_clipframe)');
       } catch { /* ยิงไม่ได้ → s5_clipframe จะยิงเองแบบเดิม */ }
+    }
+    // ★ โหมดไม่ค้นเพิ่ม: ข้ามลูปค้นเว็บ 4 แหล่งทั้งหมด (เฟรมคลิปยิงไปแล้วด้านบน) — จบ stage ทันที ไม่แตะลำดับ/ด่านอื่น
+    if (sourceOnlyMode) {
+      console.log(`[MEGA S5c] 🎯 โหมดไม่ค้นเพิ่ม (sourceOnly): ใช้เฟรมจากคลิปเท่านั้น — ข้ามค้นเว็บ 4 แหล่ง (${_sourceOnlyClips.length} ลิงก์)`);
+      return {
+        status: 'done',
+        nextAction: 'continue',
+        summary: `🎬 โหมดไม่ค้นเพิ่ม: ข้ามค้นเว็บ 4 แหล่ง (ใช้เฟรมจากคลิปต้นทาง ${_sourceOnlyClips.length} ลิงก์เท่านั้น)`,
+        dossierPatch: { images: { ...im, ...(ytFired ? { ytFired } : {}), searchedPlatforms: [...SEARCH_PLATFORMS], searchStats: im.searchStats || [], totalAdded: im.totalAdded || 0, sourceOnlySkipped: true } },
+      };
     }
     const r = await _jf(`${origin}/api/images/search`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, platform: next }) }, 480000); // ★ 7 ก.ค.: 5→8 นาที (search+EyeScreen ต่อแหล่งแตะ 5 นาทีได้ → เดิม abort พอดี)
     // 🔎 Search Provenance V1 (ON เท่านั้น + fail-closed) — แนบ 6 ตัวนับจาก response เข้า stat เดียวกัน

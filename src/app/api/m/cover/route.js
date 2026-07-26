@@ -29,6 +29,17 @@ const keyHeaders = () => ({
   ...(process.env.COVER_TEST_KEY ? { 'x-cover-test-key': process.env.COVER_TEST_KEY } : {}),
 });
 
+// ★ ชุด① sol-review 26 ก.ค. 69: ตรวจลิงก์คลิปเข้มขึ้น — ต้อง parse ผ่าน URL จริง + http(s) + hostname ไม่ว่าง (กัน "https://" เปล่า) + ยาว ≤500
+const CLIP_URL_MAX_LEN = 500;
+function isValidClipUrl(u) {
+  const s = String(u || '').trim();
+  if (!s || s.length > CLIP_URL_MAX_LEN) return false;
+  try {
+    const p = new URL(s);
+    return (p.protocol === 'http:' || p.protocol === 'https:') && !!p.hostname;
+  } catch { return false; }
+}
+
 export async function GET(request) {
   try {
     const s = await sess();
@@ -94,9 +105,14 @@ export async function POST(request) {
     if (combined < 200) {
       return NextResponse.json({ success: false, error: `เนื้อรวม (หัวข่าว+เนื้อ) ต้อง ≥200 ตัวอักษร — ตอนนี้ ${combined}`, errorType: 'CONTENT_TOO_SHORT' }, { status: 400 });
     }
+    // ★ ชุด① 26 ก.ค. 69: ลิงก์คลิปต้นทาง 1-3 + สวิตช์ไม่ค้นเพิ่ม — validate แล้วส่งต่อ /api/quick-test
+    //   sol-review: คงรูป payload เดิมเมื่อไม่ใช้ฟีเจอร์ — แนบ field เฉพาะมีค่าจริง (ไม่งั้น omit ไปเลย ห้าม [] / false)
+    const clipUrls = (Array.isArray(body.clipUrls) ? body.clipUrls : [])
+      .map((u) => String(u || '').trim()).filter(isValidClipUrl).slice(0, 3);
+    const sourceOnly = body.sourceOnly === true;
     const r = await fetch(`${request.nextUrl.origin}/api/quick-test`, {
       method: 'POST', headers: keyHeaders(),
-      body: JSON.stringify({ kind: 'ref', newsTitle, content }),
+      body: JSON.stringify({ kind: 'ref', newsTitle, content, ...(clipUrls.length ? { clipUrls } : {}), ...(sourceOnly ? { sourceOnly: true } : {}) }),
       signal: AbortSignal.timeout(30000),
     });
     const d = await r.json();

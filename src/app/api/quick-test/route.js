@@ -31,6 +31,17 @@ function badReq(error) {
   return NextResponse.json({ success: false, error, errorType: 'BAD_INPUT' }, { status: 400 });
 }
 
+// ★ ชุด① sol-review 26 ก.ค. 69: ตรวจลิงก์คลิปเข้มขึ้น — ต้อง parse ผ่าน URL จริง + http(s) + hostname ไม่ว่าง (กัน "https://" เปล่า) + ยาว ≤500
+const CLIP_URL_MAX_LEN = 500;
+function isValidClipUrl(u) {
+  const s = String(u || '').trim();
+  if (!s || s.length > CLIP_URL_MAX_LEN) return false;
+  try {
+    const p = new URL(s);
+    return (p.protocol === 'http:' || p.protocol === 'https:') && !!p.hostname;
+  } catch { return false; }
+}
+
 // ── retry: วนทำซ้ำจน "ได้ผลจริง" (ระบบล่มชั่วคราว เช่น Gemini ล่ม → ห้ามปล่อยงานล้ม/คุณภาพต่ำ) ──
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRY_MAX = Math.max(1, parseInt(process.env.QUICK_TEST_MAX_ATTEMPTS || '6', 10));
@@ -75,10 +86,15 @@ async function callOnce(job, origin) {
   // ★ 15 ก.ค. 69 แบตช์ 5: แนบคีย์ทีม (server-side env — ไม่รั่วสู่ client) ให้ผ่านด่านตรวจสิทธิ์ src/middleware.js เมื่อเรียกผ่านโฮสต์ (cloud)
   const refHeaders = { 'Content-Type': 'application/json' };
   if (process.env.COVER_TEST_KEY) refHeaders['x-cover-test-key'] = process.env.COVER_TEST_KEY;
+  // ★ ชุด① 26 ก.ค. 69: ลิงก์คลิปต้นทาง 1-3 + สวิตช์ไม่ค้นเพิ่ม — ต่อท่อจากประตูกลางไปเต็มท่อ MEGA
+  //   sol-review: คงรูป payload เดิมเป๊ะเมื่อไม่ใช้ฟีเจอร์ — แนบ field เฉพาะตอนมีค่าจริงเท่านั้น (ห้ามส่ง [] / false เปล่าๆ)
+  const refBody = { newsTitle: job.input.newsTitle || '', content: job.input.content };
+  if (Array.isArray(job.input.clipUrls) && job.input.clipUrls.length) refBody.clipUrls = job.input.clipUrls;
+  if (job.input.sourceOnly === true) refBody.sourceOnly = true;
   const res = await fetch(`${origin}/api/cover-ref-test`, {
     method: 'POST',
     headers: refHeaders,
-    body: JSON.stringify({ newsTitle: job.input.newsTitle || '', content: job.input.content }),
+    body: JSON.stringify(refBody),
     signal: AbortSignal.timeout(25 * 60 * 1000),
     dispatcher: REF_LONG_AGENT,
   });
@@ -185,7 +201,12 @@ export async function POST(req) {
       if (content.length < 100) return badReq(`เนื้อข่าวเต็มต้อง ≥100 ตัวอักษร (ตอนนี้มี ${content.length} ตัวอักษร — ห้ามเนื้อสั้นตัดทอน)`);
       const combinedLen = [newsTitle, content].filter(Boolean).join('\n\n').length;
       if (combinedLen < 200) return badReq(`เนื้อหารวม (หัวข่าว+เนื้อข่าว) ต้อง ≥200 ตัวอักษร (ตอนนี้มี ${combinedLen} ตัวอักษร — ห้ามเนื้อสั้นตัดทอน)`);
-      input = { newsTitle, content };
+      // ★ ชุด① 26 ก.ค. 69: ลิงก์คลิปต้นทาง 1-3 (รับ array หรือสตริง) + สวิตช์ไม่ค้นเพิ่ม (sourceOnly) — เก็บไว้ใน input ส่งต่อ /api/cover-ref-test
+      //   sol-review: คงรูป input เดิมเมื่อไม่ใช้ฟีเจอร์ — ใส่ field เฉพาะมีค่าจริง (ไม่งั้น omit ไปเลย ห้าม [] / false)
+      const clipUrlsRaw = Array.isArray(body.clipUrls) ? body.clipUrls : (body.clipUrls != null ? String(body.clipUrls).split(/[\n,]+/) : []);
+      const clipUrls = clipUrlsRaw.map((u) => String(u || '').trim()).filter(isValidClipUrl).slice(0, 3);
+      const sourceOnly = body.sourceOnly === true;
+      input = { newsTitle, content, ...(clipUrls.length ? { clipUrls } : {}), ...(sourceOnly ? { sourceOnly: true } : {}) };
       label = `🎯 เต็มท่อ · ${(newsTitle || content).slice(0, 40)}`;
     }
 
