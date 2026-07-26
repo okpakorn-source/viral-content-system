@@ -1086,6 +1086,21 @@ export async function s5_triage(job, { origin }) {
   const rounds = im.triageRounds || 0;
   const r = await jfetch(`${origin}/api/images/triage`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, limit: TRIAGE_LIMIT_PER_CALL }) }, 420000);
   if (!r.success) {
+    // ★ sol-review round3 (27 ก.ค. 69): sourceOnly แคปเฟรมใช้ ~2 นาที แต่ตาคัดมาถึงก่อน (คลังว่าง NO_IMAGES) —
+    //   เดิมนับรวมกับ "ตาล้มชั่วคราว" (Gemini แกว่ง, พอ 2 ครั้ง) → ล้มทั้งงานก่อนเฟรมมาถึงจริง (เทสจริง 2 รอบยืนยัน)
+    //   ต่างกันที่ธรรมชาติ: นี่คือ "ยังไม่พร้อม" (รอเฟรม) ไม่ใช่ระบบล่มชั่วคราว — แยกออกมาเฉพาะ errorType NO_IMAGES
+    //   + มี sourceOnly/sourceClips + ytFired ยิงไปแล้ว + ยังไม่เกินเพดาน MEGA_YT_WAIT_MIN (สูตร/ค่าเดียวกับ s5_clipframe)
+    //   → คืน waiting แบบเดียวกับ s5_clipframe (ไม่กิน budget triageErrors) จนเฟรมมา/ครบเพดาน
+    //   ไม่กระทบโหมดปกติ (ไม่ sourceOnly/ไม่มี sourceClips) และไม่กระทบ error อื่นที่ไม่ใช่คลังว่าง
+    const _hasClipSource = job.dossier?.sourceOnly === true || (Array.isArray(job.dossier?.sourceClips) && job.dossier.sourceClips.length > 0);
+    if (r.errorType === 'NO_IMAGES' && _hasClipSource && im.ytFired) {
+      const waitedMin = (Date.now() - new Date(im.ytFired).getTime()) / 60000;
+      if (waitedMin < YT_WAIT_MIN) {
+        return { status: 'waiting', nextAction: 'wait', summary: `ตาคัด: รอเฟรมคลิปต้นทางมาก่อน (คลังยังว่าง) — รอเฟรม ${waitedMin.toFixed(1)}/${YT_WAIT_MIN} นาที` };
+      }
+      // หมดเพดานรอแล้วคลังยังว่างจริง → ค่อย fail (ข้อความเดิม + เติมเหตุ)
+      return { status: 'failed', nextAction: 'fail', summary: `ตาคัดคลังล้ม: ${r.error || r.httpStatus} (รอเฟรมครบเพดาน ${YT_WAIT_MIN} นาทีแล้ว ยังไม่มีรูป)`, quality: 'red' };
+    }
     // ตาล้มชั่วคราว (Gemini แกว่ง) → รออีกรอบ สูงสุด 2 ครั้ง — ไม่ใช้ระบบ attempt (โดน waiting นับปนจนเพี้ยน)
     const errs = (im.triageErrors || 0) + 1;
     if (errs <= 2) {
