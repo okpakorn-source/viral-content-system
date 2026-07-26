@@ -32,6 +32,7 @@ const ACTIONS = new Set([
   'filter_run', 'split_run', 'send_topic', 'copy_version', 'regen', 'view_case',
   'cover_save',
   'cover_submit', 'cover_done',
+  'desk_harvest', 'desk_send', 'desk_dismiss',
 ]);
 
 export async function POST(request) {
