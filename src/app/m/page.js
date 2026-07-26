@@ -4,6 +4,13 @@
 //   สกัดเนื้อ → /api/news-filter/* · ผลงาน → /api/generation-logs — ไม่แตะไฟล์ระบบเขียนข่าวที่ล็อก
 //   ★ รอบสมาชิก (เจ้าของสั่ง): ตัวตนจาก session จริง (เลิกพิมพ์ชื่อ) + สมุดใช้งาน /api/usage + จอโปรไฟล์/ทีม/สร้างยูส
 import { useState, useEffect, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
+
+// เครื่องมือแต่งปกแมนวล — โหลดเฉพาะตอนเปิดแท็บ (ไฟล์หนัก ไม่ถ่วงจอแรก)
+const CoverEditor = dynamic(() => import('./CoverEditor'), {
+  ssr: false,
+  loading: () => <p style={{ fontSize: 13, color: 'var(--mut)', padding: '20px 0' }}>กำลังเปิดเครื่องมือแต่งปก…</p>,
+});
 
 const CSS = `
 :root{--bg:#F7F5F7;--panel:#FFFFFF;--card:#F1EEF3;--line:#E6E1E8;--line2:#D8D1DB;--ink:#1C1522;--sub:#655C6E;--mut:#9C93A6;--pink:#E5136E;--pinkD:#B80E58;--pinkS:#FBE3EE;--onp:#fff;--ok:#0E8A5F;--okS:#DFF2E9;--warn:#95660D;--warnS:#F8ECD2;--glow:rgba(229,19,110,.13)}
@@ -169,6 +176,7 @@ export default function MobileApp() {
   const [cvErr, setCvErr] = useState('');
   const [cvBusy, setCvBusy] = useState(false);
   const [cvOpen, setCvOpen] = useState(null);
+  const [cvMode, setCvMode] = useState('manual'); // manual = แต่งเอง (default ตามเจ้าของสั่ง) · auto = AI หาภาพ
   const cvMineRef = useRef(new Set()); // job ที่เราส่งเอง — ไว้ log ตอนเสร็จครั้งเดียว
 
   // ── ผลงาน ──
@@ -613,7 +621,14 @@ export default function MobileApp() {
       {/* ═══ แท็บ ทำปก ═══ */}
       {tab === 'cover' && <div className="wrap">
         <h1>ทำปก</h1>
-        <p className="sub">เต็มท่อ MEGA (~3-6 นาที) — ระบบเดียวกับ /quick-cover · รันเบื้องหลัง ปิดจอได้</p>
+        <div className="seg" style={{ marginBottom: 12 }}>
+          <button className={cvMode === 'manual' ? 'on' : ''} onClick={() => setCvMode('manual')}>✋ แต่งเอง</button>
+          <button className={cvMode === 'auto' ? 'on' : ''} onClick={() => setCvMode('auto')}>🤖 ให้ AI หา</button>
+        </div>
+        {cvMode === 'manual' && <CoverEditor onLog={log} say={say} initialTitle={result?.title || ''} />}
+      </div>}
+      {tab === 'cover' && cvMode === 'auto' && <div className="wrap" style={{ paddingTop: 0 }}>
+        <p className="sub">เต็มท่อ MEGA (~3-6 นาที) — AI ค้นภาพให้เอง · รันเบื้องหลัง ปิดจอได้</p>
         <input className="in" style={{ marginBottom: 8 }} value={cvTitle} onChange={e => setCvTitle(e.target.value)} placeholder="หัวข่าว (ไม่บังคับ)…" />
         <div className="compose">
           <textarea className="ta" value={cvContent} onChange={e => setCvContent(e.target.value)} placeholder={`วางเนื้อข่าวเต็ม ≥100 ตัวอักษร… (ตอนนี้ ${cvContent.trim().length})`} />
