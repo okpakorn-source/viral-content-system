@@ -159,11 +159,10 @@ export default function MobileApp() {
   const [insightCases, setInsightCases] = useState([]);
   const clipPollRef = useRef(null);
 
-  // ── สกัดเนื้อหา ──
-  const [nfUrl, setNfUrl] = useState('');
+  // ── สกัดเนื้อหา ── (ตรงตามเว็บ /news-filter ยกเครื่อง 19-24 มิ.ย.: ปิดดึงลิงก์ + เหลือโหมดเดียว)
   const [nfText, setNfText] = useState('');
-  const [nfMode, setNfMode] = useState('balanced');
   const [nfAI, setNfAI] = useState(true);
+  const [nfQuotes, setNfQuotes] = useState(true);
   const [nfBusy, setNfBusy] = useState('');
   const [nfOut, setNfOut] = useState(null);
   const [nfSplit, setNfSplit] = useState(null);
@@ -356,30 +355,20 @@ export default function MobileApp() {
     submitNews(input, { source: 'clip' });
   };
 
-  // ═══ สกัดเนื้อหา ═══
-  const nfScrape = async () => {
-    const u = nfUrl.trim();
-    if (!/^https?:\/\//i.test(u)) { say('วางลิงก์ข่าวก่อน'); return; }
-    setNfBusy('scrape'); setNfErr('');
-    try {
-      const d = await (await fetch('/api/news-filter/scrape', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: u }) })).json();
-      if (!d.success) throw new Error(d.error || 'ดึงเนื้อไม่สำเร็จ');
-      setNfText((d.data?.title ? d.data.title + '\n\n' : '') + (d.data?.text || ''));
-      say('ดึงเนื้อจากลิงก์แล้ว — กดสกัดต่อได้เลย');
-    } catch (e) { setNfErr(String(e.message || e)); }
-    setNfBusy('');
-  };
+  // ═══ สกัดเนื้อหา ═══ (ปิดดึงจากลิงก์ตามเว็บ — รับเฉพาะข้อความสรุปที่วางเอง)
   const nfRun = async () => {
-    if (nfText.trim().length < 80) { say('วางเนื้อข่าวก่อน (ยาวสักหน่อย)'); return; }
+    const t = nfText.trim();
+    if (/^https?:\/\/\S+$/i.test(t)) { say('ปิดสกัดจากลิงก์แล้ว — สรุปใจความข่าวแล้ววางเป็นข้อความแทน'); return; }
+    if (t.length < 80) { say('วางเนื้อข่าวก่อน (ยาวสักหน่อย)'); return; }
     setNfBusy('filter'); setNfErr(''); setNfOut(null); setNfSplit(null);
     try {
       const d = await (await fetch('/api/news-filter', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: nfText, mode: nfMode, useAI: nfAI, user: 'mobile-' + me }),
+        body: JSON.stringify({ text: nfText, mode: 'soft', useAI: nfAI, user: 'mobile-' + me, options: { keepQuotes: nfQuotes } }),
       })).json();
       if (!d.success) throw new Error(d.error || 'สกัดไม่สำเร็จ');
       setNfOut(d.data); say('สกัดเสร็จ — ตัดไป ' + (d.data?.removedPercent ?? '?') + '%');
-      log('filter_run', '', { mode: nfMode, ai: nfAI, removed: d.data?.removedPercent ?? null });
+      log('filter_run', '', { mode: 'soft', ai: nfAI, removed: d.data?.removedPercent ?? null });
     } catch (e) { setNfErr(String(e.message || e)); }
     setNfBusy('');
   };
@@ -578,16 +567,16 @@ export default function MobileApp() {
       {/* ═══ แท็บ สกัดเนื้อ ═══ */}
       {tab === 'filter' && <div className="wrap">
         <h1>สกัดเนื้อหา</h1>
-        <p className="sub">ตัดคำฟุ่มเฟือย/อารมณ์เกิน เหลือแก่นข่าว — ระบบเดียวกับหน้า /news-filter</p>
-        <div className="row" style={{ marginBottom: 9 }}>
-          <input className="in" value={nfUrl} onChange={e => setNfUrl(e.target.value)} placeholder="วางลิงก์ข่าว (ไม่บังคับ)…" inputMode="url" />
-          <button className="gh" style={{ width: 'auto', flex: 'none', padding: '0 16px' }} disabled={nfBusy === 'scrape'} onClick={nfScrape}>{nfBusy === 'scrape' ? 'กำลังดึง…' : 'ดึงเนื้อ'}</button>
-        </div>
+        <p className="sub">🔴 ต้องวาง &quot;สรุปใจความข่าว&quot; มาก่อนเท่านั้น — ห้ามก๊อปเนื้อข่าวเต็มๆ จากเว็บมาวาง (จะได้เนื้อกากๆ ไม่มีคุณภาพ)</p>
         <div className="compose">
-          <textarea className="ta" value={nfText} onChange={e => setNfText(e.target.value)} placeholder="หรือวางเนื้อข่าวดิบตรงนี้…" />
+          <textarea className="ta" value={nfText} onChange={e => setNfText(e.target.value)} placeholder="สรุปใจความข่าวก่อน แล้ววาง 'สรุป' ที่นี่…" />
         </div>
+        <div className="row" style={{ alignItems: 'center', marginTop: 9, marginBottom: 2 }}>
+          <span className="chip" style={{ background: 'var(--okS)', color: 'var(--ok)' }}>เก็บเนื้อครบ 🟢</span>
+        </div>
+        <p className="sub" style={{ marginTop: 2 }}>ตัดเฉพาะคำเฟ้อ/อารมณ์/เกริ่นที่ชัดเจน เก็บข้อเท็จจริง+รายละเอียดครบ</p>
         <div className="seg">
-          {[['soft', 'เบา'], ['balanced', 'สมดุล'], ['strict', 'เข้ม']].map(([k, l]) => <button key={k} className={nfMode === k ? 'on' : ''} onClick={() => setNfMode(k)}>{l}</button>)}
+          <button className={nfQuotes ? 'on' : ''} onClick={() => setNfQuotes(q => !q)}>💬 เก็บคำพูดตรง</button>
           <button className={nfAI ? 'on' : ''} onClick={() => setNfAI(a => !a)}>{nfAI ? 'AI วิเคราะห์' : 'กฎล้วน'}</button>
         </div>
         {nfErr && <div className="err">{nfErr}</div>}
