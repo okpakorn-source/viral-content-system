@@ -399,7 +399,8 @@ async function expectStrictError(steps, overrides = {}) {
 test('A1 analyze persists one exact frozen pin; keywords reads that pin despite changed env', async () => {
   await withEnv({
     ANALYSIS_PROVIDER: 'anthropic',
-    ANALYSIS_MODEL: PIN.model,
+    // ★ 26 ก.ค. 69: resolvePin() ล็อกขั้นวิเคราะห์ให้อ่าน ANALYSIS_PIN_MODEL (ไม่ใช่ ANALYSIS_MODEL) แล้ว — fixture ต้องตามให้ตรง
+    ANALYSIS_PIN_MODEL: PIN.model,
     ANTHROPIC_API_KEY: TEST_KEY,
     OPENAI_API_KEY: undefined,
   }, async () => {
@@ -532,7 +533,8 @@ test('A2 malformed pin and stored-meta shapes fail closed before provider calls'
 test('A3 resolved and stored model IDs reject blank, padded, and overlong values without trimming', async () => {
   const badModels = [` ${PIN.model}`, `${PIN.model} `, '   ', 'x'.repeat(257)];
   for (const model of badModels) {
-    await withEnv({ ANALYSIS_PROVIDER: 'anthropic', ANALYSIS_MODEL: model, ANTHROPIC_API_KEY: TEST_KEY }, async () => {
+    // ★ 26 ก.ค. 69: resolvePin() (anthropic) อ่าน ANALYSIS_PIN_MODEL แล้ว ไม่ใช่ ANALYSIS_MODEL — fixture ต้องตามให้ตรง
+    await withEnv({ ANALYSIS_PROVIDER: 'anthropic', ANALYSIS_PIN_MODEL: model, ANTHROPIC_API_KEY: TEST_KEY }, async () => {
       assert.throws(resolvePin, (error) => error?.errorType === 'INVALID_RESOLVED_MODEL');
     });
     assert.strictEqual(readStoredPin({ requestedProvider: PIN.provider, requestedModel: model }), null);
@@ -961,7 +963,8 @@ test('D2 strict terminal route responses align top-level/meta errorType and omit
 });
 
 test('D3 addCase/updateCase failures are typed 500 store failures with no false success or follow-on admission', async () => {
-  await withEnv({ ANALYSIS_PROVIDER: 'anthropic', ANALYSIS_MODEL: PIN.model, ANTHROPIC_API_KEY: TEST_KEY }, async () => {
+  // ★ 26 ก.ค. 69: resolvePin() (anthropic) อ่าน ANALYSIS_PIN_MODEL แล้ว ไม่ใช่ ANALYSIS_MODEL — fixture ต้องตามให้ตรง
+  await withEnv({ ANALYSIS_PROVIDER: 'anthropic', ANALYSIS_PIN_MODEL: PIN.model, ANTHROPIC_API_KEY: TEST_KEY }, async () => {
     const analyzeStore = setCaseStore({ addError: new Error('STORAGE_SECRET_ANALYZE') });
     const analyzeFetch = installFetch([responseStep({ text: json(VALID_ANALYSIS), actualModel: PIN.model })]);
     try {

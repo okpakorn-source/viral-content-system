@@ -12,7 +12,7 @@ import { recordLLM } from './costStore.js';
 import { logApiUsage } from './ai/usageLogger.js'; // ★ 7 ก.ค. อุดรูรั่วต้นทุน → /cost เห็นยอดจริง
 
 const DEFAULTS = {
-  anthropic: 'claude-opus-4-8',
+  anthropic: 'claude-opus-5', // ★ 26 ก.ค. 69 เจ้าของสั่งอัปเกรด default จาก claude-opus-4-8 → claude-opus-5 (ANALYSIS_MODEL ยัง override ได้เหมือนเดิม = ปุ่มถอยกลับ)
   openai: 'gpt-4o',
 };
 

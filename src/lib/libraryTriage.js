@@ -15,6 +15,8 @@ import {
   sanitizeStrictClassifierItem, isValidClassifierEvidence,
 } from './gemini.js';
 import { applyRehost } from './imageStore.js';
+// ★ 26 ก.ค. 69 (เจ้าของอนุมัติ mapping): ตาสายปก gemini-2.5-flash → gemini-3.6-flash เฉพาะ vetImages/triageLibrary
+import { COVER_GEMINI_MODEL } from './coverVisionModel.js';
 // ★ Wave2 Batch B1 (10 ก.ค.): เกณฑ์ตัวเลขย้ายไป imageQualityConfig.js (single source of truth) — ค่าเดิมเป๊ะ
 import { QUALITY_CAP_SHORT_SIDE, QUALITY_CAP_VALUE } from './imageQualityConfig.js';
 // ★ Stage-A: authority-normalized facts (เพิ่มฟิลด์ nested candidateFacts แบบ additive — ไม่แตะฟิลด์/การตัดสินเดิม)
@@ -440,7 +442,8 @@ export async function vetImages({ images, subjects, newsGist, onProgress, onRetr
   let abortError = null; // ★ correction P1-5: external signal cancel → หยุดทั้ง invocation (ไม่ใช่แค่แบตช์นี้)
   // ★ Batch 5B2: pin ครั้งเดียวต่อ invocation นี้ — ส่งเดิมเป๊ะเข้าทุกแบตช์/ทุก retry ห้าม re-resolve จาก env
   //   ระหว่างงาน (ถ้า env ตั้งโมเดลผิดรูปแบบ ให้ล้มทั้ง invocation ทันทีตรงนี้ ก่อนเริ่มแบตช์ไหนเลย)
-  const pin = resolveGeminiClassifierPin();
+  // ★ 26 ก.ค. 69: ส่ง COVER_GEMINI_MODEL ตรงๆ (สายปก) — ปุ่มถอยกลับ: env COVER_GEMINI_MODEL
+  const pin = resolveGeminiClassifierPin(COVER_GEMINI_MODEL);
   // ★ correction P1-6: อ่านค่าเดียวกับที่ gemini.js อ่านเองเป๊ะ (env ตัวเดียวกัน อ่านครั้งเดียวต่อ invocation
   //   เหมือน pin) — ใช้เลือก required-key-set ที่ sanitizeStrictClassifierItem ต้องตรวจให้ตรง mode จริงของงานนี้
   const FILE_TAG = process.env.FILE_SHOT_TAG !== '0';
@@ -521,7 +524,8 @@ export async function triageLibrary({ images, subjects, newsGist, onProgress, on
   const byCategory = {};
   const byPerson = {};
   // ★ Batch 5B2: pin ครั้งเดียวต่อ invocation นี้ — ส่งเดิมเป๊ะเข้าทุกแบตช์/ทุก retry ห้าม re-resolve จาก env
-  const pin = resolveGeminiClassifierPin();
+  // ★ 26 ก.ค. 69: ส่ง COVER_GEMINI_MODEL ตรงๆ (สายปก) — ปุ่มถอยกลับ: env COVER_GEMINI_MODEL
+  const pin = resolveGeminiClassifierPin(COVER_GEMINI_MODEL);
   // ★ correction P1-6: ค่าเดียวกับที่ gemini.js อ่านเองเป๊ะ — เลือก required-key-set ให้ตรง mode จริงของงานนี้
   const FILE_TAG = process.env.FILE_SHOT_TAG !== '0';
   // ★ 21 ก.ค. (บั๊กตาคัดทิ้งเงียบทุกใบหลัง flip MEGA_CLUTTER_GUARD=ON 20 ก.ค.): ชั้นแรก (geminiClassifyFrames)

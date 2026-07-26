@@ -28,9 +28,10 @@ function getKey() {
 
 // เรียก Gemini พร้อม retry (กัน 503/429/overloaded) → คืน data (JSON)
 // onRetry(attempt, waitMs) เรียกตอนต้องรอคิวลองใหม่ (ใช้อัปเดตสถานะ)
-async function callGemini(body, { onRetry, cost } = {}) {
+// ★ 26 ก.ค. 69: model (optional) — override เฉพาะครั้งนี้ (เช่นสายปกส่ง COVER_GEMINI_MODEL) ไม่ส่ง = geminiModel() เดิมเป๊ะ
+async function callGemini(body, { onRetry, cost, model: modelOverride } = {}) {
   const key = getKey();
-  const model = geminiModel();
+  const model = modelOverride || geminiModel();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
   const data = await withRetry(
     async () => {
@@ -65,7 +66,8 @@ function geminiText(data) {
 }
 
 // frames: [{ index:number, base64:string }]  → คืน [{ index, reason }]
-export async function geminiSelectFrames({ frames, subjects, onRetry, caseId, newsGist, pinpoint }) {
+// ★ 26 ก.ค. 69: model (optional) — สายปก (youtubePipeline.js) ส่ง COVER_GEMINI_MODEL มาตรงนี้ · ไม่ส่ง = พฤติกรรมเดิม (geminiModel())
+export async function geminiSelectFrames({ frames, subjects, onRetry, caseId, newsGist, pinpoint, model }) {
   const COST_STEP = 'แคปเฟรม YouTube (คัดภาพ)';
   const names =
     (subjects || []).map((s) => s.name).filter(Boolean).join(', ') || 'บุคคลในข่าว';
@@ -115,7 +117,7 @@ ${pinpoint ? 'เลือกแบบ "ครบทุกซีนที่พ�
     generationConfig: { temperature: 0.2, responseMimeType: 'application/json' },
   };
 
-  const data = await callGemini(body, { onRetry, cost: { step: COST_STEP, caseId } });
+  const data = await callGemini(body, { onRetry, cost: { step: COST_STEP, caseId }, model });
   const text = geminiText(data);
   const parsed = safeParse(text);
   if (!parsed) return [];
@@ -306,8 +308,12 @@ function ownReadEnumerable(obj, key) {
 
 // ★ resolve ครั้งเดียวต่อ vetImages/triageLibrary invocation — caller (libraryTriage.js) เรียกก่อนเริ่มแบตช์แรก
 //   แล้วส่ง pin เดิมเป๊ะเข้าทุกแบตช์/ทุก retry — ไม่ผ่าน geminiModel() (เดิม ยังใช้ได้กับสาย legacy อื่นเหมือนเดิม)
-export function resolveGeminiClassifierPin() {
-  const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+// ★ 26 ก.ค. 69: overrideModel (optional) — libraryTriage.js ส่ง COVER_GEMINI_MODEL มาตรงนี้ (สายปกเท่านั้น)
+//   ไม่ส่ง = พฤติกรรมเดิมเป๊ะ (GEMINI_MODEL env → DEFAULT_MODEL)
+export function resolveGeminiClassifierPin(overrideModel) {
+  const model = (typeof overrideModel === 'string' && overrideModel)
+    ? overrideModel
+    : (process.env.GEMINI_MODEL || DEFAULT_MODEL);
   if (!isExactModelId(model, MAX_PIN_MODEL_LEN)) {
     const e = new Error(CLASSIFIER_FIXED_MESSAGE.INVALID_RESOLVED_MODEL);
     e.errorType = 'INVALID_RESOLVED_MODEL';

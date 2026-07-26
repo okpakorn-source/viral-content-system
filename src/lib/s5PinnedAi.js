@@ -77,7 +77,14 @@ export function resolvePin() {
     e.errorType = 'NO_API_KEY';
     throw e;
   }
-  const model = resolveModel(provider);
+  // ★ 26 ก.ค. 69 (เจ้าของสั่งล็อก): ขั้นวิเคราะห์เปิดเคส (analyze) ต้องคง claude-opus-4-8 ตายตัว — ไม่ตาม
+  //   DEFAULTS.anthropic ของ aiClient.js ที่เพิ่งอัปเกรดเป็น claude-opus-5 · ใช้ ANALYSIS_PIN_MODEL เป็นปุ่ม
+  //   override/ถอยกลับเฉพาะสายนี้เท่านั้น (แยกจาก ANALYSIS_MODEL ที่ยังคุม resolveModel() ทั่วไปเหมือนเดิม
+  //   สำหรับ provider ที่ไม่ใช่ anthropic) · เคส/pin เก่าที่บันทึกไว้แล้วไม่กระทบ (keywords อ่านคืนผ่าน
+  //   readStoredPin จาก case.meta เดิม ไม่เรียก resolvePin() ซ้ำ)
+  const model = provider === 'anthropic'
+    ? (process.env.ANALYSIS_PIN_MODEL || 'claude-opus-4-8')
+    : resolveModel(provider);
   // ★ correction item 4 (round 2): ปฏิเสธ model ว่าง/ยาวเกิน/มีช่องว่างหัวท้าย — ห้าม trim ให้แล้วยอมรับ
   //   (เช่น ANALYSIS_MODEL="  claude-x  " ใน env ต้องถือว่า INVALID ไม่ใช่ "ตัดขอบให้เป็นค่าที่ใช้ได้")
   if (!isExactModelId(model, MAX_PIN_MODEL_LEN)) {

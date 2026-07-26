@@ -11,6 +11,8 @@ import sharp from 'sharp';
 import crypto from 'crypto';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
+// ★ 26 ก.ค. 69 (เจ้าของอนุมัติ mapping): ตา (Gemini fallback) สายปก gemini-2.5-flash → gemini-3.6-flash
+import { COVER_GEMINI_MODEL } from '../coverVisionModel.js';
 // ★ 9 ก.ค. 2026: ตาหาหน้า 2 ชั้น — gpt-4o-mini (callAI) เป็นตัวแรกเสมอ → ถ้าล้ม (เช่น OpenAI 429 quota หมด)
 //   ตกไป Gemini vision fallback (REST v1beta) ท้ายไฟล์ · kill-switch: FACE_GEMINI_FALLBACK=0 = ปิด fallback
 
@@ -36,9 +38,12 @@ function normalizePose(v) {
 //   → LLM ไม่ deterministic 100% ผลตรวจขยับนิดหน่อยรอบต่อรอบ → hero/crop กระโดดข้าม batch
 //   แก้: cache 2 ชั้น — ชั้น 1 Map ในหน่วยความจำ (เร็ว, หายเมื่อ process restart)
 //                      ชั้น 2 ไฟล์ data/face-cache.json (ข้าม process/deploy ได้, โหลด lazy)
-//   คีย์ = sha1(imageBuffer) + maxDim + detail — 2 ตัวนี้เท่านั้นที่ detectFaces อ่านจาก opts จริง
-//     และมีผลต่อภาพที่ resize ก่อนส่งเข้าโมเดล (ดู resize/quality ด้านล่าง) จึงกระทบผลตรวจจริง
-//     ฟิลด์อื่นใน opts (ถ้ามีเพิ่มในอนาคต) ไม่ถูกอ่านในฟังก์ชันนี้เลย → ไม่ต้องเข้าคีย์
+//   คีย์ = sha1(imageBuffer) + maxDim + detail + faceModel + geminiFallbackModel
+//     maxDim/detail: 2 ตัวนี้เท่านั้นที่ detectFaces อ่านจาก opts จริง และมีผลต่อภาพที่ resize ก่อนส่งเข้าโมเดล
+//     (ดู resize/quality ด้านล่าง) จึงกระทบผลตรวจจริง — ฟิลด์อื่นใน opts (ถ้ามีเพิ่มในอนาคต) ไม่ถูกอ่านในฟังก์ชันนี้เลย → ไม่ต้องเข้าคีย์
+//   ★ 26 ก.ค. 69 (รีวิว Codex sol): เพิ่ม faceModel (FACE_MODEL env/default) + geminiFallbackModel (COVER_GEMINI_MODEL)
+//     เข้าคีย์ด้วย — ไม่งั้นรูปที่เคยแคชผลตอนใช้ gpt-4o-mini จะไม่มีวันวิ่ง luna เลย (สลับ env ก็ไม่มีผลจนกว่า cache miss เอง)
+//     แคชเก่าไม่ต้องล้าง — คีย์ใหม่มีโมเดลต่อท้าย ไม่ชนคีย์เก่าโดยอัตโนมัติ
 //   cache เฉพาะผลตรวจ "สำเร็จจริง" (รวมเคส 0 หน้าที่ตรวจจบปกติ) — ห้าม cache เมื่อ GPT+Gemini ล้มทั้งคู่/exception
 //   kill switch: env FACE_CACHE='0' → ปิด cache ทั้งอ่านและเขียน (พฤติกรรมเดิมเป๊ะ ไม่แตะดิสก์เลย)
 // ============================================================
@@ -57,7 +62,11 @@ export function _faceCacheKey(buffer, opts = {}) {
   const hash = crypto.createHash('sha1').update(buffer).digest('hex');
   const maxDim = opts.maxDim || 800;
   const detail = opts.detail || 'low';
-  return `${hash}_${maxDim}_${detail}`;
+  // ★ 26 ก.ค. 69 (รีวิว Codex sol): โมเดลที่ใช้จริงต้องอยู่ในคีย์ — gpt ตัวแรก (FACE_MODEL) + gemini fallback
+  //   (COVER_GEMINI_MODEL) — เปลี่ยนโมเดลแล้วต้องได้แคชคนละชุดทันที ไม่ต้องรอ cache หมดอายุ/ล้างเอง
+  const faceModel = process.env.FACE_MODEL || 'gpt-5.6-luna';
+  const geminiFallbackModel = COVER_GEMINI_MODEL;
+  return `${hash}_${maxDim}_${detail}_${faceModel}_${geminiFallbackModel}`;
 }
 
 // ตัดตัวเก่าสุดออกจน Map เหลือไม่เกิน cap (FIFO ตาม insertion order ของ Map)
@@ -260,7 +269,10 @@ watermark_region: SEPARATE from has_big_text — if the photo has a press/agency
           image_url: { url: `data:image/jpeg;base64,${base64}`, detail }
         }
       ],
-      model: 'gpt-4o-mini',
+      // ★ 26 ก.ค. 69 (เจ้าของอนุมัติ mapping): gpt-4o-mini → gpt-5.6-luna — env FACE_MODEL ถอยกลับได้
+      //   openai.js::callAI ตรวจ prefix 'gpt-5' เอง (isNewModel) → ใช้ max_completion_tokens + ไม่ส่ง temperature
+      //   ให้อัตโนมัติอยู่แล้ว (ไม่ต้องแก้เงื่อนไขซ้ำที่นี่ ไม่แตะไฟล์ openai.js ที่ล็อกไว้)
+      model: process.env.FACE_MODEL || 'gpt-5.6-luna',
       temperature: 0.1,
       maxTokens: 700, // ★ rev.S4: 500→700 — เพิ่ม watermark_region แล้ว output เดิม ~460-640ch เสี่ยง JSON โดนตัด
     });
@@ -584,7 +596,10 @@ Rules:
 
 // ตาหาหน้า via Gemini vision → คืน object schema เดียวกับ detectFaces เป๊ะ (หรือ null ถ้าอ่านผล JSON ไม่ได้)
 async function detectFacesGemini(base64, metadata) {
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  // ★ 26 ก.ค. 69 (เจ้าของอนุมัติ mapping): default gemini-2.5-flash → COVER_GEMINI_MODEL (gemini-3.6-flash)
+  //   เฉพาะท่อปก — ตัด process.env.GEMINI_MODEL ออกจากจุดนี้ตั้งใจ (ให้เหมือน libraryTriage.js/youtubePipeline.js
+  //   ที่ COVER_GEMINI_MODEL เป็นช่องคุม/ถอยกลับเดียวของสายปก ไม่ผูกกับ GEMINI_MODEL กลางอีกต่อไป)
+  const model = COVER_GEMINI_MODEL;
   const data = await _geminiWithRetry(base64, _GEMINI_FACE_PROMPT, model);
   const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('').trim();
   const parsed = _parseGeminiJSON(text);

@@ -14,6 +14,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { searchYouTubeClips } from './imageSearch.js';
 import { geminiSelectFrames } from './gemini.js';
+// ★ 26 ก.ค. 69 (เจ้าของอนุมัติ mapping): ตาสายปก gemini-2.5-flash → gemini-3.6-flash เฉพาะคัดเฟรมปก
+import { COVER_GEMINI_MODEL } from './coverVisionModel.js';
 
 const exec = promisify(execFile);
 
@@ -304,7 +306,8 @@ async function selectWithGemini(cand, subjects, onRetry, caseId, newsGist, pinpo
       const buf = await fs.readFile(c.file);
       frames.push({ index: c.index, base64: buf.toString('base64') });
     }
-    const sel = await geminiSelectFrames({ frames, subjects, onRetry, caseId, newsGist, pinpoint });
+    // ★ 26 ก.ค. 69: ส่ง COVER_GEMINI_MODEL ตรงๆ (สายปก) — ปุ่มถอยกลับ: env COVER_GEMINI_MODEL
+    const sel = await geminiSelectFrames({ frames, subjects, onRetry, caseId, newsGist, pinpoint, model: COVER_GEMINI_MODEL });
     for (const s of sel) keep.push(s.index);
   }
   return [...new Set(keep)];
