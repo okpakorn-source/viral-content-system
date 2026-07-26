@@ -33,6 +33,16 @@ export async function GET(request) {
   try {
     const s = await sess();
     if (!s) return NextResponse.json({ success: false, error: 'ต้องล็อกอินก่อน', errorType: 'UNAUTHORIZED' }, { status: 401 });
+
+    // ⚡ ทางลัดประกอบ — รายการเคสจากคลัง (มีรูปพร้อมอยู่แล้ว ไม่ค้นรูปใหม่)
+    if (request.nextUrl.searchParams.get('view') === 'cases') {
+      const r = await fetch(`${request.nextUrl.origin}/api/mega/compose-test?list=1`, {
+        headers: keyHeaders(), cache: 'no-store', signal: AbortSignal.timeout(20000),
+      });
+      const d = await r.json();
+      return NextResponse.json(d, { status: r.status });
+    }
+
     const r = await fetch(`${request.nextUrl.origin}/api/quick-test?limit=30`, {
       headers: keyHeaders(), cache: 'no-store', signal: AbortSignal.timeout(20000),
     });
@@ -56,6 +66,22 @@ export async function POST(request) {
         method: 'POST', headers: keyHeaders(), body: JSON.stringify(fwd), signal: AbortSignal.timeout(20000),
       });
       return NextResponse.json(await r.json(), { status: r.status });
+    }
+
+    // ⚡ ทางลัดประกอบ (kind='compose') — ประกอบปกจากคลังเคสเดิม ไม่ค้นรูปใหม่ เร็วกว่าเต็มท่อมาก
+    if (body.kind === 'compose') {
+      const caseId = String(body.caseId || '').trim();
+      if (!caseId) {
+        return NextResponse.json({ success: false, error: 'เลือกเคสก่อนกดประกอบปก', errorType: 'BAD_INPUT' }, { status: 400 });
+      }
+      const heroPersonHint = String(body.heroPersonHint || '').slice(0, 100) || undefined;
+      const r = await fetch(`${request.nextUrl.origin}/api/quick-test`, {
+        method: 'POST', headers: keyHeaders(),
+        body: JSON.stringify({ kind: 'compose', caseId, heroPersonHint }),
+        signal: AbortSignal.timeout(30000),
+      });
+      const d = await r.json();
+      return NextResponse.json(d, { status: r.status });
     }
 
     // สร้างงานเต็มท่อ (kind='ref' เท่านั้น) — เกณฑ์ความยาวเดียวกับหน้า /quick-cover

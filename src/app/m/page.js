@@ -175,8 +175,13 @@ export default function MobileApp() {
   const [cvErr, setCvErr] = useState('');
   const [cvBusy, setCvBusy] = useState(false);
   const [cvOpen, setCvOpen] = useState(null);
-  const [cvMode, setCvMode] = useState('manual'); // manual = แต่งเอง (default ตามเจ้าของสั่ง) · auto = AI หาภาพ
+  const [cvMode, setCvMode] = useState('manual'); // manual = แต่งเอง (default ตามเจ้าของสั่ง) · auto = AI หาภาพ · quick = ⚡ ทางลัดประกอบจากคลังเคสเดิม
   const cvMineRef = useRef(new Set()); // job ที่เราส่งเอง — ไว้ log ตอนเสร็จครั้งเดียว
+  // ⚡ ทางลัดประกอบ (kind='compose' — ประกอบจากคลังเคสเดิม ไม่ค้นรูปใหม่ ~20-80 วิ)
+  const [qcCases, setQcCases] = useState([]);
+  const [qcSel, setQcSel] = useState(null);
+  const [qcHero, setQcHero] = useState('');
+  const [qcBusy, setQcBusy] = useState(false);
 
   // ── ผลงาน ──
   const [cases, setCases] = useState([]);
@@ -239,6 +244,16 @@ export default function MobileApp() {
     if (tab === 'cover') loadCovers();
     if (tab === 'me') { loadMe(); if (isAdmin) { loadTeam(); loadReport(); } }
   }, [tab, isAdmin, loadCases, loadInsightCases, loadCovers, loadMe, loadTeam, loadReport]);
+
+  // ⚡ ทางลัดประกอบ — โหลดรายการเคสจากคลัง (ครั้งแรกที่เข้าโหมด หรือกดรีเฟรชเอง)
+  const loadQcCases = useCallback(() => {
+    fetch('/api/m/cover?view=cases', { cache: 'no-store' }).then(r => r.json()).then(d => {
+      if (d.success) setQcCases((d.cases || []).slice(0, 15));
+    }).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (tab === 'cover' && cvMode === 'quick' && qcCases.length === 0) loadQcCases();
+  }, [tab, cvMode, qcCases.length, loadQcCases]);
 
   // โพลงานปก — 5 วิเมื่ออยู่แท็บปกหรือมีงานวิ่ง, ไม่งั้นหยุด
   useEffect(() => {
@@ -402,6 +417,23 @@ export default function MobileApp() {
       setTimeout(loadCovers, 800); setTimeout(loadCovers, 3000);
     } catch (e) { setCvErr(String(e.message || e)); }
     setCvBusy(false);
+  };
+  // ⚡ ทางลัดประกอบ — ประกอบปกจากคลังเคสเดิม (kind='compose')
+  const submitQuickCover = async () => {
+    if (!qcSel) return;
+    setCvErr(''); setQcBusy(true);
+    try {
+      const d = await (await fetch('/api/m/cover', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'compose', caseId: qcSel, heroPersonHint: qcHero.trim() }),
+      })).json();
+      if (!d.success) throw new Error(d.error || 'ส่งงานปกไม่สำเร็จ');
+      if (d.jobId) { cvMineRef.current.add(d.jobId); setCvOpen(d.jobId); }
+      log('cover_submit', d.jobId || '', { mode: 'compose' });
+      say('เข้าคิวประกอบปกแล้ว — รอสัก 20-80 วิ');
+      setTimeout(loadCovers, 800); setTimeout(loadCovers, 3000);
+    } catch (e) { setCvErr(String(e.message || e)); }
+    setQcBusy(false);
   };
   const delCover = async (id) => {
     setCvJobs(p => p.filter(j => j.id !== id));
@@ -628,6 +660,7 @@ export default function MobileApp() {
         <div className="seg" style={{ marginBottom: 12 }}>
           <button className={cvMode === 'manual' ? 'on' : ''} onClick={() => setCvMode('manual')}>✋ แต่งเอง</button>
           <button className={cvMode === 'auto' ? 'on' : ''} onClick={() => setCvMode('auto')}>🤖 ให้ AI หา</button>
+          <button className={cvMode === 'quick' ? 'on' : ''} onClick={() => setCvMode('quick')}>⚡ ทางลัด</button>
         </div>
         {cvMode === 'manual' && <CoverEditor onLog={log} say={say} initialTitle={result?.title || ''} />}
       </div>}
@@ -639,6 +672,59 @@ export default function MobileApp() {
         </div>
         {cvErr && <div className="err">{cvErr}</div>}
         <button className="cta" disabled={cvBusy} onClick={submitCover}>{cvBusy ? 'กำลังส่ง…' : 'ทำปก — เข้าคิวจริง รันเบื้องหลัง'}</button>
+
+        <h2>งานปกล่าสุด</h2>
+        {cvJobs.length === 0 && <p className="sub">ยังไม่มีงานปก</p>}
+        {cvJobs.map(j => {
+          const r = j.result || {};
+          const open = cvOpen === j.id;
+          const chip = j.status === 'done' ? <span className="chip cok">เสร็จ</span>
+            : j.status === 'failed' ? <span className="chip" style={{ background: 'var(--warnS)', color: 'var(--warn)' }}>ล้ม</span>
+            : j.status === 'running' ? <span className="chip cwr">กำลังทำ</span> : <span className="chip cmu">รอคิว</span>;
+          return (
+            <div key={j.id} style={{ marginBottom: 8 }}>
+              <div className="job" onClick={() => setCvOpen(open ? null : j.id)}>
+                {r.coverImgUrl && j.status === 'done'
+                  ? <img src={r.coverImgUrl} alt="ปก" style={{ width: 40, height: 50, objectFit: 'cover', borderRadius: 9, flex: 'none' }} />
+                  : <span className="ava">🖼️</span>}
+                <div style={{ overflow: 'hidden' }}>
+                  <p className="tt" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.label || j.kind || 'งานปก'}</p>
+                  <p className="mm">{j.dispatch === 'team' ? 'เครื่องทีม' : 'คลาวด์'}{j.progress?.step ? ` · ${j.progress.step}` : ''}{j.status === 'done' && r.refSimilarity != null ? ` · เหมือน ref ${r.refSimilarity}%` : ''}</p>
+                </div>
+                <span className="right">{chip}</span>
+              </div>
+              {open && <div className="reader" style={{ marginTop: 6 }}>
+                {j.status === 'failed' && <div className="err" style={{ margin: 0 }}>{j.error || 'ล้มเหลว'}</div>}
+                {(j.status === 'pending' || j.status === 'running') && <p className="sub" style={{ margin: 0 }}>⏳ {j.progress?.step || 'กำลังทำ'} — ปิดจอได้ เดี๋ยวผลมาเอง</p>}
+                {r.coverImgUrl && <img src={r.coverImgUrl} alt="ปกเต็ม" style={{ width: '100%', borderRadius: 12, marginTop: 8 }} />}
+                <div className="row" style={{ marginTop: 9 }}>
+                  {r.coverImgUrl && j.status === 'done' && <a className="gh" style={{ textDecoration: 'none' }} href={`${r.coverImgUrl}${r.coverImgUrl.includes('?') ? '&' : '?'}dl=1`}>⬇️ โหลดภาพ</a>}
+                  <button className="gh" onClick={() => delCover(j.id)}>ลบงานนี้</button>
+                </div>
+              </div>}
+            </div>
+          );
+        })}
+      </div>}
+      {tab === 'cover' && cvMode === 'quick' && <div className="wrap" style={{ paddingTop: 0 }}>
+        <p className="sub">ประกอบจากเคสที่มีรูปแล้ว ~20-80 วิ (ไม่ค้นรูปใหม่)</p>
+        <div className="row" style={{ marginBottom: 10 }}>
+          <button className="gh" style={{ width: 'auto', padding: '7px 14px', fontSize: 12.5 }} onClick={loadQcCases}>🔄 รีเฟรชรายการ</button>
+        </div>
+        {qcCases.length === 0 && <p className="sub">ยังไม่มีเคสในคลัง — ลองรีเฟรช</p>}
+        {qcCases.map(c => (
+          <div key={c.id} className="job" style={qcSel === c.id ? { borderColor: 'var(--pink)', background: 'var(--pinkS)' } : undefined} onClick={() => setQcSel(c.id)}>
+            <span className="ava">🖼️</span>
+            <div style={{ overflow: 'hidden' }}>
+              <p className="tt" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(c.headline || c.id || '').slice(0, 60)}</p>
+              <p className="mm">รูปตรง {c.relevant ?? '-'}/{c.total ?? '-'} · หน้าชัด {c.cleanFace ?? '-'}{c.tone ? ` · ${c.tone}` : ''}</p>
+            </div>
+            <span className="right">{qcSel === c.id ? <span className="chip cpk">เลือกแล้ว</span> : null}</span>
+          </div>
+        ))}
+        <input className="in" style={{ margin: '10px 0' }} value={qcHero} onChange={e => setQcHero(e.target.value)} placeholder="ชื่อคนตัวเด่น (ไม่บังคับ)…" />
+        {cvErr && <div className="err">{cvErr}</div>}
+        <button className="cta" disabled={!qcSel || qcBusy} onClick={submitQuickCover}>{qcBusy ? 'กำลังส่ง…' : '⚡ ประกอบปก — เข้าคิว รันเบื้องหลัง'}</button>
 
         <h2>งานปกล่าสุด</h2>
         {cvJobs.length === 0 && <p className="sub">ยังไม่มีงานปก</p>}
