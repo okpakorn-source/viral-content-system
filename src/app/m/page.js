@@ -90,6 +90,7 @@ const IC = {
   clip: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>,
   lib: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>,
   fil: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>,
+  img: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>,
 };
 
 const fmtTime = (iso) => { try { const d = new Date(iso); return d.toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
@@ -161,6 +162,15 @@ export default function MobileApp() {
   const [nfSplit, setNfSplit] = useState(null);
   const [nfErr, setNfErr] = useState('');
 
+  // ── ทำปก (ต่อท่อ /quick-cover ผ่านประตู /api/m/cover) ──
+  const [cvTitle, setCvTitle] = useState('');
+  const [cvContent, setCvContent] = useState('');
+  const [cvJobs, setCvJobs] = useState([]);
+  const [cvErr, setCvErr] = useState('');
+  const [cvBusy, setCvBusy] = useState(false);
+  const [cvOpen, setCvOpen] = useState(null);
+  const cvMineRef = useRef(new Set()); // job ที่เราส่งเอง — ไว้ log ตอนเสร็จครั้งเดียว
+
   // ── ผลงาน ──
   const [cases, setCases] = useState([]);
   const [caseDetail, setCaseDetail] = useState(null);
@@ -201,11 +211,35 @@ export default function MobileApp() {
   const loadReport = useCallback(() => {
     fetch('/api/usage?view=report', { cache: 'no-store' }).then(r => r.json()).then(d => { if (d.success) setReport(d); }).catch(() => {});
   }, []);
+  const loadCovers = useCallback(() => {
+    fetch('/api/m/cover', { cache: 'no-store' }).then(r => r.json()).then(d => {
+      if (!d.success) return;
+      const jobs = d.jobs || [];
+      setCvJobs(jobs);
+      // งานที่เราส่งเองเพิ่งเสร็จ → log ครั้งเดียว
+      for (const j of jobs) {
+        if (j.status === 'done' && cvMineRef.current.has(j.id)) {
+          cvMineRef.current.delete(j.id);
+          log('cover_done', j.id, { sim: j.result?.refSimilarity ?? null });
+        }
+      }
+    }).catch(() => {});
+  }, [log]);
+
   useEffect(() => {
     if (tab === 'works') loadCases();
     if (tab === 'clip') loadInsightCases();
+    if (tab === 'cover') loadCovers();
     if (tab === 'me') { loadMe(); if (isAdmin) { loadTeam(); loadReport(); } }
-  }, [tab, isAdmin, loadCases, loadInsightCases, loadMe, loadTeam, loadReport]);
+  }, [tab, isAdmin, loadCases, loadInsightCases, loadCovers, loadMe, loadTeam, loadReport]);
+
+  // โพลงานปก — 5 วิเมื่ออยู่แท็บปกหรือมีงานวิ่ง, ไม่งั้นหยุด
+  useEffect(() => {
+    const active = cvJobs.some(j => j.status === 'pending' || j.status === 'running');
+    if (tab !== 'cover' && !active) return;
+    const iv = setInterval(loadCovers, active ? 5000 : 12000);
+    return () => clearInterval(iv);
+  }, [tab, cvJobs, loadCovers]);
 
   // ═══ ส่งเข้าคิวเขียนจริง ═══
   const submitNews = async (input, { forceNew = false, source = 'text' } = {}) => {
@@ -344,6 +378,36 @@ export default function MobileApp() {
     setNfBusy('');
   };
 
+  // ═══ ทำปก ═══
+  const submitCover = async () => {
+    const c = cvContent.trim();
+    if (c.length < 100) { setCvErr(`วางเนื้อข่าวเต็มก่อน (≥100 ตัวอักษร — ตอนนี้ ${c.length})`); return; }
+    setCvErr(''); setCvBusy(true);
+    try {
+      const d = await (await fetch('/api/m/cover', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newsTitle: cvTitle.trim(), content: c }),
+      })).json();
+      if (!d.success) throw new Error(d.error || 'ส่งงานปกไม่สำเร็จ');
+      if (d.jobId) { cvMineRef.current.add(d.jobId); setCvOpen(d.jobId); }
+      log('cover_submit', d.jobId || '', {});
+      say('เข้าคิวทำปกแล้ว — ปิดจอได้ ~3-6 นาที');
+      setTimeout(loadCovers, 800); setTimeout(loadCovers, 3000);
+    } catch (e) { setCvErr(String(e.message || e)); }
+    setCvBusy(false);
+  };
+  const delCover = async (id) => {
+    setCvJobs(p => p.filter(j => j.id !== id));
+    await fetch('/api/m/cover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', jobId: id }) }).catch(() => {});
+    setTimeout(loadCovers, 600);
+  };
+  const coverFromNews = () => {
+    setCvTitle(result?.title || '');
+    setCvContent(text || cur?.content || '');
+    setTab('cover');
+    say('ใส่เนื้อจากข่าวให้แล้ว — กดทำปกได้เลย');
+  };
+
   const openCase = async (id) => {
     setCaseLoading(true); setCaseDetail(null);
     try {
@@ -453,6 +517,7 @@ export default function MobileApp() {
             <button className="gh" onClick={() => copyText(cur?.content || '', result.caseId || jobId)}>คัดลอกเวอร์ชันนี้</button>
             <button className="gh" onClick={() => submitNews(text || cur?.content || '', { forceNew: true })}>เจนใหม่</button>
           </div>
+          <button className="gh" style={{ marginBottom: 9 }} onClick={coverFromNews}>🖼️ ทำปกจากข่าวนี้</button>
           <button className="cta" onClick={() => { setPhase('idle'); setText(''); }}>ส่งข่าวเรื่องถัดไป</button>
         </>}
       </div>}
@@ -543,6 +608,51 @@ export default function MobileApp() {
             </div>
           ))}
         </>}
+      </div>}
+
+      {/* ═══ แท็บ ทำปก ═══ */}
+      {tab === 'cover' && <div className="wrap">
+        <h1>ทำปก</h1>
+        <p className="sub">เต็มท่อ MEGA (~3-6 นาที) — ระบบเดียวกับ /quick-cover · รันเบื้องหลัง ปิดจอได้</p>
+        <input className="in" style={{ marginBottom: 8 }} value={cvTitle} onChange={e => setCvTitle(e.target.value)} placeholder="หัวข่าว (ไม่บังคับ)…" />
+        <div className="compose">
+          <textarea className="ta" value={cvContent} onChange={e => setCvContent(e.target.value)} placeholder={`วางเนื้อข่าวเต็ม ≥100 ตัวอักษร… (ตอนนี้ ${cvContent.trim().length})`} />
+        </div>
+        {cvErr && <div className="err">{cvErr}</div>}
+        <button className="cta" disabled={cvBusy} onClick={submitCover}>{cvBusy ? 'กำลังส่ง…' : 'ทำปก — เข้าคิวจริง รันเบื้องหลัง'}</button>
+
+        <h2>งานปกล่าสุด</h2>
+        {cvJobs.length === 0 && <p className="sub">ยังไม่มีงานปก</p>}
+        {cvJobs.map(j => {
+          const r = j.result || {};
+          const open = cvOpen === j.id;
+          const chip = j.status === 'done' ? <span className="chip cok">เสร็จ</span>
+            : j.status === 'failed' ? <span className="chip" style={{ background: 'var(--warnS)', color: 'var(--warn)' }}>ล้ม</span>
+            : j.status === 'running' ? <span className="chip cwr">กำลังทำ</span> : <span className="chip cmu">รอคิว</span>;
+          return (
+            <div key={j.id} style={{ marginBottom: 8 }}>
+              <div className="job" onClick={() => setCvOpen(open ? null : j.id)}>
+                {r.coverImgUrl && j.status === 'done'
+                  ? <img src={r.coverImgUrl} alt="ปก" style={{ width: 40, height: 50, objectFit: 'cover', borderRadius: 9, flex: 'none' }} />
+                  : <span className="ava">🖼️</span>}
+                <div style={{ overflow: 'hidden' }}>
+                  <p className="tt" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.label || j.kind || 'งานปก'}</p>
+                  <p className="mm">{j.dispatch === 'team' ? 'เครื่องทีม' : 'คลาวด์'}{j.progress?.step ? ` · ${j.progress.step}` : ''}{j.status === 'done' && r.refSimilarity != null ? ` · เหมือน ref ${r.refSimilarity}%` : ''}</p>
+                </div>
+                <span className="right">{chip}</span>
+              </div>
+              {open && <div className="reader" style={{ marginTop: 6 }}>
+                {j.status === 'failed' && <div className="err" style={{ margin: 0 }}>{j.error || 'ล้มเหลว'}</div>}
+                {(j.status === 'pending' || j.status === 'running') && <p className="sub" style={{ margin: 0 }}>⏳ {j.progress?.step || 'กำลังทำ'} — ปิดจอได้ เดี๋ยวผลมาเอง</p>}
+                {r.coverImgUrl && <img src={r.coverImgUrl} alt="ปกเต็ม" style={{ width: '100%', borderRadius: 12, marginTop: 8 }} />}
+                <div className="row" style={{ marginTop: 9 }}>
+                  {r.coverImgUrl && j.status === 'done' && <a className="gh" style={{ textDecoration: 'none' }} href={`${r.coverImgUrl}${r.coverImgUrl.includes('?') ? '&' : '?'}dl=1`}>⬇️ โหลดภาพ</a>}
+                  <button className="gh" onClick={() => delCover(j.id)}>ลบงานนี้</button>
+                </div>
+              </div>}
+            </div>
+          );
+        })}
       </div>}
 
       {/* ═══ แท็บ ผลงาน ═══ */}
@@ -673,6 +783,7 @@ export default function MobileApp() {
         <button className={'tab' + (tab === 'write' ? ' on' : '')} onClick={() => setTab('write')}>{IC.send}ส่งข่าว</button>
         <button className={'tab' + (tab === 'clip' ? ' on' : '')} onClick={() => setTab('clip')}>{IC.clip}ถอดคลิป</button>
         <button className={'tab' + (tab === 'filter' ? ' on' : '')} onClick={() => setTab('filter')}>{IC.fil}สกัดเนื้อ</button>
+        <button className={'tab' + (tab === 'cover' ? ' on' : '')} onClick={() => setTab('cover')}>{IC.img}ทำปก</button>
         <button className={'tab' + (tab === 'works' ? ' on' : '')} onClick={() => setTab('works')}>{IC.lib}ผลงาน</button>
       </div></div>
       {toast && <div className="toast">{toast}</div>}

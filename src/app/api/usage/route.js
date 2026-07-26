@@ -30,6 +30,7 @@ async function sess() {
 const ACTIONS = new Set([
   'app_open', 'submit_news', 'job_done', 'job_failed', 'clip_submit', 'clip_done',
   'filter_run', 'split_run', 'send_topic', 'copy_version', 'regen', 'view_case',
+  'cover_submit', 'cover_done',
 ]);
 
 export async function POST(request) {

@@ -1,0 +1,81 @@
+/**
+ * /api/m/cover — ประตูทำปกสำหรับแอพมือถือ /m (26 ก.ค. 69 — เจ้าของสั่ง)
+ * ─────────────────────────────────────────────────────────────
+ * ต่อท่อเดียวกับ /quick-cover (/api/quick-test kind='ref' เต็มท่อ MEGA) แต่:
+ *   - ด่านสิทธิ์ = ต้องล็อกอินยูสพนักงานจริง (session) — คนนอกไม่มี session โดน 401
+ *   - ฝั่งเซิร์ฟเวอร์แนบคีย์ทีม (COVER_TEST_KEY) ให้เอง — คีย์ไม่เคยหลุดไปหน้าจอ
+ *   - ด่าน middleware ของ /api/quick-test เดิมยังคุมการยิงตรงจากภายนอกเหมือนเดิมทุกประการ
+ * GET  → รายการงานปก (สะท้อนจาก quick-test) · POST {newsTitle, content} → สร้างงานเต็มท่อ
+ * POST {action:'delete', jobId} → ลบงาน — ไฟล์ใหม่ล้วน ไม่แตะระบบข่าว/ระบบปกเดิม
+ */
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
+import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { getSession } from '@/lib/auth';
+
+async function sess() {
+  try {
+    const c = await cookies();
+    const token = c.get('auth_token')?.value;
+    return token ? await getSession(token) : null;
+  } catch { return null; }
+}
+
+const keyHeaders = () => ({
+  'Content-Type': 'application/json',
+  ...(process.env.COVER_TEST_KEY ? { 'x-cover-test-key': process.env.COVER_TEST_KEY } : {}),
+});
+
+export async function GET(request) {
+  try {
+    const s = await sess();
+    if (!s) return NextResponse.json({ success: false, error: 'ต้องล็อกอินก่อน', errorType: 'UNAUTHORIZED' }, { status: 401 });
+    const r = await fetch(`${request.nextUrl.origin}/api/quick-test?limit=30`, {
+      headers: keyHeaders(), cache: 'no-store', signal: AbortSignal.timeout(20000),
+    });
+    const d = await r.json();
+    return NextResponse.json(d, { status: r.status });
+  } catch (error) {
+    return NextResponse.json({ success: false, error: error.message, errorType: 'M_COVER_ERROR' }, { status: 500 });
+  }
+}
+
+export async function POST(request) {
+  try {
+    const s = await sess();
+    if (!s) return NextResponse.json({ success: false, error: 'ต้องล็อกอินก่อน', errorType: 'UNAUTHORIZED' }, { status: 401 });
+    const body = await request.json().catch(() => ({}));
+
+    // ลบงาน — ส่งต่อตรงๆ (เฉพาะ action ที่อนุญาต)
+    if (body.action === 'delete') {
+      const fwd = body.scope === 'active' ? { action: 'delete', scope: 'active' } : { action: 'delete', jobId: String(body.jobId || '') };
+      const r = await fetch(`${request.nextUrl.origin}/api/quick-test`, {
+        method: 'POST', headers: keyHeaders(), body: JSON.stringify(fwd), signal: AbortSignal.timeout(20000),
+      });
+      return NextResponse.json(await r.json(), { status: r.status });
+    }
+
+    // สร้างงานเต็มท่อ (kind='ref' เท่านั้น) — เกณฑ์ความยาวเดียวกับหน้า /quick-cover
+    const newsTitle = String(body.newsTitle || '').slice(0, 200);
+    const content = String(body.content || '');
+    if (content.trim().length < 100) {
+      return NextResponse.json({ success: false, error: `วางเนื้อข่าวเต็มก่อน (≥100 ตัวอักษร — ตอนนี้ ${content.trim().length})`, errorType: 'CONTENT_TOO_SHORT' }, { status: 400 });
+    }
+    const combined = [newsTitle.trim(), content.trim()].filter(Boolean).join('\n\n').length;
+    if (combined < 200) {
+      return NextResponse.json({ success: false, error: `เนื้อรวม (หัวข่าว+เนื้อ) ต้อง ≥200 ตัวอักษร — ตอนนี้ ${combined}`, errorType: 'CONTENT_TOO_SHORT' }, { status: 400 });
+    }
+    const r = await fetch(`${request.nextUrl.origin}/api/quick-test`, {
+      method: 'POST', headers: keyHeaders(),
+      body: JSON.stringify({ kind: 'ref', newsTitle, content }),
+      signal: AbortSignal.timeout(30000),
+    });
+    const d = await r.json();
+    return NextResponse.json(d, { status: r.status });
+  } catch (error) {
+    return NextResponse.json({ success: false, error: error.message, errorType: 'M_COVER_ERROR' }, { status: 500 });
+  }
+}
