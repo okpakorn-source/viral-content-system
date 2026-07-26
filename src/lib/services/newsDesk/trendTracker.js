@@ -4,7 +4,7 @@
  * → harvester ค้นทุกแหล่ง (ข่าว/เว็บ/ยูทูป/เพจ/รีลส์) มารวมในเลน 'trend-track'
  */
 import { callAI } from '@/lib/ai/openai';
-import { MODEL_FAST } from '@/lib/ai/modelConfig';
+import { DESK_MODEL_FAST } from '@/lib/services/deskModelConfig';
 
 /**
  * วิเคราะห์กระแส → ตัวละคร + คีย์เวิร์ดค้นหา
@@ -28,7 +28,7 @@ export async function analyzeTrendKeywords(topic) {
 ตอบ JSON เท่านั้น: {"people":["ชื่อคนที่เกี่ยวข้อง"],"keywords":["คำค้น1","คำค้น2",...]} รวมคีย์เวิร์ด 6-8 คำ`;
 
   try {
-    const res = await callAI({ model: MODEL_FAST, temperature: 0.4, maxTokens: 800, prompt });
+    const res = await callAI({ model: DESK_MODEL_FAST, temperature: 0.4, maxTokens: 800, prompt });
     const parsed = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
     let keywords = (parsed.keywords || []).map(k => String(k).replace(/["“”']/g, '').trim()).filter(k => k.length >= 3 && k.length <= 45);
     const people = (parsed.people || []).map(p => String(p).trim()).filter(Boolean).slice(0, 8);

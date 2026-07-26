@@ -12,6 +12,7 @@
  */
 import { callAI } from '@/lib/ai/openai';
 import { createStore } from '@/lib/persistStore';
+import { DESK_MODEL_FAST } from '@/lib/services/deskModelConfig';
 
 // 7 แนวข่าวน้ำดีที่เพจเล่นได้ — แต่ละแนวมีคำอธิบาย + ตัวอย่างจุดที่อยากได้ (seed ให้ AI เห็นทิศ)
 export const SCOUT_GENRES = [
@@ -818,7 +819,7 @@ ${genres.map((g, i) => `${i + 1}. [${g.name}] ${g.brief}\n   แนวตัว�
 
   let genreQs = [];
   try {
-    const res = await callAI({ model: 'gpt-4o-mini', temperature: 0.8, maxTokens: 600, prompt });
+    const res = await callAI({ model: DESK_MODEL_FAST, temperature: 0.8, maxTokens: 600, prompt });
     const parsed = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
     genreQs = (parsed.queries || [])
       .map(x => ({ q: String(x.q || '').trim(), genre: String(x.genre || '') }))

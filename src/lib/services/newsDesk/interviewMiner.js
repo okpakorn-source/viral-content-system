@@ -10,6 +10,7 @@
 
 import crypto from 'crypto';
 import { callAI } from '@/lib/ai/openai';
+import { DESK_MODEL_BRAIN } from '@/lib/services/deskModelConfig';
 
 const idOf = (url) => 'clip_' + crypto.createHash('md5').update(String(url)).digest('hex').slice(0, 10);
 
@@ -76,7 +77,7 @@ ${caption ? `แคปชัน/ชื่อคลิป: ${caption.slice(0, 300
 "goldenMoments":[{"quote":"คำพูด/ประเด็นเด่น","why":"ทำไมแชร์ได้"}],
 "captionSkeleton":"เปิด: ... → กลาง: ... → จบ: ...",
 "angles":["มุมเล่า 1","มุมเล่า 2"]}`,
-    model: 'gpt-5.5',
+    model: DESK_MODEL_BRAIN,
     temperature: 0.2,
     maxTokens: 8000,
   });

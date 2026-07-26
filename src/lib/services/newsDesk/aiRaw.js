@@ -6,6 +6,7 @@
  *  ★ ไม่แตะ openai.js/safetyFilter.js — แค่เรียก client ที่ export ไว้ (getOpenAIClient) แล้วไม่ run sanitize
  */
 import { getOpenAIClient } from '@/lib/ai/openai';
+import { DESK_MODEL_FAST } from '@/lib/services/deskModelConfig'; // 🔧 27 ก.ค. 69 (sol): กันสาย FAST โต๊ะข่าว (gpt-5.6-luna) fallback ไป gpt-4o เต็มราคา
 
 const SYS = `คุณเป็นบรรณาธิการข่าวไทยมืออาชีพ ตอบเป็น JSON ที่ถูกต้องเท่านั้น ตาม schema ที่ระบุใน prompt
 กฎเหล็ก: ใช้เฉพาะข้อเท็จจริงจากข้อมูลที่ให้มา ห้ามแต่งเติม/บิดเบือน · ชื่อคน ตัวเลข สถานที่ คำพูด ต้องตรงต้นฉบับ 100% ห้ามเปลี่ยน/ย่อ/ตัด/แทนคำในชื่อเฉพาะ`;
@@ -18,6 +19,9 @@ export async function callRawJSON({ prompt, model, temperature = 0.5, maxTokens 
   const tryModels = [model];
   if (model === 'gpt-5.5') tryModels.push('gpt-4o');
   else if (model === 'gpt-5.4-mini') tryModels.push('gpt-4o-mini');
+  // 🔧 27 ก.ค. 69 (sol): สาย FAST ของโต๊ะข่าว (DESK_MODEL_FAST = gpt-5.6-luna) ต้องได้คู่ประหยัด gpt-4o-mini
+  //   ไม่งั้นตกไป branch สุดท้าย (gpt-4o เต็มราคา) — แพงเกินสายที่ตั้งใจให้ถูก/เร็ว
+  else if (model === DESK_MODEL_FAST) tryModels.push('gpt-4o-mini');
   else if (model !== 'gpt-4o') tryModels.push('gpt-4o');
 
   let lastErr = null;

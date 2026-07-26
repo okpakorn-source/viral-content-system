@@ -24,7 +24,8 @@
 
 import { createStore } from '../../persistStore.js';
 import { callAI } from '../../ai/openai.js';
-import { MODEL_PRIMARY, MODEL_FAST, MODEL_COSTS } from '../../ai/modelConfig.js';
+import { MODEL_COSTS } from '../../ai/modelConfig.js'; // ราคาต่อโมเดล (ตารางกลาง — ยังใช้เฉพาะประมาณต้นทุน ไม่เกี่ยวกับเลือกโมเดลเรียก)
+import { DESK_MODEL_BRAIN, DESK_MODEL_FAST } from '../deskModelConfig.js'; // 🔴 27 ก.ค. 69: โมเดลโต๊ะข่าว v2 — เลิกพึ่ง MODEL_PRIMARY/MODEL_FAST ของ modelConfig.js
 import { sanitizeText, STORE_EXEMPLARS, STORE_RUNS } from './dnaContract.js';
 import { listLeads, pushEvent, STORE as LEADS_STORE } from './researchLeads.js';
 import { extractAndSend, classifyExtractRoute, extractArticle, extractClip, attachExtract } from './researchExtract.js';
@@ -68,7 +69,7 @@ const THB_PER_USD = 36.5;
 const CHARS_PER_TOKEN_EST = 2.2;
 
 function estimateCallCostUSD(model, promptChars, outputChars) {
-  const costs = MODEL_COSTS[model] || MODEL_COSTS[MODEL_PRIMARY] || { input: 5.0, output: 30.0 };
+  const costs = MODEL_COSTS[model] || MODEL_COSTS[DESK_MODEL_BRAIN] || { input: 5.0, output: 30.0 };
   const inTokens = promptChars / CHARS_PER_TOKEN_EST;
   const outTokens = outputChars / CHARS_PER_TOKEN_EST;
   return (inTokens / 1_000_000) * costs.input + (outTokens / 1_000_000) * costs.output;
@@ -239,13 +240,13 @@ async function loadSynthesisInput() {
  * studyDna — บก. อ่านคลัง DNA ทั้งคลัง (STORE_EXEMPLARS) + synthesis เสริม (STORE_RUNS) → กลั่นเป็น "ธรรมนูญ บก."
  * เก็บถาวรใน STORE_BRAIN (id 'brain_latest' + สำเนา history รายวัน)
  * @param {object} args
- * @param {'primary'|'fast'} [args.modelKey] - 'fast' → MODEL_FAST, อื่นๆ ทั้งหมด → MODEL_PRIMARY
+ * @param {'primary'|'fast'} [args.modelKey] - 'fast' → DESK_MODEL_FAST, อื่นๆ ทั้งหมด → DESK_MODEL_BRAIN
  * @param {number} [args.maxExemplars] - จำกัดจำนวนใบที่อ่าน (คุมงบเทส) — ค่าเริ่มต้น = อ่านทั้งคลัง
  * @returns {Promise<{charter:object, exemplarCount:number, aiCalls:number, tookMs:number}>}
  */
 export async function studyDna({ modelKey = 'primary', maxExemplars } = {}) {
   const t0 = Date.now();
-  const model = modelKey === 'fast' ? MODEL_FAST : MODEL_PRIMARY; // 🔴 รับแค่ 2 ค่านี้เท่านั้น
+  const model = modelKey === 'fast' ? DESK_MODEL_FAST : DESK_MODEL_BRAIN; // 🔴 รับแค่ 2 ค่านี้เท่านั้น
 
   const exStore = createStore(STORE_EXEMPLARS);
   const allExemplars = await exStore.getAll();
@@ -524,7 +525,7 @@ async function _pruneOldPickRuns(store, keep) {
 export async function editorPick({ limit = 5, autoSend = false, sendMode = 'immediate', origin, modelKey = 'primary' } = {}) {
   const safeSendMode = sendMode === 'polite' ? 'polite' : 'immediate'; // 🔴 รับแค่ 2 ค่านี้เท่านั้น (default immediate — P2 ถอดยาม)
   const t0 = Date.now();
-  const model = modelKey === 'fast' ? MODEL_FAST : MODEL_PRIMARY; // 🔴 รับแค่ 2 ค่านี้เท่านั้น
+  const model = modelKey === 'fast' ? DESK_MODEL_FAST : DESK_MODEL_BRAIN; // 🔴 รับแค่ 2 ค่านี้เท่านั้น
   const safeLimit = Math.max(1, Math.min(MAX_PICK_LIMIT, Number(limit) || 5));
 
   const brainStore = createStore(STORE_BRAIN);

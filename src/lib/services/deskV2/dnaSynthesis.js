@@ -15,7 +15,7 @@
  */
 
 import { callAI } from '../../ai/openai.js';
-import { MODEL_PRIMARY, MODEL_FAST } from '../../ai/modelConfig.js';
+import { DESK_MODEL_BRAIN, DESK_MODEL_FAST } from '../deskModelConfig.js'; // 🔴 27 ก.ค. 69: โมเดลโต๊ะข่าว v2 — เลิกพึ่ง MODEL_PRIMARY/MODEL_FAST ของ modelConfig.js
 import { sanitizeText } from './dnaContract.js';
 
 const AI_TIMEOUT_MS = 200_000; // 200s — gpt-5.5 เป็น reasoning model เพดานต่ำ=ตอบว่างเปล่า (ดู dnaResearch.js)
@@ -177,12 +177,12 @@ function buildSynthesis(parsed) {
  * @param {{S:{count:number,exemplars:object[]}, A:{count:number,exemplars:object[]}}} args.groups
  * @param {{count:number, stats:{contrastPct:number,numbersPct:number,medianMetric:number,topHours:number[],topDays:number[]}}} args.control
  * @param {string} [args.runId]
- * @param {'primary'|'fast'} [args.modelKey] - 'fast' → MODEL_FAST, อื่นๆ ทั้งหมด → MODEL_PRIMARY (กันรับชื่อโมเดลดิบจาก caller)
+ * @param {'primary'|'fast'} [args.modelKey] - 'fast' → DESK_MODEL_FAST, อื่นๆ ทั้งหมด → DESK_MODEL_BRAIN (กันรับชื่อโมเดลดิบจาก caller)
  * @returns {Promise<{synthesis:{mainFindings:string[], sVsA:string[], archetypeRanking:object[], cautions:string[]}, model:string, tookMs:number}>}
  */
 export async function synthesizeRun({ groups, control, runId = '', modelKey = 'primary' } = {}) {
   const t0 = Date.now();
-  const model = modelKey === 'fast' ? MODEL_FAST : MODEL_PRIMARY; // 🔴 รับแค่ 2 ค่านี้เท่านั้น
+  const model = modelKey === 'fast' ? DESK_MODEL_FAST : DESK_MODEL_BRAIN; // 🔴 รับแค่ 2 ค่านี้เท่านั้น
 
   const safeGroups = {
     S: capGroup(groups?.S),

@@ -8,6 +8,7 @@
 import { NextResponse } from 'next/server';
 import { createStore } from '@/lib/persistStore';
 import { callAI } from '@/lib/ai/openai';
+import { DESK_MODEL_FAST } from '@/lib/services/deskModelConfig';
 import crypto from 'crypto';
 
 export const runtime = 'nodejs';
@@ -57,7 +58,7 @@ export async function POST(request) {
 ${note ? 'หมายเหตุจากทีม: ' + note + '\n' : ''}เนื้อหา: ${material.slice(0, 2500)}
 
 {"topic":"เรื่องอะไรใน 1 ประโยค","category":"หมวด","whyViral":"ทำไมแรง (hook/อารมณ์/ตัวเลข/จังหวะ)","rewritable":true/false,"rewriteAngle":"ถ้าเพจเราจะเล่นเรื่องนี้/แนวนี้ ควรเล่นมุมไหน"}`,
-        model: 'gpt-4o-mini',
+        model: DESK_MODEL_FAST,
         temperature: 0.2,
         maxTokens: 500,
       });

@@ -13,6 +13,7 @@
 import crypto from 'crypto';
 import { createStore } from '@/lib/persistStore';
 import { callAI } from '@/lib/ai/openai';
+import { DESK_MODEL_FAST } from '@/lib/services/deskModelConfig';
 
 const CAP = 120; // เก็บสูงสุด — เกินแล้วตัดตัวคะแนนต่ำ/เก่าสุด
 const idOf = (name) => 'wl_' + crypto.createHash('md5').update(String(name)).digest('hex').slice(0, 10);
@@ -72,7 +73,7 @@ export async function addFromTitle(title, from = 'sent') {
 ตอบ JSON เท่านั้น: {"names":["ชื่อ/ฉายา"]}
 - เอาเฉพาะชื่อคนจริง (เช่น "พี่หนุ่ม กรรชัย", "ต่าย อรทัย", "ป้าขยัน") — ไม่เอาชื่อสถานที่/รายการ/บริษัท/หน่วยงาน
 - ชื่อยาว 3-30 ตัวอักษร · ไม่มีชื่อคนเลย = {"names":[]}`,
-      model: 'gpt-4o-mini', temperature: 0.1, maxTokens: 200,
+      model: DESK_MODEL_FAST, temperature: 0.1, maxTokens: 200,
     });
     const parsed = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
     names = (parsed?.names || []).map(n => String(n).trim()).filter(n => n.length >= 3 && n.length <= 30).slice(0, 4);

@@ -9,6 +9,7 @@
  */
 
 import { callAI } from '@/lib/ai/openai';
+import { DESK_MODEL_BRAIN } from '@/lib/services/deskModelConfig';
 
 async function serperSearch(endpoint, query, num = 6) {
   const key = process.env.SERPER_API_KEY;
@@ -90,7 +91,7 @@ ${material.slice(0, 8000)}
 "stillMissing":"ยังขาดอะไรถ้าจะให้สมบูรณ์ (ไม่ขาดใส่ '')"}
 - readyScore: 9-10=ตัวเลข+คำพูด+เรื่องครบ | 5-6=พอเขียนได้ | 0-3=ข้อมูลบางมาก
 - ห้ามแต่งข้อเท็จจริงที่ไม่อยู่ในแหล่ง`,
-    model: 'gpt-5.5',
+    model: DESK_MODEL_BRAIN,
     temperature: 0.2,
     maxTokens: 8000,
   });

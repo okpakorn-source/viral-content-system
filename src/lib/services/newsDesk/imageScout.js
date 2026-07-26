@@ -14,6 +14,7 @@
  * ③ กรองความเกี่ยวข้อง (gpt-4o-mini): ให้คะแนนทุกลิงก์ 0-10 เทียบเหตุการณ์ ตัดของเก่า/คนละเรื่อง
  */
 import { callAI } from '@/lib/ai/openai';
+import { DESK_MODEL_BRAIN, DESK_MODEL_FAST } from '@/lib/services/deskModelConfig';
 
 async function serperSearch(endpoint, query, num = 8, timeRange = null) {
   const key = process.env.SERPER_API_KEY;
@@ -62,7 +63,7 @@ ${String(content || '').slice(0, 3500)}
 "mustAvoid":["สัญญาณว่าผิดเหตุการณ์ เช่น ปี พ.ศ. เก่า / เหตุการณ์คล้ายของคนอื่น"]}
 
 queries 4-6 ชุด เรียงจากแม่นสุดไปกว้างสุด`,
-    model: 'gpt-5.5',
+    model: DESK_MODEL_BRAIN,
     temperature: 0.2,
     maxTokens: 4000,
   });
@@ -135,7 +136,7 @@ ${listing}
 ให้คะแนน 0-10: 10=เหตุการณ์นี้แน่นอน คนตรง การกระทำตรง | 5=น่าจะเกี่ยว | 0=คนละเรื่อง/ของเก่า
 กฎเข้ม: ถ้าหัวข้อ/คำโปรยไม่ได้พูดถึงคนในข่าว หรือการกระทำ หรือสถานที่ของเหตุการณ์นี้เลย ให้ ≤3 เสมอ ห้ามเดาเข้าข้าง
 ตอบ JSON เท่านั้น: {"scores":[{"i":0,"s":8},{"i":1,"s":3}]}  ← ครบทุกเลข`,
-      model: 'gpt-4o-mini',
+      model: DESK_MODEL_FAST,
       temperature: 0.1,
       maxTokens: 3000,
     });

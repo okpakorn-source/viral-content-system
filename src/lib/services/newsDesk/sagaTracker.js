@@ -17,6 +17,7 @@ import crypto from 'crypto';
 import { createStore } from '@/lib/persistStore';
 import { callAI } from '@/lib/ai/openai';
 import { storySignature } from './taxonomy';
+import { DESK_MODEL_FAST } from '@/lib/services/deskModelConfig';
 
 const MAX_ACTIVE = 4;            // ซากา active พร้อมกันสูงสุด (คุมต้นทุน Serper)
 const IDLE_HOURS_DEACTIVATE = 72; // เงียบเกิน 3 วัน = กระแสจบ ปิดเอง
@@ -167,7 +168,7 @@ ${list}
 ซากาที่ติดตามอยู่แล้ว (อย่าเสนอซ้ำ): ${existingTopics}
 ตอบ JSON เท่านั้น: {"sagas":[{"i":0,"big":true/false,"topic":"ชื่อซากาสั้น 3-8 คำ","people":["ตัวละครที่เกี่ยว 3-8 คน/ฝ่าย"],"angles":["มุมค้นหาตัวละครข้างเคียง/น้ำใจ/ฮีโร่ 4-6 มุม เช่น 'กู้ภัยอาสา ช่วยเหลือ', 'ครอบครัวผู้ประสบภัย ล่าสุด'"]}]}
 - big=true เฉพาะซากาใหญ่จริง (คนทั้งประเทศตาม + ยังไม่จบ) — เข้มงวด อย่าเหมาข่าวธรรมดาเป็นซากา`,
-      model: 'gpt-4o-mini',
+      model: DESK_MODEL_FAST,
       temperature: 0.2,
       maxTokens: 900,
     });

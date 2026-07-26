@@ -3,7 +3,7 @@
  * 🧲 Research Extract — ท่อสกัดเนื้อก่อนเขียน (โต๊ะข่าวกลาง v2, Research Engine เฟส 2.0 — R6, 17 ก.ค. 69)
  * =====================================================
  * ต่อจาก R3 (researchLeads.js): ลีดที่กด "สกัดเนื้อ" → ดึงเนื้อดิบเต็มตามประเภทแหล่ง (บทความ/คลิป)
- * → 🆕 D1 (17 ก.ค. 69): กลั่นเนื้อดิบด้วย AI (distillContent, MODEL_FAST) ให้เหลือ "เนื้อข่าวล้วน"
+ * → 🆕 D1 (17 ก.ค. 69): กลั่นเนื้อดิบด้วย AI (distillContent, DESK_MODEL_FAST) ให้เหลือ "เนื้อข่าวล้วน"
  *   ตัดเมนู/โฆษณา/ความเห็นทั่วไปทิ้ง — กลั่นล้ม = fail-open ใช้ raw ตรงแทน (ไม่บล็อกงาน)
  * → แนบเข้าลีด (remove-แล้ว-add) → กด "ส่งเขียน" = ประกอบข้อความล้วน (ไม่มี URL) ส่งเข้าคิวเขียนข่าว
  * ผ่านสาย "text" ของ /api/queue/add ที่ระบบเปิดไว้ (สาย URL ปิดอยู่ด้วย TEXT_ONLY_MODE — ห้ามพยายาม bypass)
@@ -36,7 +36,7 @@ import { createStore } from '../../persistStore.js';
 import { sanitizeText } from './dnaContract.js';
 import { STORE as LEADS_STORE, pushEvent } from './researchLeads.js'; // 🔧 17 ก.ค. 69: pushEvent ร่วม (เขียน event พร้อม write หลักจังหวะเดียว — เลิกใช้ appendLeadEvents fire-and-forget)
 import { callAI } from '../../ai/openai.js'; // 🆕 D1: กลั่นเนื้อดิบ (ตามแพตเทิร์น dnaResearch.js — ห้ามแก้ openai.js)
-import { MODEL_FAST } from '../../ai/modelConfig.js'; // 🔴 ห้าม hardcode ชื่อโมเดล — งานเร็ว/ประหยัด
+import { DESK_MODEL_FAST } from '../deskModelConfig.js'; // 🔴 27 ก.ค. 69: ห้าม hardcode ชื่อโมเดล — งานเร็ว/ประหยัดของโต๊ะข่าว v2 (เลิกพึ่ง MODEL_FAST ของ modelConfig.js)
 import { getDiscoveryConfig } from './researchDiscoveryConfig.js'; // 🆕 เฟส 7: flag highlightConfirm
 import { confirmTranscriptHighlights } from './researchInterview.js'; // 🆕 เฟส 7: ยืนยันไฮไลต์จาก transcript จริง
 
@@ -342,7 +342,7 @@ function buildDistillUserPrompt({ rawText, title, sourceHost, isThread }) {
 }
 
 /**
- * distillContent — กลั่นข้อความดิบ (อาจปนขยะ/เมนู/ความเห็น) ให้เหลือ "เนื้อข่าวล้วน" ด้วย AI (MODEL_FAST)
+ * distillContent — กลั่นข้อความดิบ (อาจปนขยะ/เมนู/ความเห็น) ให้เหลือ "เนื้อข่าวล้วน" ด้วย AI (DESK_MODEL_FAST)
  *   fail-close ภายในฟังก์ชันนี้เอง (คืน {ok:false, error}) — ผู้เรียก (attachExtract) fail-open ต่อ
  *   (กลั่นล้ม → ใช้ raw แทน ไม่บล็อกงานสกัดเนื้อจริง)
  * @param {object} args
@@ -378,7 +378,7 @@ export async function distillContent({ rawText, title = '', sourceHost = '', isT
           sourceHost: sanitizeText(sourceHost, 100),
           isThread: !!isThread,
         }),
-        model: MODEL_FAST,
+        model: DESK_MODEL_FAST,
         temperature: 0.2,
         maxTokens: DISTILL_MAX_TOKENS,
         signal: ctrl ? ctrl.signal : undefined,
@@ -428,7 +428,7 @@ export async function getLead(leadId) {
 
 /**
  * attachExtract — แนบผลสกัดเนื้อเข้าลีด (remove-แล้ว-add) — status เดิมคงอยู่ + ตั้ง contentReady:true
- *   🆕 D1 (17 ก.ค. 69): ก่อนเก็บ เรียก distillContent() กลั่นเนื้อดิบ (AI MODEL_FAST) ให้เหลือเนื้อข่าวล้วน
+ *   🆕 D1 (17 ก.ค. 69): ก่อนเก็บ เรียก distillContent() กลั่นเนื้อดิบ (AI DESK_MODEL_FAST) ให้เหลือเนื้อข่าวล้วน
  *   - กลั่นสำเร็จ → extract.text = ฉบับกลั่น (สะอาด สั้นลง), extract.raw = ต้นฉบับดิบเก็บไว้อ้างอิง, distilled:true
  *   - กลั่นล้ม/ข้าม (fail-open — ไม่บล็อกงาน) → extract.text = raw เหมือนพฤติกรรมเดิมก่อนมี D1, distilled:false
  * @param {string} leadId

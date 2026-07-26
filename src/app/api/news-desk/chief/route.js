@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server';
 import { createStore } from '@/lib/persistStore';
 import { callAI } from '@/lib/ai/openai';
 import { runHarvest } from '@/lib/services/newsDesk/harvester';
+import { DESK_MODEL_BRAIN } from '@/lib/services/deskModelConfig';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -109,7 +110,7 @@ ${instruction ? `★★★ คำสั่งพิเศษจากหัว�
 "warnings":["ข้อควรระวัง 0-2 ข้อ เช่น 'ข่าวเจนนี่ เขียนโทนอบอุ่น ห้ามโจมตีครอบครัว'"],
 "pushNow":["ชื่อข่าวสั้นๆ ที่ควรดันตอนนี้ 0-4 เรื่อง"],
 "extraQueries":[{"q":"คำค้น","lane":"trend|good|evergreen","timeRange":"qdr:d|qdr:w|qdr:y"}]}`,
-      model: 'gpt-5.5',
+      model: DESK_MODEL_BRAIN,
       temperature: 0.3,
       maxTokens: 8000,
     });

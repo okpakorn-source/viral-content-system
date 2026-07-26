@@ -3,7 +3,7 @@
  * 🧬 DNA Research Service — วิจัย DNA ข่าวไวรัลจากโพสต์ต้นแบบ (โต๊ะข่าวกลาง v2, เฟส 1 — 16 ก.ค. 69)
  * ============================================================
  * รับโพสต์ต้นแบบ (S/A tier) เป็นก้อนละ ≤5 โพสต์/1 AI call (เรียงลำดับ ก้อนถัดไปรอก้อนก่อนเสร็จ)
- * → ให้ AI (gpt-5.5/gpt-5.4-mini ผ่าน modelConfig เท่านั้น — ห้าม hardcode ชื่อโมเดล) สกัด "DNA ไวรัล"
+ * → ให้ AI (DESK_MODEL_BRAIN/DESK_MODEL_FAST จาก deskModelConfig.js เท่านั้น — ห้าม hardcode ชื่อโมเดล) สกัด "DNA ไวรัล"
  * (archetype/ตัวละคร-บทบาท/จุดหักมุม/คำค้นสำหรับหาข่าว-คลิปคล้าย) → validate ผ่านสัญญากลาง dnaContract.js
  * ก่อนคืนกลับ — ไฟล์นี้ "ไม่" เขียนลงคลัง (STORE_EXEMPLARS) เอง ปล่อยให้ผู้เรียก (route) ตัดสินใจ
  *
@@ -14,7 +14,7 @@
  */
 
 import { callAI } from '../../ai/openai.js';
-import { MODEL_PRIMARY, MODEL_FAST } from '../../ai/modelConfig.js';
+import { DESK_MODEL_BRAIN, DESK_MODEL_FAST } from '../deskModelConfig.js'; // 🔴 27 ก.ค. 69: โมเดลโต๊ะข่าว v2 — เลิกพึ่ง MODEL_PRIMARY/MODEL_FAST ของ modelConfig.js
 import { sanitizeText, validateDnaRecord, tierOf, CATEGORIES } from './dnaContract.js';
 
 const CHUNK_SIZE = 5;
@@ -110,14 +110,14 @@ function extractItems(aiResult) {
  * researchBatch — วิจัย DNA จากโพสต์ต้นแบบ เป็นก้อนละ ≤5 โพสต์ (sequential — กันงบพุ่ง+เพดาน token)
  * @param {object} args
  * @param {object[]} args.posts - array ≤10 ของ { title, contentExcerpt?, reach, reactions?, postType?, publishedAt?, permalink?, postId?, tier? }
- * @param {'primary'|'fast'} [args.modelKey] - 'fast' → MODEL_FAST, อื่นๆ ทั้งหมด → MODEL_PRIMARY (กันรับชื่อโมเดลดิบจาก caller)
+ * @param {'primary'|'fast'} [args.modelKey] - 'fast' → DESK_MODEL_FAST, อื่นๆ ทั้งหมด → DESK_MODEL_BRAIN (กันรับชื่อโมเดลดิบจาก caller)
  * @param {string} [args.runId]
  * @param {string} [args.sourceFile]
  * @returns {Promise<{results:object[], failed:object[], model:string, aiCalls:number, tookMs:number}>}
  */
 export async function researchBatch({ posts, modelKey = 'primary', runId = '', sourceFile = '' } = {}) {
   const t0 = Date.now();
-  const model = modelKey === 'fast' ? MODEL_FAST : MODEL_PRIMARY; // 🔴 รับแค่ 2 ค่านี้เท่านั้น
+  const model = modelKey === 'fast' ? DESK_MODEL_FAST : DESK_MODEL_BRAIN; // 🔴 รับแค่ 2 ค่านี้เท่านั้น
   const safePosts = Array.isArray(posts) ? posts.slice(0, MAX_POSTS) : [];
 
   const results = [];

@@ -22,7 +22,7 @@ import { sanitizeText } from './dnaContract.js';
 import { listExemplars } from './dnaLibrary.js';
 import { getDiscoveryConfig } from './researchDiscoveryConfig.js';
 import { callAI } from '../../ai/openai.js';
-import { MODEL_PRIMARY, MODEL_FAST } from '../../ai/modelConfig.js';
+import { DESK_MODEL_BRAIN, DESK_MODEL_FAST } from '../deskModelConfig.js'; // 🔴 27 ก.ค. 69: โมเดลโต๊ะข่าว v2 — เลิกพึ่ง MODEL_PRIMARY/MODEL_FAST ของ modelConfig.js
 
 const MAX_CANDIDATES = 24;
 const CHUNK_SIZE = 8;
@@ -236,12 +236,12 @@ function sanitizeJudgeItem(item) {
  * @param {object} args
  * @param {object[]} args.candidates - array ≤24 ของ { title, url, snippet?/summary?/description?, source? }
  * @param {string} args.clusterId - คลัสเตอร์ที่จะดึงต้นแบบมาเทียบ (listExemplars)
- * @param {'fast'|'primary'} [args.modelKey] - 'fast' → MODEL_FAST (default), อื่นๆ → MODEL_PRIMARY
+ * @param {'fast'|'primary'} [args.modelKey] - 'fast' → DESK_MODEL_FAST (default), อื่นๆ → DESK_MODEL_BRAIN
  * @returns {Promise<{judged:object[], dropped:object[], model:string, aiCalls:number, tookMs:number}>}
  */
 export async function judgeCandidates({ candidates, clusterId, modelKey = 'fast', lane = 'dna' } = {}) {
   const t0 = Date.now();
-  const model = modelKey === 'fast' ? MODEL_FAST : MODEL_PRIMARY; // 🔴 รับแค่ 2 ค่านี้เท่านั้น กันชื่อโมเดลดิบ
+  const model = modelKey === 'fast' ? DESK_MODEL_FAST : DESK_MODEL_BRAIN; // 🔴 รับแค่ 2 ค่านี้เท่านั้น กันชื่อโมเดลดิบ
   const isInterview = lane === 'interview'; // เฟส 6: ใช้ rubric สัมภาษณ์ ไม่บังคับ exemplar cluster
   const storyGroupingOn = getDiscoveryConfig().flags.storyGrouping; // เฟส 5: archive match → ติดป้าย ไม่ทิ้ง
   const safeCandidates = (Array.isArray(candidates) ? candidates : []).slice(0, MAX_CANDIDATES);
