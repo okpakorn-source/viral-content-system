@@ -6,12 +6,16 @@
  *   - จำกัด action ที่ยิงต่อได้เฉพาะ whitelist ข้างล่าง — ห้ามแอพยิงตรงเข้า /api/news-desk/* เปลือย
  *   - ผู้ใช้ = ดึงจาก session เสมอ (ปลอมไม่ได้จากฝั่ง client)
  * 🔴 ห้ามแตะ /api/news-desk/* — ไฟล์นี้เป็นแค่ประตูส่งต่อ ไม่มี business logic ใหม่
- * GET  ?view=feed&tab=all|trend|good      → forward GET /api/news-desk?tab=...&limit=30 (tab ผิด = 400)
- * POST {action:'harvest', mode}           → forward POST /api/news-desk/harvest {mode} (mode ต้องอยู่ใน HARVEST_MODE_KEYS เท่านั้น)
- * POST {action:'chief'}                   → forward POST /api/news-desk/chief
- * POST {action:'card', cardAction, id}    → forward POST /api/news-desk {action:cardAction, id, user}
+ * GET  ?view=feed&tab=all|trend|good|shortlist|ready   → forward GET /api/news-desk?tab=...&limit=30 (tab ผิด = 400)
+ * POST {action:'harvest', mode}            → forward POST /api/news-desk/harvest {mode} (mode ต้องอยู่ใน HARVEST_MODE_KEYS เท่านั้น)
+ * POST {action:'chief'}                    → forward POST /api/news-desk/chief
+ * POST {action:'card', cardAction, id}     → forward POST /api/news-desk {action:cardAction, id, user}
+ * POST {action:'searchKeyword', keyword}   → forward POST /api/news-desk/harvest {keyword} (2-60 ตัวอักษร เท่านั้น — ★ 27 ก.ค. 69 batch ถัดไป)
  * ★ sol-review 27 ก.ค. 69: ตัด `lanes` ออกจาก gateway (UI ส่งแต่ mode — กันยิง mode มั่วแล้วปลายทางตกไปรันหนักทุกเลน)
  *   + ตัด editorRun ออกจาก whitelist (รอบนี้ไม่มีปุ่มใช้จริง — ลด surface, ค่อยคืนตอนมีปุ่ม)
+ * ★ 27 ก.ค. 69 (เจ้าของอนุมัติ — อัปเกรดแท็บโต๊ะข่าวใน /m ให้ครบเท่าโต๊ะกลาง):
+ *   + เปิด FEED_TABS รับ 'shortlist'/'ready' (คลังส่งเช้า/พร้อมใช้ — endpoint จริงมีอยู่แล้วที่ /api/news-desk?tab=shortlist|ready)
+ *   + เพิ่ม action 'searchKeyword' (ช่องค้นเองในจอเดิม — ยิง harvest ด้วยคำค้นตรงๆ ไม่ใช่ mode) จำกัดความยาวเข้ม กันยิงคำยาว/มั่ว
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,8 +38,9 @@ const unauthorized = () => NextResponse.json({ success: false, error: 'ต้อ
 const forbidden = () => NextResponse.json({ success: false, error: 'เฉพาะแอดมิน', errorType: 'FORBIDDEN' }, { status: 403 });
 
 // ── whitelist ทางเข้า — เพิ่มทีหลังได้ แต่ห้ามเปิดกว้างเป็น pass-through เปลือย ──
-const FEED_TABS = new Set(['all', 'trend', 'good']);
-const POST_ACTIONS = new Set(['harvest', 'chief', 'card']); // ★ sol-review 27 ก.ค. 69: ตัด editorRun ออก — ยังไม่มีปุ่มใช้จริงรอบนี้
+// ★ 27 ก.ค. 69: + shortlist (⭐ คลังส่งเช้า) / ready (✅ พร้อมใช้) — endpoint จริงมีอยู่แล้ว (/api/news-desk?tab=shortlist|ready) แค่เปิดผ่าน
+const FEED_TABS = new Set(['all', 'trend', 'good', 'shortlist', 'ready']);
+const POST_ACTIONS = new Set(['harvest', 'chief', 'card', 'searchKeyword']); // ★ sol-review 27 ก.ค. 69: ตัด editorRun ออก — ยังไม่มีปุ่มใช้จริงรอบนี้ · +searchKeyword 27 ก.ค. 69 (ช่องค้นเอง)
 // ★ ตัดสินใจ 27 ก.ค. 69: การ์ดในแอพมือถือมีแค่ 2 ปุ่ม (ส่งเขียน/ทิ้ง) — จำกัด cardAction เท่าที่ UI ใช้จริง
 //   'sendWorkflow' (ไม่ใช่ 'sent') เพราะเป็นตัวที่ส่งเข้า /api/queue/add จริง (ดู src/app/api/news-desk/route.js action=sendWorkflow)
 //   'sent' เดิมแค่ mark สถานะเฉยๆ ไม่ได้ส่งงานจริง — ใช้ sendWorkflow ตรงๆ กันเขียนตรรกะสร้าง input ซ้ำซ้อนฝั่งนี้
@@ -90,6 +95,22 @@ export async function POST(request) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode }),
         signal: AbortSignal.timeout(120000), // งานล่าใช้เวลานาน (ฝั่งจริง maxDuration 600s)
+      });
+      const d = await r.json();
+      return NextResponse.json(d, { status: r.status });
+    }
+
+    // ★ 27 ก.ค. 69: ช่องค้นเอง (ใส่ชื่อคน/แนว) — ยิง harvest ตรงด้วยคำค้น (ไม่ใช่ mode) เหมือนจอเว็บเดิม
+    //   จำกัดยาวเข้ม (2-60 ตัวอักษร — ★ sol-review: ตรงกับที่ /api/news-desk/harvest ตัดจริงด้วย .slice(0,60) กันค่าเกินโดนตัดเงียบ)
+    if (action === 'searchKeyword') {
+      const keyword = String(body.keyword || '').trim();
+      if (keyword.length < 2 || keyword.length > 60) {
+        return NextResponse.json({ success: false, error: 'คีย์เวิร์ดต้องยาว 2-60 ตัวอักษร', errorType: 'BAD_KEYWORD' }, { status: 400 });
+      }
+      const r = await fetch(`${request.nextUrl.origin}/api/news-desk/harvest`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword }),
+        signal: AbortSignal.timeout(120000), // งานค้น+คัดใช้เวลานาน เหมือน harvest ปกติ
       });
       const d = await r.json();
       return NextResponse.json(d, { status: r.status });

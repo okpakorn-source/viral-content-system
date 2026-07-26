@@ -3,10 +3,12 @@
 //   ส่งข่าว → /api/queue/add (คิวเดียวกับบอทดิสคอร์ด) · ถอดคลิป → /api/clip-transcript/* (คิว+คลังร่วมกับเว็บ)
 //   สกัดเนื้อ → /api/news-filter/* · ผลงาน → /api/generation-logs — ไม่แตะไฟล์ระบบเขียนข่าวที่ล็อก
 //   ★ รอบสมาชิก (เจ้าของสั่ง): ตัวตนจาก session จริง (เลิกพิมพ์ชื่อ) + สมุดใช้งาน /api/usage + จอโปรไฟล์/ทีม/สร้างยูส
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 // 🗞️ โต๊ะข่าว (v1) — taxonomy.js isomorphic (ระบุไว้ในไฟล์ต้นทาง) ใช้ฝั่ง client ได้ตรงๆ ไม่ต้อง hardcode ซ้ำ
-import { HARVEST_MODES } from '@/lib/services/newsDesk/taxonomy';
+// ★ 27 ก.ค. 69 (เจ้าของอนุมัติ — อัปเกรดแท็บโต๊ะข่าวให้ครบเท่าโต๊ะกลาง): +LIBRARIES/isClip/enrichDeskItem
+//   enrichDeskItem เติม library/sourceType/imageUrl/freshClass/reliability/editorial ให้ทุกใบฝั่ง client (API บาง tab ไม่ enrich มาให้)
+import { HARVEST_MODES, LIBRARIES, isClip, enrichDeskItem } from '@/lib/services/newsDesk/taxonomy';
 
 // เครื่องมือแต่งปกแมนวล — โหลดเฉพาะตอนเปิดแท็บ (ไฟล์หนัก ไม่ถ่วงจอแรก)
 const CoverEditor = dynamic(() => import('./CoverEditor'), {
@@ -118,7 +120,55 @@ const EV_LABEL = {
   clip_submit: '🎬 ส่งคลิปเข้าคิวถอด', clip_done: '🎬 ถอดคลิปเสร็จ', filter_run: '🧃 สกัดเนื้อ', split_run: '🔀 แยกประเด็น',
   send_topic: '📌 ส่งประเด็นเข้าเขียน', copy_version: '📋 คัดลอกเวอร์ชัน', regen: '🔁 สั่งเจนใหม่', view_case: '📖 เปิดอ่านเคส',
   desk_harvest: '🔍 ล่าข่าวโต๊ะข่าว', desk_send: '✍️ ส่งข่าวจากโต๊ะข่าว', desk_dismiss: '🗑 ทิ้งข่าวจากโต๊ะข่าว',
+  desk_search: '🔎 ค้นข่าวเองจากโต๊ะข่าว', // ★ 27 ก.ค. 69
 };
+
+// ═══ โต๊ะข่าว — ฟิลเตอร์ + ป้ายวันที่ (27 ก.ค. 69: อัปเกรดครบเท่าโต๊ะกลาง, เจ้าของอนุมัติ) ═══
+// กรองฝั่งจอล้วน (ไม่ยิง API เพิ่ม) — ใช้ field ที่ enrichDeskItem เติมให้ทุกใบแล้ว (library/sourceType)
+const DESK_TYPE_FILTERS = [
+  { key: 'all', label: '🗂️ ทั้งหมด' },
+  { key: 'clip', label: '🎬 คลิป' },
+  { key: 'article', label: '📰 บทความ' },
+];
+const DESK_SRC_FILTERS = [
+  { key: 'all', label: 'ทุกแหล่ง' },
+  { key: 'youtube', label: '▶️ YT' },
+  { key: 'tiktok', label: '🎵 TikTok' },
+  { key: 'fb-clip', label: '🎬 FB' },
+  { key: 'ig', label: '📷 IG' },
+];
+// หมวด 7 ปุ่ม = 'ทั้งหมด' + 6 คลังเนื้อหาจริงจาก taxonomy.js (เกณฑ์เดียวกับจอเว็บเดิม)
+const DESK_LIB_FILTERS = [{ key: 'all', label: '🗂️ ทั้งหมด' }, ...LIBRARIES.map(l => ({ key: l.key, label: l.label }))];
+
+// ป้ายความสด — เกณฑ์เดียวกับจอเว็บเดิม (news-desk/page.js freshnessBadge): 🟢≤24ชม / 🟡≤72ชม / 🗓️เก่ากว่า / ⏳ไม่มีวันที่
+function deskFreshBadge(it) {
+  const p = it.publishedAt ? new Date(it.publishedAt).getTime() : null;
+  if (!p || isNaN(p)) return { label: '⏳ ไม่ระบุวันที่', color: 'var(--mut)', bg: 'transparent' };
+  const hrs = (Date.now() - p) / 36e5;
+  if (hrs <= 24) return { label: hrs < 2 ? '🟢 สดมาก' : `🟢 วันนี้ · ${Math.round(hrs)} ชม.`, color: 'var(--ok)', bg: 'var(--okS)' };
+  if (hrs <= 72) return { label: `🟡 ${Math.round(hrs / 24)} วันก่อน`, color: 'var(--warn)', bg: 'var(--warnS)' };
+  const ds = new Date(p).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+  return { label: `🗓️ ${ds}`, color: 'var(--mut)', bg: 'transparent' };
+}
+// ป้ายคุณภาพ บก. — เกณฑ์+สีเดียวกับจอเว็บเดิมเป๊ะ (qualityGrade): judgeScore ก่อน ไม่มีค่อย fallback finalScore
+function deskQualityGrade(it) {
+  const j = it.judgeScore;
+  let tier;
+  if (typeof j === 'number') tier = j >= 9 ? 3 : j >= 7 ? 2 : j >= 5 ? 1 : 0;
+  else { const s = it.finalScore || 0; tier = s >= 85 ? 3 : s >= 70 ? 2 : s >= 55 ? 1 : 0; }
+  return [
+    { label: 'ผ่านเกณฑ์', emoji: '⚪', color: '#6b7280', bg: 'rgba(107,114,128,0.12)' },
+    { label: 'ดีปนกลาง', emoji: '🟡', color: '#d97706', bg: 'rgba(217,119,6,0.14)' },
+    { label: 'ดี', emoji: '✅', color: '#16a34a', bg: 'rgba(22,163,74,0.14)' },
+    { label: 'ดีมาก', emoji: '🌟', color: '#15803d', bg: 'rgba(21,128,61,0.16)' },
+  ][tier];
+}
+// ปุ่มชิป overflow-x เลื่อนแนวนอน (แบบเดียวกับเลือกเทมเพลตใน CoverEditor.js)
+const deskChipBtn = (active) => ({
+  flex: 'none', padding: '7px 13px', borderRadius: 999, fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+  border: active ? '2px solid var(--pink)' : '1px solid var(--line)',
+  background: active ? 'var(--pinkS)' : 'var(--card)', color: active ? 'var(--pink)' : 'var(--sub)',
+});
 const evText = (e) => {
   const m = e.meta || {};
   let x = EV_LABEL[e.action] || e.action;
@@ -203,7 +253,7 @@ export default function MobileApp() {
   const [qcBusy, setQcBusy] = useState(false);
 
   // ── โต๊ะข่าว (v1) — ต่อท่อผ่านประตู /api/m/desk (เฉพาะแอดมิน) ──
-  const [deskTab, setDeskTab] = useState('all'); // all | trend | good
+  const [deskTab, setDeskTab] = useState('all'); // all | trend | good | shortlist | ready
   const [deskItems, setDeskItems] = useState([]);
   const [deskExpanded, setDeskExpanded] = useState(null); // id การ์ดที่กางอยู่
   const [deskModeOpen, setDeskModeOpen] = useState(false); // กางชิปเลือกโหมดล่าข่าว
@@ -211,6 +261,13 @@ export default function MobileApp() {
   const [deskChiefBusy, setDeskChiefBusy] = useState(false);
   const [deskCardBusy, setDeskCardBusy] = useState({}); // {[id]: 'sendWorkflow'|'dismiss'}
   const [deskBrief, setDeskBrief] = useState(null); // สรุปวินิจฉัยล่าสุดจาก บก.ใหญ่
+  // ★ 27 ก.ค. 69: ฟิลเตอร์ฝั่งจอ (ไม่ยิง API เพิ่ม) + ช่องค้นเอง + ภาพตัวอย่างล้ม
+  const [deskTypeFilter, setDeskTypeFilter] = useState('all');   // all | clip | article
+  const [deskSrcFilter, setDeskSrcFilter] = useState('all');     // all | youtube | tiktok | fb-clip | ig
+  const [deskLibFilter, setDeskLibFilter] = useState('all');     // all | 6 คลัง
+  const [deskSearchKw, setDeskSearchKw] = useState('');
+  const [deskSearchBusy, setDeskSearchBusy] = useState(false);
+  const [deskImgFail, setDeskImgFail] = useState({}); // {[id]: true} ภาพตัวอย่างโหลดไม่ขึ้น → โชว์ ▶ แทน
 
   // ── ผลงาน ──
   const [cases, setCases] = useState([]);
@@ -271,9 +328,25 @@ export default function MobileApp() {
   //   เหมือน loadCovers/loadMe ข้างบน (ไม่มี loading flag แยก — ใช้ deskItems.length===0 บอกสถานะ "ยังไม่มี/กำลังโหลด" แทน)
   const loadDesk = useCallback(() => {
     fetch('/api/m/desk?view=feed&tab=' + deskTab, { cache: 'no-store' }).then(r => r.json())
-      .then(d => { if (d.success) setDeskItems(d.items || []); })
+      // ★ 27 ก.ค. 69: enrich ทุกใบฝั่ง client — บาง tab (all/trend/good/ready) ฝั่ง server ไม่เติม library/sourceType/reliability ให้
+      //   (เฉพาะ zone clip/link + browse + shortlist ของจอเว็บเดิมที่ enrich มาให้) เติมเองที่นี่แทน ไม่ต้องยิง API เพิ่ม
+      .then(d => { if (d.success) setDeskItems((d.items || []).map(enrichDeskItem)); })
       .catch(() => {});
   }, [deskTab]);
+  // เปลี่ยนกระดาน/แท็บย่อย → เคลียร์ฟิลเตอร์เดิม (กันค้างฟิลเตอร์ที่ทำให้จอว่างงงๆ)
+  // ★ ทำในตัว handler เอง ไม่ใช้ useEffect (กัน react-hooks/set-state-in-effect — ทำตามแบบที่โปรเจกต์นี้เคยชี้ปัญหาไว้แล้วที่จุดอื่น)
+  const changeDeskTab = (next) => {
+    setDeskTab(next); setDeskTypeFilter('all'); setDeskSrcFilter('all'); setDeskLibFilter('all');
+  };
+  // ฟิลเตอร์ล้วนฝั่งจอ — กรองจาก field ที่มีในการ์ดอยู่แล้ว (isClip/library/sourceType จาก taxonomy.js)
+  const deskFiltered = useMemo(() => {
+    let list = deskItems;
+    if (deskTypeFilter === 'clip') list = list.filter(isClip);
+    else if (deskTypeFilter === 'article') list = list.filter(it => !isClip(it));
+    if (deskSrcFilter !== 'all') list = list.filter(it => it.sourceType === deskSrcFilter);
+    if (deskLibFilter !== 'all') list = list.filter(it => it.library === deskLibFilter);
+    return list;
+  }, [deskItems, deskTypeFilter, deskSrcFilter, deskLibFilter]);
 
   useEffect(() => {
     if (tab === 'works') loadCases();
@@ -519,6 +592,26 @@ export default function MobileApp() {
       if ((d.harvested || 0) > 0) loadDesk();
     } catch (e) { say('❌ ' + String(e.message || e)); }
     setDeskChiefBusy(false);
+  };
+  // ★ 27 ก.ค. 69: ช่องค้นเอง — ใส่ชื่อคน/แนว → ยิง harvest ด้วยคำค้นตรงๆ (endpoint เดิมที่จอเว็บใช้ ผ่านประตู action ใหม่ 'searchKeyword')
+  const runDeskSearch = async () => {
+    if (!isAdmin) return; // มาตรฐานเดียวกับ fetch อื่นของโต๊ะข่าว (เช่น poll โพลปก ~บรรทัด 373) — กันยิงเปล่าแม้ปุ่มถูกซ่อนไว้แล้วก็ตาม
+    const kw = deskSearchKw.trim();
+    if (kw.length < 2) { say('ใส่ชื่อคน/แนวอย่างน้อย 2 ตัวอักษร'); return; }
+    if (kw.length > 60) { say('ยาวเกินไป (สูงสุด 60 ตัวอักษร)'); return; }
+    setDeskSearchBusy(true);
+    try {
+      const d = await (await fetch('/api/m/desk', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'searchKeyword', keyword: kw }),
+      })).json();
+      if (!d.success) throw new Error(d.error || 'ค้นข่าวไม่สำเร็จ');
+      log('desk_search', '', { keyword: kw, added: d.added ?? null });
+      say(`🔎 ค้น "${kw}" เสร็จ — เก็บ ${d.harvested ?? 0} · ผ่านคัด ${d.added ?? 0} ใบ`);
+      setDeskSearchKw('');
+      loadDesk();
+    } catch (e) { say('❌ ' + String(e.message || e)); }
+    setDeskSearchBusy(false);
   };
   const deskCardAction = async (item, cardAction) => {
     setDeskCardBusy(p => ({ ...p, [item.id]: cardAction }));
@@ -904,10 +997,17 @@ export default function MobileApp() {
         </>}
       </div>}
 
-      {/* ═══ แท็บ โต๊ะข่าว (v1 — เฉพาะแอดมิน) ═══ */}
+      {/* ═══ แท็บ โต๊ะข่าว (v1 — เฉพาะแอดมิน) — อัปเกรดครบเท่าโต๊ะกลาง 27 ก.ค. 69 (เจ้าของอนุมัติ) ═══ */}
       {tab === 'desk' && isAdmin && <div className="wrap">
         <h1>โต๊ะข่าว</h1>
         <p className="sub">ต่อท่อโต๊ะข่าวกลาง (v1) เดียวกับหน้าเว็บ — เฉพาะแอดมิน</p>
+
+        {/* 🔎 ค้นข่าวเอง — ยิง harvest ด้วยคำค้นตรงๆ (endpoint เดิมที่จอเว็บใช้ ผ่านประตู action ใหม่) */}
+        <input className="in" style={{ marginBottom: 8 }} placeholder="🔎 ค้นข่าวเอง — ใส่ชื่อคน/แนว…" value={deskSearchKw} disabled={deskSearchBusy}
+          onChange={e => setDeskSearchKw(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') runDeskSearch(); }} maxLength={60} />
+        <button className="gh" style={{ marginBottom: 9 }} disabled={deskSearchBusy || deskSearchKw.trim().length < 2} onClick={runDeskSearch}>
+          {deskSearchBusy ? '⏳ กำลังค้น… (~2-3 นาที)' : '🔎 ค้นข่าวนี้'}</button>
 
         <div className="row" style={{ marginBottom: 9 }}>
           <button className="gh" disabled={deskHarvestBusy} onClick={() => setDeskModeOpen(v => !v)}>
@@ -935,24 +1035,64 @@ export default function MobileApp() {
           </div>}
         </div>}
 
-        <div className="seg" style={{ marginBottom: 11 }}>
-          <button className={deskTab === 'all' ? 'on' : ''} onClick={() => setDeskTab('all')}>🗂️ ทั้งหมด</button>
-          <button className={deskTab === 'trend' ? 'on' : ''} onClick={() => setDeskTab('trend')}>🔥 กระแส</button>
-          <button className={deskTab === 'good' ? 'on' : ''} onClick={() => setDeskTab('good')}>💚 น้ำดี</button>
+        {/* 📥⭐✅ สลับกระดาน — คลังส่งเช้า/พร้อมใช้ ต่อ endpoint เดิม (tab=shortlist|ready) ผ่านประตูเดิม */}
+        <div className="seg" style={{ marginBottom: 9 }}>
+          <button className={(deskTab !== 'shortlist' && deskTab !== 'ready') ? 'on' : ''} onClick={() => changeDeskTab('all')}>📥 กระดานหลัก</button>
+          <button className={deskTab === 'shortlist' ? 'on' : ''} onClick={() => changeDeskTab('shortlist')}>⭐ คลังส่งเช้า</button>
+          <button className={deskTab === 'ready' ? 'on' : ''} onClick={() => changeDeskTab('ready')}>✅ พร้อมใช้</button>
         </div>
-        <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5, marginBottom: 10 }} onClick={loadDesk}>🔄 รีเฟรช</button>
+
+        {deskTab !== 'shortlist' && deskTab !== 'ready' && (
+          <div className="seg" style={{ marginBottom: 11 }}>
+            <button className={deskTab === 'all' ? 'on' : ''} onClick={() => changeDeskTab('all')}>🗂️ ทั้งหมด</button>
+            <button className={deskTab === 'trend' ? 'on' : ''} onClick={() => changeDeskTab('trend')}>🔥 กระแส</button>
+            <button className={deskTab === 'good' ? 'on' : ''} onClick={() => changeDeskTab('good')}>💚 น้ำดี</button>
+          </div>
+        )}
+
+        {/* ฟิลเตอร์ ประเภท/แหล่ง/หมวด — กรองฝั่งจอจากข้อมูลในการ์ด ไม่ยิง API เพิ่ม (เลื่อนแนวนอนแบบชิปเทมเพลตใน CoverEditor) */}
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, marginBottom: 7 }}>
+          {DESK_TYPE_FILTERS.map(o => (
+            <button key={o.key} style={deskChipBtn(deskTypeFilter === o.key)} onClick={() => setDeskTypeFilter(o.key)}>{o.label}</button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, marginBottom: 7 }}>
+          {DESK_SRC_FILTERS.map(o => (
+            <button key={o.key} style={deskChipBtn(deskSrcFilter === o.key)} onClick={() => setDeskSrcFilter(o.key)}>{o.label}</button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, marginBottom: 9 }}>
+          {DESK_LIB_FILTERS.map(o => (
+            <button key={o.key} style={deskChipBtn(deskLibFilter === o.key)} onClick={() => setDeskLibFilter(o.key)}>{o.label}</button>
+          ))}
+        </div>
+
+        <div className="row" style={{ alignItems: 'center', marginBottom: 10 }}>
+          <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5 }} onClick={loadDesk}>🔄 รีเฟรช</button>
+          <span className="right mm">แสดง {deskFiltered.length}/{deskItems.length}</span>
+        </div>
 
         {deskItems.length === 0 && <p className="sub">ยังไม่มี / กำลังโหลด… — ลองล่าข่าวรอบใหม่ได้เลย</p>}
+        {deskItems.length > 0 && deskFiltered.length === 0 && <p className="sub">ไม่มีข่าวตรงตัวกรองที่เลือก — ลองเปลี่ยนตัวกรองดู</p>}
 
-        {deskItems.map(it => {
+        {deskFiltered.map(it => {
           const open = deskExpanded === it.id;
           const busy = deskCardBusy[it.id];
           const ES = { ready: ['✅ พร้อมเขียน', '#16a34a'], needsResearch: ['🔎 ต้องหาเพิ่ม', '#d97706'], weakSource: ['⚠️ แหล่งอ่อน', '#ca8a04'], duplicate: ['🔁 มุมซ้ำ', '#6b7280'], lowValue: ['💤 คุณค่าน้อย', '#94a3b8'], reject: ['🚫 ไม่ควรทำ', '#dc2626'] };
           const [qLbl, qCol] = ES[it.editorial?.status] || ['', '#888'];
+          const clip = isClip(it);
+          const fresh = deskFreshBadge(it);
+          const grade = deskQualityGrade(it);
+          const showImg = clip && it.imageUrl && !deskImgFail[it.id];
           return (
             <div key={it.id} style={{ marginBottom: 8 }}>
               <div className="job" style={{ alignItems: 'flex-start' }} onClick={() => setDeskExpanded(open ? null : it.id)}>
-                <span className="ava">📰</span>
+                {showImg ? (
+                  <img src={it.imageUrl} alt="" loading="lazy" onError={() => setDeskImgFail(p => ({ ...p, [it.id]: true }))}
+                    style={{ width: 44, height: 44, borderRadius: 11, objectFit: 'cover', flex: 'none', background: 'var(--card)' }} />
+                ) : (
+                  <span className="ava">{clip ? '▶' : '📰'}</span>
+                )}
                 <div style={{ overflow: 'hidden', flex: 1 }}>
                   <p className="tt">{it.title}</p>
                   <div className="row" style={{ flexWrap: 'wrap', gap: 5, marginTop: 5 }}>
@@ -960,7 +1100,17 @@ export default function MobileApp() {
                     {it.freshClass && <span className="chip" style={{ background: it.freshClass === 'timeless' ? 'var(--okS)' : 'var(--warnS)', color: it.freshClass === 'timeless' ? 'var(--ok)' : 'var(--warn)' }}>{it.freshClass === 'timeless' ? '♾️ อมตะ' : '🔥 กระแส'}</span>}
                     {it.reliability?.label && <span className="chip cmu">{it.reliability.label}</span>}
                   </div>
+                  {/* ★ 27 ก.ค. 69: บรรทัดวันที่ครบ — ความสด (เกณฑ์เดิม) + คุณภาพ บก. */}
+                  <div className="row" style={{ flexWrap: 'wrap', gap: 5, marginTop: 4 }}>
+                    <span className="chip" style={{ background: fresh.bg, color: fresh.color }}>{fresh.label}</span>
+                    {grade && <span className="chip" style={{ background: grade.bg, color: grade.color }}>{grade.emoji} {grade.label}</span>}
+                  </div>
                   <p className="mm" style={{ marginTop: 4 }}>{it.category || ''}{it.source ? ` · ${it.source}` : ''}</p>
+                  {(it.publishedAt || it.harvestedAt) && (
+                    <p className="mm" style={{ marginTop: 1 }}>
+                      {it.publishedAt ? `โพสต์ ${fmtTime(it.publishedAt)}` : ''}{it.harvestedAt ? `${it.publishedAt ? ' · ' : ''}เก็บเข้าโต๊ะ ${fmtTime(it.harvestedAt)}` : ''}
+                    </p>
+                  )}
                 </div>
                 {it.status === 'sent' && <span className="right chip cok">ส่งแล้ว</span>}
               </div>
