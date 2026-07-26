@@ -1235,6 +1235,58 @@ const isCleanStoryImg = (x) =>
   x?.triage?.relevant !== false && x?.triage?.clean !== false && x?.triage?.newsScene !== false
   && /^(context|group)$/i.test(String(x?.triage?.category || ''));
 
+// ---------- S5c.5 "จุดรอเฟรมคลิปต้นทาง" (27 ก.ค. 69 — ชุด②ก) ----------
+// ทำให้ลำดับที่ตั้งใจไว้ ("แคปเฟรมจากคลิปก่อน แล้วค่อยคัด") เป็นจริง — เดิมมันจริงแค่ในโหมดคิว (tick วนเอง)
+// เหตุที่พิสูจน์แล้ว (เทสจริง 3 รอบ 26-27 ก.ค.): s5_search ยิงแคปแบบ fire-and-forget แล้วเดินต่อทันที ·
+//   แคปจริงใช้ ~2 นาที · s5_triage มาถึงตอนคลังยังว่าง (NO_IMAGES) — ถึงจะมีบล็อกรอใน s5_triage แล้ว แต่ตัวรัน
+//   sync วน waiting รวดเดียวไม่มีจังหวะหน่วง → หลุดไป S6 ตายด้วย "ไม่มีภาพที่ตายืนยันว่าเกี่ยวเลย" (~1:42 นาที)
+// ขั้นนี้จึงเป็น "จุดรอ" ที่ถูกลำดับ (ก่อนตาคัด) — เกณฑ์อ่านจากคลังสดเหมือน s5_clipframe เป๊ะ:
+//   คลังมีของแล้ว (เฟรมมาถึง platform clip/youtube หรือมีภาพจากแหล่งอื่น) หรือครบเพดาน = เดินต่อ · ยังไม่มา = waiting
+// วินัย "แตะน้อยที่สุด": ไม่มี dossierPatch เลย (ไม่ตั้ง clipFrameDone/ไม่ยิงแคปซ้ำ/ไม่แตะ triageErrors) —
+//   s5_clipframe ด้านล่างยังทำงานเหมือนเดิมทุกอย่าง แค่จะผ่านเร็วเพราะเฟรมมาถึงแล้ว
+// ประตูข้าม (คืน done ทันที ไม่ถ่วง ไม่ล้มงาน): ไม่มี sourceClips / ยังไม่ได้ยิงแคป (ytFired ว่าง) / ไม่มีเคสภาพ /
+//   อ่านคลังไม่ได้ — งานที่ไม่มีลิงก์คลิปจึงไม่ถูกกระทบเลย (ผู้เรียกฝั่ง sync กันอีกชั้นด้วย sourceClips.length)
+export async function s5_clipwait(job, { origin }) {
+  const im = job.dossier?.images || {};
+  const clips = (Array.isArray(job.dossier?.sourceClips) ? job.dossier.sourceClips : [])
+    .map((u) => String(u || '').trim()).filter((u) => VIDEO_URL_RE.test(u)); // เกณฑ์เดียวกับที่ s5_search ใช้ยิงแคป
+  if (!clips.length) return { status: 'done', nextAction: 'continue', summary: 'รอเฟรมคลิป: ไม่มีคลิปต้นทาง — ข้าม' };
+  if (!im.ytFired) return { status: 'done', nextAction: 'continue', summary: 'รอเฟรมคลิป: ยังไม่ได้ยิงแคป — ข้าม' };
+  if (!im.caseId) return { status: 'done', nextAction: 'continue', summary: 'รอเฟรมคลิป: ไม่มีเคสภาพ — ข้าม' };
+
+  let libImages = [];
+  try {
+    const lib = await jfetch(`${origin}/api/images/${encodeURIComponent(im.caseId)}`, {}, 60000);
+    libImages = lib?.images || [];
+  } catch {
+    return { status: 'done', nextAction: 'continue', summary: 'รอเฟรมคลิป: อ่านคลังไม่ได้ — เดินต่อ (ให้ตาคัดตัดสินเอง)' };
+  }
+  // คลังไม่ว่าง = ตาคัดมีของให้ทำแน่นอน (NO_IMAGES ของ /api/images/triage คือ "คลังว่างสนิท" เท่านั้น) → ปล่อยผ่าน
+  if (libImages.length) {
+    const frames = libImages.filter((x) => x.platform === 'clip' || x.platform === 'youtube');
+    return {
+      status: 'done',
+      nextAction: 'continue',
+      summary: frames.length
+        ? `รอเฟรมคลิป: เฟรมมาถึง ${frames.length} ใบ (คลังรวม ${libImages.length}) — ปล่อยเข้าตาคัด`
+        : `รอเฟรมคลิป: คลังมี ${libImages.length} ใบแล้ว — ปล่อยเข้าตาคัด (เฟรมตามมาทีหลังที่ s5_clipframe)`,
+    };
+  }
+  // เพดาน/สูตรเดียวกับจุดรอของ s5_clipframe (MEGA_YT_WAIT_MIN) — โหมดผสม (มีคลิป + ค้นเว็บ) รอครึ่งเดียว
+  //   เพราะเฟรมเป็นแค่ "ตัวเสริม" ที่นั่น (และมีจุดรอเต็มเพดานรออยู่ที่ s5_clipframe อีกทีอยู่แล้ว)
+  // ★ sol-review (27 ก.ค. 69): normalize ค่า env "เฉพาะในขั้นนี้" (ห้ามแตะ YT_WAIT_MIN กลางที่ stage อื่นใช้ร่วม) —
+  //   MEGA_YT_WAIT_MIN เพี้ยน/ติดลบ/NaN → ถอย default 10 ก่อนคำนวณ · ครึ่งเพดานหารตรงๆ ไม่มี floor 1 นาที
+  //   (เดิม Math.max(1, …) ทำให้ตั้ง 1 นาทีแล้วโหมดผสมได้ 1 นาทีเท่าเดิม ไม่ใช่ครึ่ง = ไม่ตรงสูตร)
+  const _ytWaitMin = Number.isFinite(YT_WAIT_MIN) && YT_WAIT_MIN > 0 ? YT_WAIT_MIN : 10;
+  const ceilMin = job.dossier?.sourceOnly === true ? _ytWaitMin : _ytWaitMin / 2;
+  const waitedMin = (Date.now() - new Date(im.ytFired).getTime()) / 60000;
+  if (!Number.isFinite(waitedMin)) return { status: 'done', nextAction: 'continue', summary: 'รอเฟรมคลิป: อ่านเวลายิงแคปไม่ได้ — เดินต่อ' };
+  if (waitedMin >= ceilMin) {
+    return { status: 'done', nextAction: 'continue', summary: `รอเฟรมคลิป: ครบเพดาน ${ceilMin} นาที คลังยังว่าง — เดินต่อ (ตาคัดจะตัดสินเอง)`, quality: 'yellow' };
+  }
+  return { status: 'waiting', nextAction: 'wait', summary: `รอเฟรมคลิป: คลังยังว่าง — รอเฟรม ${waitedMin.toFixed(1)}/${ceilMin} นาที (คลิปต้นทาง ${clips.length} ลิงก์)` };
+}
+
 export async function s5_clipframe(job, { origin }) {
   const im = job.dossier.images || {};
   if (im.clipFrameDone) return { status: 'done', nextAction: 'continue', summary: 'เฟรมคลิป: ทำแล้ว — ข้าม' };

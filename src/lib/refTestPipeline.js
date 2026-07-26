@@ -14,6 +14,11 @@
 
 import { compassBrain } from '@/lib/megaBrains';
 import { s5_case, s5_keywords, s5_search, s5_triage, s5_clipframe, s6_slots, s7_cover } from '@/lib/megaAdapters';
+// ★ link-compat (วินัยเดียวกับ _composerModule ด้านล่าง): stage ที่เพิ่มใหม่ (s5_clipwait — ชุด②ก 27 ก.ค. 69)
+//   อ่านผ่าน "namespace ตอนรัน" ไม่ใช่ named import ตอน link — test double ที่ stub ทั้งโมดูล megaAdapters
+//   (เช่น tests/batch2-v2-failfast.test.mjs) จะยัง link ผ่านเหมือนเดิม (ชื่อที่ไม่มี = undefined ไม่ใช่ error)
+//   จุดเรียกใช้กันอีกชั้นด้วย typeof === 'function' → ของจริงใน prod ผูกตัวจริงเสมอ
+import * as _megaAdaptersModule from '@/lib/megaAdapters';
 import { evaluateCoverQc } from '@/lib/coverQcGate';        // ★ Lane D (frozen) — advisory ใน legacy, gate ใน strict
 import { composeAndVerify } from '@/lib/services/megaComposerService'; // ★ Lane D (frozen) — always-exported named binding
 // ★ link-compat: read the shared pure activation seam (_strictActivate) from the module NAMESPACE at RUNTIME, not as a
@@ -539,6 +544,7 @@ export async function runCoverRefTest(input = {}, deps = {}) {
     s5_keywords: _s5_keywords = s5_keywords,
     s5_search: _s5_search = s5_search,
     s5_triage: _s5_triage = s5_triage,
+    s5_clipwait: _s5_clipwait = _megaAdaptersModule.s5_clipwait,
     s5_clipframe: _s5_clipframe = s5_clipframe,
     s6_slots: _s6_slots = s6_slots,
     s7_cover: _s7_cover = s7_cover,
@@ -652,6 +658,40 @@ export async function runCoverRefTest(input = {}, deps = {}) {
     r = merge(step('s5_search', await _s5_search(job, { origin })));
     if (failed(r)) return { status: 502, body: { success: false, error: r.summary, errorType: 'S5_SEARCH_FAILED', trace } };
     if (r.nextAction !== 'wait') break;
+  }
+  // ── S5c.5 (27 ก.ค. 69 — ชุด②ก) รอเฟรมคลิปต้นทางมาถึงคลัง "ก่อน" ปล่อยเข้าตาคัด ──
+  //   ★ เข้าบล็อกนี้เฉพาะงานที่มีลิงก์คลิป (sourceClips ≥1) เท่านั้น — งานปกติ (ไม่มีคลิป) ไม่แตะแม้แต่บรรทัดเดียว
+  //   เหตุ: s5_search ยิงแคปแบบ fire-and-forget (~2 นาทีกว่าเฟรมจะถึงคลัง) แล้วเดินต่อทันที · ตาคัดถึงก่อน =
+  //   NO_IMAGES · บล็อกรอที่ s5_triage คืน waiting ก็จริง แต่ลูปตาคัดด้านล่างวนรวดเดียวไม่มีจังหวะหน่วง (10 รอบ
+  //   จบใน ~วินาที) แล้วหลุดไปตายที่ S6 ("ไม่มีภาพที่ตายืนยันว่าเกี่ยวเลย") — เทสจริง 3 รอบยืนยัน (~1:42 นาที)
+  //   เพดาน/สูตร = ตัวเดียวกับจุดรอ s5_clipframe ด้านล่าง (MEGA_YT_WAIT_MIN · sourceOnly เต็มเพดาน / ผสม ครึ่งเดียว
+  //   — ตัดสินในตัว adapter) · จังหวะ poll = _clipframeWaitMs ตัวเดียวกัน · รอครบที่นี่แล้ว บล็อก s5_clipframe
+  //   ด้านล่างจะผ่านเร็ว (อ่านคลังรอบเดียวเห็นเฟรม → done ไม่วน)
+  if (sourceClips.length && typeof _s5_clipwait === 'function') {
+    const _cwCeilMin = Math.max(1, parseInt(_env.MEGA_YT_WAIT_MIN || '10', 10) || 10);
+    // ตัวคุมชั้นนอกเท่านั้น — ตัวตัดสินจริงคือ s5_clipwait (เพดานเดียวกัน) · +2 รอบกันปัดเศษ
+    const _cwMaxIters = _clipframeWaitMs > 0 ? Math.ceil((_cwCeilMin * 60000) / _clipframeWaitMs) + 2 : 6;
+    // กันชนงบเวลาของ route (maxDuration 800s): ห้ามรอจนกินงบทั้งก้อน — โหมด sourceOnly ข้ามค้นเว็บ 4 แหล่ง
+    //   จึงมาถึงจุดนี้ตั้งแต่ ~1 นาที (เพดาน 10 นาทีจบใน ~11 นาที ยังอยู่ในงบ) · ตัวนี้กันเคสผิดปกติเท่านั้น
+    //   ★ sol-review (27 ก.ค. 69): เป็น "hard deadline" จริง — เช็ค "ก่อน" เรียก adapter ทุกรอบ (เดิมเช็คหลังเรียก
+    //   = เลยงบแล้วยังยิงเพิ่มได้อีก 1 รอบ ซึ่ง jfetch ข้างในรอได้ถึง 60 วิ) + clamp เวลานอนไม่ให้ล้ำงบที่เหลือ
+    const _cwDeadline = t0 + 600000;
+    let _cw = null;
+    let _cwFirst = null;
+    for (let i = 0; i < _cwMaxIters; i++) {
+      if (Date.now() >= _cwDeadline) break;
+      _cw = merge(await _s5_clipwait(job, { origin }));
+      if (!_cwFirst) _cwFirst = _cw;
+      if (_cw?.nextAction !== 'wait') break;
+      if (i < _cwMaxIters - 1 && _clipframeWaitMs > 0) {
+        const _cwSleepMs = Math.min(_clipframeWaitMs, _cwDeadline - Date.now());
+        if (_cwSleepMs <= 0) break;
+        await new Promise((res) => setTimeout(res, _cwSleepMs));
+      }
+    }
+    // trace: รอบแรก + รอบสุดท้าย (ไม่สแปมทุก poll — รอ 10 นาทีคือ ~120 รอบ)
+    if (_cwFirst) trace.push({ stage: 's5_clipwait', status: _cwFirst.status, summary: (_cwFirst.summary || '').slice(0, 160) });
+    if (_cw && _cw !== _cwFirst) trace.push({ stage: 's5_clipwait', status: _cw.status, summary: (_cw.summary || '').slice(0, 160) });
   }
   // ── S5d ตาคัดคลัง (วนจน done) ──
   for (let i = 0; i < 10; i++) {
