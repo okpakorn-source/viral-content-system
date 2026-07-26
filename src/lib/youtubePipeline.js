@@ -19,6 +19,11 @@ import { COVER_GEMINI_MODEL } from './coverVisionModel.js';
 
 const exec = promisify(execFile);
 
+// 🩹 เครื่องทีมบล็อก yt-dlp.exe (spawn UNKNOWN) → เรียกผ่าน py -m yt_dlp แทน (สูตรเดียวกับ discord-board 23 ก.ค.)
+//    override ได้ด้วย env YTDLP_CMD (เช่น 'yt-dlp' บนเครื่องที่ไม่โดนบล็อก)
+const YTDLP_BIN = process.env.YTDLP_CMD || (process.platform === 'win32' ? 'py' : 'yt-dlp');
+const ytdlpArgs = (args) => (YTDLP_BIN === 'py' ? ['-m', 'yt_dlp', ...args] : args);
+
 const MAX_CLIPS = int(process.env.YT_MAX_CLIPS, 5);
 const TARGET_FRAMES = int(process.env.YT_TARGET_FRAMES, 25);
 const HARD_CAP = int(process.env.YT_HARD_CAP, 30);
@@ -212,8 +217,8 @@ async function downloadClip(url, dir, hq = false) {
   // ★ 6 ก.ค.: โหมดเจาะจงคลิป (hq) — คลิปเดียว เอาชัดสุด ≤1080p (โหมดค้นอัตโนมัติคง 720p เพื่อความเร็ว)
   const fmt = hq ? 'bv*[height<=1080]/b[height<=1080]/b' : 'bv*[height<=720]/b[height<=720]/b';
   await exec(
-    'yt-dlp',
-    [
+    YTDLP_BIN,
+    ytdlpArgs([
       '-f',
       fmt,
       '--no-playlist',
@@ -225,7 +230,7 @@ async function downloadClip(url, dir, hq = false) {
       '-o',
       out,
       url,
-    ],
+    ]),
     { maxBuffer: 1024 * 1024 * 64, timeout: 300000 }
   );
 
