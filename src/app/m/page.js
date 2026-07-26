@@ -546,7 +546,9 @@ export default function MobileApp() {
             <div key={i} className={'topic' + (selTopics.includes(i) ? ' sel' : '')} onClick={() => setSelTopics(s => s.includes(i) ? s.filter(x => x !== i) : [...s, i])}>
               <span className="num">{t.no}</span>
               <div><p className="tx">{t.topic}</p>{t.time && <p className="du">ช่วง {t.time}</p>}
-                {t.raw && <details className="raw" onClick={e => e.stopPropagation()}><summary>เนื้อดิบ ({t.raw.length} ตัวอักษร)</summary><div>{t.raw}</div></details>}
+                {t.raw && <details className="raw" onClick={e => e.stopPropagation()}><summary>เนื้อดิบ ({t.raw.length} ตัวอักษร)</summary><div>{t.raw}</div>
+                  <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5, marginTop: 7 }} onClick={e => { e.stopPropagation(); copyText(`${t.topic}${t.time ? ` (ช่วง ${t.time})` : ''}\n\n${t.raw}`); }}>📋 คัดลอกประเด็นนี้</button>
+                </details>}
               </div>
             </div>
           ))}
@@ -610,7 +612,10 @@ export default function MobileApp() {
                 <p className="du">{t.category || ''}{t.wordCount ? ` · ${t.wordCount} คำ` : ''}{t.viralAngle ? ` · มุมไวรัล: ${t.viralAngle}` : ''}</p>
                 {t.summary && <p className="du" style={{ marginTop: 3 }}>{t.summary}</p>}
                 {t.content && <details className="raw"><summary>เนื้อประเด็นนี้ ({t.content.length} ตัวอักษร)</summary><div>{t.content}</div></details>}
-                <button className="gh" style={{ width: 'auto', padding: '6px 16px', fontSize: 12.5, marginTop: 8 }} onClick={() => { log('send_topic', '', { from: 'filter' }); submitNews((t.title ? t.title + '\n\n' : '') + (t.content || t.summary || ''), { source: 'filter-topic' }); }}>ส่งประเด็นนี้เข้าเขียน</button>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <button className="gh" style={{ width: 'auto', padding: '6px 16px', fontSize: 12.5 }} onClick={() => { log('send_topic', '', { from: 'filter' }); submitNews((t.title ? t.title + '\n\n' : '') + (t.content || t.summary || ''), { source: 'filter-topic' }); }}>ส่งประเด็นนี้เข้าเขียน</button>
+                  <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5 }} onClick={() => copyText((t.title ? t.title + '\n\n' : '') + (t.content || t.summary || ''))}>📋 คัดลอกประเด็นนี้</button>
+                </div>
               </div>
             </div>
           ))}
