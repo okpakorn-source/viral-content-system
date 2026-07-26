@@ -21,7 +21,13 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (data.success) {
-        router.push('/content/new');
+        // ★ 26 ก.ค.: รองรับ ?next= (เฉพาะเส้นทางภายในเท่านั้น กัน open-redirect) — ใช้โดยแอพมือถือ /m
+        let next = '/content/new';
+        try {
+          const q = new URLSearchParams(window.location.search).get('next') || '';
+          if (q.startsWith('/') && !q.startsWith('//')) next = q;
+        } catch {}
+        router.push(next);
         router.refresh();
       } else {
         setError(data.error || 'เข้าสู่ระบบไม่สำเร็จ');
