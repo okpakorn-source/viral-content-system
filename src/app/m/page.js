@@ -391,7 +391,7 @@ export default function MobileApp() {
     return (<div className="vf"><style dangerouslySetInnerHTML={{ __html: CSS }} />
       <div className="wrap" style={{ paddingTop: 80, textAlign: 'center' }}>
         <div className="mk" style={{ margin: '0 auto 12px', width: 52, height: 52, fontSize: 24 }}>⚡</div>
-        <h1>ViralFlow</h1>
+        <h1>รวมไอจีดารา</h1>
         <p className="sub">ต้องล็อกอินด้วยยูสพนักงานก่อนใช้งาน</p>
         <a className="cta" style={{ textDecoration: 'none', maxWidth: 260, margin: '0 auto' }} href="/login?next=/m">ไปหน้าล็อกอิน</a>
       </div></div>);
@@ -401,7 +401,7 @@ export default function MobileApp() {
     <div className="vf">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
       <div className="hdr">
-        <span className="mk">⚡</span><span className="hname">ViralFlow</span>
+        <span className="mk">⚡</span><span className="hname">รวมไอจีดารา</span>
         <span className="livepill"><span className="dotb" />{ov ? (ov.busy || ov.processing > 0 ? `คิวทำงาน ${ov.processing}` : 'คิวว่าง') : 'LIVE'}</span>
         <button className="meBtn" aria-label="โปรไฟล์ของฉัน" onClick={() => setTab('me')}>{(member?.displayName || '?').slice(0, 1)}</button>
       </div>

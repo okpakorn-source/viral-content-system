@@ -1,8 +1,8 @@
 // Layout เฉพาะแอพมือถือ /m — ทำให้ "เพิ่มไปหน้าจอโฮม" ได้แอพเต็มตัว (ชื่อ/แถบสถานะ/สีของตัวเอง)
 export const metadata = {
-  title: 'ViralFlow',
+  title: 'รวมไอจีดารา',
   description: 'โต๊ะข่าวในกระเป๋า — ทีม IG.dara',
-  appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'ViralFlow' },
+  appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'รวมไอจีดารา' },
 };
 
 export const viewport = {
