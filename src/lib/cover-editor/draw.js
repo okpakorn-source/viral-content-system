@@ -2,6 +2,14 @@
 // 🔴 ห้ามแก้สูตร — จูนมาเป็นปี ถ้าแก้ปกหน้าตาเปลี่ยน · หน้าเว็บเดิมยังใช้ของตัวเองไม่ถูกแตะ
 export const W = 1080, H = 1350;
 
+// 🩹 Safari/iOS ไม่รองรับ ctx.filter — ตรวจครั้งเดียว (ฝั่ง server ไม่มี document → false อัตโนมัติ)
+const CANVAS_FILTER_OK = (() => {
+  try {
+    const c = document.createElement('canvas').getContext('2d');
+    return typeof c.filter === 'string'; // รองรับ = มีค่าเริ่ม 'none' · ไม่รองรับ = undefined
+  } catch { return false; }
+})();
+
 export const BUILTIN_TEMPLATES = [
   // ═══════════════════════════════════════════════════════════
   // Template 1: Hero ซ้ายเต็ม + Scene ขวาบน + Context ขวาล่าง + Highlight กลาง + Sub ซ้ายล่าง
@@ -239,9 +247,17 @@ export function drawRectSlot(ctx, img, slot, offset, crop) {
   // ★ 6 ก.ค. (คุณภาพสูงสุด): ย่อ/ขยายภาพแบบเกรดสูง — ขอบคม ไม่หยาบ
   c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
   const {sx,sy,sw,sh} = coverFit(img,ow,oh,0.3,crop);
-  if (_gray > 0) c.filter = `grayscale(${_gray})`; // ★ 4 ก.ค.: โทนไว้อาลัยรายช่อง
+  if (CANVAS_FILTER_OK && _gray > 0) c.filter = `grayscale(${_gray})`; // ★ 4 ก.ค.: โทนไว้อาลัยรายช่อง
   c.drawImage(img,sx,sy,sw,sh,0,0,ow,oh);
   c.filter = 'none';
+  if (!CANVAS_FILTER_OK && _gray > 0) {
+    // 🩹 Safari fallback: ไม่มี ctx.filter → desaturate ด้วย blend mode แทน grayscale()
+    c.save();
+    c.globalCompositeOperation = 'saturation';
+    c.fillStyle = `rgba(128,128,128,${_gray})`;
+    c.fillRect(0, 0, ow, oh);
+    c.restore();
+  }
   if (me) {
     // ไล่ความใสคร่อมเส้นขอบเดิม: เริ่มจางจาก "ครึ่งในกรอบ" → ใสสุดที่ปลายส่วนลาม
     // = ขอบตัวเองหายจาง (เห็นผลทันทีทุกกรณี) + เนื้อที่ลามซ้อนบนช่องข้างเคียงจางเข้าหากัน
@@ -257,7 +273,7 @@ export function drawRectSlot(ctx, img, slot, offset, crop) {
   // ★ 6 ก.ค. รอบ 3 (ผู้ใช้สั่ง): โหมด "เบลอละลาย" — ขอบภาพเบลอฟุ้งค่อยๆ ชัดเข้าใน (ภาพละลายเข้าหากัน)
   //   ต่างจากเฟด: ภาพไม่จางหายเป็นใส แต่ขอบถูกเบลอแรงสุดที่ริมแล้วไล่กลับมาคม
   const be = slot._blurEdges;
-  if (!border && !me && be && (be.left || be.right || be.top || be.bottom)) {
+  if (CANVAS_FILTER_OK && !border && !me && be && (be.left || be.right || be.top || be.bottom)) {
     const bpx = Math.max(40, be.px || 200);
     // ★ ความแรงเบลอปรับแยกได้ (be.blur) — ไม่ตั้ง = คำนวณจากระยะ (บทเรียน: ผู้ใช้ขอคุมเองได้)
     const k = Math.min(80, Math.max(2, be.blur || Math.round(bpx / 6)));
@@ -298,9 +314,18 @@ export function drawCircleSlot(ctx, img, slot, offset, crop) {
   ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=16; ctx.shadowOffsetY=4;
   ctx.fillStyle=border; ctx.fill(); ctx.restore();
   ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.clip();
-  if (_gray > 0) ctx.filter = `grayscale(${_gray})`; // ★ 4 ก.ค.: โทนไว้อาลัยรายช่อง
+  if (CANVAS_FILTER_OK && _gray > 0) ctx.filter = `grayscale(${_gray})`; // ★ 4 ก.ค.: โทนไว้อาลัยรายช่อง
   const {sx,sy,sw,sh} = coverFit(img,d,d,0.3,crop);
-  ctx.drawImage(img,sx,sy,sw,sh,x,y,d,d); ctx.restore();
+  ctx.drawImage(img,sx,sy,sw,sh,x,y,d,d);
+  if (!CANVAS_FILTER_OK && _gray > 0) {
+    // 🩹 Safari fallback: ไม่มี ctx.filter → desaturate ด้วย blend mode แทน grayscale() (พื้นที่ถูก clip เป็นวงกลมอยู่แล้ว)
+    ctx.save();
+    ctx.globalCompositeOperation = 'saturation';
+    ctx.fillStyle = `rgba(128,128,128,${_gray})`;
+    ctx.fillRect(x, y, d, d);
+    ctx.restore();
+  }
+  ctx.restore();
 }
 
 export function drawTextSlot(ctx, ts, val, overrideBg, overrides) {
@@ -344,10 +369,27 @@ export function drawBlurredBg(ctx, slotImages, template) {
   const bgImg = slotImages['main'] || slotImages[template.slots[0]?.id];
   if (!bgImg) return;
   ctx.save();
-  ctx.filter = 'blur(30px) brightness(0.3)';
-  const { sx, sy, sw, sh } = coverFit(bgImg, W + 40, H + 40);
-  ctx.drawImage(bgImg, sx, sy, sw, sh, -20, -20, W + 40, H + 40);
-  ctx.filter = 'none';
+  if (CANVAS_FILTER_OK) {
+    const { sx, sy, sw, sh } = coverFit(bgImg, W + 40, H + 40);
+    ctx.filter = 'blur(30px) brightness(0.3)';
+    ctx.drawImage(bgImg, sx, sy, sw, sh, -20, -20, W + 40, H + 40);
+    ctx.filter = 'none';
+  } else {
+    // 🩹 Safari fallback: ไม่มี ctx.filter → เบลอด้วยย่อ-ขยายภาพ 2 จังหวะ + ทามืดด้วย fillRect แทน brightness()
+    const stage1 = document.createElement('canvas'); stage1.width = 135; stage1.height = 169;
+    const s1 = stage1.getContext('2d');
+    s1.imageSmoothingEnabled = true; s1.imageSmoothingQuality = 'high';
+    const { sx: fsx, sy: fsy, sw: fsw, sh: fsh } = coverFit(bgImg, 135, 169);
+    s1.drawImage(bgImg, fsx, fsy, fsw, fsh, 0, 0, 135, 169);
+    const stage2 = document.createElement('canvas'); stage2.width = 27; stage2.height = 34;
+    const s2 = stage2.getContext('2d');
+    s2.imageSmoothingEnabled = true; s2.imageSmoothingQuality = 'high';
+    s2.drawImage(stage1, 0, 0, 27, 34);
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(stage2, -20, -20, W + 40, H + 40);
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+  }
   ctx.restore();
 }
 
