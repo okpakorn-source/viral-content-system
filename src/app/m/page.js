@@ -83,6 +83,7 @@ const IC = {
   send: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
   clip: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>,
   lib: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>,
+  fil: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>,
 };
 
 const fmtTime = (iso) => { try { const d = new Date(iso); return d.toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
@@ -114,6 +115,16 @@ export default function MobileApp() {
   const [clipErr, setClipErr] = useState('');
   const [insightCases, setInsightCases] = useState([]);
   const clipPollRef = useRef(null);
+
+  // ── สกัดเนื้อหา (ระบบเดียวกับหน้า /news-filter) ──
+  const [nfUrl, setNfUrl] = useState('');
+  const [nfText, setNfText] = useState('');
+  const [nfMode, setNfMode] = useState('balanced');
+  const [nfAI, setNfAI] = useState(true);
+  const [nfBusy, setNfBusy] = useState('');       // ''|scrape|filter|split
+  const [nfOut, setNfOut] = useState(null);       // ผลสกัด {cleanText, ...stats}
+  const [nfSplit, setNfSplit] = useState(null);   // ผลแยกประเด็น {topics:[...]}
+  const [nfErr, setNfErr] = useState('');
 
   // ── ผลงาน ──
   const [cases, setCases] = useState([]);
@@ -227,6 +238,44 @@ export default function MobileApp() {
       `${t.topic}${t.time ? ` (ช่วง ${t.time})` : ''}\n\n${t.raw || ''}${t.quotes?.length ? '\n\nคำพูดจากคลิป:\n' + t.quotes.map(q => `"${q}"`).join('\n') : ''}`
     ).join('\n\n———\n\n');
     submitNews(input);
+  };
+
+  // ═══ สกัดเนื้อหา — API เดียวกับหน้า /news-filter ทุกเส้น ═══
+  const nfScrape = async () => {
+    const u = nfUrl.trim();
+    if (!/^https?:\/\//i.test(u)) { say('วางลิงก์ข่าวก่อน'); return; }
+    setNfBusy('scrape'); setNfErr('');
+    try {
+      const d = await (await fetch('/api/news-filter/scrape', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: u }) })).json();
+      if (!d.success) throw new Error(d.error || 'ดึงเนื้อไม่สำเร็จ');
+      setNfText((d.data?.title ? d.data.title + '\n\n' : '') + (d.data?.text || ''));
+      say('ดึงเนื้อจากลิงก์แล้ว — กดสกัดต่อได้เลย');
+    } catch (e) { setNfErr(String(e.message || e)); }
+    setNfBusy('');
+  };
+  const nfRun = async () => {
+    if (nfText.trim().length < 80) { say('วางเนื้อข่าวก่อน (ยาวสักหน่อย)'); return; }
+    setNfBusy('filter'); setNfErr(''); setNfOut(null); setNfSplit(null);
+    try {
+      const d = await (await fetch('/api/news-filter', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: nfText, mode: nfMode, useAI: nfAI, user: 'mobile-' + (me || 'guest') }),
+      })).json();
+      if (!d.success) throw new Error(d.error || 'สกัดไม่สำเร็จ');
+      setNfOut(d.data); say('สกัดเสร็จ — ตัดไป ' + (d.data?.removedPercent ?? '?') + '%');
+    } catch (e) { setNfErr(String(e.message || e)); }
+    setNfBusy('');
+  };
+  const nfDoSplit = async () => {
+    if (!nfOut?.cleanText) return;
+    setNfBusy('split'); setNfErr('');
+    try {
+      const d = await (await fetch('/api/news-filter/split', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: nfOut.cleanText }) })).json();
+      if (!d.success) throw new Error(d.error || 'แยกประเด็นไม่สำเร็จ');
+      setNfSplit(d.data);
+      say(d.data?.isSingleTopic ? 'ข่าวนี้เป็นประเด็นเดียว' : 'แยกได้ ' + (d.data?.topics?.length || 0) + ' ประเด็น');
+    } catch (e) { setNfErr(String(e.message || e)); }
+    setNfBusy('');
   };
 
   const openCase = async (id) => {
@@ -344,6 +393,59 @@ export default function MobileApp() {
         ))}
       </div>}
 
+      {/* ═══ แท็บ สกัดเนื้อ ═══ */}
+      {tab === 'filter' && <div className="wrap">
+        <h1>สกัดเนื้อหา</h1>
+        <p className="sub">ตัดคำฟุ่มเฟือย/อารมณ์เกิน เหลือแก่นข่าว — ระบบเดียวกับหน้า /news-filter</p>
+        <div className="row" style={{ marginBottom: 9 }}>
+          <input className="in" value={nfUrl} onChange={e => setNfUrl(e.target.value)} placeholder="วางลิงก์ข่าว (ไม่บังคับ)…" inputMode="url" />
+          <button className="gh" style={{ width: 'auto', flex: 'none', padding: '0 16px' }} disabled={nfBusy === 'scrape'} onClick={nfScrape}>{nfBusy === 'scrape' ? 'กำลังดึง…' : 'ดึงเนื้อ'}</button>
+        </div>
+        <div className="compose">
+          <textarea className="ta" value={nfText} onChange={e => setNfText(e.target.value)} placeholder="หรือวางเนื้อข่าวดิบตรงนี้…" />
+        </div>
+        <div className="seg">
+          {[['soft', 'เบา'], ['balanced', 'สมดุล'], ['strict', 'เข้ม']].map(([k, l]) => <button key={k} className={nfMode === k ? 'on' : ''} onClick={() => setNfMode(k)}>{l}</button>)}
+          <button className={nfAI ? 'on' : ''} onClick={() => setNfAI(a => !a)}>{nfAI ? 'AI วิเคราะห์' : 'กฎล้วน'}</button>
+        </div>
+        {nfErr && <div className="err">{nfErr}</div>}
+        <button className="cta" disabled={nfBusy === 'filter'} onClick={nfRun}>{nfBusy === 'filter' ? 'กำลังสกัด…' : 'สกัดแก่นข่าว'}</button>
+
+        {nfOut && <>
+          <h2>แก่นข่าวที่สกัดได้</h2>
+          <div className="reader">
+            <div className="bd">{nfOut.cleanText}</div>
+            <div className="ft">
+              <span className="chip cpk">{nfOut.originalWordCount} → {nfOut.cleanWordCount} คำ</span>
+              <span className="chip cpk">ตัดไป {nfOut.removedPercent}%</span>
+              <span className="chip cmu">{nfOut.useAI ? 'AI' : 'กฎ'} · {nfOut.mode}</span>
+            </div>
+          </div>
+          <div className="row" style={{ margin: '10px 0 8px' }}>
+            <button className="gh" onClick={() => copyText(nfOut.cleanText)}>คัดลอก</button>
+            <button className="gh" disabled={nfBusy === 'split'} onClick={nfDoSplit}>{nfBusy === 'split' ? 'กำลังแยก…' : 'แยกประเด็นย่อย'}</button>
+          </div>
+          <button className="cta" onClick={() => submitNews(nfOut.cleanText)}>ส่งแก่นข่าวเข้าเขียน — เข้าคิวจริง</button>
+        </>}
+
+        {nfSplit?.topics?.length > 0 && <>
+          <h2>{nfSplit.isSingleTopic ? 'ประเด็นเดียว' : `แยกได้ ${nfSplit.topics.length} ประเด็น — ส่งเจนทีละประเด็น`}</h2>
+          {nfSplit.overview && <p className="sub">{nfSplit.overview}</p>}
+          {nfSplit.topics.map((t, i) => (
+            <div key={t.id || i} className="topic" style={{ cursor: 'default' }}>
+              <span className="num">{t.emoji || i + 1}</span>
+              <div style={{ flex: 1 }}>
+                <p className="tx">{t.title}</p>
+                <p className="du">{t.category || ''}{t.wordCount ? ` · ${t.wordCount} คำ` : ''}{t.viralAngle ? ` · มุมไวรัล: ${t.viralAngle}` : ''}</p>
+                {t.summary && <p className="du" style={{ marginTop: 3 }}>{t.summary}</p>}
+                {t.content && <details className="raw"><summary>เนื้อประเด็นนี้ ({t.content.length} ตัวอักษร)</summary><div>{t.content}</div></details>}
+                <button className="gh" style={{ width: 'auto', padding: '6px 16px', fontSize: 12.5, marginTop: 8 }} onClick={() => submitNews((t.title ? t.title + '\n\n' : '') + (t.content || t.summary || ''))}>ส่งประเด็นนี้เข้าเขียน</button>
+              </div>
+            </div>
+          ))}
+        </>}
+      </div>}
+
       {/* ═══ แท็บ ผลงาน ═══ */}
       {tab === 'works' && <div className="wrap">
         {!caseDetail && !caseLoading && <>
@@ -380,6 +482,7 @@ export default function MobileApp() {
       <div className="tabs"><div className="tabsin">
         <button className={'tab' + (tab === 'write' ? ' on' : '')} onClick={() => setTab('write')}>{IC.send}ส่งข่าว</button>
         <button className={'tab' + (tab === 'clip' ? ' on' : '')} onClick={() => setTab('clip')}>{IC.clip}ถอดคลิป</button>
+        <button className={'tab' + (tab === 'filter' ? ' on' : '')} onClick={() => setTab('filter')}>{IC.fil}สกัดเนื้อ</button>
         <button className={'tab' + (tab === 'works' ? ' on' : '')} onClick={() => setTab('works')}>{IC.lib}ผลงาน</button>
       </div></div>
       {toast && <div className="toast">{toast}</div>}
