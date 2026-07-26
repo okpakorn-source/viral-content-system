@@ -44,6 +44,8 @@ export async function GET(request) {
   try {
     const s = await sess();
     if (!s) return NextResponse.json({ success: false, error: 'ต้องล็อกอินก่อน', errorType: 'UNAUTHORIZED' }, { status: 401 });
+    // ★ 27 ก.ค. 69 (เจ้าของสั่ง): ล็อกโหมด 🤖 ให้ AI หา / ⚡ ทางลัด เฉพาะแอดมิน — ปิดหลังบ้านซ้ำกันยิงตรง (UI ซ่อนไปแล้ว)
+    if (s.role !== 'admin') return NextResponse.json({ success: false, error: 'เฉพาะแอดมิน', errorType: 'FORBIDDEN' }, { status: 403 });
 
     // ⚡ ทางลัดประกอบ — รายการเคสจากคลัง (มีรูปพร้อมอยู่แล้ว ไม่ค้นรูปใหม่)
     if (request.nextUrl.searchParams.get('view') === 'cases') {
@@ -68,6 +70,8 @@ export async function POST(request) {
   try {
     const s = await sess();
     if (!s) return NextResponse.json({ success: false, error: 'ต้องล็อกอินก่อน', errorType: 'UNAUTHORIZED' }, { status: 401 });
+    // ★ 27 ก.ค. 69 (เจ้าของสั่ง): ล็อกโหมด 🤖 ให้ AI หา / ⚡ ทางลัด เฉพาะแอดมิน — ปิดหลังบ้านซ้ำกันยิงตรง (UI ซ่อนไปแล้ว)
+    if (s.role !== 'admin') return NextResponse.json({ success: false, error: 'เฉพาะแอดมิน', errorType: 'FORBIDDEN' }, { status: 403 });
     const body = await request.json().catch(() => ({}));
 
     // ลบงาน — ส่งต่อตรงๆ (เฉพาะ action ที่อนุญาต)

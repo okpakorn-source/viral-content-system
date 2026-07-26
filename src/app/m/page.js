@@ -189,6 +189,8 @@ export default function MobileApp() {
   const [cvSrcOnly, setCvSrcOnly] = useState(false);     // สวิตช์ไม่ค้นเพิ่ม — ใช้เฟรมจากคลิปเป็นแหล่งเดียว
   // ★ sol-review: ลิงก์ถูกลบจนไม่เหลือลิงก์ที่ผ่าน validation → รีเซ็ตสวิตช์เอง (กันปุ่มค้าง on แต่กดปิดไม่ได้เพราะ disabled)
   useEffect(() => { if (cvSrcOnly && !cvClips.some(isValidClipUrl)) setCvSrcOnly(false); }, [cvClips, cvSrcOnly]);
+  // ★ 27 ก.ค. 69 (เจ้าของสั่ง): ล็อกโหมด 🤖 ให้ AI หา / ⚡ ทางลัด เฉพาะแอดมิน — พนักงานบังคับกลับ manual เสมอ (กัน member โหลดช้า/สลับยูสค้าง state)
+  useEffect(() => { if (!isAdmin && cvMode !== 'manual') setCvMode('manual'); }, [isAdmin, cvMode]);
   const cvMineRef = useRef(new Set()); // job ที่เราส่งเอง — ไว้ log ตอนเสร็จครั้งเดียว
   // ⚡ ทางลัดประกอบ (kind='compose' — ประกอบจากคลังเคสเดิม ไม่ค้นรูปใหม่ ~20-80 วิ)
   const [qcCases, setQcCases] = useState([]);
@@ -254,7 +256,8 @@ export default function MobileApp() {
   useEffect(() => {
     if (tab === 'works') loadCases();
     if (tab === 'clip') loadInsightCases();
-    if (tab === 'cover') loadCovers();
+    // ★ 27 ก.ค. 69 (sol แจ้งตกค้าง): /api/m/cover ล็อกเฉพาะแอดมินแล้วฝั่ง server — พนักงานไม่ต้องยิงเลย กันโดน 403 เปล่าๆ
+    if (tab === 'cover' && isAdmin) loadCovers();
     if (tab === 'me') { loadMe(); if (isAdmin) { loadTeam(); loadReport(); } }
   }, [tab, isAdmin, loadCases, loadInsightCases, loadCovers, loadMe, loadTeam, loadReport]);
 
@@ -265,16 +268,18 @@ export default function MobileApp() {
     }).catch(() => {});
   }, []);
   useEffect(() => {
-    if (tab === 'cover' && cvMode === 'quick' && qcCases.length === 0) loadQcCases();
-  }, [tab, cvMode, qcCases.length, loadQcCases]);
+    // ★ 27 ก.ค. 69: โหมดทางลัดล็อกเฉพาะแอดมิน — พนักงานไม่ยิง /api/m/cover?view=cases เลย
+    if (tab === 'cover' && isAdmin && cvMode === 'quick' && qcCases.length === 0) loadQcCases();
+  }, [tab, isAdmin, cvMode, qcCases.length, loadQcCases]);
 
-  // โพลงานปก — 5 วิเมื่ออยู่แท็บปกหรือมีงานวิ่ง, ไม่งั้นหยุด
+  // โพลงานปก — 5 วิเมื่ออยู่แท็บปกหรือมีงานวิ่ง, ไม่งั้นหยุด (★ 27 ก.ค. 69: เฉพาะแอดมิน — พนักงานไม่โพลเลยเพราะ /api/m/cover ล็อกไว้แล้ว)
   useEffect(() => {
+    if (!isAdmin) return;
     const active = cvJobs.some(j => j.status === 'pending' || j.status === 'running');
     if (tab !== 'cover' && !active) return;
     const iv = setInterval(loadCovers, active ? 5000 : 12000);
     return () => clearInterval(iv);
-  }, [tab, cvJobs, loadCovers]);
+  }, [tab, isAdmin, cvJobs, loadCovers]);
 
   // ═══ ส่งเข้าคิวเขียนจริง ═══
   const submitNews = async (input, { forceNew = false, source = 'text' } = {}) => {
@@ -673,14 +678,15 @@ export default function MobileApp() {
       {/* ═══ แท็บ ทำปก ═══ */}
       {tab === 'cover' && <div className="wrap">
         <h1>ทำปก</h1>
-        <div className="seg" style={{ marginBottom: 12 }}>
+        {/* ★ 27 ก.ค. 69 (เจ้าของสั่ง): แถวสลับโหมดเฉพาะแอดมิน — พนักงานไม่เห็นแถวปุ่มเลย เห็นแค่โหมดแต่งเอง */}
+        {isAdmin && <div className="seg" style={{ marginBottom: 12 }}>
           <button className={cvMode === 'manual' ? 'on' : ''} onClick={() => setCvMode('manual')}>✋ แต่งเอง</button>
           <button className={cvMode === 'auto' ? 'on' : ''} onClick={() => setCvMode('auto')}>🤖 ให้ AI หา</button>
           <button className={cvMode === 'quick' ? 'on' : ''} onClick={() => setCvMode('quick')}>⚡ ทางลัด</button>
-        </div>
+        </div>}
         {cvMode === 'manual' && <CoverEditor onLog={log} say={say} initialTitle={result?.title || ''} />}
       </div>}
-      {tab === 'cover' && cvMode === 'auto' && <div className="wrap" style={{ paddingTop: 0 }}>
+      {tab === 'cover' && isAdmin && cvMode === 'auto' && <div className="wrap" style={{ paddingTop: 0 }}>
         <p className="sub">เต็มท่อ MEGA (~3-6 นาที) — AI ค้นภาพให้เอง · รันเบื้องหลัง ปิดจอได้</p>
         <input className="in" style={{ marginBottom: 8 }} value={cvTitle} onChange={e => setCvTitle(e.target.value)} placeholder="หัวข่าว (ไม่บังคับ)…" />
         <div className="compose">
@@ -736,7 +742,7 @@ export default function MobileApp() {
           );
         })}
       </div>}
-      {tab === 'cover' && cvMode === 'quick' && <div className="wrap" style={{ paddingTop: 0 }}>
+      {tab === 'cover' && isAdmin && cvMode === 'quick' && <div className="wrap" style={{ paddingTop: 0 }}>
         <p className="sub">ประกอบจากเคสที่มีรูปแล้ว ~20-80 วิ (ไม่ค้นรูปใหม่)</p>
         <div className="row" style={{ marginBottom: 10 }}>
           <button className="gh" style={{ width: 'auto', padding: '7px 14px', fontSize: 12.5 }} onClick={loadQcCases}>🔄 รีเฟรชรายการ</button>
