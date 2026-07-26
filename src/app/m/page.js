@@ -331,6 +331,12 @@ export default function MobileApp() {
 
   const insightTopics = (ins) => {
     if (!ins) return [];
+    const tq = ins.transcriptQuotes;
+    if (tq?.enrichedTopics?.length) {
+      const withRaw = tq.enrichedTopics.filter(t => t && typeof t.enrichedRaw === 'string' && t.enrichedRaw.trim());
+      if (withRaw.length) return withRaw.map((t, i) => ({ topic: t.topic, time: t.timeRange, raw: t.enrichedRaw, no: t.no || i + 1 }));
+    }
+    if (typeof tq?.enrichedRaw === 'string' && tq.enrichedRaw.trim()) return [{ topic: ins.headline || ins.overview || 'ประเด็นจากคลิป', time: '', raw: tq.enrichedRaw, no: 1 }];
     if (ins.subStories?.length) return ins.subStories.map((s, i) => ({ topic: s.topic, time: s.timeRange, raw: s.rawData, quotes: s.quotes, no: s.no || i + 1 }));
     if (ins.topics?.length) return ins.topics.map((t, i) => ({ topic: t.topic || t.title, time: t.timeRange, raw: t.rawData || t.detail || '', no: t.no || i + 1 }));
     return [{ topic: ins.headline || ins.overview || 'ประเด็นจากคลิป', time: '', raw: ins.rawData || '', no: 1 }];
@@ -339,9 +345,13 @@ export default function MobileApp() {
   const sendTopicsToWrite = () => {
     const tps = insightTopics(insight).filter((_, i) => selTopics.includes(i));
     if (!tps.length) { say('เลือกอย่างน้อย 1 ประเด็นก่อน'); return; }
-    const input = tps.map(t =>
+    let input = tps.map(t =>
       `${t.topic}${t.time ? ` (ช่วง ${t.time})` : ''}\n\n${t.raw || ''}${t.quotes?.length ? '\n\nคำพูดจากคลิป:\n' + t.quotes.map(q => `"${q}"`).join('\n') : ''}`
     ).join('\n\n———\n\n');
+    const pq = Array.isArray(insight?.transcriptQuotes?.punchyQuotes) ? insight.transcriptQuotes.punchyQuotes.filter(q => q && typeof q.quote === 'string' && q.quote.trim()) : [];
+    if (pq.length) {
+      input += '\n\nประโยคเด็ดจากคลิป:\n' + pq.map(q => `"${q.quote}"${q.speaker ? ' — ' + q.speaker : ''}`).join('\n');
+    }
     log('send_topic', '', { from: 'clip', count: tps.length });
     submitNews(input, { source: 'clip' });
   };
