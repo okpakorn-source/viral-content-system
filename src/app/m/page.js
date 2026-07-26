@@ -124,6 +124,8 @@ export default function MobileApp() {
   const [teamSel, setTeamSel] = useState(null);   // {userKey, events}
   const [nu, setNu] = useState({ username: '', displayName: '', password: '', role: 'editor' });
   const [nuBusy, setNuBusy] = useState(false);
+  const [report, setReport] = useState(null);
+  const [showRates, setShowRates] = useState(false);
 
   // ── ส่งข่าว ──
   const [text, setText] = useState('');
@@ -194,11 +196,14 @@ export default function MobileApp() {
   const loadTeam = useCallback(() => {
     fetch('/api/usage?view=team', { cache: 'no-store' }).then(r => r.json()).then(d => { if (d.success) setTeam(d); }).catch(() => {});
   }, []);
+  const loadReport = useCallback(() => {
+    fetch('/api/usage?view=report', { cache: 'no-store' }).then(r => r.json()).then(d => { if (d.success) setReport(d); }).catch(() => {});
+  }, []);
   useEffect(() => {
     if (tab === 'works') loadCases();
     if (tab === 'clip') loadInsightCases();
-    if (tab === 'me') { loadMe(); if (isAdmin) loadTeam(); }
-  }, [tab, isAdmin, loadCases, loadInsightCases, loadMe, loadTeam]);
+    if (tab === 'me') { loadMe(); if (isAdmin) { loadTeam(); loadReport(); } }
+  }, [tab, isAdmin, loadCases, loadInsightCases, loadMe, loadTeam, loadReport]);
 
   // ═══ ส่งเข้าคิวเขียนจริง ═══
   const submitNews = async (input, { forceNew = false, source = 'text' } = {}) => {
@@ -596,6 +601,35 @@ export default function MobileApp() {
           </> : <p className="sub">กำลังโหลดสถิติ…</p>}
 
           {isAdmin && <>
+            <h2>📊 รีพอร์ตการใช้งาน & ต้นทุน (เฉพาะแอดมิน · 30 วัน)</h2>
+            {!report && <p className="sub">กำลังโหลดรีพอร์ต…</p>}
+            {report && <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                <div className="stat"><span className="l">ต้นทุนรวมทั้งระบบ (ประมาณ)</span><b>฿{(report.totalThb || 0).toLocaleString()}</b></div>
+                <div className="stat"><span className="l">อัตราแลก</span><b>{report.thbRate} ฿/$</b></div>
+              </div>
+              <div className="reader" style={{ padding: '10px 13px', marginBottom: 8 }}>
+                <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--mut)', marginBottom: 6 }}>แยกตามช่องทาง (งานข่าว 30 วัน)</p>
+                {(report.channels || []).map(c => <p key={c.channel} style={{ fontSize: 12.5, marginBottom: 3 }}>{c.channel}: {c.jobs} งาน ≈ ฿{c.estThb.toLocaleString()}</p>)}
+              </div>
+              <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--mut)', margin: '10px 0 6px' }}>รายยูส (แอพ) — ใช้อะไรบ้าง เป็นเงินเท่าไหร่</p>
+              {(report.users || []).length === 0 && <p className="sub">ยังไม่มีเหตุการณ์จากยูสแอพ — เริ่มนับตั้งแต่ติดตั้งสมุด</p>}
+              {(report.users || []).map(u => (
+                <div key={u.username} className="job" onClick={() => openMemberHistory(u.username)}>
+                  <span className="ava">{(u.displayName || '?').slice(0, 1)}</span>
+                  <div><p className="tt">{u.displayName} <span style={{ color: 'var(--pink)' }}>฿{u.estThb.toLocaleString()}</span></p>
+                    <p className="mm">ข่าว {u.d30.jobs} · คลิป {u.d30.clips} · สกัด AI {u.d30.filtersAI} · แยกประเด็น {u.d30.splits} · คัดลอก {u.d30.copies}</p></div>
+                  <span className="right chip cmu">ประวัติ</span>
+                </div>
+              ))}
+              <button className="gh" style={{ marginBottom: 6 }} onClick={() => setShowRates(v => !v)}>{showRates ? 'ซ่อนเรตการ์ด' : 'ดูเรตการ์ด (สูตรคิดเงิน — โปร่งใสตรวจได้)'}</button>
+              {showRates && <div className="reader" style={{ padding: '10px 13px', marginBottom: 8 }}>
+                {Object.values(report.rates || {}).map((r, i) => <p key={i} style={{ fontSize: 12, marginBottom: 4 }}><b>฿{r.thb}</b> / {r.label} — <span style={{ color: 'var(--mut)' }}>{r.note}</span></p>)}
+                {report.realLogged && <p style={{ fontSize: 11.5, color: 'var(--mut)', marginTop: 6 }}>บิลที่บันทึกได้จริงล่าสุด ({report.realLogged.calls} calls): {Object.entries(report.realLogged.byProvider).map(([k, v]) => `${k} $${v}`).join(' · ')} — {report.realLogged.note}</p>}
+                <p style={{ fontSize: 11.5, color: 'var(--mut)', marginTop: 6 }}>{report.disclosure}</p>
+              </div>}
+            </>}
+
             <h2>ทีม (แอดมินเท่านั้น)</h2>
             {!team && <p className="sub">กำลังโหลด…</p>}
             {team?.team?.map(t => (
