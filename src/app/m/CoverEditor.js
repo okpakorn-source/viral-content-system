@@ -29,6 +29,8 @@ export default function CoverEditor({ onLog, say, initialTitle = '' }) {
   const draftRef = useRef(newDraftId());
   const rafRef = useRef(0);
   const gestureRef = useRef(null);
+  const selRef = useRef(sel);           // ✋ กัน state ค้าง: นิ้ว 2 แตะเร็วกว่า setSel ของนิ้ว 1 คอมมิต
+  selRef.current = sel;
 
   const state = { template: tpl, slotImages: images, slotCrops: crops, slotOffsets: offsets, slotScales: scales, textValues: texts, fadeOn };
   const stateRef = useRef(state);
@@ -74,10 +76,19 @@ export default function CoverEditor({ onLog, say, initialTitle = '' }) {
     if (t.length === 1) {
       const p = toCanvasPt(t[0]);
       const hit = hitSlot(stateRef.current, p.x, p.y);
-      if (hit && hit !== sel) setSel(hit);
-      gestureRef.current = { kind: 'drag', id: hit || sel, x: t[0].clientX, y: t[0].clientY, moved: false };
-    } else if (t.length === 2 && sel) {
-      gestureRef.current = { kind: 'pinch', id: sel, d0: dist(t[0], t[1]), z0: (crops[sel]?.zoom || 1), s0: (scales[sel] || 1) };
+      if (hit && hit !== selRef.current) setSel(hit);
+      gestureRef.current = { kind: 'drag', id: hit || selRef.current, x: t[0].clientX, y: t[0].clientY, moved: false };
+    } else if (t.length === 2) {
+      gestureRef.current = null; // นิ้วที่ 2 ลง = ยกเลิกลาก 1 นิ้วที่ค้างอยู่ทันที
+      const mid = { clientX: (t[0].clientX + t[1].clientX) / 2, clientY: (t[0].clientY + t[1].clientY) / 2 };
+      const p = toCanvasPt(mid);
+      const hit = hitSlot(stateRef.current, p.x, p.y);
+      // hit ใช้ได้เฉพาะช่องที่มีรูปจริง — ถ้าจุดกลางไปโดนช่องว่าง ให้ fallback ไปช่องที่เลือกอยู่แทน (จาก ref กัน state ค้าง)
+      const target = (hit && stateRef.current.slotImages[hit]) ? hit : selRef.current;
+      if (target && stateRef.current.slotImages[target]) {
+        if (target !== selRef.current) setSel(target);
+        gestureRef.current = { kind: 'pinch', id: target, d0: dist(t[0], t[1]), z0: (stateRef.current.slotCrops[target]?.zoom || 1) };
+      }
     }
   };
   const onTouchMove = (e) => {
@@ -99,12 +110,9 @@ export default function CoverEditor({ onLog, say, initialTitle = '' }) {
       }
       e.preventDefault();
     } else if (g.kind === 'pinch' && t.length === 2 && g.id) {
+      // ✋ จีบ 2 นิ้ว = ซูมรูปในช่องเสมอ ทั้ง 2 โหมด — เฟรม (offsets/scales) ห้ามขยับ/ขยายจากการจีบ
       const ratio = dist(t[0], t[1]) / (g.d0 || 1);
-      if (mode === 'slot') {
-        setScales(s => ({ ...s, [g.id]: Math.max(0.3, Math.min(2.5, g.s0 * ratio)) }));
-      } else {
-        setCrops(cr => ({ ...cr, [g.id]: { ...(cr[g.id] || {}), zoom: Math.max(1, Math.min(5, g.z0 * ratio)) } }));
-      }
+      setCrops(cr => ({ ...cr, [g.id]: { ...(cr[g.id] || {}), zoom: Math.max(1, Math.min(5, g.z0 * ratio)) } }));
       e.preventDefault();
     }
   };
@@ -188,7 +196,7 @@ export default function CoverEditor({ onLog, say, initialTitle = '' }) {
       {/* ปก */}
       <div style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', border: '1px solid var(--line)', background: '#0b0b0f' }}>
         <canvas ref={canvasRef} width={W} height={H}
-          onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+          onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}
           style={{ width: '100%', display: 'block', touchAction: 'none' }} />
       </div>
 
@@ -228,7 +236,7 @@ export default function CoverEditor({ onLog, say, initialTitle = '' }) {
           <button className="gh" onClick={() => nudge(mode === 'slot' ? 'scale' : 'zoom', 0.15)}>+ ใหญ่ขึ้น</button>
           <button className="gh" onClick={() => nudge('reset')}>รีเซ็ต</button>
         </div>}
-        <p className="mm">ลาก 1 นิ้วบนปก = {mode === 'slot' ? 'ย้ายทั้งช่อง' : 'เลื่อนรูปในช่อง'} · จีบ 2 นิ้ว = {mode === 'slot' ? 'ย่อ/ขยายช่อง' : 'ซูมรูป'}</p>
+        <p className="mm">ลาก 1 นิ้วบนปก = {mode === 'slot' ? 'ย้ายทั้งช่อง' : 'เลื่อนรูปในช่อง'} · จีบ 2 นิ้ว = ซูมรูปในช่องเสมอ (ทุกโหมด)</p>
       </div>}
 
       {/* ข้อความบนปก (เฉพาะเทมเพลตที่มี) */}
