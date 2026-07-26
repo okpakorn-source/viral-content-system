@@ -1,7 +1,7 @@
 // 🎨 ตัวประกอบปกสำหรับแอพมือถือ — ใช้หัวใจการวาดจาก draw.js (ก๊อปจาก cover-tester)
 //   วาดทั้งหมดในเบราว์เซอร์ (canvas) ไม่พึ่งเซิร์ฟเวอร์/sharp/เครื่องทีม
 import {
-  W, H, drawBlurredBg, drawRectSlot, drawCircleSlot, drawTextSlot, getEffSlot,
+  W, H, drawBlurredBg, drawRectSlot, drawCircleSlot, drawTextSlot, getEffSlot, roundRectPath,
 } from './draw';
 
 /**
@@ -62,36 +62,56 @@ function slotBox(slot, offset) {
 
 function drawEmptySlot(ctx, slot, offset, selected) {
   const b = slotBox(slot, offset);
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
   ctx.save();
-  ctx.setLineDash([16, 12]);
-  ctx.lineWidth = selected ? 8 : 5;
-  ctx.strokeStyle = selected ? '#FF2D8A' : 'rgba(255,255,255,0.55)';
-  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fillStyle = selected ? 'rgba(255,45,138,0.06)' : 'rgba(255,255,255,0.03)';
   if (b.circle) {
-    ctx.beginPath(); ctx.arc(b.x + b.w / 2, b.y + b.h / 2, b.w / 2, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, b.w / 2 - 2, 0, Math.PI * 2);
   } else {
-    ctx.fillRect(b.x, b.y, b.w, b.h);
-    ctx.strokeRect(b.x, b.y, b.w, b.h);
+    roundRectPath(ctx, b.x + 4, b.y + 4, b.w - 8, b.h - 8, 14);
   }
-  ctx.setLineDash([]);
-  ctx.fillStyle = selected ? '#FF2D8A' : 'rgba(255,255,255,0.85)';
-  ctx.font = 'bold 34px "Noto Sans Thai","Sarabun",sans-serif';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fill();
+  if (selected) {
+    ctx.strokeStyle = '#FF2D8A'; ctx.lineWidth = 4;
+    ctx.shadowColor = 'rgba(255,45,138,0.55)'; ctx.shadowBlur = 24;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  } else {
+    ctx.strokeStyle = 'rgba(255,255,255,0.17)'; ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
   const label = String(slot.label || slot.id).replace(/\s*\(.*\)\s*$/, '');
-  ctx.fillText(label, b.x + b.w / 2, b.y + b.h / 2, b.w - 40);
-  ctx.font = '26px "Noto Sans Thai","Sarabun",sans-serif';
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.fillText('แตะเพื่อใส่รูป', b.x + b.w / 2, b.y + b.h / 2 + 46, b.w - 40);
+  ctx.font = 'bold 30px "Noto Sans Thai","Sarabun",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const textW = ctx.measureText(label).width;
+  const pillW = Math.min(textW + 36, b.w - 24);
+  const pillH = 46;
+  const pillCy = cy - 8;
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  roundRectPath(ctx, cx - pillW / 2, pillCy - pillH / 2, pillW, pillH, pillH / 2);
+  ctx.fill();
+  ctx.fillStyle = selected ? '#FF6AA9' : 'rgba(255,255,255,0.88)';
+  ctx.fillText(label, cx, pillCy, pillW - 12);
+
+  ctx.font = '22px "Noto Sans Thai","Sarabun",sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.fillText('แตะเพื่อใส่รูป', cx, cy + 34, b.w - 24);
   ctx.restore();
 }
 
 function drawSelRing(ctx, slot, offset) {
   const b = slotBox(slot, offset);
   ctx.save();
-  ctx.lineWidth = 6; ctx.strokeStyle = '#FF2D8A'; ctx.setLineDash([18, 10]);
-  if (b.circle) { ctx.beginPath(); ctx.arc(b.x + b.w / 2, b.y + b.h / 2, b.w / 2 + 4, 0, Math.PI * 2); ctx.stroke(); }
-  else ctx.strokeRect(b.x - 3, b.y - 3, b.w + 6, b.h + 6);
+  ctx.lineWidth = 5; ctx.strokeStyle = '#FF2D8A';
+  ctx.shadowColor = 'rgba(255,45,138,0.6)'; ctx.shadowBlur = 22;
+  if (b.circle) {
+    ctx.beginPath(); ctx.arc(b.x + b.w / 2, b.y + b.h / 2, b.w / 2 + 3, 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    roundRectPath(ctx, b.x - 2, b.y - 2, b.w + 4, b.h + 4, 12);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
