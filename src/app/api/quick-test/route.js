@@ -13,6 +13,7 @@
 // ============================================================
 
 import { NextResponse } from 'next/server';
+import { Agent } from 'undici';
 import { createJob, patchJob, finishJob, listJobs, getJob, claimTeamJob, removeJob } from '@/lib/quickTestJobs';
 
 export const runtime = 'nodejs';
@@ -40,6 +41,10 @@ const TERMINAL_ERRORS = new Set([
   'BAD_INPUT', 'NO_CONTENT', 'CASE_NOT_FOUND',                     // input ผิด
   'INSUFFICIENT_PICKED', 'POOL_TOO_THIN', 'NO_CLIPS', 'NO_FRAMES', // ทำครบแล้ววัตถุดิบไม่พอ (ไม่ใช่ระบบล่ม)
 ]);
+
+// ★ 26 ก.ค. 69: ท่อ ref ตอบครั้งเดียวตอนจบ (>5 นาทีได้) — undici default headersTimeout 300s ตัดกลางทาง = "fetch failed"
+//   ต้องยกเพดานผ่าน dispatcher เท่านั้น (AbortSignal คุมไม่ถึงชั้นนี้)
+const REF_LONG_AGENT = new Agent({ headersTimeout: 25 * 60 * 1000, bodyTimeout: 25 * 60 * 1000 });
 
 // รัน 1 รอบ — สำเร็จคืน result object, ล้ม throw (แนบ errorType/trace)
 async function callOnce(job, origin) {
@@ -75,6 +80,7 @@ async function callOnce(job, origin) {
     headers: refHeaders,
     body: JSON.stringify({ newsTitle: job.input.newsTitle || '', content: job.input.content }),
     signal: AbortSignal.timeout(25 * 60 * 1000),
+    dispatcher: REF_LONG_AGENT,
   });
   const d = await res.json().catch(() => ({}));
   if (!res.ok || !d.success) throw Object.assign(new Error(d.error || `HTTP ${res.status}`), { errorType: d.errorType, trace: d.trace });
