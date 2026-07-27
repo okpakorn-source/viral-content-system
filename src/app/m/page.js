@@ -123,6 +123,15 @@ const EV_LABEL = {
   desk_search: '🔎 ค้นข่าวเองจากโต๊ะข่าว', // ★ 27 ก.ค. 69
 };
 
+// ═══ ทำปก — 5 ช่องของผัง "ปกไม่ถูกใจ" ปุ่ม "เปลี่ยนภาพรายช่อง" (27 ก.ค. ค่ำ) — ตรงกับ SLOT_ORDER ของ compose-test ═══
+const SLOT_ROLES = [
+  { key: 'hero', label: 'Hero' },
+  { key: 'reaction', label: 'ขวาบน' },
+  { key: 'action', label: 'ขวากลาง' },
+  { key: 'context', label: 'ขวาล่าง' },
+  { key: 'circle', label: 'วงกลม' },
+];
+
 // ═══ โต๊ะข่าว — ฟิลเตอร์ + ป้ายวันที่ (27 ก.ค. 69: อัปเกรดครบเท่าโต๊ะกลาง, เจ้าของอนุมัติ) ═══
 // กรองฝั่งจอล้วน (ไม่ยิง API เพิ่ม) — ใช้ field ที่ enrichDeskItem เติมให้ทุกใบแล้ว (library/sourceType)
 const DESK_TYPE_FILTERS = [
@@ -280,6 +289,13 @@ export default function MobileApp() {
   const [caseImgOpen, setCaseImgOpen] = useState(null); // caseId ที่กางกริดภาพอยู่ (null = ปิดหมด)
   const [caseImgList, setCaseImgList] = useState({}); // {[caseId]: items[] | undefined (ยังไม่โหลด)}
   const caseImgLoadedRef = useRef(new Set()); // กันยิงซ้ำเคสเดิม
+  // ★ 27 ก.ค. ค่ำ (เจ้าของอนุมัติ — "ปกไม่ถูกใจ" 4 ฟังก์ชันใต้ปกที่เสร็จแล้ว): ประกอบใหม่ทั้งปก / เปลี่ยนภาพรายช่อง / เปลี่ยนตัวเอก / เปลี่ยนต้นแบบ
+  const [cvActionJob, setCvActionJob] = useState(null);   // id งานที่กำลังกางแผงฟังก์ชันอยู่ (null = ปิดหมด)
+  const [cvActionMode, setCvActionMode] = useState(null); // 'slots' | 'hero' | 'ref' — โหมดย่อยที่เปิดอยู่ในแผงนั้น
+  const [cvSlotRole, setCvSlotRole] = useState(null);     // ช่อง (hero/reaction/action/context/circle) ที่กำลังเลือกภาพแทน
+  const [cvHeroName, setCvHeroName] = useState('');       // ชื่อตัวเอกที่พิมพ์ (โหมด "เปลี่ยนตัวเอก" — เข้าถึงรายชื่อจริงยาก ใช้ช่องพิมพ์เองตามที่เจ้าของอนุมัติ)
+  const [cvRefList, setCvRefList] = useState(null);       // แคชรายชื่อต้นแบบจากคลัง (null = ยังไม่โหลด · [] = โหลดแล้วว่าง)
+  const [cvActionBusy, setCvActionBusy] = useState(false);
   // ★ 27 ก.ค. 69: คลังปกล่าสุด (โหมด auto/quick) — ต่อ /api/m/cover?view=archive (forward /api/mega-covers)
   const [cvArchive, setCvArchive] = useState([]);
 
@@ -349,7 +365,10 @@ export default function MobileApp() {
     fetch('/api/m/cover', { cache: 'no-store' }).then(r => r.json()).then(d => {
       if (!d.success) return;
       const jobs = d.jobs || [];
-      setCvJobs(jobs);
+      // ★ แก้บั๊ก (รีวิว 27 ก.ค. ค่ำ รอบ 2): งานจำลอง "frozen-…" (ปุ่มเปลี่ยนภาพรายช่อง) ไม่ผ่านคิวจริง —
+      //   เดิม setCvJobs(jobs) ทับทิ้งทุกครั้งที่ poll (ทุก 800ms/3s หลังส่งงานอื่น) ทำให้หายไปใน 5-12 วิ ทั้งที่ผู้ใช้เพิ่งรอผล
+      //   คงไว้ด้านบนสุดเสมอ — รายการจริงจากเซิร์ฟเวอร์ไม่มีทางมี id ขึ้นต้น "frozen-" ชนกันอยู่แล้ว
+      setCvJobs(prev => [...prev.filter(j => String(j.id).startsWith('frozen-')), ...jobs]);
       // งานที่เราส่งเองเพิ่งเสร็จ → log ครั้งเดียว
       for (const j of jobs) {
         if (j.status === 'done' && cvMineRef.current.has(j.id)) {
@@ -780,8 +799,122 @@ export default function MobileApp() {
   };
   const delCover = async (id) => {
     setCvJobs(p => p.filter(j => j.id !== id));
+    // ★ 27 ก.ค. ค่ำ: งาน "จำลอง" จากปุ่มเปลี่ยนภาพรายช่อง (frozen-…) ไม่ผ่านคิวจริง — ลบแค่ฝั่งจอ ไม่มีอะไรให้ยิงลบที่เซิร์ฟเวอร์
+    if (String(id).startsWith('frozen-')) return;
     await fetch('/api/m/cover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', jobId: id }) }).catch(() => {});
     setTimeout(loadCovers, 600);
+  };
+  // ★ แก้บั๊ก (รีวิว 27 ก.ค. ค่ำ รอบ 2): coverImgUrl ของงาน composeFrozen เป็น data: URL (ไม่มี archivedId ให้ต่อ ?dl=1) —
+  //   ต่อ ?dl=1 ตรงๆ จะได้สตริงเพี้ยน + iOS Safari บล็อกเปิด data: ระดับหน้าเต็ม → แปลงเป็น blob URL ฝั่ง client แล้ว trigger ดาวน์โหลดแทน
+  const downloadDataCover = async (dataUrl) => {
+    try {
+      const blob = await (await fetch(dataUrl)).blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl; a.download = 'cover.jpg';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
+    } catch {
+      say('โหลดอัตโนมัติไม่ได้ — กดค้างที่ภาพเพื่อบันทึกแทน');
+    }
+  };
+
+  // ══ "ปกไม่ถูกใจ" (27 ก.ค. ค่ำ, เจ้าของอนุมัติ) — 4 ฟังก์ชันใต้ปกที่เสร็จแล้ว ══
+  // ① 🎲 ประกอบใหม่ทั้งปก — ยิง kind='compose' รอบใหม่ของ caseId เดิม (ทางเดียวกับ ⚡ ทางลัด) ไม่ล็อกฮีโร่/ต้นแบบ ให้สุ่มใหม่ล้วน
+  const rerollCover = async (j) => {
+    const r = j.result || {};
+    const caseId = r.caseId || r.imageCaseId;
+    if (!caseId) { say('ปกนี้ไม่มีข้อมูลเคสต้นทาง — ยิงใหม่ไม่ได้'); return; }
+    setCvActionBusy(true);
+    try {
+      const d = await (await fetch('/api/m/cover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'compose', caseId }) })).json();
+      if (!d.success) throw new Error(d.error || 'ส่งงานไม่สำเร็จ');
+      if (d.jobId) { cvMineRef.current.add(d.jobId); setCvOpen(d.jobId); }
+      log('cover_submit', d.jobId || '', { mode: 'reroll' });
+      say('เข้าคิวประกอบปกใหม่แล้ว — รอสัก 20-80 วิ');
+      setTimeout(loadCovers, 800); setTimeout(loadCovers, 3000);
+    } catch (e) { say(String(e.message || e)); }
+    setCvActionBusy(false);
+  };
+  // ③ 👤 เปลี่ยนตัวเอก — เข้าถึงรายชื่อตัวละครจริงของเคสยาก (คนละระบบกับ generation-logs) ใช้ช่องพิมพ์ชื่อเองตามที่เจ้าของอนุมัติไว้ (เหมือน qcHero โหมดทางลัด)
+  const sendHeroCover = async (j) => {
+    const r = j.result || {};
+    const caseId = r.caseId || r.imageCaseId;
+    const hero = cvHeroName.trim();
+    if (!caseId) { say('ปกนี้ไม่มีข้อมูลเคสต้นทาง'); return; }
+    if (!hero) { say('พิมพ์ชื่อตัวเอกก่อน'); return; }
+    setCvActionBusy(true);
+    try {
+      const d = await (await fetch('/api/m/cover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'compose', caseId, heroPersonHint: hero }) })).json();
+      if (!d.success) throw new Error(d.error || 'ส่งงานไม่สำเร็จ');
+      if (d.jobId) { cvMineRef.current.add(d.jobId); setCvOpen(d.jobId); }
+      log('cover_submit', d.jobId || '', { mode: 'hero', hero });
+      say(`เข้าคิวประกอบปก (ตัวเอก: ${hero}) แล้ว`);
+      setCvActionJob(null); setCvActionMode(null); setCvHeroName('');
+      setTimeout(loadCovers, 800); setTimeout(loadCovers, 3000);
+    } catch (e) { say(String(e.message || e)); }
+    setCvActionBusy(false);
+  };
+  // ④ 🎨 เปลี่ยนต้นแบบ — โหลดลิสต์ ref "เพจจริง" จากคลัง (แคชครั้งเดียว) + สุ่ม/เลือกเอง แล้วยิง compose ใหม่พร้อม refId
+  const loadCvRefs = () => {
+    fetch('/api/m/cover?view=refs', { cache: 'no-store' }).then(r => r.json()).then(d => { if (d.success) setCvRefList(d.items || []); }).catch(() => setCvRefList([]));
+  };
+  const sendRefCover = async (j, refId) => {
+    const r = j.result || {};
+    const caseId = r.caseId || r.imageCaseId;
+    if (!caseId) { say('ปกนี้ไม่มีข้อมูลเคสต้นทาง'); return; }
+    setCvActionBusy(true);
+    try {
+      const d = await (await fetch('/api/m/cover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'compose', caseId, refId }) })).json();
+      if (!d.success) throw new Error(d.error || 'ส่งงานไม่สำเร็จ');
+      if (d.jobId) { cvMineRef.current.add(d.jobId); setCvOpen(d.jobId); }
+      log('cover_submit', d.jobId || '', { mode: 'ref', refId });
+      say('เข้าคิวประกอบปกต้นแบบใหม่แล้ว');
+      setCvActionJob(null); setCvActionMode(null);
+      setTimeout(loadCovers, 800); setTimeout(loadCovers, 3000);
+    } catch (e) { say(String(e.message || e)); }
+    setCvActionBusy(false);
+  };
+  const pickRandomRef = (j) => {
+    if (!cvRefList || !cvRefList.length) return;
+    const pick = cvRefList[Math.floor(Math.random() * cvRefList.length)];
+    sendRefCover(j, pick.id);
+  };
+  // ② 🖼️ เปลี่ยนภาพรายช่อง — เปิดกริดภาพจากเคส (คลังเดียวกับ "🖼 ดูภาพเคส" โหมดทางลัด) แตะเลือกแทนช่องที่กำลังแก้
+  const ensureCaseImages = (caseId) => {
+    if (!caseId || caseImgList[caseId] !== undefined) return;
+    fetch(`/api/m/cover?view=caseImages&caseId=${encodeURIComponent(caseId)}&limit=60`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => setCaseImgList(m => ({ ...m, [caseId]: (d && d.success && Array.isArray(d.items)) ? d.items : [] })))
+      .catch(() => setCaseImgList(m => ({ ...m, [caseId]: [] })));
+  };
+  // แตะภาพในกริด → ยิงประกอบใหม่แบบ "แผนแช่แข็ง" (ของเดิมทุกช่อง แทนที่เฉพาะช่องที่เลือก) ผ่าน kind='composeFrozen'
+  const pickSlotImage = async (j, role, url) => {
+    const r = j.result || {};
+    const caseId = r.caseId || r.imageCaseId;
+    const refId = r.refUsed?.id;
+    const base = Array.isArray(r.slotPlanUsed) ? r.slotPlanUsed : [];
+    if (!caseId || !refId || !base.length) { say('ปกนี้ไม่มีข้อมูลผังช่อง — ลองกดประกอบใหม่ก่อน'); return; }
+    const idx = base.findIndex(e => e.slot === role);
+    const nextPlan = base.map(e => ({ ...e }));
+    if (idx >= 0) nextPlan[idx] = { url, slot: role, isHero: role === 'hero' };
+    else nextPlan.push({ url, slot: role, isHero: role === 'hero' });
+    if (role === 'hero') nextPlan.forEach((e, i) => { if (i !== (idx >= 0 ? idx : nextPlan.length - 1)) e.isHero = false; });
+    if (nextPlan.length < 3) { say('ผังช่องน้อยเกินไป (ต้อง ≥3 ช่อง)'); return; }
+    setCvActionBusy(true);
+    try {
+      const d = await (await fetch('/api/m/cover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'composeFrozen', caseId, refId, slotPlan: nextPlan }) })).json();
+      if (!d.success) throw new Error(d.error || 'ประกอบใหม่ไม่สำเร็จ');
+      // ★ งานนี้ไม่ผ่านคิว quick-test (frozen mode ยิงตรง compose-test — ดู /api/m/cover) → สร้าง "งานจำลอง" ใส่แถบงานเองให้ดูเหมือนงานปกติ
+      const jr = d.result || {};
+      const fakeId = 'frozen-' + Date.now();
+      setCvJobs(list => [{ id: fakeId, kind: 'compose', label: '🖼️ เปลี่ยนภาพรายช่อง', status: 'done', dispatch: 'local', result: jr }, ...list]);
+      setCvOpen(fakeId);
+      setCvActionJob(null); setCvActionMode(null); setCvSlotRole(null);
+      say('ประกอบใหม่เสร็จแล้ว — ดูผลด้านบน');
+      log('cover_submit', fakeId, { mode: 'slotSwap', role });
+    } catch (e) { say(String(e.message || e)); }
+    setCvActionBusy(false);
   };
   const coverFromNews = () => {
     setCvTitle(result?.title || '');
@@ -933,6 +1066,99 @@ export default function MobileApp() {
       </div>}
     </>
   );
+
+  // ★ 27 ก.ค. ค่ำ (เจ้าของอนุมัติ — "ปกไม่ถูกใจ"): ปุ่ม 4 ฟังก์ชัน + แผงย่อยของงานปกที่เสร็จแล้ว 1 ใบ
+  //   ใช้ซ้ำ 2 จุด (โหมด 🤖 ให้ AI หา / ⚡ ทางลัด — job-list JSX เดิมก็ซ้ำกันอยู่แล้ว) กัน copy-paste ก้อนใหญ่
+  const renderCoverActions = (j) => {
+    if (j.status !== 'done') return null;
+    const r = j.result || {};
+    const effCaseId = r.caseId || r.imageCaseId; // ★ ref-kind jobs เก็บ caseId ไว้คนละชื่อฟิลด์ (imageCaseId) — รวมเป็นตัวเดียวให้ปุ่มใช้ได้ทั้งคู่
+    const canSlots = !!(r.slotPlanUsed?.length && r.refUsed?.id);
+    return (
+      <>
+        <div className="row" style={{ marginTop: 8, flexWrap: 'wrap', gap: 6 }}>
+          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={cvActionBusy} onClick={() => rerollCover(j)}>🎲 ประกอบใหม่ทั้งปก</button>
+          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={cvActionBusy || !canSlots}
+            onClick={() => { const on = cvActionJob === j.id && cvActionMode === 'slots'; setCvActionJob(on ? null : j.id); setCvActionMode(on ? null : 'slots'); setCvSlotRole(null); if (!on && effCaseId) ensureCaseImages(effCaseId); }}>
+            🖼️ เปลี่ยนภาพรายช่อง
+          </button>
+          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={cvActionBusy}
+            onClick={() => { const on = cvActionJob === j.id && cvActionMode === 'hero'; setCvActionJob(on ? null : j.id); setCvActionMode(on ? null : 'hero'); setCvHeroName(''); }}>
+            👤 เปลี่ยนตัวเอก
+          </button>
+          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={cvActionBusy}
+            onClick={() => { const on = cvActionJob === j.id && cvActionMode === 'ref'; setCvActionJob(on ? null : j.id); setCvActionMode(on ? null : 'ref'); if (!on && cvRefList === null) loadCvRefs(); }}>
+            🎨 เปลี่ยนต้นแบบ
+          </button>
+        </div>
+        {!canSlots && <p className="sub" style={{ marginTop: 4, fontSize: 11 }}>* &quot;เปลี่ยนภาพรายช่อง&quot; ใช้ได้เฉพาะปกที่ประกอบหลังอัปเดตนี้ (มีข้อมูลผังช่องเก็บไว้)</p>}
+
+        {cvActionJob === j.id && cvActionMode === 'slots' && (
+          <div style={{ marginTop: 8, padding: '10px 8px', border: '1px solid var(--line)', borderRadius: 12 }}>
+            <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+              {SLOT_ROLES.map(sr => {
+                const cur = (r.slotPlanUsed || []).find(e => e.slot === sr.key);
+                const on = cvSlotRole === sr.key;
+                return (
+                  <button key={sr.key} className="gh" style={{ minHeight: 44, padding: '6px 10px', fontSize: 12, borderColor: on ? 'var(--pink)' : undefined, color: on ? 'var(--pink)' : undefined }}
+                    onClick={() => setCvSlotRole(sr.key)}>
+                    {cur?.url && <img src={cur.url} alt="" style={{ width: 22, height: 22, borderRadius: 5, objectFit: 'cover', verticalAlign: 'middle', marginRight: 5 }} />}
+                    {sr.label}
+                  </button>
+                );
+              })}
+            </div>
+            {cvSlotRole && (() => {
+              const imgs = caseImgList[effCaseId];
+              return (
+                <>
+                  <p className="sub" style={{ margin: '0 0 6px' }}>แตะภาพเพื่อแทนช่อง &quot;{SLOT_ROLES.find(s => s.key === cvSlotRole)?.label}&quot;</p>
+                  {imgs === undefined && <p className="sub" style={{ margin: 0 }}>⏳ กำลังโหลดภาพ…</p>}
+                  {Array.isArray(imgs) && imgs.length === 0 && <p className="sub" style={{ margin: 0 }}>ไม่มีภาพในเคสนี้</p>}
+                  {Array.isArray(imgs) && imgs.length > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                      {imgs.map((im, i) => (
+                        <div key={im.id || im.url || i} onClick={() => !cvActionBusy && pickSlotImage(j, cvSlotRole, im.url)} style={{ cursor: 'pointer' }}>
+                          <img src={im.url} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
+                            style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)', display: 'block' }} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        )}
+
+        {cvActionJob === j.id && cvActionMode === 'hero' && (
+          <div style={{ marginTop: 8, padding: '10px 8px', border: '1px solid var(--line)', borderRadius: 12 }}>
+            <input className="in" style={{ marginBottom: 8 }} value={cvHeroName} onChange={e => setCvHeroName(e.target.value)} placeholder="ชื่อตัวเอกคนใหม่…" />
+            <button className="cta" style={{ minHeight: 44 }} disabled={cvActionBusy || !cvHeroName.trim()} onClick={() => sendHeroCover(j)}>
+              {cvActionBusy ? 'กำลังส่ง…' : '✅ ประกอบใหม่ด้วยตัวเอกนี้'}
+            </button>
+          </div>
+        )}
+
+        {cvActionJob === j.id && cvActionMode === 'ref' && (
+          <div style={{ marginTop: 8, padding: '10px 8px', border: '1px solid var(--line)', borderRadius: 12 }}>
+            <button className="gh" style={{ minHeight: 44, marginBottom: 8 }} disabled={cvActionBusy || !cvRefList?.length} onClick={() => pickRandomRef(j)}>🎲 สุ่มต้นแบบ</button>
+            {cvRefList === null && <p className="sub">⏳ กำลังโหลดรายชื่อต้นแบบ…</p>}
+            {Array.isArray(cvRefList) && cvRefList.length === 0 && <p className="sub">ยังไม่มีต้นแบบในคลัง</p>}
+            {Array.isArray(cvRefList) && cvRefList.map(ref => (
+              <div key={ref.id} className="job" style={{ marginBottom: 6 }} onClick={() => !cvActionBusy && sendRefCover(j, ref.id)}>
+                <span className="ava">🎨</span>
+                <div style={{ overflow: 'hidden' }}>
+                  <p className="tt" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ref.title || ref.styleName}</p>
+                  <p className="mm">{ref.likes ? `${ref.likes} ไลค์` : ''}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </>
+    );
+  };
 
   // จอกันเหนียว: ยังไม่ล็อกอิน (ปกติเว็บพาไปหน้า login เองอยู่แล้ว)
   if (sessChecked && !member) {
@@ -1360,9 +1586,18 @@ export default function MobileApp() {
                 {(j.status === 'pending' || j.status === 'running') && <p className="sub" style={{ margin: 0 }}>⏳ {j.progress?.step || 'กำลังทำ'} — ปิดจอได้ เดี๋ยวผลมาเอง</p>}
                 {r.coverImgUrl && <img src={r.coverImgUrl} alt="ปกเต็ม" style={{ width: '100%', borderRadius: 12, marginTop: 8 }} />}
                 <div className="row" style={{ marginTop: 9 }}>
-                  {r.coverImgUrl && j.status === 'done' && <a className="gh" style={{ textDecoration: 'none' }} href={`${r.coverImgUrl}${r.coverImgUrl.includes('?') ? '&' : '?'}dl=1`}>⬇️ โหลดภาพ</a>}
+                  {r.coverImgUrl && j.status === 'done' && (
+                    String(r.coverImgUrl).startsWith('data:')
+                      ? <button className="gh" onClick={() => downloadDataCover(r.coverImgUrl)}>⬇️ โหลดภาพ</button>
+                      : <a className="gh" style={{ textDecoration: 'none' }} href={`${r.coverImgUrl}${r.coverImgUrl.includes('?') ? '&' : '?'}dl=1`}>⬇️ โหลดภาพ</a>
+                  )}
                   <button className="gh" onClick={() => delCover(j.id)}>ลบงานนี้</button>
                 </div>
+                {/* ★ แก้บั๊ก (รีวิว 27 ก.ค. ค่ำ รอบ 2): บางเบราว์เซอร์ (เช่น iOS Safari) เงียบไม่ดาวน์โหลดแม้ไม่มี error ให้จับ — เตือนทางสำรองไว้เสมอ */}
+                {r.coverImgUrl && j.status === 'done' && String(r.coverImgUrl).startsWith('data:') && (
+                  <p className="sub" style={{ marginTop: 4, fontSize: 11 }}>* ถ้ากด &quot;⬇️ โหลดภาพ&quot; แล้วไม่ลง — กดค้างที่ภาพเพื่อบันทึกแทน</p>
+                )}
+                {renderCoverActions(j)}
               </div>}
             </div>
           );
@@ -1442,9 +1677,18 @@ export default function MobileApp() {
                 {(j.status === 'pending' || j.status === 'running') && <p className="sub" style={{ margin: 0 }}>⏳ {j.progress?.step || 'กำลังทำ'} — ปิดจอได้ เดี๋ยวผลมาเอง</p>}
                 {r.coverImgUrl && <img src={r.coverImgUrl} alt="ปกเต็ม" style={{ width: '100%', borderRadius: 12, marginTop: 8 }} />}
                 <div className="row" style={{ marginTop: 9 }}>
-                  {r.coverImgUrl && j.status === 'done' && <a className="gh" style={{ textDecoration: 'none' }} href={`${r.coverImgUrl}${r.coverImgUrl.includes('?') ? '&' : '?'}dl=1`}>⬇️ โหลดภาพ</a>}
+                  {r.coverImgUrl && j.status === 'done' && (
+                    String(r.coverImgUrl).startsWith('data:')
+                      ? <button className="gh" onClick={() => downloadDataCover(r.coverImgUrl)}>⬇️ โหลดภาพ</button>
+                      : <a className="gh" style={{ textDecoration: 'none' }} href={`${r.coverImgUrl}${r.coverImgUrl.includes('?') ? '&' : '?'}dl=1`}>⬇️ โหลดภาพ</a>
+                  )}
                   <button className="gh" onClick={() => delCover(j.id)}>ลบงานนี้</button>
                 </div>
+                {/* ★ แก้บั๊ก (รีวิว 27 ก.ค. ค่ำ รอบ 2): บางเบราว์เซอร์ (เช่น iOS Safari) เงียบไม่ดาวน์โหลดแม้ไม่มี error ให้จับ — เตือนทางสำรองไว้เสมอ */}
+                {r.coverImgUrl && j.status === 'done' && String(r.coverImgUrl).startsWith('data:') && (
+                  <p className="sub" style={{ marginTop: 4, fontSize: 11 }}>* ถ้ากด &quot;⬇️ โหลดภาพ&quot; แล้วไม่ลง — กดค้างที่ภาพเพื่อบันทึกแทน</p>
+                )}
+                {renderCoverActions(j)}
               </div>}
             </div>
           );

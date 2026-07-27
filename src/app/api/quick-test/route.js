@@ -96,6 +96,12 @@ async function callOnce(job, origin) {
       // ★ 27 ก.ค. 69 (นโยบาย "เก็บทุกใบ+ติดป้ายสถานะ"): ป้ายสถานะ + เหตุผลถ้าไม่เข้าคลัง — ให้ progress.step ท้าย runJob() ใช้
       qcStatus: d.qcStatus || null,
       archiveSkipReason: d.archiveSkipReason || null,
+      // ★ 27 ก.ค. ค่ำ (เจ้าของอนุมัติ — ปุ่ม "เปลี่ยนภาพรายช่อง" ใน /m): เก็บผังช่องที่ใช้จริง + id ต้นแบบ ติดไปกับผลงาน
+      //   ให้ภายหลังหยิบมาสร้าง slotPlan แช่แข็งใหม่ได้โดยไม่ต้องยิง S6 ซ้ำ — กันขนาด payload ใหญ่: เก็บเฉพาะ url+slot+isHero ต่อช่อง (ตัด backup/thumbnail/triage ทิ้ง)
+      slotPlanUsed: Array.isArray(d.slotPlanUsed)
+        ? d.slotPlanUsed.filter((e) => e && e.slot).map((e) => ({ url: e.url, slot: e.slot, isHero: !!e.isHero }))
+        : null,
+      refUsed: d.refUsed?.id ? { id: d.refUsed.id } : null,
     };
   }
   // ★ 27 ก.ค. 69: 3 ชนิดงานโต๊ะข่าว — เรียกตรงเข้า /api/news-desk/* (ไม่ผ่าน middleware ป้องกัน คุมแค่ cover-ref-test/quick-test)
@@ -188,6 +194,10 @@ async function callOnce(job, origin) {
     // ★ 27 ก.ค. 69 (นโยบาย "เก็บทุกใบ+ติดป้ายสถานะ"): ป้ายสถานะ + เหตุผลถ้าไม่เข้าคลัง — ให้ progress.step ท้าย runJob() ใช้
     qcStatus: d.qcStatus || null,
     archiveSkipReason: d.archiveSkipReason || null,
+    // ★ 27 ก.ค. ค่ำ (เจ้าของอนุมัติ): ท่อ ref (buildCoverResponseBody) ไม่มี slotPlanUsed ให้เก็บ (ไม่ผ่าน compose-test) —
+    //   เก็บได้แค่ id ต้นแบบที่ใช้จริง (matchedRef.refId) ให้ "เปลี่ยนตัวเอก/เปลี่ยนต้นแบบ" ยิงต่อได้ (ปุ่ม "เปลี่ยนภาพรายช่อง" จะปิดไว้ที่จอ เพราะไม่มี slotPlanUsed)
+    caseId: d.imageCaseId || null,
+    refUsed: d.matchedRef?.refId ? { id: d.matchedRef.refId } : null,
   };
 }
 

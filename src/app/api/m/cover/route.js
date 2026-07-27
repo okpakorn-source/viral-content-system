@@ -7,12 +7,16 @@
  *   - ด่าน middleware ของ /api/quick-test เดิมยังคุมการยิงตรงจากภายนอกเหมือนเดิมทุกประการ
  * GET  → รายการงานปก (สะท้อนจาก quick-test kinds=compose,ref เท่านั้น — คิวโต๊ะข่าวแยกคนละคลาส ไม่ปนกัน)
  * GET  ?view=archive&limit=24 → คลังปกล่าสุด — import listMegaCovers ตรง (แบบเดียวกับ /api/m/cover-editor) ไม่ hop HTTP
+ * GET  ?view=refs → ★ 27 ก.ค. ค่ำ (ปุ่ม "เปลี่ยนต้นแบบ"): 20 ต้นแบบ "เพจจริง" จากคลัง /api/ref-covers (ชื่อ+ยอดไลค์แกะจากชื่อไฟล์)
  * POST {newsTitle, content} → สร้างงานเต็มท่อ · POST {action:'delete', jobId} → ลบงาน (scope:'active' จำกัดคลาส compose/ref เท่านั้น)
+ * POST {kind:'compose', caseId, heroPersonHint?, refId?} → ★ 27 ก.ค. ค่ำ: เติม refId ให้ปุ่ม "เปลี่ยนต้นแบบ" ยิงต่อ (ของเดิมส่งแค่ caseId/heroPersonHint)
+ * POST {kind:'composeFrozen', caseId, refId, slotPlan} → ★ ใหม่ 27 ก.ค. ค่ำ (ปุ่ม "เปลี่ยนภาพรายช่อง"): ยิงตรง /api/mega/compose-test โหมด slotPlan แช่แข็ง
+ *   (ไม่ผ่านคิว quick-test — compose-test โหมดนี้ไม่รองรับผ่าน callOnce ปัจจุบัน ห้ามแก้ compose-test) รันสั้น (~20-30 วิ ข้าม S6/compass) จึงตอบ sync ในคำขอเดียว
  * ไฟล์ใหม่ล้วน ไม่แตะระบบข่าว/ระบบปกเดิม
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 120; // ★ 27 ก.ค. ค่ำ: 60→120 กันชนเวลาเมื่อ composeFrozen sync ยาวกว่าคาด (ปกติ ~20-30 วิ)
 
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
@@ -94,6 +98,21 @@ export async function GET(request) {
       return NextResponse.json({ success: true, caseId, total: items.length, items });
     }
 
+    // ★ 27 ก.ค. ค่ำ (ปุ่ม "เปลี่ยนต้นแบบ"): 20 ต้นแบบ "เพจจริง" จากคลัง ref-covers — ผ่านประตูนี้ (session/แอดมิน) แทนยิง /api/ref-covers ตรง
+    //   (endpoint นั้นเปิดไม่มีด่านสิทธิ์เอง — ไม่อยากให้จอ /m เปิดช่องยิงตรงข้ามด่านที่มี) ชื่อไฟล์แพทเทิร์น "เพจจริง-<ยอดไลค์>k-<หัวข้อ>"
+    if (request.nextUrl.searchParams.get('view') === 'refs') {
+      const r = await fetch(`${request.nextUrl.origin}/api/ref-covers`, { cache: 'no-store', signal: AbortSignal.timeout(15000) });
+      const d = await r.json().catch(() => ({}));
+      const items = (Array.isArray(d.items) ? d.items : [])
+        .filter((it) => /^เพจจริง/i.test(String(it?.styleName || '')))
+        .slice(0, 20)
+        .map((it) => {
+          const m = /^เพจจริง-([^-]+)-(.*)$/i.exec(String(it.styleName || ''));
+          return { id: it.id, styleName: it.styleName, likes: m ? m[1] : null, title: (m ? m[2] : it.styleName || '').slice(0, 60) };
+        });
+      return NextResponse.json({ success: true, items });
+    }
+
     // ★ 27 ก.ค. 69 (sol-review วิกฤต 2): kinds=compose,ref — คิวนี้เป็นของงานปกเท่านั้น กันงานโต๊ะข่าว (desk_*) หลุดมาโผล่จอปก
     const r = await fetch(`${request.nextUrl.origin}/api/quick-test?limit=30&kinds=compose,ref`, {
       headers: keyHeaders(), cache: 'no-store', signal: AbortSignal.timeout(20000),
@@ -125,19 +144,65 @@ export async function POST(request) {
     }
 
     // ⚡ ทางลัดประกอบ (kind='compose') — ประกอบปกจากคลังเคสเดิม ไม่ค้นรูปใหม่ เร็วกว่าเต็มท่อมาก
+    // ★ 27 ก.ค. ค่ำ: เติม refId (ไม่บังคับ) — ให้ปุ่ม "ประกอบใหม่ทั้งปก"/"เปลี่ยนตัวเอก"/"เปลี่ยนต้นแบบ" ใช้ทางเดียวกันนี้ได้
+    //   (quick-test เดิมรับ+ส่งต่อ refId ให้ compose-test อยู่แล้ว — แค่ประตูนี้ไม่เคยส่งต่อ ไม่แตะ quick-test)
     if (body.kind === 'compose') {
       const caseId = String(body.caseId || '').trim();
       if (!caseId) {
         return NextResponse.json({ success: false, error: 'เลือกเคสก่อนกดประกอบปก', errorType: 'BAD_INPUT' }, { status: 400 });
       }
       const heroPersonHint = String(body.heroPersonHint || '').slice(0, 100) || undefined;
+      const refId = String(body.refId || '').trim() || undefined;
       const r = await fetch(`${request.nextUrl.origin}/api/quick-test`, {
         method: 'POST', headers: keyHeaders(),
-        body: JSON.stringify({ kind: 'compose', caseId, heroPersonHint }),
+        body: JSON.stringify({ kind: 'compose', caseId, heroPersonHint, refId }),
         signal: AbortSignal.timeout(30000),
       });
       const d = await r.json();
       return NextResponse.json(d, { status: r.status });
+    }
+
+    // ★ ใหม่ 27 ก.ค. ค่ำ (ปุ่ม "เปลี่ยนภาพรายช่อง"): ประกอบใหม่แบบ "แผนแช่แข็ง" — คงตำแหน่งภาพเดิมทุกช่อง ยกเว้นช่องที่เลือกแทน
+    //   ยิงตรง /api/mega/compose-test (ห้ามแก้ไฟล์นั้น) ไม่ผ่านคิว quick-test เพราะ callOnce ปัจจุบันไม่ส่ง slotPlan ต่อ (ห้ามแก้ตรงนั้นด้วย)
+    //   รันสั้น (ข้าม S6/compass) จึงตอบ sync ในคำขอเดียว — ฝั่งแอพเอาไปสร้างเป็น "งานจำลอง" โชว์ในแถบงานเอง
+    if (body.kind === 'composeFrozen') {
+      const caseId = String(body.caseId || '').trim();
+      const refId = String(body.refId || '').trim();
+      // ★ แก้บั๊ก (รีวิว 27 ก.ค. ค่ำ รอบ 2): บังคับ isValidClipUrl ต่อ entry ก่อนส่งเข้า compose-test — กัน path "/..." อ่านไฟล์นอก public,
+      //   SSRF (ยิง URL ภายในเน็ตเวิร์ก), และ data: URL ยักษ์หลุดเข้ามาปนแล้วทำ payload บวม (คลังภาพจริงเป็น https ทั้งหมดอยู่แล้ว ไม่กระทบ flow ปกติ)
+      const slotPlan = (Array.isArray(body.slotPlan) ? body.slotPlan : [])
+        .filter((e) => e && typeof e.url === 'string' && isValidClipUrl(e.url))
+        .slice(0, 8)
+        .map((e) => ({ url: String(e.url), slot: e.slot ? String(e.slot).slice(0, 20) : null, isHero: !!e.isHero }));
+      if (!caseId) return NextResponse.json({ success: false, error: 'ต้องระบุ caseId', errorType: 'BAD_INPUT' }, { status: 400 });
+      if (!refId) return NextResponse.json({ success: false, error: 'ปกนี้ไม่มีข้อมูลต้นแบบเดิม (refId) — ลองกดประกอบใหม่ก่อน', errorType: 'BAD_INPUT' }, { status: 400 });
+      if (slotPlan.length < 3) return NextResponse.json({ success: false, error: 'ต้องมีอย่างน้อย 3 ช่องภาพ', errorType: 'BAD_INPUT' }, { status: 400 });
+      const r = await fetch(`${request.nextUrl.origin}/api/mega/compose-test`, {
+        method: 'POST', headers: keyHeaders(),
+        body: JSON.stringify({ caseId, refId, slotPlan }),
+        signal: AbortSignal.timeout(100000),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.success) {
+        return NextResponse.json({ success: false, error: d.error || `HTTP ${r.status}`, errorType: d.errorType || 'COMPOSE_FROZEN_FAILED' }, { status: r.status || 500 });
+      }
+      // ★ frozen mode ของ compose-test ไม่เข้าคลัง /mega-covers (ข้ามขั้นตอน archive เอง ดูโค้ด compose-test บรรทัด ~130-139)
+      //   → ไม่มี archivedId ให้ทำ /api/mega-covers/img?id=.. เหมือนสายปกติ ใช้ data URL จาก base64 แสดง/โหลดตรงแทน
+      // ★ แก้บั๊ก (รีวิว 27 ก.ค. ค่ำ รอบ 2): composeAndVerify คืน d.base64 เป็น data URL "data:image/jpeg;base64,..." อยู่แล้ว
+      //   ของเดิมใส่ prefix ซ้ำชั้นสอง → ภาพไม่ขึ้นเลย (ไม่ใช่ data URL ที่ถูกต้องอีกต่อไป)
+      return NextResponse.json({
+        success: true,
+        result: {
+          template: d.template || null,
+          refSimilarity: d.refSimilarity ?? null,
+          coverImgUrl: d.base64 || null,
+          caseId: d.caseId || caseId,
+          refUsed: d.refUsed?.id ? { id: d.refUsed.id, styleName: d.refUsed.styleName || null } : null,
+          slotPlanUsed: Array.isArray(d.slotPlanUsed)
+            ? d.slotPlanUsed.filter((e) => e && e.slot).map((e) => ({ url: e.url, slot: e.slot, isHero: !!e.isHero }))
+            : slotPlan,
+        },
+      });
     }
 
     // สร้างงานเต็มท่อ (kind='ref' เท่านั้น) — เกณฑ์ความยาวเดียวกับหน้า /quick-cover
