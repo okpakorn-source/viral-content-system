@@ -949,8 +949,7 @@ export default function MobileApp() {
         {clipPhase === 'done' && insight && (() => {
           const baseTopics = insightTopics(insight);
           const topics = effectiveTopics(insight);
-          // ★ รีวิว item 8: กันกรอบเทา "ข้อมูลดิบรวม" ซ้ำเนื้อกับการ์ดประเด็น เมื่อมีประเด็นใบเดียวและเนื้อดิบ = rawData ตัวเดียวกันเป๊ะ (fallback path ของ insightTopics)
-          const singleRawDup = !!insight.rawData && baseTopics.length === 1 && baseTopics[0].raw === insight.rawData;
+          // ★ 27 ก.ค. ค่ำ: ยกเลิก singleRawDup (item 8 เดิม) — เจ้าของสั่ง "เหมือนเว็บ 100%" กรอบเทาต้องโชว์เสมอแม้เนื้อซ้ำการ์ดประเด็น
           return <>
           {/* ★ 27 ก.ค. 69 (เจ้าของอนุมัติ — ครบเท่าเว็บ /clip-transcript): ป้ายหมวด + หัวเรื่อง + เมตา + ปุ่มเปิดคลิป/คัดลอก */}
           <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
@@ -995,6 +994,14 @@ export default function MobileApp() {
                   {k.detail && <p className="mm" style={{ marginTop: 3 }}>{k.detail}</p>}
                 </div>
               ))}
+            </div>
+          )}
+          {/* ★ 27 ก.ค. ค่ำ (เจ้าของชี้ "กรอบเทาไม่มา ต้องเหมือนเว็บ 100%"): กล่องเทาเนื้อดิบรวม โชว์เต็มเสมอ
+              ตำแหน่งเดียวกับเว็บเป๊ะ (คั่นระหว่างประเด็นสำคัญ กับ คำพูดสำคัญ) — เลิกพับซ่อน/เลิกเงื่อนไขข้าม */}
+          {insight.rawData && (
+            <div style={{ marginTop: 10, marginBottom: 4 }}>
+              <div className="bd" style={{ fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', maxHeight: 320, overflowY: 'auto', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>{insight.rawData}</div>
+              <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5, marginTop: 6 }} onClick={() => copyText(insight.rawData, insight.id || '')}>📋 คัดลอกข้อมูลดิบ</button>
             </div>
           )}
           {insight.quotes?.length > 0 && (
@@ -1076,15 +1083,6 @@ export default function MobileApp() {
                 </div>
               ))}
             </div>
-          )}
-
-          {/* ★ เนื้อดิบเต็มกรอบเทา (ภาพรวมทั้งคลิป) — เท่าเว็บ · item 8: ซ่อนเมื่อซ้ำกับการ์ดประเด็นใบเดียว */}
-          {insight.rawData && !singleRawDup && (
-            <details className="raw" style={{ marginTop: 14 }}>
-              <summary>📄 ข้อมูลดิบรวม (ภาพรวมทั้งคลิป) — {insight.rawData.length} ตัวอักษร</summary>
-              <div style={{ maxHeight: 320, overflowY: 'auto' }}>{insight.rawData}</div>
-              <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5, marginTop: 7 }} onClick={() => copyText(insight.rawData, insight.id || '')}>📋 คัดลอกข้อมูลดิบ</button>
-            </details>
           )}
 
           {/* ★ เนื้อดิบมีมิติ (transcriptQuotes) — กรอบม่วง เท่าเว็บ · item 3: เปิดกรอบเมื่อมี transcriptQuotes อยู่จริง (กัน punchyQuotes/transcript เดี่ยวๆ หายทั้งกรอบ) */}
