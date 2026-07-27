@@ -235,6 +235,17 @@ export default function MobileApp() {
   const [rawEditing, setRawEditing] = useState(false); // กางช่องแก้กรอบเทาอยู่ไหม
   const [purpleEdit, setPurpleEdit] = useState(null);
   const [purpleEditing, setPurpleEditing] = useState(false); // กางช่องแก้กรอบม่วงอยู่ไหม
+  // ★ 27 ก.ค. ค่ำ v2 (ฟีดแบ็กเจ้าของ: ช่องแก้เดิมเล็ก/เลื่อนหาคำยาก) — หน้าแก้เต็มจอใช้ร่วมกัน 3 จุด (การ์ดประเด็น/กรอบเทา/กรอบม่วง)
+  //   editSnapshot = ค่า "ก่อนเปิดหน้าแก้รอบนี้" (undefined/null = ยังไม่เคยแก้มาก่อน) — ใช้เฉพาะปุ่ม "✖ ยกเลิก" คืนค่ากลับจุดที่เปิด (ต่างจาก "↩︎ คืนค่าเดิม" ที่ล้างกลับต้นฉบับ AI เสมอ)
+  const [editSnapshot, setEditSnapshot] = useState(undefined);
+  // ล็อกสกรอลพื้นหลังตอนหน้าแก้เต็มจอเปิดอยู่ — คืนค่าเดิมตอนปิด
+  useEffect(() => {
+    const open = editingIdx !== null || rawEditing || purpleEditing;
+    if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prevOverflow; };
+  }, [editingIdx, rawEditing, purpleEditing]);
 
   // ── สกัดเนื้อหา ── (ตรงตามเว็บ /news-filter ยกเครื่อง 19-24 มิ.ย.: ปิดดึงลิงก์ + เหลือโหมดเดียว)
   const [nfText, setNfText] = useState('');
@@ -591,10 +602,41 @@ export default function MobileApp() {
     const e = topicEdits[i];
     return e ? { ...t, topic: e.topic ?? t.topic, raw: e.raw ?? t.raw } : t;
   });
-  // แตะไอคอนดินสอ → เปิด/ปิดช่องแก้ของประเด็นนั้น (seed ค่าตั้งต้นจากเนื้อหาปัจจุบันครั้งแรกที่เปิด)
+  // ★ 27 ก.ค. ค่ำ v2: แตะไอคอนดินสอ → เปิด "หน้าแก้เต็มจอ" เสมอ (ไม่ toggle ปิดอีกต่อไป — ปิดทำผ่านปุ่ม 3 ปุ่มในหน้าแก้เท่านั้น)
+  //   seed ค่าตั้งต้นจากเนื้อหาปัจจุบันครั้งแรกที่เปิด + เก็บ editSnapshot (ค่าก่อนเปิดรอบนี้) ไว้ให้ปุ่ม "✖ ยกเลิก" คืนกลับแม่นยำ
   const startEditTopic = (i) => {
+    setEditSnapshot(topicEdits[i]);
     setTopicEdits(m => (m[i] ? m : { ...m, [i]: { topic: insightTopics(insight)[i]?.topic || '', raw: insightTopics(insight)[i]?.raw || '' } }));
-    setEditingIdx(idx => (idx === i ? null : i));
+    setEditingIdx(i);
+  };
+  // เปิดหน้าแก้เต็มจอของ "กรอบเทา" (ข้อมูลดิบรวม)
+  const openRawEditor = () => {
+    setEditSnapshot(rawEdit);
+    if (rawEdit == null) setRawEdit(insight?.rawData || '');
+    setRawEditing(true);
+  };
+  // เปิดหน้าแก้เต็มจอของ "กรอบม่วง" (เนื้อหลัก enrichedRaw เท่านั้น — ส่วนอื่นในกรอบม่วงไม่มีดินสอ)
+  const openPurpleEditor = () => {
+    setEditSnapshot(purpleEdit);
+    if (purpleEdit == null) setPurpleEdit(insight?.transcriptQuotes?.enrichedRaw || '');
+    setPurpleEditing(true);
+  };
+  const closeAllEditors = () => { setEditingIdx(null); setRawEditing(false); setPurpleEditing(false); };
+  // ✅ เสร็จแล้ว — ปิดหน้าแก้ เก็บค่าที่พิมพ์ไว้ (ผูกกับ state จริงผ่าน onChange อยู่แล้ว ไม่ต้องทำอะไรเพิ่ม)
+  const confirmEditor = () => { closeAllEditors(); };
+  // ↩︎ คืนค่าเดิม — ล้างกลับ "ต้นฉบับ AI" ทั้งหมด (เหมือนปุ่ม ↩︎ นอกหน้าแก้เป๊ะ)
+  const revertEditor = () => {
+    if (editingIdx !== null) { const i = editingIdx; setTopicEdits(m => { const n = { ...m }; delete n[i]; return n; }); }
+    else if (rawEditing) setRawEdit(null);
+    else if (purpleEditing) setPurpleEdit(null);
+    closeAllEditors();
+  };
+  // ✖ ยกเลิก — กลับค่า "ก่อนเปิดหน้าแก้รอบนี้" เป๊ะ (ต่างจาก ↩︎ ตรงที่ถ้าเคยแก้มาก่อนหน้านี้แล้ว จะไม่ล้างของเก่าทิ้งไปด้วย)
+  const cancelEditor = () => {
+    if (editingIdx !== null) { const i = editingIdx; setTopicEdits(m => ({ ...m, [i]: editSnapshot })); }
+    else if (rawEditing) setRawEdit(editSnapshot ?? null);
+    else if (purpleEditing) setPurpleEdit(editSnapshot ?? null);
+    closeAllEditors();
   };
   // ข้อความ "คัดลอกทั้งหมด" — พอร์ตจากเว็บ /clip-transcript (insightCaseText + topicText) ตรงเป๊ะ รวม early-return ของ multiTopic ด้วย
   const clipAllText = (ins) => {
@@ -1039,18 +1081,10 @@ export default function MobileApp() {
                       onClick={() => setRawEdit(null)}>↩︎</button>
                   )}
                   <button className="gh" title="แก้ไขก่อนส่ง" style={{ width: 40, height: 40, padding: 0, fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                    onClick={() => { if (rawEdit == null) setRawEdit(insight.rawData); setRawEditing(o => !o); }}>✏️</button>
+                    onClick={openRawEditor}>✏️</button>
                 </div>
               </div>
-              {rawEditing ? (
-                <>
-                  <textarea className="ta" style={{ minHeight: 120, background: 'var(--panel)', border: '1.5px solid var(--line)', borderRadius: 10, padding: 10, width: '100%' }}
-                    value={rawEdit ?? insight.rawData} onChange={e => setRawEdit(e.target.value)} placeholder="เนื้อดิบรวม" />
-                  <button className="gh" style={{ marginTop: 6 }} onClick={() => setRawEditing(false)}>✅ เสร็จแล้ว ปิดช่องแก้</button>
-                </>
-              ) : (
-                <div className="bd" style={{ fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', maxHeight: 320, overflowY: 'auto', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>{rawEdit ?? insight.rawData}</div>
-              )}
+              <div className="bd" style={{ fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', maxHeight: 320, overflowY: 'auto', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>{rawEdit ?? insight.rawData}</div>
               <div className="row" style={{ gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
                 <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5 }} onClick={() => copyText(insight.rawData, insight.id || '')}>📋 คัดลอกข้อมูลดิบ</button>
                 <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5, borderColor: 'var(--pink)', color: 'var(--pink)' }} onClick={sendRawToWrite}>🚀 ส่งกรอบนี้เข้าเขียนข่าว</button>
@@ -1097,18 +1131,9 @@ export default function MobileApp() {
                   </div>
                 </div>
                 {t.time && <p className="du">ช่วง {t.time}</p>}
-                {editingIdx === i ? (
-                  <div onClick={e => e.stopPropagation()} style={{ marginTop: 8 }}>
-                    <input className="in" style={{ marginBottom: 6, padding: '9px 11px' }} value={topicEdits[i]?.topic ?? t.topic}
-                      onChange={e => setTopicEdits(m => ({ ...m, [i]: { topic: e.target.value, raw: m[i]?.raw ?? t.raw } }))} placeholder="หัวข้อ" />
-                    <textarea className="ta" style={{ minHeight: 90, background: 'var(--panel)', border: '1.5px solid var(--line)', borderRadius: 10, padding: 10, width: '100%' }}
-                      value={topicEdits[i]?.raw ?? t.raw}
-                      onChange={e => setTopicEdits(m => ({ ...m, [i]: { topic: m[i]?.topic ?? t.topic, raw: e.target.value } }))} placeholder="เนื้อดิบ" />
-                    <button className="gh" style={{ marginTop: 6 }} onClick={() => setEditingIdx(null)}>✅ เสร็จแล้ว ปิดช่องแก้</button>
-                  </div>
-                ) : (t.raw && <details className="raw" onClick={e => e.stopPropagation()}><summary>เนื้อดิบ ({t.raw.length} ตัวอักษร)</summary><div>{t.raw}</div>
+                {t.raw && <details className="raw" onClick={e => e.stopPropagation()}><summary>เนื้อดิบ ({t.raw.length} ตัวอักษร)</summary><div>{t.raw}</div>
                   <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5, marginTop: 7 }} onClick={e => { e.stopPropagation(); copyText(`${t.topic}${t.time ? ` (ช่วง ${t.time})` : ''}\n\n${t.raw}`); }}>📋 คัดลอกประเด็นนี้</button>
-                </details>)}
+                </details>}
               </div>
             </div>
           ))}
@@ -1157,18 +1182,10 @@ export default function MobileApp() {
                           onClick={() => setPurpleEdit(null)}>↩︎</button>
                       )}
                       <button className="gh" title="แก้ไขก่อนส่ง" style={{ width: 40, height: 40, padding: 0, fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        onClick={() => { if (purpleEdit == null) setPurpleEdit(insight.transcriptQuotes.enrichedRaw); setPurpleEditing(o => !o); }}>✏️</button>
+                        onClick={openPurpleEditor}>✏️</button>
                     </div>
                   </div>
-                  {purpleEditing ? (
-                    <>
-                      <textarea className="ta" style={{ minHeight: 120, background: 'var(--panel)', border: '1.5px solid var(--line)', borderRadius: 10, padding: 10, width: '100%' }}
-                        value={purpleEdit ?? insight.transcriptQuotes.enrichedRaw} onChange={e => setPurpleEdit(e.target.value)} placeholder="เนื้อดิบมีมิติ" />
-                      <button className="gh" style={{ marginTop: 6 }} onClick={() => setPurpleEditing(false)}>✅ เสร็จแล้ว ปิดช่องแก้</button>
-                    </>
-                  ) : (
-                    <div className="bd" style={{ fontSize: 13 }}>{purpleEdit ?? insight.transcriptQuotes.enrichedRaw}</div>
-                  )}
+                  <div className="bd" style={{ fontSize: 13 }}>{purpleEdit ?? insight.transcriptQuotes.enrichedRaw}</div>
                   <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
                     <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5 }} onClick={() => copyText(insight.transcriptQuotes.enrichedRaw)}>📋 คัดลอกกรอบนี้</button>
                     <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5, borderColor: 'var(--pink)', color: 'var(--pink)' }} onClick={sendPurpleToWrite}>🚀 ส่งกรอบนี้เข้าเขียนข่าว</button>
@@ -1760,6 +1777,49 @@ export default function MobileApp() {
         <button className={'tab' + (tab === 'desk' ? ' on' : '')} onClick={() => setTab('desk')}>{IC.desk}โต๊ะข่าว</button>
       </div></div>
       {toast && <div className="toast">{toast}</div>}
+
+      {/* ★ 27 ก.ค. ค่ำ v2 (ฟีดแบ็กเจ้าของ — ช่องแก้เดิมเล็ก/เลื่อนหาคำยาก): หน้าแก้เต็มจอ ใช้ร่วมกันทั้ง 3 จุด (การ์ดประเด็น / กรอบเทา / กรอบม่วง)
+          ครอบทั้งจอ (ทับแท็บบาร์ด้วย) กันสลับแท็บระหว่างแก้ · ล็อกสกรอลพื้นหลังด้วย useEffect ด้านบน · ทำงานได้ทั้งผลสดและเปิดจากคลัง (ไม่ผูกกับแหล่งที่มา) */}
+      {(editingIdx !== null || rawEditing || purpleEditing) && (() => {
+        const isTopic = editingIdx !== null;
+        const i = editingIdx;
+        const curTopic = isTopic ? effectiveTopics(insight)[i] : null;
+        const kindTitle = isTopic ? `แก้ประเด็น ${curTopic?.no ?? i + 1}` : rawEditing ? 'แก้ข้อมูลดิบรวม' : 'แก้เนื้อดิบมีมิติ';
+        const titleVal = isTopic ? (topicEdits[i]?.topic ?? curTopic?.topic ?? '') : '';
+        const bodyVal = isTopic ? (topicEdits[i]?.raw ?? curTopic?.raw ?? '')
+          : rawEditing ? (rawEdit ?? insight?.rawData ?? '')
+          : (purpleEdit ?? insight?.transcriptQuotes?.enrichedRaw ?? '');
+        const setTitleField = (v) => setTopicEdits(m => ({ ...m, [i]: { topic: v, raw: m[i]?.raw ?? curTopic?.raw ?? '' } }));
+        const setBodyField = (v) => {
+          if (isTopic) setTopicEdits(m => ({ ...m, [i]: { topic: m[i]?.topic ?? curTopic?.topic ?? '', raw: v } }));
+          else if (rawEditing) setRawEdit(v);
+          else setPurpleEdit(v);
+        };
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'var(--bg)', display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}>
+            <div style={{ width: '100%', maxWidth: 560, margin: '0 auto', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <div style={{ padding: '16px 16px 10px', borderBottom: '1px solid var(--line)', flex: 'none' }}>
+                <p style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>✏️ {kindTitle}</p>
+              </div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: '12px 16px', gap: 8 }}>
+                {isTopic && (
+                  <input className="in" style={{ flex: 'none' }} value={titleVal} onChange={e => setTitleField(e.target.value)} placeholder="หัวข้อ" />
+                )}
+                <textarea
+                  style={{ flex: 1, minHeight: '55vh', fontSize: 16, lineHeight: 1.8, background: 'var(--panel)', border: '1.5px solid var(--line)', borderRadius: 12, padding: 12, width: '100%', resize: 'none', fontFamily: 'inherit', color: 'inherit' }}
+                  value={bodyVal} onChange={e => setBodyField(e.target.value)} placeholder="เนื้อดิบ" autoFocus
+                />
+                <p style={{ textAlign: 'right', fontSize: 11.5, color: 'var(--mut)', flex: 'none', margin: 0 }}>{bodyVal.length.toLocaleString('th-TH')} ตัวอักษร</p>
+              </div>
+              <div style={{ display: 'flex', gap: 8, padding: '10px 16px calc(10px + env(safe-area-inset-bottom))', borderTop: '1px solid var(--line)', flex: 'none', background: 'var(--panel)' }}>
+                <button className="cta" style={{ flex: 1, minHeight: 44, padding: '10px 6px', fontSize: 13.5 }} onClick={confirmEditor}>✅ เสร็จแล้ว</button>
+                <button className="gh" style={{ flex: 1, minHeight: 44, padding: '10px 6px', fontSize: 13.5 }} onClick={revertEditor}>↩︎ คืนค่าเดิม</button>
+                <button className="gh" style={{ flex: 1, minHeight: 44, padding: '10px 6px', fontSize: 13.5, borderColor: '#ef4444', color: '#ef4444' }} onClick={cancelEditor}>✖ ยกเลิก</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
