@@ -223,6 +223,12 @@ export default function MobileApp() {
   const [clipErr, setClipErr] = useState('');
   const [insightCases, setInsightCases] = useState([]);
   const clipPollRef = useRef(null);
+  // ★ 27 ก.ค. 69 (เจ้าของอนุมัติ — อัปเกรดแท็บถอดคลิปให้ครบเท่าเว็บ /clip-transcript):
+  //   insightMeta = เมตาของ insight ที่กำลังโชว์ (ลิงก์/แพลตฟอร์ม/คนส่ง/วันที่/หมวด) — งานสดใช้ค่าตอนส่ง · จากคลังใช้ค่าของเคสนั้น
+  const [insightMeta, setInsightMeta] = useState(null);
+  // topicEdits = ข้อความที่แก้ก่อนส่งเขียน {[idx]: {topic, raw}} — ทับเฉพาะช่องที่แก้ ช่องอื่นยังใช้ของเดิม
+  const [topicEdits, setTopicEdits] = useState({});
+  const [editingIdx, setEditingIdx] = useState(null); // idx การ์ดประเด็นที่กางช่องแก้ไขอยู่ (null = ปิดหมด)
 
   // ── สกัดเนื้อหา ── (ตรงตามเว็บ /news-filter ยกเครื่อง 19-24 มิ.ย.: ปิดดึงลิงก์ + เหลือโหมดเดียว)
   const [nfText, setNfText] = useState('');
@@ -526,7 +532,7 @@ export default function MobileApp() {
   const startClip = async () => {
     const u = clipUrl.trim();
     if (!/^https?:\/\//i.test(u)) { say('วางลิงก์คลิปก่อน (TikTok / YouTube / FB)'); return; }
-    setClipErr(''); setInsight(null); setSelTopics([]); setClipPhase('queued'); setClipPos(0);
+    setClipErr(''); setInsight(null); setSelTopics([]); setTopicEdits({}); setEditingIdx(null); setInsightMeta(null); setClipPhase('queued'); setClipPos(0);
     try {
       const r = await fetch('/api/clip-transcript/submit', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -546,6 +552,12 @@ export default function MobileApp() {
           else if (st.status === 'done') {
             clearInterval(clipPollRef.current);
             setInsight(st.result || {}); setClipPhase('done'); loadInsightCases(); say('ถอดเสร็จ — เลือกประเด็นได้เลย');
+            // ★ เก็บเมตาไว้โชว์เท่าเว็บ (ลิงก์เปิดคลิป/แพลตฟอร์ม/คนส่ง/วันที่/ธงคุณภาพ) — job-status ไม่ส่ง url กลับมาใน result จึงใช้ค่าที่พิมพ์ไว้ตอนส่ง
+            //   ★ รีวิว: lowQuality/qualityNote ทางสดอยู่บน st.result ตรงๆ (ผลเดียวกับ /api/clip-transcript/insight) — ย้ายเข้า insightMeta ให้ใช้ทางเดียวกับเคสจากคลัง
+            setInsightMeta({
+              url: u, platform: st.platform || (st.result || {}).platform || '', user: 'mobile-' + me, createdAt: new Date().toISOString(),
+              category: (st.result || {}).category || '', lowQuality: !!(st.result || {}).lowQuality, qualityNote: (st.result || {}).qualityNote || '',
+            });
             log('clip_done', d.jobId, { topics: insightTopics(st.result || {}).length });
           } else if (st.status === 'error') { clearInterval(clipPollRef.current); setClipPhase('error'); setClipErr(st.error || 'ถอดไม่สำเร็จ'); }
           if (tries > 200) { clearInterval(clipPollRef.current); setClipPhase('error'); setClipErr('งานยังทำอยู่เบื้องหลัง — เสร็จแล้วจะโผล่ในคลังถอดประเด็นด้านล่าง'); }
@@ -567,9 +579,56 @@ export default function MobileApp() {
     return [{ topic: ins.headline || ins.overview || 'ประเด็นจากคลิป', time: '', raw: ins.rawData || '', no: 1 }];
   };
 
+  // ★ 27 ก.ค. 69: ประเด็นที่ "แก้แล้ว" (หัวข้อ/เนื้อดิบ) ทับของเดิมเฉพาะช่องที่แตะดินสอแก้ — ช่องอื่นใช้ผลจาก AI ตามปกติ
+  const effectiveTopics = (ins) => insightTopics(ins).map((t, i) => {
+    const e = topicEdits[i];
+    return e ? { ...t, topic: e.topic ?? t.topic, raw: e.raw ?? t.raw } : t;
+  });
+  // แตะไอคอนดินสอ → เปิด/ปิดช่องแก้ของประเด็นนั้น (seed ค่าตั้งต้นจากเนื้อหาปัจจุบันครั้งแรกที่เปิด)
+  const startEditTopic = (i) => {
+    setTopicEdits(m => (m[i] ? m : { ...m, [i]: { topic: insightTopics(insight)[i]?.topic || '', raw: insightTopics(insight)[i]?.raw || '' } }));
+    setEditingIdx(idx => (idx === i ? null : i));
+  };
+  // ข้อความ "คัดลอกทั้งหมด" — พอร์ตจากเว็บ /clip-transcript (insightCaseText + topicText) ตรงเป๊ะ รวม early-return ของ multiTopic ด้วย
+  const clipAllText = (ins) => {
+    if (!ins) return '';
+    const parts = [];
+    if (ins.headline) parts.push(`📌 ${ins.headline}`);
+    if (ins.overview) parts.push(ins.overview);
+    if (ins.multiTopic && ins.topics?.length) {
+      parts.push(`— แยก ${ins.topics.length} ประเด็น —`);
+      ins.topics.forEach((t) => {
+        const lines = [`【${t.no}】 ${t.title || ''}${(t.timeStart || t.timeEnd) ? `  (${t.timeStart || '?'}–${t.timeEnd || '?'})` : ''}`];
+        if (t.summary) lines.push(t.summary);
+        if (t.keyPoints?.length) lines.push(t.keyPoints.map((k) => `• ${k}`).join('\n'));
+        if (t.quotes?.length) lines.push(t.quotes.map((q) => `"${q}"`).join('\n'));
+        parts.push(lines.join('\n'));
+      });
+      return parts.join('\n\n'); // ★ เท่าเว็บ: คลิปยาว (multiTopic) จบที่นี่ ไม่ต่อ rawData/subStories/transcriptQuotes
+    }
+    if (ins.keyPoints?.length) parts.push('— ประเด็นสำคัญ —\n' + ins.keyPoints.map((k, i) => `${i + 1}. ${k.point}${k.detail ? ' — ' + k.detail : ''}`).join('\n'));
+    if (ins.quotes?.length) parts.push('— คำพูดสำคัญ —\n' + ins.quotes.map(q => `"${q}"`).join('\n'));
+    if (ins.rawData) parts.push('— ข้อมูลดิบรวม —\n' + ins.rawData);
+    if (ins.subStories?.length) {
+      ins.subStories.forEach((s, i) => parts.push(`— เนื้อดิบประเด็น ${s.no || i + 1}: ${s.topic}${s.timeRange ? ` (${s.timeRange})` : ''} —\n${s.rawData}${s.quotes?.length ? '\n\nคำพูด:\n' + s.quotes.map(q => `"${q}"`).join('\n') : ''}`));
+    }
+    const tq = ins.transcriptQuotes;
+    if (tq) {
+      if (tq.enrichedRaw) parts.push('— เนื้อดิบมีมิติ (ประเด็น+คำพูดจริง พร้อมเขียนข่าว) —\n' + tq.enrichedRaw);
+      if (tq.enrichedTopics?.length) tq.enrichedTopics.forEach((t, i) => parts.push(`— เนื้อดิบมีมิติ ประเด็น ${t.no || i + 1}: ${t.topic}${t.timeRange ? ` (${t.timeRange})` : ''} —\n${t.enrichedRaw}`));
+      if (tq.punchyQuotes?.length) parts.push('— ประโยคเด็ด —\n' + tq.punchyQuotes.map(q => `"${q.quote}"${q.speaker ? ' — ' + q.speaker : ''}${q.why ? ' (' + q.why + ')' : ''}`).join('\n'));
+      if (tq.transcript) parts.push('— บทพูดในคลิป (ไม่รวมเพลง) —\n' + tq.transcript);
+    }
+    return parts.join('\n\n');
+  };
+
   const sendTopicsToWrite = () => {
-    const tps = insightTopics(insight).filter((_, i) => selTopics.includes(i));
-    if (!tps.length) { say('เลือกอย่างน้อย 1 ประเด็นก่อน'); return; }
+    const picked = effectiveTopics(insight).filter((_, i) => selTopics.includes(i));
+    if (!picked.length) { say('เลือกอย่างน้อย 1 ประเด็นก่อน'); return; }
+    // ★ รีวิว: ประเด็นที่แก้จนว่างทั้งหัวข้อและเนื้อดิบ → ตัดทิ้งก่อนส่ง กันเจนจากช่องว่างเปล่า
+    const tps = picked.filter(t => (t.topic || '').trim() || (t.raw || '').trim());
+    if (!tps.length) { say('ประเด็นที่เลือกถูกแก้จนว่างหมด — เติมข้อความก่อนส่ง'); return; }
+    if (tps.length < picked.length) say(`ข้าม ${picked.length - tps.length} ประเด็นที่แก้จนว่าง — ส่งเฉพาะที่มีเนื้อหา`);
     let input = tps.map(t =>
       `${t.topic}${t.time ? ` (ช่วง ${t.time})` : ''}\n\n${t.raw || ''}${t.quotes?.length ? '\n\nคำพูดจากคลิป:\n' + t.quotes.map(q => `"${q}"`).join('\n') : ''}`
     ).join('\n\n———\n\n');
@@ -887,29 +946,204 @@ export default function MobileApp() {
         </button>
         {clipErr && <div className="err">{clipErr}</div>}
 
-        {clipPhase === 'done' && insight && <>
-          <h2>เจอ {insightTopics(insight).length} ประเด็น — แตะเลือกแล้วส่งเขียน</h2>
-          {insight.category && <p className="sub" style={{ marginBottom: 8 }}>หมวด: {insight.category}{insight.engine ? ` · ${String(insight.engine).includes('gemini-video') ? 'Gemini ดูคลิป' : 'จากบทถอดเสียง'}` : ''}</p>}
-          {insightTopics(insight).map((t, i) => (
+        {clipPhase === 'done' && insight && (() => {
+          const baseTopics = insightTopics(insight);
+          const topics = effectiveTopics(insight);
+          // ★ รีวิว item 8: กันกรอบเทา "ข้อมูลดิบรวม" ซ้ำเนื้อกับการ์ดประเด็น เมื่อมีประเด็นใบเดียวและเนื้อดิบ = rawData ตัวเดียวกันเป๊ะ (fallback path ของ insightTopics)
+          const singleRawDup = !!insight.rawData && baseTopics.length === 1 && baseTopics[0].raw === insight.rawData;
+          return <>
+          {/* ★ 27 ก.ค. 69 (เจ้าของอนุมัติ — ครบเท่าเว็บ /clip-transcript): ป้ายหมวด + หัวเรื่อง + เมตา + ปุ่มเปิดคลิป/คัดลอก */}
+          <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+            {insight.clipTypeLabel && <span className="chip cpk">{insight.emoji || '🎬'} {insight.clipTypeLabel}</span>}
+            {(insightMeta?.category || insight.category) && <span className="chip" style={{ background: 'var(--warnS)', color: 'var(--warn)' }}>📂 {insightMeta?.category || insight.category}</span>}
+            <span className="chip cmu">{String(insight.engine || '').includes('gemini-video') ? '👁️ Gemini ดูคลิป' : '📝 จากบทถอดเสียง'}</span>
+            {insight.multiTopic && <span className="chip" style={{ background: 'var(--warnS)', color: 'var(--warn)' }}>📚 คลิปยาว · {insight.totalTopics || insight.topics?.length || 0} ประเด็น</span>}
+          </div>
+
+          {/* ★ item 2: ป้าย ⚡ ผลจากคลัง — เท่าเว็บ (เฉพาะทางสด insight.cached เพราะเคสจากคลังไม่ได้เก็บฟิลด์นี้) */}
+          {insight.cached && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, padding: '9px 12px', borderRadius: 9, background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.3)', color: '#22c55e', marginTop: 9 }}>
+              ⚡ <b>ผลจากคลัง</b> — คลิปนี้เคยถอดไว้แล้ว{insight.cachedAt ? ` เมื่อ ${fmtTime(insight.cachedAt)}` : ''} (ไม่เสียเวลา/ค่าถอดซ้ำ)
+            </div>
+          )}
+
+          {insight.headline && <p className="tt" style={{ fontSize: 16, marginTop: 9 }}>📌 {insight.headline}</p>}
+          {insight.speakers?.length > 0 && <p className="mm" style={{ marginTop: 4 }}>🗣️ ผู้พูด: {insight.speakers.join(', ')}</p>}
+          {insight.usageNote && <p className="bd" style={{ fontSize: 12.5, color: '#a78bfa', marginTop: 8, padding: '8px 11px', background: 'rgba(124,58,237,.07)', borderRadius: 8 }}>💡 {insight.usageNote}</p>}
+
+          <p className="mm" style={{ marginTop: 8 }}>
+            {insightMeta?.platform ? `${{ youtube: '📺 YouTube', tiktok: '🎵 TikTok', meta: '📘 Facebook/IG' }[insightMeta.platform] || insightMeta.platform} · ` : ''}
+            {topics.length} ประเด็น
+            {insight.subStories?.length ? ` · 🧩 ${insight.subStories.length} เนื้อดิบแยก` : ''}
+            {insightMeta?.user ? ` · 👤 ${insightMeta.user}` : ''}
+            {insightMeta?.createdAt ? ` · ${fmtTime(insightMeta.createdAt)}` : ''}
+          </p>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 8, marginTop: 9, marginBottom: 2 }}>
+            {insightMeta?.url && <a className="lnk" href={insightMeta.url} target="_blank" rel="noreferrer">🔗 เปิดคลิป</a>}
+            {insight.rawData && <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5 }} onClick={() => copyText(insight.rawData, insight.id || '')}>📋 คัดลอกข้อมูลดิบ</button>}
+            <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5 }} onClick={() => copyText(clipAllText(insight), insight.id || '')}>📋 คัดลอกทั้งหมด</button>
+          </div>
+          {insight.overview && <p className="bd" style={{ fontSize: 13.5, marginTop: 6, marginBottom: 6 }}>{insight.overview}</p>}
+
+          {/* ★ item 2: keyPoints / quotes / timeline — บล็อกที่เว็บมีแต่แอพเคยขาด */}
+          {insight.keyPoints?.length > 0 && (
+            <div style={{ marginTop: 10, marginBottom: 4 }}>
+              <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--mut)', marginBottom: 6 }}>🎯 ประเด็นสำคัญ ({insight.keyPoints.length})</p>
+              {insight.keyPoints.map((k, i) => (
+                <div key={i} style={{ padding: '9px 11px', borderRadius: 9, background: 'var(--card)', borderLeft: '3px solid #2563eb', marginBottom: 6 }}>
+                  <p style={{ fontSize: 13, fontWeight: 700 }}>{i + 1}. {k.point}</p>
+                  {k.detail && <p className="mm" style={{ marginTop: 3 }}>{k.detail}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+          {insight.quotes?.length > 0 && (
+            <div style={{ marginTop: 10, marginBottom: 4 }}>
+              <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--mut)', marginBottom: 6 }}>💬 คำพูดสำคัญ</p>
+              {insight.quotes.map((q, i) => (
+                <div key={i} style={{ fontSize: 12.5, padding: '7px 10px', marginBottom: 5, borderLeft: '3px solid #22c55e', background: 'rgba(34,197,94,.06)', borderRadius: 7 }}>&ldquo;{q}&rdquo;</div>
+              ))}
+            </div>
+          )}
+          {insight.timeline?.length > 0 && (
+            <div style={{ marginTop: 10, marginBottom: 4 }}>
+              <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--mut)', marginBottom: 6 }}>⏱️ ช่วงจังหวะในคลิป</p>
+              {insight.timeline.map((tl, i) => (
+                <div key={i} style={{ display: 'flex', gap: 9, fontSize: 12.5, marginBottom: 3 }}>
+                  <span style={{ color: '#60a5fa', fontWeight: 700, minWidth: 78, flexShrink: 0 }}>{tl.time || '—'}</span>
+                  <span style={{ color: 'var(--mut)' }}>{tl.topic}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <h2>เจอ {topics.length} ประเด็น — แตะเลือกแล้วส่งเขียน</h2>
+          {topics.map((t, i) => (
             <div key={i} className={'topic' + (selTopics.includes(i) ? ' sel' : '')} onClick={() => setSelTopics(s => s.includes(i) ? s.filter(x => x !== i) : [...s, i])}>
               <span className="num">{t.no}</span>
-              <div><p className="tx">{t.topic}</p>{t.time && <p className="du">ช่วง {t.time}</p>}
-                {t.raw && <details className="raw" onClick={e => e.stopPropagation()}><summary>เนื้อดิบ ({t.raw.length} ตัวอักษร)</summary><div>{t.raw}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="row" style={{ alignItems: 'flex-start', gap: 6 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p className="tx" style={{ overflowWrap: 'anywhere' }}>{t.topic}</p>
+                    {topicEdits[i] && <span className="chip cpk" style={{ fontSize: 10, marginTop: 4, display: 'inline-block' }}>✏️ แก้แล้ว</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, flex: 'none' }}>
+                    {topicEdits[i] && (
+                      <button className="gh" title="คืนค่าเดิม" style={{ width: 40, height: 40, padding: 0, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={e => { e.stopPropagation(); setTopicEdits(m => { const n = { ...m }; delete n[i]; return n; }); }}>↩︎</button>
+                    )}
+                    <button className="gh" title="แก้ไขก่อนส่ง" style={{ width: 40, height: 40, padding: 0, fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      onClick={e => { e.stopPropagation(); startEditTopic(i); }}>✏️</button>
+                  </div>
+                </div>
+                {t.time && <p className="du">ช่วง {t.time}</p>}
+                {editingIdx === i ? (
+                  <div onClick={e => e.stopPropagation()} style={{ marginTop: 8 }}>
+                    <input className="in" style={{ marginBottom: 6, padding: '9px 11px' }} value={topicEdits[i]?.topic ?? t.topic}
+                      onChange={e => setTopicEdits(m => ({ ...m, [i]: { topic: e.target.value, raw: m[i]?.raw ?? t.raw } }))} placeholder="หัวข้อ" />
+                    <textarea className="ta" style={{ minHeight: 90, background: 'var(--panel)', border: '1.5px solid var(--line)', borderRadius: 10, padding: 10, width: '100%' }}
+                      value={topicEdits[i]?.raw ?? t.raw}
+                      onChange={e => setTopicEdits(m => ({ ...m, [i]: { topic: m[i]?.topic ?? t.topic, raw: e.target.value } }))} placeholder="เนื้อดิบ" />
+                    <button className="gh" style={{ marginTop: 6 }} onClick={() => setEditingIdx(null)}>✅ เสร็จแล้ว ปิดช่องแก้</button>
+                  </div>
+                ) : (t.raw && <details className="raw" onClick={e => e.stopPropagation()}><summary>เนื้อดิบ ({t.raw.length} ตัวอักษร)</summary><div>{t.raw}</div>
                   <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5, marginTop: 7 }} onClick={e => { e.stopPropagation(); copyText(`${t.topic}${t.time ? ` (ช่วง ${t.time})` : ''}\n\n${t.raw}`); }}>📋 คัดลอกประเด็นนี้</button>
-                </details>}
+                </details>)}
               </div>
             </div>
           ))}
+
+          {/* ★ item 1: แถบเตือนแดง — ธงคุณภาพไม่สมบูรณ์ เหนือปุ่มส่ง เท่าเว็บ */}
+          {insightMeta?.lowQuality && <div className="err">⚠️ {insightMeta.qualityNote || 'ผลอาจไม่สมบูรณ์ — แนะนำกดถอดใหม่'}</div>}
           <button className="cta" style={{ marginTop: 6 }} onClick={sendTopicsToWrite}>ส่งประเด็นที่เลือกเข้าเขียนข่าว</button>
-        </>}
+
+          {/* ★ item 2: subStories เต็มกล่อง (ไม่ใช่แค่ตัวนับ) — เท่าเว็บ */}
+          {insight.subStories?.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <p style={{ fontSize: 13, fontWeight: 800, color: '#fbbf24', marginBottom: 9 }}>🧩 เนื้อดิบแยกประเด็น ({insight.subStories.length}) — แต่ละอันพร้อมเขียนเป็นข่าวเดี่ยว</p>
+              {insight.subStories.map((s, i) => (
+                <div key={i} style={{ border: '1px solid rgba(245,158,11,.3)', borderRadius: 10, padding: 11, background: 'rgba(245,158,11,.05)', marginBottom: 10 }}>
+                  <p style={{ fontSize: 13, fontWeight: 800 }}>ประเด็น {s.no || i + 1}: {s.topic}{s.timeRange ? ` (${s.timeRange})` : ''}</p>
+                  <div className="bd" style={{ fontSize: 12.5, marginTop: 6, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 8, padding: 10 }}>{s.rawData}</div>
+                  {s.keyPoints?.length > 0 && <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: 'var(--mut)' }}>{s.keyPoints.map((k, j) => <li key={j}>{k}</li>)}</ul>}
+                  {s.quotes?.length > 0 && (
+                    <div style={{ marginTop: 6 }}>
+                      {s.quotes.map((q, j) => <div key={j} style={{ fontSize: 12, padding: '5px 9px', marginBottom: 4, borderLeft: '2px solid #22c55e', background: 'rgba(34,197,94,.06)', borderRadius: 6 }}>&ldquo;{q}&rdquo;</div>)}
+                    </div>
+                  )}
+                  <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5, marginTop: 7 }}
+                    onClick={() => copyText(`${s.topic}\n\n${s.rawData}${s.quotes?.length ? '\n\nคำพูด:\n' + s.quotes.map(q => `"${q}"`).join('\n') : ''}`)}>📋 คัดลอก</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ★ เนื้อดิบเต็มกรอบเทา (ภาพรวมทั้งคลิป) — เท่าเว็บ · item 8: ซ่อนเมื่อซ้ำกับการ์ดประเด็นใบเดียว */}
+          {insight.rawData && !singleRawDup && (
+            <details className="raw" style={{ marginTop: 14 }}>
+              <summary>📄 ข้อมูลดิบรวม (ภาพรวมทั้งคลิป) — {insight.rawData.length} ตัวอักษร</summary>
+              <div style={{ maxHeight: 320, overflowY: 'auto' }}>{insight.rawData}</div>
+              <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5, marginTop: 7 }} onClick={() => copyText(insight.rawData, insight.id || '')}>📋 คัดลอกข้อมูลดิบ</button>
+            </details>
+          )}
+
+          {/* ★ เนื้อดิบมีมิติ (transcriptQuotes) — กรอบม่วง เท่าเว็บ · item 3: เปิดกรอบเมื่อมี transcriptQuotes อยู่จริง (กัน punchyQuotes/transcript เดี่ยวๆ หายทั้งกรอบ) */}
+          {insight.transcriptQuotes && (
+            <div style={{ marginTop: 14, border: '1px solid rgba(124,58,237,.3)', background: 'rgba(124,58,237,.06)', borderRadius: 14, padding: 13 }}>
+              <p style={{ fontSize: 13, fontWeight: 800, color: '#a78bfa', marginBottom: 4 }}>🎙️ เนื้อดิบมีมิติ — ประเด็น + คำพูดจริง (ไม่รวมเพลง)</p>
+              <p style={{ fontSize: 11, color: 'var(--mut)', marginBottom: 10 }}>Gemini ถอดคำพูดจริงมาถักทอกับประเด็นข่าว · AI ถอด—โปรดตรวจชื่อ/คำเฉพาะ{insight.transcriptQuotes.note ? ` · ${insight.transcriptQuotes.note}` : ''}</p>
+              {insight.transcriptQuotes.enrichedRaw && (<>
+                <div className="bd" style={{ fontSize: 13 }}>{insight.transcriptQuotes.enrichedRaw}</div>
+                <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5, marginTop: 8 }} onClick={() => copyText(insight.transcriptQuotes.enrichedRaw)}>📋 คัดลอกกรอบนี้</button>
+              </>)}
+              {insight.transcriptQuotes.enrichedTopics?.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  {insight.transcriptQuotes.enrichedTopics.map((t, i) => (
+                    <div key={i} style={{ marginBottom: 9, paddingTop: 9, borderTop: '1px dashed rgba(124,58,237,.25)' }}>
+                      <p style={{ fontSize: 12.5, fontWeight: 700 }}>ประเด็น {t.no || i + 1}: {t.topic}{t.timeRange ? ` (${t.timeRange})` : ''}</p>
+                      <p className="bd" style={{ fontSize: 12.5, marginTop: 3 }}>{t.enrichedRaw}</p>
+                      <button className="gh" style={{ width: 'auto', padding: '4px 10px', fontSize: 11.5, marginTop: 5 }} onClick={() => copyText(`${t.topic}${t.timeRange ? ` (${t.timeRange})` : ''}\n\n${t.enrichedRaw}`)}>📋 คัดลอก</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {insight.transcriptQuotes.punchyQuotes?.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--mut)' }}>🔥 ประโยคเด็ด</p>
+                  {insight.transcriptQuotes.punchyQuotes.map((q, i) => (
+                    <div key={i} style={{ fontSize: 12.5, padding: '6px 9px', marginTop: 5, borderLeft: '3px solid #22c55e', background: 'rgba(34,197,94,.06)', borderRadius: 6 }}>
+                      &ldquo;{q.quote}&rdquo;{(q.speaker || q.why) && <span style={{ color: 'var(--mut)' }}> {q.speaker ? `— ${q.speaker}` : ''}{q.why ? `${q.speaker ? ' · ' : ''}${q.why}` : ''}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {insight.transcriptQuotes.transcript && (
+                <details className="raw" style={{ marginTop: 10 }}>
+                  <summary>💬 บทพูดในคลิป (ไม่รวมเพลง) — กดกาง{insight.transcriptQuotes.hasSong ? ' · มีเพลง (ข้ามเนื้อเพลง)' : ''}</summary>
+                  <div>{insight.transcriptQuotes.transcript}</div>
+                </details>
+              )}
+            </div>
+          )}
+          </>;
+        })()}
 
         <h2>คลังถอดประเด็น (ล่าสุด — คลังเดียวกับเว็บ)</h2>
         {insightCases.length === 0 && <p className="sub">ยังไม่มี / กำลังโหลด…</p>}
         {insightCases.slice(0, 10).map(c => (
-          <div key={c.id} className="job" onClick={() => { setInsight(c.insight || {}); setSelTopics([]); setClipPhase('done'); window.scrollTo({ top: 0 }); }}>
+          <div key={c.id} className="job" onClick={() => {
+            setInsight(c.insight || {}); setSelTopics([]); setTopicEdits({}); setEditingIdx(null);
+            // ★ รีวิว item 1: lowQuality/qualityNote ของเคสจากคลังอยู่ที่ "ระดับเคส" (c.lowQuality) ไม่ใช่ c.insight — อ่านจากตรงนี้
+            setInsightMeta({ url: c.url, platform: c.platform, user: c.user, createdAt: c.createdAt, category: c.category || c.insight?.category || '', lowQuality: !!c.lowQuality, qualityNote: c.qualityNote || '' });
+            setClipPhase('done'); window.scrollTo({ top: 0 });
+          }}>
             <span className="ava">▶</span>
-            <div style={{ overflow: 'hidden' }}><p className="tt" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.title || c.url}</p><p className="mm">{fmtTime(c.createdAt)}{c.insight?.category ? ` · ${c.insight.category}` : ''}</p></div>
-            <span className="right chip cmu">หยิบใช้</span>
+            <div style={{ overflow: 'hidden', flex: 1 }}><p className="tt" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.title || c.url}</p><p className="mm">{fmtTime(c.createdAt)}{c.insight?.category ? ` · ${c.insight.category}` : ''}</p></div>
+            <span className="right" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+              {/* ★ รีวิว item 1: ป้าย ⚠️ ไม่สมบูรณ์ บนการ์ดคลัง — เทียบเว็บ src/app/clip-transcript/page.js:783 */}
+              {c.lowQuality && <span className="chip" title={c.qualityNote || ''} style={{ background: 'rgba(239,68,68,.14)', color: '#f87171' }}>⚠️ ไม่สมบูรณ์</span>}
+              <span className="chip cmu">หยิบใช้</span>
+            </span>
           </div>
         ))}
       </div>}
