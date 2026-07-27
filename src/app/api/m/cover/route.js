@@ -67,9 +67,20 @@ export async function GET(request) {
     // ★ 27 ก.ค. 69 (sol-review ข้อ 6): คลังปกล่าสุด (แท็บทำปกในแอพ) — import lib ตรง ไม่ hop HTTP ผ่าน /api/mega-covers
     //   แบบเดียวกับ src/app/api/m/cover-editor/route.js:50-57 (ไฟล์นั้นไม่แตะ — แค่ทำตามแพทเทิร์นเดียวกัน)
     if (request.nextUrl.searchParams.get('view') === 'archive') {
+      // ★ แก้บั๊ก (รีวิว 27 ก.ค. ค่ำ รอบ 3 — "งานเก่ากดปุ่มไม่มีอะไรเกิด"): เจาะดูใบเดียวด้วย id= — งานปกที่สร้างก่อนอัปเดตนี้
+      //   ไม่มี r.caseId/r.imageCaseId ติดมากับผลงาน (quick-test เพิ่งเริ่มเก็บให้) แต่มี archivedId/archiveId ชี้เข้าคลังนี้ได้
+      //   → หยิบ imageCaseId ของใบนั้นจากคลังมาใช้แทนได้ ไม่ต้องดึงทั้งลิสต์ 200 ใบ
+      const idParam = request.nextUrl.searchParams.get('id');
+      if (idParam) {
+        const all = await listMegaCovers(500);
+        const hit = (all || []).find((it) => it.id === idParam);
+        if (!hit) return NextResponse.json({ success: false, error: 'ไม่พบปกนี้ในคลัง', errorType: 'NOT_FOUND' }, { status: 404 });
+        return NextResponse.json({ success: true, item: { id: hit.id, title: hit.title || '', createdAt: hit.at || null, source: hit.source || '', qcStatus: hit.qcStatus || null, imageCaseId: hit.imageCaseId || null } });
+      }
       const limit = Math.min(parseInt(request.nextUrl.searchParams.get('limit') || '24', 10) || 24, 60);
       const all = await listMegaCovers(200);
-      const items = (all || []).slice(0, limit).map((it) => ({ id: it.id, title: it.title || '', createdAt: it.at || null, source: it.source || '', qcStatus: it.qcStatus || null })); // ★ 27 ก.ค. 69: ป้าย 'manual_review' ให้จอ /m ขึ้นป้าย "รอตรวจ"
+      // ★ เติม imageCaseId ต่อใบ (มีอยู่แล้วในเรคคอร์ด — แค่ของเดิมไม่ส่งออกมาให้จอ) ให้ฝั่งแอพหาย้อนจาก state คลังที่โหลดไว้แล้วได้เลยโดยไม่ต้องยิงซ้ำ
+      const items = (all || []).slice(0, limit).map((it) => ({ id: it.id, title: it.title || '', createdAt: it.at || null, source: it.source || '', qcStatus: it.qcStatus || null, imageCaseId: it.imageCaseId || null })); // ★ 27 ก.ค. 69: ป้าย 'manual_review' ให้จอ /m ขึ้นป้าย "รอตรวจ"
       return NextResponse.json({ success: true, items });
     }
 

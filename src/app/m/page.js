@@ -295,7 +295,9 @@ export default function MobileApp() {
   const [cvSlotRole, setCvSlotRole] = useState(null);     // ช่อง (hero/reaction/action/context/circle) ที่กำลังเลือกภาพแทน
   const [cvHeroName, setCvHeroName] = useState('');       // ชื่อตัวเอกที่พิมพ์ (โหมด "เปลี่ยนตัวเอก" — เข้าถึงรายชื่อจริงยาก ใช้ช่องพิมพ์เองตามที่เจ้าของอนุมัติ)
   const [cvRefList, setCvRefList] = useState(null);       // แคชรายชื่อต้นแบบจากคลัง (null = ยังไม่โหลด · [] = โหลดแล้วว่าง)
-  const [cvActionBusy, setCvActionBusy] = useState(false);
+  // ★ แก้บั๊ก (รีวิว 27 ก.ค. ค่ำ รอบ 3): เดิมเป็น boolean เดี่ยว — เปลี่ยนเป็น key เฉพาะปุ่ม/งานที่กำลังทำ ให้ปุ่มที่กดจริงขึ้น "⏳" ได้
+  //   (ปุ่มอื่นแค่ disabled ตามเดิม — ใช้ !!cvActionBusyKey แทนที่เดิมใช้ cvActionBusy ตรงๆ)
+  const [cvActionBusyKey, setCvActionBusyKey] = useState(null); // e.g. `${jobId}:reroll` | `${jobId}:hero` | `${jobId}:ref` | `${jobId}:slot:${role}`
   // ★ 27 ก.ค. 69: คลังปกล่าสุด (โหมด auto/quick) — ต่อ /api/m/cover?view=archive (forward /api/mega-covers)
   const [cvArchive, setCvArchive] = useState([]);
 
@@ -820,12 +822,33 @@ export default function MobileApp() {
   };
 
   // ══ "ปกไม่ถูกใจ" (27 ก.ค. ค่ำ, เจ้าของอนุมัติ) — 4 ฟังก์ชันใต้ปกที่เสร็จแล้ว ══
+  // ★ แก้บั๊ก (รีวิว รอบ 4): say() ปกติหายใน 2.4 วิ — สั้นไปสำหรับข้อความ error จริงจาก API ที่ต้องอ่านทัน
+  //   ใช้เฉพาะจุดนี้ (ไม่แตะ say() ตัวกลางที่จุดอื่นทั้งแอพพึ่งอยู่) ค้าง ~4 วิ
+  const sayLong = (m, ms = 4000) => { setToast(m); setTimeout(() => setToast(''), ms); };
+  // ★ แก้บั๊ก (รีวิว รอบ 3 — งานเก่ากดปุ่มแล้ว "ไม่มีอะไรเกิด"): งานที่สร้างก่อนอัปเดตนี้ไม่มี r.caseId/r.imageCaseId ติดผลงาน
+  //   (quick-test เพิ่งเริ่มเก็บให้ล่าสุด) แต่มี archivedId (compose)/archiveId (ref) ชี้เข้าคลัง /mega-covers ได้เสมอ
+  //   (ก) เช็ค state คลังปกที่จอโหลดไว้แล้วก่อน (cvArchive) ฟรี ไม่ต้องยิง · (ข) ไม่เจอในจอ → เจาะถามเซิร์ฟเวอร์ใบเดียว (view=archive&id=)
+  const resolveCaseId = async (j) => {
+    const r = j.result || {};
+    if (r.caseId || r.imageCaseId) return r.caseId || r.imageCaseId;
+    const archivedId = r.archivedId || r.archiveId;
+    if (!archivedId) return null;
+    const hit = cvArchive.find(a => a.id === archivedId);
+    if (hit?.imageCaseId) return hit.imageCaseId;
+    try {
+      const d = await (await fetch(`/api/m/cover?view=archive&id=${encodeURIComponent(archivedId)}`, { cache: 'no-store' })).json();
+      if (d.success && d.item?.imageCaseId) return d.item.imageCaseId;
+    } catch { /* เน็ตสะดุด — ตกไป toast เหตุผลที่เรียกใช้ */ }
+    return null;
+  };
   // ① 🎲 ประกอบใหม่ทั้งปก — ยิง kind='compose' รอบใหม่ของ caseId เดิม (ทางเดียวกับ ⚡ ทางลัด) ไม่ล็อกฮีโร่/ต้นแบบ ให้สุ่มใหม่ล้วน
   const rerollCover = async (j) => {
-    const r = j.result || {};
-    const caseId = r.caseId || r.imageCaseId;
-    if (!caseId) { say('ปกนี้ไม่มีข้อมูลเคสต้นทาง — ยิงใหม่ไม่ได้'); return; }
-    setCvActionBusy(true);
+    const key = j.id + ':reroll';
+    setCvActionBusyKey(key);
+    say('⏳ กำลังหาเคสต้นทาง…');
+    const caseId = await resolveCaseId(j);
+    if (!caseId) { sayLong('ปกนี้เป็นงานเก่าก่อนอัปเดตนี้ — ไม่มีข้อมูลเคสต้นทางให้ยิงใหม่'); setCvActionBusyKey(null); return; }
+    say('⏳ กำลังส่งประกอบใหม่…');
     try {
       const d = await (await fetch('/api/m/cover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'compose', caseId }) })).json();
       if (!d.success) throw new Error(d.error || 'ส่งงานไม่สำเร็จ');
@@ -833,17 +856,19 @@ export default function MobileApp() {
       log('cover_submit', d.jobId || '', { mode: 'reroll' });
       say('เข้าคิวประกอบปกใหม่แล้ว — รอสัก 20-80 วิ');
       setTimeout(loadCovers, 800); setTimeout(loadCovers, 3000);
-    } catch (e) { say(String(e.message || e)); }
-    setCvActionBusy(false);
+    } catch (e) { sayLong(String(e.message || e)); }
+    setCvActionBusyKey(null);
   };
   // ③ 👤 เปลี่ยนตัวเอก — เข้าถึงรายชื่อตัวละครจริงของเคสยาก (คนละระบบกับ generation-logs) ใช้ช่องพิมพ์ชื่อเองตามที่เจ้าของอนุมัติไว้ (เหมือน qcHero โหมดทางลัด)
   const sendHeroCover = async (j) => {
-    const r = j.result || {};
-    const caseId = r.caseId || r.imageCaseId;
     const hero = cvHeroName.trim();
-    if (!caseId) { say('ปกนี้ไม่มีข้อมูลเคสต้นทาง'); return; }
     if (!hero) { say('พิมพ์ชื่อตัวเอกก่อน'); return; }
-    setCvActionBusy(true);
+    const key = j.id + ':hero';
+    setCvActionBusyKey(key);
+    say('⏳ กำลังหาเคสต้นทาง…');
+    const caseId = await resolveCaseId(j);
+    if (!caseId) { sayLong('ปกนี้เป็นงานเก่าก่อนอัปเดตนี้ — ไม่มีข้อมูลเคสต้นทาง'); setCvActionBusyKey(null); return; }
+    say('⏳ กำลังส่งประกอบใหม่…');
     try {
       const d = await (await fetch('/api/m/cover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'compose', caseId, heroPersonHint: hero }) })).json();
       if (!d.success) throw new Error(d.error || 'ส่งงานไม่สำเร็จ');
@@ -852,18 +877,20 @@ export default function MobileApp() {
       say(`เข้าคิวประกอบปก (ตัวเอก: ${hero}) แล้ว`);
       setCvActionJob(null); setCvActionMode(null); setCvHeroName('');
       setTimeout(loadCovers, 800); setTimeout(loadCovers, 3000);
-    } catch (e) { say(String(e.message || e)); }
-    setCvActionBusy(false);
+    } catch (e) { sayLong(String(e.message || e)); }
+    setCvActionBusyKey(null);
   };
   // ④ 🎨 เปลี่ยนต้นแบบ — โหลดลิสต์ ref "เพจจริง" จากคลัง (แคชครั้งเดียว) + สุ่ม/เลือกเอง แล้วยิง compose ใหม่พร้อม refId
   const loadCvRefs = () => {
     fetch('/api/m/cover?view=refs', { cache: 'no-store' }).then(r => r.json()).then(d => { if (d.success) setCvRefList(d.items || []); }).catch(() => setCvRefList([]));
   };
   const sendRefCover = async (j, refId) => {
-    const r = j.result || {};
-    const caseId = r.caseId || r.imageCaseId;
-    if (!caseId) { say('ปกนี้ไม่มีข้อมูลเคสต้นทาง'); return; }
-    setCvActionBusy(true);
+    const key = j.id + ':ref';
+    setCvActionBusyKey(key);
+    say('⏳ กำลังหาเคสต้นทาง…');
+    const caseId = await resolveCaseId(j);
+    if (!caseId) { sayLong('ปกนี้เป็นงานเก่าก่อนอัปเดตนี้ — ไม่มีข้อมูลเคสต้นทาง'); setCvActionBusyKey(null); return; }
+    say('⏳ กำลังส่งประกอบใหม่…');
     try {
       const d = await (await fetch('/api/m/cover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'compose', caseId, refId }) })).json();
       if (!d.success) throw new Error(d.error || 'ส่งงานไม่สำเร็จ');
@@ -872,8 +899,8 @@ export default function MobileApp() {
       say('เข้าคิวประกอบปกต้นแบบใหม่แล้ว');
       setCvActionJob(null); setCvActionMode(null);
       setTimeout(loadCovers, 800); setTimeout(loadCovers, 3000);
-    } catch (e) { say(String(e.message || e)); }
-    setCvActionBusy(false);
+    } catch (e) { sayLong(String(e.message || e)); }
+    setCvActionBusyKey(null);
   };
   const pickRandomRef = (j) => {
     if (!cvRefList || !cvRefList.length) return;
@@ -889,32 +916,42 @@ export default function MobileApp() {
       .catch(() => setCaseImgList(m => ({ ...m, [caseId]: [] })));
   };
   // แตะภาพในกริด → ยิงประกอบใหม่แบบ "แผนแช่แข็ง" (ของเดิมทุกช่อง แทนที่เฉพาะช่องที่เลือก) ผ่าน kind='composeFrozen'
+  //   หมายเหตุ item③ ของรีวิว: ปุ่มนี้ disabled อยู่แล้วเมื่อไม่มี slotPlanUsed (canSlots) ซึ่งงานที่มี slotPlanUsed ย่อมมี caseId ติดมาด้วยเสมอ
+  //   (มาจากจุด mapping เดียวกันใน quick-test) — ยังคง resolveCaseId ไว้เป็นตาข่ายกันพลาดชั้นสอง
+  // ★ แก้บั๊ก (รีวิว รอบ 4 — "แตะภาพในกริดแล้วเงียบ"): ไล่ทุกจุดที่เคยคืนเงียบ (return เปล่า) → ต้อง sayLong เสมอ ห้ามเงียบเด็ดขาด
+  //   ต้นตอตัวจริงคือ onClick ในกริด/ปุ่มอื่นอ้าง cvActionBusy (ตัวแปรเก่าที่เพิ่งเปลี่ยนชื่อเป็น cvActionBusyKey) — undefined ทำ throw
+  //   เงียบตอนคลิก (ReferenceError ถูก React กลืนไม่ขึ้น error แดง) → แก้ครบทุกจุดอ้างอิงแล้ว (ดู renderCoverActions)
   const pickSlotImage = async (j, role, url) => {
     const r = j.result || {};
-    const caseId = r.caseId || r.imageCaseId;
     const refId = r.refUsed?.id;
     const base = Array.isArray(r.slotPlanUsed) ? r.slotPlanUsed : [];
-    if (!caseId || !refId || !base.length) { say('ปกนี้ไม่มีข้อมูลผังช่อง — ลองกดประกอบใหม่ก่อน'); return; }
+    if (!refId) { sayLong('ปกนี้ไม่มีข้อมูลต้นแบบ (refId) — ลองกดประกอบใหม่ก่อน'); return; }
+    if (!base.length) { sayLong('ปกนี้ไม่มีข้อมูลผังช่อง — ลองกดประกอบใหม่ก่อน'); return; }
+    const key = j.id + ':slot:' + role;
+    setCvActionBusyKey(key);
+    const caseId = await resolveCaseId(j);
+    if (!caseId) { sayLong('ปกนี้เป็นงานเก่าก่อนอัปเดตนี้ — ไม่มีข้อมูลเคสต้นทาง'); setCvActionBusyKey(null); return; }
     const idx = base.findIndex(e => e.slot === role);
     const nextPlan = base.map(e => ({ ...e }));
     if (idx >= 0) nextPlan[idx] = { url, slot: role, isHero: role === 'hero' };
     else nextPlan.push({ url, slot: role, isHero: role === 'hero' });
     if (role === 'hero') nextPlan.forEach((e, i) => { if (i !== (idx >= 0 ? idx : nextPlan.length - 1)) e.isHero = false; });
-    if (nextPlan.length < 3) { say('ผังช่องน้อยเกินไป (ต้อง ≥3 ช่อง)'); return; }
-    setCvActionBusy(true);
+    if (nextPlan.length < 3) { sayLong('ผังช่องน้อยเกินไป (ต้อง ≥3 ช่อง) — ประกอบใหม่ทั้งปกก่อนแล้วค่อยลองสลับช่อง'); setCvActionBusyKey(null); return; }
     try {
-      const d = await (await fetch('/api/m/cover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'composeFrozen', caseId, refId, slotPlan: nextPlan }) })).json();
-      if (!d.success) throw new Error(d.error || 'ประกอบใหม่ไม่สำเร็จ');
+      const r2 = await fetch('/api/m/cover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'composeFrozen', caseId, refId, slotPlan: nextPlan }) });
+      const d = await r2.json().catch(() => ({ success: false, error: `เซิร์ฟเวอร์ตอบกลับผิดพลาด (${r2.status})` }));
+      if (!d.success) throw new Error(d.error || `ประกอบใหม่ไม่สำเร็จ (${r2.status})`);
       // ★ งานนี้ไม่ผ่านคิว quick-test (frozen mode ยิงตรง compose-test — ดู /api/m/cover) → สร้าง "งานจำลอง" ใส่แถบงานเองให้ดูเหมือนงานปกติ
       const jr = d.result || {};
+      if (!jr.coverImgUrl) { sayLong('ประกอบเสร็จแต่ไม่ได้ภาพกลับมา (base64 ว่าง) — ลองใหม่อีกครั้ง'); setCvActionBusyKey(null); return; }
       const fakeId = 'frozen-' + Date.now();
       setCvJobs(list => [{ id: fakeId, kind: 'compose', label: '🖼️ เปลี่ยนภาพรายช่อง', status: 'done', dispatch: 'local', result: jr }, ...list]);
       setCvOpen(fakeId);
       setCvActionJob(null); setCvActionMode(null); setCvSlotRole(null);
       say('ประกอบใหม่เสร็จแล้ว — ดูผลด้านบน');
       log('cover_submit', fakeId, { mode: 'slotSwap', role });
-    } catch (e) { say(String(e.message || e)); }
-    setCvActionBusy(false);
+    } catch (e) { sayLong(String(e.message || e)); }
+    setCvActionBusyKey(null);
   };
   const coverFromNews = () => {
     setCvTitle(result?.title || '');
@@ -1074,19 +1111,22 @@ export default function MobileApp() {
     const r = j.result || {};
     const effCaseId = r.caseId || r.imageCaseId; // ★ ref-kind jobs เก็บ caseId ไว้คนละชื่อฟิลด์ (imageCaseId) — รวมเป็นตัวเดียวให้ปุ่มใช้ได้ทั้งคู่
     const canSlots = !!(r.slotPlanUsed?.length && r.refUsed?.id);
+    const busy = !!cvActionBusyKey; // ★ แก้บั๊ก (รีวิว รอบ 3): ปุ่มอื่นยัง disabled เหมือนเดิม แต่ปุ่มที่กดจริงขึ้น "⏳" ให้เห็นชัด (เทียบ key ด้านล่าง)
     return (
       <>
         <div className="row" style={{ marginTop: 8, flexWrap: 'wrap', gap: 6 }}>
-          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={cvActionBusy} onClick={() => rerollCover(j)}>🎲 ประกอบใหม่ทั้งปก</button>
-          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={cvActionBusy || !canSlots}
+          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={busy} onClick={() => rerollCover(j)}>
+            {cvActionBusyKey === j.id + ':reroll' ? '⏳ กำลังทำ…' : '🎲 ประกอบใหม่ทั้งปก'}
+          </button>
+          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={busy || !canSlots}
             onClick={() => { const on = cvActionJob === j.id && cvActionMode === 'slots'; setCvActionJob(on ? null : j.id); setCvActionMode(on ? null : 'slots'); setCvSlotRole(null); if (!on && effCaseId) ensureCaseImages(effCaseId); }}>
             🖼️ เปลี่ยนภาพรายช่อง
           </button>
-          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={cvActionBusy}
+          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={busy}
             onClick={() => { const on = cvActionJob === j.id && cvActionMode === 'hero'; setCvActionJob(on ? null : j.id); setCvActionMode(on ? null : 'hero'); setCvHeroName(''); }}>
             👤 เปลี่ยนตัวเอก
           </button>
-          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={cvActionBusy}
+          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={busy}
             onClick={() => { const on = cvActionJob === j.id && cvActionMode === 'ref'; setCvActionJob(on ? null : j.id); setCvActionMode(on ? null : 'ref'); if (!on && cvRefList === null) loadCvRefs(); }}>
             🎨 เปลี่ยนต้นแบบ
           </button>
@@ -1110,19 +1150,27 @@ export default function MobileApp() {
             </div>
             {cvSlotRole && (() => {
               const imgs = caseImgList[effCaseId];
+              const curForRole = (r.slotPlanUsed || []).find(e => e.slot === cvSlotRole);
+              const slotKey = j.id + ':slot:' + cvSlotRole;
+              const slotBusy = cvActionBusyKey === slotKey;
               return (
                 <>
                   <p className="sub" style={{ margin: '0 0 6px' }}>แตะภาพเพื่อแทนช่อง &quot;{SLOT_ROLES.find(s => s.key === cvSlotRole)?.label}&quot;</p>
+                  {/* ★ แก้บั๊ก (รีวิว รอบ 4): ต้องเห็นสถานะ "กำลังประกอบ" ค้างตลอดช่วง ~20-30 วิ ไม่ใช่แค่ toast แวบเดียว */}
+                  {slotBusy && <p className="sub" style={{ margin: '0 0 6px', color: 'var(--pink)', fontWeight: 700 }}>⏳ กำลังประกอบช่องใหม่… (ปกติ 20-30 วิ — อย่าเพิ่งปิดหน้านี้)</p>}
                   {imgs === undefined && <p className="sub" style={{ margin: 0 }}>⏳ กำลังโหลดภาพ…</p>}
                   {Array.isArray(imgs) && imgs.length === 0 && <p className="sub" style={{ margin: 0 }}>ไม่มีภาพในเคสนี้</p>}
                   {Array.isArray(imgs) && imgs.length > 0 && (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-                      {imgs.map((im, i) => (
-                        <div key={im.id || im.url || i} onClick={() => !cvActionBusy && pickSlotImage(j, cvSlotRole, im.url)} style={{ cursor: 'pointer' }}>
-                          <img src={im.url} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
-                            style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)', display: 'block' }} />
-                        </div>
-                      ))}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, opacity: busy ? 0.55 : 1 }}>
+                      {imgs.map((im, i) => {
+                        const isCurrent = !!curForRole?.url && curForRole.url === im.url;
+                        return (
+                          <div key={im.id || im.url || i} onClick={() => { if (!busy) pickSlotImage(j, cvSlotRole, im.url); }} style={{ cursor: busy ? 'wait' : 'pointer' }}>
+                            <img src={im.url} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
+                              style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8, border: isCurrent ? '3px solid var(--pink)' : '1px solid var(--line)', display: 'block' }} />
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </>
@@ -1134,19 +1182,21 @@ export default function MobileApp() {
         {cvActionJob === j.id && cvActionMode === 'hero' && (
           <div style={{ marginTop: 8, padding: '10px 8px', border: '1px solid var(--line)', borderRadius: 12 }}>
             <input className="in" style={{ marginBottom: 8 }} value={cvHeroName} onChange={e => setCvHeroName(e.target.value)} placeholder="ชื่อตัวเอกคนใหม่…" />
-            <button className="cta" style={{ minHeight: 44 }} disabled={cvActionBusy || !cvHeroName.trim()} onClick={() => sendHeroCover(j)}>
-              {cvActionBusy ? 'กำลังส่ง…' : '✅ ประกอบใหม่ด้วยตัวเอกนี้'}
+            <button className="cta" style={{ minHeight: 44 }} disabled={busy || !cvHeroName.trim()} onClick={() => sendHeroCover(j)}>
+              {cvActionBusyKey === j.id + ':hero' ? '⏳ กำลังส่ง…' : '✅ ประกอบใหม่ด้วยตัวเอกนี้'}
             </button>
           </div>
         )}
 
         {cvActionJob === j.id && cvActionMode === 'ref' && (
           <div style={{ marginTop: 8, padding: '10px 8px', border: '1px solid var(--line)', borderRadius: 12 }}>
-            <button className="gh" style={{ minHeight: 44, marginBottom: 8 }} disabled={cvActionBusy || !cvRefList?.length} onClick={() => pickRandomRef(j)}>🎲 สุ่มต้นแบบ</button>
+            <button className="gh" style={{ minHeight: 44, marginBottom: 8 }} disabled={busy || !cvRefList?.length} onClick={() => pickRandomRef(j)}>
+              {cvActionBusyKey === j.id + ':ref' ? '⏳ กำลังส่ง…' : '🎲 สุ่มต้นแบบ'}
+            </button>
             {cvRefList === null && <p className="sub">⏳ กำลังโหลดรายชื่อต้นแบบ…</p>}
             {Array.isArray(cvRefList) && cvRefList.length === 0 && <p className="sub">ยังไม่มีต้นแบบในคลัง</p>}
             {Array.isArray(cvRefList) && cvRefList.map(ref => (
-              <div key={ref.id} className="job" style={{ marginBottom: 6 }} onClick={() => !cvActionBusy && sendRefCover(j, ref.id)}>
+              <div key={ref.id} className="job" style={{ marginBottom: 6, opacity: busy ? 0.55 : 1 }} onClick={() => { if (!busy) sendRefCover(j, ref.id); }}>
                 <span className="ava">🎨</span>
                 <div style={{ overflow: 'hidden' }}>
                   <p className="tt" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ref.title || ref.styleName}</p>
