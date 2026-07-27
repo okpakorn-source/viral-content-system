@@ -220,12 +220,14 @@ export async function POST(req) {
     const qcVerdict = evaluateCoverQc({ qcFlags: out.qcFlags, refSimilarity: out.refSimilarity, manifest: out.manifest });
 
     // 🗂️ 9 ก.ค. (ผู้ใช้สั่ง "ทุกครั้งที่กดสร้างปกเข้าคลังออโต้"): ผลสำเร็จเด้งเข้าคลังงาน MEGA
-    // ★ AC-0107: BUT never auto-archive an output Production would ZERO-archive — a QC-FAILED cover (qcVerdict.pass===false)
-    //   must NOT pollute the cover library, even though this advisory tool still returns HTTP 200 for diagnostics.
-    //   (Frozen diagnostic mode above never archives at all; this guards the NORMAL path.)
-    const _productionQcPass = qcVerdict?.pass !== false;
+    // ★ 27 ก.ค. 69 (เจ้าของเคาะนโยบายใหม่ "เก็บทุกใบ+ติดป้ายสถานะ" — แทนที่ AC-0107 ZERO-archive เดิม):
+    //   เก็บเข้าคลังเสมอเมื่อ out.success && out.base64 (ไม่เช็ค QC pass อีกต่อไป) — ใบที่ QC ไม่ผ่านติดป้าย
+    //   qcStatus:'manual_review' + qcReasons ให้คนดูรู้ว่าต้องตรวจก่อนใช้จริง (ดูป้ายที่ /m คลังปก)
     let archived = null;
-    if (out.success && out.base64 && _productionQcPass) {
+    let archiveSkipReason = null; // ★ เลิกกลืน error เงียบ — ไม่เข้าคลัง = ต้องบอกเหตุผลเสมอ
+    const qcStatus = qcVerdict?.pass === false ? 'manual_review' : 'pass';
+    const qcReasons = Array.isArray(qcVerdict?.reasons) ? qcVerdict.reasons.slice(0, 6) : [];
+    if (out.success && out.base64) {
       try {
         const { addMegaCover } = await import('@/lib/megaCoverArchive');
         archived = await addMegaCover({
@@ -238,8 +240,15 @@ export async function POST(req) {
           score: out.score || null,
           base64: out.base64,
           qcFlags: out.qcFlags || [], // เฟส 4.3
+          qcStatus, // 'pass' | 'manual_review'
+          qcReasons, // เหตุผลสั้นๆ เวลา manual_review
         });
-      } catch { /* คลังล้มไม่กระทบผลเทส */ }
+      } catch (e) {
+        console.warn('[compose archive]', e.message);
+        archiveSkipReason = 'archive_error:' + e.message;
+      }
+    } else {
+      archiveSkipReason = !out.success ? 'compose_failed' : 'no_base64';
     }
 
     // ★ 17 ก.ค. (ทางเข้า editor): แนบสูตรเอดิเตอร์ให้ผลทุกใบ (ผ่าน/ไม่ผ่าน QC) — เปิดแก้ต่อใน /cover-tester ได้ทันที
@@ -260,13 +269,15 @@ export async function POST(req) {
       caseId,
       qcVerdict,
       editorRecipe, // ★ 17 ก.ค.: สูตรสำหรับปุ่ม "แก้ต่อในเอดิเตอร์" (null = สร้างไม่ได้)
-      // ★ AC-0107 truthful parity (advisory tool ≠ Production): HTTP success:true still follows out.success (advisory) —
-      //   so a QC-FAILED cover is still success:true here — BUT auto-archive above is now gated on qcVerdict.pass (a
-      //   QC-failed cover is NOT archived). productionQcPass mirrors the Production HARD gate (/cover-ref-test): false =
-      //   Production would 422 + ZERO-archive. Advisory/frozen HTTP semantics unchanged.
+      // ★ 27 ก.ค. 69: HTTP success:true still follows out.success (advisory) — so a QC-FAILED cover is still
+      //   success:true here. productionQcPass mirrors the Production HARD gate (/cover-ref-test) for diagnostics only:
+      //   false = Production strict lane would 422 + ZERO-archive there — ไม่ผูกกับการเข้าคลังของเครื่องมือนี้แล้ว
+      //   (นโยบายใหม่ "เก็บทุกใบ+ติดป้ายสถานะ" — ดู qcStatus/archiveSkipReason ด้านล่าง)
       productionQcPass: qcVerdict?.pass !== false,
       refUsed: ref ? { id: ref.id, styleName: ref.styleName || ref.id, imagePath: ref.imagePath } : null,
       archivedId: archived?.id || null, // เข้าคลัง /mega-covers แล้ว (โหลดภาพ: /api/mega-covers/img?id=..&dl=1)
+      qcStatus, // 'pass' | 'manual_review' — ป้ายสถานะใบที่เข้าคลัง (badge ฝั่ง /m)
+      archiveSkipReason, // null = เข้าคลังสำเร็จ · ไม่ null = เหตุผลที่ไม่เข้าคลัง (เช่น 'compose_failed' / 'archive_error:...')
       poolSize: pool.length,
       poolDirtyFallback: dirtyFallbackIds.size, // ★ เฟส 5.1: จำนวนใบ clean=false ที่เติมเข้าพูลเพราะสะอาดบางเกินไป (debug)
       slotPlanUsed: slotPlan, // เฟส 0.2: ให้เครื่องเทสเก็บไปแช่แข็ง (โหมด slotPlan ด้านบน)

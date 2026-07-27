@@ -190,9 +190,12 @@ function computeEffectiveMode(isStrictEngaged) {
 }
 
 // ★ Preview MVP item 3 — fields ร่วมของ response 200 ทั้งสองเส้นทาง (QC-pass จริง + QC-fail preview_advisory
-//   แบบ mirror /mega-compose-test): ต่างกันแค่ productionQcPass/coverPath/archiveId (QC-fail preview_advisory =
-//   null ทั้งคู่ เพราะไม่ persist/archive เด็ดขาด) — outputId ผูก archive id จริงถ้ามี ไม่งั้นผูก REFTEST job id เดิม
-function buildCoverResponseBody({ cover, qcVerdict, productionQcPass, effectiveMode, renderMode, latchReport, authority, matchedRef, job, sourceLinks, trace, t0, coverPath, archiveId }) {
+//   แบบ mirror /mega-compose-test) — ★ 27 ก.ค. 69 (นโยบายใหม่ "เก็บทุกใบ+ติดป้ายสถานะ" แทนกติกาเดิม): ทั้งสอง
+//   เส้นทางนี้ persist+archive จริงแล้วทั้งคู่ (ต่างกันแค่ qcStatus: 'pass' vs 'manual_review') — outputId ผูก
+//   archive id จริงเสมอเมื่อ archive สำเร็จ (archive เองล้มถึงจะ fallback ไป REFTEST job id — ดู archiveSkipReason)
+//   มีแค่ strict lane ที่ QC ไม่ผ่านเท่านั้นที่ไม่ผ่านฟังก์ชันนี้เลย (return 422 ตรงจาก holdBody ก่อนถึงจุดนี้ —
+//   zero persist/archive คงเดิมทุกไบต์ ไม่แตะ)
+function buildCoverResponseBody({ cover, qcVerdict, productionQcPass, effectiveMode, renderMode, latchReport, authority, matchedRef, job, sourceLinks, trace, t0, coverPath, archiveId, qcStatus = null, archiveSkipReason = null }) {
   const outputId = archiveId || job.id;
   return {
     ...cover,               // base64, template, score, directorReason, assignments, caseId...
@@ -205,6 +208,11 @@ function buildCoverResponseBody({ cover, qcVerdict, productionQcPass, effectiveM
     authority,
     holdReason: null,
     coverPath,
+    // ★ 27 ก.ค. 69 (นโยบาย "เก็บทุกใบ+ติดป้ายสถานะ"): 'pass' | 'manual_review' — ได้ทั้ง strict lane ที่สำเร็จ (QC ผ่าน)
+    //   และ preview_advisory (ทั้ง QC ผ่าน/ไม่ผ่าน) เพราะ archive ครั้งเดียวด้านล่างเป็น code path ร่วมของทุกเส้นทาง
+    //   ที่มาถึงจุดนี้ — มีแค่ strict lane ที่ QC ไม่ผ่าน (422 QC_REJECTED) เท่านั้นที่ไม่มีฟิลด์นี้เลย (ไม่ผ่านฟังก์ชันนี้)
+    qcStatus,
+    archiveSkipReason, // null = เข้าคลังสำเร็จ (หรือไม่เกี่ยว) · ไม่ null = เหตุผลที่ไม่เข้าคลัง
     outputId,                                  // ★ item 3: nonempty เสมอ — ผูก archive id จริงหรือ REFTEST job id
     ...(archiveId ? { archiveId } : {}),        // ★ item 3: โผล่เฉพาะเมื่อมี archive entry จริงเท่านั้น
     matchedRef,
@@ -898,26 +906,57 @@ export async function runCoverRefTest(input = {}, deps = {}) {
 
   // QC pass===false:
   //   strict (item 1 — ไม่แตะ) ⇒ typed 422 QC_REJECTED เสมอ ก่อน archive — archiveCalls=0 (byte-identical เดิม)
-  //   preview_advisory (item 3) ⇒ mirror /mega-compose-test advisory semantics เฉพาะจุดตัดสินนี้: HTTP 200
-  //     success:true + qcVerdict + productionQcPass:false — ห้าม persist/archive ผลนี้เด็ดขาด (return ก่อนถึง
-  //     บล็อก archive ด้านล่างเสมอ)
+  //   preview_advisory ⇒ ★ 27 ก.ค. 69 (เจ้าของเคาะนโยบายใหม่ "เก็บทุกใบ+ติดป้ายสถานะ" — แทนที่กติกา "ห้าม persist" เดิม):
+  //     ยังคืน HTTP 200 success:true + qcVerdict + productionQcPass:false เหมือนเดิม แต่ตอนนี้เก็บเข้าคลังด้วย
+  //     qcStatus:'manual_review' ให้คนตรวจทีหลัง (ดูป้ายที่ /m คลังปก) — ล้มไม่ critical ต่อผลปก (archiveSkipReason
+  //     บอกเหตุผลถ้าไม่เข้าคลังจริง แทนกลืน error เงียบแบบเดิม)
   if (!productionQcPass) {
     if (effectiveMode === 'strict') {
       return { status: 422, body: holdBody({ error: 'QC ไม่ผ่าน: ' + (qcVerdict.reasons || []).join(' · ').slice(0, 160), errorType: 'QC_REJECTED', holdReason: 'qc_failed', effectiveMode, latchReport, authority, trace, extra: { qcVerdict, qcFlags: cover.qcFlags || [] } }) };
+    }
+    let previewCoverPath = null;
+    let previewArchiveId = null;
+    let previewArchiveSkipReason = null;
+    try {
+      const m = /^data:image\/(\w+);base64,(.+)$/.exec(cover.base64 || '');
+      if (m) {
+        try { previewCoverPath = (await _persistCoverImage({ format: m[1], base64: m[2] })) || null; } catch { /* พึ่งคลาวด์แทน */ }
+        const { addMegaCover } = await _loadArchive();
+        const ent = await addMegaCover({
+          title: newsTitle || content.slice(0, 60),
+          source: 'cover-ref-test',
+          imageCaseId: job.dossier.images?.caseId || null,
+          coverCaseId: cover.caseId || null,
+          coverPath: previewCoverPath, base64: cover.base64, template: cover.template, score: cover.score, throughMega: true, trace,
+          qcFlags: Array.isArray(cover.qcFlags) ? cover.qcFlags : [],
+          qcStatus: 'manual_review',
+          qcReasons: Array.isArray(qcVerdict?.reasons) ? qcVerdict.reasons.slice(0, 6) : [],
+          refId: job.dossier.refMatch?.refId || job.dossier.refMatch?.dnaHash || null,
+          refSimilarity: cover.refSimilarity ?? null,
+        });
+        previewArchiveId = ent?.id || null;
+        if (!previewCoverPath && ent?.id) previewCoverPath = `/api/mega-covers/img?id=${encodeURIComponent(ent.id)}`;
+      } else {
+        previewArchiveSkipReason = 'no_base64';
+      }
+    } catch (e) {
+      console.warn('[refTestPipeline archive/manual_review]', e.message);
+      previewArchiveSkipReason = 'archive_error:' + e.message;
     }
     return {
       status: 200,
       body: buildCoverResponseBody({
         cover, qcVerdict, productionQcPass, effectiveMode, renderMode, latchReport, authority,
-        matchedRef, job, sourceLinks, trace, t0, coverPath: null, archiveId: null,
+        matchedRef, job, sourceLinks, trace, t0, coverPath: previewCoverPath, archiveId: previewArchiveId,
+        qcStatus: 'manual_review', archiveSkipReason: previewArchiveSkipReason,
       }),
     };
   }
 
-  // ── archive ครั้งเดียว (สำเร็จ + QC ผ่านเท่านั้น — item 3: preserve the existing single persist/archive path) ──
-  //   ล้มไม่ critical ต่อผลปก
+  // ── archive ครั้งเดียว (สำเร็จ + QC ผ่าน) — ล้มไม่ critical ต่อผลปก ──
   let coverPath = null;
   let archiveId = null;
+  let archiveSkipReason = null; // ★ 27 ก.ค. 69: เลิกกลืน error เงียบ — ไม่เข้าคลัง = ต้องบอกเหตุผลเสมอ
   try {
     const m = /^data:image\/(\w+);base64,(.+)$/.exec(cover.base64 || '');
     if (m) {
@@ -930,6 +969,8 @@ export async function runCoverRefTest(input = {}, deps = {}) {
         coverCaseId: cover.caseId || null,
         coverPath, base64: cover.base64, template: cover.template, score: cover.score, throughMega: true, trace,
         qcFlags: Array.isArray(cover.qcFlags) ? cover.qcFlags : [],
+        qcStatus: 'pass',
+        qcReasons: Array.isArray(qcVerdict?.reasons) ? qcVerdict.reasons.slice(0, 6) : [],
         // ★ 15 ก.ค. (แบตช์ 4 — บัค #6): archive รองรับสอง field นี้อยู่แล้ว (megaCoverArchive:85-86) แต่ route ไม่เคยส่ง
         //   → ปกในคลังเสียลิงก์ ref ตลอด — ส่ง identity ที่ S6 bind จริง (แนว refId guard ที่ strict ใช้)
         refId: job.dossier.refMatch?.refId || job.dossier.refMatch?.dnaHash || null,
@@ -937,14 +978,20 @@ export async function runCoverRefTest(input = {}, deps = {}) {
       });
       archiveId = ent?.id || null;
       if (!coverPath && ent?.id) coverPath = `/api/mega-covers/img?id=${encodeURIComponent(ent.id)}`;
+    } else {
+      archiveSkipReason = 'no_base64';
     }
-  } catch { /* คลังล้ม ไม่ให้กระทบผลปก */ }
+  } catch (e) {
+    console.warn('[refTestPipeline archive]', e.message);
+    archiveSkipReason = 'archive_error:' + e.message;
+  }
 
   return {
     status: 200,
     body: buildCoverResponseBody({
       cover, qcVerdict, productionQcPass, effectiveMode, renderMode, latchReport, authority,
       matchedRef, job, sourceLinks, trace, t0, coverPath, archiveId,
+      qcStatus: 'pass', archiveSkipReason,
     }),
     // R1.6: no residual capture-after-writes path — this function is now ALWAYS the ordinary full run.
     //   Capture-only evidence, when authorized, comes exclusively from runS7CaptureOnly (see above), which

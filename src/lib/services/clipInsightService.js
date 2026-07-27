@@ -292,21 +292,121 @@ ${IDENTITY_RULES}
 
 ${TRANSCRIPT_QUOTES_SCHEMA}`;
 
+// ★ 27 ก.ค. (v2 — แก้รูรีวิว A5): กรอง "ชื่อจริง" ออกจากบทบาท/คำกลางล้วน — ใช้กับ speakers ของรอบแรก
+//   เดิมเทียบแบบ exact-match หลุดเคสผสมคำ (เช่น 'หญิงสาวในคลิป' 'พิธีกรหญิง' 'ผู้ถูกสัมภาษณ์ (หญิง)')
+//   แก้เป็น: ถอดวงเล็บ + ถอดคำบทบาท/คำขยายเพศ-วัย-ที่มาออกทั้งหมด แล้วเช็คว่า "เหลือสาระ (ชื่อจริง) ไหม"
+//   เหลือสาระ → เก็บสตริงเดิมทั้งดุ้น (เช่น 'น้องเบล (ผู้ถูกสัมภาษณ์)') · ไม่เหลือ → ทิ้ง (เช่น 'พิธีกร', 'หญิงสาวในคลิป')
+const ROLE_WORDS = [
+  'ผู้ดำเนินรายการ', 'ผู้ให้สัมภาษณ์', 'ผู้ถูกสัมภาษณ์', 'ผู้ร่วมรายการ', 'เจ้าของเพจ', 'เจ้าของร้าน',
+  'ผู้สื่อข่าว', 'แขกรับเชิญ', 'เจ้าหน้าที่', 'พิธีกร', 'ผู้ประกาศ', 'นักข่าว', 'ผู้บรรยาย',
+  'ผู้ต้องหา', 'ผู้เสียหาย', 'เพื่อนบ้าน', 'คุณแม่', 'คุณพ่อ', 'ลูกค้า', 'แอดมิน',
+  'คนขับ', 'พนักงาน', 'ตำรวจ', 'หมอ', 'พยาบาล', 'ทหาร', 'ผู้ชม', 'ผู้ฟัง',
+  'ในคลิปนี้', 'ในวิดีโอ', 'ในคลิป', 'ผู้ชาย', 'ผู้หญิง', 'เด็กชาย', 'เด็กหญิง',
+  'สาว', 'หนุ่ม', 'ชาย', 'หญิง', 'เด็ก',
+].sort((a, b) => b.length - a.length); // ตัดคำยาวก่อนสั้น กันเหลือเศษ (เช่น ต้องตัด 'ผู้ชาย' ทั้งคำ ไม่ใช่ตัด 'ชาย' แล้วเหลือ 'ผู้')
+
+function filterIdentityNames(names) {
+  if (!Array.isArray(names)) return [];
+  return names
+    .map(n => String(n || '').trim())
+    .filter(Boolean)
+    .filter((n) => {
+      let s = n.replace(/[()（）]/g, ' '); // ถอดวงเล็บ (มักกำกับบทบาท/เพศ เช่น '(ผู้ถูกสัมภาษณ์)' '(หญิง)')
+      for (const w of ROLE_WORDS) s = s.split(w).join('');
+      return s.replace(/\s+/g, '').length > 0; // ถอดคำบทบาท/คำกลางแล้วยังเหลือสาระ = มีชื่อจริงกำกับ เก็บไว้
+    })
+    .slice(0, 12);
+}
+
+// ★ 27 ก.ค. (v2 — แก้รูรีวิว A7): ตัดที่ขอบช่องว่าง/ประโยคสุดท้าย ไม่ตัดกลางคำ (หาขอบในระยะยอมรับไม่เจอ → ค่อยตัดตรงๆ)
+function truncateAtBoundary(str, maxLen) {
+  const s = String(str || '');
+  if (s.length <= maxLen) return s;
+  const cut = s.slice(0, maxLen);
+  const boundary = Math.max(cut.lastIndexOf(' '), cut.lastIndexOf('\n'), cut.lastIndexOf('ฯ'), cut.lastIndexOf('.'), cut.lastIndexOf('!'), cut.lastIndexOf('?'));
+  return (boundary > maxLen * 0.5 ? cut.slice(0, boundary + 1) : cut).trim();
+}
+
+// ★ 27 ก.ค.: ดึง "ข้อเท็จจริงแกน" จากรอบแรก (headline + keyPoints) — bullet สั้นๆ ใช้เป็นเช็คลิสต์ความครบตอนเขียนรอบ 2
+//   (ไม่ใช่ rawData/เนื้อความยาว — ตั้งใจกันสำนวนรอบแรกไหลมาปนเหมือนเดิม)
+//   ★ v2 — แก้รูรีวิว A7: ใช้ point อย่างเดียว (ตัด detail ออก กันสำนวนรอบแรกปนเยอะเกิน) + ตัดที่ขอบคำ
+function buildFactAnchors({ headline, keyPoints } = {}) {
+  const anchors = [];
+  const h = String(headline || '').trim();
+  if (h) anchors.push(truncateAtBoundary(h, 160));
+  if (Array.isArray(keyPoints)) {
+    for (const k of keyPoints) {
+      if (anchors.length >= 10) break;
+      const point = String(k?.point || k || '').trim();
+      if (!point) continue;
+      anchors.push(truncateAtBoundary(point, 160));
+    }
+  }
+  return anchors.slice(0, 10);
+}
+
+/** ★ 27 ก.ค.: ประกอบ "identity" (บัญชีชื่อ+แคปชั่น+ข้อเท็จจริงแกน) จาก insight รอบแรก
+ *   ให้ call site (route ที่เรียก extractTranscriptQuotes/extractTranscriptQuotesFromVideoBuffer) ใช้ประกอบ arg ที่ 3
+ *   หมายเหตุ: insight ปัจจุบัน (normalizeInsight) ไม่มีฟิลด์ caption จริง — ส่ง caption แยกได้ถ้ามีจากแหล่งอื่น (เช่น metaReelsService)
+ * @param {object} insight  ผล extractClipInsight/extractInsightFromVideoBuffer รอบแรก (ใช้ .speakers/.headline/.keyPoints)
+ * @param {string} [caption] แคปชั่น/ชื่อคลิปจากแหล่งอื่น ถ้ามี
+ */
+export function buildIdentityFromInsight(insight, caption = '') {
+  return {
+    caption: String(caption || '').trim().slice(0, 200),
+    names: filterIdentityNames(insight?.speakers),
+    factAnchors: buildFactAnchors({ headline: insight?.headline, keyPoints: insight?.keyPoints }),
+  };
+}
+
+// ★ 27 ก.ค.: ประกอบบล็อก "บัญชีตัวตน + ข้อเท็จจริงแกน" จากรอบแรก — ว่างทั้งหมด = คืน '' (backward-safe)
+function buildIdentityBlock(identity) {
+  const names = filterIdentityNames(identity?.names);
+  const caption = String(identity?.caption || '').trim().slice(0, 200);
+  const factAnchors = Array.isArray(identity?.factAnchors)
+    ? identity.factAnchors.map(a => truncateAtBoundary(String(a || '').trim(), 160)).filter(Boolean).slice(0, 10)
+    : [];
+  if (!names.length && !caption && !factAnchors.length) return '';
+
+  const parts = [];
+  if (names.length || caption) {
+    const nameList = names.length ? names.map(n => `   - ${n}`).join('\n') : '   - (ไม่มีชื่อบุคคลจากรอบแรก)';
+    parts.push(`👤 บัญชีตัวตนที่ยืนยันแล้วจากการถอดรอบแรก (มีหลักฐานตามกฎหลักฐานตัวตนแล้ว):
+${nameList}${caption ? `\n   แคปชั่น/ชื่อคลิป: ${caption}` : ''}
+   → บุคคลในบัญชีนี้: ใช้ "ชื่อจริง" สม่ำเสมอทุกครั้งที่อ้างถึง ห้ามลดรูปเป็นคำกลาง ("หญิงสาวในคลิป/ผู้ถูกสัมภาษณ์/ฝ่ายชาย")
+   → คนที่ไม่อยู่ในบัญชีและไม่มีหลักฐานในคลิป: กฎหลักฐานตัวตนเดิมบังคับตามปกติ (ห้ามมโน)
+   → ★ ถ้าดูคลิปแล้วไม่พบหลักฐานของชื่อใดในบัญชีนี้เลย ให้ยึดคลิปจริงเป็นหลัก ไม่ต้องใช้ชื่อนั้น`);
+  }
+  if (factAnchors.length) {
+    parts.push(`📌 ข้อเท็จจริงแกนจากรอบแรก (ใช้เป็นเช็คลิสต์ความครบ):
+${factAnchors.map(a => `   - ${a}`).join('\n')}
+   → ใช้เป็นเช็คลิสต์ความครบ — ถ้าคลิปจริงยืนยันประเด็นเหล่านี้ ให้ครอบคลุมให้ครบใน enrichedRaw · ถ้าขัดกับคลิปจริง ให้ยึดคลิปจริงเป็นหลัก
+   → bullets ข้างบนคือ "ข้อเท็จจริงดิบ" ไม่ใช่ประโยคสำเร็จ ห้ามลอกสำนวน — เรียบเรียงเป็นภาษาตัวเองใหม่จากคลิปจริง`);
+  }
+  return parts.join('\n');
+}
+
 /**
  * ★ 24 ก.ค.: ประกอบพรอมต์ + แนบ "โครงประเด็นจากรอบแรก" (subStories/topics) เป็น "แนวอ้างอิง"
  *   เพื่อให้ประเด็นที่แยกในรอบ 2 ตรงกับเนื้อดิบแยกประเด็นของระบบเดิม (ผู้ใช้เทียบข้ามกันได้)
  *   🔴 ส่งเฉพาะ "หัวข้อ+ช่วงเวลา" (โครงสร้าง) ไม่ส่งเนื้อความ — กันสำนวนรอบแรกไหลมาปน
+ * ★ 27 ก.ค.: เพิ่ม arg ที่ 2 "identity" (บัญชีชื่อยืนยันแล้ว + แคปชั่น + ข้อเท็จจริงแกนจากรอบแรก) — แก้เคส
+ *   รอบ 2 ไม่มีบัญชีชื่อที่รอบแรกยืนยันแล้ว → เรียกคนกลางๆ ทั้งที่รอบแรกรู้ชื่อแล้ว · identity ว่าง = พร้อมท์เดิมเป๊ะ (backward-safe)
  */
-function buildTranscriptQuotesPrompt(topicHints) {
+function buildTranscriptQuotesPrompt(topicHints, identity = null) {
   const hints = Array.isArray(topicHints) ? topicHints.filter(t => t?.topic).slice(0, 10) : [];
-  if (!hints.length) return TRANSCRIPT_QUOTES_PROMPT;
-  const list = hints.map((t, i) => `   ${i + 1}. ${String(t.topic).slice(0, 120)}${t.timeRange ? ` (${t.timeRange})` : ''}`).join('\n');
+  const identityBlock = buildIdentityBlock(identity);
+  if (!hints.length && !identityBlock) return TRANSCRIPT_QUOTES_PROMPT;
+
+  const topicBlock = hints.length ? `📎 โครงประเด็นที่ระบบถอดไว้ก่อนหน้า (ใช้เป็น "แนวอ้างอิง" ให้ enrichedTopics แบ่งตรงกัน):
+${hints.map((t, i) => `   ${i + 1}. ${String(t.topic).slice(0, 120)}${t.timeRange ? ` (${t.timeRange})` : ''}`).join('\n')}
+   → ถ้าตรงกับที่เห็นในคลิปจริง ให้แบ่ง enrichedTopics ตามนี้ (ชื่อ/ช่วงเวลาปรับให้ตรงคลิปได้)
+   → ถ้าคลิปจริงมีประเด็นมากกว่า/ต่างไป ให้ยึด "คลิปจริง" เป็นหลัก เพิ่มหรือปรับได้ · ⛔ ห้ามลอกสำนวน ให้เขียนเนื้อใหม่จากคลิปเอง` : '';
+
+  const combined = [topicBlock, identityBlock].filter(Boolean).join('\n\n');
   return TRANSCRIPT_QUOTES_PROMPT.replace(
     '✍️ กฎภาษาเนื้อดิบ',
-    `📎 โครงประเด็นที่ระบบถอดไว้ก่อนหน้า (ใช้เป็น "แนวอ้างอิง" ให้ enrichedTopics แบ่งตรงกัน):
-${list}
-   → ถ้าตรงกับที่เห็นในคลิปจริง ให้แบ่ง enrichedTopics ตามนี้ (ชื่อ/ช่วงเวลาปรับให้ตรงคลิปได้)
-   → ถ้าคลิปจริงมีประเด็นมากกว่า/ต่างไป ให้ยึด "คลิปจริง" เป็นหลัก เพิ่มหรือปรับได้ · ⛔ ห้ามลอกสำนวน ให้เขียนเนื้อใหม่จากคลิปเอง
+    `${combined}
 
 ✍️ กฎภาษาเนื้อดิบ`
   );
@@ -334,17 +434,19 @@ function normalizeTranscriptQuotes(p) {
   };
 }
 
-/** ★ เนื้อดิบมีมิติ จากลิงก์ YouTube (Gemini ดูคลิปตรง) · topicHints = โครงประเด็นจากรอบแรก (ไม่บังคับ) */
-export async function extractTranscriptQuotes({ url, topicHints = null }) {
+/** ★ เนื้อดิบมีมิติ จากลิงก์ YouTube (Gemini ดูคลิปตรง) · topicHints = โครงประเด็นจากรอบแรก (ไม่บังคับ)
+ *  ★ 27 ก.ค.: identity = {caption, names, factAnchors} จากรอบแรก (ไม่บังคับ — ไม่ส่ง = พร้อมท์เดิมเป๊ะ) ดู buildIdentityFromInsight() */
+export async function extractTranscriptQuotes({ url, topicHints = null, identity = null }) {
   const { callGeminiVideo } = await import('@/lib/ai/geminiClient');
-  const r = await callGeminiVideo({ prompt: buildTranscriptQuotesPrompt(topicHints), youtubeUrl: url, maxTokens: 32000 });
+  const r = await callGeminiVideo({ prompt: buildTranscriptQuotesPrompt(topicHints, identity), youtubeUrl: url, maxTokens: 32000 });
   return normalizeTranscriptQuotes(r);
 }
 
-/** ★ เนื้อดิบมีมิติ จากไฟล์วิดีโอ (TikTok/FB/IG ที่โหลดมาแล้ว — ใช้ buffer ซ้ำจากรอบ insight) */
-export async function extractTranscriptQuotesFromVideoBuffer(videoBuffer, mimeType = 'video/mp4', topicHints = null) {
+/** ★ เนื้อดิบมีมิติ จากไฟล์วิดีโอ (TikTok/FB/IG ที่โหลดมาแล้ว — ใช้ buffer ซ้ำจากรอบ insight)
+ *  ★ 27 ก.ค.: identity = {caption, names, factAnchors} จากรอบแรก (ไม่บังคับ — ไม่ส่ง = พร้อมท์เดิมเป๊ะ) ดู buildIdentityFromInsight() */
+export async function extractTranscriptQuotesFromVideoBuffer(videoBuffer, mimeType = 'video/mp4', topicHints = null, identity = null) {
   const { callGeminiVideoFile } = await import('@/lib/ai/geminiClient');
-  const r = await callGeminiVideoFile({ prompt: buildTranscriptQuotesPrompt(topicHints), videoBuffer, mimeType, maxTokens: 32000 });
+  const r = await callGeminiVideoFile({ prompt: buildTranscriptQuotesPrompt(topicHints, identity), videoBuffer, mimeType, maxTokens: 32000 });
   return normalizeTranscriptQuotes(r);
 }
 

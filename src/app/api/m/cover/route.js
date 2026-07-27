@@ -18,6 +18,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getSession } from '@/lib/auth';
 import { listMegaCovers } from '@/lib/megaCoverArchive'; // ★ 27 ก.ค. 69 (sol-review ข้อ 6): เลิก hop HTTP ไป /api/mega-covers
+import { readImages } from '@/lib/imageStore'; // ★ "ช่องเคส" (27 ก.ค. 69) — view=caseImages ใช้คลังรูปเดิมเป๊ะ (ตัวเดียวกับ /api/images/[id] + compose-test) ไม่สร้างที่เก็บใหม่
 
 async function sess() {
   try {
@@ -64,8 +65,33 @@ export async function GET(request) {
     if (request.nextUrl.searchParams.get('view') === 'archive') {
       const limit = Math.min(parseInt(request.nextUrl.searchParams.get('limit') || '24', 10) || 24, 60);
       const all = await listMegaCovers(200);
-      const items = (all || []).slice(0, limit).map((it) => ({ id: it.id, title: it.title || '', createdAt: it.at || null, source: it.source || '' }));
+      const items = (all || []).slice(0, limit).map((it) => ({ id: it.id, title: it.title || '', createdAt: it.at || null, source: it.source || '', qcStatus: it.qcStatus || null })); // ★ 27 ก.ค. 69: ป้าย 'manual_review' ให้จอ /m ขึ้นป้าย "รอตรวจ"
       return NextResponse.json({ success: true, items });
+    }
+
+    // ★ "ช่องเคส" (27 ก.ค. 69, เจ้าของขอ) — รายการภาพดิบของเคส AC-#### ให้เปิดดู/โหลดจากการ์ดในโหมด ⚡ ทางลัด
+    //   ใช้คลังรูปเดิม (readImages) ตัวเดียวกับ GET /api/images/[id] และ /api/mega/compose-test — ไม่สร้างที่เก็บใหม่
+    //   ล้มเงียบเฉพาะฝั่งอ่านคลัง (readImages พัง/ไม่มีข้อมูล) → คืนลิสต์ว่าง ไม่ throw ให้จอฝั่ง /m พัง
+    if (request.nextUrl.searchParams.get('view') === 'caseImages') {
+      const caseId = String(request.nextUrl.searchParams.get('caseId') || '').trim();
+      if (!/^AC-\d+$/.test(caseId)) {
+        return NextResponse.json({ success: false, error: 'caseId ไม่ถูกรูปแบบ (ต้องเป็น AC-#### )', errorType: 'BAD_INPUT' }, { status: 400 });
+      }
+      const limitRaw = parseInt(request.nextUrl.searchParams.get('limit') || '60', 10);
+      const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 60, 1), 60);
+      const imgs = await readImages(caseId).catch(() => []);
+      const items = (Array.isArray(imgs) ? imgs : [])
+        .filter((x) => x && typeof x.imageUrl === 'string' && x.imageUrl)
+        .slice(0, limit)
+        .map((x) => ({
+          id: x.id || undefined,
+          url: x.imageUrl,
+          w: Number(x.realWidth) > 0 ? Number(x.realWidth) : undefined,
+          h: Number(x.realHeight) > 0 ? Number(x.realHeight) : undefined,
+          clean: x.triage && typeof x.triage.clean === 'boolean' ? x.triage.clean : undefined,
+          person: x.triage && x.triage.person ? String(x.triage.person).slice(0, 60) : undefined,
+        }));
+      return NextResponse.json({ success: true, caseId, total: items.length, items });
     }
 
     // ★ 27 ก.ค. 69 (sol-review วิกฤต 2): kinds=compose,ref — คิวนี้เป็นของงานปกเท่านั้น กันงานโต๊ะข่าว (desk_*) หลุดมาโผล่จอปก

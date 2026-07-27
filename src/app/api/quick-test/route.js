@@ -66,7 +66,9 @@ const TERMINAL_ERRORS = new Set([
 
 // ★ 26 ก.ค. 69: ท่อ ref ตอบครั้งเดียวตอนจบ (>5 นาทีได้) — undici default headersTimeout 300s ตัดกลางทาง = "fetch failed"
 //   ต้องยกเพดานผ่าน dispatcher เท่านั้น (AbortSignal คุมไม่ถึงชั้นนี้)
-const REF_LONG_AGENT = new Agent({ headersTimeout: 25 * 60 * 1000, bodyTimeout: 25 * 60 * 1000 });
+// ★ 27 ก.ค. 69: ยก 25→32 นาที — ต้องสูงกว่าเพดาน AbortSignal สูงสุดของ desk_harvest mode 'all' (30 นาที ดู harvestTimeoutMs
+//   ด้านล่าง) เสมอ กันชั้น dispatcher ตัดก่อนที่ AbortSignal ชั้นในจะได้ทำงานตามที่ตั้งใจ
+const REF_LONG_AGENT = new Agent({ headersTimeout: 32 * 60 * 1000, bodyTimeout: 32 * 60 * 1000 });
 
 // รัน 1 รอบ — สำเร็จคืน result object, ล้ม throw (แนบ errorType/trace)
 async function callOnce(job, origin) {
@@ -91,17 +93,23 @@ async function callOnce(job, origin) {
       refImgUrl: d.refUsed?.imagePath || null,
       refName: d.refUsed?.styleName || null,
       caseId: d.caseId || job.input.caseId,
+      // ★ 27 ก.ค. 69 (นโยบาย "เก็บทุกใบ+ติดป้ายสถานะ"): ป้ายสถานะ + เหตุผลถ้าไม่เข้าคลัง — ให้ progress.step ท้าย runJob() ใช้
+      qcStatus: d.qcStatus || null,
+      archiveSkipReason: d.archiveSkipReason || null,
     };
   }
   // ★ 27 ก.ค. 69: 3 ชนิดงานโต๊ะข่าว — เรียกตรงเข้า /api/news-desk/* (ไม่ผ่าน middleware ป้องกัน คุมแค่ cover-ref-test/quick-test)
   //   ทุกตัวต้องใช้ dispatcher REF_LONG_AGENT เหมือน ref — undici headersTimeout/bodyTimeout ค่า default (300s) ตัดกลางทางถ้าไม่ตั้ง
   if (job.kind === 'desk_harvest' || job.kind === 'desk_search') {
     const body = job.kind === 'desk_harvest' ? { mode: job.input.mode } : { keyword: job.input.keyword };
+    // ★ 27 ก.ค. 69 (หลักฐานงานจริง): mode 'all' ลาก 11 เลนพร้อมกัน วัดจริง ~20-25 นาที ชนเพดาน 20 นาทีเดิม
+    //   → ยกเป็น 30 นาทีเฉพาะ desk_harvest mode 'all' · โหมดเดี่ยว (~9 นาที) และ desk_search คงเดิม 20 นาที (พอเหลือ)
+    const harvestTimeoutMs = (job.kind === 'desk_harvest' && job.input.mode === 'all') ? 30 * 60 * 1000 : 20 * 60 * 1000;
     const res = await fetch(`${origin}/api/news-desk/harvest`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(20 * 60 * 1000),
+      signal: AbortSignal.timeout(harvestTimeoutMs),
       dispatcher: REF_LONG_AGENT,
     });
     const d = await res.json().catch(() => ({}));
@@ -177,6 +185,9 @@ async function callOnce(job, origin) {
     imageCaseId: d.imageCaseId || null,
     poolSize: d.poolSize ?? null,
     trace: Array.isArray(d.trace) ? d.trace.map((t) => ({ stage: t.stage, status: t.status })) : [],
+    // ★ 27 ก.ค. 69 (นโยบาย "เก็บทุกใบ+ติดป้ายสถานะ"): ป้ายสถานะ + เหตุผลถ้าไม่เข้าคลัง — ให้ progress.step ท้าย runJob() ใช้
+    qcStatus: d.qcStatus || null,
+    archiveSkipReason: d.archiveSkipReason || null,
   };
 }
 
@@ -196,7 +207,15 @@ async function runJob(job, origin) {
       if (attempt > 1) await patchJob(job.id, { claimedAt: nowIso(), progress: { step: `ลองใหม่รอบ ${attempt}/${maxAttempts}`, pct: 5 } });
       const result = await callOnce(job, origin);
       if (!(await getJob(job.id))) return; // ถูกลบระหว่างรอบนี้ → ไม่เขียน done ทับ
-      await finishJob(job.id, { status: 'done', progress: { step: 'เสร็จ', pct: 100 }, result, attempts: attempt, error: null });
+      // ★ 27 ก.ค. 69 (งานไม่โกหก — นโยบาย "เก็บทุกใบ+ติดป้ายสถานะ"): เฉพาะสายปก (compose/ref) มี qcStatus/archiveSkipReason
+      //   แนบมา — desk_* ไม่มีฟิลด์นี้เลย ตกไปข้อความเดิม 'เสร็จ' ตามปกติ
+      let doneStep = 'เสร็จ';
+      if (result && result.archiveSkipReason) {
+        doneStep = `เสร็จ แต่ไม่เข้าคลัง: ${String(result.archiveSkipReason).slice(0, 80)}`;
+      } else if (result && result.qcStatus === 'manual_review') {
+        doneStep = 'เสร็จ (ปกรอตรวจ — ดูในคลัง)';
+      }
+      await finishJob(job.id, { status: 'done', progress: { step: doneStep, pct: 100 }, result, attempts: attempt, error: null });
       return;
     } catch (e) {
       lastErr = e;

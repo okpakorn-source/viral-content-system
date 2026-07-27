@@ -53,7 +53,7 @@ export async function GET(request) {
       const items = (all || [])
         .filter(x => x && x.source === 'm-editor')
         .slice(0, limit)
-        .map(x => ({ id: x.id, title: x.title || '', createdAt: x.createdAt || x.at || null, by: x.by || '', template: x.template || '' }));
+        .map(x => ({ id: x.id, title: x.title || '', createdAt: x.createdAt || x.at || null, by: x.by || '', template: x.template || '', qcStatus: x.qcStatus || null })); // ★ 27 ก.ค. 69: ป้าย 'manual_review' ให้จอขึ้นป้าย "รอตรวจ"
       return NextResponse.json({ success: true, items });
     }
 

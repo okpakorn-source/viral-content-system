@@ -88,6 +88,9 @@ export async function addMegaCover(rec = {}) {
     score: rec.score ?? null,
     throughMega: rec.throughMega !== false,
     qcFlags: Array.isArray(rec.qcFlags) && rec.qcFlags.length ? rec.qcFlags : undefined, // เฟส 4.3: ธงคุณภาพต่อใบ
+    // ★ 27 ก.ค. 69 (นโยบาย "เก็บทุกใบ+ติดป้ายสถานะ"): 'pass' | 'manual_review' — undefined = ผู้เรียกเก่ายังไม่ส่ง (เดิมเป๊ะ ไม่บังคับ)
+    qcStatus: rec.qcStatus === 'manual_review' ? 'manual_review' : (rec.qcStatus === 'pass' ? 'pass' : undefined),
+    qcReasons: Array.isArray(rec.qcReasons) && rec.qcReasons.length ? rec.qcReasons.slice(0, 6) : undefined,
     hasCloudImage: false,
     trace: Array.isArray(rec.trace) ? rec.trace.map((t) => ({ stage: t.stage, status: t.status })) : undefined,
   };

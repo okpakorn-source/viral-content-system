@@ -117,7 +117,9 @@ export async function createJob({ kind, label, input, dispatch = 'local' }) {
 export async function claimTeamJob(kinds = null) {
   const jobs = await listJobs(200);
   const inClass = (j) => !kinds || kinds.includes(j.kind);
-  const staleMs = 30 * 60 * 1000;
+  // ★ 27 ก.ค. 69: ยก 30→40 นาที — desk_harvest mode 'all' เพดานจริงตอนนี้ 30 นาที (harvestTimeoutMs ใน quick-test/route.js)
+  //   staleMs เดิม 30 นาทีเท่ากันพอดี เสี่ยง reclaim งานที่ยังรันอยู่จริงกลางทาง (claim ซ้ำ = ยิงซ้ำ/เปลืองโควตา) ต้องมี buffer เผื่อ
+  const staleMs = 40 * 60 * 1000;
   const now = Date.now();
   const isFreshRunning = (j) => j.status === 'running' && j.dispatch === 'team' && inClass(j)
     && (now - Date.parse(j.claimedAt || j.startedAt || j.createdAt)) <= staleMs;

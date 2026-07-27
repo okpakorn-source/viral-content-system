@@ -319,8 +319,9 @@ function JobCard({ job, open, onToggle, onDelete, now }) {
           <div style={{ fontSize: 13.5, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{job.label || job.kind}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 11.5, fontWeight: 800, color }}>{badge}</span>
-            {job.dispatch === 'team' && <span style={{ fontSize: 10.5, color: C.dim, background: C.card2, borderRadius: 6, padding: '1px 6px' }}>🖥️ เครื่องทีม</span>}
-            {job.dispatch === 'cloud' && <span style={{ fontSize: 10.5, color: C.dim, background: C.card2, borderRadius: 6, padding: '1px 6px' }}>☁️ คลาว</span>}
+            {job.dispatch === 'cloud'
+              ? <span style={{ fontSize: 10.5, color: C.dim, background: C.card2, borderRadius: 6, padding: '1px 6px' }}>☁️ คลาวด์</span>
+              : <span style={{ fontSize: 10.5, color: C.dim, background: C.card2, borderRadius: 6, padding: '1px 6px' }}>🖥️ เครื่องทีม</span>}
             {liveDur && <span style={{ fontSize: 11.5, color: C.dim }}>· {liveDur}</span>}
             {st === 'done' && (r.refSimilarity != null) && <span style={{ fontSize: 11.5, color: C.dim }}>· เหมือน ref {r.refSimilarity}%</span>}
             {st === 'done' && r.score && r.score !== '-' && (r.refSimilarity == null) && <span style={{ fontSize: 11.5, color: C.dim }}>· {r.score}</span>}
@@ -336,6 +337,10 @@ function JobCard({ job, open, onToggle, onDelete, now }) {
         <div style={{ marginTop: 12, borderTop: `1px solid ${C.line}`, paddingTop: 12 }}>
           {st === 'failed' && <div style={{ padding: 10, background: 'rgba(239,68,68,.12)', color: '#fca5a5', borderRadius: 10, fontSize: 12.5, marginBottom: 10 }}>{job.error || 'ล้มเหลว'}</div>}
           {running && <div style={{ fontSize: 12.5, color: C.dim, marginBottom: 10 }}>⏳ {job.progress?.step || 'กำลังรัน'} — กดปิดจอได้ เดี๋ยวผลมาเอง</div>}
+          {/* ★ 27 ก.ค. 69 (นโยบาย "เก็บทุกใบ+ติดป้ายสถานะ"): งานจบแล้วแต่มีเงื่อนไขพิเศษ (ปกรอตรวจ / ไม่เข้าคลัง) — โชว์ step ท้ายให้เห็น */}
+          {st === 'done' && (String(job.progress?.step || '').startsWith('เสร็จ (') || String(job.progress?.step || '').startsWith('เสร็จ แต่')) && (
+            <div style={{ fontSize: 12.5, color: C.amber, marginBottom: 10, fontWeight: 700 }}>{job.progress.step}</div>
+          )}
 
           {(r.coverImgUrl || r.refImgUrl) && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -355,7 +360,10 @@ function JobCard({ job, open, onToggle, onDelete, now }) {
             {r.poolSize != null && <div>พูล: {r.poolSize} ใบ{r.imageCaseId ? ` · ${r.imageCaseId}` : ''}{r.caseId ? ` · ${r.caseId}` : ''}</div>}
             {Array.isArray(r.refDiffs) && r.refDiffs.length > 0 && <div style={{ color: '#fbbf24' }}>จุดต่าง: {r.refDiffs.join(' · ')}</div>}
             {Array.isArray(r.trace) && r.trace.length > 0 && <div style={{ color: '#a3a3a3' }}>{r.trace.map((t) => `${t.stage}${t.status === 'failed' ? '❌' : '✓'}`).join(' → ')}</div>}
-            {r.archivedId && <a href="/mega-covers" style={{ color: C.green, fontWeight: 700, textDecoration: 'none' }}>🗂️ เข้าคลังแล้ว ({r.archivedId})</a>}
+            {/* ★ 27 ก.ค. 69: ref lane ใช้ field ชื่อ archiveId (ไม่ใช่ archivedId แบบสาย compose) — เช็คทั้งคู่ ไม่งั้นลิงก์นี้ไม่โผล่เลยฝั่ง ref */}
+            {(r.archivedId || r.archiveId) && (r.qcStatus === 'manual_review'
+              ? <a href="/mega-covers" style={{ color: C.amber, fontWeight: 700, textDecoration: 'none' }}>🗂️ เข้าคลัง (รอตรวจ) ({r.archivedId || r.archiveId})</a>
+              : <a href="/mega-covers" style={{ color: C.green, fontWeight: 700, textDecoration: 'none' }}>🗂️ เข้าคลังแล้ว ({r.archivedId || r.archiveId})</a>)}
           </div>
           {r.coverImgUrl && st === 'done' && (
             <a href={`${r.coverImgUrl}${r.coverImgUrl.includes('?') ? '&' : '?'}dl=1`} style={{ display: 'inline-block', marginTop: 10, padding: '9px 16px', borderRadius: 10, background: C.accent, color: '#fff', fontSize: 13, fontWeight: 800, textDecoration: 'none' }}>⬇️ โหลดภาพ</a>

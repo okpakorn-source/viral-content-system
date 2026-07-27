@@ -45,7 +45,7 @@ export default function MegaCoversPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginTop: 12 }}>
         {items.map((it) => (
-          <div key={it.id} style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+          <div key={it.id} style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden', background: '#fff', position: 'relative' }}>
             {/* ★ 9 ก.ค.: ภาพผ่าน /api/mega-covers/img (ไฟล์เครื่อง→คลาวด์) — Vercel เห็นคลังเดียวกับเครื่องทีม
                 · onError ถอยไป coverPath (record เก่าก่อนคลาวด์) ก่อนโชว์ "ไม่มีภาพ" */}
             <img
@@ -60,6 +60,10 @@ export default function MegaCoversPage() {
               }}
               style={{ width: '100%', display: 'block', cursor: 'zoom-in', aspectRatio: '4/5', objectFit: 'cover', background: '#f1f5f9' }}
             />
+            {/* ★ 27 ก.ค. 69 (นโยบาย "เก็บทุกใบ+ติดป้ายสถานะ"): ใบที่ QC ไม่ผ่านยังเข้าคลัง แต่ติดป้ายเตือนให้คนตรวจก่อนใช้จริง */}
+            {it.qcStatus === 'manual_review' && (
+              <span style={{ position: 'absolute', top: 8, right: 8, fontSize: 10.5, fontWeight: 800, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '2px 7px', pointerEvents: 'none' }}>รอตรวจ</span>
+            )}
             <div style={{ padding: 10 }}>
               <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.3, marginBottom: 4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{it.title || '(ไม่มีหัวข้อ)'}</div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: '#475569' }}>

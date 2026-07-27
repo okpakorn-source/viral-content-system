@@ -308,7 +308,7 @@ export async function POST(request) {
     if (ctx.mode && !bufTooBig && enrichBudgetMs > 60_000) {
       let enrichTimer;
       try {
-        const { extractTranscriptQuotes, extractTranscriptQuotesFromVideoBuffer } = await import('@/lib/services/clipInsightService');
+        const { extractTranscriptQuotes, extractTranscriptQuotesFromVideoBuffer, buildIdentityFromInsight } = await import('@/lib/services/clipInsightService');
         // ★ 24 ก.ค. (ผู้ใช้สั่ง): ส่ง "โครงประเด็น" จากรอบแรก (subStories/topics) ให้รอบ 2 แยกประเด็นตรงกัน
         //   ส่งเฉพาะหัวข้อ+ช่วงเวลา (โครงสร้าง) ไม่ส่งเนื้อความ — กันสำนวนรอบแรกไหลมาปน
         const topicHints = (insight?.subStories?.length ? insight.subStories : (insight?.topics || []))
@@ -317,11 +317,14 @@ export async function POST(request) {
             timeRange: t?.timeRange || (t?.timeStart ? `${t.timeStart}–${t.timeEnd || ''}` : ''),
           }))
           .filter(t => t.topic);
+        // ★ 27 ก.ค. (เจ้าของอนุมัติ wire): บัญชีชื่อ+ข้อเท็จจริงแกนที่รอบแรกยืนยันแล้ว → กันรอบ 2 เรียกคนกลางๆ ทั้งที่รู้ชื่อแล้ว
+        //   ctx ปัจจุบันไม่มี caption/title จริง (ดูแล้ว — buildInsight ไม่เคยเซ็ต ctx.caption) → ส่ง null ไปก่อน ไม่ฝืนมั่ว
+        const identity = buildIdentityFromInsight(insight, ctx.caption || null);
         const tq = await Promise.race([
           getClipVideoQueue().run(
             () => (ctx.mode === 'buffer'
-              ? extractTranscriptQuotesFromVideoBuffer(ctx.buffer, ctx.mimeType, topicHints)
-              : extractTranscriptQuotes({ url: ctx.url, topicHints })),
+              ? extractTranscriptQuotesFromVideoBuffer(ctx.buffer, ctx.mimeType, topicHints, identity)
+              : extractTranscriptQuotes({ url: ctx.url, topicHints, identity })),
             { label: `enrich:${type}` }
           ),
           new Promise((_, rej) => { enrichTimer = setTimeout(() => rej(new Error(`enriched budget timeout ${Math.round(enrichBudgetMs / 1000)}s`)), enrichBudgetMs); }),

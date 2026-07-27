@@ -318,7 +318,7 @@ await E('E2 typed 422 + archive0 (S7 not-done / missing capture / consumer throw
 });
 
 // ============================================================ E3 + E6 (real s6→s7, strict armed)
-await E('E2 legacy carrier + QC fail => preview advisory 200 with real output and zero persist/archive', async () => {
+await E('E2 legacy carrier + QC fail => preview_advisory 200 with real output, NOW persisted+archived tagged qcStatus=manual_review (เจ้าของเคาะนโยบายใหม่ 27 ก.ค. 69 "เก็บทุกใบ+ติดป้ายสถานะ" แทน AC-0107 zero-archive เดิม)', async () => {
   const { res, counters } = await runRoute(INPUT, { compose: async () => ({ ...COVER_OK, qcFlags: ['blank_image:x'] }) });
   assert.strictEqual(res.status, 200, `legacy QC-fail status exact 200 (got ${res.status})`);
   assert.strictEqual(res.body?.success, true, 'legacy QC-fail body.success exact true');
@@ -328,9 +328,17 @@ await E('E2 legacy carrier + QC fail => preview advisory 200 with real output an
   assert.strictEqual(res.body?.renderMode, 'legacy', `legacy QC-fail renderMode exact legacy (got ${j(res.body?.renderMode)})`);
   assert.strictEqual(res.body?.qcVerdict?.pass, false, 'legacy QC-fail qcVerdict.pass exact false');
   assert.strictEqual(res.body?.productionQcPass, false, 'legacy QC-fail productionQcPass exact false');
-  assert.strictEqual(res.body?.outputId, `REFTEST-${FIXED_TS.toString(36)}`, 'legacy QC-fail outputId is the truthful route job id');
-  assert.strictEqual(counters.persistCalls, 0, 'legacy QC-fail persist exactly 0');
-  assert.strictEqual(counters.archiveCalls, 0, 'legacy QC-fail archive exactly 0');
+  // ★ 27 ก.ค. 69 (เจ้าของเคาะนโยบายใหม่ "เก็บทุกใบ+ติดป้ายสถานะ" แทน AC-0107 zero-archive เดิม): preview_advisory
+  //   ตอนนี้ persist+archive จริงแม้ QC ตก — ติดป้าย qcStatus:'manual_review' ให้คนตรวจทีหลัง แทนทิ้งไปเงียบๆ
+  assert.strictEqual(res.body?.qcStatus, 'manual_review', `legacy QC-fail qcStatus exact manual_review (got ${j(res.body?.qcStatus)})`);
+  assert.strictEqual(res.body?.archiveSkipReason, null, 'legacy QC-fail archiveSkipReason null — archive succeeded (new policy)');
+  assert.strictEqual(res.body?.archiveId, 'ARC-1', `legacy QC-fail archiveId set from the (now-called) archive stub (got ${j(res.body?.archiveId)})`);
+  assert.strictEqual(res.body?.outputId, 'ARC-1', `legacy QC-fail outputId now === archiveId — new policy persists this output instead of falling back to the bare route job id (got ${j(res.body?.outputId)})`);
+  assert.strictEqual(counters.persistCalls, 1, 'legacy QC-fail persist exactly 1 (new policy persists QC-failed covers too)');
+  assert.strictEqual(counters.archiveCalls, 1, 'legacy QC-fail archive exactly 1 (new policy archives QC-failed covers, tagged manual_review, instead of zero-archiving)');
+  assert.strictEqual(counters.archiveEntries.length, 1, 'legacy QC-fail exactly one archive entry');
+  assert.strictEqual(counters.archiveEntries[0].qcStatus, 'manual_review', 'legacy QC-fail archive entry carries qcStatus:manual_review');
+  assert.ok(Array.isArray(counters.archiveEntries[0].qcReasons) && counters.archiveEntries[0].qcReasons.length > 0, 'legacy QC-fail archive entry carries nonempty qcReasons');
 
   const pageSource = fs.readFileSync(new URL('../src/app/cover-ref-test/page.js', import.meta.url), 'utf8');
   const formatterStart = pageSource.indexOf('function formatClientError(value) {');

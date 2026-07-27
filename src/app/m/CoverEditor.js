@@ -266,9 +266,15 @@ export default function CoverEditor({ onLog, say, initialTitle = '' }) {
         <h2>ปกที่แต่งจากแอพ</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 7 }}>
           {archive.map(a => (
-            <a key={a.id} href={`/api/mega-covers/img?id=${a.id}`} target="_blank" rel="noreferrer" style={{ display: 'block' }}>
+            <a key={a.id} href={`/api/mega-covers/img?id=${a.id}`} target="_blank" rel="noreferrer" style={{ display: 'block', position: 'relative' }}>
               <img src={`/api/mega-covers/img?id=${a.id}`} alt={a.title || a.id}
                 style={{ width: '100%', aspectRatio: '4/5', objectFit: 'cover', borderRadius: 10, border: '1px solid var(--line)' }} />
+              {/* ★ 27 ก.ค. 69 (นโยบาย "เก็บทุกใบ+ติดป้ายสถานะ"): ใบที่ QC ไม่ผ่านยังเข้าคลัง แต่ติดป้ายเตือนให้คนตรวจก่อนใช้จริง */}
+              {a.qcStatus === 'manual_review' && (
+                <span style={{ position: 'absolute', top: 4, right: 4, fontSize: 9.5, fontWeight: 800, color: 'var(--warn)', background: 'var(--warnS)', borderRadius: 5, padding: '2px 5px', lineHeight: 1.4 }}>
+                  รอตรวจ
+                </span>
+              )}
             </a>
           ))}
         </div>

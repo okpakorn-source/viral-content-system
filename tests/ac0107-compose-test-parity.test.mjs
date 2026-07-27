@@ -123,8 +123,10 @@ await test('control: a clean render (no stretch flags) ⇒ success:true AND prod
   assert.strictEqual(res._body.qcVerdict.pass, true);
 });
 
-// ── NORMAL (non-frozen) auto-archive branch: a QC-FAILED cover must NOT be archived (AC-0107 archive gate) ──
-await test('AC-0107 archive gate (NORMAL path): a QC-FAILED render (upscaled:main:2.69) still returns success:true (advisory) + productionQcPass:false, but is NOT auto-archived — the cover library never receives an output Production would zero-archive', async () => {
+// ── NORMAL (non-frozen) auto-archive branch: ★ 27 ก.ค. 69 (เจ้าของเคาะนโยบายใหม่ 27 ก.ค. 69 แทน AC-0107 เดิม
+//    "เก็บทุกใบ+ติดป้ายสถานะ") — a QC-FAILED cover is NOW archived too, tagged qcStatus:'manual_review' for a human
+//    to review later, instead of the old AC-0107 zero-archive gate ──
+await test('archive policy REPLACED 27 ก.ค. 69 (เจ้าของเคาะนโยบายใหม่ "เก็บทุกใบ+ติดป้ายสถานะ" แทน AC-0107 เดิม): a QC-FAILED render (upscaled:main:2.69) still returns success:true (advisory) + productionQcPass:false, and IS now auto-archived with qcStatus:"manual_review" — the cover library keeps every render but flags QC-failed ones for manual review instead of zero-archiving them', async () => {
   clearHardQc();
   globalThis.__CT_ARCHIVE = 0;
   globalThis.__CT_COMPOSE = composeYielding(['upscaled:main:2.69']);
@@ -134,8 +136,10 @@ await test('AC-0107 archive gate (NORMAL path): a QC-FAILED render (upscaled:mai
   assert.strictEqual(res._body.frozenPlan, undefined, 'NORMAL path (not frozen)');
   assert.strictEqual(res._body.productionQcPass, false, 'productionQcPass:false');
   assert.strictEqual(res._body.qcVerdict.pass, false, 'qcVerdict.pass:false');
-  assert.strictEqual(res._body.archivedId, null, 'archivedId:null — QC-failed cover NOT archived');
-  assert.strictEqual(globalThis.__CT_ARCHIVE, 0, 'addMegaCover NEVER called for a QC-failed normal-path output');
+  assert.strictEqual(res._body.qcStatus, 'manual_review', 'qcStatus:"manual_review" — new policy tags QC-failed covers for review instead of zero-archiving');
+  assert.strictEqual(res._body.archivedId, 'CT-ARCH', 'archivedId set — QC-failed cover IS now archived (new policy)');
+  assert.strictEqual(res._body.archiveSkipReason, null, 'archiveSkipReason:null — archive succeeded');
+  assert.strictEqual(globalThis.__CT_ARCHIVE, 1, 'addMegaCover IS called for a QC-failed normal-path output (new policy: archive every render, tag status instead of zero-archive)');
 });
 
 await test('control (NORMAL path): a clean render (no stretch flags) IS auto-archived (the deliberate tuning-tool feature still works for QC-passing output)', async () => {

@@ -253,6 +253,10 @@ export default function MobileApp() {
   const [qcSel, setQcSel] = useState(null);
   const [qcHero, setQcHero] = useState('');
   const [qcBusy, setQcBusy] = useState(false);
+  // ★ "ช่องเคส" (27 ก.ค. 69, เจ้าของขอ) — ดูภาพดิบของเคสในโหมด ⚡ ทางลัด · ต่อ /api/m/cover?view=caseImages
+  const [caseImgOpen, setCaseImgOpen] = useState(null); // caseId ที่กางกริดภาพอยู่ (null = ปิดหมด)
+  const [caseImgList, setCaseImgList] = useState({}); // {[caseId]: items[] | undefined (ยังไม่โหลด)}
+  const caseImgLoadedRef = useRef(new Set()); // กันยิงซ้ำเคสเดิม
   // ★ 27 ก.ค. 69: คลังปกล่าสุด (โหมด auto/quick) — ต่อ /api/m/cover?view=archive (forward /api/mega-covers)
   const [cvArchive, setCvArchive] = useState([]);
 
@@ -428,6 +432,17 @@ export default function MobileApp() {
     // ★ 27 ก.ค. 69: โหมดทางลัดล็อกเฉพาะแอดมิน — พนักงานไม่ยิง /api/m/cover?view=cases เลย
     if (tab === 'cover' && isAdmin && cvMode === 'quick' && qcCases.length === 0) loadQcCases();
   }, [tab, isAdmin, cvMode, qcCases.length, loadQcCases]);
+
+  // ★ "ช่องเคส" (27 ก.ค. 69, เจ้าของขอ) — เปิด/ปิดกริดภาพดิบของเคส · ล้มเงียบถ้าโหลดไม่ได้ (คืน [] เงียบ ไม่ retry ไม่ error แดง จอห้ามพัง)
+  const toggleCaseImages = useCallback((caseId) => {
+    setCaseImgOpen(prev => (prev === caseId ? null : caseId));
+    if (!caseId || caseImgLoadedRef.current.has(caseId)) return;
+    caseImgLoadedRef.current.add(caseId);
+    fetch(`/api/m/cover?view=caseImages&caseId=${encodeURIComponent(caseId)}&limit=60`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => setCaseImgList(m => ({ ...m, [caseId]: (d && d.success && Array.isArray(d.items)) ? d.items : [] })))
+      .catch(() => setCaseImgList(m => ({ ...m, [caseId]: [] })));
+  }, []);
 
   // ★ 27 ก.ค. 69: คลังปกล่าสุด (โชว์ในโหมด auto/quick) — โหลดครั้งแรกที่เข้าโหมดใดโหมดหนึ่ง (guard isAdmin เหมือนบล็อกอื่น)
   const loadCoverArchive = useCallback(() => {
@@ -775,9 +790,15 @@ export default function MobileApp() {
       {cvArchive.length === 0 && <p className="sub">ยังไม่มีปกในคลัง</p>}
       {cvArchive.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 7 }}>
         {cvArchive.map(a => (
-          <a key={a.id} href={`/api/mega-covers/img?id=${encodeURIComponent(a.id)}`} target="_blank" rel="noreferrer" style={{ display: 'block' }}>
+          <a key={a.id} href={`/api/mega-covers/img?id=${encodeURIComponent(a.id)}`} target="_blank" rel="noreferrer" style={{ display: 'block', position: 'relative' }}>
             <img src={`/api/mega-covers/img?id=${encodeURIComponent(a.id)}`} alt={a.title || a.id} loading="lazy"
               style={{ width: '100%', aspectRatio: '4/5', objectFit: 'cover', borderRadius: 10, border: '1px solid var(--line)' }} />
+            {/* ★ 27 ก.ค. 69 (นโยบาย "เก็บทุกใบ+ติดป้ายสถานะ"): ใบที่ QC ไม่ผ่านยังเข้าคลัง แต่ติดป้ายเตือนให้คนตรวจก่อนใช้จริง */}
+            {a.qcStatus === 'manual_review' && (
+              <span style={{ position: 'absolute', top: 4, right: 4, fontSize: 9.5, fontWeight: 800, color: 'var(--warn)', background: 'var(--warnS)', borderRadius: 5, padding: '2px 5px', lineHeight: 1.4 }}>
+                รอตรวจ
+              </span>
+            )}
           </a>
         ))}
       </div>}
@@ -999,7 +1020,7 @@ export default function MobileApp() {
                   : <span className="ava">🖼️</span>}
                 <div style={{ overflow: 'hidden' }}>
                   <p className="tt" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.label || j.kind || 'งานปก'}</p>
-                  <p className="mm">{j.dispatch === 'team' ? 'เครื่องทีม' : 'คลาวด์'}{j.progress?.step ? ` · ${j.progress.step}` : ''}{j.status === 'done' && r.refSimilarity != null ? ` · เหมือน ref ${r.refSimilarity}%` : ''}</p>
+                  <p className="mm">{j.dispatch === 'cloud' ? 'คลาวด์' : 'เครื่องทีม'}{j.progress?.step ? ` · ${j.progress.step}` : ''}{j.status === 'done' && r.refSimilarity != null ? ` · เหมือน ref ${r.refSimilarity}%` : ''}</p>
                 </div>
                 <span className="right">{chip}</span>
               </div>
@@ -1024,16 +1045,43 @@ export default function MobileApp() {
           <button className="gh" style={{ width: 'auto', padding: '7px 14px', fontSize: 12.5 }} onClick={loadQcCases}>🔄 รีเฟรชรายการ</button>
         </div>
         {qcCases.length === 0 && <p className="sub">ยังไม่มีเคสในคลัง — ลองรีเฟรช</p>}
-        {qcCases.map(c => (
-          <div key={c.id} className="job" style={qcSel === c.id ? { borderColor: 'var(--pink)', background: 'var(--pinkS)' } : undefined} onClick={() => setQcSel(c.id)}>
-            <span className="ava">🖼️</span>
-            <div style={{ overflow: 'hidden' }}>
-              <p className="tt" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(c.headline || c.id || '').slice(0, 60)}</p>
-              <p className="mm">รูปตรง {c.relevant ?? '-'}/{c.total ?? '-'} · หน้าชัด {c.cleanFace ?? '-'}{c.tone ? ` · ${c.tone}` : ''}</p>
+        {qcCases.map(c => {
+          const imgGridOpen = caseImgOpen === c.id;
+          const imgs = caseImgList[c.id]; // undefined = ยังไม่โหลด · [] = โหลดแล้วแต่ว่าง/ล้มเงียบ
+          return (
+          <div key={c.id} style={{ marginBottom: 8 }}>
+            <div className="job" style={qcSel === c.id ? { borderColor: 'var(--pink)', background: 'var(--pinkS)' } : undefined} onClick={() => setQcSel(c.id)}>
+              <span className="ava">🖼️</span>
+              <div style={{ overflow: 'hidden' }}>
+                <p className="tt" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(c.headline || c.id || '').slice(0, 60)}</p>
+                <p className="mm">รูปตรง {c.relevant ?? '-'}/{c.total ?? '-'} · หน้าชัด {c.cleanFace ?? '-'}{c.tone ? ` · ${c.tone}` : ''}</p>
+              </div>
+              <button className="gh" style={{ width: 'auto', flex: 'none', padding: '5px 8px', fontSize: 11, marginRight: 6 }}
+                onClick={(e) => { e.stopPropagation(); toggleCaseImages(c.id); }}>
+                {imgGridOpen ? '✕ ปิด' : '🖼 ดูภาพเคส'}
+              </button>
+              <span className="right">{qcSel === c.id ? <span className="chip cpk">เลือกแล้ว</span> : null}</span>
             </div>
-            <span className="right">{qcSel === c.id ? <span className="chip cpk">เลือกแล้ว</span> : null}</span>
+            {imgGridOpen && (
+              <div style={{ padding: '8px 6px', border: '1px solid var(--line)', borderTop: 'none', borderRadius: '0 0 12px 12px' }}>
+                {imgs === undefined && <p className="sub" style={{ margin: 0 }}>⏳ กำลังโหลดภาพ…</p>}
+                {Array.isArray(imgs) && imgs.length === 0 && <p className="sub" style={{ margin: 0 }}>ไม่มีภาพในเคสนี้</p>}
+                {Array.isArray(imgs) && imgs.length > 0 && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                    {imgs.map((im, i) => (
+                      <a key={im.id || im.url || i} href={im.url} target="_blank" rel="noopener noreferrer">
+                        <img src={im.url} alt="" loading="lazy"
+                          onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
+                          style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)', display: 'block' }} />
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-        ))}
+          );
+        })}
         <input className="in" style={{ margin: '10px 0' }} value={qcHero} onChange={e => setQcHero(e.target.value)} placeholder="ชื่อคนตัวเด่น (ไม่บังคับ)…" />
         {cvErr && <div className="err">{cvErr}</div>}
         <button className="cta" disabled={!qcSel || qcBusy} onClick={submitQuickCover}>{qcBusy ? 'กำลังส่ง…' : '⚡ ประกอบปก — เข้าคิว รันเบื้องหลัง'}</button>
@@ -1054,7 +1102,7 @@ export default function MobileApp() {
                   : <span className="ava">🖼️</span>}
                 <div style={{ overflow: 'hidden' }}>
                   <p className="tt" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.label || j.kind || 'งานปก'}</p>
-                  <p className="mm">{j.dispatch === 'team' ? 'เครื่องทีม' : 'คลาวด์'}{j.progress?.step ? ` · ${j.progress.step}` : ''}{j.status === 'done' && r.refSimilarity != null ? ` · เหมือน ref ${r.refSimilarity}%` : ''}</p>
+                  <p className="mm">{j.dispatch === 'cloud' ? 'คลาวด์' : 'เครื่องทีม'}{j.progress?.step ? ` · ${j.progress.step}` : ''}{j.status === 'done' && r.refSimilarity != null ? ` · เหมือน ref ${r.refSimilarity}%` : ''}</p>
                 </div>
                 <span className="right">{chip}</span>
               </div>
