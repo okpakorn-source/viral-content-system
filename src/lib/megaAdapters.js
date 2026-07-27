@@ -3081,6 +3081,10 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   const _brainFn = _deps?.slotDirectorBrain || slotDirectorBrain;
   const _abFn = _deps?.artBriefBrain || artBriefBrain; // ★ D3-B2: DI seam (default = ของจริง — production เดิม)
   const _jf = _deps?.fetchJson || jfetch;
+  // ★ TIER3 (สูตรเล่าเรื่องตามเพจ — เจ้าของอนุมัติ 27 ก.ค. 69): อ่าน env ที่นี่ (megaBrains.js ไม่อ่าน process.env
+  //   เอง) แล้วส่ง storyRulesOn เข้า artBriefBrain/slotDirectorBrain ทั้งคู่ · default ON · MEGA_STORY_RULES=0
+  //   → prompt ทั้งสองตัว byte-identical กับก่อน TIER3
+  const _storyRulesOn = process.env.MEGA_STORY_RULES !== '0';
   // ═══ D-sidecar — FINAL-DECISION EVIDENCE v2 (kill switch MEGA_FINAL_DECISION_EVIDENCE_V2='1' เป๊ะ) ═══
   //   latch "ครั้งเดียวก่อน await แรกของฟังก์ชัน" (TOCTOU-proof — flip env กลางทางไม่มีผล) ·
   //   OFF = inert เต็มตัว: ไม่มี dynamic import โมดูล D / ไม่อ่าน carrier-วินิจฉัยใด / ไม่มี field-log ใหม่ —
@@ -3721,6 +3725,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         deskTitle: job.dossier.desk?.title,
         typeMatched: !!job.dossier.refMatch.typeMatched,
         ...(_armTemplateV1 && _semPrereqOn ? { mode: 'template_v1' } : {}), // legacy = ไม่ส่ง mode (arg เดิมเป๊ะ)
+        storyRulesOn: _storyRulesOn, // ★ TIER3
       });
       if (_armTemplateV1 && _semPrereqOn) {
         // ★ P0/P1: normalize marker ที่ generate มาครั้งเดียว — invalid = HOLD · valid = แทน raw ด้วย canonical plain clone
@@ -4106,7 +4111,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   let brain = { slots: {}, note: '' };
   let brainOk = true;
   try {
-    brain = await _brainFn({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title, refDNA: _refDNA, artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) || null, sceneInventory, ...(semContract ? { slotContract: semContract.slots } : {}) }); // เฟส 3.1: สมองเห็นแผนที่ฉาก · SEM-1: ส่งสัญญาช่องเมื่อ semantic ON เท่านั้น (OFF = args เดิมเป๊ะ) · ★ D3-B3.3: template path ใช้ local snapshot
+    brain = await _brainFn({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title, refDNA: _refDNA, artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) || null, sceneInventory, ...(semContract ? { slotContract: semContract.slots } : {}), storyRulesOn: _storyRulesOn }); // เฟส 3.1: สมองเห็นแผนที่ฉาก · SEM-1: ส่งสัญญาช่องเมื่อ semantic ON เท่านั้น (OFF = args เดิมเป๊ะ) · ★ D3-B3.3: template path ใช้ local snapshot · ★ TIER3: storyRulesOn
   } catch (err) {
     brainOk = false; // สมองล่ม → fallback ล้วน (กฎเดียวกับทางหลัก)
   }

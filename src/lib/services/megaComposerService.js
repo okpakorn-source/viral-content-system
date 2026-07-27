@@ -335,6 +335,124 @@ function _circleFaceHeadRatio() {
   return Number.isFinite(r) && r > 0 ? r : 1.4;
 }
 
+// ============================================================
+// ★ TIER3 ข (เจ้าของอนุมัติ 27 ก.ค. 69 — แก้ตามผลตรวจ 2 รอบ) — ป้ายชื่อวงกลม: สไตล์เพจ "ชื่อ" ในเครื่องหมาย
+//   คำพูด ตัวอักษรขาว ขอบ/เงาดำบาง จัดกลาง — วาดเฉพาะเมื่อ "รู้ชื่อจริง" เท่านั้น (ห้ามเดา/ห้ามมโนชื่อ/ห้ามวาดคำบรรยาย generic)
+// PURE ล้วน (ไม่มี IO/env) — ยกเว้น kill-switch MEGA_CIRCLE_LABEL อ่านที่จุดเรียกใช้ (composeAndVerify) เท่านั้น
+// ============================================================
+
+// ── ตัวกรองชื่อก่อนวาด (แนวเดียวกับ ROLE_WORDS/filterIdentityNames ใน clipInsightService.js) ──
+// (ก) ถอดวงเล็บ: "จุน วนวิทย์ (อากงจุน)" → ใช้ชื่อเล่นในวงเล็บ "อากงจุน" (สั้นกว่า เหมาะกับป้ายบนวงกลม) —
+//     ไม่มีชื่อเล่นในวงเล็บ (หรือวงเล็บว่าง/ซ้อนกันเอง) → ตัดวงเล็บ+เนื้อในทิ้งทั้งหมด แล้วกวาดอักขระวงเล็บที่
+//     หลงเหลือ "ทุกกรณี" เป็นด่านสุดท้าย (ห้ามมีวงเล็บเปิดค้างเด็ดขาด แม้อินพุตจะประหลาด/วงเล็บซ้อน/ไม่บาลานซ์)
+function _extractCircleDisplayName(raw) {
+  const s = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  // เนื้อในวงเล็บต้อง "ไม่มีวงเล็บซ้อนข้างใน" ถึงนับเป็นชื่อเล่นที่ใช้ได้ (กันเคส "(((...)))" จับวงเล็บซ้อนมาเป็นชื่อผิดๆ)
+  const m = s.match(/[(（]\s*([^()（）]+?)\s*[)）]/);
+  const out = (m && m[1] && m[1].trim()) ? m[1].trim() : s.replace(/[(（][^)）]*[)）]?/g, '');
+  // ด่านสุดท้าย (กันเหนียวไม่ว่าอินพุตจะประหลาดแค่ไหน): ล้างอักขระวงเล็บที่อาจหลงเหลือทุกตัว
+  return out.replace(/[()（）]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+// (ข) บัญชีดำคำบรรยาย generic (เพศ/วัย/บทบาท/ที่มา) — "มีคำ" พวกนี้ หรือ "ขึ้นต้น" ด้วยคำเพศ/วัยกว้างๆ = ไม่ใช่ชื่อจริง
+const _CIRCLE_GENERIC_NAME_RE = /หญิงสาว|ชายหนุ่ม|เด็กหญิง|เด็กชาย|ในคลิป|ชาวบ้าน|ผู้ถูกสัมภาษณ์|ผู้เสียหาย|เจ้าของ|ลูกสาว|ลูกชาย|คุณแม่|คุณพ่อ|พิธีกร/;
+const _CIRCLE_GENERIC_PREFIX_RE = /^(หญิง|ชาย|เด็ก|ผู้)/;
+function _isCircleGenericName(name) {
+  const s = String(name || '').trim();
+  if (!s) return true;
+  return _CIRCLE_GENERIC_NAME_RE.test(s) || _CIRCLE_GENERIC_PREFIX_RE.test(s);
+}
+
+// ทำความสะอาดชื่อสำหรับป้ายวงกลม: ถอดวงเล็บ/ใช้ชื่อเล่น → กรองคำบรรยาย generic → คืน null เมื่อไม่ใช่ชื่อจริง
+//   (ห้ามเดา/ห้ามมโนชื่อ — ไม่รู้ชื่อจริง = ไม่วาดป้ายเด็ดขาด) — ★ ไม่ตัดความยาวด้วยจำนวนตัวอักษรอีกต่อไป (ผลตรวจจริง
+//   พบว่าจำนวนตัวอักษรไม่ได้สัมพันธ์กับความกว้าง ink ตรงพอจะใช้ตัดสินใจตัดคำ) — คุมความกว้างจริงที่ buildCircleLabelOverlay
+//   แทน (fontSize ปรับตามสัดส่วน + mask วงกลมตอน composite เป็นด่านสุดท้าย) เหลือแค่เพดานกันสตริงประหลาดยาวเกินเหตุ
+export function circleLabelText(name) {
+  const cleaned = _extractCircleDisplayName(name);
+  if (!cleaned) return null;
+  if (_isCircleGenericName(cleaned)) return null; // คำบรรยาย generic ไม่ใช่ชื่อจริง — ห้ามวาด
+  return cleaned.length > 40 ? cleaned.slice(0, 40) : cleaned; // เพดานกันสตริงประหลาดยาวเกินเหตุ (ไม่ใช่ด่านฟิตวงกลม)
+}
+
+// escape ตัวอักษรพิเศษ XML (กันชื่อที่มีอักขระแปลก เช่น & < > " ' หลุดพัง SVG)
+function _svgXmlEscape(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+// ── เรขาคณิต + การฟิตความกว้าง ink (แก้บั๊กผลตรวจรอบ 1: fontSize ตรึง 14%d + baseline ใกล้ขอบล่างมาก
+//   (chord แคบ ณ จุดนั้น) → ชื่อ 13-14 ตัวอักษร ink ล้นนอกวงจริง 18-26% วัดจาก rasterize) ──
+const _CIRCLE_LABEL_BASELINE_FRAC = 0.80;  // ตำแหน่ง baseline จากบนของวง (0=บน,1=ล่าง) — ครึ่งล่างแต่ไม่ใช่ริมสุด (chord กว้างพอ)
+const _CIRCLE_LABEL_CHORD_FRAC = 0.8;      // เป้าความกว้างข้อความ ≤ นี้ × คอร์ดวงกลม ณ ระดับ baseline (สเปกผู้ตรวจ)
+const _CIRCLE_LABEL_CHAR_W = 0.64;         // ค่าเฉลี่ยความกว้าง ink ต่อตัวอักษร (สัดส่วนของ fontSize) — คาลิเบรตจาก
+                                            //   ผลวัดจริงของผู้ตรวจ (13-14 ตัวอักษรล้น 18-26% ที่ fontSize เดิม 14%d)
+const _CIRCLE_LABEL_MIN_FONT_FRAC = 0.07;  // เพดานล่าง fontSize (กันเล็กจนอ่านไม่ออก)
+
+// สร้าง SVG overlay ป้ายชื่อ 1 วง (ขนาดเท่าวงกลมพอดี — composite ทับตำแหน่ง x,y ของช่องวงกลมได้ตรงๆ)
+//   diameter = เส้นผ่านศูนย์กลางวงกลม (px) · วาง 2 ชั้น (ดำหนา→ขาวบาง) ให้เอฟเฟกต์ขอบ/เงาไม่พึ่ง CSS filter/
+//   paint-order (compat กับ librsvg ทุกเวอร์ชันที่ sharp ใช้) · ลด fontSize ตามสัดส่วนความยาวชื่อ (คำนวณจากคอร์ด
+//   วงกลมจริง ณ ระดับ baseline) กันตัวอักษรบิดเบี้ยว — เป็น "ตัวช่วยฟิต" ระดับ best-effort เท่านั้น ไม่ใช่การันตี
+//   ★ เคยลอง textLength+lengthAdjust="spacingAndGlyphs" เป็นด่านสุดท้ายด้วย แต่วัดจริงแล้ว librsvg ที่ sharp ใช้ใน
+//   สภาพแวดล้อมนี้ "ไม่รองรับ" (ทดสอบ: บังคับ textLength เหลือ 1/3 ของความกว้างธรรมชาติ ผลลัพธ์ยังกว้างเท่าเดิม
+//   เป๊ะ) — ตัดออกเพื่อไม่ให้คอมเมนต์โกหกว่ามีการรับประกัน · การรับประกันจริง (ห้าม ink หลุดนอกวงเด็ดขาด) ย้ายไปทำที่
+//   buildCircleLabelOverlay() ด้านล่างแทน ด้วยการ mask วงกลมตอน composite (ตัดเนื้อ ink ส่วนเกินทิ้งจริง ไม่พึ่ง
+//   ความสามารถของ renderer เลย)
+//   คืน null เมื่อไม่มีชื่อจริง (circleLabelText คืน null หลังกรอง) หรือ diameter ไม่ถูกต้อง — caller ต้องไม่วาดป้าย
+export function buildCircleLabelSvg(name, diameter) {
+  const label = circleLabelText(name);
+  if (!label) return null; // ★ ห้ามเดา/ห้ามมโนชื่อ/ห้ามวาดคำบรรยาย generic — ไม่ผ่านตัวกรอง = ไม่วาดป้ายเด็ดขาด
+  const d = Math.round(Number(diameter));
+  if (!Number.isFinite(d) || d <= 0) return null;
+
+  const r = d / 2;
+  const cy = d * _CIRCLE_LABEL_BASELINE_FRAC;
+  const dyFromCenter = Math.abs(cy - r);
+  const halfChord = dyFromCenter < r ? Math.sqrt(r * r - dyFromCenter * dyFromCenter) : 0;
+  const targetWidth = Math.max(1, halfChord * 2 * _CIRCLE_LABEL_CHORD_FRAC);
+
+  const displayText = `"${label}"`;
+  let fontSize = Math.max(10, Math.round(d * 0.14));
+  const minFont = Math.max(8, Math.round(d * _CIRCLE_LABEL_MIN_FONT_FRAC));
+  const naturalWidth = displayText.length * fontSize * _CIRCLE_LABEL_CHAR_W;
+  if (naturalWidth > targetWidth) {
+    const shrunkFont = fontSize * (targetWidth / naturalWidth);
+    fontSize = Math.max(1, Math.round(Math.max(shrunkFont, minFont))); // ลดตามสัดส่วน ไม่ต่ำกว่าเพดานล่าง
+  }
+
+  const cx = Math.round(d / 2);
+  const strokeW = Math.max(2, Math.round(fontSize * 0.14));
+  const font = "'Sarabun', 'Leelawadee UI', 'Tahoma', sans-serif"; // เครื่องทีม Windows มีฟอนต์ไทยครบ
+  const text = _svgXmlEscape(displayText);
+  const svg = `<svg width="${d}" height="${d}" xmlns="http://www.w3.org/2000/svg">
+  <text x="${cx}" y="${Math.round(cy)}" text-anchor="middle" font-family="${font}" font-size="${fontSize}" font-weight="700" fill="#000000" stroke="#000000" stroke-width="${strokeW}">${text}</text>
+  <text x="${cx}" y="${Math.round(cy)}" text-anchor="middle" font-family="${font}" font-size="${fontSize}" font-weight="700" fill="#FFFFFF">${text}</text>
+</svg>`;
+  return Buffer.from(svg);
+}
+
+// ★ ด่านการันตีจริง "ห้าม ink หลุดนอกวงเด็ดขาด" (ผลตรวจรอบ 2 ข้อ 1): rasterize SVG จาก buildCircleLabelSvg()
+//   แล้ว mask วงกลมทับด้วย sharp blend 'dest-in' (เก็บเฉพาะพิกเซลที่อยู่ในวงกลม ตัดส่วนเกินทิ้งจริงระดับพิกเซล)
+//   ก่อน composite ลงปกจริง — ไม่พึ่งความแม่นของการประมาณความกว้างตัวอักษรใน buildCircleLabelSvg เลย (นั่นเป็นแค่
+//   ตัวช่วยให้ "ตัดทิ้งน้อยที่สุด" เพื่อความสวยงาม ไม่ใช่ตัวรับประกันความถูกต้อง) · ไม่มี IO ภายนอกอื่นนอกจาก sharp
+//   (rasterize ในหน่วยความจำล้วน) · คืน null เมื่อ buildCircleLabelSvg คืน null (ไม่มีชื่อจริง/diameter ผิด)
+export async function buildCircleLabelOverlay(name, diameter) {
+  const svg = buildCircleLabelSvg(name, diameter);
+  if (!svg) return null;
+  const d = Math.round(Number(diameter));
+  const sharp = (await import('sharp')).default;
+  const maskSvg = Buffer.from(`<svg width="${d}" height="${d}" xmlns="http://www.w3.org/2000/svg"><circle cx="${d / 2}" cy="${d / 2}" r="${d / 2}" fill="#fff"/></svg>`);
+  try {
+    return await sharp(svg).ensureAlpha().composite([{ input: maskSvg, blend: 'dest-in' }]).png().toBuffer();
+  } catch {
+    return null; // rasterize/mask ล้ม = ไม่วาดป้าย (ห้ามปล่อย SVG ดิบที่ไม่ได้ mask หลุดไปทับปก)
+  }
+}
+
 export function measureTechRules({ assignments = [], spec = null, faceBoxes = [], cropTrace = [], heroComposerSlotId = null } = {}) {
   const flags = [];
   const bySlot = {}; // slotId → { role, faceSharePct?, headroomPct?, hasFace }
@@ -2386,6 +2504,49 @@ export async function composeAndVerify(args = {}) {
       if (typeof _raw !== 'number' || !Number.isFinite(_raw) || _raw <= 0) return _fail(`hero_crop_raw_invalid:${_hid}`, `hero ${_hid} raw upscale ไม่ใช่จำนวนบวกจำกัด (${typeof _raw === 'number' ? String(_raw) : typeof _raw}) — fail-closed`);
       // EXACT threshold: 1.2 passes; ANY value above 1.2 fails — NO epsilon tolerance (a hard contract must not be weakened).
       if (_raw > HERO_STRETCH_MAX) return _fail(`hero_crop_upscaled:${_hid}:${_raw}`, `hero ${_hid} เรนเดอร์จริง ${_raw}× > ${HERO_STRETCH_MAX}× (Final-Cropper/dodge/detector หด region)`);
+    }
+    // ═══ TIER3 ข (เจ้าของอนุมัติ 27 ก.ค. 69 — แก้ตามผลตรวจรอบ 2) — ป้ายชื่อวงกลม ═══════════════════════════
+    //   เมื่อรู้ชื่อคนในภาพวงกลมจริง (core.loaded[idx].person — มาจาก slotPlan.person ที่ megaAdapters.js ผูก
+    //   ไว้แล้วจาก triage.person/identity matching กับ compass.mainCharacters ตั้งแต่ชั้น S6 เลือกภาพ ไม่ต้อง
+    //   เดา/จับคู่ซ้ำที่นี่) → วาดป้ายชื่อสั้นบนขอบล่างในวงกลม ห้ามเดา/ห้ามมโนชื่อ: ไม่มี person (null/ว่าง) หรือเป็น
+    //   คำบรรยาย generic (กรองใน circleLabelText) = ไม่วาด
+    //   ต้องวาด "ก่อน" manifest.outputHash (sha1 ของ buffer ด้านล่าง) ไม่งั้น hash จะไม่ตรงกับภาพที่ส่งออกจริง
+    //   ★ สายสตริกต์ (ผลตรวจรอบ 2 ข้อ 4): MEGA_STRICT_RENDER=1 (strictCtx truthy) → ปิดป้ายเสมอ ไม่ว่า
+    //   MEGA_CIRCLE_LABEL จะตั้งอย่างไร — กันหลักฐาน strict (refSimilarity/hero crop proof/outputHash) ไม่ตรงกับ
+    //   พิกเซลจริงที่ผ่านการตรวจสอบ invariant ไปแล้วด้านบน (จุดนี้อยู่ "หลัง" invariant check แล้ว — ป้ายจะไม่ถูก
+    //   ตรวจสอบซ้ำ ถือเป็นการแก้ผลลัพธ์ที่ผ่านการพิสูจน์แล้วอย่างเงียบๆ ถ้าปล่อยให้วาดในสายนี้)
+    //   kill-switch: MEGA_CIRCLE_LABEL=0 → ปิด (ไม่วาดป้ายเลย — buffer/ผลปกเดิม byte-identical ทุกกรณี)
+    try {
+      const _circleLabelOn = process.env.MEGA_CIRCLE_LABEL !== '0' && !strictCtx;
+      if (_circleLabelOn) {
+        const _specSlots = (core.spec && Array.isArray(core.spec.slots)) ? core.spec.slots : [];
+        const _circleOverlays = [];
+        for (const a of core.assignments) {
+          const gs = _specSlots.find((s) => s && String(s.id) === String(a.slotId));
+          if (!gs || gs.shape !== 'circle') continue;
+          const rawName = core.loaded?.[a.imageIndex]?.person;
+          const diameter = Math.round(Number(gs.w));
+          const gx = Math.round(Number(gs.x)), gy = Math.round(Number(gs.y));
+          if (!(diameter > 0) || !Number.isFinite(gx) || !Number.isFinite(gy)) continue;
+          // ★ ผลตรวจรอบ 2 ข้อ 1: ใช้ overlay ที่ mask วงกลมแล้ว (buildCircleLabelOverlay) ไม่ใช่ SVG ดิบ —
+          //   การันตี ink ไม่หลุดนอกวงจริงระดับพิกเซล ไม่พึ่งความแม่นของการประมาณความกว้างตัวอักษร
+          const png = await buildCircleLabelOverlay(rawName, diameter); // คืน null เอง ถ้าไม่มีชื่อจริง/เป็นคำบรรยาย generic (ห้ามเดา)
+          if (png) _circleOverlays.push({ input: png, left: gx, top: gy });
+        }
+        if (_circleOverlays.length) {
+          const sharp = (await import('sharp')).default;
+          // ★ ผลตรวจรอบ 2 ข้อ 3 (เลี่ยง JPEG encode ซ้ำ): executeCover (coverExecutorService.js บรรทัด ~1296/1301)
+          //   เข้ารหัส jpeg q92 "ในไฟล์นั้นเอง" ก่อนคืน buffer กลับมาที่นี่แล้ว — ย้าย overlay เข้าไปอยู่ใน
+          //   composite chain เดียวกันต้องแก้ signature ของ executeCover (ไฟล์หนัก production อีกไฟล์ ไม่ได้อยู่ใน
+          //   ขอบเขตที่อนุมัติให้แก้รอบนี้ "ทั้งหมดใน megaComposerService.js") จึงคง decode→composite→re-encode
+          //   1 รอบเพิ่มตามที่เดิม (หลีกเลี่ยงไม่ได้จริงถ้าไม่แตะไฟล์นั้น) แต่ยกคุณภาพ 92→97 (ใกล้ lossless) ลดผล
+          //   generation-loss สะสมให้เหลือน้อยที่สุดเท่าที่ทำได้โดยไม่ขยายขอบเขตไฟล์ที่แก้
+          buffer = await sharp(buffer).composite(_circleOverlays).jpeg({ quality: 97 }).toBuffer();
+          console.log(`[MegaComposer] 🏷️ circle label: วาดป้ายชื่อ ${_circleOverlays.length} วง`);
+        }
+      }
+    } catch (e) {
+      console.log('[MegaComposer] circle label วาดล้ม (ไม่กระทบปก):', e.message?.slice(0, 60));
     }
     // ★ W2 (จากคลังจริง 10 ก.ค. — เจอ "วงกลมว่าง" 2 ใบ): จับภาพเปล่า/เกือบสีเดียวล้วนที่หลุดลงช่อง
     //   aHash 64 บิตของภาพแบนๆ จะมีบิตเกือบเท่ากันหมด (popcount ≤6 หรือ ≥58) → ติดธงให้ด่าน QC ตัดสิน
