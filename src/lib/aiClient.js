@@ -10,6 +10,7 @@
 import { withRetry } from './retry.js';
 import { recordLLM } from './costStore.js';
 import { logApiUsage } from './ai/usageLogger.js'; // ★ 7 ก.ค. อุดรูรั่วต้นทุน → /cost เห็นยอดจริง
+import { AI_HONESTY_DNA, honestyDnaOn } from './aiHonestyDna.js'; // ★ การ์ดที่ 5 (28 ก.ค. 69 เคส AC-0195): DNA ความซื่อสัตย์
 
 const DEFAULTS = {
   anthropic: 'claude-opus-5', // ★ 26 ก.ค. 69 เจ้าของสั่งอัปเกรด default จาก claude-opus-4-8 → claude-opus-5 (ANALYSIS_MODEL ยัง override ได้เหมือนเดิม = ปุ่มถอยกลับ)
@@ -50,6 +51,10 @@ const isExactModelStr = (v, maxLen) => typeof v === 'string' && v.length > 0 && 
 // redactBody (optional): true = ตัด raw provider response body ออกจาก error message ทั้งหมด (สาย strict เท่านั้น)
 // retries (optional, default เดิม 5) ให้สาย strict ปรับเป็น 1 ต่อการยิงจริงหนึ่งครั้ง
 export async function callBrain({ system, user, maxTokens = 4000, temperature = 0.2, onRetry, cost, retries = 5, forceProvider, forceModel, signal, redactBody }) {
+  // ★ การ์ดที่ 5 (28 ก.ค. 69 เคส AC-0195, เจ้าของสั่งตรง): ฉีด "DNA ความซื่อสัตย์" หน้า system ทุกครั้ง —
+  //   จุดกลางเดียวครอบทุกสมองที่เรียก callBrain (megaBrains 5 ตัว + gap-search + ผู้เรียกอื่นทุกจุด)
+  //   AI_HONESTY_DNA=0 = ปิด → system เดิมทุก byte (เดิมเป๊ะ)
+  if (honestyDnaOn() && system) system = `${AI_HONESTY_DNA}\n\n${system}`;
   let provider;
   let model;
   const forceAttempted = forceProvider !== undefined || forceModel !== undefined;
@@ -152,7 +157,8 @@ async function callAnthropic({ system, user, model, maxTokens, temperature, sign
     // ★ correction item 7: redactBody=true (สาย strict เท่านั้น) = ไม่มี raw provider response body ใน error message
     let message = `Anthropic API error ${res.status}`;
     if (!redactBody) {
-      const body = await res.text();
+      // ★ วิกฤต :3900 (28 ก.ค. 69): res.text() ห่อผ่าน _readBodyOrAbort — ดู comment เต็มที่นิยามฟังก์ชันด้านล่าง
+      const body = await _readBodyOrAbort(() => res.text(), signal, 'Anthropic');
       message += `: ${truncate(body, 400)}`;
     }
     const e = new Error(message);
@@ -161,7 +167,10 @@ async function callAnthropic({ system, user, model, maxTokens, temperature, sign
     throw e;
   }
 
-  const data = await res.json();
+  // ★ วิกฤต :3900 (28 ก.ค. 69): res.json() ห่อผ่าน _readBodyOrAbort — ดู comment เต็มที่นิยามฟังก์ชันด้านล่าง
+  //   (แก้ orphan-classification gap: abort ระหว่างอ่าน body stream ต้องได้ errorType:'ABORTED' เหมือนกับ abort
+  //   ระหว่าง fetch() headers เป๊ะ ไม่ใช่หลุดเป็น PROVIDER_ERROR ดิบแบบเดิม)
+  const data = await _readBodyOrAbort(() => res.json(), signal, 'Anthropic');
   const text = (data.content || [])
     .filter((b) => b.type === 'text')
     .map((b) => b.text)
@@ -211,7 +220,8 @@ async function callOpenAI({ system, user, model, maxTokens, temperature, signal,
     // ★ correction item 7: redactBody=true (สาย strict เท่านั้น) = ไม่มี raw provider response body ใน error message
     let message = `OpenAI API error ${res.status}`;
     if (!redactBody) {
-      const body = await res.text();
+      // ★ วิกฤต :3900 (28 ก.ค. 69): res.text() ห่อผ่าน _readBodyOrAbort — ดู comment เต็มใน callAnthropic ด้านบน
+      const body = await _readBodyOrAbort(() => res.text(), signal, 'OpenAI');
       message += `: ${truncate(body, 400)}`;
     }
     const e = new Error(message);
@@ -220,7 +230,8 @@ async function callOpenAI({ system, user, model, maxTokens, temperature, signal,
     throw e;
   }
 
-  const data = await res.json();
+  // ★ วิกฤต :3900 (28 ก.ค. 69): res.json() ห่อผ่าน _readBodyOrAbort — ดู comment เต็มใน callAnthropic ด้านบน
+  const data = await _readBodyOrAbort(() => res.json(), signal, 'OpenAI');
   const text = (data.choices?.[0]?.message?.content || '').trim();
   // ★ 15 ก.ค. (Batch 5B1 + correction item 4 round 2): actualModel = ค่า data.model ที่ OpenAI ตอบกลับ
   //   จริง เก็บแบบ verbatim (ไม่ trim) — self-report ของ provider เอง ไม่ใช่ข้อพิสูจน์ cryptographic ·
@@ -232,4 +243,26 @@ async function callOpenAI({ system, user, model, maxTokens, temperature, signal,
 function truncate(s, n) {
   if (!s) return '';
   return s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+// ★ วิกฤต :3900 (28 ก.ค. 69 — เซิร์ฟเวอร์ตายซ้ำ 2 รอบห่างกัน 40 นาที): จุด orphan-rejection ที่พบจริงตอนไล่โค้ด
+//   ทั้งไฟล์ (s5PinnedAi.js + aiClient.js) — เดิม `await res.json()` (และ `await res.text()` ใน branch !res.ok)
+//   ของทั้ง callAnthropic/callOpenAI อยู่ "นอก" try/catch ที่จัดหมวด abort (มีแค่ครอบ fetch(...) เท่านั้น) ·
+//   ผลจริง: เมื่อ ATTEMPT_TIMEOUT_MS ยิง abort "ระหว่างอ่าน body stream" (เคสจริงคืนนี้ — headers มาทันเวลาแต่
+//   completion ยาวของ opus-4-8 ยังสตรีมอยู่ตอนครบเพดาน) error ดิบจาก res.json()/res.text() (ไม่มี errorType เลย)
+//   หลุดขึ้นไปให้ s5PinnedAi.js::readErrorProbe อ่านเป็น errorType=null → ตกเป็น PROVIDER_ERROR (retryable ผิด
+//   เงื่อนไข ไม่ terminal ตามที่ควรเป็น ATTEMPT_TIMEOUT/DEADLINE_EXCEEDED) — แม้ promise เส้นนี้ยังมี catch เกาะ
+//   อยู่ทุกจุด (ไม่ใช่ unhandledRejection ตรงๆ) แต่การจัดหมวดผิดทำให้ retry-loop/backoff ตัดสินใจผิดขั้นตอน เพิ่ม
+//   ความเสี่ยงยิงซ้ำเกินจำเป็น — แก้โดยห่อขั้นอ่าน body ด้วย logic เดียวกับขั้น fetch() เป๊ะ (DRY ผ่าน helper นี้)
+async function _readBodyOrAbort(readFn, signal, providerLabel) {
+  try {
+    return await readFn();
+  } catch (err) {
+    if (signal?.aborted) {
+      const e = new Error(`${providerLabel} API call aborted — request timed out`);
+      e.errorType = 'ABORTED';
+      throw e;
+    }
+    throw err;
+  }
 }

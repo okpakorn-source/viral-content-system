@@ -14,6 +14,7 @@
  */
 import { callGeminiVision } from '@/lib/ai/geminiClient';
 import { briefToInstruction } from '@/lib/services/coverShotPlanner';
+import { withHonestyDna } from '@/lib/aiHonestyDna'; // ★ การ์ดที่ 5 (28 ก.ค. 69 เคส AC-0195): DNA ความซื่อสัตย์
 
 const LOG = '[FrameCurator]';
 
@@ -69,7 +70,7 @@ ${briefBlock ? briefBlock + '\n' : ''}เลือกและจัดอัน
 ตอบ JSON เท่านั้น: {"hero": <index>, "context": [<index>,...], "reject": [<index>,...], "reason": "เหตุผลสั้นๆว่าทำไม hero ตัวนี้"}`;
 
   try {
-    const r = await callGeminiVision({ prompt, images: imageObjs, maxTokens: 1200 });
+    const r = await callGeminiVision({ prompt: withHonestyDna(prompt), images: imageObjs, maxTokens: 1200 });
     const inRange = (i) => Number.isInteger(i) && i >= 0 && i < N;
     const heroIndex = inRange(r.hero) ? r.hero : 0;
     const ctx = (Array.isArray(r.context) ? r.context : [])

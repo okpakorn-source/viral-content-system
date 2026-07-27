@@ -419,6 +419,9 @@ export function _heroUpscaleMaxEffExec() {
 //   หน้า/กลุ่มหน้าจริง → เปิด centerMode ที่จุดเรียก batch-C ให้กึ่งกลางกลุ่มหน้าแทน (แกนที่ชนขอบภาพจริงยัง clamp
 //   ชิดขอบเท่าที่ได้เหมือนเดิม — ดู _place1D) · default ON · '0' = พฤติกรรมเดิมเป๊ะ (เลื่อนน้อยสุด)
 function _subslotCenterOn() { return process.env.MEGA_SUBSLOT_CENTER !== '0'; }
+// ★ MEGA_HEAD_SAFE (เคส AC-0195 28 ก.ค. 69 — ปกคลาวด์พังหนัก: คลังสกปรก 100% + ตาให้ faceBox ผิดจนครอปตัดหัว):
+//   ด่านสุดท้ายกันหัวขาดจากเรขาคณิตล้วน (ไม่พึ่งตา/ไม่พึ่งว่า faceBox มาจากไหน) — ดูจุดเรียกใน renderRectTile
+function _headSafeOn() { return process.env.MEGA_HEAD_SAFE !== '0'; }
 // band ขอบล่าง faceShare ของ hero — mirror megaComposerService._heroFaceBand (C3): env MEGA_HERO_FACE_BAND="min,max"
 //   ไม่ตั้ง/พังรูปแบบ = TECH_RULES.HERO_FACE_SHARE เดิมเป๊ะ (ต้องตรง C3 เสมอ ถ้าจะแก้แก้พร้อมกัน)
 function _heroFaceBandExec() {
@@ -1168,6 +1171,34 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null, strict = fa
   if (_tr && _needCircleBackup) _tr.circleAvoidNeedsBackup = true; // แบตช์ C: additive — composer อ่านเพื่อสลับภาพสำรอง
   if (_tr && _needRefineBackup) _tr.refineNeedsBackup = true; // ★ C1c/BS: additive — composer อ่านเพื่อสลับภาพสำรอง (union จัดไม่ลง)
   if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ` ${slot.id}`); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
+  // ★ MEGA_HEAD_SAFE (เคส AC-0195 28 ก.ค. 69): ด่านสุดท้ายกันหัวขาด รันหลังทุกจุดปรับ region เดิม+หลบลายน้ำ
+  //   ก่อนคลัมป์สุดท้าย — ไม่พึ่งตา (ทำงานจากเรขาคณิตล้วน ไม่สนว่า fb มาจากไหน — ตาสอง/triage/detector เหมือนกันหมด)
+  //   (1) มี faceBox ใช้ได้ + หัวหน้า (face top) อยู่ "เหนือ" หน้าต่างครอปปัจจุบัน (face top < region top แปลว่า
+  //       ครอปจะตัดหัว) → เลื่อนหน้าต่างขึ้น (ลด top เท่านั้น ไม่แตะขนาด/กว้างช่อง) ให้คลุมหัว + เผื่อ headroom
+  //       ขั้นต่ำ 4% ของความสูงช่อง
+  //   (2) ไม่มี faceBox เลย (ครอปตาบอดเต็มรูปแบบ) → แนวตั้งยึดโซนบนแทนกึ่งกลาง (window top ≤ 12% ของภาพ) กัน
+  //       ภาพคนเต็มตัวแนวตั้งโดนครอปกึ่งกลางแล้วหัวหลุดบนสุด (แนวนอนไม่แตะเลย — ยังกึ่งกลางเดิมทุกจุด)
+  //   ไม่ใช่ _final (Final-Cropper เชื่อ 100% ห้ามแตะ) · default ON · MEGA_HEAD_SAFE=0 → ข้ามด่านนี้เลย (พฤติกรรมเดิมเป๊ะ)
+  if (_headSafeOn() && !(crop && crop._final)) {
+    const _hsFace = (fb && fb.allFaces && fb.allFaces.length)
+      ? fb.allFaces.reduce((b, f) => ((f.x2 - f.x1) * (f.y2 - f.y1) > (b.x2 - b.x1) * (b.y2 - b.y1) ? f : b), fb.allFaces[0])
+      : (fb && fb.x2 > fb.x1 ? fb : null);
+    if (_hsFace) {
+      const _faceTopPx = _hsFace.y1 * imgH;
+      if (_faceTopPx < region.top) {
+        const _headroomPx = region.height * 0.04;
+        const _newTop = Math.max(0, Math.min(_faceTopPx - _headroomPx, Math.max(0, imgH - region.height)));
+        if (_newTop < region.top - 0.5) { region = { ...region, top: _newTop }; _br += '+headsafe'; if (_tr) _tr.branch = _br; }
+      }
+    } else {
+      const _maxTopPx = imgH * 0.12;
+      if (region.top > _maxTopPx) {
+        region = { ...region, top: Math.max(0, Math.min(_maxTopPx, Math.max(0, imgH - region.height))) };
+        _br += '+headsafetop';
+        if (_tr) _tr.branch = _br;
+      }
+    }
+  }
   region = _clampRegion(region, imgW, imgH); // ★ 10 ก.ค.: การ์ดสุดท้ายก่อน extract — ห้ามเกินขอบภาพเด็ดขาด
   // ★ เฟส 3.1+3.3 (10 ก.ค.): วัด upscale จริง (region px → slot px) — ติดธงยืด (composer อ่านจาก sink) + งด sharpen ตอนขยาย
   const _upR = Math.max(slot.w / Math.max(1, region.width), slot.h / Math.max(1, region.height));

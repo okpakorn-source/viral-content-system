@@ -9,6 +9,7 @@
 import { withRetry, isRetryable } from './retry.js';
 import { recordLLM } from './costStore.js';
 import { types as nodeUtilTypes } from 'node:util';
+import { withHonestyDna } from './aiHonestyDna.js'; // ★ การ์ดที่ 5 (28 ก.ค. 69 เคส AC-0195): DNA ความซื่อสัตย์ — ฉีดหน้า prompt ตาคัด (ไม่แตะ requiredKeys/validator)
 
 const DEFAULT_MODEL = 'gemini-2.5-flash';
 
@@ -106,7 +107,7 @@ ${pinpoint ? 'เลือกแบบ "ครบทุกซีนที่พ�
 { "selected": [ { "index": <เลขรูป>, "reason": "เหตุผลสั้นๆ" } ] }
 ถ้าไม่มีเฟรมไหนดีเลย ให้ "selected": []`;
 
-  const parts = [{ text: promptText }];
+  const parts = [{ text: withHonestyDna(promptText) }];
   for (const f of frames) {
     parts.push({ text: frameLabel(f) });
     parts.push({ inline_data: { mime_type: 'image/jpeg', data: f.base64 } });
@@ -898,7 +899,7 @@ faceFront= มุมการเห็น "ใบหน้าคนหลัก"
   2 = เห็นเต็มหน้า — หน้าตรงหรือเกือบตรง (เอียงได้เล็กน้อย) เห็นตา-จมูก-ปากครบ ไม่ถูกบัง
   ไม่มีคนในรูป/ตัดสินไม่ได้ = null` : ''}`;
 
-  const parts = [{ text: promptText }];
+  const parts = [{ text: withHonestyDna(promptText) }];
   for (const f of frames) {
     parts.push({ text: frameLabel(f) });
     parts.push({ inline_data: { mime_type: 'image/jpeg', data: f.base64 } });
@@ -1002,7 +1003,7 @@ ${OWNERSHIP_RULES}
 หลักคิด: "เก็บไว้เฉพาะภาพที่เป็นคน/ของ ของคนในข่าวจริงๆ และสะอาดรีทัชได้" — สงสัยว่าเป็นบ้าน/รถมั่วที่ไม่ใช่ของคนในข่าว = ตัดทิ้ง
 ตอบเป็น JSON เท่านั้น: { "items": [ { "index": <เลขรูป>, "junk": true/false, "reason": "สั้นๆ (เช่น 'บ้านแคตตาล็อกไม่ใช่ของคนในข่าว', 'มีข้อความทับหน้า', 'ลายน้ำสำนักข่าว')" } ] }`;
 
-  const parts = [{ text: promptText }];
+  const parts = [{ text: withHonestyDna(promptText) }];
   for (const f of frames) {
     parts.push({ text: frameLabel(f) });
     parts.push({ inline_data: { mime_type: 'image/jpeg', data: f.base64 } });
@@ -1046,7 +1047,7 @@ export async function geminiEmotionScan({ frames, subjects, onRetry, caseId }) {
 หลักคิด: ดู "สีหน้า+ท่าทาง" เป็นหลัก แล้วเลือกหมวดที่ "เด่นสุด" ของรูปนั้น
 ตอบเป็น JSON เท่านั้น: { "items": [ { "index": <เลขรูป>, "emotion": "<key>" } ] }`;
 
-  const parts = [{ text: promptText }];
+  const parts = [{ text: withHonestyDna(promptText) }];
   for (const f of frames) {
     parts.push({ text: frameLabel(f) });
     parts.push({ inline_data: { mime_type: 'image/jpeg', data: f.base64 } });
@@ -1073,7 +1074,7 @@ export async function geminiHeroPick({ frames, subjects, onRetry, caseId }) {
 ฮีโร่คือช่องใหญ่สุดของปก ต้องเป็น: ใบหน้า ${names} "เดี่ยว ใหญ่ ชัด เต็มหน้า" (หน้ากินพื้นที่ภาพมาก ไม่ถูกมือ/ไมค์/วัตถุบัง ไม่ติดขอบ ไม่เบลอ ไม่หันหลัง)
 🚫 unusable เด็ดขาด: เห็นแต่ผนัง/เพดาน/ฉากเปล่า/แทบไม่เห็นหน้า, หน้าโดนขอบตัด/ถูกบัง, คนตัวเล็กอยู่ไกล, เบลอหนัก
 ตอบ JSON: { "best": <index ที่ดีสุด>, "order": [index เรียงดีสุด→แย่], "unusable": [index ที่ห้ามใช้] }`;
-  const parts = [{ text: promptText }];
+  const parts = [{ text: withHonestyDna(promptText) }];
   for (const f of frames) {
     parts.push({ text: `รูปที่ ${f.index}:` });
     parts.push({ inline_data: { mime_type: 'image/jpeg', data: f.base64 } });
@@ -1108,7 +1109,7 @@ export async function geminiCoverCheck({ frames, plan, subjects, onRetry, caseId
 6. ขัดข้อ "แปลนห้าม" ชัดเจน
 ช่องที่พอใช้ได้แม้ไม่สมบูรณ์แบบ = ผ่าน (อย่าเข้มจนทุกช่องตก)
 ตอบ JSON เท่านั้น: { "fail": [ { "slot": "<ชื่อช่อง>", "reason": "สั้นๆ" } ] } — ผ่านหมดให้ "fail": []`;
-  const parts = [{ text: promptText }];
+  const parts = [{ text: withHonestyDna(promptText) }];
   for (const f of frames) {
     parts.push({ text: `ช่อง ${f.slot}:` });
     parts.push({ inline_data: { mime_type: 'image/jpeg', data: f.base64 } });
@@ -1166,7 +1167,7 @@ ${planText}
 ตอบเป็น JSON ล้วน:
 { "assignments": { "<SLOT>": [<index>, ...], ... }, "notes": { "<SLOT>": "เหตุผลสั้นๆ ว่าเลือกเพราะตรงอะไร" } }`;
 
-  const parts = [{ text: promptText }];
+  const parts = [{ text: withHonestyDna(promptText) }];
   for (const f of frames) {
     parts.push({ text: `รูปที่ ${f.index}:` });
     parts.push({ inline_data: { mime_type: 'image/jpeg', data: f.base64 } });

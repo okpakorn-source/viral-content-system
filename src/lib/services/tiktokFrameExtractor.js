@@ -110,7 +110,7 @@ async function extractTikTokHD(url) {
 
   const { execSync, execFile } = await import('child_process');
   try {
-    execSync('ffmpeg -version', { stdio: 'ignore', timeout: 3000 });
+    execSync('ffmpeg -version', { stdio: 'ignore', timeout: 3000, windowsHide: true });
   } catch {
     return [];
   }
@@ -303,7 +303,7 @@ async function ffmpegExtractFrames(videoPath, tmpDir, sourceLabel) {
       '-vf', "select='gt(scene\\,0.3)',scale='min(960\\,iw):-2'",
       '-fps_mode', 'vfr', '-q:v', '2', '-frames:v', '8',
       path.join(framesDir, 'tk_%04d.jpg'),
-    ], { timeout: 20000 }, (err) => {
+    ], { timeout: 20000, windowsHide: true }, (err) => {
       if (err && !fs.readdirSync(framesDir).length) reject(err);
       else resolve();
     });

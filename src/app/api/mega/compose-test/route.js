@@ -6,6 +6,7 @@
 //   GET  ?list=1        → รายชื่อเคสที่พร้อมเทส (มีภาพ triaged) + ref ในคลัง
 //   POST {caseId, refId?, heroPersonHint?} → ประกอบปกจากพูลเคสนั้น + ref (auto-match ถ้าไม่ระบุ)
 // ไม่ค้นภาพ/ตาคัดใหม่ = ไม่เสียค่า SerpApi/Gemini ซ้ำ · จ่ายแค่ตาหาหน้า+ตาเทียบ ~$0.05/ครั้ง
+//   (ยกเว้น MEGA_QUICK_GAP เปิด + พูลสะอาดว่าง/บาง → ยิงค้นเสริม 1 รอบ ดูหมายเหตุเคส AC-0195 ด้านล่าง)
 // ============================================================
 
 import { NextResponse } from 'next/server';
@@ -55,8 +56,58 @@ export async function POST(req) {
 
     const c = await getCase(caseId);
     if (!c) return NextResponse.json({ success: false, error: 'ไม่พบเคส ' + caseId, errorType: 'CASE_NOT_FOUND' }, { status: 404 });
-    const imgs = await readImages(caseId);
-    const relevantImgs = imgs.filter((x) => x.triage && x.triage.relevant !== false);
+
+    // ★ ตรวจ (28 ก.ค. 69, ผู้ตรวจ): โหมด slotPlan แช่แข็ง (ปุ่ม ② composeFrozen ใน /m) ต้อง "ข้าม compass+S6 (LLM)
+    //   ทั้งหมด" ตามคอมเมนต์เดิมจริง — ก่อนหน้านี้ compassBrain + MEGA_QUICK_GAP ถูกย้ายมาไว้ก่อนด่านนี้ (เพื่อให้
+    //   QUICK_GAP ใช้ compass.mainCharacters ได้) ทำให้โหมดแช่แข็งเสียเวลา compass (10-30s) + อาจยิง gap-search
+    //   (เป็นนาที) ทั้งที่ไม่ใช้ผลเลย จนชน AbortSignal/maxDuration ของ /m → คำนวณธง frozen ไว้ก่อน แล้วครอบทั้ง
+    //   compassBrain และ MEGA_QUICK_GAP ด้วย `if (!frozen)` ด้านล่าง (ยังคง pool-building + pool.length<3 gate
+    //   ให้ทำงานก่อนด่าน frozen เหมือนเดิมเป๊ะ — ไม่เปลี่ยนพฤติกรรมจุดนั้น)
+    const frozen = Array.isArray(body.slotPlan) && body.slotPlan.length >= 3;
+
+    // ── A (8 ก.ค.): ใช้ S6 จริง แทน heuristic หยาบ — เครื่องเทสสะท้อน production เป๊ะ ──
+    //   ★ ข้อ 3 (28 ก.ค. 69 เคส AC-0195): ย้าย compass มาไว้ "ก่อน" สร้างพูล (เดิมอยู่หลัง) เพราะ MEGA_QUICK_GAP
+    //   ด้านล่างต้องใช้ compass.mainCharacters (ชื่อตัวละครจริง — ห้ามมโน) ตอนตัดสินใจยิงค้นเสริม — ไม่กระทบ
+    //   ลำดับการทำงานเดิมจุดอื่นเลย (compass ไม่ถูกใช้ระหว่างสร้างพูล อยู่แล้ว) · frozen=true → ข้ามบล็อกนี้ทั้งก้อน
+    //   สร้าง job dossier ขั้นต่ำ → เรียก s6_slots (มี S6a บก.ศิลป์ + hero-authority + clean-sort + typeMatched gate ครบ)
+    const t0 = Date.now();
+    let origin = null;
+    let compass = null;
+    let storyQueries = [];
+    if (!frozen) {
+      // ★ ข้อ 3 (28 ก.ค. 69): defensive — origin ถูกใช้ (ใหม่) ก่อนถึงด่าน frozen-plan ด้านล่างแล้ว (สำหรับ QUICK_GAP)
+      //   ผิดกับเดิมที่คำนวณหลัง frozen-check เสมอ (req.url รับประกันมีจริงในโปรดักชัน) — เครื่องมือเทส/สคริปต์ที่ยิง
+      //   POST มาแบบ req จำลอง (ไม่มี .url) ต้องไม่ทำทั้งด่าน 500 พัง → ล้ม = null (ปลอดภัย ผลกระทบแค่ origin-based
+      //   gap-search ข้ามไปเงียบๆ ถ้าทำไม่ได้ — ดู catch ใน MEGA_QUICK_GAP ด้านล่างอยู่แล้ว)
+      try { origin = new URL(req.url).origin; } catch { origin = null; }
+      // ★ A rev.2 (8 ก.ค. ผู้ใช้ชี้ "สมองไม่อ่านเนื้อข่าว"): รัน compassBrain บน "เนื้อข่าวเต็ม" ที่เคสเก็บไว้
+      //   → ได้ angle/อารมณ์/ตัวละคร/visualDreamShots จริง (เท่า production) → S6 เลือกภาพตามบริบทข่าวได้
+      //   ล้ม/ไม่มีเนื้อ → compass บางจาก analysis (ไม่พังเทส)
+      const fullText = [c.analysis?.headline, c.newsText || c.analysis?.content || c.analysis?.summary || c.newsSnippet].filter(Boolean).join('\n\n');
+      try {
+        const { compassBrain } = await import('@/lib/megaBrains');
+        compass = await compassBrain({ card: { title: c.analysis?.headline || '', lane: '', category: '' }, extractText: fullText });
+      } catch (e) {
+        compass = {
+          angle: c.analysis?.headline || c.newsSnippet || '',
+          primaryEmotion: c.analysis?.context?.emotional_tone || '',
+          secondaryEmotions: [],
+          mainCharacters: (c.analysis?.characters || []).map((ch) => ({ name: typeof ch === 'string' ? ch : ch.name, role: 'hero' })).filter((x) => x.name),
+          visualDreamShots: [],
+        };
+      }
+      // hero hint → ดันตัวละครที่ระบุขึ้นหัว mainCharacters (ให้ s6 hero-authority ล็อกถูกคน)
+      const heroName = (body.heroPersonHint || '').trim();
+      if (heroName) compass.mainCharacters = [{ name: heroName, role: 'hero' }, ...(compass.mainCharacters || []).filter((x) => !String(x.name || '').includes(heroName))];
+
+      // ★ 10 ก.ค. เฟส 6A: แนบ storyQueries จาก keywords ที่เคสเก็บไว้ (เหมือน s5_keywords ทำในท่อ /mega)
+      //   — ไม่มี = story-fit ปิดเอง (พฤติกรรมเดิม) ทำให้เครื่องเทสนี้สะท้อน production ครบทุกเกต
+      const _kw = c.keywords || {};
+      storyQueries = ['relationship_archive', 'lifestyle_travel', 'family_album', 'landmark_context', 'scene_place']
+        .flatMap((k) => (Array.isArray(_kw[k]) ? _kw[k] : [])).map((s) => String(s).trim()).filter(Boolean);
+    }
+
+    // ── สร้างพูล (relevant → ตัดโปรโมท → ตัดสกปรก) — ห่อเป็นฟังก์ชันเรียกซ้ำได้ (ต้องเรียกอีกรอบหลัง gap-search) ──
     // ★ 9 ก.ค. เฟส 5.1+5.2 (แผนคุณภาพคลังรูป): พูลเข้าโรงประกอบต้องสะอาด default —
     //   คลังจริงพิสูจน์: clean แค่ 33.6% (AC-0058, โลโก้/ลายน้ำ 126 + ตัวหนังสือทับ 101 จาก 375)
     //   เดิมกรองแค่ relevant!==false → ภาพ clean=false เข้าพูลได้ พอของสะอาดขาดระบบจำใจหยิบของสกปรก
@@ -70,47 +121,85 @@ export async function POST(req) {
     //   ใช้ util กลาง src/lib/promoImageGuard.js ตัวเดียวกัน — ห้าม copy regex ซ้ำ 2 ที่
     //   สวิตช์แม่ MEGA_TIER2_OFF=1 = ปิด TIER2 ทั้งชุด (ปิด promo ban ด้วย) · เฉพาะจุด: MEGA_PROMO_BAN=0 = ปิด (พฤติกรรมเดิมเป๊ะ)
     const PROMO_BAN_ON = process.env.MEGA_TIER2_OFF !== '1' && process.env.MEGA_PROMO_BAN !== '0';
-    const _hiddenImgs = relevantImgs.filter(notHidden);
-    const _promoBannedImgs = PROMO_BAN_ON ? _hiddenImgs.filter((x) => isPromoImage(x)) : [];
-    let visibleImgs = _promoBannedImgs.length
-      ? _hiddenImgs.filter((x) => !_promoBannedImgs.some((b) => String(b.id) === String(x.id)))
-      : _hiddenImgs;
-    const promoFallbackIds = new Set();
-    // ★ พื้นกันพูลล่ม (เหมือน dirtyFallback ด้านล่าง): แบนแล้วพูล < POOL_MIN_FLOOR และมีของให้เติม → คืนใบคะแนนดีสุดกลับ
-    if (_promoBannedImgs.length && visibleImgs.length < POOL_MIN_FLOOR) {
-      const need = POOL_MIN_FLOOR - visibleImgs.length;
-      const promoBest = _promoBannedImgs
-        .slice()
-        .sort((a, b) => (Number(b.triage?.faceCount) || 0) - (Number(a.triage?.faceCount) || 0) || (Number(b.triage?.quality) || 0) - (Number(a.triage?.quality) || 0))
-        .slice(0, need);
-      promoBest.forEach((x) => promoFallbackIds.add(String(x.id)));
-      visibleImgs = [...visibleImgs, ...promoBest];
-      console.log(`[compose-test] 🚫🧹 promo ban: พูลบางกว่าพื้น (${POOL_MIN_FLOOR}) → เติมภาพโปรโมทคะแนนดีสุดกลับ ${promoBest.length} ใบ (กันงานล่ม)`);
-    }
-    const promoBannedCount = _promoBannedImgs.length - promoFallbackIds.size;
-    if (promoBannedCount) console.log(`[compose-test] 🚫 promo ban: ตัดภาพโปรโมท/ฉากหลังรก ${promoBannedCount} ใบ (regex ตาคัด note) — พูลใช้จริง ${visibleImgs.length}`);
-    const dirtyFallbackIds = new Set(promoFallbackIds); // ★ TIER2: ภาพโปรโมทที่เติมกลับกันพูลล่ม ติดธง dirtyFallback แบบเดียวกับ clean=false เติมกลับ
-    let pool = visibleImgs;
-    if (POOL_CLEAN_GATE) {
-      const cleanOnly = visibleImgs.filter((x) => x.triage.clean !== false);
-      if (cleanOnly.length < POOL_MIN_FLOOR && cleanOnly.length < visibleImgs.length) {
-        const need = POOL_MIN_FLOOR - cleanOnly.length;
-        const dirtyBest = visibleImgs
-          .filter((x) => x.triage.clean === false)
+    function buildPool(imgsList) {
+      const relevantImgs = imgsList.filter((x) => x.triage && x.triage.relevant !== false);
+      const _hiddenImgs = relevantImgs.filter(notHidden);
+      const _promoBannedImgs = PROMO_BAN_ON ? _hiddenImgs.filter((x) => isPromoImage(x)) : [];
+      let visibleImgs = _promoBannedImgs.length
+        ? _hiddenImgs.filter((x) => !_promoBannedImgs.some((b) => String(b.id) === String(x.id)))
+        : _hiddenImgs;
+      const promoFallbackIds = new Set();
+      // ★ พื้นกันพูลล่ม (เหมือน dirtyFallback ด้านล่าง): แบนแล้วพูล < POOL_MIN_FLOOR และมีของให้เติม → คืนใบคะแนนดีสุดกลับ
+      if (_promoBannedImgs.length && visibleImgs.length < POOL_MIN_FLOOR) {
+        const need = POOL_MIN_FLOOR - visibleImgs.length;
+        const promoBest = _promoBannedImgs
+          .slice()
           .sort((a, b) => (Number(b.triage?.faceCount) || 0) - (Number(a.triage?.faceCount) || 0) || (Number(b.triage?.quality) || 0) - (Number(a.triage?.quality) || 0))
           .slice(0, need);
-        dirtyBest.forEach((x) => dirtyFallbackIds.add(String(x.id)));
-        pool = [...cleanOnly, ...dirtyBest];
-        console.log(`[compose-test] 🧹 เฟส 5.1: พูลสะอาดบาง (${cleanOnly.length}/${POOL_MIN_FLOOR}) → เติม clean=false ที่ดีที่สุด ${dirtyBest.length} ใบ (dirtyFallback)`);
-      } else {
-        pool = cleanOnly;
+        promoBest.forEach((x) => promoFallbackIds.add(String(x.id)));
+        visibleImgs = [...visibleImgs, ...promoBest];
+        console.log(`[compose-test] 🚫🧹 promo ban: พูลบางกว่าพื้น (${POOL_MIN_FLOOR}) → เติมภาพโปรโมทคะแนนดีสุดกลับ ${promoBest.length} ใบ (กันงานล่ม)`);
+      }
+      const promoBannedCount = _promoBannedImgs.length - promoFallbackIds.size;
+      if (promoBannedCount) console.log(`[compose-test] 🚫 promo ban: ตัดภาพโปรโมท/ฉากหลังรก ${promoBannedCount} ใบ (regex ตาคัด note) — พูลใช้จริง ${visibleImgs.length}`);
+      const dirtyFallbackIds = new Set(promoFallbackIds); // ★ TIER2: ภาพโปรโมทที่เติมกลับกันพูลล่ม ติดธง dirtyFallback แบบเดียวกับ clean=false เติมกลับ
+      let pool = visibleImgs;
+      let cleanCount = visibleImgs.length; // POOL_CLEAN_GATE=0 = ไม่กรองสะอาด → ทั้งพูลนับเป็น "สะอาด" (พฤติกรรมเดิม)
+      if (POOL_CLEAN_GATE) {
+        const cleanOnly = visibleImgs.filter((x) => x.triage.clean !== false);
+        cleanCount = cleanOnly.length;
+        if (cleanOnly.length < POOL_MIN_FLOOR && cleanOnly.length < visibleImgs.length) {
+          const need = POOL_MIN_FLOOR - cleanOnly.length;
+          const dirtyBest = visibleImgs
+            .filter((x) => x.triage.clean === false)
+            .sort((a, b) => (Number(b.triage?.faceCount) || 0) - (Number(a.triage?.faceCount) || 0) || (Number(b.triage?.quality) || 0) - (Number(a.triage?.quality) || 0))
+            .slice(0, need);
+          dirtyBest.forEach((x) => dirtyFallbackIds.add(String(x.id)));
+          pool = [...cleanOnly, ...dirtyBest];
+          console.log(`[compose-test] 🧹 เฟส 5.1: พูลสะอาดบาง (${cleanOnly.length}/${POOL_MIN_FLOOR}) → เติม clean=false ที่ดีที่สุด ${dirtyBest.length} ใบ (dirtyFallback)`);
+        } else {
+          pool = cleanOnly;
+        }
+      }
+      return { pool, dirtyFallbackIds, promoBannedCount, cleanCount };
+    }
+
+    let imgs = await readImages(caseId);
+    let poolResult = buildPool(imgs);
+
+    // ★ ข้อ 3 (28 ก.ค. 69 เคส AC-0195 — ปกคลาวด์พังหนัก: คลังสกปรก 100% clean=0/30): พูลสะอาดว่าง/บางกว่าพื้น →
+    //   ยิง gap-search หาภาพสะอาดเพิ่ม 1 รอบ ก่อนค่อยเลือกภาพ (ใช้กลไก MEGA_HERO_GAP_CLOSEUP เดิมทั้งหมด — ขยาย
+    //   trigger ผ่าน _cleanPoolGapFor ที่เพิ่มใน megaAdapters.js: ไม่ใช่แค่ "ตัวเอกไม่มีโคลสอัพ" แต่รวมกรณี "พูล
+    //   สะอาดว่าง/บาง" ด้วย — คำค้นสร้างจากชื่อตัวละคร compass จริงเท่านั้น ห้ามมโน) · ยิง s5_gapsearch ตรงๆ (job
+    //   ที่นี่เป็น local throwaway object ไม่ persist ที่ไหน เรียกได้ปลอดภัย ไม่ต้องกังวล gapSearchDone ค้าง)
+    //   ค้นแล้วยังว่าง → แนบข้อความเตือนให้ผู้ใช้เห็นผ่าน qcReasons (ดูด้านล่าง) · flag MEGA_QUICK_GAP default ON
+    const QUICK_GAP_ON = process.env.MEGA_QUICK_GAP !== '0';
+    let _cleanPoolWarning = null;
+    // ★ ตรวจ (28 ก.ค. 69): frozen=true ต้องไม่ยิง gap-search เลย (compass เป็น null ในโหมดนี้ด้วย — ใช้ไม่ได้อยู่แล้ว)
+    if (!frozen && QUICK_GAP_ON && poolResult.cleanCount < POOL_MIN_FLOOR) {
+      try {
+        const { s5_gapsearch } = await import('@/lib/megaAdapters');
+        const gapJob = { dossier: { images: { caseId, storyQueries }, compass, desk: { title: compass.angle } } };
+        const gapResult = await s5_gapsearch(gapJob, { origin });
+        console.log(`[compose-test] 🔎 MEGA_QUICK_GAP: พูลสะอาด ${poolResult.cleanCount}/${POOL_MIN_FLOOR} ก่อนค้น — ${gapResult?.summary || '(ไม่มีสรุป)'}`);
+        imgs = await readImages(caseId); // ★ re-fetch: gap-search เก็บภาพใหม่เข้าคลังเคสเดียวกันแล้ว (addImages)
+        poolResult = buildPool(imgs);
+        console.log(`[compose-test] 🔎 MEGA_QUICK_GAP: หลังค้น พูลสะอาด ${poolResult.cleanCount}/${POOL_MIN_FLOOR}`);
+      } catch (e) {
+        console.log('[compose-test] 🔎 MEGA_QUICK_GAP: ค้นเสริมล้ม — เดินต่อด้วยพูลเดิม:', String(e?.message || '').slice(0, 60));
+      }
+      if (poolResult.cleanCount === 0) {
+        _cleanPoolWarning = 'คลังเคสนี้ไม่มีภาพสะอาด — ควรใช้โหมดให้ AI หา';
       }
     }
+    const { pool, dirtyFallbackIds, promoBannedCount } = poolResult;
+    void promoBannedCount; // เก็บไว้เผื่ออนาคต (เดิมมีแค่ log ใน buildPool แล้ว ไม่ได้ใช้ต่อนอกฟังก์ชัน)
     if (pool.length < 3) return NextResponse.json({ success: false, error: `พูลเคสนี้มีแค่ ${pool.length} ใบ (ต้อง ≥3) — ยังตาคัดไม่พอ`, errorType: 'POOL_TOO_THIN' }, { status: 422 });
 
     // ★ เฟส 0.2 (โหมดเทสนิ่ง): ส่ง slotPlan แช่แข็งมาเอง = ข้าม compass+S6 (LLM) ทั้งหมด
     //   ใช้วัดเฉพาะชั้นประกอบ/ครอปแบบ before-after ได้จริง (อินพุตเดิมเป๊ะทุกรอบ) + ไม่เสียค่า LLM เลือกภาพซ้ำ
-    if (Array.isArray(body.slotPlan) && body.slotPlan.length >= 3) {
+    //   ★ ใช้ธง `frozen` เดียวกับด้านบน (คำนวณครั้งเดียว กันสองเงื่อนไขดริฟท์กัน)
+    if (frozen) {
       const t0f = Date.now();
       // ★ R5b.1 (audit sweep): variant (_derived) โผล่ในช่อง explicit-id ได้เฉพาะประตูเกรดเปิด+เกรดถึง — OFF = ใบจริงชุดเดิมเป๊ะ
       const refsF = (await listRefCovers(500)).filter((r) => r.dna && r.dna._reproducible !== false && (!r.dna._derived || refPoolGateOpen(r)));
@@ -153,36 +242,6 @@ export async function POST(req) {
       ref = m?.ref || refs[0];
     }
 
-    // ── A (8 ก.ค.): ใช้ S6 จริง แทน heuristic หยาบ — เครื่องเทสสะท้อน production เป๊ะ ──
-    //   สร้าง job dossier ขั้นต่ำ → เรียก s6_slots (มี S6a บก.ศิลป์ + hero-authority + clean-sort + typeMatched gate ครบ)
-    const t0 = Date.now();
-    const origin = new URL(req.url).origin;
-    // ★ A rev.2 (8 ก.ค. ผู้ใช้ชี้ "สมองไม่อ่านเนื้อข่าว"): รัน compassBrain บน "เนื้อข่าวเต็ม" ที่เคสเก็บไว้
-    //   → ได้ angle/อารมณ์/ตัวละคร/visualDreamShots จริง (เท่า production) → S6 เลือกภาพตามบริบทข่าวได้
-    //   ล้ม/ไม่มีเนื้อ → compass บางจาก analysis (ไม่พังเทส)
-    const fullText = [c.analysis?.headline, c.newsText || c.analysis?.content || c.analysis?.summary || c.newsSnippet].filter(Boolean).join('\n\n');
-    let compass;
-    try {
-      const { compassBrain } = await import('@/lib/megaBrains');
-      compass = await compassBrain({ card: { title: c.analysis?.headline || '', lane: '', category: '' }, extractText: fullText });
-    } catch (e) {
-      compass = {
-        angle: c.analysis?.headline || c.newsSnippet || '',
-        primaryEmotion: c.analysis?.context?.emotional_tone || '',
-        secondaryEmotions: [],
-        mainCharacters: (c.analysis?.characters || []).map((ch) => ({ name: typeof ch === 'string' ? ch : ch.name, role: 'hero' })).filter((x) => x.name),
-        visualDreamShots: [],
-      };
-    }
-    // hero hint → ดันตัวละครที่ระบุขึ้นหัว mainCharacters (ให้ s6 hero-authority ล็อกถูกคน)
-    const heroName = (body.heroPersonHint || '').trim();
-    if (heroName) compass.mainCharacters = [{ name: heroName, role: 'hero' }, ...(compass.mainCharacters || []).filter((x) => !String(x.name || '').includes(heroName))];
-
-    // ★ 10 ก.ค. เฟส 6A: แนบ storyQueries จาก keywords ที่เคสเก็บไว้ (เหมือน s5_keywords ทำในท่อ /mega)
-    //   — ไม่มี = story-fit ปิดเอง (พฤติกรรมเดิม) ทำให้เครื่องเทสนี้สะท้อน production ครบทุกเกต
-    const _kw = c.keywords || {};
-    const storyQueries = ['relationship_archive', 'lifestyle_travel', 'family_album', 'landmark_context', 'scene_place']
-      .flatMap((k) => (Array.isArray(_kw[k]) ? _kw[k] : [])).map((s) => String(s).trim()).filter(Boolean);
     const job = { dossier: { images: { caseId, storyQueries }, compass, desk: { title: compass.angle } } };
     if (ref) job.dossier.refMatch = { dna: ref.dna, styleName: ref.styleName || ref.id, imagePath: ref.imagePath, reason: 'เลือกในหน้าเทส', typeMatched: true };
 
@@ -230,6 +289,10 @@ export async function POST(req) {
         dirtyFallback: !!(primary && slots[primary]?.dirtyFallback), // ★ เฟส 5.1: ติดธงถ้าเป็นของเติมพูลบาง (clean=false)
         person: tt.person || null, category: tt.category || null, emotion: tt.emotion || null,
         note: tt.note || null, faceBox: tt.faceBox || null, peopleBox: tt.peopleBox || null, // เฟส 1.3
+        // ★ ข้อ 1 (28 ก.ค. 69 เคส AC-0195, MEGA_SECOND_EYE): ต่อสาย _secondEyeFaceBox แบบเดียวกับ s7_cover จริง —
+        //   ให้เครื่องมือเทสนี้ได้ผลตรวจตาสองที่ s6_slots ทำไว้แล้วไปถึงชั้นเรนเดอร์ด้วย (ไม่งั้นบั๊กเดิมที่วินิจฉัย
+        //   จากเครื่องมือนี้จะไม่เห็นผลของด่านตาสองที่เพิ่งแก้เลย)
+        ...(primary && slots[primary]?._secondEyeFaceBox ? { _secondEyeFaceBox: slots[primary]._secondEyeFaceBox } : {}),
       };
     });
     const out = await composeAndVerify({
@@ -249,8 +312,13 @@ export async function POST(req) {
     //   qcStatus:'manual_review' + qcReasons ให้คนดูรู้ว่าต้องตรวจก่อนใช้จริง (ดูป้ายที่ /m คลังปก)
     let archived = null;
     let archiveSkipReason = null; // ★ เลิกกลืน error เงียบ — ไม่เข้าคลัง = ต้องบอกเหตุผลเสมอ
-    const qcStatus = qcVerdict?.pass === false ? 'manual_review' : 'pass';
-    const qcReasons = Array.isArray(qcVerdict?.reasons) ? qcVerdict.reasons.slice(0, 6) : [];
+    const qcStatus = qcVerdict?.pass === false || _cleanPoolWarning ? 'manual_review' : 'pass';
+    // ★ ข้อ 3 (28 ก.ค. 69 เคส AC-0195): แนบคำเตือน "คลังเคสนี้ไม่มีภาพสะอาด" ต่อท้าย qcReasons ปกติ (ช่องทางเดิม
+    //   ที่แอป /m แสดงผลอยู่แล้วเวลา manual_review — ไม่ต้องเปิดฟิลด์ใหม่)
+    const qcReasons = [
+      ...(Array.isArray(qcVerdict?.reasons) ? qcVerdict.reasons.slice(0, 6) : []),
+      ...(_cleanPoolWarning ? [_cleanPoolWarning] : []),
+    ];
     if (out.success && out.base64) {
       try {
         const { addMegaCover } = await import('@/lib/megaCoverArchive');

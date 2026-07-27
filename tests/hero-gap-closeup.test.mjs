@@ -46,7 +46,7 @@ export async function resolve(specifier, context, nextResolve) {
 register('data:text/javascript,' + encodeURIComponent(hook));
 
 process.env.IMG_GAP_SEARCH = '1';
-const { s5_gapsearch, _heroCloseupGapFor } = await import('../src/lib/megaAdapters.js');
+const { s5_gapsearch, _heroCloseupGapFor, _cleanPoolGapFor } = await import('../src/lib/megaAdapters.js');
 
 let passed = 0, failed = 0;
 const test = async (name, fn) => { try { await fn(); passed++; console.log(`ok ${passed + failed} - ${name}`); } catch (e) { failed++; console.log(`not ok ${passed + failed} - ${name}\n  ${String(e && e.stack || e).split('\n').slice(0, 6).join('\n  ')}`); } };
@@ -114,6 +114,9 @@ await test('s5_gapsearch: kill-switch OFF (MEGA_HERO_GAP_CLOSEUP=0) → ไม�
 });
 
 await test('s5_gapsearch: default ON + ไม่มีโคลสอัพเลย → ยิงคำค้นตรงชื่อจริง 2 คำ ("<ชื่อ> สัมภาษณ์" / "<ชื่อ> ใบหน้า โคลสอัพ") ผ่าน google + google_news, เก็บเข้าคลัง, log ตรงสเปค', async () => {
+  // ★ ข้อ 3 (28 ก.ค. 69 เคส AC-0195): fixture นี้ (พูลว่างสนิท libImages=[]) เข้าเงื่อนไข "พูลสะอาดว่าง" ด้วย
+  //   (_cleanPoolGapFor) พร้อมกับ "ไม่มีโคลสอัพ" (_heroCloseupGapFor) — ทั้งสองแกนใช้สวิตช์เดียวกัน (MEGA_HERO_GAP_CLOSEUP)
+  //   จึงยิงคำค้นทั้งคู่ในรอบเดียวกัน (คนละคำค้น ไม่ซ้ำงาน) รวม 2×(2 คำ×2 แพลตฟอร์ม) = 8 เรียก ไม่ใช่ 4 อีกต่อไป
   const firedQueries = [];
   globalThis.__MEGA_SP = mkSP({
     searchImages: async (platform, q) => {
@@ -133,10 +136,13 @@ await test('s5_gapsearch: default ON + ไม่มีโคลสอัพเ�
   assert.ok(firedQueries.includes('google:ม่วย สัมภาษณ์'), `fires "ม่วย สัมภาษณ์" on google (got ${JSON.stringify(firedQueries)})`);
   assert.ok(firedQueries.includes('google_news:ม่วย สัมภาษณ์'), 'fires on google_news too');
   assert.ok(firedQueries.includes('google:ม่วย ใบหน้า โคลสอัพ'), 'fires the second deterministic query');
-  assert.ok(firedQueries.length === 4, `exactly 2 queries × 2 platforms = 4 calls (got ${firedQueries.length})`);
-  const line = logs.find((l) => l.includes('gap-closeup'));
+  assert.ok(firedQueries.length === 8, `2 แกน (closeup + cleanpool) × 2 คำ × 2 แพลตฟอร์ม = 8 calls (got ${firedQueries.length})`);
+  // ★ ข้อ 3: หา log บรรทัด "wrapper" ที่มีลูกศร → (รูปแบบบังคับตามสเปค) แยกจาก log ภายใน _fireGapQueries ที่ใช้ ":"
+  const line = logs.find((l) => l.includes('gap-closeup: ตัวเอก') && l.includes('→'));
   assert.ok(line, 'emits the required gap-closeup log line');
   assert.match(line, /🔎 gap-closeup: ตัวเอก ม่วย ไม่มีโคลสอัพ → ค้นเพิ่ม \d+ ใบ/, `log matches exact required format (got "${line}")`);
+  const cpLine = logs.find((l) => l.includes('gap-cleanpool'));
+  assert.ok(cpLine, 'emits the new gap-cleanpool log line too (ข้อ 3, พูลว่างพร้อมกัน)');
   assert.ok(result, 's5_gapsearch still returns normally (does not crash the pipeline)');
 });
 
@@ -184,6 +190,62 @@ await test('s5_gapsearch: ภาพที่เพิ่งเก็บจาก
   } finally { delete globalThis.__MEGA_SP; delete globalThis.__MEGA_AI; }
   assert.ok(!aiCalled, 'axis (ก)/(ข) never needed to call the LLM query-writer — the closeup pass alone already satisfied hero-grade≥2 for this fixture');
   assert.match(result.summary, /ครบทั้ง 2 แกน/, `axis (ก)/(ข) sees the freshly-added closeup images in the SAME pass (got "${result.summary}")`);
+});
+
+// ═══════════════════ ข้อ 3 (28 ก.ค. 69 เคส AC-0195) — _cleanPoolGapFor + gap-cleanpool trigger ═══════════════════
+
+await test('_cleanPoolGapFor: ไม่มี mainCharacters เลย → null (ไม่มีชื่อให้ค้น กันยิงมั่ว)', () => {
+  assert.strictEqual(_cleanPoolGapFor({ dossier: {} }, []), null);
+});
+
+await test('_cleanPoolGapFor: พูลสะอาดครบพอ (≥6) → null (ไม่ต้องค้นเสริม)', () => {
+  const job = heroJob('ม่วย');
+  const imgs = Array.from({ length: 6 }, (_, i) => cleanSolo(`c${i}`, 0.30));
+  assert.strictEqual(_cleanPoolGapFor(job, imgs, 6), null);
+});
+
+await test('_cleanPoolGapFor: พูลว่างสนิท (0 ใบ) → { name, cleanCount:0 }', () => {
+  const r = _cleanPoolGapFor(heroJob('ม่วย'), [], 6);
+  assert.deepEqual(r, { name: 'ม่วย', cleanCount: 0 });
+});
+
+await test('_cleanPoolGapFor: พูลมีภาพแต่ทุกใบ clean=false (เคส AC-0195 จริง: clean=0/30) → { name, cleanCount:0 }', () => {
+  const dirtyImgs = Array.from({ length: 30 }, (_, i) => ({ id: `d${i}`, imageUrl: `https://x/${i}.jpg`, triage: { relevant: true, clean: false } }));
+  const r = _cleanPoolGapFor(heroJob('ม่วย'), dirtyImgs, 6);
+  assert.deepEqual(r, { name: 'ม่วย', cleanCount: 0 });
+});
+
+await test('_cleanPoolGapFor: พูลสะอาดบาง (3/6) → { name, cleanCount:3 }', () => {
+  const imgs = Array.from({ length: 3 }, (_, i) => cleanSolo(`c${i}`, 0.30));
+  const r = _cleanPoolGapFor(heroJob('ม่วย'), imgs, 6);
+  assert.deepEqual(r, { name: 'ม่วย', cleanCount: 3 });
+});
+
+await test('s5_gapsearch: พูลสะอาดว่างแต่ตัวเอกมีโคลสอัพอยู่แล้ว (ทดสอบแกน cleanpool แยกจาก closeup) → ยิงคำค้นทั่วไปจากชื่อตัวละคร ("<ชื่อ>" / "<ชื่อ> ข่าว") ไม่ใช่คำค้นโคลสอัพ', async () => {
+  const firedQueries = [];
+  globalThis.__MEGA_SP = mkSP({
+    searchImages: async (platform, q) => { firedQueries.push(`${platform}:${q}`); return []; },
+  });
+  const logs = []; const origLog = console.log; console.log = (...a) => logs.push(a.join(' '));
+  try {
+    // ภาพเดียวในพูล — ผ่านเกณฑ์ closeup (faceH สูงพอ) แต่ cleanCount=1 < POOL_MIN_FLOOR_GAP(6) → เข้าเงื่อนไข cleanpool
+    await s5_gapsearch(heroJob('ม่วย'), { origin: 'http://mock', _deps: { fetchJson: jf([cleanSolo('good', 0.35)]) } });
+  } finally { console.log = origLog; delete globalThis.__MEGA_SP; }
+  assert.ok(!firedQueries.some((q) => q.includes('สัมภาษณ์') || q.includes('โคลสอัพ')), `closeup axis ต้องไม่ยิง (ตัวเอกมีโคลสอัพอยู่แล้ว) (got ${JSON.stringify(firedQueries)})`);
+  assert.ok(firedQueries.includes('google:ม่วย'), `cleanpool axis ยิงคำค้นชื่อเปล่าๆ (got ${JSON.stringify(firedQueries)})`);
+  assert.ok(firedQueries.includes('google:ม่วย ข่าว'), 'cleanpool axis ยิงคำค้นที่สอง (+ข่าว) ด้วย');
+  const line = logs.find((l) => l.includes('gap-cleanpool') && l.includes('→'));
+  assert.ok(line, 'emits the gap-cleanpool log line');
+});
+
+await test('s5_gapsearch: MEGA_HERO_GAP_CLOSEUP=0 (สวิตช์แม่) → ปิด cleanpool axis ด้วย (ใช้สวิตช์เดียวกัน ไม่ใช่สวิตช์แยก)', async () => {
+  process.env.MEGA_HERO_GAP_CLOSEUP = '0';
+  const calls = [];
+  globalThis.__MEGA_SP = mkSP({ searchImages: async (platform, q) => { calls.push(q); return []; } });
+  try {
+    await s5_gapsearch(heroJob('ม่วย'), { origin: 'http://mock', _deps: { fetchJson: jf([]) } });
+  } finally { delete process.env.MEGA_HERO_GAP_CLOSEUP; delete globalThis.__MEGA_SP; }
+  assert.ok(!calls.some((q) => q === 'ม่วย' || q === 'ม่วย ข่าว'), `kill-switch เดียวกันต้องปิด cleanpool axis ด้วย (got ${JSON.stringify(calls)})`);
 });
 
 console.log(`\n# hero-gap-closeup: ${passed}/${passed + failed} passed`);

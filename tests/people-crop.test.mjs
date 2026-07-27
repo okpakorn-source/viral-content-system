@@ -98,7 +98,11 @@ await test('(a) OFF ⇒ no face + peopleBox is IGNORED — same blind centre cro
 await test('(b) ON ⇒ no face + peopleBox ⇒ branch flips to "people-box" and the region differs from the blind centre crop', async () => {
   const on  = await withPeople('1', () => run({ slot: SEC_SLOT, fb: noFaceFb({ peopleBox: midPeople() }) }));
   const off = await withPeople('0', () => run({ slot: SEC_SLOT, fb: noFaceFb({ peopleBox: midPeople() }) }));
-  assert.strictEqual(on.branch, 'people-box', `ON anchors on the person (got ${on.branch})`);
+  // ★ 28 ก.ค. 69 (MEGA_HEAD_SAFE, default ON): no-face people-box crop can additionally get a "+headsafetop" suffix
+  //   when the person-anchored window starts below the 12% top zone — this is the intended generalization ("ครอป
+  //   ทุกช่องคน ... ไม่มี faceBox เลย แนวตั้งให้ยึดโซนบน") reaching the people-box branch too, not a regression —
+  //   startsWith tolerates this (and any future additive suffix) instead of an exact/enumerated match.
+  assert.ok(on.branch.startsWith('people-box'), `ON anchors on the person (got ${on.branch})`);
   assert.ok(off.branch.startsWith('noface'), `OFF still on the blind centre crop (got ${off.branch})`);
   assert.notDeepEqual(on.region, off.region, 'the ON region genuinely differs — not a no-op');
   assert.strictEqual(on.peopleNeedsBackup, undefined, 'a well-covered person raises no backup flag');

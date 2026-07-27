@@ -9,6 +9,7 @@
 // ============================================================
 
 import { callAI } from '@/lib/ai/openai';
+import { withHonestyDna } from '@/lib/aiHonestyDna'; // ★ การ์ดที่ 5 (28 ก.ค. 69 เคส AC-0195): DNA ความซื่อสัตย์
 
 // ★ 27 ก.ค. 69 (เจ้าของสั่ง "ไม่เอา gpt-4o ขอ 5.6"): สมองสกัด DNA ปก ref เปลี่ยนเป็นตระกูล 5.6
 //   (vision ผ่าน callAI ตัวเดียวกับ faceDetector ที่ใช้ gpt-5.6-luna พิสูจน์แล้ว) — override ได้ผ่าน env
@@ -68,7 +69,7 @@ const SYSTEM = `คุณคือผู้เชี่ยวชาญออก�
  */
 export async function extractCoverDNA(dataUrl) {
   const res = await callAI({
-    systemPrompt: SYSTEM,
+    systemPrompt: withHonestyDna(SYSTEM),
     userPrompt: 'ถอดแบบปกนี้เป็นชุดข้อมูลครบตาม schema (รวม template พิกัด % ที่ render ได้จริง) — ตอบ JSON ล้วนเท่านั้น',
     imageContents: [{ type: 'image_url', image_url: { url: dataUrl, detail: 'high' } }],
     model: REF_DNA_MODEL,
@@ -112,7 +113,7 @@ export async function extractCoverDNA(dataUrl) {
     const draft = JSON.stringify(dna.template || {}, null, 0).slice(0, 1200);
     const askGeo = async (extraNote) => {
       const geo = await callAI({
-        systemPrompt: GEO_SYSTEM,
+        systemPrompt: withHonestyDna(GEO_SYSTEM),
         userPrompt: `ร่างวัดรอบแรก (อาจนับภาพขาด/ควบภาพ — เริ่มนับใหม่จากภาพจริงตามขั้น 1 ก่อนเสมอ):\n${draft}${extraNote ? `\n\n⚠️ ${extraNote}` : ''}`,
         imageContents: [{ type: 'image_url', image_url: { url: dataUrl, detail: 'high' } }],
         model: REF_DNA_MODEL,

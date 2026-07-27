@@ -583,7 +583,10 @@ test('A5 repair response with missing model replaces prior actualModel with null
 // ============================================================
 // B — abort, bounds, safe error normalization, and redaction
 test('B1 child 45s timeout aborts the owned provider signal and settles through recordLLM/logApiUsage hangs', async () => {
-  await withEnv({ ANTHROPIC_API_KEY: TEST_KEY }, async () => {
+  // ★ วิกฤต :3900 (28 ก.ค. 69): default ATTEMPT_TIMEOUT_MS ยกจาก 45000→90000 (env ANALYSIS_ATTEMPT_TIMEOUT_MS
+  //   ปรับได้แล้ว — ดู s5PinnedAi.js) — เทสนี้ยึดเลขคณิตตายตัว 45000ms กับ fake clock ต้อง pin ค่าเดิมกลับไว้
+  //   ตรงๆ ผ่าน env เพื่อพิสูจน์ mechanic เดิม (abort/cleanup/listener) ยังถูกต้อง 100% ไม่ใช่แค่เปลี่ยนเลขตาม
+  await withEnv({ ANTHROPIC_API_KEY: TEST_KEY, ANALYSIS_ATTEMPT_TIMEOUT_MS: '45000', ANALYSIS_WRAPPER_DEADLINE_MS: '120000' }, async () => {
     for (const mode of ['record', 'log']) {
       const clock = createFakeTimers();
       const aborts = createTrackedAbortControllers();
@@ -614,7 +617,9 @@ test('B1 child 45s timeout aborts the owned provider signal and settles through 
 });
 
 test('B2 parent 120s deadline wins over a late repair child deadline and cleans all listeners/timers', async () => {
-  await withEnv({ ANTHROPIC_API_KEY: TEST_KEY }, async () => {
+  // ★ วิกฤต :3900 (28 ก.ค. 69): default WRAPPER_DEADLINE_MS ยกจาก 120000→200000 (env ANALYSIS_WRAPPER_DEADLINE_MS
+  //   ปรับได้แล้ว) — เทสนี้ยึดเลขคณิตตายตัว 80000+40000=120000ms กับ fake clock ต้อง pin ค่าเดิมกลับไว้ตรงๆ
+  await withEnv({ ANTHROPIC_API_KEY: TEST_KEY, ANALYSIS_ATTEMPT_TIMEOUT_MS: '45000', ANALYSIS_WRAPPER_DEADLINE_MS: '120000' }, async () => {
     const clock = createFakeTimers();
     const aborts = createTrackedAbortControllers();
     const bookkeeping = useBookkeeping();
@@ -649,6 +654,50 @@ test('B2 parent 120s deadline wins over a late repair child deadline and cleans 
       assert.strictEqual(clock.pendingCount(), 0);
       assert.ok(aborts.controllers.every((controller) => controller.signal.listenerCount() === 0));
     } finally {
+      fetcher.restore();
+      aborts.restore();
+      clock.restore();
+      delete globalThis.__B5_BOOKKEEPING;
+    }
+  });
+});
+
+// ============================================================
+// E — วิกฤต :3900 (28 ก.ค. 69): provider ช้ากว่า ATTEMPT_TIMEOUT_MS (จำลอง opus-4-8 ~51s เกินเพดานเดิม 45s) ต้อง
+//   จบด้วย error สวยๆ (ATTEMPT_TIMEOUT) "และ" process/test-runner ต้องไม่ตาย — พิสูจน์ผ่าน process.on
+//   ('unhandledRejection') จริงว่าไม่มี promise หลุดมือแม้แต่ตัวเดียว (เคสจริงคืนที่เกิดเหตุ: opus-4-8 ยิง 2
+//   ครั้งติดแล้ว process ดับเงียบ) ใช้ default ใหม่ (90000/200000) ตรงๆ ไม่ pin ค่าเดิม — ทดสอบพฤติกรรมจริงที่
+//   ผู้ใช้จะได้หลังแก้ไฟล์นี้ · ★ ค้นพบระหว่างเขียนเทสนี้: attempt ที่ timeout ผ่านกลไก abort-race จริง (ไม่ใช่
+//   provider ตอบ 503/429) ไม่ retry ต่อ (attemptCount ค้างที่ 1 เสมอ — isRetryable() เช็ค message ของ error ที่
+//   raceAgainstAbort เป็นคนสร้างตอนชนะ race ("...post-fetch stage") ซึ่งไม่มีคำว่า timeout/timed out ให้ regex
+//   จับ ต่างจาก error message ที่ aiClient.js สร้างตอน fetch เองล้มตรงๆ ที่มีคำว่า "timed out") — พฤติกรรมนี้มีอยู่
+//   ก่อนหน้านี้แล้ว ไม่ใช่สิ่งที่แก้รอบนี้เปลี่ยน แค่ยืนยันว่า B1 (attemptCount:1) คือพฤติกรรมจริงของทั้งระบบ ไม่ใช่
+//   เฉพาะเคส "bookkeeping ค้าง" เท่านั้น
+test('E1 provider ช้ากว่า ATTEMPT_TIMEOUT_MS (จำลอง opus-4-8 ~51s) → error สวยๆ (ATTEMPT_TIMEOUT) และไม่มี unhandledRejection เลยแม้แต่ตัวเดียว (พิสูจน์ไม่มี orphan promise จากกลไก abort-race)', async () => {
+  await withEnv({ ANTHROPIC_API_KEY: TEST_KEY, ANALYSIS_ATTEMPT_TIMEOUT_MS: undefined, ANALYSIS_WRAPPER_DEADLINE_MS: undefined }, async () => {
+    const unhandled = [];
+    const onUnhandled = (reason) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    const clock = createFakeTimers();
+    const aborts = createTrackedAbortControllers();
+    const bookkeeping = useBookkeeping();
+    // provider ค้างไม่ตอบเลยจนกว่าจะโดน abort — จำลอง opus-4-8 ที่ใช้เวลานานกว่าเพดานเสมอ
+    const fetcher = installFetch([{ pending: true }]);
+    try {
+      const outcome = runStrictPinned(strictOptions({ cost: { step: 'test' } }));
+      await flush();
+      clock.advanceSync(90000); // ครบ ATTEMPT_TIMEOUT_MS default ใหม่
+      const error = await captureRejection(outcome);
+      assert.strictEqual(error.errorType, 'ATTEMPT_TIMEOUT', 'ต้องได้ error สวยๆ ที่จัดหมวดถูกต้อง ไม่ใช่ process ตายเงียบ');
+      assert.strictEqual(error.provenance.attemptCount, 1);
+      assert.strictEqual(fetcher.stats.activeRequests, 0, 'ต้องไม่มี request ค้างเบื้องหลังเลย');
+      assert.strictEqual(clock.pendingCount(), 0, 'ต้องไม่มี timer ค้างเบื้องหลังเลย');
+      assert.ok(aborts.controllers.every((controller) => controller.signal.listenerCount() === 0), 'listener ทุกตัวต้องถูกถอดหมด ไม่ leak ข้าม attempt');
+      // ★ ให้ event loop มีโอกาส flush microtask/promise ที่อาจค้างอยู่เบื้องหลังก่อนสรุปผล unhandledRejection
+      await flush(50);
+      assert.strictEqual(unhandled.length, 0, `ต้องไม่มี unhandledRejection เลยแม้แต่ตัวเดียว (เจอ ${unhandled.length} ตัว) — พิสูจน์ไม่มี orphan promise จากกลไก abort-race (นี่คือรากของเซิร์ฟเวอร์ :3900 ที่ตายซ้ำ)`);
+    } finally {
+      process.removeListener('unhandledRejection', onUnhandled);
       fetcher.restore();
       aborts.restore();
       clock.restore();

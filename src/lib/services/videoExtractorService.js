@@ -44,7 +44,7 @@ async function getYouTubeInfo(videoUrl) {
         '--dump-json', '--no-warnings',
         '--cookies', cookiesFile,
         videoUrl
-      ], { maxBuffer: 1024 * 1024 * 10 });
+      ], { maxBuffer: 1024 * 1024 * 10, windowsHide: true });
       return JSON.parse(stdout.trim());
     } catch (err) {
       vlog.warn(`cookies.txt failed: ${err.message?.slice(0, 100)}`);
@@ -56,7 +56,7 @@ async function getYouTubeInfo(videoUrl) {
   const { stdout } = await execFileAsync(ytdlpPath, [
     '--dump-json', '--no-warnings',
     videoUrl
-  ], { maxBuffer: 1024 * 1024 * 10 });
+  ], { maxBuffer: 1024 * 1024 * 10, windowsHide: true });
   return JSON.parse(stdout.trim());
 }
 

@@ -18,7 +18,7 @@ async function whisperFromAudio(url) {
   const audioPath = join(tmpdir(), `yt_${Date.now()}.m4a`);
   try {
     // โหลดเฉพาะเสียง m4a (เล็ก + Whisper รับได้ตรง)
-    await execFileAsync(exe, ['-f', 'ba[ext=m4a]/ba/b', '-o', audioPath, '--no-warnings', '--no-playlist', url], { maxBuffer: 1024 * 1024 * 20, timeout: 180_000 });
+    await execFileAsync(exe, ['-f', 'ba[ext=m4a]/ba/b', '-o', audioPath, '--no-warnings', '--no-playlist', url], { maxBuffer: 1024 * 1024 * 20, timeout: 180_000, windowsHide: true });
     if (!existsSync(audioPath)) throw new Error('ดาวน์โหลดเสียงไม่สำเร็จ');
     const tr = await getOpenai().audio.transcriptions.create({
       file: createReadStream(audioPath), model: 'whisper-1', language: 'th',

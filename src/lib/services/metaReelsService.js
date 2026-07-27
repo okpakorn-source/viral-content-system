@@ -46,13 +46,13 @@ async function runYtdlp(args, timeout = 90_000) {
   // มี cookies ลองก่อน (IG/บางโพสต์ FB ต้องล็อกอิน) — พังค่อยลองแบบไม่มี
   if (cookies) {
     try {
-      return await execFileAsync(exe, ['--cookies', cookies, ...args], { maxBuffer: 1024 * 1024 * 20, timeout });
+      return await execFileAsync(exe, ['--cookies', cookies, ...args], { maxBuffer: 1024 * 1024 * 20, timeout, windowsHide: true });
     } catch (e) {
       console.log('[MetaReels] cookies.txt failed:', e.message?.slice(0, 80));
     }
   }
   try {
-    return await execFileAsync(exe, args, { maxBuffer: 1024 * 1024 * 20, timeout });
+    return await execFileAsync(exe, args, { maxBuffer: 1024 * 1024 * 20, timeout, windowsHide: true });
   } catch (e) {
     // โชว์สาเหตุจริงจาก yt-dlp — e.message อย่างเดียวมักเป็นแค่ "Command failed: ..."
     const stderr = String(e.stderr || '').trim().split('\n').slice(-3).join(' | ');

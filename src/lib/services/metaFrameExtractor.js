@@ -32,20 +32,20 @@ async function runYtdlp(args, timeout = 180_000) {
   const { exe, cookies } = ytdlpPaths();
   if (cookies) {
     try {
-      return await execFileAsync(exe, ['--cookies', cookies, ...args], { maxBuffer: 1024 * 1024 * 20, timeout });
+      return await execFileAsync(exe, ['--cookies', cookies, ...args], { maxBuffer: 1024 * 1024 * 20, timeout, windowsHide: true });
     } catch (e) {
       console.log(`${LOG} cookies.txt failed:`, e.message?.slice(0, 70));
     }
   }
   try {
-    return await execFileAsync(exe, args, { maxBuffer: 1024 * 1024 * 20, timeout });
+    return await execFileAsync(exe, args, { maxBuffer: 1024 * 1024 * 20, timeout, windowsHide: true });
   } catch (e) {
     // ★ FIX (2 ก.ค. CASE-345): YouTube bot-check "Sign in to confirm you're not a bot" ฆ่า Tier REAL ทุกคลิป
     //   → เฟรมโมเมนต์ (หัวใจปกแสนไลค์) ไม่เคยเข้าพูล — ลองดึงคุกกี้จากเบราว์เซอร์เครื่องทีมก่อนยอมแพ้ (non-fatal ต่อชั้น)
     if (!/sign in to confirm|not a bot|login required/i.test(String(e?.message || ''))) throw e;
     for (const br of ['chrome', 'edge']) {
       try {
-        const r = await execFileAsync(exe, ['--cookies-from-browser', br, ...args], { maxBuffer: 1024 * 1024 * 20, timeout });
+        const r = await execFileAsync(exe, ['--cookies-from-browser', br, ...args], { maxBuffer: 1024 * 1024 * 20, timeout, windowsHide: true });
         console.log(`${LOG} 🍪 bot-check ผ่านด้วยคุกกี้ ${br}`);
         return r;
       } catch (e2) {
@@ -136,7 +136,7 @@ export async function extractMetaVideoFrames(url, numFrames = 12) {
         // -ss segStart -t segLen = ดูเฉพาะช่วงนี้ · -vf thumbnail = เลือกเฟรมตัวแทนคมสุดในช่วง
         await execFileAsync('ffmpeg', ['-y', '-ss', segStart.toFixed(2), '-t', Math.max(segLen, 1).toFixed(2),
           '-i', videoPath, '-vf', 'thumbnail', '-frames:v', '1', '-q:v', '2', out],
-          { maxBuffer: 1024 * 1024 * 10, timeout: 30_000 });
+          { maxBuffer: 1024 * 1024 * 10, timeout: 30_000, windowsHide: true });
         if (existsSync(out)) {
           const buf = await fs.readFile(out);
           if (buf.length > 2000) shots.push({ buffer: buf, idx: i });

@@ -13,6 +13,7 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 // ★ 26 ก.ค. 69 (เจ้าของอนุมัติ mapping): ตา (Gemini fallback) สายปก gemini-2.5-flash → gemini-3.6-flash
 import { COVER_GEMINI_MODEL } from '../coverVisionModel.js';
+import { withHonestyDna } from '../aiHonestyDna.js'; // ★ การ์ดที่ 5 (28 ก.ค. 69 เคส AC-0195): DNA ความซื่อสัตย์
 // ★ 9 ก.ค. 2026: ตาหาหน้า 2 ชั้น — gpt-4o-mini (callAI) เป็นตัวแรกเสมอ → ถ้าล้ม (เช่น OpenAI 429 quota หมด)
 //   ตกไป Gemini vision fallback (REST v1beta) ท้ายไฟล์ · kill-switch: FACE_GEMINI_FALLBACK=0 = ปิด fallback
 
@@ -262,7 +263,7 @@ text_region: when has_big_text=true, give the bounding box of the main burned-in
 watermark_region: SEPARATE from has_big_text — if the photo has a press/agency watermark or channel logo ANYWHERE (even small, faint, semi-transparent, or in a corner — e.g. "ผู้จัดการ", "ไทยรัฐ", channel logos), give its bounding box e.g. { "x_pct": 55, "y_pct": 88, "w_pct": 45, "h_pct": 12 } — ★ numbers MUST be 0-100 percent of image (NOT 0-1 fractions). null if none. This field does NOT change has_big_text (keep its rule unchanged) — it is only used to crop AROUND the watermark.`;
 
     const parsed = await callAI({
-      prompt: gptPrompt,
+      prompt: withHonestyDna(gptPrompt),
       imageContents: [
         {
           type: 'image_url',
@@ -600,7 +601,7 @@ async function detectFacesGemini(base64, metadata) {
   //   เฉพาะท่อปก — ตัด process.env.GEMINI_MODEL ออกจากจุดนี้ตั้งใจ (ให้เหมือน libraryTriage.js/youtubePipeline.js
   //   ที่ COVER_GEMINI_MODEL เป็นช่องคุม/ถอยกลับเดียวของสายปก ไม่ผูกกับ GEMINI_MODEL กลางอีกต่อไป)
   const model = COVER_GEMINI_MODEL;
-  const data = await _geminiWithRetry(base64, _GEMINI_FACE_PROMPT, model);
+  const data = await _geminiWithRetry(base64, withHonestyDna(_GEMINI_FACE_PROMPT), model);
   const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('').trim();
   const parsed = _parseGeminiJSON(text);
   if (!parsed) return null;

@@ -26,8 +26,10 @@ const STUB_REFLIB = _mod('export async function listRefCovers(n){ return globalT
 const STUB_ARCHIVE = _mod('export async function addMegaCover(e){ globalThis.__CT_ARCHIVE = (globalThis.__CT_ARCHIVE||0)+1; return { id: "CT-ARCH" }; }');
 const STUB_NEXT = _mod('export const NextResponse = { json: (obj, init) => ({ _body: obj, status: (init && init.status) || 200 }) };');
 // normal-path leaves: compassBrain, s6_slots, pickBestRef — all data-driven from globalThis.__CT_SP
-const STUB_BRAINS = _mod('export async function compassBrain(){ return globalThis.__CT_SP.compass(); }');
-const STUB_ADAPTERS = _mod('export async function s6_slots(){ return globalThis.__CT_SP.s6(); }');
+// ★ ตรวจ (28 ก.ค. 69): compassBrain/s5_gapsearch นับจำนวนครั้งที่ถูกเรียกจริงด้วย (globalThis.__CT_CALLS) —
+//   ใช้พิสูจน์ว่าโหมด frozen ข้ามทั้งคู่ไปเลย (ไม่ใช่แค่ผลลัพธ์เหมือนเดิม แต่ "ไม่ถูกเรียก" จริงๆ)
+const STUB_BRAINS = _mod('export async function compassBrain(){ globalThis.__CT_CALLS.compass++; return globalThis.__CT_SP.compass(); }');
+const STUB_ADAPTERS = _mod('export async function s6_slots(){ return globalThis.__CT_SP.s6(); } export async function s5_gapsearch(){ globalThis.__CT_CALLS.gapsearch++; return globalThis.__CT_SP.gapsearch ? globalThis.__CT_SP.gapsearch() : { summary: "x" }; }');
 const STUB_REFMATCH = _mod('export async function pickBestRef(){ return globalThis.__CT_SP.pickBestRef ? globalThis.__CT_SP.pickBestRef() : null; }');
 
 const hook = `
@@ -58,6 +60,8 @@ globalThis.fetch = () => { fetchBomb++; throw new Error('NETWORK_FORBIDDEN'); };
 const { evaluateCoverQc } = await import('../src/app/../lib/coverQcGate.js');
 const { POST } = await import('../src/app/api/mega/compose-test/route.js');
 
+globalThis.__CT_CALLS = { compass: 0, gapsearch: 0 }; // ★ ตรวจ 28 ก.ค. 69 — นับ call จริงของ compassBrain/s5_gapsearch (ต้องมีก่อนสตับใดๆ ถูกเรียก)
+
 const CASE_ID = 'AC0107-CT';
 const REF_ID = 'REF-CT-1';
 // 6 clean relevant images ⇒ pool ≥ POOL_MIN_FLOOR under the default clean gate
@@ -80,6 +84,8 @@ const FROZEN_PLAN = [
   { url: 'https://cdn.test/I1.jpg', slot: 'reaction' },
   { url: 'https://cdn.test/I2.jpg', slot: 'context' },
 ];
+// ★ ตรวจ (28 ก.ค. 69): req จำลองของโหมด frozen ไม่มี .url เลย (ตัวแทนของจริง — ปุ่ม ② composeFrozen ใน /m ก็ไม่
+//   จำเป็นต้องมี URL จริงให้ route ใช้ เพราะโหมดนี้ไม่ควรแตะ origin/compass/gap-search เลยตามสัญญา "ข้าม compass+S6"
 const mkReq = () => ({ json: async () => ({ caseId: CASE_ID, refId: REF_ID, slotPlan: FROZEN_PLAN }) });
 // compose double: a RENDERED cover (out.success:true, has base64) carrying caller-chosen qcFlags
 const composeYielding = (qcFlags) => async () => ({ success: true, base64: 'data:image/jpeg;base64,QUJD', template: 'ct', refSimilarity: 80, manifest: {}, qcFlags });
@@ -110,6 +116,20 @@ await test('AC-0107 non-equivalence (frozen diagnostic mode): compose-test with 
   assert.strictEqual(res._body.productionQcPass, false, 'productionQcPass:false — Production (/cover-ref-test) would 422 + zero-archive this exact output');
   assert.strictEqual(res._body.qcVerdict.pass, false, 'attached qcVerdict.pass:false (real shared gate)');
   assert.strictEqual(res._body.qcVerdict.suggestedStatus, 'needs_gap_search');
+});
+
+// ── ตรวจ (28 ก.ค. 69, ผู้ตรวจ): โหมด frozen ต้องไม่เรียก compassBrain และไม่ยิง gap-search เลย — regression ของ
+//    MEGA_QUICK_GAP เอง (ย้าย compass+QUICK_GAP มาไว้ก่อนด่าน frozen จนโหมดแช่แข็งเสียเวลา compass 10-30s + อาจ
+//    ยิง gap-search เป็นนาที ทั้งที่ไม่ใช้ผล จนชน AbortSignal/maxDuration ของ /m) — นับ call จริงต้องเป็น 0 ทั้งคู่
+await test('frozen mode ต้องไม่เรียก compassBrain และไม่ยิง s5_gapsearch เลย (นับ call จริง = 0 ทั้งคู่ — กัน regression เสียเวลา/ชน timeout)', async () => {
+  clearHardQc();
+  globalThis.__CT_CALLS = { compass: 0, gapsearch: 0 };
+  globalThis.__CT_COMPOSE = composeYielding([]);
+  const res = await POST(mkReq());
+  assert.strictEqual(res.status, 200, 'frozen request ยังต้องสำเร็จตามปกติ');
+  assert.strictEqual(res._body.frozenPlan, true);
+  assert.strictEqual(globalThis.__CT_CALLS.compass, 0, 'compassBrain ต้องไม่ถูกเรียกเลยในโหมด frozen');
+  assert.strictEqual(globalThis.__CT_CALLS.gapsearch, 0, 's5_gapsearch ต้องไม่ถูกเรียกเลยในโหมด frozen');
 });
 
 // ── control: a QC-passing render ⇒ productionQcPass:true (parity indicator does not over-fire) ──

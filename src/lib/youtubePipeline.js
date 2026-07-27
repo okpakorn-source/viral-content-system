@@ -231,7 +231,7 @@ async function downloadClip(url, dir, hq = false) {
       out,
       url,
     ]),
-    { maxBuffer: 1024 * 1024 * 64, timeout: 300000 }
+    { maxBuffer: 1024 * 1024 * 64, timeout: 300000, windowsHide: true }
   );
 
   const files = await fs.readdir(dir);
@@ -246,7 +246,7 @@ async function probeDuration(videoFile) {
     const { stdout } = await exec(
       'ffprobe',
       ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', videoFile],
-      { timeout: 30000 }
+      { timeout: 30000, windowsHide: true }
     );
     const d = parseFloat(String(stdout).trim());
     return isNaN(d) ? null : d;
@@ -290,7 +290,7 @@ async function extractFrames(videoFile, dir, dense = false) {
       String((dense ? Math.max(60, MAX_CAND_PER_CLIP) : MAX_CAND_PER_CLIP) + 5),
       pattern,
     ],
-    { timeout: 300000 }
+    { timeout: 300000, windowsHide: true }
   );
 
   const files = (await fs.readdir(dir)).filter((f) => /^f_\d+\.jpg$/.test(f)).sort();

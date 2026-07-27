@@ -12,8 +12,11 @@
 //      ตรวจโครงสร้างแบบ own-data-descriptor ล้วน (ห้าม getter/proxy/symbol/exotic เข้าเงียบๆ)
 //   4) BOUNDED RETRY/REPAIR (★ 15 ก.ค. correction — real AbortController cancellation): generation ≤2
 //      attempt (initial+retry ตามกติกา retryable เดิมของ retry.js) → สำเร็จ transport+identity แต่
-//      JSON/schema พัง = repair ได้ "ครั้งเดียว" ด้วย pin เดิมเป๊ะ → พังอีก = terminal · ทุก attempt ≤45s
-//      ผูกกับ AbortController จริง (ยกเลิก fetch จริง ไม่ใช่แค่เลิกรอ) · เพดานรวม ≤120s ผูกกับ parent
+//      JSON/schema พัง = repair ได้ "ครั้งเดียว" ด้วย pin เดิมเป๊ะ → พังอีก = terminal · ทุก attempt ≤ATTEMPT_TIMEOUT_MS
+//      (env ANALYSIS_ATTEMPT_TIMEOUT_MS ปรับได้ — default 90000ms, 28 ก.ค. 69 ยกจาก 45000 เดิม: opus-4-8 ทำ
+//      analysis เต็มใช้ ~51s เกินเพดานเดิมทุกครั้ง → เซิร์ฟเวอร์ :3900 ตายซ้ำ ดู orphan-rejection fix ใน aiClient.js)
+//      ผูกกับ AbortController จริง (ยกเลิก fetch จริง ไม่ใช่แค่เลิกรอ) · เพดานรวม ≤WRAPPER_DEADLINE_MS (env
+//      ANALYSIS_WRAPPER_DEADLINE_MS ปรับได้ — default 200000ms, clamp ให้เกิน attempt×2+gap เสมอ) ผูกกับ parent
 //      AbortController เดียวกันที่ครอบทุก attempt/repair — เกิน = abort ของจริงทันที ไม่มี background request
 //      ค้าง · รวมไม่เกิน 3 provider invocation ตลอดสาย
 //   5) TERMINAL EVIDENCE: ทุก error ที่ throw ออกจากสายนี้พก .provenance (requestedProvider/Model,
@@ -30,10 +33,42 @@ import { types as nodeUtilTypes } from 'node:util';
 import { resolveProvider, resolveModel, callBrain } from './aiClient.js';
 import { isRetryable } from './retry.js';
 
-const WRAPPER_DEADLINE_MS = 120000; // เพดานรวมทั้งกระบวนการ (generation + repair) — ผูก AbortController จริง
-const ATTEMPT_TIMEOUT_MS = 45000;   // เพดานต่อ 1 ครั้งที่ยิง provider จริง — ผูก AbortController จริงเช่นกัน
+// ★ วิกฤต :3900 (28 ก.ค. 69 — เซิร์ฟเวอร์ตายซ้ำ 2 รอบห่างกัน 40 นาที คืนเดียวกัน): เพดานเดิมตายตัว 45000/120000
+//   ชนบั๊กเก่าที่จดไว้ (analyze-45s-timeout-bug — opus-4-8 ทำ analysis เต็มใช้จริง ~51s) ทุก attempt timeout
+//   แน่นอน → ยกเป็น env ปรับได้ (ถอยกลับ/ปรับจูนได้โดยไม่ต้องแก้โค้ด) คง architecture strict/pin/AbortController
+//   เดิมทุกอย่าง 100% — แค่ตัวเลขเพดานมาจาก env แทน literal ตายตัว
+//   ★ อ่าน env "แบบ lazy" (ฟังก์ชัน เรียกตอนใช้จริงในแต่ละ call) ไม่ใช่ const ตอน module โหลด — เดิมลองทำเป็น
+//   const มาก่อนแล้วพบว่าเทสเก่า (batch5-v2-pinned-ai) ที่ withEnv(...) ตั้ง env รอบ test body ใช้ไม่ได้ผลเลย
+//   (module import ครั้งเดียวตอนต้นไฟล์ ก่อนเทสไหนตั้ง env ด้วยซ้ำ) — ฟังก์ชันแก้ตรงนี้ + ให้พฤติกรรม production
+//   จริง (env มาจาก .env.local ก่อน process เริ่มอยู่แล้ว) เหมือนเดิมทุกกรณี
+function _clampInt(raw, def, min, max) {
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return def;
+  return Math.min(max, Math.max(min, n));
+}
 const GEN_MAX_ATTEMPTS = 2;         // initial + retry ตามกติกา retryable เดิม (retry.js:isRetryable)
 const GEN_RETRY_GAP_MS = 300;       // หน่วงสั้นๆ ก่อนยิงซ้ำรอบ 2 (courtesy — ไม่ใช่ backoff เต็มรูปแบบ) · abort-aware
+// เพดานต่อ 1 ครั้งที่ยิง provider จริง — ผูก AbortController จริง · env ANALYSIS_ATTEMPT_TIMEOUT_MS ปรับได้
+// default 90000ms (เดิม 45000 — opus-4-8 จริงใช้ ~51s ทำ analysis เต็ม ต้องมีหายใจเหลือ) · clamp 30000-180000
+function _attemptTimeoutMs() {
+  return _clampInt(process.env.ANALYSIS_ATTEMPT_TIMEOUT_MS, 90000, 30000, 180000);
+}
+// เพดานรวมทั้งกระบวนการ (generation + repair) — ผูก AbortController จริง · env ANALYSIS_WRAPPER_DEADLINE_MS
+// ปรับได้ default 200000ms (เดิม 120000) · ต้องเกิน attempt×2(generation)+gap เสมอ ไม่งั้นเพดานรวมจะตัดจบ
+// ก่อน generation ครบรอบด้วยซ้ำ — ถ้าผู้ใช้ตั้งค่าขัดกัน (เล็กกว่าขั้นต่ำนี้) clamp ขึ้นอัตโนมัติ + log เตือนดังๆ
+function _wrapperDeadlineMs() {
+  const attemptMs = _attemptTimeoutMs();
+  const raw = _clampInt(process.env.ANALYSIS_WRAPPER_DEADLINE_MS, 200000, 60000, 600000);
+  const minForAttempts = attemptMs * GEN_MAX_ATTEMPTS + GEN_RETRY_GAP_MS;
+  const out = raw > minForAttempts ? raw : minForAttempts + 1000;
+  if (out !== raw) {
+    console.warn(
+      `[S5PinnedAi] ⚠️ ANALYSIS_WRAPPER_DEADLINE_MS (${raw}ms) เล็กกว่าขั้นต่ำที่ต้องการ ` +
+      `(ATTEMPT_TIMEOUT_MS×${GEN_MAX_ATTEMPTS}+gap = ${minForAttempts}ms) — ปรับขึ้นเป็น ${out}ms อัตโนมัติกันเพดานรวมตัดจบก่อน generation ครบรอบ`
+    );
+  }
+  return out;
+}
 const MAX_PIN_MODEL_LEN = 256;
 
 // ============================================================
@@ -512,7 +547,7 @@ function checkIdentity(brain, pin, state) {
 }
 
 async function attemptOnce({ system, user, maxTokens, temperature, pin, cost, onRetry, label, parentController, state }) {
-  const { signal, cleanup } = makeAttemptController(parentController.signal, ATTEMPT_TIMEOUT_MS);
+  const { signal, cleanup } = makeAttemptController(parentController.signal, _attemptTimeoutMs());
   try {
     // ★ correction item 1 (round 2): signal ยกเลิก fetch จริง (ผ่าน callBrain→provider adapter) เสมอ + race
     //   ทั้ง call กับ signal นี้ด้วย กัน post-fetch bookkeeping (recordLLM/logApiUsage) ค้างเกินเพดาน
@@ -631,9 +666,10 @@ export async function runStrictPinned(opts) {
     throw e;
   }
   const parentController = new AbortController();
+  const wrapperDeadlineMs = _wrapperDeadlineMs();
   const parentTimer = setTimeout(() => {
-    parentController.abort(Object.assign(new Error(`S5 strict wrapper deadline exceeded (${WRAPPER_DEADLINE_MS}ms)`), { name: 'AbortError' }));
-  }, WRAPPER_DEADLINE_MS);
+    parentController.abort(Object.assign(new Error(`S5 strict wrapper deadline exceeded (${wrapperDeadlineMs}ms)`), { name: 'AbortError' }));
+  }, wrapperDeadlineMs);
   try {
     return await runStrictInner({ ...opts, pin, parentController });
   } finally {

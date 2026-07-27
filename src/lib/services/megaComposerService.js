@@ -219,6 +219,64 @@ function normalizeFaceBox(fd) {
   };
 }
 
+// ★ MEGA_SECOND_EYE (เคส AC-0195 28 ก.ค. 69 — "ตาโกหก": ตาคัด/ตาหาหน้าให้ faceBox ผิดจนครอปตัดหัว): S6 (megaAdapters.js
+//   s6_slots) ยิงตาสอง (Gemini vision) หลังเลือกภาพสุดท้ายแล้ว แนบ _secondEyeFaceBox เข้า slotPlan row (ผ่าน
+//   s7_cover/compose-test) → ตรงนี้คือจุดครอปจริง (ตอนประกอบ) — ทับผลตรวจจับใหม่ (batchDetectFaces) เสมอเมื่อมี
+//   ค่าแนบมาจริง (validate รูปแบบก่อนเชื่อ — พังรูปแบบ = ไม่ทับ) คงค่า extras อื่น (subject/textRegion/
+//   watermarkRegion/hasText/pose) จากผลตรวจจับปกติไว้ (ตาสองให้แค่กรอบหน้า ไม่ได้ตรวจสิ่งเหล่านี้)
+//   default ON · MEGA_SECOND_EYE=0 → ไม่ทับเลย (พฤติกรรมเดิมเป๊ะ ใช้ผลตรวจจับปกติทุกจุด)
+//   ★ ข้อ 2 (28 ก.ค. 69 — "แยกอำนาจตา"): ลำดับอำนาจ faceBox ตอนครอป = ตาสอง (S6) > faceDetector (ผลตรวจจับสด
+//   ข้างบน) > triage เก่า (im.faceBox ฟิลด์เก่า {x,y,w,h} normalized — tier 3 สุดท้าย) ใช้เมื่อ detector ไม่เจอ
+//   หน้าจริงเลย (count=0/ไม่มี) และตาสองก็ไม่ได้ให้ค่ามา — กันกรณีตาทั้งสองมองไม่เห็นแต่คลังยังมีร่องรอยเดิมอยู่
+function _secondEyeOverrideOn() { return process.env.MEGA_SECOND_EYE !== '0'; }
+function _validSecondEyeFb(se) {
+  return !!(se && typeof se === 'object'
+    && ['x1', 'y1', 'x2', 'y2'].every((k) => typeof se[k] === 'number' && Number.isFinite(se[k]))
+    && se.x2 > se.x1 && se.y2 > se.y1);
+}
+function _realDetectedFace(detected) {
+  return !!(detected && (detected.count || 0) > 0 && detected.x2 > detected.x1 && detected.y2 > detected.y1);
+}
+function _validOldTriageFb(fb) {
+  return !!(fb && typeof fb === 'object'
+    && ['x', 'y', 'w', 'h'].every((k) => typeof fb[k] === 'number' && Number.isFinite(fb[k]))
+    && fb.w > 0 && fb.h > 0);
+}
+// ★ export (แค่เปลี่ยน visibility ไม่แตะ logic) — ให้เทสยูนิตตรงฟังก์ชัน pure นี้ได้โดยไม่ต้องผ่านทั้ง composeCore
+export function _applySecondEyeOverride(faceBoxes, loaded) {
+  if (!_secondEyeOverrideOn()) return faceBoxes;
+  return faceBoxes.map((detected, i) => {
+    const se = loaded[i]?._secondEyeFaceBox;
+    if (_validSecondEyeFb(se)) {
+      return {
+        x1: se.x1, y1: se.y1, x2: se.x2, y2: se.y2,
+        imgW: loaded[i]?._w || detected?.imgW || 1, imgH: loaded[i]?._h || detected?.imgH || 1,
+        count: 1, allFaces: [{ x1: se.x1, y1: se.y1, x2: se.x2, y2: se.y2 }],
+        pose: detected?.pose || 'frontal',
+        subject: detected?.subject || null, textRegion: detected?.textRegion || null,
+        watermarkRegion: detected?.watermarkRegion || null, hasText: detected?.hasText || false,
+      };
+    }
+    // tier 3 (last resort): ตาสองไม่มีค่ามา + detector ไม่เจอหน้าจริง → ลองดึง triage เก่า (im.faceBox) แปลงร่าง
+    if (!_realDetectedFace(detected)) {
+      const oldFb = loaded[i]?.faceBox;
+      if (_validOldTriageFb(oldFb)) {
+        const x1 = oldFb.x, y1 = oldFb.y, x2 = oldFb.x + oldFb.w, y2 = oldFb.y + oldFb.h;
+        return {
+          x1, y1, x2, y2,
+          imgW: detected?.imgW || 1, imgH: detected?.imgH || 1,
+          count: 1, allFaces: [{ x1, y1, x2, y2 }],
+          pose: detected?.pose || 'frontal',
+          subject: detected?.subject || null, textRegion: detected?.textRegion || null,
+          watermarkRegion: detected?.watermarkRegion || null, hasText: detected?.hasText || false,
+          _fromOldTriage: true,
+        };
+      }
+    }
+    return detected;
+  });
+}
+
 // ---------- ★ Wave1 Batch E (manifest-lite): แปลงกล่องหน้า normalized (0-1) → พิกเซล int ให้ manifest ----------
 //   ใช้ค่าที่ normalizeFaceBox คำนวณไว้แล้วเท่านั้น (ห้ามยิงตาหาหน้าเพิ่ม) · จำกัด 5 กล่องแรกต่อภาพกันขนาดบวม
 function _manifestFaceBoxes(fb) {
@@ -1081,6 +1139,7 @@ async function composeCoreStrict(strictCtx) {
   const { batchDetectFaces } = await import('@/lib/services/faceDetector');
   let fdMap = await batchDetectFaces(loaded.map((im, i) => ({ id: `mc_${i}`, buffer: im.buffer })));
   let faceBoxes = loaded.map((im, i) => normalizeFaceBox(fdMap?.get?.(`mc_${i}`)));
+  faceBoxes = _applySecondEyeOverride(faceBoxes, loaded); // ★ MEGA_SECOND_EYE: ทับด้วยตาสอง (S6) เมื่อมีค่าแนบมา
   // ★ รอบ 5 (P1 semantic trap — Codex): normalizeFaceBox คืน object truthy (count=0, กรอบ 0) เมื่อ
   //   ไม่มีหน้าแต่มี mainSubject/textRegion/watermark → filter(Boolean) นับ "ไม่มีหน้า" เป็น "เจอหน้า"
   //   = detector ล่มแต่เกท outage เป็นใบ้ · นับเฉพาะ "หน้าจริง": count>0 + กรอบมีพื้นที่จริง
@@ -1091,6 +1150,7 @@ async function composeCoreStrict(strictCtx) {
     console.log('[MegaComposer] 🔐⚠️ ตาหาหน้า (หน้าจริง) ศูนย์ทั้งชุด → ลองใหม่ 1 รอบ');
     fdMap = await batchDetectFaces(loaded.map((im, i) => ({ id: `mc_${i}`, buffer: im.buffer })));
     faceBoxes = loaded.map((im, i) => normalizeFaceBox(fdMap?.get?.(`mc_${i}`)));
+    faceBoxes = _applySecondEyeOverride(faceBoxes, loaded); // ★ MEGA_SECOND_EYE: ทับด้วยตาสองหลัง retry ด้วยเช่นกัน
     actualFaceHits = faceBoxes.filter(_realFace).length;
     // ★ รอบ 4 (P1-4): perception-outage gate เหมือน legacy — retry แล้วยังศูนย์ทั้งชุด ทั้งที่ metadata
     //   จาก binding ยืนยันมีหน้า ≥2 ใบ = detector ล่มยาว → คืน error ให้คิววนใหม่ ห้ามปล่อยปกครอปตาบอด
@@ -1311,6 +1371,7 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
   const { batchDetectFaces } = await import('@/lib/services/faceDetector');
   let fdMap = await batchDetectFaces(loaded.map((im, i) => ({ id: `mc_${i}`, buffer: im.buffer })));
   let faceBoxes = loaded.map((im, i) => normalizeFaceBox(fdMap?.get?.(`mc_${i}`)));
+  faceBoxes = _applySecondEyeOverride(faceBoxes, loaded); // ★ MEGA_SECOND_EYE: ทับด้วยตาสอง (S6) เมื่อมีค่าแนบมา
   // ★ 9 ก.ค. (hero ไม่นิ่ง — บางรอบตาหาหน้าล้มทั้งชุดแบบเงียบ → ทุกช่องครอปไร้หน้า): เห็น + ซ่อมตัวเอง
   const faceHits = faceBoxes.filter(Boolean).length;
   console.log(`[MegaComposer] ตาหาหน้า: เจอ ${faceHits}/${loaded.length} ใบ`);
@@ -1318,6 +1379,7 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
     console.log('[MegaComposer] ⚠️ ตาหาหน้าล้มทั้งชุด → ลองใหม่ 1 รอบ');
     fdMap = await batchDetectFaces(loaded.map((im, i) => ({ id: `mc_${i}`, buffer: im.buffer })));
     faceBoxes = loaded.map((im, i) => normalizeFaceBox(fdMap?.get?.(`mc_${i}`)));
+    faceBoxes = _applySecondEyeOverride(faceBoxes, loaded); // ★ MEGA_SECOND_EYE: ทับด้วยตาสองหลัง retry ด้วยเช่นกัน
     console.log(`[MegaComposer] ตาหาหน้า (รอบ 2): เจอ ${faceBoxes.filter(Boolean).length}/${loaded.length} ใบ`);
     // ★ audit B-R2 (คำถามผู้ใช้ "ล่มต้องรอทำซ้ำ ไม่ทำผลเพี้ยน"): retry แล้วยังศูนย์ทั้งชุด ทั้งที่ตาคัด
     //   ยืนยันว่ามีหน้า (slotPlan.faces>0 หลายใบ) = OpenAI ล่มยาว → คืน error ให้คิว/quick-test วนใหม่

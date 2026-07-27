@@ -11,6 +11,8 @@ import { evaluateCoverQc } from '@/lib/coverQcGate'; // ★ Wave2 A1: ด่า�
 // ★ Wave2 Batch B1 (10 ก.ค.): เกณฑ์ตัวเลขคุณภาพภาพ/hero รวมเป็น single source of truth — ค่าเดิมเป๊ะ
 import { HERO_MIN_SHORT_SIDE, HERO_STRETCH_MAX, SHARPNESS_MIN_HERO, GAP_SEARCH_MIN_HERO_PER_PERSON as GAP_SEARCH_MIN_HERO_PER_PERSON_CFG } from '@/lib/imageQualityConfig';
 import { resolveRefSlotView } from '@/lib/refSlotContract'; // ★ D3-B3.2 (Codex): read-only — canonical template view สำหรับ derive authoritative target rows (ห้ามแก้ refSlotContract)
+import { COVER_GEMINI_MODEL } from '@/lib/coverVisionModel'; // ★ MEGA_SECOND_EYE: โมเดลตาสอง default เดียวกับตาคัด/ตาหาหน้าทั้งสาย
+import { withHonestyDna } from '@/lib/aiHonestyDna'; // ★ การ์ดที่ 5 (28 ก.ค. 69 เคส AC-0195): DNA ความซื่อสัตย์ — ฉีดหน้า prompt ตาชั้นสอง
 // ★ R2 (cover-ref-test queue mode): rt_* stage functions อยู่ที่ refTestPipeline.js — โหลดแบบ LAZY dynamic import
 //   ใน STAGE_FLOW (ด้านล่าง) เท่านั้น. ห้าม static import ที่นี่: refTestPipeline นำเข้า megaAdapters เอง (circular)
 //   และดึง import graph (imageStore/composer) ที่บาง harness stub ไม่ครบ — lazy = โหลดตอน tick เดิน rt_* จริงเท่านั้น.
@@ -396,6 +398,9 @@ const HERO_GAP_CLOSEUP_MAX_IMAGES = 12;
 // หน้าใหญ่พอ = faceH (สัดส่วนสูงหน้า/เฟรม 0-1) ไม่ต่ำกว่าขอบล่างย่าน HERO_FACE_SHARE (imageQualityConfig, 30%)
 //   เผื่อ margin เพราะยังไม่ผ่านครอปจริง (ค่านี้วัดจากภาพดิบทั้งใบ ไม่ใช่หลังครอปเข้าช่อง)
 const HERO_GAP_CLOSEUP_MIN_FACE_H = 0.22;
+// ★ ข้อ 3 (28 ก.ค. 69 เคส AC-0195): พื้นพูลสะอาดสำหรับทริกเกอร์ _cleanPoolGapFor ใน s5_gapsearch — ตัวเลขเดียวกับ
+//   POOL_MIN_FLOOR ของ compose-test/route.js (=6) เพื่อให้เกณฑ์ตรงกันทั้งสองทาง (ท่อจริง S5 กับทางลัดเทส)
+const POOL_MIN_FLOOR_GAP = 6;
 // ★ Wave2 Batch B1 (10 ก.ค. — _PLAN_MEGA_V2.md Wave2 ข้อ 2): hero-grade <GAP_SEARCH_MIN_HERO_PER_PERSON
 //   ต่อ "คนหลัก" (role=hero ในเข็มทิศ) หลังค้นรอบสอง (s5_gapsearch) จบแล้ว = จบงานด้วย holdStatus
 //   'insufficient_assets' (เดิม continue เสมอ ไม่มีทางหยุด) — ปิดกลับพฤติกรรมเดิม: MEGA_HERO_GRADE_HARD=0
@@ -501,6 +506,180 @@ export function _heroCloseupGapFor(job, libImages) {
     return Number.isFinite(fh) && fh >= HERO_GAP_CLOSEUP_MIN_FACE_H;
   });
   return hasCloseup ? null : { name };
+}
+
+// ★ MEGA_QUICK_GAP (เคส AC-0195 28 ก.ค. 69 — ทางลัด compose-test เจอเคสคลังสกปรก 100% clean=0/30): ขยาย trigger
+//   ของกลไก gap-search เดิม (MEGA_HERO_GAP_CLOSEUP) — ไม่ใช่แค่ "ตัวเอกไม่มีโคลสอัพ" แต่รวมกรณี "พูลสะอาดว่าง/บาง"
+//   (relevant + clean!==false + junkHidden!==true < floor) → ต้องค้นเพิ่มด้วย คำค้นสร้างจากชื่อตัวละคร compass
+//   จริงเท่านั้น (ห้ามมโนชื่อ) — คืน { name, cleanCount } เมื่อขาดจริง (name = ตัวละครหลักตัวแรกที่มีชื่อจริง)
+//   null = พูลสะอาดพอแล้ว หรือไม่มีชื่อตัวละครให้ค้น (กันยิงค้นมั่ว)
+export function _cleanPoolGapFor(job, libImages, poolMinFloor = 6) {
+  const chars = (job.dossier?.compass?.mainCharacters || []).map((c) => String(c?.name || '').trim()).filter(Boolean);
+  if (!chars.length) return null;
+  const cleanCount = (libImages || []).filter((x) => x.triage?.relevant !== false && x.triage?.clean !== false && x.triage?.junkHidden !== true).length;
+  if (cleanCount >= poolMinFloor) return null;
+  return { name: chars[0], cleanCount };
+}
+
+// ★ MEGA_SECOND_EYE (เคส AC-0195 27/28 ก.ค. 69 — "ตาโกหก": ตาคัด/ตาหาหน้าให้ faceBox ผิดจนครอปตัดหัว) — ด่านตาชั้น
+//   สอง หลัง S6 เลือกภาพสุดท้ายครบทุกช่อง ก่อนส่ง S7 ประกอบ: ยิง Gemini vision "1 call เดียว" ดูภาพที่ถูกเลือกจริง
+//   default ON · MEGA_SECOND_EYE=0 → ไม่มีทริกเกอร์นี้เลย (ไม่มี log/ไม่มีการเปลี่ยนแปลงใดๆ)
+function _secondEyeOn() { return process.env.MEGA_SECOND_EYE !== '0'; }
+// ดึงภาพจาก URL → base64 ให้ callGeminiVision (fail-safe: ล้ม/timeout/ไฟล์จิ๋ว = null เงียบๆ ไม่ throw)
+async function _fetchImageB64(url, timeoutMs = 8000) {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 500) return null; // กันไฟล์จิ๋ว/error page
+    const ct = res.headers.get('content-type') || '';
+    const mimeType = /^image\//.test(ct) ? ct.split(';')[0].trim() : 'image/jpeg';
+    return { data: buf.toString('base64'), mimeType };
+  } catch { return null; }
+}
+// faceBox ที่ตาสองคืนมาต้องมีรูปแบบถูกต้องจริง (normalized 0-1, x2>x1, y2>y1) ก่อนนำไปทับของเดิม — พังรูปแบบ = ไม่เชื่อ (fail-safe)
+function _validSecondEyeFaceBox(fb) {
+  return !!(fb && typeof fb === 'object'
+    && ['x1', 'y1', 'x2', 'y2'].every((k) => typeof fb[k] === 'number' && Number.isFinite(fb[k]))
+    && fb.x2 > fb.x1 && fb.y2 > fb.y1
+    && fb.x1 >= -0.01 && fb.y1 >= -0.01 && fb.x2 <= 1.01 && fb.y2 <= 1.01);
+}
+
+// ★ ตรวจซ้ำ (28 ก.ค. 69 — "หาวิธีให้ตาไม่โกหก") ข้อ 1: textOverlay ต้องตัดสินจากข้อความที่ตาสอง "อ่านออกมาจริง"
+//   (textFound) ไม่ใช่ความรู้สึก/เดาของโมเดลตรงๆ — โมเดลที่แกล้งข้ามอ่าน/มั่วจะโดนจับได้จากช่องนี้ว่าง/สั้นผิดสังเกต
+//   ตัดสิน 0/1/2 จาก "ความยาวข้อความที่อ่านได้จริง" ล้วน (deterministic ในโค้ด ไม่ใช่ปล่อยให้โมเดลรายงานเลขเอง):
+//   ว่าง/whitespace = 0 (ไม่มีทับ) · ≤20 ตัวอักษร = 1 (ชื่อช่อง/โลโก้/ลายน้ำสั้นๆ) · ยาวกว่า = 2 (พาดหัว/แถบข่าว)
+function _deriveTextOverlay(textFound) {
+  const t = String(textFound || '').trim();
+  if (!t) return 0;
+  return t.length <= 20 ? 1 : 2;
+}
+
+// ★ MEGA_SECOND_EYE — แกนตรวจจริง (เรียกจาก s6_slots ท้ายสุดก่อน return 'done') แยกเป็นฟังก์ชันเรียกได้เดี่ยว
+//   (testability — รับ _deps.callGeminiVision/_deps.fetchImageB64/_deps.setTriage ฉีดได้ default = ของจริง)
+//   ยิง Gemini vision 1 call เดียวดูภาพที่ S6 เลือกจริงทุกช่อง (≤5 ใบ) + ภาพสำรองอันดับ 1 ของช่องที่มีสำรอง
+//   (≤3 ใบเพิ่ม รวม ≤8 ใบ) mutate `slots` ตรงๆ: สลับ .id เมื่อ primary ติด textOverlay=2 และสำรองสะอาดกว่าจริง +
+//   แนบ _secondEyeFaceBox (ของภาพที่ใช้จริงสุดท้ายต่อช่อง) ให้ชั้นเรนเดอร์ทับ faceBox ปกติเสมอ (ดู composeCore
+//   ฝั่ง megaComposerService.js — ลำดับอำนาจ: ตาสอง > faceDetector > triage เก่า)
+//   ★ ข้อ 4 (จับตาแรกโกหก): ภาพไหน triage เดิมว่า clean (≠false) แต่ตาสองอ่านออก textOverlay=2 จริง → แก้ไข
+//   triage ถาวรในคลัง (setTriage: clean=false + note ต่อท้าย textFound) กันเคสหน้า/รอบหน้าโดนหลอกซ้ำด้วยภาพเดิม
+//   ★ ข้อ 5: ไม่เช็ก field รุ่นใหม่ใดๆ ก่อนตรวจ (เช่น busy) — ภาพยุคเก่าที่ขาด field เหล่านี้ยังถูกตรวจปกติทุกใบ
+//   ไม่ throw เอง (ผู้เรียกยังต้อง try/catch ครอบอีกชั้น — fail-open ตามสเปค)
+//   คืน { swapped, fixedCoords, checked, liesCaught }
+export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _deps = {} }) {
+  const roles = (activeSlots || []).filter((r) => slots[r] && slots[r].id).slice(0, 5);
+  if (!roles.length) return { swapped: 0, fixedCoords: 0, checked: 0, liesCaught: 0 };
+  const _fetchB64 = _deps.fetchImageB64 || _fetchImageB64;
+  const images = [];
+  const map = []; // { role, kind:'primary'|'backup', id } ตามลำดับ index ที่ส่งจริงใน images[]
+  for (const r of roles) {
+    const rec = byId.get(String(slots[r].id));
+    if (!rec?.imageUrl) continue;
+    const fetched = await _fetchB64(rec.imageUrl);
+    if (!fetched) continue;
+    images.push(fetched);
+    map.push({ role: r, kind: 'primary', id: String(slots[r].id) });
+  }
+  // เติมสำรองอันดับ 1 ของช่องที่มีสำรอง (≤3 ใบ — จำกัดงบใน call เดียวกัน)
+  let backupBudget = 3;
+  for (const r of roles) {
+    if (backupBudget <= 0) break;
+    const bId = (slots[r].backups || [])[0];
+    if (!bId) continue;
+    const brec = byId.get(String(bId));
+    if (!brec?.imageUrl) continue;
+    const bFetched = await _fetchB64(brec.imageUrl);
+    if (!bFetched) continue;
+    images.push(bFetched);
+    map.push({ role: r, kind: 'backup', id: String(bId) });
+    backupBudget--;
+  }
+  if (!images.length) return { swapped: 0, fixedCoords: 0, checked: roles.length, liesCaught: 0 };
+  // ★ ข้อ 1 (transcription proof): สั่งให้ "อ่านออกเสียง/พิมพ์" ข้อความที่เห็นจริงออกมาก่อน (textFound) — บังคับ
+  //   commit เป็นข้อความจริง ปฏิเสธไม่ได้ทีหลัง ไม่ถามแค่ textOverlay ตรงๆ (โมเดลอาจข้ามอ่านแล้วเดาเลขมั่ว)
+  const prompt = `คุณเป็นตาตรวจสอบภาพปกข่าวรอบสอง (second-eye QC) — ตรวจภาพที่แนบมา ${images.length} รูป เรียงตาม index 0 ถึง ${images.length - 1} (รูปแรก=0)
+ตอบต่อรูปแต่ละรูป:
+- textFound: ถ้ามีตัวหนังสือ/แถบข่าว/โลโก้/ลายน้ำใดๆ ทับอยู่บนภาพ ให้ "พิมพ์ข้อความที่อ่านเห็นจริงออกมาทั้งหมด" (string) — ถ้าไม่มีตัวหนังสือทับภาพเลย ให้ตอบ "" (สตริงว่าง) ห้ามเดา/ห้ามมโนข้อความที่ไม่ได้เห็นจริง
+- faceBox: กรอบหน้าคนเด่นที่สุดในภาพ {x1,y1,x2,y2} normalized 0-1 (สัดส่วนของภาพ ไม่ใช่พิกเซล x1<x2, y1<y2) หรือ null ถ้าไม่เห็นหน้าคนในภาพ
+- faceCount: จำนวนหน้าคนที่เห็นชัดในภาพ (จำนวนเต็ม 0 ขึ้นไป)
+ตอบ JSON เท่านั้น: {"results":[{"index":0,"textFound":"","faceBox":{"x1":0,"y1":0,"x2":0,"y2":0},"faceCount":1},...]}`;
+  // ★ ข้อ 3 (โมเดลปรับได้): MEGA_SECOND_EYE_MODEL override ได้ (แค่ 5-8 ภาพ/ปก ต้นทุนจิ๊บแม้ใช้โมเดลแรงกว่า) —
+  //   ไม่ตั้ง = COVER_GEMINI_MODEL เดิม (ตัวเดียวกับที่ตาคัด/ตาหาหน้าใช้อยู่แล้วทั้งสาย — ไม่ต้องคีย์ใหม่)
+  const _seModel = process.env.MEGA_SECOND_EYE_MODEL || _deps.coverGeminiModel || COVER_GEMINI_MODEL;
+  const _cgv = _deps.callGeminiVision || (await import('@/lib/ai/geminiClient')).callGeminiVision;
+  const r = await _cgv({ prompt: withHonestyDna(prompt), images, maxTokens: 2000, model: _seModel });
+  const results = Array.isArray(r?.results) ? r.results : [];
+  // ★ ข้อ 1: textOverlay มาจากโค้ด (_deriveTextOverlay) เสมอ ไม่ใช่ field ที่โมเดลรายงานเอง (ถ้าส่งมาก็ทิ้ง)
+  const byIndex = new Map(
+    results.filter((x) => Number.isInteger(x?.index))
+      .map((x) => [x.index, { ...x, textFound: String(x.textFound ?? ''), textOverlay: _deriveTextOverlay(x.textFound) }]),
+  );
+  const perRole = new Map(); // role -> { primary: {id,result}|null, backup: {id,result}|null }
+  map.forEach((m, i) => {
+    const res = byIndex.get(i) || null;
+    if (!perRole.has(m.role)) perRole.set(m.role, { primary: null, backup: null });
+    perRole.get(m.role)[m.kind] = { id: m.id, result: res };
+  });
+
+  // ★ ข้อ 4 (จับตาแรกโกหก): ทุกใบที่ตรวจจริง (หลัก+สำรองทั้งหมด) — triage เดิมว่า clean (≠false) แต่ตาสองอ่านออก
+  //   textOverlay=2 จริง = จับได้ว่าตาแรกโกหก → คิว patch แก้ถาวร (ไม่ผูกกับว่าจะสลับภาพหรือไม่ — คนละเรื่องกัน:
+  //   ภาพที่ไม่ถูกสลับก็ยังต้องแก้ triage มันเองไว้กันใช้ผิดซ้ำ)
+  const triagePatch = {};
+  let liesCaught = 0;
+  for (let i = 0; i < map.length; i++) {
+    const { id } = map[i];
+    const res = byIndex.get(i);
+    if (!res) continue;
+    const rec = byId.get(id);
+    const wasClean = rec?.triage?.clean !== false;
+    if (wasClean && res.textOverlay === 2) {
+      const oldNote = String(rec?.triage?.note || '');
+      triagePatch[id] = {
+        ...(rec?.triage || {}),
+        clean: false,
+        note: `${oldNote}${oldNote ? ' · ' : ''}ตาสองจับได้ (28 ก.ค. 69): "${res.textFound.slice(0, 80)}"`.slice(0, 200),
+      };
+      liesCaught++;
+    }
+  }
+  if (liesCaught && caseId) {
+    try {
+      const _setTriage = _deps.setTriage || (await import('@/lib/imageStore')).setTriage;
+      await _setTriage(caseId, triagePatch);
+    } catch (e) {
+      console.log('[MEGA S6] 👁️ ตาสอง: แก้ triage คลังถาวรล้ม (ไม่กระทบงานนี้):', String(e?.message || '').slice(0, 60));
+    }
+  }
+  if (liesCaught) console.log(`👁️ จับตาแรกโกหก ${liesCaught} ใบ`);
+
+  let swapped = 0, fixedCoords = 0;
+  for (const [role, info] of perRole) {
+    let finalRes = info.primary?.result || null;
+    // ช่องที่ primary ติด textOverlay=2 (แถบข่าว/ตัวหนังสือใหญ่) และมีสำรองที่ตรวจแล้วสะอาดกว่าจริง → สลับใช้สำรอง
+    //   ★ ต้องอัปเดต imageUrl/person/category/emotion ให้ตรงภาพใหม่ด้วย (ไม่ใช่แค่ .id) — ผู้บริโภคปลายทาง
+    //   (s7_cover/compose-test) อ่าน slots[role].imageUrl ตรงๆ ไม่ได้ join จาก .id ซ้ำ ถ้าลืมอัปเดต ภาพจะไม่สลับจริง
+    if (info.primary?.result?.textOverlay === 2 && info.backup?.result && info.backup.result.textOverlay < 2) {
+      const bRec = byId.get(info.backup.id);
+      if (bRec?.imageUrl) {
+        const oldId = slots[role].id;
+        slots[role].id = info.backup.id;
+        slots[role].imageUrl = bRec.imageUrl;
+        slots[role].person = bRec.triage?.person || null;
+        slots[role].category = bRec.triage?.category || null;
+        slots[role].emotion = bRec.triage?.emotion || null;
+        slots[role]._secondEyeSwapped = { from: oldId, to: info.backup.id, reason: `textOverlay=2 บนภาพเดิม (อ่านได้ "${info.primary.result.textFound.slice(0, 40)}")` };
+        finalRes = info.backup.result;
+        swapped++;
+      }
+    }
+    // faceBox ของภาพที่ใช้จริงสุดท้าย (ไม่ว่าสลับหรือไม่) แนบเป็น override — ให้ชั้นเรนเดอร์ทับ faceBox ปกติเสมอ
+    //   (อำนาจสูงสุด — ดู _applySecondEyeOverride ฝั่ง megaComposerService.js: ตาสอง > faceDetector > triage เก่า)
+    if (finalRes && _validSecondEyeFaceBox(finalRes.faceBox)) {
+      slots[role]._secondEyeFaceBox = { x1: finalRes.faceBox.x1, y1: finalRes.faceBox.y1, x2: finalRes.faceBox.x2, y2: finalRes.faceBox.y2 };
+      fixedCoords++;
+    }
+  }
+  return { swapped, fixedCoords, checked: roles.length, liesCaught };
 }
 
 // ★ Wave2 Batch B1: ตัดสิน hard gate ท้าย s5_gapsearch — คืน null = ผ่าน/ไม่มีเกณฑ์จะวัด (ไม่แตะ path เดิม)
@@ -1433,10 +1612,12 @@ export async function s5_gapsearch(job, { origin, _deps } = {}) {
   //   ภาพที่เพิ่งเก็บเข้ามาถูกนับรวมในแกนเดิมด้วย (กันยิงค้นซ้ำคนเดิมสองรอบในรอบเดียวกัน) · ล้ม/ไม่มีตัวเอกชัด/
   //   มีโคลสอัพอยู่แล้ว = ข้ามเงียบ ไม่ถ่วงสายพาน (เหมือน pattern เดิมทั้งฟังก์ชัน) · 🔴 ค้นภาพจริงเท่านั้น — ห้าม
   //   เจน/สังเคราะห์ภาพทุกกรณี (กฎเหล็ก AGENTS.md §6) — ใช้ searchImages/vetImages/addImages เดิมทั้งหมด
+  //   ★ ข้อ 3 (28 ก.ค. 69 เคส AC-0195): ขยาย trigger — เพิ่ม _cleanPoolGapFor (พูลสะอาดว่าง/บาง ไม่ใช่แค่ "ตัวเอก
+  //   ไม่มีโคลสอัพ") ใต้สวิตช์เดียวกัน (MEGA_HERO_GAP_CLOSEUP) — ดึงตรรกะค้น/กรอง/ตา/เก็บที่ใช้ร่วมกันออกเป็น
+  //   _fireGapQueries เดียว กันโค้ดซ้ำ 2 ที่ (เดิมมีแค่แกนโคลสอัพ ตอนนี้มี 2 แกนใช้ตัวเดียวกัน)
   if (_heroGapCloseupOn()) {
-    const _cg = _heroCloseupGapFor(job, libImages);
-    if (_cg) {
-      let _cgAdded = 0;
+    const _fireGapQueries = async (queries, label) => {
+      let added = 0;
       try {
         const { searchImages } = await import('@/lib/imageSearch');
         const { isCatalogSource, isOwnPageSource, isMismatchedFbMedia } = await import('@/lib/junkSources');
@@ -1444,11 +1625,9 @@ export async function s5_gapsearch(job, { origin, _deps } = {}) {
         const { addImages } = await import('@/lib/imageStore');
         const { getCase } = await import('@/lib/caseStore');
 
-        // คำค้นตรงชื่อจริงเท่านั้น (ห้ามเดา) — deterministic ไม่ผ่านสมอง (ต่างจากแกน (ก)/(ข) ที่ให้ callBrain แต่งคำค้น)
-        const closeupQueries = [`${_cg.name} สัมภาษณ์`, `${_cg.name} ใบหน้า โคลสอัพ`];
         const seenUrls = new Set(libImages.map((x) => x.imageUrl));
         const collected = [];
-        outer: for (const q of closeupQueries) {
+        outer: for (const q of queries) {
           for (const platform of ['google', 'google_news']) {
             try {
               const imgs = await searchImages(platform, q, { num: 15, caseId: im.caseId });
@@ -1473,19 +1652,35 @@ export async function s5_gapsearch(job, { origin, _deps } = {}) {
           };
           const subjects = (c?.keywords?.subjects || []).map((s) => ({ ...s, gender: s.gender || genderOf(s.name) }));
           const newsGist = String(c?.newsText || c?.analysis?.content || c?.analysis?.summary || c?.newsSnippet || '').slice(0, 1800);
-          let toStoreCloseup = collected;
+          let toStore = collected;
           try {
             const { vetted } = await vetImages({ images: collected, subjects, newsGist, caseId: im.caseId });
             const anyTag = vetted.some((x) => x.triage);
-            toStoreCloseup = anyTag ? vetted.filter((x) => x.triage?.relevant !== false) : vetted;
+            toStore = anyTag ? vetted.filter((x) => x.triage?.relevant !== false) : vetted;
           } catch { /* ตาล้ม = เก็บดิบไปก่อน (เหมือนแกน (ก)/(ข)) */ }
-          toStoreCloseup = toStoreCloseup.slice(0, HERO_GAP_CLOSEUP_MAX_IMAGES); // เพดาน ≤12 ใบ ตามสเปค
-          const saved = await addImages(im.caseId, toStoreCloseup);
-          _cgAdded = saved.added || 0;
-          if (_cgAdded > 0) libImages = [...libImages, ...toStoreCloseup]; // ให้แกน (ก)/(ข) ด้านล่างเห็นภาพที่เพิ่งเพิ่ม
+          toStore = toStore.slice(0, HERO_GAP_CLOSEUP_MAX_IMAGES); // เพดาน ≤12 ใบ ตามสเปค
+          const saved = await addImages(im.caseId, toStore);
+          added = saved.added || 0;
+          if (added > 0) libImages = [...libImages, ...toStore]; // ให้แกน (ก)/(ข) ด้านล่างเห็นภาพที่เพิ่งเพิ่ม
         }
       } catch { /* ยิง/เก็บล้มทั้งขั้น = ข้าม (log ยังต้องออกตามสเปคแม้ผลเป็น 0) */ }
-      console.log(`🔎 gap-closeup: ตัวเอก ${_cg.name} ไม่มีโคลสอัพ → ค้นเพิ่ม ${_cgAdded} ใบ`);
+      console.log(`🔎 gap-${label}: ค้นเพิ่ม ${added} ใบ`);
+      return added;
+    };
+
+    const _cg = _heroCloseupGapFor(job, libImages);
+    if (_cg) {
+      // คำค้นตรงชื่อจริงเท่านั้น (ห้ามเดา) — deterministic ไม่ผ่านสมอง (ต่างจากแกน (ก)/(ข) ที่ให้ callBrain แต่งคำค้น)
+      const _added = await _fireGapQueries([`${_cg.name} สัมภาษณ์`, `${_cg.name} ใบหน้า โคลสอัพ`], `closeup: ตัวเอก ${_cg.name} ไม่มีโคลสอัพ`);
+      console.log(`🔎 gap-closeup: ตัวเอก ${_cg.name} ไม่มีโคลสอัพ → ค้นเพิ่ม ${_added} ใบ`);
+    }
+    // ★ ข้อ 3 (28 ก.ค. 69 เคส AC-0195): พูลสะอาดว่าง/บาง (ไม่ใช่แค่ตัวเอกไม่มีโคลสอัพ) → ค้นเสริมทั่วไปจากชื่อ
+    //   ตัวละครหลัก compass (ห้ามมโน) — รันแยกจาก closeup ด้านบน (คนละเงื่อนไข อาจเข้าทั้งคู่พร้อมกันได้ในเคสที่
+    //   ทั้งขาดโคลสอัพและพูลสะอาดว่างพร้อมกัน — คนละคำค้น ไม่ซ้ำงาน)
+    const _cp = _cleanPoolGapFor(job, libImages, POOL_MIN_FLOOR_GAP);
+    if (_cp) {
+      const _added2 = await _fireGapQueries([`${_cp.name}`, `${_cp.name} ข่าว`], `cleanpool: พูลสะอาดบาง (${_cp.cleanCount}/${POOL_MIN_FLOOR_GAP})`);
+      console.log(`🔎 gap-cleanpool: พูลสะอาดบาง (${_cp.cleanCount}/${POOL_MIN_FLOOR_GAP}) ตัวละคร ${_cp.name} → ค้นเพิ่ม ${_added2} ใบ`);
     }
   }
 
@@ -5961,6 +6156,20 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     }
   }
 
+  // ★ MEGA_SECOND_EYE (เคส AC-0195 27/28 ก.ค. 69 — "ตาโกหก": ตาคัด/ตาหาหน้าให้ faceBox ผิดจนครอปตัดหัว) — ด่านตา
+  //   ชั้นสอง หลัง S6 เลือกภาพสุดท้ายครบทุกช่องแล้ว (ทุกจุดสลับ/แก้ก่อนหน้านี้จบหมด) ก่อนส่ง S7 ประกอบ — ยิง Gemini
+  //   vision 1 call เดียว (ดู _runSecondEye ด้านบน) · ล้ม/timeout = เดินต่อแบบเดิมทุกจุด (fail-open, try/catch
+  //   ครอบทั้งก้อน) · default ON · MEGA_SECOND_EYE=0 → ข้ามด่านนี้เลย (ไม่มี log/ไม่มีการเปลี่ยนแปลงใดๆ)
+  if (_secondEyeOn()) {
+    try {
+      const _caseIdForEye = job?.dossier?.images?.caseId || job?.dossier?.caseId || null;
+      const _se = await _runSecondEye({ slots, activeSlots, byId, caseId: _caseIdForEye, _deps });
+      console.log(`[MEGA S6] 👁️‍🗨️ ตาสอง: ตรวจ ${_se.checked} ใบ · เปลี่ยน ${_se.swapped} · แก้พิกัด ${_se.fixedCoords}${_se.liesCaught ? ` · จับตาแรกโกหก ${_se.liesCaught}` : ''}`);
+    } catch (e) {
+      console.log('[MEGA S6] 👁️‍🗨️ ตาสอง: ล้ม/timeout — เดินต่อแบบเดิม:', String(e?.message || '').slice(0, 60));
+    }
+  }
+
   // ★ WAVE1A: _refHeroV2Patch was computed by the PRE-BRAIN gate above (Fix #6) and, on success, is attached
   //   additively below. HOLD already returned before the brain, so here it is either null (OFF) or the frozen
   //   success payload (ON). It never mutates slots/slotOrder/heroSlotId/slotContractHash or any legacy field.
@@ -6287,6 +6496,10 @@ export async function s7_cover(job, { origin, _deps } = {}) {
       //   เลย (ครอปหน้าเดี่ยวที่ S6 สังเคราะห์ไว้ถูกทิ้งกลางทาง ภาพคู่หลุดเป็น hero ได้จริง) → พกต่อเฉพาะ primary
       //   entry ที่มี field นี้จริง (ในทางปฏิบัติมีแค่ hero slot เท่านั้นที่ S6 แนบ) — ช่องอื่นไม่มี = ไม่แนบ (พฤติกรรมเดิม)
       ...(primary && slots[primary]?._heroFaceCrop ? { _heroFaceCrop: slots[primary]._heroFaceCrop } : {}),
+      // ★ MEGA_SECOND_EYE (เคส AC-0195 28 ก.ค. 69): ต่อสาย _secondEyeFaceBox แบบเดียวกับ _heroFaceCrop ด้านบนเป๊ะ —
+      //   ให้ composeCore (megaComposerService.js) เห็น field นี้ผ่าน slotPlan → loaded[i] แล้วทับ faceBox ที่
+      //   ตรวจจับใหม่ตอนประกอบเสมอ (แก้อาการหัวขาดจากพิกัดเก่าผิด) — พกต่อเฉพาะ primary entry ที่มี field นี้จริง
+      ...(primary && slots[primary]?._secondEyeFaceBox ? { _secondEyeFaceBox: slots[primary]._secondEyeFaceBox } : {}),
       // ★ 8 ก.ค. (CASE-366): thumbnail สำรอง (gstatic cache) — sourceLinks เป็น string เปล่า ไม่พก thumbnailUrl
       //   ส่งผ่าน slotPlan แทน ให้ v3 ใช้ตอนโหลดตรงพัง (Instagram/TikTok โดน anti-hotlink)
       thumbnailUrl: t.thumbnailUrl || '',
