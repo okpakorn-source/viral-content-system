@@ -2,7 +2,8 @@
  * /api/m/desk — ประตูโต๊ะข่าวกลาง (v1) สำหรับแอพมือถือ /m (27 ก.ค. 69 — ชุด B ชุบชีวิตโต๊ะข่าว, เจ้าของสั่ง)
  * ─────────────────────────────────────────────────────────────
  * ต่อท่อเดียวกับ /news-desk (v1) แต่:
- *   - ด่านสิทธิ์ = ต้องล็อกอินยูสพนักงานจริง (session) + เฉพาะแอดมินเท่านั้น (พนักงานโดน 403)
+ *   - ด่านสิทธิ์ = ต้องล็อกอินยูสพนักงานจริง (session) เท่านั้น — ★ 27 ก.ค. 69 (เจ้าของสั่ง): เปิดให้ทุกคนที่ล็อกอินใช้ได้
+ *     ถอดด่านเฉพาะแอดมินออกแล้ว (เดิมพนักงานโดน 403) — ยังต้องมี session จริงอยู่ (401 ถ้าไม่ได้ล็อกอิน)
  *   - จำกัด action ที่ยิงต่อได้เฉพาะ whitelist ข้างล่าง — ห้ามแอพยิงตรงเข้า /api/news-desk/* เปลือย
  *   - ผู้ใช้ = ดึงจาก session เสมอ (ปลอมไม่ได้จากฝั่ง client)
  * 🔴 ห้ามแตะ /api/news-desk/* — ไฟล์นี้เป็นแค่ประตูส่งต่อ ไม่มี business logic ใหม่
@@ -42,7 +43,7 @@ async function sess() {
 }
 
 const unauthorized = () => NextResponse.json({ success: false, error: 'ต้องล็อกอินก่อน', errorType: 'UNAUTHORIZED' }, { status: 401 });
-const forbidden = () => NextResponse.json({ success: false, error: 'เฉพาะแอดมิน', errorType: 'FORBIDDEN' }, { status: 403 });
+// ★ 27 ก.ค. 69 (เจ้าของสั่ง): ตัดด่านแอดมินออก — เหลือแค่ unauthorized() (session) ด้านบน
 
 // ★ 27 ก.ค. 69: แนบคีย์ทีมแบบเดียวกับ src/app/api/m/cover/route.js — จำเป็นเพราะ middleware กั้น POST/GET /api/quick-test บนคลาวด์
 const keyHeaders = () => ({
@@ -176,8 +177,7 @@ async function extractOgImage(pageUrl) {
 export async function GET(request) {
   try {
     const s = await sess();
-    if (!s) return unauthorized();
-    if (s.role !== 'admin') return forbidden();
+    if (!s) return unauthorized(); // ★ 27 ก.ค. 69: เปิดให้ทุกคนที่ล็อกอินใช้ได้ — ตัดด่าน role!=='admin' ออกแล้ว
 
     const view = request.nextUrl.searchParams.get('view') || 'feed';
 
@@ -214,8 +214,7 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const s = await sess();
-    if (!s) return unauthorized();
-    if (s.role !== 'admin') return forbidden();
+    if (!s) return unauthorized(); // ★ 27 ก.ค. 69: เปิดให้ทุกคนที่ล็อกอินใช้ได้ — ตัดด่าน role!=='admin' ออกแล้ว
     const body = await request.json().catch(() => ({}));
     const action = String(body.action || '');
     if (!POST_ACTIONS.has(action)) {

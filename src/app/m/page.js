@@ -341,7 +341,8 @@ export default function MobileApp() {
   // 🔴 กำชับเจ้าของ 27 ก.ค. 69: "หารูปไม่เจอไม่เป็นไร ไม่ต้องพยายาม เดี๋ยวพัง" — ห้าม say()/toast เมื่อล้ม (ไม่เจอ = ปกติ
   //   ไม่ใช่ error) · ห้ามรีทราย/เรียกซ้ำจากจอเอง — ให้ negative-cache ฝั่งเซิร์ฟเวอร์ (thumbTriedAt) เป็นตัวกันยิงซ้ำ
   const fetchDeskThumbs = useCallback((ids) => {
-    if (!isAdmin || !ids || !ids.length) return;
+    // ★ 27 ก.ค. 69 (เจ้าของสั่ง): แท็บโต๊ะข่าวเปิดให้ทุกคนที่ล็อกอินใช้ได้แล้ว — ตัด isAdmin guard ออก
+    if (!ids || !ids.length) return;
     fetch('/api/m/desk', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'fetchThumbs', ids }),
@@ -349,7 +350,7 @@ export default function MobileApp() {
       if (!d.success || !d.images) return;
       setDeskItems(prev => prev.map(it => (d.images[it.id] && !it.imageUrl && !it.thumbUrl) ? { ...it, thumbUrl: d.images[it.id] } : it));
     }).catch(() => {}); // เติมรูปล้ม = จอยังใช้งานได้ปกติ แค่ไม่มีรูป
-  }, [isAdmin]);
+  }, []);
   const loadDesk = useCallback(() => {
     fetch('/api/m/desk?view=feed&tab=' + deskTab, { cache: 'no-store' }).then(r => r.json())
       // ★ 27 ก.ค. 69: enrich ทุกใบฝั่ง client — บาง tab (all/trend/good/ready) ฝั่ง server ไม่เติม library/sourceType/reliability ให้
@@ -414,7 +415,7 @@ export default function MobileApp() {
     // ★ 27 ก.ค. 69 (sol แจ้งตกค้าง): /api/m/cover ล็อกเฉพาะแอดมินแล้วฝั่ง server — พนักงานไม่ต้องยิงเลย กันโดน 403 เปล่าๆ
     if (tab === 'cover' && isAdmin) loadCovers();
     if (tab === 'me') { loadMe(); if (isAdmin) { loadTeam(); loadReport(); } }
-    if (tab === 'desk' && isAdmin) { loadDesk(); loadDeskJobs(); }
+    if (tab === 'desk') { loadDesk(); loadDeskJobs(); } // ★ 27 ก.ค. 69 (เจ้าของสั่ง): เปิดให้ทุกคนที่ล็อกอินใช้ได้แล้ว
   }, [tab, isAdmin, loadCases, loadInsightCases, loadCovers, loadMe, loadTeam, loadReport, loadDesk, loadDeskJobs]);
 
   // ⚡ ทางลัดประกอบ — โหลดรายการเคสจากคลัง (ครั้งแรกที่เข้าโหมด หรือกดรีเฟรชเอง)
@@ -448,14 +449,15 @@ export default function MobileApp() {
     return () => clearInterval(iv);
   }, [tab, isAdmin, cvJobs, loadCovers]);
 
-  // ★ 27 ก.ค. 69: โพลงานเบื้องหลังโต๊ะข่าว — เฉพาะตอนอยู่แท็บโต๊ะข่าว+แอดมิน+มีงานยังไม่จบ (ไม่โพลค้างถาวร)
+  // ★ 27 ก.ค. 69: โพลงานเบื้องหลังโต๊ะข่าว — เฉพาะตอนอยู่แท็บโต๊ะข่าว+มีงานยังไม่จบ (ไม่โพลค้างถาวร)
+  //   ★ เจ้าของสั่ง (ชุดนี้): เปิดให้ทุกคนที่ล็อกอินใช้ได้แล้ว — ตัด isAdmin guard ออก
   useEffect(() => {
-    if (!isAdmin || tab !== 'desk') return;
+    if (tab !== 'desk') return;
     const active = deskJobs.some(j => j.status === 'pending' || j.status === 'running');
     if (!active) return;
     const iv = setInterval(loadDeskJobs, 8000);
     return () => clearInterval(iv);
-  }, [tab, isAdmin, deskJobs, loadDeskJobs]);
+  }, [tab, deskJobs, loadDeskJobs]);
 
   // ═══ ส่งเข้าคิวเขียนจริง ═══
   const submitNews = async (input, { forceNew = false, source = 'text' } = {}) => {
@@ -648,7 +650,7 @@ export default function MobileApp() {
   // ★ 27 ก.ค. 69 (ชุดนี้): 3 ปุ่มนี้ → งานเบื้องหลังผ่านคิว /api/quick-test (เหมือนทำปก) — กดแล้วปิดจอได้เลย
   //   ไม่รอ response ยาวอีกต่อไป (/api/m/desk คืน {jobId} ทันที) ผลจริงมาทีหลังผ่าน loadDeskJobs (โพล + toast อัตโนมัติ)
   const runDeskHarvest = async (mode) => {
-    if (!isAdmin) return; // ★ sol-review ข้อ 7: เท่ากับ runDeskSearch — กันยิงเปล่าแม้ปุ่มถูกซ่อนไว้แล้วก็ตาม
+    // ★ 27 ก.ค. 69 (เจ้าของสั่ง): แท็บโต๊ะข่าวเปิดให้ทุกคนที่ล็อกอินใช้ได้แล้ว — ตัด isAdmin guard ออก
     setDeskHarvestBusy(true); setDeskModeOpen(false);
     try {
       const d = await (await fetch('/api/m/desk', {
@@ -663,7 +665,7 @@ export default function MobileApp() {
     setDeskHarvestBusy(false);
   };
   const runDeskChief = async () => {
-    if (!isAdmin) return; // ★ sol-review ข้อ 7: เท่ากับ runDeskSearch — กันยิงเปล่าแม้ปุ่มถูกซ่อนไว้แล้วก็ตาม
+    // ★ 27 ก.ค. 69 (เจ้าของสั่ง): แท็บโต๊ะข่าวเปิดให้ทุกคนที่ล็อกอินใช้ได้แล้ว — ตัด isAdmin guard ออก
     setDeskChiefBusy(true);
     try {
       const d = await (await fetch('/api/m/desk', {
@@ -679,7 +681,7 @@ export default function MobileApp() {
   };
   // ★ 27 ก.ค. 69: ช่องค้นเอง — ใส่ชื่อคน/แนว → เข้าคิว desk_search ผ่านประตู action 'searchKeyword' (ไม่ sync ค้างจอแล้ว)
   const runDeskSearch = async () => {
-    if (!isAdmin) return; // มาตรฐานเดียวกับ fetch อื่นของโต๊ะข่าว (เช่น poll โพลปก ~บรรทัด 373) — กันยิงเปล่าแม้ปุ่มถูกซ่อนไว้แล้วก็ตาม
+    // ★ 27 ก.ค. 69 (เจ้าของสั่ง): แท็บโต๊ะข่าวเปิดให้ทุกคนที่ล็อกอินใช้ได้แล้ว — ตัด isAdmin guard ออก
     const kw = deskSearchKw.trim();
     if (kw.length < 2) { say('ใส่ชื่อคน/แนวอย่างน้อย 2 ตัวอักษร'); return; }
     if (kw.length > 60) { say('ยาวเกินไป (สูงสุด 60 ตัวอักษร)'); return; }
@@ -1105,10 +1107,10 @@ export default function MobileApp() {
         </>}
       </div>}
 
-      {/* ═══ แท็บ โต๊ะข่าว (v1 — เฉพาะแอดมิน) — อัปเกรดครบเท่าโต๊ะกลาง 27 ก.ค. 69 (เจ้าของอนุมัติ) ═══ */}
-      {tab === 'desk' && isAdmin && <div className="wrap">
+      {/* ═══ แท็บ โต๊ะข่าว (v1 — เปิดให้ทุกคนที่ล็อกอินใช้ได้ 27 ก.ค. 69 เจ้าของสั่ง) — อัปเกรดครบเท่าโต๊ะกลาง ═══ */}
+      {tab === 'desk' && <div className="wrap">
         <h1>โต๊ะข่าว</h1>
-        <p className="sub">ต่อท่อโต๊ะข่าวกลาง (v1) เดียวกับหน้าเว็บ — เฉพาะแอดมิน</p>
+        <p className="sub">ต่อท่อโต๊ะข่าวกลาง (v1) เดียวกับหน้าเว็บ</p>
 
         {/* 🔎 ค้นข่าวเอง — ยิง harvest ด้วยคำค้นตรงๆ (endpoint เดิมที่จอเว็บใช้ ผ่านประตู action ใหม่) */}
         <input className="in" style={{ marginBottom: 8 }} placeholder="🔎 ค้นข่าวเอง — ใส่ชื่อคน/แนว…" value={deskSearchKw} disabled={deskSearchBusy}
@@ -1392,7 +1394,8 @@ export default function MobileApp() {
         <button className={'tab' + (tab === 'filter' ? ' on' : '')} onClick={() => setTab('filter')}>{IC.fil}สกัดเนื้อ</button>
         <button className={'tab' + (tab === 'cover' ? ' on' : '')} onClick={() => setTab('cover')}>{IC.img}ทำปก</button>
         <button className={'tab' + (tab === 'works' ? ' on' : '')} onClick={() => setTab('works')}>{IC.lib}ผลงาน</button>
-        {isAdmin && <button className={'tab' + (tab === 'desk' ? ' on' : '')} onClick={() => setTab('desk')}>{IC.desk}โต๊ะข่าว</button>}
+        {/* ★ 27 ก.ค. 69 (เจ้าของสั่ง): เปิดให้ทุกคนที่ล็อกอินใช้ได้แล้ว — ตัด isAdmin guard ออก */}
+        <button className={'tab' + (tab === 'desk' ? ' on' : '')} onClick={() => setTab('desk')}>{IC.desk}โต๊ะข่าว</button>
       </div></div>
       {toast && <div className="toast">{toast}</div>}
     </div>
