@@ -1,11 +1,15 @@
 // ============================================================
 // crop-guard.test.mjs — เลน A · P1 ด่านครอป + P3 หักคะแนนหน้าชิดขอบ "ก่อนเลือกรูป"
 //   (1) computeCropGuard PURE — สูตร cover-fit upscale / heroEligible fail-closed / edgePenalty
+//       + TIER2 options (heroUpscaleMax override / heroDimsSoft) — PURE เหมือนเดิม ไม่อ่าน env ในไฟล์นี้
 //   (2) s6_slots wiring — pre-brain ป้าย meta · post-brain hard swap · violation flag · OFF byte-identical
+//       + TIER2: เพดานยืด default ใหม่ 1.35 (override/clamp ผ่าน MEGA_HERO_UPSCALE_MAX) · dims-soft default ON
+//       (kill MEGA_HERO_DIMS_SOFT=0) · candidate-filter/ranking กัน dims-unknown แซง measured ตอนสลับอัตโนมัติ ·
+//       สวิตช์แม่ MEGA_TIER2_OFF=1
+//   ★ ปักหมุด 11 เทสเดิม (ก่อน TIER2) ด้วย MEGA_HERO_UPSCALE_MAX=1.2 + MEGA_HERO_DIMS_SOFT=0 = พฤติกรรมเดิมเป๊ะ
 //   ไม่ยิง LLM/network/store จริง (loader stubs + injected fakes) · deterministic ล้วน
 // ============================================================
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import { register } from 'node:module';
 
 const SRC_ROOT = new URL('../src/', import.meta.url).href;
@@ -44,15 +48,24 @@ const { dnaToTemplateSpec } = await import('../src/lib/refTemplate.js');
 let passed = 0;
 const test = async (name, fn) => { await fn(); passed++; console.log(`ok ${passed} - ${name}`); };
 
-// ── ช่อง hero ของ DNA ทดสอบ = 'main' 540×1350 (คำนวณจริงจาก dnaToTemplateSpec) ──
-const DNA = (() => {
-  const refs = JSON.parse(fs.readFileSync(new URL('../data/ref-cover-library.json', import.meta.url), 'utf8'));
-  const rec = refs.find((r) => r.id === 'REF-mrbqalpo-h1r1');
-  assert.ok(rec?.dna, 'ref DNA ต้องมี');
-  return rec.dna;
-})();
+// ── ช่อง hero ของ DNA ทดสอบ = 'main' 540×1350 (จำลอง DNA ปกจริงแบบมินิมอล ฝัง "ในเทสเอง" — 27 ก.ค. 69
+//   หลังตรวจพบว่า data/ref-cover-library.json เป็นไฟล์ live ที่แก้ไปมา ใบอ้างอิงเดิม REF-mrbqalpo-h1r1 หาย
+//   ไปแล้วจากคลังจริง ทำให้เทสนี้ throw ที่ module top-level ก่อนรันเทสข้อไหนเลยด้วยซ้ำ — ฝัง DNA ขั้นต่ำที่นี่
+//   กันเทสพังเพราะข้อมูล production เปลี่ยน ไม่ใช่เพราะโค้ด cropGuard/megaAdapters พัง) ──
+//   layout: ซ้ายเต็มสูง (hero, 50%×100%) + บนขวา/ล่างขวา (2 ช่องรอง) = ครบเงื่อนไข dnaToTemplateSpec
+//   (rects≥2, slots≥3) พอดี — คำนวณจริงผ่าน dnaToTemplateSpec (ไม่ hardcode พิกัด px เอง)
+const DNA = {
+  layoutType: 'fixture-hero-left-half',
+  template: {
+    slots: [
+      { role: 'hero', pos: 'ซ้ายเต็มสูง', xPct: 0, yPct: 0, wPct: 50, hPct: 100 },
+      { role: 'context', pos: 'บนขวา', xPct: 50, yPct: 0, wPct: 50, hPct: 50 },
+      { role: 'action', pos: 'ล่างขวา', xPct: 50, yPct: 50, wPct: 50, hPct: 50 },
+    ],
+  },
+};
 const SPEC = dnaToTemplateSpec(DNA);
-const HERO = SPEC.slots.find((s) => s.id === 'main');
+const HERO = SPEC?.slots?.find((s) => s.id === 'main');
 assert.ok(HERO && HERO.w === 540 && HERO.h === 1350, `hero slot 540×1350 (ได้ ${HERO?.w}×${HERO?.h})`);
 
 // ═══════════════════════ (1) computeCropGuard — PURE UNIT ═══════════════════════
@@ -65,17 +78,18 @@ await test('upscale: ภาพใหญ่ (1200×1600) heroEligible=true · cov
   assert.equal(r.heroEligible, true);
 });
 
-await test('upscale: ภาพเล็ก (800×1000) heroEligible=false · ยืด 1.35× เกิน 1.2×', async () => {
+await test('upscale: ภาพเล็ก (800×1000) heroEligible=false (default params) · ยืด 1.35× เกิน 1.2×', async () => {
+  // ★ ไม่ส่ง heroUpscaleMax/heroDimsSoft → คงพฤติกรรม "เดิมก่อน TIER2" เป๊ะ (default ภายในฟังก์ชัน = HERO_UPSCALE_MAX 1.2 / hard-ban)
   const g = computeCropGuard({ pool: [{ id: 'SMALL', realWidth: 800, realHeight: 1000 }], templateSpec: SPEC });
   const r = g.byId.get('SMALL');
   assert.ok(Math.abs(r.heroUpscale - 1.35) < 1e-9, `heroUpscale=1.35 (ได้ ${r.heroUpscale})`);
-  assert.ok(r.heroUpscale > HERO_UPSCALE_MAX, 'เกินเพดาน hero');
+  assert.ok(r.heroUpscale > HERO_UPSCALE_MAX, 'เกินเพดาน hero (ค่าคงที่เดิม 1.2 — ยังผูกกับ renderer)');
   assert.equal(r.heroEligible, false);
   // 800×1000 ยัง fit ช่องรอง (540×446 → max(0.675,0.446)=0.675 ≤ 1.6)
   assert.equal(r.slotEligible, true);
 });
 
-await test('fail-closed: ไม่มี realWidth/realHeight → hasRealDims=false · heroEligible=false', async () => {
+await test('fail-closed: ไม่มี realWidth/realHeight → hasRealDims=false · heroEligible=false (default params)', async () => {
   const g = computeCropGuard({ pool: [
     { id: 'NODIM' },                                  // ไม่มี dims เลย
     { id: 'SHORTONLY', triage: { realShortSide: 900 } }, // มีแค่ short side (ไม่รู้ aspect)
@@ -84,7 +98,7 @@ await test('fail-closed: ไม่มี realWidth/realHeight → hasRealDims=fa
   for (const id of ['NODIM', 'SHORTONLY', 'ZERO']) {
     const r = g.byId.get(id);
     assert.equal(r.hasRealDims, false, `${id} hasRealDims=false`);
-    assert.equal(r.heroEligible, false, `${id} heroEligible=false (fail-closed)`);
+    assert.equal(r.heroEligible, false, `${id} heroEligible=false (fail-closed default)`);
     assert.equal(r.heroUpscale, HERO ? r.heroUpscale : null); // heroUpscale=null เพราะ dims=null
     assert.equal(r.heroUpscale, null);
   }
@@ -114,6 +128,43 @@ await test('backstop: input พิสดาร (null / templateSpec หาย) �
   assert.equal(computeCropGuard({ pool: [{ id: 'X', realWidth: 800, realHeight: 1000 }] }).heroSlot, null);
 });
 
+// ── TIER2: options ใหม่ (heroUpscaleMax override / heroDimsSoft) — ยังคง PURE (ส่งผ่าน input เท่านั้น) ──
+
+await test('TIER2 options: heroUpscaleMax override = 1.35 → SMALL (ยืด 1.35× พอดี) กลายเป็น eligible', async () => {
+  const g = computeCropGuard({ pool: [{ id: 'SMALL', realWidth: 800, realHeight: 1000 }], templateSpec: SPEC, heroUpscaleMax: 1.35 });
+  const r = g.byId.get('SMALL');
+  assert.ok(Math.abs(r.heroUpscale - 1.35) < 1e-9);
+  assert.equal(r.heroEligible, true, 'ยืด 1.35× ผ่านเพดานที่ระบุ 1.35 พอดี (<=)');
+});
+
+await test('TIER2 options: heroDimsSoft=true → วัดขนาดไม่ได้ กลายเป็น eligible (ไม่ hard-ban)', async () => {
+  const g = computeCropGuard({ pool: [{ id: 'NODIM' }], templateSpec: SPEC, heroDimsSoft: true });
+  const r = g.byId.get('NODIM');
+  assert.equal(r.hasRealDims, false);
+  assert.equal(r.heroEligible, true, 'soft mode: วัดไม่ได้ไม่ hard-ban อีกต่อไป');
+});
+
+await test('TIER2 options: heroDimsSoft=false (หรือไม่ระบุ) → วัดขนาดไม่ได้ ยัง hard-ban เหมือนเดิมทั้งคู่', async () => {
+  const g1 = computeCropGuard({ pool: [{ id: 'NODIM' }], templateSpec: SPEC, heroDimsSoft: false });
+  assert.equal(g1.byId.get('NODIM').heroEligible, false);
+  const g2 = computeCropGuard({ pool: [{ id: 'NODIM' }], templateSpec: SPEC }); // ไม่ระบุเลย = default เดิม
+  assert.equal(g2.byId.get('NODIM').heroEligible, false);
+});
+
+await test('TIER2 options: วัดขนาดได้แต่ยืดเกินเพดานที่ระบุ → ยัง hard-ban ทั้งสองโหมด dims (คนละเงื่อนไขกัน)', async () => {
+  const gSoft = computeCropGuard({ pool: [{ id: 'SMALL', realWidth: 800, realHeight: 1000 }], templateSpec: SPEC, heroUpscaleMax: 1.2, heroDimsSoft: true });
+  assert.equal(gSoft.byId.get('SMALL').heroEligible, false, 'ยืด 1.35× เกินเพดาน 1.2 ที่ระบุ → hard-ban แม้ dims-soft on (dims-soft คุมแค่ "วัดไม่ได้" ไม่คุม "วัดได้แต่ยืดเกิน")');
+});
+
+await test('TIER2 options: computeCropGuard คืน heroUpscaleMax/heroDimsSoft ที่ใช้จริงกลับมาด้วย (ให้ caller log ตรงกัน)', async () => {
+  const g = computeCropGuard({ pool: [], templateSpec: SPEC, heroUpscaleMax: 1.4, heroDimsSoft: true });
+  assert.equal(g.heroUpscaleMax, 1.4);
+  assert.equal(g.heroDimsSoft, true);
+  const gDefault = computeCropGuard({ pool: [], templateSpec: SPEC });
+  assert.equal(gDefault.heroUpscaleMax, HERO_UPSCALE_MAX);
+  assert.equal(gDefault.heroDimsSoft, false);
+});
+
 // ═══════════════════════ (2) s6_slots WIRING ═══════════════════════
 
 const IMG = (id, t = {}, top = {}) => ({ id, imageUrl: `https://cdn.test/${id}.jpg`, thumbnailUrl: '', width: 800, height: 1000, realWidth: 900, realHeight: 1200, ...top, triage: { relevant: true, clean: true, faceCount: 1, person: null, persons: [], category: 'context', emotion: 'warm', note: '', newsScene: true, quality: 7, ...t } });
@@ -124,16 +175,24 @@ const mkDeps = ({ pool, answer, captures }) => ({
   fetchJson: async (url) => { captures.fetches.push(url); if (String(url).includes('/api/images/')) return { success: true, images: pool }; throw new Error('unexpected fetch: ' + url); },
 });
 const setPrefilter = (v) => { if (v === null) delete process.env.MEGA_CROP_PREFILTER; else process.env.MEGA_CROP_PREFILTER = v; };
+// ★ TIER2: ปักหมุดเพดาน/โหมด dims ให้เท่าพฤติกรรม "เดิมก่อน TIER2" — ใช้ในเทส 11 ข้อเดิมด้านล่างทั้งหมด
+const setHeroCap = (v) => { if (v === null) delete process.env.MEGA_HERO_UPSCALE_MAX; else process.env.MEGA_HERO_UPSCALE_MAX = v; };
+const setDimsSoft = (v) => { if (v === null) delete process.env.MEGA_HERO_DIMS_SOFT; else process.env.MEGA_HERO_DIMS_SOFT = v; };
+const setTier2Off = (v) => { if (v === null) delete process.env.MEGA_TIER2_OFF; else process.env.MEGA_TIER2_OFF = v; };
 
-// hero person ดวงเดือน · SMALL=ยืด 1.35× (ineligible) · BIG=0.844× (eligible)
+// hero person ดวงเดือน · SMALL=ยืด 1.35× (ineligible เมื่อเพดานปักหมุด 1.2 — ดูโค้ดแต่ละเทส) · BIG=0.844× (eligible เสมอ)
 const SMALL = IMG('SMALL', { person: 'ดวงเดือน', category: 'face-emotional' }, { realWidth: 800, realHeight: 1000 });
 const BIG = IMG('BIG', { person: 'ดวงเดือน', category: 'face-neutral' }, { realWidth: 1200, realHeight: 1600 });
 const F1 = IMG('F1', { category: 'context', faceCount: 0 }, { realWidth: 1200, realHeight: 900 });
 const F2 = IMG('F2', { category: 'action', faceCount: 0 }, { realWidth: 1200, realHeight: 900 });
 const F3 = IMG('F3', { category: 'context', faceCount: 0 }, { realWidth: 1200, realHeight: 900 });
 
+// ★ ปักหมุด 11 ข้อเดิม (ก่อน TIER2): MEGA_HERO_UPSCALE_MAX=1.2 + MEGA_HERO_DIMS_SOFT=0 = พฤติกรรมเดิม byte-identical
+//   (เพดานเดิม 1.2 ผูกกับ HERO_UPSCALE_MAX ในไฟล์ cropGuard.js · dims-unknown hard-ban เหมือนก่อนมี TIER2)
+//   ไม่ปักหมุดแบบนี้ → SMALL (1.35×) จะผ่านเพดาน default ใหม่ 1.35 พอดี ทำให้ 4 เทสด้านล่างพัง (ตามที่ตรวจพบ)
+
 await test('pre-brain: meta ติดป้าย heroCropBlock เฉพาะรูปที่ heroEligible=false (SMALL) — สมองเห็น', async () => {
-  setPrefilter('1');
+  setPrefilter('1'); setHeroCap('1.2'); setDimsSoft('0');
   const captures = { brainArgs: [], fetches: [] };
   const answer = { hero: { id: 'BIG', reason: 'x', backups: [] }, reaction: { id: 'SMALL', reason: 'x', backups: [] }, action: { id: 'F1' }, context: { id: 'F2' }, circle: { id: 'F3' } };
   await s6_slots(mkJob(), { origin: 'http://mock', _deps: mkDeps({ pool: [SMALL, BIG, F1, F2, F3], answer, captures }) });
@@ -145,7 +204,7 @@ await test('pre-brain: meta ติดป้าย heroCropBlock เฉพาะ�
 });
 
 await test('post-brain (a): brain ตั้ง SMALL เป็น hero → สลับกับช่อง reaction ที่ถือ BIG (crop-safe คนเดียวกัน)', async () => {
-  setPrefilter('1');
+  setPrefilter('1'); setHeroCap('1.2'); setDimsSoft('0');
   const captures = { brainArgs: [], fetches: [] };
   const answer = { hero: { id: 'SMALL', reason: 'x', backups: [] }, reaction: { id: 'BIG', reason: 'x', backups: [] }, action: { id: 'F1' }, context: { id: 'F2' }, circle: { id: 'F3' } };
   const s6 = await s6_slots(mkJob(), { origin: 'http://mock', _deps: mkDeps({ pool: [SMALL, BIG, F1, F2, F3], answer, captures }) });
@@ -158,7 +217,7 @@ await test('post-brain (a): brain ตั้ง SMALL เป็น hero → ส�
 });
 
 await test('post-brain (b): ไม่มีช่องอื่นถือ hero-safe แต่พูลมี BIG ว่าง → ดึงจากพูลเป็น hero', async () => {
-  setPrefilter('1');
+  setPrefilter('1'); setHeroCap('1.2'); setDimsSoft('0');
   const captures = { brainArgs: [], fetches: [] };
   // brain assign ครบทุกช่องด้วย filler (คนละคน) · BIG (hero-person, eligible) ไม่ถูก assign → ว่างในพูล
   const F4 = IMG('F4', { category: 'face-neutral', faceCount: 1 }, { realWidth: 1200, realHeight: 1600 }); // person null (คนละคน hero)
@@ -172,7 +231,7 @@ await test('post-brain (b): ไม่มีช่องอื่นถือ her
 });
 
 await test('post-brain (c): ไม่มี hero-safe เลย → ปล่อยผ่านพร้อมธง cropGuardViolation (ไม่ fail งาน)', async () => {
-  setPrefilter('1');
+  setPrefilter('1'); setHeroCap('1.2'); setDimsSoft('0');
   const captures = { brainArgs: [], fetches: [] };
   // พูลมีแต่ SMALL (hero-person, ineligible) + filler คนละคน/ยืดเกิน → ไม่มี hero-safe คนเดียวกัน
   const SMALL2 = IMG('SMALL2', { person: 'ดวงเดือน', category: 'face-neutral' }, { realWidth: 700, realHeight: 900 }); // max(540/700,1350/900)=1.5 ineligible
@@ -186,7 +245,7 @@ await test('post-brain (c): ไม่มี hero-safe เลย → ปล่อ
 });
 
 await test('OFF byte-identical: MEGA_CROP_PREFILTER=0 → ไม่มีป้าย meta · ไม่มี cropGuard key · hero = brain pick (ไม่สลับ)', async () => {
-  setPrefilter('0');
+  setPrefilter('0'); setHeroCap('1.2'); setDimsSoft('0');
   const captures = { brainArgs: [], fetches: [] };
   const answer = { hero: { id: 'SMALL', reason: 'x', backups: [] }, reaction: { id: 'BIG', reason: 'x', backups: [] }, action: { id: 'F1' }, context: { id: 'F2' }, circle: { id: 'F3' } };
   const s6 = await s6_slots(mkJob(), { origin: 'http://mock', _deps: mkDeps({ pool: [SMALL, BIG, F1, F2, F3], answer, captures }) });
@@ -194,7 +253,109 @@ await test('OFF byte-identical: MEGA_CROP_PREFILTER=0 → ไม่มีป้�
   assert.equal(pi.slots.hero.id, 'SMALL', 'OFF: hero = brain pick เดิม (ไม่สลับ)');
   assert.ok(!('cropGuard' in pi), 'OFF: ไม่มี cropGuard key ใน pickImages');
   for (const m of captures.brainArgs[0].imagesMeta) assert.ok(!('heroCropBlock' in m), 'OFF: meta ไม่มี heroCropBlock');
-  setPrefilter(null);
+  setPrefilter(null); setHeroCap(null); setDimsSoft(null);
+});
+
+// ═══════════════════════ (3) TIER2 — default ใหม่ / dims-soft / clamp / สวิตช์แม่ / candidate-rank ═══════════════════════
+
+await test('TIER2 default (ไม่ตั้ง env ใดๆ): เพดานยืด=1.35 → SMALL (1.35×) เป็น hero-eligible ไม่มีป้ายห้าม', async () => {
+  setPrefilter('1'); setHeroCap(null); setDimsSoft(null);
+  const captures = { brainArgs: [], fetches: [] };
+  const answer = { hero: { id: 'SMALL', reason: 'x', backups: [] }, reaction: { id: 'BIG', reason: 'x', backups: [] }, action: { id: 'F1' }, context: { id: 'F2' }, circle: { id: 'F3' } };
+  const s6 = await s6_slots(mkJob(), { origin: 'http://mock', _deps: mkDeps({ pool: [SMALL, BIG, F1, F2, F3], answer, captures }) });
+  const meta = captures.brainArgs[0].imagesMeta;
+  const mSmall = meta.find((m) => m.id === 'SMALL');
+  assert.ok(!('heroCropBlock' in mSmall), 'default 1.35× → SMALL ไม่ติดป้ายห้าม hero อีกต่อไป');
+  const pi = s6.dossierPatch.pickImages;
+  assert.equal(pi.slots.hero.id, 'SMALL', 'default: hero คงเป็น SMALL (ไม่ต้องสลับ เพราะ eligible แล้ว)');
+  assert.equal(pi.cropGuard.swapped, false);
+  assert.equal(pi.cropGuard.heroEligible, true);
+});
+
+await test('TIER2 dims-soft (default ON): วัดขนาดไม่ได้ → ป้าย soft heroDimsAvoid (ไม่ใช่ heroCropBlock) + ไม่ถูกสลับออกถ้าสมองเลือกเป็น hero', async () => {
+  setPrefilter('1'); setHeroCap(null); setDimsSoft(null);
+  const UNKNOWN = IMG('UNKNOWN', { person: 'ดวงเดือน', category: 'face-neutral' }, { realWidth: undefined, realHeight: undefined });
+  const captures = { brainArgs: [], fetches: [] };
+  const answer = { hero: { id: 'UNKNOWN', reason: 'x', backups: [] }, reaction: { id: 'BIG', reason: 'x', backups: [] }, action: { id: 'F1' }, context: { id: 'F2' }, circle: { id: 'F3' } };
+  const s6 = await s6_slots(mkJob(), { origin: 'http://mock', _deps: mkDeps({ pool: [UNKNOWN, BIG, F1, F2, F3], answer, captures }) });
+  const meta = captures.brainArgs[0].imagesMeta;
+  const mUnknown = meta.find((m) => m.id === 'UNKNOWN');
+  assert.ok(!('heroCropBlock' in mUnknown), 'soft mode: ไม่มีป้ายห้ามแข็ง');
+  assert.ok(mUnknown.heroDimsAvoid && /เลี่ยงเป็น hero/.test(mUnknown.heroDimsAvoid), 'soft mode: มีป้ายแนะนำ (soft) แทน');
+  const pi = s6.dossierPatch.pickImages;
+  assert.equal(pi.slots.hero.id, 'UNKNOWN', 'post-brain ไม่สลับ UNKNOWN ออก (heroEligible=true ในโหมด soft — ห้าม post-brain วนเตะใบที่สมองเพิ่งเลือก)');
+  assert.equal(pi.cropGuard.swapped, false);
+  assert.equal(pi.cropGuard.violation, false);
+  assert.equal(pi.cropGuard.heroEligible, true);
+});
+
+await test('TIER2 kill-switch: MEGA_HERO_DIMS_SOFT=0 → วัดขนาดไม่ได้กลับเป็น hard-ban (เดิมเป๊ะ) + ถูกสลับออกถ้าสมองเลือกเป็น hero', async () => {
+  setPrefilter('1'); setHeroCap(null); setDimsSoft('0');
+  const UNKNOWN = IMG('UNKNOWN', { person: 'ดวงเดือน', category: 'face-neutral' }, { realWidth: undefined, realHeight: undefined });
+  const captures = { brainArgs: [], fetches: [] };
+  const answer = { hero: { id: 'UNKNOWN', reason: 'x', backups: [] }, reaction: { id: 'BIG', reason: 'x', backups: [] }, action: { id: 'F1' }, context: { id: 'F2' }, circle: { id: 'F3' } };
+  const s6 = await s6_slots(mkJob(), { origin: 'http://mock', _deps: mkDeps({ pool: [UNKNOWN, BIG, F1, F2, F3], answer, captures }) });
+  const meta = captures.brainArgs[0].imagesMeta;
+  const mUnknown = meta.find((m) => m.id === 'UNKNOWN');
+  assert.ok(mUnknown.heroCropBlock && /วัดขนาดจริงไม่ได้/.test(mUnknown.heroCropBlock), 'hard mode: ป้ายห้ามแข็งกลับมา');
+  assert.ok(!('heroDimsAvoid' in mUnknown), 'hard mode: ไม่มีป้าย soft (คนละโหมดกัน)');
+  const pi = s6.dossierPatch.pickImages;
+  assert.equal(pi.slots.hero.id, 'BIG', 'hard mode: สลับ hero ออกจาก UNKNOWN ไปเป็น BIG (crop-safe)');
+  assert.equal(pi.cropGuard.swapped, true);
+  setDimsSoft(null);
+});
+
+await test('TIER2 clamp: MEGA_HERO_UPSCALE_MAX="10" (เกินเพดานปลอดภัย 1.6) → clamp เหลือ 1.6 จริง (พิสูจน์ด้วยภาพยืด 2.0×)', async () => {
+  setPrefilter('1'); setHeroCap('10'); setDimsSoft(null);
+  // TOOBIG ยืด max(540/270,1350/675) = 2.0× — ถ้า clamp ไม่ทำงาน (ใช้ 10 ตรงๆ) จะ eligible ไม่มีป้าย
+  const TOOBIG = IMG('TOOBIG', { person: 'ดวงเดือน', category: 'face-neutral' }, { realWidth: 270, realHeight: 675 });
+  const captures = { brainArgs: [], fetches: [] };
+  const answer = { hero: { id: 'TOOBIG', reason: 'x', backups: [] }, reaction: { id: 'BIG', reason: 'x', backups: [] }, action: { id: 'F1' }, context: { id: 'F2' }, circle: { id: 'F3' } };
+  const s6 = await s6_slots(mkJob(), { origin: 'http://mock', _deps: mkDeps({ pool: [TOOBIG, BIG, F1, F2, F3], answer, captures }) });
+  const meta = captures.brainArgs[0].imagesMeta;
+  const mToobig = meta.find((m) => m.id === 'TOOBIG');
+  assert.ok(mToobig.heroCropBlock, 'ต้องมีป้ายห้าม (พิสูจน์ clamp เหลือ 1.6 จริง — ถ้าใช้ "10" ตรงๆ 2.0× จะผ่านสบายๆ ไม่มีป้าย)');
+  const pi = s6.dossierPatch.pickImages;
+  assert.equal(pi.slots.hero.id, 'BIG', 'สลับออกจาก TOOBIG ไปเป็น BIG (crop-safe) — ยืนยัน clamp มีผลจริงถึงชั้น post-brain ด้วย');
+  setHeroCap(null);
+});
+
+await test('สวิตช์แม่ MEGA_TIER2_OFF=1: เพดานกลับ 1.2 ตรงๆ + dims กลับ hard — ชนะ env อื่นที่ตั้งสวนทางไว้เสมอ', async () => {
+  setPrefilter('1');
+  setHeroCap('1.35'); setDimsSoft('1'); // ตั้งสวนทางตั้งใจ — TIER2_OFF ต้องชนะทุกอัน
+  setTier2Off('1');
+  const captures = { brainArgs: [], fetches: [] };
+  const answer = { hero: { id: 'SMALL', reason: 'x', backups: [] }, reaction: { id: 'BIG', reason: 'x', backups: [] }, action: { id: 'F1' }, context: { id: 'F2' }, circle: { id: 'F3' } };
+  const s6 = await s6_slots(mkJob(), { origin: 'http://mock', _deps: mkDeps({ pool: [SMALL, BIG, F1, F2, F3], answer, captures }) });
+  const meta = captures.brainArgs[0].imagesMeta;
+  const mSmall = meta.find((m) => m.id === 'SMALL');
+  assert.ok(mSmall.heroCropBlock, 'TIER2_OFF=1: SMALL (1.35×) ต้องกลับมาโดนแบน (เพดานจริง=1.2 ไม่ใช่ 1.35 ที่ตั้งสวนทางไว้)');
+  const pi = s6.dossierPatch.pickImages;
+  assert.equal(pi.slots.hero.id, 'BIG', 'สลับออกจาก SMALL (เหมือนพฤติกรรมเดิมก่อน TIER2 ทุกกรณี)');
+  setTier2Off(null); setHeroCap(null); setDimsSoft(null);
+});
+
+await test('TIER2 candidate-rank (post-brain reselect): dims-unknown ห้ามแซง measured แม้ edgePenalty เป็นกลาง 0', async () => {
+  // hero ที่สมองเลือก = TOOBIG2 (2.0×) ไม่ผ่านแม้เพดาน default 1.35 → เข้า branch (b) reselect-from-pool
+  // ช่องอื่นเป็นคนละคน (identity ไม่ตรง) → บังคับให้ไม่มี swap-in-plan (a) เหลือแต่ผู้สมัครในพูลที่ไม่ถูกใช้
+  //   • UNKNOWN_CAND: hasRealDims=false → eligible=true ในโหมด soft (default) แต่ไม่มี faceBox → edgePenalty=0 (เป็นกลาง)
+  //   • MEASURED_CAND: hasRealDims=true, วัดได้จริง+ผ่านเพดาน (0.844×) แต่มี faceBox ใกล้มุม → edgePenalty>0
+  //   ก่อนแก้บั๊ก: จัดอันดับด้วย edgePenalty ก่อนเสมอ → UNKNOWN_CAND (0) จะ "ชนะ" MEASURED_CAND (>0) ผิดที่ผิดทาง
+  //   หลังแก้: ต้อง "วัดขนาดได้จริง" มาก่อนเสมอ (ทั้ง candidate filter + _cgRank) → ต้องได้ MEASURED_CAND เท่านั้น
+  setPrefilter('1'); setHeroCap(null); setDimsSoft(null); // default: cap 1.35 / soft ON
+  const TOOBIG2 = IMG('TOOBIG2', { person: 'ดวงเดือน', category: 'face-neutral' }, { realWidth: 270, realHeight: 675 }); // 2.0× ไม่ผ่านแม้ default 1.35
+  const FA = IMG('FA', { category: 'context', faceCount: 0 }, { realWidth: 1200, realHeight: 900 }); // คนละคน (person null)
+  const FB = IMG('FB', { category: 'action', faceCount: 0 }, { realWidth: 1200, realHeight: 900 });
+  const FC = IMG('FC', { category: 'context', faceCount: 0 }, { realWidth: 1200, realHeight: 900 });
+  const FD = IMG('FD', { category: 'context', faceCount: 0 }, { realWidth: 1200, realHeight: 900 });
+  const UNKNOWN_CAND = IMG('UNKNOWN_CAND', { person: 'ดวงเดือน', category: 'face-neutral' }, { realWidth: undefined, realHeight: undefined });
+  const MEASURED_CAND = IMG('MEASURED_CAND', { person: 'ดวงเดือน', category: 'face-neutral', faceBox: { x1: 0.05, y1: 0.05, x2: 0.35, y2: 0.35 } }, { realWidth: 1200, realHeight: 1600 });
+  const captures = { brainArgs: [], fetches: [] };
+  const answer = { hero: { id: 'TOOBIG2', reason: 'x', backups: [] }, reaction: { id: 'FA' }, action: { id: 'FB' }, context: { id: 'FC' }, circle: { id: 'FD' } };
+  const s6 = await s6_slots(mkJob(), { origin: 'http://mock', _deps: mkDeps({ pool: [TOOBIG2, FA, FB, FC, FD, UNKNOWN_CAND, MEASURED_CAND], answer, captures }) });
+  const pi = s6.dossierPatch.pickImages;
+  assert.equal(pi.cropGuard.swapped, true, 'ต้องสลับ hero ออกจาก TOOBIG2 (ไม่ผ่านเพดานแม้ default)');
+  assert.equal(pi.slots.hero.id, 'MEASURED_CAND', 'ต้องได้ MEASURED_CAND (วัดขนาดได้จริง) — ห้ามได้ UNKNOWN_CAND (วัดไม่ได้ แม้ edgePenalty เป็นกลาง 0)');
 });
 
 console.log(`\n1..${passed}`);

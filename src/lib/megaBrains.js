@@ -11,8 +11,14 @@ function parseJson(text) {
   const t = String(text || '').trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
   const s = t.indexOf('{');
   const e = t.lastIndexOf('}');
-  if (s < 0 || e <= s) throw new Error('สมองไม่ตอบเป็น JSON');
-  return JSON.parse(t.slice(s, e + 1));
+  // แนบหัว/ท้ายคำตอบดิบไว้ในข้อความ error — วินิจฉัยได้จาก log เดิมโดยไม่ต้องแก้ผู้เรียก
+  // (บทเรียน 27 ก.ค. 69: opus-5 คิดก่อนตอบ เพดานยุค opus-4-8 ทำคำตอบว่าง/ขาดท้าย = "ไม่ตอบเป็น JSON")
+  if (s < 0 || e <= s) throw new Error(`สมองไม่ตอบเป็น JSON (ยาว ${t.length}) หัวคำตอบ: ${t.slice(0, 120)}`);
+  try {
+    return JSON.parse(t.slice(s, e + 1));
+  } catch {
+    throw new Error(`สมองตอบ JSON เพี้ยน (ยาว ${t.length}) ท้ายคำตอบ: ${t.slice(-120)}`);
+  }
 }
 
 // ---------- S1.5 Preflight: ข่าวนี้ "ลงทุนแล้วคุ้ม" ไหม (ตายเร็ว = ถูก) ----------
@@ -22,7 +28,7 @@ export async function preflightBrain({ card }) {
 ตอบ JSON เท่านั้น: {"score":0.0-1.0,"hasPrimarySource":bool,"hasUsableVisuals":bool,"hasKnownPeople":bool,"hasClip":bool,"decision":"pass|skip","reason":"สั้นๆ ภาษาไทย"}
 decision=pass เมื่อ score>=0.6 และ hasUsableVisuals=true`;
   const user = `การ์ดข่าวจากโต๊ะข่าว (JSON):\n${JSON.stringify(card, null, 1).slice(0, 3500)}`;
-  const out = await callBrain({ system, user, maxTokens: 500, temperature: 0.1, cost: { step: 'MEGA S1.5 preflight' } });
+  const out = await callBrain({ system, user, maxTokens: 4000, temperature: 0.1, cost: { step: 'MEGA S1.5 preflight' } });
   return parseJson(out.text || out);
 }
 
@@ -37,7 +43,7 @@ export async function compassBrain({ card, extractText }) {
 "doNotUse":["สิ่งที่ห้ามใช้ เช่น ภาพคนผิด/เหตุการณ์อื่น"],
 "contentComplete":bool,"missingFacts":["ข้อเท็จจริงที่ยังขาด ถ้ามี"]}`;
   const user = `การ์ดข่าว: ${JSON.stringify({ title: card?.title, lane: card?.lane, category: card?.category }, null, 0)}\n\nเนื้อข่าวที่สกัดได้ (เต็ม):\n"""\n${String(extractText || '').slice(0, 6000)}\n"""`;
-  const out = await callBrain({ system, user, maxTokens: 900, temperature: 0.2, cost: { step: 'MEGA S2.5 compass' } });
+  const out = await callBrain({ system, user, maxTokens: 6000, temperature: 0.2, cost: { step: 'MEGA S2.5 compass' } });
   return parseJson(out.text || out);
 }
 
@@ -67,7 +73,7 @@ export async function judgeBrain({ versions, extractText, compass }) {
 ฉบับร่างทั้งหมด (ลำดับสุ่ม ไม่บอกที่มา):
 ${blinded.map((b) => `--- ฉบับ ${b.label} ---\n${b.text}`).join('\n\n')}`;
 
-  const out = await callBrain({ system, user, maxTokens: 1200, temperature: 0.1, cost: { step: 'MEGA S4 judge' } });
+  const out = await callBrain({ system, user, maxTokens: 6000, temperature: 0.1, cost: { step: 'MEGA S4 judge' } });
   const res = parseJson(out.text || out);
   const winIdx = labels.indexOf(res.winner);
   return {
@@ -259,7 +265,7 @@ export async function artBriefBrain({ refDNA, compass, deskTitle, typeMatched = 
 เข็มทิศข่าว: ${JSON.stringify({ angle: compass?.angle, primaryEmotion: compass?.primaryEmotion, mainCharacters: compass?.mainCharacters, visualDreamShots: compass?.visualDreamShots }, null, 0).slice(0, 1200)}
 ช่องของปกต้นแบบ (เรขาคณิตล็อกแล้ว — สั่งแค่เนื้อหา):
 ${JSON.stringify(slots, null, 0).slice(0, 1800)}`;
-  const out = await _callBrain({ system, user, maxTokens: 700, temperature: 0.15, cost: { step: 'MEGA S6a art brief' } });
+  const out = await _callBrain({ system, user, maxTokens: 6000, temperature: 0.15, cost: { step: 'MEGA S6a art brief' } });
   const brief = parseJson(out.text || out);
   // ผูกใบสั่งกลับเข้าช่อง (ตามดัชนี) + พก faceSizePct ไปให้สูตรครอป
   return {
@@ -379,6 +385,6 @@ ${roleLines}
 ตอบ JSON เท่านั้น:
 ${schemaSem}`;
   }
-  const out = await _cb({ system: systemSem || system, user, maxTokens: 1100, temperature: 0.1, cost: { step: 'MEGA S6 slot director' } });
+  const out = await _cb({ system: systemSem || system, user, maxTokens: 6000, temperature: 0.1, cost: { step: 'MEGA S6 slot director' } });
   return parseJson(out.text || out);
 }

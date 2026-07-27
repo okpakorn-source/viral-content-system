@@ -15,6 +15,7 @@ import { listRefCovers } from '@/lib/refCoverLibrary';
 import { composeAndVerify } from '@/lib/services/megaComposerService';
 import { evaluateCoverQc } from '@/lib/coverQcGate'; // ★ W2-A2: advisory เท่านั้น — ไม่บล็อกเครื่องมือเทส แค่แนบผลด่าน QC ให้เห็น
 import { refPoolGateOpen } from '@/lib/refCoverGrade'; // ★ R3: ตัวกรอง ref ใต้สวิตช์ REF_TEMPLATE_GRADE_GATE (OFF = เดิมเป๊ะ)
+import { isPromoImage } from '@/lib/promoImageGuard'; // ★ TIER2 สายงาน ข (เคส AC-0196): util กลางร่วมกับ megaAdapters.js s6_slots — ห้าม copy regex ซ้ำ
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // audit 9 ก.ค.: ท่อเต็มมี LLM ≥4 จุด เวลาจริง 60-90s — 120 ตึงเกิน (ชน timeout = เสียค่า LLM ฟรี)
@@ -64,8 +65,31 @@ export async function POST(req) {
     const POOL_CLEAN_GATE = process.env.POOL_CLEAN_GATE !== '0';
     const POOL_MIN_FLOOR = 6; // พูลสะอาดบางกว่านี้ → อนุญาตเติม clean=false ที่ดีที่สุดกลับ (กันงานล่ม)
     const notHidden = (x) => x.triage?.junkHidden !== true;
-    const visibleImgs = relevantImgs.filter(notHidden);
-    const dirtyFallbackIds = new Set();
+    // ★ TIER2 สายงาน ข (เคส AC-0196): mirror ตัวกรอง promo ban ของ s6_slots จริง (megaAdapters.js) — ให้เครื่องมือ
+    //   เทสนี้เห็น poolSize/POOL_TOO_THIN ตรงกับท่อจริง (s6_slots เองก็มีด่านเดียวกันซ้ำอีกชั้นตอนอ่าน r.images)
+    //   ใช้ util กลาง src/lib/promoImageGuard.js ตัวเดียวกัน — ห้าม copy regex ซ้ำ 2 ที่
+    //   สวิตช์แม่ MEGA_TIER2_OFF=1 = ปิด TIER2 ทั้งชุด (ปิด promo ban ด้วย) · เฉพาะจุด: MEGA_PROMO_BAN=0 = ปิด (พฤติกรรมเดิมเป๊ะ)
+    const PROMO_BAN_ON = process.env.MEGA_TIER2_OFF !== '1' && process.env.MEGA_PROMO_BAN !== '0';
+    const _hiddenImgs = relevantImgs.filter(notHidden);
+    const _promoBannedImgs = PROMO_BAN_ON ? _hiddenImgs.filter((x) => isPromoImage(x)) : [];
+    let visibleImgs = _promoBannedImgs.length
+      ? _hiddenImgs.filter((x) => !_promoBannedImgs.some((b) => String(b.id) === String(x.id)))
+      : _hiddenImgs;
+    const promoFallbackIds = new Set();
+    // ★ พื้นกันพูลล่ม (เหมือน dirtyFallback ด้านล่าง): แบนแล้วพูล < POOL_MIN_FLOOR และมีของให้เติม → คืนใบคะแนนดีสุดกลับ
+    if (_promoBannedImgs.length && visibleImgs.length < POOL_MIN_FLOOR) {
+      const need = POOL_MIN_FLOOR - visibleImgs.length;
+      const promoBest = _promoBannedImgs
+        .slice()
+        .sort((a, b) => (Number(b.triage?.faceCount) || 0) - (Number(a.triage?.faceCount) || 0) || (Number(b.triage?.quality) || 0) - (Number(a.triage?.quality) || 0))
+        .slice(0, need);
+      promoBest.forEach((x) => promoFallbackIds.add(String(x.id)));
+      visibleImgs = [...visibleImgs, ...promoBest];
+      console.log(`[compose-test] 🚫🧹 promo ban: พูลบางกว่าพื้น (${POOL_MIN_FLOOR}) → เติมภาพโปรโมทคะแนนดีสุดกลับ ${promoBest.length} ใบ (กันงานล่ม)`);
+    }
+    const promoBannedCount = _promoBannedImgs.length - promoFallbackIds.size;
+    if (promoBannedCount) console.log(`[compose-test] 🚫 promo ban: ตัดภาพโปรโมท/ฉากหลังรก ${promoBannedCount} ใบ (regex ตาคัด note) — พูลใช้จริง ${visibleImgs.length}`);
+    const dirtyFallbackIds = new Set(promoFallbackIds); // ★ TIER2: ภาพโปรโมทที่เติมกลับกันพูลล่ม ติดธง dirtyFallback แบบเดียวกับ clean=false เติมกลับ
     let pool = visibleImgs;
     if (POOL_CLEAN_GATE) {
       const cleanOnly = visibleImgs.filter((x) => x.triage.clean !== false);

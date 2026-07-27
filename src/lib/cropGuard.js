@@ -8,8 +8,11 @@
 // PURE 100%: import เฉพาะโมดูล pure อื่น (heroCropGeometry / candidateMetricMeasurements) — ไม่มี env / IO /
 //   Date / random / network. เรียกกี่ครั้งด้วย input เดียวกันได้ผลเท่ากันเป๊ะ (deterministic).
 //
-// 🔴 fail-closed: รูปที่ "วัดขนาดจริงไม่ได้" (ไม่มี realWidth/realHeight ครบ) ⇒ heroEligible=false เสมอ
-//   (เดา = อันตราย: ไฟล์จิ๋วที่ตาคัดให้คะแนนหลอกจะยืดแตกตอนประกอบ). ไม่ปั้น eligible ปลอมจากข้อมูลที่ไม่มี.
+// 🔴 fail-closed (ค่าเริ่มต้นของฟังก์ชันเมื่อไม่ส่ง options): รูปที่ "วัดขนาดจริงไม่ได้" (ไม่มี realWidth/realHeight
+//   ครบ) ⇒ heroEligible=false เสมอ (เดา = อันตราย: ไฟล์จิ๋วที่ตาคัดให้คะแนนหลอกจะยืดแตกตอนประกอบ) ไม่ปั้น eligible
+//   ปลอมจากข้อมูลที่ไม่มี — ★ TIER2 (เคส AC-0196): caller ส่ง `heroDimsSoft: true` มาได้ (เช่น megaAdapters.js
+//   default ส่งมาเมื่อ MEGA_HERO_DIMS_SOFT≠'0') เพื่อผ่อนเป็น heroEligible=true แทน (ไม่ hard-ban) — โมดูลนี้เอง
+//   ยังคง fail-closed เป็นค่าเริ่มต้นเสมอถ้า caller ไม่ระบุ options (byte-identical กับก่อน TIER2 ทุกจุดเรียกเดิม)
 // ============================================================
 
 import { HERO_STRETCH_MAX } from '@/lib/heroCropGeometry';
@@ -96,7 +99,8 @@ function pickHeroSlot(slots) {
 // guard ต่อรูป = {
 //   id, hasRealDims, realWidth, realHeight,
 //   heroUpscale,   // cover-fit upscale เทียบช่อง hero (null = วัดไม่ได้/ไม่มี hero slot)
-//   heroEligible,  // true เฉพาะ hasRealDims && heroUpscale ≤ 1.2 (fail-closed: วัดไม่ได้ = false)
+//   heroEligible,  // hasRealDims=true: heroUpscale ≤ heroUpscaleMax (ดีฟอลต์พารามิเตอร์ HERO_UPSCALE_MAX=1.2)
+//                  //   hasRealDims=false: =heroDimsSoft (ดีฟอลต์ false → fail-closed เดิม; true = TIER2 soft ไม่ hard-ban)
 //   slotEligible,  // hasRealDims && มีช่องรองอย่างน้อย 1 ช่องที่ upscale ≤ 1.6
 //   bestSlotUpscale, perSlot: { [slotId]: upscale },
 //   edgeCut,       // 0..1 (สูตรเดียวกับ candidateMetricMeasurements — หน้าชิดขอบ→1) · null = ไม่มี faceBox
@@ -113,6 +117,12 @@ export function computeCropGuard(input) {
     const heroSlot = pickHeroSlot(specSlots);
     const secondarySlots = specSlots.filter((s) => s && s !== heroSlot && _pos(s.w) && _pos(s.h));
 
+    // ★ TIER2 hero-gate softening (เคส AC-0196: crop pre-filter แบนเหมาเข่ง 74/77 ใบ เพราะ hasRealDims=false)
+    //   ยังคง PURE 100% — รับ cap/โหมดผ่าน "input" เท่านั้น (ไม่อ่าน env ในไฟล์นี้) · caller (megaAdapters.js)
+    //   เป็นคนอ่าน env แล้วส่งค่าเข้ามา · ไม่ระบุ (undefined) = พฤติกรรมเดิม byte-identical ทุกประการ
+    const heroUpscaleMax = _pos(src.heroUpscaleMax) ?? HERO_UPSCALE_MAX;
+    const heroDimsSoft = src.heroDimsSoft === true; // default false = เดิมเป๊ะ (hard ban วัดขนาดไม่ได้)
+
     const byId = new Map();
     const guards = [];
     for (const row of pool) {
@@ -122,7 +132,12 @@ export function computeCropGuard(input) {
       const hasRealDims = dims !== null;
 
       const heroUpscale = heroSlot ? coverFitUpscale(dims, heroSlot) : null;
-      const heroEligible = hasRealDims && heroUpscale !== null && heroUpscale <= HERO_UPSCALE_MAX + 1e-9;
+      // fail-closed เดิม (heroDimsSoft=false): วัดไม่ได้ = ไม่ eligible เสมอ
+      // TIER2 soft (heroDimsSoft=true): วัดไม่ได้ = eligible (ไม่ hard-ban) — caller แปะป้ายเตือน soft แยกต่างหาก
+      //   ส่วนใบที่ "วัดได้แต่ยืดเกินเพดาน" ยัง hard-ban เหมือนเดิมทั้งสองโหมด (ไม่เปลี่ยน)
+      const heroEligible = hasRealDims
+        ? (heroUpscale !== null && heroUpscale <= heroUpscaleMax + 1e-9)
+        : heroDimsSoft;
 
       const perSlot = {};
       let bestSlotUpscale = null;
@@ -154,7 +169,8 @@ export function computeCropGuard(input) {
       guards.push(guard);
       if (idStr !== null && !byId.has(idStr)) byId.set(idStr, guard);
     }
-    return { heroSlot, secondarySlots, byId, guards };
+    // ★ TIER2: สะท้อนค่า cap/โหมดที่ใช้จริงกลับให้ caller (log/ป้ายใช้เลขเดียวกันเป๊ะ ไม่ต้อง re-parse env ซ้ำ)
+    return { heroSlot, secondarySlots, byId, guards, heroUpscaleMax, heroDimsSoft };
   } catch {
     return empty;
   }

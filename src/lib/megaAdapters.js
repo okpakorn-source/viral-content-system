@@ -1424,7 +1424,7 @@ export async function s5_gapsearch(job, { origin, _deps } = {}) {
     const r = await callBrain({
       system: 'คุณเป็นผู้ช่วยสร้างคำค้นรูปภาพสำหรับนักข่าว ตอบเป็น JSON เท่านั้น รูปแบบ {"queries": ["คำค้น1", "คำค้น2", ...]} ห้ามมีข้อความอื่นนอก JSON',
       user: `ข่าวนี้ยังขาดภาพ ${gapDesc} ของ ${people} — สร้างคำค้นภาพใหม่ ${GAP_SEARCH_MAX_QUERIES} คำ (ภาษาไทยหรืออังกฤษตามความเหมาะสม) ที่ยังไม่เคยใช้ ห้ามซ้ำกับคำค้นเดิมเหล่านี้: ${usedQueries.join(', ') || '(ไม่มี)'}`,
-      maxTokens: 400,
+      maxTokens: 4000, // 27 ก.ค. 69: 400→4000 — สมอง opus-5 คิดก่อนตอบ เพดานต่ำ=คำตอบว่าง (บทเรียนเดียวกับ megaBrains)
       cost: { step: 'mega-gap-search', caseId: im.caseId },
     });
     // แกะ JSON แบบเดียวกับ megaBrains.js parseJson (กันสมองห่อ ```json ทั้งที่สั่งห้ามแล้ว)
@@ -3268,7 +3268,45 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   //   เดิมกรองแค่ relevant!==false → ภาพ clean=false เข้าพูลได้ พอของสะอาดขาดสมองเลือกภาพจำใจหยิบของสกปรก
   //   ธง junkHidden (เฟส 5.3 AI junk scan ตั้งแทนลบถาวร — ย้อนกลับได้) ห้ามเข้าพูลเสมอ ไม่ผูกกับ kill-switch ด้านล่าง
   const notHidden = (x) => x.triage?.junkHidden !== true;
-  const visiblePool = rawPool.filter(notHidden);
+  // ★ TIER2 สายงาน ข (เคส AC-0196 ศรราม): แบนภาพโปรโมทรายการ/โปสเตอร์/ฉากหลังรก "ระดับพูล" — กันเข้าทุกช่อง
+  //   ไม่ใช่แค่ hero (แบบเดียวกับ junkHidden ด้านบน) · triage.clean เดิมจับแค่ตัวหนังสือทับภาพ/ลายน้ำ จับ
+  //   "ภาพโปรโมทรายการ/ฉากหลังไฟ marquee" เองไม่ได้ (เจ้าของสั่งแบน 100%) — ใช้ util กลาง src/lib/promoImageGuard.js
+  //   (regex บน triage.note) แทนเพิ่มฟิลด์ schema ใหม่ในตาคัด (gemini.js มี requiredKeys 8 combo อยู่แล้ว เพิ่มฟิลด์
+  //   เสี่ยง cache/รูปแบบ) · util เดียวกันใช้ร่วมกับ compose-test/route.js ห้าม copy regex ซ้ำ
+  //   kill-switch เฉพาะจุด: MEGA_PROMO_BAN=0 = ปิด (พฤติกรรมเดิมเป๊ะ ไม่กรอง) · สวิตช์แม่ MEGA_TIER2_OFF=1 = ปิดทั้งชุด TIER2
+  const _tier2OffPool = process.env.MEGA_TIER2_OFF === '1';
+  const PROMO_BAN_ON = !_tier2OffPool && process.env.MEGA_PROMO_BAN !== '0';
+  const _hiddenFilteredPool = rawPool.filter(notHidden);
+  let _promoBannedList = [];
+  let visiblePool = _hiddenFilteredPool;
+  if (PROMO_BAN_ON) {
+    try {
+      const { isPromoImage } = await import('@/lib/promoImageGuard');
+      _promoBannedList = _hiddenFilteredPool.filter((x) => isPromoImage(x));
+      if (_promoBannedList.length) {
+        const _bannedIds = new Set(_promoBannedList.map((x) => String(x.id)));
+        visiblePool = _hiddenFilteredPool.filter((x) => !_bannedIds.has(String(x.id)));
+      }
+    } catch (e) {
+      _promoBannedList = []; // guard ล้ม = เดินต่อแบบไม่มีด่าน (ห้ามทำ S6 พัง)
+      console.log('[MEGA S6] 🚫 promo ban: คำนวณไม่สำเร็จ — ข้ามด่าน (เดินต่อแบบเดิม):', String(e?.message || '').slice(0, 50));
+    }
+  }
+  // ★ พื้นกันพูลล่ม (เหมือน POOL_CLEAN_GATE dirtyFallback ด้านล่าง): แบนแล้วพูล < POOL_MIN_FLOOR และมีของให้เติม
+  //   → คืนใบที่โดนแบน "คะแนนดีสุด" กลับมา (faceCount ก่อน → quality) ติดธง fallback เดียวกับ dirtyFallback
+  const promoFallbackIds = new Set();
+  if (_promoBannedList.length && visiblePool.length < POOL_MIN_FLOOR) {
+    const need = POOL_MIN_FLOOR - visiblePool.length;
+    const promoBest = _promoBannedList
+      .slice()
+      .sort((a, b) => (Number(b.triage?.faceCount) || 0) - (Number(a.triage?.faceCount) || 0) || (Number(b.triage?.quality) || 0) - (Number(a.triage?.quality) || 0))
+      .slice(0, need);
+    promoBest.forEach((x) => promoFallbackIds.add(String(x.id)));
+    visiblePool = [...visiblePool, ...promoBest];
+    console.log(`[MEGA S6] 🚫🧹 promo ban: พูลบางกว่าพื้น (${POOL_MIN_FLOOR}) → เติมภาพโปรโมทคะแนนดีสุดกลับ ${promoBest.length} ใบ (กันงานล่ม, พูลใช้จริง ${visiblePool.length})`);
+  }
+  const promoBannedCount = _promoBannedList.length - promoFallbackIds.size; // ตัดจริง (หักที่เติมพื้นกันล่มกลับคืนแล้ว)
+  if (promoBannedCount) console.log(`[MEGA S6] 🚫 promo ban: ตัดภาพโปรโมท/ฉากหลังรก ${promoBannedCount} ใบ (regex ตาคัด note) — พูลใช้จริง ${visiblePool.length}`);
   // ★ Wave2 Batch D1: นับ+รายงาน "กักกัน" เสมอ (แม้ MEGA_QUARANTINE=0) — ความจริงต้องเห็น แม้ยังไม่เปลี่ยนพฤติกรรมกรอง
   //   untriaged มาจาก r.images ทั้งก้อน (ก่อนกรอง rawPool) — เดิมภาพไม่มีป้าย triage หายเงียบตรงตัวกรอง rawPool ด้านบน
   //   sizeUnknown นับใน visiblePool (พูลที่ยังไม่ถูกซ่อน junkHidden) ตามสเปก Wave2 ข้อ 4
@@ -3276,7 +3314,9 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   const sizeUnknownList = visiblePool.filter((x) => classifyPoolImage(x) === 'size_unknown');
   const quarantineSampleIds = [...untriagedList, ...sizeUnknownList].map((x) => x.id).filter((id) => id != null).slice(0, 5);
   console.log(`[MEGA S6] 🧿 กักกัน: ไม่มีป้าย ${untriagedList.length} ใบ · วัดขนาดไม่ได้ ${sizeUnknownList.length} ใบ (พูลใช้จริง ${visiblePool.length})`);
-  const dirtyFallbackIds = new Set();
+  // ★ TIER2: ภาพโปรโมทที่ถูกเติมกลับกันพูลล่ม (promoFallbackIds) ติดธง dirtyFallback แบบเดียวกับ clean=false
+  //   เติมกลับด้านล่าง — ให้ QC/UI/consumer เดิม (slotPlan.dirtyFallback ฯลฯ) เห็นป้ายเตือนชุดเดียวกันโดยไม่ต้องเพิ่ม field ใหม่
+  const dirtyFallbackIds = new Set(promoFallbackIds);
   let pool = visiblePool;
   if (POOL_CLEAN_GATE) {
     const cleanOnly = visiblePool.filter((x) => x.triage?.clean !== false);
@@ -3294,9 +3334,22 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     }
   }
   // ★ เฟส 5.2: ข้อความ error แยกเคส "ไม่มีภาพเกี่ยวเลย" ออกจาก "มีแต่ถูกซ่อนหมด" — debug ง่ายกว่า (กฎ error ชัดเจน)
+  // ★ TIER2: แยกเหตุ junkHidden ออกจากเหตุ promo ban ด้วย (คนละสาเหตุ คนละวิธีแก้ — junkHidden กู้คืนภาพ, promo ต้องตรวจคลัง)
+  //   หมายเหตุ: ด้วยพื้นกันพูลล่มด้านบน (เติม promo คะแนนดีสุดกลับเมื่อพูล < POOL_MIN_FLOOR รวมถึงกรณีเหลือ 0)
+  //   สาขา "promoAll > 0" ด้านล่างแทบไม่มีทางเกิดจริงตอนนี้ (promo ที่มีให้แบนจะถูกดึงกลับมาช่วยพูลก่อนถึงจุดว่างเปล่าเสมอ)
+  //   — คงไว้เป็น defensive/อนาคต เผื่อ logic เติมพื้นเปลี่ยน ไม่ใช่ dead code ที่ตั้งใจลบทิ้ง
   if (!pool.length) {
-    const hiddenAll = rawPool.length - visiblePool.length;
-    return { status: 'failed', nextAction: 'fail', summary: hiddenAll >= rawPool.length ? `ภาพที่เกี่ยวทั้งหมด ${rawPool.length} ใบ ถูกตั้งธงซ่อน (junkHidden) หมด — กู้คืนบางใบก่อนทำปก` : 'ไม่มีภาพที่ตายืนยันว่าเกี่ยวเลย — ทำปกไม่ได้', quality: 'red' };
+    const hiddenAll = rawPool.length - _hiddenFilteredPool.length; // ตัดเพราะ junkHidden เท่านั้น
+    const promoAll = promoBannedCount; // ตัดเพราะ promo เท่านั้น (หักที่เติมพื้นกันล่มกลับคืนแล้ว)
+    let why = 'ไม่มีภาพที่ตายืนยันว่าเกี่ยวเลย — ทำปกไม่ได้';
+    if (hiddenAll > 0 && promoAll > 0) {
+      why = `ภาพที่เกี่ยวทั้งหมด ${rawPool.length} ใบ ถูกซ่อน (junkHidden) ${hiddenAll} ใบ + ตัดเป็นภาพโปรโมท/ฉากหลังรก ${promoAll} ใบ — กู้คืน/ตรวจคลังก่อนทำปก`;
+    } else if (promoAll > 0) {
+      why = `ภาพที่เกี่ยวทั้งหมด ${rawPool.length} ใบ ถูกตัดเป็นภาพโปรโมท/ฉากหลังรกหมด — ตรวจคลังก่อนทำปก`;
+    } else if (hiddenAll >= rawPool.length) {
+      why = `ภาพที่เกี่ยวทั้งหมด ${rawPool.length} ใบ ถูกตั้งธงซ่อน (junkHidden) หมด — กู้คืนบางใบก่อนทำปก`;
+    }
+    return { status: 'failed', nextAction: 'fail', summary: why, quality: 'red' };
   }
 
   // metadata กะทัดรัด (สะอาดก่อน → คุณภาพสูงก่อน · เพดาน 80 ใบกัน prompt บวม)
@@ -3971,27 +4024,56 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   //       (brain serialize ทุก field ของ meta row เป็น JSON — ไม่แตะ megaBrains) → สมองเลี่ยงเลือกรูปครอปแตกเป็น hero
   //   OFF (==='0') = ไม่มี guard/ไม่มี field/ไม่มี log ใหม่แม้ byte เดียว (เส้น OFF ข้ามทั้งบล็อก)
   const _cropPrefilterOn = process.env.MEGA_CROP_PREFILTER !== '0';
+  // ★ TIER2 (เคส AC-0196: crop pre-filter แบน 74/77 ใบ "ห้ามเป็น hero" — เหลือ hero จริงแค่ ~3 ใบ จำใจใช้ภาพคู่):
+  //   (1) เพดานยืด hero override ได้ผ่าน env MEGA_HERO_UPSCALE_MAX (parseFloat, clamp เข้าช่วงปลอดภัย [1.0,1.6]
+  //       เกิน/ต่ำกว่าช่วง = ดึงเข้าขอบที่ใกล้สุด + log เตือน) — ค่า default ใหม่ (ไม่ตั้ง env) = 1.35 (ของเดิม
+  //       cropGuard.js = 1.2 ผูกกับ renderer) · ตั้งค่า env กลับเป็น 1.2 = พฤติกรรมเดิมเป๊ะ · invalid/ว่าง = 1.35
+  //   (2) เคส "วัดขนาดจริงไม่ได้" (hasRealDims=false): เดิม hard-ban (heroEligible=false เสมอ) → ผ่อนเป็น soft
+  //       (heroEligible=true แต่แปะป้ายเตือนแยก heroDimsAvoid ให้สมองเลี่ยงเอง — โค้ดสลับอัตโนมัติชั้น post-brain
+  //       ยังคงกันใบ dims-unknown ออกจากผู้สมัคร "สลับเข้าแทน" เสมอ (ดู candidate filter จุด post-brain ด้านล่าง —
+  //       ต้องวัดขนาดได้จริง+ผ่านเพดานก่อน โค้ดถึงจะสลับเข้าให้อัตโนมัติ) กันคลังที่ ~ครึ่งไม่มีขนาดจริงโดนแบนเหมาเข่ง
+  //       kill-switch เฉพาะข้อนี้: MEGA_HERO_DIMS_SOFT=0 → กลับ hard-ban เดิมเป๊ะ (default ON = soft)
+  //   สวิตช์แม่: MEGA_TIER2_OFF=1 → ปิดทั้งชุด TIER2 (จุดนี้: upscale กลับ 1.2 ตรงๆ ไม่ผ่าน env/clamp, dims กลับ hard
+  //     — pool filter ด้านบนก็อ่านสวิตช์นี้ตัวเดียวกันปิด promo ban ด้วย)
+  const _tier2OffHero = process.env.MEGA_TIER2_OFF === '1';
+  const _heroUpscaleMaxRaw = _tier2OffHero ? 1.2 : parseFloat(process.env.MEGA_HERO_UPSCALE_MAX);
+  let _heroUpscaleMaxEff = Number.isFinite(_heroUpscaleMaxRaw) && _heroUpscaleMaxRaw > 0 ? _heroUpscaleMaxRaw : 1.35;
+  if (!_tier2OffHero && (_heroUpscaleMaxEff < 1.0 || _heroUpscaleMaxEff > 1.6)) {
+    const _clamped = Math.min(1.6, Math.max(1.0, _heroUpscaleMaxEff));
+    console.log(`[MEGA S6] ⚠️ MEGA_HERO_UPSCALE_MAX=${_heroUpscaleMaxEff} นอกช่วงปลอดภัย [1.0,1.6] → clamp เป็น ${_clamped}`);
+    _heroUpscaleMaxEff = _clamped;
+  }
+  const _heroDimsSoftOn = !_tier2OffHero && process.env.MEGA_HERO_DIMS_SOFT !== '0';
   let _cropGuard = null; // ผลด่านครอป (ใช้ต่อ post-brain hard check) · null = ปิด/ไม่มี ref template
   if (_cropPrefilterOn && _refDNA) {
     try {
+      console.log(`[MEGA S6] ⚙️ TIER2 hero-gate เริ่มด่าน: upscaleMax=${_heroUpscaleMaxEff}× dimsSoft=${_heroDimsSoftOn ? 'ON' : 'OFF'}${_tier2OffHero ? ' (MEGA_TIER2_OFF=1 → ปิดทั้งชุด TIER2)' : ''}`);
       const _cgDts = _deps?.dnaToTemplateSpec || (await import('@/lib/refTemplate')).dnaToTemplateSpec;
       const _cgSpec = typeof _cgDts === 'function' ? _cgDts(_refDNA) : null;
       if (_cgSpec) {
-        const { computeCropGuard, HERO_UPSCALE_MAX } = await import('@/lib/cropGuard');
-        _cropGuard = computeCropGuard({ pool: sorted, templateSpec: _cgSpec });
+        const { computeCropGuard } = await import('@/lib/cropGuard');
+        _cropGuard = computeCropGuard({ pool: sorted, templateSpec: _cgSpec, heroUpscaleMax: _heroUpscaleMaxEff, heroDimsSoft: _heroDimsSoftOn });
         if (_cropGuard?.heroSlot) {
           let _cgBlocked = 0;
+          let _cgDimsAvoid = 0;
           for (const m of meta) {
             const g = _cropGuard.byId.get(String(m.id));
-            if (g && g.heroEligible === false) {
+            if (!g) continue;
+            if (g.heroEligible === false) {
               // ป้ายที่สมองอ่านได้จาก JSON row — ระบุตัวเลขยืดจริงเพื่อให้ LLM เข้าใจเหตุผล
+              //   (soft mode: g.hasRealDims=false ไม่มีทางเข้าสาขานี้แล้ว — heroEligible ของเคสนั้นเป็น true เสมอ)
               m.heroCropBlock = g.hasRealDims
-                ? `ห้ามเป็น hero: ครอปช่องหลักต้องยืด ${(g.heroUpscale || 0).toFixed(2)}× (เกินเพดาน ${HERO_UPSCALE_MAX}×)`
+                ? `ห้ามเป็น hero: ครอปช่องหลักต้องยืด ${(g.heroUpscale || 0).toFixed(2)}× (เกินเพดาน ${_heroUpscaleMaxEff}×)`
                 : 'ห้ามเป็น hero: วัดขนาดจริงไม่ได้ (เสี่ยงยืดแตก)';
               _cgBlocked++;
+            } else if (_heroDimsSoftOn && g.hasRealDims === false) {
+              // TIER2 soft: วัดขนาดจริงไม่ได้แต่ไม่ hard-ban — ป้ายแนะนำเฉยๆ (แพทเทิร์นเดียวกับ heroSourceAvoid ด้านล่าง)
+              m.heroDimsAvoid = 'เลี่ยงเป็น hero: วัดขนาดจริงไม่ได้ (เลือกได้เมื่อไม่มีตัวเลือกที่วัดขนาดผ่าน)';
+              _cgDimsAvoid++;
             }
           }
-          if (_cgBlocked) console.log(`[MEGA S6] ✂️ crop pre-filter: ป้าย "ห้ามเป็น hero" ${_cgBlocked}/${meta.length} ใบ (ครอปช่องหลักเกิน ${HERO_UPSCALE_MAX}× / วัดขนาดไม่ได้)`);
+          if (_cgBlocked) console.log(`[MEGA S6] ✂️ crop pre-filter: ป้าย "ห้ามเป็น hero" ${_cgBlocked}/${meta.length} ใบ (ครอปช่องหลักเกิน ${_heroUpscaleMaxEff}×${_heroDimsSoftOn ? '' : ' / วัดขนาดไม่ได้'})`);
+          if (_cgDimsAvoid) console.log(`[MEGA S6] ✂️ crop pre-filter (soft): ป้าย "เลี่ยงเป็น hero: วัดขนาดจริงไม่ได้" ${_cgDimsAvoid}/${meta.length} ใบ (ไม่ตัดพูล)`);
         }
       }
     } catch (e) {
@@ -4606,12 +4688,17 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   }
 
   // ═══ P1/P3 CROP PRE-FILTER · POST-BRAIN HARD CHECK (เลน A · MEGA_CROP_PREFILTER default ON) ═══════════════════════════
-  //   ถ้า assignment ให้ "รูปที่ครอปช่อง hero ไม่ปลอดภัย" (heroEligible=false — ยืดเกิน 1.2× / วัดขนาดไม่ได้) เป็น hero
-  //   → พยายามสลับ (deterministic) ให้ได้ hero ที่ครอปปลอดภัย:
-  //     (a) สลับกับช่องอื่นใน assignment เดียวกันที่ถือรูป heroEligible + เป็นตัวตน hero (และรูป hero เดิมลงช่องนั้นได้)
-  //     (b) ถ้าไม่มี → ดึงรูป heroEligible + ตัวตน hero ที่ยังว่างในพูล อันดับดีสุด (รูปเดิมตกไป backups)
+  //   ถ้า assignment ให้ "รูปที่ครอปช่อง hero ไม่ปลอดภัย" (heroEligible=false — วัดขนาดได้จริงแต่ยืดเกินเพดาน
+  //   _heroUpscaleMaxEff เท่านั้น — TIER2 soft mode: dims-unknown ไม่ทำให้ heroEligible=false อีกต่อไป จึงไม่มีทาง
+  //   เข้าเงื่อนไขนี้จากเหตุ "วัดขนาดไม่ได้" เลย) เป็น hero → พยายามสลับ (deterministic) ให้ได้ hero ที่ครอปปลอดภัย:
+  //     (a) สลับกับช่องอื่นใน assignment เดียวกันที่ถือรูป heroEligible + วัดขนาดได้จริง (hasRealDims) + เป็นตัวตน hero
+  //         (และรูป hero เดิมลงช่องนั้นได้)
+  //     (b) ถ้าไม่มี → ดึงรูป heroEligible + วัดขนาดได้จริง + ตัวตน hero ที่ยังว่างในพูล อันดับดีสุด (รูปเดิมตกไป backups)
   //     (c) สลับไม่ได้เลย → ปล่อยผ่านพร้อมธง cropGuardViolation (ไม่ fail งาน — ให้ QC เดิมตัดสิน) + log ชัด
-  //   จัดอันดับตัวเลือก: edgePenalty น้อยก่อน (หน้าไม่ชิดขอบ) → heroUpscale น้อยก่อน (ยืดน้อย) → ลำดับ sorted เดิม
+  //   ★ TIER2: ผู้สมัคร (a)/(b) ต้อง hasRealDims=true เสมอ (ตัด dims-unknown ออกจากผู้สมัครโดยตั้งใจ แม้ตอนนี้
+  //     heroEligible ของใบ dims-unknown จะเป็น true ในโหมด soft) — soft mode มีไว้ "แค่ป้ายให้สมองอ่าน" ไม่ใช่ไฟเขียว
+  //     ให้โค้ดดีเทอร์มินิสติกสลับเข้าอัตโนมัติแทนโดยไม่มีใครยืนยันว่าไม่ยืดแตกจริง
+  //   จัดอันดับตัวเลือก: วัดขนาดได้จริงมาก่อนเสมอ → edgePenalty น้อยก่อน (หน้าไม่ชิดขอบ) → heroUpscale น้อยก่อน (ยืดน้อย)
   //   ทุกอย่างใต้ try/catch — guard ห้ามทำ S6 พัง · OFF/ไม่มี ref template = ข้ามทั้งบล็อก (_cropGuard===null)
   let _cropGuardPatch = null;
   if (_cropPrefilterOn && _cropGuard && _cropGuard.heroSlot) {
@@ -4632,7 +4719,13 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         ...(STORY_SEL_ON ? { storyFit: storyFitOf(rec) } : {}),
         backups: (Array.isArray(backups) ? backups : []).map(String).slice(0, 3),
       });
-      const _cgRank = (a, b) => (a.edgePenalty - b.edgePenalty) || (a.heroUpscale - b.heroUpscale);
+      // ★ TIER2: จัดอันดับผู้สมัคร — "วัดขนาดได้จริง" ต้องมาก่อนเสมอ (defense-in-depth: แม้ candidate filter ด้านล่าง
+      //   ตัด dims-unknown ออกไปแล้ว ก็ยังกันไว้ชั้นนี้ด้วย เผื่อ _cgRank ถูกเรียกจากที่อื่นในอนาคต) — ใบ dims-unknown
+      //   ไม่มี faceBox (edgePenalty=0 neutral เสมอ) จะได้ไม่ "ชนะ" ใบวัดขนาดจริงที่มี edgePenalty>0 อย่างผิดที่ผิดทาง
+      //   ตามด้วย edgePenalty น้อยก่อน → heroUpscale น้อยก่อน (null = Infinity กันเทียบเลขเป็น NaN)
+      const _cgRank = (a, b) => (Number(!a.hasRealDims) - Number(!b.hasRealDims))
+        || (a.edgePenalty - b.edgePenalty)
+        || ((a.heroUpscale ?? Infinity) - (b.heroUpscale ?? Infinity));
       const heroPick = slots[_canonHeroId];
       const heroGuard = heroPick ? _cropGuard.byId.get(String(heroPick.id)) : null;
       let _cgSwapNote = null;
@@ -4646,7 +4739,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           const p = slots[s]; if (!p) continue;
           const rec = byId.get(String(p.id)); if (!rec) continue;
           const g = _cropGuard.byId.get(String(p.id));
-          if (!g || !g.heroEligible) continue;                 // ช่องนี้ต้องถือรูป hero-safe
+          if (!g || !g.heroEligible || !g.hasRealDims) continue; // ช่องนี้ต้องถือรูป hero-safe + วัดขนาดได้จริง (TIER2: dims-unknown ห้ามเป็นผู้สมัครสลับอัตโนมัติ)
           if (!_identityOk(_canonHeroId, rec)) continue;       // และเป็นตัวตน hero จริง
           // รูป hero เดิมต้องลงช่องเป้าหมายได้ (ถ้าช่องนั้นผูกตัวตนคนอื่น = สลับไม่ได้)
           if (_idGated(s) && !_isHeroSlot(s) && _oldHeroRec && !_identityOk(s, _oldHeroRec)) continue;
@@ -4662,28 +4755,28 @@ export async function s6_slots(job, { origin, _deps } = {}) {
             slots[bestSlot].refSlotId = bestSlot; slots[bestSlot].legacySlot = _projMap.get(bestSlot) ?? null;
           }
           _cgSwapNote = `swap-in-plan hero ${_heroEntry.id}→${_tgtEntry.id} (⇄ ช่อง ${bestSlot})`;
-          console.log(`[MEGA S6] ✂️ crop guard: hero ${_heroEntry.id} ครอปเกิน 1.2× → สลับกับช่อง ${bestSlot} (${_tgtEntry.id} crop-safe คนเดียวกัน) ก่อน queue`);
+          console.log(`[MEGA S6] ✂️ crop guard: hero ${_heroEntry.id} ครอปเกิน ${_heroUpscaleMaxEff}× → สลับกับช่อง ${bestSlot} (${_tgtEntry.id} crop-safe คนเดียวกัน) ก่อน queue`);
         } else {
           // (b) ดึงจากพูลที่ยังว่าง
           const cand = sorted
             .filter((x) => x && !used.has(String(x.id)) && String(x.id) !== String(heroPick.id) && _identityOk(_canonHeroId, x))
             .map((x) => ({ x, g: _cropGuard.byId.get(String(x.id)) }))
-            .filter((o) => o.g && o.g.heroEligible)
+            .filter((o) => o.g && o.g.heroEligible && o.g.hasRealDims) // TIER2: dims-unknown ห้ามเป็นผู้สมัครสลับอัตโนมัติ
             .sort((A, B) => _cgRank(A.g, B.g))[0];
           if (cand) {
             const _old = slots[_canonHeroId];
             used.add(String(cand.x.id));
             slots[_canonHeroId] = _cgBuildEntry(
               _canonHeroId, cand.x,
-              `crop guard hero reselection (แทน ${_old.id} ที่ครอปช่อง hero เกิน 1.2×)`,
+              `crop guard hero reselection (แทน ${_old.id} ที่ครอปช่อง hero เกิน ${_heroUpscaleMaxEff}×)`,
               [String(_old.id), ...((_old.backups || []).map(String))],
             );
             _cgSwapNote = `reselect-from-pool hero ${_old.id}→${cand.x.id}`;
-            console.log(`[MEGA S6] ✂️ crop guard: hero ${_old.id} ครอปเกิน 1.2× → เลือกใหม่จากพูล ${cand.x.id} (crop-safe อันดับดีสุด) ก่อน queue`);
+            console.log(`[MEGA S6] ✂️ crop guard: hero ${_old.id} ครอปเกิน ${_heroUpscaleMaxEff}× → เลือกใหม่จากพูล ${cand.x.id} (crop-safe อันดับดีสุด) ก่อน queue`);
           } else {
             // (c) ไม่มีทางเลือก crop-safe เลย → ปล่อยผ่านพร้อมธง (QC เดิมตัดสิน)
             _cgViolation = true;
-            console.log(`[MEGA S6] ✂️⚠️ crop guard: hero ${heroPick.id} ครอปเกิน 1.2× แต่ไม่มีตัวเลือก crop-safe ในแผน/พูล → ปล่อยผ่านพร้อมธง cropGuardViolation (QC ตัดสิน)`);
+            console.log(`[MEGA S6] ✂️⚠️ crop guard: hero ${heroPick.id} ครอปเกิน ${_heroUpscaleMaxEff}× แต่ไม่มีตัวเลือก crop-safe ในแผน/พูล → ปล่อยผ่านพร้อมธง cropGuardViolation (QC ตัดสิน)`);
           }
         }
       }

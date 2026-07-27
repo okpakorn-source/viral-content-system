@@ -10,6 +10,10 @@
 
 import { callAI } from '@/lib/ai/openai';
 
+// ★ 27 ก.ค. 69 (เจ้าของสั่ง "ไม่เอา gpt-4o ขอ 5.6"): สมองสกัด DNA ปก ref เปลี่ยนเป็นตระกูล 5.6
+//   (vision ผ่าน callAI ตัวเดียวกับ faceDetector ที่ใช้ gpt-5.6-luna พิสูจน์แล้ว) — override ได้ผ่าน env
+const REF_DNA_MODEL = process.env.REF_DNA_MODEL || 'gpt-5.6-terra';
+
 const SYSTEM = `คุณคือผู้เชี่ยวชาญออกแบบ "ปกข่าวไวรัลไทย" (คอลลาจหลายภาพ) — งานคือ "ถอดแบบ" ปกตัวอย่างที่ให้มาให้ละเอียดที่สุด เป็นชุดข้อมูลที่เอาไปสร้างปกใหม่แนวเดียวกันได้จริง
 มองภาพจริงเท่านั้น · ประเมินพิกัด/สัดส่วนเป็น % ของทั้งปก (0-100) ให้แม่นที่สุดเท่าที่ตาเห็น · ตอบ JSON ล้วนตาม schema (ไม่มีข้อความอื่น):
 {
@@ -67,9 +71,9 @@ export async function extractCoverDNA(dataUrl) {
     systemPrompt: SYSTEM,
     userPrompt: 'ถอดแบบปกนี้เป็นชุดข้อมูลครบตาม schema (รวม template พิกัด % ที่ render ได้จริง) — ตอบ JSON ล้วนเท่านั้น',
     imageContents: [{ type: 'image_url', image_url: { url: dataUrl, detail: 'high' } }],
-    model: 'gpt-4o',
+    model: REF_DNA_MODEL,
     temperature: 0.2,
-    maxTokens: 2500,
+    maxTokens: 8000, // 5.6 เป็น reasoning model — เพดานต่ำ=ตอบว่าง (บทเรียนเดียวกับ megaBrains 27 ก.ค.)
   });
   let dna;
   if (res && typeof res === 'object' && (res.layoutType || res.template || res.layout)) dna = res;
@@ -111,9 +115,9 @@ export async function extractCoverDNA(dataUrl) {
         systemPrompt: GEO_SYSTEM,
         userPrompt: `ร่างวัดรอบแรก (อาจนับภาพขาด/ควบภาพ — เริ่มนับใหม่จากภาพจริงตามขั้น 1 ก่อนเสมอ):\n${draft}${extraNote ? `\n\n⚠️ ${extraNote}` : ''}`,
         imageContents: [{ type: 'image_url', image_url: { url: dataUrl, detail: 'high' } }],
-        model: 'gpt-4o',
+        model: REF_DNA_MODEL,
         temperature: 0.1,
-        maxTokens: 1600,
+        maxTokens: 6000, // reasoning headroom (บทเรียน 27 ก.ค.)
       });
       if (geo && typeof geo === 'object' && Array.isArray(geo.slots)) return geo;
       const raw2 = typeof geo === 'string' ? geo : (geo?.text || '');
