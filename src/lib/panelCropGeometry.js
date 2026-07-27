@@ -70,14 +70,21 @@ function _boxInside1D(boxMin, boxMax, start, size, margin) {
  * หา start (left/top) ที่ "เลื่อนน้อยสุดจาก pref" โดยให้กล่อง [boxMin,boxMax] อยู่ในกรอบขนาด size
  * เว้นขอบ margin + ไม่หลุดภาพ [0, imgSize]
  * คืน { start, covered } — covered=false เมื่อภาพเล็ก/หน้าชิดขอบจนคลุม+margin ไม่ได้
+ * ★ MEGA_SUBSLOT_CENTER (27 ก.ค. 69 — ปกจริงบนคลาวด์: หน้าคน 2 คนกองชิดขอบขวาช่อง เหลือพื้นหลังโล่งซ้าย):
+ *   เดิม anchor = pref (ตำแหน่ง region ปัจจุบัน) → ได้ผลแค่ "เลื่อนน้อยสุดให้หน้าอยู่ในกรอบ" ไม่ได้กึ่งกลางจริง
+ *   centerMode=true → anchor = จุดกึ่งกลางกล่องหน้าลบครึ่ง size (ตำแหน่งที่กล่องหน้าจะอยู่กึ่งกลางเป๊ะถ้าไม่ติดขอบ)
+ *   แล้ว _clamp เดิมเข้ากรอบ [lo,hi]/ภาพเหมือนเดิมทุกจุด — ถ้ากึ่งกลางแล้วยังอยู่ในกรอบ valid ก็ได้กึ่งกลางเป๊ะ
+ *   ถ้าชนขอบภาพ/กรอบ margin จริงๆ clamp จะดึงมาชิดขอบเท่าที่ได้ (พฤติกรรม fallback ตรงตามที่สั่ง)
+ *   default false = byte-parity เดิมเป๊ะทุกจุดเรียกเดิม (ต้องส่ง true ชัดเจนเท่านั้นถึงเปลี่ยน)
  */
-function _place1D(boxMin, boxMax, size, margin, imgSize, pref) {
+function _place1D(boxMin, boxMax, size, margin, imgSize, pref, centerMode = false) {
   // เงื่อนไข: start ≤ boxMin - margin  และ  start ≥ boxMax + margin - size
   let lo = boxMax + margin - size;
   let hi = boxMin - margin;
   if (lo > hi) { lo = boxMax - size; hi = boxMin; }        // margin ไม่พอ → อย่างน้อยคลุมกล่อง
   if (lo > hi) { const c = (boxMin + boxMax) / 2 - size / 2; lo = c; hi = c; } // กล่องใหญ่กว่ากรอบ → จัดกึ่งกลาง
-  let start = _clamp(pref, lo, hi);
+  const anchor = centerMode ? ((boxMin + boxMax) / 2 - size / 2) : pref;
+  let start = _clamp(anchor, lo, hi);
   start = _clamp(start, 0, Math.max(0, imgSize - size));
   const covered = _boxInside1D(boxMin, boxMax, start, size, margin);
   return { start, covered };
@@ -93,7 +100,7 @@ function _place1D(boxMin, boxMax, size, margin, imgSize, pref) {
  */
 export function refineRegionForFace({
   region, faceBox, imgW, imgH, slotAspect,
-  band = [18, 60], edgeMarginPct = 0.06, headPad = { x: 0.20, top: 0.42, bottom: 0.32 },
+  band = [18, 60], edgeMarginPct = 0.06, headPad = { x: 0.20, top: 0.42, bottom: 0.32 }, centerMode = false,
 }) {
   if (!region || !region.height || !faceBox || !(faceBox.x2 > faceBox.x1) || !(faceBox.y2 > faceBox.y1)
     || !(imgW > 0) || !(imgH > 0) || !(slotAspect > 0)) {
@@ -125,8 +132,8 @@ export function refineRegionForFace({
   if (H > imgH) { H = imgH; W = H * slotAspect; }
 
   // ── (2) วางตำแหน่งเลื่อนน้อยสุด ให้หัวอยู่ในกรอบ + margin + ไม่หลุดภาพ ──
-  const posX = _place1D(head.minX, head.maxX, W, edgeMarginPct * W, imgW, region.left);
-  const posY = _place1D(head.minY, head.maxY, H, edgeMarginPct * H, imgH, region.top);
+  const posX = _place1D(head.minX, head.maxX, W, edgeMarginPct * W, imgW, region.left, centerMode);
+  const posY = _place1D(head.minY, head.maxY, H, edgeMarginPct * H, imgH, region.top, centerMode);
 
   const out = {
     left: Math.round(posX.start),
@@ -154,7 +161,7 @@ export function refineRegionForFace({
  */
 export function refineRegionForFaces({
   region, faces, imgW, imgH, slotAspect,
-  band = [18, 60], edgeMarginPct = 0.06, headPad = { x: 0.20, top: 0.42, bottom: 0.32 },
+  band = [18, 60], edgeMarginPct = 0.06, headPad = { x: 0.20, top: 0.42, bottom: 0.32 }, centerMode = false,
 }) {
   const valid = Array.isArray(faces)
     ? faces.filter((f) => f && f.x2 > f.x1 && f.y2 > f.y1)
@@ -164,7 +171,7 @@ export function refineRegionForFaces({
   }
   // ── 1 หน้า = เส้น refineRegionForFace เดิมเป๊ะ (delegate — ห้าม regress) ──
   if (valid.length === 1) {
-    const r = refineRegionForFace({ region, faceBox: valid[0], imgW, imgH, slotAspect, band, edgeMarginPct, headPad });
+    const r = refineRegionForFace({ region, faceBox: valid[0], imgW, imgH, slotAspect, band, edgeMarginPct, headPad, centerMode });
     return { ...r, ok: r.reason !== 'no-face-or-bad-input' && r.reason !== 'no-face' };
   }
   const [bandLo, bandHi] = band[0] <= band[1] ? band : [band[1], band[0]];
@@ -214,8 +221,8 @@ export function refineRegionForFaces({
   if (H > imgH) { H = imgH; W = H * slotAspect; }
 
   // ── (2) วางตำแหน่ง: คลุม union + margin + ไม่หลุดภาพ (เลื่อนน้อยสุดจาก region เดิม) ──
-  const posX = _place1D(uMinX, uMaxX, W, edgeMarginPct * W, imgW, region.left);
-  const posY = _place1D(uMinY, uMaxY, H, edgeMarginPct * H, imgH, region.top);
+  const posX = _place1D(uMinX, uMaxX, W, edgeMarginPct * W, imgW, region.left, centerMode);
+  const posY = _place1D(uMinY, uMaxY, H, edgeMarginPct * H, imgH, region.top, centerMode);
 
   const out = {
     left: Math.round(posX.start),

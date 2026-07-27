@@ -381,6 +381,21 @@ const GAP_SEARCH_MAX_QUERIES = 5;
 // ★ Wave2 B1: ค่านี้ย้ายไป imageQualityConfig.js (single source of truth) — ค่าเดิมเป๊ะ (=2)
 const GAP_SEARCH_MIN_HERO_PER_PERSON = GAP_SEARCH_MIN_HERO_PER_PERSON_CFG;
 const GAP_SEARCH_MIN_SCENE = 3;
+// ★ MEGA_HERO_GAP_CLOSEUP (เคส AC-0197 27 ก.ค. 69 — ตัวเอก "ม่วย" มีภาพเดี่ยวสะอาดใบเดียวในพูลทั้งเคส เป็น
+//   พอร์เทรตครึ่งตัว หน้าไม่ใหญ่พอ, _heroGradeOf เดิมผ่าน (เช็คแค่ขนาดภาพรวม/ความคม) แต่ไม่เคยเช็คสัดส่วน "หน้า"
+//   ในเฟรมเลย — แกน (ก)/(ข) เดิมด้านล่างจึงไม่จับเคสนี้): ทริกเกอร์ใหม่แยกต่างหาก — ตัวเอกหลัก (hero-authority
+//   person จาก _heroRoleNamesOf เดียวกับ hard gate ท้ายฟังก์ชัน) ไม่มีภาพเดี่ยวสะอาด faceCount=1 ที่ "หน้าใหญ่พอ"
+//   (ไม่มีเลย หรือมีแต่ faceH ต่ำกว่าเกณฑ์) → ยิงค้นเสริม 1 รอบ คำค้นตรงชื่อจริงเท่านั้น (ห้ามเดา) เพดานภาพใหม่
+//   ≤HERO_GAP_CLOSEUP_MAX_IMAGES ผ่านตา (vetImages)/ค้น (searchImages)/เก็บ (addImages) เดิมทั้งหมด — ไม่เขียน
+//   ตัวค้น/ตัวกรองใหม่ · รันครั้งเดียวพร้อมแกน (ก)/(ข) ในรอบเดียวกัน (การันตี "1 รอบ/เคส" จาก gapSearchDone gate
+//   เดิมด้านบนอยู่แล้ว ไม่ต้องมีธงแยก) · default ON · MEGA_HERO_GAP_CLOSEUP=0 → ไม่มีทริกเกอร์นี้เลย ไม่มี log แม้บรรทัดเดียว
+//   ★ ตั้งใจเขียนเป็นฟังก์ชัน (ไม่ใช่ module-level const แบบ GAP_SEARCH_ON ข้างบน) — อ่าน env สดทุกครั้งที่เรียก
+//   ให้เทส toggle เปิด/ปิดกลางไฟล์เดียวกันได้ (แพตเทิร์นเดียวกับ _heroCropGuardOn ใน coverExecutorService.js)
+function _heroGapCloseupOn() { return process.env.MEGA_HERO_GAP_CLOSEUP !== '0'; }
+const HERO_GAP_CLOSEUP_MAX_IMAGES = 12;
+// หน้าใหญ่พอ = faceH (สัดส่วนสูงหน้า/เฟรม 0-1) ไม่ต่ำกว่าขอบล่างย่าน HERO_FACE_SHARE (imageQualityConfig, 30%)
+//   เผื่อ margin เพราะยังไม่ผ่านครอปจริง (ค่านี้วัดจากภาพดิบทั้งใบ ไม่ใช่หลังครอปเข้าช่อง)
+const HERO_GAP_CLOSEUP_MIN_FACE_H = 0.22;
 // ★ Wave2 Batch B1 (10 ก.ค. — _PLAN_MEGA_V2.md Wave2 ข้อ 2): hero-grade <GAP_SEARCH_MIN_HERO_PER_PERSON
 //   ต่อ "คนหลัก" (role=hero ในเข็มทิศ) หลังค้นรอบสอง (s5_gapsearch) จบแล้ว = จบงานด้วย holdStatus
 //   'insufficient_assets' (เดิม continue เสมอ ไม่มีทางหยุด) — ปิดกลับพฤติกรรมเดิม: MEGA_HERO_GRADE_HARD=0
@@ -454,6 +469,38 @@ function _heroRoleNamesOf(job) {
   const hs = chars.filter((c) => /hero/i.test(String(c?.role || ''))).map((c) => c?.name).filter(Boolean);
   if (hs.length) return hs;
   return chars.length && chars[0]?.name ? [chars[0].name] : [];
+}
+
+// ★ MEGA_HERO_GAP_CLOSEUP: สัดส่วนสูงหน้า (0-1) จาก triage.faceBox — สำเนาย่อของ _faceHFrac ที่ใช้ใน s6_slots
+//   (ที่นั่นเป็น local ผูก scope ของฟังก์ชันนั้นๆ ไม่ export จึงเรียกจากนี่ไม่ได้ — เขียนสำเนา pure เบาๆ ต่างหาก
+//   ไม่แตะของเดิม) รับได้ทั้งสคีมา {x,y,w,h} (h=สูงหน้า) และ {x1,y1,x2,y2} — วัดไม่ได้/รูปแบบแปลก = null (ไม่เดา)
+function _faceHFracOf(fb) {
+  if (!fb || typeof fb !== 'object') return null;
+  const h = Number(fb.h);
+  if (Number.isFinite(h) && h > 0 && h <= 1.0001) return Math.min(1, h);
+  const y1 = Number(fb.y1), y2 = Number(fb.y2);
+  if (Number.isFinite(y1) && Number.isFinite(y2) && y2 > y1 && y2 <= 1.0001) return Math.min(1, y2 - y1);
+  return null;
+}
+
+// ★ MEGA_HERO_GAP_CLOSEUP (เคส AC-0197 27 ก.ค. 69): ตัวเอกหลัก (ตัวเดียวกับ _heroRoleNamesOf — ไม่มี = คืน null
+//   ข้ามด่านนี้ กันโดนยิงค้นผิดคน/ไม่มีเกณฑ์จะวัด) ไม่มีภาพเดี่ยวสะอาด faceCount=1 หน้าใหญ่พอ (_heroGradeOf ผ่าน
+//   + faceH วัดได้ + faceH ≥ HERO_GAP_CLOSEUP_MIN_FACE_H) เลยสักใบ → คืน { name } ให้ผู้เรียกไปสร้างคำค้น
+//   ★ ตั้งใจใช้ "ตัวเอกหลัก" ตัวเดียว (heroNames[0]) ไม่ใช่ทุกคนใน mainCharacters — ตามสเปคที่สั่ง (ต่างจาก
+//   แกน (ก) heroGaps เดิมที่วนทุกคนใน mainChars) · คืน null = มีโคลสอัพอยู่แล้ว (ไม่ต้องยิงค้นเสริม)
+// ★ export (แค่เปลี่ยน visibility ไม่แตะ logic) — ให้เทสยูนิตตรงเงื่อนไขทริกเกอร์ได้โดยไม่ต้องผ่านทั้ง s5_gapsearch
+export function _heroCloseupGapFor(job, libImages) {
+  const heroNames = _heroRoleNamesOf(job);
+  if (!heroNames.length) return null;
+  const name = heroNames[0];
+  const hasCloseup = (libImages || []).some((x) => {
+    if (!_heroGradeOf(x)) return false;
+    const ps = [x.triage?.person, ...(x.triage?.persons || [])].filter(Boolean);
+    if (!ps.some((p) => _namesMatchSimple(p, name))) return false;
+    const fh = _faceHFracOf(x.triage?.faceBox);
+    return Number.isFinite(fh) && fh >= HERO_GAP_CLOSEUP_MIN_FACE_H;
+  });
+  return hasCloseup ? null : { name };
 }
 
 // ★ Wave2 Batch B1: ตัดสิน hard gate ท้าย s5_gapsearch — คืน null = ผ่าน/ไม่มีเกณฑ์จะวัด (ไม่แตะ path เดิม)
@@ -1379,6 +1426,67 @@ export async function s5_gapsearch(job, { origin, _deps } = {}) {
     libImages = lib?.images || [];
   } catch {
     return { status: 'done', nextAction: 'continue', summary: 'ค้นรอบสอง: อ่านคลังไม่ได้ — ข้าม', dossierPatch: { images: { ...im, gapSearchDone: true } } };
+  }
+
+  // ★ MEGA_HERO_GAP_CLOSEUP (เคส AC-0197 27 ก.ค. 69) — ทริกเกอร์แยกจากแกน (ก)/(ข) ด้านล่าง: รันครั้งเดียวในรอบ
+  //   นี้ (การันตี "1 รอบ/เคส" จาก gapSearchDone gate ด้านบนอยู่แล้ว — ไม่มีธงแยก) ก่อนแกน (ก)/(ข) เดิม เพื่อให้
+  //   ภาพที่เพิ่งเก็บเข้ามาถูกนับรวมในแกนเดิมด้วย (กันยิงค้นซ้ำคนเดิมสองรอบในรอบเดียวกัน) · ล้ม/ไม่มีตัวเอกชัด/
+  //   มีโคลสอัพอยู่แล้ว = ข้ามเงียบ ไม่ถ่วงสายพาน (เหมือน pattern เดิมทั้งฟังก์ชัน) · 🔴 ค้นภาพจริงเท่านั้น — ห้าม
+  //   เจน/สังเคราะห์ภาพทุกกรณี (กฎเหล็ก AGENTS.md §6) — ใช้ searchImages/vetImages/addImages เดิมทั้งหมด
+  if (_heroGapCloseupOn()) {
+    const _cg = _heroCloseupGapFor(job, libImages);
+    if (_cg) {
+      let _cgAdded = 0;
+      try {
+        const { searchImages } = await import('@/lib/imageSearch');
+        const { isCatalogSource, isOwnPageSource, isMismatchedFbMedia } = await import('@/lib/junkSources');
+        const { vetImages } = await import('@/lib/libraryTriage');
+        const { addImages } = await import('@/lib/imageStore');
+        const { getCase } = await import('@/lib/caseStore');
+
+        // คำค้นตรงชื่อจริงเท่านั้น (ห้ามเดา) — deterministic ไม่ผ่านสมอง (ต่างจากแกน (ก)/(ข) ที่ให้ callBrain แต่งคำค้น)
+        const closeupQueries = [`${_cg.name} สัมภาษณ์`, `${_cg.name} ใบหน้า โคลสอัพ`];
+        const seenUrls = new Set(libImages.map((x) => x.imageUrl));
+        const collected = [];
+        outer: for (const q of closeupQueries) {
+          for (const platform of ['google', 'google_news']) {
+            try {
+              const imgs = await searchImages(platform, q, { num: 15, caseId: im.caseId });
+              for (const x of imgs) {
+                if (collected.length >= HERO_GAP_CLOSEUP_MAX_IMAGES) break outer;
+                if (!x.imageUrl || seenUrls.has(x.imageUrl)) continue;
+                if (isCatalogSource(x) || isOwnPageSource(x) || isMismatchedFbMedia(x)) continue;
+                seenUrls.add(x.imageUrl);
+                collected.push({ ...x, platform, query: q });
+              }
+            } catch { /* แหล่งย่อยล้ม = ข้าม ไม่ถ่วงสายพาน (เหมือนแกน (ก)/(ข) ด้านล่าง) */ }
+          }
+        }
+
+        if (collected.length) {
+          const c = await getCase(im.caseId);
+          const chars = c?.analysis?.characters || [];
+          const genderOf = (nm) => {
+            const n = (nm || '').trim();
+            const hit = chars.find((ch) => ch.name === n || (ch.name && (n.includes(ch.name) || ch.name.includes(n))));
+            return hit?.gender || '';
+          };
+          const subjects = (c?.keywords?.subjects || []).map((s) => ({ ...s, gender: s.gender || genderOf(s.name) }));
+          const newsGist = String(c?.newsText || c?.analysis?.content || c?.analysis?.summary || c?.newsSnippet || '').slice(0, 1800);
+          let toStoreCloseup = collected;
+          try {
+            const { vetted } = await vetImages({ images: collected, subjects, newsGist, caseId: im.caseId });
+            const anyTag = vetted.some((x) => x.triage);
+            toStoreCloseup = anyTag ? vetted.filter((x) => x.triage?.relevant !== false) : vetted;
+          } catch { /* ตาล้ม = เก็บดิบไปก่อน (เหมือนแกน (ก)/(ข)) */ }
+          toStoreCloseup = toStoreCloseup.slice(0, HERO_GAP_CLOSEUP_MAX_IMAGES); // เพดาน ≤12 ใบ ตามสเปค
+          const saved = await addImages(im.caseId, toStoreCloseup);
+          _cgAdded = saved.added || 0;
+          if (_cgAdded > 0) libImages = [...libImages, ...toStoreCloseup]; // ให้แกน (ก)/(ข) ด้านล่างเห็นภาพที่เพิ่งเพิ่ม
+        }
+      } catch { /* ยิง/เก็บล้มทั้งขั้น = ข้าม (log ยังต้องออกตามสเปคแม้ผลเป็น 0) */ }
+      console.log(`🔎 gap-closeup: ตัวเอก ${_cg.name} ไม่มีโคลสอัพ → ค้นเพิ่ม ${_cgAdded} ใบ`);
+    }
   }
 
   // แกน (ก) hero-grade จริงต่อคนหลัก: clean + faceCount==1 + ไม่ใช่ thumbnail-only + ขนาดจริง/ความคมพอ
@@ -3085,6 +3193,10 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   //   เอง) แล้วส่ง storyRulesOn เข้า artBriefBrain/slotDirectorBrain ทั้งคู่ · default ON · MEGA_STORY_RULES=0
   //   → prompt ทั้งสองตัว byte-identical กับก่อน TIER3
   const _storyRulesOn = process.env.MEGA_STORY_RULES !== '0';
+  // ★ ตรวจซ้ำ (28 ก.ค. 69 — คัมภีร์เพจฉบับเต็ม, กฎเหล็กเจ้าของ): แพทเทิร์นเดียวกับ _storyRulesOn เป๊ะ — อ่าน env
+  //   ที่นี่ (megaBrains.js ไม่อ่าน process.env เอง) แล้วส่ง pagePlaybookOn เข้าทั้งสอง brain · default ON ·
+  //   MEGA_PAGE_PLAYBOOK=0 → prompt ทั้งสองตัว byte-identical กับก่อนแทรกคัมภีร์เป๊ะ
+  const _pagePlaybookOn = process.env.MEGA_PAGE_PLAYBOOK !== '0';
   // ═══ D-sidecar — FINAL-DECISION EVIDENCE v2 (kill switch MEGA_FINAL_DECISION_EVIDENCE_V2='1' เป๊ะ) ═══
   //   latch "ครั้งเดียวก่อน await แรกของฟังก์ชัน" (TOCTOU-proof — flip env กลางทางไม่มีผล) ·
   //   OFF = inert เต็มตัว: ไม่มี dynamic import โมดูล D / ไม่อ่าน carrier-วินิจฉัยใด / ไม่มี field-log ใหม่ —
@@ -3539,11 +3651,21 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     //   (ปิดสวิตช์/ตาไม่ส่ง busy มา = ไม่ใส่ field เลย → prompt เดิมเป๊ะ ไม่ regress)
     ...(CLUTTER_GUARD_ON ? { busy: (() => { const v = Number(x.triage?.busy); return Number.isFinite(v) ? Math.max(0, Math.min(2, v)) : undefined; })() } : {}),
   }));
-  // ★ Wave3 Phase1: mirror เพดาน prompt ของ slotDirectorBrain (megaBrains.js IMG_META_BUDGET=18000)
+  // ★ Wave3 Phase1: mirror เพดาน prompt ของ slotDirectorBrain (megaBrains.js IMG_META_BUDGET)
   //   เพื่อบันทึกความจริงว่า LLM เห็นกี่ id โดยไม่เปลี่ยน candidate/ลำดับ/ผลเลือกเดิม หากค่าต้นทางเปลี่ยนต้องแก้ mirror นี้พร้อมกัน
   //   ★ Codex D P1 (candidate-universe honesty รอบ 2): แกน mirror จุดเดียว — ค่างบ + serialization ต่อใบ ใช้ร่วมทุกผู้บริโภค
   //     ห้ามพิสูจน์จากสิ่งที่ brain fn (จริง/ฉีดเทส) รายงานเอง
-  const IMG_META_BUDGET_MIRROR = 18000; // ต้องเท่ากับ IMG_META_BUDGET ใน megaBrains.js เสมอ (แก้ที่โน่นต้องแก้ที่นี่คู่กัน)
+  // ★ ข้อ 6 (27 ก.ค. 69 — เจ้าของจับได้จากล็อกจริง: สมองเห็นแค่ 39-58/77-80 ใบ เพราะงบ 18000 เดิมคับแคบเกินไป):
+  //   อ่านได้จาก env MEGA_IMG_META_BUDGET (parseInt, clamp เข้าช่วงปลอดภัย [10000,80000] — เกิน/ต่ำกว่าดึงเข้าขอบใกล้สุด
+  //   + log เตือน แพทเทิร์นเดียวกับ MEGA_HERO_UPSCALE_MAX) · ไม่ตั้ง/พังรูปแบบ = default ใหม่ 45000 (เดิม 18000)
+  //   ★ ค่านี้ต้องเท่ากับ imgMetaBudget ที่ส่งให้ _brainFn ด้านล่างเสมอ (มาจากตัวแปรเดียวกัน กันหลุด sync)
+  const _imgMetaBudgetRaw = parseInt(process.env.MEGA_IMG_META_BUDGET, 10);
+  let IMG_META_BUDGET_MIRROR = Number.isFinite(_imgMetaBudgetRaw) && _imgMetaBudgetRaw > 0 ? _imgMetaBudgetRaw : 45000;
+  if (IMG_META_BUDGET_MIRROR < 10000 || IMG_META_BUDGET_MIRROR > 80000) {
+    const _imgBudgetClamped = Math.min(80000, Math.max(10000, IMG_META_BUDGET_MIRROR));
+    console.log(`[MEGA S6] ⚠️ MEGA_IMG_META_BUDGET=${IMG_META_BUDGET_MIRROR} นอกช่วงปลอดภัย [10000,80000] → clamp เป็น ${_imgBudgetClamped}`);
+    IMG_META_BUDGET_MIRROR = _imgBudgetClamped;
+  }
   const _promptLineOf = (m) => JSON.stringify(m); // canonical per-row serialization — single source (solver-diag + D-sidecar)
   // FROZEN PROOF ของ D-sidecar: serialize "ทุกใบ" เหมือน production เป๊ะ (megaBrains .map ทุกใบก่อนคิดงบ — ไม่ break กลางคัน)
   //   + บัญชี byte เต็ม (บรรทัดจริงทุกแถว · งบ len+2 สะสม) + id ต่อใบ (primitive-only ผ่าน _dIdOf) · deep-frozen กันแก้ทีหลัง
@@ -3726,6 +3848,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         typeMatched: !!job.dossier.refMatch.typeMatched,
         ...(_armTemplateV1 && _semPrereqOn ? { mode: 'template_v1' } : {}), // legacy = ไม่ส่ง mode (arg เดิมเป๊ะ)
         storyRulesOn: _storyRulesOn, // ★ TIER3
+        pagePlaybookOn: _pagePlaybookOn, // ★ ตรวจซ้ำ 28 ก.ค. 69: คัมภีร์เพจฉบับเต็ม
       });
       if (_armTemplateV1 && _semPrereqOn) {
         // ★ P0/P1: normalize marker ที่ generate มาครั้งเดียว — invalid = HOLD · valid = แทน raw ด้วย canonical plain clone
@@ -4073,12 +4196,14 @@ export async function s6_slots(job, { origin, _deps } = {}) {
               _cgBlocked++;
             } else if (_heroDimsSoftOn && g.hasRealDims === false) {
               // TIER2 soft: วัดขนาดจริงไม่ได้แต่ไม่ hard-ban — ป้ายแนะนำเฉยๆ (แพทเทิร์นเดียวกับ heroSourceAvoid ด้านล่าง)
-              m.heroDimsAvoid = 'เลี่ยงเป็น hero: วัดขนาดจริงไม่ได้ (เลือกได้เมื่อไม่มีตัวเลือกที่วัดขนาดผ่าน)';
+              // ★ ข้อ 6 (27 ก.ค. 69): ย่อป้ายให้สั้นลง (เดิม 'เลี่ยงเป็น hero: วัดขนาดจริงไม่ได้ (เลือกได้เมื่อไม่มีตัวเลือกที่วัดขนาดผ่าน)')
+              //   — ใจความเดิมครบ (เลี่ยง/เงื่อนไขเลือกได้ยังสื่อในตัวจากป้าย soft นี้เอง ไม่ใช่ hard-ban) แค่สั้นลงกันงบ prompt บวม
+              m.heroDimsAvoid = 'เลี่ยง hero: วัดขนาดไม่ได้';
               _cgDimsAvoid++;
             }
           }
           if (_cgBlocked) console.log(`[MEGA S6] ✂️ crop pre-filter: ป้าย "ห้ามเป็น hero" ${_cgBlocked}/${meta.length} ใบ (ครอปช่องหลักเกิน ${_heroUpscaleMaxEff}×${_heroDimsSoftOn ? '' : ' / วัดขนาดไม่ได้'})`);
-          if (_cgDimsAvoid) console.log(`[MEGA S6] ✂️ crop pre-filter (soft): ป้าย "เลี่ยงเป็น hero: วัดขนาดจริงไม่ได้" ${_cgDimsAvoid}/${meta.length} ใบ (ไม่ตัดพูล)`);
+          if (_cgDimsAvoid) console.log(`[MEGA S6] ✂️ crop pre-filter (soft): ป้าย "เลี่ยง hero: วัดขนาดไม่ได้" ${_cgDimsAvoid}/${meta.length} ใบ (ไม่ตัดพูล)`);
         }
       }
     } catch (e) {
@@ -4111,7 +4236,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   let brain = { slots: {}, note: '' };
   let brainOk = true;
   try {
-    brain = await _brainFn({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title, refDNA: _refDNA, artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) || null, sceneInventory, ...(semContract ? { slotContract: semContract.slots } : {}), storyRulesOn: _storyRulesOn }); // เฟส 3.1: สมองเห็นแผนที่ฉาก · SEM-1: ส่งสัญญาช่องเมื่อ semantic ON เท่านั้น (OFF = args เดิมเป๊ะ) · ★ D3-B3.3: template path ใช้ local snapshot · ★ TIER3: storyRulesOn
+    brain = await _brainFn({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title, refDNA: _refDNA, artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) || null, sceneInventory, ...(semContract ? { slotContract: semContract.slots } : {}), storyRulesOn: _storyRulesOn, pagePlaybookOn: _pagePlaybookOn, imgMetaBudget: IMG_META_BUDGET_MIRROR }); // เฟส 3.1: สมองเห็นแผนที่ฉาก · SEM-1: ส่งสัญญาช่องเมื่อ semantic ON เท่านั้น (OFF = args เดิมเป๊ะ) · ★ D3-B3.3: template path ใช้ local snapshot · ★ TIER3: storyRulesOn · ★ ข้อ 6: imgMetaBudget ตัวเดียวกับ mirror ด้านบน (sync เสมอ) · ★ ตรวจซ้ำ 28 ก.ค. 69: pagePlaybookOn คัมภีร์เพจฉบับเต็ม
   } catch (err) {
     brainOk = false; // สมองล่ม → fallback ล้วน (กฎเดียวกับทางหลัก)
   }

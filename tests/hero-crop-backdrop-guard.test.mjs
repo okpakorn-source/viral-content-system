@@ -81,9 +81,14 @@ await test('pure: expand reaches the cap comfortably (reached=true) on a large i
 });
 
 // ── renderer wiring: a small face in a huge image ⇒ expand reaches the cap AND heroCropNeedsBackup is now set ──
-await test('renderer: small face + huge image ⇒ HERO_CROP_GUARD expands to reach the 1.2x cap (region grows a lot) and the post-expand faceShare is under band-min ⇒ heroCropNeedsBackup=true (was NOT set before this fix, since _ex.reached was true)', async () => {
+// ★ ข้อสุดท้าย (27 ก.ค. 69 — align HERO_CROP_GUARD ปลายน้ำ): เพดานจริงของด่านนี้ (สายไม่ strict) เปลี่ยนจาก
+//   ฮาร์ดโค้ด 1.2 เป็น eff (default 1.35) แล้ว — ตรึง env ให้ค่า 1.2 เดิมเป๊ะ เพื่อพิสูจน์กลไก backup-flag ที่ค่า
+//   1.2 เดิม (ตัวเลขไม่ใช่ประเด็นหลักของเทสนี้ ธงคือประเด็น) ดู tests/hero-crop-alignment.test.mjs สำหรับเพดาน eff ใหม่
+await test('renderer: small face + huge image ⇒ HERO_CROP_GUARD expands to reach the 1.2x cap (region grows a lot) and the post-expand faceShare is under band-min ⇒ heroCropNeedsBackup=true (was NOT set before this fix, since _ex.reached was true) [pinned to the legacy 1.2 cap — see note]', async () => {
+  process.env.MEGA_HERO_UPSCALE_MAX = '1.2';
   const fb = singleFace(0.47, 0.47, 0.53, 0.53); // tiny centred face (6% of frame)
   const t = await runExec({ metaW: 4000, metaH: 4000, fb });
+  delete process.env.MEGA_HERO_UPSCALE_MAX;
   assert.ok(t, 'hero trace produced');
   assert.ok(t.upscaleRaw <= 1.2 + 1e-6, `upscale capped at ≤1.2 (got ${t.upscaleRaw})`);
   assert.equal(t.heroCropNeedsBackup, true, 'small face left tiny after the stretch-cap expand ⇒ backup flag now raised');

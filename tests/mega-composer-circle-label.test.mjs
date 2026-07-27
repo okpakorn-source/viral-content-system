@@ -261,6 +261,45 @@ await test('integration: person เป็นคำบรรยาย generic ("�
   assert.equal(outOn.manifest.outputHash, outOff.manifest.outputHash, 'person="ผู้เสียหาย" เป็นคำบรรยาย generic — ต้องไม่วาดป้าย (buffer เหมือนปิดสวิตช์)');
 });
 
+// ═══ (3b) hotfix 27 ก.ค. 69: เครื่องคลาวด์ (Vercel Linux) ไม่มีฟอนต์ไทย → librsvg เรนเดอร์ป้ายเป็นกล่อง □□□ ═══
+//   แก้ = วาดป้ายเฉพาะ process.platform==='win32' (ห้ามใช้ env VERCEL ตัดสิน — เครื่องทีมก็มี VERCEL=1 ค้างอยู่)
+//   เทส: stub ค่า process.platform ตรงๆ (Object.defineProperty — วิธีมาตรฐาน Node สำหรับเทส ไม่กระทบระบบจริง
+//   เพราะ restore กลับทันทีใน finally) — ไม่มีพารามิเตอร์ deps ให้ inject platform ในโค้ดจริง (composeAndVerify
+//   ไม่มีช่องนี้อยู่แล้ว เพิ่มเข้าไปเฉพาะเพื่อเทสจะขยายพื้นผิว API โดยไม่จำเป็น) จึงเลือกวิธีนี้แทน
+async function withPlatform(name, fn) {
+  const desc = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: name, configurable: true });
+  try { return await fn(); } finally { Object.defineProperty(process, 'platform', desc); }
+}
+
+await test('hotfix: platform !== "win32" (จำลองเครื่องคลาวด์ Linux) → ป้ายไม่ถูกวาดเลยแม้ MEGA_CIRCLE_LABEL เปิด + รู้ชื่อจริง (buffer เหมือนปิดสวิตช์เป๊ะ — กันกล่อง □□□ ติดปกจริง)', async () => {
+  const slotPlan = await buildSlotPlan('พี่แก้ว');
+  setEnv('MEGA_CIRCLE_LABEL', '0');
+  const outOff = await composeAndVerify({ newsTitle: 'x', slotPlan, refDNA: null, refImagePath: null, stableOrder: true });
+  setEnv('MEGA_CIRCLE_LABEL', null); // default ON
+  const outOnLinux = await withPlatform('linux', () => composeAndVerify({ newsTitle: 'x', slotPlan, refDNA: null, refImagePath: null, stableOrder: true }));
+  assert.equal(outOff.success, true);
+  assert.equal(outOnLinux.success, true);
+  assert.equal(outOnLinux.manifest.outputHash, outOff.manifest.outputHash, 'platform=linux ต้องไม่วาดป้ายเลย แม้สวิตช์เปิด+รู้ชื่อจริง — buffer ต้องเหมือนปิดสวิตช์เป๊ะ');
+});
+
+await test('hotfix: platform !== "win32" ไม่ใช่ env VERCEL — ตั้ง VERCEL=1 ไว้ (เหมือนเครื่องทีมจริง) แต่ platform=win32 ต้องยังวาดป้ายปกติ (บทเรียน vercel-env-on-team-machine: ห้ามใช้ env ตัดสิน)', async () => {
+  const slotPlan = await buildSlotPlan('พี่แก้ว');
+  setEnv('MEGA_CIRCLE_LABEL', '0');
+  const outOff = await composeAndVerify({ newsTitle: 'x', slotPlan, refDNA: null, refImagePath: null, stableOrder: true });
+  setEnv('MEGA_CIRCLE_LABEL', null); // default ON
+  const prevVercel = process.env.VERCEL;
+  process.env.VERCEL = '1';
+  let outOnWin32;
+  try {
+    outOnWin32 = await withPlatform('win32', () => composeAndVerify({ newsTitle: 'x', slotPlan, refDNA: null, refImagePath: null, stableOrder: true }));
+  } finally {
+    if (prevVercel === undefined) delete process.env.VERCEL; else process.env.VERCEL = prevVercel;
+  }
+  assert.equal(outOnWin32.success, true);
+  assert.notEqual(outOnWin32.manifest.outputHash, outOff.manifest.outputHash, 'platform=win32 (แม้ VERCEL=1 ค้างอยู่) ต้องยังวาดป้ายปกติ — เกตต้องอิง process.platform เท่านั้น ไม่ใช่ env VERCEL');
+});
+
 // ═══════════════════════ (4) [ผู้ตรวจ #4] สายสตริกต์ (MEGA_STRICT_RENDER=1) ต้องปิดป้ายเสมอ ═══════════════════════
 
 // fnv1a32 — คัดลอกจาก src/lib/refSlotContract.js เป๊ะ (ฟังก์ชัน private ในนั้น) เพื่อคำนวณ hash ที่

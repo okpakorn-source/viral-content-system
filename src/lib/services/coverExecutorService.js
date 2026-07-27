@@ -394,6 +394,31 @@ function _panelFaceCropOn() { return process.env.MEGA_PANEL_FACE_CROP !== '0'; }
 function _circleAvoidOn() { return process.env.MEGA_CIRCLE_AVOID !== '0'; }
 // ★ HZ (17 ก.ค.): kill-switch ซูม hero เด่น (default ON · '0'=byte-parity เดิมทุกเส้น hero)
 function _heroZoomOn() { return process.env.MEGA_HERO_ZOOM !== '0'; }
+// ★ MEGA_FACE_FIRST_CROP (เคส AC-0197 27 ก.ค. 69 + ข้อ 4 ตรวจปกจริงรอบ 2 — เดิมชื่อ MEGA_HERO_FACE_ZOOM เฉพาะ
+//   hero, ขยายเป็น "หน้ามาก่อนเสมอ" ทุกช่องที่มีคน): กันช่องว่างที่ _tightenForProminence เป้าเดิมของแต่ละชนิดช่อง
+//   (hero 0.42/cap0.50 · secondary 0.25/cap0.35) + HZ hero (แตะแค่ band-min 0.30) ไม่ครอบคลุม — หน้ายังเล็กกว่า
+//   เป้าจริงตามสูตรวัดจากปกยอดแสนไลค์ (hero ~45-55% · ช่องย่อยมีคน ~30-45% · วงกลม ~55-65%) ทั้งที่ผ่านด่านเดิมแล้ว
+//   → ซูมชั้นเสริมเฉพาะ branch single-face-zoom (renderRectTile) + วงกลมทุกกรณี (renderCircleTile) ตามเป้าราย
+//   ชนิดช่อง (ดูจุดเรียกแต่ละจุด) — default ON · '0' = ไม่เรียกชั้นซูมนี้เลย (พฤติกรรมเดิมเป๊ะ ไม่มีการเปลี่ยน
+//   region/log เพิ่มแม้จุดเดียว ทั้ง hero/secondary/circle)
+function _faceFirstCropOn() { return process.env.MEGA_FACE_FIRST_CROP !== '0'; }
+// เพดานยืดจริงของชั้นซูมนี้: MEGA_HERO_UPSCALE_MAX (eff) — คนละตัวกับ HERO_STRETCH_MAX (1.2) ที่ _tightenForProminence
+//   ใช้เป็น default ของ hero — mirror สูตร parse+clamp เดียวกับ megaAdapters.js s6_slots เป๊ะ (parseFloat, ช่วง
+//   ปลอดภัย [1.0,1.6], ค่าเริ่มต้นเมื่อไม่ตั้ง/พังรูปแบบ = 1.35) กันสองจุดคำนวณค่า effective ต่างกัน
+//   ★ ข้อสุดท้าย (27 ก.ค. 69 — align HERO_CROP_GUARD ปลายน้ำ): เพิ่ม MEGA_TIER2_OFF=1 ให้กลับ 1.2 ตรงๆ ไม่ผ่าน
+//   env/clamp เหมือนกัน — mirror _tier2OffHero ของ megaAdapters.js เป๊ะ (สวิตช์แม่ต้องชนะทุกจุดที่อ้างอิงชุด TIER2)
+//   ★ export (แค่เปลี่ยน visibility ไม่แตะ logic) — ให้เทสยูนิตตรง parse/clamp ได้โดยไม่ต้องผ่านทั้ง pipeline
+export function _heroUpscaleMaxEffExec() {
+  if (process.env.MEGA_TIER2_OFF === '1') return HERO_STRETCH_MAX; // สวิตช์แม่ชนะเสมอ — กลับ 1.2 ตรงๆ
+  const raw = parseFloat(process.env.MEGA_HERO_UPSCALE_MAX);
+  const v = Number.isFinite(raw) && raw > 0 ? raw : 1.35;
+  return Math.min(1.6, Math.max(1.0, v));
+}
+// ★ MEGA_SUBSLOT_CENTER (27 ก.ค. 69 — ปกจริงบนคลาวด์: ช่องขวาบนหน้าคน 2 คนกองชิดขอบขวา เหลือพื้นหลังโล่งซ้าย):
+//   refineRegionForFace(s) เดิม (panelCropGeometry.js) วางตำแหน่ง "เลื่อนน้อยสุดจาก region เดิม" ไม่ใช่กึ่งกลาง
+//   หน้า/กลุ่มหน้าจริง → เปิด centerMode ที่จุดเรียก batch-C ให้กึ่งกลางกลุ่มหน้าแทน (แกนที่ชนขอบภาพจริงยัง clamp
+//   ชิดขอบเท่าที่ได้เหมือนเดิม — ดู _place1D) · default ON · '0' = พฤติกรรมเดิมเป๊ะ (เลื่อนน้อยสุด)
+function _subslotCenterOn() { return process.env.MEGA_SUBSLOT_CENTER !== '0'; }
 // band ขอบล่าง faceShare ของ hero — mirror megaComposerService._heroFaceBand (C3): env MEGA_HERO_FACE_BAND="min,max"
 //   ไม่ตั้ง/พังรูปแบบ = TECH_RULES.HERO_FACE_SHARE เดิมเป๊ะ (ต้องตรง C3 เสมอ ถ้าจะแก้แก้พร้อมกัน)
 function _heroFaceBandExec() {
@@ -481,24 +506,33 @@ function _facesInRegion(fb, region, imgW, imgH) {
  *  คืน { region, meta } — meta.tightened=ซูมจริงไหม · meta.small=ถึงเพดานแล้วยังเล็ก · หรือ null ถ้าไม่เข้าเงื่อนไข
  *  ★ HERO_CROP_GUARD (19 ก.ค.): export เพิ่ม (แค่เปลี่ยน visibility ไม่แตะ logic/ชื่อ/พฤติกรรม) — ให้เทสยูนิตตรง
  *  ceilingDivisor ของ kind='hero' ได้โดยไม่ต้องผ่านทั้ง pipeline (จุดที่ 3 ของ HERO_CROP_GUARD อาจกลบผลจุดที่ 4
- *  ถ้าเทสผ่านแค่ executeCover เต็มสาย — ดู tests/hero-crop-guard.test.mjs) */
-export function _tightenForProminence(region, fb, slot, imgW, imgH) {
+ *  ถ้าเทสผ่านแค่ executeCover เต็มสาย — ดู tests/hero-crop-guard.test.mjs)
+ *  ★ MEGA_FACE_FIRST_CROP (เคส AC-0197 27 ก.ค. 69, เดิมชื่อ MEGA_HERO_FACE_ZOOM): เพิ่มพารามิเตอร์ที่ 6
+ *  `overrideCfg` (optional) — ให้ผู้เรียกยัด {target,cap,trigMul,ceilingDivisor,eyeLineFrac} ของตัวเองแทนค่า
+ *  FACE_PROMINENCE[kind]/ceilingDivisor/ตำแหน่งแนวตั้งที่คำนวณภายในได้ โดยไม่แตะ logic/floor/clamp ส่วนอื่นเลย —
+ *  ไม่ส่ง (undefined/null) = พฤติกรรมเดิม byte-identical ทุกจุดเรียกเดิม (ใช้เป็นชั้นซูมเสริมสำหรับ hero/ช่องย่อย
+ *  มีคนที่ prominence/HZ เดิมเป้าไม่ถึง — ดูจุดเรียกใน renderRectTile/renderCircleTile) */
+export function _tightenForProminence(region, fb, slot, imgW, imgH, overrideCfg = null) {
   try {
     if (!region || !fb || !(fb.x2 > fb.x1)) return null;
     const kind = _promKind(slot);
-    const cfg = FACE_PROMINENCE[kind];
+    const cfg = overrideCfg || FACE_PROMINENCE[kind];
     if (!cfg) return null;
     const aspect = slot.w / Math.max(1, slot.h); // วงกลม = 1
     // ★ HERO_CROP_GUARD 4/4: hero เพดานยืดจริงคือ HERO_STRETCH_MAX (1.2 — QC hard gate) ไม่ใช่ 1.6 ของช่องอื่น
     //   floor เดิม (/1.6) เคยยอมให้ tighten หด region จนยืดเกิน 1.2 ได้ (เฉพาะ hero) → ใช้ /1.2 กันหน้าเด่นแลกยืดแตก
     //   ช่องอื่น (secondary/circle/context) ค่าเดิม /1.6 ไม่ถูกแตะ · '0' = พฤติกรรมเดิมเป๊ะทุก byte
-    const ceilingDivisor = (_heroCropGuardOn() && kind === 'hero') ? HERO_STRETCH_MAX : FACE_PROM_CEILING;
+    //   ★ overrideCfg.ceilingDivisor (ถ้ามี) ชนะค่าที่คำนวณภายในเสมอ — ใช้เฉพาะจุดเรียกใหม่ (MEGA_FACE_FIRST_CROP)
+    const ceilingDivisor = (Number.isFinite(overrideCfg?.ceilingDivisor) && overrideCfg.ceilingDivisor > 0)
+      ? overrideCfg.ceilingDivisor
+      : ((_heroCropGuardOn() && kind === 'hero') ? HERO_STRETCH_MAX : FACE_PROM_CEILING);
     const ceilingH = slot.h / ceilingDivisor;  // region เตี้ยสุดที่ยอม (ยืดไม่เกินเพดานตามชนิดช่อง)
 
     // กล่องเนื้อหา: face mode = หน้าใหญ่สุด(+เผื่อผม/คาง) · context = peopleBox รวมทุกคน(+ลำตัว)
     const faces = (fb.allFaces && fb.allFaces.length) ? fb.allFaces
       : [{ x1: fb.x1, y1: fb.y1, x2: fb.x2, y2: fb.y2 }];
     let cTopN, cBotN, cLN, cRN, measureHN;
+    let _eyeLineN = null; // ★ MEGA_FACE_FIRST_CROP: ตำแหน่งแนวตาโดยประมาณ (normalized) — เฉพาะ face mode (ไม่ใช่ context)
     if (kind === 'context') {
       const y1 = Math.min(...faces.map((f) => f.y1)), y2 = Math.max(...faces.map((f) => f.y2));
       const x1 = Math.min(...faces.map((f) => f.x1)), x2 = Math.max(...faces.map((f) => f.x2));
@@ -512,6 +546,7 @@ export function _tightenForProminence(region, fb, slot, imgW, imgH) {
       cTopN = lf.y1 - fh * 0.50; cBotN = lf.y2 + fh * 0.32; // กล่องหัว (ผม+คาง) ห้ามตัด
       cLN = lf.x1 - fw * 0.20;   cRN = lf.x2 + fw * 0.20;
       measureHN = fh;                                       // faceHeight ดิบ (ตามสเปค faceHeight/cropHeight)
+      _eyeLineN = lf.y1 + fh * 0.40; // สัดส่วนเดียวกับ HERO_CROP.faceTopAt (0.40) ที่ใช้ทั้งไฟล์เป็นค่าอ้างอิงแนวตา
     }
     cTopN = Math.max(0, cTopN); cLN = Math.max(0, cLN);
     cBotN = Math.min(1, cBotN); cRN = Math.min(1, cRN);
@@ -541,7 +576,17 @@ export function _tightenForProminence(region, fb, slot, imgW, imgH) {
     const rL = region.left, rT = region.top, rR = region.left + region.width, rB = region.top + region.height;
     const ccx = (cL + cR) / 2;
     let nl = Math.round(ccx - nW / 2);
-    let nt = Math.round(kind === 'context' ? ((cTop + cBot) / 2 - nH / 2) : (cTop - nH * 0.10));
+    // ★ MEGA_FACE_FIRST_CROP (ข้อ 4 — eye-line): overrideCfg.eyeLineFrac ถ้ามี (face mode เท่านั้น) → วางแนวตา
+    //   (ประมาณจาก _eyeLineN) ที่สัดส่วนนั้นของช่องแทนสูตร headroom เดิม (cTop - nH*0.10) — clamp headbox/ขอบภาพ
+    //   ด้านล่างยังทำงานเหมือนเดิมทุกจุด (ห้ามตัดหน้าผาก/คาง/หลุดขอบ) ไม่ส่ง = พฤติกรรมเดิมเป๊ะ
+    let nt;
+    if (kind === 'context') {
+      nt = Math.round((cTop + cBot) / 2 - nH / 2);
+    } else if (_eyeLineN != null && Number.isFinite(overrideCfg?.eyeLineFrac) && overrideCfg.eyeLineFrac > 0 && overrideCfg.eyeLineFrac < 1) {
+      nt = Math.round(_eyeLineN * imgH - nH * overrideCfg.eyeLineFrac);
+    } else {
+      nt = Math.round(cTop - nH * 0.10);
+    }
     nl = Math.min(Math.max(nl, rL), rR - nW);
     nt = Math.min(Math.max(nt, rT), rB - nH);
     if (cTop < nt) nt = Math.max(rT, Math.min(cTop, rB - nH));          // หัว/คนบนสุดต้องอยู่ในเฟรม
@@ -831,7 +876,12 @@ function _peopleShareInRegion(region, pb, imgW, imgH) {
 }
 
 /** ครอป+ย่อภาพลงช่องสี่เหลี่ยม (+กรอบสีถ้ามี) */
-async function renderRectTile(src, crop, slot, fb, traceSink = null) {
+// ★ ข้อสุดท้าย (27 ก.ค. 69 — align HERO_CROP_GUARD ปลายน้ำ): เพิ่มพารามิเตอร์ที่ 6 `strict` (optional, default false)
+//   — เมื่อ true (สาย MEGA_STRICT_RENDER=1 ที่ activate จริง) จุด HERO_CROP_GUARD 3/3 ด้านล่างยัง hard-cap ที่
+//   HERO_STRETCH_MAX(1.2) ตรงๆ เป๊ะเหมือนเดิมทุก byte (สัญญา strict ที่ validateStrictRenderActivation อ้างอิงอยู่
+//   ห้ามแตะ) — false (default, ทุกจุดเรียกเดิมที่ไม่ได้ส่งพารามิเตอร์นี้) = ใช้เพดาน eff (_heroUpscaleMaxEffExec)
+//   แทน 1.2 ตรงๆ ตามที่สั่งให้ face-zoom (ข้อ 1) มีผลจริงถึงเป้า 45-55% ไม่ถูกดึงกลับเงียบๆ
+async function renderRectTile(src, crop, slot, fb, traceSink = null, strict = false) {
   const meta = await sharp(src).metadata();
   const imgW = meta.width || 1, imgH = meta.height || 1;
   let region;
@@ -976,7 +1026,14 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
     //   ช่องที่ "ตรวจไม่เจอหน้า" + ครอป Director สูง (>0.5 ของภาพ = เห็นลำตัว/เต็มตัว) → ซูมเข้า "ช่วงบน-กลาง"
     //   (หัว-อก) แทนครอปเต็ม กันคนยืนเต็มตัวหลุดมา (รูที่ภาพคู่ยืนขวาล่างหลุด) · ภาพบริบท/ฉากได้ส่วนบนพอ (บริบทเป็นรอง)
     let _c = crop;
-    if (crop && crop.h > 0.5) {
+    if (!crop && _subslotCenterOn()) {
+      // ★ MEGA_SUBSLOT_CENTER (ข้อ 3 — "ไม่มี faceBox" สุดทาง คือไม่มี crop ของ director เลยด้วย เช่น
+      //   ตาตรวจล้ม/ข้อมูลไม่ครบบนคลาวด์): เดิม _c ค้างเป็น null/undefined ตรงนี้ → fitCropToSlotAspect
+      //   ด้านล่างพัง/พฤติกรรมไม่นิยาม → default เป็นกรอบภาพเต็ม {x:0,y:0,w:1,h:1} ซึ่ง fitCropToSlotAspect
+      //   ปรับสัดส่วนแบบสมมาตรรอบศูนย์กลางภาพเดิมเสมอ = ได้ครอปกึ่งกลางภาพจริง ไม่ใช่มุมใดมุมหนึ่ง
+      _c = { x: 0, y: 0, w: 1, h: 1 };
+      _br = 'noface-blind-center';
+    } else if (crop && crop.h > 0.5) {
       const nw = crop.w * 0.80;                                  // แคบเข้าหน่อย (กันเก็บฉากซ้าย-ขวา)
       const nx = Math.max(0, Math.min(crop.x + (crop.w - nw) / 2, 1 - nw));
       _c = { x: nx, y: crop.y, w: nw, h: crop.h * 0.55 };        // เก็บช่วงบน 55% (หัว-อก) ทิ้งช่วงล่าง(ขา/ลำตัว)
@@ -1020,6 +1077,28 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
       if (_hz.changed) { region = _hz.region; _br += '+herozoom'; }
     }
   }
+  // ★ MEGA_FACE_FIRST_CROP (เคส AC-0197 27 ก.ค. 69 + ข้อ 4 ตรวจปกจริงรอบ 2 — สูตรวัดจากปกยอดแสนไลค์): เฉพาะ
+  //   branch single-face-zoom เท่านั้น (เช็คจาก _br — HZ ด้านบนอาจต่อท้าย '+herozoom' แล้วถ้าทำงาน จึงเช็คด้วย
+  //   startsWith ไม่ใช่ equality ตรงๆ) — หน้ายังเล็กกว่าเป้าจริง แม้ผ่าน prominence เป้าเดิมของชนิดช่อง + HZ (hero,
+  //   แตะแค่ band-min 0.30) มาแล้ว → ซูมชั้นเสริมผ่าน _tightenForProminence ตัวเดิม (โครง floor กันหัวขาด + clamp
+  //   ในกรอบเดิม + ห้ามขยายเกิน region เดิม เหมือนทุกจุดเรียกอื่นเป๊ะ) เป้า/เพดาน/แนวตาต่างกันตามชนิดช่อง (_promKind):
+  //   • hero: เป้า 0.50 cap 0.55 (สูตรใหม่ 45-55% — ปรับลงจาก 0.55-0.65 เดิมตามคำสั่ง) เพดานยืด MEGA_HERO_UPSCALE_MAX(eff)
+  //   • secondary (ช่องย่อยมีคน เช่น reaction/action): เป้า 0.375 cap 0.45 (สูตร 30-45%) เพดานยืดเดิม SLOT_UPSCALE_MAX(1.6)
+  //     ไม่ยัด ceilingDivisor เอง (ไม่ส่ง = ใช้ค่าเดิมของฟังก์ชันสำหรับ kind ที่ไม่ใช่ hero)
+  //   ทั้งคู่: eyeLineFrac 0.33 (แนวตาราว 1/3 บนของช่อง แทนสูตร headroom เดิม) + trigMul 0.85 (ปิดช่องว่าง
+  //   dead-zone ระหว่าง trigger เดิม↔เป้าใหม่ — ดูบทเรียนเคส AC-0197 ที่ trigMul เดิมเตี้ยเกินจนไม่ทำงานในย่าน 30-45%)
+  //   default ON · MEGA_FACE_FIRST_CROP=0 → ไม่เรียกบล็อกนี้เลย (พฤติกรรมเดิมเป๊ะทุก byte ทั้ง hero/secondary)
+  if (_faceFirstCropOn() && !(crop && crop._final) && String(_br).startsWith('single-face-zoom')) {
+    const _ffcKind = _promKind(slot);
+    // ★ ตรวจซ้ำ (28 ก.ค. 69 — strict region drift): จุดนี้เดิมยัด _heroUpscaleMaxEffExec() ตรงๆ ไม่ดู `strict` เลย
+    //   → สาย strict ได้ region ต่างกันตาม env MEGA_HERO_UPSCALE_MAX (ทั้งที่ควรได้ region เดิมเป๊ะทุกค่า env เพราะ
+    //   strict ต้องไม่ขึ้นกับ env ใดๆ) แก้เป็น strict ? HERO_STRETCH_MAX : eff เหมือนจุด HERO_CROP_GUARD 3/3 ทุกประการ
+    const _ffcCfg = _ffcKind === 'hero'
+      ? { target: 0.50, cap: 0.55, trigMul: 0.85, eyeLineFrac: 0.33, ceilingDivisor: strict ? HERO_STRETCH_MAX : _heroUpscaleMaxEffExec() }
+      : { target: 0.375, cap: 0.45, trigMul: 0.85, eyeLineFrac: 0.33 };
+    const _hfz = _tightenForProminence(region, fb, slot, imgW, imgH, _ffcCfg);
+    if (_hfz && _hfz.meta.tightened) { region = _hfz.region; _br += '+facezoom'; }
+  }
   // ★ แบตช์ C (C1/C2) + C1b (17 ก.ค.): ครอปช่องรอง "เล็งหน้า" + หลบโซนวง — คำสั่งสุดท้ายก่อน trace (PURE geometry)
   //   เงื่อนไข: ไม่ใช่ hero · ไม่ใช่ _final · มีหน้าเด่นตกใน region 1-3 ใบ (เกิน 3 = ภาพกลุ่มใหญ่ ไม่แตะ ให้ group-crop เดิมทำงาน)
   //     1 ใบ = เส้น refineRegionForFace เดิมเป๊ะ (byte-parity) · 2-3 ใบ = refineRegionForFaces คลุม union หลายหน้า
@@ -1033,7 +1112,8 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
       const _face = _dominantFaceInRegion(fb, region, imgW, imgH);
       if (_face) {
         if (_panelFaceCropOn()) {
-          const _rf = refineRegionForFace({ region, faceBox: _face, imgW, imgH, slotAspect: slot.w / slot.h, band: _panelBandForSlot(slot) });
+          // ★ MEGA_SUBSLOT_CENTER: กึ่งกลางกลุ่มหน้าจริงแทนเลื่อนน้อยสุด (default ON · '0'=เดิม)
+          const _rf = refineRegionForFace({ region, faceBox: _face, imgW, imgH, slotAspect: slot.w / slot.h, band: _panelBandForSlot(slot), centerMode: _subslotCenterOn() });
           if (_rf.changed) { region = _rf.region; _br += '+faceaim'; }
         }
         if (_circleAvoidOn() && slot._circleZone) {
@@ -1052,7 +1132,12 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
       const _facesIn = _facesInRegion(fb, region, imgW, imgH);
       if (_facesIn.length >= 2) {
         if (_panelFaceCropOn()) {
-          const _rf = refineRegionForFaces({ region, faces: _facesIn, imgW, imgH, slotAspect: slot.w / slot.h, band: _panelBandForSlot(slot) });
+          // ★ MEGA_FACE_FIRST_CROP (ข้อ 4 — "กลุ่มหน้า" 2-3 ใบในช่องย่อย): band แคบขึ้น [30,45] แทน band เดิมของ
+          //   บทบาทช่อง (เฉพาะ kind=secondary — reaction/action/moment/pair/victim/ช่องรองทั่วไป ไม่แตะ context/evidence
+          //   ที่มีย่านออกแบบเฉพาะของตัวเอง) · ปิด flag = _panelBandForSlot เดิมเป๊ะ
+          // ★ MEGA_SUBSLOT_CENTER: กึ่งกลาง union กลุ่มหน้าแทนเลื่อนน้อยสุด (default ON · '0'=เดิม)
+          const _ffc2Band = (_faceFirstCropOn() && _promKind(slot) === 'secondary') ? [30, 45] : _panelBandForSlot(slot);
+          const _rf = refineRegionForFaces({ region, faces: _facesIn, imgW, imgH, slotAspect: slot.w / slot.h, band: _ffc2Band, centerMode: _subslotCenterOn() });
           if (_rf.ok && _rf.changed) { region = _rf.region; _br += '+faceaim2'; }
           // ★ C1c/BS: union คลุมทุกหน้าไม่ลง (กว้าง/สูงเกิน band หรือ aspect บีบ) → สัญญาณให้ composer ลองภาพสำรอง
           else if (!_rf.ok && (_rf.reason === 'union-exceeds-band' || _rf.reason === 'cannot-fit')) _needRefineBackup = true;
@@ -1074,7 +1159,7 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
     //   → เลือกหน้าเด่น 1 ใบ (_dominantFaceInRegion) แล้วเล็ง refineRegionForFace แบบเส้น 1 หน้า ให้ช่องมีคนโฟกัสชัด
     const _domC = _dominantFaceInRegion(fb, region, imgW, imgH);
     if (_domC && _panelFaceCropOn()) {
-      const _rfC = refineRegionForFace({ region, faceBox: _domC, imgW, imgH, slotAspect: slot.w / slot.h, band: _panelBandForSlot(slot) });
+      const _rfC = refineRegionForFace({ region, faceBox: _domC, imgW, imgH, slotAspect: slot.w / slot.h, band: _panelBandForSlot(slot), centerMode: _subslotCenterOn() });
       if (_rfC.changed) { region = _rfC.region; _br += '+clutteraim'; }
     }
   }
@@ -1090,12 +1175,18 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
   //   decision must NEVER read the rounded display value (1.201–1.204 would round to 1.20 and wrongly pass). The
   //   rounded `upscale` stays for advisory traceQcFlags/logs only.
   if (_tr) { _tr.upscaleRaw = _upR; _tr.upscale = +_upR.toFixed(2); }
-  // ★ HERO_CROP_GUARD 3/3: hero เท่านั้น — ยืดเกิน HERO_STRETCH_MAX(1.2) → ขยาย region เข้าหาขอบภาพ (face-anchored,
-  //   คง aspect ช่อง) ดึง upscale ลง ≤1.2 เท่าที่ภาพต้นฉบับให้ · ดึงไม่ถึง (ภาพเล็ก/หน้าชิดขอบ) → _needHeroBackup
+  // ★ HERO_CROP_GUARD 3/3: hero เท่านั้น — ยืดเกินเพดาน → ขยาย region เข้าหาขอบภาพ (face-anchored,
+  //   คง aspect ช่อง) ดึง upscale ลง ≤เพดาน เท่าที่ภาพต้นฉบับให้ · ดึงไม่ถึง (ภาพเล็ก/หน้าชิดขอบ) → _needHeroBackup
   //   (ไม่ปล่อยยืดเงียบๆ — ให้ composer อ่านธงแล้วสลับภาพ/HOLD) · ไม่ใช่ _final (Final-Cropper เชื่อ 100% ห้ามแตะ)
+  //   ★ ข้อสุดท้าย (27 ก.ค. 69): เพดานเดิมฮาร์ดโค้ด HERO_STRETCH_MAX(1.2) เสมอ — ทำให้ MEGA_FACE_FIRST_CROP (ข้อ 1)
+  //   ซูมเข้าจนหน้าเด่นตามเป้า 45-55% ไม่ได้จริง เพราะจุดนี้รันทีหลังเสมอแล้วดึงกลับ 1.2 (branch โชว์ '+stretchcap'
+  //   กลบ '+facezoom') → เปลี่ยนเป็นเพดาน eff (_heroUpscaleMaxEffExec — MEGA_HERO_UPSCALE_MAX/default 1.35/
+  //   MEGA_TIER2_OFF=1→1.2) ยกเว้นสาย strict (parameter `strict` true) ที่ยังต้องคง 1.2 ตรงๆ เป๊ะ (สัญญา
+  //   validateStrictRenderActivation ผูกกับ HERO_STRETCH_MAX(1.2) โดยตรง ห้ามแตะ)
+  const _heroCap = strict ? HERO_STRETCH_MAX : _heroUpscaleMaxEffExec();
   let _upFinal = _upR;
-  if (_heroCropGuardOn() && !(crop && crop._final) && _promKind(slot) === 'hero' && _upR > HERO_STRETCH_MAX) {
-    const _ex = expandHeroRegionForStretchCap({ region, slotW: slot.w, slotH: slot.h, imgW, imgH, cap: HERO_STRETCH_MAX });
+  if (_heroCropGuardOn() && !(crop && crop._final) && _promKind(slot) === 'hero' && _upR > _heroCap) {
+    const _ex = expandHeroRegionForStretchCap({ region, slotW: slot.w, slotH: slot.h, imgW, imgH, cap: _heroCap });
     if (_ex.changed) {
       region = _clampRegion(_ex.region, imgW, imgH);
       _br += '+stretchcap';
@@ -1129,7 +1220,7 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null) {
     if (_pb2 && _peopleShareInRegion(region, _pb2, imgW, imgH) < PEOPLE_MIN_SHARE) _needPeopleBackup = true;
   }
   if (_tr && _needPeopleBackup) _tr.peopleNeedsBackup = true; // ★ MEGA_PEOPLE_CROP: additive — composer อ่านเพื่อสลับภาพที่มีคนชัด
-  if (_upFinal > HERO_STRETCH_MAX) console.log(`[CoverV3] 🔎 ${slot.id} ยืด ${_upFinal.toFixed(2)}x (region ${region.width}x${region.height} → ${slot.w}x${slot.h})`);
+  if (_upFinal > _heroCap) console.log(`[CoverV3] 🔎 ${slot.id} ยืด ${_upFinal.toFixed(2)}x (region ${region.width}x${region.height} → ${slot.w}x${slot.h})`);
   const _doSharpen = _upFinal < 1; // sharpen เฉพาะเคสย่อ — ขยายแล้ว sharpen = ขยาย artifact (เฟส 3.3)
   // rev.16: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — WB คุมโทนรวม + รีทัชเบา
   //   (1) gray-world WB ดึงคาสต์สีเข้าโทนเดียว  (2) sat/contrast บางๆ  (3) คมขึ้นพอดี (เฉพาะย่อ)
@@ -1212,9 +1303,15 @@ async function renderCircleTile(src, crop, slot, fb, traceSink = null) {
   }
 
   // ★ เฟส 6B.3: ซูมวงกลมให้หน้าเต็มวงถึงเป้า (เคารพเพดานยืด 1.6 + ไม่ตัดหัว) — skip เมื่อ _final
+  //   ★ MEGA_FACE_FIRST_CROP (ข้อ 4 — วงกลมของจริงวัดได้แค่ ~35% ต่ำกว่าเป้าเดิม 0.45 มาก เพราะ trigMul เดิม
+  //   (0.6 → trig=0.27) ต่ำเกิน เกิด dead-zone เดียวกับ hero AC-0197): ยกเป้าเป็น 0.60/cap 0.65 (สูตร 55-65%)
+  //   trigMul 0.85 ปิด dead-zone · ไม่ยัด ceilingDivisor (เพดานยืดวงกลมเดิม FACE_PROM_CEILING=1.6 ไม่ถูกแตะ) ·
+  //   ไม่ใช้ eyeLineFrac (วงกลมยึดธรรมเนียมหน้ากึ่งกลางวงเดิม ไม่ใช่กติกา eye-line ของช่องสี่เหลี่ยม)
+  //   ปิด flag = เรียกแบบเดิมเป๊ะ (ไม่ส่ง overrideCfg เลย)
   let _tg6bC = null;
   if (_faceProminenceOn() && !(crop && crop._final)) {
-    const _ttC = _tightenForProminence(region, fb, slot, imgW, imgH);
+    const _ttC = _tightenForProminence(region, fb, slot, imgW, imgH,
+      _faceFirstCropOn() ? { target: 0.60, cap: 0.65, trigMul: 0.85 } : null);
     if (_ttC) { if (_ttC.meta.tightened) region = _ttC.region; _tg6bC = _ttC.meta; }
   }
   const _tr = _cropTrace(slot, _br, fb, imgW, imgH, region, traceSink); // เฟส 0.1: log อย่างเดียว
@@ -1265,7 +1362,9 @@ async function renderCircleTile(src, crop, slot, fb, traceSink = null) {
  * ประกอบปกตามคำสั่ง Director — เรียงตาม zIndex (ต่ำ→สูง) ให้โซนซ้อนเหลื่อมแบบปกไวรัลจริง
  * @returns {Promise<Buffer>} JPEG buffer
  */
-export async function executeCover({ assignments, imageBuffers, templateSpec, faceBoxes = [], traceSink = null }) {
+// ★ ข้อสุดท้าย (27 ก.ค. 69): พารามิเตอร์ `strict` (optional, default false) — ส่งต่อให้ renderRectTile เท่านั้น
+//   (renderCircleTile ไม่มี HERO_CROP_GUARD 3/3 อยู่แล้ว ไม่ต้องรับพารามิเตอร์นี้) ไม่ส่ง = พฤติกรรมเดิมเป๊ะทุกจุดเรียกเดิม
+export async function executeCover({ assignments, imageBuffers, templateSpec, faceBoxes = [], traceSink = null, strict = false }) {
   const { canvasW, canvasH } = templateSpec;
   // เฟส 0.1 + audit: trace ต่อรอบเรียกผ่าน traceSink (array ของผู้เรียก) — ไม่มี state แชร์ข้ามงาน
   const _sink = Array.isArray(traceSink) ? traceSink : null;
@@ -1285,7 +1384,7 @@ export async function executeCover({ assignments, imageBuffers, templateSpec, fa
     if (!slot || !src) throw new Error(`EXECUTE_MISSING: slot=${a.slotId} image=#${a.imageIndex}`);
     const fb = faceBoxes?.[a.imageIndex] || null; // rev.14: ป้อนพิกัดหน้าให้ครอปหน้าเต็มช่อง
     if (slot.shape === 'circle') circleComps.push(await renderCircleTile(src, a.crop, slot, fb, _sink));
-    else rectComps.push(await renderRectTile(src, a.crop, slot, fb, _sink));
+    else rectComps.push(await renderRectTile(src, a.crop, slot, fb, _sink, strict));
   }
 
   const bg = { create: { width: canvasW, height: canvasH, channels: 3, background: { r: 255, g: 255, b: 255 } } };

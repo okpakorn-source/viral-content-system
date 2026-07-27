@@ -1183,7 +1183,9 @@ async function composeCoreStrict(strictCtx) {
   // render ครั้งเดียว — ไม่มี retry-เปลี่ยนรูป
   const { executeCover } = await import('@/lib/services/coverExecutorService');
   const traceSink = [];
-  const buffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: spec, faceBoxes, traceSink });
+  // ★ ข้อสุดท้าย (27 ก.ค. 69): strict:true — สายนี้ (composeCoreStrict) คือ "สาย strict" ที่ต้องคง
+  //   HERO_CROP_GUARD ปลายน้ำที่ HERO_STRETCH_MAX(1.2) ตรงๆ เป๊ะเสมอ (สัญญาที่ validateStrictRenderActivation อ้างอิง)
+  const buffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: spec, faceBoxes, traceSink, strict: true });
   console.log(`[MegaComposer] 🔐 strict ประกอบเสร็จ ${Math.round(buffer.length / 1024)}KB (${spec.id || 'realized'})`);
   const cropTrace = [...traceSink];
   qcFlags.push(...traceQcFlags(cropTrace));
@@ -2296,7 +2298,9 @@ export async function _runEyeFixTransaction({ core, fixes, buffer, cropTrace, re
     if (!fixedCount) return { buffer, cropTrace, fixedCount: 0 };
     const render = renderCover || (async () => {
       const { executeCover } = await import('@/lib/services/coverExecutorService');
-      return executeCover({ assignments: core.assignments, imageBuffers: core.loaded, templateSpec: core.spec, faceBoxes: core.faceBoxes, traceSink: core.traceSink });
+      // ★ ข้อสุดท้าย (27 ก.ค. 69): core._strictSourceLock===true = core มาจาก composeCoreStrict (แพตเทิร์นเดียวกับ
+      //   allowSourceSwap ด้านบน) → re-render รอบ eye-fix นี้ก็ต้องคง HERO_CROP_GUARD ปลายน้ำที่ 1.2 ตรงๆ เหมือนกัน
+      return executeCover({ assignments: core.assignments, imageBuffers: core.loaded, templateSpec: core.spec, faceBoxes: core.faceBoxes, traceSink: core.traceSink, strict: core._strictSourceLock === true });
     });
     buffer = await render();
     cropTrace = [...(core.traceSink || [])]; // audit: trace ของรอบสุดท้าย จาก sink ของงานนี้เอง
@@ -2418,6 +2422,9 @@ export async function composeAndVerify(args = {}) {
                   templateSpec: core.spec,
                   faceBoxes: core.faceBoxes,
                   traceSink: candidateTrace,
+                  // ★ ข้อสุดท้าย (27 ก.ค. 69): strictCtx truthy = งานนี้ activate strict จริง — re-render candidate
+                  //   นี้ (hero close-up recrop) ก็ต้องคง HERO_CROP_GUARD ปลายน้ำที่ 1.2 ตรงๆ เหมือนกัน
+                  strict: !!strictCtx,
                 });
                 const candidateEye = await refCompareEye({ coverBuffer: candidateBuffer, refImagePath, newsTitle }).catch(() => null);
                 if (candidateEye?.checks?.hero_shot === true) {
@@ -2516,8 +2523,14 @@ export async function composeAndVerify(args = {}) {
     //   พิกเซลจริงที่ผ่านการตรวจสอบ invariant ไปแล้วด้านบน (จุดนี้อยู่ "หลัง" invariant check แล้ว — ป้ายจะไม่ถูก
     //   ตรวจสอบซ้ำ ถือเป็นการแก้ผลลัพธ์ที่ผ่านการพิสูจน์แล้วอย่างเงียบๆ ถ้าปล่อยให้วาดในสายนี้)
     //   kill-switch: MEGA_CIRCLE_LABEL=0 → ปิด (ไม่วาดป้ายเลย — buffer/ผลปกเดิม byte-identical ทุกกรณี)
+    //   ★ hotfix เจอจากปกจริงบนคลาวด์ 27 ก.ค. 69 — เครื่อง Vercel Linux ไม่มีฟอนต์ไทยติดตั้ง (librsvg เรนเดอร์
+    //   ป้ายเป็นกล่อง □□□ แทนตัวอักษร) → เฉพาะเครื่องที่ยืนยันมีฟอนต์ไทย (win32 เครื่องทีม) จึงวาดป้าย
+    //   🔴 ห้ามใช้ env VERCEL ตัดสิน — เครื่องทีมก็มี VERCEL=1 ค้างอยู่ (บทเรียนเก่า: vercel-env-on-team-machine)
+    //   ต้องใช้ process.platform==='win32' ตรงๆ · คลาวด์ (linux) = ไม่วาดป้ายเลย (ดีกว่าได้กล่องเปล่าติดปกจริง)
+    //   TODO (รอบหน้า): แก้ขาดของจริงคือ bundle ฟอนต์ไทย (เช่น Sarabun OFL) + ตั้ง fontconfig ให้ librsvg บนคลาวด์
+    //   เห็นฟอนต์ — พอมีแล้วค่อยถอดเงื่อนไข win32 นี้ออก (ตอนนี้เป็นแค่ทางหนีบั๊กเฉพาะหน้า ไม่ใช่ทางแก้ถาวร)
     try {
-      const _circleLabelOn = process.env.MEGA_CIRCLE_LABEL !== '0' && !strictCtx;
+      const _circleLabelOn = process.env.MEGA_CIRCLE_LABEL !== '0' && !strictCtx && process.platform === 'win32';
       if (_circleLabelOn) {
         const _specSlots = (core.spec && Array.isArray(core.spec.slots)) ? core.spec.slots : [];
         const _circleOverlays = [];

@@ -281,7 +281,9 @@ await test('TIER2 dims-soft (default ON): วัดขนาดไม่ได�
   const meta = captures.brainArgs[0].imagesMeta;
   const mUnknown = meta.find((m) => m.id === 'UNKNOWN');
   assert.ok(!('heroCropBlock' in mUnknown), 'soft mode: ไม่มีป้ายห้ามแข็ง');
-  assert.ok(mUnknown.heroDimsAvoid && /เลี่ยงเป็น hero/.test(mUnknown.heroDimsAvoid), 'soft mode: มีป้ายแนะนำ (soft) แทน');
+  // ★ ข้อ 6 (27 ก.ค. 69 — งบ prompt IMG_META_BUDGET): ย่อป้ายจาก "เลี่ยงเป็น hero: วัดขนาดจริงไม่ได้ (เลือกได้เมื่อ...)"
+  //   เหลือ "เลี่ยง hero: วัดขนาดไม่ได้" (ใจความเดิม สั้นลงกันงบ prompt บวม) — เช็คคำที่ยังต้องอยู่แน่ๆ แทน exact string เดิม
+  assert.ok(mUnknown.heroDimsAvoid && /เลี่ยง/.test(mUnknown.heroDimsAvoid) && /hero/.test(mUnknown.heroDimsAvoid) && /วัดขนาด/.test(mUnknown.heroDimsAvoid), `soft mode: มีป้ายแนะนำ (soft) แทน (ได้ "${mUnknown.heroDimsAvoid}")`);
   const pi = s6.dossierPatch.pickImages;
   assert.equal(pi.slots.hero.id, 'UNKNOWN', 'post-brain ไม่สลับ UNKNOWN ออก (heroEligible=true ในโหมด soft — ห้าม post-brain วนเตะใบที่สมองเพิ่งเลือก)');
   assert.equal(pi.cropGuard.swapped, false);

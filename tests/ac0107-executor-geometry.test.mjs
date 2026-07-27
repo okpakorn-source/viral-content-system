@@ -79,7 +79,12 @@ const test = async (name, fn) => { try { await fn(); passed++; console.log(`ok $
 //   reaches the cap). So under the default (guard ON) these are now SAFE. The kill-switch (MEGA_HERO_CROP_GUARD=0)
 //   must still reproduce the historical bug byte-for-byte — asserted below so the regression coverage isn't lost, only
 //   relocated to the OFF path (proving it's this guard, and nothing else, that fixed the ON path).
-await test('1) REAL small face in a large image: HERO_CROP_GUARD (default ON) expands the region toward the image edges and caps the real upscale at ≤1.2 (the image affords room); MEGA_HERO_CROP_GUARD=0 reproduces the historical AC-0107 bug byte-for-byte (upscaleRaw >1.2 while whole-image cover-fit ≤1.2)', async () => {
+// ★ ข้อสุดท้าย (27 ก.ค. 69 — align HERO_CROP_GUARD ปลายน้ำ): เพดานจริงของด่านนี้ (สายไม่ strict) เปลี่ยนจาก
+//   ฮาร์ดโค้ด 1.2 เป็น eff (_heroUpscaleMaxEffExec, default 1.35) แล้ว — ทั้งสองเทสด้านล่างพิสูจน์กลไก "ขยายเข้าหา
+//   ขอบภาพ" ที่ค่าเพดาน 1.2 เดิมเป๊ะ (คือค่าที่ AC-0107/QC เดิมอ้างอิง) จึงตรึง env MEGA_HERO_UPSCALE_MAX=1.2 ให้
+//   พฤติกรรม/ตัวเลขเดิมทุกจุดไม่เปลี่ยน — ดู tests/hero-crop-alignment.test.mjs สำหรับเทสเพดาน eff ใหม่โดยเฉพาะ
+await test('1) REAL small face in a large image: HERO_CROP_GUARD (default ON) expands the region toward the image edges and caps the real upscale at ≤1.2 (the image affords room); MEGA_HERO_CROP_GUARD=0 reproduces the historical AC-0107 bug byte-for-byte (upscaleRaw >1.2 while whole-image cover-fit ≤1.2) [pinned to the legacy 1.2 cap — see note]', async () => {
+  process.env.MEGA_HERO_UPSCALE_MAX = '1.2';
   const fb = singleFace(0.45, 0.45, 0.55, 0.55);
   const t = await runExec({ metaW: 3000, metaH: 3000, fb });
   assert.ok(t, 'hero trace produced');
@@ -90,10 +95,12 @@ await test('1) REAL small face in a large image: HERO_CROP_GUARD (default ON) ex
   process.env.MEGA_HERO_CROP_GUARD = '0';
   const tOff = await runExec({ metaW: 3000, metaH: 3000, fb });
   delete process.env.MEGA_HERO_CROP_GUARD;
+  delete process.env.MEGA_HERO_UPSCALE_MAX;
   assert.ok(tOff.upscaleRaw > 1.2, `kill-switch OFF reproduces the historical AC-0107 bug byte-for-byte (got ${tOff.upscaleRaw}) — proves the guard (not some unrelated change) is what fixed the ON path above`);
 });
 
-await test('2) DECODED-dimension sensitivity: HERO_CROP_GUARD keeps the SAME face safe (≤1.2) at both a large and a trimmed/smaller decoded size by expanding toward the image edges when room allows; MEGA_HERO_CROP_GUARD=0 reproduces the historical dimension-sensitive crossing byte-for-byte (safe large ⇒ unsafe trimmed — executor keys on decoded dims, not stored)', async () => {
+await test('2) DECODED-dimension sensitivity: HERO_CROP_GUARD keeps the SAME face safe (≤1.2) at both a large and a trimmed/smaller decoded size by expanding toward the image edges when room allows; MEGA_HERO_CROP_GUARD=0 reproduces the historical dimension-sensitive crossing byte-for-byte (safe large ⇒ unsafe trimmed — executor keys on decoded dims, not stored) [pinned to the legacy 1.2 cap — see note]', async () => {
+  process.env.MEGA_HERO_UPSCALE_MAX = '1.2';
   const fb = singleFace(0.40, 0.38, 0.60, 0.62); // moderate centred face
   const big = await runExec({ metaW: 2600, metaH: 3250, fb });
   const trimmed = await runExec({ metaW: 900, metaH: 1125, fb });
@@ -104,13 +111,20 @@ await test('2) DECODED-dimension sensitivity: HERO_CROP_GUARD keeps the SAME fac
   process.env.MEGA_HERO_CROP_GUARD = '0';
   const trimmedOff = await runExec({ metaW: 900, metaH: 1125, fb });
   delete process.env.MEGA_HERO_CROP_GUARD;
+  delete process.env.MEGA_HERO_UPSCALE_MAX;
   assert.ok(trimmedOff.upscaleRaw > 1.2, `kill-switch OFF reproduces the historical stored-vs-decoded mismatch byte-for-byte (got ${trimmedOff.upscaleRaw}) — proves the underlying AC-0107 sensitivity is unchanged, only pre-emptively fixed when the guard is ON`);
 });
 
 await test('3) TRANSFORM-driven: a watermark/text region overlapping the crop makes the real dodge SHRINK the region ⇒ upscaleRaw >= the no-dodge value (a clean-looking crop can be pushed up by a render transform)', async () => {
+  // ★ MEGA_FACE_FIRST_CROP (27 ก.ค. 69, ข้อ 4): default-ON hero tightening (เป้าใหม่ 0.50/cap 0.55) ซูมเข้าจนช่อง
+  //   ไม่แตะโซน watermark (y 0.80-1.0) ในเคสนี้อยู่แล้วตั้งแต่ "clean" ⇒ dodge ไม่มีอะไรให้หลบ (ผล upscale เท่ากัน
+  //   ทั้งสองเคส) — คนละกลไกกับที่เทสนี้พิสูจน์ (dodge เท่านั้น) จึงปิด flag นี้เฉพาะเทสนี้ให้แยกกลไกสะอาด
+  //   (แพตเทิร์นเดียวกับเทส 1/2 ด้านบนที่ตั้ง/ถอด MEGA_HERO_CROP_GUARD เพื่อแยกกลไก ไม่ใช่ปิดเพราะเทสนี้ผิด)
+  process.env.MEGA_FACE_FIRST_CROP = '0';
   const fb = singleFace(0.36, 0.20, 0.64, 0.52);                      // upper-centred face, headroom below
   const clean = await runExec({ metaW: 1600, metaH: 2000, fb });
   const dodged = await runExec({ metaW: 1600, metaH: 2000, fb: { ...fb, watermarkRegion: { x1: 0.0, y1: 0.80, x2: 1.0, y2: 1.0 } } });
+  delete process.env.MEGA_FACE_FIRST_CROP;
   assert.ok(dodged.upscaleRaw > clean.upscaleRaw, `the real watermark dodge SHRANK the region ⇒ strictly higher upscale (${dodged.upscaleRaw} > ${clean.upscaleRaw}) — a render transform the pre-carrier filter cannot see`);
 });
 

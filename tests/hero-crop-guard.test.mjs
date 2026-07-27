@@ -82,10 +82,16 @@ await test('1b) kill-switch OFF (MEGA_HERO_CROP_GUARD=0) ⇒ slot._heroFaceCrop 
   assert.ok(t.branch.startsWith('group-hero-largest'), `branch falls back to the old path (got ${t.branch})`);
 });
 
-await test('2) two faces standing close together (the reported bug shape — largest near the left edge, a second face close enough that the shift-only clamp cannot escape it): guard ON resolves it — shrinks past the neighbor AND caps the stretch, ending with a clean, non-overlapping, ≤1.2× region', async () => {
+await test('2) two faces standing close together (the reported bug shape — largest near the left edge, a second face close enough that the shift-only clamp cannot escape it): guard ON resolves it — shrinks past the neighbor AND caps the stretch, ending with a clean, non-overlapping, ≤1.2× region [pinned to the legacy 1.2 cap — see note]', async () => {
+  // ★ ข้อสุดท้าย (27 ก.ค. 69 — align HERO_CROP_GUARD ปลายน้ำ): เพดานยืดจริงของด่านนี้เปลี่ยนจากฮาร์ดโค้ด 1.2 เป็น
+  //   eff (_heroUpscaleMaxEffExec, default 1.35) สำหรับสายไม่ strict — เทสนี้พิสูจน์กลไก "หด/ขยายแก้ปัญหาหน้าซ้อน"
+  //   ที่ค่าเพดาน 1.2 เดิมเป๊ะ (ค่าตัวเลขไม่ใช่ประเด็นหลักของเทสนี้ กลไกคือประเด็น) จึงตรึง env ตรงๆ ให้พฤติกรรม/
+  //   ตัวเลขเดิมทุกจุดไม่เปลี่ยน — ดู tests/hero-crop-alignment.test.mjs สำหรับเทสเพดาน eff ใหม่โดยเฉพาะ
+  process.env.MEGA_HERO_UPSCALE_MAX = '1.2';
   const largest = { x1: 0.08, y1: 0.25, x2: 0.22, y2: 0.50 };
   const second = { x1: 0.30, y1: 0.27, x2: 0.42, y2: 0.48 };
   const t = await runExec({ metaW: 1200, metaH: 2727, fb: groupFaces(largest, second) });
+  delete process.env.MEGA_HERO_UPSCALE_MAX;
   assert.ok(t, 'hero trace produced');
   assert.strictEqual(t.branch, 'group-hero-largest+shrink+stretchcap', `both guard steps engaged (got ${t.branch})`);
   assert.deepEqual(t.region, { left: 0, top: 265, width: 360, height: 818 });

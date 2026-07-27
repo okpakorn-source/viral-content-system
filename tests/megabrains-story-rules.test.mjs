@@ -5,7 +5,8 @@
 //       megaBrains.js.bak-tier3 ไว้ก่อนแก้ — ฝังเป็น literal กันเทสพังถ้า .bak ถูกกวาดทิ้งภายหลัง)
 //   (2) default ON: ไม่ส่ง storyRulesOn เลย = เหมือน storyRulesOn=true (ต้องเห็นกติกาใหม่)
 //   (3) เนื้อหากติกาใหม่ต้องมีครบ 4 ข้อ (hero=อารมณ์พีค / ไทม์ไลน์ช่องรอง / circle=บุคคลที่สอง / เลี่ยงฉากรายการ)
-//   (4) งบ prompt: กติกาใหม่ไม่กระทบ IMG_META_BUDGET (18000) การตัดท้ายรายใบ + delta ความยาวต้องไม่บวมเกินเหตุ
+//   (4) งบ prompt: กติกาใหม่ไม่กระทบ IMG_META_BUDGET (default 45000 — ขึ้นกับ env MEGA_IMG_META_BUDGET, ข้อ 6
+//       27 ก.ค. 69 ยกจาก 18000 เดิม) การตัดท้ายรายใบ + delta ความยาวต้องไม่บวมเกินเหตุ
 //   ไม่ยิง LLM จริง (stub callBrain แค่ "จับ args" แล้วตอบ JSON ว่างพอ parseJson ผ่าน) · deterministic ล้วน
 // ============================================================
 import assert from 'node:assert/strict';
@@ -51,21 +52,24 @@ const SLOT_CONTRACT = [
 
 const captureSystem = async (fn) => { await fn(); return globalThis.__CAPTURED.system; };
 const captureUser = async (fn) => { await fn(); return globalThis.__CAPTURED.user; };
+const countIds = (userStr) => (userStr.match(/"id":"IMG\d{4}"/g) || []).length;
 
 // ═══════════════════════ (1) parity: storyRulesOn=false → byte-identical กับก่อน TIER3 ═══════════════════════
 
+// ★ ตรวจซ้ำ (28 ก.ค. 69 — คัมภีร์เพจฉบับเต็ม): golden ทั้ง 3 ก้อนถูก capture ก่อนคัมภีร์เพจมีอยู่ด้วย ⇒ ต้องปิด
+//   pagePlaybookOn ด้วย (ไม่ใช่แค่ storyRulesOn) ไม่งั้น default ON ใหม่จะแทรกคัมภีร์เข้ามาทำให้ golden ไม่ตรง
 await test('parity: artBriefBrain storyRulesOn=false → system เหมือน golden ก่อน TIER3 เป๊ะ', async () => {
-  const sys = await captureSystem(() => artBriefBrain({ refDNA: REF_DNA, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', typeMatched: false, storyRulesOn: false }));
+  const sys = await captureSystem(() => artBriefBrain({ refDNA: REF_DNA, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', typeMatched: false, storyRulesOn: false, pagePlaybookOn: false }));
   assert.equal(sys, GOLDEN_ARTBRIEF_SYSTEM_OFF);
 });
 
 await test('parity: slotDirectorBrain (legacy system) storyRulesOn=false → เหมือน golden ก่อน TIER3 เป๊ะ', async () => {
-  const sys = await captureSystem(() => slotDirectorBrain({ imagesMeta: META_NO_FLAGS, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', refDNA: null, artBrief: null, sceneInventory: '', storyRulesOn: false }));
+  const sys = await captureSystem(() => slotDirectorBrain({ imagesMeta: META_NO_FLAGS, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', refDNA: null, artBrief: null, sceneInventory: '', storyRulesOn: false, pagePlaybookOn: false }));
   assert.equal(sys, GOLDEN_SLOTDIR_SYSTEM_LEGACY_OFF);
 });
 
 await test('parity: slotDirectorBrain (systemSem — SEM-1) storyRulesOn=false → เหมือน golden ก่อน TIER3 เป๊ะ', async () => {
-  const sys = await captureSystem(() => slotDirectorBrain({ imagesMeta: META_NO_FLAGS, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', refDNA: null, artBrief: null, sceneInventory: '', slotContract: SLOT_CONTRACT, storyRulesOn: false }));
+  const sys = await captureSystem(() => slotDirectorBrain({ imagesMeta: META_NO_FLAGS, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', refDNA: null, artBrief: null, sceneInventory: '', slotContract: SLOT_CONTRACT, storyRulesOn: false, pagePlaybookOn: false }));
   assert.equal(sys, GOLDEN_SLOTDIR_SYSTEM_SEM_OFF);
 });
 
@@ -114,16 +118,15 @@ await test('เนื้อหากติกาใหม่: slotDirectorBrain 
   assert.ok(/ฉากรายการทีวี|สตูดิโอ|ไฟเวที/.test(sys));
 });
 
-// ═══════════════════════ (4) งบ prompt: ไม่กระทบ IMG_META_BUDGET (18000) + delta ไม่บวมเกินเหตุ ═══════════════════════
+// ═══════════════════════ (4) งบ prompt: ไม่กระทบ IMG_META_BUDGET (default 45000) + delta ไม่บวมเกินเหตุ ═══════════════════════
 
-await test('งบ prompt: กติกาใหม่ไม่กระทบจำนวนใบภาพที่ถูกตัดท้ายคิว (IMG_META_BUDGET 18000 คงเดิม)', async () => {
-  // สร้าง imagesMeta ~300 ใบ ให้รวมกันเกิน 18000 ตัวอักษรแน่นอน (บังคับให้เกิดการตัดท้ายจริง)
+await test('งบ prompt: กติกาใหม่ไม่กระทบจำนวนใบภาพที่ถูกตัดท้ายคิว (IMG_META_BUDGET default 45000 คงเดิม)', async () => {
+  // สร้าง imagesMeta ~300 ใบ ให้รวมกันเกิน 45000 ตัวอักษรแน่นอน (บังคับให้เกิดการตัดท้ายจริงแม้งบใหม่ใหญ่กว่าเดิม 18000)
   const bigMeta = Array.from({ length: 300 }, (_, i) => ({
     id: `IMG${String(i).padStart(4, '0')}`, category: 'context', quality: 7,
     note: 'คำบรรยายฉากยาวพอสมควรสำหรับทดสอบงบ prompt ตัดท้ายคิวใบภาพที่คะแนนต่ำสุด'.repeat(2),
     person: null, emotion: 'warm', clean: true, newsScene: true,
   }));
-  const countIds = (userStr) => (userStr.match(/"id":"IMG\d{4}"/g) || []).length;
 
   const userOff = await captureUser(() => slotDirectorBrain({ imagesMeta: bigMeta, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', refDNA: null, artBrief: null, sceneInventory: '', storyRulesOn: false }));
   const userOn = await captureUser(() => slotDirectorBrain({ imagesMeta: bigMeta, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', refDNA: null, artBrief: null, sceneInventory: '', storyRulesOn: true }));
@@ -132,6 +135,41 @@ await test('งบ prompt: กติกาใหม่ไม่กระทบ�
   const nOn = countIds(userOn);
   assert.ok(nOff > 0 && nOff < bigMeta.length, `ต้องเกิดการตัดท้ายจริง (ได้ ${nOff}/${bigMeta.length}) — ไม่งั้น fixture ยังไม่เกินงบจริง`);
   assert.equal(nOn, nOff, `จำนวนใบที่รวมเข้า user ต้องเท่ากันทั้งสองโหมด (ได้ OFF=${nOff} ON=${nOn}) — กติกาใหม่อยู่ที่ system ไม่ใช่ user ห้ามแย่งงบภาพ`);
+});
+
+// ★ ข้อ 6 (27 ก.ค. 69 — เจ้าของจับได้จากล็อกจริง: สมองเห็นแค่ 39-58/77-80 ใบ): จำลองพูลจริง 90 ใบพร้อมป้ายครบทุกชนิด
+//   (faceH/busy/faceFront/heroDimsAvoid/note ยาวสุดตามเพดานจริงของ megaAdapters.js) → ต้องเข้าครบ 90/90 ภายในงบ
+//   default ใหม่ (45000) แม้รวมกันเกินงบเดิม (18000) แน่นอน — พิสูจน์ตัวเลขจริง ไม่ใช่แค่ "ไม่พัง"
+await test('ข้อ 6: พูลจริง 90 ใบป้ายครบ (faceH/busy/faceFront/heroDimsAvoid/note 64 ตัวอักษร) → เข้าครบ 90/90 ภายในงบ default 45000 (แม้รวมกันเกินงบเดิม 18000 แน่นอน)', async () => {
+  const fullMeta = Array.from({ length: 90 }, (_, i) => ({
+    id: `IMG${String(i).padStart(4, '0')}`,
+    category: i % 2 === 0 ? 'face-emotional' : 'context',
+    quality: 7,
+    note: `เฟรมคลิปสัมภาษณ์ที่งานแถลงข่าว มีคนยืนพูดคุยกันอยู่หน้ากล้อง ${i}`.slice(0, 64),
+    orient: i % 3 === 0 ? 'tall' : (i % 3 === 1 ? 'wide' : 'sq'),
+    person: i % 4 === 0 ? 'ทดสอบ' : null,
+    emotion: 'warm',
+    clean: true,
+    newsScene: true,
+    faceH: 0.42,
+    busy: 1,
+    faceFront: 2,
+    ...(i % 5 === 0 ? { heroDimsAvoid: 'เลี่ยง hero: วัดขนาดไม่ได้' } : {}),
+  }));
+  const totalLen = fullMeta.reduce((s, m) => s + JSON.stringify(m).length + 2, 0);
+  assert.ok(totalLen > 18000, `fixture ต้องเกินงบเดิม 18000 แน่นอน (ได้ ${totalLen}) — ไม่งั้นพิสูจน์อะไรไม่ได้`);
+  assert.ok(totalLen <= 45000, `fixture ต้องยังอยู่ในงบใหม่ 45000 (ได้ ${totalLen}) — สมมติฐานพูล ~80-100 ใบจริง`);
+
+  const userStr = await captureUser(() => slotDirectorBrain({ imagesMeta: fullMeta, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', refDNA: null, artBrief: null, sceneInventory: '', storyRulesOn: true }));
+  const n = countIds(userStr);
+  assert.equal(n, 90, `ต้องเข้าครบ 90/90 ภายในงบ default ใหม่ (ได้ ${n}/90) — รวมข้อความจริง ${totalLen} ตัวอักษร`);
+});
+
+await test('ข้อ 6: parametrized imgMetaBudget — ส่ง budget เล็กเจาะจง (2000) กับพูลเดียวกัน → ตัดท้ายจริง (พิสูจน์พารามิเตอร์มีผลจริง ไม่ใช่แค่ default)', async () => {
+  const smallMeta = Array.from({ length: 30 }, (_, i) => ({ id: `IMG${String(i).padStart(4, '0')}`, category: 'context', quality: 7, note: 'x'.repeat(50) }));
+  const userStr = await captureUser(() => slotDirectorBrain({ imagesMeta: smallMeta, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', refDNA: null, artBrief: null, sceneInventory: '', storyRulesOn: true, imgMetaBudget: 2000 }));
+  const n = countIds(userStr);
+  assert.ok(n > 0 && n < 30, `imgMetaBudget=2000 ต้องบังคับตัดท้ายจริง (ได้ ${n}/30)`);
 });
 
 await test('งบ prompt: ความยาว system ที่เพิ่มขึ้น (ON เทียบ OFF) อยู่ในเกณฑ์สมเหตุสมผล (<1000 ตัวอักษร/จุด)', async () => {
