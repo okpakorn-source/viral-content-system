@@ -109,16 +109,22 @@ export async function createJob({ kind, label, input, dispatch = 'local' }) {
 
 // ★ worker เครื่องทีม claim งาน dispatch='team' ที่ค้าง (pending) มารัน — ทีละงาน (กันรุมโหลด)
 //   งาน running ค้างเกิน 30 นาที = ถือว่าตาย → หยิบมาทำใหม่ (สูงสุด 2 รอบ) เหมือน ytJobStore
-export async function claimTeamJob() {
+// ★ 27 ก.ค. 69 (sol-review วิกฤต 2 — แยกคิวงานโต๊ะข่าวออกจากงานปก): kinds = filter คลาส เช่น
+//   ['compose','ref'] (คลาสปก) หรือ ['desk_harvest','desk_search','desk_chief'] (คลาสโต๊ะข่าว)
+//   → isFreshRunning เช็คเฉพาะคลาสเดียวกัน + ค้นหา pending เฉพาะคลาสเดียวกัน = งานยาวคลาสหนึ่ง (เช่น desk_harvest
+//   9+ นาที) ไม่บล็อกอีกคลาส (compose/ref) รอคิวอยู่ "ทีละงาน" ในช่องของมันเอง
+//   ไม่ส่ง kinds (undefined/null ตามค่า default) = พฤติกรรมเดิมเป๊ะ (ไม่กรอง ข้ามคลาสได้เหมือนก่อน) ผู้เรียกเก่าไม่พัง
+export async function claimTeamJob(kinds = null) {
   const jobs = await listJobs(200);
+  const inClass = (j) => !kinds || kinds.includes(j.kind);
   const staleMs = 30 * 60 * 1000;
   const now = Date.now();
-  const isFreshRunning = (j) => j.status === 'running' && j.dispatch === 'team'
+  const isFreshRunning = (j) => j.status === 'running' && j.dispatch === 'team' && inClass(j)
     && (now - Date.parse(j.claimedAt || j.startedAt || j.createdAt)) <= staleMs;
-  // มีงานเครื่องทีมกำลังรันสดอยู่ → ยังไม่หยิบเพิ่ม (รันทีละงาน)
+  // มีงานเครื่องทีมกำลังรันสดอยู่ (คลาสเดียวกัน) → ยังไม่หยิบเพิ่ม (รันทีละงานต่อคลาส)
   if (jobs.some(isFreshRunning)) return null;
-  const pick = jobs.slice().reverse().find((j) => j.status === 'pending' && j.dispatch === 'team') // เก่าสุดก่อน
-    || jobs.find((j) => j.status === 'running' && j.dispatch === 'team'
+  const pick = jobs.slice().reverse().find((j) => j.status === 'pending' && j.dispatch === 'team' && inClass(j)) // เก่าสุดก่อน
+    || jobs.find((j) => j.status === 'running' && j.dispatch === 'team' && inClass(j)
       && (now - Date.parse(j.claimedAt || j.startedAt || j.createdAt)) > staleMs);
   if (!pick) return null;
   const nowIso = new Date().toISOString();
@@ -131,7 +137,7 @@ export async function claimTeamJob() {
   };
   if (updated.retries > 2) {
     await saveJob({ ...updated, status: 'failed', error: 'งานค้างเกิน 2 รอบ (เครื่องทีมรันไม่จบ)', finishedAt: nowIso });
-    return claimTeamJob();
+    return claimTeamJob(kinds); // ★ ต้องส่ง kinds ต่อ ไม่งั้น recurse หลังบังคับ fail จะข้ามคลาสหลุด filter
   }
   await saveJob(updated);
   return updated;

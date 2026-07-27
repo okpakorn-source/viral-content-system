@@ -15,6 +15,8 @@
 import { NextResponse } from 'next/server';
 import { Agent } from 'undici';
 import { createJob, patchJob, finishJob, listJobs, getJob, claimTeamJob, removeJob } from '@/lib/quickTestJobs';
+// ★ 27 ก.ค. 69: 3 ชนิดงานโต๊ะข่าว (desk_harvest/desk_search/desk_chief) — ยืม whitelist mode จาก taxonomy เดียวกับ /api/m/desk
+import { HARVEST_MODE_KEYS, HARVEST_MODES } from '@/lib/services/newsDesk/taxonomy';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // คลาวรัน compose sync ได้ถึง ~5 นาที (ต้อง Vercel Pro) · เครื่องทีมคืนทันที
@@ -25,7 +27,13 @@ export const maxDuration = 300; // คลาวรัน compose sync ได้�
 //   compose (AI+sharp เร็ว) คลาวทำได้ · ref (เต็มท่อ 3-18 นาที + yt-dlp) คลาวทำไม่ได้
 const IS_CLOUD = process.platform !== 'win32';
 const CLOUD_KINDS = (process.env.QUICK_TEST_CLOUD_KINDS || 'compose').split(',').map((s) => s.trim()).filter(Boolean);
-const canRunOnCloud = (kind) => CLOUD_KINDS.includes(kind);
+// ★ 27 ก.ค. 69 (sol-review วิกฤต 2): 2 คลาสงาน — แต่ละคลาส claim/รัน "ทีละงาน" เป็นช่องแยกกัน (ดู quickTestJobs.claimTeamJob)
+//   คลาสปก (compose/ref) กับคลาสโต๊ะข่าว (desk_*) ต้องไม่บล็อกกัน — งานโต๊ะยาว 9+ นาทีไม่ควรกันงานปกรอคิวเปล่าๆ
+const COVER_KINDS = ['compose', 'ref'];
+const DESK_KINDS = ['desk_harvest', 'desk_search', 'desk_chief'];
+// desk_* (ล่าข่าว/ค้นเอง/บก.ใหญ่) = ห้ามรันบนคลาวเสมอ (งานยาว 9+ นาที เกิน maxDuration 300 ของสาย sync)
+//   บังคับ false ตรงๆ ไม่พึ่ง env CLOUD_KINDS กันตั้งค่าพลาดเปิดคลาวรันงานยาวเกิน
+const canRunOnCloud = (kind) => (DESK_KINDS.includes(kind) ? false : CLOUD_KINDS.includes(kind));
 
 function badReq(error) {
   return NextResponse.json({ success: false, error, errorType: 'BAD_INPUT' }, { status: 400 });
@@ -46,6 +54,9 @@ function isValidClipUrl(u) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRY_MAX = Math.max(1, parseInt(process.env.QUICK_TEST_MAX_ATTEMPTS || '6', 10));
 const RETRY_BASE_MS = Math.max(3000, parseInt(process.env.QUICK_TEST_RETRY_MS || '20000', 10));
+// ★ 27 ก.ค. 69 (sol-review ข้อ 2 ต่อเนื่อง): งานโต๊ะข่าววนน้อยกว่าปก — ล่าข่าว/ค้นเอง/บก.ใหญ่ ล้มซ้ำ = ยิง Serper/AI ซ้ำแพง
+//   ต่างจากปก (compose/ref) ที่ล้มมักเป็นระบบล่มชั่วคราว วนคุ้มกว่า — desk วน 2 รอบพอ ล้มจริงค่อยกดใหม่เอง
+const DESK_RETRY_MAX = Math.max(1, parseInt(process.env.QUICK_TEST_DESK_MAX_ATTEMPTS || '2', 10));
 // หยุดวน (วนไปก็ไม่หาย): input ผิด + "ทำครบแล้วแต่วัตถุดิบไม่พอจริง" (พูล/ภาพไม่พอ — วนเนื้อเดิมก็ได้เท่าเดิม)
 //   ต่างจาก "ระบบล่มชั่วคราว" (Gemini/SerpApi/network/5xx/timeout ล่ม) ที่ *ต้อง* วนซ้ำจนได้ผลจริง
 const TERMINAL_ERRORS = new Set([
@@ -82,6 +93,55 @@ async function callOnce(job, origin) {
       caseId: d.caseId || job.input.caseId,
     };
   }
+  // ★ 27 ก.ค. 69: 3 ชนิดงานโต๊ะข่าว — เรียกตรงเข้า /api/news-desk/* (ไม่ผ่าน middleware ป้องกัน คุมแค่ cover-ref-test/quick-test)
+  //   ทุกตัวต้องใช้ dispatcher REF_LONG_AGENT เหมือน ref — undici headersTimeout/bodyTimeout ค่า default (300s) ตัดกลางทางถ้าไม่ตั้ง
+  if (job.kind === 'desk_harvest' || job.kind === 'desk_search') {
+    const body = job.kind === 'desk_harvest' ? { mode: job.input.mode } : { keyword: job.input.keyword };
+    const res = await fetch(`${origin}/api/news-desk/harvest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(20 * 60 * 1000),
+      dispatcher: REF_LONG_AGENT,
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok || !d.success) throw Object.assign(new Error(d.error || `HTTP ${res.status}`), { errorType: d.errorType });
+    const added = d.added ?? 0;
+    const harvested = d.harvested ?? 0;
+    if (job.kind === 'desk_harvest') {
+      const modeInfo = HARVEST_MODES.find((m) => m.key === job.input.mode);
+      return {
+        added, harvested, mode: job.input.mode, lanes: modeInfo?.lanes || [],
+        summary: `เก็บข่าวใหม่ได้ ${added} ใบ (เจอทั้งหมด ${harvested} · ซ้ำ ${d.dupSkipped ?? 0} · ไม่ผ่านด่าน ${d.gated ?? 0})`.slice(0, 2000),
+      };
+    }
+    return {
+      added, harvested, keyword: job.input.keyword,
+      summary: `ค้น "${job.input.keyword}" เจอข่าวใหม่ ${added} ใบ (เจอทั้งหมด ${harvested} · ซ้ำ ${d.dupSkipped ?? 0})`.slice(0, 2000),
+    };
+  }
+  if (job.kind === 'desk_chief') {
+    const res = await fetch(`${origin}/api/news-desk/chief`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(20 * 60 * 1000),
+      dispatcher: REF_LONG_AGENT,
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok || !d.success) throw Object.assign(new Error(d.error || `HTTP ${res.status}`), { errorType: d.errorType });
+    const orders = Array.isArray(d.orders) ? d.orders : [];
+    const warnings = Array.isArray(d.warnings) ? d.warnings : [];
+    const pushNow = Array.isArray(d.pushNow) ? d.pushNow : [];
+    return {
+      diagnosis: String(d.diagnosis || '').slice(0, 2000),
+      orders, warnings, pushNow,
+      extraQueries: Array.isArray(d.extraQueries) ? d.extraQueries : [],
+      harvested: d.harvested ?? 0,
+      summary: [d.diagnosis, ...orders, ...warnings].filter(Boolean).join(' · ').slice(0, 2000),
+    };
+  }
+
   // kind === 'ref' — เต็มท่อ MEGA
   // ★ 15 ก.ค. 69 แบตช์ 5: แนบคีย์ทีม (server-side env — ไม่รั่วสู่ client) ให้ผ่านด่านตรวจสิทธิ์ src/middleware.js เมื่อเรียกผ่านโฮสต์ (cloud)
   const refHeaders = { 'Content-Type': 'application/json' };
@@ -100,12 +160,18 @@ async function callOnce(job, origin) {
   });
   const d = await res.json().catch(() => ({}));
   if (!res.ok || !d.success) throw Object.assign(new Error(d.error || `HTTP ${res.status}`), { errorType: d.errorType, trace: d.trace });
+  // ★ 27 ก.ค. 69 (แก้บั๊ก "รูปปกไม่โชว์"): อ่านจาก src/lib/refTestPipeline.js buildCoverResponseBody จริง —
+  //   field ชื่อ `archiveId` (ไม่ใช่ archivedId แบบสาย compose) + `coverPath` เป็นแค่ path ไฟล์ local
+  //   (public/mega-covers/reftest-xxx.jpg เขียนบนเครื่องที่รันท่อเท่านั้น) → ใช้ข้ามโฮสต์ไม่ได้เลย
+  //   (มือถือเปิดจากคลาวด์ แต่ท่อ ref รันบนเครื่องทีม = รูปหาย 404) ต้องเลือก /api/mega-covers/img?id=
+  //   (คลังคลาวด์ ข้ามโฮสต์ได้จริง — แบบเดียวกับสาย compose ที่ใช้ archivedId ถูกอยู่แล้ว) ก่อนเสมอถ้ามี archiveId
   return {
     template: d.template || null,
     score: d.score ?? null,
     refSimilarity: d.refSimilarity ?? null,
     elapsed: d.elapsedTotal || d.elapsed || null,
-    coverImgUrl: d.coverPath || null,
+    archiveId: d.archiveId || null,
+    coverImgUrl: d.archiveId ? `/api/mega-covers/img?id=${encodeURIComponent(d.archiveId)}` : (d.coverPath || null),
     refImgUrl: d.matchedRef?.imagePath || null,
     refName: d.matchedRef?.styleName || null,
     imageCaseId: d.imageCaseId || null,
@@ -118,7 +184,8 @@ async function callOnce(job, origin) {
 //   cloud (sync บน Vercel maxDuration 300) = ลองรอบเดียว → ล้มให้ POST fallback ส่งเครื่องทีม (วนซ้ำได้ไม่จำกัดเวลา)
 //   team/local (เครื่องทีมรันยาว) = วนซ้ำ RETRY_MAX รอบ + backoff เพิ่มขึ้น · refresh claimedAt กัน stale-reclaim ระหว่างวน
 async function runJob(job, origin) {
-  const maxAttempts = job.dispatch === 'cloud' ? 1 : RETRY_MAX;
+  // ★ 27 ก.ค. 69: desk_* ใช้เพดานวนของตัวเอง (2 รอบ) — ดู DESK_RETRY_MAX ด้านบน
+  const maxAttempts = job.dispatch === 'cloud' ? 1 : (DESK_KINDS.includes(job.kind) ? DESK_RETRY_MAX : RETRY_MAX);
   const nowIso = () => new Date().toISOString();
   await patchJob(job.id, { status: 'running', startedAt: nowIso(), claimedAt: nowIso(), progress: { step: 'กำลังรัน', pct: 5 } });
   let lastErr = null;
@@ -162,13 +229,21 @@ export async function POST(req) {
     // ── action 'delete': ผู้ใช้กดลบคิว (ทีละงาน jobId หรือ ล้างค้างทั้งหมด scope='active') ──
     //   งานที่กำลังรัน: ลบแถวออก → runJob เจอ getJob=null แล้วหยุด+ไม่เขียนผลทับ (ไม่ต้องฆ่า process)
     if (body.action === 'delete') {
+      // ★ 27 ก.ค. 69 (sol-review วิกฤต 2): kinds ทางเลือก — จำกัดสโคปลบเฉพาะคลาส (array หรือ 'a,b' คั่นจุลภาค)
+      //   กันปุ่ม "ล้างคิวค้าง" ของหน้าปก (/quick-cover, /m ทำปก) ไปลบงานโต๊ะข่าวที่ค้างอยู่ด้วยโดยไม่ตั้งใจ
+      const allowKinds = Array.isArray(body.kinds)
+        ? body.kinds.map((s) => String(s || '').trim()).filter(Boolean)
+        : (typeof body.kinds === 'string' && body.kinds
+          ? body.kinds.split(',').map((s) => s.trim()).filter(Boolean)
+          : null);
       if (body.jobId) {
         await removeJob(String(body.jobId)).catch(() => {});
         return NextResponse.json({ success: true, deleted: 1 });
       }
       if (body.scope === 'active' || body.scope === 'all') {
         const jobs = await listJobs(200);
-        const targets = body.scope === 'all' ? jobs : jobs.filter((j) => j.status === 'pending' || j.status === 'running');
+        let targets = body.scope === 'all' ? jobs : jobs.filter((j) => j.status === 'pending' || j.status === 'running');
+        if (allowKinds) targets = targets.filter((j) => allowKinds.includes(j.kind));
         for (const j of targets) await removeJob(j.id).catch(() => {});
         return NextResponse.json({ success: true, deleted: targets.length });
       }
@@ -177,14 +252,25 @@ export async function POST(req) {
 
     if (body.action === 'run') {
       if (IS_CLOUD) return NextResponse.json({ success: false, error: 'action run ใช้บนเครื่องทีมเท่านั้น', errorType: 'CLOUD_CANNOT_RUN' }, { status: 400 });
-      const claimed = await claimTeamJob();
+      // ★ 27 ก.ค. 69 (sol-review วิกฤต 2): claim แยกช่องตามคลาส (cover/desk) แบบอิสระในรอบเดียวกัน —
+      //   งานคลาสหนึ่งกำลังรันยาวอยู่ ไม่กันอีกคลาสถูกหยิบ (เดิม claimTeamJob() ตัวเดียวกันข้ามคลาสหมด รันได้ทีละงานทั้งระบบ)
+      const claimedCover = await claimTeamJob(COVER_KINDS);
+      if (claimedCover) runJob(claimedCover, origin).catch(() => {});
+      const claimedDesk = await claimTeamJob(DESK_KINDS);
+      if (claimedDesk) runJob(claimedDesk, origin).catch(() => {});
+      const claimed = claimedCover || claimedDesk; // ★ คงชื่อฟิลด์เดิม (worker เก่าอ่าน d.claimed/d.kind เป็นค่าเดี่ยวสำหรับล็อก)
       if (!claimed) return NextResponse.json({ success: true, claimed: null });
-      runJob(claimed, origin).catch(() => {});
-      return NextResponse.json({ success: true, claimed: claimed.id, kind: claimed.kind });
+      return NextResponse.json({
+        success: true, claimed: claimed.id, kind: claimed.kind,
+        // ★ เสริมไว้เผื่อใช้ต่อ (ไม่กระทบผู้เรียกเดิมที่อ่านแค่ claimed/kind) — โผล่เฉพาะตอน claim ได้ทั้ง 2 คลาสพร้อมกันจริง
+        ...(claimedCover && claimedDesk ? { claimedBoth: [{ id: claimedCover.id, kind: claimedCover.kind }, { id: claimedDesk.id, kind: claimedDesk.kind }] } : {}),
+      });
     }
 
-    const kind = body.kind === 'ref' ? 'ref' : body.kind === 'compose' ? 'compose' : null;
-    if (!kind) return badReq('ต้องระบุ kind = compose | ref');
+    // ★ 27 ก.ค. 69: +desk_harvest/desk_search/desk_chief (งานเบื้องหลังโต๊ะข่าว — เจ้าของอนุมัติ)
+    const VALID_KINDS = new Set(['ref', 'compose', 'desk_harvest', 'desk_search', 'desk_chief']);
+    const kind = VALID_KINDS.has(body.kind) ? body.kind : null;
+    if (!kind) return badReq('ต้องระบุ kind = compose | ref | desk_harvest | desk_search | desk_chief');
 
     let input;
     let label;
@@ -194,6 +280,21 @@ export async function POST(req) {
       const heroPersonHint = String(body.heroPersonHint || '').trim();
       input = { caseId, refId: String(body.refId || '').trim() || null, heroPersonHint: heroPersonHint || null };
       label = `⚡ ทางลัด · ${caseId}${heroPersonHint ? ' · ' + heroPersonHint : ''}`;
+    } else if (kind === 'desk_harvest') {
+      // ★ HARVEST_MODE_KEYS จาก taxonomy มี 'all' รวมอยู่แล้ว (ดู HARVEST_MODES ในไฟล์ต้นทาง)
+      const mode = String(body.mode || '').trim();
+      if (!HARVEST_MODE_KEYS.includes(mode)) return badReq(`mode ไม่ถูกต้อง: ${mode}`);
+      const modeInfo = HARVEST_MODES.find((m) => m.key === mode);
+      input = { mode };
+      label = `🗞️ ล่าข่าว · ${modeInfo?.label || mode}`;
+    } else if (kind === 'desk_search') {
+      const keyword = String(body.keyword || '').trim();
+      if (keyword.length < 2 || keyword.length > 60) return badReq('คีย์เวิร์ดต้องยาว 2-60 ตัวอักษร');
+      input = { keyword };
+      label = `🔎 ค้นเอง · ${keyword}`;
+    } else if (kind === 'desk_chief') {
+      input = {};
+      label = '🧠 บก.ใหญ่วินิจฉัย';
     } else {
       const content = String(body.content || '').trim();
       const newsTitle = String(body.newsTitle || '').trim();
@@ -257,6 +358,16 @@ export async function GET(req) {
       return NextResponse.json({ success: true, job });
     }
     const limit = Math.min(parseInt(searchParams.get('limit') || '30', 10) || 30, 60);
+    // ★ 27 ก.ค. 69 (sol-review วิกฤต 2): kinds= (คั่นจุลภาค) — กรอง "ก่อน" ตัด limit เพื่อไม่ให้งานคลาสหนึ่ง
+    //   หลุดพ้นหน้าต่าง N งานล่าสุดของอีกคลาส (เดิม /api/m/desk ดึง limit=40 มากรอง desk_* เอง — พลาดได้ถ้า
+    //   คลาสปกยิงถี่กว่าจนดันงานโต๊ะเกิน 40 ไป) — ผู้เรียกส่ง kinds ตามคลาสของตัวเอง (compose,ref หรือ desk_*)
+    const kindsParam = searchParams.get('kinds');
+    if (kindsParam) {
+      const allow = new Set(kindsParam.split(',').map((s) => s.trim()).filter(Boolean));
+      const all = await listJobs(200);
+      const jobs = all.filter((j) => allow.has(j.kind)).slice(0, limit);
+      return NextResponse.json({ success: true, jobs });
+    }
     const jobs = await listJobs(limit);
     return NextResponse.json({ success: true, jobs });
   } catch (err) {

@@ -139,6 +139,8 @@ const DESK_SRC_FILTERS = [
 ];
 // หมวด 7 ปุ่ม = 'ทั้งหมด' + 6 คลังเนื้อหาจริงจาก taxonomy.js (เกณฑ์เดียวกับจอเว็บเดิม)
 const DESK_LIB_FILTERS = [{ key: 'all', label: '🗂️ ทั้งหมด' }, ...LIBRARIES.map(l => ({ key: l.key, label: l.label }))];
+// ★ 27 ก.ค. 69: ไอคอนแพลตฟอร์มเต็มบล็อก — ใบไม่มีรูป (ยังไม่เติม/เติมไม่สำเร็จ) โชว์ตัวนี้แทนจุดจิ๋วเดิม
+const DESK_PLATFORM_ICON = { youtube: '▶️', tiktok: '🎵', 'fb-clip': '🎬', 'fb-post': '📘', ig: '📷', article: '📰' };
 
 // ป้ายความสด — เกณฑ์เดียวกับจอเว็บเดิม (news-desk/page.js freshnessBadge): 🟢≤24ชม / 🟡≤72ชม / 🗓️เก่ากว่า / ⏳ไม่มีวันที่
 function deskFreshBadge(it) {
@@ -251,6 +253,8 @@ export default function MobileApp() {
   const [qcSel, setQcSel] = useState(null);
   const [qcHero, setQcHero] = useState('');
   const [qcBusy, setQcBusy] = useState(false);
+  // ★ 27 ก.ค. 69: คลังปกล่าสุด (โหมด auto/quick) — ต่อ /api/m/cover?view=archive (forward /api/mega-covers)
+  const [cvArchive, setCvArchive] = useState([]);
 
   // ── โต๊ะข่าว (v1) — ต่อท่อผ่านประตู /api/m/desk (เฉพาะแอดมิน) ──
   const [deskTab, setDeskTab] = useState('all'); // all | trend | good | shortlist | ready
@@ -268,13 +272,18 @@ export default function MobileApp() {
   const [deskSearchKw, setDeskSearchKw] = useState('');
   const [deskSearchBusy, setDeskSearchBusy] = useState(false);
   const [deskImgFail, setDeskImgFail] = useState({}); // {[id]: true} ภาพตัวอย่างโหลดไม่ขึ้น → โชว์ ▶ แทน
+  // ★ 27 ก.ค. 69 (ชุดนี้): ล่าข่าว/ค้นเอง/บก.ใหญ่ → งานเบื้องหลังผ่านคิว /api/quick-test (เหมือนทำปก) — โพลดูสถานะที่นี่
+  const [deskJobs, setDeskJobs] = useState([]);
+  const [deskJobOpen, setDeskJobOpen] = useState(null); // id งาน บก.ใหญ่ ที่กางอยู่ (โชว์ result.summary จากตัวงานเอง — sol-review ข้อ 7)
+  const deskMineRef = useRef(new Set()); // job ที่เราส่งเอง — toast/loadDesk ตอนเสร็จครั้งเดียว (เหมือน cvMineRef ของทำปก)
 
   // ── ผลงาน ──
   const [cases, setCases] = useState([]);
   const [caseDetail, setCaseDetail] = useState(null);
   const [caseLoading, setCaseLoading] = useState(false);
 
-  const say = (m) => { setToast(m); setTimeout(() => setToast(''), 2400); };
+  // ★ 27 ก.ค. 69: useCallback (deps [] — setToast เสถียรอยู่แล้ว) เพื่อให้ loadDeskJobs อ้างอิงได้แบบ stable ไม่ชน react-hooks/exhaustive-deps
+  const say = useCallback((m) => { setToast(m); setTimeout(() => setToast(''), 2400); }, []);
 
   // 📓 สมุดใช้งาน — fire-and-forget (พังเงียบ ไม่กวนงานจริง)
   const log = useCallback((action, refId = '', meta = {}) => {
@@ -326,13 +335,64 @@ export default function MobileApp() {
   // 🗞️ โต๊ะข่าว — /api/m/desk ล็อกเฉพาะแอดมินฝั่ง server เหมือน /api/m/cover (พนักงานไม่ยิงเลย กันโดน 403 เปล่าๆ)
   // ★ sol-review 27 ก.ค. 69: ไม่ตั้ง state แบบ sync ใน effect (react-hooks/set-state-in-effect) — setState เกิดใน .then เท่านั้น
   //   เหมือน loadCovers/loadMe ข้างบน (ไม่มี loading flag แยก — ใช้ deskItems.length===0 บอกสถานะ "ยังไม่มี/กำลังโหลด" แทน)
+  // ★ 27 ก.ค. 69: เติมรูปอัตโนมัติ — ใบไหนไม่มีรูป → ยิงหลังบ้านหา og:image เงียบๆ (ล้มได้ จอห้ามพัง) แล้ว merge เข้า state
+  // ★ sol-review ข้อ 3: merge เป็น `thumbUrl` (ไม่ใช่ `imageUrl` — ฟิลด์นั้นมีผลคะแนนคัดข่าวฝั่งเซิร์ฟเวอร์) จอแสดงผล
+  //   ใช้ it.imageUrl || it.thumbUrl ตรงจุด render แทน (ดู DESK_PLATFORM_ICON block ด้านล่าง)
+  // 🔴 กำชับเจ้าของ 27 ก.ค. 69: "หารูปไม่เจอไม่เป็นไร ไม่ต้องพยายาม เดี๋ยวพัง" — ห้าม say()/toast เมื่อล้ม (ไม่เจอ = ปกติ
+  //   ไม่ใช่ error) · ห้ามรีทราย/เรียกซ้ำจากจอเอง — ให้ negative-cache ฝั่งเซิร์ฟเวอร์ (thumbTriedAt) เป็นตัวกันยิงซ้ำ
+  const fetchDeskThumbs = useCallback((ids) => {
+    if (!isAdmin || !ids || !ids.length) return;
+    fetch('/api/m/desk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'fetchThumbs', ids }),
+    }).then(r => r.json()).then(d => {
+      if (!d.success || !d.images) return;
+      setDeskItems(prev => prev.map(it => (d.images[it.id] && !it.imageUrl && !it.thumbUrl) ? { ...it, thumbUrl: d.images[it.id] } : it));
+    }).catch(() => {}); // เติมรูปล้ม = จอยังใช้งานได้ปกติ แค่ไม่มีรูป
+  }, [isAdmin]);
   const loadDesk = useCallback(() => {
     fetch('/api/m/desk?view=feed&tab=' + deskTab, { cache: 'no-store' }).then(r => r.json())
       // ★ 27 ก.ค. 69: enrich ทุกใบฝั่ง client — บาง tab (all/trend/good/ready) ฝั่ง server ไม่เติม library/sourceType/reliability ให้
       //   (เฉพาะ zone clip/link + browse + shortlist ของจอเว็บเดิมที่ enrich มาให้) เติมเองที่นี่แทน ไม่ต้องยิง API เพิ่ม
-      .then(d => { if (d.success) setDeskItems((d.items || []).map(enrichDeskItem)); })
+      .then(d => {
+        if (!d.success) return;
+        const enriched = (d.items || []).map(enrichDeskItem);
+        setDeskItems(enriched);
+        // ★ 27 ก.ค. 69 (sol-review ข้อ 3): 30 ใบแรกที่ยังไม่มีรูป (youtube ได้ thumb จาก enrichDeskItem ไปแล้ว)
+        //   + ไม่เคยลองมาก่อน (thumbUrl/thumbTriedAt ว่างทั้งคู่) → เติมรูปเบื้องหลัง · เลิกส่ง id ที่มี thumbTriedAt
+        //   แล้ว (ไม่ว่าเจอหรือไม่) กันยิงซ้ำเว็บเดิมทุกครั้งที่จอโหลด (server มี negative-cache 7 วันเป็นด่านสำรอง)
+        const missingIds = enriched.slice(0, 30).filter(it => !it.imageUrl && !it.thumbUrl && !it.thumbTriedAt).map(it => it.id);
+        if (missingIds.length) fetchDeskThumbs(missingIds);
+      })
       .catch(() => {});
-  }, [deskTab]);
+  }, [deskTab, fetchDeskThumbs]);
+  // ★ 27 ก.ค. 69: รายการงานเบื้องหลังโต๊ะข่าว (harvest/search/chief) — โพลจากที่นี่ + toast/loadDesk อัตโนมัติตอนเสร็จ
+  //   เฉพาะงานที่เราส่งเอง (deskMineRef) ถึง toast — งานเก่าจากรอบก่อน/เครื่องอื่นไม่เด้งซ้ำ (เหมือน loadCovers)
+  const loadDeskJobs = useCallback(() => {
+    fetch('/api/m/desk?view=jobs', { cache: 'no-store' }).then(r => r.json()).then(d => {
+      if (!d.success) return;
+      const jobs = d.jobs || [];
+      setDeskJobs(jobs);
+      for (const j of jobs) {
+        if (!deskMineRef.current.has(j.id)) continue;
+        if (j.status === 'done') {
+          deskMineRef.current.delete(j.id);
+          if (j.kind === 'desk_chief') {
+            setDeskBrief(j.result || null);
+            say('🧠 บก.ใหญ่วินิจฉัยเสร็จแล้ว');
+          } else {
+            const kw = j.input?.keyword;
+            log(j.kind === 'desk_search' ? 'desk_search' : 'desk_harvest', j.id, { mode: j.input?.mode, keyword: kw, added: j.result?.added ?? null });
+            say(`🔍 ${j.kind === 'desk_search' ? `ค้น "${kw}"` : 'ล่าข่าว'}เสร็จ — เจอใหม่ ${j.result?.added ?? 0} ใบ`);
+            loadDesk();
+          }
+        } else if (j.status === 'failed') {
+          deskMineRef.current.delete(j.id);
+          say(`❌ ${j.label || 'งานโต๊ะข่าว'} ล้มเหลว: ${String(j.error || '').slice(0, 60)}`);
+        }
+      }
+    }).catch(() => {});
+  }, [log, loadDesk, say]);
   // เปลี่ยนกระดาน/แท็บย่อย → เคลียร์ฟิลเตอร์เดิม (กันค้างฟิลเตอร์ที่ทำให้จอว่างงงๆ)
   // ★ ทำในตัว handler เอง ไม่ใช้ useEffect (กัน react-hooks/set-state-in-effect — ทำตามแบบที่โปรเจกต์นี้เคยชี้ปัญหาไว้แล้วที่จุดอื่น)
   const changeDeskTab = (next) => {
@@ -354,8 +414,8 @@ export default function MobileApp() {
     // ★ 27 ก.ค. 69 (sol แจ้งตกค้าง): /api/m/cover ล็อกเฉพาะแอดมินแล้วฝั่ง server — พนักงานไม่ต้องยิงเลย กันโดน 403 เปล่าๆ
     if (tab === 'cover' && isAdmin) loadCovers();
     if (tab === 'me') { loadMe(); if (isAdmin) { loadTeam(); loadReport(); } }
-    if (tab === 'desk' && isAdmin) loadDesk();
-  }, [tab, isAdmin, loadCases, loadInsightCases, loadCovers, loadMe, loadTeam, loadReport, loadDesk]);
+    if (tab === 'desk' && isAdmin) { loadDesk(); loadDeskJobs(); }
+  }, [tab, isAdmin, loadCases, loadInsightCases, loadCovers, loadMe, loadTeam, loadReport, loadDesk, loadDeskJobs]);
 
   // ⚡ ทางลัดประกอบ — โหลดรายการเคสจากคลัง (ครั้งแรกที่เข้าโหมด หรือกดรีเฟรชเอง)
   const loadQcCases = useCallback(() => {
@@ -368,6 +428,17 @@ export default function MobileApp() {
     if (tab === 'cover' && isAdmin && cvMode === 'quick' && qcCases.length === 0) loadQcCases();
   }, [tab, isAdmin, cvMode, qcCases.length, loadQcCases]);
 
+  // ★ 27 ก.ค. 69: คลังปกล่าสุด (โชว์ในโหมด auto/quick) — โหลดครั้งแรกที่เข้าโหมดใดโหมดหนึ่ง (guard isAdmin เหมือนบล็อกอื่น)
+  const loadCoverArchive = useCallback(() => {
+    fetch('/api/m/cover?view=archive&limit=24', { cache: 'no-store' }).then(r => r.json()).then(d => {
+      if (d.success) setCvArchive(d.items || []);
+    }).catch(() => {});
+  }, []);
+  useEffect(() => {
+    // ★ sol-review ข้อ 5: เดิมเช็คแค่ cvMode==='auto' — โหมด quick เข้ามาก่อนก็ไม่โหลดเลย (คลังว่างค้าง)
+    if (tab === 'cover' && isAdmin && (cvMode === 'auto' || cvMode === 'quick') && cvArchive.length === 0) loadCoverArchive();
+  }, [tab, isAdmin, cvMode, cvArchive.length, loadCoverArchive]);
+
   // โพลงานปก — 5 วิเมื่ออยู่แท็บปกหรือมีงานวิ่ง, ไม่งั้นหยุด (★ 27 ก.ค. 69: เฉพาะแอดมิน — พนักงานไม่โพลเลยเพราะ /api/m/cover ล็อกไว้แล้ว)
   useEffect(() => {
     if (!isAdmin) return;
@@ -376,6 +447,15 @@ export default function MobileApp() {
     const iv = setInterval(loadCovers, active ? 5000 : 12000);
     return () => clearInterval(iv);
   }, [tab, isAdmin, cvJobs, loadCovers]);
+
+  // ★ 27 ก.ค. 69: โพลงานเบื้องหลังโต๊ะข่าว — เฉพาะตอนอยู่แท็บโต๊ะข่าว+แอดมิน+มีงานยังไม่จบ (ไม่โพลค้างถาวร)
+  useEffect(() => {
+    if (!isAdmin || tab !== 'desk') return;
+    const active = deskJobs.some(j => j.status === 'pending' || j.status === 'running');
+    if (!active) return;
+    const iv = setInterval(loadDeskJobs, 8000);
+    return () => clearInterval(iv);
+  }, [tab, isAdmin, deskJobs, loadDeskJobs]);
 
   // ═══ ส่งเข้าคิวเขียนจริง ═══
   const submitNews = async (input, { forceNew = false, source = 'text' } = {}) => {
@@ -565,7 +645,10 @@ export default function MobileApp() {
   };
 
   // ═══ โต๊ะข่าว (v1) ═══
+  // ★ 27 ก.ค. 69 (ชุดนี้): 3 ปุ่มนี้ → งานเบื้องหลังผ่านคิว /api/quick-test (เหมือนทำปก) — กดแล้วปิดจอได้เลย
+  //   ไม่รอ response ยาวอีกต่อไป (/api/m/desk คืน {jobId} ทันที) ผลจริงมาทีหลังผ่าน loadDeskJobs (โพล + toast อัตโนมัติ)
   const runDeskHarvest = async (mode) => {
+    if (!isAdmin) return; // ★ sol-review ข้อ 7: เท่ากับ runDeskSearch — กันยิงเปล่าแม้ปุ่มถูกซ่อนไว้แล้วก็ตาม
     setDeskHarvestBusy(true); setDeskModeOpen(false);
     try {
       const d = await (await fetch('/api/m/desk', {
@@ -573,13 +656,14 @@ export default function MobileApp() {
         body: JSON.stringify({ action: 'harvest', mode }),
       })).json();
       if (!d.success) throw new Error(d.error || 'ล่าข่าวไม่สำเร็จ');
-      log('desk_harvest', '', { mode, added: d.added ?? null });
-      say(`🔍 ล่าเสร็จ — เจอใหม่ ${d.added ?? 0} ใบ (เก็บดิบ ${d.harvested ?? 0})`);
-      loadDesk();
+      if (d.jobId) deskMineRef.current.add(d.jobId);
+      say('🗞️ เข้าคิวแล้ว — ปิดจอได้ เดี๋ยวผลมาเอง');
+      setTimeout(loadDeskJobs, 800); setTimeout(loadDeskJobs, 3000);
     } catch (e) { say('❌ ' + String(e.message || e)); }
     setDeskHarvestBusy(false);
   };
   const runDeskChief = async () => {
+    if (!isAdmin) return; // ★ sol-review ข้อ 7: เท่ากับ runDeskSearch — กันยิงเปล่าแม้ปุ่มถูกซ่อนไว้แล้วก็ตาม
     setDeskChiefBusy(true);
     try {
       const d = await (await fetch('/api/m/desk', {
@@ -587,13 +671,13 @@ export default function MobileApp() {
         body: JSON.stringify({ action: 'chief' }),
       })).json();
       if (!d.success) throw new Error(d.error || 'บก.ใหญ่ทำงานไม่สำเร็จ');
-      setDeskBrief(d);
-      say('🧠 บก.ใหญ่วินิจฉัยเสร็จแล้ว');
-      if ((d.harvested || 0) > 0) loadDesk();
+      if (d.jobId) deskMineRef.current.add(d.jobId);
+      say('🧠 เข้าคิวแล้ว — ปิดจอได้ เดี๋ยวผลมาเอง');
+      setTimeout(loadDeskJobs, 800); setTimeout(loadDeskJobs, 3000);
     } catch (e) { say('❌ ' + String(e.message || e)); }
     setDeskChiefBusy(false);
   };
-  // ★ 27 ก.ค. 69: ช่องค้นเอง — ใส่ชื่อคน/แนว → ยิง harvest ด้วยคำค้นตรงๆ (endpoint เดิมที่จอเว็บใช้ ผ่านประตู action ใหม่ 'searchKeyword')
+  // ★ 27 ก.ค. 69: ช่องค้นเอง — ใส่ชื่อคน/แนว → เข้าคิว desk_search ผ่านประตู action 'searchKeyword' (ไม่ sync ค้างจอแล้ว)
   const runDeskSearch = async () => {
     if (!isAdmin) return; // มาตรฐานเดียวกับ fetch อื่นของโต๊ะข่าว (เช่น poll โพลปก ~บรรทัด 373) — กันยิงเปล่าแม้ปุ่มถูกซ่อนไว้แล้วก็ตาม
     const kw = deskSearchKw.trim();
@@ -606,10 +690,10 @@ export default function MobileApp() {
         body: JSON.stringify({ action: 'searchKeyword', keyword: kw }),
       })).json();
       if (!d.success) throw new Error(d.error || 'ค้นข่าวไม่สำเร็จ');
-      log('desk_search', '', { keyword: kw, added: d.added ?? null });
-      say(`🔎 ค้น "${kw}" เสร็จ — เก็บ ${d.harvested ?? 0} · ผ่านคัด ${d.added ?? 0} ใบ`);
+      if (d.jobId) deskMineRef.current.add(d.jobId);
+      say('🔎 เข้าคิวแล้ว — ปิดจอได้ เดี๋ยวผลมาเอง');
       setDeskSearchKw('');
-      loadDesk();
+      setTimeout(loadDeskJobs, 800); setTimeout(loadDeskJobs, 3000);
     } catch (e) { say('❌ ' + String(e.message || e)); }
     setDeskSearchBusy(false);
   };
@@ -677,6 +761,26 @@ export default function MobileApp() {
 
   const V = result?.versions || [];
   const cur = V[vIdx] || null;
+
+  // ★ 27 ก.ค. 69: คลังปกล่าสุด — โชว์ซ้ำในโหมด auto/quick (เลย์เอาต์เดียวกับคลังในโหมดแต่งเอง ของ CoverEditor.js)
+  //   คำนวณครั้งเดียวต่อ render ใช้ซ้ำ 2 จุด กัน copy-paste JSX ก้อนใหญ่
+  const coverArchiveBlock = (
+    <>
+      <div className="row" style={{ alignItems: 'center', marginTop: 16, marginBottom: 8 }}>
+        <h2 style={{ margin: 0 }}>🖼️ คลังปกล่าสุด</h2>
+        <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 12, marginLeft: 'auto' }} onClick={loadCoverArchive}>🔄 รีเฟรช</button>
+      </div>
+      {cvArchive.length === 0 && <p className="sub">ยังไม่มีปกในคลัง</p>}
+      {cvArchive.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 7 }}>
+        {cvArchive.map(a => (
+          <a key={a.id} href={`/api/mega-covers/img?id=${encodeURIComponent(a.id)}`} target="_blank" rel="noreferrer" style={{ display: 'block' }}>
+            <img src={`/api/mega-covers/img?id=${encodeURIComponent(a.id)}`} alt={a.title || a.id} loading="lazy"
+              style={{ width: '100%', aspectRatio: '4/5', objectFit: 'cover', borderRadius: 10, border: '1px solid var(--line)' }} />
+          </a>
+        ))}
+      </div>}
+    </>
+  );
 
   // จอกันเหนียว: ยังไม่ล็อกอิน (ปกติเว็บพาไปหน้า login เองอยู่แล้ว)
   if (sessChecked && !member) {
@@ -909,6 +1013,8 @@ export default function MobileApp() {
             </div>
           );
         })}
+
+        {coverArchiveBlock}
       </div>}
       {tab === 'cover' && isAdmin && cvMode === 'quick' && <div className="wrap" style={{ paddingTop: 0 }}>
         <p className="sub">ประกอบจากเคสที่มีรูปแล้ว ~20-80 วิ (ไม่ค้นรูปใหม่)</p>
@@ -962,6 +1068,8 @@ export default function MobileApp() {
             </div>
           );
         })}
+
+        {coverArchiveBlock}
       </div>}
 
       {/* ═══ แท็บ ผลงาน ═══ */}
@@ -1007,13 +1115,13 @@ export default function MobileApp() {
           onChange={e => setDeskSearchKw(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') runDeskSearch(); }} maxLength={60} />
         <button className="gh" style={{ marginBottom: 9 }} disabled={deskSearchBusy || deskSearchKw.trim().length < 2} onClick={runDeskSearch}>
-          {deskSearchBusy ? '⏳ กำลังค้น… (~2-3 นาที)' : '🔎 ค้นข่าวนี้'}</button>
+          {deskSearchBusy ? '⏳ กำลังส่งเข้าคิว…' : '🔎 ค้นข่าวนี้'}</button>
 
         <div className="row" style={{ marginBottom: 9 }}>
           <button className="gh" disabled={deskHarvestBusy} onClick={() => setDeskModeOpen(v => !v)}>
-            {deskHarvestBusy ? '⏳ กำลังล่า…' : '🔍 ล่าข่าวรอบใหม่'}</button>
+            {deskHarvestBusy ? '⏳ กำลังส่งเข้าคิว…' : '🔍 ล่าข่าวรอบใหม่'}</button>
           <button className="gh" disabled={deskChiefBusy} onClick={runDeskChief}>
-            {deskChiefBusy ? '⏳ กำลังวินิจฉัย…' : '🧠 บก.ใหญ่'}</button>
+            {deskChiefBusy ? '⏳ กำลังส่งเข้าคิว…' : '🧠 บก.ใหญ่'}</button>
         </div>
 
         {deskModeOpen && <div className="seg" style={{ marginBottom: 11 }}>
@@ -1021,6 +1129,52 @@ export default function MobileApp() {
             <button key={m.key} disabled={deskHarvestBusy} onClick={() => runDeskHarvest(m.key)} title={m.desc}>{m.label}</button>
           ))}
         </div>}
+
+        {/* ★ 27 ก.ค. 69: งานเบื้องหลังโต๊ะข่าว (ล่าข่าว/ค้นเอง/บก.ใหญ่) — เข้าคิวจริง กดแล้วปิดจอได้ ผลโผล่ที่นี่อัตโนมัติ */}
+        {deskJobs.length > 0 && <>
+          <h2>งานโต๊ะล่าสุด</h2>
+          {deskJobs.map(j => {
+            const chip = j.status === 'done' ? <span className="chip cok">เสร็จ</span>
+              : j.status === 'failed' ? <span className="chip" style={{ background: 'var(--warnS)', color: 'var(--warn)' }}>ล้ม</span>
+              : j.status === 'running' ? <span className="chip cwr">กำลังทำ</span> : <span className="chip cmu">รอคิว</span>;
+            const icon = j.kind === 'desk_chief' ? '🧠' : j.kind === 'desk_search' ? '🔎' : '🗞️';
+            // ★ sol-review ข้อ 7: การ์ด บก.ใหญ่ ที่เสร็จ → แตะกางได้ อ่าน result ของ "งานนี้เอง" ตรงๆ (ไม่พึ่ง deskBrief
+            //   ที่เป็น state ชั่วคราว หายเมื่อรีโหลดหน้า/มาดูทีหลัง) · แก้ข้อความให้ตรงจริง (ไม่ใช่ "ดูด้านล่าง" อีกต่อไป)
+            const isChiefDone = j.kind === 'desk_chief' && j.status === 'done';
+            const openJ = deskJobOpen === j.id;
+            const sub = j.status === 'failed' ? (j.error || 'ล้มเหลว').slice(0, 60)
+              : j.status === 'done' && j.kind !== 'desk_chief' ? `เจอใหม่ ${j.result?.added ?? 0} ใบ`
+                : j.status === 'done' ? 'วินิจฉัยเสร็จแล้ว — แตะดูผล'
+                  : (j.progress?.step || 'กำลังทำ');
+            return (
+              <div key={j.id} style={{ marginBottom: 8 }}>
+                <div className="job" style={{ cursor: isChiefDone ? 'pointer' : 'default' }}
+                  onClick={() => { if (isChiefDone) setDeskJobOpen(openJ ? null : j.id); }}>
+                  <span className="ava">{icon}</span>
+                  <div style={{ overflow: 'hidden' }}>
+                    <p className="tt" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.label || j.kind}</p>
+                    <p className="mm">{sub}</p>
+                  </div>
+                  <span className="right">{chip}</span>
+                </div>
+                {isChiefDone && openJ && <div className="reader" style={{ marginTop: 6 }}>
+                  {j.result?.diagnosis && <p className="bd" style={{ fontSize: 13.5 }}>{j.result.diagnosis}</p>}
+                  {(j.result?.orders || []).length > 0 && <div style={{ marginTop: 8 }}>
+                    <p className="mm" style={{ fontWeight: 700 }}>📌 คำสั่ง</p>
+                    {j.result.orders.map((o, i) => <p key={i} style={{ fontSize: 12.5, marginTop: 3 }}>• {o}</p>)}
+                  </div>}
+                  {(j.result?.warnings || []).length > 0 && <div style={{ marginTop: 8 }}>
+                    <p className="mm" style={{ fontWeight: 700, color: 'var(--warn)' }}>⚠️ ระวัง</p>
+                    {j.result.warnings.map((w, i) => <p key={i} style={{ fontSize: 12.5, marginTop: 3 }}>• {w}</p>)}
+                  </div>}
+                  {!j.result?.diagnosis && !(j.result?.orders || []).length && !(j.result?.warnings || []).length && (
+                    <p className="bd" style={{ fontSize: 13 }}>{j.result?.summary || 'ไม่มีผลสรุป'}</p>
+                  )}
+                </div>}
+              </div>
+            );
+          })}
+        </>}
 
         {deskBrief && <div className="reader" style={{ marginBottom: 12 }}>
           <p style={{ fontWeight: 800, fontSize: 13.5, color: 'var(--pink)', marginBottom: 6 }}>🧠 วินิจฉัยล่าสุด</p>
@@ -1083,15 +1237,23 @@ export default function MobileApp() {
           const clip = isClip(it);
           const fresh = deskFreshBadge(it);
           const grade = deskQualityGrade(it);
-          const showImg = clip && it.imageUrl && !deskImgFail[it.id];
+          // ★ 27 ก.ค. 69: ภาพซ้ายขยายเด่นทุกใบ (ไม่ใช่เฉพาะคลิปแล้ว) — ไม่มีรูป/โหลดพัง = กล่องไอคอนแพลตฟอร์มเต็มบล็อกขนาดเดียวกัน
+          // ★ sol-review ข้อ 3: imageUrl (จริง/youtube) มาก่อนเสมอ · thumbUrl (og:image ที่เติมทีหลัง) เป็น fallback
+          const thumb = it.imageUrl || it.thumbUrl;
+          const showImg = thumb && !deskImgFail[it.id];
           return (
             <div key={it.id} style={{ marginBottom: 8 }}>
               <div className="job" style={{ alignItems: 'flex-start' }} onClick={() => setDeskExpanded(open ? null : it.id)}>
                 {showImg ? (
-                  <img src={it.imageUrl} alt="" loading="lazy" onError={() => setDeskImgFail(p => ({ ...p, [it.id]: true }))}
-                    style={{ width: 44, height: 44, borderRadius: 11, objectFit: 'cover', flex: 'none', background: 'var(--card)' }} />
+                  <div style={{ position: 'relative', flex: 'none' }}>
+                    <img src={thumb} alt="" loading="lazy" onError={() => setDeskImgFail(p => ({ ...p, [it.id]: true }))}
+                      style={{ width: 110, height: 82, borderRadius: 14, objectFit: 'cover', display: 'block', background: 'var(--card)' }} />
+                    {clip && <span style={{ position: 'absolute', top: 5, left: 5, background: 'rgba(0,0,0,.68)', color: '#fff', fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 999, letterSpacing: '.02em' }}>คลิป</span>}
+                  </div>
                 ) : (
-                  <span className="ava">{clip ? '▶' : '📰'}</span>
+                  <div style={{ width: 110, height: 82, borderRadius: 14, background: 'var(--pinkS)', color: 'var(--pink)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, flex: 'none' }}>
+                    {DESK_PLATFORM_ICON[it.sourceType] || (clip ? '▶️' : '📰')}
+                  </div>
                 )}
                 <div style={{ overflow: 'hidden', flex: 1 }}>
                   <p className="tt">{it.title}</p>

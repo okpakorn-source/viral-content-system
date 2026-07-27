@@ -61,8 +61,9 @@ export default function QuickCoverPage() {
   }, []);
 
   // โพลรายการงาน — ทุก 4 วิถ้ามีงานค้างหรืออยู่สไลด์งาน, ไม่งั้น 12 วิ
+  // ★ 27 ก.ค. 69 (sol-review วิกฤต 2): kinds=compose,ref — หน้านี้โชว์แค่งานปก กันงานโต๊ะข่าว (desk_*) หลุดมาโผล่
   const loadJobs = useCallback(() => {
-    fetch('/api/quick-test?limit=40').then((r) => r.json()).then((d) => {
+    fetch('/api/quick-test?limit=40&kinds=compose,ref').then((r) => r.json()).then((d) => {
       if (d.success) setJobs(d.jobs || []);
     }).catch(() => {});
   }, []);
@@ -118,12 +119,13 @@ export default function QuickCoverPage() {
     setTimeout(loadJobs, 500);
   }
   // ล้างคิวค้างทั้งหมด (รอคิว + กำลังรัน)
+  // ★ 27 ก.ค. 69 (sol-review วิกฤต 2): แนบ kinds:['compose','ref'] เสมอ — กันปุ่มนี้ไปลบงานโต๊ะข่าวที่ค้างอยู่ในคิวเดียวกัน
   async function clearActive() {
     const active = jobs.filter((j) => j.status === 'pending' || j.status === 'running');
     if (!active.length) return;
     if (typeof window !== 'undefined' && !window.confirm(`ลบงานที่ค้าง (รอคิว + กำลังรัน) ${active.length} งาน?`)) return;
     setJobs((prev) => prev.filter((j) => j.status !== 'pending' && j.status !== 'running'));
-    await fetch('/api/quick-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', scope: 'active' }) }).catch(() => {});
+    await fetch('/api/quick-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', scope: 'active', kinds: ['compose', 'ref'] }) }).catch(() => {});
     setTimeout(loadJobs, 500);
   }
 

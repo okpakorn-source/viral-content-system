@@ -5,8 +5,10 @@
  *   - ด่านสิทธิ์ = ต้องล็อกอินยูสพนักงานจริง (session) — คนนอกไม่มี session โดน 401
  *   - ฝั่งเซิร์ฟเวอร์แนบคีย์ทีม (COVER_TEST_KEY) ให้เอง — คีย์ไม่เคยหลุดไปหน้าจอ
  *   - ด่าน middleware ของ /api/quick-test เดิมยังคุมการยิงตรงจากภายนอกเหมือนเดิมทุกประการ
- * GET  → รายการงานปก (สะท้อนจาก quick-test) · POST {newsTitle, content} → สร้างงานเต็มท่อ
- * POST {action:'delete', jobId} → ลบงาน — ไฟล์ใหม่ล้วน ไม่แตะระบบข่าว/ระบบปกเดิม
+ * GET  → รายการงานปก (สะท้อนจาก quick-test kinds=compose,ref เท่านั้น — คิวโต๊ะข่าวแยกคนละคลาส ไม่ปนกัน)
+ * GET  ?view=archive&limit=24 → คลังปกล่าสุด — import listMegaCovers ตรง (แบบเดียวกับ /api/m/cover-editor) ไม่ hop HTTP
+ * POST {newsTitle, content} → สร้างงานเต็มท่อ · POST {action:'delete', jobId} → ลบงาน (scope:'active' จำกัดคลาส compose/ref เท่านั้น)
+ * ไฟล์ใหม่ล้วน ไม่แตะระบบข่าว/ระบบปกเดิม
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,6 +17,7 @@ export const maxDuration = 60;
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getSession } from '@/lib/auth';
+import { listMegaCovers } from '@/lib/megaCoverArchive'; // ★ 27 ก.ค. 69 (sol-review ข้อ 6): เลิก hop HTTP ไป /api/mega-covers
 
 async function sess() {
   try {
@@ -56,7 +59,17 @@ export async function GET(request) {
       return NextResponse.json(d, { status: r.status });
     }
 
-    const r = await fetch(`${request.nextUrl.origin}/api/quick-test?limit=30`, {
+    // ★ 27 ก.ค. 69 (sol-review ข้อ 6): คลังปกล่าสุด (แท็บทำปกในแอพ) — import lib ตรง ไม่ hop HTTP ผ่าน /api/mega-covers
+    //   แบบเดียวกับ src/app/api/m/cover-editor/route.js:50-57 (ไฟล์นั้นไม่แตะ — แค่ทำตามแพทเทิร์นเดียวกัน)
+    if (request.nextUrl.searchParams.get('view') === 'archive') {
+      const limit = Math.min(parseInt(request.nextUrl.searchParams.get('limit') || '24', 10) || 24, 60);
+      const all = await listMegaCovers(200);
+      const items = (all || []).slice(0, limit).map((it) => ({ id: it.id, title: it.title || '', createdAt: it.at || null, source: it.source || '' }));
+      return NextResponse.json({ success: true, items });
+    }
+
+    // ★ 27 ก.ค. 69 (sol-review วิกฤต 2): kinds=compose,ref — คิวนี้เป็นของงานปกเท่านั้น กันงานโต๊ะข่าว (desk_*) หลุดมาโผล่จอปก
+    const r = await fetch(`${request.nextUrl.origin}/api/quick-test?limit=30&kinds=compose,ref`, {
       headers: keyHeaders(), cache: 'no-store', signal: AbortSignal.timeout(20000),
     });
     const d = await r.json();
@@ -75,8 +88,10 @@ export async function POST(request) {
     const body = await request.json().catch(() => ({}));
 
     // ลบงาน — ส่งต่อตรงๆ (เฉพาะ action ที่อนุญาต)
+    // ★ 27 ก.ค. 69 (sol-review วิกฤต 2): scope:'active' แนบ kinds:['compose','ref'] เสมอ — กันปุ่ม "ล้างคิวค้าง"
+    //   ฝั่งทำปกไปลบงานโต๊ะข่าว (desk_*) ที่ค้างอยู่ด้วยโดยไม่ตั้งใจ (ประตูนี้มีแค่ปก แต่คิวจริงที่ /api/quick-test ใช้ร่วมกัน)
     if (body.action === 'delete') {
-      const fwd = body.scope === 'active' ? { action: 'delete', scope: 'active' } : { action: 'delete', jobId: String(body.jobId || '') };
+      const fwd = body.scope === 'active' ? { action: 'delete', scope: 'active', kinds: ['compose', 'ref'] } : { action: 'delete', jobId: String(body.jobId || '') };
       const r = await fetch(`${request.nextUrl.origin}/api/quick-test`, {
         method: 'POST', headers: keyHeaders(), body: JSON.stringify(fwd), signal: AbortSignal.timeout(20000),
       });
