@@ -229,6 +229,12 @@ export default function MobileApp() {
   // topicEdits = ข้อความที่แก้ก่อนส่งเขียน {[idx]: {topic, raw}} — ทับเฉพาะช่องที่แก้ ช่องอื่นยังใช้ของเดิม
   const [topicEdits, setTopicEdits] = useState({});
   const [editingIdx, setEditingIdx] = useState(null); // idx การ์ดประเด็นที่กางช่องแก้ไขอยู่ (null = ปิดหมด)
+  // ★ 27 ก.ค. ค่ำ (เจ้าของสั่งตรง): ดินสอแก้ก่อนส่งของ "กรอบเทา" (rawData) และ "กรอบม่วง" (transcriptQuotes.enrichedRaw)
+  //   null = ยังไม่แก้ (ใช้ต้นฉบับ AI) · string = ฉบับที่แก้แล้ว — รีเซ็ตจุดเดียวกับ topicEdits (เริ่มถอดใหม่ + เปิดเคสจากคลัง)
+  const [rawEdit, setRawEdit] = useState(null);
+  const [rawEditing, setRawEditing] = useState(false); // กางช่องแก้กรอบเทาอยู่ไหม
+  const [purpleEdit, setPurpleEdit] = useState(null);
+  const [purpleEditing, setPurpleEditing] = useState(false); // กางช่องแก้กรอบม่วงอยู่ไหม
 
   // ── สกัดเนื้อหา ── (ตรงตามเว็บ /news-filter ยกเครื่อง 19-24 มิ.ย.: ปิดดึงลิงก์ + เหลือโหมดเดียว)
   const [nfText, setNfText] = useState('');
@@ -533,6 +539,7 @@ export default function MobileApp() {
     const u = clipUrl.trim();
     if (!/^https?:\/\//i.test(u)) { say('วางลิงก์คลิปก่อน (TikTok / YouTube / FB)'); return; }
     setClipErr(''); setInsight(null); setSelTopics([]); setTopicEdits({}); setEditingIdx(null); setInsightMeta(null); setClipPhase('queued'); setClipPos(0);
+    setRawEdit(null); setRawEditing(false); setPurpleEdit(null); setPurpleEditing(false);
     try {
       const r = await fetch('/api/clip-transcript/submit', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -638,6 +645,27 @@ export default function MobileApp() {
     }
     log('send_topic', '', { from: 'clip', count: tps.length });
     submitNews(input, { source: 'clip' });
+  };
+
+  // ★ 27 ก.ค. ค่ำ (เจ้าของสั่งตรง): ปุ่มส่งเจนประจำกรอบเทา (ข้อมูลดิบรวม) — ใช้ฉบับที่แก้แล้วถ้ามี ไม่งั้นใช้ต้นฉบับ AI
+  //   เส้นทางเดียวกับ sendTopicsToWrite ทุกอย่าง: log เดิม + submitNews ตัวเดิม (ด่านความยาว <60 ตัวอักษร อยู่ใน submitNews แล้ว)
+  const sendRawToWrite = () => {
+    const text = (rawEdit ?? insight?.rawData ?? '').trim();
+    if (!text) { say('เนื้อดิบว่าง — เติมข้อความก่อนส่ง'); return; }
+    if (text.length < 60) { say('เนื้อสั้นเกินไป — ขอความยาวสักหน่อย'); return; } // กัน toast "ส่งแล้ว" ทับข้อความบล็อกของ submitNews
+    log('send_topic', '', { from: 'clip-raw' });
+    submitNews(text, { source: 'clip-raw' });
+    say('ส่งกรอบข้อมูลดิบเข้าเขียนข่าวแล้ว');
+  };
+
+  // ★ 27 ก.ค. ค่ำ (เจ้าของสั่งตรง): ปุ่มส่งเจนประจำกรอบม่วง (เนื้อดิบมีมิติ enrichedRaw) — เฉพาะเนื้อหลัก ไม่รวม enrichedTopics/punchyQuotes/transcript
+  const sendPurpleToWrite = () => {
+    const text = (purpleEdit ?? insight?.transcriptQuotes?.enrichedRaw ?? '').trim();
+    if (!text) { say('เนื้อดิบมีมิติว่าง — เติมข้อความก่อนส่ง'); return; }
+    if (text.length < 60) { say('เนื้อสั้นเกินไป — ขอความยาวสักหน่อย'); return; } // กัน toast "ส่งแล้ว" ทับข้อความบล็อก
+    log('send_topic', '', { from: 'clip-purple' });
+    submitNews(text, { source: 'clip-purple' });
+    say('ส่งกรอบเนื้อดิบมีมิติเข้าเขียนข่าวแล้ว');
   };
 
   // ═══ สกัดเนื้อหา ═══ (ปิดดึงจากลิงก์ตามเว็บ — รับเฉพาะข้อความสรุปที่วางเอง)
@@ -997,11 +1025,36 @@ export default function MobileApp() {
             </div>
           )}
           {/* ★ 27 ก.ค. ค่ำ (เจ้าของชี้ "กรอบเทาไม่มา ต้องเหมือนเว็บ 100%"): กล่องเทาเนื้อดิบรวม โชว์เต็มเสมอ
-              ตำแหน่งเดียวกับเว็บเป๊ะ (คั่นระหว่างประเด็นสำคัญ กับ คำพูดสำคัญ) — เลิกพับซ่อน/เลิกเงื่อนไขข้าม */}
+              ตำแหน่งเดียวกับเว็บเป๊ะ (คั่นระหว่างประเด็นสำคัญ กับ คำพูดสำคัญ) — เลิกพับซ่อน/เลิกเงื่อนไขข้าม
+              ★ 27 ก.ค. ค่ำ (เจ้าของสั่งตรง): เพิ่มดินสอแก้ก่อนส่ง + ปุ่มส่งกรอบนี้เข้าเขียนข่าวตรง — คัดลอกยังใช้ต้นฉบับ AI เดิมเสมอ */}
           {insight.rawData && (
             <div style={{ marginTop: 10, marginBottom: 4 }}>
-              <div className="bd" style={{ fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', maxHeight: 320, overflowY: 'auto', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>{insight.rawData}</div>
-              <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5, marginTop: 6 }} onClick={() => copyText(insight.rawData, insight.id || '')}>📋 คัดลอกข้อมูลดิบ</button>
+              <div className="row" style={{ alignItems: 'flex-start', gap: 6, marginBottom: 6 }}>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  {rawEdit != null && <span className="chip cpk" style={{ fontSize: 10 }}>✏️ แก้แล้ว</span>}
+                </div>
+                <div style={{ display: 'flex', gap: 4, flex: 'none' }}>
+                  {rawEdit != null && (
+                    <button className="gh" title="คืนค่าเดิม" style={{ width: 40, height: 40, padding: 0, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      onClick={() => setRawEdit(null)}>↩︎</button>
+                  )}
+                  <button className="gh" title="แก้ไขก่อนส่ง" style={{ width: 40, height: 40, padding: 0, fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    onClick={() => { if (rawEdit == null) setRawEdit(insight.rawData); setRawEditing(o => !o); }}>✏️</button>
+                </div>
+              </div>
+              {rawEditing ? (
+                <>
+                  <textarea className="ta" style={{ minHeight: 120, background: 'var(--panel)', border: '1.5px solid var(--line)', borderRadius: 10, padding: 10, width: '100%' }}
+                    value={rawEdit ?? insight.rawData} onChange={e => setRawEdit(e.target.value)} placeholder="เนื้อดิบรวม" />
+                  <button className="gh" style={{ marginTop: 6 }} onClick={() => setRawEditing(false)}>✅ เสร็จแล้ว ปิดช่องแก้</button>
+                </>
+              ) : (
+                <div className="bd" style={{ fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', maxHeight: 320, overflowY: 'auto', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>{rawEdit ?? insight.rawData}</div>
+              )}
+              <div className="row" style={{ gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5 }} onClick={() => copyText(insight.rawData, insight.id || '')}>📋 คัดลอกข้อมูลดิบ</button>
+                <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5, borderColor: 'var(--pink)', color: 'var(--pink)' }} onClick={sendRawToWrite}>🚀 ส่งกรอบนี้เข้าเขียนข่าว</button>
+              </div>
             </div>
           )}
           {insight.quotes?.length > 0 && (
@@ -1090,10 +1143,38 @@ export default function MobileApp() {
             <div style={{ marginTop: 14, border: '1px solid rgba(124,58,237,.3)', background: 'rgba(124,58,237,.06)', borderRadius: 14, padding: 13 }}>
               <p style={{ fontSize: 13, fontWeight: 800, color: '#a78bfa', marginBottom: 4 }}>🎙️ เนื้อดิบมีมิติ — ประเด็น + คำพูดจริง (ไม่รวมเพลง)</p>
               <p style={{ fontSize: 11, color: 'var(--mut)', marginBottom: 10 }}>Gemini ถอดคำพูดจริงมาถักทอกับประเด็นข่าว · AI ถอด—โปรดตรวจชื่อ/คำเฉพาะ{insight.transcriptQuotes.note ? ` · ${insight.transcriptQuotes.note}` : ''}</p>
-              {insight.transcriptQuotes.enrichedRaw && (<>
-                <div className="bd" style={{ fontSize: 13 }}>{insight.transcriptQuotes.enrichedRaw}</div>
-                <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5, marginTop: 8 }} onClick={() => copyText(insight.transcriptQuotes.enrichedRaw)}>📋 คัดลอกกรอบนี้</button>
-              </>)}
+              {/* ★ 27 ก.ค. ค่ำ (เจ้าของสั่งตรง): ดินสอแก้ก่อนส่ง + ปุ่มส่งกรอบนี้เข้าเขียนข่าวตรง — เฉพาะเนื้อหลัก enrichedRaw เท่านั้น
+                  (enrichedTopics/punchyQuotes/transcript ด้านล่างคงพฤติกรรมเดิม ไม่แตะ) · คัดลอกยังใช้ต้นฉบับ AI เดิมเสมอ */}
+              {insight.transcriptQuotes.enrichedRaw && (
+                <div style={{ marginBottom: 6 }}>
+                  <div className="row" style={{ alignItems: 'flex-start', gap: 6, marginBottom: 6 }}>
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      {purpleEdit != null && <span className="chip cpk" style={{ fontSize: 10 }}>✏️ แก้แล้ว</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, flex: 'none' }}>
+                      {purpleEdit != null && (
+                        <button className="gh" title="คืนค่าเดิม" style={{ width: 40, height: 40, padding: 0, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                          onClick={() => setPurpleEdit(null)}>↩︎</button>
+                      )}
+                      <button className="gh" title="แก้ไขก่อนส่ง" style={{ width: 40, height: 40, padding: 0, fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={() => { if (purpleEdit == null) setPurpleEdit(insight.transcriptQuotes.enrichedRaw); setPurpleEditing(o => !o); }}>✏️</button>
+                    </div>
+                  </div>
+                  {purpleEditing ? (
+                    <>
+                      <textarea className="ta" style={{ minHeight: 120, background: 'var(--panel)', border: '1.5px solid var(--line)', borderRadius: 10, padding: 10, width: '100%' }}
+                        value={purpleEdit ?? insight.transcriptQuotes.enrichedRaw} onChange={e => setPurpleEdit(e.target.value)} placeholder="เนื้อดิบมีมิติ" />
+                      <button className="gh" style={{ marginTop: 6 }} onClick={() => setPurpleEditing(false)}>✅ เสร็จแล้ว ปิดช่องแก้</button>
+                    </>
+                  ) : (
+                    <div className="bd" style={{ fontSize: 13 }}>{purpleEdit ?? insight.transcriptQuotes.enrichedRaw}</div>
+                  )}
+                  <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                    <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5 }} onClick={() => copyText(insight.transcriptQuotes.enrichedRaw)}>📋 คัดลอกกรอบนี้</button>
+                    <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5, borderColor: 'var(--pink)', color: 'var(--pink)' }} onClick={sendPurpleToWrite}>🚀 ส่งกรอบนี้เข้าเขียนข่าว</button>
+                  </div>
+                </div>
+              )}
               {insight.transcriptQuotes.enrichedTopics?.length > 0 && (
                 <div style={{ marginTop: 12 }}>
                   {insight.transcriptQuotes.enrichedTopics.map((t, i) => (
@@ -1131,6 +1212,7 @@ export default function MobileApp() {
         {insightCases.slice(0, 10).map(c => (
           <div key={c.id} className="job" onClick={() => {
             setInsight(c.insight || {}); setSelTopics([]); setTopicEdits({}); setEditingIdx(null);
+            setRawEdit(null); setRawEditing(false); setPurpleEdit(null); setPurpleEditing(false);
             // ★ รีวิว item 1: lowQuality/qualityNote ของเคสจากคลังอยู่ที่ "ระดับเคส" (c.lowQuality) ไม่ใช่ c.insight — อ่านจากตรงนี้
             setInsightMeta({ url: c.url, platform: c.platform, user: c.user, createdAt: c.createdAt, category: c.category || c.insight?.category || '', lowQuality: !!c.lowQuality, qualityNote: c.qualityNote || '' });
             setClipPhase('done'); window.scrollTo({ top: 0 });
