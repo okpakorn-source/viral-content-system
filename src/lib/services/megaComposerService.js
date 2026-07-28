@@ -15,7 +15,7 @@ import { isProxy } from 'node:util/types'; // (P0) reject a raw outer args Proxy
 // ★ Wave2 Batch D2 (10 ก.ค.): เกณฑ์ตัวเลข "กติกาวัดได้" จากคลังเทคนิคปก — single source of truth (sync, ใช้ใน measureTechRules)
 import { TECH_RULES } from '@/lib/imageQualityConfig';
 import { HERO_STRETCH_MAX } from '@/lib/heroCropGeometry'; // ★ AC-0107: single source of the hard 1.2× hero limit (runtime-bound crop proof, strict V2)
-import { computePanelCircleZone } from '@/lib/panelCropGeometry'; // ★ แบตช์ C (C2): โซนวงกลม frac ต่อช่อง (PURE) → executor bias หน้าออกนอกวง
+import { computePanelCircleZone, chooseCirclePosition } from '@/lib/panelCropGeometry'; // ★ แบตช์ C (C2): โซนวงกลม frac ต่อช่อง (PURE) → executor bias หน้าออกนอกวง · ★ MEGA_CIRCLE_POS_FLEX (28 ก.ค. 69): เลือกตำแหน่งวงยืดหยุ่น (PURE)
 // ★ Checkpoint B (11 ก.ค. — Codex strict consumer): ผู้ตัดสิน "เปิด strict ได้ไหม" คือ validator ของ Checkpoint A
 //   เท่านั้น — consumer ใช้เฉพาะ decision.authority ที่ normalize แล้ว ห้ามอ่าน raw selectionSpec เอง
 // ★ Wave1A (LANE C — flag-gated, default OFF): V2 consumer ใช้ validateSelectionSpecV2Activation (canonical) เป็นผู้ตัดสินเดียว —
@@ -304,6 +304,10 @@ function traceQcFlags(cropTrace) {
       else if (tg.tightened) out.push(`crop_tightened:${tt.slot}`);
       if (tg.small) out.push(`face_small:${tt.slot}:${Number(tg.share).toFixed(2)}`);
     }
+    // ★ MEGA_WATERMARK_GUARD C2 (29 ก.ค. 69 — แบตช์ C): executor แนบ tt.watermarkKept เมื่อลายน้ำขอบเกินงบ 12%
+    //   หลบไม่ไหว (coverExecutorService.js _applyWatermarkEdgeGuard) — ชื่อ flag เดียวกับ C1 (ตาสองหาแทนที่ไม่เจอ)
+    //   ตั้งใจให้เป็นชื่อเดียวกัน (สื่อความหมายเดียวกัน: "ยอมเก็บลายน้ำไว้เพราะไม่มีทางออกอื่น")
+    if (tt.watermarkKept) out.push('watermark_kept');
   }
   return out;
 }
@@ -340,6 +344,16 @@ function _panelBackupSwapOn() { return process.env.MEGA_PANEL_BACKUP_SWAP !== '0
 // ★ MEGA_CLUTTER_GUARD (มือ D, 19 ก.ค.) — kill-switch เดียว **default OFF** (=1 เปิด) · OFF → byte-parity 100%
 //   ต้องตรง _clutterGuardOn() ใน coverExecutorService.js เป๊ะ (เปิด/ปิดพร้อมกัน)
 function _clutterGuardOnComposer() { return process.env.MEGA_CLUTTER_GUARD !== '0'; }
+
+// ★ MEGA_WATERMARK_GUARD (29 ก.ค. 69 — แบตช์ C "ด่านลายน้ำ"): ประตูเดียว default ON ใช้ร่วม C1(ตาสอง)/C2(ครอป)/
+//   C3(หักคะแนนแหล่ง) — ต้องตรงชื่อเดียวกับ _watermarkGuardOn() ใน coverExecutorService.js (เปิด/ปิดพร้อมกัน)
+function _watermarkGuardOn() { return process.env.MEGA_WATERMARK_GUARD !== '0'; }
+// marker ที่ตาสอง (megaAdapters.js _runSecondEye) แนบมาต้องมีรูปแบบถูกต้องก่อนเชื่อ (fail-safe เหมือน _validSecondEyeFb)
+function _validWatermarkEdge(we) {
+  return !!(we && typeof we === 'object'
+    && ['top', 'bottom', 'left', 'right'].includes(we.side)
+    && typeof we.strengthPct === 'number' && Number.isFinite(we.strengthPct) && we.strengthPct > 0);
+}
 // plumbing (จุดที่ 1/7): แนบสัญญาณ "ลายตา/สะอาด" จาก triage (loaded[i]) ลง faceBox — additive ไม่แตะ normalizeFaceBox
 //   busy undefined บน loaded → คงค่า undefined บน fb (executor treats as neutral) · fb null (ไร้หน้า)/OFF → ข้าม
 function _attachClutterMeta(faceBoxes, loaded) {
@@ -1491,6 +1505,12 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
   for (const _im of loaded) {
     if (_im?._secondEyeSubSlotFlag) qcFlags.push(_im._secondEyeSubSlotFlag);
   }
+  // ★ MEGA_WATERMARK_GUARD C1 (29 ก.ค. 69 — แบตช์ C): ลายน้ำ/โลโก้ทับกลางภาพชัดเจน (center+strength2) หา
+  //   backup สะอาดไม่เจอ (megaAdapters.js _runSecondEye ปาส (ค)) → slots[role]._secondEyeWatermarkFlag='watermark_kept'
+  //   ถูกแนบไว้ — ต่อสายผ่าน slotPlan → loaded[i] เหมือน _secondEyeSubSlotFlag เป๊ะ (ทุกช่อง รวม hero)
+  for (const _im of loaded) {
+    if (_im?._secondEyeWatermarkFlag) qcFlags.push(_im._secondEyeWatermarkFlag);
+  }
   // ★ เฟส 6B.3 (10 ก.ค.): ส่ง "เป้าหน้าเด่น" (faceSizePct จาก ref DNA) ต่อช่องให้ executor —
   //   executor ใช้เป็น "ขั้นต่ำที่ต้องบังคับ" (ไม่ใช่แค่ hint) โดยมี cap ความปลอดภัยของมันเอง กันซูมแน่นเกิน/หัวขาด
   //   refSlotMeta เป็น 1:1 กับ spec.slots เสมอเมื่อไม่ null (map ในบล็อก ref ด้านบน) · _faceProm ปิด = ไม่ส่ง (พฤติกรรมเดิม)
@@ -1539,33 +1559,11 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
     }
   } catch { /* คำนวณโซนล้ม → วางแบบเดิม */ }
 
-  // ── ③c ⭕ แบตช์ C (C2): แนบ slot._circleZone (frac ของช่อง) ให้ executor bias หน้าออกนอกวง ──
-  //   เฉพาะช่องรอง (ไม่ใช่ hero) ที่วง template ทับ · margin = CIRCLE_FACE_GAP_PCT ของกว้าง canvas (ตรง measureTechRules)
-  //   สวิตช์ปิด (MEGA_CIRCLE_AVOID=0) = ไม่แนบ → executor ไม่แตะ region (byte-parity)
-  if (process.env.MEGA_CIRCLE_AVOID !== '0') {
-    try {
-      const _cW = Number(spec?.canvasW) || 0;
-      const _circleSlots = spec.slots
-        .filter((s) => s.shape === 'circle' && s.w > 0)
-        .map((s) => ({ cx: s.x + s.w / 2, cy: s.y + s.h / 2, d: s.w }));
-      if (_circleSlots.length && _cW) {
-        const _mPx = _cW * (TECH_RULES.CIRCLE_FACE_GAP_PCT / 100);
-        for (const s of spec.slots) {
-          if (s.shape === 'circle' || /main|hero/i.test(String(s.id))) continue; // ห้ามแตะ hero
-          let zone = null;
-          for (const c of _circleSlots) {
-            const z = computePanelCircleZone({ circle: c, slot: s, marginPx: _mPx });
-            if (!z) continue;
-            zone = zone ? { x0: Math.min(zone.x0, z.x0), y0: Math.min(zone.y0, z.y0), x1: Math.max(zone.x1, z.x1), y1: Math.max(zone.y1, z.y1) } : z;
-          }
-          if (zone) {
-            s._circleZone = { x0: +zone.x0.toFixed(3), y0: +zone.y0.toFixed(3), x1: +zone.x1.toFixed(3), y1: +zone.y1.toFixed(3) };
-            console.log(`[MegaComposer] ⭕ ${s.id} วงทับ → โซนหลบ x${s._circleZone.x0}-${s._circleZone.x1} y${s._circleZone.y0}-${s._circleZone.y1}`);
-          }
-        }
-      }
-    } catch { /* คำนวณโซนวงล้ม → executor ครอปแบบเดิม */ }
-  }
+  // ★ ③c ⭕ แบตช์ C (C2) — แนบ slot._circleZone — ย้ายลงไปทำงาน "หลัง" ④ จับคู่ภาพ→ช่อง (28 ก.ค. 69 แบตช์
+  //   "วงกลมทับหน้าคน" 2 กลไก): MEGA_CIRCLE_POS_FLEX (ใหม่) ต้องรู้ faceBox จริงต่อช่อง (มาจาก assignment ที่
+  //   จับคู่แล้วเท่านั้น) ก่อนจะเลือกตำแหน่งวงได้ ("B ก่อน A" ตามสเปก) — จุดคำนวณ _circleZone เดิมจึงต้องตามไปอยู่
+  //   หลัง B ด้วย ให้เห็นตำแหน่งวงที่ (อาจ) ถูกย้ายแล้ว ไม่ใช่ตำแหน่งเทมเพลตเดิมเสมอ · ดูโค้ดจริงหลัง otherSlots
+  //   loop (ก่อนบล็อก "⭕🚫 กฎเหล็ก" เดิม) — ไม่มีจุดใดระหว่างนี้ถึงตรงนั้นอ่าน s._circleZone เลย (ย้ายได้ปลอดภัย)
 
   // ── ④ จับคู่ภาพ→ช่อง ตายตัว (เคารพ S6) + ✂️ ครอปด้วย faceSizePct ของ ref จริง ──
   const used = new Set();
@@ -1675,6 +1673,12 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
     //   เป็นค่าคงที่ระดับโมดูล/reuse ข้ามงาน — ถ้าไม่ลบ ครอปของงานก่อนหน้าจะค้าง "รั่ว" ไปติดปกของงานถัดไปที่ไม่มีครอปนี้จริง)
     if (loaded[mi]?._heroFaceCrop) mainSlot._heroFaceCrop = loaded[mi]._heroFaceCrop;
     else delete mainSlot._heroFaceCrop;
+    // ★ MEGA_WATERMARK_GUARD C1b/C2 (29 ก.ค. 69 — แบตช์ C): ต่อสาย _watermarkEdge แบบเดียวกับ _heroFaceCrop เป๊ะ —
+    //   จาก loaded[mi] (มาจาก slotPlan row ผ่าน s6→s7/compose-test) เข้า spec.slots[hero] object ตรงๆ ให้
+    //   renderRectTile (coverExecutorService.js) อ่าน slot._watermarkEdge ได้จริง — ลบทิ้งเสมอถ้าไม่มี (กันรั่วข้ามงาน
+    //   เหมือน _heroFaceCrop/_circleZone — spec อาจเป็น V3_TEMPLATES ค่าคงที่ระดับโมดูล reuse ข้ามงานได้)
+    if (_watermarkGuardOn() && _validWatermarkEdge(loaded[mi]?._watermarkEdge)) mainSlot._watermarkEdge = loaded[mi]._watermarkEdge;
+    else delete mainSlot._watermarkEdge;
     console.log(`[MegaComposer] 🔒 hero #${mi} — ${bigFace(faceBoxes[mi]) ? 'หน้าเด่น' : '⚠️ พูลไม่มีหน้าเด่น ใช้เท่าที่มี'} · หน้ากิน ${hs.pct}% (${hs.pos})${loaded[mi].clean === false ? ' (ยอมภาพไม่สะอาด)' : ''}${mainSlot._heroFaceCrop ? ' · 👤✂️ ใช้ _heroFaceCrop จาก S6' : ''}`);
     assignments.push({ slotId: mainSlot.id, imageIndex: mi, crop: faceBoxes[mi] ? cropFromFace(faceBoxes[mi], hs.pct, hs.pos, mainSlot.w / mainSlot.h) : { x: 0, y: 0, w: 1, h: 1 }, why: 'hero หน้าเด่น (locked)' });
   }
@@ -1709,6 +1713,9 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
       const cropC = fbC && fbC.x2 > fbC.x1
         ? cropFromFace(fbC, csp.pct, csp.pos, 1) // วงกลม = 1:1
         : { x: 0.2, y: 0.05, w: 0.6, h: 0.6, _final: true }; // ไร้หน้า: สี่เหลี่ยมกลาง-บน ซูมเข้า (ห้าม full-frame เต็มตัวไกลๆ)
+      // ★ MEGA_WATERMARK_GUARD C1b/C2 (29 ก.ค. 69): ต่อสาย _watermarkEdge เข้า spec.slots[circle] เหมือน hero เป๊ะ
+      if (_watermarkGuardOn() && _validWatermarkEdge(loaded[ci]?._watermarkEdge)) cs._watermarkEdge = loaded[ci]._watermarkEdge;
+      else delete cs._watermarkEdge;
       assignments.push({ slotId: cs.id, imageIndex: ci, crop: cropC, why: 'วงกลมตาม S6' });
     }
   }
@@ -1770,11 +1777,77 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
       else if (fbO && bigFace(fbO)) cropO = cropFromFace(fbO, osp.pct, osp.pos, os.w / os.h);
       else if (fbO && fbO.x2 > fbO.x1) cropO = cropFromFace(fbO, 40, 'center', os.w / os.h); // หน้าเล็กเดี่ยว → มุมกว้างเห็นคน+บริบท
       else cropO = { x: 0.02, y: 0, w: 0.96, h: 0.94, _final: true };                          // ไร้หน้า → เอนบน ไม่ตัดหัว
+      // ★ MEGA_WATERMARK_GUARD C1b/C2 (29 ก.ค. 69): ต่อสาย _watermarkEdge เข้า spec.slots[os] เหมือน hero/circle เป๊ะ
+      if (_watermarkGuardOn() && _validWatermarkEdge(loaded[oi]?._watermarkEdge)) os._watermarkEdge = loaded[oi]._watermarkEdge;
+      else delete os._watermarkEdge;
       assignments.push({ slotId: os.id, imageIndex: oi, crop: cropO, why: 'ช่องรองตาม S6' });
     }
   }
   if (assignments.length < spec.slots.length) {
     return { error: `จับคู่ได้ ${assignments.length}/${spec.slots.length} ช่อง — ภาพไม่พอ`, errorType: 'INSUFFICIENT_IMAGES' };
+  }
+
+  // ── ★ B: MEGA_CIRCLE_POS_FLEX (28-29 ก.ค. 69, ใหม่) — เลือกตำแหน่งวงกลมยืดหยุ่น "ก่อน" คำนวณโซนหลบของ A (B ก่อน A) ──
+  //   ผู้สมัคร 3 จุด (เดิม/สะท้อนแนวนอนข้ามเส้นกึ่งกลาง canvas/กึ่งกลาง canvas พอดี — cy + รัศมีเดิมทั้ง 3 จุด =
+  //   "อยู่บนแนวเดียวกัน" ตามสเปก) คะแนนต่อจุด = ผลรวมพื้นที่ faceBox (px²) ทุกช่องที่ footprint วงกลม+margin ทับ
+  //   (ไม่รวม hero/วงกลมเอง) — ยิ่งน้อยยิ่งดี เท่ากันเลือกตำแหน่งเทมเพลตเดิม (deterministic, ดู chooseCirclePosition
+  //   ใน panelCropGeometry.js) · ต้องรันตรงนี้ (หลัง ④ จับคู่ภาพ→ช่องเสร็จสมบูรณ์) เพราะต้องรู้ faceBox จริงต่อช่อง
+  //   จาก assignments — รู้ไม่ได้ก่อนจับคู่ภาพ
+  //   ★ ผลตรวจ Opus (29 ก.ค. 69) — แก้ default: เดิมเข้าใจผิดว่า "เทมเพลตจริงวางวงทับฮีโร่เท่านั้น" (ตรวจแค่
+  //   V3_TEMPLATES คงที่ในไฟล์) แต่สาย ref จริงผ่าน dnaToTemplateSpec (refDNA จากคลัง ref-cover-library) มีวงทับ
+  //   ช่อง non-hero จริง 16/33 ใบที่สุ่มตรวจ (เช่น REF-mrbq6y74-on6u-vmirror ทับ reaction_3 100%) — ย้ายวงออกจาก
+  //   ตำแหน่ง ref กระทบ refSimilarity (ตัวชี้วัดหลักของระบบ) โดยตรง ต้องวัดผลจริงก่อนเปิดถาวร ⇒ เปลี่ยนเป็น
+  //   opt-in: ต้องตั้ง MEGA_CIRCLE_POS_FLEX==='1' เป๊ะเท่านั้นถึงเปิด (unset/'0'/ค่าอื่นใด = ปิด = ตำแหน่งเทมเพลตเดิม
+  //   เป๊ะ ไม่แตะ spec.slots เลย) — default OFF (ตรงข้ามกับตอนแรกที่เป็น default ON) · A (MEGA_CIRCLE_AVOID_CROP)
+  //   ยังคงประตูคู่ default ON เดิมทุกประการ ไม่เกี่ยวกัน — mutate ผ่าน "แทนที่ entry ในอาเรย์" spec.slots[idx]={...cs2,...}
+  //   ไม่ใช่แก้ property บน object เดิมตรงๆ (spec อาจเป็น object ระดับโมดูล V3_TEMPLATES ที่ reuse ข้ามคำขอ —
+  //   แทนที่ทั้ง entry กัน "รั่ว" ตำแหน่งค้างข้ามงานถัดไปที่ใช้เทมเพลตเดียวกัน)
+  if (process.env.MEGA_CIRCLE_POS_FLEX === '1') {
+    try {
+      const _cW2 = Number(spec?.canvasW) || 0, _cH2 = Number(spec?.canvasH) || 0;
+      if (_cW2 && _cH2) {
+        const _mPx2 = _cW2 * (TECH_RULES.CIRCLE_FACE_GAP_PCT / 100);
+        for (const cs2 of spec.slots.filter((s) => s.shape === 'circle' && s.w > 0)) {
+          const pick = chooseCirclePosition({ circle: cs2, canvasW: _cW2, canvasH: _cH2, slots: spec.slots, assignments, faceBoxes, marginPx: _mPx2 });
+          if (!pick) continue;
+          console.log(`[MegaComposer] 🞅 วงกลม: ตำแหน่ง ${pick.label} (ทับหน้า ${pick.score}px²) · ครอปหลบ ${pick.affectedSlots} ช่อง`);
+          if (pick.x !== cs2.x || pick.y !== cs2.y) {
+            const idx2 = spec.slots.indexOf(cs2);
+            spec.slots[idx2] = { ...cs2, x: pick.x, y: pick.y };
+          }
+        }
+      }
+    } catch { /* เลือกตำแหน่งวงล้ม → ใช้ตำแหน่งเทมเพลตเดิม */ }
+  }
+
+  // ── ★ A (relocated): ③c ⭕ แบตช์ C (C2) — แนบ slot._circleZone (frac ของช่อง) ให้ executor bias หน้าออกนอกวง ──
+  //   ย้ายมาจากก่อน ④ (28 ก.ค. 69 — ดูคอมเมนต์ตรงตำแหน่งเดิม) ต้องอ่านตำแหน่งวงกลม "หลัง" B ข้างบนเสมอ
+  //   เฉพาะช่องรอง (ไม่ใช่ hero) ที่วง template ทับ · margin = CIRCLE_FACE_GAP_PCT ของกว้าง canvas (ตรง measureTechRules)
+  //   สวิตช์ปิด (MEGA_CIRCLE_AVOID=0 หรือ MEGA_CIRCLE_AVOID_CROP=0 — ตัวใดตัวหนึ่งพอ) = ไม่แนบ → executor ไม่แตะ
+  //   region เลย (byte-parity) — ทั้งคู่ default ON เหมือนเดิมไม่กระทบพฤติกรรม
+  if (process.env.MEGA_CIRCLE_AVOID !== '0' && process.env.MEGA_CIRCLE_AVOID_CROP !== '0') {
+    try {
+      const _cW = Number(spec?.canvasW) || 0;
+      const _circleSlots = spec.slots
+        .filter((s) => s.shape === 'circle' && s.w > 0)
+        .map((s) => ({ cx: s.x + s.w / 2, cy: s.y + s.h / 2, d: s.w }));
+      if (_circleSlots.length && _cW) {
+        const _mPx = _cW * (TECH_RULES.CIRCLE_FACE_GAP_PCT / 100);
+        for (const s of spec.slots) {
+          if (s.shape === 'circle' || /main|hero/i.test(String(s.id))) continue; // ห้ามแตะ hero
+          let zone = null;
+          for (const c of _circleSlots) {
+            const z = computePanelCircleZone({ circle: c, slot: s, marginPx: _mPx });
+            if (!z) continue;
+            zone = zone ? { x0: Math.min(zone.x0, z.x0), y0: Math.min(zone.y0, z.y0), x1: Math.max(zone.x1, z.x1), y1: Math.max(zone.y1, z.y1) } : z;
+          }
+          if (zone) {
+            s._circleZone = { x0: +zone.x0.toFixed(3), y0: +zone.y0.toFixed(3), x1: +zone.x1.toFixed(3), y1: +zone.y1.toFixed(3) };
+            console.log(`[MegaComposer] ⭕ ${s.id} วงทับ → โซนหลบ x${s._circleZone.x0}-${s._circleZone.x1} y${s._circleZone.y0}-${s._circleZone.y1}`);
+          }
+        }
+      }
+    } catch { /* คำนวณโซนวงล้ม → executor ครอปแบบเดิม */ }
   }
 
   // ── ⭕🚫 กฎเหล็ก (8 ก.ค. ผู้ใช้): "ห้ามวงกลม/กรอบทับหน้าคน" — เช็คหน้าทุกช่อง rect บน canvas vs วงกลม

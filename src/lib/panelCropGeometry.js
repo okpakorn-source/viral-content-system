@@ -329,3 +329,124 @@ export function biasRegionFromCircleZone({ region, faceBox, faces, zone, imgW, i
   const moved = rLeft !== region.left || rTop !== region.top;
   return { region: { ...region, left: rLeft, top: rTop }, moved, avoided: true };
 }
+
+/**
+ * C2c (29 ก.ค. 69 — ผลตรวจ Opus แบตช์ "วงกลมทับหน้าคน": biasRegionFromCircleZone เดิมยิงแค่ 2 กิ่ง single/
+ *   multi-face ใน renderRectTile — กิ่งที่ "ไม่มีข้อมูลหน้า" เลย (crop._final จาก S6 / blind-center / noface-*)
+ *   ไม่เคยหลบวงเลย = สาเหตุน่าจะใช่ที่สุดของเคส AC-0202 ทับแค่ ~3% ของวง) — หลบโซนวงแบบ "ไม่พึ่งหน้า":
+ *   ยึด "จุดกึ่งกลางภาพต้นทาง" (จุดคงที่แน่นอนในพิกัดต้นทาง ต่างจากจุดกึ่งกลาง region เองที่คงที่ 0.5,0.5 เทียบ
+ *   ตัวเองเสมอไม่ว่าจะเลื่อนไปไหน — ใช้ไม่ได้เป็นตัวอ้างอิง) เป็นตัวแทน "สิ่งสำคัญ" เพราะไม่รู้ตำแหน่งจริง
+ *
+ * ★ ต่างจาก biasRegionFromCircleZone (all-or-nothing — ต้องพ้นเต็ม 100% ถึงยอมใช้ ไม่งั้นคืนเดิม): ฟังก์ชันนี้
+ *   "ยอมรับผลบางส่วนได้" (เลือกคะแนนดีสุดในตัวเลือกทั้งหมด แม้ยังไม่พ้นเต็มร้อย) ตามสเปก "เลื่อนแบบ geometric ล้วน
+ *   หนี zone ให้พ้นหรือมากสุดที่ทำได้" — จัดอันดับด้วยคะแนนเดียว (ยิ่งน้อย/ยิ่งติดลบมาก ยิ่งดี):
+ *     score(left,top) = min(fx-zone.x0, zone.x1-fx, fy-zone.y0, zone.y1-fy) โดย fx,fy = จุดสนใจเทียบ region candidate
+ *     (บวก = ยังอยู่ในโซน ค่ายิ่งน้อยยิ่งใกล้ขอบ/ยิ่งปลอดภัย · ลบ = พ้นโซนแล้ว ค่ายิ่งติดลบมากยิ่งพ้นเยอะ)
+ *   ลองเลื่อน 4 ทิศ (เหมือน biasRegionFromCircleZone) + "อยู่เดิม" เป็น baseline เผื่อทุก candidate แย่กว่าเดิม
+ *   เท่ากันเลือกที่เลื่อนน้อยสุด (deterministic)
+ *
+ * @returns {{ region, moved, attempted }} attempted=false = จุดสนใจพ้นโซนอยู่แล้วตั้งแต่แรก (ไม่ต้องทำอะไร ไม่ log)
+ */
+export function biasRegionFromCircleZoneBlind({ region, zone, imgW, imgH }) {
+  const _keep = (attempted = false) => ({ region, moved: false, attempted });
+  if (!zone || !region || !(region.width > 0) || !(region.height > 0) || !(imgW > 0) || !(imgH > 0)) return _keep();
+  const W = region.width, H = region.height;
+  const poiX = imgW / 2, poiY = imgH / 2; // จุดสนใจ = ศูนย์กลางภาพต้นทาง (จุดคงที่ในพิกัดต้นทาง — เลื่อน region ได้จริง)
+  const scoreOf = (left, top) => {
+    const fx = (poiX - left) / W, fy = (poiY - top) / H;
+    return Math.min(fx - zone.x0, zone.x1 - fx, fy - zone.y0, zone.y1 - fy);
+  };
+  const curScore = scoreOf(region.left, region.top);
+  if (curScore <= 0) return _keep(false); // จุดสนใจพ้นโซน (หรือติดขอบเป๊ะ) อยู่แล้ว — ไม่ต้องทำอะไร
+  const EPS = 1;
+  const candidates = [
+    { left: poiX - zone.x0 * W + EPS, top: region.top }, // ดันให้จุดสนใจอยู่ซ้ายของโซน
+    { left: poiX - zone.x1 * W - EPS, top: region.top }, // ดันให้จุดสนใจอยู่ขวาของโซน
+    { left: region.left, top: poiY - zone.y0 * H + EPS }, // ดันให้จุดสนใจอยู่เหนือโซน
+    { left: region.left, top: poiY - zone.y1 * H - EPS }, // ดันให้จุดสนใจอยู่ใต้โซน
+    { left: region.left, top: region.top }, // เดิม (baseline เผื่อทุก candidate แย่กว่า)
+  ];
+  let best = { left: region.left, top: region.top }, bestScore = curScore, bestCost = 0;
+  for (const c of candidates) {
+    const left = _clamp(c.left, 0, Math.max(0, imgW - W));
+    const top = _clamp(c.top, 0, Math.max(0, imgH - H));
+    const s = scoreOf(left, top);
+    const cost = Math.hypot(left - region.left, top - region.top);
+    if (s < bestScore - 1e-6 || (Math.abs(s - bestScore) <= 1e-6 && cost < bestCost)) {
+      best = { left, top }; bestScore = s; bestCost = cost;
+    }
+  }
+  const rLeft = Math.round(best.left), rTop = Math.round(best.top);
+  const moved = rLeft !== region.left || rTop !== region.top;
+  return { region: moved ? { ...region, left: rLeft, top: rTop } : region, moved, attempted: true };
+}
+
+/**
+ * C3a (28 ก.ค. 69 — แบตช์ "วงกลมทับหน้าคน" 2 กลไก, เจ้าของเคาะ) — เลือก "ตำแหน่งวงกลม" ยืดหยุ่น 3 จุด:
+ *   ตำแหน่งเดิมจากเทมเพลต + สะท้อนแนวนอนข้ามเส้นกึ่งกลาง canvas + กึ่งกลาง canvas พอดี (cy/รัศมีเดิมทั้ง 3 จุด
+ *   — "อยู่บนแนวเดียวกัน" ตามสเปก) คะแนนต่อจุด = ผลรวมพื้นที่ (px²) ของ faceBox ทุกช่อง (ไม่รวม hero/วงกลมเอง)
+ *   ที่ "footprint วงกลม+margin" (สี่เหลี่ยมล้อมรอบวง — แพทเทิร์นเดียวกับ computePanelCircleZone) ทับ — ยิ่งน้อยยิ่งดี
+ *   เท่ากันเลือกตำแหน่งเทมเพลตเดิม (ลำดับ candidates: เดิม→สะท้อน→กลาง — เจอค่าต่ำสุดตัวแรกชนะ = deterministic)
+ *
+ * faceBox ต่อช่องแมปจาก "พิกัดปกติของภาพต้นทาง" (fb, 0..1) ผ่าน "crop" (fractional hint ของ assignment เดียวกับ
+ *   ที่ใช้ในกฎเหล็ก "ห้ามวงกลม/กรอบทับหน้าคน" composer เดิม) → พิกัด canvas ผ่านกรอบช่อง (slot.x/.y/.w/.h)
+ *   — หน้าที่ศูนย์กลางอยู่ "นอกครอป" แล้ว (ไม่ถูกเรนเดอร์จริง) ไม่นับ (เหมือนกฎเหล็กเดิม)
+ *
+ * @param circle {x,y,w,h} ตำแหน่ง+ขนาดวงกลมจากเทมเพลต (พิกเซล canvas, w===h เสมอ — เส้นผ่านศูนย์กลาง)
+ * @param canvasW,canvasH พิกเซล canvas เต็ม
+ * @param slots  spec.slots ทั้งหมด (หา rect ของแต่ละช่องจาก slotId)
+ * @param assignments  [{slotId, imageIndex, crop:{x,y,w,h}}] ของทุกช่อง (assignment เสร็จสมบูรณ์แล้ว)
+ * @param faceBoxes  faceBoxes[imageIndex] = {x1,y1,x2,y2}|null (normalized 0..1 ของภาพต้นทาง)
+ * @param marginPx  เผื่อขอบวง (พิกเซล canvas) — ผู้เรียกส่ง canvasW*(CIRCLE_FACE_GAP_PCT/100) ตรง measureTechRules
+ * @returns {null | { x, y, label, score, affectedSlots, candidates: [{x,y,label,score,affectedSlots}] }}
+ *   x,y = พิกัดซ้ายบนของวงกลมที่ชนะ (มุมเดียวกับ circle.x/circle.y อินพุต) · null = อินพุตพัง/ไม่มีวงกลมให้เลือก
+ */
+export function chooseCirclePosition({ circle, canvasW, canvasH, slots, assignments, faceBoxes, marginPx = 0 }) {
+  if (!circle || !(circle.w > 0) || !(circle.h > 0) || !(canvasW > 0) || !(canvasH > 0) || !Array.isArray(slots) || !Array.isArray(assignments)) {
+    return null;
+  }
+  const r = circle.w / 2;
+  const cy = circle.y + circle.h / 2;
+  const cx0 = circle.x + circle.w / 2;
+  const m = Math.max(0, Number(marginPx) || 0);
+  const _clampCx = (cx) => _clamp(cx, r, canvasW - r);
+  const rawCandidates = [
+    { cx: cx0, label: 'เดิม' },
+    { cx: canvasW - cx0, label: 'สะท้อน' },
+    { cx: canvasW / 2, label: 'กลาง' },
+  ];
+
+  const fbList = Array.isArray(faceBoxes) ? faceBoxes : [];
+  const relevantAssignments = assignments.filter((a) => {
+    const s = slots.find((sl) => sl && sl.id === a.slotId);
+    return s && s.shape !== 'circle' && !/main|hero/i.test(String(s.id));
+  });
+
+  const candidates = rawCandidates.map(({ cx: cxRaw, label }) => {
+    const cx = _clampCx(cxRaw);
+    const fpL = cx - r - m, fpR = cx + r + m, fpT = cy - r - m, fpB = cy + r + m;
+    let score = 0, affectedSlots = 0;
+    for (const a of relevantAssignments) {
+      const slot = slots.find((sl) => sl && sl.id === a.slotId);
+      const fb = fbList[a.imageIndex];
+      const c = a.crop;
+      if (!slot || !fb || !(fb.x2 > fb.x1) || !(fb.y2 > fb.y1) || !c || !(c.w > 0) || !(c.h > 0)) continue;
+      const fcx = (fb.x1 + fb.x2) / 2, fcy = (fb.y1 + fb.y2) / 2;
+      if (fcx < c.x || fcx > c.x + c.w || fcy < c.y || fcy > c.y + c.h) continue; // หน้าอยู่นอกครอปแล้ว (เหมือนกฎเหล็กเดิม)
+      const mapX = (nx) => slot.x + ((nx - c.x) / c.w) * slot.w;
+      const mapY = (ny) => slot.y + ((ny - c.y) / c.h) * slot.h;
+      const fL = mapX(fb.x1), fR = mapX(fb.x2), fT = mapY(fb.y1), fB = mapY(fb.y2);
+      const ixW = Math.min(fR, fpR) - Math.max(fL, fpL);
+      const ixH = Math.min(fB, fpB) - Math.max(fT, fpT);
+      const area = (ixW > 0 && ixH > 0) ? ixW * ixH : 0;
+      if (area > 0) { score += area; affectedSlots++; }
+    }
+    return { x: +(cx - r).toFixed(3), y: circle.y, label, score: +score.toFixed(1), affectedSlots };
+  });
+
+  let winner = candidates[0];
+  for (let i = 1; i < candidates.length; i++) {
+    if (candidates[i].score < winner.score - 1e-6) winner = candidates[i];
+  }
+  return { ...winner, candidates };
+}

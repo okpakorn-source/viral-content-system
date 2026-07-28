@@ -12,9 +12,11 @@ import {
   refineRegionForFaces,
   computePanelCircleZone,
   biasRegionFromCircleZone,
+  biasRegionFromCircleZoneBlind,
   faceSharePctOf,
   headBoxPx,
   facesIntersectingRegion,
+  chooseCirclePosition,
 } from '../src/lib/panelCropGeometry.js';
 import { zoomHeroRegionForFaceShare } from '../src/lib/heroCropGeometry.js';
 
@@ -407,4 +409,156 @@ test('C1c-4 ผสม: ในเต็ม + โผล่ขอบ ≥30% + น�
   assert.strictEqual(out.length, 2, 'ต้องได้ 2 ใบ (A ในเต็ม + B โผล่ขอบ) · C นอกสุดถูกตัด');
   assert.deepStrictEqual(out[0], faceA, 'ลำดับคงเดิม: A มาก่อน');
   assert.deepStrictEqual(out[1], faceB, 'B ตามมา');
+});
+
+// ═══════════════════════ C2c — biasRegionFromCircleZoneBlind (29 ก.ค. 69, ผลตรวจ Opus แบตช์ "วงกลมทับหน้าคน"
+//   รอบ 2, ข้อ 3 บังคับ) — หลบโซนวงกลมแบบ "ไม่พึ่งหน้า" (ยึดจุดกึ่งกลางภาพต้นทางแทน) สำหรับกิ่งครอปที่ไม่มีข้อมูล
+//   หน้าเลย (crop._final จาก S6 / blind-center) ต่างจาก biasRegionFromCircleZone (all-or-nothing) ตรงที่ยอมรับ
+//   "ผลบางส่วน" ได้ (คะแนนดีสุดแม้ยังไม่พ้นเต็มร้อย) ═══════════════════════
+test('C2c-1 ไม่มี zone → ไม่แตะ (attempted:false, region เดิมเป๊ะ)', () => {
+  const region0 = { left: 100, top: 100, width: 400, height: 500 };
+  const r = biasRegionFromCircleZoneBlind({ region: region0, zone: null, imgW: 1000, imgH: 1000 });
+  assert.strictEqual(r.moved, false);
+  assert.strictEqual(r.attempted, false);
+  assert.deepStrictEqual(r.region, region0);
+});
+
+test('C2c-2 จุดสนใจ (กึ่งกลางภาพต้นทาง) อยู่นอกโซนอยู่แล้ว → ไม่แตะ (attempted:false)', () => {
+  const region = { left: 300, top: 300, width: 400, height: 400 }; // poi (500,500) → fx=fy=0.5
+  const zone = { x0: 0, y0: 0, x1: 0.3, y1: 0.3 }; // fx=0.5 > x1=0.3 → นอกโซนแล้ว
+  const r = biasRegionFromCircleZoneBlind({ region, zone, imgW: 1000, imgH: 1000 });
+  assert.strictEqual(r.moved, false);
+  assert.strictEqual(r.attempted, false);
+  assert.deepStrictEqual(r.region, region);
+});
+
+test('C2c-3 จุดสนใจอยู่ในโซน (สมมาตรทุกทิศ) → เลื่อนจริง (attempted+moved:true) ทางซ้ายชนะ (ลำดับ candidate แรกตอนคะแนนเท่ากันหมด)', () => {
+  const region = { left: 300, top: 300, width: 400, height: 400 }; // poi (500,500) → fx=fy=0.5
+  const zone = { x0: 0.3, y0: 0.3, x1: 0.7, y1: 0.7 }; // ครอบ poi ทุกด้านเท่ากัน (สมมาตร)
+  const r = biasRegionFromCircleZoneBlind({ region, zone, imgW: 1000, imgH: 1000 });
+  assert.strictEqual(r.attempted, true);
+  assert.strictEqual(r.moved, true);
+  // left = poiX - zone.x0*W + EPS = 500 - 0.3*400 + 1 = 381 (candidate แรกในลำดับชนะเมื่อคะแนนเสมอกันทุกทิศ)
+  assert.strictEqual(r.region.left, 381);
+  assert.strictEqual(r.region.top, region.top, 'สมมาตร X/Y เท่ากัน → ทิศซ้าย (candidate แรก) ชนะ ไม่ใช่ทิศบน/ล่าง');
+  assert.strictEqual(r.region.width, region.width, 'เลื่อนอย่างเดียว — width ต้องคง scale เดิม');
+  assert.strictEqual(r.region.height, region.height, 'เลื่อนอย่างเดียว — height ต้องคง scale เดิม');
+});
+
+test('C2c-4 แกน X เลื่อนไม่ได้เลย (region กว้างเท่าภาพ, left ล็อก 0 เสมอ) แต่แกน Y เลื่อนได้ → ใช้ Y หลบแทน', () => {
+  const region = { left: 0, top: 300, width: 1000, height: 400 }; // poi (500,500) → fx=0.5 (คงที่เสมอ), fy=0.5
+  const zone = { x0: 0, y0: 0.3, x1: 1, y1: 0.7 }; // โซนคลุมเต็มแกน X (เลื่อน X ไม่มีผล) แต่แคบแกน Y
+  const r = biasRegionFromCircleZoneBlind({ region, zone, imgW: 1000, imgH: 1000 });
+  assert.strictEqual(r.attempted, true);
+  assert.strictEqual(r.moved, true);
+  assert.strictEqual(r.region.left, 0, 'แกน X ล็อกอยู่แล้ว (region กว้างเท่าภาพ) — left ต้องคงเป็น 0');
+  assert.strictEqual(r.region.top, 381, 'ต้องใช้แกน Y หลบแทน: top = poiY - zone.y0*H + EPS = 500-120+1=381');
+});
+
+test('C2c-5 หนีไม่พ้นเลยจริงๆ (region = ทั้งภาพพอดี, zone คลุมทั้งภาพ) → ไม่มีตำแหน่งไหนดีกว่าเดิม → moved:false แต่ attempted:true (พยายามแล้วแต่ไม่มีทางเลือกดีกว่า)', () => {
+  const region = { left: 0, top: 0, width: 1000, height: 1000 };
+  const zone = { x0: 0, y0: 0, x1: 1, y1: 1 }; // คลุมทั้งภาพ — เลื่อนไปทางไหนก็ยังอยู่ในโซนเท่าเดิม (left/top ก็ล็อก 0 อยู่แล้วด้วย)
+  const r = biasRegionFromCircleZoneBlind({ region, zone, imgW: 1000, imgH: 1000 });
+  assert.strictEqual(r.attempted, true, 'คะแนนเดิม > 0 (อยู่ในโซน) → ต้องพยายามก่อนเสมอ');
+  assert.strictEqual(r.moved, false, 'ไม่มี candidate ไหนดีกว่าเดิมเลย → ต้องไม่เปลี่ยน region');
+  assert.deepStrictEqual(r.region, region, 'region เดิมเป๊ะเมื่อเลื่อนไม่ได้จริง');
+});
+
+test('C2c-6 best-effort: เลื่อนได้จำกัด (region เล็ก อยู่กลางภาพ) → ยอมรับคะแนนดีขึ้นบางส่วนแม้ยังไม่พ้นเต็มร้อย (ต่างจาก biasRegionFromCircleZone ที่ all-or-nothing)', () => {
+  const region = { left: 450, top: 450, width: 100, height: 100 }; // เล็กมาก กลางภาพ 1000x1000 — ที่ให้เลื่อนมีจำกัด
+  const zone = { x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8 }; // โซนใหญ่ ครอบ poi ลึกมาก
+  const scoreOf = (r) => { const fx = (500 - r.left) / r.width, fy = (500 - r.top) / r.height; return Math.min(fx - zone.x0, zone.x1 - fx, fy - zone.y0, zone.y1 - fy); };
+  const before = scoreOf(region);
+  const r = biasRegionFromCircleZoneBlind({ region, zone, imgW: 1000, imgH: 1000 });
+  assert.strictEqual(r.attempted, true);
+  assert.strictEqual(r.moved, true, 'ต้องเลื่อนแม้จะพ้นไม่เต็มร้อย (accept ผลบางส่วน)');
+  const after = scoreOf(r.region);
+  assert.ok(after < before, `คะแนนหลังเลื่อนต้องดีขึ้น (น้อยลง) — ก่อน=${before} หลัง=${after}`);
+  assert.ok(after <= 0 + 1e-6, `กรณีนี้เลื่อนพ้นได้เกือบเต็ม (คะแนน${after} ควรใกล้ 0 หรือติดลบเล็กน้อย) — ยังไม่ต้องเป๊ะ 100% แค่ดีขึ้นชัดเจนพอ`);
+});
+
+test('C2c-7 อินพุตพัง (region/zone ว่าง หรือ width/height ไม่ถูกต้อง) → คืน attempted:false เสมอ ไม่ throw', () => {
+  assert.strictEqual(biasRegionFromCircleZoneBlind({ region: null, zone: { x0: 0, y0: 0, x1: 1, y1: 1 }, imgW: 1000, imgH: 1000 }).attempted, false);
+  assert.strictEqual(biasRegionFromCircleZoneBlind({ region: { left: 0, top: 0, width: 0, height: 100 }, zone: { x0: 0, y0: 0, x1: 1, y1: 1 }, imgW: 1000, imgH: 1000 }).attempted, false);
+  assert.strictEqual(biasRegionFromCircleZoneBlind({ region: { left: 0, top: 0, width: 100, height: 100 }, zone: { x0: 0, y0: 0, x1: 1, y1: 1 }, imgW: 0, imgH: 1000 }).attempted, false);
+});
+
+// ═══════════════════════ C3a — chooseCirclePosition (28 ก.ค. 69, แบตช์ "วงกลมทับหน้าคน" 2 กลไก — B) ═══════════════════════
+// canvas 1200×1200 · circle w=h=400 (r=200) ที่ x=0,y=800 (cx0=200,cy=1000) — ผู้สมัคร 3 จุด (cy/r เดิมทั้งคู่):
+//   เดิม cx=200 (x=0..400) · สะท้อน cx=1200-200=1000 (x=800..1200) · กลาง cx=600 (x=400..800)
+// 3 ช่อง (ไม่ใช่ hero) ตรงกับ 3 โซนพอดี: panel_a=x0-400 (เดิม) · panel_b=x400-800 (กลาง) · panel_c=x800-1200 (สะท้อน)
+const CX_CANVAS_W = 1200, CX_CANVAS_H = 1200;
+const CX_CIRCLE = { x: 0, y: 800, w: 400, h: 400 };
+const CX_SLOTS = [
+  { id: 'panel_a', shape: 'rect', x: 0, y: 800, w: 400, h: 400 },
+  { id: 'panel_b', shape: 'rect', x: 400, y: 800, w: 400, h: 400 },
+  { id: 'panel_c', shape: 'rect', x: 800, y: 800, w: 400, h: 400 },
+  { id: 'main', shape: 'rect', x: 0, y: 0, w: 1200, h: 800 }, // hero — ห้ามนับแม้มีหน้าทับโซนไหนก็ตาม
+  { id: 'circle', shape: 'circle', x: CX_CIRCLE.x, y: CX_CIRCLE.y, w: CX_CIRCLE.w, h: CX_CIRCLE.h },
+];
+const CX_CROP_FULL = { x: 0, y: 0, w: 1, h: 1 };
+
+test('C3a-1 หน้าเดียวทับโซน "เดิม" เต็มๆ + โซนอื่นไร้หน้า → เลือก "สะท้อน" (ตัวแรกในลำดับที่คะแนน 0 ชนะ)', () => {
+  const assignments = [
+    { slotId: 'panel_a', imageIndex: 0, crop: CX_CROP_FULL },
+    { slotId: 'panel_b', imageIndex: 1, crop: CX_CROP_FULL },
+    { slotId: 'panel_c', imageIndex: 2, crop: CX_CROP_FULL },
+  ];
+  const faceBoxes = [{ x1: 0.2, y1: 0.2, x2: 0.8, y2: 0.8 }, null, null];
+  const pick = chooseCirclePosition({ circle: CX_CIRCLE, canvasW: CX_CANVAS_W, canvasH: CX_CANVAS_H, slots: CX_SLOTS, assignments, faceBoxes, marginPx: 0 });
+  assert.ok(pick, 'ต้องคืนผลลัพธ์ (ไม่ใช่ null)');
+  assert.strictEqual(pick.label, 'สะท้อน', 'ทั้งสะท้อน+กลางคะแนน 0 เท่ากัน — ต้องเลือกตัวแรกในลำดับ (สะท้อนมาก่อนกลาง)');
+  assert.strictEqual(pick.x, 800, 'x ของ "สะท้อน" ต้องเท่ากับ canvasW - cx0 - r = 1200-200-200=800');
+  assert.strictEqual(pick.y, CX_CIRCLE.y, 'y ต้องไม่เปลี่ยน (อยู่บนแนวเดียวกันเสมอ)');
+  assert.strictEqual(pick.affectedSlots, 0, 'ตำแหน่งที่ชนะต้องไม่มีช่องไหนถูกทับเลย');
+  const origCand = pick.candidates.find((c) => c.label === 'เดิม');
+  assert.ok(origCand.score > 0 && origCand.affectedSlots === 1, 'ตำแหน่งเดิมต้องมีคะแนนทับจริง (หน้าเต็มโซน panel_a)');
+});
+
+test('C3a-2 ไม่มี assignment/หน้าเลย → ทุกจุดคะแนน 0 เท่ากัน → เลือกตำแหน่งเทมเพลตเดิม (deterministic)', () => {
+  const pick = chooseCirclePosition({ circle: CX_CIRCLE, canvasW: CX_CANVAS_W, canvasH: CX_CANVAS_H, slots: CX_SLOTS, assignments: [], faceBoxes: [], marginPx: 0 });
+  assert.strictEqual(pick.label, 'เดิม');
+  assert.strictEqual(pick.x, CX_CIRCLE.x);
+  assert.strictEqual(pick.y, CX_CIRCLE.y);
+  assert.strictEqual(pick.score, 0);
+});
+
+test('C3a-3 hero (main) มีหน้าทับโซนเดิมเต็มๆ ด้วย แต่ต้องไม่ถูกนับ (ห้ามแตะ hero)', () => {
+  const assignments = [
+    { slotId: 'main', imageIndex: 0, crop: CX_CROP_FULL }, // หน้าทับโซน "เดิม" แต่เป็น hero — ห้ามนับ
+  ];
+  const faceBoxes = [{ x1: 0.0, y1: 0.9, x2: 1.0, y2: 1.0 }]; // map เข้า main (x:0-1200,y:0-800) — ไม่ทับ y:800-1200 อยู่แล้วด้วยซ้ำ แต่ยืนยันไม่ถูกนับไม่ว่ากรณีใด
+  const pick = chooseCirclePosition({ circle: CX_CIRCLE, canvasW: CX_CANVAS_W, canvasH: CX_CANVAS_H, slots: CX_SLOTS, assignments, faceBoxes, marginPx: 0 });
+  assert.strictEqual(pick.label, 'เดิม', 'ไม่มีช่องไหนที่นับได้ถูกทับเลย → คะแนนเท่ากันหมด → ตำแหน่งเดิมชนะ');
+  const origCand = pick.candidates.find((c) => c.label === 'เดิม');
+  assert.strictEqual(origCand.affectedSlots, 0, 'hero ต้องไม่ถูกนับแม้จะมีหน้าจริงอยู่ในภาพ');
+});
+
+test('C3a-4 หน้าอยู่ "นอกครอป" ของ assignment แล้ว (ไม่ถูกเรนเดอร์จริง) → ไม่ถูกนับ (เหมือนกฎเหล็ก composer เดิม)', () => {
+  const assignments = [
+    { slotId: 'panel_a', imageIndex: 0, crop: { x: 0, y: 0, w: 0.3, h: 0.3 } }, // ครอปมุมบนซ้ายเล็กๆ
+  ];
+  const faceBoxes = [{ x1: 0.6, y1: 0.6, x2: 0.9, y2: 0.9 }]; // หน้าอยู่นอกครอป (ศูนย์กลาง 0.75,0.75 > 0.3)
+  const pick = chooseCirclePosition({ circle: CX_CIRCLE, canvasW: CX_CANVAS_W, canvasH: CX_CANVAS_H, slots: CX_SLOTS, assignments, faceBoxes, marginPx: 0 });
+  assert.strictEqual(pick.label, 'เดิม');
+  assert.strictEqual(pick.candidates.find((c) => c.label === 'เดิม').affectedSlots, 0, 'หน้านอกครอป = ไม่นับ (เหมือนไม่มีหน้าเลย)');
+});
+
+test('C3a-5 marginPx ใหญ่ขึ้น → footprint กว้างขึ้น → candidate ที่เคยคะแนน 0 อาจกลายเป็นทับ (คะแนน > 0)', () => {
+  // หน้าอยู่ชิดขอบซ้ายของ panel_b (โซน "กลาง" x:400-800) ที่ x:400-440 (ใกล้ขอบ footprint เดิมของ "เดิม" x:0-400)
+  const assignments = [{ slotId: 'panel_b', imageIndex: 0, crop: CX_CROP_FULL }];
+  const faceBoxes = [{ x1: 0.0, y1: 0.5, x2: 0.1, y2: 0.6 }]; // map → x:400-440, y:1000-1040 (ในช่วง 800-1200 เสมอ)
+  const noMargin = chooseCirclePosition({ circle: CX_CIRCLE, canvasW: CX_CANVAS_W, canvasH: CX_CANVAS_H, slots: CX_SLOTS, assignments, faceBoxes, marginPx: 0 });
+  const bigMargin = chooseCirclePosition({ circle: CX_CIRCLE, canvasW: CX_CANVAS_W, canvasH: CX_CANVAS_H, slots: CX_SLOTS, assignments, faceBoxes, marginPx: 50 });
+  const origNoMargin = noMargin.candidates.find((c) => c.label === 'เดิม');
+  const origBigMargin = bigMargin.candidates.find((c) => c.label === 'เดิม');
+  assert.strictEqual(origNoMargin.score, 0, 'ไม่มี margin: footprint เดิม x0-400 ไม่ทับหน้าที่ x400-440 เลยพอดี');
+  assert.ok(origBigMargin.score > 0, 'margin 50px ขยาย footprint เดิมเป็น x(-50)-450 → ทับหน้าที่ x400-440 แล้ว');
+});
+
+test('C3a-6 อินพุตพัง (ไม่มี circle/canvasW/slots/assignments) → คืน null เสมอ', () => {
+  assert.strictEqual(chooseCirclePosition({}), null);
+  assert.strictEqual(chooseCirclePosition({ circle: CX_CIRCLE, canvasW: 0, canvasH: CX_CANVAS_H, slots: CX_SLOTS, assignments: [] }), null);
+  assert.strictEqual(chooseCirclePosition({ circle: { x: 0, y: 0, w: 0, h: 0 }, canvasW: CX_CANVAS_W, canvasH: CX_CANVAS_H, slots: CX_SLOTS, assignments: [] }), null);
+  assert.strictEqual(chooseCirclePosition({ circle: CX_CIRCLE, canvasW: CX_CANVAS_W, canvasH: CX_CANVAS_H, slots: null, assignments: [] }), null);
 });

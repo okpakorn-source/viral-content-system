@@ -545,6 +545,13 @@ function _validSecondEyeFaceBox(fb) {
     && fb.x1 >= -0.01 && fb.y1 >= -0.01 && fb.x2 <= 1.01 && fb.y2 <= 1.01);
 }
 
+// ★ MEGA_WATERMARK_GUARD (29 ก.ค. 69 — แบตช์ C, C1): watermark ที่ตาสองคืนมาต้องมีรูปแบบถูกต้องจริงก่อนเชื่อ
+//   (fail-safe เดียวกับ faceBox) — pos ต้องอยู่ใน enum ที่กำหนด + strength ต้องเป็น 1 หรือ 2 เป๊ะ (ไม่ coerce ชนิด)
+const _WM_POS_ENUM = new Set(['edge-top', 'edge-bottom', 'edge-left', 'edge-right', 'center']);
+function _validWatermark(w) {
+  return !!(w && typeof w === 'object' && _WM_POS_ENUM.has(w.pos) && (w.strength === 1 || w.strength === 2));
+}
+
 // ★ ตรวจซ้ำ (28 ก.ค. 69 — "หาวิธีให้ตาไม่โกหก") ข้อ 1: textOverlay ต้องตัดสินจากข้อความที่ตาสอง "อ่านออกมาจริง"
 //   (textFound) ไม่ใช่ความรู้สึก/เดาของโมเดลตรงๆ — โมเดลที่แกล้งข้ามอ่าน/มั่วจะโดนจับได้จากช่องนี้ว่าง/สั้นผิดสังเกต
 //   ตัดสิน 0/1/2 จาก "ความยาวข้อความที่อ่านได้จริง" ล้วน (deterministic ในโค้ด ไม่ใช่ปล่อยให้โมเดลรายงานเลขเอง):
@@ -631,16 +638,21 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
   //   ใบก่อนหน้าที่ซ้ำกันจริง (ช็อตประเภทเดียวกัน+คนเดียวกัน+ฉากใกล้เคียงกัน) ไม่งั้น null — ใช้ตัดสินนโยบายกันช็อต
   //   ซ้ำเชิงกลไกใน pass 2 ด้านล่าง (ไม่พึ่ง prompt ฝั่ง megaBrains.js อย่างเดียวอีกต่อไป เพราะ LLM ฝ่าฝืนได้จริง)
   const _primaryCount = map.filter((m) => m.kind === 'primary').length;
+  // ★ MEGA_WATERMARK_GUARD (29 ก.ค. 69 — แบตช์ C "ด่านลายน้ำ", C1): เพิ่ม field watermark "ใน call เดิม" (ห้ามเพิ่ม
+  //   call ใหม่ — แพทเทิร์นเดียวกับ faceFront/_frontalOn ด้านบนเป๊ะ) default ON · '0' = ไม่ใส่ field ใน prompt เลย
+  //   (prompt กลับเป็นข้อความเดิมทุก byte = byte-parity จริง ไม่ใช่แค่ "ไม่ใช้ผลลัพธ์")
+  const _wmGuardOn = process.env.MEGA_WATERMARK_GUARD !== '0';
   const prompt = `คุณเป็นตาตรวจสอบภาพปกข่าวรอบสอง (second-eye QC) — ตรวจภาพที่แนบมา ${images.length} รูป เรียงตาม index 0 ถึง ${images.length - 1} (รูปแรก=0)
 ตอบต่อรูปแต่ละรูป:
 - textFound: ถ้ามีตัวหนังสือ/แถบข่าว/โลโก้/ลายน้ำใดๆ ทับอยู่บนภาพ ให้ "พิมพ์ข้อความที่อ่านเห็นจริงออกมาทั้งหมด" (string) — ถ้าไม่มีตัวหนังสือทับภาพเลย ให้ตอบ "" (สตริงว่าง) ห้ามเดา/ห้ามมโนข้อความที่ไม่ได้เห็นจริง
 - faceBox: กรอบหน้าคนเด่นที่สุดในภาพ {x1,y1,x2,y2} normalized 0-1 (สัดส่วนของภาพ ไม่ใช่พิกเซล x1<x2, y1<y2) หรือ null ถ้าไม่เห็นหน้าคนในภาพ
 - faceCount: จำนวนหน้าคนที่เห็นชัดในภาพ (จำนวนเต็ม 0 ขึ้นไป)
-- faceVisible: "เห็นหน้าชัดแค่ไหน" เลือก 0-2: 0=หน้าถูกปิด/หันหลังไม่เห็นหน้าเลย (เช่น หมวกกันน็อคเต็มใบปิดหน้าหมด/หันหลังให้กล้อง), 1=เห็นหน้าบางส่วน (เช่น หมวกกันน็อค/หน้ากากบังจนเห็นแค่ตา, มุมข้างเห็นแค่ครึ่งหน้า), 2=เห็นหน้าเต็มชัดเจน (เห็นตา+จมูก+ปากครบ ไม่ถูกบัง)
+- faceVisible: "เห็นหน้าชัดแค่ไหน" เลือก 0-2: 0=หน้าถูกปิด/หันหลังไม่เห็นหน้าเลย (เช่น หมวกกันน็อคเต็มใบปิดหน้าหมด/หันหลังให้กล้อง), 1=เห็นหน้าบางส่วน (เช่น หมวกกันน็อค/หน้ากากบังจนเห็นแค่ตา, มุมข้างเห็นแค่ครึ่งหน้า), 2=เห็นหน้าเต็มชัดเจน (เห็นตา+จมูก+ปากครบ ไม่ถูกบัง)${_wmGuardOn ? `
+- watermark: ถ้ามี "โลโก้เว็บ/ชื่อเพจ/URL" ประทับอยู่บนภาพ (ไม่ใช่ซับไตเติล/ป้ายข้อความในฉากจริงที่ถ่ายมา — เฉพาะสิ่งที่ประทับทับภาพภายหลัง) ให้ตอบ {"pos":"edge-top"|"edge-bottom"|"edge-left"|"edge-right"|"center","strength":1|2} (pos=ตำแหน่งที่ลายน้ำอยู่, strength: 1=จางพอเห็น 2=ชัดเจน) — ไม่มีลายน้ำ/โลโก้/URL แบบนี้เลย ตอบ null` : ''}
 - duplicateOfIndex: เทียบภาพนี้กับ "ภาพหลักของช่อง" (index 0 ถึง ${_primaryCount - 1}) ที่มี index น้อยกว่าภาพนี้เท่านั้น — ถ้าเป็นช็อตประเภทเดียวกัน (เช่น เซลฟี่มุมกล้อง/ท่าโพสคล้ายกัน) + คนเดียวกัน + ฉากใกล้เคียงกันจนดูซ้ำกัน ให้ตอบ index ของภาพหลักใบนั้น (จำนวนเต็ม) — ไม่ซ้ำกับใครเลยหรือเป็นภาพหลักใบแรกสุด (index 0) ตอบ null${heroIdx >= 0 ? `
 - sameAsHeroPerson: ตอบเฉพาะรูปที่ไม่ใช่ index ${heroIdx} เท่านั้น (ข้ามรูป index ${heroIdx} เอง ไม่ต้องตอบฟิลด์นี้) — true/false: เป็น "คนคนเดียวกัน" กับคนในรูป index ${heroIdx} (ภาพตัวเอกของปกที่เลือกไว้ตอนนี้) หรือไม่ ตัดสินจากใบหน้า/รูปร่าง/เสื้อผ้าที่เห็นจริงเทียบกันเท่านั้น ไม่มั่นใจ = false` : ''}${_frontalOn ? `
 - faceFront: มุมการเห็น "ใบหน้าคนหลัก" เลือก 1: 0-2 (0=ไม่เห็นหน้า หันหลัง/เห็นแต่ท้ายทอย/หน้าถูกบังเกือบหมด, 1=เห็นหน้าบางส่วน มุมข้าง/ก้มหน้า/มือผมบังเกินครึ่ง, 2=เห็นเต็มหน้า หน้าตรงหรือเกือบตรง เห็นตา-จมูก-ปากครบ) ไม่มีคนในรูป/ตัดสินไม่ได้ = null` : ''}
-ตอบ JSON เท่านั้น: {"results":[{"index":0,"textFound":"","faceBox":{"x1":0,"y1":0,"x2":0,"y2":0},"faceCount":1,"faceVisible":2,"duplicateOfIndex":null${heroIdx >= 0 ? ',"sameAsHeroPerson":true' : ''}${_frontalOn ? ',"faceFront":2' : ''}},...]}`;
+ตอบ JSON เท่านั้น: {"results":[{"index":0,"textFound":"","faceBox":{"x1":0,"y1":0,"x2":0,"y2":0},"faceCount":1,"faceVisible":2${_wmGuardOn ? ',"watermark":null' : ''},"duplicateOfIndex":null${heroIdx >= 0 ? ',"sameAsHeroPerson":true' : ''}${_frontalOn ? ',"faceFront":2' : ''}},...]}`;
   // ★ ข้อ 3 (โมเดลปรับได้): MEGA_SECOND_EYE_MODEL override ได้ (แค่ 5-8 ภาพ/ปก ต้นทุนจิ๊บแม้ใช้โมเดลแรงกว่า) —
   //   ไม่ตั้ง = COVER_GEMINI_MODEL เดิม (ตัวเดียวกับที่ตาคัด/ตาหาหน้าใช้อยู่แล้วทั้งสาย — ไม่ต้องคีย์ใหม่)
   const _seModel = process.env.MEGA_SECOND_EYE_MODEL || _deps.coverGeminiModel || COVER_GEMINI_MODEL;
@@ -661,6 +673,9 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
         //   + ห้ามชี้ตัวเอง (ป้องกัน loop) — ค่าพังรูปแบบ/นอกช่วง/ชี้ตัวเอง = ไม่เชื่อ (null, fail-safe เหมือน faceBox)
         duplicateOfIndex: (Number.isInteger(x.duplicateOfIndex) && x.duplicateOfIndex >= 0 && x.duplicateOfIndex < _primaryCount && x.duplicateOfIndex !== x.index) ? x.duplicateOfIndex : null,
         ...(_frontalOn ? { faceFront: [0, 1, 2].includes(x.faceFront) ? x.faceFront : null } : {}),
+        // ★ MEGA_WATERMARK_GUARD (แบตช์ C, C1): watermark validate ชนิดก่อนเชื่อ (fail-safe เหมือน faceBox/faceFront)
+        //   ปิด flag = ไม่ใส่ field เลย (prompt เองก็ไม่ได้ถามด้วย — เข้าคู่กัน ไม่ใช่แค่ทิ้งผลลัพธ์)
+        ...(_wmGuardOn ? { watermark: _validWatermark(x.watermark) ? { pos: x.watermark.pos, strength: x.watermark.strength } : null } : {}),
       }]),
   );
   const perRole = new Map(); // role -> { primary: {id,result}|null, backup: {id,result}|null }
@@ -962,7 +977,30 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
     return -1;
   }
 
+  // ★ MEGA_WATERMARK_GUARD (29 ก.ค. 69 — แบตช์ C, C1(ก)): หา backup "สะอาด" สำหรับแทนที่ช่องที่ลายน้ำทับกลางชัดเจน
+  //   (center+strength2) — เกณฑ์เดียวกับ _findBestReplacementIndex (textOverlay≤1 + backup เท่านั้น + ไม่ชน id
+  //   ที่ใช้อยู่) บวกเพิ่ม: candidate เองต้องไม่มีลายน้ำทับกลางชัดเจนแบบเดียวกัน (ไม่งั้นย้ายปัญหาไม่ใช่แก้ปัญหา)
+  //   ★★★ แก้ 29 ก.ค. 69 (Opus ตรวจแบตช์ C พบ FAIL 1 จุด): ปาส (ค) ครอบ hero ด้วย แต่ finder เดิมไม่บังคับเกณฑ์
+  //   hero เลย (faceVisible/sameAsHeroPerson) — เสี่ยงสลับ hero ไปเป็นภาพหน้าไม่ชัด/คนละคน ล้มนโยบาย hero แข็ง +
+  //   กฎ "ถูกคน 100%" ที่ระบบยึดมาตลอดทั้งเซสชัน → เมื่อ role==='hero' บังคับเพิ่ม cand.faceVisible===2 &&
+  //   cand.sameAsHeroPerson===true (เกณฑ์เดียวกับที่นโยบาย hero แข็งเดิมใช้ตอนหา candidate แทนที่ faceVisible ต่ำ/
+  //   textOverlay สูง ในลูปหลักข้างบน) — ไม่ผ่าน = ไม่ใช่ตัวเลือก ข้ามไปใบถัดไป
+  function _findWatermarkSafeReplacementIndex(excludeIds, role) {
+    for (let i = 0; i < map.length; i++) {
+      if (map[i].kind !== 'backup') continue;
+      if (excludeIds.has(String(map[i].id))) continue;
+      const cand = byIndex.get(i);
+      if (!cand) continue;
+      if (cand.textOverlay > 1) continue;
+      if (cand.watermark && cand.watermark.pos === 'center' && cand.watermark.strength === 2) continue;
+      if (role === 'hero' && !(cand.faceVisible === 2 && cand.sameAsHeroPerson === true)) continue;
+      return i;
+    }
+    return -1;
+  }
+
   let subSlotReplaced = 0;
+  let watermarkReplaced = 0;
   const _resolvedThisPass = new Set(); // เฉพาะ "ผู้แพ้" ที่ถูกจัดการแล้วใน (ก) — กันประมวลผลซ้ำสองครั้ง (ผู้ชนะยังตรวจ (ข) ต่อได้ปกติ)
 
   // ── (ก) ตรวจจับ+แก้ "ช็อตซ้ำ" ข้ามช่อง (duplicateOfIndex เชิงกลไก — ไม่พึ่งกติกา prompt ฝั่ง megaBrains.js อย่างเดียว) ──
@@ -1012,7 +1050,46 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
     }
   }
 
-  return { swapped, fixedCoords, checked: roles.length, liesCaught, subSlotReplaced };
+  // ── (ค) MEGA_WATERMARK_GUARD (29 ก.ค. 69 — แบตช์ C, C1(ก)): ลายน้ำ/โลโก้/URL ทับ "กลางภาพชัดเจน" (center+
+  //   strength2) — ทุกช่อง "รวม hero" (ต่างจาก (ข) ที่ยกเว้น hero เพราะ hero มีนโยบายตัวเองแล้วในลูปหลักข้างบน —
+  //   ลายน้ำกลางภาพชัดเจนเป็นปัญหาคุณภาพภาพล้วน ไม่เกี่ยวกับ "หน้าไม่ชัด/คนละคนกับ hero" ที่นโยบาย hero เดิมเช็ก
+  //   จึงแยกเป็นปาสของตัวเอง ครอบทุกช่องเท่ากันหมด) ใช้กลไกเดียวกับ (ก)/(ข) เป๊ะ (_swapRoleImageMechanic — field-
+  //   transfer ครบชุด + สลับสองทาง + ตาข่ายกันซ้ำ id) หาไม่เจอ = คงเดิม + ติดธง watermark_kept (ชื่อเดียวกับที่ C2
+  //   ใช้เมื่อครอปหนีขอบไม่ไหว — ทั้งคู่คือ "ยอมเก็บลายน้ำไว้เพราะไม่มีทางออกอื่น" ในความหมายเดียวกัน)
+  if (_wmGuardOn) {
+    for (const role of _activeCanonRoles) {
+      const res = _curResOf(role);
+      if (!res || !res.watermark || res.watermark.pos !== 'center' || res.watermark.strength !== 2) continue;
+      const usedIds = new Set(_activeCanonRoles.map((rr) => String(slots[rr].id)));
+      const candIdx = _findWatermarkSafeReplacementIndex(usedIds, role);
+      if (candIdx >= 0) {
+        const { applied } = _swapRoleImageMechanic(role, candIdx, byIndex.get(candIdx), 'watermark_center_forced_replace');
+        if (applied) watermarkReplaced++;
+        else slots[role]._secondEyeWatermarkFlag = 'watermark_kept';
+      } else {
+        slots[role]._secondEyeWatermarkFlag = 'watermark_kept';
+        console.log(`[MEGA S6] 👁️‍🗨️ ตาสอง: ${role} ลายน้ำทับกลางภาพชัดเจน (center/strength2) แต่ไม่มีภาพแทนที่สะอาดในพูล — คงเดิม + ติดธง watermark_kept`);
+      }
+    }
+  }
+
+  // ── (ง) MEGA_WATERMARK_GUARD (C1(ข)): ลายน้ำ "ที่ขอบภาพ" (ไม่ใช่ center — (ค) จัดการไปแล้ว) — ไม่บังคับเปลี่ยน
+  //   ภาพ แค่แนบ marker ให้ขั้นครอป (C2, coverExecutorService.js) หลบเอง · อ่านสถานะ "ล่าสุด" ของทุกช่อง (หลัง
+  //   (ก)/(ข)/(ค) settle แล้ว) เดินท่อเดียวกับ _secondEyeFaceBox เดิม (s7/compose-test slotPlan → loaded →
+  //   megaComposerService bridge เข้า spec.slots[role]._watermarkEdge)
+  if (_wmGuardOn) {
+    for (const role of _activeCanonRoles) {
+      const res = _curResOf(role);
+      const wm = res?.watermark;
+      if (wm && wm.pos !== 'center' && _WM_POS_ENUM.has(wm.pos)) {
+        slots[role]._watermarkEdge = { side: wm.pos.replace('edge-', ''), strengthPct: wm.strength === 2 ? 12 : 6 };
+      } else {
+        delete slots[role]._watermarkEdge;
+      }
+    }
+  }
+
+  return { swapped, fixedCoords, checked: roles.length, liesCaught, subSlotReplaced, watermarkReplaced };
 }
 
 // ★ Wave2 Batch B1: ตัดสิน hard gate ท้าย s5_gapsearch — คืน null = ผ่าน/ไม่มีเกณฑ์จะวัด (ไม่แตะ path เดิม)
@@ -4774,6 +4851,28 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     if (_cfLabeled) console.log(`[MEGA S6] 🎬 hero source policy: ป้าย hero-source ${_cfLabeled}/${meta.length} ใบ (${_rulesV3On ? 'v3 กลาง' : 'เดิม เลี่ยงเป็น hero'})`);
   }
 
+  // ═══ G3 WATERMARK SOURCE POLICY (29 ก.ค. 69 — แบตช์ C "ด่านลายน้ำ", C3) — เลนซอฟท์เหมือน G2 (heroSourceAvoid)
+  //   เป๊ะ · MEGA_WATERMARK_GUARD ตัวเดียวกับ C1/C2 · default ON · ป้าย meta row ที่ url มาจากโดเมนที่มักมีลายน้ำ/
+  //   เว็บสะสมรูป (blogspot/pantip/เว็บสะสมรูปทั่วไป) — ไม่ hard block พูลไม่มีทางเลือกอื่นก็ยังใช้ภาพนั้นได้ตามเดิม
+  //   (แค่คำแนะนำให้สมองเลือกเมื่อไม่มีทางอื่น) รายชื่อโดเมนเป็น heuristic (ไม่ได้วัดสถิติลายน้ำจริงจากคลัง) — อิงจาก
+  //   sourceAuthorityService.js ที่มีอยู่แล้วซึ่งให้คะแนนต่ำกลุ่มเดียวกัน (pantip/blogspot/wordpress/pinterest)
+  const _wmSrcPolicyOn = process.env.MEGA_WATERMARK_GUARD !== '0';
+  if (_wmSrcPolicyOn) {
+    const _wmSrcById = new Map(sorted.filter(Boolean).map((x) => [String(x.id), x]));
+    const _WM_SRC_RE = /blogspot\.|pantip\.com|wordpress\.com|pinterest\./i;
+    const _wmSrcLabel = 'แหล่งมักมีลายน้ำ — เลือกเมื่อไม่มีทางอื่น';
+    let _wmSrcLabeled = 0;
+    for (const m of meta) {
+      const x = _wmSrcById.get(String(m.id));
+      const _isWmSrc = !!x && (_WM_SRC_RE.test(String(x.imageUrl || '')) || _WM_SRC_RE.test(String(x.source || '')));
+      if (_isWmSrc) {
+        m.watermarkSourceAvoid = _wmSrcLabel;
+        _wmSrcLabeled++;
+      }
+    }
+    if (_wmSrcLabeled) console.log(`[MEGA S6] 💧 watermark source policy: ป้ายแหล่งมักมีลายน้ำ ${_wmSrcLabeled}/${meta.length} ใบ`);
+  }
+
   let brain = { slots: {}, note: '' };
   let brainOk = true;
   try {
@@ -6854,6 +6953,13 @@ export async function s7_cover(job, { origin, _deps } = {}) {
       //   ใช้ได้กับ "ช่องย่อยไหนก็ได้" (ไม่จำกัดแค่ hero) ที่นโยบายกันช็อตซ้ำ/text ทับใหญ่หาแทนที่ไม่เจอ → ยก qcFlag
       //   'subslot_duplicate_shot' / 'subslot_text_overlay' ที่ชั้นประกอบ (ดู composeCore ที่วนทุกแถว ไม่ใช่แค่ hero)
       ...(primary && slots[primary]?._secondEyeSubSlotFlag ? { _secondEyeSubSlotFlag: slots[primary]._secondEyeSubSlotFlag } : {}),
+      // ★ MEGA_WATERMARK_GUARD (29 ก.ค. 69 — แบตช์ C): ต่อสาย _secondEyeWatermarkFlag แบบเดียวกับ _secondEyeSubSlotFlag
+      //   เป๊ะ (ทุกช่อง รวม hero) → composeCore ยก qcFlag 'watermark_kept' เมื่อลายน้ำกลางชัดเจนหาแทนที่ไม่เจอ
+      ...(primary && slots[primary]?._secondEyeWatermarkFlag ? { _secondEyeWatermarkFlag: slots[primary]._secondEyeWatermarkFlag } : {}),
+      // ★ MEGA_WATERMARK_GUARD (29 ก.ค. 69 — แบตช์ C): ต่อสาย _watermarkEdge แบบเดียวกับ _secondEyeFaceBox เป๊ะ —
+      //   ให้ composeCore เห็น field นี้ผ่าน slotPlan → loaded[i] แล้ว bridge เข้า spec.slots[role] ให้ executor
+      //   (coverExecutorService.js renderRectTile/renderCircleTile) อ่าน slot._watermarkEdge หลบครอปที่ขอบได้จริง
+      ...(primary && slots[primary]?._watermarkEdge ? { _watermarkEdge: slots[primary]._watermarkEdge } : {}),
       // ★ 8 ก.ค. (CASE-366): thumbnail สำรอง (gstatic cache) — sourceLinks เป็น string เปล่า ไม่พก thumbnailUrl
       //   ส่งผ่าน slotPlan แทน ให้ v3 ใช้ตอนโหลดตรงพัง (Instagram/TikTok โดน anti-hotlink)
       thumbnailUrl: t.thumbnailUrl || '',

@@ -297,6 +297,10 @@ export async function POST(req) {
         ...(primary && slots[primary]?._secondEyeHeroFaceHidden ? { _secondEyeHeroFaceHidden: slots[primary]._secondEyeHeroFaceHidden } : {}),
         // ★ เคส AC-0201 รอบ 2 (28 ก.ค. 69): ต่อสาย _secondEyeSubSlotFlag แบบเดียวกับ _secondEyeHeroFaceHidden เป๊ะ
         ...(primary && slots[primary]?._secondEyeSubSlotFlag ? { _secondEyeSubSlotFlag: slots[primary]._secondEyeSubSlotFlag } : {}),
+        // ★ MEGA_WATERMARK_GUARD (29 ก.ค. 69 — แบตช์ C): ต่อสาย _secondEyeWatermarkFlag + _watermarkEdge แบบเดียวกับ
+        //   _secondEyeSubSlotFlag/_secondEyeFaceBox เป๊ะ — ให้เครื่องมือเทสนี้เห็นผลตรวจ/มาร์กเกอร์ลายน้ำที่ s6_slots ทำไว้ด้วย
+        ...(primary && slots[primary]?._secondEyeWatermarkFlag ? { _secondEyeWatermarkFlag: slots[primary]._secondEyeWatermarkFlag } : {}),
+        ...(primary && slots[primary]?._watermarkEdge ? { _watermarkEdge: slots[primary]._watermarkEdge } : {}),
       };
     });
     const out = await composeAndVerify({

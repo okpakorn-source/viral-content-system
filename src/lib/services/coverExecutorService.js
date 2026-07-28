@@ -19,7 +19,7 @@ import {
   resolveHeroNeighborOverlap, expandHeroRegionForStretchCap,
 } from '@/lib/heroCropGeometry';
 // ★ แบตช์ C (17 ก.ค.): เรขาคณิตครอปช่องรอง (PURE) + band จาก config เดียว — เทสได้โดดที่ tests/panel-crop-geometry.test.mjs
-import { refineRegionForFace, refineRegionForFaces, biasRegionFromCircleZone, facesIntersectingRegion } from '@/lib/panelCropGeometry';
+import { refineRegionForFace, refineRegionForFaces, biasRegionFromCircleZone, biasRegionFromCircleZoneBlind, facesIntersectingRegion } from '@/lib/panelCropGeometry';
 import { TECH_RULES, HERO_STRETCH_MAX } from '@/lib/imageQualityConfig';
 
 // Template v3 — "viral-safe": ฐานตารางสะอาด (พิสูจน์จาก CASE-031/037) + องค์ประกอบไวรัล
@@ -391,7 +391,16 @@ function _promKind(slot) {
 // ★ แบตช์ C (17 ก.ค.): kill-switch + helper สำหรับครอปช่องรองเล็งหน้า (C1) / หลบโซนวง (C2)
 //   default ON ปิดด้วย '0' → byte-parity (region เดิมทุกจุด) · ห้ามแตะสาขา hero
 function _panelFaceCropOn() { return process.env.MEGA_PANEL_FACE_CROP !== '0'; }
-function _circleAvoidOn() { return process.env.MEGA_CIRCLE_AVOID !== '0'; }
+// ★ MEGA_CIRCLE_AVOID_CROP (28 ก.ค. 69 — แบตช์ "วงกลมทับหน้าคน" 2 กลไก, เจ้าของเคาะ): ชื่อ flag ใหม่ตามสเปกงานนี้
+//   ควบคู่กับ MEGA_CIRCLE_AVOID เดิม (แบตช์ C 17 ก.ค.) — AND ทั้งคู่ ('0' ที่ตัวใดตัวหนึ่ง = ปิดกลไกนี้ทั้งหมด
+//   พฤติกรรมเดิม byte เป๊ะ) ทั้งคู่ default ON จึงไม่กระทบพฤติกรรมเดิมเลยถ้าไม่มีใครแตะ env — ให้ rollback
+//   แยกอิสระได้ทั้งชื่อเก่า/ใหม่ ไม่ต้องลบ/เปลี่ยนชื่อของเดิม (กันของเดิมพัง)
+function _circleAvoidOn() { return process.env.MEGA_CIRCLE_AVOID !== '0' && process.env.MEGA_CIRCLE_AVOID_CROP !== '0'; }
+// ★ MEGA_WATERMARK_GUARD (29 ก.ค. 69 — แบตช์ C "ด่านลายน้ำ"): ประตูเดียวใช้ร่วมทั้ง C1 (ตาสอง S6 ตรวจ
+//   watermark field, megaAdapters.js) + C2 (ครอปหนีขอบที่นี่) + C3 (หักคะแนนแหล่ง megaAdapters.js) — default ON
+//   '0' = ปิดทั้งชุด ไม่แตะ region เลย (byte-parity เดิมทุกจุดที่เกี่ยวกับลายน้ำที่ขอบ — dodgeWatermarkPx เดิม
+//   ที่ทำงานอิสระจาก field คนละตัว (fb.watermarkRegion) ไม่ถูกแตะ/ไม่ขึ้นกับ flag นี้)
+function _watermarkGuardOn() { return process.env.MEGA_WATERMARK_GUARD !== '0'; }
 // ★ HZ (17 ก.ค.): kill-switch ซูม hero เด่น (default ON · '0'=byte-parity เดิมทุกเส้น hero)
 function _heroZoomOn() { return process.env.MEGA_HERO_ZOOM !== '0'; }
 // ★ MEGA_FACE_FIRST_CROP (เคส AC-0197 27 ก.ค. 69 + ข้อ 4 ตรวจปกจริงรอบ 2 — เดิมชื่อ MEGA_HERO_FACE_ZOOM เฉพาะ
@@ -723,6 +732,91 @@ async function grayWorldGains(buf, strength = 0.5) {
     const gain = (m) => clamp(1 + ((gray / (m || gray)) - 1) * strength);
     return [gain(r.mean), gain(g.mean), gain(b.mean)];
   } catch { return null; }
+}
+
+/**
+ * ★ MEGA_WATERMARK_GUARD C2 (29 ก.ค. 69 — แบตช์ C "ด่านลายน้ำ"): หลบลายน้ำ "ที่ขอบภาพ" ตาม marker slot._watermarkEdge
+ *  ({side:'top'|'bottom'|'left'|'right', strengthPct:number}) ที่ตาสอง (C1, megaAdapters.js) แนบมา — ต่างจาก
+ *  dodgeWatermarkPx เดิมด้านล่างตรงที่: (1) ข้อมูลมาจากคนละแหล่ง (ตาสอง S6 ต่อช่อง ไม่ใช่ fb.watermarkRegion ที่มา
+ *  จาก faceDetector ต่อภาพ) (2) ไม่มีกล่องพิกัดแม่นยำ มีแค่ "ด้าน+ความเข้ม" → ใช้เป็นสัดส่วนตัดตรงๆ ไม่ต้องคำนวณ
+ *  overlap เหมือน _dodgeBoxPx (3) เพดานตายตัว "ห้ามเกิน 12% ของด้านนั้น" (ของ dodgeWatermarkPx เดิมไม่มีเพดาน % —
+ *  ใช้พิกัดจริงของกล่องแทน)
+ *  หลักการ: (ก) region ไม่ได้แตะขอบด้านนั้นของภาพต้นทางอยู่แล้ว → ไม่ต้องทำอะไร (ถือว่าปลอดภัยอยู่แล้ว)
+ *  (ข) แตะขอบ → "เลื่อนก่อน" (ขนาดเดิมเป๊ะ) ถ้าภาพต้นทางมีที่ว่างให้เลื่อนพ้นครบตามสัดส่วนที่ขอ
+ *  (ค) เลื่อนไม่พอ (ไม่มีที่ว่างมากพอ) → "หด" เท่าที่จำเป็น (ตัดแถบตามสัดส่วน + คง aspect โดยหดอีกแกนตามส่วน + กึ่งกลางแกนนั้นใหม่)
+ *  (ง) หดแล้วเล็กเกินไป (<60px ด้านใดด้านหนึ่ง) → ยอมแพ้ คืน region เดิม + kept:true (ให้ผู้เรียกติดธง watermark_kept)
+ * @returns {{ region, kept, moved }} kept=true = ทำไม่ได้จริงในงบ 12% (คงเดิม) · moved=true = เปลี่ยน region จริง
+ */
+export function avoidWatermarkEdgePx(region, watermarkEdge, imgW, imgH) {
+  const _keep = (kept = false) => ({ region, kept, moved: false });
+  if (!watermarkEdge || !region || !(region.width > 0) || !(region.height > 0) || !(imgW > 0) || !(imgH > 0)) return _keep();
+  const { side } = watermarkEdge;
+  if (!['top', 'bottom', 'left', 'right'].includes(side)) return _keep();
+  const cutFrac = Math.max(0, Math.min(12, Number(watermarkEdge.strengthPct) || 0)) / 100; // เพดานตายตัว 12% แม้ค่าที่ส่งมาเกิน/ผิดรูปแบบ
+  if (cutFrac <= 0) return _keep();
+  const EPS = 1;
+  const isVertical = side === 'top' || side === 'bottom';
+  const touches = side === 'top' ? region.top <= EPS
+    : side === 'bottom' ? (region.top + region.height) >= imgH - EPS
+    : side === 'left' ? region.left <= EPS
+    : (region.left + region.width) >= imgW - EPS; // 'right'
+  if (!touches) return _keep(); // ครอปไม่ได้แตะขอบด้านนั้นของภาพต้นทางอยู่แล้ว = ปลอดภัยอยู่แล้ว ไม่ต้องทำอะไร
+
+  const dim = isVertical ? region.height : region.width;
+  const cutPx = dim * cutFrac;
+  const MIN_PX = 60; // เกณฑ์เดียวกับ _dodgeBoxPx เดิม (nh>=60 && nw>=60) กันครอปเล็กจนพัง
+
+  // ① เลื่อนก่อน (ขนาดเดิมเป๊ะ) — มีที่ว่างในภาพต้นทางให้เลื่อนพ้นครบตามสัดส่วนที่ขอไหม
+  if (side === 'top') {
+    const newTop = Math.min(region.top + cutPx, imgH - region.height);
+    if (newTop - region.top >= cutPx - 0.5) return { region: { ...region, top: Math.round(newTop) }, kept: false, moved: true };
+  } else if (side === 'bottom') {
+    const newTop = Math.max(region.top - cutPx, 0);
+    if (region.top - newTop >= cutPx - 0.5) return { region: { ...region, top: Math.round(newTop) }, kept: false, moved: true };
+  } else if (side === 'left') {
+    const newLeft = Math.min(region.left + cutPx, imgW - region.width);
+    if (newLeft - region.left >= cutPx - 0.5) return { region: { ...region, left: Math.round(newLeft) }, kept: false, moved: true };
+  } else { // 'right'
+    const newLeft = Math.max(region.left - cutPx, 0);
+    if (region.left - newLeft >= cutPx - 0.5) return { region: { ...region, left: Math.round(newLeft) }, kept: false, moved: true };
+  }
+
+  // ② เลื่อนไม่พอ → หดเท่าที่จำเป็น (ตัดแถบด้านนั้นทิ้ง + คง aspect โดยหดอีกแกนตามส่วน + กึ่งกลางแกนนั้นใหม่)
+  const ratio = region.width / region.height;
+  if (isVertical) {
+    const newH = dim - cutPx;
+    const newW = newH * ratio;
+    if (newH < MIN_PX || newW < MIN_PX) return _keep(true); // หดแล้วเล็กเกินไป → ยอมแพ้ ติดธง watermark_kept
+    const cx = region.left + region.width / 2;
+    const newLeft = Math.max(0, Math.min(Math.round(cx - newW / 2), imgW - Math.round(newW)));
+    const newTop = side === 'top' ? region.top + cutPx : region.top;
+    return { region: { left: newLeft, top: Math.round(newTop), width: Math.round(newW), height: Math.round(newH) }, kept: false, moved: true };
+  } else {
+    const newW = dim - cutPx;
+    const newH = newW / ratio;
+    if (newW < MIN_PX || newH < MIN_PX) return _keep(true);
+    const cy = region.top + region.height / 2;
+    const newTop = Math.max(0, Math.min(Math.round(cy - newH / 2), imgH - Math.round(newH)));
+    const newLeft = side === 'left' ? region.left + cutPx : region.left;
+    return { region: { left: Math.round(newLeft), top: newTop, width: Math.round(newW), height: Math.round(newH) }, kept: false, moved: true };
+  }
+}
+
+/** ★ MEGA_WATERMARK_GUARD C2 — ตัวช่วยกลาง เรียกจาก renderRectTile+renderCircleTile เหมือนกันเป๊ะ (กันโค้ดซ้ำ)
+ *  log เฉพาะตอนมี marker จริง+ (เลื่อน/หดสำเร็จ หรือ ยอมแพ้เกินงบ) — เงียบเมื่อไม่มี marker/region ไม่ได้แตะขอบอยู่แล้ว
+ *  (กันสแปม เหมือนแนว log ของ circle-avoid final catch-all) */
+function _applyWatermarkEdgeGuard(region, slot, imgW, imgH) {
+  if (!_watermarkGuardOn() || !slot?._watermarkEdge) return { region, brSuffix: '', kept: false };
+  const r = avoidWatermarkEdgePx(region, slot._watermarkEdge, imgW, imgH);
+  if (r.moved) {
+    console.log(`[CoverV3] 💧 หลบลายน้ำขอบ: ${slot.id} ด้าน=${slot._watermarkEdge.side} moved=Y`);
+    return { region: r.region, brSuffix: '+wmedge', kept: false };
+  }
+  if (r.kept) {
+    console.log(`[CoverV3] 💧 หลบลายน้ำขอบ: ${slot.id} ด้าน=${slot._watermarkEdge.side} moved=N (เกินงบ 12% — คงเดิม)`);
+    return { region, brSuffix: '', kept: true };
+  }
+  return { region, brSuffix: '', kept: false }; // ไม่ได้แตะขอบด้านนั้นอยู่แล้ว — ปลอดภัยอยู่แล้ว ไม่ log
 }
 
 /** ★ rev.S4 (2 ก.ค. — ลายน้ำ "ผู้จัดการ" หลุดขึ้นปก CASE-300/304/305): หลบโซนลายน้ำระดับพิกเซล
@@ -1166,10 +1260,63 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null, strict = fa
       if (_rfC.changed) { region = _rfC.region; _br += '+clutteraim'; }
     }
   }
+  // ★ [29 ก.ค. 69 — ผลตรวจ Opus แบตช์ "วงกลมทับหน้าคน"]: ด่านสุดท้าย "ครอบคลุมทุกกิ่งครอป" — 2 บล็อกข้างบน
+  //   (single/multi-face) ยิงเฉพาะเมื่อ !_final + _nFaces 1-3 เท่านั้น กิ่งอื่น (_final จาก S6 / blind-center /
+  //   noface-* / >3 หน้า ที่ไม่มีหน้าเด่นเหลือ) ไม่เคยหลบวงมาก่อนเลย = สาเหตุน่าจะใช่ที่สุดของเคส AC-0202 (วงทับ
+  //   แค่ ~3% = เฉียดนิดเดียวแต่ไม่มีใครหลบ) — รันหลังทุกจุดปรับ region ข้างบนจบสนิท (รวม tighten/HZ/faceFirstCrop/
+  //   2 บล็อกข้างบน) ก่อน dodgeWatermark/headSafe/clamp เห็น region "สุดท้ายจริง" ของทุกกิ่งเสมอ ไม่ว่า _br จะเป็นอะไร:
+  //   มีหน้าเด่นตกใน region สุดท้าย → biasRegionFromCircleZone (helper เดิม, all-or-nothing เหมือน 2 บล็อกข้างบน —
+  //   ถ้า 2 บล็อกข้างบนเพิ่งหลบสำเร็จไปแล้วและไม่มีอะไรรบกวนต่อ จุดนี้จะเจอ "พ้นอยู่แล้ว" ไม่ทำอะไรซ้ำ/ไม่ log ซ้ำ) ·
+  //   ไม่มีหน้าเด่นเลย (ครอบคลุม _final/blind/noface ทุกแบบที่ 2 บล็อกข้างบนไม่เคยเข้าเงื่อนไข) → biasRegionFromCircleZoneBlind
+  //   (ใหม่ PURE — ยึดจุดกึ่งกลางภาพต้นทางแทนหน้า ยอมรับผลบางส่วนได้ ไม่ all-or-nothing) · ทั้งคู่ใต้ประตูเดิม
+  //   _circleAvoidOn()+slot._circleZone เป๊ะ (MEGA_CIRCLE_AVOID+MEGA_CIRCLE_AVOID_CROP) · ไม่แตะ hero · log เฉพาะ
+  //   ตอนตรวจเจอทับจริง (ไม่ log ทุกช่องเปล่าๆ กันสแปม) รูปแบบ "⭕ หลบวง: <slot> กิ่ง=<branch ปัจจุบัน> moved=Y/N"
+  if (_circleAvoidOn() && slot._circleZone && _promKind(slot) !== 'hero') {
+    const _fFinal = _dominantFaceInRegion(fb, region, imgW, imgH);
+    if (_fFinal) {
+      const _facesFinal = _facesInRegion(fb, region, imgW, imgH);
+      const _useMultiFinal = _facesFinal.length >= 2;
+      const _bzFin = biasRegionFromCircleZone({
+        region,
+        ...(_useMultiFinal ? { faces: _facesFinal } : { faceBox: _fFinal }),
+        zone: slot._circleZone, imgW, imgH,
+      });
+      const _wasOverlappingFinal = !_bzFin.avoided || _bzFin.moved;
+      if (_wasOverlappingFinal) {
+        const _listFinal = _useMultiFinal ? _facesFinal : [_fFinal];
+        const _allInFinal = _bzFin.region && _listFinal.every((f) => (
+          f.x1 * imgW >= _bzFin.region.left - 1 && f.x2 * imgW <= _bzFin.region.left + _bzFin.region.width + 1
+          && f.y1 * imgH >= _bzFin.region.top - 1 && f.y2 * imgH <= _bzFin.region.top + _bzFin.region.height + 1
+        ));
+        const _appliedFinal = _bzFin.moved && _allInFinal;
+        if (_appliedFinal) { region = _bzFin.region; _br += '+circavoidfinal'; }
+        else if (!_bzFin.avoided || (_bzFin.moved && !_allInFinal)) _needCircleBackup = true;
+        console.log(`[CoverV3] ⭕ หลบวง: ${slot.id} กิ่ง=${_br} moved=${_appliedFinal ? 'Y' : 'N'}`);
+      }
+    } else {
+      const _bzBlind = biasRegionFromCircleZoneBlind({ region, zone: slot._circleZone, imgW, imgH });
+      if (_bzBlind.attempted) {
+        if (_bzBlind.moved) { region = _bzBlind.region; _br += '+circavoidblind'; }
+        console.log(`[CoverV3] ⭕ หลบวง: ${slot.id} กิ่ง=${_br} moved=${_bzBlind.moved ? 'Y' : 'N'}`);
+      }
+    }
+  }
+  // ★ MEGA_WATERMARK_GUARD C2 (29 ก.ค. 69 — แบตช์ C): หลบลายน้ำ "ที่ขอบ" ตาม slot._watermarkEdge (ตาสอง C1 แนบ)
+  //   รันหลังทุกจุดปรับ region ข้างบนจบสนิท (เหมือน circle catch-all) — "ก่อน" dodgeWatermarkPx เดิมด้านล่างเสมอ
+  //   (คนละกลไก/คนละข้อมูลกัน — dodgeWatermarkPx เดิมใช้ fb.watermarkRegion จาก faceDetector ไม่ใช่ marker ตัวนี้ —
+  //   รันต่อกันได้ปลอดภัยเพราะแต่ละตัวเช็ก overlap เองก่อนขยับ ไม่มีทางเลื่อนซ้ำสอง) · ปิด flag/ไม่มี marker = ข้ามเงียบ
+  let _needWatermarkKept = false;
+  {
+    const _wmg = _applyWatermarkEdgeGuard(region, slot, imgW, imgH);
+    region = _wmg.region;
+    _br += _wmg.brSuffix;
+    if (_wmg.kept) _needWatermarkKept = true;
+  }
   const _tr = _cropTrace(slot, _br, fb, imgW, imgH, region, traceSink); // เฟส 0.1: log อย่างเดียว
   if (_tr) _tr.tighten = _tg6b; // เฟส 6B: composer อ่าน tt.tighten → ธง crop_tightened/context_tightened/face_small
   if (_tr && _needCircleBackup) _tr.circleAvoidNeedsBackup = true; // แบตช์ C: additive — composer อ่านเพื่อสลับภาพสำรอง
   if (_tr && _needRefineBackup) _tr.refineNeedsBackup = true; // ★ C1c/BS: additive — composer อ่านเพื่อสลับภาพสำรอง (union จัดไม่ลง)
+  if (_tr && _needWatermarkKept) _tr.watermarkKept = true; // ★ แบตช์ C (C2): additive — composer ยก qcFlag 'watermark_kept'
   if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ` ${slot.id}`); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
   // ★ MEGA_HEAD_SAFE (เคส AC-0195 28 ก.ค. 69): ด่านสุดท้ายกันหัวขาด รันหลังทุกจุดปรับ region เดิม+หลบลายน้ำ
   //   ก่อนคลัมป์สุดท้าย — ไม่พึ่งตา (ทำงานจากเรขาคณิตล้วน ไม่สนว่า fb มาจากไหน — ตาสอง/triage/detector เหมือนกันหมด)
@@ -1345,8 +1492,17 @@ async function renderCircleTile(src, crop, slot, fb, traceSink = null) {
       _faceFirstCropOn() ? { target: 0.60, cap: 0.65, trigMul: 0.85 } : null);
     if (_ttC) { if (_ttC.meta.tightened) region = _ttC.region; _tg6bC = _ttC.meta; }
   }
+  // ★ MEGA_WATERMARK_GUARD C2 (29 ก.ค. 69 — แบตช์ C): เหมือน renderRectTile เป๊ะ — ก่อน dodgeWatermarkPx เดิมเสมอ
+  let _needWatermarkKeptC = false;
+  {
+    const _wmgC = _applyWatermarkEdgeGuard(region, slot, imgW, imgH);
+    region = _wmgC.region;
+    _br += _wmgC.brSuffix;
+    if (_wmgC.kept) _needWatermarkKeptC = true;
+  }
   const _tr = _cropTrace(slot, _br, fb, imgW, imgH, region, traceSink); // เฟส 0.1: log อย่างเดียว
   if (_tr) _tr.tighten = _tg6bC; // เฟส 6B: ธง crop_tightened/face_small ของวงกลม
+  if (_tr && _needWatermarkKeptC) _tr.watermarkKept = true; // ★ แบตช์ C (C2): additive — composer ยก qcFlag 'watermark_kept'
   if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ' circle'); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
   region = _clampRegion(region, imgW, imgH); // ★ 10 ก.ค.: การ์ดสุดท้ายก่อน extract (วงกลม)
   // ★ CLUTTER (มือ D 7/7): วงกลม = คนเดี่ยวสะอาดโฟกัสชัด — ไร้หน้า(noface-square)/≥2 หน้าในวง/eyeClean เท็จ/busy>=2
