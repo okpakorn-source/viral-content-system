@@ -4373,7 +4373,9 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         //   เพิ่ม — ดู inferRefCategory ใน refCoverMatch.js) · desk มี category จริง = ใช้ของเดิมเสมอ ไม่แตะ
         //   (desk ชนะเสมอ) · ปิดสวิตช์ MEGA_REF_CAT_QUICK='0' = พฤติกรรมเดิมทุก byte (ไม่มีสัญญาณเพิ่มเลย)
         if (!_catHint && process.env.MEGA_REF_CAT_QUICK !== '0') {
-          _catHint = inferRefCategory([job.dossier.desk?.title, c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '));
+          // ★ 29 ก.ค. รอบ 3 (โพรบพิสูจน์): angle เป็นภาษาอารมณ์ ("เล่าจากมุมม่วยที่เก็บความรู้สึก...")
+          //   มักไม่มีคำหมวดตรงๆ ("แต่งงาน/กตัญญู") → เติมเนื้อจริงหัวข่าว+ต้นเนื้อ (มีในมืออยู่แล้ว ไม่โหลดเพิ่ม)
+          _catHint = inferRefCategory([job.dossier.desk?.title, c.angle, ...(c.secondaryEmotions || []), fullNewsText(job).slice(0, 600)].filter(Boolean).join(' '));
         }
         // ★ 10 ก.ค. Wave1-A: seedKey นิ่งต่อข่าว (หัวข่าวก่อน — ข่าวเดิมเทสซ้ำคนละ job/คนละ caseId ก็ได้ ref ใบเดิม) → caseId → job.id
         const m = await pickBestRef({
@@ -7012,7 +7014,8 @@ export async function s7_cover(job, { origin, _deps } = {}) {
       // ★ 29 ก.ค. 69 (แบตช์ 2 — พิสูจน์จริง): เส้นนี้เอง (mega/compose-test route.js สร้าง desk:{title} เปล่า
       //   ไม่มี category) คือเส้น "quick" ที่พิสูจน์ว่า ref ไม่หมุนจริง — เกณฑ์/สวิตช์เดียวกับจุด S6 เป๊ะ
       if (!_catHint && process.env.MEGA_REF_CAT_QUICK !== '0') {
-        _catHint = inferRefCategory([d.desk?.title, c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '));
+        // ★ 29 ก.ค. รอบ 3 (โพรบพิสูจน์): เติมเนื้อจริงเช่นเดียวกับจุด S6 (fullNewsText ใช้ dossier — ที่นี่คือ d เอง)
+        _catHint = inferRefCategory([d.desk?.title, c.angle, ...(c.secondaryEmotions || []), fullNewsText({ dossier: d }).slice(0, 600)].filter(Boolean).join(' '));
       }
       const m = await pickBestRef({
         emotion: c.primaryEmotion || '',
