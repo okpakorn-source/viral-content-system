@@ -293,6 +293,10 @@ export async function POST(req) {
         //   ให้เครื่องมือเทสนี้ได้ผลตรวจตาสองที่ s6_slots ทำไว้แล้วไปถึงชั้นเรนเดอร์ด้วย (ไม่งั้นบั๊กเดิมที่วินิจฉัย
         //   จากเครื่องมือนี้จะไม่เห็นผลของด่านตาสองที่เพิ่งแก้เลย)
         ...(primary && slots[primary]?._secondEyeFaceBox ? { _secondEyeFaceBox: slots[primary]._secondEyeFaceBox } : {}),
+        // ★ เคสไรเดอร์ (28 ก.ค. 69): ต่อสาย _secondEyeHeroFaceHidden แบบเดียวกับ _secondEyeFaceBox เป๊ะ
+        ...(primary && slots[primary]?._secondEyeHeroFaceHidden ? { _secondEyeHeroFaceHidden: slots[primary]._secondEyeHeroFaceHidden } : {}),
+        // ★ เคส AC-0201 รอบ 2 (28 ก.ค. 69): ต่อสาย _secondEyeSubSlotFlag แบบเดียวกับ _secondEyeHeroFaceHidden เป๊ะ
+        ...(primary && slots[primary]?._secondEyeSubSlotFlag ? { _secondEyeSubSlotFlag: slots[primary]._secondEyeSubSlotFlag } : {}),
       };
     });
     const out = await composeAndVerify({

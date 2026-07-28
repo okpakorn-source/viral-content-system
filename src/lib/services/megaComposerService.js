@@ -926,9 +926,10 @@ function _strictPrepareV1({ decision, carrier, slotPlan }) {
       refSlotId: s.refSlotId,
       candidateId: s.primary.candidateId,
       imageUrl: s.primary.imageUrl, // fetch ใช้ค่านี้เท่านั้น
-      // ★ TODO (28 ก.ค. 69, เคสไรเดอร์ — ผู้ตรวจ Opus ข้อ 4): ก่อนเปิด strict/V2 จริง ต้องเติม
-      //   _secondEyeHeroFaceHidden (+ _secondEyeFaceBox) เข้า allowlist นี้ด้วย — ตอนนี้ยังไม่มี ⇒ MEGA_SECOND_EYE
-      //   (ทั้ง faceBox override และ qcFlag 'hero_face_hidden') ใช้ไม่ได้ผลเลยในสายนี้ (loaded[i] คัด field แบบ
+      // ★ TODO (28 ก.ค. 69, เคสไรเดอร์ — ผู้ตรวจ Opus ข้อ 4, ขยาย AC-0201 รอบ 2): ก่อนเปิด strict/V2 จริง ต้องเติม
+      //   _secondEyeHeroFaceHidden + _secondEyeSubSlotFlag (+ _secondEyeFaceBox) เข้า allowlist นี้ด้วย — ตอนนี้
+      //   ยังไม่มีสักตัว ⇒ MEGA_SECOND_EYE ทั้งชุด (faceBox override + qcFlag 'hero_face_hidden'/
+      //   'subslot_duplicate_shot'/'subslot_text_overlay') ใช้ไม่ได้ผลเลยในสายนี้ (loaded[i] คัด field แบบ
       //   allowlist ไม่ spread ทั้งก้อนเหมือน legacy composeCore) — ติดตามที่ task "Wire _secondEyeFaceBox/
       //   _secondEyeHeroFaceHidden into strict compose path" (spawn_task เคสไรเดอร์)
       meta: Object.freeze({
@@ -1028,8 +1029,9 @@ function _strictPrepareV2({ decision, slotPlan }) {
       personId: s.primary.personId,
       imageUrl: url, // fetch ใช้ค่านี้เท่านั้น (จาก authority — ไม่ใช่ plan)
       borderColor: s.render.border === true ? '#FFFFFF' : null,
-      // ★ TODO (28 ก.ค. 69, เคสไรเดอร์ — ผู้ตรวจ Opus ข้อ 4): ก่อนเปิด strict/V2 จริง ต้องเติม
-      //   _secondEyeHeroFaceHidden (+ _secondEyeFaceBox) เข้า allowlist นี้ด้วย (เหมือน TODO ที่ V1 block ด้านบน)
+      // ★ TODO (28 ก.ค. 69, เคสไรเดอร์ — ผู้ตรวจ Opus ข้อ 4, ขยาย AC-0201 รอบ 2): ก่อนเปิด strict/V2 จริง ต้องเติม
+      //   _secondEyeHeroFaceHidden + _secondEyeSubSlotFlag (+ _secondEyeFaceBox) เข้า allowlist นี้ด้วย (เหมือน
+      //   TODO ที่ V1 block ด้านบน)
       meta: Object.freeze({
         slot: m && m.slot != null ? String(m.slot) : null,
         person: s.primary.personId != null ? String(s.primary.personId) : (m && m.person != null ? String(m.person) : null),
@@ -1483,6 +1485,12 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
   //   (เหมือนแพทเทิร์น spec._featherCapped → 'feather_capped' บรรทัดบนเป๊ะ)
   const _heroRowRider = loaded.find((im) => im?.isHero);
   if (_heroRowRider?._secondEyeHeroFaceHidden) qcFlags.push('hero_face_hidden');
+  // ★ เคส AC-0201 รอบ 2 (28 ก.ค. 69): นโยบายกันช็อตซ้ำ/text ทับใหญ่ในช่องย่อย (ตาสอง S6) หาแทนที่ไม่เจอ →
+  //   slots[role]._secondEyeSubSlotFlag ถูกแนบไว้ — ต่างจาก hero_face_hidden ตรงที่เกิดได้กับ "ช่องไหนก็ได้ไม่ใช่
+  //   แค่ hero" จึงต้องวนทุกแถวที่โหลดมา (ไม่ใช่เจาะจงแถวเดียวแบบ hero) — อาจมีได้มากกว่า 1 ช่องพร้อมกัน
+  for (const _im of loaded) {
+    if (_im?._secondEyeSubSlotFlag) qcFlags.push(_im._secondEyeSubSlotFlag);
+  }
   // ★ เฟส 6B.3 (10 ก.ค.): ส่ง "เป้าหน้าเด่น" (faceSizePct จาก ref DNA) ต่อช่องให้ executor —
   //   executor ใช้เป็น "ขั้นต่ำที่ต้องบังคับ" (ไม่ใช่แค่ hint) โดยมี cap ความปลอดภัยของมันเอง กันซูมแน่นเกิน/หัวขาด
   //   refSlotMeta เป็น 1:1 กับ spec.slots เสมอเมื่อไม่ null (map ในบล็อก ref ด้านบน) · _faceProm ปิด = ไม่ส่ง (พฤติกรรมเดิม)

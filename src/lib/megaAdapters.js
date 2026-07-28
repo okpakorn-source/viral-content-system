@@ -625,15 +625,22 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
   //   (สเกล 0-2 เดียวกับที่ gemini.js::geminiClassifyFrames ใช้อยู่แล้วตอนตาคัด — ไม่ต้องคิดสเกลใหม่) นโยบาย hero
   //   แข็งข้อ 2 ทำงานผ่าน faceVisible อยู่แล้วโดยไม่ต้องพึ่ง flag นี้ — เป็นแค่สัญญาณเสริมให้ชั้นอื่นหยิบไปใช้ต่อได้
   const _frontalOn = process.env.MEGA_HERO_FRONTAL === '1';
+  // ★ เคส AC-0201 รอบ 2 (28 ก.ค. 69 — "director ฝ่าฝืนกติกา prompt ได้เรื่อยๆ ต้องบังคับเชิงกลไก"): เพิ่ม
+  //   duplicateOfIndex ต่อภาพ (ทุกใบ ไม่ใช่แค่ primary — ให้สำรองก็ self-report ได้ว่าซ้ำกับ primary ใบไหนบ้าง
+  //   เพื่อใช้เป็นเกณฑ์ "ไม่ซ้ำฉากกับช่องอื่น" ตอนเลือกสำรองแทนที่ด้านล่าง) — ชี้ index ของ "ภาพหลัก (primary)"
+  //   ใบก่อนหน้าที่ซ้ำกันจริง (ช็อตประเภทเดียวกัน+คนเดียวกัน+ฉากใกล้เคียงกัน) ไม่งั้น null — ใช้ตัดสินนโยบายกันช็อต
+  //   ซ้ำเชิงกลไกใน pass 2 ด้านล่าง (ไม่พึ่ง prompt ฝั่ง megaBrains.js อย่างเดียวอีกต่อไป เพราะ LLM ฝ่าฝืนได้จริง)
+  const _primaryCount = map.filter((m) => m.kind === 'primary').length;
   const prompt = `คุณเป็นตาตรวจสอบภาพปกข่าวรอบสอง (second-eye QC) — ตรวจภาพที่แนบมา ${images.length} รูป เรียงตาม index 0 ถึง ${images.length - 1} (รูปแรก=0)
 ตอบต่อรูปแต่ละรูป:
 - textFound: ถ้ามีตัวหนังสือ/แถบข่าว/โลโก้/ลายน้ำใดๆ ทับอยู่บนภาพ ให้ "พิมพ์ข้อความที่อ่านเห็นจริงออกมาทั้งหมด" (string) — ถ้าไม่มีตัวหนังสือทับภาพเลย ให้ตอบ "" (สตริงว่าง) ห้ามเดา/ห้ามมโนข้อความที่ไม่ได้เห็นจริง
 - faceBox: กรอบหน้าคนเด่นที่สุดในภาพ {x1,y1,x2,y2} normalized 0-1 (สัดส่วนของภาพ ไม่ใช่พิกเซล x1<x2, y1<y2) หรือ null ถ้าไม่เห็นหน้าคนในภาพ
 - faceCount: จำนวนหน้าคนที่เห็นชัดในภาพ (จำนวนเต็ม 0 ขึ้นไป)
-- faceVisible: "เห็นหน้าชัดแค่ไหน" เลือก 0-2: 0=หน้าถูกปิด/หันหลังไม่เห็นหน้าเลย (เช่น หมวกกันน็อคเต็มใบปิดหน้าหมด/หันหลังให้กล้อง), 1=เห็นหน้าบางส่วน (เช่น หมวกกันน็อค/หน้ากากบังจนเห็นแค่ตา, มุมข้างเห็นแค่ครึ่งหน้า), 2=เห็นหน้าเต็มชัดเจน (เห็นตา+จมูก+ปากครบ ไม่ถูกบัง)${heroIdx >= 0 ? `
+- faceVisible: "เห็นหน้าชัดแค่ไหน" เลือก 0-2: 0=หน้าถูกปิด/หันหลังไม่เห็นหน้าเลย (เช่น หมวกกันน็อคเต็มใบปิดหน้าหมด/หันหลังให้กล้อง), 1=เห็นหน้าบางส่วน (เช่น หมวกกันน็อค/หน้ากากบังจนเห็นแค่ตา, มุมข้างเห็นแค่ครึ่งหน้า), 2=เห็นหน้าเต็มชัดเจน (เห็นตา+จมูก+ปากครบ ไม่ถูกบัง)
+- duplicateOfIndex: เทียบภาพนี้กับ "ภาพหลักของช่อง" (index 0 ถึง ${_primaryCount - 1}) ที่มี index น้อยกว่าภาพนี้เท่านั้น — ถ้าเป็นช็อตประเภทเดียวกัน (เช่น เซลฟี่มุมกล้อง/ท่าโพสคล้ายกัน) + คนเดียวกัน + ฉากใกล้เคียงกันจนดูซ้ำกัน ให้ตอบ index ของภาพหลักใบนั้น (จำนวนเต็ม) — ไม่ซ้ำกับใครเลยหรือเป็นภาพหลักใบแรกสุด (index 0) ตอบ null${heroIdx >= 0 ? `
 - sameAsHeroPerson: ตอบเฉพาะรูปที่ไม่ใช่ index ${heroIdx} เท่านั้น (ข้ามรูป index ${heroIdx} เอง ไม่ต้องตอบฟิลด์นี้) — true/false: เป็น "คนคนเดียวกัน" กับคนในรูป index ${heroIdx} (ภาพตัวเอกของปกที่เลือกไว้ตอนนี้) หรือไม่ ตัดสินจากใบหน้า/รูปร่าง/เสื้อผ้าที่เห็นจริงเทียบกันเท่านั้น ไม่มั่นใจ = false` : ''}${_frontalOn ? `
 - faceFront: มุมการเห็น "ใบหน้าคนหลัก" เลือก 1: 0-2 (0=ไม่เห็นหน้า หันหลัง/เห็นแต่ท้ายทอย/หน้าถูกบังเกือบหมด, 1=เห็นหน้าบางส่วน มุมข้าง/ก้มหน้า/มือผมบังเกินครึ่ง, 2=เห็นเต็มหน้า หน้าตรงหรือเกือบตรง เห็นตา-จมูก-ปากครบ) ไม่มีคนในรูป/ตัดสินไม่ได้ = null` : ''}
-ตอบ JSON เท่านั้น: {"results":[{"index":0,"textFound":"","faceBox":{"x1":0,"y1":0,"x2":0,"y2":0},"faceCount":1,"faceVisible":2${heroIdx >= 0 ? ',"sameAsHeroPerson":true' : ''}${_frontalOn ? ',"faceFront":2' : ''}},...]}`;
+ตอบ JSON เท่านั้น: {"results":[{"index":0,"textFound":"","faceBox":{"x1":0,"y1":0,"x2":0,"y2":0},"faceCount":1,"faceVisible":2,"duplicateOfIndex":null${heroIdx >= 0 ? ',"sameAsHeroPerson":true' : ''}${_frontalOn ? ',"faceFront":2' : ''}},...]}`;
   // ★ ข้อ 3 (โมเดลปรับได้): MEGA_SECOND_EYE_MODEL override ได้ (แค่ 5-8 ภาพ/ปก ต้นทุนจิ๊บแม้ใช้โมเดลแรงกว่า) —
   //   ไม่ตั้ง = COVER_GEMINI_MODEL เดิม (ตัวเดียวกับที่ตาคัด/ตาหาหน้าใช้อยู่แล้วทั้งสาย — ไม่ต้องคีย์ใหม่)
   const _seModel = process.env.MEGA_SECOND_EYE_MODEL || _deps.coverGeminiModel || COVER_GEMINI_MODEL;
@@ -650,6 +657,9 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
         textOverlay: _deriveTextOverlay(x.textFound),
         faceVisible: [0, 1, 2].includes(x.faceVisible) ? x.faceVisible : null,
         sameAsHeroPerson: typeof x.sameAsHeroPerson === 'boolean' ? x.sameAsHeroPerson : null,
+        // ★ เคส AC-0201 รอบ 2: duplicateOfIndex ต้อง Number.isInteger + อยู่ในช่วง primary จริง (0..primaryCount-1)
+        //   + ห้ามชี้ตัวเอง (ป้องกัน loop) — ค่าพังรูปแบบ/นอกช่วง/ชี้ตัวเอง = ไม่เชื่อ (null, fail-safe เหมือน faceBox)
+        duplicateOfIndex: (Number.isInteger(x.duplicateOfIndex) && x.duplicateOfIndex >= 0 && x.duplicateOfIndex < _primaryCount && x.duplicateOfIndex !== x.index) ? x.duplicateOfIndex : null,
         ...(_frontalOn ? { faceFront: [0, 1, 2].includes(x.faceFront) ? x.faceFront : null } : {}),
       }]),
   );
@@ -848,7 +858,161 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
       slots[role]._secondEyeFaceFront = finalRes.faceFront;
     }
   }
-  return { swapped, fixedCoords, checked: roles.length, liesCaught };
+
+  // ============================================================
+  // ★ PASS 2 (28 ก.ค. 69 เคส AC-0201 รอบ 2 — ผลเทสจริง MCV-ms482jxobj8: hero สำเร็จแล้ว แต่ช่องย่อยพัง 2 จุด:
+  //   เซลฟี่หมวก+หน้ากากใบเดิมซ้ำ 2 ช่องล่าง + ล่างซ้ายมี text ฝังใหญ่ — พิสูจน์ว่า director (LLM) ฝ่าฝืนกติกา
+  //   prompt (megaBrains.js) ได้เรื่อยๆ ต้องบังคับเชิงกลไกที่นี่แทน) — ทำงาน "หลัง" นโยบาย hero แข็งข้างบนจบสนิท
+  //   แล้วเท่านั้น (hero จบก่อน แล้วค่อยไล่ช่องย่อย — backup ที่ hero ใช้ไปแล้วห้ามหยิบซ้ำ เพราะ usedIds อ่านจาก
+  //   สภาพ slots ปัจจุบันหลัง pass 1 เสมอ) — แก้ 2 ปัญหา: (ก) ช็อตซ้ำข้ามช่องย่อย (ข) text ทับใหญ่ในช่องย่อย
+  // ============================================================
+  const SLOT_CANON_ORDER = ['hero', 'reaction', 'action', 'context', 'circle'];
+  const _activeCanonRoles = SLOT_CANON_ORDER.filter((rr) => slots[rr] && slots[rr].id);
+  const _curIdxOf = (rr) => map.findIndex((m) => String(m.id) === String(slots[rr].id));
+  const _curResOf = (rr) => { const i = _curIdxOf(rr); return i >= 0 ? byIndex.get(i) : null; };
+
+  // ★ ฟังก์ชันกลาง: สลับภาพเข้าช่อง targetRole ด้วย candidate ที่ map index = candidateMapIndex — ใช้กลไกเดียวกับ
+  //   นโยบาย hero แข็งข้างบนเป๊ะ (field-transfer ครบชุด + สลับสองทางถ้า candidate เป็น primary ของช่องอื่น + ตาข่าย
+  //   กันซ้ำ id ทั้ง 5 ช่อง + revert คืนสภาพเดิมทั้งคู่ถ้าซ้ำ) — คืน {applied, donorRole}. หมายเหตุ: pass 2 นี้จำกัด
+  //   candidate ให้เป็น "backup เท่านั้น" เสมอ (ดู _findBestReplacementIndex ด้านล่าง) กันปัญหา "ยกภาพเสียไปให้ช่อง
+  //   อื่นแทน" (ถ้ายืมภาพหลักของช่องอื่นมาแก้ปัญหาช่องนี้ ช่องนั้นจะได้ภาพซ้ำ/มี text แทน = ย้ายปัญหาไม่ใช่แก้ปัญหา)
+  //   — donorRole จึงเป็น null เสมอในทางปฏิบัติสำหรับ pass 2 แต่คงกลไกสองทางไว้เผื่ออนาคตขยายพูล candidate
+  function _swapRoleImageMechanic(targetRole, candidateMapIndex, candidateResult, reasonTag) {
+    const candMapEntry = map[candidateMapIndex];
+    const cRec = byId.get(candMapEntry.id);
+    if (!cRec?.imageUrl) return { applied: false, donorRole: null };
+    const oldTarget = {
+      id: slots[targetRole].id, imageUrl: slots[targetRole].imageUrl, person: slots[targetRole].person,
+      category: slots[targetRole].category, emotion: slots[targetRole].emotion,
+      _secondEyeFaceBox: slots[targetRole]._secondEyeFaceBox,
+    };
+    const donorRole = (candMapEntry.kind === 'primary' && candMapEntry.role !== targetRole) ? candMapEntry.role : null;
+    const oldDonor = donorRole && slots[donorRole] ? {
+      id: slots[donorRole].id, imageUrl: slots[donorRole].imageUrl, person: slots[donorRole].person,
+      category: slots[donorRole].category, emotion: slots[donorRole].emotion,
+      _secondEyeFaceBox: slots[donorRole]._secondEyeFaceBox, _secondEyeSwapped: slots[donorRole]._secondEyeSwapped,
+    } : null;
+
+    slots[targetRole].id = candMapEntry.id;
+    slots[targetRole].imageUrl = cRec.imageUrl;
+    slots[targetRole].person = cRec.triage?.person || oldTarget.person || null;
+    slots[targetRole].category = cRec.triage?.category || null;
+    slots[targetRole].emotion = cRec.triage?.emotion || null;
+    slots[targetRole]._secondEyeSwapped = {
+      from: oldTarget.id, to: candMapEntry.id,
+      reason: `${reasonTag}${donorRole ? ` — two_way_swap_with:${donorRole}` : ''}`,
+    };
+    if (candidateResult && _validSecondEyeFaceBox(candidateResult.faceBox)) {
+      slots[targetRole]._secondEyeFaceBox = { x1: candidateResult.faceBox.x1, y1: candidateResult.faceBox.y1, x2: candidateResult.faceBox.x2, y2: candidateResult.faceBox.y2 };
+    } else {
+      delete slots[targetRole]._secondEyeFaceBox;
+    }
+
+    if (donorRole && slots[donorRole]) {
+      slots[donorRole].id = oldTarget.id;
+      slots[donorRole].imageUrl = oldTarget.imageUrl;
+      slots[donorRole].person = oldTarget.person;
+      slots[donorRole].category = oldTarget.category;
+      slots[donorRole].emotion = oldTarget.emotion;
+      if (oldTarget._secondEyeFaceBox) slots[donorRole]._secondEyeFaceBox = oldTarget._secondEyeFaceBox;
+      else delete slots[donorRole]._secondEyeFaceBox;
+      slots[donorRole]._secondEyeSwapped = { from: candMapEntry.id, to: oldTarget.id, reason: `two_way_swap_with:${targetRole} (${reasonTag})` };
+    }
+
+    const _idsAfter = SLOT_CANON_ORDER.map((rr) => (slots[rr]?.id != null ? String(slots[rr].id) : null)).filter(Boolean);
+    if (new Set(_idsAfter).size !== _idsAfter.length) {
+      console.log(`[MEGA S6] 👁️‍🗨️ ตาสอง: ⚠️ สลับ ${targetRole} แล้วพบ id ซ้ำกันข้ามช่อง (${_idsAfter.join(',')}) — ยกเลิกการสลับ คืนสภาพเดิม`);
+      slots[targetRole].id = oldTarget.id;
+      slots[targetRole].imageUrl = oldTarget.imageUrl;
+      slots[targetRole].person = oldTarget.person;
+      slots[targetRole].category = oldTarget.category;
+      slots[targetRole].emotion = oldTarget.emotion;
+      delete slots[targetRole]._secondEyeSwapped;
+      if (oldTarget._secondEyeFaceBox) slots[targetRole]._secondEyeFaceBox = oldTarget._secondEyeFaceBox;
+      else delete slots[targetRole]._secondEyeFaceBox;
+      if (donorRole && slots[donorRole] && oldDonor) {
+        slots[donorRole].id = oldDonor.id;
+        slots[donorRole].imageUrl = oldDonor.imageUrl;
+        slots[donorRole].person = oldDonor.person;
+        slots[donorRole].category = oldDonor.category;
+        slots[donorRole].emotion = oldDonor.emotion;
+        if (oldDonor._secondEyeFaceBox !== undefined) slots[donorRole]._secondEyeFaceBox = oldDonor._secondEyeFaceBox;
+        else delete slots[donorRole]._secondEyeFaceBox;
+        if (oldDonor._secondEyeSwapped !== undefined) slots[donorRole]._secondEyeSwapped = oldDonor._secondEyeSwapped;
+        else delete slots[donorRole]._secondEyeSwapped;
+      }
+      return { applied: false, donorRole: null };
+    }
+    return { applied: true, donorRole };
+  }
+
+  // ★ หา backup ที่ดีที่สุดสำหรับแทนที่ช่องย่อย — เกณฑ์: id ไม่ชนช่องไหนที่ใช้อยู่ตอนนี้ (รวม backup ที่ hero ใช้
+  //   ไปแล้วในสภาพ slots ปัจจุบัน), textOverlay≤1 เสมอ, (ถ้า requireNoDuplicate) duplicateOfIndex ต้องเป็น null
+  //   (ไม่ซ้ำฉากกับ primary ใบไหนเลย per ตาสอง) · backup เท่านั้น (kind==='backup') — ห้ามยืม primary ของช่องอื่น
+  function _findBestReplacementIndex(excludeIds, requireNoDuplicate) {
+    for (let i = 0; i < map.length; i++) {
+      if (map[i].kind !== 'backup') continue;
+      if (excludeIds.has(String(map[i].id))) continue;
+      const cand = byIndex.get(i);
+      if (!cand) continue;
+      if (cand.textOverlay > 1) continue;
+      if (requireNoDuplicate && cand.duplicateOfIndex !== null) continue;
+      return i;
+    }
+    return -1;
+  }
+
+  let subSlotReplaced = 0;
+  const _resolvedThisPass = new Set(); // เฉพาะ "ผู้แพ้" ที่ถูกจัดการแล้วใน (ก) — กันประมวลผลซ้ำสองครั้ง (ผู้ชนะยังตรวจ (ข) ต่อได้ปกติ)
+
+  // ── (ก) ตรวจจับ+แก้ "ช็อตซ้ำ" ข้ามช่อง (duplicateOfIndex เชิงกลไก — ไม่พึ่งกติกา prompt ฝั่ง megaBrains.js อย่างเดียว) ──
+  for (const role of _activeCanonRoles) {
+    if (_resolvedThisPass.has(role)) continue;
+    const res = _curResOf(role);
+    if (!res || res.duplicateOfIndex === null) continue;
+    const otherRole = _activeCanonRoles.find((r2) => r2 !== role && _curIdxOf(r2) === res.duplicateOfIndex);
+    if (!otherRole || _resolvedThisPass.has(otherRole)) continue;
+    const otherRes = _curResOf(otherRole);
+    // ★ ข้อ 2: hero ชนะเสมอ · ระหว่างช่องย่อย เก็บใบ textOverlay ต่ำกว่า · เท่ากันเก็บใบแรก (ตามลำดับ canonical)
+    let loserRole;
+    if (role === 'hero') loserRole = otherRole;
+    else if (otherRole === 'hero') loserRole = role;
+    else {
+      const t1 = Number(res.textOverlay) || 0, t2 = Number(otherRes?.textOverlay) || 0;
+      if (t1 !== t2) loserRole = t1 > t2 ? role : otherRole;
+      else loserRole = SLOT_CANON_ORDER.indexOf(role) < SLOT_CANON_ORDER.indexOf(otherRole) ? otherRole : role;
+    }
+    _resolvedThisPass.add(loserRole);
+    const usedIds = new Set(_activeCanonRoles.map((rr) => String(slots[rr].id)));
+    const candIdx = _findBestReplacementIndex(usedIds, true);
+    if (candIdx >= 0) {
+      const { applied } = _swapRoleImageMechanic(loserRole, candIdx, byIndex.get(candIdx), 'subslot_duplicate_shot_forced_replace');
+      if (applied) subSlotReplaced++;
+      else slots[loserRole]._secondEyeSubSlotFlag = 'subslot_duplicate_shot';
+    } else {
+      slots[loserRole]._secondEyeSubSlotFlag = 'subslot_duplicate_shot';
+      console.log(`[MEGA S6] 👁️‍🗨️ ตาสอง: ${loserRole} ซ้ำช็อตกับ ${loserRole === role ? otherRole : role} แต่ไม่มีภาพแทนที่ที่ผ่านเกณฑ์ในพูล — คงเดิม + ติดธง subslot_duplicate_shot`);
+    }
+  }
+
+  // ── (ข) ตรวจจับ+แก้ "text ทับใหญ่" ในช่องย่อย (ไม่ใช่ hero — hero มีนโยบายตัวเองแล้วในลูปหลักข้างบน) ──
+  for (const role of _activeCanonRoles) {
+    if (role === 'hero' || _resolvedThisPass.has(role)) continue;
+    const res = _curResOf(role);
+    if (!res || res.textOverlay < 2) continue;
+    const usedIds = new Set(_activeCanonRoles.map((rr) => String(slots[rr].id)));
+    const candIdx = _findBestReplacementIndex(usedIds, false);
+    if (candIdx >= 0) {
+      const { applied } = _swapRoleImageMechanic(role, candIdx, byIndex.get(candIdx), 'subslot_text_overlay_forced_replace');
+      if (applied) subSlotReplaced++;
+      else slots[role]._secondEyeSubSlotFlag = 'subslot_text_overlay';
+    } else {
+      slots[role]._secondEyeSubSlotFlag = 'subslot_text_overlay';
+      console.log(`[MEGA S6] 👁️‍🗨️ ตาสอง: ${role} textOverlay=${res.textOverlay} แต่ไม่มีภาพแทนที่สะอาดในพูล — คงเดิม + ติดธง subslot_text_overlay`);
+    }
+  }
+
+  return { swapped, fixedCoords, checked: roles.length, liesCaught, subSlotReplaced };
 }
 
 // ★ Wave2 Batch B1: ตัดสิน hard gate ท้าย s5_gapsearch — คืน null = ผ่าน/ไม่มีเกณฑ์จะวัด (ไม่แตะ path เดิม)
@@ -6333,7 +6497,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     try {
       const _caseIdForEye = job?.dossier?.images?.caseId || job?.dossier?.caseId || null;
       const _se = await _runSecondEye({ slots, activeSlots, byId, caseId: _caseIdForEye, _deps });
-      console.log(`[MEGA S6] 👁️‍🗨️ ตาสอง: ตรวจ ${_se.checked} ใบ · เปลี่ยน ${_se.swapped} · แก้พิกัด ${_se.fixedCoords}${_se.liesCaught ? ` · จับตาแรกโกหก ${_se.liesCaught}` : ''}`);
+      console.log(`[MEGA S6] 👁️‍🗨️ ตาสอง: ตรวจ ${_se.checked} ใบ · เปลี่ยน ${_se.swapped} · แก้พิกัด ${_se.fixedCoords}${_se.liesCaught ? ` · จับตาแรกโกหก ${_se.liesCaught}` : ''}${_se.subSlotReplaced ? ` · แทนช่องย่อย ${_se.subSlotReplaced} ใบ` : ''}`);
     } catch (e) {
       console.log('[MEGA S6] 👁️‍🗨️ ตาสอง: ล้ม/timeout — เดินต่อแบบเดิม:', String(e?.message || '').slice(0, 60));
     }
@@ -6673,6 +6837,10 @@ export async function s7_cover(job, { origin, _deps } = {}) {
       //   composeCore/composeCoreStrict เห็น field นี้ผ่าน slotPlan → loaded[i] (spread ทั้งก้อน) แล้วยก qcFlag
       //   'hero_face_hidden' เมื่อจำใจใช้ hero ที่ยังหน้าไม่ชัด (นโยบาย hero แข็งข้อ 2 หาแทนที่ไม่เจอ)
       ...(primary && slots[primary]?._secondEyeHeroFaceHidden ? { _secondEyeHeroFaceHidden: slots[primary]._secondEyeHeroFaceHidden } : {}),
+      // ★ เคส AC-0201 รอบ 2 (28 ก.ค. 69): ต่อสาย _secondEyeSubSlotFlag แบบเดียวกับ _secondEyeHeroFaceHidden เป๊ะ —
+      //   ใช้ได้กับ "ช่องย่อยไหนก็ได้" (ไม่จำกัดแค่ hero) ที่นโยบายกันช็อตซ้ำ/text ทับใหญ่หาแทนที่ไม่เจอ → ยก qcFlag
+      //   'subslot_duplicate_shot' / 'subslot_text_overlay' ที่ชั้นประกอบ (ดู composeCore ที่วนทุกแถว ไม่ใช่แค่ hero)
+      ...(primary && slots[primary]?._secondEyeSubSlotFlag ? { _secondEyeSubSlotFlag: slots[primary]._secondEyeSubSlotFlag } : {}),
       // ★ 8 ก.ค. (CASE-366): thumbnail สำรอง (gstatic cache) — sourceLinks เป็น string เปล่า ไม่พก thumbnailUrl
       //   ส่งผ่าน slotPlan แทน ให้ v3 ใช้ตอนโหลดตรงพัง (Instagram/TikTok โดน anti-hotlink)
       thumbnailUrl: t.thumbnailUrl || '',

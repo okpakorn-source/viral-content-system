@@ -429,6 +429,203 @@ await test('เคสไรเดอร์ (ผู้ตรวจ Opus ข) ป�
   assert.ok(!slots.context._secondEyeSwapped, 'context ต้องไม่ถูกแตะเลย');
 });
 
+// ═══════ 28 ก.ค. 69 — เคส AC-0201 รอบ 2 (ผลเทสจริง MCV-ms482jxobj8): hero สำเร็จแล้วแต่ช่องย่อยพัง — เซลฟี่หมวก
+// +หน้ากากใบเดิมซ้ำ 2 ช่องล่าง + ล่างซ้ายมี text ฝังใหญ่ (director ฝ่าฝืนกติกา prompt ได้เรื่อยๆ) → บังคับเชิงกลไก
+// ผ่าน duplicateOfIndex + นโยบายกันช็อตซ้ำ/text ทับใหญ่ในช่องย่อย (ทำงานหลัง hero policy จบสนิทแล้วเท่านั้น) ═══════
+
+await test('AC-0201 รอบ 2 (ก): ช็อตซ้ำระหว่าง action↔context (duplicateOfIndex เท่ากัน tie-break เก็บใบแรกตามลำดับ canonical) + มี backup ผ่านเกณฑ์ → แทนจริง + id ทั้ง 5 ช่องไม่ซ้ำกันเลย', async () => {
+  const records = [
+    { id: 'h1', imageUrl: 'https://x/h1.jpg' },
+    { id: 'r1', imageUrl: 'https://x/r1.jpg' },
+    { id: 'a1', imageUrl: 'https://x/a1.jpg' }, // เซลฟี่หมวก+หน้ากาก (ต้นฉบับ)
+    { id: 'c1', imageUrl: 'https://x/c1.jpg' }, // เซลฟี่หมวก+หน้ากากใบเดิมซ้ำ (คนละ id แต่ฉาก/ช็อตเดียวกัน)
+    { id: 'ci1', imageUrl: 'https://x/ci1.jpg' },
+    { id: 'c1_backup', imageUrl: 'https://x/c1_backup.jpg', triage: { person: 'คนละคน' } },
+  ];
+  const slots = mkSlots({
+    hero: { id: 'h1', backups: [] },
+    reaction: { id: 'r1', backups: [] },
+    action: { id: 'a1', backups: [] },
+    context: { id: 'c1', backups: ['c1_backup'] },
+    circle: { id: 'ci1', backups: [] },
+  });
+  const r = await _runSecondEye({
+    slots, activeSlots: ['hero', 'reaction', 'action', 'context', 'circle'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images }) => ({
+        results: images.map((_, i) => {
+          if (i === 3) return { index: 3, textFound: '', faceBox: null, faceCount: 0, faceVisible: 0, duplicateOfIndex: 2 }; // context ซ้ำกับ action (index 2)
+          return { index: i, textFound: '', faceBox: null, faceCount: 0, faceVisible: 0, duplicateOfIndex: null };
+        }),
+      }),
+    },
+  });
+  assert.equal(slots.action.id, 'a1', 'action (มาก่อนตามลำดับ canonical) ต้องยังคงเดิม');
+  assert.equal(slots.context.id, 'c1_backup', 'context (ผู้แพ้ tie-break) ต้องถูกแทนด้วย backup ที่ผ่านเกณฑ์');
+  assert.equal(r.subSlotReplaced, 1, 'ต้องนับว่าแทนช่องย่อยไป 1 ใบ');
+  const _allIds = ['hero', 'reaction', 'action', 'context', 'circle'].map((rr) => slots[rr].id);
+  assert.equal(new Set(_allIds).size, 5, `id ทั้ง 5 ช่องต้องไม่ซ้ำกันเลย (ได้ ${JSON.stringify(_allIds)})`);
+  assert.ok(!slots.context._secondEyeSubSlotFlag, 'แทนสำเร็จ = ไม่ติดธง');
+});
+
+await test('AC-0201 รอบ 2 (ข): ช็อตซ้ำระหว่างช่องย่อย แต่ไม่มี backup ผ่านเกณฑ์เลย → คงภาพเดิม + ติดธง subslot_duplicate_shot', async () => {
+  const records = [
+    { id: 'h1', imageUrl: 'https://x/h1.jpg' },
+    { id: 'r1', imageUrl: 'https://x/r1.jpg' },
+    { id: 'a1', imageUrl: 'https://x/a1.jpg' },
+    { id: 'c1', imageUrl: 'https://x/c1.jpg' }, // ไม่มี backup ให้แทนเลย
+    { id: 'ci1', imageUrl: 'https://x/ci1.jpg' },
+  ];
+  const slots = mkSlots({
+    hero: { id: 'h1', backups: [] }, reaction: { id: 'r1', backups: [] },
+    action: { id: 'a1', backups: [] }, context: { id: 'c1', backups: [] }, circle: { id: 'ci1', backups: [] },
+  });
+  const r = await _runSecondEye({
+    slots, activeSlots: ['hero', 'reaction', 'action', 'context', 'circle'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images }) => ({
+        results: images.map((_, i) => {
+          if (i === 3) return { index: 3, textFound: '', faceBox: null, faceCount: 0, faceVisible: 0, duplicateOfIndex: 2 };
+          return { index: i, textFound: '', faceBox: null, faceCount: 0, faceVisible: 0, duplicateOfIndex: null };
+        }),
+      }),
+    },
+  });
+  assert.equal(slots.context.id, 'c1', 'ไม่มี backup ผ่านเกณฑ์ → ต้องคงภาพเดิม');
+  assert.equal(r.subSlotReplaced, 0);
+  assert.equal(slots.context._secondEyeSubSlotFlag, 'subslot_duplicate_shot', 'ต้องติดธง subslot_duplicate_shot');
+});
+
+await test('AC-0201 รอบ 2 (ค1): ช่องย่อย (ไม่ใช่ hero) textOverlay≥2 (text ฝังใหญ่) + ตัวเองไม่มี backup แต่พูลรวมมี backup สะอาดของช่องอื่น → แทนจริงข้ามช่อง (พิสูจน์ pass 2 หาข้ามพูลได้ ต่างจากนโยบายเดิมที่หากันแค่ backup ของตัวเอง)', async () => {
+  const LONG_TEXT = 'BREAKING NEWS HEADLINE BAR TEXT'; // >20 ตัวอักษร → derive textOverlay=2
+  const records = [
+    { id: 'h1', imageUrl: 'https://x/h1.jpg' },
+    { id: 'r1', imageUrl: 'https://x/r1.jpg' },
+    { id: 'a1', imageUrl: 'https://x/a1.jpg' }, // text ฝังใหญ่ — action เองไม่มี backup ให้ตัวเอง
+    { id: 'c1', imageUrl: 'https://x/c1.jpg' },
+    { id: 'ci1', imageUrl: 'https://x/ci1.jpg' },
+    { id: 'spare_backup', imageUrl: 'https://x/spare_backup.jpg' }, // backup ของ circle แต่สะอาด ใช้แทน action ข้ามช่องได้
+  ];
+  const slots = mkSlots({
+    hero: { id: 'h1', backups: [] }, reaction: { id: 'r1', backups: [] },
+    action: { id: 'a1', backups: [] }, context: { id: 'c1', backups: [] }, circle: { id: 'ci1', backups: ['spare_backup'] },
+  });
+  const r = await _runSecondEye({
+    slots, activeSlots: ['hero', 'reaction', 'action', 'context', 'circle'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images }) => ({
+        results: images.map((_, i) => (i === 2
+          ? { index: 2, textFound: LONG_TEXT, faceBox: null, faceCount: 0, faceVisible: 0, duplicateOfIndex: null }
+          : { index: i, textFound: '', faceBox: null, faceCount: 0, faceVisible: 0, duplicateOfIndex: null }
+        )),
+      }),
+    },
+  });
+  assert.equal(slots.action.id, 'spare_backup', 'action ไม่มี backup ของตัวเอง แต่พูลรวมมี backup สะอาดของ circle → ต้องถูกแทนข้ามช่อง');
+  assert.equal(slots.circle.id, 'ci1', 'circle (เจ้าของ backup ที่ถูกยืมไปใช้) ต้องยังคงภาพเดิมของตัวเอง — ไม่ใช่สลับสองทาง (candidate เป็น backup ไม่ใช่ primary ของช่องอื่น)');
+  assert.equal(r.subSlotReplaced, 1);
+  assert.ok(!slots.action._secondEyeSubSlotFlag, 'แทนสำเร็จ = ไม่ติดธง');
+  const _allIds = ['hero', 'reaction', 'action', 'context', 'circle'].map((rr) => slots[rr].id);
+  assert.equal(new Set(_allIds).size, 5, `id ทั้ง 5 ช่องต้องไม่ซ้ำกันเลย (ได้ ${JSON.stringify(_allIds)})`);
+});
+
+await test('AC-0201 รอบ 2 (ค2): ช่องย่อย textOverlay≥2 แต่ไม่มี backup เลย → คงภาพเดิม + ติดธง subslot_text_overlay', async () => {
+  const LONG_TEXT = 'BREAKING NEWS HEADLINE BAR TEXT';
+  const records = [
+    { id: 'h1', imageUrl: 'https://x/h1.jpg' }, { id: 'r1', imageUrl: 'https://x/r1.jpg' },
+    { id: 'a1', imageUrl: 'https://x/a1.jpg' }, { id: 'c1', imageUrl: 'https://x/c1.jpg' }, { id: 'ci1', imageUrl: 'https://x/ci1.jpg' },
+  ];
+  const slots = mkSlots({
+    hero: { id: 'h1', backups: [] }, reaction: { id: 'r1', backups: [] },
+    action: { id: 'a1', backups: [] }, context: { id: 'c1', backups: [] }, circle: { id: 'ci1', backups: [] },
+  });
+  const r = await _runSecondEye({
+    slots, activeSlots: ['hero', 'reaction', 'action', 'context', 'circle'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images }) => ({
+        results: images.map((_, i) => (i === 2
+          ? { index: 2, textFound: LONG_TEXT, faceBox: null, faceCount: 0, faceVisible: 0, duplicateOfIndex: null }
+          : { index: i, textFound: '', faceBox: null, faceCount: 0, faceVisible: 0, duplicateOfIndex: null }
+        )),
+      }),
+    },
+  });
+  assert.equal(slots.action.id, 'a1');
+  assert.equal(r.subSlotReplaced, 0);
+  assert.equal(slots.action._secondEyeSubSlotFlag, 'subslot_text_overlay');
+});
+
+await test('AC-0201 รอบ 2 (ง): hero ใช้ backup ไปแล้วในนโยบาย hero แข็ง (pass 1) → นโยบายช่องย่อย (pass 2) ต้องไม่หยิบภาพเดียวกันซ้ำ แม้จะเป็น backup ตัวเดียวที่มีในพูล', async () => {
+  const LONG_TEXT = 'BREAKING NEWS HEADLINE BAR TEXT';
+  const records = [
+    { id: 'h_masked', imageUrl: 'https://x/h_masked.jpg' },
+    { id: 'r1', imageUrl: 'https://x/r1.jpg' },
+    { id: 'a_bad', imageUrl: 'https://x/a_bad.jpg' }, // text ฝังใหญ่ ไม่มี backup ของตัวเอง
+    { id: 'c1', imageUrl: 'https://x/c1.jpg' },
+    { id: 'ci1', imageUrl: 'https://x/ci1.jpg' },
+    { id: 'hero_backup', imageUrl: 'https://x/hero_backup.jpg' }, // backup ตัวเดียวในพูลทั้งหมด — hero ใช้ไปก่อน
+  ];
+  const slots = mkSlots({
+    hero: { id: 'h_masked', backups: ['hero_backup'] },
+    reaction: { id: 'r1', backups: [] },
+    action: { id: 'a_bad', backups: [] },
+    context: { id: 'c1', backups: [] },
+    circle: { id: 'ci1', backups: [] },
+  });
+  const r = await _runSecondEye({
+    slots, activeSlots: ['hero', 'reaction', 'action', 'context', 'circle'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images }) => ({
+        results: images.map((_, i) => {
+          if (i === 0) return { index: 0, textFound: '', faceBox: null, faceCount: 1, faceVisible: 1, duplicateOfIndex: null }; // hero: หน้าถูกบัง
+          if (i === 2) return { index: 2, textFound: LONG_TEXT, faceBox: null, faceCount: 0, faceVisible: 0, duplicateOfIndex: null }; // action: text ฝังใหญ่
+          if (i === 5) return { index: 5, textFound: '', faceBox: null, faceCount: 1, faceVisible: 2, sameAsHeroPerson: true, duplicateOfIndex: null }; // hero_backup: หน้าเต็ม คนเดียวกับ hero
+          return { index: i, textFound: '', faceBox: null, faceCount: 0, faceVisible: 0, duplicateOfIndex: null };
+        }),
+      }),
+    },
+  });
+  // hero ต้องสลับไปใช้ hero_backup สำเร็จก่อน (pass 1)
+  assert.equal(slots.hero.id, 'hero_backup', 'hero ต้องใช้ backup ตัวเดียวในพูลไปแล้ว');
+  // action ยังคง text ฝังใหญ่ — พูลไม่มี backup อื่นเหลือให้แทนเลย (ตัวเดียวถูก hero ใช้ไปแล้ว) → ต้องคงเดิม+ติดธง ไม่ใช่หยิบ hero_backup ซ้ำ
+  assert.equal(slots.action.id, 'a_bad', 'action ต้องไม่หยิบ hero_backup ซ้ำ (hero ใช้ไปแล้ว) — ต้องคงภาพเดิม');
+  assert.equal(slots.action._secondEyeSubSlotFlag, 'subslot_text_overlay', 'ไม่มี backup เหลือให้แทน (ตัวเดียวถูก hero ใช้ไปแล้ว) → ติดธง');
+  const _allIds = ['hero', 'reaction', 'action', 'context', 'circle'].map((rr) => slots[rr].id);
+  assert.equal(new Set(_allIds).size, 5, `id ทั้ง 5 ช่องต้องไม่ซ้ำกันเลย (ได้ ${JSON.stringify(_allIds)})`);
+});
+
+await test('AC-0201 รอบ 2 (จ): ทุกช่องดีอยู่แล้ว (ไม่มีช็อตซ้ำ ไม่มี text ทับใหญ่) → นโยบายช่องย่อย pass 2 ไม่ทำอะไรเลย (byte-parity — เทียบเท่า "ปิดสวิตช์" เมื่อไม่มีอะไรต้องแก้)', async () => {
+  const records = [
+    { id: 'h1', imageUrl: 'https://x/h1.jpg' }, { id: 'r1', imageUrl: 'https://x/r1.jpg' },
+    { id: 'a1', imageUrl: 'https://x/a1.jpg' }, { id: 'c1', imageUrl: 'https://x/c1.jpg' }, { id: 'ci1', imageUrl: 'https://x/ci1.jpg' },
+  ];
+  const slots = mkSlots({
+    hero: { id: 'h1', backups: [] }, reaction: { id: 'r1', backups: [] },
+    action: { id: 'a1', backups: [] }, context: { id: 'c1', backups: [] }, circle: { id: 'ci1', backups: [] },
+  });
+  const before = JSON.parse(JSON.stringify(slots));
+  const r = await _runSecondEye({
+    slots, activeSlots: ['hero', 'reaction', 'action', 'context', 'circle'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images }) => ({
+        results: images.map((_, i) => ({ index: i, textFound: '', faceBox: null, faceCount: 1, faceVisible: 2, sameAsHeroPerson: i === 0 ? undefined : false, duplicateOfIndex: null })),
+      }),
+    },
+  });
+  assert.equal(r.subSlotReplaced, 0, 'ไม่มีอะไรต้องแก้ → subSlotReplaced ต้องเป็น 0');
+  for (const role of ['hero', 'reaction', 'action', 'context', 'circle']) {
+    assert.equal(slots[role].id, before[role].id, `${role}.id ต้องไม่เปลี่ยนเลย`);
+    assert.ok(!slots[role]._secondEyeSubSlotFlag, `${role} ต้องไม่ติดธง sub-slot ใดๆ`);
+    assert.ok(!slots[role]._secondEyeSwapped, `${role} ต้องไม่มี record การสลับ`);
+  }
+});
+
 // ═══════════════════ 28 ก.ค. 69 — "หาวิธีให้ตาไม่โกหก" 5 กลไก: เทสเพิ่ม (ก)(ค) ═══════════════════
 
 await test('(ก) จับตาแรกโกหก → เรียก setTriage แก้คลังถาวรจริง (merge-safe: คงฟิลด์เดิม + clean:false + note มี textFound) พร้อม caseId', async () => {
