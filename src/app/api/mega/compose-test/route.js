@@ -179,7 +179,7 @@ export async function POST(req) {
     if (!frozen && QUICK_GAP_ON && poolResult.cleanCount < POOL_MIN_FLOOR) {
       try {
         const { s5_gapsearch } = await import('@/lib/megaAdapters');
-        const gapJob = { dossier: { images: { caseId, storyQueries }, compass, desk: { title: compass.angle } } };
+        const gapJob = { dossier: { images: { caseId, storyQueries }, compass, desk: { title: compass.angle, fullText: (fullText || '').slice(0, 1200) } } };
         const gapResult = await s5_gapsearch(gapJob, { origin });
         console.log(`[compose-test] 🔎 MEGA_QUICK_GAP: พูลสะอาด ${poolResult.cleanCount}/${POOL_MIN_FLOOR} ก่อนค้น — ${gapResult?.summary || '(ไม่มีสรุป)'}`);
         imgs = await readImages(caseId); // ★ re-fetch: gap-search เก็บภาพใหม่เข้าคลังเคสเดียวกันแล้ว (addImages)
@@ -242,7 +242,9 @@ export async function POST(req) {
       ref = m?.ref || refs[0];
     }
 
-    const job = { dossier: { images: { caseId, storyQueries }, compass, desk: { title: compass.angle } } };
+    // ★ 29 ก.ค. รอบ 4 (พิสูจน์จริง ref ไม่หมุนบนเส้น quick): เนื้อเต็มเคยใช้แค่ compassBrain แล้วทิ้ง — เก็บเข้า desk.fullText
+    //   (ช่องที่ fullNewsText() อ่านเป็น fallback อยู่แล้ว) ให้ inferRefCategory เห็นเนื้อจริง ไม่ใช่แค่ angle ภาษาอารมณ์
+    const job = { dossier: { images: { caseId, storyQueries }, compass, desk: { title: compass.angle, fullText: (fullText || '').slice(0, 1200) } } };
     if (ref) job.dossier.refMatch = { dna: ref.dna, styleName: ref.styleName || ref.id, imagePath: ref.imagePath, reason: 'เลือกในหน้าเทส', typeMatched: true };
 
     const { s6_slots } = await import('@/lib/megaAdapters');
