@@ -9,6 +9,8 @@ import dynamic from 'next/dynamic';
 // ★ 27 ก.ค. 69 (เจ้าของอนุมัติ — อัปเกรดแท็บโต๊ะข่าวให้ครบเท่าโต๊ะกลาง): +LIBRARIES/isClip/enrichDeskItem
 //   enrichDeskItem เติม library/sourceType/imageUrl/freshClass/reliability/editorial ให้ทุกใบฝั่ง client (API บาง tab ไม่ enrich มาให้)
 import { HARVEST_MODES, LIBRARIES, isClip, enrichDeskItem } from '@/lib/services/newsDesk/taxonomy';
+// ★ 28 ก.ค. 69 (แก้บั๊ก "มือถือค้างบันเดิลรุ่นเก่า"): เทียบรุ่นแอพนี้กับ mRev ที่ /api/m/cover ตอบมา — ต่างกันเตือนแตะรีโหลด
+import { M_APP_REV } from '@/lib/mAppRev';
 
 // เครื่องมือแต่งปกแมนวล — โหลดเฉพาะตอนเปิดแท็บ (ไฟล์หนัก ไม่ถ่วงจอแรก)
 const CoverEditor = dynamic(() => import('./CoverEditor'), {
@@ -300,6 +302,20 @@ export default function MobileApp() {
   const [cvActionBusyKey, setCvActionBusyKey] = useState(null); // e.g. `${jobId}:reroll` | `${jobId}:hero` | `${jobId}:ref` | `${jobId}:slot:${role}`
   // ★ 27 ก.ค. 69: คลังปกล่าสุด (โหมด auto/quick) — ต่อ /api/m/cover?view=archive (forward /api/mega-covers)
   const [cvArchive, setCvArchive] = useState([]);
+  // ★ 28 ก.ค. 69 (แก้บั๊ก "มือถือค้างบันเดิลรุ่นเก่า"): true = เซิร์ฟเวอร์ตอบ mRev ไม่ตรงกับ M_APP_REV ของตัวเอง → โชว์แบนเนอร์แตะรีโหลด
+  const [cvOutdated, setCvOutdated] = useState(false);
+  // ★ 28 ก.ค. 69 (แก้บั๊ก "เปิดแผงแล้วดูเหมือนไม่มีอะไรเกิด" — แผงโผล่ใต้จอที่มองไม่เห็น): ref เดียวใช้ร่วมกันได้เพราะ
+  //   แผงย่อย (slots/hero/ref) เปิดได้ทีละแผงเท่านั้น (cvActionJob/cvActionMode เป็น state เดี่ยว ไม่ใช่ต่อการ์ด)
+  const cvPanelRef = useRef(null);
+  const cvHeroInputRef = useRef(null);
+  useEffect(() => {
+    if (!cvActionJob || !cvActionMode) return;
+    const raf = requestAnimationFrame(() => {
+      cvPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      if (cvActionMode === 'hero') cvHeroInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [cvActionJob, cvActionMode]);
 
   // ── โต๊ะข่าว (v1) — ต่อท่อผ่านประตู /api/m/desk (เฉพาะแอดมิน) ──
   const [deskTab, setDeskTab] = useState('all'); // all | trend | good | shortlist | ready
@@ -365,6 +381,8 @@ export default function MobileApp() {
   }, []);
   const loadCovers = useCallback(() => {
     fetch('/api/m/cover', { cache: 'no-store' }).then(r => r.json()).then(d => {
+      // ★ 28 ก.ค. 69 (แก้บั๊ก "มือถือค้างบันเดิลรุ่นเก่า"): เช็คก่อน success — เซิร์ฟเวอร์รุ่นใหม่ตอบ mRev มาเสมอไม่ว่างานจะดึงสำเร็จไหม
+      if (d.mRev && d.mRev !== M_APP_REV) setCvOutdated(true);
       if (!d.success) return;
       const jobs = d.jobs || [];
       // ★ แก้บั๊ก (รีวิว 27 ก.ค. ค่ำ รอบ 2): งานจำลอง "frozen-…" (ปุ่มเปลี่ยนภาพรายช่อง) ไม่ผ่านคิวจริง —
@@ -825,6 +843,11 @@ export default function MobileApp() {
   // ★ แก้บั๊ก (รีวิว รอบ 4): say() ปกติหายใน 2.4 วิ — สั้นไปสำหรับข้อความ error จริงจาก API ที่ต้องอ่านทัน
   //   ใช้เฉพาะจุดนี้ (ไม่แตะ say() ตัวกลางที่จุดอื่นทั้งแอพพึ่งอยู่) ค้าง ~4 วิ
   const sayLong = (m, ms = 4000) => { setToast(m); setTimeout(() => setToast(''), ms); };
+  // ★ 28 ก.ค. 69 (แก้บั๊ก "กดปุ่มแก้ปกแล้วไม่มีอะไรเกิด"): ครอบทุก onClick ใน renderCoverActions ด้วยตัวนี้ —
+  //   จับทั้ง throw synchronous และ promise reject แล้ว sayLong เสมอ ห้ามมีทางเงียบแม้โค้ดในอนาคตพัง
+  const safeClick = (fn) => async (...args) => {
+    try { await fn(...args); } catch (e) { sayLong('ปุ่มขัดข้อง: ' + String(e && e.message || e)); }
+  };
   // ★ แก้บั๊ก (รีวิว รอบ 3 — งานเก่ากดปุ่มแล้ว "ไม่มีอะไรเกิด"): งานที่สร้างก่อนอัปเดตนี้ไม่มี r.caseId/r.imageCaseId ติดผลงาน
   //   (quick-test เพิ่งเริ่มเก็บให้ล่าสุด) แต่มี archivedId (compose)/archiveId (ref) ชี้เข้าคลัง /mega-covers ได้เสมอ
   //   (ก) เช็ค state คลังปกที่จอโหลดไว้แล้วก่อน (cvArchive) ฟรี ไม่ต้องยิง · (ข) ไม่เจอในจอ → เจาะถามเซิร์ฟเวอร์ใบเดียว (view=archive&id=)
@@ -1115,33 +1138,38 @@ export default function MobileApp() {
     return (
       <>
         <div className="row" style={{ marginTop: 8, flexWrap: 'wrap', gap: 6 }}>
-          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={busy} onClick={() => rerollCover(j)}>
+          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={busy} onClick={safeClick(() => rerollCover(j))}>
             {cvActionBusyKey === j.id + ':reroll' ? '⏳ กำลังทำ…' : '🎲 ประกอบใหม่ทั้งปก'}
           </button>
-          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={busy || !canSlots}
-            onClick={() => { const on = cvActionJob === j.id && cvActionMode === 'slots'; setCvActionJob(on ? null : j.id); setCvActionMode(on ? null : 'slots'); setCvSlotRole(null); if (!on && effCaseId) ensureCaseImages(effCaseId); }}>
+          {/* ★ แก้บั๊ก (รีวิว รอบ 5): เอา !canSlots ออกจาก disabled — เดิมกดไม่ได้แบบเงียบๆ เมื่องานมาจากท่อเต็ม (kind=ref ไม่เก็บ slotPlanUsed โดยดีไซน์)
+              ตอนนี้กดได้เสมอ (แค่ busy ปิด) แล้วเช็ค canSlots ข้างในแทน — ไม่พร้อมก็ยัง sayLong บอกเหตุผล+ทางแก้ ไม่เงียบ */}
+          <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={busy}
+            onClick={safeClick(() => {
+              if (!canSlots) { sayLong('ปกใบนี้มาจากท่อเต็ม — ไม่ได้เก็บผังช่องไว้ · กด "🎲 ประกอบใหม่ทั้งปก" ก่อน แล้วค่อยสลับภาพรายช่องจากใบใหม่'); return; }
+              const on = cvActionJob === j.id && cvActionMode === 'slots'; setCvActionJob(on ? null : j.id); setCvActionMode(on ? null : 'slots'); setCvSlotRole(null); if (!on && effCaseId) ensureCaseImages(effCaseId);
+            })}>
             🖼️ เปลี่ยนภาพรายช่อง
           </button>
           <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={busy}
-            onClick={() => { const on = cvActionJob === j.id && cvActionMode === 'hero'; setCvActionJob(on ? null : j.id); setCvActionMode(on ? null : 'hero'); setCvHeroName(''); }}>
+            onClick={safeClick(() => { const on = cvActionJob === j.id && cvActionMode === 'hero'; setCvActionJob(on ? null : j.id); setCvActionMode(on ? null : 'hero'); setCvHeroName(''); })}>
             👤 เปลี่ยนตัวเอก
           </button>
           <button className="gh" style={{ flex: '1 1 auto', minHeight: 44, fontSize: 12.5 }} disabled={busy}
-            onClick={() => { const on = cvActionJob === j.id && cvActionMode === 'ref'; setCvActionJob(on ? null : j.id); setCvActionMode(on ? null : 'ref'); if (!on && cvRefList === null) loadCvRefs(); }}>
+            onClick={safeClick(() => { const on = cvActionJob === j.id && cvActionMode === 'ref'; setCvActionJob(on ? null : j.id); setCvActionMode(on ? null : 'ref'); if (!on && cvRefList === null) loadCvRefs(); })}>
             🎨 เปลี่ยนต้นแบบ
           </button>
         </div>
-        {!canSlots && <p className="sub" style={{ marginTop: 4, fontSize: 11 }}>* &quot;เปลี่ยนภาพรายช่อง&quot; ใช้ได้เฉพาะปกที่ประกอบหลังอัปเดตนี้ (มีข้อมูลผังช่องเก็บไว้)</p>}
+        {!canSlots && <p className="sub" style={{ marginTop: 4, fontSize: 11 }}>* ปกใบนี้มาจากท่อเต็ม (kind=ref) — ไม่ได้เก็บผังช่องไว้ · แตะ &quot;🖼️ เปลี่ยนภาพรายช่อง&quot; จะเห็นเหตุผล + ทางแก้</p>}
 
         {cvActionJob === j.id && cvActionMode === 'slots' && (
-          <div style={{ marginTop: 8, padding: '10px 8px', border: '1px solid var(--line)', borderRadius: 12 }}>
+          <div ref={cvPanelRef} style={{ marginTop: 8, padding: '10px 8px', border: '1px solid var(--line)', borderRadius: 12 }}>
             <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
               {SLOT_ROLES.map(sr => {
                 const cur = (r.slotPlanUsed || []).find(e => e.slot === sr.key);
                 const on = cvSlotRole === sr.key;
                 return (
                   <button key={sr.key} className="gh" style={{ minHeight: 44, padding: '6px 10px', fontSize: 12, borderColor: on ? 'var(--pink)' : undefined, color: on ? 'var(--pink)' : undefined }}
-                    onClick={() => setCvSlotRole(sr.key)}>
+                    onClick={safeClick(() => setCvSlotRole(sr.key))}>
                     {cur?.url && <img src={cur.url} alt="" style={{ width: 22, height: 22, borderRadius: 5, objectFit: 'cover', verticalAlign: 'middle', marginRight: 5 }} />}
                     {sr.label}
                   </button>
@@ -1165,7 +1193,7 @@ export default function MobileApp() {
                       {imgs.map((im, i) => {
                         const isCurrent = !!curForRole?.url && curForRole.url === im.url;
                         return (
-                          <div key={im.id || im.url || i} onClick={() => { if (!busy) pickSlotImage(j, cvSlotRole, im.url); }} style={{ cursor: busy ? 'wait' : 'pointer' }}>
+                          <div key={im.id || im.url || i} onClick={safeClick(() => { if (!busy) return pickSlotImage(j, cvSlotRole, im.url); })} style={{ cursor: busy ? 'wait' : 'pointer' }}>
                             <img src={im.url} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
                               style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8, border: isCurrent ? '3px solid var(--pink)' : '1px solid var(--line)', display: 'block' }} />
                           </div>
@@ -1180,23 +1208,23 @@ export default function MobileApp() {
         )}
 
         {cvActionJob === j.id && cvActionMode === 'hero' && (
-          <div style={{ marginTop: 8, padding: '10px 8px', border: '1px solid var(--line)', borderRadius: 12 }}>
-            <input className="in" style={{ marginBottom: 8 }} value={cvHeroName} onChange={e => setCvHeroName(e.target.value)} placeholder="ชื่อตัวเอกคนใหม่…" />
-            <button className="cta" style={{ minHeight: 44 }} disabled={busy || !cvHeroName.trim()} onClick={() => sendHeroCover(j)}>
+          <div ref={cvPanelRef} style={{ marginTop: 8, padding: '10px 8px', border: '1px solid var(--line)', borderRadius: 12 }}>
+            <input ref={cvHeroInputRef} className="in" style={{ marginBottom: 8 }} value={cvHeroName} onChange={e => setCvHeroName(e.target.value)} placeholder="ชื่อตัวเอกคนใหม่…" autoFocus />
+            <button className="cta" style={{ minHeight: 44 }} disabled={busy || !cvHeroName.trim()} onClick={safeClick(() => sendHeroCover(j))}>
               {cvActionBusyKey === j.id + ':hero' ? '⏳ กำลังส่ง…' : '✅ ประกอบใหม่ด้วยตัวเอกนี้'}
             </button>
           </div>
         )}
 
         {cvActionJob === j.id && cvActionMode === 'ref' && (
-          <div style={{ marginTop: 8, padding: '10px 8px', border: '1px solid var(--line)', borderRadius: 12 }}>
-            <button className="gh" style={{ minHeight: 44, marginBottom: 8 }} disabled={busy || !cvRefList?.length} onClick={() => pickRandomRef(j)}>
+          <div ref={cvPanelRef} style={{ marginTop: 8, padding: '10px 8px', border: '1px solid var(--line)', borderRadius: 12 }}>
+            <button className="gh" style={{ minHeight: 44, marginBottom: 8 }} disabled={busy || !cvRefList?.length} onClick={safeClick(() => pickRandomRef(j))}>
               {cvActionBusyKey === j.id + ':ref' ? '⏳ กำลังส่ง…' : '🎲 สุ่มต้นแบบ'}
             </button>
             {cvRefList === null && <p className="sub">⏳ กำลังโหลดรายชื่อต้นแบบ…</p>}
             {Array.isArray(cvRefList) && cvRefList.length === 0 && <p className="sub">ยังไม่มีต้นแบบในคลัง</p>}
             {Array.isArray(cvRefList) && cvRefList.map(ref => (
-              <div key={ref.id} className="job" style={{ marginBottom: 6, opacity: busy ? 0.55 : 1 }} onClick={() => { if (!busy) sendRefCover(j, ref.id); }}>
+              <div key={ref.id} className="job" style={{ marginBottom: 6, opacity: busy ? 0.55 : 1 }} onClick={safeClick(() => { if (!busy) return sendRefCover(j, ref.id); })}>
                 <span className="ava">🎨</span>
                 <div style={{ overflow: 'hidden' }}>
                   <p className="tt" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ref.title || ref.styleName}</p>
@@ -1580,6 +1608,12 @@ export default function MobileApp() {
       {/* ═══ แท็บ ทำปก ═══ */}
       {tab === 'cover' && <div className="wrap">
         <h1>ทำปก</h1>
+        {/* ★ 28 ก.ค. 69 (แก้บั๊ก "มือถือค้างบันเดิลรุ่นเก่า"): mRev จากเซิร์ฟเวอร์ไม่ตรงกับ M_APP_REV ของตัวเอง — แตะรีโหลดหน้าทันที */}
+        {cvOutdated && (
+          <button className="cta" style={{ marginBottom: 12, background: 'linear-gradient(135deg,#f59e0b,#d97706)' }} onClick={() => window.location.reload()}>
+            📦 แอพรุ่นใหม่ออกแล้ว — แตะที่นี่เพื่อโหลดใหม่
+          </button>
+        )}
         {/* ★ 27 ก.ค. 69 (เจ้าของสั่ง): แถวสลับโหมดเฉพาะแอดมิน — พนักงานไม่เห็นแถวปุ่มเลย เห็นแค่โหมดแต่งเอง */}
         {isAdmin && <div className="seg" style={{ marginBottom: 12 }}>
           <button className={cvMode === 'manual' ? 'on' : ''} onClick={() => setCvMode('manual')}>✋ แต่งเอง</button>
@@ -1611,7 +1645,7 @@ export default function MobileApp() {
         {cvErr && <div className="err">{cvErr}</div>}
         <button className="cta" disabled={cvBusy} onClick={submitCover}>{cvBusy ? 'กำลังส่ง…' : 'ทำปก — เข้าคิวจริง รันเบื้องหลัง'}</button>
 
-        <h2>งานปกล่าสุด</h2>
+        <h2>งานปกล่าสุด <span style={{ fontSize: 10, color: 'var(--mut)', fontWeight: 400, letterSpacing: 0 }}>{M_APP_REV}</span></h2>
         {cvJobs.length === 0 && <p className="sub">ยังไม่มีงานปก</p>}
         {cvJobs.map(j => {
           const r = j.result || {};
@@ -1702,7 +1736,7 @@ export default function MobileApp() {
         {cvErr && <div className="err">{cvErr}</div>}
         <button className="cta" disabled={!qcSel || qcBusy} onClick={submitQuickCover}>{qcBusy ? 'กำลังส่ง…' : '⚡ ประกอบปก — เข้าคิว รันเบื้องหลัง'}</button>
 
-        <h2>งานปกล่าสุด</h2>
+        <h2>งานปกล่าสุด <span style={{ fontSize: 10, color: 'var(--mut)', fontWeight: 400, letterSpacing: 0 }}>{M_APP_REV}</span></h2>
         {cvJobs.length === 0 && <p className="sub">ยังไม่มีงานปก</p>}
         {cvJobs.map(j => {
           const r = j.result || {};

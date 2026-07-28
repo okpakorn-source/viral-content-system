@@ -23,6 +23,7 @@ import { cookies } from 'next/headers';
 import { getSession } from '@/lib/auth';
 import { listMegaCovers } from '@/lib/megaCoverArchive'; // ★ 27 ก.ค. 69 (sol-review ข้อ 6): เลิก hop HTTP ไป /api/mega-covers
 import { readImages } from '@/lib/imageStore'; // ★ "ช่องเคส" (27 ก.ค. 69) — view=caseImages ใช้คลังรูปเดิมเป๊ะ (ตัวเดียวกับ /api/images/[id] + compose-test) ไม่สร้างที่เก็บใหม่
+import { M_APP_REV } from '@/lib/mAppRev'; // ★ 28 ก.ค. 69 (แก้บั๊ก "มือถือค้างบันเดิลรุ่นเก่า"): แนบรุ่นแอพให้ /m เทียบ+เตือนรีโหลดเอง
 
 async function sess() {
   try {
@@ -129,7 +130,8 @@ export async function GET(request) {
       headers: keyHeaders(), cache: 'no-store', signal: AbortSignal.timeout(20000),
     });
     const d = await r.json();
-    return NextResponse.json(d, { status: r.status });
+    // ★ 28 ก.ค. 69: แนบรุ่นแอพปัจจุบันติด payload งานปก — /m เทียบกับ M_APP_REV ของตัวเอง ต่างกัน = บันเดิลมือถือค้างรุ่นเก่า
+    return NextResponse.json({ ...d, mRev: M_APP_REV }, { status: r.status });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message, errorType: 'M_COVER_ERROR' }, { status: 500 });
   }

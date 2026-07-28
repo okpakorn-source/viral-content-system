@@ -198,6 +198,176 @@ await test('fetchImageB64 ล้มบางใบ (URL โหลดไม่ไ
   assert.deepEqual(slots.reaction._secondEyeFaceBox, { x1: 0.2, y1: 0.2, x2: 0.4, y2: 0.4 }, 'reaction โหลดสำเร็จ → ยังได้ผลปกติ');
 });
 
+// ═══════════════════ 28 ก.ค. 69 — เคสไรเดอร์ (ผู้ใช้เทียบ ref จริง): faceVisible + นโยบาย hero แข็ง ═══════════════════
+// hero=หมวก+หน้ากาก+text ยักษ์ ทั้งที่ภาพหน้าจริงอยู่ในพูล — ตาสองต้องบังคับสลับหา candidate ที่ faceVisible=2 +
+// textOverlay≤1 + เป็นคนเดียวกับ hero เดิม (sameAsHeroPerson) เจอ=สลับทันที · ไม่เจอ=คงเดิม+ติดธง · เดิม(หน้าเต็มอยู่แล้ว)=ไม่ยุ่ง
+
+await test('เคสไรเดอร์ (ก) hero ใส่หมวก/หน้ากาก (faceVisible=1) + มี candidate หน้าเต็มคนเดียวกันในพูล (backup: faceVisible=2, textOverlay≤1, sameAsHeroPerson=true) → สลับจริง', async () => {
+  const records = [
+    { id: 'h_helmet', imageUrl: 'https://x/h_helmet.jpg', triage: { person: 'ไรเดอร์เอ' } },
+    { id: 'h_realface', imageUrl: 'https://x/h_realface.jpg', triage: { person: 'ไรเดอร์เอ' } },
+  ];
+  const slots = mkSlots({ hero: { id: 'h_helmet', backups: ['h_realface'], person: 'ไรเดอร์เอ' } });
+  const r = await _runSecondEye({
+    slots, activeSlots: ['hero'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images }) => ({
+        // index 0 = hero (h_helmet): หน้ากากบัง เห็นแค่ตา = faceVisible 1, ไม่มี text
+        // index 1 = backup (h_realface): หน้าเต็มชัด คนเดียวกับ hero
+        results: images.map((_, i) => (i === 0
+          ? { index: 0, textFound: '', faceBox: { x1: 0.3, y1: 0.1, x2: 0.6, y2: 0.4 }, faceCount: 1, faceVisible: 1 }
+          : { index: 1, textFound: '', faceBox: { x1: 0.2, y1: 0.1, x2: 0.7, y2: 0.6 }, faceCount: 1, faceVisible: 2, sameAsHeroPerson: true }
+        )),
+      }),
+    },
+  });
+  assert.equal(slots.hero.id, 'h_realface', 'hero ต้องสลับไปใช้ภาพหน้าเต็มของคนเดียวกัน');
+  assert.ok(r.swapped >= 1, 'ต้องนับเป็นการสลับ');
+  assert.ok(slots.hero._secondEyeSwapped && slots.hero._secondEyeSwapped.reason.includes('hero_face_hidden_forced_replace'), 'ต้องบันทึกเหตุผลว่าบังคับสลับเพราะ hero หน้าไม่ชัด');
+  assert.ok(!slots.hero._secondEyeHeroFaceHidden, 'สลับสำเร็จ = ไม่ติดธงจำใจใช้');
+  assert.deepEqual(slots.hero._secondEyeFaceBox, { x1: 0.2, y1: 0.1, x2: 0.7, y2: 0.6 }, 'faceBox override ต้องเป็นของภาพใหม่ (หน้าเต็ม)');
+});
+
+await test('เคสไรเดอร์ (ข) hero ใส่หมวก (faceVisible=1) แต่ไม่มี candidate ที่ผ่านเกณฑ์ครบ (คนละคน) → คงภาพเดิม + ติดธง hero_face_hidden พร้อมเหตุผล', async () => {
+  const records = [
+    { id: 'h_helmet', imageUrl: 'https://x/h_helmet.jpg', triage: { person: 'ไรเดอร์เอ' } },
+    { id: 'other_face', imageUrl: 'https://x/other_face.jpg', triage: { person: 'คนอื่น' } },
+  ];
+  const slots = mkSlots({ hero: { id: 'h_helmet', backups: ['other_face'], person: 'ไรเดอร์เอ' } });
+  const r = await _runSecondEye({
+    slots, activeSlots: ['hero'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images }) => ({
+        results: images.map((_, i) => (i === 0
+          // faceCount:1 (มีคนอยู่แน่ๆ นับได้ 1 คน) แต่ faceVisible:1 (หมวก/หน้ากากบังจนเห็นแค่บางส่วน) — คนละ
+          // เรื่องกับ "ปกไร้คน" (ข้อ 3 ผู้ตรวจ Opus ใหม่) ที่ faceCount ต้องเป็น 0 จริงๆ (ไม่มีคนในเฟรมเลย)
+          ? { index: 0, textFound: '', faceBox: null, faceCount: 1, faceVisible: 1 }
+          // หน้าเต็มจริง แต่ "คนละคน" กับ hero — ไม่ผ่านเกณฑ์ sameAsHeroPerson
+          : { index: 1, textFound: '', faceBox: { x1: 0.2, y1: 0.1, x2: 0.7, y2: 0.6 }, faceCount: 1, faceVisible: 2, sameAsHeroPerson: false }
+        )),
+      }),
+    },
+  });
+  assert.equal(slots.hero.id, 'h_helmet', 'ไม่มี candidate ที่ผ่านเกณฑ์ครบ (คนละคน) → ต้องคงภาพเดิม');
+  assert.equal(r.swapped, 0);
+  assert.ok(slots.hero._secondEyeHeroFaceHidden, 'ต้องติดธงจำใจใช้ hero หน้าไม่ชัด');
+  assert.equal(slots.hero._secondEyeHeroFaceHidden.faceVisible, 1);
+  assert.equal(slots.hero._secondEyeHeroFaceHidden.reason, 'no_qualifying_replacement_found_in_checked_pool');
+});
+
+await test('เคสไรเดอร์ (ค) hero หน้าเต็มชัดอยู่แล้ว (faceVisible=2, textOverlay=0) → นโยบายแข็งไม่ทำงานเลย (เทียบเท่า "ปิดสวิตช์" สำหรับ hero ที่ไม่มีปัญหา) — ไม่สลับ ไม่ติดธง', async () => {
+  const records = [{ id: 'h_good', imageUrl: 'https://x/h_good.jpg' }, { id: 'h_backup', imageUrl: 'https://x/h_backup.jpg' }];
+  const slots = mkSlots({ hero: { id: 'h_good', backups: ['h_backup'] } });
+  const r = await _runSecondEye({
+    slots, activeSlots: ['hero'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images }) => ({
+        results: images.map((_, i) => (i === 0
+          ? { index: 0, textFound: '', faceBox: { x1: 0.2, y1: 0.1, x2: 0.7, y2: 0.6 }, faceCount: 1, faceVisible: 2 }
+          : { index: 1, textFound: '', faceBox: { x1: 0.2, y1: 0.1, x2: 0.7, y2: 0.6 }, faceCount: 1, faceVisible: 2, sameAsHeroPerson: true }
+        )),
+      }),
+    },
+  });
+  assert.equal(slots.hero.id, 'h_good', 'hero หน้าเต็มอยู่แล้ว → ไม่ต้องสลับแม้มี candidate ที่ผ่านเกณฑ์ก็ตาม');
+  assert.equal(r.swapped, 0);
+  assert.ok(!slots.hero._secondEyeHeroFaceHidden, 'ไม่มีปัญหา → ไม่ติดธง');
+  assert.ok(!slots.hero._secondEyeSwapped, 'ไม่มีปัญหา → ไม่มี record การสลับ');
+});
+
+await test('เคสไรเดอร์: sameAsHeroPerson/faceVisible รูปแบบพัง (ไม่ใช่ boolean/ไม่ใช่ 0-2) → validate เป็น null ไม่เชื่อ (fail-safe เหมือน faceBox)', async () => {
+  const records = [{ id: 'h1', imageUrl: 'https://x/h1.jpg' }, { id: 'h1b', imageUrl: 'https://x/h1b.jpg' }];
+  const slots = mkSlots({ hero: { id: 'h1', backups: ['h1b'] } });
+  await _runSecondEye({
+    slots, activeSlots: ['hero'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images }) => ({
+        results: images.map((_, i) => (i === 0
+          ? { index: 0, textFound: '', faceBox: null, faceCount: 0, faceVisible: 'ต่ำ' } // ผิดชนิด
+          : { index: 1, textFound: '', faceBox: { x1: 0.2, y1: 0.1, x2: 0.7, y2: 0.6 }, faceCount: 1, faceVisible: 2, sameAsHeroPerson: 'ใช่' } // ผิดชนิด (ไม่ใช่ boolean)
+        )),
+      }),
+    },
+  });
+  // faceVisible พังรูปแบบ → null → badFace ไม่ true (faceVisible !== null && ... เป็น false เพราะเป็น null) → ไม่เข้าเงื่อนไข
+  // แต่ sameAsHeroPerson พังรูปแบบของ backup → null ≠ true → ถ้า badFace/badText true อยู่ก็ยังไม่ควรสลับเพราะ candidate ไม่ผ่าน
+  assert.equal(slots.hero.id, 'h1', 'ค่าพังรูปแบบต้องไม่ทำให้สลับผิดพลาด');
+  assert.ok(!slots.hero._secondEyeSwapped);
+});
+
+// ═══════ 28 ก.ค. 69 — ผู้ตรวจ (Opus) FAIL: candidate เป็น primary ของช่องอื่น → ต้อง "สลับสองทาง" ═══════
+// บั๊กที่พบจริงจากรัน: บล็อกบังคับสลับ hero เดิมเขียนทับแค่ slots.hero → ถ้า candidate ดันเป็น primary ของช่องอื่น
+// (เคสไรเดอร์จริง: ภาพหน้าเต็มเป็น primary ของช่องล่าง ไม่ใช่ backup ของ hero) จะได้ภาพเดียวกันขึ้น 2 ช่อง เพราะ
+// บล็อกนี้อยู่ท้าย s6_slots หลังด่านกันซ้ำผ่านหมดแล้ว ไม่มีใครมาจับซ้ำอีกที
+
+await test('เคสไรเดอร์ (ผู้ตรวจ Opus ก) candidate เป็น primary ของช่องอื่น (ไม่ใช่ backup ของ hero) → สลับสองทาง: hero ได้ภาพใหม่ + ช่องนั้นได้ภาพ hero เดิมกลับไป + id ทั้ง 5 ช่องไม่ซ้ำกันเลย', async () => {
+  const records = [
+    { id: 'h_helmet', imageUrl: 'https://x/h_helmet.jpg', triage: { person: 'ไรเดอร์เอ' } },
+    { id: 'ctx_realface', imageUrl: 'https://x/ctx_realface.jpg', triage: { person: 'ไรเดอร์เอ' } }, // primary ของช่อง context จริงๆ (ไม่ใช่ backup ของ hero)
+    { id: 'r1', imageUrl: 'https://x/r1.jpg' },
+    { id: 'a1', imageUrl: 'https://x/a1.jpg' },
+    { id: 'c1', imageUrl: 'https://x/c1.jpg' },
+  ];
+  // ★ imageUrl ต้องแนบมาด้วยเสมอ (production จริง s6_slots เซ็ตให้ทุกช่องอยู่แล้ว) — จำเป็นเฉพาะเทสนี้ที่ path
+  //   สลับสองทางอ่าน slots.hero.imageUrl ตรงๆ ก่อนเขียนทับ (เทสอื่นก่อนหน้าไม่ต้องมีเพราะ donorRole เป็น null เสมอ)
+  const slots = mkSlots({
+    hero: { id: 'h_helmet', imageUrl: 'https://x/h_helmet.jpg', backups: [], person: 'ไรเดอร์เอ' },
+    reaction: { id: 'r1', imageUrl: 'https://x/r1.jpg', backups: [] },
+    action: { id: 'a1', imageUrl: 'https://x/a1.jpg', backups: [] },
+    context: { id: 'ctx_realface', imageUrl: 'https://x/ctx_realface.jpg', backups: [], person: 'ไรเดอร์เอ' },
+    circle: { id: 'c1', imageUrl: 'https://x/c1.jpg', backups: [] },
+  });
+  const r = await _runSecondEye({
+    slots, activeSlots: ['hero', 'reaction', 'action', 'context', 'circle'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images }) => ({
+        results: images.map((_, i) => {
+          if (i === 0) return { index: 0, textFound: '', faceBox: { x1: 0.3, y1: 0.1, x2: 0.6, y2: 0.4 }, faceCount: 1, faceVisible: 1 }; // hero: หมวกบัง
+          if (i === 3) return { index: 3, textFound: '', faceBox: { x1: 0.2, y1: 0.1, x2: 0.7, y2: 0.6 }, faceCount: 1, faceVisible: 2, sameAsHeroPerson: true }; // context primary: หน้าเต็ม คนเดียวกับ hero
+          return { index: i, textFound: '', faceBox: null, faceCount: 0, faceVisible: 0, sameAsHeroPerson: false };
+        }),
+      }),
+    },
+  });
+  assert.equal(slots.hero.id, 'ctx_realface', 'hero ต้องได้ภาพหน้าเต็มจากช่อง context');
+  assert.equal(slots.context.id, 'h_helmet', 'ช่อง context (เจ้าของ candidate เดิม) ต้องได้ภาพ hero เดิม (หมวก) กลับไปแทน — ห้ามว่าง/ห้ามซ้ำ');
+  assert.equal(slots.hero.imageUrl, 'https://x/ctx_realface.jpg');
+  assert.equal(slots.context.imageUrl, 'https://x/h_helmet.jpg');
+  assert.ok(slots.hero._secondEyeSwapped?.reason.includes('two_way_swap_with:context'), 'ต้องบันทึกว่าสลับสองทางกับช่องไหน');
+  assert.ok(slots.context._secondEyeSwapped?.reason.includes('two_way_swap_with_hero'), 'ช่อง context ต้องบันทึกว่ารับภาพ hero เดิมมา');
+  assert.deepEqual(slots.context._secondEyeFaceBox, { x1: 0.3, y1: 0.1, x2: 0.6, y2: 0.4 }, 'ช่อง context ต้องได้ faceBox ของภาพ hero เดิม (ไม่ใช่ค่าเก่าของตัวเอง)');
+  const _allIds = ['hero', 'reaction', 'action', 'context', 'circle'].map((rr) => slots[rr].id);
+  assert.equal(new Set(_allIds).size, 5, `id ทั้ง 5 ช่องต้องไม่ซ้ำกันเลย (ได้ ${JSON.stringify(_allIds)})`);
+  assert.equal(r.swapped, 1);
+});
+
+await test('เคสไรเดอร์ (ผู้ตรวจ Opus ข) ปกไร้คน (hero faceCount=0 + ไม่มีใบไหนในพูล sameAsHeroPerson=true) → ข้ามนโยบายบังคับสลับทั้งก้อน ไม่สลับ ไม่ติดธง hero_face_hidden', async () => {
+  const records = [
+    { id: 'h_object', imageUrl: 'https://x/h_object.jpg' }, // hero = ภาพวัตถุ/สถานที่ ไม่มีคนเลย
+    { id: 'ctx_thing', imageUrl: 'https://x/ctx_thing.jpg' },
+  ];
+  const slots = mkSlots({ hero: { id: 'h_object', backups: [] }, context: { id: 'ctx_thing', backups: [] } });
+  const r = await _runSecondEye({
+    slots, activeSlots: ['hero', 'context'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images }) => ({
+        // ทั้งคู่ไม่มีหน้าเลย + ไม่มีใบไหนตอบ sameAsHeroPerson=true (ไม่ใช่เรื่องคนตั้งแต่ต้น)
+        results: images.map((_, i) => ({ index: i, textFound: '', faceBox: null, faceCount: 0, faceVisible: 0, sameAsHeroPerson: false })),
+      }),
+    },
+  });
+  assert.equal(slots.hero.id, 'h_object', 'ปกไร้คน — hero ต้องไม่ถูกสลับแม้ faceVisible=0 (ตรงเงื่อนไข badFace) ก็ตาม');
+  assert.equal(r.swapped, 0);
+  assert.ok(!slots.hero._secondEyeHeroFaceHidden, 'ปกไร้คน — ต้องไม่ติดธง hero_face_hidden (ไม่ใช่ปัญหาหน้าคนไม่ชัด แต่ไม่มีคนตั้งแต่ต้น)');
+  assert.ok(!slots.context._secondEyeSwapped, 'context ต้องไม่ถูกแตะเลย');
+});
+
 // ═══════════════════ 28 ก.ค. 69 — "หาวิธีให้ตาไม่โกหก" 5 กลไก: เทสเพิ่ม (ก)(ค) ═══════════════════
 
 await test('(ก) จับตาแรกโกหก → เรียก setTriage แก้คลังถาวรจริง (merge-safe: คงฟิลด์เดิม + clean:false + note มี textFound) พร้อม caseId', async () => {

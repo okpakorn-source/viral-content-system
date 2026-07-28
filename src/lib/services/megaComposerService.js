@@ -926,6 +926,11 @@ function _strictPrepareV1({ decision, carrier, slotPlan }) {
       refSlotId: s.refSlotId,
       candidateId: s.primary.candidateId,
       imageUrl: s.primary.imageUrl, // fetch ใช้ค่านี้เท่านั้น
+      // ★ TODO (28 ก.ค. 69, เคสไรเดอร์ — ผู้ตรวจ Opus ข้อ 4): ก่อนเปิด strict/V2 จริง ต้องเติม
+      //   _secondEyeHeroFaceHidden (+ _secondEyeFaceBox) เข้า allowlist นี้ด้วย — ตอนนี้ยังไม่มี ⇒ MEGA_SECOND_EYE
+      //   (ทั้ง faceBox override และ qcFlag 'hero_face_hidden') ใช้ไม่ได้ผลเลยในสายนี้ (loaded[i] คัด field แบบ
+      //   allowlist ไม่ spread ทั้งก้อนเหมือน legacy composeCore) — ติดตามที่ task "Wire _secondEyeFaceBox/
+      //   _secondEyeHeroFaceHidden into strict compose path" (spawn_task เคสไรเดอร์)
       meta: Object.freeze({
         slot: m.slot != null ? String(m.slot) : null,
         person: m.person != null ? String(m.person) : null,
@@ -1023,6 +1028,8 @@ function _strictPrepareV2({ decision, slotPlan }) {
       personId: s.primary.personId,
       imageUrl: url, // fetch ใช้ค่านี้เท่านั้น (จาก authority — ไม่ใช่ plan)
       borderColor: s.render.border === true ? '#FFFFFF' : null,
+      // ★ TODO (28 ก.ค. 69, เคสไรเดอร์ — ผู้ตรวจ Opus ข้อ 4): ก่อนเปิด strict/V2 จริง ต้องเติม
+      //   _secondEyeHeroFaceHidden (+ _secondEyeFaceBox) เข้า allowlist นี้ด้วย (เหมือน TODO ที่ V1 block ด้านบน)
       meta: Object.freeze({
         slot: m && m.slot != null ? String(m.slot) : null,
         person: s.primary.personId != null ? String(s.primary.personId) : (m && m.person != null ? String(m.person) : null),
@@ -1470,6 +1477,12 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
   }
   console.log(`[MegaComposer] โครง: ${spec.id} (${spec.slots.length} ช่อง) · ${spec.canvasW}x${spec.canvasH}`);
   if (spec?._featherCapped) qcFlags.push('feather_capped'); // ★ เฟส 3.5: DNA รายงาน featherPx เกิน 8 → ถูก cap
+  // ★ เคสไรเดอร์ (28 ก.ค. 69, เจ้าของเทียบ ref จริง — hero=หมวก+หน้ากาก+text ยักษ์): นโยบาย hero แข็งข้อ 2 (ตาสอง
+  //   S6) หาภาพแทนที่ไม่เจอในพูล → slots.hero._secondEyeHeroFaceHidden ถูกแนบไว้ (megaAdapters.js) → ต่อสายผ่าน
+  //   slotPlan row → loaded[i] (สืบทอดอัตโนมัติจาก {...p,...} spread ด้านบน) → ยกเป็น qcFlag ให้เห็นตอน QC จริง
+  //   (เหมือนแพทเทิร์น spec._featherCapped → 'feather_capped' บรรทัดบนเป๊ะ)
+  const _heroRowRider = loaded.find((im) => im?.isHero);
+  if (_heroRowRider?._secondEyeHeroFaceHidden) qcFlags.push('hero_face_hidden');
   // ★ เฟส 6B.3 (10 ก.ค.): ส่ง "เป้าหน้าเด่น" (faceSizePct จาก ref DNA) ต่อช่องให้ executor —
   //   executor ใช้เป็น "ขั้นต่ำที่ต้องบังคับ" (ไม่ใช่แค่ hint) โดยมี cap ความปลอดภัยของมันเอง กันซูมแน่นเกิน/หัวขาด
   //   refSlotMeta เป็น 1:1 กับ spec.slots เสมอเมื่อไม่ null (map ในบล็อก ref ด้านบน) · _faceProm ปิด = ไม่ส่ง (พฤติกรรมเดิม)
