@@ -10,6 +10,31 @@ import { refPoolGateOpen, computeTemplateGrade } from '@/lib/refCoverGrade';
 
 const norm = (s) => String(s || '').toLowerCase().trim();
 
+// ★ 29 ก.ค. 69 (เจ้าของถาม "ทำไม ref template ไม่เคยเปลี่ยน" — สืบพบ 2 ชั้น: (1) ref เพจจริง 20 ใบ ติดป้าย
+//   matchNewsType เป็น tag ทั่วไป (human-interest/ครอบครัว-ดราม่า/กตัญญู/สูญเสีย ฯลฯ) ไม่ใช่คำใน "11 หมวด" ของ
+//   คัมภีร์ v3 (coverPagePlaybook.js 【ช. สูตรรายหมวด】) เลย → substring match กับ signals.text (angle+
+//   secondaryEmotions) แทบไม่ตรงเป๊ะ (2) signals ที่ส่งเข้า pickBestRef ตอน compose (megaAdapters.js) ไม่เคยมี
+//   "หมวดเคส" เลยด้วยซ้ำ — มีแต่ compass.angle/secondaryEmotions ซึ่งเป็นประโยคเล่าเรื่อง ไม่ใช่คำหมวดตรงๆ):
+//   สะพานคำศัพท์ "หมวดเคสข่าว (DESK_CATEGORIES, deskBrain.js)" → "หมวด ref/คัมภีร์ v3" (สูตรรายหมวด) — สอง
+//   vocabulary คนละชุดกันไม่ตรง 1:1 จับคู่ได้เฉพาะที่ความหมายตรงจริง เหลือ→ปล่อยว่าง (signals.text เดิมจาก
+//   angle/emotion ยังทำงานคู่ขนานต่อไป ไม่ตัดทางเดิม) · ★ ไม่ import DESK_CATEGORIES ตรงๆ จาก deskBrain.js
+//   (กัน circular import ข้ามโดเมน desk↔cover — เกิน scope) คีย์เป็น literal string เดียวกันเป๊ะ พังไม่ crash
+//   แค่ mapping จะไม่ตรงถ้าแหล่งเปลี่ยนชื่อหมวด (fail-safe เดียวกับแพทเทิร์นทั่วทั้งไฟล์นี้)
+export const DESK_TO_REF_CATEGORY = {
+  'น้ำใจ/ช่วยเหลือ': 'น้ำใจคนธรรมดา',
+  'กตัญญู/ครอบครัวอบอุ่น': 'กตัญญู',
+  'สู้ชีวิต': 'สู้ชีวิต',
+  'คนดังทำดี/ติดดิน': 'น้ำใจคนดัง',
+  'ความรัก/แต่งงาน': 'ความรักคู่',
+  'ดราม่าสังคม': 'ความยุติธรรม',
+  'อาชญากรรม/คดีดัง': 'ความยุติธรรม',
+};
+
+/** แปล "หมวดเคสข่าว" (เช่น job.dossier.desk.category) → "หมวด ref คัมภีร์ v3" — ไม่ตรง/ไม่มี = '' (ไม่เติม) */
+export function refCategoryHint(deskCategory) {
+  return DESK_TO_REF_CATEGORY[String(deskCategory || '').trim()] || '';
+}
+
 // ★ 19 ก.ค. (เคสเป็กกี้ REF-mrraukej-6ky5 grade C ถูกเลือก → ปกวงกลมล้น/hero ยืด — pickBestRef เดิม
 //   ไม่ถ่วงน้ำหนัก fidelity/geometry เลย): โบนัสคะแนนตาม "grade" ปัจจุบันของ ref (recompute ผ่าน
 //   computeTemplateGrade รวม R6 human-verified floor เสมอ — ไม่ใช้เกรดค้างที่ persist ไว้)
@@ -65,6 +90,16 @@ export async function pickBestRef(signals = {}, opts = {}) {
 
   const emo = norm(signals.emotion);
   const hay = norm(`${signals.emotion || ''} ${signals.text || ''}`);
+  // ★ 29 ก.ค. 69 (Opus ตรวจแบตช์ ref-category-rotation รอบ 2 — FAIL): matchNewsType เดิมให้ +3 เท่ากันหมดไม่ว่า
+  //   ตรงทั้งป้ายหรือแค่บางส่วน (substring/fragment) — ป้ายรวม/กว้าง (เช่น "น้ำใจ") ยุบรวมแมตช์กับเคสที่ควรตรง
+  //   ป้ายเจาะจงกว่า (เช่น "น้ำใจคนดัง") เพราะเป็น substring ของกันและกัน · เช่นเดียวกัน "ความรักคู่" กับ
+  //   "ความรักครอบครัว" ชนกันได้ผ่าน tag ทั่วไปอื่น (เช่น "ความรัก") ที่ ref บางใบพกมาด้วย — แก้: แยก 2 ระดับ
+  //   "เป๊ะ" (ป้ายทั้งก้อน = "คำ/วลี" ที่แยกด้วยช่องว่างได้ใน hay พอดี — เคสของจริงคือ category hint จาก
+  //   refCategoryHint() ที่ต่อเข้า signals.text เป็นชิ้นแยกด้วยช่องว่างเสมอ) = +3 ต่างจาก "แค่ substring ฝังอยู่ใน
+  //   ประโยคยาว" (สัญญาณอ่อนกว่า ไม่น่าเชื่อเท่า) = +1 · ใต้ env ใหม่ MEGA_REF_TAG_EXACT default ON —
+  //   ==='0' → พฤติกรรมเดิมทุก byte (+3 เท่ากันทั้งสองกรณี ไม่แยกระดับ)
+  const _tagExactOn = process.env.MEGA_REF_TAG_EXACT !== '0';
+  const hayTokens = hay.split(/\s+/).filter(Boolean);
   const cc = Number(signals.charCount) || 0;
   // ★ ช็อตที่ "ข่าวต้องมี" (จากเนื้อเต็ม → compass visualDreamShots) = หัวใจการเลือกแบบ content-driven
   const dreamRoles = (signals.dreamShots || []).map(norm).filter(Boolean);
@@ -76,10 +111,19 @@ export async function pickBestRef(signals = {}, opts = {}) {
     let score = 0;
     let typeHit = false;
     const hits = [];
-    // ① แนวข่าวที่ปกนี้เหมาะ (matchNewsType) ตรงข่าว
+    // ① แนวข่าวที่ปกนี้เหมาะ (matchNewsType) ตรงข่าว — MEGA_REF_TAG_EXACT: เป๊ะ(+3) แยกจาก substring(+1) (ดูคอมเมนต์ hayTokens ด้านบน)
     for (const t of d.matchNewsType || []) {
       const tn = norm(t);
-      if (tn && (hay.includes(tn) || tn.split(/[\s\-/]+/).some((w) => w.length >= 3 && hay.includes(w)))) { score += 3; typeHit = true; hits.push(t); }
+      if (!tn) continue;
+      const isSubstringHit = hay.includes(tn) || tn.split(/[\s\-/]+/).some((w) => w.length >= 3 && hay.includes(w));
+      if (!isSubstringHit) continue;
+      if (_tagExactOn) {
+        const isExact = hayTokens.includes(tn);
+        if (isExact) { score += 3; typeHit = true; hits.push(t); }
+        else { score += 1; typeHit = true; hits.push(`${t}(บางส่วน)`); }
+      } else {
+        score += 3; typeHit = true; hits.push(t); // ปิดสวิตช์ = พฤติกรรมเดิมทุก byte (+3 ทั้งสองกรณี ไม่แยกระดับ)
+      }
     }
     // ② อารมณ์ปก/matchEmotion ↔ อารมณ์ข่าว
     const refEmos = [d.emotion, ...(d.matchEmotion || [])].map(norm).filter(Boolean);
@@ -118,7 +162,13 @@ export async function pickBestRef(signals = {}, opts = {}) {
   // ★ 8 ก.ค. (คลัง 18/21 ตระกูลเดียว + role generic ทำคะแนนเสมอกันบ่อย): เดิม argmax ตัวแรกชนะซ้ำทุกครั้ง
   //   → เก็บทุกตัวที่คะแนนอยู่ในช่วงใกล้สุด (margin) แล้วสุ่มถ่วงน้ำหนักตามคะแนน — ตรงเนื้อข่าวจริงชนะขาดเหมือนเดิม (คะแนนไม่เสมอ)
   //   ตรงแบบ generic (เสมอกันบ่อย) → หมุนเวียน ref อื่นในกลุ่มเดียวกันจริง ไม่ใช่ตัวเดิมทุกครั้ง
-  const MARGIN = 1; // เผื่อคะแนนห่างไม่เกิน 1 (เช่น matchNewsType hit เดียว = 3 แต้ม ยังชนะขาดเหนือ margin นี้)
+  // ★ 29 ก.ค. 69 (งานหมุนเวียน ref — เจ้าของถาม "ทำไม ref template ไม่เคยเปลี่ยน"): หลังติดป้ายหมวดจริงให้
+  //   ref 20 ใบแล้ว หลายใบจะอยู่หมวดเดียวกัน (เช่น "อาลัย" มี 5 ใบ) — MARGIN เดิม (1) อาจแคบไปสำหรับสภาพนี้
+  //   (คะแนน matchNewsType เท่ากันหมดในกลุ่มเดียวกัน แต่ fidelity/humanVerified อาจถ่างเกิน margin เดิมจนใบ
+  //   เดียวชนะซ้ำในกลุ่ม) → เปิดให้ปรับได้ผ่าน MEGA_REF_VARIETY_MARGIN (float, parse ไม่ได้/ติดลบ = fallback 1
+  //   ค่าเดิมเป๊ะ) ไม่ตั้ง env = พฤติกรรมเดิมทุก byte (MARGIN=1 เหมือนเดิม)
+  const _marginRaw = parseFloat(process.env.MEGA_REF_VARIETY_MARGIN);
+  const MARGIN = Number.isFinite(_marginRaw) && _marginRaw >= 0 ? _marginRaw : 1; // เผื่อคะแนนห่างไม่เกิน MARGIN (เช่น matchNewsType hit เดียว = 3 แต้ม ยังชนะขาดเหนือ margin default นี้)
   const candidates = scored.filter((s) => s.score >= bestScore - MARGIN && s.score > 0);
   const totalW = candidates.reduce((n, c) => n + c.score, 0);
   // ★ 10 ก.ค. Wave1-A: เดิม Math.random() → เคสเดิม re-run ได้ ref คนละใบ (สุ่มจริงทุกครั้ง)

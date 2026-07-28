@@ -5,7 +5,14 @@
 //   GET    : รายการปก ref ทั้งหมด (+DNA)
 //   DELETE : ?id=... ลบปก ref
 //   PATCH  : {id, styleName?} หรือ {id, reanalyze:true} → อัปเดต/วิเคราะห์ DNA ใหม่ (reanalyze ใช้ได้เฉพาะ legacy record ที่มี imagePath)
+//            {id, matchNewsType:[...]} → เติมป้ายหมวดข่าว (merge เข้า dna.matchNewsType เดิม ไม่ทับทั้งก้อน)
 // ทั้งหมดแยกจากท่อทำข่าว/ปกอัตโนมัติ 100%
+// 🔴🔴🔴 ห้ามใช้ reanalyze:true กับ ref ที่ติดป้าย matchNewsType ไว้แล้ว (เช่น 20 ใบ "เพจจริง" ที่ติดป้าย 11 หมวด
+//   คัมภีร์ v3 เมื่อ 29 ก.ค. 69) — reanalyze สกัด DNA ใหม่ทั้งก้อนจากภาพ (patch.dna = extractCoverDNA(...) ตรงๆ
+//   ใน branch ด้านล่าง) ล้าง matchNewsType/template ที่แก้มือ/ธง _humanVerified ทิ้งหมด ไม่ merge — ในทางปฏิบัติ
+//   ref โครงล้วน (structure-only, ไม่มี imagePath) ที่เพิ่มหลัง redesign 18 ก.ค. จะโดน branch นี้บล็อกเองอยู่แล้ว
+//   (คืน 422 REANALYZE_IMAGE_UNAVAILABLE เพราะไม่มีภาพต้นฉบับให้สกัดซ้ำ) แต่ record ไหนมี imagePath ค้างอยู่
+//   (legacy) ยังเสี่ยงจริง — อย่าเรียก reanalyze พร่ำเพรื่อกับใบที่ติดป้ายหมวดไว้แล้วเด็ดขาด
 // ============================================================
 
 import { NextResponse } from 'next/server';
@@ -156,6 +163,28 @@ export async function PATCH(req) {
       }
       if (typeof body.verified === 'boolean') dna._humanVerified = body.verified;
       patch.dna = dna;
+    }
+    // ★ 29 ก.ค. 69 (งานติดป้ายหมวด ref 20 ใบ — Opus ตรวจพบ endpoint นี้ไม่รองรับ matchNewsType เลย ต้องยิงผ่าน
+    //   /api/ref-covers PATCH เท่านั้น เพราะ data/ref-cover-library.json ใน working tree โดน Supabase sync ทับ
+    //   ค่าที่แก้ตรงไฟล์ local หายได้ทุกเมื่อ — บั๊กเก่าที่รู้กัน): {id, matchNewsType:[...]} → merge เข้า dna เดิม
+    //   ห้าม shallow-replace dna ทั้งก้อนเด็ดขาด (ทับ template/slots/panelCount ที่มีอยู่แล้วหาย) — ใช้ base เดียวกับ
+    //   branch template.slots ด้านบน (ถ้ามาพร้อมกันในคำขอเดียว — ในทางปฏิบัติสคริปต์แท็กจะส่งแยกทีละฟิลด์เสมอ)
+    //   idempotent: ยิงป้ายชุดเดิมซ้ำ → Set dedupe ไม่งอก · เพดาน 40 ตัวอักษร/ป้าย + 12 ป้าย/ใบ (กันยัดขยะ/บวมไม่จำกัด)
+    if (Array.isArray(body.matchNewsType)) {
+      let base = patch.dna;
+      if (!base) {
+        const items1 = await listRefCovers(1000);
+        const cur1 = items1.find((x) => x.id === id);
+        if (!cur1) return NextResponse.json({ success: false, error: 'ไม่พบ id' }, { status: 404 });
+        base = cur1.dna || {};
+      }
+      const newTags = body.matchNewsType
+        .filter((t) => typeof t === 'string' && t.trim())
+        .map((t) => t.trim().slice(0, 40));
+      const oldTags = Array.isArray(base.matchNewsType) ? base.matchNewsType : [];
+      // ป้ายใหม่ขึ้นก่อนเสมอ (canonical hint จากงานติดป้ายหมวด) + คงป้ายเดิมทั้งหมด (dedupe ด้วย Set) + เพดาน 12 ป้าย
+      const merged = [...new Set([...newTags, ...oldTags])].slice(0, 12);
+      patch.dna = { ...base, matchNewsType: merged };
     }
     if (body.reanalyze) {
       // re-analyze DNA จากไฟล์เดิม — เฉพาะ legacy record ที่ยังมี imagePath (ref ใหม่หลัง redesign = โครงล้วน ไม่มีภาพให้ reanalyze)

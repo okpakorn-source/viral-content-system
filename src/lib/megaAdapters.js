@@ -4361,12 +4361,17 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       console.log(`[MEGA S6] 🔒 ใช้ ref ที่ล็อก: ${lockedRef.styleName || lockedRef.id}`);
     } else {
       try {
-        const { pickBestRef } = await import('@/lib/refCoverMatch');
+        const { pickBestRef, refCategoryHint } = await import('@/lib/refCoverMatch');
         const c = job.dossier.compass || {};
+        // ★ 29 ก.ค. 69 (เจ้าของถาม "ทำไม ref template ไม่เคยเปลี่ยน"): เดิม signals.text มีแค่ angle/
+        //   secondaryEmotions — ไม่เคยมี "หมวดเคสข่าว" เลย ทั้งที่ job.dossier.desk.category (จาก DESK_CATEGORIES,
+        //   deskBrain.js S1) มีอยู่แล้วตั้งแต่ต้นทาง — เติมเข้า text ผ่านสะพานคำศัพท์ refCategoryHint (ไม่ตรง/ไม่มี
+        //   mapping = '' ไม่เติมอะไร ไม่กระทบพฤติกรรมเดิม) ไม่ยิง LLM เพิ่มเลย (ข้อมูลมีอยู่แล้วในเคส)
+        const _catHint = refCategoryHint(job.dossier.desk?.category);
         // ★ 10 ก.ค. Wave1-A: seedKey นิ่งต่อข่าว (หัวข่าวก่อน — ข่าวเดิมเทสซ้ำคนละ job/คนละ caseId ก็ได้ ref ใบเดิม) → caseId → job.id
         const m = await pickBestRef({
           emotion: c.primaryEmotion || '',
-          text: [c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '),
+          text: [_catHint, c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '),
           charCount: (c.mainCharacters || []).length,
           dreamShots: (c.visualDreamShots || []).map((v) => v.slot || v.description || ''),
         }, { seedKey: job.dossier.desk?.title || job.dossier.images?.caseId || job.id });
@@ -6992,11 +6997,14 @@ export async function s7_cover(job, { origin, _deps } = {}) {
   let selectionRefDNA = refDNA;
   if (!refDNA) {
     try {
-      const { pickBestRef } = await import('@/lib/refCoverMatch');
+      const { pickBestRef, refCategoryHint } = await import('@/lib/refCoverMatch');
       const c = d.compass || {};
+      // ★ 29 ก.ค. 69 (เจ้าของถาม "ทำไม ref template ไม่เคยเปลี่ยน"): เติมสัญญาณหมวดเคส แบบเดียวกับจุด S6
+      //   ด้านบนเป๊ะ (ดูคอมเมนต์เต็มที่นั่น) — fallback path นี้ (แฟ้มเก่าไม่มี refMatch) ก็ควรได้สัญญาณเดียวกัน
+      const _catHint = refCategoryHint(d.desk?.category);
       const m = await pickBestRef({
         emotion: c.primaryEmotion || '',
-        text: [c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '),
+        text: [_catHint, c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '),
         charCount: (c.mainCharacters || []).length,
         dreamShots: (c.visualDreamShots || []).map((v) => v.slot || v.description || ''),
       });
