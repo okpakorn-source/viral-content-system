@@ -8,6 +8,7 @@
  * GET  → รายการงานปก (สะท้อนจาก quick-test kinds=compose,ref เท่านั้น — คิวโต๊ะข่าวแยกคนละคลาส ไม่ปนกัน)
  * GET  ?view=archive&limit=24 → คลังปกล่าสุด — import listMegaCovers ตรง (แบบเดียวกับ /api/m/cover-editor) ไม่ hop HTTP
  * GET  ?view=refs → ★ 27 ก.ค. ค่ำ (ปุ่ม "เปลี่ยนต้นแบบ"): 20 ต้นแบบ "เพจจริง" จากคลัง /api/ref-covers (ชื่อ+ยอดไลค์แกะจากชื่อไฟล์)
+ * GET  ?view=rev → ★ 28 ก.ค. 69 (รอบ 2 — global ทั้งแอพ): {mRev} เฉยๆ ไม่ต้องล็อกอิน (ก่อนด่าน session ตั้งใจ) — เช็ครุ่นแอพได้แม้ session หลุด
  * POST {newsTitle, content} → สร้างงานเต็มท่อ · POST {action:'delete', jobId} → ลบงาน (scope:'active' จำกัดคลาส compose/ref เท่านั้น)
  * POST {kind:'compose', caseId, heroPersonHint?, refId?} → ★ 27 ก.ค. ค่ำ: เติม refId ให้ปุ่ม "เปลี่ยนต้นแบบ" ยิงต่อ (ของเดิมส่งแค่ caseId/heroPersonHint)
  * POST {kind:'composeFrozen', caseId, refId, slotPlan} → ★ ใหม่ 27 ก.ค. ค่ำ (ปุ่ม "เปลี่ยนภาพรายช่อง"): ยิงตรง /api/mega/compose-test โหมด slotPlan แช่แข็ง
@@ -51,6 +52,12 @@ function isValidClipUrl(u) {
 
 export async function GET(request) {
   try {
+    // ★ 28 ก.ค. 69 (รอบ 2 — ยกเช็ครุ่นเป็น global ทั้งแอพ): ?view=rev ไม่ต้องล็อกอิน — วางไว้ "ก่อน" ด่าน session/แอดมินตั้งใจ
+    //   ไม่มีข้อมูลลับ มีแค่เลขรุ่น (M_APP_REV) ให้เช็คได้แม้ session หลุด/คุกกี้หมดอายุ (จอตายเงียบเพราะ 401 ก่อนไม่เห็น mRev)
+    if (request.nextUrl.searchParams.get('view') === 'rev') {
+      return NextResponse.json({ success: true, mRev: M_APP_REV });
+    }
+
     const s = await sess();
     if (!s) return NextResponse.json({ success: false, error: 'ต้องล็อกอินก่อน', errorType: 'UNAUTHORIZED' }, { status: 401 });
     // ★ 27 ก.ค. 69 (เจ้าของสั่ง): ล็อกโหมด 🤖 ให้ AI หา / ⚡ ทางลัด เฉพาะแอดมิน — ปิดหลังบ้านซ้ำกันยิงตรง (UI ซ่อนไปแล้ว)

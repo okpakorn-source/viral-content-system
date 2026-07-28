@@ -362,6 +362,29 @@ export default function MobileApp() {
   }, []);
   useEffect(() => { if (member) log('app_open'); }, [member, log]);
 
+  // ★ 28 ก.ค. 69 (รอบ 2 — ยกเช็ครุ่นเป็น global ทั้งแอพ): ตอน mount + แท็บกลับมา visible + focus หน้าต่าง
+  //   ไม่ผูกกับ login/แท็บที่เปิดอยู่ — /api/m/cover?view=rev ไม่ต้องล็อกอิน เช็คได้แม้ session หลุด
+  //   throttle: เช็คจาก visibility/focus ไม่ถี่กว่า 1 ครั้ง/60 วิ (ตอน mount เช็คเสมอ ไม่ throttle) · ล้มเงียบ (เน็ตสะดุด/timeout ไม่กวนผู้ใช้)
+  //   ห้าม auto-reload เอง (กันข้อมูลที่พิมพ์ค้างหาย) — ใช้แบนเนอร์ให้แตะเสมอ
+  const revLastCheckRef = useRef(0);
+  const checkAppRev = useCallback((force) => {
+    const now = Date.now();
+    if (!force && now - revLastCheckRef.current < 60000) return;
+    revLastCheckRef.current = now;
+    fetch('/api/m/cover?view=rev', { cache: 'no-store', signal: AbortSignal.timeout(6000) })
+      .then(r => r.json())
+      .then(d => { if (d.success && d.mRev && d.mRev !== M_APP_REV) setCvOutdated(true); })
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    checkAppRev(true);
+    const onVis = () => { if (document.visibilityState === 'visible') checkAppRev(false); };
+    const onFocus = () => checkAppRev(false);
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', onFocus);
+    return () => { document.removeEventListener('visibilitychange', onVis); window.removeEventListener('focus', onFocus); };
+  }, [checkAppRev]);
+
   const loadCases = useCallback(() => {
     fetch('/api/generation-logs?limit=30', { cache: 'no-store' }).then(r => r.json())
       .then(d => setCases(d.cases || [])).catch(() => {});
@@ -1257,6 +1280,16 @@ export default function MobileApp() {
         <span className="livepill"><span className="dotb" />{ov ? (ov.busy || ov.processing > 0 ? `คิวทำงาน ${ov.processing}` : 'คิวว่าง') : 'LIVE'}</span>
         <button className="meBtn" aria-label="โปรไฟล์ของฉัน" onClick={() => setTab('me')}>{(member?.displayName || '?').slice(0, 1)}</button>
       </div>
+      {/* ★ 28 ก.ค. 69 (รอบ 2 — ยกเป็น global ทั้งแอพ): แบนเนอร์รุ่นใหม่ ย้ายจากในแท็บปกมาไว้ใต้ header แสดงทุกแท็บ
+          sticky top:0 ต่อจากเฮดเดอร์ที่ sticky top:0 อยู่แล้ว — เบราว์เซอร์วางซ้อนสติกกี้ให้เอง (โผล่ใต้เฮดเดอร์เสมอ ไม่ทับ safe-area/notch) */}
+      {cvOutdated && (
+        <button onClick={() => window.location.reload()}
+          style={{ position: 'sticky', top: 0, zIndex: 4, display: 'block', width: '100%', border: 0, cursor: 'pointer',
+            background: 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#fff', fontFamily: 'inherit', fontWeight: 700, fontSize: 13,
+            padding: '10px 16px', textAlign: 'center' }}>
+          📦 แอพรุ่นใหม่ออกแล้ว — แตะที่นี่เพื่อโหลดใหม่
+        </button>
+      )}
 
       {/* ═══ แท็บ ส่งข่าว ═══ */}
       {tab === 'write' && <div className="wrap">
@@ -1608,12 +1641,7 @@ export default function MobileApp() {
       {/* ═══ แท็บ ทำปก ═══ */}
       {tab === 'cover' && <div className="wrap">
         <h1>ทำปก</h1>
-        {/* ★ 28 ก.ค. 69 (แก้บั๊ก "มือถือค้างบันเดิลรุ่นเก่า"): mRev จากเซิร์ฟเวอร์ไม่ตรงกับ M_APP_REV ของตัวเอง — แตะรีโหลดหน้าทันที */}
-        {cvOutdated && (
-          <button className="cta" style={{ marginBottom: 12, background: 'linear-gradient(135deg,#f59e0b,#d97706)' }} onClick={() => window.location.reload()}>
-            📦 แอพรุ่นใหม่ออกแล้ว — แตะที่นี่เพื่อโหลดใหม่
-          </button>
-        )}
+        {/* ★ 28 ก.ค. 69 (รอบ 2): แบนเนอร์รุ่นย้ายขึ้น global ใต้ header แล้ว (แสดงทุกแท็บ) — ดูตรง .hdr ด้านล่าง */}
         {/* ★ 27 ก.ค. 69 (เจ้าของสั่ง): แถวสลับโหมดเฉพาะแอดมิน — พนักงานไม่เห็นแถวปุ่มเลย เห็นแค่โหมดแต่งเอง */}
         {isAdmin && <div className="seg" style={{ marginBottom: 12 }}>
           <button className={cvMode === 'manual' ? 'on' : ''} onClick={() => setCvMode('manual')}>✋ แต่งเอง</button>
