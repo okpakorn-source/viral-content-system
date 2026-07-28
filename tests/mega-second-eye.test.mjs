@@ -162,7 +162,7 @@ await test('faceBox รูปแบบพัง (x2<x1 / ค่าไม่ใ�
   }
 });
 
-await test('เพดานสำรอง ≤3 ใบ: 5 ช่องหลักมีสำรองครบทุกช่อง → ส่งภาพรวม 5+3=8 ใบเท่านั้น (ไม่ใช่ 10)', async () => {
+await test('เพดานสำรอง ≤5 ใบ (28 ก.ค. 69 เคส AC-0201 ขยายจากเดิม ≤3): 5 ช่องหลักมีสำรองครบทุกช่องอย่างละ 1 → ส่งภาพรวม 5+5=10 ใบเท่านั้น', async () => {
   const roles = ['hero', 'reaction', 'action', 'context', 'circle'];
   const records = [];
   const picks = {};
@@ -180,7 +180,68 @@ await test('เพดานสำรอง ≤3 ใบ: 5 ช่องหลั�
       callGeminiVision: async ({ images }) => { capturedCount = images.length; return { results: images.map((_, i) => ({ index: i, textFound: '', faceBox: null, faceCount: 0 })) }; },
     },
   });
-  assert.equal(capturedCount, 8, `ต้องส่งแค่ 5 หลัก + 3 สำรอง (เพดานงบ) = 8 (ได้ ${capturedCount})`);
+  assert.equal(capturedCount, 10, `ต้องส่งแค่ 5 หลัก + 5 สำรอง (เพดานงบใหม่) = 10 (ได้ ${capturedCount})`);
+});
+
+await test('เพดานภาพรวม 10 ใบไม่ทะลุ (28 ก.ค. 69 เคส AC-0201): พูลสำรองจริงมีมากกว่า 5 ใบ (hero มี 3 + ช่องอื่นละ 1 = 7 ผู้สมัคร) → ตัดเหลือแค่ 5 ตามงบ ไม่ใช่ส่งทั้ง 7', async () => {
+  const records = [
+    { id: 'h_p', imageUrl: 'https://x/h_p.jpg' },
+    { id: 'h_b1', imageUrl: 'https://x/h_b1.jpg' },
+    { id: 'h_b2', imageUrl: 'https://x/h_b2.jpg' },
+    { id: 'h_b3', imageUrl: 'https://x/h_b3.jpg' },
+    { id: 'r_p', imageUrl: 'https://x/r_p.jpg' }, { id: 'r_b', imageUrl: 'https://x/r_b.jpg' },
+    { id: 'a_p', imageUrl: 'https://x/a_p.jpg' }, { id: 'a_b', imageUrl: 'https://x/a_b.jpg' },
+    { id: 'c_p', imageUrl: 'https://x/c_p.jpg' }, { id: 'c_b', imageUrl: 'https://x/c_b.jpg' },
+  ];
+  const slots = mkSlots({
+    hero: { id: 'h_p', backups: ['h_b1', 'h_b2', 'h_b3'] },
+    reaction: { id: 'r_p', backups: ['r_b'] },
+    action: { id: 'a_p', backups: ['a_b'] },
+    context: { id: 'c_p', backups: ['c_b'] },
+  });
+  let capturedCount = 0;
+  await _runSecondEye({
+    slots, activeSlots: ['hero', 'reaction', 'action', 'context'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images }) => { capturedCount = images.length; return { results: images.map((_, i) => ({ index: i, textFound: '', faceBox: null, faceCount: 0 })) }; },
+    },
+  });
+  // 4 primary (hero/reaction/action/context) + สูงสุด 5 สำรอง (จากผู้สมัคร 6: h_b1/h_b2/h_b3/r_b/a_b/c_b) = ≤9 เสมอ
+  assert.ok(capturedCount <= 9, `ต้องไม่เกิน 4 หลัก + 5 สำรอง = 9 (ได้ ${capturedCount})`);
+  assert.equal(capturedCount, 9, `ผู้สมัครสำรองมี 6 ใบ (เกินงบ 5) → ต้องตัดเหลือ 5 พอดี รวมเป็น 4+5=9 (ได้ ${capturedCount})`);
+});
+
+await test('เรียงลำดับ "ผู้ท้าชิง hero" ก่อนเสมอ (28 ก.ค. 69 เคส AC-0201): สำรองที่มีหน้า (faceCount≥1) + ไม่ text-suspect ต้องถูกส่งตรวจก่อนสำรองที่ไม่มีหน้า/ต้องสงสัยว่ามีตัวหนังสือทับ เมื่องบไม่พอส่งครบทุกใบ', async () => {
+  const records = [
+    { id: 'h_p', imageUrl: 'https://x/h_p.jpg' },
+    // จงใจเรียง candidate ให้ "แย่ก่อนดี" ในลำดับ backups array — พิสูจน์ว่า sort ทำงานจริง ไม่ใช่แค่ตามลำดับเดิม
+    { id: 'no_face', imageUrl: 'https://x/no_face.jpg', triage: { faceCount: 0, clean: true } }, // ไม่มีหน้า
+    { id: 'dirty_face', imageUrl: 'https://x/dirty_face.jpg', triage: { faceCount: 1, clean: false } }, // มีหน้า แต่ text-suspect
+    { id: 'clean_face_1', imageUrl: 'https://x/clean_face_1.jpg', triage: { faceCount: 1, clean: true } }, // ผู้ท้าชิงตัวจริง
+    { id: 'clean_face_2', imageUrl: 'https://x/clean_face_2.jpg', triage: { faceCount: 2, clean: true } }, // ผู้ท้าชิงตัวจริง
+  ];
+  const slots = mkSlots({ hero: { id: 'h_p', backups: ['no_face', 'dirty_face', 'clean_face_1', 'clean_face_2'] } });
+  let capturedMapIds = null;
+  await _runSecondEye({
+    slots, activeSlots: ['hero'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: async (url) => ({ data: 'ZmFrZQ==', mimeType: 'image/jpeg', _url: url }),
+      callGeminiVision: async ({ images }) => {
+        capturedMapIds = images.map((im) => im._url);
+        return { results: images.map((_, i) => ({ index: i, textFound: '', faceBox: null, faceCount: 0 })) };
+      },
+    },
+  });
+  // งบสำรอง ≤5 พอส่งครบทั้ง 4 ผู้สมัครในเคสนี้ (ไม่ทะลุ) — แต่ "ลำดับ" ที่ส่งเข้า images[] ต้องเรียงผู้ท้าชิงก่อนเสมอ
+  const order = capturedMapIds.slice(1).map((u) => String(u).split('/').pop().replace('.jpg', ''));
+  const idxCleanFace1 = order.indexOf('clean_face_1');
+  const idxCleanFace2 = order.indexOf('clean_face_2');
+  const idxNoFace = order.indexOf('no_face');
+  const idxDirtyFace = order.indexOf('dirty_face');
+  assert.ok(idxCleanFace1 < idxNoFace && idxCleanFace1 < idxDirtyFace, 'ผู้ท้าชิงมีหน้า+สะอาด ต้องมาก่อนใบไม่มีหน้า/สงสัยตัวหนังสือทับเสมอ');
+  assert.ok(idxCleanFace2 < idxNoFace && idxCleanFace2 < idxDirtyFace, 'ผู้ท้าชิงมีหน้า+สะอาดอีกใบ ก็ต้องมาก่อนเช่นกัน');
+  assert.ok(idxDirtyFace < idxNoFace, 'มีหน้าแต่ text-suspect ยังต้องมาก่อนใบไม่มีหน้าเลย (เกณฑ์ที่ 1 คือมีหน้าก่อน)');
 });
 
 await test('fetchImageB64 ล้มบางใบ (URL โหลดไม่ได้) → ข้ามใบนั้นเงียบๆ ยังตรวจใบที่เหลือได้ปกติ', async () => {

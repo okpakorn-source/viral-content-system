@@ -557,8 +557,8 @@ function _deriveTextOverlay(textFound) {
 
 // ★ MEGA_SECOND_EYE — แกนตรวจจริง (เรียกจาก s6_slots ท้ายสุดก่อน return 'done') แยกเป็นฟังก์ชันเรียกได้เดี่ยว
 //   (testability — รับ _deps.callGeminiVision/_deps.fetchImageB64/_deps.setTriage ฉีดได้ default = ของจริง)
-//   ยิง Gemini vision 1 call เดียวดูภาพที่ S6 เลือกจริงทุกช่อง (≤5 ใบ) + ภาพสำรองอันดับ 1 ของช่องที่มีสำรอง
-//   (≤3 ใบเพิ่ม รวม ≤8 ใบ) mutate `slots` ตรงๆ: สลับ .id เมื่อ primary ติด textOverlay=2 และสำรองสะอาดกว่าจริง +
+//   ยิง Gemini vision 1 call เดียวดูภาพที่ S6 เลือกจริงทุกช่อง (≤5 ใบ) + สำรองของทุกช่องรวมกันเรียงผู้ท้าชิง
+//   hero ก่อน (≤5 ใบเพิ่ม รวม ≤10 ใบ — ขยาย 28 ก.ค. 69 เคส AC-0201) mutate `slots` ตรงๆ: สลับ .id เมื่อ primary ติด textOverlay=2 และสำรองสะอาดกว่าจริง +
 //   แนบ _secondEyeFaceBox (ของภาพที่ใช้จริงสุดท้ายต่อช่อง) ให้ชั้นเรนเดอร์ทับ faceBox ปกติเสมอ (ดู composeCore
 //   ฝั่ง megaComposerService.js — ลำดับอำนาจ: ตาสอง > faceDetector > triage เก่า)
 //   ★ ข้อ 4 (จับตาแรกโกหก): ภาพไหน triage เดิมว่า clean (≠false) แต่ตาสองอ่านออก textOverlay=2 จริง → แก้ไข
@@ -580,18 +580,37 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
     images.push(fetched);
     map.push({ role: r, kind: 'primary', id: String(slots[r].id) });
   }
-  // เติมสำรองอันดับ 1 ของช่องที่มีสำรอง (≤3 ใบ — จำกัดงบใน call เดียวกัน)
-  let backupBudget = 3;
+  // ★ ข้อ 2 (28 ก.ค. 69 เคส AC-0201 — "ตาสองเห็นแค่ 5+3 ใบ เลยหาตัวแทนไม่เจอ"): ขยายโควตาสำรองจาก ≤3 เป็น ≤5
+  //   (เพดานภาพรวม 5 หลัก + 5 สำรอง = 10 ใบ กันโทเคนบวม) + เดิมมองแค่ backups[0] ของแต่ละช่อง (พลาดผู้ท้าชิง hero
+  //   ที่อาจอยู่ backups[1]/[2] ของช่องไหนก็ได้) → รวบรวมสำรอง "ทุกใบของทุกช่อง" เป็นพูลเดียวก่อน แล้วเรียงลำดับ
+  //   "ผู้ท้าชิงตำแหน่ง hero" ขึ้นก่อนเสมอ (มี faceCount≥1 จาก triage ก่อนไม่มี, ไม่ text-suspect (triage.clean
+  //   !==false) ก่อนที่ clean=false) ก่อนค่อยตัดตามงบ ≤5 — ให้นโยบาย hero แข็ง (ข้อ 2 เคสไรเดอร์) มีตัวเลือกจริง
+  //   ให้ตรวจมากขึ้นแทนที่จะพลาดเพราะไม่เคยถูกส่งไปตรวจตั้งแต่แรก
+  const _backupCandidates = [];
   for (const r of roles) {
+    for (const bId of (slots[r].backups || [])) {
+      const brec = byId.get(String(bId));
+      if (!brec?.imageUrl) continue;
+      _backupCandidates.push({ role: r, id: String(bId), rec: brec });
+    }
+  }
+  const _hasFaceFromTriage = (t) => Number(t?.faceCount) >= 1;
+  const _textSuspectFromTriage = (t) => t?.clean === false; // ธง clean=false = มีลายน้ำ/ตัวหนังสือ/แคปชั่นทับ (นิยามเดิมทั้งระบบ)
+  _backupCandidates.sort((a, b) => {
+    const fa = _hasFaceFromTriage(a.rec.triage) ? 0 : 1;
+    const fb = _hasFaceFromTriage(b.rec.triage) ? 0 : 1;
+    if (fa !== fb) return fa - fb;
+    const ta = _textSuspectFromTriage(a.rec.triage) ? 1 : 0;
+    const tb = _textSuspectFromTriage(b.rec.triage) ? 1 : 0;
+    return ta - tb;
+  });
+  let backupBudget = 5;
+  for (const cand of _backupCandidates) {
     if (backupBudget <= 0) break;
-    const bId = (slots[r].backups || [])[0];
-    if (!bId) continue;
-    const brec = byId.get(String(bId));
-    if (!brec?.imageUrl) continue;
-    const bFetched = await _fetchB64(brec.imageUrl);
+    const bFetched = await _fetchB64(cand.rec.imageUrl);
     if (!bFetched) continue;
     images.push(bFetched);
-    map.push({ role: r, kind: 'backup', id: String(bId) });
+    map.push({ role: cand.role, kind: 'backup', id: cand.id });
     backupBudget--;
   }
   if (!images.length) return { swapped: 0, fixedCoords: 0, checked: roles.length, liesCaught: 0 };

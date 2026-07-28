@@ -118,6 +118,27 @@ await test('เนื้อหากติกาใหม่: slotDirectorBrain 
   assert.ok(/ฉากรายการทีวี|สตูดิโอ|ไฟเวที/.test(sys));
 });
 
+// ═══════ 28 ก.ค. 69 — เคส AC-0201 (ผลเทสจริง): ขยายกติกากันช็อตซ้ำจาก "ช่องบน" เป็น "ทุกช่อง" + เพิ่มกติกา
+// ห้ามเลือกภาพหน้าถูกบัง (หมวก/หน้ากาก/มือ) เป็น hero เมื่อพูลมีภาพหน้าเต็มของตัวเอกจริง ═══════
+
+await test('เคส AC-0201: กติกากันช็อตซ้ำต้องครอบ "ทุกช่อง" (ไม่ใช่แค่ช่องบนสุดแบบเดิม) ทั้ง legacy + systemSem', async () => {
+  const legacySys = await captureSystem(() => slotDirectorBrain({ imagesMeta: META_NO_FLAGS, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', refDNA: null, artBrief: null, sceneInventory: '', storyRulesOn: true }));
+  assert.ok(/ทุกช่อง.*ห้ามช็อตซ้ำ/.test(legacySys), 'legacy: ต้องเป็น "ทุกช่อง" ห้ามช็อตซ้ำ ไม่ใช่จำกัดแค่ reaction/ช่องบนสุดแบบเดิม');
+  assert.ok(!/reaction \(ช่องบนสุด\)/.test(legacySys), 'ถ้อยคำเดิมที่จำกัดแค่ reaction (ช่องบนสุด) ต้องถูกแทนที่แล้ว ไม่ใช่แค่เพิ่มเติม');
+
+  const semSys = await captureSystem(() => slotDirectorBrain({ imagesMeta: META_NO_FLAGS, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', refDNA: null, artBrief: null, sceneInventory: '', slotContract: SLOT_CONTRACT, storyRulesOn: true }));
+  assert.ok(/ทุกช่อง.*ห้ามช็อตซ้ำ/.test(semSys), 'systemSem: ต้องเป็น "ทุกช่อง" ห้ามช็อตซ้ำเช่นกัน');
+  assert.ok(!/ช่องย่อยอื่น \(ไม่ใช่/.test(semSys), 'ถ้อยคำเดิมที่จำกัดแค่ "ช่องย่อยอื่น (ไม่ใช่ hero/circle)" ต้องถูกแทนที่แล้ว');
+});
+
+await test('เคส AC-0201: กติกาใหม่ "ห้ามเลือกภาพหน้าถูกหมวก/หน้ากาก/มือบังเป็น hero เมื่อพูลมีภาพหน้าเต็ม" ต้องมีทั้ง legacy + systemSem (อ้างอิง instance id จริง)', async () => {
+  const legacySys = await captureSystem(() => slotDirectorBrain({ imagesMeta: META_NO_FLAGS, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', refDNA: null, artBrief: null, sceneInventory: '', storyRulesOn: true }));
+  assert.ok(/หน้าเต็ม.*ห้ามเลือกภาพหน้าถูกหมวก\/หน้ากาก\/มือบังเป็น hero/.test(legacySys), 'legacy: ต้องมีกติกาห้ามเลือก hero หน้าถูกบังเมื่อมีตัวเลือกหน้าเต็ม');
+
+  const semSys = await captureSystem(() => slotDirectorBrain({ imagesMeta: META_NO_FLAGS, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', refDNA: null, artBrief: null, sceneInventory: '', slotContract: SLOT_CONTRACT, storyRulesOn: true }));
+  assert.ok(semSys.includes('ห้ามเลือกภาพหน้าถูกหมวก/หน้ากาก/มือบังเป็น main เด็ดขาด'), 'systemSem: ต้องอ้างอิง instance id จริง (main) ไม่ใช่คำว่า hero ลอยๆ');
+});
+
 // ═══════════════════════ (4) งบ prompt: ไม่กระทบ IMG_META_BUDGET (default 45000) + delta ไม่บวมเกินเหตุ ═══════════════════════
 
 await test('งบ prompt: กติกาใหม่ไม่กระทบจำนวนใบภาพที่ถูกตัดท้ายคิว (IMG_META_BUDGET default 45000 คงเดิม)', async () => {
