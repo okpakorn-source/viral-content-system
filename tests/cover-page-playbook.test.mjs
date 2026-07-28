@@ -12,19 +12,29 @@ import { register } from 'node:module';
 const SRC_ROOT = new URL('../src/', import.meta.url).href;
 const _mod = (body) => 'data:text/javascript,' + encodeURIComponent(body);
 const AI_STUB = _mod('export function callBrain(a){ globalThis.__CAPTURED = a; return { text: JSON.stringify({ orders: [], storyNote: "x", slots: {} }) }; }');
+// ★ เฟส 1 v3 (28 ก.ค. 69, เคส "ฝังคัมภีร์ v3 เข้าท่อปก"): เพิ่ม parent-tag propagation — ถ้า parent module ที่ import
+//   '@/lib/coverPagePlaybook' ถูก cache-bust ด้วย query 'v2switch' (ดู megaBrains.js?v2switch ด้านล่าง) ให้ผูก
+//   query เดียวกันต่อเข้า coverPagePlaybook ด้วย บังคับให้มันถูกประเมินใหม่ (อ่าน process.env.MEGA_PLAYBOOK_V2
+//   ปัจจุบันจริงๆ ตอนโหลด ณ main thread) แทนที่จะใช้ instance เดิมที่แคชไว้ตั้งแต่ import แรกบนสุดของไฟล์นี้
+//   (ทดสอบแล้ว: hook ที่ register() ทำงานคนละ thread กับ main — อ่าน process.env ในตัว hook เองไม่ได้ ต้องผูก
+//   ผ่าน context.parentURL/query แทนซึ่งเป็น logic ล้วนไม่พึ่ง env ในฝั่ง hook เลย)
 const hook = `
 export async function resolve(specifier, context, nextResolve) {
   if (specifier === '@/lib/aiClient') return { url: ${JSON.stringify(AI_STUB)}, shortCircuit: true };
   if (specifier.startsWith('@/')) {
-    const mapped = new URL(specifier.slice(2) + (specifier.endsWith('.js') || specifier.endsWith('.mjs') ? '' : '.js'), ${JSON.stringify(SRC_ROOT)}).href;
-    return nextResolve(mapped, context);
+    let mapped = specifier.slice(2) + (specifier.endsWith('.js') || specifier.endsWith('.mjs') ? '' : '.js');
+    if (mapped.startsWith('lib/coverPagePlaybook') && context.parentURL && context.parentURL.includes('v2switch')) {
+      mapped += (mapped.includes('?') ? '&' : '?') + 'v2switch';
+    }
+    const mappedURL = new URL(mapped, ${JSON.stringify(SRC_ROOT)}).href;
+    return nextResolve(mappedURL, context);
   }
   return nextResolve(specifier, context);
 }`;
 register('data:text/javascript,' + encodeURIComponent(hook));
 
 const { artBriefBrain, slotDirectorBrain } = await import('../src/lib/megaBrains.js');
-const { COVER_PAGE_PLAYBOOK } = await import('../src/lib/coverPagePlaybook.js');
+const { COVER_PAGE_PLAYBOOK, COVER_PAGE_PLAYBOOK_V2, COVER_PAGE_PLAYBOOK_V3 } = await import('../src/lib/coverPagePlaybook.js');
 
 let passed = 0, failed = 0;
 const test = async (name, fn) => { try { await fn(); passed++; console.log(`ok ${passed + failed} - ${name}`); } catch (e) { failed++; console.log(`not ok ${passed + failed} - ${name}\n  ${String(e && e.stack || e).split('\n').slice(0, 8).join('\n  ')}`); } };
@@ -116,6 +126,57 @@ await test('วัดความยาว prompt รวมจริง: คั�
   console.log(`   [ตัวเลขจริง] รวมสูงสุดที่ยิงจริง (system ที่ยาวสุด + งบภาพ) = ${Math.max(totalArt, totalLegacy, totalSem)} ตัวอักษร`);
   console.log(`   [เพดานประมาณ] MEGA_S6 opus-5 รับได้ระดับ ${MODEL_INPUT_CEILING_ESTIMATE.toLocaleString()} ตัวอักษรขึ้นไปสบายๆ`);
   assert.ok(Math.max(totalArt, totalLegacy, totalSem) < MODEL_INPUT_CEILING_ESTIMATE, `รวมแล้วต้องไม่ชนเพดานประมาณ (ได้ ${Math.max(totalArt, totalLegacy, totalSem)})`);
+});
+
+// ═══════════════ เฟส 1 v3 (28 ก.ค. 69, วิจัยใหญ่ 478 ใบ): คัมภีร์ v3 default + MEGA_PLAYBOOK_V2=1 rollback ═══════════════
+
+await test('sanity: COVER_PAGE_PLAYBOOK_V2 (~3,535) และ COVER_PAGE_PLAYBOOK_V3 (~6,800 หลังแก้คำ 28 ก.ค. 69) มีเนื้อจริงและไม่ใช่ก้อนเดียวกัน', () => {
+  assert.ok(COVER_PAGE_PLAYBOOK_V2.length > 500, `V2 ต้องมีเนื้อจริง (ได้ ${COVER_PAGE_PLAYBOOK_V2.length})`);
+  assert.ok(COVER_PAGE_PLAYBOOK_V3.length > 500, `V3 ต้องมีเนื้อจริง (ได้ ${COVER_PAGE_PLAYBOOK_V3.length})`);
+  assert.notEqual(COVER_PAGE_PLAYBOOK_V2, COVER_PAGE_PLAYBOOK_V3, 'V2/V3 ต้องเป็นคนละก้อนกัน');
+  assert.ok(COVER_PAGE_PLAYBOOK_V3.length > COVER_PAGE_PLAYBOOK_V2.length, 'V3 (478 ใบ) ต้องยาวกว่า V2 (36 ใบ) — สอดคล้องวิจัยชุดใหญ่กว่า');
+  console.log(`   (V2 = ${COVER_PAGE_PLAYBOOK_V2.length} ตัวอักษร · V3 = ${COVER_PAGE_PLAYBOOK_V3.length} ตัวอักษร)`);
+});
+
+await test('default (ไม่ตั้ง env MEGA_PLAYBOOK_V2) → COVER_PAGE_PLAYBOOK ต้องเป็น V3 เป๊ะ (byte-identical, ===)', () => {
+  assert.equal(COVER_PAGE_PLAYBOOK, COVER_PAGE_PLAYBOOK_V3, 'default ต้องเลือก V3 (=== object identity เดียวกัน ไม่ใช่แค่ค่าเท่ากัน)');
+  assert.notEqual(COVER_PAGE_PLAYBOOK, COVER_PAGE_PLAYBOOK_V2, 'default ต้องไม่ใช่ V2');
+});
+
+await test('byte-complete v3 (แพทเทิร์นเดียวกับเทส v2 เดิม): sysOn - sysOff (artBriefBrain) ต้องเท่ากับความยาว COVER_PAGE_PLAYBOOK_V3 + ตัวคั่น \\n\\n เป๊ะ', async () => {
+  const sysOn = await captureSystem(() => artBriefBrain({ refDNA: REF_DNA, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', typeMatched: false, pagePlaybookOn: true }));
+  const sysOff = await captureSystem(() => artBriefBrain({ refDNA: REF_DNA, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', typeMatched: false, pagePlaybookOn: false }));
+  assert.equal(sysOn.length - sysOff.length, COVER_PAGE_PLAYBOOK_V3.length + 2, `ผลต่างต้องเท่ากับความยาว v3 (${COVER_PAGE_PLAYBOOK_V3.length}) + 2 เป๊ะ (ได้ ${sysOn.length - sysOff.length})`);
+  assert.ok(sysOn.includes(COVER_PAGE_PLAYBOOK_V3), 'sysOn ต้องมี V3 ทั้งก้อน verbatim');
+});
+
+await test('สลับ MEGA_PLAYBOOK_V2=1 (ระดับโมดูล): fresh import coverPagePlaybook.js ต้องได้ COVER_PAGE_PLAYBOOK === COVER_PAGE_PLAYBOOK_V2 เป๊ะ (ความยาว 3,535)', async () => {
+  process.env.MEGA_PLAYBOOK_V2 = '1';
+  try {
+    // cache-bust ให้โมดูลคำนวณ const COVER_PAGE_PLAYBOOK ใหม่ (อ่าน env ตอน module load ใน main thread จริง)
+    const fresh = await import('../src/lib/coverPagePlaybook.js?v2switch-unit');
+    assert.equal(fresh.COVER_PAGE_PLAYBOOK, fresh.COVER_PAGE_PLAYBOOK_V2, 'MEGA_PLAYBOOK_V2=1 ต้องเลือก V2');
+    assert.equal(fresh.COVER_PAGE_PLAYBOOK, COVER_PAGE_PLAYBOOK_V2, 'ต้องตรงกับ V2 เดิมทุกตัวอักษร (=== เดียวกัน — const เดิมไม่ถูกแก้)');
+    assert.equal(fresh.COVER_PAGE_PLAYBOOK.length, 3535, `ความยาว V2 ต้องเท่าเดิม (ได้ ${fresh.COVER_PAGE_PLAYBOOK.length})`);
+  } finally {
+    delete process.env.MEGA_PLAYBOOK_V2;
+  }
+});
+
+await test('สลับ MEGA_PLAYBOOK_V2=1 (ครบสาย inject จริง): fresh megaBrains.js ต้องแทรก V2 เข้า artBriefBrain system แทน V3 เป๊ะ (ไม่ใช่แค่ const เฉยๆ — ทดสอบจุด inject จริงด้วย)', async () => {
+  process.env.MEGA_PLAYBOOK_V2 = '1';
+  try {
+    // cache-bust megaBrains.js เองด้วย — hook (ด้านบนไฟล์นี้) จะผูก tag 'v2switch' ต่อให้ '@/lib/coverPagePlaybook'
+    // ที่มันเรียกใช้ภายในด้วย (ผ่าน context.parentURL) บังคับให้ได้ instance ใหม่ที่อ่าน env='1' จริง ไม่ใช่ตัวที่แคชไว้
+    // ตั้งแต่ import แรกบนสุดของไฟล์นี้ (ตอนนั้น env ยังไม่ตั้ง)
+    const { artBriefBrain: artBriefBrainV2 } = await import('../src/lib/megaBrains.js?v2switch');
+    const captureLocal = async (fn) => { await fn(); return globalThis.__CAPTURED.system; };
+    const sysV2 = await captureLocal(() => artBriefBrainV2({ refDNA: REF_DNA, compass: FIXED_COMPASS, deskTitle: 'ข่าวทดสอบ', typeMatched: false }));
+    assert.ok(sysV2.includes(COVER_PAGE_PLAYBOOK_V2), 'system ต้องมี V2 ทั้งก้อน verbatim เมื่อ MEGA_PLAYBOOK_V2=1');
+    assert.ok(!sysV2.includes(COVER_PAGE_PLAYBOOK_V3), 'system ต้องไม่มี V3 เจือปนเลยเมื่อสลับไป V2 แล้ว');
+  } finally {
+    delete process.env.MEGA_PLAYBOOK_V2;
+  }
 });
 
 console.log(`\n# cover-page-playbook: ${passed}/${passed + failed} passed`);

@@ -58,13 +58,33 @@ test('ไม่มีใบไหนมี field busy → prompt ไม่มี
   assert.ok(!system.includes('(13)'), 'prompt ต้องไม่มีกฎข้อ (13) เมื่อไม่มี busy');
 });
 
-test('มีใบที่มี field busy → prompt เติมกฎ (13) ช่องย่อยเลี่ยง busy=2 / circle=busy 0-1 / เลือก busy ต่ำก่อน', async () => {
+test('มีใบที่มี field busy → prompt เติมกฎ (13) ช่องย่อยเลี่ยง busy=2 / circle=busy 0-1 (v3 default) / เลือก busy ต่ำก่อน', async () => {
   const system = await captureSystem(withBusyMeta);
   assert.ok(system.includes('(13)'), 'prompt ต้องมีกฎข้อ (13) เมื่อมี busy');
   assert.match(system, /busy=2/, 'ต้องพูดถึงการเลี่ยง busy=2 สำหรับช่องย่อย');
   assert.match(system, /reaction\/action\/context\/circle/, 'ต้องระบุช่องย่อย reaction/action/context/circle');
-  assert.match(system, /circle ต้องเป็นคนเดี่ยวโฟกัสชัด \(busy 0-1\)/, 'circle ต้องบังคับ busy 0-1 (คนเดี่ยวโฟกัสชัด)');
+  // ★ MEGA_RULES_V3 (28 ก.ค. 69 — เจ้าของสั่งรื้อกติกาขัด v3): เดิม circle บังคับ "คนเดี่ยวโฟกัสชัด" ตรงๆ — v3 ง
+  //   ระบุว่า circle ยังเป็นภาพเก่า/วัยเด็ก/โมเมนต์กอด-กราบได้ (มักมี 2 คนในเฟรม) จึงไม่บังคับคนเดี่ยวอีกต่อไป
+  //   (default rulesV3On:true — ไม่ส่งพารามิเตอร์ในเทสนี้เลย = เห็นข้อความ v3 ใหม่)
+  assert.match(system, /ช่อง circle เลือกภาพไม่ลายตา \(busy 0-1\) เสมอที่เป็นไปได้ — ไม่บังคับต้องเป็นคนเดี่ยว/, 'circle (v3 default) ต้องไม่บังคับคนเดี่ยวอีกต่อไป แค่แนะนำ busy 0-1');
+  assert.ok(!system.includes('circle ต้องเป็นคนเดี่ยวโฟกัสชัด (busy 0-1) เท่านั้น'), 'ถ้อยคำเดิมที่บังคับคนเดี่ยวเท่านั้น ต้องถูกแทนที่แล้วโดย default');
   assert.match(system, /เลือกใบ busy ต่ำกว่าก่อนเสมอ/, 'เมื่อ story ใกล้กันต้องเลือก busy ต่ำก่อน');
+});
+
+test('MEGA_RULES_V3 rollback (rulesV3On:false): circle บังคับ "คนเดี่ยวโฟกัสชัด" ข้อความเดิมทุก byte', async () => {
+  let captured = null;
+  const stubCallBrain = async ({ system }) => {
+    captured = system;
+    return { text: JSON.stringify({ slots: { hero: { id: null }, reaction: { id: null }, action: { id: null }, context: { id: null }, circle: { id: null } }, note: 'stub' }) };
+  };
+  await slotDirectorBrain({
+    imagesMeta: withBusyMeta,
+    compass: { angle: 'ทดสอบ', primaryEmotion: 'neutral', secondaryEmotions: [], mainCharacters: [], visualDreamShots: [], doNotUse: [] },
+    deskTitle: 'ข่าวทดสอบ clutter guard',
+    rulesV3On: false,
+    _deps: { callBrain: stubCallBrain },
+  });
+  assert.match(captured, /circle ต้องเป็นคนเดี่ยวโฟกัสชัด \(busy 0-1\) เท่านั้น/, 'rulesV3On:false ต้องคืนข้อความเดิมทุก byte (rollback)');
 });
 
 test('โครงสร้าง byte-identical: system(มี busy) = system(ไม่มี busy) + บล็อกกฎ (13) เป๊ะ', async () => {

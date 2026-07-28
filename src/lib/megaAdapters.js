@@ -3725,6 +3725,11 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   //   ที่นี่ (megaBrains.js ไม่อ่าน process.env เอง) แล้วส่ง pagePlaybookOn เข้าทั้งสอง brain · default ON ·
   //   MEGA_PAGE_PLAYBOOK=0 → prompt ทั้งสองตัว byte-identical กับก่อนแทรกคัมภีร์เป๊ะ
   const _pagePlaybookOn = process.env.MEGA_PAGE_PLAYBOOK !== '0';
+  // ★ MEGA_RULES_V3 (28 ก.ค. 69 — เจ้าของสั่ง: "กติกาเก่าที่เป็นตัวถ่วงกติกาใหม่ ให้ลบ/เขียนใหม่ได้ เพราะของใหม่
+  //   พิสูจน์จากงานจริง 478 ใบ"): แพทเทิร์นเดียวกับ _storyRulesOn/_pagePlaybookOn เป๊ะ — อ่าน env ที่นี่ (megaBrains.js
+  //   ไม่อ่าน process.env เอง) แล้วส่ง rulesV3On เข้า artBriefBrain/slotDirectorBrain + ใช้ตัดสินข้อความป้าย
+  //   heroSourceAvoid ด้านล่างด้วย (จุดเดียวที่แก้ในไฟล์นี้) · default ON · MEGA_RULES_V3=0 → ข้อความเดิมทุก byte
+  const _rulesV3On = process.env.MEGA_RULES_V3 !== '0';
   // ═══ D-sidecar — FINAL-DECISION EVIDENCE v2 (kill switch MEGA_FINAL_DECISION_EVIDENCE_V2='1' เป๊ะ) ═══
   //   latch "ครั้งเดียวก่อน await แรกของฟังก์ชัน" (TOCTOU-proof — flip env กลางทางไม่มีผล) ·
   //   OFF = inert เต็มตัว: ไม่มี dynamic import โมดูล D / ไม่อ่าน carrier-วินิจฉัยใด / ไม่มี field-log ใหม่ —
@@ -4377,6 +4382,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         ...(_armTemplateV1 && _semPrereqOn ? { mode: 'template_v1' } : {}), // legacy = ไม่ส่ง mode (arg เดิมเป๊ะ)
         storyRulesOn: _storyRulesOn, // ★ TIER3
         pagePlaybookOn: _pagePlaybookOn, // ★ ตรวจซ้ำ 28 ก.ค. 69: คัมภีร์เพจฉบับเต็ม
+        rulesV3On: _rulesV3On, // ★ MEGA_RULES_V3 28 ก.ค. 69: รื้อกติกาเก่าที่ขัดคัมภีร์ v3
       });
       if (_armTemplateV1 && _semPrereqOn) {
         // ★ P0/P1: normalize marker ที่ generate มาครั้งเดียว — invalid = HOLD · valid = แทน raw ด้วย canonical plain clone
@@ -4741,30 +4747,37 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   }
 
   // ═══ G2 HERO SOURCE POLICY (เลน soft · MEGA_HERO_SOURCE_POLICY default ON · ปิด==='0' = ไม่มีป้าย/เดิม byte-identical) ═══
-  //   ป้าย soft "เลี่ยงเป็น hero: เฟรมคลิป" ต่อ meta row ที่มาจากเฟรมคลิป (platform youtube/clip หรือ url/source มี acs-frames)
-  //   สมองเห็นป้ายใน JSON row แล้วเลี่ยงเลือกเป็น hero เอง (แพทเทิร์นเดียวกับ heroCropBlock) — ★ ไม่ hard block:
+  //   ป้าย soft ต่อ meta row ที่มาจากเฟรมคลิป (platform youtube/clip หรือ url/source มี acs-frames)
+  //   สมองเห็นป้ายใน JSON row (แพทเทิร์นเดียวกับ heroCropBlock) — ★ ไม่ hard block:
   //   พูลไม่มีทางเลือก press เลย ก็ยังใช้เฟรมคลิปเป็น hero ได้ตามเดิม (ป้ายเป็นแค่คำแนะนำให้สมอง)
+  // ★ MEGA_RULES_V3 (28 ก.ค. 69): ข้อความป้ายเดิม "เลี่ยงเป็น hero: เฟรมคลิป (คุณภาพต่ำ/เบลอ...)" ขัดกับคัมภีร์ v3
+  //   ก.5 ตรงๆ ("ภาพดิบจากคลิป/CCTV/เซลฟี่ใช้เป็น hero ได้ — ความดิบ = ความจริง — ขอแค่แสงเห็นหน้า และไม่มีภาพ
+  //   press ที่หน้าชัดกว่าให้ใช้") — เขียนใหม่เป็นกลาง (ถอดคำว่า "เลี่ยง"/"คุณภาพต่ำ" ทิ้ง) ให้ตรงเงื่อนไขจริงของ v3
+  //   แทน ("ได้ปกติเมื่อแสงเห็นหน้า" ไม่ใช่ "เลี่ยงเสมอ") · rulesV3On=false = ข้อความเดิมทุก byte (rollback)
   const _heroSrcPolicyOn = process.env.MEGA_HERO_SOURCE_POLICY !== '0';
   if (_heroSrcPolicyOn) {
     // ★ audit G (optional fix): จับคู่ด้วย id แทน positional sorted[i]/meta[i] — กัน mislabel เงียบถ้าอนาคต meta ถูก reorder
     const _cfById = new Map(sorted.filter(Boolean).map((x) => [String(x.id), x]));
+    const _heroSrcLabel = _rulesV3On
+      ? 'hero จากเฟรมคลิป/CCTV/เซลฟี่ได้ปกติเมื่อแสงเห็นหน้าชัด — ใช้ภาพข่าว press แทนเฉพาะเมื่อมีใบที่หน้าชัดกว่าจริง'
+      : 'เลี่ยงเป็น hero: เฟรมคลิป (คุณภาพต่ำ/เบลอ — ใช้ภาพข่าว press เป็น hero ถ้ามีทางเลือก)';
     let _cfLabeled = 0;
     for (const m of meta) {
       const x = _cfById.get(String(m.id));
       const _isClipFrame = !!x && (x.platform === 'youtube' || x.platform === 'clip'
         || /acs-frames/i.test(String(x.imageUrl || '')) || /acs-frames/i.test(String(x.source || '')));
       if (_isClipFrame) {
-        m.heroSourceAvoid = 'เลี่ยงเป็น hero: เฟรมคลิป (คุณภาพต่ำ/เบลอ — ใช้ภาพข่าว press เป็น hero ถ้ามีทางเลือก)';
+        m.heroSourceAvoid = _heroSrcLabel;
         _cfLabeled++;
       }
     }
-    if (_cfLabeled) console.log(`[MEGA S6] 🎬 hero source policy: ป้าย "เลี่ยงเป็น hero: เฟรมคลิป" ${_cfLabeled}/${meta.length} ใบ`);
+    if (_cfLabeled) console.log(`[MEGA S6] 🎬 hero source policy: ป้าย hero-source ${_cfLabeled}/${meta.length} ใบ (${_rulesV3On ? 'v3 กลาง' : 'เดิม เลี่ยงเป็น hero'})`);
   }
 
   let brain = { slots: {}, note: '' };
   let brainOk = true;
   try {
-    brain = await _brainFn({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title, refDNA: _refDNA, artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) || null, sceneInventory, ...(semContract ? { slotContract: semContract.slots } : {}), storyRulesOn: _storyRulesOn, pagePlaybookOn: _pagePlaybookOn, imgMetaBudget: IMG_META_BUDGET_MIRROR }); // เฟส 3.1: สมองเห็นแผนที่ฉาก · SEM-1: ส่งสัญญาช่องเมื่อ semantic ON เท่านั้น (OFF = args เดิมเป๊ะ) · ★ D3-B3.3: template path ใช้ local snapshot · ★ TIER3: storyRulesOn · ★ ข้อ 6: imgMetaBudget ตัวเดียวกับ mirror ด้านบน (sync เสมอ) · ★ ตรวจซ้ำ 28 ก.ค. 69: pagePlaybookOn คัมภีร์เพจฉบับเต็ม
+    brain = await _brainFn({ imagesMeta: meta, compass: job.dossier.compass, deskTitle: job.dossier.desk?.title, refDNA: _refDNA, artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) || null, sceneInventory, ...(semContract ? { slotContract: semContract.slots } : {}), storyRulesOn: _storyRulesOn, pagePlaybookOn: _pagePlaybookOn, rulesV3On: _rulesV3On, imgMetaBudget: IMG_META_BUDGET_MIRROR }); // เฟส 3.1: สมองเห็นแผนที่ฉาก · SEM-1: ส่งสัญญาช่องเมื่อ semantic ON เท่านั้น (OFF = args เดิมเป๊ะ) · ★ D3-B3.3: template path ใช้ local snapshot · ★ TIER3: storyRulesOn · ★ ข้อ 6: imgMetaBudget ตัวเดียวกับ mirror ด้านบน (sync เสมอ) · ★ ตรวจซ้ำ 28 ก.ค. 69: pagePlaybookOn คัมภีร์เพจฉบับเต็ม · ★ MEGA_RULES_V3 28 ก.ค. 69: rulesV3On
   } catch (err) {
     brainOk = false; // สมองล่ม → fallback ล้วน (กฎเดียวกับทางหลัก)
   }
