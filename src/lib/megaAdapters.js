@@ -4361,13 +4361,20 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       console.log(`[MEGA S6] 🔒 ใช้ ref ที่ล็อก: ${lockedRef.styleName || lockedRef.id}`);
     } else {
       try {
-        const { pickBestRef, refCategoryHint } = await import('@/lib/refCoverMatch');
+        const { pickBestRef, refCategoryHint, inferRefCategory } = await import('@/lib/refCoverMatch');
         const c = job.dossier.compass || {};
         // ★ 29 ก.ค. 69 (เจ้าของถาม "ทำไม ref template ไม่เคยเปลี่ยน"): เดิม signals.text มีแค่ angle/
         //   secondaryEmotions — ไม่เคยมี "หมวดเคสข่าว" เลย ทั้งที่ job.dossier.desk.category (จาก DESK_CATEGORIES,
         //   deskBrain.js S1) มีอยู่แล้วตั้งแต่ต้นทาง — เติมเข้า text ผ่านสะพานคำศัพท์ refCategoryHint (ไม่ตรง/ไม่มี
         //   mapping = '' ไม่เติมอะไร ไม่กระทบพฤติกรรมเดิม) ไม่ยิง LLM เพิ่มเลย (ข้อมูลมีอยู่แล้วในเคส)
-        const _catHint = refCategoryHint(job.dossier.desk?.category);
+        let _catHint = refCategoryHint(job.dossier.desk?.category);
+        // ★ 29 ก.ค. 69 (แบตช์ 2 — พิสูจน์จริง: เส้น compose/ref quick ไม่มี desk.category เลย ตัวสะพานด้าน
+        //   บนคืน '' เสมอ → ref ไม่หมุน) desk.category ว่าง = ลองอนุมานจากเนื้อความล้วนแทน (กลไก ไม่มี LLM
+        //   เพิ่ม — ดู inferRefCategory ใน refCoverMatch.js) · desk มี category จริง = ใช้ของเดิมเสมอ ไม่แตะ
+        //   (desk ชนะเสมอ) · ปิดสวิตช์ MEGA_REF_CAT_QUICK='0' = พฤติกรรมเดิมทุก byte (ไม่มีสัญญาณเพิ่มเลย)
+        if (!_catHint && process.env.MEGA_REF_CAT_QUICK !== '0') {
+          _catHint = inferRefCategory([job.dossier.desk?.title, c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '));
+        }
         // ★ 10 ก.ค. Wave1-A: seedKey นิ่งต่อข่าว (หัวข่าวก่อน — ข่าวเดิมเทสซ้ำคนละ job/คนละ caseId ก็ได้ ref ใบเดิม) → caseId → job.id
         const m = await pickBestRef({
           emotion: c.primaryEmotion || '',
@@ -6997,11 +7004,16 @@ export async function s7_cover(job, { origin, _deps } = {}) {
   let selectionRefDNA = refDNA;
   if (!refDNA) {
     try {
-      const { pickBestRef, refCategoryHint } = await import('@/lib/refCoverMatch');
+      const { pickBestRef, refCategoryHint, inferRefCategory } = await import('@/lib/refCoverMatch');
       const c = d.compass || {};
       // ★ 29 ก.ค. 69 (เจ้าของถาม "ทำไม ref template ไม่เคยเปลี่ยน"): เติมสัญญาณหมวดเคส แบบเดียวกับจุด S6
       //   ด้านบนเป๊ะ (ดูคอมเมนต์เต็มที่นั่น) — fallback path นี้ (แฟ้มเก่าไม่มี refMatch) ก็ควรได้สัญญาณเดียวกัน
-      const _catHint = refCategoryHint(d.desk?.category);
+      let _catHint = refCategoryHint(d.desk?.category);
+      // ★ 29 ก.ค. 69 (แบตช์ 2 — พิสูจน์จริง): เส้นนี้เอง (mega/compose-test route.js สร้าง desk:{title} เปล่า
+      //   ไม่มี category) คือเส้น "quick" ที่พิสูจน์ว่า ref ไม่หมุนจริง — เกณฑ์/สวิตช์เดียวกับจุด S6 เป๊ะ
+      if (!_catHint && process.env.MEGA_REF_CAT_QUICK !== '0') {
+        _catHint = inferRefCategory([d.desk?.title, c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '));
+      }
       const m = await pickBestRef({
         emotion: c.primaryEmotion || '',
         text: [_catHint, c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '),

@@ -20,6 +20,11 @@
 export async function register() {
   // instrumentation.js ถูกโหลดทั้งสอง runtime (nodejs/edge) — process.on ไม่มีใน edge runtime เลย ต้องกรองก่อน
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
-  const { installCrashGuard } = await import('./instrumentation-node.js');
+  const { installCrashGuard, recoverOrphanJobsOnBoot } = await import('./instrumentation-node.js');
   installCrashGuard();
+  // ★ 29 ก.ค. 69 (แบตช์เสถียรภาพ — เหตุ :3900 hard-kill 5 ครั้ง): กู้งานกำพร้า status='running' ค้างจากโปรเซส
+  //   ก่อนหน้าที่ตายกลางทาง — ต้อง await ให้จบใน register() (Next.js การันตี register() ต้องจบก่อนเซิร์ฟเวอร์
+  //   พร้อมรับ request เสมอ ดู node_modules/next/dist/docs — จึงปลอดภัยที่จะให้จบก่อนรับงานใหม่) ตัวฟังก์ชันเองมี
+  //   try/catch ครอบทุกจุดแล้ว ไม่มีทางทำให้บูตค้าง/พัง (อ่าน/เขียนคลังปกติเร็วกว่า 1 วิมาก)
+  await recoverOrphanJobsOnBoot();
 }

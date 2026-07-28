@@ -14,7 +14,7 @@
 
 import { NextResponse } from 'next/server';
 import { Agent } from 'undici';
-import { createJob, patchJob, finishJob, listJobs, getJob, claimTeamJob, removeJob } from '@/lib/quickTestJobs';
+import { createJob, patchJob, finishJob, listJobs, getJob, claimTeamJob, removeJob, getBootId } from '@/lib/quickTestJobs';
 // ★ 27 ก.ค. 69: 3 ชนิดงานโต๊ะข่าว (desk_harvest/desk_search/desk_chief) — ยืม whitelist mode จาก taxonomy เดียวกับ /api/m/desk
 import { HARVEST_MODE_KEYS, HARVEST_MODES } from '@/lib/services/newsDesk/taxonomy';
 
@@ -208,7 +208,9 @@ async function runJob(job, origin) {
   // ★ 27 ก.ค. 69: desk_* ใช้เพดานวนของตัวเอง (2 รอบ) — ดู DESK_RETRY_MAX ด้านบน
   const maxAttempts = job.dispatch === 'cloud' ? 1 : (DESK_KINDS.includes(job.kind) ? DESK_RETRY_MAX : RETRY_MAX);
   const nowIso = () => new Date().toISOString();
-  await patchJob(job.id, { status: 'running', startedAt: nowIso(), claimedAt: nowIso(), progress: { step: 'กำลังรัน', pct: 5 } });
+  // ★ 29 ก.ค. 69 (Opus fix): stamp ownerBootId/ownerPort ตอนตั้ง running — recoverOrphanJobs (quickTestJobs.js)
+  //   ใช้แยกงานของโปรเซสตัวเอง (ยังไม่ตายแน่) ออกจากโปรเซสอื่นที่แชร์ store เดียวกัน (:3000 vs :3900)
+  await patchJob(job.id, { status: 'running', startedAt: nowIso(), claimedAt: nowIso(), ownerBootId: getBootId(), ownerPort: process.env.PORT || null, progress: { step: 'กำลังรัน', pct: 5 } });
   let lastErr = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     // ★ 9 ก.ค.: ผู้ใช้กดลบระหว่างรัน → getJob เจอ null → หยุดทันที ไม่วนต่อ ไม่เขียนผลกลับ (ปุ่มลบใน UI)

@@ -31,3 +31,29 @@ export function installCrashGuard() {
 
   console.log('🧯 [instrumentation] ติดตาข่ายกันเซิร์ฟเวอร์ตายจาก unhandledRejection/uncaughtException แล้ว (register() ผ่าน)');
 }
+
+// ============================================================
+// 🩹 recoverOrphanJobsOnBoot (29 ก.ค. 69 แบตช์เสถียรภาพ) — เรียก recoverOrphanJobs (quickTestJobs.js) ตอนบูต
+// ------------------------------------------------------------
+// idempotent เหมือน installCrashGuard ด้านบนเป๊ะ — เหตุผลสำคัญ (ต่างจาก crash-guard ตรงนี้): งาน dispatch='local'
+// ที่กำลังรันจริงในโปรเซสเดียวกันนี้อาจมี claimedAt ค้างเกิน 90 วิ ได้ตามปกติ (callOnce ภายในกินเวลาได้ถึง 25+ นาที
+// ต่อความพยายาม 1 ครั้ง โดยไม่รีเฟรช claimedAt ระหว่างทางเลย) — ถ้า register() ถูกเรียกซ้ำระหว่าง dev hot-reload
+// (ตามคอมเมนต์ installCrashGuard เดิม) แล้วสแกนซ้ำโดยไม่มี guard จะเข้าใจผิดว่างานที่ยังรันสดอยู่จริงเป็นงานกำพร้า
+// → guard นี้การันตีสแกนแค่ "ครั้งเดียวต่อการบูตจริง" (โปรเซสใหม่ทั้งก้อน = globalThis รีเซ็ต = สแกนใหม่ถูกต้อง)
+// ล้ม (อ่าน/เขียนคลังไม่สำเร็จ) ต้องไม่ทำให้เซิร์ฟเวอร์บูตไม่ขึ้น — ครอบ try/catch เอง (recoverOrphanJobs เองก็มี
+// try/catch ภายในอีกชั้นสำหรับ error ต่อรายการ — ชั้นนี้กันเฉพาะ import ล้ม/ throw ที่ไม่คาดคิด)
+export async function recoverOrphanJobsOnBoot() {
+  if (globalThis.__ORPHAN_RECOVERY_RAN) return;
+  globalThis.__ORPHAN_RECOVERY_RAN = true;
+  try {
+    const { recoverOrphanJobs } = await import('./lib/quickTestJobs.js');
+    const r = await recoverOrphanJobs();
+    if (r?.on === false) {
+      console.log('🩹 [instrumentation] กู้งานกำพร้าตอนบูต: ปิดสวิตช์ (MEGA_ORPHAN_RECOVERY=0) — ข้าม');
+    } else if (!r?.scanned) {
+      console.log('🩹 [instrumentation] กู้งานกำพร้าตอนบูต: ไม่เจองานกำพร้า');
+    }
+  } catch (e) {
+    console.error('🩹 [instrumentation] กู้งานกำพร้าตอนบูต: ล้มเหลว (ไม่กระทบการบูตเซิร์ฟเวอร์)', e?.message);
+  }
+}
