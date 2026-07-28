@@ -652,12 +652,19 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
 - duplicateOfIndex: เทียบภาพนี้กับ "ภาพหลักของช่อง" (index 0 ถึง ${_primaryCount - 1}) ที่มี index น้อยกว่าภาพนี้เท่านั้น — ถ้าเป็นช็อตประเภทเดียวกัน (เช่น เซลฟี่มุมกล้อง/ท่าโพสคล้ายกัน) + คนเดียวกัน + ฉากใกล้เคียงกันจนดูซ้ำกัน ให้ตอบ index ของภาพหลักใบนั้น (จำนวนเต็ม) — ไม่ซ้ำกับใครเลยหรือเป็นภาพหลักใบแรกสุด (index 0) ตอบ null${heroIdx >= 0 ? `
 - sameAsHeroPerson: ตอบเฉพาะรูปที่ไม่ใช่ index ${heroIdx} เท่านั้น (ข้ามรูป index ${heroIdx} เอง ไม่ต้องตอบฟิลด์นี้) — true/false: เป็น "คนคนเดียวกัน" กับคนในรูป index ${heroIdx} (ภาพตัวเอกของปกที่เลือกไว้ตอนนี้) หรือไม่ ตัดสินจากใบหน้า/รูปร่าง/เสื้อผ้าที่เห็นจริงเทียบกันเท่านั้น ไม่มั่นใจ = false` : ''}${_frontalOn ? `
 - faceFront: มุมการเห็น "ใบหน้าคนหลัก" เลือก 1: 0-2 (0=ไม่เห็นหน้า หันหลัง/เห็นแต่ท้ายทอย/หน้าถูกบังเกือบหมด, 1=เห็นหน้าบางส่วน มุมข้าง/ก้มหน้า/มือผมบังเกินครึ่ง, 2=เห็นเต็มหน้า หน้าตรงหรือเกือบตรง เห็นตา-จมูก-ปากครบ) ไม่มีคนในรูป/ตัดสินไม่ได้ = null` : ''}
+ตอบสั้นกระชับที่สุด — JSON บรรทัดเดียวเท่านั้น ห้ามมี markdown/code fence/คำอธิบายใดๆ ปนมา · field ไหนเป็น null/false/ไม่มีข้อมูล ให้ข้ามไม่ต้องใส่ในออบเจ็กต์นั้นเลย (ระบบเติมค่าเริ่มต้นให้เอง) — ใส่เฉพาะ field ที่มีค่าจริงเท่านั้น (ยกเว้น index/textFound/faceCount ที่ต้องมีเสมอ)
 ตอบ JSON เท่านั้น: {"results":[{"index":0,"textFound":"","faceBox":{"x1":0,"y1":0,"x2":0,"y2":0},"faceCount":1,"faceVisible":2${_wmGuardOn ? ',"watermark":null' : ''},"duplicateOfIndex":null${heroIdx >= 0 ? ',"sameAsHeroPerson":true' : ''}${_frontalOn ? ',"faceFront":2' : ''}},...]}`;
   // ★ ข้อ 3 (โมเดลปรับได้): MEGA_SECOND_EYE_MODEL override ได้ (แค่ 5-8 ภาพ/ปก ต้นทุนจิ๊บแม้ใช้โมเดลแรงกว่า) —
   //   ไม่ตั้ง = COVER_GEMINI_MODEL เดิม (ตัวเดียวกับที่ตาคัด/ตาหาหน้าใช้อยู่แล้วทั้งสาย — ไม่ต้องคีย์ใหม่)
   const _seModel = process.env.MEGA_SECOND_EYE_MODEL || _deps.coverGeminiModel || COVER_GEMINI_MODEL;
   const _cgv = _deps.callGeminiVision || (await import('@/lib/ai/geminiClient')).callGeminiVision;
-  const r = await _cgv({ prompt: withHonestyDna(prompt), images, maxTokens: 2000, model: _seModel });
+  // ★★★ แก้ด่วน 29 ก.ค. 69 (เคสจริง AC-0202 — "Gemini ส่งข้อมูลที่ parse ไม่ได้" 4 รอบติด หลัง schema โตขึ้นเรื่อยๆ:
+  //   faceVisible+sameAsHeroPerson+duplicateOfIndex+faceFront+watermark): เพดานเดิม 2000 ตายตัวไม่พอสำหรับภาพ
+  //   สูงสุด 10 ใบ (5 หลัก+5 สำรอง) × field ที่เพิ่มขึ้นทุกใบ — คำตอบยาวขึ้นมากจนโดนตัดกลาง (บทเรียน AGENTS.md:
+  //   "เพดานต่ำ=ตอบว่างเปล่า/ขาด" ของโมเดล reasoning ก็เกิดกับโมเดล vision ที่มี thinking ได้เหมือนกัน) → ยกเพดาน
+  //   ให้ scale ตามจำนวนภาพจริง (ไม่ใช่ค่าคงที่) กันพังซ้ำถ้าโควตาสำรองขยับในอนาคตอีก
+  const _wmMaxTokens = Math.max(4000, images.length * 600);
+  const r = await _cgv({ prompt: withHonestyDna(prompt), images, maxTokens: _wmMaxTokens, model: _seModel });
   const results = Array.isArray(r?.results) ? r.results : [];
   // ★ ข้อ 1: textOverlay มาจากโค้ด (_deriveTextOverlay) เสมอ ไม่ใช่ field ที่โมเดลรายงานเอง (ถ้าส่งมาก็ทิ้ง)
   // ★ เคสไรเดอร์: faceVisible/sameAsHeroPerson/faceFront validate ชนิดก่อนเชื่อ (fail-safe — ค่าพังรูปแบบ = null)

@@ -731,6 +731,82 @@ await test('(ค) MEGA_SECOND_EYE_MODEL ตั้งไว้ → override เ�
   assert.equal(capturedModel, 'gemini-9-ultra-test', 'ต้องใช้โมเดลจาก env override');
 });
 
+// ═══════════════════ 29 ก.ค. 69 — แก้ด่วนเคสจริง AC-0202: "Gemini ส่งข้อมูลที่ parse ไม่ได้" 4 รอบติด ═══════════════════
+// หลัง schema โตขึ้นเรื่อยๆ (faceVisible+sameAsHeroPerson+duplicateOfIndex+faceFront+watermark) คำตอบยาวขึ้นมาก
+// จนโดนตัดกลาง (เพดานเดิม maxTokens:2000 ตายตัว) → ด่านลายน้ำ C1 ไม่ทำงานเลย (วง② หลบสำเร็จเพราะเป็นกลไก A คนละจุด
+// แต่ลายน้ำ①ยังอยู่เพราะ C1 ไม่เคยได้ผลตรวจจากตาสองเลย) — แก้ 3 จุด: (1) เพดาน scale ตามจำนวนภาพ (2) prompt สั่ง
+// ตอบกระชับ+ข้าม field null/false (3) sanitizer/derivation เดิมต้องทนทานเมื่อ field หายไปทั้งหมด (ไม่ใช่แค่ null)
+
+await test('(แก้ด่วน AC-0202-1) maxTokens ต้อง scale ตามจำนวนภาพจริง (ไม่ใช่ 2000 ตายตัว) — 1 ภาพ = floor 4000', async () => {
+  const records = [{ id: 'h1', imageUrl: 'https://x/h1.jpg' }];
+  const slots = mkSlots({ hero: { id: 'h1', backups: [] } });
+  let capturedMaxTokens = null;
+  await _runSecondEye({
+    slots, activeSlots: ['hero'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ maxTokens }) => { capturedMaxTokens = maxTokens; return { results: [{ index: 0, textFound: '', faceBox: null, faceCount: 0 }] }; },
+    },
+  });
+  assert.equal(capturedMaxTokens, 4000, '1 ภาพ (ต่ำกว่า floor) ต้องได้ maxTokens=4000 (floor กันเพดานต่ำเกินไปเมื่อภาพน้อย)');
+});
+
+await test('(แก้ด่วน AC-0202-1) maxTokens ต้อง scale ขึ้นเมื่อภาพเยอะ (เพดานงบ 5 หลัก+5 สำรอง=10 ใบ) → 10*600=6000', async () => {
+  const roles = ['hero', 'reaction', 'action', 'context', 'circle'];
+  const records = [];
+  const picks = {};
+  for (const role of roles) {
+    records.push({ id: `${role}_p`, imageUrl: `https://x/${role}_p.jpg` });
+    records.push({ id: `${role}_b`, imageUrl: `https://x/${role}_b.jpg` });
+    picks[role] = { id: `${role}_p`, backups: [`${role}_b`] };
+  }
+  const slots = mkSlots(picks);
+  let capturedMaxTokens = null, capturedCount = 0;
+  await _runSecondEye({
+    slots, activeSlots: roles, byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images, maxTokens }) => { capturedCount = images.length; capturedMaxTokens = maxTokens; return { results: images.map((_, i) => ({ index: i, textFound: '', faceBox: null, faceCount: 0 })) }; },
+    },
+  });
+  assert.equal(capturedCount, 10, 'เคสนี้ต้องส่งภาพครบ 10 ใบ (5 หลัก+5 สำรอง) — เงื่อนไขของเทสนี้');
+  assert.equal(capturedMaxTokens, 6000, `10 ภาพ ต้องได้ maxTokens=10*600=6000 (ได้ ${capturedMaxTokens}) — เดิมตายตัว 2000 ไม่พอจนพังจริง`);
+});
+
+await test('(แก้ด่วน AC-0202-2) prompt ต้องมีคำสั่งตอบกระชับ + ห้าม markdown + ข้าม field null/false (ลดขนาดคำตอบกันโดนตัดกลาง)', async () => {
+  const records = [{ id: 'h1', imageUrl: 'https://x/h1.jpg' }];
+  const slots = mkSlots({ hero: { id: 'h1', backups: [] } });
+  let capturedPrompt = null;
+  await _runSecondEye({
+    slots, activeSlots: ['hero'], byId: mkById(records),
+    _deps: { fetchImageB64: mkFetch(), callGeminiVision: async ({ prompt }) => { capturedPrompt = prompt; return { results: [{ index: 0, textFound: '', faceBox: null, faceCount: 0 }] }; } },
+  });
+  assert.ok(capturedPrompt.includes('ห้ามมี markdown'), 'ต้องสั่งห้าม markdown/code fence ชัดเจน');
+  assert.ok(capturedPrompt.includes('ข้ามไม่ต้องใส่ในออบเจ็กต์นั้นเลย'), 'ต้องสั่งข้าม field null/false/ไม่มีข้อมูล');
+});
+
+await test('(แก้ด่วน AC-0202-3) derivation เดิมทนทานเมื่อคำตอบ "ข้าม field ทั้งหมด" (ไม่ใช่แค่ตอบ null ตรงๆ) — faceBox/watermark/duplicateOfIndex/sameAsHeroPerson ต้อง default ถูกต้องเหมือนตอบ null ทุกประการ', async () => {
+  const records = [
+    { id: 'h1', imageUrl: 'https://x/h1.jpg' },
+    { id: 'hb1', imageUrl: 'https://x/hb1.jpg' },
+  ];
+  const slots = mkSlots({ hero: { id: 'h1', backups: ['hb1'] } });
+  const r = await _runSecondEye({
+    slots, activeSlots: ['hero'], byId: mkById(records),
+    _deps: {
+      fetchImageB64: mkFetch(),
+      // จงใจ "ข้าม" ทุก field ที่เป็น optional เลย (ไม่ส่ง faceBox/faceVisible/watermark/duplicateOfIndex/
+      // sameAsHeroPerson มาในออบเจ็กต์เลยแม้แต่คีย์เดียว) — มีแค่ index/textFound/faceCount ตามที่บังคับเสมอ
+      callGeminiVision: async () => ({ results: [{ index: 0, textFound: '', faceCount: 0 }] }),
+    },
+  });
+  assert.equal(r.checked, 1);
+  assert.ok(!slots.hero._secondEyeFaceBox, 'faceBox ที่ถูกข้าม (undefined) ต้อง default เหมือนตอบ null เป๊ะ — ไม่แนบ override');
+  assert.ok(!slots.hero._secondEyeWatermarkFlag, 'watermark ที่ถูกข้าม ต้องไม่ทริกเกอร์ forced-replace');
+  assert.ok(!slots.hero._watermarkEdge, 'watermark ที่ถูกข้าม ต้องไม่แนบ marker ครอปด้วย');
+  assert.equal(slots.hero.id, 'h1', 'ไม่มีปัญหาอะไร (ทุก field ว่าง/default) → ไม่ต้องสลับภาพเลย');
+});
+
 await test('(การ์ดที่ 5, 28 ก.ค. 69) prompt ตาสองที่ส่งจริงขึ้นต้นด้วย AI_HONESTY_DNA เมื่อ AI_HONESTY_DNA เปิด (default)', async () => {
   const records = [{ id: 'h1', imageUrl: 'https://x/h1.jpg' }];
   const slots = mkSlots({ hero: { id: 'h1', backups: [] } });
