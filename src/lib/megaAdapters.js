@@ -1401,6 +1401,78 @@ function _buildFrameBrief(compass) {
   return sanitizeFrameBrief(raw);
 }
 
+// ★ C-0 (แบตช์เฟส C, 29 ก.ค. 69 — บทเรียนสด AC-0218/MCV-ms6792hxlwz): การ์ดกัน dream-score บูสต์ผิดฉาก
+//   สืบจากหลักฐานจริง (log/S6 trace ของ AC-0218) ก่อนแก้: hero slot ของเคสนั้น "ไม่ได้" ผ่าน storyFitOf/dreamMatch
+//   เลย (hero ถูกกันออกจาก STORY_SLOTS ทั้งชุดอยู่แล้ว — ดูคอมเมนต์ "6.3" ใกล้ storyFitOf) รากที่แท้จริงของเคสนั้น
+//   คือคนละกลไก (hero ตกไปใช้ candidate ที่ตาสองตรวจพบว่าเป็นภาพหมู่ 5 หน้า ระหว่าง fallback-ตัวสุดท้ายที่ไม่มีตัวเลือก
+//   อื่นเหลือ → hero_unverified_kept) — ไม่ใช่ dream-score เลย จึงไม่ยืนยันสมมติฐานเดิมของ C-0 ตรงตัว
+//   แต่หลักการที่ขอ ("dream boost ใช้ได้เฉพาะภาพที่ผ่านเกณฑ์พื้นฐานของ role") ยังมีคุณค่าจริงในจุดที่ dreamMatch
+//   ทำงานจริง (context/action/circle ผ่าน storyFitOf) — ภาพที่ข้อความ note ดันบังเอิญไปพ้องคำกับช็อตในฝัน (text-match
+//   ล้วน ไม่เช็คเนื้อหาภาพเลย) อาจเป็นภาพหมู่ผิดฉากที่ไม่ควรถูกดันคะแนนขึ้นมาแข่ง — การ์ดนี้จึงเป็นมาตรการป้องกันเชิงรุก
+//   ทั่วไป ไม่ใช่การแก้ AC-0218 โดยตรง (root cause ของ AC-0218 อยู่นอกสโคปที่ขอในแบตช์นี้ — เป็นเรื่อง fallback-ไม่มี
+//   ตัวเลือกอื่น ไม่ใช่ scoring bug)
+//   PURE: ไม่ import/IO/env — export ให้เทสตรงได้ (env check อยู่ที่ caller เท่านั้น เหมือน sanitizeFrameBrief)
+export function dreamScoreGuardOk(x, { maxFaces = 4 } = {}) {
+  const fc = x?.triage?.faceCount;
+  if (typeof fc === 'number' && Number.isFinite(fc) && fc > maxFaces) return false; // ภาพหมู่ชัดเจน (เกิน maxFaces หน้า) — ไม่ให้เครดิต dream boost
+  return true; // วัดไม่ได้ (undefined/NaN)/อยู่ในเกณฑ์ = ผ่าน (permissive-by-default ตามแพทเทิร์นทั้งไฟล์)
+}
+function _dreamScoreGuardOn() { return process.env.MEGA_DREAM_SCORE_GUARD !== '0'; }
+
+// ★ C-1 (แบตช์เฟส C, 29 ก.ค. 69 — Opus scope-fix รอบ 2): เดิมตั้งใจให้ compassBrain (LLM) ติดป้าย beat ตรงๆ แต่ผิด
+//   กติกาทีม (ห้ามแก้ megaBrains.js โดยไม่ได้รับอนุมัติเจ้าของตรง — revert byte-exact แล้ว) → ย้ายมาเป็นการอนุมาน
+//   เชิงกลไกล้วน ไม่มี LLM เอี่ยวเลย จาก 2 สัญญาณที่ "มีอยู่แล้ว" ในข้อมูลเดิม (compass.visualDreamShots ไม่มีฟิลด์
+//   beat จาก AI อีกต่อไป — แค่ {slot, description} เดิมทุกไบต์):
+//   (ก) shot.slot ที่มีอยู่แล้วเป็น "ค่า default" (ไม่ใช่หลักฐานจริง — ดู source:'slot' ด้านล่าง) — reaction→ก่อน,
+//   action→ระหว่าง, context/evidence→จบ (ตรงกับผัง ROLE_EXPECTED_BEAT เดิมที่ใช้กับ storyFitOf ด้านล่างเป๊ะ —
+//   ดึงมาจากค่าเดียวกัน กันชุดตัวเลขสองชุดหลุดไม่ตรงกัน)
+//   (ข) คำ/วลีบอกเวลาใน description "ถ้ามี" = หลักฐานจริง (source:'keyword') ชนะ default ของ slot เสมอ
+//   ★ ผลตรวจรอบ 2 (Opus) พบบั๊กจริง 2 ข้อ + จุดอ่อนออกแบบ 1 ข้อ แก้ทั้งหมดตรงนี้:
+//   1) คำสั้นเดี่ยวชนกับคำไทยทั่วไปที่ไม่เกี่ยวกัน ('รอ' แมตช์ใน "ครอบครัว"/"รอยยิ้ม", 'หลัง' แมตช์ใน "เบื้องหลัง",
+//      'จบ' เดี่ยวก็เสี่ยงแบบเดียวกัน) — แก้ด้วยวลียาว/เจาะจงล้วน (ไม่มีคำเดี่ยว 1-2 พยางค์ในตารางอีกต่อไป)
+//   2) เคสมีหลายวลีชนกันในประโยคเดียว (เช่น "หลังจากรอคอยมานาน ในที่สุดก็ชนะ" — เดิมเจอ 'รอ' ก่อนตามลำดับ priority
+//      ก่อน→ระหว่าง→จบ เลยตอบ "ก่อน" ทั้งที่ประโยคทั้งหมดคือเล่าอดีตจบแล้ว "ในที่สุด/ชนะ") — แก้ด้วย "ตำแหน่งท้ายสุด
+//      ในประโยคชนะ" (lastIndexOf ของทุกวลีที่แมตช์ทุกกลุ่ม แล้วเลือกวลีที่ตำแหน่งมากสุด) — เล่าเรื่องไทยมักจบประโยค
+//      ด้วยสถานะปัจจุบัน/ผลลัพธ์สุดท้าย ไม่ใช่จุดเริ่มเรื่อง
+//   3) tautology: ROLE_EXPECTED_BEAT ใช้ค่าเดียวกับ BEAT_SLOT_DEFAULT → เมื่อ shot.slot ตรงกับ role ที่กำลังให้คะแนน
+//      อยู่แล้ว (เงื่อนไขก่อนหน้านี้ใน storyFitOf กรองไว้แล้ว) การ fallback ไปใช้ slot-default จะ "ตรง" กับ
+//      expectedBeat เสมอโดยไม่มีหลักฐานจริงอะไรเลย = ไม่แยกแยะอะไร — แก้โดยคืนค่าเป็น {beat, source} แยกชัดว่า
+//      มาจาก 'keyword' (หลักฐานจริงจาก description) หรือ 'slot' (แค่ default เดา) — จุดให้โบนัสใน storyFitOf ต้อง
+//      เช็ค source==='keyword' เท่านั้นถึงจะให้โบนัส (ดูจุดเรียกด้านล่าง)
+//   จับไม่ได้ทั้งคู่ (slot ไม่อยู่ในผังที่รู้จัก + ไม่มีวลีบอกเวลาในคำอธิบายเลย) = {beat:null, source:null} (ไม่ให้
+//   โบนัส ไม่เดา) · PURE: ไม่ import/IO/env — export ให้เทสตรงได้ (เหมือน dreamScoreGuardOk/sanitizeFrameBrief)
+const BEAT_KEYWORDS = {
+  ก่อน: ['รอคอย', 'ระหว่างรอ', 'ก่อนแข่ง', 'เตรียมตัว', 'ก่อนหน้านี้', 'สมัยก่อน', 'ตอนเด็ก'],
+  // ★ ผลตรวจรอบ 3 (Opus): 'กำลัง' เดี่ยวชน "กำลังใจ" (คำถี่มากในโดเมนข่าวซึ้ง/ให้กำลังใจ) · 'ในสนาม' เดี่ยวชน
+  //   "ในสนามหญ้า" (บริบทบ้าน ไม่ใช่สนามแข่ง) — แทนด้วยวลีเจาะจงกว่าทั้งคู่
+  ระหว่าง: ['กำลังจะ', 'กำลังแข่ง', 'ขณะกำลัง', 'ระหว่าง', 'ในสนามแข่ง', 'กลางสนาม', 'ขณะที่', 'กลางงาน', 'ในพิธี'],
+  จบ: ['หลังจาก', 'หลังจบ', 'หลังแข่ง', 'ชนะ', 'รับถ้วย', 'สิ้นสุด', 'จบการแข่ง', 'จบการศึกษา', 'ในที่สุด', 'สุดท้าย', 'ปัจจุบัน', 'ทุกวันนี้'],
+};
+const BEAT_SLOT_DEFAULT = { reaction: 'ก่อน', action: 'ระหว่าง', context: 'จบ', evidence: 'จบ' };
+// หาวลีบอกเวลาที่ตำแหน่งท้ายสุดในคำอธิบาย (ไม่ใช่วลีแรกที่เจอตามลำดับกลุ่ม) — เท่ากันเป๊ะ (ชนตำแหน่งเดียวกัน,
+// เคสหายากมาก) ให้กลุ่มที่ตรวจก่อน (ก่อน→ระหว่าง→จบ) ชนะ เป็น tie-break ที่นิ่ง/ทำนายผลได้
+function _matchLatestBeatKeyword(desc) {
+  let best = null; // { beat, pos }
+  for (const beat of ['ก่อน', 'ระหว่าง', 'จบ']) {
+    for (const kw of BEAT_KEYWORDS[beat]) {
+      const pos = desc.lastIndexOf(kw);
+      if (pos < 0) continue;
+      if (!best || pos > best.pos) best = { beat, pos };
+    }
+  }
+  return best ? best.beat : null;
+}
+export function inferBeatFromDreamShot(shot) {
+  const desc = String(shot?.description || '').trim().toLowerCase();
+  if (desc) {
+    const kwBeat = _matchLatestBeatKeyword(desc);
+    if (kwBeat) return { beat: kwBeat, source: 'keyword' };
+  }
+  const slot = String(shot?.slot || '').trim().toLowerCase();
+  const slotBeat = BEAT_SLOT_DEFAULT[slot] || null;
+  return slotBeat ? { beat: slotBeat, source: 'slot' } : { beat: null, source: null };
+}
+
 // ---------- S5b สกัดคีย์เวิร์ด (สมองอารมณ์ครบสเปกตรัม + ผูกชื่อ) ----------
 export async function s5_keywords(job, { origin }) {
   const im = job.dossier.images || {};
@@ -4464,11 +4536,25 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   const _cmpEmo = [_cmp.primaryEmotion, ...(_cmp.secondaryEmotions || [])].map(_lc).filter(Boolean);
   const _dreamText = _lc([_cmp.angle, ...(_cmp.visualDreamShots || []).map((v) => `${v?.slot || ''} ${v?.description || ''}`)].join(' '));
   const STORY_CAT_RE = /(relationship|family|group|lifestyle|travel|landmark|context|scene)/i;
+  // ★ C-1 (แบตช์เฟส C, 29 ก.ค. 69 — "ช่องย่อยเล่าตามลำดับเรื่อง", rework หลัง Opus scope-fix): dream shots ที่
+  //   อนุมาน beat ได้ (ก่อน/ระหว่าง/จบ — ผ่าน inferBeatFromDreamShot ล้วน ไม่มี LLM เอี่ยว ดูคอมเมนต์เต็มที่นิยาม
+  //   ฟังก์ชันนั้น) ตรงกับจังหวะเล่าเรื่องที่คาดไว้ของ role นั้น (ตามลำดับที่ slotDirectorBrain สอน LLM ไว้อยู่แล้ว
+  //   rule 15: บริบท/ที่มา(reaction) → โมเมนต์หัวใจ(action) → ผลลัพธ์/จุดพลิก(context)) → บวกคะแนนเสริมเล็กน้อยให้
+  //   candidate ที่ note ตรงกับ "ช็อตเฉพาะจุดนั้น" (ไม่ใช่ blob รวมแบบ dreamMatch) เป็นแค่คะแนนจัดลำดับเสริม ไม่ใช่
+  //   hard constraint — อนุมาน beat ไม่ได้/ปิดสวิตช์/role ไม่อยู่ในผัง = ไม่มีผลเลย (วัตถุดิบไม่พอ = เงียบ ไม่พัง
+  //   ไม่มีคะแนนผี) · kill-switch MEGA_STORY_TIMELINE (default ON, '0'=ปิด) — ควบคุมได้ทุกเส้นจากจุดเดียว (อ่าน env
+  //   ตรงในไฟล์นี้ ไม่มี param ข้าม layer ไปที่ megaBrains.js อีกต่อไป)
+  const STORY_TIMELINE_ON = process.env.MEGA_STORY_TIMELINE !== '0';
+  const ROLE_EXPECTED_BEAT = { reaction: BEAT_SLOT_DEFAULT.reaction, action: BEAT_SLOT_DEFAULT.action, context: BEAT_SLOT_DEFAULT.context };
+  const _dreamShotsRaw = Array.isArray(_cmp.visualDreamShots) ? _cmp.visualDreamShots : [];
   const _sfCache = new Map();
-  const storyFitOf = (x) => {
+  const storyFitOf = (x, roleKey) => {
     if (!STORY_SEL_ON) return null;
     const id = String(x?.id ?? '');
-    if (_sfCache.has(id)) return _sfCache.get(id);
+    // ★ C-1: cache key ต้องแยกตาม roleKey เมื่อโหมด timeline เปิด (คะแนนเดียวกันอาจต่างกันคนละ role) — ปิดสวิตช์/
+    //   ไม่ส่ง roleKey = cache key เดิมทุก byte (id ล้วน) พฤติกรรมเดิมเป๊ะ
+    const cacheKey = (STORY_TIMELINE_ON && roleKey) ? `${id}::${roleKey}` : id;
+    if (_sfCache.has(cacheKey)) return _sfCache.get(cacheKey);
     const fromStory = storySet.has(_lc(x?.query));
     const relCat = STORY_CAT_RE.test(String(x?.triage?.category || ''));
     const emo = _lc(x?.triage?.emotion);
@@ -4484,18 +4570,46 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     // ★ ปิดเงื่อนไข เฟส A ข้อ 6 (29 ก.ค. 69): dreamMatch เดิมได้แค่ +1 เท่าน้ำหนักอารมณ์ — เบาไป (ภาพที่ตรงช็อต
     //   ในฝันจริงๆ ต้องชนะภาพสวยเฉยๆ) ยกเป็น +3 ใต้ env ใหม่ MEGA_DREAM_SCORE ('0'=+1 เดิม) + เคารพสวิตช์แม่
     //   MEGA_DREAM_WIRING ด้วย (ปิดสวิตช์แม่ = ทุกอย่างเกี่ยวกับ dream กลับพฤติกรรมเดิมเป๊ะ รวมค่า boost นี้)
-    if (dreamMatch) s += (_dreamWiringOn() && process.env.MEGA_DREAM_SCORE !== '0') ? 3 : 1;
+    // ★ C-0 (แบตช์เฟส C — การ์ดกัน dream บูสต์ผิดฉาก): บูสต์นี้ต้องผ่าน dreamScoreGuardOk ก่อนเสมอ (ภาพหมู่ชัดเจน
+    //   เกิน maxFaces หน้า = ไม่ได้เครดิต แม้ note จะพ้องคำกับช็อตในฝันจริงก็ตาม) · kill-switch MEGA_DREAM_SCORE_GUARD
+    //   (default ON, '0' = ไม่การ์ด พฤติกรรมเดิมเป๊ะ) · วัด faceCount ไม่ได้ = ผ่าน (permissive-by-default)
+    if (dreamMatch && (!_dreamScoreGuardOn() || dreamScoreGuardOk(x))) {
+      s += (_dreamWiringOn() && process.env.MEGA_DREAM_SCORE !== '0') ? 3 : 1;
+    }
+    // ★ C-1: timeline-beat bonus — เฉพาะ role ที่อยู่ในผัง (reaction/action/context) + มี dream shot ที่ slot ตรง role
+    //   นี้ + beat ที่อนุมานได้ "จากวลีบอกเวลาจริงใน description เท่านั้น" (source==='keyword' — ห้ามนับ source==='slot'
+    //   ซึ่งเป็นแค่ default เดา ไม่ใช่หลักฐาน กันโบนัส tautology ที่ผู้ตรวจจับได้: slot ตรง role อยู่แล้วจากเงื่อนไข
+    //   ก่อนหน้า → ถ้ายอมนับ default ด้วย จะ "ตรง" เสมอโดยไม่มีหลักฐานอะไรเลย) ตรงจังหวะที่คาด + note ของ candidate
+    //   พ้องคำกับ "คำอธิบายของช็อตนั้นเจาะจง" (ไม่ใช่ blob รวม) — ผ่านการ์ด C-0 เดียวกัน (ภาพหมู่ผิดฉากไม่ควรได้เครดิต
+    //   จาก dream ไม่ว่าจะเป็นบูสต์ไหน)
+    if (STORY_TIMELINE_ON && roleKey && ROLE_EXPECTED_BEAT[roleKey] && note && _dreamShotsRaw.length
+      && (!_dreamScoreGuardOn() || dreamScoreGuardOk(x))) {
+      const expectedBeat = ROLE_EXPECTED_BEAT[roleKey];
+      const beatMatch = _dreamShotsRaw.some((v) => {
+        if (!v || _lc(v.slot) !== roleKey) return false;
+        const inferred = inferBeatFromDreamShot(v);
+        if (inferred.source !== 'keyword' || inferred.beat !== expectedBeat) return false;
+        const desc = _lc(v.description);
+        return !!desc && note.split(/\s+/).some((w) => w.length >= 3 && desc.includes(w));
+      });
+      if (beatMatch) s += 1;
+    }
     s = Math.max(0, Math.min(10, s));
-    _sfCache.set(id, s);
+    _sfCache.set(cacheKey, s);
     return s;
   };
   // 6.3 ถ่วงน้ำหนักเรียง: story 40 / clean 30 / ขนาดจริง 30 — เฉพาะ context/action/circle (hero ไม่ใช้ — ถูกคน+หน้าชัดมาก่อน)
   const STORY_SLOTS = new Set(['context', 'action', 'circle']);
   // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD): ลบ k*busy (k=0.15, busy 0-2 → โทษสูงสุด 0.3) จากคะแนนรวมของช่อง story
   //   (context/action/circle) — ภาพลายตาแพ้ภาพสะอาดที่ story-fit ใกล้กัน · ปิดสวิตช์/busy neutral = คะแนนเดิมเป๊ะ
-  const _combinedStory = (x) => 4 * ((storyFitOf(x) ?? 0) / 10) + 3 * (isClean(x) ? 1 : 0) + 3 * (1 - Math.min(sizePenalty(x), 2) / 2) - (CLUTTER_GUARD_ON ? 0.15 * _busyOf(x) : 0);
-  const storyRank = (a, b) => {
-    const d = _combinedStory(b) - _combinedStory(a);
+  // ★ C-1: roleKey optional (2nd param) — ไม่ส่ง = พฤติกรรมเดิมเป๊ะ (storyFitOf(x) ไม่มี timeline bonus)
+  const _combinedStory = (x, roleKey) => 4 * ((storyFitOf(x, roleKey) ?? 0) / 10) + 3 * (isClean(x) ? 1 : 0) + 3 * (1 - Math.min(sizePenalty(x), 2) / 2) - (CLUTTER_GUARD_ON ? 0.15 * _busyOf(x) : 0);
+  // ★ C-1: storyRank เปลี่ยนเป็น curried (roleKey) => comparator — เรียกแบบเดิม storyRank(a,b) ตรงๆ (ไม่ curry)
+  //   จะพัง เพราะงั้น caller เดิมทุกจุดต้องเรียก storyRank(roleKey) เพื่อได้ comparator กลับมา ★ ไม่มี caller เดิม
+  //   เรียก storyRank(a,b) ตรงๆ อยู่แล้วในไฟล์นี้ (เช็คแล้ว — จุดเดียวที่ใช้คือ .sort(storyRank) ด้านล่าง ต้องแก้เป็น
+  //   .sort(storyRank(roleKey)) ด้วย) — roleKey=undefined ยังทำงานถูกต้อง (_combinedStory ส่งต่อ undefined ให้ storyFitOf)
+  const storyRank = (roleKey) => (a, b) => {
+    const d = _combinedStory(b, roleKey) - _combinedStory(a, roleKey);
     if (Math.abs(d) > 1e-6) return d;
     return (b.triage?.quality ?? 0) - (a.triage?.quality ?? 0);
   };
@@ -5525,7 +5639,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       const cands0 = sorted.filter((x) => !used.has(String(x.id)) && !(x.borrowed === true && (_fbLegacyKey === 'context' || _fbLegacyKey === 'action')));
       // ★ 10 ก.ค. เฟส 6A (6.3): ช่อง context/action/circle เรียง candidate ด้วยแกน story-fit (story40/clean30/ขนาดจริง30)
       //   ภาพ "สื่อเรื่อง" ชนะ "หน้าชัดเฉยๆ" เมื่อคุณภาพใกล้กัน · hero ไม่แตะ (ถูกคน+หน้าชัดมาก่อน) · ปิด/ไม่มีคำค้นเรื่องราว = ลำดับเดิมเป๊ะ
-      const cands = (STORY_SEL_ON && STORY_SLOTS.has(_legacyKeyOf(slot))) ? cands0.slice().sort(storyRank) : cands0;
+      const cands = (STORY_SEL_ON && STORY_SLOTS.has(_legacyKeyOf(slot))) ? cands0.slice().sort(storyRank(_legacyKeyOf(slot))) : cands0;
       const hint = SLOT_CATEGORY_HINT[_legacyKeyOf(slot)] || [];
       // ★ 9 ก.ค. เฟส 2.2: hero fallback ลองแบบมีเกณฑ์ขนาดจริงก่อน (heroSizeOk) — ไม่เจอเลยค่อยถอยเกณฑ์เดิม (ไม่กรองขนาด)
       const findHeroSized = (arr) => {
@@ -5683,9 +5797,12 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       const heroPerson0 = _lc(slots[_canonHeroId]?.person || '');
       for (const slot of activeSlots) {
         if (_isHeroSlot(slot) || !STORY_RESCUE_SLOTS.has(_legacyKeyOf(slot))) continue;
+        // ★ C-1: roleKey ของช่องนี้ — ส่งต่อให้ storyFitOf ทุกจุดในลูปนี้ (timeline bonus มีผลเฉพาะ 'context' ในเซ็ต
+        //   rescue นี้ เพราะ 'circle' ไม่อยู่ใน ROLE_EXPECTED_BEAT — ปิดสวิตช์/ไม่มี beat = ไม่มีผลเหมือนเดิม)
+        const roleKey = _legacyKeyOf(slot);
         const cur = slots[slot];
         const curRec = cur ? byId.get(String(cur.id)) : null;
-        const curStory = curRec ? (storyFitOf(curRec) ?? 0) : 0;
+        const curStory = curRec ? (storyFitOf(curRec, roleKey) ?? 0) : 0;
         if (curStory >= STORY_HIGH) continue; // ช่องนี้เล่าเรื่องดีอยู่แล้ว — ไม่ต้องกู้
         const curQ = curRec ? (curRec.triage?.quality ?? 0) : 0;
         const curScene = curRec ? sceneKeyOf(curRec) : '';
@@ -5699,12 +5816,12 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           .filter((x) => !_idGated(slot) || _identityOk(slot, x))
           // circle = ต้องเป็นคนหลักจริง (ภาพวงกลม=บุคคล) · context รับภาพสถานที่/ทริปที่มาจากคำค้นเรื่องราวได้ (landmark ไม่มีคนในภาพ)
           .filter((x) => isMainChar(x) || (_legacyKeyOf(slot) === 'context' && storySet.has(_lc(x.query))))
-          .filter((x) => (storyFitOf(x) ?? 0) >= STORY_MIN_TO_WIN && (storyFitOf(x) ?? 0) >= curStory + STORY_SWAP_MARGIN)
+          .filter((x) => (storyFitOf(x, roleKey) ?? 0) >= STORY_MIN_TO_WIN && (storyFitOf(x, roleKey) ?? 0) >= curStory + STORY_SWAP_MARGIN)
           .filter((x) => (x.triage?.quality ?? 0) >= curQ - STORY_Q_TOL)
           .filter((x) => { const sk = sceneKeyOf(x); return !sk || sk === curScene || !chosenScenes.has(sk); })
           // ★ SEM-1 correction (Codex P0-2): ช่องที่ ref ระบุคนชัด → intent ชนะกฎ "คนละคนกับ hero" (identity filter ด้านบนคุมแล้ว)
           .filter((x) => _slotHasIntent(slot) ? true : (!_isCircleSlot(slot) || !heroPerson0 || _lc(x.triage?.person || '') !== heroPerson0))
-          .sort((a, b) => (storyFitOf(b) ?? 0) - (storyFitOf(a) ?? 0) || ((b.triage?.quality ?? 0) - (a.triage?.quality ?? 0)))[0];
+          .sort((a, b) => (storyFitOf(b, roleKey) ?? 0) - (storyFitOf(a, roleKey) ?? 0) || ((b.triage?.quality ?? 0) - (a.triage?.quality ?? 0)))[0];
         if (!best) continue;
         const oldBackups = cur ? [String(cur.id), ...((cur.backups || []).map(String))] : [];
         used.add(String(best.id));
@@ -5721,15 +5838,15 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           dirtyFallback: dirtyFallbackIds.has(String(best.id)),
           // ★ SEM-1 fix (ผู้ตรวจ P1): entry ที่ถูกกู้ต้องพก field instance เหมือนลูปแรก — ไม่งั้น S7 ป้าย slot=null
           ...(semContract ? { refSlotId: slot, legacySlot: _projMap.get(slot) ?? null } : {}),
-          reason: `story-fit rescue เฟส 6A (${curStory}→${storyFitOf(best)}) — ภาพเล่าแก่นข่าวชนะหน้าชัดเฉยๆ`,
-          storyFit: storyFitOf(best),
+          reason: `story-fit rescue เฟส 6A (${curStory}→${storyFitOf(best, roleKey)}) — ภาพเล่าแก่นข่าวชนะหน้าชัดเฉยๆ`,
+          storyFit: storyFitOf(best, roleKey),
           // ★ SEM-1 correction (Codex P0-3, scope เฉพาะ semantic): backups หลัง rescue ต้องผ่าน identity ของช่อง
           //   legacy = สูตรเดิมเป๊ะ (ไม่กรอง — byte-parity)
           backups: oldBackups.filter((b) => byId.has(b) && (!semContract || !_idGated(slot) || _identityOk(slot, byId.get(b)))).slice(0, 3),
         };
         // ★ D-sidecar: ไซต์ story-rescue จริง — ทับ stage เดิมของช่องนี้ (ตัวจริงเปลี่ยนเป็น best แล้ว)
         if (_dEvidenceOn) _dTrace.set(slot, { stage: 'story_rescue', id: _dIdOf(best.id) });
-        console.log(`[MEGA S6] 📖 เฟส 6A สลับช่อง ${slot}: ${cur?.id ?? '(ว่าง)'}(story ${curStory}) → ${best.id}(story ${storyFitOf(best)}, ${best.triage?.person || '-'})`);
+        console.log(`[MEGA S6] 📖 เฟส 6A สลับช่อง ${slot}: ${cur?.id ?? '(ว่าง)'}(story ${curStory}) → ${best.id}(story ${storyFitOf(best, roleKey)}, ${best.triage?.person || '-'})`);
       }
     } catch (e) { console.log('[MEGA S6] เฟส 6A story rescue ข้าม:', e.message?.slice(0, 50)); }
   }

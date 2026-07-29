@@ -504,6 +504,16 @@ function _svgXmlEscape(s) {
 // ── เรขาคณิต + การฟิตความกว้าง ink (แก้บั๊กผลตรวจรอบ 1: fontSize ตรึง 14%d + baseline ใกล้ขอบล่างมาก
 //   (chord แคบ ณ จุดนั้น) → ชื่อ 13-14 ตัวอักษร ink ล้นนอกวงจริง 18-26% วัดจาก rasterize) ──
 const _CIRCLE_LABEL_BASELINE_FRAC = 0.80;  // ตำแหน่ง baseline จากบนของวง (0=บน,1=ล่าง) — ครึ่งล่างแต่ไม่ใช่ริมสุด (chord กว้างพอ)
+// ★ C-2 (แบตช์เฟส C, 29 ก.ค. 69 — "ป้ายเราต้องไม่ทับหน้า"): renderCircleTile (coverExecutorService.js) เมื่อเจอ
+//   หน้าจริง ("single-face-zoom"/"multi-face-largest") ซูมเป้าหน้ากิน ~60-65% ของกรอบ (เฟส 6B.3 target 0.60/cap 0.65)
+//   หน้ากึ่งกลางวง (ไม่ใช้ eyeLineFrac สำหรับวงกลม) → ขอบล่างหน้า (คาง) โดยประมาณอยู่ราว 0.5+0.65/2=0.825 — ใกล้/
+//   ทับ baseline เดิม (0.80) พอดี ★ ตัวเลขนี้เป็นการประมาณจากอัตราส่วนเป้าที่มีเอกสารในโค้ด ไม่ใช่พิกัดจริงที่วัดจาก
+//   ภาพ (การวัดจริงต้องส่งพิกัดหน้าหลังครอปข้ามไฟล์จาก coverExecutorService.js ซึ่งอยู่นอกสโคปที่อนุมัติรอบนี้ —
+//   ต้องตรวจด้วยตาจริงก่อนเชื่อ 100%) — เมื่อรู้ว่ามีหน้าจริงในวง (hasDetectedFace) ขยับ baseline ลงมาอีกหน่อยให้
+//   มีระยะห่างจากคางมากขึ้น (เพดานยัง ≤0.92 กัน chord แคบจนวาดไม่ได้เลย) · ไม่มีหน้า/วัดไม่ได้ = ใช้ค่าเดิมเป๊ะ
+//   (ครอปสาย noface-square/people-box ไม่ได้ซูมหน้าแบบเดียวกัน ไม่มีเหตุผลให้ขยับ) · kill-switch MEGA_CIRCLE_LABEL_FACE_SAFE
+//   (default ON, '0'=ใช้ baseline เดิมเสมอไม่ว่ามีหน้าหรือไม่ — พฤติกรรมก่อนแบตช์นี้ทุก byte)
+const _CIRCLE_LABEL_BASELINE_FRAC_FACE = 0.88;
 const _CIRCLE_LABEL_CHORD_FRAC = 0.8;      // เป้าความกว้างข้อความ ≤ นี้ × คอร์ดวงกลม ณ ระดับ baseline (สเปกผู้ตรวจ)
 const _CIRCLE_LABEL_CHAR_W = 0.64;         // ค่าเฉลี่ยความกว้าง ink ต่อตัวอักษร (สัดส่วนของ fontSize) — คาลิเบรตจาก
                                             //   ผลวัดจริงของผู้ตรวจ (13-14 ตัวอักษรล้น 18-26% ที่ fontSize เดิม 14%d)
@@ -519,14 +529,18 @@ const _CIRCLE_LABEL_MIN_FONT_FRAC = 0.07;  // เพดานล่าง fontSi
 //   buildCircleLabelOverlay() ด้านล่างแทน ด้วยการ mask วงกลมตอน composite (ตัดเนื้อ ink ส่วนเกินทิ้งจริง ไม่พึ่ง
 //   ความสามารถของ renderer เลย)
 //   คืน null เมื่อไม่มีชื่อจริง (circleLabelText คืน null หลังกรอง) หรือ diameter ไม่ถูกต้อง — caller ต้องไม่วาดป้าย
-export function buildCircleLabelSvg(name, diameter) {
+//   ★ C-2: hasDetectedFace (optional, default false) — true = ขยับ baseline ลง (ดูคอมเมนต์ _CIRCLE_LABEL_BASELINE_FRAC_FACE)
+export function buildCircleLabelSvg(name, diameter, { hasDetectedFace = false } = {}) {
   const label = circleLabelText(name);
   if (!label) return null; // ★ ห้ามเดา/ห้ามมโนชื่อ/ห้ามวาดคำบรรยาย generic — ไม่ผ่านตัวกรอง = ไม่วาดป้ายเด็ดขาด
   const d = Math.round(Number(diameter));
   if (!Number.isFinite(d) || d <= 0) return null;
 
   const r = d / 2;
-  const cy = d * _CIRCLE_LABEL_BASELINE_FRAC;
+  const _baselineFrac = (hasDetectedFace && process.env.MEGA_CIRCLE_LABEL_FACE_SAFE !== '0')
+    ? _CIRCLE_LABEL_BASELINE_FRAC_FACE
+    : _CIRCLE_LABEL_BASELINE_FRAC;
+  const cy = d * _baselineFrac;
   const dyFromCenter = Math.abs(cy - r);
   const halfChord = dyFromCenter < r ? Math.sqrt(r * r - dyFromCenter * dyFromCenter) : 0;
   const targetWidth = Math.max(1, halfChord * 2 * _CIRCLE_LABEL_CHORD_FRAC);
@@ -556,8 +570,9 @@ export function buildCircleLabelSvg(name, diameter) {
 //   ก่อน composite ลงปกจริง — ไม่พึ่งความแม่นของการประมาณความกว้างตัวอักษรใน buildCircleLabelSvg เลย (นั่นเป็นแค่
 //   ตัวช่วยให้ "ตัดทิ้งน้อยที่สุด" เพื่อความสวยงาม ไม่ใช่ตัวรับประกันความถูกต้อง) · ไม่มี IO ภายนอกอื่นนอกจาก sharp
 //   (rasterize ในหน่วยความจำล้วน) · คืน null เมื่อ buildCircleLabelSvg คืน null (ไม่มีชื่อจริง/diameter ผิด)
-export async function buildCircleLabelOverlay(name, diameter) {
-  const svg = buildCircleLabelSvg(name, diameter);
+//   ★ C-2: opts ส่งต่อ buildCircleLabelSvg ตรงๆ (hasDetectedFace) — ไม่ส่ง = พฤติกรรมเดิมเป๊ะ
+export async function buildCircleLabelOverlay(name, diameter, opts = {}) {
+  const svg = buildCircleLabelSvg(name, diameter, opts);
   if (!svg) return null;
   const d = Math.round(Number(diameter));
   const sharp = (await import('sharp')).default;
@@ -2825,13 +2840,26 @@ export async function composeAndVerify(args = {}) {
         for (const a of core.assignments) {
           const gs = _specSlots.find((s) => s && String(s.id) === String(a.slotId));
           if (!gs || gs.shape !== 'circle') continue;
-          const rawName = core.loaded?.[a.imageIndex]?.person;
+          const _loadedRec = core.loaded?.[a.imageIndex];
+          const rawName = _loadedRec?.person;
           const diameter = Math.round(Number(gs.w));
           const gx = Math.round(Number(gs.x)), gy = Math.round(Number(gs.y));
           if (!(diameter > 0) || !Number.isFinite(gx) || !Number.isFinite(gy)) continue;
+          // ★ C-2 (แบตช์เฟส C, 29 ก.ค. 69): ถ้าภาพวงนี้ยังติดซับฝัง/ตัวอักษรทับ (ตาสองอ่านออกจริงและหาภาพแทนที่
+          //   สะอาดกว่าไม่เจอเลย — ธง _secondEyeSubSlotFlag==='subslot_text_overlay' ถูกแนบมาแล้วจาก megaAdapters.js
+          //   _runSecondEye, ดูคอมเมนต์ "6.3"/บล็อก textOverlay ใกล้ต้นไฟล์นั้น) → ไม่วาดป้ายเราซ้อนทับข้อความที่มีอยู่
+          //   แล้ว (จะดูรก/ปนกัน) ปล่อยภาพเดิมไว้เฉยๆ ดีกว่า · kill-switch MEGA_CIRCLE_LABEL_TEXT_GUARD (default ON,
+          //   '0'=ไม่การ์ด วาดทับไปเลยเหมือนเดิม) · ไม่มีธงนี้เลย (ภาพสะอาด/ปิดสวิตช์ตาสอง) = ไม่กระทบ วาดตามปกติ
+          if (process.env.MEGA_CIRCLE_LABEL_TEXT_GUARD !== '0' && _loadedRec?._secondEyeSubSlotFlag === 'subslot_text_overlay') {
+            console.log(`[MegaComposer] 🏷️ circle label: ข้ามช่อง ${a.slotId} (ภาพมีตัวอักษรทับอยู่แล้ว — subslot_text_overlay)`);
+            continue;
+          }
           // ★ ผลตรวจรอบ 2 ข้อ 1: ใช้ overlay ที่ mask วงกลมแล้ว (buildCircleLabelOverlay) ไม่ใช่ SVG ดิบ —
           //   การันตี ink ไม่หลุดนอกวงจริงระดับพิกเซล ไม่พึ่งความแม่นของการประมาณความกว้างตัวอักษร
-          const png = await buildCircleLabelOverlay(rawName, diameter); // คืน null เอง ถ้าไม่มีชื่อจริง/เป็นคำบรรยาย generic (ห้ามเดา)
+          // ★ C-2: baseline ป้ายต้องไม่ทับหน้า — ส่ง hasDetectedFace (มี faceBox จริงจากตาคัด) ให้ buildCircleLabelOverlay
+          //   ปรับ baseline ให้ต่ำลงกว่าเดิมเมื่อรู้ว่ามีหน้าในวง (เหตุผลเต็ม/เลขคาลิเบรตอยู่ที่นิยาม _CIRCLE_LABEL_BASELINE_FRAC_FACE ด้านบน)
+          const _hasFace = !!(_loadedRec?.faceBox && Number(_loadedRec.faceBox.x2) > Number(_loadedRec.faceBox.x1));
+          const png = await buildCircleLabelOverlay(rawName, diameter, { hasDetectedFace: _hasFace }); // คืน null เอง ถ้าไม่มีชื่อจริง/เป็นคำบรรยาย generic (ห้ามเดา)
           if (png) _circleOverlays.push({ input: png, left: gx, top: gy });
         }
         if (_circleOverlays.length) {

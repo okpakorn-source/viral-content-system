@@ -17,8 +17,18 @@ const src = readFileSync(new URL('../src/lib/megaAdapters.js', import.meta.url),
 
 test('source: dreamMatch boost คำนวณจากทั้ง MEGA_DREAM_WIRING และ MEGA_DREAM_SCORE (ไม่ใช่ +1 คงที่แบบเดิม)', () => {
   assert.ok(
-    /if \(dreamMatch\) s \+= \(_dreamWiringOn\(\) && process\.env\.MEGA_DREAM_SCORE !== '0'\) \? 3 : 1;/.test(src),
+    /s \+= \(_dreamWiringOn\(\) && process\.env\.MEGA_DREAM_SCORE !== '0'\) \? 3 : 1;/.test(src),
     'ต้องมีเงื่อนไข boost ตรงตามที่ออกแบบ (เห็นทั้งสองสวิตช์ในเงื่อนไขเดียว)'
+  );
+});
+
+// ★ C-0 (แบตช์เฟส C, 29 ก.ค. 69 — การ์ดกัน dream บูสต์ผิดฉาก): บรรทัดเดิม "if (dreamMatch) s += ..." เดี่ยวๆ
+//   ถูกห่อด้วยเงื่อนไขการ์ดเพิ่ม (dreamScoreGuardOk) — เทสนี้ยืนยันว่า "ห่อ" จริง (ไม่ใช่ลบเงื่อนไขเดิมทิ้ง) แยกจาก
+//   เทสเฉพาะของการ์ดเอง (ดู tests/dream-score-guard-c0.test.mjs)
+test('source (C-0): boost ทั้งก้อนถูกครอบด้วยการ์ด dreamScoreGuardOk (ผ่านการ์ดก่อนถึงจะได้ค่า boost เดิม)', () => {
+  assert.ok(
+    /if \(dreamMatch && \(!_dreamScoreGuardOn\(\) \|\| dreamScoreGuardOk\(x\)\)\) \{\s*\n\s*s \+= \(_dreamWiringOn\(\) && process\.env\.MEGA_DREAM_SCORE !== '0'\) \? 3 : 1;\s*\n\s*\}/.test(src),
+    'เงื่อนไขการ์ด C-0 ต้องครอบเงื่อนไข boost เดิมไว้ทั้งก้อน'
   );
 });
 

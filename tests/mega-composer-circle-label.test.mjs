@@ -380,4 +380,91 @@ await test('[ผู้ตรวจ #4] สายสตริกต์ (MEGA_STRI
   }
 });
 
+// ═══════════════════════════ (5) C-2 (แบตช์เฟส C, 29 ก.ค. 69): ป้ายต้องไม่ทับหน้า ═══════════════════════════
+// renderCircleTile ซูมหน้าให้กิน ~60-65% ของกรอบ (เฟส 6B.3) หน้ากึ่งกลางวง → คางอยู่ราว 0.5+0.65/2=0.825 ใกล้/ทับ
+// baseline เดิม (0.80) — เมื่อรู้ว่ามีหน้าจริง (hasDetectedFace) ต้องขยับ baseline ลงมาปลอดภัยขึ้น (0.88)
+
+const yOf = (svgBuf) => Number(svgBuf.toString('utf8').match(/y="(\d+)"/)[1]);
+
+await test('[C-2] buildCircleLabelSvg: hasDetectedFace=true → baseline (y) ต่ำกว่า hasDetectedFace=false ที่ diameter เดียวกัน', async () => {
+  const d = 300;
+  const yNoFace = yOf(buildCircleLabelSvg('พี่แก้ว', d));
+  const yFace = yOf(buildCircleLabelSvg('พี่แก้ว', d, { hasDetectedFace: true }));
+  assert.equal(yNoFace, Math.round(d * 0.80), 'ไม่มีหน้า (หรือไม่ส่ง option) ต้องใช้ baseline เดิม 0.80 เป๊ะ');
+  assert.equal(yFace, Math.round(d * 0.88), 'มีหน้าจริง ต้องขยับ baseline ลงไป 0.88');
+  assert.ok(yFace > yNoFace, 'baseline มีหน้า ต้องต่ำกว่า (ห่างจากบนมากกว่า) ไม่มีหน้าเสมอ');
+});
+
+await test('[C-2] buildCircleLabelSvg: hasDetectedFace=false (ค่า default เมื่อไม่ส่ง options เลย) → เหมือนพฤติกรรมก่อน C-2 ทุก byte', async () => {
+  const d = 300;
+  const before = buildCircleLabelSvg('พี่แก้ว', d).toString('utf8');
+  const after = buildCircleLabelSvg('พี่แก้ว', d, {}).toString('utf8');
+  assert.equal(before, after, 'ไม่ส่ง hasDetectedFace (หรือส่ง {} ว่าง) ต้องได้ SVG เหมือนกันทุก byte — false คือ default');
+});
+
+await test('[C-2] buildCircleLabelSvg: MEGA_CIRCLE_LABEL_FACE_SAFE=0 → ใช้ baseline เดิม (0.80) เสมอแม้ hasDetectedFace=true (byte-parity กับก่อนมี C-2)', async () => {
+  setEnv('MEGA_CIRCLE_LABEL_FACE_SAFE', '0');
+  try {
+    const d = 300;
+    const y = yOf(buildCircleLabelSvg('พี่แก้ว', d, { hasDetectedFace: true }));
+    assert.equal(y, Math.round(d * 0.80), 'ปิดสวิตช์ต้องไม่ขยับ baseline แม้บอกว่ามีหน้าจริง');
+  } finally { setEnv('MEGA_CIRCLE_LABEL_FACE_SAFE', null); }
+});
+
+await test('[C-2] buildCircleLabelOverlay: hasDetectedFace=true ยังคง ink 0% นอกวงเสมอ (การันตี mask เดิมไม่เปลี่ยน)', async () => {
+  const d = 300;
+  const png = await buildCircleLabelOverlay('วรรณิศาใจดีงาม', d, { hasDetectedFace: true });
+  const { total, outside } = await inkOutsideCircleStats(png, d);
+  assert.ok(total > 0);
+  assert.equal(outside, 0, `ได้ ${outside}/${total} ink นอกวง — baseline ขยับต้องยังอยู่ในการรับประกัน mask`);
+});
+
+// ── C-2: skip ป้ายเมื่อภาพมีตัวอักษรทับอยู่แล้ว (_secondEyeSubSlotFlag==='subslot_text_overlay') ──
+
+async function buildSlotPlanWithFlag(circlePersonName, flagOnCircle) {
+  const urls = await Promise.all([0, 1, 2, 3].map((i) => makeDataUri(60 + i * 10))); // seed แยกจากชุดอื่น (mean 128+60..90 ยังอยู่ในช่วงปลอดภัย <255 กันไฟล์เล็กเกิน 5000 bytes)
+  return urls.map((url, i) => ({
+    url, thumbnailUrl: '', isHero: i === 0, person: i === 1 ? (circlePersonName ?? null) : null,
+    clean: true, newsScene: true, faces: 0, slot: null,
+    ...(i === 1 && flagOnCircle ? { _secondEyeSubSlotFlag: 'subslot_text_overlay' } : {}),
+  }));
+}
+
+await test('[C-2] integration: ภาพวงกลมติดธง subslot_text_overlay → ไม่วาดป้ายเลย (buffer เหมือนปิดสวิตช์ MEGA_CIRCLE_LABEL เป๊ะ)', async () => {
+  const slotPlanFlagged = await buildSlotPlanWithFlag('พี่แก้ว', true);
+  setEnv('MEGA_CIRCLE_LABEL', '0');
+  const outOff = await composeAndVerify({ newsTitle: 'x', slotPlan: slotPlanFlagged, refDNA: null, refImagePath: null, stableOrder: true });
+  setEnv('MEGA_CIRCLE_LABEL', null); // default ON
+  const outOnFlagged = await composeAndVerify({ newsTitle: 'x', slotPlan: slotPlanFlagged, refDNA: null, refImagePath: null, stableOrder: true });
+  assert.equal(outOff.success, true);
+  assert.equal(outOnFlagged.success, true);
+  assert.equal(outOnFlagged.manifest.outputHash, outOff.manifest.outputHash, 'ภาพติดธง text_overlay ต้องไม่วาดป้ายเราซ้อนทับ — buffer ต้องเหมือนปิดสวิตช์เป๊ะ');
+});
+
+await test('[C-2] integration: MEGA_CIRCLE_LABEL_TEXT_GUARD=0 → วาดป้ายทับไปเลยแม้ติดธง subslot_text_overlay (byte-parity เดิมก่อนมีการ์ดนี้)', async () => {
+  const slotPlanFlagged = await buildSlotPlanWithFlag('พี่แก้ว', true);
+  setEnv('MEGA_CIRCLE_LABEL', '0');
+  const outOff = await composeAndVerify({ newsTitle: 'x', slotPlan: slotPlanFlagged, refDNA: null, refImagePath: null, stableOrder: true });
+  setEnv('MEGA_CIRCLE_LABEL', null); // default ON
+  setEnv('MEGA_CIRCLE_LABEL_TEXT_GUARD', '0');
+  let outOnGuardOff;
+  try {
+    outOnGuardOff = await composeAndVerify({ newsTitle: 'x', slotPlan: slotPlanFlagged, refDNA: null, refImagePath: null, stableOrder: true });
+  } finally { setEnv('MEGA_CIRCLE_LABEL_TEXT_GUARD', null); }
+  assert.equal(outOff.success, true);
+  assert.equal(outOnGuardOff.success, true);
+  assert.notEqual(outOnGuardOff.manifest.outputHash, outOff.manifest.outputHash, 'ปิดการ์ด text-guard ต้องวาดป้ายตามปกติ (ไม่สนธง) — buffer ต้องต่างจากปิด MEGA_CIRCLE_LABEL');
+});
+
+await test('[C-2] integration: ไม่มีธง subslot_text_overlay (ภาพสะอาดปกติ) → วาดป้ายตามปกติเหมือนก่อนมี C-2 (ไม่กระทบ)', async () => {
+  const slotPlanClean = await buildSlotPlanWithFlag('พี่แก้ว', false);
+  setEnv('MEGA_CIRCLE_LABEL', '0');
+  const outOff = await composeAndVerify({ newsTitle: 'x', slotPlan: slotPlanClean, refDNA: null, refImagePath: null, stableOrder: true });
+  setEnv('MEGA_CIRCLE_LABEL', null); // default ON
+  const outOn = await composeAndVerify({ newsTitle: 'x', slotPlan: slotPlanClean, refDNA: null, refImagePath: null, stableOrder: true });
+  assert.equal(outOff.success, true);
+  assert.equal(outOn.success, true);
+  assert.notEqual(outOn.manifest.outputHash, outOff.manifest.outputHash, 'ไม่มีธง = วาดป้ายปกติ — ต้องต่างจากปิดสวิตช์');
+});
+
 console.log(`\n1..${passed}`);
