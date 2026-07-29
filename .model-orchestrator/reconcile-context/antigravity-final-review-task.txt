@@ -1,0 +1,25 @@
+Read-only final review. Do not edit any file.
+
+Objective:
+Audit the assembled deploy worktree at origin/main baseline for accidental reverts, wrong hunk selection, and integration defects.
+
+Expected deliverable scope (tracked/untracked code only):
+- New files copied exactly: src/lib/imageAirlockCore.js, src/lib/imgAirlock.js, scripts/img-airlock-worker.mjs, tests/img-airlock-core.test.mjs, tests/img-airlock-malformed.test.mjs, tests/img-airlock-crash-sim.test.mjs, tests/img-airlock-triage-integration.test.mjs, tests/fixtures/img-airlock-crash-worker.mjs, tests/fixtures/img-airlock-bootcrash-worker.mjs
+- Whole-file test updates copied from the source worktree: tests/ac0099-strict-ref-test.test.mjs, tests/mega-semantic-selection.test.mjs
+- Surgical files: src/lib/libraryTriage.js, src/lib/refCoverLibrary.js, scripts/acs-yt-worker.mjs
+- .model-orchestrator and node_modules are runtime/audit dependencies, not deploy content.
+
+Review requirements:
+1. Inspect git status and git diff against HEAD. Confirm no code/data files outside the 14 expected paths.
+2. In src/lib/libraryTriage.js, confirm the existing origin/main WIP remains present: COVER_GEMINI_MODEL import and pin use, busyOn/frontalOn strict sanitization, busy/peopleCount and faceFront outputs, BUSY_TAG/FRONTAL_TAG propagation in both vetImages and triageLibrary. Confirm the diff against HEAD adds only the airlock integration and does not revert those WIP semantics.
+3. In src/lib/refCoverLibrary.js, confirm the only new semantic hunk is updateRefCover distinguishing /^ไม่พบ id/ (null) from other errors ({__error}).
+4. In scripts/acs-yt-worker.mjs, confirm FRAME_JOB_TIMEOUT_MS plus AbortSignal.timeout wiring are both present and no unrelated behavior was changed.
+5. Inspect new airlock files and their call sites for obvious import/export, buffer, worker lifecycle, or fail-open/fail-safe integration defects that the focused tests might miss.
+6. Do not run builds, tests, installs, fetches, or any git mutation. Read/diff checks only.
+
+Return:
+- ACCEPT or REJECT.
+- Concrete evidence by file/function.
+- Any remaining risk or warning.
+- Files changed: none.
+- Do not delegate.

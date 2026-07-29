@@ -21,6 +21,7 @@ import { computePanelCircleZone, chooseCirclePosition } from '@/lib/panelCropGeo
 // ★ Wave1A (LANE C — flag-gated, default OFF): V2 consumer ใช้ validateSelectionSpecV2Activation (canonical) เป็นผู้ตัดสินเดียว —
 //   ห้าม reimplement schema V2; S7 แค่ "บริโภค" spec ที่ผ่าน validator แล้วเท่านั้น (fail-closed HOLD ถ้าไม่ผ่าน)
 import { validateStrictRenderActivationVersioned } from '@/lib/refSlotContract';
+import { runAirlockBatch, airlockOn } from '@/lib/imgAirlock'; // ★ 30 ก.ค. เกราะภาพพิษชั้น composer (ประตูที่ 2): decode ไบต์ดิบครั้งเดียวในโปรเซสลูก แล้วใช้ buffer สะอาดต่อทุก sharp op (กัน native crash 0xC0000409 ที่ triage-airlock คุมไม่ถึงเพราะ composer refetch เอง)
 
 // ★ Wave1 Batch E (10 ก.ค. — manifest-lite): เวอร์ชัน composer ปัจจุบัน ประกาศตายตัวตรงนี้
 //   อัปเดตมือเมื่อแก้กติกา compose/crop/hero — ใช้ stamp ลง manifest ให้ debug/replay ย้อนดูได้ว่ารอบนี้วิ่งด้วยกติกาไหน
@@ -46,6 +47,20 @@ async function fetchOne(url, ms = 15000) {
     if (!ct.startsWith('image/')) return null; // Instagram ตอบ 200 แต่เป็น HTML (anti-hotlink)
     return Buffer.from(await res.arrayBuffer());
   } catch { clearTimeout(timer); return null; }
+}
+
+// เกราะ composer ใช้ policy เดียวกันทั้ง strict + legacy:
+// - caller fetch ไบต์ดิบตาม semantics เดิมของ path นั้นเพียงครั้งเดียว
+// - เปิด airlock แล้ว batch ล้ม = Map ว่าง (fail-closed) ห้ามย้อนกลับไปให้ sharp ใน parent แตะไบต์ดิบ
+// - helper นี้ถูกเรียกเฉพาะเมื่อ airlockOn() เป็น true; สวิตช์ปิดจึงยังวิ่ง fetchOne เดิมในลูปของแต่ละ path
+async function cleanComposerBatchById(rawItems, scope) {
+  try {
+    const cleaned = await runAirlockBatch(rawItems, {});
+    return new Map(cleaned.map((r) => [String(r.id), r]));
+  } catch (e) {
+    console.warn(`[MegaComposer] ⚠️ airlock ชั้น composer (${scope}) ล้มทั้งชุด — fail-closed ไม่ส่งไบต์ดิบเข้า sharp: ${String(e?.message || e).slice(0, 120)}`);
+    return new Map();
+  }
 }
 
 // ---------- ✂️ สูตรครอป (เรขาคณิตล้วน ไม่มี AI) — จัดตาม ref เคร่งครัด ----------
@@ -1169,9 +1184,36 @@ async function composeCoreStrict(strictCtx) {
   const loaded = new Array(strictCtx.bind.length).fill(null);
   const loadFail = [];
   const trimFlags = new Array(strictCtx.bind.length).fill(null);
+  // ★ 30 ก.ค. เกราะภาพพิษชั้น composer (ประตูที่ 2 — Opus audit + acceptance พิสูจน์: ภาพพิษ decode ผ่าน
+  //   triage แต่ระเบิด libvips ตอน sharp op หนักที่นี่ node exit 0xC0000409). แก้: fetch ไบต์ดิบทั้งชุด "ก่อน"
+  //   → ส่งผ่าน airlock (โปรเซสลูก) ทีเดียว → ได้ buffer สะอาด (re-encode สำเร็จ = malformation หายไปแล้ว) →
+  //   ทุก sharp op ถัดไป (trim/metadata/aHash/face/render) ใช้ buffer สะอาดนี้ ไม่แตะไบต์ดิบอีก · ภาพที่ทำ
+  //   airlock ลูกตาย (พิษจริง) = ok:false → composer ข้ามใบนั้น (loadFail) ไม่ล้มทั้งงาน เซิร์ฟหลักไม่ตาย.
+  //   MEGA_IMG_AIRLOCK='0' → cleanByIndex=null → ลูปใช้ fetchOne เดิมทุก byte (parity เป๊ะ) · เปิดแล้ว
+  //   airlock ล้มทั้ง batch = Map ว่าง → ทุกใบ loadFail (fail-closed) ห้าม refetch raw เข้า sharp ใน parent.
+  let cleanByIndex = null;
+  if (airlockOn()) {
+    const rawItems = [];
+    await Promise.all(strictCtx.bind.map(async (b, i) => {
+      const raw = await fetchOne(b.imageUrl);
+      if (raw && raw.length > 5000) rawItems.push({ id: String(i), buf: raw });
+    }));
+    cleanByIndex = await cleanComposerBatchById(rawItems, 'strict');
+  }
   await Promise.all(strictCtx.bind.map(async (b, i) => {
-    let buf = await fetchOne(b.imageUrl);
-    if (!buf || buf.length <= 5000) { loadFail.push(`primary_unusable:${b.composerSlotId}`); return; }
+    let buf;
+    if (cleanByIndex) {
+      const c = cleanByIndex.get(String(i));
+      if (!c || !c.ok || !c.buf) {
+        // airlock ชี้ว่าใบนี้เป็นภาพพิษ (ลูก crash) หรือโหลด/แปลงไม่ได้ → ข้าม (เซิร์ฟหลักรอดแล้ว)
+        loadFail.push(`primary_${c && c.poisoned ? 'poison' : 'unusable'}:${b.composerSlotId}`);
+        return;
+      }
+      buf = c.buf;
+    } else {
+      buf = await fetchOne(b.imageUrl);
+      if (!buf || buf.length <= 5000) { loadFail.push(`primary_unusable:${b.composerSlotId}`); return; }
+    }
     // ★ รอบ 4 (P1-1): same-asset preprocessing เหมือน legacy — ตัดกรอบสีทึบ/letterbox "ก่อน"
     //   sharp metadata/aHash/face/render ทุกชั้นเห็นภาพสะอาดตรงกัน · URL/identity/imageIndex ไม่ขยับ
     //   (นี่คือ crop ต้นฉบับเดิม ไม่ใช่ source swap) · trim ล้ม = ใช้ buffer เดิม (fail-open ในตัวฟังก์ชัน)
@@ -1414,10 +1456,30 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
   const _faceProm = process.env.COMPOSE_FACE_PROMINENCE !== '0';
   const loaded = [];
   const _byIdx = new Array(slotPlan.length).fill(null);
+  // ★ เกราะภาพพิษชั้น composer ครอบ legacy/V1 ด้วย — path นี้ reachable เมื่อไม่มี strict carrier และ
+  //   composeMegaCover เรียกตรง · semantics primary→thumbnail เดิมทุกข้อ แต่เปิด airlock แล้ว fetch ไบต์ดิบ
+  //   เพียงรอบเดียวก่อนส่ง batch; ผลในลูปใช้เฉพาะ clean buffer · batch ล้ม = ข้ามทั้งหมดแบบ fail-closed.
+  let cleanByIndex = null;
+  if (airlockOn()) {
+    const rawItems = [];
+    await Promise.all(slotPlan.map(async (p, i) => {
+      let raw = await fetchOne(p.url);
+      if (!raw && p.thumbnailUrl && p.thumbnailUrl !== p.url && !(_minSrcGate && p.isHero)) raw = await fetchOne(p.thumbnailUrl);
+      if (raw && raw.length > 5000) rawItems.push({ id: String(i), buf: raw });
+    }));
+    cleanByIndex = await cleanComposerBatchById(rawItems, 'legacy');
+  }
   await Promise.all(slotPlan.map(async (p, _i) => {
-    let buf = await fetchOne(p.url);
-    // ★ เฟส 3.4: ช่อง hero (isHero) ห้าม fallback thumbnail (ยืดจนเบลอ) — โหลดตรงไม่ได้ = ปล่อยให้ตรรกะเลือก hero ไปใช้ใบอื่น
-    if (!buf && p.thumbnailUrl && p.thumbnailUrl !== p.url && !(_minSrcGate && p.isHero)) buf = await fetchOne(p.thumbnailUrl);
+    let buf;
+    if (cleanByIndex) {
+      const c = cleanByIndex.get(String(_i));
+      if (!c || !c.ok || !c.buf) return; // poisoned/decode-fail/โหลดไม่ได้ → ข้ามใบนี้ ห้ามแตะ raw ใน parent
+      buf = c.buf;
+    } else {
+      buf = await fetchOne(p.url);
+      // ★ เฟส 3.4: ช่อง hero (isHero) ห้าม fallback thumbnail (ยืดจนเบลอ) — โหลดตรงไม่ได้ = ปล่อยให้ตรรกะเลือก hero ไปใช้ใบอื่น
+      if (!buf && p.thumbnailUrl && p.thumbnailUrl !== p.url && !(_minSrcGate && p.isHero)) buf = await fetchOne(p.thumbnailUrl);
+    }
     if (buf && buf.length > 5000) {
       // ★ เฟส 4.1: ตัดกรอบสีทึบ/สีจัดที่ขอบ (กรอบเขียวเฟรมคลิป/letterbox) ก่อน detect/ครอป —
       //   ทำตรงนี้ = ทุกชั้นถัดไป (หน้า/aHash/คอลลาจ/ครอป) เห็นภาพสะอาดตรงกันหมด

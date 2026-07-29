@@ -104,6 +104,9 @@ for (const k of [
 // ★ 20 ก.ค.: pin MEGA_HERO_SOLO_ONLY=0 — ฟีเจอร์ SOLO_ONLY (default ON) "ห้ามครอปภาพคู่→หน้าเดี่ยว" มาแทนที่ synth-crop
 //   ของ MEGA_HERO_SINGLE โดยเจตนา (borrow-or-HOLD) เทสนี้พิสูจน์การต่อสาย _heroFaceCrop ของ synth-crop เดิม จึงต้องปักสวิตช์ปิด
 process.env.MEGA_HERO_SOLO_ONLY = '0';
+// Fixture ในไฟล์นี้เป็น bytes ปลอม >5000 ที่ sharp stub รับโดยตั้งใจ แต่ไม่มี image magic จริง — เทสนี้ตรวจ
+// crop wiring ไม่ใช่ decoder/airlock จึงปิดเกราะเฉพาะ test process (เทส composer-airlock-guard ครอบ ON/crash แยกแล้ว)
+process.env.MEGA_IMG_AIRLOCK = '0';
 
 const withEnv = async (name, v, fn) => {
   const prev = process.env[name];

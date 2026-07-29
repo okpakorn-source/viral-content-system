@@ -1,0 +1,28 @@
+Read-only pre-merge audit. Do not edit any file.
+
+Objective:
+Validate the three-way hunk selection for a deploy worktree whose tracked baseline is origin/main.
+
+Inspect only these context artifacts:
+- .model-orchestrator/reconcile-context/WIP-RECONCILE-PLAN.md
+- .model-orchestrator/reconcile-context/working-vs-local-head.patch
+- .model-orchestrator/reconcile-context/origin-main-vs-local-head.patch
+- .model-orchestrator/reconcile-context/working-vs-origin-main.patch
+
+Files in scope:
+- src/lib/libraryTriage.js
+- src/lib/refCoverLibrary.js
+- scripts/acs-yt-worker.mjs
+
+Required findings:
+1. For libraryTriage.js, determine whether the origin/main WIP hunks (busyOn/frontalOn/COVER_GEMINI_MODEL import/busy peopleCount classifier work) overlap the airlock changes on the same base lines. Confirm whether the working-vs-origin-main hunks are exclusively the new airlock integration (imports plus loadRawBuffer/loadOne/processLoadedBuffer/loadBatch and its call sites) without reverting those main WIP hunks.
+2. For refCoverLibrary.js, confirm the only working-vs-origin-main change is plan hunk L1 (__error propagation from updateRefCover), and identify anything that must be excluded.
+3. For acs-yt-worker.mjs, confirm the only working-vs-origin-main changes are W1+W2 (FRAME_JOB_TIMEOUT_MS and AbortSignal timeout wiring) and that they must remain together; identify anything that must be excluded.
+4. Give a concise accept/stop verdict with concrete function or hunk evidence.
+
+Forbidden:
+- No file edits.
+- No git mutation, commit, push, pull, fetch, install, build, or test.
+- Do not delegate.
+
+Deliverable: plain-text audit only, with files changed = none and checks limited to reading/diff inspection.
