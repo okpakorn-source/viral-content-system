@@ -21,69 +21,25 @@ import { COVER_GEMINI_MODEL } from './coverVisionModel.js';
 import { QUALITY_CAP_SHORT_SIDE, QUALITY_CAP_VALUE } from './imageQualityConfig.js';
 // ★ Stage-A: authority-normalized facts (เพิ่มฟิลด์ nested candidateFacts แบบ additive — ไม่แตะฟิลด์/การตัดสินเดิม)
 import { buildCandidateFactsV1 } from './candidateFactAuthority.js';
+// ★ 30 ก.ค. 69 (เฟส "กันภาพพิษฆ่าเซิร์ฟ" — :3900 ตายซ้ำ node exit 0xC0000409 กลาง S5 ตอนนี้ๆ นี้แหละ):
+//   computeSharpness/computeDHash64 ย้ายไป imageAirlockCore.js (PURE, ใช้ร่วมกับ scripts/img-airlock-worker.mjs)
+//   เพื่อไม่ให้อัลกอริทึมสองที่ drift กัน — อัลกอริทึมเดิมเป๊ะ ไม่เปลี่ยน แค่ย้ายที่อยู่ + รับ opts เพิ่ม (default {})
+import { computeSharpness, computeDHash64, imageGuardCheck, safeSharpOpts } from './imageAirlockCore.js';
+// ★ เดิม export computeDHash64 ตรงจากไฟล์นี้ (ยืนยันด้วย grep: ไม่มีที่อื่น import ใช้ตอนนี้) — คง export ไว้เพื่อ back-compat
+export { computeDHash64 };
+import { airlockOn, runAirlockBatch } from './imgAirlock.js';
+
+// ชั้น 1 (MEGA_IMG_GUARD, default ON, '0'=ปิด): magic-byte allowlist + เพดานขนาด + sharp failOn/limitInputPixels
+//   ที่ปลอดภัยกว่าเดิม — อ่าน env "ทุกครั้งที่เรียก" (เหมือน FILE_TAG/BUSY_TAG ด้านล่างในไฟล์นี้) ไม่ cache ตอน import
+function guardOn() { return process.env.MEGA_IMG_GUARD !== '0'; }
+function guardOpts() { return safeSharpOpts(guardOn()); }
 
 async function toB64(buf, size = 512) {
-  const out = await sharp(buf, { failOn: 'none' })
+  const out = await sharp(buf, guardOpts())
     .resize(size, size, { fit: 'inside', withoutEnlargement: true })
     .jpeg({ quality: 80 })
     .toBuffer();
   return out.toString('base64');
-}
-
-// ★ 9 ก.ค. เฟส 2.1: Laplacian variance (ประมาณความคม) — sharp ไม่มี built-in variance ตรงๆ
-//   greyscale → ย่อด้านยาว ≤600 (กันรูปใหญ่ช้า/รูปเล็กพอกัน) → convolve kernel Laplacian → raw → variance ของพิกเซล
-//   ยิ่งค่าสูง = ยิ่งคม (ขอบ/รายละเอียดเยอะ) · ยิ่งต่ำ = ภาพเบลอ/แบน
-async function computeSharpness(buf) {
-  try {
-    const { data } = await sharp(buf, { failOn: 'none' })
-      .greyscale()
-      .resize({ width: 600, height: 600, fit: 'inside', withoutEnlargement: true })
-      .convolve({ width: 3, height: 3, kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0] })
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    const n = data.length;
-    if (!n) return null;
-    let sum = 0;
-    for (let i = 0; i < n; i++) sum += data[i];
-    const mean = sum / n;
-    let sq = 0;
-    for (let i = 0; i < n; i++) { const d = data[i] - mean; sq += d * d; }
-    return Math.round((sq / n) * 100) / 100;
-  } catch {
-    return null; // วัดไม่ได้ = ปกติ (ไม่บล็อกตาคัด)
-  }
-}
-
-// ★ Wave3 ชุด2 (10 ก.ค.): pHash64 — dHash 64 บิตจาก buffer เดียวกับ sharpness (ห้ามโหลดภาพเพิ่ม)
-//   ลอกอัลกอริทึมเดิมเป๊ะจาก legacy (auto-cover/route.js computeImageHash + imageSearchService.js
-//   computeImageHash — โค้ดสองไฟล์เหมือนกัน 100%, คอมเมนต์ "Inlined เพราะ imageSearchService ไม่ export"):
-//   resize 9x8 fill → greyscale → raw → เทียบพิกเซลซ้าย>ขวาแถวละ 8 คู่ (8 แถว) = 64 บิต
-//   ต่างจาก legacy แค่รูปแบบเก็บผล: legacy เก็บเป็น BigInt (ใช้เทียบในไฟล์เดียวกัน), ที่นี่แปลงเป็น
-//   hex string 16 ตัวอักษร (field pHash64) เพื่อเก็บ/ส่งต่อข้าม module ได้ปลอดภัย (BigInt serialize JSON ไม่ได้)
-//   — บิตที่ตั้ง (y,x) เรียงจากซ้ายไปขวา บนลงล่าง เข้า nibble ตามลำดับสแกน (self-consistent พอสำหรับ hamming ภายในระบบนี้)
-//   วัดไม่ได้ (โหลดไม่ครบ/sharp ล้ม) = null (fail-open เหมือน sharpness — ห้ามบล็อกตาคัด)
-export async function computeDHash64(buf) {
-  try {
-    const raw = await sharp(buf, { failOn: 'none' })
-      .resize(9, 8, { fit: 'fill' })
-      .greyscale()
-      .raw()
-      .toBuffer();
-    if (!raw || raw.length < 72) return null; // 9×8 grayscale ต้องมี ≥72 ไบต์ — สั้นกว่านี้ = ข้อมูลไม่ครบ
-    let bits = '';
-    for (let y = 0; y < 8; y++) {
-      for (let x = 0; x < 8; x++) {
-        const left = raw[y * 9 + x];
-        const right = raw[y * 9 + x + 1];
-        bits += (left > right) ? '1' : '0';
-      }
-    }
-    let hex = '';
-    for (let i = 0; i < 64; i += 4) hex += parseInt(bits.slice(i, i + 4), 2).toString(16);
-    return hex; // 16 hex chars = 64 บิต
-  } catch {
-    return null;
-  }
 }
 
 // ★ 9 ก.ค. เฟส 2.1: โหลด URL เดี่ยว (reuse loadImageBuffer เดิม — ส่งแค่ imageUrl ไม่มี fallback ในตัว)
@@ -96,7 +52,10 @@ async function loadSingleUrl(url) {
 //   (ก) record มี realWidth/realHeight แล้ว (เฟส 1 วัดไว้ตอน rehost) → ใช้เลย ไม่ต้องโหลดซ้ำ
 //   (ข) ไม่มี → ตามลำดับ imageUrl → rehostThumbUrl → thumbnailUrl วัดจาก buffer ที่โหลดได้จริง
 //   คืน { realWidth, realHeight, measuredFrom: 'full'|'thumb', fresh: bool (ยังไม่เคยมีใน record) }
-async function resolveRealSize(im, fallbackBuf) {
+// ★ 30 ก.ค. 69: เพิ่ม knownDims (optional) — เมื่อห้องนิรภัยวัด width/height มาแล้วตอน re-encode ส่งมาใช้ตรงๆ
+//   กันต้อง sharp().metadata() ซ้ำบน buffer เดิม (decode มาแล้วรอบหนึ่งในโปรเซสลูก) — ไม่ส่งมา (null/undefined)
+//   = พฤติกรรมเดิมเป๊ะ (sharp().metadata() ตรงบนบัฟเฟอร์ เหมือนเดิมทุกประการ)
+async function resolveRealSize(im, fallbackBuf, knownDims) {
   const rw = Number(im.realWidth), rh = Number(im.realHeight);
   if (rw > 0 && rh > 0) {
     return { realWidth: rw, realHeight: rh, measuredFrom: im.rehostQuality === 'thumbnail' ? 'thumb' : 'full', fresh: false };
@@ -105,7 +64,9 @@ async function resolveRealSize(im, fallbackBuf) {
   //   knownThumbOnly เคสนี้จะไม่ผ่านมาถึงตรงนี้ (มี rw/rh อยู่แล้วเฉพาะ rehostQuality='full')
   try {
     if (fallbackBuf?.buf) {
-      const meta = await sharp(fallbackBuf.buf, { failOn: 'none' }).metadata();
+      const meta = (knownDims && knownDims.width > 0 && knownDims.height > 0)
+        ? knownDims
+        : await sharp(fallbackBuf.buf, guardOpts()).metadata();
       if (meta.width > 0 && meta.height > 0) {
         return { realWidth: meta.width, realHeight: meta.height, measuredFrom: fallbackBuf.from === 'imageUrl' && im.rehostQuality !== 'thumbnail' ? 'full' : 'thumb', fresh: true };
       }
@@ -114,29 +75,51 @@ async function resolveRealSize(im, fallbackBuf) {
   return null;
 }
 
+// ★ 30 ก.ค. 69 (เฟส "กันภาพพิษฆ่าเซิร์ฟ"): แยก "โหลด buffer ดิบตาม ladder" ออกจาก loadOne — ให้ loadBatch
+//   (เส้นห้องนิรภัย) reuse ได้โดยไม่ก็อปปี้ ladder logic ซ้ำ (กัน drift) — พฤติกรรมเดิมเป๊ะ ยกมาทั้งก้อนไม่เปลี่ยน
+async function loadRawBuffer(im) {
+  const knownThumbOnly = im.rehostQuality === 'thumbnail';
+  const ladder = knownThumbOnly
+    ? [{ url: im.rehostThumbUrl, from: 'rehostThumbUrl' }, { url: im.thumbnailUrl, from: 'thumbnailUrl' }, { url: im.imageUrl, from: 'imageUrl' }]
+    : [{ url: im.imageUrl, from: 'imageUrl' }, { url: im.rehostThumbUrl, from: 'rehostThumbUrl' }, { url: im.thumbnailUrl, from: 'thumbnailUrl' }];
+  for (const step of ladder) {
+    if (!step.url) continue;
+    const buf = await loadSingleUrl(step.url);
+    if (buf) return { buf, loadedFrom: step.from };
+  }
+  return null;
+}
+
 // โหลดรูป 1 ใบ → { im, base64, brightness, detail, realWidth, realHeight, measuredFrom, sharpness }
 //   (คืน null ถ้าโหลด/decode ไม่ได้)
 // ★ 9 ก.ค. เฟส 2.1 (มิชชัน "ตาคัดต้องเห็นไฟล์จริง"): เดิมโหลด thumbnailUrl ก่อนเสมอ (แม้ imageUrl จะเป็นไฟล์จริง) —
 //   สลับลำดับ: imageUrl (ของจริง) ก่อน แล้วค่อย rehostThumbUrl/thumbnailUrl · ยกเว้นรู้อยู่แล้วว่า rehost ได้แค่
 //   thumbnail (rehostQuality='thumbnail') → ข้าม imageUrl ไปเลย (Phase 1 ลองแล้วไม่ผ่าน กันยิงซ้ำ 403 ฟรี)
+// ★ 30 ก.ค. 69: เส้น "ตรง" ไม่ผ่านห้องนิรภัย — ใช้เมื่อ MEGA_IMG_AIRLOCK='0' หรือถูกเรียกตรงจากที่อื่น (สคริปต์/เทส)
+//   ชั้น 1 (magic-byte/ขนาด) ยังทำงานถ้า MEGA_IMG_GUARD ไม่ได้ปิด (เร็ว ไม่มี IO เพิ่ม แต่ป้องกัน native crash ไม่ได้ —
+//   ป้องกันได้จริงต้องผ่าน loadBatch+airlock เท่านั้น)
 async function loadOne(im) {
-  const knownThumbOnly = im.rehostQuality === 'thumbnail';
-  const ladder = knownThumbOnly
-    ? [{ url: im.rehostThumbUrl, from: 'rehostThumbUrl' }, { url: im.thumbnailUrl, from: 'thumbnailUrl' }, { url: im.imageUrl, from: 'imageUrl' }]
-    : [{ url: im.imageUrl, from: 'imageUrl' }, { url: im.rehostThumbUrl, from: 'rehostThumbUrl' }, { url: im.thumbnailUrl, from: 'thumbnailUrl' }];
-  let buf = null;
-  let loadedFrom = null;
-  for (const step of ladder) {
-    if (!step.url) continue;
-    buf = await loadSingleUrl(step.url);
-    if (buf) { loadedFrom = step.from; break; }
+  const raw = await loadRawBuffer(im);
+  if (!raw) return null;
+  const { buf, loadedFrom } = raw;
+  if (guardOn()) {
+    const g = imageGuardCheck(buf);
+    if (!g.ok) return null; // ปฏิเสธชั้น 1 (ผิด magic byte/ใหญ่เกิน) → ปฏิบัติเหมือน "โหลดไม่ได้" (fail-open เดิม)
   }
-  if (!buf) return null;
+  return processLoadedBuffer(im, buf, loadedFrom);
+}
+
+// ★ 30 ก.ค. 69: ส่วนประมวลผลหลังได้ buffer แล้ว (เดิมเป็นหางของ loadOne) — แยกออกมาให้ loadBatch (เส้นห้องนิรภัย)
+//   เรียกต่อบน "buffer สะอาด" ที่ผ่าน decode+re-encode ในโปรเซสลูกมาแล้วได้เหมือนกัน (ไม่ต้อง decode raw ซ้ำในโปรเซสหลัก)
+//   precomputed (optional): { sharpness, pHash64, width, height } — ห้องนิรภัยคำนวณมาแล้วระหว่าง re-encode (เรียก
+//   ฟังก์ชัน core เดียวกันเป๊ะ — ค่า/อัลกอริทึมไม่ต่างกัน) ส่งมาเพื่อข้าม sharp() รอบที่ซ้ำซ้อนในโปรเซสหลัก
+//   ไม่ส่งมา (default {}) → คำนวณเองบน buf ตรงๆ เหมือน loadOne เดิมทุกประการ (byte-parity เมื่อเรียกจาก loadOne)
+async function processLoadedBuffer(im, buf, loadedFrom, precomputed = {}) {
   try {
     let brightness = 128;
     let detail = 60;
     try {
-      const st = await sharp(buf, { failOn: 'none' }).stats();
+      const st = await sharp(buf, guardOpts()).stats();
       const ch = st.channels.slice(0, 3);
       if (ch.length) {
         brightness = ch.reduce((a, c) => a + c.mean, 0) / ch.length;
@@ -148,7 +131,10 @@ async function loadOne(im) {
     // ★ 9 ก.ค. เฟส 2.1: ขนาดจริง + ความคม — ใช้ buffer ที่เพิ่งโหลด (ตัวเดียวกับที่ตา Gemini จะเห็น)
     let realWidth = null, realHeight = null, measuredFrom = null;
     try {
-      const size = await resolveRealSize(im, { buf, from: loadedFrom });
+      const knownDims = (typeof precomputed.width === 'number' && typeof precomputed.height === 'number')
+        ? { width: precomputed.width, height: precomputed.height }
+        : null;
+      const size = await resolveRealSize(im, { buf, from: loadedFrom }, knownDims);
       if (size) {
         realWidth = size.realWidth;
         realHeight = size.realHeight;
@@ -168,9 +154,9 @@ async function loadOne(im) {
         }
       }
     } catch { /* วัดขนาดไม่ได้ = ปกติ ไม่บล็อกตาคัด */ }
-    const sharpness = await computeSharpness(buf);
+    const sharpness = (typeof precomputed.sharpness === 'number') ? precomputed.sharpness : await computeSharpness(buf, guardOpts());
     // ★ Wave3 ชุด2 (10 ก.ค.): pHash64 จาก buffer เดียวกัน (ไม่โหลดซ้ำ) — วัดไม่ได้ = null
-    const pHash64 = await computeDHash64(buf);
+    const pHash64 = (typeof precomputed.pHash64 === 'string' && precomputed.pHash64) ? precomputed.pHash64 : await computeDHash64(buf, guardOpts());
     // ★ 15 ก.ค. (Batch 2B authority resolution + 2C P1-A): หลักฐานขนาดจาก "บัฟเฟอร์ที่ decode จริงตอนนี้" เท่านั้น —
     //   แยกขาดจาก realWidth/realHeight ด้านบน (ซึ่ง resolveRealSize อาจ reuse ค่าเก่าจาก record โดยไม่ decode) ·
     //   decode header ล้ม/ค่าไม่ใช่จำนวนเต็มบวก = ไม่มีหลักฐาน (null ทั้งชุด) — ห้าม reuse ขนาด legacy จาก record ·
@@ -179,7 +165,9 @@ async function loadOne(im) {
     //   · ระบุชั้นไม่ได้ = provenance null → buildTriage ไม่ส่ง resolution → facts ฝั่ง authority คง 'unknown'
     let decodedWidth = null, decodedHeight = null, decodedProvenance = null;
     try {
-      const _dm = await sharp(buf, { failOn: 'none' }).metadata();
+      const _dm = (typeof precomputed.width === 'number' && typeof precomputed.height === 'number')
+        ? { width: precomputed.width, height: precomputed.height }
+        : await sharp(buf, guardOpts()).metadata();
       if (Number.isInteger(_dm.width) && _dm.width > 0 && Number.isInteger(_dm.height) && _dm.height > 0) {
         decodedWidth = _dm.width;
         decodedHeight = _dm.height;
@@ -197,6 +185,65 @@ async function loadOne(im) {
     return null;
   }
 }
+
+// ★ 30 ก.ค. 69 (เฟส "กันภาพพิษฆ่าเซิร์ฟ" — บริบท: :3900 ตายซ้ำ node exit 0xC0000409 ตอน S5 ประมวลภาพจากเว็บ):
+//   โหลด "ทั้งแบตช์" แล้วส่งผ่านห้องนิรภัย (โปรเซสลูก) รวดเดียว — 1 child ต่อ 1 เรียก (ไม่ spawn ต่อภาพ) native
+//   crash ที่เคยตายทั้งเซิร์ฟหลัก ตอนนี้ตายใน "โปรเซสอื่น" แทน (parent เห็น exit event → blacklist ใบนั้น +
+//   respawn ทำใบที่เหลือต่อ) ภาพที่ผ่านห้องนิรภัยแล้วใช้ "บัฟเฟอร์สะอาด" ต่อทั้งสาย (โปรเซสหลักไม่แตะ raw bytes อีกเลย)
+//   kill-switch: MEGA_IMG_AIRLOCK='0' → ข้ามชั้นนี้ทั้งหมด ใช้ Promise.all(map(loadOne)) เส้นเดิมเป๊ะ (byte-parity)
+async function loadBatch(images) {
+  if (!airlockOn()) {
+    return Promise.all(images.map(loadOne)); // เส้นเดิม 100% (ชั้น 1 guard ยังทำงานถ้า MEGA_IMG_GUARD ไม่ปิด)
+  }
+  // โหลด raw buffer ทั้งแบตช์ก่อน (ยัง "ไม่" decode ใดๆ) — ตาม ladder เดิมทุกใบ
+  const raws = await Promise.all(images.map(async (im) => {
+    const r = await loadRawBuffer(im);
+    return { buf: r?.buf || null, loadedFrom: r?.loadedFrom || null };
+  }));
+  // ชั้น 1 ก่อนส่งเข้าห้องนิรภัย (ประหยัด round-trip ถ้าเห็นชัดว่าพิษตั้งแต่ในโปรเซสหลัก) — ปฏิบัติเหมือน "โหลดไม่ได้"
+  const gOn = guardOn();
+  const items = [];
+  raws.forEach((r, i) => {
+    if (!r.buf) return;
+    if (gOn) {
+      const g = imageGuardCheck(r.buf);
+      if (!g.ok) { raws[i] = { buf: null, loadedFrom: r.loadedFrom }; return; } // ปฏิเสธชั้น 1 = null เหมือนโหลดไม่ได้
+    }
+    items.push({ id: String(i), buf: r.buf });
+  });
+  if (!items.length) return images.map(() => null);
+
+  let airlockResults;
+  try {
+    airlockResults = await runAirlockBatch(items);
+  } catch (e) {
+    // ห้องนิรภัยใช้งานไม่ได้เลยทั้งระบบ (เช่น spawn ENOENT) — ปลอดภัยไว้ก่อน: ตกกลับเส้นเดิมทั้งแบตช์นี้
+    //   (ยอมรับความเสี่ยงเดิมกลับมาชั่วคราว ดีกว่าทำให้ภาพทั้งแบตช์หายไปเงียบๆ)
+    console.warn('[img-airlock] เรียกห้องนิรภัยล้มทั้งระบบ — fallback เส้นเดิมสำหรับแบตช์นี้:', String(e?.message || e));
+    return Promise.all(images.map(loadOne));
+  }
+  const byId = new Map(airlockResults.map((r) => [r.id, r]));
+
+  return Promise.all(images.map(async (im, i) => {
+    const raw = raws[i];
+    if (!raw.buf) return null; // โหลดไม่ได้ หรือถูกปฏิเสธชั้น 1 = เหมือนเดิม (null)
+    const res = byId.get(String(i));
+    if (!res || !res.ok || !res.buf) {
+      if (res?.poisoned) {
+        console.warn(`[img-airlock] 🧟 ภาพพิษ: id=${im.id || im.imageUrl || im.thumbnailUrl || '(ไม่มี id)'} loadedFrom=${raw.loadedFrom} — กันไว้ไม่ให้ตกลงสายเซิร์ฟหลัก (ข้ามใบนี้เหมือนโหลดไม่ได้ ทำใบอื่นในแบตช์ต่อ)`);
+      }
+      return null; // ล้ม/พิษ = เหมือนโหลด/decode ไม่ได้ (fail-open พฤติกรรมเดิม — รอบหน้าลองใหม่)
+    }
+    // ใช้ "บัฟเฟอร์สะอาด" จากห้องนิรภัยต่อจากนี้ (ไม่ใช่ raw) — ใช้ sharpness/pHash64/width/height ที่คำนวณมาแล้ว
+    //   ข้ามการคำนวณซ้ำในโปรเซสหลัก (ประหยัดเวลา + ลดจำนวนครั้งที่โปรเซสหลักต้อง decode)
+    return processLoadedBuffer(im, res.buf, raw.loadedFrom, {
+      sharpness: res.sharpness, pHash64: res.dHash64, width: res.width, height: res.height,
+    });
+  }));
+}
+// ★ 30 ก.ค. 69: export loadOne/loadBatch เพื่อให้เทส "กันภาพพิษฆ่าเซิร์ฟ" เรียกตรงได้ (เหมือน buildTriage ด้านล่าง
+//   ที่ export ไว้ให้ Stage-A focused test เรียกตรง) — additive ล้วน ไม่กระทบ caller เดิมในไฟล์นี้/ที่อื่น
+export { loadOne, loadBatch };
 
 // ★ 9 ก.ค. เฟส 2.3: whitelist หมวดจริงที่พรอมป์ Gemini กำหนด (gemini.js geminiClassifyFrames) — กันหมวดผี
 //   (เคสจริง: "face-happy" 2 ใบ โผล่เพราะไม่เคย validate) — นอกลิสต์ = 'other' เสมอ
@@ -456,7 +503,10 @@ export async function vetImages({ images, subjects, newsGist, onProgress, onRetr
   async function runOneBatch(bi) {
     const slice = batches[bi];
     const out = [];
-    const loads = await Promise.all(slice.map(async (im) => ({ im, r: await loadOne(im) })));
+    // ★ 30 ก.ค. 69: loadBatch (1 child/แบตช์ ผ่านห้องนิรภัย เมื่อ MEGA_IMG_AIRLOCK เปิด) แทน Promise.all(map(loadOne))
+    //   ตรงๆ — ปิดสวิตช์ = เส้นเดิมเป๊ะ (loadBatch เองก็ fallback ไป Promise.all(map(loadOne)) ตอน off)
+    const results_ = await loadBatch(slice);
+    const loads = slice.map((im, k) => ({ im, r: results_[k] }));
     doneImgs += slice.length;
     if (onProgress) onProgress({ done: Math.min(doneImgs, total), total, kept, dropped });
     const ok = loads.filter((x) => x.r);
@@ -537,7 +587,8 @@ export async function triageLibrary({ images, subjects, newsGist, onProgress, on
   for (let i = 0; i < images.length; i += batchSize) {
     const slice = images.slice(i, i + batchSize);
     // โหลด base64 พร้อมกันในแบตช์ (เร็วขึ้น) — ทิ้งรูปที่โหลดไม่ได้ (รอบหน้าค่อยลองใหม่)
-    const loaded = (await Promise.all(slice.map(loadOne))).filter(Boolean);
+    // ★ 30 ก.ค. 69: loadBatch (ผ่านห้องนิรภัยเมื่อ MEGA_IMG_AIRLOCK เปิด) แทน Promise.all(map(loadOne)) ตรงๆ
+    const loaded = (await loadBatch(slice)).filter(Boolean);
     if (onProgress) {
       const done = Math.min(i + batchSize, total);
       onProgress({ done, total, pct: Math.round((done / total) * 100), tagged });

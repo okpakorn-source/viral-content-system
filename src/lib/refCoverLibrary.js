@@ -120,10 +120,20 @@ export async function deleteRefCover(id) {
 export async function updateRefCover(id, patch = {}) {
   // ★ ใช้ store.update (atomic UPDATE ตรง — merge {...existing,...patch}) แทน remove→add
   //   กันข้อมูลหายถ้า add ล้มหลัง remove สำเร็จ · store.update throw เมื่อไม่พบ id → catch คืน null (คงสัญญาเดิม)
+  // ★ 29 ก.ค. 69 (lane2 audit-ref-app #1.8): เดิมกลืนทุก error (ไม่พบ id ปนกับ Supabase เขียนล้มจริง — network/
+  //   schema พัง) เป็น null เหมือนกันหมด → ผู้เรียก (api/ref-covers/route.js) เห็นแค่ "ไม่พบ id" ทั้งที่จริง record
+  //   ยังอยู่ปกติ แค่เขียนฐานข้อมูลล้ม (persistStore.js:280 มี console.error ของตัวเองอยู่แล้ว แต่ route.js ไม่มีทาง
+  //   แยกได้) — persistStore.js throw ข้อความต่างกันชัดเจนระหว่างสองเคส (`ไม่พบ id:` vs `อัพเดทไม่สำเร็จ:` ดู
+  //   persistStore.js:262,281) ใช้แยกที่นี่: เคส "ไม่พบ id" จริง → คืน null เป๊ะเหมือนเดิม (ผู้เรียกเดิมไม่เปลี่ยน
+  //   พฤติกรรม) · เคสอื่น (เขียนล้มจริง) → คืน {__error} ให้ route.js (ผู้เรียกเดียวในระบบ ยืนยันด้วย grep แล้ว)
+  //   แยกส่ง 500 พร้อมเหตุผลจริงแทนที่จะโกหกว่า 404 "ไม่พบ id"
   try {
     return await getStore().update(id, patch);
-  } catch {
-    return null;
+  } catch (e) {
+    const msg = e?.message || String(e);
+    if (/^ไม่พบ id/.test(msg)) return null;
+    console.warn(`[refCoverLibrary] updateRefCover(${id}) ล้มไม่ใช่เพราะไม่พบ id: ${msg}`);
+    return { __error: msg };
   }
 }
 

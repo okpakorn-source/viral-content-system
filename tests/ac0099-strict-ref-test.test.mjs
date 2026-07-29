@@ -5,7 +5,7 @@
 //    สังเคราะห์ขึ้นเพื่อจำลอง "รูปแบบ" ความพังของ AC-0099 (ตึก+หน้าจิ๋วขอบภาพ /
 //    หัวแหว่ง) — ไม่ใช่และไม่อ้างข้อมูล cloud ของเคส AC-0099 จริง (ซึ่ง
 //    UNAVAILABLE-LOCALLY). ref DNA ใช้ของจริงจากคลัง local (tracked ใน repo).
-// - offline 100%: global.fetch = counting bomb (โยนทันทีถ้าถูกเรียก)
+// - offline 100%: global.fetch ตอบเฉพาะภาพ fixture cdn.test; URL อื่นเป็น counting bomb
 // - archive/persist = injected counters เท่านั้น — ห้ามแตะ fs/network/cloud
 // - loader stub ตามแบบ scripts/test-semantic-selection.mjs (data:URL alias hook)
 // ============================================================
@@ -73,6 +73,16 @@ export async function resolve(specifier, context, nextResolve) {
 // H1.1: setup (register/env/fetch) เองก็อาจ throw — ครอบด้วย try/catch แยก คืนต้นฉบับแล้ว rethrow
 //   (ไม่ใช้ outer try เดียวเพราะ `let fetchBombCalls` ต้องอยู่นอก scope ของ try หลักที่ตามมา)
 let fetchBombCalls = 0;
+// dummy JPEG สั้นกว่า guard 500 bytes โดยตั้งใจ: intercept fixture fetch แล้วให้ second-eye fail-safe ข้าม vision
+const FIXTURE_IMAGE_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+function isFixtureImageUrl(input) {
+  try {
+    const rawUrl = typeof input === 'string' ? input : (input?.url || input?.href);
+    const url = new URL(rawUrl);
+    return url.protocol === 'https:' && url.host === 'cdn.test'
+      && !url.username && !url.password && /^\/[^/]+\.jpg$/i.test(url.pathname);
+  } catch { return false; }
+}
 const results = [];
 try {
   register('data:text/javascript,' + encodeURIComponent(hook));
@@ -83,8 +93,18 @@ try {
   process.env.MEGA_HERO_GRADE_HARD = '0';
   for (const k of ENV_KEYS_TOUCHED) if (!['MEGA_SOLVER_SHADOW', 'MEGA_YT_PARALLEL', 'MEGA_HERO_GRADE_HARD'].includes(k)) delete process.env[k];
 
-  // ---- fetch bomb ก่อน dynamic import เป้าหมาย (E12 ต้องนับ import-time ด้วย) ----
-  globalThis.fetch = () => { fetchBombCalls++; throw new Error('NETWORK_BOMB: global.fetch is forbidden in this test'); };
+  // ---- fixture image stub + fetch bomb ก่อน dynamic import เป้าหมาย (E12 ต้องนับ import-time ด้วย) ----
+  globalThis.fetch = (input) => {
+    if (isFixtureImageUrl(input)) {
+      return Promise.resolve({
+        ok: true,
+        headers: { get: (name) => (String(name).toLowerCase() === 'content-type' ? 'image/jpeg' : null) },
+        arrayBuffer: async () => FIXTURE_IMAGE_BYTES.buffer,
+      });
+    }
+    fetchBombCalls++;
+    throw new Error('NETWORK_BOMB: global.fetch is forbidden in this test');
+  };
 } catch (setupErr) {
   restoreExactOriginals();
   throw setupErr;

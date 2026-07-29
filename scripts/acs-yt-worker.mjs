@@ -26,6 +26,14 @@ const ERR_MS = 30000;
 // แคปเฟรม 1 งาน (ค้นคลิป+โหลด+แคป+ตาคัด+อัปโฮสต์) กินเวลาได้ 15-40 นาทีเมื่อ Gemini คิวแน่น
 // → timeout 60 นาที (บทเรียน 6 ก.ค.: 15 นาทีสั้นไป งานจริงโดนตัดกลางคัน)
 //   และ "route เป็นคนปิดงานในคิวเอง" — ต่อให้สายหลุด งานก็จบถูกสถานะ
+// ★ 29 ก.ค. 69 (lane2 audit-queue-stability #1): 1 ชม.นี้เป็น dispatcher-level (undici Agent headersTimeout/
+//   bodyTimeout) เพียงอย่างเดียว — processJob() เดิมไม่ผูก AbortSignal ของตัวเองเลย ถ้า import('undici') ล้ม
+//   (catch ด้านล่าง) longDispatcher=null แล้วไม่มี timeout เหลืออยู่เลย + ระหว่างที่ processJob ค้าง (สูงสุด 1 ชม.)
+//   worker เป็น loop เดียว sequential (ดู for(;;) ด้านล่าง) หยุดทำทุกอย่างรวม claim งานแคปเฟรมใหม่/quick-test dispatch
+//   → เพิ่ม timeout เฉพาะจุดนี้ (แยกจาก claim/report/jobStatus ที่ 15s เดิม — งานเหล่านั้นเบาไม่เกี่ยวกับแคปคลิปจริง)
+//   ตั้ง 45 นาที: มากกว่าเพดานงานจริงสุด (40 นาทีตามคอมเมนต์ข้างบน กันแคปคลิปปกติโดนตัดกลางคัน) แต่น้อยกว่า
+//   dispatcher 1 ชม. (กันชนกัน — timeout นี้ต้องทำงานก่อนเสมอเมื่อเซิร์ฟเวอร์ค้างจริง)
+const FRAME_JOB_TIMEOUT_MS = Number(process.env.ACS_FRAME_JOB_TIMEOUT_MS) || 45 * 60 * 1000;
 let longDispatcher = null;
 try {
   const { Agent } = await import('undici');
@@ -74,10 +82,13 @@ async function jobStatus(id) {
 
 async function processJob(job) {
   log(`▶️ เริ่มงาน ${job.id} เคส ${job.caseId}`);
+  // ★ 29 ก.ค. 69 (lane2 audit-queue-stability #1): เพิ่ม signal ของตัวเอง (ดูคอมเมนต์ FRAME_JOB_TIMEOUT_MS ด้านบน)
+  //   — ไม่แตะ endpoint อื่นในไฟล์นี้ (claim/report/jobStatus 15s, rehost 300s, quick-test 20s ยังเดิมทุกจุด)
   const r = await fetch(`${FRAME_BASE}/api/images/youtube`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ caseId: job.caseId, hostPublic: true, ytJobId: job.id, clipUrl: job.clipUrl || undefined }),
+    signal: AbortSignal.timeout(FRAME_JOB_TIMEOUT_MS),
     ...(longDispatcher ? { dispatcher: longDispatcher } : {}),
   });
   const d = await r.json().catch(() => ({}));

@@ -345,7 +345,8 @@ const gapSPos = (o = {}) => ({
   isCatalogSource: o.isCatalogSource, isOwnPageSource: o.isOwnPageSource, isMismatchedFbMedia: o.isMismatchedFbMedia,
 });
 const runGapOS = async (sp, os, { lib = [], queries = ['nq0'] } = {}) => {
-  globalThis.__MEGA_SP = sp; globalThis.__MEGA_AI = async () => ({ text: JSON.stringify({ queries }) });
+  globalThis.__MEGA_SP = { ...sp, searchImages: (p, q, opts) => (queries.includes(q) ? sp.searchImages(p, q, opts) : []) };
+  globalThis.__MEGA_AI = async () => ({ text: JSON.stringify({ queries }) });
   const prev = process.env.MEGA_SEARCH_OUTCOME_SHADOW_V1 ?? null; SETOS(os);
   const job = { dossier: { images: { caseId: 'GAP', storyQueries: ['sq'] }, compass: { mainCharacters: [{ name: 'A' }] }, desk: { title: 't' } } };
   const jf = async (url) => { if (String(url).includes('/api/images/')) return { images: lib }; throw new Error('NO NET'); };
