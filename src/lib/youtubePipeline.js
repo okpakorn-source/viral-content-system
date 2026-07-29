@@ -42,7 +42,11 @@ function num(v, d) {
   return isNaN(n) ? d : n;
 }
 
-export async function runYouTubePipeline({ caseId, keywords, progress, clipUrls, newsGist }) {
+// ★ 29 ก.ค. 69 (lane2 เฟส A "ภาพที่ใช่ต้องเข้าพูล" ข้อ 4 — clip-first ชุด② dormant): frameBrief (optional string)
+//   จาก options — ต่อสายลงไปถึง geminiSelectFrames (gemini.js) เพื่อคัดเฟรมแบบมีน้ำหนักต่อใบสั่ง ไม่ส่งมา =
+//   undefined ตลอดสาย = พฤติกรรมเดิมเป๊ะ · ต้นทางจริงที่จะป้อน frameBrief (megaAdapters.js เรียก runYouTubePipeline)
+//   ยังไม่ต่อสายในรอบนี้ (เลน 1 ถือไฟล์อยู่ — ทำแบตช์ถัดไป)
+export async function runYouTubePipeline({ caseId, keywords, progress, clipUrls, newsGist, frameBrief }) {
   const P = progress || (() => {});
   const subjects = keywords.subjects || [];
   const log = [];
@@ -145,7 +149,7 @@ export async function runYouTubePipeline({ caseId, keywords, progress, clipUrls,
       }
 
       P('Gemini คัดเฟรม', `คลิป ${clipIdx} — คัดจาก ${cand.length} เฟรม (ได้ ${collected.length} แล้ว)`, { pct: 22 + clipIdx * 12 });
-      let selected = await selectWithGemini(cand, subjects, P.onRetry, caseId, newsGist, pinpoint);
+      let selected = await selectWithGemini(cand, subjects, P.onRetry, caseId, newsGist, pinpoint, frameBrief);
       log.push(`คลิป ${clipIdx} "${clip.title.slice(0, 40)}": เฟรมดิบ ${cand.length} → Gemini เลือก ${selected.length}`);
 
       // ★ 6 ก.ค. (ผู้ใช้สั่ง "ต้องได้ 10+ ภาพ"): โหมดเจาะจงคลิป — ตาคัดน้อยไป (คลิปถ่ายมือ/สั่น
@@ -302,7 +306,9 @@ async function extractFrames(videoFile, dir, dense = false) {
 }
 
 // ---- Gemini: คัดเฟรมเป็นแบตช์ คืน index ที่เลือก ----
-async function selectWithGemini(cand, subjects, onRetry, caseId, newsGist, pinpoint) {
+// ★ 29 ก.ค. 69 (เฟส A ข้อ 4, dormant): frameBrief (optional) — ต่อสายจาก runYouTubePipeline ลงมาถึง
+//   geminiSelectFrames เท่านั้น ไม่ส่งมา = undefined = พฤติกรรมเดิมเป๊ะ
+async function selectWithGemini(cand, subjects, onRetry, caseId, newsGist, pinpoint, frameBrief) {
   const keep = [];
   for (let i = 0; i < cand.length; i += GEMINI_BATCH) {
     const batch = cand.slice(i, i + GEMINI_BATCH);
@@ -312,7 +318,7 @@ async function selectWithGemini(cand, subjects, onRetry, caseId, newsGist, pinpo
       frames.push({ index: c.index, base64: buf.toString('base64') });
     }
     // ★ 26 ก.ค. 69: ส่ง COVER_GEMINI_MODEL ตรงๆ (สายปก) — ปุ่มถอยกลับ: env COVER_GEMINI_MODEL
-    const sel = await geminiSelectFrames({ frames, subjects, onRetry, caseId, newsGist, pinpoint, model: COVER_GEMINI_MODEL });
+    const sel = await geminiSelectFrames({ frames, subjects, onRetry, caseId, newsGist, pinpoint, model: COVER_GEMINI_MODEL, frameBrief });
     for (const s of sel) keep.push(s.index);
   }
   return [...new Set(keep)];

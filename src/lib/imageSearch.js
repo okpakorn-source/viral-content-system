@@ -325,6 +325,11 @@ const MOMENT_SLOTS = parseInt(process.env.IMAGES_MOMENT_SLOTS || '3', 10);
 // ★ 9 ก.ค. เฟส 4a: จำนวนคำค้น "เชิงเรื่องราว" (ความสัมพันธ์/ทริป/อัลบั้ม/แลนด์มาร์ก) ที่การันตียิงเสมอ
 //   (ภาพเชิงบริบทที่เพจดังใช้แล้วแมส — ต้องได้ยิงแม้ event queries เยอะ) · kill-switch IMG_STORY_QUERIES=0 = ปิดหมวดใหม่ทั้งหมด
 const STORY_SLOTS = parseInt(process.env.IMAGES_STORY_SLOTS || '3', 10);
+// ★ 29 ก.ค. 69 (lane2 เฟส A "ภาพที่ใช่ต้องเข้าพูล" ข้อ 1 — dormant): จำนวนคำค้น "dream shot" (มาจาก
+//   compass.visualDreamShots ผ่าน compassBrain, megaBrains.js:39-51 — ยังไม่มีต้นทางป้อนจริงในรอบนี้ เลน 1 จะต่อสาย
+//   เข้า megaAdapters.js ในแบตช์ถัดไป) ที่การันตียิงเสมอเหมือนบัคเก็ตอื่น (evidence/moment/place/story)
+//   kill-switch MEGA_DREAM_QUERIES='0' ปิดทั้งบัคเก็ต (default เปิด) — ไม่ส่ง dreamQueries มาเลย = [] เสมอไม่ว่าสวิตช์ค่าใด
+const DREAM_SLOTS = parseInt(process.env.IMAGES_DREAM_SLOTS || '3', 10);
 // คำบ่ง "สถาบัน/สถานที่สาธารณะ" — ภาพจาก Google ใช้ได้เลย ไม่ต้องผูกชื่อคน (ชื่อเฉพาะระบุตัวตนสถานที่แล้ว)
 // ★ 8 ก.ค. บั๊กซ่อนเดิม: "จังหวัด"/"หวัด" มีคำว่า "วัด" ซ่อนอยู่ → regex เคยตีความ "จังหวัดแม่ฮ่องสอน" เป็นชื่อวัด
 //   แล้วปล่อยคำค้นพื้นที่เปล่าผ่านช่องสถาบัน (ที่มาวิวอำเภอ 14 ใบใน AC-0043) — ใส่ lookbehind กัน ห/หนำหน้า วัด
@@ -351,7 +356,9 @@ export function isSaneSubjectName(name) {
 }
 
 // เลือกคำค้น "สมดุลต่อบุคคล" (round-robin) + P2: ผูกวัตถุกับเจ้าของ, ตัดคำค้นวัตถุลอย
-export function buildQueries(keywords, maxQueries) {
+// ★ 29 ก.ค. 69 (lane2 เฟส A ข้อ 1 — dormant): พารามิเตอร์ที่ 3 ใหม่ dreamQueries (array of string, optional)
+//   ไม่ส่งมา/undefined = พฤติกรรมเดิมทุกคิวเป๊ะ (ดูจุดใช้งานด้านล่าง — ทุกจุดเช็ค Array.isArray ก่อนเสมอ)
+export function buildQueries(keywords, maxQueries, dreamQueries) {
   // ★ 9 ก.ค. เฟส 4a: เปิด/ปิดหมวดคำค้น "เชิงเรื่องราว" + emotion/source_show + สถานที่ตปท. (kill-switch)
   const STORY_ON = process.env.IMG_STORY_QUERIES !== '0';
   // ★ W3: กรอง subject ขยะก่อนใช้ — ถ้ากรองแล้วเหลือ 0 (ทุกตัวเพี้ยน) ใช้ raw เดิม กัน "ค้นแล้วได้ศูนย์"
@@ -395,9 +402,24 @@ export function buildQueries(keywords, maxQueries) {
         ...(keywords.family_album || []),
       ].map(bindName).filter(Boolean)
     : [];
-  const emoShowQ = STORY_ON && mainName
+  let emoShowQ = STORY_ON && mainName
     ? [...(keywords.emotion || []), ...(keywords.source_show || [])].map(bindName).filter(Boolean)
     : [];
+  // ★ 29 ก.ค. 69 (lane2 เฟส A ข้อ 1, dormant — MEGA_DREAM_QUERIES): บัคเก็ต "dream shot" จาก compass.visualDreamShots
+  //   ไม่ส่ง dreamQueries มา หรือปิดสวิตช์ = dream=[] เสมอ → dedupeTake([], N) คืน [] และ trim ท้าย emoShowQ ด้วย
+  //   dream.length=0 เป็น no-op — ไม่กระทบ emoShowQ/pool/guaranteed แม้แต่ byte เดียวเมื่อไม่มี dreamQueries จริง
+  const dreamOn = process.env.MEGA_DREAM_QUERIES !== '0';
+  const dream = dreamOn && Array.isArray(dreamQueries) && dreamQueries.length
+    ? dedupeTake(dreamQueries.map((q) => bindName(String(q || '').trim())).filter(Boolean), DREAM_SLOTS)
+    : [];
+  // หักโควตาจากคิวอ่อนสุด (emoShowQ) เท่าจำนวน dream ที่เพิ่มเข้า guaranteed — ชดเชย "เพดานงบไม่บวม" (ดูคอมเมนต์ guaranteedBase
+  //   ด้านล่างสำหรับข้อพิสูจน์เพดานจริง) ★ ถ้อยคำแก้ 29 ก.ค. 69 (Opus review, งบค้นห้ามบวม รอบ 2): บรรทัดนี้เป็น best-effort
+  //   ล้วนๆ ไม่ใช่การันตี — ชดเชยได้เต็มก็ต่อเมื่อ emoShowQ (emotion/source_show) มีของให้ตัดพอ (≥ จำนวน dream) เท่านั้น ข่าวที่
+  //   emoShowQ บาง/ว่าง (เช่น ไม่มี subject เลย หรือสกัด emotion/source_show ไม่ได้) จะไม่มีอะไรให้หักชดเชย → ยอดจริงขยับขึ้น
+  //   ได้จริง (พิสูจน์แล้วด้วยโพรบ: พูลว่างสนิท ไม่มี dream=0 ข้อ, มี dream=1-3 ข้อ ตามจำนวน dream ที่ส่งมา ไม่มีการหักชดเชยเลย)
+  //   — สิ่งที่ยังคงจริงเสมอ (โครงสร้าง พิสูจน์แล้วแยกต่างหาก) คือ "เพดาน" (ตัวเลข n ที่ส่งเข้า dedupeTake สุดท้าย) เท่าเดิมเป๊ะ
+  //   ไม่ว่า emoShowQ จะชดเชยได้เต็ม/บางส่วน/ไม่ได้เลยก็ตาม — ยอดจริงจึงขยับขึ้นได้สูงสุดแค่ "≤ เพดานเดิม" ไม่ใช่ "เท่าเดิมเป๊ะเสมอ"
+  if (dream.length) emoShowQ = emoShowQ.slice(0, Math.max(0, emoShowQ.length - dream.length));
   pool = [...pool, ...storyQ, ...emoShowQ];
 
   const HARD_EVIDENCE = /จดหมาย|เช็ค|ป้าย|เอกสาร|ลายมือ|สลิป|แชท|ใบประกาศ|มอบเงิน|บริจาค|โพสต์/;
@@ -447,9 +469,20 @@ export function buildQueries(keywords, maxQueries) {
 
   // 🧾🎬🏛️📖 หลักฐาน + โมเมนต์/แอ็กชัน + สถานที่ + เรื่องราว = การันตียิงทุกช่อง (เพิ่มจากโควตา round-robin ต่อบุคคล — ไม่เบียดสมดุลคน)
   //    ลำดับ: หลักฐาน/โมเมนต์/สถานที่นำก่อน (ตามเดิม) แล้วเรื่องราวต่อท้าย — แต่ทั้งหมดยิงก่อน round-robin
-  const guaranteed = dedupeTake(
+  // ★ ปิดเงื่อนไข Opus #1 (29 ก.ค. 69 — งบค้นห้ามบวม): guaranteedBase = ฐานเดิมไม่รวม dream แยกไว้ต่างหาก — ใช้
+  //   ความยาวของ "ฐานนี้" (ไม่ใช่ guaranteed.length ทั้งก้อนที่รวม dream แล้ว) เป็นตัวคำนวณเพดานรวมสุดท้าย 2 จุดด้านล่าง
+  //   (บรรทัด "return dedupeTake([...guaranteed, ...names, ...pool], ...)" ทั้ง 2 กิ่ง) — เดิม bug: เพดานรวมใช้
+  //   guaranteed.length ที่รวม dream ไปแล้ว ทำให้งบรวมบวมขึ้นตรงๆ เท่าจำนวน dream ที่ผ่านเข้ามา (พิสูจน์จริง: pool
+  //   สมจริง maxQueries=11 → 19 กลายเป็น 22 (+3), พูลบาง → 1 กลายเป็น 3 (+2)) ทั้งที่ตั้งใจ trim emoShowQ ชดเชยแล้ว
+  //   (การ trim นั้นแก้แค่ "สัดส่วนใน pool" ไม่ได้แก้เพดานรวมที่โตตามเลย) — ไม่ส่ง dreamQueries/ปิดสวิตช์ = dream=[]
+  //   เสมอ → guaranteedBase===guaranteed ทุก byte (ไม่มี dream ให้ตัดออก) = พฤติกรรมเดิมเป๊ะ ไม่มีการเปลี่ยนแปลงใดๆ
+  const guaranteedBase = dedupeTake(
     [...evidence, ...momentScenes, ...places, ...story],
     EVIDENCE_SLOTS + MOMENT_SLOTS + PLACE_SLOTS + STORY_SLOTS
+  );
+  const guaranteed = dedupeTake(
+    [...evidence, ...momentScenes, ...places, ...story, ...dream],
+    EVIDENCE_SLOTS + MOMENT_SLOTS + PLACE_SLOTS + STORY_SLOTS + DREAM_SLOTS
   );
 
   // round-robin ยึด "ชื่อบุคคล" (ถ้าข่าวไม่มีบุคคลเลย ค่อยใช้ทุก subject)
@@ -457,7 +490,10 @@ export function buildQueries(keywords, maxQueries) {
 
   if (names.length <= 1) {
     // คนเดียว = หลักฐาน+สถานที่ก่อน แล้วตามด้วยชื่อ+คำค้นตามลำดับ
-    return dedupeTake([...guaranteed, ...names, ...pool], maxQueries + guaranteed.length);
+    // ★ ปิดเงื่อนไข Opus #1 (ถ้อยคำแก้ 29 ก.ค. 69 รอบ 2): เพดานใช้ guaranteedBase.length (ไม่รวม dream) — "เพดานงบ"
+    //   ไม่บวมเมื่อเปิด dream (ค่าเดิมเป๊ะ) แต่ "ยอดจริง" ที่ dedupeTake คืนอาจขยับขึ้นได้ ≤ เพดานเดิม เมื่อ dream เติมพูล
+    //   ที่เดิมเหลือว่าง/บาง (การ trim emoShowQ ชดเชยได้แค่ best-effort — ดูคอมเมนต์ที่นิยาม guaranteedBase/emoShowQ ด้านบน)
+    return dedupeTake([...guaranteed, ...names, ...pool], maxQueries + guaranteedBase.length);
   }
 
   // คิวต่อบุคคล: ชื่อตัวเองก่อน แล้วตามด้วยคำค้นที่เอ่ยชื่อคนนั้น
@@ -498,5 +534,6 @@ export function buildQueries(keywords, maxQueries) {
     }
   }
   // 🧾🏛️ หลักฐาน+สถานที่นำหน้าเสมอ (เพิ่มจากโควตา round-robin — ไม่เบียดสมดุลต่อบุคคล)
-  return dedupeTake([...guaranteed, ...out], maxQueries + guaranteed.length);
+  // ★ ปิดเงื่อนไข Opus #1: เพดานใช้ guaranteedBase.length (ไม่รวม dream) เหมือนกิ่งคนเดียวด้านบนเป๊ะ
+  return dedupeTake([...guaranteed, ...out], maxQueries + guaranteedBase.length);
 }

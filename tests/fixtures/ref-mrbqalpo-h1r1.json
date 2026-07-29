@@ -1,0 +1,201 @@
+[
+  {
+    "id": "REF-mrbqalpo-h1r1",
+    "uploadedAt": "2026-07-08T07:00:25.836Z",
+    "styleName": "735563396_2013930885893761_6511373257075723340_n",
+    "imagePath": "/ref-covers/ref-mrbqa9kn-kzao.jpg",
+    "dna": {
+      "aspectRatio": "4:5",
+      "canvasWpx": 1080,
+      "canvasHpx": 1350,
+      "layoutFamily": "hero-left-collage",
+      "layoutType": "ฮีโร่ซ้ายเต็มสูง + ขวา 3 ช่อง + วงกลมล่างซ้าย",
+      "panelCount": 5,
+      "template": {
+        "slots": [
+          {
+            "role": "hero",
+            "shape": "rect",
+            "xPct": 0,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 100,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0,
+            "pos": "ซ้ายเต็มสูง",
+            "subject": "พระสงฆ์",
+            "shot": "closeup"
+          },
+          {
+            "role": "context",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 0,
+            "wPct": 50,
+            "hPct": 33,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0,
+            "pos": "บนขวา",
+            "subject": "พระสงฆ์และบุคคลหน้าหอผู้ป่วย",
+            "shot": "medium"
+          },
+          {
+            "role": "action",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 33,
+            "wPct": 50,
+            "hPct": 33,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0,
+            "pos": "กลางขวา",
+            "subject": "พระสงฆ์เยี่ยมผู้ป่วย (วงเหลืองชี้)",
+            "shot": "medium"
+          },
+          {
+            "role": "moment",
+            "shape": "rect",
+            "xPct": 50,
+            "yPct": 66,
+            "wPct": 50,
+            "hPct": 34,
+            "zIndex": 0,
+            "border": false,
+            "borderColor": "-",
+            "borderWidthPct": 0,
+            "pos": "ล่างขวา",
+            "subject": "ผู้ดูแลป้อนยาผู้ป่วย (วงเหลืองชี้)",
+            "shot": "medium"
+          },
+          {
+            "role": "reaction",
+            "shape": "circle",
+            "xPct": 17,
+            "yPct": 61,
+            "wPct": 26,
+            "hPct": 21,
+            "zIndex": 4,
+            "border": true,
+            "borderColor": "#FFFFFF",
+            "borderWidthPct": 2,
+            "subject": "ผู้หญิงยิ้ม",
+            "shot": "closeup"
+          }
+        ],
+        "seamStyle": "feather",
+        "featherPx": 13
+      },
+      "layout": {
+        "hero": {
+          "position": "left",
+          "widthPct": 50,
+          "facePct": 60,
+          "facePosition": "center"
+        },
+        "sidePanels": {
+          "count": 3,
+          "stack": "vertical",
+          "split": "33/33/34"
+        },
+        "circle": {
+          "present": true,
+          "xPct": 5,
+          "yPct": 75,
+          "diameterPct": 20,
+          "position": "bottom-left",
+          "role": "reaction"
+        }
+      },
+      "slots": [
+        {
+          "role": "hero",
+          "subject": "พระสงฆ์",
+          "emotion": "สงบ",
+          "facing": "ตรง",
+          "pos": "ซ้ายเต็มสูง",
+          "shot": "medium",
+          "desc": "ซ้ายเต็มสูง · medium · พระสงฆ์"
+        },
+        {
+          "role": "context",
+          "subject": "พระสงฆ์และบุคคลอื่นหน้าหอผู้ป่วยชาย",
+          "emotion": "ยิ้ม",
+          "facing": "ตรง",
+          "pos": "บนขวา",
+          "shot": "medium",
+          "desc": "บนขวา · medium · พระสงฆ์และบุคคลอื่นหน้าหอผู้ป่วยชาย"
+        },
+        {
+          "role": "action",
+          "subject": "พระสงฆ์เยี่ยมผู้ป่วย",
+          "emotion": "ห่วงใย",
+          "facing": "ข้าง",
+          "pos": "กลางขวา",
+          "shot": "medium",
+          "desc": "กลางขวา · medium · พระสงฆ์เยี่ยมผู้ป่วย"
+        },
+        {
+          "role": "moment",
+          "subject": "ผู้หญิงดูแลผู้ป่วย",
+          "emotion": "เอาใจใส่",
+          "facing": "ข้าง",
+          "pos": "ล่างขวา",
+          "shot": "medium",
+          "desc": "ล่างขวา · medium · ผู้หญิงดูแลผู้ป่วย"
+        },
+        {
+          "role": "reaction",
+          "subject": "ผู้หญิงยิ้ม",
+          "emotion": "ยิ้ม",
+          "facing": "ตรง",
+          "pos": "วงกลมกลาง",
+          "shot": "closeup",
+          "desc": "วงกลมกลาง · closeup · ผู้หญิงยิ้ม"
+        }
+      ],
+      "subjectsRelation": "ฮีโร่=พระสงฆ์, ขวาบน=บริบท, ขวากลาง=พระสงฆ์กับผู้ป่วย, ขวาล่าง=ผู้ป่วยกับพยาบาล, วงกลม=หญิงยิ้มแย้ม",
+      "style": {
+        "tone": "อบอุ่น",
+        "palette": ["#E8C9A0", "#FFFFFF", "#A0C9E8"],
+        "hasText": true,
+        "textNote": "มีตัวหนังสือที่ป้ายหอผู้ป่วยชาย",
+        "effects": ["feathered-seams", "faces-fill", "วงกลมขอบขาว"],
+        "retouch": "เนียน"
+      },
+      "emotion": "อบอุ่น",
+      "compositionLogic": "วางพระสงฆ์เป็นฮีโร่เพื่อเน้นความสำคัญ ขวาเป็นบริบทและการกระทำที่เกี่ยวข้อง",
+      "storyFlow": "พระสงฆ์→สงบ→เยี่ยมผู้ป่วย→บริบทโรงพยาบาล→โมเมนต์อบอุ่น",
+      "matchNewsType": ["human-interest", "กตัญญู", "สุขภาพ"],
+      "matchEmotion": ["อบอุ่น", "เมตตา"],
+      "neededShots": ["ฮีโร่หน้าอารมณ์", "ภาพคู่", "โมเมนต์เหตุการณ์"],
+      "_geometryRefined": true,
+      "_humanVerified": true,
+      "_reproducible": true,
+      "_fidelity": {
+        "score": 57,
+        "rawScore": 41,
+        "featherPx": 13,
+        "worstOffsetPx": 23.5,
+        "meanOffsetPx": 23.5,
+        "confidence": "ok",
+        "confidentBoundaries": 1,
+        "lowConfidenceBoundaries": 3,
+        "measuredAt": "2026-07-16T10:52:02.736Z",
+        "engineVersion": "rtf-1.0.0"
+      },
+      "_templateGrade": {
+        "grade": "F",
+        "reasons": ["ใบซ้ำของ REF-mrbqa9k2-obt0 (_duplicateOf)"],
+        "engineVersion": "ref-grade-r3-v1"
+      }
+    },
+    "dnaError": null,
+    "_duplicateOf": "REF-mrbqa9k2-obt0"
+  }
+]

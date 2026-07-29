@@ -68,7 +68,11 @@ function geminiText(data) {
 
 // frames: [{ index:number, base64:string }]  → คืน [{ index, reason }]
 // ★ 26 ก.ค. 69: model (optional) — สายปก (youtubePipeline.js) ส่ง COVER_GEMINI_MODEL มาตรงนี้ · ไม่ส่ง = พฤติกรรมเดิม (geminiModel())
-export async function geminiSelectFrames({ frames, subjects, onRetry, caseId, newsGist, pinpoint, model }) {
+// ★ 29 ก.ค. 69 (lane2 เฟส A "ภาพที่ใช่ต้องเข้าพูล" ข้อ 4 — clip-first ชุด② dormant): frameBrief (optional string)
+//   ใบสั่ง "เฟรมที่ต้องหา" จาก dream shots — ต้นทางจริง (megaAdapters.js/youtubePipeline call site) ยังไม่ต่อสาย
+//   ในรอบนี้ (เลน 1 ถือไฟล์ megaComposerService.js/coverExecutorService.js อยู่) ไม่ส่งมา = briefBlock ว่างเสมอ
+//   = prompt เดิมทุกตัวอักษร (ดู briefBlock ด้านล่าง)
+export async function geminiSelectFrames({ frames, subjects, onRetry, caseId, newsGist, pinpoint, model, frameBrief }) {
   const COST_STEP = 'แคปเฟรม YouTube (คัดภาพ)';
   const names =
     (subjects || []).map((s) => s.name).filter(Boolean).join(', ') || 'บุคคลในข่าว';
@@ -83,11 +87,16 @@ export async function geminiSelectFrames({ frames, subjects, onRetry, caseId, ne
 - ผ่อนเกณฑ์ความคม 1 ระดับ: "ชัดพอใช้" (เห็นหน้า/ท่าทาง/บริบทรู้เรื่อง) = เก็บ — ตัดเฉพาะเบลอหนักมาก/มืดสนิท/เฟรมเปลี่ยนฉากล้วนๆ
 - กระจายให้ครบทุกช่วงคลิป (ต้น-กลาง-ท้าย) และทุกมุมกล้อง/ทุกคนที่ปรากฏ ไม่ใช่ซีนเดียวซ้ำ\n`
     : '';
+  // ★ 29 ก.ค. 69 (เฟส A ข้อ 4, dormant): ใบสั่งเฟรมจาก dream shots — ให้น้ำหนักเฟรมตรงใบสั่งก่อน แต่ยังต้องผ่าน
+  //   เกณฑ์คุณภาพเดิมเสมอ (ไม่ใช่เลือกแทนเกณฑ์) — ไม่ส่ง frameBrief มา = briefBlock='' = prompt เดิมทุกตัวอักษร
+  const briefBlock = frameBrief
+    ? `\n🎯 ใบสั่งเฟรมที่ต้องหาเป็นพิเศษ (ให้น้ำหนักเฟรมที่ตรงกับใบสั่งนี้ก่อนเป็นอันดับแรกเมื่อมีให้เลือกหลายเฟรมใกล้เคียงกัน แต่ยังต้องผ่านเกณฑ์คุณภาพด้านล่างเสมอ — ไม่ใช่เลือกแทนเกณฑ์):\n${String(frameBrief).slice(0, 800)}\n`
+    : '';
 
   const promptText = `คุณคือผู้ช่วยคัดภาพจากคลิปข่าวเพื่อนำไปทำ "ปกข่าว"
 มีภาพเฟรมที่แคปจากวิดีโอมาให้หลายรูป (กำกับด้วย "รูปที่ N:")
 งานของคุณ: เลือกเฉพาะเฟรมที่ "ใช้ทำปกได้ดีจริง" ตามเกณฑ์
-${gistBlock}${pinpointBlock}
+${gistBlock}${pinpointBlock}${briefBlock}
 เกณฑ์ที่ต้องผ่าน:
 - เห็นบุคคลเป้าหมายชัดเจน: ${names}
 - ใบหน้า/ตัวบุคคลคมชัด ไม่เบลอ ไม่ไหว ไม่มืดจนมองไม่เห็น

@@ -416,7 +416,10 @@ export async function POST(req) {
         .filter((q) => { if (!q || seenQ.has(q)) return false; seenQ.add(q); return true; })
         .slice(0, maxQ);
     } else {
-      queries = buildQueries(keywords, maxQ);
+      // ★ 29 ก.ค. 69 (lane2 เฟส A ข้อ 2 — dormant): body.dreamQueries (array of string, optional) → ส่งต่อ
+      //   buildQueries ตรงๆ (แพทเทิร์นเดียวกับ body.keywords ด้านบน) ไม่ส่งมา = undefined = พฤติกรรมเดิมเป๊ะ
+      //   ต้นทางจริงที่จะป้อน dreamQueries (S6/megaAdapters.js) ยังไม่ต่อสายในรอบนี้ — ยังเป็น dormant สนิท
+      queries = buildQueries(keywords, maxQ, body.dreamQueries);
     }
     // ★ G3 วินัยโควตา: เพดานคำค้นต่อรอบ (MEGA_SEARCH_QUERY_CAP int) — ตัดตามลำดับความสำคัญเดิม (buildQueries เรียงให้แล้ว)
     //   ไม่ตั้ง/ตั้งไม่ถูก (NaN/≤0) = ไม่ตัด = พฤติกรรมเดิมเป๊ะ · ตั้งแล้ว = slice หัวรายการ

@@ -1357,10 +1357,58 @@ export async function s5_case(job, { origin }) {
   };
 }
 
+// ★ MEGA_DREAM_WIRING (เฟส A batch — 29 ก.ค. 69, lane2 "ภาพที่ใช่ต้องเข้าพูล"): kill-switch หลักคุมจุดที่ต่อสาย
+//   "ช็อตในฝัน" (compass.visualDreamShots) จริงในรอบนี้ — ข้อ 1 (ส่ง compass เข้า /api/keywords + เก็บ dreamQueries
+//   จากคำตอบ, ฟังก์ชันนี้), ข้อ 3 (ส่ง dreamQueries เข้า /api/images/search, s5_search ด้านล่าง), ข้อ 6 (ให้คะแนน
+//   dreamMatch หนักขึ้นที่ S6 — ดู MEGA_DREAM_SCORE จุดนั้น), ข้อ 7 (สร้าง+ส่ง frameBrief จาก visualDreamShots เข้า
+//   ท่อแคปเฟรมคลิป — ดู _buildFrameBrief ด้านล่าง) · default ON · '0' = ปิดทุกจุดกลับพฤติกรรมเดิมทุกไบต์ (ไม่ส่ง
+//   compass/dreamQueries/frameBrief ที่ไหนเลย — ปลายทางทุกจุดรองรับ "ไม่ส่งมา" เป็น byte-parity อยู่แล้ว —
+//   สวิตช์นี้แค่ตัดสินใจว่า "จะส่งไหม")
+function _dreamWiringOn() { return process.env.MEGA_DREAM_WIRING !== '0'; }
+
+// ★ MEGA_CLIPFRAME_FIX (เฟส A batch ข้อ 7, 29 ก.ค. 69 — 2 รูจริงจาก Explore report ก่อนต่อสาย frameBrief):
+//   (ก) เส้น sync ของ s5_clipframe (MEGA_YT_PARALLEL=0/งานเก่า) เดิมมองแค่ desk.url ไม่มอง dossier.sourceClips
+//   เลย (ต่างจาก s5_search โหมดขนานที่มองอยู่แล้ว) — งานที่ตั้งใจให้ sourceClips เป็นแหล่งหลักตกไปเส้นนี้จะไม่ได้ใช้
+//   ลิงก์ต้นทางเลย (ข) เงื่อนไข done.length===0 ใน s5_search (จุดยิงแคปขนาน) ทำให้ retry/resume ที่ done.length>0
+//   แล้วแต่ยังไม่เคยยิงแคปสำเร็จจริง (ytFired ยังว่าง) ไม่มีทางยิงแคปได้อีกเลยตลอดชีวิตงาน — ธง ytFired/clipFrameDone
+//   เดิมกันซ้ำอยู่แล้วไม่ต้องพึ่งเงื่อนไขนี้ซ้ำ · default ON · '0' = คืนพฤติกรรมเดิมทั้ง 2 จุดทุกไบต์
+function _clipframeFixOn() { return process.env.MEGA_CLIPFRAME_FIX !== '0'; }
+
+// ★ ปิดเงื่อนไข Opus #2 (เฟส A ข้อ 5, 29 ก.ค. 69): frameBrief มาจาก compass.visualDreamShots (เนื้อหา LLM-generated
+//   ไม่ผ่านการตรวจสอบเนื้อหาใดๆ) แล้วถูกยัดตรงเข้า prompt ของ Gemini อีกตัว (geminiSelectFrames ใน gemini.js ผ่าน
+//   youtubePipeline.js) — ต้อง sanitize ก่อนเสมอ กัน prompt injection (ประโยคเชิงคำสั่ง/role marker ปลอมที่หลุดมา
+//   ในคำอธิบายช็อต) ก่อนต่อสายจริง: ตัด newline→space (กันปลอมเป็นบรรทัดคำสั่งแยก) + ตัดวลี role marker/คำสั่งแทรก
+//   ทิ้ง (ตัดเฉพาะวลีอันตราย ไม่ทิ้งทั้งข้อความ — รักษาเนื้อหาที่เหลือซึ่งน่าจะยังมีประโยชน์ไว้) + คุมความยาว 800
+//   ตัวอักษร (เท่าเพดานเดิมที่ gemini.js geminiSelectFrames ใช้อยู่แล้ว — ทำซ้ำที่ต้นทางเป็นการป้องกันชั้นแรกด้วย)
+// PURE: ไม่ import/IO/env/Date/random — export ให้เทสตรงได้
+const FRAME_BRIEF_ROLE_MARKER_RE = /\b(system|assistant|user|human)\s*[:：]|(?:^|\s)(ระบบ|ผู้ช่วย|คำสั่งระบบ)\s*[:：]/gi;
+const FRAME_BRIEF_IMPERATIVE_RE = /ignore\s+(all\s+)?(previous|prior|above)[^.。]*|disregard\s+(all\s+)?(previous|prior)[^.。]*|ไม่ต้องสนใจ(คำสั่ง|กฎ)?ก่อนหน้า[^.。]*|ลืมคำสั่งก่อนหน้า[^.。]*|pretend\s+(to\s+be|that\s+you\s+are|you\s+are)[^.。]*|act\s+as\s+(a|an)\s+\w+[^.。]*|ทำตัวเป็น(ระบบ|ผู้ช่วย|เอไอ|ai)[^.。]*/gi;
+export function sanitizeFrameBrief(text) {
+  let t = String(text || '').replace(/[\r\n]+/g, ' '); // ตัด newline→space ก่อนอื่นใด
+  t = t.replace(FRAME_BRIEF_ROLE_MARKER_RE, ' ');
+  t = t.replace(FRAME_BRIEF_IMPERATIVE_RE, ' ');
+  t = t.replace(/\s+/g, ' ').trim();
+  return t.slice(0, 800);
+}
+
+// ★ เฟส A ข้อ 7: สร้าง "ใบสั่งเฟรม" จาก compass.visualDreamShots ให้ geminiSelectFrames เลือกเฟรมคลิปตามช็อตที่
+//   compass คิดไว้ (ไม่ใช่แค่ "หน้าชัด/ไม่ลายตา" ทั่วไปแบบเดิม) — ไม่มี compass/visualDreamShots ว่าง = '' เสมอ
+//   (youtubePipeline/gemini.js เดิมรองรับ frameBrief='' /ไม่ส่งมาเป็น byte-parity อยู่แล้ว) sanitize เสมอก่อนคืนค่า
+function _buildFrameBrief(compass) {
+  const shots = Array.isArray(compass?.visualDreamShots) ? compass.visualDreamShots.slice(0, 8) : [];
+  if (!shots.length) return '';
+  const raw = shots.map((d, i) => `${i + 1}. [${String(d?.slot || '-').slice(0, 20)}] ${String(d?.description || '').slice(0, 200)}`).join(' ');
+  return sanitizeFrameBrief(raw);
+}
+
 // ---------- S5b สกัดคีย์เวิร์ด (สมองอารมณ์ครบสเปกตรัม + ผูกชื่อ) ----------
 export async function s5_keywords(job, { origin }) {
   const im = job.dossier.images || {};
-  const r = await jfetch(`${origin}/api/keywords`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId }) }, 240000);
+  // ★ ปิดเงื่อนไข เฟส A ข้อ 1: ส่ง compass เข้า /api/keywords (route รับ body.compass อยู่แล้ว dormant —
+  //   buildKeywordUserPrompt เป็นคนตัดสินว่าจะสร้าง dreamBlock จริงไหมจาก compass.visualDreamShots เอง) ไม่มี
+  //   compass เลย/ปิดสวิตช์ = ไม่ส่ง key นี้เลย (พฤติกรรมเดิมทุกไบต์ — route อ่าน body.compass แบบ optional)
+  const body = { caseId: im.caseId, ...(_dreamWiringOn() && job.dossier.compass ? { compass: job.dossier.compass } : {}) };
+  const r = await jfetch(`${origin}/api/keywords`, { method: 'POST', body: JSON.stringify(body) }, 240000);
   if (!r.success || !r.keywords) {
     return { status: 'failed', nextAction: 'retry', summary: 'สกัดคีย์เวิร์ดไม่สำเร็จ: ' + (r.error || r.httpStatus) };
   }
@@ -1376,6 +1424,12 @@ export async function s5_keywords(job, { origin }) {
   //   field query ของแต่ละภาพในคลัง (ภาพที่ query ตรงหมวดนี้ = ภาพเชิงบริบท/ความสัมพันธ์ ไม่ใช่แค่ฉากข่าวเดียว)
   const storyQueries = ['relationship_archive', 'lifestyle_travel', 'family_album', 'landmark_context', 'scene_place']
     .flatMap((k) => (kw[k] || []).map((q) => String(q || '').trim()).filter(Boolean));
+  // ★ ปิดเงื่อนไข เฟส A ข้อ 1: dream_shot_queries จากคำตอบ (validateKeywordsV1Structure การันตี default [] เสมอ
+  //   แม้ AI ไม่ตอบคีย์นี้มา/ปิดสวิตช์คีย์เวิร์ดไม่เคยส่ง compass เลย — ไม่ throw) เก็บไว้ให้ s5_search ต่อสายเข้า
+  //   /api/images/search (ข้อ 3) — เหมือน storyQueries ด้านบนเป๊ะ (derived field จากคำตอบ ไม่ใช่ pass-through)
+  const dreamQueries = _dreamWiringOn() && Array.isArray(kw.dream_shot_queries)
+    ? kw.dream_shot_queries.map((q) => String(q || '').trim()).filter(Boolean)
+    : [];
   // ★ 18 ก.ค. 69 (เคส MG-0011 เนื้อหาถึง AI เป็น '?' ล้วน → ทุกหมวดว่าง): 0 คำค้น = ค้นภาพไม่ได้แน่นอน
   //   เดิมคืน done → เปลือง 4 tick ไปตายที่ s5_search ด้วย error ชวนงง ("ไม่มีคำค้นในคีย์เวิร์ด" ทั้ง 4 แหล่ง)
   //   → fail-fast ที่นี่พร้อมเหตุผลจริง (semantics เดียวกับเส้น fail ข้างบนเป๊ะ: status failed + nextAction retry)
@@ -1390,7 +1444,7 @@ export async function s5_keywords(job, { origin }) {
     status: 'done',
     nextAction: 'continue',
     summary: `สกัดคีย์ ${nQueries} คำค้น (เชิงเรื่องราว ${nStory}) · บุคคล ${(kw.subjects || []).length} คน`,
-    dossierPatch: { images: { ...im, keywordsCount: nQueries, subjects: (kw.subjects || []).map((s) => s.name).slice(0, 8), storyQueries } },
+    dossierPatch: { images: { ...im, keywordsCount: nQueries, subjects: (kw.subjects || []).map((s) => s.name).slice(0, 8), storyQueries, dreamQueries } },
   };
 }
 
@@ -1722,7 +1776,13 @@ export async function s5_search(job, { origin, _deps }) {
     //   sourceOnlyMode ก็คืน done ทันที = ไม่มีทั้งเฟรมไม่มีทั้งค้นเว็บ แถม s5_clipframe fallback ทีหลังไม่รู้จัก
     //   sourceClips (เช็คแค่ desk.url) จะไปค้น YouTube ทั่วไปผิดความหมาย — เฉพาะ branch นี้เท่านั้นที่ข้าม gate
     //   YT_PARALLEL ปกติของโหมดค้นเว็บทั่วไป (ไม่ sourceOnly) ยังคุมด้วย YT_PARALLEL เหมือนเดิมทุกอย่าง
-    if ((YT_PARALLEL || sourceOnlyMode) && !ytFired && done.length === 0) {
+    // ★ ปิดเงื่อนไข Opus #2 (เฟส A ข้อ 7, 29 ก.ค. 69 — "รูที่ 2" จาก Explore report): เดิมมี && done.length === 0
+    //   บังคับให้ยิงแคปได้เฉพาะ "รอบแรกสุด" ของงานเท่านั้น — งาน retry/resume (เช่น เซิร์ฟเวอร์ตายกลางทางหลังค้นเว็บ
+    //   ไปแล้วบางแพลตฟอร์ม done.length>0 แต่การยิงแคปครั้งแรกไม่เคยรอดจริง ytFired ยังเป็น null) จะไม่มีทางยิงแคป
+    //   ได้อีกเลยตลอดชีวิตงาน (done.length ไม่มีวันกลับเป็น 0) ทั้งที่ยังไม่เคยแคปจริง — ธง ytFired/clipFrameDone
+    //   เดิมกันซ้ำอยู่แล้ว (ตรวจ !ytFired ก่อนเข้าบล็อกนี้แล้ว) ไม่จำเป็นต้องพึ่ง done.length===0 ซ้ำอีกชั้น → ตัดออก
+    //   ใต้ kill-switch MEGA_CLIPFRAME_FIX (default ON) · '0' = คืน && done.length === 0 เดิมทุกไบต์
+    if ((YT_PARALLEL || sourceOnlyMode) && !ytFired && (_clipframeFixOn() || done.length === 0)) {
       // ★ โหมดคลิปต้นทาง (18 ก.ค. — ผู้ใช้สั่ง): job แนบลิงก์คลิปที่ข่าวมาจาก (dossier.sourceClips ≤3 —
       //   คนกรอกฟอร์ม cover-ref-test / auto-detect จากเนื้อ / สาย auto ส่ง desk.url เดิม) = แหล่งภาพ "หลัก"
       //   → ยิงแคปเฟรม pinpoint ทุกลิงก์ตั้งแต่ tick แรก · ค้นเว็บ 4 แหล่งกลายเป็นตัวเสริม
@@ -1731,12 +1791,15 @@ export async function s5_search(job, { origin, _deps }) {
         .map((u) => String(u || '').trim()).filter((u) => VIDEO_URL_RE.test(u)).slice(0, 3);
       const deskUrl = VIDEO_URL_RE.test(String(job.dossier.desk?.url || '')) ? job.dossier.desk.url : '';
       const clipUrls = srcClips.length ? srcClips : (deskUrl ? [deskUrl] : ['']); // '' = generic search แบบเดิม
+      // ★ ปิดเงื่อนไข เฟส A ข้อ 7: frameBrief จาก compass.visualDreamShots (sanitize แล้ว) — ไม่มี compass/ปิด
+      //   MEGA_DREAM_WIRING = '' เสมอ (ไม่ส่ง key นี้เลย พฤติกรรมเดิมทุกไบต์)
+      const _frameBrief = _dreamWiringOn() ? _buildFrameBrief(job.dossier.compass) : '';
       try {
         for (const cu of clipUrls) {
           fetch(`${origin}/api/images/youtube`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ caseId: im.caseId, ...(cu ? { clipUrl: cu } : {}) }),
+            body: JSON.stringify({ caseId: im.caseId, ...(cu ? { clipUrl: cu } : {}), ...(_frameBrief ? { frameBrief: _frameBrief } : {}) }),
           }).catch(() => {});
         }
         ytFired = new Date().toISOString();
@@ -1755,7 +1818,11 @@ export async function s5_search(job, { origin, _deps }) {
         dossierPatch: { images: { ...im, ...(ytFired ? { ytFired } : {}), searchedPlatforms: [...SEARCH_PLATFORMS], searchStats: im.searchStats || [], totalAdded: im.totalAdded || 0, sourceOnlySkipped: true } },
       };
     }
-    const r = await _jf(`${origin}/api/images/search`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, platform: next }) }, 480000); // ★ 7 ก.ค.: 5→8 นาที (search+EyeScreen ต่อแหล่งแตะ 5 นาทีได้ → เดิม abort พอดี)
+    // ★ ปิดเงื่อนไข เฟส A ข้อ 3: ส่ง dreamQueries (จาก s5_keywords ข้อ 1 ด้านบน) เข้า /api/images/search — route
+    //   รับ body.dreamQueries อยู่แล้ว (dormant, ส่งต่อ buildQueries() ตรงๆ) ไม่มี im.dreamQueries เลย/ว่างเปล่า/
+    //   ปิดสวิตช์ = ไม่ส่ง key นี้เลย (พฤติกรรมเดิมทุกไบต์ — route+buildQueries รองรับ "ไม่ส่งมา" อยู่แล้ว)
+    const _searchBody = { caseId: im.caseId, platform: next, ...(_dreamWiringOn() && Array.isArray(im.dreamQueries) && im.dreamQueries.length ? { dreamQueries: im.dreamQueries } : {}) };
+    const r = await _jf(`${origin}/api/images/search`, { method: 'POST', body: JSON.stringify(_searchBody) }, 480000); // ★ 7 ก.ค.: 5→8 นาที (search+EyeScreen ต่อแหล่งแตะ 5 นาทีได้ → เดิม abort พอดี)
     // 🔎 Search Provenance V1 (ON เท่านั้น + fail-closed) — แนบ 6 ตัวนับจาก response เข้า stat เดียวกัน
     //   propagate ทั้ง success stat และ error stat (attempted failure ที่ route แนบ provenance มา — P1-3)
     const _prov = provenanceOn ? _sanitizeSearchProv(r.provenance) : null;
@@ -2146,7 +2213,14 @@ export async function s5_clipframe(job, { origin }) {
   }
 
   // ขาด → แคปเฟรมจากคลิป (ช้า 3-5 นาที · ลิงก์ข่าวเป็นคลิป = แคปตรง / ไม่ใช่ = ค้น YouTube จากคีย์เวิร์ด)
-  const clipUrl = VIDEO_URL_RE.test(String(job.dossier.desk?.url || '')) ? job.dossier.desk.url : '';
+  // ★ ปิดรู (ก) จาก Explore report (เฟส A ข้อ 7, 29 ก.ค. 69): เส้น sync เดิมมองแค่ desk.url ตัวเดียว ทั้งที่
+  //   dossier.sourceClips (คลิปต้นทาง ≤3 ลิงก์) มีความสำคัญกว่า — ให้มองเหมือนเส้นขนานใน s5_search
+  //   ใต้ MEGA_CLIPFRAME_FIX (default ON) · '0' = desk.url เดี่ยวเดิมทุกไบต์
+  const _syncSrcClips = _clipframeFixOn()
+    ? (Array.isArray(job.dossier.sourceClips) ? job.dossier.sourceClips : [])
+        .map((u) => String(u || '').trim()).filter((u) => VIDEO_URL_RE.test(u))
+    : [];
+  const clipUrl = _syncSrcClips[0] || (VIDEO_URL_RE.test(String(job.dossier.desk?.url || '')) ? job.dossier.desk.url : '');
   const lack = cleanFaces < CLIPFRAME_MIN_CLEAN_FACES ? `หน้าเดี่ยวสะอาดแค่ ${cleanFaces}/${CLIPFRAME_MIN_CLEAN_FACES}` : `ไม่มีภาพโมเมนต์เล่าเรื่อง (${cleanStory}/${CLIPFRAME_MIN_CLEAN_STORY})`;
 
   // ★ 9 ก.ค. (เคาะ): โหมดขนาน — S5c ยิงแคปเฟรมไปแล้วตั้งแต่ต้น → ขั้นนี้กลายเป็น "จุดรอเฟรม"
@@ -2171,9 +2245,12 @@ export async function s5_clipframe(job, { origin }) {
 
   // โหมดเดิม (MEGA_YT_PARALLEL=0 หรืองานเก่าที่ไม่ได้ยิงขนาน): เรียก synchronous ครั้งเดียว
   console.log(`[MEGA S5e] 🎬 ${lack} → แคปเฟรมจากคลิป${clipUrl ? ' (ลิงก์ข่าว)' : ' (ค้น YouTube)'}`);
+  // ★ ปิดเงื่อนไข เฟส A ข้อ 7: frameBrief จาก compass.visualDreamShots (sanitize แล้ว) ส่งเข้าเส้น sync ด้วย
+  //   (ไม่ใช่แค่เส้นขนาน) — ไม่มี compass/ปิด MEGA_DREAM_WIRING = '' เสมอ (ไม่ส่ง key นี้เลย พฤติกรรมเดิมทุกไบต์)
+  const _syncFrameBrief = _dreamWiringOn() ? _buildFrameBrief(job.dossier.compass) : '';
   let r;
   try {
-    r = await jfetch(`${origin}/api/images/youtube`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, ...(clipUrl ? { clipUrl } : {}) }) }, 600000);
+    r = await jfetch(`${origin}/api/images/youtube`, { method: 'POST', body: JSON.stringify({ caseId: im.caseId, ...(clipUrl ? { clipUrl } : {}), ...(_syncFrameBrief ? { frameBrief: _syncFrameBrief } : {}) }) }, 600000);
   } catch (err) {
     return { status: 'done', nextAction: 'continue', summary: `เฟรมคลิป: เรียกไม่สำเร็จ (${String(err?.message || '').slice(0, 50)}) — เดินต่อด้วยของเดิม`, dossierPatch: { images: { ...im, clipFrameDone: true } }, quality: 'yellow' };
   }
@@ -4404,7 +4481,10 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     //   ตัดบูสต์ +2 นี้ทิ้งเมื่อ busy=2 (ปิดสวิตช์/busy neutral = บูสต์ปกติเป๊ะ)
     if (relCat && !(CLUTTER_GUARD_ON && _busyOf(x) === 2)) s += 2;
     if (emoMatch) s += 1;
-    if (dreamMatch) s += 1;
+    // ★ ปิดเงื่อนไข เฟส A ข้อ 6 (29 ก.ค. 69): dreamMatch เดิมได้แค่ +1 เท่าน้ำหนักอารมณ์ — เบาไป (ภาพที่ตรงช็อต
+    //   ในฝันจริงๆ ต้องชนะภาพสวยเฉยๆ) ยกเป็น +3 ใต้ env ใหม่ MEGA_DREAM_SCORE ('0'=+1 เดิม) + เคารพสวิตช์แม่
+    //   MEGA_DREAM_WIRING ด้วย (ปิดสวิตช์แม่ = ทุกอย่างเกี่ยวกับ dream กลับพฤติกรรมเดิมเป๊ะ รวมค่า boost นี้)
+    if (dreamMatch) s += (_dreamWiringOn() && process.env.MEGA_DREAM_SCORE !== '0') ? 3 : 1;
     s = Math.max(0, Math.min(10, s));
     _sfCache.set(id, s);
     return s;

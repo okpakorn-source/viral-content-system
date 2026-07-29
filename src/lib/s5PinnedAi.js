@@ -365,8 +365,16 @@ export const KEYWORD_LIST_KEYS = Object.freeze([
 ]);
 const KEYWORDS_TOP_KEYS = ['subjects', ...KEYWORD_LIST_KEYS];
 
+// ★ ปิดเงื่อนไข Opus #— lane2 เฟส A ข้อ 2 (29 ก.ค. 69): dream_shot_queries เป็นคีย์เสริม optional จาก
+//   keywordPrompt.js's dormant dreamBlock (สั่ง AI เติมคีย์นี้เฉพาะเมื่อ compass.visualDreamShots ไม่ว่าง —
+//   ดูคอมเมนต์เต็มที่ buildKeywordUserPrompt) guardExactObject เช็คจำนวนคีย์ตรงเป๊ะกับ topKeys เสมอ ต้องรู้ก่อนว่า
+//   คำตอบนี้ "มี" คีย์นี้มาจริงไหม แล้วค่อยเลือกชุด topKeys ที่ตรวจให้ตรงกัน — คำตอบเก่า (ไม่มีคีย์นี้เลย) ต้องผ่าน
+//   เหมือนเดิมทุกไบต์เสมอ ไม่ต้องพึ่งสวิตช์ใดๆ (การตรวจนี้เป็น additive ล้วน ไม่รัดกุมน้อยลงเด็ดขาด — แค่ "ยอมรับ
+//   เพิ่ม" รูปแบบใหม่ 1 แบบ ไม่เคยทำให้รูปแบบเดิมที่เคยผ่านกลับไม่ผ่าน)
 export function validateKeywordsV1Structure(raw) {
-  if (!guardExactObject(raw, KEYWORDS_TOP_KEYS)) return { ok: false, reason: 'TOP_LEVEL_SHAPE' };
+  const hasDreamKey = !nodeUtilTypes.isProxy(raw) && ownRead(raw, 'dream_shot_queries').present;
+  const topKeys = hasDreamKey ? [...KEYWORDS_TOP_KEYS, 'dream_shot_queries'] : KEYWORDS_TOP_KEYS;
+  if (!guardExactObject(raw, topKeys)) return { ok: false, reason: 'TOP_LEVEL_SHAPE' };
   const subjArr = guardArray(ownRead(raw, 'subjects').value, MAX_LIST);
   if (subjArr === null) return { ok: false, reason: 'subjects' };
   const subjects = [];
@@ -380,6 +388,15 @@ export function validateKeywordsV1Structure(raw) {
     const list = readStringArray(ownRead(raw, key).value, MAX_LIST);
     if (list === null) return { ok: false, reason: key };
     out[key] = list;
+  }
+  // dream_shot_queries: ไม่มีคีย์นี้มาเลย = [] เสมอ (uniform — ผู้เรียกอ่าน kw.dream_shot_queries ตรงๆ ได้โดยไม่ต้อง
+  //   fallback เอง) มีคีย์มา = ตรวจเป็น string array แบบเดียวกับคีย์อื่นทุกประการ (MAX_LIST เดียวกัน)
+  if (hasDreamKey) {
+    const dreamList = readStringArray(ownRead(raw, 'dream_shot_queries').value, MAX_LIST);
+    if (dreamList === null) return { ok: false, reason: 'dream_shot_queries' };
+    out.dream_shot_queries = dreamList;
+  } else {
+    out.dream_shot_queries = [];
   }
   return { ok: true, value: out };
 }

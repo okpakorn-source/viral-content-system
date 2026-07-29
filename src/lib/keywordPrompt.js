@@ -106,14 +106,30 @@ ${JSON.stringify(KEYWORD_SCHEMA, null, 2)}
 - ขั้นนี้คือ "สกัดคำค้น" เท่านั้น ยังไม่ต้องไปค้นภาพจริงหรือประเมินภาพ`;
 }
 
-export function buildKeywordUserPrompt(analysis, newsText) {
+// ★ 29 ก.ค. 69 (lane2 เฟส A "ภาพที่ใช่ต้องเข้าพูล" ข้อ 2 — dormant): compass (จาก compassBrain,
+//   megaBrains.js:39-51) ผลิต visualDreamShots (ช็อตที่อยากได้ต่อ slot) มาแล้วแต่ไม่เคยถูกป้อนเข้าขั้นสกัดคีย์เวิร์ดเลย
+//   พารามิเตอร์ที่ 3 ใหม่นี้ optional — ไม่ส่งมา/undefined/ไม่มี visualDreamShots เลย = ไม่มีบล็อกเพิ่มต่อท้าย
+//   prompt เดิมแม้แต่ตัวอักษรเดียว (ดู dreamBlock ด้านล่าง คืน '' เสมอในเคสนั้น) — ต้นทางที่จะป้อน compass จริง
+//   (S6/megaAdapters.js) ยังไม่ต่อสายในรอบนี้ (เลน 1 ถือไฟล์อยู่ — ทำแบตช์ถัดไป) จึงยังเป็น dormant สนิท
+// ⚠️ หมายเหตุสำหรับแบตช์ถัดไปที่จะต่อสายจริง: POST /api/keywords ตรวจสคีมาด้วย validateKeywordsV1Structure
+//   (src/lib/s5PinnedAi.js) ซึ่งใช้ guardExactObject เช็ค "จำนวนคีย์ระดับบนสุดต้องตรงเป๊ะ" กับ KEYWORDS_TOP_KEYS —
+//   ถ้าเปิดใช้บล็อกนี้จริงแล้ว AI เติมคีย์ dream_shot_queries เข้ามาด้วยตามที่สั่ง จะโดนตัดเป็น
+//   SCHEMA_VALIDATION_FAILED ทันที (จำนวนคีย์ไม่ตรง KEYWORDS_TOP_KEYS) — ต้องแก้ s5PinnedAi.js ให้รองรับคีย์ใหม่นี้
+//   ก่อนเปิดใช้งานจริง (นอกสโคปที่มอบมารอบนี้ — ไม่ได้แก้ในรอบนี้)
+export function buildKeywordUserPrompt(analysis, newsText, compass) {
+  const dreamShots = Array.isArray(compass?.visualDreamShots) ? compass.visualDreamShots.slice(0, 8) : [];
+  const dreamBlock = dreamShots.length
+    ? `\n\n== ช็อตภาพในฝันจากเข็มทิศเรื่อง (compass.visualDreamShots — ใช้เป็นแนวทางเสริม เจาะจงกว่าคำค้นทั่วไป) ==\n${dreamShots
+        .map((d, i) => `${i + 1}. [${String(d?.slot || '-').slice(0, 20)}] ${String(d?.description || '').slice(0, 200)}`)
+        .join('\n')}\n\nนอกจากคำค้นตามสคีมาปกติแล้ว ให้เพิ่มคีย์ใหม่ "dream_shot_queries" ใน JSON ที่ตอบ (array of string ยาวเท่าจำนวนช็อตข้างบน) — แปลงแต่ละช็อตเป็นคำค้นภาพที่เจาะจงพอให้พิมพ์แล้วเจอภาพจริง ผูกชื่อบุคคลในข่าวเสมอ ตามกฎเหล็กเดิมทุกข้อ`
+    : '';
   return `== ผลวิเคราะห์ข่าว (JSON) ==
 ${JSON.stringify(analysis, null, 2)}
 
 == เนื้อข่าวเต็ม (อ้างอิงเพิ่มเติม) ==
 """
 ${newsText || '(ไม่มีเนื้อข่าวเพิ่มเติม)'}
-"""
+"""${dreamBlock}
 
 จงสกัดคำค้นหาภาพให้มากและหลากหลายที่สุดตามกฎเหล็กและสคีมา แล้วตอบกลับเป็น JSON ล้วนเท่านั้น`;
 }

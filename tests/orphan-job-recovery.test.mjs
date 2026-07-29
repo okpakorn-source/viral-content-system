@@ -345,3 +345,96 @@ test('กรณี 2 ไม่รู้พอร์ต (ฝั่งงานห
   assert.equal(deps.store.get('noport2').status, 'pending', 'idle 50 นาที เกินเกณฑ์ 40 นาที ต้องถูกกู้');
   assert.equal(r.scanned, 1);
 });
+
+// ============================================================
+// 🩹 29 ก.ค. 69 คืน — Opus fix #3: recoveredAt (กู้ซ้ำได้แม้ dispatch ถูก flip เป็น team ไปแล้ว)
+// บริบท: เหตุ :3900 hard-kill 4 ครั้งซ้อน 19:14/19:17/19:31/19:33 — 2 งาน (qtj_...ou236m, qtj_...9gohnv)
+//   ถูกกู้ครั้งแรกสำเร็จ (pending+team) worker หยิบไปรันต่อ (running+team) แล้วเซิร์ฟตายซ้ำกลางทาง → ค้าง
+//   running+team ถาวร เพราะบรรทัดกรอง dispatch เดิมตัดงาน team ทิ้งหมดไม่ว่าจะมาจากไหน
+// ============================================================
+
+test('งาน team ที่เคยผ่านกลไกนี้มาก่อน (มี recoveredAt) + running ค้าง >90วิอีกครั้ง → กู้ซ้ำได้ (retries เดินต่อจากเดิม)', async () => {
+  setEnv('MEGA_ORPHAN_RECOVERY', null);
+  const job = mkJob({
+    id: 'reorphan1', dispatch: 'team', retries: 1,
+    recoveredAt: isoAgo(150 * 1000), // เคยถูกกู้มาแล้วรอบก่อน (flip local→team ไปแล้ว)
+    claimedAt: isoAgo(120 * 1000), // worker claim ไปแล้วแต่เซิร์ฟตายซ้ำกลางทาง ค้างอีกครั้ง (>90วิ)
+  });
+  const deps = mkDeps([job]);
+  const r = await recoverOrphanJobs({ _deps: { ...deps, port: '3900' } });
+  assert.equal(r.scanned, 1, 'งาน team ที่มี recoveredAt ต้องถูกสแกนต่อได้ ไม่ใช่ถูกตัดทิ้งเหมือนงาน team แท้ๆ');
+  assert.equal(r.recovered, 1);
+  const updated = deps.store.get('reorphan1');
+  assert.equal(updated.status, 'pending', 'ต้องรีเซ็ตกลับเป็นสถานะที่ claimTeamJob รับได้จริง');
+  assert.equal(updated.dispatch, 'team');
+  assert.equal(updated.retries, 2, 'retries ต้องเดินต่อจากเดิม (1→2) ไม่ใช่รีเซ็ตกลับ 0 — เพดาน 6 รอบยังนับรวมกันได้ถูกต้อง');
+  assert.ok(updated.recoveredAt, 'recoveredAt ต้องยังอยู่ (หรือถูกประทับใหม่) หลังกู้ซ้ำ');
+});
+
+test('งาน team แท้ๆ (ไม่เคยผ่านกลไกนี้ — ไม่มี recoveredAt) → ยังคงถูกตัดทิ้งเหมือนเดิมทุกกรณี (พฤติกรรมเดิม ไม่เปลี่ยน)', async () => {
+  setEnv('MEGA_ORPHAN_RECOVERY', null);
+  const job = mkJob({ id: 'realteam1', dispatch: 'team', claimedAt: isoAgo(999999 * 1000) }); // ไม่มี recoveredAt เลย
+  const deps = mkDeps([job]);
+  const r = await recoverOrphanJobs({ _deps: { ...deps, port: '3900' } });
+  assert.equal(r.scanned, 0, 'งาน team แท้ๆ (เช่น desk_harvest ที่สร้าง dispatch:team ตรงๆ) ยังต้องปล่อยให้ claimTeamJob ดูแลเอง');
+  assert.equal(deps.saved.length, 0);
+});
+
+test('งาน team + recoveredAt แต่ครบ 6 รอบแล้ว → mark failed (นับ retries รวมข้ามรอบ local→team→local→team ถูกต้อง)', async () => {
+  setEnv('MEGA_ORPHAN_RECOVERY', null);
+  const job = mkJob({ id: 'reorphan2', dispatch: 'team', retries: 6, recoveredAt: isoAgo(200 * 1000), claimedAt: isoAgo(200 * 1000) });
+  const deps = mkDeps([job]);
+  const r = await recoverOrphanJobs({ _deps: { ...deps, port: '3900' } });
+  assert.equal(r.recovered, 0);
+  assert.equal(r.failed, 1);
+  const updated = deps.store.get('reorphan2');
+  assert.equal(updated.status, 'failed');
+  assert.equal(updated.retries, 7);
+});
+
+test('งาน team + recoveredAt แต่ bootId ตรงกับตัวเอง (ยังไม่ตายแน่) → ข้ามเหมือนงาน local ปกติ (ownerBootId guard ใช้ร่วมกันได้)', async () => {
+  setEnv('MEGA_ORPHAN_RECOVERY', null);
+  const myBootId = getBootId();
+  const job = mkJob({ id: 'reorphan3', dispatch: 'team', recoveredAt: isoAgo(200 * 1000), ownerBootId: myBootId, claimedAt: isoAgo(999999 * 1000) });
+  const deps = mkDeps([job]);
+  const r = await recoverOrphanJobs({ _deps: { ...deps, port: '3900' } });
+  assert.equal(r.scanned, 0, 'bootId ตรงกับตัวเอง (แม้ dispatch เป็น team+recoveredAt) ต้องข้ามเด็ดขาดเหมือนเดิม');
+  assert.equal(deps.store.get('reorphan3').status, 'running');
+});
+
+test('งาน team + recoveredAt แต่ heartbeat สดอยู่ (<90วิ บนโปรเซสอื่น) → ไม่กู้ (มีคนทำงานจริงอยู่ — กันชนงานจริง)', async () => {
+  setEnv('MEGA_ORPHAN_RECOVERY', null);
+  const job = mkJob({
+    id: 'reorphan4', dispatch: 'team', recoveredAt: isoAgo(200 * 1000),
+    claimedAt: isoAgo(999 * 1000), heartbeatAt: isoAgo(10 * 1000), // heartbeat เพิ่งขยับ 10 วิ — งานจริงกำลังรันอยู่
+  });
+  const deps = mkDeps([job]);
+  const r = await recoverOrphanJobs({ _deps: { ...deps, port: '3900' } });
+  assert.equal(r.scanned, 0, 'heartbeat สด ต้องชนะเกณฑ์เดิมแม้ dispatch เป็น team+recoveredAt แล้ว — ห้ามชนงานที่กำลังรันจริง');
+  assert.equal(deps.saved.length, 0);
+});
+
+// ============================================================
+// 🩹 29 ก.ค. 69 คืน — เคส "สแกนซ้ำเป็นรอบจับงานที่เพิ่งกำพร้าไม่ทันตอนบูต" (คู่กับ instrumentation-node.js
+//   startOrphanRescan) — พิสูจน์ด้วย _deps.now injection (ไม่ต้องรอเวลาจริง): boot-scan แรกมาถึงตอนงานเพิ่งค้าง
+//   10 วิ (ยังไม่เข้าเกณฑ์ 90 วิ) → ยังไม่กู้ · เวลาผ่านไปอีก (จำลอง interval รอบถัดไปที่ ~120วิ) → ตอนนี้ค้างรวม
+//   130 วิ (>90วิ) → กู้ได้แล้ว — ยืนยันว่า "รอบสแกนถัดไป" (ไม่ใช่แค่ตอนบูต) เก็บงานที่บูตแรกพลาดได้จริง
+// ============================================================
+test('เคส "งานเพิ่งค้าง 10 วิตอนบูต → รอบสแกนถัดไป (จำลองเวลาผ่านไป) เก็บได้": boot-scan แรกไม่กู้ (10วิ<90วิ) รอบถัดไปกู้ได้ (130วิ>90วิ)', async () => {
+  setEnv('MEGA_ORPHAN_RECOVERY', null);
+  const T0 = NOW;
+  const job = mkJob({ id: 'bootrace1', claimedAt: new Date(T0 - 10 * 1000).toISOString() }); // ค้างแค่ 10 วิ ณ T0
+  const deps = mkDeps([job]);
+
+  // รอบที่ 1 (boot-scan ทันทีหลังบูตเร็ว ~5วิ): เวลา ณ T0 — ค้างแค่ 10วิ ยังไม่ถึงเกณฑ์ 90วิ
+  const r1 = await recoverOrphanJobs({ _deps: { ...deps, port: '3900', now: () => T0 } });
+  assert.equal(r1.scanned, 0, 'บูตเร็วมาก งานเพิ่งค้าง 10วิ ยังไม่ถือว่ากำพร้า');
+  assert.equal(deps.store.get('bootrace1').status, 'running', 'ต้องยังไม่ถูกแตะ');
+
+  // รอบที่ 2 (จำลอง setInterval รอบถัดไปที่ ~120วิถัดมา — ไม่ต้องรอเวลาจริง แค่เลื่อน now() ไปข้างหน้า):
+  //   ค้างรวม 10+120=130วิ > 90วิ → ต้องกู้ได้แล้ว
+  const r2 = await recoverOrphanJobs({ _deps: { ...deps, port: '3900', now: () => T0 + 120 * 1000 } });
+  assert.equal(r2.scanned, 1, 'รอบสแกนถัดไปต้องเก็บงานที่บูตแรกพลาดได้');
+  assert.equal(r2.recovered, 1);
+  assert.equal(deps.store.get('bootrace1').status, 'pending');
+});

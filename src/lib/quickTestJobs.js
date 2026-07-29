@@ -232,6 +232,18 @@ export async function finishJob(id, patch) {
 //      ใครสักคน (อีกโปรเซส) กำลังทำงานอยู่จริง (patchJob ถูกเรียกล่าสุด) ไม่กู้; เย็นเกิน 90วิ = น่าจะตายจริง กู้
 //   3) ไม่มี ownerBootId เลย (legacy — สร้างก่อนแพตช์นี้ deploy) → ไม่รู้เจ้าของ ไม่มี heartbeat ให้เชื่อ ใช้เกณฑ์
 //      ปลอดภัยกว่าเดิมแทน = เท่ากับ claimTeamJob.staleMs (40 นาที) จาก claimedAt/startedAt/createdAt
+//
+// ★ 29 ก.ค. 69 คืน — Opus fix #3 (เหตุ :3900 hard-kill 4 ครั้งซ้อน 19:14/19:17/19:31/19:33 คืนเดียวกัน):
+//   บั๊กที่พบ: กู้งานสำเร็จ (pending+dispatch:'team') → worker (claimTeamJob) หยิบไปรันต่อ (status:'running' อีก
+//   ครั้ง, dispatch ยังเป็น 'team') → ถ้าเซิร์ฟตายซ้ำกลางทาง (ตามที่เกิดจริงคืนนี้ ตายรัวๆ ห่างกันแค่ 2-14 นาที)
+//   บรรทัดกรอง "if (j.dispatch !== 'local') continue;" เดิมจะตัดงานนี้ทิ้งจากกลไกนี้ถาวร (เพราะ dispatch ไม่ใช่
+//   'local' อีกต่อไปแล้ว) เหลือแค่ claimTeamJob เองที่ต้องรอ 40 นาที + เพดาน 2 รอบ (ออกแบบมาสำหรับงาน team แท้ๆ
+//   ที่ยาวนานปกติ ไม่ใช่สำหรับ "ตายซ้ำเร็ว" ระดับนาที) → งานติดค้าง running ถาวรตลอดช่วง incident (เจอจริง 2 ใบ
+//   คืนนี้ qtj_...ou236m/qtj_...9gohnv ต้องลบมือทั้งคู่)
+//   แก้: ตอนกู้สำเร็จ stamp recoveredAt ไว้ (เครื่องหมาย "เคยผ่านกลไกนี้มาแล้ว") → รอบสแกนถัดไป อนุญาตให้งานที่มี
+//   recoveredAt ผ่านด่านกรอง dispatch ต่อได้แม้ dispatch จะเป็น 'team' แล้ว (งาน team แท้ๆ ที่ไม่เคยผ่านกลไกนี้ —
+//   ไม่มี recoveredAt — ยังคงถูกตัดเหมือนเดิมทุกกรณี ปล่อยให้ claimTeamJob ดูแลเอง) เกณฑ์เวลา/ownerBootId/heartbeat
+//   ทั้งหมดยังคงเดิมทุกอย่าง (ไม่ผ่อนความปลอดภัย) + เพดานรอบเดิม 6 (retries ตัวเดิม ใช้ร่วมกับ claimTeamJob)
 // ============================================================
 export const ORPHAN_STALE_MS = 90 * 1000;
 export const ORPHAN_MAX_ROUNDS = 6;
@@ -254,11 +266,16 @@ export async function recoverOrphanJobs({ env = process.env, _deps = {} } = {}) 
     return { scanned: 0, recovered: 0, failed: 0, on: true, error: e?.message };
   }
 
-  const now = Date.now();
+  const _now = _deps.now || Date.now; // ★ ตรวจซ้ำ: injectable เพื่อเทส "สแกนซ้ำเป็นรอบ" ข้ามเวลาได้โดยไม่ต้องรอจริง
+  const now = _now();
   let scanned = 0, recovered = 0, failedCount = 0;
   for (const j of jobs) {
     if (!j || j.status !== 'running') continue;
-    if (j.dispatch !== 'local') continue; // dispatch='team' มีกลไก stale-reclaim ของตัวเองแล้ว (claimTeamJob)
+    // ★ ตรวจซ้ำ (Opus fix #3): งาน team แท้ๆ (ไม่เคยผ่านกลไกนี้ — ไม่มี recoveredAt) ยังคงถูกตัดเหมือนเดิม
+    //   (ปล่อยให้ claimTeamJob ดูแลเอง คนละเกณฑ์เวลา/เพดานรอบ) แต่งานที่เคยกู้ผ่านกลไกนี้มาแล้ว (มี recoveredAt —
+    //   ถูก flip local→team ไปตอนกู้ครั้งก่อน) ต้องผ่านด่านนี้ต่อได้ ไม่งั้นถ้ากำพร้าซ้ำ (ตายซ้ำระหว่าง worker รันต่อ)
+    //   จะไม่มีใครมองเห็นมันอีกเลย
+    if (j.dispatch !== 'local' && !j.recoveredAt) continue;
     if (!orphanKindSet.has(j.kind)) continue;
     // ★ กรณี 1: bootId ตรงกับโปรเซสที่กำลังสแกนอยู่ตอนนี้ — ยังไม่ตายแน่ (ข้ามเด็ดขาด ไม่ต้องเช็คเวลาเลย)
     if (j.ownerBootId && j.ownerBootId === currentBootId) continue;
@@ -302,6 +319,9 @@ export async function recoverOrphanJobs({ env = process.env, _deps = {} } = {}) 
           dispatch: 'team', // ★ ให้ worker เครื่องทีม (poll action:'run' อยู่แล้ว) หยิบไปรันต่ออัตโนมัติ
           retries: nextRetries,
           claimedAt: null,
+          // ★ ตรวจซ้ำ (Opus fix #3): เครื่องหมาย "ผ่านกลไกนี้แล้ว" — ให้สแกนรอบถัดไปยังคุ้มครองต่อได้แม้ dispatch
+          //   จะเป็น 'team' แล้ว (กันซอมบี้ถาวรถ้ากำพร้าซ้ำระหว่าง worker รันต่อ) ไม่ถูกเขียนทับหายแม้กู้ซ้ำหลายรอบ
+          recoveredAt: new Date().toISOString(),
           progress: { ...(j.progress || {}), step: `🩹 กู้งานกำพร้า (รอบ ${nextRetries}/${ORPHAN_MAX_ROUNDS})` },
         });
         recovered++;

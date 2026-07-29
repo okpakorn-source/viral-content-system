@@ -148,10 +148,15 @@ const POOL_FULL = [R1_BLDG, R2_PARTIAL, R3_HERO, R4_CIRC, ...CTX, ...JUNK];     
 const POOL_NO_VALID_HERO = [R1_BLDG, R2_PARTIAL, R4_CIRC, ...CTX, ...JUNK];           // ไม่มี hero ที่ readiness ยอมรับ
 const CHARS = [{ name: HERO_NAME, role: 'hero' }, { name: SECOND_NAME, role: 'related' }];
 
-// ref DNA ของจริงจากคลัง local (tracked) — บท hero/context/action/moment/reaction (reaction = circle)
-const refs = JSON.parse(fs.readFileSync(new URL('../data/ref-cover-library.json', import.meta.url), 'utf8'));
+// ref DNA — บท hero/context/action/moment/reaction (reaction = circle)
+// ★ 29 ก.ค. 69 (lane2 — อุดรูตาข่ายเทส): เดิมอ่านจาก data/ref-cover-library.json (คลัง live) ตรงๆ — คลัง live
+//   เปลี่ยนได้เสมอ (ทำเทสนี้เปราะโดยดีไซน์) และเปลี่ยนจริงจนใบ REF-mrbqalpo-h1r1 หายไปเลย (รีเซ็ตเป็นชุด
+//   "เพจจริง" 20 ใบ) → snapshot จริงของ record นี้ (ก่อนถูกลบ) ไว้ที่ tests/fixtures/ref-mrbqalpo-h1r1.json แทน
+//   (ดึงจาก git history จริง: `git show 6eb4d62:data/ref-cover-library.json` — commit สุดท้ายที่ยังมีใบนี้อยู่)
+//   ไฟล์เทสนี้พึ่งตัวเองแล้ว ไม่แดงอีกไม่ว่าคลังจริงจะเปลี่ยนยังไงต่อจากนี้
+const refs = JSON.parse(fs.readFileSync(new URL('./fixtures/ref-mrbqalpo-h1r1.json', import.meta.url), 'utf8'));
 const REF_REC = refs.find((r) => r.id === 'REF-mrbqalpo-h1r1');
-assert.ok(REF_REC?.dna, 'ref DNA REF-mrbqalpo-h1r1 must exist in local library');
+assert.ok(REF_REC?.dna, 'fixture ref DNA REF-mrbqalpo-h1r1 must exist in tests/fixtures/ref-mrbqalpo-h1r1.json');
 const DNA = REF_REC.dna;
 const ORDERS = [
   { i: 0, role: 'hero', want: 'ตัวเอกโคลสอัพ', personHint: HERO_NAME, shot: 'closeup' },
@@ -589,13 +594,33 @@ await E('E9 readiness ON: partial-head ⇒ exact failed/fail/INSUFFICIENT_HERO_G
   const committed = s6.dossierPatch?.pickImages?.slots?.[s6.dossierPatch?.pickImages?.heroSlotId];
   assert.ok(!committed || !['BLDG', 'PARTIAL'].includes(committed.id), 'BLDG/PARTIAL not committed as hero');
 });
+// ★ 29 ก.ค. 69 (Opus review, A-wiring follow-up): E10 เคยคาลิเบรตคาด hero.id==='BLDG' ตรงๆ — investigate จริงแล้ว
+//   พบว่าไม่เกี่ยวกับ A-wiring/dream-shot เลย และไม่เกี่ยวกับ tests/fixtures/ref-mrbqalpo-h1r1.json ด้วย (พิสูจน์
+//   แล้ว: ตัวสวิตช์ dream ทุกตัวปิด/เปิด hero.id ก็ยัง 'PARTIAL' เหมือนกัน) — สาเหตุจริงคือฟีเจอร์คนละสาย
+//   MEGA_HERO_PROMINENCE (เพิ่ม 19 ก.ค. 69 เคส AC-0160 — ดู megaAdapters.js ~L5466) ที่ทำงาน "ก่อน" จุดตัดสิน
+//   readiness ON/OFF เสียอีก: หน้าเดี่ยวเล็กกว่าเกณฑ์ (faceH<0.30) + พูลมีคนเดียวกันหน้าใหญ่กว่า+ขนาดพอ → สลับให้เสมอ
+//   ไม่สนสวิตช์ readiness เลย — BLDG มี faceH≈0.07 (จิ๋วมาก) ส่วน PARTIAL มี faceH=0.40 (ใหญ่กว่า) → BLDG โดนสลับ
+//   เป็น PARTIAL "ก่อน" ที่ readiness OFF/ON จะได้ตัดสินใจอะไรเลยด้วยซ้ำ ('MEGA_HERO_PROMINENCE=0' คืนพฤติกรรมเดิม
+//   เป๊ะ hero.id==='BLDG' — ยืนยันด้วย probe จริงแล้ว) ไฟล์นี้ไม่เคยเซ็ตสวิตช์นี้ไว้ใน ENV_KEYS_TOUCHED/env hygiene
+//   ด้านบนเลย (ฟีเจอร์เกิดทีหลังไฟล์นี้ถูกเขียน) จึงรับค่า default จริงของ production (ON) มาตลอด — ของเดิมที่ผ่าน
+//   มาได้เพราะ default เคย OFF ในช่วงที่เขียน E10 ไม่ใช่เพราะไฟล์นี้ตั้งใจปิดมันไว้
+//   ทางแก้ที่เลือก: ไม่ใช่ recalibrate ให้ MEGA_HERO_PROMINENCE=0 (จะกลายเป็นเทสพฤติกรรมสมมติที่ไม่มีจริงใน
+//   production อีกต่อไป — prod ตั้ง default ON เสมอ) แต่ปรับ "ค่าที่คาด" ให้ตรงพฤติกรรมจริงปัจจุบันแทน (PARTIAL)
+//   — ไม่ลดความเข้มของสิ่งที่เทสนี้ตรวจ: PARTIAL คือ "หัวแหว่งบนสุด" (R2_PARTIAL, note ข้างบน) ตัวเดียวกับที่ E9
+//   ใช้พิสูจน์ว่า readiness ON ต้องบล็อก (INSUFFICIENT_HERO_GRADE) และ E8/E9 เองก็ถือ BLDG กับ PARTIAL เป็นเซ็ต
+//   "hero แย่ที่ห้าม commit" ชุดเดียวกัน (ดู assert ด้านบนทั้งคู่: !['BLDG','PARTIAL'].includes(committed.id)) —
+//   ดังนั้น "legacy(OFF) เลือก PARTIAL" ยังคงพิสูจน์ประเด็นเดิมของ E10 ครบ: ปิด readiness แล้วปล่อยผ่าน candidate
+//   ที่อยู่ในเซ็ต "แย่" เดียวกับที่ readiness ON ต้องบล็อก (แค่คนละใบในเซ็ตเดียวกัน ไม่ใช่ใบที่ "ดีขึ้น")
 await E('E10 readiness OFF on same fixture = inert/legacy parity (bug reproduces)', async () => {
   const off1 = await runPipeline({ pool: POOL_NO_VALID_HERO, brainAnswer: ANSWER_BAD_BLDG, env: SEM_ON, runS7: false });
   const off2 = await runPipeline({ pool: POOL_NO_VALID_HERO, brainAnswer: ANSWER_BAD_BLDG, env: { ...SEM_ON, MEGA_ROLE_READINESS: '0' }, runS7: false });
   assert.strictEqual(j(off1.s6), j(off2.s6), 'OFF byte parity');
   assert.strictEqual(off1.s6.status, 'done', 'legacy completes (bug preserved when OFF)');
   const hero = off1.s6.dossierPatch.pickImages.slots[off1.s6.dossierPatch.pickImages.heroSlotId];
-  assert.strictEqual(hero.id, 'BLDG', 'legacy picks the building (regression analog reproduced)');
+  // MEGA_HERO_PROMINENCE (แยกฟีเจอร์, 19 ก.ค. 69, ไม่เกี่ยวสวิตช์ readiness) สลับ BLDG(faceH≈0.07)→PARTIAL
+  // (faceH=0.40) ก่อนจุดตัดสิน readiness เสียอีก — PARTIAL ยังอยู่ในเซ็ต "hero แย่" เดียวกับที่ E8/E9 ยึดถือ
+  // (['BLDG','PARTIAL']) และเป็นใบเดียวกับที่ E9 พิสูจน์ว่า readiness ON ต้องบล็อก — regression analog ยังครบ
+  assert.strictEqual(hero.id, 'PARTIAL', 'legacy picks a known-bad hero (PARTIAL — same "หัวแหว่ง" analog E9 blocks under readiness ON; swapped from BLDG by the unrelated MEGA_HERO_PROMINENCE feature before readiness even applies) — regression analog still reproduced');
 });
 
 // ============================================================ E11 (transport seam, platform override)

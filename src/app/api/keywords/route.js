@@ -79,7 +79,10 @@ export async function POST(req) {
     }
 
     const system = buildKeywordSystemPrompt();
-    const user = buildKeywordUserPrompt(analysis, newsText);
+    // ★ 29 ก.ค. 69 (lane2 เฟส A ข้อ 2 — dormant): body.compass (optional) → ส่งต่อ buildKeywordUserPrompt
+    //   ไม่ส่งมา = undefined = prompt เดิมทุกตัวอักษร (ดูคอมเมนต์เต็มใน keywordPrompt.js รวมคำเตือนเรื่อง
+    //   validateKeywordsV1Structure ก่อนต่อสายจริงในแบตช์ถัดไป)
+    const user = buildKeywordUserPrompt(analysis, newsText, body.compass);
 
     P('สกัดคีย์เวิร์ด', 'เรียกสมอง AI สกัดคำค้นหาภาพ', { pct: 40 });
     let result;

@@ -1496,7 +1496,13 @@ export async function rt_s7compose(job, opts = {}) {
 //   regex เอาเฉพาะ "ลิงก์ตัวคลิป" จริง (watch/shorts/reel/video/fb.watch/ลิงก์ย่อ TikTok) — ไม่เอาหน้าเพจ/โพสต์รูป
 // ★ ชุด① 26 ก.ค. 69: เพิ่ม Instagram Reels (/reel/, /reels/, /share/reel/) — ท่อล่าง VIDEO_URL_RE (megaAdapters) รองรับ IG อยู่แล้ว
 // ★ sol-review round2: เพิ่ม (?![\w-]) หลัง shortcode ของ IG กัน regex จับเกินท้าย shortcode (boundary กันติดสตริงต่อท้าย)
-const SOURCE_CLIP_RX = /https?:\/\/(?:www\.|m\.|web\.)?(?:youtube\.com\/(?:watch\?[^\s"'<>]*v=|shorts\/)[^\s"'<>]+|youtu\.be\/[^\s"'<>]+|(?:vt|vm)\.tiktok\.com\/[^\s"'<>]+|tiktok\.com\/@[^\s"'<>]+\/video\/[^\s"'<>]+|facebook\.com\/(?:reel\/|watch\/?\?[^\s"'<>]*v=|share\/[vr]\/|[^\s"'<>]+\/videos\/)[^\s"'<>]*|fb\.watch\/[^\s"'<>]+|instagram\.com\/(?:reel|reels)\/[\w-]+(?![\w-])|instagram\.com\/share\/reel\/[\w-]+(?![\w-]))/gi;
+// ★ 29 ก.ค. 69 (lane2 เฟส A ข้อ 3 — ขยายรูปแบบวิดีโอที่ตกหล่น): ตรวจสอบแล้วว่า m.youtube (prefix (?:www\.|m\.|web\.)?
+//   ครอบทุก alternative อยู่แล้ว), youtube ลิงก์มี si= (จับด้วย [^\s"'<>]*/[^\s"'<>]+ ตัวจับทุกอักขระอยู่แล้ว ไม่ต้องแก้),
+//   FB /share/v/ และ /share/r/ (มีอยู่แล้วใน share\/[vr]\/), IG /reels/ พหูพจน์ (มีอยู่แล้วใน (?:reel|reels)),
+//   TikTok vt.tiktok (มีอยู่แล้วใน (?:vt|vm)\.tiktok\.com) — ทั้งหมดนี้ "ผ่านอยู่แล้ว" เพิ่มแค่เทสล็อกไว้กันถอย
+//   ช่องว่างจริงที่พบ: YouTube "/live/VIDEOID" (ไลฟ์สด/ไลฟ์ย้อนหลัง) ไม่เคยอยู่ในรายการ alternative ของ youtube.com เลย
+//   → เพิ่ม live\/ เป็น alternative ที่ 3 คู่กับ watch?...v= และ shorts/ (ใช้ [^\s"'<>]+ ตัวจับท้ายเดียวกัน รองรับ ?si= ต่อท้ายได้)
+const SOURCE_CLIP_RX = /https?:\/\/(?:www\.|m\.|web\.)?(?:youtube\.com\/(?:watch\?[^\s"'<>]*v=|shorts\/|live\/)[^\s"'<>]+|youtu\.be\/[^\s"'<>]+|(?:vt|vm)\.tiktok\.com\/[^\s"'<>]+|tiktok\.com\/@[^\s"'<>]+\/video\/[^\s"'<>]+|facebook\.com\/(?:reel\/|watch\/?\?[^\s"'<>]*v=|share\/[vr]\/|[^\s"'<>]+\/videos\/)[^\s"'<>]*|fb\.watch\/[^\s"'<>]+|instagram\.com\/(?:reel|reels)\/[\w-]+(?![\w-])|instagram\.com\/share\/reel\/[\w-]+(?![\w-]))/gi;
 // ★ sol-review round2 (26 ก.ค. 69): ลิงก์ explicit ต้องผ่าน "รูปทรงคลิปจริง" (SOURCE_CLIP_RX) ก่อนนับเป็น sourceClip เสมอ
 //   เดิม: ผู้ใช้กรอกมาแต่ไม่มีสักลิงก์เข้า pattern → "เชื่อผู้ใช้" ทั้งหมด (yt-dlp รองรับกว้างกว่า regex) — บั๊ก:
 //   ลิงก์ IG โปรไฟล์/โพสต์รูป (/p/...) หรือเว็บมั่วหลุดเข้า sourceClips ได้ → เปิด sourceOnly ข้ามค้นเว็บทั้งที่แคปไม่ได้จริง

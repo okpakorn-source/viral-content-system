@@ -70,7 +70,17 @@ let passed = 0;
 const test = async (name, fn) => { await fn(); passed++; console.log(`ok ${passed} - ${name}`); };
 
 // ---------- s6/s7 fixtures (สำหรับเทส no-leak) — คัดลอกจาก scripts harness ----------
-const loadRefDna = (id) => { const refs = JSON.parse(fs.readFileSync(new URL('../data/ref-cover-library.json', import.meta.url), 'utf8')); const rec = refs.find((r) => r.id === id); assert.ok(rec?.dna, `ref ${id} must exist`); return rec.dna; };
+// ★ 29 ก.ค. 69 (lane2 — อุดรูตาข่ายเทส): เดิมอ่านจาก data/ref-cover-library.json (คลัง live) ตรงๆ — เปลี่ยนได้เสมอ
+//   และเปลี่ยนจริงจนใบ REF-mrbqalpo-h1r1 หายไป → ใช้ snapshot fixture (tests/fixtures/ref-mrbqalpo-h1r1.json,
+//   ที่มา: git history จริงของคลัง ดูคอมเมนต์เต็มใน tests/ac0099-strict-ref-test.test.mjs) เฉพาะ id นี้ ·
+//   id อื่นที่ยังไม่ได้ snapshot ยังอ่านจากคลัง live เหมือนเดิม (ไม่มีผู้เรียกอื่นเรียก loadRefDna ด้วย id อื่นในไฟล์นี้)
+const loadRefDna = (id) => {
+  const path = id === 'REF-mrbqalpo-h1r1' ? './fixtures/ref-mrbqalpo-h1r1.json' : '../data/ref-cover-library.json';
+  const refs = JSON.parse(fs.readFileSync(new URL(path, import.meta.url), 'utf8'));
+  const rec = refs.find((r) => r.id === id);
+  assert.ok(rec?.dna, `ref ${id} must exist`);
+  return rec.dna;
+};
 const IMG = (id, t = {}, top = {}) => ({ id, imageUrl: `https://cdn.test/${id}.jpg`, thumbnailUrl: '', width: 800, height: 1000, realWidth: 900, realHeight: 1200, ...top, triage: { relevant: true, clean: true, faceCount: 1, person: null, persons: [], category: 'context', emotion: 'warm', note: '', newsScene: true, quality: 7, ...t } });
 const mkJob = ({ dna, orders = [], chars, refId }) => ({ dossier: { images: { caseId: 'SEM-TEST' }, compass: { angle: 'มุมทดสอบ', primaryEmotion: 'warm', secondaryEmotions: [], mainCharacters: chars, visualDreamShots: [], doNotUse: [] }, desk: { title: 'ข่าวทดสอบ OS' }, refMatch: { dna, styleName: 'ref-test', typeMatched: true, imagePath: '/ref-covers/test.jpg', ...(refId ? { refId } : {}) }, artBrief: { storyNote: 'เรื่องทดสอบ', orders } } });
 const mkDeps = ({ pool, brainAnswer, captures }) => ({

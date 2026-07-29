@@ -111,10 +111,13 @@ const withEnvMap = async (map, fn) => {
 };
 const cloneJson = (v) => JSON.parse(JSON.stringify(v));
 
-// ── real DNA from the tracked library (same record ac0084/ac0099 already prove valid) ──
-const refs = JSON.parse(readFileSync(new URL('../data/ref-cover-library.json', import.meta.url), 'utf8'));
+// ── real DNA — snapshot fixture (same record ac0084/ac0099 already prove valid) ──
+// ★ 29 ก.ค. 69 (lane2 — อุดรูตาข่ายเทส): เดิมอ่านจาก data/ref-cover-library.json (คลัง live) ตรงๆ — เปลี่ยนได้เสมอ
+//   และเปลี่ยนจริงจนใบนี้หายไป → ใช้ snapshot ที่ tests/fixtures/ref-mrbqalpo-h1r1.json แทน (ที่มา: git history
+//   จริงของคลัง — ดูคอมเมนต์เต็มใน tests/ac0099-strict-ref-test.test.mjs) พึ่งตัวเอง ไม่แดงซ้ำอีกไม่ว่าคลังเปลี่ยนยังไง
+const refs = JSON.parse(readFileSync(new URL('./fixtures/ref-mrbqalpo-h1r1.json', import.meta.url), 'utf8'));
 const REF_REC = refs.find((r) => r.id === 'REF-mrbqalpo-h1r1');
-assert.ok(REF_REC?.dna, 'fixture: ref DNA REF-mrbqalpo-h1r1 must exist');
+assert.ok(REF_REC?.dna, 'fixture: ref DNA REF-mrbqalpo-h1r1 must exist in tests/fixtures/ref-mrbqalpo-h1r1.json');
 const FIXTURE_DNA = REF_REC.dna;
 const FIXTURE_REF_ID = REF_REC.id;
 const FIXTURE_DNA_HASH = _dnaHashFor(FIXTURE_DNA);

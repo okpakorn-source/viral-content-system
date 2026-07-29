@@ -124,7 +124,11 @@ export async function POST(req) {
           ? (c.newsText || c.analysis?.content || c.analysis?.summary || c.newsSnippet || '')
           : (c.analysis?.summary || c.analysis?.content || c.newsSnippet || '')
       ).slice(0, _gistChars);
-      result = await runYouTubePipeline({ caseId, keywords: c.keywords, progress: P2, clipUrls, newsGist });
+      // ★ ปิดเงื่อนไข เฟส A ข้อ 7 (29 ก.ค. 69): frameBrief จาก compass.visualDreamShots (megaAdapters.js
+      //   sanitize มาก่อนส่งแล้ว) — ส่งต่อให้ runYouTubePipeline → geminiSelectFrames ใช้คัดเฟรมตรงช็อตในฝันขึ้น
+      //   ไม่มี/ปิด MEGA_DREAM_WIRING ต้นทาง = ไม่มี key นี้มาเลย พฤติกรรมเดิมทุกไบต์
+      const frameBrief = typeof body.frameBrief === 'string' && body.frameBrief.trim() ? body.frameBrief.trim() : undefined;
+      result = await runYouTubePipeline({ caseId, keywords: c.keywords, progress: P2, clipUrls, newsGist, frameBrief });
     } catch (err) {
       failProgress(jobId, err.message);
       // ★ 6 ก.ค.: route เป็นคนปิดงานในคิวเอง (worker อาจวางสายไปแล้วถ้างานยาว)
