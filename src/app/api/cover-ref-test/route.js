@@ -83,6 +83,9 @@ export async function handleCoverRefTestPost({
       forceTemplateId: body.forceTemplateId,
       clipUrls: body.clipUrls, // ★ โหมดคลิปต้นทาง (18 ก.ค.): ลิงก์คลิปที่ข่าวมาจาก → แคปเฟรมเป็นแหล่งหลัก
       sourceOnly: body.sourceOnly === true, // ★ ชุด① 26 ก.ค. 69: สวิตช์ไม่ค้นเพิ่ม — ใช้เฟรมจากคลิปเป็นแหล่งเดียว (บังคับจริงที่ s5_search)
+      // ★ 29 ก.ค. 69 (แบตช์ variety; Opus รอบ 2): ตัวบ่งชี้งานจริงจาก quick-test (job.id นิ่งตลอด retry) —
+      //   ใช้แทน job.id เฉพาะกิจที่ refTestPipeline.js synthesize ใหม่ทุก request (ดูคอมเมนต์เต็มที่นั่น)
+      varietySeed: body.varietySeed,
       origin,
     }, {});
     return jsonResponder(out, { status });

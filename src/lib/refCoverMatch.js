@@ -148,11 +148,77 @@ function _fnv1aHash(str) {
   return h >>> 0; // uint32
 }
 
+// ★ 29 ก.ค. 69 (แบตช์ variety — เจ้าของสั่ง "เทมเพลตออกแบบซ้ำเกินไป"; Opus ตรวจรอบ 2 FAIL แล้วแก้):
+//   seedKey เดิม (caseId/หัวข่าวล้วน) → เคสเดิมได้ ref เดิมตลอดกาล ไม่ว่าสร้างงานใหม่กี่ครั้ง (กดปุ่ม 🎲
+//   ประกอบใหม่ก็ยังใบเดิม) — ต้องผูก "ตัวบ่งชี้งาน" (varietySeed เช่น job.id) เข้า seedKey ด้วย: งานใหม่
+//   (varietySeed ต่าง) = seedKey ใหม่ → มีโอกาสได้ ref อื่นในวง near-tie · retry ของ "งานเดียวกัน" (varietySeed
+//   เดิม) = seedKey เดิม → ผลซ้ำเดิมตามดีไซน์เดิม (ห้ามพัง — งานหนึ่งเรียกซ้ำ 6 รอบต้องได้ ref เดิมเสมอ)
+// ★ Opus รอบ 2 (จุดหักล้าง): เดิมแต่ละจุดเสียบ (compose-test route / megaAdapters S6 / S7) copy สูตร
+//   `varietySeed ? \`${identity}:${varietySeed}\` : identity` ไว้เอง 3 ที่ — เส้นเต็มท่อ (refTestPipeline.js,
+//   /api/cover-ref-test) synthesize job.id ใหม่ทุก HTTP request (`REFTEST-${Date.now()...}`) ไม่ใช่ id ที่นิ่ง
+//   ตลอด retry แบบ quick-test job.id จริง → ผูกเข้า seedKey ตรงๆ ทำให้ retry รอบ 2-6 ของงานเดียวกัน (เส้น ref)
+//   ได้ ref คนละใบ (พิสูจน์จริง: ก่อนแก้ 6 attempt=ใบเดียว, บั๊ก=2ใบสลับ) — แก้โดยแยก "id เฉพาะกิจของ pipeline
+//   run นี้" ออกจาก "ตัวบ่งชี้งานที่นิ่งตลอด retry" เด็ดขาด: ต้นทางจริง (quick-test) ส่ง job.id ของตัวเอง
+//   ลงมาผ่าน body.varietySeed → refTestPipeline.js เก็บเป็น job.varietySeed แยกจาก job.id (ephemeral) →
+//   ผู้เรียก (megaAdapters.js) ต้องใช้ `job.varietySeed || job.id` เสมอ (varietySeed ถ้ามี ชนะ id เฉพาะกิจ)
+//   ไม่ส่ง varietySeed มา (เช่น ผู้ใช้กดหน้า /cover-ref-test ตรงๆ ไม่ผ่าน quick-test) = fallback job.id เดิม
+//   (พฤติกรรมเดิมของเส้นนั้น — เรียกครั้งเดียวไม่มี retry loop อยู่แล้วในกรณีนี้ ไม่ต่างจากเดิม)
+// รวมสูตรกลางไว้ที่นี่ที่เดียว (ผู้เรียกทั้ง 3 จุดต้องเรียกฟังก์ชันนี้จริง ห้าม copy สูตรแยก — กันบั๊กแบบ
+//   Opus รอบ 2 ที่จุดเสียบแยกกันดริฟท์จากกันได้) + kill-switch MEGA_REF_VARIETY_SEED==='0' → ไม่ผูก varietySeed
+//   เลย (คืน caseIdentity ดิบล้วน) default (ไม่ตั้ง/ค่าอื่น) = เปิด ตามแบบแผนสวิตช์อื่นในไฟล์นี้
+//   (MEGA_REF_SEEDED/MEGA_REF_CAT_QUICK/MEGA_REF_TAG_EXACT)
+// ★ Opus รอบ 3 (ตรวจจุดหลุด 2 ข้อ — คอมเมนต์เดิมตรงนี้เขียนเท็จ แก้ให้ตรงจริงแล้ว):
+//   (1) "คืน caseIdentity ล้วน = พฤติกรรมเดิมทุก byte ทั้ง S6/S7/compose-test" — ไม่จริงสำหรับ S7: HEAD เดิม
+//       ของ S7 ไม่เคยส่ง opts.seedKey เข้า pickBestRef เลย (ตกไปใช้ signals.newsTitle → JSON.stringify(signals)
+//       แทน) ไม่ใช่ title-based seedKey แบบนี้ — ฟังก์ชันนี้ "คืน caseIdentity ล้วน" ได้แค่กรณีที่ผู้เรียกยัง
+//       ตัดสินใจส่ง opts.seedKey มาอยู่ดี (เช่น S6/compose-test ที่ HEAD เดิมมี seedKey title-based อยู่แล้ว)
+//       — ส่วน S7 ต้อง "ไม่ส่ง opts.seedKey เลย" ตอนไม่มี varietySeed จริง/สวิตช์ปิด (เงื่อนไข spread ที่ตัว
+//       เรียก ไม่ใช่หน้าที่ของฟังก์ชันนี้ — ดู megaAdapters.js S7 ที่ห่อ opts แบบมีเงื่อนไข)
+//   (2) caseIdentity ต้อง "ไม่ trim" — Opus โพรบพบเคสหลุด: ถ้า trim ตรงนี้ แต่ต้นทาง (เช่น S6's
+//       job.dossier.desk?.title) ส่งค่าดิบที่มีช่องว่างหัว/ท้ายมา ผลลัพธ์ตอนไม่มี seed (คืน caseIdentity ล้วน)
+//       จะไม่ตรงกับพฤติกรรมเดิม (ที่ใช้ title ดิบไม่ผ่าน trim ใดๆ เป็น seedKey ตรงๆ) → seedKey ต่างกัน →
+//       hash ต่างกัน → เลือกคนละใบ ทั้งที่ควรได้ผลเดิมเป๊ะ (trim เฉพาะ varietySeed พอ เพราะเป็นค่าที่สร้างขึ้น
+//       ใหม่โดยฟีเจอร์นี้เอง ไม่ใช่ค่าที่มาจาก byte-parity เดิม)
+/**
+ * @param {string} caseIdentity - ตัวบ่งชี้เคส (title/caseId เดิม) — ส่งเข้ามาเป็นค่าดิบเป๊ะ (ห้าม trim ในนี้ —
+ *   ต้องเท่ากับค่าที่ผู้เรียกเคยใช้เป็น seedKey ตรงๆ ก่อนมีฟีเจอร์นี้ ไม่งั้น byte-parity หลุดตอนไม่มี seed)
+ * @param {string} varietySeed - ตัวบ่งชี้ "งานนี้" (เช่น job.id ถาวรจริงของ quick-test) — นิ่งตลอด retry ของ
+ *   งานเดียวกัน เปลี่ยนเฉพาะตอนสร้างงานใหม่จริงๆ — ห้ามใช้ id ที่ synthesize ใหม่ทุก HTTP request (ดู
+ *   isEphemeralPipelineId ด้านล่าง — ผู้เรียกต้องกรองก่อนส่งเข้ามาที่นี่)
+ * @param {object} env - process.env (รับพารามิเตอร์ให้เทสฉีด env สังเคราะห์แทนได้ แบบเดียวกับ refFidelityBonus)
+ * @returns {string} seedKey สำหรับส่งเข้า pickBestRef({}, { seedKey }) — ถ้าไม่มี seed จริง/สวิตช์ปิด คืน
+ *   caseIdentity ดิบเป๊ะ (ผู้เรียกที่ HEAD เดิมไม่เคยส่ง opts.seedKey เลย เช่น S7 ต้องเช็คเองว่าจะเรียกฟังก์ชัน
+ *   นี้หรือไม่ส่ง opts เลย — ฟังก์ชันนี้ไม่รู้ context ของผู้เรียกแต่ละจุด)
+ */
+// ★ Opus รอบ 3: แยก kill-switch ออกมาเป็นฟังก์ชันเดี่ยว export ให้ผู้เรียกที่ต้อง "ไม่ส่ง opts.seedKey เลย"
+//   (เช่น S7 — ดู megaAdapters.js) เช็คก่อนตัดสินใจ spread opts ได้ โดยไม่ต้อง copy เงื่อนไข env ซ้ำเอง
+export function isVarietySeedEnabled(env = process.env) {
+  return env?.MEGA_REF_VARIETY_SEED !== '0';
+}
+
+export function buildVarietySeedKey(caseIdentity, varietySeed, env = process.env) {
+  const identity = caseIdentity == null ? '' : String(caseIdentity); // ★ ห้าม trim (ดูคอมเมนต์ Opus รอบ 3 ด้านบน)
+  const seed = String(varietySeed || '').trim();
+  if (!isVarietySeedEnabled(env) || !seed) return identity;
+  return `${identity}:${seed}`;
+}
+
+// ★ 29 ก.ค. 69 (แบตช์ variety รอบ 3 — Opus ตรวจ): job.id บางเส้น (refTestPipeline.js /api/cover-ref-test)
+//   เป็นแค่ trace id ชั่วคราวของ "1 HTTP request นี้" (synthesize ใหม่ทุกครั้ง — ขึ้นต้น 'REFTEST-') ไม่ใช่
+//   ตัวบ่งชี้งานถาวร — ใช้เป็น variety seed ไม่ได้เด็ดขาด (ทำให้ retry รอบ 2-6 ของงานเดียวกันได้ ref คนละใบ)
+//   ตัวบ่งชี้งานถาวรจริง (เช่น MG-#### จาก megaJobStore.js คิวข่าวจริง, qtj_... จาก quickTestJobs.js) นิ่ง
+//   ตลอดอายุงาน ใช้ได้ปกติ — เช็คแบบ blocklist (กันเฉพาะ prefix ที่รู้ว่าเป็นปัญหา) แทน allowlist เพราะ
+//   รูปแบบ id ถาวรมีได้หลายแบบ (MG-####/qtj_.../ฯลฯ) ไม่อยากผูกติดรูปแบบเดียว
+export function isEphemeralPipelineId(id) {
+  return /^REFTEST-/.test(String(id || ''));
+}
+
 /**
  * @param {object} signals - { emotion, text, charCount }
  *   emotion: อารมณ์หลักข่าว · text: มุมเล่า+อารมณ์รอง+หมวด (ไว้จับคำ) · charCount: จำนวนตัวละครหลัก
  * @param {object} opts - { seedKey } — คีย์นิ่งต่อเคส (เช่น caseId/job.id) ให้ tiebreak ได้ผลเดิมทุกรอบ retry
  *   ไม่ส่ง → fallback signals.newsTitle → JSON.stringify(signals) (ยังนิ่งกว่า Math.random() เดิม)
+ *   (ประกอบ seedKey ด้วย buildVarietySeedKey ด้านบน — ห้าม copy สูตรเอง)
  * @returns {Promise<{ref, score, reason}|null>}
  */
 export async function pickBestRef(signals = {}, opts = {}) {

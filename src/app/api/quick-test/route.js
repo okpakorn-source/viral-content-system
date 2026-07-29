@@ -76,7 +76,11 @@ async function callOnce(job, origin) {
     const res = await fetch(`${origin}/api/mega/compose-test`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ caseId: job.input.caseId, refId: job.input.refId || undefined, heroPersonHint: job.input.heroPersonHint || undefined }),
+      // ★ 29 ก.ค. 69 (แบตช์ variety — เจ้าของสั่ง "เทมเพลตออกแบบซ้ำเกินไป"): varietySeed=job.id ให้ปลายทาง
+      //   (compose-test route) ผูก seedKey ของ pickBestRef เข้ากับ "งานนี้" ไม่ใช่แค่ caseId ตรงๆ — งานใหม่
+      //   (job.id ใหม่ เช่น ผู้ใช้กด 🎲 ประกอบใหม่/สร้างงานใหม่ของเคสเดิม) มีโอกาสได้ ref อื่นในวง near-tie ·
+      //   retry รอบ 2-6 ของ "งานเดิม" (job.id เดิมตลอด attempt loop ใน runJob) ยังได้ seedKey เดิม = ผลซ้ำเดิม
+      body: JSON.stringify({ caseId: job.input.caseId, refId: job.input.refId || undefined, heroPersonHint: job.input.heroPersonHint || undefined, varietySeed: job.id || undefined }),
       signal: AbortSignal.timeout(5 * 60 * 1000),
     });
     const d = await res.json().catch(() => ({}));
@@ -165,6 +169,10 @@ async function callOnce(job, origin) {
   const refBody = { newsTitle: job.input.newsTitle || '', content: job.input.content };
   if (Array.isArray(job.input.clipUrls) && job.input.clipUrls.length) refBody.clipUrls = job.input.clipUrls;
   if (job.input.sourceOnly === true) refBody.sourceOnly = true;
+  // ★ 29 ก.ค. 69 (แบตช์ variety; Opus รอบ 2 — จุดหักล้างหลัก): job.id ที่นี่นิ่งตลอด attempt loop ของ runJob
+  //   (ต่างจาก id ที่ refTestPipeline.js synthesize ใหม่ทุก HTTP request) — ส่งลงไปให้ปลายทางผูก seedKey ของ
+  //   pickBestRef แทน กัน retry รอบ 2-6 ของงานเดียวกันได้ ref คนละใบ (ดูคอมเมนต์เต็มที่ refTestPipeline.js)
+  if (job.id) refBody.varietySeed = job.id;
   const res = await fetch(`${origin}/api/cover-ref-test`, {
     method: 'POST',
     headers: refHeaders,

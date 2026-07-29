@@ -580,6 +580,26 @@ export async function runCoverRefTest(input = {}, deps = {}) {
   const newsTitle = String(input.newsTitle || '').trim();
   const forceTemplateId = input.forceTemplateId || null;
   const origin = String(input.origin || '');
+  // ★ 29 ก.ค. 69 (แบตช์ variety; Opus รอบ 2 — จุดหักล้างหลัก): job.id ด้านล่างถูก synthesize ใหม่ทุก HTTP
+  //   request (`REFTEST-${Date.now()...}`) ไม่นิ่งตลอด retry เหมือน quick-test job.id จริง — ถ้า megaAdapters.js
+  //   (S6/S7) ผูก job.id ตรงๆ เข้า seedKey ของ pickBestRef จะทำให้ retry รอบ 2-6 ของ "งานเดียวกัน" (quick-test
+  //   วนยิง /api/cover-ref-test ซ้ำที่ quick-test/route.js callOnce) ได้ ref คนละใบ (Opus โพรบจริง: ก่อนแก้ 6
+  //   attempt=ใบเดียว หลังแก้=2ใบสลับ) — แก้: ต้นทางจริง (quick-test) ส่ง job.id ของตัวเอง (นิ่งตลอด retry)
+  //   ลงมาทาง body.varietySeed → เก็บแยกเป็น job.varietySeed (คนละฟิลด์จาก job.id เฉพาะกิจ)
+  // ★ Opus รอบ 3 (คอมเมนต์เดิมตรงนี้เขียนเท็จ แก้ให้ตรงจริงแล้ว — เดิมบอกว่า "megaAdapters.js ต้องใช้
+  //   job.varietySeed || job.id เสมอ" และ "ไม่ส่งมา = fallback job.id เดิม ไม่ต่างจากเดิม" ซึ่งไม่จริงทั้งคู่
+  //   หลังแก้รอบ 3): พฤติกรรมจริงตอนนี้ที่ megaAdapters.js —
+  //   • S6: ใช้ job.varietySeed ก่อนเสมอถ้ามี · ไม่มี → fallback job.id เฉพาะเมื่อ "ไม่ขึ้นต้น REFTEST-"
+  //     (isEphemeralPipelineId กรอง id ชั่วคราวทิ้ง) · ไม่มีทั้งคู่ → seedKey = caseIdentity ล้วน (title-based
+  //     เดิม HEAD S6 มีอยู่แล้ว)
+  //   • S7: เงื่อนไขเดียวกัน แต่ต่างจาก S6 ตรงที่ "ไม่มี varietySeed ใช้งานได้จริง (หรือสวิตช์ปิด)" = ไม่ส่ง
+  //     opts.seedKey เข้า pickBestRef เลย (ตกไป fallback chain เดิมของ pickBestRef เอง — signals.newsTitle →
+  //     JSON.stringify(signals)) เพราะ HEAD เดิมของ S7 ไม่เคยมี seedKey จาก path นี้เลยตั้งแต่แรก
+  //   สรุป: เรียกตรงหน้า /cover-ref-test (ไม่ผ่าน quick-test เลย ไม่มี varietySeed ส่งมา) = job.id ที่นี่เป็น
+  //   REFTEST-* เสมอ ถูกกรองทิ้งทั้ง S6/S7 → ยิงเนื้อเดิมซ้ำได้ผลนิ่งเหมือนก่อนมีฟีเจอร์นี้ทุกกรณี (ไม่ใช่แค่
+  //   "เรียกครั้งเดียวไม่มี retry loop" อย่างที่เคยเข้าใจผิด — งานผ่านคิว/ท่อจริงที่มี varietySeed/job.id ถาวร
+  //   ต่างหากที่จะได้สัญญาณหมุนเวียนใหม่)
+  const varietySeed = String(input.varietySeed || '').trim().slice(0, 64);
 
   if (content.length < 100) {
     return { status: 400, body: { success: false, error: 'ต้องมีเนื้อข่าวเต็ม (≥100 ตัวอักษร)', errorType: 'NO_CONTENT' } };
@@ -611,6 +631,9 @@ export async function runCoverRefTest(input = {}, deps = {}) {
   const sourceOnly = input.sourceOnly === true;
   const job = {
     id: `REFTEST-${Date.now().toString(36)}`,
+    // ★ 29 ก.ค. 69 (แบตช์ variety — ดูคอมเมนต์เต็มด้านบน): ตัวบ่งชี้งานที่นิ่งตลอด retry (job.id จริงของ
+    //   quick-test ถ้าส่งมา) — แยกจาก id ด้านบนซึ่งเป็นแค่ trace id เฉพาะกิจของ pipeline run นี้เท่านั้น
+    ...(varietySeed ? { varietySeed } : {}),
     dossier: {
       desk: { title: newsTitle, lane: '', category: '' },
       extract: { text: content, chars: content.length },

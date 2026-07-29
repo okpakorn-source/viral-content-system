@@ -4361,7 +4361,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       console.log(`[MEGA S6] 🔒 ใช้ ref ที่ล็อก: ${lockedRef.styleName || lockedRef.id}`);
     } else {
       try {
-        const { pickBestRef, refCategoryHint, inferRefCategory } = await import('@/lib/refCoverMatch');
+        const { pickBestRef, refCategoryHint, inferRefCategory, buildVarietySeedKey, isEphemeralPipelineId } = await import('@/lib/refCoverMatch');
         const c = job.dossier.compass || {};
         // ★ 29 ก.ค. 69 (เจ้าของถาม "ทำไม ref template ไม่เคยเปลี่ยน"): เดิม signals.text มีแค่ angle/
         //   secondaryEmotions — ไม่เคยมี "หมวดเคสข่าว" เลย ทั้งที่ job.dossier.desk.category (จาก DESK_CATEGORIES,
@@ -4378,12 +4378,27 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           _catHint = inferRefCategory([job.dossier.desk?.title, c.angle, ...(c.secondaryEmotions || []), fullNewsText(job).slice(0, 600)].filter(Boolean).join(' '));
         }
         // ★ 10 ก.ค. Wave1-A: seedKey นิ่งต่อข่าว (หัวข่าวก่อน — ข่าวเดิมเทสซ้ำคนละ job/คนละ caseId ก็ได้ ref ใบเดิม) → caseId → job.id
+        // ★ 29 ก.ค. 69 (แบตช์ variety; Opus รอบ 2 ตรวจ+แก้): เดิมใช้แค่ title/caseId ล้วน — เคสเดิมไม่ว่าสร้าง
+        //   งานใหม่กี่ครั้ง ก็ยัง seedKey เดิมเป๊ะ (hash เดิม → ref เดิมตลอดกาล แม้ผู้ใช้ตั้งใจกด "ประกอบใหม่")
+        //   ผูก "ตัวบ่งชี้งาน" เข้าไปด้วย: retry รอบ 2-6 ของ "งานเดียวกัน" ยัง seedKey เดิม = ผลซ้ำเดิม · งานใหม่
+        //   = seedKey ใหม่ → มีโอกาสได้ ref อื่นในวง near-tie (MEGA_REF_VARIETY_MARGIN) จริง
+        // ★ Opus รอบ 2 (จุดหักล้าง): job.id เพียวๆ ใช้ไม่ได้เสมอไป — เส้นเต็มท่อ (refTestPipeline.js) synthesize
+        //   job.id ใหม่ทุก HTTP request (`REFTEST-...`) ไม่นิ่งตลอด retry แบบ quick-test job.id จริง → ต้องเชื่อ
+        //   job.varietySeed ก่อนเสมอถ้ามี (ต้นทางจริงส่งมาจาก quick-test ผ่าน body.varietySeed → refTestPipeline
+        //   เก็บลง job.varietySeed แยกจาก job.id เฉพาะกิจ) — ไม่มี varietySeed (เช่น เรียกตรงไม่ผ่าน quick-test)
+        //   = fallback job.id เดิม (เรียกครั้งเดียวไม่มี retry loop ในกรณีนั้นอยู่แล้ว ไม่ต่างจากเดิม)
+        //   ประกอบผ่าน buildVarietySeedKey กลาง (ห้าม copy สูตรเอง — ดูคอมเมนต์เต็มที่ refCoverMatch.js)
+        // ★ Opus รอบ 3: job.id fallback ต้องกัน id ชั่วคราว (REFTEST-*) ด้วย isEphemeralPipelineId — ไม่งั้น
+        //   ยิงตรงหน้า /cover-ref-test (ไม่ผ่าน quick-test เลย จึงไม่มี job.varietySeed) จะได้ job.id แบบ
+        //   REFTEST-ใหม่ทุกครั้งมาเป็น seed แทน ทำให้ยิงเนื้อเดิมซ้ำก็ไม่นิ่ง (เดิม HEAD ก่อนแบตช์นี้นิ่งเสมอ)
+        const _caseIdentity = job.dossier.desk?.title || job.dossier.images?.caseId || job.id || '';
+        const _varietySeedS6 = job.varietySeed || (job.id && !isEphemeralPipelineId(job.id) ? job.id : '');
         const m = await pickBestRef({
           emotion: c.primaryEmotion || '',
           text: [_catHint, c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '),
           charCount: (c.mainCharacters || []).length,
           dreamShots: (c.visualDreamShots || []).map((v) => v.slot || v.description || ''),
-        }, { seedKey: job.dossier.desk?.title || job.dossier.images?.caseId || job.id });
+        }, { seedKey: buildVarietySeedKey(_caseIdentity, _varietySeedS6) });
         if (m?.ref?.dna) {
           // ★ 8 ก.ค. (CASE-360): แนวข่าวไม่ตรงจริง (แมตช์แค่อารมณ์/role generic) = "หลวม"
           //   → ตัด slot subject/storyFlow ทิ้ง (กัน ref รับปริญญาพาเลือก "คนกอด/เด็กในวง" ที่ข่าวนี้ไม่มี)
@@ -7006,7 +7021,7 @@ export async function s7_cover(job, { origin, _deps } = {}) {
   let selectionRefDNA = refDNA;
   if (!refDNA) {
     try {
-      const { pickBestRef, refCategoryHint, inferRefCategory } = await import('@/lib/refCoverMatch');
+      const { pickBestRef, refCategoryHint, inferRefCategory, buildVarietySeedKey, isEphemeralPipelineId, isVarietySeedEnabled } = await import('@/lib/refCoverMatch');
       const c = d.compass || {};
       // ★ 29 ก.ค. 69 (เจ้าของถาม "ทำไม ref template ไม่เคยเปลี่ยน"): เติมสัญญาณหมวดเคส แบบเดียวกับจุด S6
       //   ด้านบนเป๊ะ (ดูคอมเมนต์เต็มที่นั่น) — fallback path นี้ (แฟ้มเก่าไม่มี refMatch) ก็ควรได้สัญญาณเดียวกัน
@@ -7017,12 +7032,27 @@ export async function s7_cover(job, { origin, _deps } = {}) {
         // ★ 29 ก.ค. รอบ 3 (โพรบพิสูจน์): เติมเนื้อจริงเช่นเดียวกับจุด S6 (fullNewsText ใช้ dossier — ที่นี่คือ d เอง)
         _catHint = inferRefCategory([d.desk?.title, c.angle, ...(c.secondaryEmotions || []), fullNewsText({ dossier: d }).slice(0, 600)].filter(Boolean).join(' '));
       }
+      // ★ 29 ก.ค. 69 (แบตช์ variety; Opus รอบ 2 ตรวจ+แก้ → รอบ 3 ตรวจซ้ำพบจุดหลุด แก้อีกรอบ):
+      // ★ Opus รอบ 3 (จุดหักล้างหลัก): HEAD เดิมของ S7 "ไม่เคยส่ง opts.seedKey เลย" (ตกไปใช้
+      //   signals.newsTitle → JSON.stringify(signals) แทน) — รอบ 2 ที่ผ่านมาเปลี่ยนเป็นส่ง seedKey แบบ
+      //   title-based เสมอ (แม้ไม่มี varietySeed จริง/สวิตช์ปิด) ทำให้ hash ต้นทางเปลี่ยนจาก JSON.stringify(signals)
+      //   เป็น title แทน — ผลเลือก ref ไม่ตรง HEAD เดิม (Opus โพรบ 60 เคส หลุด 37/60) ทั้งที่ตั้งใจให้ "ไม่มี
+      //   varietySeed จริง = พฤติกรรมเดิมทุก byte" — แก้: ส่ง opts.seedKey เฉพาะตอนมี varietySeed จริงและสวิตช์
+      //   เปิดเท่านั้น (spread แบบมีเงื่อนไข) ไม่งั้นส่ง opts ว่างเปล่า {} ให้ตกไปใช้ fallback chain เดิมของ
+      //   pickBestRef เป๊ะ (เหมือนไม่เคยมีฟีเจอร์นี้เลย)
+      //   ตัวบ่งชี้งาน: เชื่อ job.varietySeed ก่อนเสมอถ้ามี (ต้นทางจริงจาก quick-test) เพราะ job.id เพียวๆ ไม่นิ่ง
+      //   ตลอด retry บนเส้นเต็มท่อ (refTestPipeline.js synthesize ใหม่ทุก HTTP request ขึ้นต้น 'REFTEST-' —
+      //   isEphemeralPipelineId กรองทิ้ง ไม่ให้ใช้เป็น fallback seed) — ประกอบผ่าน buildVarietySeedKey กลาง
+      //   (ห้าม copy สูตรเอง) เฉพาะตอน seed ใช้งานได้จริงเท่านั้น
+      const _caseIdentityS7 = d.desk?.title || d.images?.caseId || job.id || '';
+      const _varietySeedS7 = job.varietySeed || (job.id && !isEphemeralPipelineId(job.id) ? job.id : '');
+      const _seedOptsS7 = (_varietySeedS7 && isVarietySeedEnabled()) ? { seedKey: buildVarietySeedKey(_caseIdentityS7, _varietySeedS7) } : {};
       const m = await pickBestRef({
         emotion: c.primaryEmotion || '',
         text: [_catHint, c.angle, ...(c.secondaryEmotions || [])].filter(Boolean).join(' '),
         charCount: (c.mainCharacters || []).length,
         dreamShots: (c.visualDreamShots || []).map((v) => v.slot || v.description || ''),
-      });
+      }, _seedOptsS7);
       if (m?.ref?.dna) {
         // ★ ผู้ตรวจอิสระ (รอบ 4) + รอบ 5: strip เฉพาะสัญญา — weak match = S6 ใช้เฉพาะโครง
         // ★ B0 (16 ก.ค.): sanitize template.slots (geometry ล้วน) + ธง _contentSanitized ด้วย — กัน note รั่ว

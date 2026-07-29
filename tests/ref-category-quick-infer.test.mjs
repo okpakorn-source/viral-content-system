@@ -149,7 +149,10 @@ test('(ง) flag เปิด/ปิด ไม่กระทบกรณี des
 // ============================================================
 test('เสียบจริงในซอร์ส: megaAdapters.js import inferRefCategory ครบ 2 จุด (S6 + S7 fallback)', () => {
   const src = fs.readFileSync(new URL('../src/lib/megaAdapters.js', import.meta.url), 'utf8');
-  const importHits = src.match(/pickBestRef, refCategoryHint, inferRefCategory\s*}\s*=\s*await import\('@\/lib\/refCoverMatch'\)/g) || [];
+  // ★ 29 ก.ค. 69 (แบตช์ variety รอบ 2): import ตอนนี้มี buildVarietySeedKey ต่อท้ายด้วย (ตัวเลือกไม่บังคับ
+  //   ในแพทเทิร์นนี้ — เช็คแค่ว่า pickBestRef, refCategoryHint, inferRefCategory ถูก import ด้วยกัน ไม่สนใจว่า
+  //   จะมีชื่ออื่นต่อท้ายก่อนปิดวงเล็บหรือไม่ กันเทสนี้ผูกติดกับรายการ import ที่ไม่ใช่จุดสนใจของเทสนี้)
+  const importHits = src.match(/pickBestRef, refCategoryHint, inferRefCategory[,}][^)]*=\s*await import\('@\/lib\/refCoverMatch'\)/g) || [];
   assert.equal(importHits.length, 2, 'ต้องมี 2 จุดเสียบ import inferRefCategory คู่กับ refCategoryHint เป๊ะ');
   const gateHits = src.match(/if \(!_catHint && process\.env\.MEGA_REF_CAT_QUICK !== '0'\)/g) || [];
   assert.equal(gateHits.length, 2, 'ต้องมีเงื่อนไข gate MEGA_REF_CAT_QUICK ครบ 2 จุดเสียบ');

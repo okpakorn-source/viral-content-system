@@ -234,26 +234,39 @@ export async function POST(req) {
     // ★ R5b.1 (audit sweep): กติกาเดียวกับ refsF — variant เข้าลิสต์เฉพาะประตูเปิด+เกรดถึง
     const refs = (await listRefCovers(500)).filter((r) => r.dna && r.dna._reproducible !== false && (!r.dna._derived || refPoolGateOpen(r)));
     console.log('[compose-test] rev-2907a เดินถึงจุดเลือก ref: body.refId=' + (body.refId || '-') + ' refs=' + refs.length);
+    // ★ 29 ก.ค. 69 (แบตช์ variety): hoist ไว้ scope นอก if-block — ใช้ทั้งจุดเลือก ref (ด้านล่าง) และ job.varietySeed
+    //   ตอนสร้าง job (กัน S6 เห็น job.id undefined ถ้าบังเอิญต้องรัน pickBestRef ของตัวเอง เช่น refs.length===0)
+    const _varietySeed = String(body.varietySeed || '').trim().slice(0, 64);
     let ref = body.refId ? refs.find((r) => r.id === body.refId) : null;
     if (!ref && refs.length) {
       // ★ 29 ก.ค. รอบ 5 (รากตัวจริง "ref ไม่หมุน" เส้น quick): จุดนี้เลือกแล้วล็อกเป็น refMatch ก่อนถึง S6 เสมอ
       //   → S6 เห็น refMatch แล้วข้าม pickBestRef ของตัวเอง = hint หมวดที่ต่อไว้ใน S6 ไม่เคยถูกใช้บนเส้นนี้
       //   จึงต้องเติม hint ที่นี่ (จุดตัดสินจริง) — กลไกล้วนไม่มี LLM เพิ่ม · สวิตช์ MEGA_REF_CAT_QUICK เดียวกับ S6
-      const { pickBestRef, inferRefCategory } = await import('@/lib/refCoverMatch');
+      const { pickBestRef, inferRefCategory, buildVarietySeedKey } = await import('@/lib/refCoverMatch');
       const _qtext = [c.analysis?.headline, c.newsSnippet, String(c.newsText || c.analysis?.content || '').slice(0, 600)].filter(Boolean).join(' ');
       const _qhint = process.env.MEGA_REF_CAT_QUICK !== '0' ? inferRefCategory(_qtext) : '';
+      // ★ 29 ก.ค. 69 (แบตช์ variety — เจ้าของสั่ง "เทมเพลตออกแบบซ้ำเกินไป"; Opus รอบ 2 ตรวจ + แก้): seedKey เดิม
+      //   = caseId ล้วน → เคสเดิมได้ ref เดิมตลอดกาล ไม่ว่าจะกดประกอบใหม่กี่งานก็ตาม — route นี้ไม่รู้ job.id ของ
+      //   ตัวเอง (สร้างจาก quick-test ที่เรียกเข้ามา) รับผ่าน body.varietySeed แทน (quick-test callOnce ส่ง
+      //   job.id มา — จำกัดความยาว .slice(0,64) กันอินพุตยาวเกิน เพราะ endpoint นี้ไม่ผ่าน middleware matcher)
+      //   ประกอบ seedKey ผ่าน buildVarietySeedKey กลาง (refCoverMatch.js) จุดเดียว — ห้าม copy สูตรเอง (Opus
+      //   รอบ 2 ชี้ว่า copy 3 ที่ทำให้จุดหนึ่ง (เส้น ref เต็มท่อ) ดริฟท์จนพัง retry-determinism)
+      const _seedKey = buildVarietySeedKey(caseId, _varietySeed);
       const m = await pickBestRef({
         emotion: c.analysis?.context?.emotional_tone || '',
         text: [_qhint, c.analysis?.headline, c.newsSnippet].filter(Boolean).join(' '),
         charCount: (c.analysis?.characters || []).length,
-      }, { seedKey: caseId }).catch((e) => { console.log('[compose-test] REF-PICK ล้มเงียบ: ' + String((e && e.message) || e).slice(0, 200)); return null; });
+      }, { seedKey: _seedKey }).catch((e) => { console.log('[compose-test] REF-PICK ล้มเงียบ: ' + String((e && e.message) || e).slice(0, 200)); return null; });
       if (m && m.ref) console.log('[compose-test] REF-PICK(route): hint="' + (_qhint || '-') + '" -> ' + m.ref.id + ' (score ' + (m.score != null ? m.score : '-') + ') เหตุผล: ' + String(m.reason || '').slice(0, 140));
       ref = m?.ref || refs[0];
     }
 
     // ★ 29 ก.ค. รอบ 4 (พิสูจน์จริง ref ไม่หมุนบนเส้น quick): เนื้อเต็มเคยใช้แค่ compassBrain แล้วทิ้ง — เก็บเข้า desk.fullText
     //   (ช่องที่ fullNewsText() อ่านเป็น fallback อยู่แล้ว) ให้ inferRefCategory เห็นเนื้อจริง ไม่ใช่แค่ angle ภาษาอารมณ์
-    const job = { dossier: { images: { caseId, storyQueries }, compass, desk: { title: compass.angle, fullText: (fullTextCase || '').slice(0, 1200) } } };
+    // ★ 29 ก.ค. 69 (แบตช์ variety): job.varietySeed = ตัวบ่งชี้งานจริง (varietySeed จาก body — ถ้ามี) แยกจาก
+    //   job.id (ไม่มีในออบเจกต์นี้เลย) — เผื่อ S6 ต้องรัน pickBestRef ของตัวเอง (refs.length===0 ตอนบนข้าม if)
+    //   ให้ยังได้ seedKey ที่ถูกต้อง ไม่ใช่ undefined (ดูคอมเมนต์เต็มที่ buildVarietySeedKey ใน refCoverMatch.js)
+    const job = { dossier: { images: { caseId, storyQueries }, compass, desk: { title: compass.angle, fullText: (fullTextCase || '').slice(0, 1200) } }, ...(_varietySeed ? { varietySeed: _varietySeed } : {}) };
     if (ref) job.dossier.refMatch = { dna: ref.dna, styleName: ref.styleName || ref.id, imagePath: ref.imagePath, reason: 'เลือกในหน้าเทส', typeMatched: true };
 
     const { s6_slots } = await import('@/lib/megaAdapters');
