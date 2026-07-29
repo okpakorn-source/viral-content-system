@@ -431,6 +431,11 @@ function _subslotCenterOn() { return process.env.MEGA_SUBSLOT_CENTER !== '0'; }
 // ★ MEGA_HEAD_SAFE (เคส AC-0195 28 ก.ค. 69 — ปกคลาวด์พังหนัก: คลังสกปรก 100% + ตาให้ faceBox ผิดจนครอปตัดหัว):
 //   ด่านสุดท้ายกันหัวขาดจากเรขาคณิตล้วน (ไม่พึ่งตา/ไม่พึ่งว่า faceBox มาจากไหน) — ดูจุดเรียกใน renderRectTile
 function _headSafeOn() { return process.env.MEGA_HEAD_SAFE !== '0'; }
+// ★ เฟส B-1 (29 ก.ค. 69 — AUDIT-SELECTION-COMPOSE.md B2/B3/B4): kill-switch เดียวคุมทั้งชุดแก้ลำดับด่านครอป
+//   (head-safe เคารพลายน้ำที่หลบไปแล้ว / circle-avoid recheck หลัง head-safe / cropTrace.region snapshot สุดท้ายจริง)
+//   default เปิด (ไม่ตั้ง/ค่าอื่น) · '0' = พฤติกรรมเดิมทุก byte ทั้ง 3 จุด (ห้ามแค่ครอบ if แล้วเหลือ side-effect —
+//   ทุกจุดที่แตะ region/_tr เช็คธงนี้ก่อนเสมอ ไม่มีจุดไหนทำงานเงียบๆ นอกเงื่อนไข)
+function _cropChainFixOn() { return process.env.MEGA_CROP_CHAIN_FIX !== '0'; }
 // band ขอบล่าง faceShare ของ hero — mirror megaComposerService._heroFaceBand (C3): env MEGA_HERO_FACE_BAND="min,max"
 //   ไม่ตั้ง/พังรูปแบบ = TECH_RULES.HERO_FACE_SHARE เดิมเป๊ะ (ต้องตรง C3 เสมอ ถ้าจะแก้แก้พร้อมกัน)
 function _heroFaceBandExec() {
@@ -1305,6 +1310,10 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null, strict = fa
   //   รันหลังทุกจุดปรับ region ข้างบนจบสนิท (เหมือน circle catch-all) — "ก่อน" dodgeWatermarkPx เดิมด้านล่างเสมอ
   //   (คนละกลไก/คนละข้อมูลกัน — dodgeWatermarkPx เดิมใช้ fb.watermarkRegion จาก faceDetector ไม่ใช่ marker ตัวนี้ —
   //   รันต่อกันได้ปลอดภัยเพราะแต่ละตัวเช็ก overlap เองก่อนขยับ ไม่มีทางเลื่อนซ้ำสอง) · ปิด flag/ไม่มี marker = ข้ามเงียบ
+  // ★ B2 fix (เฟส B-1): จำ region.top "ก่อน" ด่านลายน้ำทั้ง 2 ตัว (avoidWatermarkEdgePx + dodgeWatermarkPx) — ถ้า
+  //   หลังด่านทั้งคู่ top ถูกดันลง (moved down = หลบสำเร็จ) จะได้ค่านี้ไว้เป็น "เพดานล่าง" กัน head-safe ดันกลับขึ้น
+  //   เกินจุดนี้ (เดิม head-safe ไม่รู้จัก _watermarkEdge/watermarkRegion เลย ดันกลับทับลายน้ำที่เพิ่งหลบสำเร็จ)
+  const _topBeforeWmChain = region.top;
   let _needWatermarkKept = false;
   {
     const _wmg = _applyWatermarkEdgeGuard(region, slot, imgW, imgH);
@@ -1318,6 +1327,9 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null, strict = fa
   if (_tr && _needRefineBackup) _tr.refineNeedsBackup = true; // ★ C1c/BS: additive — composer อ่านเพื่อสลับภาพสำรอง (union จัดไม่ลง)
   if (_tr && _needWatermarkKept) _tr.watermarkKept = true; // ★ แบตช์ C (C2): additive — composer ยก qcFlag 'watermark_kept'
   if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ` ${slot.id}`); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
+  // ★ B2 fix: เพดานล่างของ head-safe — เชื่อถือได้เฉพาะตอน flag เปิด (ปิด = _wmMinTopPx เป็น 0 เสมอ = ไม่มีเพดาน
+  //   พฤติกรรมเดิมทุก byte) region.top เพิ่มขึ้นจริง (ดันลงมา) แปลว่าด่านลายน้ำด่านใดด่านหนึ่งหลบสำเร็จแล้ว
+  const _wmMinTopPx = (_cropChainFixOn() && region.top > _topBeforeWmChain + 0.5) ? region.top : 0;
   // ★ MEGA_HEAD_SAFE (เคส AC-0195 28 ก.ค. 69): ด่านสุดท้ายกันหัวขาด รันหลังทุกจุดปรับ region เดิม+หลบลายน้ำ
   //   ก่อนคลัมป์สุดท้าย — ไม่พึ่งตา (ทำงานจากเรขาคณิตล้วน ไม่สนว่า fb มาจากไหน — ตาสอง/triage/detector เหมือนกันหมด)
   //   (1) มี faceBox ใช้ได้ + หัวหน้า (face top) อยู่ "เหนือ" หน้าต่างครอปปัจจุบัน (face top < region top แปลว่า
@@ -1334,15 +1346,43 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null, strict = fa
       const _faceTopPx = _hsFace.y1 * imgH;
       if (_faceTopPx < region.top) {
         const _headroomPx = region.height * 0.04;
-        const _newTop = Math.max(0, Math.min(_faceTopPx - _headroomPx, Math.max(0, imgH - region.height)));
+        const _newTopRaw = Math.max(0, Math.min(_faceTopPx - _headroomPx, Math.max(0, imgH - region.height)));
+        // ★ B2 fix: ห้ามดันกลับเข้าโซนลายน้ำที่เพิ่งหลบสำเร็จ (_wmMinTopPx=0 เมื่อไม่มีการหลบ/flag ปิด = ไม่จำกัด)
+        const _capsIntoWm = _wmMinTopPx > 0 && _newTopRaw < _wmMinTopPx;
+        const _newTop = _capsIntoWm ? _wmMinTopPx : _newTopRaw;
+        if (_capsIntoWm) { _needWatermarkKept = true; if (_tr) _tr.watermarkKept = true; } // ยอมกันหัวไม่เต็มที่ เพื่อไม่ละเมิดลายน้ำ — ต้องขึ้นธง ไม่เงียบ
         if (_newTop < region.top - 0.5) { region = { ...region, top: _newTop }; _br += '+headsafe'; if (_tr) _tr.branch = _br; }
       }
     } else {
       const _maxTopPx = imgH * 0.12;
       if (region.top > _maxTopPx) {
-        region = { ...region, top: Math.max(0, Math.min(_maxTopPx, Math.max(0, imgH - region.height))) };
+        const _targetTopRaw = Math.max(0, Math.min(_maxTopPx, Math.max(0, imgH - region.height)));
+        const _capsIntoWmBlind = _wmMinTopPx > 0 && _targetTopRaw < _wmMinTopPx;
+        const _targetTop = _capsIntoWmBlind ? _wmMinTopPx : _targetTopRaw;
+        if (_capsIntoWmBlind) { _needWatermarkKept = true; if (_tr) _tr.watermarkKept = true; }
+        region = { ...region, top: _targetTop };
         _br += '+headsafetop';
         if (_tr) _tr.branch = _br;
+      }
+    }
+  }
+  // ★ B3 fix (เฟส B-1): recheck circle-avoid "หลังทุกด่านที่ขยับ region" (watermark-edge/dodge/head-safe) ก่อน
+  //   clamp — เดิม catch-all ที่บนสุด (ก่อนหน้านี้ในไฟล์) ตัดสิน _needCircleBackup ไปแล้วตอน region ยังไม่นิ่งจริง
+  //   (คอมเมนต์ตรงนั้นอ้างว่า "เห็น region สุดท้ายจริง" แต่ไม่จริง — ยังมี 3 ด่านขยับต่ออีก) → ตรวจซ้ำเบาๆ ตรงนี้
+  //   (ไม่คำนวณ bias ใหม่/ไม่แก้ region เอง กันชนกับตำแหน่งที่ด่านลายน้ำเพิ่งวางไว้) แค่เช็คว่าหน้าเด่นยังทับวงไหม
+  //   ยังทับ = ยกธงขอภาพสำรอง (เดิมไม่มีใครตรวจซ้ำเลย — ธงเก่าที่ตัดสินไปแล้วอาจไม่ตรงสภาพจริงอีกต่อไป)
+  if (_cropChainFixOn() && _circleAvoidOn() && slot._circleZone && _promKind(slot) !== 'hero' && !_needCircleBackup) {
+    const _fRecheck = _dominantFaceInRegion(fb, region, imgW, imgH);
+    if (_fRecheck) {
+      const _facesRecheck = _facesInRegion(fb, region, imgW, imgH);
+      const _useMultiRecheck = _facesRecheck.length >= 2;
+      const _bzRecheck = biasRegionFromCircleZone({
+        region, ...(_useMultiRecheck ? { faces: _facesRecheck } : { faceBox: _fRecheck }), zone: slot._circleZone, imgW, imgH,
+      });
+      if (!_bzRecheck.avoided) {
+        _needCircleBackup = true;
+        if (_tr) _tr.circleAvoidNeedsBackup = true;
+        console.log(`[CoverV3] ⭕ หลบวง (recheck หลัง head-safe): ${slot.id} ยังทับอยู่หลังด่านลายน้ำ/head-safe ขยับ region → ขึ้นธงขอภาพสำรอง`);
       }
     }
   }
@@ -1385,6 +1425,11 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null, strict = fa
     if (!_ex.reached) _needHeroBackup = true;
   }
   if (_tr && _needHeroBackup) _tr.heroCropNeedsBackup = true; // ★ HERO_CROP_GUARD: additive — composer อ่านเพื่อสลับภาพสำรอง/HOLD
+  // ★ B4 fix (เฟส B-1): _tr.region เดิม snapshot ไว้ตอน _cropTrace() ก่อนหน้านี้มาก (ก่อน dodgeWatermark/
+  //   head-safe/clamp/stretchcap ทั้งหมด) — measureTechRules (megaComposerService.js) อ่าน _tr.region ไปคำนวณ
+  //   faceSharePct/headroomPct/circle_face_overlap (ธง hard-tier ที่ coverQcGate ใช้ตัดสินฆ่างาน) จากกรอบที่ไม่ตรง
+  //   กับกรอบที่เรนเดอร์จริงเลย → อัปเดตให้ตรง ณ จุดที่ region นิ่งจริงแล้ว (หลังทุกด่านข้างบนจบสนิท)
+  if (_cropChainFixOn() && _tr) _tr.region = { ...region };
   // ★ CLUTTER (มือ D 5/7): วัดซ้ำ "กรอบสุดท้าย" (หลังครอป/หลบลายน้ำ/clamp/stretchcap) — ยังลายตา → ธงให้ composer สลับภาพสะอาดกว่า
   //   เกณฑ์: หน้าจริง ≥3 ใบตกในกรอบ · ตา Gemini ชี้ไม่สะอาด (eyeClean===false) · busy>=2 — เลียนแบบ _needRefineBackup (additive)
   if (_clutterGuardOn() && !(crop && crop._final)
@@ -1505,6 +1550,9 @@ async function renderCircleTile(src, crop, slot, fb, traceSink = null) {
   if (_tr && _needWatermarkKeptC) _tr.watermarkKept = true; // ★ แบตช์ C (C2): additive — composer ยก qcFlag 'watermark_kept'
   if (!(crop && crop._final)) region = dodgeWatermarkPx(region, fb, imgW, imgH, ' circle'); // ★ rev.S4 (FinalCrop เห็น text เองแล้ว — ไม่ทับ)
   region = _clampRegion(region, imgW, imgH); // ★ 10 ก.ค.: การ์ดสุดท้ายก่อน extract (วงกลม)
+  // ★ B4 fix (เฟส B-1): _tr.region snapshot ไว้ก่อน dodgeWatermarkPx/clamp — อัปเดตให้ตรงกรอบสุดท้ายจริงของวงกลมด้วย
+  //   (วงกลมไม่มี head-safe/stretchcap/circle-avoid ของตัวเอง — จุดนี้จึงเป็นจุดสุดท้ายที่ region นิ่งแล้วพอดี)
+  if (_cropChainFixOn() && _tr) _tr.region = { ...region };
   // ★ CLUTTER (มือ D 7/7): วงกลม = คนเดี่ยวสะอาดโฟกัสชัด — ไร้หน้า(noface-square)/≥2 หน้าในวง/eyeClean เท็จ/busy>=2
   //   → ธงให้ composer สลับภาพสำรองสะอาดกว่า (circle อยู่ในขอบเขต BS swap — ไม่ใช่ main/hero) · OFF → ไม่ตั้งธง (byte-parity)
   if (_clutterGuardOn() && !(crop && crop._final)

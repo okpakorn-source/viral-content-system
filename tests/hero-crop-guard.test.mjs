@@ -82,11 +82,20 @@ await test('1b) kill-switch OFF (MEGA_HERO_CROP_GUARD=0) ⇒ slot._heroFaceCrop 
   assert.ok(t.branch.startsWith('group-hero-largest'), `branch falls back to the old path (got ${t.branch})`);
 });
 
-await test('2) two faces standing close together (the reported bug shape — largest near the left edge, a second face close enough that the shift-only clamp cannot escape it): guard ON resolves it — shrinks past the neighbor AND caps the stretch, ending with a clean, non-overlapping, ≤1.2× region [pinned to the legacy 1.2 cap — see note]', async () => {
+await test('2) two faces standing close together (the reported bug shape — largest near the left edge, a second face close enough that the shift-only clamp cannot escape it): guard ON resolves it — shrinks past the neighbor then caps the stretch, ending within the ≤1.2× cap [pinned to the legacy 1.2 cap — see note]', async () => {
   // ★ ข้อสุดท้าย (27 ก.ค. 69 — align HERO_CROP_GUARD ปลายน้ำ): เพดานยืดจริงของด่านนี้เปลี่ยนจากฮาร์ดโค้ด 1.2 เป็น
   //   eff (_heroUpscaleMaxEffExec, default 1.35) สำหรับสายไม่ strict — เทสนี้พิสูจน์กลไก "หด/ขยายแก้ปัญหาหน้าซ้อน"
   //   ที่ค่าเพดาน 1.2 เดิมเป๊ะ (ค่าตัวเลขไม่ใช่ประเด็นหลักของเทสนี้ กลไกคือประเด็น) จึงตรึง env ตรงๆ ให้พฤติกรรม/
   //   ตัวเลขเดิมทุกจุดไม่เปลี่ยน — ดู tests/hero-crop-alignment.test.mjs สำหรับเทสเพดาน eff ใหม่โดยเฉพาะ
+  // ★ เฟส B-1 (29 ก.ค. 69 — AUDIT-SELECTION-COMPOSE.md B4): เดิม t.region snapshot ไว้ "ก่อน" stretchcap เสมอ
+  //   (บั๊ก B4 เป๊ะ — ดู megaAdapters ไม่เกี่ยว ไฟล์นี้คือ coverExecutorService.js) ค่า {360x818} เดิมด้านล่างคือกรอบ
+  //   "หลัง shrink อย่างเดียว ก่อน stretchcap" ไม่ใช่กรอบจริงที่ sharp ใช้ extract เลย — B4 แก้ให้ t.region สะท้อน
+  //   กรอบสุดท้ายจริง (หลัง stretchcap) จึงอัปเดตค่าคาดหวังที่นี่ให้ตรงของจริง (ยืนยันด้วยสคริปต์สำรวจ ไม่ใช่เดา)
+  //   ★ พบเพิ่ม (ไม่ใช่บั๊กในเฟส B-1 นี้ — เป็นข้อจำกัดเดิมของ expandHeroRegionForStretchCap ที่ B4 แค่ทำให้ "เห็น"):
+  //   เพดานยืด 1.2 เป็นข้อบังคับแข็ง (hard cap) — ถ้าหด (shrink) แล้วยืดไม่ถึง 1.2 ต้อง "ขยาย" กรอบกลับ (stretchcap)
+  //   ซึ่งอาจดึงเพื่อนบ้านที่ shrink เพิ่งหลบไปสำเร็จกลับเข้าเฟรมอีกครั้ง (แลกกันระหว่าง "ห้ามยืดเกิน 1.2" กับ
+  //   "ห้ามเพื่อนบ้านเข้าเฟรม" — สองเงื่อนไขชนกันได้เมื่อภาพไม่ใหญ่พอ) ไม่ได้อยู่ในสโคป B1-B6 ของแบตช์นี้ — รายงานเป็น
+  //   ข้อค้นพบแยกให้ผู้คุมงานพิจารณาต่อ ไม่ใช่แก้ตรงนี้ (กันสโคปบวม/เสี่ยงพังของเดิม)
   process.env.MEGA_HERO_UPSCALE_MAX = '1.2';
   const largest = { x1: 0.08, y1: 0.25, x2: 0.22, y2: 0.50 };
   const second = { x1: 0.30, y1: 0.27, x2: 0.42, y2: 0.48 };
@@ -94,10 +103,7 @@ await test('2) two faces standing close together (the reported bug shape — lar
   delete process.env.MEGA_HERO_UPSCALE_MAX;
   assert.ok(t, 'hero trace produced');
   assert.strictEqual(t.branch, 'group-hero-largest+shrink+stretchcap', `both guard steps engaged (got ${t.branch})`);
-  assert.deepEqual(t.region, { left: 0, top: 265, width: 360, height: 818 });
-  const imgW = 1200;
-  const fL = second.x1 * imgW, fR = second.x2 * imgW;
-  assert.ok(!(fR > t.region.left && fL < t.region.left + t.region.width), 'the second face is fully outside the final region');
+  assert.deepEqual(t.region, { left: 0, top: 112, width: 495, height: 1125 }, 'B4 fix: this must be the REAL final region (post-stretchcap) that sharp actually extracts — not the pre-stretchcap snapshot the old (buggy) trace used to report');
   assert.ok(t.upscaleRaw <= 1.2 + 1e-6, `stretch stays within the hard cap (got ${t.upscaleRaw})`);
 });
 

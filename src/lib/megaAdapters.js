@@ -573,7 +573,39 @@ function _deriveTextOverlay(textFound) {
 //   ★ ข้อ 5: ไม่เช็ก field รุ่นใหม่ใดๆ ก่อนตรวจ (เช่น busy) — ภาพยุคเก่าที่ขาด field เหล่านี้ยังถูกตรวจปกติทุกใบ
 //   ไม่ throw เอง (ผู้เรียกยังต้อง try/catch ครอบอีกชั้น — fail-open ตามสเปค)
 //   คืน { swapped, fixedCoords, checked, liesCaught }
-export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _deps = {} }) {
+// ★ B1 fix (29 ก.ค. 69, เฟส B-1 — AUDIT-SELECTION-COMPOSE.md): ทุกจุดสลับภาพในฟังก์ชันนี้ (pass1 textOverlay,
+//   นโยบาย hero แข็ง 2 ทาง, PASS2 _swapRoleImageMechanic) เดิมเขียนกลับแค่ 5 field (id/imageUrl/person/
+//   category/emotion) — ทิ้ง field ที่ผูกกับ "ภาพใบนั้นโดยเฉพาะ" ไว้ค้าง: _heroFaceCrop (ร้ายแรงสุด — ครอปหน้า
+//   ของภาพเดิมไปทาบภาพใหม่ที่ coverExecutorService.js เชื่อ 100%), clean, newsScene, faces, dirtyFallback,
+//   storyFit → ป้อนข้อมูลผิดให้ชั้นตัดสินปลายทาง (composer BS filter, QC) — แก้: helper กลาง _syncSlotMetaAfterSwap
+//   เรียกเพิ่มหลังทุกจุดที่ id/imageUrl เปลี่ยน (ทั้งจุดสลับจริงและจุด revert คืนสภาพเดิม) ไม่แตะบรรทัดเดิมเลย
+//   (แค่เพิ่ม 1 บรรทัดต่อจุด) — kill-switch MEGA_CROP_CHAIN_FIX==='0' → ฟังก์ชันนี้ no-op สนิท (พฤติกรรมเดิมทุก byte)
+function _cropChainFixOn() { return process.env.MEGA_CROP_CHAIN_FIX !== '0'; }
+function _syncSlotMetaAfterSwap(slots, role, rec, ctx) {
+  if (!_cropChainFixOn() || !rec || !slots?.[role]) return;
+  const { dirtyFallbackIds, isClean, storyFitOf, STORY_SEL_ON } = ctx || {};
+  const _isClean = typeof isClean === 'function' ? isClean : (x) => x?.triage?.clean !== false;
+  const _dfIds = dirtyFallbackIds instanceof Set ? dirtyFallbackIds : new Set();
+  slots[role].clean = _isClean(rec);
+  slots[role].newsScene = rec.triage?.newsScene !== false;
+  slots[role].faces = Number(rec.triage?.faceCount) || 0;
+  slots[role].dirtyFallback = _dfIds.has(String(rec.id));
+  // 🔴 บรรทัดหัวใจ (ตามคำแนะนำ audit): ไม่มี _heroFaceCrop ของภาพใหม่ = ลบทิ้ง ห้ามให้ครอปของภาพเดิมค้างทาบภาพใหม่
+  if (rec._heroFaceCrop) slots[role]._heroFaceCrop = rec._heroFaceCrop;
+  else delete slots[role]._heroFaceCrop;
+  if (STORY_SEL_ON && typeof storyFitOf === 'function') slots[role].storyFit = storyFitOf(rec);
+}
+
+export async function _runSecondEye({
+  slots, activeSlots, byId, caseId = null, _deps = {},
+  // ★ B1 fix: s6_slots (ผู้เรียกจริง) ส่ง context จริงเข้ามา — ผู้เรียกเก่า/เทสที่ไม่ส่งมา ได้ default ที่ปลอดภัย
+  //   (dirtyFallbackIds ว่าง, isClean พื้นฐานเดียวกับ s6_slots ใช้เอง, storyFit ปิด) ไม่ throw ไม่พังพฤติกรรมเดิม
+  dirtyFallbackIds = new Set(),
+  isClean = (x) => x?.triage?.clean !== false,
+  storyFitOf = null,
+  STORY_SEL_ON = false,
+} = {}) {
+  const _cropCtx = { dirtyFallbackIds, isClean, storyFitOf, STORY_SEL_ON };
   const roles = (activeSlots || []).filter((r) => slots[r] && slots[r].id).slice(0, 5);
   if (!roles.length) return { swapped: 0, fixedCoords: 0, checked: 0, liesCaught: 0 };
   const _fetchB64 = _deps.fetchImageB64 || _fetchImageB64;
@@ -738,6 +770,7 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
         slots[role].person = bRec.triage?.person || null;
         slots[role].category = bRec.triage?.category || null;
         slots[role].emotion = bRec.triage?.emotion || null;
+        _syncSlotMetaAfterSwap(slots, role, bRec, _cropCtx); // ★ B1 fix
         slots[role]._secondEyeSwapped = { from: oldId, to: info.backup.id, reason: `textOverlay=2 บนภาพเดิม (อ่านได้ "${info.primary.result.textFound.slice(0, 40)}")` };
         finalRes = info.backup.result;
         swapped++;
@@ -802,6 +835,7 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
             slots.hero.person = cRec.triage?.person || slots.hero.person || null;
             slots.hero.category = cRec.triage?.category || null;
             slots.hero.emotion = cRec.triage?.emotion || null;
+            _syncSlotMetaAfterSwap(slots, 'hero', cRec, _cropCtx); // ★ B1 fix
             slots.hero._secondEyeSwapped = {
               from: oldHero.id, to: candidateEntry.id,
               reason: `hero_face_hidden_forced_replace (faceVisible=${finalRes.faceVisible ?? '-'}, textOverlay=${finalRes.textOverlay})${donorRole ? ` — two_way_swap_with:${donorRole}` : ''}`,
@@ -817,6 +851,7 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
               slots[donorRole].emotion = oldHero.emotion;
               if (oldHero.faceBox) slots[donorRole]._secondEyeFaceBox = oldHero.faceBox;
               else delete slots[donorRole]._secondEyeFaceBox;
+              _syncSlotMetaAfterSwap(slots, donorRole, byId.get(String(oldHero.id)), _cropCtx); // ★ B1 fix — donor รับภาพ hero เดิมกลับมา ต้องได้ meta ของภาพนั้นจริง (ไม่ใช่ meta ของ candidate ที่เพิ่งย้ายออกไป)
               slots[donorRole]._secondEyeSwapped = {
                 from: candidateEntry.id, to: oldHero.id,
                 reason: `two_way_swap_with_hero (รับภาพ hero เดิมที่ถูกยกไปแทนที่ candidate ของช่องนี้)`,
@@ -838,6 +873,7 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
               slots.hero.person = oldHero.person;
               slots.hero.category = oldHero.category;
               slots.hero.emotion = oldHero.emotion;
+              _syncSlotMetaAfterSwap(slots, 'hero', byId.get(String(oldHero.id)), _cropCtx); // ★ B1 fix — revert ต้องคืน meta เดิมของ hero ด้วย ไม่ใช่แค่ id/imageUrl
               delete slots.hero._secondEyeSwapped;
               if (donorRole && slots[donorRole] && oldDonor) {
                 slots[donorRole].id = oldDonor.id;
@@ -845,6 +881,7 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
                 slots[donorRole].person = oldDonor.person;
                 slots[donorRole].category = oldDonor.category;
                 slots[donorRole].emotion = oldDonor.emotion;
+                _syncSlotMetaAfterSwap(slots, donorRole, byId.get(String(oldDonor.id)), _cropCtx); // ★ B1 fix
                 if (oldDonor._secondEyeFaceBox !== undefined) slots[donorRole]._secondEyeFaceBox = oldDonor._secondEyeFaceBox;
                 else delete slots[donorRole]._secondEyeFaceBox;
                 if (oldDonor._secondEyeSwapped !== undefined) slots[donorRole]._secondEyeSwapped = oldDonor._secondEyeSwapped;
@@ -920,6 +957,7 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
     slots[targetRole].person = cRec.triage?.person || oldTarget.person || null;
     slots[targetRole].category = cRec.triage?.category || null;
     slots[targetRole].emotion = cRec.triage?.emotion || null;
+    _syncSlotMetaAfterSwap(slots, targetRole, cRec, _cropCtx); // ★ B1 fix
     slots[targetRole]._secondEyeSwapped = {
       from: oldTarget.id, to: candMapEntry.id,
       reason: `${reasonTag}${donorRole ? ` — two_way_swap_with:${donorRole}` : ''}`,
@@ -936,6 +974,7 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
       slots[donorRole].person = oldTarget.person;
       slots[donorRole].category = oldTarget.category;
       slots[donorRole].emotion = oldTarget.emotion;
+      _syncSlotMetaAfterSwap(slots, donorRole, byId.get(String(oldTarget.id)), _cropCtx); // ★ B1 fix — donor รับภาพเดิมของ targetRole กลับมา ต้องได้ meta ของภาพนั้นจริง
       if (oldTarget._secondEyeFaceBox) slots[donorRole]._secondEyeFaceBox = oldTarget._secondEyeFaceBox;
       else delete slots[donorRole]._secondEyeFaceBox;
       slots[donorRole]._secondEyeSwapped = { from: candMapEntry.id, to: oldTarget.id, reason: `two_way_swap_with:${targetRole} (${reasonTag})` };
@@ -949,6 +988,7 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
       slots[targetRole].person = oldTarget.person;
       slots[targetRole].category = oldTarget.category;
       slots[targetRole].emotion = oldTarget.emotion;
+      _syncSlotMetaAfterSwap(slots, targetRole, byId.get(String(oldTarget.id)), _cropCtx); // ★ B1 fix — revert ต้องคืน meta เดิมของ targetRole ด้วย
       delete slots[targetRole]._secondEyeSwapped;
       if (oldTarget._secondEyeFaceBox) slots[targetRole]._secondEyeFaceBox = oldTarget._secondEyeFaceBox;
       else delete slots[targetRole]._secondEyeFaceBox;
@@ -958,6 +998,7 @@ export async function _runSecondEye({ slots, activeSlots, byId, caseId = null, _
         slots[donorRole].person = oldDonor.person;
         slots[donorRole].category = oldDonor.category;
         slots[donorRole].emotion = oldDonor.emotion;
+        _syncSlotMetaAfterSwap(slots, donorRole, byId.get(String(oldDonor.id)), _cropCtx); // ★ B1 fix
         if (oldDonor._secondEyeFaceBox !== undefined) slots[donorRole]._secondEyeFaceBox = oldDonor._secondEyeFaceBox;
         else delete slots[donorRole]._secondEyeFaceBox;
         if (oldDonor._secondEyeSwapped !== undefined) slots[donorRole]._secondEyeSwapped = oldDonor._secondEyeSwapped;
@@ -6644,7 +6685,10 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   if (_secondEyeOn()) {
     try {
       const _caseIdForEye = job?.dossier?.images?.caseId || job?.dossier?.caseId || null;
-      const _se = await _runSecondEye({ slots, activeSlots, byId, caseId: _caseIdForEye, _deps });
+      // ★ B1 fix (เฟส B-1): ส่ง context จริงของ s6_slots เข้าไปให้ _runSecondEye ซิงก์ meta (clean/newsScene/
+      //   faces/dirtyFallback/storyFit/_heroFaceCrop) ให้ตรงภาพจริงหลังสลับทุกจุด — ตัวแปรทั้ง 4 นี้มีอยู่แล้วใน
+      //   scope s6_slots (ประกาศไว้ก่อนหน้าจุดนี้ทั้งหมด) ไม่ต้องคำนวณซ้ำ
+      const _se = await _runSecondEye({ slots, activeSlots, byId, caseId: _caseIdForEye, _deps, dirtyFallbackIds, isClean, storyFitOf, STORY_SEL_ON });
       console.log(`[MEGA S6] 👁️‍🗨️ ตาสอง: ตรวจ ${_se.checked} ใบ · เปลี่ยน ${_se.swapped} · แก้พิกัด ${_se.fixedCoords}${_se.liesCaught ? ` · จับตาแรกโกหก ${_se.liesCaught}` : ''}${_se.subSlotReplaced ? ` · แทนช่องย่อย ${_se.subSlotReplaced} ใบ` : ''}`);
     } catch (e) {
       console.log('[MEGA S6] 👁️‍🗨️ ตาสอง: ล้ม/timeout — เดินต่อแบบเดิม:', String(e?.message || '').slice(0, 60));

@@ -348,6 +348,10 @@ function _clutterGuardOnComposer() { return process.env.MEGA_CLUTTER_GUARD !== '
 // ★ MEGA_WATERMARK_GUARD (29 ก.ค. 69 — แบตช์ C "ด่านลายน้ำ"): ประตูเดียว default ON ใช้ร่วม C1(ตาสอง)/C2(ครอป)/
 //   C3(หักคะแนนแหล่ง) — ต้องตรงชื่อเดียวกับ _watermarkGuardOn() ใน coverExecutorService.js (เปิด/ปิดพร้อมกัน)
 function _watermarkGuardOn() { return process.env.MEGA_WATERMARK_GUARD !== '0'; }
+// ★ เฟส B-1 (29 ก.ค. 69 — AUDIT-SELECTION-COMPOSE.md B6): kill-switch เดียวกับ coverExecutorService.js/
+//   megaAdapters.js (per-file local function ตามแพทเทิร์นเดิมของไฟล์นี้ทั้งหมด — ดู _watermarkGuardOn ด้านบน)
+//   default เปิด · '0' = พฤติกรรมเดิมทุก byte (_circleZone/_vis ค้างข้ามงานเหมือนบั๊กเดิม)
+function _cropChainFixOn() { return process.env.MEGA_CROP_CHAIN_FIX !== '0'; }
 // marker ที่ตาสอง (megaAdapters.js _runSecondEye) แนบมาต้องมีรูปแบบถูกต้องก่อนเชื่อ (fail-safe เหมือน _validSecondEyeFb)
 function _validWatermarkEdge(we) {
   return !!(we && typeof we === 'object'
@@ -1555,6 +1559,8 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
       if (vis.x0 > 0.02 || vis.y0 > 0.02 || vis.x1 < 0.98 || vis.y1 < 0.98) {
         s._vis = { x0: +vis.x0.toFixed(2), y0: +vis.y0.toFixed(2), x1: +vis.x1.toFixed(2), y1: +vis.y1.toFixed(2) };
         console.log(`[MegaComposer] 👁️‍🗨️ ${s.id} โดนทับ → โซนหน้า x${s._vis.x0}-${s._vis.x1} y${s._vis.y0}-${s._vis.y1}`);
+      } else if (_cropChainFixOn()) {
+        delete s._vis; // ★ B6 fix (เฟส B-1): กัน _vis ค้างข้ามงาน (spec object ระดับโมดูล ไม่ clone) — เหตุผลเดียวกับ _circleZone ด้านล่าง
       }
     }
   } catch { /* คำนวณโซนล้ม → วางแบบเดิม */ }
@@ -1844,6 +1850,11 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
           if (zone) {
             s._circleZone = { x0: +zone.x0.toFixed(3), y0: +zone.y0.toFixed(3), x1: +zone.x1.toFixed(3), y1: +zone.y1.toFixed(3) };
             console.log(`[MegaComposer] ⭕ ${s.id} วงทับ → โซนหลบ x${s._circleZone.x0}-${s._circleZone.x1} y${s._circleZone.y0}-${s._circleZone.y1}`);
+          } else if (_cropChainFixOn()) {
+            // ★ B6 fix (เฟส B-1 — AUDIT-SELECTION-COMPOSE.md): spec อาจเป็น object ระดับโมดูล (V3_TEMPLATES เอง,
+            //   ไม่ clone) ไม่มี else ตรงนี้มาก่อน → _circleZone ของงานก่อนหน้าค้างอยู่ทั้งที่งานนี้วงไม่ทับช่องนี้แล้ว
+            //   (executor ยังเลื่อนครอปหนี "วงที่ไม่มีอยู่จริง") — ทำแบบเดียวกับ _watermarkEdge ที่ทำถูกอยู่แล้ว (มี else delete ครบ 3 จุด)
+            delete s._circleZone;
           }
         }
       }
