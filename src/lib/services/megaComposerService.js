@@ -341,6 +341,46 @@ function _heroCropGuardOnComposer() { return process.env.MEGA_HERO_CROP_GUARD !=
 // ★ BS (17 ก.ค.): kill-switch สลับภาพสำรองช่องรอง "จัดไม่ลง" (default ON · '0'=พฤติกรรมปัจจุบันเป๊ะ)
 function _panelBackupSwapOn() { return process.env.MEGA_PANEL_BACKUP_SWAP !== '0'; }
 
+// ★ เฟส B-2 (29 ก.ค. 69 — ข้อแถม Opus จาก B-1): watermarkKept (ลายน้ำหลบไม่ได้จริง — coverExecutorService.js
+//   avoidWatermarkEdgePx เกินงบ 12% แล้วยอมแพ้) เดิมจบแค่ธง qcFlag 'watermark_kept' (traceQcFlags:310) ไม่เคยเข้า
+//   วง BS เลย (ไม่อยู่ใน trigger condition ที่ :2196 เดิม) → ช่องที่ลายน้ำหลบไม่ได้ไม่มีโอกาสได้ลองภาพสำรองแม้แต่ครั้ง
+//   เดียว — เพิ่มเป็น trigger ที่ 5 (ธงเดิมถูกนับใน traceQcFlags() อยู่แล้วสำหรับเกณฑ์รับ/ปฏิเสธ ไม่ต้องแก้จุดนั้น)
+//   kill-switch แยก default ON · '0' = ไม่ต่อสาย (ธงยังขึ้นเหมือนเดิม แค่ไม่กระตุ้น BS)
+function _wmKeptBackupOn() { return process.env.MEGA_WM_KEPT_BACKUP !== '0'; }
+
+// ★ เฟส B-2 (29 ก.ค. 69, ข้อ 3) — MEGA_SLOT_COLLAPSE: "ไม่มีตัวแทน = ยุบ ไม่ใช่ปล่อยผ่าน" ช่องที่ตาสอง S6
+//   (megaAdapters.js _runSecondEye) หา backup ในพูลไม่เจอเลย ยังคงภาพเสียไว้ (subslot_no_face/subslot_dedup_strict/
+//   subslot_text_overlay/subslot_duplicate_shot/watermark_kept) แม้ BS ด้านบนพยายามสลับสำรองแล้วก็ตาม (คนละกลไก/
+//   คนละพูลจาก S6 — อาจแก้ไม่ได้เหมือนกัน) → ขยายช่องเพื่อนบ้านเรขาคณิตง่าย (แนวแกนเดียวกัน ชนขอบเป๊ะ) ให้เต็มพื้นที่
+//   แล้วลบช่องเสียทิ้ง แทนที่จะโชว์ภาพเสียเงียบๆ · ขอบเขต: เฉพาะช่องสี่เหลี่ยมธรรมดา ไม่ใช่ hero/circle (เรขาคณิตซับซ้อน
+//   กว่านั้น เช่น วงกลมทับซ้อน = ข้ามอย่างปลอดภัย ปล่อยธงเดิมไว้ ไม่ฝืน) · ลอง+เทียบ+ยอมรับ/คืนของเดิม แบบเดียวกับ BS เป๊ะ
+//   default ON · '0' = ไม่ทำงานเลย (ธงยังขึ้นเหมือนเดิม แค่ไม่ลองยุบ = พฤติกรรมปัจจุบันเป๊ะ)
+// export เพื่อเทสตรง (pure, ไม่มี IO) — ใช้จริงเฉพาะใน composeCore (legacy path) ด้านล่าง
+export function _slotCollapseOn() { return process.env.MEGA_SLOT_COLLAPSE !== '0'; }
+
+// helper ล้วน (ไม่มี IO) — หาเพื่อนบ้านสี่เหลี่ยมที่ชนขอบเป๊ะกับ flagSlot (แนวเดียวกัน มิติที่เหลือเท่ากัน)
+// คืน null ถ้าไม่มี (รวม flagSlot/เพื่อนบ้านเป็น circle หรือ main/hero — เรขาคณิตซับซ้อน/ห้ามแตะ)
+export function _findCollapseNeighborSlot(flagSlot, slots) {
+  if (!flagSlot || flagSlot.shape === 'circle' || /main|hero/i.test(String(flagSlot.id))) return null;
+  const EPS = 2; // px คลาดเคลื่อนเล็กน้อยจากการปัดเศษพิกัด
+  for (const s of slots || []) {
+    if (!s || s.id === flagSlot.id || s.shape === 'circle' || /main|hero/i.test(String(s.id))) continue;
+    const sameCol = Math.abs(s.x - flagSlot.x) <= EPS && Math.abs(s.w - flagSlot.w) <= EPS;
+    const vAdj = sameCol && (Math.abs((s.y + s.h) - flagSlot.y) <= EPS || Math.abs((flagSlot.y + flagSlot.h) - s.y) <= EPS);
+    const sameRow = Math.abs(s.y - flagSlot.y) <= EPS && Math.abs(s.h - flagSlot.h) <= EPS;
+    const hAdj = sameRow && (Math.abs((s.x + s.w) - flagSlot.x) <= EPS || Math.abs((flagSlot.x + flagSlot.w) - s.x) <= EPS);
+    if (vAdj || hAdj) return s;
+  }
+  return null;
+}
+
+// helper ล้วน — กรอบรวม (union) ของสี่เหลี่ยมสองใบที่ชนขอบเป๊ะ (ไม่มีช่องว่าง เพราะ _findCollapseNeighborSlot การันตีชนขอบแล้ว)
+export function _unionRectXY(a, b) {
+  const x1 = Math.min(a.x, b.x), y1 = Math.min(a.y, b.y);
+  const x2 = Math.max(a.x + a.w, b.x + b.w), y2 = Math.max(a.y + a.h, b.y + b.h);
+  return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+}
+
 // ★ MEGA_CLUTTER_GUARD (มือ D, 19 ก.ค.) — kill-switch เดียว **default OFF** (=1 เปิด) · OFF → byte-parity 100%
 //   ต้องตรง _clutterGuardOn() ใน coverExecutorService.js เป๊ะ (เปิด/ปิดพร้อมกัน)
 function _clutterGuardOnComposer() { return process.env.MEGA_CLUTTER_GUARD !== '0'; }
@@ -2193,7 +2233,9 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
         //   OFF → executor ไม่เคยตั้งธงนี้ = ไม่มีในสาย = byte-parity เดิม
         // ★ MEGA_PEOPLE_CROP (จุดที่ 4): ต่อสายธง peopleNeedsBackup (ครอปตาบอด/คนจิ๋วพื้นหลังท่วม) เข้า BS →
         //   สลับหาใบที่มีคนชัดก่อน · OFF → executor ไม่เคยตั้งธงนี้ = ไม่มีในสาย = byte-parity เดิม
-        if (tt.circleAvoidNeedsBackup === true || tt.refineNeedsBackup === true || tt.cleanNeedsBackup === true || tt.peopleNeedsBackup === true) _needSlots.push(String(tt.slot));
+        // ★ เฟส B-2: watermarkKept เป็น trigger ที่ 5 — ต้องเช็ค _wmKeptBackupOn() ตรงนี้ (ปิด='0' = ไม่กระตุ้น BS
+        //   เลย แม้ธงจะขึ้นอยู่ปกติ — byte-parity เดิม เพราะ _needSlots จะไม่มีช่องนี้ ไม่มีการสลับ/re-render เกิดขึ้น)
+        if (tt.circleAvoidNeedsBackup === true || tt.refineNeedsBackup === true || tt.cleanNeedsBackup === true || tt.peopleNeedsBackup === true || (_wmKeptBackupOn() && tt.watermarkKept === true)) _needSlots.push(String(tt.slot));
       }
       if (_needSlots.length) {
         const _preBuffer = buffer;
@@ -2246,6 +2288,85 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
         }
       }
     } catch (e) { console.log('[MegaComposer] BS สลับสำรองล้ม (ใช้ปกเดิม):', String(e?.message || '').slice(0, 60)); }
+  }
+
+  // ★ MEGA_SLOT_COLLAPSE (เฟส B-2, ข้อ 3, 29 ก.ค. 69 — เคสจริง AC-0210/MCV-ms5wwdv2sy2): ช่องที่ตาสอง S6 หาแทนที่
+  //   ไม่เจอ (ยังพกธง _secondEyeSubSlotFlag/_secondEyeWatermarkFlag ค้างบนภาพที่ "ถูกใช้งานจริงตอนนี้" — ถ้า BS
+  //   ด้านบนสลับสำเร็จไปแล้วภาพจะเปลี่ยนไปเป็นใบที่ไม่มีธงนี้ ไม่เข้าเงื่อนไข) → ลองยุบ (ขยายเพื่อนบ้านชนขอบง่ายๆ เต็ม
+  //   พื้นที่ + ลบช่องเสียทิ้ง) ทีละช่อง เทียบธง qc ก่อน/หลัง รับเมื่อไม่แย่ลง ไม่งั้นคืนของเดิม
+  // ★ ตรวจซ้ำ (Opus 29 ก.ค. 69 — งบ B-2): เกณฑ์รับเดิม (traceQcFlags ทั้งเฟรม ก่อน/หลัง) นับ "ทุกช่อง" ไม่ใช่แค่ช่อง
+  //   ที่เกี่ยวข้องกับการยุบนี้ — ธงของช่องอื่น (เช่น main upscale_soft) ที่ไม่เกี่ยวเลยก็ถูกนับรวมทั้งสองฝั่ง (หักล้างกัน
+  //   พอดี ไม่ใช่ปัญหา) แต่ "ธงที่หายไปจริง" จากการยุบ (_secondEyeSubSlotFlag เดิม เช่น subslot_no_face) ไม่เคยถูกนับ
+  //   เป็นเครดิตเลย (traceQcFlags ไม่รู้จักธงตระกูลนี้ — มันมาจาก qcFlags แยกก้อน ไม่ใช่จาก cropTrace) → ถ้าเพื่อนบ้านที่
+  //   ขยายเกิดปัญหาระดับ render ใหม่แม้เพียง 1 จุด (เช่น blind_crop เพราะไร้หน้า) เกณฑ์เดิมจะเห็นแค่ "แย่ลง 1" โดยไม่เห็น
+  //   "ดีขึ้น 1" จากการล้างธง S6 เลย ⇒ ปฏิเสธเกือบทุกเคสที่เพื่อนบ้านไม่มีหน้าสมบูรณ์แบบ (ทั้งที่เป็นการแลกที่คุ้ม) →
+  //   แก้เป็น "เทียบเฉพาะช่องที่เกี่ยวข้อง" (flagSlot เดิม + neighbor เท่านั้น) จากทั้ง 2 รอบ + เครดิต +1 ให้การล้างธง S6
+  //   เดิมเสมอ (มันหายแน่นอนเมื่อช่องถูกลบจริง) — ธงของช่องอื่นที่ไม่เกี่ยวไม่ถูกนำมาปนเลย ทั้งสองทาง
+  if (_slotCollapseOn()) {
+    try {
+      const _collapseTargets = [];
+      for (const a of assignments) {
+        if (/main|hero/i.test(String(a.slotId))) continue;
+        const sl = spec.slots.find((s) => s.id === a.slotId);
+        if (!sl || sl.shape === 'circle') continue;
+        const im = loaded[a.imageIndex];
+        const flag = im?._secondEyeSubSlotFlag || (im?._secondEyeWatermarkFlag === 'watermark_kept' ? 'watermark_kept' : null);
+        if (flag) _collapseTargets.push({ slotId: String(a.slotId), flag });
+      }
+      for (const { slotId, flag } of _collapseTargets) {
+        const flagSlot = spec.slots.find((s) => s.id === slotId);
+        if (!flagSlot) continue; // ช่องนี้อาจถูกยุบไปแล้วจากรอบก่อนหน้าใน loop เดียวกัน
+        const neighbor = _findCollapseNeighborSlot(flagSlot, spec.slots);
+        if (!neighbor) {
+          console.log(`[MegaComposer] 🗜️ ยุบช่อง ${slotId} (${flag}) ไม่ได้ — ไม่มีเพื่อนบ้านเรขาคณิตง่ายให้ขยาย (ปล่อยธงเดิมไว้)`);
+          continue;
+        }
+        // สแนปช็อตก่อนลอง — คืนได้ทุก byte ถ้าไม่ดีขึ้น
+        const _preAssignSnap = assignments.map((a) => ({ ...a }));
+        const _preBuffer3 = buffer;
+        const _preTrace3 = [...traceSink];
+        // ★ ตรวจซ้ำ: ก่อน = ธง render เฉพาะ {flagSlot, neighbor} จากรอบเดิม + เครดิต +1 (ธง S6 เดิมที่จะหายแน่นอน)
+        const _preRelevantTrace = _preTrace3.filter((t) => t && (String(t.slot) === slotId || String(t.slot) === neighbor.id));
+        const _preRelevantFlagN = traceQcFlags(_preRelevantTrace).length + 1;
+        const _mergedRect = _unionRectXY(neighbor, flagSlot);
+        const _newSlots = spec.slots.filter((s) => s.id !== slotId).map((s) => (s.id === neighbor.id ? { ...s, ..._mergedRect } : s));
+        const _newSpecTry = { ...spec, slots: _newSlots };
+        const _idx = assignments.findIndex((a) => a.slotId === slotId);
+        const _neighborIdx = assignments.findIndex((a) => a.slotId === neighbor.id);
+        if (_idx < 0 || _neighborIdx < 0) continue;
+        const _removedAssign = assignments[_idx];
+        assignments.splice(_idx, 1);
+        const _neighborA = assignments.find((a) => a.slotId === neighbor.id);
+        const _preNeighborCrop = _neighborA.crop;
+        _neighborA.crop = { x: 0, y: 0, w: 1, h: 1 }; // ให้ executor คำนวณครอปใหม่ตามกรอบที่ขยายแล้ว
+        let _collapseOk = false;
+        try {
+          const _tryBuffer = await executeCover({ assignments, imageBuffers: loaded, templateSpec: _newSpecTry, faceBoxes, traceSink });
+          // ★ ตรวจซ้ำ: หลัง = ธง render เฉพาะ neighbor จากรอบใหม่ (flagSlot ไม่มีอยู่แล้วจริง ไม่ต้องนับ — ธง S6 เดิม
+          //   ของมันหายไปแน่นอนโดยโครงสร้าง ไม่ใช่แค่ "น่าจะหาย") — ธงช่องอื่น (main/circle/ฯลฯ) ไม่ถูกนำมาปนทั้ง 2 ฝั่ง
+          const _newRelevantTrace = [...traceSink].filter((t) => t && String(t.slot) === neighbor.id);
+          const _newRelevantFlagN = traceQcFlags(_newRelevantTrace).length;
+          if (_newRelevantFlagN <= _preRelevantFlagN) {
+            buffer = _tryBuffer;
+            spec = _newSpecTry;
+            const fi = qcFlags.indexOf(flag);
+            if (fi >= 0) qcFlags.splice(fi, 1); // ธงเดิม (S6 pre-flag) ค้างมาตั้งแต่ก่อน render — ช่องถูกยุบไปแล้วจริง ไม่ใช่ปล่อยผ่านเงียบๆ
+            qcFlags.push(`slot_collapsed:${slotId}->${neighbor.id}`);
+            console.log(`[MegaComposer] 🗜️ ยุบช่อง ${slotId} (${flag}) → ขยาย ${neighbor.id} เต็มพื้นที่ (รับผล, ธงช่องเกี่ยวข้อง ${_preRelevantFlagN}→${_newRelevantFlagN})`);
+            _collapseOk = true;
+          }
+        } catch (e) {
+          console.log('[MegaComposer] ลองยุบช่องล้ม (คืนของเดิม):', String(e?.message || '').slice(0, 60));
+        }
+        if (!_collapseOk) {
+          // คืนของเดิมทุกอย่าง (assignments + buffer + traceSink) — byte-parity
+          // (spec ไม่เคยถูกแก้ในสาขานี้ — reassign เป็น _newSpecTry เกิดขึ้นเฉพาะตอนรับผลสำเร็จเท่านั้น ไม่ต้องคืน)
+          assignments.length = 0; for (const a of _preAssignSnap) assignments.push(a);
+          buffer = _preBuffer3;
+          traceSink.length = 0; for (const t of _preTrace3) traceSink.push(t);
+        }
+      }
+    } catch (e) { console.log('[MegaComposer] ด่านยุบช่องเสียล้ม (ใช้ปกเดิม):', String(e?.message || '').slice(0, 60)); }
   }
 
   // ★ เฟส 6B.2 (observability): ท่าหน้า hero ตัวสุดท้าย (หลังด่านบังคับ/สลับใบ) — ธงเสมอ + ธง forced เมื่อจำใจใช้มุมข้าง

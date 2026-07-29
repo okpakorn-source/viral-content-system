@@ -82,20 +82,20 @@ await test('1b) kill-switch OFF (MEGA_HERO_CROP_GUARD=0) ⇒ slot._heroFaceCrop 
   assert.ok(t.branch.startsWith('group-hero-largest'), `branch falls back to the old path (got ${t.branch})`);
 });
 
-await test('2) two faces standing close together (the reported bug shape — largest near the left edge, a second face close enough that the shift-only clamp cannot escape it): guard ON resolves it — shrinks past the neighbor then caps the stretch, ending within the ≤1.2× cap [pinned to the legacy 1.2 cap — see note]', async () => {
+await test('2) two faces standing close together (the reported bug shape — largest near the left edge, a second face close enough that the shift-only clamp cannot escape it): guard ON resolves it — shrinks past the neighbor, then the stretch-cap expansion respects the neighbor safe-zone (MEGA_STRETCH_NEIGHBOR_FIX) instead of pulling the neighbor back into frame — upscale stays ABOVE 1.2 rather than reintroducing the second face', async () => {
   // ★ ข้อสุดท้าย (27 ก.ค. 69 — align HERO_CROP_GUARD ปลายน้ำ): เพดานยืดจริงของด่านนี้เปลี่ยนจากฮาร์ดโค้ด 1.2 เป็น
   //   eff (_heroUpscaleMaxEffExec, default 1.35) สำหรับสายไม่ strict — เทสนี้พิสูจน์กลไก "หด/ขยายแก้ปัญหาหน้าซ้อน"
   //   ที่ค่าเพดาน 1.2 เดิมเป๊ะ (ค่าตัวเลขไม่ใช่ประเด็นหลักของเทสนี้ กลไกคือประเด็น) จึงตรึง env ตรงๆ ให้พฤติกรรม/
   //   ตัวเลขเดิมทุกจุดไม่เปลี่ยน — ดู tests/hero-crop-alignment.test.mjs สำหรับเทสเพดาน eff ใหม่โดยเฉพาะ
   // ★ เฟส B-1 (29 ก.ค. 69 — AUDIT-SELECTION-COMPOSE.md B4): เดิม t.region snapshot ไว้ "ก่อน" stretchcap เสมอ
-  //   (บั๊ก B4 เป๊ะ — ดู megaAdapters ไม่เกี่ยว ไฟล์นี้คือ coverExecutorService.js) ค่า {360x818} เดิมด้านล่างคือกรอบ
-  //   "หลัง shrink อย่างเดียว ก่อน stretchcap" ไม่ใช่กรอบจริงที่ sharp ใช้ extract เลย — B4 แก้ให้ t.region สะท้อน
-  //   กรอบสุดท้ายจริง (หลัง stretchcap) จึงอัปเดตค่าคาดหวังที่นี่ให้ตรงของจริง (ยืนยันด้วยสคริปต์สำรวจ ไม่ใช่เดา)
-  //   ★ พบเพิ่ม (ไม่ใช่บั๊กในเฟส B-1 นี้ — เป็นข้อจำกัดเดิมของ expandHeroRegionForStretchCap ที่ B4 แค่ทำให้ "เห็น"):
-  //   เพดานยืด 1.2 เป็นข้อบังคับแข็ง (hard cap) — ถ้าหด (shrink) แล้วยืดไม่ถึง 1.2 ต้อง "ขยาย" กรอบกลับ (stretchcap)
-  //   ซึ่งอาจดึงเพื่อนบ้านที่ shrink เพิ่งหลบไปสำเร็จกลับเข้าเฟรมอีกครั้ง (แลกกันระหว่าง "ห้ามยืดเกิน 1.2" กับ
-  //   "ห้ามเพื่อนบ้านเข้าเฟรม" — สองเงื่อนไขชนกันได้เมื่อภาพไม่ใหญ่พอ) ไม่ได้อยู่ในสโคป B1-B6 ของแบตช์นี้ — รายงานเป็น
-  //   ข้อค้นพบแยกให้ผู้คุมงานพิจารณาต่อ ไม่ใช่แก้ตรงนี้ (กันสโคปบวม/เสี่ยงพังของเดิม)
+  //   (บั๊ก B4 เป๊ะ — ดู megaAdapters ไม่เกี่ยว ไฟล์นี้คือ coverExecutorService.js) B4 แก้ให้ t.region สะท้อนกรอบ
+  //   สุดท้ายจริง (หลัง stretchcap) ที่ sharp ใช้ extract จริง
+  // ★ B13 fix (เฟส B-2 ข้อ 6, 29 ก.ค. 69, MEGA_STRETCH_NEIGHBOR_FIX): B4 (ข้างบน) เผยข้อจำกัดเดิมของ
+  //   expandHeroRegionForStretchCap ที่พบระหว่างแก้ B4 — เพดานยืด 1.2 บังคับ "ขยาย" กรอบกลับหลัง shrink หนี
+  //   เพื่อนบ้านสำเร็จ ซึ่งเดิมไม่รู้จักโซนปลอดภัย (rMin/rMax จาก resolveHeroNeighborOverlap) จึงดึงเพื่อนบ้านกลับ
+  //   เข้าเฟรมได้ (region เดิม {left:0,top:112,width:495,height:1125} ทับหน้าที่สองที่ px 360-504 พอดี) → แก้แล้ว:
+  //   expand ถูกจำกัดไม่ให้ล้ำโซนปลอดภัย ยอมค้าง upscale เกิน 1.2 (reached:false → heroCropNeedsBackup) ดีกว่าดึง
+  //   เพื่อนบ้านกลับมา — ยืนยันด้วยสคริปต์สำรวจจริง (ไม่ใช่เดา) ก่อนอัปเดตค่าคาดหวังที่นี่
   process.env.MEGA_HERO_UPSCALE_MAX = '1.2';
   const largest = { x1: 0.08, y1: 0.25, x2: 0.22, y2: 0.50 };
   const second = { x1: 0.30, y1: 0.27, x2: 0.42, y2: 0.48 };
@@ -103,8 +103,28 @@ await test('2) two faces standing close together (the reported bug shape — lar
   delete process.env.MEGA_HERO_UPSCALE_MAX;
   assert.ok(t, 'hero trace produced');
   assert.strictEqual(t.branch, 'group-hero-largest+shrink+stretchcap', `both guard steps engaged (got ${t.branch})`);
-  assert.deepEqual(t.region, { left: 0, top: 112, width: 495, height: 1125 }, 'B4 fix: this must be the REAL final region (post-stretchcap) that sharp actually extracts — not the pre-stretchcap snapshot the old (buggy) trace used to report');
-  assert.ok(t.upscaleRaw <= 1.2 + 1e-6, `stretch stays within the hard cap (got ${t.upscaleRaw})`);
+  assert.deepEqual(t.region, { left: 0, top: 112, width: 360, height: 1125 }, 'B13 fix: expand is now capped at the neighbor safe-zone boundary (width=360, not the old 495 that reintroduced the second face)');
+  const imgW = 1200;
+  const fL = second.x1 * imgW, fR = second.x2 * imgW; // second face px range = [360, 504]
+  assert.ok(!(fR > t.region.left && fL < t.region.left + t.region.width), `B13 fix: the second face must NOT be back inside the final region (region=${JSON.stringify(t.region)}, secondFace px=[${fL},${fR}])`);
+  assert.ok(t.upscaleRaw > 1.2, `B13 fix: since the safe-zone is narrower than what 1.2x would need, the cap is deliberately NOT fully reached (got upscaleRaw=${t.upscaleRaw}) — heroCropNeedsBackup must fire instead of shipping the overlap`);
+  assert.equal(t.heroCropNeedsBackup, true, 'not reaching the cap (because the neighbor zone is narrower) must flag heroCropNeedsBackup so the composer can try a backup image');
+});
+
+await test('2a2) B13 kill-switch OFF (MEGA_STRETCH_NEIGHBOR_FIX=0) ⇒ the SAME close pair reproduces the pre-B13-fix numbers byte-for-byte: region back to the old {width:495}, upscaleRaw back to ≤1.2, and the second face IS back inside the final region — proves the fix in test 2 is real (an actual behavior change) and the switch gives an honest byte-parity escape hatch', async () => {
+  process.env.MEGA_HERO_UPSCALE_MAX = '1.2';
+  process.env.MEGA_STRETCH_NEIGHBOR_FIX = '0';
+  const largest = { x1: 0.08, y1: 0.25, x2: 0.22, y2: 0.50 };
+  const second = { x1: 0.30, y1: 0.27, x2: 0.42, y2: 0.48 };
+  const t = await runExec({ metaW: 1200, metaH: 2727, fb: groupFaces(largest, second) });
+  delete process.env.MEGA_HERO_UPSCALE_MAX;
+  delete process.env.MEGA_STRETCH_NEIGHBOR_FIX;
+  assert.strictEqual(t.branch, 'group-hero-largest+shrink+stretchcap');
+  assert.deepEqual(t.region, { left: 0, top: 112, width: 495, height: 1125 }, 'switch OFF must reproduce the pre-fix region exactly (byte-parity)');
+  assert.ok(t.upscaleRaw <= 1.2 + 1e-6, `switch OFF must reproduce the pre-fix upscale exactly (got ${t.upscaleRaw})`);
+  const imgW = 1200;
+  const fL = second.x1 * imgW, fR = second.x2 * imgW;
+  assert.ok(fR > t.region.left && fL < t.region.left + t.region.width, 'switch OFF must reproduce the B13 bug exactly: the second face is back inside the final region');
 });
 
 await test('2b) kill-switch OFF ⇒ the SAME close pair reproduces the historical shift-only bug byte-for-byte: the second face is STILL inside the final region (a materially different, wider/taller, overlapping region) — proves guard ON above genuinely fixed something real, not a no-op', async () => {

@@ -175,6 +175,40 @@ test('expandHeroRegionForStretchCap: region already within cap ⇒ no-op (change
   assert.deepEqual(res.region, region);
 });
 
+// ============================================================
+// ★ B13 fix (เฟส B-2 ข้อ 6, 29 ก.ค. 69) — expandHeroRegionForStretchCap รับ rMin/rMax (โซนปลอดภัยแนวนอนจาก
+// resolveHeroNeighborOverlap) กันดึงเพื่อนบ้านที่เพิ่ง shrink หนีไปแล้วกลับเข้าเฟรมตอนขยาย cap ยืด
+// ============================================================
+test('B13: rMin/rMax wide enough to hold the full expansion ⇒ same result as no zone (reached:true, region unaffected by the zone)', () => {
+  const region = { left: 800, top: 600, width: 400, height: 800 };
+  const noZone = expandHeroRegionForStretchCap({ region, slotW: 600, slotH: 1200, imgW: 2000, imgH: 2000, cap: 1.2 });
+  const wideZone = expandHeroRegionForStretchCap({ region, slotW: 600, slotH: 1200, imgW: 2000, imgH: 2000, cap: 1.2, rMin: 0, rMax: 2000 });
+  assert.deepEqual(wideZone.region, noZone.region, 'a zone spanning the whole image must not change anything vs. no zone at all');
+  assert.strictEqual(wideZone.reached, true);
+});
+
+test('B13: rMin/rMax narrower than the image ⇒ expansion is clamped to the zone, never crosses rMin/rMax, and reached:false when the zone is too narrow for the cap', () => {
+  const region = { left: 800, top: 600, width: 400, height: 800 }; // needs width 500 to reach cap 1.2 (slotW/cap=600/1.2=500)
+  // โซนปลอดภัย [700, 1250] — กว้าง 550px ยังพอสำหรับ width 500 ทางทฤษฎี แต่ region เดิมอยู่ที่ 800-1200 (กึ่งกลางโซนไม่พอดี)
+  const res = expandHeroRegionForStretchCap({ region, slotW: 600, slotH: 1200, imgW: 2000, imgH: 2000, cap: 1.2, rMin: 900, rMax: 1250 });
+  assert.ok(res.region.left >= 900 - 0.5, `left (${res.region.left}) ต้องไม่ต่ำกว่า rMin=900`);
+  assert.ok(res.region.left + res.region.width <= 1250 + 0.5, `right edge (${res.region.left + res.region.width}) ต้องไม่เกิน rMax=1250`);
+  assert.ok(res.region.width <= 350 + 0.5, `กว้างสุดที่โซนให้ได้คือ 1250-900=350 (ได้ ${res.region.width})`);
+  assert.strictEqual(res.reached, false, 'โซนแคบกว่าที่ต้องใช้ (350 < 500 ที่ต้องการ) — ต้องไม่ถึง cap (caller ตั้ง needsBackup เอง)');
+  assert.ok(res.upscale > 1.2, `upscale ที่รายงานต้องยังสะท้อนค่าจริงที่ยังเกิน cap (ได้ ${res.upscale})`);
+});
+
+test('B13: invalid zone (rMax <= rMin, or non-finite) ⇒ treated exactly as "no zone" — byte-parity with the pre-fix behavior', () => {
+  const region = { left: 800, top: 600, width: 400, height: 800 };
+  const base = expandHeroRegionForStretchCap({ region, slotW: 600, slotH: 1200, imgW: 2000, imgH: 2000, cap: 1.2 });
+  const inverted = expandHeroRegionForStretchCap({ region, slotW: 600, slotH: 1200, imgW: 2000, imgH: 2000, cap: 1.2, rMin: 1000, rMax: 900 });
+  const nanZone = expandHeroRegionForStretchCap({ region, slotW: 600, slotH: 1200, imgW: 2000, imgH: 2000, cap: 1.2, rMin: NaN, rMax: 2000 });
+  const undefinedZone = expandHeroRegionForStretchCap({ region, slotW: 600, slotH: 1200, imgW: 2000, imgH: 2000, cap: 1.2, rMin: undefined, rMax: undefined });
+  assert.deepEqual(inverted.region, base.region, 'rMax<=rMin ต้องถูกมองข้ามเหมือนไม่ส่งมาเลย');
+  assert.deepEqual(nanZone.region, base.region, 'rMin เป็น NaN ต้องถูกมองข้ามเหมือนไม่ส่งมาเลย');
+  assert.deepEqual(undefinedZone.region, base.region, 'ไม่ส่ง rMin/rMax เลย (undefined) ต้องเหมือน default null เป๊ะ');
+});
+
 test('expandHeroRegionForStretchCap: fail-safe on malformed/missing inputs ⇒ never throws, always changed:false/reached:false', () => {
   const region = { left: 0, top: 0, width: 100, height: 100 };
   assert.deepEqual(expandHeroRegionForStretchCap({}), { region: undefined, changed: false, reached: false });

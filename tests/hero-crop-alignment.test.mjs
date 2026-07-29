@@ -61,9 +61,17 @@ const runExec = async ({ metaW, metaH, fb, slotOverrides, strict = false }) => {
   return traceSink.find((t) => t.slot === 'main') || null;
 };
 const groupFaces = (largest, second) => ({ x1: largest.x1, y1: largest.y1, x2: largest.x2, y2: largest.y2, count: 2, allFaces: [largest, second] });
-// เคสเดียวกับ tests/hero-crop-guard.test.mjs test #2 (หน้าซ้อนกัน ต้องหด+ยืดแก้) — ตัวเดียวกันเพื่อเทียบเดพานตรงๆ
-const LARGEST = { x1: 0.08, y1: 0.25, x2: 0.22, y2: 0.50 };
-const SECOND = { x1: 0.30, y1: 0.27, x2: 0.42, y2: 0.48 };
+// ★ B13 fix (เฟส B-2 ข้อ 6, 29 ก.ค. 69, MEGA_STRETCH_NEIGHBOR_FIX): เดิมฟิกซ์เจอร์นี้ใช้ "คู่หน้าซ้อนกันต้องหด+ยืด"
+//   เดียวกับ tests/hero-crop-guard.test.mjs test #2 ตรงๆ (เพื่อเทียบเพดานตรงๆ) — แต่หลัง B13 fix จุดประสงค์นั้นใช้
+//   ไม่ได้แล้ว: เมื่อ resolveHeroNeighborOverlap หด region เพราะเพื่อนบ้านจริง ความกว้างหลังหดจะ "เท่ากับ" โซนปลอดภัย
+//   ที่ expandHeroRegionForStretchCap (ตอนนี้รู้จักโซนเดียวกัน) ยอมให้ขยายกลับได้สูงสุดพอดี — ทำให้ upscale หลังหด
+//   ชนเพดานโซนปลอดภัยเสมอ ไม่ว่า cap (1.2/1.35/1.6) จะตั้งเป็นอะไร (พิสูจน์เพดานแยกกันไม่ได้อีกต่อไปด้วยฟิกซ์เจอร์เดิม
+//   — เป็นผลลัพธ์ที่ถูกต้องของ B13 ไม่ใช่บั๊กใหม่) → เปลี่ยนฟิกซ์เจอร์เป็น "หน้าที่สองอยู่ไกลมุมภาพ ไม่ทับ/ไม่หดเลย"
+//   (branch เหลือแค่ 'group-hero-largest+stretchcap' ไม่มี '+shrink') ให้ B13's rMin/rMax กว้างพอจนไม่จำกัดอะไร
+//   → เพดานยืด (eff/strict/TIER2_OFF) กลับมาเป็นตัวกำหนดผลลัพธ์เพียงอย่างเดียวเหมือนเจตนาเดิมของชุดเทสนี้ (ยืนยันตัวเลข
+//   ด้วยสคริปต์สำรวจจริงก่อนแก้ ไม่ใช่เดา)
+const LARGEST = { x1: 0.42, y1: 0.30, x2: 0.58, y2: 0.42 };
+const SECOND = { x1: 0.02, y1: 0.05, x2: 0.10, y2: 0.13 }; // มุมภาพ ไกลจาก largest มาก — ไม่ทับ ไม่กระตุ้น shrink เลย
 const FB = groupFaces(LARGEST, SECOND);
 const IMG = { metaW: 1200, metaH: 2727 };
 

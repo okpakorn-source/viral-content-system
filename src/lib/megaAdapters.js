@@ -13,6 +13,7 @@ import { HERO_MIN_SHORT_SIDE, HERO_STRETCH_MAX, SHARPNESS_MIN_HERO, GAP_SEARCH_M
 import { resolveRefSlotView } from '@/lib/refSlotContract'; // ★ D3-B3.2 (Codex): read-only — canonical template view สำหรับ derive authoritative target rows (ห้ามแก้ refSlotContract)
 import { COVER_GEMINI_MODEL } from '@/lib/coverVisionModel'; // ★ MEGA_SECOND_EYE: โมเดลตาสอง default เดียวกับตาคัด/ตาหาหน้าทั้งสาย
 import { withHonestyDna } from '@/lib/aiHonestyDna'; // ★ การ์ดที่ 5 (28 ก.ค. 69 เคส AC-0195): DNA ความซื่อสัตย์ — ฉีดหน้า prompt ตาชั้นสอง
+import { hammingDistanceHex, PHASH_DUP_HAMMING_MAX } from '@/lib/slotSolver'; // ★ เฟส B-2 (29 ก.ค. 69, MEGA_SLOT_DEDUP_STRICT): pHash64 hamming — reuse ค่าคาลิเบรตเดียวกับ slotSolver/duplicate_scene (ไม่เดาค่าใหม่)
 // ★ R2 (cover-ref-test queue mode): rt_* stage functions อยู่ที่ refTestPipeline.js — โหลดแบบ LAZY dynamic import
 //   ใน STAGE_FLOW (ด้านล่าง) เท่านั้น. ห้าม static import ที่นี่: refTestPipeline นำเข้า megaAdapters เอง (circular)
 //   และดึง import graph (imageStore/composer) ที่บาง harness stub ไม่ครบ — lazy = โหลดตอน tick เดิน rt_* จริงเท่านั้น.
@@ -1047,6 +1048,60 @@ export async function _runSecondEye({
     return -1;
   }
 
+  // ★ MEGA_SUBSLOT_FACE_GATE (เฟส B-2): หา backup "เห็นหน้าจริง" — faceVisible===2 (ตาสองยืนยันชัด) หรือถ้าตาสอง
+  //   ไม่ได้ตัดสิน (faceVisible เป็น null — ปิด flag หรือรูปแบบพัง) ให้ยอมรับ faceCount>=1 แทน (สัญญาณอ่อนกว่าแต่
+  //   ยังดีกว่าไม่มีคนเลย) — textOverlay≤1 เสมอ (เกณฑ์ร่วมทุก finder ในไฟล์นี้)
+  function _findFaceSafeReplacementIndex(excludeIds) {
+    for (let i = 0; i < map.length; i++) {
+      if (map[i].kind !== 'backup') continue;
+      if (excludeIds.has(String(map[i].id))) continue;
+      const cand = byIndex.get(i);
+      if (!cand) continue;
+      if (cand.textOverlay > 1) continue;
+      const hasFace = cand.faceVisible === 2 || (cand.faceVisible === null && Number(cand.faceCount) >= 1);
+      if (!hasFace) continue;
+      return i;
+    }
+    return -1;
+  }
+
+  // ★ MEGA_CIRCLE_NOT_HERO (เฟส B-2): หา backup ที่ "ไม่ใช่คนเดียวกับ hero" — sameAsHeroPerson!==true (false/null
+  //   ทั้งคู่ยอมรับ — ไม่มั่นใจ (null) ดีกว่าเสี่ยงซ้ำแน่ๆ (true))
+  function _findCircleDifferentPersonIndex(excludeIds) {
+    for (let i = 0; i < map.length; i++) {
+      if (map[i].kind !== 'backup') continue;
+      if (excludeIds.has(String(map[i].id))) continue;
+      const cand = byIndex.get(i);
+      if (!cand) continue;
+      if (cand.textOverlay > 1) continue;
+      if (cand.sameAsHeroPerson === true) continue;
+      return i;
+    }
+    return -1;
+  }
+
+  // ★ MEGA_SLOT_DEDUP_STRICT (เฟส B-2): หา backup ที่ pHash64 "ไม่ใกล้เคียง" ภาพของช่อง active อื่นใดๆ (ยกเว้น
+  //   skipRole เอง) — เกณฑ์เดียวกับ hamming≤PHASH_DUP_HAMMING_MAX ที่ใช้ตัดสินว่า "ซ้ำ" ตอนแรก (สมมาตร) ·
+  //   pHash64 วัดไม่ได้ (null ทั้งคู่) = ไม่เช็คคู่นั้น (fail-open เหมือน hammingDistanceHex คืน null เอง)
+  function _findDedupSafeReplacementIndex(excludeIds, skipRole, pHashOfRole) {
+    for (let i = 0; i < map.length; i++) {
+      if (map[i].kind !== 'backup') continue;
+      if (excludeIds.has(String(map[i].id))) continue;
+      const cand = byIndex.get(i);
+      if (!cand) continue;
+      if (cand.textOverlay > 1) continue;
+      const candHash = byId.get(String(map[i].id))?.triage?.pHash64 || null;
+      const dupsWithOther = _activeCanonRoles.some((rr) => {
+        if (rr === skipRole) return false;
+        const d = hammingDistanceHex(candHash, pHashOfRole(rr));
+        return d !== null && d <= PHASH_DUP_HAMMING_MAX;
+      });
+      if (dupsWithOther) continue;
+      return i;
+    }
+    return -1;
+  }
+
   let subSlotReplaced = 0;
   let watermarkReplaced = 0;
   const _resolvedThisPass = new Set(); // เฉพาะ "ผู้แพ้" ที่ถูกจัดการแล้วใน (ก) — กันประมวลผลซ้ำสองครั้ง (ผู้ชนะยังตรวจ (ข) ต่อได้ปกติ)
@@ -1137,7 +1192,105 @@ export async function _runSecondEye({
     }
   }
 
-  return { swapped, fixedCoords, checked: roles.length, liesCaught, subSlotReplaced, watermarkReplaced };
+  // ── (จ) MEGA_SUBSLOT_FACE_GATE (เฟส B-2, 29 ก.ค. 69 — เคสจริง AC-0210/MCV-ms5wwdv2sy2: ช่องบน 2 ช่องได้ภาพ
+  //   เกือบเดียวกัน มุมกว้าง+ซูมช็อตเดิม): ขยายหลัก faceVisible จาก hero (นโยบายเดิม) ไปช่องย่อยที่ตั้งใจเป็นภาพคน
+  //   (reaction/action/circle — ไม่รวม context ที่มักเป็นวัตถุ/สถานที่ ไม่บังคับหน้า) หัวขาด/ไม่เห็นหน้า
+  //   (faceVisible<=1) หรือไม่มีคนเลย (faceCount===0) ทั้งที่มีตัวเลือกเห็นหน้าในพูล → สลับ · ปกสายวัตถุ/สถานที่
+  //   ล้วน (พูลไม่มีหน้าใครเลย) → ข้ามด่านนี้ทั้งก้อน (เหมือนนโยบาย hero ที่มี coverHasNoPerson กันไว้แล้ว)
+  //   หาไม่เจอ = ติดธง subslot_no_face (ให้ MEGA_SLOT_COLLAPSE ด้านล่าง/composer อ่านต่อ — ห้ามปล่อยผ่านเงียบๆ)
+  const _subslotFaceGateOn = process.env.MEGA_SUBSLOT_FACE_GATE !== '0';
+  let faceGateReplaced = 0;
+  if (_subslotFaceGateOn) {
+    const _anyFaceInPool = map.some((m, i) => Number(byIndex.get(i)?.faceCount) >= 1);
+    if (_anyFaceInPool) {
+      for (const role of _activeCanonRoles) {
+        // ★ อย่าทับธงที่ปาส (ก)/(ข)/(ค) แปะไว้แล้ว (ช่องนั้น "ถูกจัดการแล้ว" ไม่ว่าจะสลับสำเร็จหรือติดธงอื่น) —
+        //   กันปาสนี้เขียนทับ subslot_duplicate_shot/subslot_text_overlay/watermark_kept ด้วย subslot_no_face
+        //   (พังเทสเดิมที่ตั้งเวลาไว้ก่อนปาสนี้เกิด + ข้อมูลสับสน — ปัญหาแรกที่เจอสำคัญพอแล้ว ไม่ต้องซ้อนปัญหาที่ 2)
+        if (!['reaction', 'action', 'circle'].includes(role) || _resolvedThisPass.has(role) || slots[role]._secondEyeSubSlotFlag) continue;
+        const res = _curResOf(role);
+        if (!res) continue;
+        const badFace = (res.faceVisible !== null && res.faceVisible <= 1) || Number(res.faceCount) === 0;
+        if (!badFace) continue;
+        const usedIds = new Set(_activeCanonRoles.map((rr) => String(slots[rr].id)));
+        const candIdx = _findFaceSafeReplacementIndex(usedIds);
+        if (candIdx >= 0) {
+          const { applied } = _swapRoleImageMechanic(role, candIdx, byIndex.get(candIdx), 'subslot_no_face_forced_replace');
+          if (applied) faceGateReplaced++;
+          else slots[role]._secondEyeSubSlotFlag = 'subslot_no_face';
+        } else {
+          slots[role]._secondEyeSubSlotFlag = 'subslot_no_face';
+          console.log(`[MEGA S6] 👁️‍🗨️ ตาสอง: ${role} หัวขาด/ไม่เห็นหน้า (faceVisible=${res.faceVisible ?? '-'}, faceCount=${res.faceCount}) แต่ไม่มีภาพแทนที่เห็นหน้าในพูล — คงเดิม + ติดธง subslot_no_face`);
+        }
+      }
+    }
+  }
+
+  // ── (ฉ) MEGA_CIRCLE_NOT_HERO (เฟส B-2): คนในวงต้องไม่ใช่คนเดียวกับ hero — วงกลมทำหน้าที่ "ตัวละครที่ 2" ของ
+  //   เรื่องเสมอ ซ้ำกับ hero = 2 ช่องเล่าคนเดียวกัน (เสียช่อง) · ใช้ sameAsHeroPerson ที่ตาสองตอบไว้แล้วในคำถามเดิม
+  //   (ไม่ยิง call เพิ่ม) · หาไม่เจอ = ติดธง circle_same_as_hero
+  const _circleNotHeroOn = process.env.MEGA_CIRCLE_NOT_HERO !== '0';
+  let circleNotHeroReplaced = 0;
+  if (_circleNotHeroOn && slots.circle && !_resolvedThisPass.has('circle')) {
+    const circleRes = _curResOf('circle');
+    if (circleRes && circleRes.sameAsHeroPerson === true) {
+      const usedIds = new Set(_activeCanonRoles.map((rr) => String(slots[rr].id)));
+      const candIdx = _findCircleDifferentPersonIndex(usedIds);
+      if (candIdx >= 0) {
+        const { applied } = _swapRoleImageMechanic('circle', candIdx, byIndex.get(candIdx), 'circle_same_as_hero_forced_replace');
+        if (applied) circleNotHeroReplaced++;
+        else slots.circle._secondEyeSubSlotFlag = 'circle_same_as_hero';
+      } else {
+        slots.circle._secondEyeSubSlotFlag = 'circle_same_as_hero';
+        console.log('[MEGA S6] 👁️‍🗨️ ตาสอง: circle เป็นคนเดียวกับ hero แต่ไม่มีภาพแทนที่เป็นคนอื่นในพูล — คงเดิม + ติดธง circle_same_as_hero');
+      }
+    }
+  }
+
+  // ── (ช) MEGA_SLOT_DEDUP_STRICT (เฟส B-2, 29 ก.ค. 69 — เคสจริง AC-0210/MCV-ms5wwdv2sy2): "ช่องบน 2 ช่องได้ภาพ
+  //   เดียวกันเกือบเป๊ะ" (มุมกว้าง+ซูมช็อตเดิมจากเฟรมคลิปติดกัน) — duplicate_scene เดิม (megaComposerService.js,
+  //   aHash ที่คอมโพสตอนคอมโพส) ยกเว้นคู่ที่ "ทั้งคู่มีหน้า" กันเคสหลุดผ่านได้พอดี (ทั้งสองช่องมีหน้าคนเดียวกัน)
+  //   จับก่อน compose แทน โดยใช้ pHash64 ที่คำนวณไว้แล้วตั้งแต่ตาคัด (libraryTriage.js — ไม่ยิง IO/LLM เพิ่มเลย)
+  //   ไม่ยกเว้นกรณีมีหน้าทั้งคู่ (จุดที่ duplicate_scene เดิมพลาด) + เป็น "active" (ลองสลับจริง ไม่ใช่แค่ธง)
+  //   threshold hamming≤10 — ค่าเดียวกับ PHASH_DUP_HAMMING_MAX (slotSolver.js) และ duplicate_scene (aHash≤10,
+  //   megaComposerService.js) ที่พิสูจน์ใช้งานจริงในระบบนี้แล้วทั้งคู่ (ไม่ได้เดาใหม่ — ไม่มีภาพต้นฉบับจริงของ
+  //   เคส AC-0210 ให้คำนวณ hamming เฉพาะเจาะจงได้ในเครื่องนี้ จึงยึดค่าคาลิเบรตที่มีอยู่แล้วในโค้ดเบสเดียวกัน)
+  //   hero ชนะเสมอ (เหมือนปาส (ก)) · หาไม่เจอ = ติดธง subslot_dedup_strict (ให้ MEGA_SLOT_COLLAPSE อ่านต่อ)
+  const _dedupStrictOn = process.env.MEGA_SLOT_DEDUP_STRICT !== '0';
+  let dedupStrictReplaced = 0;
+  if (_dedupStrictOn) {
+    const pHashOfRole = (role) => byId.get(String(slots[role]?.id))?.triage?.pHash64 || null;
+    // ★ กันวนไม่รู้จบ: เพดานรอบ = จำนวนช่อง active (แก้ได้สูงสุด 1 คู่/รอบ ไม่มีทางเกินจำนวนช่องจริง)
+    for (let guard = 0; guard < _activeCanonRoles.length; guard++) {
+      let foundDup = null;
+      outerDedup:
+      for (let ii = 0; ii < _activeCanonRoles.length; ii++) {
+        for (let jj = ii + 1; jj < _activeCanonRoles.length; jj++) {
+          const r1 = _activeCanonRoles[ii], r2 = _activeCanonRoles[jj];
+          if (_resolvedThisPass.has(r1) || _resolvedThisPass.has(r2)) continue;
+          const d = hammingDistanceHex(pHashOfRole(r1), pHashOfRole(r2));
+          if (d !== null && d <= PHASH_DUP_HAMMING_MAX) { foundDup = [r1, r2]; break outerDedup; }
+        }
+      }
+      if (!foundDup) break; // ไม่เจอคู่ซ้ำเหลืออีกแล้ว — จบ
+      const [r1, r2] = foundDup;
+      const loserRole = r1 === 'hero' ? r2 : (r2 === 'hero' ? r1 : (SLOT_CANON_ORDER.indexOf(r1) > SLOT_CANON_ORDER.indexOf(r2) ? r1 : r2));
+      const usedIds = new Set(_activeCanonRoles.map((rr) => String(slots[rr].id)));
+      const candIdx = _findDedupSafeReplacementIndex(usedIds, loserRole, pHashOfRole);
+      if (candIdx >= 0) {
+        const { applied } = _swapRoleImageMechanic(loserRole, candIdx, byIndex.get(candIdx), `subslot_dedup_strict_forced_replace (pHash hamming≤${PHASH_DUP_HAMMING_MAX} กับ ${loserRole === r1 ? r2 : r1})`);
+        if (applied) { dedupStrictReplaced++; continue; } // ลองรอบถัดไปต่อ (อาจมีคู่ซ้ำเหลืออีก)
+        slots[loserRole]._secondEyeSubSlotFlag = 'subslot_dedup_strict';
+      } else {
+        slots[loserRole]._secondEyeSubSlotFlag = 'subslot_dedup_strict';
+      }
+      // สลับไม่สำเร็จ/ไม่มีตัวเลือก — ไม่ลองคู่นี้ซ้ำอีก (กันวนติดคู่เดิม) ให้ resolvedThisPass กันไว้เฉพาะรอบนี้
+      _resolvedThisPass.add(loserRole);
+      console.log(`[MEGA S6] 👁️‍🗨️ ตาสอง: ${loserRole} เกือบซ้ำภาพกับ ${loserRole === r1 ? r2 : r1} (pHash hamming≤${PHASH_DUP_HAMMING_MAX}) แต่ไม่มีภาพแทนที่ไม่ซ้ำใครในพูล — คงเดิม + ติดธง subslot_dedup_strict`);
+    }
+  }
+
+  return { swapped, fixedCoords, checked: roles.length, liesCaught, subSlotReplaced, watermarkReplaced, faceGateReplaced, circleNotHeroReplaced, dedupStrictReplaced };
 }
 
 // ★ Wave2 Batch B1: ตัดสิน hard gate ท้าย s5_gapsearch — คืน null = ผ่าน/ไม่มีเกณฑ์จะวัด (ไม่แตะ path เดิม)

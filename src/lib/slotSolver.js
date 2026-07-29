@@ -27,7 +27,9 @@ const SCENE_DUP_PENALTY = 0.30;    // ภาพ sceneKey ซ้ำกับท�
 const CIRCLE_ALT_THRESHOLD = 0.60; // circle: มีตัวเลือกอื่น (คนละคน hero) ≥60% ของตัวเต็ง → สลับเลี่ยงคนซ้ำ
 // ★ Wave3 ชุด2 (10 ก.ค.): pHash64 (dHash 16 hex จาก libraryTriage.js) — จับภาพเกือบซ้ำระดับพิกเซล
 //   (sceneKey จับด้วยข้อความ, ตัวนี้จับด้วยพิกเซลจริง — สองตัวคนละแบบ ใช้คู่กัน ไม่แทนกัน)
-const PHASH_DUP_HAMMING_MAX = 10;  // hamming ≤10/64 บิต = ถือว่าภาพเกือบซ้ำ → โทษเหมือน sceneKey ซ้ำ (ค่าคงที่ร่วม SCENE_DUP_PENALTY)
+// ★ เฟส B-2 (29 ก.ค. 69): export เพิ่ม (เดิม const ล้วน) — megaAdapters.js (MEGA_SLOT_DEDUP_STRICT) reuse ค่า
+//   คาลิเบรตเดียวกันนี้ (ไม่เดาค่าใหม่/ไม่ก็อปปี้ค่าซ้ำสองที่ให้ดริฟท์กันได้ภายหลัง) — แค่เติมคำว่า export ไม่แตะค่า/พฤติกรรมเดิม
+export const PHASH_DUP_HAMMING_MAX = 10;  // hamming ≤10/64 บิต = ถือว่าภาพเกือบซ้ำ → โทษเหมือน sceneKey ซ้ำ (ค่าคงที่ร่วม SCENE_DUP_PENALTY)
 
 // ---------- helper เล็ก (pure) ----------
 function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }

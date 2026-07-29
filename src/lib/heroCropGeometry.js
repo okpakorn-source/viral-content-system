@@ -301,8 +301,14 @@ export function resolveHeroNeighborOverlap({ region, largestFace, otherFaces, sl
 //   ปล่อยยืดเงียบๆ) — คืน region ที่ขยายเต็มที่เท่าที่ทำได้เสมอ (ไม่ใช่ปฏิเสธเฉยๆ)
 // PURE: ไม่ import/IO/env/Date/random
 // @param region {left,top,width,height} px | @param slotW,slotH px | @param imgW,imgH px | @param cap เพดานยืด (เช่น 1.2)
+// @param rMin,rMax px (optional) — ★ B13 fix (เฟส B-2 ข้อ 6, 29 ก.ค. 69): โซนปลอดภัยแนวนอนจาก
+//   resolveHeroNeighborOverlap (ระยะที่หน้าคนข้างเคียงกินอยู่ ห้ามล้ำ) — เดิม expand นี้ไม่รู้จักโซนนี้เลย จึงอาจ
+//   ขยายเข้าหาขอบภาพ (marginL/marginR เดิม = แค่ขอบภาพ) จน "ดึงเพื่อนบ้านที่เพิ่ง shrink หนีไปแล้วกลับเข้ามาในเฟรม"
+//   เมื่อ cap บังคับให้ขยาย — ไม่ส่งมา (undefined/null/rMax<=rMin) = พฤติกรรมเดิมทุก byte (จำกัดแค่ขอบภาพเหมือนเดิม)
+//   ส่งมา = ขยายได้ไม่เกินโซนนี้ ดึงไม่ถึง cap เพราะโซนแคบ = reached:false (caller เดิมอ่าน !reached →
+//   needsBackup อยู่แล้ว ไม่ต้องเพิ่ม logic ฝั่งเรียกใหม่)
 // @returns {{ region, changed, reached, upscale }}
-export function expandHeroRegionForStretchCap({ region, slotW, slotH, imgW, imgH, cap = HERO_STRETCH_MAX } = {}) {
+export function expandHeroRegionForStretchCap({ region, slotW, slotH, imgW, imgH, cap = HERO_STRETCH_MAX, rMin = null, rMax = null } = {}) {
   const _keep = () => ({ region, changed: false, reached: false });
   try {
     if (!region || !(slotW > 0 && slotH > 0 && imgW > 0 && imgH > 0 && cap > 0)) return _keep();
@@ -314,7 +320,11 @@ export function expandHeroRegionForStretchCap({ region, slotW, slotH, imgW, imgH
     nH = Math.max(region.height, nH);
     if (nW <= region.width + 0.5 && nH <= region.height + 0.5) return _keep();
     const dW = nW - region.width, dH = nH - region.height;
-    const marginL = region.left, marginR = Math.max(0, imgW - (region.left + region.width));
+    const _hasZone = Number.isFinite(rMin) && Number.isFinite(rMax) && rMax > rMin;
+    const safeMinL = _hasZone ? Math.max(0, rMin) : 0;
+    const safeMaxR = _hasZone ? Math.min(imgW, rMax) : imgW;
+    const marginL = Math.max(0, region.left - safeMinL); // B13 fix: ขยายซ้ายได้แค่ถึง safeMinL (ไม่ใช่ 0 เสมอ)
+    const marginR = Math.max(0, safeMaxR - (region.left + region.width)); // ขยายขวาได้แค่ถึง safeMaxR (ไม่ใช่ imgW เสมอ)
     const marginT = region.top, marginB = Math.max(0, imgH - (region.top + region.height));
     // แจกส่วนขยายซ้าย/ขวา(บน/ล่าง) ตามพื้นที่ว่างจริง — เกินฝั่งไหนไหว ดันไปอีกฝั่ง (region เดิมยังอยู่ในใหม่เสมอ)
     const rightGrow0 = Math.min(dW / 2, marginR);
@@ -323,12 +333,17 @@ export function expandHeroRegionForStretchCap({ region, slotW, slotH, imgW, imgH
     const botGrow0 = Math.min(dH / 2, marginB);
     const topGrow = Math.min(dH - botGrow0, marginT);
     const botGrow = Math.min(dH - topGrow, marginB);
-    const rW = Math.min(imgW, Math.round(region.width + leftGrow + rightGrow));
+    let rW = Math.min(imgW, Math.round(region.width + leftGrow + rightGrow));
     const rH = Math.min(imgH, Math.round(region.height + topGrow + botGrow));
     const rL = Math.round(region.left - leftGrow);
     const rT = Math.round(region.top - topGrow);
-    const clL = Math.min(Math.max(rL, 0), Math.max(0, imgW - rW));
+    let clL = Math.min(Math.max(rL, 0), Math.max(0, imgW - rW));
     const clT = Math.min(Math.max(rT, 0), Math.max(0, imgH - rH));
+    // การ์ดสุดท้าย (belt-and-suspenders) — บังคับแนวนอนอยู่ในโซนปลอดภัยเป๊ะ ไม่ว่าคำนวณข้างบนจะปัดเศษคลาดยังไง
+    if (_hasZone) {
+      rW = Math.min(rW, Math.max(1, Math.round(safeMaxR - safeMinL)));
+      clL = Math.min(Math.max(clL, Math.round(safeMinL)), Math.max(Math.round(safeMinL), Math.round(safeMaxR) - rW));
+    }
     const newRegion = { left: clL, top: clT, width: rW, height: rH };
     const newUp = Math.max(slotW / Math.max(1, newRegion.width), slotH / Math.max(1, newRegion.height));
     return { region: newRegion, changed: true, reached: newUp <= cap + 1e-6, upscale: newUp };

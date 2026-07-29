@@ -451,6 +451,13 @@ function _heroFaceBandExec() {
 //   → หด+การ์ด (3) cap ยืด hero ≤HERO_STRETCH_MAX หลังวัด upscale จริง — ดูจุดใช้งานแต่ละจุดสำหรับรายละเอียด
 //   default ON · env MEGA_HERO_CROP_GUARD='0' → พฤติกรรมเดิมเป๊ะทุก byte (kill-switch)
 function _heroCropGuardOn() { return process.env.MEGA_HERO_CROP_GUARD !== '0'; }
+// ★ B13 fix (เฟส B-2 ข้อ 6, 29 ก.ค. 69 — พบระหว่างแก้ B4 ในเฟส B-1): expandHeroRegionForStretchCap (จุดที่ 3
+//   ข้างบน) ขยาย region เข้าหาขอบภาพเพื่อดึง upscale ลง ≤cap โดยไม่รู้จัก "โซนปลอดภัย" (rMin/rMax) ที่จุดที่ 2
+//   (resolveHeroNeighborOverlap) เพิ่งหด region หนีหน้าคนข้างเคียงไปแล้ว — เมื่อ cap บังคับให้ขยายกลับ อาจดึง
+//   เพื่อนบ้านที่เพิ่ง shrink แก้ไปแล้วกลับเข้ามาในกรอบใหม่ (regression เชิงตรรกะ ไม่ใช่ crash) — ยังไม่เคยมี
+//   kill-switch คุมจุดนี้มาก่อน · default ON · '0' = ไม่ส่ง rMin/rMax เข้า expand เลย = พฤติกรรมเดิมเป๊ะ (ขยาย
+//   ได้เต็มขอบภาพเหมือนเดิมทุก byte — ไม่ใช่แค่ "ปิด" ฟังก์ชันใหม่ แต่ผลลัพธ์ตัวเลขต้องเหมือนก่อนแก้เป๊ะ)
+function _stretchNeighborFixOn() { return process.env.MEGA_STRETCH_NEIGHBOR_FIX !== '0'; }
 // normalized {x,y,w,h} ที่ valid สำหรับใช้เป็นครอปตรงๆ (producer แนบมา) — พังรูปแบบ/นอกขอบ = ไม่ใช้ (fail-safe)
 function _validHeroFaceCropBox(b) {
   return !!(b && typeof b === 'object'
@@ -1404,7 +1411,27 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null, strict = fa
   const _heroCap = strict ? HERO_STRETCH_MAX : _heroUpscaleMaxEffExec();
   let _upFinal = _upR;
   if (_heroCropGuardOn() && !(crop && crop._final) && _promKind(slot) === 'hero' && _upR > _heroCap) {
-    const _ex = expandHeroRegionForStretchCap({ region, slotW: slot.w, slotH: slot.h, imgW, imgH, cap: _heroCap });
+    // ★ B13 fix (MEGA_STRETCH_NEIGHBOR_FIX): คำนวณโซนปลอดภัยแนวนอนสดใหม่ ณ จุดนี้ (region ปัจจุบัน หลัง
+    //   head-safe/watermark-dodge/clamp ทุกด่านก่อนหน้าปรับแล้ว) — อัลกอริทึมเดียวกับ rMin/rMax ที่จุดที่ 2
+    //   (resolveHeroNeighborOverlap, บรรทัด ~1044-1050) ใช้เป๊ะ แค่คำนวณซ้ำตรงนี้แทนการ hoist ตัวแปร (ตัวแปรเดิม
+    //   เป็น block-scoped ในกิ่ง if คนละที่ ไปไม่ถึงตรงนี้) — ไม่มีหน้าอื่น/ปิดสวิตช์ = ไม่ส่ง rMin/rMax (null)
+    let _stretchRMin = null, _stretchRMax = null;
+    if (_stretchNeighborFixOn() && fb && Array.isArray(fb.allFaces) && fb.allFaces.length > 1) {
+      const _hf = _dominantFaceInRegion(fb, region, imgW, imgH);
+      if (_hf) {
+        const _hcx = ((_hf.x1 + _hf.x2) / 2) * imgW;
+        let _rl = 0, _rr = imgW;
+        for (const f of fb.allFaces) {
+          // เทียบค่าพิกัด (ไม่ใช่ reference — _dominantFaceInRegion คืน object ก็อปปี้ใหม่เสมอ) ข้ามหน้าตัวเอง
+          if (f.x1 === _hf.x1 && f.y1 === _hf.y1 && f.x2 === _hf.x2 && f.y2 === _hf.y2) continue;
+          const fcx = ((f.x1 + f.x2) / 2) * imgW;
+          if (fcx < _hcx) _rl = Math.max(_rl, f.x2 * imgW);
+          else _rr = Math.min(_rr, f.x1 * imgW);
+        }
+        if (_rr > _rl) { _stretchRMin = _rl; _stretchRMax = _rr; }
+      }
+    }
+    const _ex = expandHeroRegionForStretchCap({ region, slotW: slot.w, slotH: slot.h, imgW, imgH, cap: _heroCap, rMin: _stretchRMin, rMax: _stretchRMax });
     if (_ex.changed) {
       region = _clampRegion(_ex.region, imgW, imgH);
       _br += '+stretchcap';
