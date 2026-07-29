@@ -205,6 +205,11 @@ export async function PATCH(req) {
       }
     }
     const updated = await updateRefCover(id, patch);
+    // ★ 29 ก.ค. 69 (lane2 audit-ref-app #1.8): updateRefCover แยก error จริงออกจาก "ไม่พบ id" แล้ว (ดูคอมเมนต์
+    //   ในไฟล์นั้น) — เช็ค __error ก่อนเสมอ กันเข้าใจผิดว่า record หายไปทั้งที่จริงคือเขียนฐานข้อมูลล้ม
+    if (updated && updated.__error) {
+      return NextResponse.json({ success: false, error: `แก้ไขคลังไม่สำเร็จ: ${updated.__error}`, errorType: 'REF_COVER_UPDATE_FAILED' }, { status: 500 });
+    }
     if (!updated) return NextResponse.json({ success: false, error: 'ไม่พบ id' }, { status: 404 });
     return NextResponse.json({ success: true, item: updated });
   } catch (err) {

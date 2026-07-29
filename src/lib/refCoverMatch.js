@@ -6,7 +6,7 @@
 // ============================================================
 
 import { listRefCovers } from '@/lib/refCoverLibrary';
-import { refPoolGateOpen, computeTemplateGrade } from '@/lib/refCoverGrade';
+import { refPoolGateOpen, computeTemplateGrade, describeActiveGate } from '@/lib/refCoverGrade';
 
 const norm = (s) => String(s || '').toLowerCase().trim();
 
@@ -124,8 +124,12 @@ export function refFidelityBonus(record, env = process.env) {
   let grade = null;
   try {
     grade = computeTemplateGrade(record, env)?.grade || null;
-  } catch {
+  } catch (e) {
+    // ★ 29 ก.ค. 69 (lane2 audit-ref-app #1.7): computeTemplateGrade มี try/catch ในตัวเองอยู่แล้ว ปกติไม่ throw —
+    //   ถ้า throw จริง (โค้ดข้างในเปลี่ยนอนาคต) เดิมเงียบสนิทเป็น grade=null ไม่มีร่องรอยอะไรเลย — log ไว้กันเหนียว
+    //   (double-safety net ซ้อนกัน โอกาสเกิดจริงต่ำ ตามที่ audit ประเมิน แต่ log ไม่มีต้นทุน ใส่ไว้ดีกว่า)
     grade = null;
+    console.warn(`[refCoverMatch] refFidelityBonus: computeTemplateGrade throw ไม่คาดคิด (${record?.id || '?'}): ${e?.message || e}`);
   }
   if (grade === 'A') return 2;
   if (grade === 'B') return 1;
@@ -228,7 +232,25 @@ export async function pickBestRef(signals = {}, opts = {}) {
   // ★ R3 (16 ก.ค.): ตัวกรองพูลย้ายไป refPoolGateOpen (PURE) — OFF = พฤติกรรมเดิมเป๊ะ
   //   (dna+imagePath+_reproducible!==false) · REF_TEMPLATE_GRADE_GATE='1' = รับเฉพาะเกรด A/B ไม่ซ้ำ
   const pool = items.filter((x) => refPoolGateOpen(x));
-  if (!pool.length) return null;
+  // ★ 29 ก.ค. 69 (lane2 audit-ref-app #1.1 — บทเรียน REF_POOL_ALLOWLIST เคยชี้ ref ที่ถูกลบ → พูลว่างเงียบ →
+  //   null เงียบ → fallback refs[0] เสมอ, ดู memory ref-dna-library-overhaul.md): เดิมไม่มี log ใดๆ ตรงนี้เลย
+  //   ทั้งที่คลัง (items) อาจมีของเต็มอยู่ — log ดังพอเห็นจริงใน console แยกกรณี "คลังว่างจริง" ออกจาก "คลังมีของ
+  //   แต่ถูกกรองจนว่าง" (สัญญาณ env ผิด/ชี้ id ที่ไม่มีจริง) ใช้ describeActiveGate (เรียกครั้งเดียวตรงนี้ ไม่ใช่
+  //   ต่อ record — กัน log ถี่เกินตามที่ AUDIT-REF-APP.md ข้อ 1.2 เตือนไว้)
+  if (!pool.length) {
+    if (items.length > 0) {
+      const gate = describeActiveGate();
+      console.warn(
+        `[refCoverMatch] ⚠️ พูล ref ว่างทั้งที่คลังมี ${items.length} ใบ — ` +
+        (gate
+          ? `กลไกจำกัดพูลที่เปิดอยู่: ${gate} (เช็คว่า id/ค่าที่ตั้งถูกต้องจริงไหม — ชี้ id ที่ไม่มี/ถูกลบ = พูลว่างเงียบแบบนี้พอดี)`
+          : `ไม่มี REF_POOL_PIN/REF_POOL_ALLOWLIST/REF_TEMPLATE_GRADE_GATE เปิดอยู่เลย — น่าจะเป็นเพราะทุกใบไม่มี dna/slots ครบ (≥3 ช่อง) หรือ _derived/_reproducible ตัดหมด`)
+      );
+    } else {
+      console.warn('[refCoverMatch] ⚠️ คลัง ref ว่างเปล่า (listRefCovers คืน 0 ใบ) — ไม่มี ref ให้เลือกเลย');
+    }
+    return null;
+  }
 
   const emo = norm(signals.emotion);
   const hay = norm(`${signals.emotion || ''} ${signals.text || ''}`);

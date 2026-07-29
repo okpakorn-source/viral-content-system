@@ -174,3 +174,26 @@ export function refPoolGateOpen(record, env = process.env) {
   const g = computeTemplateGrade(record).grade;
   return g === 'A' || g === 'B';
 }
+
+// ============================================================
+// 🔎 describeActiveGate — วินิจฉัย "กลไกไหนกำลังจำกัดพูลอยู่" (ใช้ตอนพูลว่างผิดปกติเท่านั้น)
+// ------------------------------------------------------------
+// ★ 29 ก.ค. 69 (lane2 audit-ref-app #1.1/#1.2): refPoolGateOpen ถูกเรียกต่อ "ทุก record" ในคลัง (วนลูปใน
+//   pickBestRef) — ถ้าใส่ console.warn ไว้ข้างในฟังก์ชันนี้ตรงๆ จะยิง log ถี่เกินไปทุกครั้งที่ตัดสินใบใดใบหนึ่ง
+//   (ตามที่ AUDIT-REF-APP.md ข้อ 1.2 เตือนไว้เอง) — จึงแยกออกมาเป็นฟังก์ชันช่วย "เรียกครั้งเดียว" โดยผู้เรียก
+//   (เช่น pickBestRef) เฉพาะตอนพบว่าพูลว่างผิดปกติ (คลังมีของแต่กรองจนเหลือ 0) ใช้ประกอบ warning message ให้ชี้
+//   สาเหตุตรงจุด (REF_POOL_PIN / REF_POOL_ALLOWLIST / REF_TEMPLATE_GRADE_GATE ตัวไหนกำลังทำงานอยู่) — PURE ล้วน
+//   ไม่มี log ในตัวเอง (ผู้เรียกเป็นคนตัดสินใจ log เอง)
+/**
+ * @param {object} [env=process.env]
+ * @returns {string|null} คำอธิบายกลไกที่กำลังจำกัดพูลอยู่ (ตัวแรกที่ match ตามลำดับที่ refPoolGateOpen เช็คจริง)
+ *   หรือ null ถ้าไม่มีกลไกจำกัดพูลใดๆ ตั้งอยู่เลย (พูลว่างต้องมาจากเหตุอื่น เช่น ใบทั้งหมดไม่มี dna/slots ครบ)
+ */
+export function describeActiveGate(env = process.env) {
+  const pin = String(env?.REF_POOL_PIN || '').trim();
+  if (pin) return `REF_POOL_PIN=${pin}`;
+  const allow = String(env?.REF_POOL_ALLOWLIST || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (allow.length) return `REF_POOL_ALLOWLIST=${allow.join(',')}`;
+  if (env?.REF_TEMPLATE_GRADE_GATE === '1') return 'REF_TEMPLATE_GRADE_GATE=1 (รับเฉพาะเกรด A/B)';
+  return null;
+}

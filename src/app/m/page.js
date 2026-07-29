@@ -287,6 +287,10 @@ export default function MobileApp() {
   const [qcSel, setQcSel] = useState(null);
   const [qcHero, setQcHero] = useState('');
   const [qcBusy, setQcBusy] = useState(false);
+  // ★ 29 ก.ค. 69 (lane2 audit-queue-stability #3 — ปุ่ม "⚡ ทางลัด" กันกดซ้ำ): ref sync (อัปเดตทันที ไม่รอ re-render)
+  //   ต่างจาก qcBusy (state — อัปเดตช้ากว่าคลิกรัว/แตะจอซ้อนบนมือถือได้) กันเคส submitQuickCover ถูกเรียกซ้ำก่อนที่
+  //   ปุ่ม disabled จะทันเปลี่ยนจริงในจอ (คนละชั้นกับ error-then-retry ปกติที่ยังอนุญาตให้กดใหม่ได้หลังงานจบ/ล้มจริง)
+  const qcBusyRef = useRef(false);
   // ★ "ช่องเคส" (27 ก.ค. 69, เจ้าของขอ) — ดูภาพดิบของเคสในโหมด ⚡ ทางลัด · ต่อ /api/m/cover?view=caseImages
   const [caseImgOpen, setCaseImgOpen] = useState(null); // caseId ที่กางกริดภาพอยู่ (null = ปิดหมด)
   const [caseImgList, setCaseImgList] = useState({}); // {[caseId]: items[] | undefined (ยังไม่โหลด)}
@@ -825,7 +829,10 @@ export default function MobileApp() {
   };
   // ⚡ ทางลัดประกอบ — ประกอบปกจากคลังเคสเดิม (kind='compose')
   const submitQuickCover = async () => {
-    if (!qcSel) return;
+    // ★ 29 ก.ค. 69 (lane2 audit-queue-stability #3): เช็ค+ล็อก ref ทันทีแบบ synchronous ก่อน setState ใดๆ
+    //   กันกดซ้ำ/แตะจอซ้อนที่มาถึงก่อนปุ่ม disabled จะสะท้อนใน DOM จริง (setQcBusy เป็น state มีดีเลย์ข้าม render)
+    if (!qcSel || qcBusyRef.current) return;
+    qcBusyRef.current = true;
     setCvErr(''); setQcBusy(true);
     try {
       const d = await (await fetch('/api/m/cover', {
@@ -838,6 +845,7 @@ export default function MobileApp() {
       say('เข้าคิวประกอบปกแล้ว — รอสัก 20-80 วิ');
       setTimeout(loadCovers, 800); setTimeout(loadCovers, 3000);
     } catch (e) { setCvErr(String(e.message || e)); }
+    qcBusyRef.current = false;
     setQcBusy(false);
   };
   const delCover = async (id) => {

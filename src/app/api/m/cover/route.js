@@ -17,7 +17,10 @@
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 120; // ★ 27 ก.ค. ค่ำ: 60→120 กันชนเวลาเมื่อ composeFrozen sync ยาวกว่าคาด (ปกติ ~20-30 วิ)
+// ★ 29 ก.ค. 69 (lane2 audit-queue-stability #3): 120→300 — kind='compose' ยิงต่อ /api/quick-test ซึ่งบน cloud
+//   dispatch รัน callOnce แบบ synchronous ได้ถึง maxDuration=300 ของตัวมันเอง (quick-test/route.js:22) เดิม 120
+//   ของไฟล์นี้จะโดน Vercel ตัด function ก่อนที่ quick-test จะตอบกลับเสร็จเสมอ ไม่ว่าจะแก้ AbortSignal ด้านล่างแค่ไหน
+export const maxDuration = 300;
 
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
@@ -173,10 +176,17 @@ export async function POST(request) {
       }
       const heroPersonHint = String(body.heroPersonHint || '').slice(0, 100) || undefined;
       const refId = String(body.refId || '').trim() || undefined;
+      // ★ 29 ก.ค. 69 (lane2 audit-queue-stability #3 — ปุ่ม "⚡ ทางลัด" ล้มหลอก): เดิม 30000ms ตายตัว ไม่ตรงพฤติกรรม
+      //   จริงของ /api/quick-test ที่มันเรียก — บน cloud dispatch (effective='cloud' เสมอบน Vercel ที่ /m ใช้งานจริง)
+      //   quick-test await runJob() แบบ sync ก่อนตอบ ซึ่ง callOnce ของ compose มี timeout ภายในสูงถึง 5 นาที
+      //   (quick-test/route.js:84) และคอมเมนต์หัวไฟล์ก็บอกปกติ ~20-80 วิ — ทั้งสองค่านี้เกิน 30 วิเดิมได้ง่ายๆ
+      //   ผลเดิม: fetch ฝั่งนี้ถูก abort ก่อน แต่งานจริงฝั่ง quick-test ยังรันต่อจนจบ (ไม่ได้ถูกยกเลิกจริง) →
+      //   ผู้ใช้เห็น error หลอกทั้งที่งานสำเร็จ แล้วมักกดซ้ำ = ยิง AI/ประกอบภาพซ้ำโดยไม่จำเป็น (เสียเงินซ้ำ)
+      //   ยกเป็น 300000ms ให้ ≥ เพดานจริงของ quick-test (5 นาที) เสมอ — คู่กับ maxDuration ของไฟล์นี้ (120→300 ด้านบน)
       const r = await fetch(`${request.nextUrl.origin}/api/quick-test`, {
         method: 'POST', headers: keyHeaders(),
         body: JSON.stringify({ kind: 'compose', caseId, heroPersonHint, refId }),
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(300000),
       });
       const d = await r.json();
       return NextResponse.json(d, { status: r.status });
