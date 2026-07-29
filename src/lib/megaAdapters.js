@@ -1473,6 +1473,85 @@ export function inferBeatFromDreamShot(shot) {
   return slotBeat ? { beat: slotBeat, source: 'slot' } : { beat: null, source: null };
 }
 
+// ★ แบตช์เฟส D ข้อ 1 (29 ก.ค. 69 — เสียบ coverFormulaCheck, แก้รอบ 2 หลัง Opus พิสูจน์ว่าให้ null ทุกข้อ):
+//   composer slotId → canonical role — สำเนา regex เดียวกับ measureTechRules.roleOf (megaComposerService.js)
+//   ทุกตัวอักษรเท่าที่ทำได้ (main|hero→hero, shape circle→circle, ^context/^evidence→context (ไม่มี check เฉพาะ
+//   evidence — ใกล้เคียง context ที่สุด), ^action/^moment/^reaction→ตัวเอง, ที่เหลือ→null ไม่เดา) — export ให้
+//   เทสตรงได้ (กันสองจุดตีความ slotId ไม่ตรงกันในอนาคตด้วย ถ้ามีใครมา reuse)
+export function formulaRoleOfSlotId(slotId, shape) {
+  const id = String(slotId || '');
+  if (shape === 'circle') return 'circle';
+  if (/main|hero/i.test(id)) return 'hero';
+  if (/^context/i.test(id) || /^evidence/i.test(id)) return 'context';
+  if (/^action/i.test(id)) return 'action';
+  if (/^moment/i.test(id)) return 'moment';
+  if (/^reaction/i.test(id)) return 'reaction';
+  return null;
+}
+
+// ★ แบตช์เฟส D ข้อ 1 (แก้รอบ 2): สร้าง { slots, template } สำหรับส่งเข้า evaluateCoverFormula (coverFormulaCheck.js)
+//   จากข้อมูลจริงที่มีในมือ ณ s7_wait — เดิมไม่ส่ง slots เลย (ส่งแค่ qcFlags+template) ได้ null ทุกข้อเสมอ เพราะ
+//   fallback regex ในไฟล์นั้นรอ canonical role name ตรงตัว (เช่น face_share_out:hero:) แต่ธงจริงที่ระบบ emit ใช้
+//   composer slotId จริง (main/circle/context/reaction_1/pair_3 ฯลฯ) — พิสูจน์จากเคสจริง MCV-ms6ac5atfg4: ธงคือ
+//   face_share_out:main:16 ไม่ใช่ face_share_out:hero:16 → regex ไม่ match เลยสักครั้ง
+//   แหล่งข้อมูลจริงที่มีในมือ (เรียงจากแม่นสุด): (1) pickImagesSlots (job.dossier.pickImages.slots — S6 เก็บไว้
+//   ตรงๆ เป็น role-keyed map มี person/newsScene จริง — ใช้เป็นหลักสำหรับ triage.newsScene + sameAsHeroPerson)
+//   (2) manifestSlots (r.manifest.slots — มี measured.faceSharePct ตัวเลขจริงจากรอบประกอบนี้ — แม่นสุดถ้ามี แต่
+//   พิสูจน์แล้วว่าเป็น null ได้จริงในบางเคส) (3) qcFlags (fallback สุดท้ายสำหรับ faceSharePct/faceVisible)
+//   🔴 ฟิลด์ที่ "หาไม่ได้จริง" ที่จุดนี้ (ไม่เดา ปล่อย null ตามที่ Opus สั่งให้บันทึกเหตุผลตรงๆ):
+//   - faceVisible ค่าเต็ม 0-2 (มีแค่ proxy บางส่วนจาก blind_crop/person_cut → รู้แค่ "ไม่ผ่านแน่ๆ" ไม่รู้ 1 vs 2)
+//     และ triage.textOverlay: ค่าจริงคำนวณชั่วคราวใน _runSecondEye (S6) ไม่ถูก persist ยาวมาถึง s7_wait — ธง
+//     subslot_text_overlay ที่มีจริงใน qcFlags ก็เป็น bare string ไม่มี slotId ต่อท้าย จึง map กลับไปช่องไหนไม่ได้
+//   - triage.pHash64: manifest มีแค่ aHash (คนละอัลกอริทึมกับ pHash64 ที่ check no_dup ต้องการเทียบ hamming — ใช้
+//     แทนกันจะให้ผลเทียบที่ไม่มีความหมายตรงกับค่าคาลิเบรตไว้ เสี่ยงหลอกว่า "เทียบซ้ำได้") — ปล่อย null (check no_dup
+//     ยังพึ่ง duplicate_scene:<a>:<b> จาก qcFlags ได้เองอยู่แล้วถ้าธงนั้นมีจริง ไม่ต้องพึ่ง slots)
+//   PURE: ไม่ import/IO/env — export ให้เทสตรงได้ (เหมือน dreamScoreGuardOk/inferBeatFromDreamShot)
+export function buildFormulaInputFromCoverResult({ qcFlags, manifestSlots, pickImagesSlots } = {}) {
+  const _qcFlags = Array.isArray(qcFlags) ? qcFlags : [];
+  const _mSlots = Array.isArray(manifestSlots) ? manifestSlots : [];
+  const _pickSlots = pickImagesSlots && typeof pickImagesSlots === 'object' ? pickImagesSlots : {};
+  // ★ กับดักจริงที่พบจากโพรบเอง (29 ก.ค. 69): coverFormulaCheck.js ใช้ num(v)=Number(v) เช็ค Number.isFinite —
+  //   Number(null)===0 (finite!) ต่างจาก Number(undefined)===NaN (ไม่ finite) — ถ้าใส่ null ให้ faceSharePct/
+  //   faceVisible/triage.textOverlay (ทุกฟิลด์ที่ check อ่านผ่าน num()) มันจะถูกตีความเป็น "วัดได้ค่า 0" ไม่ใช่
+  //   "วัดไม่ได้" (fail เงียบๆ แบบผิดๆ แทนที่จะ degrade เป็น null ตามที่ตั้งใจ) → ต้องใช้ undefined สำหรับฟิลด์
+  //   เหล่านี้เท่านั้น (sameAsHeroPerson/triage.newsScene/triage.pHash64 เช็คด้วย typeof ไม่ใช่ num() — null ปลอดภัย)
+  const byRole = new Map();
+  const ensure = (role) => {
+    if (!byRole.has(role)) byRole.set(role, { role, faceSharePct: undefined, faceVisible: undefined, sameAsHeroPerson: null, triage: { newsScene: null, textOverlay: undefined, pHash64: null } });
+    return byRole.get(role);
+  };
+  for (const [role, ps] of Object.entries(_pickSlots)) {
+    if (!ps || typeof ps.newsScene !== 'boolean') continue;
+    ensure(role).triage.newsScene = ps.newsScene;
+  }
+  for (const ms of _mSlots) {
+    const role = formulaRoleOfSlotId(ms?.slot, ms?.shape);
+    if (!role || ms?.measured?.faceSharePct == null) continue;
+    ensure(role).faceSharePct = ms.measured.faceSharePct;
+  }
+  for (const f of _qcFlags) {
+    let mm;
+    if ((mm = /^face_share_out:([^:]+):(-?\d+(?:\.\d+)?)$/.exec(f))) {
+      const role = formulaRoleOfSlotId(mm[1], mm[1] === 'circle' ? 'circle' : undefined);
+      if (role) { const rec = ensure(role); if (rec.faceSharePct == null) rec.faceSharePct = Number(mm[2]); }
+    } else if ((mm = /^(blind_crop|person_cut):(.+)$/.exec(f))) {
+      const role = formulaRoleOfSlotId(mm[2]);
+      if (role) ensure(role).faceVisible = 0; // ยืนยันว่าไม่ผ่านแน่ๆ (ไม่รู้ 1 vs 2 ที่ "ผ่าน")
+    }
+  }
+  const heroPerson = String(_pickSlots.hero?.person || '').trim().toLowerCase();
+  const circlePerson = String(_pickSlots.circle?.person || '').trim().toLowerCase();
+  // ★ ต้อง ensure('circle') เสมอเมื่อรู้ชื่อทั้งคู่ — ไม่ใช่แค่ "ถ้า circle มีอยู่แล้วจากสัญญาณอื่น" (บั๊กที่เจอจาก
+  //   เทสของตัวเอง: circle ที่มีแค่ .person ไม่มี newsScene/faceSharePct/faceVisible เลย จะไม่เคยถูกสร้างเข้า
+  //   byRole มาก่อน ทำให้ sameAsHeroPerson หายไปทั้งที่รู้ชื่อจริงทั้งคู่)
+  if (_pickSlots.circle) {
+    ensure('circle').sameAsHeroPerson = (heroPerson && circlePerson) ? (heroPerson === circlePerson) : null;
+  }
+  const slots = [...byRole.values()];
+  const template = { panelCount: _mSlots.length || Object.keys(_pickSlots).length || null, hasCircle: _mSlots.some((s) => s?.shape === 'circle') || !!_pickSlots.circle };
+  return { slots, template };
+}
+
 // ---------- S5b สกัดคีย์เวิร์ด (สมองอารมณ์ครบสเปกตรัม + ผูกชื่อ) ----------
 export async function s5_keywords(job, { origin }) {
   const im = job.dossier.images || {};
@@ -4806,7 +4885,13 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           // ★ รอบ 6 P1: refId เพิ่มเฉพาะใต้สวิตช์ — ปิด = ไม่มี property เลย (object shape เท่า legacy 100%)
           job.dossier.refMatch = { ...(process.env.MEGA_SELECTION_SPEC === '1' && m.ref.id ? { refId: m.ref.id } : {}), dna, styleName: m.ref.styleName || m.ref.id, imagePath: m.ref.imagePath, reason: m.reason, typeMatched: !weak, dnaHash: _dnaHashFor(dna), refBoundAt: new Date().toISOString() };
         }
-      } catch { /* ไม่มีคลัง ref → เดินแบบเดิม */ }
+      } catch (e) {
+        // ★ แบตช์เฟส D ข้อ 2 (29 ก.ค. 69 — AUDIT-REF-APP 1.3): เดิม catch เปล่าไม่มี log แม้แต่บรรทัดเดียว — งานข่าวจริง
+        //   เดินไปเต็มท่อโดยไม่มี ref template กำกับ โดยไม่มีร่องรอยใน log ให้ตรวจย้อนหลัง (throw จริงจาก pickBestRef/
+        //   sanitize/dynamic import ก็เงียบเหมือนกันหมด) — เพิ่ม console.warn บอกสาเหตุจริงเท่านั้น ไม่เปลี่ยน control
+        //   flow (ยังกลืน error + เดินต่อแบบเดิมทุกกรณี แค่มองเห็นได้จาก log)
+        console.warn('[MEGA S6] ref-pick ล้ม (เดินแบบเดิมไม่มี ref): ' + String(e?.message || e).slice(0, 200));
+      }
     }
   }
   // แมตช์หลวม → ไม่ส่ง DNA เข้าสมองเลือกภาพ (เลือกตามเข็มทิศข่าวล้วน) · โครงยังใช้ตอน s7
@@ -7466,7 +7551,12 @@ export async function s7_cover(job, { origin, _deps } = {}) {
         resolvedRefId = m.ref.id || _dnaHashFor(selectionRefDNA); // identity จริงเท่านั้น — ห้ามใช้ styleName
         refInfo = ` · 🎯ref ${m.ref.styleName || m.ref.id} (${m.reason})`.slice(0, 90);
       }
-    } catch { /* คลัง ref ว่าง/ล้ม → ไม่มี ref (ใช้ template ปกติ) ไม่กระทบ */ }
+    } catch (e) {
+      // ★ แบตช์เฟส D ข้อ 2 (29 ก.ค. 69 — AUDIT-REF-APP 1.4): เหมือนข้อ 1.3 เป๊ะ (เส้นสำรอง — รันเฉพาะไฟล์เก่าที่ไม่มี
+      //   refMatch ติดมา) — เพิ่ม console.warn บอกสาเหตุจริงเท่านั้น ไม่เปลี่ยน control flow (ยังกลืน error + ใช้
+      //   template ปกติต่อแบบเดิมทุกกรณี แค่มองเห็นได้จาก log)
+      console.warn('[MEGA S7] ref-pick fallback ล้ม (ใช้ template ปกติ ไม่กระทบ): ' + String(e?.message || e).slice(0, 200));
+    }
   }
   // ★ D3-B2 (11 ก.ค. — Codex): mode ของ S7 = persisted marker (artBrief + pickImages echo) ไม่ใช่ env ล้วน
   //   marker-present ต้องผ่านทุกด่าน (switch ON · prereq · schema · deep-equal ab↔pi · rebuild effectiveViewHash
@@ -7690,6 +7780,54 @@ export async function s7_wait(job) {
     if (qcVerdict.pass) console.log(`[MEGA S7] ✅ QC gate ผ่าน (${job.id})${qcVerdict.reasons.length ? ' · เตือน: ' + qcVerdict.reasons.join(' / ') : ''}`);
     else console.log(`[MEGA S7] ⛔ QC gate: ${qcVerdict.reasons.join(' / ')} → ${qcVerdict.suggestedStatus}`);
 
+    // ★ แบตช์เฟส D ข้อ 1 (29 ก.ค. 69 — เสียบ coverFormulaCheck เข้าท่อจริง, แก้รอบ 2 หลัง Opus พิสูจน์ว่าให้ null
+    //   ทุกข้อ): เดิมไม่ได้ส่ง "slots" เข้า evaluateCoverFormula เลย (ส่งแค่ qcFlags+template) — คิดว่า qcFlags อย่าง
+    //   เดียวพอ (ตามคอมเมนต์หัวไฟล์ coverFormulaCheck.js ที่บอกว่ามี fallback) แต่ fallback regex ในไฟล์นั้น
+    //   (เช่น /^face_share_out:hero:.../ ) รอ "canonical role name" ตรงตัว ในขณะที่ธงจริงที่ระบบ emit (measureTechRules
+    //   ใน megaComposerService.js) ใช้ "composer slotId" จริง (main/circle/context/reaction_1/pair_3 ฯลฯ) — พิสูจน์
+    //   จากเคสจริง MCV-ms6ac5atfg4: ธงคือ face_share_out:main:16 ไม่ใช่ face_share_out:hero:16 → regex ไม่ match
+    //   เลยสักครั้ง = null ทุกข้อเสมอ (ตามที่ Opus พิสูจน์)
+    //   แก้จริง: แปลง composer slotId → canonical role "ที่จุดนี้" ด้วยฟังก์ชันเดียว (regex เดียวกับ
+    //   measureTechRules.roleOf ทุกตัวอักษร กันสองจุดตีความ slotId ไม่ตรงกัน) แล้วสร้าง slots array ส่งตรงเข้า
+    //   evaluateCoverFormula (ไม่ต้องพึ่ง fallback regex ในไฟล์นั้นเลย เพราะ slots array ที่มี role ถูกเช็คก่อนเสมอ)
+    //   แหล่งข้อมูลจริงที่มีในมือ ณ จุดนี้ (เรียงจากแม่นสุด): (1) job.dossier.pickImages.slots — S6 เก็บไว้ตรงๆ
+    //   เป็น role-keyed map (hero/context/action/moment/reaction/circle) มี person/newsScene/category จริง —
+    //   ใช้เป็นหลักสำหรับ triage.newsScene + sameAsHeroPerson (เทียบชื่อคนตรงๆ แม่นกว่าเดาจาก qcFlags)
+    //   (2) r.manifest.slots — มี measured.faceSharePct ตัวเลขจริงจากรอบประกอบนี้ (แม่นสุดถ้ามี — แต่พิสูจน์แล้วว่า
+    //   เป็น null ได้จริงในบางเคส เช่น MCV-ms6ac5atfg4) — map composer slotId → role ด้วยฟังก์ชันเดียวกัน
+    //   (3) r.qcFlags — fallback สุดท้ายสำหรับ faceSharePct (face_share_out:<slotId>:<pct>) และ faceVisible
+    //   (blind_crop/person_cut:<slotId> = ยืนยันว่าไม่ผ่านแน่ๆ) เมื่อ manifest ไม่มี/ไม่ครบ
+    //   🔴 ฟิลด์ที่ "หาไม่ได้จริง" ที่จุดนี้ (ไม่เดา ปล่อย null ตามที่ Opus สั่งให้บันทึกเหตุผลตรงๆ):
+    //   - faceVisible ค่าเต็ม 0-2 (มีแค่ proxy บางส่วนจาก blind_crop/person_cut → รู้แค่ "ไม่ผ่านแน่ๆ" ไม่รู้ 1 vs 2)
+    //     และ triage.textOverlay: ค่าจริงคำนวณชั่วคราวใน _runSecondEye (S6) ไม่ถูก persist ยาวมาถึง s7_wait —
+    //     ธง subslot_text_overlay ที่มีจริงใน qcFlags ก็เป็น bare string ไม่มี slotId ต่อท้าย จึง map กลับไปช่องไหน
+    //     ไม่ได้อย่างน่าเชื่อถือ
+    //   - triage.pHash64: manifest มีแค่ aHash (คนละอัลกอริทึมกับ pHash64 ที่ check no_dup ต้องการเทียบ hamming —
+    //     ใช้แทนกันจะให้ผลเทียบที่ไม่มีความหมายตรงกับค่าคาลิเบรตไว้ เสี่ยงหลอกว่า "เทียบซ้ำได้") — ปล่อย null
+    //     (check no_dup ยังพึ่ง duplicate_scene:<a>:<b> จาก qcFlags ได้เองอยู่แล้วถ้าธงนั้นมีจริง ไม่ต้องพึ่ง slots)
+    //   🔴 advisory เท่านั้น ไม่บล็อกอะไรเลย (ไม่แตะ qcVerdict/การเข้าคลัง/การตัดสินใจใดๆ ของ pipeline)
+    //   kill-switch: MEGA_FORMULA_CHECK (default ON, '0' = ไม่เรียกเลย formulaScore=null เสมอ)
+    let formulaScore = null;
+    if (process.env.MEGA_FORMULA_CHECK !== '0') {
+      try {
+        const { evaluateCoverFormula } = await import('@/lib/coverFormulaCheck');
+        const _qcFlags = Array.isArray(r.qcFlags) ? r.qcFlags : [];
+        const { slots: _formulaSlots, template: _formulaTemplate } = buildFormulaInputFromCoverResult({
+          qcFlags: _qcFlags,
+          manifestSlots: r.manifest?.slots,
+          pickImagesSlots: job.dossier.pickImages?.slots,
+        });
+        const _fc = evaluateCoverFormula({ slots: _formulaSlots, qcFlags: _qcFlags, template: _formulaTemplate });
+        const _measurable = _fc.checks.filter((c) => c.pass !== null);
+        const _unmeasurableCount = _fc.checks.length - _measurable.length;
+        formulaScore = { passed: _measurable.filter((c) => c.pass === true).length, total: _measurable.length, score: _fc.score, checks: _fc.checks };
+        // ★ ข้อ 3 (Opus): แยก "วัดไม่ได้ (n ข้อ)" ออกจาก "ผ่าน x/y" ให้อ่านออกชัด ไม่ปนกันจนเข้าใจผิดว่าวัดครบแล้วไม่ผ่าน
+        console.log(`[MEGA S7] 🧮 formula-check: ผ่าน ${formulaScore.passed}/${formulaScore.total} ข้อที่วัดได้ · วัดไม่ได้ ${_unmeasurableCount} ข้อ (score=${formulaScore.score ?? '-'})`);
+      } catch (e) {
+        console.warn('[MEGA S7] formula-check ล้ม (advisory เท่านั้น ไม่กระทบปก): ' + String(e?.message || e).slice(0, 150));
+      }
+    }
+
     // เซฟเป็นไฟล์ให้ UI ใช้ได้เลย (ทั้งผ่าน/ไม่ผ่าน — คนต้องเปิดดูใบที่ถูก hold ได้)
     // ★ 9 ก.ค.: เขียนดิสก์ล้ม (Vercel/Railway อ่านอย่างเดียว) ห้ามพังงาน — คลังคลาวด์รับช่วงเสิร์ฟภาพแทน
     const { promises: fs } = await import('fs');
@@ -7752,6 +7890,7 @@ export async function s7_wait(job) {
       manifest: r.manifest || null, // ★ Wave1 Batch E: ความจริงของรอบประกอบ (จาก composeAndVerify) — additive
       ...(finalAssignmentTrace ? { finalAssignmentTrace } : {}),
       qcVerdict, // ★ Wave2 A1: คำตัดสินด่าน (pass/reasons/suggestedStatus/advisory)
+      ...(formulaScore ? { formulaScore } : {}), // ★ แบตช์เฟส D ข้อ 1: คะแนนสูตร 478 ใบ (advisory) — ไม่มี = ไม่ใส่คีย์นี้เลย
       completedAt: new Date().toISOString(),
     };
 
@@ -7776,7 +7915,7 @@ export async function s7_wait(job) {
     let ent = null;
     try {
       const { addMegaCover } = await import('@/lib/megaCoverArchive');
-      ent = await addMegaCover({ id: job.id, title: job.dossier.desk?.title || '', source: 'mega', imageCaseId: job.dossier.images?.caseId || null, coverCaseId: r.caseId || '', coverPath, base64, template: r.template || '', score: r.score ?? null, throughMega: true, qcFlags: Array.isArray(r.qcFlags) ? r.qcFlags : [] }); // audit: ธงคุณภาพต้องถึงคลังจากทางหลักด้วย
+      ent = await addMegaCover({ id: job.id, title: job.dossier.desk?.title || '', source: 'mega', imageCaseId: job.dossier.images?.caseId || null, coverCaseId: r.caseId || '', coverPath, base64, template: r.template || '', score: r.score ?? null, throughMega: true, qcFlags: Array.isArray(r.qcFlags) ? r.qcFlags : [], ...(formulaScore ? { formulaScore } : {}) }); // audit: ธงคุณภาพต้องถึงคลังจากทางหลักด้วย · ★ แบตช์เฟส D ข้อ 1: formulaScore ก็ต้องถึงคลังจริงด้วยเช่นกัน
       if (!coverPath) coverPath = `/api/mega-covers/img?id=${encodeURIComponent(ent?.id || job.id)}`;
     } catch { if (!coverPath) coverPath = ''; /* คลังไม่ critical */ }
     return {

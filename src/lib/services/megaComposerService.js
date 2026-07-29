@@ -2147,12 +2147,36 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
     if (heroOk) { if (attempt > 0) console.log(`[MegaComposer] 🛡️ hero ผ่านด่านบังคับ (รอบ ${attempt + 1})`); break; }
     heroBanned.add(mainAssign.imageIndex);
     let ni = -1, nBest = 0;
-    loaded.forEach((im, i) => {
-      if (heroBanned.has(i) || (i !== mainAssign.imageIndex && used.has(i)) || isCollage[i]) return;
-      if (!_heroPersonOk(im)) return; // ★ 9 ก.ค. ค่ำ: ตัวสำรอง hero ก็ห้ามผิดคนเช่นกัน
-      const sc = heroScore(im, faceBoxes[i]);
-      if (sc > nBest) { nBest = sc; ni = i; }
-    });
+    // ★ แบตช์เฟส D ข้อ 3 (29 ก.ค. 69 — บทเรียน AC-0218, Opus เห็นด้วย): เดิม heroScore มีเทอม "หน้าเดี่ยว+25/
+    //   อื่น-20" ตัวเดียว — ภาพหมู่ 2 หน้ากับภาพหมู่ 12 หน้าโดนหักเท่ากันเป๊ะ (-20) แปลว่าถ้าภาพหมู่หน้าใหญ่/สะอาด/
+    //   ไม่ชิดขอบกว่า อาจชนะภาพ 2 หน้าที่ด้อยกว่านิดหน่อยได้ — เคส AC-0218 (hero ตกไปเป็นภาพงานเลี้ยง 5 หน้า
+    //   ระหว่าง fallback ตัวสุดท้าย) แม้ root cause จริงคือ "ไม่มีตัวเลือกอื่นเหลือเลย" (ดูคอมเมนต์ C-0 ใน
+    //   megaAdapters.js) แต่หลักการนี้ยังคุ้มทำเผื่อกรณีมีตัวเลือกน้อยหน้ากว่าเหลืออยู่จริงแต่ heroScore ไม่เลือก —
+    //   เรียง candidate ด้วย faceCount น้อยก่อนเสมอ (1 หน้า > 2 หน้า > หมู่) เป็นชั้นหลัก แล้วค่อยใช้ heroScore
+    //   ตัดสินภายในชั้นเดียวกัน (ไม่ใช่ผสมเป็นคะแนนเดียวแบบเดิม) · เกณฑ์ขั้นต่ำเดิม (sc>0) ยังคงอยู่ทุกกรณี
+    //   kill-switch: MEGA_HERO_FALLBACK_MINFACE (default ON, '0' = ลำดับเดิมเป๊ะ ใช้ heroScore ล้วนแบบเดิม)
+    if (process.env.MEGA_HERO_FALLBACK_MINFACE !== '0') {
+      const cands = [];
+      loaded.forEach((im, i) => {
+        if (heroBanned.has(i) || (i !== mainAssign.imageIndex && used.has(i)) || isCollage[i]) return;
+        if (!_heroPersonOk(im)) return; // ★ 9 ก.ค. ค่ำ: ตัวสำรอง hero ก็ห้ามผิดคนเช่นกัน
+        const sc = heroScore(im, faceBoxes[i]);
+        if (sc <= 0) return; // เกณฑ์ขั้นต่ำเดิม (คงพฤติกรรมเดิม — ใบคะแนนไม่ผ่านศูนย์ไม่นับเป็นตัวเลือก)
+        const faces = Math.max(1, Number(faceBoxes[i]?.count) || 1);
+        cands.push({ i, sc, faces });
+      });
+      if (cands.length) {
+        cands.sort((a, b) => a.faces - b.faces || b.sc - a.sc); // faceCount น้อยก่อนเสมอ · เท่ากันค่อยแพ้-ชนะด้วย heroScore
+        ni = cands[0].i; nBest = cands[0].sc;
+      }
+    } else {
+      loaded.forEach((im, i) => {
+        if (heroBanned.has(i) || (i !== mainAssign.imageIndex && used.has(i)) || isCollage[i]) return;
+        if (!_heroPersonOk(im)) return; // ★ 9 ก.ค. ค่ำ: ตัวสำรอง hero ก็ห้ามผิดคนเช่นกัน
+        const sc = heroScore(im, faceBoxes[i]);
+        if (sc > nBest) { nBest = sc; ni = i; }
+      });
+    }
     if (ni < 0) { console.log('[MegaComposer] 🛡️ hero ไม่ผ่านด่านแต่ไม่มีตัวเลือกอื่น — ใช้ที่ดีสุดเท่าที่มี'); qcFlags.push('hero_unverified_kept'); break; }
     console.log(`[MegaComposer] 🛡️ hero #${mainAssign.imageIndex} ไม่ผ่าน (หน้าไม่เด่นในผลจริง) → เปลี่ยนเป็น #${ni} ประกอบใหม่`);
     used.delete(mainAssign.imageIndex);
