@@ -338,6 +338,11 @@ function traceQcFlags(cropTrace) {
     //   หลบไม่ไหว (coverExecutorService.js _applyWatermarkEdgeGuard) — ชื่อ flag เดียวกับ C1 (ตาสองหาแทนที่ไม่เจอ)
     //   ตั้งใจให้เป็นชื่อเดียวกัน (สื่อความหมายเดียวกัน: "ยอมเก็บลายน้ำไว้เพราะไม่มีทางออกอื่น")
     if (tt.watermarkKept) out.push('watermark_kept');
+    // ★ MEGA_FACE_SHARE_LOOP (30 ก.ค. 69): ลูปป้อนกลับซูมสุดแรงแล้วหน้ายังไม่ถึงขอบล่างของชนิด hero นั้น
+    //   (executor แนบ tt.faceShareLimited = "<kind>:<pct>:<reason>") — สัญญาณ "วัตถุดิบไม่พอ ต้องหาเฟรมใกล้กว่านี้"
+    //   ไม่ใช่ธงลงโทษการครอป · สวิตช์ปิด = executor ไม่เคยแนบ field นี้ = byte-parity
+    if (tt.faceShareLimited) out.push(`face_share_limited:${tt.faceShareLimited}`);
+    if (tt.faceShareLoopWarn) out.push(`face_share_loop_warn:${tt.slot}`);
   }
   return out;
 }
@@ -1655,6 +1660,12 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
   //   ถูกแนบไว้ — ต่อสายผ่าน slotPlan → loaded[i] เหมือน _secondEyeSubSlotFlag เป๊ะ (ทุกช่อง รวม hero)
   for (const _im of loaded) {
     if (_im?._secondEyeWatermarkFlag) qcFlags.push(_im._secondEyeWatermarkFlag);
+  }
+  // ★ MEGA_HERO_H_GATES (30 ก.ค. 69 — default ON, '0'=ปิด): S6 จำใจใช้ hero ภาพนอน/หลับตา
+  //   (ทั้งพูลไม่มีภาพตื่นเลย) → _heroAwakeFlag='hero_sleeping_kept' ต่อสายมาถึง loaded[i] — ยกเป็น qcFlag ให้เห็น
+  //   สวิตช์ปิด = ไม่มี field นี้เลยตั้งแต่ต้นทาง = byte-parity (ไม่ต้องเช็ค env ซ้ำที่นี่)
+  for (const _im of loaded) {
+    if (_im?._heroAwakeFlag === 'hero_sleeping_kept') qcFlags.push('hero_sleeping_kept');
   }
   // ★ เฟส 6B.3 (10 ก.ค.): ส่ง "เป้าหน้าเด่น" (faceSizePct จาก ref DNA) ต่อช่องให้ executor —
   //   executor ใช้เป็น "ขั้นต่ำที่ต้องบังคับ" (ไม่ใช่แค่ hint) โดยมี cap ความปลอดภัยของมันเอง กันซูมแน่นเกิน/หัวขาด

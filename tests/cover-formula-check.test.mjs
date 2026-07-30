@@ -36,7 +36,7 @@ test('ไม่ส่ง argument เลย (default {}) — ไม่ throw', (
 // ============================================================
 // 1) face_share_hero
 // ============================================================
-test('face_share_hero: ค่าอยู่ในช่วง 40-46 → pass true', () => {
+test('face_share_hero: ค่าอยู่ในช่วง 36-48 → pass true', () => {
   const r = evaluateCoverFormula({ slots: [{ role: 'hero', faceSharePct: HERO_FACE_SHARE_MEDIAN_PCT }] });
   const c = getCheck(r, 'face_share_hero');
   assert.equal(c.pass, true);
@@ -45,8 +45,12 @@ test('face_share_hero: ค่าอยู่ในช่วง 40-46 → pass tr
 test('face_share_hero: ขอบล่าง/ขอบบนพอดี (inclusive) → pass true', () => {
   const lo = getCheck(evaluateCoverFormula({ slots: [{ role: 'hero', faceSharePct: HERO_FACE_SHARE_MIN_PCT }] }), 'face_share_hero');
   const hi = getCheck(evaluateCoverFormula({ slots: [{ role: 'hero', faceSharePct: HERO_FACE_SHARE_MAX_PCT }] }), 'face_share_hero');
-  assert.equal(lo.pass, true, 'ขอบล่าง 40 ต้องผ่าน (inclusive)');
-  assert.equal(hi.pass, true, 'ขอบบน 46 ต้องผ่าน (inclusive)');
+  const below = getCheck(evaluateCoverFormula({ slots: [{ role: 'hero', faceSharePct: 35.99 }] }), 'face_share_hero');
+  const above = getCheck(evaluateCoverFormula({ slots: [{ role: 'hero', faceSharePct: 48.01 }] }), 'face_share_hero');
+  assert.equal(lo.pass, true, 'ขอบล่าง 36 ต้องผ่าน (inclusive)');
+  assert.equal(hi.pass, true, 'ขอบบน 48 ต้องผ่าน (inclusive)');
+  assert.equal(below.pass, false, 'ต่ำกว่า 36 ต้องตก');
+  assert.equal(above.pass, false, 'สูงกว่า 48 ต้องตก');
 });
 test('face_share_hero: เล็กไป (30%) → pass false', () => {
   const c = getCheck(evaluateCoverFormula({ slots: [{ role: 'hero', faceSharePct: 30 }] }), 'face_share_hero');

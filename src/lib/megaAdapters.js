@@ -609,6 +609,9 @@ export async function _runSecondEye({
   isClean = (x) => x?.triage?.clean !== false,
   storyFitOf = null,
   STORY_SEL_ON = false,
+  // Optional caller-owned policy guard. Legacy callers omit it and retain the
+  // exact pre-policy replacement behavior.
+  heroCandidateAllowed = null,
 } = {}) {
   const _cropCtx = { dirtyFallbackIds, isClean, storyFitOf, STORY_SEL_ON };
   const roles = (activeSlots || []).filter((r) => slots[r] && slots[r].id).slice(0, 5);
@@ -768,7 +771,7 @@ export async function _runSecondEye({
     //   (s7_cover/compose-test) อ่าน slots[role].imageUrl ตรงๆ ไม่ได้ join จาก .id ซ้ำ ถ้าลืมอัปเดต ภาพจะไม่สลับจริง
     if (info.primary?.result?.textOverlay === 2 && info.backup?.result && info.backup.result.textOverlay < 2) {
       const bRec = byId.get(info.backup.id);
-      if (bRec?.imageUrl) {
+      if (bRec?.imageUrl && (role !== 'hero' || typeof heroCandidateAllowed !== 'function' || heroCandidateAllowed(bRec))) {
         const oldId = slots[role].id;
         slots[role].id = info.backup.id;
         slots[role].imageUrl = bRec.imageUrl;
@@ -809,6 +812,8 @@ export async function _runSecondEye({
           if (String(map[i].id) === currentHeroId) continue;
           const cand = byIndex.get(i);
           if (!cand) continue;
+          const candRec = byId.get(String(map[i].id));
+          if (typeof heroCandidateAllowed === 'function' && !heroCandidateAllowed(candRec)) continue;
           if (cand.faceVisible === 2 && cand.textOverlay <= 1 && cand.sameAsHeroPerson === true) {
             candidateEntry = { mIndex: i, id: map[i].id, result: cand };
             break;
@@ -4497,6 +4502,45 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   //   ภาพเก่าไม่มี field (undefined) = ข้ามด่านเงียบ (fail-open ตาม pattern faceH) ไม่ตัดทิ้ง/ไม่ HOLD มั่ว
   const HERO_FRONTAL_ON = process.env.MEGA_HERO_FRONTAL === '1';
   const _faceFrontOf = (x) => { const v = Number(x?.triage?.faceFront); return Number.isInteger(v) && v >= 0 && v <= 2 ? v : null; };
+  // ★ 30 ก.ค. 69 (MEGA_HERO_H_GATES — "ด่านฟอร์แมต hero" H5/H6/H8) — **default ON** เพราะมีหลักฐานรองรับแล้ว
+  //   📊 วิจัยจริง `_research-igdara-15k/HERO-POSE-RESEARCH.md` (สำมะโนปกเพจ 478 ใบ + เปิดดูด้วยตา 85 ใบ +
+  //      กลุ่มควบคุม FAIL 124 ใบ):
+  //      • hero ท่านอน = 1/478 (0.21%) · hero หลับตา = 1/478 (0.21%) · ชั้น 100k+ ตาเปิด 18/18 นอน 0/18
+  //      • เพจ "ใช้" ภาพนอน/ป่วย/หลับตาจริง (3.8% ของปก) แต่วางในช่องย่อย/วงกลม **มากกว่า hero 6 เท่า** (18 vs 3) = H6
+  //   🔴 ความซื่อสัตย์ที่ต้องคงไว้ (วิจัยระบุเอง): กลุ่ม FAIL ก็ 0/25 เหมือนกัน ⇒ นี่คือ **"ด่านกันของเสีย"
+  //      ไม่ใช่ "ตัวเพิ่มยอด"** — ตั้งเป็น gate ได้ **ห้าม**ตั้งเป็น booster ถ่วงน้ำหนักแรง และห้ามอ้างว่าทำแล้วยอดขึ้น
+  //   H8 (ข้อยกเว้นเดียว): ทั้งพูลไม่มีภาพตาเปิด/ไม่นอนเลย → ใช้ได้ ไม่ HOLD + ตั้งธง hero_sleeping_kept
+  //   ⚠️ H5 มี "เงื่อนไขยกเว้น" (นอน/หลับตาแต่ faceH≥0.40 + หน้าตั้งตรง H2 + เต็มช่อง H4 พร้อมกัน = ยอมได้ · ฐาน
+  //      แค่ 2 ใบ ความมั่นใจกลาง) — **จงใจไม่ implement**: ชั้น S6 วัด roll (H2) และพื้นหลังว่าง (H4) ไม่ได้เลย
+  //      การใส่แค่ท่อน faceH ท่อนเดียวจะ "หลวมกว่าที่วิจัยเขียนไว้" = เดาแทนหลักฐาน
+  //   สัญญาข้อมูล: triage.eyesClosed / triage.lyingDown = bool | null (จาก MEGA_UNGUARDED_TAG ที่ตาคัด) —
+  //   เทียบ `=== true` เท่านั้น (null/undefined = "ตาไม่รู้" ห้ามตัดสิทธิ์ = fail-open ตาม pattern faceFront)
+  //   ⇒ ตาไม่เปิดสวิตช์ MEGA_UNGUARDED_TAG = ไม่มีป้ายเลย = ด่านนี้ไม่ทำอะไรเลยโดยปริยาย (ปลอดภัยที่ default ON)
+  const HERO_H_GATES_ON = process.env.MEGA_HERO_H_GATES !== '0';
+  const _heroAsleepOf = (x) => {
+    const t = x?.triage;
+    if (!t || typeof t !== 'object') return false;
+    return t.eyesClosed === true || t.lyingDown === true;
+  };
+  // H6 — ภาพนอน/หลับตา "ย้ายไปช่องย่อย/วงกลม": ลดสิทธิ์ hero (ข้างบน) + เพิ่มคะแนนช่องเล่าเรื่อง (ที่นี่)
+  //   ค่าเริ่มต้น 1.0 บนสเกล _combinedStory (0-10) = ขยับลำดับพอสังเกต ไม่พลิกกระดาน (เคารพคำเตือน "อย่าถ่วงแรง")
+  const HERO_H_EVIDENCE_BONUS = (() => {
+    const v = Number(process.env.MEGA_HERO_H_EVIDENCE_BONUS);
+    return Number.isFinite(v) && v >= 0 && v <= 5 ? v : 1.0;
+  })();
+  // `_legacyKeyOf` folds semantic evidence→context and moment→action. Reaction
+  // remains a real sub-slot, so include it explicitly as well.
+  const AWAKE_EVIDENCE_ROLES = new Set(['reaction', 'context', 'action', 'circle']);
+  // ★ 30 ก.ค. 69 (MEGA_HERO_UNGUARDED_BOOST) — ผู้บริโภคตัวแรกของ triage.unguardedScore ที่ยัง dormant อยู่
+  //   🔴 **คง default OFF** ตามผลวิจัย: ลักษณะฟอร์แมตพบเท่ากันในกลุ่ม viral และ FAIL ⇒ เป็น gate ไม่ใช่ booster
+  //   (จะเปิดเป็นโบนัสเบาๆ ได้ก็ต่อเมื่อวัดผลจริงหลังใช้งานแล้วเท่านั้น) · น้ำหนักตั้งได้ผ่าน env
+  //   ค่าเริ่มต้น 0.10 = "ตัวตัดสินตอนหน้าใหญ่พอกัน" (faceH ต่างกัน ≤0.10 ถึงจะพลิกได้) ไม่ใช่ตัวชี้ขาดเหนือขนาดหน้า
+  const HERO_UNGUARDED_BOOST_ON = process.env.MEGA_HERO_UNGUARDED_BOOST === '1';
+  const HERO_UNGUARDED_WEIGHT = (() => {
+    const v = Number(process.env.MEGA_HERO_UNGUARDED_WEIGHT);
+    return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 0.10;
+  })();
+  const _unguardedOf = (x) => { const v = Number(x?.triage?.unguardedScore); return Number.isInteger(v) && v >= 0 && v <= 3 ? v : null; };
   const HERO_FACE_VISIBLE_MIN = (() => { const v = Number(process.env.MEGA_HERO_FACE_VISIBLE_MIN); return Number.isFinite(v) && v > 0 && v <= 1 ? v : 0; })();
   // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD — ช่องย่อยลายตา): ตาคัด (Gemini) แนบ triage.busy 0-2 ต่อภาพ
   //   (0=สะอาดโฟกัสชัด, 1=มีพื้นหลังกิจกรรมบ้างแต่ subject หลักยังชัด, 2=ลายตา/คนเยอะหาโฟกัสไม่ได้/มุมกว้างไม่มีจุดเด่น)
@@ -4637,7 +4681,23 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD): ลบ k*busy (k=0.15, busy 0-2 → โทษสูงสุด 0.3) จากคะแนนรวมของช่อง story
   //   (context/action/circle) — ภาพลายตาแพ้ภาพสะอาดที่ story-fit ใกล้กัน · ปิดสวิตช์/busy neutral = คะแนนเดิมเป๊ะ
   // ★ C-1: roleKey optional (2nd param) — ไม่ส่ง = พฤติกรรมเดิมเป๊ะ (storyFitOf(x) ไม่มี timeline bonus)
-  const _combinedStory = (x, roleKey) => 4 * ((storyFitOf(x, roleKey) ?? 0) / 10) + 3 * (isClean(x) ? 1 : 0) + 3 * (1 - Math.min(sizePenalty(x), 2) / 2) - (CLUTTER_GUARD_ON ? 0.15 * _busyOf(x) : 0);
+  // ★ H6 (MEGA_HERO_H_GATES, default ON): เพจเองก็ใช้ภาพนอน/หลับตา แต่วางในช่องย่อย/วงกลม มากกว่า hero 6 เท่า (18 vs 3 ใน 478)
+  //   → บวกโบนัสให้ที่ช่องพวกนั้น (ตรงข้ามกับที่ถูกตัดสิทธิ์จาก hero) · ปิดสวิตช์ = ไม่บวกเลย = คะแนนเดิมทุก byte
+  const _awakeEvidenceBonus = (x, roleKey) => (
+    (HERO_H_GATES_ON && roleKey && AWAKE_EVIDENCE_ROLES.has(roleKey) && _heroAsleepOf(x)) ? HERO_H_EVIDENCE_BONUS : 0
+  );
+  // Outside story-selection there is no story comparator to consume H6. Apply
+  // the same modest bonus over quality, but compare only mixed awake/asleep
+  // pairs so candidates with no pose evidence retain their existing order.
+  const _awakeEvidenceRank = (roleKey) => (a, b) => {
+    const ab = _awakeEvidenceBonus(a, roleKey);
+    const bb = _awakeEvidenceBonus(b, roleKey);
+    if (ab === bb) return 0;
+    const aq = Number.isFinite(Number(a?.triage?.quality)) ? Number(a.triage.quality) : 0;
+    const bq = Number.isFinite(Number(b?.triage?.quality)) ? Number(b.triage.quality) : 0;
+    return (bq + bb) - (aq + ab);
+  };
+  const _combinedStory = (x, roleKey) => 4 * ((storyFitOf(x, roleKey) ?? 0) / 10) + 3 * (isClean(x) ? 1 : 0) + 3 * (1 - Math.min(sizePenalty(x), 2) / 2) - (CLUTTER_GUARD_ON ? 0.15 * _busyOf(x) : 0) + _awakeEvidenceBonus(x, roleKey);
   // ★ C-1: storyRank เปลี่ยนเป็น curried (roleKey) => comparator — เรียกแบบเดิม storyRank(a,b) ตรงๆ (ไม่ curry)
   //   จะพัง เพราะงั้น caller เดิมทุกจุดต้องเรียก storyRank(roleKey) เพื่อได้ comparator กลับมา ★ ไม่มี caller เดิม
   //   เรียก storyRank(a,b) ตรงๆ อยู่แล้วในไฟล์นี้ (เช็คแล้ว — จุดเดียวที่ใช้คือ .sort(storyRank) ด้านล่าง ต้องแก้เป็น
@@ -4686,6 +4746,14 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     ...(HERO_PROMINENCE_ON ? { faceH: (() => { const v = _faceHFrac(x.triage?.faceBox); return v == null ? undefined : Math.round(v * 100) / 100; })() } : {}),
     // ★ 21 ก.ค. (MEGA_HERO_FRONTAL): มุมการเห็นหน้า 0-2 ให้ผู้กำกับเห็น — วัดไม่ได้/สวิตช์ปิด = ไม่ใส่ field
     ...(HERO_FRONTAL_ON ? { faceFront: _faceFrontOf(x) ?? undefined } : {}),
+    // ★ MEGA_HERO_H_GATES (default ON): ให้ผู้กำกับ LLM เห็นสภาพคนในภาพตรงๆ (นอน/หลับตา = ไม่ใช่ hero แต่เป็น
+    //   หลักฐาน/บริบทชั้นดี) — ใส่ field เฉพาะเมื่อ "ตาตอบมาจริง" (true/false) · ไม่รู้ (null) = ไม่ใส่
+    ...(HERO_H_GATES_ON ? {
+      eyesClosed: (x.triage?.eyesClosed === true || x.triage?.eyesClosed === false) ? x.triage.eyesClosed : undefined,
+      lyingDown: (x.triage?.lyingDown === true || x.triage?.lyingDown === false) ? x.triage.lyingDown : undefined,
+    } : {}),
+    // ★ MEGA_HERO_UNGUARDED_BOOST (default OFF): คะแนนจังหวะธรรมชาติ 0-3 ให้ผู้กำกับเห็น · วัดไม่ได้ = ไม่ใส่
+    ...(HERO_UNGUARDED_BOOST_ON ? { unguarded: _unguardedOf(x) ?? undefined } : {}),
     // ★ 19 ก.ค. (MEGA_CLUTTER_GUARD): busy 0-2 จากตาคัด — ให้ผู้กำกับ LLM เห็น "ภาพนี้ลายตาแค่ไหน" เลี่ยงลงช่องย่อย
     //   (ปิดสวิตช์/ตาไม่ส่ง busy มา = ไม่ใส่ field เลย → prompt เดิมเป๊ะ ไม่ regress)
     ...(CLUTTER_GUARD_ON ? { busy: (() => { const v = Number(x.triage?.busy); return Number.isFinite(v) ? Math.max(0, Math.min(2, v)) : undefined; })() } : {}),
@@ -5479,6 +5547,33 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     }
     return _isHeroSlot(slot) ? isHeroChar(img) : true;
   };
+  // H5/H8 ใช้ eligibility สูตรเดียวทุกชั้น: ต้องเป็นตัวเลือก hero ที่ใช้ได้จริง
+  // ไม่ใช่เพียงภาพที่ "ไม่ติดป้ายหลับ" แต่ผิดคน/หลายหน้า/เล็ก/สกปรก
+  const _eligibleAwakeHero = (img) => {
+    if (!img
+      || !_identityOk(_canonHeroId, img)
+      || (img.triage?.faceCount ?? 0) !== 1
+      || !heroSizeOk(img)
+      || !isClean(img)
+      || _heroAsleepOf(img)) return false;
+    if (HERO_FACE_VISIBLE_ON) {
+      const faceH = _faceHFrac(img.triage?.faceBox);
+      if (faceH == null || faceH < HERO_FACE_VISIBLE_MIN) return false;
+    }
+    if (HERO_FRONTAL_ON) {
+      const front = _faceFrontOf(img);
+      if (front != null && front < 2) return false; // unknown remains fail-open, matching the existing frontal gate
+    }
+    // Final H reconciliation runs after the crop pre-filter. Do not pull back
+    // an awake candidate that the active hard crop check already rejected (or
+    // could not measure); use the exact same replacement eligibility as that
+    // guard so its decision and diagnostics cannot become stale.
+    if (_cropPrefilterOn && _cropGuard?.heroSlot) {
+      const cropVerdict = _cropGuard.byId?.get(String(img.id));
+      if (!cropVerdict || cropVerdict.heroEligible !== true || cropVerdict.hasRealDims !== true) return false;
+    }
+    return true;
+  };
   const _idGated = (slot) => (semContract
     ? (_isHeroSlot(slot) || !!String(semById.get(slot)?.wantPerson || '').trim())
     : slot === 'hero');
@@ -5747,6 +5842,19 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         }
       }
     }
+    // ★ 30 ก.ค. 69 (H5/H6 — MEGA_HERO_H_GATES default ON, หลักฐาน: hero นอน 1/478 · หลับตา 1/478): →
+    //   หาสำรอง "คนเดียวกัน ตื่น เดี่ยว ขนาดพอ สะอาด" สลับ (hard exclusion เมื่อมีตัวเลือกอื่นจริง) — ไม่เจอ =
+    //   คงไว้ (ห้ามทำงานตาย) แล้วปล่อยให้บล็อกสรุปท้ายฟังก์ชันตั้งธง hero_sleeping_kept แทน
+    //   ตาไม่รู้ (null) = ไม่ตัดสิน (fail-open) · ปิดสวิตช์ = ข้ามทั้ง block พฤติกรรมเดิมเป๊ะ
+    if (img && _isHeroSlot(slot) && HERO_H_GATES_ON && _heroAsleepOf(img)) {
+      const awake = sorted.find((x) => !used.has(String(x.id)) && String(x.id) !== String(img.id)
+        && _eligibleAwakeHero(x));
+      if (awake) {
+        console.log(`[MEGA S6] 😴 hero ${img.id} นอน/หลับตา (eyesClosed=${img.triage?.eyesClosed} lyingDown=${img.triage?.lyingDown}) → สลับ ${awake.id} (ตื่น)`);
+        img = awake;
+        reason = 'hero ตื่น (โค้ดบังคับ H5/H6 MEGA_HERO_H_GATES — เดิมภาพนอน/หลับตา)';
+      }
+    }
     // ★ D-sidecar: solo-face swap / hero-size swap เปลี่ยนตัวจริง (reference เปลี่ยน) = 'policy_override' — ตรวจที่ไซต์จริง
     if (_dEvidenceOn && img && _dPreSwap && img !== _dPreSwap) _dStage = 'policy_override';
     if (!img) {
@@ -5757,7 +5865,11 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       const cands0 = sorted.filter((x) => !used.has(String(x.id)) && !(x.borrowed === true && (_fbLegacyKey === 'context' || _fbLegacyKey === 'action')));
       // ★ 10 ก.ค. เฟส 6A (6.3): ช่อง context/action/circle เรียง candidate ด้วยแกน story-fit (story40/clean30/ขนาดจริง30)
       //   ภาพ "สื่อเรื่อง" ชนะ "หน้าชัดเฉยๆ" เมื่อคุณภาพใกล้กัน · hero ไม่แตะ (ถูกคน+หน้าชัดมาก่อน) · ปิด/ไม่มีคำค้นเรื่องราว = ลำดับเดิมเป๊ะ
-      const cands = (STORY_SEL_ON && STORY_SLOTS.has(_legacyKeyOf(slot))) ? cands0.slice().sort(storyRank(_legacyKeyOf(slot))) : cands0;
+      const cands = (STORY_SEL_ON && STORY_SLOTS.has(_fbLegacyKey))
+        ? cands0.slice().sort(storyRank(_fbLegacyKey))
+        : (HERO_H_GATES_ON && AWAKE_EVIDENCE_ROLES.has(_fbLegacyKey) && cands0.some(_heroAsleepOf)
+          ? cands0.slice().sort(_awakeEvidenceRank(_fbLegacyKey))
+          : cands0);
       const hint = SLOT_CATEGORY_HINT[_legacyKeyOf(slot)] || [];
       // ★ 9 ก.ค. เฟส 2.2: hero fallback ลองแบบมีเกณฑ์ขนาดจริงก่อน (heroSizeOk) — ไม่เจอเลยค่อยถอยเกณฑ์เดิม (ไม่กรองขนาด)
       const findHeroSized = (arr) => {
@@ -5772,7 +5884,19 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       // ★ วงกลม: "คนละคนกับ hero" — อ่านสถานะ hero ณ ตอนนี้เท่านั้น (ยังไม่ถึงคิว hero ในลูป = ไม่บังคับ ตรงกับ
       //   กฎเดียวกับ story-rescue ด้านล่าง `!heroPerson0 || person !== heroPerson0`) ไม่ทำให้พังถ้าลำดับช่องต่างไป
       const diffPerson = (x) => { const hp = _lc(slots[_canonHeroId]?.person || ''); return !hp || _lc(x?.triage?.person || '') !== hp; };
-      const pickFrom = (arr) =>
+      // ★ MEGA_HERO_UNGUARDED_BOOST (default OFF): อันดับผู้สมัคร hero = ขนาดหน้า + น้ำหนัก×(จังหวะธรรมชาติ/3)
+      //   ปิดสวิตช์ = ค่าเท่ากับ (_heroFaceHOf(x) ?? -1) เป๊ะ ⇒ comparator ให้ผลเดิมทุกคู่ (sort เสถียร = ลำดับเดิม)
+      const _heroRankOf = (x) => (_heroFaceHOf(x) ?? -1)
+        + (HERO_UNGUARDED_BOOST_ON ? HERO_UNGUARDED_WEIGHT * ((_unguardedOf(x) ?? 0) / 3) : 0);
+      // ★ H5 (MEGA_HERO_H_GATES, default ON): hard exclusion ชั้นผู้สมัคร hero — ตัดภาพนอน/หลับตาออก "เมื่อยังมี
+      //   ตัวเลือกอื่นจริง" · ทั้งพูลเป็นแบบนี้หมด = คืนลิสต์เดิม (ไม่ทำงานตาย ธงตั้งท้ายฟังก์ชัน)
+      //   ปิดสวิตช์/ไม่ใช่ช่อง hero = คืน arr เดิมตัวเดิมเป๊ะ (reference เดิม ไม่สร้าง array ใหม่)
+      const _awakeOnly = (arr) => {
+        if (!HERO_H_GATES_ON || !_isHeroSlot(slot) || !Array.isArray(arr) || !arr.length || !arr.some(_heroAsleepOf)) return arr;
+        const awake = arr.filter((x) => !_heroAsleepOf(x));
+        return awake.length ? awake : arr;
+      };
+      const pickFrom = (arr0) => ((arr) =>
         // ★ 21 ก.ค. (MEGA_HERO_FRONTAL): เต็มหน้า (faceFront=2) + เดี่ยว + ขนาดพอ ชนะทุกชั้นเมื่อมี — ภาพมุมข้าง/
         //   ก้มหน้าตกไป tier ล่างตามปกติ (ไม่ตัดทิ้ง) · field ไม่มี = ไม่เข้าเกณฑ์ชั้นนี้ · ปิดสวิตช์ = ข้ามชั้นนี้เดิมเป๊ะ
         (_isHeroSlot(slot) && HERO_FRONTAL_ON
@@ -5783,7 +5907,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         //   ด้วย faceH มากสุดก่อน (สำเนาเรียงแยกต่างหาก ไม่แตะลำดับ arr/sorted เดิมที่เรียงคุณภาพ) · faceBox วัดไม่ได้
         //   (null) = ไม่เข้าเกณฑ์นี้ ไม่ใช่ตัดทิ้ง (ลง tier ถัดไปตามปกติ) · ปิดสวิตช์ MEGA_HERO_PROMINENCE=0 = ข้ามชั้นนี้ พฤติกรรมเดิมเป๊ะ
         (_isHeroSlot(slot) && HERO_PROMINENCE_ON
-          ? [...arr].sort((a, b) => (_heroFaceHOf(b) ?? -1) - (_heroFaceHOf(a) ?? -1))
+          ? [...arr].sort((a, b) => _heroRankOf(b) - _heroRankOf(a))
             .find((x) => _identityOk(slot, x) && (x.triage?.faceCount ?? 0) === 1 && heroSizeOk(x) && (_heroFaceHOf(x) ?? -1) >= HERO_FACE_PROMINENCE_MIN)
           : null) ||
         // ★ นโยบาย C (19 ก.ค., MEGA_HERO_SINGLE): หน้าเดี่ยว+ขนาดพอ ต้องชนะภาพคู่เสมอเมื่อมี — เช็คก่อน
@@ -5804,7 +5928,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           ? arr.find((x) => (x.triage?.faceCount ?? 0) >= 1 && (_heroFaceHOf(x) ?? -1) >= CIRCLE_FACE_PRESENCE_MIN && diffPerson(x) && _busyOf(x) <= 1)
           : null) ||
         arr[0] ||
-        null;
+        null)(_awakeOnly(arr0));
       // B (reject ลายน้ำ): ช่องทั่วไปหยิบภาพสะอาดก่อน ไม่มีค่อยยอมลายน้ำ · hero ยึด "ถูกคน 100%" เหนือทุกข้อ
       // ★ เฟส 3.1: ชั้นแรกหยิบ "ฉากที่ยังไม่ใช้" ก่อน (สะอาด+ฉากใหม่ → สะอาด → ฉากใหม่ → อะไรก็ได้)
       const freshScene = (x) => { const k = sceneKeyOf(x); return !k || !chosenScenes.has(k); };
@@ -6194,6 +6318,9 @@ export async function s6_slots(job, { origin, _deps } = {}) {
         });
       }
       if (HERO_FRONTAL_ON) _narrowWhenAvailable((o) => _faceFrontOf(o.rec) === 2);
+      // ★ MEGA_HERO_H_GATES (default ON): ด่านเลือกต้นทาง hero ต้องไม่พลิกกลับไปหยิบภาพนอน/หลับตาที่ด่านก่อนหน้า
+      //   เพิ่งตัดออก — _narrowWhenAvailable = "แคบได้เมื่อมีของ" (ทั้งพูลนอนหมด = ไม่แคบ ไม่ทำงานตาย) ตรงสเปกพอดี
+      if (HERO_H_GATES_ON) _narrowWhenAvailable((o) => !_heroAsleepOf(o.rec));
       if (HERO_PROMINENCE_ON) {
         _narrowWhenAvailable((o) => (_faceHFrac(o.rec.triage?.faceBox) ?? -1) >= HERO_FACE_PROMINENCE_MIN);
       }
@@ -7216,6 +7343,67 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     _imagesPatch = { ...im, quarantine: _quarField };
   }
 
+  // H5 final reconciliation: post-selection guards can replace the hero after the
+  // first awake filter. Re-check the actual final slot here, before HOLD/second-eye.
+  // Prefer an unused eligible candidate. If the only eligible candidate is already
+  // in a sub-slot, perform a safe two-way swap so the sleeping image becomes
+  // evidence rather than duplicating an image or violating a slot identity contract.
+  // ตาสองต้องกันภาพนอน/หลับตาทุกครั้งที่พูลยังมีใบที่ไม่ถูกป้ายว่านอนอยู่เลย.
+  // ใช้ predicate ท่าทางล้วนตรงสเปก; eligibility เต็มชุดยังเป็นอำนาจของ H5 reconciliation ด้านล่าง.
+  const _hGateHasNonSleeping = HERO_H_GATES_ON && sorted.some((x) => !_heroAsleepOf(x));
+  if (HERO_H_GATES_ON && _canonHeroId && slots[_canonHeroId]) {
+    const _awakeHeroPool = sorted.filter(_eligibleAwakeHero);
+    const _currentEntry = slots[_canonHeroId];
+    const _currentRec = byId.get(String(_currentEntry.id)) || null;
+    if (_currentRec && _heroAsleepOf(_currentRec) && _awakeHeroPool.length) {
+      const _rolesForId = (id) => activeSlots.filter((role) => (
+        role !== _canonHeroId && slots[role] && String(slots[role].id) === String(id)
+      ));
+      const _awakeOptions = _awakeHeroPool.map((rec) => ({ rec, donorRoles: _rolesForId(rec.id) }));
+      const _canDonate = ({ donorRoles }) => {
+        if (donorRoles.length !== 1) return false;
+        const donor = donorRoles[0];
+        return !_idGated(donor) || _identityOk(donor, _currentRec);
+      };
+      const _choice = _awakeOptions.find(({ donorRoles }) => donorRoles.length === 0)
+        // Prefer ordinary evidence panels; use circle as the final legal
+        // sub-slot source instead of incorrectly declaring the whole pool asleep.
+        || _awakeOptions.find((option) => _canDonate(option) && !_isCircleSlot(option.donorRoles[0]))
+        || _awakeOptions.find((option) => _canDonate(option) && _isCircleSlot(option.donorRoles[0]))
+        || null;
+      if (_choice) {
+        const _assignSlotImage = (role, rec, reason) => {
+          const entry = slots[role];
+          entry.id = rec.id;
+          entry.imageUrl = rec.imageUrl;
+          entry.person = rec.triage?.person || null;
+          entry.category = rec.triage?.category || null;
+          entry.emotion = rec.triage?.emotion || null;
+          entry.reason = reason;
+          _syncSlotMetaAfterSwap(slots, role, rec, { dirtyFallbackIds, isClean, storyFitOf, STORY_SEL_ON });
+          delete entry._secondEyeFaceBox;
+          delete entry._secondEyeHeroFaceHidden;
+          delete entry._heroAwakeFlag;
+          delete entry._heroMinSourceWarning;
+        };
+        const _donorRole = _choice.donorRoles[0] || null;
+        if (_donorRole) {
+          _assignSlotImage(
+            _donorRole,
+            _currentRec,
+            'ภาพนอน/หลับตาเก็บเป็น evidence/sub-slot หลัง MEGA_HERO_H_GATES สลับ hero',
+          );
+        }
+        _assignSlotImage(
+          _canonHeroId,
+          _choice.rec,
+          'hero ตื่น (final reconciliation MEGA_HERO_H_GATES)',
+        );
+        console.log(`[MEGA S6] 😴 hero ${_currentRec.id} ถูกด่านท้ายแทนด้วย ${_choice.rec.id} (ตื่น)${_donorRole ? ` · สลับสองทางกับ ${_donorRole}` : ''}`);
+      }
+    }
+  }
+
   // ★ นโยบาย C (19 ก.ค., MEGA_HERO_SINGLE): เช็คสถานะ slots[hero] "สุดท้ายจริง" หลัง loop + post-processing
   //   ทั้งหมด (story-rescue/crop-guard swap/cross-case borrow sweep) จบแล้ว — ไม่ใช้ flag ที่ตั้งกลาง loop เพราะ
   //   บล็อกด้านบนอาจสลับ hero อีกที (แก้ปัญหาให้แล้ว หรือทำปัญหาใหม่) เช็คที่นี่แม่นตรงกับผลจริงเสมอ
@@ -7307,7 +7495,10 @@ export async function s6_slots(job, { origin, _deps } = {}) {
       // ★ B1 fix (เฟส B-1): ส่ง context จริงของ s6_slots เข้าไปให้ _runSecondEye ซิงก์ meta (clean/newsScene/
       //   faces/dirtyFallback/storyFit/_heroFaceCrop) ให้ตรงภาพจริงหลังสลับทุกจุด — ตัวแปรทั้ง 4 นี้มีอยู่แล้วใน
       //   scope s6_slots (ประกาศไว้ก่อนหน้าจุดนี้ทั้งหมด) ไม่ต้องคำนวณซ้ำ
-      const _se = await _runSecondEye({ slots, activeSlots, byId, caseId: _caseIdForEye, _deps, dirtyFallbackIds, isClean, storyFitOf, STORY_SEL_ON });
+      const _se = await _runSecondEye({
+        slots, activeSlots, byId, caseId: _caseIdForEye, _deps, dirtyFallbackIds, isClean, storyFitOf, STORY_SEL_ON,
+        ...(HERO_H_GATES_ON && _hGateHasNonSleeping ? { heroCandidateAllowed: (x) => !_heroAsleepOf(x) } : {}),
+      });
       console.log(`[MEGA S6] 👁️‍🗨️ ตาสอง: ตรวจ ${_se.checked} ใบ · เปลี่ยน ${_se.swapped} · แก้พิกัด ${_se.fixedCoords}${_se.liesCaught ? ` · จับตาแรกโกหก ${_se.liesCaught}` : ''}${_se.subSlotReplaced ? ` · แทนช่องย่อย ${_se.subSlotReplaced} ใบ` : ''}`);
     } catch (e) {
       console.log('[MEGA S6] 👁️‍🗨️ ตาสอง: ล้ม/timeout — เดินต่อแบบเดิม:', String(e?.message || '').slice(0, 60));
@@ -7339,6 +7530,28 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     }
   }
 
+  // ★ 30 ก.ค. 69 (H8 — MEGA_HERO_H_GATES บล็อกสรุป, default ON): ตัดสินจาก "hero ตัวจริงใบสุดท้าย" หลังทุกด่าน/
+  //   ตาสองจบสนิท (เหตุผลเดียวกับ HOLD ของ FACE_VISIBLE/FRONTAL) — ยังเป็นภาพนอน/หลับตา = แปลว่าทั้งพูลไม่มี
+  //   ตัวเลือกตื่นที่ผ่าน eligibility เลย ⇒ **ไม่ HOLD** (H8 ป้องกันงานตาย) แต่
+  //   ตั้งธง hero_sleeping_kept ให้เห็นตรงๆ ทั้งใน dossier และต่อสายเป็น qcFlag ที่ชั้นประกอบ
+  //   (pattern เดียวกับ _secondEyeSubSlotFlag/_secondEyeWatermarkFlag เป๊ะ) · ปิดสวิตช์ = ไม่มีธง/ไม่มี field เลย
+  let _heroAwakePatch = null;
+  if (HERO_H_GATES_ON && _canonHeroId && slots[_canonHeroId]) {
+    const _awEntry = slots[_canonHeroId];
+    const _awRec = byId.get(String(_awEntry.id)) || null;
+    if (_awRec && _heroAsleepOf(_awRec)) {
+      _awEntry._heroAwakeFlag = 'hero_sleeping_kept';
+      _heroAwakePatch = {
+        sleepingKept: true,
+        imageId: String(_awRec.id),
+        eyesClosed: _awRec.triage?.eyesClosed === true,
+        lyingDown: _awRec.triage?.lyingDown === true,
+      };
+      console.warn(`[MEGA S6] 😴⚠️ hero ${_awRec.id} ยังเป็นภาพนอน/หลับตาหลังทุกด่าน (พูลไม่มีภาพตื่นที่ผ่าน eligibility แทน) → ธง hero_sleeping_kept (ไม่ HOLD ตาม H8)`);
+    } else if (_awEntry._heroAwakeFlag) {
+      delete _awEntry._heroAwakeFlag; // กันธงค้างข้ามรอบเมื่อสลับเป็นภาพตื่นสำเร็จ
+    }
+  }
   // ★ WAVE1A: _refHeroV2Patch was computed by the PRE-BRAIN gate above (Fix #6) and, on success, is attached
   //   additively below. HOLD already returned before the brain, so here it is either null (OFF) or the frozen
   //   success payload (ON). It never mutates slots/slotOrder/heroSlotId/slotContractHash or any legacy field.
@@ -7347,7 +7560,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     nextAction: 'continue',
     summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'}${storyTag}${quarantineTag} — ${(brain.note || '').slice(0, 80)}`,
     dossierPatch: {
-      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}), ...(_refHeroV2Patch ? { refHeroV2: _refHeroV2Patch } : {}), ...(_cropGuardPatch ? { cropGuard: _cropGuardPatch } : {}), ...(_heroMinSourcePatch ? { heroMinSource: _heroMinSourcePatch } : {}), ...(SOLVER_LIVE ? { s6_authority: _solverAuthorityLabel, ...(_solverInvalidReason ? { solverInvalidReason: _solverInvalidReason } : {}) } : {}), ...(CROSS_CASE_BORROW ? { crossCaseBorrow: { borrowedCount: _borrowedCount, borrowedPersons: _borrowedPersons } } : {}) },
+      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}), ...(_refHeroV2Patch ? { refHeroV2: _refHeroV2Patch } : {}), ...(_cropGuardPatch ? { cropGuard: _cropGuardPatch } : {}), ...(_heroMinSourcePatch ? { heroMinSource: _heroMinSourcePatch } : {}), ...(_heroAwakePatch ? { heroAwake: _heroAwakePatch } : {}), ...(SOLVER_LIVE ? { s6_authority: _solverAuthorityLabel, ...(_solverInvalidReason ? { solverInvalidReason: _solverInvalidReason } : {}) } : {}), ...(CROSS_CASE_BORROW ? { crossCaseBorrow: { borrowedCount: _borrowedCount, borrowedPersons: _borrowedPersons } } : {}) },
       ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}),
       // ★ D3-B3.3 (Codex): template path echo local plain snapshot (ไม่ใช่ raw carrier) → S7/retry เห็น plain · legacy = raw byte เดิม
       ...((_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) ? { artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) } : {}),
@@ -7682,6 +7895,9 @@ export async function s7_cover(job, { origin, _deps } = {}) {
       // ★ MEGA_WATERMARK_GUARD (29 ก.ค. 69 — แบตช์ C): ต่อสาย _secondEyeWatermarkFlag แบบเดียวกับ _secondEyeSubSlotFlag
       //   เป๊ะ (ทุกช่อง รวม hero) → composeCore ยก qcFlag 'watermark_kept' เมื่อลายน้ำกลางชัดเจนหาแทนที่ไม่เจอ
       ...(primary && slots[primary]?._secondEyeWatermarkFlag ? { _secondEyeWatermarkFlag: slots[primary]._secondEyeWatermarkFlag } : {}),
+      // ★ MEGA_HERO_H_GATES (30 ก.ค. 69, default ON): ต่อสาย _heroAwakeFlag='hero_sleeping_kept' แบบเดียวกับ
+      //   _secondEyeWatermarkFlag เป๊ะ → composeCore ยก qcFlag ให้เห็นว่า "จำใจใช้ hero ภาพนอน/หลับตา"
+      ...(primary && slots[primary]?._heroAwakeFlag ? { _heroAwakeFlag: slots[primary]._heroAwakeFlag } : {}),
       // ★ MEGA_WATERMARK_GUARD (29 ก.ค. 69 — แบตช์ C): ต่อสาย _watermarkEdge แบบเดียวกับ _secondEyeFaceBox เป๊ะ —
       //   ให้ composeCore เห็น field นี้ผ่าน slotPlan → loaded[i] แล้ว bridge เข้า spec.slots[role] ให้ executor
       //   (coverExecutorService.js renderRectTile/renderCircleTile) อ่าน slot._watermarkEdge หลบครอปที่ขอบได้จริง

@@ -399,12 +399,16 @@ function buildTriageStrict(it, src, strictOpts) {
   const frontalOn = frontalOnR.present && frontalOnR.value === true;
   const unguardedOnR = ownReadStrictOpt(strictOpts, 'unguardedOn'); // ★ MEGA_UNGUARDED_TAG — pattern เดียวกับ busyOn เป๊ะ (absent = false = เดิม)
   const unguardedOn = unguardedOnR.present && unguardedOnR.value === true;
-  const sanitized = sanitizeStrictClassifierItem(it, fileTagOn, busyOn, frontalOn, unguardedOn);
+  const heroPoseOnR = ownReadStrictOpt(strictOpts, 'heroPoseOn');
+  const heroPoseOn = heroPoseOnR.present && heroPoseOnR.value === true;
+  const sanitized = sanitizeStrictClassifierItem(it, fileTagOn, busyOn, frontalOn, unguardedOn, heroPoseOn);
   if (sanitized === null) return null;
 
   const hasNewsScene = Object.prototype.hasOwnProperty.call(sanitized, 'newsScene'); // sanitized เป็นของเราเอง (frozen literal) — ปลอดภัย
   // ★ MEGA_UNGUARDED_TAG: คำนวณครั้งเดียว (undefined = ตาตอบ null/ไม่ครบ 4 ช่อง = "วัดไม่ได้")
   const hasUnguarded = Object.prototype.hasOwnProperty.call(sanitized, 'gazeAway');
+  const hasEyesClosed = Object.prototype.hasOwnProperty.call(sanitized, 'eyesClosed');
+  const hasLyingDown = Object.prototype.hasOwnProperty.call(sanitized, 'lyingDown');
   const unguardedScore = hasUnguarded ? computeUnguardedScore(sanitized) : undefined;
   const emotion = sanitized.emotion || null;
   let category = sanitized.category;
@@ -463,6 +467,9 @@ function buildTriageStrict(it, src, strictOpts) {
         ...(unguardedScore === undefined ? {} : { unguardedScore }),
       }
       : {}),
+    // H-gates ใช้แต่ละป้ายอย่างอิสระ; คีย์ที่ขาดหมายถึง "ไม่รู้" และต้องไม่ทำให้คีย์อีกตัวหายตาม.
+    ...(hasEyesClosed ? { eyesClosed: sanitized.eyesClosed } : {}),
+    ...(hasLyingDown ? { lyingDown: sanitized.lyingDown } : {}),
     brightness: Math.round(src?.brightness ?? 128),
     detail: Math.round(src?.detail ?? 60),
     note: sanitized.note,
@@ -518,6 +525,7 @@ export async function vetImages({ images, subjects, newsGist, onProgress, onRetr
   // ★ 30 ก.ค. 69 MEGA_UNGUARDED_TAG — ต้องอ่าน env ตัวเดียวกับ gemini.js เป๊ะ แล้วส่งเข้า strictOpts ทุกครั้ง
   //   (ถ้าไม่ส่ง = ชุดคีย์สองชั้นไม่ตรง → sanitize เจอ key เกิน → null เงียบทุกใบ = บั๊ก tagged 0 ซ้ำรอย 20-21 ก.ค.)
   const UNGUARDED_TAG = process.env.MEGA_UNGUARDED_TAG === '1';
+  const HERO_POSE_TAG = process.env.MEGA_HERO_H_GATES !== '0';
 
   async function runOneBatch(bi) {
     const slice = batches[bi];
@@ -558,7 +566,7 @@ export async function vetImages({ images, subjects, newsGist, onProgress, onRetr
           //   (schema ที่ gemini.js บังคับ relevant ครบทุกใบอยู่แล้ว — เช็คนี้เป็น defense-in-depth)
           if (!it || typeof it.relevant === 'undefined') { out.push({ ...x.im }); failed++; return; }
           const triage = buildTriage(it, x.r, {
-            strict: true, evidence, caseId, batchIndex: bi, resultIndex: it.index, fileTagOn: FILE_TAG, busyOn: BUSY_TAG, frontalOn: FRONTAL_TAG, unguardedOn: UNGUARDED_TAG,
+            strict: true, evidence, caseId, batchIndex: bi, resultIndex: it.index, fileTagOn: FILE_TAG, busyOn: BUSY_TAG, frontalOn: FRONTAL_TAG, unguardedOn: UNGUARDED_TAG, heroPoseOn: HERO_POSE_TAG,
           });
           if (!triage) { out.push({ ...x.im }); failed++; return; } // malformed strict item → ศูนย์ triage/admission
           out.push({ ...x.im, triage });
@@ -605,6 +613,7 @@ export async function triageLibrary({ images, subjects, newsGist, onProgress, on
   // ★ 30 ก.ค. 69 MEGA_UNGUARDED_TAG — ต้องอ่าน env ตัวเดียวกับ gemini.js เป๊ะ แล้วส่งเข้า strictOpts ทุกครั้ง
   //   (ถ้าไม่ส่ง = ชุดคีย์สองชั้นไม่ตรง → sanitize เจอ key เกิน → null เงียบทุกใบ = บั๊ก tagged 0 ซ้ำรอย 20-21 ก.ค.)
   const UNGUARDED_TAG = process.env.MEGA_UNGUARDED_TAG === '1';
+  const HERO_POSE_TAG = process.env.MEGA_HERO_H_GATES !== '0';
 
   for (let i = 0; i < images.length; i += batchSize) {
     const slice = images.slice(i, i + batchSize);
@@ -636,7 +645,7 @@ export async function triageLibrary({ images, subjects, newsGist, onProgress, on
       if (!src) continue;
       if (typeof it.relevant === 'undefined') continue; // ★ audit B-R4: ตอบครึ่งฟิลด์ = ไม่ติดป้าย รอรอบหน้า (กันป้ายบวกฟรี)
       const triage = buildTriage(it, src, {
-        strict: true, evidence: result.evidence, caseId, batchIndex, resultIndex: it.index, fileTagOn: FILE_TAG, busyOn: BUSY_TAG, frontalOn: FRONTAL_TAG, unguardedOn: UNGUARDED_TAG,
+        strict: true, evidence: result.evidence, caseId, batchIndex, resultIndex: it.index, fileTagOn: FILE_TAG, busyOn: BUSY_TAG, frontalOn: FRONTAL_TAG, unguardedOn: UNGUARDED_TAG, heroPoseOn: HERO_POSE_TAG,
       });
       if (!triage) continue; // malformed strict item → ศูนย์ triage/admission
       map[src.im.id] = triage;

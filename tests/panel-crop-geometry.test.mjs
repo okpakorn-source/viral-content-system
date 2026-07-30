@@ -368,7 +368,7 @@ test('HZ-5 region ยืด ≥1.2× อยู่แล้ว (regionH < slotH/1
   const r = zoomHeroRegionForFaceShare({ region: region0, faceBox, imgW: IW, imgH: IH, slotAspect: HSLOT_A, slotH: HSLOT_H, bandMinFrac: BAND_MIN / 100, maxFaceHFrac: MAXFACE });
   assert.strictEqual(r.changed, false, 'region ยืดเกิน 1.2 อยู่แล้ว → HZ ไม่แตะ (floorH ≥ regionH)');
   assert.deepStrictEqual(r.region, region0, 'region เดิมเป๊ะ');
-  assert.strictEqual(r.reason, 'at-floor');
+  assert.strictEqual(r.reason, 'stretch-cap');
 });
 
 // ============================================================

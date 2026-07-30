@@ -106,10 +106,10 @@ export function buildFormulaInputFromCoverResult({ qcFlags, manifestSlots, pickI
   return { slots, template };
 }
 
-// ── เป้าจากวิจัย 478 ใบ (ตัวเลขระบุมาโดยตรงจากผู้ประสานงานเฟสนี้ — ยังไม่ได้คำนวณซ้ำจาก analysis/all-478.json
-//   ดิบในรอบนี้ เพราะ RESEARCH-REPORT.md ที่สรุปไว้ไม่มีตัวเลข facePct ระดับนี้ตรงๆ ให้ยืนยันคู่ขนาน) ──
-export const HERO_FACE_SHARE_MIN_PCT = 40;
-export const HERO_FACE_SHARE_MAX_PCT = 46;
+// `_research-igdara-15k/HERO-POSE-RESEARCH.md` พบ faceH p10=0.27, median=0.44, p90=0.55;
+// band advisory 36-48 จึงสะท้อนหลักฐานกว้างกว่าช่วงเดิม โดยยังใช้ median เดิมเป็นค่ากลางอ้างอิง.
+export const HERO_FACE_SHARE_MIN_PCT = 36;
+export const HERO_FACE_SHARE_MAX_PCT = 48;
 export const HERO_FACE_SHARE_MEDIAN_PCT = 44;
 
 // เกณฑ์ "เห็นหน้าชัด" — ใช้สเกล 0/1/2 เดียวกับที่ megaAdapters.js second-eye ใช้อยู่แล้ว (2 = ยืนยันชัด)
@@ -142,7 +142,7 @@ function mk(key, pass, value, target, note) {
 }
 
 // ============================================================
-// 1) face_share_hero — สัดส่วนหน้า hero ในช่อง เป้า 40-46% (median 44)
+// 1) face_share_hero — สัดส่วนหน้า hero ในช่อง band 36-48 (research median 0.44)
 // ============================================================
 function checkFaceShareHero(slots, flags) {
   const target = `${HERO_FACE_SHARE_MIN_PCT}-${HERO_FACE_SHARE_MAX_PCT}% (median ${HERO_FACE_SHARE_MEDIAN_PCT})`;

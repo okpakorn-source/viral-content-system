@@ -90,7 +90,14 @@ function makeFetchStub(capture, items) {
 
 const FRAMES = [{ index: 0, base64: 'AAAA' }];
 const SUBJECTS = [{ name: 'ทดสอบ' }];
-const BASE_ENV = { FILE_SHOT_TAG: '0', MEGA_CLUTTER_GUARD: '0', MEGA_HERO_FRONTAL: undefined, GEMINI_API_KEY: 'test-key', GEMINI_MODEL: undefined };
+const BASE_ENV = {
+  FILE_SHOT_TAG: '0',
+  MEGA_CLUTTER_GUARD: '0',
+  MEGA_HERO_FRONTAL: undefined,
+  MEGA_HERO_H_GATES: '0',
+  GEMINI_API_KEY: 'test-key',
+  GEMINI_MODEL: undefined,
+};
 
 // item รูปแบบ BASE (ธงอื่นปิดหมด — โฟกัสเฉพาะ 4 ฟิลด์ใหม่)
 const baseItem = (extra = {}) => ({
@@ -98,8 +105,14 @@ const baseItem = (extra = {}) => ({
   person: null, persons: [], emotion: 'none', clean: true,
   faceCount: 0, faceBox: null, peopleBox: null, note: '', ...extra,
 });
+// H-gates ขอป้ายท่าทางด้วยสวิตช์ของตัวเอง; ห้ามผูกกับ MEGA_UNGUARDED_TAG.
+const POSE_OK = { eyesClosed: false, lyingDown: false };
 const UG_ALL = { gazeAway: true, mouthOpen: false, inMotion: true, posedShot: false };
+// UG_KEYS = 4 ป้ายที่ "เข้าสูตรคะแนน" เท่านั้น (เทสกับดัก null→0 ผูกกับสูตร ห้ามใส่ป้ายท่าทางปน)
 const UG_KEYS = ['gazeAway', 'mouthOpen', 'inMotion', 'posedShot'];
+const POSE_KEYS = ['eyesClosed', 'lyingDown'];
+// UG_ALL_KEYS = ทุกป้ายในแพ็ก (ใช้พิสูจน์ OFF = ไม่มีคำ/ไม่มีคีย์ใหม่แม้แต่ตัวเดียว)
+const UG_ALL_KEYS = [...UG_KEYS, ...POSE_KEYS];
 
 async function runOnce(env, items) {
   const capture = {};
@@ -113,22 +126,24 @@ async function runOnce(env, items) {
 
 // ═══════════════ (ก) สวิตช์ OFF = byte-parity ═══════════════
 
-test('(ก1) OFF (unset): prompt ไม่มีคำใหม่เลย + item ที่ผ่านสคีมาไม่มี 4 คีย์ใหม่', async () => {
+test('(ก1) OFF (unset): prompt ไม่มีคำใหม่เลย + item ที่ผ่านสคีมาไม่มี 6 คีย์ใหม่', async () => {
   const cap = await runOnce({ MEGA_UNGUARDED_TAG: undefined }, [baseItem()]);
-  for (const k of UG_KEYS) {
+  for (const k of UG_ALL_KEYS) {
     assert.ok(!new RegExp(k, 'i').test(cap.prompt), `OFF: prompt ต้องไม่มีคำว่า ${k} เลย`);
   }
   assert.ok(!/จังหวะธรรมชาติ/.test(cap.prompt), 'OFF: prompt ต้องไม่มีบล็อกคำอธิบายใหม่');
-  for (const k of UG_KEYS) {
+  assert.ok(!/สภาพร่างกาย/.test(cap.prompt), 'OFF: prompt ต้องไม่มีบล็อกคำอธิบายท่าทางใหม่');
+  for (const k of UG_ALL_KEYS) {
     assert.ok(!Object.prototype.hasOwnProperty.call(cap.result.items[0], k), `OFF: item ต้องไม่มีคีย์ ${k}`);
   }
 });
 
 test('(ก2) OFF: prompt "เท่ากันทุกไบต์" ทุกค่าที่ไม่ใช่ \'1\' (unset/\'0\'/\'true\'/\'ON\'/\' 1\') — kill-switch ต้องเป็น ==="1" เป๊ะ', async () => {
-  const baseline = (await runOnce({ MEGA_UNGUARDED_TAG: undefined }, [baseItem()])).prompt;
+  const baselineCap = await runOnce({ MEGA_UNGUARDED_TAG: undefined }, [baseItem()]);
   for (const v of ['0', 'true', 'ON', ' 1', '2', '']) {
     const cap = await runOnce({ MEGA_UNGUARDED_TAG: v }, [baseItem()]);
-    assert.equal(cap.prompt, baseline, `MEGA_UNGUARDED_TAG=${JSON.stringify(v)} ต้องยังปิดอยู่ + prompt เท่ากันทุกไบต์`);
+    assert.equal(cap.prompt, baselineCap.prompt, `MEGA_UNGUARDED_TAG=${JSON.stringify(v)} ต้องยังปิดอยู่ + prompt เท่ากันทุกไบต์`);
+    assert.deepEqual(cap.result.items, baselineCap.result.items, 'OFF ทุกค่าต้องคืนผล classifier เดิมระดับค่า');
   }
 });
 
@@ -143,12 +158,107 @@ test('(ก3) OFF: ตาแอบตอบ 4 ฟิลด์มาเอง (ไ
   });
 });
 
-test('(ก4) OFF: triage record เดิมเป๊ะ — ไม่มี 4 ฟิลด์ ไม่มี unguardedScore', () => {
+test('(ก4) OFF: triage record เดิมเป๊ะ — ไม่มี 6 ฟิลด์ ไม่มี unguardedScore', () => {
   const t = buildTriage(baseItem(), SRC, opts());
   assert.ok(t, 'ต้องได้ triage');
-  for (const k of [...UG_KEYS, 'unguardedScore']) {
+  for (const k of [...UG_ALL_KEYS, 'unguardedScore']) {
     assert.ok(!Object.prototype.hasOwnProperty.call(t, k), `OFF: triage ต้องไม่มีคีย์ ${k}`);
   }
+});
+
+test('(ก5) schema/prompt แยก 2 สวิตช์ครบ 4 ช่อง: H-gates ขอเฉพาะ pose และ unguarded ขอเฉพาะ 4 ป้ายเดิม', async () => {
+  const off = await runOnce(
+    { MEGA_HERO_H_GATES: '0', MEGA_UNGUARDED_TAG: '0' },
+    [baseItem()],
+  );
+  const poseOnly = await runOnce(
+    { MEGA_HERO_H_GATES: '1', MEGA_UNGUARDED_TAG: '0' },
+    [baseItem(POSE_OK)],
+  );
+  const unguardedOnly = await runOnce(
+    { MEGA_HERO_H_GATES: '0', MEGA_UNGUARDED_TAG: '1' },
+    [baseItem(UG_ALL)],
+  );
+  const both = await runOnce(
+    { MEGA_HERO_H_GATES: '1', MEGA_UNGUARDED_TAG: '1' },
+    [baseItem({ ...UG_ALL, ...POSE_OK })],
+  );
+
+  for (const k of UG_ALL_KEYS) assert.ok(!off.prompt.includes(k), `ทั้งสอง OFF ต้องไม่มี ${k}`);
+  for (const k of POSE_KEYS) {
+    assert.ok(poseOnly.prompt.includes(k), `H ON ต้องขอ ${k}`);
+    assert.ok(Object.prototype.hasOwnProperty.call(poseOnly.result.items[0], k), `ผล H ON ต้องมี ${k}`);
+    assert.ok(!unguardedOnly.prompt.includes(k), `เปิดเฉพาะ unguarded ต้องไม่มี ${k}`);
+  }
+  for (const k of UG_KEYS) {
+    assert.ok(!poseOnly.prompt.includes(k), `เปิดเฉพาะ H ต้องไม่มี ${k}`);
+    assert.ok(unguardedOnly.prompt.includes(k), `unguarded ON ต้องขอ ${k}`);
+    assert.ok(Object.prototype.hasOwnProperty.call(unguardedOnly.result.items[0], k), `ผล unguarded ON ต้องมี ${k}`);
+  }
+  for (const k of UG_ALL_KEYS) {
+    assert.ok(both.prompt.includes(k), `เปิดทั้งคู่ต้องขอ ${k}`);
+    assert.ok(Object.prototype.hasOwnProperty.call(both.result.items[0], k), `ผลเปิดทั้งคู่ต้องมี ${k}`);
+  }
+});
+
+test('(ก6) MEGA_HERO_H_GATES default ON และปิดเฉพาะค่า "0"; H=0/U=0 คง prompt เดิมทุกไบต์', async () => {
+  const legacy = await runOnce(
+    { MEGA_HERO_H_GATES: '0', MEGA_UNGUARDED_TAG: undefined },
+    [baseItem()],
+  );
+  for (const v of ['0', 'true', 'ON', ' 1', '2', '']) {
+    // Each iteration mutates process env and must complete before the next value.
+    // eslint-disable-next-line no-await-in-loop
+    const cap = await runOnce(
+      { MEGA_HERO_H_GATES: '0', MEGA_UNGUARDED_TAG: v },
+      [baseItem()],
+    );
+    assert.equal(cap.prompt, legacy.prompt, `H=0 และ unguarded=${JSON.stringify(v)} ต้องคง prompt legacy ทุกไบต์`);
+  }
+
+  for (const v of [undefined, '1', 'true', 'OFF', '']) {
+    // Each iteration mutates process env and must complete before the next value.
+    // eslint-disable-next-line no-await-in-loop
+    const cap = await runOnce(
+      { MEGA_HERO_H_GATES: v, MEGA_UNGUARDED_TAG: '0' },
+      [baseItem(POSE_OK)],
+    );
+    assert.match(cap.prompt, /"eyesClosed": true\/false\/null/, `H=${JSON.stringify(v)} ต้องเปิด pose`);
+    assert.equal(cap.result.items[0].lyingDown, false);
+  }
+});
+
+test('(ก7) sanitizer/triage รับ pose แยกจาก unguarded; คีย์ pose ขาดได้แต่ค่าผิดชนิดยังถูกปฏิเสธ', () => {
+  const poseItem = baseItem(POSE_OK);
+  const sanitized = sanitizeStrictClassifierItem(poseItem, false, false, false, false, true);
+  assert.ok(sanitized, 'เปิด heroPoseOn ต้องรับ item ที่มี pose ครบ');
+  assert.equal(sanitized.eyesClosed, false);
+  assert.equal(sanitized.lyingDown, false);
+  const eyesOnly = sanitizeStrictClassifierItem(baseItem({ eyesClosed: false }), false, false, false, false, true);
+  assert.ok(eyesOnly, 'ขาด lyingDown = ไม่รู้ ไม่ใช่ schema failure');
+  assert.equal(eyesOnly.eyesClosed, false);
+  assert.ok(!Object.prototype.hasOwnProperty.call(eyesOnly, 'lyingDown'));
+  assert.equal(sanitizeStrictClassifierItem(baseItem({ ...POSE_OK, eyesClosed: 'false' }), false, false, false, false, true), null);
+
+  const poseTriage = buildTriage(poseItem, SRC, opts({ heroPoseOn: true }));
+  assert.ok(poseTriage);
+  assert.equal(poseTriage.eyesClosed, false);
+  assert.equal(poseTriage.lyingDown, false);
+  assert.ok(!Object.prototype.hasOwnProperty.call(poseTriage, 'gazeAway'));
+  assert.ok(!Object.prototype.hasOwnProperty.call(poseTriage, 'unguardedScore'));
+  const lyingOnlyTriage = buildTriage(baseItem({ lyingDown: true }), SRC, opts({ heroPoseOn: true }));
+  assert.ok(lyingOnlyTriage);
+  assert.equal(lyingOnlyTriage.lyingDown, true);
+  assert.ok(!Object.prototype.hasOwnProperty.call(lyingOnlyTriage, 'eyesClosed'));
+
+  const bothTriage = buildTriage(
+    baseItem({ ...UG_ALL, ...POSE_OK }),
+    SRC,
+    opts({ unguardedOn: true, heroPoseOn: true }),
+  );
+  assert.ok(bothTriage);
+  assert.equal(bothTriage.unguardedScore, 2);
+  assert.equal(bothTriage.eyesClosed, false);
 });
 
 // ═══════════════ (ข) เปิดสวิตช์ + ตาตอบครบ ═══════════════

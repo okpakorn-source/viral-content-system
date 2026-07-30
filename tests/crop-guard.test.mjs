@@ -254,6 +254,49 @@ await test('post-brain (b): ไม่มีช่องอื่นถือ her
   assert.ok((pi.slots.hero.backups || []).map(String).includes('SMALL'), 'SMALL เดิมตกไป backups');
 });
 
+await test('H-gate final reconciliation ห้ามดึง awake ที่ crop-unsafe กลับมาหลัง crop guard สลับออกแล้ว', async () => {
+  setPrefilter('1'); setHeroCap('1.2'); setDimsSoft('0');
+  const prevH = process.env.MEGA_HERO_H_GATES;
+  const prevEye = process.env.MEGA_SECOND_EYE;
+  delete process.env.MEGA_HERO_H_GATES; // default ON
+  process.env.MEGA_SECOND_EYE = '0';
+  try {
+    const awakeSmall = IMG('AWAKE-SMALL', {
+      person: 'ดวงเดือน',
+      category: 'face-emotional',
+      eyesClosed: false,
+      lyingDown: false,
+    }, { realWidth: 800, realHeight: 1000 });
+    const sleepingBig = IMG('SLEEPING-BIG', {
+      person: 'ดวงเดือน',
+      category: 'face-neutral',
+      eyesClosed: true,
+      lyingDown: true,
+    }, { realWidth: 1200, realHeight: 1600 });
+    const F4 = IMG('F4-H', { category: 'face-neutral', faceCount: 1 }, { realWidth: 1200, realHeight: 1600 });
+    const captures = { brainArgs: [], fetches: [] };
+    const answer = {
+      hero: { id: 'AWAKE-SMALL', reason: 'x', backups: [] },
+      reaction: { id: 'F4-H' },
+      action: { id: 'F1' },
+      context: { id: 'F2' },
+      circle: { id: 'F3' },
+    };
+    const s6 = await s6_slots(mkJob(), {
+      origin: 'http://mock',
+      _deps: mkDeps({ pool: [awakeSmall, sleepingBig, F4, F1, F2, F3], answer, captures }),
+    });
+    const pi = s6.dossierPatch.pickImages;
+    assert.equal(pi.cropGuard.swapped, true, 'crop guard ต้องสลับ awake ที่ยืดเกินออกก่อน');
+    assert.equal(pi.slots.hero.id, 'SLEEPING-BIG', 'final H pass ห้าม undo crop guard ด้วย awake ที่ crop-unsafe');
+    assert.equal(pi.cropGuard.heroEligible, true);
+    assert.equal(pi.heroAwake?.sleepingKept, true, 'ไม่มี awake ที่ผ่าน crop eligibility จึงเก็บ sleeping hero พร้อมธง');
+  } finally {
+    if (prevH === undefined) delete process.env.MEGA_HERO_H_GATES; else process.env.MEGA_HERO_H_GATES = prevH;
+    if (prevEye === undefined) delete process.env.MEGA_SECOND_EYE; else process.env.MEGA_SECOND_EYE = prevEye;
+  }
+});
+
 await test('post-brain (c): ไม่มี hero-safe เลย → ปล่อยผ่านพร้อมธง cropGuardViolation (ไม่ fail งาน)', async () => {
   setPrefilter('1'); setHeroCap('1.2'); setDimsSoft('0');
   const captures = { brainArgs: [], fetches: [] };

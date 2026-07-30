@@ -86,7 +86,7 @@ test('[เคสจริง MCV-ms6ac5atfg4, qcFlags-only — manifest=null ต
   assert.equal(heroSlot.faceSharePct, 16, 'ค่าต้องมาจาก face_share_out:main:16 จริง (ไม่ใช่เดา/ค่าคงที่)');
   const fc = evaluateCoverFormula({ slots, qcFlags: REAL_QCFLAGS_MS6AC5ATFG4, template });
   const heroCheck = fc.checks.find((c) => c.key === 'face_share_hero');
-  assert.equal(heroCheck.pass, false, 'ต้อง fail จริง (16% ต่ำกว่าเป้า 40-46%) — ไม่ใช่ null เหมือนบั๊กเดิม');
+  assert.equal(heroCheck.pass, false, 'ต้อง fail จริง (16% ต่ำกว่าเป้า 36-48%) — ไม่ใช่ null เหมือนบั๊กเดิม');
   assert.equal(heroCheck.value, 16);
   // ★ ข้อ 4 (Opus): assert ว่าเป็นค่าจริง ไม่ใช่ตอกหมุด 0/0
   const measurable = fc.checks.filter((c) => c.pass !== null);

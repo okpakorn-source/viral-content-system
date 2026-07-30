@@ -102,6 +102,35 @@ await test('primary textFound ยาว (แถบข่าวทับ, derive 
   assert.deepEqual(slots.hero._secondEyeFaceBox, { x1: 0.1, y1: 0.1, x2: 0.5, y2: 0.5 }, 'faceBox override ต้องเป็นของภาพใหม่ (backup) ไม่ใช่ของเดิม');
 });
 
+await test('H-gate seam: hero หลัก faceCount=2 และ backup นอน/หลับตา → second-eye ห้ามสลับ backup เข้า hero', async () => {
+  const records = [
+    { id: 'h_awake_pair', imageUrl: 'https://x/h_awake_pair.jpg', triage: { person: 'เอ', faceCount: 2, eyesClosed: false, lyingDown: false } },
+    { id: 'h_sleep', imageUrl: 'https://x/h_sleep.jpg', triage: { person: 'เอ', faceCount: 1, eyesClosed: true, lyingDown: true } },
+  ];
+  const slots = mkSlots({ hero: { id: 'h_awake_pair', backups: ['h_sleep'], person: 'เอ' } });
+  const r = await _runSecondEye({
+    slots,
+    activeSlots: ['hero'],
+    byId: mkById(records),
+    heroCandidateAllowed: (rec) => rec?.triage?.eyesClosed !== true && rec?.triage?.lyingDown !== true,
+    _deps: {
+      fetchImageB64: mkFetch(),
+      callGeminiVision: async ({ images }) => ({
+        results: images.map((_, i) => ({
+          index: i,
+          textFound: i === 0 ? LONG_TEXT : '',
+          faceBox: { x1: 0.1, y1: 0.1, x2: 0.5, y2: 0.5 },
+          faceCount: i === 0 ? 2 : 1,
+          faceVisible: 2,
+          ...(i === 1 ? { sameAsHeroPerson: true } : {}),
+        })),
+      }),
+    },
+  });
+  assert.equal(r.swapped, 0);
+  assert.equal(slots.hero.id, 'h_awake_pair', 'ทั้ง text-swap และ forced hero replacement ต้องเคารพ policy guard');
+});
+
 await test('primary textFound สั้น (ลายน้ำ/โลโก้เล็ก, derive textOverlay=1 ไม่ใช่ 2) + มีสำรอง → ไม่สลับ ไม่นับโกหก (เกณฑ์สลับ/โกหกต้อง =2 เท่านั้น)', async () => {
   const records = [{ id: 'h1', imageUrl: 'https://x/h1.jpg' }, { id: 'hb1', imageUrl: 'https://x/hb1.jpg' }];
   const slots = mkSlots({ hero: { id: 'h1', backups: ['hb1'] } });

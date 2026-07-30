@@ -12,11 +12,11 @@ import sharp from 'sharp';
 // ★ AC-0107: only the hero-crop CONSTANTS live in ONE shared pure module (heroCropGeometry), imported by BOTH the
 //   renderer here and the pre-carrier crop-safety FILTER (megaAdapters S6), so the constants stay in lockstep. The
 //   region math is NOT shared — faceRegionForSlot below is the renderer's own; heroCropGeometry only REPLICATES it as a
-//   conservative estimator (a filter input, never authoritative). The authoritative ≤1.2× proof is the runtime-bound
-//   check in composeAndVerify, measured on THIS renderer's actual output.
+//   conservative estimator (a filter input, never authoritative). Runtime crop traces carry the exact final region and
+//   raw upscale used by composeAndVerify for the authoritative ≤1.2× proof.
 import {
   HERO_CROP, FACE_PROM_CEILING, HERO_PROMINENCE, zoomHeroRegionForFaceShare,
-  resolveHeroNeighborOverlap, expandHeroRegionForStretchCap,
+  resolveHeroNeighborOverlap, expandHeroRegionForStretchCap, runHeroFaceShareLoop,
 } from '@/lib/heroCropGeometry';
 // ★ แบตช์ C (17 ก.ค.): เรขาคณิตครอปช่องรอง (PURE) + band จาก config เดียว — เทสได้โดดที่ tests/panel-crop-geometry.test.mjs
 import { refineRegionForFace, refineRegionForFaces, biasRegionFromCircleZone, biasRegionFromCircleZoneBlind, facesIntersectingRegion } from '@/lib/panelCropGeometry';
@@ -458,6 +458,46 @@ function _heroCropGuardOn() { return process.env.MEGA_HERO_CROP_GUARD !== '0'; }
 //   kill-switch คุมจุดนี้มาก่อน · default ON · '0' = ไม่ส่ง rMin/rMax เข้า expand เลย = พฤติกรรมเดิมเป๊ะ (ขยาย
 //   ได้เต็มขอบภาพเหมือนเดิมทุก byte — ไม่ใช่แค่ "ปิด" ฟังก์ชันใหม่ แต่ผลลัพธ์ตัวเลขต้องเหมือนก่อนแก้เป๊ะ)
 function _stretchNeighborFixOn() { return process.env.MEGA_STRETCH_NEIGHBOR_FIX !== '0'; }
+// ★ MEGA_FACE_SHARE_LOOP (30 ก.ค. 69 — "เส้นป้อนกลับครอปหน้า", แผน GAP-ANALYSIS-FINAL ตัวถ่วง #1)
+//   สำมะโน 478 ใบคาลิเบรตแล้ว: default ON; '0' เท่านั้นคืนเส้นทาง render เดิม
+export function _faceShareLoopOn() { return process.env.MEGA_FACE_SHARE_LOOP !== '0'; }
+// floor=0.30 และ target=0.36 ซึ่งทำได้จริงใต้ headPad ปัจจุบัน; 0.44 ค่อยพิจารณาหลังคาลิเบรต pad จากใบจริง.
+// รับทั้งชื่อ env เฉพาะ hero และ alias ทั่วไปเพื่อให้ rollout ปรับค่าได้โดยไม่แก้โค้ด.
+let _heroShareEnvWarned = false;
+function _warnHeroShareEnvOnce(message) {
+  if (_heroShareEnvWarned) return;
+  _heroShareEnvWarned = true;
+  console.warn(message);
+}
+export function _heroShareTargetPct() {
+  const DEFAULT_FLOOR = 0.30;
+  const DEFAULT_TARGET = 0.36;
+  let warned = false;
+  const _frac = (primary, alias, fallback) => {
+    const raw = process.env[primary] ?? process.env[alias];
+    if (raw === undefined) return fallback;
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0 && n < 1) return n;
+    warned = true;
+    return fallback;
+  };
+  const floorRaw = _frac('MEGA_HERO_SHARE_FLOOR', 'MEGA_FACE_SHARE_FLOOR', DEFAULT_FLOOR);
+  const targetRaw = _frac('MEGA_HERO_SHARE_TARGET', 'MEGA_FACE_SHARE_TARGET', DEFAULT_TARGET);
+  const floor = Math.min(0.90, floorRaw);
+  if (floor !== floorRaw) warned = true;
+  if (!(targetRaw > floor && targetRaw < 1)) {
+    warned = true;
+    _warnHeroShareEnvOnce('[CoverV3] ⚠️ ค่า face-share floor/target ผิดสัญญา — ใช้ค่าเริ่มต้น floor=0.30 target=0.36');
+    return [DEFAULT_FLOOR * 100, DEFAULT_TARGET * 100];
+  }
+  if (warned) _warnHeroShareEnvOnce('[CoverV3] ⚠️ ค่า face-share env บางช่องไม่ถูกต้อง/เกินเพดาน — ใช้ fallback หรือ clamp ที่ปลอดภัย');
+  return [floor * 100, targetRaw * 100];
+}
+// จำนวน refinement ก่อน render: default 2 และห้ามเกิน 2 ตามสเปค
+export function _heroShareRounds() {
+  const v = parseInt(process.env.MEGA_HERO_SHARE_ROUNDS, 10);
+  return v === 1 ? 1 : 2;
+}
 // normalized {x,y,w,h} ที่ valid สำหรับใช้เป็นครอปตรงๆ (producer แนบมา) — พังรูปแบบ/นอกขอบ = ไม่ใช้ (fail-safe)
 function _validHeroFaceCropBox(b) {
   return !!(b && typeof b === 'object'
@@ -990,7 +1030,7 @@ function _peopleShareInRegion(region, pb, imgW, imgH) {
 //   HERO_STRETCH_MAX(1.2) ตรงๆ เป๊ะเหมือนเดิมทุก byte (สัญญา strict ที่ validateStrictRenderActivation อ้างอิงอยู่
 //   ห้ามแตะ) — false (default, ทุกจุดเรียกเดิมที่ไม่ได้ส่งพารามิเตอร์นี้) = ใช้เพดาน eff (_heroUpscaleMaxEffExec)
 //   แทน 1.2 ตรงๆ ตามที่สั่งให้ face-zoom (ข้อ 1) มีผลจริงถึงเป้า 45-55% ไม่ถูกดึงกลับเงียบๆ
-async function renderRectTile(src, crop, slot, fb, traceSink = null, strict = false) {
+async function renderRectTile(src, crop, slot, fb, traceSink = null, strict = false, faceShareLoop = true) {
   const meta = await sharp(src).metadata();
   const imgW = meta.width || 1, imgH = meta.height || 1;
   let region;
@@ -1408,9 +1448,11 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null, strict = fa
   //   กลบ '+facezoom') → เปลี่ยนเป็นเพดาน eff (_heroUpscaleMaxEffExec — MEGA_HERO_UPSCALE_MAX/default 1.35/
   //   MEGA_TIER2_OFF=1→1.2) ยกเว้นสาย strict (parameter `strict` true) ที่ยังต้องคง 1.2 ตรงๆ เป๊ะ (สัญญา
   //   validateStrictRenderActivation ผูกกับ HERO_STRETCH_MAX(1.2) โดยตรง ห้ามแตะ)
+  const _faceShareEnabled = faceShareLoop !== false && _faceShareLoopOn() && _promKind(slot) === 'hero';
   const _heroCap = strict ? HERO_STRETCH_MAX : _heroUpscaleMaxEffExec();
   let _upFinal = _upR;
-  if (_heroCropGuardOn() && !(crop && crop._final) && _promKind(slot) === 'hero' && _upR > _heroCap) {
+  if (_promKind(slot) === 'hero' && _upR > _heroCap
+    && _heroCropGuardOn() && !(crop && crop._final)) {
     // ★ B13 fix (MEGA_STRETCH_NEIGHBOR_FIX): คำนวณโซนปลอดภัยแนวนอนสดใหม่ ณ จุดนี้ (region ปัจจุบัน หลัง
     //   head-safe/watermark-dodge/clamp ทุกด่านก่อนหน้าปรับแล้ว) — อัลกอริทึมเดียวกับ rMin/rMax ที่จุดที่ 2
     //   (resolveHeroNeighborOverlap, บรรทัด ~1044-1050) ใช้เป๊ะ แค่คำนวณซ้ำตรงนี้แทนการ hoist ตัวแปร (ตัวแปรเดิม
@@ -1451,6 +1493,67 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null, strict = fa
     }
     if (!_ex.reached) _needHeroBackup = true;
   }
+  // ★ MEGA_FACE_SHARE_LOOP: face share is exact geometry (face-box height /
+  // final crop height). Finish the bounded crop calculation first, then render
+  // the selected region once; `base` is reused by the retouch path below.
+  let base = null;
+  if (_faceShareEnabled && !(crop && crop._final)) {
+    const _fsFace = _dominantFaceInRegion(fb, region, imgW, imgH);
+    if (_fsFace) {
+      const [_fsFloor, _fsTarget] = _heroShareTargetPct();
+      let _fsRes;
+      try {
+        _fsRes = await runHeroFaceShareLoop({
+          region, faceBox: _fsFace, imgW, imgH,
+          slotAspect: slot.w / slot.h, slotH: slot.h,
+          floorFrac: _fsFloor / 100, targetFrac: _fsTarget / 100,
+          maxFaceHFrac: HERO_CROP.maxFaceHFrac,
+          maxRetries: _heroShareRounds(),
+          render: (attemptRegion) => sharp(src)
+            .extract(_clampRegion(attemptRegion, imgW, imgH))
+            .resize(slot.w, slot.h, { fit: 'fill' })
+            .png()
+            .toBuffer(),
+        });
+      } catch (cause) {
+        const err = new Error(`FACE_SHARE_LOOP_FAILED: ${String(cause?.message || cause || 'unknown').slice(0, 160)}`);
+        err.code = 'FACE_SHARE_LOOP_FAILED';
+        err.cause = cause;
+        throw err;
+      }
+      base = _fsRes.rendered;
+      if (_fsRes.changed) {
+        region = _clampRegion(_fsRes.region, imgW, imgH);
+        _br += '+shareloop';
+        _upFinal = Math.max(slot.w / Math.max(1, region.width), slot.h / Math.max(1, region.height));
+        if (_tr) { _tr.upscaleRaw = _upFinal; _tr.upscale = +_upFinal.toFixed(2); _tr.branch = _br; }
+      }
+      if (_tr) {
+        _tr.faceShareLoop = {
+          floor: _fsFloor, target: _fsTarget,
+          pct: _fsRes.faceSharePct, retries: _fsRes.retries,
+          renderCount: _fsRes.renderCount, reached: _fsRes.reachedTarget, reason: _fsRes.reason,
+        };
+        if (_fsRes.limited) _tr.faceShareLimited = `hero:${_fsRes.faceSharePct}:${_fsRes.reason}`;
+      }
+      console.log(`[CoverV3] 🎯 face-share loop: ${slot.id} → ${_fsRes.faceSharePct}% (floor ${_fsFloor} · target ${_fsTarget}) retry ${_fsRes.retries} ${_fsRes.reachedTarget ? 'ถึงเป้า' : _fsRes.reason} · ยืด ${_upFinal.toFixed(2)}x`);
+    }
+  } else if (_faceShareEnabled && crop && crop._final) {
+    const _fsFace = _dominantFaceInRegion(fb, region, imgW, imgH);
+    if (_fsFace) {
+      const [_fsFloor, _fsTarget] = _heroShareTargetPct();
+      const _fsShare = ((_fsFace.y2 - _fsFace.y1) * imgH) / Math.max(1, region.height);
+      const _fsPct = Number.isFinite(_fsShare) ? +(_fsShare * 100).toFixed(1) : null;
+      const _fsLimited = _fsPct !== null && _fsShare < (_fsFloor / 100) - 1e-9;
+      if (_tr) {
+        _tr.faceShareLoop = {
+          floor: _fsFloor, target: _fsTarget, pct: _fsPct,
+          retries: 0, renderCount: 1, reached: false, reason: 'final-crop-locked',
+        };
+        if (_fsLimited) _tr.faceShareLimited = `hero:${_fsPct}:final-crop-locked`;
+      }
+    }
+  }
   if (_tr && _needHeroBackup) _tr.heroCropNeedsBackup = true; // ★ HERO_CROP_GUARD: additive — composer อ่านเพื่อสลับภาพสำรอง/HOLD
   // ★ B4 fix (เฟส B-1): _tr.region เดิม snapshot ไว้ตอน _cropTrace() ก่อนหน้านี้มาก (ก่อน dodgeWatermark/
   //   head-safe/clamp/stretchcap ทั้งหมด) — measureTechRules (megaComposerService.js) อ่าน _tr.region ไปคำนวณ
@@ -1475,7 +1578,7 @@ async function renderRectTile(src, crop, slot, fb, traceSink = null, strict = fa
   // rev.16: ตัดต่อ/รีทัชจากภาพออริจินัล (ไม่เจเนอเรทใหม่) — WB คุมโทนรวม + รีทัชเบา
   //   (1) gray-world WB ดึงคาสต์สีเข้าโทนเดียว  (2) sat/contrast บางๆ  (3) คมขึ้นพอดี (เฉพาะย่อ)
   //   ★ เฟส 3.3: png ระหว่างทาง (lossless) — encode jpeg รอบเดียวตอนผืนจบ (เดิม .toBuffer() = jpeg q80 ซ่อน)
-  const base = await sharp(src).extract(region).resize(slot.w, slot.h, { fit: 'fill' }).png().toBuffer();
+  if (!base) base = await sharp(src).extract(region).resize(slot.w, slot.h, { fit: 'fill' }).png().toBuffer();
   const wb = await grayWorldGains(base);
   let pipe = sharp(base);
   if (wb) pipe = pipe.linear(wb, [0, 0, 0]);           // คุม white-balance ให้เข้าโทนช่องอื่น
@@ -1645,8 +1748,24 @@ export async function executeCover({ assignments, imageBuffers, templateSpec, fa
     const src = imageBuffers[a.imageIndex]?.buffer;
     if (!slot || !src) throw new Error(`EXECUTE_MISSING: slot=${a.slotId} image=#${a.imageIndex}`);
     const fb = faceBoxes?.[a.imageIndex] || null; // rev.14: ป้อนพิกัดหน้าให้ครอปหน้าเต็มช่อง
-    if (slot.shape === 'circle') circleComps.push(await renderCircleTile(src, a.crop, slot, fb, _sink));
-    else rectComps.push(await renderRectTile(src, a.crop, slot, fb, _sink, strict));
+    if (slot.shape === 'circle') {
+      circleComps.push(await renderCircleTile(src, a.crop, slot, fb, _sink));
+    } else {
+      const _traceStart = _sink ? _sink.length : 0;
+      try {
+        rectComps.push(await renderRectTile(src, a.crop, slot, fb, _sink, strict));
+      } catch (e) {
+        if (e?.code !== 'FACE_SHARE_LOOP_FAILED') throw e;
+        if (_sink) _sink.length = _traceStart;
+        console.warn(`[CoverV3] ⚠️ face-share loop ล้มที่ ${slot.id} — ถอยไปเรนเดอร์ legacy: ${String(e?.cause?.message || e?.message || '').slice(0, 120)}`);
+        const _legacyComp = await renderRectTile(src, a.crop, slot, fb, _sink, strict, false);
+        if (_sink) {
+          const _fallbackTrace = _sink.slice(_traceStart).find((entry) => entry?.slot === slot.id);
+          if (_fallbackTrace) _fallbackTrace.faceShareLoopWarn = 'legacy-fallback';
+        }
+        rectComps.push(_legacyComp);
+      }
+    }
   }
 
   const bg = { create: { width: canvasW, height: canvasH, channels: 3, background: { r: 255, g: 255, b: 255 } } };

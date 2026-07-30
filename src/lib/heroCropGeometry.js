@@ -199,9 +199,16 @@ export function selectHeroSourceCandidate(candidates = [], maxUpscale = HERO_MIN
 //   region {left,top,width,height} px · faceBox raw {x1,y1,x2,y2} 0..1 (หน้าที่ region ยึด) · imgW,imgH px
 //   slotAspect · slotH px · bandMinFrac (0..1 เช่น 0.30 = ขอบล่างของ TECH_RULES.HERO_FACE_SHARE) · maxFaceHFrac (เช่น 0.74)
 // @returns {{ region, changed, faceSharePct, reason }}
+// ★ 30 ก.ค. 69 (MEGA_FACE_SHARE_LOOP) — พารามิเตอร์เสริม 2 ตัว ทั้งคู่ "ไม่ส่ง = พฤติกรรมเดิมทุก byte":
+//   • stretchCap  : เพดานยืดที่ใช้คำนวณ floorH (เดิมฮาร์ดโค้ด HERO_STRETCH_MAX=1.2 เสมอ) — ผู้เรียกใหม่ส่งเพดาน
+//     "จริง" ของสายนั้นได้ (เส้นปกติใช้ MEGA_HERO_UPSCALE_MAX eff=1.35 · สาย strict ต้องคง 1.2) — 🔑 นี่คือ
+//     ตัวคุมเพดานหน้าเด่นตัวจริง: โพรบพิสูจน์แล้วว่าทุกเคสที่ซูมสำเร็จหยุดที่ up=1.20 พอดี ไม่ใช่หยุดเพราะถึงเป้า
+//   • headFitClamp: true = เมื่อกรอบเป้าหมาย "เล็กกว่ากล่องหัว" (เดิม return 'head-would-cut' ทิ้งการซูมทั้งดุ้น)
+//     ให้ขยายกรอบขึ้นมาพอดีกล่องหัวแล้วซูมเท่าที่ได้แทนการยอมแพ้ (ยังคลุมหัวครบ 100% เหมือนเดิม)
 export function zoomHeroRegionForFaceShare({
   region, faceBox, imgW, imgH, slotAspect, slotH, bandMinFrac, maxFaceHFrac,
   headPad = { top: 0.42, bottom: 0.32, x: 0.20 },
+  stretchCap = HERO_STRETCH_MAX, headFitClamp = false,
 } = {}) {
   const iw = _num(imgW), ih = _num(imgH), sa = _num(slotAspect), sh = _num(slotH);
   const bmf = _num(bandMinFrac), mfh = _num(maxFaceHFrac);
@@ -230,11 +237,24 @@ export function zoomHeroRegionForFaceShare({
   const headWpx = hMaxX - hMinX, headHpx = hMaxY - hMinY;
   if (!(headWpx > 0 && headHpx > 0)) return _keep('bad-head', +(curShare * 100).toFixed(1));
 
-  // เพดานซูม: floor guard เดิม ∪ เพดานยืด 1.2× (region เตี้ยกว่านี้ไม่ได้)
-  const floorH = Math.max(headHpx / mfh, sh / HERO_STRETCH_MAX);
+  // เพดานซูม: floor จาก pad/max-face ∪ เพดานยืดตาม cap — แยกเหตุผลไว้ไม่ให้รายงาน stretch ผิดตัว.
+  const capEff = (_num(stretchCap) > 0) ? _num(stretchCap) : HERO_STRETCH_MAX;
+  const headFitH = headFitClamp === true ? Math.max(headHpx, headWpx / sa) : 0;
+  const padFloorH = Math.max(headHpx / mfh, headFitH);
+  const stretchFloorH = sh / capEff;
+  const floorH = Math.max(padFloorH, stretchFloorH);
   const desiredH = rawFaceHpx / bmf;                 // region ที่ทำให้ faceShare = band-min พอดี
+  const ceilingEps = 1e-9;
+  // stretch ชนะเมื่อสองเพดานเสมอกัน; pad-ceiling ใช้เฉพาะเมื่อเรขาคณิต headPad เป็นตัวบังคับจริง.
+  const stretchBlocksTarget = stretchFloorH > desiredH + ceilingEps
+    && stretchFloorH >= padFloorH - ceilingEps;
+  const padBlocksTarget = padFloorH > desiredH + ceilingEps
+    && padFloorH > stretchFloorH + ceilingEps;
+  const ceilingReason = stretchBlocksTarget ? 'stretch-cap' : (padBlocksTarget ? 'pad-ceiling' : null);
   const newH = Math.min(rH, Math.max(desiredH, floorH)); // ซูมเข้าเท่านั้น + ไม่ต่ำกว่า floor
-  if (!(newH < rH - 0.5)) return _keep('at-floor', +(curShare * 100).toFixed(1)); // ชนเพดาน/ยืดเกินอยู่แล้ว = คงเดิม
+  if (!(newH < rH - 0.5)) {
+    return _keep(ceilingReason || 'at-floor', +(curShare * 100).toFixed(1));
+  }
   const newW = newH * sa;
   // region ต้องคลุมกล่องหัวครบทั้งกว้าง/สูง — เล็กกว่าหัว = ตัดหัว → ไม่ซูม (คืนเดิม)
   if (newW < headWpx - 0.5 || newH < headHpx - 0.5) return _keep('head-would-cut', +(curShare * 100).toFixed(1));
@@ -257,8 +277,10 @@ export function zoomHeroRegionForFaceShare({
   //   (เช่น 618.33→618 ⇒ 742/618 = 1.2007 · หรือแกนกว้าง 513.33→513 ⇒ 616/513 = 1.2008) → strict-V2 hero gate ตีตก
   //   ⇒ บังคับ "ค่าที่ปัดแล้ว" ให้ ≥ ceil(slot/1.2) ทั้งสองแกน: ceil(sa*sh/1.2)=ceil(slotW/1.2) · ceil(sh/1.2)=ceil(slotH/1.2)
   //   ⇒ slotW/out.width ≤ 1.2 และ slotH/out.height ≤ 1.2 เสมอ (ปัด "ขึ้น" = region ใหญ่ขึ้น → คลุมหัวปลอดภัยขึ้น + คง aspect ~เดิม)
-  const wFloorInt = Math.ceil((sa * sh) / HERO_STRETCH_MAX); // = ceil(slotW / 1.2)
-  const hFloorInt = Math.ceil(sh / HERO_STRETCH_MAX);        // = ceil(slotH / 1.2)
+  //   ★ ต้องใช้ capEff ตัวเดียวกับ floorH ข้างบน ไม่งั้น "ปัดขึ้น" จะดันกรอบกลับไปที่ slot/1.2 = ลบผลซูมทิ้ง
+  //   (ไม่ส่ง stretchCap = capEff === HERO_STRETCH_MAX = สูตรเดิมทุก byte)
+  const wFloorInt = Math.ceil((sa * sh) / capEff); // = ceil(slotW / cap)
+  const hFloorInt = Math.ceil(sh / capEff);        // = ceil(slotH / cap)
   const outW = Math.max(8, Math.round(newW), wFloorInt);
   const outH = Math.max(8, Math.round(newH), hFloorInt);
   let outL = Math.round(nl), outT = Math.round(nt);
@@ -272,7 +294,149 @@ export function zoomHeroRegionForFaceShare({
   if (!headIn) return _keep('head-out-after-round', +(curShare * 100).toFixed(1));
   const changed = out.left !== R.left || out.top !== R.top || out.width !== R.width || out.height !== R.height;
   const newShare = rawFaceHpx / out.height;
-  return { region: changed ? out : region, changed, faceSharePct: +(newShare * 100).toFixed(1), reason: changed ? 'zoomed' : 'unchanged' };
+  const reason = newShare < bmf - ceilingEps && ceilingReason
+    ? ceilingReason
+    : (changed ? 'zoomed' : 'unchanged');
+  return { region: changed ? out : region, changed, faceSharePct: +(newShare * 100).toFixed(1), reason };
+}
+
+// ============================================================
+// ★ MEGA_FACE_SHARE_LOOP — geometry coordinator for the face-share crop.
+// ------------------------------------------------------------
+// Face share is determined entirely by the authoritative face box and crop
+// region. Finish the bounded geometry loop first, then ask the executor to
+// render the final region exactly once. A share below floorFrac activates at
+// most two refinements aimed at targetFrac. Every refinement is hard-capped at
+// HERO_STRETCH_MAX (1.2).
+export async function runHeroFaceShareLoop({
+  region, faceBox, imgW, imgH, slotAspect, slotH,
+  floorFrac = 0.30, targetFrac = 0.36, maxFaceHFrac,
+  maxRetries = 2, render, refineRegion = null,
+} = {}) {
+  const _validRegion = (r) => !!(
+    r && typeof r === 'object'
+    && Number.isFinite(r.left) && Number.isFinite(r.top)
+    && Number.isFinite(r.width) && Number.isFinite(r.height)
+    && r.width > 0 && r.height > 0
+  );
+  const floor = _num(floorFrac);
+  const target = _num(targetFrac);
+  const retriesCap = Number.isInteger(maxRetries) && maxRetries >= 0
+    ? Math.min(maxRetries, 2)
+    : 2;
+  if (!_validRegion(region) || typeof render !== 'function') {
+    throw new TypeError('runHeroFaceShareLoop requires region and render');
+  }
+  if (!(floor > 0 && floor < 1 && target > floor && target < 1)) {
+    throw new RangeError('face-share floor/target must satisfy 0 < floor < target < 1');
+  }
+
+  const faceY1 = _num(faceBox?.y1);
+  const faceY2 = _num(faceBox?.y2);
+  const imageH = _num(imgH);
+  const rawFaceH = faceY1 !== null && faceY2 !== null && faceY2 > faceY1 && imageH > 0
+    ? (faceY2 - faceY1) * imageH
+    : null;
+  const _shareOf = (reg) => {
+    const raw = rawFaceH === null ? null : rawFaceH / reg.height;
+    return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : null;
+  };
+  const _pct = (share) => (share === null ? null : +(share * 100).toFixed(1));
+  const _upscale = (reg) => {
+    const sw = _num(slotAspect) * _num(slotH);
+    const sh = _num(slotH);
+    if (!(sw > 0 && sh > 0)) return null;
+    return Math.max(sw / reg.width, sh / reg.height);
+  };
+  const _defaultRefine = (reg) => zoomHeroRegionForFaceShare({
+    region: reg, faceBox, imgW, imgH, slotAspect, slotH,
+    bandMinFrac: target, maxFaceHFrac,
+    // Face detector has no shoulder landmark; conservative padding below and
+    // beside the face keeps an approximate head-and-shoulders portrait.
+    headPad: { top: 0.42, bottom: 0.60, x: 0.35 },
+    stretchCap: HERO_STRETCH_MAX,
+    headFitClamp: true,
+  });
+  const _refine = typeof refineRegion === 'function' ? refineRegion : _defaultRefine;
+
+  let current = region;
+  let share = _shareOf(current);
+  let retries = 0;
+  let changed = false;
+  let limited = false;
+  let reason = 'above-floor';
+
+  if (share === null) {
+    const rendered = await render(current, 0);
+    return {
+      region: current, rendered, changed, faceSharePct: null,
+      retries, renderCount: 1, reachedTarget: false, limited: false, reason: 'unmeasured',
+    };
+  }
+  if (share < floor - 1e-9) {
+    reason = 'max-retries';
+    while (retries < retriesCap && share < target - 1e-9) {
+      const currentUpscale = _upscale(current);
+      if (currentUpscale !== null && currentUpscale > HERO_STRETCH_MAX + 1e-9) {
+        limited = true;
+        reason = 'stretch-cap';
+        break;
+      }
+      // Each refinement depends on the geometry produced by the previous one.
+      // eslint-disable-next-line no-await-in-loop
+      const refined = await _refine(current, {
+        attempt: retries + 1,
+        floorFrac: floor,
+        targetFrac: target,
+        stretchCap: HERO_STRETCH_MAX,
+      });
+      if (!refined?.changed || !_validRegion(refined.region)) {
+        limited = true;
+        reason = refined?.reason || 'geometry-limited';
+        break;
+      }
+      const refinedUpscale = _upscale(refined.region);
+      if (refinedUpscale !== null && refinedUpscale > HERO_STRETCH_MAX + 1e-9) {
+        limited = true;
+        reason = 'stretch-cap';
+        break;
+      }
+      current = refined.region;
+      changed = true;
+      retries++;
+      share = _shareOf(current);
+      if (share === null) {
+        reason = 'unmeasured';
+        limited = false;
+        break;
+      }
+      if (share >= target - 1e-9) {
+        reason = 'target-reached';
+        break;
+      }
+      if (refined.reason === 'pad-ceiling' || refined.reason === 'stretch-cap') {
+        limited = true;
+        reason = refined.reason;
+        break;
+      }
+    }
+    if (share !== null && share < target - 1e-9 && reason === 'max-retries') limited = true;
+  } else if (share >= target - 1e-9) {
+    reason = 'target-reached';
+  }
+
+  const rendered = await render(current, retries);
+  return {
+    region: current,
+    rendered,
+    changed,
+    faceSharePct: _pct(share),
+    retries,
+    renderCount: 1,
+    reachedTarget: share !== null && share >= target - 1e-9,
+    limited,
+    reason,
+  };
 }
 
 // ============================================================
@@ -398,5 +562,5 @@ export function expandHeroRegionForStretchCap({ region, slotW, slotH, imgW, imgH
 export default Object.freeze({
   HERO_CROP, FACE_PROM_CEILING, HERO_PROMINENCE, HERO_STRETCH_MAX, HERO_MIN_SOURCE_MAX_UPSCALE,
   heroCropRegion, heroCropUpscale, isHeroCropSafe, selectHeroSourceCandidate, zoomHeroRegionForFaceShare,
-  resolveHeroNeighborOverlap, expandHeroRegionForStretchCap,
+  resolveHeroNeighborOverlap, expandHeroRegionForStretchCap, runHeroFaceShareLoop,
 });
